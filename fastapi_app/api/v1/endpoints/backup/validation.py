@@ -377,13 +377,13 @@ def _get_validation_cache_key(filename: str, password: str | None = None) -> str
 @router.get('/validate/{filename}', response_model=BackupValidationResponse)
 async def validate_backup_file(
     filename: str,
-    password: str | None = Query(None, description="加密备份的解密密码"),
     x_backup_password: str | None = Header(None, alias='X-Backup-Password'),
     user: User = Depends(require_backup_permission('validate_backup_file')),
 ):
     """
     验证服务器上已有备份文件的完整性
-    支持加密备份的解密验证
+    支持加密备份的解密验证（M4：密码仅经 X-Backup-Password 请求头传递，
+    不接受 URL query 形式，避免密码进入访问日志/浏览器历史）
     """
     # 安全检查：防止路径遍历
     safe_name = Path(filename).name
@@ -395,7 +395,7 @@ async def validate_backup_file(
         raise HTTPException(status_code=404, detail='备份文件不存在')
 
     # 检查缓存
-    cache_key = _get_validation_cache_key(filename, password or x_backup_password)
+    cache_key = _get_validation_cache_key(filename, x_backup_password)
     cached_result = await _validation_cache.get(cache_key)
     if cached_result:
         cached_result['cache_hit'] = True
@@ -411,7 +411,7 @@ async def validate_backup_file(
 
         # 如果是加密文件，尝试解密
         if encrypted:
-            if not password and not x_backup_password:
+            if not x_backup_password:
                 # 检查环境变量
                 env_password = os.environ.get('BACKUP_ENCRYPTION_PASSWORD')
                 if not env_password:
@@ -430,7 +430,7 @@ async def validate_backup_file(
                     }
                 password_to_use = env_password
             else:
-                password_to_use = password or x_backup_password
+                password_to_use = x_backup_password
 
             try:
                 decrypted_content = _decrypt_backup_data(content, password_to_use)

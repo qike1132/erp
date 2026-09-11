@@ -17,11 +17,12 @@ import contextlib
 import logging
 from datetime import date, datetime
 
-from sqlalchemy import and_, select, text
+from sqlalchemy import and_, event, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import load_only
+from sqlalchemy.orm import Session, load_only
 
+from fastapi_app.core.cache import invalidate_local_cache
 from fastapi_app.core.cache_invalidation import InvalidationStrategy, cache_mgr
 from fastapi_app.core.redis_wrapper import safe_get, safe_set
 from fastapi_app.shared_models import (
@@ -45,6 +46,45 @@ async def _invalidate_fifo_cache(plan_month: str) -> None:
     """
     cache_key = f'{FIFO_CACHE_PREFIX}:{plan_month}'
     await cache_mgr.invalidate(InvalidationStrategy.KEYS, [cache_key])
+
+
+# ==================== StockOut 写入 → FIFO 缓存失效（集中钩子，M2 修复） ====================
+# 出货/退货/出货修改/出货删除/批量导入都会改变 FIFO 的"累计出货净量"，但写路径分散在
+# 多个服务中，逐点挂钩易漏。改为 SQLAlchemy 会话事件集中钩子：任何事务提交前检测到
+# StockOut 变更，提交后即清除全部 plan_fifo:* 缓存。
+# after_commit 时数据已落库，此后任何缓存重建读到的都是已提交数据（无回填旧值窗口）；
+# 若失效失败仅告警，由 TTL（FIFO_CACHE_TTL）兜底。
+_pending_fifo_invalidation = False
+
+
+def _fifo_before_commit(session) -> None:
+    global _pending_fifo_invalidation
+    if _pending_fifo_invalidation:
+        return
+    for obj in list(session.new) + list(session.dirty) + list(session.deleted):
+        if isinstance(obj, StockOut):
+            _pending_fifo_invalidation = True
+            return
+
+
+def _fifo_after_commit(session) -> None:
+    global _pending_fifo_invalidation
+    if not _pending_fifo_invalidation:
+        return
+    _pending_fifo_invalidation = False
+    asyncio.get_running_loop().create_task(_invalidate_fifo_caches_safe())
+
+
+async def _invalidate_fifo_caches_safe() -> None:
+    try:
+        await cache_mgr.invalidate(InvalidationStrategy.PATTERN, ['plan_fifo:*'])
+        invalidate_local_cache('plan_fifo:*')
+    except Exception:  # defensive: 缓存失效失败不阻断业务，靠 TTL 兜底
+        logger.warning("FIFO 缓存全量失效失败（等待 TTL 过期兜底）", exc_info=True)
+
+
+event.listen(Session, "before_commit", _fifo_before_commit)
+event.listen(Session, "after_commit", _fifo_after_commit)
 
 
 async def _get_shipped_fifo_map(db: AsyncSession, plan_details: list, customer_name_map: dict | None = None, plan_month: str = '') -> dict[int, int]:
@@ -71,10 +111,16 @@ async def _get_shipped_fifo_map(db: AsyncSession, plan_details: list, customer_n
         cache_key = f'{FIFO_CACHE_PREFIX}:{plan_month}'
         cached = await safe_get(cache_key, context='FIFO缓存')
         if cached is not None:
-            cached_int_keys = {int(k) for k in cached}
-            detail_ids = {d.id for d in plan_details}
-            if detail_ids.issubset(cached_int_keys):
-                return {int(k): v for k, v in cached.items()}
+            try:
+                cached_int_keys = {int(k) for k in cached}
+            except (ValueError, TypeError):
+                # L2 修复：缓存脏数据（键不可转 int）视为未命中并清除，不让其演变为 500
+                await _invalidate_fifo_cache(plan_month)
+                cached = None
+            else:
+                detail_ids = {d.id for d in plan_details}
+                if detail_ids.issubset(cached_int_keys):
+                    return {int(k): v for k, v in cached.items()}
 
     try:
         result = await _fifo_query_with_timeout(db, plan_details, customer_name_map, plan_month)

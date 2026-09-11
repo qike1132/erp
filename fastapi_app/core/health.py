@@ -171,8 +171,8 @@ def register_health_routes(app: FastAPI) -> None:
         @app.get("/metrics", tags=["监控"])
         async def metrics(request: Request):
             # 生产环境要求 Bearer Token 或内网 IP 访问
-            import os as _os
-            if _os.getenv('APP_ENV') == 'production':
+            from fastapi_app.core.config import settings as _settings
+            if _settings.is_production:
                 auth = request.headers.get('authorization', '')
                 metrics_token = _os.getenv('METRICS_BEARER_TOKEN', '')
                 if metrics_token and not auth.startswith(f'Bearer {metrics_token}'):

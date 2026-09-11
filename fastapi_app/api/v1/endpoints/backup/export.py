@@ -271,11 +271,11 @@ async def save_backup_to_server(
     参数：
     - remark: 备份备注
     - encrypt: 是否启用加密，默认True
-    - password: 加密密码（查询参数）
+    - password: 加密密码（请求体，H3）
     - x_backup_password: 加密密码（请求头）
 
     加密密码获取优先级：
-    1. password查询参数
+    1. password请求体字段
     2. X-Backup-Password请求头
     3. BACKUP_ENCRYPTION_PASSWORD环境变量
     4. 均未配置时不加密（记录告警日志）

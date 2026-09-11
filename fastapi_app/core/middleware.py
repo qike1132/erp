@@ -77,7 +77,7 @@ def _setup_csrf(app: FastAPI) -> None:
 
         _csrf_secure = os.getenv(
             "CSRF_COOKIE_SECURE",
-            "true" if os.getenv("APP_ENV", "dev").lower() in ("prod", "production") else "",
+            "true" if settings.is_production else "",
         ).lower() in ("true", "1", "yes")
 
         # 内网 IP 段：CSRF 攻击几乎不可能来自内网，直接豁免
@@ -99,7 +99,7 @@ def _setup_csrf(app: FastAPI) -> None:
             """验证请求Origin是否为允许的源（内网环境放行所有内网 origin）"""
             if not origin:
                 return False
-            is_production = os.getenv("APP_ENV") == "production"
+            is_production = settings.is_production
             if is_production:
                 allowed = settings.BACKEND_CORS_ORIGINS
                 return any(origin.rstrip('/') == allowed_origin.rstrip('/') for allowed_origin in allowed)
@@ -124,7 +124,7 @@ def _setup_csrf(app: FastAPI) -> None:
             # CSRF 内网豁免：仅开发环境保留（纯内网直连调试场景）
             # 生产环境必须经过 Nginx/Ingress 反代，request.client.host 为真实客户端 IP，
             # 内网豁免会使所有反代请求绕过 CSRF，导致全局失效。生产环境一律执行 CSRF 校验。
-            _is_production = os.getenv("APP_ENV") == "production"
+            _is_production = settings.is_production
             if not _is_production:
                 client_ip = request.client.host if request.client else None
                 if client_ip and _is_lan_ip(client_ip):
@@ -193,7 +193,7 @@ def _setup_security_headers(app: FastAPI) -> None:
     - 开发环境保留 'unsafe-inline'（Vue 内联样式 + HMR 需要）
     - frame-ancestors 'none' 防止点击劫持
     """
-    is_production = os.getenv("APP_ENV") == "production"
+    is_production = settings.is_production
 
     # 生产环境 WSS 域名白名单：从 WS_ALLOWED_ORIGINS 读取（逗号分隔）
     # 未配置时回退到 'wss:'（保持向后兼容，但日志告警）
@@ -258,7 +258,7 @@ def _setup_security_headers(app: FastAPI) -> None:
 
 
 def _setup_cors(app: FastAPI) -> None:
-    is_dev = os.getenv("APP_ENV") != "production"
+    is_dev = not settings.is_production
     if is_dev:
         _dev_origins = [
             "http://localhost",
@@ -304,7 +304,7 @@ def _setup_trusted_host(app: FastAPI) -> None:
 
 def _setup_gzip(app: FastAPI) -> None:
     # 生产环境由 Nginx 统一处理 GZip 压缩，避免双重压缩
-    if os.getenv("APP_ENV") == "production":
+    if settings.is_production:
         logger.info("GZip 压缩由 Nginx 处理（生产环境）")
         return
     app.add_middleware(GZipMiddleware, minimum_size=1000)

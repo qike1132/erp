@@ -124,7 +124,7 @@ def _get_encryption_password(
 ) -> str | None:
     """
     获取加密密码，优先级：
-    1. 请求参数中的 password
+    1. 请求体字段（password，M4/H3：禁止使用 URL query 形式）
     2. 请求头 X-Backup-Password
     3. 环境变量 BACKUP_ENCRYPTION_PASSWORD
 

@@ -160,8 +160,22 @@ async def get_async_db():
     async with _AsyncSessionLocal() as session:
         try:
             yield session
+        except (RuntimeError, OSError, ValueError, SQLAlchemyError):
+            try:
+                await session.rollback()
+            except (RuntimeError, OSError, ValueError, SQLAlchemyError):
+                logger.warning("Session rollback failed (may be broken after psql restore)", exc_info=True)
+            raise
+        # FastAPI 0.106+ 语义：依赖收尾在响应发送之后执行，commit 失败时客户端已收到
+        # 成功响应。此处显式 ERROR 告警（监控可对关键字段告警），防止静默数据丢失。
+        try:
             await session.commit()
         except (RuntimeError, OSError, ValueError, SQLAlchemyError):
+            logger.error(
+                "事务提交失败：响应已发送但数据未落库（静默丢失风险），"
+                "path 相关信息见请求日志",
+                exc_info=True,
+            )
             try:
                 await session.rollback()
             except (RuntimeError, OSError, ValueError, SQLAlchemyError):
@@ -185,8 +199,16 @@ async def get_async_db_context():
     async with _AsyncSessionLocal() as session:
         try:
             yield session
+        except (RuntimeError, OSError, ValueError, SQLAlchemyError):
+            try:
+                await session.rollback()
+            except (RuntimeError, OSError, ValueError, SQLAlchemyError):
+                logger.warning("Session rollback failed (may be broken after psql restore)", exc_info=True)
+            raise
+        try:
             await session.commit()
         except (RuntimeError, OSError, ValueError, SQLAlchemyError):
+            logger.error("事务提交失败（ARQ 任务上下文）：任务将按异常处理", exc_info=True)
             try:
                 await session.rollback()
             except (RuntimeError, OSError, ValueError, SQLAlchemyError):

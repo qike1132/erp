@@ -114,6 +114,7 @@ def _get_user_id_from_jwt(request: Request) -> int | None:
     """
     尝试从 Authorization: Bearer <token> 中获取用户ID。
     如果没有Bearer Token或解码失败，返回None（不抛异常，降级到cookie方式）。
+    成功解码时将 payload 暂存到 request.state._jwt_payload（L1 优化：避免同请求重复解码）。
     """
     auth_header = request.headers.get('authorization', '')
     if not auth_header.startswith('Bearer '):
@@ -123,6 +124,7 @@ def _get_user_id_from_jwt(request: Request) -> int | None:
         return None
     try:
         payload = _decode_jwt_token(token, expected_type='access')
+        request.state._jwt_payload = payload
         user_id = payload.get('sub')
         if user_id:
             return int(user_id)
@@ -136,12 +138,14 @@ def _get_user_id_from_cookie(request: Request) -> int | None:
 
     浏览器登录后，FastAPI 在 httpOnly cookie 中设置 JWT token，
     此函数解码该 cookie 中的 JWT 获取用户信息。
+    成功解码时同样暂存 payload（L1 优化）。
     """
     cookie_token = request.cookies.get('access_token')
     if not cookie_token:
         return None
     try:
         payload = _decode_jwt_token(cookie_token, expected_type='access')
+        request.state._jwt_payload = payload
         user_id = payload.get('sub')
         if user_id:
             return int(user_id)
@@ -173,7 +177,7 @@ def _resolve_token_jti(request: Request) -> str | None:
 _USER_ACTIVE_CACHE = _TTLCache(ttl=10, maxsize=500)
 
 async def _verify_user_active(user_id: int, db: AsyncSession) -> bool:
-    """验证用户仍存在且处于启用状态（带 L1 缓存，TTL 30s）"""
+    """验证用户仍存在且处于启用状态（带 L1 缓存，TTL 10s）"""
     cached = await _USER_ACTIVE_CACHE.get(user_id)
     if cached is not None:
         return cached  # type: ignore[return-value]
@@ -199,20 +203,13 @@ async def _authenticate_user_id(request: Request, db: AsyncSession, *, fail_clos
     if user_id is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='未登录')
 
-    token = request.headers.get('authorization', '')
-    if token.startswith('Bearer '):
-        token = token[7:]
+    # L1 优化：_resolve_user_id 已成功解码并暂存 payload，此处直接复用，
+    # 不再对同一 token 做第二次/第三次解码（原实现每请求最多解码 3 次）。
+    payload = getattr(request.state, '_jwt_payload', None)
+    if payload is not None:
+        jti = payload.get('jti')
     else:
-        token = request.cookies.get('access_token', '')
-
-    if token:
-        try:
-            payload = _decode_jwt_token(token, expected_type='access')
-            request.state._jwt_payload = payload
-            jti = payload.get('jti')
-        except HTTPException:
-            jti = _resolve_token_jti(request)
-    else:
+        # 罕见边界（如 state 被中间件重置）：退回独立解析
         jti = _resolve_token_jti(request)
 
     if await is_token_revoked(jti, fail_closed=fail_closed):

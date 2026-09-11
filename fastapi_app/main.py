@@ -328,7 +328,7 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    if os.getenv("APP_ENV") == "production":
+    if settings.is_production:
         detail = "请求参数验证失败"
     else:
         detail = f"请求参数验证失败: {exc.errors()}"
@@ -410,9 +410,10 @@ async def root():
 if __name__ == "__main__":
     # 生产环境默认绑定 127.0.0.1（仅本机回环），开发环境绑定 :: （所有接口）
     # 可通过 FASTAPI_HOST 环境变量显式覆盖
+    # M3 修复：原 == "prod" 漏判 start.py 设置的 "production"，改用统一的 settings.is_production
     _host = os.getenv(
         "FASTAPI_HOST",
-        "127.0.0.1" if os.getenv("APP_ENV", "dev") == "prod" else "::",
+        "127.0.0.1" if settings.is_production else "::",
     )
     uvicorn.run(
         "fastapi_app.main:app",

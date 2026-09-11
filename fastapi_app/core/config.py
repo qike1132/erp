@@ -111,8 +111,7 @@ class Settings(BaseSettings):
     ALLOWED_HOSTS: list[str] = [h for h in os.getenv("ALLOWED_HOSTS", "").split(",") if h]
 
     def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        # 内网宽松：SECRET_KEY 非空即可（不检查长度/弱密码等）
+        super().__init__(**kwargs)        # 内网宽松：SECRET_KEY 非空即可（不检查长度/弱密码等）
         if not self.SECRET_KEY:
             raise RuntimeError(
                 "SECRET_KEY 必须通过环境变量 SECRET_KEY 或 .env 文件设置"
@@ -161,6 +160,11 @@ class Settings(BaseSettings):
                     "生产环境 CORS_ORIGINS 不得包含 'null' 源（沙箱 iframe 逃逸风险），"
                     "请移除 null 并设置为具体 HTTPS 域名。"
                 )
+
+    @property
+    def is_production(self) -> bool:
+        """生产环境判定（全库统一入口；动态读取以兼容测试 monkeypatch APP_ENV）"""
+        return os.getenv("APP_ENV", "").lower() in ("prod", "production")
 
     # 对象存储配置（P2-1：static/uploads 迁移至 MinIO/S3）
     # STORAGE_TYPE=local 时保持现有本地文件系统行为；=s3 时上传到对象存储

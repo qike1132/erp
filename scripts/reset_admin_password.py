@@ -1,12 +1,12 @@
 """
 重置 admin 用户密码脚本
 
-从环境变量 NEW_ADMIN_PASSWORD 或命令行参数读取新密码，避免硬编码弱密码。
+从环境变量 NEW_ADMIN_PASSWORD 或命令行参数读取新密码，禁止硬编码。
 用法:
     # 方式1: 环境变量
-    $env:NEW_ADMIN_PASSWORD='YourStrongPwd123'; python scripts/reset_admin_password.py
+    $env:NEW_ADMIN_PASSWORD='<your-strong-password>'; python scripts/reset_admin_password.py
     # 方式2: 命令行参数
-    python scripts/reset_admin_password.py --password YourStrongPwd123
+    python scripts/reset_admin_password.py --password <your-strong-password>
 """
 
 import argparse
