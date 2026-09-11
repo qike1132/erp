@@ -7,6 +7,13 @@
       <UiSpinner />
     </div>
 
+    <!-- Error (可重试) -->
+    <div v-else-if="error && orders.length === 0" class="pc-error-state">
+      <FontAwesomeIcon icon="exclamation-circle" aria-hidden="true" />
+      <span>加载失败，请检查网络后重试</span>
+      <button class="pc-btn pc-btn-primary pc-btn-sm" @click="$emit('retry')">重试</button>
+    </div>
+
     <!-- Empty -->
     <div v-else-if="orders.length === 0" class="pc-empty-state">
       <FontAwesomeIcon icon="inbox" aria-hidden="true" />
@@ -127,6 +134,7 @@ const props = withDefaults(defineProps<{
   orders: UnprocessedOrder[]
   loading: boolean
   fetching?: boolean
+  error?: boolean
   total: number
   currentPage: number
   totalPages: number
@@ -149,6 +157,7 @@ defineEmits<{
   quickGenerate: [compositeId: string]
   noBomError: [order: UnprocessedOrder]
   changePage: [page: number]
+  retry: []
 }>()
 </script>
 

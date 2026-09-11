@@ -8,6 +8,7 @@
     </div>
     <div class="preview-stats">
       <div class="preview-stat-item"><div class="text-muted text-sm">物料总数</div><div class="text-2xl font-bold text-primary-500">{{ preview.material_count }}</div></div>
+      <div class="preview-stat-item"><div class="text-muted text-sm">角色数</div><div class="text-2xl font-bold">{{ preview.role_count }}</div></div>
       <div class="preview-stat-item"><div class="text-muted text-sm">面料类</div><div class="text-2xl font-bold">{{ preview.fabric_count }}</div></div>
       <div class="preview-stat-item"><div class="text-muted text-sm">填充类</div><div class="text-2xl font-bold">{{ preview.filling_count }}</div></div>
       <div class="preview-stat-item"><div class="text-muted text-sm">辅料/包装</div><div class="text-2xl font-bold">{{ preview.accessory_count }}</div></div>

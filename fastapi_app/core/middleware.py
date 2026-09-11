@@ -75,7 +75,10 @@ def _setup_csrf(app: FastAPI) -> None:
         import ipaddress
         import secrets
 
-        _csrf_secure = os.getenv("CSRF_COOKIE_SECURE", "").lower() in ("true", "1", "yes")
+        _csrf_secure = os.getenv(
+            "CSRF_COOKIE_SECURE",
+            "true" if os.getenv("APP_ENV", "dev") == "production" else "",
+        ).lower() in ("true", "1", "yes")
 
         # 内网 IP 段：CSRF 攻击几乎不可能来自内网，直接豁免
         _LAN_NETWORKS = (

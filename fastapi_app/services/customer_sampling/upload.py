@@ -123,6 +123,11 @@ async def _register_project_image_cleanup(db: AsyncSession, file_id: int | None)
             except Exception as e:  # broad-except: 清理失败仅记录，不影响主流程
                 logger.warning('清理产品图片存储对象失败: key=%s, error=%s', key, e)
 
+    # TODO(P3): 此处使用项目约定的 db.info['post_commit_callbacks'] 回调机制，
+    # 在 core/exceptions.py 的 db_transaction commit 成功后统一执行。
+    # 迁移到 SQLAlchemy event.listen(session, 'after_commit', ...) 需同步改造
+    # purchase_plan_common.py 等所有调用方，且 AsyncSession 的 after_commit
+    # 事件回调为同步执行，无法直接处理 async 回调，暂保留现有机制。
     callbacks = db.info.setdefault('post_commit_callbacks', [])
     callbacks.append(_delete_storage_objects)
 

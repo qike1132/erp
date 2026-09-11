@@ -21,8 +21,8 @@ from fastapi_app.core.redis_client import (
     redis_infra_exceptions as _redis_infra_exceptions,
     reset_async_redis_client,
 )
+from fastapi_app.core.exception_handler import INFRA_EXCEPTIONS
 from fastapi_app.shared_models import AuditLog, Notification, Order, OrderItem, Product, User
-from fastapi_app.shared_models.device_token import DeviceToken
 
 logger = logging.getLogger(__name__)
 
@@ -131,27 +131,14 @@ async def publish_stock_event(event_type: str, data: dict, redis_client=None):
         logger.warning("事件发布失败: %s", e)
 
 
-async def publish_event_with_fcm(
+async def publish_event(
     event_type: str,
     data: dict,
-    fcm_title: str | None = None,
-    fcm_body: str | None = None,
     redis_client=None,
 ):
-    """统一事件发布：WebSocket + FCM 推送"""
-    # 1. WebSocket 广播
+    """统一事件发布：WebSocket 广播（FCM 推送已于 2026-08-31 随移动端一并摘除）"""
+    # WebSocket 广播
     await publish_stock_event(event_type, data, redis_client)
-
-    # 2. FCM 推送（可选，失败不影响业务）
-    if fcm_title:
-        try:
-            from fastapi_app.services import fcm_service
-
-            fcm_data = {"type": event_type, **{k: str(v) for k, v in data.items()}}
-            # 发送到业务事件主题
-            await fcm_service.send_to_topic("erp_business_events", fcm_title, fcm_body or "", fcm_data)
-        except Exception as e:  # defensive: FCM推送失败不影响事件发布主流程
-            logger.debug("FCM 推送跳过: %s", e)
 
 
 class ConnectionManager:
@@ -504,7 +491,7 @@ async def dispatch_beile_unconfirmed_notifications(
     return len(notifications)
 
 
-# ==================== 通知/设备令牌查询函数（自 notification.py / device_token.py 端点下沉） ====================
+# ==================== 通知查询函数（自 notification.py 端点下沉） ====================
 
 async def count_unread_notifications(db: AsyncSession, user_id: int) -> int:
     """统计指定用户的未读通知数"""
@@ -548,28 +535,3 @@ async def mark_all_notifications_read(db: AsyncSession, user_id: int) -> int:
     )
     return result.rowcount or 0
 
-
-async def get_device_token_by_token(db: AsyncSession, token: str) -> DeviceToken | None:
-    """按 FCM 令牌查找设备注册记录"""
-    result = await db.execute(
-        select(DeviceToken).where(DeviceToken.token == token)
-    )
-    return result.scalar_one_or_none()
-
-
-async def deactivate_device_tokens_by_platform(db: AsyncSession, user_id: int, platform: str) -> None:
-    """将指定用户指定平台的旧设备令牌全部置为 inactive（事务由调用方管理）"""
-    await db.execute(
-        update(DeviceToken)
-        .where(DeviceToken.user_id == user_id, DeviceToken.platform == platform)
-        .values(is_active=False, updated_at=datetime.now())
-    )
-
-
-async def deactivate_device_token(db: AsyncSession, token: str, user_id: int) -> None:
-    """注销指定用户的指定 FCM 设备令牌（事务由调用方管理）"""
-    await db.execute(
-        update(DeviceToken)
-        .where(DeviceToken.token == token, DeviceToken.user_id == user_id)
-        .values(is_active=False, updated_at=datetime.now())
-    )

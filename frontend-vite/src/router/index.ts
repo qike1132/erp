@@ -1,11 +1,11 @@
 /**
  * 路由配置 - 响应式自适应
- * 根据设备类型（PC/移动端/Capacitor）自动加载对应路由集
+ * 根据设备类型（PC/移动端）自动加载对应路由集
  * 所有路由懒加载，确保每种设备只加载自己需要的代码
  */
 import { createRouter, createWebHistory, type RouteRecordRaw, type RouteLocationNormalized } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import { isMobileDevice, isCapacitor } from '@/composables/useDevice'
+import { isMobileDevice } from '@/composables/useDevice'
 import { devLog } from '@/utils/devLog'
 
 // ==================== PC 端路由====================
@@ -106,13 +106,11 @@ const mobileRoutes: RouteRecordRaw[] = [
 ]
 
 // ==================== 设备自适应路由选择 ====================
-// 使用 typeof 安全检测 __CAPACITOR_BUILD__，兜底 Vite define 因缓存等原因未正确替换的场景
-const _isCapBuild = typeof __CAPACITOR_BUILD__ !== 'undefined' && __CAPACITOR_BUILD__
-const useMobile = _isCapBuild || isMobileDevice()
+const useMobile = isMobileDevice()
 const routes: RouteRecordRaw[] = useMobile ? mobileRoutes : pcRoutes
 
 if (import.meta.env.DEV) {
-  devLog(`[Router] 设备类型: ${useMobile ? '移动端' : 'PC端'}${_isCapBuild ? ' (Capacitor)' : ''}`)
+  devLog(`[Router] 设备类型: ${useMobile ? '移动端' : 'PC端'}`)
 }
 
 // ==================== 创建路由实例 ====================
@@ -181,8 +179,12 @@ router.beforeEach(async (to: RouteLocationNormalized, _from: RouteLocationNormal
   }
 
   // 权限检查：非超级用户只能访问 filteredNavSections 中可见的路径
-  // navSections 未加载时放行（非阻塞门），导航加载完成后侧边栏自然过滤不可见项
-  if (authStore.user && !authStore.user.is_super && authStore.navSections.length > 0) {
+  // fail-closed：navSections 未加载时阻止导航，避免权限绕过
+  if (authStore.user && !authStore.user.is_super) {
+    if (authStore.navSections.length === 0) {
+      // navSections 尚未加载，阻止导航而非放行
+      return false
+    }
     const targetPath = '/' + to.path.split('/').filter(Boolean)[0]
     const allowedPaths = authStore.filteredNavSections.flatMap((s) => s.items.map((i) => i.path))
     if (targetPath !== '/dashboard' && targetPath !== '/notifications' && targetPath !== '/' && !allowedPaths.includes(targetPath)) {

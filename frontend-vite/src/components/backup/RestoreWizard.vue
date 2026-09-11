@@ -22,8 +22,8 @@
           <p class="rw-desc">选择一个备份点用于还原。还原将把该备份点数据覆盖到当前数据库。</p>
           <label v-for="f in serverBackups" :key="f.filename" class="rw-point" :class="{ checked: selected === f.filename }">
             <input type="radio" :checked="selected === f.filename" @change="selectPoint(f.filename)" />
-            <span class="rw-point-name">{{ displayName(f.filename) }}</span>
-            <span class="mono rw-point-meta">{{ fmtSize(f.size) }} · {{ fmtTime(f.created_at) }}</span>
+            <span class="mono rw-point-name">{{ f.filename }}</span>
+            <span class="mono rw-point-meta">{{ fmtSize(f.size) }} · {{ f.created_at?.slice(0, 16) }}</span>
           </label>
           <div v-if="serverBackups.length === 0" class="rw-empty">暂无服务器备份可还原</div>
         </div>
@@ -131,8 +131,6 @@ const props = defineProps<{
   serverBackups: ServerBackupSummary[]
   plan: BackupRestorePlan | null
   task: BackupTaskState | null
-  /** 打开向导时预选的备份文件名（B9：从记录表点"还原"进入时防止残留上次选择） */
-  initialFilename?: string
   onPreview: (filename: string) => void
   onExecute: (filename: string, opts: RestoreExecuteOptions) => void
 }>()
@@ -149,9 +147,6 @@ const decryptPassword = ref('')
 watch(() => props.open, (o) => {
   if (o) {
     step.value = 1
-    // B9 修复：打开时重置选择并应用预选文件名。旧实现不重置 selected，
-    // 从记录表点备份 B 的"还原"时若残留上次选择 A，实际还原的是 A。
-    selected.value = props.initialFilename ?? ''
     confirmText.value = ''
     confirmSensitive.value = false
     decryptPassword.value = ''
@@ -161,11 +156,7 @@ watch(() => props.open, (o) => {
 watch(() => props.task, (t) => {
   if (!t) return
   if (t.status === 'completed' || t.status === 'completed_with_warnings' || t.status === 'failed') {
-    // H5 修复：仅当向导处于执行还原步骤时才跳转结果报告——任何共享任务
-    // （含无关备份任务）终态都会触发本 watch，旧实现把选择中的向导劫持到第 5 步
-    if (step.value === 4) {
-      step.value = 5
-    }
+    step.value = 5
   }
 })
 
@@ -216,26 +207,6 @@ function fmtSize(n?: number) {
   if (gb >= 1) return `${gb.toFixed(1)} GB`
   if (mb >= 1) return `${Math.round(mb)} MB`
   return `${Math.round(n / 1024)} KB`
-}
-
-/** 备份名称：全量/增量备份 + 文件名中的本地日期（与 BackupRecordTable 展示格式一致） */
-function displayName(filename: string): string {
-  const label = /^erp_incremental_/.test(filename) ? '增量备份' : '全量备份'
-  const m = filename.match(/(\d{4})(\d{2})(\d{2})/)
-  if (m) {
-    const [, y, mo, d] = m
-    return `${label}${y}-${mo}-${d}`
-  }
-  return filename
-}
-
-/** 备份时间：UTC 转本地精确到秒 */
-function fmtTime(createdAt?: string | null): string {
-  if (!createdAt) return '—'
-  const d = new Date(createdAt)
-  if (Number.isNaN(d.getTime())) return '—'
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
 }
 </script>
 

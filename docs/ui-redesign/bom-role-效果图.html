@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BOM 配置·角色字段 - 效果图 v5</title>
+<style>
+  :root {
+    --primary-50: #eff6ff; --primary-100: #dbeafe; --primary-200: #bfdbfe;
+    --primary-400: #60a5fa; --primary-500: #3b82f6; --primary-600: #2563eb; --primary-700: #1d4ed8;
+    --success-50: #f0fdf4; --success-100: #dcfce7; --success-200: #bbf7d0; --success-600: #16a34a;
+    --danger-50: #fef2f2; --danger-100: #fee2e2; --danger-500: #ef4444; --danger-600: #dc2626;
+    --surface: #f8fafc; --border-light: #e2e8f0; --border-lighter: #f1f5f9;
+    --text: #1e293b; --text-secondary: #64748b;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif; background: #eef2f7; color: var(--text); min-height: 100vh; padding: 40px; }
+  .page-meta { max-width: 1280px; margin: 0 auto 24px; }
+  .page-meta h1 { font-size: 20px; font-weight: 700; }
+  .page-meta p { font-size: 13px; color: var(--text-secondary); margin-top: 6px; line-height: 1.8; }
+  .page-meta p code { background: var(--primary-50); color: var(--primary-600); padding: 1px 6px; border-radius: 4px; font-size: 12px; }
+
+  .card { max-width: 1280px; margin: 0 auto; background: #fff; border-radius: 16px; box-shadow: 0 10px 30px rgba(15,23,42,.08); overflow: hidden; }
+  .card-head { display: flex; justify-content: space-between; align-items: center; padding: 0 24px; height: 60px; border-bottom: 1px solid var(--border-light); }
+  .card-head .title { font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+  .card-head .title svg { color: var(--primary-500); }
+  .search-box { display: flex; align-items: center; gap: 8px; border: 1px solid var(--border-light); border-radius: 10px; padding: 8px 14px; width: 300px; background: var(--surface); }
+  .search-box input { border: none; outline: none; flex: 1; font-size: 13px; background: transparent; color: var(--text); }
+  table { width: 100%; border-collapse: collapse; }
+  thead th { text-align: left; font-size: 12px; font-weight: 600; color: var(--text); padding: 12px 16px; background: var(--surface); border-bottom: 2px solid var(--primary-200); white-space: nowrap; }
+  tbody td { padding: 12px 16px; border-bottom: 1px solid var(--border-lighter); vertical-align: middle; }
+  tbody tr:hover { background: var(--primary-50); }
+  .thumb { width: 72px; height: 72px; border-radius: 10px; background: var(--surface); border: 1px solid var(--border-light); display: flex; align-items: center; justify-content: center; font-size: 26px; }
+  .name { font-size: 14px; font-weight: 600; }
+  .barcode { font-size: 12px; color: var(--text-secondary); font-family: Consolas, monospace; margin-top: 4px; }
+  .price { font-size: 13px; font-weight: 600; color: var(--danger-500); }
+  .act-btn { width: 34px; height: 34px; border: none; border-radius: 9px; display: inline-flex; align-items: center; justify-content: center; font-size: 14px; cursor: pointer; margin-right: 4px; transition: transform .2s; }
+  .act-btn:hover { transform: translateY(-1px); }
+  .act-bom { background: var(--primary-50); color: var(--primary-600); }
+  .act-edit { background: #fffbeb; color: #d97706; }
+  .act-delete { background: var(--danger-50); color: var(--danger-500); }
+
+  /* ===== 弹窗 ===== */
+  .overlay { position: fixed; inset: 0; z-index: 50; background: rgba(15,23,42,.5); display: none; align-items: center; justify-content: center; padding: 16px; }
+  .overlay.show { display: flex; }
+  .modal { width: min(1180px, 96vw); max-height: 92vh; background: #fff; border-radius: 18px; box-shadow: 0 20px 60px rgba(15,23,42,.25); display: flex; flex-direction: column; overflow: hidden; animation: pop .22s ease; }
+  @keyframes pop { from { transform: scale(.97); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  .modal-head { display: flex; justify-content: space-between; align-items: center; padding: 20px 28px; border-bottom: 1px solid var(--border-light); }
+  .modal-head h2 { font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 10px; }
+  .modal-head h2 svg { color: var(--primary-500); }
+  .close-btn { width: 36px; height: 36px; border: none; border-radius: 50%; cursor: pointer; background: var(--surface); color: var(--text-secondary); font-size: 15px; display: flex; align-items: center; justify-content: center; transition: background .25s, transform .25s; }
+  .close-btn:hover { background: var(--border-light); transform: rotate(90deg); }
+  .modal-body { background: var(--surface); padding: 24px 28px; overflow-y: auto; flex: 1; }
+
+  /* 页签 */
+  .tabs { display: inline-flex; gap: 4px; padding: 4px; background: #fff; border-radius: 12px; border: 1px solid var(--border-light); box-shadow: 0 1px 3px rgba(15,23,42,.04), 0 4px 12px rgba(15,23,42,.06); }
+  .tab { padding: 8px 16px; border: none; border-radius: 9px; background: transparent; font-size: 13px; font-weight: 600; color: var(--text-secondary); cursor: pointer; display: flex; align-items: center; gap: 6px; transition: all .25s; }
+  .tab:hover { background: var(--primary-50); color: var(--primary-600); }
+  .tab.active { background: linear-gradient(135deg, var(--primary-50), var(--primary-100)); color: var(--primary-700); box-shadow: 0 4px 12px rgba(59,130,246,.15); }
+
+  /* ===== 角色栏（表格正上方，点击切换BOM） ===== */
+  .role-bar {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    background: #fff; border: 1px solid var(--primary-200); border-radius: 12px;
+    padding: 12px 20px; margin: 14px 0 10px;
+  }
+  .role-bar-label { display: flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 700; white-space: nowrap; }
+  .role-bar-label svg { color: var(--primary-500); }
+  .role-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    border: 2px solid var(--primary-200); background: #fff; color: var(--primary-600);
+    border-radius: 999px; padding: 6px 8px 6px 14px; font-size: 13px; font-weight: 600; cursor: pointer;
+    transition: all .2s;
+  }
+  .role-chip:hover { background: var(--primary-50); transform: translateY(-1px); }
+  .role-chip.active { background: linear-gradient(135deg, var(--primary-500), var(--primary-600)); border-color: var(--primary-500); color: #fff; box-shadow: 0 4px 12px rgba(59,130,246,.3); }
+  .role-chip .rm { width: 18px; height: 18px; border: none; border-radius: 50%; background: transparent; color: inherit; opacity: .75; cursor: pointer; font-size: 12px; display: flex; align-items: center; justify-content: center; }
+  .role-chip .rm:hover { background: var(--danger-100); color: var(--danger-600); opacity: 1; }
+  .role-empty { font-size: 13px; color: var(--text-secondary); }
+  .role-add-btn { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 999px; border: 2px dashed var(--primary-200); background: var(--primary-50); color: var(--primary-600); font-size: 13px; font-weight: 600; cursor: pointer; transition: all .2s; }
+  .role-add-btn:hover { border-color: var(--primary-400); background: var(--primary-100); }
+  .add-role-input { border: 1px solid var(--primary-400); border-radius: 999px; padding: 6px 14px; font-size: 13px; width: 170px; outline: none; box-shadow: 0 0 0 3px rgba(59,130,246,.12); }
+
+  /* 汇总栏 */
+  .summary-bar { display: flex; justify-content: space-between; align-items: center; background: #fff; border: 1px solid var(--primary-200); border-radius: 12px; padding: 12px 20px; margin-bottom: 10px; }
+  .summary-left { display: flex; align-items: center; gap: 16px; }
+  .summary-text { font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+  .summary-count { font-size: 13px; color: var(--text-secondary); }
+  .count-value { font-size: 18px; font-weight: 700; color: var(--primary-600); }
+  .btn { padding: 9px 18px; border-radius: 10px; font-size: 13px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: transform .25s, box-shadow .25s; border: 2px solid transparent; }
+  .btn:hover { transform: translateY(-1px); }
+  .btn-add { background: var(--success-50); color: var(--success-600); border-color: var(--success-200); }
+  .btn-copy { background: var(--primary-50); color: var(--primary-600); border-color: var(--primary-200); }
+
+  /* 物料表格 */
+  .mat-table-wrap { background: #fff; border-radius: 12px; border: 1px solid var(--border-light); overflow: hidden; }
+  .mat-table { width: 100%; border-collapse: collapse; min-width: 980px; }
+  .mat-table th { background: var(--surface); text-align: left; font-size: 12px; font-weight: 600; padding: 12px 16px; border-bottom: 2px solid var(--primary-200); white-space: nowrap; }
+  .mat-table th .req { color: var(--danger-500); }
+  .mat-table td { padding: 10px 16px; border-bottom: 1px solid var(--border-lighter); }
+  .tinput { width: 100%; padding: 6px 10px; border: 1px solid var(--border-light); border-radius: 8px; font-size: 13px; outline: none; transition: border-color .2s, box-shadow .2s; }
+  .tinput:focus { border-color: var(--primary-400); box-shadow: 0 0 0 3px rgba(59,130,246,.1); }
+  .del-btn { padding: 5px 9px; border: none; border-radius: 6px; cursor: pointer; background: var(--danger-50); color: var(--danger-600); font-size: 12px; }
+  .del-btn:hover { transform: translateY(-1px); box-shadow: 0 2px 8px rgba(229,115,115,.3); }
+  .empty-state { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 44px 20px; text-align: center; }
+  .empty-state .ic { font-size: 38px; opacity: .4; }
+  .empty-state .t { font-size: 15px; font-weight: 600; }
+  .empty-state .h { font-size: 13px; color: var(--text-secondary); }
+
+  .modal-foot { display: flex; justify-content: flex-end; align-items: center; gap: 10px; padding: 20px 28px; background: #fff; border-top: 1px solid var(--border-light); }
+  .btn-cancel { background: #fff; color: var(--text); border-color: var(--border-light); }
+  .btn-save { background: linear-gradient(135deg, var(--primary-500), var(--primary-600)); color: #fff; }
+  .btn-save:hover { box-shadow: 0 4px 12px rgba(59,130,246,.3); }
+
+  .toast { position: fixed; top: 24px; left: 50%; transform: translateX(-50%) translateY(-80px); background: #16a34a; color: #fff; padding: 10px 22px; border-radius: 10px; font-size: 14px; font-weight: 600; box-shadow: 0 8px 24px rgba(22,163,74,.35); transition: transform .3s ease; z-index: 99; opacity: 0; }
+  .toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
+  .note { max-width: 1280px; margin: 18px auto 0; font-size: 12px; color: var(--text-secondary); line-height: 1.8; }
+</style>
+</head>
+<body>
+
+  <div class="page-meta">
+    <h1>BOM 配置 · 角色字段 — HTML 效果图 v5</h1>
+    <p>
+      角色标签<b>常驻</b>显示在物料表格正上方；<b>点击角色标签 → 自动切换到该角色的 BOM</b>（每个角色拥有独立的 面料/填充/辅料 物料清单）。<br>
+      无角色产品保留产品级默认 BOM；［＋ 添加角色］新增角色并切换到其空 BOM。
+    </p>
+  </div>
+
+  <!-- ===== 产品列表 ===== -->
+  <div class="card">
+    <div class="card-head">
+      <div class="title">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><path d="M3 2h10a1 1 0 011 1v10a1 1 0 01-1 1H3a1 1 0 01-1-1V3a1 1 0 011-1z"/></svg>
+        产品列表
+      </div>
+      <div class="search-box">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M11.7 10.3a6 6 0 111.4-1.4l2.8 2.8a1 1 0 01-1.4 1.4l-2.8-2.8zM7 12a5 5 0 100-10 5 5 0 000 10z"/></svg>
+        <input type="text" placeholder="搜索产品名称或69码...">
+      </div>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th style="width:110px">产品图片</th>
+          <th style="width:240px">产品名称</th>
+          <th style="width:170px">69码</th>
+          <th style="width:120px">产品价格</th>
+          <th style="width:110px">工厂</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody id="productRows"></tbody>
+    </table>
+  </div>
+  <p class="note">产品列表保持原样；角色信息全部在 BOM 弹窗内管理。示例：产品①②③带角色（每个角色独立BOM），产品④无角色（产品级默认BOM）。</p>
+
+  <!-- ===== BOM 配置弹窗 ===== -->
+  <div class="overlay" id="bomOverlay">
+    <div class="modal">
+      <div class="modal-head">
+        <h2>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z"/></svg>
+          BOM表配置 - <span id="modalProductName">幸运盲盒·童话系列 A 款</span>
+        </h2>
+        <button class="close-btn" onclick="closeBom()">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <!-- 页签 -->
+        <div class="tabs">
+          <button class="tab active" onclick="switchTab(this)">📜 面料类</button>
+          <button class="tab" onclick="switchTab(this)">☁️ 填充类</button>
+          <button class="tab" onclick="switchTab(this)">🧩 辅料类</button>
+        </div>
+
+        <!-- 角色栏（表格正上方·点击切换BOM） -->
+        <div class="role-bar" id="roleBar">
+          <span class="role-bar-label">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 12a5 5 0 100-10 5 5 0 000 10zm0 2c-3.9 0-8 1.8-8 5v1h16v-1c0-3.2-4.1-5-8-5z"/></svg>
+            角色：
+          </span>
+          <div id="roleChips" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex:1"></div>
+          <button class="role-add-btn" onclick="addRole()">＋ 添加角色</button>
+        </div>
+
+        <!-- 汇总栏 -->
+        <div class="summary-bar">
+          <div class="summary-left">
+            <span class="summary-text">📋 <span id="tabLabel">面料类</span><span id="scopeLabel"> · 默认BOM</span></span>
+            <span class="summary-count">物料总数：<span class="count-value" id="countValue">3</span></span>
+          </div>
+          <div class="summary-right">
+            <button class="btn btn-copy">⧉ 复制BOM</button>
+            <button class="btn btn-add" style="background:var(--success-50);color:var(--success-600);border-color:var(--success-200)">＋ 添加物料</button>
+          </div>
+        </div>
+
+        <!-- 物料表格 -->
+        <div class="mat-table-wrap">
+          <table class="mat-table">
+            <thead>
+              <tr>
+                <th style="width:200px">物料名称 <span class="req">*</span></th>
+                <th style="width:180px">规格型号 <span class="req">*</span></th>
+                <th style="width:120px">计量单位 <span class="req">*</span></th>
+                <th style="width:200px">供应商 <span class="req">*</span></th>
+                <th style="width:140px">单个用量</th>
+                <th style="width:200px">备注</th>
+                <th style="width:80px">操作</th>
+              </tr>
+            </thead>
+            <tbody id="matRows"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="modal-foot">
+        <button class="btn btn-cancel" onclick="closeBom()">取消</button>
+        <button class="btn btn-save" onclick="saveBom()">💾 保存BOM</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast">保存成功</div>
+
+<script>
+  // 每个角色独立物料清单；roles 为空时使用 product.materials（产品级默认BOM）
+  const PRODUCTS = [
+    {
+      id: 1, name: '幸运盲盒·童话系列 A 款', barcode: '6901234567890', price: 29.9, factory: '东莞', img: '🎁',
+      roles: [
+        { id: 11, name: '白雪公主', materials: { fabric: [['珠光雪纺面料', '100%涤纶·白', '码', '东莞艺佳纺织', 1.2, '公主裙面料'], ['金线刺绣网纱', '金色', '码', '东莞艺佳纺织', 0.8, '裙摆']], filling: [['PP棉填充', 'A级', '克', '湖北嘉丰棉业', 35, '']], accessory: [['珍珠纽扣', '6mm', '个', '义乌宏利辅料', 5, '']] } },
+        { id: 12, name: '灰姑娘', materials: { fabric: [['蓝缎面料', '100%涤纶·蓝', '码', '苏州欣荣纺织', 1.1, '舞会裙'], ['蕾丝花边', '1.5cm', '码', '苏州欣荣纺织', 0.6, '领口']], filling: [['PP棉填充', 'A级', '克', '湖北嘉丰棉业', 32, '']], accessory: [['水晶钻贴', '5mm', '个', '义乌宏利辅料', 8, '']] } },
+        { id: 13, name: '小美人鱼', materials: { fabric: [['海蓝鳞纹面料', '涤纶+亮片', '码', '苏州欣荣纺织', 1.0, '鱼尾裙'], ['雪纺纱', '粉色', '码', '东莞艺佳纺织', 0.5, '披肩']], filling: [['PP棉填充', 'B级', '克', '湖北嘉丰棉业', 30, '']], accessory: [['贝壳发饰', '2cm', '个', '义乌宏利辅料', 1, '']] } },
+      ],
+    },
+    { id: 2, name: '职业公仔·6只装礼盒', barcode: '6901234567891', price: 89.0, factory: '湖北', img: '🧸', roles: [
+        { id: 21, name: '医生', materials: { fabric: [['白色斜纹布', '涤棉', '码', '苏州欣荣纺织', 0.9, '白大褂']], filling: [['PP棉填充', 'A级', '克', '湖北嘉丰棉业', 28, '']], accessory: [['听诊器配件', '3cm', '个', '义乌宏利辅料', 1, '']] } },
+        { id: 22, name: '消防员', materials: { fabric: [['消防橙阻燃布', '涤纶', '码', '苏州欣荣纺织', 1.0, '制服']], filling: [['PP棉填充', 'A级', '克', '湖北嘉丰棉业', 30, '']], accessory: [['安全帽配件', '3cm', '个', '义乌宏利辅料', 1, '']] } },
+      ] },
+    { id: 3, name: '十二生肖盲盒·单只', barcode: '6901234567892', price: 19.9, factory: '东莞', img: '🐰', roles: [
+        { id: 31, name: '子鼠', materials: { fabric: [['灰色短绒布', '仿兔绒', '码', '东莞艺佳纺织', 0.4, '皮毛']], filling: [['PP棉填充', 'A级', '克', '湖北嘉丰棉业', 18, '']], accessory: [['红色小马甲', '成品', '个', '义乌宏利辅料', 1, '']] } },
+        { id: 32, name: '丑牛', materials: { fabric: [['棕色短绒布', '仿兔绒', '码', '东莞艺佳纺织', 0.45, '皮毛']], filling: [['PP棉填充', 'A级', '克', '湖北嘉丰棉业', 20, '']], accessory: [['牛角配件', '2cm', '个', '义乌宏利辅料', 2, '']] } },
+      ] },
+    { id: 4, name: '运动系列公仔套装', barcode: '6901234567893', price: 59.9, factory: '东莞', img: '⚽', roles: [], materials: { fabric: [['运动速干面料', '涤纶', '码', '东莞艺佳纺织', 1.5, '套装面料']], filling: [['PP棉填充', 'A级', '克', '湖北嘉丰棉业', 60, '']], accessory: [['运动拉链', '20cm', '条', '义乌宏利辅料', 2, '']] } },
+    { id: 5, name: '经典收藏款', barcode: '6901234567894', price: 39.9, factory: '湖北', img: '📦', roles: [], materials: { fabric: [['羊毛混纺面料', '羊毛30%', '码', '苏州欣荣纺织', 1.2, '收藏款面料']], filling: [['羽绒棉', 'A级', '克', '湖北嘉丰棉业', 45, '']], accessory: [['收藏证书', 'A5', '张', '义乌宏利辅料', 1, '']] } },
+  ];
+
+  // ---- 弹窗状态 ----
+  let currentProduct = null;
+  let activeTab = 'fabric';     // fabric / filling / accessory
+  let activeRoleId = null;      // null = 产品级默认BOM（无角色或选中"默认"）
+  const currentRoles = [];      // [{id,name,materials}]
+
+  function renderProducts() {
+    const tbody = document.getElementById('productRows');
+    tbody.innerHTML = '';
+    PRODUCTS.forEach(p => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><div class="thumb">${p.img}</div></td>
+        <td><div class="name">${p.name}</div></td>
+        <td><div class="barcode">${p.barcode}</div></td>
+        <td><div class="price">¥${p.price.toFixed(1)}</div></td>
+        <td><div class="factory">${p.factory}</div></td>
+        <td>
+          <button class="act-btn act-bom" title="配置BOM表" onclick="openBom(${p.id})">⚙️</button>
+          <button class="act-btn act-edit" title="编辑">✏️</button>
+          <button class="act-btn act-delete" title="删除">🗑</button>
+        </td>`;
+      tbody.appendChild(tr);
+    });
+  }
+
+  function openBom(id) {
+    currentProduct = PRODUCTS.find(p => p.id === id);
+    document.getElementById('modalProductName').textContent = currentProduct.name;
+    currentRoles.length = 0;
+    (currentProduct.roles || []).forEach(r => currentRoles.push({ id: r.id, name: r.name, materials: r.materials }));
+    activeTab = 'fabric';
+    activeRoleId = null; // 默认产品级BOM（无角色产品）；有角色产品自动选中第一个角色
+    if (currentRoles.length) activeRoleId = currentRoles[0].id;
+    document.querySelectorAll('.tab')[0].classList.add('active');
+    document.querySelectorAll('.tab').forEach((t, i) => t.classList.toggle('active', i === 0));
+    renderAll();
+    document.getElementById('bomOverlay').classList.add('show');
+  }
+  function closeBom() { document.getElementById('bomOverlay').classList.remove('show'); }
+
+  function renderAll() {
+    renderChips();
+    const scope = activeRoleId ? currentRoles.find(r => r.id === activeRoleId) : null;
+    document.getElementById('scopeLabel').textContent = scope ? ` · ${scope.name}` : ' · 默认BOM';
+    renderRows();
+  }
+
+  // 角色 chips（点击切换BOM；✕ 删除）
+  function renderChips() {
+    const wrap = document.getElementById('roleChips');
+    wrap.innerHTML = '';
+    if (!currentRoles.length) {
+      wrap.innerHTML = '<span class="role-empty">尚未配置角色（当前为产品级默认BOM），点击"＋ 添加角色"开始</span>';
+      return;
+    }
+    currentRoles.forEach(r => {
+      const chip = document.createElement('span');
+      chip.className = 'role-chip' + (r.id === activeRoleId ? ' active' : '');
+      chip.innerHTML = `${r.name}<button class="rm" onclick="event.stopPropagation();removeRole('${r.id}')" title="删除角色">✕</button>`;
+      chip.onclick = () => { activeRoleId = r.id; renderAll(); };
+      wrap.appendChild(chip);
+    });
+  }
+
+  // 当前作用域物料（角色或默认）
+  function scopeMaterials() {
+    if (activeRoleId) {
+      const role = currentRoles.find(r => r.id === activeRoleId);
+      return role ? role.materials[activeTab] : [];
+    }
+    return currentProduct.materials ? currentProduct.materials[activeTab] : [];
+  }
+
+  function renderRows() {
+    const tbody = document.getElementById('matRows');
+    const list = scopeMaterials() || [];
+    document.getElementById('countValue').textContent = list.length;
+    tbody.innerHTML = '';
+    if (!list.length) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = '<td colspan="7" style="padding:0"><div class="empty-state"><div class="ic">📦</div><div class="t">暂无物料</div><div class="h">点击"＋ 添加物料"为该角色配置物料</div></div></td>';
+      tbody.appendChild(tr);
+      return;
+    }
+    list.forEach(m => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><input class="tinput" value="${m[0]}"></td>
+        <td><input class="tinput" value="${m[1]}"></td>
+        <td><select class="tinput"><option>码</option><option ${m[2]==='克'?'selected':''}>克</option><option ${m[2]==='个'?'selected':''}>个</option><option>件</option><option>套</option></select></td>
+        <td><input class="tinput" value="${m[3]}"></td>
+        <td><input class="tinput" type="number" value="${m[4]}" step="0.01"></td>
+        <td><input class="tinput" value="${m[5]}"></td>
+        <td><button class="del-btn">🗑</button></td>`;
+      tbody.appendChild(tr);
+    });
+  }
+
+  function addRole() {
+    const wrap = document.getElementById('roleChips');
+    const input = document.createElement('input');
+    input.className = 'add-role-input';
+    input.placeholder = '输入角色名称，回车确认';
+    input.maxLength = 100;
+    wrap.appendChild(input);
+    input.focus();
+    let done = false;
+    const confirm = () => {
+      if (done) return;
+      const v = input.value.trim();
+      if (!v) { input.remove(); return; }
+      done = true;
+      const role = { id: Date.now(), name: v, materials: { fabric: [], filling: [], accessory: [] } };
+      currentRoles.push(role);
+      activeRoleId = role.id; // 自动切换到新角色BOM
+      renderAll();
+    };
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') confirm(); if (e.key === 'Escape') input.remove(); });
+    input.addEventListener('blur', confirm);
+  }
+
+  function removeRole(id) {
+    if (!confirm('确定删除该角色？其独立物料清单将一并删除。')) return;
+    const idx = currentRoles.findIndex(r => r.id === id);
+    if (idx < 0) return;
+    currentRoles.splice(idx, 1);
+    if (activeRoleId === id) activeRoleId = currentRoles.length ? currentRoles[0].id : null;
+    renderAll();
+  }
+
+  function switchTab(btn) {
+    const labels = ['fabric', 'filling', 'accessory'];
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    btn.classList.add('active');
+    activeTab = labels[[...document.querySelectorAll('.tab')].indexOf(btn)];
+    document.getElementById('tabLabel').textContent = btn.textContent.trim().replace(/^[^一-龥]+/, '').replace(/[^一-龥]/g, '');
+    renderRows();
+  }
+
+  function saveBom() {
+    const roleNames = currentRoles.map(r => r.name).filter(Boolean);
+    showToast(`保存成功（角色 ${roleNames.length} 个，物料按角色独立保存）`);
+    closeBom();
+  }
+
+  let toastTimer;
+  function showToast(msg, type = 'ok') {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.style.background = type === 'warn' ? '#d97706' : '#16a34a';
+    t.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove('show'), 2400);
+  }
+
+  renderProducts();
+</script>
+</body>
+</html>

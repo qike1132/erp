@@ -11,7 +11,7 @@ from fastapi_app.core.cache import CacheDomain
 from fastapi_app.core.cache_invalidation import InvalidationStrategy, cache_mgr
 from fastapi_app.core.domain_events import DomainEvent, DomainEventType, publish_with_retry
 from fastapi_app.core.exception_handler import INFRA_EXCEPTIONS
-from fastapi_app.services.notification_service import StockEvent, publish_event_with_fcm
+from fastapi_app.services.notification_service import StockEvent, publish_event
 
 logger = logging.getLogger(__name__)
 
@@ -26,16 +26,16 @@ _STOCK_TO_DOMAIN_EVENT_MAP = {
 }
 
 
-async def _safe_publish_event(event_type: str, data: dict, fcm_title: str | None = None, fcm_body: str | None = None) -> None:
-    """安全发布库存事件（WebSocket/FCM 实时通知 + 领域事件总线）。
+async def _safe_publish_event(event_type: str, data: dict) -> None:
+    """安全发布库存事件（WebSocket 实时通知 + 领域事件总线）。
 
     core/event_bus.safe_publish_event 的等价实现：
-    1. publish_event_with_fcm → WebSocket 广播 + FCM 推送，失败仅记警告；
+    1. publish_event → WebSocket 广播，失败仅记警告；
     2. StockEvent 映射为领域事件后经 publish_with_retry 发布（失败重试一次，
        仍失败则内部记 ERROR 日志，不向主流程抛出）。
     """
     try:
-        await publish_event_with_fcm(event_type, data, fcm_title=fcm_title, fcm_body=fcm_body)
+        await publish_event(event_type, data)
     except (RuntimeError, *INFRA_EXCEPTIONS):
         logger.warning("事件发布失败: %s", event_type, exc_info=True)
 

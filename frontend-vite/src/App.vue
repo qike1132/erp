@@ -23,8 +23,11 @@ import { useRouter, type RouteLocationNormalized } from 'vue-router'
 const router = useRouter()
 const showRouteLoading = ref(false)
 let loadingTimer: ReturnType<typeof setTimeout> | null = null
+let forceStopTimer: ReturnType<typeof setTimeout> | null = null
 
 const DELAY_MS = 800
+// 兜底：懒加载 chunk 请求悬挂（既不成也不失败）时，进度条最长展示 15s 后强制关闭，避免无限转圈
+const MAX_LOADING_MS = 15_000
 
 /** 检查目标路由是否包含未解析的动态 import（即 chunk 尚未缓存） */
 function hasUnresolvedChunk(to: RouteLocationNormalized): boolean {
@@ -40,6 +43,8 @@ function startRouteLoading(to: RouteLocationNormalized) {
   if (loadingTimer) return
   loadingTimer = setTimeout(() => {
     showRouteLoading.value = true
+    if (forceStopTimer) clearTimeout(forceStopTimer)
+    forceStopTimer = setTimeout(() => stopRouteLoading(), MAX_LOADING_MS)
   }, DELAY_MS)
 }
 
@@ -47,6 +52,10 @@ function stopRouteLoading() {
   if (loadingTimer) {
     clearTimeout(loadingTimer)
     loadingTimer = null
+  }
+  if (forceStopTimer) {
+    clearTimeout(forceStopTimer)
+    forceStopTimer = null
   }
   showRouteLoading.value = false
 }

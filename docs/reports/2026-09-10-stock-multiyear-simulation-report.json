@@ -1,0 +1,47 @@
+{
+  "run_dir": "d:\\erp_system\\scripts\\stock_sim\\journal\\20260910T105141",
+  "summary": {
+    "status": "DONE",
+    "planned_ops": 11000,
+    "executed_ops": 10970,
+    "rejected_ops": 30,
+    "fail": 0,
+    "product_id": 20587,
+    "customer": "SIMTEST-CUST-20260910",
+    "checkpoints": 37
+  },
+  "checks": [
+    {
+      "check": "A1 余额账",
+      "passed": true,
+      "detail": "API current_stock=413595 vs 影子=413595"
+    },
+    {
+      "check": "A2 流水账",
+      "passed": true,
+      "detail": "移库类日志 Σ=413595 vs 影子余额=413595（共 10970 条，剔除非移库类型后 413595）"
+    },
+    {
+      "check": "A3 视图账",
+      "passed": true,
+      "detail": "本产品(SIMTEST-PROD-20260910105142) total_stock=1403778 vs 账簿推导预期=1403778（差异 0）"
+    },
+    {
+      "check": "A4 流水明细",
+      "passed": true,
+      "detail": "入库3482条(重复0) 出库去重后3683条(原始3684，去重后重复单号0)"
+    },
+    {
+      "check": "A5 汇总账",
+      "passed": true,
+      "detail": "入库Σ=622424(预期622424)；出库(余额反推)=208829(预期208829)；出库(列表去重Σ)=208710"
+    },
+    {
+      "check": "A6 不变量",
+      "passed": true,
+      "detail": "检查点数=37，负余额日=无"
+    }
+  ],
+  "all_pass": true,
+  "generated_at": "2026-09-10T11:59:09"
+}

@@ -229,6 +229,10 @@ async def api_upload_project_image(
 ) -> dict[str, Any]:
     """上传产品图片（复用 storage_service，限制 JPEG/PNG/WebP ≤ 10MB）"""
     content = await file.read()
+    # 文件大小校验（10MB 上限），先于数据库查询快速失败
+    MAX_IMAGE_SIZE = 10 * 1024 * 1024  # 10MB
+    if len(content) > MAX_IMAGE_SIZE:
+        raise HTTPException(status_code=413, detail='文件大小超过 10MB 限制')
     # 项目存在性优先（404 语义先于文件校验 400），
     # 魔数 + 解码校验在进入事务前执行（快速失败，不占用数据库连接）
     await svc._ensure_project_exists(db, project_id)

@@ -81,6 +81,11 @@ def _init_async_engine():
     async_engine = _async_engine
 
 
+# TODO(P3): 副作用导入 - _init_async_engine() 在模块导入时自动执行，属于隐式副作用。
+# 理想方案是在 main.py lifespan 中显式调用 _init_async_engine()，但当前许多模块
+# 依赖 `from fastapi_app.core.database import async_engine` 时引擎已初始化，
+# 直接移除会导致数据库连接不建立。保留自动调用以保证兼容性，后续重构应在
+# main.py lifespan 启动入口先调用 _init_async_engine()。
 _init_async_engine()
 
 try:

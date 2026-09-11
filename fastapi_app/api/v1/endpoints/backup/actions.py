@@ -12,6 +12,7 @@
 import logging
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
+from redis.exceptions import RedisError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.api.v1.endpoints.backup._deps import require_backup_permission
@@ -49,12 +50,11 @@ async def _check_task_mutex(db: AsyncSession) -> None:
         )
     await backup_service.release_backup_lock(db)
 
-    restore_busy = await backup_service.is_restore_in_progress()
-    if restore_busy:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={'code': 'TASK_RUNNING', 'message': '已有还原任务正在执行中，请稍后重试'},
-        )
+    # 还原锁检查委托共享助手：区分「Redis 故障(503)」与「锁真实占用(409)」，
+    # 并对崩溃残留的陈旧锁自愈清除——避免把 Redis 故障误报成
+    # "已有还原任务正在执行中"（用户视角：明明没跑还原却拒绝备份）。
+    from fastapi_app.api.v1.endpoints.backup._mutex import ensure_restore_slot_free
+    await ensure_restore_slot_free()
 
 
 async def _enqueue_task(
@@ -118,7 +118,10 @@ async def trigger_full_backup(
     # 写入失败继续入队：任务侧拿不到密码时按既有 fail-safe 降级为不加密。
     if password:
         from fastapi_app.core.backup_progress import store_task_password
-        await store_task_password(task_id, password)
+        try:
+            await store_task_password(task_id, password)
+        except Exception:
+            logger.warning('store_task_password 失败，继续入队（task_id=%s）', task_id)
     try:
         await _enqueue_task(
             'manual_full_backup_task',
@@ -128,7 +131,7 @@ async def trigger_full_backup(
             tables=payload.tables,
             exclude_tables=payload.exclude_tables,
         )
-    except (RuntimeError, OSError, ConnectionError) as e:
+    except (RuntimeError, OSError, ConnectionError, RedisError) as e:
         logger.error('入队全量备份任务失败: %s', e)
         raise HTTPException(status_code=500, detail='触发备份失败，请查看服务器日志') from e
 

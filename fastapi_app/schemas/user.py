@@ -6,7 +6,7 @@ from fastapi_app.schemas.product import _validate_factory
 
 class UserCreate(BaseModel):
     username: str = Field(..., min_length=1, max_length=50, description="用户名")
-    password: str = Field(..., min_length=6, max_length=128, description="密码")
+    password: str = Field(..., min_length=8, max_length=128, description="密码")
     is_super: bool = Field(default=False, description="是否超级用户")
     factory: str | None = Field(default=None, max_length=20, description="所属工厂：东莞/湖北/NULL")
 

@@ -627,7 +627,7 @@ async def api_save_factory_summary_edits(
     """
     try:
         async with db_transaction(db):
-            result = await svc.save_factory_summary_edits(db, data.edits)
+            result = await svc.save_factory_summary_edits(db, [e.model_dump() for e in data.edits])
         return {'success': True, **result}
     except RuntimeError as e:
         logger.exception('保存工厂订单编辑失败')

@@ -31,11 +31,84 @@ class CustomerBatchRequest(BaseModel):
     """客户批量查询请求"""
     ids: list[int] = Field(..., min_length=1, max_length=500, description="客户ID列表")
 
+class FillingItem(BaseModel):
+    """BOM 填充物明细（ProductMaterial）。
+
+    允许额外字段以兼容前端未声明的扩展字段。
+    """
+    model_config = {"extra": "allow"}
+    id: int | None = None
+    role_id: int | None = None
+    role_key: str | None = None
+    cotton_usage: float = 0
+    supplier_id: int | None = None
+    supplier_name: str = ''
+    specification: str = ''
+    unit: str = ''
+    remark: str = ''
+
+
+class FabricItem(BaseModel):
+    """BOM 面料明细（ProductFabric）。
+
+    允许额外字段以兼容前端未声明的扩展字段。
+    """
+    model_config = {"extra": "allow"}
+    id: int | None = None
+    role_id: int | None = None
+    role_key: str | None = None
+    fabric_name: str = ''
+    specification: str = ''
+    unit: str = ''
+    quantity: float = 0
+    supplier_id: int | None = None
+    supplier_name: str = ''
+    remark: str = ''
+
+
+class AccessoryItem(BaseModel):
+    """BOM 辅料明细（ProductAccessory）。
+
+    允许额外字段以兼容前端未声明的扩展字段。
+    """
+    model_config = {"extra": "allow"}
+    id: int | None = None
+    role_id: int | None = None
+    role_key: str | None = None
+    accessory_name: str = ''
+    specification: str = ''
+    unit: str = ''
+    quantity: float = 0
+    supplier_id: int | None = None
+    supplier_name: str = ''
+    remark: str = ''
+
+
+class PackagingItem(BaseModel):
+    """BOM 包装明细（预留字段，允许额外字段）。"""
+    model_config = {"extra": "allow"}
+
+
+class RoleItem(BaseModel):
+    """BOM 角色明细（ProductRole）。
+
+    允许额外字段以兼容前端未声明的扩展字段。
+    """
+    model_config = {"extra": "allow"}
+    id: int | None = None
+    role_key: str | None = None
+    role_name: str = ''
+    name: str | None = None
+
+
 class BomSaveRequest(BaseModel):
     """保存BOM请求"""
-    filling: dict | None = None
-    fabrics: list[dict] = []
-    accessories: list[dict] = []
+    filling: FillingItem | None = None
+    fabrics: list[FabricItem] = []
+    accessories: list[AccessoryItem] = []
+    packagings: list[PackagingItem] = []
+    roles: list[RoleItem] = []
+    fillings: list[FillingItem] = []
 
 class BomCopyRequest(BaseModel):
     """复制BOM请求"""
@@ -51,9 +124,28 @@ class CalculateMaterialRequest(BaseModel):
     """物料计算请求"""
     orders: list[MaterialOrderItem] = Field(..., min_length=1, description="订单物料列表")
 
+class PurchaseOrderMaterialItem(BaseModel):
+    """采购订单物料明细。
+
+    允许额外字段以兼容前端未声明的扩展字段。
+    """
+    model_config = {"extra": "allow"}
+    material_name: str = ''
+    material_code: str = ''
+    specification: str = ''
+    unit: str = ''
+    unit_price: float = 0
+    quantity: float = 0
+    supplier_id: int | None = None
+    supplier_name: str = ''
+    customer_name: str = ''
+    category: str = ''
+    remark: str = ''
+
+
 class PurchaseOrderCreateRequest(BaseModel):
     """创建采购订单请求"""
-    materials: list[dict] = Field(..., min_length=1, description="物料列表")
+    materials: list[PurchaseOrderMaterialItem] = Field(..., min_length=1, description="物料列表")
     customer_id: int | None = None
     customer_name: str = ''
     customer_code: str = ''
@@ -84,17 +176,35 @@ class ExportCompletedRequest(BaseModel):
     start_date: str | None = None
     end_date: str | None = None
 
+class FactorySummaryEditItem(BaseModel):
+    """工厂订单汇总编辑项。
+
+    允许额外字段以兼容前端未声明的扩展字段。
+    """
+    model_config = {"extra": "allow"}
+    item_ids: list[int] = []
+    quantity: float | None = None
+
+
 class FactorySummarySaveRequest(BaseModel):
     """保存工厂订单编辑请求"""
-    edits: list[dict] = Field(..., min_length=1, description="编辑列表")
+    edits: list[FactorySummaryEditItem] = Field(..., min_length=1, description="编辑列表")
 
 class SummaryPrintRequest(BaseModel):
     """汇总打印请求"""
     ids: list[int] = Field(..., min_length=1, max_length=500, description="订单ID列表")
     format: str = 'print'
 
+class QueryCondition(BaseModel):
+    """查询条件（动态结构，允许额外字段）。
+
+    查询条件为前端动态构造的过滤参数，结构不固定，因此允许任意额外字段。
+    """
+    model_config = {"extra": "allow"}
+
+
 class SaveQueryRequest(BaseModel):
     """保存查询请求"""
     name: str = Field(..., min_length=1, description="查询名称")
     query_type: str = 'purchase_order'
-    conditions: dict = Field(..., description="查询条件")
+    conditions: QueryCondition = Field(..., description="查询条件")

@@ -3,6 +3,15 @@
 /** BOM 物料类别 */
 export type BomCategory = 'fabric' | 'filling' | 'accessory'
 
+/** BOM 角色（一个 SKU 可关联多个角色，每个角色有独立物料清单） */
+export interface Role {
+  /** 后端角色 id（新建角色在保存前无 id） */
+  id?: number
+  /** 新建角色的客户端临时键，保存时经 role_key 归位物料 */
+  role_key?: string
+  name: string
+}
+
 /** BOM 物料项（前端编辑态） */
 export interface BomItem {
   id?: number
@@ -13,6 +22,8 @@ export interface BomItem {
   supplier_name: string
   usage: number
   remark: string
+  /** 归属角色 id（null = 产品级默认 BOM） */
+  role_id?: number | null
   category?: string
 }
 
@@ -31,6 +42,7 @@ export interface BomPreviewStats {
   source_name: string
   source_barcode: string
   material_count: number
+  role_count: number
   fabric_count: number
   filling_count: number
   accessory_count: number

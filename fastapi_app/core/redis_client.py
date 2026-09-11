@@ -37,12 +37,17 @@ async def get_async_redis_client():
         import redis.asyncio as aioredis
 
         from fastapi_app.core.config import settings
+        from urllib.parse import quote_plus
+
         url = settings.REDIS_URL
         if settings.REDIS_PASSWORD and settings.REDIS_PASSWORD not in url:
+            # 使用 quote_plus 对密码进行 URL 编码，避免密码中包含
+            # 特殊字符（如 @ : / ? # %）破坏 URL 解析或被注入攻击
+            encoded_password = quote_plus(settings.REDIS_PASSWORD)
             if url.startswith("rediss://"):
-                url = url.replace("rediss://", f"rediss://:{settings.REDIS_PASSWORD}@")
+                url = url.replace("rediss://", f"rediss://:{encoded_password}@")
             elif url.startswith("redis://"):
-                url = url.replace("redis://", f"redis://:{settings.REDIS_PASSWORD}@")
+                url = url.replace("redis://", f"redis://:{encoded_password}@")
         _async_redis_client = aioredis.from_url(url)
         return _async_redis_client
     except redis_infra_exceptions() as e:

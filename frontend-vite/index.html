@@ -40,6 +40,30 @@
       @media (prefers-reduced-motion: reduce) {
         .app-spinner { animation: none; }
       }
+      .app-loading-fail {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+      }
+      .app-loading-fail .app-fail-text {
+        margin: 0;
+        font-size: 14px;
+        color: #991b1b;
+        font-weight: 600;
+      }
+      .app-loading-fail button {
+        padding: 8px 20px;
+        border: none;
+        border-radius: 8px;
+        background: #2d5ab8;
+        color: #fff;
+        font-size: 14px;
+        cursor: pointer;
+      }
+      .app-loading-fail button:hover {
+        background: #234996;
+      }
     </style>
   </head>
   <body>
@@ -50,5 +74,19 @@
       </div>
     </div>
     <script type="module" src="/src/main.ts"></script>
+    <script>
+      // 启动遮罩兜底：Vue 挂载成功后 #app-loading 会被替换。
+      // 若主 JS 加载失败/挂载报错导致 8s 后仍存在，则改为失败提示并提供重试，杜绝"永久加载中"。
+      setTimeout(function () {
+        var el = document.getElementById('app-loading')
+        if (el && document.getElementById('app')) {
+          el.innerHTML =
+            '<div class="app-loading-fail">' +
+            '<p class="app-fail-text">页面加载失败，请检查网络后重试</p>' +
+            '<button type="button" onclick="location.reload()">重新加载</button>' +
+            '</div>'
+        }
+      }, 8000)
+    </script>
   </body>
 </html>

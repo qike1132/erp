@@ -10,7 +10,7 @@
 """
 import io
 import uuid
-from datetime import date
+
 
 import openpyxl
 from sqlalchemy import and_, delete, select
@@ -51,18 +51,18 @@ def _load_excel_rows(file_content: bytes) -> list[tuple]:
 def _parse_excel_row(row: tuple, row_idx: int) -> tuple[dict, str]:
     """解析单行 Excel 数据, 返回 (字段字典, 错误信息)
 
+    模板列：客户名称、产品名称、数量、计划日期、备注（69码已移除，产品按名称关联）。
     S10 修复：Excel 单元格可能为字符串 '10' 或浮点 10.5，
-    int(row[3]) 会抛 ValueError；int(float(...)) 兼容两种格式。
+    int(row[2]) 会抛 ValueError；int(float(...)) 兼容两种格式。
     """
     try:
         customer_name = str(row[0] or '').strip()
         product_name = str(row[1] or '').strip()
-        barcode = str(row[2] or '').strip()
         # S10: 兼容字符串数字与浮点数；负数/0 在 _validate_excel_row 中拦截
-        quantity = int(float(row[3])) if row[3] not in (None, '') else 0
-        plan_date_str = str(row[4] or '').strip()
-        remark = str(row[5] or '').strip() if len(row) > 5 and row[5] else ''
-        return {'customer_name': customer_name, 'product_name': product_name, 'barcode': barcode, 'quantity': quantity, 'plan_date_str': plan_date_str, 'remark': remark}, ''
+        quantity = int(float(row[2])) if row[2] not in (None, '') else 0
+        plan_date_str = str(row[3] or '').strip()
+        remark = str(row[4] or '').strip() if len(row) > 4 and row[4] else ''
+        return {'customer_name': customer_name, 'product_name': product_name, 'barcode': '', 'quantity': quantity, 'plan_date_str': plan_date_str, 'remark': remark}, ''
     except (ValueError, IndexError) as e:
         return {}, f'第{row_idx}行: 数据格式错误 - {e}'
 
@@ -71,8 +71,8 @@ def _validate_excel_row(fields: dict, detected_month: str | None) -> tuple[str, 
     """校验行字段, 返回 (validation_error, new_detected_month)"""
     if not fields['customer_name']:
         return '客户名称为空', None
-    if not fields['barcode']:
-        return '69码为空', None
+    if not fields['product_name']:
+        return '产品名称为空', None
     if fields['quantity'] <= 0:
         return '数量必须为正整数', None
     if not fields['plan_date_str']:
@@ -109,11 +109,14 @@ async def upload_excel(db: AsyncSession, file_content: bytes, session_id: str, c
         validation_error, new_month = _validate_excel_row(fields, detected_month)
         if new_month:
             detected_month = new_month
-        record = StagingPurchasePlan(session_id=session_id, customer_name=fields['customer_name'], product_name=fields['product_name'], barcode=fields['barcode'], quantity=fields['quantity'], plan_date=normalize_plan_date(fields['plan_date_str']) if not validation_error else date.today(), plan_month=detected_month, remark=fields['remark'], is_validated=0, validation_error=validation_error, upload_batch_id=batch_id)
+        # 校验失败：记录错误并跳过该行，避免使用 date.today() 产生错误的默认日期
+        if validation_error:
+            errors.append(f'第{i}行: {validation_error}')
+            continue
+        record = StagingPurchasePlan(session_id=session_id, customer_name=fields['customer_name'], product_name=fields['product_name'], barcode=fields['barcode'], quantity=fields['quantity'], plan_date=normalize_plan_date(fields['plan_date_str']), plan_month=detected_month, remark=fields['remark'], is_validated=0, validation_error=validation_error, upload_batch_id=batch_id)
         db.add(record)
         staging_records.append(record)
-        if not validation_error:
-            success_count += 1
+        success_count += 1
     await db.flush()
     is_async = len(staging_records) > 500
     return {'batch_id': batch_id, 'total': len(staging_records), 'success_count': success_count, 'error_count': len(errors), 'errors': errors, 'is_async': is_async, 'detected_month': detected_month}
@@ -125,13 +128,18 @@ async def get_staging_list(db: AsyncSession, session_id: str) -> list[dict]:
     return [r.to_dict() for r in records]
 
 async def validate_staging(db: AsyncSession, session_id: str) -> dict:
-    """验证暂存数据：检查客户和产品是否存在"""
-    result = await db.execute(select(StagingPurchasePlan).where(StagingPurchasePlan.session_id == session_id))
+    """验证暂存数据：检查客户和产品是否存在
+
+    返回 errors 明细供前端展示/导出错误清单。errors[].seq 为数据在导入批次中的
+    行序号（1 起，按暂存表 id 升序，即 Excel 数据行顺序），非 Excel 物理行号；
+    上传阶段产生的错误其 message 已自带「第N行」物理行号。
+    """
+    result = await db.execute(select(StagingPurchasePlan).where(StagingPurchasePlan.session_id == session_id).order_by(StagingPurchasePlan.id))
     records = result.scalars().all()
     all_customers = await customer_service.get_active_customer_names(db)
     customer_map = {c['name']: c for c in all_customers}
-    barcode_map = await product_service.get_product_barcode_map(db)
-    barcode_set = set(barcode_map.keys())
+    products = await product_service.get_products(db)
+    product_name_set = {p['name'] for p in products}
     valid_count = 0
     error_count = 0
     for record in records:
@@ -142,10 +150,10 @@ async def validate_staging(db: AsyncSession, session_id: str) -> dict:
             fuzzy = [c['name'] for c in all_customers if record.customer_name in c['name']]
             hint = f"，相似: {', '.join(fuzzy[:3])}" if fuzzy else ''
             errors_list.append(f"客户 '{record.customer_name}' 不存在{hint}")
-        if record.barcode not in barcode_set:
-            errors_list.append(f"69码 '{record.barcode}' 未找到产品")
-        elif not record.product_name and record.barcode in barcode_map:
-            record.product_name = barcode_map[record.barcode]
+        if not record.product_name:
+            errors_list.append('产品名称为空')
+        elif record.product_name not in product_name_set:
+            errors_list.append(f"产品 '{record.product_name}' 未找到对应产品")
         if errors_list:
             record.is_validated = 0
             record.validation_error = '; '.join(errors_list)
@@ -154,19 +162,32 @@ async def validate_staging(db: AsyncSession, session_id: str) -> dict:
             record.is_validated = 1
             record.validation_error = None
             valid_count += 1
-    records_to_check = [r for r in records if r.is_validated and r.barcode in barcode_set]
+    records_to_check = [r for r in records if r.is_validated]
     if records_to_check:
-        insufficient = await _check_inventory_realtime(db, [{'barcode': r.barcode, 'product_name': r.product_name, 'quantity': r.quantity} for r in records_to_check])
-        insufficient_map = {it['barcode']: it for it in insufficient}
+        insufficient = await _check_inventory_realtime(db, [{'barcode': '', 'product_name': r.product_name, 'quantity': r.quantity} for r in records_to_check])
+        insufficient_map = {it['product_name']: it for it in insufficient if it.get('product_name')}
         for r in records_to_check:
-            if r.barcode in insufficient_map:
-                it = insufficient_map[r.barcode]
+            if r.product_name in insufficient_map:
+                it = insufficient_map[r.product_name]
                 r.is_validated = 0
                 r.validation_error = f"库存不足：当前库存 {it['current_stock']}，库存不足 {it['total_quantity'] - it['current_stock']}"
                 valid_count -= 1
                 error_count += 1
     await db.flush()
-    return {'total': len(records), 'valid_count': valid_count, 'error_count': error_count}
+    error_details = [
+        {
+            'seq': seq,
+            'customer_name': r.customer_name or '',
+            'product_name': r.product_name or '',
+            'barcode': r.barcode or '',
+            'quantity': int(r.quantity or 0),
+            'plan_date': r.plan_date.isoformat() if r.plan_date else '',
+            'message': r.validation_error or '未通过校验',
+        }
+        for seq, r in enumerate(records, start=1)
+        if not r.is_validated
+    ]
+    return {'total': len(records), 'valid_count': valid_count, 'error_count': error_count, 'errors': error_details}
 
 def _group_staging_records(valid_records: list) -> dict[tuple[str, str], list]:
     """按 (customer_name, plan_month) 分组"""
@@ -236,13 +257,13 @@ def _create_details_for_group(
     db: AsyncSession,
     plan: PurchasePlan,
     group_records: list,
-    barcode_to_product: dict,
+    name_to_product: dict,
 ) -> int:
     """为分组创建明细, 返回创建数量"""
     created = 0
     for record in group_records:
-        product = barcode_to_product.get(record.barcode)
-        detail = PurchasePlanDetail(plan_id=plan.id, product_id=product.id if product else 0, product_name=record.product_name, barcode=record.barcode, plan_date=record.plan_date, quantity=record.quantity, shipped_qty=0, remark=record.remark or '')
+        product = name_to_product.get(record.product_name)
+        detail = PurchasePlanDetail(plan_id=plan.id, product_id=product.id if product else 0, product_name=record.product_name, barcode='', plan_date=record.plan_date, quantity=record.quantity, shipped_qty=0, remark=record.remark or '')
         db.add(detail)
         created += 1
     return created
@@ -266,16 +287,16 @@ async def confirm_staging(db: AsyncSession, session_id: str, batch_id: str='', c
     valid_records = [r for r in records if r.is_validated]
     if not valid_records:
         raise ValueError('所有数据验证未通过，无法保存')
-    insufficient = await _check_inventory_realtime(db, [{'barcode': r.barcode, 'product_name': r.product_name, 'quantity': r.quantity} for r in valid_records], with_for_update=True)
+    insufficient = await _check_inventory_realtime(db, [{'barcode': '', 'product_name': r.product_name, 'quantity': r.quantity} for r in valid_records], with_for_update=True)
     if insufficient:
-        errors = '; '.join(f"产品 {it['barcode']}({it['product_name']}) 当前库存 {it['current_stock']} 库存不足 {it['total_quantity'] - it['current_stock']}" for it in insufficient)
+        errors = '; '.join(f"产品 {it['product_name']} 当前库存 {it['current_stock']} 库存不足 {it['total_quantity'] - it['current_stock']}" for it in insufficient)
         raise ValueError(f'库存不足，无法确认：{errors}')
     groups = _group_staging_records(valid_records)
     all_customers = await customer_service.get_active_customer_names(db)
     customer_id_map = {c['name']: c['id'] for c in all_customers}
-    barcodes = list({r.barcode for r in valid_records if r.barcode})
-    product_result = await db.execute(select(Product).where(Product.barcode.in_(barcodes)))
-    barcode_to_product = {p.barcode: p for p in product_result.scalars().all()}
+    names = list({r.product_name for r in valid_records if r.product_name})
+    product_result = await db.execute(select(Product).where(Product.name.in_(names)))
+    name_to_product = {p.name: p for p in product_result.scalars().all()}
     created_plans = []
     created_details = 0
     for (customer_name, plan_month), group_records in groups.items():
@@ -285,7 +306,7 @@ async def confirm_staging(db: AsyncSession, session_id: str, batch_id: str='', c
         if not customer_id:
             continue
         plan = await _get_or_create_plan_for_group(db, customer_id, customer_name, plan_month, batch_id, created_by)
-        created_details += _create_details_for_group(db, plan, group_records, barcode_to_product)
+        created_details += _create_details_for_group(db, plan, group_records, name_to_product)
         created_plans.append({'plan_id': plan.id, 'plan_no': plan.plan_no})
     await db.execute(delete(StagingPurchasePlan).where(*conditions))
     await db.flush()

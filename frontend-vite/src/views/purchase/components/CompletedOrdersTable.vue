@@ -5,6 +5,13 @@
       <div v-for="i in 8" :key="i" class="coq-skeleton-row" />
     </div>
 
+    <!-- 错误状态 (可重试) -->
+    <div v-else-if="error && orders.length === 0" class="coq-empty coq-error">
+      <FontAwesomeIcon icon="exclamation-triangle" aria-hidden="true" />
+      <p class="coq-empty-text">加载失败，请检查网络后重试</p>
+      <button class="coq-retry-btn" @click="$emit('retry')">重试</button>
+    </div>
+
     <!-- 空状态 -->
     <div v-else-if="orders.length === 0" class="coq-empty">
       <FontAwesomeIcon icon="folder-open" aria-hidden="true" />
@@ -79,6 +86,7 @@ const props = defineProps<{
   orders: PurchaseOrder[]
   loading: boolean
   fetching?: boolean
+  error?: boolean
   total: number
   currentPage: number
   totalPages: number
@@ -87,6 +95,7 @@ const props = defineProps<{
 defineEmits<{
   viewDetail: [id: number]
   'update:currentPage': [page: number]
+  retry: []
 }>()
 
 const statusMap: Record<string, { label: string; cls: string }> = {
@@ -293,6 +302,25 @@ const flatRows = computed(() =>
   margin: 0;
   font-size: 12px;
   color: var(--coq-text-muted);
+}
+
+.coq-error i {
+  color: var(--coq-red);
+}
+
+.coq-retry-btn {
+  margin-top: 8px;
+  padding: 6px 18px;
+  border: none;
+  border-radius: 6px;
+  background: var(--coq-blue);
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.coq-retry-btn:hover {
+  background: var(--coq-navy-deep);
 }
 
 .coq-fetching {

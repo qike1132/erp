@@ -4,7 +4,7 @@
 提供产品列表（Redis 缓存）、BOM 查询/保存/复制、物料计算、
 搜索建议及分类列表等 HTTP 端点。
 """
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.exc import DisconnectionError, OperationalError, SQLAlchemyError
@@ -44,7 +44,7 @@ async def api_get_products(
     has_bom: str = Query('all', description='BOM 筛选: all/yes/no'),
     category: str = Query('', max_length=100, description='分类筛选'),
     sort_by: str = Query('name', description='排序字段'),
-    sort_order: str = Query('asc', description='排序方向: asc/desc'),
+    sort_order: Literal['asc', 'desc'] = Query('desc', description='排序方向'),
     simple: bool = Query(False, description='是否精简模式'),
     db: AsyncSession = Depends(get_read_db),
     _current_user=Depends(require_permission('product_manage')),
@@ -142,7 +142,7 @@ async def api_get_products_statistics(
 
 @router.get('/products/search', response_model=ProductListResponse)
 async def api_search_products_for_bom_copy(
-    keyword: str = Query('', min_length=1, description='搜索关键词'),
+    keyword: str = Query(..., min_length=1, description='搜索关键词'),
     db: AsyncSession = Depends(get_read_db),
     _current_user=Depends(require_permission('product_manage')),
 ) -> dict[str, Any]:

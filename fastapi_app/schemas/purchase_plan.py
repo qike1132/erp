@@ -275,11 +275,23 @@ class PurchasePlanStagingListResponse(BaseModel):
     total: int = 0
 
 
+class StagingErrorItem(BaseModel):
+    """暂存校验失败明细，供前端展示与导出错误清单"""
+    seq: int = Field(0, description='导入批次内的行序号（1 起），非 Excel 物理行号')
+    customer_name: str = ''
+    product_name: str = ''
+    barcode: str = ''
+    quantity: int = 0
+    plan_date: str = ''
+    message: str = Field('', description='失败原因，上传阶段的错误自带「第N行」物理行号')
+
+
 class PurchasePlanStagingValidateResponse(BaseModel):
     success: bool
     total: int = 0
     valid_count: int = 0
     error_count: int = 0
+    errors: list[StagingErrorItem] = []
 
 
 class PurchasePlanStagingConfirmResponse(BaseModel):

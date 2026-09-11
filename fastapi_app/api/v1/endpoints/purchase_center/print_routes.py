@@ -9,7 +9,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from sqlalchemy.exc import DisconnectionError, OperationalError
+from sqlalchemy.exc import DisconnectionError, OperationalError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.api.v1.endpoints.purchase_center.export_utils import (
@@ -64,77 +64,81 @@ async def api_summary_print(data: SummaryPrintRequest, db: AsyncSession=Depends(
         else:
             html = generate_normal_summary_print(orders, order_items_map)
             return {'success': True, 'html': html, 'order_count': len(orders)}
-    except (OperationalError, DisconnectionError, ValueError, RuntimeError) as e:
+    except (OperationalError, DisconnectionError, SQLAlchemyError, ValueError, RuntimeError) as e:
         logger.exception(f'汇总打印失败: {e!s}')
         raise HTTPException(status_code=500, detail='操作失败，请稍后重试') from e
 
 @router.post('/orders/supplier-summary-export')
 async def export_supplier_summary_excel(data: OrderIdsRequest, db: AsyncSession=Depends(get_db), _user=Depends(require_permission('product_manage'))):
-    """根据选中的采购订单 ID 列表，按供应商分组导出采购订单 Excel。
+    """根据选中的采购订单 ID 列表，按每个采购订单单独导出供应商采购订单 Excel。
     重载触发标记
 
-    使用 get_supplier_order_summary 获取物料明细，按 supplier_name 分组，
-    每组生成一个独立的供应商采购订单 Excel 工作簿（基于模板）。
-    单个供应商返回 .xlsx，多个供应商打包为 .zip。
+    一份采购订单对应一家供应商，因此按 order_no 逐单导出：
+    - 每张采购订单生成一个独立的工作簿（基于模板，含该单供应商信息与物料明细）。
+    - 单个订单返回 .xlsx，多个订单打包为 .zip。
     """
     if not data.ids:
         raise HTTPException(status_code=400, detail='请至少选择一个订单')
     try:
-        from fastapi_app.services.purchase_order_query import get_supplier_order_summary
+        orders = await svc.get_purchase_orders_with_items(db, data.ids)
+        if not orders:
+            raise HTTPException(status_code=404, detail='未找到采购订单数据')
 
-        summary = await get_supplier_order_summary(db, data.ids)
-        materials = summary.get('materials', [])
-        if not materials:
-            raise HTTPException(status_code=404, detail='未找到供应商物料数据')
-
-        # 按 supplier_name 分组，构建 create_supplier_workbook 所需的数据结构
-        supplier_map: dict[str, dict] = {}
-        order: list[str] = []
-        for m in materials:
-            sname = m.get('supplier_name') or '未指定供应商'
-            if sname not in supplier_map:
-                supplier_map[sname] = {
-                    'supplier_name': sname,
-                    'items': [],
+        # 每张采购订单 → 一个独立供应商工作簿的数据结构
+        supplier_order_items = []
+        for order in orders:
+            items = [
+                {
+                    'material_name': item.material_name,
+                    'specification': item.specification or '',
+                    'quantity': float(item.quantity or 0),
+                    'unit': item.unit or '',
                 }
-                order.append(sname)
-            supplier_map[sname]['items'].append({
-                'material_name': m.get('material_name', ''),
-                'specification': m.get('specification', ''),
-                'quantity': float(m.get('total_quantity', 0)),
-                'unit': m.get('unit', ''),
+                for item in (order.items or [])
+            ]
+            if not items:
+                continue
+            supplier_order_items.append({
+                'supplier_name': order.supplier_name or '未指定供应商',
+                'order_no': order.order_no,
+                'address': order.supplier_address or '',
+                'phone': order.supplier_phone or '',
+                'contact_person': order.supplier_contact_person or '',
+                'items': items,
             })
 
-        sorted_suppliers = [supplier_map[s] for s in order]
+        if not supplier_order_items:
+            raise HTTPException(status_code=404, detail='未找到可导出的采购订单明细数据')
+
         date_prefix = datetime.now().strftime('%Y-%m-%d')
 
-        def _generate_export(sorted_suppliers, date_prefix):
-            if len(sorted_suppliers) == 1:
-                supplier = sorted_suppliers[0]
-                wb = create_supplier_workbook(supplier)
+        def _generate_export(supplier_order_items, date_prefix):
+            if len(supplier_order_items) == 1:
+                order_data = supplier_order_items[0]
+                wb = create_supplier_workbook(order_data)
                 excel_buffer = io.BytesIO()
                 wb.save(excel_buffer)
                 wb.close()
                 excel_buffer.seek(0)
-                filename = f"{date_prefix}-{supplier['supplier_name']}_采购订单汇总.xlsx"
+                filename = f"{order_data['order_no']}_采购订单.xlsx"
                 encoded_filename = quote(filename, safe='')
                 return ('excel', excel_buffer, encoded_filename)
             zip_buffer = io.BytesIO()
             with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
-                for supplier in sorted_suppliers:
-                    wb = create_supplier_workbook(supplier)
+                for order_data in supplier_order_items:
+                    wb = create_supplier_workbook(order_data)
                     excel_buffer = io.BytesIO()
                     wb.save(excel_buffer)
                     wb.close()
                     excel_buffer.seek(0)
-                    filename = f"{supplier['supplier_name']}_采购订单汇总.xlsx"
+                    filename = f"{order_data['order_no']}_采购订单.xlsx"
                     zf.writestr(filename, excel_buffer.read())
             zip_buffer.seek(0)
             zip_filename = f'{date_prefix}-供应商采购订单汇总.zip'
             encoded_filename = quote(zip_filename, safe='')
             return ('zip', zip_buffer, encoded_filename)
 
-        export_type, buffer, encoded_filename = await asyncio.to_thread(_generate_export, sorted_suppliers, date_prefix)
+        export_type, buffer, encoded_filename = await asyncio.to_thread(_generate_export, supplier_order_items, date_prefix)
         if export_type == 'excel':
             return StreamingResponse(buffer, media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', headers={'Content-Disposition': f"attachment; filename*=UTF-8''{encoded_filename}"})
         return StreamingResponse(buffer, media_type='application/zip', headers={'Content-Disposition': f"attachment; filename*=UTF-8''{encoded_filename}"})

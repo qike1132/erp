@@ -2,11 +2,15 @@
   "name": "binfa-erp-vue3",
   "version": "1.0.0",
   "private": true,
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 5173",
     "build": "vue-tsc -b && vite build",
     "build:fast": "vite build --logLevel info",
+    "build:atomic": "vue-tsc -b && vite build --outDir dist-new --logLevel info && node scripts/swap-dist.mjs",
     "build:open": "node scripts/build-refresh.mjs",
     "build:open:fast": "node scripts/build-refresh.mjs --fast",
     "check:routes": "node scripts/check-route-alignment.mjs",
@@ -19,15 +23,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "prepare": "husky",
-    "build:cap": "vue-tsc -b && vite build --mode capacitor && node -e \"const fs=require('fs'),p=require('path');['sw.js','workbox-63c18b4d.js','registerSW.js','manifest.webmanifest'].forEach(f=>{try{fs.unlinkSync('dist/'+f)}catch(e){}});const html='dist/index.html';let c=fs.readFileSync(html,'utf8');c=c.replace(/<script[^>]*registerSW[^>]*><\\/script>/g,'');fs.writeFileSync(html,c)\"",
-    "cap:patch": "node -e \"const f='node_modules/@capacitor/filesystem/android/build.gradle';const fs=require('fs');if(fs.existsSync(f)){let c=fs.readFileSync(f,'utf8');c=c.replace(/JavaVersion.VERSION_21/g,'JavaVersion.VERSION_17').replace(/jvmToolchain\\(21\\)/g,'jvmToolchain(17)');fs.writeFileSync(f,c);console.log('Patched filesystem plugin to JDK 17')}\"",
-    "cap:sync": "npm run cap:patch && npx cap sync android",
-    "cap:open": "npx cap open android",
-    "cap:build": "npm run build:cap && npm run cap:sync && cd android && set JAVA_HOME=C:\\\\Program Files\\\\Java\\\\jdk-17.0.13+11 && set ANDROID_SDK_ROOT= && gradlew assembleDebug --no-daemon"
+    "prepare": "husky"
   },
   "devDependencies": {
-    "@capacitor/cli": "^8.3.4",
+    "@babel/traverse": "^8.0.4",
     "@eslint/js": "^9.28.0",
     "@tailwindcss/vite": "^4.2.4",
     "@testing-library/jest-dom": "^6.6.3",
@@ -44,8 +43,7 @@
     "playwright": "^1.60.0",
     "prettier": "^3.5.3",
     "rollup-plugin-visualizer": "^7.0.1",
-    "sass": "^1.102.0",
-    "sass-embedded": "^1.100.0",
+    "sass-embedded": "^1.102.0",
     "tailwindcss": "^4.2.4",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.33.0",
@@ -57,16 +55,6 @@
     "vue-tsc": "^3.2.9"
   },
   "dependencies": {
-    "@babel/traverse": "^8.0.4",
-    "@capacitor/android": "^8.3.4",
-    "@capacitor/app": "^8.1.0",
-    "@capacitor/core": "^8.3.4",
-    "@capacitor/filesystem": "^8.1.2",
-    "@capacitor/network": "^8.0.1",
-    "@capacitor/share": "^8.0.1",
-    "@capacitor/splash-screen": "^8.0.1",
-    "@capacitor/status-bar": "^8.0.2",
-    "@fortawesome/fontawesome-free": "^7.2.0",
     "@fortawesome/fontawesome-svg-core": "^7.2.0",
     "@fortawesome/free-solid-svg-icons": "^7.2.0",
     "@fortawesome/vue-fontawesome": "^3.3.3",

@@ -71,6 +71,7 @@ async def get_products(db: AsyncSession, *, page: int = 1, per_page: int = 50,
     if not simple:
         query = query.options(
             selectinload(Product.material),
+            selectinload(Product.material_rows),
             selectinload(Product.fabrics),
             selectinload(Product.accessories),
         )
@@ -90,16 +91,16 @@ async def get_products(db: AsyncSession, *, page: int = 1, per_page: int = 50,
         )
 
     if has_bom == 'true':
-        query = query.where(Product.material.has())
-        count_query = count_query.where(Product.material.has())
+        query = query.where(Product.material_rows.any())
+        count_query = count_query.where(Product.material_rows.any())
     elif has_bom == 'false':
-        query = query.where(~Product.material.has())
-        count_query = count_query.where(~Product.material.has())
+        query = query.where(~Product.material_rows.any())
+        count_query = count_query.where(~Product.material_rows.any())
 
     if category:
         if category == 'filling':
-            query = query.where(Product.material.has())
-            count_query = count_query.where(Product.material.has())
+            query = query.where(Product.material_rows.any())
+            count_query = count_query.where(Product.material_rows.any())
         elif category == 'fabric':
             query = query.where(Product.fabrics.any())
             count_query = count_query.where(Product.fabrics.any())
@@ -148,7 +149,7 @@ async def get_products(db: AsyncSession, *, page: int = 1, per_page: int = 50,
         bom_info = {}
         if has_bom_flag:
             bom_info = {
-                'filling_count': 1 if (p.material and p.material.cotton_usage and p.material.cotton_usage > 0) else 0,
+                'filling_count': sum(1 for m in p.material_rows if m.cotton_usage and m.cotton_usage > 0),
                 'fabric_count': len(p.fabrics),
                 'accessory_count': len(p.accessories),
             }
@@ -182,6 +183,7 @@ async def get_products_batch_bom(db: AsyncSession, product_ids_str: str) -> dict
     result = await db.execute(
         select(Product).options(
             selectinload(Product.material),
+            selectinload(Product.material_rows),
             selectinload(Product.fabrics),
             selectinload(Product.accessories),
         ).where(Product.id.in_(pid_list))
@@ -232,7 +234,7 @@ async def get_products_statistics(db: AsyncSession) -> dict:
     total = total_result.scalar()
 
     has_bom_result = await db.execute(
-        select(func.count(Product.id)).where(Product.material.has())
+        select(func.count(Product.id)).where(Product.material_rows.any())
     )
     has_bom = has_bom_result.scalar()
 
@@ -329,6 +331,7 @@ async def calculate_material(db: AsyncSession, orders_data: list) -> dict:
     products_result = await db.execute(
         select(Product).options(
             selectinload(Product.material),
+            selectinload(Product.material_rows),
             selectinload(Product.fabrics),
             selectinload(Product.accessories),
         ).where(Product.id.in_(product_ids))

@@ -47,7 +47,9 @@
             <ProjectDetailPanel
               :project="projectHook.currentProject.value"
               :parts-by-version="partHook.partsByVersion.value"
+              :version-list="partHook.versionList.value"
               :final-version="partHook.finalVersion.value"
+              :version-loading="versionHook.loading.value"
               :part-loading="partHook.loading.value"
               :can-manage="canManage"
               :can-print="canPrint"
@@ -65,7 +67,6 @@
               @add-role="onAddRole"
               @remove-role="onRemoveRole"
               @add-part="openCreatePartDialog"
-              @create-version="openCreateVersionDialog"
               @print="handlePrint"
             />
           </template>
@@ -131,8 +132,8 @@
  */
 defineOptions({ name: 'PatternRoomView' })
 
-// 本页使用 <i class="fas fa-xxx"> CSS 图标，按需加载 Font Awesome 全量 CSS（仅此页 chunk 承载）
-import '@fortawesome/fontawesome-free/css/all.min.css'
+// 图标统一走全局 tree-shaking 管线（src/icons.ts library.add + FontAwesomeIcon SVG 组件），
+// 子组件 ProjectCardItem 亦使用 SVG 组件，本页不再引入 Font Awesome 全量 CSS
 
 import { ref, computed, watch, onMounted, onActivated } from 'vue'
 import UiAlert from '@/components/ui/UiAlert.vue'
@@ -252,24 +253,23 @@ const {
 })
 
 const {
-  partFormVisible,
-  versionCreateVisible,
-  editingPartId,
-  editForm,
-  openCreatePartDialog,
-  openCreateVersionDialog,
-  onPartSubmitBatch,
-  onSetFinalVersion,
-  onCopyPartVersion,
-  onSaveEdit,
-  onStartEdit,
-  onCancelEdit,
-  onDeleteVersion,
-  onVersionCreateConfirm,
-  onSelectRole,
-  onAddRole,
-  onRemoveRole,
-} = usePatternRoomPartActions({
+    partFormVisible,
+    versionCreateVisible,
+    editingPartId,
+    editForm,
+    openCreatePartDialog,
+    onPartSubmitBatch,
+    onSetFinalVersion,
+    onCopyPartVersion,
+    onSaveEdit,
+    onStartEdit,
+    onCancelEdit,
+    onDeleteVersion,
+    onVersionCreateConfirm,
+    onSelectRole,
+    onAddRole,
+    onRemoveRole,
+  } = usePatternRoomPartActions({
   canManage,
   confirmDialog,
   selectedProjectId,

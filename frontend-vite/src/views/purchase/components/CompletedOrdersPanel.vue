@@ -27,11 +27,13 @@
       :orders="orders"
       :loading="loading"
       :fetching="fetching"
+      :error="error"
       :total="total"
       :current-page="currentPage"
       :total-pages="totalPages"
       @view-detail="onViewDetail"
       @update:current-page="onUpdateCurrentPage"
+      @retry="onRetry"
     />
   </div>
 </template>
@@ -48,6 +50,7 @@ defineProps<{
   orders: PurchaseOrder[]
   loading: boolean
   fetching?: boolean
+  error?: boolean
   total: number
   currentPage: number
   totalPages: number
@@ -66,6 +69,7 @@ const emit = defineEmits<{
   applyQuickFilter: [id: string]
   viewDetail: [id: number]
   'update:currentPage': [page: number]
+  retry: []
 }>()
 
 function onUpdateFilter(payload: { key: string; value: string }) {
@@ -88,6 +92,9 @@ function onResetFilters() {
 }
 function onExport() {
   emit('export')
+}
+function onRetry() {
+  emit('retry')
 }
 </script>
 

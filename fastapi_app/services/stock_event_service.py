@@ -70,14 +70,9 @@ async def _publish_shipment_completed_events(shipment_completed_orders: list[dic
     """发布出货完成事件（单个失败不影响主操作）"""
     if not shipment_completed_orders:
         return
-    from fastapi_app.services.notification_service import publish_event_with_fcm
+    from fastapi_app.services.notification_service import publish_event
     for order_info in shipment_completed_orders:
         try:
-            await publish_event_with_fcm(
-                StockEvent.SHIPMENT_COMPLETED,
-                order_info,
-                fcm_title="出货完成",
-                fcm_body=f"订单 {order_info['order_no']} 已完成出货",
-            )
+            await publish_event(StockEvent.SHIPMENT_COMPLETED, order_info)
         except Exception as e:  # defensive: 单个事件发布失败不影响主操作
             logger.warning('出货完成事件发布失败: %s', e)

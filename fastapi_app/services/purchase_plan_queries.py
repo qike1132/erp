@@ -8,6 +8,7 @@
 从 purchase_plan_crud.py 拆分而来，保持函数签名不变。
 """
 import calendar
+import os
 from datetime import date, datetime
 
 from sqlalchemy import and_, select, text
@@ -28,6 +29,9 @@ from fastapi_app.shared_models import (
 
 # 出货记录查询回溯月数（S9: 提取为常量便于统一调整）
 SHIPMENT_RECORD_LOOKBACK_MONTHS = 12
+
+# 出货记录查询条数上限（P3: 从环境变量读取，便于调优）
+_QUERY_LIMIT = int(os.getenv('PURCHASE_QUERY_LIMIT', '500'))
 
 
 def _calc_stock_status(plan_qty: int, inventory_qty: int) -> str:
@@ -117,7 +121,7 @@ async def get_shipment_records(db: AsyncSession, plan_id: int) -> list[dict]:
     if not product_names:
         return []
     date_limit = _compute_shipment_lookback_limit(plan.plan_month)
-    result = await db.execute(select(StockOut.id, StockOut.stockout_no, StockOut.stockout_date, StockOut.quantity, StockOut.returned_quantity, StockOut.customer, StockOut.note, Product.name.label('product_name')).join(Product, StockOut.product_id == Product.id).where(and_(StockOut.customer == plan.customer_name, Product.name.in_(product_names), StockOut.customer.isnot(None), StockOut.customer != '', StockOut.stockout_date >= date_limit)).order_by(StockOut.stockout_date.desc(), StockOut.id.desc()).limit(500))
+    result = await db.execute(select(StockOut.id, StockOut.stockout_no, StockOut.stockout_date, StockOut.quantity, StockOut.returned_quantity, StockOut.customer, StockOut.note, Product.name.label('product_name')).join(Product, StockOut.product_id == Product.id).where(and_(StockOut.customer == plan.customer_name, Product.name.in_(product_names), StockOut.customer.isnot(None), StockOut.customer != '', StockOut.stockout_date >= date_limit)).order_by(StockOut.stockout_date.desc(), StockOut.id.desc()).limit(_QUERY_LIMIT))
     rows = result.all()
     return [{'stockout_id': row.id, 'shipment_no': row.stockout_no, 'customer_name': row.customer or '', 'product_name': row.product_name, 'quantity': row.quantity - row.returned_quantity, 'shipment_date': row.stockout_date.strftime('%Y-%m-%d') if row.stockout_date else '', 'source_type': 'stockout', 'note': row.note or ''} for row in rows]
 
@@ -184,7 +188,7 @@ async def get_shipment_records_by_date(db: AsyncSession, target_date: str) -> li
             StockOut.stockout_date >= date_limit,
         ))
         .order_by(StockOut.stockout_date.desc(), StockOut.id.desc())
-        .limit(500)
+        .limit(_QUERY_LIMIT)
     )
     seen = set()
     out: list[dict] = []

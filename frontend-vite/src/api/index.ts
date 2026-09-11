@@ -35,6 +35,12 @@ export { userApi, permissionApi } from './user'
 export { dashboardApi } from './dashboard'
 export { ocrApi } from './ocr'
 export { planApi } from './plan'
+export type {
+  StagingErrorItem,
+  PlanUploadResult,
+  PlanStagingValidateResult,
+  PlanStagingConfirmResult,
+} from './plan'
 export { auxApi } from './auxiliary'
 export { backupApi } from './backup'
 export { caseApi } from './case'

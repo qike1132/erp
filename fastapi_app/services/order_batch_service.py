@@ -14,10 +14,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 # event_bus 迁移说明（暂保留，不迁移至 domain_events）：
-# event_bus.safe_publish_event 承担 WebSocket 广播 + FCM 推送（经 notification_service），
+# event_bus.safe_publish_event 承担 WebSocket 广播（经 notification_service），
 # 本文件发布的 "batch_no_updated" / "batch_completed" 为任意字符串事件名，
 # 而 domain_events.publish_with_retry 需要 DomainEventType 枚举值（无对应 batch 事件），
-# 且不具备 WS/FCM 实时通知能力——强行迁移会丢失前端实时推送，行为不等价。
+# 且不具备 WS 实时通知能力——强行迁移会丢失前端实时推送，行为不等价。
 from fastapi_app.core.event_bus import safe_publish_event as _safe_publish_event
 from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.services.serializers.order_serializer import OrderSerializer
@@ -391,22 +391,23 @@ async def update_batch_no(
     order.batch_no = batch_no
 
     if sync_same_batch and old_batch_no and old_batch_no != batch_no:
-        sync_stmt = update(Order).where(
-            Order.batch_no == old_batch_no,
-            Order.id != order_id,
-            Order.status != ORDER_STATUS_BATCH_COMPLETED,
-            Order.is_deleted.isnot(True),
-        ).values(batch_no=batch_no)
-        sync_result = await db.execute(sync_stmt)
-        if sync_result.rowcount > 0:
-            sync_ids_result = await db.execute(
-                select(Order.id).where(
-                    Order.batch_no == batch_no,
-                    Order.id != order_id,
-                    Order.is_deleted.isnot(True),
-                )
-            )
-            updated_ids = [order_id, *list(sync_ids_result.scalars().all())]
+        # 先锁定待同步订单，避免并发竞态（行级锁）
+        lock_result = await db.execute(
+            select(Order.id).where(
+                Order.batch_no == old_batch_no,
+                Order.id != order_id,
+                Order.status != ORDER_STATUS_BATCH_COMPLETED,
+                Order.is_deleted.isnot(True),
+            ).with_for_update()
+        )
+        sync_ids = list(lock_result.scalars().all())
+        if sync_ids:
+            sync_stmt = update(Order).where(
+                Order.id.in_(sync_ids),
+            ).values(batch_no=batch_no)
+            sync_result = await db.execute(sync_stmt)
+            if sync_result.rowcount > 0:
+                updated_ids = [order_id, *sync_ids]
 
     effective_batch = batch_no or old_batch_no or ''
     _write_audit_log(

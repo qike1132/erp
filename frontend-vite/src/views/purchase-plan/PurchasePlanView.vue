@@ -8,7 +8,7 @@
             :aria-selected="viewTab === 'daily'"
             :class="['sp-tab', { 'sp-tab-active': viewTab === 'daily' }]"
             @click="viewTab = 'daily'"
-          >每日计划</button>
+          >排产日历</button>
           <button
             role="tab"
             :aria-selected="viewTab === 'summary'"
@@ -25,6 +25,7 @@
         :m="m"
         :has-summary="summaryCustomers.length > 0"
         :s-kpi="sKpi"
+        :risks="risks"
         @prev-month="prevMonth"
         @next-month="nextMonth"
         @export="viewTab === 'daily' ? exportCSV() : exportSkuCSV()"
@@ -34,12 +35,14 @@
       <PurchasePlanDailyTab
         v-if="viewTab === 'daily'"
         v-model:sel="sel"
+        :y="y"
+        :m="m"
         :is-loading="isLoading"
-        :d="d"
         :is-error="isError"
         :is-fetching="isFetching"
         :rows="rows"
         :filtered="filtered"
+        :customers="allCustomers"
         @refetch="refetch()"
       />
 
@@ -68,7 +71,7 @@
   </div>
 
   <PlanDetailDrawer v-model:visible="drwOpen" :plan-id="drwId" @edited="onEdited" />
-  <CreateShipmentPlanDialog v-model:open="showCreate" @created="onCreated" />
+  <CreateShipmentPlanDialog v-model:open="showCreate" @created="onCreated" @imported="onImported" />
 </template>
 
 <script setup lang="ts">
@@ -168,6 +171,20 @@ const selDetail = computed(() => {
   return rows.value.find(r => r.date === sel.value) ?? null;
 });
 
+// 延期 / 临期风险汇总，用于顶栏 KPI 阈值条展示
+const risks = computed(() => {
+  const now = new Date(); now.setHours(0, 0, 0, 0);
+  const MS = 86400000;
+  const r = { delayedCount: 0, delayedQty: 0, maxDays: 0, expiringCount: 0, expiringQty: 0 };
+  for (const row of rows.value) {
+    if (row._shippedPct === 100 || row._pendingCount <= 0) continue;
+    const diff = Math.round((new Date(row.date + 'T00:00:00').getTime() - now.getTime()) / MS);
+    if (diff < 0) { r.delayedCount++; r.delayedQty += row.totalQty; r.maxDays = Math.max(r.maxDays, -diff); }
+    else if (diff <= 3) { r.expiringCount++; r.expiringQty += row.totalQty; }
+  }
+  return r;
+});
+
 function exportSkuCSV() {
   const list = sortedSkuList.value;
   if (!list.length) { showToast('无数据', 'error'); return; }
@@ -182,6 +199,32 @@ function prevMonth() { m.value = m.value === 1 ? 12 : m.value - 1; if (m.value =
 function nextMonth() { m.value = m.value === 12 ? 1 : m.value + 1; if (m.value === 1) y.value++; }
 function onEdited() { qc.invalidateQueries({ queryKey: ['pp-agg'] }); qc.invalidateQueries({ queryKey: ['pp-day'] }); }
 function onCreated() { showCreate.value = false; qc.invalidateQueries({ queryKey: ['pp-agg'] }); qc.invalidateQueries({ queryKey: ['pp-day'] }); }
+
+/**
+ * 批量导入完成。
+ * 与 onCreated 的差异：
+ *   1. 不关闭对话框——导入结果（成功/失败条数、失败明细、导出入口）需要停留供查看；
+ *   2. 跳转到数据所属月份——导入的计划可能不属于当前浏览月份，
+ *      若只刷新不跳月，新数据会因月度筛选而不可见。
+ */
+function onImported(month?: string) {
+  // 清空搜索词与客户筛选：残留的筛选条件会把新导入的数据过滤掉，
+  // 表现为「导入成功但列表看不到」，与数据未入库难以区分。
+  globalKw.value = ''
+  debouncedKw.value = ''
+  custFilter.value = ''
+  sel.value = ''
+  if (month) {
+    const [yy, mm] = month.split('-').map(Number)
+    if (yy && mm) {
+      y.value = yy
+      m.value = mm
+    }
+  }
+  // skuPage 由 useSkuSummary 内的 watch 监听筛选变化自动归位，此处无需手动重置
+  qc.invalidateQueries({ queryKey: ['pp-agg'] })
+  qc.invalidateQueries({ queryKey: ['pp-day'] })
+}
 
 const { runExport } = useExport({ start: false });
 

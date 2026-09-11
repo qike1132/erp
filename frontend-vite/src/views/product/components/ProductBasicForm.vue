@@ -35,10 +35,12 @@
       <div class="pd-form-group">
         <label class="pd-label">产品图片</label>
         <div
+          ref="imageDropZoneRef"
           class="pd-section-header pd-droppable"
-          :class="{ 'pd-drag-over': imageDragOver }"
+          :class="{ 'pd-drag-over': imageDragOver || imagePasteFlash }"
+          title="点击选择、拖拽或粘贴图片"
           @click="imageInputRef?.click()"
-          @dragover.prevent="imageDragOver = true"
+          @dragover.prevent="onImageDragOver"
           @dragleave="imageDragOver = false"
           @drop.prevent="onImageDrop"
         >
@@ -50,7 +52,7 @@
                 <button type="button" class="pd-thumb-remove" aria-label="关闭" @click.stop="form.image = ''"><FontAwesomeIcon icon="times" aria-hidden="true" /></button>
               </span>
             </template>
-            <span v-else>拖拽文件到标题栏 · 支持 JPG / PNG / GIF</span>
+            <span v-else>点击选择 / 拖拽 / 粘贴图片 · 支持 {{ ALLOWED_IMAGE_HINT }}</span>
           </label>
           <input ref="imageInputRef" type="file" style="display: none" accept="image/*" name="image" @change="onImageSelect" />
         </div>
@@ -64,11 +66,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive } from 'vue'
+import { ref, reactive, onBeforeUnmount } from 'vue'
 import { useQueryClient } from '@tanstack/vue-query'
 import { productApi } from '@/api'
 import { resolveStaticUrl } from '@/api/request'
-import { uploadImage } from '../composables/useImageUpload'
+import { uploadImage, ALLOWED_IMAGE_HINT } from '../composables/useImageUpload'
+import { useImagePaste } from '../composables/useImagePaste'
 import { showToast } from '@/composables/useToast'
 import { getErrorMessage } from '@/types/errors'
 
@@ -85,12 +88,40 @@ const queryClient = useQueryClient()
 const submitting = ref(false)
 const form = reactive({ name: '', barcode: '', price: 0, factory: '', image: '' })
 const imageInputRef = ref<HTMLInputElement | null>(null)
+const imageDropZoneRef = ref<HTMLElement | null>(null)
 const imageDragOver = ref(false)
+const imagePasteFlash = ref(false)
+
+let pasteFlashTimer: ReturnType<typeof setTimeout> | undefined
+
+/** 粘贴命中时复用拖拽高亮，给出「已接收」的即时反馈 */
+function flashPasteFeedback() {
+  imagePasteFlash.value = true
+  clearTimeout(pasteFlashTimer)
+  pasteFlashTimer = setTimeout(() => { imagePasteFlash.value = false }, 600)
+}
+
+useImagePaste({
+  target: imageDropZoneRef,
+  onFile: (file) => {
+    flashPasteFeedback()
+    uploadImageFile(file)
+  },
+  enabled: () => !submitting.value,
+})
+
+onBeforeUnmount(() => clearTimeout(pasteFlashTimer))
 
 function onImageSelect(e: Event) {
-  const file = (e.target as HTMLInputElement).files?.[0]
-  if (!file) return
-  uploadImageFile(file)
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = '' // 清空以便同一文件可重复选择
+  if (file) uploadImageFile(file)
+}
+
+/** 仅在拖入真实文件时高亮，与粘贴反馈语义保持一致 */
+function onImageDragOver(e: DragEvent) {
+  if (e.dataTransfer?.types.includes('Files')) imageDragOver.value = true
 }
 
 function onImageDrop(e: DragEvent) {

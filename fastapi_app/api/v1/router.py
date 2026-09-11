@@ -15,7 +15,6 @@ from fastapi_app.api.v1.endpoints.customer_sampling import router as customer_sa
 from fastapi_app.api.v1.endpoints.daily_production import router as daily_production_router
 from fastapi_app.api.v1.endpoints.dashboard import router as dashboard_router
 from fastapi_app.api.v1.endpoints.dead_letter import router as dead_letter_router
-from fastapi_app.api.v1.endpoints.device_token import router as device_token_router
 from fastapi_app.api.v1.endpoints.material_registration import router as material_reg_router
 from fastapi_app.api.v1.endpoints.monitoring import router as monitoring_router
 from fastapi_app.api.v1.endpoints.notification import router as notification_router
@@ -249,14 +248,6 @@ api_router.include_router(
     dependencies=[Depends(get_current_user_id)],
 )
 
-# 设备令牌注册路由 - 前缀 /api/v1/device
-api_router.include_router(
-    device_token_router,
-    prefix="/device",
-    tags=["设备管理"],
-    dependencies=[Depends(get_current_user_id)],
-)
-
 # 权限管理路由 - 前缀 /api/v1/permissions
 api_router.include_router(
     permission_router,
@@ -298,10 +289,10 @@ api_router.include_router(
     dependencies=[Depends(get_current_user_id)],
 )
 
-# 版师管理路由 - 前缀 /api/v1/pattern-room/pattern-makers
+# 版师管理路由 - 前缀 /api/v1/pattern-maker/pattern-makers
 api_router.include_router(
     pattern_maker_router,
-    prefix="/pattern-room",
+    prefix="/pattern-maker",
     tags=["板房管理"],
     dependencies=[Depends(get_current_user_id)],
 )

@@ -12,6 +12,7 @@
 """
 import logging
 from datetime import datetime
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
@@ -98,9 +99,13 @@ async def delete_server_backup(
     避免记录列表残留"幽灵"备份导致重复删除报错；文件存在时同时清理记录，
     保持记录列表与磁盘文件一致。
     """
+    # 路径遍历校验：禁止文件名包含路径分隔符或上级目录引用
+    safe_name = Path(filename).name
+    if safe_name != filename:
+        raise HTTPException(status_code=400, detail='文件名包含非法路径字符')
     deleted = ''
     try:
-        deleted = backup_service.delete_backup_file(filename)
+        deleted = backup_service.delete_backup_file(safe_name)
     except BackupFileError as e:
         if '不存在' not in str(e):
             raise HTTPException(status_code=400, detail=str(e)) from e
@@ -108,9 +113,9 @@ async def delete_server_backup(
     try:
         from fastapi_app.shared_models.backup_record import BackupRecord
         from sqlalchemy import delete as _sa_delete
-        await db.execute(_sa_delete(BackupRecord).where(BackupRecord.filename == filename))
+        await db.execute(_sa_delete(BackupRecord).where(BackupRecord.filename == safe_name))
     except SQLAlchemyError as e:
-        logger.error(f'清理备份记录 {filename} 失败: {e}')
+        logger.error(f'清理备份记录 {safe_name} 失败: {e}')
     return {'success': True, 'deleted': deleted}
 
 
@@ -159,8 +164,8 @@ async def get_backup_records(
                 'ip_address': r.get('ip_address'),
                 'user_agent': r.get('user_agent'),
                 'parent_record_id': r.get('parent_record_id'),
-                'created_at': r['created_at'].isoformat() if isinstance(r.get('created_at'), datetime) else r.get('created_at'),
-                'updated_at': r['updated_at'].isoformat() if isinstance(r.get('updated_at'), datetime) else r.get('updated_at'),
+                'created_at': r.get('created_at').isoformat() if isinstance(r.get('created_at'), datetime) else r.get('created_at'),
+                'updated_at': r.get('updated_at').isoformat() if isinstance(r.get('updated_at'), datetime) else r.get('updated_at'),
                 'source': r.get('source', 'db'),
                 'encrypted': r.get('encrypted'),
             }

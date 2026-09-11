@@ -127,7 +127,9 @@ class AuditLogMiddleware(BaseHTTPMiddleware):
 
         client_ip = request.client.host if request.client else None
         if forwarded := request.headers.get('x-forwarded-for'):
-            client_ip = forwarded.split(',')[0].strip()
+            # 取最后一个 IP（最接近服务器的可信代理追加的），
+            # 避免客户端伪造 x-forwarded-for 头注入任意 IP（取第一个 IP 会被伪造）
+            client_ip = forwarded.split(',')[-1].strip()
 
         user_agent = request.headers.get('user-agent', '')[:500]
 
@@ -149,7 +151,7 @@ class AuditLogMiddleware(BaseHTTPMiddleware):
             'user_agent': user_agent,
             'request_id': request_id,
             'status_code': response.status_code,
-            'created_at': datetime.now(UTC).replace(tzinfo=None),
+            'created_at': datetime.now(UTC),
         }
 
         await _buffer_audit_entry(audit_entry)
@@ -197,7 +199,7 @@ async def _write_audit_direct(entries: list[dict]):
                 # 兜底：无论来自 Redis 缓冲（JSON 反序列化会丢 datetime 类型）还是直接路径，
                 # 都保证 created_at 是 datetime 实例，asyncpg 不接受 timestamp 列的字符串
                 if not isinstance(entry.get('created_at'), datetime):
-                    entry['created_at'] = datetime.now(UTC).replace(tzinfo=None)
+                    entry['created_at'] = datetime.now(UTC)
                 await session.execute(sa_text("""
                     INSERT INTO audit_log (user_id, username, action, resource_type, resource_id,
                                           detail, ip_address, user_agent, request_id, status_code, created_at)

@@ -2,7 +2,6 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { authApi, dashboardApi, clearCsrfCache } from '@/api'
 import type { User, UserInfo, NavSection } from '@/types'
-import { removeAccessToken } from '@/utils/secureStorage'
 import { useCatalogStore } from './catalog'
 import { usePatternRoomStore } from './patternRoom'
 import { queryClient, queryPersister } from '@/utils/queryClient'
@@ -205,9 +204,6 @@ export const useAuthStore = defineStore('auth', () => {
       sessionStorage.removeItem(USER_SNAPSHOT_KEY)
     } catch { /* 静默 */ }
     clearUserCaches()
-    if (import.meta.env.VITE_CAPACITOR) {
-      removeAccessToken()
-    }
   }
 
   return { user, navSections, filteredNavSections, loaded, isLoggedIn, setUserInfo, init, fetchUser, fetchNavSections, hasPermission, hasAnyPermission, logout }

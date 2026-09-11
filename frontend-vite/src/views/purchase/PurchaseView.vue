@@ -54,6 +54,7 @@
           :orders="unprocessed.orders"
           :loading="unprocessed.loading"
           :fetching="unprocessed.fetching"
+          :error="unprocessed.error"
           :total="unprocessed.total"
           :current-page="unprocessed.currentPage"
           :total-pages="unprocessed.totalPages"
@@ -65,6 +66,7 @@
           @quick-generate="handleQuickGenerate"
           @no-bom-error="handleNoBomError"
           @change-page="unprocessed.load"
+          @retry="unprocessed.retry"
         />
 
         <!-- 待下订单面板 -->
@@ -73,6 +75,7 @@
           :orders="purchaseOrders.orders"
           :loading="purchaseOrders.loading"
           :fetching="purchaseOrders.fetching"
+          :error="purchaseOrders.error"
           :total="purchaseOrders.total"
           :current-page="purchaseOrders.page"
           :total-pages="purchaseOrders.pages"
@@ -84,6 +87,7 @@
           @batch-complete="handleBatchComplete"
           @complete-order="handleCompleteOrder"
           @update:current-page="handleOrderPageChange"
+          @retry="purchaseOrders.retry"
         />
 
         <!-- 下单查询面板 -->
@@ -93,6 +97,7 @@
           :orders="completed.orders"
           :loading="completed.loading"
           :fetching="completed.fetching"
+          :error="completed.error"
           :total="completed.total"
           :current-page="completed.page"
           :total-pages="completed.totalPages"
@@ -106,6 +111,7 @@
           @apply-quick-filter="completed.applyQuickFilter"
           @view-detail="handleViewDetail"
           @update:current-page="handleCompletedPageChange"
+          @retry="completed.retry"
         />
       </div>
     </div>

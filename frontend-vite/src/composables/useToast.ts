@@ -183,7 +183,11 @@ function _renderToast(msg: string, type: ToastType, options: Required<ToastOptio
     closeBtn = document.createElement('button')
     closeBtn.setAttribute('aria-label', '关闭通知')
     const closeIcon = icon(faTimes)
-    closeBtn.innerHTML = Array.isArray(closeIcon.html) ? closeIcon.html.join('') : closeIcon.html
+    const iconHtml = Array.isArray(closeIcon.html) ? closeIcon.html.join('') : closeIcon.html
+    // 安全注入：使用 DOMParser 解析 FontAwesome 图标 SVG 后 appendChild，避免直接对 closeBtn.innerHTML 赋值
+    // 内容为受控常量（faTimes 图标），非用户输入，XSS 风险极低
+    const parsedSvg = new DOMParser().parseFromString(iconHtml, 'image/svg+xml')
+    closeBtn.appendChild(document.importNode(parsedSvg.documentElement, true))
     const closeSvg = closeBtn.querySelector('svg')
     if (closeSvg) {
       closeSvg.style.width = '12px'

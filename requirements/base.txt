@@ -13,7 +13,8 @@ msgspec==0.21.1
 
 # ----- 数据验证与配置 -----
 pydantic==2.13.2
-pydantic-settings==2.14.0
+# 2.14.2 修复 GHSA-4xgf-cpjx-pc3j（NestedSecretsSettingsSource 符号链接越界读取）
+pydantic-settings==2.14.2
 
 # ----- 数据库 -----
 sqlalchemy==2.0.49
@@ -21,7 +22,9 @@ asyncpg==0.31.0
 # psycopg3：Alembic 同步迁移必需（asyncpg 仅支持异步，无法用于 Alembic 的同步引擎）
 psycopg[binary]==3.3.3
 alembic==1.16.0
-cryptography==46.0.7
+# 50.0.1：修复 CVE-2026-69247/69248/69249 + GHSA-537c（wheel 内置 OpenSSL）。
+# 项目仅使用 AESGCM（backup_encryption.py），46→50 API 平面不变，已通过加密单测验证。
+cryptography==50.0.1
 
 # ----- 安全 -----
 PyJWT==2.13.0
@@ -47,6 +50,8 @@ redis[hiredis]==5.3.1
 # ----- 监控 -----
 prometheus-client==0.21.0
 structlog==25.5.0
+# 磁盘空间预检/系统指标（backup 域 cleanup/metrics/settings/health_check 等模块顶层依赖）
+psutil==7.2.2
 
 # ----- OpenTelemetry 可观测性 -----
 opentelemetry-api==1.30.0
@@ -71,7 +76,9 @@ charset-normalizer==3.4.0
 httpx==0.28.1
 
 # ----- 对象存储 -----
-boto3==1.36.0
+# boto3 仅在 STORAGE_TYPE=s3 时使用（S3StorageBackend，代码内延迟 import + 熔断降级）。
+# 生产默认 STORAGE_TYPE=local，故从 base 移出：
+#   需要 S3/MinIO 时执行: pip install -r requirements/s3.txt
 
 # ----- OCR 与文档识别（可选）-----
 # OCR 功能已拆分到 requirements/ocr.txt（约 500MB，按需安装）

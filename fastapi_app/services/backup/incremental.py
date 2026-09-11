@@ -223,18 +223,17 @@ async def create_wal_incremental_backup(
         'backup_files': wal_backup_result.get('backup_file'),
     }
 
-    # 保存元数据文件
+    # 保存元数据文件（先在内存中处理，避免明文落盘）
     metadata_filename = f'erp_wal_incremental_{timestamp}.json'
     metadata_path = BACKUP_DIR / metadata_filename
-    metadata_path.write_text(json.dumps(backup_info, indent=2, ensure_ascii=False))
+    metadata_content = json.dumps(backup_info, indent=2, ensure_ascii=False).encode('utf-8')
 
     # 可选加密
     effective_encryption_password = encrypt_password or get_backup_encryption_password()
     if effective_encryption_password:
         from fastapi_app.core.backup_encryption import encrypt_backup
         try:
-            metadata_bytes = metadata_path.read_bytes()
-            encrypted_bytes, meta_dict = encrypt_backup(metadata_bytes, effective_encryption_password)
+            encrypted_bytes, meta_dict = encrypt_backup(metadata_content, effective_encryption_password)
             metadata_path.write_bytes(encrypted_bytes)
 
             # 更新备份信息（仅记录在日志中，不覆盖加密后的文件）
@@ -254,6 +253,8 @@ async def create_wal_incremental_backup(
         except Exception as e:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断
             logger.error(f"WAL 增量备份加密失败: {e}")
             raise BackupError(f"WAL 增量备份加密失败: {e}") from e
+    else:
+        metadata_path.write_bytes(metadata_content)
 
     return {
         'success': True,

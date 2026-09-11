@@ -87,6 +87,7 @@ async def search_products_for_bom_copy(db: AsyncSession, keyword: str) -> list:
             select(Product)
             .options(
                 selectinload(Product.material),
+                selectinload(Product.material_rows),
                 selectinload(Product.fabrics),
                 selectinload(Product.accessories),
             )
@@ -122,6 +123,7 @@ async def get_bom_preview(db: AsyncSession, source_product_id: int) -> dict:
         select(Product)
         .options(
             selectinload(Product.material),
+            selectinload(Product.material_rows),
             selectinload(Product.fabrics),
             selectinload(Product.accessories),
         )

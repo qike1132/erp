@@ -1,6 +1,6 @@
 """版师管理接口
 
-前缀: /api/v1/pattern-room/pattern-makers
+前缀: /api/v1/pattern-maker/pattern-makers
 提供版师列表查询与新增（供打样项目弹窗下拉与内联添加）。
 权限: 需登录 + customer_sampling_manage
 """

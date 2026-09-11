@@ -15,7 +15,9 @@ import json
 import logging
 import re
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
+
+import base64
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +99,22 @@ async def _get_redis():
     return get_client()
 
 
+async def is_redis_available() -> bool:
+    """探测 Redis 是否可用（PING 探活）。
+
+    用于把「锁服务不可用」与「锁确实被占用」区分开：锁函数 fail-closed
+    返回的 True 只是保守值，不等于真的有任务在执行。探测失败按不可用处理。
+    """
+    try:
+        client = await _get_redis()
+        if client is None:
+            return False
+        await client.ping()
+        return True
+    except Exception:  # broad-except: 探活失败即视为不可用
+        return False
+
+
 # ---------------------------------------------------------------------------
 # Task password side-channel (H3)
 # ---------------------------------------------------------------------------
@@ -116,7 +134,9 @@ async def store_task_password(task_id: str, password: str) -> bool:
         client = await _get_redis()
         if client is None:
             return False
-        await client.set(_TASK_PASSWORD_PREFIX + task_id, password, ex=_TASK_PASSWORD_TTL)
+        # base64 编码作为最低防护，避免密码明文存入 Redis
+        encoded = base64.b64encode(password.encode('utf-8'))
+        await client.set(_TASK_PASSWORD_PREFIX + task_id, encoded, ex=_TASK_PASSWORD_TTL)
         return True
     except Exception as e:  # broad-except: 密码写入失败不应阻断任务入队
         logger.warning("写入任务密码侧信道失败（task_id=%s）: %s", task_id, e)
@@ -133,7 +153,11 @@ async def get_task_password(task_id: str) -> str | None:
         client = await _get_redis()
         if client is None:
             return None
-        return await client.get(_TASK_PASSWORD_PREFIX + task_id)
+        raw = await client.get(_TASK_PASSWORD_PREFIX + task_id)
+        if raw:
+            # base64 解码还原密码
+            return base64.b64decode(raw).decode('utf-8')
+        return None
     except Exception as e:  # broad-except: 读取失败按无密码处理（降级不加密）
         logger.warning("读取任务密码侧信道失败（task_id=%s）: %s", task_id, e)
         return None
@@ -230,7 +254,7 @@ async def create_progress(
         "progress": 0,
         "phase": "init",
         "phase_label": "初始化",
-        "started_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "started_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
         "completed_at": None,
         "result": None,
         "error": None,
@@ -322,7 +346,7 @@ async def complete_progress(
         else:
             data["phase_label"] = "恢复完成"
 
-    data["completed_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    data["completed_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     data["result"] = result
 
     await client.set(key, json.dumps(data, ensure_ascii=False), ex=PROGRESS_TTL)
@@ -360,7 +384,7 @@ async def fail_progress(task_id: str, error: str) -> None:
     data["phase"] = "failed"
     data["phase_label"] = f"{op_label}失败: {sanitized[:100]}"
     data["error"] = sanitized
-    data["completed_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    data["completed_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
     await client.set(key, json.dumps(data, ensure_ascii=False), ex=PROGRESS_TTL)
 

@@ -225,14 +225,10 @@ async def confirm_staging_stockouts(
 
     # 发送出货完成事件
     if completed_orders:
-        from fastapi_app.services.notification_service import StockEvent, publish_event_with_fcm
+        from fastapi_app.services.notification_service import StockEvent, publish_event
         for co in completed_orders:
             try:
-                await publish_event_with_fcm(
-                    StockEvent.SHIPMENT_COMPLETED, co,
-                    fcm_title="出货完成",
-                    fcm_body=f"订单 {co['order_no']} 已完成出货",
-                )
+                await publish_event(StockEvent.SHIPMENT_COMPLETED, co)
             except Exception as e:  # defensive: 单个事件发布失败不影响确认结果
                 logger.warning("出货完成事件发布失败: %s", e)
 

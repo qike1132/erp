@@ -1,4 +1,4 @@
-import { ref, computed } from 'vue'
+import { ref, computed, onUnmounted } from 'vue'
 import { purchaseApi, type MaterialCalcProduct, type MaterialCalcRow } from '@/api'
 import { showToast } from '@/composables/useToast'
 import { getErrorMessage } from '@/types/errors'
@@ -118,6 +118,11 @@ export function useMaterialCalculator() {
   function dispose() {
     if (calcTimer) clearTimeout(calcTimer)
   }
+
+  // 组件卸载时清理防抖定时器，避免内存泄漏与卸载后回调执行
+  onUnmounted(() => {
+    dispose()
+  })
 
   return {
     orderItems,

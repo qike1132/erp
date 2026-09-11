@@ -44,6 +44,33 @@ interface ShipmentRecordRow {
   quantity?: number
 }
 
+/**
+ * 运行时类型守卫：判断未知值是否为合法的 ShipmentRecordRow。
+ * 替代 `as unknown as ShipmentRecordRow[]` 不安全断言，避免后端字段缺失/类型漂移导致运行时错误。
+ */
+function isShipmentRecordRow(v: unknown): v is ShipmentRecordRow {
+  if (!v || typeof v !== 'object') return false
+  const o = v as Record<string, unknown>
+  // shipment_no 为必填字符串，其余字段可选，存在时需类型匹配
+  if (typeof o.shipment_no !== 'string' || o.shipment_no === '') return false
+  if (o.shipment_date !== undefined && typeof o.shipment_date !== 'string') return false
+  if (o.customer_name !== undefined && typeof o.customer_name !== 'string') return false
+  if (o.product_name !== undefined && typeof o.product_name !== 'string') return false
+  if (o.quantity !== undefined && typeof o.quantity !== 'number') return false
+  return true
+}
+
+/** 将后端响应安全转换为 ShipmentRecordRow[]，兼容 {records: [...]} 与 [...] 两种返回结构 */
+function toShipmentRecords(res: unknown): ShipmentRecordRow[] {
+  if (!res || typeof res !== 'object') return []
+  const list = Array.isArray((res as { records?: unknown }).records)
+    ? (res as { records: unknown[] }).records
+    : Array.isArray(res)
+      ? res
+      : []
+  return list.filter(isShipmentRecordRow)
+}
+
 const props = defineProps<{
   date: string;
   plans: Plan[];
@@ -71,7 +98,7 @@ async function load() {
       const chunk = planIds.slice(i, i + chunkSize);
       const responses = await Promise.all(chunk.map(pid => planApi.shipmentRecords(pid)));
       for (const res of responses) {
-        const recs = (res as { records?: ShipmentRecordRow[] })?.records ?? (res as unknown as ShipmentRecordRow[]) ?? [];
+        const recs = toShipmentRecords(res)
         allRecords.push(...recs);
       }
     }

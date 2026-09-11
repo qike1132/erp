@@ -1,83 +1,63 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""
-ERP 服务器管理器 PyInstaller 打包配置文件
-使用方法: pyinstaller server_manager.spec
-"""
+"""ERP 服务器管理器 v5.40 PyInstaller 打包配置。
 
-import os
+用法: pyinstaller server_manager.spec
+产出: dist/ERP服务器管理器_v5.40.exe
+
+说明:
+  - spec 中 __file__ 不可用，项目根经 SPECPATH 解析；
+  - uac_admin=True: nssm/sc 服务控制需提权，默认 asInvoker 会被静默拒绝（拒绝访问）；
+  - pystray/PIL 为可选依赖: 未安装时 collect_all 降级为空，管理器自动回落普通窗口模式。
+"""
 from pathlib import Path
+
 from PyInstaller.utils.hooks import collect_all
 
-# 获取项目根目录（spec 文件中 __file__ 不可用，使用 SPECPATH）
 project_root = Path(SPECPATH).absolute()
 
-# 强制收集 pystray 及其子模块（hiddenimports 对 pystray 不够）
-pystray_datas, pystray_binaries, pystray_hiddenimports = collect_all('pystray')
+# 可选依赖 pystray 全量收集（hiddenimports 对其不够）；缺失时静默降级
+try:
+    pystray_datas, pystray_binaries, pystray_hiddenimports = collect_all('pystray')
+except Exception:
+    pystray_datas, pystray_binaries, pystray_hiddenimports = [], [], []
 
-# 收集数据文件 — 管理器 EXE 仅需运行时资源，不含 ERP 应用代码
-datas = pystray_datas
+datas = list(pystray_datas)
+binaries = list(pystray_binaries)
 
-# 如果有 .env 文件，也包含进去
-# if (project_root / '.env').exists():
-#     datas.append((str(project_root / '.env'), '.'))
-
-# 收集隐藏导入 — 仅包含管理器实际运行所需的模块
 hiddenimports = [
-    # GUI
     'tkinter',
-
-    # 系统托盘
+    'tkinter.scrolledtext',
+    'tkinter.font',
     'pystray',
-    'pystray._win32',     # Windows 平台托盘后端
+    'pystray._win32',   # Windows 平台托盘后端
     'PIL',
     'PIL.Image',
     'PIL.ImageDraw',
-    'PIL.ImageTk',        # 窗口图标
-    
-    # 进程管理
-    'psutil',
-] + pystray_hiddenimports
+    'PIL.ImageTk',
+    'psutil',           # 可选: 缺失时管理器按降级路径运行
+] + list(pystray_hiddenimports)
 
-# 排除不必要的模块
+# 排除管理器 EXE 运行期并不需要的重依赖，压缩体积
 excludes = [
-    'matplotlib',
-    'scipy',
-    'numpy',
-    'IPython',
-    'jupyter',
-    'pytest',
-    'unittest',
-    'pandas',
-    'sqlalchemy',
-    'django',
-    'fastapi',
-    'uvicorn',
-    'celery',
-    'redis',
-    'openpyxl',
-    'rapidfuzz',
-    'arrow',
+    'matplotlib', 'scipy', 'numpy', 'pandas', 'IPython', 'jupyter',
+    'pytest', 'unittest', 'sqlalchemy', 'django', 'fastapi', 'uvicorn',
+    'celery', 'redis', 'openpyxl', 'rapidfuzz', 'arrow',
 ]
-
-block_cipher = None
 
 a = Analysis(
     ['server_manager.py'],
     pathex=[str(project_root)],
-    binaries=pystray_binaries,
+    binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
     excludes=excludes,
-    win_no_prefer_redirects=False,
-    win_private_assemblies=False,
-    cipher=block_cipher,
     noarchive=False,
 )
 
-pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+pyz = PYZ(a.pure)
 
 exe = EXE(
     pyz,
@@ -86,18 +66,20 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name='ERP服务器管理器_v6.0.0',
+    name='ERP服务器管理器_v5.40',
     debug=False,
     bootloader_ignore_signals=False,
     strip=True,
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=False,  # GUI 应用不显示控制台
+    console=False,        # GUI 应用不显示控制台
     disable_windowed_traceback=False,
+    uac_admin=True,       # 请求管理员权限：nssm/sc 服务控制需提权
+    manifest_filename=None,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,  # 可以添加 .ico 文件路径
+    icon=None,
 )

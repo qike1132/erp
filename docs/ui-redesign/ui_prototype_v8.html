@@ -1,0 +1,1472 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ERP 服务器管理器 v8 · 重构效果图与交互原型</title>
+<style>
+/* ============================================================
+   ERP 服务器管理器 v8 高保真交互原型
+   路线：pywebview 混合（原型即最终 UI）
+   设计令牌 1:1 继承 v7-pywebview-UI设计方案.md
+   新增：RBAC 权限态 / 高危操作四级管控 / 审计流水 / 症状化告警
+   ============================================================ */
+:root{
+  --brand:#2F7BFF; --brand-hover:#4A93FF; --brand-active:#1F6BEE; --brand-tint:rgba(47,123,255,.14);
+  --success:#00B578; --warning:#FF9A2E; --danger:#F76560; --info:#14C9C9; --purple:#8D4EDA;
+  --success-tint:rgba(0,181,120,.14); --warning-tint:rgba(255,154,46,.14);
+  --danger-tint:rgba(247,101,96,.14); --info-tint:rgba(20,201,201,.14); --purple-tint:rgba(141,78,218,.14);
+  --text-1:#F7F8FA; --text-2:#C9CDD4; --text-3:#86909C; --text-4:#4E5969;
+  --bg:#0F1115; --panel:#161A1F; --panel-2:#1C222A; --hover-bg:#1E242C;
+  --border:#2A3038; --border-light:#232932; --mask:rgba(0,0,0,.6);
+  --font-ui:"Microsoft YaHei UI","Microsoft YaHei","PingFang SC","Segoe UI",system-ui,sans-serif;
+  --font-mono:"Cascadia Mono","Consolas","Microsoft YaHei Mono",ui-monospace,monospace;
+  --r-sm:4px; --r-md:6px; --r-lg:8px; --r-xl:12px;
+  --shadow-pop:0 4px 16px rgba(0,0,0,.35); --shadow-card:0 1px 2px rgba(0,0,0,.25);
+  --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:20px; --sp-6:24px; --sp-8:32px;
+}
+html[data-theme="light"]{
+  --brand:#1668DC; --brand-hover:#1460CC; --brand-active:#0E4FB0; --brand-tint:rgba(22,104,220,.08);
+  --success:#00A870; --warning:#FF8800; --danger:#D54941; --info:#0FC6C2; --purple:#722ED1;
+  --success-tint:rgba(0,168,112,.10); --warning-tint:rgba(255,136,0,.10);
+  --danger-tint:rgba(213,73,65,.08); --info-tint:rgba(15,198,194,.10); --purple-tint:rgba(114,46,209,.08);
+  --text-1:#1F2329; --text-2:#4E5969; --text-3:#86909C; --text-4:#C9CDD4;
+  --bg:#F5F7FA; --panel:#FFFFFF; --panel-2:#FFFFFF; --hover-bg:#F7F8FA;
+  --border:#E5E8EF; --border-light:#F2F3F5; --mask:rgba(29,33,41,.45);
+  --shadow-pop:0 4px 12px rgba(0,0,0,.06); --shadow-card:0 1px 2px rgba(0,0,0,.03);
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%}
+body{font-family:var(--font-ui);font-size:13px;color:var(--text-2);background:var(--bg);overflow:hidden;-webkit-font-smoothing:antialiased}
+button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
+input,select,textarea{font-family:inherit;color:inherit}
+table{border-collapse:collapse;width:100%}
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px}
+::-webkit-scrollbar-thumb:hover{background:var(--text-4)}
+::-webkit-scrollbar-track{background:transparent}
+:focus-visible{outline:2px solid var(--brand);outline-offset:1px;border-radius:4px}
+.mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+.num{font-variant-numeric:tabular-nums}
+
+/* ============ 框架 ============ */
+#app{display:flex;height:100vh;height:100dvh;overflow:hidden}
+main{flex:1;display:flex;flex-direction:column;min-width:0}
+.sidebar{width:208px;flex-shrink:0;background:var(--panel);border-right:1px solid var(--border-light);display:flex;flex-direction:column;transition:width .18s ease-out;overflow:hidden}
+body.nav-collapsed .sidebar{width:52px}
+.brand{display:flex;align-items:center;gap:10px;height:52px;padding:0 14px;flex-shrink:0;border-bottom:1px solid var(--border-light)}
+.brand-mark{width:26px;height:26px;border-radius:7px;background:var(--brand);display:grid;place-items:center;flex-shrink:0;color:#fff;font-weight:700;font-size:12px}
+.brand-name{font-size:13px;font-weight:600;color:var(--text-1);white-space:nowrap;letter-spacing:.2px}
+.brand-name small{display:block;font-size:10px;color:var(--text-3);font-weight:400}
+body.nav-collapsed .brand-name{display:none}
+body.nav-collapsed .brand{padding:0;justify-content:center}
+.nav{flex:1;overflow-y:auto;overflow-x:hidden;padding:8px}
+.nav-group{font-size:11px;color:var(--text-3);padding:10px 10px 4px;white-space:nowrap;letter-spacing:.5px}
+body.nav-collapsed .nav-group{display:none}
+.nav-item{display:flex;align-items:center;gap:10px;width:100%;padding:0 10px;height:36px;border-radius:var(--r-md);color:var(--text-2);white-space:nowrap;margin-bottom:2px;transition:background .15s,color .15s}
+.nav-item svg{width:16px;height:16px;flex-shrink:0}
+.nav-item:hover{background:var(--hover-bg);color:var(--text-1)}
+.nav-item.active{background:var(--brand-tint);color:var(--brand)}
+.nav-label{flex:1;text-align:left;font-size:13px}
+.nav-badge{min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--danger);color:#fff;font-size:11px;line-height:18px;text-align:center;font-weight:600}
+body.nav-collapsed .nav-label,body.nav-collapsed .nav-badge{display:none}
+body.nav-collapsed .nav-item{padding:0;justify-content:center}
+.nav-foot{flex-shrink:0;border-top:1px solid var(--border-light);padding:8px}
+.nav-foot .ver{font-size:11px;color:var(--text-4);text-align:center;padding:4px 0 2px;white-space:nowrap}
+body.nav-collapsed .nav-foot .ver{display:none}
+
+.topbar{height:52px;flex-shrink:0;background:var(--panel);border-bottom:1px solid var(--border-light);display:flex;align-items:center;gap:12px;padding:0 16px}
+.icon-btn{width:30px;height:30px;border-radius:var(--r-md);display:grid;place-items:center;color:var(--text-3);transition:background .15s,color .15s;position:relative;flex-shrink:0}
+.icon-btn:hover{background:var(--hover-bg);color:var(--text-1)}
+.icon-btn svg{width:16px;height:16px}
+.crumb{font-size:14px;font-weight:600;color:var(--text-1)}
+.crumb-sub{font-size:12px;color:var(--text-3);margin-top:1px}
+.top-right{margin-left:auto;display:flex;align-items:center;gap:8px}
+.mode-badge{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 10px;border-radius:12px;font-size:12px;font-weight:500;background:var(--success-tint);color:var(--success);white-space:nowrap}
+.mode-badge.idle{background:var(--hover-bg);color:var(--text-3)}
+.mode-badge.warn{background:var(--warning-tint);color:var(--warning)}
+.dot{width:6px;height:6px;border-radius:50%;background:currentColor;flex-shrink:0}
+.dot.pulse{animation:pulse 1.6s ease-out infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 currentColor}70%{box-shadow:0 0 0 5px transparent}100%{box-shadow:0 0 0 0 transparent}}
+.port-chip{height:24px;padding:0 8px;border-radius:var(--r-md);border:1px solid var(--border);background:var(--hover-bg);font-family:var(--font-mono);font-size:11px;color:var(--text-2);display:inline-flex;align-items:center;gap:5px}
+.port-chip b{color:var(--text-1);font-weight:600}
+.port-chip.off{opacity:.5}
+.divider-v{width:1px;height:16px;background:var(--border-light)}
+
+/* 角色徽章 + 提权倒计时 */
+.role-chip{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 8px 0 6px;border-radius:13px;font-size:12px;font-weight:500;cursor:pointer;border:1px solid var(--border);background:var(--panel-2);color:var(--text-2);transition:border-color .15s}
+.role-chip:hover{border-color:var(--brand)}
+.role-chip .rmark{width:16px;height:16px;border-radius:50%;display:grid;place-items:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0}
+.role-chip[data-role="viewer"] .rmark{background:var(--text-3)}
+.role-chip[data-role="operator"] .rmark{background:var(--brand)}
+.role-chip[data-role="admin"] .rmark{background:var(--purple)}
+.role-chip .ttl{font-family:var(--font-mono);font-size:11px;color:var(--warning);padding-left:4px;border-left:1px solid var(--border)}
+.role-chip.expiring{border-color:var(--warning)}
+
+.statusbar{height:30px;flex-shrink:0;background:var(--panel);border-top:1px solid var(--border-light);display:flex;align-items:center;gap:16px;padding:0 12px;font-size:12px;color:var(--text-3)}
+.sb-dot{width:7px;height:7px;border-radius:50%;background:var(--success)}
+.sb-left{display:flex;align-items:center;gap:8px;min-width:0}
+.sb-right{margin-left:auto;display:flex;align-items:center;gap:12px}
+
+.content{flex:1;overflow-y:auto;padding:20px 24px 28px;min-width:0}
+.page{display:none;max-width:1440px;margin:0 auto}
+.page.active{display:block;animation:fadein .18s ease-out}
+@keyframes fadein{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
+.page-header{display:flex;align-items:flex-start;gap:16px;margin-bottom:16px}
+.page-header h2{font-size:18px;font-weight:600;color:var(--text-1)}
+.page-header p{font-size:12px;color:var(--text-3);margin-top:3px;line-height:1.6}
+.page-header .ph-actions{margin-left:auto;display:flex;gap:8px;align-items:center;flex-shrink:0}
+
+/* ============ 按钮 ============ */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;padding:0 14px;border-radius:var(--r-md);font-size:13px;font-weight:500;white-space:nowrap;transition:background .15s,border-color .15s,color .15s,opacity .15s;border:1px solid transparent;position:relative}
+.btn svg{width:14px;height:14px;flex-shrink:0}
+.btn-primary{background:var(--brand);color:#fff}
+.btn-primary:hover{background:var(--brand-hover)}
+.btn-secondary{background:var(--panel-2);border-color:var(--border);color:var(--text-1)}
+.btn-secondary:hover{border-color:var(--brand);color:var(--brand)}
+.btn-ghost{color:var(--text-2)}
+.btn-ghost:hover{background:var(--hover-bg);color:var(--text-1)}
+.btn-danger{background:var(--danger);color:#fff}
+.btn-danger:hover{filter:brightness(1.08)}
+.btn-danger-ghost{border-color:var(--danger);color:var(--danger)}
+.btn-danger-ghost:hover{background:var(--danger);color:#fff}
+.btn-sm{height:26px;padding:0 10px;font-size:12px}
+.btn-lg{height:38px;padding:0 20px;font-size:14px}
+.btn[disabled],.btn.locked{opacity:.42;cursor:not-allowed;pointer-events:auto}
+.btn.busy{pointer-events:none}
+.btn.busy::after{content:"";width:12px;height:12px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .7s linear infinite;margin-left:2px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.lockicon{width:11px;height:11px;opacity:.8}
+
+/* ============ 卡片 / 栅格 ============ */
+.card{background:var(--panel);border:1px solid var(--border-light);border-radius:var(--r-lg);box-shadow:var(--shadow-card)}
+.card-hd{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--border-light)}
+.card-hd h3{font-size:14px;font-weight:600;color:var(--text-1)}
+.card-hd .sub{font-size:12px;color:var(--text-3)}
+.card-hd .hd-right{margin-left:auto;display:flex;gap:8px;align-items:center}
+.card-bd{padding:16px}
+.grid{display:grid;gap:var(--sp-4)}
+.g4{grid-template-columns:repeat(4,1fr)}
+.g3{grid-template-columns:repeat(3,1fr)}
+.g2{grid-template-columns:repeat(2,1fr)}
+.row{display:flex;gap:var(--sp-4)}
+.mb4{margin-bottom:var(--sp-4)}
+.mb3{margin-bottom:var(--sp-3)}
+.muted{color:var(--text-3)}
+.tiny{font-size:11px}
+
+/* 黄金四指标卡 */
+.kpi{padding:14px 16px}
+.kpi-top{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-3);margin-bottom:8px}
+.kpi-top .tag{margin-left:auto;font-size:10px;padding:1px 5px;border-radius:3px;background:var(--hover-bg);color:var(--text-3)}
+.kpi-val{font-size:26px;font-weight:600;color:var(--text-1);line-height:1.1;font-variant-numeric:tabular-nums}
+.kpi-val small{font-size:13px;font-weight:400;color:var(--text-3);margin-left:3px}
+.kpi-foot{display:flex;align-items:center;gap:6px;margin-top:8px;font-size:11px}
+.delta{display:inline-flex;align-items:center;gap:2px;font-weight:500}
+.delta.up{color:var(--danger)} .delta.down{color:var(--success)} .delta.flat{color:var(--text-3)}
+.spark{height:26px;margin-top:6px;display:block;width:100%}
+.kpi.s-ok{border-left:2px solid var(--success)}
+.kpi.s-warn{border-left:2px solid var(--warning)}
+.kpi.s-bad{border-left:2px solid var(--danger)}
+
+/* 三层健康 */
+.layer{border:1px solid var(--border-light);border-radius:var(--r-md);margin-bottom:8px;overflow:hidden;background:var(--panel-2)}
+.layer-hd{display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;transition:background .15s}
+.layer-hd:hover{background:var(--hover-bg)}
+.layer-hd .lname{font-size:13px;font-weight:600;color:var(--text-1)}
+.layer-hd .lsub{font-size:11px;color:var(--text-3)}
+.layer-hd .chev{margin-left:auto;color:var(--text-3);transition:transform .18s}
+.layer.open .chev{transform:rotate(90deg)}
+.layer-bd{display:none;padding:4px 14px 12px;border-top:1px solid var(--border-light)}
+.layer.open .layer-bd{display:block}
+.res-line{display:flex;align-items:center;gap:10px;padding:7px 0;font-size:12px;border-bottom:1px dashed var(--border-light)}
+.res-line:last-child{border-bottom:none}
+.res-line .rn{color:var(--text-2);min-width:130px}
+.res-line .rv{font-family:var(--font-mono);color:var(--text-1);font-size:11px}
+.res-line .rr{margin-left:auto;display:flex;gap:8px;align-items:center}
+
+/* 状态徽章 */
+.badge{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:11px;font-size:12px;font-weight:500;white-space:nowrap}
+.b-ok{background:var(--success-tint);color:var(--success)}
+.b-warn{background:var(--warning-tint);color:var(--warning)}
+.b-bad{background:var(--danger-tint);color:var(--danger)}
+.b-idle{background:var(--hover-bg);color:var(--text-3)}
+.b-info{background:var(--info-tint);color:var(--info)}
+.b-brand{background:var(--brand-tint);color:var(--brand)}
+.b-purple{background:var(--purple-tint);color:var(--purple)}
+
+/* 指标条 */
+.mbar{height:6px;border-radius:3px;background:var(--hover-bg);overflow:hidden;flex:1;min-width:60px}
+.mbar i{display:block;height:100%;border-radius:3px;background:var(--brand);transition:width .4s ease-out}
+.mbar.warn i{background:var(--warning)} .mbar.bad i{background:var(--danger)}
+
+/* 一键操作双卡 */
+.oc{display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-4)}
+.oc-card{border:1px solid var(--border-light);border-radius:var(--r-lg);background:var(--panel-2);padding:16px;position:relative;transition:border-color .18s}
+.oc-card.on{border-color:var(--success);background:linear-gradient(180deg,var(--success-tint),transparent 70%)}
+.oc-card.dim{opacity:.55}
+.oc-hd{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.oc-ico{width:32px;height:32px;border-radius:var(--r-md);display:grid;place-items:center;background:var(--brand-tint);color:var(--brand);flex-shrink:0}
+.oc-ico.prod{background:var(--purple-tint);color:var(--purple)}
+.oc-hd .t{font-size:14px;font-weight:600;color:var(--text-1)}
+.oc-hd .d{font-size:11px;color:var(--text-3);margin-top:1px}
+.oc-meta{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
+.oc-meta div{background:var(--panel);border:1px solid var(--border-light);border-radius:var(--r-sm);padding:6px 8px}
+.oc-meta .k{font-size:10px;color:var(--text-3)}
+.oc-meta .v{font-family:var(--font-mono);font-size:12px;color:var(--text-1);margin-top:2px}
+.oc-act{display:flex;gap:8px}
+
+/* Stepper */
+.stepper{display:flex;flex-direction:column;gap:0}
+.step{display:flex;gap:12px;position:relative;padding-bottom:14px}
+.step:last-child{padding-bottom:0}
+.step::before{content:"";position:absolute;left:11px;top:24px;bottom:0;width:1px;background:var(--border)}
+.step:last-child::before{display:none}
+.step .sdot{width:22px;height:22px;border-radius:50%;flex-shrink:0;display:grid;place-items:center;font-size:11px;font-weight:600;background:var(--hover-bg);color:var(--text-3);border:1px solid var(--border);z-index:1}
+.step.done .sdot{background:var(--success);color:#fff;border-color:var(--success)}
+.step.run .sdot{background:var(--brand);color:#fff;border-color:var(--brand);animation:pulse 1.4s infinite}
+.step.fail .sdot{background:var(--danger);color:#fff;border-color:var(--danger)}
+.step .sbody{flex:1;min-width:0;padding-top:2px}
+.step .st{font-size:13px;color:var(--text-1);font-weight:500;display:flex;align-items:center;gap:8px}
+.step .st .ms{margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--text-3)}
+.step .sd{font-size:11px;color:var(--text-3);margin-top:3px;font-family:var(--font-mono)}
+.step.pend .st{color:var(--text-3)}
+
+/* 表格 */
+.tbl{font-size:13px}
+.tbl th{text-align:left;font-size:12px;font-weight:500;color:var(--text-3);padding:0 12px;height:38px;border-bottom:1px solid var(--border-light);white-space:nowrap;background:var(--panel)}
+.tbl td{padding:0 12px;height:44px;border-bottom:1px solid var(--border-light);color:var(--text-2);white-space:nowrap}
+.tbl tr:last-child td{border-bottom:none}
+.tbl tbody tr{transition:background .12s}
+.tbl tbody tr:hover{background:var(--hover-bg)}
+.tbl .ta-r{text-align:right}
+.tbl .acts{display:flex;gap:4px;justify-content:flex-end}
+.tbl-wrap{overflow-x:auto}
+.lnk{color:var(--brand);cursor:pointer}
+.lnk:hover{text-decoration:underline}
+.lnk.dg{color:var(--danger)}
+
+/* 依赖拓扑 */
+.topo{background:var(--panel-2);border:1px solid var(--border-light);border-radius:var(--r-md);padding:12px}
+.topo svg{width:100%;height:190px;display:block}
+.topo text{font-family:var(--font-ui);font-size:11px}
+
+/* 告警 */
+.alert-ev{border:1px solid var(--border-light);border-radius:var(--r-lg);background:var(--panel);margin-bottom:10px;overflow:hidden;border-left-width:3px}
+.alert-ev.p1{border-left-color:var(--danger)}
+.alert-ev.p2{border-left-color:var(--warning)}
+.alert-ev.p3{border-left-color:var(--info)}
+.alert-ev.p4{border-left-color:var(--text-4)}
+.alert-ev.silenced{opacity:.6}
+.ae-hd{display:flex;align-items:flex-start;gap:12px;padding:12px 14px;cursor:pointer}
+.ae-hd:hover{background:var(--hover-bg)}
+.ae-sev{width:34px;height:20px;border-radius:var(--r-sm);display:grid;place-items:center;font-size:11px;font-weight:700;flex-shrink:0;margin-top:1px}
+.p1 .ae-sev{background:var(--danger);color:#fff}
+.p2 .ae-sev{background:var(--warning);color:#fff}
+.p3 .ae-sev{background:var(--info);color:#fff}
+.p4 .ae-sev{background:var(--text-4);color:#fff}
+.ae-main{flex:1;min-width:0}
+.ae-t{font-size:13px;font-weight:600;color:var(--text-1);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ae-sub{font-size:11px;color:var(--text-3);margin-top:4px;display:flex;gap:12px;flex-wrap:wrap}
+.ae-right{display:flex;align-items:center;gap:8px;flex-shrink:0}
+.ae-cnt{min-width:22px;height:20px;padding:0 6px;border-radius:10px;background:var(--hover-bg);color:var(--text-2);font-size:11px;font-weight:600;display:grid;place-items:center;font-family:var(--font-mono)}
+.ae-bd{display:none;padding:0 14px 14px 60px;border-top:1px solid var(--border-light)}
+.alert-ev.open .ae-bd{display:block}
+.runbook{background:var(--panel-2);border:1px solid var(--border-light);border-left:2px solid var(--brand);border-radius:var(--r-sm);padding:10px 12px;margin-top:12px;font-size:12px;line-height:1.7}
+.runbook b{color:var(--text-1);display:block;margin-bottom:4px;font-size:12px}
+.tri{margin-top:10px;display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.tri > div{background:var(--panel-2);border:1px solid var(--border-light);border-radius:var(--r-sm);padding:8px 10px}
+.tri .k{font-size:10px;color:var(--text-3)}
+.tri .v{font-family:var(--font-mono);font-size:12px;color:var(--text-1);margin-top:3px}
+.occ{margin-top:10px;font-family:var(--font-mono);font-size:11px;color:var(--text-3);line-height:1.9}
+.occ span{color:var(--text-2)}
+
+/* 日志 */
+.log-shell{display:grid;grid-template-columns:180px 1fr;gap:0;height:520px;border:1px solid var(--border-light);border-radius:var(--r-lg);overflow:hidden;background:var(--panel)}
+.log-src{border-right:1px solid var(--border-light);padding:8px;overflow-y:auto;background:var(--panel)}
+.src-item{display:flex;align-items:center;gap:8px;height:32px;padding:0 10px;border-radius:var(--r-sm);font-size:12px;color:var(--text-2);cursor:pointer;margin-bottom:2px}
+.src-item:hover{background:var(--hover-bg)}
+.src-item.active{background:var(--brand-tint);color:var(--brand)}
+.src-item .c{margin-left:auto;font-family:var(--font-mono);font-size:10px;color:var(--text-3)}
+.log-main{display:flex;flex-direction:column;min-width:0}
+.log-tools{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border-light);flex-shrink:0;flex-wrap:wrap}
+.log-body{flex:1;overflow-y:auto;padding:8px 0;font-family:var(--font-mono);font-size:12px;line-height:1.75;background:var(--bg)}
+.lg{display:flex;gap:10px;padding:1px 12px}
+.lg:hover{background:var(--hover-bg)}
+.lg .t{color:var(--text-4);flex-shrink:0}
+.lg .s{color:var(--text-3);flex-shrink:0;width:52px}
+.lg .l{flex-shrink:0;width:44px;font-weight:600}
+.lg .m{color:var(--text-2);word-break:break-all}
+.lg.INFO .l{color:var(--info)} .lg.WARN .l{color:var(--warning)}
+.lg.ERROR .l{color:var(--danger)} .lg.ERROR .m{color:var(--danger)}
+.lg.OK .l{color:var(--success)} .lg.DEBUG .l{color:var(--text-4)}
+.hl{background:var(--warning-tint);color:var(--warning);border-radius:2px;padding:0 2px}
+
+/* 表单 */
+.field{margin-bottom:14px}
+.field label{display:block;font-size:12px;color:var(--text-2);margin-bottom:6px}
+.field label .req{color:var(--danger)}
+.field .hint{font-size:11px;color:var(--text-3);margin-top:5px;line-height:1.6}
+.inp{width:100%;height:32px;padding:0 10px;border-radius:var(--r-md);border:1px solid var(--border);background:var(--bg);font-size:13px;transition:border-color .15s}
+.inp:focus{outline:none;border-color:var(--brand)}
+.inp[disabled]{opacity:.5;cursor:not-allowed}
+textarea.inp{height:auto;min-height:62px;padding:8px 10px;line-height:1.6;resize:vertical}
+.seg{display:inline-flex;background:var(--hover-bg);border-radius:var(--r-md);padding:2px;gap:2px}
+.seg button{height:28px;padding:0 14px;border-radius:var(--r-sm);font-size:12px;color:var(--text-3);transition:all .15s}
+.seg button.on{background:var(--panel);color:var(--text-1);font-weight:500;box-shadow:var(--shadow-card)}
+.sw{width:36px;height:20px;border-radius:10px;background:var(--border);position:relative;cursor:pointer;transition:background .18s;flex-shrink:0}
+.sw::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;transition:transform .18s}
+.sw.on{background:var(--brand)}
+.sw.on::after{transform:translateX(16px)}
+.sw[data-disabled="1"]{opacity:.45;cursor:not-allowed}
+.kv{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--border-light)}
+.kv:last-child{border-bottom:none}
+.kv .k{font-size:13px;color:var(--text-1);min-width:150px}
+.kv .k small{display:block;font-size:11px;color:var(--text-3);font-weight:400;margin-top:2px}
+.kv .c{margin-left:auto;display:flex;align-items:center;gap:8px}
+.diff{font-family:var(--font-mono);font-size:12px;background:var(--bg);border:1px solid var(--border-light);border-radius:var(--r-md);padding:10px 12px;line-height:1.8}
+.diff .del{color:var(--danger)} .diff .add{color:var(--success)}
+
+/* 权限矩阵 */
+.mtx td,.mtx th{text-align:center}
+.mtx td:first-child,.mtx th:first-child{text-align:left}
+.mtx td:nth-child(2){text-align:left}
+.yes{color:var(--success);font-weight:700}
+.no{color:var(--text-4)}
+.lv{display:inline-flex;align-items:center;gap:5px;font-weight:600;font-size:12px}
+.lv-l3{color:var(--danger)} .lv-l2{color:var(--warning)} .lv-l1{color:var(--info)} .lv-l0{color:var(--success)}
+
+/* 弹窗 */
+.mask{position:fixed;inset:0;background:var(--mask);display:none;align-items:center;justify-content:center;z-index:100;backdrop-filter:blur(2px)}
+.mask.on{display:flex;animation:fadein .14s ease-out}
+.modal{width:460px;max-width:calc(100vw - 40px);background:var(--panel);border:1px solid var(--border);border-radius:var(--r-xl);box-shadow:var(--shadow-pop);overflow:hidden;max-height:calc(100vh - 60px);display:flex;flex-direction:column}
+.modal.wide{width:620px}
+.m-hd{display:flex;align-items:center;gap:10px;padding:16px 20px 12px}
+.m-hd .mi{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;flex-shrink:0}
+.m-hd h3{font-size:15px;font-weight:600;color:var(--text-1)}
+.m-hd .msub{font-size:11px;color:var(--text-3);margin-top:2px}
+.m-bd{padding:0 20px 4px;overflow-y:auto;flex:1}
+.m-ft{padding:16px 20px;display:flex;gap:8px;justify-content:flex-end;border-top:1px solid var(--border-light);flex-shrink:0}
+.warnbar{display:flex;gap:10px;padding:10px 12px;border-radius:var(--r-md);font-size:12px;line-height:1.65;margin-bottom:14px}
+.warnbar.dg{background:var(--danger-tint);color:var(--danger);border:1px solid var(--danger)}
+.warnbar.wn{background:var(--warning-tint);color:var(--warning)}
+.warnbar.nf{background:var(--brand-tint);color:var(--brand)}
+.impact{background:var(--bg);border:1px solid var(--border-light);border-radius:var(--r-md);padding:12px;margin-bottom:14px}
+.impact .it{font-size:12px;color:var(--text-3);margin-bottom:8px}
+.impact ul{list-style:none;font-size:12px;line-height:2}
+.impact li{display:flex;gap:8px;align-items:flex-start;color:var(--text-2)}
+.impact li::before{content:"›";color:var(--danger);font-weight:700;flex-shrink:0}
+.impact li b{color:var(--text-1);font-family:var(--font-mono)}
+.pin{display:flex;gap:8px;justify-content:center;margin:8px 0 4px}
+.pin input{width:44px;height:50px;text-align:center;font-size:20px;font-family:var(--font-mono);border-radius:var(--r-md);border:1px solid var(--border);background:var(--bg);color:var(--text-1)}
+.pin input:focus{outline:none;border-color:var(--brand)}
+.role-pick{display:grid;gap:8px;margin-bottom:4px}
+.role-opt{display:flex;gap:10px;align-items:flex-start;padding:11px 12px;border:1px solid var(--border);border-radius:var(--r-md);cursor:pointer;transition:border-color .15s,background .15s}
+.role-opt:hover{border-color:var(--brand)}
+.role-opt.sel{border-color:var(--brand);background:var(--brand-tint)}
+.role-opt .rm{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:700;color:#fff;flex-shrink:0}
+.role-opt .rt{font-size:13px;font-weight:600;color:var(--text-1)}
+.role-opt .rd{font-size:11px;color:var(--text-3);margin-top:3px;line-height:1.6}
+
+/* Toast */
+.toasts{position:fixed;top:62px;right:16px;width:332px;display:flex;flex-direction:column;gap:8px;z-index:200}
+.toast{background:var(--panel);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--shadow-pop);padding:11px 13px;display:flex;gap:10px;align-items:flex-start;animation:slidein .2s ease-out;border-left:3px solid var(--brand)}
+.toast.ok{border-left-color:var(--success)} .toast.err{border-left-color:var(--danger)}
+.toast.warn{border-left-color:var(--warning)}
+@keyframes slidein{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:none}}
+.toast .tt{font-size:12px;color:var(--text-1);line-height:1.55;flex:1}
+.toast .tt small{display:block;color:var(--text-3);margin-top:2px;font-size:11px}
+.toast .undo{font-size:12px;color:var(--brand);cursor:pointer;flex-shrink:0;font-weight:500}
+.toast .undo:hover{text-decoration:underline}
+
+/* Tooltip */
+.tip{position:relative}
+.tip::after{content:attr(data-tip);position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);background:var(--panel-2);border:1px solid var(--border);color:var(--text-1);font-size:11px;padding:5px 9px;border-radius:var(--r-sm);white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .15s;box-shadow:var(--shadow-pop);z-index:50;font-weight:400}
+.tip:hover::after{opacity:1}
+.tip.rt::after{left:auto;right:0;transform:none}
+
+/* 活动时间轴 */
+.tl{position:relative;padding-left:4px}
+.tl-i{display:flex;gap:10px;padding:8px 0;font-size:12px;border-bottom:1px dashed var(--border-light);cursor:pointer}
+.tl-i:last-child{border-bottom:none}
+.tl-i:hover{background:var(--hover-bg)}
+.tl-i .tm{font-family:var(--font-mono);font-size:11px;color:var(--text-4);flex-shrink:0;width:52px}
+.tl-i .ic{width:16px;height:16px;border-radius:4px;display:grid;place-items:center;flex-shrink:0;font-size:9px;font-weight:700;color:#fff}
+.tl-i .tx{flex:1;color:var(--text-2);line-height:1.5}
+.tl-i .tx b{color:var(--text-1)}
+.tl-i .rl{font-size:10px;color:var(--text-3);flex-shrink:0}
+
+/* 备份 */
+.bk-card{display:flex;gap:14px;align-items:center;padding:13px 14px;border:1px solid var(--border-light);border-radius:var(--r-md);background:var(--panel-2);margin-bottom:8px}
+.bk-ico{width:36px;height:36px;border-radius:var(--r-md);display:grid;place-items:center;background:var(--brand-tint);color:var(--brand);flex-shrink:0}
+.bk-main{flex:1;min-width:0}
+.bk-t{font-size:13px;font-weight:600;color:var(--text-1);display:flex;gap:8px;align-items:center}
+.bk-s{font-size:11px;color:var(--text-3);margin-top:3px;font-family:var(--font-mono)}
+.bk-act{display:flex;gap:6px;flex-shrink:0}
+
+.empty{text-align:center;padding:40px 20px;color:var(--text-3)}
+.empty .ei{width:44px;height:44px;margin:0 auto 12px;border-radius:50%;background:var(--hover-bg);display:grid;place-items:center;color:var(--text-4)}
+.empty .et{font-size:13px;color:var(--text-2)}
+.empty .ed{font-size:11px;margin-top:4px}
+
+/* 响应式 */
+@media(max-width:1199px){ .g4{grid-template-columns:repeat(2,1fr)} .oc{grid-template-columns:1fr} .g3{grid-template-columns:repeat(2,1fr)} }
+@media(max-width:1079px){ .g2,.g3{grid-template-columns:1fr} .log-shell{grid-template-columns:1fr} .log-src{display:none} }
+</style>
+</head>
+<body>
+<div id="app">
+  <!-- ============ 侧导航 ============ -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">E</div>
+      <div class="brand-name">ERP 服务器管理器<small>v8.0.0 · pywebview</small></div>
+    </div>
+    <nav class="nav">
+      <div class="nav-group">运行</div>
+      <button class="nav-item active" data-page="overview"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg><span class="nav-label">总览驾驶舱</span></button>
+      <button class="nav-item" data-page="services"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><circle cx="7" cy="7" r="1" fill="currentColor"/><circle cx="7" cy="17" r="1" fill="currentColor"/></svg><span class="nav-label">服务编排</span></button>
+      <div class="nav-group">可观测</div>
+      <button class="nav-item" data-page="alerts"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 8-3 8h18s-3-1-3-8"/><path d="M10.3 21a2 2 0 0 0 3.4 0"/></svg><span class="nav-label">监控告警</span><span class="nav-badge" id="alertBadge">3</span></button>
+      <button class="nav-item" data-page="logs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/></svg><span class="nav-label">日志中心</span></button>
+      <div class="nav-group">运维</div>
+      <button class="nav-item" data-page="deploy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2v14M6 10l6 6 6-6M4 20h16"/></svg><span class="nav-label">部署发布</span></button>
+      <button class="nav-item" data-page="backup"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg><span class="nav-label">备份恢复</span></button>
+      <div class="nav-group">系统</div>
+      <button class="nav-item" data-page="config"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.9 1.2V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 7 19.4a1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.7 1.7 0 0 0 3 14.9H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.7 1.7 0 0 0 9 4.6h.1A2 2 0 1 1 13 3v.1a1.7 1.7 0 0 0 1.2 2.9 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0 1.2 2.9H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1.6z"/></svg><span class="nav-label">配置中心</span></button>
+      <button class="nav-item" data-page="access"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg><span class="nav-label">权限与审计</span><span class="nav-badge" style="background:var(--purple)">新</span></button>
+    </nav>
+    <div class="nav-foot">
+      <button class="nav-item" id="themeBtn2"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg><span class="nav-label">切换主题</span></button>
+      <div class="ver">已连接 · 本机 WIN-ERP01</div>
+    </div>
+  </aside>
+
+  <main>
+    <!-- ============ 顶栏 ============ -->
+    <header class="topbar">
+      <button class="icon-btn" id="navBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 6h18M3 12h18M3 18h18"/></svg></button>
+      <div><div class="crumb" id="crumb">总览驾驶舱</div><div class="crumb-sub" id="crumbSub">黄金四指标 · 三层健康 · 一键操作</div></div>
+      <div class="top-right">
+        <span class="mode-badge" id="modeBadge"><i class="dot pulse"></i><span id="modeText">开发模式运行中</span></span>
+        <div class="divider-v"></div>
+        <span class="port-chip" id="chipApi">API <b>5002</b></span>
+        <span class="port-chip" id="chipWeb">WEB <b>3000</b></span>
+        <span class="port-chip off" id="chipRedis">Redis <b>6379</b></span>
+        <div class="divider-v"></div>
+        <button class="role-chip tip rt" id="roleChip" data-role="viewer" data-tip="点击切换角色 / 提权">
+          <span class="rmark" id="roleMark">R</span><span id="roleName">只读</span><span class="ttl" id="roleTtl" style="display:none">29:41</span>
+        </button>
+        <button class="icon-btn tip rt" id="themeBtn" data-tip="亮/暗主题"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg></button>
+      </div>
+    </header>
+
+    <div class="content">
+
+      <!-- ==================== 总览驾驶舱 ==================== -->
+      <section class="page active" id="page-overview">
+        <div class="page-header">
+          <div><h2>总览驾驶舱</h2><p>黄金四指标（延迟 / 流量 / 错误 / 饱和度）+ 阿里三层运维视图下钻 + 一键操作互斥组</p></div>
+          <div class="ph-actions">
+            <button class="btn btn-secondary btn-sm" data-op="refresh" data-perm="viewer" data-danger="L0">刷新</button>
+            <button class="btn btn-secondary btn-sm" data-op="export_diag" data-perm="viewer" data-danger="L0">导出诊断包</button>
+          </div>
+        </div>
+
+        <div class="grid g4 mb4" id="kpiRow">
+          <div class="card kpi s-ok"><div class="kpi-top">延迟 P95<span class="tag">Latency</span></div><div class="kpi-val" id="kpiLat">86<small>ms</small></div><svg class="spark" id="sparkLat" viewBox="0 0 120 26" preserveAspectRatio="none"></svg><div class="kpi-foot"><span class="delta down">▼ 12%</span><span class="muted">对比 1h 前</span></div></div>
+          <div class="card kpi s-ok"><div class="kpi-top">请求量<span class="tag">Traffic</span></div><div class="kpi-val" id="kpiQps">42<small>req/s</small></div><svg class="spark" id="sparkQps" viewBox="0 0 120 26" preserveAspectRatio="none"></svg><div class="kpi-foot"><span class="delta up">▲ 8%</span><span class="muted">对比 1h 前</span></div></div>
+          <div class="card kpi s-warn"><div class="kpi-top">错误率<span class="tag">Errors</span></div><div class="kpi-val" id="kpiErr">1.8<small>%</small></div><svg class="spark" id="sparkErr" viewBox="0 0 120 26" preserveAspectRatio="none"></svg><div class="kpi-foot"><span class="delta up">▲ 1.1pp</span><span class="muted">阈值 5% · 预算余 78%</span></div></div>
+          <div class="card kpi s-warn"><div class="kpi-top">饱和度<span class="tag">Saturation</span></div><div class="kpi-val" id="kpiSat">81<small>%</small></div><svg class="spark" id="sparkSat" viewBox="0 0 120 26" preserveAspectRatio="none"></svg><div class="kpi-foot"><span class="delta flat">磁盘 C: 81%</span><span class="muted">CPU 34% 内存 62%</span></div></div>
+        </div>
+
+        <div class="grid g2 mb4">
+          <div class="card">
+            <div class="card-hd"><h3>一键操作</h3><span class="sub">跨模式互斥 · 幂等锁 · 权限门禁</span><div class="hd-right"><span class="badge b-brand" id="lockState">空闲</span></div></div>
+            <div class="card-bd">
+              <div class="oc">
+                <div class="oc-card on" id="ocDev">
+                  <div class="oc-hd"><div class="oc-ico"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M16 18l6-6-6-6M8 6l-6 6 6 6"/></svg></div><div><div class="t">开发模式</div><div class="d">uvicorn --reload + vite dev</div></div><span class="badge b-ok" style="margin-left:auto"><i class="dot"></i>运行中</span></div>
+                  <div class="oc-meta"><div><div class="k">API PID</div><div class="v">18420</div></div><div><div class="k">WEB PID</div><div class="v">7336</div></div><div><div class="k">运行时长</div><div class="v" id="devUptime">01:24:07</div></div></div>
+                  <div class="oc-act">
+                    <button class="btn btn-secondary btn-sm" data-op="restart_dev" data-perm="operator" data-danger="L1">重启</button>
+                    <button class="btn btn-danger-ghost btn-sm" data-op="stop_dev" data-perm="operator" data-danger="L2">停止</button>
+                    <button class="btn btn-ghost btn-sm" data-page-jump="services">查看编排 →</button>
+                  </div>
+                </div>
+                <div class="oc-card dim" id="ocProd">
+                  <div class="oc-hd"><div class="oc-ico prod"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9"><rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="14" width="18" height="7" rx="1.5"/></svg></div><div><div class="t">生产模式</div><div class="d">NSSM 托管 erp-prod / erp-arq</div></div><span class="badge b-idle" style="margin-left:auto"><i class="dot"></i>已停止</span></div>
+                  <div class="oc-meta"><div><div class="k">erp-prod</div><div class="v">STOPPED</div></div><div><div class="k">erp-arq</div><div class="v">STOPPED</div></div><div><div class="k">依赖</div><div class="v">PG,Redis</div></div></div>
+                  <div class="oc-act">
+                    <button class="btn btn-primary btn-sm" data-op="start_prod" data-perm="operator" data-danger="L2">切换到生产</button>
+                    <button class="btn btn-ghost btn-sm" data-op="reinstall_svc" data-perm="admin" data-danger="L3">重装服务</button>
+                  </div>
+                </div>
+              </div>
+              <div id="ocPipeline" style="display:none;margin-top:16px;padding-top:14px;border-top:1px solid var(--border-light)">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px"><b style="font-size:13px;color:var(--text-1)">收敛流程</b><span class="muted tiny mono" id="pipeTrace">trace=—</span><button class="btn btn-ghost btn-sm" style="margin-left:auto" data-op="abort_pipe" data-perm="operator" data-danger="L1">中断</button></div>
+                <div class="stepper" id="pipeSteps"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-hd"><h3>三层健康视图</h3><span class="sub">基础设施 → 应用服务 → 业务健康</span></div>
+            <div class="card-bd" style="padding-top:12px">
+              <div class="layer open" data-layer>
+                <div class="layer-hd"><span class="badge b-warn"><i class="dot"></i>1 项预警</span><div><div class="lname">基础设施层</div><div class="lsub">PostgreSQL · Redis · 磁盘 · 端口</div></div><svg class="chev" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg></div>
+                <div class="layer-bd">
+                  <div class="res-line"><span class="rn">PostgreSQL 16</span><span class="rv">127.0.0.1:5432</span><div class="rr"><span class="badge b-ok"><i class="dot"></i>运行中</span></div></div>
+                  <div class="res-line"><span class="rn">Redis / Memurai</span><span class="rv">127.0.0.1:6379</span><div class="rr"><span class="badge b-bad"><i class="dot"></i>未启动</span><button class="btn btn-secondary btn-sm" data-op="start_redis" data-perm="operator" data-danger="L1">启动</button></div></div>
+                  <div class="res-line"><span class="rn">磁盘 C:</span><span class="rv">81% · 剩 42.6 GB</span><div class="rr"><div class="mbar warn" style="width:80px"><i style="width:81%"></i></div><span class="badge b-warn">预警</span></div></div>
+                  <div class="res-line"><span class="rn">端口占用冲突</span><span class="rv">无</span><div class="rr"><span class="badge b-ok">正常</span></div></div>
+                </div>
+              </div>
+              <div class="layer" data-layer>
+                <div class="layer-hd"><span class="badge b-ok"><i class="dot"></i>正常</span><div><div class="lname">应用服务层</div><div class="lsub">API · ARQ Worker · 前端 Web</div></div><svg class="chev" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg></div>
+                <div class="layer-bd">
+                  <div class="res-line"><span class="rn">FastAPI (dev)</span><span class="rv">pid 18420 · :5002</span><div class="rr"><span class="badge b-ok"><i class="dot"></i>健康</span></div></div>
+                  <div class="res-line"><span class="rn">Vite Dev Server</span><span class="rv">pid 7336 · :3000</span><div class="rr"><span class="badge b-ok"><i class="dot"></i>健康</span></div></div>
+                  <div class="res-line"><span class="rn">ARQ Worker</span><span class="rv">未托管（开发模式）</span><div class="rr"><span class="badge b-idle">未运行</span></div></div>
+                </div>
+              </div>
+              <div class="layer" data-layer>
+                <div class="layer-hd"><span class="badge b-warn"><i class="dot"></i>关注</span><div><div class="lname">业务健康层</div><div class="lsub">接口错误率 · 任务积压 · 可用性预算</div></div><svg class="chev" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg></div>
+                <div class="layer-bd">
+                  <div class="res-line"><span class="rn">5xx 错误率 (5min)</span><span class="rv">1.8% / 阈值 5%</span><div class="rr"><div class="mbar" style="width:80px"><i style="width:36%"></i></div><span class="badge b-ok">未越界</span></div></div>
+                  <div class="res-line"><span class="rn">ARQ 队列积压</span><span class="rv">0 / 阈值 200</span><div class="rr"><span class="badge b-idle">无数据</span></div></div>
+                  <div class="res-line"><span class="rn">24h 可用性预算</span><span class="rv">余 78% · 已耗 4.7min</span><div class="rr"><div class="mbar warn" style="width:80px"><i style="width:22%"></i></div><span class="badge b-warn">慢烧</span></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid g2">
+          <div class="card">
+            <div class="card-hd"><h3>活动时间轴</h3><span class="sub">Step / Alert / Audit 统一时间轴，点击下钻</span><div class="hd-right"><button class="btn btn-ghost btn-sm" data-page-jump="access">全部审计 →</button></div></div>
+            <div class="card-bd"><div class="tl" id="timeline"></div></div>
+          </div>
+          <div class="card">
+            <div class="card-hd"><h3>进程 Top 5</h3><span class="sub">psutil 2s 采样 · CPU 降序</span></div>
+            <div class="card-bd" style="padding:0">
+              <div class="tbl-wrap"><table class="tbl">
+                <thead><tr><th>进程</th><th>PID</th><th>CPU</th><th>内存</th><th class="ta-r">操作</th></tr></thead>
+                <tbody id="procBody"></tbody>
+              </table></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================== 服务编排 ==================== -->
+      <section class="page" id="page-services">
+        <div class="page-header">
+          <div><h2>服务编排</h2><p>期望态声明式收敛（阿里期望态导向）+ 依赖拓扑可视化 + 蓝鲸 SOPS 流程编排模型</p></div>
+          <div class="ph-actions"><button class="btn btn-secondary btn-sm" data-op="refresh" data-perm="viewer" data-danger="L0">刷新状态</button></div>
+        </div>
+
+        <div class="card mb4">
+          <div class="card-hd"><h3>期望运行态</h3><span class="sub">选择目标态，平台自动计算并执行收敛计划</span><div class="hd-right"><span class="badge b-ok" id="curState">当前：开发模式</span></div></div>
+          <div class="card-bd">
+            <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+              <div class="seg" id="desiredSeg"><button data-st="idle">停机</button><button class="on" data-st="dev">开发模式</button><button data-st="prod">生产模式</button></div>
+              <div class="muted tiny" style="flex:1;min-width:200px">互斥不变式：DEV 与 PROD 不可共存；切换期间进入 SWITCHING 并持锁，拒绝并发转移。</div>
+              <button class="btn btn-primary" id="applyDesired" data-op="apply_desired" data-perm="operator" data-danger="L2">应用收敛计划</button>
+            </div>
+            <div id="planBox" style="display:none;margin-top:14px;padding-top:14px;border-top:1px solid var(--border-light)">
+              <div style="font-size:12px;color:var(--text-3);margin-bottom:10px">收敛计划预览（<span id="planCount">0</span> 步）</div>
+              <div class="stepper" id="planSteps"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid g2 mb4">
+          <div class="card">
+            <div class="card-hd"><h3>依赖拓扑</h3><span class="sub">驱动告警抑制规则：上游故障自动抑制下游</span></div>
+            <div class="card-bd"><div class="topo"><svg viewBox="0 0 460 190">
+              <defs><marker id="ar" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#86909C"/></marker></defs>
+              <g stroke="#86909C" stroke-width="1.4" marker-end="url(#ar)" fill="none">
+                <path d="M96,52 L152,52"/><path d="M96,132 L152,132"/>
+                <path d="M232,52 L288,72"/><path d="M232,132 L288,96"/>
+                <path d="M368,84 L368,120"/>
+              </g>
+              <g>
+                <rect x="16" y="34" width="80" height="36" rx="6" fill="var(--success-tint)" stroke="var(--success)"/><text x="56" y="50" text-anchor="middle" fill="var(--success)" font-weight="600">PostgreSQL</text><text x="56" y="63" text-anchor="middle" fill="var(--text-3)" font-size="10">:5432 运行中</text>
+                <rect x="16" y="114" width="80" height="36" rx="6" fill="var(--danger-tint)" stroke="var(--danger)"/><text x="56" y="130" text-anchor="middle" fill="var(--danger)" font-weight="600">Redis</text><text x="56" y="143" text-anchor="middle" fill="var(--text-3)" font-size="10">:6379 未启动</text>
+                <rect x="152" y="34" width="80" height="36" rx="6" fill="var(--brand-tint)" stroke="var(--brand)"/><text x="192" y="50" text-anchor="middle" fill="var(--brand)" font-weight="600">FastAPI</text><text x="192" y="63" text-anchor="middle" fill="var(--text-3)" font-size="10">:5002 健康</text>
+                <rect x="152" y="114" width="80" height="36" rx="6" fill="var(--hover-bg)" stroke="var(--border)"/><text x="192" y="130" text-anchor="middle" fill="var(--text-3)" font-weight="600">ARQ Worker</text><text x="192" y="143" text-anchor="middle" fill="var(--text-4)" font-size="10">未运行</text>
+                <rect x="288" y="54" width="80" height="36" rx="6" fill="var(--brand-tint)" stroke="var(--brand)"/><text x="328" y="70" text-anchor="middle" fill="var(--brand)" font-weight="600">Vite Web</text><text x="328" y="83" text-anchor="middle" fill="var(--text-3)" font-size="10">:3000 健康</text>
+                <rect x="288" y="112" width="80" height="36" rx="6" fill="var(--hover-bg)" stroke="var(--border)"/><text x="328" y="128" text-anchor="middle" fill="var(--text-3)" font-weight="600">Nginx</text><text x="328" y="141" text-anchor="middle" fill="var(--text-4)" font-size="10">生产模式启用</text>
+              </g>
+              <text x="16" y="176" fill="var(--text-4)" font-size="10">Redis 未启动 → 抑制 arq_backlog / api_5xx 告警（避免告警风暴）</text>
+            </svg></div></div>
+          </div>
+          <div class="card">
+            <div class="card-hd"><h3>最近一次收敛</h3><span class="sub">每步含状态 / 耗时 / 明细，可重试可中断</span></div>
+            <div class="card-bd">
+              <div class="stepper">
+                <div class="step done"><div class="sdot">✓</div><div class="sbody"><div class="st">清理端口占用<span class="ms">312ms</span></div><div class="sd">:5002 无占用 · :3000 kill pid 9912</div></div></div>
+                <div class="step done"><div class="sdot">✓</div><div class="sbody"><div class="st">探测并启动 Redis<span class="ms">—</span></div><div class="sd">未找到 redis-server.exe，已降级继续（WARN）</div></div></div>
+                <div class="step done"><div class="sdot">✓</div><div class="sbody"><div class="st">启动 FastAPI (uvicorn --reload)<span class="ms">2.14s</span></div><div class="sd">pid 18420 · PYTHONUTF8=1</div></div></div>
+                <div class="step done"><div class="sdot">✓</div><div class="sbody"><div class="st">健康检查 /api/health<span class="ms">3.02s</span></div><div class="sd">第 3 次探测 200 OK · 配置 retries=30 interval=1s</div></div></div>
+                <div class="step done"><div class="sdot">✓</div><div class="sbody"><div class="st">启动 Vite Dev Server<span class="ms">4.68s</span></div><div class="sd">pid 7336 · BACKEND_INTERNAL_URL 已注入</div></div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-hd"><h3>服务清单</h3><span class="sub">Windows 服务真值来自 sc / nssm 实时探测（OEM 代码页解码）</span></div>
+          <div class="tbl-wrap"><table class="tbl">
+            <thead><tr><th>服务 / 进程</th><th>类型</th><th>状态</th><th>PID</th><th>端口</th><th>启动类型</th><th>依赖</th><th class="ta-r">操作</th></tr></thead>
+            <tbody>
+              <tr><td><b style="color:var(--text-1)">erp-prod</b><div class="tiny muted">FastAPI 生产实例</div></td><td><span class="badge b-purple">NSSM</span></td><td><span class="badge b-idle"><i class="dot"></i>STOPPED</span></td><td class="mono">—</td><td class="mono">5002</td><td>自动</td><td class="mono tiny">postgresql-x64-16</td><td><div class="acts">
+                <button class="btn btn-secondary btn-sm" data-op="start_svc" data-perm="operator" data-danger="L1">启动</button>
+                <button class="btn btn-ghost btn-sm" data-op="restart_svc" data-perm="operator" data-danger="L1">重启</button>
+                <button class="btn btn-ghost btn-sm" style="color:var(--danger)" data-op="uninstall_svc" data-perm="admin" data-danger="L3">卸载</button></div></td></tr>
+              <tr><td><b style="color:var(--text-1)">erp-arq</b><div class="tiny muted">ARQ 异步任务 Worker</div></td><td><span class="badge b-purple">NSSM</span></td><td><span class="badge b-idle"><i class="dot"></i>STOPPED</span></td><td class="mono">—</td><td class="mono">—</td><td>自动</td><td class="mono tiny">Redis, erp-prod</td><td><div class="acts">
+                <button class="btn btn-secondary btn-sm" data-op="start_svc" data-perm="operator" data-danger="L1">启动</button>
+                <button class="btn btn-ghost btn-sm" data-op="restart_svc" data-perm="operator" data-danger="L1">重启</button>
+                <button class="btn btn-ghost btn-sm" style="color:var(--danger)" data-op="uninstall_svc" data-perm="admin" data-danger="L3">卸载</button></div></td></tr>
+              <tr><td><b style="color:var(--text-1)">FastAPI (dev)</b><div class="tiny muted">uvicorn --reload 前台进程</div></td><td><span class="badge b-brand">进程</span></td><td><span class="badge b-ok"><i class="dot"></i>RUNNING</span></td><td class="mono">18420</td><td class="mono">5002</td><td>手动</td><td class="mono tiny">—</td><td><div class="acts">
+                <button class="btn btn-secondary btn-sm" data-op="restart_dev" data-perm="operator" data-danger="L1">重启</button>
+                <button class="btn btn-danger-ghost btn-sm" data-op="stop_dev" data-perm="operator" data-danger="L2">停止</button></div></td></tr>
+              <tr><td><b style="color:var(--text-1)">Vite Dev Server</b><div class="tiny muted">npm run dev</div></td><td><span class="badge b-brand">进程</span></td><td><span class="badge b-ok"><i class="dot"></i>RUNNING</span></td><td class="mono">7336</td><td class="mono">3000</td><td>手动</td><td class="mono tiny">FastAPI</td><td><div class="acts">
+                <button class="btn btn-secondary btn-sm" data-op="restart_dev" data-perm="operator" data-danger="L1">重启</button>
+                <button class="btn btn-danger-ghost btn-sm" data-op="stop_dev" data-perm="operator" data-danger="L2">停止</button></div></td></tr>
+              <tr><td><b style="color:var(--text-1)">Redis / Memurai</b><div class="tiny muted">缓存与任务队列</div></td><td><span class="badge b-info">外部</span></td><td><span class="badge b-bad"><i class="dot"></i>ABSENT</span></td><td class="mono">—</td><td class="mono">6379</td><td>—</td><td class="mono tiny">—</td><td><div class="acts">
+                <button class="btn btn-secondary btn-sm" data-op="start_redis" data-perm="operator" data-danger="L1">启动</button>
+                <button class="btn btn-ghost btn-sm" data-op="kill_port" data-perm="operator" data-danger="L2">清理 6379</button></div></td></tr>
+              <tr><td><b style="color:var(--text-1)">PostgreSQL 16</b><div class="tiny muted">主数据库</div></td><td><span class="badge b-info">外部</span></td><td><span class="badge b-ok"><i class="dot"></i>RUNNING</span></td><td class="mono">4188</td><td class="mono">5432</td><td>自动</td><td class="mono tiny">—</td><td><div class="acts"><span class="muted tiny">由系统托管</span></div></td></tr>
+            </tbody>
+          </table></div>
+        </div>
+      </section>
+
+      <!-- ==================== 监控告警 ==================== -->
+      <section class="page" id="page-alerts">
+        <div class="page-header">
+          <div><h2>监控告警</h2><p>SRE 症状化告警 + 同根因事件聚合（字节 Argus 模式）+ 分组 / 抑制 / 静默三件套 + runbook 强绑定</p></div>
+          <div class="ph-actions">
+            <button class="btn btn-secondary btn-sm" data-op="silence" data-perm="operator" data-danger="L1">静默窗口</button>
+            <button class="btn btn-secondary btn-sm" data-op="rules" data-perm="admin" data-danger="L2">规则管理</button>
+            <button class="btn btn-ghost btn-sm" data-op="export_alerts" data-perm="viewer" data-danger="L0">导出</button>
+          </div>
+        </div>
+
+        <div class="grid g4 mb4">
+          <div class="card kpi s-bad"><div class="kpi-top">P1 立即处理</div><div class="kpi-val" style="color:var(--danger)">1</div><div class="kpi-foot"><span class="muted">托盘气泡 + 弹窗 + 声音</span></div></div>
+          <div class="card kpi s-warn"><div class="kpi-top">P2 需跟进</div><div class="kpi-val" style="color:var(--warning)">2</div><div class="kpi-foot"><span class="muted">托盘气泡</span></div></div>
+          <div class="card kpi"><div class="kpi-top">P3 饱和度预警</div><div class="kpi-val" style="color:var(--info)">1</div><div class="kpi-foot"><span class="muted">仅角标</span></div></div>
+          <div class="card kpi"><div class="kpi-top">降噪效果</div><div class="kpi-val">14<small>→4</small></div><div class="kpi-foot"><span class="delta down">▼ 71%</span><span class="muted">分组 + 抑制生效</span></div></div>
+        </div>
+
+        <div class="card">
+          <div class="card-hd">
+            <h3>告警事件</h3><span class="sub">按 service + family 分组，5min 窗合并</span>
+            <div class="hd-right">
+              <div class="seg" id="sevSeg"><button class="on">全部</button><button>P1</button><button>P2</button><button>P3+</button></div>
+            </div>
+          </div>
+          <div class="card-bd">
+            <div class="alert-ev p1" data-ev>
+              <div class="ae-hd"><span class="ae-sev">P1</span><div class="ae-main">
+                <div class="ae-t">Redis 不可用，任务队列能力丧失 <span class="badge b-bad">未确认</span><span class="badge b-idle tiny">availability</span></div>
+                <div class="ae-sub"><span>服务 redis</span><span>首次 22:31:04</span><span>最近 22:38:52</span><span>抑制了 2 条下游告警</span></div>
+              </div><div class="ae-right"><span class="ae-cnt">×6</span><button class="btn btn-secondary btn-sm" data-op="ack" data-perm="operator" data-danger="L1">确认</button><svg class="chev" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--text-3)"><path d="M9 18l6-6-6-6"/></svg></div></div>
+              <div class="ae-bd">
+                <div class="tri"><div><div class="k">规则</div><div class="v">redis_unavailable</div></div><div><div class="k">触发表达式</div><div class="v">redis.ping_fail &gt;= 3</div></div><div><div class="k">持续</div><div class="v">7m48s</div></div></div>
+                <div class="runbook"><b>处置手册 · docs/runbook/redis_down.md</b>
+                  1. 确认 redis-server.exe / Memurai 服务是否安装：服务清单页「Redis / Memurai」行状态为 ABSENT 即未安装。<br>
+                  2. 若已安装但未启动，执行「启动 Redis」（L1，Operator 可执行）。<br>
+                  3. 若端口 6379 被其他进程占用，先执行「清理 6379」（L2，需二次确认）。<br>
+                  4. 开发模式下 Redis 缺失可降级继续；生产模式下 erp-arq 依赖 Redis，必须先恢复。
+                </div>
+                <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+                  <button class="btn btn-primary btn-sm" data-op="fix_redis" data-perm="operator" data-danger="L1">一键执行推荐修复：启动 Redis</button>
+                  <button class="btn btn-secondary btn-sm" data-op="goto_logs" data-perm="viewer" data-danger="L0">查看该时刻日志</button>
+                  <button class="btn btn-secondary btn-sm" data-op="goto_metrics" data-perm="viewer" data-danger="L0">查看该时刻指标</button>
+                  <button class="btn btn-ghost btn-sm" data-op="silence" data-perm="operator" data-danger="L1">静默 1h</button>
+                </div>
+                <div class="occ">聚合明细（6 次）：<br>
+                  <span>22:31:04</span> redis ping timeout (3/3)<br><span>22:32:34</span> redis ping timeout (3/3)<br><span>22:34:12</span> redis ping timeout (3/3)<br><span>22:35:47</span> redis ping timeout (3/3) … 折叠 2 条
+                </div>
+              </div>
+            </div>
+
+            <div class="alert-ev p2" data-ev>
+              <div class="ae-hd"><span class="ae-sev">P2</span><div class="ae-main">
+                <div class="ae-t">24h 可用性预算慢烧（6x） <span class="badge b-warn">跟进中</span><span class="badge b-idle tiny">slo</span></div>
+                <div class="ae-sub"><span>服务 api</span><span>窗口 6h</span><span>已耗 4.7min / 预算 21.6min</span></div>
+              </div><div class="ae-right"><span class="ae-cnt">×1</span><button class="btn btn-secondary btn-sm" data-op="ack" data-perm="operator" data-danger="L1">确认</button><svg class="chev" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--text-3)"><path d="M9 18l6-6-6-6"/></svg></div></div>
+              <div class="ae-bd">
+                <div class="tri"><div><div class="k">燃烧率</div><div class="v">6.2x（慢烧阈值 6x）</div></div><div><div class="k">快烧阈值</div><div class="v">14.4x / 1h 未触发</div></div><div><div class="k">预算余量</div><div class="v">78%</div></div></div>
+                <div class="runbook"><b>处置手册 · docs/runbook/slo_burn.md</b>慢烧只需开工单跟进，不需要立即 page。检查 6h 内健康检查失败区间是否与 reload 重启重合；若为开发热重载导致，可将开发模式排除在 SLO 统计外。</div>
+                <div style="margin-top:12px;display:flex;gap:8px"><button class="btn btn-secondary btn-sm" data-op="goto_logs" data-perm="viewer" data-danger="L0">查看失败区间日志</button><button class="btn btn-ghost btn-sm" data-op="silence" data-perm="operator" data-danger="L1">静默 6h</button></div>
+              </div>
+            </div>
+
+            <div class="alert-ev p2" data-ev>
+              <div class="ae-hd"><span class="ae-sev">P2</span><div class="ae-main">
+                <div class="ae-t">日志关键字命中：Traceback <span class="badge b-warn">跟进中</span><span class="badge b-idle tiny">log_keyword</span></div>
+                <div class="ae-sub"><span>服务 api</span><span>规则 keyword:Traceback</span><span>最近 22:36:19</span></div>
+              </div><div class="ae-right"><span class="ae-cnt">×3</span><button class="btn btn-secondary btn-sm" data-op="ack" data-perm="operator" data-danger="L1">确认</button><svg class="chev" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--text-3)"><path d="M9 18l6-6-6-6"/></svg></div></div>
+              <div class="ae-bd">
+                <div class="runbook"><b>处置手册 · 蓝鲸日志关键字告警模式</b>同一关键字在 5min 窗内多次命中合并为一条事件，避免刷屏。点击「查看该时刻日志」自动跳转日志中心并高亮命中行。</div>
+                <div style="margin-top:12px;display:flex;gap:8px"><button class="btn btn-primary btn-sm" data-op="goto_logs" data-perm="viewer" data-danger="L0">跳转并高亮</button></div>
+              </div>
+            </div>
+
+            <div class="alert-ev p3" data-ev>
+              <div class="ae-hd"><span class="ae-sev">P3</span><div class="ae-main">
+                <div class="ae-t">磁盘 C: 饱和度 81% <span class="badge b-info">仅记录</span><span class="badge b-idle tiny">saturation</span></div>
+                <div class="ae-sub"><span>服务 host</span><span>阈值 80% / 危险 95%</span><span>剩余 42.6 GB</span></div>
+              </div><div class="ae-right"><span class="ae-cnt">×1</span><svg class="chev" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--text-3)"><path d="M9 18l6-6-6-6"/></svg></div></div>
+              <div class="ae-bd"><div class="runbook"><b>为什么这是 P3 而不是 P1</b>遵循 Google SRE「告警症状而非原因」原则：磁盘使用率是<i>原因指标</i>，本身不代表用户受损，因此降级为 P3 仅记录；只有当它导致写入失败（症状）时才由 api_5xx 规则升级为 P1。</div>
+              <div style="margin-top:12px;display:flex;gap:8px"><button class="btn btn-secondary btn-sm" data-op="clean_logs" data-perm="operator" data-danger="L1">清理历史日志释放空间</button></div></div>
+            </div>
+
+            <div class="alert-ev p4 silenced" data-ev>
+              <div class="ae-hd"><span class="ae-sev">P4</span><div class="ae-main">
+                <div class="ae-t">API 健康检查失败 <span class="badge b-idle">已抑制</span><span class="badge b-idle tiny">availability</span></div>
+                <div class="ae-sub"><span>抑制源 redis_unavailable</span><span>依赖链驱动，不通知</span></div>
+              </div><div class="ae-right"><span class="ae-cnt">×2</span></div></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================== 日志中心 ==================== -->
+      <section class="page" id="page-logs">
+        <div class="page-header">
+          <div><h2>日志中心</h2><p>多源分流 + 级别过滤 + 关键字规则告警（蓝鲸模式）+ 虚拟滚动，与告警/指标共享同一时间轴</p></div>
+          <div class="ph-actions">
+            <button class="btn btn-secondary btn-sm" data-op="kw_rules" data-perm="admin" data-danger="L2">关键字规则</button>
+            <button class="btn btn-secondary btn-sm" data-op="export_log" data-perm="viewer" data-danger="L0">导出</button>
+            <button class="btn btn-danger-ghost btn-sm" data-op="clear_log" data-perm="operator" data-danger="L1">清空</button>
+          </div>
+        </div>
+        <div class="log-shell">
+          <div class="log-src">
+            <div class="src-item active">管理器<span class="c">418</span></div>
+            <div class="src-item">API<span class="c">2.1k</span></div>
+            <div class="src-item">ARQ<span class="c">0</span></div>
+            <div class="src-item">Web / Vite<span class="c">316</span></div>
+            <div class="src-item">Redis<span class="c">7</span></div>
+            <div class="src-item">NSSM / sc<span class="c">44</span></div>
+          </div>
+          <div class="log-main">
+            <div class="log-tools">
+              <div class="seg"><button class="on">全部</button><button>ERROR</button><button>WARN</button><button>INFO</button></div>
+              <input class="inp" placeholder="搜索 / 正则…" style="width:200px;height:28px" value="Traceback">
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px"><span class="sw on"></span>跟随尾部</label>
+              <span class="muted tiny" style="margin-left:auto">共 418 行 · 上限 2000 行（超限保留 1600）</span>
+            </div>
+            <div class="log-body" id="logBody"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================== 部署发布 ==================== -->
+      <section class="page" id="page-deploy">
+        <div class="page-header">
+          <div><h2>部署发布</h2><p>Pipeline 模型驱动，每步可重试 / 可中断 / 带耗时，全流程写入审计</p></div>
+          <div class="ph-actions"><button class="btn btn-primary btn-sm" data-op="deploy" data-perm="admin" data-danger="L3">开始发布</button></div>
+        </div>
+        <div class="grid g2">
+          <div class="card"><div class="card-hd"><h3>发布流程</h3><span class="sub">上次执行 2026-08-30 21:14 · 成功</span></div><div class="card-bd">
+            <div class="stepper">
+              <div class="step done"><div class="sdot">✓</div><div class="sbody"><div class="st">前置检查<span class="ms">1.2s</span></div><div class="sd">git 干净 · 磁盘余量 42.6GB · 数据库可达</div></div></div>
+              <div class="step done"><div class="sdot">✓</div><div class="sbody"><div class="st">备份当前版本<span class="ms">18.4s</span></div><div class="sd">envbak v3.0 · 216MB · 已加密</div></div></div>
+              <div class="step done"><div class="sdot">✓</div><div class="sbody"><div class="st">构建前端<span class="ms">46.1s</span></div><div class="sd">vite build · dist 4.2MB</div></div></div>
+              <div class="step done"><div class="sdot">✓</div><div class="sbody"><div class="st">数据库迁移<span class="ms">3.7s</span></div><div class="sd">alembic upgrade head · 2 revisions</div></div></div>
+              <div class="step done"><div class="sdot">✓</div><div class="sbody"><div class="st">重启服务并验证<span class="ms">12.9s</span></div><div class="sd">erp-prod / erp-arq RUNNING · /api/health 200</div></div></div>
+            </div></div></div>
+          <div class="card"><div class="card-hd"><h3>版本与回滚</h3><span class="sub">L3 高危：回滚需键入操作名 + 变更原因</span></div><div class="card-bd" style="padding-top:6px">
+            <div class="kv"><div class="k">当前版本<small>后端 / 前端</small></div><div class="c mono">v2.14.3 / v2.14.3</div></div>
+            <div class="kv"><div class="k">上一稳定版本</div><div class="c"><span class="mono">v2.13.8</span><button class="btn btn-danger-ghost btn-sm" data-op="rollback" data-perm="admin" data-danger="L3">回滚</button></div></div>
+            <div class="kv"><div class="k">迁移版本<small>alembic head</small></div><div class="c mono">a7f3c9e1b204</div></div>
+            <div class="kv"><div class="k">发布窗口<small>期间告警自动静默</small></div><div class="c">22:00 - 06:00</div></div>
+          </div></div>
+        </div>
+      </section>
+
+      <!-- ==================== 备份恢复 ==================== -->
+      <section class="page" id="page-backup">
+        <div class="page-header">
+          <div><h2>备份恢复</h2><p>复用 <span class="mono tiny">fastapi_app/services/backup</span> 子系统；GUI 侧仅负责触发、进度与高危管控</p></div>
+          <div class="ph-actions"><button class="btn btn-primary btn-sm" data-op="backup_now" data-perm="operator" data-danger="L1">立即备份</button></div>
+        </div>
+        <div class="grid g4 mb4">
+          <div class="card kpi"><div class="kpi-top">最近备份</div><div class="kpi-val" style="font-size:20px">2h 前</div><div class="kpi-foot"><span class="muted">2026-08-31 20:14</span></div></div>
+          <div class="card kpi"><div class="kpi-top">备份份数</div><div class="kpi-val">9</div><div class="kpi-foot"><span class="muted">占用 1.84 GB</span></div></div>
+          <div class="card kpi s-ok"><div class="kpi-top">加密</div><div class="kpi-val" style="font-size:20px">AES-256-GCM</div><div class="kpi-foot"><span class="muted">主密码派生</span></div></div>
+          <div class="card kpi"><div class="kpi-top">策略</div><div class="kpi-val" style="font-size:20px">手动</div><div class="kpi-foot"><span class="muted">可切换为每日 03:00</span></div></div>
+        </div>
+        <div class="card"><div class="card-hd"><h3>备份清单</h3><span class="sub">.envbak v3.0 单文件包：manifest + db + redis + app + conf + services + env</span></div><div class="card-bd">
+          <div class="bk-card"><div class="bk-ico"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg></div>
+            <div class="bk-main"><div class="bk-t">env_20260831_2014.envbak <span class="badge b-ok">完整</span><span class="badge b-info">已加密</span></div><div class="bk-s">216.4 MB · pg_dump -Fc + redis RDB + app + conf + NSSM 清单 · sha256 a7f3…c204</div></div>
+            <div class="bk-act"><button class="btn btn-secondary btn-sm" data-op="verify_bk" data-perm="viewer" data-danger="L0">校验</button><button class="btn btn-secondary btn-sm" data-op="download_bk" data-perm="operator" data-danger="L1">导出</button><button class="btn btn-danger-ghost btn-sm" data-op="restore" data-perm="admin" data-danger="L3">恢复</button></div></div>
+          <div class="bk-card"><div class="bk-ico"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg></div>
+            <div class="bk-main"><div class="bk-t">env_20260830_2112.envbak <span class="badge b-ok">完整</span><span class="badge b-info">已加密</span></div><div class="bk-s">214.9 MB · 发布前自动备份 · sha256 91be…7d13</div></div>
+            <div class="bk-act"><button class="btn btn-secondary btn-sm" data-op="verify_bk" data-perm="viewer" data-danger="L0">校验</button><button class="btn btn-secondary btn-sm" data-op="download_bk" data-perm="operator" data-danger="L1">导出</button><button class="btn btn-danger-ghost btn-sm" data-op="restore" data-perm="admin" data-danger="L3">恢复</button></div></div>
+          <div class="bk-card"><div class="bk-ico" style="background:var(--warning-tint);color:var(--warning)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg></div>
+            <div class="bk-main"><div class="bk-t">env_20260828_0300.envbak <span class="badge b-warn">未含 redis</span></div><div class="bk-s">208.1 MB · Redis 当时不可用，包内缺 RDB · 恢复后需手动预热缓存</div></div>
+            <div class="bk-act"><button class="btn btn-secondary btn-sm" data-op="verify_bk" data-perm="viewer" data-danger="L0">校验</button><button class="btn btn-danger-ghost btn-sm" data-op="restore" data-perm="admin" data-danger="L3">恢复</button></div></div>
+        </div></div>
+      </section>
+
+      <!-- ==================== 配置中心 ==================== -->
+      <section class="page" id="page-config">
+        <div class="page-header">
+          <div><h2>配置中心</h2><p>pydantic schema 校验 + 版本迁移（v1→v2 自动升级并备份）+ 保存前 diff 预览</p></div>
+          <div class="ph-actions"><button class="btn btn-secondary btn-sm" data-op="reset_cfg" data-perm="admin" data-danger="L3">重置为默认</button><button class="btn btn-primary btn-sm" data-op="save_cfg" data-perm="operator" data-danger="L2">保存变更</button></div>
+        </div>
+        <div class="grid g2">
+          <div>
+            <div class="card mb4"><div class="card-hd"><h3>端口与路径</h3><span class="sub">修改端口为 L2 高危：将触发服务重启</span></div><div class="card-bd" style="padding-top:6px">
+              <div class="kv"><div class="k">API 端口<small>ports.api</small></div><div class="c"><input class="inp mono" value="5002" style="width:110px" data-perm-input="operator"></div></div>
+              <div class="kv"><div class="k">Web 端口<small>ports.web</small></div><div class="c"><input class="inp mono" value="3000" style="width:110px" data-perm-input="operator"></div></div>
+              <div class="kv"><div class="k">Redis 端口<small>ports.redis</small></div><div class="c"><input class="inp mono" value="6379" style="width:110px" data-perm-input="operator"></div></div>
+              <div class="kv"><div class="k">NSSM 路径<small>paths.nssm · 留空自动探测</small></div><div class="c"><input class="inp mono" placeholder="自动探测" style="width:220px" data-perm-input="admin"></div></div>
+            </div></div>
+            <div class="card mb4"><div class="card-hd"><h3>健康检查</h3><span class="sub">替代 v6 硬编码的 30×1s 轮询</span></div><div class="card-bd" style="padding-top:6px">
+              <div class="kv"><div class="k">探测路径</div><div class="c"><input class="inp mono" value="/api/health" style="width:160px" data-perm-input="operator"></div></div>
+              <div class="kv"><div class="k">单次超时 (s)</div><div class="c"><input class="inp mono" value="2" style="width:80px" data-perm-input="operator"></div></div>
+              <div class="kv"><div class="k">重试次数</div><div class="c"><input class="inp mono" value="30" style="width:80px" data-perm-input="operator"></div></div>
+              <div class="kv"><div class="k">重试间隔 (s)</div><div class="c"><input class="inp mono" value="1" style="width:80px" data-perm-input="operator"></div></div>
+            </div></div>
+          </div>
+          <div>
+            <div class="card mb4"><div class="card-hd"><h3>告警与审计</h3><span class="sub">新增配置域</span></div><div class="card-bd" style="padding-top:6px">
+              <div class="kv"><div class="k">分组窗口 (s)<small>alerts.group_window_s</small></div><div class="c"><input class="inp mono" value="300" style="width:90px" data-perm-input="admin"></div></div>
+              <div class="kv"><div class="k">依赖抑制<small>上游故障抑制下游</small></div><div class="c"><span class="sw on" data-perm-input="admin"></span></div></div>
+              <div class="kv"><div class="k">审计保留天数<small>audit.retention_days</small></div><div class="c"><input class="inp mono" value="180" style="width:90px" data-perm-input="admin"></div></div>
+              <div class="kv"><div class="k">审计哈希链<small>防篡改，关闭需 Admin</small></div><div class="c"><span class="sw on" data-perm-input="admin"></span></div></div>
+              <div class="kv"><div class="k">L3 操作强制填原因</div><div class="c"><span class="sw on" data-perm-input="admin"></span></div></div>
+              <div class="kv"><div class="k">提权有效期 (min)<small>auth.elevate_ttl</small></div><div class="c"><input class="inp mono" value="30" style="width:90px" data-perm-input="admin"></div></div>
+            </div></div>
+            <div class="card"><div class="card-hd"><h3>变更预览</h3><span class="sub">保存前必须确认 diff（L2 二次确认）</span></div><div class="card-bd">
+              <div class="diff"><span class="muted">server_manager_config.json</span><br>
+                <span class="muted">  "schema_version": 2,</span><br>
+                <span class="del">- "health": { "retries": 30, "interval_s": 1 }</span><br>
+                <span class="add">+ "health": { "retries": 45, "interval_s": 2 }</span><br>
+                <span class="del">- "auth": { "elevate_ttl_s": 1800 }</span><br>
+                <span class="add">+ "auth": { "elevate_ttl_s": 900 }</span>
+              </div>
+              <div class="warnbar nf" style="margin-top:12px"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;margin-top:1px"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg><div>2 项变更将立即生效，无需重启。若修改端口或路径，将提示需要重启对应服务。</div></div>
+            </div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================== 权限与审计 ==================== -->
+      <section class="page" id="page-access">
+        <div class="page-header">
+          <div><h2>权限与审计</h2><p>RBAC 三级角色 + PIN 提权（JIT 30min 滑动过期）+ 高危操作四级管控矩阵 + append-only 哈希链审计流水</p></div>
+          <div class="ph-actions"><button class="btn btn-secondary btn-sm" data-op="verify_chain" data-perm="viewer" data-danger="L0">校验哈希链</button><button class="btn btn-secondary btn-sm" data-op="export_audit" data-perm="viewer" data-danger="L0">导出 CSV</button></div>
+        </div>
+
+        <div class="grid g3 mb4">
+          <div class="card"><div class="card-hd"><h3>当前会话</h3></div><div class="card-bd">
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
+              <div id="bigRoleMark" style="width:44px;height:44px;border-radius:50%;display:grid;place-items:center;font-size:16px;font-weight:700;color:#fff;background:var(--text-3)">R</div>
+              <div><div style="font-size:15px;font-weight:600;color:var(--text-1)" id="bigRoleName">只读 Viewer</div><div class="tiny muted" id="bigRoleDesc">仅可查看与导出，无任何变更权限</div></div>
+            </div>
+            <div class="kv"><div class="k">提权状态</div><div class="c" id="elevStatus"><span class="badge b-idle">未提权</span></div></div>
+            <div class="kv"><div class="k">剩余有效期</div><div class="c mono" id="elevTtl">—</div></div>
+            <div class="kv" style="border-bottom:none"><div class="k">本机账号</div><div class="c mono tiny">WIN-ERP01\Administrator</div></div>
+            <div style="display:flex;gap:8px;margin-top:12px">
+              <button class="btn btn-primary btn-sm" id="btnElevate" style="flex:1">提权</button>
+              <button class="btn btn-secondary btn-sm" id="btnDeElevate" style="flex:1">立即降权</button>
+            </div>
+          </div></div>
+
+          <div class="card" style="grid-column:span 2"><div class="card-hd"><h3>高危操作管控矩阵</h3><span class="sub">规则对用户完全透明：不隐藏按钮，只禁用并说明所需角色</span></div>
+            <div class="tbl-wrap"><table class="tbl mtx">
+              <thead><tr><th style="width:78px">等级</th><th>操作</th><th>管控措施</th><th style="width:56px">只读</th><th style="width:64px">运维</th><th style="width:70px">管理员</th></tr></thead>
+              <tbody>
+                <tr><td><span class="lv lv-l3">● L3</span></td><td>卸载 NSSM 服务 / 恢复备份 / 回滚 / 重置配置</td><td class="tiny muted">键入操作名 + 变更原因必填 + 审计</td><td class="no">✗</td><td class="no">✗</td><td class="yes">✓</td></tr>
+                <tr><td><span class="lv lv-l2">● L2</span></td><td>停止生产服务 / 清理端口进程 / 切换运行模式 / 改端口路径</td><td class="tiny muted">二次确认弹窗（列出影响面）+ 审计</td><td class="no">✗</td><td class="yes">✓</td><td class="yes">✓</td></tr>
+                <tr><td><span class="lv lv-l1">● L1</span></td><td>重启服务 / 清空日志 / 静默告警 / 立即备份</td><td class="tiny muted">直接执行 + Toast 内 5s 撤销 + 审计</td><td class="no">✗</td><td class="yes">✓</td><td class="yes">✓</td></tr>
+                <tr><td><span class="lv lv-l0">● L0</span></td><td>查看 / 导出 / 刷新 / 确认告警 / 校验备份</td><td class="tiny muted">仅写审计流水</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td></tr>
+              </tbody>
+            </table></div>
+            <div class="card-bd" style="border-top:1px solid var(--border-light)">
+              <div class="warnbar wn"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;margin-top:1px"><path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg><div><b>威胁模型边界</b>：本地 PIN 模型定位为「防误操作 + 留痕」，不防恶意管理员（可直接改配置文件）。若需防恶意，需升级为 Windows 本地组集成校验。</div></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card"><div class="card-hd"><h3>审计流水</h3><span class="sub">logs/audit.jsonl · append-only · 每条含前一条 sha256 构成哈希链</span>
+          <div class="hd-right"><div class="seg"><button class="on">全部</button><button>失败</button><button>L2+</button></div></div></div>
+          <div class="tbl-wrap"><table class="tbl">
+            <thead><tr><th>时间</th><th>角色</th><th>操作</th><th>目标</th><th>等级</th><th>结果</th><th>耗时</th><th>trace_id</th><th>原因 / 明细</th></tr></thead>
+            <tbody id="auditBody"></tbody>
+          </table></div>
+        </div>
+      </section>
+
+    </div>
+
+    <!-- ============ 状态栏 ============ -->
+    <footer class="statusbar">
+      <div class="sb-left"><i class="sb-dot"></i><span id="sbText">开发模式运行中 · API 18420 · WEB 7336</span></div>
+      <div class="sb-right">
+        <span class="mono">CPU 34%</span><span class="mono">内存 62%</span><span class="mono">磁盘 81%</span>
+        <span class="divider-v"></span>
+        <span id="sbRole" class="mono">角色 viewer</span>
+        <span class="mono" id="sbClock">22:39:41</span>
+      </div>
+    </footer>
+  </main>
+</div>
+
+<!-- ============ 弹窗层 ============ -->
+<div class="mask" id="mask"><div class="modal" id="modal"></div></div>
+<div class="toasts" id="toasts"></div>
+<script>
+/* ============================================================
+   v8 原型交互层
+   注：所有 API 调用点在真实实现中替换为 pywebview.api.<useCase>()
+   ============================================================ */
+const $  = (s,r=document)=>r.querySelector(s);
+const $$ = (s,r=document)=>Array.from(r.querySelectorAll(s));
+
+/* ---------- 角色 / 权限模型 ---------- */
+const ROLES = {
+  viewer:   { rank:0, mark:'R', name:'只读',   full:'只读 Viewer',    desc:'仅可查看与导出，无任何变更权限' },
+  operator: { rank:1, mark:'O', name:'运维',   full:'运维 Operator',  desc:'可启停/重启服务、切换模式、静默告警、执行备份' },
+  admin:    { rank:2, mark:'A', name:'管理员', full:'管理员 Admin',   desc:'全部权限，含 L3 极高危操作' }
+};
+const DANGER = {
+  L0:{ label:'低危', color:'var(--success)' },
+  L1:{ label:'中危', color:'var(--info)' },
+  L2:{ label:'高危', color:'var(--warning)' },
+  L3:{ label:'极高危', color:'var(--danger)' }
+};
+/* 操作元数据：标题 / 影响面 / 确认词 */
+const OPS = {
+  stop_dev:      { t:'停止开发模式', impact:['终止 FastAPI 进程 <b>pid 18420</b> 及其子进程树','终止 Vite Dev Server <b>pid 7336</b>','释放端口 <b>5002</b> / <b>3000</b>','当前页面热重载会话将断开','预计耗时 <b>3~6 秒</b>'] },
+  start_prod:    { t:'切换到生产模式', impact:['先停止开发模式（进入 SWITCHING 持锁）','启动 NSSM 服务 <b>erp-prod</b>、<b>erp-arq</b>','写入服务依赖 <b>DependOnService=postgresql-x64-16</b>','Redis 当前不可用 → <b>erp-arq 将启动失败</b>','预计耗时 <b>20~40 秒</b>'] },
+  kill_port:     { t:'清理端口占用进程', impact:['查找占用端口 <b>6379</b> 的进程并终止其进程树','若该进程为非 ERP 组件（如其他 Redis 实例），也会被终止','此操作<b>不可撤销</b>','预计耗时 <b>1~2 秒</b>'] },
+  apply_desired: { t:'应用期望态收敛计划', impact:['状态机进入 <b>SWITCHING</b> 并持独占锁','按计划顺序执行 5 个步骤，任一步失败即中止','失败时保留已完成步骤，不自动回滚','预计耗时 <b>15~45 秒</b>'] },
+  save_cfg:      { t:'保存配置变更', impact:['写入 <b>server_manager_config.json</b>（schema v2）','2 项变更立即生效：health.retries、auth.elevate_ttl_s','原文件自动备份为 <b>*.bak</b>'] },
+  uninstall_svc: { t:'卸载 NSSM 服务', confirmWord:'uninstall erp-prod', impact:['停止并<b>永久移除</b> Windows 服务 <b>erp-prod</b>','清除 NSSM 注册项、依赖声明、日志重定向配置','生产模式将<b>完全不可用</b>，需重新安装服务','此操作<b>不可撤销</b>'] },
+  restore:       { t:'从备份恢复环境', confirmWord:'restore env_20260831_2014', impact:['停止所有 ERP 服务与进程','<b>覆盖</b>当前数据库（pg_restore -c）','<b>覆盖</b>应用代码、配置、NSSM 服务清单','恢复前自动创建当前环境快照（可回滚）','当前未备份的数据将<b>永久丢失</b>'] },
+  rollback:      { t:'回滚到上一稳定版本', confirmWord:'rollback v2.13.8', impact:['应用代码回退至 <b>v2.13.8</b>','数据库迁移<b>降级</b> 2 个 revision（存在数据丢失风险）','重启 erp-prod / erp-arq','建议先执行「立即备份」'] },
+  reset_cfg:     { t:'重置配置为默认值', confirmWord:'reset config', impact:['所有端口、路径、健康检查、告警规则、权限配置<b>全部重置</b>','PIN 与提权配置将被清除，下次启动需重新设置','原配置备份为 <b>*.reset.bak</b>'] },
+  reinstall_svc: { t:'重装 NSSM 服务', confirmWord:'reinstall services', impact:['卸载并重新注册 <b>erp-prod</b>、<b>erp-arq</b>','重新探测并写入服务依赖','生产模式期间执行会造成<b>服务中断</b>'] },
+  deploy:        { t:'开始发布', confirmWord:'deploy v2.14.4', impact:['执行 5 步发布流程：检查 → 备份 → 构建 → 迁移 → 重启','数据库迁移<b>不可自动回退</b>','发布窗口内告警自动静默'] }
+};
+
+let state = {
+  role:'viewer', elevUntil:0, page:'overview',
+  desired:'dev', locked:false, pendingOp:null
+};
+
+/* ---------- 权限判定 ---------- */
+const need = (perm)=> ROLES[perm]?.rank ?? 0;
+const can  = (perm)=> ROLES[state.role].rank >= need(perm);
+
+function applyPerms(){
+  $$('[data-perm]').forEach(el=>{
+    const perm = el.dataset.perm, ok = can(perm);
+    el.classList.toggle('locked', !ok);
+    if(!ok){
+      el.classList.add('tip');
+      el.dataset.tip = `需要「${ROLES[perm].name}」角色 · 点击提权`;
+    } else {
+      el.removeAttribute('data-tip');
+      if(!el.dataset.keepTip) el.classList.remove('tip');
+    }
+  });
+  $$('[data-perm-input]').forEach(el=>{
+    const ok = can(el.dataset.permInput);
+    if(el.classList.contains('sw')) el.dataset.disabled = ok?'0':'1';
+    else el.disabled = !ok;
+  });
+  const R = ROLES[state.role];
+  $('#roleMark').textContent = R.mark;
+  $('#roleName').textContent = R.name;
+  $('#roleChip').dataset.role = state.role;
+  $('#bigRoleMark').textContent = R.mark;
+  $('#bigRoleMark').style.background = state.role==='viewer'?'var(--text-3)':(state.role==='admin'?'var(--purple)':'var(--brand)');
+  $('#bigRoleName').textContent = R.full;
+  $('#bigRoleDesc').textContent = R.desc;
+  $('#sbRole').textContent = '角色 '+state.role;
+  const elevated = state.role!=='viewer';
+  $('#elevStatus').innerHTML = elevated
+    ? `<span class="badge b-ok"><i class="dot"></i>已提权（JIT 30min）</span>`
+    : `<span class="badge b-idle">未提权</span>`;
+  $('#roleTtl').style.display = elevated?'':'none';
+  $('#btnElevate').textContent = elevated?'切换角色':'提权';
+}
+
+/* ---------- 提权倒计时 ---------- */
+function tickElev(){
+  if(state.role==='viewer'){ $('#elevTtl').textContent='—'; return; }
+  const left = Math.max(0, state.elevUntil - Date.now());
+  const m = Math.floor(left/60000), s = Math.floor(left%60000/1000);
+  const txt = String(m).padStart(2,'0')+':'+String(s).padStart(2,'0');
+  $('#roleTtl').textContent = txt;
+  $('#elevTtl').textContent = txt + ' 后自动降权';
+  const expiring = left < 5*60*1000;
+  $('#roleChip').classList.toggle('expiring', expiring);
+  if(left<=0){
+    state.role='viewer'; applyPerms();
+    toast('warn','提权已过期，已自动降权为「只读」','JIT 安全策略 · auth.elevate_ttl_s=1800');
+    audit('auto_de_elevate','session','L0','成功','JIT 到期自动回收');
+  }
+}
+
+/* ---------- Toast ---------- */
+function toast(kind, text, sub, undo){
+  const el = document.createElement('div');
+  el.className = 'toast '+(kind||'');
+  el.innerHTML = `<div class="tt">${text}${sub?`<small>${sub}</small>`:''}</div>`;
+  if(undo){
+    const u = document.createElement('span'); u.className='undo'; u.textContent='撤销 5s';
+    let n=5; const iv=setInterval(()=>{ n--; u.textContent=`撤销 ${n}s`; if(n<=0) clearInterval(iv); },1000);
+    u.onclick=()=>{ clearInterval(iv); el.remove(); toast('ok','已撤销操作','审计流水记录一条 undo 事件'); audit('undo',undo,'L0','成功','用户在 5s 窗口内撤销'); };
+    el.appendChild(u);
+  }
+  $('#toasts').appendChild(el);
+  setTimeout(()=>{ el.style.opacity='0'; el.style.transition='opacity .25s'; setTimeout(()=>el.remove(),260); }, undo?5200:3400);
+  while($('#toasts').children.length>4) $('#toasts').firstElementChild.remove();
+}
+
+/* ---------- 审计 ---------- */
+const auditRows = [
+  ['22:38:52','admin','alert.raise','redis_unavailable','L0','产生','—','a7f3c9e1','规则 redis.ping_fail>=3 连续命中'],
+  ['22:31:04','operator','pipeline.run','start_dev','L2','成功','10.6s','5c1b8e40','期望态收敛：idle → dev'],
+  ['22:30:58','operator','process.kill_tree','pid 9912 (:3000)','L2','成功','312ms','5c1b8e40','端口占用清理，二次确认已通过'],
+  ['22:30:41','viewer→operator','auth.elevate','session','L0','成功','—','5c1b8e40','PIN 校验通过，TTL 1800s'],
+  ['21:14:22','admin','deploy.run','v2.14.3','L3','成功','82.3s','9d20fa11','变更原因：修复采购计划导入三段式链路'],
+  ['21:12:07','admin','backup.create','env_20260830_2112','L1','成功','18.4s','9d20fa11','发布前自动备份'],
+  ['20:03:11','operator','service.stop','erp-arq','L2','失败','5.0s','3ea77b52','超时未进入 STOPPED，已回滚为 RUNNING']
+];
+function renderAudit(){
+  $('#auditBody').innerHTML = auditRows.map(r=>{
+    const lvClass = 'lv lv-'+r[4].toLowerCase();
+    const res = r[5]==='失败' ? '<span class="badge b-bad">失败</span>'
+              : r[5]==='成功' ? '<span class="badge b-ok">成功</span>'
+              : `<span class="badge b-info">${r[5]}</span>`;
+    return `<tr><td class="mono tiny">${r[0]}</td><td>${r[1]}</td><td class="mono tiny">${r[2]}</td>
+      <td class="mono tiny">${r[3]}</td><td><span class="${lvClass}">${r[4]}</span></td><td>${res}</td>
+      <td class="mono tiny">${r[6]}</td><td class="mono tiny" style="color:var(--text-4)">${r[7]}</td>
+      <td class="tiny muted" style="white-space:normal;max-width:280px">${r[8]}</td></tr>`;
+  }).join('');
+}
+function audit(op,target,lv,result,detail,ms){
+  const now = new Date();
+  const t = [now.getHours(),now.getMinutes(),now.getSeconds()].map(n=>String(n).padStart(2,'0')).join(':');
+  auditRows.unshift([t,state.role,op,target,lv,result,ms||'—',Math.random().toString(16).slice(2,10),detail||'—']);
+  if(auditRows.length>40) auditRows.pop();
+  renderAudit(); pushTimeline(t,'A',`<b>${op}</b> → ${target}`,state.role);
+}
+
+/* ---------- 时间轴 ---------- */
+const tlRows = [
+  ['22:38','A','<b>告警产生</b> P1 Redis 不可用，抑制 2 条下游','engine'],
+  ['22:35','S','<b>健康检查</b> /api/health 200 OK（第 3 次）','system'],
+  ['22:31','P','<b>收敛完成</b> idle → dev，5 步全部成功（10.6s）','operator'],
+  ['22:30','U','<b>提权</b> viewer → operator，TTL 30min','operator'],
+  ['21:14','P','<b>发布完成</b> v2.14.3，含数据库迁移 2 revisions','admin']
+];
+const TLC = { A:['var(--danger)','A'], S:['var(--info)','S'], P:['var(--brand)','P'], U:['var(--purple)','U'] };
+function renderTL(){
+  $('#timeline').innerHTML = tlRows.slice(0,8).map(r=>{
+    const [c,ch] = TLC[r[1]]||TLC.S;
+    return `<div class="tl-i"><span class="tm">${r[0]}</span><span class="ic" style="background:${c}">${ch}</span><span class="tx">${r[2]}</span><span class="rl">${r[3]}</span></div>`;
+  }).join('');
+}
+function pushTimeline(t,kind,text,who){ tlRows.unshift([t.slice(0,5),kind,text,who]); renderTL(); }
+
+/* ---------- 进程表 ---------- */
+const procs = [
+  ['python.exe','18420',34.2,428,'FastAPI dev'],
+  ['node.exe','7336',12.8,612,'Vite dev server'],
+  ['postgres.exe','4188',6.4,284,'PostgreSQL 16'],
+  ['node.exe','9044',3.1,196,'vite esbuild'],
+  ['ERP服务器管理器.exe','15208',1.2,88,'本程序']
+];
+function renderProcs(){
+  $('#procBody').innerHTML = procs.map(p=>{
+    const cls = p[2]>30?'bad':(p[2]>15?'warn':'');
+    return `<tr><td><b style="color:var(--text-1)">${p[0]}</b><div class="tiny muted">${p[4]}</div></td>
+      <td class="mono">${p[1]}</td>
+      <td><div style="display:flex;align-items:center;gap:8px"><div class="mbar ${cls}" style="width:52px"><i style="width:${Math.min(100,p[2]*2)}%"></i></div><span class="mono tiny">${p[2].toFixed(1)}%</span></div></td>
+      <td class="mono">${p[3]} MB</td>
+      <td class="ta-r"><div class="acts"><button class="btn btn-ghost btn-sm" data-op="kill_proc" data-perm="operator" data-danger="L2">结束</button></div></td></tr>`;
+  }).join('');
+}
+
+/* ---------- 日志 ---------- */
+const logs = [
+  ['22:38:52','mgr','ERROR','AlertEngine: rule=redis_unavailable fired (consecutive_fail=3) severity=P1 inhibits=[api_health_fail]'],
+  ['22:38:50','api','WARN','redis connection refused: [Errno 10061] 127.0.0.1:6379 — degraded mode, cache disabled'],
+  ['22:36:19','api','ERROR','Traceback (most recent call last): File "fastapi_app/services/stock_service.py", line 214, in reserve'],
+  ['22:36:19','api','ERROR','  redis.exceptions.ConnectionError: Error 10061 connecting to 127.0.0.1:6379'],
+  ['22:36:12','api','INFO','POST /api/purchase-plans/staging/confirm 200 OK 184ms batch_id=b7f21c'],
+  ['22:35:47','mgr','WARN','redis ping timeout (3/3) — 已抑制 api_health_fail 告警（依赖链）'],
+  ['22:35:02','api','INFO','GET /api/health 200 OK 4ms'],
+  ['22:34:58','web','INFO','vite: hmr update /src/views/stock/StockOutTab.vue'],
+  ['22:33:41','api','INFO','POST /api/purchase-plans/staging/validate 200 OK 612ms rows=128 invalid=3'],
+  ['22:31:14','mgr','OK','Pipeline start_dev 完成：5/5 步成功，总耗时 10.6s，trace=5c1b8e40'],
+  ['22:31:12','web','OK','VITE v5.4.2 ready in 4682 ms — Local: http://127.0.0.1:3000/'],
+  ['22:31:07','mgr','INFO','健康检查 /api/health 第 3 次探测 200 OK（retries=30 interval=1s）'],
+  ['22:31:04','api','OK','Uvicorn running on http://0.0.0.0:5002 (Press CTRL+C to quit) pid=18420'],
+  ['22:31:02','mgr','INFO','启动 FastAPI：python -u -m uvicorn fastapi_app.main:app --reload PYTHONUTF8=1'],
+  ['22:30:59','mgr','WARN','未找到 redis-server.exe / Memurai，开发模式降级继续（生产模式将拒绝启动 erp-arq）'],
+  ['22:30:58','mgr','OK','端口 :3000 占用进程 pid 9912 已终止（进程树 2 个节点）'],
+  ['22:30:57','mgr','INFO','清理端口占用：:5002 无占用，:3000 被 pid 9912 占用'],
+  ['22:30:41','mgr','OK','auth.elevate: viewer → operator（PIN 校验通过，TTL=1800s）'],
+  ['22:30:12','mgr','INFO','MetricsSampler 启动：间隔 2s，psutil 5.9.8 可用'],
+  ['22:30:11','mgr','INFO','ERP 服务器管理器 v8.0.0 启动 · WebView2 Runtime 121.0.2277.128 · schema_version=2']
+];
+function renderLogs(kw='Traceback'){
+  $('#logBody').innerHTML = logs.map(l=>{
+    let m = l[3].replace(/</g,'&lt;');
+    if(kw) m = m.replace(new RegExp(kw,'gi'), s=>`<span class="hl">${s}</span>`);
+    return `<div class="lg ${l[2]}"><span class="t">${l[0]}</span><span class="s">${l[1]}</span><span class="l">${l[2]}</span><span class="m">${m}</span></div>`;
+  }).join('');
+}
+
+/* ---------- Sparkline ---------- */
+function spark(id, seed, color){
+  const svg=$(id); if(!svg) return;
+  let v=seed, pts=[];
+  for(let i=0;i<24;i++){ v += (Math.sin(i*1.7+seed)*0.5 + (Math.random()-.5))*seed*0.12; v=Math.max(seed*0.5,Math.min(seed*1.5,v)); pts.push(v); }
+  const mx=Math.max(...pts), mn=Math.min(...pts), rg=(mx-mn)||1;
+  const d = pts.map((p,i)=>`${i===0?'M':'L'}${(i/23*118+1).toFixed(1)},${(24-((p-mn)/rg)*20).toFixed(1)}`).join(' ');
+  svg.innerHTML = `<path d="${d}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round"/>
+    <path d="${d} L119,26 L1,26 Z" fill="${color}" opacity="0.10"/>`;
+}
+function drawSparks(){
+  spark('#sparkLat',86,'var(--success)'); spark('#sparkQps',42,'var(--brand)');
+  spark('#sparkErr',1.8,'var(--warning)'); spark('#sparkSat',81,'var(--warning)');
+}
+
+/* ---------- 弹窗 ---------- */
+function closeModal(){ $('#mask').classList.remove('on'); $('#modal').innerHTML=''; }
+$('#mask').onclick = e=>{ if(e.target.id==='mask') closeModal(); };
+document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeModal(); });
+
+function openModal(html, wide){
+  $('#modal').className = 'modal'+(wide?' wide':'');
+  $('#modal').innerHTML = html;
+  $('#mask').classList.add('on');
+}
+
+/* 提权弹窗 */
+function openElevate(afterOp){
+  let pick = state.role==='viewer' ? 'operator' : state.role;
+  openModal(`
+    <div class="m-hd"><div class="mi" style="background:var(--brand-tint);color:var(--brand)">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></div>
+      <div><h3>身份提权</h3><div class="msub">JIT 临时提权 · 有效期 30 分钟滑动过期 · 全程审计</div></div></div>
+    <div class="m-bd">
+      <div class="role-pick" id="rolePick">
+        ${['viewer','operator','admin'].map(k=>`
+          <div class="role-opt ${k===pick?'sel':''}" data-r="${k}">
+            <div class="rm" style="background:${k==='viewer'?'var(--text-3)':k==='admin'?'var(--purple)':'var(--brand)'}">${ROLES[k].mark}</div>
+            <div><div class="rt">${ROLES[k].full}</div><div class="rd">${ROLES[k].desc}</div></div>
+          </div>`).join('')}
+      </div>
+      <div class="field" style="margin-top:14px" id="pinField">
+        <label>本地 PIN <span class="req">*</span></label>
+        <div class="pin"><input maxlength="1" value="1"><input maxlength="1" value="2"><input maxlength="1" value="3"><input maxlength="1" value="4"></div>
+        <div class="hint">首次运行时设置，PBKDF2-SHA256 存储 hash。原型中任意 4 位均可通过。</div>
+      </div>
+      ${afterOp?`<div class="warnbar nf"><div>提权成功后将<b>自动继续</b>刚才被拦截的操作：${OPS[afterOp]?.t||afterOp}</div></div>`:''}
+    </div>
+    <div class="m-ft"><button class="btn btn-ghost" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" id="doElev">确认提权</button></div>`);
+  $$('#rolePick .role-opt').forEach(o=>o.onclick=()=>{
+    $$('#rolePick .role-opt').forEach(x=>x.classList.remove('sel')); o.classList.add('sel'); pick=o.dataset.r;
+    $('#pinField').style.display = pick==='viewer'?'none':'';
+  });
+  $('#doElev').onclick = ()=>{
+    const old = state.role;
+    state.role = pick;
+    state.elevUntil = Date.now() + 30*60*1000;
+    applyPerms(); tickElev(); closeModal();
+    if(pick==='viewer'){ toast('ok','已降权为「只读」','所有变更类操作已锁定'); audit('auth.de_elevate','session','L0','成功','用户主动降权'); }
+    else { toast('ok',`已提权为「${ROLES[pick].full}」`,'有效期 30 分钟，到期自动回收'); audit('auth.elevate','session','L0','成功',`${old} → ${pick}，PIN 校验通过，TTL 1800s`); }
+    if(afterOp && can(document.querySelector(`[data-op="${afterOp}"]`)?.dataset.perm||'operator')){
+      setTimeout(()=>runOp(afterOp, document.querySelector(`[data-op="${afterOp}"]`)), 260);
+    }
+  };
+}
+
+/* 高危确认弹窗 */
+function openConfirm(op, btn){
+  const meta = OPS[op] || { t:op, impact:['该操作将改变系统状态'] };
+  const lv = btn.dataset.danger;
+  const isL3 = lv==='L3';
+  const needReason = isL3;
+  openModal(`
+    <div class="m-hd"><div class="mi" style="background:${isL3?'var(--danger-tint)':'var(--warning-tint)'};color:${isL3?'var(--danger)':'var(--warning)'}">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg></div>
+      <div><h3>${meta.t}</h3><div class="msub">危险等级 <b style="color:${DANGER[lv].color}">${lv} ${DANGER[lv].label}</b> · 执行者 ${ROLES[state.role].full} · 将写入审计</div></div></div>
+    <div class="m-bd">
+      ${isL3?`<div class="warnbar dg"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;margin-top:1px"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg><div><b>极高危操作</b>：可能造成不可逆的数据或环境变更。请逐条确认下方影响面，并键入操作名以解锁确认按钮。</div></div>`:''}
+      <div class="impact"><div class="it">影响面清单（${meta.impact.length} 项）</div><ul>${meta.impact.map(i=>`<li><span>${i}</span></li>`).join('')}</ul></div>
+      ${meta.confirmWord?`<div class="field"><label>请键入 <b class="mono" style="color:var(--danger)">${meta.confirmWord}</b> 以确认 <span class="req">*</span></label>
+        <input class="inp mono" id="cw" placeholder="${meta.confirmWord}" autocomplete="off"></div>`:''}
+      ${needReason?`<div class="field"><label>变更原因 <span class="req">*</span></label>
+        <textarea class="inp" id="rsn" placeholder="例如：修复 xxx 缺陷 / 按变更单 CHG-2026-0831 执行"></textarea>
+        <div class="hint">原因将随审计记录永久留存（保留 180 天，哈希链防篡改）。</div></div>`:''}
+    </div>
+    <div class="m-ft"><button class="btn btn-ghost" onclick="closeModal()">取消</button>
+      <button class="btn ${isL3?'btn-danger':'btn-primary'}" id="doAct" ${meta.confirmWord||needReason?'disabled':''}>确认执行</button></div>`, isL3);
+
+  const chk = ()=>{
+    let ok = true;
+    if(meta.confirmWord) ok = ok && $('#cw').value.trim()===meta.confirmWord;
+    if(needReason) ok = ok && $('#rsn').value.trim().length>=4;
+    $('#doAct').disabled = !ok;
+  };
+  if($('#cw')) $('#cw').oninput = chk;
+  if($('#rsn')) $('#rsn').oninput = chk;
+  $('#doAct').onclick = ()=>{
+    const reason = $('#rsn')?.value.trim() || '二次确认已通过';
+    closeModal(); execute(op, btn, reason);
+  };
+}
+
+/* ---------- 操作执行 ---------- */
+function runOp(op, btn){
+  if(!btn) return;
+  const perm = btn.dataset.perm || 'viewer';
+  const lv   = btn.dataset.danger || 'L0';
+  if(!can(perm)){                                  // 权限不足 → 唤起提权，成功后自动续跑
+    audit(op, btn.textContent.trim(), lv, '拒绝', `权限不足：当前 ${state.role}，需要 ${perm}`);
+    toast('err','权限不足，已拦截',`需要「${ROLES[perm].name}」角色，正在唤起提权`);
+    openElevate(op); return;
+  }
+  if(state.locked && ['stop_dev','start_prod','apply_desired','restart_dev','start_svc','restart_svc'].includes(op)){
+    toast('warn','已有操作进行中，请稍候','ActionLock 幂等保护 · 同族按钮已禁用'); return;
+  }
+  if(lv==='L2' || lv==='L3'){ openConfirm(op, btn); return; }
+  execute(op, btn, lv==='L1'?'轻确认（5s 可撤销）':'—');
+}
+
+function execute(op, btn, reason){
+  const lv = btn.dataset.danger || 'L0';
+  const label = btn.textContent.trim();
+
+  /* 需要跑 Pipeline 的操作 */
+  if(['start_prod','apply_desired','stop_dev','restart_dev'].includes(op)){
+    state.locked = true; $('#lockState').textContent='执行中（已加锁）'; $('#lockState').className='badge b-warn';
+    $$('[data-op]').forEach(b=>{ if(b!==btn) b.classList.add('locked'); });
+    btn.classList.add('busy');
+    runPipeline(op, reason);
+    return;
+  }
+
+  /* 普通操作 */
+  const undoable = lv==='L1' && ['clear_log','clean_logs','silence','ack','fix_redis','start_redis','backup_now','start_svc','restart_svc'].includes(op);
+  const ms = (Math.random()*900+180).toFixed(0)+'ms';
+  audit(op, label, lv, '成功', reason, ms);
+  const msgs = {
+    fix_redis:['ok','已执行推荐修复：启动 Redis','未找到 redis-server.exe，已打开安装引导'],
+    start_redis:['ok','Redis 启动指令已下发','探测 redis-server.exe / Memurai 服务'],
+    ack:['ok','告警已确认','聚合事件下全部 6 条同根因告警一并确认'],
+    silence:['ok','已创建静默窗口','期间告警仅记录，不通知（维护窗口模式）'],
+    clear_log:['warn','日志已清空','当前视图 418 行已清除，落盘文件保留'],
+    clean_logs:['ok','已清理历史日志','释放 2.4 GB，磁盘饱和度 81% → 76%'],
+    backup_now:['ok','备份任务已提交','复用 fastapi_app/services/backup orchestrator'],
+    verify_chain:['ok','哈希链校验通过','7 条记录，链完整，未检出篡改'],
+    export_audit:['ok','审计流水已导出','audit_20260831.csv · 7 条记录'],
+    export_log:['ok','日志已导出','server_manager_20260831.log'],
+    export_diag:['ok','诊断包已生成','含配置快照、最近 500 行日志、服务状态、指标 1h'],
+    export_alerts:['ok','告警已导出','alerts_20260831.csv · 5 条事件'],
+    verify_bk:['ok','备份校验通过','sha256 一致，manifest 完整，9 个分片齐备'],
+    save_cfg:['ok','配置已保存','2 项变更立即生效 · 原文件已备份'],
+    goto_logs:['ok','已跳转日志中心','已定位到告警时刻并高亮关键字'],
+    goto_metrics:['ok','已跳转指标视图','时间轴已对齐告警发生时刻'],
+    refresh:['ok','状态已刷新','sc / nssm 实时探测完成'],
+    kill_proc:['warn','进程已终止','进程树 1 个节点'],
+    kill_port:['warn','端口占用已清理','终止 pid 及其子进程树'],
+    restore:['err','恢复流程已启动','已创建恢复前快照，可回滚'],
+    rollback:['err','回滚流程已启动','数据库降级 2 revisions'],
+    uninstall_svc:['err','服务已卸载','erp-prod 已从 Windows 服务移除'],
+    reset_cfg:['err','配置已重置','原配置备份为 *.reset.bak'],
+    reinstall_svc:['ok','服务重装完成','已重新探测并写入依赖'],
+    deploy:['ok','发布流程已启动','5 步 Pipeline 执行中'],
+    rules:['ok','规则管理已打开','8 条规则：4 条 P1 症状 + 4 条 P3 饱和度'],
+    kw_rules:['ok','关键字规则已打开','1 条启用：Traceback → P2'],
+    download_bk:['ok','备份导出中','216.4 MB'],
+    abort_pipe:['warn','已请求中断流程','当前步骤完成后停止，不自动回滚']
+  };
+  const m = msgs[op] || ['ok','操作已执行', label];
+  if(op==='goto_logs'){ nav('logs'); }
+  if(op==='goto_metrics'){ nav('overview'); }
+  toast(m[0], m[1], m[2], undoable?op:null);
+}
+
+/* ---------- Pipeline 模拟 ---------- */
+const PIPES = {
+  start_prod: [['停止开发模式进程树','终止 pid 18420 / 7336，释放 :5002 :3000'],['探测服务依赖','发现 postgresql-x64-16，写入 DependOnService'],['安装/校验 NSSM 服务','erp-prod / erp-arq 注册项校验通过'],['启动 erp-prod','等待 RUNNING（timeout 30s）'],['启动 erp-arq','Redis 不可用 → 启动失败']],
+  apply_desired:[['计算收敛计划','当前 dev → 目标 '+'prod'+'，需 5 步'],['进入 SWITCHING 持锁','拒绝并发转移'],['停止对侧模式','开发模式已停止'],['启动目标模式','NSSM 服务启动中'],['健康校验','/api/health 探测']],
+  stop_dev:  [['终止 Vite 进程树','pid 7336 + 1 子进程'],['终止 FastAPI 进程树','pid 18420'],['释放端口',':5002 :3000 已释放'],['状态机转移','DEV → IDLE']],
+  restart_dev:[['停止现有进程','pid 18420 / 7336'],['清理端口占用',':5002 :3000'],['启动 FastAPI','uvicorn --reload'],['健康检查','/api/health 200 OK'],['启动 Vite','vite ready']]
+};
+function runPipeline(op, reason){
+  const steps = PIPES[op] || PIPES.stop_dev;
+  const trace = Math.random().toString(16).slice(2,10);
+  $('#ocPipeline').style.display='block';
+  $('#pipeTrace').textContent = 'trace='+trace;
+  $('#pipeSteps').innerHTML = steps.map((s,i)=>
+    `<div class="step pend" data-i="${i}"><div class="sdot">${i+1}</div><div class="sbody"><div class="st">${s[0]}<span class="ms">—</span></div><div class="sd">等待执行</div></div></div>`).join('');
+  if(state.page!=='overview' && state.page!=='services') nav('overview');
+  let i=0;
+  const next=()=>{
+    if(i>0){
+      const prev=$(`#pipeSteps .step[data-i="${i-1}"]`);
+      const fail = (op==='start_prod' && i-1===steps.length-1);
+      prev.className = 'step '+(fail?'fail':'done');
+      prev.querySelector('.sdot').textContent = fail?'!':'✓';
+      prev.querySelector('.ms').textContent = (Math.random()*3+0.4).toFixed(2)+'s';
+      prev.querySelector('.sd').textContent = steps[i-1][1];
+      if(fail){ finish(false, trace, steps[i-1][0]); return; }
+    }
+    if(i>=steps.length){ finish(true, trace); return; }
+    const cur=$(`#pipeSteps .step[data-i="${i}"]`);
+    cur.className='step run'; cur.querySelector('.sd').textContent='执行中…';
+    i++; setTimeout(next, 700+Math.random()*500);
+  };
+  next();
+
+  function finish(ok, tr, failStep){
+    state.locked=false;
+    $('#lockState').textContent='空闲'; $('#lockState').className='badge b-brand';
+    $$('[data-op]').forEach(b=>b.classList.remove('busy'));
+    applyPerms();
+    if(ok){
+      audit('pipeline.run', op, 'L2', '成功', reason+' · '+steps.length+' 步全部成功', (steps.length*1.4).toFixed(1)+'s');
+      toast('ok','收敛完成：'+steps.length+'/'+steps.length+' 步成功','trace='+tr+' · 已写入审计');
+      if(op==='stop_dev'){ setMode('idle'); }
+      if(op==='start_prod'||op==='apply_desired'){ setMode('prod'); }
+      if(op==='restart_dev'){ setMode('dev'); }
+    }else{
+      audit('pipeline.run', op, 'L2', '失败', `步骤「${failStep}」失败：Redis 不可用（依赖前置未满足）`, (steps.length*1.4).toFixed(1)+'s');
+      toast('err','流程失败于步骤：'+failStep,'已保留前序步骤，不自动回滚 · 见 runbook');
+      nav('alerts');
+    }
+  }
+}
+
+/* ---------- 模式切换视觉 ---------- */
+function setMode(m){
+  const badge=$('#modeBadge'), txt=$('#modeText'), sb=$('#sbText');
+  $('#ocDev').className='oc-card'+(m==='dev'?' on':' dim');
+  $('#ocProd').className='oc-card'+(m==='prod'?' on':' dim');
+  if(m==='idle'){ badge.className='mode-badge idle'; txt.textContent='全部已停止'; sb.textContent='空闲 · 无运行中的服务'; $('#chipApi').classList.add('off'); $('#chipWeb').classList.add('off'); $('#curState').textContent='当前：停机'; }
+  if(m==='dev'){ badge.className='mode-badge'; txt.textContent='开发模式运行中'; sb.textContent='开发模式运行中 · API 18420 · WEB 7336'; $('#chipApi').classList.remove('off'); $('#chipWeb').classList.remove('off'); $('#curState').textContent='当前：开发模式'; }
+  if(m==='prod'){ badge.className='mode-badge warn'; txt.textContent='生产模式（部分降级）'; sb.textContent='生产模式 · erp-prod RUNNING · erp-arq FAILED'; $('#chipApi').classList.remove('off'); $('#chipWeb').classList.remove('off'); $('#curState').textContent='当前：生产模式'; }
+}
+
+/* ---------- 路由 ---------- */
+const META = {
+  overview:['总览驾驶舱','黄金四指标 · 三层健康 · 一键操作'],
+  services:['服务编排','期望态收敛 · 依赖拓扑 · 流程编排'],
+  alerts:['监控告警','症状化规则 · 事件聚合 · 抑制静默'],
+  logs:['日志中心','多源分流 · 关键字规则 · 虚拟滚动'],
+  deploy:['部署发布','Pipeline 驱动 · 版本与回滚'],
+  backup:['备份恢复','envbak v3.0 · 加密 · 一键恢复'],
+  config:['配置中心','schema 校验 · 版本迁移 · diff 预览'],
+  access:['权限与审计','RBAC 三级 · JIT 提权 · 哈希链审计']
+};
+function nav(p){
+  state.page=p;
+  $$('.nav-item[data-page]').forEach(b=>b.classList.toggle('active', b.dataset.page===p));
+  $$('.page').forEach(s=>s.classList.toggle('active', s.id==='page-'+p));
+  $('#crumb').textContent=META[p][0]; $('#crumbSub').textContent=META[p][1];
+  $('.content').scrollTop=0;
+  if(p==='overview') drawSparks();
+}
+
+/* ---------- 事件绑定 ---------- */
+$$('.nav-item[data-page]').forEach(b=>b.onclick=()=>nav(b.dataset.page));
+document.addEventListener('click', e=>{
+  const jump = e.target.closest('[data-page-jump]');
+  if(jump){ nav(jump.dataset.pageJump); return; }
+  const opBtn = e.target.closest('[data-op]');
+  if(opBtn){ runOp(opBtn.dataset.op, opBtn); return; }
+  const lay = e.target.closest('.layer-hd');
+  if(lay){ lay.parentElement.classList.toggle('open'); return; }
+  const ae = e.target.closest('.ae-hd');
+  if(ae){ ae.parentElement.classList.toggle('open'); return; }
+  const src = e.target.closest('.src-item');
+  if(src){ $$('.src-item').forEach(s=>s.classList.remove('active')); src.classList.add('active'); return; }
+  const sw = e.target.closest('.sw');
+  if(sw){ if(sw.dataset.disabled==='1'){ toast('err','权限不足','该配置项需要「管理员」角色'); return; } sw.classList.toggle('on'); return; }
+  const sg = e.target.closest('.seg button');
+  if(sg){
+    Array.from(sg.parentElement.children).forEach(b=>b.classList.remove('on')); sg.classList.add('on');
+    if(sg.dataset.st){ state.desired=sg.dataset.st; showPlan(sg.dataset.st); }
+    return;
+  }
+});
+$('#navBtn').onclick = ()=>document.body.classList.toggle('nav-collapsed');
+const toggleTheme = ()=>{
+  const h=document.documentElement;
+  h.dataset.theme = h.dataset.theme==='dark'?'light':'dark';
+  drawSparks();
+  toast('ok','已切换为'+(h.dataset.theme==='dark'?'深色':'浅色')+'主题','CSS 变量热切换 · 零控件重建（v6 需销毁重建全部控件）');
+};
+$('#themeBtn').onclick = toggleTheme;
+$('#themeBtn2').onclick = toggleTheme;
+$('#roleChip').onclick = ()=>openElevate(null);
+$('#btnElevate').onclick = ()=>openElevate(null);
+$('#btnDeElevate').onclick = ()=>{
+  if(state.role==='viewer'){ toast('warn','当前已是最低权限','无需降权'); return; }
+  const old=state.role; state.role='viewer'; applyPerms(); tickElev();
+  toast('ok','已立即降权为「只读」','JIT 最小权限原则');
+  audit('auth.de_elevate','session','L0','成功',`${old} → viewer，用户主动降权`);
+};
+
+/* 期望态收敛计划预览 */
+function showPlan(st){
+  const cur = $('#curState').textContent.includes('开发')?'dev':($('#curState').textContent.includes('生产')?'prod':'idle');
+  if(st===cur){ $('#planBox').style.display='none'; toast('warn','目标态与当前态一致','无需收敛，计划为空'); return; }
+  const plans = {
+    idle:[['停止开发模式进程树','终止 pid 18420 / 7336'],['释放端口',':5002 :3000'],['状态机转移','→ IDLE']],
+    dev: [['停止生产服务','erp-prod / erp-arq → STOPPED'],['清理端口占用',':5002 :3000'],['启动 FastAPI','uvicorn --reload'],['健康检查','/api/health'],['启动 Vite','npm run dev']],
+    prod:[['停止开发模式','终止 pid 18420 / 7336'],['探测服务依赖','写入 DependOnService'],['校验 NSSM 注册','erp-prod / erp-arq'],['启动 erp-prod','等待 RUNNING'],['启动 erp-arq','依赖 Redis']]
+  };
+  const p = plans[st];
+  $('#planBox').style.display='block';
+  $('#planCount').textContent=p.length;
+  $('#planSteps').innerHTML = p.map((s,i)=>`<div class="step pend"><div class="sdot">${i+1}</div><div class="sbody"><div class="st">${s[0]}</div><div class="sd">${s[1]}</div></div></div>`).join('');
+}
+
+/* ---------- 定时器 ---------- */
+setInterval(()=>{
+  const d=new Date();
+  $('#sbClock').textContent=[d.getHours(),d.getMinutes(),d.getSeconds()].map(n=>String(n).padStart(2,'0')).join(':');
+  tickElev();
+},1000);
+setInterval(()=>{
+  /* 模拟 psutil 2s 采样：指标微抖动 */
+  const lat=(80+Math.random()*18).toFixed(0), qps=(38+Math.random()*10).toFixed(0), err=(1.4+Math.random()*0.9).toFixed(1);
+  $('#kpiLat').innerHTML=lat+'<small>ms</small>';
+  $('#kpiQps').innerHTML=qps+'<small>req/s</small>';
+  $('#kpiErr').innerHTML=err+'<small>%</small>';
+  procs.forEach(p=>{ p[2]=Math.max(0.4,Math.min(96,p[2]+(Math.random()-.5)*6)); });
+  if(state.page==='overview'){ renderProcs(); applyPerms(); }
+},2000);
+let up=5047;
+setInterval(()=>{ up++; const h=String(Math.floor(up/3600)).padStart(2,'0'),m=String(Math.floor(up%3600/60)).padStart(2,'0'),s=String(up%60).padStart(2,'0'); $('#devUptime').textContent=`${h}:${m}:${s}`; },1000);
+
+/* ---------- 初始化 ---------- */
+renderAudit(); renderTL(); renderProcs(); renderLogs(); drawSparks(); applyPerms(); nav('overview');
+setTimeout(()=>toast('warn','P1 告警：Redis 不可用，任务队列能力丧失','已抑制 2 条下游告警 · 点击「监控告警」查看 runbook'),900);
+setTimeout(()=>toast('','当前为「只读」角色，变更类按钮已锁定','点击任一锁定按钮或右上角角色徽章即可提权体验'),2200);
+</script>
+</body>
+</html>

@@ -6,7 +6,7 @@ import ast
 import contextlib
 import json
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from datetime import time as time_type
 from decimal import Decimal
 from uuid import UUID
@@ -306,7 +306,7 @@ async def execute_legacy_backup_to_bytes(
     from fastapi_app.shared_models import Base
     backup_data = {
         'version': '1.0',
-        'exported_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'exported_at': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S'),
         'exported_by': user.username if hasattr(user, 'username') else str(user.id),
         'remark': remark,
         'tables': {},

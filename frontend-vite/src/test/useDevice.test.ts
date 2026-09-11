@@ -141,7 +141,7 @@ describe('useDevice', () => {
     expect(isMobileDevice()).toBe(false)
   })
 
-  it('Capacitor 环境变量强制移动端', async () => {
+  it('Capacitor 已摘除：桌面 Chrome（无触屏）不再强制移动端', async () => {
     vi.stubEnv('VITE_CAPACITOR', '1')
     vi.stubGlobal('navigator', {
       userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0',
@@ -154,9 +154,9 @@ describe('useDevice', () => {
       matchMedia: () => ({ matches: false, addEventListener: () => {} }),
     })
     vi.stubGlobal('document', {})
-    const { isMobileDevice, isCapacitor } = await loadModule()
-    expect(isCapacitor()).toBe(true)
-    expect(isMobileDevice()).toBe(true)
+    const { isMobileDevice } = await loadModule()
+    // VITE_CAPACITOR 已不再参与设备判定（2026-08-31 摘除 Capacitor 全链路）
+    expect(isMobileDevice()).toBe(false)
   })
 
   it('UA-CH userAgentData.mobile=true 判定为移动端', async () => {

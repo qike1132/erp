@@ -216,3 +216,15 @@ dist_v6/
 /.resultverify/
 # 运行时上传文件
 /static/uploads/
+
+# Redis 生产配置含真实密码，禁止入库（模板见 redis.production.conf.template）
+config/redis.production.conf
+
+# 敏感环境变量（含生产凭据，禁止提交）
+.env.production
+.env.local
+
+# 前端构建交换/历史产物目录（纯生成物，不入库；正式产物见 frontend-vite/dist/）
+/frontend-vite/dist-new/
+/frontend-vite/dist_prev_*/
+/backups/frontend-dist-*/

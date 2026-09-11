@@ -104,11 +104,37 @@ def _is_redis_up(port: int) -> bool:
         return False
 
 
+# 健康探针必须直连本机，绝不走系统代理。
+# 根因(2026-09-10 实证): 本机设置了 HTTP_PROXY/HTTPS_PROXY=127.0.0.1:<port>(代理客户端)
+# 且无 NO_PROXY，urllib 默认会读取系统代理——包括 Windows 注册表代理设置——导致
+# 探测 127.0.0.1:5002 的 /api/health 被路由进代理。代理客户端抖动时健康检查间歇性
+# 失败，触发下方「连续失败 20s → 强制重启」逻辑，形成后端重启风暴
+# (应用本身完全正常：被杀前最后一条日志距关停 0 秒、均为正常业务请求)。
+# ProxyHandler({}) 显式清空代理，保证探针永远直连。
+_OPENER_DIRECT = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+# 健康检查失败原因留痕的节流间隔。此前 _http_ok 静默吞掉异常，排障时完全看不出
+# 失败原因（本次就是靠排除法才定位到代理），必须留痕。
+_HEALTH_FAIL_LOG_INTERVAL = 60.0
+_last_health_fail_log = 0.0
+
+
+def _log_health_fail(err: BaseException) -> None:
+    """健康检查失败原因留痕（60s 节流，避免刷屏）。"""
+    global _last_health_fail_log
+    now = time.monotonic()
+    if now - _last_health_fail_log < _HEALTH_FAIL_LOG_INTERVAL:
+        return
+    _last_health_fail_log = now
+    print(f"[prod_runner] 健康检查失败(60s 内不重复记录): {type(err).__name__}: {err}")
+
+
 def _http_ok(url: str, timeout: float = 2.0) -> bool:
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as resp:  # nosec B310
+        with _OPENER_DIRECT.open(url, timeout=timeout) as resp:  # nosec B310
             return resp.status == 200
-    except (urllib.error.URLError, OSError, TimeoutError):
+    except (urllib.error.URLError, OSError, TimeoutError) as e:
+        _log_health_fail(e)
         return False
 
 

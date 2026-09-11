@@ -81,7 +81,7 @@ async def restore_non_dependent_components(
                         results[component_name] = result
 
             if sync_tasks:
-                loop = asyncio.get_event_loop()
+                loop = asyncio.get_running_loop()
                 sync_results = await asyncio.gather(
                     *[loop.run_in_executor(None, lambda t=t: t[1]) for t in sync_tasks],
                     return_exceptions=True
@@ -371,3 +371,64 @@ async def is_restore_in_progress() -> bool:
     except Exception as e:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断
         logger.warning(f'检查恢复锁失败: {e}（fail-closed，视为有任务）')
         return True
+
+
+# 进度键的终态集合（与 core.backup_progress complete/fail_progress 写入值一致）
+_RESTORE_TERMINAL_STATUSES = ('completed', 'completed_with_warnings', 'failed')
+
+
+async def get_restore_lock_info() -> dict | None:
+    """读取还原锁持有者信息（holder + 剩余 TTL），供 409 响应附带诊断上下文。
+
+    Redis 不可用或锁不存在时返回 None，调用方需做 None 检查。
+    """
+    try:
+        from fastapi_app.core.backup_progress import _get_redis
+        client = await _get_redis()
+        if client is None:
+            return None
+        holder = await client.get(_RESTORE_LOCK_KEY)
+        if not holder:
+            return None
+        ttl = await client.ttl(_RESTORE_LOCK_KEY)
+        return {'holder': holder, 'ttl_seconds': max(int(ttl), 0)}
+    except Exception as e:  # broad-except: 读锁信息失败不影响主流程
+        logger.warning(f'读取还原锁信息失败: {e}')
+        return None
+
+
+async def is_stale_restore_lock(holder: str | None) -> bool:
+    """判断还原锁是否为崩溃残留的陈旧锁（仅对持进度键的 task_id 可判定）。
+
+    判定依据：持有者对应的进度键已处于终态（completed/failed 等），说明该还原
+    任务早已结束而锁未释放——典型场景是还原执行中 API 进程被重启/杀死，
+    finally 释放逻辑未及执行。同步路径的 purpose（如 sync_import）无进度键，
+    无法判定，返回 False（保守：仍按真实占用处理，等 TTL 自然过期）。
+    """
+    if not holder:
+        return False
+    try:
+        from fastapi_app.core.backup_progress import get_progress
+        progress = await get_progress(holder)
+    except Exception as e:  # broad-except: 判定失败按非陈旧处理
+        logger.warning(f'读取还原锁持有者进度失败（{holder}）: {e}')
+        return False
+    if progress is None:
+        return False
+    return progress.get('status') in _RESTORE_TERMINAL_STATUSES
+
+
+async def clear_stale_restore_lock(holder: str) -> bool:
+    """清除确认已陈旧的还原锁（Lua 校验，仅当锁仍由 holder 持有时才删除）。"""
+    try:
+        from fastapi_app.core.backup_progress import _get_redis
+        client = await _get_redis()
+        if client is None:
+            return False
+        result = await client.eval(_RELEASE_LOCK_LUA, 1, _RESTORE_LOCK_KEY, holder)
+        if result:
+            logger.warning(f'已清除陈旧还原锁（holder={holder}，任务已终态但锁未释放）')
+        return bool(result)
+    except Exception as e:  # broad-except: 清锁失败由调用方按 409 兜底
+        logger.warning(f'清除陈旧还原锁失败（{holder}）: {e}')
+        return False

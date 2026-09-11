@@ -9,6 +9,7 @@
 - POST /async-restore-by-name/{name} 异步恢复：从服务器文件恢复
 """
 import asyncio
+import gzip
 import json
 import logging
 import os
@@ -47,10 +48,13 @@ router = APIRouter()
 
 
 async def _redis_unavailable() -> bool:
-    """探测 Redis 是否可用（用于区分 409 锁被占与 503 锁服务故障）。"""
+    """探测 Redis 是否可用（用于区分 409 锁被占与 503 锁服务故障）。
+
+    委托 core.backup_progress.is_redis_available 统一实现。
+    """
     try:
-        from fastapi_app.core.backup_progress import _get_redis
-        return await _get_redis() is None
+        from fastapi_app.core.backup_progress import is_redis_available
+        return not await is_redis_available()
     except Exception:  # broad-except: 探测失败按不可用处理（fail-closed）
         return True
 
@@ -99,9 +103,13 @@ async def _read_backup_file(file: UploadFile) -> tuple[bytes, bool, str]:
     if not content:
         raise HTTPException(status_code=400, detail='备份文件内容为空')
     is_zip = filename.endswith('.zip') or filename.endswith('.zip.enc') or content[:4] == b'PK\x03\x04'
-    is_json = filename.endswith('.json') or filename.endswith('.gz') or (content[:1] == b'{' and content.strip().endswith(b'}'))
-    if not is_zip and not is_json:
+    is_json = filename.endswith('.json') or (content[:1] == b'{' and content.strip().endswith(b'}'))
+    is_gz = filename.endswith('.gz') or (content[:2] == b'\x1f\x8b')
+    if not is_zip and not is_json and not is_gz:
         raise HTTPException(status_code=400, detail='无法识别的备份文件格式')
+    if is_gz:
+        content = await asyncio.to_thread(gzip.decompress, content)
+        is_json = True
     return content, is_zip, filename
 
 
@@ -354,9 +362,10 @@ async def async_import_backup(
     content, is_zip, filename = await _read_backup_file(file)
     decrypt_password = _get_encryption_password(None, x_backup_password)
 
-    # 并发检查：避免同时启动多个恢复任务
-    if await backup_service.is_restore_in_progress():
-        raise HTTPException(status_code=409, detail='另一个恢复操作正在执行中，请稍后重试')
+    # 并发检查：避免同时启动多个恢复任务。委托共享助手区分「Redis 故障(503)」
+    # 与「锁真实占用(409)」，并自愈崩溃残留的陈旧锁（同 actions._check_task_mutex）
+    from fastapi_app.api.v1.endpoints.backup._mutex import ensure_restore_slot_free
+    await ensure_restore_slot_free()
 
     from fastapi_app.core.backup_progress import create_progress, generate_task_id
     task_id = generate_task_id()
@@ -394,9 +403,9 @@ async def async_restore_server_backup(
     if not confirm:
         raise HTTPException(status_code=400, detail='恢复操作需要二次确认，请传入 confirm=true')
 
-    # 并发检查
-    if await backup_service.is_restore_in_progress():
-        raise HTTPException(status_code=409, detail='另一个恢复操作正在执行中，请稍后重试')
+    # 并发检查（同 async_import_backup：区分 Redis 故障与真实占用 + 陈旧锁自愈）
+    from fastapi_app.api.v1.endpoints.backup._mutex import ensure_restore_slot_free
+    await ensure_restore_slot_free()
     safe_name = Path(filename).name
     if safe_name != filename:
         raise HTTPException(status_code=400, detail='无效的文件名')

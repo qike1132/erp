@@ -77,10 +77,6 @@ class Settings(BaseSettings):
     # ARQ 结果存储沿用 broker 实例（REDIS_BROKER_URL），未配置时使用通用 Redis
     REDIS_RESULT_URL: str = os.getenv("REDIS_RESULT_URL", "")
 
-    # FCM 推送配置（可选，未设置时降级为仅 WebSocket 通知）
-    FCM_SERVICE_ACCOUNT_PATH: str = os.getenv("FCM_SERVICE_ACCOUNT_PATH", "")
-    FCM_ENABLED: bool = os.getenv("FCM_ENABLED", "false").lower() in ("true", "1", "yes")
-
     # CORS配置 - 从环境变量读取允许的源，默认仅允许本地访问
     # 包含 Nginx 统一入口（端口80）、Python HTTP 服务（端口8000/8080）、
     # 直接访问模式（端口5002）以及 Vue/Vite 前端（端口3000）
@@ -106,16 +102,13 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     # 刷新令牌有效期（天），默认7天
     REFRESH_TOKEN_EXPIRE_DAYS: int = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", 7))
-    # httpOnly JWT Cookie 最大有效期（秒），默认31天
-    COOKIE_MAX_AGE: int = int(os.getenv("COOKIE_MAX_AGE", 2678400))
+    # httpOnly JWT Cookie 最大有效期（秒），默认1天，配合 refresh token 续期
+    COOKIE_MAX_AGE: int = int(os.getenv("COOKIE_MAX_AGE", 86400))
 
     # 允许的主机名 - 用于 TrustedHostMiddleware 和 CSRF Origin/Referer 校验
     # 生产环境必须通过 ALLOWED_HOSTS 环境变量显式设置（如 "erp.example.com,erp.example.cn"）
     # 开发环境默认允许所有主机（"*"），生产环境必须限制为具体域名
-    ALLOWED_HOSTS: list[str] = os.getenv(
-        "ALLOWED_HOSTS",
-        "*"  # 开发环境允许所有主机；生产环境必须设置具体域名
-    ).split(",")
+    ALLOWED_HOSTS: list[str] = [h for h in os.getenv("ALLOWED_HOSTS", "").split(",") if h]
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -132,6 +125,9 @@ class Settings(BaseSettings):
             )
         # 生产环境安全配置强校验：防止运维漏配导致安全控制失效
         _is_production = os.getenv("APP_ENV") == "production"
+        if not _is_production and not self.ALLOWED_HOSTS:
+            # 开发环境未配置 ALLOWED_HOSTS 时默认允许所有主机，便于本地调试
+            self.ALLOWED_HOSTS = ["*"]
         if _is_production:
             # SECRET_KEY 必须为高强度密钥（长度 >= 32 字符），防止弱密钥被暴力破解后伪造 JWT
             if len(self.SECRET_KEY) < 32:
@@ -139,12 +135,12 @@ class Settings(BaseSettings):
                     "生产环境 SECRET_KEY 长度不足 32 字符，"
                     "请使用高强度随机密钥（如 openssl rand -hex 32 生成后注入）"
                 )
-            # ALLOWED_HOSTS 允许通配 "*"（家庭/内网 + 动态 IPv6 公网访问场景），
-            # 但必须显式配置至少一项，禁止为空，防止 TrustedHost 校验完全失效。
-            if not any(h.strip() for h in self.ALLOWED_HOSTS):
+            # ALLOWED_HOSTS 必须显式配置具体域名，禁止为空或使用通配 "*"，
+            # 防止 TrustedHost 校验完全失效或被绕过。
+            if not self.ALLOWED_HOSTS or "*" in self.ALLOWED_HOSTS:
                 raise RuntimeError(
-                    "生产环境（APP_ENV=production）ALLOWED_HOSTS 不能为空。"
-                    "允许所有主机用 \"*\"；需限定域名用 erp.example.com,erp.example.cn"
+                    "生产环境（APP_ENV=production）必须通过 ALLOWED_HOSTS 设置具体域名，"
+                    "如 \"erp.example.com,erp.example.cn\"，禁止为空或使用 \"*\"。"
                 )
             # 非对称模式（RS256/ES256）下私钥/公钥路径必须显式配置且文件存在（密钥移出仓库，由部署环境注入）
             if self.ALGORITHM in ("RS256", "ES256"):

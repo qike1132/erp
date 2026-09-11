@@ -39,13 +39,13 @@
           @load="thumbLoaded = true"
         />
         <span v-if="proj.status === 'completed'" class="cgl-card-status-badge">
-          <i class="fas fa-check-circle" aria-hidden="true" /> 已完成
+          <FontAwesomeIcon :icon="faCheckCircle" aria-hidden="true" /> 已完成
         </span>
       </div>
       <div v-else class="cgl-card-thumb cgl-card-thumb-placeholder">
-        <i class="fas fa-tshirt" aria-hidden="true" />
+        <FontAwesomeIcon :icon="faTshirt" aria-hidden="true" />
         <span v-if="proj.status === 'completed'" class="cgl-card-status-badge">
-          <i class="fas fa-check-circle" aria-hidden="true" /> 已完成
+          <FontAwesomeIcon :icon="faCheckCircle" aria-hidden="true" /> 已完成
         </span>
       </div>
     </div>
@@ -75,7 +75,7 @@
           title="编辑该打样项目"
           @click.stop="emit('edit', proj.id)"
         >
-          <i class="fas fa-pen" aria-hidden="true" /> 编辑
+          <FontAwesomeIcon :icon="faPen" aria-hidden="true" /> 编辑
         </button>
         <button
           v-if="proj.status === 'in_progress'"
@@ -84,7 +84,7 @@
           title="标记为已完成"
           @click.stop="emit('complete', proj.id)"
         >
-          <i class="fas fa-check" aria-hidden="true" /> 完成
+          <FontAwesomeIcon :icon="faCheck" aria-hidden="true" /> 完成
         </button>
         <button
           v-if="proj.status === 'in_progress'"
@@ -93,7 +93,7 @@
           title="取消该打样项目"
           @click.stop="emit('cancel', proj.id)"
         >
-          <i class="fas fa-times" aria-hidden="true" /> 取消
+          <FontAwesomeIcon :icon="faTimes" aria-hidden="true" /> 取消
         </button>
       </div>
     </div>
@@ -108,6 +108,7 @@
  * attrs 透传绑定（保持原 VirtualList 插槽内联写法），本组件不再重复绑定。
  */
 import { ref } from 'vue'
+import { faCheck, faCheckCircle, faPen, faTimes, faTshirt } from '@fortawesome/free-solid-svg-icons'
 import type { ProjectSummary } from '@/api/patternRoom'
 
 defineProps<{
@@ -267,7 +268,7 @@ function onThumbError(e: Event, proj: { product_image_url?: string | null }) {
   opacity: 1;
 }
 
-.cgl-card-thumb-placeholder i {
+.cgl-card-thumb-placeholder svg {
   font-size: 48px;
   color: var(--color-text-secondary);
   opacity: 0.5;

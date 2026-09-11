@@ -19,6 +19,7 @@ if TYPE_CHECKING:
         ProductAccessory,
         ProductFabric,
         ProductMaterial,
+        ProductRole,
     )
 
 
@@ -56,12 +57,21 @@ class Product(Base):
         "ProductMaterial", back_populates="product", uselist=False, cascade="all, delete-orphan",
         lazy="raise",
     )
+    # 全部填充物行（含各角色 role_id≠NULL 的行）；material 仅为产品级 1:1 兼容视图
+    material_rows: Mapped[list[ProductMaterial]] = relationship(
+        "ProductMaterial", lazy="raise", viewonly=True,
+        foreign_keys="ProductMaterial.product_id",
+    )
     fabrics: Mapped[list[ProductFabric]] = relationship(
         "ProductFabric", back_populates="product", cascade="all, delete-orphan",
         lazy="raise",
     )
     accessories: Mapped[list[ProductAccessory]] = relationship(
         "ProductAccessory", back_populates="product", cascade="all, delete-orphan",
+        lazy="raise",
+    )
+    roles: Mapped[list[ProductRole]] = relationship(
+        "ProductRole", back_populates="product", cascade="all, delete-orphan",
         lazy="raise",
     )
 
@@ -82,18 +92,21 @@ class Product(Base):
         }
 
     def has_bom(self):
-        """检查产品是否有BOM数据"""
-        has_material = self.material and self.material.cotton_usage and self.material.cotton_usage > 0
+        """检查产品是否有BOM数据（含各角色物料行）"""
+        has_material = any(
+            m.cotton_usage and m.cotton_usage > 0 for m in self.material_rows
+        )
         has_fabric = len(self.fabrics) > 0
         has_accessory = len(self.accessories) > 0
         return has_material or has_fabric or has_accessory
 
     def get_all_materials(self):
-        """获取产品所有物料（包括填充物、面料、辅料）"""
+        """获取产品所有物料（含各角色的填充物/面料/辅料）"""
         materials = []
 
-        if self.material and self.material.cotton_usage and self.material.cotton_usage > 0:
-            materials.append(self.material.to_dict())
+        for material in self.material_rows:
+            if material.cotton_usage and material.cotton_usage > 0:
+                materials.append(material.to_dict())
 
         for fabric in self.fabrics:
             materials.append(fabric.to_dict())

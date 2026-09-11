@@ -82,7 +82,8 @@ excludes = [
     'flasgger', 'waitress', 'gunicorn', 'fuzzywuzzy',
     # 本项目后端（不让 GUI 包进去）
     'fastapi_app',
-    'http.server',
+    # 注意：不要排除 'http.server'，它是 wsgiref.simple_server 的顶层依赖，
+    #       pywebview(webview/http.py) 启动时 import 它，排除会导致启动即崩
     'xmlrpc', 'xmlrpc.client', 'xmlrpc.server',
     'pydoc',
 ]

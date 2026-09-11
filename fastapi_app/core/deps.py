@@ -69,7 +69,7 @@ class _TTLCache:
             self._data.clear()
 
 
-_PERMISSION_CACHE = _TTLCache(ttl=30, maxsize=500)
+_PERMISSION_CACHE = _TTLCache(ttl=5, maxsize=500)
 
 async def _get_cached_user(user_id: int) -> User | None:
     cached = await _PERMISSION_CACHE.get(user_id)

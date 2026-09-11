@@ -511,11 +511,11 @@ body {
 }
 
 /*
- * 下拉面板瞬时显示：禁用 PrimeVue anchored-overlay 的 300ms 缩放/淡入动画。
- * 在表格上方的搜索框中逐键输入时，面板每次挂载/更新都会重播该动画并覆盖表格
- * 顶部行，视觉上表现为“表格闪烁”；改为瞬时显示后面板安静出现，不再闪烁。
+ * 注：曾经此处有 `.p-anchored-overlay-enter/leave-active { animation: none !important }`
+ * （fee97d9 引入，意图禁用 PrimeVue overlay 的 300ms 展开动画）。
+ * 但项目现以 unstyled 模式运行 PrimeVue（main.ts），styled CSS（含动画）根本不存在，
+ * 该规则无正面作用；反而会改写 Vue 过渡类的 computed style，
+ * 干扰 Transition 的完成检测，偶发导致下拉面板卡在 enter-from 不可见
+ * （产品页 BOM 配置联想下拉失效的成因之一，2026-09-11 移除）。
+ * 面板"逐键闪烁"问题已由 UiAutocomplete 的 searchDelayMs 防抖解决，无需禁动画。
  */
-.p-anchored-overlay-enter-active,
-.p-anchored-overlay-leave-active {
-  animation: none !important;
-}

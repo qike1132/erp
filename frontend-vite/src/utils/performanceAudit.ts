@@ -34,14 +34,29 @@ export function auditDOM(): DOMAuditResult {
 export function monitorReflowRepaint(durationMs = 10000): void {
   let reflowCount = 0
   const orig = window.getComputedStyle
-  window.getComputedStyle = function (elt: Element, pseudoElt?: string | null) { reflowCount++; return orig.call(window, elt, pseudoElt ?? null) }
-  if ('PerformanceObserver' in window) {
-    try {
-      const obs = new PerformanceObserver((list) => { for (const e of list.getEntries()) if (!((e as { hadRecentInput?: boolean }).hadRecentInput)) reflowCount++ })
-      obs.observe({ type: 'layout-shift', buffered: true })
-    } catch { /* 浏览器不支持 layout-shift 观察时降级忽略 */ }
+  // 恢复函数做成幂等，确保全局 API 不会被重复恢复或漏恢复
+  let restored = false
+  const restore = (): void => {
+    if (restored) return
+    restored = true
+    window.getComputedStyle = orig
   }
-  setTimeout(() => { window.getComputedStyle = orig; devLog(`[性能] 重排次数: ${reflowCount}`); if (reflowCount > 100) console.warn('[性能] 重排过多，建议用transform替代top/left') }, durationMs)
+  try {
+    window.getComputedStyle = function (elt: Element, pseudoElt?: string | null) { reflowCount++; return orig.call(window, elt, pseudoElt ?? null) }
+    if ('PerformanceObserver' in window) {
+      try {
+        const obs = new PerformanceObserver((list) => { for (const e of list.getEntries()) if (!((e as { hadRecentInput?: boolean }).hadRecentInput)) reflowCount++ })
+        obs.observe({ type: 'layout-shift', buffered: true })
+      } catch { /* 浏览器不支持 layout-shift 观察时降级忽略 */ }
+    }
+  } finally {
+    // 无论监测初始化是否抛异常，都在 durationMs 后恢复原 API 并输出结果
+    setTimeout(() => {
+      restore()
+      devLog(`[性能] 重排次数: ${reflowCount}`)
+      if (reflowCount > 100) console.warn('[性能] 重排过多，建议用transform替代top/left')
+    }, durationMs)
+  }
 }
 
 export function auditEventListeners(): { eventType: string; count: number }[] {

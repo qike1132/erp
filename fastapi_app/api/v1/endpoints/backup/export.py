@@ -486,6 +486,8 @@ async def get_backup_info(
     try:
         await _sweep_chunk_bundle_files()
         bundle_dest = _CHUNK_BUNDLE_DIR / f'{os.path.basename(backup_path)}.bundle'
+        if bundle_dest.exists():
+            bundle_dest.unlink()
         backup_path.rename(bundle_dest)
         bundle_id = await _register_chunk_bundle(
             bundle_dest, filename=filename, total_size=total_size,
@@ -630,7 +632,7 @@ async def export_backup_enhanced(
     增强的备份导出端点，支持Range请求头和分片下载
     基于 FileResponse 磁盘流式传输，由 Starlette 自动处理 Range 请求。
     """
-    datetime.now().strftime('%Y%m%d_%H%M%S')
+
     temp_files: list[str] = []
 
     def _register_temp_file(path: Path) -> Path:

@@ -1,15 +1,12 @@
 import axios from 'axios'
 import type { AxiosInstance, InternalAxiosRequestConfig, AxiosResponse, AxiosError } from 'axios'
-import { getAccessToken, setAccessToken } from '@/utils/secureStorage'
 import { devLog } from '@/utils/devLog'
 
 // TODO(技术栈优化): 本模块可考虑用原生 fetch 替代 axios 以减小打包体积。
-// 当前深度依赖 axios 特性（请求/响应拦截器、isAxiosError 类型守卫、retry 退避逻辑、
-// Capacitor 文件下载集成），直接替换风险较高，暂保留。
+// 当前深度依赖 axios 特性（请求/响应拦截器、isAxiosError 类型守卫、retry 退避逻辑），
+// 直接替换风险较高，暂保留。
 // 替换时需重写：CSRF token 注入、401 跳转/403 提示、文件上传(multipart)、
 // 文件下载(blob/arraybuffer)、502/503/504 重试退避。
-
-const isCap = !!import.meta.env.VITE_CAPACITOR
 
 let isRedirecting401 = false
 let isShowing403 = false
@@ -51,20 +48,16 @@ type RetryableAxiosConfig = InternalAxiosRequestConfig & {
 
 /**
  * 尝试用 refresh_token 刷新 access_token（单飞）。
- * - Web 端：后端用 refresh_token cookie 校验并自动回写新 access_token cookie
- * - 移动端：响应体带新 access_token，需同步更新内存中的 Bearer token
+ * Web 端：后端用 refresh_token cookie 校验并自动回写新 access_token cookie。
  * 成功返回 true，失败返回 false（由调用方决定是否登出）。
  */
 async function refreshAccessToken(): Promise<boolean> {
   if (!_refreshPromise) {
     _refreshPromise = (async () => {
       try {
-        const res = (await service.post('/auth/refresh', {}, {
+        await service.post('/auth/refresh', {}, {
           _skipAuthRefresh: true,
-        } as RetryableAxiosConfig)) as { access_token?: string } | null | undefined
-        if (isCap && res?.access_token) {
-          setAccessToken(res.access_token)
-        }
+        } as RetryableAxiosConfig)
         return true
       } catch {
         return false
@@ -79,26 +72,15 @@ async function refreshAccessToken(): Promise<boolean> {
 service.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   const method = config.method?.toLowerCase()
   if (method && ['post', 'put', 'delete', 'patch'].includes(method)) {
-    // CSRF Token 获取优先级：
-    //   Capacitor → localStorage('csrf_token') → 响应头缓存
-    //   PC 端     → 响应头缓存 → Cookie('fastapi_csrf_token')
     // PC 端登录是 Cookie 认证（无 Bearer），后端不会在响应头设置 X-CSRF-Token，
     // 需从 Cookie 兜底读取，否则首次 POST 请求会 403
-    const csrfToken = isCap
-      ? (localStorage.getItem('csrf_token') || _csrfCache || getCsrfFromCookie())
-      : (_csrfCache || getCsrfFromCookie())
+    const csrfToken = _csrfCache || getCsrfFromCookie()
     if (csrfToken) {
       config.headers['X-CSRF-Token'] = csrfToken
     }
   }
-  if (isCap) {
-    const accessToken = getAccessToken()
-    if (accessToken && !config.headers['Authorization']) {
-      config.headers['Authorization'] = `Bearer ${accessToken}`
-    }
-    if (import.meta.env.DEV) {
-      devLog(`[API] ${method?.toUpperCase()} ${config.baseURL}${config.url}`)
-    }
+  if (import.meta.env.DEV) {
+    devLog(`[API] ${method?.toUpperCase()} ${config.baseURL}${config.url}`)
   }
   return config
 })
@@ -108,21 +90,10 @@ service.interceptors.response.use(
     const csrfFromHeader = response.headers['x-csrf-token']
     if (csrfFromHeader) {
       _csrfCache = csrfFromHeader as string
-      if (isCap) {
-        localStorage.setItem('csrf_token', csrfFromHeader as string)
-      }
     }
     return response.data
   },
   async (error: AxiosError) => {
-    if (isCap && import.meta.env.DEV) {
-      console.error(`[API Error] ${error.config?.method?.toUpperCase()} ${error.config?.url}`, {
-        status: error.response?.status,
-        data: error.response?.data,
-        message: error.message,
-        code: error.code,
-      })
-    }
     if (error.response?.status === 401) {
       const config = error.config as RetryableAxiosConfig | undefined
       const isLoginRequest = config?.url?.includes('/auth/login') ?? false
@@ -203,7 +174,9 @@ export function get<T>(url: string, params?: Record<string, unknown>): Promise<T
   const key = _dedupeKey(url, params)
   const existing = _inflightGet.get(key)
   if (existing) return existing as Promise<T>
-  const p = executeWithRetry(() => service.get(url, { params }) as Promise<T>)
+  // 读接口快速失败：单次请求（axios 15s 超时即抛错），不做网络重试。
+  // 叠加重试会让 UI 的"加载中"最长挂约 48s；失败后由前端错误态 + 重试按钮兜底。
+  const p = service.get(url, { params }) as Promise<T>
   _inflightGet.set(key, p)
   // finally 会派生一个与原 Promise 同状态的新 Promise；若原请求失败（403/401/网络错误），
   // 必须 catch 这个派生 Promise，否则每次失败 GET 都会产生一次未处理的 Promise 拒绝（Uncaught (in promise) AxiosError）
@@ -240,8 +213,12 @@ export function del<T>(url: string): Promise<T> {
   return executeWriteWithRetry(() => service.delete(url) as Promise<T>)
 }
 
-export function upload<T>(url: string, formData: FormData, headers?: Record<string, string>): Promise<T> {
-  return service.post(url, formData, { headers }) as Promise<T>
+/**
+ * 文件上传。
+ * timeout 可覆盖全局 15s（Excel 解析 + 写暂存通常远超 15s，导入场景需显式放宽）。
+ */
+export function upload<T>(url: string, formData: FormData, headers?: Record<string, string>, timeout?: number): Promise<T> {
+  return service.post(url, formData, { headers, ...(timeout ? { timeout } : {}) }) as Promise<T>
 }
 
 /** POST 请求下载文件（用于需要 POST body 的文件下载场景） */
@@ -257,29 +234,6 @@ export async function postDownload(url: string, data: unknown, filename: string)
 }
 
 export function download(url: string, filename: string, params?: Record<string, unknown>): Promise<void> {
-  if (isCap) {
-    return executeWithRetry(() =>
-      service.get(url, { responseType: 'arraybuffer', params }).then(async (data: unknown) => {
-        const { Filesystem, Directory } = await import('@capacitor/filesystem')
-        const { Share } = await import('@capacitor/share')
-        const blob = new Blob([data as ArrayBuffer])
-        const base64 = await new Promise<string>((resolve) => {
-          const reader = new FileReader()
-          reader.onload = () => {
-            const dataUrl = reader.result as string
-            resolve(dataUrl.split(',')[1] ?? '')
-          }
-          reader.readAsDataURL(blob)
-        })
-        const result = await Filesystem.writeFile({
-          path: filename,
-          data: base64,
-          directory: Directory.Cache,
-        })
-        await Share.share({ url: result.uri, title: filename })
-      }),
-    )
-  }
   return executeWithRetry(() =>
     service.get(url, { responseType: 'blob', params }).then((blob: unknown) => {
       try {
@@ -302,7 +256,7 @@ export function download(url: string, filename: string, params?: Record<string, 
  *
  * 优先级（自上而下）：
  * 1. 已是 http/https 绝对路径 → 原样返回（直连对象存储等场景）
- * 2. Capacitor 模式 → 使用 VITE_STATIC_ORIGIN（移动端独立静态域名）
+ * 2. 显式配置 VITE_STATIC_ORIGIN → 使用该域名
  * 3. 浏览器环境 → 同源 /static，由 Vite proxy / nginx 反代转发到后端
  *    - Dev (Vite dev server) → vite.config.ts 的 /static proxy
  *    - Preview (Vite preview) → vite.config.ts 的 preview.proxy
@@ -314,7 +268,7 @@ export function resolveStaticUrl(url: string | null | undefined): string {
   if (!url) return ''
   if (url.startsWith('http') || url.startsWith('//')) return url
 
-  // 1) Capacitor / 显式配置的静态资源专用域名
+  // 1) 显式配置的静态资源专用域名
   const explicit = import.meta.env.VITE_STATIC_ORIGIN
   if (explicit) return explicit + url
 

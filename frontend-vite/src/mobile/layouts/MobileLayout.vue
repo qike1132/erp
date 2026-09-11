@@ -46,17 +46,27 @@ const quickActionsVisible = ref(false)
  * 将 SVG 字符串转换为 Vue 组件（运行时渲染，无需模板编译器）。
  * 解析 SVG 根元素的属性并通过 h() 渲染，内部子元素使用 innerHTML 设置。
  */
+// 安全说明：所有 SVG 字符串均来自下方 _tabDefs / _quickDefs / _quickSvg 等模块级常量，
+// 非用户输入，XSS 风险极低。sanitizeSvgInner 作为防御性校验，拒绝脚本/事件处理器等危险内容。
+function sanitizeSvgInner(html: string): string {
+  if (/<script|on\w+\s*=|javascript:|<iframe|<object|<embed/i.test(html)) {
+    throw new Error('[MobileLayout] SVG inner content contains disallowed markup')
+  }
+  return html
+}
+
 function createSvgIcon(svgString: string): Component {
   const m = svgString.match(/^<svg([^>]*)>([\s\S]*)<\/svg>$/)
   if (!m) throw new Error('Invalid SVG: ' + svgString.slice(0, 50))
   const attrStr = m[1] ?? ''
-  const innerHtml = m[2] ?? ''
+  const innerHtml = sanitizeSvgInner(m[2] ?? '')
   const attrs: Record<string, string> = {}
   for (const am of attrStr.matchAll(/([\w-]+)="([^"]*)"/g)) {
     if (am[1]) attrs[am[1]] = am[2] ?? ''
   }
   return markRaw(defineComponent({
     render() {
+      // innerHTML 内容经 sanitizeSvgInner 校验且源自模块级 SVG 常量，等价于 v-html 的安全用法
       return h('svg', { ...attrs, innerHTML: innerHtml })
     }
   }))

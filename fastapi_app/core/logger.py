@@ -8,7 +8,7 @@
 import logging
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
@@ -62,12 +62,12 @@ def setup_logging():
     ))
     root_logger.addHandler(console_handler)
 
-    # 文件处理器（JSON 格式，按天轮转，保留 30 天）
-    log_file = log_dir / f"fastapi_{datetime.now().strftime('%Y%m%d')}.log"
+    # 文件处理器（JSON 格式，按天轮转，保留 3 天）
+    log_file = log_dir / f"fastapi_{datetime.now(timezone.utc).strftime('%Y%m%d')}.log"
     file_handler = TimedRotatingFileHandler(
         log_file,
         when="midnight",
-        backupCount=30,
+        backupCount=3,
         encoding="utf-8",
     )
     file_handler.setLevel(logging.INFO)
@@ -95,7 +95,11 @@ def get_logger(name: str | None = None) -> structlog.stdlib.BoundLogger:
     return structlog.get_logger(name)
 
 
-# 初始化日志系统
+# TODO(P3): 副作用导入 - setup_logging() 在模块导入时自动执行，属于隐式副作用。
+# 理想方案是在 main.py lifespan 中显式调用 setup_logging()，但当前许多模块依赖
+# `from fastapi_app.core.logger import logger` 时日志系统已初始化，直接移除会
+# 导致日志未配置。保留自动调用以保证兼容性，后续重构应在 main.py 启动入口
+# 先调用 setup_logging()，再导入其他业务模块。
 setup_logging()
 
 # 默认 logger

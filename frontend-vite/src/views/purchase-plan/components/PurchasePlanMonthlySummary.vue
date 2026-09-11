@@ -47,6 +47,7 @@
                       <FontAwesomeIcon v-else icon="sort" class="sp-sort-muted" />
                     </span>
                   </th>
+                  <th class="sp-sku-th-progress">进度</th>
                 </tr>
               </thead>
               <tbody>
@@ -55,8 +56,14 @@
                   <td class="sp-sku-td-product"><span class="sp-sku-product-name">{{ s.product_name }}</span></td>
                   <td class="sp-sku-td-barcode"><code class="sp-sku-barcode">{{ s.barcode }}</code></td>
                   <td class="sp-sku-td-number">{{ s.plan_qty }}</td>
-                  <td class="sp-sku-td-number sp-sku-td-success">{{ s.shipped_qty }}</td>
+                  <td class="sp-sku-td-number" :class="s.shipped_qty > 0 ? 'sp-sku-td-success' : 'sp-sku-td-danger'">{{ s.shipped_qty }}</td>
                   <td class="sp-sku-td-number sp-sku-td-warning">{{ s.remain_qty }}</td>
+                  <td class="sp-sku-td-progress">
+                    <div class="sp-prog">
+                      <div class="sp-prog-meter"><i :class="progClass(s._pct)" :style="{ width: s._pct + '%' }" /></div>
+                      <span class="sp-prog-v num">{{ s._pct }}%</span>
+                    </div>
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -94,6 +101,12 @@ const emit = defineEmits<{
   'open-sku-detail': [payload: { barcode: string; name: string; customer: string }];
   refetch: [];
 }>();
+
+function progClass(pct: number): string {
+  if (pct <= 0) return 'prog-r';
+  if (pct < 100) return 'prog-a';
+  return 'prog-g';
+}
 </script>
 
 <style scoped lang="scss">
@@ -295,7 +308,44 @@ const emit = defineEmits<{
   font-weight: 600;
 }
 
+.sp-sku-table td.sp-sku-td-danger {
+  color: var(--color-danger-600);
+  font-weight: 600;
+}
+
 .sp-sku-row-clickable {
   cursor: pointer;
+}
+
+.sp-sku-th-progress,
+.sp-sku-td-progress {
+  width: 18%;
+}
+.sp-prog {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.sp-prog-meter {
+  flex: 1;
+  max-width: 130px;
+  height: 6px;
+  border-radius: 3px;
+  background: #edf0f6;
+  overflow: hidden;
+}
+.sp-prog-meter > i {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+}
+.prog-r { background: var(--color-danger-500, #e04042); }
+.prog-a { background: var(--color-warning-500, #f59e0b); }
+.prog-g { background: var(--color-success-500, #2a9a5b); }
+.sp-prog-v {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-text-muted, #8c96ad);
+  min-width: 32px;
 }
 </style>

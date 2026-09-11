@@ -408,9 +408,15 @@ async def root():
 
 
 if __name__ == "__main__":
+    # 生产环境默认绑定 127.0.0.1（仅本机回环），开发环境绑定 :: （所有接口）
+    # 可通过 FASTAPI_HOST 环境变量显式覆盖
+    _host = os.getenv(
+        "FASTAPI_HOST",
+        "127.0.0.1" if os.getenv("APP_ENV", "dev") == "prod" else "::",
+    )
     uvicorn.run(
         "fastapi_app.main:app",
-        host="::",  # nosec B104
+        host=_host,  # nosec B104
         port=5002,
         reload=settings.FASTAPI_DEBUG,
     )

@@ -42,7 +42,6 @@ from fastapi_app.shared_models.customer_sampling import (
     CustomerSamplingRole,
 )
 from fastapi_app.shared_models.daily_production_record import DailyProductionRecord
-from fastapi_app.shared_models.device_token import DeviceToken
 from fastapi_app.shared_models.file_record import FileRecord
 from fastapi_app.shared_models.inventory_log import InventoryLog
 from fastapi_app.shared_models.material_registration import MaterialRegistration, MaterialRegistrationItem
@@ -69,6 +68,7 @@ from fastapi_app.shared_models.product_material import (
     ProductAccessory,
     ProductFabric,
     ProductMaterial,
+    ProductRole,
 )
 from fastapi_app.shared_models.production_plan import ProductionPlan, ProductionPlanLog, StagingPurchasePlan
 from fastapi_app.shared_models.purchase_center import ModificationLog, SavedQuery
@@ -110,7 +110,7 @@ __all__ = [
     'CustomerSamplingProject',
     'CustomerSamplingRole',
     'DailyProductionRecord',
-    'DeviceToken',
+
     'FileRecord',
     'InventoryLog',
     'MaterialRegistration',
@@ -134,6 +134,7 @@ __all__ = [
     'ProductAccessory',
     'ProductFabric',
     'ProductMaterial',
+    'ProductRole',
     'ProductionPlan',
     'ProductionPlanLog',
     'PurchaseOrder',

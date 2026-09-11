@@ -1,8 +1,9 @@
 """
 事件发布安全封装
 
-提供 safe_publish_event 函数，统一处理 WebSocket 广播、FCM 推送和领域事件发布，
+提供 safe_publish_event 函数，统一处理 WebSocket 广播和领域事件发布，
 所有操作失败仅记录日志，不影响主业务流程。
+（FCM 推送已于 2026-08-31 随移动端一并摘除）
 """
 import logging
 
@@ -11,18 +12,18 @@ from fastapi_app.core.exception_handler import INFRA_EXCEPTIONS
 logger = logging.getLogger(__name__)
 
 
-async def safe_publish_event(event_type: str, data: dict, fcm_title: str | None = None, fcm_body: str | None = None):
-    """安全发布库存事件（WebSocket + FCM），同时通过领域事件总线发布解耦事件
+async def safe_publish_event(event_type: str, data: dict):
+    """安全发布库存事件（WebSocket 广播），同时通过领域事件总线发布解耦事件
 
     调用链：
-    1. notification_service.publish_event_with_fcm → WebSocket 广播 + FCM 推送（实时通知）
+    1. notification_service.publish_event → WebSocket 广播（实时通知）
     2. domain_events.publish → 进程内订阅者通知 + Redis Pub/Sub 跨进程广播（跨域解耦）
 
     两者均失败不影响主业务流程。
     """
     try:
-        from fastapi_app.services.notification_service import publish_event_with_fcm
-        await publish_event_with_fcm(event_type, data, fcm_title=fcm_title, fcm_body=fcm_body)
+        from fastapi_app.services.notification_service import publish_event
+        await publish_event(event_type, data)
     except (RuntimeError, *INFRA_EXCEPTIONS):
         logger.warning("事件发布失败: %s", event_type, exc_info=True)
 

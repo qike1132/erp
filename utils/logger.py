@@ -85,7 +85,7 @@ def setup_logging(app=None):
         os.path.join(log_dir, 'access.log'),
         when='midnight',
         interval=1,
-        backupCount=30,
+        backupCount=3,
         encoding='utf-8'
     )
     access_handler.setLevel(logging.INFO)

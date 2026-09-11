@@ -1,4 +1,4 @@
-import { ref, reactive, type Ref } from 'vue'
+import { ref, reactive, onUnmounted, type Ref } from 'vue'
 import { productApi } from '@/api'
 import { showToast } from '@/composables/useToast'
 import type { BomSearchProduct, BomPreviewStats, ProgressState } from './bomTypes'
@@ -23,6 +23,11 @@ export function useBomCopyDialog({ currentProductId, reloadBom }: UseBomCopyDial
   const copyBomOverwrite = ref(false)
   const copyBomProgress = reactive<ProgressState>({ visible: false, percent: 0, text: '' })
   const _pendingTimeouts = new Set<ReturnType<typeof setTimeout>>()
+  // 组件卸载时清理所有待处理定时器
+  onUnmounted(() => {
+    _pendingTimeouts.forEach(clearTimeout)
+    _pendingTimeouts.clear()
+  })
 
   async function searchProductForCopy() {
     const keyword = copyBomSearchKeyword.value.trim()
@@ -45,12 +50,13 @@ export function useBomCopyDialog({ currentProductId, reloadBom }: UseBomCopyDial
     copyBomSourceProductId.value = product.id
     copyBomPreview.value = null
     try {
-      const res = (await productApi.bomPreview(product.id)) as { success: boolean; material_count?: number; bom?: { fabric?: unknown[]; filling?: unknown[]; accessory?: unknown[]; packaging?: unknown[] } }
+      const res = (await productApi.bomPreview(product.id)) as { success: boolean; material_count?: number; role_count?: number; bom?: { fabric?: unknown[]; filling?: unknown[]; accessory?: unknown[]; packaging?: unknown[] } }
       if (res.success) {
         copyBomPreview.value = {
           source_name: product.name,
           source_barcode: product.barcode || '',
           material_count: res.material_count ?? 0,
+          role_count: res.role_count ?? 0,
           fabric_count: res.bom?.fabric?.length || 0,
           filling_count: res.bom?.filling?.length || 0,
           accessory_count: (res.bom?.accessory?.length || 0) + (res.bom?.packaging?.length || 0),

@@ -2,24 +2,16 @@ import { ref, readonly, onScopeDispose } from 'vue'
 
 /**
  * 设备类型检测 composable
- * 通过 Capacitor 环境变量 / UA-CH / User-Agent / 触屏+屏幕宽度多级判断
+ * 通过 UA-CH / User-Agent / 触屏+屏幕宽度多级判断
  * 用于路由级别的 PC/移动端 UI 自动切换
  *
  * 检测优先级（高→低）：
- *   1. VITE_CAPACITOR 构建环境变量（Capacitor APK 专用）
- *   2. navigator.userAgentData.mobile（UA-CH，现代浏览器标准）
- *   3. User-Agent 正则匹配（含 iPadOS 13+ 桌面版 UA 识别）
- *   4. 触屏 + coarse pointer + 小屏幕（兜底）
+ *   1. navigator.userAgentData.mobile（UA-CH，现代浏览器标准）
+ *   2. User-Agent 正则匹配（含 iPadOS 13+ 桌面版 UA 识别）
+ *   3. 触屏 + coarse pointer + 小屏幕（兜底）
  */
 
 let _isMobile: boolean | null = null
-let _isCapacitor: boolean | null = null
-
-export function isCapacitor(): boolean {
-  if (_isCapacitor !== null) return _isCapacitor
-  _isCapacitor = !!import.meta.env.VITE_CAPACITOR
-  return _isCapacitor
-}
 
 function getUAData(): { mobile?: boolean; platform?: string } | undefined {
   if (typeof navigator === 'undefined') return undefined
@@ -84,18 +76,12 @@ export function isMobileDevice(): boolean {
   }
 
   const ua = navigator.userAgent || ''
-  if (isCapacitor()) {
-    _isMobile = true
-    return true
-  }
-
   _isMobile = detectMobileUA(ua) || detectTouchSmallScreen()
   return _isMobile
 }
 
 export function resetDeviceCache(): void {
   _isMobile = null
-  _isCapacitor = null
 }
 
 /**

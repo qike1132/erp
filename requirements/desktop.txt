@@ -1,0 +1,12 @@
+# ============================================================
+# 桌面管理器依赖（server_manager.exe 打包用）
+# 安装: pip install -r requirements/desktop.txt
+#
+# 仅 Tkinter GUI（server_manager.py / build_server_manager.bat）需要。
+# Web 后端本身不依赖这些包。
+# ============================================================
+
+-r base.txt
+
+# ----- 系统托盘（server_manager.py:3468 托盘图标，延迟 import 可选降级）-----
+pystray==0.19.0

@@ -13,8 +13,6 @@ interface UseWebSocketOptions {
   reconnectBaseDelay?: number
 }
 
-const isCap = !!import.meta.env.VITE_CAPACITOR
-
 export function useWebSocket(options: UseWebSocketOptions) {
   const { onMessage, isActive, maxReconnectAttempts = 20, reconnectBaseDelay = 3000 } = options
 
@@ -26,14 +24,9 @@ export function useWebSocket(options: UseWebSocketOptions) {
   function connect() {
     if (reconnectAttempts >= maxReconnectAttempts) return
 
-    let wsUrl: string
-    if (isCap) {
-      const base = import.meta.env.VITE_WS_BASE_URL as string
-      wsUrl = `${base}/ws/notifications`
-    } else {
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-      wsUrl = `${protocol}//${window.location.host}/ws/notifications`
-    }
+    // Web 环境：同源 WS（由 Vite proxy / nginx 反代转发到后端）
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const wsUrl = `${protocol}//${window.location.host}/ws/notifications`
 
     ws = new WebSocket(wsUrl)
 
@@ -76,25 +69,12 @@ export function useWebSocket(options: UseWebSocketOptions) {
     }
   }
 
-  let resumeCleanup: (() => Promise<void>) | null = null
-
-  onMounted(async () => {
+  onMounted(() => {
     connect()
-    if (isCap) {
-      const { App } = await import('@capacitor/app')
-      const listener = await App.addListener('appStateChange', (state) => {
-        if (state.isActive && !manuallyClosed && ws?.readyState !== WebSocket.OPEN) {
-          reconnectAttempts = 0
-          connect()
-        }
-      })
-      resumeCleanup = async () => { await listener.remove() }
-    }
   })
 
-  onUnmounted(async () => {
+  onUnmounted(() => {
     cleanup()
-    if (resumeCleanup) await resumeCleanup()
   })
 
   return { cleanup }

@@ -15,7 +15,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-INFRA_EXCEPTIONS = (OSError, ConnectionError, ValueError)
+INFRA_EXCEPTIONS = (OSError, ConnectionError)  # 移除 ValueError：业务校验异常不应被基础设施降级捕获
 
 
 async def safe_call(
@@ -36,7 +36,7 @@ async def safe_call(
     等价于:
         try:
             result = await redis_cache.get(key)
-        except (OSError, ConnectionError, ValueError) as e:
+        except (OSError, ConnectionError) as e:
             logger.warning("客户名称缓存读取失败: %s", e)
             result = None
     """
@@ -63,12 +63,10 @@ async def safe_publish_event(
 
     用法:
         await safe_publish_event(
-            publish_event_with_fcm,
+            publish_event,
             StockEvent.ORDER_CREATED,
             {'order_id': order.id, ...},
             context="订单创建事件发布",
-            fcm_title="新订单",
-            fcm_body="...",
         )
     """
     try:

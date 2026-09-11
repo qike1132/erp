@@ -1,7 +1,7 @@
 """
 熔断器模式实现 - 保护外部服务调用
 
-当外部服务（S3/FCM/OCR）连续失败达到阈值时自动熔断，
+当外部服务（S3/OCR）连续失败达到阈值时自动熔断，
 快速失败避免级联故障，超时后进入半开状态试探恢复。
 
 使用方式：
@@ -47,6 +47,8 @@ class CircuitBreaker:
         self._success_count = 0
         self._last_failure_time = 0.0
         self._lock = asyncio.Lock()
+        # HALF_OPEN 状态下限制并发测试请求数为 1，避免竞态导致多个请求同时试探
+        self._half_open_sem = asyncio.Semaphore(1)
 
     @property
     def state(self) -> str:
@@ -66,6 +68,19 @@ class CircuitBreaker:
                 raise CircuitBreakerOpenError(
                     f"熔断器 [{self.name}] 已开启，请稍后重试"
                 )
+
+        # HALF_OPEN 状态下使用信号量限制并发测试请求为 1，
+        # 避免多个请求同时进入试探阶段导致竞态（多个并发请求同时调用
+        # _on_success/_on_failure 引起状态反复抖动）
+        if current_state == CircuitState.HALF_OPEN:
+            async with self._half_open_sem:
+                try:
+                    result = await func(*args, **kwargs)
+                    await self._on_success()
+                    return result
+                except Exception:  # broad-except: 熔断器需捕获所有异常以记录失败次数
+                    await self._on_failure()
+                    raise
 
         try:
             result = await func(*args, **kwargs)

@@ -58,10 +58,13 @@ class SearchSuggestionResponse(BaseModel):
 
 
 class BomSaveRequest(BaseModel):
+    """保存BOM请求"""
     filling: dict | None = None
     fabrics: list[dict] = []
     accessories: list[dict] = []
     packagings: list[dict] = []
+    roles: list[dict] = []
+    fillings: list[dict] = []
 
 
 class MaterialCalculateRequest(BaseModel):

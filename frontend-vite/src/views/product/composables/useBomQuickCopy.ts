@@ -1,4 +1,4 @@
-import { ref, reactive, type Ref } from 'vue'
+import { ref, reactive, onUnmounted, type Ref } from 'vue'
 import { productApi } from '@/api'
 import { showToast } from '@/composables/useToast'
 import type { BomSearchProduct, ProgressState } from './bomTypes'
@@ -19,6 +19,12 @@ export function useBomQuickCopy({ currentProductId, reloadBom }: UseBomQuickCopy
 
   let selectedSourceProductId: number | null = null
   let selectedSourceProductName: string | null = null
+
+  // 复制成功后隐藏进度条的定时器，卸载时需清理
+  let _copyTimer: ReturnType<typeof setTimeout> | null = null
+  onUnmounted(() => {
+    if (_copyTimer) clearTimeout(_copyTimer)
+  })
 
   // ============================================================
   // UiAutocomplete 搜索函数
@@ -93,7 +99,7 @@ export function useBomQuickCopy({ currentProductId, reloadBom }: UseBomQuickCopy
       const res = (await productApi.copyBom(currentProductId.value!, sourceId, true)) as { success: boolean; error?: string }
       if (res.success) {
         showProgress(100, '复制成功！')
-        setTimeout(() => {
+        _copyTimer = setTimeout(() => {
           hideProgress()
           quickCopyLoading.value = false
           if (currentProductId.value) reloadBom(currentProductId.value)

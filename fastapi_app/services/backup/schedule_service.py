@@ -180,7 +180,7 @@ async def create_schedule(
         enabled=enabled,
     )
     db.add(row)
-    await db.commit()
+    await db.flush()
     await db.refresh(row)
     return row
 
@@ -213,7 +213,7 @@ async def update_schedule(
         row.cron_expr = cron_expr
     if enabled is not None:
         row.enabled = enabled
-    await db.commit()
+    await db.flush()
     await db.refresh(row)
     return row
 
@@ -223,7 +223,7 @@ async def delete_schedule(db: AsyncSession, schedule_id: int) -> bool:
     if row is None:
         return False
     await db.delete(row)
-    await db.commit()
+    await db.flush()
     return True
 
 

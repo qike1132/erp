@@ -79,7 +79,8 @@ export function buildFactoryHtml(data: FactorySummaryData, lossRate: number): st
     const suppliers: SupplierGroup[] = group.suppliers || []
     let globalFabricIdx = 0
     suppliers.forEach((supplier) => {
-      supplier.fabrics?.forEach((fabric) => {
+      const fabricCount = supplier.fabrics?.length || 0
+      supplier.fabrics?.forEach((fabric, fi: number) => {
         tableHtml += '<tr>'
         if (globalFabricIdx === 0) {
           const rowCount = suppliers.reduce((s: number, sup: SupplierGroup) => s + (sup.fabrics?.length || 0), 0)
@@ -89,7 +90,9 @@ export function buildFactoryHtml(data: FactorySummaryData, lossRate: number): st
           tableHtml += `<td rowspan="${rowCount}">${escapeHtml(fmtQty(qty))}</td>`
           tableHtml += `<td rowspan="${rowCount}">${escapeHtml(fmtQty(calcSpareQuantity(qty, lossRate)))}</td>`
         }
-        tableHtml += `<td style="font-weight:bold;">${escapeHtml(supplier.supplier_name)}</td>`
+        if (fi === 0) {
+          tableHtml += `<td rowspan="${fabricCount}" style="font-weight:bold;">${escapeHtml(supplier.supplier_name)}</td>`
+        }
         tableHtml += `<td>${escapeHtml(fabric.fabric_name)}</td>`
         tableHtml += `<td>${escapeHtml(fabric.specification || '')}</td>`
         tableHtml += `<td>${escapeHtml(fmtQty(fabric.quantity))}</td>`

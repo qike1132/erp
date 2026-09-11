@@ -9,7 +9,7 @@
       <div class="us-form-group">
         <label>密码 <span class="us-required">*</span></label>
         <div class="us-input-wrapper">
-          <input v-model="form.password" :type="showPwd1 ? 'text' : 'password'" class="us-input" placeholder="至少6位" aria-label="至少6位" />
+          <input v-model="form.password" :type="showPwd1 ? 'text' : 'password'" class="us-input" placeholder="至少8位，含大小写字母和数字" aria-label="至少8位，含大小写字母和数字" />
           <button type="button" class="us-pwd-toggle" aria-label="查看" @click="showPwd1 = !showPwd1">
             <FontAwesomeIcon :icon="showPwd1 ? 'eye-slash' : 'eye'" aria-hidden="true" />
           </button>
@@ -54,6 +54,18 @@ const showPwd1 = ref(false)
 const submitting = ref(false)
 const form = reactive({ username: '', password: '', isSuper: false, factory: '' })
 
+/**
+ * 密码复杂度校验：至少 8 位，且需同时包含大写字母、小写字母、数字。
+ * @returns 错误提示字符串；通过校验返回 null
+ */
+function validatePasswordComplexity(password: string): string | null {
+  if (password.length < 8) return '密码至少 8 位'
+  if (!/[A-Z]/.test(password)) return '密码需包含大写字母'
+  if (!/[a-z]/.test(password)) return '密码需包含小写字母'
+  if (!/[0-9]/.test(password)) return '密码需包含数字'
+  return null
+}
+
 /** 提交添加用户表单 */
 async function handleAdd() {
   formError.value = ''
@@ -65,8 +77,9 @@ async function handleAdd() {
     formError.value = '请输入密码'
     return
   }
-  if (form.password.length < 6) {
-    formError.value = '密码至少6位'
+  const pwdErr = validatePasswordComplexity(form.password)
+  if (pwdErr) {
+    formError.value = pwdErr
     return
   }
   submitting.value = true

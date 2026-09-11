@@ -3,13 +3,15 @@
 
 支持详细的布料和配件信息。
 物料分类: fabric(面料类) / filling(填充类) / accessory(辅料类)
+角色(role): 一个 SKU 可关联多个角色，每个角色拥有独立的物料清单；
+物料表 role_id 为 NULL 时表示产品级默认 BOM（无角色产品）。
 """
 from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, Numeric, String, Text
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from fastapi_app.shared_models import Base
@@ -25,12 +27,39 @@ MATERIAL_CATEGORIES = {
 }
 
 
+class ProductRole(Base):
+    """产品角色模型 - 每个 SKU 可关联多个角色（如公仔的不同角色）"""
+    __tablename__ = 'product_role'
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    product_id: Mapped[int] = mapped_column(Integer, ForeignKey('product.id', ondelete='CASCADE'), nullable=False, comment='关联产品ID')
+    role_name: Mapped[str] = mapped_column(String(100), nullable=False, comment='角色名称')
+    create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), comment='创建时间')
+    update_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), comment='更新时间')
+
+    product: Mapped[Product] = relationship("Product", back_populates="roles")
+
+    __table_args__ = (
+        Index('idx_product_role_product', 'product_id'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'product_id': self.product_id,
+            'role_name': self.role_name,
+            'name': self.role_name,
+            'create_time': self.create_time.strftime('%Y-%m-%d %H:%M:%S') if self.create_time else None,
+        }
+
+
 class ProductFabric(Base):
     """产品布料明细模型"""
     __tablename__ = 'product_fabric'
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     product_id: Mapped[int] = mapped_column(Integer, ForeignKey('product.id'), nullable=False, comment='关联产品ID')
+    role_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('product_role.id', ondelete='CASCADE'), comment='角色ID(NULL=产品级默认BOM)')
     material_code: Mapped[str | None] = mapped_column(String(50), comment='物料编码')
     fabric_name: Mapped[str] = mapped_column(String(100), nullable=False, comment='布料名称')
     specification: Mapped[str | None] = mapped_column(String(100), comment='规格型号')
@@ -49,12 +78,14 @@ class ProductFabric(Base):
     __table_args__ = (
         Index('idx_product_fabric_product', 'product_id'),
         Index('idx_product_fabric_supplier', 'supplier_id'),
+        Index('idx_product_fabric_role_id', 'role_id'),
     )
 
     def to_dict(self):
         return {
             'id': self.id,
             'product_id': self.product_id,
+            'role_id': self.role_id,
             'material_code': self.material_code,
             'material_name': self.fabric_name,
             'fabric_name': self.fabric_name,
@@ -77,7 +108,8 @@ class ProductMaterial(Base):
     __tablename__ = 'product_material'
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    product_id: Mapped[int] = mapped_column(Integer, ForeignKey('product.id'), nullable=False, unique=True, comment='关联产品ID')
+    product_id: Mapped[int] = mapped_column(Integer, ForeignKey('product.id'), nullable=False, comment='关联产品ID')
+    role_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('product_role.id', ondelete='CASCADE'), comment='角色ID(NULL=产品级默认BOM)')
     material_code: Mapped[str | None] = mapped_column(String(50), comment='物料编码')
     cotton_usage: Mapped[float | None] = mapped_column(Numeric(10, 4), default=0, comment='棉花用量（克）- 单SKU标准用量')
     specification: Mapped[str | None] = mapped_column(String(100), comment='规格型号')
@@ -95,12 +127,15 @@ class ProductMaterial(Base):
     __table_args__ = (
         Index('idx_product_material_product', 'product_id'),
         Index('idx_product_material_supplier', 'supplier_id'),
+        Index('idx_product_material_role_id', 'role_id'),
+        UniqueConstraint('product_id', 'role_id', name='uq_product_material_product_role'),
     )
 
     def to_dict(self):
         return {
             'id': self.id,
             'product_id': self.product_id,
+            'role_id': self.role_id,
             'product_name': self.product.name if self.product else None,
             'material_code': self.material_code,
             'material_name': '棉花/填充物',
@@ -126,6 +161,7 @@ class ProductAccessory(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     product_id: Mapped[int] = mapped_column(Integer, ForeignKey('product.id'), nullable=False, comment='关联产品ID')
+    role_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('product_role.id', ondelete='CASCADE'), comment='角色ID(NULL=产品级默认BOM)')
     material_code: Mapped[str | None] = mapped_column(String(50), comment='物料编码')
     accessory_name: Mapped[str] = mapped_column(String(100), nullable=False, comment='配件名称')
     specification: Mapped[str | None] = mapped_column(String(100), comment='规格型号')
@@ -143,6 +179,7 @@ class ProductAccessory(Base):
     __table_args__ = (
         Index('idx_product_accessory_product', 'product_id'),
         Index('idx_product_accessory_supplier', 'supplier_id'),
+        Index('idx_product_accessory_role_id', 'role_id'),
     )
 
     def to_dict(self):
@@ -150,6 +187,7 @@ class ProductAccessory(Base):
         return {
             'id': self.id,
             'product_id': self.product_id,
+            'role_id': self.role_id,
             'material_code': self.material_code,
             'material_name': self.accessory_name,
             'accessory_name': self.accessory_name,

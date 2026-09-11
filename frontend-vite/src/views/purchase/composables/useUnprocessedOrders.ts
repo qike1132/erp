@@ -1,4 +1,4 @@
-import { ref, computed, reactive, watch } from 'vue'
+import { ref, computed, reactive, watch, onScopeDispose } from 'vue'
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/vue-query'
 import { purchaseApi } from '@/api'
 import { showToast } from '@/composables/useToast'
@@ -31,7 +31,7 @@ export function useUnprocessedOrders(options?: { refetchInterval?: () => number 
   const perPage = ref(15)
   const selectedCompositeIds = ref<string[]>([])
 
-  const { data, isLoading, isFetching } = useQuery({
+  const { data, isLoading, isFetching, isError } = useQuery({
     queryKey: [UNPROCESSED_QUERY_KEY, () => currentPage.value, () => perPage.value],
     queryFn: async () => {
       try {
@@ -50,6 +50,34 @@ export function useUnprocessedOrders(options?: { refetchInterval?: () => number 
     retry: false,
     refetchInterval: options?.refetchInterval,
   })
+
+  // 前端加载超时兜底：后端异常导致 query 长时间停在"加载中"时（axios 层最差约 15s），
+  // 20s 后强制转错误态，保证加载状态必定会结束，由面板展示错误提示 + 重试。
+  // 注意 immediate: true —— 首次加载时 isLoading 在 setup 即 true，若不加 immediate 且请求一直挂着，
+  // watch 不会触发、定时器永远不会启动（安全网失效）。
+  const loadingTimedOut = ref(false)
+  let loadingTimer: ReturnType<typeof setTimeout> | null = null
+  watch([isLoading, isError], () => {
+    if (loadingTimer) {
+      clearTimeout(loadingTimer)
+      loadingTimer = null
+    }
+    loadingTimedOut.value = false
+    if (isLoading.value && !isError.value) {
+      loadingTimer = setTimeout(() => {
+        loadingTimedOut.value = true
+      }, 20_000)
+    }
+  }, { immediate: true })
+  onScopeDispose(() => {
+    if (loadingTimer) clearTimeout(loadingTimer)
+  })
+  const loadError = computed(() => isError.value || loadingTimedOut.value)
+
+  async function retry() {
+    loadingTimedOut.value = false
+    await queryClient.invalidateQueries({ queryKey: [UNPROCESSED_QUERY_KEY] })
+  }
 
   const orders = computed<UnprocessedOrder[]>(() => data.value?.orders ?? [])
   const total = computed(() => data.value?.total ?? 0)
@@ -136,6 +164,8 @@ export function useUnprocessedOrders(options?: { refetchInterval?: () => number 
     orders,
     loading: isLoading,
     fetching: isFetching,
+    error: loadError,
+    retry,
     total,
     currentPage,
     totalPages,

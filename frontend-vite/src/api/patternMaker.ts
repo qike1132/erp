@@ -17,9 +17,9 @@ export interface PatternMakerActionResponse {
 }
 
 export const patternMakerApi = {
-  list: () => get<PatternMakerListResponse>('/pattern-room/pattern-makers'),
+  list: () => get<PatternMakerListResponse>('/pattern-maker/pattern-makers'),
   create: (data: { name: string }) =>
-    post<PatternMakerActionResponse>('/pattern-room/pattern-makers', data),
+    post<PatternMakerActionResponse>('/pattern-maker/pattern-makers', data),
   delete: (id: number) =>
-    del<PatternMakerActionResponse>(`/pattern-room/pattern-makers/${id}`),
+    del<PatternMakerActionResponse>(`/pattern-maker/pattern-makers/${id}`),
 }

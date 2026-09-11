@@ -86,7 +86,7 @@ class CustomerAccessLog(Base):
             ip_address=ip_address
         )
         db_session.add(log)
-        db_session.commit()
+        db_session.flush()
         return log
 
     @staticmethod
@@ -96,7 +96,7 @@ class CustomerAccessLog(Base):
 
         from sqlalchemy import select
 
-        start_date = datetime.now() - timedelta(days=days)
+        start_date = datetime.now(UTC) - timedelta(days=days)
         result = db_session.execute(
             select(CustomerAccessLog).where(
                 CustomerAccessLog.customer_name == customer_name,
@@ -127,7 +127,7 @@ class CustomerAccessLog(Base):
 
         from sqlalchemy import select
 
-        start_date = datetime.now() - timedelta(days=days)
+        start_date = datetime.now(UTC) - timedelta(days=days)
         result = db_session.execute(
             select(CustomerAccessLog).where(
                 CustomerAccessLog.module == module,

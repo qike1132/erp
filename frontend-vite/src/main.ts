@@ -8,7 +8,6 @@ import './styles/app.css'
 import './icons'
 import App from './App.vue'
 import router from './router'
-import { initTokenCache } from './utils/secureStorage'
 import { isMobileDevice } from './composables/useDevice'
 import { devLog } from './utils/devLog'
 
@@ -129,6 +128,11 @@ async function bootstrap() {
           app.use(PrimeVueMod.default, {
             unstyled: true,
             pt: ptMod.plushCutePT,
+            // PrimeVue 弹层(autocomplete/select/datepicker 面板等)的内联 z-index
+            // 从该起点递增。项目自定义弹窗(pd-overlay 等)硬编码 z-index: 1050,
+            // 默认 overlay 起点 1000 会被弹窗遮罩盖住 —— 弹窗内打开联想下拉
+            // 表现为"面板已渲染但不可见"(BOM 配置联想失效成因,2026-09-11 修复)。
+            zIndex: { modal: 2100, overlay: 2000, menu: 2000, tooltip: 2100 },
             locale: {
               emptySearchMessage: '无匹配结果',
               searchMessage: '{0} 条结果',
@@ -138,10 +142,6 @@ async function bootstrap() {
       )
       .catch((e) => console.error('[App] PrimeVue 加载失败，PC 端组件可能无法正常渲染', e))
   }
-
-
-  // Token 缓存初始化独立执行，不阻塞渲染
-  initTokenCache().catch(() => {})
 }
 
 bootstrap()

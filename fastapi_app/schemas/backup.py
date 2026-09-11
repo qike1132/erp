@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -137,7 +137,7 @@ class BackupRestorePlanOut(BaseModel):
 
 class BackupEncryptRequest(BaseModel):
     """加密备份请求"""
-    password: str = Field(min_length=1, description="加密密码")
+    password: str = Field(min_length=8, max_length=128, description="加密密码")
 
 
 class BackupRestoreRequest(BaseModel):
@@ -376,7 +376,7 @@ class BackupSettingsUpdate(BaseModel):
     backup_dir: str | None = Field(default=None, max_length=500, description="自定义备份路径(须先通过 validate-path 校验)")
     retention_days: int | None = Field(default=None, ge=1, le=3650, description="保留天数")
     max_count: int | None = Field(default=None, ge=1, le=10000, description="最大备份数量")
-    encryption_mode: str | None = Field(default=None, description="加密模式: off/password/key/env")
+    encryption_mode: Literal['off', 'password', 'key', 'env'] | None = Field(default=None, description="加密模式")
 
 
 class BackupPathValidateRequest(BaseModel):

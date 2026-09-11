@@ -44,10 +44,12 @@
             <div class="pd-form-group">
               <label class="pd-label">产品图片</label>
               <div
+                ref="editDropZoneRef"
                 class="pd-section-header pd-droppable"
-                :class="{ 'pd-drag-over': editDragOver }"
+                :class="{ 'pd-drag-over': editDragOver || editPasteFlash }"
+                title="点击选择、拖拽或粘贴图片"
                 @click="editImageInputRef?.click()"
-                @dragover.prevent="editDragOver = true"
+                @dragover.prevent="onEditDragOver"
                 @dragleave="editDragOver = false"
                 @drop.prevent="onEditDrop"
               >
@@ -55,11 +57,11 @@
                   <FontAwesomeIcon icon="image" class="label-icon" aria-hidden="true" />
                   <template v-if="editForm.image">
                     <span class="pd-file-inline pd-file-inline-success">
-                      <img loading="lazy" :src="resolveStaticUrl(editForm.image)" class="pd-thumb-preview" @click.stop="emit('open-image', editForm.image)" alt="产品图片" />
-                      <button type="button" class="pd-thumb-remove" @click.stop="editForm.image = ''" aria-label="关闭"><FontAwesomeIcon icon="times" aria-hidden="true" /></button>
+                      <img loading="lazy" :src="resolveStaticUrl(editForm.image)" class="pd-thumb-preview" alt="产品图片" @click.stop="emit('open-image', editForm.image)" />
+                      <button type="button" class="pd-thumb-remove" aria-label="关闭" @click.stop="editForm.image = ''"><FontAwesomeIcon icon="times" aria-hidden="true" /></button>
                     </span>
                   </template>
-                  <span v-else>拖拽文件到标题栏 · 支持 JPG / PNG / GIF</span>
+                  <span v-else>点击选择 / 拖拽 / 粘贴图片 · 支持 {{ ALLOWED_IMAGE_HINT }}</span>
                 </label>
                 <input ref="editImageInputRef" type="file" style="display: none" accept="image/*" name="image" @change="onEditImageSelect" />
               </div>
@@ -78,11 +80,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive } from 'vue'
+import { ref, reactive, onBeforeUnmount } from 'vue'
 import { useQueryClient } from '@tanstack/vue-query'
 import { productApi } from '@/api'
 import { resolveStaticUrl } from '@/api/request'
-import { uploadImage } from '../composables/useImageUpload'
+import { uploadImage, ALLOWED_IMAGE_HINT } from '../composables/useImageUpload'
+import { useImagePaste } from '../composables/useImagePaste'
 import { showToast } from '@/composables/useToast'
 import { getErrorMessage } from '@/types/errors'
 
@@ -111,7 +114,30 @@ const editDialogVisible = ref(false)
 const editSubmitting = ref(false)
 const editForm = reactive({ id: 0, name: '', barcode: '', price: 0, factory: '', image: '' })
 const editImageInputRef = ref<HTMLInputElement | null>(null)
+const editDropZoneRef = ref<HTMLElement | null>(null)
 const editDragOver = ref(false)
+const editPasteFlash = ref(false)
+
+let editPasteFlashTimer: ReturnType<typeof setTimeout> | undefined
+
+function flashEditPasteFeedback() {
+  editPasteFlash.value = true
+  clearTimeout(editPasteFlashTimer)
+  editPasteFlashTimer = setTimeout(() => { editPasteFlash.value = false }, 600)
+}
+
+// 弹窗优先级高于左侧新增表单：弹窗打开时只有它响应粘贴
+useImagePaste({
+  target: editDropZoneRef,
+  onFile: (file) => {
+    flashEditPasteFeedback()
+    uploadEditImage(file)
+  },
+  enabled: () => editDialogVisible.value,
+  priority: 10,
+})
+
+onBeforeUnmount(() => clearTimeout(editPasteFlashTimer))
 
 function open(row: Product) {
   Object.assign(editForm, { id: row.id, name: row.name, barcode: row.barcode, price: row.price, factory: row.factory || '', image: row.image || '' })
@@ -119,9 +145,17 @@ function open(row: Product) {
 }
 
 function onEditImageSelect(e: Event) {
-  const file = (e.target as HTMLInputElement).files?.[0]
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = '' // 清空以便同一文件可重复选择
   if (file) uploadEditImage(file)
 }
+
+/** 仅在拖入真实文件时高亮，与粘贴反馈语义保持一致 */
+function onEditDragOver(e: DragEvent) {
+  if (e.dataTransfer?.types.includes('Files')) editDragOver.value = true
+}
+
 function onEditDrop(e: DragEvent) {
   editDragOver.value = false
   const file = e.dataTransfer?.files[0]

@@ -41,7 +41,7 @@
       <ImportPanel
         v-show="mode === 'import'"
         :open="open"
-        @created="$emit('created')"
+        @imported="$emit('imported', $event)"
       />
     </div>
 
@@ -72,7 +72,10 @@ import { useCreateShipmentPlan } from '../composables/useCreateShipmentPlan'
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{
   'update:open': [value: boolean]
+  /** 手动创建成功（调用方据此关闭对话框） */
   created: []
+  /** 批量导入完成，参数为数据所属月份 YYYY-MM（对话框保持打开以展示结果） */
+  imported: [month?: string]
 }>()
 
 const mode = ref<'manual' | 'import'>('manual')

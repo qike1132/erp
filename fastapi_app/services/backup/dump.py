@@ -237,8 +237,9 @@ async def restore_database_via_psql(zf, db: AsyncSession, task_id: str | None = 
         try:
             check_proc = await run_proc(
                 [
-                    resolve_pg_tool('psql'), '-h', db_host, '-p', db_port, '-U', db_user, '-d', 'postgres', '-t', '-c',
-                    f"SELECT COUNT(*) FROM pg_stat_activity WHERE datname = '{db_name}';",  # nosec B608 — db_name 经 isidentifier() 白名单校验
+                    resolve_pg_tool('psql'), '-h', db_host, '-p', db_port, '-U', db_user, '-d', 'postgres', '-t',
+                    '-v', f'db_name={db_name}',
+                    '-c', "SELECT COUNT(*) FROM pg_stat_activity WHERE datname = :'db_name';",  # nosec B608 — db_name 经 isidentifier() 白名单校验，psql 变量引用自动转义
                 ],
                 env=env, timeout=10,
             )
@@ -255,8 +256,9 @@ async def restore_database_via_psql(zf, db: AsyncSession, task_id: str | None = 
     try:
         term_proc = await run_proc(
             [
-                resolve_pg_tool('psql'), '-h', db_host, '-p', db_port, '-U', db_user, '-d', 'postgres', '-c',
-                f"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '{db_name}' AND pid <> pg_backend_pid();",  # nosec B608 — db_name 经 isidentifier() 白名单校验
+                resolve_pg_tool('psql'), '-h', db_host, '-p', db_port, '-U', db_user, '-d', 'postgres',
+                '-v', f'db_name={db_name}',
+                '-c', "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = :'db_name' AND pid <> pg_backend_pid();",  # nosec B608 — db_name 经 isidentifier() 白名单校验，psql 变量引用自动转义
             ],
             env=env, timeout=30,
         )

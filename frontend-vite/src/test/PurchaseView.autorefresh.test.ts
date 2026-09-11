@@ -44,13 +44,14 @@ vi.mock('@tanstack/vue-query', async () => {
     const data = ref<unknown>(null)
     const isLoading = ref(true)
     const isFetching = ref(false)
+    const isError = ref(false)
     const refetch = vi.fn(() => {
       if (typeof opts?.queryFn !== 'function') return Promise.resolve()
       isFetching.value = true
       return Promise.resolve()
         .then(() => opts.queryFn!())
         .then((res) => { data.value = res; isLoading.value = false; isFetching.value = false })
-        .catch(() => { isLoading.value = false; isFetching.value = false })
+        .catch(() => { isLoading.value = false; isFetching.value = false; isError.value = true })
     })
     if (typeof opts?.queryFn === 'function') {
       void refetch()
@@ -67,7 +68,7 @@ vi.mock('@tanstack/vue-query', async () => {
       })
       onScopeDispose(() => { if (timer) clearInterval(timer) })
     }
-    return { data, isLoading, isFetching, refetch }
+    return { data, isLoading, isFetching, isError, refetch }
   }
   return {
     useQueryClient: () => ({ invalidateQueries: vi.fn(), prefetchQuery: vi.fn() }),
@@ -94,6 +95,7 @@ vi.mock('@/composables/useConfirmDialog', () => ({
 
 import { mount, flushPromises } from '@vue/test-utils'
 import { nextTick } from 'vue'
+import PendingOrdersPanel from '@/views/purchase/components/PendingOrdersPanel.vue'
 
 const stubs = {
   PendingOrdersPanel: { template: '<div />' },
@@ -153,5 +155,47 @@ describe('PurchaseView auto-refresh orders filter (regression for BUG-PURCHASE-C
     for (const call of mocks.ordersMock.mock.calls) {
       expect(call[0]?.status).toBe('pending,confirmed')
     }
+  })
+})
+
+describe('PendingOrdersPanel 错误态（迭代修复：加载失败不再误显空态/永久加载中）', () => {
+  const panelStubs = {
+    UiSpinner: { template: '<div />' },
+    UiCheckbox: { template: '<div />' },
+    UiPagination: { template: '<div />' },
+    FontAwesomeIcon: { template: '<i />' },
+  }
+
+  const baseProps = {
+    orders: [],
+    loading: false,
+    error: true,
+    total: 0,
+    currentPage: 1,
+    totalPages: 1,
+    selectedCompositeIds: [],
+    selectedCount: 0,
+    allSelected: false,
+  }
+
+  it('error=true 且无数据时显示错误提示与重试按钮，点击触发 retry', async () => {
+    const wrapper = mount(PendingOrdersPanel, {
+      props: baseProps,
+      global: { stubs: panelStubs },
+    })
+    expect(wrapper.text()).toContain('加载失败')
+    const btn = wrapper.find('button')
+    expect(btn.exists()).toBe(true)
+    await btn.trigger('click')
+    expect(wrapper.emitted('retry')).toBeTruthy()
+  })
+
+  it('error=false 且无数据时显示空态而非错误态', () => {
+    const wrapper = mount(PendingOrdersPanel, {
+      props: { ...baseProps, error: false },
+      global: { stubs: panelStubs },
+    })
+    expect(wrapper.text()).toContain('暂无未处理订单')
+    expect(wrapper.text()).not.toContain('加载失败')
   })
 })

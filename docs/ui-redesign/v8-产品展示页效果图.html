@@ -1,0 +1,1664 @@
+<!DOCTYPE html>
+<!--
+  ============================================================================
+  页面主题：ERP 服务器管理器 v8 · 产品展示页（静态视觉预览稿）
+  整体风格：现代简约 + 科技感（深色主题 / 玻璃拟态 / 渐变辉光 / 几何网格）
+  使用方法：
+    1. 本文件为单文件自包含 HTML，双击即可用任意现代浏览器打开，无需联网、无需服务器
+    2. 所有图像均为纯 CSS 渐变或内联 SVG 绘制，零外部图片/字体/CDN 依赖
+    3. 响应式：>=1200px 桌面三栏 / 768-1199px 平板双栏 / <768px 移动端单栏 + 折叠导航
+    4. 仅含约 30 行原生 JS，用于移动端导航折叠与滚动进场动画；禁用 JS 亦可完整浏览
+    5. 配色沿用 v8 设计令牌：品牌蓝 #3B82F6 / 青 #06B6D4 / 紫 #8B5CF6
+       告警语义色：P0 致命 #F5222D / P1 严重 #FA8C16 / P2 警告 #FAAD14 / P3 提示 #1890FF
+    6. 如需换肤，只改 :root 中的 CSS 变量即可全局生效
+  ============================================================================
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ERP 服务器管理器 v8 · 产品展示页</title>
+<style>
+/* ===================== 1. 设计令牌 Design Tokens ===================== */
+:root{
+  /* 背景层次（由深到浅） */
+  --bg-0:#060A12; --bg-1:#0A0F1C; --bg-2:#0F1626; --bg-3:#141D33;
+  --bg-glass:rgba(20,29,51,.72); --bg-glass-2:rgba(15,22,38,.85);
+
+  /* 描边 */
+  --line:#1C2740; --line-2:#28364F; --line-3:#36486B;
+
+  /* 文本（由强到弱） */
+  --ink-1:#EAF0FA; --ink-2:#A6B4CE; --ink-3:#6B7C9E; --ink-4:#495A78;
+
+  /* 品牌 & 语义色 */
+  --brand:#3B82F6; --brand-2:#06B6D4; --violet:#8B5CF6;
+  --ok:#52C41A; --p0:#F5222D; --p1:#FA8C16; --p2:#FAAD14; --p3:#1890FF; --p4:#8C8C8C;
+
+  /* 渐变 */
+  --grad-brand:linear-gradient(135deg,#3B82F6 0%,#06B6D4 100%);
+  --grad-violet:linear-gradient(135deg,#8B5CF6 0%,#3B82F6 100%);
+  --grad-warm:linear-gradient(135deg,#FA8C16 0%,#F5222D 100%);
+  --grad-ink:linear-gradient(120deg,#EAF0FA 0%,#7DD3FC 46%,#A5B4FC 100%);
+  --grad-hair:linear-gradient(90deg,transparent,var(--line-3),transparent);
+
+  /* 圆角 */
+  --r-xs:6px; --r-sm:8px; --r:12px; --r-lg:16px; --r-xl:24px; --r-2xl:32px; --r-full:999px;
+
+  /* 间距（4px 基准） */
+  --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:24px; --s6:32px;
+  --s7:48px; --s8:64px; --s9:96px; --s10:128px;
+
+  /* 阴影 */
+  --sh-1:0 1px 2px rgba(0,0,0,.30);
+  --sh-2:0 4px 16px rgba(0,0,0,.35);
+  --sh-3:0 12px 32px rgba(0,0,0,.45);
+  --sh-4:0 24px 64px rgba(0,0,0,.55);
+  --sh-glow:0 8px 40px rgba(59,130,246,.28);
+  --sh-glow-v:0 8px 40px rgba(139,92,246,.28);
+
+  /* 布局 */
+  --maxw:1200px; --header-h:68px;
+
+  /* 动效 */
+  --ease:cubic-bezier(.4,0,.2,1);
+  --dur:.28s;
+}
+
+/* ===================== 2. 基础重置 ===================== */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB",
+              "Microsoft YaHei","Helvetica Neue",Helvetica,Arial,sans-serif;
+  font-size:15px; line-height:1.65; color:var(--ink-2);
+  background:var(--bg-1); overflow-x:hidden;
+  -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale;
+}
+img,svg{display:block;max-width:100%}
+a{color:inherit;text-decoration:none}
+button{font-family:inherit;font-size:inherit;cursor:pointer;border:0;background:none;color:inherit}
+ul,ol{list-style:none}
+h1,h2,h3,h4{color:var(--ink-1);line-height:1.25;font-weight:700;letter-spacing:-.01em}
+::selection{background:rgba(59,130,246,.35);color:#fff}
+
+/* 全局背景光晕 + 网格 */
+body::before{
+  content:""; position:fixed; inset:0; z-index:0; pointer-events:none;
+  background:
+    radial-gradient(900px 600px at 12% -8%, rgba(59,130,246,.16), transparent 62%),
+    radial-gradient(800px 520px at 88% 4%, rgba(139,92,246,.13), transparent 60%),
+    radial-gradient(1000px 700px at 50% 108%, rgba(6,182,212,.10), transparent 65%);
+}
+body::after{
+  content:""; position:fixed; inset:0; z-index:0; pointer-events:none; opacity:.5;
+  background-image:
+    linear-gradient(rgba(40,54,79,.30) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(40,54,79,.30) 1px, transparent 1px);
+  background-size:56px 56px;
+  mask-image:radial-gradient(ellipse 100% 62% at 50% 0%, #000 12%, transparent 72%);
+  -webkit-mask-image:radial-gradient(ellipse 100% 62% at 50% 0%, #000 12%, transparent 72%);
+}
+
+/* ===================== 3. 布局工具 ===================== */
+.wrap{width:100%;max-width:var(--maxw);margin:0 auto;padding:0 var(--s5);position:relative;z-index:1}
+.section{padding:var(--s10) 0;position:relative;z-index:1}
+.section--tight{padding:var(--s8) 0}
+.grid{display:grid;gap:var(--s5)}
+.grid-2{grid-template-columns:repeat(2,1fr)}
+.grid-3{grid-template-columns:repeat(3,1fr)}
+.grid-4{grid-template-columns:repeat(4,1fr)}
+.flex{display:flex}
+.between{justify-content:space-between}
+.center{align-items:center}
+.gap-2{gap:var(--s2)} .gap-3{gap:var(--s3)} .gap-4{gap:var(--s4)} .gap-5{gap:var(--s5)}
+
+/* 分隔细线 */
+.hairline{height:1px;background:var(--grad-hair);border:0}
+
+/* ===================== 4. 通用组件 ===================== */
+/* 4.1 徽章 */
+.badge{
+  display:inline-flex;align-items:center;gap:6px;
+  padding:5px 12px;border-radius:var(--r-full);
+  font-size:12px;font-weight:600;letter-spacing:.02em;white-space:nowrap;
+  border:1px solid var(--line-2);background:rgba(20,29,51,.6);color:var(--ink-2);
+}
+.badge--brand{background:rgba(59,130,246,.14);border-color:rgba(59,130,246,.34);color:#7CB0FB}
+.badge--violet{background:rgba(139,92,246,.14);border-color:rgba(139,92,246,.34);color:#B79BFA}
+.badge--ok{background:rgba(82,196,26,.14);border-color:rgba(82,196,26,.34);color:#8ADB5B}
+.badge--warn{background:rgba(250,173,20,.14);border-color:rgba(250,173,20,.34);color:#F5C44E}
+.badge__dot{width:6px;height:6px;border-radius:50%;background:currentColor;flex:none}
+
+/* 4.2 按钮 */
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:var(--s2);
+  height:44px;padding:0 var(--s5);border-radius:var(--r);
+  font-size:14px;font-weight:600;letter-spacing:.01em;white-space:nowrap;
+  transition:transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease),
+             background var(--dur) var(--ease), border-color var(--dur) var(--ease);
+  border:1px solid transparent;
+}
+.btn:hover{transform:translateY(-2px)}
+.btn:active{transform:translateY(0)}
+.btn--primary{background:var(--grad-brand);color:#04121F;box-shadow:var(--sh-glow)}
+.btn--primary:hover{box-shadow:0 14px 48px rgba(59,130,246,.42)}
+.btn--ghost{background:rgba(20,29,51,.55);border-color:var(--line-2);color:var(--ink-1);
+            backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+.btn--ghost:hover{border-color:var(--brand);background:rgba(59,130,246,.10)}
+.btn--sm{height:36px;padding:0 var(--s4);font-size:13px;border-radius:var(--r-sm)}
+.btn__ico{width:16px;height:16px;flex:none}
+
+/* 4.3 卡片 */
+.card{
+  position:relative;border-radius:var(--r-lg);
+  background:linear-gradient(180deg, rgba(20,29,51,.72), rgba(15,22,38,.72));
+  border:1px solid var(--line);
+  padding:var(--s5);
+  box-shadow:var(--sh-2);
+  backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  transition:transform var(--dur) var(--ease), border-color var(--dur) var(--ease),
+             box-shadow var(--dur) var(--ease);
+  overflow:hidden;
+}
+.card:hover{transform:translateY(-4px);border-color:var(--line-3);box-shadow:var(--sh-3)}
+/* 卡片顶部高光 */
+.card::before{
+  content:"";position:absolute;top:0;left:0;right:0;height:1px;
+  background:linear-gradient(90deg,transparent,rgba(125,211,252,.5),transparent);
+  opacity:0;transition:opacity var(--dur) var(--ease);
+}
+.card:hover::before{opacity:1}
+
+/* 4.4 图标容器 */
+.ico-box{
+  width:46px;height:46px;border-radius:var(--r);flex:none;
+  display:grid;place-items:center;
+  background:rgba(59,130,246,.12);border:1px solid rgba(59,130,246,.26);
+  color:#7CB0FB;
+}
+.ico-box svg{width:22px;height:22px}
+.ico-box--violet{background:rgba(139,92,246,.12);border-color:rgba(139,92,246,.26);color:#B79BFA}
+.ico-box--cyan{background:rgba(6,182,212,.12);border-color:rgba(6,182,212,.26);color:#5FD4E8}
+.ico-box--ok{background:rgba(82,196,26,.12);border-color:rgba(82,196,26,.26);color:#8ADB5B}
+.ico-box--warn{background:rgba(250,140,22,.12);border-color:rgba(250,140,22,.26);color:#F5A94E}
+.ico-box--danger{background:rgba(245,34,45,.12);border-color:rgba(245,34,45,.26);color:#FF6B73}
+
+/* 4.5 章节标题 */
+.sec-head{max-width:720px;margin:0 auto var(--s8);text-align:center}
+.sec-head__eyebrow{
+  display:inline-flex;align-items:center;gap:8px;margin-bottom:var(--s4);
+  font-size:12px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;
+  color:#7CB0FB;
+}
+.sec-head__eyebrow::before,.sec-head__eyebrow::after{
+  content:"";width:24px;height:1px;background:linear-gradient(90deg,transparent,#7CB0FB);
+}
+.sec-head__eyebrow::after{background:linear-gradient(270deg,transparent,#7CB0FB)}
+.sec-head h2{font-size:clamp(26px,3.6vw,40px);margin-bottom:var(--s4)}
+.sec-head p{font-size:16px;color:var(--ink-3);line-height:1.75}
+
+/* 渐变文字 */
+.gtext{background:var(--grad-ink);-webkit-background-clip:text;background-clip:text;
+       -webkit-text-fill-color:transparent;color:transparent}
+
+/* ===================== 5. 页头导航 ===================== */
+.hdr{
+  position:sticky;top:0;z-index:100;height:var(--header-h);
+  background:rgba(10,15,28,.72);
+  backdrop-filter:blur(18px) saturate(160%);-webkit-backdrop-filter:blur(18px) saturate(160%);
+  border-bottom:1px solid transparent;
+  transition:border-color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+.hdr.is-stuck{border-bottom-color:var(--line);background:rgba(10,15,28,.9);box-shadow:var(--sh-2)}
+.hdr__in{display:flex;align-items:center;justify-content:space-between;height:100%;gap:var(--s5)}
+
+.logo{display:flex;align-items:center;gap:var(--s3);flex:none}
+.logo__mark{
+  width:36px;height:36px;border-radius:10px;flex:none;
+  background:var(--grad-brand);display:grid;place-items:center;
+  box-shadow:var(--sh-glow);
+}
+.logo__mark svg{width:20px;height:20px;color:#04121F}
+.logo__txt{display:flex;flex-direction:column;line-height:1.15}
+.logo__name{font-size:15px;font-weight:700;color:var(--ink-1);letter-spacing:-.01em}
+.logo__sub{font-size:11px;color:var(--ink-4);letter-spacing:.06em}
+
+.nav{display:flex;align-items:center;gap:var(--s2)}
+.nav__a{
+  position:relative;padding:8px 14px;border-radius:var(--r-sm);
+  font-size:14px;font-weight:500;color:var(--ink-2);
+  transition:color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+.nav__a:hover{color:var(--ink-1);background:rgba(59,130,246,.10)}
+.nav__a::after{
+  content:"";position:absolute;left:14px;right:14px;bottom:2px;height:2px;
+  border-radius:2px;background:var(--grad-brand);
+  transform:scaleX(0);transform-origin:center;
+  transition:transform var(--dur) var(--ease);
+}
+.nav__a.is-active{color:var(--ink-1)}
+.nav__a.is-active::after{transform:scaleX(1)}
+
+.hdr__act{display:flex;align-items:center;gap:var(--s3);flex:none}
+/* 汉堡按钮 */
+.burger{display:none;width:40px;height:40px;border-radius:var(--r-sm);
+        border:1px solid var(--line-2);align-items:center;justify-content:center;flex-direction:column;gap:4px}
+.burger span{display:block;width:16px;height:2px;border-radius:2px;background:var(--ink-2);
+             transition:transform var(--dur) var(--ease), opacity var(--dur) var(--ease)}
+.burger.is-open span:nth-child(1){transform:translateY(6px) rotate(45deg)}
+.burger.is-open span:nth-child(2){opacity:0}
+.burger.is-open span:nth-child(3){transform:translateY(-6px) rotate(-45deg)}
+/* ===================== 6. 主视觉 Hero ===================== */
+.hero{position:relative;padding:var(--s10) 0 var(--s9);overflow:hidden}
+.hero__grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.08fr);
+            gap:var(--s8);align-items:center}
+
+.hero__eyebrow{
+  display:inline-flex;align-items:center;gap:10px;margin-bottom:var(--s5);
+  padding:6px 8px 6px 6px;border-radius:var(--r-full);
+  background:rgba(20,29,51,.6);border:1px solid var(--line-2);
+  font-size:12.5px;color:var(--ink-2);backdrop-filter:blur(10px);
+}
+.hero__eyebrow .badge{margin-right:2px}
+
+.hero h1{font-size:clamp(32px,5.2vw,58px);line-height:1.14;letter-spacing:-.025em;margin-bottom:var(--s5)}
+.hero h1 .accent{
+  background:var(--grad-ink);-webkit-background-clip:text;background-clip:text;
+  -webkit-text-fill-color:transparent;color:transparent;
+}
+.hero__lead{font-size:17px;line-height:1.8;color:var(--ink-3);margin-bottom:var(--s6);max-width:34em}
+.hero__lead strong{color:var(--ink-2);font-weight:600}
+
+.hero__cta{display:flex;flex-wrap:wrap;gap:var(--s4);margin-bottom:var(--s7)}
+.hero__stats{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--s4);
+             padding-top:var(--s6);border-top:1px solid var(--line)}
+.stat__num{font-size:22px;font-weight:700;color:var(--ink-1);letter-spacing:-.02em;
+           display:flex;align-items:baseline;gap:6px}
+.stat__num small{font-size:12px;font-weight:600;color:var(--ink-4)}
+.stat__label{font-size:12.5px;color:var(--ink-4);margin-top:2px}
+.stat__from{color:var(--p0);text-decoration:line-through;text-decoration-thickness:1px}
+.stat__to{color:var(--ok)}
+
+/* --- Hero 仪表盘 mockup（纯 CSS/SVG） --- */
+.hero__visual{position:relative}
+.mock{
+  position:relative;border-radius:var(--r-xl);overflow:hidden;
+  border:1px solid var(--line-2);background:var(--bg-1);
+  box-shadow:var(--sh-4), 0 0 0 1px rgba(125,211,252,.06);
+  transform:perspective(1600px) rotateY(-7deg) rotateX(2deg);
+  transition:transform .6s var(--ease);
+}
+.mock:hover{transform:perspective(1600px) rotateY(-3deg) rotateX(1deg)}
+.mock__bar{
+  display:flex;align-items:center;gap:var(--s3);
+  height:38px;padding:0 var(--s4);
+  background:var(--bg-2);border-bottom:1px solid var(--line);
+}
+.mock__dots{display:flex;gap:6px}
+.mock__dots i{width:10px;height:10px;border-radius:50%;display:block}
+.mock__dots i:nth-child(1){background:#FF5F57}
+.mock__dots i:nth-child(2){background:#FEBC2E}
+.mock__dots i:nth-child(3){background:#28C840}
+.mock__url{
+  flex:1;height:22px;border-radius:var(--r-xs);
+  background:rgba(6,10,18,.7);border:1px solid var(--line);
+  display:flex;align-items:center;padding:0 10px;
+  font-size:11px;color:var(--ink-4);font-family:ui-monospace,Consolas,monospace;
+}
+.mock__body{display:grid;grid-template-columns:150px 1fr;min-height:330px}
+
+/* 侧栏 */
+.mock__side{background:var(--bg-2);border-right:1px solid var(--line);padding:var(--s4) var(--s3)}
+.mock__side-hd{display:flex;align-items:center;gap:8px;margin-bottom:var(--s5);padding:0 4px}
+.mock__side-hd i{width:20px;height:20px;border-radius:6px;background:var(--grad-brand);display:block}
+.mock__side-hd span{font-size:11px;font-weight:700;color:var(--ink-1)}
+.mock__nav{display:flex;flex-direction:column;gap:3px}
+.mock__nav i{display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:var(--r-xs);
+             font-size:11px;color:var(--ink-3);font-style:normal}
+.mock__nav i b{width:12px;height:12px;border-radius:3px;background:var(--line-2);flex:none}
+.mock__nav i.on{background:rgba(59,130,246,.16);color:#7CB0FB}
+.mock__nav i.on b{background:var(--brand)}
+
+/* 主区 */
+.mock__main{padding:var(--s4);display:flex;flex-direction:column;gap:var(--s3);min-width:0}
+.mock__kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.kpi{
+  border-radius:var(--r-sm);padding:9px 10px;min-width:0;
+  background:var(--bg-2);border:1px solid var(--line);
+}
+.kpi__l{font-size:9.5px;color:var(--ink-4);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kpi__v{font-size:15px;font-weight:700;color:var(--ink-1);letter-spacing:-.02em;line-height:1.3}
+.kpi__d{font-size:9px;font-weight:600;margin-top:1px}
+.kpi__d.up{color:var(--ok)} .kpi__d.dn{color:var(--p0)} .kpi__d.flat{color:var(--ink-4)}
+
+.mock__chart{
+  flex:1;border-radius:var(--r-sm);padding:var(--s3);min-height:120px;
+  background:var(--bg-2);border:1px solid var(--line);
+  display:flex;flex-direction:column;gap:6px;
+}
+.mock__chart-hd{display:flex;justify-content:space-between;align-items:center}
+.mock__chart-hd span{font-size:10px;color:var(--ink-3);font-weight:600}
+.mock__legend{display:flex;gap:10px}
+.mock__legend em{display:flex;align-items:center;gap:4px;font-size:9px;color:var(--ink-4);font-style:normal}
+.mock__legend em::before{content:"";width:8px;height:2px;border-radius:2px;background:currentColor}
+.mock__legend em:nth-child(1){color:var(--brand)} .mock__legend em:nth-child(2){color:var(--brand-2)}
+.mock__chart svg{width:100%;height:100%;min-height:78px}
+.mock__rows{display:flex;flex-direction:column;gap:5px}
+.mock__row{display:flex;align-items:center;gap:8px;font-size:9.5px;color:var(--ink-3)}
+.mock__row em{font-style:normal;width:56px;flex:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mock__row u{flex:1;height:4px;border-radius:2px;background:var(--line);overflow:hidden;text-decoration:none}
+.mock__row u i{display:block;height:100%;border-radius:2px;background:var(--grad-brand)}
+.mock__row b{width:26px;text-align:right;font-weight:600;color:var(--ink-2);flex:none}
+
+/* 浮动装饰标签 */
+.flt{
+  position:absolute;z-index:2;border-radius:var(--r);padding:9px 13px;
+  background:var(--bg-glass-2);border:1px solid var(--line-2);
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  box-shadow:var(--sh-3);display:flex;align-items:center;gap:8px;
+  font-size:11.5px;font-weight:600;color:var(--ink-1);white-space:nowrap;
+  animation:float 6s ease-in-out infinite;
+}
+.flt svg{width:15px;height:15px;flex:none}
+.flt--1{top:9%;right:-4%;animation-delay:0s}
+.flt--2{bottom:14%;left:-8%;animation-delay:1.4s}
+.flt--3{bottom:-4%;right:12%;animation-delay:2.6s}
+@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}
+
+/* ===================== 7. 数据指标带 ===================== */
+.band{
+  border-block:1px solid var(--line);
+  background:linear-gradient(180deg, rgba(15,22,38,.5), rgba(10,15,28,.2));
+  padding:var(--s7) 0;
+}
+.band__grid{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--s5);text-align:center}
+.band__num{font-size:clamp(28px,4vw,44px);font-weight:800;letter-spacing:-.03em;line-height:1.1}
+.band__num--b{color:var(--brand)} .band__num--c{color:var(--brand-2)}
+.band__num--v{color:var(--violet)} .band__num--o{color:var(--ok)}
+.band__label{font-size:13px;color:var(--ink-3);margin-top:var(--s2)}
+
+/* ===================== 8. 核心特性 ===================== */
+.feat{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--s5)}
+.feat__card{display:flex;flex-direction:column}
+.feat__card h3{font-size:17px;margin:var(--s4) 0 var(--s2)}
+.feat__card p{font-size:14px;color:var(--ink-3);line-height:1.72;flex:1}
+.feat__tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:var(--s4)}
+.feat__tags code{
+  font-family:ui-monospace,Consolas,monospace;font-size:11px;
+  padding:3px 8px;border-radius:var(--r-xs);
+  background:rgba(59,130,246,.10);border:1px solid rgba(59,130,246,.20);color:#7CB0FB;
+}
+
+/* ===================== 9. 架构分层 ===================== */
+.arch{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,.95fr);
+      gap:var(--s8);align-items:center}
+.arch__stack{display:flex;flex-direction:column;gap:var(--s3)}
+.layer{
+  position:relative;border-radius:var(--r-lg);padding:var(--s4) var(--s5);
+  border:1px solid var(--line-2);background:var(--bg-2);
+  display:flex;align-items:center;gap:var(--s4);
+  transition:transform var(--dur) var(--ease), border-color var(--dur) var(--ease),
+             box-shadow var(--dur) var(--ease);
+}
+.layer:hover{transform:translateX(6px);border-color:var(--brand);box-shadow:var(--sh-glow)}
+.layer__tag{
+  width:44px;height:44px;border-radius:var(--r);flex:none;display:grid;place-items:center;
+  font-size:14px;font-weight:800;letter-spacing:-.02em;
+  background:rgba(59,130,246,.14);border:1px solid rgba(59,130,246,.30);color:#7CB0FB;
+}
+.layer__bd{min-width:0;flex:1}
+.layer__bd h4{font-size:15px;margin-bottom:2px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.layer__bd p{font-size:12.5px;color:var(--ink-3);line-height:1.6}
+.layer__n{font-size:11px;color:var(--ink-4);font-family:ui-monospace,Consolas,monospace}
+/* 层级间箭头 */
+.arch__arw{display:flex;justify-content:center;color:var(--line-3);margin:-6px 0}
+.arch__arw svg{width:16px;height:16px}
+/* 分层配色 */
+.layer--l4 .layer__tag{background:rgba(139,92,246,.14);border-color:rgba(139,92,246,.30);color:#B79BFA}
+.layer--l3 .layer__tag{background:rgba(59,130,246,.14);border-color:rgba(59,130,246,.30);color:#7CB0FB}
+.layer--l2 .layer__tag{background:rgba(6,182,212,.14);border-color:rgba(6,182,212,.30);color:#5FD4E8}
+.layer--l1 .layer__tag{background:rgba(82,196,26,.14);border-color:rgba(82,196,26,.30);color:#8ADB5B}
+
+.arch__rules{display:flex;flex-direction:column;gap:var(--s3)}
+.rule{
+  display:flex;gap:var(--s3);padding:var(--s4);
+  border-radius:var(--r);background:rgba(20,29,51,.5);
+  border:1px solid var(--line);
+}
+.rule__ico{width:22px;height:22px;flex:none;color:var(--brand);margin-top:1px}
+.rule__ico svg{width:100%;height:100%}
+.rule h4{font-size:14px;margin-bottom:3px}
+.rule p{font-size:12.5px;color:var(--ink-3);line-height:1.65}
+.rule code{font-family:ui-monospace,Consolas,monospace;font-size:11.5px;
+           background:rgba(6,10,18,.7);padding:1px 6px;border-radius:4px;color:#7DD3FC}
+/* ===================== 10. 页面预览画廊 ===================== */
+.gal{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--s5)}
+.shot{border-radius:var(--r-lg);overflow:hidden;border:1px solid var(--line);
+      background:var(--bg-2);cursor:default;
+      transition:transform var(--dur) var(--ease), border-color var(--dur) var(--ease),
+                 box-shadow var(--dur) var(--ease)}
+.shot:hover{transform:translateY(-6px) scale(1.012);border-color:var(--line-3);box-shadow:var(--sh-4)}
+.shot__win{aspect-ratio:16/10;background:var(--bg-1);border-bottom:1px solid var(--line);
+           display:grid;grid-template-columns:52px 1fr;overflow:hidden;position:relative}
+/* 迷你侧栏 */
+.shot__sd{background:var(--bg-2);border-right:1px solid var(--line);padding:7px 5px;
+          display:flex;flex-direction:column;gap:5px}
+.shot__sd i{height:5px;border-radius:2px;background:var(--line-2);display:block}
+.shot__sd i:nth-child(1){background:var(--brand);width:80%}
+.shot__sd i:nth-child(3){width:65%} .shot__sd i:nth-child(4){width:75%}
+.shot__sd i:nth-child(5){width:55%} .shot__sd i:nth-child(6){width:70%}
+/* 迷你主区 */
+.shot__mn{padding:9px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.shot__hd{height:7px;border-radius:3px;background:var(--line);width:44%}
+.shot__kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:5px}
+.shot__kpi{height:22px;border-radius:4px;background:var(--bg-2);border:1px solid var(--line);
+           padding:4px 5px;display:flex;flex-direction:column;gap:3px}
+.shot__kpi i{height:3px;border-radius:2px;background:var(--ink-4);opacity:.5;width:60%}
+.shot__kpi b{height:5px;border-radius:2px;width:80%;display:block}
+/* 迷你图表（CSS 柱状） */
+.shot__bars{flex:1;display:flex;align-items:flex-end;gap:3px;padding:2px 0;min-height:26px}
+.shot__bars i{flex:1;border-radius:2px 2px 0 0;background:linear-gradient(180deg,var(--brand),rgba(59,130,246,.22))}
+/* 迷你列表行 */
+.shot__rows{display:flex;flex-direction:column;gap:4px}
+.shot__rows i{height:4px;border-radius:2px;background:var(--line);display:block}
+.shot__rows i:nth-child(1){width:92%} .shot__rows i:nth-child(2){width:78%} .shot__rows i:nth-child(3){width:85%}
+/* 变体：折线趋势图 */
+.shot__spark{position:relative;flex:1;min-height:26px}
+.shot__spark svg{position:absolute;inset:0;width:100%;height:100%}
+/* 变体：告警列表 */
+.shot__alerts{display:flex;flex-direction:column;gap:4px;flex:1}
+.shot__alerts i{height:11px;border-radius:3px;display:block;opacity:.85}
+.shot__alerts i:nth-child(1){background:linear-gradient(90deg,var(--p0),rgba(245,34,45,.15))}
+.shot__alerts i:nth-child(2){background:linear-gradient(90deg,var(--p1),rgba(250,140,22,.15))}
+.shot__alerts i:nth-child(3){background:linear-gradient(90deg,var(--p2),rgba(250,173,20,.15))}
+.shot__alerts i:nth-child(4){background:linear-gradient(90deg,var(--p3),rgba(24,144,255,.15))}
+/* 变体：日志行 */
+.shot__logs{display:flex;flex-direction:column;gap:3px;flex:1;font-family:ui-monospace,Consolas,monospace}
+.shot__logs i{height:4px;border-radius:2px;display:block;background:var(--line)}
+.shot__logs i:nth-child(1){width:88%;background:var(--line-2)}
+.shot__logs i:nth-child(3){width:70%;background:rgba(250,173,20,.5)}
+.shot__logs i:nth-child(5){width:80%;background:rgba(245,34,45,.5)}
+/* 变体：步骤条 */
+.shot__steps{display:flex;align-items:center;gap:4px;flex:1}
+.shot__steps i{flex:1;height:5px;border-radius:3px;background:var(--line);display:block}
+.shot__steps i.done{background:var(--ok)} .shot__steps i.run{background:var(--brand)}
+.shot__steps i.fail{background:var(--p0)}
+/* 变体：拓扑图 */
+.shot__topo{position:relative;flex:1;min-height:40px}
+.shot__topo svg{position:absolute;inset:0;width:100%;height:100%}
+
+.shot__cap{padding:var(--s4) var(--s5)}
+.shot__cap h4{font-size:14.5px;margin-bottom:4px;display:flex;align-items:center;
+              justify-content:space-between;gap:8px}
+.shot__cap p{font-size:12.5px;color:var(--ink-3);line-height:1.6}
+.shot__no{font-size:10.5px;font-family:ui-monospace,Consolas,monospace;color:var(--ink-4);font-weight:500}
+
+/* ===================== 11. 设计系统 ===================== */
+.ds{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--s5)}
+.ds__panel{border-radius:var(--r-lg);border:1px solid var(--line);background:var(--bg-2);
+           padding:var(--s5);box-shadow:var(--sh-2)}
+.ds__panel h4{font-size:14px;margin-bottom:var(--s4);display:flex;align-items:center;gap:8px}
+.ds__panel h4 span{font-size:11px;color:var(--ink-4);font-weight:500}
+/* 色板 */
+.sw{display:flex;flex-direction:column;gap:var(--s2)}
+.sw__row{display:flex;align-items:center;gap:var(--s3);padding:6px;
+         border-radius:var(--r-sm);transition:background var(--dur) var(--ease)}
+.sw__row:hover{background:rgba(59,130,246,.07)}
+.sw__chip{width:34px;height:34px;border-radius:var(--r-xs);flex:none;
+          box-shadow:inset 0 0 0 1px rgba(255,255,255,.10)}
+.sw__meta{flex:1;min-width:0}
+.sw__meta b{display:block;font-size:12.5px;color:var(--ink-1);font-weight:600}
+.sw__meta i{display:block;font-size:10.5px;color:var(--ink-4);font-style:normal;
+            font-family:ui-monospace,Consolas,monospace}
+.sw__use{font-size:11px;color:var(--ink-3)}
+/* 字体阶梯 */
+.type__row{display:flex;align-items:baseline;gap:var(--s4);padding:9px 6px;
+           border-radius:var(--r-sm);border-bottom:1px dashed var(--line)}
+.type__row:last-child{border-bottom:0}
+.type__row em{font-style:normal;font-size:10.5px;color:var(--ink-4);width:78px;flex:none;
+              font-family:ui-monospace,Consolas,monospace}
+.type__row span{color:var(--ink-1);font-weight:600;line-height:1.3}
+/* 组件样例 */
+.cmp{display:flex;flex-direction:column;gap:var(--s3)}
+.cmp__row{display:flex;flex-wrap:wrap;gap:var(--s2);align-items:center}
+.cmp__lbl{font-size:10.5px;color:var(--ink-4);width:100%;
+          font-family:ui-monospace,Consolas,monospace;margin-bottom:-4px}
+
+/* ===================== 12. 迁移路线时间轴 ===================== */
+.road{position:relative;padding-left:var(--s6)}
+.road::before{content:"";position:absolute;left:11px;top:6px;bottom:6px;width:2px;
+              background:linear-gradient(180deg,var(--brand),var(--brand-2),var(--violet),transparent)}
+.rd{position:relative;padding:0 0 var(--s6) var(--s6)}
+.rd:last-child{padding-bottom:0}
+.rd__dot{position:absolute;left:-25px;top:4px;width:24px;height:24px;border-radius:50%;
+         display:grid;place-items:center;font-size:10px;font-weight:800;
+         background:var(--bg-1);border:2px solid var(--line-2);color:var(--ink-3);z-index:1}
+.rd--done .rd__dot{background:var(--ok);border-color:var(--ok);color:#04121F}
+.rd--key .rd__dot{background:var(--grad-brand);border-color:transparent;color:#04121F;
+                  box-shadow:0 0 0 5px rgba(59,130,246,.16)}
+.rd__hd{display:flex;align-items:center;gap:var(--s3);flex-wrap:wrap;margin-bottom:6px}
+.rd__hd h4{font-size:15px}
+.rd__meta{font-size:11.5px;color:var(--ink-4);font-family:ui-monospace,Consolas,monospace}
+.rd p{font-size:13.5px;color:var(--ink-3);line-height:1.7;max-width:62ch}
+.rd p b{color:var(--ink-2);font-weight:600}
+
+/* ===================== 13. 底部 CTA ===================== */
+.cta{
+  position:relative;border-radius:var(--r-2xl);overflow:hidden;
+  padding:var(--s9) var(--s6);text-align:center;
+  border:1px solid var(--line-2);
+  background:linear-gradient(135deg, rgba(59,130,246,.14), rgba(139,92,246,.12) 55%, rgba(6,182,212,.10));
+  box-shadow:var(--sh-3);
+}
+.cta::before{
+  content:"";position:absolute;inset:0;
+  background:radial-gradient(700px 300px at 50% 0%, rgba(59,130,246,.22), transparent 70%);
+  pointer-events:none;
+}
+.cta h2{font-size:clamp(24px,3.4vw,36px);margin-bottom:var(--s4);position:relative}
+.cta p{font-size:16px;color:var(--ink-2);max-width:52ch;margin:0 auto var(--s7);position:relative}
+.cta__btns{display:flex;gap:var(--s4);justify-content:center;flex-wrap:wrap;position:relative}
+
+/* ===================== 14. 页脚 ===================== */
+.ftr{margin-top:var(--s10);border-top:1px solid var(--line);
+     background:linear-gradient(180deg,rgba(6,10,18,.4),rgba(6,10,18,.9));
+     padding:var(--s8) 0 var(--s6);position:relative;z-index:1}
+.ftr__grid{display:grid;grid-template-columns:1.6fr repeat(3,1fr);gap:var(--s7);margin-bottom:var(--s7)}
+.ftr__brand p{font-size:13px;color:var(--ink-4);line-height:1.75;margin-top:var(--s4);max-width:34ch}
+.ftr__col h5{font-size:12.5px;color:var(--ink-1);margin-bottom:var(--s4);
+             letter-spacing:.06em;text-transform:uppercase;font-weight:700}
+.ftr__col a{display:block;font-size:13.5px;color:var(--ink-3);padding:5px 0;
+            transition:color var(--dur) var(--ease), transform var(--dur) var(--ease)}
+.ftr__col a:hover{color:var(--brand);transform:translateX(3px)}
+.ftr__bot{display:flex;justify-content:space-between;align-items:center;gap:var(--s4);
+          padding-top:var(--s5);border-top:1px solid var(--line);flex-wrap:wrap}
+.ftr__bot p{font-size:12.5px;color:var(--ink-4)}
+.ftr__badges{display:flex;gap:var(--s2);flex-wrap:wrap}
+
+/* ===================== 15. 进场动画 ===================== */
+.rv{opacity:0;transform:translateY(22px);
+    transition:opacity .7s var(--ease), transform .7s var(--ease)}
+.rv.in{opacity:1;transform:none}
+@media (prefers-reduced-motion:reduce){
+  *{animation:none!important;transition:none!important}
+  .rv{opacity:1;transform:none}
+  html{scroll-behavior:auto}
+}
+
+/* ===================== 16. 响应式 ===================== */
+@media (max-width:1080px){
+  .hero__grid{gap:var(--s7)}
+  .feat,.gal,.ds{grid-template-columns:repeat(2,1fr)}
+  .arch{grid-template-columns:1fr;gap:var(--s7)}
+  .ftr__grid{grid-template-columns:1fr 1fr;gap:var(--s6)}
+}
+@media (max-width:860px){
+  .nav{
+    position:fixed;top:var(--header-h);left:0;right:0;
+    flex-direction:column;align-items:stretch;gap:2px;
+    padding:var(--s4) var(--s5) var(--s5);
+    background:rgba(10,15,28,.97);
+    backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+    border-bottom:1px solid var(--line);
+    box-shadow:var(--sh-3);
+    transform:translateY(-12px);opacity:0;pointer-events:none;
+    transition:transform var(--dur) var(--ease), opacity var(--dur) var(--ease);
+    max-height:calc(100vh - var(--header-h));overflow-y:auto;
+  }
+  .nav.is-open{transform:none;opacity:1;pointer-events:auto}
+  .nav__a{padding:11px 14px;font-size:15px}
+  .nav__a::after{display:none}
+  .burger{display:flex}
+  .hdr__act .btn--sm{display:none}
+  .section{padding:var(--s8) 0}
+  .hero{padding:var(--s8) 0 var(--s7)}
+  .mock{transform:none}
+  .mock:hover{transform:none}
+  .flt--1{right:0} .flt--2{left:0} .flt--3{right:4%}
+  .band__grid{grid-template-columns:repeat(2,1fr);gap:var(--s6)}
+}
+@media (max-width:640px){
+  .wrap{padding:0 var(--s4)}
+  .hero__grid{grid-template-columns:1fr}
+  .hero__visual{order:-1}
+  .hero__cta .btn{flex:1;min-width:140px}
+  .feat,.gal,.ds{grid-template-columns:1fr}
+  .grid-2,.grid-3,.grid-4{grid-template-columns:1fr}
+  .hero__stats{grid-template-columns:1fr;gap:var(--s4)}
+  .stat{display:flex;align-items:baseline;gap:var(--s3);justify-content:space-between}
+  .band__grid{grid-template-columns:1fr 1fr;gap:var(--s5)}
+  .mock__body{grid-template-columns:1fr;min-height:0}
+  .mock__side{display:none}
+  .mock__kpis{grid-template-columns:repeat(2,1fr)}
+  .ftr__grid{grid-template-columns:1fr;gap:var(--s6)}
+  .ftr__bot{flex-direction:column;align-items:flex-start}
+  .cta{padding:var(--s8) var(--s5)}
+  .cta__btns .btn{width:100%}
+  .road{padding-left:var(--s5)}
+  .rd{padding-left:var(--s5)}
+  .rd__dot{left:-21px;width:20px;height:20px;font-size:9px}
+  .sec-head{margin-bottom:var(--s7)}
+}
+@media (max-width:420px){
+  .band__grid{grid-template-columns:1fr}
+  .flt{font-size:10.5px;padding:7px 10px}
+  .flt--2,.flt--3{display:none}
+}
+</style>
+</head>
+<body>
+<!-- ===================== 页头导航 ===================== -->
+<header class="hdr" id="hdr">
+  <div class="wrap hdr__in">
+    <a class="logo" href="#top">
+      <span class="logo__mark">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+             stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="3" width="20" height="7" rx="2"/><rect x="2" y="14" width="20" height="7" rx="2"/>
+          <path d="M6.5 6.5h.01M6.5 17.5h.01"/>
+        </svg>
+      </span>
+      <span class="logo__txt">
+        <span class="logo__name">ERP 服务器管理器</span>
+        <span class="logo__sub">SERVER MANAGER v8</span>
+      </span>
+    </a>
+
+    <nav class="nav" id="nav">
+      <a class="nav__a is-active" href="#top">首页</a>
+      <a class="nav__a" href="#features">核心特性</a>
+      <a class="nav__a" href="#arch">架构设计</a>
+      <a class="nav__a" href="#gallery">页面预览</a>
+      <a class="nav__a" href="#design">设计系统</a>
+      <a class="nav__a" href="#roadmap">迁移路线</a>
+    </nav>
+
+    <div class="hdr__act">
+      <span class="badge badge--violet"><i class="badge__dot"></i>v8.0 待评审</span>
+      <a class="btn btn--primary btn--sm" href="#gallery">
+        <svg class="btn__ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round">
+          <path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/>
+        </svg>
+        查看效果图
+      </a>
+      <button class="burger" id="burger" aria-label="展开导航菜单" aria-expanded="false">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+  </div>
+</header>
+
+<main id="top">
+
+<!-- ===================== 主视觉 Banner ===================== -->
+<section class="hero">
+  <div class="wrap hero__grid">
+    <!-- 左：文案 -->
+    <div class="hero__copy rv">
+      <div class="hero__eyebrow">
+        <span class="badge badge--brand"><i class="badge__dot"></i>架构重构</span>
+        <span>从 4854 行 Tkinter 单体，到四层可测试架构</span>
+      </div>
+
+      <h1>
+        让 ERP 运维<br>
+        从<span class="accent">手忙脚乱</span><br>
+        到<span class="accent">掌控全局</span>
+      </h1>
+
+      <p class="hero__lead">
+        v8 不是换皮，而是<strong>重写架构</strong>。我们把散落在上帝类里的 96 个方法，
+        重构为 <strong>Domain / Application / Adapter / Presentation</strong> 四层单向依赖结构，
+        业务逻辑 100% 可单测；并引入症状化告警引擎、三级权限管控与不可篡改审计流水。
+        <strong>进程树清理、NSSM 托管、服务依赖探测</strong>等踩坑资产被逐行迁移保留。
+      </p>
+
+      <div class="hero__cta">
+        <a class="btn btn--primary" href="#gallery">
+          <svg class="btn__ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/>
+          </svg>
+          浏览 8 张页面效果图
+        </a>
+        <a class="btn btn--ghost" href="#arch">
+          <svg class="btn__ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/>
+          </svg>
+          阅读重构方案
+        </a>
+      </div>
+
+      <div class="hero__stats">
+        <div class="stat">
+          <div class="stat__num"><span class="stat__from">4854</span> → <span class="stat__to">4 层</span></div>
+          <div class="stat__label">单文件行数 → 架构分层</div>
+        </div>
+        <div class="stat">
+          <div class="stat__num"><span class="stat__from">96</span> → <span class="stat__to">12</span></div>
+          <div class="stat__label">上帝类方法 → 业务用例</div>
+        </div>
+        <div class="stat">
+          <div class="stat__num"><span class="stat__from">0%</span> → <span class="stat__to">90%</span></div>
+          <div class="stat__label">业务可单测覆盖率</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 右：仪表盘 mockup（纯 CSS + 内联 SVG） -->
+    <div class="hero__visual rv">
+      <div class="mock">
+        <div class="mock__bar">
+          <div class="mock__dots"><i></i><i></i><i></i></div>
+          <div class="mock__url">127.0.0.1:5002 · 总览驾驶舱</div>
+        </div>
+        <div class="mock__body">
+          <!-- 迷你侧栏 -->
+          <aside class="mock__side">
+            <div class="mock__side-hd"><i></i><span>Server Manager</span></div>
+            <div class="mock__nav">
+              <i class="on"><b></b>总览驾驶舱</i>
+              <i><b></b>服务编排</i>
+              <i><b></b>监控告警</i>
+              <i><b></b>日志中心</i>
+              <i><b></b>部署发布</i>
+              <i><b></b>备份恢复</i>
+              <i><b></b>配置中心</i>
+              <i><b></b>权限与审计</i>
+            </div>
+          </aside>
+
+          <!-- 迷你主区 -->
+          <div class="mock__main">
+            <div class="mock__kpis">
+              <div class="kpi">
+                <div class="kpi__l">延迟 P95</div>
+                <div class="kpi__v">42<small>ms</small></div>
+                <div class="kpi__d dn">▲ 8%</div>
+              </div>
+              <div class="kpi">
+                <div class="kpi__l">请求量</div>
+                <div class="kpi__v">1.2<small>k</small></div>
+                <div class="kpi__d up">▼ 12%</div>
+              </div>
+              <div class="kpi">
+                <div class="kpi__l">错误率</div>
+                <div class="kpi__v">0.3<small>%</small></div>
+                <div class="kpi__d up">▼ 0.1</div>
+              </div>
+              <div class="kpi">
+                <div class="kpi__l">饱和度</div>
+                <div class="kpi__v">58<small>%</small></div>
+                <div class="kpi__d flat">— 平稳</div>
+              </div>
+            </div>
+
+            <div class="mock__chart">
+              <div class="mock__chart-hd">
+                <span>CPU / 内存趋势 · 120s 窗口</span>
+                <div class="mock__legend"><em>CPU</em><em>内存</em></div>
+              </div>
+              <!-- 内联 SVG 面积折线图 -->
+              <svg viewBox="0 0 300 90" preserveAspectRatio="none" aria-label="CPU 与内存趋势图">
+                <defs>
+                  <linearGradient id="gCpu" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="#3B82F6" stop-opacity=".42"/>
+                    <stop offset="100%" stop-color="#3B82F6" stop-opacity="0"/>
+                  </linearGradient>
+                  <linearGradient id="gMem" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="#06B6D4" stop-opacity=".30"/>
+                    <stop offset="100%" stop-color="#06B6D4" stop-opacity="0"/>
+                  </linearGradient>
+                </defs>
+                <!-- 网格 -->
+                <g stroke="#1C2740" stroke-width=".6">
+                  <line x1="0" y1="22" x2="300" y2="22"/><line x1="0" y1="45" x2="300" y2="45"/>
+                  <line x1="0" y1="68" x2="300" y2="68"/>
+                </g>
+                <!-- CPU 面积 + 线 -->
+                <path d="M0,62 L25,55 L50,58 L75,44 L100,48 L125,36 L150,40 L175,30 L200,34 L225,26 L250,30 L275,22 L300,26 L300,90 L0,90 Z"
+                      fill="url(#gCpu)"/>
+                <polyline points="0,62 25,55 50,58 75,44 100,48 125,36 150,40 175,30 200,34 225,26 250,30 275,22 300,26"
+                      fill="none" stroke="#3B82F6" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>
+                <!-- 内存 面积 + 线 -->
+                <path d="M0,72 L25,70 L50,66 L75,68 L100,62 L125,64 L150,58 L175,60 L200,54 L225,56 L250,52 L275,50 L300,48 L300,90 L0,90 Z"
+                      fill="url(#gMem)"/>
+                <polyline points="0,72 25,70 50,66 75,68 100,62 125,64 150,58 175,60 200,54 225,56 250,52 275,50 300,48"
+                      fill="none" stroke="#06B6D4" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
+                <circle cx="300" cy="26" r="2.6" fill="#3B82F6"/>
+                <circle cx="300" cy="48" r="2.6" fill="#06B6D4"/>
+              </svg>
+            </div>
+
+            <div class="mock__rows">
+              <div class="mock__row"><em>uvicorn.exe</em><u><i style="width:72%"></i></u><b>36%</b></div>
+              <div class="mock__row"><em>node.exe</em><u><i style="width:48%"></i></u><b>24%</b></div>
+              <div class="mock__row"><em>redis-server</em><u><i style="width:22%"></i></u><b>11%</b></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 浮动标签 -->
+      <div class="flt flt--1" style="color:#8ADB5B">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+             stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+        全部服务健康
+      </div>
+      <div class="flt flt--2" style="color:#F5C44E">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round">
+          <path d="M18 8a6 6 0 1 0-12 0c0 7-3 8-3 8h18s-3-1-3-8"/><path d="M10.3 21a2 2 0 0 0 3.4 0"/>
+        </svg>
+        3 条未确认告警
+      </div>
+      <div class="flt flt--3" style="color:#7CB0FB">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/>
+        </svg>
+        审计哈希链完整
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 数据指标带 ===================== -->
+<section class="band">
+  <div class="wrap band__grid">
+    <div class="rv">
+      <div class="band__num band__num--b">8</div>
+      <div class="band__label">完整页面设计</div>
+    </div>
+    <div class="rv">
+      <div class="band__num band__num--c">12</div>
+      <div class="band__label">功能模块重构</div>
+    </div>
+    <div class="rv">
+      <div class="band__num band__num--v">4</div>
+      <div class="band__label">架构分层（单向依赖）</div>
+    </div>
+    <div class="rv">
+      <div class="band__num band__num--o">9</div>
+      <div class="band__label">渐进迁移阶段 P0–P8</div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 核心特性 ===================== -->
+<section class="section" id="features">
+  <div class="wrap">
+    <div class="sec-head rv">
+      <div class="sec-head__eyebrow">Core Capabilities</div>
+      <h2>六项<span class="gtext">核心能力升级</span></h2>
+      <p>每一项都对应 v6 的一个具体病灶，也都有明确的大厂实践出处。不做为了炫技而加的功能。</p>
+    </div>
+
+    <div class="feat">
+      <!-- 1 -->
+      <article class="card feat__card rv">
+        <div class="ico-box">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+               stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="18" height="6" rx="1.5"/><rect x="3" y="15" width="18" height="6" rx="1.5"/>
+            <path d="M12 9v6"/><circle cx="12" cy="9" r=".8" fill="currentColor"/>
+          </svg>
+        </div>
+        <h3>四层单向依赖架构</h3>
+        <p>表现层 → 应用层 → 领域层 ← 适配层。领域层零 I/O、100% 可单测；适配层实现领域定义的 Protocol，
+           依赖倒置。用 import-linter 在 CI 拦截越层引用，防止重新腐化。</p>
+        <div class="feat__tags"><code>Domain</code><code>Application</code><code>Adapter</code><code>Ports</code></div>
+      </article>
+
+      <!-- 2 -->
+      <article class="card feat__card rv">
+        <div class="ico-box ico-box--warn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+               stroke-linecap="round" stroke-linejoin="round">
+            <path d="M18 8a6 6 0 1 0-12 0c0 7-3 8-3 8h18s-3-1-3-8"/><path d="M10.3 21a2 2 0 0 0 3.4 0"/>
+          </svg>
+        </div>
+        <h3>症状化告警引擎</h3>
+        <p>遵循 Google SRE：告「API 错误率 &gt; 5%」而非「CPU &gt; 80%」。仅保留 4 条症状规则，
+           CPU/内存/磁盘降级为 P3 饱和度预警。支持分组、抑制、静默三件套，每条规则强制绑定 runbook。</p>
+        <div class="feat__tags"><code>SRE</code><code>group_by</code><code>inhibition</code><code>silence</code></div>
+      </article>
+
+      <!-- 3 -->
+      <article class="card feat__card rv">
+        <div class="ico-box ico-box--violet">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+               stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/>
+          </svg>
+        </div>
+        <h3>三级权限 + 高危管控</h3>
+        <p>堡垒机 4A 裁剪：只读 / 运维 / 管理员三角色，高危操作分 L0–L3 四级。L3 需键入操作名并填写变更原因，
+           L2 二次确认并列出影响面。本地 PIN 提权，30 分钟滑动过期。</p>
+        <div class="feat__tags"><code>RBAC</code><code>JIT</code><code>L0–L3</code><code>PIN</code></div>
+      </article>
+
+      <!-- 4 -->
+      <article class="card feat__card rv">
+        <div class="ico-box ico-box--ok">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+               stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/>
+            <path d="M8 13h5M8 17h8"/>
+          </svg>
+        </div>
+        <h3>不可篡改审计流水</h3>
+        <p>借鉴字节 Romaster：append-only JSONL，每条记录携带前一条的 SHA-256，
+           形成哈希链。任何中间篡改都能被 verify_chain 检出。保留 180 天，支持按角色/操作/结果筛选导出。</p>
+        <div class="feat__tags"><code>append-only</code><code>sha256</code><code>trace_id</code></div>
+      </article>
+
+      <!-- 5 -->
+      <article class="card feat__card rv">
+        <div class="ico-box ico-box--cyan">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+               stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="5" cy="6" r="2.5"/><circle cx="19" cy="12" r="2.5"/><circle cx="5" cy="18" r="2.5"/>
+            <path d="M7.5 6H14a3 3 0 0 1 3 3v.5M16.5 12H9a3 3 0 0 0-3 3"/>
+          </svg>
+        </div>
+        <h3>Pipeline 流程编排</h3>
+        <p>腾讯蓝鲸 SOPS 模型：把开发模式启动的 5 个步骤显式建模为 Pipeline + Step，
+           每步有状态、耗时、可重试、可中断，UI 渲染为 Stepper。告别写在 120 行线程函数里的一坨逻辑。</p>
+        <div class="feat__tags"><code>Pipeline</code><code>Step</code><code>Stepper</code><code>可中断</code></div>
+      </article>
+
+      <!-- 6 -->
+      <article class="card feat__card rv">
+        <div class="ico-box ico-box--danger">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+               stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 3v18h18"/><path d="M7 15l4-5 3 3 5-7"/>
+          </svg>
+        </div>
+        <h3>统一可观测时间轴</h3>
+        <p>字节 Argos 思路：Metrics / Logs / Events 收敛到同一时间轴。告警可一键跳转到该时刻的日志与指标，
+           用 trace_id 串联「一次操作 → N 个子步骤 → M 条日志 → K 条告警」。</p>
+        <div class="feat__tags"><code>Metrics</code><code>Logs</code><code>Events</code><code>联动下钻</code></div>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 架构设计 ===================== -->
+<section class="section" id="arch" style="background:linear-gradient(180deg,transparent,rgba(15,22,38,.42),transparent)">
+  <div class="wrap">
+    <div class="sec-head rv">
+      <div class="sec-head__eyebrow">Architecture</div>
+      <h2>四层<span class="gtext">单向依赖</span>架构</h2>
+      <p>依赖方向严格向下，领域层不依赖任何外部 I/O。这是让业务逻辑从 0% 可测变为 100% 可测的关键。</p>
+    </div>
+
+    <div class="arch">
+      <!-- 左：分层栈 -->
+      <div class="arch__stack rv">
+        <div class="layer layer--l4">
+          <div class="layer__tag">L4</div>
+          <div class="layer__bd">
+            <h4>表现层 Presentation <span class="badge badge--violet">HTML / CSS / JS</span></h4>
+            <p>Web 页面 + pywebview Bridge。零业务逻辑，只调用 UseCase、只消费事件。</p>
+          </div>
+        </div>
+        <div class="arch__arw">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <path d="M12 5v14M6 13l6 6 6-6"/>
+          </svg>
+        </div>
+
+        <div class="layer layer--l3">
+          <div class="layer__tag">L3</div>
+          <div class="layer__bd">
+            <h4>应用层 Application <span class="badge badge--brand">用例编排</span></h4>
+            <p>usecases / pipeline / event_bus / auth。编排步骤、事务边界、权限校验、写审计。</p>
+          </div>
+        </div>
+        <div class="arch__arw">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <path d="M12 5v14M6 13l6 6 6-6"/>
+          </svg>
+        </div>
+
+        <div class="layer layer--l2">
+          <div class="layer__tag">L2</div>
+          <div class="layer__bd">
+            <h4>领域层 Domain <span class="badge badge--ok">零 I/O · 100% 可测</span></h4>
+            <p>models / state_machine / rules / ports。模式状态机、互斥规则、告警求值、权限矩阵、健康判定。</p>
+            <div class="layer__n">禁止 import：subprocess · psutil · tkinter · open()</div>
+          </div>
+        </div>
+        <div class="arch__arw">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <path d="M12 19V5M6 11l6-6 6 6"/>
+          </svg>
+        </div>
+
+        <div class="layer layer--l1">
+          <div class="layer__tag">L1</div>
+          <div class="layer__bd">
+            <h4>适配层 Adapter <span class="badge badge--brand">实现 Ports</span></h4>
+            <p>process_win · service_nssm · metrics_psutil · health_http · storage_json · audit_jsonl</p>
+            <div class="layer__n">v6 的踩坑资产（进程树清理 / NSSM 等待 / OEM 解码）全部落在此层</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 右：防腐化规则 -->
+      <div class="arch__rules rv">
+        <div class="rule">
+          <span class="rule__ico">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+          </span>
+          <div>
+            <h4>依赖契约由 CI 守护</h4>
+            <p>用 <code>import-linter</code> 声明四层顺序，越层 import 直接让 CI 失败，而不是靠自觉。</p>
+          </div>
+        </div>
+        <div class="rule">
+          <span class="rule__ico">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/>
+                 <path d="M12 7v5l3 2"/></svg>
+          </span>
+          <div>
+            <h4>规模门禁</h4>
+            <p>函数 ≤ 80 行、文件 ≤ 800 行、类方法 ≤ 20 个。v6 的上帝类 96 个方法，正是没有门禁的产物。</p>
+          </div>
+        </div>
+        <div class="rule">
+          <span class="rule__ico">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round">
+                 <path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>
+                 <path d="M12 9v4M12 17h.01"/></svg>
+          </span>
+          <div>
+            <h4>禁止静默失败</h4>
+            <p>v6 有 148 处静默吞错。v8 全面禁绝 <code>except Exception: pass</code>，
+               统一返回含 <code>ok / reason / detail</code> 的显式结果对象。</p>
+          </div>
+        </div>
+        <div class="rule">
+          <span class="rule__ico">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round">
+                 <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          </span>
+          <div>
+            <h4>导入冒烟检查</h4>
+            <p>CI 增加逐模块 import 冒烟。v6 的 <code>server_manager_console.py</code> 导入不存在符号、
+               整文件是死代码却无人发现，根源就是没有这道检查。</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 页面预览画廊 ===================== -->
+<section class="section" id="gallery">
+  <div class="wrap">
+    <div class="sec-head rv">
+      <div class="sec-head__eyebrow">Page Gallery</div>
+      <h2>八张<span class="gtext">关键页面效果图</span></h2>
+      <p>下列缩略图用纯 CSS 与内联 SVG 还原各页面的信息架构与视觉重心；
+         完整高保真版本见同目录 <code style="font-family:ui-monospace,Consolas,monospace;color:#7DD3FC">shots/</code> 目录，
+         可交互版本为 <code style="font-family:ui-monospace,Consolas,monospace;color:#7DD3FC">ui_prototype_v8.html</code>。</p>
+    </div>
+
+    <div class="gal">
+      <!-- 01 总览驾驶舱 -->
+      <article class="shot rv">
+        <div class="shot__win">
+          <div class="shot__sd"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          <div class="shot__mn">
+            <div class="shot__hd"></div>
+            <div class="shot__kpis">
+              <div class="shot__kpi"><i></i><b style="background:var(--brand)"></b></div>
+              <div class="shot__kpi"><i></i><b style="background:var(--brand-2)"></b></div>
+              <div class="shot__kpi"><i></i><b style="background:var(--ok)"></b></div>
+            </div>
+            <div class="shot__spark">
+              <svg viewBox="0 0 200 60" preserveAspectRatio="none">
+                <path d="M0,44 L30,38 L60,40 L90,26 L120,30 L150,18 L200,22 L200,60 L0,60 Z"
+                      fill="rgba(59,130,246,.28)"/>
+                <polyline points="0,44 30,38 60,40 90,26 120,30 150,18 200,22"
+                          fill="none" stroke="#3B82F6" stroke-width="1.6" stroke-linejoin="round"/>
+              </svg>
+            </div>
+            <div class="shot__rows"><i></i><i></i><i></i></div>
+          </div>
+        </div>
+        <div class="shot__cap">
+          <h4>总览驾驶舱 <span class="shot__no">01</span></h4>
+          <p>黄金四指标翻牌器（带同比）+ 一键操作双卡 + 三层健康视图 + 活动时间轴 + 进程 Top5。</p>
+        </div>
+      </article>
+
+      <!-- 02 服务编排 -->
+      <article class="shot rv">
+        <div class="shot__win">
+          <div class="shot__sd"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          <div class="shot__mn">
+            <div class="shot__hd"></div>
+            <div class="shot__topo">
+              <svg viewBox="0 0 200 62" preserveAspectRatio="none">
+                <g stroke="#28364F" stroke-width="1"><path d="M40,14 L100,31 L160,14"/>
+                   <path d="M100,31 L100,50"/><path d="M40,50 L100,31"/><path d="M160,50 L100,31"/></g>
+                <g fill="#3B82F6" opacity=".18" stroke="#3B82F6" stroke-width="1.2">
+                  <rect x="18" y="6" width="44" height="16" rx="4"/><rect x="138" y="6" width="44" height="16" rx="4"/>
+                </g>
+                <rect x="78" y="23" width="44" height="16" rx="4" fill="rgba(139,92,246,.22)" stroke="#8B5CF6" stroke-width="1.2"/>
+                <g fill="rgba(82,196,26,.2)" stroke="#52C41A" stroke-width="1.2">
+                  <rect x="18" y="42" width="44" height="16" rx="4"/><rect x="138" y="42" width="44" height="16" rx="4"/></g>
+              </svg>
+            </div>
+            <div class="shot__rows"><i></i><i></i><i></i><i></i></div>
+          </div>
+        </div>
+        <div class="shot__cap">
+          <h4>服务编排 <span class="shot__no">02</span></h4>
+          <p>期望态运行（声明目标态自动收敛）+ 依赖拓扑可视化 + Pipeline 收敛记录 + 服务清单。</p>
+        </div>
+      </article>
+
+      <!-- 03 监控告警 -->
+      <article class="shot rv">
+        <div class="shot__win">
+          <div class="shot__sd"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          <div class="shot__mn">
+            <div class="shot__hd"></div>
+            <div class="shot__kpis">
+              <div class="shot__kpi" style="border-color:rgba(245,34,45,.4)"><i></i><b style="background:var(--p0)"></b></div>
+              <div class="shot__kpi" style="border-color:rgba(250,140,22,.4)"><i></i><b style="background:var(--p1)"></b></div>
+              <div class="shot__kpi" style="border-color:rgba(24,144,255,.4)"><i></i><b style="background:var(--p3)"></b></div>
+            </div>
+            <div class="shot__alerts"><i></i><i></i><i></i><i></i></div>
+          </div>
+        </div>
+        <div class="shot__cap">
+          <h4>监控告警 <span class="shot__no">03</span></h4>
+          <p>四级告警卡 + 抑制率徽标 + 事件聚合（service × family × 5min）+ runbook + 一键修复。</p>
+        </div>
+      </article>
+
+      <!-- 04 日志中心 -->
+      <article class="shot rv">
+        <div class="shot__win">
+          <div class="shot__sd"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          <div class="shot__mn">
+            <div class="shot__hd"></div>
+            <div class="cmp__row" style="gap:4px">
+              <span style="font-size:7px;padding:2px 5px;border-radius:3px;background:rgba(59,130,246,.2);color:#7CB0FB">API</span>
+              <span style="font-size:7px;padding:2px 5px;border-radius:3px;background:var(--line)">Web</span>
+              <span style="font-size:7px;padding:2px 5px;border-radius:3px;background:var(--line)">Redis</span>
+              <span style="font-size:7px;padding:2px 5px;border-radius:3px;background:var(--line)">Mgr</span>
+            </div>
+            <div class="shot__logs"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          </div>
+        </div>
+        <div class="shot__cap">
+          <h4>日志中心 <span class="shot__no">04</span></h4>
+          <p>多源分流 + 级别过滤带计数 + 实时跟随（Stream Live）+ 关键字高亮 + 上下文查看。</p>
+        </div>
+      </article>
+
+      <!-- 05 部署发布 -->
+      <article class="shot rv">
+        <div class="shot__win">
+          <div class="shot__sd"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          <div class="shot__mn">
+            <div class="shot__hd"></div>
+            <div class="shot__steps">
+              <i class="done"></i><i class="done"></i><i class="done"></i><i class="run"></i><i></i><i></i>
+            </div>
+            <div class="shot__rows"><i></i><i></i><i></i><i></i><i></i></div>
+          </div>
+        </div>
+        <div class="shot__cap">
+          <h4>部署发布 <span class="shot__no">05</span></h4>
+          <p>步骤化 Stepper（选版→预检→执行→健康检查→观察窗）+ 灰度策略选择 + 发布记录与回滚点。</p>
+        </div>
+      </article>
+
+      <!-- 06 备份恢复 -->
+      <article class="shot rv">
+        <div class="shot__win">
+          <div class="shot__sd"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          <div class="shot__mn">
+            <div class="shot__hd"></div>
+            <div class="shot__kpis" style="grid-template-columns:repeat(2,1fr)">
+              <div class="shot__kpi"><i></i><b style="background:var(--ok)"></b></div>
+              <div class="shot__kpi"><i></i><b style="background:var(--brand-2)"></b></div>
+            </div>
+            <div class="shot__bars" style="flex:1">
+              <i style="height:42%"></i><i style="height:68%"></i><i style="height:35%"></i>
+              <i style="height:88%"></i><i style="height:54%"></i><i style="height:72%"></i>
+              <i style="height:30%"></i><i style="height:62%"></i>
+            </div>
+          </div>
+        </div>
+        <div class="shot__cap">
+          <h4>备份恢复 <span class="shot__no">06</span></h4>
+          <p>一键备份 + 计划任务 + 恢复向导（预检 / 影响面确认 / 恢复前快照 / 自检 / 回滚）。</p>
+        </div>
+      </article>
+
+      <!-- 07 配置中心 -->
+      <article class="shot rv">
+        <div class="shot__win">
+          <div class="shot__sd"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          <div class="shot__mn">
+            <div class="shot__hd"></div>
+            <div class="shot__rows" style="flex:1;gap:7px">
+              <i style="height:16px;border-radius:4px;background:var(--bg-2);border:1px solid var(--line)"></i>
+              <i style="height:16px;border-radius:4px;background:var(--bg-2);border:1px solid var(--line)"></i>
+              <i style="height:16px;border-radius:4px;background:var(--bg-2);border:1px solid var(--line)"></i>
+              <i style="height:16px;border-radius:4px;background:rgba(59,130,246,.1);border:1px solid var(--brand)"></i>
+              <i style="height:16px;border-radius:4px;background:var(--bg-2);border:1px solid var(--line)"></i>
+            </div>
+          </div>
+        </div>
+        <div class="shot__cap">
+          <h4>配置中心 <span class="shot__no">07</span></h4>
+          <p>分组表单 + pydantic schema 校验 + schema 版本迁移 + 变更 diff 预览，改配置不再盲改。</p>
+        </div>
+      </article>
+
+      <!-- 08 权限与审计 -->
+      <article class="shot rv">
+        <div class="shot__win">
+          <div class="shot__sd"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          <div class="shot__mn">
+            <div class="shot__hd"></div>
+            <div class="cmp__row" style="gap:3px">
+              <span style="font-size:6.5px;padding:2px 4px;border-radius:3px;background:rgba(245,34,45,.18);color:#FF6B73">L3</span>
+              <span style="font-size:6.5px;padding:2px 4px;border-radius:3px;background:rgba(250,140,22,.18);color:#F5A94E">L2</span>
+              <span style="font-size:6.5px;padding:2px 4px;border-radius:3px;background:rgba(250,173,20,.18);color:#F5C44E">L1</span>
+              <span style="font-size:6.5px;padding:2px 4px;border-radius:3px;background:rgba(82,196,26,.18);color:#8ADB5B">L0</span>
+            </div>
+            <div class="shot__logs"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          </div>
+        </div>
+        <div class="shot__cap">
+          <h4>权限与审计 <span class="shot__no">08</span></h4>
+          <p>会话卡（提权 / TTL 倒计时）+ 高危矩阵 L0–L3 + 审计流水（哈希链 + trace_id 串联）。</p>
+        </div>
+      </article>
+
+      <!-- 09 交互原型入口 -->
+      <article class="shot rv" style="border-color:rgba(59,130,246,.45);background:linear-gradient(180deg,rgba(59,130,246,.10),rgba(15,22,38,.6))">
+        <div class="shot__win" style="grid-template-columns:1fr;place-items:center;
+             background:radial-gradient(400px 200px at 50% 0%,rgba(59,130,246,.22),transparent 70%)">
+          <div style="text-align:center;padding:var(--s5)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#7CB0FB" stroke-width="1.6"
+                 style="width:44px;height:44px;margin:0 auto var(--s3)" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>
+            </svg>
+            <div style="font-size:14px;font-weight:700;color:var(--ink-1);margin-bottom:6px">可交互原型</div>
+            <div style="font-size:12px;color:var(--ink-3);line-height:1.6;max-width:24ch;margin:0 auto">
+              支持角色切换、PIN 提权、L2/L3 高危确认、Pipeline 分步执行、主题热切换
+            </div>
+          </div>
+        </div>
+        <div class="shot__cap">
+          <h4>ui_prototype_v8.html <span class="shot__no">1473 行</span></h4>
+          <p>自包含单文件，双击即可运行，8 个页面全部可点击、可交互。</p>
+        </div>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 设计系统 ===================== -->
+<section class="section" id="design" style="background:linear-gradient(180deg,transparent,rgba(15,22,38,.42),transparent)">
+  <div class="wrap">
+    <div class="sec-head rv">
+      <div class="sec-head__eyebrow">Design System</div>
+      <h2>统一的<span class="gtext">设计语言</span></h2>
+      <p>全部视觉决策收敛为 CSS 变量（Design Token）。改一处，全局生效——这是 v6 的 DesignTokens 思想在 v8 的延续。</p>
+    </div>
+
+    <div class="ds">
+      <!-- 色板 -->
+      <div class="ds__panel rv">
+        <h4>语义色板 <span>Semantic Colors</span></h4>
+        <div class="sw">
+          <div class="sw__row">
+            <div class="sw__chip" style="background:linear-gradient(135deg,#3B82F6,#06B6D4)"></div>
+            <div class="sw__meta"><b>品牌主色</b><i>#3B82F6 → #06B6D4</i></div>
+            <span class="sw__use">主按钮 / 强调</span>
+          </div>
+          <div class="sw__row">
+            <div class="sw__chip" style="background:#8B5CF6"></div>
+            <div class="sw__meta"><b>辅助紫</b><i>#8B5CF6</i></div>
+            <span class="sw__use">新功能标记</span>
+          </div>
+          <div class="sw__row">
+            <div class="sw__chip" style="background:#F5222D"></div>
+            <div class="sw__meta"><b>P0 致命</b><i>#F5222D</i></div>
+            <span class="sw__use">弹窗 + 声音</span>
+          </div>
+          <div class="sw__row">
+            <div class="sw__chip" style="background:#FA8C16"></div>
+            <div class="sw__meta"><b>P1 严重</b><i>#FA8C16</i></div>
+            <span class="sw__use">托盘气泡</span>
+          </div>
+          <div class="sw__row">
+            <div class="sw__chip" style="background:#FAAD14"></div>
+            <div class="sw__meta"><b>P2 警告</b><i>#FAAD14</i></div>
+            <span class="sw__use">列表标记</span>
+          </div>
+          <div class="sw__row">
+            <div class="sw__chip" style="background:#1890FF"></div>
+            <div class="sw__meta"><b>P3 提示</b><i>#1890FF</i></div>
+            <span class="sw__use">角标计数</span>
+          </div>
+          <div class="sw__row">
+            <div class="sw__chip" style="background:#52C41A"></div>
+            <div class="sw__meta"><b>运行中</b><i>#52C41A</i></div>
+            <span class="sw__use">健康状态</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 字体阶梯 -->
+      <div class="ds__panel rv">
+        <h4>字体阶梯 <span>Type Scale</span></h4>
+        <div class="type__row"><em>H1 / 58px</em><span style="font-size:26px">掌控全局</span></div>
+        <div class="type__row"><em>H2 / 40px</em><span style="font-size:21px">核心能力升级</span></div>
+        <div class="type__row"><em>H3 / 17px</em><span style="font-size:16px">四层单向依赖架构</span></div>
+        <div class="type__row"><em>Body / 15px</em><span style="font-size:14.5px;font-weight:400;color:var(--ink-2)">
+          业务逻辑 100% 可单测</span></div>
+        <div class="type__row"><em>Caption / 12.5px</em><span style="font-size:12.5px;font-weight:400;color:var(--ink-3)">
+          辅助说明与元信息</span></div>
+        <div class="type__row"><em>Mono / 11px</em><span style="font-size:11.5px;font-weight:400;
+          font-family:ui-monospace,Consolas,monospace;color:#7DD3FC">trace_id: 5c1b8e40</span></div>
+        <div class="type__row" style="border-bottom:0"><em>字重</em><span style="font-size:13px;font-weight:400;color:var(--ink-3)">
+          400 常规 · 500 中等 · 600 半粗 · 700 粗 · 800 特粗</span></div>
+      </div>
+
+      <!-- 组件样例 -->
+      <div class="ds__panel rv">
+        <h4>组件样例 <span>Components</span></h4>
+        <div class="cmp">
+          <div class="cmp__lbl">Buttons</div>
+          <div class="cmp__row">
+            <button class="btn btn--primary btn--sm">主按钮</button>
+            <button class="btn btn--ghost btn--sm">次按钮</button>
+          </div>
+          <div class="cmp__lbl" style="margin-top:var(--s2)">Badges</div>
+          <div class="cmp__row">
+            <span class="badge badge--brand"><i class="badge__dot"></i>架构重构</span>
+            <span class="badge badge--ok"><i class="badge__dot"></i>健康</span>
+            <span class="badge badge--warn"><i class="badge__dot"></i>待评审</span>
+            <span class="badge badge--violet"><i class="badge__dot"></i>新</span>
+          </div>
+          <div class="cmp__lbl" style="margin-top:var(--s2)">Code Tags</div>
+          <div class="cmp__row">
+            <code style="font-family:ui-monospace,Consolas,monospace;font-size:11px;padding:3px 8px;
+                  border-radius:6px;background:rgba(59,130,246,.10);border:1px solid rgba(59,130,246,.20);color:#7CB0FB">Domain</code>
+            <code style="font-family:ui-monospace,Consolas,monospace;font-size:11px;padding:3px 8px;
+                  border-radius:6px;background:rgba(59,130,246,.10);border:1px solid rgba(59,130,246,.20);color:#7CB0FB">Ports</code>
+            <code style="font-family:ui-monospace,Consolas,monospace;font-size:11px;padding:3px 8px;
+                  border-radius:6px;background:rgba(59,130,246,.10);border:1px solid rgba(59,130,246,.20);color:#7CB0FB">Pipeline</code>
+          </div>
+          <div class="cmp__lbl" style="margin-top:var(--s2)">Progress</div>
+          <div class="cmp__row" style="width:100%">
+            <div style="flex:1;height:6px;border-radius:3px;background:var(--line);overflow:hidden">
+              <div style="width:72%;height:100%;border-radius:3px;background:var(--grad-brand)"></div>
+            </div>
+            <span style="font-size:11px;color:var(--ink-3);font-family:ui-monospace,Consolas,monospace">72%</span>
+          </div>
+          <div class="cmp__lbl" style="margin-top:var(--s2)">Severity Bar</div>
+          <div class="cmp__row" style="width:100%;gap:3px">
+            <i style="flex:3;height:8px;border-radius:2px;background:var(--p0);display:block"></i>
+            <i style="flex:2;height:8px;border-radius:2px;background:var(--p1);display:block"></i>
+            <i style="flex:2;height:8px;border-radius:2px;background:var(--p2);display:block"></i>
+            <i style="flex:4;height:8px;border-radius:2px;background:var(--p3);display:block"></i>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 迁移路线 ===================== -->
+<section class="section" id="roadmap">
+  <div class="wrap">
+    <div class="sec-head rv">
+      <div class="sec-head__eyebrow">Migration Path</div>
+      <h2>Strangler Fig <span class="gtext">渐进迁移</span></h2>
+      <p>不推倒重来。新旧并存、按阶段切流，随时可回退。最关键的设计是 P4：
+         命令行即可驱动全部业务能力，把 UI 风险与业务风险彻底解耦。</p>
+    </div>
+
+    <div class="road rv">
+      <div class="rd rd--done">
+        <div class="rd__dot">✓</div>
+        <div class="rd__hd"><h4>P0 · 现状审计</h4><span class="badge badge--ok">已完成</span>
+          <span class="rd__meta">2026-08-31</span></div>
+        <p>量化审计 4854 行单体，定位上帝类 96 方法、148 处静默失败、1 处死代码 ImportError。
+           产出 10 章方案 + 8 张效果图 + 可交互原型。</p>
+      </div>
+
+      <div class="rd">
+        <div class="rd__dot">1</div>
+        <div class="rd__hd"><h4>P1 · 骨架与门禁</h4><span class="rd__meta">3 天</span></div>
+        <p>建立四层目录结构，接入 <b>import-linter</b> 依赖契约、<b>ruff</b> 规模与静默失败规则、
+           CI 逐模块 import 冒烟。</p>
+      </div>
+
+      <div class="rd rd--key">
+        <div class="rd__dot">2</div>
+        <div class="rd__hd"><h4>P2 · 领域层迁移</h4><span class="badge badge--brand">关键路径</span>
+          <span class="rd__meta">5 天</span></div>
+        <p>把散落在上帝类的互斥逻辑、告警规则、权限矩阵、健康判定，
+           内聚为 <b>可单测的纯逻辑</b>。这一步决定整个重构的成败。</p>
+      </div>
+
+      <div class="rd">
+        <div class="rd__dot">3</div>
+        <div class="rd__hd"><h4>P3 · 适配层迁移</h4><span class="rd__meta">4 天</span></div>
+        <p>逐行迁移 v6 踩坑资产：进程树清理、NSSM STOP_PENDING 等待、OEM 解码、
+           服务依赖探测、消息队列。配集成测试覆盖失败路径。</p>
+      </div>
+
+      <div class="rd rd--key">
+        <div class="rd__dot">4</div>
+        <div class="rd__hd"><h4>P4 · 应用层 + CLI 入口</h4><span class="badge badge--brand">风险解耦点</span>
+          <span class="rd__meta">3 天</span></div>
+        <p>事件总线、Pipeline、权限守卫、12 个 UseCase。
+           <b>本阶段结束即可用 CLI 驱动全部业务能力</b>——UI 重写不再阻塞业务交付。</p>
+      </div>
+
+      <div class="rd">
+        <div class="rd__dot">5</div>
+        <div class="rd__hd"><h4>P5 · pywebview 装壳</h4><span class="rd__meta">3 天</span></div>
+        <p>bridge.py + 设计令牌迁移到 tokens.css + 前端路由。Windows Server 2019 需随包 WebView2 Runtime。</p>
+      </div>
+
+      <div class="rd">
+        <div class="rd__dot">6</div>
+        <div class="rd__hd"><h4>P6 · 页面渐进替换</h4><span class="rd__meta">5 天</span></div>
+        <p>7 个页面逐一切流（feature flag），每页 v6 / v8 可随时回退。</p>
+      </div>
+
+      <div class="rd">
+        <div class="rd__dot">7</div>
+        <div class="rd__hd"><h4>P7 · 四大新模块</h4><span class="badge badge--violet">新增能力</span>
+          <span class="rd__meta">4 天</span></div>
+        <p>权限与审计、症状化告警、部署发布、备份恢复——v6 完全没有的能力。</p>
+      </div>
+
+      <div class="rd">
+        <div class="rd__dot">8</div>
+        <div class="rd__hd"><h4>P8 · v6 退役</h4><span class="rd__meta">2 天</span></div>
+        <p>100% 流量切至 v8，v6 文件移入 <b>legacy/</b> 冻结，观察 3 个月后归档。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 底部 CTA ===================== -->
+<section class="section section--tight">
+  <div class="wrap">
+    <div class="cta rv">
+      <h2>准备好<span class="gtext">启动 P0 了吗</span></h2>
+      <p>方案、效果图、可交互原型均已就绪。确认 5 项待决策项（权限模型 / 备份复用 /
+         审计切分 / 控制台去留 / metrics 端点）后即可开工。</p>
+      <div class="cta__btns">
+        <a class="btn btn--primary" href="#roadmap">
+          <svg class="btn__ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round">
+            <path d="M5 12h14M13 6l6 6-6 6"/>
+          </svg>
+          查看完整迁移路线
+        </a>
+        <a class="btn btn--ghost" href="#gallery">
+          <svg class="btn__ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/>
+          </svg>
+          浏览页面效果图
+        </a>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+</main>
+
+<!-- ===================== 页脚 ===================== -->
+<footer class="ftr">
+  <div class="wrap">
+    <div class="ftr__grid">
+      <div class="ftr__brand">
+        <a class="logo" href="#top">
+          <span class="logo__mark">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+                 stroke-linecap="round" stroke-linejoin="round">
+              <rect x="2" y="3" width="20" height="7" rx="2"/><rect x="2" y="14" width="20" height="7" rx="2"/>
+              <path d="M6.5 6.5h.01M6.5 17.5h.01"/>
+            </svg>
+          </span>
+          <span class="logo__txt">
+            <span class="logo__name">ERP 服务器管理器</span>
+            <span class="logo__sub">SERVER MANAGER v8</span>
+          </span>
+        </a>
+        <p>把 4854 行的 Tkinter 单体，重构成四层可测试架构。让运维从手忙脚乱，到掌控全局。</p>
+        <div class="ftr__badges" style="margin-top:var(--s5)">
+          <span class="badge badge--brand">Domain / Application / Adapter / Presentation</span>
+        </div>
+      </div>
+
+      <div class="ftr__col">
+        <h5>方案文档</h5>
+        <a href="#arch">架构设计</a>
+        <a href="#features">核心特性</a>
+        <a href="#design">设计系统</a>
+        <a href="#roadmap">迁移路线</a>
+      </div>
+
+      <div class="ftr__col">
+        <h5>设计资产</h5>
+        <a href="#gallery">8 张页面效果图</a>
+        <a href="#gallery">可交互原型 HTML</a>
+        <a href="#design">设计令牌 tokens.css</a>
+        <a href="#gallery">Playwright 渲染脚本</a>
+      </div>
+
+      <div class="ftr__col">
+        <h5>技术栈</h5>
+        <a href="#arch">Python · pywebview</a>
+        <a href="#arch">HTML / CSS / JS</a>
+        <a href="#features">psutil · NSSM</a>
+        <a href="#features">import-linter · ruff</a>
+      </div>
+    </div>
+
+    <div class="ftr__bot">
+      <p>© 2026 ERP 服务器管理器 · v8 重构方案静态视觉预览稿 · 单文件自包含，零外部依赖</p>
+      <div class="ftr__badges">
+        <span class="badge"><i class="badge__dot" style="background:var(--ok)"></i>纯 CSS / SVG 绘制</span>
+        <span class="badge"><i class="badge__dot" style="background:var(--brand)"></i>响应式 桌面 + 移动</span>
+        <span class="badge"><i class="badge__dot" style="background:var(--violet)"></i>状态：待评审</span>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<script>
+/* ===================== 交互脚本（约 40 行，禁用 JS 亦可完整浏览） ===================== */
+(function () {
+  'use strict';
+
+  /* 1. 移动端导航折叠 */
+  var burger = document.getElementById('burger');
+  var nav = document.getElementById('nav');
+  burger.addEventListener('click', function () {
+    var open = nav.classList.toggle('is-open');
+    burger.classList.toggle('is-open', open);
+    burger.setAttribute('aria-expanded', String(open));
+  });
+  // 点击导航项后自动收起
+  nav.querySelectorAll('.nav__a').forEach(function (a) {
+    a.addEventListener('click', function () {
+      nav.classList.remove('is-open');
+      burger.classList.remove('is-open');
+      burger.setAttribute('aria-expanded', 'false');
+    });
+  });
+
+  /* 2. 顶栏滚动加边框 */
+  var hdr = document.getElementById('hdr');
+  var onScroll = function () {
+    hdr.classList.toggle('is-stuck', window.scrollY > 8);
+  };
+  window.addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+
+  /* 3. 滚动进场动画（IntersectionObserver，不支持则直接显示） */
+  var items = document.querySelectorAll('.rv');
+  if (!('IntersectionObserver' in window)) {
+    items.forEach(function (el) { el.classList.add('in'); });
+    return;
+  }
+  var io = new IntersectionObserver(function (entries) {
+    entries.forEach(function (e) {
+      if (e.isIntersecting) {
+        e.target.classList.add('in');
+        io.unobserve(e.target);
+      }
+    });
+  }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
+  items.forEach(function (el) { io.observe(el); });
+
+  /* 4. 导航高亮跟随滚动位置 */
+  var links = Array.prototype.slice.call(document.querySelectorAll('.nav__a'));
+  var targets = links.map(function (a) { return document.querySelector(a.getAttribute('href')); });
+  var spy = new IntersectionObserver(function (entries) {
+    entries.forEach(function (e) {
+      if (!e.isIntersecting) return;
+      var i = targets.indexOf(e.target);
+      if (i < 0) return;
+      links.forEach(function (l) { l.classList.remove('is-active'); });
+      links[i].classList.add('is-active');
+    });
+  }, { threshold: 0, rootMargin: '-30% 0px -60% 0px' });
+  targets.forEach(function (t) { if (t) spy.observe(t); });
+})();
+</script>
+
+</body>
+</html>

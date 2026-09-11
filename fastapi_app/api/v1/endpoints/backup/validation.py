@@ -8,8 +8,8 @@
 - POST /validate-integrity     执行深度完整性检查
 - GET  /stats                  获取备份统计信息
 """
-import asyncio
 import hashlib
+import asyncio
 import io
 import json
 import logging
@@ -377,15 +377,13 @@ def _get_validation_cache_key(filename: str, password: str | None = None) -> str
 @router.get('/validate/{filename}', response_model=BackupValidationResponse)
 async def validate_backup_file(
     filename: str,
+    password: str | None = Query(None, description="加密备份的解密密码"),
     x_backup_password: str | None = Header(None, alias='X-Backup-Password'),
     user: User = Depends(require_backup_permission('validate_backup_file')),
 ):
     """
     验证服务器上已有备份文件的完整性
     支持加密备份的解密验证
-
-    解密密码仅通过 X-Backup-Password 请求头或环境变量提供（H3：已移除 URL query
-    形式，避免密码进入访问日志/浏览器历史）。
     """
     # 安全检查：防止路径遍历
     safe_name = Path(filename).name
@@ -397,15 +395,14 @@ async def validate_backup_file(
         raise HTTPException(status_code=404, detail='备份文件不存在')
 
     # 检查缓存
-    cache_key = _get_validation_cache_key(filename, x_backup_password)
+    cache_key = _get_validation_cache_key(filename, password or x_backup_password)
     cached_result = await _validation_cache.get(cache_key)
     if cached_result:
         cached_result['cache_hit'] = True
         return cached_result
 
     try:
-        # 读取文件
-        # H5: 大文件读取为阻塞 IO，移入线程池避免卡住事件循环
+        # 读取文件（阻塞 IO 移入线程池，避免卡住事件循环）
         content = await asyncio.to_thread(filepath.read_bytes)
         file_size = len(content)
 
@@ -414,7 +411,7 @@ async def validate_backup_file(
 
         # 如果是加密文件，尝试解密
         if encrypted:
-            if not x_backup_password:
+            if not password and not x_backup_password:
                 # 检查环境变量
                 env_password = os.environ.get('BACKUP_ENCRYPTION_PASSWORD')
                 if not env_password:
@@ -433,7 +430,7 @@ async def validate_backup_file(
                     }
                 password_to_use = env_password
             else:
-                password_to_use = x_backup_password
+                password_to_use = password or x_backup_password
 
             try:
                 decrypted_content = _decrypt_backup_data(content, password_to_use)
@@ -630,8 +627,7 @@ async def validate_backup_integrity(
 
                 # 尝试读取文件
                 try:
-                    # H5: 大文件读取为阻塞 IO，移入线程池避免卡住事件循环
-                    content = await asyncio.to_thread(filepath.read_bytes)
+                    content = filepath.read_bytes()
 
                     # 检查是否为加密文件
                     encrypted = _is_encrypted_data(content)
@@ -758,7 +754,7 @@ async def get_backup_statistics(
         # 获取最近30天的备份记录
         thirty_days_ago = datetime.now() - timedelta(days=30)
         total_records, success_records = await backup_query_service.get_backup_record_stats_since(db, thirty_days_ago)
-        backup_success_rate = (success_records / total_records * 100) if total_records > 0 else 100.0
+        backup_success_rate = (success_records / total_records * 100) if total_records > 0 else 0.0
 
         # 5. 计算备份类型分布
         type_distribution = await backup_query_service.get_backup_type_distribution_since(db, thirty_days_ago)

@@ -7,6 +7,8 @@
 #   测试环境:  pip install -r requirements/test.txt
 #   OCR 功能:  pip install -r requirements/ocr.txt      （可选，约 500MB）
 #   密码迁移:  pip install -r requirements/migration.txt （可选，迁移完即可卸载）
+#   S3 存储:   pip install -r requirements/s3.txt       （可选，STORAGE_TYPE=s3 时）
+#   桌面管理器: pip install -r requirements/desktop.txt （可选，server_manager.exe 打包用）
 #
 # 此文件引用分拆文件，兼容旧部署流程。
 # ============================================================

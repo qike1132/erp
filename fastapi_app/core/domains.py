@@ -63,7 +63,7 @@ DOMAIN_SERVICE_MAP = {
     Domain.PRODUCTION: ['production_plan_service', 'production_summary_service', 'daily_production_service'],
     Domain.APPROVAL: ['approval_service'],
     Domain.BACKUP: ['backup_service'],
-    Domain.NOTIFICATION: ['notification_service', 'fcm_service'],
+    Domain.NOTIFICATION: ['notification_service'],
     Domain.REPORT: ['report_service'],
     Domain.CASE: ['case_service'],
     Domain.MATERIAL: ['material_registration_service'],

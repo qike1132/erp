@@ -1,4 +1,4 @@
-import { ref, reactive, computed, watch } from 'vue'
+import { ref, reactive, computed, watch, onScopeDispose } from 'vue'
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/vue-query'
 import { purchaseApi } from '@/api'
 import { showToast } from '@/composables/useToast'
@@ -34,7 +34,7 @@ export function useCompletedOrders() {
   const currentQuickFilterId = ref<string | null>(null)
   const filterExpanded = ref(false)
 
-  const { data, isLoading, isFetching } = useQuery({
+  const { data, isLoading, isFetching, isError } = useQuery({
     queryKey: [
       COMPLETED_ORDERS_QUERY_KEY,
       () => page.value,
@@ -69,6 +69,32 @@ export function useCompletedOrders() {
     placeholderData: keepPreviousData,
     retry: false,
   })
+
+  // 前端加载超时兜底：后端异常导致 query 长时间停在"加载中"时，20s 后强制转错误态。
+  // 注意 immediate: true —— 首次加载时 isLoading 在 setup 即 true，否则定时器不会启动（安全网失效）。
+  const loadingTimedOut = ref(false)
+  let loadingTimer: ReturnType<typeof setTimeout> | null = null
+  watch([isLoading, isError], () => {
+    if (loadingTimer) {
+      clearTimeout(loadingTimer)
+      loadingTimer = null
+    }
+    loadingTimedOut.value = false
+    if (isLoading.value && !isError.value) {
+      loadingTimer = setTimeout(() => {
+        loadingTimedOut.value = true
+      }, 20_000)
+    }
+  }, { immediate: true })
+  onScopeDispose(() => {
+    if (loadingTimer) clearTimeout(loadingTimer)
+  })
+  const loadError = computed(() => isError.value || loadingTimedOut.value)
+
+  async function retry() {
+    loadingTimedOut.value = false
+    await queryClient.invalidateQueries({ queryKey: [COMPLETED_ORDERS_QUERY_KEY] })
+  }
 
   const orders = computed<PurchaseOrder[]>(() => data.value?.orders ?? [])
   const total = computed(() => data.value?.total ?? 0)
@@ -187,6 +213,8 @@ export function useCompletedOrders() {
     orders,
     loading: isLoading,
     fetching: isFetching,
+    error: loadError,
+    retry,
     page,
     total,
     totalPages,

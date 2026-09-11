@@ -8,6 +8,7 @@
 模块级 SQL 片段常量（_SI_PID/_SO_CUST 等）仅在此处使用，随函数一并迁移至此。
 """
 import hashlib
+import logging
 from datetime import UTC, datetime
 
 from sqlalchemy import and_, func, or_, select, text
@@ -17,6 +18,8 @@ from sqlalchemy.orm import joinedload, selectinload
 from fastapi_app.core.cache import cache_result
 from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.shared_models import Order, OrderItem, Product, StockIn, StockOut, StockReturn
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # SQL 条件片段常量（安全边界说明）
@@ -310,7 +313,11 @@ async def get_inventory(db: AsyncSession, search_customer: str='', search_produc
             for item in raw.split('|'):
                 if ':' in item:
                     country, qty_str = item.split(':', 1)
-                    qty = int(qty_str)
+                    try:
+                        qty = int(qty_str)
+                    except (ValueError, TypeError):
+                        qty = 0
+                        logger.warning('数量转换失败: %s', qty_str)
                     country_data[country] = qty
                     if country != '常规':
                         all_countries.add(country)
@@ -579,7 +586,7 @@ def _format_inventory_rows(rows) -> tuple[list, int, int, int, int, list[str]]:
         country_data = _parse_country_data(row.country_data or '')
         so_total = int(row.direct_stockout_qty) + int(row.regular_stockout_qty) + int(row.custom_stockout_qty)
         remaining_reg = int(row.remaining_reg)
-        int(row.remaining_cus)
+
         production_qty = int(row.production_qty)
         available_stock = int(row.available_stock)
 
@@ -657,30 +664,34 @@ async def _get_all_countries(db: AsyncSession, pids: tuple | None, search_custom
 @cache_result(key_prefix="customers:all", ttl=120, local_ttl=60,
               key_builder=lambda **kwargs: f"pids{hashlib.sha256(str(kwargs.get('pids', '')).encode()).hexdigest()[:16] if kwargs.get('pids') else 'all'}")
 async def _get_all_customers(db: AsyncSession, pids: tuple | None) -> list[str]:
-    """获取所有客户列表（120s 缓存，客户列表变更频率低）"""
+    """获取客户快捷切换栏客户列表：成员 = 所有“有订单数量”的客户，按最近订单活动排序。
+
+    成员规则（产品要求）：只放有订单数量的客户，因此以 order 表为准（排除已删除订单、
+    数量<=0 的行）；不再并入 stock_in/stock_out 三表 UNION，避免把“仅有备货/出库、
+    无订单”的客户也放进切换栏。
+
+    排序口径：
+    1) last_activity：MAX(order_date)，最近下单的客户置顶（刚在用的客户排前面）；
+    2) order_cnt：COUNT(*)，最近下单时间相同则下单多的靠前；
+    3) customer：名称升序，保证结果稳定。
+
+    背景：切换栏是单行横向滚动条（nowrap + 隐藏滚动条），排在末尾的客户会被裁出首屏，
+    需滚动才可见；旧版按 Unicode 码点排序无法把常用客户置顶。
+    """
+    # pid_clause 为常量 SQL 片段（ANY(:pids)），不拼接用户输入，安全
+    pid_clause = ' AND product_id = ANY(:pids)' if pids else ''
+    sql = text(f"""
+        SELECT customer, MAX(order_date) AS last_activity, COUNT(*) AS order_cnt
+        FROM "order"
+        WHERE customer IS NOT NULL AND is_deleted IS NOT TRUE AND quantity > 0{pid_clause}
+        GROUP BY customer
+        ORDER BY last_activity DESC NULLS LAST, order_cnt DESC, customer ASC
+    """)
     if pids:
-        sql = text("""
-            SELECT DISTINCT customer FROM (
-                SELECT DISTINCT customer FROM stock_in WHERE product_id = ANY(:pids) AND customer IS NOT NULL
-                UNION
-                SELECT DISTINCT customer FROM stock_out WHERE product_id = ANY(:pids) AND customer IS NOT NULL
-                UNION
-                SELECT DISTINCT customer FROM "order" WHERE product_id = ANY(:pids) AND customer IS NOT NULL
-            ) sub
-        """)
         result = await db.execute(sql, {'pids': pids})
     else:
-        sql = text("""
-            SELECT DISTINCT customer FROM (
-                SELECT DISTINCT customer FROM stock_in WHERE customer IS NOT NULL
-                UNION
-                SELECT DISTINCT customer FROM stock_out WHERE customer IS NOT NULL
-                UNION
-                SELECT DISTINCT customer FROM "order" WHERE customer IS NOT NULL
-            ) sub
-        """)
         result = await db.execute(sql)
-    return sorted(row[0] for row in result.all())
+    return [row[0] for row in result.all()]
 
 
 async def _resolve_products(db: AsyncSession, search: str) -> list[int] | None:

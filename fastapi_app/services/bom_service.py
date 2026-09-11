@@ -32,9 +32,9 @@ import json
 import logging
 from decimal import Decimal
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, inspect as sa_inspect, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import InstanceState, selectinload
 
 from fastapi_app.shared_models import (
     ModificationLog,
@@ -42,6 +42,7 @@ from fastapi_app.shared_models import (
     ProductAccessory,
     ProductFabric,
     ProductMaterial,
+    ProductRole,
 )
 
 logger = logging.getLogger(__name__)
@@ -53,13 +54,34 @@ def has_bom(product) -> bool:
     从 purchase_product_service.py 提取至 product_service.py，
     消除 product_search_service ↔ purchase_product_service 的循环依赖。
     purchase_product_service 仍重新导出此函数以保持向后兼容。
+
+    填充物判定含各角色行（material_rows 已加载时按全量统计）；
+    未加载 material_rows 的旧调用方回退到产品级 material（1:1 兼容）。
+
+    注意：material_rows 为 lazy="raise" 关系，禁止直接 getattr 探测——
+    那会触发关系加载并抛 InvalidRequestError（生产 /products/search 500 根因）。
+    用 inspect().unloaded 判断是否已加载，未加载时静默回退。
     """
-    has_filling = (
-        product.material is not None and
-        getattr(product.material, 'cotton_usage', Decimal('0')) > 0
-    )
-    has_fabric = hasattr(product, 'fabrics') and len(product.fabrics) > 0
-    has_accessory = hasattr(product, 'accessories') and len(product.accessories) > 0
+    state = sa_inspect(product)
+    if isinstance(state, InstanceState):
+        rows = None if 'material_rows' in state.unloaded else product.material_rows
+    else:
+        # 非 ORM 实体（测试桩等）：直接访问属性
+        rows = getattr(product, 'material_rows', None)
+    if isinstance(rows, list):
+        has_filling = any(getattr(m, 'cotton_usage', Decimal('0')) > 0 for m in rows)
+    else:
+        has_filling = (
+            getattr(product, 'material', None) is not None
+            and getattr(product.material, 'cotton_usage', Decimal('0')) > 0
+        )
+    if isinstance(state, InstanceState):
+        has_fabric = 'fabrics' not in state.unloaded and len(product.fabrics) > 0
+        has_accessory = 'accessories' not in state.unloaded and len(product.accessories) > 0
+    else:
+        # 非 ORM 实体（测试桩等）：直接访问属性
+        has_fabric = len(getattr(product, 'fabrics', []) or []) > 0
+        has_accessory = len(getattr(product, 'accessories', []) or []) > 0
     return has_filling or has_fabric or has_accessory
 
 
@@ -67,8 +89,10 @@ async def get_bom(db: AsyncSession, product_id: int) -> dict:
     result = await db.execute(
         select(Product).options(
             selectinload(Product.material),
+            selectinload(Product.material_rows),
             selectinload(Product.fabrics),
             selectinload(Product.accessories),
+            selectinload(Product.roles),
         ).where(Product.id == product_id)
     )
     product = result.scalars().first()
@@ -79,6 +103,7 @@ async def get_bom(db: AsyncSession, product_id: int) -> dict:
         'id': product.id,
         'name': product.name,
         'barcode': product.barcode,
+        'roles': [{'id': r.id, 'name': r.role_name} for r in product.roles],
         'materials': all_materials,
     }
 
@@ -90,6 +115,7 @@ async def _save_material_bom_items(
     material_type: str,
     model_class,
     username: str,
+    temp_role_map: dict | None = None,
 ) -> None:
     """保存 1:N 物料 BOM 明细（面料/辅料）的通用框架。
 
@@ -97,6 +123,8 @@ async def _save_material_bom_items(
     - 对每条 item：若含 id 则更新对应记录（需校验 product_id 一致），
       否则新建一条属于当前 product_id 的记录。
     - 名称字段变更时写入 ModificationLog。
+    - role_id 归属：物料项可携带 role_id（真实角色），或 role_key（本次新建角色的
+      客户端临时键，由 temp_role_map 解析为真实 id）。
 
     Args:
         db: 异步会话。
@@ -106,7 +134,9 @@ async def _save_material_bom_items(
             用于定位 name 字段与日志 target_type。
         model_class: ORM 模型类（ProductFabric / ProductAccessory）。
         username: 操作人，用于 ModificationLog。
+        temp_role_map: 客户端 role_key -> 新建角色 id 映射（可选）。
     """
+    temp_role_map = temp_role_map or {}
     # 各类物料的名称字段与日志 target_type 映射
     _meta = {
         'fabric': {'name_field': 'fabric_name', 'log_type': 'fabric'},
@@ -127,11 +157,15 @@ async def _save_material_bom_items(
 
     for item_data in items:
         item_id = item_data.get('id')
+        role_id = item_data.get('role_id')
+        if role_id is None:
+            role_id = temp_role_map.get(item_data.get('role_key'))
         if item_id:
             existing = existing_map.get(item_id)
             if existing and existing.product_id == product_id:
                 old_val = getattr(existing, name_field)
                 setattr(existing, name_field, item_data.get(name_field, ''))
+                existing.role_id = role_id  # 归属可迁移（角色变更时挂到新角色）
                 existing.specification = item_data.get('specification', '')
                 existing.unit = item_data.get('unit', '')
                 existing.quantity = Decimal(str(item_data.get('quantity', 0)))
@@ -149,6 +183,7 @@ async def _save_material_bom_items(
         # 新建（含 id 不匹配当前产品的情况，与原实现一致）
         db.add(model_class(
             product_id=product_id,
+            role_id=role_id,
             **{name_field: item_data.get(name_field, '')},
             specification=item_data.get('specification', ''),
             unit=item_data.get('unit', ''),
@@ -163,36 +198,113 @@ async def save_bom(db: AsyncSession, product_id: int, data: dict, username: str)
     result = await db.execute(
         select(Product).options(
             selectinload(Product.material),
+            selectinload(Product.material_rows),
             selectinload(Product.fabrics),
             selectinload(Product.accessories),
+            selectinload(Product.roles),
         ).where(Product.id == product_id)
     )
     product = result.scalars().first()
     if not product:
         raise ValueError('产品不存在')
 
-    filling_data = data.get('filling')
-    # TODO: filling 为 1:1 关系（cotton_usage 字段 + 多字段日志），结构与 fabric/accessory 的
-    # 1:N 列表模式差异较大，未纳入 _save_material_bom_items 通用框架以避免改变业务语义。
-    if filling_data:
-        if product.material:
+    # ===== 角色保存（roles 键存在才执行全量替换，旧客户端不传则保持原状） =====
+    temp_role_map: dict = {}  # 客户端临时 role_key -> 新建角色真实 id
+    if 'roles' in data:
+        roles_data = data.get('roles') or []
+        role_ids: list[int] = []
+        for role_item in roles_data:
+            role_name = (role_item.get('role_name') or role_item.get('name') or '').strip()
+            rid = role_item.get('id')
+            role_key = role_item.get('role_key')
+            if rid:
+                existing_role = next((r for r in product.roles if r.id == rid), None)
+                if existing_role:
+                    role_ids.append(existing_role.id)
+                    if role_key:
+                        temp_role_map[role_key] = existing_role.id
+                    if existing_role.role_name != role_name and role_name:
+                        db.add(ModificationLog(
+                            target_type='role', target_id=existing_role.id,
+                            field_name='role_name', old_value=existing_role.role_name,
+                            new_value=role_name, modifier_name=username,
+                        ))
+                        existing_role.role_name = role_name
+            elif role_name:
+                new_role = ProductRole(product_id=product_id, role_name=role_name)
+                db.add(new_role)
+                await db.flush()
+                role_ids.append(new_role.id)
+                if role_key:
+                    temp_role_map[role_key] = new_role.id
+        # 删除未出现在 payload 中的角色（物料由 DB 级 FK ON DELETE CASCADE 清理）
+        to_delete = [r for r in product.roles if r.id not in role_ids]
+        if to_delete:
+            for role in to_delete:
+                db.add(ModificationLog(
+                    target_type='role', target_id=role.id,
+                    field_name='deleted',
+                    old_value=role.role_name or '', new_value='(已删除)',
+                    modifier_name=username,
+                ))
+                db.delete(role)
+
+    def _resolve_role_id(item: dict):
+        """物料项 role_id：优先真实 id，其次用 role_key 映射新建角色"""
+        rid = item.get('role_id')
+        if rid is not None:
+            return rid
+        role_key = item.get('role_key')
+        if role_key:
+            return temp_role_map.get(role_key)
+        return None
+
+    # 填充物：支持 fillings 列表（每角色一条），兼容旧字段 filling（产品级）
+    fillings_data = data.get('fillings')
+    if not fillings_data and data.get('filling'):
+        fillings_data = [data['filling']]
+    # 批量预取填充物，避免循环内 N+1 查询
+    existing_map: dict = {}
+    if fillings_data:
+        filling_role_ids = [_resolve_role_id(fd) for fd in fillings_data]
+        non_none_ids = [rid for rid in filling_role_ids if rid]
+        has_none_role = any(rid is None for rid in filling_role_ids)
+        or_conditions = []
+        if non_none_ids:
+            or_conditions.append(ProductMaterial.role_id.in_(non_none_ids))
+        if has_none_role:
+            or_conditions.append(ProductMaterial.role_id.is_(None))
+        if or_conditions:
+            batch_result = await db.execute(
+                select(ProductMaterial).where(
+                    ProductMaterial.product_id == product_id,
+                    or_(*or_conditions),
+                )
+            )
+            existing_map = {m.role_id: m for m in batch_result.scalars()}
+
+    for filling_data in fillings_data or []:
+        filling_role_id = _resolve_role_id(filling_data)
+        filling_material = existing_map.get(filling_role_id)
+        if filling_material:
             old_data = {
-                'cotton_usage': float(product.material.cotton_usage) if product.material.cotton_usage else 0,
-                'supplier_name': product.material.supplier_name,
+                'cotton_usage': float(filling_material.cotton_usage) if filling_material.cotton_usage else 0,
+                'supplier_name': filling_material.supplier_name,
             }
-            product.material.cotton_usage = Decimal(str(filling_data.get('cotton_usage', 0)))
-            product.material.supplier_id = filling_data.get('supplier_id')
-            product.material.supplier_name = filling_data.get('supplier_name', '')
-            product.material.specification = filling_data.get('specification', '')
-            product.material.unit = filling_data.get('unit', '')
-            product.material.remark = filling_data.get('remark', '')
+            filling_material.role_id = filling_role_id
+            filling_material.cotton_usage = Decimal(str(filling_data.get('cotton_usage', 0)))
+            filling_material.supplier_id = filling_data.get('supplier_id')
+            filling_material.supplier_name = filling_data.get('supplier_name', '')
+            filling_material.specification = filling_data.get('specification', '')
+            filling_material.unit = filling_data.get('unit', '')
+            filling_material.remark = filling_data.get('remark', '')
             new_data = {
-                'cotton_usage': float(product.material.cotton_usage),
-                'supplier_name': product.material.supplier_name,
+                'cotton_usage': float(filling_material.cotton_usage),
+                'supplier_name': filling_material.supplier_name,
             }
             if old_data != new_data:
                 db.add(ModificationLog(
-                    target_type='material', target_id=product.material.id,
+                    target_type='material', target_id=filling_material.id,
                     field_name='filling_data',
                     old_value=json.dumps(old_data, ensure_ascii=False),
                     new_value=json.dumps(new_data, ensure_ascii=False),
@@ -201,6 +313,7 @@ async def save_bom(db: AsyncSession, product_id: int, data: dict, username: str)
         else:
             db.add(ProductMaterial(
                 product_id=product_id,
+                role_id=filling_role_id,
                 cotton_usage=Decimal(str(filling_data.get('cotton_usage', 0))),
                 supplier_id=filling_data.get('supplier_id'),
                 supplier_name=filling_data.get('supplier_name', ''),
@@ -210,38 +323,62 @@ async def save_bom(db: AsyncSession, product_id: int, data: dict, username: str)
             ))
 
     fabrics_data = data.get('fabrics', [])
-    await _save_material_bom_items(db, product_id, fabrics_data, 'fabric', ProductFabric, username)
+    await _save_material_bom_items(db, product_id, fabrics_data, 'fabric', ProductFabric, username, temp_role_map)
 
     accessories_data = data.get('accessories', [])
-    await _save_material_bom_items(db, product_id, accessories_data, 'accessory', ProductAccessory, username)
+    await _save_material_bom_items(db, product_id, accessories_data, 'accessory', ProductAccessory, username, temp_role_map)
 
-    _delete_meta = {
-        'fabrics': ('fabric', 'fabric_name'),
-        'accessories': ('accessory', 'accessory_name'),
-    }
-    for category, model_cls in [('fabrics', ProductFabric), ('accessories', ProductAccessory)]:
-        existing_ids = {item['id'] for item in data.get(category, []) if item.get('id')}
-        result = await db.execute(  # batch-loop: 有意逐行处理,非 N+1
-            select(model_cls).where(
-                model_cls.product_id == product_id,
-                ~model_cls.id.in_(existing_ids) if existing_ids else True,
+    # 角色感知客户端才执行"payload 外删除"（与角色全量替换同门控，避免旧客户端误删角色物料）
+    if 'roles' in data:
+        # 面料/辅料：删除未出现在 payload 中的行（含各角色行）
+        _delete_meta = {
+            'fabrics': ('fabric', 'fabric_name'),
+            'accessories': ('accessory', 'accessory_name'),
+        }
+        for category, model_cls in [('fabrics', ProductFabric), ('accessories', ProductAccessory)]:
+            existing_ids = {item['id'] for item in data.get(category, []) if item.get('id')}
+            result = await db.execute(  # batch-loop: 有意逐行处理,非 N+1
+                select(model_cls).where(
+                    model_cls.product_id == product_id,
+                    ~model_cls.id.in_(existing_ids) if existing_ids else True,
+                )
+            )
+            to_delete = result.scalars().all()
+            target_type, name_attr = _delete_meta[category]
+            if to_delete:
+                # 先采集审计日志所需字段，再单条批量 DELETE 替代逐条 session.delete
+                delete_ids = []
+                for item in to_delete:
+                    delete_ids.append(item.id)
+                    db.add(ModificationLog(
+                        target_type=target_type, target_id=item.id,
+                        field_name='deleted',
+                        old_value=getattr(item, name_attr, '') or '',
+                        new_value='(已删除)',
+                        modifier_name=username,
+                    ))
+                await db.execute(delete(model_cls).where(model_cls.id.in_(delete_ids)))  # batch-loop: 有意逐行处理,非 N+1
+
+        # 填充物：删除未出现在 payload 中的行（含产品级与各角色行）
+        submitted_filling_ids = [fd.get('id') for fd in fillings_data or [] if fd.get('id')]
+        filling_result = await db.execute(
+            select(ProductMaterial).where(
+                ProductMaterial.product_id == product_id,
+                ~ProductMaterial.id.in_(submitted_filling_ids) if submitted_filling_ids else True,
             )
         )
-        to_delete = result.scalars().all()
-        target_type, name_attr = _delete_meta[category]
-        if to_delete:
-            # 先采集审计日志所需字段，再单条批量 DELETE 替代逐条 session.delete
-            delete_ids = []
-            for item in to_delete:
-                delete_ids.append(item.id)
+        fillings_to_delete = filling_result.scalars().all()
+        if fillings_to_delete:
+            filling_delete_ids = []
+            for item in fillings_to_delete:
+                filling_delete_ids.append(item.id)
                 db.add(ModificationLog(
-                    target_type=target_type, target_id=item.id,
+                    target_type='material', target_id=item.id,
                     field_name='deleted',
-                    old_value=getattr(item, name_attr, '') or '',
-                    new_value='(已删除)',
+                    old_value='填充物', new_value='(已删除)',
                     modifier_name=username,
                 ))
-            await db.execute(delete(model_cls).where(model_cls.id.in_(delete_ids)))  # batch-loop: 有意逐行处理,非 N+1
+            await db.execute(delete(ProductMaterial).where(ProductMaterial.id.in_(filling_delete_ids)))  # batch-loop: 有意逐行处理,非 N+1
 
     return 'BOM 保存成功'
 
@@ -258,8 +395,10 @@ async def copy_bom(db: AsyncSession, target_product_id: int, data: dict, usernam
     src_result = await db.execute(
         select(Product).options(
             selectinload(Product.material),
+            selectinload(Product.material_rows),
             selectinload(Product.fabrics),
             selectinload(Product.accessories),
+            selectinload(Product.roles),
         ).where(Product.id == source_product_id)
     )
     source_product = src_result.scalar_one_or_none()
@@ -267,8 +406,10 @@ async def copy_bom(db: AsyncSession, target_product_id: int, data: dict, usernam
     tgt_result = await db.execute(
         select(Product).options(
             selectinload(Product.material),
+            selectinload(Product.material_rows),
             selectinload(Product.fabrics),
             selectinload(Product.accessories),
+            selectinload(Product.roles),
         ).where(Product.id == target_product_id)
     )
     target_product = tgt_result.scalar_one_or_none()
@@ -282,13 +423,22 @@ async def copy_bom(db: AsyncSession, target_product_id: int, data: dict, usernam
     if not overwrite and has_bom(target_product):
         raise ValueError('目标产品已有BOM表，请确认是否覆盖')
 
+    # 源产品所有填充物（含各角色行，source_product.material 仅为产品级）
+    src_mat_result = await db.execute(
+        select(ProductMaterial).where(ProductMaterial.product_id == source_product_id)
+    )
+    source_materials = src_mat_result.scalars().all()
+
     copied_count = 0
 
     if overwrite:
+        # 先删目标角色（DB 级 FK CASCADE 一并清理其物料），再删产品级物料
+        await db.execute(delete(ProductRole).where(ProductRole.product_id == target_product_id))
         await db.execute(delete(ProductMaterial).where(ProductMaterial.product_id == target_product_id))
         await db.execute(delete(ProductFabric).where(ProductFabric.product_id == target_product_id))
         await db.execute(delete(ProductAccessory).where(ProductAccessory.product_id == target_product_id))
 
+    # ===== 产品级默认 BOM（role_id 为 NULL） =====
     if source_product.material and getattr(source_product.material, 'cotton_usage', Decimal('0')) > 0:
         old_mat = source_product.material
         db.add(ProductMaterial(
@@ -304,6 +454,8 @@ async def copy_bom(db: AsyncSession, target_product_id: int, data: dict, usernam
         copied_count += 1
 
     for old_fabric in source_product.fabrics:
+        if old_fabric.role_id is not None:
+            continue
         db.add(ProductFabric(
             product_id=target_product_id,
             material_code=getattr(old_fabric, 'material_code', '') or '',
@@ -318,6 +470,8 @@ async def copy_bom(db: AsyncSession, target_product_id: int, data: dict, usernam
         copied_count += 1
 
     for old_accessory in source_product.accessories:
+        if old_accessory.role_id is not None:
+            continue
         db.add(ProductAccessory(
             product_id=target_product_id,
             material_code=getattr(old_accessory, 'material_code', '') or '',
@@ -331,6 +485,61 @@ async def copy_bom(db: AsyncSession, target_product_id: int, data: dict, usernam
             remark=getattr(old_accessory, 'remark', '') or '',
         ))
         copied_count += 1
+
+    # ===== 角色及其独立物料 =====
+    for old_role in source_product.roles:
+        new_role = ProductRole(product_id=target_product_id, role_name=old_role.role_name)
+        db.add(new_role)
+        await db.flush()
+        copied_count += 1
+        for old_fabric in source_product.fabrics:
+            if old_fabric.role_id != old_role.id:
+                continue
+            db.add(ProductFabric(
+                product_id=target_product_id,
+                role_id=new_role.id,
+                material_code=getattr(old_fabric, 'material_code', '') or '',
+                fabric_name=old_fabric.fabric_name,
+                specification=getattr(old_fabric, 'specification', '') or '',
+                quantity=old_fabric.quantity,
+                supplier_id=getattr(old_fabric, 'supplier_id', None),
+                supplier_name=getattr(old_fabric, 'supplier_name', '') or '',
+                unit=getattr(old_fabric, 'unit', '') or '码',
+                remark=getattr(old_fabric, 'remark', '') or '',
+            ))
+            copied_count += 1
+        for old_accessory in source_product.accessories:
+            if old_accessory.role_id != old_role.id:
+                continue
+            db.add(ProductAccessory(
+                product_id=target_product_id,
+                role_id=new_role.id,
+                material_code=getattr(old_accessory, 'material_code', '') or '',
+                accessory_name=old_accessory.accessory_name,
+                specification=getattr(old_accessory, 'specification', '') or '',
+                quantity=old_accessory.quantity,
+                supplier_id=getattr(old_accessory, 'supplier_id', None),
+                supplier_name=getattr(old_accessory, 'supplier_name', '') or '',
+                unit=getattr(old_accessory, 'unit', '') or '个',
+                material_category=getattr(old_accessory, 'material_category', '') or 'accessory',
+                remark=getattr(old_accessory, 'remark', '') or '',
+            ))
+            copied_count += 1
+        for old_material in source_materials:
+            if old_material.role_id != old_role.id:
+                continue
+            db.add(ProductMaterial(
+                product_id=target_product_id,
+                role_id=new_role.id,
+                material_code=getattr(old_material, 'material_code', '') or '',
+                cotton_usage=old_material.cotton_usage,
+                specification=getattr(old_material, 'specification', '') or '',
+                supplier_id=getattr(old_material, 'supplier_id', None),
+                supplier_name=getattr(old_material, 'supplier_name', '') or '',
+                unit=getattr(old_material, 'unit', '') or '克',
+                remark=getattr(old_material, 'remark', '') or '',
+            ))
+            copied_count += 1
 
     await db.flush()
 
@@ -353,8 +562,10 @@ async def preview_bom(db: AsyncSession, source_product_id: int) -> dict:
     result = await db.execute(
         select(Product).options(
             selectinload(Product.material),
+            selectinload(Product.material_rows),
             selectinload(Product.fabrics),
             selectinload(Product.accessories),
+            selectinload(Product.roles),
         ).where(Product.id == source_product_id)
     )
     source_product = result.scalar_one_or_none()
@@ -363,24 +574,45 @@ async def preview_bom(db: AsyncSession, source_product_id: int) -> dict:
     if not has_bom(source_product):
         raise ValueError('该产品没有配置BOM表，无法复制')
 
+    # 源产品所有填充物（含各角色行）
+    src_mat_result = await db.execute(
+        select(ProductMaterial).where(ProductMaterial.product_id == source_product_id)
+    )
+    source_materials = src_mat_result.scalars().all()
+
     bom_data = {
         'filling': None,
         'fabric': [],
         'accessory': [],
+        'roles': [],
     }
 
     if source_product.material and getattr(source_product.material, 'cotton_usage', Decimal('0')) > 0:
         bom_data['filling'] = source_product.material.to_dict()
 
     for fabric in source_product.fabrics:
+        if fabric.role_id is not None:
+            continue
         bom_data['fabric'].append(fabric.to_dict())
     for accessory in source_product.accessories:
+        if accessory.role_id is not None:
+            continue
         bom_data['accessory'].append(accessory.to_dict())
+
+    for role in source_product.roles:
+        bom_data['roles'].append({
+            'id': role.id,
+            'name': role.role_name,
+            'filling_count': sum(1 for m in source_materials if m.role_id == role.id),
+            'fabric_count': sum(1 for f in source_product.fabrics if f.role_id == role.id),
+            'accessory_count': sum(1 for a in source_product.accessories if a.role_id == role.id),
+        })
 
     material_count = (
         (1 if bom_data['filling'] else 0)
         + len(bom_data['fabric'])
         + len(bom_data['accessory'])
+        + sum(r['filling_count'] + r['fabric_count'] + r['accessory_count'] for r in bom_data['roles'])
     )
 
     create_time_str = (
@@ -397,6 +629,7 @@ async def preview_bom(db: AsyncSession, source_product_id: int) -> dict:
         },
         'bom': bom_data,
         'material_count': material_count,
+        'role_count': len(source_product.roles),
     }
 
 
@@ -411,6 +644,7 @@ async def search_for_bom_copy(db: AsyncSession, keyword: str, *, search_service=
     query = search_service.build_search_query_async(db, keyword)
     query = query.options(
         selectinload(Product.material),
+        selectinload(Product.material_rows),
         selectinload(Product.fabrics),
         selectinload(Product.accessories),
     ).limit(20)

@@ -150,7 +150,7 @@ async def create_order(db: AsyncSession, product_id: int, quantity: int,
             'customer': customer,
             'product_name': product.name,
             'quantity': quantity,
-        }, fcm_title="新订单已创建", fcm_body=f"订单 {order_no}，客户：{customer}，数量：{quantity}")
+        })
 
     return order.to_dict()
 
@@ -231,7 +231,7 @@ async def _update_order_directly(
         'order_no': order.order_no,
         'customer': customer,
         'quantity': quantity,
-    }, fcm_title="订单已更新", fcm_body=f"订单 {order.order_no} 信息已更新")
+    })
 
     return {'success': True, 'message': '订单编辑成功！', 'requires_approval': False}
 
@@ -313,12 +313,12 @@ async def _delete_order_directly(
 
     await _safe_invalidate_purchase_cache()
 
-    # StockEvent.ORDER_DELETED：仅 WebSocket/FCM 通知（不查询数据库，可在提交前调度）
+    # StockEvent.ORDER_DELETED：仅 WebSocket 通知（不查询数据库，可在提交前调度）
     # 领域事件 ORDER_DELETED 由 endpoint 层在事务提交后直接发布（order.py）
     task = asyncio.create_task(_safe_publish_event(StockEvent.ORDER_DELETED, {
         'order_id': order_id,
         'order_no': deleted_order_no,
-    }, fcm_title="订单已删除", fcm_body=f"订单 {deleted_order_no} 已被删除"))
+    }))
     _pending_tasks.add(task)
     task.add_done_callback(_log_background_task_exception)
     task.add_done_callback(_pending_tasks.discard)
