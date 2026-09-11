@@ -28,6 +28,11 @@ from fastapi_app.shared_models import (
 logger = logging.getLogger(__name__)
 
 
+def _scope_remark(source_role: str | None) -> str:
+    """把来源 BOM 作用域转成明细备注；无来源时返回空串（保持旧行为）。"""
+    return f'来源BOM：{source_role}' if source_role else ''
+
+
 async def _create_material_registration(
     db: AsyncSession, order: PurchaseOrder, items: Sequence[PurchaseOrderItem],
 ) -> MaterialRegistration:
@@ -113,7 +118,9 @@ async def create_purchase_order(db: AsyncSession, data: dict, include_summary: b
             supplier_name=item_data.get('supplier_name') or supplier_name,
             customer_name=customer_name,
             material_category=item_data.get('category', ''),
-            remark=item_data.get('remark', ''),
+            # 来源 BOM 作用域（默认BOM / 各角色）：写进备注，采购员能看出这条需求由谁产生。
+            # 无 source_role（如手工单、旧路径）时保持 remark 原样，不产生多余文本。
+            remark=item_data.get('remark') or _scope_remark(item_data.get('source_role')),
         )
         db.add(poi)
         total_amount += amount
@@ -151,7 +158,7 @@ def _apply_item_fields(item: PurchaseOrderItem, item_data: dict, order: Purchase
     item.quantity = Decimal(str(item_data.get('quantity', 0)))
     item.total_price = item.unit_price * item.quantity
     item.material_category = item_data.get('category', '')
-    item.remark = item_data.get('remark', '')
+    item.remark = item_data.get('remark') or _scope_remark(item_data.get('source_role'))
     item.supplier_name = order.supplier_name
     item.customer_name = order.customer_name
 

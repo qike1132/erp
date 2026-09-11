@@ -566,11 +566,11 @@ LIMIT :limit OFFSET :offset
     return cte_sql
 
 
-def _format_inventory_rows(rows) -> tuple[list, int, int, int, int, list[str]]:
+def _format_inventory_rows(rows) -> tuple[list, int, int, int, int, list[str], int]:
     """格式化库存查询结果行。
 
     Returns:
-        (inventory_data, total_items, sum_stockin, sum_order, sum_stock, all_countries)
+        (inventory_data, total_items, sum_stockin, sum_order, sum_stock, all_countries, total_available_stock)
     """
     first = rows[0]
     total_items = first.total_count

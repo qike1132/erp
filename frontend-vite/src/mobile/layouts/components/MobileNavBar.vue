@@ -1,5 +1,5 @@
 <template>
-  <header class="m-navbar" :class="{ transparent, 'has-subtitle': !!subtitle }">
+  <header class="m-navbar" :class="{ transparent, 'has-subtitle': !!subtitle, 'has-right-action': hasRightAction }">
     <button v-if="showBack" class="m-navbar-back" aria-label="返回" @click="handleBack">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="20" height="20">
         <polyline points="15 18 9 12 15 6" />
@@ -16,6 +16,7 @@
 </template>
 
 <script setup lang="ts">
+import { computed, useSlots } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 
 defineProps<{
@@ -27,6 +28,11 @@ defineProps<{
 
 const router = useRouter()
 const route = useRoute()
+
+// 全局通知铃铛是 fixed 悬浮在右上角（z-index 60，高于导航栏的 50），
+// 会盖住右侧插槽里的操作按钮导致点不到；有插槽内容时预留其占位宽度。
+const slots = useSlots()
+const hasRightAction = computed(() => !!slots.right)
 
 function handleBack() {
   if (window.history.length > 1) {
@@ -109,5 +115,10 @@ function handleBack() {
   gap: 4px;
   margin-right: -8px;
   flex-shrink: 0;
+}
+
+/* 预留右上角通知铃铛（right:8px，宽 36px）的占位，避免按钮被悬浮层盖住 */
+.m-navbar.has-right-action .m-navbar-right {
+  margin-right: 28px;
 }
 </style>

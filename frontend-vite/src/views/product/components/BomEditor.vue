@@ -251,16 +251,27 @@ defineExpose({ open: openBomModal })
 .pd-input-wrap { position: relative; }
 .autocomplete-wrapper { position: relative; }
 
-/* ===== BOM模态框 ===== */
+/* ===== BOM模态框 =====
+   尺寸契约（勿改回 height:auto）：弹窗**恒定高度**，不随物料条数变化。
+   历史问题：max-height:90vh + 默认 height:auto + body 仅 min-height:500px，
+   导致物料 1 条时弹窗 ~663px、20 条时 ~810px，视觉上「一会大一会小」。
+   现在：dialog 固定 height:90vh（带 min/max 兜底），body 内部滚动，
+   物料多少只影响 body 的滚动位置，弹窗外框尺寸始终一致。 */
 .bom-modal-content {
   border-radius: 18px; border: none; box-shadow: 0 20px 60px rgba(0,0,0,0.15);
   overflow: hidden; background: white;
 }
-.bom-modal-dialog { max-width: 1400px; width: 95vw; max-height: 90vh; display: flex; flex-direction: column; }
+.bom-modal-dialog {
+  max-width: 1400px; width: 95vw;
+  /* 固定高度：三种写法叠加，避免 90vh 在小屏/大屏下越界后又被内容撑开 */
+  height: 90vh; min-height: 680px; max-height: 90vh;
+  display: flex; flex-direction: column;
+}
 .bom-modal-header {
   display: flex; justify-content: space-between; align-items: center;
   padding: 20px 28px; background: transparent;
   border-bottom: 1px solid var(--color-border-light, #e2e8f0);
+  flex: 0 0 auto;
 }
 .bom-modal-header-left { flex: 1; }
 .bom-modal-title {
@@ -274,7 +285,12 @@ defineExpose({ open: openBomModal })
   color: var(--color-text-secondary); font-size: 16px; transition: background 0.3s ease, color 0.3s ease, transform 0.3s ease;
 }
 .bom-modal-close:hover { background: var(--color-border-light, #e2e8f0); color: var(--color-text); transform: rotate(90deg); }
-.bom-modal-body { padding: 0; background: var(--color-surface, #f8fafc); min-height: 500px; overflow-y: auto; flex: 1; }
+/* body：占满 dialog 剩余高度并内部滚动；min-height 取消（改为 flex:1 + min-height:0，
+   否则内容少时 min-height 会反向撑高外框，又变成"尺寸随内容变"） */
+.bom-modal-body {
+  padding: 0; background: var(--color-surface, #f8fafc);
+  flex: 1 1 auto; min-height: 0; overflow-y: auto;
+}
 .bom-tabs-container {
   display: inline-flex;
   gap: 4px;
@@ -386,8 +402,14 @@ defineExpose({ open: openBomModal })
 }
 .bom-role-add-btn:hover { border-color: var(--color-primary-400); background: var(--color-primary-100); }
 
-/* BOM内容区 */
-.bom-content-area { background: white; border-radius: 12px; border: 1px solid var(--color-border-light, #e2e8f0); overflow: hidden; }
+/* BOM内容区：给一个稳定的最小高度，保证「0 条(空态) / 1 条 / 多条」时
+   内容区下沿位置一致，不会因为只有 1 行而显得弹窗塌陷 */
+.bom-content-area {
+  background: white; border-radius: 12px;
+  border: 1px solid var(--color-border-light, #e2e8f0);
+  overflow: hidden;
+  min-height: 300px;
+}
 .bom-table-container-v2 { display: block; }
 .bom-table-wrapper-v2 { overflow-x: auto; }
 .bom-table-v2 { width: 100%; border-collapse: collapse; min-width: 1100px; }
@@ -426,6 +448,7 @@ defineExpose({ open: openBomModal })
   display: flex; justify-content: flex-end; align-items: center; gap: 10px;
   padding: 20px 28px; background: white;
   border-top: 1px solid var(--color-border-light, #e2e8f0);
+  flex: 0 0 auto;
 }
 .bom-btn-cancel {
   padding: 10px 20px; background: white; color: var(--color-text);

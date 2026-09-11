@@ -16,6 +16,7 @@
                 <th class="odm-w-spec">规格</th>
                 <th class="odm-th-num">数量</th>
                 <th class="odm-w-unit">单位</th>
+                <th class="odm-w-source">来源</th>
               </tr>
             </thead>
             <tbody>
@@ -24,9 +25,10 @@
                 <td class="odm-td-muted">{{ item.specification || '—' }}</td>
                 <td class="odm-td-num">{{ formatNumber(item.quantity) }}</td>
                 <td class="odm-td-muted">{{ item.unit || '—' }}</td>
+                <td class="odm-td-muted">{{ scopeOf(item) }}</td>
               </tr>
               <tr v-if="(order.items || []).length === 0">
-                <td colspan="4" class="odm-td-empty">暂无物料数据</td>
+                <td colspan="5" class="odm-td-empty">暂无物料数据</td>
               </tr>
             </tbody>
           </table>
@@ -53,6 +55,15 @@ defineProps<{
 }>()
 
 defineEmits<{ close: [] }>()
+
+/** 明细的来源 BOM 作用域：一键生成会写 '来源BOM：<默认BOM|角色名>' 到 remark。
+ *  无该前缀时回退到备注原文（手工备注），都没有则显示 '—'。 */
+function scopeOf(item: { remark?: string | null }): string {
+  const remark = (item.remark || '').trim()
+  if (!remark) return '—'
+  const prefix = '来源BOM：'
+  return remark.startsWith(prefix) ? remark.slice(prefix.length) : remark
+}
 </script>
 
 <style scoped>
@@ -148,12 +159,13 @@ defineEmits<{ close: [] }>()
   background: var(--color-primary-50, #eff5ff);
 }
 
-/* 列宽分配：物料名称主导，规格次之，数量/单位紧凑（总和 100%）
+/* 列宽分配：物料名称主导，规格次之，数量/单位紧凑，来源兜底（总和 100%）
    fixed 布局下列宽由 th 决定，表头与数据严格对齐 */
-.odm-w-name { width: 48%; }
-.odm-w-spec { width: 28%; }
-.odm-th-num { width: 16%; }
+.odm-w-name { width: 38%; }
+.odm-w-spec { width: 24%; }
+.odm-th-num { width: 14%; }
 .odm-w-unit { width: 8%; }
+.odm-w-source { width: 16%; }
 
 .odm-td-name {
   font-weight: 500;

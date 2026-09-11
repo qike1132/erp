@@ -142,16 +142,23 @@ const emit = defineEmits<{
 }
 .pd-btn-sm { padding: 5px 10px; font-size: 11px; }
 
-/* ===== BOM模态框 ===== */
+/* ===== BOM模态框 =====
+   尺寸契约（勿改回 height:auto）：弹窗**恒定高度**，不随内容条数变化。
+   与 BomEditor.vue 同口径：外框固定，内部滚动。 */
 .bom-modal-content {
   border-radius: 18px; border: none; box-shadow: 0 20px 60px rgba(0,0,0,0.15);
   overflow: hidden; background: white;
 }
-.copy-bom-modal-dialog { max-width: 1200px; width: 90vw; max-height: 90vh; display: flex; flex-direction: column; }
+.copy-bom-modal-dialog {
+  max-width: 1200px; width: 90vw;
+  height: 90vh; min-height: 620px; max-height: 90vh;
+  display: flex; flex-direction: column;
+}
 .bom-modal-header {
   display: flex; justify-content: space-between; align-items: center;
   padding: 20px 28px; background: transparent;
   border-bottom: 1px solid var(--color-border-light, #e2e8f0);
+  flex: 0 0 auto;
 }
 .bom-modal-header-left { flex: 1; }
 .bom-modal-title {
@@ -165,11 +172,13 @@ const emit = defineEmits<{
   color: var(--color-text-secondary); font-size: 16px; transition: background 0.3s ease, color 0.3s ease, transform 0.3s ease;
 }
 .bom-modal-close:hover { background: var(--color-border-light, #e2e8f0); color: var(--color-text); transform: rotate(90deg); }
-.bom-modal-body { padding: 0; background: var(--color-surface, #f8fafc); min-height: 500px; overflow-y: auto; flex: 1; }
+/* body：占满剩余高度并内部滚动（min-height 必须为 0，否则内容少时反向撑高外框） */
+.bom-modal-body { padding: 0; background: var(--color-surface, #f8fafc); flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .bom-modal-footer {
   display: flex; justify-content: flex-end; align-items: center; gap: 10px;
   padding: 20px 28px; background: white;
   border-top: 1px solid var(--color-border-light, #e2e8f0);
+  flex: 0 0 auto;
 }
 .bom-btn-cancel {
   padding: 10px 20px; background: white; color: var(--color-text);

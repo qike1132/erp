@@ -5,7 +5,7 @@ import json
 import logging
 import tempfile
 import zipfile
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from sqlalchemy import text
@@ -52,7 +52,7 @@ async def create_incremental_backup(
     from .restore import is_restore_in_progress
     if await is_restore_in_progress():
         raise BackupLockError('还原操作正在执行中，请等待还原完成后再备份')
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    timestamp = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
     from fastapi_app.shared_models import Base
     incremental_tables = {}
     total_rows = 0
@@ -77,7 +77,7 @@ async def create_incremental_backup(
         json_path.parent.mkdir(parents=True, exist_ok=True)
         backup_data = {
             'version': BACKUP_FORMAT_VERSION, 'type': 'incremental',
-            'exported_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'exported_at': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S'),
             'exported_by': user.username if hasattr(user, 'username') else str(user.id),
             'remark': remark, 'base_timestamp': effective_since,
             'table_count': len(incremental_tables), 'total_rows': total_rows,
@@ -200,7 +200,7 @@ async def create_wal_incremental_backup(
             start_lsn = current_lsn
             logger.warning("未找到最近全量备份的 LSN，使用当前 LSN")
 
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    timestamp = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
 
     # 创建 WAL 备份
     wal_backup_result = await create_binary_log_backup(
@@ -214,7 +214,7 @@ async def create_wal_incremental_backup(
         'version': BACKUP_FORMAT_VERSION,
         'type': 'wal_incremental',
         'app_version': '2.0',
-        'exported_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'exported_at': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S'),
         'exported_by': user.username if hasattr(user, 'username') else str(user.id),
         'remark': remark,
         'start_lsn': start_lsn,
@@ -402,5 +402,5 @@ async def restore_incremental(
         'success': True, 'format': 'incremental', 'filename': filename,
         'total_upserted': total_upserted, 'results': results, 'errors': errors,
         'pre_restore_backup': pre_restore_info,
-        'restored_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'restored_at': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S'),
     }

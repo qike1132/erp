@@ -26,7 +26,7 @@ class UserCreate(BaseModel):
 
 
 class UserUpdate(BaseModel):
-    password: str | None = Field(default=None, min_length=6, max_length=128, description="密码（不修改则不传）")
+    password: str | None = Field(default=None, min_length=8, max_length=128, description="密码（不修改则不传）")
     is_super: bool | None = Field(default=None, description="是否超级用户")
     factory: str | None = Field(default=None, max_length=20, description="所属工厂：东莞/湖北/NULL（传空字符串表示清除）")
 

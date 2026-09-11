@@ -27,6 +27,9 @@ from fastapi_app.shared_models.purchase_order import PurchaseOrder, PurchaseOrde
 
 logger = logging.getLogger(__name__)
 
+# BOM 作用域显示名：role_id=None 即产品级默认 BOM
+DEFAULT_SCOPE_LABEL = '默认BOM'
+
 
 def _iter_source_skus(rec) -> list[tuple[int, int | float]]:
     """统一抽取源记录（Order / StockIn）中的 SKU 级 (product_id, quantity) 列表。
@@ -45,6 +48,34 @@ def _iter_source_skus(rec) -> list[tuple[int, int | float]]:
     return [(rec.product_id, rec.quantity)]
 
 
+def _scope_order(role_ids) -> list[int | None]:
+    """作用域排序：默认 BOM(None) 恒在首位，其余按 role_id 升序。
+
+    与物料计算器 (services/purchase_product_service.aggregate_materials) 保持同一口径，
+    保证「计算器算出来的」与「一键生成落单的」顺序、分组一致。
+    """
+    present = set(role_ids)
+    return ([None] if None in present else []) + sorted(k for k in present if k is not None)
+
+
+def _bom_rows_by_scope(rows) -> dict[int | None, list]:
+    """把带 role_id 的 BOM 行按作用域分桶。"""
+    buckets: dict[int | None, list] = defaultdict(list)
+    for row in rows:
+        buckets[row.role_id].append(row)
+    return buckets
+
+
+def _scope_label(pid: int, role_id: int | None, role_names: dict[tuple[int, int], str]) -> str:
+    """作用域显示名，与前端「默认BOM + 各角色」口径一致。
+
+    角色名缺失时退化为「角色#<id>」而不是静默丢弃，便于现场定位脏数据。
+    """
+    if role_id is None:
+        return DEFAULT_SCOPE_LABEL
+    return role_names.get((pid, role_id)) or f'角色#{role_id}'
+
+
 async def generate_purchase_orders_from_customer_orders(
     db: AsyncSession, composite_ids: list[str], idempotency_key: str = '',
 ) -> dict:
@@ -55,6 +86,11 @@ async def generate_purchase_orders_from_customer_orders(
 
     idempotency_key 为可选的幂等键，当前由数据库唯一约束 uq_po_pending_dedup
     和 endpoint 层的 IntegrityError 处理保证幂等，此参数保留用于未来扩展。
+
+    BOM 口径：**产品所有 BOM 作用域（默认BOM + 各角色）的物料都会落入采购单**，
+    每个作用域都用该 SKU 的完整数量计算（不做分摊），与物料计算器一致。
+    多角色 SKU 因此会把同一个「哈哈」按不同角色各算一次，采购明细按
+    (物料名, 规格, 单位) 合并后数量累加 —— 即该产品的**总采购需求**。
     """
     if not composite_ids:
         raise ValueError('未选择任何订单')
@@ -112,34 +148,61 @@ async def generate_purchase_orders_from_customer_orders(
         )
         pid_name_map = dict(prod_result.all())
 
-    filling_map: dict[int, list] = {}
-    fabric_map: dict[int, list] = {}
-    accessory_map: dict[int, list] = {}
+    # === BOM 物料按 (product_id, 作用域) 分桶。role_id=None 为产品级默认BOM ===
+    filling_map: dict[int | None, list] = {}
+    fabric_map: dict[int | None, list] = {}
+    accessory_map: dict[int | None, list] = {}
+    scopes_by_pid: dict[int, list[int | None]] = {}
+    role_names: dict[tuple[int, int], str] = {}
 
     if product_ids:
         fill_result = await db.execute(
             select(ProductMaterial).where(ProductMaterial.product_id.in_(product_ids))
         )
-        for row in fill_result.scalars().all():
-            filling_map.setdefault(row.product_id, []).append(row)
+        filling_map = _bom_rows_by_scope(fill_result.scalars().all())
 
         fab_result = await db.execute(
             select(ProductFabric).where(ProductFabric.product_id.in_(product_ids))
         )
-        for row in fab_result.scalars().all():
-            fabric_map.setdefault(row.product_id, []).append(row)
+        fabric_map = _bom_rows_by_scope(fab_result.scalars().all())
 
         acc_result = await db.execute(
             select(ProductAccessory).where(ProductAccessory.product_id.in_(product_ids))
         )
-        for row in acc_result.scalars().all():
-            accessory_map.setdefault(row.product_id, []).append(row)
+        accessory_map = _bom_rows_by_scope(acc_result.scalars().all())
+
+        # 产品级作用域清单：取三类物料出现过的 role_id 与产品实际声明的角色取并集。
+        # 用并集而非「物料 role_id 集合」，是为了让「配了角色但该角色暂无物料」也能被
+        # 纳入作用域枚举（该作用域最终不产出任何明细，等价于被跳过）。
+        from fastapi_app.shared_models.product_material import ProductRole
+        role_result = await db.execute(
+            select(ProductRole.id, ProductRole.product_id, ProductRole.role_name)
+            .where(ProductRole.product_id.in_(product_ids))
+        )
+        role_ids_by_pid: dict[int, set[int]] = defaultdict(set)
+        for rid, rpid, rname in role_result.all():
+            role_names[(rpid, rid)] = rname or ''
+            role_ids_by_pid[rpid].add(rid)
+
+        # 产品级作用域清单 = 产品级默认BOM(None) ∪ 物料上出现过的 role_id ∪ 产品声明的角色。
+        # ★ None 必须显式补入：product_role 表里**没有**「默认BOM」这一行，
+        #   它只以「物料 role_id IS NULL」的形式存在，漏掉就会把整个产品级 BOM 丢了。
+        #   与物料计算器 aggregate_materials 的 ordered = ([None] if None in buckets ...) 口径一致。
+        for pid in product_ids:
+            material_roles = {
+                row.role_id
+                for m in (filling_map, fabric_map, accessory_map)
+                for row in m.get(pid, [])
+                if row.product_id == pid
+            } | set(role_ids_by_pid.get(pid, ())) | {None}
+            scopes_by_pid[pid] = _scope_order(material_roles)
 
     def _build_items(records: list) -> list:
         """为给定记录列表构建物料项。
 
         多 SKU 模型：遍历每条记录的所有 SKU（Order.items 或 StockIn 单 SKU），
-        为每个 SKU 独立查询 BOM 并按其自身数量计算物料用量。
+        为每个 SKU 独立查询 BOM，并**对每个 BOM 作用域各算一遍**（都用该 SKU 的
+        完整数量，不分摊），与物料计算器口径一致。
         """
         result_items = []
         for rec in records:
@@ -147,54 +210,68 @@ async def generate_purchase_orders_from_customer_orders(
             # 按 SKU 粒度迭代，确保多 SKU 订单的每个 SKU 都生成 BOM 物料
             for pid, qty in _iter_source_skus(rec):
                 product_name = pid_name_map.get(pid, '未知产品')
+                # 产品无任何角色 BOM 时回退到 [None]（仅默认BOM），保持旧行为
+                scopes = scopes_by_pid.get(pid) or [None]
 
-                for bom in filling_map.get(pid, []):
-                    material_qty = float(bom.cotton_usage or 0) * qty
-                    result_items.append({
-                        'material_name': product_name + '-填充物',
-                        'material_code': bom.material_code or '',
-                        'specification': bom.specification or '',
-                        'unit': bom.unit or '克',
-                        'unit_price': 0,
-                        'quantity': material_qty,
-                        'supplier_name': bom.supplier_name or '',
-                        'supplier_id': bom.supplier_id,
-                        'customer_name': customer_name,
-                        'category': 'filling',
-                        'unit_usage': float(bom.cotton_usage or 0),
-                    })
+                for role_id in scopes:
+                    scope_label = _scope_label(pid, role_id, role_names)
 
-                for fabric in fabric_map.get(pid, []):
-                    material_qty = float(fabric.quantity or 0) * qty
-                    result_items.append({
-                        'material_name': fabric.fabric_name or '面料',
-                        'material_code': fabric.material_code or '',
-                        'specification': fabric.specification or '',
-                        'unit': fabric.unit or '米',
-                        'unit_price': 0,
-                        'quantity': material_qty,
-                        'supplier_name': fabric.supplier_name or '',
-                        'supplier_id': fabric.supplier_id,
-                        'customer_name': customer_name,
-                        'category': 'fabric',
-                        'unit_usage': float(fabric.quantity or 0),
-                    })
+                    for bom in filling_map.get(role_id, []):
+                        if bom.product_id != pid:
+                            continue
+                        material_qty = float(bom.cotton_usage or 0) * qty
+                        result_items.append({
+                            'material_name': product_name + '-填充物',
+                            'material_code': bom.material_code or '',
+                            'specification': bom.specification or '',
+                            'unit': bom.unit or '克',
+                            'unit_price': 0,
+                            'quantity': material_qty,
+                            'supplier_name': bom.supplier_name or '',
+                            'supplier_id': bom.supplier_id,
+                            'customer_name': customer_name,
+                            'category': 'filling',
+                            'unit_usage': float(bom.cotton_usage or 0),
+                            'source_role': scope_label,
+                        })
 
-                for acc in accessory_map.get(pid, []):
-                    material_qty = float(acc.quantity or 0) * qty
-                    result_items.append({
-                        'material_name': acc.accessory_name or '配件',
-                        'material_code': acc.material_code or '',
-                        'specification': acc.specification or '',
-                        'unit': acc.unit or '个',
-                        'unit_price': 0,
-                        'quantity': material_qty,
-                        'supplier_name': acc.supplier_name or '',
-                        'supplier_id': acc.supplier_id,
-                        'customer_name': customer_name,
-                        'category': 'accessory',
-                        'unit_usage': float(acc.quantity or 0),
-                    })
+                    for fabric in fabric_map.get(role_id, []):
+                        if fabric.product_id != pid:
+                            continue
+                        material_qty = float(fabric.quantity or 0) * qty
+                        result_items.append({
+                            'material_name': fabric.fabric_name or '面料',
+                            'material_code': fabric.material_code or '',
+                            'specification': fabric.specification or '',
+                            'unit': fabric.unit or '米',
+                            'unit_price': 0,
+                            'quantity': material_qty,
+                            'supplier_name': fabric.supplier_name or '',
+                            'supplier_id': fabric.supplier_id,
+                            'customer_name': customer_name,
+                            'category': 'fabric',
+                            'unit_usage': float(fabric.quantity or 0),
+                            'source_role': scope_label,
+                        })
+
+                    for acc in accessory_map.get(role_id, []):
+                        if acc.product_id != pid:
+                            continue
+                        material_qty = float(acc.quantity or 0) * qty
+                        result_items.append({
+                            'material_name': acc.accessory_name or '配件',
+                            'material_code': acc.material_code or '',
+                            'specification': acc.specification or '',
+                            'unit': acc.unit or '个',
+                            'unit_price': 0,
+                            'quantity': material_qty,
+                            'supplier_name': acc.supplier_name or '',
+                            'supplier_id': acc.supplier_id,
+                            'customer_name': customer_name,
+                            'category': 'accessory',
+                            'unit_usage': float(acc.quantity or 0),
+                            'source_role': scope_label,
+                        })
         return result_items
 
     # 幂等性检查：先清理关联这些客户订单/备货记录的旧 pending 采购单，防止重复审核产生重复订单

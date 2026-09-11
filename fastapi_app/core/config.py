@@ -43,9 +43,9 @@ class Settings(BaseSettings):
     # API配置
     API_PREFIX: str = "/api/v1"
     # 生产环境（APP_ENV=production）自动关闭文档端点，防止暴露 API 结构
-    DOCS_URL: str | None = None if os.getenv("APP_ENV") == "production" else "/api/docs"
-    REDOC_URL: str | None = None if os.getenv("APP_ENV") == "production" else "/api/redoc"
-    OPENAPI_URL: str | None = None if os.getenv("APP_ENV") == "production" else "/api/openapi.json"
+    DOCS_URL: str | None = None if os.getenv("APP_ENV", "").lower() in ("prod", "production") else "/api/docs"
+    REDOC_URL: str | None = None if os.getenv("APP_ENV", "").lower() in ("prod", "production") else "/api/redoc"
+    OPENAPI_URL: str | None = None if os.getenv("APP_ENV", "").lower() in ("prod", "production") else "/api/openapi.json"
 
     # 数据库配置
     # 异步数据库URL - 使用 asyncpg 驱动（性能最优）
@@ -86,7 +86,7 @@ class Settings(BaseSettings):
         origin.strip() for origin in _raw_cors.split(",")
         if origin.strip()
         and (
-            os.getenv("APP_ENV") != "production"
+            os.getenv("APP_ENV", "").lower() not in ("prod", "production")
             or origin.strip().startswith("https://")
             or origin.strip().startswith("http://localhost")
         )
@@ -124,7 +124,7 @@ class Settings(BaseSettings):
                 f"当前值 '{self.ALGORITHM}' 不在允许范围内"
             )
         # 生产环境安全配置强校验：防止运维漏配导致安全控制失效
-        _is_production = os.getenv("APP_ENV") == "production"
+        _is_production = os.getenv("APP_ENV", "").lower() in ("prod", "production")
         if not _is_production and not self.ALLOWED_HOSTS:
             # 开发环境未配置 ALLOWED_HOSTS 时默认允许所有主机，便于本地调试
             self.ALLOWED_HOSTS = ["*"]

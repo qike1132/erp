@@ -77,7 +77,7 @@ def _setup_csrf(app: FastAPI) -> None:
 
         _csrf_secure = os.getenv(
             "CSRF_COOKIE_SECURE",
-            "true" if os.getenv("APP_ENV", "dev") == "production" else "",
+            "true" if os.getenv("APP_ENV", "dev").lower() in ("prod", "production") else "",
         ).lower() in ("true", "1", "yes")
 
         # 内网 IP 段：CSRF 攻击几乎不可能来自内网，直接豁免
