@@ -120,10 +120,7 @@ from .verify import *  # noqa: F403
 # release_restore_lock(db)，曾遮蔽 Redis 版导致端点 finally TypeError。
 from .restore import (  # noqa: E402,F811
     acquire_restore_lock,
-    clear_stale_restore_lock,
-    get_restore_lock_info,
     is_restore_in_progress,
-    is_stale_restore_lock,
     release_restore_lock,
     restore_from_zip,
     restore_non_dependent_components,
@@ -248,11 +245,7 @@ __all__ = [
     # snapshot
     "get_postgres_snapshot",
     "get_postgres_wal_info",
-    # restore
-    "clear_stale_restore_lock",
-    "get_restore_lock_info",
     "is_restore_in_progress",
-    "is_stale_restore_lock",
     "list_backup_files",
     "query_table_rows",
     # verify
