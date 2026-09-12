@@ -269,7 +269,8 @@ class _Managed:
             self.started_at = time.monotonic()
             self.health_fail_start = None
             self.status = "running"
-            self.delay = 2.0
+            # 注意：此处不重置 self.delay——退避在「健康检查恢复」时才清零，
+            # 保证启动即崩的进程按 2→4→…→30s 指数退避，避免崩溃风暴
             print(f"[prod_runner] {self.name} 已启动 (PID {self.proc.pid}, 日志 {log_path.name})")
         except (OSError, subprocess.SubprocessError) as e:
             self.status = "failed"
@@ -308,12 +309,16 @@ class _Managed:
         if self.proc is None:
             return
         if self.proc.poll() is not None:
-            # 进程已退出
-            self.status = "crashed"
-            self.next_start = time.monotonic() + self.delay
-            self.delay = min(self.delay * 2, 30.0)
-            print(f"[prod_runner] {self.name} 已退出 (code={self.proc.returncode})，"
-                  f"{int(self.delay)}s 后重启")
+            # 只在「运行→崩溃」跳变时安排重启时刻。若每轮都重置 next_start，
+            # 由于主循环间隔(3s)≥首次退避(2s)，next_start 永远落在未来，
+            # maybe_restart 将永久饥饿——已退出进程永远不会被重启（2026-09-12 实证：
+            # uvicorn master 死后 4 个孤儿 worker 顶在 5002 上服务数小时无人重启）。
+            if self.status != "crashed":
+                self.status = "crashed"
+                self.next_start = time.monotonic() + self.delay
+                self.delay = min(self.delay * 2, 30.0)
+                print(f"[prod_runner] {self.name} 已退出 (code={self.proc.returncode})，"
+                      f"{int(self.delay)}s 后重启")
             return
         if not self.health_url:
             self.status = "running"
@@ -323,6 +328,7 @@ class _Managed:
             self.status = "ready"
             self.last_health = _iso_now()
             self.health_fail_start = None
+            self.delay = 2.0  # 服务健康，退避归零
             return
         if self.health_fail_start is None:
             self.health_fail_start = time.monotonic()
