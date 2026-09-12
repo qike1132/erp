@@ -28,11 +28,6 @@ defineProps<{ collapsed: boolean }>()
   margin-bottom: 0;
   text-decoration: none;
   cursor: pointer;
-  transition: opacity 0.2s ease;
-}
-
-.sb-logo:hover {
-  opacity: 0.8;
 }
 
 .sb-logo img {

@@ -41,7 +41,7 @@
       </div>
       <div
         :class="[
-          'w-9 h-9 md:w-10 md:h-10 rounded-[var(--radius-md)] flex items-center justify-center shrink-0 transition-transform duration-300 group-hover:scale-110',
+          'w-9 h-9 md:w-10 md:h-10 rounded-[var(--radius-md)] flex items-center justify-center shrink-0',
           iconBgClass,
         ]"
       >
@@ -66,12 +66,12 @@ const props = defineProps<{
 }>()
 
 const accentBorderClass: Record<string, string> = {
-  blue: 'border-l-[3px] border-l-primary-500 hover:-translate-y-1 hover:shadow-md hover:border-l-primary-400',
-  green: 'border-l-[3px] border-l-success-500 hover:-translate-y-1 hover:shadow-md hover:border-l-success-400',
-  amber: 'border-l-[3px] border-l-warning-500 hover:-translate-y-1 hover:shadow-md hover:border-l-warning-400',
-  red: 'border-l-[3px] border-l-danger-500 hover:-translate-y-1 hover:shadow-md hover:border-l-danger-400',
-  purple: 'border-l-[3px] border-l-purple-500 hover:-translate-y-1 hover:shadow-md hover:border-l-purple-400',
-  ocean: 'border-l-[3px] border-l-ocean-deep hover:-translate-y-1 hover:shadow-md hover:border-l-ocean',
+  blue: 'border-l-[3px] border-l-primary-500',
+  green: 'border-l-[3px] border-l-success-500',
+  amber: 'border-l-[3px] border-l-warning-500',
+  red: 'border-l-[3px] border-l-danger-500',
+  purple: 'border-l-[3px] border-l-purple-500',
+  ocean: 'border-l-[3px] border-l-ocean-deep',
 }
 
 const iconBgClass: Record<string, string> = {
@@ -100,12 +100,6 @@ const animationStyle = {
 <style scoped>
 .kpi-card {
   animation: slideUp 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) both;
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.kpi-card:hover {
-  transform: translateY(-1px) scale(1.01);
-  box-shadow: 0 8px 25px rgba(135, 206, 235, 0.35);
 }
 
 @keyframes slideUp {

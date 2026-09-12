@@ -64,12 +64,6 @@ const emit = defineEmits<{ 'toggle': [] }>()
   transition: color 0.2s ease, border-color 0.2s ease, background 0.2s ease;
 }
 
-.sb-section-header:hover {
-  color: var(--color-primary-600);
-  border-color: var(--color-primary-200);
-  background: var(--color-primary-50);
-}
-
 .sb-section-header.open {
   color: var(--color-primary-700);
   border-color: var(--color-primary-300);
@@ -117,21 +111,6 @@ const emit = defineEmits<{ 'toggle': [] }>()
   border: 1px solid var(--color-border-light);
   box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
   transition: background 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
-}
-
-.sb-nav-item:hover {
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 12px 32px rgba(0,0,0,0.1);
-  transform: translateY(-1px);
-  border-color: var(--color-primary-200);
-}
-
-.sb-nav-item:hover .sb-nav-icon {
-  color: var(--color-primary-500);
-  background: var(--color-primary-50);
-}
-
-.sb-nav-item:hover .sb-nav-label {
-  color: var(--color-primary-600);
 }
 
 .sb-nav-item.active {

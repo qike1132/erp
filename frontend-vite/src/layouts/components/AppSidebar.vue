@@ -63,11 +63,6 @@ const {
   margin: 4px 12px;
 }
 
-.sb-sidebar:hover {
-  box-shadow: 0 4px 12px rgba(0,0,0,0.06);
-  transform: translateY(-2px);
-}
-
 .sb-sidebar.collapsed {
   width: 68px;
 }

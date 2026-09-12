@@ -48,17 +48,6 @@ defineProps<{
   transition: background 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
 }
 
-.sb-nav-item:hover {
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 12px 32px rgba(0,0,0,0.1);
-  transform: translateY(-1px);
-  border-color: var(--color-primary-200);
-}
-
-.sb-nav-item:hover .sb-nav-icon {
-  color: var(--color-primary-500);
-  background: var(--color-primary-50);
-}
-
 .sb-nav-item.active {
   background: linear-gradient(135deg, var(--color-primary-50), var(--color-primary-100));
   border-color: var(--color-primary-300);
