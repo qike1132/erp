@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import tailwindcss from '@tailwindcss/vite'
 import AutoImport from 'unplugin-auto-import/vite'
@@ -8,8 +8,14 @@ import { VitePWA } from 'vite-plugin-pwa'
 import { resolve } from 'path'
 
 export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), '')
+  const isCapacitor = mode === 'capacitor'
+
   return {
     base: '/',
+    define: {
+      __CAPACITOR_BUILD__: JSON.stringify(isCapacitor),
+    },
     // 生产构建移除 console.* 调用与 debugger 语句（已确认无依赖 console 副作用的代码）
     esbuild: {
       drop: mode === 'production' ? ['console', 'debugger'] : [],
@@ -88,10 +94,8 @@ export default defineConfig(({ mode }) => {
             { src: '/logo_plush.png', sizes: '512x512', type: 'image/png' },
           ],
         },
-        // PWA 彻底禁用：http 内网访问下 Service Worker 无法注册（非安全上下文），
-        // 且旧 Workbox SW 会预缓存 index.html/静态资源导致"加载中"卡死与旧资源串用。
-        // 与项目长期约定"禁用 PWA"保持一致，避免再生成 sw.js/registerSW.js。
-        disable: true,
+        // Capacitor 构建禁用 PWA，开发模式也禁用
+        disable: isCapacitor || mode === 'development',
       }),
     ],
     resolve: {
@@ -106,6 +110,18 @@ export default defineConfig(({ mode }) => {
         output: {
           exports: 'auto',
           manualChunks(id: string) {
+            // Capacitor 构建：分离 Capacitor 依赖
+            if (isCapacitor) {
+              const capChunks: Record<string, string[]> = {
+                'vendor-capacitor': ['@capacitor/core', '@capacitor/app', '@capacitor/filesystem', '@capacitor/share'],
+              }
+              for (const [name, deps] of Object.entries(capChunks)) {
+                for (const dep of deps) {
+                  if (id.includes(`node_modules/${dep}`)) return name
+                }
+              }
+            }
+
             const chunks: Record<string, string[]> = {
               'vendor-echarts': ['echarts/core', 'echarts/charts', 'echarts/components', 'echarts/renderers'],
               'vendor-vue': ['vue', 'vue-router', 'pinia'],
@@ -196,6 +212,9 @@ export default defineConfig(({ mode }) => {
         'echarts/renderers',
         '@fortawesome/fontawesome-svg-core',
         '@fortawesome/free-solid-svg-icons',
+        '@capacitor/app',
+        '@capacitor/filesystem',
+        '@capacitor/share',
       ],
     },
   }

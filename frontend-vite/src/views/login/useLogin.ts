@@ -4,6 +4,7 @@ import { authApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import { usePatternRoomStore } from '@/stores/patternRoom'
 import { usePerfMark } from '@/composables/usePerfMark'
+import { setAccessToken } from '@/utils/secureStorage'
 import { getErrorMessage } from '@/types/errors'
 import { preloadEcharts } from '@/utils/echartsPreload'
 import { prefetchDashboardData } from '@/views/dashboard/composables/useDashboardStats'
@@ -16,6 +17,7 @@ import { devLog } from '@/utils/devLog'
  * 关闭页面后自动清除，避免用户名明文持久化。
  */
 export function useLogin() {
+  const isCapacitor = !!import.meta.env.VITE_CAPACITOR
   const router = useRouter()
   const route = useRoute()
   const authStore = useAuthStore()
@@ -60,7 +62,7 @@ export function useLogin() {
       const res = await authApi.login({
         username: form.username,
         password: form.password,
-        remember: form.remember,
+        remember: isCapacitor ? true : form.remember,
       })
       // 登录成功清除贝乐未确认订单弹窗标记，实现「每登录会话弹一次」
       sessionStorage.removeItem('beile_confirm_popup_shown')
@@ -73,12 +75,18 @@ export function useLogin() {
       // 利用路由跳转 + Dashboard 组件挂载的时间窗口下载 ~1MB 图表库
       preloadEcharts()
 
+      if (isCapacitor && res.access_token) {
+        setAccessToken(res.access_token)
+      }
       // 🟢 并行预取 Dashboard 数据：登录成功后立即发起 stats + stock 请求，
       // 填充 Vue Query 缓存，用户到达 Dashboard 时命中缓存 → 首次加载 0ms
+      // 必须在 setAccessToken 之后调用，确保 Capacitor Bearer token 已就绪
       prefetchDashboardData(queryClient)
       // 🟢 并行预取 Pattern-Room 数据（分组列表 + 版师列表），填充 patternRoom Store 缓存，
-      // 首次进入 /pattern-room 命中缓存 → 0ms 渲染、无「加载中...」
-      usePatternRoomStore().prefetch().catch(() => { /* 预取失败静默 */ })
+      // 首次进入 /pattern-room 命中缓存 → 0ms 渲染、无「加载中...」（移动端无此模块，跳过）
+      if (!isCapacitor) {
+        usePatternRoomStore().prefetch().catch(() => { /* 预取失败静默 */ })
+      }
       // 登录接口返回了用户信息时，直接写入 store（避免登录后再 GET /auth/me）
       if (res.user) {
         authStore.setUserInfo(res.user)
@@ -88,7 +96,7 @@ export function useLogin() {
       devLog('[Login] authStore.init 完成, loaded:', authStore.loaded, 'isLoggedIn:', authStore.isLoggedIn)
       perf.markEnd('init-start')
       perf.measure('auth-store-init', 'init-start')
-      const defaultRedirect = '/dashboard'
+      const defaultRedirect = isCapacitor ? '/' : '/dashboard'
       const rawRedirect = route.query.redirect
       const redirect = (typeof rawRedirect === 'string' && rawRedirect.startsWith('/') && !rawRedirect.startsWith('//'))
         ? rawRedirect
@@ -112,5 +120,5 @@ export function useLogin() {
     }
   }
 
-  return { loading, showPassword, errorMsg, form, handleLogin }
+  return { loading, showPassword, errorMsg, form, isCapacitor, handleLogin }
 }
