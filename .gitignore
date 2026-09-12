@@ -248,3 +248,6 @@ scripts/stock_sim/journal/
 
 # 历史构建产物目录（dist-old 等）
 /frontend-vite/dist-old/
+
+# local-machine ops recovery script
+/_recover_prod.ps1
