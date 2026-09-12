@@ -47,12 +47,9 @@ export function usePurchaseHandlers() {
     } else if (tab === 'active') {
       purchaseOrders.load()
     } else if (tab === 'history') {
-      if (!historyInitialized.value) {
-        Promise.all([completed.loadQuickFilters(), completed.load()])
-        historyInitialized.value = true
-      } else {
-        completed.load()
-      }
+      // 快速筛选 UI 已移除，无需 loadQuickFilters
+      completed.load()
+      historyInitialized.value = true
     }
   }
 

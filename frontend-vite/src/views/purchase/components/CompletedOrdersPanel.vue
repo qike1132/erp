@@ -1,28 +1,5 @@
 <template>
   <div class="coq-panel">
-    <CompletedOrdersToolbar
-      :total="total"
-      :filter-expanded="filterExpanded"
-      @toggle-filter="filterExpanded = !filterExpanded"
-      @export="onExport"
-    />
-
-    <CompletedOrdersSearchBar
-      :filters="filters"
-      :quick-filters="quickFilters"
-      :current-quick-filter-id="currentQuickFilterId"
-      @update-filter="onUpdateFilter"
-      @search="onSearch"
-      @apply-quick-filter="onApplyQuickFilter"
-    />
-
-    <CompletedOrdersAdvancedFilter
-      :filters="filters"
-      :filter-expanded="filterExpanded"
-      @update-filter="onUpdateFilter"
-      @reset-filters="onResetFilters"
-    />
-
     <CompletedOrdersTable
       :orders="orders"
       :loading="loading"
@@ -40,10 +17,6 @@
 
 <script setup lang="ts">
 import type { PurchaseOrder } from '@/types'
-import type { QuickFilter } from '../composables/useCompletedOrders'
-import CompletedOrdersToolbar from './CompletedOrdersToolbar.vue'
-import CompletedOrdersSearchBar from './CompletedOrdersSearchBar.vue'
-import CompletedOrdersAdvancedFilter from './CompletedOrdersAdvancedFilter.vue'
 import CompletedOrdersTable from './CompletedOrdersTable.vue'
 
 defineProps<{
@@ -54,44 +27,19 @@ defineProps<{
   total: number
   currentPage: number
   totalPages: number
-  filters: Record<string, string>
-  quickFilters: QuickFilter[]
-  currentQuickFilterId: string | null
 }>()
 
-const filterExpanded = defineModel<boolean>('filterExpanded', { default: false })
-
 const emit = defineEmits<{
-  updateFilter: [payload: { key: string; value: string }]
-  resetFilters: []
-  search: []
-  export: []
-  applyQuickFilter: [id: string]
   viewDetail: [id: number]
   'update:currentPage': [page: number]
   retry: []
 }>()
 
-function onUpdateFilter(payload: { key: string; value: string }) {
-  emit('updateFilter', payload)
-}
-function onApplyQuickFilter(id: string) {
-  emit('applyQuickFilter', id)
-}
 function onViewDetail(id: number) {
   emit('viewDetail', id)
 }
 function onUpdateCurrentPage(page: number) {
   emit('update:currentPage', page)
-}
-function onSearch() {
-  emit('search')
-}
-function onResetFilters() {
-  emit('resetFilters')
-}
-function onExport() {
-  emit('export')
 }
 function onRetry() {
   emit('retry')
@@ -119,5 +67,6 @@ function onRetry() {
   font-family: var(--font-sans);
   color: var(--coq-text);
   background: var(--coq-bg);
+  padding-top: 16px;
 }
 </style>

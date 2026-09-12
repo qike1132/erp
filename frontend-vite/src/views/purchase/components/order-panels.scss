@@ -9,20 +9,6 @@
   border-bottom: 1px solid var(--color-border-light, #e2e8f0);
 }
 
-.pc-section-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--color-text);
-}
-
-.pc-section-title i {
-  font-size: 13px;
-  color: var(--color-primary-500);
-}
-
 .pc-btn {
   display: inline-flex;
   align-items: center;

@@ -1,27 +1,6 @@
 <template>
   <div class="pc-section">
-    <div class="pc-section-header">
-      <div class="pc-section-title">
-        <FontAwesomeIcon icon="list" aria-hidden="true" /> 待生产订单
-      </div>
-      <div class="pc-section-actions">
-        <button
-          class="pc-btn pc-btn-purple"
-          :disabled="selectedIds.length === 0"
-          @click="$emit('summary')"
-        >
-          <FontAwesomeIcon icon="clipboard-list" aria-hidden="true" /> 汇总下单 ({{ selectedIds.length }})
-        </button>
-        <button
-          class="pc-btn pc-btn-success pc-btn-sm"
-          :disabled="selectedIds.length === 0"
-          @click="$emit('batchComplete')"
-        >
-          <FontAwesomeIcon icon="check-double" aria-hidden="true" /> 批量确认订单 ({{ selectedIds.length }})
-        </button>
-        <span class="count-badge">{{ total }} 个订单</span>
-      </div>
-    </div>
+    <!-- 汇总下单/批量确认按钮已移至 PurchaseView 顶部 TAB 行（右上角） -->
 
     <!-- Loading (initial only) -->
     <div v-if="loading && orders.length === 0" class="pc-loading-state">
@@ -159,8 +138,6 @@ const selectedSet = computed(() => new Set(props.selectedIds))
 defineEmits<{
   toggleAll: [checked: boolean]
   toggleSelection: [id: number]
-  summary: []
-  batchComplete: []
   completeOrder: [id: number]
   'update:currentPage': [page: number]
   retry: []
@@ -170,34 +147,6 @@ defineEmits<{
 
 <style scoped lang="scss">
 @use './order-panels.scss' as *;
-
-.pc-section-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 8px 24px 10px;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.pc-section-actions {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-
-.pc-btn-purple {
-  color: var(--color-purple-700, #7e22ce);
-  border-color: var(--color-purple-200, #e9d5ff);
-  background: var(--color-purple-50, #faf5ff);
-}
-
-.pc-btn-purple:hover:not(:disabled) {
-  background: var(--color-purple-600, #9333ea);
-  color: white;
-  border-color: transparent;
-}
 
 .pc-order-badges .pc-sku-badge {
   margin: 0;

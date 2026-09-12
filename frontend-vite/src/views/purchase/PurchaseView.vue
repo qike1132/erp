@@ -42,6 +42,25 @@
             }})
           </button>
         </div>
+
+        <!-- 待生产订单 TAB 的操作区（与待审核 TAB 同款右上角位置） -->
+        <div v-else-if="activeTab === 'active'" class="pc-header-actions">
+          <button
+            class="pc-btn pc-btn-purple"
+            :disabled="purchaseOrders.selectedIds.length === 0"
+            @click="handleSummary"
+          >
+            <FontAwesomeIcon icon="clipboard-list" aria-hidden="true" /> 汇总下单 ({{ purchaseOrders.selectedIds.length }})
+          </button>
+          <button
+            class="pc-btn pc-btn-success"
+            :disabled="purchaseOrders.selectedIds.length === 0"
+            @click="handleBatchComplete"
+          >
+            <FontAwesomeIcon icon="check-double" aria-hidden="true" /> 批量确认订单 ({{ purchaseOrders.selectedIds.length }})
+          </button>
+          <span class="count-badge">{{ purchaseOrders.total }} 个订单</span>
+        </div>
       </div>
 
       <div class="page-card-body">
@@ -83,8 +102,6 @@
           :all-selected="purchaseOrders.allSelected"
           @toggle-all="purchaseOrders.toggleAll"
           @toggle-selection="purchaseOrders.toggleSelection"
-          @summary="handleSummary"
-          @batch-complete="handleBatchComplete"
           @complete-order="handleCompleteOrder"
           @update:current-page="handleOrderPageChange"
           @retry="purchaseOrders.retry"
@@ -93,7 +110,6 @@
         <!-- 下单查询面板 -->
         <CompletedOrdersPanel
           v-else
-          v-model:filter-expanded="completed.filterExpanded"
           :orders="completed.orders"
           :loading="completed.loading"
           :fetching="completed.fetching"
@@ -101,14 +117,6 @@
           :total="completed.total"
           :current-page="completed.page"
           :total-pages="completed.totalPages"
-          :filters="completed.filters"
-          :quick-filters="completed.quickFilters"
-          :current-quick-filter-id="completed.currentQuickFilterId"
-          @update-filter="handleFilterUpdate"
-          @reset-filters="completed.resetFilters"
-          @search="handleCompletedSearch"
-          @export="handleExport"
-          @apply-quick-filter="completed.applyQuickFilter"
           @view-detail="handleViewDetail"
           @update:current-page="handleCompletedPageChange"
           @retry="completed.retry"
@@ -183,9 +191,6 @@ const {
   handleSaveFactoryEdits,
   handleUpdateFactoryQty,
   handleViewDetail,
-  handleFilterUpdate,
-  handleCompletedSearch,
-  handleExport,
   handleCompletedPageChange,
 } = usePurchaseHandlers()
 </script>
@@ -218,6 +223,18 @@ const {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.pc-btn-purple {
+  color: var(--color-purple-700, #7e22ce);
+  border-color: var(--color-purple-200, #e9d5ff);
+  background: var(--color-purple-50, #faf5ff);
+}
+
+.pc-btn-purple:hover:not(:disabled) {
+  background: var(--color-purple-600, #9333ea);
+  color: white;
+  border-color: transparent;
 }
 
 /* === Tabs === */

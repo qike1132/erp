@@ -16,7 +16,6 @@
     <div v-else-if="orders.length === 0" class="coq-empty">
       <FontAwesomeIcon icon="folder-open" aria-hidden="true" />
       <p class="coq-empty-text">暂无订单记录</p>
-      <p class="coq-empty-hint">调整搜索条件或选择其他时间范围</p>
     </div>
 
     <!-- 数据表格 -->
