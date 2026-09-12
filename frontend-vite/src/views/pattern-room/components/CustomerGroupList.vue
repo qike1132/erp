@@ -13,7 +13,7 @@
 
     <EmptyState
       v-else-if="!hasData"
-      icon="fas fa-boxes"
+      icon="boxes"
       title="暂无打样项目"
       description="点击右上角「新增打样项目」创建第一个项目"
     />

@@ -2,7 +2,7 @@
   <div class="pdp-container">
     <EmptyState
       v-if="!project"
-      icon="fas fa-hand-point-left"
+      icon="hand-point-left"
       title="请选择一个打样项目"
       description="从左侧列表中选择项目查看详情"
     />
