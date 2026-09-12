@@ -131,7 +131,7 @@ async def create_case_stockin(db: AsyncSession, product_id: int, quantity: int, 
         stockin_date: 入库日期字符串（YYYY-MM-DD）。
         customer: 客户名称。
         note: 备注。
-        stockin_no: 入库单号，为空时由调用方生成。
+        stockin_no: 入库单号，为空时自动生成。
 
     Returns:
         dict，包含 success、stockin_no、id 字段。
@@ -141,6 +141,10 @@ async def create_case_stockin(db: AsyncSession, product_id: int, quantity: int, 
         HTTPException: 日期格式错误时抛出 400。
     """
     validate_quantity_range(quantity, "入库数量")
+    if not stockin_no:
+        # 单条入库路径不会预生成单号；stockin_no 有唯一约束，空串会在第二条时炸
+        from fastapi_app.services.numbering import generate_case_stockin_number
+        stockin_no = await generate_case_stockin_number(db)
     case_obj = await _get_or_create_case_for_product(db, product_id)
 
     stockin = CaseStockIn(stockin_no=stockin_no, stockin_date=_parse_date(stockin_date, '入库日期'),
@@ -169,7 +173,7 @@ async def create_case_stockout(db: AsyncSession, product_id: int, quantity: int,
         stockout_date: 出库日期字符串（YYYY-MM-DD）。
         customer: 客户名称。
         note: 备注。
-        stockout_no: 出库单号，为空时由调用方生成。
+        stockout_no: 出库单号，为空时自动生成。
 
     Returns:
         dict，包含 success、stockout_no、id 字段。
@@ -179,6 +183,9 @@ async def create_case_stockout(db: AsyncSession, product_id: int, quantity: int,
         HTTPException: 日期格式错误时抛出 400。
     """
     validate_quantity_range(quantity, "出货数量")
+    if not stockout_no:
+        from fastapi_app.services.numbering import generate_case_stockout_number
+        stockout_no = await generate_case_stockout_number(db)
     case_obj = await _get_case_by_product_for_update(db, product_id)
 
     if case_obj.current_stock < quantity:

@@ -1,22 +1,29 @@
 <template>
   <div class="cs-container">
     <div class="page-card page-card-main">
-      <!-- 卡片头部 -->
       <div class="page-card-header">
         <div class="cs-tab-group" role="tablist">
-          <button role="tab" :aria-selected="activeTab === 'stock'" :class="['cs-tab-btn', { active: activeTab === 'stock' }]" aria-label="出入库" @click="activeTab = 'stock'">
-            出入库
-          </button>
-          <button role="tab" :aria-selected="activeTab === 'inventory'" :class="['cs-tab-btn', { active: activeTab === 'inventory' }]" aria-label="库存查询" @click="activeTab = 'inventory'">
-            库存查询
+          <button
+            v-for="tab in TABS"
+            :key="tab.key"
+            role="tab"
+            :aria-selected="activeTab === tab.key"
+            :class="['cs-tab-btn', { active: activeTab === tab.key, 'out-tab': tab.key === 'stockout' }]"
+            :aria-label="tab.label"
+            @click="activeTab = tab.key"
+          >
+            <FontAwesomeIcon :icon="tab.icon" aria-hidden="true" />
+            {{ tab.label }}
           </button>
         </div>
       </div>
 
-      <!-- 内容区 -->
       <div class="page-card-body">
-        <CaseStockTab v-if="activeTab === 'stock'" />
-        <CaseInventoryTab v-if="activeTab === 'inventory'" />
+        <KeepAlive>
+          <StockWorkbench v-if="activeTab === 'stockin'" mode="stockin" />
+          <StockWorkbench v-else-if="activeTab === 'stockout'" mode="stockout" />
+          <InventoryPanel v-else />
+        </KeepAlive>
       </div>
     </div>
   </div>
@@ -24,22 +31,44 @@
 
 <script setup lang="ts">
 /**
- * CaseView.vue — 皮套出入库管理页面
+ * CaseView.vue — 皮套管理页面（/case）
  *
- * 职责：
- * - 提供出入库（CaseStockTab）和库存查询（CaseInventoryTab）两个标签页
- * - 通过 activeTab 控制标签页切换
+ * 结构：入库 / 出库 / 库存 三个主标签。
+ * - 入库、出库各挂独立 StockWorkbench 实例（暂存单互不干扰，KeepAlive 保留状态）；
+ * - 库存标签为汇总 + 流水查询；
+ * - 订阅 WebSocket case_stock_changed 事件，多端任一出入库操作后自动刷新查询缓存。
  */
 import { ref } from 'vue'
-import CaseStockTab from './CaseStockTab.vue'
-import CaseInventoryTab from './CaseInventoryTab.vue'
+import { useQueryClient } from '@tanstack/vue-query'
+import { useWebSocket } from '@/composables/useWebSocket'
+import { caseQueryKeys } from './composables/useCaseStockWorkbench'
+import StockWorkbench from './components/StockWorkbench.vue'
+import InventoryPanel from './components/InventoryPanel.vue'
 
-/** 当前激活的标签页：stock（出入库）/ inventory（库存查询） */
-const activeTab = ref<'stock' | 'inventory'>('stock')
+type CaseTab = 'stockin' | 'stockout' | 'inventory'
+
+const TABS: { key: CaseTab; label: string; icon: string }[] = [
+  { key: 'stockin', label: '入库', icon: 'truck-loading' },
+  { key: 'stockout', label: '出库', icon: 'shipping-fast' },
+  { key: 'inventory', label: '库存', icon: 'warehouse' },
+]
+
+const activeTab = ref<CaseTab>('stockin')
+const queryClient = useQueryClient()
+
+// 皮套库存变更事件：失效全部相关查询，由 vue-query 按需重拉
+useWebSocket({
+  isActive: ref(true),
+  onMessage: (data) => {
+    if (data.type !== 'case_stock_changed') return
+    for (const key of caseQueryKeys()) {
+      queryClient.invalidateQueries({ queryKey: [key] })
+    }
+  },
+})
 </script>
 
 <style scoped>
-/* Container */
 .cs-container {
   padding: 0;
   margin: 0 auto;
@@ -49,51 +78,6 @@ const activeTab = ref<'stock' | 'inventory'>('stock')
   box-sizing: border-box;
 }
 
-/* Card */
-/* 卡片样式已迁移到全局 .page-card 系列（src/styles/app.css） */
-
-/* Card Header */
-/* 卡片头部样式已迁移到全局 .page-card-header（src/styles/app.css） */
-.cs-card-title-group {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.cs-card-title-group h3 {
-  font-size: 17px;
-  font-weight: 700;
-  color: var(--color-text);
-  margin: 0;
-}
-.cs-card-title-group small {
-  font-size: 12px;
-  color: var(--color-text-secondary);
-  display: block;
-  margin-top: 2px;
-}
-.cs-header-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-/* Icon Box */
-.cs-icon-box {
-  width: 46px;
-  height: 46px;
-  border-radius: 13px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 19px;
-  flex-shrink: 0;
-}
-.cs-icon-green {
-  background: linear-gradient(135deg, var(--color-success-100), var(--color-success-200));
-  color: var(--color-success-700);
-}
-
-/* Tab Group */
 .cs-tab-group {
   display: inline-flex;
   gap: 4px;
@@ -101,7 +85,7 @@ const activeTab = ref<'stock' | 'inventory'>('stock')
   border-radius: 12px;
   background: white;
   border: 1px solid var(--color-border-light);
-  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.06);
 }
 .cs-tab-btn {
   display: inline-flex;
@@ -121,16 +105,18 @@ const activeTab = ref<'stock' | 'inventory'>('stock')
 .cs-tab-btn:hover {
   background: var(--color-primary-50);
   color: var(--color-primary-600);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
   transform: translateY(-1px);
 }
 .cs-tab-btn.active {
   background: linear-gradient(135deg, var(--color-primary-50), var(--color-primary-100));
   color: var(--color-primary-700);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 2px 8px rgba(91, 141, 239, 0.2);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08), 0 2px 8px rgba(91, 141, 239, 0.2);
   transform: translateY(-1px);
 }
-
-/* Body */
-/* 卡片主体样式已迁移到全局 .page-card-body（src/styles/app.css） */
+.cs-tab-btn.active.out-tab {
+  background: linear-gradient(135deg, var(--color-danger-50), var(--color-danger-100));
+  color: var(--color-danger-700);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08), 0 2px 8px rgba(234, 84, 85, 0.2);
+}
 </style>

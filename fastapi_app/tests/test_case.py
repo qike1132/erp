@@ -115,6 +115,40 @@ class TestCaseService:
         with pytest.raises(ValueError, match="库存为0"):
             await delete_case_product(mock_db, 1)
 
+    @pytest.mark.asyncio
+    async def test_create_stockin_generates_no_when_missing(self, mock_db, monkeypatch):
+        """单条入库未传单号时应自动生成（stockin_no 有唯一约束，空串第二条必炸）"""
+        from fastapi_app.services.case_service import create_case_stockin
+        from fastapi_app.services.case import commands
+
+        async def _fake_number(db):
+            return 'RK2026010100001'
+
+        monkeypatch.setattr('fastapi_app.services.numbering.generate_case_stockin_number', _fake_number)
+        case = MagicMock(id=1)
+        monkeypatch.setattr(commands, '_get_or_create_case_for_product', AsyncMock(return_value=case))
+
+        result = await create_case_stockin(mock_db, 1, 2, '2026-01-01', '客户A')
+        assert result['success'] is True
+        assert result['stockin_no'] == 'RK2026010100001'
+
+    @pytest.mark.asyncio
+    async def test_create_stockout_generates_no_when_missing(self, mock_db, monkeypatch):
+        """单条出库未传单号时应自动生成"""
+        from fastapi_app.services.case_service import create_case_stockout
+        from fastapi_app.services.case import commands
+
+        async def _fake_number(db):
+            return 'CK2026010100001'
+
+        monkeypatch.setattr('fastapi_app.services.numbering.generate_case_stockout_number', _fake_number)
+        case = MagicMock(id=1, current_stock=5)
+        monkeypatch.setattr(commands, '_get_case_by_product_for_update', AsyncMock(return_value=case))
+
+        result = await create_case_stockout(mock_db, 1, 2, '2026-01-01', '客户A')
+        assert result['success'] is True
+        assert result['stockout_no'] == 'CK2026010100001'
+
 
 class TestCaseEndpoints:
     @pytest.mark.asyncio
