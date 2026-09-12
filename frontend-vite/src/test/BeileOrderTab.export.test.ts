@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { ref, nextTick, defineComponent, h } from 'vue'
+import { nextTick, defineComponent } from 'vue'
 
 const mocks = vi.hoisted(() => ({
   beileListMock: vi.fn(),
@@ -73,8 +73,7 @@ vi.mock('@/utils/print', () => ({
 }))
 
 import { mount, flushPromises } from '@vue/test-utils'
-import BeileOrderTab from '@/views/beile-order/BeileOrderTab.vue'
-import { provideBeileOrders } from '@/views/beile-order/composables/useBeileOrders'
+import HubeiView from '@/views/hubei/HubeiView.vue'
 import type { OrderListApiResponse } from '@/api/order'
 
 Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
@@ -92,6 +91,15 @@ const stubs = {
     props: ['open', 'title', 'maxWidthClass'],
     template: '<div v-if="open" class="ui-dialog-stub"><slot /><slot name="footer" /></div>',
   },
+  HubeiSearchBar: defineComponent({
+    emits: ['select-product'],
+    setup(_, { emit }) {
+      return {
+        pick: () => emit('select-product', (globalThis as { __beileKw?: string }).__beileKw ?? ''),
+      }
+    },
+    template: '<button type="button" class="sb-pick" @click="pick" />',
+  }),
   VirtualList: {
     props: ['items'],
     methods: {
@@ -151,16 +159,9 @@ function makeListResponse(overrides: Partial<OrderListApiResponse> = {}): OrderL
   } as OrderListApiResponse
 }
 
-/** 测试包装组件：在 setup 中调用 provideBeileOrders 创建状态实例并 provide 给 BeileOrderTab */
-const TestHost = defineComponent({
-  setup() {
-    provideBeileOrders()
-    return () => h(BeileOrderTab)
-  },
-})
-
+/** HubeiView 自身调用 provideBeileOrders()，导出/打印按钮在其头部（bo-header-btn） */
 async function mountTab() {
-  const wrapper = mount(TestHost, { global: { stubs } })
+  const wrapper = mount(HubeiView, { global: { stubs } })
   await flushPromises()
   await nextTick()
   return wrapper
@@ -168,6 +169,7 @@ async function mountTab() {
 
 describe('BeileOrderTab 导出与打印功能', () => {
   beforeEach(() => {
+    (globalThis as { __beileKw?: string }).__beileKw = undefined
     mocks.beileListMock.mockReset()
     mocks.confirmBeileOrderMock.mockReset()
     mocks.confirmBeileStockinMock.mockReset()
@@ -189,8 +191,8 @@ describe('BeileOrderTab 导出与打印功能', () => {
 
   it('有权限时显示导出和打印按钮', async () => {
     const wrapper = await mountTab()
-    const exportBtn = wrapper.find('.bo-toolbar-btn--export')
-    const printBtn = wrapper.find('.bo-toolbar-btn--print')
+    const exportBtn = wrapper.find('.bo-header-btn--export')
+    const printBtn = wrapper.find('.bo-header-btn--print')
     expect(exportBtn.exists()).toBe(true)
     expect(printBtn.exists()).toBe(true)
   })
@@ -198,21 +200,21 @@ describe('BeileOrderTab 导出与打印功能', () => {
   it('无导出权限时隐藏导出按钮', async () => {
     mocks.hasPermissionMock.mockImplementation((code: string) => code !== 'beile_order_export')
     const wrapper = await mountTab()
-    expect(wrapper.find('.bo-toolbar-btn--export').exists()).toBe(false)
-    expect(wrapper.find('.bo-toolbar-btn--print').exists()).toBe(true)
+    expect(wrapper.find('.bo-header-btn--export').exists()).toBe(false)
+    expect(wrapper.find('.bo-header-btn--print').exists()).toBe(true)
   })
 
   it('无打印权限时隐藏打印按钮和复选框列', async () => {
     mocks.hasPermissionMock.mockImplementation((code: string) => code !== 'beile_order_print')
     const wrapper = await mountTab()
-    expect(wrapper.find('.bo-toolbar-btn--print').exists()).toBe(false)
+    expect(wrapper.find('.bo-header-btn--print').exists()).toBe(false)
     expect(wrapper.find('.bo-th-select').exists()).toBe(false)
     expect(wrapper.findAll('.bo-td-select').length).toBe(0)
   })
 
   it('点击导出按钮调用 downloadXls，文件名含状态与日期，HTML 含居中标题', async () => {
     const wrapper = await mountTab()
-    await wrapper.find('.bo-toolbar-btn--export').trigger('click')
+    await wrapper.find('.bo-header-btn--export').trigger('click')
     await flushPromises()
     expect(mocks.downloadXlsMock).toHaveBeenCalledTimes(1)
     const [html, filename] = mocks.downloadXlsMock.mock.calls[0]!
@@ -230,7 +232,7 @@ describe('BeileOrderTab 导出与打印功能', () => {
 
   it('打印按钮在未选中时禁用', async () => {
     const wrapper = await mountTab()
-    const printBtn = wrapper.find('.bo-toolbar-btn--print')
+    const printBtn = wrapper.find('.bo-header-btn--print')
     expect(printBtn.attributes('disabled')).toBeDefined()
   })
 
@@ -240,7 +242,7 @@ describe('BeileOrderTab 导出与打印功能', () => {
     expect(checkboxes.length).toBeGreaterThan(0)
     await checkboxes[0]!.trigger('click')
     await nextTick()
-    const printBtn = wrapper.find('.bo-toolbar-btn--print')
+    const printBtn = wrapper.find('.bo-header-btn--print')
     expect(printBtn.attributes('disabled')).toBeUndefined()
     await printBtn.trigger('click')
     await flushPromises()
@@ -261,7 +263,7 @@ describe('BeileOrderTab 导出与打印功能', () => {
     await headerCheckbox.trigger('click')
     await nextTick()
     expect(wrapper.find('.bo-selected-count').text()).toContain('2')
-    await wrapper.find('.bo-toolbar-btn--print').trigger('click')
+    await wrapper.find('.bo-header-btn--print').trigger('click')
     await flushPromises()
     expect(mocks.printHtmlMock).toHaveBeenCalledTimes(1)
     const [title, bodyHtml] = mocks.printHtmlMock.mock.calls[0]!
@@ -301,7 +303,7 @@ describe('BeileOrderTab 导出与打印功能', () => {
     const wrapper = await mountTab()
 
     // 导出：HTML tbody 应含 2 行（2 个 SKU）
-    await wrapper.find('.bo-toolbar-btn--export').trigger('click')
+    await wrapper.find('.bo-header-btn--export').trigger('click')
     await flushPromises()
     const [exportHtml, exportFilename] = mocks.downloadXlsMock.mock.calls[0]!
     expect(exportFilename).toMatch(/\.xls$/)
@@ -313,7 +315,7 @@ describe('BeileOrderTab 导出与打印功能', () => {
     const checkbox = wrapper.find('.bo-td-select [role="checkbox"]')
     await checkbox.trigger('click')
     await nextTick()
-    await wrapper.find('.bo-toolbar-btn--print').trigger('click')
+    await wrapper.find('.bo-header-btn--print').trigger('click')
     await flushPromises()
     const [, printBody] = mocks.printHtmlMock.mock.calls[0]!
     // 2 个 SKU → tbody 2 行 + thead 1 行 = 3 <tr>
@@ -323,5 +325,127 @@ describe('BeileOrderTab 导出与打印功能', () => {
     // 首行含产品 X，次行含产品 Y
     expect(printBody).toContain('产品X')
     expect(printBody).toContain('产品Y')
+  })
+
+  /** 多 SKU 订单数据：变形金刚 + 蛋黄派，订单级 product_name 为首个 SKU */
+  function makeMultiSkuResponse(): OrderListApiResponse {
+    return makeListResponse({
+      total: 1,
+      data: [
+        {
+          id: 401,
+          record_type: 'order',
+          confirmed: false,
+          confirmed_at: null,
+          confirmed_by: null,
+          order_no: 'PO-401',
+          customer: '客户S',
+          order_date: '2026-09-01',
+          product_name: '变形金刚',
+          product_id: 1,
+          quantity: 30,
+          deduct_quantity: 0,
+          deduct_stock: false,
+          note: '备注S',
+          status: '待备货',
+          factories: ['湖北'],
+          items: [
+            { id: 1, product_name: '变形金刚', product_barcode: '690001', quantity: 10, note: '' },
+            { id: 2, product_name: '蛋黄派', product_barcode: '690002', quantity: 20, note: '' },
+          ],
+        },
+      ] as unknown as OrderListApiResponse['data'],
+    })
+  }
+
+  /** 挂载并通过搜索栏选中产品（等价于用户在下拉中选择产品名） */
+  async function mountTabWithKeyword(kw: string) {
+    ;(globalThis as { __beileKw?: string }).__beileKw = kw
+    const wrapper = await mountTab()
+    await wrapper.find('.sb-pick').trigger('click')
+    await nextTick()
+    return wrapper
+  }
+
+  it('产品搜索生效时导出仅含匹配 SKU 行，同订单其他产品不输出', async () => {
+    mocks.queryData.value = makeMultiSkuResponse()
+    const wrapper = await mountTabWithKeyword('变形金刚')
+
+    await wrapper.find('.bo-header-btn--export').trigger('click')
+    await flushPromises()
+    const [html] = mocks.downloadXlsMock.mock.calls[0]!
+    expect(html).toContain('变形金刚')
+    expect(html).not.toContain('蛋黄派')
+    // 1 thead + 1 tbody（仅命中的 1 个 SKU）
+    expect((html.match(/<tr>/g) || []).length).toBe(2)
+  })
+
+  it('产品搜索生效时打印预览仅含匹配 SKU 行，同订单其他产品不输出', async () => {
+    mocks.queryData.value = makeMultiSkuResponse()
+    const wrapper = await mountTabWithKeyword('变形金刚')
+
+    const checkbox = wrapper.find('.bo-td-select [role="checkbox"]')
+    await checkbox.trigger('click')
+    await nextTick()
+    await wrapper.find('.bo-header-btn--print').trigger('click')
+    await flushPromises()
+    const [, bodyHtml] = mocks.printHtmlMock.mock.calls[0]!
+    expect(bodyHtml).toContain('变形金刚')
+    expect(bodyHtml).not.toContain('蛋黄派')
+    // 1 thead + 1 tbody（仅命中的 1 个 SKU，无 rowspan 合并）
+    expect((bodyHtml.match(/<tr>/g) || []).length).toBe(2)
+    expect(bodyHtml).not.toContain('rowspan')
+  })
+
+  it('关键字仅命中订单级产品名时导出回退为该产品单行', async () => {
+    // 订单级 product_name 命中但明细 SKU 均不含关键字：不应输出空明细，
+    // 回退为 buildSummaryTbody 的订单级单行
+    mocks.queryData.value = makeListResponse({
+      total: 1,
+      data: [
+        {
+          id: 501,
+          record_type: 'order',
+          confirmed: false,
+          confirmed_at: null,
+          confirmed_by: null,
+          order_no: 'PO-501',
+          customer: '客户T',
+          order_date: '2026-09-02',
+          product_name: '变形金刚',
+          product_id: 1,
+          quantity: 5,
+          deduct_quantity: 0,
+          deduct_stock: false,
+          note: '',
+          status: '待备货',
+          factories: ['湖北'],
+          items: [
+            { id: 1, product_name: '蛋黄派', product_barcode: '690002', quantity: 5, note: '' },
+          ],
+        },
+      ] as unknown as OrderListApiResponse['data'],
+    })
+    const wrapper = await mountTabWithKeyword('变形金刚')
+
+    await wrapper.find('.bo-header-btn--export').trigger('click')
+    await flushPromises()
+    const [html] = mocks.downloadXlsMock.mock.calls[0]!
+    expect(html).toContain('变形金刚')
+    expect(html).not.toContain('蛋黄派')
+    expect((html.match(/<tr>/g) || []).length).toBe(2)
+  })
+
+  it('按条码搜索时导出仅含条码命中的 SKU 行', async () => {
+    mocks.queryData.value = makeMultiSkuResponse()
+    const wrapper = await mountTabWithKeyword('690002')
+
+    await wrapper.find('.bo-header-btn--export').trigger('click')
+    await flushPromises()
+    const [html] = mocks.downloadXlsMock.mock.calls[0]!
+    // 条码命中蛋黄派：仅输出蛋黄派行
+    expect(html).toContain('蛋黄派')
+    expect(html).not.toContain('变形金刚')
+    expect((html.match(/<tr>/g) || []).length).toBe(2)
   })
 })

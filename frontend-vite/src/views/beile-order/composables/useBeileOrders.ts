@@ -302,11 +302,31 @@ export function useBeileOrders() {
     return html
   }
 
+  /**
+   * 按产品关键字裁剪 SKU 明细：产品搜索生效时，导出/打印仅保留
+   * 匹配关键字的 SKU 行（同一订单内未命中的产品不输出）。
+   * 仅订单级 product_name 命中或无明细的订单保持原样
+   * （buildSummaryTbody 对空明细回退为单行 product_name）。
+   */
+  function filterSkusByKeyword(list: BeileOrderRow[]): BeileOrderRow[] {
+    const kw = appliedProduct.value.trim().toLowerCase()
+    if (!kw) return list
+    return list.map((o) => {
+      const original = o.items || []
+      if (original.length === 0) return o
+      const items = original.filter((s) => skuMatchesKeyword(s, kw))
+      // 全部命中复用原对象；过滤后可能为空 → 置空明细，
+      // 由 buildSummaryTbody 回退为订单级 product_name 单行
+      if (items.length === original.length) return o
+      return { ...o, items }
+    })
+  }
+
   /** 导出当前页数据为 XLS */
   function handleExport() {
     runExport(() => {
       const thead = `<tr>${SUMMARY_HEADERS.map((h, i) => `<th style="width:${SUMMARY_COL_WIDTHS[i]}px">${h}</th>`).join('')}</tr>`
-      const tbody = buildSummaryTbody(displayOrders.value)
+      const tbody = buildSummaryTbody(filterSkusByKeyword(displayOrders.value))
       const statusLabel = confirmStatus.value === 'unconfirmed' ? '未确认' : '已确认'
       const title = `湖北订单汇总（${statusLabel}）`
       const html = `<div style="text-align:center;margin-bottom:20px;"><h2>${title}</h2></div><table><thead>${thead}</thead><tbody>${tbody}</tbody></table>`
@@ -323,7 +343,7 @@ export function useBeileOrders() {
       return
     }
     const thead = `<tr>${SUMMARY_HEADERS.map((h) => `<th>${escapeHtml(h)}</th>`).join('')}</tr>`
-    const tbody = buildSummaryTbody(targets)
+    const tbody = buildSummaryTbody(filterSkusByKeyword(targets))
     const printStyle = `
       body { font-family: SimSun, 宋体; padding: 20px; }
       table { width: 100%; border-collapse: collapse; }
