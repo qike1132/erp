@@ -116,14 +116,16 @@ export function useOutsourceProcess(detailDataProp: Ref<OutsourceOrderRow | null
 
   // ==================== 台账（只读汇总） ====================
 
-  /** 订单总数量（SKU 合计） */
+  /** 订单总数量（按 SKU 件数合计） */
   const totalQty = computed(() => processGroups.value.reduce((sum, g) => sum + (g.skuQty || 0), 0))
-  /** 已发货合计（累计） */
+  /** 已发货合计（按工序累计：同一 SKU 的多道工序各自发货，分别计入） */
   const shippedTotal = computed(() => processes.value.reduce((sum, p) => sum + (p.shipped_quantity || 0), 0))
-  /** 已收货合计（累计） */
+  /** 已收货合计（按工序累计） */
   const receivedTotal = computed(() => processes.value.reduce((sum, p) => sum + (p.received_quantity || 0), 0))
-  /** 未发货合计 */
-  const remainingTotal = computed(() => Math.max(0, totalQty.value - shippedTotal.value))
+  /** 未发货合计（按工序累计剩余，与「未发货清单」口径一致）
+   *  修复：此前用 totalQty - shippedTotal，把 SKU 件数与工序累计两种口径相减，
+   *  同一 SKU 有多道工序时会系统性偏小，甚至首道工序发满后即显示为 0。 */
+  const remainingTotal = computed(() => processes.value.reduce((sum, p) => sum + remainingShipQty(p), 0))
   /** 发货记录（流水，时间倒序） */
   const shipRecords = computed(() => flows.value.filter((f) => f.action === 'ship'))
   /** 收货记录（流水，时间倒序） */

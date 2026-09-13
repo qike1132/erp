@@ -39,7 +39,7 @@ async def list_process_types(
         pn = f'%{escape_like(product_name.strip())}%'
         conditions.append(Product.name.like(pn))
     if keyword:
-        kw = f'%{keyword.strip()}%'
+        kw = f'%{escape_like(keyword.strip())}%'
         conditions.append(OutsourceProcessType.process_type.like(kw))
     if is_active is not None:
         conditions.append(OutsourceProcessType.is_active == is_active)

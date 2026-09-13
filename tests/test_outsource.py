@@ -27,7 +27,7 @@ from fastapi_app.services.outsource_service import (
     sync_outsource_processes_for_order,
     update_process_type,
 )
-from fastapi_app.shared_models import OrderItem
+from fastapi_app.shared_models import OrderItem, OrderOutsourceProcess
 
 
 def make_preset(product_id=1, process_type='电绣', sort_order=0, is_active=True, pt_id=1):
@@ -362,7 +362,9 @@ class TestSyncOrderProcesses:
             await generate_order_processes(mock_async_db, 999)
 
     @pytest.mark.asyncio
-    @patch('fastapi_app.services.outsource_service.sync_outsource_processes_for_order')
+    # patch 目标必须是真实定义模块：generate_order_processes 在 _order_processes 命名空间内
+    # 调用 sync_outsource_processes_for_order，patch 兼容层 outsource_service 不会生效。
+    @patch('fastapi_app.services.outsource._order_processes.sync_outsource_processes_for_order')
     async def test_generate_order_success(self, mock_sync, mock_async_db):
         """生成工序 - 正常"""
         order = MagicMock()
@@ -464,7 +466,8 @@ class TestProcessStatusFlow:
         item = MagicMock()
         item.quantity = 100
         # db.get：进程返回 p，OrderItem 返回带数量的 item
-        async def fake_get(model, pk):
+        # （**_kwargs 兼容 with_for_update 等关键字参数）
+        async def fake_get(model, pk, **_kwargs):
             return item if model is OrderItem else p
         mock_async_db.get = AsyncMock(side_effect=fake_get)
 
@@ -690,10 +693,14 @@ class TestOrderListProgress:
 
 
 class TestKanban:
-    """进度看板聚合（兼容保留）"""
+    """进度看板聚合（兼容保留）
+
+    patch 目标必须是真实定义模块：get_kanban 在 _queries 命名空间内调用
+    list_outsource_orders，patch 兼容层 outsource_service 是静默失效的。
+    """
 
     @pytest.mark.asyncio
-    @patch('fastapi_app.services.outsource_service.list_outsource_orders')
+    @patch('fastapi_app.services.outsource._queries.list_outsource_orders')
     async def test_kanban_progress(self, mock_list, mock_async_db):
         """看板：进度计算与当前工序"""
         mock_list.return_value = {
@@ -728,7 +735,7 @@ class TestKanban:
         assert '进行中' in order['status_label']
 
     @pytest.mark.asyncio
-    @patch('fastapi_app.services.outsource_service.list_outsource_orders')
+    @patch('fastapi_app.services.outsource._queries.list_outsource_orders')
     async def test_kanban_no_processes(self, mock_list, mock_async_db):
         """看板：未配置工序的订单"""
         mock_list.return_value = {
@@ -756,7 +763,7 @@ class TestKanban:
         assert order['current_process'] is None
 
     @pytest.mark.asyncio
-    @patch('fastapi_app.services.outsource_service.list_outsource_orders')
+    @patch('fastapi_app.services.outsource._queries.list_outsource_orders')
     async def test_kanban_all_completed(self, mock_list, mock_async_db):
         """看板：全部完成"""
         mock_list.return_value = {
@@ -785,3 +792,95 @@ class TestKanban:
         assert order['progress'] == 100
         assert order['status_label'] == '外发完成'
         assert order['current_process'] is None
+
+
+class TestOutsourceRegressions:
+    """回归测试：对应本轮修复的缺陷（修复前失败，修复后通过）"""
+
+    @pytest.mark.asyncio
+    async def test_ship_locks_process_row(self, mock_async_db):
+        """并发保护：发货读取工序行时必须加行锁（FOR UPDATE）
+
+        数量是「读-改-写」，不加锁时并发发货会相互覆盖（丢失更新）。
+        """
+        p = make_order_process(pid=1)
+        mock_async_db.get = AsyncMock(return_value=p)
+
+        await ship_order_process(mock_async_db, 1, 10, 'admin')
+
+        first_call = mock_async_db.get.await_args_list[0]
+        assert first_call.args[0] is OrderOutsourceProcess
+        assert first_call.kwargs.get('with_for_update') is True
+
+    @pytest.mark.asyncio
+    async def test_receive_locks_process_row(self, mock_async_db):
+        """并发保护：收货同样需要行锁（同一工序可分批收货）"""
+        p = make_order_process(pid=1, status='shipped')
+        p.shipped_quantity = 50
+        mock_async_db.get = AsyncMock(return_value=p)
+
+        await receive_order_process(mock_async_db, 1, '贝乐')
+
+        first_call = mock_async_db.get.await_args_list[0]
+        assert first_call.args[0] is OrderOutsourceProcess
+        assert first_call.kwargs.get('with_for_update') is True
+
+    @pytest.mark.asyncio
+    @patch('fastapi_app.services.outsource._queries.list_outsource_orders')
+    async def test_kanban_excludes_stockin_ids(self, mock_list, mock_async_db):
+        """回归：备货记录的 id 是 StockIn.id，不得混入 order_id 查询
+
+        与 order.id 属两套主键空间，混入会把无关订单的工序挂到备货行上。
+        """
+        mock_list.return_value = {
+            'items': [
+                {'id': 7, 'order_no': 'PO-7', 'customer': '客户A', 'record_type': 'order', 'items': []},
+                {'id': 3, 'order_no': 'BH-1', 'customer': '客户B', 'record_type': 'stockin', 'items': []},
+            ],
+            'total': 2, 'page': 1, 'per_page': 20,
+        }
+        proc_result = MagicMock()
+        proc_result.scalars.return_value.all.return_value = []
+        mock_async_db.execute = AsyncMock(return_value=proc_result)
+
+        result = await get_kanban(mock_async_db)
+
+        stmt = mock_async_db.execute.await_args.args[0]
+        id_lists = [v for v in stmt.compile().params.values() if isinstance(v, list)]
+        assert id_lists == [[7]], f'工序查询不应包含备货 id，实际：{id_lists}'
+        stockin = next(r for r in result['items'] if r['record_type'] == 'stockin')
+        assert stockin['total_processes'] == 0
+        assert stockin['status_label'] == '未配置工序'
+
+    @pytest.mark.asyncio
+    @patch('fastapi_app.services.order_crud.get_beile_orders_with_stockins')
+    async def test_process_status_filter_scans_all_pages(self, mock_beile, mock_async_db):
+        """回归：状态筛选必须遍历全部页，不能只取首页 500 条
+
+        修复前固定 page=1&per_page=500，第 501 条起的命中订单被静默丢弃。
+        """
+        from fastapi_app.services.outsource_service import list_outsource_orders
+        mock_beile.side_effect = [
+            {
+                'items': [{'id': i, 'record_type': 'order', 'order_no': f'PO-{i}'} for i in range(1, 501)],
+                'total': 501, 'page': 1, 'per_page': 500,
+            },
+            {
+                'items': [{'id': 501, 'record_type': 'order', 'order_no': 'PO-501'}],
+                'total': 501, 'page': 2, 'per_page': 500,
+            },
+        ]
+        proc_result = MagicMock()
+        # 唯一一道「待发货」工序挂在第 501 条订单上（首页取不到）
+        proc_result.scalars.return_value.all.return_value = [
+            make_order_process(pid=1, order_id=501, process_type='裁剪', status='pending'),
+        ]
+        mock_async_db.execute = AsyncMock(return_value=proc_result)
+
+        result = await list_outsource_orders(
+            mock_async_db, page=1, per_page=50, process_status='pending',
+        )
+
+        assert mock_beile.call_count == 2, '状态筛选必须继续取第 2 页'
+        assert result['total'] == 1
+        assert [r['id'] for r in result['items']] == [501]

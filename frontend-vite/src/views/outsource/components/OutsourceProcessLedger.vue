@@ -3,19 +3,19 @@
     <!-- 汇总条 -->
     <div class="oso-ledger-stats">
       <div class="oso-stat-card">
-        <span class="oso-stat-label">总数量</span>
+        <span class="oso-stat-label">订单总数量（件）</span>
         <strong class="oso-stat-val">{{ totalQty }}</strong>
       </div>
       <div class="oso-stat-card oso-stat-card--ship">
-        <span class="oso-stat-label">已发货合计</span>
+        <span class="oso-stat-label">已发货（工序累计）</span>
         <strong class="oso-stat-val">{{ shippedTotal }}</strong>
       </div>
       <div class="oso-stat-card oso-stat-card--recv">
-        <span class="oso-stat-label">已收货合计</span>
+        <span class="oso-stat-label">已收货（工序累计）</span>
         <strong class="oso-stat-val">{{ receivedTotal }}</strong>
       </div>
       <div class="oso-stat-card oso-stat-card--remain">
-        <span class="oso-stat-label">未发货合计</span>
+        <span class="oso-stat-label">未发货（工序累计）</span>
         <strong class="oso-stat-val">{{ remainingTotal }}</strong>
       </div>
     </div>

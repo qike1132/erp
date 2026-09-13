@@ -173,7 +173,8 @@ async def update_order_process(db: AsyncSession, process_id: int, data: dict) ->
 
 async def ship_order_process(db: AsyncSession, process_id: int, shipped_quantity: int, username: str | None = None) -> dict:
     """发货（分批）：每次发货追加流水并累加数量，校验不超过剩余目标数量。"""
-    p = await db.get(OrderOutsourceProcess, process_id)
+    # with_for_update：数量是「读-改-写」，必须锁行，否则并发发货会相互覆盖（丢失更新）
+    p = await db.get(OrderOutsourceProcess, process_id, with_for_update=True)
     if not p:
         raise ValueError('外发工序不存在')
     if shipped_quantity <= 0:
@@ -204,7 +205,8 @@ async def ship_order_process(db: AsyncSession, process_id: int, shipped_quantity
 
 async def receive_order_process(db: AsyncSession, process_id: int, username: str | None = None, received_quantity: int | None = None) -> dict:
     """确认收货（分批）：每次收货追加流水并累加数量，缺省=剩余待收，不超过已发货数量。"""
-    p = await db.get(OrderOutsourceProcess, process_id)
+    # with_for_update：同发货，收货数量同样是「读-改-写」，需锁行避免并发覆盖
+    p = await db.get(OrderOutsourceProcess, process_id, with_for_update=True)
     if not p:
         raise ValueError('外发工序不存在')
     if _is_fully_received(p):

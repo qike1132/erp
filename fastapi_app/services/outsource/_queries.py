@@ -45,6 +45,31 @@ async def _process_target_quantity(db: AsyncSession, p: OrderOutsourceProcess) -
 
 # ==================== 湖北外发订单列表 ====================
 
+# 状态筛选需跨页统计，故按页遍历取回全量合并列表（单页上限 500 由 beile 查询约定）
+_SCAN_PAGE_SIZE = 500
+
+
+async def _load_all_beile_items(db: AsyncSession, customer: str | None) -> list[dict]:
+    """按页遍历取回全部订单+备货记录。
+
+    状态筛选是跨页统计，不能只取首页：此前固定 page=1&per_page=500，
+    第 500 条之后的记录被静默丢弃，这些订单在任何状态筛选下都查不到。
+    """
+    from fastapi_app.services.order_crud import get_beile_orders_with_stockins
+    items: list[dict] = []
+    page = 1
+    while True:
+        page_data = await get_beile_orders_with_stockins(
+            db, page=page, per_page=_SCAN_PAGE_SIZE, customer=customer, factory='湖北',
+        )
+        page_items = page_data['items']
+        items.extend(page_items)
+        # 短页说明已到末页；total 判定兜底防止短页提前终止
+        if len(page_items) < _SCAN_PAGE_SIZE or page * _SCAN_PAGE_SIZE >= page_data['total']:
+            return items
+        page += 1
+
+
 async def list_outsource_orders(
     db: AsyncSession, *, page: int = 1, per_page: int = 50,
     customer: str | None = None, process_status: str | None = None,
@@ -62,12 +87,10 @@ async def list_outsource_orders(
     """
     from fastapi_app.services.order_crud import get_beile_orders_with_stockins
     if process_status:
-        all_data = await get_beile_orders_with_stockins(
-            db, page=1, per_page=500, customer=customer, factory='湖北',
-        )
-        await _attach_progress_to_orders(db, all_data['items'])
+        all_items = await _load_all_beile_items(db, customer)
+        await _attach_progress_to_orders(db, all_items)
         filtered = [
-            row for row in all_data['items']
+            row for row in all_items
             if _matches_process_status(row, process_status)
         ]
         total = len(filtered)
@@ -136,7 +159,9 @@ async def get_kanban(
         db, page=page, per_page=per_page, customer=customer,
     )
     items: list[dict] = []
-    order_ids = [row['id'] for row in orders_data['items']]
+    # 仅订单记录参与工序统计：备货记录的 id 是 StockIn.id，与 order.id 属两套主键空间，
+    # 混入 IN 查询会把无关订单的工序挂到备货行上。
+    order_ids = [row['id'] for row in orders_data['items'] if row.get('record_type') == 'order']
 
     processes_by_order: dict[int, list[OrderOutsourceProcess]] = {}
     if order_ids:
