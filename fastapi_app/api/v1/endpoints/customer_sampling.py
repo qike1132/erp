@@ -21,7 +21,6 @@ from fastapi_app.schemas.customer_sampling import (
     ActionResponse,
     BatchPartCreateRequest,
     ChangeLogListResponse,
-    CompletedTableResponse,
     GroupedListResponse,
     PartCreateRequest,
     PartListResponse,
@@ -102,24 +101,6 @@ async def api_list_projects(
     return await svc.list_projects(
         db, page=page, per_page=per_page, keyword=keyword,
         pattern_maker_id=pattern_maker_id, status=status,
-    )
-
-
-# ==================== 2b. 已完成打样项目表格查询 ====================
-
-@router.get('/projects/completed-table', response_model=CompletedTableResponse)
-@_svc_error_guard('查询失败')
-async def api_get_completed_table(
-    page: int = Query(1, ge=1, description='页码'),
-    per_page: int = Query(20, ge=1, le=100, description='每页数量'),
-    keyword: str | None = Query(None, description='关键词(序列号/产品名)'),
-    pattern_maker_id: int | None = Query(None, description='版师ID筛选'),
-    db: AsyncSession = Depends(get_read_db),
-) -> dict[str, Any]:
-    """查询已完成打样项目表格数据（含部位数量统计与操作人，分页）"""
-    return await svc.get_completed_table(
-        db, keyword=keyword, pattern_maker_id=pattern_maker_id,
-        page=page, per_page=per_page,
     )
 
 
@@ -452,10 +433,11 @@ async def api_list_change_logs(
 async def api_get_parts_by_version(
     project_id: int,
     role_id: int | None = Query(None, description='角色ID筛选（未传时默认指向默认角色）'),
+    final_only: bool = Query(False, description='仅返回该角色最终版本行（打印场景，避免拉取全部历史版本）'),
     db: AsyncSession = Depends(get_read_db),
 ) -> dict[str, Any]:
     """获取指定角色所有版本的部位布料数据（跨版本二维表数据源）"""
-    return await svc.get_parts_by_version(db, project_id, role_id=role_id)
+    return await svc.get_parts_by_version(db, project_id, role_id=role_id, final_only=final_only)
 
 
 # ==================== 17. 角色列表 ====================

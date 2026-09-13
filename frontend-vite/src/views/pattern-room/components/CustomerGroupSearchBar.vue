@@ -25,9 +25,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
-
-const props = defineProps<{
+defineProps<{
+  /** 当前状态筛选（受控：由父级 statusFilter 传入，避免父子状态漂移） */
   statusFilter: string
 }>()
 
@@ -42,10 +41,7 @@ const STATUS_OPTIONS = [
   { value: 'cancelled', label: '已取消' },
 ] as const
 
-const statusFilter = ref<string>(props.statusFilter)
-
 function onStatusChange(value: string) {
-  statusFilter.value = value
   emit('status-change', value)
 }
 

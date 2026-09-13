@@ -30,6 +30,7 @@
               :has-data="groupHook.hasData.value"
               :selected-project-id="selectedProjectId"
               :can-manage="canManage"
+              :status-filter="statusFilter"
               :group-page="groupHook.currentPage.value"
               :group-pages="groupHook.pages.value"
               :group-total="groupHook.total.value"
@@ -67,6 +68,7 @@
               @add-role="onAddRole"
               @remove-role="onRemoveRole"
               @add-part="openCreatePartDialog"
+              @create-version="openCreateVersionDialog"
               @print="handlePrint"
             />
           </template>
@@ -258,6 +260,7 @@ const {
     editingPartId,
     editForm,
     openCreatePartDialog,
+    openCreateVersionDialog,
     onPartSubmitBatch,
     onSetFinalVersion,
     onCopyPartVersion,

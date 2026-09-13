@@ -101,13 +101,23 @@ const form = reactive({
 
 const roleNames = ref<string[]>([''])
 
+/** 编辑模式下是否移除了已有产品图片（提交时带 clear_image，后端清除旧图） */
+const imageRemoved = ref(false)
+
 const { previewUrl, setPreview, applyImageFile, removeImage } = useFormImageUpload(
-  (file) => emit('upload-image', file),
-  () => emit('remove-image'),
+  (file) => {
+    imageRemoved.value = false
+    emit('upload-image', file)
+  },
+  () => {
+    imageRemoved.value = true
+    emit('remove-image')
+  },
 )
 
 watch(() => props.visible, (val) => {
   if (val) {
+    imageRemoved.value = false
     if (props.project) {
       form.product_name = props.project.product_name ?? ''
       form.remark = props.project.remark ?? ''
@@ -126,7 +136,9 @@ function handleSubmit() {
     const data: ProjectUpdateRequest = {
       product_name: form.product_name || null,
       pattern_maker_id: props.patternMakerId,
-      remark: form.remark || null,
+      // 空串即"清空备注"（后端 None 语义为不修改）
+      remark: form.remark,
+      clear_image: imageRemoved.value,
       version: props.project!.version,
     }
     emit('submit-update', data)

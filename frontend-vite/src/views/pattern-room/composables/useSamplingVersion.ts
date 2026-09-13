@@ -13,21 +13,8 @@ import type {
   ActionResponse,
 } from '@/api/patternRoom'
 import { toast } from '@/composables/useToast'
-import { getErrorMessage, getErrorStatus } from '@/types/errors'
-
-/**
- * 根据 HTTP 状态码解析版本操作的错误消息
- * - 409 乐观锁冲突：数据已被他人更新，需刷新重试
- * - 404 资源不存在：可能已被删除
- * - 400 业务错误：使用后端返回的 detail
- */
-function resolveVersionErrorMessage(err: unknown, fallback: string): string {
-  const status = getErrorStatus(err)
-  if (status === 409) return '数据已被他人更新，请刷新后重试'
-  if (status === 404) return '数据不存在，可能已被删除'
-  if (status === 400) return getErrorMessage(err, '操作失败，请检查输入')
-  return getErrorMessage(err, fallback)
-}
+import { getErrorStatus } from '@/types/errors'
+import { resolveSamplingErrorMessage } from './useSamplingErrors'
 
 export function useSamplingVersion(
   projectId: Ref<number | null>,
@@ -66,7 +53,7 @@ export function useSamplingVersion(
     } catch (e) {
       if (reqId !== _requestId) return
       console.error('[useSamplingVersion] 查询版本列表失败:', e)
-      const message = resolveVersionErrorMessage(e, '加载版本列表失败')
+      const message = resolveSamplingErrorMessage(e, '加载版本列表失败')
       error.value = message
       toast.error(message)
       versions.value = []
@@ -94,7 +81,7 @@ export function useSamplingVersion(
     } catch (e) {
       if (reqId !== _requestId) return null
       console.error('[useSamplingVersion] 查询版本详情失败:', e)
-      const message = resolveVersionErrorMessage(e, '加载版本详情失败')
+      const message = resolveSamplingErrorMessage(e, '加载版本详情失败')
       error.value = message
       toast.error(message)
       versionDetail.value = null
@@ -129,7 +116,7 @@ export function useSamplingVersion(
       return res
     } catch (e) {
       console.error('[useSamplingVersion] 创建新版本失败:', e)
-      const message = resolveVersionErrorMessage(e, '创建新版本失败')
+      const message = resolveSamplingErrorMessage(e, '创建新版本失败')
       error.value = message
       toast.error(message)
       // 乐观锁冲突：自动刷新版本列表，让用户基于最新数据重试

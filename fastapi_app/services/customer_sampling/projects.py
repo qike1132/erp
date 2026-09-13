@@ -22,13 +22,6 @@ from fastapi_app.shared_models import (
 
 logger = logging.getLogger(__name__)
 
-# 版本快照中参与 diff 计算的布料业务字段
-_SNAPSHOT_FIELDS = (
-    'part_name', 'sort_order', 'fabric_name', 'fabric_spec',
-    'supplier_id', 'supplier_name', 'contact_person', 'contact_phone',
-    'unit_price', 'delivery_days', 'remark',
-)
-
 from .common import (
     _ensure_part_name_unique,
     _ensure_project_exists,
@@ -333,7 +326,6 @@ async def get_project_detail(db: AsyncSession, project_id: int) -> dict:
         select(CustomerSamplingProject)
         .options(
             selectinload(CustomerSamplingProject.parts).selectinload(CustomerSamplingPart.supplier),
-            selectinload(CustomerSamplingProject.fabric_versions),
             selectinload(CustomerSamplingProject.creator),
             selectinload(CustomerSamplingProject.roles),
         )
@@ -345,10 +337,22 @@ async def get_project_detail(db: AsyncSession, project_id: int) -> dict:
 
     image_info = await _get_product_image_urls(db, project.product_image_file_id)
 
+    # 版本列表仅取展示列（id/version_no/created_at/reason），
+    # 避免为三个展示字段加载全部版本的 snapshot_data/change_summary JSON
+    versions_result = await db.execute(
+        select(
+            CustomerSamplingFabricVersion.id,
+            CustomerSamplingFabricVersion.version_no,
+            CustomerSamplingFabricVersion.created_at,
+            CustomerSamplingFabricVersion.reason,
+        )
+        .where(CustomerSamplingFabricVersion.project_id == project_id)
+        .order_by(CustomerSamplingFabricVersion.version_no)
+    )
+    version_rows = versions_result.all()
+
     # 部位按 sort_order 升序（relationship 已配置 order_by，但显式排序更安全）
     parts_sorted = sorted(project.parts or [], key=lambda p: p.sort_order)
-    # 版本按 version_no 升序
-    versions_sorted = sorted(project.fabric_versions or [], key=lambda v: v.version_no)
     # 角色按 sort_order 升序
     roles_sorted = sorted(project.roles or [], key=lambda r: r.sort_order)
 
@@ -372,12 +376,12 @@ async def get_project_detail(db: AsyncSession, project_id: int) -> dict:
         'parts': [p.to_dict() for p in parts_sorted],
         'versions': [
             {
-                'id': v.id,
-                'version_no': v.version_no,
-                'created_at': v.created_at.strftime('%Y-%m-%d %H:%M:%S') if v.created_at else '',
-                'reason': v.reason or '',
+                'id': vid,
+                'version_no': vno,
+                'created_at': created_at.strftime('%Y-%m-%d %H:%M:%S') if created_at else '',
+                'reason': reason or '',
             }
-            for v in versions_sorted
+            for vid, vno, created_at, reason in version_rows
         ],
         'roles': [r.to_dict() for r in roles_sorted],
     }

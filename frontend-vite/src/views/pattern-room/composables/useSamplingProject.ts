@@ -13,21 +13,8 @@ import type {
   ActionResponse,
 } from '@/api/patternRoom'
 import { toast } from '@/composables/useToast'
-import { getErrorMessage, getErrorStatus } from '@/types/errors'
-
-/**
- * 根据 HTTP 状态码解析打样项目操作的错误消息
- * - 409 乐观锁冲突：数据已被他人更新，需刷新重试
- * - 404 资源不存在：可能已被删除
- * - 400 业务错误：使用后端返回的 detail
- */
-function resolveProjectErrorMessage(err: unknown, fallback: string): string {
-  const status = getErrorStatus(err)
-  if (status === 409) return '数据已被他人更新，请刷新后重试'
-  if (status === 404) return '数据不存在，可能已被删除'
-  if (status === 400) return getErrorMessage(err, '操作失败，请检查输入')
-  return getErrorMessage(err, fallback)
-}
+import { getErrorStatus } from '@/types/errors'
+import { resolveSamplingErrorMessage } from './useSamplingErrors'
 
 export function useSamplingProject() {
   /** 当前选中项目详情 */
@@ -57,7 +44,7 @@ export function useSamplingProject() {
       return res
     } catch (e) {
       console.error('[useSamplingProject] 查询详情失败:', e)
-      const message = resolveProjectErrorMessage(e, '加载打样详情失败')
+      const message = resolveSamplingErrorMessage(e, '加载打样详情失败')
       if (seq === detailFetchSeq) {
         error.value = message
         currentProject.value = null
@@ -83,7 +70,7 @@ export function useSamplingProject() {
       return res
     } catch (e) {
       console.error('[useSamplingProject] 新增打样项目失败:', e)
-      const message = resolveProjectErrorMessage(e, '新增打样项目失败')
+      const message = resolveSamplingErrorMessage(e, '新增打样项目失败')
       error.value = message
       toast.error(message)
       return null
@@ -104,7 +91,7 @@ export function useSamplingProject() {
       return res
     } catch (e) {
       console.error('[useSamplingProject] 编辑打样项目失败:', e)
-      const message = resolveProjectErrorMessage(e, '编辑打样项目失败')
+      const message = resolveSamplingErrorMessage(e, '编辑打样项目失败')
       error.value = message
       toast.error(message)
       // 乐观锁冲突：自动刷新详情，让用户基于最新数据重试
@@ -128,7 +115,7 @@ export function useSamplingProject() {
       return res
     } catch (e) {
       console.error('[useSamplingProject] 删除打样项目失败:', e)
-      const message = resolveProjectErrorMessage(e, '删除打样项目失败')
+      const message = resolveSamplingErrorMessage(e, '删除打样项目失败')
       error.value = message
       toast.error(message)
       return null
@@ -149,7 +136,7 @@ export function useSamplingProject() {
       return res
     } catch (e) {
       console.error('[useSamplingProject] 上传产品图片失败:', e)
-      const message = resolveProjectErrorMessage(e, '图片上传失败')
+      const message = resolveSamplingErrorMessage(e, '图片上传失败')
       error.value = message
       toast.error(message)
       return null

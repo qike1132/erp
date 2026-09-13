@@ -12,23 +12,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import noload, selectinload
 
 from fastapi_app.core.exceptions import BusinessError, ConflictError, NotFoundError
-from fastapi_app.services.numbering import generate_customer_sampling_number
 from fastapi_app.shared_models import (
     CustomerSamplingChangeLog,
     CustomerSamplingFabricVersion,
     CustomerSamplingPart,
     CustomerSamplingProject,
     CustomerSamplingRole,
+    Supplier,
 )
 
 logger = logging.getLogger(__name__)
-
-# 版本快照中参与 diff 计算的布料业务字段
-_SNAPSHOT_FIELDS = (
-    'part_name', 'sort_order', 'fabric_name', 'fabric_spec',
-    'supplier_id', 'supplier_name', 'contact_person', 'contact_phone',
-    'unit_price', 'delivery_days', 'remark',
-)
 
 from .common import (
     _ensure_part_name_unique,
@@ -278,7 +271,6 @@ async def batch_create_parts(
     supplier_ids = {item.get('supplier_id') for item in items if item.get('supplier_id') is not None}
     supplier_name_map: dict[int, str] = {}
     if supplier_ids:
-        from fastapi_app.shared_models import Supplier
         rows = (await db.execute(
             select(Supplier.id, Supplier.name).where(Supplier.id.in_(supplier_ids))
         )).all()

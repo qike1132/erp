@@ -11,7 +11,7 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi_app.core.exceptions import BusinessError
+from fastapi_app.core.exceptions import BusinessError, NotFoundError
 from fastapi_app.shared_models import PatternMaker
 
 logger = logging.getLogger(__name__)
@@ -59,7 +59,6 @@ async def delete_pattern_maker(db: AsyncSession, maker_id: int) -> dict:
     )
     maker = result.scalar_one_or_none()
     if maker is None:
-        from fastapi_app.core.exceptions import NotFoundError
         raise NotFoundError('版师不存在')
 
     name = maker.name

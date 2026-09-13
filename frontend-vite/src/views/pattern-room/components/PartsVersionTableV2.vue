@@ -38,8 +38,10 @@
               :edit-form="editForm"
               :can-manage="canManage"
               :selected-version="selectedVersion"
+              :final-version="finalVersion"
               @toggle-expand="toggleExpand"
               @toggle-version="toggleVersion"
+              @set-final-version="$emit('set-final-version', $event)"
               @start-edit="$emit('start-edit', $event)"
               @save-edit="$emit('save-edit', $event)"
               @cancel-edit="$emit('cancel-edit')"
@@ -74,7 +76,7 @@ const props = defineProps<{
   editForm: PartEditData
 }>()
 
-const emit = defineEmits<{
+defineEmits<{
   'set-final-version': [versionNo: string]
   'copy-version': [part: PartDetail]
   'delete-version': [part: PartDetail]
@@ -93,7 +95,6 @@ const { selectedVersion, toggleVersion, toggleExpand, groupedRows } = usePartsVe
   finalVersionRef,
   projectIdRef,
   currentRoleIdRef,
-  (v) => emit('set-final-version', v),
 )
 </script>
 

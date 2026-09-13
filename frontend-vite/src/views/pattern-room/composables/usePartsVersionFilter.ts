@@ -15,7 +15,6 @@ export function usePartsVersionFilter(
   finalVersion: Ref<string>,
   projectId: Ref<number | null | undefined>,
   currentRoleId: Ref<number | null>,
-  onSetFinalVersion: (versionNo: string) => void,
 ) {
   const selectedVersion = ref<Record<string, string | null>>({})
   const expandedParts = ref<Set<string>>(new Set())
@@ -54,7 +53,6 @@ export function usePartsVersionFilter(
     } else {
       selectedVersion.value = { ...selectedVersion.value, [partName]: versionNo }
       expandedParts.value.delete(partName)
-      onSetFinalVersion(versionNo)
     }
   }
 

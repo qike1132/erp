@@ -1,7 +1,7 @@
 <template>
   <div class="cgl-container">
     <CustomerGroupSearchBar
-      status-filter="in_progress"
+      :status-filter="statusFilter"
       @search="$emit('search', $event)"
       @status-change="$emit('status-change', $event)"
     />
@@ -69,6 +69,8 @@ const props = defineProps<{
   hasData: boolean
   selectedProjectId: number | null
   canManage: boolean
+  /** 当前状态筛选（透传给搜索栏做受控高亮） */
+  statusFilter: string
   groupPage: number
   groupPages: number
   groupTotal: number

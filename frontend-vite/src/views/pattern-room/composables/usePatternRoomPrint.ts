@@ -49,10 +49,11 @@ export function usePatternRoomPrint(options: UsePatternRoomPrintOptions) {
     const projectId = selectedProjectId.value
     const allRoles = roles.value
     printRoles.value = allRoles
-    // 后端不支持不传 role_id 返回全部角色，需逐个角色加载（并行请求，避免多角色串行等待）
+    // 后端不支持不传 role_id 返回全部角色，需逐个角色加载（并行请求，避免多角色串行等待）。
+    // finalOnly=true：打印只用各角色最终版本行，避免拉取全部历史版本快照
     try {
       const results = await Promise.all(
-        allRoles.map((role) => patternRoomApi.getPartsByVersion(projectId, role.id)),
+        allRoles.map((role) => patternRoomApi.getPartsByVersion(projectId, role.id, true)),
       )
       const allParts: PartDetail[] = []
       results.forEach((res, idx) => {
@@ -65,8 +66,9 @@ export function usePatternRoomPrint(options: UsePatternRoomPrintOptions) {
         }
       })
       printParts.value = allParts
-    } catch {
+    } catch (e) {
       // 降级：使用当前角色的数据
+      console.warn('[usePatternRoomPrint] 逐角色加载打印数据失败，降级为当前角色数据:', e)
       printParts.value = partsByVersion.value
     }
     // 打印前刷新打印时间

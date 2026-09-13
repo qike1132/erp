@@ -1,47 +1,31 @@
-"""customer_sampling 子包 - 按客户分类打样信息模块
-
-职责拆分（由 customer_sampling_service.py 1619 行上帝服务拆分而来）：
-- grouping: 按客户分组聚合查询
-- crud: 打样项目与部位 CRUD
-- version_diff: 版本创建与字段级 diff
-- upload: 产品图片上传
-- roles: 角色管理
-- common: 公共工具函数
+"""分组聚合查询：按版师分组的打样项目列表、分组分页与项目摘要构建。
 
 对应需求规格：.codeartsdoer/specs/customer_sampling/spec.md
 """
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import noload, selectinload
 
 from fastapi_app.shared_models import (
-    CustomerSamplingChangeLog,
-    CustomerSamplingPart,
     CustomerSamplingProject,
 )
 
 logger = logging.getLogger(__name__)
-
-# 版本快照中参与 diff 计算的布料业务字段
-_SNAPSHOT_FIELDS = (
-    'part_name', 'sort_order', 'fabric_name', 'fabric_spec',
-    'supplier_id', 'supplier_name', 'contact_person', 'contact_phone',
-    'unit_price', 'delivery_days', 'remark',
-)
 
 _GROUPED_LIST_MAX_PROJECTS = 5000
 
 
 from .upload import _batch_get_image_urls
 
-# 列表查询统一 noload 选项：抑制 CustomerSamplingProject 模型默认 lazy='selectin'
-# 的级联加载（parts/roles/fabric_versions/change_logs/product_image/creator，
-# 含 Role→parts/fabric_versions 二级链）。列表页只输出摘要字段，pattern_maker
-# 单独 selectinload（分组与名称兜底需要）。
+# 列表查询统一 noload 选项：抑制 CustomerSamplingProject 模型 relationship 的
+# 惰性加载（parts/roles/fabric_versions/change_logs/product_image/creator，
+# 含 Role→parts/fabric_versions 二级链；async 会话下未预加载即访问会抛错）。
+# 列表页只输出摘要字段，pattern_maker 单独 selectinload（分组与名称兜底需要）。
 _LIST_NOLOAD = (
     noload(CustomerSamplingProject.parts),
     noload(CustomerSamplingProject.roles),
@@ -81,11 +65,12 @@ async def get_grouped_list(
     # 构建查询条件
     conditions = []
     if keyword:
-        like = f'%{keyword}%'
+        # 关键词作为绑定参数，通配符由 SQL 侧 concat 拼接（不在 Python 侧拼 SQL 片段）
+        kw_pattern = func.concat('%', keyword, '%')
         conditions.append(
             or_(
-                CustomerSamplingProject.sequence_no.ilike(like),
-                CustomerSamplingProject.product_name.ilike(like),
+                CustomerSamplingProject.sequence_no.ilike(kw_pattern),
+                CustomerSamplingProject.product_name.ilike(kw_pattern),
             )
         )
     if pattern_maker_id is not None:
@@ -99,78 +84,96 @@ async def get_grouped_list(
         count_query = count_query.where(cond)
     total_projects = (await db.execute(count_query)).scalar_one()
 
-    # 一次性拉取全部匹配项目（含版师关联，避免 N+1），按 updated_at 倒序；
-    # 上限防护截断，避免极端数据量下全量序列化。
-    query = select(CustomerSamplingProject).options(
-        selectinload(CustomerSamplingProject.pattern_maker),
-        *_LIST_NOLOAD,
+    # 两段式查询：先仅取分组/排序所需轻量列（id/pattern_maker_id/updated_at）做全量分组
+    # 与分组级分页，再只对当前页分组的项目取完整明细（避免全量实例化 ORM + 全量图片查询）
+    light_result = await db.execute(
+        select(
+            CustomerSamplingProject.id,
+            CustomerSamplingProject.pattern_maker_id,
+            CustomerSamplingProject.updated_at,
+        )
+        .where(*conditions)
+        .order_by(CustomerSamplingProject.updated_at.desc())
+        .limit(_GROUPED_LIST_MAX_PROJECTS)
     )
-    for cond in conditions:
-        query = query.where(cond)
-    query = query.order_by(CustomerSamplingProject.updated_at.desc()).limit(_GROUPED_LIST_MAX_PROJECTS)
-
-    result = await db.execute(query)
-    projects = result.scalars().all()
+    light_rows = light_result.all()
 
     # 命中上限截断时告警，便于定位分组统计与项目总数不一致的问题
-    if len(projects) < total_projects:
+    if len(light_rows) < total_projects:
         logger.warning(
             "Grouped list truncated: total_projects=%s, loaded=%s, max_limit=%s",
-            total_projects, len(projects), _GROUPED_LIST_MAX_PROJECTS,
+            total_projects, len(light_rows), _GROUPED_LIST_MAX_PROJECTS,
         )
 
-    # 批量预取产品图片 URL（单次 SQL，消除逐项目查询的 N+1）
-    image_url_map = await _batch_get_image_urls(
-        db, [p.product_image_file_id for p in projects if p.product_image_file_id]
-    )
-    summary_map = {p.id: _project_to_summary(p, image_url_map) for p in projects}
+    # 应用层按 pattern_maker_id 全量分组（同一版师的项目不再被分页拆散），
+    # 组内保持 updated_at 倒序（轻量查询的返回顺序）
+    groups_map: dict[int | None, list[int]] = {}
+    latest_map: dict[int | None, datetime] = {}
+    for pid, pmid, updated_at in light_rows:
+        groups_map.setdefault(pmid, []).append(pid)
+        prev = latest_map.get(pmid)
+        if prev is None or (updated_at is not None and updated_at > prev):
+            latest_map[pmid] = updated_at
 
-    # 应用层按 pattern_maker_id 全量分组（同一版师的项目不再被分页拆散）
-    groups_map: dict[int | None, list[CustomerSamplingProject]] = {}
-    for p in projects:
-        key = p.pattern_maker_id
-        groups_map.setdefault(key, []).append(p)
+    # 分组间按组内最新更新时间倒序（datetime 比较；"未分类"分组最后单独追加）
+    all_groups_meta = [
+        {'pattern_maker_id': pmid, 'latest': latest_map[pmid], 'project_ids': pid_list}
+        for pmid, pid_list in groups_map.items()
+        if pmid is not None
+    ]
+    all_groups_meta.sort(key=lambda g: g['latest'], reverse=True)
 
-    # 构建全部分组（"未分类"最后处理）
-    all_groups = []
-    for pmid, proj_list in groups_map.items():
-        if pmid is None:
-            # "未分类"分组最后处理
-            continue
-        # 获取版师姓名（优先用冗余字段，降级用关联查询）
-        pattern_maker_name = proj_list[0].pattern_maker_name or ''
-        if not pattern_maker_name and proj_list[0].pattern_maker:
-            pattern_maker_name = proj_list[0].pattern_maker.name
-        latest_update = max(p.updated_at for p in proj_list)
-        all_groups.append({
-            'pattern_maker_id': pmid,
-            'pattern_maker_name': pattern_maker_name or '未命名版师',
-            'project_count': len(proj_list),
-            'latest_update_time': latest_update.strftime('%Y-%m-%d %H:%M:%S') if latest_update else '',
-            'projects': [summary_map[p.id] for p in proj_list],
-        })
-
-    # 分组间按组内最新更新时间倒序
-    all_groups.sort(key=lambda g: g['latest_update_time'], reverse=True)
-
-    # "未分类"分组始终最后
-    unclassified = groups_map.get(None, [])
-    if unclassified:
-        latest_update = max(p.updated_at for p in unclassified)
-        all_groups.append({
+    unclassified_ids = groups_map.get(None, [])
+    if unclassified_ids:
+        all_groups_meta.append({
             'pattern_maker_id': None,
-            'pattern_maker_name': '未分类',
-            'project_count': len(unclassified),
-            'latest_update_time': latest_update.strftime('%Y-%m-%d %H:%M:%S') if latest_update else '',
-            'projects': [summary_map[p.id] for p in unclassified],
+            'latest': latest_map.get(None),
+            'project_ids': unclassified_ids,
         })
 
     # 分组级分页：分页单位是"版师分组"而非项目，保证每个分组完整、不跨页拆散
-    total_groups = len(all_groups)
+    total_groups = len(all_groups_meta)
     pages = max(1, (total_groups + per_page - 1) // per_page)
     page = max(1, min(page, pages))
     start = (page - 1) * per_page
-    groups = all_groups[start:start + per_page]
+    page_meta = all_groups_meta[start:start + per_page]
+
+    # 仅对当前页分组的项目取完整明细（含版师关联），构建摘要与图片 URL
+    page_ids: list[int] = []
+    for meta in page_meta:
+        page_ids.extend(meta['project_ids'])
+    by_id: dict[int, CustomerSamplingProject] = {}
+    if page_ids:
+        heavy_conditions = [CustomerSamplingProject.id.in_(page_ids)]
+        heavy_result = await db.execute(
+            select(CustomerSamplingProject)
+            .options(selectinload(CustomerSamplingProject.pattern_maker), *_LIST_NOLOAD)
+            .where(*heavy_conditions)
+        )
+        for p in heavy_result.scalars().all():
+            by_id[p.id] = p
+
+    image_url_map = await _batch_get_image_urls(
+        db, [p.product_image_file_id for p in by_id.values() if p.product_image_file_id]
+    )
+    summary_map = {pid: _project_to_summary(p, image_url_map) for pid, p in by_id.items()}
+
+    groups = []
+    for meta in page_meta:
+        proj_list = [by_id[pid] for pid in meta['project_ids'] if pid in by_id]
+        first = proj_list[0] if proj_list else None
+        # 获取版师姓名（优先用冗余字段，降级用关联查询）
+        pattern_maker_name = (first.pattern_maker_name or '') if first else ''
+        if not pattern_maker_name and first is not None and first.pattern_maker:
+            pattern_maker_name = first.pattern_maker.name
+        latest = meta['latest']
+        groups.append({
+            'pattern_maker_id': meta['pattern_maker_id'],
+            'pattern_maker_name': pattern_maker_name or ('未分类' if meta['pattern_maker_id'] is None else '未命名版师'),
+            'project_count': len(proj_list),
+            'latest_update_time': latest.strftime('%Y-%m-%d %H:%M:%S') if latest else '',
+            'projects': [summary_map[pid] for pid in meta['project_ids'] if pid in summary_map],
+        })
 
     return {
         'success': True,
@@ -200,119 +203,7 @@ def _project_to_summary(project: CustomerSamplingProject, image_url_map: dict[in
         'status': project.status,
         'completed_at': project.completed_at.strftime('%Y-%m-%d %H:%M:%S') if project.completed_at else None,
         # 列表查询已 noload(parts)（访问会触发 async lazy load 报错），恒为 0；
-        # 详情页 parts 数量由 get_project_detail / get_completed_table 单独统计
+        # 详情页 parts 数量由 get_project_detail 单独统计
         'parts_count': 0,
         'updated_at': project.updated_at.strftime('%Y-%m-%d %H:%M:%S') if project.updated_at else '',
-    }
-
-
-
-async def get_completed_table(
-    db: AsyncSession,
-    *,
-    keyword: str | None = None,
-    pattern_maker_id: int | None = None,
-    page: int = 1,
-    per_page: int = 20,
-) -> dict:
-    """查询已完成打样项目表格数据（含部位数量统计与操作人）
-
-    返回按 updated_at 倒序的已完成项目列表（分页），每行含：
-    - 项目基本信息（id, sequence_no, product_name, pattern_maker_name）
-    - completed_at（完成时间）
-    - parts_count（该项目所有角色的部位总数）
-    - operator_name（最近一次标记为完成的操作人）
-
-    Args:
-        keyword: 关键词（序列号/产品名 ILIKE）
-        pattern_maker_id: 版师 ID 筛选
-        page: 页码（从 1 开始）
-        per_page: 每页条数
-    """
-    # 构建查询条件
-    conditions = [CustomerSamplingProject.status == 'completed']
-    if keyword:
-        like = f'%{keyword}%'
-        conditions.append(
-            or_(
-                CustomerSamplingProject.sequence_no.ilike(like),
-                CustomerSamplingProject.product_name.ilike(like),
-            )
-        )
-    if pattern_maker_id is not None:
-        conditions.append(CustomerSamplingProject.pattern_maker_id == pattern_maker_id)
-
-    # 统计总条数（用于分页）
-    count_query = select(func.count()).select_from(CustomerSamplingProject).where(*conditions)
-    total = (await db.execute(count_query)).scalar_one()
-    if total == 0:
-        return {'success': True, 'items': [], 'total': 0, 'pages': 0, 'current_page': page}
-
-    # 查询项目（含版师关联），按页码分页
-    # 同 get_grouped_list：noload 抑制无关 relationship 的级联 selectin 加载
-    query = (
-        select(CustomerSamplingProject)
-        .options(selectinload(CustomerSamplingProject.pattern_maker), *_LIST_NOLOAD)
-        .where(*conditions)
-        .order_by(CustomerSamplingProject.updated_at.desc())
-        .offset((page - 1) * per_page)
-        .limit(per_page)
-    )
-    result = await db.execute(query)
-    projects = result.scalars().all()
-    pages = (total + per_page - 1) // per_page
-
-    # 统计部位数量：按 project_id 聚合 count
-    project_ids = [p.id for p in projects]
-    parts_count_query = (
-        select(CustomerSamplingPart.project_id, func.count().label('cnt'))
-        .where(CustomerSamplingPart.project_id.in_(project_ids))
-        .group_by(CustomerSamplingPart.project_id)
-    )
-    parts_result = await db.execute(parts_count_query)
-    parts_count_map = {row.project_id: row.cnt for row in parts_result}
-
-    # 查询操作人：取每个项目最近一次状态更新（update_project_status）的操作人
-    # 已完成项目最近一次状态更新通常即标记完成操作，符合报表口径
-    # DISTINCT ON 每项目仅返回最新一条，避免全量拉取历史状态日志
-    operator_query = (
-        select(CustomerSamplingChangeLog.project_id, CustomerSamplingChangeLog.operator_name)
-        .where(
-            CustomerSamplingChangeLog.project_id.in_(project_ids),
-            CustomerSamplingChangeLog.action == 'update_project_status',
-        )
-        .distinct(CustomerSamplingChangeLog.project_id)
-        .order_by(
-            CustomerSamplingChangeLog.project_id,
-            CustomerSamplingChangeLog.created_at.desc(),
-        )
-    )
-    op_result = await db.execute(operator_query)
-    operator_map: dict[int, str] = {}
-    for row in op_result:
-        if row.project_id not in operator_map:
-            operator_map[row.project_id] = row.operator_name or ''
-
-    # 构建响应
-    items = []
-    for p in projects:
-        pattern_maker_name = (p.pattern_maker_name or
-                              (p.pattern_maker.name if p.pattern_maker else ''))
-        items.append({
-            'id': p.id,
-            'sequence_no': p.sequence_no,
-            'product_name': p.product_name,
-            'pattern_maker_name': pattern_maker_name,
-            'completed_at': p.completed_at.strftime('%Y-%m-%d %H:%M:%S') if p.completed_at else None,
-            'parts_count': parts_count_map.get(p.id, 0),
-            'operator_name': operator_map.get(p.id, ''),
-            'status': 'completed',
-        })
-
-    return {
-        'success': True,
-        'items': items,
-        'total': total,
-        'pages': pages,
-        'current_page': page,
     }

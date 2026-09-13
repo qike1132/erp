@@ -248,27 +248,6 @@ export interface ProjectListResponse {
   current_page: number
 }
 
-/** 已完成打样项目表格行 */
-export interface CompletedTableRow {
-  id: number
-  sequence_no: string
-  product_name: string
-  pattern_maker_name: string
-  completed_at: string | null
-  parts_count: number
-  operator_name: string
-  status: string
-}
-
-/** 已完成打样项目表格查询响应 */
-export interface CompletedTableResponse {
-  success: boolean
-  items: CompletedTableRow[]
-  total: number
-  pages: number
-  current_page: number
-}
-
 /** 打样项目详情响应 */
 export interface ProjectDetailResponse {
   id: number
@@ -310,6 +289,8 @@ export interface ProjectUpdateRequest {
   pattern_maker_id?: number | null
   remark?: string | null
   product_image_file_id?: number | null
+  /** 移除已有产品图片（后端清除 product_image_file_id） */
+  clear_image?: boolean
   current_version?: string | null
   version: number
 }
@@ -394,10 +375,6 @@ export const patternRoomApi = {
   listProjects: (params?: ProjectListParams) =>
     get<ProjectListResponse>('/pattern-room/projects', params as Record<string, unknown>),
 
-  // ---------- 2b. 已完成打样项目表格查询 ----------
-  getCompletedTable: (params?: { keyword?: string; pattern_maker_id?: number; page?: number; per_page?: number }) =>
-    get<CompletedTableResponse>('/pattern-room/projects/completed-table', params as Record<string, unknown>),
-
   // ---------- 3. 打样项目详情 ----------
   getProject: (id: number) =>
     get<ProjectDetailResponse>(`/pattern-room/projects/${id}`),
@@ -464,10 +441,15 @@ export const patternRoomApi = {
     ),
 
   // ---------- 16. 部位跨版本汇总 ----------
-  getPartsByVersion: (projectId: number, roleId?: number) =>
+  getPartsByVersion: (projectId: number, roleId?: number, finalOnly?: boolean) =>
     get<PartsByVersionResponse>(
       `/pattern-room/projects/${projectId}/parts-by-version`,
-      roleId != null ? { role_id: roleId } : undefined,
+      (roleId != null || finalOnly != null
+        ? {
+            ...(roleId != null ? { role_id: roleId } : {}),
+            ...(finalOnly ? { final_only: true } : {}),
+          }
+        : undefined) as Record<string, unknown>,
     ),
 
   // ---------- 17. 批量新增部位 ----------

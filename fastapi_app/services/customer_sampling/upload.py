@@ -1,12 +1,4 @@
-"""customer_sampling 子包 - 按客户分类打样信息模块
-
-职责拆分（由 customer_sampling_service.py 1619 行上帝服务拆分而来）：
-- grouping: 按客户分组聚合查询
-- crud: 打样项目与部位 CRUD
-- version_diff: 版本创建与字段级 diff
-- upload: 产品图片上传
-- roles: 角色管理
-- common: 公共工具函数
+"""产品图片上传：内容校验（魔数/解码/大小）、存储保存、URL 批量解析与旧图清理。
 
 对应需求规格：.codeartsdoer/specs/customer_sampling/spec.md
 """
@@ -25,13 +17,6 @@ from fastapi_app.shared_models import (
 
 logger = logging.getLogger(__name__)
 
-# 版本快照中参与 diff 计算的布料业务字段
-_SNAPSHOT_FIELDS = (
-    'part_name', 'sort_order', 'fabric_name', 'fabric_spec',
-    'supplier_id', 'supplier_name', 'contact_person', 'contact_phone',
-    'unit_price', 'delivery_days', 'remark',
-)
-
 from .common import _ensure_project_exists, _get_user_name, _write_change_log
 
 # 产品图片大小上限（与 storage_service 安全策略一致）
@@ -39,6 +24,14 @@ _IMAGE_MAX_SIZE = 10 * 1024 * 1024
 
 # 允许的图片格式（PIL format 名称 → 声明 content-type 映射）
 _IMAGE_FORMATS = {'JPEG', 'PNG', 'WEBP'}
+
+# 解压炸弹防护阈值：受信用户上传，放行大尺寸扫描件（与 storage_service 数值一致）。
+# PIL 该配置为进程级全局，模块加载时设置一次，避免每次校验改写全局状态
+try:
+    from PIL import Image as _PILImage
+    _PILImage.MAX_IMAGE_PIXELS = 200_000_000
+except ImportError:  # Pillow 可缺省（storage_service 同样容错）
+    pass
 
 
 def validate_project_image(content: bytes, content_type: str | None = None) -> None:
@@ -63,8 +56,6 @@ def validate_project_image(content: bytes, content_type: str | None = None) -> N
     from PIL import Image, UnidentifiedImageError
 
     try:
-        # 与 storage_service 保持一致的解压炸弹阈值（受信用户上传）
-        Image.MAX_IMAGE_PIXELS = 200_000_000
         with Image.open(BytesIO(content)) as im:
             fmt = (im.format or '').upper()
             if fmt not in _IMAGE_FORMATS:
@@ -145,22 +136,13 @@ async def upload_project_image(
 
     - 复用 storage_service.save_upload
     - 更新 project.product_image_file_id
-    - 文件类型限制 image/jpeg|png|webp，大小 ≤ 10MB（storage_service 安全策略）
+    - 前置条件：content/type/大小已由 validate_project_image 校验通过
+      （endpoint 在进入事务前调用，本函数不再重复校验）
     """
     from fastapi_app.services.storage_service import save_upload
 
     # 校验项目存在
     await _ensure_project_exists(db, project_id)
-
-    # 文件类型校验
-    allowed_types = {'image/jpeg', 'image/png', 'image/webp'}
-    if content_type and content_type not in allowed_types:
-        raise BusinessError('图片格式不支持，仅支持 JPEG/PNG/WebP')
-
-    # 文件大小校验（≤ 10MB）
-    max_size = 10 * 1024 * 1024
-    if len(content) > max_size:
-        raise BusinessError('图片大小不能超过 10MB')
 
     # 复用 storage_service 保存文件（同步生成 400px WebP 缩略图供列表使用）
     upload_result = await save_upload(

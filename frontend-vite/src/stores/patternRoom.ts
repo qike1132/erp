@@ -151,6 +151,8 @@ export const usePatternRoomStore = defineStore('patternRoom', () => {
   /** 清除全部分组列表缓存（写操作后调用，强制下次走真实请求） */
   function invalidateGrouped(): void {
     groupedCache = {}
+    // 同步重写 sessionStorage 快照，避免失效后 F5 恢复出写操作前的旧数据
+    persist()
   }
 
   // ==================== 版师列表 ====================
@@ -188,6 +190,7 @@ export const usePatternRoomStore = defineStore('patternRoom', () => {
   /** 清除版师列表缓存（新增/删除版师后调用） */
   function invalidateMakers(): void {
     patternMakersCache = null
+    persist()
   }
 
   // ==================== 预取（登录/首屏时调用） ====================

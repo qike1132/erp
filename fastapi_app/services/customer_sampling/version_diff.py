@@ -1,12 +1,4 @@
-"""customer_sampling 子包 - 按客户分类打样信息模块
-
-职责拆分（由 customer_sampling_service.py 1619 行上帝服务拆分而来）：
-- grouping: 按客户分组聚合查询
-- crud: 打样项目与部位 CRUD
-- version_diff: 版本创建与字段级 diff
-- upload: 产品图片上传
-- roles: 角色管理
-- common: 公共工具函数
+"""版本域：版本列表/详情、创建新版本（快照 + 字段级 diff）、跨版本部位汇总。
 
 对应需求规格：.codeartsdoer/specs/customer_sampling/spec.md
 """
@@ -29,14 +21,8 @@ from fastapi_app.shared_models import (
 
 logger = logging.getLogger(__name__)
 
-# 版本快照中参与 diff 计算的布料业务字段
-_SNAPSHOT_FIELDS = (
-    'part_name', 'sort_order', 'fabric_name', 'fabric_spec',
-    'supplier_id', 'supplier_name', 'contact_person', 'contact_phone',
-    'unit_price', 'delivery_days', 'remark',
-)
-
 from .common import (
+    _SNAPSHOT_FIELDS,
     _ensure_project_exists,
     _ensure_role_belongs_to_project,
     _get_default_role_id,
@@ -46,25 +32,30 @@ from .common import (
 
 
 async def list_versions(db: AsyncSession, project_id: int) -> dict:
-    """版本列表查询（按 version_no 升序）"""
+    """版本列表查询（按 version_no 升序；仅取展示列，避免加载全量快照 JSON）"""
     await _ensure_project_exists(db, project_id)
 
     result = await db.execute(
-        select(CustomerSamplingFabricVersion)
+        select(
+            CustomerSamplingFabricVersion.id,
+            CustomerSamplingFabricVersion.version_no,
+            CustomerSamplingFabricVersion.created_at,
+            CustomerSamplingFabricVersion.reason,
+        )
         .where(CustomerSamplingFabricVersion.project_id == project_id)
         .order_by(CustomerSamplingFabricVersion.version_no)
     )
-    versions = result.scalars().all()
+    rows = result.all()
     return {
         'success': True,
         'items': [
             {
-                'id': v.id,
-                'version_no': v.version_no,
-                'created_at': v.created_at.strftime('%Y-%m-%d %H:%M:%S') if v.created_at else '',
-                'reason': v.reason or '',
+                'id': vid,
+                'version_no': vno,
+                'created_at': created_at.strftime('%Y-%m-%d %H:%M:%S') if created_at else '',
+                'reason': reason or '',
             }
-            for v in versions
+            for vid, vno, created_at, reason in rows
         ],
     }
 
@@ -259,6 +250,7 @@ async def get_parts_by_version(
     project_id: int,
     *,
     role_id: int | None = None,
+    final_only: bool = False,
 ) -> dict:
     """获取指定角色所有版本的部位布料数据（跨版本二维表数据源）
 
@@ -270,6 +262,8 @@ async def get_parts_by_version(
 
     Args:
         role_id: 角色ID筛选；未传时自动解析项目的默认角色
+        final_only: 仅返回该角色最终版本（current_version）的行（打印场景，
+            避免拉取全部历史版本快照）
 
     Returns:
         {
@@ -288,14 +282,23 @@ async def get_parts_by_version(
     else:
         await _ensure_role_belongs_to_project(db, role_id, project_id)
 
+    # 角色当前最终版本（final_only 过滤与返回值共用）
+    role_result = await db.execute(
+        select(CustomerSamplingRole.current_version).where(CustomerSamplingRole.id == role_id)
+    )
+    final_version = role_result.scalar_one_or_none() or 'T1'
+
     # 1. 从 part 表读取该角色所有版本化部件（带 supplier 关联）
+    part_conditions = [
+        CustomerSamplingPart.project_id == project_id,
+        CustomerSamplingPart.role_id == role_id,
+    ]
+    if final_only:
+        part_conditions.append(CustomerSamplingPart.version_no == final_version)
     parts_result = await db.execute(
         select(CustomerSamplingPart)
         .options(selectinload(CustomerSamplingPart.supplier))
-        .where(
-            CustomerSamplingPart.project_id == project_id,
-            CustomerSamplingPart.role_id == role_id,
-        )
+        .where(*part_conditions)
         .order_by(CustomerSamplingPart.sort_order)
     )
     all_parts = parts_result.scalars().all()
@@ -330,6 +333,8 @@ async def get_parts_by_version(
     live_part_names = {p.part_name for p in all_parts}
 
     for ver in versions:
+        if final_only and ver.version_no != final_version:
+            continue
         version_set.add(ver.version_no)
         snapshot: list[dict] = ver.snapshot_data or []
         for part in snapshot:
@@ -344,25 +349,12 @@ async def get_parts_by_version(
 
     version_list = sorted(version_set, key=lambda v: (len(v), v))
 
-    # 加载角色 current_version 作为「最终版本」
-    role_result = await db.execute(
-        select(CustomerSamplingRole.current_version).where(CustomerSamplingRole.id == role_id)
-    )
-    final_version = role_result.scalar_one_or_none() or 'T1'
-
     return {
         'success': True,
         'items': items,
         'versions': version_list,
         'final_version': final_version,
     }
-
-
-
-def _next_version(current: str) -> str:
-    """T1 -> T2, T2 -> T3, ..."""
-    n = _version_num(current)
-    return f'T{n + 1}' if n else 'T1'
 
 
 

@@ -1,12 +1,4 @@
-"""customer_sampling 子包 - 按客户分类打样信息模块
-
-职责拆分（由 customer_sampling_service.py 1619 行上帝服务拆分而来）：
-- grouping: 按客户分组聚合查询
-- crud: 打样项目与部位 CRUD
-- version_diff: 版本创建与字段级 diff
-- upload: 产品图片上传
-- roles: 角色管理
-- common: 公共工具函数
+"""角色管理：角色列表/新增/改名/删除（角色维度独立维护部位与版本快照）。
 
 对应需求规格：.codeartsdoer/specs/customer_sampling/spec.md
 """
@@ -23,13 +15,6 @@ from fastapi_app.shared_models import (
 )
 
 logger = logging.getLogger(__name__)
-
-# 版本快照中参与 diff 计算的布料业务字段
-_SNAPSHOT_FIELDS = (
-    'part_name', 'sort_order', 'fabric_name', 'fabric_spec',
-    'supplier_id', 'supplier_name', 'contact_person', 'contact_phone',
-    'unit_price', 'delivery_days', 'remark',
-)
 
 from .common import _ensure_project_exists, _get_user_name, _write_change_log
 

@@ -248,27 +248,6 @@ class ProjectListResponse(BaseModel):
     current_page: int = 1
 
 
-class CompletedTableRow(BaseModel):
-    """已完成打样项目表格行"""
-    id: int
-    sequence_no: str
-    product_name: str
-    pattern_maker_name: str = ''
-    completed_at: str | None = None
-    parts_count: int = 0
-    operator_name: str = ''
-    status: str = 'completed'
-
-
-class CompletedTableResponse(BaseModel):
-    """已完成打样项目表格查询响应"""
-    success: bool = True
-    items: list[CompletedTableRow] = Field(default_factory=list)
-    total: int = 0
-    pages: int = 0
-    current_page: int = 1
-
-
 class ProjectDetailResponse(BaseModel):
     """打样项目详情响应"""
     model_config = ConfigDict(from_attributes=True)

@@ -10,7 +10,7 @@ import { toast } from '@/composables/useToast'
 import type { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { patternRoomApi } from '@/api/patternRoom'
 import type { BatchPartCreateRequest, PartDetail, PartUpdateRequest } from '@/api/patternRoom'
-import { getErrorMessage } from '@/types/errors'
+import { getErrorMessage, getErrorStatus } from '@/types/errors'
 import { usePartInlineEdit } from './usePartInlineEdit'
 import type { useSamplingProject } from './useSamplingProject'
 import type { useSamplingPart } from './useSamplingPart'
@@ -239,7 +239,7 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
       }
     } catch (e) {
       console.error('[PatternRoomView] 保存部位编辑失败:', e)
-      const status = (e as { response?: { status?: number } })?.response?.status
+      const status = getErrorStatus(e)
       const errMsg = status === 409 ? '数据已被他人更新，请刷新后重试' : '保存失败'
       toast.error(errMsg)
       // 409 乐观锁冲突：局部 patch 未更新 version，需全量刷新获取最新数据
