@@ -61,13 +61,6 @@ def test_backup_progress_uses_redis_wrapper():
     assert 'from utils.redis_cache import' not in source
 
 
-def test_restore_progress_uses_redis_wrapper():
-    """验证 restore_progress.py 使用 get_client()"""
-    source = Path('fastapi_app/core/restore_progress.py').read_text(encoding='utf-8')
-    assert 'from fastapi_app.core.redis_wrapper import get_client' in source
-    assert 'from utils.redis_cache import' not in source
-
-
 def test_deps_uses_redis_wrapper():
     """验证 deps.py 使用 get_client()"""
     source = Path('fastapi_app/core/deps.py').read_text(encoding='utf-8')

@@ -203,6 +203,3 @@ async def get_presets_for_products(db: AsyncSession, product_ids: list[int]) -> 
     for pt in result.scalars().all():
         grouped.setdefault(pt.product_id, []).append(pt)
     return grouped
-
-
-# ==================== 订单外发工序 ====================

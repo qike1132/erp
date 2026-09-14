@@ -250,7 +250,7 @@ const flatRows = computed(() =>
 }
 
 .coq-skeleton {
-  padding: 0 24px;
+  padding: 0;
 }
 
 .coq-skeleton-row {

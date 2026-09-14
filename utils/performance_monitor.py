@@ -98,7 +98,48 @@ class PerformanceMiddleware(BaseHTTPMiddleware):
         }
 
 
-performance_monitor = PerformanceMiddleware.__new__(PerformanceMiddleware)
+class PerformanceStatsHolder:
+    """性能统计持有者（无 app 依赖，供 get_system_stats 等只读消费方使用）
+
+    与 PerformanceMiddleware 的区别：本类不参与请求处理，仅保存/暴露统计值。
+    它存在的原因是 PerformanceMiddleware.__init__ 需要 app 参数，无法在模块级实例化 ——
+    原先用 `__new__` 绕过构造导致 self.stats 从未被初始化。
+
+    注意：PerformanceMiddleware 目前未在任何地方注册（见 core/middleware.py 的同类职责），
+    因此本对象的数据必然长期为「全 0」。若后续决定注册中间件，应改为由中间件实例
+    把统计值同步到这里，或让消费方直接读取中间件实例。
+    """
+
+    def __init__(self, slow_query_threshold: float = 1.0,
+                 slow_request_threshold: float = 2.0):
+        self.slow_query_threshold = slow_query_threshold
+        self.slow_request_threshold = slow_request_threshold
+        self.stats = self._empty_stats()
+
+    @staticmethod
+    def _empty_stats() -> dict:
+        return {
+            'total_requests': 0,
+            'slow_requests': 0,
+            'errors': 0,
+            'avg_response_time': 0.0
+        }
+
+    def get_stats(self) -> dict:
+        """获取性能统计"""
+        return {
+            **self.stats,
+            'slow_query_threshold': self.slow_query_threshold,
+            'slow_request_threshold': self.slow_request_threshold,
+            'timestamp': datetime.now().isoformat()
+        }
+
+    def reset_stats(self) -> None:
+        """重置统计"""
+        self.stats = self._empty_stats()
+
+
+performance_monitor = PerformanceStatsHolder()
 
 
 def monitor_performance(f):

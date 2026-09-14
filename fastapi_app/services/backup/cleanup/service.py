@@ -295,13 +295,13 @@ class BackupCleanupService:
             # 对于每个保留的全量备份，保留其增量备份链
             for full_backup in full_backups:
                 if full_backup['name'] in files_to_keep:
-                    full_timestamp = self._extract_timestamp(full_backup['name'])
+                    full_timestamp = self._normalize_backup_ts(self._extract_timestamp(full_backup['name']))
                     if full_timestamp:
                         # 找到基于此全量备份的增量备份
                         for file_info in backup_files:
                             if (file_info['is_incremental'] and
                                 file_info['base_timestamp'] and
-                                file_info['base_timestamp'] <= full_timestamp):
+                                self._normalize_backup_ts(str(file_info['base_timestamp'])) <= full_timestamp):
                                 files_to_keep.add(file_info['name'])
 
         except Exception as e:  # defensive: incremental chain marking must not abort cleanup
@@ -324,6 +324,16 @@ class BackupCleanupService:
             return None
         except (ValueError, IndexError, AttributeError):
             return None
+
+    def _normalize_backup_ts(self, ts: str) -> str:
+        """把备份时间戳统一为 'YYYY-MM-DD HH:MM:SS'，避免文件名格式与
+        manifest base_timestamp 格式不一致导致字符串比较恒为 True/False。"""
+        if not ts:
+            return ''
+        ts = str(ts).strip()
+        if len(ts) == 15 and ts[8] == '_' and ts[:8].isdigit() and ts[9:].isdigit():
+            return f'{ts[:4]}-{ts[4:6]}-{ts[6:8]} {ts[9:11]}:{ts[11:13]}:{ts[13:15]}'
+        return ts
 
     async def _calculate_importance_scores(self,
                                          backup_files: list[dict[str, Any]],

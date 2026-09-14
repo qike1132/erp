@@ -132,6 +132,7 @@ async def get_approval_detail(db: AsyncSession, approval_id: int) -> dict:
             selectinload(ApprovalRequest.logs),
             joinedload(ApprovalRequest.order).joinedload(Order.product),
             joinedload(ApprovalRequest.requester),
+            joinedload(ApprovalRequest.approver),
         )
         .where(ApprovalRequest.id == approval_id)
     )

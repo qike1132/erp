@@ -20,6 +20,7 @@
 
 import logging
 import os
+import re
 import time
 import uuid
 
@@ -34,6 +35,14 @@ from fastapi_app.core.config import settings
 logger = logging.getLogger(__name__)
 
 MAX_REQUEST_BODY_SIZE = 10 * 1024 * 1024
+
+# Prometheus endpoint 归一化：纯数字 ID / UUID / 长 hex token 统一折叠为 {id}，
+# 防止订单号等非数字动态路径段造成指标 label 基数爆炸
+_PATH_ID_SEGMENT_RE = re.compile(
+    r'^(?:\d+'
+    r'|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
+    r'|[0-9a-fA-F]{16,})$'
+)
 
 
 def setup_middleware(app: FastAPI) -> None:
@@ -161,7 +170,12 @@ def _setup_csrf(app: FastAPI) -> None:
 
             response = await call_next(request)
 
-            csrf_token = secrets.token_urlsafe(32)
+            # 仅在请求未携带有效 CSRF cookie 时才生成新 token。此前每次响应（含 GET）
+            # 都轮换 cookie，浏览器多标签/并发请求下旧 cookie 会被新值覆盖，导致
+            # 基于 cookie 的 CSRF 校验偶发 403。复用已有 cookie 可避免该竞态。
+            csrf_token = request.cookies.get("fastapi_csrf_token")
+            if not csrf_token:
+                csrf_token = secrets.token_urlsafe(32)
             _csrf_samesite = "lax"
             _has_bearer_resp = request.headers.get("authorization", "").startswith("Bearer ")
             _csrf_sec = False if _has_bearer_resp else _csrf_secure
@@ -370,7 +384,7 @@ def _setup_prometheus(app: FastAPI) -> None:
         parts = path.rstrip("/").split("/")
         normalized_parts = []
         for part in parts:
-            if part.isdigit():
+            if _PATH_ID_SEGMENT_RE.match(part):
                 normalized_parts.append("{id}")
             else:
                 normalized_parts.append(part)

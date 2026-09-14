@@ -33,6 +33,8 @@ class Notification(Base):
     __table_args__ = (
         Index('ix_notification_user_read', 'user_id', 'is_read'),
         Index('ix_notification_created_at', 'created_at'),
+        # 湖北订单确认流程按 related_order_id 批量标记已读，避免通知表全表扫描
+        Index('ix_notification_related_order', 'related_order_id'),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

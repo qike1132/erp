@@ -33,17 +33,6 @@ if TYPE_CHECKING:
     from fastapi_app.shared_models.order_item import OrderItem
     from fastapi_app.shared_models.product import Product
 
-# 外发工序状态：待发货 -> 已发货（待收货）-> 已收货
-OUTSOURCE_PROCESS_STATUSES = ('pending', 'shipped', 'received')
-
-# 状态显示文案
-OUTSOURCE_PROCESS_STATUS_LABELS = {
-    'pending': '待发货',
-    'shipped': '已发货',
-    'received': '已收货',
-}
-
-
 class OutsourceProcessType(Base):
     """SKU 外发工序预设：为某个产品（SKU）固定配置的外发工序类型清单。"""
 

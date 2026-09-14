@@ -16,13 +16,10 @@ export interface ProcessGroup {
 /** 订单外发工序弹窗的业务逻辑 */
 export function useOutsourceProcess(detailDataProp: Ref<OutsourceOrderRow | null>, emit: (event: 'refresh') => void) {
   const authStore = useAuthStore()
-  const canManage = computed(() => authStore.hasPermission('outsource_manage'))
-  /** 贝乐用户：仅确认收货，不可发货 */
-  const isBeile = computed(() => authStore.user?.username === '贝乐')
-  /** 发货权限：非贝乐用户可发货 */
-  const canShip = computed(() => canManage.value && !isBeile.value)
-  /** 确认收货权限：仅贝乐用户 */
-  const canReceive = computed(() => canManage.value && isBeile.value)
+  /** 发货权限点：外协方账号授权（替代原先按用户名 == '贝乐' 的硬编码判断） */
+  const canShip = computed(() => authStore.hasPermission('outsource_ship'))
+  /** 收货权限点：收货账号授权（替代原先按用户名 == '贝乐' 的硬编码判断） */
+  const canReceive = computed(() => authStore.hasPermission('outsource_receive'))
 
   const processes = ref<OrderOutsourceProcess[]>([])
   const loadingProcesses = ref(false)
@@ -191,64 +188,61 @@ export function useOutsourceProcess(detailDataProp: Ref<OutsourceOrderRow | null
     receiveQtyDrafts[id] = value
   }
 
-  /** 一键发货：所有有待发剩余且未开始收货的工序按剩余发货（数量取各行输入，缺省剩余） */
+  /** 提取后端返回的错误文案（批量接口任一条失败会整批 400 并带上明细） */
+  function errorDetail(e: unknown, fallback: string): string {
+    return (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || fallback
+  }
+
+  /** 一键发货：所有有待发剩余且未开始收货的工序，单请求单事务批量发货（数量取各行输入，缺省剩余） */
   async function handleBulkShip() {
     const targets = processes.value.filter((p) => remainingShipQty(p) > 0 && (p.received_quantity || 0) === 0)
     if (targets.length === 0) {
       toast.info('没有待发货的工序')
       return
     }
+    const orderId = detailData.value?.id
+    if (!orderId) return
+    const items = targets.map((p) => ({
+      process_id: p.id,
+      quantity: Number(shipQtyDrafts[p.id]) || remainingShipQty(p),
+    }))
     bulkShipping.value = true
-    let ok = 0
-    const errors: string[] = []
-    for (const p of targets) {
-      const qty = Number(shipQtyDrafts[p.id]) || remainingShipQty(p)
-      try {
-        await outsourceApi.shipProcess(p.id, qty)
-        delete shipQtyDrafts[p.id]
-        ok += 1
-      } catch (e) {
-        const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-        errors.push(`「${p.process_type}」${msg || '发货失败'}`)
-      }
+    try {
+      await outsourceApi.shipProcessesBatch(orderId, items)
+      for (const p of targets) delete shipQtyDrafts[p.id]
+      toast.success(`全部 ${targets.length} 道工序已发货`)
+    } catch (e) {
+      toast.error(errorDetail(e, '一键发货失败（整批已回滚）'))
+    } finally {
+      bulkShipping.value = false
+      reloadDetail()
     }
-    bulkShipping.value = false
-    if (errors.length === 0) {
-      toast.success(`全部 ${ok} 道工序已发货`)
-    } else {
-      toast.error(`${ok} 道发货成功，${errors.length} 道失败：${errors.join('；')}`)
-    }
-    reloadDetail()
   }
 
-  /** 一键收货：所有有待收剩余的工序按剩余收货（数量取各行输入，缺省剩余） */
+  /** 一键收货：所有有待收剩余的工序，单请求单事务批量收货（数量取各行输入，缺省剩余） */
   async function handleBulkReceive() {
     const targets = processes.value.filter((p) => remainingReceiveQty(p) > 0)
     if (targets.length === 0) {
       toast.info('没有待收货的工序')
       return
     }
+    const orderId = detailData.value?.id
+    if (!orderId) return
+    const items = targets.map((p) => ({
+      process_id: p.id,
+      quantity: receiveQtyDrafts[p.id] ? Number(receiveQtyDrafts[p.id]) : remainingReceiveQty(p),
+    }))
     bulkReceiving.value = true
-    let ok = 0
-    const errors: string[] = []
-    for (const p of targets) {
-      const qty = receiveQtyDrafts[p.id] ? Number(receiveQtyDrafts[p.id]) : remainingReceiveQty(p)
-      try {
-        await outsourceApi.receiveProcess(p.id, qty)
-        delete receiveQtyDrafts[p.id]
-        ok += 1
-      } catch (e) {
-        const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-        errors.push(`「${p.process_type}」${msg || '确认收货失败'}`)
-      }
+    try {
+      await outsourceApi.receiveProcessesBatch(orderId, items)
+      for (const p of targets) delete receiveQtyDrafts[p.id]
+      toast.success(`全部 ${targets.length} 道工序已确认收货`)
+    } catch (e) {
+      toast.error(errorDetail(e, '一键收货失败（整批已回滚）'))
+    } finally {
+      bulkReceiving.value = false
+      reloadDetail()
     }
-    bulkReceiving.value = false
-    if (errors.length === 0) {
-      toast.success(`全部 ${ok} 道工序已确认收货`)
-    } else {
-      toast.error(`${ok} 道收货成功，${errors.length} 道失败：${errors.join('；')}`)
-    }
-    reloadDetail()
   }
 
   function statusLabel(status: string): string {

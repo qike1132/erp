@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only, selectinload
 
 from fastapi_app.core.cache import cache_result
+from fastapi_app.core.float_utils import round_qty
 from fastapi_app.services.plan_utils import calc_shipment_status
 from fastapi_app.services.purchase_plan_inventory import _get_inventory_map
 from fastapi_app.services.purchase_plan_shipment import _get_shipped_fifo_map_safe
@@ -53,10 +54,11 @@ async def get_plan_list(db: AsyncSession, year: int, month: int, customer_id: in
         conditions.append(PurchasePlan.status == status)
     result = await db.execute(select(PurchasePlan).options(selectinload(PurchasePlan.details).load_only(PurchasePlanDetail.id, PurchasePlanDetail.quantity, PurchasePlanDetail.plan_id, PurchasePlanDetail.product_name)).where(*conditions).order_by(PurchasePlan.create_time.desc()))
     plans = result.scalars().all()
-    # FIFO 分配出货数量
+    # FIFO 分配出货数量：整月查询，传 plan_month 走 Redis 缓存（与日历/汇总一致），
+    # 避免每次列表请求都全量重查 FIFO
     all_details = [d for p in plans for d in p.details]
     customer_name_map = {p.id: p.customer_name for p in plans}
-    shipped_fifo_map, fifo_degraded = await _get_shipped_fifo_map_safe(db, all_details, customer_name_map)
+    shipped_fifo_map, fifo_degraded = await _get_shipped_fifo_map_safe(db, all_details, customer_name_map, plan_month=plan_month)
     plan_list = []
     for plan in plans:
         detail_count = len(plan.details)
@@ -106,7 +108,7 @@ async def get_shipment_progress(db: AsyncSession, plan_id: int) -> dict:
     for d in details:
         shp_qty = shipped_fifo_map.get(d.id, 0)
         remaining = d.quantity - shp_qty
-        percent = round(shp_qty / d.quantity * 100, 1) if d.quantity > 0 else 0
+        percent = round_qty(shp_qty / d.quantity * 100, precision_digits=1) if d.quantity > 0 else 0
         progress_list.append({'detail_id': d.id, 'product_name': d.product_name, 'barcode': d.barcode, 'plan_qty': d.quantity, 'shipped_qty': shp_qty, 'remaining_qty': remaining, 'percent': percent, 'shipment_status': calc_shipment_status(d.quantity, shp_qty)})
     return {'details': progress_list, 'fifo_degraded': fifo_degraded}
 
@@ -496,7 +498,9 @@ async def get_monthly_aggregated(db: AsyncSession, year: int, month: int, custom
         ps['plan_qty'] += qty
         ps['shipped_qty'] += shp_qty
         ps['remaining_qty'] += remain
-        if _calc_stock_status(qty, inv_qty) != 'sufficient':
+        # 预警按累计口径：该客户该产品当月计划总量超过该产品总库存即告警，
+        # 单行比较会漏掉"多条明细各自不超、累计超库存"的场景
+        if _calc_stock_status(ps['plan_qty'], inv_qty) != 'sufficient':
             ps['warning'] = True
 
     # 构建 rows 列表（字段名与前端 Row 类型对齐）
@@ -507,7 +511,7 @@ async def get_monthly_aggregated(db: AsyncSession, year: int, month: int, custom
             'customerCount': len(d['_cust_set']), 'planCount': d['plan_count'],
             'totalQty': d['total_qty'], '_shippedCount': d['shipped_count'],
             '_pendingCount': d['pending_count'],
-            '_shippedPct': int(d['shipped_qty'] / d['total_qty'] * 1000) / 10 if d['total_qty'] > 0 else 0,
+            '_shippedPct': round_qty(d['shipped_qty'] / d['total_qty'] * 100, precision_digits=1) if d['total_qty'] > 0 else 0,
             'customerNames': sorted(d['_cust_set']),
             '_fullDate': f'{month}月{d["day_num"]}日', '_isPeak': False,
         })
@@ -523,7 +527,7 @@ async def get_monthly_aggregated(db: AsyncSession, year: int, month: int, custom
             'barcode': sk['barcode'], 'product_name': sk['product_name'],
             'plan_qty': sk['plan_qty'], 'shipped_qty': sk['shipped_qty'],
             'remain_qty': sk['remain_qty'], 'customer_name': sk['customer_name'],
-            '_pct': int(sk['shipped_qty'] / sk['plan_qty'] * 1000) / 10 if sk['plan_qty'] > 0 else 0,
+            '_pct': round_qty(sk['shipped_qty'] / sk['plan_qty'] * 100, precision_digits=1) if sk['plan_qty'] > 0 else 0,
             '_odd': False,
         })
     sku_summary.sort(key=lambda s: (s['customer_name'], s['barcode']))
@@ -618,7 +622,7 @@ async def get_day_details(db: AsyncSession, year: int, month: int, day: int, cus
     return {
         'date': date_str, 'weekday': _py_weekday_to_js(target_date.weekday()),
         'plans': plans, 'by_customer': by_customer,
-        'shipped_pct': int(shipped_qty / total_qty * 1000) / 10 if total_qty > 0 else 0,
+        'shipped_pct': round_qty(shipped_qty / total_qty * 100, precision_digits=1) if total_qty > 0 else 0,
         'fifo_degraded': fifo_degraded,
     }
 

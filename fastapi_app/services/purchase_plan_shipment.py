@@ -148,7 +148,7 @@ async def _recalc_plans_common(
     snapshot_before: dict[int, dict] | None = None,
     extra_old_value: dict | None = None,
     prefetched: tuple[list, list, list] | None = None,
-) -> tuple[dict[int, dict], int]:
+) -> tuple[dict[int, dict], int, set[str]]:
     """
     采购计划重算的公共逻辑（出货记录创建/删除后重新计算 shipped_qty 和状态）
 
@@ -164,10 +164,15 @@ async def _recalc_plans_common(
                     传入时跳过内部查询以避免重复 DB 访问
 
     返回:
-        (状态变更字典, 受影响计划数)
+        (状态变更字典, 受影响计划数, 受影响计划月份集合)
+
+    ⚠️ 三处 return 必须元数一致（均为 3 元组），调用方统一按 3 元组解包。
+    `affected_plan_months` 是后加的返回项，早退路径必须返回 set() 而不是省略它 ——
+    2026-09-10 生产曾因此抛 ValueError 并被上层 except 吞成 ERROR 日志，
+    导致出货成功但采购计划 shipped_qty 未重算的静默数据不一致。
     """
     if not customer_name or not product_name:
-        return {}, 0
+        return {}, 0, set()
 
     if prefetched is not None:
         affected_plans, all_affected_details, related_details = prefetched
@@ -175,7 +180,7 @@ async def _recalc_plans_common(
         affected_plans, all_affected_details, related_details = await _fetch_affected_plans_and_details(db, customer_name, product_name)
 
     if not affected_plans or not related_details:
-        return {}, len(affected_plans)
+        return {}, len(affected_plans), set()
 
     affected_plan_ids = [p.id for p in affected_plans]
 

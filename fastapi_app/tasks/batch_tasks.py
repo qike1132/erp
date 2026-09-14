@@ -45,6 +45,84 @@ def _resolve_product_locked(session: Session, product_identifier: str) -> Produc
     ).scalar_one_or_none()
 
 
+def _run_batch_import_sync(file_path: str, job_id: str, task_label: str, build_row) -> dict:
+    """订单/备货批量导入共享骨架：路径校验 → Excel 解析 → 逐行处理（50 行一批提交）→ 临时文件清理。
+
+    build_row(session, row, i) 处理单行（编号生成/建对象/库存变更），
+    返回非空字符串表示行级校验失败（跳过该行、不回滚批次）；
+    抛 ValueError/TypeError/OSError 则回滚当前未提交批次并计入 skipped_uncommitted。
+
+    Args:
+        file_path: 已保存的临时文件路径。
+        job_id: ARQ 任务 ID。
+        task_label: 任务标签（日志用，如 '订单'/'备货'）。
+        build_row: 单行处理函数。
+
+    Returns:
+        dict: {success, imported_count, errors, task_id}
+    """
+    real_path = os.path.realpath(file_path)
+    if not any(os.path.commonpath([real_path, d]) == d for d in ALLOWED_UPLOAD_DIRS if os.path.exists(d)):
+        logger.error(f'批量导入{task_label}任务拒绝非法文件路径: {file_path}')
+        return {'success': False, 'error': '非法文件路径', 'imported_count': 0, 'task_id': job_id}
+    delete_file = True
+    try:
+        from utils.batch_upload_utils import parse_excel_file
+        success, data_list, error = parse_excel_file(file_path)
+        if not success:
+            return {'success': False, 'error': error, 'imported_count': 0, 'task_id': job_id}
+        session: Session = _SyncSession()
+        try:
+            imported_count = 0
+            last_committed_count = 0
+            errors = []
+            BATCH_COMMIT_SIZE = 50
+            for i, row in enumerate(data_list, start=2):
+                try:
+                    row_error = build_row(session, row, i)
+                except (ValueError, TypeError, OSError) as e:
+                    session.rollback()
+                    # 保留已提交批次的计数，仅回滚当前未提交批次
+                    uncommitted_in_batch = imported_count - last_committed_count
+                    imported_count = last_committed_count
+                    errors.append({'row': i, 'error': str(e), 'skipped_uncommitted': uncommitted_in_batch})
+                    logger.error(f'批量导入{task_label}行{i}失败: {e}')
+                    continue
+                if row_error:
+                    errors.append({'row': i, 'error': row_error})
+                    continue
+                imported_count += 1
+                if imported_count % BATCH_COMMIT_SIZE == 0:
+                    session.commit()
+                    last_committed_count = imported_count
+            session.commit()
+            return {'success': True, 'imported_count': imported_count, 'errors': errors, 'task_id': job_id}
+        finally:
+            session.close()
+    except (ValueError, TypeError, OSError) as exc:
+        logger.error(f'批量导入{task_label}任务失败: {exc}', exc_info=True)
+        # 保留文件以供 ARQ 重试（max_tries 控制重试上限）
+        delete_file = False
+        raise exc
+    finally:
+        if delete_file and file_path and os.path.exists(file_path):
+            with contextlib.suppress(OSError):
+                os.unlink(file_path)
+
+
+def _resolve_row_product(session: Session, row: dict) -> tuple[Product | None, str | None]:
+    """解析行内产品标识并加行锁；返回 (product, 错误消息)。缺少必填字段/产品不存在返回错误消息。"""
+    product_identifier = row.get('产品名称', row.get('产品编号', ''))
+    customer = row.get('客户名称', '')
+    quantity = row.get('数量', 0)
+    if not all([product_identifier, customer, quantity]):
+        return None, '缺少必填字段'
+    product = _resolve_product_locked(session, product_identifier)
+    if not product:
+        return None, f"产品 '{product_identifier}' 不存在"
+    return product, None
+
+
 async def batch_import_orders_task(ctx, file_path: str, original_filename: str, user_id: int):
     """异步批量导入订单
 
@@ -59,137 +137,47 @@ async def batch_import_orders_task(ctx, file_path: str, original_filename: str, 
     """
     job_id = ctx['job_id']
 
-    def _sync_impl():
-        allowed_dirs = ALLOWED_UPLOAD_DIRS
-        real_path = os.path.realpath(file_path)
-        if not any(os.path.commonpath([real_path, d]) == d for d in allowed_dirs if os.path.exists(d)):
-            logger.error(f'批量导入订单任务拒绝非法文件路径: {file_path}')
-            return {'success': False, 'error': '非法文件路径', 'imported_count': 0, 'task_id': job_id}
-        delete_file = True
-        try:
-            from datetime import datetime
+    def _orders_row(session: Session, row: dict, i: int) -> str | None:
+        from datetime import datetime
 
-            from fastapi_app.shared.stock_crud_service import generate_order_number_sync
-            from fastapi_app.shared_models import InventoryLog, Order
-            from utils.batch_upload_utils import parse_excel_file
-            success, data_list, error = parse_excel_file(file_path)
-            if not success:
-                return {'success': False, 'error': error, 'imported_count': 0, 'task_id': job_id}
-            session: Session = _SyncSession()
-            try:
-                imported_count = 0
-                last_committed_count = 0
-                errors = []
-                BATCH_COMMIT_SIZE = 50
-                for i, row in enumerate(data_list, start=2):
-                    try:
-                        product_identifier = row.get('产品名称', row.get('产品编号', ''))
-                        customer = row.get('客户名称', '')
-                        quantity = row.get('数量', 0)
-                        if not all([product_identifier, customer, quantity]):
-                            errors.append({'row': i, 'error': '缺少必填字段'})
-                            continue
-                        product = _resolve_product_locked(session, product_identifier)
-                        if not product:
-                            errors.append({'row': i, 'error': f"产品 '{product_identifier}' 不存在"})
-                            continue
-                        order = Order(order_no=generate_order_number_sync(session), product_id=product.id, customer=customer, quantity=int(quantity), order_date=datetime.now(), status=ORDER_STATUS_PENDING_STOCK, note=row.get('备注', ''))
-                        session.add(order)
-                        session.flush()
-                        log = InventoryLog(product_id=product.id, change_type='订单创建', change_quantity=int(quantity), change_date=datetime.now(), customer=customer, related_id=str(order.id), note=f'批量导入订单 {order.order_no}')
-                        session.add(log)
-                        imported_count += 1
-                        if imported_count % BATCH_COMMIT_SIZE == 0:
-                            session.commit()
-                            last_committed_count = imported_count
-                    except (ValueError, TypeError, OSError) as e:
-                        session.rollback()
-                        # 保留已提交批次的计数，仅回滚当前未提交批次
-                        uncommitted_in_batch = imported_count - last_committed_count
-                        imported_count = last_committed_count
-                        errors.append({'row': i, 'error': str(e), 'skipped_uncommitted': uncommitted_in_batch})
-                        logger.error(f'批量导入订单行{i}失败: {e}')
-                session.commit()
-                return {'success': True, 'imported_count': imported_count, 'errors': errors, 'task_id': job_id}
-            finally:
-                session.close()
-        except (ValueError, TypeError, OSError) as exc:
-            logger.error(f'批量导入订单任务失败: {exc}', exc_info=True)
-            # 保留文件以供 ARQ 重试（max_tries 控制重试上限）
-            delete_file = False
-            raise exc
-        finally:
-            if delete_file and file_path and os.path.exists(file_path):
-                with contextlib.suppress(OSError):
-                    os.unlink(file_path)
+        from fastapi_app.shared.stock_crud_service import generate_order_number_sync
+        from fastapi_app.shared_models import InventoryLog, Order
+        product, row_error = _resolve_row_product(session, row)
+        if row_error:
+            return row_error
+        order = Order(order_no=generate_order_number_sync(session), product_id=product.id, customer=row.get('客户名称', ''), quantity=int(row.get('数量', 0)), order_date=datetime.now(), status=ORDER_STATUS_PENDING_STOCK, note=row.get('备注', ''))
+        session.add(order)
+        session.flush()
+        log = InventoryLog(product_id=product.id, change_type='订单创建', change_quantity=int(row.get('数量', 0)), change_date=datetime.now(), customer=row.get('客户名称', ''), related_id=str(order.id), note=f'批量导入订单 {order.order_no}')
+        session.add(log)
+        return None
 
-    return await asyncio.to_thread(_sync_impl)
+    return await asyncio.to_thread(
+        _run_batch_import_sync, file_path, job_id, '订单', _orders_row,
+    )
 
 
 async def batch_import_stockins_task(ctx, file_path: str, original_filename: str, user_id: int):
     """异步批量导入备货"""
     job_id = ctx['job_id']
 
-    def _sync_impl():
-        allowed_dirs = ALLOWED_UPLOAD_DIRS
-        real_path = os.path.realpath(file_path)
-        if not any(os.path.commonpath([real_path, d]) == d for d in allowed_dirs if os.path.exists(d)):
-            logger.error(f'批量导入备货任务拒绝非法文件路径: {file_path}')
-            return {'success': False, 'error': '非法文件路径', 'imported_count': 0, 'task_id': job_id}
-        delete_file = True
-        try:
-            from datetime import datetime
+    def _stockins_row(session: Session, row: dict, i: int) -> str | None:
+        from datetime import datetime
 
-            from fastapi_app.shared.stock_crud_service import generate_stockin_number_sync
-            from fastapi_app.shared_models import InventoryLog, StockIn
-            from utils.batch_upload_utils import parse_excel_file
-            success, data_list, error = parse_excel_file(file_path)
-            if not success:
-                return {'success': False, 'error': error, 'imported_count': 0, 'task_id': job_id}
-            session: Session = _SyncSession()
-            try:
-                imported_count = 0
-                last_committed_count = 0
-                errors = []
-                BATCH_COMMIT_SIZE = 50
-                for i, row in enumerate(data_list, start=2):
-                    try:
-                        product_identifier = row.get('产品名称', row.get('产品编号', ''))
-                        customer = row.get('客户名称', '')
-                        quantity = row.get('数量', 0)
-                        if not all([product_identifier, customer, quantity]):
-                            errors.append({'row': i, 'error': '缺少必填字段'})
-                            continue
-                        product = _resolve_product_locked(session, product_identifier)
-                        if not product:
-                            errors.append({'row': i, 'error': f"产品 '{product_identifier}' 不存在"})
-                            continue
-                        stockin = StockIn(stockin_no=generate_stockin_number_sync(session), product_id=product.id, customer=customer, quantity=int(quantity), stockin_date=datetime.now(), note=row.get('备注', ''))
-                        session.add(stockin)
-                        session.flush()
-                        product.current_stock += int(quantity)
-                        log = InventoryLog(product_id=product.id, change_type='备货入库', change_quantity=int(quantity), change_date=datetime.now(), customer=customer, related_id=str(stockin.id), note=f'批量导入备货 {stockin.stockin_no}')
-                        session.add(log)
-                        imported_count += 1
-                        if imported_count % BATCH_COMMIT_SIZE == 0:
-                            session.commit()
-                            last_committed_count = imported_count
-                    except (ValueError, TypeError, OSError) as e:
-                        session.rollback()
-                        imported_count = last_committed_count
-                        errors.append({'row': i, 'error': str(e)})
-                session.commit()
-                return {'success': True, 'imported_count': imported_count, 'errors': errors, 'task_id': job_id}
-            finally:
-                session.close()
-        except (ValueError, TypeError, OSError) as exc:
-            logger.error(f'批量导入备货任务失败: {exc}', exc_info=True)
-            # 保留文件以供 ARQ 重试
-            delete_file = False
-            raise exc
-        finally:
-            if delete_file and file_path and os.path.exists(file_path):
-                with contextlib.suppress(OSError):
-                    os.unlink(file_path)
+        from fastapi_app.shared.stock_crud_service import generate_stockin_number_sync
+        from fastapi_app.shared_models import InventoryLog, StockIn
+        product, row_error = _resolve_row_product(session, row)
+        if row_error:
+            return row_error
+        quantity = int(row.get('数量', 0))
+        stockin = StockIn(stockin_no=generate_stockin_number_sync(session), product_id=product.id, customer=row.get('客户名称', ''), quantity=quantity, stockin_date=datetime.now(), note=row.get('备注', ''))
+        session.add(stockin)
+        session.flush()
+        product.current_stock += quantity
+        log = InventoryLog(product_id=product.id, change_type='备货入库', change_quantity=quantity, change_date=datetime.now(), customer=row.get('客户名称', ''), related_id=str(stockin.id), note=f'批量导入备货 {stockin.stockin_no}')
+        session.add(log)
+        return None
 
-    return await asyncio.to_thread(_sync_impl)
+    return await asyncio.to_thread(
+        _run_batch_import_sync, file_path, job_id, '备货', _stockins_row,
+    )

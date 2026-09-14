@@ -3,14 +3,11 @@
 
 提供悲观锁 + 乐观锁双重保障，确保 product.current_stock 在并发场景下不会出现数据不一致。
 用法参照 Case 模型的 with_for_update() 模式。
-
-本模块为跨框架共享模块，Flask 和 FastAPI 均可直接导入使用，不依赖任何 Web 框架。
 """
 import logging
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Session
 
 from fastapi_app.core.exceptions import ConflictError
 from fastapi_app.shared_models import Product
@@ -32,24 +29,10 @@ async def get_product_for_update(db: AsyncSession, product_id: int) -> Product:
     """
     获取产品并加行级悲观锁（SELECT ... FOR UPDATE）。
 
-    在事务内使用，确保同一产品的库存不会被并发修改。
-    用法：
-        product = await get_product_for_update(db, product_id)
-        product.current_stock += quantity
-        await db.commit()
+    在事务内使用，确保同一产品的库存不会被并发修改。事务提交由
+    get_async_db / db_transaction 统一控制，本函数不提交。
     """
     result = await db.execute(
-        select(Product).where(Product.id == product_id).with_for_update()
-    )
-    product = result.scalar_one_or_none()
-    if not product:
-        raise ValueError(f'产品ID {product_id} 不存在')
-    return product
-
-
-def get_product_for_update_sync(db: Session, product_id: int) -> Product:
-    """同步版本：获取产品并加行级悲观锁（供 Flask 路径使用）"""
-    result = db.execute(
         select(Product).where(Product.id == product_id).with_for_update()
     )
     product = result.scalar_one_or_none()

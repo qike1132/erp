@@ -83,18 +83,19 @@ const historyColumns: TableColumn[] = [
 
 <style scoped lang="scss">
 /* === Content area === */
+/* 与 /beile-order 一致：内容贴卡片边缘，无内边距 */
 .mr-content {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 0 24px 24px;
+  padding: 0;
 }
 
 /* === Cards === */
 .mr-card {
   background: white;
-  border-radius: 14px;
-  margin-bottom: 18px;
+  border-radius: 0;
+  margin-bottom: 0;
   overflow: hidden;
 }
 

@@ -43,6 +43,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 from fastapi_app.core.config import settings
+from fastapi_app.core.float_utils import round_money
 from fastapi_app.core.security import hash_password
 from fastapi_app.shared_models import (
     ApprovalRequest,
@@ -368,7 +369,7 @@ def insert_purchase_order_items(session, count, po_ids):
                 quantity=qty,
                 unit_usage=Decimal(str(round(random.uniform(0.001, 5), 4))),
                 unit_price=up,
-                total_price=Decimal(str(round(float(qty) * float(up), 2))),
+                total_price=Decimal(str(round_money(float(qty) * float(up)))),
                 material_category=random.choice(categories),
                 remark=fake.sentence()[:200] if random.random() < 0.3 else None,
                 supplier_name=fake.company()[:100] if random.random() < 0.5 else None,

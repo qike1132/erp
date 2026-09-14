@@ -56,18 +56,24 @@ async def test_sheet_failure_rolls_back_only_that_sheet(monkeypatch):
     assert db.begin_nested.call_count == 2
 
 
-async def test_products_sheet_single_value_counter(monkeypatch):
+async def test_products_sheet_row_messages_are_surfaced(monkeypatch):
+    """产品导入的行级消息（含去重跳过原因）必须进 results.errors。
+
+    此前产品导入返回单值、其他三种类型的消息又被 ``count, _ = ...`` 整体丢弃，
+    用户只能看到「Sheet X 导入失败」，却不知道是哪一行、因为什么。
+    现在四种 Sheet 统一返回 ``(计数, 行级消息)``，消息一律回显。
+    """
     db, _ = _make_db()
 
     async def product_importer(db_, data_list):
-        return 3
+        return 3, ['行5: 产品名称与已有数据重复，已跳过: acme']
 
     monkeypatch.setattr(batch_import_module(), '_SHEET_IMPORTERS', {'product': (product_importer, 'products')})
     results = _FakeResults()
 
     await _process_comprehensive_sheet(db, 'product', '产品管理', [], results)
     assert results.imported['products'] == 3
-    assert results.errors == []
+    assert results.errors == ['行5: 产品名称与已有数据重复，已跳过: acme']
 
 
 async def test_unknown_sheet_type_records_error(monkeypatch):

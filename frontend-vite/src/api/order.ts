@@ -15,7 +15,6 @@ export interface OrderListApiResponse {
 export interface ConfirmOrderResponse {
   success: boolean
   message: string
-  already_confirmed?: boolean
 }
 
 export const orderApi = {

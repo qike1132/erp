@@ -49,6 +49,7 @@ from .upload import (
 from .version_diff import (
     _SNAPSHOT_FIELDS,
     _compute_diff,
+    _next_version,
     _normalize_value,
     _version_num,
     create_version,
@@ -68,6 +69,7 @@ __all__ = [
     '_get_default_role_id',
     '_get_product_image_urls',
     '_get_user_name',
+    '_next_version',
     '_normalize_value',
     '_project_to_summary',
     '_register_project_image_cleanup',

@@ -104,12 +104,13 @@ async def orchestrate_batch_stockouts(db: AsyncSession, stockouts_data: list[dic
         if successful_pairs:
             unique_product_ids = {pid for pid, _ in successful_pairs}
             product_result = await db.execute(
-                select(Product.id, Product.name).where(Product.id.in_(unique_product_ids))
+                select(Product).where(Product.id.in_(unique_product_ids))
             )
-            product_name_map = {row[0]: row[1] for row in product_result.all()}
+            product_map = {p.id: p for p in product_result.scalars().all()}
             now_month = datetime.now(UTC).strftime('%Y-%m')
             for product_id, customer in successful_pairs:
-                product_name = product_name_map.get(product_id, '')
+                product = product_map.get(product_id)
+                product_name = product.name if product is not None else ''
                 if product_name:
                     # 通过领域事件总线发布 STOCK_OUT_CREATED，由 purchase_plan_service 订阅处理
                     # （recalc_plans_after_stockout_create + _invalidate_plan_caches）
@@ -127,7 +128,7 @@ async def orchestrate_batch_stockouts(db: AsyncSession, stockouts_data: list[dic
                         logger.warning("领域事件 STOCK_OUT_CREATED 发布失败", exc_info=True)
 
             for product_id, _ in successful_pairs:
-                product = await db.get(Product, product_id)
+                product = product_map.get(product_id)
                 if product is not None:
                     total_qty = sum(
                         item['quantity'] for item in stockouts_data
@@ -319,5 +320,7 @@ async def get_system_stats() -> dict:
                 'queries': query_tracker.get_stats()
             }
         }
-    except ImportError:
+    except (ImportError, AttributeError) as e:
+        # 不静默吞掉：模块本身出问题时必须留痕，否则又是「接口 500 无人知」
+        logger.warning('系统统计不可用: %s', e, exc_info=True)
         return {'cache': {}, 'performance': {}}

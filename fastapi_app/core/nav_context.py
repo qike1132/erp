@@ -1,7 +1,7 @@
 """
 导航权限注入 - 全异步模式
 
-提供 get_nav_sections() 函数，支持两级缓存（进程内 + Redis）。
+提供 get_nav_sections_async() 函数，支持两级缓存（进程内 + Redis）。
 """
 
 import asyncio
@@ -168,44 +168,3 @@ async def get_nav_sections_async() -> dict:
     except (OperationalError, DisconnectionError) as e:
         logger.warning("获取导航权限数据失败: %s [%s]", e, type(e).__name__)
         return _nav_local_cache["data"] or {}
-
-
-def get_nav_sections() -> dict:
-    """
-    获取导航分区数据 - 同步包装器（已废弃，保留向后兼容）。
-
-    注意：此函数已废弃，请使用 get_nav_sections_async()。
-    """
-    import warnings
-    warnings.warn(
-        "get_nav_sections() 已废弃，请使用 get_nav_sections_async()",
-        DeprecationWarning,
-        stacklevel=2
-    )
-
-    # 尝试从缓存获取
-    now = time.time()
-    if _nav_local_cache["data"] is not None and (now - _nav_local_cache["cached_at"]) < _nav_local_ttl:
-        return _nav_local_cache["data"]
-
-    try:
-        import asyncio as _aio
-
-        from fastapi_app.core.redis_wrapper import safe_get
-        try:
-            loop = _aio.get_running_loop()
-        except RuntimeError:
-            loop = None
-        if loop and loop.is_running():
-            cached = _aio.run_coroutine_threadsafe(safe_get('nav_sections', context="导航缓存(同步)"), loop).result(timeout=5)
-        else:
-            cached = _aio.run(safe_get('nav_sections', context="导航缓存(同步)"))
-        if cached is not None:
-            _nav_local_cache["data"] = cached
-            _nav_local_cache["cached_at"] = now
-            return cached
-    except (OSError, ConnectionError, ValueError, RuntimeError):
-        logger.warning("导航同步缓存读取失败", exc_info=True)
-
-    # 返回空数据，让异步版本填充
-    return _nav_local_cache["data"] or {}

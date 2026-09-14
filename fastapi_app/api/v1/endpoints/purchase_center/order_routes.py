@@ -560,7 +560,7 @@ async def api_get_orders_batch_print_data(
 @router.get('/unprocessed-orders', response_model=UnprocessedOrdersResponse)
 async def api_get_unprocessed_orders(
     page: int = Query(1, ge=1, description='页码'),
-    per_page: int = Query(15, ge=1, description='每页数量'),
+    per_page: int = Query(15, ge=1, le=500, description='每页数量'),
     db: AsyncSession = Depends(get_read_db),
     _current_user=Depends(require_permission('product_manage')),
 ) -> dict[str, Any]:

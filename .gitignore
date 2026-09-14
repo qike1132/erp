@@ -251,3 +251,18 @@ scripts/stock_sim/journal/
 
 # local-machine ops recovery script
 /_recover_prod.ps1
+
+# === 2026-09-13 复查清理：一次性脚本/产物/归档移出跟踪（磁盘文件保留） ===
+/_*.py
+/_*.sh
+/_*.txt
+/_proc5002.json
+/analyze-appdata.ps1
+/analyze_ruff.py
+/scan_quality*.ps1
+/remove_packaging.ps1
+/fix-pytest-cache-acl.cmd
+/backups/
+/temp/
+/tests/*.txt
+/tests/stress/results_*.csv

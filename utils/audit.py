@@ -94,6 +94,7 @@ class AuditService:
 
         with SyncSession() as session:
             session.add(audit_log)
+            session.commit()
 
         return audit_log
 

@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from fastapi_app.core.float_utils import round_qty
 from fastapi_app.services.purchase_order_crud import (
     cleanup_orphan_pending_purchase_orders,
     create_purchase_order,
@@ -219,7 +220,7 @@ async def generate_purchase_orders_from_customer_orders(
                     for bom in filling_map.get(role_id, []):
                         if bom.product_id != pid:
                             continue
-                        material_qty = float(bom.cotton_usage or 0) * qty
+                        material_qty = round_qty(float(bom.cotton_usage or 0) * qty)
                         result_items.append({
                             'material_name': product_name + '-填充物',
                             'material_code': bom.material_code or '',
@@ -238,7 +239,7 @@ async def generate_purchase_orders_from_customer_orders(
                     for fabric in fabric_map.get(role_id, []):
                         if fabric.product_id != pid:
                             continue
-                        material_qty = float(fabric.quantity or 0) * qty
+                        material_qty = round_qty(float(fabric.quantity or 0) * qty)
                         result_items.append({
                             'material_name': fabric.fabric_name or '面料',
                             'material_code': fabric.material_code or '',
@@ -257,7 +258,7 @@ async def generate_purchase_orders_from_customer_orders(
                     for acc in accessory_map.get(role_id, []):
                         if acc.product_id != pid:
                             continue
-                        material_qty = float(acc.quantity or 0) * qty
+                        material_qty = round_qty(float(acc.quantity or 0) * qty)
                         result_items.append({
                             'material_name': acc.accessory_name or '配件',
                             'material_code': acc.material_code or '',

@@ -8,6 +8,7 @@
 - 进度看板聚合（progress / current_process / status_label）
 """
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -18,12 +19,13 @@ from fastapi_app.services.outsource_service import (
     delete_order_process,
     delete_process_type,
     generate_order_processes,
-    get_kanban,
     list_order_flows,
     list_order_processes,
     list_process_types,
     receive_order_process,
+    receive_order_processes_batch,
     ship_order_process,
+    ship_order_processes_batch,
     sync_outsource_processes_for_order,
     update_process_type,
 )
@@ -79,6 +81,59 @@ def make_order_process(pid=1, order_id=1, item_id=None, product_id=1,
     p.create_time = datetime.now(UTC)
     p.update_time = datetime.now(UTC)
     return p
+
+
+def _oracle_process_stats(processes) -> dict:
+    """工序进度聚合的参照实现（改造前的 Python 口径）。
+
+    两处使用：
+    1) mock 掉数据库时，把聚合结果喂给 _attach_progress_to_orders；
+    2) 真实 SQL 测试中与数据库聚合查询的结果逐一对比（改造前后一致）。
+    排序与 SQL 保持一致：order_item_id（NULL 在后）、sort_order、id。
+    """
+    by_order: dict[int, list] = {}
+    for p in processes:
+        by_order.setdefault(p.order_id, []).append(p)
+
+    stats: dict[int, SimpleNamespace] = {}
+    for order_id, rows in by_order.items():
+        ordered = sorted(
+            rows,
+            key=lambda x: (x.order_item_id is None, x.order_item_id or 0, x.sort_order or 0, x.id),
+        )
+        full = [
+            (p.received_quantity or 0) > 0 and (p.received_quantity or 0) >= (p.shipped_quantity or 0)
+            for p in ordered
+        ]
+        current = next((p.process_type for p, f in zip(ordered, full) if not f), None)
+        stats[order_id] = SimpleNamespace(
+            order_id=order_id,
+            total_processes=len(ordered),
+            completed_processes=sum(1 for f in full if f),
+            started_processes=sum(1 for p in ordered if (p.shipped_quantity or 0) > 0),
+            current_process=current,
+        )
+    return stats
+
+
+def _progress_results(processes) -> list[MagicMock]:
+    """一页的两次窄查询结果：[进度聚合行, 有工序的 SKU 行]。"""
+    agg_result = MagicMock()
+    agg_result.all.return_value = list(_oracle_process_stats(processes).values())
+    items_result = MagicMock()
+    items_result.all.return_value = [
+        (p.order_id, p.order_item_id) for p in processes if p.order_item_id is not None
+    ]
+    return [agg_result, items_result]
+
+
+def _mock_progress_queries(mock_db, processes, *, pages: int = 10):
+    """让 mock 会话依次返回「进度聚合行」与「有工序的 SKU 行」两组窄查询结果。
+
+    _attach_progress_to_orders 每次调用会执行两次查询（每页一次），
+    故按目标页数重复准备 side_effect。
+    """
+    mock_db.execute = AsyncMock(side_effect=_progress_results(processes) * pages)
 
 
 class TestProcessTypeCRUD:
@@ -578,14 +633,12 @@ class TestOrderListProgress:
             ],
             'total': 3, 'page': 1, 'per_page': 50,
         }
-        proc_result = MagicMock()
-        proc_result.scalars.return_value.all.return_value = [
+        _mock_progress_queries(mock_async_db, [
             make_order_process(pid=1, order_id=1, process_type='电绣', status='received'),
             make_order_process(pid=2, order_id=1, process_type='转印', status='received'),
             make_order_process(pid=3, order_id=1, process_type='配件', status='pending'),
             make_order_process(pid=4, order_id=2, process_type='裁剪', status='received'),
-        ]
-        mock_async_db.execute = AsyncMock(return_value=proc_result)
+        ])
 
         result = await list_outsource_orders(mock_async_db, page=1, per_page=50)
 
@@ -612,9 +665,7 @@ class TestOrderListProgress:
             'items': [{'id': 1, 'record_type': 'order', 'order_no': 'PO-1'}],
             'total': 1, 'page': 1, 'per_page': 50,
         }
-        proc_result = MagicMock()
-        proc_result.scalars.return_value.all.return_value = []
-        mock_async_db.execute = AsyncMock(return_value=proc_result)
+        _mock_progress_queries(mock_async_db, [])
 
         result = await list_outsource_orders(mock_async_db)
 
@@ -638,16 +689,14 @@ class TestOrderListProgress:
             ],
             'total': 5, 'page': 1, 'per_page': 500,
         }
-        proc_result = MagicMock()
-        proc_result.scalars.return_value.all.return_value = [
+        _mock_progress_queries(mock_async_db, [
             make_order_process(pid=1, order_id=1, process_type='裁剪', status='pending'),
             make_order_process(pid=2, order_id=1, process_type='电绣', status='pending'),
             make_order_process(pid=3, order_id=2, process_type='裁剪', status='received'),
             make_order_process(pid=4, order_id=2, process_type='电绣', status='pending'),
             make_order_process(pid=5, order_id=3, process_type='裁剪', status='received'),
             make_order_process(pid=6, order_id=3, process_type='电绣', status='received'),
-        ]
-        mock_async_db.execute = AsyncMock(return_value=proc_result)
+        ], pages=30)
 
         pending = await list_outsource_orders(mock_async_db, page=1, per_page=50, process_status='pending')
         in_progress = await list_outsource_orders(mock_async_db, page=1, per_page=50, process_status='in_progress')
@@ -675,13 +724,10 @@ class TestOrderListProgress:
             ],
             'total': 4, 'page': 1, 'per_page': 500,
         }
-        proc_result = MagicMock()
-        # 全部订单均为待开始（pending）
-        proc_result.scalars.return_value.all.return_value = [
+        _mock_progress_queries(mock_async_db, [
             make_order_process(pid=i, order_id=i, process_type='裁剪', status='pending')
             for i in range(1, 5)
-        ]
-        mock_async_db.execute = AsyncMock(return_value=proc_result)
+        ], pages=20)
 
         page1 = await list_outsource_orders(mock_async_db, page=1, per_page=2, process_status='pending')
         page2 = await list_outsource_orders(mock_async_db, page=2, per_page=2, process_status='pending')
@@ -690,108 +736,6 @@ class TestOrderListProgress:
         assert [r['id'] for r in page1['items']] == [1, 2]
         assert [r['id'] for r in page2['items']] == [3, 4]
         assert page1['page'] == 1 and page2['page'] == 2
-
-
-class TestKanban:
-    """进度看板聚合（兼容保留）
-
-    patch 目标必须是真实定义模块：get_kanban 在 _queries 命名空间内调用
-    list_outsource_orders，patch 兼容层 outsource_service 是静默失效的。
-    """
-
-    @pytest.mark.asyncio
-    @patch('fastapi_app.services.outsource._queries.list_outsource_orders')
-    async def test_kanban_progress(self, mock_list, mock_async_db):
-        """看板：进度计算与当前工序"""
-        mock_list.return_value = {
-            'items': [{
-                'id': 1,
-                'order_no': 'ORD-001',
-                'customer': '客户A',
-                'order_date': '2026-08-01 10:00',
-                'record_type': 'order',
-                'items': [{'product_id': 1, 'product_name': '测试产品', 'quantity': 10}],
-            }],
-            'total': 1,
-            'page': 1,
-            'per_page': 20,
-        }
-        proc_result = MagicMock()
-        proc_result.scalars.return_value.all.return_value = [
-            make_order_process(pid=1, process_type='电绣', status='received'),
-            make_order_process(pid=2, process_type='转印', status='shipped'),
-            make_order_process(pid=3, process_type='配件', status='pending'),
-        ]
-        mock_async_db.execute = AsyncMock(return_value=proc_result)
-
-        result = await get_kanban(mock_async_db, page=1, per_page=20)
-
-        assert result['total'] == 1
-        order = result['items'][0]
-        assert order['total_processes'] == 3
-        assert order['completed_processes'] == 1
-        assert order['progress'] == 33
-        assert order['current_process'] == '转印'
-        assert '进行中' in order['status_label']
-
-    @pytest.mark.asyncio
-    @patch('fastapi_app.services.outsource._queries.list_outsource_orders')
-    async def test_kanban_no_processes(self, mock_list, mock_async_db):
-        """看板：未配置工序的订单"""
-        mock_list.return_value = {
-            'items': [{
-                'id': 2,
-                'order_no': 'ORD-002',
-                'customer': '客户B',
-                'order_date': '2026-08-02 09:00',
-                'record_type': 'order',
-                'items': [],
-            }],
-            'total': 1,
-            'page': 1,
-            'per_page': 20,
-        }
-        proc_result = MagicMock()
-        proc_result.scalars.return_value.all.return_value = []
-        mock_async_db.execute = AsyncMock(return_value=proc_result)
-
-        result = await get_kanban(mock_async_db)
-
-        order = result['items'][0]
-        assert order['progress'] == 0
-        assert order['status_label'] == '未配置工序'
-        assert order['current_process'] is None
-
-    @pytest.mark.asyncio
-    @patch('fastapi_app.services.outsource._queries.list_outsource_orders')
-    async def test_kanban_all_completed(self, mock_list, mock_async_db):
-        """看板：全部完成"""
-        mock_list.return_value = {
-            'items': [{
-                'id': 3,
-                'order_no': 'ORD-003',
-                'customer': '客户C',
-                'order_date': '2026-08-03 09:00',
-                'record_type': 'order',
-                'items': [],
-            }],
-            'total': 1,
-            'page': 1,
-            'per_page': 20,
-        }
-        proc_result = MagicMock()
-        proc_result.scalars.return_value.all.return_value = [
-            make_order_process(pid=1, order_id=3, process_type='电绣', status='received'),
-            make_order_process(pid=2, order_id=3, process_type='转印', status='received'),
-        ]
-        mock_async_db.execute = AsyncMock(return_value=proc_result)
-
-        result = await get_kanban(mock_async_db)
-
-        order = result['items'][0]
-        assert order['progress'] == 100
-        assert order['status_label'] == '外发完成'
-        assert order['current_process'] is None
 
 
 class TestOutsourceRegressions:
@@ -826,33 +770,6 @@ class TestOutsourceRegressions:
         assert first_call.kwargs.get('with_for_update') is True
 
     @pytest.mark.asyncio
-    @patch('fastapi_app.services.outsource._queries.list_outsource_orders')
-    async def test_kanban_excludes_stockin_ids(self, mock_list, mock_async_db):
-        """回归：备货记录的 id 是 StockIn.id，不得混入 order_id 查询
-
-        与 order.id 属两套主键空间，混入会把无关订单的工序挂到备货行上。
-        """
-        mock_list.return_value = {
-            'items': [
-                {'id': 7, 'order_no': 'PO-7', 'customer': '客户A', 'record_type': 'order', 'items': []},
-                {'id': 3, 'order_no': 'BH-1', 'customer': '客户B', 'record_type': 'stockin', 'items': []},
-            ],
-            'total': 2, 'page': 1, 'per_page': 20,
-        }
-        proc_result = MagicMock()
-        proc_result.scalars.return_value.all.return_value = []
-        mock_async_db.execute = AsyncMock(return_value=proc_result)
-
-        result = await get_kanban(mock_async_db)
-
-        stmt = mock_async_db.execute.await_args.args[0]
-        id_lists = [v for v in stmt.compile().params.values() if isinstance(v, list)]
-        assert id_lists == [[7]], f'工序查询不应包含备货 id，实际：{id_lists}'
-        stockin = next(r for r in result['items'] if r['record_type'] == 'stockin')
-        assert stockin['total_processes'] == 0
-        assert stockin['status_label'] == '未配置工序'
-
-    @pytest.mark.asyncio
     @patch('fastapi_app.services.order_crud.get_beile_orders_with_stockins')
     async def test_process_status_filter_scans_all_pages(self, mock_beile, mock_async_db):
         """回归：状态筛选必须遍历全部页，不能只取首页 500 条
@@ -870,12 +787,13 @@ class TestOutsourceRegressions:
                 'total': 501, 'page': 2, 'per_page': 500,
             },
         ]
-        proc_result = MagicMock()
         # 唯一一道「待发货」工序挂在第 501 条订单上（首页取不到）
-        proc_result.scalars.return_value.all.return_value = [
+        page2_processes = [
             make_order_process(pid=1, order_id=501, process_type='裁剪', status='pending'),
         ]
-        mock_async_db.execute = AsyncMock(return_value=proc_result)
+        mock_async_db.execute = AsyncMock(
+            side_effect=_progress_results([]) + _progress_results(page2_processes)
+        )
 
         result = await list_outsource_orders(
             mock_async_db, page=1, per_page=50, process_status='pending',
@@ -884,3 +802,348 @@ class TestOutsourceRegressions:
         assert mock_beile.call_count == 2, '状态筛选必须继续取第 2 页'
         assert result['total'] == 1
         assert [r['id'] for r in result['items']] == [501]
+
+    @pytest.mark.asyncio
+    @patch('fastapi_app.services.outsource._common._load_process_item_ids', new_callable=AsyncMock)
+    @patch('fastapi_app.services.outsource._common._load_process_stats', new_callable=AsyncMock)
+    async def test_progress_query_excludes_stockin_ids(self, mock_stats, mock_item_ids, mock_async_db):
+        """备货记录 id 与订单 id 不同域：进度查询只能带订单 id（防止串号挂错工序）
+
+        备货记录（record_type='stockin'）的 id 与订单 id 是两套编号，
+        若一起放进 order_id IN (...) 会把无关订单的工序挂到备货行上。
+        """
+        from fastapi_app.services.outsource._common import _attach_progress_to_orders
+
+        mock_stats.return_value = {}
+        mock_item_ids.return_value = {}
+        items = [
+            {'id': 7, 'record_type': 'order', 'items': [{'id': 11}]},
+            {'id': 3, 'record_type': 'stockin', 'stockin_no': 'BH-1'},
+        ]
+
+        await _attach_progress_to_orders(mock_async_db, items)
+
+        assert mock_stats.await_args.args[1] == [7], '备货 id 不得进入工序进度查询'
+        assert items[1]['status_label'] == '未配置工序'
+        assert items[1]['total_processes'] == 0
+
+
+class TestProcessProgressSqlAggregation:
+    """进度统计下推数据库：SQL 聚合结果与改造前的 Python 口径逐一对比"""
+
+    # (id, order_id, order_item_id, process_type, sort_order, status, shipped, received)
+    SPECS = [
+        # 订单 1：3 道工序，2 已收齐 + 1 未发货 → 进行中（配件）
+        (1, 1, 11, '电绣', 0, 'received', 10, 10),
+        (2, 1, 11, '转印', 1, 'received', 10, 10),
+        (3, 1, 11, '配件', 2, 'pending', None, None),
+        # 订单 2：全部收齐 → 外发完成
+        (4, 2, 21, '裁剪', 0, 'received', 5, 5),
+        # 订单 3：已发未收 → 进行中
+        (5, 3, 31, '电绣', 0, 'shipped', 8, None),
+        (6, 3, 31, '裁剪', 1, 'shipped', 8, 3),
+        # 订单 4：全部未发货 → 待发货
+        (7, 4, 41, '电绣', 0, 'pending', 0, None),
+    ]
+
+    @staticmethod
+    def _specs_as_objects():
+        return [
+            SimpleNamespace(
+                id=r[0], order_id=r[1], order_item_id=r[2], process_type=r[3],
+                sort_order=r[4], status=r[5], shipped_quantity=r[6], received_quantity=r[7],
+            )
+            for r in TestProcessProgressSqlAggregation.SPECS
+        ]
+
+    @staticmethod
+    async def _session(tmp_path):
+        """真实 SQLite 库（仅建外发工序相关表），用于验证聚合 SQL 语义"""
+        from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+        engine = create_async_engine(f'sqlite+aiosqlite:///{tmp_path / "oosp.db"}')
+        async with engine.begin() as conn:
+            await conn.run_sync(
+                lambda c: OrderOutsourceProcess.__table__.create(c, checkfirst=True)
+            )
+        return engine, async_sessionmaker(engine, expire_on_commit=False)
+
+    @pytest.mark.asyncio
+    async def test_sql_aggregation_matches_python_oracle(self, tmp_path):
+        """改造前后结果一致：数据库聚合 == 旧 Python 汇总（含 current_process）"""
+        from fastapi_app.services.outsource._common import (
+            _format_process_progress,
+            _load_process_stats,
+        )
+
+        engine, session_factory = await self._session(tmp_path)
+        try:
+            async with session_factory() as session:
+                for r in self.SPECS:
+                    session.add(OrderOutsourceProcess(
+                        id=r[0], order_id=r[1], order_item_id=r[2], product_id=1,
+                        product_name='测试产品', process_type=r[3], sort_order=r[4],
+                        status=r[5], shipped_quantity=r[6], received_quantity=r[7],
+                    ))
+                await session.commit()
+
+            async with session_factory() as session:
+                stats = await _load_process_stats(session, [1, 2, 3, 4, 999])
+
+            expected: dict[int, dict] = {}
+            for order_id, row in _oracle_process_stats(self._specs_as_objects()).items():
+                expected[order_id] = _format_process_progress(
+                    total=row.total_processes,
+                    completed=row.completed_processes,
+                    started=row.started_processes,
+                    current_process=row.current_process,
+                )
+
+            assert stats == expected
+            # 抽查关键口径，避免“两边都错成一样”时用例失去意义
+            assert stats[1]['progress'] == 67
+            assert stats[1]['current_process'] == '配件'
+            assert stats[3]['status_label'] == '进行中（电绣）'
+            assert stats[4]['status_label'] == '待发货'
+            assert stats[2]['status_label'] == '外发完成'
+            assert 999 not in stats
+        finally:
+            await engine.dispose()
+
+    @pytest.mark.asyncio
+    @patch('fastapi_app.services.order_crud.get_beile_orders_with_stockins')
+    async def test_progress_query_count_is_constant_per_page(self, mock_beile, mock_async_db):
+        """进度查询次数与订单数/工序数无关：每页固定 2 条窄查询（聚合 + 有工序的 SKU）"""
+        from fastapi_app.services.outsource._common import _attach_progress_to_orders
+
+        processes = [
+            make_order_process(pid=o * 10 + k, order_id=o, item_id=o, process_type=f'工序{k}')
+            for o in range(1, 41) for k in range(3)
+        ]
+        _mock_progress_queries(mock_async_db, processes)
+        items = [{'id': o, 'record_type': 'order', 'items': [{'id': o}]} for o in range(1, 41)]
+
+        await _attach_progress_to_orders(mock_async_db, items)
+
+        # 改造前：按订单拉取全部工序行（此处必然是 1 次大查询 + Python 循环），
+        # 改造后：固定 2 次（聚合行 + SKU 标记），不随订单/工序数量增长
+        assert mock_async_db.execute.await_count == 2
+        assert all(item['total_processes'] == 3 for item in items)
+        assert all(sku['has_processes'] for item in items for sku in item['items'])
+
+
+class TestBatchShipReceive:
+    """批量发货/收货：单事务内逐条复用单条发货/收货逻辑，失败即抛错回滚整批"""
+
+    @pytest.mark.asyncio
+    @patch('fastapi_app.services.outsource._order_processes.ship_order_process')
+    async def test_batch_ship_reuses_single_path_and_does_not_commit(self, mock_ship, mock_async_db):
+        """批量发货逐条复用带行锁的单条发货；服务层不得自行 commit（事务边界归端点）"""
+        mock_ship.side_effect = [{'id': 1, 'order_id': 7}, {'id': 2, 'order_id': 7}]
+
+        items = await ship_order_processes_batch(mock_async_db, 7, [(1, 5), (2, 3)], 'admin')
+
+        assert [i['id'] for i in items] == [1, 2]
+        assert [c.args[1:] for c in mock_ship.await_args_list] == [(1, 5, 'admin'), (2, 3, 'admin')]
+        mock_async_db.commit.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    @patch('fastapi_app.services.outsource._order_processes.ship_order_process')
+    async def test_batch_ship_failure_names_process_and_aborts(self, mock_ship, mock_async_db):
+        """任一条失败：抛错并指明工序，由外层事务整批回滚（不留下部分成功）"""
+        mock_ship.side_effect = [
+            {'id': 1, 'order_id': 7},
+            ValueError('发货数量超过剩余数量（剩余 3）'),
+        ]
+
+        with pytest.raises(ValueError, match='外发工序 2：发货数量超过剩余数量'):
+            await ship_order_processes_batch(mock_async_db, 7, [(1, 5), (2, 9)], 'admin')
+        assert mock_ship.await_count == 2
+
+    @pytest.mark.asyncio
+    @patch('fastapi_app.services.outsource._order_processes.ship_order_process')
+    async def test_batch_ship_rejects_process_from_other_order(self, mock_ship, mock_async_db):
+        """防越权：批量接口只允许操作路径上的订单自己的工序"""
+        mock_ship.return_value = {'id': 1, 'order_id': 999}
+
+        with pytest.raises(ValueError, match='不属于订单 7'):
+            await ship_order_processes_batch(mock_async_db, 7, [(1, 5)], 'admin')
+
+    @pytest.mark.asyncio
+    @patch('fastapi_app.services.outsource._order_processes.receive_order_process')
+    async def test_batch_receive_passes_quantity_and_operator(self, mock_receive, mock_async_db):
+        """批量收货把本批数量与操作人透传给单条收货（None 表示按剩余待收）"""
+        mock_receive.side_effect = [
+            {'id': 1, 'order_id': 7}, {'id': 2, 'order_id': 7},
+        ]
+
+        await receive_order_processes_batch(mock_async_db, 7, [(1, 4), (2, None)], '收货员')
+
+        assert [c.args[1:] for c in mock_receive.await_args_list] == [(1, '收货员'), (2, '收货员')]
+        assert [c.kwargs['received_quantity'] for c in mock_receive.await_args_list] == [4, None]
+
+
+class TestShipReceivePermissions:
+    """发货/收货改为权限点：outsource_ship / outsource_receive（不再按用户名 == 贝乐 硬编码）"""
+
+    @staticmethod
+    def _route_permission(suffix: str, method: str = 'POST') -> str | None:
+        """取出该路由实际依赖的权限点名称（require_permission 的闭包变量）"""
+        from fastapi_app.api.v1.endpoints.outsource import router
+
+        for route in router.routes:
+            if not getattr(route, 'path', '').endswith(suffix) or method not in route.methods:
+                continue
+            for dep in route.dependant.dependencies:
+                if getattr(dep.call, '__name__', '') != 'permission_checker':
+                    continue
+                for cell in dep.call.__closure__ or ():
+                    try:
+                        value = cell.cell_contents
+                    except ValueError:  # pragma: no cover - 空闭包单元格
+                        continue
+                    if isinstance(value, str):
+                        return value
+        return None
+
+    def test_ship_and_receive_routes_use_permission_points(self):
+        assert self._route_permission('/processes/{process_id}/ship') == 'outsource_ship'
+        assert self._route_permission('/processes/{process_id}/receive') == 'outsource_receive'
+        assert self._route_permission('/orders/{order_id}/processes/ship-batch') == 'outsource_ship'
+        assert self._route_permission('/orders/{order_id}/processes/receive-batch') == 'outsource_receive'
+
+    def test_ship_and_receive_are_independent_permissions(self):
+        """发货与收货是两个独立权限点：同一账号可分别授予（原实现两者互斥）"""
+        assert self._route_permission('/processes/{process_id}/ship') != self._route_permission(
+            '/processes/{process_id}/receive'
+        )
+
+
+class TestConcurrencyAndLegacyData:
+    """并发与异常路径：并发发货不丢量、旧数据 status 与数量不一致、缓存命中时进度新鲜度"""
+
+    @staticmethod
+    async def _session(tmp_path):
+        from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+        from fastapi_app.shared_models import OrderOutsourceProcessFlow
+
+        engine = create_async_engine(f'sqlite+aiosqlite:///{tmp_path / "oosp.db"}')
+        async with engine.begin() as conn:
+            await conn.run_sync(
+                lambda c: OrderOutsourceProcess.__table__.create(c, checkfirst=True)
+            )
+            await conn.run_sync(
+                lambda c: OrderOutsourceProcessFlow.__table__.create(c, checkfirst=True)
+            )
+        return engine, async_sessionmaker(engine, expire_on_commit=False)
+
+    @pytest.mark.asyncio
+    async def test_two_ship_calls_accumulate_without_losing_quantity(self, tmp_path):
+        """两次发货不丢量：按「锁内读到的累计值 + 本次数量」累加，流水逐次留痕
+
+        注：SQLite 不支持 SELECT ... FOR UPDATE（无法在本用例中重现真正的并发竞争），
+        「读-改-写 必须拿行锁」由 test_ship_locks_process_row / test_receive_locks_process_row
+        直接断言；本用例验证累加语义与流水条数在真实库上成立。
+        """
+        from sqlalchemy import func, select
+
+        from fastapi_app.services.outsource import _order_processes as mod
+        from fastapi_app.shared_models import OrderOutsourceProcessFlow
+
+        engine, session_factory = await self._session(tmp_path)
+        try:
+            async with session_factory() as session:
+                session.add(OrderOutsourceProcess(
+                    id=1, order_id=1, order_item_id=None, product_id=1, product_name='测试产品',
+                    process_type='电绣', sort_order=0, status='pending',
+                    shipped_quantity=None, received_quantity=None,
+                ))
+                await session.commit()
+
+            async with session_factory() as session:
+                with patch.object(mod, '_process_target_quantity', AsyncMock(return_value=100)):
+                    await mod.ship_order_process(session, 1, 5, '甲')
+                    await mod.ship_order_process(session, 1, 3, '乙')
+                await session.commit()
+
+            async with session_factory() as session:
+                p = await session.get(OrderOutsourceProcess, 1)
+                flow_count = await session.scalar(
+                    select(func.count()).select_from(OrderOutsourceProcessFlow)
+                )
+
+            assert p.shipped_quantity == 8, '第二次发货必须基于第一次的累计值，不能覆盖'
+            assert p.status == 'shipped'
+            assert flow_count == 2, '每次发货各留一条流水'
+        finally:
+            await engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_legacy_row_with_stale_status_is_derived_from_quantities(self, tmp_path):
+        """旧数据 status 与数量不一致（status='received' 但没收到货）：以数量为准，写回时自愈
+
+        - 进度聚合不信任 status 列，按数量派生 → 不会误报「外发完成」
+        - 发货/收货的准入判定同样按数量（_is_fully_received）→ 旧行仍可正常发/收货
+        - 写回时用数量重算 status，把不一致的旧值纠正过来
+        """
+        from fastapi_app.services.outsource import _order_processes as mod
+        from fastapi_app.services.outsource._common import _load_process_stats
+
+        engine, session_factory = await self._session(tmp_path)
+        try:
+            async with session_factory() as session:
+                session.add(OrderOutsourceProcess(
+                    id=1, order_id=1, order_item_id=None, product_id=1, product_name='测试产品',
+                    process_type='电绣', sort_order=0,
+                    status='received',          # 旧数据：status 声称已收货
+                    shipped_quantity=10, received_quantity=0,   # 但数量根本没收
+                ))
+                await session.commit()
+
+            async with session_factory() as session:
+                stats = await _load_process_stats(session, [1])
+
+            assert stats[1]['completed_processes'] == 0, '进度按数量派生，不被 status 列误导'
+            assert stats[1]['progress'] == 0
+            assert stats[1]['status_label'] == '进行中（电绣）'
+
+            async with session_factory() as session:
+                item = await mod.receive_order_process(session, 1, '收货员')
+                await session.commit()
+
+            assert item['status'] == 'received'
+            async with session_factory() as session:
+                p = await session.get(OrderOutsourceProcess, 1)
+            assert p.received_quantity == 10
+        finally:
+            await engine.dispose()
+
+    @pytest.mark.asyncio
+    @patch('fastapi_app.services.order_crud.get_beile_orders_with_stockins')
+    async def test_cached_order_list_still_gets_fresh_progress(self, mock_beile, mock_async_db):
+        """订单列表命中缓存（同一 list 对象）时：进度必须按本次数据库结果重算
+
+        get_beile_orders_with_stockins 带 @cache_result(ttl=60)，进度不在其缓存键内，
+        因此每次请求都要重新聚合；同时进度不能就地写回缓存对象。
+        """
+        from fastapi_app.services.outsource_service import list_outsource_orders
+
+        cached_items = [{'id': 1, 'record_type': 'order', 'order_no': 'PO-1'}]
+        mock_beile.return_value = {
+            'items': cached_items, 'total': 1, 'page': 1, 'per_page': 50,
+        }
+        pending = [make_order_process(pid=1, order_id=1, process_type='电绣', status='pending')]
+        received = [make_order_process(pid=1, order_id=1, process_type='电绣', status='received')]
+        mock_async_db.execute = AsyncMock(
+            side_effect=_progress_results(pending) + _progress_results(received)
+        )
+
+        first = await list_outsource_orders(mock_async_db, page=1, per_page=50)
+        second = await list_outsource_orders(mock_async_db, page=1, per_page=50)
+
+        assert first['items'][0]['status_label'] == '待发货'
+        assert second['items'][0]['status_label'] == '外发完成'
+        assert second['items'][0]['progress'] == 100
+        # 缓存对象不得被就地写入进度字段（否则会污染 beile-order 页面的缓存响应）
+        assert 'progress' not in cached_items[0]
+        assert 'status_label' not in cached_items[0]
+        assert 'has_processes' not in cached_items[0]

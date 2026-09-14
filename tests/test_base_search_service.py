@@ -10,7 +10,7 @@ class _MockSearchService(BaseSearchService):
         return MagicMock(__name__='MockModel')
     def get_search_fields(self):
         return ['name', 'code']
-    def get_result_serializer(self):
+    def get_result_formatter(self):
         return lambda x: {'id': x.id, 'name': getattr(x, 'name', '')}
 
 
@@ -24,9 +24,9 @@ class TestBaseSearchService:
         fields = svc.get_search_fields()
         assert fields == ['name', 'code']
 
-    def test_get_result_serializer(self):
+    def test_get_result_formatter(self):
         svc = _MockSearchService()
-        serializer = svc.get_result_serializer()
+        serializer = svc.get_result_formatter()
         m = MagicMock(id=1, name='Test')
         result = serializer(m)
         assert result['id'] == 1

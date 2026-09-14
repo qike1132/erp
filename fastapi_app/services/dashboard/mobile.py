@@ -9,6 +9,7 @@ from sqlalchemy import extract, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.cache import cache_result
+from fastapi_app.core.float_utils import round_money
 from fastapi_app.schemas.dashboard import (
     MobileDashboardData,
     MobileDashboardResponse,
@@ -94,11 +95,11 @@ async def fetch_mobile_dashboard(query_date: str | None, db: AsyncSession) -> di
             .join(Product, StockOut.product_id == Product.id, isouter=True)
         )).one()
         stock_data.today_quantity = int(stock_row.today_qty)
-        stock_data.today_amount = round(float(stock_row.today_amt), 2)
+        stock_data.today_amount = round_money(float(stock_row.today_amt))
         stock_data.month_quantity = int(stock_row.month_qty)
-        stock_data.month_amount = round(float(stock_row.month_amt), 2)
+        stock_data.month_amount = round_money(float(stock_row.month_amt))
         stock_data.total_quantity = int(stock_row.total_qty)
-        stock_data.total_amount = round(float(stock_row.total_amt), 2)
+        stock_data.total_amount = round_money(float(stock_row.total_amt))
         # shipping_data 复用 stock 当日值
         # 业务等价性说明：移动看板中"出货"(shipping) 与"出库"(stock) 在当日维度指同一批
         # StockOut 记录（SUM(quantity) + SUM(quantity*price) WHERE stockout_date=today）。
@@ -132,10 +133,10 @@ async def fetch_mobile_dashboard(query_date: str | None, db: AsyncSession) -> di
             dept = dept_name_map.get(dept_code, dept_code)
             qty = int(row[1] or 0)
             val = float(row[2] or 0)
-            dept_map[dept] = {"name": dept, "daily_output": qty, "output_value": round(val, 2)}
+            dept_map[dept] = {"name": dept, "daily_output": qty, "output_value": round_money(val)}
             total_val += val
 
-        production_data.total_value = round(total_val, 2)
+        production_data.total_value = round_money(total_val)
 
         if not dept_map:
             any_result = await db.execute(
@@ -155,12 +156,12 @@ async def fetch_mobile_dashboard(query_date: str | None, db: AsyncSession) -> di
                 if dept not in dept_map:
                     qty = int(row[1] or 0)
                     val = float(row[2] or 0)
-                    dept_map[dept] = {"name": dept, "daily_output": qty, "output_value": round(val, 2)}
+                    dept_map[dept] = {"name": dept, "daily_output": qty, "output_value": round_money(val)}
                     total_val += val
-            production_data.total_value = round(total_val, 2)
+            production_data.total_value = round_money(total_val)
 
         for d in dept_map.values():
-            d["output_value"] = round(d["output_value"], 2)
+            d["output_value"] = round_money(d["output_value"])
             production_data.departments.append(MobileDeptData(**d))
         logger.info(f"生产数据加载完成: {len(production_data.departments)}个部门, 总值{production_data.total_value}")
     except Exception as e:  # defensive: 移动看板单个数据卡片失败时继续加载其他卡片
@@ -192,9 +193,9 @@ async def fetch_mobile_dashboard(query_date: str | None, db: AsyncSession) -> di
             .where(Order.is_deleted.isnot(True))
         )).one()
         order_data.daily_qty = int(order_row.daily_qty)
-        order_data.daily_amount = round(float(order_row.daily_amt), 2)
+        order_data.daily_amount = round_money(float(order_row.daily_amt))
         order_data.total_qty = int(order_row.total_qty)
-        order_data.total_amount = round(float(order_row.total_amt), 2)
+        order_data.total_amount = round_money(float(order_row.total_amt))
 
         # 产品总库存数量 + 金额合并（2→1）
         inv_row = (await db.execute(
@@ -204,7 +205,7 @@ async def fetch_mobile_dashboard(query_date: str | None, db: AsyncSession) -> di
             )
         )).one()
         order_data.total_inventory = int(inv_row.inv_qty)
-        order_data.total_inventory_amount = round(float(inv_row.inv_amt), 2)
+        order_data.total_inventory_amount = round_money(float(inv_row.inv_amt))
     except Exception as e:  # defensive: 移动看板单个数据卡片失败时继续加载其他卡片
         logger.warning("移动看板订单数据加载失败: %s", e)
 
@@ -221,7 +222,7 @@ async def fetch_mobile_dashboard(query_date: str | None, db: AsyncSession) -> di
             .where(CaseStockIn.stockin_date < today_end)
         )).one()
         warehouse_data.in_qty = int(csi_row.qty)
-        warehouse_data.in_amount = round(float(csi_row.amt), 2)
+        warehouse_data.in_amount = round_money(float(csi_row.amt))
 
         cso_row = (await db.execute(
             select(
@@ -234,7 +235,7 @@ async def fetch_mobile_dashboard(query_date: str | None, db: AsyncSession) -> di
             .where(CaseStockOut.stockout_date < today_end)
         )).one()
         warehouse_data.out_qty = int(cso_row.qty)
-        warehouse_data.out_amount = round(float(cso_row.amt), 2)
+        warehouse_data.out_amount = round_money(float(cso_row.amt))
     except Exception as e:  # defensive: 移动看板单个数据卡片失败时继续加载其他卡片
         logger.warning("移动看板仓储数据加载失败: %s", e)
 

@@ -306,7 +306,7 @@ describe('BeileOrderTab 状态列与确认按钮行为', () => {
 
     const btn = wrapper.find('.vl-row .bo-confirm-btn')
     expect(btn.exists()).toBe(true)
-    expect(btn.text()).toBe('确认订单')
+    expect(btn.text()).toBe('确认备货')
 
     await btn.trigger('click')
     await flushPromises()

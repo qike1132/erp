@@ -1,8 +1,6 @@
 """PostgreSQL 快照/LSN/WAL。"""
 from __future__ import annotations
 
-import asyncio
-import json
 import logging
 import os
 from datetime import datetime
@@ -12,7 +10,6 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ._constants import BACKUP_DIR
 from .exceptions import BinaryLogError, DatabaseSnapshotError
 
 logger = logging.getLogger(__name__)
@@ -134,77 +131,30 @@ async def create_binary_log_backup(
 ) -> dict:
     """创建基于 PostgreSQL WAL 的二进制日志备份
 
+    ⚠️ 尚未实现（P0-10，2026-09-12）。
+
+    此前实现会写出一份元数据 JSON，并把 `backup_file` 填成
+    `wal_backup_<ts>.tar.gz` 这一路径返回 success=True，但**该文件从未被创建** ——
+    全程没有任何 pg_basebackup / pg_receivewal 调用。
+    而调用方 `incremental.create_wal_incremental_backup` 又不校验文件是否存在，
+    于是会落库一条「看起来是备份、实际不含 WAL 数据」的记录，
+    在灾备场景下误导运维认为已具备 PITR 能力。假成功比失败更危险，故改为显式抛错。
+
+    待实现时需要：`pg_basebackup -D <dir> -Ft -z` 建基础备份 +
+    `pg_receivewal` 归档 WAL，恢复侧配置 `recovery.signal` / `restore_command`。
+
     Args:
         db: 数据库会话
-        start_lsn: 起始 LSN，如果为 None 则从当前 LSN 开始
-        output_dir: 输出目录，如果为 None 则使用备份目录
+        start_lsn: 起始 LSN（保留入参以兼容既有签名）
+        output_dir: 输出目录（保留入参以兼容既有签名）
 
-    Returns:
-        包含备份信息的字典
+    Raises:
+        BinaryLogError: 该功能尚未实现
     """
-    try:
-        # 获取当前 WAL 信息
-        wal_info = await get_postgres_wal_info(db)
-        if not wal_info.get('current_lsn'):
-            raise BinaryLogError("无法获取当前 LSN")
-
-        current_lsn = wal_info['current_lsn']
-        start_lsn = start_lsn or current_lsn
-
-        # 确保输出目录存在
-        if output_dir is None:
-            output_dir = BACKUP_DIR / 'wal_archive'
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        # 生成备份文件名
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        backup_file = output_dir / f'wal_backup_{timestamp}.tar.gz'
-
-        # 获取数据库连接信息
-        os.getenv('DB_HOST', 'localhost')
-        os.getenv('DB_PORT', '5432')
-        os.getenv('DB_USER', 'erp_app')
-        db_name = os.getenv('DB_NAME', 'erp_system')
-        if not db_name.isidentifier() or not all(c.isalnum() or c == '_' for c in db_name) or db_name[0].isdigit():
-            raise ValueError(f'Invalid database name: {db_name!r}')
-        db_password = os.getenv('DB_PASSWORD', '')
-
-        # 设置环境变量
-        env = os.environ.copy()
-        env['PGPASSWORD'] = db_password
-
-        # 使用 pg_basebackup 创建基础备份（如果需要）
-        # 或者使用 pg_receivewal 接收 WAL 日志
-        # 这里我们使用 pg_dump 的逻辑，但实际应该使用 pg_basebackup 或 pg_receivewal
-
-        # 暂时实现为创建包含 WAL 信息的元数据文件
-        backup_info = {
-            'type': 'binary_log',
-            'start_lsn': start_lsn,
-            'end_lsn': current_lsn,
-            'wal_info': wal_info,
-            'created_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            'backup_file': str(backup_file),
-        }
-
-        # 保存备份信息到文件
-        info_file = output_dir / f'wal_backup_{timestamp}.json'
-        info_file.write_text(json.dumps(backup_info, indent=2, ensure_ascii=False))
-
-        logger.info(f"创建二进制日志备份: 从 LSN {start_lsn} 到 {current_lsn}")
-
-        return {
-            'success': True,
-            'backup_file': str(backup_file),
-            'info_file': str(info_file),
-            'start_lsn': start_lsn,
-            'end_lsn': current_lsn,
-            'wal_info': wal_info,
-        }
-
-    except Exception as e:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断
-        logger.error(f"创建二进制日志备份失败: {e}")
-        raise BinaryLogError(f"创建二进制日志备份失败: {e}") from e
+    raise BinaryLogError(
+        'WAL 二进制日志备份尚未实现（缺少 pg_basebackup / pg_receivewal 集成）。'
+        '如需时间点恢复（PITR）请先完成实现；当前请使用全量备份 + 增量备份。'
+    )
 
 
 async def restore_from_binary_log(
@@ -214,48 +164,24 @@ async def restore_from_binary_log(
 ) -> dict:
     """从二进制日志备份恢复
 
+    ⚠️ 尚未实现（P0-10，2026-09-12）。
+
+    此前实现会读取备份信息文件、解析出 LSN，然后**不执行任何恢复动作**
+    却返回 `success: True`（原文注释即为「暂时返回成功信息」）。
+    这是典型的假成功：调用方据此会判断已完成 PITR 恢复。现改为显式抛错。
+
     Args:
         db: 数据库会话
         backup_info_file: 备份信息文件路径
-        target_lsn: 目标 LSN，如果为 None 则恢复到最新
+        target_lsn: 目标 LSN（保留入参以兼容既有签名）
 
-    Returns:
-        恢复结果字典
+    Raises:
+        BinaryLogError: 该功能尚未实现
     """
-    try:
-        # 读取备份信息
-        if not backup_info_file.exists():
-            raise BinaryLogError(f"备份信息文件不存在: {backup_info_file}")
-
-        backup_info = json.loads(backup_info_file.read_text())
-        if backup_info.get('type') != 'binary_log':
-            raise BinaryLogError(f"不是二进制日志备份文件: {backup_info_file}")
-
-        start_lsn = backup_info.get('start_lsn')
-        end_lsn = backup_info.get('end_lsn')
-
-        if not start_lsn or not end_lsn:
-            raise BinaryLogError(f"备份信息文件缺少 LSN 信息: {backup_info_file}")
-
-        target_lsn = target_lsn or end_lsn
-
-        logger.info(f"从二进制日志备份恢复: 从 LSN {start_lsn} 到 {target_lsn}")
-
-        # 这里应该实现实际的 WAL 恢复逻辑
-        # 实际实现需要使用 pg_restore 或类似的工具
-
-        # 暂时返回成功信息
-        return {
-            'success': True,
-            'message': f"二进制日志恢复已计划: 从 {start_lsn} 到 {target_lsn}",
-            'start_lsn': start_lsn,
-            'target_lsn': target_lsn,
-            'restored_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-        }
-
-    except Exception as e:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断
-        logger.error(f"从二进制日志备份恢复失败: {e}")
-        raise BinaryLogError(f"从二进制日志备份恢复失败: {e}") from e
+    raise BinaryLogError(
+        'WAL 二进制日志恢复尚未实现。此前该函数返回成功但不执行任何恢复，'
+        '现已改为显式报错以免误判灾备能力。'
+    )
 
 
 async def get_pg_version(host, port, user, password, env) -> str:

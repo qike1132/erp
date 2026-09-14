@@ -3,7 +3,7 @@
 P2-15: 仪表盘统计与最近活动已迁移到 /api/v2，
 复用服务层逻辑以保证与 v1 行为一致，并通过响应头暴露版本与弃用政策。
 """
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.exc import DisconnectionError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import Response
@@ -49,7 +49,8 @@ async def get_dashboard_stats_v2(
     try:
         dashboard_stats = await fetch_dashboard_stats(db)
     except (OperationalError, DisconnectionError):
-        dashboard_stats = {}
+        # 数据库不可用不得吞成空统计返回 200（掩盖故障），显式 503 触发告警。
+        raise HTTPException(status_code=503, detail="数据库暂不可用，请稍后重试") from None
     _set_version_headers(response)
     return DashboardResponse(success=True, data=DashboardStats(**dashboard_stats))
 

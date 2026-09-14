@@ -420,26 +420,27 @@ class TestServiceMockErrors:
             await create_part(mock_async_db, 1, part_name='身体')
 
     async def test_upload_image_unsupported_type(self, mock_async_db):
-        """上传图片：不支持的格式 → BusinessError"""
-        # _ensure_project_exists 通过
-        mock_async_db.execute = AsyncMock(return_value=_mock_result(scalar_value=1))
-        with pytest.raises(BusinessError):
-            await upload_project_image(
-                mock_async_db, 1,
+        """上传图片：不支持的格式 → BusinessError
+
+        内容/类型/大小校验已前移至 validate_project_image（端点在事务前调用），
+        service 层 upload_project_image 不再重复校验。
+        """
+        from fastapi_app.services.customer_sampling_service import validate_project_image
+
+        with pytest.raises(BusinessError, match='图片格式不支持'):
+            validate_project_image(
                 content=b'\x00',
-                original_filename='test.gif',
                 content_type='image/gif',
             )
 
     async def test_upload_image_too_large(self, mock_async_db):
-        """上传图片：超过 10MB → BusinessError"""
-        mock_async_db.execute = AsyncMock(return_value=_mock_result(scalar_value=1))
+        """上传图片：超过 10MB → BusinessError（校验前移至 validate_project_image）"""
+        from fastapi_app.services.customer_sampling_service import validate_project_image
+
         large_content = b'\x00' * (10 * 1024 * 1024 + 1)
-        with pytest.raises(BusinessError):
-            await upload_project_image(
-                mock_async_db, 1,
+        with pytest.raises(BusinessError, match='图片大小不能超过'):
+            validate_project_image(
                 content=large_content,
-                original_filename='test.png',
                 content_type='image/png',
             )
 
@@ -471,6 +472,12 @@ async def cs_db():
     首次运行时通过 Base.metadata.create_all 幂等创建缺失表（开发环境安全）。
     """
     from fastapi_app.shared_models import Base
+
+    # 让 app 全局引擎在当前测试 loop 上按 conftest 重定向后的 URL 重建：
+    # create_project/create_version 经 numbering_sequence.allocate_sequence 直接
+    # 引用 _AsyncSessionLocal（非请求路径），不先跑守卫则该引用为 None → TypeError。
+    from fastapi_app.core import database as _db_mod
+    await _db_mod.ensure_engine_for_current_loop()
 
     engine = create_async_engine(TEST_DATABASE_URL, echo=False, pool_pre_ping=True)
     try:

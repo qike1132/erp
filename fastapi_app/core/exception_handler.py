@@ -13,9 +13,19 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
+try:
+    import redis.exceptions as _redis_exceptions
+    _REDIS_INFRA: tuple[type[BaseException], ...] = (_redis_exceptions.RedisError,)
+except ImportError:  # pragma: no cover - redis 为运行时必需依赖，此处仅保证模块可导入
+    _REDIS_INFRA = ()
+
 logger = logging.getLogger(__name__)
 
-INFRA_EXCEPTIONS = (OSError, ConnectionError)  # 移除 ValueError：业务校验异常不应被基础设施降级捕获
+# 说明：redis-py 的 ConnectionError / TimeoutError / AuthenticationError 均继承自
+# redis.exceptions.RedisError，而 **不** 继承 Python 内置的 ConnectionError / OSError
+# （已实测 issubclass(redis.exceptions.ConnectionError, ConnectionError) is False）。
+# 因此必须显式纳入 RedisError，否则 Redis 不可用/认证失败不会走降级路径，而是直接冒泡。
+INFRA_EXCEPTIONS = (OSError, ConnectionError, *_REDIS_INFRA)  # 移除 ValueError：业务校验异常不应被基础设施降级捕获
 
 
 async def safe_call(
@@ -36,7 +46,7 @@ async def safe_call(
     等价于:
         try:
             result = await redis_cache.get(key)
-        except (OSError, ConnectionError) as e:
+        except INFRA_EXCEPTIONS as e:
             logger.warning("客户名称缓存读取失败: %s", e)
             result = None
     """

@@ -13,18 +13,18 @@ _async_redis_client = None
 
 
 def redis_infra_exceptions():
-    """Redis 异常基类（redis.exceptions.RedisError）与内置基础设施异常并集。
+    """基础设施异常元组（含 redis.exceptions.RedisError）。
 
     注意：redis-py 的 ConnectionError/AuthenticationError 继承自 RedisError
     而非 Python 内置 ConnectionError，必须显式纳入，否则 Redis 不可用/认证
     失败会在启动预热时逃逸并导致应用启动崩溃。
+
+    历史：本函数曾手工拼接 (*INFRA_EXCEPTIONS, RedisError) 作为局部绕过。
+    RedisError 现已收进 exception_handler.INFRA_EXCEPTIONS 根定义，
+    本函数保留为兼容转发（notification_service 等仍在调用）。
     """
     from fastapi_app.core.exception_handler import INFRA_EXCEPTIONS
-    try:
-        import redis.exceptions as redis_exc
-        return (*INFRA_EXCEPTIONS, redis_exc.RedisError)
-    except Exception:  # broad-except: 服务层容错，返回安全默认值
-        return INFRA_EXCEPTIONS
+    return INFRA_EXCEPTIONS
 
 
 async def get_async_redis_client():

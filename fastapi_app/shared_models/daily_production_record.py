@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from sqlalchemy import Date, DateTime, Index, Integer, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column
 
+from fastapi_app.core.float_utils import round_money
 from fastapi_app.shared_models import Base
 
 
@@ -52,7 +53,7 @@ class DailyProductionRecord(Base):
             'barcode': self.barcode or '',
             'unit_price': up,
             'quantity': self.quantity,
-            'production_value': round(up * self.quantity, 2),
+            'production_value': round_money(up * self.quantity),
             'production_date': self.production_date.isoformat() if self.production_date else '',
             'remark': self.remark or '',
             'create_time': self.create_time.strftime('%Y-%m-%d %H:%M:%S') if self.create_time else '',

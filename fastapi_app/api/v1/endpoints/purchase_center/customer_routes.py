@@ -96,8 +96,12 @@ async def api_sync_customers(
     # 当前实现为只读快照模式：返回客户完整数据供调用方同步至外部系统。
     # TODO(待业务方明确外部同步目标系统后实现写入逻辑，如更新 sync_time 字段或推送至采购中心服务)
     if data.force:
-        # force 参数当前未实现（无写入逻辑），仅记录警告便于排查
-        logger.warning('api_sync_customers: force=True 已接收但当前快照模式下未生效')
+        # force 参数当前未实现（无写入逻辑）。返回 501 显式告知，而非静默忽略后
+        # 返回 200 造成「已强制同步」的契约误导。
+        raise HTTPException(
+            status_code=501,
+            detail='force 同步尚未实现（当前仅支持只读快照模式），请勿传入 force=true',
+        )
     details = [
         {
             'id': c.id,

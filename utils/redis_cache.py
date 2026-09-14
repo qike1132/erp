@@ -260,58 +260,6 @@ class RedisCacheManager:
 redis_cache = RedisCacheManager()
 
 
-def redis_cached(timeout: int = 300, key_prefix: str | None = None):
-    """异步 Redis 缓存装饰器，支持 async 和 sync 函数"""
-    def decorator(f):
-        is_async = asyncio.iscoroutinefunction(f)
-
-        if is_async:
-            @wraps(f)
-            async def async_wrapper(*args, **kwargs):
-                cache_key = _generate_cache_key(f, key_prefix, args, kwargs)
-                result = await redis_cache.get(cache_key)
-                if result is not None:
-                    return result
-                result = await f(*args, **kwargs)
-                if result is not None:
-                    await redis_cache.set(cache_key, result, timeout)
-                return result
-            return async_wrapper
-        else:
-            @wraps(f)
-            def sync_wrapper(*args, **kwargs):
-                cache_key = _generate_cache_key(f, key_prefix, args, kwargs)
-                import asyncio as _aio
-                try:
-                    loop = _aio.get_running_loop()
-                except RuntimeError:
-                    loop = None
-
-                if loop and loop.is_running():
-                    result = _aio.run_coroutine_threadsafe(
-                        redis_cache.get(cache_key), loop
-                    ).result(timeout=5)
-                else:
-                    result = _aio.run(redis_cache.get(cache_key))
-
-                if result is not None:
-                    return result
-
-                result = f(*args, **kwargs)
-
-                if result is not None:
-                    if loop and loop.is_running():
-                        _aio.run_coroutine_threadsafe(
-                            redis_cache.set(cache_key, result, timeout), loop
-                        )
-                    else:
-                        _aio.run(redis_cache.set(cache_key, result, timeout))
-
-                return result
-            return sync_wrapper
-    return decorator
-
-
 def cache_invalidate(*key_patterns):
     """缓存失效装饰器，支持 async 和 sync 函数"""
     def decorator(f):

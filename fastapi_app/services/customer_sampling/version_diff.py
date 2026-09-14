@@ -113,6 +113,18 @@ def _version_num(version_no: str | None) -> int:
         return 0
 
 
+def _next_version(version_no: str | None) -> str:
+    """返回下一个版本号：T1 -> T2、t5 -> T6；无效输入降级为 T1
+
+    由 _version_num 组合而来（板房拆分时从旧 facade 移除，此处恢复为
+    可复用纯函数，避免调用方各自内联 f'T{max+1}'）。
+    """
+    num = _version_num(version_no)
+    if num <= 0:
+        return 'T1'
+    return f'T{num + 1}'
+
+
 
 def _normalize_value(value: Any) -> Any:
     """规范化字段值用于 diff 比较

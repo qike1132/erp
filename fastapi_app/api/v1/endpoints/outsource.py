@@ -5,28 +5,35 @@
 - 湖北工厂订单列表（复用 beile-list 逻辑，强制 factory=湖北）
 - SKU 工序预设 CRUD（按产品固定配置外发工序类型）
 - 订单外发工序管理（计划/实际完成时间、开始/完成、按预设生成）
-- 订单进度看板（时间轴/进度条数据）
 
 权限：
-- outsource_view：查看订单/工序/看板
-- outsource_manage：工序预设 CRUD + 工序状态管理
+- outsource_view：查看订单/工序
+- outsource_manage：工序预设 CRUD
+- outsource_ship：外发工序发货（外协方账号）
+- outsource_receive：确认收货（贝乐账号）
+
+说明：发货/收货原先按「用户名 == 贝乐」硬编码区分，现改为权限点；
+配套授权脚本 scripts/add_outsource_ship_receive_perms.py 必须先于本代码上线执行。
 """
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_permission
+from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.schemas.order import OrderListResponse
 from fastapi_app.schemas.outsource import (
     GenerateProcessResponse,
-    KanbanResponse,
     OrderActionResponse,
     OrderProcessFlowListResponse,
     OrderProcessListResponse,
     OrderProcessReceive,
+    OrderProcessReceiveBatch,
     OrderProcessShip,
+    OrderProcessShipBatch,
     OrderProcessUpdate,
     ProcessTypeBatchCreate,
     ProcessTypeCreate,
@@ -92,12 +99,12 @@ async def create_process_type(
     user: User = Depends(require_permission("outsource_manage")),
 ) -> ProcessTypeResponse:
     """创建 SKU 外发工序预设。"""
-    try:
+    async with db_transaction(db, error_map={
+        IntegrityError: (409, '该产品已存在同名工序，请刷新后重试'),
+    }):
         pt = await outsource_service.create_process_type(
             db, data.model_dump(), username=user.username,
         )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
     return ProcessTypeResponse(**pt)
 
 
@@ -108,13 +115,11 @@ async def batch_create_process_types(
     user: User = Depends(require_permission("outsource_manage")),
 ) -> GenerateProcessResponse:
     """为一个 SKU 批量添加多个工序预设（自由输入工序名称，幂等去重）。"""
-    try:
+    async with db_transaction(db):
         result = await outsource_service.batch_create_process_types(
             db, product_id=data.product_id,
             process_types=data.process_types, username=user.username,
         )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
     return GenerateProcessResponse(
         success=True,
         message=f"已添加 {result['created']} 道工序，跳过 {result['skipped']} 道重复工序",
@@ -131,12 +136,12 @@ async def update_process_type(
     _user: User = Depends(require_permission("outsource_manage")),
 ) -> ProcessTypeResponse:
     """更新 SKU 外发工序预设（部分更新）。"""
-    try:
+    async with db_transaction(db, error_map={
+        IntegrityError: (409, '该产品已存在同名工序，请刷新后重试'),
+    }):
         pt = await outsource_service.update_process_type(
             db, pt_id, data.model_dump(exclude_unset=True),
         )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
     return ProcessTypeResponse(**pt)
 
 
@@ -147,10 +152,8 @@ async def delete_process_type(
     _user: User = Depends(require_permission("outsource_manage")),
 ) -> OrderActionResponse:
     """删除 SKU 外发工序预设。"""
-    try:
+    async with db_transaction(db):
         await outsource_service.delete_process_type(db, pt_id)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
     return OrderActionResponse(success=True, message="工序预设已删除")
 
 
@@ -185,12 +188,10 @@ async def generate_order_processes(
     user: User = Depends(require_permission("outsource_manage")),
 ) -> GenerateProcessResponse:
     """按 SKU 预设为订单生成外发工序（返单自动带出的手动触发）。"""
-    try:
+    async with db_transaction(db):
         result = await outsource_service.generate_order_processes(
             db, order_id, username=user.username,
         )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
     return GenerateProcessResponse(
         success=True,
         message=f"已生成 {result['created']} 道工序，跳过 {result['skipped']} 道重复工序",
@@ -207,12 +208,10 @@ async def update_order_process(
     _user: User = Depends(require_permission("outsource_manage")),
 ) -> OrderProcessListResponse:
     """更新订单外发工序（计划时间/工序类型/备注）。"""
-    try:
+    async with db_transaction(db):
         item = await outsource_service.update_order_process(
             db, process_id, data.model_dump(exclude_unset=True),
         )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
     return OrderProcessListResponse(data=[item], total=1)
 
 
@@ -221,17 +220,13 @@ async def ship_order_process(
     process_id: int,
     data: OrderProcessShip,
     db: AsyncSession = Depends(get_async_db),
-    user: User = Depends(require_permission("outsource_manage")),
+    user: User = Depends(require_permission("outsource_ship")),
 ) -> OrderProcessListResponse:
-    """发货外发工序：录入发货数量，状态 pending → shipped。贝乐用户不可发货。"""
-    if user.username == '贝乐':
-        raise HTTPException(status_code=403, detail='贝乐用户不可发货，由其他用户发货')
-    try:
+    """发货外发工序：录入发货数量，状态 pending → shipped。"""
+    async with db_transaction(db):
         item = await outsource_service.ship_order_process(
             db, process_id, shipped_quantity=data.shipped_quantity, username=user.username,
         )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
     return OrderProcessListResponse(data=[item], total=1)
 
 
@@ -240,19 +235,49 @@ async def receive_order_process(
     process_id: int,
     data: OrderProcessReceive | None = None,
     db: AsyncSession = Depends(get_async_db),
-    user: User = Depends(require_permission("outsource_manage")),
+    user: User = Depends(require_permission("outsource_receive")),
 ) -> OrderProcessListResponse:
-    """确认收货外发工序：状态 shipped → received。仅贝乐用户可确认收货。收货数量可选，缺省等于发货数量。"""
-    if user.username != '贝乐':
-        raise HTTPException(status_code=403, detail='仅贝乐用户可确认收货')
-    try:
+    """确认收货外发工序：状态 shipped → received。收货数量可选，缺省等于发货数量。"""
+    async with db_transaction(db):
         item = await outsource_service.receive_order_process(
             db, process_id, username=user.username,
             received_quantity=data.received_quantity if data else None,
         )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
     return OrderProcessListResponse(data=[item], total=1)
+
+
+@router.post("/orders/{order_id}/processes/ship-batch", response_model=OrderProcessListResponse)
+async def ship_order_processes_batch(
+    order_id: int,
+    data: OrderProcessShipBatch,
+    db: AsyncSession = Depends(get_async_db),
+    user: User = Depends(require_permission("outsource_ship")),
+) -> OrderProcessListResponse:
+    """批量发货（单事务原子）：一次请求完成多道工序发货，任一条失败整批回滚。"""
+    async with db_transaction(db):
+        items = await outsource_service.ship_order_processes_batch(
+            db, order_id,
+            [(i.process_id, i.quantity) for i in data.items],
+            username=user.username,
+        )
+    return OrderProcessListResponse(data=items, total=len(items))
+
+
+@router.post("/orders/{order_id}/processes/receive-batch", response_model=OrderProcessListResponse)
+async def receive_order_processes_batch(
+    order_id: int,
+    data: OrderProcessReceiveBatch,
+    db: AsyncSession = Depends(get_async_db),
+    user: User = Depends(require_permission("outsource_receive")),
+) -> OrderProcessListResponse:
+    """批量确认收货（单事务原子）：一次请求完成多道工序收货，缺省按剩余待收数量。"""
+    async with db_transaction(db):
+        items = await outsource_service.receive_order_processes_batch(
+            db, order_id,
+            [(i.process_id, i.quantity) for i in data.items],
+            username=user.username,
+        )
+    return OrderProcessListResponse(data=items, total=len(items))
 
 
 @router.delete("/processes/{process_id}", response_model=OrderActionResponse)
@@ -262,26 +287,6 @@ async def delete_order_process(
     _user: User = Depends(require_permission("outsource_manage")),
 ) -> OrderActionResponse:
     """删除订单外发工序。"""
-    try:
+    async with db_transaction(db):
         await outsource_service.delete_order_process(db, process_id)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
     return OrderActionResponse(success=True, message="外发工序已删除")
-
-
-# ==================== 进度看板 ====================
-
-@router.get("/kanban", response_model=KanbanResponse)
-async def get_kanban(
-    page: int = Query(1, ge=1, description="页码"),
-    per_page: int = Query(20, ge=1, le=100, description="每页数量"),
-    customer: str | None = Query(None, description="客户名筛选"),
-    db: AsyncSession = Depends(get_async_read_db),
-    _user: User = Depends(require_permission("outsource_view")),
-) -> KanbanResponse:
-    """订单进度看板：湖北工厂订单 + 外发工序时间轴/进度。"""
-    result = await outsource_service.get_kanban(
-        db, page=page, per_page=per_page, customer=customer,
-    )
-    return KanbanResponse(data=result['items'], total=result['total'],
-                          page=result['page'], per_page=result['per_page'])

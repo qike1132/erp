@@ -7,7 +7,7 @@
 
 import logging
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.exc import DisconnectionError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -48,8 +48,10 @@ async def get_dashboard_stats(
     try:
         dashboard_stats = await fetch_dashboard_stats(db)
     except (OperationalError, DisconnectionError):
+        # 数据库不可用时不得吞成空统计返回 200（会掩盖故障、前端展示全 0 无告警），
+        # 应显式 503 触发监控告警与前端降级提示。
         logger.warning("仪表盘统计查询失败", exc_info=True)
-        dashboard_stats = {}
+        raise HTTPException(status_code=503, detail="数据库暂不可用，请稍后重试") from None
 
     return DashboardResponse(
         success=True,

@@ -12,7 +12,6 @@ from fastapi_app.services.outsource._common import (
     _fmt_dt,
     _matches_process_status,
     _serialize_order_process,
-    _summarize_process_progress,
 )
 from fastapi_app.shared_models import (
     Order,
@@ -49,11 +48,32 @@ async def _process_target_quantity(db: AsyncSession, p: OrderOutsourceProcess) -
 _SCAN_PAGE_SIZE = 500
 
 
-async def _load_all_beile_items(db: AsyncSession, customer: str | None) -> list[dict]:
-    """按页遍历取回全部订单+备货记录。
+def _detach_page_items(items: list[dict]) -> list[dict]:
+    """复制一页记录（含 SKU 明细），避免就地改写被缓存的数据。
+
+    `get_beile_orders_with_stockins` 带 @cache_result，命中的是同一个 list 对象；
+    直接就地附加进度会把 progress/status_label 等字段写回缓存，污染
+    beile-order 页面的响应。此处先复制再改写，保证缓存内容不变。
+    """
+    detached: list[dict] = []
+    for row in items:
+        copied = dict(row)
+        if copied.get('items'):
+            copied['items'] = [dict(sku) for sku in copied['items']]
+        detached.append(copied)
+    return detached
+
+
+async def _scan_beile_items_with_progress(db: AsyncSession, customer: str | None) -> list[dict]:
+    """按页遍历取回全部订单+备货记录，并逐页附加外发工序进度。
 
     状态筛选是跨页统计，不能只取首页：此前固定 page=1&per_page=500，
     第 500 条之后的记录被静默丢弃，这些订单在任何状态筛选下都查不到。
+    进度按页附加（每页 ≤500 个 id），避免把全量订单 id 堆进一条 IN 查询。
+
+    已知局限：订单列表本身由 order_crud.get_beile_orders_with_stockins 提供，
+    其 SQL 不接收「工序状态」条件，因此状态筛选仍需跨页扫描后再过滤；
+    进度统计已下推到数据库聚合（见 _attach_progress_to_orders）。
     """
     from fastapi_app.services.order_crud import get_beile_orders_with_stockins
     items: list[dict] = []
@@ -62,7 +82,8 @@ async def _load_all_beile_items(db: AsyncSession, customer: str | None) -> list[
         page_data = await get_beile_orders_with_stockins(
             db, page=page, per_page=_SCAN_PAGE_SIZE, customer=customer, factory='湖北',
         )
-        page_items = page_data['items']
+        page_items = _detach_page_items(page_data['items'])
+        await _attach_progress_to_orders(db, page_items)
         items.extend(page_items)
         # 短页说明已到末页；total 判定兜底防止短页提前终止
         if len(page_items) < _SCAN_PAGE_SIZE or page * _SCAN_PAGE_SIZE >= page_data['total']:
@@ -84,11 +105,11 @@ async def list_outsource_orders(
     process_status：按订单外发工序整体状态过滤（pending/in_progress/completed），
     需跨页统计，故先取全量合并列表附加进度后过滤再分页；未配置工序的订单
     不属于任何状态（未配置是独立状态，仅在无状态筛选时展示）。
+    进度统计本身由数据库聚合完成（数据库聚合 JOIN + GROUP BY，见 _common）。
     """
     from fastapi_app.services.order_crud import get_beile_orders_with_stockins
     if process_status:
-        all_items = await _load_all_beile_items(db, customer)
-        await _attach_progress_to_orders(db, all_items)
+        all_items = await _scan_beile_items_with_progress(db, customer)
         filtered = [
             row for row in all_items
             if _matches_process_status(row, process_status)
@@ -105,8 +126,9 @@ async def list_outsource_orders(
     data = await get_beile_orders_with_stockins(
         db, page=page, per_page=per_page, customer=customer, factory='湖北',
     )
-    await _attach_progress_to_orders(db, data['items'])
-    return data
+    items = _detach_page_items(data['items'])
+    await _attach_progress_to_orders(db, items)
+    return {**data, 'items': items}
 
 async def list_order_processes(db: AsyncSession, order_id: int) -> list[dict]:
     """查询订单外发工序（按 SKU + 工序顺序排序）。"""
@@ -142,72 +164,3 @@ async def list_order_flows(db: AsyncSession, order_id: int) -> list[dict]:
         }
         for flow, process_type in result.all()
     ]
-
-async def get_kanban(
-    db: AsyncSession, *, page: int = 1, per_page: int = 20,
-    customer: str | None = None,
-) -> dict:
-    """订单进度看板：湖北工厂订单 + 各 SKU 外发工序状态。
-
-    每个订单条目包含：
-    - 下单时间/客户/产品
-    - processes: 按 SKU 排序的工序（计划/实际完成时间、状态）
-    - progress: 完成工序占比（0-100）
-    - current_process: 当前进行中（或下一个待开始）的工序
-    """
-    orders_data = await list_outsource_orders(
-        db, page=page, per_page=per_page, customer=customer,
-    )
-    items: list[dict] = []
-    # 仅订单记录参与工序统计：备货记录的 id 是 StockIn.id，与 order.id 属两套主键空间，
-    # 混入 IN 查询会把无关订单的工序挂到备货行上。
-    order_ids = [row['id'] for row in orders_data['items'] if row.get('record_type') == 'order']
-
-    processes_by_order: dict[int, list[OrderOutsourceProcess]] = {}
-    if order_ids:
-        proc_result = await db.execute(
-            select(OrderOutsourceProcess)
-            .where(OrderOutsourceProcess.order_id.in_(order_ids))
-            .order_by(
-                OrderOutsourceProcess.order_id,
-                OrderOutsourceProcess.order_item_id,
-                OrderOutsourceProcess.sort_order,
-                OrderOutsourceProcess.id,
-            )
-        )
-        for p in proc_result.scalars().all():
-            processes_by_order.setdefault(p.order_id, []).append(p)
-
-    for row in orders_data['items']:
-        processes = processes_by_order.get(row['id'], [])
-        summary = _summarize_process_progress(processes)
-        total = summary['total_processes']
-        completed = summary['completed_processes']
-        current_process = summary['current_process']
-        status_label = summary['status_label']
-
-        items.append({
-            'id': row['id'],
-            'order_no': row['order_no'],
-            'customer': row['customer'],
-            'order_date': row.get('order_date', ''),
-            'record_type': row.get('record_type', 'order'),
-            'products': [
-                {'product_id': sku['product_id'], 'product_name': sku['product_name'],
-                 'quantity': sku['quantity']}
-                for sku in (row.get('items') or [])
-            ],
-            'processes': [_serialize_order_process(p) for p in processes],
-            'total_processes': total,
-            'completed_processes': completed,
-            'progress': summary['progress'],
-            'current_process': current_process,
-            'status_label': status_label,
-        })
-
-    return {
-        'items': items,
-        'total': orders_data['total'],
-        'page': page,
-        'per_page': per_page,
-    }

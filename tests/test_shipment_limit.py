@@ -12,7 +12,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, create_engine, func
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 
-Base = declarative_base()
+# 每个测试类使用独立的 declarative Base：若共用同一 Base，第二个类注册同名表
+# （product/order/stock_in/stock_out）会触发 SAWarning，在 pytest.ini 的
+# filterwarnings = error 下被升级为错误。
 
 
 class ShipmentLimitTestCase(unittest.TestCase):
@@ -22,9 +24,10 @@ class ShipmentLimitTestCase(unittest.TestCase):
     def setUpClass(cls):
         """测试类初始化"""
         cls.engine = create_engine('sqlite:///:memory:')
+        cls.Base = declarative_base()
         cls._define_models()
 
-        Base.metadata.create_all(cls.engine)
+        cls.Base.metadata.create_all(cls.engine)
         Session = sessionmaker(bind=cls.engine)
         cls.db_session = Session()
         cls._init_test_data()
@@ -32,6 +35,7 @@ class ShipmentLimitTestCase(unittest.TestCase):
     @classmethod
     def _define_models(cls):
         """定义数据模型"""
+        Base = cls.Base
 
         class Product(Base):
             __tablename__ = 'product'
@@ -380,15 +384,17 @@ class ShipmentLimitBusinessRuleTestCase(unittest.TestCase):
     def setUpClass(cls):
         """测试类初始化"""
         cls.engine = create_engine('sqlite:///:memory:')
+        cls.Base = declarative_base()
         cls._define_models()
 
-        Base.metadata.create_all(cls.engine)
+        cls.Base.metadata.create_all(cls.engine)
         Session = sessionmaker(bind=cls.engine)
         cls.db_session = Session()
 
     @classmethod
     def _define_models(cls):
         """定义数据模型"""
+        Base = cls.Base
 
         class Product(Base):
             __tablename__ = 'product'

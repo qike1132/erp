@@ -220,14 +220,16 @@ __all__ = [
     "cleanup_pre_restore_backups",
     "combine_backup_chunks",
     "create_backup_chunks",
-    "create_binary_log_backup",
+    # P0-10（2026-09-12）：WAL 二进制日志备份未实现，已摘除出公开 API，避免被误当作可用能力
+    # "create_binary_log_backup",
     "create_database_snapshot_backup",
     "create_full_backup",
     "create_full_backup_to_file",
     # incremental
     "create_incremental_backup",
     "create_pre_restore_backup",
-    "create_wal_incremental_backup",
+    # P0-10（2026-09-12）：依赖未实现的 WAL 备份，已摘除出公开 API
+    # "create_wal_incremental_backup",
     "delete_backup_file",
     "deserialize_value",
     # records
@@ -258,7 +260,8 @@ __all__ = [
     "restore_database_via_psql_from_bytes",
     # filestore
     "restore_filestore",
-    "restore_from_binary_log",
+    # P0-10（2026-09-12）：WAL 二进制日志恢复未实现（原为假成功），已摘除出公开 API
+    # "restore_from_binary_log",
     "restore_from_chunks",
     "restore_from_zip",
     "restore_incremental",

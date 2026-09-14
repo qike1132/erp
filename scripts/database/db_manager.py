@@ -342,11 +342,14 @@ class DatabaseManager:
         env['PGPASSWORD'] = config['password']
 
         # Pre-restore backup
+        # 这是 DROP DATABASE 之前唯一的回退手段，因此失败必须中止恢复
         self.log("正在创建恢复前备份...")
         pre_backup_dir = BACKUP_DIR / 'pre_restore'
         pre_backup_dir.mkdir(parents=True, exist_ok=True)
-        pre_backup_dir / f'pre_restore_{self.timestamp}.sql'
-        self.backup_postgresql(pre_backup_dir, compress=False)
+        backup_ok, backup_msg, _ = self.backup_postgresql(pre_backup_dir, compress=False)
+        if not backup_ok:
+            return False, f"恢复前备份失败，已中止恢复以避免数据丢失: {backup_msg}"
+        self.log(f"恢复前备份完成: {backup_msg}")
 
         # Terminate existing connections
         self.log("终止现有数据库连接...")
@@ -384,24 +387,43 @@ class DatabaseManager:
                 result = subprocess.run([
                     'psql', '-h', config['host'], '-p', config['port'],
                     '-U', config['user'], '-d', config['database'],
-                    '-v', 'ON_ERROR_STOP=0',
+                    '-v', 'ON_ERROR_STOP=1',
                 ], stdin=f, capture_output=True, env=env, timeout=600)
 
             stderr_text = result.stderr.decode('utf-8', errors='replace')
 
-            if result.returncode != 0:
-                # psql often returns non-zero for minor warnings - log but don't fail
-                warning_lines = [
-                    line for line in stderr_text.split('\n')
-                    if 'ERROR' in line and 'already exists' not in line.lower()
-                ]
-                if warning_lines:
-                    self.log(f"恢复过程中有 {len(warning_lines)} 个错误", 'WARNING')
-                    for line in warning_lines[:10]:
-                        self.log(f"  {line.strip()}", 'WARNING')
-                else:
-                    self.log(f"恢复完成（有非关键警告: {stderr_text[:200]}）", 'WARNING')
+            error_lines = [
+                line for line in stderr_text.split('\n')
+                if line.strip().startswith('ERROR') or 'ERROR:' in line
+            ]
 
+            # psql 退出码：0=正常，1=自身致命错误，2=连接中断，3=脚本错误(需 ON_ERROR_STOP=1)
+            # 注意：库在恢复前刚 DROP+CREATE，因此"恢复失败"等价于"库是空的"
+            if result.returncode != 0 or error_lines:
+                detail = error_lines[0].strip() if error_lines else stderr_text.strip()[:200]
+                self.log(
+                    f"数据库恢复失败（psql 退出码={result.returncode}，"
+                    f"错误行数={len(error_lines)}）: {detail}",
+                    'ERROR',
+                )
+                for line in error_lines[1:10]:
+                    self.log(f"  {line.strip()}", 'ERROR')
+                return False, f"PostgreSQL 恢复失败：{detail}"
+
+            # 数据落地校验：psql 退出码为 0 不代表数据真的进去了（dump 本身可能是空的）
+            verify = subprocess.run([
+                'psql', '-h', config['host'], '-p', config['port'],
+                '-U', config['user'], '-d', config['database'],
+                '-tAc', "SELECT count(*) FROM information_schema.tables "
+                        "WHERE table_schema='public';",
+            ], env=env, capture_output=True, timeout=30)
+            raw_count = verify.stdout.decode('utf-8', errors='replace').strip() if verify.stdout else ''
+            table_count = int(raw_count) if raw_count.isdigit() else 0
+            if table_count == 0:
+                detail = verify.stderr.decode('utf-8', errors='replace').strip()[:200]
+                return False, f"PostgreSQL 恢复后 public schema 无任何表，疑似恢复失败: {detail}"
+
+            self.log(f"PostgreSQL 数据库恢复完成（public schema 表数={table_count}）")
             return True, "PostgreSQL 数据库恢复完成"
         except subprocess.TimeoutExpired:
             return False, "数据库恢复超时（超过 600 秒）"

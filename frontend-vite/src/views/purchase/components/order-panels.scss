@@ -45,14 +45,14 @@
   border-color: transparent;
 }
 
-/* Section body - consistent padding with header */
+/* Section body - 内容贴卡片边缘（与 /beile-order 一致，无内边距） */
 .pc-section-body {
-  padding: 0 24px;
+  padding: 0;
 }
 
 /* Table */
 .pc-table-wrap {
-  padding: 0 0 16px;
+  padding: 0;
   overflow-x: auto;
 }
 

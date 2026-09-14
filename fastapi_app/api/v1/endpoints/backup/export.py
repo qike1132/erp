@@ -603,7 +603,6 @@ async def export_backup_chunk(
         logger.error(f'下载备份分片失败: {e}')
         raise HTTPException(status_code=500, detail='下载备份分片失败') from e
 
-    from fastapi_app.schemas.backup import BackupChunkResponse
     return BackupChunkResponse(
         success=True,
         chunk_index=chunk_index,

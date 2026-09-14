@@ -112,30 +112,30 @@ class CustomerSamplingProject(Base):
         'CustomerSamplingPart',
         back_populates='project',
         cascade='all, delete-orphan',
-        lazy='selectin',
+        lazy='select',
         order_by='CustomerSamplingPart.sort_order',
     )
-    pattern_maker: Mapped[PatternMaker | None] = relationship("PatternMaker", lazy='selectin')
-    product_image: Mapped[FileRecord | None] = relationship("FileRecord", lazy='selectin')
-    creator: Mapped[User | None] = relationship("User", lazy='selectin')
+    pattern_maker: Mapped[PatternMaker | None] = relationship("PatternMaker", lazy='select')
+    product_image: Mapped[FileRecord | None] = relationship("FileRecord", lazy='select')
+    creator: Mapped[User | None] = relationship("User", lazy='select')
     roles: Mapped[list[CustomerSamplingRole]] = relationship(
         'CustomerSamplingRole',
         back_populates='project',
         cascade='all, delete-orphan',
-        lazy='selectin',
+        lazy='select',
         order_by='CustomerSamplingRole.sort_order',
     )
     fabric_versions: Mapped[list[CustomerSamplingFabricVersion]] = relationship(
         'CustomerSamplingFabricVersion',
         back_populates='project',
         cascade='all, delete-orphan',
-        lazy='selectin',
+        lazy='select',
         order_by='CustomerSamplingFabricVersion.version_no',
     )
     change_logs: Mapped[list[CustomerSamplingChangeLog]] = relationship(
         'CustomerSamplingChangeLog',
         back_populates='project',
-        lazy='selectin',
+        lazy='select',
         order_by='desc(CustomerSamplingChangeLog.created_at)',
     )
 
@@ -223,14 +223,14 @@ class CustomerSamplingRole(Base):
         'CustomerSamplingPart',
         back_populates='role',
         cascade='all, delete-orphan',
-        lazy='selectin',
+        lazy='select',
         order_by='CustomerSamplingPart.sort_order',
     )
     fabric_versions: Mapped[list[CustomerSamplingFabricVersion]] = relationship(
         'CustomerSamplingFabricVersion',
         back_populates='role',
         cascade='all, delete-orphan',
-        lazy='selectin',
+        lazy='select',
         order_by='CustomerSamplingFabricVersion.version_no',
     )
 
@@ -311,7 +311,7 @@ class CustomerSamplingPart(Base):
     role: Mapped[CustomerSamplingRole] = relationship(
         "CustomerSamplingRole", back_populates="parts",
     )
-    supplier: Mapped[Supplier | None] = relationship("Supplier", lazy='selectin')
+    supplier: Mapped[Supplier | None] = relationship("Supplier", lazy='select')
 
     __table_args__ = (
         # 同角色 + 同版本下部位名称唯一（T1/T2/T3 各自独立）
@@ -409,7 +409,7 @@ class CustomerSamplingFabricVersion(Base):
     role: Mapped[CustomerSamplingRole] = relationship(
         "CustomerSamplingRole", back_populates="fabric_versions",
     )
-    creator: Mapped[User | None] = relationship("User", lazy='selectin')
+    creator: Mapped[User | None] = relationship("User", lazy='select')
 
     __table_args__ = (
         Index('idx_csfv_project_version', 'project_id', 'version_no'),
@@ -467,7 +467,7 @@ class CustomerSamplingChangeLog(Base):
     project: Mapped[CustomerSamplingProject | None] = relationship(
         "CustomerSamplingProject", back_populates="change_logs",
     )
-    operator: Mapped[User | None] = relationship("User", lazy='selectin')
+    operator: Mapped[User | None] = relationship("User", lazy='select')
 
     __table_args__ = (
         Index('idx_cscl_project_time', 'project_id', desc('created_at')),

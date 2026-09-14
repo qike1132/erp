@@ -110,9 +110,10 @@ async def create_incremental_backup(
                 logger.warning("增量备份未显式指定 encrypt，且无可用密码，本次备份不加密")
         encrypted = False
         if encryption_password:
-            from fastapi_app.core.backup_encryption import encrypt_backup
+            # ITER-1 T3：新写增量备份统一走分块格式（chunked-v1），旧格式仍可读。
+            from fastapi_app.core.backup_encryption import encrypt_backup_auto
             try:
-                encrypted_bytes, meta_dict = encrypt_backup(zip_bytes, encryption_password)
+                encrypted_bytes, meta_dict = encrypt_backup_auto(zip_bytes, encryption_password)
                 # 更新 manifest 以标记加密
                 manifest['encrypted'] = True
                 manifest['encryption'] = meta_dict
@@ -153,6 +154,12 @@ async def create_wal_incremental_backup(
     使用 PostgreSQL 的 WAL (Write-Ahead Logging) 进行增量备份。
     需要 PostgreSQL 配置了 WAL 归档。
 
+    ⚠️ 当前不可用（P0-10，2026-09-12）。
+    本函数依赖 `create_binary_log_backup`，而后者尚未实现（无 pg_basebackup /
+    pg_receivewal 集成），现已改为显式抛 `BinaryLogError`。该异常会从下方调用点
+    直接向外传播，因此本函数调用时必然失败，不会产出「假备份」记录。
+    真正的增量备份请走 `create_incremental_backup`。
+
     Args:
         db: 数据库会话
         user: 用户信息
@@ -162,6 +169,9 @@ async def create_wal_incremental_backup(
 
     Returns:
         包含备份信息的字典
+
+    Raises:
+        BinaryLogError: 依赖的 WAL 二进制日志备份功能尚未实现
     """
     ensure_backup_dir()
 
@@ -231,9 +241,9 @@ async def create_wal_incremental_backup(
     # 可选加密
     effective_encryption_password = encrypt_password or get_backup_encryption_password()
     if effective_encryption_password:
-        from fastapi_app.core.backup_encryption import encrypt_backup
+        from fastapi_app.core.backup_encryption import encrypt_backup_auto
         try:
-            encrypted_bytes, meta_dict = encrypt_backup(metadata_content, effective_encryption_password)
+            encrypted_bytes, meta_dict = encrypt_backup_auto(metadata_content, effective_encryption_password)
             metadata_path.write_bytes(encrypted_bytes)
 
             # 更新备份信息（仅记录在日志中，不覆盖加密后的文件）
@@ -301,7 +311,7 @@ async def restore_incremental(
     results = {}
     errors = []
 
-    pre_restore_info = await create_pre_restore_backup(db)
+    pre_restore_info = await create_pre_restore_backup(db, skip_restore_check=True)
     lock_acquired = False
     try:
         lock_result = await db.execute(text('SELECT pg_try_advisory_lock(:lock_id)'), {'lock_id': RESTORE_LOCK_ID})

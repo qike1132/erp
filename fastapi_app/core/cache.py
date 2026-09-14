@@ -13,6 +13,7 @@ import inspect
 import json
 import logging
 import os
+import uuid
 from collections import OrderedDict
 from collections.abc import Callable
 from datetime import datetime, timedelta
@@ -28,6 +29,18 @@ logger = logging.getLogger(__name__)
 
 _CACHE_LOCAL_MAX_SIZE = 5000  # L1 缓存最大条目数（从 10000 降至 5000）
 _cache_local: OrderedDict[str, tuple[Any, datetime]] = OrderedDict()
+
+# 缓存击穿轮询等待上限（秒）：未获分布式锁的 worker 自旋等持锁方回填，
+# 超过即放弃等待自行重算——10s 会让冷缓存高并发请求全部挂起占住连接槽
+_CACHE_REFILL_POLL_SECONDS = 2.0
+_CACHE_REFILL_POLL_INTERVAL = 0.1
+
+# 击穿锁释放脚本：仅删除自己持有的锁（value=token 比对），防止持锁超过
+# lock TTL 后误删后继获锁方的锁。KEYS[1]=完整锁键，ARGV[1]=本方 token。
+_RELEASE_LOCK_LUA = (
+    "if redis.call('get', KEYS[1]) == ARGV[1] then "
+    "return redis.call('del', KEYS[1]) else return 0 end"
+)
 
 # 断路器：Redis 连续失败 N 次后短路跳过，避免每次请求浪费超时等待
 _redis_fail_count = 0
@@ -123,6 +136,53 @@ def _get_redis_cache():
         return None
 
 
+async def _acquire_stampede_lock(redis, lock_key: str, token: str) -> bool:
+    """尝试获取缓存击穿分布式锁（SET NX EX 10，value=属主 token）"""
+    client = getattr(redis, 'redis_client', None)
+    if client is None:
+        return False
+    try:
+        full_lock_key = redis._make_key(lock_key)
+        got = await asyncio.wait_for(
+            client.set(full_lock_key, token, nx=True, ex=10),
+            timeout=CACHE_TIMEOUT,
+        )
+        return bool(got)
+    except (TimeoutError, OSError, ConnectionError, ValueError):
+        return False
+
+
+async def _release_stampede_lock(redis, lock_key: str, token: str) -> None:
+    """释放击穿锁（Lua 比对 token，仅删除自己持有的锁；失败依赖 TTL 过期兜底）"""
+    client = getattr(redis, 'redis_client', None)
+    if client is None:
+        return
+    try:
+        full_lock_key = redis._make_key(lock_key)
+        await asyncio.wait_for(
+            client.eval(_RELEASE_LOCK_LUA, 1, full_lock_key, token),
+            timeout=CACHE_TIMEOUT,
+        )
+    except (TimeoutError, OSError, ConnectionError, ValueError):
+        pass  # 释放失败无害：锁 10s 后自动过期
+
+
+async def _poll_for_refill(redis, cache_key: str, local_ttl: int) -> Any | None:
+    """自旋等待持锁 worker 回填缓存，命中即回填 L1 并返回；超时/失败返回 None"""
+    deadline = datetime.now() + timedelta(seconds=_CACHE_REFILL_POLL_SECONDS)
+    while datetime.now() < deadline:
+        await asyncio.sleep(_CACHE_REFILL_POLL_INTERVAL)
+        try:
+            cached = await asyncio.wait_for(redis.get(cache_key), timeout=CACHE_TIMEOUT)
+        except (TimeoutError, OSError, ConnectionError):
+            return None
+        if cached is not None:
+            _cache_local.pop(cache_key, None)
+            _cache_local[cache_key] = (cached, datetime.now() + timedelta(seconds=local_ttl))
+            return cached
+    return None
+
+
 def cache_result(
     key_prefix: str,
     ttl: int = 60,
@@ -197,18 +257,21 @@ def cache_result(
                             logger.warning("Redis 缓存读取失败(timeout=%ss)，降级到数据库查询: %s", CACHE_TIMEOUT, e)
 
                 # 缓存击穿保护：分布式锁防止雪崩（stampede）
-                # 获取锁的 worker 重算并回填缓存；未获取锁的 worker 轮询缓存
+                # 获得锁的 worker 重算并回填；未获锁的 worker 短暂轮询后放弃等待自行重算
                 lock_key = f"{cache_key}:lock"
+                lock_token = uuid.uuid4().hex
                 lock_acquired = False
-                if redis and redis_available and getattr(redis, 'redis_client', None):
-                    try:
-                        full_lock_key = redis._make_key(lock_key)
-                        lock_acquired = await asyncio.wait_for(
-                            redis.redis_client.set(full_lock_key, "1", nx=True, ex=10),
-                            timeout=CACHE_TIMEOUT
-                        )
-                    except (TimeoutError, OSError, ConnectionError, ValueError):
-                        lock_acquired = False
+                if redis and redis_available:
+                    lock_acquired = await _acquire_stampede_lock(redis, lock_key, lock_token)
+
+                if not lock_acquired and redis and redis_available:
+                    # 未获锁：先轮询等持锁方回填（上限 _CACHE_REFILL_POLL_SECONDS），命中直接返回
+                    polled = await _poll_for_refill(redis, cache_key, local_ttl)
+                    if polled is not None:
+                        _redis_fail_count = 0
+                        return polled
+                    # 轮询超时（持锁方还没写完）：再试一次拿锁，拿到就自己重算
+                    lock_acquired = await _acquire_stampede_lock(redis, lock_key, lock_token)
 
                 if lock_acquired:
                     # 获得锁：重算并回填缓存
@@ -229,54 +292,12 @@ def cache_result(
                                 if _redis_fail_count >= _REDIS_CIRCUIT_THRESHOLD:
                                     _redis_circuit_open_until = datetime.now() + _REDIS_CIRCUIT_COOLDOWN
                                     logger.warning("Redis 断路器开启: %s", e)
-                    finally:
-                        with contextlib.suppress(TimeoutError, OSError, ConnectionError):
-                            await redis.delete(lock_key)  # type: ignore[union-attr]
-                    return result
-                elif redis and redis_available and getattr(redis, 'redis_client', None):
-                    # 未获得锁：轮询缓存（最多 10s = lock TTL），等待持锁 worker 回填
-                    # 注意：仅当 redis_client 可用时才轮询，否则跳过避免 10s 空轮询
-                    for _ in range(100):  # 100 × 100ms = 10s（与 lock TTL 一致）
-                        await asyncio.sleep(0.1)
-                        try:
-                            cached = await asyncio.wait_for(
-                                redis.get(cache_key),
-                                timeout=CACHE_TIMEOUT
-                            )
-                            if cached is not None:
-                                _cache_local.pop(cache_key, None)
-                                _cache_local[cache_key] = (cached, datetime.now() + timedelta(seconds=local_ttl))
-                                return cached
-                        except (TimeoutError, OSError, ConnectionError):
-                            break
-                    # 轮询超时：尝试获取锁再重算，避免延迟雪崩
-                    logger.debug("缓存击穿轮询超时，尝试获取锁重算: %s", cache_key)
-                    if redis and redis_available and getattr(redis, 'redis_client', None):
-                        try:
-                            full_lock_key = redis._make_key(lock_key)
-                            lock_acquired = await asyncio.wait_for(
-                                redis.redis_client.set(full_lock_key, "1", nx=True, ex=10),
-                                timeout=CACHE_TIMEOUT
-                            )
-                        except (TimeoutError, OSError, ConnectionError, ValueError):
-                            lock_acquired = False
-                    if lock_acquired:
-                        try:
-                            result = await func(*args, **kwargs)
-                            _cache_local.pop(cache_key, None)
-                            _cache_local[cache_key] = (result, datetime.now() + timedelta(seconds=local_ttl))
-                            _evict_local_cache()
-                            if redis and redis_available:
-                                with contextlib.suppress(TimeoutError, OSError, ConnectionError, ValueError):
-                                    await asyncio.wait_for(
-                                        redis.set(cache_key, result, timeout=int(ttl)),
-                                        timeout=CACHE_TIMEOUT
-                                    )
-                        finally:
-                            with contextlib.suppress(TimeoutError, OSError, ConnectionError):
-                                await redis.delete(lock_key)
                         return result
+                    finally:
+                        if redis is not None:
+                            await _release_stampede_lock(redis, lock_key, lock_token)
 
+                # 未获锁且轮询未命中（或 Redis 不可用）：直接重算，保证请求总能返回
                 result = await func(*args, **kwargs)
 
                 # 写入 L1：先移除再插入，保证 OrderedDict 顺序
@@ -428,20 +449,6 @@ async def stop_l1_broadcast_listener() -> None:
 def _match_pattern(key: str, pattern: str) -> bool:
     import fnmatch
     return fnmatch.fnmatch(key, pattern)
-
-
-async def warmup_cache(func, *args, key_prefix: str, ttl: int = 60, **kwargs):
-    """主动预热缓存"""
-    result = await func(*args, **kwargs)
-    cache_key = f"{key_prefix}:prewarm"
-    now = datetime.now()
-    _cache_local.pop(cache_key, None)
-    _cache_local[cache_key] = (result, now + timedelta(seconds=30))
-    redis = _get_redis_cache()
-    if redis:
-        with contextlib.suppress(OSError, ValueError):
-            await redis.set(cache_key, result, timeout=int(ttl))
-    return result
 
 
 async def invalidate_dashboard_cache():

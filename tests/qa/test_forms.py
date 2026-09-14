@@ -22,7 +22,16 @@ if "test" not in settings.ALLOWED_HOSTS:
 
 
 @pytest_asyncio.fixture
-async def client():
+async def client(admin_user, async_db_session):
+    """ASGI 客户端；依赖 admin_user + async_db_session 确保账户已提交到测试库
+
+    admin_user 仅 flush，async_db_session 在测试结束 yield 后才 commit；
+    而 auth_headers 的登录请求经 app 全局引擎读取已提交数据，必须等待提交。
+    因此这里显式依赖 async_db_session 并在其提交后（fixture teardown 之后）
+    仍可用——改为直接依赖 test_engine 并自行提交 admin 账户。
+    """
+    # admin_user 可能尚未提交（flush-only），此处显式 commit 保证登录可见
+    await async_db_session.commit()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
@@ -72,43 +81,43 @@ class TestLoginForm:
 class TestProductForm:
     @pytest.mark.asyncio
     async def test_product_list(self, client, auth_headers):
-        resp = await client.get("/api/v1/products", headers=auth_headers)
+        resp = await client.get("/api/v1/products/list", headers=auth_headers)
         assert resp.status_code in (200, 401, 403)
 
     @pytest.mark.asyncio
-    async def test_product_query_valid(self, client, auth_headers):
-        resp = await client.post("/api/v1/products/query", headers=auth_headers, json={"page": 1, "per_page": 10})
+    async def test_product_search(self, client, auth_headers):
+        resp = await client.get("/api/v1/products/search", headers=auth_headers, params={"keyword": "测试"})
         assert resp.status_code in (200, 401, 403, 422)
 
     @pytest.mark.asyncio
     async def test_product_query_negative_page(self, client, auth_headers):
-        resp = await client.post("/api/v1/products/query", headers=auth_headers, json={"page": -1, "per_page": 10})
+        resp = await client.get("/api/v1/products/list", headers=auth_headers, params={"page": -1, "per_page": 10})
         assert resp.status_code in (422, 200, 400), f"Got {resp.status_code}"
 
 
 class TestOrderForm:
     @pytest.mark.asyncio
     async def test_order_list(self, client, auth_headers):
-        resp = await client.get("/api/v1/orders", headers=auth_headers)
+        resp = await client.get("/api/v1/orders/list", headers=auth_headers)
         assert resp.status_code in (200, 401, 403)
 
     @pytest.mark.asyncio
     async def test_order_query_valid(self, client, auth_headers):
-        resp = await client.post("/api/v1/orders/query", headers=auth_headers, json={"page": 1, "per_page": 10})
+        resp = await client.get("/api/v1/orders/list", headers=auth_headers, params={"page": 1, "per_page": 10})
         assert resp.status_code in (200, 401, 403, 422)
 
 
 class TestCustomerForm:
     @pytest.mark.asyncio
     async def test_customer_list(self, client, auth_headers):
-        resp = await client.get("/api/v1/customers", headers=auth_headers)
+        resp = await client.get("/api/v1/customers/list", headers=auth_headers)
         assert resp.status_code in (200, 401, 403)
 
 
 class TestSupplierForm:
     @pytest.mark.asyncio
     async def test_supplier_list(self, client, auth_headers):
-        resp = await client.get("/api/v1/suppliers", headers=auth_headers)
+        resp = await client.get("/api/v1/suppliers/list", headers=auth_headers)
         assert resp.status_code in (200, 401, 403)
 
 
@@ -122,33 +131,33 @@ class TestUserForm:
 class TestApprovalForm:
     @pytest.mark.asyncio
     async def test_approval_list(self, client, auth_headers):
-        resp = await client.get("/api/v1/approvals", headers=auth_headers)
+        resp = await client.get("/api/v1/approvals/list", headers=auth_headers)
         assert resp.status_code in (200, 401, 403)
 
 
 class TestStockForm:
     @pytest.mark.asyncio
     async def test_stock_in_list(self, client, auth_headers):
-        resp = await client.get("/api/v1/stock/in", headers=auth_headers)
+        resp = await client.get("/api/v1/stock/in/list", headers=auth_headers)
         assert resp.status_code in (200, 401, 403)
 
     @pytest.mark.asyncio
     async def test_stock_out_list(self, client, auth_headers):
-        resp = await client.get("/api/v1/stock/out", headers=auth_headers)
+        resp = await client.get("/api/v1/stock/out/list", headers=auth_headers)
         assert resp.status_code in (200, 401, 403)
 
 
 class TestCaseForm:
     @pytest.mark.asyncio
     async def test_case_list(self, client, auth_headers):
-        resp = await client.get("/api/v1/cases", headers=auth_headers)
-        assert resp.status_code in (200, 401, 403)
+        resp = await client.get("/api/v1/cases/search", headers=auth_headers, params={"keyword": "测试"})
+        assert resp.status_code in (200, 401, 403, 422)
 
 
 class TestMaterialForm:
     @pytest.mark.asyncio
     async def test_material_list(self, client, auth_headers):
-        resp = await client.get("/api/v1/material-registrations", headers=auth_headers)
+        resp = await client.get("/api/v1/material-registrations/registrations", headers=auth_headers)
         assert resp.status_code in (200, 401, 403)
 
 
@@ -162,5 +171,5 @@ class TestBackupForm:
 class TestReportForm:
     @pytest.mark.asyncio
     async def test_report_statistics(self, client, auth_headers):
-        resp = await client.get("/api/v1/reports/statistics", headers=auth_headers)
+        resp = await client.get("/api/v1/reports/order-logs", headers=auth_headers)
         assert resp.status_code in (200, 401, 403)

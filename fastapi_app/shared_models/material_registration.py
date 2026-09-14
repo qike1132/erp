@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, desc
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from fastapi_app.core.float_utils import float_compare, round_qty
 from fastapi_app.shared_models import Base
 
 if TYPE_CHECKING:
@@ -52,8 +53,14 @@ class MaterialRegistration(Base):
         items_list = list(self.items) if self.items else []
         total_ordered = sum(float(item.ordered_quantity or 0) for item in items_list)
         total_received = sum(float(item.received_quantity or 0) for item in items_list)
+        # ordered/received 为 Numeric(12,2)，经 float 聚合后带表示噪声，
+        # 用 float_compare 按 2 位精度比较，避免 99.999999997 >= 100.0 误判未收齐
         all_complete = all(
-            float(item.received_quantity or 0) >= float(item.ordered_quantity or 0)
+            float_compare(
+                float(item.received_quantity or 0),
+                float(item.ordered_quantity or 0),
+                precision_digits=2,
+            ) >= 0
             for item in items_list if float(item.ordered_quantity or 0) > 0
         )
         return items_list, total_ordered, total_received, all_complete
@@ -78,7 +85,7 @@ class MaterialRegistration(Base):
             return 0.0
         if all_complete:
             return 100.0
-        return min(round(total_received / total_ordered * 100, 1), 99.9)
+        return min(round_qty(total_received / total_ordered * 100, precision_digits=1), 99.9)
 
     def update_status(self):
         """根据明细更新状态"""
@@ -142,7 +149,7 @@ class MaterialRegistrationItem(Base):
         ordered = float(self.ordered_quantity or 0)
         received = float(self.received_quantity or 0)
         remaining = ordered - received
-        item_progress = min(round(received / ordered * 100, 1), 99.9) if ordered > 0 and received < ordered else (100.0 if received >= ordered and ordered > 0 else 0)
+        item_progress = min(round_qty(received / ordered * 100, precision_digits=1), 99.9) if ordered > 0 and received < ordered else (100.0 if received >= ordered and ordered > 0 else 0)
         return {
             'id': self.id,
             'registration_id': self.registration_id,

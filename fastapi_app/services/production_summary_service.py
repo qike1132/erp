@@ -7,10 +7,10 @@ import calendar
 import io
 import logging
 import uuid
-from datetime import date
+from datetime import date, datetime, timedelta
 
 import openpyxl
-from sqlalchemy import and_, extract, func, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -35,7 +35,7 @@ async def get_craft_works(db: AsyncSession, year: int, month: int, work_date: st
 
     返回每条记录 + 按日汇总（含当天皮套出库总数）
     """
-    conditions = [extract('year', CraftWork.work_date) == year, extract('month', CraftWork.work_date) == month]
+    conditions = [CraftWork.work_date >= date(year, month, 1), CraftWork.work_date <= _last_day_of_month(year, month)]
     if work_date:
         conditions.append(CraftWork.work_date == parse_date_with_fallback(work_date))
     result = await db.execute(select(CraftWork).where(*conditions).order_by(CraftWork.work_date, CraftWork.id))
@@ -98,8 +98,12 @@ async def export_craft_works(db: AsyncSession, start_date: str='', end_date: str
     query = select(CraftWork).order_by(CraftWork.work_date, CraftWork.id)
     if conditions:
         query = query.where(*conditions)
-    result = await db.execute(query)
-    records = list(result.scalars().all())
+    # 导出上界：无日期条件时为全表导出，超限截断并告警（与包装部导出同模式）
+    query = query.limit(_MAX_EXPORT_ROWS + 1)
+    records = list((await db.scalars(query)).all())
+    if len(records) > _MAX_EXPORT_ROWS:
+        logger.warning('手工部数据导出超过最大行数 %d，已截断', _MAX_EXPORT_ROWS)
+        records = records[:_MAX_EXPORT_ROWS]
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = '手工部生产数据'
@@ -122,7 +126,7 @@ async def get_packaging_records(db: AsyncSession, year: int, month: int, custome
     """获取包装部记录列表"""
     conditions = []
     if year and month:
-        conditions.extend([extract('year', PackagingRecord.pack_date) == year, extract('month', PackagingRecord.pack_date) == month])
+        conditions.extend([PackagingRecord.pack_date >= date(year, month, 1), PackagingRecord.pack_date <= _last_day_of_month(year, month)])
     if customer:
         conditions.append(PackagingRecord.customer.like(f'%{escape_like(customer)}%'))
     if start_date:
@@ -328,12 +332,17 @@ async def get_production_summary(db: AsyncSession, year: int, month: int) -> dic
 
 async def _get_case_stockout_daily(db: AsyncSession, start: date, end: date) -> dict:
     """获取皮套出库按日汇总"""
-    result = await db.execute(select(func.date(CaseStockOut.stockout_date).label('d'), func.coalesce(func.sum(CaseStockOut.quantity), 0).label('total')).where(and_(func.date(CaseStockOut.stockout_date) >= start, func.date(CaseStockOut.stockout_date) <= end)).group_by(func.date(CaseStockOut.stockout_date)))
+    # 范围条件（>= 当日零点，< 次日零点）而非 func.date()，使 stockout_date 索引可命中
+    start_dt = datetime(start.year, start.month, start.day)
+    end_dt = start_dt + timedelta(days=1)
+    result = await db.execute(select(func.date(CaseStockOut.stockout_date).label('d'), func.coalesce(func.sum(CaseStockOut.quantity), 0).label('total')).where(and_(CaseStockOut.stockout_date >= start_dt, CaseStockOut.stockout_date < end_dt)).group_by(func.date(CaseStockOut.stockout_date)))
     return {str(row.d): int(row.total) for row in result.all()}
 
 async def _get_case_stockout_detail(db: AsyncSession, start: date, end: date) -> dict:
     """获取皮套出库按日+客户+产品明细"""
-    result = await db.execute(select(func.date(CaseStockOut.stockout_date).label('d'), CaseStockOut.customer, func.coalesce(Product.name, Case.name).label('product_name'), CaseStockOut.quantity).join(Case, CaseStockOut.case_id == Case.id).outerjoin(Product, Case.product_id == Product.id).where(and_(func.date(CaseStockOut.stockout_date) >= start, func.date(CaseStockOut.stockout_date) <= end)).order_by(CaseStockOut.stockout_date))
+    start_dt = datetime(start.year, start.month, start.day)
+    end_dt = start_dt + timedelta(days=1)
+    result = await db.execute(select(func.date(CaseStockOut.stockout_date).label('d'), CaseStockOut.customer, func.coalesce(Product.name, Case.name).label('product_name'), CaseStockOut.quantity).join(Case, CaseStockOut.case_id == Case.id).outerjoin(Product, Case.product_id == Product.id).where(and_(CaseStockOut.stockout_date >= start_dt, CaseStockOut.stockout_date < end_dt)).order_by(CaseStockOut.stockout_date))
     data = {}
     for row in result.all():
         d = str(row.d)

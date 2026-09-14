@@ -73,26 +73,26 @@ class OrderProcessReceive(BaseModel):
     received_quantity: int | None = Field(None, gt=0, le=9999999, description="收货数量")
 
 
-class OrderProcessResponse(BaseModel):
-    """订单外发工序响应"""
-    id: int
-    order_id: int
-    order_item_id: int | None = None
-    product_id: int
-    product_name: str | None = None
-    process_type: str
-    sort_order: int = 0
-    status: str = 'pending'
-    shipped_quantity: int | None = None
-    received_quantity: int | None = None
-    planned_start_time: datetime | None = None
-    planned_end_time: datetime | None = None
-    actual_start_time: datetime | None = None
-    actual_end_time: datetime | None = None
-    remark: str | None = None
-    created_by: str | None = None
-    create_time: datetime | None = None
-    update_time: datetime | None = None
+class OrderProcessShipItem(BaseModel):
+    """批量发货单条明细"""
+    process_id: int = Field(..., gt=0, description="工序ID")
+    quantity: int = Field(..., gt=0, le=9999999, description="本批发货数量")
+
+
+class OrderProcessReceiveItem(BaseModel):
+    """批量收货单条明细"""
+    process_id: int = Field(..., gt=0, description="工序ID")
+    quantity: int | None = Field(None, gt=0, le=9999999, description="本批收货数量（缺省=剩余待收）")
+
+
+class OrderProcessShipBatch(BaseModel):
+    """批量发货请求（单事务原子）：一次请求完成多道工序发货"""
+    items: list[OrderProcessShipItem] = Field(..., min_length=1, max_length=200)
+
+
+class OrderProcessReceiveBatch(BaseModel):
+    """批量收货请求（单事务原子）：一次请求完成多道工序收货"""
+    items: list[OrderProcessReceiveItem] = Field(..., min_length=1, max_length=200)
 
 
 class OrderProcessListResponse(BaseModel):
@@ -134,43 +134,3 @@ class OrderActionResponse(BaseModel):
     message: str
 
 
-class KanbanOrderProcess(BaseModel):
-    """看板中的单道工序"""
-    id: int
-    order_item_id: int | None = None
-    product_id: int
-    product_name: str | None = None
-    process_type: str
-    sort_order: int = 0
-    status: str = 'pending'
-    shipped_quantity: int | None = None
-    received_quantity: int | None = None
-    planned_start_time: datetime | None = None
-    planned_end_time: datetime | None = None
-    actual_start_time: datetime | None = None
-    actual_end_time: datetime | None = None
-
-
-class KanbanOrder(BaseModel):
-    """看板中的订单条目"""
-    id: int
-    order_no: str
-    customer: str
-    order_date: str = ''
-    record_type: str = 'order'
-    products: list[dict] = []
-    processes: list[KanbanOrderProcess] = []
-    total_processes: int = 0
-    completed_processes: int = 0
-    progress: int = 0
-    current_process: str | None = None
-    status_label: str = '未配置工序'
-
-
-class KanbanResponse(BaseModel):
-    """看板数据响应"""
-    success: bool = True
-    data: list[dict]
-    total: int = 0
-    page: int = 1
-    per_page: int = 20

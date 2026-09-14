@@ -5,6 +5,7 @@
 依赖 batch_import_parser 中的解析函数（parse_date_value、validate_customer_name）。
 """
 import logging
+from collections.abc import Container, Hashable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Callable
@@ -13,6 +14,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi_app.services.batch_import_dedup import dedupe_by_keys
 from fastapi_app.services.batch_import_parser import parse_date_value, validate_customer_name
 from fastapi_app.services.inventory_service import calculate_available_shipment_quantity
 from fastapi_app.services.numbering import (
@@ -58,6 +60,33 @@ def default_import_deps() -> ImportDeps:
     return ImportDeps()
 
 
+@dataclass(frozen=True)
+class DedupeSpec:
+    """导入前的内存去重规格（ITER-2 决策 1：去重在应用层，不靠 DB 唯一约束）。
+
+    传给 :func:`_import_data_generic` 后，行处理**之前**先做一遍内存去重：
+    批内重复、与库中已有数据重复的行会被剔除並生成人类可读的错误消息，
+    而不是静默跳过、也不是等到 ``executemany`` 时整批撞唯一约束失败。
+
+    Attributes:
+        key_fn: 从一行提取唯一键；返回 ``None`` 表示该行无从判定唯一性（一律保留）。
+            需要大小写不敏感时用 ``batch_import_dedup.composite_key``。
+        existing_keys: 库中已有数据的键集合。也可留空并改用 ``existing_keys_key``。
+        existing_keys_key: ``pre_load`` 返回的 context 中的键名，用于取出库中已有的键集合。
+            之所以需要它：``pre_load`` 查库发生在 ``_import_data_generic`` 内部，
+            本规格作为入参传入时那些键还不存在，只能延迟到 context 就绪后再取。
+        label: 错误消息里对这把键的称呼，如 ``'产品名称'``。
+        message_limit: 最多回显多少条去重消息，超出部分汇总为一条。
+            防止一个几千行的文件刷出上千条消息盖住真正的问题。
+    """
+
+    key_fn: Callable[[dict], Hashable | None]
+    existing_keys: Container[Hashable] = ()
+    existing_keys_key: str | None = None
+    label: str = '唯一键'
+    message_limit: int | None = 50
+
+
 # ==================== 综合导入子函数 ====================
 
 async def _pre_load_product_map(db: AsyncSession) -> dict:
@@ -80,6 +109,7 @@ async def _import_data_generic(
     use_savepoint: bool = True,
     has_debug_messages: bool = True,
     label: str = "导入",
+    dedupe: DedupeSpec | None = None,
 ):
     """
     通用导入数据框架
@@ -93,13 +123,37 @@ async def _import_data_generic(
         use_savepoint: 是否使用 savepoint 包裹每行处理
         has_debug_messages: 是否收集调试消息
         label: 导入类型标签，用于日志和完成消息
+        dedupe: 可选的内存去重规格（见 :class:`DedupeSpec`）。不传则行为完全不变。
     """
     count = 0
     debug_messages = [] if has_debug_messages else None
 
     context = await pre_load(db) if pre_load else {}
 
-    for idx, row_data in enumerate(data_list, start=2):
+    if dedupe is not None:
+        # 去重先于行处理：重复行不进循环，也就不会撞唯一约束。
+        # kept 保留原始行号，使后续错误消息与 Excel 里看到的行号一致。
+        existing_keys = dedupe.existing_keys
+        if dedupe.existing_keys_key is not None:
+            existing_keys = context.get(dedupe.existing_keys_key) or ()
+        deduped = dedupe_by_keys(
+            data_list,
+            dedupe.key_fn,
+            existing_keys=existing_keys,
+            label=dedupe.label,
+        )
+        rows_to_process = deduped.kept
+        if debug_messages is not None:
+            debug_messages.extend(deduped.error_messages(limit=dedupe.message_limit))
+        if deduped.removed_count:
+            logger.info(
+                "%s：去重跳过 %d 行（输入 %d 行）",
+                label, deduped.removed_count, deduped.total_count,
+            )
+    else:
+        rows_to_process = list(enumerate(data_list, start=2))
+
+    for idx, row_data in rows_to_process:
         try:
             if use_savepoint:
                 async with db.begin_nested():
@@ -116,21 +170,40 @@ async def _import_data_generic(
 
     await db.flush()
 
-    completion_msg = f"{label}完成: 共导入 {count} 条"
-    logger.info(completion_msg)
-    if debug_messages is not None:
-        debug_messages.append(completion_msg)
+    # 完成消息只进日志，不再 append 进 debug_messages：
+    # debug_messages 的语义是「行级消息」，调用方（_process_comprehensive_sheet）
+    # 会把它整体并进 results.errors 展示给用户，混入完成消息会污染错误列表。
+    logger.info("%s完成: 共导入 %d 条", label, count)
 
     if has_debug_messages:
         return count, debug_messages
     return count
 
 
-async def import_products_from_data(db: AsyncSession, data_list: list) -> int:
-    """从数据列表导入产品"""
+def _product_dedupe_key(row: dict) -> str | None:
+    """产品导入的唯一键：产品名称（去首尾空白 + casefold）。
+
+    归一化必须与 ``Product.name`` 既有匹配口径一致（大小写不敏感、去空白），
+    否则「Acme」与「acme 」会被当成两个产品 —— 正是要去防的那种重复。
+    返回 ``None`` 表示该行没有产品名，无从判定唯一性，一律保留。
+    """
+    name = row.get('产品名称') or row.get('产品名') or row.get('名称')
+    if not name:
+        return None
+    return str(name).strip().casefold()
+
+
+async def import_products_from_data(db: AsyncSession, data_list: list) -> tuple[int, list[str]]:
+    """从数据列表导入产品。
+
+    Returns:
+        ``(成功导入条数, 错误消息列表)``。重复行（批内重复 / 与库中已有重复）
+        在进入行处理**之前**被剔除，并为每行生成一条可读消息，
+        不再像以前那样静默 ``return False``。
+    """
     async def _pre_load(db):
         existing_result = await db.execute(select(func.lower(Product.name)))
-        existing_names = {row[0] for row in existing_result.all()}
+        existing_names = {row[0].casefold() for row in existing_result.all() if row[0]}
         return {'existing_names': existing_names}
 
     async def _row_handler(db, row_data, idx, context, debug_messages):
@@ -145,6 +218,8 @@ async def import_products_from_data(db: AsyncSession, data_list: list) -> int:
 
         name = str(name).strip()
 
+        # 与库中已有产品的重复已由 dedupe 前置剔除；此处保留为防御性检查
+        # （历史行为：直接 return False，不产生任何消息）。
         if name.lower() in existing_names:
             return False
 
@@ -155,10 +230,13 @@ async def import_products_from_data(db: AsyncSession, data_list: list) -> int:
             stock = 0
 
         try:
-            price_val = float(price) if price else 0
-        except (ValueError, TypeError):
+            # Decimal(str(...)) 直转：避免 float 二进制近似值进入 Numeric 列
+            from decimal import Decimal, InvalidOperation
+
+            price_val = Decimal(str(price)) if price else Decimal('0')
+        except (ValueError, TypeError, InvalidOperation):
             logger.warning("产品导入：price 解析失败，使用默认值 0 (name=%s, value=%r)", name, price)
-            price_val = 0
+            price_val = Decimal('0')
 
         product = Product(
             name=name,
@@ -174,8 +252,13 @@ async def import_products_from_data(db: AsyncSession, data_list: list) -> int:
         db, data_list, _row_handler,
         pre_load=_pre_load,
         use_savepoint=False,
-        has_debug_messages=False,
+        has_debug_messages=True,
         label="产品导入",
+        dedupe=DedupeSpec(
+            key_fn=_product_dedupe_key,
+            existing_keys_key='existing_names',
+            label='产品名称',
+        ),
     )
 
 

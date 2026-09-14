@@ -53,8 +53,6 @@ from fastapi_app.shared_models.order_item import OrderItem
 from fastapi_app.shared_models.order_status_log import OrderStatusLog
 from fastapi_app.shared_models.order_sync import OrderSyncConfig, OrderSyncRecord, SyncRetryQueue
 from fastapi_app.shared_models.outsource import (
-    OUTSOURCE_PROCESS_STATUS_LABELS,
-    OUTSOURCE_PROCESS_STATUSES,
     OrderOutsourceProcess,
     OrderOutsourceProcessFlow,
     OutsourceProcessType,
@@ -87,8 +85,6 @@ __all__ = [
     'CUSTOMER_SAMPLING_ACTIONS',
     'CUSTOMER_SAMPLING_CHANGE_TYPES',
     'MATERIAL_CATEGORIES',
-    'OUTSOURCE_PROCESS_STATUSES',
-    'OUTSOURCE_PROCESS_STATUS_LABELS',
     'ApprovalLog',
     'ApprovalRequest',
     'AuditLog',

@@ -47,9 +47,13 @@ def client(monkeypatch):
         ]
 
     async def _fake_todos(_db):
-        return [
-            TodoItem(id=1, type="order", description="订单 PO-1 待处理", urgency="urgent", related_module="order_query", related_business_id=1),
-        ]
+        # 服务实现返回 TodoListResponse.model_dump()（dict，兼容 cache_result JSON 序列化）
+        return {
+            "success": True,
+            "data": [
+                TodoItem(id=1, type="order", description="订单 PO-1 待处理", urgency="urgent", related_module="order_query", related_business_id=1).model_dump(),
+            ],
+        }
 
     def _fake_system_status():
         from fastapi_app.services.dashboard_service import SystemStatus, SystemStatusResponse
@@ -58,17 +62,19 @@ def client(monkeypatch):
             data=SystemStatus(is_running=True, last_sync_time="2026-06-22", data_status="up_to_date"),
         )
 
-    def _fake_mobile_dashboard(_query_date, _db):
-        return MobileDashboardResponse(
-            success=True,
-            data={
+    async def _fake_mobile_dashboard(_query_date, _db):
+        # 端点已改为 await fetch_mobile_dashboard(...)（服务实现为 async），
+        # 服务返回 dict，由端点构造成 MobileDashboardResponse
+        return {
+            "success": True,
+            "data": {
                 "stock": {"today_quantity": 1, "today_amount": 1.0, "month_quantity": 2, "month_amount": 2.0, "total_quantity": 3, "total_amount": 3.0},
                 "production": {"total_value": 0.0, "departments": []},
                 "shipping": {"daily_qty": 0, "total_amount": 0.0},
                 "orders": {"daily_qty": 0, "daily_amount": 0.0, "total_amount": 0.0, "total_qty": 0, "total_inventory": 0, "total_inventory_amount": 0.0},
                 "warehouse": {"in_qty": 0, "in_amount": 0.0, "out_qty": 0, "out_amount": 0.0},
             },
-        )
+        }
 
     async def _fake_nav_sections():
         return {"main": NavSection(name="主菜单", items=[])}

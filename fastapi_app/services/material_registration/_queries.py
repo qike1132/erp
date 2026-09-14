@@ -12,6 +12,7 @@ from sqlalchemy.orm import joinedload, selectinload
 
 from fastapi_app.core.cache import cache_result
 from fastapi_app.core.exceptions import BusinessError
+from fastapi_app.core.float_utils import float_compare, round_qty
 from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.shared_models import (
     MaterialRegistration,
@@ -113,7 +114,7 @@ def _compute_pct(ordered: float, received: float) -> float:
         return 0.0
     if received >= ordered:
         return 100.0
-    return min(round(received / ordered * 100 * 10) / 10, 99.9)
+    return min(round_qty(received / ordered * 100, precision_digits=1), 99.9)
 
 @cache_result(key_prefix="material:supplier_detail", ttl=30, local_ttl=10,
              key_builder=lambda **kw: kw.get('order_no', ''))
@@ -175,7 +176,8 @@ async def get_supplier_detail(db, order_no: str) -> dict:
         r_total = sum(m['received'] for m in items)
         all_ordered += o_total
         all_received += r_total
-        all_complete = all(m['received'] >= m['ordered'] for m in items)
+        # ordered/received 为 Numeric(12,2) 经 float 聚合，用 2 位精度比较避免表示噪声
+        all_complete = all(float_compare(m['received'], m['ordered'], precision_digits=2) >= 0 for m in items)
         supplier_groups.append({
             'supplier_name': sup_name,
             'items': items,
@@ -185,7 +187,7 @@ async def get_supplier_detail(db, order_no: str) -> dict:
         })
 
     all_complete = all(
-        m['received'] >= m['ordered']
+        float_compare(m['received'], m['ordered'], precision_digits=2) >= 0
         for g in supplier_groups
         for m in g['items']
     )
@@ -408,7 +410,7 @@ async def get_stats_overview(db) -> dict:
             'total_ordered': float(total_ordered),
             'total_received': float(total_received),
             'total_remaining': float(total_ordered) - float(total_received),
-            'overall_progress': min(round(float(total_received) / float(total_ordered or 1) * 100, 1), 99.9) if completed < total_all_num else (100.0 if total_all_num > 0 else 0),
+            'overall_progress': min(round_qty(float(total_received) / float(total_ordered or 1) * 100, precision_digits=1), 99.9) if completed < total_all_num else (100.0 if total_all_num > 0 else 0),
             'recent_registrations': recent,
         }
     }

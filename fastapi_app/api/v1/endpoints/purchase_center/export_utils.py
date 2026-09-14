@@ -14,6 +14,7 @@ from openpyxl.styles import Border as Bd
 from openpyxl.styles import Font as Ft
 from openpyxl.styles import Side as Sd
 
+from fastapi_app.core.float_utils import round_qty
 from fastapi_app.core.logger import logger
 
 # 模板文件路径
@@ -153,7 +154,7 @@ def generate_factory_summary_print(orders, order_items_map, source_orders=None):
         for supplier_name, fabric_dict in supplier_dict.items():
             fabrics_list = list(fabric_dict.values())
             for f in fabrics_list:
-                f['quantity'] = round(float(f['quantity']), 2) if f['quantity'] else 0
+                f['quantity'] = round_qty(float(f['quantity'])) if f['quantity'] else 0
             suppliers_list.append({'supplier_name': supplier_name, 'fabrics': fabrics_list})
         sorted_groups[(customer_name, product_name)] = suppliers_list
 

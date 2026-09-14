@@ -99,7 +99,7 @@ const emit = defineEmits<{
   overflow-y: auto;
 }
 .sp-table-wrap {
-  padding: 0 24px 24px;
+  padding: 0;
 }
 .sp-table-wrap table {
   width: 100%;

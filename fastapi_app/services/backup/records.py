@@ -41,6 +41,23 @@ def _is_backup_file(f: Path) -> bool:  # log-context: internal helper 无请求�
     )
 
 
+def _normalize_backup_ts(ts: str) -> str:  # log-context: internal helper 无请求上下文
+    """把备份时间戳统一为 'YYYY-MM-DD HH:MM:SS' 便于字符串比较。
+
+    兼容两种来源格式：
+    - 文件名格式 'YYYYMMDD_HHMMSS'（如 erp_backup_20260913_010000.zip）
+    - manifest 格式 'YYYY-MM-DD HH:MM:SS'（exported_at / base_timestamp）
+    二者格式不同，混比较会恒为 False/True，导致级联删除误判。
+    """
+    if not ts:
+        return ''
+    ts = ts.strip()
+    # 文件名格式：YYYYMMDD_HHMMSS（15 位，第 8 位为下划线，其余为数字）
+    if len(ts) == 15 and ts[8] == '_' and ts[:8].isdigit() and ts[9:].isdigit():
+        return f'{ts[:4]}-{ts[4:6]}-{ts[6:8]} {ts[9:11]}:{ts[11:13]}:{ts[13:15]}'
+    return ts
+
+
 def ensure_backup_dir():  # log-context: internal helper 无请求上下文
     """确保备份目录存在"""
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
@@ -473,13 +490,15 @@ def cleanup_old_backups() -> dict:  # log-context: internal helper 无请求上�
             to_delete.add(b['name'])
 
     # 策略3: 级联删除 - 删除全量备份时，删除依赖它的增量备份
+    # 注意：文件名时间戳为 'YYYYMMDD_HHMMSS'，而 manifest 的 base_timestamp 为
+    # 'YYYY-MM-DD HH:MM:SS'，两者格式不一致。若直接字符串比较会恒为 False，导致
+    # 所有增量备份被无条件误删（数据丢失）。这里统一归一化为同一格式后再比较。
     full_backup_timestamps = set()
     for b in backups:
         if not b['is_incremental'] and b['name'] not in to_delete:
-            # 提取全量备份的时间戳
             try:
                 ts_str = b['name'].replace('erp_backup_', '').replace('erp_auto_daily_', '').replace('.zip', '').replace('.json', '').replace('.enc', '')
-                full_backup_timestamps.add(ts_str)
+                full_backup_timestamps.add(_normalize_backup_ts(ts_str))
             except (ValueError, IndexError):
                 pass  # defensive: 异常静默处理,不影响主流程
 
@@ -487,7 +506,8 @@ def cleanup_old_backups() -> dict:  # log-context: internal helper 无请求上�
     for b in backups:
         if b['is_incremental'] and b['base_timestamp']:
             # 如果基础全量备份被删除，增量备份也应该删除
-            base_exists = any(ts for ts in full_backup_timestamps if ts <= b['base_timestamp'])
+            base_ts = _normalize_backup_ts(str(b['base_timestamp']))
+            base_exists = any(ts for ts in full_backup_timestamps if ts <= base_ts)
             if not base_exists:
                 to_delete.add(b['name'])
 

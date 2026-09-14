@@ -67,6 +67,5 @@ function onRetry() {
   font-family: var(--font-sans);
   color: var(--coq-text);
   background: var(--coq-bg);
-  padding-top: 16px;
 }
 </style>

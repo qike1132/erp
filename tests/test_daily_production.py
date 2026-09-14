@@ -80,10 +80,12 @@ class TestGetRecords:
     @pytest.mark.asyncio
     async def test_get_records_empty(self, mock_async_db):
         """空记录"""
-        mock_async_db.execute = AsyncMock()
+        # 现实现两次 execute：主查询（rows）+ 独立 COUNT（total）
         empty_result = MagicMock()
         empty_result.all.return_value = []
-        mock_async_db.execute.return_value = empty_result
+        count_result = MagicMock()
+        count_result.scalar.return_value = 0
+        mock_async_db.execute = AsyncMock(side_effect=[empty_result, count_result])
 
         result = await get_records(mock_async_db, year=2024, month=6)
 
@@ -93,10 +95,11 @@ class TestGetRecords:
     @pytest.mark.asyncio
     async def test_get_records_with_department(self, mock_async_db):
         """按部门筛选"""
-        mock_async_db.execute = AsyncMock()
         empty_result = MagicMock()
         empty_result.all.return_value = []
-        mock_async_db.execute.return_value = empty_result
+        count_result = MagicMock()
+        count_result.scalar.return_value = 0
+        mock_async_db.execute = AsyncMock(side_effect=[empty_result, count_result])
 
         result = await get_records(
             mock_async_db, year=2024, month=6, department='filling'
@@ -107,10 +110,11 @@ class TestGetRecords:
     @pytest.mark.asyncio
     async def test_get_records_with_date(self, mock_async_db):
         """按日期筛选"""
-        mock_async_db.execute = AsyncMock()
         empty_result = MagicMock()
         empty_result.all.return_value = []
-        mock_async_db.execute.return_value = empty_result
+        count_result = MagicMock()
+        count_result.scalar.return_value = 0
+        mock_async_db.execute = AsyncMock(side_effect=[empty_result, count_result])
 
         result = await get_records(
             mock_async_db, year=2024, month=6, production_date='2024-06-15'
@@ -121,10 +125,11 @@ class TestGetRecords:
     @pytest.mark.asyncio
     async def test_get_records_pagination(self, mock_async_db):
         """分页查询"""
-        mock_async_db.execute = AsyncMock()
         empty_result = MagicMock()
         empty_result.all.return_value = []
-        mock_async_db.execute.return_value = empty_result
+        count_result = MagicMock()
+        count_result.scalar.return_value = 0
+        mock_async_db.execute = AsyncMock(side_effect=[empty_result, count_result])
 
         result = await get_records(
             mock_async_db, year=2024, month=6, page=2, per_page=20

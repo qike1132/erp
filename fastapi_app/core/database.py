@@ -60,6 +60,62 @@ _AsyncSessionLocal: async_sessionmaker | None = None
 async_engine: AsyncEngine | None = None
 _rebuild_lock = asyncio.Lock()
 
+# 引擎连接池所属的事件循环。asyncpg 连接绑定在创建它的 loop 上；
+# pytest-asyncio 为每个测试新建 loop，若跨 loop 复用池中连接，
+# 会在检出/清理阶段报 "Event loop is closed" 或
+# "'NoneType' object has no attribute 'send'"。生产环境 loop 与进程同寿命，
+# 此守卫在生产中恒为 no-op（见 ensure_engine_for_current_loop）。
+_engine_loop: asyncio.AbstractEventLoop | None = None
+
+
+async def ensure_engine_for_current_loop() -> None:
+    """确保异步引擎连接池运行在当前事件循环上。
+
+    检测到 running loop 与建池 loop 不一致（仅测试环境会出现）时，
+    丢弃旧引擎并重建。旧池中连接属于已关闭的旧 loop，无法优雅关闭，
+    因此以 close=False 丢弃，避免清理阶段产生
+    "Exception terminating connection ... Event loop is closed" 噪声日志。
+    """
+    global _engine_loop, _async_engine, _AsyncSessionLocal, async_engine
+    global _read_engine, _ReadSessionLocal
+
+    try:
+        running = asyncio.get_running_loop()
+    except RuntimeError:
+        return  # 同步上下文调用，无法判定 loop，交由首个异步入口处理
+
+    if _engine_loop is running and _async_engine is not None:
+        return
+
+    stale = _async_engine
+    stale_read = _read_engine
+    # 同步完成换库，避免并发协程在 await 点交错时重复重建
+    _async_engine = None
+    _AsyncSessionLocal = None
+    async_engine = None
+    _read_engine = None
+    _ReadSessionLocal = None
+    _engine_loop = running
+    _init_async_engine()
+
+    if stale is not None:
+        try:
+            from fastapi_app.core.slow_query import setup_slow_query_listener
+
+            assert _async_engine is not None  # noqa: S101
+            setup_slow_query_listener(_async_engine.sync_engine)
+        except ImportError as e:
+            logger.warning('慢查询监听器初始化失败: %s', e)
+        try:
+            await stale.dispose(close=False)
+        except Exception:  # noqa: BLE001 - 旧 loop 引擎清理失败不应影响当前请求
+            logger.debug('旧事件循环引擎清理失败（已忽略）', exc_info=True)
+        if stale_read is not None:
+            try:
+                await stale_read.dispose(close=False)
+            except Exception:  # noqa: BLE001 - 同上，尽力而为
+                logger.debug('旧事件循环只读引擎清理失败（已忽略）', exc_info=True)
+
 
 def _init_async_engine():
     global _async_engine, _AsyncSessionLocal, async_engine
@@ -155,6 +211,7 @@ async def get_async_db():
     的连接失效。此依赖对 commit/rollback 错误进行宽容处理，避免恢复成功后
     因 session 失效而返回 500 错误。
     """
+    await ensure_engine_for_current_loop()
     if _AsyncSessionLocal is None:
         raise RuntimeError("数据库引擎未初始化，请先调用 init_async_engine()")
     async with _AsyncSessionLocal() as session:
@@ -194,6 +251,7 @@ async def get_async_db_context():
     的连接失效。此上下文管理器对 commit/rollback 错误进行宽容处理，避免恢复
     成功后因 session 失效而抛出异常。
     """
+    await ensure_engine_for_current_loop()
     if _AsyncSessionLocal is None:
         raise RuntimeError("数据库引擎未初始化，请先调用 init_async_engine()")
     async with _AsyncSessionLocal() as session:
@@ -290,7 +348,7 @@ async def get_async_read_db():
 
 
 async def dispose_async_engines():
-    global _async_engine, _AsyncSessionLocal, async_engine
+    global _async_engine, _AsyncSessionLocal, async_engine, _engine_loop
     if _async_engine is not None:
         try:
             await _async_engine.dispose()
@@ -299,6 +357,7 @@ async def dispose_async_engines():
     _async_engine = None
     _AsyncSessionLocal = None
     async_engine = None
+    _engine_loop = None
 
 
 async def rebuild_pool() -> bool:
@@ -336,11 +395,13 @@ async def rebuild_pool() -> bool:
         async_engine = None
         _read_engine = None
         _ReadSessionLocal = None
+        _engine_loop = None
 
         # ---- 重新初始化 ----
         try:
             _init_async_engine()
             _init_read_engine()
+            _engine_loop = asyncio.get_running_loop()
 
             from fastapi_app.core.slow_query import setup_slow_query_listener
             assert _async_engine is not None  # noqa: S101
@@ -358,6 +419,7 @@ async def rebuild_pool() -> bool:
 async def verify_db_connectivity() -> bool:
     """验证数据库连接可用性，返回 True/False"""
     from sqlalchemy import text
+    await ensure_engine_for_current_loop()
     try:
         assert _async_engine is not None  # noqa: S101
         async with _async_engine.connect() as conn:

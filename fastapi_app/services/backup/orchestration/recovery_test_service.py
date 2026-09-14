@@ -520,6 +520,7 @@ class DisasterRecoveryTestService:
         返回 {'success', 'imported_rows', 'error'}，异常转为失败结果而非向上抛。
         """
         import gzip as gzip_mod
+        import os
         import subprocess
 
         from fastapi_app.services.backup.dump import resolve_pg_tool

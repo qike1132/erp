@@ -298,6 +298,40 @@ class TestCleanupOldBackups:
 
 
 # ---------------------------------------------------------------------------
+# 时间戳归一化测试（修复增量备份级联误删 bug）
+# ---------------------------------------------------------------------------
+
+class TestNormalizeBackupTs:
+    """_normalize_backup_ts：统一文件名时间戳与 manifest base_timestamp 格式。
+
+    文件名时间戳为 'YYYYMMDD_HHMMSS'，manifest base_timestamp 为
+    'YYYY-MM-DD HH:MM:SS'。二者格式不一致时字符串比较恒为 False，曾导致
+    所有增量备份被无条件误删（数据丢失）。此测试锁死该修复。
+    """
+
+    def test_filename_format_is_normalized(self):
+        from fastapi_app.services.backup.records import _normalize_backup_ts
+        assert _normalize_backup_ts('20260913_010000') == '2026-09-13 01:00:00'
+
+    def test_manifest_format_is_unchanged(self):
+        from fastapi_app.services.backup.records import _normalize_backup_ts
+        assert _normalize_backup_ts('2026-09-13 01:00:00') == '2026-09-13 01:00:00'
+
+    def test_empty_and_none(self):
+        from fastapi_app.services.backup.records import _normalize_backup_ts
+        assert _normalize_backup_ts('') == ''
+        assert _normalize_backup_ts(None) == ''
+
+    def test_two_formats_compare_equal(self):
+        """归一化后，文件名时间戳 <= manifest base_timestamp 应成立（修复前恒 False）"""
+        from fastapi_app.services.backup.records import _normalize_backup_ts
+        filename_ts = _normalize_backup_ts('20260913_010000')
+        base_ts = _normalize_backup_ts('2026-09-13 01:00:00')
+        assert filename_ts == base_ts
+        assert filename_ts <= base_ts
+
+
+# ---------------------------------------------------------------------------
 # 异常类测试
 # ---------------------------------------------------------------------------
 

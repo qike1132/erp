@@ -40,10 +40,6 @@ BACKUP_FORMAT_VERSION = "1.0"
 # 加密配置引用
 BACKUP_ENCRYPTION_PASSWORD = os.environ.get("BACKUP_ENCRYPTION_PASSWORD")
 BACKUP_ENCRYPTION_KEY = os.environ.get("BACKUP_ENCRYPTION_KEY")
-BACKUP_ENCRYPTION_ENABLED = os.environ.get("BACKUP_ENCRYPTION_ENABLED", "true").lower() in ("true", "1", "yes")
-BACKUP_ENCRYPTION_FALLBACK_TO_GENERATED = os.environ.get(
-    "BACKUP_ENCRYPTION_FALLBACK_TO_GENERATED", "false"
-).lower() in ("true", "1", "yes")
 
 
 class BackupFormatError(Exception):
@@ -316,10 +312,12 @@ class DefaultBackupFormatStrategy(BackupFormatStrategy):
         password: str | bytearray,
     ) -> None:
         """加密文件。"""
-        from fastapi_app.core.backup_encryption import encrypt_backup
+        # ITER-1 T3：新写密文统一走分块格式（chunked-v1）。
+        # 注意此处仍 read_bytes 整包读入（内存优化见 ITER-1 阶段 B 的流式切换）。
+        from fastapi_app.core.backup_encryption import encrypt_backup_auto
 
         data = source_path.read_bytes()
-        encrypted_bytes, meta_dict = encrypt_backup(data, password)
+        encrypted_bytes, meta_dict = encrypt_backup_auto(data, password)
 
         # 写入带 meta 前缀的加密格式：4-byte meta length + JSON meta + ciphertext
         meta_bytes = json.dumps(meta_dict, ensure_ascii=False).encode("utf-8")
@@ -461,7 +459,12 @@ class DefaultBackupFormatStrategy(BackupFormatStrategy):
         return b"".join(parts)
 
     def _resolve_password(self, options: PackOptions) -> str | bytearray | None:
-        """解析打包时的加密密码。"""
+        """解析打包时的加密密码。
+
+        fail-safe：绝不生成一次性随机密钥。随机密钥一旦生成即无人能找回，
+        会产出「永久不可还原」的加密备份（P0-1 已在 crypto.py/core.py 移除该
+        缺陷，此处同样收敛为：无密码即不加密，由调用方显式决策）。
+        """
         if not options.encrypt:
             return None
         if options.password is not None:
@@ -470,12 +473,6 @@ class DefaultBackupFormatStrategy(BackupFormatStrategy):
             return BACKUP_ENCRYPTION_PASSWORD
         if BACKUP_ENCRYPTION_KEY:
             return BACKUP_ENCRYPTION_KEY
-        if BACKUP_ENCRYPTION_ENABLED and BACKUP_ENCRYPTION_FALLBACK_TO_GENERATED:
-            from fastapi_app.services.backup.crypto import generate_encryption_key
-
-            generated = generate_encryption_key()
-            logger.warning("使用生成的随机密钥进行备份加密，请安全保存完整密钥用于恢复")
-            return generated
         return None
 
     def _resolve_password_for_unpack(self, options: UnpackOptions) -> str | bytearray | None:

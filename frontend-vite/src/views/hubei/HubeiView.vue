@@ -22,7 +22,7 @@
           <span>提醒：共有 <strong>{{ unconfirmedCount }}</strong> 条订单记录待确认，请及时确认</span>
         </div>
         <HubeiSearchBar
-          v-model:product-query="filterOrderNo"
+          v-model:product-query="filterProductKw"
           v-model:customer-query="filterCustomer"
           :show-customer-search="false"
           :show-actions="false"
@@ -97,9 +97,9 @@ const {
 } = provideBeileOrders()
 
 /** 筛选栏 v-model：双向绑定到 composable 的 filters（reactive） */
-const filterOrderNo = computed({
-  get: () => filters.orderNo,
-  set: (v: string) => { filters.orderNo = v },
+const filterProductKw = computed({
+  get: () => filters.productKw,
+  set: (v: string) => { filters.productKw = v },
 })
 const filterCustomer = computed({
   get: () => filters.customer,
@@ -168,24 +168,6 @@ function onReset() {
 .bo-confirm-filter-btn.is-active:hover {
   color: #fff;
   background: linear-gradient(135deg, var(--color-primary-600, #2563eb), var(--color-primary-700, #1d4ed8));
-}
-.bo-confirm-filter-count {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 16px;
-  height: 16px;
-  padding: 0 4px;
-  border-radius: 999px;
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 1;
-  background: var(--color-warning-100);
-  color: var(--color-warning-700);
-}
-.bo-confirm-filter-btn.is-active .bo-confirm-filter-count {
-  background: rgba(255, 255, 255, 0.28);
-  color: #fff;
 }
 
 /* ===== 未确认提醒（位于「已确认」TAB 右侧） ===== */

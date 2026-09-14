@@ -39,6 +39,16 @@ BACKUP_ENCRYPTION_PASSWORD = os.environ.get('BACKUP_ENCRYPTION_PASSWORD', '')
 BACKUP_ENCRYPTION_KEY = os.environ.get('BACKUP_ENCRYPTION_KEY', '')
 BACKUP_ENCRYPTION_FALLBACK_TO_GENERATED = os.environ.get('BACKUP_ENCRYPTION_FALLBACK_TO_GENERATED', 'false').lower() == 'true'
 
+# 加密落盘格式开关（ITER-1 T3）
+#   true （默认）→ 新写密文用 chunked-v1 分块 AEAD（可流式，内存与备份体积解耦）
+#   false        → 回退 legacy 单包格式
+# 读侧两种格式永远都能解开，所以改这个开关**不会**让任何既有备份变成不可读；
+# 它是「新密文怕旧代码读不了」这一回退场景的唯一开关（改环境变量 + 重启即可，不必回滚代码）。
+# 注意：实际判定在 fastapi_app/core/backup_encryption.py::chunked_encryption_enabled ——
+# core 层不能反向 import 本包（会与 services/backup/orchestration/core.py 形成循环依赖），
+# 因此那里直接读同名环境变量。本行仅作开关索引，两处默认值必须一致。
+BACKUP_ENCRYPTION_CHUNKED = os.environ.get('BACKUP_ENCRYPTION_CHUNKED', 'true').lower() == 'true'
+
 # 大文件分片配置
 BACKUP_CHUNK_SIZE = int(os.environ.get('BACKUP_CHUNK_SIZE', '104857600'))  # 默认 100MB
 BACKUP_MAX_CHUNKS = int(os.environ.get('BACKUP_MAX_CHUNKS', '100'))  # 最大分片数

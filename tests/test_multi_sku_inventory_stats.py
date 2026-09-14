@@ -6,9 +6,8 @@
 - 库存聚合按 SKU 维度拆分，国家归属取明细 country
 - 出库列表 order_type/country 按匹配明细判定
 
-自包含 fixture（函数级引擎/会话）：不依赖 root conftest 的 session 级
-test_engine（与本机 pytest-asyncio 1.x 存在 ScopeMismatch），只写测试库
-erp_system_test，事务回滚隔离。
+复用根 conftest 的会话级 test_engine（loop_scope="session" 已修复
+ScopeMismatch），事务回滚隔离，只写测试库 erp_system_test。
 """
 import os
 from datetime import UTC, datetime
@@ -16,7 +15,7 @@ from urllib.parse import urlparse, urlunparse
 
 import pytest
 import pytest_asyncio
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from fastapi_app.services.stock_inventory_service import (
     _fetch_inventory,
@@ -42,17 +41,20 @@ def _test_db_url() -> str:
 
 
 @pytest_asyncio.fixture
-async def db():
-    """函数级测试会话：建表 + 事务回滚隔离（自包含，不依赖 session 级 fixture）"""
-    engine = create_async_engine(_test_db_url(), echo=False)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+async def db(test_engine):
+    """函数级测试会话：复用会话级引擎 + 事务回滚隔离。
+
+    早期版本因 ScopeMismatch 自建函数级引擎并整库重置；
+    test_engine 增加 loop_scope="session" 后可直接复用，
+    避免每测试反复建/拆引擎与 DROP SCHEMA 引发的连接抖动。
+    """
+    factory = async_sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False, autoflush=False,
+    )
     async with factory() as session:
         async with session.begin() as transaction:
             yield session
             await transaction.rollback()
-    await engine.dispose()
 
 
 @pytest.fixture

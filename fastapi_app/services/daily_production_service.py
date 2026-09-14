@@ -8,6 +8,7 @@ import io
 import logging
 from collections.abc import Iterable
 from datetime import date
+from decimal import Decimal
 
 import openpyxl
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -15,6 +16,7 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.business_rules import MAX_QUANTITY
+from fastapi_app.core.float_utils import round_money
 from fastapi_app.core.validators import validate_not_empty
 from fastapi_app.shared_models import DailyProductionRecord, Product
 from fastapi_app.utils import calc_total_pages, parse_date_with_fallback
@@ -40,7 +42,8 @@ async def _build_product_price_fallback(
     if not fallback_ids:
         return {}
     result = await db.execute(select(Product.id, Product.price).where(Product.id.in_(fallback_ids)))
-    return {pid: float(price or 0) for pid, price in result.all()}
+    # Decimal 原样返回（Product.price 为 Numeric 列），避免 float 中转损耗精度
+    return {pid: (price if price is not None else Decimal('0')) for pid, price in result.all()}
 
 
 # ==================== 校验 ====================
@@ -142,7 +145,7 @@ async def get_records(
         'pages': calc_total_pages(total, per_page),
         'stats': {
             'total_quantity': int(total_qty),
-            'total_value': round(float(total_val), 2),
+            'total_value': round_money(float(total_val)),
             'total_sku': int(total_sku),
         },
     }
@@ -254,19 +257,19 @@ async def get_daily_summary(db: AsyncSession, target_date: str) -> dict:
     records = list(result.scalars().all())
     price_fallback = await _build_product_price_fallback(db, records)
 
-    def effective_unit_price(r: DailyProductionRecord) -> float:
-        up = float(r.unit_price or 0)
+    def effective_unit_price(r: DailyProductionRecord) -> Decimal:
+        up = r.unit_price if r.unit_price is not None else Decimal('0')
         if up > 0:
             return up
         if r.product_id and r.product_id in price_fallback:
             return price_fallback[r.product_id]
-        return 0.0
+        return Decimal('0')
 
     dept_data = {}
     for r in records:
         dept = r.department
         if dept not in dept_data:
-            dept_data[dept] = {'quantity': 0, 'value': 0.0, 'skus': set()}
+            dept_data[dept] = {'quantity': 0, 'value': Decimal('0'), 'skus': set()}
         dept_data[dept]['quantity'] += r.quantity
         dept_data[dept]['value'] += effective_unit_price(r) * r.quantity
         if r.product_name:
@@ -274,11 +277,11 @@ async def get_daily_summary(db: AsyncSession, target_date: str) -> dict:
 
     departments = []
     overall_quantity = 0
-    overall_value = 0.0
+    overall_value = Decimal('0')
     overall_skus = set()
 
     for dept_key in ('filling', 'handcraft', 'packaging'):
-        d_info = dept_data.get(dept_key, {'quantity': 0, 'value': 0.0, 'skus': set()})
+        d_info = dept_data.get(dept_key, {'quantity': 0, 'value': Decimal('0'), 'skus': set()})
         overall_quantity += d_info['quantity']
         overall_value += d_info['value']
         overall_skus.update(d_info['skus'])
@@ -286,7 +289,7 @@ async def get_daily_summary(db: AsyncSession, target_date: str) -> dict:
             'department': dept_key,
             'department_label': DEPARTMENT_LABELS.get(dept_key, dept_key),
             'total_quantity': d_info['quantity'],
-            'total_value': round(d_info['value'], 2),
+            'total_value': float(round_money(float(d_info['value']))),
             'sku_count': len(d_info['skus']),
         })
 
@@ -294,7 +297,7 @@ async def get_daily_summary(db: AsyncSession, target_date: str) -> dict:
         'date': target_date,
         'departments': departments,
         'overall_quantity': overall_quantity,
-        'overall_value': round(overall_value, 2),
+        'overall_value': float(round_money(float(overall_value))),
         'overall_sku_count': len(overall_skus),
     }
 
@@ -349,7 +352,7 @@ async def get_monthly_summary(db: AsyncSession, year: int, month: int) -> dict:
         if dept in ('filling', 'handcraft', 'packaging'):
             daily_map[d_str][dept] = {
                 'quantity': int(row.total_qty),
-                'value': round(float(row.total_val), 2),
+                'value': round_money(float(row.total_val)),
                 'sku_count': int(row.sku_count),
             }
 
@@ -366,7 +369,7 @@ async def get_monthly_summary(db: AsyncSession, year: int, month: int) -> dict:
         entry['day'] = day
         entry['total'] = {
             'quantity': entry['filling']['quantity'] + entry['handcraft']['quantity'] + entry['packaging']['quantity'],
-            'value': round(entry['filling']['value'] + entry['handcraft']['value'] + entry['packaging']['value'], 2),
+            'value': round_money(entry['filling']['value'] + entry['handcraft']['value'] + entry['packaging']['value']),
             'sku_count': entry['filling']['sku_count'] + entry['handcraft']['sku_count'] + entry['packaging']['sku_count'],
         }
         daily_data.append(entry)
@@ -375,7 +378,7 @@ async def get_monthly_summary(db: AsyncSession, year: int, month: int) -> dict:
     monthly_depts = []
     for dept_key in ('filling', 'handcraft', 'packaging'):
         dept_total_qty = sum(d[dept_key]['quantity'] for d in daily_data)
-        dept_total_val = round(sum(d[dept_key]['value'] for d in daily_data), 2)
+        dept_total_val = round_money(sum(d[dept_key]['value'] for d in daily_data))
         dept_total_sku = sum(d[dept_key]['sku_count'] for d in daily_data)
         monthly_depts.append({
             'department': dept_key,
@@ -391,7 +394,7 @@ async def get_monthly_summary(db: AsyncSession, year: int, month: int) -> dict:
         'daily_data': daily_data,
         'monthly_departments': monthly_depts,
         'monthly_total_quantity': sum(d['total']['quantity'] for d in daily_data),
-        'monthly_total_value': round(sum(d['total']['value'] for d in daily_data), 2),
+        'monthly_total_value': round_money(sum(d['total']['value'] for d in daily_data)),
     }
 
 
@@ -477,7 +480,7 @@ async def export_records(
     total_val = 0.0
     for r in records:
         up = effective_unit_price(r)
-        val = round(up * r.quantity, 2)
+        val = round_money(up * r.quantity)
         total_qty += r.quantity
         total_val += val
         ws.append([
@@ -504,7 +507,7 @@ async def export_records(
         ws.append(['暂无数据', '', '', '', '', '', '', '', '', ''])
 
     # 汇总行
-    ws.append(['全部门合计', '', '', '', '', total_qty, round(total_val, 2), '', '', ''])
+    ws.append(['全部门合计', '', '', '', '', total_qty, round_money(total_val), '', '', ''])
     for cell in ws[ws.max_row]:
         cell.fill = summary_fill
         cell.font = summary_font
@@ -531,7 +534,7 @@ async def export_records(
             ws.append([
                 DEPARTMENT_LABELS.get(dept_key, dept_key),
                 dept_summary[dept_key]['quantity'],
-                round(dept_summary[dept_key]['value'], 2),
+                round_money(dept_summary[dept_key]['value']),
                 '', '', '', '', '', '', '',
             ])
             for cell in ws[ws.max_row]:

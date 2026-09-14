@@ -104,6 +104,7 @@ async def create_full_backup(
     tables: list[str] | None = None,
     exclude_tables: list[str] | None = None,
     progress_cb=None,
+    skip_restore_check: bool = False,
 ) -> tuple[bytes, dict]:
     """执行全量备份并返回 (zip_bytes, manifest_dict)。
 
@@ -111,6 +112,9 @@ async def create_full_backup(
     指定后固定走 JSON 路径（还原时按表 upsert，不整库重建）。
     progress_cb（P2-2）：可选异步回调 (phase, sub, detail)，用于任务层上报
     8 阶段进度（导出/附件/配置/Redis/索引/校验和）。
+    skip_restore_check：True 时跳过「还原进行中」互斥检查。仅用于恢复前
+    安全备份（create_pre_restore_backup）——该场景下还原锁已由调用方持有，
+    若再走 is_restore_in_progress() 检查会必然抛错、导致安全备份静默失败。
     """
     if _backup_in_progress.locked():
         raise BackupLockError('已有备份任务正在执行中，请稍后重试')
@@ -118,9 +122,11 @@ async def create_full_backup(
     # B4 修复：备份与还原互斥——还原期间拒绝启动备份。全量 psql 还原会
     # pg_terminate_backend 杀掉正在运行的 pg_dump；反向场景下还原中表的
     # DROP/重建也会让备份产出部分表缺失的损坏包。
-    from ..restore import is_restore_in_progress
-    if await is_restore_in_progress():
-        raise BackupLockError('还原操作正在执行中，请等待还原完成后再备份')
+    # 例外：恢复前安全备份必须在还原锁已持有的前提下执行，故跳过此检查。
+    if not skip_restore_check:
+        from ..restore import is_restore_in_progress
+        if await is_restore_in_progress():
+            raise BackupLockError('还原操作正在执行中，请等待还原完成后再备份')
 
     db_lock_acquired = await acquire_backup_lock(db)
     if not db_lock_acquired:
@@ -406,9 +412,11 @@ async def _do_create_full_backup(
             if encrypt is None and not effective_encryption_password:
                 logger.warning("create_full_backup 未显式指定 encrypt，且无可用密码，本次备份不加密")
         if effective_encryption_password:
-            from fastapi_app.core.backup_encryption import encrypt_backup
+            # ITER-1 T3：新写备份统一走分块格式（chunked-v1），旧格式仍可读。
+            # 回退开关 BACKUP_ENCRYPTION_CHUNKED=false，无需回滚代码。
+            from fastapi_app.core.backup_encryption import encrypt_backup_auto
             try:
-                encrypted_bytes, meta_dict = encrypt_backup(zip_bytes, effective_encryption_password)
+                encrypted_bytes, meta_dict = encrypt_backup_auto(zip_bytes, effective_encryption_password)
                 manifest['encrypted'] = True
                 manifest['encryption'] = meta_dict
                 if encrypt_password:
@@ -447,8 +455,14 @@ async def create_full_backup_to_file(
         return Path(tmp_file), manifest
 
 
-async def create_pre_restore_backup(db: AsyncSession) -> dict:
-    """创建恢复前安全备份"""
+async def create_pre_restore_backup(db: AsyncSession, skip_restore_check: bool = False) -> dict:
+    """创建恢复前安全备份。
+
+    skip_restore_check：异步还原路径在「已持有还原锁」的前提下调用本函数，若
+    仍走 is_restore_in_progress() 检查会必然抛 BackupLockError、导致安全备份
+    静默失败。该场景须传 True。同步还原路径在获取还原锁之前调用，应保持默认
+    False 以保留「还原进行中拒绝备份」的互斥保护。
+    """
     ensure_pre_restore_dir()
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     filename = f'pre_restore_{timestamp}.zip'
@@ -458,7 +472,7 @@ async def create_pre_restore_backup(db: AsyncSession) -> dict:
         dummy_user = UserModel()
         dummy_user.username = 'system'
         dummy_user.id = 0
-        zip_bytes, _manifest = await create_full_backup(db, dummy_user, '恢复前自动安全备份', encrypt=False)
+        zip_bytes, _manifest = await create_full_backup(db, dummy_user, '恢复前自动安全备份', encrypt=False, skip_restore_check=skip_restore_check)
         filepath.write_bytes(zip_bytes)
         cleanup_pre_restore_backups()
         return {'success': True, 'filename': filename, 'filepath': str(filepath), 'size': len(zip_bytes)}

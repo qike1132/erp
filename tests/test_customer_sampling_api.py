@@ -45,6 +45,13 @@ async def cs_api():
     from fastapi_app.main import app
     from fastapi_app.shared_models import Base
 
+    # 让 app 的全局引擎在当前测试 loop 上按 conftest 重定向后的 URL 重建：
+    # 本套件只 override 请求依赖，而 create_project 会经
+    # numbering_sequence.allocate_sequence 直接引用 _AsyncSessionLocal（非请求路径），
+    # 不先跑守卫的话该引用为 None → TypeError。
+    from fastapi_app.core import database as _db_mod
+    await _db_mod.ensure_engine_for_current_loop()
+
     engine = create_async_engine(TEST_DATABASE_URL, echo=False, pool_pre_ping=True)
     try:
         # 确保表存在（幂等）
@@ -405,90 +412,10 @@ class TestCustomerSamplingApi:
         # 未完成的项目不应出现
         assert all(item["id"] != pid_b for item in data["items"])
 
-    # ==================== 5c. 已完成项目表格查询 ====================
-
-    async def test_completed_table_endpoint(self, cs_api):
-        """GET /projects/completed-table 返回已完成项目表格数据"""
-        client, _ = cs_api
-        pid, _ = await _create_project_via_api(client, "表格已完成项目")
-        # 标记完成
-        resp = await client.put(
-            f"{API_PREFIX}/projects/{pid}/status",
-            json={"status": "completed"},
-        )
-        assert resp.status_code == 200
-
-        resp = await client.get(f"{API_PREFIX}/projects/completed-table")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["success"] is True
-        assert data["total"] >= 1
-        assert "pages" in data
-        assert "current_page" in data
-        row = next((r for r in data["items"] if r["id"] == pid), None)
-        assert row is not None
-        assert row["status"] == "completed"
-        assert row["completed_at"] is not None
-        assert "parts_count" in row
-        assert row["sequence_no"] != ""
-
-    async def test_completed_table_endpoint_pagination(self, cs_api):
-        """GET /projects/completed-table 服务端分页"""
-        client, _ = cs_api
-        for i in range(3):
-            pid, _ = await _create_project_via_api(client, f"表格分页产品{i}")
-            resp = await client.put(
-                f"{API_PREFIX}/projects/{pid}/status",
-                json={"status": "completed"},
-            )
-            assert resp.status_code == 200
-
-        # 默认返回全部（per_page=20），total 为已完成总数
-        resp = await client.get(f"{API_PREFIX}/projects/completed-table")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["total"] >= 3
-
-        # per_page=1 时 items 长度受限，total/pages 反映总数据
-        resp = await client.get(
-            f"{API_PREFIX}/projects/completed-table",
-            params={"page": 1, "per_page": 1},
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["total"] == data["pages"]  # 每页1条时 pages == total
-        assert len(data["items"]) == 1
-        assert data["current_page"] == 1
-
-        # 越界页返回空 items，但 total 不变
-        resp = await client.get(
-            f"{API_PREFIX}/projects/completed-table",
-            params={"page": 999, "per_page": 1},
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["total"] >= 1
-        assert data["items"] == []
-
-    async def test_completed_table_endpoint_keyword(self, cs_api):
-        """GET /projects/completed-table 关键词筛选"""
-        client, _ = cs_api
-        pid, _ = await _create_project_via_api(client, "表格关键词产品")
-        await _create_project_via_api(client, "表格其他产品")
-        # 仅 pid 标记完成
-        resp = await client.put(
-            f"{API_PREFIX}/projects/{pid}/status",
-            json={"status": "completed"},
-        )
-        assert resp.status_code == 200
-
-        resp = await client.get(
-            f"{API_PREFIX}/projects/completed-table", params={"keyword": "关键词"},
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["total"] == 1
-        assert data["items"][0]["id"] == pid
+    # 5c. 已完成项目表格查询（GET /projects/completed-table）：
+    # 该端点已随板房重构移除（后端无此路由，前端 patternRoom.ts 也改用
+    # GET /projects?status=completed，由 test_list_projects_status_filter 覆盖），
+    # 原 3 个 completed_table_* 用例删除，避免误将请求落入 /projects/{project_id}。
 
     # ==================== 6. 删除打样项目 ====================
 

@@ -233,6 +233,43 @@ async def receive_order_process(db: AsyncSession, process_id: int, username: str
     await db.refresh(p)
     return _serialize_order_process(p)
 
+async def ship_order_processes_batch(
+    db: AsyncSession, order_id: int, items: list[tuple[int, int]], username: str | None = None,
+) -> list[dict]:
+    """按订单批量发货（单事务、原子）。
+
+    逐条复用 ship_order_process（含行锁、数量校验、流水），任一条失败即抛错，
+    由外层 db_transaction 回滚整批——单事务避免前端逐条请求产生的
+    「部分成功」半完成状态。
+    """
+    results: list[dict] = []
+    for process_id, quantity in items:
+        try:
+            item = await ship_order_process(db, process_id, quantity, username)
+        except ValueError as e:
+            raise ValueError(f'外发工序 {process_id}：{e}') from e
+        if item['order_id'] != order_id:
+            raise ValueError(f'外发工序 {process_id} 不属于订单 {order_id}')
+        results.append(item)
+    return results
+
+
+async def receive_order_processes_batch(
+    db: AsyncSession, order_id: int, items: list[tuple[int, int | None]], username: str | None = None,
+) -> list[dict]:
+    """按订单批量确认收货（单事务、原子）；quantity 为 None 时按剩余待收数量收货。"""
+    results: list[dict] = []
+    for process_id, quantity in items:
+        try:
+            item = await receive_order_process(db, process_id, username, received_quantity=quantity)
+        except ValueError as e:
+            raise ValueError(f'外发工序 {process_id}：{e}') from e
+        if item['order_id'] != order_id:
+            raise ValueError(f'外发工序 {process_id} 不属于订单 {order_id}')
+        results.append(item)
+    return results
+
+
 async def delete_order_process(db: AsyncSession, process_id: int) -> None:
     """删除订单外发工序。"""
     p = await db.get(OrderOutsourceProcess, process_id)
@@ -240,6 +277,3 @@ async def delete_order_process(db: AsyncSession, process_id: int) -> None:
         raise ValueError('外发工序不存在')
     await db.delete(p)
     await db.flush()
-
-
-# ==================== 进度看板 ====================

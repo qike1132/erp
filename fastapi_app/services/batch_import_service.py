@@ -159,12 +159,13 @@ async def _process_comprehensive_sheet(
         # savepoint 隔离单个 Sheet：失败仅回滚本 Sheet 未提交行，不影响其他 Sheet；
         # 计数在 savepoint 成功退出后才累加，保证上报数与实际落库一致
         async with db.begin_nested():
-            if count_key == 'products':
-                # 产品导入返回成功计数（单值）
-                count = await importer(db, data_list)
-            else:
-                count, _ = await importer(db, data_list)
+            # 四种 Sheet 的导入函数现在统一返回 (计数, 行级消息列表)。
+            count, messages = await importer(db, data_list)
         results.imported[count_key] += count
+        if messages:
+            # 行级消息（含去重跳过原因）此前被整体丢弃，用户只能看到
+            # 「Sheet X 导入失败」却不知道哪一行、为什么。
+            results.errors.extend(messages)
     except (ValueError, TypeError, SQLAlchemyError) as e:
         # savepoint 上下文退出时已回滚本 Sheet 的未提交行
         logger.error(f'综合导入 - Sheet {sheet_name} 导入失败: {e}', exc_info=True)
@@ -671,9 +672,12 @@ async def import_products_service(db: AsyncSession, file: UploadFile) -> BatchIm
                     except ValueError:
                         stock = 0
                     try:
-                        price_val = float(price) if price else 0
-                    except (ValueError, TypeError):
-                        price_val = 0
+                        # Decimal(str(...)) 直转：避免 float 二进制近似值进入 Numeric 列
+                        from decimal import Decimal, InvalidOperation
+
+                        price_val = Decimal(str(price)) if price else Decimal('0')
+                    except (ValueError, TypeError, InvalidOperation):
+                        price_val = Decimal('0')
                     product = Product(
                         name=name, barcode=str(barcode).strip() if barcode else '',
                         price=price_val, initial_stock=stock, current_stock=stock,

@@ -73,8 +73,12 @@ class TestStockInRoutes:
 
     @pytest.mark.asyncio
     async def test_stockin_edit_get_success(self, async_client, auth_headers, test_stockin):
-        """测试入库编辑 API 访问成功"""
-        resp = await async_client.get(f"/api/v1/stock/in/edit/{test_stockin.id}", headers=auth_headers)
+        """测试入库编辑 API 可达（编辑现为 PUT /in/edit/{id}，无 GET 表单路由）"""
+        resp = await async_client.put(
+            f"/api/v1/stock/in/edit/{test_stockin.id}",
+            headers=auth_headers,
+            json={},  # 部分更新语义：空载荷沿用原值
+        )
         assert resp.status_code == 200
 
     @pytest.mark.asyncio
@@ -182,8 +186,8 @@ class TestStockOutRoutes:
         assert resp.status_code == 200
 
     @pytest.mark.asyncio
-    async def test_stockout_create_success(self, async_client, auth_headers, async_db_session, test_product):
-        """测试创建出库记录成功"""
+    async def test_stockout_create_success(self, async_client, auth_headers, async_db_session, test_product, test_customer, test_order):
+        """测试创建出库记录成功（出库受 FIFO 订单约束，需先有该客户订单）"""
         test_product.current_stock = 100
         await async_db_session.flush()
 
@@ -191,6 +195,7 @@ class TestStockOutRoutes:
         payload = {
             "product_id": test_product.id,
             "quantity": 20,
+            "customer": test_customer.name,
             "stockout_date": datetime.now(UTC).strftime("%Y-%m-%d"),
             "note": "测试出库",
         }
@@ -201,18 +206,19 @@ class TestStockOutRoutes:
         assert test_product.current_stock == initial_stock - 20
 
     @pytest.mark.asyncio
-    async def test_stockout_create_insufficient_stock(self, async_client, auth_headers, async_db_session, test_product):
-        """测试库存不足时出库"""
+    async def test_stockout_create_insufficient_stock(self, async_client, auth_headers, async_db_session, test_product, test_customer, test_order):
+        """测试库存不足时出库（400，业务校验在服务层）"""
         test_product.current_stock = 10
         await async_db_session.flush()
 
         payload = {
             "product_id": test_product.id,
             "quantity": 100,
+            "customer": test_customer.name,
             "stockout_date": datetime.now(UTC).strftime("%Y-%m-%d"),
         }
         resp = await async_client.post("/api/v1/stock/out/create", headers=auth_headers, json=payload)
-        assert resp.status_code in (200, 400)
+        assert resp.status_code == 400
         data = resp.json()
         assert not data.get("success", True) or "error" in str(data).lower() or "不足" in str(data)
 
@@ -229,8 +235,12 @@ class TestStockOutRoutes:
 
     @pytest.mark.asyncio
     async def test_stockout_edit_get_success(self, async_client, auth_headers, test_stockout):
-        """测试出库编辑 API 访问成功"""
-        resp = await async_client.get(f"/api/v1/stock/out/edit/{test_stockout.id}", headers=auth_headers)
+        """测试出库编辑 API 可达（编辑现为 PUT /out/edit/{id}，无 GET 表单路由）"""
+        resp = await async_client.put(
+            f"/api/v1/stock/out/edit/{test_stockout.id}",
+            headers=auth_headers,
+            json={},  # 部分更新语义：空载荷沿用原值
+        )
         assert resp.status_code == 200
 
     @pytest.mark.asyncio
@@ -367,17 +377,19 @@ class TestStockBusinessLogic:
         assert log.change_quantity == 30
 
     @pytest.mark.asyncio
-    async def test_stockout_creates_inventory_log(self, async_client, auth_headers, async_db_session, test_product):
-        """测试出库时库存日志创建"""
+    async def test_stockout_creates_inventory_log(self, async_client, auth_headers, async_db_session, test_product, test_customer, test_order):
+        """测试出库时库存日志创建（出库受 FIFO 订单约束，需先有该客户订单）"""
         test_product.current_stock = 100
         await async_db_session.flush()
 
         payload = {
             "product_id": test_product.id,
             "quantity": 25,
+            "customer": test_customer.name,
             "stockout_date": datetime.now(UTC).strftime("%Y-%m-%d"),
         }
-        await async_client.post("/api/v1/stock/out/create", headers=auth_headers, json=payload)
+        resp = await async_client.post("/api/v1/stock/out/create", headers=auth_headers, json=payload)
+        assert resp.status_code in (200, 201), resp.text
 
         result = await async_db_session.execute(
             select(InventoryLog)
@@ -444,14 +456,28 @@ class TestStockEdgeCases:
         assert resp.status_code in (200, 400, 422)
 
     @pytest.mark.asyncio
-    async def test_stockout_exact_stock(self, async_client, auth_headers, async_db_session, test_product):
-        """测试出库数量等于库存"""
+    async def test_stockout_exact_stock(self, async_client, auth_headers, async_db_session, test_product, test_customer):
+        """测试出库数量等于库存（专用订单，避免与套件内其他出货共享可出货量）"""
+        from fastapi_app.shared_models.order import Order
+
         test_product.current_stock = 50
+        await async_db_session.flush()
+
+        order = Order(
+            order_no="ORD-TEST-EXACT-001",
+            product_id=test_product.id,
+            customer=test_customer.name,
+            quantity=50,
+            order_date=datetime.now(UTC),
+            status="待备货",
+        )
+        async_db_session.add(order)
         await async_db_session.flush()
 
         payload = {
             "product_id": test_product.id,
             "quantity": 50,
+            "customer": test_customer.name,
             "stockout_date": datetime.now(UTC).strftime("%Y-%m-%d"),
         }
         resp = await async_client.post("/api/v1/stock/out/create", headers=auth_headers, json=payload)

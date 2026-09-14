@@ -15,6 +15,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi_app.core.float_utils import round_qty
 from fastapi_app.services.numbering import generate_purchase_order_number
 from fastapi_app.shared_models import (
     MaterialRegistration,
@@ -379,11 +380,11 @@ async def save_factory_summary_edits(
             if original_total > 0:
                 ratio = float(new_quantity) / original_total
                 for it in items:
-                    it.quantity = Decimal(str(round(float(it.quantity or 0) * ratio, 2)))
+                    it.quantity = Decimal(str(round_qty(float(it.quantity or 0) * ratio)))
                     it.total_price = (it.unit_price or 0) * it.quantity
                     updated += 1
             else:
-                per_item = Decimal(str(round(float(new_quantity) / len(items), 2)))
+                per_item = Decimal(str(round_qty(float(new_quantity) / len(items))))
                 for it in items:
                     it.quantity = per_item
                     it.total_price = (it.unit_price or 0) * it.quantity
@@ -442,22 +443,22 @@ async def cleanup_orphan_pending_purchase_orders(
 
     _exclude = set(exclude_ids or [])
 
-    # 1) 找出所有 source_order_ids JSON 数组中包含目标 ID 的 PurchaseOrder.id
+    # 1) 找出所有 source_order_ids JSON 数组中包含任一目标 ID 的 PurchaseOrder.id
+    # 用 PostgreSQL JSONB @> 下推过滤，避免全表拉取 pending 单后在 Python 里逐条 json.loads。
+    from sqlalchemy import cast as sa_cast
+    from sqlalchemy import or_
+    from sqlalchemy.dialects.postgresql import JSONB as PG_JSONB
+
+    jsonb_col = sa_cast(PurchaseOrder.source_order_ids, PG_JSONB)
+    contain_conds = [jsonb_col.contains([sid]) for sid in source_ids]
     result2 = await db.execute(
         select(PurchaseOrder.id, PurchaseOrder.source_order_ids).where(
             PurchaseOrder.source_order_ids.isnot(None),
             PurchaseOrder.status == PurchaseOrderStatus.PENDING,
+            or_(*contain_conds),
         )
     )
-    json_match_ids: list[int] = []
-    for row in result2.all():
-        try:
-            ids = json.loads(row.source_order_ids)
-        except (ValueError, TypeError):
-            logger.warning('PurchaseOrder %s has invalid source_order_ids: %s', row.id, row.source_order_ids)
-            continue
-        if any(i in source_ids for i in ids):
-            json_match_ids.append(row.id)
+    json_match_ids: list[int] = [row.id for row in result2.all()]
 
     # 2) 合并匹配：source_order_id 列直接命中 + JSON 数组命中
     result = await db.execute(

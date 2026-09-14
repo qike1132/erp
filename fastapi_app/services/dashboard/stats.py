@@ -19,6 +19,7 @@ from sqlalchemy.exc import (
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.cache import cache_result
+from fastapi_app.core.float_utils import round_qty
 from fastapi_app.shared_models import (
     ApprovalRequest,
     MaterialRegistration,
@@ -177,7 +178,7 @@ async def _query_production_stats(db: AsyncSession, today_start: datetime) -> di
         total_plans = prod_stats[0] or 0
         completed_plans = prod_stats[1] or 0
         return {
-            "production_completion_rate": round(completed_plans / total_plans, 2) if total_plans > 0 else 0.0,
+            "production_completion_rate": round_qty(completed_plans / total_plans, precision_digits=2) if total_plans > 0 else 0.0,
             "pending_shipments": total_plans - completed_plans,
         }
     except Exception:  # defensive: 仪表盘某个统计项失败时不影响整体返回

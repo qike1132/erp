@@ -9,6 +9,7 @@
 
 import json
 import logging
+import os
 import time
 from typing import Any
 
@@ -174,7 +175,7 @@ def register_health_routes(app: FastAPI) -> None:
             from fastapi_app.core.config import settings as _settings
             if _settings.is_production:
                 auth = request.headers.get('authorization', '')
-                metrics_token = _os.getenv('METRICS_BEARER_TOKEN', '')
+                metrics_token = os.getenv('METRICS_BEARER_TOKEN', '')
                 if metrics_token and not auth.startswith(f'Bearer {metrics_token}'):
                     from starlette.responses import JSONResponse
                     return JSONResponse(status_code=401, content={'detail': '未授权访问'})

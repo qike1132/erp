@@ -18,18 +18,16 @@ class TestBuildBeileUnifiedQuery:
     def test_returns_subquery_with_order_part(self):
         """无确认状态筛选时应包含 Order + StockIn 两部分"""
         subq = order_crud._build_beile_unified_query(
-            confirm_condition=None, unconfirmed_only=False, customer=None, factory="湖北",
+            confirmed=None, customer=None, factory="湖北",
         )
         compiled = str(subq.compile())
         assert 'record_type' in compiled
         assert 'order' in compiled
 
-    def test_with_confirm_condition_excludes_stockin(self):
-        """有确认状态条件时（confirm_condition 非 None）应仅查询订单，排除备货"""
-        from fastapi_app.shared_models import Order
-        confirm_cond = Order.confirmed_at.is_(None)
+    def test_with_confirmed_filter_applies_to_both_parts(self):
+        """confirmed 非 None 时订单与备货均按各自 confirmed_at 过滤"""
         subq = order_crud._build_beile_unified_query(
-            confirm_condition=confirm_cond, unconfirmed_only=False, customer=None, factory="湖北",
+            confirmed=False, customer=None, factory="湖北",
         )
         compiled = str(subq.compile())
         assert 'confirmed_at' in compiled
@@ -37,7 +35,7 @@ class TestBuildBeileUnifiedQuery:
     def test_with_customer_filter_applies_to_both_parts(self):
         """customer 非空时应同时筛选 Order 和 StockIn 的 customer"""
         subq = order_crud._build_beile_unified_query(
-            confirm_condition=None, unconfirmed_only=False, customer="MINISO", factory="湖北",
+            confirmed=None, customer="MINISO", factory="湖北",
         )
         compiled = str(subq.compile())
         assert 'customer' in compiled
@@ -45,7 +43,7 @@ class TestBuildBeileUnifiedQuery:
     def test_factory_filter_applied(self):
         """factory 应作为 Product.factory 筛选条件"""
         subq = order_crud._build_beile_unified_query(
-            confirm_condition=None, unconfirmed_only=False, customer=None, factory="深圳",
+            confirmed=None, customer=None, factory="深圳",
         )
         compiled = str(subq.compile())
         assert 'factory' in compiled
@@ -53,11 +51,36 @@ class TestBuildBeileUnifiedQuery:
     def test_no_customer_no_confirm_includes_both_parts(self):
         """无 customer、无 confirm_condition 时应包含 Order + StockIn 两部分（UNION ALL）"""
         subq = order_crud._build_beile_unified_query(
-            confirm_condition=None, unconfirmed_only=False, customer=None, factory="湖北",
+            confirmed=None, customer=None, factory="湖北",
         )
         # subquery 应可编译
         compiled = str(subq.compile())
         assert 'UNION' in compiled or 'union' in compiled.lower() or 'select' in compiled.lower()
+
+    def test_product_kw_filter_applies_to_both_parts(self):
+        """product_kw 非空时应对 Order 的 SKU 与 StockIn 的产品做 ilike 过滤（服务端过滤，修复「先分页后过滤」漏数据）"""
+        subq = order_crud._build_beile_unified_query(
+            confirmed=None, customer=None, factory="湖北",
+            product_kw="皮套",
+        )
+        compiled = str(subq.compile())
+        # 关键字以绑定参数形式出现（不内联），但过滤条件必须下推到两个子查询：
+        # Order 侧按 order_item.product_name / product_barcode，StockIn 侧按 product.name / product.barcode
+        assert 'product_name' in compiled.lower()
+        assert 'product_barcode' in compiled.lower()
+        assert 'barcode' in compiled.lower()
+        assert 'like' in compiled.lower()
+
+    def test_product_kw_none_no_extra_filter(self):
+        """product_kw 为 None 时不应引入产品过滤（向后兼容）"""
+        subq = order_crud._build_beile_unified_query(
+            confirmed=None, customer=None, factory="湖北",
+            product_kw=None,
+        )
+        compiled = str(subq.compile())
+        assert 'product_name' not in compiled.lower()
+        assert 'product_barcode' not in compiled.lower()
+
 
 
 # ============================================================================

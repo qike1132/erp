@@ -12,7 +12,7 @@ import uuid
 from datetime import UTC, date, datetime
 
 import openpyxl
-from sqlalchemy import and_, delete, extract, func, select
+from sqlalchemy import and_, delete, func, select
 from sqlalchemy.exc import DisconnectionError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,7 +29,10 @@ logger = logging.getLogger(__name__)
 
 async def get_plans(db: AsyncSession, year: int, month: int, customer: str='') -> list[ProductionPlan]:
     """获取指定月份的排产计划列表"""
-    conditions = [extract('year', ProductionPlan.plan_date) == year, extract('month', ProductionPlan.plan_date) == month]
+    # 用范围条件而非 extract('year'/'month')，使 plan_date 上的索引可被命中
+    start = date(year, month, 1)
+    end = last_day_of_month(year, month)
+    conditions = [ProductionPlan.plan_date >= start, ProductionPlan.plan_date <= end]
     if customer:
         conditions.append(ProductionPlan.customer_name == customer)
     result = await db.execute(select(ProductionPlan).where(*conditions).order_by(ProductionPlan.plan_date, ProductionPlan.customer_name))
@@ -110,10 +113,10 @@ async def get_plans_with_inventory(db: AsyncSession, year: int, month: int, cust
         inventory_qty = inventory_map.get(key, 0)
         shipped_qty = shipped_map.get(key, 0)
         remaining_qty = plan.quantity - shipped_qty
-        if plan.shipped_qty != shipped_qty:
-            plan.shipped_qty = shipped_qty
         plan_list.append({'id': plan.id, 'customer_name': plan.customer_name, 'product_name': plan.product_name, 'barcode': plan.barcode, 'quantity': plan.quantity, 'inventory_qty': inventory_qty, 'shipped_qty': shipped_qty, 'remaining_qty': remaining_qty, 'diff': plan.quantity - inventory_qty, 'stock_status': _calc_stock_status(plan.quantity, inventory_qty), 'shipment_status': calc_shipment_status(plan.quantity, shipped_qty), 'plan_date': plan.plan_date.isoformat() if plan.plan_date else '', 'status': plan.status, 'remark': plan.remark or '', 'upload_batch': plan.upload_batch or '', 'create_time': plan.create_time.strftime('%Y-%m-%d %H:%M:%S') if plan.create_time else '', 'update_time': plan.update_time.strftime('%Y-%m-%d %H:%M:%S') if plan.update_time else '', 'created_by': plan.created_by or ''})
-    await db.flush()
+    # 注意：这是只读查询，不得回写 plan.shipped_qty 或 flush()。shipped_qty 列由
+    # 出货时的 _recalc_plans_common 维护；此处只把即时计算值放进返回 dict，
+    # 回写会产生隐蔽脏写，且在只读/副本会话上会报错。
     monthly_summary = _calc_monthly_summary(plan_list)
     return {'plans': plan_list, 'monthly_summary': monthly_summary, 'total': len(plan_list)}
 
@@ -126,7 +129,10 @@ async def _calc_all_shipped_qty(db: AsyncSession, year: int, month: int) -> dict
     """
     start = date(year, month, 1)
     end = last_day_of_month(year, month)
-    result = await db.execute(select(StockOut.customer, Product.name.label('product_name'), func.coalesce(func.sum(StockOut.quantity - StockOut.returned_quantity), 0).label('total_qty')).join(Product, StockOut.product_id == Product.id).where(and_(func.date(StockOut.stockout_date) >= start, func.date(StockOut.stockout_date) <= end, StockOut.customer.isnot(None), StockOut.customer != '')).group_by(StockOut.customer, Product.name))
+    # 用范围条件而非 func.date()，使 stockout_date 上的索引可被命中
+    start_dt = datetime(year, month, 1)
+    end_dt = datetime.combine(end, datetime.max.time())
+    result = await db.execute(select(StockOut.customer, Product.name.label('product_name'), func.coalesce(func.sum(StockOut.quantity - StockOut.returned_quantity), 0).label('total_qty')).join(Product, StockOut.product_id == Product.id).where(and_(StockOut.stockout_date >= start_dt, StockOut.stockout_date <= end_dt, StockOut.customer.isnot(None), StockOut.customer != '')).group_by(StockOut.customer, Product.name))
     return {(row.customer, row.product_name): row.total_qty for row in result.all()}
 
 def _calc_stock_status(plan_qty: int, inventory_qty: int) -> str:

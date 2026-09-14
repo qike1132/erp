@@ -38,15 +38,25 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="(sku, idx) in (detailData.items || []).length > 0 ? detailData.items! : ([{}] as OrderSKU[])" :key="sku.id ?? idx">
-              <td class="bo-detail-td-name">{{ sku.product_name || detailData.product_name || '-' }}</td>
-              <td class="bo-detail-td-barcode">{{ sku.product_barcode || detailData.barcode || '-' }}</td>
-              <td class="bo-detail-td-qty"><strong>{{ sku.quantity ?? detailData.quantity }}</strong></td>
-              <td class="bo-detail-td-note" :title="(sku.note || detailData.note || '')">{{ sku.note || detailData.note || '-' }}</td>
-            </tr>
-            <tr v-if="(detailData.items || []).length === 0 && !detailData.product_name">
-              <td colspan="4" class="bo-detail-td-empty">暂无 SKU 明细</td>
-            </tr>
+            <template v-if="(detailData.items || []).length > 0">
+              <tr v-for="sku in detailData.items" :key="sku.id">
+                <td class="bo-detail-td-name">{{ sku.product_name || detailData.product_name || '-' }}</td>
+                <td class="bo-detail-td-barcode">{{ sku.product_barcode || detailData.barcode || '-' }}</td>
+                <td class="bo-detail-td-qty"><strong>{{ sku.quantity ?? detailData.quantity }}</strong></td>
+                <td class="bo-detail-td-note" :title="(sku.note || detailData.note || '')">{{ sku.note || detailData.note || '-' }}</td>
+              </tr>
+            </template>
+            <template v-else>
+              <tr v-if="detailData.product_name">
+                <td class="bo-detail-td-name">{{ detailData.product_name }}</td>
+                <td class="bo-detail-td-barcode">{{ detailData.barcode || '-' }}</td>
+                <td class="bo-detail-td-qty"><strong>{{ detailData.quantity }}</strong></td>
+                <td class="bo-detail-td-note" :title="(detailData.note || '')">{{ detailData.note || '-' }}</td>
+              </tr>
+              <tr v-else>
+                <td colspan="4" class="bo-detail-td-empty">暂无 SKU 明细</td>
+              </tr>
+            </template>
           </tbody>
         </table>
       </div>
@@ -66,7 +76,6 @@
 import { computed } from 'vue'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import UiButton from '@/components/ui/UiButton.vue'
-import type { OrderSKU } from '@/types'
 import type { BeileOrderRow } from '@/views/beile-order/composables/useBeileOrders'
 
 const props = defineProps<{

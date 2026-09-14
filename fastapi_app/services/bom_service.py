@@ -501,17 +501,34 @@ async def copy_bom(db: AsyncSession, target_product_id: int, data: dict, usernam
         copied_count += 1
 
     # ===== 角色及其独立物料 =====
+    # 先批量建角色并单次 flush 取 id（原逐 role flush 为 R 次往返），
+    # 再按 role_id 建索引，避免对 fabrics/accessories/materials 的 R 次嵌套扫描
+    role_id_map: dict[int, ProductRole] = {}
     for old_role in source_product.roles:
         new_role = ProductRole(product_id=target_product_id, role_name=old_role.role_name)
         db.add(new_role)
+        role_id_map[old_role.id] = new_role
+    copied_count += len(role_id_map)
+    if role_id_map:
         await db.flush()
-        copied_count += 1
-        for old_fabric in source_product.fabrics:
-            if old_fabric.role_id != old_role.id:
-                continue
+
+    def _items_by_role(items):
+        grouped: dict[int, list] = {}
+        for item in items:
+            if item.role_id is not None:
+                grouped.setdefault(item.role_id, []).append(item)
+        return grouped
+
+    fabrics_by_role = _items_by_role(source_product.fabrics)
+    accessories_by_role = _items_by_role(source_product.accessories)
+    materials_by_role = _items_by_role(source_materials)
+
+    for old_role in source_product.roles:
+        new_role_id = role_id_map[old_role.id].id
+        for old_fabric in fabrics_by_role.get(old_role.id, []):
             db.add(ProductFabric(
                 product_id=target_product_id,
-                role_id=new_role.id,
+                role_id=new_role_id,
                 material_code=getattr(old_fabric, 'material_code', '') or '',
                 fabric_name=old_fabric.fabric_name,
                 specification=getattr(old_fabric, 'specification', '') or '',
@@ -522,12 +539,10 @@ async def copy_bom(db: AsyncSession, target_product_id: int, data: dict, usernam
                 remark=getattr(old_fabric, 'remark', '') or '',
             ))
             copied_count += 1
-        for old_accessory in source_product.accessories:
-            if old_accessory.role_id != old_role.id:
-                continue
+        for old_accessory in accessories_by_role.get(old_role.id, []):
             db.add(ProductAccessory(
                 product_id=target_product_id,
-                role_id=new_role.id,
+                role_id=new_role_id,
                 material_code=getattr(old_accessory, 'material_code', '') or '',
                 accessory_name=old_accessory.accessory_name,
                 specification=getattr(old_accessory, 'specification', '') or '',
@@ -539,12 +554,10 @@ async def copy_bom(db: AsyncSession, target_product_id: int, data: dict, usernam
                 remark=getattr(old_accessory, 'remark', '') or '',
             ))
             copied_count += 1
-        for old_material in source_materials:
-            if old_material.role_id != old_role.id:
-                continue
+        for old_material in materials_by_role.get(old_role.id, []):
             db.add(ProductMaterial(
                 product_id=target_product_id,
-                role_id=new_role.id,
+                role_id=new_role_id,
                 material_code=getattr(old_material, 'material_code', '') or '',
                 cotton_usage=old_material.cotton_usage,
                 specification=getattr(old_material, 'specification', '') or '',

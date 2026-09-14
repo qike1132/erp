@@ -8,8 +8,6 @@ export { outsourceApi } from './outsource'
 export type {
   OutsourceProcessType,
   OrderOutsourceProcess,
-  KanbanOrder,
-  KanbanResponse,
   ProcessTypeListResponse,
   OrderProcessListResponse,
   GenerateProcessResponse,

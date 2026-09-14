@@ -175,8 +175,10 @@ def _encrypt_backup_data(zip_bytes: bytes, password: str) -> bytes:  # log-conte
     加密备份数据
     """
     try:
-        from fastapi_app.core.backup_encryption import encrypt_backup
-        encrypted_bytes, meta = encrypt_backup(zip_bytes, password)
+        # ITER-1 T3：新写密文统一走分块格式（chunked-v1）；本函数在其外再包一层
+        # meta 前缀（历史上称格式 B），读侧 _decrypt_backup_data 会先剥前缀再解密。
+        from fastapi_app.core.backup_encryption import encrypt_backup_auto
+        encrypted_bytes, meta = encrypt_backup_auto(zip_bytes, password)
         # 添加元数据到加密数据开头（JSON格式）
         meta_json = json.dumps(meta, ensure_ascii=False).encode('utf-8')
         meta_len = len(meta_json).to_bytes(4, 'big')

@@ -101,8 +101,8 @@ async def list_beile_orders(
     page: int = Query(1, ge=1, description="页码"),
     per_page: int = Query(50, ge=1, le=500, description="每页数量"),
     customer: str | None = Query(None, description="客户名筛选"),
-    status: str | None = Query(None, description="状态筛选"),
     confirm_status: str | None = Query(None, description="湖北订单确认状态筛选：unconfirmed=未确认 / confirmed=已确认"),
+    product: str | None = Query(None, description="产品关键字筛选（匹配产品名称或条码）"),
     db: AsyncSession = Depends(get_async_read_db),
     _user: User = Depends(require_permission("beile_order_view")),
 ) -> OrderListResponse:
@@ -112,10 +112,12 @@ async def list_beile_orders(
     强制 factory='湖北'，忽略前端传参，确保数据隔离。
     同时包含订单（Order）和备货（StockIn）记录，通过 record_type 字段区分。
     confirm_status 生效时订单与备货均按各自 confirmed_at 过滤后合并返回。
+    product 关键字在服务端过滤（订单按 SKU 名称/条码、备货按产品名称/条码），
+    避免前端「先分页后过滤」漏掉后续页命中数据。
     """
     result = await order_crud.get_beile_orders_with_stockins(
         db, page=page, per_page=per_page, customer=customer, factory='湖北',
-        confirm_status=confirm_status,
+        confirm_status=confirm_status, product_kw=product,
     )
 
     return OrderListResponse(data=result['items'], total=result['total'],
@@ -133,7 +135,11 @@ async def confirm_beile_order(
 
     仅允许确认 factory=湖北 的订单，幂等（已确认直接返回成功）。
     """
-    result = await order_crud.confirm_beile_order(db, order_id, user)
+    async with db_transaction(db):
+        result = await order_crud.confirm_beile_order(db, order_id, user)
+    # 事务提交后再失效缓存，避免并发请求用未提交前数据回填缓存
+    await cache_mgr.invalidate(InvalidationStrategy.DOMAIN, CacheDomain.ORDER)
+    await cache_mgr.invalidate(InvalidationStrategy.PURCHASE)
     return OrderActionResponse(**result)
 
 
@@ -147,7 +153,11 @@ async def confirm_beile_stockin(
 
     仅允许确认 factory=湖北 的备货记录，幂等（已确认直接返回成功）。
     """
-    result = await order_crud.confirm_beile_stockin(db, stockin_id, user)
+    async with db_transaction(db):
+        result = await order_crud.confirm_beile_stockin(db, stockin_id, user)
+    # 事务提交后再失效缓存，避免并发请求用未提交前数据回填缓存
+    await cache_mgr.invalidate(InvalidationStrategy.DOMAIN, CacheDomain.ORDER)
+    await cache_mgr.invalidate(InvalidationStrategy.PURCHASE)
     return OrderActionResponse(**result)
 
 

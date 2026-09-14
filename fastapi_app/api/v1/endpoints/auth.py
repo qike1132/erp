@@ -437,8 +437,9 @@ async def upload_file(
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(status_code=400, detail="不支持的文件类型")
 
-    # 读取文件内容并检查大小
-    content = await file.read()
+    # 读取文件内容并检查大小：只读 MAX_UPLOAD_SIZE + 1 字节，超限即拒，
+    # 避免恶意超大文件先全量读入内存再判断（内存耗尽 DoS）。
+    content = await file.read(MAX_UPLOAD_SIZE + 1)
     if len(content) > MAX_UPLOAD_SIZE:
         raise HTTPException(status_code=400, detail=f"文件大小超过{MAX_UPLOAD_SIZE // 1024 // 1024}MB限制")
 

@@ -10,6 +10,7 @@ from sqlalchemy.exc import DatabaseError, DataError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.cache import cache_result
+from fastapi_app.core.float_utils import round_money
 from fastapi_app.schemas.dashboard import CustomerOutDetail, CustomerOutDetailResponse
 from fastapi_app.shared_models import Order, OrderItem, Product, StockOut
 
@@ -67,7 +68,7 @@ async def fetch_customer_out_details(
             details.append(CustomerOutDetail(
                 customer_name=row[0] or "未知客户",
                 total_quantity=int(row[1] or 0),
-                total_amount=round(float(row[2] or 0), 2)
+                total_amount=round_money(float(row[2] or 0))
             ))
         return CustomerOutDetailResponse(success=True, data=details).model_dump()
     except (OperationalError, DataError, DatabaseError, ValueError, TypeError) as e:
@@ -119,7 +120,7 @@ async def fetch_customer_order_details(
             details.append(CustomerOutDetail(
                 customer_name=row[0] or "未知客户",
                 total_quantity=int(row[1] or 0),
-                total_amount=round(float(row[2] or 0), 2)
+                total_amount=round_money(float(row[2] or 0))
             ))
         return CustomerOutDetailResponse(success=True, data=details).model_dump()
     except (OperationalError, DataError, DatabaseError, ValueError, TypeError) as e:

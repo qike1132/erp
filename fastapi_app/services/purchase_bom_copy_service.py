@@ -71,32 +71,25 @@ async def search_products_for_bom_copy(db: AsyncSession, keyword: str) -> list:
         return []
 
     result = await db.execute(
-        select(Product).where(
+        select(Product)
+        .options(
+            selectinload(Product.material),
+            selectinload(Product.material_rows),
+            selectinload(Product.fabrics),
+            selectinload(Product.accessories),
+        )
+        .where(
             or_(
                 Product.name.ilike(f'%{keyword}%'),
                 Product.barcode.ilike(f'%{keyword}%'),
             )
-        ).limit(20)
+        )
+        .limit(20)
     )
     products = result.scalars().all()
 
     output = []
-    for product in products:
-        # 预加载 BOM 关系
-        p_result = await db.execute(  # batch-loop: 预加载 BOM 关系,非 N+1
-            select(Product)
-            .options(
-                selectinload(Product.material),
-                selectinload(Product.material_rows),
-                selectinload(Product.fabrics),
-                selectinload(Product.accessories),
-            )
-            .where(Product.id == product.id)
-        )
-        p = p_result.scalar_one_or_none()
-        if not p:
-            continue
-
+    for p in products:
         has_bom_result = has_bom(p)
         material_count = (
             len(p.fabrics) + len(p.accessories)

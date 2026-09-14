@@ -7,6 +7,10 @@
 # ruff: noqa: F401 - 兼容 Facade re-export
 import logging
 
+from fastapi_app.services.order._common import (  # 兼容：调用方曾经 order_crud 隐式再导出
+    PermissionDeniedError,
+    _safe_invalidate_purchase_cache,
+)
 from fastapi_app.services.order.approval_flow import (
     _check_order_lock,
     _create_approval_log_obj,
@@ -23,10 +27,7 @@ from fastapi_app.services.order.beile import (
     confirm_beile_order,
     confirm_beile_stockin,
     get_beile_orders_with_stockins,
-)
-from fastapi_app.services.order._common import (  # 兼容：调用方曾经 order_crud 隐式再导出
-    PermissionDeniedError,
-    _safe_invalidate_purchase_cache,
+    get_beile_unconfirmed_count,
 )
 from fastapi_app.services.order.commands import (
     _delete_order_directly,

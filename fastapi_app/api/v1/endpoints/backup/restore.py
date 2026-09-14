@@ -477,7 +477,8 @@ async def _run_async_file_restore(
         async with get_async_db_context() as db:
             try:
                 await update_progress(task_id, 'pre_backup', 0.0, '创建安全备份')
-                pre_result = await backup_service.create_pre_restore_backup(db)
+                # 异步路径已持有还原锁，须跳过还原互斥检查，否则安全备份必然失败
+                pre_result = await backup_service.create_pre_restore_backup(db, skip_restore_check=True)
                 pre_restore_info = pre_result
                 await update_progress(task_id, 'pre_backup', 1.0, '安全备份完成')
 

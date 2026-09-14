@@ -5,7 +5,7 @@ import logging
 import uuid
 from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import HTTPException
@@ -93,7 +93,7 @@ def make_error_response(
             'code': code,
             'message': message,
             'request_id': request_id or _generate_request_id(),
-            'timestamp': datetime.utcnow().isoformat(timespec='seconds') + 'Z',
+            'timestamp': datetime.now(UTC).isoformat(timespec='seconds').replace('+00:00', 'Z'),
         },
     }
     if extra:
@@ -108,7 +108,7 @@ def _generate_request_id() -> str:
 
 def current_iso_timestamp() -> str:
     """统一的 UTC ISO8601 时间戳字符串。"""
-    return datetime.utcnow().isoformat(timespec='seconds') + 'Z'
+    return datetime.now(UTC).isoformat(timespec='seconds').replace('+00:00', 'Z')
 
 
 def new_request_id() -> str:
@@ -189,6 +189,9 @@ async def db_transaction(
             if mapped is not None:
                 await db.rollback()
                 raise mapped from e
+            # 未映射的异常（含 HTTPException 等）也必须 rollback，避免会话残留
+            # 脏状态被后续请求复用后误提交
+            await db.rollback()
             raise
     except NotFoundError as e:
         await db.rollback()

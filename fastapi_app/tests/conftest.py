@@ -144,6 +144,11 @@ async def override_deps(mock_db, mock_current_user):
         'fastapi_app.core.database.verify_db_connectivity',
         side_effect=_fake_verify_db_connectivity,
     ), patch(
+        # health.py 以 `from ... import verify_db_connectivity` 名字导入，
+        # 必须同时 patch 导入方名字空间，否则 /api/health 仍会走真实连接
+        'fastapi_app.core.health.verify_db_connectivity',
+        side_effect=_fake_verify_db_connectivity,
+    ), patch(
         # 批次1-4 客户端上提后 patch 目标同步更新（旧 notification_service 路径已失效）
         'fastapi_app.core.redis_client.get_async_redis_client',
         side_effect=_fake_get_async_redis_client,

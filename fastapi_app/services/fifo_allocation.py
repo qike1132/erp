@@ -54,24 +54,26 @@ async def _invalidate_fifo_cache(plan_month: str) -> None:
 # StockOut 变更，提交后即清除全部 plan_fifo:* 缓存。
 # after_commit 时数据已落库，此后任何缓存重建读到的都是已提交数据（无回填旧值窗口）；
 # 若失效失败仅告警，由 TTL（FIFO_CACHE_TTL）兜底。
-_pending_fifo_invalidation = False
+#
+# 注意：此处不能用模块级全局布尔标记（曾为 `_pending_fifo_invalidation`）。并发事务会
+# 共享同一全局标志：T1 提交置 True → T2 的 before_commit 见 True 提前返回 → T1 清 False
+# → T2 的 after_commit 见 False 跳过失效，导致 T2 的 StockOut 变更 FIFO 缓存永不失效
+# （静默数据不一致）。改用 session.info（每会话独立）承载标记。
 
 
 def _fifo_before_commit(session) -> None:
-    global _pending_fifo_invalidation
-    if _pending_fifo_invalidation:
+    if session.info.get('fifo_dirty'):
         return
     for obj in list(session.new) + list(session.dirty) + list(session.deleted):
         if isinstance(obj, StockOut):
-            _pending_fifo_invalidation = True
+            session.info['fifo_dirty'] = True
             return
 
 
 def _fifo_after_commit(session) -> None:
-    global _pending_fifo_invalidation
-    if not _pending_fifo_invalidation:
+    if not session.info.get('fifo_dirty'):
         return
-    _pending_fifo_invalidation = False
+    session.info['fifo_dirty'] = False
     asyncio.get_running_loop().create_task(_invalidate_fifo_caches_safe())
 
 

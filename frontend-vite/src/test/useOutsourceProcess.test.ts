@@ -1,16 +1,26 @@
 /**
- * useOutsourceProcess 台账汇总口径 单元测试
+ * useOutsourceProcess 单测
  *
- * 回归背景：同一 SKU 可配置多道外发工序（每道工序各自按 SKU 数量发货）。
- * 修复前「未发货合计」= totalQty(SKU 件数) - shippedTotal(工序累计)，
- * 两种口径相减 → 多工序 SKU 下系统性偏小，甚至首道工序发满后就显示为 0。
+ * 1) 台账汇总口径：同一 SKU 可配置多道外发工序（每道工序各自按 SKU 数量发货）。
+ *    修复前「未发货合计」= totalQty(SKU 件数) - shippedTotal(工序累计)，
+ *    两种口径相减 → 多工序 SKU 下系统性偏小，甚至首道工序发满后就显示为 0。
+ * 2) 一键发货/收货：改为单请求批量接口（单事务），不再逐条串行请求。
+ * 3) 发货/收货权限：由 outsource_ship / outsource_receive 权限点决定，
+ *    不再按用户名 == '贝乐' 硬编码。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { ref } from 'vue'
 
-// 隔离外部依赖：鉴权 store（避免引入 pinia 与整条 api/queryClient 依赖链）
+/** 当前测试用户被授予的权限点（用例可改写） */
+let grantedPermissions = new Set<string>()
+/** 当前测试用户名（用于证明权限判定与用户名无关） */
+let currentUsername = 'admin'
+
 vi.mock('@/stores/auth', () => ({
-  useAuthStore: () => ({ hasPermission: () => true, user: { username: 'admin' } }),
+  useAuthStore: () => ({
+    hasPermission: (code: string) => grantedPermissions.has(code),
+    user: { get username() { return currentUsername } },
+  }),
 }))
 vi.mock('@/composables/useToast', () => ({
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() },
@@ -19,13 +29,14 @@ vi.mock('@/api/outsource', () => ({
   outsourceApi: {
     orderProcesses: vi.fn(),
     orderFlows: vi.fn(),
-    shipProcess: vi.fn(),
-    receiveProcess: vi.fn(),
+    shipProcessesBatch: vi.fn(),
+    receiveProcessesBatch: vi.fn(),
   },
 }))
 
 import { outsourceApi } from '@/api/outsource'
 import type { OrderOutsourceProcess } from '@/api/outsource'
+import { toast } from '@/composables/useToast'
 import { useOutsourceProcess } from '@/views/outsource/composables/useOutsourceProcess'
 import type { OutsourceOrderRow } from '@/views/outsource/composables/useOutsourceOrders'
 
@@ -78,9 +89,17 @@ async function setup(processes: OrderOutsourceProcess[]) {
   return hook
 }
 
+/** 两道工序：电绣已发 4 已收 0；转印已发 2 已收 2 */
+const twoShippable = [
+  makeProcess({ id: 1, process_type: '电绣', status: 'shipped', shipped_quantity: 4, received_quantity: 0 }),
+  makeProcess({ id: 2, process_type: '转印', sort_order: 1, status: 'received', shipped_quantity: 2, received_quantity: 2 }),
+]
+
 describe('useOutsourceProcess 台账汇总口径', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    grantedPermissions = new Set(['outsource_manage', 'outsource_ship', 'outsource_receive'])
+    currentUsername = 'admin'
   })
 
   it('首道工序发满后，未发货合计仍反映其余工序的未发货数量', async () => {
@@ -116,5 +135,81 @@ describe('useOutsourceProcess 台账汇总口径', () => {
     expect(hook.totalQty.value).toBe(10)
     expect(hook.shippedTotal.value).toBe(10)
     expect(hook.remainingTotal.value).toBe(0)
+  })
+})
+
+describe('useOutsourceProcess 一键发货/收货（单请求批量）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    grantedPermissions = new Set(['outsource_manage', 'outsource_ship', 'outsource_receive'])
+    currentUsername = 'admin'
+  })
+
+  it('一键发货只发 1 个批量请求，携带全部待发工序与数量', async () => {
+    vi.mocked(outsourceApi.shipProcessesBatch).mockResolvedValue({ success: true, total: 1, data: [] } as never)
+    const hook = await setup(twoShippable)
+
+    await hook.handleBulkShip()
+
+    // 仅「电绣」有待发剩余（10-4=6）；「转印」已收货，不再计入目标
+    expect(outsourceApi.shipProcessesBatch).toHaveBeenCalledTimes(1)
+    expect(outsourceApi.shipProcessesBatch).toHaveBeenCalledWith(1, [{ process_id: 1, quantity: 6 }])
+    expect(toast.success).toHaveBeenCalled()
+  })
+
+  it('一键收货只发 1 个批量请求', async () => {
+    vi.mocked(outsourceApi.receiveProcessesBatch).mockResolvedValue({ success: true, total: 1, data: [] } as never)
+    const hook = await setup(twoShippable)
+
+    await hook.handleBulkReceive()
+
+    // 仅「电绣」已发 4 未收 0 有待收剩余
+    expect(outsourceApi.receiveProcessesBatch).toHaveBeenCalledTimes(1)
+    expect(outsourceApi.receiveProcessesBatch).toHaveBeenCalledWith(1, [{ process_id: 1, quantity: 4 }])
+  })
+
+  it('批量失败时提示整批已回滚，且保留输入草稿', async () => {
+    vi.mocked(outsourceApi.shipProcessesBatch).mockRejectedValue({
+      response: { data: { detail: '外发工序 2：发货数量超过剩余数量（剩余 8）' } },
+    })
+    const hook = await setup(twoShippable)
+
+    await hook.handleBulkShip()
+
+    expect(toast.error).toHaveBeenCalledWith('外发工序 2：发货数量超过剩余数量（剩余 8）')
+    expect(toast.success).not.toHaveBeenCalled()
+  })
+})
+
+describe('useOutsourceProcess 发货/收货权限点', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    grantedPermissions = new Set()
+    currentUsername = 'admin'
+  })
+
+  it('用户名不是「贝乐」但持有发货权限 → 可发货', async () => {
+    grantedPermissions = new Set(['outsource_ship'])
+    currentUsername = 'zhangsan'
+    const hook = await setup([])
+
+    expect(hook.canShip.value).toBe(true)
+    expect(hook.canReceive.value).toBe(false)
+  })
+
+  it('用户名是「贝乐」且持有收货权限 → 可收货（不再被用户名挡住）', async () => {
+    grantedPermissions = new Set(['outsource_receive'])
+    currentUsername = '贝乐'
+    const hook = await setup([])
+
+    expect(hook.canReceive.value).toBe(true)
+    expect(hook.canShip.value).toBe(false)
+  })
+
+  it('无权限点则既不可发货也不可收货', async () => {
+    const hook = await setup([])
+
+    expect(hook.canShip.value).toBe(false)
+    expect(hook.canReceive.value).toBe(false)
   })
 })

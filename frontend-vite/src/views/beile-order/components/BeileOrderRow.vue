@@ -3,17 +3,17 @@
     :class="['bo-grid bo-grid-row bo-row-clickable', { 'bo-row-highlight': highlightId !== null && String(item.id) === highlightId, 'bo-row-multi-sku': (item.items?.length || 1) > 1 }]"
     @click="openDetail(item)"
   >
-    <div v-if="selectable" class="bo-td bo-td-center bo-td-middle bo-td-select" style="width: 40px;" @click.stop>
-      <UiCheckbox :checked="selected" @update:checked="$emit('toggleSelect', item.id)" />
+    <div v-if="selectable" class="bo-td bo-td-center bo-td-select" style="width: 40px;" @click.stop>
+      <UiCheckbox :checked="selected" @update:checked="$emit('toggleSelect', rowKey(item))" />
     </div>
-    <div class="bo-td bo-td-center bo-td-middle bo-td-nowrap" style="width: 90px;">
+    <div class="bo-td bo-td-center bo-td-nowrap" style="width: 90px;">
       <span v-if="item.record_type === 'stockin'" class="bo-type-badge bo-type-badge--stockin">备货</span>
       <span v-else class="bo-type-badge bo-type-badge--order">订单</span>
     </div>
-    <div class="bo-td bo-td-center bo-td-middle bo-td-nowrap" style="width: 170px;">
+    <div class="bo-td bo-td-center bo-td-nowrap" style="width: 170px;">
       <span class="bo-order-date" :title="item.order_date || ''">{{ item.order_date || '-' }}</span>
     </div>
-    <div class="bo-td bo-td-center bo-td-middle bo-customer-cell" style="width:170px">{{ item.customer || '-' }}</div>
+    <div class="bo-td bo-td-center bo-customer-cell" style="width:170px">{{ item.customer || '-' }}</div>
     <div v-if="showProductColumn" class="bo-td bo-td-center bo-product-cell" style="width: 180px;">
       <template v-if="visibleSkus.length > 0">
         <div v-for="sku in visibleSkus" :key="sku.id" class="bo-sku-line">
@@ -22,10 +22,12 @@
       </template>
       <span v-else class="bo-sku-name">{{ item.product_name || '-' }}</span>
     </div>
-    <div class="bo-td bo-td-center bo-td-middle" style="width: 100px;"><span class="bo-cell-main">{{ item.factories?.join(', ') || '湖北' }}</span></div>
-    <div class="bo-td bo-td-center bo-td-middle" style="width: 130px;">
-      <template v-if="showProductColumn && visibleSkus.length > 0">
-        <strong>{{ visibleSkus.reduce((sum, s) => sum + (s.quantity || 0), 0) }}</strong>
+    <div class="bo-td bo-td-center" style="width: 100px;"><span class="bo-cell-main">{{ item.factories?.join(', ') || '湖北' }}</span></div>
+    <div class="bo-td bo-td-center" style="width: 130px;">
+      <template v-if="showProductColumn">
+        <strong v-if="visibleSkus.length > 0">{{ visibleSkus.reduce((sum, s) => sum + (s.quantity || 0), 0) }}</strong>
+        <!-- 关键字无 SKU 命中：回退订单级数量（与导出/打印回退行为一致） -->
+        <strong v-else>{{ item.quantity }}</strong>
       </template>
       <template v-else-if="item.items && item.items.length > 0">
         <strong>{{ item.items.reduce((sum, s) => sum + (s.quantity || 0), 0) }}</strong>
@@ -33,23 +35,23 @@
       <template v-else><strong>{{ item.quantity }}</strong></template>
     </div>
     <!-- 确认状态列：订单与备货均参与确认流程；未确认 TAB 下整列隐藏（冗余） -->
-    <div v-if="confirmStatus !== 'unconfirmed'" class="bo-td bo-td-center bo-td-middle" style="width: 110px;">
+    <div v-if="confirmStatus !== 'unconfirmed'" class="bo-td bo-td-center" style="width: 110px;">
       <span v-if="item.confirmed" class="bo-confirm-badge bo-confirm-badge--done">已确认</span>
       <span v-else class="bo-confirm-badge bo-confirm-badge--pending">未确认</span>
     </div>
     <!-- 确认操作列：未确认记录显示确认按钮，已确认记录显示已确认徽章（已确认 TAB 隐藏整列） -->
-    <div v-if="confirmStatus !== 'confirmed'" class="bo-td bo-td-center bo-td-middle" style="width: 130px;">
+    <div v-if="confirmStatus !== 'confirmed'" class="bo-td bo-td-center" style="width: 130px;">
       <button
         v-if="!item.confirmed"
         class="bo-confirm-btn"
         :disabled="isConfirming"
         @click.stop="handleConfirm(item)"
       >
-        {{ isConfirming ? '确认中…' : '确认订单' }}
+        {{ isConfirming ? '确认中…' : (item.record_type === 'stockin' ? '确认备货' : '确认订单') }}
       </button>
       <span v-else class="bo-confirm-badge bo-confirm-badge--done">已确认</span>
     </div>
-    <div class="bo-td bo-td-left bo-td-middle" style="width: 160px;">
+    <div class="bo-td bo-td-left" style="width: 160px;">
       <template v-if="visibleSkus.length > 0">
         <div v-for="sku in visibleSkus" :key="sku.id" class="bo-sku-line">
           <span v-if="sku.note" class="bo-sku-note" :title="sku.note">{{ sku.note }}</span>
@@ -69,6 +71,7 @@
  */
 import { computed } from 'vue'
 import type { BeileOrderRow as BeileOrderRowType } from '@/views/beile-order/composables/useBeileOrders'
+import { rowKey, skuMatchesKeyword } from '@/views/beile-order/composables/useBeileOrders'
 import UiCheckbox from '@/components/ui/UiCheckbox.vue'
 
 const props = defineProps<{
@@ -95,27 +98,22 @@ const emit = defineEmits<{
   open: [item: BeileOrderRowType]
   /** 确认订单 */
   confirm: [item: BeileOrderRowType]
-  /** 切换行选中状态 */
-  toggleSelect: [id: number]
+  /** 切换行选中状态（参数为 rowKey：record_type:id，订单与备货 id 可能撞号） */
+  toggleSelect: [key: string]
 }>()
-
-/** SKU 是否匹配关键字（产品名称或条码） */
-function skuMatchesKeyword(sku: { product_name?: string | null; product_barcode?: string | null }, kw: string): boolean {
-  return (sku.product_name || '').toLowerCase().includes(kw)
-    || (sku.product_barcode || '').toLowerCase().includes(kw)
-}
 
 /**
  * 行内展示的 SKU：应用产品筛选时仅返回名称/条码匹配关键字的 SKU，
  * 使产品名称、数量、备注只对应搜索到的那个产品；未筛选时返回全部。
+ * 无命中时返回空数组，模板回退到订单级 product_name/quantity 展示
+ * （与导出/打印的 filterSkusByKeyword 回退行为一致）。
  * 缓存为 computed，避免模板内多次调用重复计算。
  */
 const visibleSkus = computed<NonNullable<BeileOrderRowType['items']>>(() => {
   const kw = props.keyword.trim().toLowerCase()
   const items = props.item.items || []
   if (!kw) return items
-  const matched = items.filter((s) => skuMatchesKeyword(s, kw))
-  return matched.length > 0 ? matched : items
+  return items.filter((s) => skuMatchesKeyword(s, kw))
 })
 
 /** 行点击：交给父组件打开详情弹窗（300ms 防连点） */
@@ -204,13 +202,6 @@ function handleConfirm(item: BeileOrderRowType) {
   font-weight: 600;
   color: var(--color-text);
 }
-.bo-cell-muted {
-  color: var(--color-text-muted);
-  font-size: 12px;
-}
-.bo-td-middle {
-  vertical-align: middle !important;
-}
 .bo-td-nowrap {
   white-space: nowrap;
 }
@@ -218,12 +209,6 @@ function handleConfirm(item: BeileOrderRowType) {
   padding: 10px 8px;
 }
 /* 下单时间列：标签 + 日期（对齐 purchase） */
-.bo-order-meta-cell {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-}
 .bo-order-date {
   flex-shrink: 0;
 }

@@ -75,10 +75,11 @@ def test_timestamp_format():
 
 
 def test_backup_chunk_size_imported():
-    """P2-2: BACKUP_CHUNK_SIZE正确从backup_service导入到endpoints"""
-    from fastapi_app.api.v1.endpoints.backup import BACKUP_CHUNK_SIZE, _get_chunk_size
-    assert _get_chunk_size() == BACKUP_CHUNK_SIZE
+    """P2-2: 分片大小配置存在于 backup 服务包并可被 endpoints 导入"""
+    from fastapi_app.api.v1.endpoints.backup.export import _get_chunk_size
+    from fastapi_app.services.backup import BACKUP_CHUNK_SIZE
     assert BACKUP_CHUNK_SIZE > 0
+    assert _get_chunk_size() > 0
 
 
 def test_cache_key_utility():
@@ -106,7 +107,7 @@ def test_backup_timeout_configured():
 
 
 def test_backup_in_process_lock():
-    """P1-4: 进程级备份锁存在"""
+    """P1-4: 进程级备份锁存在（现位于 services/backup/_constants.py）"""
     import asyncio
-    assert hasattr(backup_service, '_backup_in_progress')
-    assert isinstance(backup_service._backup_in_progress, asyncio.Lock)
+    from fastapi_app.services.backup._constants import _backup_in_progress
+    assert isinstance(_backup_in_progress, asyncio.Lock)

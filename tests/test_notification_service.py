@@ -82,7 +82,7 @@ class TestConnectionManagerBroadcast:
     async def test_broadcast_disconnects_failed_ws(self):
         ws_good = AsyncMock()
         ws_bad = AsyncMock()
-        ws_bad.send_json.side_effect = Exception("connection lost")
+        ws_bad.send_json.side_effect = RuntimeError('Cannot call "send" once a close message has been sent.')
         self.mgr.active_connections[1] = [ws_good, ws_bad]
 
         await self.mgr.broadcast_event({"type": "test"})

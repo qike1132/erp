@@ -294,7 +294,10 @@ const {
 }
 
 /* === Body === */
-/* 卡片主体样式已迁移到全局 .page-card-body（src/styles/app.css） */
+/* 与 /beile-order 一致：内容贴卡片边缘，无内边距（覆盖全局 20px 24px） */
+.page-card-body {
+  padding: 0;
+}
 
 .pc-tab-content {
   padding: 0;
