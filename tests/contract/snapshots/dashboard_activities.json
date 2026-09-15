@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "name": "dashboard_activities",
+  "method": "GET",
+  "path": "/api/v1/dashboard/activities",
+  "query": {
+    "page": 1,
+    "page_size": 2
+  },
+  "auth": true,
+  "http_status": 200,
+  "shape": [
+    "[].desc:str",
+    "[].status:str",
+    "[].time:str",
+    "[].title:str",
+    "[].type:str"
+  ],
+  "value_checks": {},
+  "recorded_at": "2026-09-14T01:06:08Z"
+}

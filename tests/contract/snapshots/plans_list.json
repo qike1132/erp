@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "name": "plans_list",
+  "method": "GET",
+  "path": "/api/v1/plans/list",
+  "query": {
+    "year": 2026,
+    "month": 1,
+    "page": 1,
+    "per_page": 2
+  },
+  "auth": true,
+  "http_status": 200,
+  "shape": [
+    "fifo_degraded:bool",
+    "plans:array[0]",
+    "total:int"
+  ],
+  "value_checks": {},
+  "recorded_at": "2026-09-14T01:06:08Z"
+}

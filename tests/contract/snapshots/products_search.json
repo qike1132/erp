@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "name": "products_search",
+  "method": "GET",
+  "path": "/api/v1/products/search",
+  "query": {
+    "q": "a"
+  },
+  "auth": true,
+  "http_status": 200,
+  "shape": [
+    "[].barcode:str",
+    "[].current_stock:int",
+    "[].id:int",
+    "[].name:str",
+    "[].price:int"
+  ],
+  "value_checks": {},
+  "recorded_at": "2026-09-14T01:06:08Z"
+}

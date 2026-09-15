@@ -1,1 +1,20 @@
+# 前端提交门禁（本地快速反馈层）
+#
+# 分层原则：
+#   - pre-commit（本文件）：只做「快且能拦住高危问题」的检查 —— 暂存文件 lint
+#     + 类型检查。类型检查必须保留：PatternRoomView 曾漏接 editingPartId/editForm
+#     两个必填 prop，vue-tsc 能拦住，而 eslint/vitest 都拦不住，最终导致 CI 的
+#     `npm run build`（vue-tsc -b && vite build）长期失败。
+#   - CI（.github/workflows/ci-cd.yml）：跑全量 lint / build / 跨端对齐检查。
+#
+# 紧急情况可用 `git commit --no-verify` 绕过，但不应成为常态。
+
+# package.json 中早已配置 lint-staged（eslint --fix + prettier），
+# 但此前从未被任何钩子调用 —— 现接入，仅处理暂存文件，耗时约 1-2s。
+npx --no-install lint-staged
+
+# 类型检查（约 18s）。这是本钩子中唯一耗时较长的步骤，但收益最高。
+npm run type-check
+
+# 单元测试（vitest，约 18s）
 npm test

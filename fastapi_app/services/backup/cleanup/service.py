@@ -20,6 +20,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from fastapi_app.core.database import get_async_db_context
 from fastapi_app.services.backup._constants import BACKUP_DIR
 from fastapi_app.services.backup.metrics.alert_service import alert_service
+from fastapi_app.services.backup.records import normalize_backup_ts
 from fastapi_app.services.backup.verify.health_check_service import health_check_service
 from fastapi_app.shared_models.backup_record import BackupRecord
 
@@ -326,14 +327,12 @@ class BackupCleanupService:
             return None
 
     def _normalize_backup_ts(self, ts: str) -> str:
-        """把备份时间戳统一为 'YYYY-MM-DD HH:MM:SS'，避免文件名格式与
-        manifest base_timestamp 格式不一致导致字符串比较恒为 True/False。"""
-        if not ts:
-            return ''
-        ts = str(ts).strip()
-        if len(ts) == 15 and ts[8] == '_' and ts[:8].isdigit() and ts[9:].isdigit():
-            return f'{ts[:4]}-{ts[4:6]}-{ts[6:8]} {ts[9:11]}:{ts[11:13]}:{ts[13:15]}'
-        return ts
+        """委托到 records.normalize_backup_ts（纯函数，无实例状态）。
+
+        保留本方法是为了不改动既有调用点（_mark_incremental_chains 等），
+        实现已统一到模块级纯函数，避免"同一逻辑两处实现"漂移。
+        """
+        return normalize_backup_ts(ts)
 
     async def _calculate_importance_scores(self,
                                          backup_files: list[dict[str, Any]],

@@ -18,6 +18,7 @@ from fastapi_app.api.v1.endpoints.purchase_center.schemas import (
 from fastapi_app.core.database import get_async_db as get_db
 from fastapi_app.core.database import get_async_read_db as get_read_db
 from fastapi_app.core.deps import require_permission
+from fastapi_app.core.response import success_response
 from fastapi_app.schemas.purchase_center import CustomerStatisticsResponse
 from fastapi_app.services import purchase_center_service as svc
 
@@ -59,7 +60,7 @@ async def api_get_customers(
             db, page=page, per_page=min(per_page, 100), status=status,
             keyword=keyword, sort_by=sort_by, sort_order=sort_order,
         )
-        return {'success': True, **result}
+        return success_response(**{**result})
     except (OperationalError, DisconnectionError, SQLAlchemyError) as e:
         logger.exception('获取客户列表失败')
         raise HTTPException(status_code=500, detail='操作失败，请稍后重试') from e
@@ -117,8 +118,7 @@ async def api_sync_customers(
     ]
 
     logger.info('采购中心客户快照读取完成: 读取%d条', len(customers))
-    return {
-        'success': True,
+    return success_response(**{
         'message': f'客户快照读取完成: {len(customers)}条（当前为只读快照模式，未写入同步状态）',
         # synced_count 保留以兼容旧调用方；新增 read_count 字段为推荐使用别名
         'synced_count': len(customers),
@@ -126,8 +126,7 @@ async def api_sync_customers(
         'skipped_count': 0,
         'snapshot_mode': True,
         'force_applied': False,  # 显式声明 force 未生效，避免契约误导
-        'details': details,
-    }
+        'details': details})
 
 
 @router.post("/customers/batch")
@@ -151,7 +150,7 @@ async def api_batch_get_customers(
     """
     try:
         customers = await svc.batch_get_customers(db, data.ids)
-        return {'success': True, 'customers': customers}
+        return success_response(customers=customers)
     except (OperationalError, DisconnectionError, SQLAlchemyError) as e:
         logger.exception('批量获取客户失败')
         raise HTTPException(status_code=500, detail='操作失败，请稍后重试') from e
@@ -176,7 +175,7 @@ async def api_get_customers_statistics(
     """
     try:
         stats = await svc.get_customers_statistics(db)
-        return {'success': True, 'statistics': stats}
+        return success_response(statistics=stats)
     except (OperationalError, DisconnectionError, SQLAlchemyError) as e:
         logger.exception('获取客户统计失败')
         raise HTTPException(status_code=500, detail='操作失败，请稍后重试') from e
@@ -209,4 +208,4 @@ async def api_get_customer_detail(
         raise HTTPException(status_code=500, detail='操作失败，请稍后重试') from e
     if not result:
         raise HTTPException(status_code=404, detail="客户不存在")
-    return {'success': True, 'customer': result}
+    return success_response(customer=result)

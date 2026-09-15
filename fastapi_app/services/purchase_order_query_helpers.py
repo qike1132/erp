@@ -55,7 +55,17 @@ from fastapi_app.services.purchase._factory import (  # noqa: F401
 )
 from fastapi_app.services.purchase._unprocessed import (  # noqa: F401
     _build_not_processed_filter,
+    _build_records_in_sql_order,
     _build_unprocessed_order_record,
+    _build_unprocessed_response,
     _build_unprocessed_stockin_record,
+    _build_unprocessed_union,
+    _collect_record_product_ids,
+    _count_unprocessed,
+    _enrich_unprocessed_items,
     _fetch_bom_product_ids,
+    _fetch_product_name_barcode,
+    _fetch_unprocessed_page,
+    _load_unprocessed_sources,
+    _order_has_bom,
 )

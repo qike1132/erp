@@ -19,6 +19,7 @@ from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_permission
 from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.core.limiter import limiter
+from fastapi_app.core.response import success_response
 from fastapi_app.schemas.daily_production import (
     DailySummaryResponse,
     MonthlySummaryResponse,
@@ -274,6 +275,6 @@ async def get_product_info(
         product = await daily_production_service.get_product_for_production(db, product_id)
         if not product:
             raise HTTPException(status_code=404, detail='产品不存在')
-        return {'success': True, 'data': product}
+        return success_response(data=product)
     except (OperationalError, DisconnectionError) as e:
         raise HTTPException(status_code=500, detail=f'获取产品信息失败: {settings.sanitize_error(e)}') from e

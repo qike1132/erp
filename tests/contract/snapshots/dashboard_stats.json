@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "name": "dashboard_stats",
+  "method": "GET",
+  "path": "/api/v1/dashboard/stats",
+  "query": {},
+  "auth": true,
+  "http_status": 200,
+  "shape": [
+    "data.low_stock_count:int",
+    "data.order_today:int",
+    "data.order_yesterday:int",
+    "data.pending_approvals:int",
+    "data.pending_materials:int",
+    "data.pending_purchases:int",
+    "data.pending_shipments:int",
+    "data.production_completion_rate:float",
+    "data.stockin_today:int",
+    "data.stockin_yesterday:int",
+    "data.stockout_today:int",
+    "data.stockout_yesterday:int",
+    "data.total_orders_today:int",
+    "data.total_shipments_today:int",
+    "success:bool"
+  ],
+  "value_checks": {},
+  "recorded_at": "2026-09-14T01:06:08Z"
+}

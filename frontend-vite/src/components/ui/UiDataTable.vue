@@ -16,6 +16,11 @@
  *   rowKey       - 行唯一键字段（默认 'id'）
  *   striped      - 斑马纹（默认 true）
  *   emptyMessage - 空数据文本
+ *   virtual      - 启用虚拟滚动（默认 false）。开启后表格主体由 VirtualList 渲染，
+ *                  DOM 节点从 O(n) 降到 O(可视区)，适用于单页渲染 200+ 行的场景。
+ *                  注意：虚拟模式下分页仍可用，但建议配合服务端分页使用。
+ *   virtualHeight - 虚拟滚动容器高度（px）。不给则取容器自适应高度。
+ *   rowHeight    - 虚拟模式下行高（px），需与实际行高一致（默认 48）
  *
  * Emits:
  *   update:selection  - 选中行变化
@@ -42,9 +47,17 @@
  *     </template>
  *   </UiDataTable>
  */
-import { DataTable, Column } from 'primevue'
-import type { DataTableSortEvent } from 'primevue'
-import { ref, watch, computed } from 'vue'
+// 按组件深导入（PrimeVue 官方推荐写法）：显式声明依赖，无需解析 barrel 入口。
+// 注：实测对 vendor-primevue chunk 体积无影响 —— 该 chunk 的体积由 DataTable
+// 内部的静态依赖（Paginator / VirtualScroller / 选择列 Checkbox 等）决定，
+// 与是否走 barrel 无关（Rollup 对 barrel 已能正确 tree-shake）。
+import DataTable from 'primevue/datatable'
+import Column from 'primevue/column'
+import type { DataTableSortEvent } from 'primevue/datatable'
+import { ref, watch, computed, onMounted, nextTick } from 'vue'
+import VirtualList from './VirtualList.vue'
+import UiSkeleton from './UiSkeleton.vue'
+import { useTableVirtualScroll } from '@/composables/useTableVirtualScroll'
 
 // ============================================================
 // Column definition
@@ -77,6 +90,12 @@ const props = withDefaults(
     rowKey?: string
     striped?: boolean
     emptyMessage?: string
+    /** 启用虚拟滚动：DOM 节点从 O(n) 降到 O(可视区) */
+    virtual?: boolean
+    /** 虚拟滚动容器高度(px)，不传则自适应父容器 */
+    virtualHeight?: number
+    /** 虚拟模式行高(px)，需与实际行高一致 */
+    rowHeight?: number
   }>(),
   {
     loading: false,
@@ -87,6 +106,9 @@ const props = withDefaults(
     rowKey: 'id',
     striped: true,
     emptyMessage: '暂无数据',
+    virtual: false,
+    virtualHeight: undefined,
+    rowHeight: 48,
   },
 )
 
@@ -145,10 +167,120 @@ function onSort(event: DataTableSortEvent) {
 function onRowSelect(event: { data: T[] }) {
   emit('update:selection', event.data)
 }
+
+// ============================================================
+// Virtual scroll
+// ============================================================
+const vsContainerRef = ref<HTMLElement | null>(null)
+const vsHeaderRef = ref<HTMLElement | null>(null)
+
+const { bodyHeight: vsBodyHeight, remeasure: vsRemeasure } = useTableVirtualScroll(
+  vsContainerRef,
+  vsHeaderRef,
+  { rowHeight: props.rowHeight },
+)
+
+/** 虚拟区实际高度：优先用显式传入的 virtualHeight，否则用测量值 */
+const vsHeight = computed(() => props.virtualHeight ?? vsBodyHeight.value)
+
+/** 虚拟列表 itemKey，兼容 rowKey 为嵌套路径的情况 */
+function vsItemKey(row: T, index: number) {
+  const k = (row as Record<string, unknown>)[props.rowKey]
+  return k != null ? String(k) : index
+}
+
+/** 数据变化后重测高度（加载完成后容器高度可能变化） */
+watch(
+  () => [props.data.length, props.loading],
+  async () => {
+    if (!props.virtual) return
+    await nextTick()
+    vsRemeasure()
+  },
+)
 </script>
 
 <template>
   <div class="ui-data-table-wrapper rounded-xl border border-border overflow-hidden">
+    <!-- ============ 虚拟滚动模式 ============ -->
+    <div
+      v-if="virtual"
+      ref="vsContainerRef"
+      class="flex flex-col"
+      :style="virtualHeight ? { height: `${virtualHeight}px` } : undefined"
+    >
+      <!-- 表头：复用 DataTable 渲染列头，保证与普通模式视觉一致 -->
+      <div ref="vsHeaderRef" class="ui-data-table-vs-header">
+        <DataTable
+          :value="[]"
+          :scrollable="false"
+          :responsive="false"
+          class="ui-data-table-vs-head-table"
+        >
+          <Column
+            v-for="col in columns"
+            :key="col.field"
+            :field="col.field"
+            :header="col.header"
+            :sortable="col.sortable ?? false"
+            :style="{
+              width: col.width,
+              textAlign: col.align ?? 'center',
+            }"
+          />
+        </DataTable>
+      </div>
+
+      <!-- 表体：虚拟列表，只渲染可视区行 -->
+      <div class="flex-1 min-h-0">
+        <UiSkeleton v-if="loading && !data.length" class="p-4" variant="table" :rows="6" />
+        <VirtualList
+          v-else-if="data.length"
+          :items="data"
+          :item-height="rowHeight"
+          :container-height="vsHeight"
+          :buffer="8"
+          :item-key="vsItemKey"
+          @visible-change="() => {}"
+        >
+          <template #default="{ item, index }">
+            <div
+              class="ui-data-table-vs-row flex items-center border-b border-border"
+              :class="striped && index % 2 === 1 ? 'bg-surface-hover' : ''"
+              :style="{ height: `${rowHeight}px` }"
+            >
+              <div
+                v-for="col in columns"
+                :key="col.field"
+                class="px-3 truncate"
+                :style="{
+                  width: col.width,
+                  textAlign: col.align ?? 'center',
+                  flex: col.width ? 'none' : '1 1 0',
+                }"
+              >
+                <slot
+                  v-if="$slots[`column-body-${col.field}`]"
+                  :name="`column-body-${col.field}`"
+                  :row="item"
+                  :column="col"
+                  :index="index"
+                />
+                <template v-else>
+                  {{ (item as Record<string, unknown>)[col.field] }}{{ col.unit ?? '' }}
+                </template>
+              </div>
+            </div>
+          </template>
+        </VirtualList>
+        <slot v-else name="empty">
+          <div class="py-12 text-center text-sm text-text-muted">{{ emptyMessage }}</div>
+        </slot>
+      </div>
+    </div>
+
+    <!-- ============ 普通模式（默认，行为不变）============ -->
+    <template v-else>
     <!-- 表格 -->
     <DataTable
       :value="data"
@@ -208,6 +340,7 @@ function onRowSelect(event: { data: T[] }) {
         <slot name="loading" />
       </template>
     </DataTable>
+    </template>
 
     <!-- 统一分页器：与 outsource/beile-order 等视图共享 UiPagination 样式 -->
     <UiPagination

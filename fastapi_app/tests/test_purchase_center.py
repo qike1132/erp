@@ -205,6 +205,75 @@ class TestPurchaseCenterService:
         rows = await export_completed_orders(db)
         assert rows == []
 
+    async def test_export_accepts_all_request_schema_fields(self):
+        """契约回归：导出服务必须接受 ExportCompletedRequest 的全部字段。
+
+        历史缺陷：路由层用 **data.model_dump() 传参，而服务层只声明了
+        supplier_id/date_from/date_to。因导出链路此前无前端调用方，该 TypeError
+        一直未被触发，直到下单查询 TAB 恢复导出入口才暴露。
+        """
+        import inspect
+
+        from fastapi_app.api.v1.endpoints.purchase_center.schemas import ExportCompletedRequest
+        from fastapi_app.services.purchase_center_service import export_completed_orders
+
+        # 全字段填充，确保模型 dump 出所有 key
+        body = ExportCompletedRequest(
+            order_no='PO-001', customer_name='客户A', product_name='产品X',
+            start_date='2026-09-01', end_date='2026-09-14',
+        )
+        sent = set(body.model_dump(exclude_none=True).keys())
+        accepted = set(inspect.signature(export_completed_orders).parameters.keys()) - {'db'}
+
+        unsupported = sorted(sent - accepted)
+        assert not unsupported, (
+            f'路由层会传入这些字段但服务层不接受：{unsupported}，'
+            f'调用将抛 TypeError。服务层需同步签名。'
+        )
+
+    @pytest.mark.asyncio
+    async def test_export_applies_text_filters(self):
+        """导出应把 order_no/customer_name/product_name 转成 ilike 条件（与列表口径一致）"""
+        from fastapi_app.services.purchase_center_service import export_completed_orders
+        db = MagicMock()
+        db.execute = AsyncMock(return_value=MagicMock(all=MagicMock(return_value=[])))
+
+        await export_completed_orders(
+            db, order_no='PO-001', customer_name='晨光', product_name='保温杯',
+        )
+
+        stmt = db.execute.call_args_list[0].args[0]
+        compiled = str(stmt)
+        # 三个文本字段都应生成 ilike 条件，值以绑定参数形式传入
+        assert compiled.count('LIKE') == 3
+        assert 'order_no' in compiled and 'customer_name' in compiled and 'product_name' in compiled
+        assert set(stmt.compile().params.values()) >= {'%PO-001%', '%晨光%', '%保温杯%'}
+
+    @pytest.mark.asyncio
+    async def test_export_date_aliases_backward_compatible(self):
+        """date_from/date_to 作为 start_date/end_date 的兼容别名仍生效"""
+        from fastapi_app.services.purchase_center_service import export_completed_orders
+        db = MagicMock()
+        db.execute = AsyncMock(return_value=MagicMock(all=MagicMock(return_value=[])))
+
+        await export_completed_orders(db, date_from='2026-09-01', date_to='2026-09-14')
+        params = db.execute.call_args_list[0].args[0].compile().params
+        # 日期以绑定参数传入（非字符串拼接），结束日补齐到当日 23:59:59
+        assert '2026-09-01' in params.values()
+        assert '2026-09-14 23:59:59' in params.values()
+
+    @pytest.mark.asyncio
+    async def test_export_start_date_takes_precedence_over_alias(self):
+        """同时传 start_date 与 date_from 时，以 start_date 为准"""
+        from fastapi_app.services.purchase_center_service import export_completed_orders
+        db = MagicMock()
+        db.execute = AsyncMock(return_value=MagicMock(all=MagicMock(return_value=[])))
+
+        await export_completed_orders(db, start_date='2026-09-10', date_from='2026-01-01')
+        values = db.execute.call_args_list[0].args[0].compile().params.values()
+        assert '2026-09-10' in values
+        assert '2026-01-01' not in values
+
     @pytest.mark.asyncio
     async def test_get_customers_statistics(self):
         from fastapi_app.services.purchase_center_service import get_customers_statistics

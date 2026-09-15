@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "name": "stock_inventory",
+  "method": "GET",
+  "path": "/api/v1/stock/inventory",
+  "query": {
+    "page": 1,
+    "per_page": 2
+  },
+  "auth": true,
+  "http_status": 200,
+  "shape": [
+    "all_countries[]:str",
+    "all_customers[]:str",
+    "data[].available_stock:str",
+    "data[].country_orders:object{}",
+    "data[].customer:str",
+    "data[].order_quantity:int",
+    "data[].product_barcode:str",
+    "data[].product_name:str",
+    "data[].production_qty:str",
+    "data[].stockin_quantity:str",
+    "data[].stockout_quantity:str",
+    "data[].total_stock:int",
+    "page:int",
+    "per_page:int",
+    "success:bool",
+    "total_available_stock:int",
+    "total_items:int",
+    "total_order_quantity:int",
+    "total_stock:int",
+    "total_stockin_quantity:int"
+  ],
+  "value_checks": {},
+  "recorded_at": "2026-09-14T01:06:08Z"
+}

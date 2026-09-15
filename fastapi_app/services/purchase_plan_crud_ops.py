@@ -106,6 +106,13 @@ async def _persist_plan_with_retry(db: AsyncSession, *, customer_id: int, custom
                 raise ValueError('单号生成冲突，请勿重复提交') from None
             logger.warning(f'plan_no {plan_no} 冲突，重试({attempt + 1}/3)')
 
+    # 防御性兜底：循环内每个分支要么 return 要么 raise，此处**不可达**。
+    # 保留它的理由是把「第 3 次必 raise」这一隐式不变式显式化 ——
+    # 否则若将来有人改动循环边界（如 range(3) → range(4)）或删掉 attempt==2 分支，
+    # 函数会**静默返回 None**，调用方 `plan.id` 抛 AttributeError，极难定位。
+    # （mypy 的 `return` 检查也依赖它才能确认返回契约成立。）
+    raise ValueError('单号生成冲突，请勿重复提交')
+
 
 async def create_plan(db: AsyncSession, *, customer_id: int, customer_name: str, plan_month: str, details: list[dict], remark: str='', created_by: str='', upload_batch: str='') -> dict:
     """

@@ -22,6 +22,7 @@ from fastapi_app.api.v1.endpoints.purchase_center.schemas import OrderIdsRequest
 from fastapi_app.core.database import get_async_db as get_db
 from fastapi_app.core.deps import require_permission
 from fastapi_app.core.logger import logger
+from fastapi_app.core.response import success_response
 from fastapi_app.schemas.purchase_center import SupplierSummaryResponse
 from fastapi_app.services import purchase_center_service as svc
 
@@ -56,14 +57,14 @@ async def api_summary_print(data: SummaryPrintRequest, db: AsyncSession=Depends(
             if source_order_ids:
                 source_orders = await svc.get_system_orders_by_ids(db, source_order_ids)
             html = generate_factory_summary_print(orders, order_items_map, source_orders)
-            return {'success': True, 'html': html, 'order_count': len(orders)}
+            return success_response(html=html, order_count=len(orders))
         elif format_type == 'supplier':
             sorted_suppliers = await svc.query_supplier_groups(db)
             html = generate_supplier_summary_print(sorted_suppliers, orders)
-            return {'success': True, 'html': html, 'supplier_count': len(sorted_suppliers), 'order_count': len(orders)}
+            return success_response(html=html, supplier_count=len(sorted_suppliers), order_count=len(orders))
         else:
             html = generate_normal_summary_print(orders, order_items_map)
-            return {'success': True, 'html': html, 'order_count': len(orders)}
+            return success_response(html=html, order_count=len(orders))
     except (OperationalError, DisconnectionError, SQLAlchemyError, ValueError, RuntimeError) as e:
         logger.exception(f'汇总打印失败: {e!s}')
         raise HTTPException(status_code=500, detail='操作失败，请稍后重试') from e

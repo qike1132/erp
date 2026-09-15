@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "name": "products_list",
+  "method": "GET",
+  "path": "/api/v1/products/list",
+  "query": {
+    "page": 1,
+    "per_page": 2
+  },
+  "auth": true,
+  "http_status": 200,
+  "shape": [
+    "items[].barcode:str",
+    "items[].create_time:<volatile>",
+    "items[].current_stock:int",
+    "items[].factory:str",
+    "items[].id:int",
+    "items[].image:str",
+    "items[].initial_stock:int",
+    "items[].name:str",
+    "items[].price:float",
+    "success:bool",
+    "total:int"
+  ],
+  "value_checks": {},
+  "recorded_at": "2026-09-14T01:06:08Z"
+}

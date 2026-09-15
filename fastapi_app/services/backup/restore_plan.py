@@ -61,7 +61,7 @@ async def build_restore_plan(db: AsyncSession, manifest: dict) -> dict:
         except ValueError as e:  # 表名白名单外
             cur = -1
             logger.warning(f'还原预览: 忽略不合法表名 {tname!r}: {e}')
-        except Exception as e:  # 表不存在/连接异常
+        except Exception as e:  # broad-except: 还原预览为只读尽力统计，单表失败仅记 -1，不阻断整体预览
             cur = -1
             logger.warning(f'还原预览: 统计表 {tname} 失败: {e}')
 

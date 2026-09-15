@@ -1,9 +1,28 @@
 # scripts/allowed_n_plus_one.yaml
 # N+1 查询扫描白名单
-# 每行一条豁免，支持 file:line 或 file 两种形式。
-# 仅豁免经评审确认可接受的循环内 await db.execute 模式，Web 业务请求路径不得豁免。
+#
+# 支持三种键（2026-09-14 起）：
+#   path/to/file.py                 —— 整个文件豁免（最粗，慎用）
+#   path/to/file.py:123             —— 指定行（**行号随编辑漂移即整批失效，已实际踩到**）
+#   path/to/file.py::function_name  —— 指定函数（**推荐**，不随行号漂移）
+#
+# ⚠️ 就地标注优先于白名单
+#   若违规只发生在某个具体调用上，直接在源码对应行加 `# batch-loop: <理由>` 更好：
+#   局部、自解释、不会腐烂。2026-09-14 已把 6 处此类站点改为就地标注。
+#
+# 准入标准：仅豁免经评审确认可接受的循环内 await db.execute ——
+#   ① 遍历的是**固定集合**（常量语句表 / manifest 表集合 / 固定模型类集合）
+#   ② 或**业务必需**的逐条独立事务（逐条提交，避免后续失败回滚已成功项）
+#   Web 业务请求路径上的数据量级 N+1 **不得豁免**，必须改写为批量查询。
 
-# === 备份/恢复操作：按固定表名集合遍历（表数量固定 ~30，非数据量 N+1）===
+# === 备份/恢复域：遍历固定集合，或逐条独立事务（2026-09-14 改为函数级）===
+# ro_grants: 遍历 _RESET_GRANTS_SQL / _DEFAULT_PRIVILEGES_SQL 两个常量语句表
+fastapi_app/services/backup/ro_grants.py::ensure_readonly_grants
+# restore_plan: 遍历 manifest 中的固定表集合（约 30 张），逐表 COUNT 供还原预览
+fastapi_app/services/backup/restore_plan.py::build_restore_plan
+# records: 逐条补录/清理孤立/修正僵尸，每条独立提交，避免后续失败回滚已成功项
+fastapi_app/services/backup/records.py::sync_backup_records
+# 以下为备份域整文件豁免（按固定表名集合遍历，表数量固定 ~30，非数据量 N+1）
 fastapi_app/services/backup/verify/core.py
 fastapi_app/services/backup/verify/query_service.py
 fastapi_app/services/backup/json_backup.py
@@ -27,14 +46,18 @@ fastapi_app/services/bom_service.py
 # === 供应商信息同步：按固定模型类集合遍历 ===
 fastapi_app/services/purchase_supplier_service.py
 
-# === 以下为"每组批查"模式（循环内已用 IN 批量查询，非逐条 N+1）===
-# staging_service.L760: 按 affected_order_ids IN 批量查（注释已标注避免N+1）
-fastapi_app/services/staging_service.py:760
-# purchase_order_crud.L358: 按 item_ids IN 批量预取（注释已标注避免N+1）
-fastapi_app/services/purchase_order_crud.py:358
-# order_batch_create.L74: 批量创建订单，每客户需独立 insert（业务必需）
-fastapi_app/services/order_batch_create.py:74
-# purchase_bom_copy_service.L35: 批量删除采购订单，每订单独立 delete（业务必需）
-fastapi_app/services/purchase_bom_copy_service.py:35
-# notification_service.L387: 按工厂分组派发通知，每工厂独立推送（业务必需）
-fastapi_app/services/notification_service.py:387
+# ============================================================
+# 已退役条目（2026-09-14）—— 保留记录以便追溯，不再生效
+#
+# 原为 `file:line` 形式，因源码编辑导致行号漂移而失效 —— 这正是本轮发现
+# "白名单会腐烂"的直接证据。其中 6 处站点已在源码内就地标注
+# `# batch-loop: 有意逐行处理,非 N+1`（比白名单更局部、更不易失效）。
+#
+# fastapi_app/services/staging_service.py:760
+# fastapi_app/services/purchase_order_crud.py:358
+# fastapi_app/services/order_batch_create.py:74
+# fastapi_app/services/purchase_bom_copy_service.py:35
+# fastapi_app/services/notification_service.py:387
+# fastapi_app/services/purchase_plan_staging.py:241
+# fastapi_app/services/staging/stockout.py:183
+# ============================================================

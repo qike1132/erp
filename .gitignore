@@ -249,6 +249,10 @@ scripts/stock_sim/journal/
 # 历史构建产物目录（dist-old 等）
 /frontend-vite/dist-old/
 
+# 压测产物：数字随机器/运行模式/负载变化，属本机测量结果而非源码。
+# 复现方式见 docs/tickets/artifacts/benchmark/README.md
+docs/tickets/artifacts/benchmark/*.json
+
 # local-machine ops recovery script
 /_recover_prod.ps1
 

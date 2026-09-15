@@ -16,6 +16,7 @@ from fastapi_app.core.config import settings
 from fastapi_app.core.database import get_async_db
 from fastapi_app.core.deps import create_access_token, get_current_user_id
 from fastapi_app.core.limiter import limiter, memory_limiter
+from fastapi_app.core.response import success_response
 
 logger = logging.getLogger(__name__)
 
@@ -90,11 +91,9 @@ async def check_login_status(
     前端每5分钟调用一次此接口检查登录是否有效。
     返回200表示登录有效，401表示需要重新登录。
     """
-    return {
-        "success": True,
+    return success_response(**{
         "message": "登录状态有效",
-        "user_id": user_id
-    }
+        "user_id": user_id})
 
 
 @router.get("/me", response_model=UserInfoResponse)
@@ -151,10 +150,8 @@ async def log_frontend_error(
     if safe_stack:
         logger.debug("[Frontend Error Stack] %s", safe_stack)
 
-    return {
-        "success": True,
-        "message": "错误日志已记录"
-    }
+    return success_response(**{
+        "message": "错误日志已记录"})
 
 
 # ==================== 登录 ====================
@@ -319,7 +316,7 @@ async def api_logout(request: Request):
 
     from fastapi.responses import Response
     resp = Response(
-        content=json.dumps({"success": True, "message": "已登出"}, ensure_ascii=False),
+        content=json.dumps(success_response(message="已登出"), ensure_ascii=False),
         media_type="application/json",
     )
     resp.delete_cookie(key="access_token", path="/")
@@ -396,7 +393,7 @@ async def api_refresh_token(
     )
 
     logger.info("[Refresh] 令牌刷新成功: user_id=%s", user_id)
-    return {"success": True, "access_token": access_token, "token_type": "bearer"}
+    return success_response(access_token=access_token, token_type="bearer")
 
 
 # ==================== 文件上传 ====================
@@ -454,5 +451,5 @@ async def upload_file(
         db=db,
         uploader_id=user_id,
     )
-    return {"success": True, "url": result["url"], "filename": result["storage_key"], "file_id": result["id"]}
+    return success_response(url=result["url"], filename=result["storage_key"], file_id=result["id"])
 

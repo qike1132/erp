@@ -110,6 +110,7 @@
         <!-- 下单查询面板 -->
         <CompletedOrdersPanel
           v-else
+          v-model:draft="completed.draft"
           :orders="completed.orders"
           :loading="completed.loading"
           :fetching="completed.fetching"
@@ -117,6 +118,13 @@
           :total="completed.total"
           :current-page="completed.page"
           :total-pages="completed.totalPages"
+          :is-dirty="completed.isDirty"
+          :has-filter="completed.hasFilter"
+          :exporting="exporting"
+          @search="completed.search"
+          @reset="completed.reset"
+          @export="handleExport"
+          @remove-filter="handleRemoveCompletedFilter"
           @view-detail="handleViewDetail"
           @update:current-page="handleCompletedPageChange"
           @retry="completed.retry"
@@ -192,6 +200,9 @@ const {
   handleUpdateFactoryQty,
   handleViewDetail,
   handleCompletedPageChange,
+  handleRemoveCompletedFilter,
+  handleExport,
+  exporting,
 } = usePurchaseHandlers()
 </script>
 

@@ -7,6 +7,7 @@
 import json
 import logging
 from collections import defaultdict
+from dataclasses import dataclass, field
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -77,28 +78,101 @@ def _scope_label(pid: int, role_id: int | None, role_names: dict[tuple[int, int]
     return role_names.get((pid, role_id)) or f'角色#{role_id}'
 
 
-async def generate_purchase_orders_from_customer_orders(
-    db: AsyncSession, composite_ids: list[str], idempotency_key: str = '',
-) -> dict:
-    """根据复合 ID 列表生成采购单
+@dataclass(frozen=True)
+class _MaterialSpec:
+    """三类 BOM 物料的字段映射。
 
-    composite_ids 格式为 ['order:5', 'stockin:3', ...]，确保 Order 和 StockIn
-    的 ID 不会碰撞。
-
-    idempotency_key 为可选的幂等键，当前由数据库唯一约束 uq_po_pending_dedup
-    和 endpoint 层的 IntegrityError 处理保证幂等，此参数保留用于未来扩展。
-
-    BOM 口径：**产品所有 BOM 作用域（默认BOM + 各角色）的物料都会落入采购单**，
-    每个作用域都用该 SKU 的完整数量计算（不做分摊），与物料计算器一致。
-    多角色 SKU 因此会把同一个「哈哈」按不同角色各算一次，采购明细按
-    (物料名, 规格, 单位) 合并后数量累加 —— 即该产品的**总采购需求**。
+    三类物料的明细结构完全同形，差异只有「取哪个用量字段 / 叫什么名字 / 默认单位」，
+    因此用表驱动替代三段近乎重复的 dict 构建（2026-09-14 重构，零行为变化）。
     """
-    if not composite_ids:
-        raise ValueError('未选择任何订单')
 
-    from fastapi_app.shared_models import StockIn
+    category: str
+    map_attr: str          # _BomContext 上对应的分桶字段名
+    usage_attr: str        # 源行上表示「单位用量」的字段
+    default_unit: str
+    name_attr: str | None = None   # None 表示用「产品名 + name_suffix」
+    name_suffix: str = ''
+    default_name: str = ''         # name_attr 取到空值时的兜底名
 
-    # 拆分复合 ID
+
+# 顺序即输出顺序：同一作用域下 填充物 → 面料 → 配件（与重构前一致）
+_MATERIAL_SPECS: tuple[_MaterialSpec, ...] = (
+    _MaterialSpec('filling', 'filling', 'cotton_usage', '克', name_suffix='-填充物'),
+    _MaterialSpec('fabric', 'fabric', 'quantity', '米', name_attr='fabric_name', default_name='面料'),
+    _MaterialSpec('accessory', 'accessory', 'quantity', '个', name_attr='accessory_name', default_name='配件'),
+)
+
+
+@dataclass
+class _BomContext:
+    """一次生成所需的 BOM 上下文（三类分桶 + 作用域清单 + 角色名）。"""
+
+    filling: dict = field(default_factory=dict)
+    fabric: dict = field(default_factory=dict)
+    accessory: dict = field(default_factory=dict)
+    scopes_by_pid: dict[int, list] = field(default_factory=dict)
+    role_names: dict[tuple[int, int], str] = field(default_factory=dict)
+
+    def scopes_for(self, pid: int) -> list:
+        """产品无任何角色 BOM 时回退到 [None]（仅默认BOM），保持旧行为。"""
+        return self.scopes_by_pid.get(pid) or [None]
+
+
+def _material_row(
+    spec: _MaterialSpec, row, qty: int | float,
+    product_name: str, customer_name: str, scope_label: str,
+) -> dict:
+    """把一条 BOM 行展开为一条采购明细（字段口径与重构前逐字对齐）。"""
+    usage = float(getattr(row, spec.usage_attr) or 0)
+    if spec.name_attr is None:
+        material_name = product_name + spec.name_suffix
+    else:
+        material_name = getattr(row, spec.name_attr) or spec.default_name
+    return {
+        'material_name': material_name,
+        'material_code': row.material_code or '',
+        'specification': row.specification or '',
+        'unit': row.unit or spec.default_unit,
+        'unit_price': 0,
+        'quantity': round_qty(usage * qty),
+        'supplier_name': row.supplier_name or '',
+        'supplier_id': row.supplier_id,
+        'customer_name': customer_name,
+        'category': spec.category,
+        'unit_usage': usage,
+        'source_role': scope_label,
+    }
+
+
+def _build_material_items(records: list, ctx: _BomContext, pid_name_map: dict[int, str]) -> list:
+    """为给定记录列表构建物料项。
+
+    多 SKU 模型：遍历每条记录的所有 SKU（Order.items 或 StockIn 单 SKU），
+    为每个 SKU 独立展开 BOM，并**对每个 BOM 作用域各算一遍**（都用该 SKU 的
+    完整数量，不分摊），与物料计算器口径一致。
+    """
+    result_items: list = []
+    for rec in records:
+        customer_name = rec.customer
+        for pid, qty in _iter_source_skus(rec):
+            product_name = pid_name_map.get(pid, '未知产品')
+            for role_id in ctx.scopes_for(pid):
+                scope_label = _scope_label(pid, role_id, ctx.role_names)
+                for spec in _MATERIAL_SPECS:
+                    for row in getattr(ctx, spec.map_attr).get(role_id, []):
+                        if row.product_id != pid:
+                            continue
+                        result_items.append(
+                            _material_row(spec, row, qty, product_name, customer_name, scope_label)
+                        )
+    return result_items
+
+
+def _split_composite_ids(composite_ids: list[str]) -> tuple[list[int], list[int]]:
+    """拆分复合 ID：`stockin:3` → stockin_ids，`order:5` / 纯数字 → order_ids。
+
+    复合前缀确保 Order 与 StockIn 的 ID 不会碰撞；纯数字为旧格式兼容。
+    """
     order_ids: list[int] = []
     stockin_ids: list[int] = []
     for cid in composite_ids:
@@ -110,192 +184,143 @@ async def generate_purchase_orders_from_customer_orders(
             else:
                 order_ids.append(rid)
         else:
-            # 兼容旧格式（纯数字 ID，视为 Order ID）
             order_ids.append(int(cid))
+    return order_ids, stockin_ids
 
-    # 分别查询 Order 和 StockIn
-    cust_orders = []
+
+async def _load_source_records(
+    db: AsyncSession, order_ids: list[int], stockin_ids: list[int],
+) -> tuple[list, list]:
+    """按类型分别加载源记录（Order 预加载 items 以支持多 SKU）。"""
+    from fastapi_app.shared_models import StockIn
+
+    cust_orders: list = []
     if order_ids:
         cust_result = await db.execute(
             select(Order).options(selectinload(Order.items)).where(Order.id.in_(order_ids))
         )
         cust_orders = cust_result.scalars().all()
 
-    stockins = []
+    stockins: list = []
     if stockin_ids:
         stockin_result = await db.execute(
             select(StockIn).where(StockIn.id.in_(stockin_ids))
         )
         stockins = stockin_result.scalars().all()
+    return cust_orders, stockins
 
-    # 验证订单状态
+
+def _assert_orders_generatable(cust_orders: list) -> None:
+    """仅「待入库」状态的订单可审核生成采购单。"""
     invalid_orders = [o for o in cust_orders if o.status != ORDER_STATUS_PENDING_STOCK]
     if invalid_orders:
-        raise ValueError(f'订单 {invalid_orders[0].order_no} 当前状态为"{invalid_orders[0].status}"，仅"{ORDER_STATUS_PENDING_STOCK}"状态可审核')
+        raise ValueError(
+            f'订单 {invalid_orders[0].order_no} 当前状态为"{invalid_orders[0].status}"，'
+            f'仅"{ORDER_STATUS_PENDING_STOCK}"状态可审核'
+        )
 
-    # 合并所有记录（Order + StockIn）用于物料计算
-    all_source_records = list(cust_orders) + list(stockins)
-    # 多 SKU 模型：必须遍历 Order.items 收集所有 SKU 的 product_id，
-    # 否则只会取到 Order.product_id（首个 SKU），遗漏其他 SKU 的 BOM。
+
+def _collect_product_ids(records: list) -> list[int]:
+    """收集所有源记录的 SKU 级 product_id。
+
+    多 SKU 模型：必须遍历 Order.items 才能拿到全部 SKU 的 product_id，
+    否则只会取到 Order.product_id（首个 SKU），遗漏其他 SKU 的 BOM。
+    """
     product_ids_set: set[int] = set()
-    for r in all_source_records:
+    for r in records:
         for pid, _qty in _iter_source_skus(r):
             product_ids_set.add(pid)
-    product_ids = list(product_ids_set)
-    pid_name_map: dict[int, str] = {}
-    if product_ids:
-        prod_result = await db.execute(
-            select(Product.id, Product.name).where(Product.id.in_(product_ids))
-        )
-        pid_name_map = dict(prod_result.all())
+    return list(product_ids_set)
 
-    # === BOM 物料按 (product_id, 作用域) 分桶。role_id=None 为产品级默认BOM ===
-    filling_map: dict[int | None, list] = {}
-    fabric_map: dict[int | None, list] = {}
-    accessory_map: dict[int | None, list] = {}
-    scopes_by_pid: dict[int, list[int | None]] = {}
-    role_names: dict[tuple[int, int], str] = {}
 
-    if product_ids:
-        fill_result = await db.execute(
-            select(ProductMaterial).where(ProductMaterial.product_id.in_(product_ids))
-        )
-        filling_map = _bom_rows_by_scope(fill_result.scalars().all())
+async def _load_product_names(db: AsyncSession, product_ids: list[int]) -> dict[int, str]:
+    if not product_ids:
+        return {}
+    prod_result = await db.execute(
+        select(Product.id, Product.name).where(Product.id.in_(product_ids))
+    )
+    return dict(prod_result.all())
 
-        fab_result = await db.execute(
-            select(ProductFabric).where(ProductFabric.product_id.in_(product_ids))
-        )
-        fabric_map = _bom_rows_by_scope(fab_result.scalars().all())
 
-        acc_result = await db.execute(
-            select(ProductAccessory).where(ProductAccessory.product_id.in_(product_ids))
-        )
-        accessory_map = _bom_rows_by_scope(acc_result.scalars().all())
+async def _load_bom_context(db: AsyncSession, product_ids: list[int]) -> _BomContext:
+    """加载三类 BOM 分桶、各产品的作用域清单与角色名。"""
+    ctx = _BomContext()
+    if not product_ids:
+        return ctx
 
-        # 产品级作用域清单：取三类物料出现过的 role_id 与产品实际声明的角色取并集。
-        # 用并集而非「物料 role_id 集合」，是为了让「配了角色但该角色暂无物料」也能被
-        # 纳入作用域枚举（该作用域最终不产出任何明细，等价于被跳过）。
-        from fastapi_app.shared_models.product_material import ProductRole
-        role_result = await db.execute(
-            select(ProductRole.id, ProductRole.product_id, ProductRole.role_name)
-            .where(ProductRole.product_id.in_(product_ids))
-        )
-        role_ids_by_pid: dict[int, set[int]] = defaultdict(set)
-        for rid, rpid, rname in role_result.all():
-            role_names[(rpid, rid)] = rname or ''
-            role_ids_by_pid[rpid].add(rid)
+    fill_result = await db.execute(
+        select(ProductMaterial).where(ProductMaterial.product_id.in_(product_ids))
+    )
+    ctx.filling = _bom_rows_by_scope(fill_result.scalars().all())
 
-        # 产品级作用域清单 = 产品级默认BOM(None) ∪ 物料上出现过的 role_id ∪ 产品声明的角色。
-        # ★ None 必须显式补入：product_role 表里**没有**「默认BOM」这一行，
+    fab_result = await db.execute(
+        select(ProductFabric).where(ProductFabric.product_id.in_(product_ids))
+    )
+    ctx.fabric = _bom_rows_by_scope(fab_result.scalars().all())
+
+    acc_result = await db.execute(
+        select(ProductAccessory).where(ProductAccessory.product_id.in_(product_ids))
+    )
+    ctx.accessory = _bom_rows_by_scope(acc_result.scalars().all())
+
+    from fastapi_app.shared_models.product_material import ProductRole
+
+    role_result = await db.execute(
+        select(ProductRole.id, ProductRole.product_id, ProductRole.role_name)
+        .where(ProductRole.product_id.in_(product_ids))
+    )
+    role_ids_by_pid: dict[int, set[int]] = defaultdict(set)
+    for rid, rpid, rname in role_result.all():
+        ctx.role_names[(rpid, rid)] = rname or ''
+        role_ids_by_pid[rpid].add(rid)
+
+    for pid in product_ids:
+        # 作用域清单 = 物料上出现过的 role_id ∪ 产品实际声明的角色 ∪ {None}。
+        # ★ None 必须显式并入：product_role 表里**没有**「默认BOM」这一行，
         #   它只以「物料 role_id IS NULL」的形式存在，漏掉就会把整个产品级 BOM 丢了。
         #   与物料计算器 aggregate_materials 的 ordered = ([None] if None in buckets ...) 口径一致。
-        for pid in product_ids:
-            material_roles = {
-                row.role_id
-                for m in (filling_map, fabric_map, accessory_map)
-                for row in m.get(pid, [])
-                if row.product_id == pid
-            } | set(role_ids_by_pid.get(pid, ())) | {None}
-            scopes_by_pid[pid] = _scope_order(material_roles)
+        # 用并集而非「物料 role_id 集合」，是为了让「配了角色但该角色暂无物料」也能被
+        # 纳入作用域枚举（该作用域最终不产出任何明细，等价于被跳过）。
+        material_roles = {
+            row.role_id
+            for m in (ctx.filling, ctx.fabric, ctx.accessory)
+            for row in m.get(pid, [])
+            if row.product_id == pid
+        } | set(role_ids_by_pid.get(pid, ())) | {None}
+        ctx.scopes_by_pid[pid] = _scope_order(material_roles)
+    return ctx
 
-    def _build_items(records: list) -> list:
-        """为给定记录列表构建物料项。
 
-        多 SKU 模型：遍历每条记录的所有 SKU（Order.items 或 StockIn 单 SKU），
-        为每个 SKU 独立查询 BOM，并**对每个 BOM 作用域各算一遍**（都用该 SKU 的
-        完整数量，不分摊），与物料计算器口径一致。
-        """
-        result_items = []
-        for rec in records:
-            customer_name = rec.customer
-            # 按 SKU 粒度迭代，确保多 SKU 订单的每个 SKU 都生成 BOM 物料
-            for pid, qty in _iter_source_skus(rec):
-                product_name = pid_name_map.get(pid, '未知产品')
-                # 产品无任何角色 BOM 时回退到 [None]（仅默认BOM），保持旧行为
-                scopes = scopes_by_pid.get(pid) or [None]
+async def _cleanup_pending_for(
+    db: AsyncSession, order_ids: list[int], stockin_ids: list[int],
+) -> None:
+    """幂等性前置：清理关联这些客户订单/备货记录的旧 pending 采购单。
 
-                for role_id in scopes:
-                    scope_label = _scope_label(pid, role_id, role_names)
+    不清理会导致重复审核产生重复订单。
+    """
+    if not (order_ids or stockin_ids):
+        return
+    await cleanup_orphan_pending_purchase_orders(
+        db, order_ids=order_ids or None, stockin_ids=stockin_ids or None
+    )
+    # 强制 flush，让 DELETE 在后续 INSERT 之前实际执行，避免唯一约束冲突
+    await db.flush()
 
-                    for bom in filling_map.get(role_id, []):
-                        if bom.product_id != pid:
-                            continue
-                        material_qty = round_qty(float(bom.cotton_usage or 0) * qty)
-                        result_items.append({
-                            'material_name': product_name + '-填充物',
-                            'material_code': bom.material_code or '',
-                            'specification': bom.specification or '',
-                            'unit': bom.unit or '克',
-                            'unit_price': 0,
-                            'quantity': material_qty,
-                            'supplier_name': bom.supplier_name or '',
-                            'supplier_id': bom.supplier_id,
-                            'customer_name': customer_name,
-                            'category': 'filling',
-                            'unit_usage': float(bom.cotton_usage or 0),
-                            'source_role': scope_label,
-                        })
 
-                    for fabric in fabric_map.get(role_id, []):
-                        if fabric.product_id != pid:
-                            continue
-                        material_qty = round_qty(float(fabric.quantity or 0) * qty)
-                        result_items.append({
-                            'material_name': fabric.fabric_name or '面料',
-                            'material_code': fabric.material_code or '',
-                            'specification': fabric.specification or '',
-                            'unit': fabric.unit or '米',
-                            'unit_price': 0,
-                            'quantity': material_qty,
-                            'supplier_name': fabric.supplier_name or '',
-                            'supplier_id': fabric.supplier_id,
-                            'customer_name': customer_name,
-                            'category': 'fabric',
-                            'unit_usage': float(fabric.quantity or 0),
-                            'source_role': scope_label,
-                        })
+def _group_by_customer(records: list) -> dict[str, list]:
+    groups: dict[str, list] = defaultdict(list)
+    for rec in records:
+        groups[rec.customer].append(rec)
+    return groups
 
-                    for acc in accessory_map.get(role_id, []):
-                        if acc.product_id != pid:
-                            continue
-                        material_qty = round_qty(float(acc.quantity or 0) * qty)
-                        result_items.append({
-                            'material_name': acc.accessory_name or '配件',
-                            'material_code': acc.material_code or '',
-                            'specification': acc.specification or '',
-                            'unit': acc.unit or '个',
-                            'unit_price': 0,
-                            'quantity': material_qty,
-                            'supplier_name': acc.supplier_name or '',
-                            'supplier_id': acc.supplier_id,
-                            'customer_name': customer_name,
-                            'category': 'accessory',
-                            'unit_usage': float(acc.quantity or 0),
-                            'source_role': scope_label,
-                        })
-        return result_items
 
-    # 幂等性检查：先清理关联这些客户订单/备货记录的旧 pending 采购单，防止重复审核产生重复订单
-    if order_ids or stockin_ids:
-        await cleanup_orphan_pending_purchase_orders(
-            db, order_ids=order_ids or None, stockin_ids=stockin_ids or None
-        )
-        # 强制 flush，让 DELETE 在后续 INSERT 之前实际执行，避免唯一约束冲突
-        await db.flush()
-
-    all_items = _build_items(all_source_records)
-    if not all_items:
-        raise ValueError('所选订单的产品未配置BOM物料，无法生成采购单')
-
-    # 按客户分组生成采购单
-    customer_groups: dict[str, list] = defaultdict(list)
-    for rec in all_source_records:
-        customer_groups[rec.customer].append(rec)
-
-    generated_orders = []
-
-    for customer_name, records in customer_groups.items():
-        cust_items = _build_items(records)
+async def _generate_per_customer(
+    db: AsyncSession, groups: dict[str, list], ctx: _BomContext, pid_name_map: dict[int, str],
+) -> list:
+    """按客户分组生成采购单（1 个客户 = 1 个采购单）。"""
+    generated_orders: list = []
+    for customer_name, records in groups.items():
+        cust_items = _build_material_items(records, ctx, pid_name_map)
         if not cust_items:
             continue
 
@@ -316,6 +341,46 @@ async def generate_purchase_orders_from_customer_orders(
             product_quantity=total_qty,
         )
         generated_orders.extend(result.get('orders', []))
+    return generated_orders
+
+
+async def generate_purchase_orders_from_customer_orders(
+    db: AsyncSession, composite_ids: list[str], idempotency_key: str = '',
+) -> dict:
+    """根据复合 ID 列表生成采购单
+
+    composite_ids 格式为 ['order:5', 'stockin:3', ...]，确保 Order 和 StockIn
+    的 ID 不会碰撞。
+
+    idempotency_key 为可选的幂等键，当前由数据库唯一约束 uq_po_pending_dedup
+    和 endpoint 层的 IntegrityError 处理保证幂等，此参数保留用于未来扩展。
+
+    BOM 口径：**产品所有 BOM 作用域（默认BOM + 各角色）的物料都会落入采购单**，
+    每个作用域都用该 SKU 的完整数量计算（不做分摊），与物料计算器一致。
+    多角色 SKU 因此会把同一个「哈哈」按不同角色各算一次，采购明细按
+    (物料名, 规格, 单位) 合并后数量累加 —— 即该产品的**总采购需求**。
+    """
+    if not composite_ids:
+        raise ValueError('未选择任何订单')
+
+    order_ids, stockin_ids = _split_composite_ids(composite_ids)
+    cust_orders, stockins = await _load_source_records(db, order_ids, stockin_ids)
+    _assert_orders_generatable(cust_orders)
+
+    all_source_records = list(cust_orders) + list(stockins)
+    product_ids = _collect_product_ids(all_source_records)
+    pid_name_map = await _load_product_names(db, product_ids)
+    ctx = await _load_bom_context(db, product_ids)
+
+    await _cleanup_pending_for(db, order_ids, stockin_ids)
+
+    all_items = _build_material_items(all_source_records, ctx, pid_name_map)
+    if not all_items:
+        raise ValueError('所选订单的产品未配置BOM物料，无法生成采购单')
+
+    generated_orders = await _generate_per_customer(
+        db, _group_by_customer(all_source_records), ctx, pid_name_map
+    )
 
     # 更新订单状态
     for o in cust_orders:

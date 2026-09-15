@@ -8,7 +8,7 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.cache_keys import CACHE_KEY_PREFIX, CacheNamespace, build_cache_key
@@ -33,10 +33,13 @@ router = APIRouter()
 
 # 客户列表缓存 TTL（秒），首页无搜索时缓存 5 分钟
 CUSTOMER_LIST_CACHE_TTL = 300
-# 客户列表缓存的键模式，用于写操作后批量失效
-# 注意：必须包含 CACHE_KEY_PREFIX（'erp'），与 build_cache_key 生成的键保持一致。
-# redis_cache._make_key 会在模式前再加 'erp:' 前缀，因此模式需以 'erp:' 开头，
-# 最终匹配 Redis 中的 'erp:erp:customer:list:*' 键。
+# 客户列表缓存的键模式，用于写操作后批量失效。
+# 注意：模式已带 'erp:' 前缀，物理模式是**单前缀** 'erp:customer:list:*'，
+# 与 build_cache_key('customer','list',...) 生成的 'erp:customer:list:*' 同层。
+# redis_cache._make_key（utils/redis_cache.py）对已带 'erp:' 前缀的 key 原样返回
+# （幂等，见 fastapi_app/tests/test_redis_key_namespace.py 的
+# test_make_key_is_idempotent_for_prefixed_key 断言）。
+# ⚠️ 切勿写成双前缀 'erp:erp:...' —— 那样会匹配不到任何键且静默失效。
 CUSTOMER_LIST_CACHE_PATTERN = f"{CACHE_KEY_PREFIX}:{CacheNamespace.CUSTOMER_LIST}:*"
 # 启用客户名称缓存键，与 customer_service._ACTIVE_CUSTOMER_CACHE_KEY 保持一致
 ACTIVE_CUSTOMER_CACHE_KEY = "active_customer_names"
@@ -101,6 +104,22 @@ async def _set_cached_customer_list(status: str | None, per_page: int, items: li
     await safe_set(
         cache_key, {'items': items, 'total': total},
         CUSTOMER_LIST_CACHE_TTL, context="客户列表缓存",
+    )
+
+
+def _customer_in_use_error(_exc: IntegrityError) -> HTTPException:
+    """客户被引用触发外键约束 —— 属预期业务场景，降级为 INFO 日志并返回 400。
+
+    作为 db_transaction 的 error_map 回调使用：rollback 由 db_transaction 统一
+    执行，端点无需手写 try/except/commit。
+
+    注意：保持 detail 为纯字符串，与本项目既有端点风格一致（133 处），
+    避免改变前端已依赖的响应结构。
+    """
+    logger.info('删除客户被拒（存在关联单据）')
+    return HTTPException(
+        status_code=400,
+        detail='该客户已有相关单据，无法删除！建议禁用该客户。',
     )
 
 
@@ -274,8 +293,13 @@ async def delete_customer(
 ) -> CustomerActionResponse:
     """删除客户。
 
-    事务模式：手动 commit + catch IntegrityError。
-    原因：db_transaction 会将 IntegrityError 转为 HTTP 500，无法对外层提供 400 友好提示。
+    事务模式：db_transaction + error_map 异常映射。
+    commit/rollback 由 db_transaction 统一执行，端点只声明 HTTP 语义
+    （与 outsource.py / purchase_plan.py 保持一致）。
+
+    异常映射：
+        - IntegrityError（客户被引用）→ 400 友好提示
+        - SQLAlchemyError → 500 "数据库操作失败"（db_transaction 默认规则）
 
     Args:
         customer_id: 客户 ID。
@@ -289,18 +313,8 @@ async def delete_customer(
         HTTPException 400: 该客户已有相关单据，无法删除。
         HTTPException 500: 数据库操作异常。
     """
-    try:
+    async with db_transaction(db, error_map={IntegrityError: _customer_in_use_error}):
         await customer_service.delete_customer(db, customer_id)
-        await db.commit()
-    except IntegrityError:
-        # 客户被引用时触发外键约束，属于预期业务场景，不需要记录完整堆栈
-        await db.rollback()
-        logger.info('删除客户被拒（存在关联单据）: customer_id=%s', customer_id)
-        raise HTTPException(status_code=400, detail='该客户已有相关单据，无法删除！建议禁用该客户。') from None
-    except SQLAlchemyError as e:
-        await db.rollback()
-        logger.exception('删除客户失败: customer_id=%s', customer_id)
-        raise HTTPException(status_code=500, detail='数据库操作失败') from e
     await _invalidate_customer_caches()
     return CustomerActionResponse(message='客户删除成功')
 

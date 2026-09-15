@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "name": "stock_in_list",
+  "method": "GET",
+  "path": "/api/v1/stock/in/list",
+  "query": {
+    "page": 1,
+    "per_page": 2
+  },
+  "auth": true,
+  "http_status": 200,
+  "shape": [
+    "data[].country:str",
+    "data[].customer:str",
+    "data[].deducted:int",
+    "data[].id:int",
+    "data[].note:str",
+    "data[].order_type:str",
+    "data[].product.barcode:str",
+    "data[].product.id:int",
+    "data[].product.image:str",
+    "data[].product.name:str",
+    "data[].quantity:int",
+    "data[].stockin_date:str",
+    "data[].stockin_no:str",
+    "page:int",
+    "per_page:int",
+    "success:bool",
+    "total:int"
+  ],
+  "value_checks": {},
+  "recorded_at": "2026-09-14T01:06:08Z"
+}

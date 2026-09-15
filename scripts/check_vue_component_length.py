@@ -52,6 +52,14 @@ def scan_file(path: Path, max_length: int) -> Violation | None:
 def collect_vue_files(scan_dir: Path) -> list[Path]:
     if not scan_dir.exists():
         return []
+    # 显式传入单个 .vue 文件时必须真的扫它。
+    # 否则 Path(file).rglob("*.vue") 返回空 → 静默 PASS（假绿），比报错更危险。
+    if scan_dir.is_file():
+        if scan_dir.suffix == ".vue" and not any(
+            part in EXCLUDE_DIRS for part in scan_dir.parts
+        ):
+            return [scan_dir]
+        return []
     return [
         p
         for p in scan_dir.rglob("*.vue")

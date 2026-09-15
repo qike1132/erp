@@ -134,11 +134,15 @@ async def delete_user(db: AsyncSession, user_id: int) -> None:
     if approval_count and approval_count > 0:
         raise ValueError(f"该用户有 {approval_count} 个待处理审批请求，无法删除")
 
+    # ⚠️ `not Order.is_deleted` 求值为 Python 布尔 False（不是 SQL 表达式），
+    #    会让整个 WHERE 恒假 → locked_order_count 永远为 0 → 本守卫永不触发。
+    #    必须用 SQLAlchemy 表达式（项目惯例 isnot(True)，列可空故 NULL 视为未删除）。
+    #    `Order.is_locked` 同理改用 `is_(True)`：裸列虽可运行，但列可空时语义不清晰。
     locked_order_count = await db.scalar(
         select(func.count()).select_from(Order).where(
             Order.locked_by_id == user_id,
-            Order.is_locked,
-            not Order.is_deleted,
+            Order.is_locked.is_(True),
+            Order.is_deleted.isnot(True),
         )
     )
     if locked_order_count and locked_order_count > 0:
@@ -196,10 +200,12 @@ async def update_user_permissions(db: AsyncSession, user_id: int, permission_ids
     user.permissions.clear()
 
     # 批量获取权限
-    result = await db.execute(
+    # 注：变量名不用 `result` —— 上方 `result` 已被推断为 Result[User]，
+    # 复用同名变量会让 mypy 按首次赋值定型，进而把 Permission 误判为 User。
+    perm_result = await db.execute(
         select(Permission).where(Permission.id.in_(permission_ids))
     )
-    permissions = {p.id: p for p in result.scalars().all()}
+    permissions = {p.id: p for p in perm_result.scalars().all()}
     logger.info(f"Loaded permissions: {list(permissions.keys())}")
 
     for pid in permission_ids:

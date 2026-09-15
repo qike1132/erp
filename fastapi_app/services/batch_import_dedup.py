@@ -133,7 +133,11 @@ def dedupe_by_keys[T](
     rows: Sequence[T],
     key_fn: Callable[[T], Hashable | None],
     *,
-    existing_keys: Container[Hashable] | Iterable[Hashable] = (),
+    # 类型为 Iterable 而非 Container：函数体要 `set(existing_keys)`，
+    # 而 Container 只保证 `__contains__`、**不保证可迭代**。
+    # 原注解 `Container[Hashable] | Iterable[Hashable]` 过宽 —— 传入一个
+    # 非可迭代的 Container 会在运行时崩。此处收窄到实际所需能力。
+    existing_keys: Iterable[Hashable] = (),
     start_index: int = DEFAULT_FIRST_DATA_ROW,
     label: str = '唯一键',
 ) -> DedupResult[T]:

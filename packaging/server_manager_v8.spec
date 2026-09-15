@@ -25,6 +25,13 @@ datas = [
 ]
 
 # 隐藏导入（v8 实际使用）
+#
+# ★ 为什么本包的模块要逐个列出而不是只写包名：
+#   `server_manager_v8.application.usecases` 的 __init__ 用**惰性再导出**
+#   （__getattr__ + _NAME_TO_MODULE 表），PyInstaller 的静态分析看不到
+#   「表里字符串 → 真的去 import 那个子模块」，于是子模块全被漏掉。
+#   运行时表现是 AttributeError，且只在打包后才出现（源码运行正常）。
+#   所以这里必须显式列全，包级那条留着（它本身也是真 import 的对象）。
 hiddenimports = [
     # 第三方
     'webview',
@@ -34,21 +41,50 @@ hiddenimports = [
     'psutil',
     # 本包所有子包与模块（PyInstaller 自动分析有时漏）
     'server_manager_v8',
+    #: 装配容器（composition root，运行时第一个被 import 的本包模块）
     'server_manager_v8.container',
     'server_manager_v8.domain',
+    'server_manager_v8.domain.models',
+    'server_manager_v8.domain.ports',
+    'server_manager_v8.domain.results',
+    'server_manager_v8.domain.permissions',
     'server_manager_v8.domain.config_schema',
+    'server_manager_v8.domain.service_state',
+    'server_manager_v8.domain.readiness',
+    'server_manager_v8.domain.port_contract',
+    'server_manager_v8.domain.state_machine',
     'server_manager_v8.application',
+    'server_manager_v8.application.events',
+    'server_manager_v8.application.event_bus',
+    'server_manager_v8.application.pipeline',
     'server_manager_v8.application.auth',
+    'server_manager_v8.application.auth.guard',
+    'server_manager_v8.application.auth.session',
     'server_manager_v8.application.usecases',
+    #: ★ 以下子模块必须逐个列出 —— 惰性再导出导致静态分析漏掉（见上方说明）
+    'server_manager_v8.application.usecases.deps',
+    'server_manager_v8.application.usecases.alert_ops',
+    'server_manager_v8.application.usecases.backup_ops',
+    'server_manager_v8.application.usecases.config_ops',
+    'server_manager_v8.application.usecases.install_services',
+    'server_manager_v8.application.usecases.kill_port',
+    'server_manager_v8.application.usecases.log_ops',
+    'server_manager_v8.application.usecases.start_dev',
+    'server_manager_v8.application.usecases.start_prod',
+    'server_manager_v8.application.usecases.stop_all',
+    'server_manager_v8.application.usecases.switch_mode',
     'server_manager_v8.adapters',
-    'server_manager_v8.adapters.process_win',
+    #: ★ port_impls 是 Protocol 的具体实现，缺了它容器装配会 ImportError
+    'server_manager_v8.adapters.port_impls',
+    'server_manager_v8.adapters._proc',
+    'server_manager_v8.adapters.clock',
     'server_manager_v8.adapters.service_nssm',
+    'server_manager_v8.adapters.process_win',
     'server_manager_v8.adapters.health_http',
     'server_manager_v8.adapters.storage_json',
     'server_manager_v8.adapters.audit_jsonl',
     'server_manager_v8.adapters.metrics_psutil',
     'server_manager_v8.adapters.notify_win',
-    'server_manager_v8.adapters._proc',
     'server_manager_v8.presentation',
     'server_manager_v8.presentation.bridge',
     'server_manager_v8.presentation.serializers',

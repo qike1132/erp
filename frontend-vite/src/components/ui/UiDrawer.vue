@@ -27,7 +27,8 @@
  *     </template>
  *   </UiDrawer>
  */
-import { Drawer } from 'primevue'
+// 按组件深导入（PrimeVue 官方推荐写法），显式声明依赖
+import Drawer from 'primevue/drawer'
 
 withDefaults(
   defineProps<{

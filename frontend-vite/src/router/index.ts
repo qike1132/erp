@@ -182,8 +182,14 @@ router.beforeEach(async (to: RouteLocationNormalized, _from: RouteLocationNormal
   // fail-closed：navSections 未加载时阻止导航，避免权限绕过
   if (authStore.user && !authStore.user.is_super) {
     if (authStore.navSections.length === 0) {
-      // navSections 尚未加载，阻止导航而非放行
-      return false
+      // navSections 尚未加载：await 在途请求（init 已后台触发）而非直接 return false，
+      // 否则登录后 router.push 在导航数据返回前即被取消，UI 永久卡在"登录中"。
+      try {
+        await authStore.loadNavSections()
+      } catch (error) {
+        console.error('[Router] 导航数据加载失败，阻止导航:', error)
+        return false
+      }
     }
     const targetPath = '/' + to.path.split('/').filter(Boolean)[0]
     const allowedPaths = authStore.filteredNavSections.flatMap((s) => s.items.map((i) => i.path))

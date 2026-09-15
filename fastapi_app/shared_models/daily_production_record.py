@@ -4,6 +4,7 @@
 替代原先分散的 CraftWork + PackagingRecord，统一记录每日各部门生产数据。
 """
 from datetime import UTC, datetime
+from decimal import Decimal
 
 from sqlalchemy import Date, DateTime, Index, Integer, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column
@@ -30,7 +31,10 @@ class DailyProductionRecord(Base):
     product_id: Mapped[int | None] = mapped_column(Integer, nullable=True, comment='关联产品ID')
     product_name: Mapped[str] = mapped_column(String(100), nullable=False, comment='产品名称')
     barcode: Mapped[str] = mapped_column(String(50), nullable=False, default='', comment='69码')
-    unit_price: Mapped[float] = mapped_column(
+    # 注解用 Decimal 而非 float：列类型是 Numeric(10, 2)，SQLAlchemy 实际返回
+    # Decimal。此前标注为 float 与运行时不符（会让 mypy 误判金额运算类型，
+    # 也会误导调用方以为可以按浮点处理）。
+    unit_price: Mapped[Decimal] = mapped_column(
         Numeric(10, 2), nullable=False, default=0,
         comment='单价（录入时快照）'
     )
@@ -41,7 +45,9 @@ class DailyProductionRecord(Base):
     created_by: Mapped[str | None] = mapped_column(String(50), nullable=True, comment='创建人')
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), comment='更新时间')
 
-    def to_dict(self, price_fallback: dict[int, float] | None = None):
+    def to_dict(self, price_fallback: dict[int, Decimal] | None = None):
+        # 对外 JSON 输出转 float（JSON 无 Decimal 原生类型）；
+        # 两位小数金额在 float 下可精确表示，此处转换不引入误差。
         up = float(self.unit_price or 0)
         if up == 0 and price_fallback and self.product_id and self.product_id in price_fallback:
             up = price_fallback[self.product_id]

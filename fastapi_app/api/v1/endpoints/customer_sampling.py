@@ -1,4 +1,3 @@
-import functools
 """按客户分类打样信息模块 API 路由
 
 前缀: /api/v1/pattern-room（保持路径不变，用户无感切换）
@@ -6,6 +5,7 @@ import functools
 
 对应 design.md 2.2.2 的 15 个接口端点。
 """
+import functools
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
@@ -17,6 +17,7 @@ from fastapi_app.core.database import get_async_read_db as get_read_db
 from fastapi_app.core.deps import require_permission
 from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.core.logger import logger
+from fastapi_app.core.response import success_response
 from fastapi_app.schemas.customer_sampling import (
     ActionResponse,
     BatchPartCreateRequest,
@@ -135,7 +136,7 @@ async def api_create_project(
             initial_roles=data.initial_roles,
             user_id=current_user.id,
         )
-    return {'success': True, 'message': '创建成功', **result}
+    return success_response(**{'message': '创建成功', **result})
 
 
 # ==================== 5. 编辑打样项目 ====================
@@ -162,7 +163,7 @@ async def api_update_project(
             version=data.version,
             user_id=current_user.id,
         )
-    return {'success': True, 'message': '更新成功', **result}
+    return success_response(**{'message': '更新成功', **result})
 
 
 # ==================== 5b. 更新项目状态（完成/进行中/取消） ====================
@@ -180,7 +181,7 @@ async def api_update_project_status(
         await svc.update_project_status(
             db, project_id, status=data.status, user_id=current_user.id,
         )
-    return {'success': True, 'message': '状态更新成功'}
+    return success_response(message='状态更新成功')
 
 
 # ==================== 6. 删除打样项目 ====================
@@ -195,7 +196,7 @@ async def api_delete_project(
     """删除打样项目（级联删除部位/版本/日志，先写审计日志）"""
     async with db_transaction(db):
         await svc.delete_project(db, project_id, user_id=current_user.id)
-    return {'success': True, 'message': '删除成功'}
+    return success_response(message='删除成功')
 
 
 # ==================== 7. 上传产品图片 ====================
@@ -227,7 +228,7 @@ async def api_upload_project_image(
             content_type=file.content_type,
             user_id=current_user.id,
         )
-    return {'success': True, 'message': '上传成功', **result}
+    return success_response(**{'message': '上传成功', **result})
 
 
 # ==================== 8. 部位列表 ====================
@@ -273,7 +274,7 @@ async def api_create_part(
             role_id=role_id,
             user_id=current_user.id,
         )
-    return {'success': True, 'message': '创建成功', **result}
+    return success_response(**{'message': '创建成功', **result})
 
 
 # ==================== 9b. 批量新增部位 ====================
@@ -293,7 +294,7 @@ async def api_batch_create_parts(
         result = await svc.batch_create_parts(
             db, project_id, items=items, role_id=role_id, user_id=current_user.id,
         )
-    return {'success': True, 'message': f"已创建 {result['count']} 个部位", **result}
+    return success_response(**{'message': f"已创建 {result['count']} 个部位", **result})
 
 
 # ==================== 9c. 复制部位版本 ====================
@@ -308,11 +309,9 @@ async def api_copy_part_version(
     """复制部位版本 — 在该部位名称下新增一个版本号 +1 的空白记录"""
     async with db_transaction(db):
         result = await svc.copy_part_version(db, part_id, user_id=current_user.id)
-    return {
-        'success': True,
-        'message': f"已创建版本 {result['version_no']}",
-        **result,
-    }
+    return success_response(
+        **{'message': f"已创建版本 {result['version_no']}", **result},
+    )
 
 
 @router.put('/parts/{part_id}', response_model=ActionResponse)
@@ -343,7 +342,7 @@ async def api_update_part(
             version=data.version,
             user_id=current_user.id,
         )
-    return {'success': True, 'message': '更新成功', **result}
+    return success_response(**{'message': '更新成功', **result})
 
 
 # ==================== 11. 删除部位 ====================
@@ -358,7 +357,7 @@ async def api_delete_part(
     """删除部位（历史版本快照中该部位数据保留）"""
     async with db_transaction(db):
         await svc.delete_part(db, part_id, user_id=current_user.id)
-    return {'success': True, 'message': '删除成功'}
+    return success_response(message='删除成功')
 
 
 # ==================== 12. 版本列表 ====================
@@ -393,11 +392,9 @@ async def api_create_version(
             role_id=role_id,
             user_id=current_user.id,
         )
-    return {
-        'success': True,
-        'message': f"已创建版本 {result['version_no']}",
-        **result,
-    }
+    return success_response(
+        **{'message': f"已创建版本 {result['version_no']}", **result},
+    )
 
 
 # ==================== 14. 版本详情 ====================
@@ -467,7 +464,7 @@ async def api_create_role(
         result = await svc.create_role(
             db, project_id, role_name=data.role_name, user_id=current_user.id,
         )
-    return {'success': True, 'message': '创建成功', **result}
+    return success_response(**{'message': '创建成功', **result})
 
 
 # ==================== 19. 编辑角色（改名 / 设置最终版本） ====================
@@ -489,7 +486,7 @@ async def api_update_role(
             version=data.version,
             user_id=current_user.id,
         )
-    return {'success': True, 'message': '更新成功', **result}
+    return success_response(**{'message': '更新成功', **result})
 
 
 # ==================== 20. 删除角色 ====================
@@ -504,4 +501,4 @@ async def api_delete_role(
     """删除角色（默认角色不可删除，级联删 part + version）"""
     async with db_transaction(db):
         await svc.delete_role(db, role_id, user_id=current_user.id)
-    return {'success': True, 'message': '删除成功'}
+    return success_response(message='删除成功')

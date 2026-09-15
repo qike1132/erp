@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_permission
 from fastapi_app.core.exceptions import db_transaction
+from fastapi_app.core.response import success_response
 from fastapi_app.schemas.case import (
     BatchCaseStockInRequest,
     BatchCaseStockOutRequest,
@@ -490,4 +491,4 @@ async def delete_case_product(case_id: int,
     """
     async with db_transaction(db):
         await case_service.delete_case_product(db, case_id)
-    return {'success': True, 'message': '删除成功'}
+    return success_response(message='删除成功')

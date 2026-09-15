@@ -22,6 +22,7 @@ from fastapi_app.core.database import get_async_read_db as get_read_db
 from fastapi_app.core.deps import require_permission
 from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.core.logger import logger
+from fastapi_app.core.response import success_response
 from fastapi_app.schemas.purchase_center import (
     ActionResponse,
     CategoriesResponse,
@@ -58,7 +59,7 @@ async def api_get_products(
         db, page=page, per_page=per_page, search=search, has_bom=has_bom,
         category=category, sort_by=sort_by, sort_order=sort_order, simple=simple,
     )
-    return {'success': True, **result}
+    return success_response(**{**result})
 
 
 @router.get('/products/batch-bom')
@@ -82,7 +83,7 @@ async def api_get_products_batch_bom(
     """
     try:
         result = await svc.get_products_batch_bom(db, ids)
-        return {'success': True, **result}
+        return success_response(**{**result})
     except (OperationalError, DisconnectionError, SQLAlchemyError) as e:
         logger.exception('批量获取产品BOM失败')
         raise HTTPException(status_code=500, detail='操作失败，请稍后重试') from e
@@ -109,7 +110,7 @@ async def api_get_search_suggestions(
     """
     try:
         suggestions = await svc.get_search_suggestions(db, q)
-        return {'success': True, 'suggestions': suggestions}
+        return success_response(suggestions=suggestions)
     except (OperationalError, DisconnectionError, SQLAlchemyError) as e:
         logger.exception('获取搜索建议失败')
         raise HTTPException(status_code=500, detail='操作失败，请稍后重试') from e
@@ -134,7 +135,7 @@ async def api_get_products_statistics(
     """
     try:
         stats = await svc.get_products_statistics(db)
-        return {'success': True, 'statistics': stats}
+        return success_response(statistics=stats)
     except (OperationalError, DisconnectionError, SQLAlchemyError) as e:
         logger.exception('获取产品统计失败')
         raise HTTPException(status_code=500, detail='操作失败，请稍后重试') from e
@@ -164,7 +165,7 @@ async def api_search_products_for_bom_copy(
         raise HTTPException(status_code=400, detail='请输入搜索关键词')
     try:
         products = await svc.search_products_for_bom_copy(db, keyword)
-        return {'success': True, 'products': products}
+        return success_response(products=products)
     except (OperationalError, DisconnectionError, SQLAlchemyError) as e:
         logger.exception('搜索产品失败（BOM复制）: keyword=%s', keyword)
         raise HTTPException(status_code=500, detail='操作失败，请稍后重试') from e
@@ -198,7 +199,7 @@ async def api_get_product_bom(
     if not result:
         raise HTTPException(status_code=404, detail='产品不存在')
     materials = result.pop('materials')
-    return {'success': True, 'product': result, 'materials': materials}
+    return success_response(product=result, materials=materials)
 
 
 @router.post('/product/{product_id}/bom', response_model=ActionResponse)
@@ -229,7 +230,7 @@ async def api_save_product_bom(
         logger.exception('保存BOM数据失败: product_id=%s', product_id)
         raise HTTPException(status_code=500, detail='保存失败，请稍后重试') from e
     await cache_mgr.invalidate(InvalidationStrategy.DOMAIN, CacheDomain.PRODUCT)
-    return {'success': True, 'message': msg}
+    return success_response(message=msg)
 
 
 @router.get('/products/{source_product_id}/bom-preview')
@@ -250,7 +251,7 @@ async def api_get_bom_preview(
     """
     async with db_transaction(db, commit=False):
         result = await svc.get_bom_preview(db, source_product_id)
-    return {'success': True, **result}
+    return success_response(**{**result})
 
 
 @router.post('/products/{target_product_id}/copy-bom', response_model=ActionResponse)
@@ -282,7 +283,7 @@ async def api_copy_bom_to_product(
             raise HTTPException(status_code=409, detail=e.detail, headers={'has_existing_bom': 'true'}) from e
         raise
     await cache_mgr.invalidate(InvalidationStrategy.DOMAIN, CacheDomain.PRODUCT)
-    return {'success': True, **result}
+    return success_response(**{**result})
 
 
 @router.post('/calculate', response_model=MaterialCalculateResponse)
@@ -306,7 +307,7 @@ async def api_calculate_material(
     """
     try:
         result = await svc.calculate_material(db, [o.model_dump() for o in data.orders])
-        return {'success': True, **result}
+        return success_response(**{**result})
     except (ValueError, OperationalError, DisconnectionError, RuntimeError) as e:
         logger.exception('物料计算失败')
         raise HTTPException(status_code=500, detail='物料计算失败，请稍后重试') from e
@@ -325,4 +326,4 @@ async def api_get_material_categories(
         dict[str, Any]: 包含 success 标志和 categories 字典的字典。
     """
     from fastapi_app.shared_models import MATERIAL_CATEGORIES
-    return {'success': True, 'categories': MATERIAL_CATEGORIES}
+    return success_response(categories=MATERIAL_CATEGORIES)

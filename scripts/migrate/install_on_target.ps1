@@ -382,7 +382,18 @@ if ($SkipNssm) {
     if (-not $NssmExe) { Write-Fail "NSSM not found."; exit 1 }
     if (-not (Test-Path $pythonExe)) { Write-Fail "portable python missing at $pythonExe"; exit 1 }
 
-    $envExtra = "APP_ENV=production FASTAPI_DEBUG=false PYTHONPATH=$TargetDir PYTHONUTF8=1 PYTHONUNBUFFERED=1 UVICORN_WORKERS=4"
+    # NSSM AppEnvironmentExtra 是 REG_MULTI_SZ：每个 "KEY=value" 必须是**独立参数**。
+    # 旧实现把整个字符串作为一个参数传入，NSSM 只按第一个 '=' 拆分，
+    # 导致 APP_ENV 的值变成 "production FASTAPI_DEBUG=false PYTHONPATH=..."（永远不等于
+    # production，文档端点关不掉），且 PYTHONPATH/PYTHONUTF8/UVICORN_WORKERS 等全部丢失。
+    $envExtra = @(
+        "APP_ENV=production"
+        "FASTAPI_DEBUG=false"
+        "PYTHONPATH=$TargetDir"
+        "PYTHONUTF8=1"
+        "PYTHONUNBUFFERED=1"
+        "UVICORN_WORKERS=4"
+    )
 
     function Install-NssmService {
         param([string]$Name, [string]$Params)

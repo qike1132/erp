@@ -5,7 +5,9 @@ SECURITY NOTE: where_clauses 列表仅包含硬编码的 SQL 片段，
 必须通过 :param 参数绑定传递，以防止 SQL 注入。
 """
 import logging
+from collections.abc import Callable
 from datetime import timedelta
+from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -62,7 +64,9 @@ async def _query_logs_generic(
     params: dict,
     page: int,
     per_page: int,
-    row_mapper: callable,
+    # 注解原为内置函数 `callable`（不是类型！），mypy 报 `callable? not callable`。
+    # 调用方一律传 `lambda row: {...}`，故用 Callable[[Any], dict]。
+    row_mapper: Callable[[Any], dict],
 ) -> dict:
     """通用日志查询（分页+分组聚合+COUNT(*) OVER()合并计数）"""
     where_sql = (" AND " + " AND ".join(base_where)) if base_where else ""  # sql-safe: escape_like/绑定参数/常量片段

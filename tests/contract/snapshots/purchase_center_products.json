@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "name": "purchase_center_products",
+  "method": "GET",
+  "path": "/api/v1/purchase-center/products",
+  "query": {
+    "page": 1,
+    "per_page": 2
+  },
+  "auth": true,
+  "http_status": 200,
+  "shape": [
+    "current_page:int",
+    "pages:int",
+    "products[].barcode:str",
+    "products[].bom_info.accessory_count:int",
+    "products[].bom_info.fabric_count:int",
+    "products[].bom_info.filling_count:int",
+    "products[].bom_info.packaging_count:int",
+    "products[].current_stock:int",
+    "products[].has_bom:bool",
+    "products[].id:int",
+    "products[].name:str",
+    "success:bool",
+    "total:int"
+  ],
+  "value_checks": {},
+  "recorded_at": "2026-09-14T01:06:08Z"
+}

@@ -33,10 +33,13 @@ DEPARTMENT_LABELS = {
 async def _build_product_price_fallback(
     db: AsyncSession,
     records: Iterable[DailyProductionRecord],
-) -> dict[int, float]:
+) -> dict[int, Decimal]:
     """当记录的 unit_price 为 0 时，按 product_id 回退到产品单价
 
     返回 {product_id: price} 映射；未匹配到产品的记录保持原值 0
+
+    注：注解为 Decimal 而非 float —— Product.price 是 Numeric 列，
+    实现原样返回 Decimal（见下方注释），此前注解写成 float 与实现不符。
     """
     fallback_ids = {r.product_id for r in records if (r.unit_price or 0) == 0 and r.product_id}
     if not fallback_ids:

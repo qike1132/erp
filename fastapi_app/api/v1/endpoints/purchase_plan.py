@@ -22,6 +22,7 @@ from fastapi_app.core.config import settings
 from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import get_user_identity, require_permission
 from fastapi_app.core.exceptions import db_transaction
+from fastapi_app.core.response import success_response
 from fastapi_app.schemas.purchase_plan import (
     AddDetailsRequest,
     BarcodeValidationResponse,
@@ -150,7 +151,7 @@ async def create_plan(data: PurchasePlanCreate, db: AsyncSession=Depends(get_asy
     }):
         _, created_by = get_user_identity(user)
         result = await purchase_plan_service.create_plan(db, customer_id=data.customer_id, customer_name=data.customer_name, plan_month=data.plan_month, details=[d.model_dump() for d in data.details], remark=data.remark, created_by=created_by)
-    return {'success': True, 'data': result}
+    return success_response(data=result)
 
 @router.put('/edit/{plan_id}', response_model=PurchasePlanActionResponse)
 async def update_plan(plan_id: int, data: PurchasePlanUpdate, db: AsyncSession=Depends(get_async_db), user: User=Depends(require_permission('production_plan_manage'))) -> PurchasePlanActionResponse:
@@ -332,7 +333,7 @@ async def monthly_aggregated(year: int=Query(..., description='年份'), month: 
     except TimeoutError:
         logger.error(f'获取月度聚合数据超时: year={year} month={month}')
         raise HTTPException(status_code=504, detail='获取月度数据超时，请稍后重试') from None
-    except Exception as e:
+    except Exception as e:  # broad-except: 端点兜底转 500 且不泄漏内部细节（DB/超时已在上方单独捕获）
         logger.error(f'获取月度聚合数据异常: {e}', exc_info=True)
         raise HTTPException(status_code=500, detail='获取月度数据失败，请稍后重试') from e
 
@@ -363,7 +364,7 @@ async def day_details(year: int=Query(..., description='年份'), month: int=Que
     except TimeoutError:
         logger.error(f'获取日期明细超时: year={year} month={month} day={day}')
         raise HTTPException(status_code=504, detail='获取日期明细超时，请稍后重试') from None
-    except Exception as e:
+    except Exception as e:  # broad-except: 端点兜底转 500 且不泄漏内部细节（DB/超时已在上方单独捕获）
         logger.error(f'获取日期明细异常: {e}', exc_info=True)
         raise HTTPException(status_code=500, detail='获取日期明细失败，请稍后重试') from e
 
@@ -488,7 +489,7 @@ async def upload_excel(file: UploadFile=File(..., description='Excel文件'), db
     session_id, created_by = get_user_identity(_user)
     async with db_transaction(db):
         result = await purchase_plan_service.upload_excel(db, content, session_id, created_by)
-    return {'success': True, **result}
+    return success_response(**{**result})
 
 @router.get('/staging/list', response_model=PurchasePlanStagingListResponse)
 async def staging_list(db: AsyncSession=Depends(get_async_read_db), _user: User=Depends(require_permission('production_plan_manage'))) -> PurchasePlanStagingListResponse:
@@ -503,7 +504,7 @@ async def staging_list(db: AsyncSession=Depends(get_async_read_db), _user: User=
     """
     session_id, _ = get_user_identity(_user)
     records = await purchase_plan_service.get_staging_list(db, session_id)
-    return {'success': True, 'data': records, 'total': len(records)}
+    return success_response(data=records, total=len(records))
 
 @router.post('/staging/validate', response_model=PurchasePlanStagingValidateResponse)
 async def staging_validate(db: AsyncSession=Depends(get_async_db), _user: User=Depends(require_permission('production_plan_manage'))) -> PurchasePlanStagingValidateResponse:
@@ -519,7 +520,7 @@ async def staging_validate(db: AsyncSession=Depends(get_async_db), _user: User=D
     session_id, _ = get_user_identity(_user)
     async with db_transaction(db):
         result = await purchase_plan_service.validate_staging(db, session_id)
-    return {'success': True, **result}
+    return success_response(**{**result})
 
 @router.post('/staging/confirm', response_model=PurchasePlanStagingConfirmResponse)
 async def staging_confirm(data: ConfirmStagingRequest, db: AsyncSession=Depends(get_async_db), user: User=Depends(require_permission('production_plan_manage'))) -> PurchasePlanStagingConfirmResponse:
@@ -547,7 +548,7 @@ async def staging_confirm(data: ConfirmStagingRequest, db: AsyncSession=Depends(
 
     async with db_transaction(db, error_map={IntegrityError: _confirm_no_conflict}):
         result = await purchase_plan_service.confirm_staging(db, session_id, batch_id=data.batch_id, created_by=created_by, selected_ids=data.selected_ids)
-    return {'success': True, **result}
+    return success_response(**{**result})
 
 @router.delete('/staging/clear', response_model=PurchasePlanActionResponse)
 async def staging_clear(db: AsyncSession=Depends(get_async_db), _user: User=Depends(require_permission('production_plan_manage'))) -> PurchasePlanActionResponse:
@@ -563,7 +564,7 @@ async def staging_clear(db: AsyncSession=Depends(get_async_db), _user: User=Depe
     session_id, _ = get_user_identity(_user)
     async with db_transaction(db):
         await purchase_plan_service.clear_staging(db, session_id)
-    return {'success': True, 'message': '暂存区已清空'}
+    return success_response(message='暂存区已清空')
 
 @router.get('/validate-barcode', response_model=BarcodeValidationResponse)
 async def validate_barcode(q: str=Query(..., min_length=1, description='69码'), db: AsyncSession=Depends(get_async_read_db), _user: User=Depends(require_permission('production_plan_manage'))) -> BarcodeValidationResponse:

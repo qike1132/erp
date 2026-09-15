@@ -184,7 +184,7 @@ async def db_transaction(
             yield
             if commit:
                 await db.commit()
-        except Exception as e:
+        except Exception as e:  # broad-except: 必须捕获全部异常以保证任何失败路径都 rollback（收窄会残留脏会话）
             mapped = _match_error_map(error_map, e)
             if mapped is not None:
                 await db.rollback()

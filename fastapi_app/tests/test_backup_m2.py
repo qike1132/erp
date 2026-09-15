@@ -71,12 +71,22 @@ class TestParseCron:
 # ===========================================================================
 
 def _db_mock():
+    """AsyncSession 的最小 mock。
+
+    注意：MagicMock 的任意属性都是 MagicMock（不可 await），因此**所有会被
+    `await` 的方法必须显式声明为 AsyncMock**，否则报
+    "object MagicMock can't be used in 'await' expression"。
+    create_schedule 会调用 add / flush / refresh，三者缺一不可。
+    """
     db = MagicMock()
-    db.add = MagicMock()
+    db.add = MagicMock()            # AsyncSession.add 是同步方法
+    db.flush = AsyncMock()
     db.get = AsyncMock(return_value=None)
     db.commit = AsyncMock()
     db.refresh = AsyncMock()
-    db.delete = MagicMock()
+    # AsyncSession.delete 是协程 —— 用 MagicMock 会让漏 await 的调用静默通过
+    db.delete = AsyncMock()
+    db.execute = AsyncMock()
     return db
 
 
@@ -95,11 +105,27 @@ class TestScheduleCrud:
 
     @pytest.mark.asyncio
     async def test_create_success(self):
+        """成功路径：服务层只 flush，不 commit（事务边界归 get_async_db）。
+
+        见 core/database.py::get_async_db 的 Unit of Work 契约：
+            "服务层应使用 flush() 而非 commit()，由本依赖统一控制事务边界"
+
+        历史遗留：本测试曾断言 db.commit.assert_awaited_once()，与上述契约相反。
+        服务层自行 commit 会在多步请求中产生部分提交（前一步成功、后一步失败时
+        无法整体回滚），因此实现（只 flush）是对的，断言（要求 commit）是错的。
+        """
         db = _db_mock()
         row = await create_schedule(db, name=' 每日 ', task_type='full', cron_expr='0 2 * * *')
         assert row.name == '每日'
         assert row.task_type == 'full'
-        db.commit.assert_awaited_once()
+
+        # 1) 必须 flush：拿到自增 id / 触发 DB 约束校验
+        db.add.assert_called_once()
+        db.flush.assert_awaited_once()
+        db.refresh.assert_awaited_once()
+
+        # 2) 必须不 commit：锁死分层契约，防止有人日后"顺手补一个 commit"
+        db.commit.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_delete_not_found_returns_false(self):

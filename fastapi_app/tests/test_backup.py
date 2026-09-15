@@ -302,33 +302,131 @@ class TestCleanupOldBackups:
 # ---------------------------------------------------------------------------
 
 class TestNormalizeBackupTs:
-    """_normalize_backup_ts：统一文件名时间戳与 manifest base_timestamp 格式。
+    """normalize_backup_ts：统一文件名时间戳与 manifest base_timestamp 格式。
 
     文件名时间戳为 'YYYYMMDD_HHMMSS'，manifest base_timestamp 为
     'YYYY-MM-DD HH:MM:SS'。二者格式不一致时字符串比较恒为 False，曾导致
     所有增量备份被无条件误删（数据丢失）。此测试锁死该修复。
+
+    函数位置：fastapi_app/services/backup/records.py 的**模块级纯函数**
+    （2026-09-14 由 BackupCleanupService 的实例方法提升而来——它不依赖 self，
+    放在类里导致测试必须实例化整个 Service 才能覆盖，且与 records 的
+    文件名/时间戳约定分离）。
     """
 
     def test_filename_format_is_normalized(self):
-        from fastapi_app.services.backup.records import _normalize_backup_ts
-        assert _normalize_backup_ts('20260913_010000') == '2026-09-13 01:00:00'
+        from fastapi_app.services.backup.records import normalize_backup_ts
+        assert normalize_backup_ts('20260913_010000') == '2026-09-13 01:00:00'
 
     def test_manifest_format_is_unchanged(self):
-        from fastapi_app.services.backup.records import _normalize_backup_ts
-        assert _normalize_backup_ts('2026-09-13 01:00:00') == '2026-09-13 01:00:00'
+        from fastapi_app.services.backup.records import normalize_backup_ts
+        assert normalize_backup_ts('2026-09-13 01:00:00') == '2026-09-13 01:00:00'
 
     def test_empty_and_none(self):
-        from fastapi_app.services.backup.records import _normalize_backup_ts
-        assert _normalize_backup_ts('') == ''
-        assert _normalize_backup_ts(None) == ''
+        from fastapi_app.services.backup.records import normalize_backup_ts
+        assert normalize_backup_ts('') == ''
+        assert normalize_backup_ts(None) == ''
 
     def test_two_formats_compare_equal(self):
         """归一化后，文件名时间戳 <= manifest base_timestamp 应成立（修复前恒 False）"""
-        from fastapi_app.services.backup.records import _normalize_backup_ts
-        filename_ts = _normalize_backup_ts('20260913_010000')
-        base_ts = _normalize_backup_ts('2026-09-13 01:00:00')
+        from fastapi_app.services.backup.records import normalize_backup_ts
+        filename_ts = normalize_backup_ts('20260913_010000')
+        base_ts = normalize_backup_ts('2026-09-13 01:00:00')
         assert filename_ts == base_ts
         assert filename_ts <= base_ts
+
+    def test_idempotent(self):
+        """幂等性：归一化结果再归一化应不变（防重复调用产生二次破坏）"""
+        from fastapi_app.services.backup.records import normalize_backup_ts
+        once = normalize_backup_ts('20260913_010000')
+        assert normalize_backup_ts(once) == once
+
+    def test_non_timestamp_passthrough(self):
+        """非法格式原样返回（去空格），不抛异常、不臆造格式"""
+        from fastapi_app.services.backup.records import normalize_backup_ts
+        assert normalize_backup_ts('not-a-ts') == 'not-a-ts'
+        assert normalize_backup_ts('  2026-09-13 01:00:00  ') == '2026-09-13 01:00:00'
+
+    def test_service_delegates_to_pure_function(self):
+        """BackupCleanupService._normalize_backup_ts 必须委托到同一纯函数，
+        防止将来有人只改一处造成实现漂移。"""
+        from fastapi_app.services.backup.cleanup.service import BackupCleanupService
+        from fastapi_app.services.backup.records import normalize_backup_ts
+
+        # 不实例化（__init__ 依赖较重）：直接以 None 作 self 调用，验证委托
+        for sample in ('20260913_010000', '2026-09-13 01:00:00', '', None, 'junk'):
+            assert BackupCleanupService._normalize_backup_ts(None, sample) == normalize_backup_ts(sample)
+
+
+# ---------------------------------------------------------------------------
+# 级联删除端到端测试
+#
+# 为什么单独写这一组：TestNormalizeBackupTs 只验证纯函数**自身**正确，
+# 无法发现"函数写对了但调用点忘了调用"的情况。2026-09-14 的重构中确实
+# 出现过这种退化（records.py 提升了函数，却把两处调用点的 normalize 去掉了，
+# 导致级联比较回退成原生字符串比较，所有增量备份被无条件删除 = 数据丢失），
+# 而当时 7 个纯函数测试**全部通过**。因此必须从 cleanup_old_backups 入口
+# 端到端锁死"比较发生在归一化之后"这一契约。
+# ---------------------------------------------------------------------------
+
+def _write_zip_with_manifest(path, base_timestamp):
+    """生成一个含 manifest.json/base_timestamp 的增量备份 zip。"""
+    with zipfile.ZipFile(path, 'w') as zf:
+        zf.writestr('manifest.json', json.dumps({'base_timestamp': base_timestamp}))
+
+
+class TestCascadeCleanup:
+    def test_incremental_survives_when_base_full_exists(self, tmp_path):
+        """基础全量还在 → 增量必须保留。
+
+        回归点：文件名 'YYYYMMDD_HHMMSS' 与 manifest 'YYYY-MM-DD HH:MM:SS'
+        混比较恒为 False（'20260913_010000' > '2026-09-13 01:00:00'，
+        因第 6 位 '6' > '0'），会让 base_exists 恒 False → 增量被误删。
+        """
+        full = tmp_path / 'erp_backup_20260913_010000.zip'
+        full.write_bytes(b'dummy')
+        incr = tmp_path / 'erp_incremental_20260913_020000.zip'
+        _write_zip_with_manifest(incr, '2026-09-13 01:00:00')  # 同一时刻的 manifest 格式
+
+        with patch('fastapi_app.services.backup.records.BACKUP_DIR', tmp_path):
+            result = cleanup_old_backups()
+
+        assert incr.exists(), '基础全量仍在，增量备份不应被删除（归一化缺失会导致此处失败）'
+        assert result['deleted_count'] == 0
+
+    def test_incremental_cascade_deleted_when_base_full_removed(self, tmp_path):
+        """基础全量已过期被删 → 依赖它的增量应级联删除（策略 3 正向生效）。
+
+        与上一个测试配对：证明级联逻辑既不过度删除、也不失效。
+        """
+        old_ts = (datetime.now() - timedelta(days=BACKUP_RETENTION_DAYS + 5)).timestamp()
+        full = tmp_path / 'erp_backup_20200101_010000.zip'
+        full.write_bytes(b'dummy')
+        os.utime(full, (old_ts, old_ts))  # 全量过期 → 必删
+
+        incr = tmp_path / 'erp_incremental_20200101_020000.zip'
+        _write_zip_with_manifest(incr, '2020-01-01 01:00:00')
+        os.utime(incr, (old_ts, old_ts))
+
+        with patch('fastapi_app.services.backup.records.BACKUP_DIR', tmp_path):
+            result = cleanup_old_backups()
+
+        assert not full.exists()
+        assert not incr.exists(), '基础全量被删后，增量应级联删除'
+        assert result['deleted_count'] == 2
+
+    def test_incremental_survives_when_newer_base_exists(self, tmp_path):
+        """存在更早（<=base_ts）的全量 → 增量保留，验证比较方向正确。"""
+        full = tmp_path / 'erp_backup_20260901_000000.zip'  # 早于 base_ts
+        full.write_bytes(b'dummy')
+        incr = tmp_path / 'erp_incremental_20260913_020000.zip'
+        _write_zip_with_manifest(incr, '2026-09-13 01:00:00')
+
+        with patch('fastapi_app.services.backup.records.BACKUP_DIR', tmp_path):
+            cleanup_old_backups()
+
+        assert incr.exists()
+        assert full.exists()
 
 
 # ---------------------------------------------------------------------------

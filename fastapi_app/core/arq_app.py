@@ -190,6 +190,6 @@ async def check_worker_health() -> tuple[bool, str]:
         if workers:
             return True, f'ARQ Worker 在线，{len(workers)} 个 worker 就绪'
         return False, 'ARQ Worker 未运行，请启动 erp-arq 服务'
-    except Exception as e:
+    except Exception as e:  # broad-except: 健康探测自身不得抛出，任何异常都须转成"不健康"返回值
         logger.warning('ARQ Worker 健康检测失败: %s', e)
         return False, f'ARQ Worker 健康检测失败: {type(e).__name__}'

@@ -48,6 +48,8 @@
             <ProjectDetailPanel
               :project="projectHook.currentProject.value"
               :parts-by-version="partHook.partsByVersion.value"
+              :editing-part-id="editingPartId"
+              :edit-form="editForm"
               :version-list="partHook.versionList.value"
               :final-version="partHook.finalVersion.value"
               :version-loading="versionHook.loading.value"
@@ -56,19 +58,14 @@
               :can-print="canPrint"
               :roles="roleHook.roles.value"
               :current-role-id="roleHook.currentRoleId.value"
-              :editing-part-id="editingPartId"
-              :edit-form="editForm"
               @set-final-version="onSetFinalVersion"
               @copy-version="onCopyPartVersion"
               @delete-version="onDeleteVersion"
-              @start-edit="onStartEdit"
-              @cancel-edit="onCancelEdit"
               @save-edit="onSaveEdit"
               @select-role="onSelectRole"
               @add-role="onAddRole"
               @remove-role="onRemoveRole"
               @add-part="openCreatePartDialog"
-              @create-version="openCreateVersionDialog"
               @print="handlePrint"
             />
           </template>
@@ -133,9 +130,6 @@
  * 二次进入不再重复发起 grouped-list / pattern-makers 等请求，消除「加载中...」闪烁。
  */
 defineOptions({ name: 'PatternRoomView' })
-
-// 图标统一走全局 tree-shaking 管线（src/icons.ts library.add + FontAwesomeIcon SVG 组件），
-// 子组件 ProjectCardItem 亦使用 SVG 组件，本页不再引入 Font Awesome 全量 CSS
 
 import { ref, computed, watch, onMounted, onActivated } from 'vue'
 import UiAlert from '@/components/ui/UiAlert.vue'
@@ -255,24 +249,24 @@ const {
 })
 
 const {
-    partFormVisible,
-    versionCreateVisible,
-    editingPartId,
-    editForm,
-    openCreatePartDialog,
-    openCreateVersionDialog,
-    onPartSubmitBatch,
-    onSetFinalVersion,
-    onCopyPartVersion,
-    onSaveEdit,
-    onStartEdit,
-    onCancelEdit,
-    onDeleteVersion,
-    onVersionCreateConfirm,
-    onSelectRole,
-    onAddRole,
-    onRemoveRole,
-  } = usePatternRoomPartActions({
+  partFormVisible,
+  versionCreateVisible,
+  // 部位内联编辑状态：由 usePatternRoomPartActions → usePartInlineEdit 提供，
+  // 需下发到 ProjectDetailPanel → PartsVersionTableV2 → PartsVersionRowV2。
+  // 此前漏接导致 editingPartId/editForm 恒为 undefined，内联编辑不可用。
+  editingPartId,
+  editForm,
+  openCreatePartDialog,
+  onPartSubmitBatch,
+  onSetFinalVersion,
+  onCopyPartVersion,
+  onSaveEdit,
+  onDeleteVersion,
+  onVersionCreateConfirm,
+  onSelectRole,
+  onAddRole,
+  onRemoveRole,
+} = usePatternRoomPartActions({
   canManage,
   confirmDialog,
   selectedProjectId,

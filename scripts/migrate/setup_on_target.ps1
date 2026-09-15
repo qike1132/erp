@@ -468,7 +468,16 @@ if ($SkipNssm) {
     if (-not $NssmExe) { Write-Fail "NSSM not found."; exit 1 }
     if (-not $PythonExe) { Write-Fail "Python not found."; exit 1 }
 
-    $envExtra = "APP_ENV=production FASTAPI_DEBUG=false PYTHONPATH=$TargetDir PYTHONUTF8=1 PYTHONUNBUFFERED=1 UVICORN_WORKERS=4"
+    # NSSM AppEnvironmentExtra 是 REG_MULTI_SZ：每个 "KEY=value" 必须是**独立参数**（同 install_on_target.ps1）。
+    $envExtra = @(
+        "APP_ENV=production"
+        "FASTAPI_DEBUG=false"
+        "PYTHONPATH=$TargetDir"
+        "PYTHONUTF8=1"
+        "PYTHONUNBUFFERED=1"
+        "UVICORN_WORKERS=4"
+        "PYTHONIOENCODING=utf-8"
+    )
 
     function Install-NssmService {
         param([string]$Name, [string]$Params)

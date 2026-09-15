@@ -4,10 +4,24 @@
 """
 import logging
 import os
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif', '.webp'}
+
+# 延迟初始化的提取器单例。
+#
+# ⚠️ 必须在此处**显式声明**：`global X` 只声明「函数内对 X 的赋值要写回模块级」，
+#    它**不会创建变量**。若模块级没有 X，`if X is None` 会先抛
+#    `NameError: name 'X' is not defined` —— 与依赖是否安装**无关**。
+#    2026-09-14 由 mypy 的 `name-defined` 发现：这三个名字只在 getter 里出现过，
+#    模块级从未赋值，导致 OCR 功能整体不可用（首次调用必抛 NameError）。
+#    类型用 Any：提取器类来自可选的第三方包（rapidocr_pdf / rapidocr / rapid_table），
+#    惰性导入，静态类型不可得。
+_pdf_extracter: Any = None
+_img_extracter: Any = None
+_table_extracter: Any = None
 
 
 def _get_pdf_extracter():

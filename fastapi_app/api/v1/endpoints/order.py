@@ -21,6 +21,7 @@ from fastapi_app.core.deps import require_permission
 from fastapi_app.core.domain_events import DomainEvent, DomainEventType
 from fastapi_app.core.domain_events import publish as publish_domain_event
 from fastapi_app.core.exceptions import AppError, NotFoundError, db_transaction
+from fastapi_app.core.response import success_response
 from fastapi_app.schemas.order import (
     ApprovalCancelResponse,
     ApprovalListResponse,
@@ -387,7 +388,7 @@ async def update_batch_no(
         )
     await cache_mgr.invalidate(InvalidationStrategy.DOMAIN, CacheDomain.ORDER)
     await cache_mgr.invalidate_dashboard()
-    return {"success": True, "message": "批次号已更新"}
+    return success_response(message="批次号已更新")
 
 
 @router.put("/deduct/{order_id}", response_model=OrderActionResponse)

@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "name": "plans_monthly_aggregated",
+  "method": "GET",
+  "path": "/api/v1/plans/monthly-aggregated",
+  "query": {
+    "year": 2026,
+    "month": 1
+  },
+  "auth": true,
+  "http_status": 200,
+  "shape": [
+    "customer_totals.total_inventory_qty:int",
+    "customer_totals.total_plan_qty:int",
+    "customer_totals.total_remaining_qty:int",
+    "customer_totals.total_shipped_qty:int",
+    "customer_totals.warning_count:int",
+    "customers:array[0]",
+    "days_in_month:int",
+    "fifo_degraded:bool",
+    "month:int",
+    "rows:array[0]",
+    "sku_date_index:object{}",
+    "sku_summary:array[0]",
+    "year:int"
+  ],
+  "value_checks": {},
+  "recorded_at": "2026-09-14T01:06:08Z"
+}

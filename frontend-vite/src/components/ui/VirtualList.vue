@@ -61,10 +61,8 @@ const bufferCount = computed(() => props.buffer ?? 10)
 const estimatedH = computed(() => props.dynamicHeight ? props.estimatedHeight : props.itemHeight)
 
 // Non-reactive height cache — avoids triggering full prefix-sum recomputation on every measurement.
-// Keyed by itemKey (falls back to index when itemKey is absent) so stale heights from a previous
-// page's items are never reused for a different row at the same index.
 // _heightVersion bumps only when a measured height actually changes, driving _prefixSums recompute.
-const _heightMap = new Map<string | number, number>()
+const _heightMap = new Map<number, number>()
 const _itemCountRef = ref(0)
 const _heightVersion = ref(0)
 const itemRefs: Map<number, HTMLElement> = new Map()
@@ -78,13 +76,6 @@ function setItemRef(el: unknown, index: number) {
   }
 }
 
-/** index → 缓存键：优先 itemKey(raw)，无 itemKey 或越界时回退 index */
-function keyOfIndex(index: number): string | number {
-  const raw = props.items[index]
-  if (raw === undefined) return index
-  return props.itemKey ? props.itemKey(raw, index) : index
-}
-
 function measureItems() {
   if (!props.dynamicHeight) return
   const currentGen = ++itemRefGeneration
@@ -92,9 +83,8 @@ function measureItems() {
   for (const [idx, el] of itemRefs) {
     if (itemRefGeneration !== currentGen) return
     const h = el.getBoundingClientRect().height
-    const key = keyOfIndex(idx)
-    if (_heightMap.get(key) !== h) {
-      _heightMap.set(key, h)
+    if (_heightMap.get(idx) !== h) {
+      _heightMap.set(idx, h)
       changed = true
     }
   }
@@ -105,7 +95,7 @@ function measureItems() {
 
 function _getItemHeight(index: number): number {
   if (!props.dynamicHeight) return props.itemHeight
-  return _heightMap.get(keyOfIndex(index)) || estimatedH.value
+  return _heightMap.get(index) || estimatedH.value
 }
 
 const _prefixSums = computed(() => {
@@ -118,7 +108,7 @@ const _prefixSums = computed(() => {
   const sums = new Float64Array(n + 1)
   let acc = 0
   for (let i = 0; i < n; i++) {
-    acc += _heightMap.get(keyOfIndex(i)) || estimatedH.value
+    acc += _heightMap.get(i) || estimatedH.value
     sums[i + 1] = acc
   }
   return sums
@@ -182,7 +172,7 @@ function getItemStyle(index: number) {
   if (!props.dynamicHeight) {
     return { height: `${props.itemHeight}px` }
   }
-  const h = _heightMap.get(keyOfIndex(index)) || estimatedH.value
+  const h = _heightMap.get(index) || estimatedH.value
   return { height: `${h}px` }
 }
 

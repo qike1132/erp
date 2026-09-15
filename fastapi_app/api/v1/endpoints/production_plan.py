@@ -17,6 +17,7 @@ from fastapi_app.core.config import settings
 from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import get_user_identity, require_permission
 from fastapi_app.core.exceptions import db_transaction
+from fastapi_app.core.response import success_response
 from fastapi_app.schemas.production_plan import (
     BarcodeValidationResponse,
     MonthlySummary,
@@ -252,7 +253,7 @@ async def upload_excel(
     session_id, _ = get_user_identity(_user)
     async with db_transaction(db):
         result = await production_plan_service.upload_excel(db, content, session_id)
-    return {'success': True, **result}
+    return success_response(**{**result})
 
 
 @router.get('/staging/list', response_model=StagingListResponse)
@@ -271,7 +272,7 @@ async def staging_list(
     """
     session_id, _ = get_user_identity(_user)
     records = await production_plan_service.get_staging_list(db, session_id)
-    return {'success': True, 'data': records, 'total': len(records)}
+    return success_response(data=records, total=len(records))
 
 
 @router.post('/staging/validate', response_model=StagingValidateResponse)
@@ -290,7 +291,7 @@ async def staging_validate(
     """
     session_id, _ = get_user_identity(_user)
     result = await production_plan_service.validate_staging(db, session_id)
-    return {'success': True, **result}
+    return success_response(**{**result})
 
 
 @router.post('/staging/confirm', response_model=StagingConfirmResponse)
@@ -314,7 +315,7 @@ async def staging_confirm(
         result = await production_plan_service.confirm_staging(
             db, session_id, batch_id=batch_id, created_by=created_by,
         )
-    return {'success': True, **result}
+    return success_response(**{**result})
 
 
 @router.delete('/staging/clear', response_model=ProductionPlanActionResponse)
@@ -333,4 +334,4 @@ async def staging_clear(
     """
     session_id, _ = get_user_identity(_user)
     await production_plan_service.clear_staging(db, session_id)
-    return {'success': True, 'message': '暂存区已清空'}
+    return success_response(message='暂存区已清空')

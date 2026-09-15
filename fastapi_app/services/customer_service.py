@@ -166,7 +166,12 @@ async def delete_customer(db: AsyncSession, customer_id: int) -> None:
     #   同时兜底匹配冗余的 customer_name 字段（历史数据 customer_id 可能为 NULL）
     checks = await db.execute(
         select(
-            select(func.count()).where(Order.customer == customer.name, not Order.is_deleted).scalar_subquery().label('orders'),
+            # ⚠️ 必须写 `isnot(True)`，不能写 `not Order.is_deleted`：
+            #    `not <SQLAlchemy 列>` 走的是 Python 的 `__bool__`，求值为**普通
+            #    布尔 False**（不是 SQL 表达式），导致整个 WHERE 恒假
+            #    （生成 `WHERE false`），count 永远为 0 → 本守卫**永不触发**。
+            #    列可空，故用 isnot(True)（NULL 也视为未删除），与项目既有惯例一致。
+            select(func.count()).where(Order.customer == customer.name, Order.is_deleted.isnot(True)).scalar_subquery().label('orders'),
             select(func.count()).where(StockIn.customer == customer.name).scalar_subquery().label('stockins'),
             select(func.count()).where(StockOut.customer == customer.name).scalar_subquery().label('stockouts'),
             select(func.count()).where(

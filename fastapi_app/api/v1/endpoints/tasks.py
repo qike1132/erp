@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from fastapi_app.core.deps import require_permission
 from fastapi_app.core.logger import logger
+from fastapi_app.core.response import success_response
 from fastapi_app.shared_models import User
 
 # ARQ Job 状态 → 对外状态映射
@@ -162,12 +163,10 @@ async def async_import_orders(
     job = await pool.enqueue_job(batch_import_orders_task.__name__, tmp_path, file.filename, current_user.id)
     task_id_str = job.job_id if job else ''
 
-    return {
-        "success": True,
+    return success_response(**{
         "message": "批量导入任务已提交",
         "task_id": task_id_str,
-        "status_url": f"/api/v1/tasks/status/{task_id_str}",
-    }
+        "status_url": f"/api/v1/tasks/status/{task_id_str}"})
 
 
 @router.post("/import-stockins", response_model=AsyncTaskSubmitResponse)
@@ -189,12 +188,10 @@ async def async_import_stockins(
     job = await pool.enqueue_job(batch_import_stockins_task.__name__, tmp_path, file.filename, current_user.id)
     task_id_str = job.job_id if job else ''
 
-    return {
-        "success": True,
+    return success_response(**{
         "message": "批量导入任务已提交",
         "task_id": task_id_str,
-        "status_url": f"/api/v1/tasks/status/{task_id_str}",
-    }
+        "status_url": f"/api/v1/tasks/status/{task_id_str}"})
 
 
 # ==================== 报表导出（异步） ====================
@@ -223,12 +220,10 @@ async def async_export_report(
     job = await pool.enqueue_job(export_report_task.__name__, request.report_type, filters, current_user.id)
     task_id = job.job_id if job else ''
 
-    return {
-        "success": True,
+    return success_response(**{
         "message": "报表导出任务已提交",
         "task_id": task_id,
-        "status_url": f"/api/v1/tasks/status/{task_id}",
-    }
+        "status_url": f"/api/v1/tasks/status/{task_id}"})
 
 
 # ==================== 导出文件下载 ====================

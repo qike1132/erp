@@ -7,7 +7,7 @@
 """
 import logging
 
-from fastapi_app.core.exception_handler import INFRA_EXCEPTIONS
+from fastapi_app.core.exception_handler import RUNTIME_INFRA_EXCEPTIONS
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ async def safe_publish_event(event_type: str, data: dict):
     try:
         from fastapi_app.services.notification_service import publish_event
         await publish_event(event_type, data)
-    except (RuntimeError, *INFRA_EXCEPTIONS):
+    except RUNTIME_INFRA_EXCEPTIONS:
         logger.warning("事件发布失败: %s", event_type, exc_info=True)
 
     # 通过领域事件总线发布，实现跨域通信解耦

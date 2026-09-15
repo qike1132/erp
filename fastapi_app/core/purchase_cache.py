@@ -12,9 +12,13 @@ import json
 import logging
 from urllib.parse import urlparse, urlunparse
 
-from fastapi_app.core.exception_handler import INFRA_EXCEPTIONS
+from fastapi_app.core.exception_handler import INFRA_EXCEPTIONS, RUNTIME_INFRA_EXCEPTIONS
 
 logger = logging.getLogger(__name__)
+
+# 本模块多处使用「RuntimeError + 基础设施异常」的防御性兜底。
+# 该组合已收敛为 core/exception_handler.RUNTIME_INFRA_EXCEPTIONS
+# （原先此处有本地副本，现统一到共享常量，避免同一变通方案在多文件各写一遍）。
 
 _purchase_l1_caches: list[dict] = []
 _listener_task: asyncio.Task | None = None
@@ -40,7 +44,7 @@ async def invalidate_purchase_caches() -> int:
     try:
         from fastapi_app.core.cache import invalidate_local_cache
         count += invalidate_local_cache("orders:*")
-    except (RuntimeError, *INFRA_EXCEPTIONS):
+    except RUNTIME_INFRA_EXCEPTIONS:
         pass  # defensive: 异常静默处理,不影响主流程
 
     await _async_publish_invalidation_signal()
@@ -56,7 +60,7 @@ async def _async_publish_invalidation_signal() -> None:
         if client is None:
             return
         await client.publish(_CHANNEL, json.dumps({"scope": "purchase_caches"}))
-    except (RuntimeError, *INFRA_EXCEPTIONS):
+    except RUNTIME_INFRA_EXCEPTIONS:
         pass  # defensive: 异常静默处理,不影响主流程
 
 
@@ -69,7 +73,7 @@ def _clear_all_local_caches() -> int:
     try:
         from fastapi_app.core.cache import invalidate_local_cache
         count += invalidate_local_cache("orders:*")
-    except (RuntimeError, *INFRA_EXCEPTIONS):
+    except RUNTIME_INFRA_EXCEPTIONS:
         pass  # defensive: 异常静默处理,不影响主流程
     return count
 
@@ -143,10 +147,10 @@ async def _listen_loop() -> None:
                 if pubsub:
                     await pubsub.unsubscribe(_CHANNEL)
                     await pubsub.close()
-            except (RuntimeError, *INFRA_EXCEPTIONS):
+            except RUNTIME_INFRA_EXCEPTIONS:
                 pass  # defensive: 异常静默处理,不影响主流程
             try:
                 if redis_client:
                     await redis_client.close()
-            except (RuntimeError, *INFRA_EXCEPTIONS):
+            except RUNTIME_INFRA_EXCEPTIONS:
                 pass  # defensive: 异常静默处理,不影响主流程

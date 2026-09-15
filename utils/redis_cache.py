@@ -27,9 +27,13 @@ class RedisCacheManager:
     def __init__(self):
         self.redis_client: aioredis.Redis | None = None
         self.default_timeout = 300
-        import socket
-        instance_id = os.getenv("HOSTNAME", socket.gethostname())[:20]
-        self.key_prefix = f'erp:{instance_id}:'
+        # key_prefix 的权威赋值点是 init_app()（默认 'erp:'，可被 CACHE_KEY_PREFIX 覆盖）。
+        # 此处只提供与 init_app 默认值一致的初值，避免"初始化前"使用产生无前缀 key。
+        #
+        # 历史：本属性曾用 f'erp:{HOSTNAME}:' 做实例隔离，但 init_app() 的默认参数
+        # key_prefix='erp:' 会将其整个覆盖，该隔离从未生效（死代码，2026-09-14 清理）。
+        # 若将来确需按实例隔离，必须同时改 init_app 的默认值与调用方传参，否则仍是空转。
+        self.key_prefix = 'erp:'
         self._fallback_cache: dict[str, Any] = {}
         self._fallback_timestamps: dict[str, float] = {}
         self._lock = asyncio.Lock()
@@ -84,8 +88,25 @@ class RedisCacheManager:
         self.key_prefix = key_prefix
 
     def _make_key(self, key: str) -> str:
-        # 防止双前缀：cache_keys.py 的 build_cache_key 已生成 'erp:...' 键，
-        # 若直接传入则不再追加前缀；否则按 key_prefix 添加
+        """把业务 key 转换为带前缀的物理 key。
+
+        ⚠️ 前缀契约（2026-09-14 明确）：
+        本方法对"已带 erp: 前缀"的 key 原样返回，对未带的补前缀。这个隐式判断
+        意味着**同一个逻辑 key 走不同路径会落到不同物理位置**：
+
+            redis_cache.get('token_blacklist:x')  ->  erp:token_blacklist:x
+            裸 client  .set('token_blacklist:x')  ->  token_blacklist:x   ← 读不到上面那个
+
+        因此**读写必须走同一层**（都经本类，或都用裸 client），否则数据互不可见。
+        现存裸 client 调用点（get_client() 直连）与本类不互通，属已知现状：
+        - core/auth/blacklist.py     token_blacklist:{jti}
+        - endpoints/auth.py          login_attempt:*/login_burst:*
+        - core/maintenance.py        erp:maintenance_mode（自带前缀，恰好两路一致）
+
+        新增 Redis 访问请一律走本类或 core/redis_wrapper 的 safe_* 封装，
+        不要用 get_client() 直连——否则会引入第三套命名空间。
+        防腐检查见 fastapi_app/tests/test_redis_key_namespace.py
+        """
         if key.startswith(self.key_prefix):
             return key
         return f"{self.key_prefix}{key}"

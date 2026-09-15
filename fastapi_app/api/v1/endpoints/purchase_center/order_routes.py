@@ -27,6 +27,7 @@ from fastapi_app.core.database import get_async_read_db as get_read_db
 from fastapi_app.core.deps import require_permission
 from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.core.logger import logger
+from fastapi_app.core.response import success_response
 from fastapi_app.schemas.purchase_center import (
     ActionResponse,
     PurchaseOrderActionResponse,
@@ -94,7 +95,7 @@ async def api_create_purchase_order(
         await _invalidate_orders_cache()
         # 手动创建的 PO 可能设置 source_order_ids，需失效未处理列表 + processed_ids 缓存
         await _invalidate_unprocessed_cache()
-        return {'success': True, **result}
+        return success_response(**result)
     except RuntimeError as e:
         logger.exception('创建采购订单失败')
         raise HTTPException(status_code=500, detail='创建订单失败，请稍后重试') from e
@@ -148,13 +149,12 @@ async def api_one_click_generate_order(
                 logger.warning("api_one_click_generate_order: rollback 失败（幂等路径）", exc_info=True)
             existing = await svc.fetch_existing_pending_for_composite_ids(db, data.composite_ids)
             await _invalidate_orders_cache()
-            return {
-                'success': True,
-                'message': f'已存在 {len(existing)} 个对应采购单（并发幂等）',
-                'created_count': len(existing),
-                'orders': existing,
-                'idempotent': True,
-            }
+            return success_response(
+                message=f'已存在 {len(existing)} 个对应采购单（并发幂等）',
+                created_count=len(existing),
+                orders=existing,
+                idempotent=True,
+            )
         try:
             await db.rollback()
         except Exception:  # defensive: rollback 失败不应掩盖原异常
@@ -177,7 +177,7 @@ async def api_one_click_generate_order(
     await _invalidate_orders_cache()
     # 一键生成会将客户订单状态从'待备货'改为'已备货'，需同时失效未处理列表缓存
     await _invalidate_unprocessed_cache()
-    return {'success': True, **result}
+    return success_response(**result)
 
 
 @router.get('/orders', response_model=PurchaseOrderListResponse)
@@ -217,7 +217,7 @@ async def api_get_purchase_orders(
         date_from=date_from, date_to=date_to, supplier_id=supplier_id,
         sort_by=sort_by, sort_order=sort_order,
     )
-    return {'success': True, **result}
+    return success_response(**result)
 
 
 @router.get('/orders/completed', response_model=PurchaseOrderListResponse)
@@ -279,7 +279,7 @@ async def api_get_completed_purchase_orders(
         barcode=barcode, material_name=material_name,
         start_date=start_date, end_date=end_date,
     )
-    return {'success': True, **result}
+    return success_response(**result)
 
 
 @router.post('/orders/completed/export')
@@ -299,7 +299,7 @@ async def api_export_completed_orders(
         dict[str, Any]: 包含 success 标志和 rows 数据的字典。
     """
     rows = await svc.export_completed_orders(db, **data.model_dump(exclude_none=True))
-    return {'success': True, 'rows': rows}
+    return success_response(rows=rows)
 
 
 @router.get('/orders/completed/suggestions', response_model=SuggestionResponse)
@@ -319,7 +319,7 @@ async def api_get_completed_order_suggestions(
         dict[str, Any]: 包含 success 标志和 suggestions 列表的字典。
     """
     suggestions = await svc.get_completed_order_suggestions(db, q)
-    return {'success': True, 'suggestions': suggestions}
+    return success_response(suggestions=suggestions)
 
 
 @router.get('/orders/completed/quick-filters', response_model=QuickFilterResponse)
@@ -337,7 +337,7 @@ async def api_get_completed_order_quick_filters(
         dict[str, Any]: 包含 success 标志和 quick_filters 字典的字典。
     """
     quick_filters = await svc.get_completed_order_quick_filters(db)
-    return {'success': True, 'quick_filters': quick_filters}
+    return success_response(quick_filters=quick_filters)
 
 
 @router.get('/orders/{order_id}', response_model=PurchaseOrderDetailResponse)
@@ -362,7 +362,7 @@ async def api_get_purchase_order(
     result = await svc.get_purchase_order(db, order_id)
     if not result:
         raise HTTPException(status_code=404, detail='订单不存在')
-    return {'success': True, 'order': result}
+    return success_response(order=result)
 
 
 @router.put('/orders/{order_id}', response_model=PurchaseOrderDetailResponse)
@@ -393,7 +393,7 @@ async def api_update_purchase_order(
     await _invalidate_orders_cache()
     # 更新可能修改 source_order_ids，需失效未处理列表 + processed_ids 缓存
     await _invalidate_unprocessed_cache()
-    return {'success': True, 'order': result}
+    return success_response(order=result)
 
 
 @router.delete('/orders/{order_id}')
@@ -422,7 +422,7 @@ async def api_delete_purchase_order(
     await _invalidate_orders_cache()
     # 删除 PO 后，其 source_order_ids 中的订单应重新出现在未处理列表
     await _invalidate_unprocessed_cache()
-    return {'success': True, 'message': result}
+    return success_response(message=result)
 
 
 @router.post('/orders/complete')
@@ -456,7 +456,7 @@ async def api_complete_purchase_order(
         logger.exception('完成订单失败: order_id=%s', data.order_id)
         raise HTTPException(status_code=500, detail='完成订单失败，请稍后重试') from e
     await _invalidate_orders_cache()
-    return {'success': True, **result}
+    return success_response(**result)
 
 
 @router.post('/orders/batch-complete')
@@ -482,7 +482,7 @@ async def api_batch_complete_purchase_orders(
         async with db_transaction(db):
             result = await svc.batch_complete_purchase_orders(db, data.ids, _current_user.username)
         await _invalidate_orders_cache()
-        return {'success': True, **result}
+        return success_response(**result)
     except RuntimeError as e:
         logger.exception('批量完成订单失败')
         raise HTTPException(status_code=500, detail='完成订单失败，请稍后重试') from e
@@ -509,7 +509,7 @@ async def api_batch_delete_purchase_orders(
     await _invalidate_orders_cache()
     # 删除 PO 后，其 source_order_ids 中的订单应重新出现在未处理列表
     await _invalidate_unprocessed_cache()
-    return {'success': True, **result}
+    return success_response(**result)
 
 
 @router.get('/orders/{order_id}/print', response_model=PurchaseOrderDetailResponse)
@@ -534,7 +534,7 @@ async def api_get_order_print_data(
     result = await svc.get_purchase_order(db, order_id)
     if not result:
         raise HTTPException(status_code=404, detail='订单不存在')
-    return {'success': True, 'order': result}
+    return success_response(order=result)
 
 
 @router.post('/orders/batch-print', response_model=PurchaseOrderActionResponse)
@@ -554,7 +554,7 @@ async def api_get_orders_batch_print_data(
         dict[str, Any]: 包含 success 标志和 orders 列表的字典。
     """
     orders = await svc.get_purchase_orders_with_items(db, data.ids)
-    return {'success': True, 'orders': [o.to_dict() for o in orders]}
+    return success_response(orders=[o.to_dict() for o in orders])
 
 
 @router.get('/unprocessed-orders', response_model=UnprocessedOrdersResponse)
@@ -576,7 +576,7 @@ async def api_get_unprocessed_orders(
         dict[str, Any]: 包含 success 标志和未处理订单列表的字典。
     """
     result = await svc.get_unprocessed_orders(db, page=page, per_page=per_page)
-    return {'success': True, **result}
+    return success_response(**result)
 
 
 @router.post('/orders/factory-summary')
@@ -600,7 +600,7 @@ async def api_get_factory_order_summary(
     """
     try:
         result = await svc.get_factory_order_summary(db, data.ids)
-        return {'success': True, **result}
+        return success_response(**result)
     except (OperationalError, DisconnectionError, ValueError, RuntimeError) as e:
         logger.exception('获取工厂订单汇总失败')
         raise HTTPException(status_code=500, detail='操作失败，请稍后重试') from e
@@ -628,7 +628,7 @@ async def api_save_factory_summary_edits(
     try:
         async with db_transaction(db):
             result = await svc.save_factory_summary_edits(db, [e.model_dump() for e in data.edits])
-        return {'success': True, **result}
+        return success_response(**result)
     except RuntimeError as e:
         logger.exception('保存工厂订单编辑失败')
         raise HTTPException(status_code=500, detail='操作失败，请稍后重试') from e
@@ -655,7 +655,7 @@ async def api_get_supplier_order_summary(
     """
     try:
         result = await svc.get_supplier_order_summary(db, data.ids)
-        return {'success': True, **result}
+        return success_response(**result)
     except (OperationalError, DisconnectionError, ValueError, RuntimeError) as e:
         logger.exception('获取供应商订单汇总失败')
         raise HTTPException(status_code=500, detail='操作失败，请稍后重试') from e
@@ -682,10 +682,11 @@ async def api_get_supplier_summary_by_vendor(
     """
     try:
         sorted_suppliers = await svc.query_supplier_groups(db)
-        return {
-            'success': True, 'suppliers': sorted_suppliers,
-            'supplier_count': len(sorted_suppliers), 'order_count': len(data.ids),
-        }
+        return success_response(
+            suppliers=sorted_suppliers,
+            supplier_count=len(sorted_suppliers),
+            order_count=len(data.ids),
+        )
     except (OperationalError, DisconnectionError, ValueError, RuntimeError) as e:
         logger.exception('按供应商汇总失败')
         raise HTTPException(status_code=500, detail='操作失败，请稍后重试') from e

@@ -87,7 +87,7 @@ async def _push_to_dead_letter(entry: dict):
     try:
         from fastapi_app.core.redis_wrapper import safe_lpush
         await safe_lpush(DLQ_KEY, json.dumps(entry, ensure_ascii=False, default=str), context="死信队列")
-    except Exception as e:
+    except Exception as e:  # broad-except: 死信队列是失败任务的最后兜底，写入失败只能告警，不得掩盖原始失败
         logger.warning('死信队列写入失败: %s', e)
 
 
@@ -104,5 +104,5 @@ def _safe_repr(obj, max_len: int = 500) -> str:
     try:
         s = repr(obj)
         return s[:max_len] + '...' if len(s) > max_len else s
-    except Exception:
+    except Exception:  # broad-except: 任意对象的 __repr__ 都可能抛错，序列化告警信息时不得中断
         return '<unrepresentable>'

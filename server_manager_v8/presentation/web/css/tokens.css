@@ -1,0 +1,50 @@
+/* ============================================================
+   ERP 服务器管理器 v8 —— 设计令牌
+   来源：docs/ui-redesign/ui_prototype_v8.html（1:1 提取，未改动数值）
+   设计令牌 1:1 继承 v7-pywebview-UI设计方案.md
+
+   ★ 本文件只放**变量定义**，不放任何选择器规则。
+     改主题色只需改这里；组件样式在 app.css。
+   ============================================================ */
+/* ============================================================
+   ERP 服务器管理器 v8 高保真交互原型
+   路线：pywebview 混合（原型即最终 UI）
+   设计令牌 1:1 继承 v7-pywebview-UI设计方案.md
+   新增：RBAC 权限态 / 高危操作四级管控 / 审计流水 / 症状化告警
+   ============================================================ */
+:root{
+  --brand:#2F7BFF; --brand-hover:#4A93FF; --brand-active:#1F6BEE; --brand-tint:rgba(47,123,255,.14);
+  --success:#00B578; --warning:#FF9A2E; --danger:#F76560; --info:#14C9C9; --purple:#8D4EDA;
+  --success-tint:rgba(0,181,120,.14); --warning-tint:rgba(255,154,46,.14);
+  --danger-tint:rgba(247,101,96,.14); --info-tint:rgba(20,201,201,.14); --purple-tint:rgba(141,78,218,.14);
+  --text-1:#F7F8FA; --text-2:#C9CDD4; --text-3:#86909C; --text-4:#4E5969;
+  --bg:#0F1115; --panel:#161A1F; --panel-2:#1C222A; --hover-bg:#1E242C;
+  --border:#2A3038; --border-light:#232932; --mask:rgba(0,0,0,.6);
+  --font-ui:"Microsoft YaHei UI","Microsoft YaHei","PingFang SC","Segoe UI",system-ui,sans-serif;
+  --font-mono:"Cascadia Mono","Consolas","Microsoft YaHei Mono",ui-monospace,monospace;
+  --r-sm:4px; --r-md:6px; --r-lg:8px; --r-xl:12px;
+  --shadow-pop:0 4px 16px rgba(0,0,0,.35); --shadow-card:0 1px 2px rgba(0,0,0,.25);
+  --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:20px; --sp-6:24px; --sp-8:32px;
+}
+html[data-theme="light"]{
+  --brand:#1668DC; --brand-hover:#1460CC; --brand-active:#0E4FB0; --brand-tint:rgba(22,104,220,.08);
+  --success:#00A870; --warning:#FF8800; --danger:#D54941; --info:#0FC6C2; --purple:#722ED1;
+  --success-tint:rgba(0,168,112,.10); --warning-tint:rgba(255,136,0,.10);
+  --danger-tint:rgba(213,73,65,.08); --info-tint:rgba(15,198,194,.10); --purple-tint:rgba(114,46,209,.08);
+  --text-1:#1F2329; --text-2:#4E5969; --text-3:#86909C; --text-4:#C9CDD4;
+  --bg:#F5F7FA; --panel:#FFFFFF; --panel-2:#FFFFFF; --hover-bg:#F7F8FA;
+  --border:#E5E8EF; --border-light:#F2F3F5; --mask:rgba(29,33,41,.45);
+  --shadow-pop:0 4px 12px rgba(0,0,0,.06); --shadow-card:0 1px 2px rgba(0,0,0,.03);
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%}
+body{font-family:var(--font-ui);font-size:13px;color:var(--text-2);background:var(--bg);overflow:hidden;-webkit-font-smoothing:antialiased}
+button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
+input,select,textarea{font-family:inherit;color:inherit}
+table{border-collapse:collapse;width:100%}
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px}
+::-webkit-scrollbar-thumb:hover{background:var(--text-4)}
+::-webkit-scrollbar-track{background:transparent}
+:focus-visible{outline:2px solid var(--brand);outline-offset:1px;border-radius:4px}
+.mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums}

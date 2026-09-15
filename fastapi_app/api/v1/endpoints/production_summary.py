@@ -17,6 +17,7 @@ from fastapi_app.core.config import settings
 from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_permission
 from fastapi_app.core.exceptions import db_transaction
+from fastapi_app.core.response import success_response
 from fastapi_app.schemas.production_summary import (
     CraftWorkActionResponse,
     CraftWorkCreate,
@@ -309,7 +310,7 @@ async def upload_packaging_excel(
     async with db_transaction(db):
         created_by = user.username if hasattr(user, 'username') else ''
         result = await production_summary_service.upload_packaging_excel(db, content, created_by)
-    return {'success': True, **result}
+    return success_response(**{**result})
 
 
 @router.get('/packaging/export')

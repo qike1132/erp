@@ -4,6 +4,7 @@
 核心业务逻辑，异步 SQLAlchemy 实现。
 """
 import logging
+from collections.abc import Awaitable, Callable
 
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -11,6 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.cache import CacheDomain, cache_result
 from fastapi_app.core.cache_invalidation import InvalidationStrategy, cache_mgr
+from fastapi_app.core.cache_keys import PRODUCT_LIST_CACHE_PATTERN
+from fastapi_app.core.redis_wrapper import safe_delete_pattern
 from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.core.validators import validate_not_empty
 from fastapi_app.services.bom_service import has_bom as product_has_bom  # noqa: F401
@@ -18,6 +21,38 @@ from fastapi_app.shared.stock_concurrency import get_product_for_update
 from fastapi_app.shared_models import InventoryLog, Order, OrderItem, Product, StockIn, StockOut
 
 logger = logging.getLogger(__name__)
+
+
+def _schedule_post_commit(db: AsyncSession, callback: Callable[[], Awaitable[None]]) -> None:
+    """注册事务提交成功后执行的异步回调（商品列表缓存失效专用）。
+
+    回调会在 db_transaction 成功 commit 后按注册顺序执行；事务回滚则不执行。
+    采用 post-commit 时机是为了消除竞态：若在提交前失效，并发请求可能在提交前
+    读到旧数据并回写缓存，而提交后不再失效，脏数据将留存至 TTL 到期。
+
+    复制自 services/purchase_plan_common.py 的同名模式（避免跨域 import 耦合）。
+    """
+    callbacks = db.info.setdefault('post_commit_callbacks', [])
+    callbacks.append(callback)
+
+
+async def _invalidate_product_list_cache() -> None:
+    """失效商品列表分页缓存（product:list:*）。
+
+    商品写操作会改变列表首屏内容，必须失效；与域级失效是「广覆盖 + 竞态兜底」的分工，
+    不是重复：
+      · 域级失效（cache_mgr.invalidate 的 INVENTORY 域，映射见 core/cache.py 的
+        _DOMAIN_PATTERN_MAP）可能在**提交前**触发，用于广覆盖各类改库存的写入口；
+      · 本回调在**提交后**执行，保证提交完成后必定再清一次，从而清除并发读在提交前
+        读到旧数据并回写缓存所产生的脏数据，消除竞态窗口。
+
+    作为 post-commit 回调执行；自带异常兜底，缓存侧故障不得影响业务返回
+    （db_transaction 对回调亦有一层兜底）。
+    """
+    try:
+        await safe_delete_pattern(PRODUCT_LIST_CACHE_PATTERN, context="商品列表缓存")
+    except Exception:  # broad-except: 缓存失效失败不得影响业务主流程
+        logger.warning("商品列表缓存失效失败", exc_info=True)
 
 
 class ProductDeleteError(Exception):
@@ -200,6 +235,7 @@ async def create_product(db: AsyncSession, name: str, barcode: str | None,
     await db.flush()
     await db.refresh(product)
     await cache_mgr.invalidate(InvalidationStrategy.DOMAIN, CacheDomain.ORDER_AND_INVENTORY | CacheDomain.PRODUCT | CacheDomain.STOCKIN)
+    _schedule_post_commit(db, _invalidate_product_list_cache)
     logger.info(f'产品添加成功：{name}，初始库存：{initial_stock}')
     return product.to_dict()
 
@@ -266,6 +302,7 @@ async def update_product(db: AsyncSession, product_id: int, name: str | None,
         raise
     await db.refresh(product)
     await cache_mgr.invalidate(InvalidationStrategy.DOMAIN, CacheDomain.ORDER_AND_INVENTORY | CacheDomain.PRODUCT | CacheDomain.STOCKIN)
+    _schedule_post_commit(db, _invalidate_product_list_cache)
     logger.info(f'产品编辑成功：{product.name}')
     return product.to_dict()
 
@@ -321,6 +358,7 @@ async def delete_product(db: AsyncSession, product_id: int) -> None:
     await db.delete(product)
     await db.flush()
     await cache_mgr.invalidate(InvalidationStrategy.DOMAIN, CacheDomain.ORDER_AND_INVENTORY | CacheDomain.PRODUCT | CacheDomain.STOCKIN)
+    _schedule_post_commit(db, _invalidate_product_list_cache)
     logger.info(f'产品删除成功：{product.name}')
 
 

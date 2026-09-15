@@ -118,8 +118,11 @@ class TestSaveBom:
             return product_result if counter['n'] == 1 else empty_result
 
         mock_db.execute = AsyncMock(side_effect=_execute_side_effect)
-        mock_db.add = MagicMock()
-        mock_db.delete = MagicMock()
+        mock_db.add = MagicMock()       # AsyncSession.add 是同步方法
+        # AsyncSession.delete 是**协程**（实测 iscoroutinefunction=True）。
+        # 早先误设为 MagicMock() → `db.delete(role)` 漏 await 时测试仍通过，
+        # 过于宽容的 mock 掩盖了真实缺陷。必须用 AsyncMock。
+        mock_db.delete = AsyncMock()
         mock_db.flush = AsyncMock()
         return empty_result
 
@@ -285,8 +288,11 @@ class TestSaveBom:
                 return empty
 
         mock_db.execute = AsyncMock(side_effect=_side_effect)
-        mock_db.add = MagicMock()
-        mock_db.delete = MagicMock()
+        mock_db.add = MagicMock()       # AsyncSession.add 是同步方法
+        # AsyncSession.delete 是**协程**（实测 iscoroutinefunction=True）。
+        # 早先误设为 MagicMock() → `db.delete(role)` 漏 await 时测试仍通过，
+        # 过于宽容的 mock 掩盖了真实缺陷。必须用 AsyncMock。
+        mock_db.delete = AsyncMock()
         mock_db.flush = AsyncMock()
 
         await bom_service.save_bom(

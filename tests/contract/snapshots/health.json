@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "name": "health",
+  "method": "GET",
+  "path": "/api/health",
+  "query": {},
+  "auth": false,
+  "http_status": 200,
+  "shape": [
+    "app:str",
+    "checks.database.status:str",
+    "checks.db_health_stats.check_interval:int",
+    "checks.db_health_stats.failed_checks:int",
+    "checks.db_health_stats.is_healthy:bool",
+    "checks.db_health_stats.last_check_time:<volatile>",
+    "checks.db_health_stats.last_failure_detail:null",
+    "checks.db_health_stats.last_failure_time:<volatile>",
+    "checks.db_health_stats.last_recovery_time:<volatile>",
+    "checks.db_health_stats.recoveries:int",
+    "checks.db_health_stats.total_checks:int",
+    "checks.db_pool.async_pool.checked_in:int",
+    "checks.db_pool.async_pool.checked_out:int",
+    "checks.db_pool.async_pool.overflow:int",
+    "checks.db_pool.async_pool.size:int",
+    "checks.redis.status:str",
+    "status:str",
+    "version:str"
+  ],
+  "value_checks": {},
+  "recorded_at": "2026-09-14T01:06:08Z"
+}

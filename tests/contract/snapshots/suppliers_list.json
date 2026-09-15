@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "name": "suppliers_list",
+  "method": "GET",
+  "path": "/api/v1/suppliers/list",
+  "query": {
+    "page": 1,
+    "per_page": 2
+  },
+  "auth": true,
+  "http_status": 200,
+  "shape": [
+    "success:bool",
+    "suppliers[].address:str",
+    "suppliers[].contact_person:str",
+    "suppliers[].created_at:<volatile>",
+    "suppliers[].id:int",
+    "suppliers[].name:str",
+    "suppliers[].phone:str",
+    "suppliers[].remark:str",
+    "suppliers[].status:bool",
+    "total:int"
+  ],
+  "value_checks": {},
+  "recorded_at": "2026-09-14T01:06:08Z"
+}

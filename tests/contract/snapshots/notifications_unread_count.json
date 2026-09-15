@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "name": "notifications_unread_count",
+  "method": "GET",
+  "path": "/api/v1/notifications/unread-count",
+  "query": {},
+  "auth": true,
+  "http_status": 200,
+  "shape": [
+    "count:int"
+  ],
+  "value_checks": {},
+  "recorded_at": "2026-09-14T01:06:08Z"
+}

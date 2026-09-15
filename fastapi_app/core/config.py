@@ -32,6 +32,17 @@ def _build_sync_database_uri() -> str:
     return f"postgresql+psycopg://{quote_plus(db_user)}:{quote_plus(db_password)}@{db_host}:{db_port}/{db_name}"
 
 
+def _is_production_env() -> bool:
+    """判定当前是否生产环境（全库统一入口，动态读取以兼容测试 monkeypatch）。
+
+    容错：取第一个空白分隔的 token 比较。历史安装脚本曾把 NSSM AppEnvironmentExtra
+    写成单个字符串（如 APP_ENV="production FASTAPI_DEBUG=false PYTHONPATH=..."），
+    若整串比较将永远判不成 production，导致文档端点/安全闸门意外失效。
+    """
+    raw = os.getenv("APP_ENV", "").strip().lower()
+    return bool(raw) and raw.split()[0] in ("prod", "production")
+
+
 class Settings(BaseSettings):
     """FastAPI应用配置"""
 
@@ -43,9 +54,9 @@ class Settings(BaseSettings):
     # API配置
     API_PREFIX: str = "/api/v1"
     # 生产环境（APP_ENV=production）自动关闭文档端点，防止暴露 API 结构
-    DOCS_URL: str | None = None if os.getenv("APP_ENV", "").lower() in ("prod", "production") else "/api/docs"
-    REDOC_URL: str | None = None if os.getenv("APP_ENV", "").lower() in ("prod", "production") else "/api/redoc"
-    OPENAPI_URL: str | None = None if os.getenv("APP_ENV", "").lower() in ("prod", "production") else "/api/openapi.json"
+    DOCS_URL: str | None = None if _is_production_env() else "/api/docs"
+    REDOC_URL: str | None = None if _is_production_env() else "/api/redoc"
+    OPENAPI_URL: str | None = None if _is_production_env() else "/api/openapi.json"
 
     # 数据库配置
     # 异步数据库URL - 使用 asyncpg 驱动（性能最优）
@@ -86,7 +97,7 @@ class Settings(BaseSettings):
         origin.strip() for origin in _raw_cors.split(",")
         if origin.strip()
         and (
-            os.getenv("APP_ENV", "").lower() not in ("prod", "production")
+            not _is_production_env()
             or origin.strip().startswith("https://")
             or origin.strip().startswith("http://localhost")
         )
@@ -123,7 +134,7 @@ class Settings(BaseSettings):
                 f"当前值 '{self.ALGORITHM}' 不在允许范围内"
             )
         # 生产环境安全配置强校验：防止运维漏配导致安全控制失效
-        _is_production = os.getenv("APP_ENV", "").lower() in ("prod", "production")
+        _is_production = _is_production_env()
         if not _is_production and not self.ALLOWED_HOSTS:
             # 开发环境未配置 ALLOWED_HOSTS 时默认允许所有主机，便于本地调试
             self.ALLOWED_HOSTS = ["*"]
@@ -164,7 +175,7 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         """生产环境判定（全库统一入口；动态读取以兼容测试 monkeypatch APP_ENV）"""
-        return os.getenv("APP_ENV", "").lower() in ("prod", "production")
+        return _is_production_env()
 
     # 对象存储配置（P2-1：static/uploads 迁移至 MinIO/S3）
     # STORAGE_TYPE=local 时保持现有本地文件系统行为；=s3 时上传到对象存储

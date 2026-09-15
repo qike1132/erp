@@ -109,7 +109,11 @@ def _apply_product_filter(query, product):
 def _get_order_logs(session, customer, product, status, start_date, end_date):
     query = session.query(Order).join(Product).options(
         selectinload(Order.product),
-        selectinload(Order.order_stockouts)
+        # Order.order_stockouts 由 StockOut.order 的 backref 在运行时注入
+        # （shared_models/stock_out.py:38），mypy 无法静态感知该属性。
+        # 改为显式 back_populates 需在 order.py 反向声明 StockOut，会引入
+        # 模型层循环导入风险，收益不成比例，故此处作用域化忽略。
+        selectinload(Order.order_stockouts),  # type: ignore[attr-defined]
     )
     if customer:
         query = query.filter(Order.customer.like(f'%{escape_like(customer)}%'))

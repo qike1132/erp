@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import get_current_user_id
 from fastapi_app.core.exceptions import db_transaction
+from fastapi_app.core.response import success_response
 from fastapi_app.services.notification_service import (
     count_unread_notifications,
     get_notifications_page,
@@ -68,7 +69,7 @@ async def mark_as_read(
     if not notification.is_read:
         async with db_transaction(db):
             notification.is_read = True
-    return {"success": True, "message": "已标记为已读"}
+    return success_response(message="已标记为已读")
 
 
 @router.post("/read-all")
@@ -79,4 +80,4 @@ async def mark_all_as_read(
     """标记当前用户所有未读通知为已读。"""
     async with db_transaction(db):
         updated = await mark_all_notifications_read(db, user_id)
-    return {"success": True, "marked_count": int(updated)}
+    return success_response(marked_count=int(updated))

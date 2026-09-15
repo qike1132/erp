@@ -80,3 +80,17 @@ class CacheNamespace:
 
     BACKUP_VALIDATION = 'backup:validation'
     BACKUP_METADATA = 'backup:metadata'
+
+
+# 商品列表缓存 TTL（秒）
+PRODUCT_LIST_CACHE_TTL = 60
+
+# 商品列表缓存失效模式（供端点与服务层共用）。
+# 前缀约定：CACHE_KEY_PREFIX = 'erp'（无冒号）。redis_cache._make_key 对
+# 已带 'erp:' 前缀的 key 原样返回（幂等性由
+# fastapi_app/tests/test_redis_key_namespace.py:135
+# test_make_key_is_idempotent_for_prefixed_key 断言），
+# 因此物理模式是**单前缀** 'erp:product:list:*'，
+# 与 build_cache_key('product','list',20) 生成的 'erp:product:list:20' 同层。
+# ⚠️ 切勿写成双前缀 'erp:erp:...'，那会匹配不到任何键且静默失效。
+PRODUCT_LIST_CACHE_PATTERN = f'{CACHE_KEY_PREFIX}:{CacheNamespace.PRODUCT_LIST}:*'

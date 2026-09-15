@@ -28,6 +28,7 @@ from fastapi_app.api.v1.endpoints.backup._deps import (
     require_backup_permission,
 )
 from fastapi_app.core.database import get_async_read_db
+from fastapi_app.core.response import success_response
 from fastapi_app.schemas.backup import (
     BackupHealthCheckResponse,
     BackupIntegrityCheckResponse,
@@ -69,7 +70,7 @@ async def validate_backup(
         summary = backup_service.validate_backup_file(content, file.filename or '')
     except BackupFileError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    return {'success': True, 'summary': summary}
+    return success_response(summary=summary)
 
 
 # ---------------------------------------------------------------------------
@@ -415,8 +416,7 @@ async def validate_backup_file(
                 # 检查环境变量
                 env_password = os.environ.get('BACKUP_ENCRYPTION_PASSWORD')
                 if not env_password:
-                    return {
-                        'success': True,
+                    return success_response(**{
                         'filename': filename,
                         'valid': False,
                         'encrypted': True,
@@ -426,8 +426,7 @@ async def validate_backup_file(
                         'table_count': None,
                         'total_rows': None,
                         'created_at': None,
-                        'issues': ['文件已加密但未提供密码']
-                    }
+                        'issues': ['文件已加密但未提供密码']})
                 password_to_use = env_password
             else:
                 password_to_use = x_backup_password
@@ -437,8 +436,7 @@ async def validate_backup_file(
                 content = decrypted_content
             except Exception:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
                 logger.exception('验证备份文件时解密失败: %s', filename)
-                return {
-                    'success': True,
+                return success_response(**{
                     'filename': filename,
                     'valid': False,
                     'encrypted': True,
@@ -448,8 +446,7 @@ async def validate_backup_file(
                     'table_count': None,
                     'total_rows': None,
                     'created_at': None,
-                    'issues': ['解密失败']
-                }
+                    'issues': ['解密失败']})
         else:
             pass
 
@@ -528,8 +525,7 @@ async def validate_backup_file(
                 pass  # 元数据提取失败不影响验证结果; defensive: 异常静默处理,不影响主流程
 
         # 构建响应
-        result = {
-            'success': True,
+        result = success_response(**{
             'filename': filename,
             'valid': valid,
             'encrypted': encrypted,
@@ -541,8 +537,7 @@ async def validate_backup_file(
             'created_at': created_at,
             'issues': issues,
             'cache_hit': False,
-            'cache_key': cache_key
-        }
+            'cache_key': cache_key})
 
         # 缓存验证结果（仅当验证成功时）
         if valid:
@@ -569,8 +564,7 @@ async def validate_backup_integrity(
     try:
         backup_files = backup_service.list_backup_files()
         if not backup_files:
-            return {
-                'success': True,
+            return success_response(**{
                 'checked_at': datetime.now().isoformat(),
                 'total_files': 0,
                 'valid_files': 0,
@@ -579,8 +573,7 @@ async def validate_backup_integrity(
                 'missing_files': [],
                 'details': [],
                 'cache_hit': False,
-                'cache_key': None
-            }
+                'cache_key': None})
 
         # 检查缓存
         cache_key = hashlib.md5(
@@ -698,8 +691,7 @@ async def validate_backup_integrity(
 
         valid_files = len(backup_files) - len(corrupted_files) - len(missing_files)
 
-        result = {
-            'success': True,
+        result = success_response(**{
             'checked_at': datetime.now().isoformat(),
             'total_files': len(backup_files),
             'valid_files': valid_files,
@@ -708,8 +700,7 @@ async def validate_backup_integrity(
             'missing_files': missing_files,
             'details': details,
             'cache_hit': False,
-            'cache_key': cache_key
-        }
+            'cache_key': cache_key})
 
         # 缓存结果
         await _validation_cache.set(cache_key, result)
@@ -811,8 +802,7 @@ async def get_backup_statistics(
                 'total_days': 30,  # 统计周期
             }
 
-        return {
-            'success': True,
+        return success_response(**{
             'timestamp': datetime.now().isoformat(),
             'total_backups': total_backups,
             'total_size_bytes': total_size_bytes,
@@ -827,8 +817,7 @@ async def get_backup_statistics(
                 'success': success_records,
                 'failure': total_records - success_records,
                 'period_days': 30,
-            }
-        }
+            }})
 
     except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
         logger.exception('获取备份统计信息失败')

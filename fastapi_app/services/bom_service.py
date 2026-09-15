@@ -85,7 +85,12 @@ def has_bom(product) -> bool:
     return has_filling or has_fabric or has_accessory
 
 
-async def get_bom(db: AsyncSession, product_id: int) -> dict:
+async def get_bom(db: AsyncSession, product_id: int) -> dict | None:
+    """查询产品 BOM（含角色列表与物料）
+
+    产品不存在时返回 ``None`` —— 注解必须带 ``| None``，
+    否则调用方会误以为返回值恒为 dict 而漏掉空值检查。
+    """
     result = await db.execute(
         select(Product).options(
             selectinload(Product.material),
@@ -261,7 +266,10 @@ async def save_bom(db: AsyncSession, product_id: int, data: dict, username: str)
                     old_value=role.role_name or '', new_value='(已删除)',
                     modifier_name=username,
                 ))
-                db.delete(role)
+                # AsyncSession.delete 是**协程**（SQLAlchemy 2.0 async API），
+                # 漏 await 会导致协程被丢弃、角色**静默不删除**。
+                # 同块内的 db.add() 是同步方法，故只有 delete 需 await。
+                await db.delete(role)
 
     def _resolve_role_id(item: dict):
         """物料项 role_id：优先真实 id，其次用 role_key 映射新建角色"""

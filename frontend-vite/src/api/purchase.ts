@@ -70,7 +70,8 @@ export const purchaseApi = {
   orderDetail: (id: number) => get<{ success: boolean; order?: PurchaseOrder; message?: string }>(`/purchase-center/orders/${id}`),
   completed: (params?: QueryParams) => get<{ orders: PurchaseOrder[]; total: number; pages: number; total_pages?: number }>('/purchase-center/orders/completed', params),
   exportCompleted: (params?: QueryParams) => post<ExportResponse>('/purchase-center/orders/completed/export', params),
-  quickFilters: () => get<{ success?: boolean; quick_filters?: { id: string; name?: string; filters?: { start_date?: string; end_date?: string } }[] }>('/purchase-center/orders/completed/quick-filters'),
+  // 后端返回的是三个时段的计数（dict[str, int]），不是可配置的区间定义数组
+  quickFilters: () => get<{ success?: boolean; quick_filters?: Record<string, number> }>('/purchase-center/orders/completed/quick-filters'),
   suggestions: (field: string, q: string) => get<string[]>('/purchase-center/orders/completed/suggestions', { field, q }),
   factorySummary: (ids: number[]) => post<Record<string, unknown>>('/purchase-center/orders/factory-summary', { ids }),
   supplierSummary: (ids: number[]) => post<Record<string, unknown>[]>('/purchase-center/orders/supplier-summary', { ids }),

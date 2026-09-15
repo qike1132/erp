@@ -80,22 +80,33 @@ class FunctionLengthVisitor(ast.NodeVisitor):
     visit_AsyncFunctionDef = visit_FunctionDef
 
 
-def scan_file(path: Path, max_length: int) -> list[Violation]:
+def scan_file(path: Path, max_length: int) -> tuple[list[Violation], str | None]:
+    """返回 (违规列表, 解析错误)。
+
+    解析失败必须显式上报——静默返回空会让"有语法错误的文件"被报告为
+    "无违规"（假绿），而这类文件恰恰最需要被拦住。
+    """
     try:
         source = path.read_text(encoding="utf-8")
         tree = ast.parse(source, filename=str(path))
-    except SyntaxError:
-        return []
+    except (SyntaxError, OSError) as exc:
+        return [], str(exc)
     lines = source.splitlines()
     visitor = FunctionLengthVisitor(path, lines, max_length)
     visitor.visit(tree)
-    return visitor.violations
+    return visitor.violations, None
 
 
 def collect_py_files(scan_dirs: list[Path]) -> list[Path]:
     files: list[Path] = []
     for d in scan_dirs:
         if not d.exists():
+            continue
+        # 显式传入单个文件时必须真的扫它。
+        # 否则 Path(file).rglob("*.py") 返回空 → 静默 PASS（假绿），比报错更危险。
+        if d.is_file():
+            if d.suffix == ".py" and not any(part in EXCLUDE_DIRS for part in d.parts):
+                files.append(d)
             continue
         for p in d.rglob("*.py"):
             if any(part in EXCLUDE_DIRS for part in p.parts):
@@ -113,9 +124,28 @@ def main() -> int:
     scan_dirs = [Path(p).resolve() for p in args.paths] or DEFAULT_SCAN_DIRS
     files = collect_py_files(scan_dirs)
 
+    # 显式传了路径却一个文件都没扫到 → 静默 PASS 会造成"假绿"，必须让人看见
+    if args.paths and not files:
+        print(
+            f"[WARN] 传入的路径未匹配到任何可扫描的 .py 文件：{[str(p) for p in args.paths]}",
+            file=sys.stderr,
+        )
+
     all_violations: list[Violation] = []
+    parse_errors: list[tuple[str, str]] = []
     for f in files:
-        all_violations.extend(scan_file(f, args.max_length))
+        violations, err = scan_file(f, args.max_length)
+        if err is not None:
+            parse_errors.append((str(f.relative_to(PROJECT_ROOT)), err))
+            continue
+        all_violations.extend(violations)
+
+    if parse_errors:
+        print(
+            f"[WARN] {len(parse_errors)} 个文件解析失败（已跳过，不计入违规）:", file=sys.stderr
+        )
+        for rel, err in parse_errors[:10]:
+            print(f"  {rel}: {err}", file=sys.stderr)
 
     if not all_violations:
         print(f"[PASS] 未发现超过 {args.max_length} 行的函数")

@@ -14,6 +14,7 @@ from fastapi_app.core.database import get_async_db as get_db
 from fastapi_app.core.database import get_async_read_db as get_read_db
 from fastapi_app.core.deps import require_permission
 from fastapi_app.core.exceptions import db_transaction
+from fastapi_app.core.response import success_response
 from fastapi_app.schemas.pattern_maker import (
     PatternMakerActionResponse,
     PatternMakerCreateRequest,
@@ -51,7 +52,7 @@ async def api_create_pattern_maker(
     try:
         async with db_transaction(db):
             result = await svc.create_pattern_maker(db, data.name)
-        return {'success': True, 'message': '版师添加成功', 'id': result['id']}
+        return success_response(message='版师添加成功', id=result['id'])
     except HTTPException:
         raise
     except SQLAlchemyError as e:
@@ -69,7 +70,7 @@ async def api_delete_pattern_maker(
     try:
         async with db_transaction(db):
             await svc.delete_pattern_maker(db, maker_id)
-        return {'success': True, 'message': '版师删除成功'}
+        return success_response(message='版师删除成功')
     except HTTPException:
         raise
     except SQLAlchemyError as e:

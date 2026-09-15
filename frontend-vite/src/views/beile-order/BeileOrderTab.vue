@@ -11,13 +11,23 @@
       </div>
       <div v-else-if="orders.length === 0" class="bo-empty">
         <FontAwesomeIcon icon="clipboard-list" aria-hidden="true" />
-        <span>暂无湖北订单</span>
+        <span>暂无外发工序</span>
       </div>
       <template v-else>
         <div v-if="isFetching" class="bo-fetching-bar"><div class="bo-fetching-progress" /></div>
-        <!-- 已选计数（导出/打印按钮在 HubeiView 头部搜索框右侧，此处不再重复） -->
-        <div v-if="canPrint && selectedCount > 0" class="bo-toolbar">
-          <span class="bo-selected-count">已选 {{ selectedCount }} 条</span>
+        <!-- 工具栏：导出 / 打印 -->
+        <div class="bo-toolbar">
+          <div class="bo-toolbar-left">
+            <span v-if="canPrint && selectedCount > 0" class="bo-selected-count">已选 {{ selectedCount }} 条</span>
+          </div>
+          <div class="bo-toolbar-right">
+            <button v-if="canExport" type="button" class="bo-toolbar-btn bo-toolbar-btn--export" :disabled="exporting || displayOrders.length === 0" @click="handleExport">
+              <FontAwesomeIcon icon="file-csv" aria-hidden="true" /> 导出
+            </button>
+            <button v-if="canPrint" type="button" class="bo-toolbar-btn bo-toolbar-btn--print" :disabled="selectedCount === 0" @click="handlePrint">
+              <FontAwesomeIcon icon="print" aria-hidden="true" /> 打印
+            </button>
+          </div>
         </div>
         <div class="bo-table-wrap">
           <!-- 表头（独立于虚拟滚动，粘在顶部） -->
@@ -46,7 +56,7 @@
               :estimated-height="54"
               dynamic-height
               :container-height="listAreaHeight"
-              :item-key="(i: BeileOrderRowType) => rowKey(i)"
+              :item-key="(i: BeileOrderRowType) => i.id"
               class="bo-virtual-list"
             >
               <template #default="{ item }">
@@ -54,17 +64,22 @@
                   :item="item"
                   :show-product-column="showProductColumn"
                   :confirm-status="confirmStatus"
-                  :is-confirming="confirmingIds.has(rowKey(item))"
+                  :is-confirming="confirmingIds.has(item.id)"
                   :highlight-id="highlightId"
                   :keyword="appliedProduct"
                   :selectable="canPrint"
-                  :selected="selectedIds.has(rowKey(item))"
+                  :selected="selectedIds.has(item.id)"
                   @open="openDetail"
                   @confirm="handleConfirm"
                   @toggle-select="toggleSelect"
                 />
               </template>
             </VirtualList>
+          </div>
+
+          <div v-if="displayOrders.length === 0" class="bo-empty bo-empty-inline">
+            <FontAwesomeIcon icon="search-minus" aria-hidden="true" />
+            <span>当前页未匹配到该订单号</span>
           </div>
         </div>
 
@@ -103,7 +118,7 @@ import UiCheckbox from '@/components/ui/UiCheckbox.vue'
 import VirtualList from '@/components/ui/VirtualList.vue'
 import BeileOrderRow from '@/views/beile-order/components/BeileOrderRow.vue'
 import BeileOrderDetailDialog from '@/views/beile-order/components/BeileOrderDetailDialog.vue'
-import { injectBeileOrders, rowKey } from '@/views/beile-order/composables/useBeileOrders'
+import { injectBeileOrders } from '@/views/beile-order/composables/useBeileOrders'
 import type { BeileOrderRow as BeileOrderRowType } from '@/views/beile-order/composables/useBeileOrders'
 
 const {
@@ -133,7 +148,11 @@ const {
   isAllSelected,
   toggleSelect,
   toggleSelectAll,
+  canExport,
   canPrint,
+  exporting,
+  handleExport,
+  handlePrint,
 } = injectBeileOrders()
 
 
@@ -176,17 +195,63 @@ watch([page, appliedProduct, appliedCustomer, confirmStatus], () => {
 </script>
 
 <style scoped>
-/* ===== 已选计数条（导出/打印按钮在 HubeiView 头部） ===== */
+/* ===== 工具栏：导出 / 打印 ===== */
 .bo-toolbar {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   padding: 6px 4px;
   flex-shrink: 0;
+}
+.bo-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.bo-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .bo-selected-count {
   font-size: 13px;
   font-weight: 600;
   color: var(--color-primary-600, #2563eb);
+}
+.bo-toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  border: 1px solid var(--color-border-light, #e2e8f0);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--color-text-secondary, #475569);
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+.bo-toolbar-btn:hover:not(:disabled) {
+  border-color: var(--color-primary-300, #93c5fd);
+  color: var(--color-primary-600, #2563eb);
+  background: var(--color-primary-50, #eff6ff);
+}
+.bo-toolbar-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.bo-toolbar-btn--export:hover:not(:disabled) {
+  border-color: var(--color-success-400, #4ade80);
+  color: var(--color-success-600, #16a34a);
+  background: var(--color-success-50, #f0fdf4);
+}
+.bo-toolbar-btn--print:hover:not(:disabled) {
+  border-color: var(--color-warning-400, #fbbf24);
+  color: var(--color-warning-600, #d97706);
+  background: var(--color-warning-50, #fffbeb);
 }
 .bo-th-select {
   padding: 10px 8px;
@@ -269,6 +334,29 @@ watch([page, appliedProduct, appliedCustomer, confirmStatus], () => {
   height: 100%;
 }
 
+/* ===== 未确认订单提醒横幅（湖北订单确认流程） ===== */
+.bo-unconfirmed-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 10px 16px;
+  background: var(--color-warning-50);
+  border: 1px solid var(--color-warning-200);
+  border-radius: 10px;
+  color: var(--color-warning-700);
+  font-size: 13px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.bo-unconfirmed-banner svg {
+  flex-shrink: 0;
+}
+.bo-unconfirmed-banner strong {
+  color: var(--color-warning-800);
+  font-size: 15px;
+}
+
 /* ===== 空/加载态 ===== */
 .bo-empty {
   display: flex;
@@ -278,8 +366,15 @@ watch([page, appliedProduct, appliedCustomer, confirmStatus], () => {
   padding: 40px 20px;
   color: var(--color-text-muted);
 }
+.bo-empty i {
+  font-size: 28px;
+  opacity: 0.5;
+}
 .bo-empty span {
   font-size: 14px;
+}
+.bo-empty-inline {
+  padding: 24px 20px;
 }
 
 /* Fetching progress bar */

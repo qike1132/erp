@@ -73,12 +73,24 @@ export const useAuthStore = defineStore('auth', () => {
       return null
     }
     const rawUser = raw as UserInfo | { id?: number; user_id?: number; username?: string; is_super?: boolean; factory?: string | null; permissions?: string[] }
+    const id = rawUser.user_id ?? (rawUser as { id?: number }).id ?? 0
+    const username = rawUser.username || ''
+    // 身份有效性校验（防"伪用户"）：
+    // 合法的登录用户必定同时具备正整数 id 与非空用户名。
+    // 若响应形状异常（例如被错误地传入了外层包装对象 { user: null }），
+    // 会映射出 { id: 0, username: '' } —— 这种"伪用户"会让 user.value 变为
+    // truthy，使前端呈现"已登录空壳态"（用户名为空、全站无权限入口），
+    // 且不会触发 401 登出流程。此处直接拒绝，交由调用方的 401 路径处理。
+    if (!id || !username) {
+      console.error('[Auth] setUserInfo 收到无效身份（缺少 id 或 username）:', raw)
+      return null
+    }
     const nextUser: User = {
-      id: rawUser.user_id ?? (rawUser as { id?: number }).id ?? 0,
-      username: raw.username || '',
-      is_super: raw.is_super ?? false,
-      factory: raw.factory ?? null,
-      permissions: Array.isArray(raw.permissions) ? raw.permissions : [],
+      id,
+      username,
+      is_super: rawUser.is_super ?? false,
+      factory: rawUser.factory ?? null,
+      permissions: Array.isArray(rawUser.permissions) ? rawUser.permissions : [],
     }
     // 同一标签页切换账号时，先清掉旧账号的内存和持久化查询。
     if (user.value && user.value.id !== nextUser.id) clearUserCaches()
@@ -92,11 +104,22 @@ export const useAuthStore = defineStore('auth', () => {
     const res = await authApi.me()
     // 请求可能在 logout() 或另一账号登录后才完成，不能再写回旧响应。
     if (requestGeneration !== authGeneration) return null
-    return setUserInfo(res.user ?? res)
+    // 后端 /auth/me 返回扁平 UserInfo（用户无效时直接 401，不会返回 { user: null }）。
+    // 这里兼容仍可能返回 { user } 包装层的部署形态，但**显式判 undefined**：
+    // 不能用 `res.user ?? res` —— 当 user 为 null 时 `null ?? res` 会退化成外层
+    // 包装对象，进而被 setUserInfo 误判为合法用户。
+    const payload = res && typeof res === 'object' && 'user' in res
+      ? (res as { user?: UserInfo | null }).user
+      : res
+    return setUserInfo(payload)
   }
 
   type NavApiItem = { name: string; url: string; icon?: string; code: string; permission_codes: string[] }
   type NavApiSection = { name?: string; items?: NavApiItem[] }
+
+  // 导航数据在途 Promise：init() 后台触发、路由守卫 await 同一 Promise，
+  // 避免 fail-closed 权限检查在导航数据就绪前竞态取消导航（登录后永久卡"登录中"）。
+  let _navPromise: Promise<void> | null = null
 
   async function fetchNavSections() {
     const requestGeneration = authGeneration
@@ -119,6 +142,16 @@ export const useAuthStore = defineStore('auth', () => {
         })),
       }))
     }
+  }
+
+  /** 触发/复用导航数据加载 Promise；成功 resolve 时 navSections 已填充 */
+  function loadNavSections(): Promise<void> {
+    if (!_navPromise) {
+      _navPromise = fetchNavSections().finally(() => {
+        _navPromise = null
+      })
+    }
+    return _navPromise
   }
 
   async function init(force = false) {
@@ -158,7 +191,7 @@ export const useAuthStore = defineStore('auth', () => {
         // nav-sections 非关键路径，后台加载不阻塞路由跳转
         loaded.value = true
 
-        fetchNavSections().catch((e) => {
+        loadNavSections().catch((e) => {
           console.error('[Auth] 导航数据加载失败:', e)
         })
       } catch (error) {
@@ -206,5 +239,5 @@ export const useAuthStore = defineStore('auth', () => {
     clearUserCaches()
   }
 
-  return { user, navSections, filteredNavSections, loaded, isLoggedIn, setUserInfo, init, fetchUser, fetchNavSections, hasPermission, hasAnyPermission, logout }
+  return { user, navSections, filteredNavSections, loaded, isLoggedIn, setUserInfo, init, fetchUser, fetchNavSections, loadNavSections, hasPermission, hasAnyPermission, logout }
 })

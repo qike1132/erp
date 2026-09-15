@@ -390,7 +390,9 @@ async def restore_incremental(
             logger.warning(f'增量恢复后缓存清除失败: {e}')
         try:
             from fastapi_app.core.purchase_cache import invalidate_purchase_caches
-            invalidate_purchase_caches()
+            # invalidate_purchase_caches 是 async def，必须 await；
+            # 漏 await 会让协程被丢弃 → 恢复后采购缓存**永不失效**（读到陈旧数据）。
+            await invalidate_purchase_caches()
         except (RuntimeError, OSError, ValueError) as e:
             logger.warning(f'增量恢复后采购缓存清除失败: {e}')
     except BackupLockError:

@@ -37,7 +37,6 @@ export function usePurchaseHandlers() {
   const summary = useSummaryModal()
   const confirm = useConfirmDialog()
 
-  const historyInitialized = ref(false)
   const isSubmitting = ref(false)
 
   function switchTab(tab: 'pending' | 'active' | 'history') {
@@ -47,9 +46,8 @@ export function usePurchaseHandlers() {
     } else if (tab === 'active') {
       purchaseOrders.load()
     } else if (tab === 'history') {
-      // 快速筛选 UI 已移除，无需 loadQuickFilters
-      completed.load()
-      historyInitialized.value = true
+      // 下单查询按当前筛选条件重新拉取最新数据
+      completed.refresh()
     }
   }
 

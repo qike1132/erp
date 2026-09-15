@@ -62,6 +62,10 @@ jobs:
         python -m alembic -c migrations/alembic.ini check
     
     - name: Run gated test suite
+      # 注意：tests/contract 未被 --ignore 排除，会随本步骤执行。
+      #   其中两条静态守卫（快照存在性、不得夹带原始响应体）在本 job 真的会跑；
+      #   "与真实后端比对"那条因 CI 无常驻后端而自动 skip。
+      #   本地要跑完整契约比对：CONTRACT_BASE_URL=http://127.0.0.1:5002 pytest tests/contract -v
       run: |
         pytest \
           tests fastapi_app/tests \
@@ -130,6 +134,11 @@ jobs:
         python -m pip install --upgrade pip
         pip install ruff mypy
     
+    # 统一代码质量门禁（基线棘轮）：存量违规不阻断，新增即拦截。
+    # 置于 ruff 之前，确保即使 ruff 步骤因存量告警失败，本步骤的结果仍然可见。
+    - name: Run code quality gate (baseline ratchet)
+      run: python scripts/quality_gate.py --verbose
+
     - name: Run Ruff gate
       run: ruff check fastapi_app tests fastapi_app/tests utils
 
@@ -169,8 +178,13 @@ jobs:
     - name: Run frontend build
       run: npm run build
 
-    - name: Run frontend E2E tests
-      run: npm run test:e2e
+    # 原为 `npm run test:e2e` —— 该脚本在 package.json 中不存在、也没有
+    # playwright.config.* 与 e2e/ 目录，步骤必然失败。改为执行真实存在的跨端
+    # 对齐检查；Playwright e2e 落地后恢复（见 ITER-4 决策项 D-2）。
+    - name: Run frontend cross-layer alignment checks
+      run: |
+        npm run check:api
+        npm run check:routes
 
     - name: Upload frontend test artifacts
       if: always()

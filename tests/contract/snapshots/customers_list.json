@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "name": "customers_list",
+  "method": "GET",
+  "path": "/api/v1/customers/list",
+  "query": {
+    "page": 1,
+    "per_page": 2
+  },
+  "auth": true,
+  "http_status": 200,
+  "shape": [
+    "customers[].address:str",
+    "customers[].contact:str",
+    "customers[].create_time:<volatile>",
+    "customers[].customer_code:null",
+    "customers[].id:int",
+    "customers[].name:str",
+    "customers[].note:str",
+    "customers[].phone:str",
+    "customers[].status:bool",
+    "success:bool",
+    "total:int"
+  ],
+  "value_checks": {},
+  "recorded_at": "2026-09-14T01:06:08Z"
+}

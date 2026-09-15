@@ -76,6 +76,16 @@ class CacheInvalidationManager:
         count += await self._invalidate_by_pattern('orders:*')
         count += await self._invalidate_by_pattern('stockins:*')
         count += await self._invalidate_by_pattern('stockouts:*')
+        # 商品列表首屏缓存亦含 current_stock（Product.to_dict），库存/订单变更后必须一并失效，
+        # 否则首屏库存显示最多陈旧一个 TTL。
+        # 模式不带 'erp:' 前缀：本方法经 _invalidate_by_pattern → cache.invalidate_cache →
+        # redis.delete_pattern → redis_cache._make_key，后者对无前缀模式补 'erp:'、
+        # 对已带前缀的幂等原样返回，故 'product:list:*' 与 'erp:product:list:*' 物理等价，
+        # 这里沿用相邻行的无前缀风格。
+        # ⚠️ 本行与 cache.py:_DOMAIN_PATTERN_MAP 中 INVENTORY 域的 product:list:* 挂载
+        # **不是重复**：本函数直连 _invalidate_by_pattern，不经过 _DOMAIN_PATTERN_MAP。
+        # 两者覆盖不同入口，请勿删除其一。
+        count += await self._invalidate_by_pattern('product:list:*')
         count += await self.invalidate_dashboard()
         return count
 

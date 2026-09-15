@@ -12,6 +12,7 @@ import logging
 from datetime import UTC, datetime
 
 from sqlalchemy import and_, func, or_, select, text
+from sqlalchemy.sql.elements import TextClause
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 
@@ -380,7 +381,7 @@ async def get_inventory_paginated(db: AsyncSession, search_customer: str = '', s
 
 
 def _build_inventory_filter_params(search_product: str, search_customer: str,
-                                   product_ids: list[int] | None) -> tuple[dict, dict]:
+                                   product_ids: list[int] | None) -> tuple[dict, dict, tuple[int, ...] | None]:
     """构建库存查询的过滤参数和SQL片段。
 
     Returns:
@@ -421,11 +422,15 @@ def _build_inventory_filter_params(search_product: str, search_customer: str,
     return params, clauses, pids_param
 
 
-def _build_inventory_cte_sql(clauses: dict, country: str) -> tuple:
+def _build_inventory_cte_sql(clauses: dict, country: str) -> TextClause:
     """构建库存CTE查询SQL。
 
     Returns:
-        (cte_sql, country) - cte_sql: TextClause; country参数由调用方添加
+        TextClause: 已编译好的 CTE 查询。``country`` 参数由调用方追加到
+        绑定参数字典中，本函数不返回它。
+
+    注：原注解为 ``-> tuple``、docstring 写「(cte_sql, country)」，
+    与实际返回（单个 TextClause，调用方也按单值接收）不符，已一并修正。
     """
     c = clauses
     # 安全说明：clauses 中所有 SQL 片段均来自模块级常量（_SI_PID/_SO_CUST 等），

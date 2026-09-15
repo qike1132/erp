@@ -1,0 +1,10 @@
+{
+  "_comment": "门禁基线（棘轮）。这些是当前存量违规数，不阻断；新增违规会被 scripts/quality_gate.py 拦下。数字只允许下调。",
+  "counts": {
+    "n_plus_one": 0,
+    "bare_except": 9,
+    "function_length": 52,
+    "vue_component_length": 6,
+    "service_commit": 9
+  }
+}

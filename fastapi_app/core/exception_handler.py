@@ -25,7 +25,19 @@ logger = logging.getLogger(__name__)
 # redis.exceptions.RedisError，而 **不** 继承 Python 内置的 ConnectionError / OSError
 # （已实测 issubclass(redis.exceptions.ConnectionError, ConnectionError) is False）。
 # 因此必须显式纳入 RedisError，否则 Redis 不可用/认证失败不会走降级路径，而是直接冒泡。
-INFRA_EXCEPTIONS = (OSError, ConnectionError, *_REDIS_INFRA)  # 移除 ValueError：业务校验异常不应被基础设施降级捕获
+INFRA_EXCEPTIONS: tuple[type[BaseException], ...] = (OSError, ConnectionError, *_REDIS_INFRA)  # 移除 ValueError：业务校验异常不应被基础设施降级捕获
+
+# 常用组合：RuntimeError + 基础设施异常（供「防御性兜底」场景使用）。
+#
+# ⚠️ 不能直接写 `except (RuntimeError, *INFRA_EXCEPTIONS)`：mypy 无法推导
+#    星号解包后的 except 元组类型，会报
+#        misc: Exception type must be derived from BaseException
+#    预展开为显式元组后语义完全等价，且类型可推导。
+#
+# 收敛说明：此前 purchase_cache.py 有本地副本 _LOCAL_INFRA_EXCEPTIONS，
+# event_bus.py / order/_common.py 则直接写星号解包（未纳入类型门禁故未暴露）。
+# 现统一到本常量，避免同一变通方案在多个文件里各写一遍。
+RUNTIME_INFRA_EXCEPTIONS: tuple[type[BaseException], ...] = (RuntimeError, *INFRA_EXCEPTIONS)
 
 
 async def safe_call(

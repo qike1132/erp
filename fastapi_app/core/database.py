@@ -274,6 +274,24 @@ async def get_async_db_context():
             raise
 
 
+def require_async_session_local() -> async_sessionmaker:
+    """返回已初始化的异步会话工厂；未初始化时抛出可操作的错误。
+
+    为什么需要它：直接写 `_AsyncSessionLocal()` 时，若引擎尚未初始化会得到
+
+        TypeError: 'NoneType' object is not callable
+
+    —— 信息量极低，排查成本高。本函数把它转成明确的 RuntimeError，
+    与 `get_async_db` / `get_async_db_context` 的口径保持一致。
+
+    同时这也让 mypy 能完成类型收窄（`_AsyncSessionLocal` 声明为
+    `async_sessionmaker | None`，直接调用会报 `"None" not callable`）。
+    """
+    if _AsyncSessionLocal is None:
+        raise RuntimeError("数据库引擎未初始化，请先调用 init_async_engine()")
+    return _AsyncSessionLocal
+
+
 # ==================== 只读副本（读写分离） ====================
 
 _read_engine = None

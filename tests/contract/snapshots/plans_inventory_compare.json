@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "name": "plans_inventory_compare",
+  "method": "GET",
+  "path": "/api/v1/plans/inventory-compare",
+  "query": {
+    "year": 2026,
+    "month": 1
+  },
+  "auth": true,
+  "http_status": 200,
+  "shape": [
+    "details:array[0]"
+  ],
+  "value_checks": {},
+  "recorded_at": "2026-09-14T01:06:08Z"
+}

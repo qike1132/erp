@@ -26,6 +26,7 @@ from fastapi_app.api.v1.endpoints.backup._deps import (
     require_backup_permission,
 )
 from fastapi_app.core.database import get_async_db
+from fastapi_app.core.response import success_response
 from fastapi_app.schemas.backup import (
     AsyncTaskResponse,
     BackupImportResponse,
@@ -338,7 +339,7 @@ async def get_restore_progress(
     progress = await _get_progress(task_id)
     if progress is None:
         raise HTTPException(status_code=404, detail='任务不存在或已过期')
-    return {'success': True, **progress}
+    return success_response(**{**progress})
 
 
 # ---------------------------------------------------------------------------
@@ -384,7 +385,7 @@ async def async_import_backup(
     ))
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
-    return {'success': True, 'task_id': task_id, 'message': '恢复任务已启动'}
+    return success_response(task_id=task_id, message='恢复任务已启动')
 
 
 # ---------------------------------------------------------------------------
@@ -443,7 +444,7 @@ async def async_restore_server_backup(
     ))
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
-    return {'success': True, 'task_id': task_id, 'message': '恢复任务已启动'}
+    return success_response(task_id=task_id, message='恢复任务已启动')
 
 
 # ---------------------------------------------------------------------------

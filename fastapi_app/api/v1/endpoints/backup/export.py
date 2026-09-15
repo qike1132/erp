@@ -31,6 +31,7 @@ from fastapi_app.api.v1.endpoints.backup._deps import (
 )
 from fastapi_app.core.audit_middleware import _buffer_audit_entry
 from fastapi_app.core.database import get_async_db
+from fastapi_app.core.response import success_response
 from fastapi_app.schemas.backup import (
     BackupChunkInfo,
     BackupChunkResponse,
@@ -320,16 +321,14 @@ async def save_backup_to_server(
         encrypted=manifest.get('encrypted', False),
     )
 
-    return {
-        'success': True, 'format': 'zip', 'filename': filename,
+    return success_response(**{ 'format': 'zip', 'filename': filename,
         'size': len(file_bytes),
         'encrypted': manifest.get('encrypted', False),
         'table_count': manifest.get('table_count', 0),
         'total_rows': manifest.get('total_rows', 0),
         'exported_at': manifest.get('exported_at'),
         'exported_by': manifest.get('exported_by'),
-        'includes': manifest.get('includes', {}), 'remark': remark,
-    }
+        'includes': manifest.get('includes', {}), 'remark': remark})
 
 
 # ---------------------------------------------------------------------------

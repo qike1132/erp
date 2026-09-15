@@ -1,0 +1,118 @@
+# ============================================================
+# 接口契约快照 · 覆盖集与比对规则
+#
+# 目的：拦住"后端改了响应字段 → 前端静默空白无报错"这类事故。
+#   （本项目 2026-09 已实际发生过一次：前端 3000 是最新源码，5002 是旧进程，
+#     响应缺字段 → 前端不报错、页面空白。）
+#
+# 只收录满足以下条件的端点：
+#   - 只读 GET（不产生副作用，可随时重复调用）
+#   - 响应结构稳定（不含"随时会变"的顶层形态）
+#   - 覆盖核心业务链路（订单/库存/采购/BOM/仪表盘/审批）
+#
+# 用法：
+#   python scripts/contract_snapshot.py --record   # 录制基线（改代码前）
+#   python scripts/contract_snapshot.py --check    # 比对（改代码后 / CI）
+# ============================================================
+
+# 每次请求都会变化、不参与比对的值。支持精确名与 glob（fnmatch）。
+# 注意：这里只影响"取值比对"与结构签名中的标记，不影响键是否存在。
+unstable_keys:
+  - request_id
+  - timestamp
+  - recorded_at
+  - created_at
+  - updated_at
+  - generated_at
+  - server_time
+  - duration_ms
+  - elapsed_ms
+  - took_ms
+  - "*_at"
+  - "*_time"
+  - "*_token"
+
+# 结构比对深度上限（防止异常递归导致签名爆炸）
+max_depth: 6
+
+# 需要比对"具体取值"的字段白名单（点分路径）。默认空 = 只比对结构与状态码。
+# 只有在数据本身稳定时才登记，否则会误报。
+# 例：- "data.status"
+value_checks: []
+
+endpoints:
+  # ---- 健康检查（无鉴权，用于确认对端身份）----
+  - name: health
+    path: /api/health
+    auth: false
+
+  # ---- 仪表盘（聚合查询，ITER-3 报告点名的高风险区）----
+  - name: dashboard_stats
+    path: /api/v1/dashboard/stats
+  - name: dashboard_activities
+    path: /api/v1/dashboard/activities
+    query: { page: 1, page_size: 2 }
+  - name: dashboard_nav_sections
+    path: /api/v1/dashboard/nav-sections
+
+  # ---- 产品 / BOM ----
+  - name: products_list
+    path: /api/v1/products/list
+    query: { page: 1, per_page: 2 }
+  - name: products_search
+    path: /api/v1/products/search
+    query: { q: "a" }
+
+  # ---- 客户 / 供应商 ----
+  - name: customers_list
+    path: /api/v1/customers/list
+    query: { page: 1, per_page: 2 }
+  - name: suppliers_list
+    path: /api/v1/suppliers/list
+    query: { page: 1, per_page: 2 }
+
+  # ---- 库存（ITER-3 点名的 stock_inventory_service.py 对应接口）----
+  - name: stock_in_list
+    path: /api/v1/stock/in/list
+    query: { page: 1, per_page: 2 }
+  - name: stock_out_list
+    path: /api/v1/stock/out/list
+    query: { page: 1, per_page: 2 }
+  - name: stock_inventory
+    path: /api/v1/stock/inventory
+    query: { page: 1, per_page: 2 }
+
+  # ---- 采购计划（真实前缀是 /api/v1/plans，不是 /purchase-plan）----
+  - name: plans_list
+    path: /api/v1/plans/list
+    query: { year: 2026, month: 1, page: 1, per_page: 2 }
+  - name: plans_monthly_aggregated
+    path: /api/v1/plans/monthly-aggregated
+    query: { year: 2026, month: 1 }
+  - name: plans_inventory_compare
+    path: /api/v1/plans/inventory-compare
+    query: { year: 2026, month: 1 }
+
+  # ---- 采购中心（ITER-3 点名的 purchase_order_query.py 对应接口）----
+  - name: purchase_center_orders
+    path: /api/v1/purchase-center/orders
+    query: { page: 1, per_page: 2 }
+  - name: purchase_center_products
+    path: /api/v1/purchase-center/products
+    query: { page: 1, per_page: 2 }
+  - name: purchase_center_unprocessed_orders
+    path: /api/v1/purchase-center/unprocessed-orders
+
+  # ---- 审批 / 通知 ----
+  - name: approvals_list
+    path: /api/v1/approvals/list
+    query: { page: 1, per_page: 2 }
+  - name: approvals_pending_count
+    path: /api/v1/approvals/pending-count
+  - name: notifications_unread_count
+    path: /api/v1/notifications/unread-count
+
+  # ---- 报表 ----
+  - name: reports_order_logs
+    path: /api/v1/reports/order-logs
+    query: { page: 1, per_page: 2 }

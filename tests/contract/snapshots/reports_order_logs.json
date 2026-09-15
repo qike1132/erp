@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "name": "reports_order_logs",
+  "method": "GET",
+  "path": "/api/v1/reports/order-logs",
+  "query": {
+    "page": 1,
+    "per_page": 2
+  },
+  "auth": true,
+  "http_status": 200,
+  "shape": [
+    "logs[].customer:str",
+    "logs[].deduction_count:int",
+    "logs[].deduction_time:<volatile>",
+    "logs[].note:str",
+    "logs[].order_count:int",
+    "logs[].order_date:str",
+    "logs[].order_nos:str",
+    "logs[].product_barcode:str",
+    "logs[].product_name:str",
+    "logs[].quantity:int",
+    "logs[].sku:str",
+    "logs[].status:str",
+    "logs[].stockin_count:int",
+    "logs[].stockin_date:str",
+    "logs[].stockin_nos:str",
+    "logs[].stockout_count:int",
+    "logs[].stockout_date:str",
+    "pagination.page:int",
+    "pagination.pages:int",
+    "pagination.per_page:int",
+    "pagination.total:int",
+    "stats.total_count:int",
+    "stats.total_quantity:int",
+    "success:bool"
+  ],
+  "value_checks": {},
+  "recorded_at": "2026-09-14T01:06:08Z"
+}

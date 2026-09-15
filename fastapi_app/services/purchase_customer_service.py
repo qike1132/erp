@@ -62,7 +62,12 @@ async def get_customers(db: AsyncSession, *, page: int = 1, per_page: int = 20,
     }
 
 
-async def get_customer_detail(db: AsyncSession, customer_id: int) -> dict:
+async def get_customer_detail(db: AsyncSession, customer_id: int) -> dict | None:
+    """查询客户详情
+
+    客户不存在时返回 ``None``（调用方 customer_routes 会据此返回 404）——
+    注解必须带 ``| None``，否则调用方会漏掉空值检查。
+    """
     customer = await db.get(Customer, customer_id)
     if not customer:
         return None

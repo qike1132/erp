@@ -2,9 +2,20 @@
 """
 N+1 查询静态扫描脚本（AST based）
 
-识别 `for` / `async for` 循环体内出现的 `await <obj>.execute/scalar/scalars` 调用，
+识别 `for` / `async for` 循环体**内**出现的 `await <obj>.execute/scalar/scalars` 调用，
 这类模式在大数据量下会产生 N+1 次数据库往返，应改用 selectinload/joinedload 批量预加载
 或 IN 批量查询 + defaultdict 内存分组。
+
+以下情况**不**视为违规（2026-09-14 修正）：
+1. 查询出现在循环的**可迭代表达式**里，如 `for x in (await db.execute(...)).all():`
+   —— 该查询只求值一次，不是 N+1。此前被误报，现已修正。
+2. 行内含**带理由**的豁免标注：`# batch-loop: <理由>` 或 `# n1-ok: <理由>`
+   （仅写标记不写理由仍视为违规）
+
+白名单 `scripts/allowed_n_plus_one.yaml` 支持三种键：
+  - `path/to/file.py`                    —— 整个文件豁免（粗，慎用）
+  - `path/to/file.py:123`                —— 指定行（**行号会随代码编辑漂移而失效**）
+  - `path/to/file.py::function_name`     —— 指定函数（**推荐**，不随行号漂移）
 
 用法:
     python scripts/check_n_plus_one.py [--whitelist scripts/allowed_n_plus_one.yaml] [路径...]
@@ -22,6 +33,7 @@ import argparse
 import ast
 import io
 import json
+import re
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -52,16 +64,35 @@ class Violation:
         return asdict(self)
 
 
+# 行内豁免标注：**必须附理由**，只写标记不写原因仍算违规。
+# 项目既有约定是 `# batch-loop: 有意逐行处理,非 N+1`，此处一并支持 `# n1-ok:`。
+_N1_MARKER_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"#\s*batch-loop:\s*\S"),
+    re.compile(r"#\s*n1-ok:\s*\S"),
+)
+
+
+def _has_justification(lines: list[str], start: int, end: int) -> bool:
+    """检查调用表达式覆盖的所有行里是否带豁免理由（多行调用时标注常写在末尾行）。"""
+    for idx in range(max(start - 1, 0), min(end, len(lines))):
+        if any(p.search(lines[idx]) for p in _N1_MARKER_PATTERNS):
+            return True
+    return False
+
+
 class NPlusOneVisitor(ast.NodeVisitor):
     """遍历单个模块，记录循环体内 await 包裹的查询调用。
 
-    仅标记 `await <session>.execute/scalar/scalars(...)` 出现在 for/async for 循环体内的情况，
+    仅标记 `await <session>.execute/scalar/scalars(...)` 出现在 for/async for 循环**体**内的情况，
     这是真正的 N+1（每次迭代发起一次新 DB 查询）。
-    排除遍历已执行结果的 `.scalars()`（非 await，仅迭代已有结果对象）。
+    - 排除遍历已执行结果的 `.scalars()`（非 await，仅迭代已有结果对象）
+    - 排除出现在循环 iterable 表达式中的查询（只求值一次）
+    - 排除带 `# batch-loop:` / `# n1-ok:` 理由标注的调用
     """
 
-    def __init__(self, file_path: Path) -> None:
+    def __init__(self, file_path: Path, source: str = "") -> None:
         self.file_path = file_path
+        self.lines = source.splitlines()
         self.violations: list[Violation] = []
         self._func_stack: list[str] = []
         self._loop_stack: list[str] = []
@@ -77,6 +108,12 @@ class NPlusOneVisitor(ast.NodeVisitor):
             return
         call_name = self._query_call_name(node)
         if call_name is None:
+            return
+        if _has_justification(
+            self.lines,
+            node.lineno,
+            getattr(node, "end_lineno", node.lineno) or node.lineno,
+        ):
             return
         self.violations.append(
             Violation(
@@ -96,9 +133,17 @@ class NPlusOneVisitor(ast.NodeVisitor):
         return None
 
     def _visit_loop(self, node: ast.For | ast.AsyncFor) -> None:
+        # 先访问 iter：循环的可迭代表达式只求值一次，不属于循环体。
+        # 若放在 push 之后访问，`for x in (await db.execute(...)).all():` 会被误报为 N+1。
+        self.visit(node.iter)
+        # for/else 的 else 分支在循环正常结束后执行一次，同样不算循环体。
+        for stmt in node.orelse:
+            self.visit(stmt)
+
         loop_var = self._loop_target_name(node.target)
         self._loop_stack.append(loop_var)
-        self.generic_visit(node)
+        for stmt in node.body:
+            self.visit(stmt)
         self._loop_stack.pop()
 
     @staticmethod
@@ -138,13 +183,13 @@ def scan_file(path: Path) -> tuple[list[Violation], str | None]:
         tree = ast.parse(source, filename=str(path))
     except SyntaxError as e:
         return [], f"{e.__class__.__name__}: {e}"
-    visitor = NPlusOneVisitor(path)
+    visitor = NPlusOneVisitor(path, source)
     visitor.visit(tree)
     return visitor.violations, None
 
 
 def load_whitelist(yaml_path: Path | None) -> set[str]:
-    """加载白名单（每行一个 file:line 或 file 形式）。无 PyYAML 依赖时按纯文本解析。"""
+    """加载白名单。支持 file / file:line / file::function 三种键。无 PyYAML 依赖时按纯文本解析。"""
     if yaml_path is None or not yaml_path.exists():
         return set()
     whitelist: set[str] = set()
@@ -159,14 +204,29 @@ def load_whitelist(yaml_path: Path | None) -> set[str]:
 
 
 def is_whitelisted(v: Violation, whitelist: set[str]) -> bool:
+    """匹配顺序：文件级 → 精确行 → 函数级。
+
+    函数级（`file::func`）不受行号漂移影响，是推荐的写法：
+    此前白名单全部用 `file:line`，只要上游插入几行就整批失效（已实际发生）。
+    """
     norm_file = v.file.replace("\\", "/")
-    return f"{norm_file}:{v.line}" in whitelist or norm_file in whitelist
+    return (
+        norm_file in whitelist
+        or f"{norm_file}:{v.line}" in whitelist
+        or f"{norm_file}::{v.function}" in whitelist
+    )
 
 
 def collect_py_files(scan_dirs: list[Path]) -> list[Path]:
     files: list[Path] = []
     for d in scan_dirs:
         if not d.exists():
+            continue
+        # 显式传入单个文件时必须真的扫它。
+        # 否则 Path(file).rglob("*.py") 返回空 → 静默 PASS（假绿），比报错更危险。
+        if d.is_file():
+            if d.suffix == ".py" and not any(part in EXCLUDE_DIRS for part in d.parts):
+                files.append(d)
             continue
         for p in d.rglob("*.py"):
             if any(part in EXCLUDE_DIRS for part in p.parts):
@@ -192,12 +252,22 @@ def main() -> int:
     scan_dirs: list[Path] = []
     for p in args.paths:
         pp = Path(p).resolve()
-        scan_dirs.append(pp if pp.is_dir() else pp.parent)
+        # 文件路径原样传入（由 collect_py_files 处理）。
+        # 曾退化为 pp.parent —— 那会让"只检查这一个文件"变成整目录扫描，
+        # 产生与本次改动无关的违规（棘轮模式下表现为假 REGRESS）。
+        scan_dirs.append(pp)
     if not scan_dirs:
         scan_dirs = DEFAULT_SCAN_DIRS
 
     whitelist = load_whitelist(args.whitelist)
     files = collect_py_files(scan_dirs)
+
+    # 显式传了路径却一个文件都没扫到 → 静默 PASS 会造成"假绿"，必须让人看见
+    if args.paths and not files:
+        print(
+            f"[WARN] 传入的路径未匹配到任何可扫描的 .py 文件：{[str(p) for p in args.paths]}",
+            file=sys.stderr,
+        )
 
     all_violations: list[Violation] = []
     parse_errors: list[tuple[str, str]] = []

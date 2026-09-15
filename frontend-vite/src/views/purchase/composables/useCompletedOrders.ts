@@ -5,60 +5,69 @@ import { showToast } from '@/composables/useToast'
 import { getErrorMessage } from '@/types/errors'
 import type { PurchaseOrder } from '@/types'
 
-/** 快速筛选配置（/purchase/quick-filters 返回） */
-export interface QuickFilter {
-  id: string
-  name?: string
-  filters?: { start_date?: string; end_date?: string }
-}
-
 /** Vue Query 缓存 key */
 export const COMPLETED_ORDERS_QUERY_KEY = 'completed-orders-list'
-export const QUICK_FILTERS_QUERY_KEY = 'purchase-quick-filters'
 
+/** 每页条数（后端 per_page 上限 500） */
+const PER_PAGE = 20
+
+export interface CompletedOrderFilters {
+  order_no: string
+  customer_name: string
+  product_name: string
+  start_date: string
+  end_date: string
+}
+
+const FILTER_KEYS = ['order_no', 'customer_name', 'product_name', 'start_date', 'end_date'] as const
+
+/** 把筛选条件拼成接口参数（查询与导出共用，避免两处重复） */
+function buildParams(filters: CompletedOrderFilters, page?: number): Record<string, string | number> {
+  const params: Record<string, string | number> = {}
+  if (page != null) {
+    params.page = page
+    params.per_page = PER_PAGE
+  }
+  for (const key of FILTER_KEYS) {
+    const value = filters[key]
+    if (value) params[key] = value
+  }
+  return params
+}
+
+/**
+ * useCompletedOrders — 下单查询数据层
+ *
+ * 只做三件事：搜索/查询（filters + page → 列表）、导出、重置。
+ * 查询为显式提交（点"查询"或回车），不做输入即请求，避免每键一次请求。
+ */
 export function useCompletedOrders() {
   const queryClient = useQueryClient()
   const page = ref(1)
 
-  const filters = reactive({
+  /** 已提交的筛选条件（真正参与请求） */
+  const filters = reactive<CompletedOrderFilters>({
     order_no: '',
     customer_name: '',
     product_name: '',
-    supplier_name: '',
-    barcode: '',
-    material_name: '',
     start_date: '',
     end_date: '',
   })
 
-  const currentQuickFilterId = ref<string | null>(null)
-  const filterExpanded = ref(false)
+  /** 表单草稿：用户编辑中，点"查询"才写入 filters */
+  const draft = reactive<CompletedOrderFilters>({ ...filters })
+
+  /** 草稿与已提交条件是否有差异（用于"查询"按钮的强调态） */
+  const isDirty = computed(() => FILTER_KEYS.some((k) => draft[k] !== filters[k]))
+
+  /** 是否处于筛选状态（用于空状态文案与重置按钮可用性） */
+  const hasFilter = computed(() => FILTER_KEYS.some((k) => !!filters[k]))
 
   const { data, isLoading, isFetching, isError } = useQuery({
-    queryKey: [
-      COMPLETED_ORDERS_QUERY_KEY,
-      () => page.value,
-      () => filters.order_no,
-      () => filters.customer_name,
-      () => filters.product_name,
-      () => filters.supplier_name,
-      () => filters.barcode,
-      () => filters.material_name,
-      () => filters.start_date,
-      () => filters.end_date,
-    ],
+    queryKey: [COMPLETED_ORDERS_QUERY_KEY, page, { ...filters }],
     queryFn: async () => {
-      const params: Record<string, string | number> = { page: page.value, per_page: 20 }
-      if (filters.order_no) params.order_no = filters.order_no
-      if (filters.customer_name) params.customer_name = filters.customer_name
-      if (filters.product_name) params.product_name = filters.product_name
-      if (filters.supplier_name) params.supplier_name = filters.supplier_name
-      if (filters.barcode) params.barcode = filters.barcode
-      if (filters.material_name) params.material_name = filters.material_name
-      if (filters.start_date) params.start_date = filters.start_date
-      if (filters.end_date) params.end_date = filters.end_date
       try {
-        return await purchaseApi.completed(params)
+        return await purchaseApi.completed(buildParams(filters, page.value))
       } catch (err) {
         showToast(getErrorMessage(err, '加载已完成订单失败'), 'error')
         throw err
@@ -70,8 +79,7 @@ export function useCompletedOrders() {
     retry: false,
   })
 
-  // 前端加载超时兜底：后端异常导致 query 长时间停在"加载中"时，20s 后强制转错误态。
-  // 注意 immediate: true —— 首次加载时 isLoading 在 setup 即 true，否则定时器不会启动（安全网失效）。
+  // 加载超时兜底：后端挂住时 20s 强制转错误态，保证加载状态必定结束
   const loadingTimedOut = ref(false)
   let loadingTimer: ReturnType<typeof setTimeout> | null = null
   watch([isLoading, isError], () => {
@@ -89,143 +97,73 @@ export function useCompletedOrders() {
   onScopeDispose(() => {
     if (loadingTimer) clearTimeout(loadingTimer)
   })
-  const loadError = computed(() => isError.value || loadingTimedOut.value)
-
-  async function retry() {
-    loadingTimedOut.value = false
-    await queryClient.invalidateQueries({ queryKey: [COMPLETED_ORDERS_QUERY_KEY] })
-  }
 
   const orders = computed<PurchaseOrder[]>(() => data.value?.orders ?? [])
   const total = computed(() => data.value?.total ?? 0)
   const totalPages = computed(() => data.value?.total_pages ?? data.value?.pages ?? 1)
+  const error = computed(() => isError.value || loadingTimedOut.value)
 
-  // P3-17: 当前页加载完成后，若存在下一页则静默预取（staleTime 30s 避免重复请求）。
-  // 预取失败不弹 toast（后台行为）；用户翻页时若缓存有 error 则 Vue Query 自动 refetch。
-  watch(data, (resp) => {
-    if (resp && page.value < (resp.total_pages ?? resp.pages ?? 1)) {
-      const nextPage = page.value + 1
-      queryClient.prefetchQuery({
-        queryKey: [
-          COMPLETED_ORDERS_QUERY_KEY,
-          nextPage,
-          filters.order_no,
-          filters.customer_name,
-          filters.product_name,
-          filters.supplier_name,
-          filters.barcode,
-          filters.material_name,
-          filters.start_date,
-          filters.end_date,
-        ],
-        queryFn: () => {
-          const params: Record<string, string | number> = { page: nextPage, per_page: 20 }
-          if (filters.order_no) params.order_no = filters.order_no
-          if (filters.customer_name) params.customer_name = filters.customer_name
-          if (filters.product_name) params.product_name = filters.product_name
-          if (filters.supplier_name) params.supplier_name = filters.supplier_name
-          if (filters.barcode) params.barcode = filters.barcode
-          if (filters.material_name) params.material_name = filters.material_name
-          if (filters.start_date) params.start_date = filters.start_date
-          if (filters.end_date) params.end_date = filters.end_date
-          return purchaseApi.completed(params)
-        },
-        staleTime: 30_000,
-      })
+  /** 查询：把草稿提交为生效条件并回到第 1 页（queryKey 变化自动请求） */
+  function search() {
+    // 日期区间校验：起始晚于截止时阻断，避免返回空结果让用户困惑
+    if (draft.start_date && draft.end_date && draft.start_date > draft.end_date) {
+      showToast('开始日期不能晚于结束日期', 'warning')
+      return
     }
-  })
+    for (const key of FILTER_KEYS) filters[key] = draft[key]
+    page.value = 1
+  }
 
-  // 快速筛选配置：5 分钟 stale，避免 applyQuickFilter 时重复请求
-  const { data: qfData } = useQuery({
-    queryKey: [QUICK_FILTERS_QUERY_KEY],
-    queryFn: () => purchaseApi.quickFilters(),
-    staleTime: 5 * 60_000,
-    gcTime: 10 * 60_000,
-  })
-  const quickFilters = computed<QuickFilter[]>(() => qfData.value?.quick_filters ?? [])
+  /** 重置：清空草稿与生效条件，回到第 1 页 */
+  function reset() {
+    for (const key of FILTER_KEYS) {
+      draft[key] = ''
+      filters[key] = ''
+    }
+    page.value = 1
+  }
 
-  function load() {
+  /** 刷新：保留当前条件重新请求 */
+  function refresh() {
     return queryClient.invalidateQueries({ queryKey: [COMPLETED_ORDERS_QUERY_KEY] })
   }
 
-  async function loadQuickFilters() {
-    await queryClient.refetchQueries({ queryKey: [QUICK_FILTERS_QUERY_KEY] })
+  async function retry() {
+    loadingTimedOut.value = false
+    await refresh()
   }
 
-  async function applyQuickFilter(filterId: string) {
-    currentQuickFilterId.value = filterId
-    const qf = quickFilters.value.find((f) => f.id === filterId)
-    if (qf) {
-      filters.start_date = qf.filters?.start_date || ''
-      filters.end_date = qf.filters?.end_date || ''
-      filters.order_no = ''
-      filters.customer_name = ''
-      filters.product_name = ''
-      filters.supplier_name = ''
-      filters.barcode = ''
-      filters.material_name = ''
-      page.value = 1
-      // filters/page 变化触发 queryKey 变化，Vue Query 自动 refetch
-    }
-  }
-
-  function resetFilters() {
-    Object.assign(filters, {
-      order_no: '',
-      customer_name: '',
-      product_name: '',
-      supplier_name: '',
-      barcode: '',
-      material_name: '',
-      start_date: '',
-      end_date: '',
-    })
-    currentQuickFilterId.value = null
-    page.value = 1
-    // queryKey 变化自动 refetch
-  }
-
-  async function exportOrders() {
-    const params: Record<string, string> = {}
-    if (filters.order_no) params.order_no = filters.order_no
-    if (filters.customer_name) params.customer_name = filters.customer_name
-    if (filters.supplier_name) params.supplier_name = filters.supplier_name
-    if (filters.start_date) params.start_date = filters.start_date
-    if (filters.end_date) params.end_date = filters.end_date
-    const res = await purchaseApi.exportCompleted(params)
-    if (res.success && res.html) {
-      const bom = '\uFEFF'
-      const blob = new Blob([bom + res.html], { type: 'application/vnd.ms-excel;charset=utf-8' })
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = '下单查询汇总.xls'
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-      URL.revokeObjectURL(url)
-      return true
-    }
-    throw new Error(res.message || '导出失败')
+  /** 导出：按当前生效条件导出，成功后触发浏览器下载 */
+  async function exportOrders(): Promise<void> {
+    const res = await purchaseApi.exportCompleted(buildParams(filters))
+    if (!res.success || !res.html) throw new Error(res.message || '导出失败')
+    const blob = new Blob(['\uFEFF' + res.html], { type: 'application/vnd.ms-excel;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = '下单查询汇总.xls'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
   }
 
   return reactive({
     orders,
     loading: isLoading,
     fetching: isFetching,
-    error: loadError,
-    retry,
-    page,
+    error,
     total,
     totalPages,
+    page,
     filters,
-    quickFilters,
-    currentQuickFilterId,
-    filterExpanded,
-    load,
-    loadQuickFilters,
-    applyQuickFilter,
-    resetFilters,
+    draft,
+    isDirty,
+    hasFilter,
+    search,
+    reset,
+    refresh,
+    retry,
     exportOrders,
   })
 }

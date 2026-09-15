@@ -167,7 +167,7 @@ async def lifespan(application: FastAPI):
                 '备份记录同步完成: 补录 %d 条, 清理孤立 %d 条, 修正僵尸 %d 条',
                 sync_result['backfilled'], sync_result['orphaned'], sync_result.get('zombie_fixed', 0),
             )
-    except Exception as e:
+    except Exception as e:  # broad-except: 启动自检的旁路步骤，失败不得阻断应用启动
         logger.warning('启动时备份记录同步失败（不影响启动）: %s', e)
 
     # 预热库存缓存（后台执行，不阻塞启动）

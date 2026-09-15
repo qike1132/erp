@@ -44,9 +44,10 @@ async def allocate_sequence(prefix: str, date_str: str, seed: int = 0) -> int:
     seed 为当日已落库编号的最大序号，保证计数表首次使用时与历史编号连续；
     并发首次写入时，冲突分支的原子递增（last_seq + 1）保证唯一性。
     """
-    from fastapi_app.core.database import _AsyncSessionLocal
+    from fastapi_app.core.database import require_async_session_local
 
-    async with _AsyncSessionLocal() as short_session:
+    session_factory = require_async_session_local()
+    async with session_factory() as short_session:
         row = await short_session.execute(
             _ALLOCATE_SQL,
             {'prefix': prefix, 'number_date': date_str, 'last_seq': seed + 1},
@@ -85,9 +86,10 @@ async def allocate_sequence_range(prefix: str, date_str: str, count: int, seed: 
     if count < 1:
         raise ValueError(f'allocate_sequence_range 的 count 必须 >= 1，收到 {count}')
 
-    from fastapi_app.core.database import _AsyncSessionLocal
+    from fastapi_app.core.database import require_async_session_local
 
-    async with _AsyncSessionLocal() as short_session:
+    session_factory = require_async_session_local()
+    async with session_factory() as short_session:
         row = await short_session.execute(
             _ALLOCATE_RANGE_SQL,
             {

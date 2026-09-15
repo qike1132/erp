@@ -5,7 +5,7 @@
 依赖 batch_import_parser 中的解析函数（parse_date_value、validate_customer_name）。
 """
 import logging
-from collections.abc import Container, Hashable
+from collections.abc import Hashable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Callable
@@ -81,7 +81,9 @@ class DedupeSpec:
     """
 
     key_fn: Callable[[dict], Hashable | None]
-    existing_keys: Container[Hashable] = ()
+    # 与 dedupe_by_keys 的参数类型保持一致（Iterable 而非 Container：
+    # 下游要 `set(existing_keys)`，Container 不保证可迭代）。
+    existing_keys: Iterable[Hashable] = ()
     existing_keys_key: str | None = None
     label: str = '唯一键'
     message_limit: int | None = 50
@@ -126,7 +128,7 @@ async def _import_data_generic(
         dedupe: 可选的内存去重规格（见 :class:`DedupeSpec`）。不传则行为完全不变。
     """
     count = 0
-    debug_messages = [] if has_debug_messages else None
+    debug_messages: list[str] | None = [] if has_debug_messages else None
 
     context = await pre_load(db) if pre_load else {}
 

@@ -1,0 +1,21 @@
+# ============================================================
+# 本文件只承载「代码质量门禁」的阈值配置。
+#
+# ⚠️ 它刻意**不包含** [build-system] / [project]：
+#    - 依赖管理的唯一来源仍是 requirements/*.txt（见 requirements.txt 的分拆说明）
+#    - 本文件不参与打包，不改变 pip 的依赖解析行为
+#    - pytest 配置在 pytest.ini（优先于本文件），ruff 在 ruff.toml，mypy 在 mypy.ini
+#
+# 阈值被 scripts/quality_gate.py 读取；缺失时回落到脚本内置默认值。
+# 任务来源：.codeartsdoer/specs/code_quality_opt/tasks.md 1.2
+# ============================================================
+
+[tool.code-quality]
+# 单个函数/方法最大有效行数（剔除空行与纯注释行）
+max_function_length = 80
+
+# 单个 .vue 组件最大行数
+max_vue_component_length = 400
+
+# 单个 .py 文件最大行数（由 scripts/file_size_gate.py 使用，仅对 git 变更文件生效）
+max_file_size = 1200

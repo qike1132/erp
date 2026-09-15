@@ -31,6 +31,39 @@ _record_write_fail_count: int = 0
 _BACKUP_NAME_PREFIXES = ('erp_backup_', 'erp_incremental_', 'erp_auto_')
 _BACKUP_FILE_SUFFIXES = ('.zip', '.json', '.zip.enc')
 
+# 文件名时间戳格式 'YYYYMMDD_HHMMSS' 的长度与分隔位
+_TS_FILENAME_LEN = 15
+_TS_FILENAME_SEP_INDEX = 8
+
+
+def normalize_backup_ts(ts: str | None) -> str:
+    """把备份时间戳统一为 'YYYY-MM-DD HH:MM:SS'。
+
+    备份系统里时间戳有两种来源、两种格式：
+      - 文件名中的时间戳：'YYYYMMDD_HHMMSS'（见 _extract_timestamp）
+      - manifest 的 base_timestamp：'YYYY-MM-DD HH:MM:SS'
+
+    二者格式不一致时直接做字符串比较恒为 False，曾导致清理逻辑把所有增量备份
+    判定为"不属于任何全量链"而无条件删除（**数据丢失**）。本函数是该修复的核心，
+    必须保证幂等：已是标准格式的输入原样返回。
+
+    Args:
+        ts: 待归一化的时间戳，允许 None / 空串 / 非法格式。
+
+    Returns:
+        规范化后的 'YYYY-MM-DD HH:MM:SS'；无法识别或为空时返回 ''（空输入）
+        或原样去空格后的字符串（非空但格式未知，交由调用方判断）。
+    """
+    if not ts:
+        return ''
+    ts = str(ts).strip()
+    if (len(ts) == _TS_FILENAME_LEN
+            and ts[_TS_FILENAME_SEP_INDEX] == '_'
+            and ts[:8].isdigit()
+            and ts[9:].isdigit()):
+        return f'{ts[:4]}-{ts[4:6]}-{ts[6:8]} {ts[9:11]}:{ts[11:13]}:{ts[13:15]}'
+    return ts
+
 
 def _is_backup_file(f: Path) -> bool:  # log-context: internal helper 无请求上下文
     """是否为正式备份文件(按命名约定排除演练/测试临时件)"""
@@ -39,23 +72,6 @@ def _is_backup_file(f: Path) -> bool:  # log-context: internal helper 无请求�
         and f.name.startswith(_BACKUP_NAME_PREFIXES)
         and f.name.endswith(_BACKUP_FILE_SUFFIXES)
     )
-
-
-def _normalize_backup_ts(ts: str) -> str:  # log-context: internal helper 无请求上下文
-    """把备份时间戳统一为 'YYYY-MM-DD HH:MM:SS' 便于字符串比较。
-
-    兼容两种来源格式：
-    - 文件名格式 'YYYYMMDD_HHMMSS'（如 erp_backup_20260913_010000.zip）
-    - manifest 格式 'YYYY-MM-DD HH:MM:SS'（exported_at / base_timestamp）
-    二者格式不同，混比较会恒为 False/True，导致级联删除误判。
-    """
-    if not ts:
-        return ''
-    ts = ts.strip()
-    # 文件名格式：YYYYMMDD_HHMMSS（15 位，第 8 位为下划线，其余为数字）
-    if len(ts) == 15 and ts[8] == '_' and ts[:8].isdigit() and ts[9:].isdigit():
-        return f'{ts[:4]}-{ts[4:6]}-{ts[6:8]} {ts[9:11]}:{ts[11:13]}:{ts[13:15]}'
-    return ts
 
 
 def ensure_backup_dir():  # log-context: internal helper 无请求上下文
@@ -496,9 +512,10 @@ def cleanup_old_backups() -> dict:  # log-context: internal helper 无请求上�
     full_backup_timestamps = set()
     for b in backups:
         if not b['is_incremental'] and b['name'] not in to_delete:
+            # 提取全量备份的时间戳
             try:
                 ts_str = b['name'].replace('erp_backup_', '').replace('erp_auto_daily_', '').replace('.zip', '').replace('.json', '').replace('.enc', '')
-                full_backup_timestamps.add(_normalize_backup_ts(ts_str))
+                full_backup_timestamps.add(normalize_backup_ts(ts_str))
             except (ValueError, IndexError):
                 pass  # defensive: 异常静默处理,不影响主流程
 
@@ -506,7 +523,7 @@ def cleanup_old_backups() -> dict:  # log-context: internal helper 无请求上�
     for b in backups:
         if b['is_incremental'] and b['base_timestamp']:
             # 如果基础全量备份被删除，增量备份也应该删除
-            base_ts = _normalize_backup_ts(str(b['base_timestamp']))
+            base_ts = normalize_backup_ts(str(b['base_timestamp']))
             base_exists = any(ts for ts in full_backup_timestamps if ts <= base_ts)
             if not base_exists:
                 to_delete.add(b['name'])

@@ -80,6 +80,7 @@ from fastapi_app.shared_models.stock_out import StockOut
 from fastapi_app.shared_models.stock_return import StockReturn
 from fastapi_app.shared_models.supplier import Supplier
 from fastapi_app.shared_models.user import User, user_permission
+from fastapi_app.shared_models.web_vital import WebVital
 
 __all__ = [
     'CUSTOMER_SAMPLING_ACTIONS',
@@ -151,4 +152,5 @@ __all__ = [
     'SyncRetryQueue',
     'User',
     'user_permission',
+    'WebVital',
 ]

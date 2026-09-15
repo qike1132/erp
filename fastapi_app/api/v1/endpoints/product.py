@@ -6,10 +6,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.cache import CacheDomain
 from fastapi_app.core.cache_invalidation import InvalidationStrategy, cache_mgr
+from fastapi_app.core.cache_keys import (
+    PRODUCT_LIST_CACHE_TTL,
+    CacheNamespace,
+    build_cache_key,
+)
 from fastapi_app.core.config import settings
 from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_permission
 from fastapi_app.core.exceptions import db_transaction
+from fastapi_app.core.redis_wrapper import safe_get, safe_set
 from fastapi_app.schemas.product import (
     ProductActionResponse,
     ProductCreate,
@@ -30,12 +36,63 @@ from fastapi_app.shared_models import User
 
 router = APIRouter()
 
+
+async def _get_cached_product_page(page: int, per_page: int, search: str) -> ProductListResponse | None:
+    """从缓存读取商品列表首页（仅首页且无搜索时使用）。
+
+    只缓存「首页 + 无搜索」以避免缓存键基数爆炸（与 customer.py 同款策略）。
+
+    Args:
+        page: 页码。
+        per_page: 每页数量，作为缓存键的一部分。
+        search: 搜索关键词，非空时直接跳过缓存。
+
+    Returns:
+        ProductListResponse | None: 命中缓存返回响应对象，未命中返回 None。
+    """
+    if page != 1 or search:
+        return None
+    key = build_cache_key(CacheNamespace.PRODUCT_LIST, per_page)
+    cached = await safe_get(key, context='商品列表缓存')
+    if cached is None:
+        return None
+    return ProductListResponse(items=cached['items'], total=cached['total'])
+
+
+async def _set_cached_product_page(page: int, per_page: int, search: str, items: list[dict], total: int) -> None:
+    """写入商品列表首页缓存（仅首页且无搜索时使用）。
+
+    Args:
+        page: 页码。
+        per_page: 每页数量，作为缓存键的一部分。
+        search: 搜索关键词，非空时直接跳过缓存。
+        items: 商品字典列表。
+        total: 总记录数。
+    """
+    if page != 1 or search:
+        return
+    key = build_cache_key(CacheNamespace.PRODUCT_LIST, per_page)
+    await safe_set(
+        key, {'items': items, 'total': total},
+        PRODUCT_LIST_CACHE_TTL, context='商品列表缓存',
+    )
+
+
 @router.get('/list', response_model=ProductListResponse)
 async def list_products(page: int = Query(1, ge=1), per_page: int = Query(20, ge=1, le=200),
                         search: str = Query('', description='搜索产品名称或69码'),
-                        db: AsyncSession=Depends(get_async_read_db), _user: User=Depends(require_permission('product_manage'))):
-    """产品列表（分页+缓存+搜索）"""
+                        db: AsyncSession = Depends(get_async_read_db),
+                        _user: User = Depends(require_permission('product_manage'))):
+    """产品列表（分页+缓存+搜索）
+
+    仅「首页且无搜索」走缓存（TTL 60s），避免缓存键基数爆炸；
+    带搜索或翻页直接查库。写操作经 product_service._invalidate_product_list_cache 失效。
+    """
+    cached = await _get_cached_product_page(page, per_page, search)
+    if cached is not None:
+        return cached
     result = await product_service.get_products_page(db, page=page, per_page=per_page, search=search)
+    await _set_cached_product_page(page, per_page, search, result['items'], result['total'])
     return ProductListResponse(items=result['items'], total=result['total'])
 
 @router.post('/create', response_model=ProductActionResponse)

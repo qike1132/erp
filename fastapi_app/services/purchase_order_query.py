@@ -213,7 +213,14 @@ async def get_factory_order_summary(
 async def export_completed_orders(
     db: AsyncSession, *, supplier_id: int | None = None,
     date_from: str = '', date_to: str = '',
+    order_no: str = '', customer_name: str = '',
+    product_name: str = '', start_date: str = '', end_date: str = '',
 ) -> list:
+    """导出已完成订单明细。
+
+    参数与 ExportCompletedRequest 对齐；date_from/date_to 为兼容旧调用方的别名
+    （与 start_date/end_date 同义，后者优先）。
+    """
     # 只查需要的列，避免大量 ORM 实例驻留内存（防 OOM）
     order_cols = (
         PurchaseOrder.id, PurchaseOrder.order_no, PurchaseOrder.supplier_name,
@@ -222,10 +229,21 @@ async def export_completed_orders(
     query = select(*order_cols).where(PurchaseOrder.status == PurchaseOrderStatus.COMPLETED)
     if supplier_id:
         query = query.where(PurchaseOrder.supplier_id == supplier_id)
-    if date_from:
-        query = query.where(PurchaseOrder.completed_at >= date_from)
-    if date_to:
-        query = query.where(PurchaseOrder.completed_at <= f'{date_to} 23:59:59')  # sql-safe: escape_like/绑定参数/常量片段
+    # 分字段模糊匹配（与 get_completed_purchase_orders 口径一致）
+    for col, val in (
+        (PurchaseOrder.order_no, order_no),
+        (PurchaseOrder.customer_name, customer_name),
+        (PurchaseOrder.product_name, product_name),
+    ):
+        if val:
+            query = query.where(col.ilike(f'%{escape_like(val)}%'))
+    # 日期区间：start_date/end_date 优先，回退到兼容别名 date_from/date_to
+    eff_start = start_date or date_from
+    eff_end = end_date or date_to
+    if eff_start:
+        query = query.where(PurchaseOrder.completed_at >= eff_start)
+    if eff_end:
+        query = query.where(PurchaseOrder.completed_at <= f'{eff_end} 23:59:59')  # sql-safe: escape_like/绑定参数/常量片段
     query = query.order_by(PurchaseOrder.completed_at.desc())
 
     result = await db.execute(query)
@@ -553,9 +571,15 @@ from fastapi_app.services.purchase_order_query_helpers import (  # noqa: F401
     _build_po_source_fill_and_no_maps,
     _build_po_source_no_map,
     _build_po_source_sku_map,
+    _build_records_in_sql_order,
     _build_supplier_mat_map,
     _build_unprocessed_order_record,
+    _build_unprocessed_response,
     _build_unprocessed_stockin_record,
+    _build_unprocessed_union,
+    _collect_record_product_ids,
+    _count_unprocessed,
+    _enrich_unprocessed_items,
     _fetch_bom_data,
     _fetch_bom_product_ids,
     _fetch_completed_items_and_arrived,

@@ -291,7 +291,14 @@ async def restore_database_via_psql(zf, db: AsyncSession, task_id: str | None = 
             env=env, timeout=60,
         )  # nosec
         if drop_proc.returncode != 0:
-            logger.warning(f"DROP DATABASE: {(drop_proc.stderr or b'').decode(errors='replace')}")
+            # P0：DROP 失败必须中止——否则后续会向一个所有权/状态未知的目标库导入，
+            # 单事务回滚后该库残留旧状态，"已整体回滚，当前为空库"的提示将不再成立。
+            drop_err = (drop_proc.stderr or b'').decode(errors='replace')
+            logger.error(f'DROP DATABASE 失败，恢复中止: {drop_err[:500]}')  # sql-safe: escape_like/绑定参数/常量片段
+            return {
+                'status': 'error',
+                'error': f'删除旧数据库失败（恢复已中止，未触碰目标库）: {drop_err[:300]}',
+            }
         create_proc = await run_proc(
             [
                 resolve_pg_tool('psql'), '-h', db_host, '-p', db_port, '-U', db_user, '-d', 'postgres', '-c',
@@ -300,7 +307,13 @@ async def restore_database_via_psql(zf, db: AsyncSession, task_id: str | None = 
             env=env, timeout=30,
         )  # nosec
         if create_proc.returncode != 0:
-            logger.warning(f"CREATE DATABASE: {(create_proc.stderr or b'').decode(errors='replace')}")  # nosec
+            # P0：CREATE 失败同样必须中止，理由同上。
+            create_err = (create_proc.stderr or b'').decode(errors='replace')
+            logger.error(f'CREATE DATABASE 失败，恢复中止: {create_err[:500]}')  # sql-safe: escape_like/绑定参数/常量片段
+            return {
+                'status': 'error',
+                'error': f'创建数据库失败（恢复已中止，旧库已被删除，请立即用 pre_restore 安全备份处理）: {create_err[:300]}',
+            }
     except (TimeoutError, OSError, ValueError) as e:
         return {'status': 'error', 'error': f'数据库重建失败: {e}'}
 

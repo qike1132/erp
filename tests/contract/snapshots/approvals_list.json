@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "name": "approvals_list",
+  "method": "GET",
+  "path": "/api/v1/approvals/list",
+  "query": {
+    "page": 1,
+    "per_page": 2
+  },
+  "auth": true,
+  "http_status": 200,
+  "shape": [
+    "approved_count:int",
+    "data:array[0]",
+    "pending_count:int",
+    "rejected_count:int",
+    "success:bool"
+  ],
+  "value_checks": {},
+  "recorded_at": "2026-09-14T01:06:08Z"
+}

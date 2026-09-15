@@ -41,7 +41,10 @@ def setup_telemetry(app=None):
         })
 
         # Tracer
-        trace.set_tracer_provider(TracerProvider(resource=resource))
+        # 保留 SDK Provider 实例引用：add_span_processor 是 SDK 层能力，
+        # 而 trace.get_tracer_provider() 返回 API 层基类 TracerProvider（无该方法）。
+        _tracer_provider = TracerProvider(resource=resource)
+        trace.set_tracer_provider(_tracer_provider)
         _tracer = trace.get_tracer(service_name)
 
         # Exporter: OTLP (生产默认) 或 Console
@@ -57,7 +60,7 @@ def setup_telemetry(app=None):
             from opentelemetry.sdk.trace.export import ConsoleSpanExporter
             exporter = ConsoleSpanExporter()
 
-        trace.get_tracer_provider().add_span_processor(
+        _tracer_provider.add_span_processor(
             BatchSpanProcessor(exporter)
         )
 

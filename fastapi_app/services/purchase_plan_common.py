@@ -73,13 +73,14 @@ async def _generate_plan_no() -> str:
     """
     from contextlib import suppress
 
-    from fastapi_app.core.database import _AsyncSessionLocal
+    from fastapi_app.core.database import require_async_session_local
     from fastapi_app.services.numbering import allocate_sequence
 
     today_str = datetime.now(UTC).strftime('%Y%m%d')
     prefix = f'PP-{today_str}-'
     # 种子：当日已落库最大编号（无锁读，保证首次分配与历史连续）
-    async with _AsyncSessionLocal() as seed_session:
+    session_factory = require_async_session_local()
+    async with session_factory() as seed_session:
         result = await seed_session.execute(
             select(PurchasePlan.plan_no)
             .where(PurchasePlan.plan_no.like(f'{prefix}%'))

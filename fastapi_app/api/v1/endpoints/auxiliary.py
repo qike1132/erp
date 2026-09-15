@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_permission
 from fastapi_app.core.exceptions import db_transaction
+from fastapi_app.core.response import success_response
 from fastapi_app.schemas.order import OrderItemSchema
 from fastapi_app.services.auxiliary_service import (
     count_inventory_logs,
@@ -169,7 +170,7 @@ async def clear_cache(
     """清除缓存（需管理员权限）"""
     from fastapi_app.core.redis_wrapper import safe_delete_pattern
     deleted = await safe_delete_pattern(pattern, context="缓存清除")
-    return {"success": True, "deleted": deleted, "pattern": pattern}
+    return success_response(deleted=deleted, pattern=pattern)
 
 
 @router.get("/product-search", response_model=list[ProductSearchItem])
@@ -312,7 +313,7 @@ async def delete_stockout_api(
     from fastapi_app.services.stock_service import delete_stockout as svc_delete
     async with db_transaction(db, commit=False):
         await svc_delete(db, id)
-    return {'success': True, 'message': '出库删除成功'}
+    return success_response(message='出库删除成功')
 
 
 @router.delete("/stockin/{id}", response_model=AuxActionResponse)
@@ -325,7 +326,7 @@ async def delete_stockin_api(
     from fastapi_app.services.stock_service import delete_stockin as svc_delete
     async with db_transaction(db, commit=False):
         await svc_delete(db, id)
-    return {'success': True, 'message': '入库删除成功'}
+    return success_response(message='入库删除成功')
 
 
 @router.delete("/customer/{id}", response_model=AuxActionResponse)
@@ -338,7 +339,7 @@ async def delete_customer_api(
     from fastapi_app.services.customer_service import delete_customer as svc_delete
     async with db_transaction(db):
         await svc_delete(db, id)
-    return {'success': True, 'message': '客户删除成功'}
+    return success_response(message='客户删除成功')
 
 
 @router.delete("/supplier/{id}", response_model=AuxActionResponse)
@@ -350,7 +351,7 @@ async def delete_supplier_api(
     """删除供应商（API方式）"""
     from fastapi_app.services.auxiliary_service import delete_supplier
     await delete_supplier(db, id)
-    return {'success': True, 'message': '供应商删除成功'}
+    return success_response(message='供应商删除成功')
 
 
 # ==================== 批量提交 Pydantic 模型 ====================
@@ -481,4 +482,4 @@ async def delete_country(
 ):
     from fastapi_app.services.auxiliary_service import delete_country as delete_country_service
     await delete_country_service(db, country_id)
-    return {'success': True, 'message': '国家删除成功'}
+    return success_response(message='国家删除成功')

@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>下单查询 · 交互优化原型</title>
+<style>
+:root{
+  --primary-50:#eff5ff;--primary-100:#d6e4ff;--primary-200:#b8ccff;--primary-300:#8babf5;
+  --primary-400:#6d95f0;--primary-500:#5b8def;--primary-600:#3a6bd6;--primary-700:#2d5ab8;--primary-800:#234996;
+  --success-50:#e8f9ef;--success-500:#28c76f;--success-600:#1e9e55;
+  --warning-50:#fff3e6;--warning-500:#ff9f43;--warning-600:#e88e2e;
+  --danger-50:#fde8e8;--danger-500:#ea5455;--danger-600:#d44042;
+  --purple-50:#faf5ff;--purple-200:#e9d5ff;--purple-600:#9333ea;--purple-700:#7e22ce;
+  --border:#e2e8f0;--border-light:#f1f5f9;--surface:#f8fafc;
+  --text:#0f172a;--text-secondary:#475569;--text-muted:#94a3b8;
+  --font:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+}
+*{box-sizing:border-box}
+body{margin:0;padding:24px;background:#f5f7fa;font-family:var(--font);color:var(--text);font-size:13px}
+
+.banner{max-width:1280px;margin:0 auto 16px;padding:12px 16px;border-radius:12px;background:#fff;
+  border:1px solid var(--border);display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.banner h1{margin:0;font-size:15px;font-weight:600}
+.banner .tag{font-size:11px;padding:2px 8px;border-radius:999px;background:var(--primary-50);
+  color:var(--primary-700);font-weight:600}
+.switcher{margin-left:auto;display:flex;gap:4px;padding:3px;background:var(--surface);
+  border:1px solid var(--border);border-radius:10px}
+.switcher button{border:none;background:transparent;padding:6px 14px;border-radius:7px;font-size:12px;
+  font-weight:600;color:var(--text-secondary);cursor:pointer;font-family:inherit}
+.switcher button.on{background:#fff;color:var(--primary-700);box-shadow:0 1px 3px rgba(0,0,0,.08)}
+
+.card{max-width:1280px;margin:0 auto;background:#fff;border:1px solid var(--border);border-radius:18px;
+  box-shadow:0 1px 3px rgba(0,0,0,.04),0 4px 12px rgba(0,0,0,.06);overflow:hidden}
+
+/* ---------- tabs ---------- */
+.tabbar{display:flex;align-items:center;gap:8px;padding:16px 24px;border-bottom:1px solid var(--border-light)}
+.tab-group{display:inline-flex;gap:4px;padding:4px;border-radius:12px;background:#fff;
+  border:1px solid var(--border-light);box-shadow:0 1px 3px rgba(0,0,0,.04)}
+.tab-btn{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border:none;border-radius:9px;
+  font-size:13px;font-weight:600;color:var(--text-secondary);background:transparent;cursor:pointer;
+  font-family:inherit;white-space:nowrap}
+.tab-btn.on{background:linear-gradient(135deg,var(--primary-50),var(--primary-100));color:var(--primary-700)}
+.tab-badge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;
+  padding:0 5px;background:var(--danger-500);color:#fff;font-size:10px;font-weight:700;border-radius:9px}
+
+/* ---------- new toolbar ---------- */
+.toolbar{display:flex;align-items:center;gap:10px;padding:16px 24px 12px;flex-wrap:wrap}
+.toolbar-left{display:flex;align-items:baseline;gap:10px}
+.title{margin:0;font-size:16px;font-weight:700;letter-spacing:-.01em}
+.count{font-size:13px;font-weight:600;color:var(--text-muted);font-variant-numeric:tabular-nums}
+.toolbar-right{margin-left:auto;display:flex;gap:8px;align-items:center}
+
+/* ---------- unified search box ---------- */
+.searchbar{display:flex;align-items:center;gap:8px;padding:0 24px 10px;flex-wrap:wrap}
+.sbox{position:relative;flex:1;min-width:220px;max-width:420px}
+.sbox input{width:100%;height:34px;padding:0 30px 0 32px;border:1px solid var(--border);border-radius:9px;
+  font-size:13px;font-family:inherit;color:var(--text);outline:none;background:#fff;transition:border-color .15s,box-shadow .15s}
+.sbox input:focus{border-color:var(--primary-400);box-shadow:0 0 0 3px rgba(91,141,239,.12)}
+.sbox .ico{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-muted);font-size:13px;pointer-events:none}
+.sbox .clr{position:absolute;right:8px;top:50%;transform:translateY(-50%);border:none;background:var(--surface);
+  color:var(--text-muted);width:18px;height:18px;border-radius:50%;cursor:pointer;font-size:11px;line-height:1;
+  display:none;align-items:center;justify-content:center;padding:0}
+.sbox.has-val .clr{display:flex}
+
+/* ---------- quick chips ---------- */
+.chips{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.chip{padding:5px 12px;border:1px solid var(--border);border-radius:999px;background:#fff;font-size:12px;
+  font-weight:600;color:var(--text-secondary);cursor:pointer;font-family:inherit;transition:all .15s;
+  display:inline-flex;align-items:center;gap:5px}
+.chip:hover{border-color:var(--primary-300);color:var(--primary-600)}
+.chip.on{background:var(--primary-600);border-color:var(--primary-600);color:#fff}
+.chip .n{font-variant-numeric:tabular-nums;opacity:.7;font-weight:500}
+
+/* ---------- advanced panel ---------- */
+.adv{max-height:0;overflow:hidden;transition:max-height .25s ease;padding:0 24px;
+  border-bottom:1px solid transparent}
+.adv.open{max-height:260px;padding-bottom:14px;border-bottom-color:var(--border-light)}
+.adv-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;padding-top:12px}
+.fld{display:flex;flex-direction:column;gap:4px;min-width:0}
+.fld label{font-size:11px;font-weight:600;color:var(--text-muted);letter-spacing:.02em}
+.fld input,.fld select{height:32px;padding:0 10px;border:1px solid var(--border);border-radius:7px;
+  font-size:13px;font-family:inherit;color:var(--text);outline:none;background:#fff;min-width:0}
+.fld input:focus,.fld select:focus{border-color:var(--primary-400);box-shadow:0 0 0 3px rgba(91,141,239,.12)}
+.adv-actions{display:flex;gap:8px;align-items:center;padding-top:12px;flex-wrap:wrap}
+
+/* ---------- active filter pills ---------- */
+.pills{display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:0 24px 10px}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:3px 6px 3px 10px;border-radius:999px;
+  background:var(--primary-50);color:var(--primary-700);font-size:12px;font-weight:600}
+.pill button{border:none;background:transparent;color:var(--primary-600);cursor:pointer;font-size:13px;
+  line-height:1;padding:0 2px;font-family:inherit}
+.pill button:hover{color:var(--danger-600)}
+.pills .clr-all{border:none;background:transparent;color:var(--text-muted);font-size:12px;cursor:pointer;
+  font-family:inherit;text-decoration:underline;padding:0 4px}
+
+/* ---------- buttons ---------- */
+.btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border:2px solid var(--border-light);
+  border-radius:9px;font-size:12px;font-weight:600;cursor:pointer;background:#fff;font-family:inherit;
+  color:var(--text-secondary);transition:all .2s;white-space:nowrap}
+.btn:hover:not(:disabled){border-color:var(--primary-300);color:var(--primary-600)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn-primary{color:#fff;background:var(--primary-600);border-color:var(--primary-600)}
+.btn-primary:hover:not(:disabled){background:var(--primary-700);border-color:var(--primary-700);color:#fff}
+.btn-ghost{border-color:transparent;background:transparent}
+.btn-ghost:hover:not(:disabled){background:var(--surface);border-color:var(--border)}
+.btn .spin{width:12px;height:12px;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;
+  border-radius:50%;animation:sp .6s linear infinite;display:none}
+.btn.loading .spin{display:block}
+@keyframes sp{to{transform:rotate(360deg)}}
+
+/* ---------- progress / refresh ---------- */
+.progress{height:2px;background:var(--primary-100);overflow:hidden;margin:0}
+.progress i{display:block;height:100%;width:30%;background:var(--primary-500);animation:slide 1s ease-in-out infinite}
+@keyframes slide{0%{transform:translateX(-100%)}100%{transform:translateX(400%)}}
+
+/* ---------- table ---------- */
+.wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums}
+thead th{padding:10px 14px;background:var(--surface);font-weight:600;color:var(--text-secondary);
+  font-size:12px;letter-spacing:.05em;border-bottom:2px solid var(--border);white-space:nowrap;
+  text-align:left;position:sticky;top:0;z-index:1}
+thead th.srt{cursor:pointer;user-select:none}
+thead th.srt:hover{color:var(--primary-600);background:var(--primary-50)}
+thead th .arw{opacity:.35;font-size:10px;margin-left:3px}
+thead th.asc .arw,thead th.desc .arw{opacity:1;color:var(--primary-600)}
+tbody td{padding:10px 14px;border-bottom:1px solid var(--border-light);vertical-align:middle}
+tbody tr.grp{cursor:pointer;transition:background .12s}
+tbody tr.grp:hover td{background:var(--primary-50)}
+tbody tr.grp:focus-visible{outline:2px solid var(--primary-500);outline-offset:-2px}
+.w-date{width:130px;white-space:nowrap}
+.w-cust{width:16%;min-width:130px}
+.w-sup{width:14%;min-width:120px}
+.w-bar{width:110px}
+.w-num{width:92px;text-align:right}
+.w-st{width:104px;text-align:center}
+.num{text-align:right;font-weight:600}
+.muted{color:var(--text-secondary);font-size:12px}
+.prod{max-width:340px}
+.prod>div{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:flex;align-items:center;gap:6px}
+.tag{display:inline-flex;align-items:center;padding:1px 6px;font-size:10px;font-weight:600;border-radius:4px;
+  background:var(--surface);color:var(--text-secondary);flex-shrink:0}
+.tag.custom{background:var(--warning-50);color:var(--warning-600)}
+.bar{font-family:Consolas,Menlo,monospace;font-size:12px;color:var(--text-muted);letter-spacing:.04em}
+.badge{display:inline-block;padding:4px 12px;border-radius:16px;font-size:12px;font-weight:600;white-space:nowrap}
+.b-ok{background:var(--success-50);color:var(--success-600)}
+.b-part{background:var(--warning-50);color:var(--warning-600)}
+.b-pend{background:var(--primary-50);color:var(--primary-700)}
+.b-cancel{background:var(--danger-50);color:var(--danger-600)}
+.b-muted{background:var(--surface);color:var(--text-muted)}
+.sku-badge{display:inline-flex;align-items:center;justify-content:center;min-width:48px;height:18px;padding:1px 6px;
+  font-size:10px;font-weight:700;border-radius:4px;background:var(--primary-100);color:var(--primary-700);flex-shrink:0}
+.rowbtn{border:1px solid var(--border);background:#fff;border-radius:6px;padding:3px 9px;font-size:12px;
+  color:var(--text-secondary);cursor:pointer;font-family:inherit;opacity:0;transition:all .15s;white-space:nowrap}
+tr.grp:hover .rowbtn,tr.grp:focus-within .rowbtn{opacity:1}
+.rowbtn:hover{border-color:var(--primary-400);color:var(--primary-600);background:var(--primary-50)}
+tr.multi-sku td{vertical-align:top}
+.sku-line{display:flex;align-items:center;gap:6px;padding:2px 0;line-height:1.4;
+  border-bottom:1px dashed var(--border-light)}
+.sku-line:last-child{border-bottom:none}
+mark{background:#fff3c4;color:inherit;border-radius:2px;padding:0 1px}
+
+/* ---------- pagination ---------- */
+.pager{display:flex;align-items:center;justify-content:center;gap:8px;padding:10px 24px;
+  border-top:1px solid var(--border-light);flex-wrap:wrap;font-size:12px;color:var(--text-secondary)}
+.pager select,.pager button,.pager input{height:26px;border:1px solid var(--border);border-radius:6px;
+  background:#fff;font-size:12px;color:var(--text-secondary);font-family:inherit}
+.pager select{padding:0 4px;cursor:pointer}
+.pager button{width:26px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;padding:0}
+.pager button:hover:not(:disabled){border-color:var(--primary-300);color:var(--primary-600)}
+.pager button:disabled{opacity:.4;cursor:not-allowed}
+.pager input{width:40px;text-align:center;color:var(--text)}
+.pinfo{font-weight:600;color:var(--text);font-variant-numeric:tabular-nums;min-width:52px;text-align:center}
+
+/* ---------- states ---------- */
+.empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:56px 20px;text-align:center}
+.empty .ic{font-size:30px;color:var(--border);margin-bottom:4px}
+.empty p{margin:0;font-size:14px;font-weight:600;color:var(--text-secondary)}
+.empty span{font-size:12px;color:var(--text-muted)}
+.skel{padding:0}
+.skel div{height:42px;border-bottom:1px solid var(--border-light);
+  background:linear-gradient(90deg,var(--surface) 0%,#eef2f7 50%,var(--surface) 100%);
+  background-size:200% 100%;animation:sh 1.4s ease-in-out infinite}
+@keyframes sh{0%{background-position:200% 0}100%{background-position:-200% 0}}
+
+/* ---------- toast ---------- */
+#toasts{position:fixed;right:20px;bottom:20px;display:flex;flex-direction:column;gap:8px;z-index:99}
+.toast{padding:10px 16px;border-radius:10px;background:#fff;border:1px solid var(--border);font-size:13px;
+  font-weight:500;box-shadow:0 4px 16px rgba(0,0,0,.1);animation:in .2s ease}
+@keyframes in{from{opacity:0;transform:translateY(8px)}}
+
+/* ---------- responsive ---------- */
+@media(max-width:820px){
+  body{padding:12px}
+  .toolbar{padding:12px 14px 8px}
+  .searchbar,.chips,.pills{padding-left:14px;padding-right:14px}
+  .adv{padding-left:14px;padding-right:14px}
+  .sbox{max-width:none;flex-basis:100%}
+  .hide-sm{display:none}
+}
+@media(max-width:560px){
+  .toolbar-right{width:100%;margin-left:0}
+  .toolbar-right .btn{flex:1;justify-content:center}
+}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}
+</style>
+</head>
+<body>
+
+<div class="banner">
+  <h1>下单查询 · 交互优化原型</h1>
+  <span class="tag" id="modeTag">优化后</span>
+  <div class="switcher">
+    <button id="btnAfter" class="on">优化后</button>
+    <button id="btnBefore">当前线上</button>
+  </div>
+</div>
+
+<div class="card">
+  <div class="tabbar">
+    <div class="tab-group">
+      <button class="tab-btn">待审核订单 <span class="tab-badge">7</span></button>
+      <button class="tab-btn">待生产订单 <span class="tab-badge">12</span></button>
+      <button class="tab-btn on">下单查询</button>
+    </div>
+  </div>
+
+  <!-- ============ 优化后工具栏 ============ -->
+  <div id="afterUI" style="display:block">
+    <div class="toolbar">
+      <div class="toolbar-left">
+        <h2 class="title">下单查询</h2>
+        <span class="count" id="totalCnt">共 342 条</span>
+      </div>
+      <div class="toolbar-right">
+        <button class="btn btn-ghost" id="btnAdv">高级筛选 <span id="advCar">▾</span></button>
+        <button class="btn" id="btnRefresh">刷新</button>
+        <button class="btn btn-primary" id="btnExport"><span class="spin"></span>导出 Excel</button>
+      </div>
+    </div>
+
+    <div class="progress" id="topbar" style="display:none"><i></i></div>
+
+    <div class="searchbar">
+      <div class="sbox" id="sboxWrap">
+        <span class="ico">⌕</span>
+        <input id="kw" type="search" autocomplete="off" placeholder="搜索订单号 / 客户 / 产品名称…（按 / 聚焦）">
+        <button class="clr" id="kwClear" aria-label="清空">✕</button>
+      </div>
+      <div class="chips" id="chips"></div>
+    </div>
+
+    <div class="pills" id="pills" style="display:none"></div>
+
+    <div class="adv" id="adv">
+      <div class="adv-grid">
+        <div class="fld"><label>客户名称</label><input data-k="customer_name" placeholder="支持模糊匹配"></div>
+        <div class="fld"><label>供应商</label><input data-k="supplier_name" placeholder="支持模糊匹配"></div>
+        <div class="fld"><label>69 码</label><input data-k="barcode" placeholder="产品条码"></div>
+        <div class="fld"><label>物料名称</label><input data-k="material_name" placeholder="BOM 物料"></div>
+        <div class="fld"><label>完成时间从</label><input type="date" data-k="start_date"></div>
+        <div class="fld"><label>完成时间到</label><input type="date" data-k="end_date"></div>
+      </div>
+      <div class="adv-actions">
+        <button class="btn btn-primary" id="btnApply">应用筛选</button>
+        <button class="btn" id="btnReset">重置全部</button>
+        <span style="font-size:12px;color:var(--text-muted)">提示：日期为区间闭区间，含当日 23:59:59</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 当前线上（无筛选无导出） ============ -->
+  <div id="beforeUI" style="display:none">
+    <div class="toolbar">
+      <div class="toolbar-left">
+        <h2 class="title">下单查询</h2>
+      </div>
+    </div>
+    <div style="padding:0 24px 14px;font-size:12px;color:var(--danger-600);font-weight:600">
+      当前线上状态：无标题计数、无筛选、无导出、列不可排序
+    </div>
+  </div>
+
+  <div id="tableArea"></div>
+
+  <div class="pager" id="pager"></div>
+</div>
+
+<div id="toasts"></div>
+
+<script>
+const ROWS = [
+  {id:1001,no:'PO-20260914-001',cust:'杭州晨光贸易',sup:'宁波精工塑业',done:'2026-09-14 09:12',st:'completed',
+   skus:[{n:'双层玻璃保温杯 500ml 定制logo',b:'6901234567890',q:1200,ct:'custom'},{n:'不锈钢吸管杯 350ml',b:'6901234567891',q:800}]},
+  {id:1002,no:'PO-20260913-047',cust:'上海鼎盛百货',sup:'苏州恒信包装',done:'2026-09-13 17:40',st:'completed',
+   skus:[{n:'折叠收纳箱 60L',b:'6909876543210',q:450}]},
+  {id:1003,no:'PO-20260913-032',cust:'广州万隆实业',sup:'东莞顺发五金',done:'2026-09-13 14:05',st:'partial',
+   skus:[{n:'硅胶厨具八件套',b:'6905551234567',q:300},{n:'陶瓷刀具四件套',b:'6905551234568',q:300},{n:'竹木砧板中号',b:'6905551234569',q:150}]},
+  {id:1004,no:'PO-20260912-118',cust:'北京华联商贸',sup:'天津北方纸品',done:'2026-09-12 11:30',st:'completed',
+   skus:[{n:'抽取式面巾纸 3层120抽',b:'6907778889990',q:2400}]},
+  {id:1005,no:'PO-20260912-076',cust:'深圳前海优品',sup:'佛山美居家品',done:'2026-09-12 08:55',st:'pending',
+   skus:[{n:'记忆棉腰靠垫',b:'6902223334445',q:600}]},
+  {id:1006,no:'PO-20260911-204',cust:'成都天府百货',sup:'重庆长江纺织',done:'2026-09-11 16:20',st:'cancelled',
+   skus:[{n:'纯棉四件套 1.8m床',b:'6903334445556',q:220}]},
+  {id:1007,no:'PO-20260911-155',cust:'南京金鹰国际',sup:'无锡光明电器',done:'2026-09-11 10:08',st:'completed',
+   skus:[{n:'桌面USB小风扇',b:'6904445556667',q:1500}]},
+];
+const ST={completed:['已完成','b-ok'],partial:['部分到货','b-part'],pending:['待处理','b-pend'],cancelled:['已取消','b-cancel']};
+const CHIPS=[{id:'',name:'全部',n:342},{id:'today',name:'今天',n:12},{id:'week',name:'近 7 天',n:68},{id:'month',name:'近 30 天',n:214}];
+
+let state={kw:'',chip:'',adv:{},sort:{field:'done',dir:'desc'},page:1,size:20,loading:false};
+
+const $=s=>document.querySelector(s);
+const advOpen=()=>$('#adv').classList.contains('open');
+
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+function hl(t,q){if(!q)return esc(t);const i=t.toLowerCase().indexOf(q.toLowerCase());
+  if(i<0)return esc(t);return esc(t.slice(0,i))+'<mark>'+esc(t.slice(i,i+q.length))+'</mark>'+esc(t.slice(i+q.length))}
+
+/* 过滤（模拟服务端） */
+function filtered(){
+  let r=ROWS.slice();
+  if(state.kw){const q=state.kw.toLowerCase();
+    r=r.filter(o=>o.no.toLowerCase().includes(q)||o.cust.toLowerCase().includes(q)||
+      o.sup.toLowerCase().includes(q)||o.skus.some(s=>s.n.toLowerCase().includes(q)||s.b.includes(q)))}
+  const a=state.adv;
+  if(a.customer_name)r=r.filter(o=>o.cust.includes(a.customer_name));
+  if(a.supplier_name)r=r.filter(o=>o.sup.includes(a.supplier_name));
+  if(a.barcode)r=r.filter(o=>o.skus.some(s=>s.b.includes(a.barcode)));
+  if(a.start_date)r=r.filter(o=>o.done.slice(0,10)>=a.start_date);
+  if(a.end_date)r=r.filter(o=>o.done.slice(0,10)<=a.end_date);
+  if(state.chip==='today')r=r.filter(o=>o.done.slice(0,10)==='2026-09-14');
+  if(state.chip==='week')r=r.filter(o=>o.done.slice(0,10)>='2026-09-08');
+  if(state.chip==='month')r=r.filter(o=>o.done.slice(0,10)>='2026-08-16');
+  const f=state.sort.field,d=state.sort.dir==='asc'?1:-1;
+  r.sort((x,y)=>{const v=f==='cust'?x.cust:y.cust&&f==='cust'?y.cust:f==='qty'?x.skus.reduce((s,k)=>s+k.q,0):f==='qty'?y.skus.reduce((s,k)=>s+k.q,0):x[f];
+    if(f==='qty'){const qa=x.skus.reduce((s,k)=>s+k.q,0),qb=y.skus.reduce((s,k)=>s+k.q,0);return (qa-qb)*d}
+    const va=f==='cust'?x.cust:x[f],vb=f==='cust'?y.cust:y[f];return String(va).localeCompare(String(vb))*d});
+  return r;
+}
+
+function renderChips(){
+  $('#chips').innerHTML=CHIPS.map(c=>
+    `<button class="chip${state.chip===c.id?' on':''}" data-chip="${c.id}">${c.name}<span class="n">${c.n}</span></button>`).join('');
+}
+function renderPills(){
+  const items=[];
+  if(state.kw)items.push(['kw','关键词：'+state.kw]);
+  const L={customer_name:'客户',supplier_name:'供应商',barcode:'69码',material_name:'物料',start_date:'起始',end_date:'截止'};
+  Object.entries(state.adv).forEach(([k,v])=>{if(v)items.push([k,L[k]+'：'+v])});
+  if(state.chip){const c=CHIPS.find(x=>x.id===state.chip);if(c)items.push(['chip',c.name])}
+  const box=$('#pills');
+  if(!items.length){box.style.display='none';box.innerHTML='';return}
+  box.style.display='flex';
+  box.innerHTML=items.map(([k,t])=>`<span class="pill">${esc(t)}<button data-rm="${k}" aria-label="移除该条件">✕</button></span>`).join('')
+    +`<button class="clr-all" id="clrAll">清空全部条件</button>`;
+}
+function renderTable(){
+  const area=$('#tableArea');
+  if(state.loading){area.innerHTML=`<div class="skel">${Array(8).fill('<div></div>').join('')}</div>`;$('#pager').innerHTML='';return}
+  const rows=filtered();
+  const tp=Math.max(1,Math.ceil(rows.length/state.size));
+  if(state.page>tp)state.page=tp;
+  const view=rows.slice((state.page-1)*state.size,state.page*state.size);
+
+  if(!view.length){
+    const has=state.kw||Object.values(state.adv).some(Boolean)||state.chip;
+    area.innerHTML=`<div class="empty"><div class="ic">▤</div>
+      <p>${has?'没有符合条件的订单':'暂无下单记录'}</p>
+      <span>${has?'试试放宽筛选条件或清空关键词':'完成审核的采购订单会出现在这里'}</span>
+      ${has?'<button class="btn" id="emptyClear" style="margin-top:8px">清空全部条件</button>':''}</div>`;
+    $('#pager').innerHTML='';
+    const b=$('#emptyClear'); if(b)b.onclick=clearAll;
+    return;
+  }
+
+  const q=state.kw;
+  let html=`<div class="wrap"><table><thead><tr>
+    <th class="srt w-date${state.sort.field==='done'?' '+state.sort.dir:''}" data-sort="done">完成时间<span class="arw">${state.sort.field==='done'?(state.sort.dir==='asc'?'▲':'▼'):'⇅'}</span></th>
+    <th class="w-cust">客户 / 供应商</th>
+    <th class="w-bar hide-sm">69 码</th>
+    <th class="w-num">数量</th>
+    <th class="w-st">状态</th>
+    <th class="w-cust hide-sm"></th>
+  </tr></thead><tbody>`;
+
+  view.forEach(o=>{
+    const [lbl,cls]=ST[o.st]||['—','b-muted'];
+    const qty=o.skus.reduce((s,k)=>s+k.q,0);
+    o.skus.forEach((s,i)=>{
+      html+=`<tr class="grp${o.skus.length>1?' multi-sku':''}" data-id="${o.id}" tabindex="0">
+        ${i===0?`<td class="w-date muted" rowspan="${o.skus.length}">${o.done}</td>`:''}
+        ${i===0?`<td class="w-cust" rowspan="${o.skus.length}">
+            <div style="font-weight:600">${hl(o.cust,q)}</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:2px">${hl(o.sup,q)}</div>
+          </td>`:''}
+        <td class="hide-sm"><span class="bar">${hl(s.b,q)}</span></td>
+        <td class="num">${s.q.toLocaleString()}</td>
+        ${i===0?`<td class="w-st" rowspan="${o.skus.length}"><span class="badge ${cls}">${lbl}</span>
+            ${o.skus.length>1?`<div style="margin-top:5px"><span class="sku-badge">${o.skus.length} SKU</span></div>`:''}</td>`:''}
+        ${i===0?`<td class="hide-sm" rowspan="${o.skus.length}"><button class="rowbtn" data-open="${o.id}">查看详情</button></td>`:''}
+      </tr>`;
+      html+=`<tr class="hide-sm" data-prod="${o.id}" style="display:none"><td colspan="6"></td></tr>`;
+    });
+  });
+  html+='</tbody></table></div>';
+  area.innerHTML=html;
+
+  $('#pager').innerHTML=`共 <strong>${rows.length}</strong> 条 ·
+    <select id="psize">${[20,50,100].map(n=>`<option value="${n}"${n===state.size?' selected':''}>${n} 条/页</option>`).join('')}</select>
+    <button id="pprev" ${state.page<=1?'disabled':''} aria-label="上一页">‹</button>
+    <span class="pinfo">${state.page} / ${tp}</span>
+    <button id="pnext" ${state.page>=tp?'disabled':''} aria-label="下一页">›</button>
+    <span>跳至</span><input id="pjump" inputmode="numeric" aria-label="跳转页码"><span>页</span>`;
+
+  area.querySelectorAll('th[data-sort]').forEach(th=>th.onclick=()=>{
+    const f=th.dataset.sort;
+    state.sort=state.sort.field===f?{field:f,dir:state.sort.dir==='asc'?'desc':'asc'}:{field:f,dir:'desc'};
+    renderTable();
+  });
+  area.querySelectorAll('.grp').forEach(tr=>{
+    const open=()=>toast('打开订单 #'+tr.dataset.id+' 详情抽屉（原型占位）');
+    tr.onclick=e=>{if(e.target.closest('[data-open]'))return;open()};
+    tr.onkeydown=e=>{if(e.key==='Enter'){open()}};
+  });
+  area.querySelectorAll('[data-open]').forEach(b=>b.onclick=e=>{
+    e.stopPropagation();toast('打开订单 #'+b.dataset.open+' 详情抽屉（原型占位）');
+  });
+
+  $('#psize').onchange=e=>{state.size=+e.target.value;state.page=1;renderTable()};
+  $('#pprev').onclick=()=>{state.page--;renderTable();scrollTop()};
+  $('#pnext').onclick=()=>{state.page++;renderTable();scrollTop()};
+  $('#pjump').onkeyup=e=>{if(e.key!=='Enter')return;const n=+e.target.value;if(Number.isInteger(n)){state.page=Math.min(Math.max(n,1),tp);renderTable();scrollTop()}};
+}
+function scrollTop(){window.scrollTo({top:0,behavior:'smooth'})}
+
+function toast(msg){
+  const d=document.createElement('div');d.className='toast';d.textContent=msg;
+  $('#toasts').appendChild(d);setTimeout(()=>d.remove(),2600);
+}
+function clearAll(){
+  state.kw='';state.chip='';state.adv={};
+  document.querySelectorAll('.adv input').forEach(i=>i.value='');
+  $('#kw').value='';$('#sboxWrap').classList.remove('has-val');
+  renderChips();renderPills();renderTable();toast('已清空全部筛选条件');
+}
+/* 模拟异步请求：展示 loading 骨架 + 顶部进度条 */
+function query(){
+  state.loading=true;$('#topbar').style.display='block';renderTable();
+  setTimeout(()=>{state.loading=false;$('#topbar').style.display='none';renderTable();},320);
+}
+
+/* events */
+$('#chips').onclick=e=>{const b=e.target.closest('[data-chip]');if(!b)return;
+  state.chip=b.dataset.chip;state.page=1;renderChips();renderPills();query()};
+
+let t=null;
+$('#kw').oninput=e=>{
+  state.kw=e.target.value;$('#sboxWrap').classList.toggle('has-val',!!state.kw);
+  clearTimeout(t);t=setTimeout(()=>{state.page=1;renderPills();query()},300);
+};
+$('#kwClear').onclick=()=>{state.kw='';$('#kw').value='';$('#sboxWrap').classList.remove('has-val');
+  state.page=1;renderPills();query()};
+
+document.addEventListener('keydown',e=>{
+  if(e.key==='/'&&!/input|textarea|select/i.test(e.target.tagName)){e.preventDefault();$('#kw').focus()}
+});
+
+$('#btnAdv').onclick=()=>{
+  const o=!advOpen();$('#adv').classList.toggle('open',o);
+  $('#advCar').textContent=o?'▴':'▾';
+};
+$('#btnApply').onclick=()=>{
+  const a={};document.querySelectorAll('.adv input').forEach(i=>{if(i.value)a[i.dataset.k]=i.value});
+  state.adv=a;state.page=1;renderPills();query();
+  if(Object.keys(a).length)toast('已应用 '+Object.keys(a).length+' 个筛选条件');
+};
+$('#btnReset').onclick=clearAll;
+$('#btnRefresh').onclick=()=>{query();toast('已刷新列表')};
+$('#btnExport').onclick=()=>{
+  const b=$('#btnExport');b.classList.add('loading');b.disabled=true;
+  setTimeout(()=>{b.classList.remove('loading');b.disabled=false;toast('已导出 下单查询汇总.xls')},900);
+};
+$('#pills').onclick=e=>{
+  if(e.target.id==='clrAll'){clearAll();return}
+  const b=e.target.closest('[data-rm]');if(!b)return;
+  const k=b.dataset.rm;
+  if(k==='kw'){state.kw='';$('#kw').value='';$('#sboxWrap').classList.remove('has-val')}
+  else if(k==='chip')state.chip='';
+  else{delete state.adv[k];const i=document.querySelector(`.adv input[data-k="${k}"]`);if(i)i.value=''}
+  state.page=1;renderChips();renderPills();query();
+};
+
+/* before / after 切换 */
+const beforeRows=()=>{
+  let html=`<div class="wrap"><table><thead><tr>
+    <th class="w-date">完成时间</th><th class="w-cust">客户</th><th>产品名称</th>
+    <th class="w-num">数量</th><th class="w-st">状态</th></tr></thead><tbody>`;
+  ROWS.slice(0,5).forEach(o=>{
+    const [lbl,cls]=ST[o.st]||['—','b-muted'];
+    o.skus.forEach((s,i)=>{
+      html+=`<tr>
+        ${i===0?`<td class="w-date muted" rowspan="${o.skus.length}">${o.done}</td>`:''}
+        ${i===0?`<td class="w-cust" rowspan="${o.skus.length}">${o.cust}</td>`:''}
+        <td class="prod"><div>${esc(s.n)}</div></td>
+        <td class="num">${s.q.toLocaleString()}</td>
+        ${i===0?`<td class="w-st" rowspan="${o.skus.length}"><span class="badge ${cls}">${lbl}</span></td>`:''}
+      </tr>`;
+    });
+  });
+  return html+'</tbody></table></div>';
+};
+let mode='after';
+function setMode(m){
+  mode=m;
+  $('#afterUI').style.display=m==='after'?'block':'none';
+  $('#beforeUI').style.display=m==='before'?'block':'none';
+  $('#btnAfter').classList.toggle('on',m==='after');
+  $('#btnBefore').classList.toggle('on',m==='before');
+  $('#modeTag').textContent=m==='after'?'优化后':'当前线上';
+  if(m==='after'){renderChips();renderPills();renderTable()}
+  else{
+    $('#tableArea').innerHTML=beforeRows();
+    $('#pager').innerHTML=`<button disabled>‹</button><span class="pinfo">1 / 18</span><button>›</button>
+      <span style="color:var(--text-muted)">（无每页条数、无跳页）</span>`;
+  }
+}
+$('#btnAfter').onclick=()=>setMode('after');
+$('#btnBefore').onclick=()=>setMode('before');
+
+setMode('after');
+</script>
+</body>
+</html>

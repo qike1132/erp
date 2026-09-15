@@ -120,7 +120,7 @@ async def trigger_full_backup(
         from fastapi_app.core.backup_progress import store_task_password
         try:
             await store_task_password(task_id, password)
-        except Exception:
+        except Exception:  # broad-except: 密码侧信道写入失败必须继续入队（降级为不加密），备份不能因此失败
             logger.warning('store_task_password 失败，继续入队（task_id=%s）', task_id)
     try:
         await _enqueue_task(

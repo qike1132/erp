@@ -217,6 +217,25 @@ async def client():
 
 
 class TestTriggerEndpoints:
+    """端点 /full、/incremental 的入队与互斥行为。
+
+    注意：端点在入队前会调用 _check_worker_online()（ARQ Worker 在线预检），
+    Worker 不在线时返回 503 WORKER_OFFLINE——这是**有意的正确设计**，用于避免
+    任务入队后无人消费、前端进度永久卡在"初始化中"。
+
+    本类测试关注的是"入队参数与状态码"，因此统一 mock 掉该预检，
+    使测试不依赖运行环境是否真的起了 Worker。
+    """
+
+    @pytest.fixture(autouse=True)
+    def _worker_online(self):
+        """默认认为 Worker 在线；需要验证 503 的用例自行覆盖。"""
+        with patch(
+            'fastapi_app.api.v1.endpoints.backup.actions._check_worker_online',
+            new=AsyncMock(),
+        ):
+            yield
+
     @pytest.mark.asyncio
     async def test_full_returns_202_with_task_id(self, client):
         """POST /full → 202 + task_id + 入队调用"""
@@ -257,6 +276,38 @@ class TestTriggerEndpoints:
         assert body['task_name'] == 'manual_incremental_backup_task'
         call_kwargs = fake_pool.enqueue_job.call_args.kwargs
         assert call_kwargs['since'] == '20260820_020000'
+
+    @pytest.mark.asyncio
+    async def test_full_returns_503_when_worker_offline(self, client):
+        """Worker 不在线时 → 503 WORKER_OFFLINE，且**不得入队**。
+
+        锁定"预检失败即拒绝"的契约：否则任务入队后无人消费，
+        前端进度会永久卡在"初始化中"。
+        """
+        from fastapi import HTTPException
+
+        async def _offline():
+            raise HTTPException(
+                status_code=503,
+                detail={'code': 'WORKER_OFFLINE', 'message': '备份 Worker 未运行'},
+            )
+
+        fake_pool = AsyncMock()
+        with patch(
+            'fastapi_app.api.v1.endpoints.backup.actions._check_worker_online',
+            new=_offline,
+        ), patch(
+            'fastapi_app.core.arq_app.get_arq_pool',
+            new=AsyncMock(return_value=fake_pool),
+        ), patch(
+            'fastapi_app.api.v1.endpoints.backup.actions._check_task_mutex',
+            new=AsyncMock(),
+        ):
+            resp = await client.post('/api/v1/backup/full', json={})
+
+        assert resp.status_code == 503
+        assert resp.json()['detail']['code'] == 'WORKER_OFFLINE'
+        fake_pool.enqueue_job.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_full_returns_409_when_busy(self, client):

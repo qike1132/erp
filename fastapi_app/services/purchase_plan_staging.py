@@ -215,6 +215,9 @@ async def _get_or_create_plan_for_group(
            pg_standalone_018），作为最后防线；并发 INSERT 触发 IntegrityError
            时重试 SELECT 读取已创建的主单。
     N3 修复：删除循环末尾不可达的 raise。
+        —— 2026-09-14 修订：该 raise 已恢复。删除它使「第 3 次必 raise」
+        变成隐式约定（mypy 也会报 Missing return statement）；恢复后既显式化
+        不变式，又避免将来改动循环边界时静默返回 None。
     """
     # with_for_update 锁住已存在行；若不存在则不锁任何行，依赖唯一索引兜底
     existing = await db.execute(
@@ -251,6 +254,13 @@ async def _get_or_create_plan_for_group(
             if _attempt == 2:
                 raise ValueError('单号生成冲突，请勿重复提交') from None
             logger.warning(f'confirm_staging: plan_no {plan_no} 冲突，重试({_attempt + 1}/3)')
+
+    # 防御性兜底：循环内每个分支要么 return 要么 raise，此处**不可达**。
+    # （原 docstring 的「N3 修复：删除循环末尾不可达的 raise」把它当作死代码删掉，
+    #  但那样「第 3 次必 raise」就变成隐式约定 —— 一旦循环边界被改动，
+    #  函数会静默返回 None，调用方拿到 None 而非 PurchasePlan。
+    #  保留它既显式化不变式，也让 mypy 能确认返回契约成立。）
+    raise ValueError('单号生成冲突，请勿重复提交')
 
 
 def _create_details_for_group(

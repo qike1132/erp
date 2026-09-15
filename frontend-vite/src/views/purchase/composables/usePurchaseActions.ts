@@ -6,7 +6,7 @@ import { useExport } from '@/composables/useExport'
 import type { UnprocessedOrder } from '@/types'
 import { useUnprocessedOrders } from './useUnprocessedOrders'
 import { usePurchaseOrders } from './usePurchaseOrders'
-import { useCompletedOrders } from './useCompletedOrders'
+import { useCompletedOrders, type CompletedOrderFilters } from './useCompletedOrders'
 import { useSummaryModal } from './useSummaryModal'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 
@@ -180,27 +180,23 @@ export function usePurchaseActions(deps: PurchaseActionDeps) {
     summary.updateFactoryQty(Number(gi), Number(si), Number(fi), parseFloat(value) || 0)
   }
 
-  function handleFilterUpdate(payload: { key: string; value: string }) {
-    ;(completed.filters as Record<string, string>)[payload.key] = payload.value
-  }
-
-  function handleCompletedSearch() {
-    completed.page = 1
-    completed.load()
-  }
-
-  const { runExport } = useExport({ success: '已导出 下单查询汇总.xls' })
-
-  function handleExport() {
-    runExport(async () => {
-      const ok = await completed.exportOrders()
-      if (!ok) throw new Error('导出失败')
-    })
-  }
-
   function handleCompletedPageChange(page: number) {
     completed.page = page
-    // P3-17: 页码变更由 Vue Query queryKey 自动触发 fetch，不 invalidate 以保留 prefetch 缓存。
+    // 页码变更由 Vue Query queryKey 自动触发 fetch，不 invalidate 以保留 prefetch 缓存。
+  }
+
+  /** 移除单个筛选条件（来自条件胶囊的 ✕），随后回到第 1 页重新查询 */
+  function handleRemoveCompletedFilter(key: keyof CompletedOrderFilters) {
+    completed.draft[key] = ''
+    completed.filters[key] = ''
+    completed.page = 1
+  }
+
+  // 导出：复用统一 useExport，自动处理"正在导出/成功/失败"提示与并发防重
+  const { exporting, runExport } = useExport({ success: '已导出 下单查询汇总.xls' })
+
+  function handleExport() {
+    runExport(() => completed.exportOrders())
   }
 
   return {
@@ -213,9 +209,9 @@ export function usePurchaseActions(deps: PurchaseActionDeps) {
     handleOrderPageChange,
     handleSaveFactoryEdits,
     handleUpdateFactoryQty,
-    handleFilterUpdate,
-    handleCompletedSearch,
-    handleExport,
     handleCompletedPageChange,
+    handleRemoveCompletedFilter,
+    handleExport,
+    exporting,
   }
 }
