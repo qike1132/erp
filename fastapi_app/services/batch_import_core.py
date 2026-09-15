@@ -25,6 +25,7 @@ from fastapi_app.services.numbering import (
 from fastapi_app.services.order_deduction_service import process_order_deduction
 from fastapi_app.shared.stock_concurrency import get_product_for_update
 from fastapi_app.shared_models import (
+    Customer,
     InventoryLog,
     Order,
     Product,
@@ -101,6 +102,72 @@ async def _pre_load_product_map(db: AsyncSession) -> dict:
     product_map = {p.name.lower().strip(): p for p in all_products}
     product_map.update({p.barcode: p for p in all_products if p.barcode})
     return {'product_map': product_map}
+
+
+async def _pre_load_customer_names(db: AsyncSession) -> set:
+    """一次性加载客户主数据中的有效名称（去首尾空白、大小写敏感）。
+
+    订单/备货的 customer 是无外键的名字快照，导入时若不校验会在库里留下
+    永远关联不到客户的孤儿单据（2026-08-10 曾因此产生 19 张孤儿订单）。
+    """
+    result = await db.execute(select(Customer.name))
+    return {name.strip() for (name,) in result.all() if name and name.strip()}
+
+
+async def _pre_load_order_context(db: AsyncSession) -> dict:
+    """订单/备货导入的复合预加载：产品字典 + 有效客户名集合。"""
+    ctx = await _pre_load_product_map(db)
+    ctx['customer_names'] = await _pre_load_customer_names(db)
+    return ctx
+
+
+async def _resolve_row_identity(context: dict, idx: int, customer: str, product_name: str,
+                                debug_messages: list, *, silent_missing: bool = False,
+                                label: str = '') -> tuple[Product | None, str | None]:
+    """校验客户并解析产品，返回 ``(product, customer)``；校验失败返回 ``(None, None)``。
+
+    订单导入与备货导入的核心校验一致（客户名称格式校验 + 必须存在于客户主数据
+    + 产品按小写名/原名双查），差别仅在失败时是否记 debug 消息。抽出以免两处各写一遍。
+
+    客户必须在客户主数据中：``customer`` 是无外键的名字快照，不校验会在库里留下
+    永远关联不到客户的孤儿单据（2026-08-10 曾因此产生 19 张孤儿订单）。
+
+    Args:
+        silent_missing: 为 True 时，客户格式非法/产品不存在**不记 debug 消息**
+            （备货导入的既有行为）；客户不在主数据始终记消息（这是新增的防孤儿校验）。
+        label: debug 消息前缀，如 ``'订单'``。
+    """
+    is_valid, error_msg = validate_customer_name(customer)
+    if not is_valid:
+        if not silent_missing:
+            debug_messages.append(f"行{idx}: {label}客户验证失败 - {error_msg}")
+        return None, None
+
+    if customer not in context['customer_names']:
+        debug_messages.append(f"行{idx}: 客户'{customer}'不存在于客户主数据，请先在客户管理中创建")
+        return None, None
+
+    product_map = context['product_map']
+    product = product_map.get(product_name.lower().strip())
+    product = product or product_map.get(product_name)
+    if not product:
+        if not silent_missing:
+            debug_messages.append(f"行{idx}: 产品不存在 - {product_name}")
+        return None, None
+
+    return product, customer
+
+
+def _parse_positive_quantity(quantity, idx: int, *, label: str,
+                             product_name: str, customer: str) -> int | None:
+    """把数量转成正整数；无法解析或非正数返回 ``None``（调用方跳过该行）。"""
+    try:
+        qty = int(quantity)
+    except (ValueError, TypeError):
+        logger.warning("%s导入：quantity 解析失败，跳过该行 (product=%s, customer=%s, value=%r)",
+                       label, product_name, customer, quantity)
+        return None
+    return qty if qty > 0 else None
 
 
 async def _import_data_generic(
@@ -273,7 +340,6 @@ async def import_orders_from_data(db: AsyncSession, data_list: list, *, deps: Im
     deps = deps or default_import_deps()
 
     async def _row_handler(db, row_data, idx, context, debug_messages):
-        product_map = context['product_map']
         customer = row_data.get('客户名称') or row_data.get('客户')
         product_name = row_data.get('产品名称') or row_data.get('产品')
         quantity = row_data.get('数量') or row_data.get('订单数量')
@@ -286,25 +352,15 @@ async def import_orders_from_data(db: AsyncSession, data_list: list, *, deps: Im
         customer = str(customer).strip()
         product_name = str(product_name).strip()
 
-        is_valid, error_msg = validate_customer_name(customer)
-        if not is_valid:
-            debug_messages.append(f"行{idx}: 客户验证失败 - {error_msg}")
-            return False
-
-        # 使用预加载的产品字典查找
-        product = product_map.get(product_name.lower().strip())
-        product = product or product_map.get(product_name)
-        if not product:
-            debug_messages.append(f"行{idx}: 产品不存在 - {product_name}")
+        product, customer = await _resolve_row_identity(
+            context, idx, customer, product_name, debug_messages)
+        if product is None:
             return False
         product_id = product.id
 
-        try:
-            qty = int(quantity)
-            if qty <= 0:
-                return False
-        except ValueError:
-            logger.warning("订单导入：quantity 解析失败，跳过该行 (product=%s, customer=%s, value=%r)", product_name, customer, quantity)
+        qty = _parse_positive_quantity(
+            quantity, idx, label='订单', product_name=product_name, customer=customer)
+        if qty is None:
             return False
 
         order_no = await deps.generate_order_number(db)
@@ -352,7 +408,7 @@ async def import_orders_from_data(db: AsyncSession, data_list: list, *, deps: Im
 
     count, debug_messages = await _import_data_generic(
         db, data_list, _row_handler,
-        pre_load=_pre_load_product_map,
+        pre_load=_pre_load_order_context,
         use_savepoint=True,
         has_debug_messages=True,
         label="订单导入",
@@ -370,7 +426,6 @@ async def import_stockins_from_data(db: AsyncSession, data_list: list, *, deps: 
     deps = deps or default_import_deps()
 
     async def _row_handler(db, row_data, idx, context, debug_messages):
-        product_map = context['product_map']
         customer = row_data.get('客户名称') or row_data.get('客户')
         product_name = row_data.get('产品名称') or row_data.get('产品')
         quantity = row_data.get('数量') or row_data.get('备货数量')
@@ -383,22 +438,15 @@ async def import_stockins_from_data(db: AsyncSession, data_list: list, *, deps: 
         customer = str(customer).strip()
         product_name = str(product_name).strip()
 
-        is_valid, _error_msg = validate_customer_name(customer)
-        if not is_valid:
-            return False
-
-        product = product_map.get(product_name.lower().strip())
-        product = product or product_map.get(product_name)
-        if not product:
+        product, customer = await _resolve_row_identity(
+            context, idx, customer, product_name, debug_messages, silent_missing=True)
+        if product is None:
             return False
         product_id = product.id
 
-        try:
-            qty = int(quantity)
-            if qty <= 0:
-                return False
-        except ValueError:
-            logger.warning("备货导入：quantity 解析失败，跳过该行 (product=%s, customer=%s, value=%r)", product_name, customer, quantity)
+        qty = _parse_positive_quantity(
+            quantity, idx, label='备货', product_name=product_name, customer=customer)
+        if qty is None:
             return False
 
         stockin_date = parse_date_value(stockin_date_val) or datetime.now(UTC).replace(tzinfo=None)
@@ -430,7 +478,7 @@ async def import_stockins_from_data(db: AsyncSession, data_list: list, *, deps: 
 
     return await _import_data_generic(
         db, data_list, _row_handler,
-        pre_load=_pre_load_product_map,
+        pre_load=_pre_load_order_context,
         use_savepoint=True,
         has_debug_messages=True,
         label="备货导入",
