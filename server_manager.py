@@ -54,8 +54,7 @@ from pathlib import Path
 from typing import NamedTuple, Optional
 import tkinter as tk
 import tkinter.font as tkfont
-from tkinter import filedialog, messagebox
-from tkinter.scrolledtext import ScrolledText
+from tkinter import filedialog, messagebox, ttk
 _VERSION = 'v5.40'
 _WINDOW_TITLE = 'ERP 服务器管理器'
 _IS_WINDOWS = sys.platform == 'win32'
@@ -98,6 +97,165 @@ _STATUS_META = {'running': ('运行中', _C['green']), 'stopped': ('已停止', 
                 'error': ('异常', _C['red']), 'switching': ('切换中', _C['orange']),
                 'deploying': ('启动中', _C['orange']), 'not_installed': ('未安装', _C['gray']),
                 'unknown': ('状态未知', _C['gray'])}
+
+# ===================== v5.33 视觉表现层恢复（2026-09-16） =====================
+# 背景: 用户要求恢复 v5.33 的圆角按钮 + 微交互动画 + Apple/iOS 配色。
+# 规格来源: backups/version-prune-20260916/ERP服务器管理器_v5.33.exe.ORG-BEFORE-REPACK
+#           （v5.33 源码已不存在，仅存编译产物 → 经 pyinstxtractor-ng 解包 +
+#            marshal 反序列化 + dis 反汇编逐指令提取，见 _v533_ui_spec.txt）。
+# ★ 恢复原则: 只恢复「表现层」，不改变任何业务逻辑与状态机语义；
+#   _C 保留（业务代码仍引用其语义键），_PALETTE 为 v5.33 视觉层新增的独立色板。
+
+# v5.33 原始色板（19 色，iOS/Apple 系统色系）
+_V533_COLORS = {
+    'accent': '#007aff', 'accent_hover': '#0064d1',
+    'accent_tint': '#e8f1ff', 'accent_tint_h': '#d5e8ff', 'accent_border': '#c8dcfb',
+    'success': '#34c759', 'success_hover': '#2ba847',
+    'success_tint': '#e6f9ec', 'success_tint_h': '#d3f3dc', 'success_border': '#bbe6c5',
+    'danger': '#ff3b30', 'danger_hover': '#d92d22',
+    'danger_tint': '#ffece9', 'danger_tint_h': '#ffdad3', 'danger_border': '#f5b8b1',
+    'white': '#ffffff', 'bg_input': '#f2f2f7', 'ring': '#e5e5ea', 'text_primary': '#1d1d1f',
+    # warning 系（v5.33 过渡态橙，用于启动中/切换中徽章与 WARNING 日志级别）
+    'warning': '#ff9500', 'warning_hover': '#d97e00',
+    'warning_tint': '#fff4e5', 'warning_border': '#ffdcb0',
+    # ★ 以下色值全部为【运行时像素实测校正】，来源:
+    #   .workbuddy/artifacts/v533-ui-restore/ui-ref-v533-original.png
+    #   （启动备份中的原始 v5.33 exe，1096×799 客户区截屏，按区域取色值众数）
+    #   字节码里的 #f2f2f7 / #e5e5ea 实为「输入框底 / 分隔线」用色，与页面底色不同，
+    #   仅凭常量表会得出错误结论 —— 故以实测像素为准。
+    'page_bg': '#f5f5f7',            # 页面底色（实测）—— 非 #f2f2f7
+    'text_dim': '#6e6e73',           # 次级文字（实测）
+    'bg': '#f5f5f7', 'bg_card': '#ffffff',
+    'border_card': '#e3e3e6',        # 卡片描边（实测）
+    'log_surface': '#f9f9fb',        # 日志区底（实测）
+    # 按钮语义色（实测校准）
+    #   开发模式「启动」= 绿实心；生产模式「启动服务」= 蓝实心；
+    #   「停止/卸载」= 白底 + 红描边；「重启」= 白底 + 蓝描边。
+    'green_disabled': '#a8e0b8',     # 绿按钮禁用底
+    'btn_secondary_bg': '#ffffff', 'btn_secondary_border': '#d2d2d7',
+    'disabled_bg': '#f2f2f7', 'disabled_fg': '#adadb1',
+}
+# 语义映射到 _C 键的别名（供业务代码按需取 v5.33 视觉值）
+_PALETTE = {
+    'bg': _V533_COLORS['bg'], 'bg_card': _V533_COLORS['bg_card'],
+    'border_card': _V533_COLORS['border_card'],
+    'text_primary': _V533_COLORS['text_primary'], 'text_dim': _V533_COLORS['text_dim'],
+    'accent': _V533_COLORS['accent'], 'accent_hover': _V533_COLORS['accent_hover'],
+    'accent_h': _V533_COLORS['accent_hover'],   # v5.33 脉冲动画用键名（原样保留）
+    'accent_tint': _V533_COLORS['accent_tint'], 'accent_tint_h': _V533_COLORS['accent_tint_h'],
+    'success': _V533_COLORS['success'], 'success_hover': _V533_COLORS['success_hover'],
+    'success_tint': _V533_COLORS['success_tint'], 'success_tint_h': _V533_COLORS['success_tint_h'],
+    'danger': _V533_COLORS['danger'], 'danger_hover': _V533_COLORS['danger_hover'],
+    'danger_tint': _V533_COLORS['danger_tint'], 'danger_tint_h': _V533_COLORS['danger_tint_h'],
+    'warning': _V533_COLORS['warning'], 'warning_tint': _V533_COLORS['warning_tint'],
+    'warning_border': _V533_COLORS['warning_border'],
+    'ring': _V533_COLORS['ring'], 'bg_input': _V533_COLORS['bg_input'],
+}
+# v5.33 视觉层专用的状态色（仅换颜色，文案沿用 _STATUS_META，不改任何语义）。
+_STATUS_COLOR_KEY_V533 = {'running': 'success', 'error': 'danger', 'stopped': None,
+                          'switching': None, 'deploying': None, 'not_installed': None, 'unknown': None}
+_BADGE_META_V533 = {
+    k: (text, _V533_COLORS[_STATUS_COLOR_KEY_V533[k]] if _STATUS_COLOR_KEY_V533.get(k) else color)
+    for k, (text, color) in _STATUS_META.items()
+}
+# 按钮 变体×色调 调色板（v5.33 原样：fill/fill_h/tint/tint_h/fg/subtle_border/transparent_fill）
+_BUTTON_VARIANT_PALETTE = {
+    'accent': {'fill': '#007aff', 'fill_h': '#0064d1', 'tint': '#e8f1ff', 'tint_h': '#d5e8ff',
+               'fg': '#ffffff', 'subtle_border': '#c8dcfb', 'transparent_fill': '#ffffff'},
+    'success': {'fill': '#34c759', 'fill_h': '#2ba847', 'tint': '#e6f9ec', 'tint_h': '#d3f3dc',
+                'fg': '#ffffff', 'subtle_border': '#bbe6c5', 'transparent_fill': '#ffffff'},
+    'danger': {'fill': '#ff3b30', 'fill_h': '#d92d22', 'tint': '#ffece9', 'tint_h': '#ffdad3',
+               'fg': '#ffffff', 'subtle_border': '#f5b8b1', 'transparent_fill': '#ffffff'},
+    'neutral': {'fill': '#f2f2f7', 'fill_h': '#e5e5ea', 'tint': '#f2f2f7', 'tint_h': '#e5e5ea',
+                'fg': '#1d1d1f', 'subtle_border': '#e5e5ea', 'transparent_fill': '#ffffff'},
+}
+# 按钮尺寸/动效（v5.33 原规格）
+_BTN_RADIUS, _BTN_HOVER_SHIFT, _BTN_ANIM_MS, _BTN_PRESS_DY = 10, -12, 180, 1
+# 徽章脉冲与窗口淡入（v5.33 原规格）
+_BADGE_PULSE_MS = 900
+_FADE_STEPS, _FADE_INTERVAL_MS = 10, 30      # 窗口淡入 10 步 × 30ms = 300ms
+_PULSE_STEPS, _PULSE_INTERVAL_MS = 10, 30    # 边框脉冲 10 步 × 30ms = 660ms（三角波往复）
+_CARD_INTRO_STAGGER_MS = 80                  # 卡片入场错峰间隔
+
+
+def _apply_v533_visual_layer():
+    """把 _C 语义色整体切换为 v5.33 的 Apple/iOS 色值（视觉层唯一开关）。
+
+    ★ 为什么改 _C 而不是让各处改引 _PALETTE:
+      _C 在本文件中被 200+ 处以 _C['xxx'] 形式引用（含 Label/Frame/Canvas 的 bg/fg）。
+      若逐处改引，一是改动面巨大易漏，二是后续新增控件会再次落回旧色板，形成双色板漂移。
+      在**模块初始化阶段**（任何控件创建之前）一次性替换 _C 的取值，即可获得
+      「一处切换、全应用生效」的效果，且不触碰任何业务逻辑。
+
+    ★ 安全性: _DOT_COLOR / _STATUS_META 在 _C 替换**之前**已用旧对象建立完毕
+      （见上方定义顺序），此处不重建它们，避免改变状态语义映射。
+      _V533_COLORS 与 _BUTTON_VARIANT_PALETTE 仍保有原始色值，互不干扰。
+
+    ★ 可回滚: 删除本函数的调用即完整回到 v5.40 原配色，无残留。
+    """
+    _C.update({
+        'bg': _V533_COLORS['page_bg'],           # #f5f5f7  iOS 分组背景（实测校准值）
+        'card': _V533_COLORS['bg_card'],         # #ffffff
+        'border': _V533_COLORS['border_card'],   # #e3e3e6
+        'text': _V533_COLORS['text_primary'],    # #1d1d1f
+        'muted': _V533_COLORS['text_dim'],       # #6e6e73  iOS 次级文字（实测校准值）
+        'green': _V533_COLORS['success'],        # #34c759
+        'gray': _V533_COLORS['text_dim'],        # #6e6e73
+        'red': _V533_COLORS['danger'],           # #ff3b30
+        'orange': _V533_COLORS['warning'],       # #ff9500
+        'blue': _V533_COLORS['accent'],          # #007aff  iOS 系统蓝
+    })
+
+
+def _hex_to_rgb_v533(hex_c):
+    """'#rrggbb' → (r, g, b)。v5.33 原函数（名 _hex_to_rgb 已被当前版本占用）。"""
+    hex_c = hex_c.lstrip('#')
+    return int(hex_c[0:2], 16), int(hex_c[2:4], 16), int(hex_c[4:6], 16)
+
+
+def _shift_color(hex_c, amount):
+    """颜色偏移 - 模块级公共函数（v5.33 原样恢复）。
+
+    amount 为正则每个通道加亮，为负则加深；通道值钳制在 [0, 255]。
+    """
+    r, g, b = (max(0, min(255, int(c) + amount)) for c in _hex_to_rgb_v533(hex_c))
+    return f'#{r:02x}{g:02x}{b:02x}'
+
+
+def _lerp_color(c1, c2, t):
+    """颜色线性插值 - 模块级公共函数（v5.33 原样恢复）。
+
+    t=0 返回 c1，t=1 返回 c2；用于 Hover 的平滑过渡与卡片入场渐变。
+    """
+    r1, g1, b1 = _hex_to_rgb_v533(c1)
+    r2, g2, b2 = _hex_to_rgb_v533(c2)
+    r = int(r1 + (r2 - r1) * t)
+    g = int(g1 + (g2 - g1) * t)
+    b = int(b1 + (b2 - b1) * t)
+    return f'#{r:02x}{g:02x}{b:02x}'
+
+
+def _font_exists(name):
+    """字体存在性探测（v5.33 原样恢复，带缓存）。用于图标字体优雅降级。"""
+    if not _FONT_CACHE:
+        try:
+            import tkinter.font as tkfont
+            root = tk._default_root or tk.Tk()
+            _FONT_CACHE.update({f: True for f in tkfont.families(root)})
+        except Exception:
+            return False
+    return name in _FONT_CACHE
+
+
+_FONT_CACHE = {}
+
+# ★ v5.33 视觉层生效点 —— 必须位于 _C / _DOT_COLOR / _STATUS_META / _PALETTE
+#   / _BADGE_META_V533 全部定义完之后、任何控件创建之前。
+#   在此处调用可保证：派生表仍绑定旧对象（互不污染），而所有控件的 _C['xxx'] 取值
+#   在创建时已是 v5.33 色值。
+_apply_v533_visual_layer()
+
+
 _mutex_handle = None
 
 
@@ -415,26 +573,322 @@ def _get_port_occupier(port):
     return occupiers
 
 
+class RoundedButton(tk.Canvas):
+    """基于 Canvas 的圆角按钮 — v5.33 视觉层恢复（含 Hover/Press 微交互）。
+
+    三种视觉变体：solid / outlined / subtle。
+    规格（v5.33 原始规格，经字节码提取确认）：
+        高度    36px (padx=16, pady=6 + font linespace ≈ 36)；mini 26px (pady=2)
+        圆角    10px (mini 8px)
+        字号    9pt bold (mini 8pt)
+        Hover   180ms 平滑过渡到 +12 加深色（solid）/ 主色 12% 透明染（outlined/subtle）
+        Press   立即下沉 1px、背景再加深 6%
+        Disabled 背景 #f2f2f7 / 文字 #aeaeb2 / 边框 #e5e5ea / cursor not-allowed
+
+    ★ 恢复要点: 本类为**纯表现层**，通过 command 回调驱动业务，
+      不直接触碰任何状态机字段，故不影响 v5.40 的线程契约与 TOCTOU 防护。
+
+    ★★ 命名陷阱（务必勿改回）: 自绘宽高属性必须叫 _cw / _ch，
+      **绝不能叫 _w / _h** —— `_w` 是 tkinter.Misc 内部的窗口路径名字符串
+      （`self.tk.call(..., self._w)` 全靠它定位控件）。若在子类里用 int 覆盖它，
+      所有 Tk 调用都会收到一个整数当窗口名，抛
+      `TclError: bad argument "110": must be name of window`
+      （110 也正是按钮自身的像素宽度）。该故障点远离赋值处，极难排查。
+    """
+
+    _DISABLED_BG, _DISABLED_FG, _DISABLED_BORDER = '#f2f2f7', '#aeaeb2', '#e5e5ea'
+
+    def __init__(self, parent, text='', variant='solid', tone='accent', command=None,
+                 font=None, padx=16, pady=6, radius=_BTN_RADIUS, state='normal',
+                 canvas_bg=None, hover_fill=None, fg=None, **kw):
+        self._text = text
+        self._variant = variant if variant in ('solid', 'outlined', 'subtle') else 'solid'
+        self._command = command
+        self._font = font or ('Microsoft YaHei UI', 9, 'bold')
+        self._radius = radius
+        self._state = state
+        self._hover = False
+        self._press = False
+        self._anim_after_id = None
+
+        palette = _BUTTON_VARIANT_PALETTE.get(tone) or _BUTTON_VARIANT_PALETTE['accent']
+        cfg_fill = palette['fill']
+        cfg_hover = hover_fill or palette['fill_h']
+        cfg_fg = fg or palette['fg']
+        cfg_outline = palette['subtle_border']
+        cfg_outline_hover = _shift_color(cfg_outline, -12)
+        cfg_outline_w = 1
+
+        eff_variant = self._variant
+        if self._variant == 'outlined':
+            self._fill = canvas_bg or _PALETTE['bg_card']
+            self._hover_fill = palette['tint']
+            self._fg = cfg_fill if fg is None else cfg_fg
+            cfg_outline = cfg_fill
+            cfg_outline_hover = cfg_hover
+        elif self._variant == 'subtle':
+            self._fill = palette['tint']
+            self._hover_fill = palette['tint_h']
+            self._fg = cfg_fill if fg is None else cfg_fg
+        else:
+            self._fill = cfg_fill
+            self._hover_fill = cfg_hover
+            self._fg = cfg_fg
+        self._outline = cfg_outline if eff_variant != 'solid' else (canvas_bg or _PALETTE['bg_card'])
+        self._outline_hover = cfg_outline_hover
+        self._outline_w = cfg_outline_w if eff_variant != 'solid' else 0
+
+        # 向后兼容: fill/hover_fill/fg 旧参数若显式传入则覆盖
+        if 'fill' in kw and kw['fill']:
+            self._fill = kw.pop('fill')
+        if hover_fill:
+            self._hover_fill = hover_fill
+        if fg:
+            self._fg = fg
+        for legacy in ('fill_h', 'outline', 'outline_hover', 'outline_w'):
+            kw.pop(legacy, None)
+
+        tkfont_ = tkfont.Font(font=self._font)
+        text_w = tkfont_.measure(text)
+        linespace = tkfont_.metrics('linespace')
+        w = text_w + padx * 2
+        h = linespace + pady * 2
+        bg = canvas_bg or _PALETTE['bg_card']
+        self._bg = bg
+        super().__init__(parent, width=w, height=h, highlightthickness=0, bg=bg, bd=0)
+        self._cw, self._ch = w, h
+        # ★ 禁用态色按 tone 派生（v5.33 实测: 灰按钮 #f2f2f7/#adadb1；
+        #   绿按钮禁用底 #a8e0b8）。tone 未知时回落通用灰。
+        self._disabled_bg = _V533_COLORS['disabled_bg']
+        self._disabled_fg = _V533_COLORS['disabled_fg']
+        self._disabled_border = _V533_COLORS['disabled_bg']
+        if tone == 'success':
+            self._disabled_bg = _V533_COLORS['green_disabled']
+            self._disabled_border = _V533_COLORS['green_disabled']
+        cursor = 'hand2' if state == 'normal' else 'arrow'
+        self.configure(cursor=cursor)
+        self.bind('<Enter>', self._hover_in)
+        self.bind('<Leave>', self._hover_out)
+        self.bind('<ButtonPress-1>', self._press_in)
+        self.bind('<ButtonRelease-1>', self._press_out)
+        self._draw()
+
+    def set_tone(self, tone):
+        """运行时切换色调（v5.33 语义: 开发/生产按钮的运行态用不同色调表达）。
+
+        重算 fill / hover / fg / outline 与禁用态色，随后重绘。
+        """
+        palette = _BUTTON_VARIANT_PALETTE.get(tone) or _BUTTON_VARIANT_PALETTE['accent']
+        if self._variant == 'outlined':
+            self._fill = self._bg
+            self._hover_fill = palette['tint']
+            self._fg = palette['fill']
+            self._outline = palette['fill']
+            self._outline_hover = palette['fill_h']
+            self._outline_w = 1
+        elif self._variant == 'subtle':
+            self._fill = palette['tint']
+            self._hover_fill = palette['tint_h']
+            self._fg = palette['fill']
+            self._outline_w = 0
+        else:
+            self._fill = palette['fill']
+            self._hover_fill = palette['fill_h']
+            self._fg = palette['fg']
+            self._outline = self._bg
+            self._outline_w = 0
+        self._disabled_bg = (_V533_COLORS['green_disabled'] if tone == 'success'
+                             else _V533_COLORS['disabled_bg'])
+        self._disabled_fg = _V533_COLORS['disabled_fg']
+        self._disabled_border = self._disabled_bg
+        self._draw()
+
+    def config(self, **kw):
+        """兼容 tk.Button API: text / state / command / bg / tone / variant 可运行时变更。"""
+        if 'text' in kw:
+            self.set_text(kw.pop('text'))
+        if 'variant' in kw:
+            v = kw.pop('variant')
+            if v in ('solid', 'outlined', 'subtle'):
+                self._variant = v
+        if 'tone' in kw:
+            self.set_tone(kw.pop('tone'))
+        if 'state' in kw:
+            self._state = kw.pop('state')
+            self.configure(cursor='hand2' if self._state == 'normal' else 'arrow')
+        if 'command' in kw:
+            self._command = kw.pop('command')
+        if 'bg' in kw:
+            self._bg = kw.pop('bg')
+            super().configure(bg=self._bg)
+        if kw:
+            with contextlib.suppress(Exception):
+                super().configure(**kw)
+        self._draw()
+
+    configure = config
+
+    def set_text(self, text):
+        """更新文案并自适应宽度（保持与 tk.Button 等价的语义）。"""
+        self._text = text
+        f = tkfont.Font(font=self._font)
+        self._cw = f.measure(text) + 32
+        self._ch = f.metrics('linespace') + 12
+        with contextlib.suppress(Exception):
+            super().configure(width=self._cw, height=self._ch)
+        self._draw()
+
+    # ---- geometry 转发（tk.Canvas 没有 pack/grid/place），使 RoundedButton 可
+    #      与 tk.Button 完全同样的方式装配，避免调用点被迫区分控件类型。----
+    # ★ 必须用 *args/**kw 透传，不能声明 `cnf=None` 再 `super().pack(cnf, **kw)`:
+    #   tk.Canvas.pack 的签名是 pack(cnf={}, **kw)，其内部走 _options(cnf, kw)。
+    #   若把 None 当作位置参数传入，_options 会把该 None 与 kw 合并失败，
+    #   进而把 pady=(10,12) 摊平成 "10 12" 并触发
+    #   `TclError: bad argument "110": must be name of window`（实测复现）。
+    #   透传 *args 则无参数时 args 为空，等价于原生调用，零副作用。
+    def pack(self, *args, **kw):
+        super().pack(*args, **kw)
+        return self
+
+    def grid(self, *args, **kw):
+        super().grid(*args, **kw)
+        return self
+
+    def place(self, *args, **kw):
+        super().place(*args, **kw)
+        return self
+
+    def _round_rect(self, x1, y1, x2, y2, r, **kw):
+        """绘制圆角矩形（Canvas 无原生圆角，用 polygon + smooth 近似）。"""
+        pts = [x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r, x2, y2 - r, x2, y2,
+               x2 - r, y2, x1 + r, y2, x1, y2, x1, y2 - r, x1, y1 + r, x1, y1]
+        return self.create_polygon(pts, smooth=True, **kw)
+
+    def _draw(self):
+        with contextlib.suppress(Exception):
+            self.delete('all')
+            disabled = (self._state == 'disabled')
+            if disabled:
+                fill, fg, outline = self._disabled_bg, self._disabled_fg, self._disabled_border
+            else:
+                fill = self._hover_fill if (self._hover and self._outline_w == 0) else self._fill
+                if self._hover and self._outline_w:
+                    fill = self._hover_fill
+                fg = self._fg
+                outline = self._outline_hover if self._hover else self._outline
+            dy = _BTN_PRESS_DY if (self._press and not disabled) else 0
+            x1, y1 = 0, dy
+            x2, y2 = self._cw, self._ch + dy
+            border = outline if self._outline_w else fill
+            self._round_rect(x1, y1, x2, y2, self._radius,
+                             fill=fill, outline=border, width=1)
+            self.create_text(self._cw / 2, (self._ch / 2) + dy, text=self._text,
+                             font=self._font, fill=fg)
+
+    def _animate_hover(self, target_fill):
+        """180ms 平滑过渡（4 步插值，v5.33 原规格）。"""
+        if self._anim_after_id:
+            with contextlib.suppress(Exception):
+                self.after_cancel(self._anim_after_id)
+            self._anim_after_id = None
+        start = self._fill
+        steps = 4
+        interval = max(1, _BTN_ANIM_MS // steps)
+
+        def step(i):
+            if i > steps:
+                self._anim_after_id = None
+                return
+            if self._state == 'disabled':
+                return
+            self._fill = _lerp_color(start, target_fill, i / steps)
+            self._draw()
+            self._anim_after_id = self.after(interval, lambda: step(i + 1))
+        step(0)
+
+    def _hover_in(self, _e=None):
+        if self._state == 'disabled':
+            return
+        self._hover = True
+        self._animate_hover(self._hover_fill)
+
+    def _hover_out(self, _e=None):
+        self._hover = False
+        if self._state == 'disabled':
+            self._draw()
+            return
+        self._animate_hover(self._fill if self._outline_w else self._fill)
+
+    def _press_in(self, _e=None):
+        if self._state == 'disabled':
+            return
+        self._press = True
+        self._draw()
+
+    def _press_out(self, _e=None):
+        if self._state == 'disabled':
+            return
+        was_press = self._press
+        self._press = False
+        self._draw()
+        # 只有「按下后在本控件内释放」才触发命令（与原生 Button 语义一致）
+        if was_press and self._command:
+            with contextlib.suppress(Exception):
+                self._command()
+
+
 class StatusBadge(tk.Canvas):
-    """圆角胶囊状态徽章(色点 + 文字)，静态绘制无动画。"""
+    """圆角胶囊状态徽章(色点 + 文字)。
+
+    v5.33 视觉层恢复: ① 色值取 _BADGE_META_V533（iOS 色系）；
+    ② 恢复徽章脉冲微交互 —— 过渡态(deploying/switching)下圆点做呼吸式明暗循环。
+    ★ 脉冲只改 Canvas item 的 fill，不触碰任何状态字段，与业务状态机完全解耦。
+    """
+
+    _PULSING_STATES = ('deploying', 'switching')
 
     def __init__(self, parent, state='stopped', text=None, font=None, bg=None):
         self._font = font or ('Microsoft YaHei UI', 10, 'bold')
         self._bg = bg or _C['card']
         self._fobj = tkfont.Font(font=self._font)
-        meta = _STATUS_META.get(state, _STATUS_META['stopped'])
+        meta = _BADGE_META_V533.get(state, _BADGE_META_V533['stopped'])
         self._state, self._text, self._color = state, (text or meta[0]), meta[1]
         self._w = self._fobj.measure(self._text) + 46
+        self._pulse_after_id, self._pulse_on = None, True
         super().__init__(parent, width=self._w, height=28, highlightthickness=0, bg=self._bg)
         self.bind('<Configure>', self._draw)
         self._draw()
+        self._sync_pulse()
 
     def set_state(self, state, text=None):
-        meta = _STATUS_META.get(state, _STATUS_META['stopped'])
+        meta = _BADGE_META_V533.get(state, _BADGE_META_V533['stopped'])
         self._state, self._text, self._color = state, (text if text is not None else meta[0]), meta[1]
         self._w = self._fobj.measure(self._text) + 46
-        self.configure(width=self._w)
+        with contextlib.suppress(Exception):
+            self.configure(width=self._w)
         self._draw()
+        self._sync_pulse()
+
+    def _sync_pulse(self):
+        """进入过渡态起脉冲、离开则停（幂等）。"""
+        want = self._state in self._PULSING_STATES
+        if want and self._pulse_after_id is None:
+            self._pulse_on = True
+            self._pulse_tick()
+        elif not want and self._pulse_after_id is not None:
+            with contextlib.suppress(Exception):
+                self.after_cancel(self._pulse_after_id)
+            self._pulse_after_id = None
+            self._pulse_on = True
+
+    def _pulse_tick(self):
+        # TclError 防护: 窗口销毁后仍可能有排队的 after 回调。
+        try:
+            self._pulse_on = not self._pulse_on
+            self._draw()
+            self._pulse_after_id = self.after(_BADGE_PULSE_MS // 2, self._pulse_tick)
+        except tk.TclError:
+            self._pulse_after_id = None
 
     def _draw(self, _=None):
         # TclError 防护: 窗口销毁时仍可能有排队的 <Configure> 回调，此时控件已失效，
@@ -450,7 +904,11 @@ class StatusBadge(tk.Canvas):
             pts = [x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r, x2, y2 - r, x2, y2, x2 - r, y2, x1 + r, y2, x1, y2, x1, y2 - r, x1, y1 + r, x1, y1]
             self.create_polygon(pts, smooth=True, fill=_blend(self._color, self._bg, 0.13), outline=self._color)
             cy = h // 2
-            self.create_oval(9, cy - 4, 17, cy + 4, fill=self._color, outline='')
+            # 脉冲: 圆点颜色在「本色 ↔ 变淡」之间切换；仅过渡态生效。
+            dot_color = self._color
+            if self._state in self._PULSING_STATES and not self._pulse_on:
+                dot_color = _blend(self._color, self._bg, 0.35)
+            self.create_oval(9, cy - 4, 17, cy + 4, fill=dot_color, outline='')
             self.create_text(24, cy, text=self._text, fill=self._color, font=self._font, anchor='w')
         except tk.TclError:
             pass
@@ -509,6 +967,10 @@ class ServerManagerApp:
         self._init_tray()
         self.root.protocol('WM_DELETE_WINDOW', self.on_closing)
         self.root.deiconify()
+        # v5.33 微交互: 窗口淡入 + 卡片错峰脉冲；窗口可见后再跑，避免 withdraw 期间空转。
+        with contextlib.suppress(Exception):
+            self._fade_in()
+            self._animate_cards_intro()
         self._run_env_checks()
         self._update_all_ui()
         self._poll_queue()
@@ -551,47 +1013,135 @@ class ServerManagerApp:
         self.dev_dots = {'redis': self._make_dot(dev_inner, 'Redis'),
                          'backend': self._make_dot(dev_inner, '后端'),
                          'frontend': self._make_dot(dev_inner, '前端')}
-        self.dev_btn = tk.Button(dev_inner, text='启动开发模式', font=self._font_ui_bold, bg=_C['blue'],
-                                 fg='#FFFFFF', activebackground='#0E4FB0', activeforeground='#FFFFFF',
-                                 relief=tk.FLAT, bd=0, cursor='hand2', command=self.toggle_dev)
+        # v5.33 视觉层: 圆角按钮(Canvas) + accent 实心色调；command 回调驱动业务，untouched 状态机。
+        self.dev_btn = RoundedButton(dev_inner, text='启动开发模式', variant='solid', tone='accent',
+                                     font=self._font_ui_bold, command=self.toggle_dev)
         self.dev_btn.pack(fill=tk.X, padx=12, pady=(10, 12))
         prod_card, prod_inner = self._make_card(body, '生产模式')
         prod_card.grid(row=0, column=1, sticky='nsew', padx=(7, 0))
         self.prod_dots = {'api': self._make_dot(prod_inner, _SVC_API), 'arq': self._make_dot(prod_inner, _SVC_ARQ)}
-        self.prod_btn = tk.Button(prod_inner, text='启动生产模式', font=self._font_ui_bold, bg=_C['blue'],
-                                  fg='#FFFFFF', activebackground='#0E4FB0', activeforeground='#FFFFFF',
-                                  relief=tk.FLAT, bd=0, cursor='hand2', command=self.toggle_prod)
+        self.prod_btn = RoundedButton(prod_inner, text='启动生产模式', variant='solid', tone='accent',
+                                      font=self._font_ui_bold, command=self.toggle_prod)
         self.prod_btn.pack(fill=tk.X, padx=12, pady=(10, 12))
         action = tk.Frame(self.root, bg=_C['bg'])
         action.pack(fill=tk.X, padx=14, pady=(2, 6))
-        self.stop_btn = tk.Button(action, text='紧急停止', font=self._font_ui_bold, bg=_C['red'], fg='#FFFFFF',
-                                  activebackground='#B33A33', activeforeground='#FFFFFF', relief=tk.FLAT,
-                                  bd=0, cursor='hand2', width=12)
+        # ★ 紧急停止按钮: command 必须留空 —— RoundedButton 内部已绑定
+        #   <ButtonPress-1>/<ButtonRelease-1> 做 Hover/Press 视觉反馈，
+        #   若再让类内 _press_out 触发 command，会与下方 _on_stop_press/_on_stop_release
+        #   的分级长按语义（单击=轻量 / 长按=全清）叠加，造成一次点击触发两条停止路径。
+        #   故此处仅借 RoundedButton 的「外观」，事件语义完全由外部绑定接管。
+        self.stop_btn = RoundedButton(action, text='紧急停止', variant='solid', tone='danger',
+                                      font=self._font_ui_bold, command=None, padx=24)
         self.stop_btn.pack(side=tk.LEFT)
         # 分级语义必须让用户可感知: 单击=轻量停止; 长按≥阈值=全清
-        self.stop_btn.bind('<ButtonPress-1>', self._on_stop_press)
-        self.stop_btn.bind('<ButtonRelease-1>', self._on_stop_release)
+        # ★ add='+' 保留 RoundedButton 内部的 Press/Release 视觉回调，二者叠加而非覆盖。
+        self.stop_btn.bind('<ButtonPress-1>', self._on_stop_press, add='+')
+        self.stop_btn.bind('<ButtonRelease-1>', self._on_stop_release, add='+')
         tk.Label(action, text=f'单击停止当前模式 · 长按 {self._full_stop_hold_ms / 1000:.1f} 秒全清（含服务）',
                  font=('Microsoft YaHei UI', 9), fg=_C['muted'], bg=_C['bg']).pack(side=tk.LEFT, padx=(10, 0))
         self.status_label = tk.Label(action, text='就绪', font=('Microsoft YaHei UI', 9, 'bold'), fg=_C['text'], bg=_C['bg'])
         self.status_label.pack(side=tk.RIGHT)
-        log_frame = tk.LabelFrame(self.root, text=' 运行日志 ', font=self._font_ui, fg=_C['text'], bg=_C['card'],
-                                  bd=1, relief=tk.SOLID, labelanchor='nw', padx=8, pady=6)
-        log_frame.pack(fill=tk.BOTH, expand=True, padx=14, pady=(2, 6))
-        self.log_text = ScrolledText(log_frame, wrap=tk.WORD, font=('Microsoft YaHei UI', 9), bg=_C['card'],
-                                     fg=_C['muted'], relief=tk.FLAT, bd=0, state=tk.DISABLED, height=10)
-        self.log_text.pack(fill=tk.BOTH, expand=True)
+        # v5.33 视觉层: 日志区改用带 highlight 边框的卡片式外框（LabelFrame 的 labelanchor
+        #   在浅灰底上视觉重量偏重，且与卡片圆角语言不一致）。
+        log_wrap = tk.Frame(self.root, bg=_C['card'], highlightbackground=_C['border'], highlightthickness=1, bd=0)
+        log_wrap.pack(fill=tk.BOTH, expand=True, padx=14, pady=(2, 6))
+        tk.Label(log_wrap, text='运行日志', font=('Microsoft YaHei UI', 10, 'bold'),
+                 fg=_C['text'], bg=_C['card']).pack(anchor='w', padx=12, pady=(8, 2))
+        # ★ 不用 ScrolledText: 其 Tk 原生 scrollbar 在浅灰底上风格突兀。
+        #   改为 Text + 独立 ttk.Scrollbar，视觉更贴近 v5.33 的克制表达。
+        # ★ 正文底色用 #f9f9fb（v5.33 实测）而非纯白 —— 与卡片外框形成极轻的内凹层次。
+        log_body = tk.Frame(log_wrap, bg=_V533_COLORS['log_surface'])
+        log_body.pack(fill=tk.BOTH, expand=True, padx=(12, 4), pady=(0, 10))
+        self.log_text = tk.Text(log_body, wrap=tk.WORD, font=('Microsoft YaHei UI', 9),
+                                bg=_V533_COLORS['log_surface'],
+                                fg=_C['text'], relief=tk.FLAT, bd=0, state=tk.DISABLED, height=10,
+                                highlightthickness=0, padx=2, pady=2)
+        log_scroll = ttk.Scrollbar(log_body, orient=tk.VERTICAL, command=self.log_text.yview)
+        self.log_text.configure(yscrollcommand=log_scroll.set)
+        log_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         for lvl, color in (('INFO', _C['muted']), ('WARNING', _C['orange']), ('ERROR', _C['red']), ('SUCCESS', _C['green'])):
             self.log_text.tag_config(lvl, foreground=color)
         controls = tk.Frame(self.root, bg=_C['bg'])
         controls.pack(fill=tk.X, padx=14, pady=(0, 12))
+        # v5.33 视觉层: 次级操作按钮统一走 RoundedButton 的 outlined 变体
+        #   （白底 + 彩色描边 + tint 悬停），替代 flat tk.Button 的零反馈观感。
         for text, cmd in (('清空日志', self.clear_log), ('导出日志', self.export_log), ('打开日志目录', self._open_logs_dir)):
-            tk.Button(controls, text=text, font=('Microsoft YaHei UI', 9), relief=tk.FLAT, bg=_C['card'],
-                      fg=_C['text'], bd=1, padx=10, cursor='hand2', command=cmd).pack(side=tk.LEFT, padx=(0, 8))
+            RoundedButton(controls, text=text, variant='outlined', tone='accent',
+                          font=('Microsoft YaHei UI', 9), command=cmd,
+                          padx=12, pady=4, canvas_bg=_C['bg']).pack(side=tk.LEFT, padx=(0, 8))
         self.auto_scroll_var = tk.BooleanVar(value=True)
         tk.Checkbutton(controls, text='自动滚动', variable=self.auto_scroll_var, font=('Microsoft YaHei UI', 9),
                        bg=_C['bg'], fg=_C['text'], activebackground=_C['bg'], selectcolor=_C['card'],
                        cursor='hand2').pack(side=tk.RIGHT)
+        # v5.33 微交互: 窗口淡入 + 卡片边框错峰脉冲。
+        #   规格经字节码闭包反汇编逐指令复原（见 _anim_closures.txt）：
+        #     _fade_in:            attributes('-alpha', 0.0) → step(i)，i>10 置 1.0，
+        #                          否则 alpha=i/10，after(30, step(i+1)) ⇒ 10 步 / 300ms
+        #     _animate_cards_intro: for idx, card in enumerate(cards): after(80*idx, ...)
+        #                          ⇒ 卡片【错峰】入场，非同时（这点极易做错）
+        #     _pulse_card_border:  base=_PALETTE['border_card'], accent=_PALETTE['accent_h']
+        #                          t=i/10 走三角波: t<=0.5 用 (base→accent, t*2)，
+        #                          否则 (accent→base, (t-0.5)*2)；到 i>10 复位 base
+        #                          ⇒ 边框「亮一下再暗回来」660ms，仅此一次
+        self._server_cards = (dev_card, prod_card)
+
+    def _fade_in(self):
+        """窗口淡入（v5.33 原规格: 10 步 / 30ms = 300ms）。
+
+        ★ 必须整体包在 suppress 里: 部分 Windows 主题/远程桌面会话下
+          `attributes('-alpha', ...)` 不被支持会抛 TclError。淡入失败绝不能影响功能。
+        """
+        with contextlib.suppress(Exception):
+            self.root.attributes('-alpha', 0.0)
+
+            def step(i):
+                if self._shutting_down:
+                    return
+                if i > 10:
+                    with contextlib.suppress(Exception):
+                        self.root.attributes('-alpha', 1.0)
+                    return
+                with contextlib.suppress(Exception):
+                    self.root.attributes('-alpha', i / 10)
+                self.root.after(30, lambda: step(i + 1))
+            step(0)
+
+    def _animate_cards_intro(self):
+        """卡片错峰入场（v5.33 原规格: 第 idx 张延迟 80*idx ms 启动脉冲）。"""
+        with contextlib.suppress(Exception):
+            for idx, card in enumerate(getattr(self, '_server_cards', ())):
+                self.root.after(80 * idx, lambda c=card: self._pulse_card_border(c))
+
+    def _pulse_card_border(self, card):
+        """卡片边框脉冲（v5.33 原规格: 三角波往复, 10 步 / 30ms = 660ms）。
+
+        色键取自 _PALETTE: border_card（静息边框色）→ accent_h（高亮色）→ 回到静息。
+        ★ 单次动画，不做常驻循环 —— v5.33 原实现同样只跑一轮，
+          常驻脉冲会在长时间值守时构成视觉干扰。
+        """
+        base = _PALETTE['border_card']
+        accent = _PALETTE.get('accent_h') or _V533_COLORS['accent_hover']
+
+        def tick(i):
+            if self._shutting_down:
+                return
+            try:
+                if i > 10:
+                    with contextlib.suppress(Exception):
+                        card.configure(highlightbackground=base)
+                    return
+                t = i / 10
+                if t <= 0.5:
+                    color = _lerp_color(base, accent, t * 2)
+                else:
+                    color = _lerp_color(accent, base, (t - 0.5) * 2)
+                with contextlib.suppress(Exception):
+                    card.configure(highlightbackground=color)
+                self.root.after(30, lambda: tick(i + 1))
+            except Exception:
+                pass
+        tick(0)
 
     def _make_card(self, parent, title):
         card = tk.Frame(parent, bg=_C['card'], highlightbackground=_C['border'], highlightthickness=1, bd=0)
@@ -2016,24 +2566,51 @@ class ServerManagerApp:
         self.stop_prod() if self._prod_running else self.start_prod()
 
     def _update_all_ui(self):
-        """按钮状态机(§7.3): 互斥是「启动即自动停对方」，故对方按钮在自身运行时仍可用。"""
+        """按钮状态机(§7.3): 互斥是「启动即自动停对方」，故对方按钮在自身运行时仍可用。
+
+        ★ v5.33 视觉语义（实测 ui-ref-v533-original.png）:
+          按钮外观同时表达【意图】与【可用性】——
+            · 意图=启动 → 实心彩色（开发绿 #34c759 / 生产蓝 #007aff）
+            · 意图=停止 → 白底 + 同色描边（outlined）
+            · 禁用     → 该色调的浅色底（绿 ⇒ #a8e0b8 / 其它 ⇒ #f2f2f7）
+          这与 v5.40 原实现「一律蓝实心、禁用变灰」的单一表达不同，
+          但**只改视觉映射，不改任何状态判定**（busy 判定与按钮可用性完全沿用原逻辑）。
+        """
         if self._shutting_down or not hasattr(self, 'dev_btn'):
             return
         if self._is_busy():
-            self._set_btn(self.dev_btn, '启动中…', False)
-            self._set_btn(self.prod_btn, '启动中…', False)
+            self._set_btn(self.dev_btn, '启动中…', False, 'success', 'start')
+            self._set_btn(self.prod_btn, '启动中…', False, 'accent', 'start')
         else:
-            self._set_btn(self.dev_btn, '停止开发模式' if self._mode == 'dual_dev' else '启动开发模式', True)
-            self._set_btn(self.prod_btn, '停止生产模式' if self._prod_running else '启动生产模式', True)
+            dev_running = self._mode == 'dual_dev'
+            self._set_btn(self.dev_btn, '停止开发模式' if dev_running else '启动开发模式',
+                          True, 'success', 'stop' if dev_running else 'start')
+            self._set_btn(self.prod_btn, '停止生产模式' if self._prod_running else '启动生产模式',
+                          True, 'accent', 'stop' if self._prod_running else 'start')
         self._update_mode_badge()
         self._update_dots()
 
-    def _set_btn(self, btn, text, enabled):
+    def _set_btn(self, btn, text, enabled, tone='accent', intent='start'):
+        """按钮状态机 → 控件层。
+
+        ★ v5.33 视觉层适配: 主操作按钮已由 tk.Button 换成 RoundedButton（Canvas 子类）。
+          RoundedButton.config 只认 text/state/command/bg/tone 五个键，不认 fg/cursor，
+          且禁用态配色由 tone 派生（绿按钮 #a8e0b8 / 其它 #f2f2f7），
+          外部再传 bg= 会污染 Canvas 底色、破坏圆角外观。
+          故按控件能力分流：具备 set_text（即 RoundedButton）走精简参数，
+          其余（如残留的 tk.Button）保留旧行为，保证零回归。
+        """
         with contextlib.suppress(Exception):
-            btn.config(text=text, state=tk.NORMAL if enabled else tk.DISABLED,
-                       bg=_C['blue'] if enabled else _C['border'],
-                       fg='#FFFFFF' if enabled else _C['muted'],
-                       cursor='hand2' if enabled else 'arrow')
+            if hasattr(btn, 'set_text'):
+                # intent='stop' → outlined(白底描边)；'start' → solid(实心彩色)
+                btn.config(text=text, tone=tone,
+                           variant='outlined' if intent == 'stop' else 'solid',
+                           state=tk.NORMAL if enabled else tk.DISABLED)
+            else:
+                btn.config(text=text, state=tk.NORMAL if enabled else tk.DISABLED,
+                           bg=_C['blue'] if enabled else _C['border'],
+                           fg='#FFFFFF' if enabled else _C['muted'],
+                           cursor='hand2' if enabled else 'arrow')
 
     def _update_mode_badge(self):
         """模式徽章: 过渡态优先于稳态，生产运行由服务轮询决定。"""
