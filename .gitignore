@@ -268,5 +268,10 @@ docs/tickets/artifacts/benchmark/*.json
 /fix-pytest-cache-acl.cmd
 /backups/
 /temp/
+
+# 服务器管理器 v5.33 产物目录：exe 与说明入库（作回滚点），运行时生成物不入库
+# erp_project_path.txt 由 server_manager_v533.py:127 运行时写入，含机器绝对路径
+/dist-v533/erp_project_path.txt
+
 /tests/*.txt
 /tests/stress/results_*.csv
