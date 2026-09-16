@@ -1188,6 +1188,13 @@ class ServerManagerApp:
         self._start_dual_server('开发模式（前后端）')
 
     def stop_dual_dev(self):
+        # 与 start_dual_dev 对称: spawn 前同步登记忙状态，闭合 TOCTOU 重入窗口。
+        # 此前本路径不起任何忙标志 → 停止的数秒窗口内 _mode 恒为 'dual_dev' →
+        # _is_busy() 为 False → 再次点击可并发起第二个 _stop_dual_worker(重复 taskkill/清端口/停 Redis)。
+        # ★ 本方法由 toggle_dev 在主线程调用，此处直接赋值 _mode 符合 §线程契约
+        #   (line 462-464 / 658-663: 状态只允许主线程变更; 后台线程须经 state_set)。
+        self._mode = 'stopping'
+        self._update_all_ui()
         threading.Thread(target=self._stop_dual_worker, args=('开发模式',), daemon=True).start()
 
     def _start_dual_server(self, label):
@@ -1334,21 +1341,29 @@ class ServerManagerApp:
         ★ 只终止管理器自有的 Redis 进程，不动托管的 Redis 服务(共享基础设施)。
         """
         self._msg_queue.put(('log', {'text': f'正在停止{label}...'}))
-        frontend_proc, backend_proc = self._frontend_process, self._process
-        self._frontend_process, self._process = None, None
-        for proc, name in ((frontend_proc, '前端'), (backend_proc, '后端')):
-            if proc and proc.poll() is None:
-                self._msg_queue.put(('log', {'text': f'正在终止{name}进程树 (PID: {proc.pid})...'}))
-                self._kill_process_tree(proc.pid)
-                with contextlib.suppress(Exception):
-                    proc.wait(timeout=3)
-                self._msg_queue.put(('log', {'text': f'{name}进程已终止'}))
-        self._stop_owned_redis()
-        self._release_ports()
-        # v5.40(审查 #7): _mode 经主线程消息复位，不再后台直写
-        self._msg_queue.put(('state_set', {'mode': 'none'}))
-        self._msg_queue.put(('log', {'text': f'{label}已停止，端口已释放'}))
-        self._msg_queue.put(('toast', {'title': f'{label}已停止', 'desc': '端口已释放'}))
+        # ★ v5.40 补丁: 停止路径必须保证状态复位 —— 若中途抛异常(如 taskkill/端口释放失败)，
+        #   原实现会跳过 line「state_set(mode='none')」而永久卡在 _mode='stopping'，
+        #   反而让按钮永久禁用。故用 try/finally 兜底复位，并对异常留痕不静默。
+        try:
+            frontend_proc, backend_proc = self._frontend_process, self._process
+            self._frontend_process, self._process = None, None
+            for proc, name in ((frontend_proc, '前端'), (backend_proc, '后端')):
+                if proc and proc.poll() is None:
+                    self._msg_queue.put(('log', {'text': f'正在终止{name}进程树 (PID: {proc.pid})...'}))
+                    self._kill_process_tree(proc.pid)
+                    with contextlib.suppress(Exception):
+                        proc.wait(timeout=3)
+                    self._msg_queue.put(('log', {'text': f'{name}进程已终止'}))
+            self._stop_owned_redis()
+            self._release_ports()
+        except Exception as e:
+            self._msg_queue.put(('log', {'text': f'停止{label}出错: {type(e).__name__}: {e}', 'level': 'ERROR'}))
+        finally:
+            # v5.40(审查 #7): _mode 经主线程消息复位，不再后台直写。
+            # finally 保证 'stopping' → 'none' 流转闭合(无论正常/异常均复位，不产生死状态)。
+            self._msg_queue.put(('state_set', {'mode': 'none'}))
+            self._msg_queue.put(('log', {'text': f'{label}已停止，端口已释放'}))
+            self._msg_queue.put(('toast', {'title': f'{label}已停止', 'desc': '端口已释放'}))
 
     def _set_mode_none(self):
         self._mode = 'none'
@@ -1951,7 +1966,11 @@ class ServerManagerApp:
     # ===================== 模式状态机 / UI 同步 =====================
 
     def _is_busy(self):
-        return self._mode in ('starting', 'restarting', 'stopping') or self._prod_busy
+        # v5.40 补丁: 纳入紧急停止进行中 —— 否则紧急停止期间 toggle_dev/toggle_prod
+        # 仍可穿过此处进入启动链，形成次级竞态(与 _stop_in_progress 抢占同一批资源)。
+        return (self._mode in ('starting', 'restarting', 'stopping')
+                or self._prod_busy
+                or self._stop_in_progress)
 
     def toggle_dev(self):
         if self._is_busy():
