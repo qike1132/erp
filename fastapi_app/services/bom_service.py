@@ -13,7 +13,8 @@ BOM 的查询、保存、复制、预览与搜索能力。
 3. save_bom(db, product_id, data, username) -> str
    保存产品 BOM，支持填充物(1:1)、面料(1:N)、辅料(1:N) 的增删改与变更日志。
 4. copy_bom(db, target_product_id, data, username) -> dict
-   将源产品 BOM 复制到目标产品，支持覆盖模式。
+   将源产品 BOM 复制到目标产品，支持覆盖模式；
+   当 data 携带 role_id 时复制到该指定角色（不新建角色、不波及默认/其他角色）。
 5. preview_bom(db, source_product_id) -> dict
    预览源产品 BOM 结构，供复制前确认。
 6. search_for_bom_copy(db, keyword) -> list
@@ -83,6 +84,58 @@ def has_bom(product) -> bool:
         has_fabric = len(getattr(product, 'fabrics', []) or []) > 0
         has_accessory = len(getattr(product, 'accessories', []) or []) > 0
     return has_filling or has_fabric or has_accessory
+
+
+def _loaded_relation(entity, name: str):
+    """安全读取 ORM 关系。
+
+    对已加载关系返回其值；对 ``lazy='raise'`` 且未加载的关系返回 ``None``，
+    避免触发关系加载抛 ``InvalidRequestError``（与 ``has_bom`` 同一套判断）。
+    非 ORM 实体（测试桩等）直接取属性。
+
+    Args:
+        entity: ORM 实体或测试桩。
+        name: 关系属性名。
+
+    Returns:
+        关系值；未加载时返回 ``None``。
+    """
+    state = sa_inspect(entity)
+    if isinstance(state, InstanceState):
+        if name in state.unloaded:
+            return None
+        return getattr(entity, name)
+    return getattr(entity, name, None)
+
+
+def _role_has_materials(product, role_id: int) -> bool:
+    """判断产品在指定角色名下是否已有 BOM 物料。
+
+    仅统计归属该角色（``role_id`` 相等）且填充用量大于 0 的物料，
+    用于目标角色模式下 ``overwrite=False`` 时的冲突判定。
+
+    Args:
+        product: 目标产品（应已加载 fabrics/accessories/material_rows）。
+        role_id: 角色 ID。
+
+    Returns:
+        bool: 该角色下存在任一物料即返回 ``True``。
+    """
+    for fabric in (_loaded_relation(product, 'fabrics') or []):
+        if getattr(fabric, 'role_id', None) == role_id:
+            return True
+    for accessory in (_loaded_relation(product, 'accessories') or []):
+        if getattr(accessory, 'role_id', None) == role_id:
+            return True
+    rows = _loaded_relation(product, 'material_rows')
+    if isinstance(rows, list):
+        for material in rows:
+            if (
+                getattr(material, 'role_id', None) == role_id
+                and getattr(material, 'cotton_usage', Decimal('0')) > 0
+            ):
+                return True
+    return False
 
 
 async def get_bom(db: AsyncSession, product_id: int) -> dict | None:
@@ -405,9 +458,158 @@ async def save_bom(db: AsyncSession, product_id: int, data: dict, username: str)
     return 'BOM 保存成功'
 
 
+async def _copy_bom_into_role(
+    db: AsyncSession,
+    source_product,
+    target_product,
+    target_product_id: int,
+    role_id: int,
+    overwrite: bool,
+    username: str,
+) -> dict:
+    """将源产品默认作用域 BOM 复制到目标产品的指定角色。
+
+    目标角色模式（``role_id`` 不为空）语义：
+    - 只把源产品**产品级默认 BOM**（``role_id`` 为 NULL）的面料/辅料/填充
+      写入目标产品的目标角色（``role_id=目标角色id``）；
+    - 不新建任何 ``ProductRole``，也不改动目标产品的默认作用域与其他角色；
+    - ``overwrite=True`` 时仅清理该角色名下既有物料行，绝不触碰默认作用域与其他角色；
+    - 源产品的角色级物料无法并入单一角色（受唯一约束
+      ``uq_product_material_product_role`` 限制），计入 ``skipped_role_items`` 供前端提示。
+
+    Args:
+        db: 异步数据库会话。
+        source_product: 源产品（已加载 fabrics/accessories/material/material_rows）。
+        target_product: 目标产品（已加载 fabrics/accessories/material_rows/roles）。
+        target_product_id: 目标产品 ID。
+        role_id: 目标角色 ID，必须属于目标产品。
+        overwrite: 是否覆盖目标角色已有物料。
+        username: 操作人名称（用于日志）。
+
+    Returns:
+        dict: 含 message / copied_count / skipped_role_items / target_role 的复制结果。
+
+    Raises:
+        ValueError: 目标角色不存在或不属于该产品；或目标角色已有物料且未覆盖。
+    """
+    # a. 校验角色存在且属于目标产品
+    role = next(
+        (r for r in (getattr(target_product, 'roles', None) or []) if getattr(r, 'id', None) == role_id),
+        None,
+    )
+    if role is None:
+        raise ValueError('目标角色不存在或不属于该产品')
+
+    # e. 目标角色已有物料且不覆盖 → 沿用「已有BOM」冲突语义
+    if not overwrite and _role_has_materials(target_product, role_id):
+        raise ValueError('目标角色已有BOM表，请确认是否覆盖')
+
+    # 源产品所有填充物（含各角色行，用于统计被跳过的角色级物料）
+    src_mat_result = await db.execute(
+        select(ProductMaterial).where(ProductMaterial.product_id == source_product.id)
+    )
+    source_materials = src_mat_result.scalars().all()
+
+    # d. 覆盖：仅删除该角色名下的物料行（绝不删除 ProductRole 或默认/其他角色数据）
+    if overwrite:
+        await db.execute(delete(ProductFabric).where(
+            ProductFabric.product_id == target_product_id,
+            ProductFabric.role_id == role_id,
+        ))
+        await db.execute(delete(ProductAccessory).where(
+            ProductAccessory.product_id == target_product_id,
+            ProductAccessory.role_id == role_id,
+        ))
+        await db.execute(delete(ProductMaterial).where(
+            ProductMaterial.product_id == target_product_id,
+            ProductMaterial.role_id == role_id,
+        ))
+
+    copied_count = 0
+
+    # c. 源产品默认作用域 → 目标角色
+    default_material = getattr(source_product, 'material', None)
+    if default_material is not None and getattr(default_material, 'cotton_usage', Decimal('0')) > 0:
+        db.add(ProductMaterial(
+            product_id=target_product_id,
+            role_id=role_id,
+            material_code=getattr(default_material, 'material_code', '') or '',
+            cotton_usage=default_material.cotton_usage,
+            specification=getattr(default_material, 'specification', '') or '',
+            supplier_id=getattr(default_material, 'supplier_id', None),
+            supplier_name=getattr(default_material, 'supplier_name', '') or '',
+            unit=getattr(default_material, 'unit', '') or '克',
+            remark=getattr(default_material, 'remark', '') or '',
+        ))
+        copied_count += 1
+
+    for old_fabric in (getattr(source_product, 'fabrics', None) or []):
+        if old_fabric.role_id is not None:
+            continue
+        db.add(ProductFabric(
+            product_id=target_product_id,
+            role_id=role_id,
+            material_code=getattr(old_fabric, 'material_code', '') or '',
+            fabric_name=old_fabric.fabric_name,
+            specification=getattr(old_fabric, 'specification', '') or '',
+            quantity=old_fabric.quantity,
+            supplier_id=getattr(old_fabric, 'supplier_id', None),
+            supplier_name=getattr(old_fabric, 'supplier_name', '') or '',
+            unit=getattr(old_fabric, 'unit', '') or '码',
+            remark=getattr(old_fabric, 'remark', '') or '',
+        ))
+        copied_count += 1
+
+    for old_accessory in (getattr(source_product, 'accessories', None) or []):
+        if old_accessory.role_id is not None:
+            continue
+        db.add(ProductAccessory(
+            product_id=target_product_id,
+            role_id=role_id,
+            material_code=getattr(old_accessory, 'material_code', '') or '',
+            accessory_name=old_accessory.accessory_name,
+            specification=getattr(old_accessory, 'specification', '') or '',
+            quantity=old_accessory.quantity,
+            supplier_id=getattr(old_accessory, 'supplier_id', None),
+            supplier_name=getattr(old_accessory, 'supplier_name', '') or '',
+            unit=getattr(old_accessory, 'unit', '') or '个',
+            material_category=getattr(old_accessory, 'material_category', '') or 'accessory',
+            remark=getattr(old_accessory, 'remark', '') or '',
+        ))
+        copied_count += 1
+
+    # 源产品角色级物料无法并入单一角色（会撞唯一约束），统计跳过数供前端提示
+    skipped_role_items = (
+        sum(1 for f in (getattr(source_product, 'fabrics', None) or []) if f.role_id is not None)
+        + sum(1 for a in (getattr(source_product, 'accessories', None) or []) if a.role_id is not None)
+        + sum(1 for m in source_materials if getattr(m, 'role_id', None) is not None)
+    )
+
+    await db.flush()
+
+    role_name = getattr(role, 'role_name', None) or getattr(role, 'name', '') or ''
+    logger.info(
+        f'BOM复制成功(目标角色) | 操作人: {username} | '
+        f'源产品: {source_product.name}({source_product.id}) | '
+        f'目标产品: {target_product.name}({target_product_id}) | '
+        f'目标角色: {role_name}({role_id}) | '
+        f'复制物料数: {copied_count} | 跳过角色级物料: {skipped_role_items} | 覆盖: {overwrite}'
+    )
+
+    return {
+        'message': f'BOM复制成功，共复制 {copied_count} 项物料到角色「{role_name}」',
+        'copied_count': copied_count,
+        'skipped_role_items': skipped_role_items,
+        'target_role': {'id': role_id, 'name': role_name},
+        'source_product': {'id': source_product.id, 'name': source_product.name},
+        'target_product': {'id': target_product.id, 'name': target_product.name},
+    }
+
+
 async def copy_bom(db: AsyncSession, target_product_id: int, data: dict, username: str = 'unknown') -> dict:
     source_product_id = data.get('source_product_id')
     overwrite = data.get('overwrite', False)
+    role_id = data.get('role_id')
 
     if not source_product_id:
         raise ValueError('请选择源产品')
@@ -442,6 +644,14 @@ async def copy_bom(db: AsyncSession, target_product_id: int, data: dict, usernam
         raise ValueError(f'目标产品ID {target_product_id} 不存在')
     if not has_bom(source_product):
         raise ValueError('源产品没有配置BOM表')
+
+    # ===== 目标角色模式：复制到当前选中的自定义角色 =====
+    if role_id is not None:
+        return await _copy_bom_into_role(
+            db, source_product, target_product, target_product_id, role_id, overwrite, username,
+        )
+
+    # ===== 以下为 role_id 为空时的原有逻辑，保持行为完全不变 =====
     if not overwrite and has_bom(target_product):
         raise ValueError('目标产品已有BOM表，请确认是否覆盖')
 

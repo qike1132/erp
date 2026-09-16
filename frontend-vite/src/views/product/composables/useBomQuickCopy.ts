@@ -1,18 +1,21 @@
 import { ref, reactive, onUnmounted, type Ref } from 'vue'
 import { productApi } from '@/api'
 import { showToast } from '@/composables/useToast'
-import type { BomSearchProduct, ProgressState } from './bomTypes'
+import { resolveCopyTargetRole } from './bomTypes'
+import type { BomSearchProduct, ProgressState, Role } from './bomTypes'
 
 interface UseBomQuickCopyDeps {
   currentProductId: Ref<number | null>
   reloadBom: (productId: number) => Promise<void>
+  /** 当前选中的角色；null = 默认 BOM 作用域，复制物料将归属到该角色 */
+  selectedRole: Ref<Role | null>
 }
 
 /**
  * BOM 快速复制（UiAutocomplete 驱动）
  * 简化版：自动补全委托给 UiAutocomplete，本模块只处理复制逻辑。
  */
-export function useBomQuickCopy({ currentProductId, reloadBom }: UseBomQuickCopyDeps) {
+export function useBomQuickCopy({ currentProductId, reloadBom, selectedRole }: UseBomQuickCopyDeps) {
   const quickCopyKeyword = ref('')
   const quickCopyLoading = ref(false)
   const quickCopyProgress = reactive<ProgressState>({ visible: false, percent: 0, text: '' })
@@ -92,11 +95,21 @@ export function useBomQuickCopy({ currentProductId, reloadBom }: UseBomQuickCopy
   }
 
   async function executeCopy(sourceId: number, sourceName: string) {
+    // 解析复制归属角色：未保存的新角色需先保存，避免物料静默落到默认 BOM
+    const target = resolveCopyTargetRole(selectedRole.value)
+    if (!target.ok) {
+      hideProgress()
+      quickCopyLoading.value = false
+      showToast(target.message, 'warning')
+      return
+    }
+
     showProgress(40, `正在从 "${sourceName}" 复制BOM...`)
 
     try {
       showProgress(70, '执行复制...')
-      const res = (await productApi.copyBom(currentProductId.value!, sourceId, true)) as { success: boolean; error?: string }
+      // 角色模式下 overwrite 仅作用于目标角色（后端已按 role_id 收敛删除范围）
+      const res = (await productApi.copyBom(currentProductId.value!, sourceId, true, target.roleId)) as { success: boolean; error?: string }
       if (res.success) {
         showProgress(100, '复制成功！')
         _copyTimer = setTimeout(() => {

@@ -406,6 +406,100 @@ class TestCopyBom:
         )
         assert target_role_delete is not None
 
+    # ===== 目标角色模式（传 role_id）=====
+    def _setup_role(self, mock_db, src, src_materials, target_role_id=21):
+        """构造目标角色模式：目标产品携带一个角色，物料查询顺序为 源产品/目标产品/源填充物。"""
+        src_result = MagicMock()
+        src_result.scalar_one_or_none.return_value = src
+        tgt = _mock_product(roles=[_mock_role(target_role_id, '目标角色')], has_bom=True)
+        tgt.name = '目标产品'
+        tgt_result = MagicMock()
+        tgt_result.scalar_one_or_none.return_value = tgt
+        mat_result = MagicMock()
+        mat_result.scalars.return_value.all.return_value = src_materials
+        fallback = MagicMock()
+        fallback.scalar_one_or_none.return_value = None
+        fallback.scalars.return_value.all.return_value = []
+
+        calls = iter([src_result, tgt_result, mat_result, fallback, fallback, fallback, fallback, fallback])
+        mock_db.execute = AsyncMock(side_effect=lambda *a, **k: next(calls))
+        mock_db.add = MagicMock()
+        mock_db.flush = AsyncMock()
+        return tgt
+
+    def _added_of(self, mock_db, cls):
+        return [c.args[0] for c in mock_db.add.call_args_list if isinstance(c.args[0], cls)]
+
+    async def test_copy_into_role_assigns_role_id(self, mock_db):
+        """传 role_id：物料全部归属该角色，且不新建任何 ProductRole。"""
+        src, src_materials = self._source_product()
+        self._setup_role(mock_db, src, src_materials, target_role_id=21)
+
+        result = await bom_service.copy_bom(
+            mock_db, 2, {'source_product_id': 1, 'overwrite': False, 'role_id': 21}, 'tester',
+        )
+
+        assert self._added_of(mock_db, bom_service.ProductRole) == []
+        fabrics = self._added_of(mock_db, bom_service.ProductFabric)
+        accessories = self._added_of(mock_db, bom_service.ProductAccessory)
+        materials = self._added_of(mock_db, bom_service.ProductMaterial)
+        assert fabrics and all(f.role_id == 21 for f in fabrics)
+        assert all(a.role_id == 21 for a in accessories)
+        assert materials and all(m.role_id == 21 for m in materials)
+        # 仅复制默认作用域：默认面料 + 产品级填充
+        assert result['copied_count'] == 2
+        assert result['target_role']['id'] == 21
+        # 角色11面料 + 角色12辅料 + 角色12填充
+        assert result['skipped_role_items'] == 3
+
+    async def test_copy_into_role_overwrite_only_scoped_to_role(self, mock_db):
+        """传 role_id + overwrite：只删该角色名下物料行，绝不删 ProductRole。"""
+        src, src_materials = self._source_product()
+        self._setup_role(mock_db, src, src_materials, target_role_id=21)
+
+        await bom_service.copy_bom(
+            mock_db, 2, {'source_product_id': 1, 'overwrite': True, 'role_id': 21}, 'tester',
+        )
+
+        delete_calls = [c.args[0] for c in mock_db.execute.call_args_list
+                        if c.args and c.args[0].__class__.__name__ == 'Delete']
+        assert len(delete_calls) == 3
+        assert not any('product_role' in str(c) for c in delete_calls)
+        tables = {
+            next(t for t in ('product_fabric', 'product_accessory', 'product_material') if t in str(c))
+            for c in delete_calls
+        }
+        assert tables == {'product_fabric', 'product_accessory', 'product_material'}
+        # 每条删除都限定 role_id
+        assert all('role_id' in str(c) for c in delete_calls)
+
+    async def test_copy_into_role_rejects_foreign_role(self, mock_db):
+        """role_id 不属于目标产品时抛 ValueError，且不写入任何数据。"""
+        src, src_materials = self._source_product()
+        self._setup_role(mock_db, src, src_materials, target_role_id=99)
+
+        with pytest.raises(ValueError, match='目标角色不存在或不属于该产品'):
+            await bom_service.copy_bom(
+                mock_db, 2, {'source_product_id': 1, 'overwrite': False, 'role_id': 21}, 'tester',
+            )
+
+        assert mock_db.add.call_count == 0
+
+    async def test_copy_into_role_conflict_when_role_has_materials(self, mock_db):
+        """目标角色已有物料且未覆盖 → 抛冲突错误。"""
+        src, src_materials = self._source_product()
+        tgt = self._setup_role(mock_db, src, src_materials, target_role_id=21)
+        existing = MagicMock()
+        existing.role_id = 21
+        tgt.fabrics = [existing]
+
+        with pytest.raises(ValueError, match='目标角色已有BOM表'):
+            await bom_service.copy_bom(
+                mock_db, 2, {'source_product_id': 1, 'overwrite': False, 'role_id': 21}, 'tester',
+            )
+
+        assert mock_db.add.call_count == 0
+
 
 class TestPreviewBom:
     """preview_bom 返回角色与物料计数"""

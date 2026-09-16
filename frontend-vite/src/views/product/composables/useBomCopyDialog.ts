@@ -1,20 +1,23 @@
 import { ref, reactive, onUnmounted, type Ref } from 'vue'
 import { productApi } from '@/api'
 import { showToast } from '@/composables/useToast'
-import type { BomSearchProduct, BomPreviewStats, ProgressState } from './bomTypes'
+import { resolveCopyTargetRole } from './bomTypes'
+import type { BomSearchProduct, BomPreviewStats, ProgressState, Role } from './bomTypes'
 
 interface UseBomCopyDialogDeps {
   /** 当前编辑 BOM 的产品 ID */
   currentProductId: Ref<number | null>
   /** 复制完成后重新加载 BOM 数据的回调 */
   reloadBom: (productId: number) => Promise<void>
+  /** 当前选中的角色；null = 默认 BOM 作用域，复制物料将归属到该角色 */
+  selectedRole: Ref<Role | null>
 }
 
 /**
  * 复制 BOM 对话框（搜索源产品 → 预览 → 确认复制）
  * 从 useProductListActions 抽离，专注于对话框内的交互流程。
  */
-export function useBomCopyDialog({ currentProductId, reloadBom }: UseBomCopyDialogDeps) {
+export function useBomCopyDialog({ currentProductId, reloadBom, selectedRole }: UseBomCopyDialogDeps) {
   const copyBomDialogVisible = ref(false)
   const copyBomSearchKeyword = ref('')
   const copyBomProducts = ref<BomSearchProduct[]>([])
@@ -67,10 +70,17 @@ export function useBomCopyDialog({ currentProductId, reloadBom }: UseBomCopyDial
 
   async function confirmCopyBom() {
     if (!copyBomSourceProductId.value) return
+    // 解析复制归属角色：未保存的新角色需先保存，避免物料静默落到默认 BOM
+    const target = resolveCopyTargetRole(selectedRole.value)
+    if (!target.ok) {
+      showToast(target.message, 'warning')
+      return
+    }
     copyBomProgress.visible = true; copyBomProgress.percent = 0; copyBomProgress.text = '准备复制...'
     try {
       copyBomProgress.percent = 30; copyBomProgress.text = '正在复制BOM表...'
-      const res = (await productApi.copyBom(currentProductId.value!, copyBomSourceProductId.value, copyBomOverwrite.value)) as { success: boolean; error?: string }
+      // 角色模式下 overwrite 仅作用于目标角色（后端已按 role_id 收敛删除范围）
+      const res = (await productApi.copyBom(currentProductId.value!, copyBomSourceProductId.value, copyBomOverwrite.value, target.roleId)) as { success: boolean; error?: string }
       if (res.success) {
         copyBomProgress.percent = 100; copyBomProgress.text = '复制成功！'
         const id = setTimeout(() => {

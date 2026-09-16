@@ -300,15 +300,18 @@ export function useProductListActions(confirmDialog: ConfirmDialogLike) {
   }
 
   // ===== 快速复制 BOM（抽离至 useBomQuickCopy） =====
+  // 注入 selectedRole：复制物料归属到当前选中的角色（null = 默认 BOM 作用域）
   const quickCopy = useBomQuickCopy({
     currentProductId,
     reloadBom: loadBomData,
+    selectedRole,
   })
 
   // ===== 复制 BOM 对话框（抽离至 useBomCopyDialog） =====
   const copyDialog = useBomCopyDialog({
     currentProductId,
     reloadBom: loadBomData,
+    selectedRole,
   })
 
   return {

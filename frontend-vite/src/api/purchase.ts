@@ -54,8 +54,19 @@ export const bomApi = {
   saveBom: (productId: number, bomData: Record<string, unknown>) => post(`/purchase-center/product/${productId}/bom`, bomData),
   searchProductsForBom: (keyword: string) => get<Product[]>('/purchase-center/products/search', { keyword }),
   bomPreview: (productId: number) => get<Record<string, unknown>>(`/purchase-center/products/${productId}/bom-preview`),
-  copyBom: (targetProductId: number, sourceProductId: number, overwrite: boolean) =>
-    post(`/purchase-center/products/${targetProductId}/copy-bom`, { source_product_id: sourceProductId, overwrite }),
+  /**
+   * 复制 BOM。
+   * @param targetProductId 目标产品 ID
+   * @param sourceProductId 源产品 ID
+   * @param overwrite 是否覆盖；角色模式下仅作用于目标角色（后端已收敛作用域）
+   * @param roleId 目标角色 ID；传入时物料归属到该角色，为空/省略时按源产品结构复制
+   */
+  copyBom: (targetProductId: number, sourceProductId: number, overwrite: boolean, roleId?: number | null) =>
+    post(`/purchase-center/products/${targetProductId}/copy-bom`, {
+      source_product_id: sourceProductId,
+      overwrite,
+      ...(roleId != null ? { role_id: roleId } : {}),
+    }),
 }
 
 export const purchaseApi = {

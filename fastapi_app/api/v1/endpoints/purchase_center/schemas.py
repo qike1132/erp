@@ -115,6 +115,7 @@ class BomCopyRequest(BaseModel):
     """复制BOM请求"""
     source_product_id: int = Field(..., description="源产品ID")
     overwrite: bool = False
+    role_id: int | None = Field(None, description="目标角色ID；为空则按源产品结构复制（默认BOM+重建角色）")
 
 class MaterialOrderItem(BaseModel):
     """物料计算单个订单项"""
