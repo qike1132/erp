@@ -9,13 +9,15 @@ interface UseBomQuickCopyDeps {
   reloadBom: (productId: number) => Promise<void>
   /** 当前选中的角色；null = 默认 BOM 作用域，复制物料将归属到该角色 */
   selectedRole: Ref<Role | null>
+  /** 复制成功后按 id 回选目标角色（新建角色落库后 id 会变） */
+  selectRoleById: (roleId: number) => void
 }
 
 /**
  * BOM 快速复制（UiAutocomplete 驱动）
  * 简化版：自动补全委托给 UiAutocomplete，本模块只处理复制逻辑。
  */
-export function useBomQuickCopy({ currentProductId, reloadBom, selectedRole }: UseBomQuickCopyDeps) {
+export function useBomQuickCopy({ currentProductId, reloadBom, selectedRole, selectRoleById }: UseBomQuickCopyDeps) {
   const quickCopyKeyword = ref('')
   const quickCopyLoading = ref(false)
   const quickCopyProgress = reactive<ProgressState>({ visible: false, percent: 0, text: '' })
@@ -95,7 +97,7 @@ export function useBomQuickCopy({ currentProductId, reloadBom, selectedRole }: U
   }
 
   async function executeCopy(sourceId: number, sourceName: string) {
-    // 解析复制归属角色：未保存的新角色需先保存，避免物料静默落到默认 BOM
+    // 解析复制归属角色：未保存的新角色按名称交给后端查找或新建，无需先保存
     const target = resolveCopyTargetRole(selectedRole.value)
     if (!target.ok) {
       hideProgress()
@@ -109,13 +111,17 @@ export function useBomQuickCopy({ currentProductId, reloadBom, selectedRole }: U
     try {
       showProgress(70, '执行复制...')
       // 角色模式下 overwrite 仅作用于目标角色（后端已按 role_id 收敛删除范围）
-      const res = (await productApi.copyBom(currentProductId.value!, sourceId, true, target.roleId)) as { success: boolean; error?: string }
+      const res = (await productApi.copyBom(
+        currentProductId.value!, sourceId, true, target.roleId, target.roleName ?? null,
+      )) as { success: boolean; error?: string; target_role?: { id: number; name: string } }
       if (res.success) {
         showProgress(100, '复制成功！')
-        _copyTimer = setTimeout(() => {
+        _copyTimer = setTimeout(async () => {
           hideProgress()
           quickCopyLoading.value = false
-          if (currentProductId.value) reloadBom(currentProductId.value)
+          if (currentProductId.value) await reloadBom(currentProductId.value)
+          // reload 会把选中项重置为第一个角色，需回选到本次复制目标角色
+          if (res.target_role?.id != null) selectRoleById(res.target_role.id)
           quickCopyKeyword.value = ''
           selectedSourceProductId = null
           selectedSourceProductName = null

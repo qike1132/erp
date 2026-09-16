@@ -62,7 +62,7 @@ export interface ConfirmDialogLike {
 
 /** 复制 BOM 的目标角色解析结果 */
 export type CopyTargetRole =
-  | { ok: true; roleId: number | null }
+  | { ok: true; roleId: number | null; roleName?: string }
   | { ok: false; message: string }
 
 /**
@@ -70,8 +70,9 @@ export type CopyTargetRole =
  *
  * - 未选中角色（默认 BOM 作用域）→ `{ ok: true, roleId: null }`，按源产品结构复制；
  * - 选中已保存角色（有 id）→ `{ ok: true, roleId }`，复制物料归属该角色；
- * - 选中未保存的新角色（无 id）→ `{ ok: false }`，调用方应提示先保存后再复制，
- *   避免静默把物料复制到默认 BOM 作用域。
+ * - 选中未保存的新角色（无 id，但有名称）→ `{ ok: true, roleId: null, roleName }`，
+ *   由后端按角色名查找或新建角色后复制，无需用户先保存；
+ * - 无 id 且无名称 → `{ ok: false, message: '请填写角色名称' }`（防御性兜底）。
  *
  * 收敛两处调用（useBomQuickCopy / useBomCopyDialog）的判定逻辑，避免重复。
  *
@@ -80,6 +81,8 @@ export type CopyTargetRole =
  */
 export function resolveCopyTargetRole(selectedRole: Role | null): CopyTargetRole {
   if (!selectedRole) return { ok: true, roleId: null }
-  if (selectedRole.id == null) return { ok: false, message: '请先保存角色后再复制BOM' }
-  return { ok: true, roleId: selectedRole.id }
+  if (selectedRole.id != null) return { ok: true, roleId: selectedRole.id }
+  const roleName = (selectedRole.name || '').trim()
+  if (!roleName) return { ok: false, message: '请填写角色名称' }
+  return { ok: true, roleId: null, roleName }
 }

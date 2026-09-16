@@ -14,7 +14,9 @@ BOM 的查询、保存、复制、预览与搜索能力。
    保存产品 BOM，支持填充物(1:1)、面料(1:N)、辅料(1:N) 的增删改与变更日志。
 4. copy_bom(db, target_product_id, data, username) -> dict
    将源产品 BOM 复制到目标产品，支持覆盖模式；
-   当 data 携带 role_id 时复制到该指定角色（不新建角色、不波及默认/其他角色）。
+   当 data 携带 role_id 时复制到该指定角色（不新建角色、不波及默认/其他角色）；
+   当 role_id 为空但携带 role_name 时，在目标产品中按名称查找角色（幂等），
+   不存在则新建后再复制，用于支持前端尚未保存的新角色。
 5. preview_bom(db, source_product_id) -> dict
    预览源产品 BOM 结构，供复制前确认。
 6. search_for_bom_copy(db, keyword) -> list
@@ -649,6 +651,26 @@ async def copy_bom(db: AsyncSession, target_product_id: int, data: dict, usernam
     if role_id is not None:
         return await _copy_bom_into_role(
             db, source_product, target_product, target_product_id, role_id, overwrite, username,
+        )
+
+    # ===== 目标角色名模式：按名称查找或新建角色后复制（支持前端未保存的新角色）=====
+    role_name = (data.get('role_name') or '').strip()
+    if role_name:
+        role = next(
+            (
+                r for r in (getattr(target_product, 'roles', None) or [])
+                if (getattr(r, 'role_name', None) or getattr(r, 'name', '') or '').strip() == role_name
+            ),
+            None,
+        )
+        if role is None:
+            role = ProductRole(product_id=target_product_id, role_name=role_name)
+            db.add(role)
+            await db.flush()
+            # 挂进关系集合，否则 _copy_bom_into_role 的归属校验会误判「角色不属于该产品」
+            target_product.roles.append(role)
+        return await _copy_bom_into_role(
+            db, source_product, target_product, target_product_id, role.id, overwrite, username,
         )
 
     # ===== 以下为 role_id 为空时的原有逻辑，保持行为完全不变 =====

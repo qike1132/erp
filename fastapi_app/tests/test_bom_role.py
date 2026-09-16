@@ -500,6 +500,92 @@ class TestCopyBom:
 
         assert mock_db.add.call_count == 0
 
+    # ===== 目标角色名模式（传 role_name，支持前端未保存的新角色）=====
+    def _setup_role_by_name(self, mock_db, src, src_materials, target_roles=None, new_role_id=31):
+        """构造目标角色名模式：目标产品携带给定角色列表；新建角色时 db.add 负责分配 id。"""
+        src_result = MagicMock()
+        src_result.scalar_one_or_none.return_value = src
+        tgt = _mock_product(roles=list(target_roles or []), has_bom=True)
+        tgt.name = '目标产品'
+        tgt_result = MagicMock()
+        tgt_result.scalar_one_or_none.return_value = tgt
+        mat_result = MagicMock()
+        mat_result.scalars.return_value.all.return_value = src_materials
+        fallback = MagicMock()
+        fallback.scalar_one_or_none.return_value = None
+        fallback.scalars.return_value.all.return_value = []
+
+        calls = iter([src_result, tgt_result, mat_result, fallback, fallback, fallback, fallback, fallback])
+        mock_db.execute = AsyncMock(side_effect=lambda *a, **k: next(calls))
+
+        def _add(obj):
+            # 模拟 DB 自增主键：新建 ProductRole 时补上 id
+            if isinstance(obj, bom_service.ProductRole) and getattr(obj, 'id', None) is None:
+                obj.id = new_role_id
+
+        mock_db.add = MagicMock(side_effect=_add)
+        mock_db.flush = AsyncMock()
+        return tgt
+
+    async def test_copy_into_role_by_name_reuses_existing_role(self, mock_db):
+        """传 role_name 且目标产品已有同名角色 → 复用该角色，不新建 ProductRole。"""
+        src, src_materials = self._source_product()
+        self._setup_role_by_name(mock_db, src, src_materials, target_roles=[_mock_role(21, '目标角色')])
+
+        result = await bom_service.copy_bom(
+            mock_db, 2, {'source_product_id': 1, 'overwrite': False, 'role_name': '目标角色'}, 'tester',
+        )
+
+        assert self._added_of(mock_db, bom_service.ProductRole) == []
+        fabrics = self._added_of(mock_db, bom_service.ProductFabric)
+        accessories = self._added_of(mock_db, bom_service.ProductAccessory)
+        materials = self._added_of(mock_db, bom_service.ProductMaterial)
+        assert fabrics and all(f.role_id == 21 for f in fabrics)
+        assert all(a.role_id == 21 for a in accessories)
+        assert materials and all(m.role_id == 21 for m in materials)
+        assert result['target_role'] == {'id': 21, 'name': '目标角色'}
+
+    async def test_copy_into_role_by_name_creates_role_when_missing(self, mock_db):
+        """传 role_name 且目标产品无该角色 → 新建 ProductRole，物料归属新角色 id。"""
+        src, src_materials = self._source_product()
+        self._setup_role_by_name(mock_db, src, src_materials, target_roles=[], new_role_id=31)
+
+        result = await bom_service.copy_bom(
+            mock_db, 2, {'source_product_id': 1, 'overwrite': False, 'role_name': '新建角色'}, 'tester',
+        )
+
+        roles = self._added_of(mock_db, bom_service.ProductRole)
+        assert len(roles) == 1
+        assert roles[0].role_name == '新建角色'
+        assert roles[0].product_id == 2
+        assert roles[0].id == 31
+        fabrics = self._added_of(mock_db, bom_service.ProductFabric)
+        accessories = self._added_of(mock_db, bom_service.ProductAccessory)
+        materials = self._added_of(mock_db, bom_service.ProductMaterial)
+        assert fabrics and all(f.role_id == 31 for f in fabrics)
+        assert all(a.role_id == 31 for a in accessories)
+        assert materials and all(m.role_id == 31 for m in materials)
+        assert result['copied_count'] == 2
+        assert result['target_role'] == {'id': 31, 'name': '新建角色'}
+
+    async def test_role_id_takes_precedence_over_role_name(self, mock_db):
+        """同时传 role_id 和 role_name → 以 role_id 为准，role_name 被忽略。"""
+        src, src_materials = self._source_product()
+        self._setup_role(mock_db, src, src_materials, target_role_id=21)
+
+        result = await bom_service.copy_bom(
+            mock_db, 2,
+            {'source_product_id': 1, 'overwrite': False, 'role_id': 21, 'role_name': '另一个角色'},
+            'tester',
+        )
+
+        assert self._added_of(mock_db, bom_service.ProductRole) == []
+        fabrics = self._added_of(mock_db, bom_service.ProductFabric)
+        accessories = self._added_of(mock_db, bom_service.ProductAccessory)
+        assert fabrics and all(f.role_id == 21 for f in fabrics)
+        assert all(a.role_id == 21 for a in accessories)
+        assert result['target_role']['id'] == 21
+
 
 class TestPreviewBom:
     """preview_bom 返回角色与物料计数"""

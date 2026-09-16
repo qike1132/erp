@@ -11,15 +11,20 @@ describe('resolveCopyTargetRole 复制BOM目标角色解析', () => {
     expect(resolveCopyTargetRole(role)).toEqual({ ok: true, roleId: 42 })
   })
 
-  it('选中未保存的新角色（无 id）→ 中止并提示先保存', () => {
+  it('选中未保存的新角色（无 id，有名称）→ 放行并携带 roleName', () => {
     const role: Role = { name: '新建角色' }
-    expect(resolveCopyTargetRole(role)).toEqual({ ok: false, message: '请先保存角色后再复制BOM' })
+    expect(resolveCopyTargetRole(role)).toEqual({ ok: true, roleId: null, roleName: '新建角色' })
   })
 
-  it('仅带 role_key 的新角色（仍无 id）→ 同样中止，不静默落默认作用域', () => {
+  it('仅带 role_key 的新角色（仍无 id）→ 同样放行并携带 roleName', () => {
     const role: Role = { role_key: 'tmp_1', name: '新建角色2' }
     const result = resolveCopyTargetRole(role)
-    expect(result.ok).toBe(false)
-    expect(result).not.toHaveProperty('roleId')
+    expect(result.ok).toBe(true)
+    expect(result).toEqual({ ok: true, roleId: null, roleName: '新建角色2' })
+  })
+
+  it('无 id 且角色名为空 → 防御性中止，提示填写角色名称', () => {
+    const role: Role = { name: '   ' }
+    expect(resolveCopyTargetRole(role)).toEqual({ ok: false, message: '请填写角色名称' })
   })
 })

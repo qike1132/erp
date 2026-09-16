@@ -60,12 +60,14 @@ export const bomApi = {
    * @param sourceProductId 源产品 ID
    * @param overwrite 是否覆盖；角色模式下仅作用于目标角色（后端已收敛作用域）
    * @param roleId 目标角色 ID；传入时物料归属到该角色，为空/省略时按源产品结构复制
+   * @param roleName 目标角色名称；仅在 roleId 为空时生效，后端按名称查找或新建角色
    */
-  copyBom: (targetProductId: number, sourceProductId: number, overwrite: boolean, roleId?: number | null) =>
+  copyBom: (targetProductId: number, sourceProductId: number, overwrite: boolean, roleId?: number | null, roleName?: string | null) =>
     post(`/purchase-center/products/${targetProductId}/copy-bom`, {
       source_product_id: sourceProductId,
       overwrite,
       ...(roleId != null ? { role_id: roleId } : {}),
+      ...(roleId == null && roleName ? { role_name: roleName } : {}),
     }),
 }
 

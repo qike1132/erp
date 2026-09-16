@@ -11,13 +11,15 @@ interface UseBomCopyDialogDeps {
   reloadBom: (productId: number) => Promise<void>
   /** 当前选中的角色；null = 默认 BOM 作用域，复制物料将归属到该角色 */
   selectedRole: Ref<Role | null>
+  /** 复制成功后按 id 回选目标角色（新建角色落库后 id 会变） */
+  selectRoleById: (roleId: number) => void
 }
 
 /**
  * 复制 BOM 对话框（搜索源产品 → 预览 → 确认复制）
  * 从 useProductListActions 抽离，专注于对话框内的交互流程。
  */
-export function useBomCopyDialog({ currentProductId, reloadBom, selectedRole }: UseBomCopyDialogDeps) {
+export function useBomCopyDialog({ currentProductId, reloadBom, selectedRole, selectRoleById }: UseBomCopyDialogDeps) {
   const copyBomDialogVisible = ref(false)
   const copyBomSearchKeyword = ref('')
   const copyBomProducts = ref<BomSearchProduct[]>([])
@@ -70,7 +72,7 @@ export function useBomCopyDialog({ currentProductId, reloadBom, selectedRole }: 
 
   async function confirmCopyBom() {
     if (!copyBomSourceProductId.value) return
-    // 解析复制归属角色：未保存的新角色需先保存，避免物料静默落到默认 BOM
+    // 解析复制归属角色：未保存的新角色按名称交给后端查找或新建，无需先保存
     const target = resolveCopyTargetRole(selectedRole.value)
     if (!target.ok) {
       showToast(target.message, 'warning')
@@ -80,14 +82,18 @@ export function useBomCopyDialog({ currentProductId, reloadBom, selectedRole }: 
     try {
       copyBomProgress.percent = 30; copyBomProgress.text = '正在复制BOM表...'
       // 角色模式下 overwrite 仅作用于目标角色（后端已按 role_id 收敛删除范围）
-      const res = (await productApi.copyBom(currentProductId.value!, copyBomSourceProductId.value, copyBomOverwrite.value, target.roleId)) as { success: boolean; error?: string }
+      const res = (await productApi.copyBom(
+        currentProductId.value!, copyBomSourceProductId.value, copyBomOverwrite.value, target.roleId, target.roleName ?? null,
+      )) as { success: boolean; error?: string; target_role?: { id: number; name: string } }
       if (res.success) {
         copyBomProgress.percent = 100; copyBomProgress.text = '复制成功！'
-        const id = setTimeout(() => {
+        const id = setTimeout(async () => {
           _pendingTimeouts.delete(id)
           copyBomProgress.visible = false
           copyBomDialogVisible.value = false
-          if (currentProductId.value) reloadBom(currentProductId.value)
+          if (currentProductId.value) await reloadBom(currentProductId.value)
+          // reload 会把选中项重置为第一个角色，需回选到本次复制目标角色
+          if (res.target_role?.id != null) selectRoleById(res.target_role.id)
         }, 500)
         _pendingTimeouts.add(id)
       } else {
