@@ -95,7 +95,7 @@ _DOT_TEXT = {'running': '运行中', 'stopped': '已停止', 'starting': '启动
              'not_installed': '未安装', 'unknown': '状态未知'}
 # 状态枚举 → (文案, 颜色)
 _STATUS_META = {'running': ('运行中', _C['green']), 'stopped': ('已停止', _C['gray']),
-                'error': ('异常', _C['red']), 'restarting': ('重启中', _C['orange']),
+                'error': ('异常', _C['red']), 'switching': ('切换中', _C['orange']),
                 'deploying': ('启动中', _C['orange']), 'not_installed': ('未安装', _C['gray']),
                 'unknown': ('状态未知', _C['gray'])}
 _mutex_handle = None
@@ -472,7 +472,9 @@ class ServerManagerApp:
         self.root.minsize(760, 560)
         self.root.configure(bg=_C['bg'])
         self.root.withdraw()  # 先 withdraw 再构建，避免白屏闪烁
-        self._mode = 'none'            # none | starting | dual_dev | restarting | stopping
+        self._mode = 'none'            # v5.40(P2): 活枚举 = none | starting | dual_dev | stopping
+        #                              'restarting' 已移除 —— 全文件从无写入点(死字面量)，
+        #                              保留会形成「看似可达实则永远为假」的分支，误导后续维护
         self._process = None           # 后端 uvicorn Popen
         self._frontend_process = None  # 前端 npm/vite Popen
         self._redis_process = None     # 管理器启动的 Redis Popen
@@ -1199,8 +1201,11 @@ class ServerManagerApp:
 
     def _start_dual_server(self, label):
         """入口守卫(防 TOCTOU): 过渡态/已有服务/缺解释器/缺前端目录一律拒绝。"""
-        if self._mode in ('starting', 'restarting'):
-            self.log_message('开发模式正在启动/重启中，请稍候', 'WARNING')
+        # v5.40(P2): 原元组含死字面量 'restarting'(从无写入点) → 已移除。
+        #   本守卫真实语义 = 仅拒绝「正在启动」; 'stopping' 不在此列，
+        #   因其已由 toggle_dev 经 _is_busy() 前置拦截。
+        if self._mode == 'starting':
+            self.log_message('开发模式正在启动中，请稍候', 'WARNING')
             return
         if self._mode != 'none':
             self.log_message('已有服务在运行，请先停止后再启动', 'WARNING')
@@ -1680,8 +1685,13 @@ class ServerManagerApp:
     # Redis 服务与残留清理。
 
     def _on_stop_press(self, _event=None):
-        """按下起长按计时器; 未满阈值松手 → 轻量停止。"""
-        if self._stop_in_progress:
+        """按下起长按计时器; 未满阈值松手 → 轻量停止。
+
+        v5.40(P2 / QA O-2): 起计时器前先过统一守卫 —— 若此刻已在进行中/过渡态，
+        直接拒绝且**不得**登记 _stop_hold_fired，否则上一轮的 _on_stop_release
+        会因 fired 残留而空转，或长按全清在轻量停止刚结束的瞬间被误触发。
+        """
+        if not self._stop_entry_guard('紧急停止'):
             return
         self._stop_hold_fired = False
         self._cancel_hold_timer()
@@ -1692,8 +1702,7 @@ class ServerManagerApp:
         if self._stop_hold_fired:
             self._stop_hold_fired = False
             return
-        if not self._stop_in_progress:
-            self.emergency_stop_light()
+        self.emergency_stop_light()
 
     def _on_stop_hold(self):
         self._stop_hold_after = None
@@ -1706,13 +1715,35 @@ class ServerManagerApp:
                 self.root.after_cancel(self._stop_hold_after)
             self._stop_hold_after = None
 
+    def _stop_entry_guard(self, action):
+        """紧急停止统一入口守卫 (v5.40 P2 / QA O-2)。
+
+        收口三类竞态:
+        ① 已在进行中(_stop_in_progress) → 拒绝重复起 worker;
+        ② 其它过渡态(_mode in starting/stopping) → 拒绝抢占同一批端口;
+        ③ 生产命令在途(_prod_busy) → 拒绝与 _service_cmd_sync 交叉。
+
+        ★ 必须由主线程调用(直接读写 _stop_in_progress，符合 §线程契约)。
+        ★ 本守卫只判定不登记; _stop_in_progress 由调用方在守卫通过后立即置位，
+          以保证「判定 → 置位」无间隙(TOCTOU 闭合)。
+        """
+        if self._stop_in_progress:
+            self.log_message('操作正在执行中，请稍候', 'WARNING')
+            return False
+        if self._mode in ('starting', 'stopping'):
+            self.log_message(f'当前处于{"启动" if self._mode == "starting" else "停止"}过渡态，请稍候再执行{action}', 'WARNING')
+            return False
+        if self._prod_busy:
+            self.log_message(f'生产命令执行中，请稍候再执行{action}', 'WARNING')
+            return False
+        return True
+
     def emergency_stop_light(self):
         """单击: 停当前模式(开发进程树 / 生产 erp-prod+erp-arq) + 停自有 Redis 进程 + 释放 5002/3000。
 
         Redis 服务保持运行(共享基础设施)。
         """
-        if self._stop_in_progress:
-            self.log_message('操作正在执行中，请稍候', 'WARNING')
+        if not self._stop_entry_guard('紧急停止'):
             return
         self._stop_in_progress = True
         self.status_label.config(text='正在紧急停止（轻量）...')
@@ -1721,8 +1752,7 @@ class ServerManagerApp:
 
     def emergency_stop_full(self):
         """长按≥1.5s: 轻量停止 + 停 Redis 服务 + 扫游离残留 + 释放 6379。需二次确认。"""
-        if self._stop_in_progress:
-            self.log_message('操作正在执行中，请稍候', 'WARNING')
+        if not self._stop_entry_guard('紧急全清'):
             return
         redis_svcs = ' / '.join(_APP_CONFIG.get('redis_services') or [])
         if not messagebox.askyesno(
@@ -1968,7 +1998,8 @@ class ServerManagerApp:
     def _is_busy(self):
         # v5.40 补丁: 纳入紧急停止进行中 —— 否则紧急停止期间 toggle_dev/toggle_prod
         # 仍可穿过此处进入启动链，形成次级竞态(与 _stop_in_progress 抢占同一批资源)。
-        return (self._mode in ('starting', 'restarting', 'stopping')
+        # v5.40(P2): 移除死字面量 'restarting'(全文件无写入点)。
+        return (self._mode in ('starting', 'stopping')
                 or self._prod_busy
                 or self._stop_in_progress)
 
@@ -2008,8 +2039,11 @@ class ServerManagerApp:
         """模式徽章: 过渡态优先于稳态，生产运行由服务轮询决定。"""
         if self._mode == 'starting' or (self._prod_busy and not self._prod_running):
             state, text = 'deploying', '启动中'
-        elif self._mode in ('restarting', 'stopping') or self._prod_busy:
-            state, text = 'restarting', '切换中'
+        elif self._mode == 'stopping' or self._prod_busy:
+            # v5.40(P2): state 由死字面量 'restarting' 改为活枚举 'switching'(→ _STATUS_META)。
+            #   此前直接传 'restarting' 而非查表，字面量一经清理即无从解析; 改用 'switching'
+            #   并在 _STATUS_META 建同名条目，语义(橙色/切换中)完全等价。
+            state, text = 'switching', '切换中'
         elif self._mode == 'dual_dev':
             state, text = 'running', '开发模式运行中'
         elif self._prod_running:
