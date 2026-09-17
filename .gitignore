@@ -226,7 +226,9 @@ _mc_contract_diff.py
 _mc_contract_probe.py
 # 系统自动生成的备份归档（*.zip 已覆盖 server/pre_restore 等；此处显式屏蔽整个 backups/ 防新产物入库）
 # 注：backups/material-calculator-rollback-20260911、backups/stale-restore-20260911 为已入库的
-#     回滚源副本，因已被跟踪不会被本规则移除；如需从版本库移除请单独 git rm --cached。
+#     回滚源副本（人工留档，作回滚点），刻意保留跟踪，请勿 git rm --cached。
+# 2026-09-17：backups/server 下运行时产物（cleanup_reports/*.json、*.zip.meta、metrics/*.json
+#     共 21 个）已 git rm --cached 移出跟踪（磁盘文件保留），此后由本规则兜住新产物。
 /backups/
 
 # Redis 生产配置含真实密码，禁止入库（模板见 redis.production.conf.template）
