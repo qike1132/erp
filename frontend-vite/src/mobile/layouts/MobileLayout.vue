@@ -55,6 +55,12 @@ function sanitizeSvgInner(html: string): string {
   return html
 }
 
+// 根 <svg> 属性白名单：仅放行无害展示属性；on* 事件句柄、href/xlink 等一律丢弃
+const _SVG_ATTR_ALLOW = new Set([
+  'viewBox', 'fill', 'stroke', 'stroke-width', 'stroke-linecap', 'stroke-linejoin',
+  'class', 'width', 'height', 'xmlns', 'aria-hidden', 'role', 'focusable',
+])
+
 function createSvgIcon(svgString: string): Component {
   const m = svgString.match(/^<svg([^>]*)>([\s\S]*)<\/svg>$/)
   if (!m) throw new Error('Invalid SVG: ' + svgString.slice(0, 50))
@@ -62,11 +68,16 @@ function createSvgIcon(svgString: string): Component {
   const innerHtml = sanitizeSvgInner(m[2] ?? '')
   const attrs: Record<string, string> = {}
   for (const am of attrStr.matchAll(/([\w-]+)="([^"]*)"/g)) {
-    if (am[1]) attrs[am[1]] = am[2] ?? ''
+    const name = am[1] ?? ''
+    const value = am[2] ?? ''
+    if (!_SVG_ATTR_ALLOW.has(name)) continue // 白名单外属性（含 on\w+ 事件）直接丢弃
+    if (/javascript:/i.test(value)) continue
+    attrs[name] = value
   }
   return markRaw(defineComponent({
     render() {
-      // innerHTML 内容经 sanitizeSvgInner 校验且源自模块级 SVG 常量，等价于 v-html 的安全用法
+      // innerHTML 内容经 sanitizeSvgInner 校验且源自模块级 SVG 常量，等价于 v-html 的安全用法；
+      // 根属性已过 _SVG_ATTR_ALLOW 白名单
       return h('svg', { ...attrs, innerHTML: innerHtml })
     }
   }))
