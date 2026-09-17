@@ -9,6 +9,21 @@ import {
 } from '../roleMatrix'
 import type { MaterialCalcRow, MaterialCalcScopeGroup } from '@/api/purchase'
 
+/**
+ * 取出数组第 i 项。
+ *
+ * `tsconfig` 开启了 `noUncheckedIndexedAccess`，因此 `arr[i]` 的静态类型为
+ * `T | undefined`，直接取属性会触发 TS2532。此助手在越界时立即抛错（而非用 `!`
+ * 断言压过去），既修正类型，也让「预期存在」这一前提在运行时被真正校验。
+ */
+function at<T>(arr: readonly T[], i: number): T {
+  const v = arr[i]
+  if (v === undefined) {
+    throw new Error(`期望索引 ${i} 存在，实际数组长度 ${arr.length}`)
+  }
+  return v
+}
+
 /** 构造一条物料结果行。 */
 function mkRow(name: string, over: Partial<MaterialCalcRow> = {}): MaterialCalcRow {
   return {
@@ -79,10 +94,10 @@ describe('deriveRoleMatrix · 合并 / 分行 (A-6)', () => {
     expect(res.visible).toBe(true)
     const hit = res.rows.filter((r) => r.materialName === '共用料')
     expect(hit).toHaveLength(1)
-    expect(hit[0].cells[SCOPE_DEFAULT]).toBe(100)
-    expect(hit[0].cells[SCOPE_A]).toBe(50)
-    expect(hit[0].scopeCount).toBe(2)
-    expect(hit[0].total).toBe(150)
+    expect(at(hit, 0).cells[SCOPE_DEFAULT]).toBe(100)
+    expect(at(hit, 0).cells[SCOPE_A]).toBe(50)
+    expect(at(hit, 0).scopeCount).toBe(2)
+    expect(at(hit, 0).total).toBe(150)
   })
 
   it('同名同供应商但**规格不同** → 必须分行（不得合并成一行）', () => {
@@ -146,8 +161,8 @@ describe('deriveRoleMatrix · 单位冲突拆行 (A-7)', () => {
     ])
     const hit = res.rows.filter((r) => r.materialName === '同单位料')
     expect(hit).toHaveLength(1)
-    expect(hit[0].unitConflict).toBe(false)
-    expect(hit[0].total).toBe(7)
+    expect(at(hit, 0).unitConflict).toBe(false)
+    expect(at(hit, 0).total).toBe(7)
   })
 })
 
@@ -163,9 +178,9 @@ describe('deriveRoleMatrix · 排序 (A-8)', () => {
     const names = res.rows.map((r) => r.materialName)
     // 共用料 scopeCount=2 必居首；独有料(total5) 先于 少料(total1)
     expect(names).toEqual(['共用料', '独有料', '少料'])
-    expect(res.rows[0].scopeCount).toBe(2)
-    expect(res.rows[1].scopeCount).toBe(1)
-    expect(res.rows[2].scopeCount).toBe(1)
+    expect(at(res.rows, 0).scopeCount).toBe(2)
+    expect(at(res.rows, 1).scopeCount).toBe(1)
+    expect(at(res.rows, 2).scopeCount).toBe(1)
   })
 
   it('类别升序作为最末一级：scopeCount/total 相同时按 filling→fabric→accessory', () => {
@@ -227,7 +242,7 @@ describe('splitByUnitConflict', () => {
     const out = splitByUnitConflict(rows)
     // k 组的两行必须相邻，且按 unit 升序（克 < 个? 用 localeCompare 稳定）
     expect(out.map((r) => r.groupKey)).toEqual(['k', 'k', 'j'])
-    expect(out[0].unit.localeCompare(out[1].unit)).toBeLessThanOrEqual(0)
+    expect(at(out, 0).unit.localeCompare(at(out, 1).unit)).toBeLessThanOrEqual(0)
   })
 })
 
