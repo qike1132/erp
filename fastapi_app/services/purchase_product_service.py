@@ -264,7 +264,11 @@ def _accumulate_bom_rows(
     """
     for mat in rows:
         category = mat.get('category', '')
-        name = mat.get('material_name', '')
+        # 文本字段一律归一：三张物料表的 material_code/unit/specification/supplier_name
+        # 在 DB 层均可空，`to_dict()` 原样透出 None。响应模型 MaterialCalcRow 声明为
+        # `str`（契约文档 +str），若不归一会抛 ResponseValidationError → 接口 500
+        # （2026-09-17 线上事故，见 test_calculate_material_null_code.py）。
+        name = mat.get('material_name', '') or ''
         supplier_name = mat.get('supplier_name', '') or ''
         specification = mat.get('specification', '') or ''
         key = (category, name, supplier_name, specification)
@@ -275,10 +279,10 @@ def _accumulate_bom_rows(
                 'total': Decimal(0),
                 'name': name,
                 'category': category,
-                'unit': mat.get('unit', ''),
+                'unit': mat.get('unit', '') or '',
                 'supplier_name': supplier_name,
                 'specification': specification,
-                'material_code': mat.get('material_code', ''),
+                'material_code': mat.get('material_code', '') or '',
             }
             totals[key] = bucket
 
@@ -303,11 +307,11 @@ def _finalize_bom_totals(totals: dict[tuple, dict]) -> dict[str, list[dict]]:
             result[category].append({
                 'name': info['name'],
                 'material_name': info['name'],
-                'material_code': info.get('material_code', ''),
-                'specification': info.get('specification', ''),
+                'material_code': info.get('material_code', '') or '',
+                'specification': info.get('specification', '') or '',
                 'total_quantity': float(info['total']),
-                'unit': info['unit'],
-                'supplier_name': info['supplier_name'],
+                'unit': info.get('unit', '') or '',
+                'supplier_name': info.get('supplier_name', '') or '',
             })
         else:
             logger.warning('未知物料分类被丢弃: %s (物料: %s)', category, info['name'])
