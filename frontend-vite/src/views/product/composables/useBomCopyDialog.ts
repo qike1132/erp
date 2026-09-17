@@ -92,7 +92,7 @@ export function useBomCopyDialog({ currentProductId, reloadBom, selectedRole, se
           copyBomProgress.visible = false
           copyBomDialogVisible.value = false
           if (currentProductId.value) await reloadBom(currentProductId.value)
-          // reload 会把选中项重置为第一个角色，需回选到本次复制目标角色
+          // reload 会把选中项停靠回「默认BOM」（A-3），若本次复制到具体角色需回选该角色
           if (res.target_role?.id != null) selectRoleById(res.target_role.id)
         }, 500)
         _pendingTimeouts.add(id)

@@ -1,7 +1,9 @@
 import { ref, reactive, computed } from 'vue'
 import { productApi } from '@/api'
+import { roleApi, RoleApiError } from '@/api/role'
 import { showToast } from '@/composables/useToast'
 import type { BomItem, BomCategory, Role, ConfirmDialogLike } from './bomTypes'
+import { buildRolePayload, findRoleByGlobalId } from './bomTypes'
 import { useBomQuickCopy } from './useBomQuickCopy'
 import { useBomCopyDialog } from './useBomCopyDialog'
 
@@ -111,11 +113,15 @@ export function useProductListActions(confirmDialog: ConfirmDialogLike) {
     try {
       const res = (await productApi.loadBom(productId)) as {
         success: boolean
-        product?: { roles?: { id: number; name: string }[]; default_bom_label?: string | null }
+        product?: { roles?: { id: number; global_role_id?: number | null; name: string }[]; default_bom_label?: string | null }
         materials?: BomMaterialRecord[]
       }
       if (res.success) {
-        bomRoles.value = (res.product?.roles || []).map(r => ({ id: r.id, name: r.name }))
+        bomRoles.value = (res.product?.roles || []).map(r => ({
+          id: r.id,
+          global_role_id: r.global_role_id ?? null,
+          name: r.name,
+        }))
         defaultScopeName.value = res.product?.default_bom_label?.trim() || '默认BOM'
         const materialsList = res.materials || []
         materialsList.forEach((item) => {
@@ -135,8 +141,9 @@ export function useProductListActions(confirmDialog: ConfirmDialogLike) {
             category: category,
           })
         })
-        // 有角色时默认选中第一个角色
-        if (bomRoles.value.length) selectedRole.value = bomRoles.value[0] ?? null
+        // 缺陷①（A-3）：打开弹窗默认停靠「默认BOM」——保持 selectedRole === null，
+        // 不再默认落 bomRoles[0]，避免用户误在某个角色作用域下编辑。
+        selectedRole.value = null
       }
     } catch (error) {
       console.error('加载BOM数据失败:', error)
@@ -161,6 +168,8 @@ export function useProductListActions(confirmDialog: ConfirmDialogLike) {
       role_id: selectedRole.value?.id ?? null,
       category: currentBomCategory.value,
     })
+    // P1-04：明确告知新物料的归属作用域，避免「加错角色」。
+    showToast(`已在「${currentScopeLabel.value}」作用域添加物料`, 'info')
   }
 
   async function deleteBomItem(index: number) {
@@ -193,10 +202,73 @@ export function useProductListActions(confirmDialog: ConfirmDialogLike) {
     selectedRole.value = role
   }
 
-  function renameRole(role: Role, newName: string) {
+  /**
+   * 关联「已有全局角色」到当前产品（A-1，走 global_role_id 路径）。
+   *
+   * 不复制全局角色记录；同一 global_role_id 已关联时幂等复用（不重复新增）。
+   *
+   * @param globalRole 全局角色字典项（`id` = role.id）
+   * @returns `true` = 新建立关联；`false` = 已关联、仅切换选中
+   */
+  function associateGlobalRole(globalRole: { id: number; name: string }): boolean {
+    const existing = findRoleByGlobalId(bomRoles.value, globalRole.id)
+    if (existing) {
+      selectedRole.value = existing
+      return false
+    }
+    const role: Role = { global_role_id: globalRole.id, name: globalRole.name }
+    bomRoles.value.push(role)
+    ensureScope(scopeKeyOf(role))
+    selectedRole.value = role
+    return true
+  }
+
+  /**
+   * 重命名角色。
+   *
+   * - 已关联全局角色（有 `global_role_id`）→ 走 `PUT /purchase-center/roles/{id}`
+   *   （A-13：改名只换名字，**不重建物料行**，物料按 role_id 归属不变）；
+   * - 未落库的新角色 / 历史遗留行 → 仅改本地名，保存时由后端同步。
+   *
+   * @returns 重命名成功返回 `true`
+   */
+  async function renameRole(role: Role, newName: string): Promise<boolean> {
     const trimmed = (newName || '').trim()
-    if (!trimmed || role.name === trimmed) return
+    if (!trimmed || role.name === trimmed) return false
+    if (role.global_role_id != null) {
+      try {
+        const updated = await roleApi.rename(role.global_role_id, trimmed)
+        role.name = updated?.name || trimmed
+        return true
+      } catch (error) {
+        if (error instanceof RoleApiError && error.status === 400) {
+          showToast(error.detail || '角色名称已存在（名称比较不区分大小写）', 'warning')
+        } else {
+          showToast('重命名角色失败', 'error')
+        }
+        return false
+      }
+    }
     role.name = trimmed
+    return true
+  }
+
+  /** 同步全局角色改名到已关联的本地角色（供全局角色选择器回调）。 */
+  function applyGlobalRename(globalRoleId: number, name: string) {
+    for (const role of bomRoles.value) {
+      if (role.global_role_id === globalRoleId) role.name = name
+    }
+  }
+
+  /** 全局角色被删除后的本地兜底清理（正常情况下被引用者删不掉）。 */
+  function applyGlobalDeleted(globalRoleId: number) {
+    const idx = bomRoles.value.findIndex(r => r.global_role_id === globalRoleId)
+    if (idx < 0) return
+    const [removed] = bomRoles.value.splice(idx, 1)
+    if (removed) {
+      delete bomByScope[scopeKeyOf(removed)]
+      if (selectedRole.value === removed) selectedRole.value = null
+    }
   }
 
   /** 重命名默认 BOM（空名/同名忽略，保持原名称） */
@@ -216,7 +288,8 @@ export function useProductListActions(confirmDialog: ConfirmDialogLike) {
     const idx = bomRoles.value.indexOf(role)
     if (idx >= 0) bomRoles.value.splice(idx, 1)
     delete bomByScope[scopeKeyOf(role)]
-    if (selectedRole.value === role) selectedRole.value = bomRoles.value[0] ?? null
+    // A-3：删除后回落到「默认BOM」作用域（与打开弹窗的默认停靠一致）
+    if (selectedRole.value === role) selectedRole.value = null
   }
 
   async function saveBom() {
@@ -235,9 +308,8 @@ export function useProductListActions(confirmDialog: ConfirmDialogLike) {
       return
     }
 
-    const rolesPayload = bomRoles.value.map(r =>
-      r.id != null ? { id: r.id, role_name: r.name } : { role_key: r.role_key, role_name: r.name },
-    )
+    // 角色负载：id（既有行）/ global_role_id（关联已有全局角色）/ role_key（新建）三条路径
+    const rolesPayload = buildRolePayload(bomRoles.value)
 
     const fabrics: unknown[] = []
     const accessories: unknown[] = []
@@ -350,7 +422,10 @@ export function useProductListActions(confirmDialog: ConfirmDialogLike) {
     selectRole,
     selectRoleById,
     addRole,
+    associateGlobalRole,
     renameRole,
+    applyGlobalRename,
+    applyGlobalDeleted,
     renameDefaultScope,
     removeRole,
     // Quick copy

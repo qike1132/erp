@@ -112,7 +112,19 @@
                   @blur="commitAddRole"
                 />
                 <button v-else class="bom-role-add-btn" @click="startAddRole"><FontAwesomeIcon icon="plus" aria-hidden="true" />添加角色</button>
+                <!-- 全局角色入口：选择已有角色并关联到当前产品（不复制记录，A-1） -->
+                <BomRolePicker
+                  :associated-global-ids="associatedGlobalIds"
+                  @associate="onRoleAssociate"
+                  @renamed="onRoleRenamed"
+                  @deleted="onRoleDeleted"
+                />
               </div>
+              <!-- P1-04：顶部常驻当前作用域徽标，避免误在别的角色作用域下编辑 -->
+              <span class="bom-scope-badge" title="当前编辑作用域">
+                <FontAwesomeIcon icon="tags" aria-hidden="true" />
+                当前作用域：<strong>{{ currentScopeLabel }}</strong>
+              </span>
               <span v-if="!bomRoles.length && !defaultScopeHasItems" class="bom-role-empty">尚未配置角色，点击"＋ 添加角色"开始</span>
             </div>
             <div v-if="quickCopyProgress.visible" class="mb-3">
@@ -195,12 +207,14 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
+import { showToast } from '@/composables/useToast'
 import { useProductListActions } from '../composables/useProductListActions'
 import type { Role } from '../composables/bomTypes'
 import BomCopyDialog from './BomCopyDialog.vue'
+import BomRolePicker from './BomRolePicker.vue'
 
 const confirmDialog = useConfirmDialog()
 
@@ -209,6 +223,7 @@ const {
   bomTabs, currentBomItems, currentBomTabLabel, currentScopeLabel, currentScopeCount,
   switchBomTab, openBomModal, addBomItem, deleteBomItem, saveBom,
   bomRoles, selectedRole, defaultScopeName, defaultScopeHasItems, selectRole, addRole, renameRole, renameDefaultScope, removeRole,
+  associateGlobalRole, applyGlobalRename, applyGlobalDeleted,
   quickCopyKeyword, quickCopyLoading,
   quickCopyProgress,
   searchProductsForBom, selectAutocompleteItem, quickCopyBom,
@@ -216,6 +231,27 @@ const {
   copyBomSourceProductId, copyBomPreview, copyBomOverwrite, copyBomProgress,
   searchProductForCopy, selectCopyBomProduct, confirmCopyBom,
 } = useProductListActions(confirmDialog)
+
+// ===== 全局角色入口（关联已有角色）：已关联的 global_role_id 集合，供选择器置灰 =====
+const associatedGlobalIds = computed<number[]>(() =>
+  bomRoles.value
+    .map(role => role.global_role_id)
+    .filter((id): id is number => id != null),
+)
+
+function onRoleAssociate(globalRole: { id: number; name: string }) {
+  const created = associateGlobalRole(globalRole)
+  if (created) showToast(`已关联角色「${globalRole.name}」`, 'success')
+  else showToast(`角色「${globalRole.name}」已关联`, 'info')
+}
+
+function onRoleRenamed(payload: { id: number; name: string }) {
+  applyGlobalRename(payload.id, payload.name)
+}
+
+function onRoleDeleted(globalRoleId: number) {
+  applyGlobalDeleted(globalRoleId)
+}
 
 // ===== 角色页签管理：⋯ 菜单 + 内联重命名 =====
 type TabKey = Role | 'default'
@@ -236,11 +272,14 @@ function startRename(key: TabKey, name: string) {
     list[0]?.focus()
   })
 }
-function commitRename() {
-  if (!renamingTarget.value) return
-  if (renamingTarget.value === 'default') renameDefaultScope(renameInput.value)
-  else renameRole(renamingTarget.value, renameInput.value)
+async function commitRename() {
+  const target = renamingTarget.value
+  if (!target) return
+  const value = renameInput.value
+  // 先收起内联输入，避免 blur 再次触发；再异步提交（全局角色走 PUT，A-13）
   renamingTarget.value = null
+  if (target === 'default') renameDefaultScope(value)
+  else await renameRole(target, value)
 }
 function cancelRename() {
   renamingTarget.value = null
@@ -451,6 +490,15 @@ defineExpose({ open: openBomModal })
   font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.2s ease;
 }
 .bom-role-add-btn:hover { border-color: var(--color-primary-400); background: var(--color-primary-100); }
+/* P1-04：当前作用域常驻徽标 */
+.bom-scope-badge {
+  display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+  padding: 6px 12px; border-radius: 999px; font-size: 12.5px; font-weight: 600;
+  color: var(--color-primary-700);
+  background: linear-gradient(135deg, var(--color-primary-50), var(--color-primary-100));
+  border: 1px solid var(--color-primary-200);
+}
+.bom-scope-badge strong { font-weight: 700; }
 
 /* BOM内容区：给一个稳定的最小高度，保证「0 条(空态) / 1 条 / 多条」时
    内容区下沿位置一致，不会因为只有 1 行而显得弹窗塌陷 */
