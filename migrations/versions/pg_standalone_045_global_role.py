@@ -151,6 +151,24 @@ def _merge_duplicate_roles() -> None:
     op.execute('DROP TABLE IF EXISTS _pr_dup;')
 
 
+def _assert_no_unbackfillable_rows() -> None:
+    """NOT NULL 前置断言：空白 / NULL 的 ``role_name`` 行无法参与回填。
+
+    ``_backfill_global_role_id`` 的回填 SQL 带 ``WHERE btrim(role_name) <> ''``，
+    故这类行的 ``global_role_id`` 会保持 NULL，随后 ``SET NOT NULL`` 抛裸 Postgres 错
+    （``column ... contains null values``），排查成本高。此处提前断言并给出可处置文案。
+    """
+    op.execute(
+        'DO $$ BEGIN '
+        "IF EXISTS (SELECT 1 FROM product_role "
+        "WHERE btrim(role_name) = '' OR role_name IS NULL) THEN "
+        "RAISE EXCEPTION '迁移中止：product_role 存在空白或 NULL 的 role_name 行，"
+        "这些行无法回填 global_role_id。请先运行 scripts/migrate_roles_report.py "
+        "定位并清理后再执行迁移。'; "
+        'END IF; END $$;'
+    )
+
+
 def _tighten_constraints() -> None:
     """加唯一约束 + 外键 + 收紧 NOT NULL（幂等；存在空白名无法回填则中止）。"""
     op.execute(
@@ -160,6 +178,8 @@ def _tighten_constraints() -> None:
         'ALTER TABLE product_role ADD CONSTRAINT uq_product_role_product_global '
         'UNIQUE (product_id, global_role_id); END IF; END $$;'
     )
+    # 先断言可回填性，再收紧，避免以裸 Postgres 约束错的形式失败
+    _assert_no_unbackfillable_rows()
     op.execute('ALTER TABLE product_role ALTER COLUMN global_role_id SET NOT NULL;')
     op.execute(
         'DO $$ BEGIN '

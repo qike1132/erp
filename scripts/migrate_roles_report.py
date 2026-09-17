@@ -11,6 +11,10 @@ SELECT，不执行任何 DDL/DML、不 commit。因此可安全对生产库运�
 
 输出内容
 --------
+- **硬性前置条件（BLOCKER）**：`btrim(role_name)` 为空的行数及其样本。回填 SQL 带
+  `WHERE btrim(role_name) <> ''`，这些行**无法回填** `global_role_id`，会以 NULL 状态
+  存活到 `_tighten_constraints` 的 `SET NOT NULL` → 迁移中途失败。此项非 0 时脚本
+  以返回码 **2** 退出（便于脚本化闸门），必须先清理才能迁移。
 - 归并组明细：同一产品下 `lower(btrim(role_name))` 相同的多行 `product_role`
   （迁移后会合并为 1 行）——列出 product_id、角色名、将保留的行 id、将删除的行 id，
   以及这些行在三张物料表上的行数（M4：归并若撞唯一约束是关键风险点）。
@@ -22,7 +26,7 @@ SELECT，不执行任何 DDL/DML、不 commit。因此可安全对生产库运�
 
 用法
 ----
-    python scripts/migrate_roles_report.py                 # 迁移前干跑
+    python scripts/migrate_roles_report.py                 # 迁移前干跑（有 BLOCKER 则退出码 2）
     python scripts/migrate_roles_report.py --json          # 机器可读
     python scripts/migrate_roles_report.py --verify        # 迁移后校验
 """
@@ -46,6 +50,9 @@ _MATERIAL_TABLES = (
     ('accessory', 'product_accessory'),
 )
 
+# 干跑发现硬性前置条件未满足时的返回码（区别于 --verify 的 1）
+EXIT_BLOCKED = 2
+
 
 def _has_column(conn, table: str, column: str) -> bool:
     """判断表上是否存在指定列（用于区分迁移前/后）。"""
@@ -58,6 +65,23 @@ def _has_column(conn, table: str, column: str) -> bool:
         {'t': table, 'c': column},
     ).first()
     return row is not None
+
+
+def collect_unbackfillable_rows(conn) -> dict:
+    """统计**无法回填** `global_role_id` 的行（空白 / NULL 的 role_name）。
+
+    回填 SQL（迁移 045 `_backfill_global_role_id`）带 `WHERE btrim(role_name) <> ''`，
+    因此这些行迁移后仍是 NULL，会令随后的 `SET NOT NULL` 直接抛裸 Postgres 错。
+    这是迁移前**必须清零**的硬性前置条件——本报告的核心闸门。
+    """
+    rows = conn.execute(
+        text(
+            'SELECT id, product_id, role_name FROM product_role '
+            "WHERE btrim(role_name) = '' OR role_name IS NULL "
+            'ORDER BY product_id, id'
+        )
+    ).mappings().all()
+    return {'count': len(rows), 'sample': [dict(r) for r in rows[:20]]}
 
 
 def collect_merge_groups(conn) -> list[dict]:
@@ -135,6 +159,7 @@ def collect_report(conn) -> dict:
         'affected_product_count': int(
             conn.execute(text('SELECT count(DISTINCT product_id) FROM product_role')).scalar() or 0
         ),
+        'unbackfillable_rows': collect_unbackfillable_rows(conn),
         'role_census': collect_role_census(conn),
         'merge_groups': collect_merge_groups(conn),
         'baseline_counts': collect_baseline_counts(conn),
@@ -145,7 +170,7 @@ def verify(conn, report: dict) -> tuple[bool, list[str]]:
     """迁移后幂等/守恒校验。返回 (是否通过, 问题清单)。"""
     problems: list[str] = []
     if not report['migrated']:
-        problems.append('global_role_id 列不存在：迁移 042 尚未执行，--verify 无意义')
+        problems.append('global_role_id 列不存在：迁移 045 尚未执行，--verify 无意义')
         return False, problems
 
     null_count = int(
@@ -181,6 +206,22 @@ def render(report: dict) -> None:
     print(f"product_role 总行数: {report['product_role_total']}")
     print(f"涉及产品数: {report['affected_product_count']}")
     print()
+
+    # 硬性前置条件：不满足则 SET NOT NULL 必然失败
+    blockers = report['unbackfillable_rows']
+    print('-' * 72)
+    if blockers['count']:
+        print(
+            f"[BLOCKER] 存在 {blockers['count']} 行空白/NULL role_name，"
+            '无法回填 global_role_id —— SET NOT NULL 会失败，必须先清理：'
+        )
+        for r in blockers['sample']:
+            print(f"  - id={r['id']} product_id={r['product_id']} role_name={r['role_name']!r}")
+    else:
+        print('[OK] 无空白/NULL role_name 行：SET NOT NULL 前置条件成立')
+    print('-' * 72)
+    print()
+
     print(f"按分类物料行数基线: {report['baseline_counts']}")
     print()
     print(f"全局角色上卷预演（{len(report['role_census'])} 个名称分组，"
@@ -230,6 +271,15 @@ def main() -> int:
         if args.verify:
             ok, _ = verify(conn, report)
             return 0 if ok else 1
+        # 迁移前干跑：硬性前置条件未满足 → 非 0（脚本化闸门用），阻止带着数据问题迁移
+        if report['unbackfillable_rows']['count']:
+            if not args.json:
+                print()
+                print(
+                    f"[EXIT {EXIT_BLOCKED}] 前置条件未满足：请先清理上列空白 role_name 行，"
+                    '否则迁移 045 会在 SET NOT NULL 处失败。'
+                )
+            return EXIT_BLOCKED
     return 0
 
 
