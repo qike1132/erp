@@ -1,9 +1,11 @@
 <template>
-  <div class="mc-filter-bar">
+  <div class="mc-seg" role="group" aria-label="按 BOM 过滤产品">
     <button
       v-for="f in options"
       :key="f.value"
-      :class="['mc-filter-btn', modelValue === f.value ? 'active' : '']"
+      type="button"
+      :class="{ active: modelValue === f.value }"
+      :aria-pressed="modelValue === f.value"
       @click="model = f.value"
     >
       {{ f.label }}
@@ -12,6 +14,8 @@
 </template>
 
 <script setup lang="ts">
+// BOM 过滤：由「独立整行的三个大按钮」改为列内紧凑分段控件（.mc-seg，定义在全局 app.css），
+// 以便与搜索框同处 .mc-col-tools 一行。取值口径与交互语义完全不变。
 type FilterValue = 'all' | 'true' | 'false'
 
 const model = defineModel<FilterValue>({ default: 'all' })
@@ -20,40 +24,3 @@ defineProps<{
   options: Array<{ label: string; value: FilterValue }>
 }>()
 </script>
-
-<style scoped>
-.mc-filter-bar {
-  display: flex;
-  gap: 8px;
-  padding: 0 16px 12px;
-}
-
-.mc-filter-btn {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 9px 14px;
-  background: white;
-  border: 2px solid var(--color-border-light, #e2e8f0);
-  border-radius: 9px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  transition: border-color 0.2s ease, background 0.2s ease, transform 0.2s ease;
-}
-
-.mc-filter-btn:hover {
-  background: white;
-  border-color: var(--color-border, #cbd5e1);
-  transform: translateY(-1px);
-}
-
-.mc-filter-btn.active {
-  background: var(--color-primary-50);
-  border-color: var(--color-primary-400);
-  color: var(--color-primary-700);
-}
-</style>

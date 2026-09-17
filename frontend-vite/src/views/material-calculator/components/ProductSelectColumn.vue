@@ -3,18 +3,22 @@
     <div class="mc-col-title">
       <FontAwesomeIcon icon="boxes-stacked" aria-hidden="true" />
       产品选择
+      <span class="mc-col-tail">{{ filteredProducts.length }} 条</span>
     </div>
 
-    <ProductSearchPanel
-      v-model="searchQuery"
-      :suggestions="searchSuggestions"
-      @search-input="onSearchInput"
-      @search-focus="onMcSearchFocus"
-      @search-blur="hideMcSuggestions"
-      @select="onSelectFromSearch"
-    />
+    <!-- 搜索与 BOM 过滤合并为一行：原先各占一整行，前置控件共吃掉 153px -->
+    <div class="mc-col-tools">
+      <ProductSearchPanel
+        v-model="searchQuery"
+        :suggestions="searchSuggestions"
+        @search-input="onSearchInput"
+        @search-focus="onMcSearchFocus"
+        @search-blur="hideMcSuggestions"
+        @select="onSelectFromSearch"
+      />
 
-    <ProductFilterBar v-model="bomFilter" :options="filterOptions" />
+      <ProductFilterBar v-model="bomFilter" :options="filterOptions" />
+    </div>
 
     <div v-if="productCapHint && !loadingProducts" class="mc-cap-hint">{{ productCapHint }}</div>
 
@@ -67,12 +71,12 @@ function onSelectFromSearch(p: MaterialCalcProduct) {
 
 <style scoped>
 .mc-cap-hint {
-  padding: 6px 12px;
-  margin: 0 16px 6px;
+  padding: 6px 10px;
+  margin: 0 12px 6px;
   font-size: 12px;
-  color: var(--color-text-secondary);
+  color: var(--color-warning-800);
   background: var(--color-warning-50);
-  border-radius: 8px;
+  border-radius: 6px;
   text-align: center;
   flex-shrink: 0;
 }

@@ -52,9 +52,11 @@ const emit = defineEmits<{
 </script>
 
 <style scoped>
+/* 本组件现在位于 .mc-col-tools 工具行内，自身不再带外边距，只负责撑满剩余宽度 */
 .mc-search-wrapper {
   position: relative;
-  padding: 12px 16px;
+  flex: 1;
+  min-width: 0;
 }
 
 .mc-search-input-group {
@@ -65,59 +67,67 @@ const emit = defineEmits<{
 
 .mc-search-icon {
   position: absolute;
-  left: 14px;
-  color: var(--color-text-muted, #94a3b8);
-  font-size: 14px;
+  left: 8px;
+  color: var(--color-text-muted);
+  font-size: 12px;
   z-index: 2;
+  pointer-events: none;
 }
 
 .mc-search-input {
   width: 100%;
-  padding: 12px 40px 12px 42px;
-  border: 2px solid var(--color-border-light, #e2e8f0);
-  border-radius: 11px;
-  font-size: 14px;
+  height: 30px;
+  padding: 0 26px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--color-text);
   outline: none;
-  transition: border-color 0.3s ease, box-shadow 0.3s ease;
-  background: white;
+  background: #fff;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
-
-.mc-search-input:focus-visible { outline: 2px solid var(--color-primary-500); outline-offset: 2px; }
 
 .mc-search-input:focus {
   border-color: var(--color-primary-400);
-  background: white;
-  box-shadow: 0 0 0 4px rgba(0, 148, 191, 0.1);
+  box-shadow: 0 0 0 3px rgba(91, 141, 239, 0.15);
+}
+.mc-search-input::placeholder {
+  color: var(--color-text-muted);
 }
 
 .mc-search-clear {
   position: absolute;
-  right: 10px;
-  background: none;
+  right: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
   border: none;
-  color: var(--color-text-muted, #94a3b8);
+  border-radius: 4px;
+  background: none;
+  color: var(--color-text-muted);
   cursor: pointer;
-  padding: 6px;
-  border-radius: 50%;
-  transition: background 0.2s ease, color 0.2s ease;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 
 .mc-search-clear:hover {
-  background: var(--color-surface, #f1f5f9);
+  background: var(--color-slate-100);
   color: var(--color-text-secondary);
 }
 
 .mc-search-dropdown {
   position: absolute;
-  top: calc(100% + 6px);
-  left: 16px;
-  right: 16px;
-  background: white;
-  border: 2px solid var(--color-primary-200);
-  border-radius: 12px;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.12);
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: #fff;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow: 0 10px 32px rgba(16, 24, 40, 0.12);
   z-index: 1000;
-  max-height: 320px;
+  max-height: 300px;
   overflow-y: auto;
 }
 
@@ -125,10 +135,11 @@ const emit = defineEmits<{
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 16px;
+  gap: 8px;
+  padding: 7px 10px;
   cursor: pointer;
-  transition: background 0.2s ease;
-  border-bottom: 1px solid var(--color-border-light, #f1f5f9);
+  border-bottom: 1px solid var(--color-border-light);
+  transition: background 0.15s ease;
 }
 
 .mc-dropdown-item:last-child {
@@ -142,34 +153,42 @@ const emit = defineEmits<{
 .mc-dropdown-item-info {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
+  min-width: 0;
 }
 
 .mc-dropdown-item-name {
-  font-weight: 600;
-  font-size: 14px;
+  font-size: 12px;
+  font-weight: 500;
   color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .mc-dropdown-item-meta {
-  font-size: 12px;
-  color: var(--color-text-secondary);
+  font-size: 11px;
+  color: var(--color-text-muted);
 }
 
 .mc-bom-tag-mini {
-  padding: 3px 8px;
-  border-radius: 6px;
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 4px;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 500;
+  border: 1px solid;
 }
 
 .mc-bom-tag-mini.has-bom {
-  background: var(--color-success-100);
+  background: var(--color-success-50);
   color: var(--color-success-700);
+  border-color: var(--color-success-200);
 }
 
 .mc-bom-tag-mini.no-bom {
-  background: var(--color-danger-100);
-  color: var(--color-danger-800);
+  background: var(--color-slate-100);
+  color: var(--color-text-muted);
+  border-color: var(--color-border);
 }
 </style>
