@@ -31,22 +31,82 @@
         </div>
       </MList>
 
-      <div v-if="calcResults && Object.keys(calcResults).length" class="m-results">
+      <!-- 分块结果（默认 BOM 恒首块） -->
+      <div v-if="hasGroups" class="m-results">
         <h3 class="m-results-title">计算结果</h3>
-        <div v-for="(rows, category) in calcResults" :key="category" class="m-result-group">
-          <div class="m-result-cat" @click="toggleCategory(category as string)">
-            <span>{{ categoryLabel(category as string) }} ({{ rows.length }})</span>
-            <svg :style="{ transform: collapsed[category as string] ? '' : 'rotate(90deg)' }" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="9 18 15 12 9 6" /></svg>
+        <div v-for="(group, gi) in calcGroups" :key="scopeKeyOf(group)" class="m-scope-card">
+          <div class="m-scope-head">
+            <span class="m-scope-badge" :class="group.role_id == null ? 'is-default' : 'is-role'">
+              {{ group.role_id == null ? '默认' : '#' + (gi + 1) }}
+            </span>
+            <span class="m-scope-name">{{ scopeNameOf(group) }}</span>
+            <span class="m-scope-qty">×{{ group.quantity }}</span>
           </div>
-          <template v-if="!collapsed[category as string]">
-            <div v-for="row in rows" :key="row.material_name" class="m-result-row">
-              <div class="m-result-name">{{ row.material_name }}</div>
+          <div v-for="cat in categoryList" :key="cat.key" class="m-result-group">
+            <div class="m-result-cat" @click="toggle(`${scopeKeyOf(group)}::${cat.key}`)">
+              <span>{{ cat.label }} ({{ groupCat(group, cat.key).length }})</span>
+              <svg :style="{ transform: isCollapsed(`${scopeKeyOf(group)}::${cat.key}`) ? '' : 'rotate(90deg)' }" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="9 18 15 12 9 6" /></svg>
+            </div>
+            <template v-if="!isCollapsed(`${scopeKeyOf(group)}::${cat.key}`)">
+              <div
+                v-for="row in groupCat(group, cat.key)"
+                :key="rowKeyOf(scopeKeyOf(group), cat.key, row)"
+                class="m-result-row"
+              >
+                <div class="m-result-name">{{ row.material_name || row.name }}</div>
+                <div class="m-result-meta">{{ row.supplier_name }} · {{ row.specification || '—' }}</div>
+                <div class="m-result-qty">{{ row.total_quantity }} {{ row.unit }}</div>
+              </div>
+            </template>
+          </div>
+        </div>
+      </div>
+
+      <!-- 扁平回退（旧后端 / groups 缺失，A-5） -->
+      <div v-else-if="hasFlat" class="m-results">
+        <h3 class="m-results-title">计算结果</h3>
+        <div v-for="cat in categoryList" :key="cat.key" class="m-result-group">
+          <div class="m-result-cat" @click="toggle(`flat::${cat.key}`)">
+            <span>{{ cat.label }} ({{ (calcResults[cat.key] || []).length }})</span>
+            <svg :style="{ transform: isCollapsed(`flat::${cat.key}`) ? '' : 'rotate(90deg)' }" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="9 18 15 12 9 6" /></svg>
+          </div>
+          <template v-if="!isCollapsed(`flat::${cat.key}`)">
+            <div v-for="row in (calcResults[cat.key] || [])" :key="rowKeyOf('flat', cat.key, row)" class="m-result-row">
+              <div class="m-result-name">{{ row.material_name || row.name }}</div>
               <div class="m-result-meta">{{ row.supplier_name }} · {{ row.specification || '—' }}</div>
               <div class="m-result-qty">{{ row.total_quantity }} {{ row.unit }}</div>
             </div>
           </template>
         </div>
       </div>
+
+      <!-- 跨作用域对比矩阵：窄屏横向滚动 + 首列吸附（保留并排对比价值，A-12） -->
+      <div v-if="matrix.visible" class="m-matrix">
+        <h3 class="m-results-title">跨作用域对比</h3>
+        <div class="m-matrix-scroll">
+          <table class="m-matrix-table">
+            <thead>
+              <tr>
+                <th class="m-mx-name-col">物料</th>
+                <th>单位</th>
+                <th v-for="s in matrix.scopes" :key="s.key" class="m-mx-num">{{ s.roleName }}</th>
+                <th class="m-mx-num m-mx-total">合计</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in matrix.rows" :key="row.key" :class="{ 'm-mx-split': row.unitConflict }">
+                <td class="m-mx-name-col">
+                  {{ row.materialName }}<span v-if="row.specification" class="m-mx-spec"> · {{ row.specification }}</span>
+                </td>
+                <td>{{ row.unit || '—' }}</td>
+                <td v-for="s in matrix.scopes" :key="s.key" class="m-mx-num">{{ cellText(row, s.key) }}</td>
+                <td class="m-mx-num m-mx-total">{{ numText(row.total) }} {{ row.unit }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div v-else-if="matrix.reason === 'single-scope'" class="m-matrix-hint">仅 1 个作用域，无需跨作用域对比</div>
 
       <MBottomSheet v-model:visible="searchSheetVisible" title="选择产品">
         <MSearchBar v-model="searchQuery" placeholder="搜索产品..." />
@@ -66,13 +126,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, watch, onUnmounted } from 'vue'
-import { purchaseApi, type MaterialCalcProduct } from '@/api'
+import { ref, reactive, computed, watch, onUnmounted } from 'vue'
+import { purchaseApi, type MaterialCalcProduct, type MaterialCalcRow, type MaterialCalcScopeGroup } from '@/api'
 import {
   useMaterialCalculator,
-  CALC_CATEGORY_LABELS,
+  CALC_CATEGORY_LIST,
   clampQuantity,
 } from '@/composables/useMaterialCalculator'
+import { scopeKeyOf, scopeNameOf, type MatrixRow } from '@/utils/roleMatrix'
 import MobileNavBar from '@/mobile/layouts/components/MobileNavBar.vue'
 import MSearchBar from '@/mobile/components/MSearchBar.vue'
 import MList from '@/mobile/components/MList.vue'
@@ -84,7 +145,9 @@ import MBottomSheet from '@/mobile/components/MBottomSheet.vue'
 const {
   orderItems,
   calcResults,
+  calcGroups,
   calculating,
+  matrix,
   addProduct: addProductToOrder,
   removeProduct,
   clearAll,
@@ -97,6 +160,10 @@ const searchResults = ref<MaterialCalcProduct[]>([])
 const searchLoading = ref(false)
 const searchSheetVisible = ref(false)
 const collapsed = reactive<Record<string, boolean>>({})
+
+const categoryList = CALC_CATEGORY_LIST
+const hasGroups = computed(() => calcGroups.value.length > 0)
+const hasFlat = computed(() => Object.values(calcResults.value).some((arr) => arr.length > 0))
 
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 watch(searchQuery, (q) => {
@@ -136,9 +203,28 @@ function decQty(item: { quantity: number }) {
   item.quantity = Math.max(0, clampQuantity(item.quantity) - 1)
 }
 
-function toggleCategory(cat: string) { collapsed[cat] = !collapsed[cat] }
-function categoryLabel(cat: string) {
-  return CALC_CATEGORY_LABELS[cat] || cat
+function toggle(key: string) { collapsed[key] = !collapsed[key] }
+function isCollapsed(key: string): boolean { return !!collapsed[key] }
+
+/** 读取分块里某分类的行（安全索引）。 */
+function groupCat(group: MaterialCalcScopeGroup, category: string): MaterialCalcRow[] {
+  const record = group as unknown as Record<string, MaterialCalcRow[] | undefined>
+  const value = record[category]
+  return Array.isArray(value) ? value : []
+}
+
+/** 复合 row-key（A-9）：同分类同名不同规格/供应商/单位必须全部渲染。 */
+function rowKeyOf(prefix: string, category: string, row: MaterialCalcRow): string {
+  return [prefix, category, row.material_name || row.name || '', row.specification || '', row.supplier_name || '', row.unit || ''].join('|')
+}
+
+/** 矩阵数值：整数原样，非整数最多 3 位小数去尾零。 */
+function numText(v: number): string {
+  return Number.isInteger(v) ? String(v) : String(parseFloat(v.toFixed(3)))
+}
+function cellText(row: MatrixRow, scopeKey: string): string {
+  const v = row.cells[scopeKey]
+  return v == null ? '—' : numText(v)
 }
 </script>
 
@@ -158,11 +244,35 @@ function categoryLabel(cat: string) {
 .m-del-btn { width: 28px; height: 28px; border: none; background: none; color: var(--m-accent-rose); font-size: 14px; cursor: pointer; margin-left: 4px; }
 .m-results { margin-top: 20px; }
 .m-results-title { font-size: 17px; font-weight: 700; color: var(--m-text-primary); margin: 0 0 10px; }
-.m-result-group { background: var(--m-bg-card); border-radius: var(--m-radius-md); box-shadow: var(--m-shadow-card); margin-bottom: 10px; overflow: hidden; }
+
+/* 作用域分块卡 */
+.m-scope-card { background: var(--m-bg-card); border-radius: var(--m-radius-md); box-shadow: var(--m-shadow-card); margin-bottom: 12px; padding: 10px; }
+.m-scope-head { display: flex; align-items: center; gap: 8px; padding: 2px 4px 10px; }
+.m-scope-badge { min-width: 30px; text-align: center; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; color: #fff; }
+.m-scope-badge.is-default { background: var(--m-text-secondary); }
+.m-scope-badge.is-role { background: var(--m-accent); }
+.m-scope-name { font-size: 14px; font-weight: 700; color: var(--m-text-primary); }
+.m-scope-qty { margin-left: auto; font-size: 12px; font-weight: 600; color: var(--m-accent); }
+
+.m-result-group { background: var(--m-bg-card); border-radius: var(--m-radius-md); margin-bottom: 8px; overflow: hidden; }
 .m-result-cat { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; font-size: 14px; font-weight: 600; color: var(--m-text-primary); cursor: pointer; }
 .m-result-row { padding: 8px 16px; border-top: 0.5px solid rgba(0,0,0,0.04); }
 .m-result-name { font-size: 14px; font-weight: 500; color: var(--m-text-primary); }
 .m-result-meta { font-size: 12px; color: var(--m-text-secondary); }
 .m-result-qty { font-size: 14px; font-weight: 600; color: var(--m-accent); margin-top: 2px; }
 .m-center { display: flex; justify-content: center; padding: 24px 0; }
+
+/* 跨作用域对比矩阵：横向滚动 + 首列吸附 */
+.m-matrix { margin-top: 20px; }
+.m-matrix-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; border-radius: var(--m-radius-md); background: var(--m-bg-card); box-shadow: var(--m-shadow-card); }
+.m-matrix-table { border-collapse: collapse; font-size: 12px; white-space: nowrap; }
+.m-matrix-table th,
+.m-matrix-table td { padding: 8px 10px; border-bottom: 0.5px solid rgba(0,0,0,0.05); text-align: left; }
+.m-matrix-table thead th { font-weight: 700; color: var(--m-text-secondary); }
+.m-mx-name-col { position: sticky; left: 0; background: var(--m-bg-card); z-index: 1; max-width: 150px; white-space: normal; color: var(--m-text-primary); }
+.m-mx-spec { color: var(--m-text-secondary); }
+.m-mx-num { text-align: right; font-variant-numeric: tabular-nums; }
+.m-mx-total { font-weight: 700; color: var(--m-accent); }
+.m-mx-split td { background: rgba(217, 119, 6, 0.06); }
+.m-matrix-hint { margin-top: 16px; font-size: 12px; color: var(--m-text-secondary); }
 </style>

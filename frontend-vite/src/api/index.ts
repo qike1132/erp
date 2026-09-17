@@ -16,6 +16,7 @@ export { bomApi, purchaseApi } from './purchase'
 export type {
   MaterialCalcProduct,
   MaterialCalcRow,
+  MaterialCalcScopeGroup,
   MaterialCalcResult,
   MaterialOrderInput,
   ProductListResponse as PurchaseProductListResponse,

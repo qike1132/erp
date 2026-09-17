@@ -1,7 +1,8 @@
 import { ref, computed, onUnmounted } from 'vue'
-import { purchaseApi, type MaterialCalcProduct, type MaterialCalcRow } from '@/api'
+import { purchaseApi, type MaterialCalcProduct, type MaterialCalcRow, type MaterialCalcScopeGroup } from '@/api'
 import { showToast } from '@/composables/useToast'
 import { getErrorMessage } from '@/types/errors'
+import { deriveRoleMatrix } from '@/utils/roleMatrix'
 
 export interface OrderItem {
   product_id: number
@@ -31,10 +32,16 @@ export function clampQuantity(v: unknown): number {
  * 物料计算器共享状态与逻辑。
  * 桌面端 / 移动端共用，确保行为一致（BOM 校验、聚合、竞态保护）。
  * 搜索 UI 由各端自行实现，仅共享订单与计算逻辑。
+ *
+ * 响应口径：后端 `/calculate` **只追加** `groups`，扁平字段原样保留。
+ * - `calcResults`：扁平字段（旧口径，保留用于回退渲染）；
+ * - `calcGroups`：按「产品 × 作用域(角色)」分块（默认 BOM 恒首）；
+ * - `matrix`：由 `calcGroups` 派生的跨角色对比矩阵（纯函数，A-5 缺失时为空矩阵）。
  */
 export function useMaterialCalculator() {
   const orderItems = ref<OrderItem[]>([])
   const calcResults = ref<Record<string, MaterialCalcRow[]>>({})
+  const calcGroups = ref<MaterialCalcScopeGroup[]>([])
   const calculating = ref(false)
 
   // selectedProductIds 由 orderItems 派生，避免双份状态失同步
@@ -43,6 +50,9 @@ export function useMaterialCalculator() {
     orderItems.value.reduce((s, i) => s + (i.quantity > 0 ? i.quantity : 0), 0),
   )
   const hasResults = computed(() => Object.values(calcResults.value).some((arr) => arr.length > 0))
+  const hasGroups = computed(() => calcGroups.value.length > 0)
+  // 跨角色对比矩阵：groups 缺失/空 → 空矩阵（不抛错，A-5）
+  const matrix = computed(() => deriveRoleMatrix(calcGroups.value))
   const calcStatus = computed(() => {
     if (calculating.value) return '计算中...'
     const total = Object.values(calcResults.value).reduce((s, arr) => s + arr.length, 0)
@@ -72,6 +82,7 @@ export function useMaterialCalculator() {
     calcRequestId++
     orderItems.value = []
     calcResults.value = {}
+    calcGroups.value = []
     calculating.value = false
   }
 
@@ -92,6 +103,7 @@ export function useMaterialCalculator() {
     const reqId = ++calcRequestId
     if (validOrders.length === 0) {
       calcResults.value = {}
+      calcGroups.value = []
       calculating.value = false
       return
     }
@@ -107,6 +119,8 @@ export function useMaterialCalculator() {
         fabric: res.fabric ?? [],
         accessory: res.accessory ?? [],
       }
+      // groups 为「只追加」字段：旧后端可能缺失 → 置空并回退扁平渲染（A-5）
+      calcGroups.value = Array.isArray(res.groups) ? res.groups : []
     } catch (err: unknown) {
       if (reqId !== calcRequestId) return
       showToast(getErrorMessage(err, '计算失败'), 'error')
@@ -127,10 +141,13 @@ export function useMaterialCalculator() {
   return {
     orderItems,
     calcResults,
+    calcGroups,
     calculating,
     selectedProductIds,
     totalOrders,
     hasResults,
+    hasGroups,
+    matrix,
     calcStatus,
     addProduct,
     removeProduct,

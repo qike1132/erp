@@ -34,11 +34,21 @@
           @remove="removeAndRecalc"
         />
 
-        <!-- Column 3: Calculation Results（子组件化，模板原样搬移） -->
+        <!-- Column 3: Calculation Results（分块卡 + 扁平回退） -->
         <CalcResultColumn
           :calc-results="calcResults"
           :has-results="hasResults"
+          :calc-groups="calcGroups"
         />
+      </div>
+
+      <!-- 跨角色对比矩阵：≥2 个作用域时展示；仅 1 个作用域时隐藏并提示（A-11） -->
+      <div v-if="matrix.visible" class="mc-matrix-section">
+        <RoleMatrix :scopes="matrix.scopes" :rows="matrix.rows" />
+      </div>
+      <div v-else-if="matrix.reason === 'single-scope'" class="mc-matrix-hint">
+        <FontAwesomeIcon icon="circle-info" aria-hidden="true" />
+        当前仅 1 个作用域（无角色区分），无需跨角色对比
       </div>
     </div>
 
@@ -71,15 +81,18 @@ import UiDialog from '@/components/ui/UiDialog.vue'
 import ProductSelectColumn from './components/ProductSelectColumn.vue'
 import OrderQuantityColumn from './components/OrderQuantityColumn.vue'
 import CalcResultColumn from './components/CalcResultColumn.vue'
+import RoleMatrix from './components/RoleMatrix.vue'
 
-// 计算引擎（全局 composable）：订单条目 / 计算结果 / 防抖重算
+// 计算引擎（全局 composable）：订单条目 / 分块结果 / 对比矩阵 / 防抖重算
 const {
   orderItems,
   calcResults,
+  calcGroups,
   calculating,
   selectedProductIds,
   totalOrders,
   hasResults,
+  matrix,
   calcStatus,
   addProduct,
   removeProduct,
@@ -206,6 +219,24 @@ function applyBatch() {
 .mc-col-title i {
   font-size: 14px;
   color: var(--color-primary-500);
+}
+
+/* === Matrix Section === */
+.mc-matrix-section {
+  flex-shrink: 0;
+  overflow: auto;
+  border-top: 1px solid var(--color-border-light, #f1f5f9);
+}
+
+.mc-matrix-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px 14px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  border-top: 1px solid var(--color-border-light, #f1f5f9);
+  flex-shrink: 0;
 }
 
 /* === Header Actions === */
