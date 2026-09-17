@@ -26,11 +26,15 @@ from fastapi_app.shared_models import (
 )
 from fastapi_app.shared_models.order import ORDER_STATUS_PENDING_STOCK, ORDER_STATUS_STOCKED, Order
 from fastapi_app.shared_models.purchase_order import PurchaseOrder, PurchaseOrderStatus
+# 作用域显示名与排序口径统一收敛到 utils.scope_order，与物料计算器共用同一实现
+# （架构设计 §7#2 / Q-05）。DEFAULT_SCOPE_LABEL 在此重新导出，保持既有导入路径可用。
+from fastapi_app.utils.scope_order import (
+    DEFAULT_SCOPE_LABEL,  # noqa: F401  re-export（保持 purchase_order_generate.DEFAULT_SCOPE_LABEL）
+    order_scopes,
+    scope_label,
+)
 
 logger = logging.getLogger(__name__)
-
-# BOM 作用域显示名：role_id=None 即产品级默认 BOM
-DEFAULT_SCOPE_LABEL = '默认BOM'
 
 
 def _iter_source_skus(rec) -> list[tuple[int, int | float]]:
@@ -50,14 +54,19 @@ def _iter_source_skus(rec) -> list[tuple[int, int | float]]:
     return [(rec.product_id, rec.quantity)]
 
 
-def _scope_order(role_ids) -> list[int | None]:
-    """作用域排序：默认 BOM(None) 恒在首位，其余按 role_id 升序。
+def _scope_order(role_ids, name_of=None) -> list[int | None]:
+    """作用域排序：默认 BOM(None) 恒首位，其余按角色名升序（名同按 id 升序）。
 
-    与物料计算器 (services/purchase_product_service.aggregate_materials) 保持同一口径，
-    保证「计算器算出来的」与「一键生成落单的」顺序、分组一致。
+    委托 ``utils.scope_order.order_scopes``，与物料计算器
+    (services/purchase_product_service.aggregate_materials_by_scope) 共用同一口径，
+    保证「计算器算出来的」与「一键生成落单的」顺序、分组一致（Q-05）。
+
+    Args:
+        role_ids: 作用域 role_id 集合（可含 ``None``）。
+        name_of: 可选的角色名解析函数 ``role_id -> str | None``；缺省时全部按
+            「角色#id」排序（对既有调用方向后兼容）。
     """
-    present = set(role_ids)
-    return ([None] if None in present else []) + sorted(k for k in present if k is not None)
+    return order_scopes(role_ids, name_of)
 
 
 def _bom_rows_by_scope(rows) -> dict[int | None, list]:
@@ -69,13 +78,13 @@ def _bom_rows_by_scope(rows) -> dict[int | None, list]:
 
 
 def _scope_label(pid: int, role_id: int | None, role_names: dict[tuple[int, int], str]) -> str:
-    """作用域显示名，与前端「默认BOM + 各角色」口径一致。
+    """作用域显示名（委托 ``utils.scope_order.scope_label``）。
 
-    角色名缺失时退化为「角色#<id>」而不是静默丢弃，便于现场定位脏数据。
+    角色名按 ``(product_id, role_id)`` 定位；缺失时退化为「角色#<id>」而不是
+    静默丢弃，便于现场定位脏数据。
     """
-    if role_id is None:
-        return DEFAULT_SCOPE_LABEL
-    return role_names.get((pid, role_id)) or f'角色#{role_id}'
+    role_name = role_names.get((pid, role_id)) if role_id is not None else None
+    return scope_label(role_id, role_name)
 
 
 @dataclass(frozen=True)
@@ -263,22 +272,25 @@ async def _load_bom_context(db: AsyncSession, product_ids: list[int]) -> _BomCon
     )
     ctx.accessory = _bom_rows_by_scope(acc_result.scalars().all())
 
-    from fastapi_app.shared_models.product_material import ProductRole
+    from fastapi_app.shared_models import ProductRole, Role
 
+    # 展示名优先取全局角色名（§7#10），缺失回退镜像列 role_name：迁移回填完成前
+    # global_role_id 可能为 NULL，故用外连接而非内连接，避免角色整行丢失。
     role_result = await db.execute(
-        select(ProductRole.id, ProductRole.product_id, ProductRole.role_name)
+        select(ProductRole.id, ProductRole.product_id, ProductRole.role_name, Role.name)
+        .join(Role, ProductRole.global_role_id == Role.id, isouter=True)
         .where(ProductRole.product_id.in_(product_ids))
     )
     role_ids_by_pid: dict[int, set[int]] = defaultdict(set)
-    for rid, rpid, rname in role_result.all():
-        ctx.role_names[(rpid, rid)] = rname or ''
+    for rid, rpid, rname, gname in role_result.all():
+        ctx.role_names[(rpid, rid)] = gname or rname or ''
         role_ids_by_pid[rpid].add(rid)
 
     for pid in product_ids:
         # 作用域清单 = 物料上出现过的 role_id ∪ 产品实际声明的角色 ∪ {None}。
         # ★ None 必须显式并入：product_role 表里**没有**「默认BOM」这一行，
         #   它只以「物料 role_id IS NULL」的形式存在，漏掉就会把整个产品级 BOM 丢了。
-        #   与物料计算器 aggregate_materials 的 ordered = ([None] if None in buckets ...) 口径一致。
+        #   与物料计算器 aggregate_materials_by_scope 的 ordered = ([None] if None in ...) 口径一致。
         # 用并集而非「物料 role_id 集合」，是为了让「配了角色但该角色暂无物料」也能被
         # 纳入作用域枚举（该作用域最终不产出任何明细，等价于被跳过）。
         material_roles = {
@@ -287,7 +299,10 @@ async def _load_bom_context(db: AsyncSession, product_ids: list[int]) -> _BomCon
             for row in m.get(pid, [])
             if row.product_id == pid
         } | set(role_ids_by_pid.get(pid, ())) | {None}
-        ctx.scopes_by_pid[pid] = _scope_order(material_roles)
+        ctx.scopes_by_pid[pid] = _scope_order(
+            material_roles,
+            name_of=lambda rid, _pid=pid: ctx.role_names.get((_pid, rid)),
+        )
     return ctx
 
 

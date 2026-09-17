@@ -1,7 +1,8 @@
 """采购单生成的 BOM 作用域（角色）单元测试
 
-覆盖 2026-09-11 改动：
-- `_scope_order`：默认 BOM(None) 恒在首位，其余按 role_id 升序
+覆盖 2026-09-11 / 2026-09-17 改动：
+- `_scope_order`：默认 BOM(None) 恒在首位，其余按**角色名升序**（名同按 id 升序），
+  与物料计算器共用 `utils.scope_order.order_scopes` 同一口径（Q-05）
 - `_bom_rows_by_scope`：按 role_id 分桶，None 与各角色互不混淆
 - `_scope_label`：role_id=None → 默认BOM；角色名缺失退化而非丢弃
 - **作用域装配必须显式补入 None**（历史缺陷：product_role 表无「默认BOM」行，
@@ -25,10 +26,35 @@ from fastapi_app.services.purchase_order_generate import (
 
 
 class TestScopeOrder:
-    """作用域排序：默认 BOM 恒在首位"""
+    """作用域排序：默认 BOM 恒在首位，其余按角色名升序（名同按 id 升序）"""
 
     def test_none_first_then_ascending(self):
+        # 未传 name_of 时全部无名 → 按 role_id **数值**升序（历史口径）
         assert _scope_order({4, None, 2}) == [None, 2, 4]
+
+    def test_no_name_of_falls_back_to_numeric_id_across_digit_boundary(self):
+        """★ 回归：未传 name_of 时必须按 id **数值**升序，不能按「角色#id」字典序。
+
+        历史缺陷：无名时排序键是 ``f'角色#{rid}'``，字符串比较下
+        ``'角色#12' < '角色#3'`` ⇒ ``{3, 12}`` 返回 ``[12, 3]``，与历史「按 id 升序」
+        静默分叉。个位 id（如 ``{2, 4}``/``{3, 7}``）两种口径恰好一致，因此旧测试
+        全绿却掩盖了跨位数分叉——故本用例专挑 9/10、3/12、2/10 三组跨界。
+        """
+        assert _scope_order({12, 3}) == [3, 12]
+        assert _scope_order({10, 9}) == [9, 10]
+        assert _scope_order({2, 10, None}) == [None, 2, 10]
+        assert _scope_order({31, 21, 3}) == [3, 21, 31]
+
+    def test_named_roles_sorted_by_name_not_id(self):
+        """★ 口径统一：按角色名升序，而非 role_id 升序（Q-05）。
+
+        role 2 名「甲」(U+7532)、role 4 名「乙」(U+4E59)：名升序为 乙(4) → 甲(2)，
+        与 id 升序 [2, 4] 相反 —— 命中「名 ≠ id 序」的真实分歧点。
+        """
+        names = {(1, 2): '甲', (1, 4): '乙'}
+        assert _scope_order(
+            {2, 4, None}, name_of=lambda rid: names.get((1, rid))
+        ) == [None, 4, 2]
 
     def test_default_only(self):
         assert _scope_order({None}) == [None]

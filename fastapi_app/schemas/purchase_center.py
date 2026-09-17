@@ -136,12 +136,43 @@ class BomSaveRequest(BaseModel):
     default_bom_label: str | None = None
 
 
+class MaterialCalcRow(BaseModel):
+    """单条物料计算结果行（与扁平字段中的行同形，供 ``groups`` 复用）。"""
+    name: str = ''
+    material_name: str = ''
+    material_code: str = ''
+    specification: str = ''
+    total_quantity: float = 0
+    unit: str = ''
+    supplier_name: str = ''
+
+
+class MaterialCalcScopeGroup(BaseModel):
+    """按「产品 × 作用域(角色)」分块的物料计算结果。
+
+    ``role_id is None`` 表示产品级默认 BOM，**恒为首块**；``role_name`` 取自全局
+    角色名，缺失退化为 ``角色#<id>``（REQ-P0-05）。
+    """
+    product_id: int
+    product_name: str = ''
+    role_id: int | None = None
+    role_name: str = ''
+    quantity: float = 0
+    filling: list[MaterialCalcRow] = []
+    fabric: list[MaterialCalcRow] = []
+    accessory: list[MaterialCalcRow] = []
+    packaging: list[MaterialCalcRow] = []
+
+
 class MaterialCalculateResponse(BaseModel):
     success: bool = True
+    # 扁平字段：全作用域合并口径，保留原值以兼容旧客户端（只追加不替换，§7#8）
     filling: list = []
     fabric: list = []
     accessory: list = []
     packaging: list = []
+    # 追加：按「产品 × 作用域(角色)」分块（默认 BOM 恒首块，§7#2）
+    groups: list[MaterialCalcScopeGroup] = []
     total_categories: dict | None = None
     message: str | None = None
 

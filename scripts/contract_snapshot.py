@@ -14,6 +14,9 @@
 3. **变体键标记**：`request_id` / `*_at` 这类每次都变的键标记为 `<volatile>`，
    仍参与"键是否存在"的比对，但不参与取值比对。
 4. **不比对取值**：默认只比对状态码 + 结构。结构变了 = 契约变了，一定有下游风险。
+5. **变更类端点需 Origin**：配置里 `method: POST` + `body` 的端点会被如实发出；
+   由于它们受 CSRF 保护，携带 Bearer 的请求会自动附 `Origin`（`--origin`，需在
+   后端 CORS 白名单内），否则生产环境会被中间件 403。
 
 用法
 ----
@@ -57,6 +60,7 @@ class Endpoint:
     path: str
     method: str = "GET"
     query: dict[str, Any] = field(default_factory=dict)
+    body: Any = None  # POST 等变更类端点的 JSON 请求体（GET 为 None）
     auth: bool = True
 
 
@@ -82,6 +86,7 @@ def load_config(path: Path) -> Config:
                 path=item["path"],
                 method=(item.get("method") or "GET").upper(),
                 query=item.get("query") or {},
+                body=item.get("body"),
                 auth=bool(item.get("auth", True)),
             )
         )
@@ -228,9 +233,19 @@ def build_client(base_url: str, timeout: float) -> httpx.Client:
 
 
 def fetch(client: httpx.Client, ep: Endpoint, headers: dict[str, str]) -> tuple[int, Any, str]:
-    """返回 (状态码, 解析后的 JSON 或 None, 错误信息)。"""
+    """返回 (状态码, 解析后的 JSON 或 None, 错误信息)。
+
+    变更类端点（POST 等）会携带配置里的 JSON ``body``；纯 GET 端点 ``body`` 为
+    ``None``，不改变既有行为。
+    """
     try:
-        resp = client.request(ep.method, ep.path, params=ep.query or None, headers=headers)
+        resp = client.request(
+            ep.method,
+            ep.path,
+            params=ep.query or None,
+            json=ep.body if ep.body is not None else None,
+            headers=headers,
+        )
     except httpx.HTTPError as exc:
         return 0, None, f"{type(exc).__name__}: {exc}"
     if resp.status_code >= 400:
@@ -334,11 +349,17 @@ def run_record(args, cfg: Config, endpoints: list[Endpoint]) -> int:
 
 
 def _auth_headers(args, cfg: Config) -> dict[str, str]:
-    needs_auth = any(ep.auth for ep in cfg.endpoints)
-    if not needs_auth:
-        return {}
-    token = resolve_token(args.token)
-    return {"Authorization": f"Bearer {token}"} if token else {}
+    headers: dict[str, str] = {}
+    if any(ep.auth for ep in cfg.endpoints):
+        token = resolve_token(args.token)
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+    # 变更类请求（POST 等）受 CSRF 保护：携带 Bearer 的请求需附一个后端 CORS
+    # 白名单内的 Origin，否则生产环境 CSRF 中间件会直接 403。仅当存在非 GET 端点时
+    # 才附带，避免污染纯只读录制的请求头。
+    if any(ep.method != "GET" for ep in cfg.endpoints):
+        headers["Origin"] = args.origin
+    return headers
 
 
 def run_check(args, cfg: Config, endpoints: list[Endpoint]) -> int:
@@ -415,6 +436,11 @@ def main() -> int:
     parser.add_argument("--snapshot-dir", type=Path, default=DEFAULT_SNAPSHOT_DIR)
     parser.add_argument("--only", nargs="*", help="只处理指定端点名")
     parser.add_argument("--token", help="显式 Bearer token")
+    parser.add_argument(
+        "--origin",
+        default="http://localhost",
+        help="变更类请求附带的 Origin 头（需在后端 CORS 白名单内，供 CSRF 校验）",
+    )
     parser.add_argument("--timeout", type=float, default=20.0)
     parser.add_argument("--json", action="store_true", help="输出机器可读结果")
     args = parser.parse_args()

@@ -103,6 +103,16 @@ endpoints:
   - name: purchase_center_unprocessed_orders
     path: /api/v1/purchase-center/unprocessed-orders
 
+  # ---- 物料计算（POST；纯计算、无写副作用，可安全重复调用）----
+  # 变更类端点：契约从旧的「仅扁平字段」演进为「扁平字段 + groups（按产品×角色分块）」，
+  # 此处纳入快照以拦住该契约漂移。Bearer 请求需 Origin（工具自动附带）以过 CSRF。
+  - name: purchase_center_calculate
+    path: /api/v1/purchase-center/calculate
+    method: POST
+    body:
+      orders:
+        - { product_id: 1, quantity: 1 }
+
   # ---- 审批 / 通知 ----
   - name: approvals_list
     path: /api/v1/approvals/list

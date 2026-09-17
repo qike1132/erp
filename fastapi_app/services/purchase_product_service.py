@@ -4,6 +4,7 @@
 从 purchase_center_service.py 拆分，包含产品查询、BOM 保存和物料计算。
 """
 import logging
+from collections.abc import Callable
 from decimal import Decimal
 
 from sqlalchemy import func, or_, select, union_all
@@ -17,8 +18,10 @@ from fastapi_app.shared_models import (
     ProductAccessory,
     ProductFabric,
     ProductMaterial,
+    ProductRole,
 )
 from fastapi_app.utils import calc_total_pages
+from fastapi_app.utils.scope_order import order_scopes, scope_label
 
 logger = logging.getLogger(__name__)
 
@@ -245,17 +248,48 @@ async def get_products_statistics(db: AsyncSession) -> dict:
     }
 
 
-def aggregate_materials(orders_data: list, product_map: dict) -> dict:
-    """按 (分类, 物料名, 供应商, 规格) 聚合物料用量。
+def _accumulate_bom_rows(
+    totals: dict[tuple, dict], rows: list, quantity: Decimal,
+) -> None:
+    """把一组带 ``category`` 的 BOM 行累加进 ``totals``（聚合内核，纯函数）。
 
-    纯函数：无 DB 依赖，便于单元测试聚合策略。
+    聚合 key = ``(分类, 物料名, 供应商, 规格)``：必须含供应商与规格，避免同名不同
+    供应商/规格的物料被错误合并；使用元组而非字符串拼接，杜绝分隔符 ':' 导致的键冲突。
 
     Args:
-        orders_data: 订单列表，每项含 product_id 与 quantity。
-        product_map: {product_id: Product} 映射，Product 须实现 has_bom() 与 get_all_materials()。
+        totals: 累加容器 ``{(cat, name, supplier, spec): bucket}``；**就地修改**。
+        rows: BOM 行字典列表（含 category/material_name/supplier_name/specification/
+            unit/unit_usage/material_code）。
+        quantity: 该组行共用的数量乘子（订单总数量，不分摊）。
+    """
+    for mat in rows:
+        category = mat.get('category', '')
+        name = mat.get('material_name', '')
+        supplier_name = mat.get('supplier_name', '') or ''
+        specification = mat.get('specification', '') or ''
+        key = (category, name, supplier_name, specification)
 
-    Returns:
-        dict: {category: [CalcRow, ...]}，category ∈ filling/fabric/accessory/packaging。
+        bucket = totals.get(key)
+        if bucket is None:
+            bucket = {
+                'total': Decimal(0),
+                'name': name,
+                'category': category,
+                'unit': mat.get('unit', ''),
+                'supplier_name': supplier_name,
+                'specification': specification,
+                'material_code': mat.get('material_code', ''),
+            }
+            totals[key] = bucket
+
+        per_unit = Decimal(str(mat.get('unit_usage', 0)))
+        bucket['total'] += per_unit * quantity
+
+
+def _finalize_bom_totals(totals: dict[tuple, dict]) -> dict[str, list[dict]]:
+    """把累加容器收敛为 ``{category: [CalcRow, ...]}``（聚合内核，纯函数）。
+
+    未知分类被丢弃并告警（与历史行为一致）。返回的四类键恒存在（可能为空列表）。
     """
     result: dict[str, list[dict]] = {
         'filling': [],
@@ -263,41 +297,6 @@ def aggregate_materials(orders_data: list, product_map: dict) -> dict:
         'accessory': [],
         'packaging': [],
     }
-    # 聚合 key 必须包含供应商与规格，避免同名不同供应商/规格的物料被错误合并
-    # 使用元组而非字符串拼接，杜绝分隔符 ':' 导致的键冲突
-    totals: dict[tuple, dict] = {}
-
-    for order_item in orders_data:
-        product_id = order_item.get('product_id')
-        quantity = Decimal(str(order_item.get('quantity', 0)))
-
-        product = product_map.get(product_id)
-        if not product or not product.has_bom():
-            continue
-
-        for mat in product.get_all_materials():
-            category = mat.get('category', '')
-            name = mat.get('material_name', '')
-            supplier_name = mat.get('supplier_name', '') or ''
-            specification = mat.get('specification', '') or ''
-            key = (category, name, supplier_name, specification)
-
-            bucket = totals.get(key)
-            if bucket is None:
-                bucket = {
-                    'total': Decimal(0),
-                    'name': name,
-                    'category': category,
-                    'unit': mat.get('unit', ''),
-                    'supplier_name': supplier_name,
-                    'specification': specification,
-                    'material_code': mat.get('material_code', ''),
-                }
-                totals[key] = bucket
-
-            per_unit = Decimal(str(mat.get('unit_usage', 0)))
-            bucket['total'] += per_unit * quantity
-
     for info in totals.values():
         category = info['category']
         if category in result:
@@ -312,21 +311,144 @@ def aggregate_materials(orders_data: list, product_map: dict) -> dict:
             })
         else:
             logger.warning('未知物料分类被丢弃: %s (物料: %s)', category, info['name'])
-
     return result
 
 
-async def calculate_material(db: AsyncSession, orders_data: list) -> dict:
-    result = {
-        'filling': [],
-        'fabric': [],
-        'accessory': [],
-        'packaging': [],
-    }
+def aggregate_materials(orders_data: list, product_map: dict) -> dict:
+    """按 (分类, 物料名, 供应商, 规格) 聚合物料用量（**全作用域合并口径**）。
 
+    纯函数：无 DB 依赖，便于单元测试聚合策略。口径与迁移前**完全一致**——
+    所有作用域的物料合并累计，供旧客户端兼容（§7#8/#9）。
+
+    Args:
+        orders_data: 订单列表，每项含 product_id 与 quantity。
+        product_map: {product_id: Product} 映射，Product 须实现 has_bom() 与 get_all_materials()。
+
+    Returns:
+        dict: {category: [CalcRow, ...]}，category ∈ filling/fabric/accessory/packaging。
+    """
+    totals: dict[tuple, dict] = {}
+    for order_item in orders_data:
+        product_id = order_item.get('product_id')
+        quantity = Decimal(str(order_item.get('quantity', 0)))
+
+        product = product_map.get(product_id)
+        if not product or not product.has_bom():
+            continue
+
+        _accumulate_bom_rows(totals, product.get_all_materials(), quantity)
+
+    return _finalize_bom_totals(totals)
+
+
+def _merge_order_quantities(orders_data: list) -> dict[int, Decimal]:
+    """把订单行按 product_id 合并数量（同产品多行求和）。"""
+    merged: dict[int, Decimal] = {}
+    for order_item in orders_data:
+        product_id = order_item.get('product_id')
+        if not product_id:
+            continue
+        merged[product_id] = merged.get(product_id, Decimal(0)) + Decimal(
+            str(order_item.get('quantity', 0))
+        )
+    return merged
+
+
+def aggregate_materials_by_scope(
+    orders_data: list,
+    product_map: dict,
+    *,
+    name_of: Callable[[int, int], str | None],
+) -> list[dict]:
+    """按「产品 × 作用域(角色)」分块聚合物料（计算器 ``groups`` 的唯一来源）。
+
+    与 :func:`aggregate_materials` 共用同一份累加/收敛内核，保证扁平口径与分块口径
+    **天然自洽**：``Σ(groups 各块[category]) ≡ aggregate_materials[category]``
+    （由单测恒等式固化）。
+
+    数量语义（§7#9）：一个产品只有一个订单总数量，**每个作用域都用该总数量展开，
+    不分摊**。空作用域（该角色下无任何物料）不产出块。
+
+    Args:
+        orders_data: 订单列表，每项含 ``product_id`` 与 ``quantity``。
+        product_map: ``{product_id: Product}``，Product 须实现 ``has_bom()`` /
+            ``get_all_materials()`` 且有 ``name``。
+        name_of: 角色名解析函数 ``(product_id, role_id) -> str | None``。
+
+    Returns:
+        list[dict]: 每块 ``{product_id, product_name, role_id, role_name, quantity,
+        filling[], fabric[], accessory[], packaging[]}``。顺序：产品按订单首现顺序；
+        产品内作用域为默认 BOM 首位 + 其余按显示名升序（``order_scopes``）。
+    """
+    groups: list[dict] = []
+    for product_id, quantity in _merge_order_quantities(orders_data).items():
+        product = product_map.get(product_id)
+        if not product or not product.has_bom():
+            continue
+
+        rows = product.get_all_materials()
+        scopes = order_scopes(
+            {row.get('role_id') for row in rows} | {None},
+            name_of=lambda rid, _pid=product_id: name_of(_pid, rid),
+        )
+        for role_id in scopes:
+            scope_totals: dict[tuple, dict] = {}
+            _accumulate_bom_rows(
+                scope_totals,
+                [row for row in rows if row.get('role_id') == role_id],
+                quantity,
+            )
+            block = _finalize_bom_totals(scope_totals)
+            if not any(block.values()):
+                continue  # 空作用域不产出块（§7 完成判据 2）
+            groups.append({
+                'product_id': product_id,
+                'product_name': getattr(product, 'name', '') or '',
+                'role_id': role_id,
+                'role_name': scope_label(
+                    role_id, name_of(product_id, role_id) if role_id is not None else None,
+                ),
+                'quantity': float(quantity),
+                **block,
+            })
+    return groups
+
+
+def _collect_role_names(products: list) -> dict[tuple[int, int], str]:
+    """汇总 ``{(product_id, product_role.id): 显示名}``。
+
+    展示名优先取全局角色名（§7#10），缺失回退镜像列 ``role_name``。调用方须已
+    ``selectinload(Product.roles).selectinload(ProductRole.global_role)``，否则
+    ``ProductRole.global_role``（``lazy='raise'``）会抛 ``InvalidRequestError``——
+    这是**刻意 fail-loud**：对未加载关系不做静默探测（§7#6）。
+    """
+    names: dict[tuple[int, int], str] = {}
+    for product in products:
+        for pr in product.roles:
+            global_role = pr.global_role
+            name = getattr(global_role, 'name', None) if global_role is not None else None
+            names[(product.id, pr.id)] = name or pr.role_name or ''
+    return names
+
+
+async def calculate_material(db: AsyncSession, orders_data: list) -> dict:
+    """计算物料需求：返回扁平合并口径 + 按「产品 × 作用域」分块的 ``groups``。
+
+    - 扁平字段（filling/fabric/accessory/packaging）：全作用域合并口径，数值与迁移前
+      完全一致（旧客户端兼容，§7#8）；
+    - ``groups``：每块对应「产品 × 作用域(角色)」，默认 BOM 恒首块（§7#2）。
+
+    Args:
+        db: 异步数据库会话。
+        orders_data: 订单列表，每项含 product_id 与 quantity。
+
+    Returns:
+        dict: 含 filling/fabric/accessory/packaging/groups 的物料计算结果。
+    """
+    empty = {'filling': [], 'fabric': [], 'accessory': [], 'packaging': [], 'groups': []}
     product_ids = [item.get('product_id') for item in orders_data if item.get('product_id')]
     if not product_ids:
-        return result
+        return empty
 
     products_result = await db.execute(
         select(Product).options(
@@ -334,9 +456,18 @@ async def calculate_material(db: AsyncSession, orders_data: list) -> dict:
             selectinload(Product.material_rows),
             selectinload(Product.fabrics),
             selectinload(Product.accessories),
+            # 计算器需按角色展示，故须加载 Product.roles 及其全局角色名（§7#10）。
+            selectinload(Product.roles).selectinload(ProductRole.global_role),
         ).where(Product.id.in_(product_ids))
     )
     products = products_result.scalars().unique().all()
     product_map = {p.id: p for p in products}
+    role_names = _collect_role_names(products)
 
-    return aggregate_materials(orders_data, product_map)
+    result = aggregate_materials(orders_data, product_map)
+    result['groups'] = aggregate_materials_by_scope(
+        orders_data,
+        product_map,
+        name_of=lambda pid, rid: role_names.get((pid, rid)),
+    )
+    return result
