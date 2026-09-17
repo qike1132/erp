@@ -1,6 +1,7 @@
+import ipaddress
 import logging
 import os
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlparse
 
 from dotenv import load_dotenv
 
@@ -67,6 +68,59 @@ def _is_production_env() -> bool:
     return bool(raw) and raw.split()[0] in ("prod", "production")
 
 
+def _is_private_or_loopback_ip(host: str) -> bool:
+    """host 是否为回环或内网 IP **字面量**（`localhost` 由调用方单独判定）。
+
+    只接受 IP 字面量，不接受域名——`http://erp.lan` 这类内网主机名不放行，
+    避免依赖不可控的内网 DNS 解析结果。
+    """
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    # is_private 覆盖 10/8、172.16/12、192.168/16、127/8、169.254/16 等私有段
+    return ip.is_private or ip.is_loopback
+
+
+def _is_production_allowed_origin(origin: str) -> bool:
+    """生产环境是否放行该 CORS origin。
+
+    规则（2026-09-17 放开局域网）：
+    - ``https://`` 一律放行（链路已加密，无中间人窃听面）；
+    - 明文 ``http://`` **仅**放行 localhost / 回环 / 内网 IP 字面量
+      （10/8、172.16/12、192.168/16 等），供内网 Nginx 入口使用，
+      例如 ``http://192.168.0.95:3000``；
+    - 公网明文 HTTP（公网域名或公网 IP）一律拒收；
+    - 内网**域名**（如 ``http://erp.lan``）不放行，只认 IP 字面量。
+
+    必须按 URL 解析取 host 判定，**不可**用 ``startswith("http://192.168")``——
+    否则 ``http://192.168.0.95.evil.com`` 会被前缀仿冒绕过。
+    """
+    if origin.startswith("https://"):
+        return True
+    if not origin.startswith("http://"):
+        return False
+    host = urlparse(origin).hostname or ""
+    if host == "localhost":
+        return True
+    return _is_private_or_loopback_ip(host)
+
+
+def filter_cors_origins(raw: str, *, is_production: bool) -> list[str]:
+    """把 CORS_ORIGINS 原始串切成可用 origin 列表。
+
+    生产环境会按 ``_is_production_allowed_origin`` 过滤掉明文 HTTP 源。
+    抽成模块级函数（原为类体内联推导式）以便单测直接覆盖该规则——
+    否则该规则只在 import 时求值一次，只能靠改环境变量才能验证。
+    """
+    return [
+        origin.strip()
+        for origin in raw.split(",")
+        if origin.strip()
+        and (not is_production or _is_production_allowed_origin(origin.strip()))
+    ]
+
+
 class Settings(BaseSettings):
     """FastAPI应用配置"""
 
@@ -115,17 +169,11 @@ class Settings(BaseSettings):
     # CORS配置 - 从环境变量读取允许的源，默认仅允许本地访问
     # 包含 Nginx 统一入口（端口80）、Python HTTP 服务（端口8000/8080）、
     # 直接访问模式（端口5002）以及 Vue/Vite 前端（端口3000）
-    # 生产环境自动过滤非 HTTPS 源（localhost/127.0.0.1/null 除外，用于本地开发和独立预览）
+    # 生产环境按 filter_cors_origins / _is_production_allowed_origin 过滤明文 HTTP 源
     _raw_cors: str = os.getenv("CORS_ORIGINS", "http://localhost,http://localhost:5002,http://localhost:3000,http://localhost:5173,http://localhost:5174,http://localhost:8000,http://localhost:8080,null")
-    BACKEND_CORS_ORIGINS: list[str] = [
-        origin.strip() for origin in _raw_cors.split(",")
-        if origin.strip()
-        and (
-            not _is_production_env()
-            or origin.strip().startswith("https://")
-            or origin.strip().startswith("http://localhost")
-        )
-    ]
+    BACKEND_CORS_ORIGINS: list[str] = filter_cors_origins(
+        _raw_cors, is_production=_is_production_env()
+    )
 
     # 安全配置 - 从环境变量读取，生产环境必须显式设置
     SECRET_KEY: str = os.getenv("SECRET_KEY", "")
