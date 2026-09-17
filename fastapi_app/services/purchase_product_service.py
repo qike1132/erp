@@ -286,7 +286,13 @@ def _accumulate_bom_rows(
             }
             totals[key] = bucket
 
-        per_unit = Decimal(str(mat.get('unit_usage', 0)))
+        # 数值字段同样不得裸露：`Decimal(str(None))` 抛 arithmetic.InvalidOperation，
+        # 而它是 ArithmeticError 子类，**不在**接口 except 元组
+        # (ValueError, OperationalError, DisconnectionError, RuntimeError) 内
+        # ⇒ 会退化成无友好文案的 500。`unit_usage` 目前由三张表的 to_dict() 各自兜底
+        # （float(x) if x else 0），但那是**生产者自觉**；内核必须自己防住
+        # （见 test_kernel_tolerates_null_unit_usage）。
+        per_unit = Decimal(str(mat.get('unit_usage') or 0))
         bucket['total'] += per_unit * quantity
 
 

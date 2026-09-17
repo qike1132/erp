@@ -32,6 +32,8 @@ from pydantic import ValidationError
 
 from fastapi_app.schemas.purchase_center import MaterialCalculateResponse
 from fastapi_app.services.purchase_product_service import (
+    _accumulate_bom_rows,
+    _finalize_bom_totals,
     aggregate_materials,
     aggregate_materials_by_scope,
 )
@@ -137,3 +139,44 @@ def test_response_model_accepts_real_payload():
         MaterialCalculateResponse.model_validate(payload)
     except ValidationError as e:  # noqa: PERF203
         pytest.fail(f'响应模型拒绝了真实生产者的产出（线上 500 同源）：\n{e}')
+
+
+def test_producers_never_emit_null_unit_usage():
+    """事实断言：当前三张表的 ``to_dict()`` 对 ``unit_usage`` 恒给出 float。
+
+    三处 ``to_dict()`` 均写作 ``float(x) if x else 0``，因此**真实生产者不会**给 None。
+    该断言把这个前提固定下来——若将来新增包材等生产者破坏它，本用例会先红。
+    """
+    product = _product_with_null_codes()
+    vals = [row['unit_usage'] for row in product.get_all_materials()]
+    assert all(isinstance(v, float) for v in vals), f'生产者应恒给出 float，实得 {vals}'
+
+
+def test_kernel_tolerates_null_unit_usage():
+    """防御性输入：``unit_usage`` 为 None 时按 0 处理，不得抛 ``InvalidOperation``。
+
+    与生产者的边界：上面已证真实生产者不给 None，但那只靠 ``to_dict()`` 各自的
+    ``float(x) if x else 0`` 兜底（**生产者自觉**）；聚合内核此前未加固，
+    ``Decimal(str(None))`` 会抛 ``arithmetic.InvalidOperation``——它是
+    ``ArithmeticError`` 子类，**不在**接口的 except 元组
+    ``(ValueError, OperationalError, DisconnectionError, RuntimeError)`` 内
+    ⇒ 会退化成无友好文案的 500。本用例固化内核侧的防御行为。
+
+    注意：这里的行是**刻意构造的畸形输入**（用于验证鲁棒性），
+    不是对生产者形状的断言——生产者形状由上面两个用例负责。
+    """
+    totals: dict[tuple, dict] = {}
+    _accumulate_bom_rows(
+        totals,
+        [{
+            'category': 'fabric', 'material_name': '白胚布', 'unit_usage': None,
+            'unit': '码', 'supplier_name': '供应商A', 'specification': '3D',
+            'material_code': 'M-001', 'role_id': None,
+        }],
+        Decimal(10),
+    )
+    rows = _finalize_bom_totals(totals)['fabric']
+    assert len(rows) == 1, f'应聚合出 1 行，实得 {len(rows)}'
+    assert rows[0]['total_quantity'] == 0.0, (
+        f'unit_usage=None 应按 0 处理，实得 {rows[0]["total_quantity"]}'
+    )

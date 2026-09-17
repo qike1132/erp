@@ -183,7 +183,10 @@ def _setup_csrf(app: FastAPI) -> None:
             # ⇒ 该 origin 下所有 POST/PUT/DELETE 一律 403「CSRF token 验证失败」。
             # 同一套判定见 api/v1/endpoints/auth.py::_set_login_cookies（登录 cookie 早已按
             # scheme 自适应，所以现象是「能登录、但写不了」）。
-            # 注：CSRF_COOKIE_SECURE=true 仍可强制开启；HTTPS 部署行为不变。
+            # 注：CSRF_COOKIE_SECURE 的语义是「https 下是否打 Secure」——置 false 可在 HTTPS
+            # 上主动关闭；但**不具备**「在明文 HTTP 上强制开启」的能力（第 193 行对 _is_https
+            # 硬门控）。这是刻意的：Secure cookie 在非可信来源会被浏览器直接丢弃，
+            # 强制开启只会复现本次「读不到 token ⇒ 写请求全 403」的故障。
             _is_https = (
                 request.url.scheme == "https"
                 or request.headers.get("x-forwarded-proto", "").split(",")[0].strip().lower() == "https"
