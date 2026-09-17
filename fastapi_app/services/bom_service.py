@@ -48,6 +48,7 @@ from fastapi_app.shared_models import (
     ProductRole,
 )
 from fastapi_app.services.product.bom_role_resolver import resolve_role_rows
+from fastapi_app.services.product.role_service import ensure_global_role
 
 logger = logging.getLogger(__name__)
 
@@ -686,15 +687,31 @@ async def copy_bom(db: AsyncSession, target_product_id: int, data: dict, usernam
     # ===== 目标角色名模式：按名称查找或新建角色后复制（支持前端未保存的新角色）=====
     role_name = (data.get('role_name') or '').strip()
     if role_name:
+        target_roles = list(getattr(target_product, 'roles', None) or [])
+        # a. 目标产品已有同名角色（镜像列）→ 幂等复用
         role = next(
             (
-                r for r in (getattr(target_product, 'roles', None) or [])
+                r for r in target_roles
                 if (getattr(r, 'role_name', None) or getattr(r, 'name', '') or '').strip() == role_name
             ),
             None,
         )
         if role is None:
-            role = ProductRole(product_id=target_product_id, role_name=role_name)
+            # b. 按名称查找或新建全局角色（copy_bom 不产生审计噪音）
+            global_role = await ensure_global_role(db, role_name, username)
+            # c. 目标产品已关联同一全局角色（镜像名漂移）→ 复用，避免撞
+            #    uq_product_role_product_global(product_id, global_role_id)
+            role = next(
+                (r for r in target_roles if getattr(r, 'global_role_id', None) == global_role.id),
+                None,
+            )
+        if role is None:
+            # d. 新建关联行：global_role_id 必填（迁移 045 后 NOT NULL），role_name 取全局角色名
+            role = ProductRole(
+                product_id=target_product_id,
+                global_role_id=global_role.id,
+                role_name=global_role.name,
+            )
             db.add(role)
             await db.flush()
             # 挂进关系集合，否则 _copy_bom_into_role 的归属校验会误判「角色不属于该产品」
@@ -772,11 +789,36 @@ async def copy_bom(db: AsyncSession, target_product_id: int, data: dict, usernam
 
     # ===== 角色及其独立物料 =====
     # 先批量建角色并单次 flush 取 id（原逐 role flush 为 R 次往返），
-    # 再按 role_id 建索引，避免对 fabrics/accessories/materials 的 R 次嵌套扫描
+    # 再按 role_id 建索引，避免对 fabrics/accessories/materials 的 R 次嵌套扫描。
+    # 每个新关联行必须携带 global_role_id（迁移 045 后 NOT NULL + FK RESTRICT）；
+    # 覆盖模式已在上方批量删除目标全部角色，故仅非覆盖模式需按 global_role_id 去重。
+    target_by_global: dict[int, ProductRole] = {}
+    if not overwrite:
+        for existing_role in (getattr(target_product, 'roles', None) or []):
+            gid_existing = getattr(existing_role, 'global_role_id', None)
+            if gid_existing is not None:
+                target_by_global[gid_existing] = existing_role
     role_id_map: dict[int, ProductRole] = {}
     for old_role in source_product.roles:
-        new_role = ProductRole(product_id=target_product_id, role_name=old_role.role_name)
+        gid = old_role.global_role_id
+        if gid is None:
+            # 历史遗留行（迁移 045 回填 + NOT NULL 后不应再出现）：按名称补齐全局角色
+            legacy_name = (old_role.role_name or '').strip()
+            if not legacy_name:
+                raise ValueError('源产品存在无名角色，无法复制')
+            gid = (await ensure_global_role(db, legacy_name, username)).id
+        reused = target_by_global.get(gid)
+        if reused is not None:
+            # 目标产品已关联同一全局角色 → 复用，避免撞 uq_product_role_product_global
+            role_id_map[old_role.id] = reused
+            continue
+        new_role = ProductRole(
+            product_id=target_product_id,
+            global_role_id=gid,
+            role_name=old_role.role_name,
+        )
         db.add(new_role)
+        target_by_global[gid] = new_role
         role_id_map[old_role.id] = new_role
     copied_count += len(role_id_map)
     if role_id_map:

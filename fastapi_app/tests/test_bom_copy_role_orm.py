@@ -24,12 +24,12 @@ from decimal import Decimal
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import select
+from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 from fastapi_app.services import bom_service
-from fastapi_app.shared_models import Base
+from fastapi_app.shared_models import Base, Role
 from fastapi_app.shared_models.product import Product
 from fastapi_app.shared_models.product_material import (
     ProductAccessory,
@@ -38,8 +38,10 @@ from fastapi_app.shared_models.product_material import (
     ProductRole,
 )
 
-# 仅建 copy_bom 路径上会被访问的表，避免拖入无关依赖链
+# 仅建 copy_bom 路径上会被访问的表，避免拖入无关依赖链。
+# Role 表必须包含：ProductRole.global_role_id 外键指向 role.id（迁移 045 后 NOT NULL）。
 _TABLES = [
+    Role.__table__,
     Product.__table__,
     ProductRole.__table__,
     ProductFabric.__table__,
@@ -56,6 +58,15 @@ async def real_db_session():
         poolclass=StaticPool,
         connect_args={'check_same_thread': False},
     )
+
+    @event.listens_for(engine.sync_engine, 'connect')
+    def _register_btrim(dbapi_connection, _record):  # pragma: no cover - 连接级回调
+        # SQLite 无 btrim（PostgreSQL 内置）。copy_bom → ensure_global_role 会用
+        # lower(btrim(name)) 查全局角色字典，此处补一个等价的空格 trim 实现。
+        dbapi_connection.create_function(
+            'btrim', 1, lambda value: value.strip() if isinstance(value, str) else value,
+        )
+
     async with engine.begin() as conn:
         await conn.run_sync(lambda c: Base.metadata.create_all(c, tables=_TABLES))
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
@@ -65,17 +76,24 @@ async def real_db_session():
 
 
 async def _seed(db) -> None:
-    """源产品含默认作用域（role_id 为 NULL）的填充/面料/辅料；目标产品含一个已有角色。"""
+    """源产品含默认作用域（role_id 为 NULL）的填充/面料/辅料；目标产品含一个已有角色。
+
+    目标已有角色必须先落一条全局角色（``role``）再关联——迁移 045 后
+    ``product_role.global_role_id`` 为 NOT NULL + 外键（ON DELETE RESTRICT）。
+    """
     db.add_all([
         Product(id=1, name='ORM回归-源产品', price=1),
         Product(id=2, name='ORM回归-目标产品', price=1),
     ])
     await db.flush()
+    existing_global = Role(name='目标已有角色')
+    db.add(existing_global)
+    await db.flush()
     db.add_all([
         ProductMaterial(product_id=1, role_id=None, cotton_usage=Decimal('120'), unit='克'),
         ProductFabric(product_id=1, role_id=None, fabric_name='超柔', quantity=Decimal('0.5'), unit='码'),
         ProductAccessory(product_id=1, role_id=None, accessory_name='拉链', quantity=Decimal('1'), unit='个'),
-        ProductRole(product_id=2, role_name='目标已有角色'),
+        ProductRole(product_id=2, global_role_id=existing_global.id, role_name='目标已有角色'),
     ])
     await db.commit()
 

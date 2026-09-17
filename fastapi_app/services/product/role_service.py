@@ -94,6 +94,51 @@ async def create_role(db: AsyncSession, name: str, username: str = 'system') -> 
     return _to_item(role)
 
 
+async def ensure_global_role(db: AsyncSession, name: str, username: str = 'system') -> Role:
+    """按名称「查找或新建」全局角色，返回 ``Role`` 实体（幂等）。
+
+    供 ``copy_bom`` / BOM 保存等**非字典维护**路径复用：这些路径只需要一个可用的
+    全局角色 id，**不产生审计噪音**，因此本函数不写 ``ModificationLog``
+    （这是与 ``create_role`` 的唯一差别）。
+
+    并发窗口：两次并发请求可能同时未命中既有行而都尝试插入同名角色。此时以
+    ``savepoint`` 包裹插入，撞 ``uq_role_name_lower`` 时**仅回滚本次插入**
+    （不破坏外层事务），回查一次取并发胜者写入的既有行复用；仍查不到才抛
+    ``RoleNameConflictError``。
+
+    Args:
+        db: 异步数据库会话。
+        name: 角色名（内部按 ``lower(trim(name))`` 比较）。
+        username: 操作人（仅用于诊断日志；本函数不写审计日志）。
+
+    Returns:
+        Role: 命中或新建的全局角色实体（已 flush，``id`` 可用）。
+
+    Raises:
+        RoleNameConflictError: 名称为空/超长，或并发插入后仍无法定位既有行。
+    """
+    normalized = _normalize_name(name)
+    key = _name_key(normalized)
+    existing = await _find_by_key(db, key)
+    if existing is not None:
+        return existing
+    role = Role(name=normalized)
+    try:
+        async with db.begin_nested():  # savepoint：冲突只回滚本次插入，不破坏外层事务
+            db.add(role)
+            await db.flush()
+    except IntegrityError as exc:
+        # 并发窗口：他人已抢先插入同名角色，回查复用（不抛冲突）
+        existing = await _find_by_key(db, key)
+        if existing is not None:
+            return existing
+        raise RoleNameConflictError(
+            f'角色「{normalized}」已存在（名称比较不区分大小写）'
+        ) from exc
+    logger.debug('ensure_global_role 新建全局角色: %s (by=%s)', normalized, username)
+    return role
+
+
 async def apply_global_rename(db: AsyncSession, role: Role, new_name: str) -> None:
     """改全局角色名 + 同步 ``product_role.role_name`` 镜像列（不写审计日志）。
 

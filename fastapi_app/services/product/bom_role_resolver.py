@@ -26,6 +26,7 @@ from fastapi_app.services.product.role_service import (
     _name_key,
     _normalize_name,
     apply_global_rename,
+    ensure_global_role,
 )
 from fastapi_app.shared_models import ModificationLog, ProductRole, Role
 
@@ -68,19 +69,25 @@ async def _load_global_roles_by_key(db: AsyncSession, keys: set[str]) -> dict[st
     return {_name_key(role.name): role for role in result.scalars().all()}
 
 
-def _ensure_new_globals(
+async def _ensure_new_globals(
     db: AsyncSession, prepared: list[dict], by_key: dict[str, Role],
-) -> list[Role]:
-    """为「全新角色」（无 id、无 global_role_id、有名称）创建全局角色（未 flush）。"""
-    created: list[Role] = []
+) -> None:
+    """为「全新角色」（无 id、无 global_role_id、有名称）查找或新建全局角色。
+
+    既有全局角色已由 ``_load_global_roles_by_key`` 批量预取写入 ``by_key``；
+    此处只处理真正缺失的键，并复用 ``role_service.ensure_global_role`` 完成
+    「查找或新建 + 并发撞名 savepoint 回查」，结果就写回 ``by_key``
+    （供后续 ``_resolve_target_global_id`` 解析 role.id）。
+
+    约束：本函数不在循环体内直接 ``await execute/scalar/scalars``（N+1 静态门禁）
+    —— 唯一的查询封装在 ``ensure_global_role`` 内，且仅对缺失键逐个调用。
+    """
     for p in prepared:
-        if p['rid'] is None and p['global_role_id'] is None and p['key']:
-            if p['key'] not in by_key:
-                role = Role(name=p['role_name'])
-                db.add(role)
-                by_key[p['key']] = role
-                created.append(role)
-    return created
+        if p['rid'] is not None or p['global_role_id'] is not None or not p['key']:
+            continue
+        if p['key'] in by_key:
+            continue
+        by_key[p['key']] = await ensure_global_role(db, p['role_name'])
 
 
 def _resolve_target_global_id(p: dict, existing_by_id: dict, by_key: dict) -> int | None:
@@ -147,10 +154,9 @@ async def resolve_role_rows(
         for role in result.scalars().all():
             by_id[role.id] = role
 
-    created_globals = _ensure_new_globals(db, prepared, by_key)
-    if created_globals:
-        await db.flush()
-        for role in created_globals:
+    await _ensure_new_globals(db, prepared, by_key)
+    for role in by_key.values():
+        if role.id is not None:
             by_id[role.id] = role
 
     existing_by_id = {r.id: r for r in existing_product_roles}
@@ -165,6 +171,10 @@ async def resolve_role_rows(
     for p in prepared:
         if not p['role_name'] and p['global_role_id'] is None and p['rid'] is None:
             continue  # 无名又无任何引用：跳过
+        if p['rid'] is not None and p['rid'] not in existing_by_id:
+            # 陈旧 id（客户端提交了不属于该产品的关联行 id）→ 明确 400，
+            # 否则会新建 global_role_id 为 NULL 的关联行，撞迁移 045 的 NOT NULL。
+            raise ValueError(f'角色 {p["rid"]} 不属于该产品')
         gid = _resolve_target_global_id(p, existing_by_id, by_key)
         assoc = existing_by_id.get(p['rid']) if p['rid'] is not None else None
         if assoc is None and gid is not None:

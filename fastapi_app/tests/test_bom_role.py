@@ -373,8 +373,10 @@ class TestCopyBom:
     """copy_bom 角色及其物料复制"""
 
     def _source_product(self):
-        role_a = _mock_role(11, '白雪公主')
-        role_b = _mock_role(12, '灰姑娘')
+        # 源角色携带 global_role_id（迁移 045 后 ProductRole.global_role_id 为 NOT NULL）：
+        # copy_bom 的源角色复制走「携带 gid」快路径，不再触发历史遗留补齐查询。
+        role_a = _mock_role(11, '白雪公主', global_role_id=101)
+        role_b = _mock_role(12, '灰姑娘', global_role_id=102)
 
         fabric_default = MagicMock()
         fabric_default.role_id = None
@@ -562,11 +564,17 @@ class TestCopyBom:
         assert mock_db.add.call_count == 0
 
     # ===== 目标角色名模式（传 role_name，支持前端未保存的新角色）=====
-    def _setup_role_by_name(self, mock_db, src, src_materials, target_roles=None, new_role_id=31):
-        """构造目标角色名模式：目标产品携带给定角色列表；新建角色时 db.add 负责分配 id。"""
+    def _setup_role_by_name(self, mock_db, src, src_materials, target_roles=None, new_role_id=31,
+                            lookup_role_name=None):
+        """构造目标角色名模式：目标产品携带给定角色列表；新建角色时 db.add 负责分配 id。
+
+        当 ``lookup_role_name`` 与目标已有角色**不同名**（走新建分支）时，copy_bom 会先
+        查一次全局角色字典（``ensure_global_role``），故需额外占一个 ``db.execute`` 槽位。
+        """
+        targets = list(target_roles or [])
         src_result = MagicMock()
         src_result.scalar_one_or_none.return_value = src
-        tgt = _mock_product(roles=list(target_roles or []), has_bom=True)
+        tgt = _mock_product(roles=targets, has_bom=True)
         tgt.name = '目标产品'
         tgt_result = MagicMock()
         tgt_result.scalar_one_or_none.return_value = tgt
@@ -575,8 +583,17 @@ class TestCopyBom:
         fallback = MagicMock()
         fallback.scalar_one_or_none.return_value = None
         fallback.scalars.return_value.all.return_value = []
+        # 全局角色字典查询：未命中（返回 None），触发 ensure_global_role 新建
+        role_lookup = MagicMock()
+        role_lookup.scalar_one_or_none.return_value = None
+        role_lookup.scalars.return_value.first.return_value = None
+        role_lookup.scalars.return_value.all.return_value = []
 
-        calls = iter([src_result, tgt_result, mat_result, fallback, fallback, fallback, fallback, fallback])
+        matched = any(
+            (getattr(r, 'role_name', '') or '') == lookup_role_name for r in targets
+        )
+        pre = [src_result, tgt_result] + ([] if matched else [role_lookup])
+        calls = iter([*pre, mat_result, fallback, fallback, fallback, fallback, fallback])
         mock_db.execute = AsyncMock(side_effect=lambda *a, **k: next(calls))
 
         def _add(obj):
@@ -591,7 +608,8 @@ class TestCopyBom:
     async def test_copy_into_role_by_name_reuses_existing_role(self, mock_db):
         """传 role_name 且目标产品已有同名角色 → 复用该角色，不新建 ProductRole。"""
         src, src_materials = self._source_product()
-        self._setup_role_by_name(mock_db, src, src_materials, target_roles=[_mock_role(21, '目标角色')])
+        self._setup_role_by_name(mock_db, src, src_materials, target_roles=[_mock_role(21, '目标角色')],
+                                 lookup_role_name='目标角色')
 
         result = await bom_service.copy_bom(
             mock_db, 2, {'source_product_id': 1, 'overwrite': False, 'role_name': '目标角色'}, 'tester',
@@ -609,7 +627,8 @@ class TestCopyBom:
     async def test_copy_into_role_by_name_creates_role_when_missing(self, mock_db):
         """传 role_name 且目标产品无该角色 → 新建 ProductRole，物料归属新角色 id。"""
         src, src_materials = self._source_product()
-        self._setup_role_by_name(mock_db, src, src_materials, target_roles=[], new_role_id=31)
+        self._setup_role_by_name(mock_db, src, src_materials, target_roles=[], new_role_id=31,
+                                 lookup_role_name='新建角色')
 
         result = await bom_service.copy_bom(
             mock_db, 2, {'source_product_id': 1, 'overwrite': False, 'role_name': '新建角色'}, 'tester',

@@ -68,7 +68,7 @@ class ProductRole(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     product_id: Mapped[int] = mapped_column(Integer, ForeignKey('product.id', ondelete='CASCADE'), nullable=False, comment='关联产品ID')
-    global_role_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('role.id', ondelete='RESTRICT'), comment='全局角色ID(role.id)')
+    global_role_id: Mapped[int] = mapped_column(Integer, ForeignKey('role.id', ondelete='RESTRICT'), nullable=False, comment='全局角色ID(role.id)')
     role_name: Mapped[str] = mapped_column(String(100), nullable=False, comment='角色名称（回滚兼容镜像列，改名时同步）')
     create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), comment='创建时间')
     update_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), comment='更新时间')
