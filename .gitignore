@@ -282,3 +282,20 @@ docs/tickets/artifacts/benchmark/*.json
 # 上线前审核补齐（2026-09-17）：遗漏的临时/产物目录
 /dist-v533-sentinel/
 /.workbuddy-ai/
+
+# === 2026-09-17 全面审计整改（S1）：浏览器配置库/凭据库禁止入库 ===
+# 事故：docs/ui-redesign/v4/_edge_profile_{ov,sv}/** 共 428 个 Edge 用户配置目录文件
+# （Login Data / Local State(含 DPAPI 密钥) / Network/Cookies / History / Web Data）
+# 曾被提交入库并推送远端 main。以下前缀目录一律不入库。
+# 说明：浏览器凭据类文件的「裸文件名」（Login Data / Local State / Cookies / History）
+# 刻意不在此处做全局忽略 —— 那些名字过泛（History 等会误伤业务文件），
+# 改由 .githooks/pre-commit 第 1 层按精确 basename 拦截。
+_edge_profile_*/
+_chrome_profile_*/
+_chromium_profile_*/
+_firefox_profile_*/
+*.db-journal
+*.sqlite-journal
+
+# 审计/排查一次性产物（与上方 /_*.py、/_*.sh、/_*.txt 同源约定）
+/_*.json

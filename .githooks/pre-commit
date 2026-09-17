@@ -1,0 +1,237 @@
+#!/bin/sh
+# ============================================================================
+# .githooks/pre-commit —— 提交前守卫
+#
+# ⚠️ 本文件的存在理由（2026-09-17 审计，S4）
+# ---------------------------------------------------------------------------
+# 仓库配置了 `core.hooksPath = .githooks`，但**该目录此前并不存在**，
+# 且 `.git/hooks/pre-commit` 也不存在 —— 结果：任何提交都不会触发 hook，
+# `.pre-commit-config.yaml` 里的 ruff / 质量门禁 / 分层门禁**长期从未运行**。
+# 直接后果：`docs/ui-redesign/v4/_edge_profile_{ov,sv}/**` 共 428 个
+# Edge 浏览器凭据文件（Login Data / Local State / Cookies / History）
+# 被顺利提交入库，并已推送到远端 main。
+#
+# 本文件即该缺陷的修复：把 hook 目录补回来，并**补上原先完全缺失的密钥扫描**。
+#
+# 三层检查（任一失败即拒绝提交）
+# ---------------------------------------------------------------------------
+#   1) 危险路径守卫 —— 浏览器配置库 / 凭据库 / 私钥文件 一律拒绝入库
+#   2) 密钥内容扫描 —— 私钥头、云凭据、口令赋值（含占位符白名单以抑制误报）
+#   3) 既有门禁     —— 若 `pre-commit` 可用则运行 .pre-commit-config.yaml
+#
+# 合法豁免
+# ---------------------------------------------------------------------------
+#   * 路径豁免：加入 `.githooks/allowlist.txt`（一行一个 glob，`#` 注释）
+#   * 内容豁免：同上；本仓库 `scripts/prod_audit/tests/test_self_audit.py`
+#     含**脱敏用测试夹具**私钥串，已预置在 allowlist。
+#
+# 绕过（仅限紧急，事后必须补跑）
+# ---------------------------------------------------------------------------
+#   git commit --no-verify
+#   ⚠️ 本地 hook 可被绕过，因此 CI 侧必须另有一道独立的扫描（见审计报告行动项）。
+# ============================================================================
+
+set -u
+
+repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || {
+    echo "pre-commit: 无法定位仓库根，跳过检查" >&2
+    exit 0
+}
+cd "$repo_root" || exit 0
+
+allowlist_file=".githooks/allowlist.txt"
+fail=0
+
+# 读取豁免 glob（去掉注释与空行）
+allow_patterns=""
+if [ -f "$allowlist_file" ]; then
+    allow_patterns=$(sed -e 's/[[:space:]]*#.*$//' -e '/^[[:space:]]*$/d' "$allowlist_file")
+fi
+
+is_allowed() {
+    [ -z "$allow_patterns" ] && return 1
+    printf '%s\n' "$allow_patterns" | while IFS= read -r pat; do
+        [ -z "$pat" ] && continue
+        # shellcheck disable=SC2254
+        case "$1" in $pat) echo "__MATCH__";; esac
+    done | grep -q "__MATCH__"
+}
+
+# 暂存文件列表（新增/修改/改名；删除不算）
+staged=$(git diff --cached --name-only --diff-filter=ACMR)
+[ -z "$staged" ] && exit 0
+
+# ---------------------------------------------------------------------------
+# 第 1 层：危险路径守卫
+# ---------------------------------------------------------------------------
+blocked_paths=""
+old_ifs=$IFS
+IFS='
+'
+for f in $staged; do
+    [ -z "$f" ] && continue
+    if is_allowed "$f"; then continue; fi
+
+    hit=""
+    case "$f" in
+        # 浏览器配置库（本轮事故正主）
+        *_edge_profile_*|*_chrome_profile_*|*_chromium_profile_*|*_firefox_profile_*|*_gecko_profile_*)
+            hit="浏览器用户配置目录" ;;
+        */Crashpad/*|*/Session\ Storage/*|*/Local\ Storage/*|*/IndexedDB/*|*/Service\ Worker/*)
+            hit="浏览器运行态数据目录" ;;
+        *.db-journal|*.sqlite-journal)
+            hit="数据库 journal 文件" ;;
+    esac
+
+    # 精确 basename 命中（浏览器凭据/历史库文件名）
+    base=$(basename "$f")
+    case "$base" in
+        "Login Data"|"Login Data For Account"|"Login Data-journal"|\
+        "Local State"|"Cookies"|"Cookies-journal"|"Web Data"|"Web Data-journal"|\
+        "History"|"History-journal"|"Vpn Tokens"|"Trust Tokens"|"Affiliation Database")
+            hit="浏览器凭据/历史数据库文件" ;;
+    esac
+
+    # 私钥 / 凭据文件（允许 *.example / *.sample / *.template）
+    case "$f" in
+        *.pem|*.key|*.p12|*.pfx|*id_rsa|*id_ed25519|*.keystore|*.jks)
+            case "$f" in
+                *.example|*.sample|*.template|*.md|*/docs/*) : ;;
+                *) hit="私钥/证书文件" ;;
+            esac ;;
+    esac
+
+    # 真实 .env（不是模板）
+    case "$base" in
+        ".env"|".env.production"|".env.development"|".env.local"|".env.backup")
+            hit="真实环境变量文件（含明文凭据）" ;;
+    esac
+
+    if [ -n "$hit" ]; then
+        blocked_paths="${blocked_paths}  ✗ $f  —— $hit
+"
+    fi
+done
+IFS=$old_ifs
+
+if [ -n "$blocked_paths" ]; then
+    echo "" >&2
+    echo "━━━ 提交被拒绝：危险路径（第 1 层） ━━━" >&2
+    printf '%s' "$blocked_paths" >&2
+    echo "" >&2
+    echo "处置：git rm -r --cached <路径>，并把模式加入 .gitignore。" >&2
+    echo "若确属必要，把路径加入 $allowlist_file 后再提交。" >&2
+    echo "参考：2026-09-17 审计 S1（428 个 Edge 凭据文件因本层缺失而入库）。" >&2
+    fail=1
+fi
+
+# ---------------------------------------------------------------------------
+# 第 2 层：密钥内容扫描
+# ---------------------------------------------------------------------------
+# 高精度模式（宁可漏报，避免误报阻塞正常开发）
+secret_patterns='-----BEGIN [A-Z ]*PRIVATE KEY-----|-----BEGIN OPENSSH PRIVATE KEY-----|AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{36,}|xox[baprs]-[A-Za-z0-9-]{10,}|sk-[A-Za-z0-9]{32,}|AIza[0-9A-Za-z_-]{35}|-----BEGIN (RSA|EC|DSA|PGP) '
+
+# 口令赋值：仅在"看起来是真值"时命中（排除占位符与常见弱口令示例）
+pwd_pattern='([Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Pp][Aa][Ss][Ss][Ww][Dd]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Tt][Oo][Kk][Ee][Nn]|[Aa][Pp][Ii][_]?[Kk][Ee][Yy]|[Rr][Ee][Qq][Uu][Ii][Rr][Ee][Pp][Aa][Ss][Ss])[[:space:]]*[:=][[:space:]]*["'"'"']?[A-Za-z0-9+/=_.:@!#%^&*-]{12,}'
+
+secret_hits=""
+old_ifs=$IFS
+IFS='
+'
+for f in $staged; do
+    [ -z "$f" ] && continue
+    if is_allowed "$f"; then continue; fi
+
+    # 跳过二进制与超大文件
+    case "$f" in
+        *.png|*.jpg|*.jpeg|*.gif|*.webp|*.ico|*.pdf|*.zip|*.gz|*.7z|*.rar|\
+        *.woff|*.woff2|*.ttf|*.eot|*.mp4|*.mp3|*.xlsx|*.docx|*.pptx|*.pyc|\
+        *.so|*.dll|*.exe|*.bin|*.dat|*.db|*.sqlite|*.wal|*.shm)
+            continue ;;
+    esac
+    size=$(git cat-file -s ":$f" 2>/dev/null || echo 0)
+    [ "$size" -gt 2000000 ] && continue
+
+    # ⚠️ 内容必须落到临时文件再扫描。踩过的坑：用 $(git show ":$f") 把内容放进
+    # shell 变量时，bash 会剥离 NUL 字节，于是"含 NUL 视为二进制"的判定
+    # *(printf '\000')* 退化成 *""* —— 它匹配一切字符串，导致**整层内容扫描被静默跳过**
+    # （实测：含伪造私钥的文件被放行）。二进制判定改用 grep -I。
+    tmpf=$(mktemp 2>/dev/null) || tmpf="${TMPDIR:-/tmp}/precommit_scan.$$"
+    if ! git show ":$f" > "$tmpf" 2>/dev/null; then
+        rm -f "$tmpf"
+        continue
+    fi
+
+    if grep -Iq . "$tmpf" 2>/dev/null; then
+        # 注意必须用 -e 分隔：模式以 '-' 开头，否则 grep 会把它当选项
+        # （实测报 "unknown option -- ---BEGIN ..."，导致扫描静默失效）
+        if grep -Eq -e "$secret_patterns" "$tmpf"; then
+            secret_hits="${secret_hits}  ✗ $f  —— 命中私钥/云凭据特征
+"
+        else
+            pwd_matches=$(grep -Ei -e "$pwd_pattern" "$tmpf" | \
+                grep -Eiv -e '(<[^>]+>|YOUR_|CHANGE_?ME|changeme|placeholder|example|xxxx|dummy|fake|testkey|your[-_])')
+            if [ -n "$pwd_matches" ]; then
+                secret_hits="${secret_hits}  ✗ $f  —— 疑似明文口令/密钥赋值
+"
+            fi
+        fi
+    fi
+    rm -f "$tmpf"
+done
+IFS=$old_ifs
+
+if [ -n "$secret_hits" ]; then
+    echo "" >&2
+    echo "━━━ 提交被拒绝：疑似凭据（第 2 层） ━━━" >&2
+    printf '%s' "$secret_hits" >&2
+    echo "" >&2
+    echo "处置：改用环境变量/密钥管理注入，勿把真值写进版本库。" >&2
+    echo "若为脱敏测试夹具，把路径加入 $allowlist_file。" >&2
+    fail=1
+fi
+
+# ---------------------------------------------------------------------------
+# 第 3 层：既有门禁（.pre-commit-config.yaml）
+# ---------------------------------------------------------------------------
+if command -v pre-commit >/dev/null 2>&1; then
+    if ! pre-commit run --hook-stage pre-commit --color=never; then
+        echo "" >&2
+        echo "━━━ 提交被拒绝：既有门禁未通过（第 3 层） ━━━" >&2
+        echo "（ruff / 代码质量门禁 / 分层门禁，见 .pre-commit-config.yaml）" >&2
+        fail=1
+    fi
+else
+    echo "pre-commit: 未安装 pre-commit，跳过第 3 层门禁（ruff/质量门禁/分层门禁）" >&2
+    echo "pre-commit: 建议安装以恢复完整保护：pip install pre-commit" >&2
+    # 退而求其次：至少把质量门禁跑起来（它是纯 python 脚本）
+    if [ -f "scripts/quality_gate.py" ]; then
+        py=""
+        # 依次尝试：PATH 上的解释器 → 本机已知解释器绝对路径
+        # （git-bash 的 PATH 常常找不到 Windows Python，故显式兜底）
+        for cand in python python3 py \
+            "/c/Users/Administrator/AppData/Local/Programs/Python/Python313/python.exe" \
+            "/c/Users/Administrator/.workbuddy/binaries/python/versions/3.13.12/python.exe"; do
+            if command -v "$cand" >/dev/null 2>&1 || [ -x "$cand" ]; then py="$cand"; break; fi
+        done
+        if [ -n "$py" ]; then
+            if ! "$py" scripts/quality_gate.py >/dev/null 2>&1; then
+                echo "" >&2
+                echo "━━━ 提交被拒绝：代码质量门禁未通过（第 3 层降级模式） ━━━" >&2
+                echo "诊断：$py scripts/quality_gate.py" >&2
+                fail=1
+            fi
+        else
+            echo "pre-commit: 未找到可用 Python，代码质量门禁未运行（请人工补跑）" >&2
+            echo "pre-commit: 建议 pip install pre-commit 以恢复完整门禁" >&2
+        fi
+    fi
+fi
+
+if [ "$fail" -ne 0 ]; then
+    echo "" >&2
+    echo "提交已取消。确需紧急绕过请用：git commit --no-verify（事后必须补跑上述检查）。" >&2
+    exit 1
+fi
+
+exit 0

@@ -7,6 +7,8 @@ Create Date: 2026-05-05
 为来料登记和每日生产记录添加性能索引，覆盖高频查询场景。
 """
 
+from alembic import op
+
 revision = 'pg_standalone_006'
 down_revision = 'pg_standalone_005'
 branch_labels = ()
