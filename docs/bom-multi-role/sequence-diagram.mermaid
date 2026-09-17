@@ -1,0 +1,113 @@
+%% ========== ① 打开 BOM 弹窗（加载全局角色） ==========
+sequenceDiagram
+    participant U as 用户
+    participant B as BomEditor.vue
+    participant A as useProductListActions.ts
+    participant API as productApi / roleApi
+    participant R as product_routes / role_routes
+    participant S as bom_service.get_bom
+    participant DB as PostgreSQL
+
+    U->>B: 点击「BOM表配置」
+    B->>A: openBomModal(row)
+    A->>API: loadBom(productId)
+    API->>R: GET /purchase-center/product/{id}/bom
+    R->>S: get_bom(db, product_id)
+    S->>DB: select Product + material_rows/fabrics/accessories/roles(→global_role)
+    DB-->>S: 行集
+    S-->>R: { roles:[{id,global_role_id,name}...(按name,id升序)], default_bom_label, materials }
+    R-->>API: success_response(product, materials)
+    API-->>A: 响应
+    A->>A: bomRoles = roles; selectedRole = null  ← 修缺陷①(默认停靠默认BOM)
+    A->>API: roleApi.list()  ← 供「选择已有角色」下拉
+    API->>R: GET /purchase-center/roles
+    R-->>API: 全局角色列表
+    API-->>A: 全局角色候选
+    B-->>U: 渲染角色栏 + 当前作用域徽标(默认BOM)
+
+%% ========== ② 保存 BOM（新建全局角色 + role_key 映射） ==========
+sequenceDiagram
+    participant U as 用户
+    participant A as useProductListActions.saveBom
+    participant R as product_routes.api_save_product_bom
+    participant S as bom_service.save_bom
+    participant RR as bom_role_resolver
+    participant RS as role_service
+    participant DB as PostgreSQL
+
+    U->>A: 点击「保存BOM」
+    A->>A: 组装 rolesPayload（含 global_role_id / role_key / id）
+    A->>R: POST /product/{id}/bom (BomSaveRequest)
+    R->>S: save_bom(db, product_id, data, user)
+    S->>RR: resolve_role_rows(payload.roles, product.roles, db)
+    loop 每个角色项
+        alt 带 global_role_id（已有全局角色）
+            RR->>DB: 查/建 product_role(product_id, global_role_id)
+        else 带 role_key（全新全局角色）
+            RR->>RS: create_role(name)  ← lower(name) 唯一校验
+            RS-->>RR: role.id
+            RR->>DB: 建 product_role(product_id, global_role_id)
+            RR->>RR: temp_role_map[role_key]=product_role.id
+        else 带 id（既有关联行）
+            RR->>DB: 校验归属；role_name 变化→改名全局角色+同步镜像
+        end
+    end
+    RR-->>S: (role_ids, temp_role_map, logs)
+    S->>S: _resolve_role_id(物料)：role_id→role_key→temp_role_map
+    S->>DB: upsert fabrics/accessories/fillings + 删除未提交行
+    S-->>R: 'BOM 保存成功'
+    R-->>A: success
+    A->>A: 关闭弹窗 + showToast('保存成功')
+
+%% ========== ③ 计算器请求与分块/矩阵渲染 ==========
+sequenceDiagram
+    participant U as 用户
+    participant V as MaterialCalculatorView
+    participant C as useMaterialCalculator
+    participant P as product_routes.api_calculate_material
+    participant S as purchase_product_service
+    participant M as roleMatrix.deriveRoleMatrix
+    participant RC as CalcResultColumn / RoleMatrix
+
+    U->>V: 录入订单总数量（防抖 350ms）
+    V->>C: debounceCalc() → triggerCalculation()
+    C->>P: POST /purchase-center/calculate {orders}
+    P->>S: calculate_material(db, orders)
+    S->>S: 加载 Product(+roles→global_role) 并调 order_scopes
+    S->>S: aggregate_materials → {groups:[默认首块, 角色按名升序]}
+    S-->>P: {groups, filling, fabric, accessory, packaging(扁平基线)}
+    P-->>C: MaterialCalculateResponse
+    C->>C: calcGroups = res.groups（缺失则回退扁平渲染, A-5）
+    C-->>V: 响应式更新
+    V->>RC: 传 calcGroups
+    RC->>RC: 分块卡（复合 row-key, 缺陷②修复）
+    RC->>M: deriveRoleMatrix(calcGroups)
+    M-->>RC: {scopes, rows, visible}
+    RC-->>U: 分块结果 + 「角色对比」矩阵
+
+%% ========== ④ 迁移脚本执行 ==========
+sequenceDiagram
+    participant O as 运维(本机)
+    participant BK as pg_dump 备份
+    participant RP as scripts/migrate_roles_report.py (只读)
+    participant AL as alembic upgrade (042)
+    participant DB as PostgreSQL
+    participant VC as --verify / downgrade
+
+    O->>BK: pg_dump 全库 → 备份文件  ← 前置必做
+    O->>RP: 干跑：输出归并报告(合并组/影响产品数/物料行数)
+    RP->>DB: SELECT count(*) 按分类基线 + 重复组识别
+    DB-->>RP: 基线/重复组
+    RP-->>O: 报告(人工确认) ← Q-04
+    O->>AL: alembic upgrade 042（单事务）
+    AL->>DB: CREATE role / INDEX / ADD COLUMN / 回填 / 归并 / 加约束
+    alt 任一步失败
+        DB-->>AL: 异常
+        AL->>DB: 事务整体回滚（DB 回到迁移前）
+        AL-->>O: 中止并报错（业务不受影响）
+    else 成功
+        DB-->>AL: commit
+        O->>VC: 幂等校验：重复执行 → 结果不变
+        O->>VC: 守恒校验：按分类物料行数 == 迁移前基线
+        O->>VC: 抽样 3 产品逐行比对（含 role 归属）
+    end

@@ -1,0 +1,107 @@
+classDiagram
+    class Role {
+        +int id
+        +str name  "trim 存储; 唯一按 lower(name)"
+        +datetime create_time
+        +datetime update_time
+        +to_dict() dict
+    }
+
+    class ProductRole {
+        +int id  "物料表 FK 目标(保持不变)"
+        +int product_id  "FK product ON DELETE CASCADE"
+        +int global_role_id  "FK role ON DELETE RESTRICT"
+        +str role_name  "遗留镜像列(改名时同步,用于回滚)"
+        +datetime create_time
+        +datetime update_time
+        +to_dict() dict
+    }
+
+    class Product {
+        +int id
+        +str name
+        +str default_bom_label
+        +get_all_materials() list
+        +has_bom() bool
+    }
+
+    class ProductMaterial {
+        +int id
+        +int product_id
+        +int role_id  "FK product_role ON DELETE CASCADE; NULL=默认BOM"
+        +float cotton_usage
+        +str specification
+        +str supplier_name
+        +str unit
+    }
+
+    class ProductFabric {
+        +int id
+        +int product_id
+        +int role_id  "FK product_role ON DELETE CASCADE; NULL=默认BOM"
+        +str fabric_name
+        +float quantity
+        +str specification
+        +str supplier_name
+        +str unit
+    }
+
+    class ProductAccessory {
+        +int id
+        +int product_id
+        +int role_id  "FK product_role ON DELETE CASCADE; NULL=默认BOM"
+        +str accessory_name
+        +float quantity
+        +str specification
+        +str supplier_name
+        +str unit
+        +str material_category
+    }
+
+    class RoleItemDTO {
+        +int id  "product_role.id (物料归属用)"
+        +int global_role_id
+        +str name
+    }
+
+    class MaterialCalcRow {
+        +str material_name
+        +str material_code
+        +str specification
+        +str supplier_name
+        +str unit
+        +float total_quantity
+    }
+
+    class MaterialCalcScopeGroup {
+        +int product_id
+        +str product_name
+        +int role_id  "product_role.id; None=默认BOM"
+        +str role_name
+        +float quantity
+        +list filling
+        +list fabric
+        +list accessory
+        +list packaging
+    }
+
+    class MaterialCalculateResponse {
+        +bool success
+        +list groups  "新增"
+        +list filling  "保留(全作用域合并口径)"
+        +list fabric
+        +list accessory
+        +list packaging
+        +dict total_categories
+        +str message
+    }
+
+    Role "1" --> "0..*" ProductRole : global_role_id (RESTRICT)
+    Product "1" --> "0..*" ProductRole : product_id (CASCADE)
+    ProductRole "1" --> "0..*" ProductMaterial : role_id (CASCADE)
+    ProductRole "1" --> "0..*" ProductFabric : role_id (CASCADE)
+    ProductRole "1" --> "0..*" ProductAccessory : role_id (CASCADE)
+    Product "1" --> "0..*" ProductMaterial : product_id
+    ProductRole ..> RoleItemDTO : get_bom() 投影
+    MaterialCalcScopeGroup "1" --> "0..*" MaterialCalcRow : filling/fabric/accessory/packaging
+    MaterialCalculateResponse "1" --> "0..*" MaterialCalcScopeGroup : groups
