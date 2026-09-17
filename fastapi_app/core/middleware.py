@@ -176,9 +176,21 @@ def _setup_csrf(app: FastAPI) -> None:
             csrf_token = request.cookies.get("fastapi_csrf_token")
             if not csrf_token:
                 csrf_token = secrets.token_urlsafe(32)
+            # ⚠️ `Secure` 必须随「实际请求 scheme」判定，不能只看全局 is_production：
+            # 浏览器只对**可信来源**（https / localhost / 127.0.0.1）接受 Secure cookie，
+            # 局域网明文 HTTP（如 http://192.168.0.95:3000）会**直接丢弃**该 cookie
+            # ⇒ 前端 document.cookie 读不到 token ⇒ double-submit 永远失败
+            # ⇒ 该 origin 下所有 POST/PUT/DELETE 一律 403「CSRF token 验证失败」。
+            # 同一套判定见 api/v1/endpoints/auth.py::_set_login_cookies（登录 cookie 早已按
+            # scheme 自适应，所以现象是「能登录、但写不了」）。
+            # 注：CSRF_COOKIE_SECURE=true 仍可强制开启；HTTPS 部署行为不变。
+            _is_https = (
+                request.url.scheme == "https"
+                or request.headers.get("x-forwarded-proto", "").split(",")[0].strip().lower() == "https"
+            )
             _csrf_samesite = "lax"
             _has_bearer_resp = request.headers.get("authorization", "").startswith("Bearer ")
-            _csrf_sec = False if _has_bearer_resp else _csrf_secure
+            _csrf_sec = _csrf_secure if (_is_https and not _has_bearer_resp) else False
             response.set_cookie(
                 key="fastapi_csrf_token",
                 value=csrf_token,
