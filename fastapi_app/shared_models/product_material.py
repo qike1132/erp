@@ -27,26 +27,66 @@ MATERIAL_CATEGORIES = {
 }
 
 
+class Role(Base):
+    """全局角色字典 - 跨产品复用的角色主数据（表 role）。
+
+    角色从「产品私有」升级为「全局字典」：一个角色记录可被多个产品通过
+    ``ProductRole.global_role_id`` 关联复用。
+
+    唯一性说明：**不在 ORM 层声明唯一约束**，改由迁移
+    ``pg_standalone_042_global_role`` 建立函数唯一索引
+    ``uq_role_name_lower ON role (lower(name))`` 实现「trim 后存储 + 大小写不敏感唯一」，
+    免引入 ``citext`` 扩展。应用层（``role_service``）另有 ``lower(trim(name))`` 预校验。
+    """
+    __tablename__ = 'role'
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False, comment='全局角色名（trim 后存储，保留用户输入大小写）')
+    create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), comment='创建时间')
+    update_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), comment='更新时间')
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'create_time': self.create_time.strftime('%Y-%m-%d %H:%M:%S') if self.create_time else None,
+            'update_time': self.update_time.strftime('%Y-%m-%d %H:%M:%S') if self.update_time else None,
+        }
+
+
 class ProductRole(Base):
-    """产品角色模型 - 每个 SKU 可关联多个角色（如公仔的不同角色）"""
+    """产品 × 全局角色 关联表（每个 SKU 可关联多个角色，如公仔的不同角色）。
+
+    迁移后本表降级为「产品 × 全局角色」关联表，其 ``id`` **保持不变**——
+    三张物料表（``product_material`` / ``product_fabric`` / ``product_accessory``）
+    的 ``role_id`` 外键仍指向本表 ``id``，因此物料表零迁移。
+
+    - ``global_role_id``：指向全局角色字典 ``role.id``（ON DELETE RESTRICT，回填后 NOT NULL）；
+    - ``role_name``：**回滚兼容镜像列**，改名时与全局角色名同步，保证回滚后旧代码显示正确名。
+    """
     __tablename__ = 'product_role'
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     product_id: Mapped[int] = mapped_column(Integer, ForeignKey('product.id', ondelete='CASCADE'), nullable=False, comment='关联产品ID')
-    role_name: Mapped[str] = mapped_column(String(100), nullable=False, comment='角色名称')
+    global_role_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('role.id', ondelete='RESTRICT'), comment='全局角色ID(role.id)')
+    role_name: Mapped[str] = mapped_column(String(100), nullable=False, comment='角色名称（回滚兼容镜像列，改名时同步）')
     create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), comment='创建时间')
     update_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), comment='更新时间')
 
     product: Mapped[Product] = relationship("Product", back_populates="roles")
+    # 全 ORM 关系均为 lazy='raise'：读取前必须显式 selectinload，否则抛 InvalidRequestError。
+    global_role: Mapped[Role | None] = relationship("Role", lazy='raise')
 
     __table_args__ = (
         Index('idx_product_role_product', 'product_id'),
+        UniqueConstraint('product_id', 'global_role_id', name='uq_product_role_product_global'),
     )
 
     def to_dict(self):
         return {
             'id': self.id,
             'product_id': self.product_id,
+            'global_role_id': self.global_role_id,
             'role_name': self.role_name,
             'name': self.role_name,
             'create_time': self.create_time.strftime('%Y-%m-%d %H:%M:%S') if self.create_time else None,

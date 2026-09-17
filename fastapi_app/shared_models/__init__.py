@@ -67,6 +67,7 @@ from fastapi_app.shared_models.product_material import (
     ProductFabric,
     ProductMaterial,
     ProductRole,
+    Role,
 )
 from fastapi_app.shared_models.production_plan import ProductionPlan, ProductionPlanLog, StagingPurchasePlan
 from fastapi_app.shared_models.purchase_center import ModificationLog, SavedQuery
@@ -139,6 +140,7 @@ __all__ = [
     'PurchaseOrderStatus',
     'PurchasePlan',
     'PurchasePlanDetail',
+    'Role',
     'SavedQuery',
     'ShipmentRecord',
     'StagingOrder',
