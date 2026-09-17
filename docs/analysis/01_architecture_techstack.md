@@ -371,7 +371,7 @@ API 层 (fastapi_app/api/v1/endpoints, 33 个端点)
 | 限流 | slowapi | 0.1.9 | 请求限流 |
 | JSON 编码 | msgspec | 0.21.1 | 高性能 JSON 编码（替代 orjson） |
 | 数据验证 | Pydantic | 2.13.2 | Schema 验证 + Settings |
-| 配置管理 | pydantic-settings | 2.14.0 | 环境变量配置 |
+| 配置管理 | pydantic-settings | 2.14.2 | 环境变量配置 |
 | ORM | SQLAlchemy | 2.0.49 | 异步 ORM |
 | 异步 DB 驱动 | asyncpg | 0.31.0 | PostgreSQL 异步驱动 |
 | 同步 DB 驱动 | psycopg[binary] | 3.3.3 | Alembic 迁移用 |
