@@ -34,7 +34,7 @@ class Role(Base):
     ``ProductRole.global_role_id`` 关联复用。
 
     唯一性说明：**不在 ORM 层声明唯一约束**，改由迁移
-    ``pg_standalone_042_global_role`` 建立函数唯一索引
+    ``pg_standalone_045_global_role`` 建立函数唯一索引
     ``uq_role_name_lower ON role (lower(name))`` 实现「trim 后存储 + 大小写不敏感唯一」，
     免引入 ``citext`` 扩展。应用层（``role_service``）另有 ``lower(trim(name))`` 预校验。
     """

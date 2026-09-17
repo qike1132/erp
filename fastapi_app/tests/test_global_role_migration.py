@@ -1,4 +1,4 @@
-"""全局角色字典迁移脚本结构测试 — pg_standalone_042_global_role
+"""全局角色字典迁移脚本结构测试 — pg_standalone_045_global_role
 
 **为何不真实执行 upgrade/downgrade**
 
@@ -35,7 +35,7 @@ from pathlib import Path
 import pytest
 
 _MIGRATIONS_DIR = Path(r"D:\erp_system\migrations\versions")
-_MIGRATION_FILE = "pg_standalone_042_global_role.py"
+_MIGRATION_FILE = "pg_standalone_045_global_role.py"
 
 # 三张物料表（本迁移的「轻迁移」对象：字段与外键零改动，仅改指重复行）
 _MATERIAL_TABLES = ("product_material", "product_fabric", "product_accessory")
@@ -93,7 +93,7 @@ def _load_migration_module(filename: str):
 
 
 class TestGlobalRoleMigrationStructure:
-    """校验 pg_standalone_042_global_role.py 的结构与不变式。"""
+    """校验 pg_standalone_045_global_role.py 的结构与不变式。"""
 
     @pytest.fixture(scope="class")
     def migration(self):
@@ -122,11 +122,11 @@ class TestGlobalRoleMigrationStructure:
     # ---- 迁移骨架 ----
 
     def test_revision_is_expected(self, migration):
-        assert migration.revision == "pg_standalone_042_global_role"
+        assert migration.revision == "pg_standalone_045_global_role"
 
-    def test_down_revision_points_to_web_vital(self, migration):
-        # 已复核 041 为 pg_standalone 系列 head，042 顺延
-        assert migration.down_revision == "pg_standalone_041_web_vital"
+    def test_down_revision_points_to_seed_beile_export_print(self, migration):
+        # 对齐生产已应用链：042(重命名权限)→043(补齐权限)→044(北乐导出打印)→045(本迁移)
+        assert migration.down_revision == "pg_standalone_044_seed_beile_export_print"
 
     def test_upgrade_and_downgrade_are_callable(self, migration):
         assert callable(migration.upgrade)
@@ -262,7 +262,7 @@ class TestGlobalRoleMigrationStructure:
 
 
 class TestGlobalRoleMigrationChainHealth:
-    """校验迁移链健康性：单一 head、无分叉，042 位于主链且父为 041。"""
+    """校验迁移链健康性：单一 head、无分叉，045 位于主链且父为 044，生产链 042–044 齐全。"""
 
     @pytest.fixture(scope="class")
     def script_dir(self):
@@ -278,10 +278,17 @@ class TestGlobalRoleMigrationChainHealth:
         assert len(heads) == 1, f"迁移链分叉，存在多个 head: {heads}"
 
     def test_global_role_is_head(self, script_dir):
-        assert script_dir.get_heads() == ["pg_standalone_042_global_role"]
+        assert script_dir.get_heads() == ["pg_standalone_045_global_role"]
 
     def test_global_role_in_chain(self, chain_revisions):
-        assert "pg_standalone_042_global_role" in chain_revisions
+        assert "pg_standalone_045_global_role" in chain_revisions
 
-    def test_parent_web_vital_in_chain(self, chain_revisions):
-        assert "pg_standalone_041_web_vital" in chain_revisions
+    def test_production_chain_042_to_044_in_chain(self, chain_revisions):
+        # 生产已应用的 042–044 必须在图内，否则与生产 alembic_version 冲突
+        for rev in (
+            "pg_standalone_041_web_vital",
+            "pg_standalone_042_rename_pattern_room_permission",
+            "pg_standalone_043_seed_missing_permissions",
+            "pg_standalone_044_seed_beile_export_print",
+        ):
+            assert rev in chain_revisions, f"迁移链缺失 {rev}"

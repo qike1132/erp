@@ -26,14 +26,18 @@
 **事务边界**：本迁移不自行开事务——由 Alembic 的 env（单事务）包裹，任一步失败
 整体回滚，业务零影响。
 
-Revision ID: pg_standalone_042_global_role
-Revises: pg_standalone_041_web_vital  (已复核为 pg_standalone 系列 head)
+**链位置**：本迁移须接在已投放生产的 042–044 系列（重命名权限 / 补齐缺漏权限 /
+北乐导出打印权限）之后，父节点为 044，确保全图单一 head、线性无分叉，避免与生产
+已应用的迁移链在 041 处形成分叉。
+
+Revision ID: pg_standalone_045_global_role
+Revises: pg_standalone_044_seed_beile_export_print
 Create Date: 2026-09-17
 """
 from alembic import op
 
-revision = 'pg_standalone_042_global_role'
-down_revision = 'pg_standalone_041_web_vital'
+revision = 'pg_standalone_045_global_role'
+down_revision = 'pg_standalone_044_seed_beile_export_print'
 branch_labels = None
 depends_on = None
 
