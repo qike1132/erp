@@ -1,3 +1,4 @@
+%% 双份存储：本文件与《02-架构设计与任务分解.md》§4 的 4 个内嵌时序图必须逐字一致；改一处须同步另一处。
 %% ========== ① 打开 BOM 弹窗（加载全局角色） ==========
 sequenceDiagram
     participant U as 用户
@@ -49,7 +50,7 @@ sequenceDiagram
             RR->>DB: 建 product_role(product_id, global_role_id)
             RR->>RR: temp_role_map[role_key]=product_role.id
         else 带 id（既有关联行）
-            RR->>DB: 校验归属；role_name 变化→改名全局角色+同步镜像
+            RR->>DB: 校验归属（陈旧 id → ValueError → HTTP 400「角色 &lt;id&gt; 不属于该产品」）；role_name 变化→改名全局角色+同步镜像
         end
     end
     RR-->>S: (role_ids, temp_role_map, logs)
@@ -90,7 +91,7 @@ sequenceDiagram
     participant O as 运维(本机)
     participant BK as pg_dump 备份
     participant RP as scripts/migrate_roles_report.py (只读)
-    participant AL as alembic upgrade (042)
+    participant AL as alembic upgrade (045)
     participant DB as PostgreSQL
     participant VC as --verify / downgrade
 
@@ -99,7 +100,7 @@ sequenceDiagram
     RP->>DB: SELECT count(*) 按分类基线 + 重复组识别
     DB-->>RP: 基线/重复组
     RP-->>O: 报告(人工确认) ← Q-04
-    O->>AL: alembic upgrade 042（单事务）
+    O->>AL: alembic upgrade 045（单事务）
     AL->>DB: CREATE role / INDEX / ADD COLUMN / 回填 / 归并 / 加约束
     alt 任一步失败
         DB-->>AL: 异常
