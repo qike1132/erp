@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from fastapi_app.shared_models import Base
@@ -33,10 +33,12 @@ class Role(Base):
     角色从「产品私有」升级为「全局字典」：一个角色记录可被多个产品通过
     ``ProductRole.global_role_id`` 关联复用。
 
-    唯一性说明：**不在 ORM 层声明唯一约束**，改由迁移
-    ``pg_standalone_045_global_role`` 建立函数唯一索引
-    ``uq_role_name_lower ON role (lower(name))`` 实现「trim 后存储 + 大小写不敏感唯一」，
-    免引入 ``citext`` 扩展。应用层（``role_service``）另有 ``lower(trim(name))`` 预校验。
+    唯一性说明：**大小写不敏感唯一由 ORM 与迁移共同表达**——两者都建立同名函数唯一索引
+    ``uq_role_name_lower ON role (lower(name))``，实现「trim 后存储 + 大小写不敏感唯一」。
+    在 ORM 层声明该索引（``text('lower(name)')``）会让 ``Base.metadata.create_all`` 建出的
+    测试库与生产 DDL 一致，避免「迁移表达了、ORM 没表达 ⇒ 测试静默失守」。仍然**不使用**
+    ``citext`` 扩展。应用层（``role_service``）另有 ``lower(trim(name))`` 预校验，
+    数据库索引作为并发写入的最终兜底。
     """
     __tablename__ = 'role'
 
@@ -44,6 +46,13 @@ class Role(Base):
     name: Mapped[str] = mapped_column(String(100), nullable=False, comment='全局角色名（trim 后存储，保留用户输入大小写）')
     create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), comment='创建时间')
     update_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), comment='更新时间')
+
+    # 函数唯一索引：与迁移 045 的 DDL 逐字同名同义（uq_role_name_lower）。
+    # 必须用 text('lower(name)')（列表达式）——类体内 name 是 MappedColumn，
+    # 用 func.lower(name) 会渲染成绑定参数，得不到真正的 (lower(name)) 函数索引。
+    __table_args__ = (
+        Index('uq_role_name_lower', text('lower(name)'), unique=True),
+    )
 
     def to_dict(self):
         return {

@@ -1,30 +1,32 @@
-"""ProductRole.global_role_id 约束回归测试（真实 ORM + 真实 create_all）
+"""ProductRole.global_role_id 约束 + Role.name 函数唯一索引 回归测试（真实 ORM + 真实 create_all）
 
 背景
 ----
-``pg_standalone_045_global_role.py`` 迁移给 ``product_role.global_role_id`` 加了：
+``pg_standalone_045_global_role.py`` 迁移给 ``role`` / ``product_role`` 加了：
 
-1. ``NOT NULL``（回填后 SET NOT NULL）；
-2. 外键 ``ON DELETE RESTRICT``（外键指向全局角色字典 ``role.id``）；
-3. 唯一约束 ``uq_product_role_product_global(product_id, global_role_id)``。
+1. ``role`` 表函数唯一索引 ``uq_role_name_lower ON role (lower(name))``（大小写不敏感唯一）；
+2. ``product_role.global_role_id`` 的 ``NOT NULL``（回填后 SET NOT NULL）；
+3. 外键 ``ON DELETE RESTRICT``（外键指向全局角色字典 ``role.id``）；
+4. 唯一约束 ``uq_product_role_product_global(product_id, global_role_id)``。
 
-但若 ORM（``shared_models/product_material.py``）把它声明为可空
-（``Mapped[int | None]``），测试库走 ``Base.metadata.create_all`` 建出的
-``global_role_id`` 就是**可空**的，于是「违约代码」在 CI 里静默通过、到生产
-才炸。本用例在真实 SQLAlchemy session + 真实 ``create_all`` 上断言四条约束
-真实生效，从而证伪上述「ORM 与迁移不一致」回归。
+但若 ORM（``shared_models/product_material.py``）未同步声明这些约束，测试库走
+``Base.metadata.create_all`` 建出的结构就与生产 DDL 不一致，于是「违约代码」在 CI 里
+静默通过、到生产才炸。本用例在真实 SQLAlchemy session + 真实 ``create_all`` 上断言这些
+约束真实生效，从而证伪「ORM 与迁移不一致」回归。
 
 fail-before / pass-after
 ------------------------
-``test_global_role_id_not_null`` 是 fail-before 用例：ORM 列可空时插入成功
-（断言 IntegrityError 失败）；ORM 列改为 NOT NULL 后才真正抛 IntegrityError。
-其余三条分别锁定「悬空外键 / 同产品重复全局角色 / 被引用角色禁止删除」。
+- ``test_global_role_id_not_null``：ORM 列可空时插入成功（断言失败）；改为 NOT NULL 后通过。
+- ``test_role_name_case_insensitive_unique``：ORM 未声明 ``uq_role_name_lower`` 时，仅大小写
+  不同的第二次插入成功（断言失败）；补上该函数唯一索引后真正抛 IntegrityError。
+- ``test_role_name_lower_unique_index_exists``：结构断言，直接证明测试库 DDL 里已有该索引。
+其余两条分别锁定「悬空外键 / 同产品重复全局角色 / 被引用角色禁止删除」。
 
 仅使用内存 SQLite，不触碰生产数据。
 """
 import pytest
 import pytest_asyncio
-from sqlalchemy import event
+from sqlalchemy import event, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
@@ -42,8 +44,8 @@ _TABLES = [
 
 
 @pytest_asyncio.fixture
-async def fk_session():
-    """真实异步 session（内存 SQLite，StaticPool 保证同一连接同一库）。
+async def fk_engine():
+    """真实内存 SQLite 引擎（StaticPool 保证同一连接同一库）。
 
     显式开启 ``PRAGMA foreign_keys=ON``，否则 SQLite 默认**不强制**外键，
     悬空 ``global_role_id`` / ``ON DELETE RESTRICT`` 两条断言会假绿。
@@ -62,10 +64,16 @@ async def fk_session():
 
     async with engine.begin() as conn:
         await conn.run_sync(lambda c: Base.metadata.create_all(c, tables=_TABLES))
-    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    yield engine
+    await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def fk_session(fk_engine):
+    """真实异步 session（复用 fk_engine 建好的同一内存库）。"""
+    session_factory = async_sessionmaker(fk_engine, expire_on_commit=False)
     async with session_factory() as session:
         yield session
-    await engine.dispose()
 
 
 async def _seed_product(db) -> None:
@@ -131,6 +139,45 @@ async def test_delete_referenced_role_restricted(fk_session):
     await db.flush()
 
     await db.delete(role)
+    with pytest.raises(IntegrityError):
+        await db.flush()
+    await db.rollback()
+
+
+async def test_role_name_lower_unique_index_exists(fk_engine):
+    """结构断言：create_all 建出的测试库上存在 uq_role_name_lower 唯一索引。
+
+    注意：SQLite 的 ``inspect(...).get_indexes('role')`` 会**跳过表达式索引**
+    （``Skipped unsupported reflection of expression-based index uq_role_name_lower``），
+    故这里直接查 ``sqlite_master``——能看到真实索引 DDL 与 unique 标记。
+    """
+    async with fk_engine.connect() as conn:
+        rows = (await conn.execute(text(
+            "SELECT name, sql FROM sqlite_master WHERE type='index' AND tbl_name='role'"
+        ))).all()
+
+    index_sql = {row[0]: (row[1] or '') for row in rows}
+    assert 'uq_role_name_lower' in index_sql, f'role 表缺少 uq_role_name_lower，实得 {sorted(index_sql)}'
+    ddl = index_sql['uq_role_name_lower']
+    assert 'UNIQUE' in ddl.upper(), f'索引非唯一：{ddl}'
+    assert 'lower(name)' in ddl, f'索引表达式非 lower(name)：{ddl}'
+
+
+async def test_role_name_case_insensitive_unique(fk_session):
+    """行为断言（fail-before / pass-after）：仅大小写不同的角色名必须被拒绝。
+
+    ORM 未声明该函数唯一索引（修复前）→ 测试库无该约束 → 第二次插入成功，
+    本断言失败；ORM 补上 ``uq_role_name_lower(text('lower(name)'))``（修复后）
+    → 第二次插入抛 IntegrityError。
+
+    用 ASCII 字母 ``X``/``x`` 是因为 SQLite 内建 ``lower()`` 仅对 ASCII 生效，
+    故 ``lower('测试角色X') == lower('测试角色x')``，同键冲突确定可复现。
+    """
+    db = fk_session
+    db.add(Role(name='测试角色X'))
+    await db.flush()
+
+    db.add(Role(name='测试角色x'))
     with pytest.raises(IntegrityError):
         await db.flush()
     await db.rollback()
