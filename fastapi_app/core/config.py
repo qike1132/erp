@@ -1,3 +1,4 @@
+import logging
 import os
 from urllib.parse import quote_plus
 
@@ -8,6 +9,14 @@ from dotenv import load_dotenv
 load_dotenv(override=False)
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger(__name__)
+
+# 「单元素错配」告警的进程内一次性闸门。
+# _is_production_env() 会被 Settings.is_production 属性按请求调用
+# （core/middleware.py 的 CSRF / CSP 中间件），若无该闸门，
+# 在错配环境下每个 HTTP 请求都会刷一条 WARNING，造成日志洪泛。
+_single_element_env_warned = False
 
 
 def _build_database_uri() -> str:
@@ -38,8 +47,23 @@ def _is_production_env() -> bool:
     容错：取第一个空白分隔的 token 比较。历史安装脚本曾把 NSSM AppEnvironmentExtra
     写成单个字符串（如 APP_ENV="production FASTAPI_DEBUG=false PYTHONPATH=..."），
     若整串比较将永远判不成 production，导致文档端点/安全闸门意外失效。
+
+    注意：该容错只救回 APP_ENV 一个变量，同一串里的其余变量
+    （FASTAPI_DEBUG / PYTHONPATH / PYTHONUTF8 / PYTHONUNBUFFERED / UVICORN_WORKERS）
+    实际都**没有**生效。因此检测到含空白时打一条显式告警，把「静默错配」变成「可见」。
+    待 NSSM AppEnvironmentExtra 改为「一变量一元素」后，可移除该容错改为严格比较。
     """
+    global _single_element_env_warned
     raw = os.getenv("APP_ENV", "").strip().lower()
+    if raw and len(raw.split()) > 1 and not _single_element_env_warned:
+        _single_element_env_warned = True
+        logger.warning(
+            "APP_ENV 含空白分隔（值=%r）：疑似 NSSM AppEnvironmentExtra 被写成"
+            "单个 REG_MULTI_SZ 元素，此时 FASTAPI_DEBUG/PYTHONPATH/PYTHONUTF8/"
+            "PYTHONUNBUFFERED/UVICORN_WORKERS 均不会生效。"
+            "修复方式见 deliverables/audit-2026-09-17/ 或运行脚本 fix_nssm_appenv.ps1。",
+            raw,
+        )
     return bool(raw) and raw.split()[0] in ("prod", "production")
 
 
