@@ -171,13 +171,16 @@ def register_health_routes(app: FastAPI) -> None:
 
         @app.get("/metrics", tags=["监控"])
         async def metrics(request: Request):
-            # 生产环境要求 Bearer Token 或内网 IP 访问
+            # 生产环境要求 Bearer Token（fail-closed：未配置 token 即不暴露）
+            from starlette.responses import JSONResponse
             from fastapi_app.core.config import settings as _settings
             if _settings.is_production:
                 auth = request.headers.get('authorization', '')
                 metrics_token = os.getenv('METRICS_BEARER_TOKEN', '')
-                if metrics_token and not auth.startswith(f'Bearer {metrics_token}'):
-                    from starlette.responses import JSONResponse
+                if not metrics_token:
+                    # fail-closed：历史 fail-open 实测无鉴权 200，指标面直接暴露
+                    return JSONResponse(status_code=503, content={'detail': '监控端点未启用（未配置 METRICS_BEARER_TOKEN）'})
+                if not auth.startswith(f'Bearer {metrics_token}'):
                     return JSONResponse(status_code=401, content={'detail': '未授权访问'})
             return Response(content=get_metrics(), media_type=get_content_type())
     except (ImportError, AttributeError):

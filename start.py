@@ -63,7 +63,8 @@ def start_backend(args: argparse.Namespace):
 
     import uvicorn
 
-    host = os.getenv("API_HOST", "0.0.0.0")
+    # 默认仅回环（本机 nginx 反代）；确需局域网直连时显式设 API_HOST=0.0.0.0
+    host = os.getenv("API_HOST", "127.0.0.1")
     reload_flag = args.dev
 
     print(f"[ERP] FastAPI 启动: http://{host}:{args.api_port}")

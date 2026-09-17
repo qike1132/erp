@@ -5,11 +5,11 @@ import re
 class PasswordValidator:
     """密码复杂度验证器"""
 
-    MIN_LENGTH = 6
+    MIN_LENGTH = 8
     MAX_LENGTH = 128
     REQUIRE_UPPERCASE = False
-    REQUIRE_LOWERCASE = False
-    REQUIRE_DIGIT = False
+    REQUIRE_LOWERCASE = True
+    REQUIRE_DIGIT = True
     REQUIRE_SPECIAL = False
 
     # 匹配常见特殊字符

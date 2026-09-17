@@ -18,7 +18,7 @@ def kill_port_process(port):
                 parts = line.strip().split()
                 pid = parts[-1]
                 print(f"发现进程占用端口 {port}, PID: {pid}")
-                subprocess.run(['taskkill', '/F', '/PID', pid], check=True)
+                subprocess.run(['taskkill', '/F', '/T', '/PID', pid], check=True)  # /T: 连同子进程树（worker/supervisor），避免残留进程继续占用端口
                 print(f"已终止 PID {pid}")
                 time.sleep(2)
                 return True

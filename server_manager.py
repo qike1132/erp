@@ -1808,7 +1808,9 @@ class ServerManagerApp:
             env.update({'PYTHONUNBUFFERED': '1', 'PYTHONIOENCODING': 'utf-8', 'PYTHONUTF8': '1', 'PYTHONPATH': str(_PROJECT_DIR)})
             # argv[0] 字面量 'python' + executable= 校验过的解释器绝对路径
             self._process = subprocess.Popen(
-                ['python', '-u', '-m', 'uvicorn', 'fastapi_app.main:app', '--host', '0.0.0.0',
+                # dev 后端仅绑回环（本机即生产机，0.0.0.0 会让局域网绕过 nginx 直连）；
+                # 确需局域网调试时改回 '0.0.0.0' 并重新打包
+                ['python', '-u', '-m', 'uvicorn', 'fastapi_app.main:app', '--host', '127.0.0.1',
                  '--port', str(_PORTS.api), '--log-level', 'info', '--reload', '--reload-dir', 'fastapi_app'],
                 executable=_PYTHON_EXE, cwd=str(_PROJECT_DIR), env=env, stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT, creationflags=_NO_WINDOW if _IS_WINDOWS else 0, text=False)

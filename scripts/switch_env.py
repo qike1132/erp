@@ -23,8 +23,13 @@ def switch_environment(env_type):
         source_file = env_dev
         env_name = '开发环境'
     elif env_type == 'production':
-        source_file = env_prod
-        env_name = '生产环境'
+        # 生产切换已禁用：.env.production 是全 ${VAR} 占位模板（真实密钥由
+        # NSSM 服务环境变量注入），用它覆盖 .env 会让应用拿着字面占位符启动即崩。
+        # 生产模式的正确入口：ERP 服务器管理器 GUI 的「生产模式」（NSSM erp-prod）。
+        print("❌ 错误: 生产环境切换已禁用（本脚本仅用于开发环境）")
+        print("   原因: .env.production 为占位模板，覆盖 .env 会导致全站启动失败")
+        print("   正确方式: 使用 ERP 服务器管理器 GUI 切换到「生产模式」（NSSM 托管）")
+        return False
     else:
         print(f"❌ 错误: 不支持的环境类型 '{env_type}'")
         print("   支持的环境: development, production")

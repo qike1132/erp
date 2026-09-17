@@ -278,3 +278,7 @@ docs/tickets/artifacts/benchmark/*.json
 
 /tests/*.txt
 /tests/stress/results_*.csv
+
+# 上线前审核补齐（2026-09-17）：遗漏的临时/产物目录
+/dist-v533-sentinel/
+/.workbuddy-ai/

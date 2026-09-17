@@ -22,10 +22,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# 登录限流常量（内网宽松配置：大幅提高阈值，避免正常操作被拦截）
-LOGIN_BURST_LIMIT = 100        # 1 分钟内最大尝试次数
+# 登录限流常量（内网折中：足以拦截脚本暴力破解，又不误伤同 IP 多个人工用户）
+LOGIN_BURST_LIMIT = 30         # 1 分钟内最大尝试次数
 LOGIN_BURST_WINDOW = 60        # 突发窗口（秒）
-LOGIN_ATTEMPT_LIMIT = 300      # 5 分钟内最大尝试次数
+LOGIN_ATTEMPT_LIMIT = 100      # 5 分钟内最大尝试次数
 LOGIN_ATTEMPT_WINDOW = 300     # 持续窗口（秒）
 
 

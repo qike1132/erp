@@ -449,7 +449,9 @@ async def export_records(
         if up > 0:
             return up
         if r.product_id and r.product_id in price_fallback:
-            return price_fallback[r.product_id]
+            # price_fallback 值为 Decimal（_build_product_price_fallback），统一转 float
+            # 与上方 r.unit_price 分支对齐（本函数仅用于 Excel 导出展示，无精度风险）
+            return float(price_fallback[r.product_id])
         return 0.0
 
     wb = openpyxl.Workbook()

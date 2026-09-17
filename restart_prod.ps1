@@ -10,11 +10,26 @@
 
 param(
     [switch]$Fast,
-    [switch]$SkipBuild
+    [switch]$SkipBuild,
+    [switch]$Force
 )
 
 $ErrorActionPreference = "Stop"
 $Root = $PSScriptRoot
+
+# ------------------------------------------------------------
+# 护栏：生产后端由 NSSM erp-prod 托管时，禁止绕过它裸起 uvicorn
+# （历史事故：本脚本杀端口另起进程，与 NSSM 自动重启互抢 5002）。
+# 正确姿势：nssm restart erp-prod，或 ERP 服务器管理器 GUI。
+# 仅应急场景可用 -Force 走旧路径。
+# ------------------------------------------------------------
+$svc = Get-Service -Name "erp-prod" -ErrorAction SilentlyContinue
+if ($svc -and $svc.Status -eq "Running" -and -not $Force) {
+    Write-Host "ERROR: 检测到 NSSM 服务 erp-prod 正在运行，本脚本禁止绕过托管裸起后端。" -ForegroundColor Red
+    Write-Host "  正确方式:  nssm restart erp-prod" -ForegroundColor Yellow
+    Write-Host "  应急裸起:  .\restart_prod.ps1 -Force（自行承担与 NSSM 抢端口的风险）" -ForegroundColor DarkGray
+    exit 1
+}
 
 Write-Host "=== ERP 一键重启（构建前端 + 重启后端）===" -ForegroundColor Cyan
 
@@ -36,8 +51,10 @@ if (Test-Path $envFile) {
     Write-Host "WARNING: 未找到 .env，将使用默认端口/参数" -ForegroundColor Yellow
 }
 
-$ApiPort = [int]($env:API_PORT ?? "5002")
-$Workers = $env:UVICORN_WORKERS ?? "4"
+$ApiPort = 5002
+if ($env:API_PORT) { $ApiPort = [int]$env:API_PORT }
+$Workers = "4"
+if ($env:UVICORN_WORKERS) { $Workers = $env:UVICORN_WORKERS }
 
 # ------------------------------------------------------------
 # 2. 前端构建（产物输出到 frontend-vite/dist）
@@ -102,7 +119,7 @@ $logFile = Join-Path $logDir "backend.out.log"
 
 $uvicornArgs = @(
     "-m", "uvicorn", "fastapi_app.main:app",
-    "--host", "0.0.0.0",
+    "--host", "127.0.0.1",
     "--port", "$ApiPort",
     "--workers", "$Workers",
     "--http", "httptools",

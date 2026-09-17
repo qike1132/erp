@@ -61,7 +61,13 @@ class RedisCacheManager:
                     max_connections=100
                 )
                 await self.redis_client.ping()
-                logger.info("Redis 异步连接成功: %s", redis_url)
+                # 日志脱敏：REDIS_URL 可能内嵌口令（redis://:pwd@host），不得明文入日志
+                from urllib.parse import urlsplit, urlunsplit
+                _parts = urlsplit(redis_url)
+                _safe_netloc = _parts.hostname or ''
+                if _parts.port:
+                    _safe_netloc += f':{_parts.port}'
+                logger.info("Redis 异步连接成功: %s", urlunsplit((_parts.scheme, _safe_netloc, _parts.path, '', '')))
             except (redis.ConnectionError, Exception) as e:
                 logger.warning("Redis 异步连接失败，将使用内存缓存: %s", e)
                 self.redis_client = None

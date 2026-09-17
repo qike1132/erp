@@ -9,7 +9,7 @@ import json
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Any
 
@@ -130,6 +130,26 @@ async def publish_with_retry(event: DomainEvent, max_retries: int = 1, delay: fl
         last_error,
         exc_info=True,
     )
+    # 最小死信：落盘 JSONL，防止 Redis/持久层持续故障时事件仅存在于滚动日志中被冲掉
+    try:
+        await asyncio.to_thread(_append_deadletter, event, last_error)
+    except Exception:  # defensive: 死信落盘失败不升级（已先有 ERROR 日志）
+        logger.debug('领域事件死信落盘失败（可忽略）', exc_info=True)
+
+
+def _append_deadletter(event: DomainEvent, error: Exception | None) -> None:
+    """把发布失败的事件追加到 logs/domain_events_deadletter.jsonl（供人工/脚本重放）。"""
+    from pathlib import Path as _Path
+    log_dir = _Path(__file__).resolve().parents[2] / 'logs'
+    log_dir.mkdir(exist_ok=True)
+    record = {
+        'ts': datetime.now(timezone.utc).isoformat(),
+        'event_type': event.event_type.value,
+        'payload': event.payload,
+        'error': str(error) if error else None,
+    }
+    with open(log_dir / 'domain_events_deadletter.jsonl', 'a', encoding='utf-8') as f:
+        f.write(json.dumps(record, ensure_ascii=False, default=str) + '\n')
 
 
 async def start_event_listener():

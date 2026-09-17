@@ -214,10 +214,9 @@ def _rotate_file_copytruncate(path: Path, max_bytes: int) -> bool:
 def _cmd_uvicorn(api_port: int, workers: int) -> list[str]:
     return [
         _PY, "-m", "uvicorn", "fastapi_app.main:app",
-        # 绑定 IPv4（回环/局域网/nginx 反代可达）。避免使用 "--host ::"：
-        # Windows 下会生成 IPv6-only socket，HTTP 探针与 nginx 反代的
-        # IPv4 127.0.0.1:5002 无法连接，导致 502 且健康门永不就绪。
-        "--host", "0.0.0.0",  # nosec B104
+        # 仅绑回环：生产拓扑为同机 nginx(3000) 反代 127.0.0.1:5002，
+        # 绑 0.0.0.0 会让局域网绕过 nginx/安全头直连后端（/metrics 等随之暴露）。
+        "--host", "127.0.0.1",
         "--port", str(api_port),
         "--workers", str(workers),
         "--http", "httptools",
@@ -521,8 +520,8 @@ class _FrontendNginx:
 
         Windows 下 `nginx -s stop` 只停最新 master，且杀 master 不会连带结束
         worker，会在重启循环中泄漏孤儿进程（worker 的父进程已消失仍存活），
-        导致端口与连接混乱、进程数爆炸。因此先优雅停 master，再按镜像名
-        强制结束所有 nginx.exe（含孤儿 worker），确保干净重启。
+        导致端口与连接混乱、进程数爆炸。因此先优雅停 master，再【定向】强制
+        结束本项目 nginx.exe（含孤儿 worker），确保干净重启。
         """
         subprocess.run(  # nosec B603
             [str(self.nginx), "-s", "stop"],
@@ -530,14 +529,62 @@ class _FrontendNginx:
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15,
         )
         if os.name == "nt":
-            subprocess.run(  # nosec B603 B607
-                ["taskkill", "/F", "/T", "/IM", "nginx.exe"],
-                creationflags=_CREATE_NO_WINDOW,
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15,
-            )
+            self._taskkill_project_nginx()
         # 进程已清理，同步释放句柄与句柄引用，避免重启路径中句柄泄漏 / 取到死进程
         self.proc = None
         self._close_spawn_log()
+
+    def _taskkill_project_nginx(self) -> None:
+        """定向结束本项目 nginx（替代历史 `taskkill /IM nginx.exe` 的全机误杀）。
+
+        历史缺陷：`taskkill /F /T /IM nginx.exe` 按镜像名匹配，会杀掉全机
+        所有 nginx（含与本项目无关的站点）。现改为两级定向：
+        1) 读取本项目 nginx 的 pid 文件，按 PID 杀整棵进程树（master + worker）；
+        2) 枚举 nginx.exe 进程，仅当可执行文件路径等于本项目 nginx（self.nginx）
+           才按 PID 补杀——覆盖父进程已消失、pid 文件不可得的孤儿 worker；
+        其他路径的 nginx（非本项目部署）一律不动。
+        """
+        killed: set[int] = set()
+
+        def _kill_tree(pid: int) -> None:
+            if pid in killed:
+                return
+            subprocess.run(  # nosec B603 B607
+                ["taskkill", "/F", "/T", "/PID", str(pid)],
+                creationflags=_CREATE_NO_WINDOW,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15,
+            )
+            killed.add(pid)
+
+        # 1) pid 文件定向（候选：项目 logs/ 与 nginx 前缀 logs/）
+        nginx_dir = os.path.dirname(str(self.nginx))
+        candidates = [LOGS_DIR / "nginx.pid", Path(nginx_dir).parent / "logs" / "nginx.pid"]
+        for pid_file in candidates:
+            try:
+                if pid_file.is_file():
+                    master_pid = int(pid_file.read_text(encoding="ascii", errors="replace").strip())
+                    if master_pid > 0:
+                        _kill_tree(master_pid)
+                        break
+            except (OSError, ValueError):
+                continue  # pid 文件缺失/损坏时落入第 2 级兜底
+
+        # 2) 路径精确匹配的孤儿 worker 补杀（psutil 为既有依赖）
+        try:
+            import psutil
+        except ImportError:
+            print("[prod_runner] psutil 不可用，跳过孤儿 nginx 扫描")
+            return
+        own_exe = os.path.normcase(os.path.normpath(str(self.nginx)))
+        for proc in psutil.process_iter(["pid", "name", "exe"]):
+            try:
+                if (proc.info["name"] or "").lower() != "nginx.exe":
+                    continue
+                exe = os.path.normcase(os.path.normpath(proc.info["exe"] or ""))
+                if exe == own_exe:
+                    _kill_tree(proc.info["pid"])
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                continue
 
     def _ensure_started(self) -> None:
         # 启动前先彻底清理历史遗留的 nginx 进程（含孤儿 worker）。

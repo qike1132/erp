@@ -21,7 +21,7 @@ from fastapi_app.services import purchase_center_service as svc
 router = APIRouter()
 
 @router.get('/modification-logs', response_model=ModificationLogResponse)
-async def api_get_modification_logs(target_type: str=Query(''), target_id: int=Query(0), page: int=Query(1, ge=1), per_page: int=Query(20, ge=1), db: AsyncSession=Depends(get_read_db), _user=Depends(require_permission('product_manage'))):
+async def api_get_modification_logs(target_type: str=Query(''), target_id: int=Query(0), page: int=Query(1, ge=1), per_page: int=Query(20, ge=1, le=200), db: AsyncSession=Depends(get_read_db), _user=Depends(require_permission('product_manage'))):
     result = await svc.get_modification_logs(db, target_type=target_type, target_id=target_id, page=page, per_page=per_page)
     return success_response(**{**result})
 
@@ -53,6 +53,6 @@ async def api_use_saved_query(query_id: int, db: AsyncSession=Depends(get_db), _
     return success_response(query=result)
 
 @router.get('/status-logs', response_model=StatusLogResponse)
-async def api_get_status_logs(target_type: str=Query(''), target_id: int=Query(0), order_no: str=Query(''), page: int=Query(1, ge=1), per_page: int=Query(20, ge=1), db: AsyncSession=Depends(get_read_db), _user=Depends(require_permission('product_manage'))):
+async def api_get_status_logs(target_type: str=Query(''), target_id: int=Query(0), order_no: str=Query(''), page: int=Query(1, ge=1), per_page: int=Query(20, ge=1, le=200), db: AsyncSession=Depends(get_read_db), _user=Depends(require_permission('product_manage'))):
     result = await svc.get_status_logs(db, target_type=target_type, target_id=target_id, order_no=order_no, page=page, per_page=per_page)
     return success_response(**{**result})
