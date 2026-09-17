@@ -17,12 +17,20 @@
 
     <div v-if="!collapsed" class="mc-category-table">
       <table class="mc-table">
+        <colgroup>
+          <col class="mc-col-supplier" />
+          <col class="mc-col-name" />
+          <col class="mc-col-spec" />
+          <col class="mc-col-qty" />
+          <col class="mc-col-unit" />
+        </colgroup>
         <thead>
           <tr>
             <th>供应商</th>
             <th>物料名称</th>
-            <th>规格</th>
+            <th>规格/色号</th>
             <th class="is-num">总采购量</th>
+            <th>单位</th>
           </tr>
         </thead>
         <tbody>
@@ -30,7 +38,8 @@
             <td>{{ row.supplier_name || '-' }}</td>
             <td>{{ row.material_name }}</td>
             <td>{{ row.specification || '-' }}</td>
-            <td class="is-num">{{ formatQuantity(categoryKey, row) }}</td>
+            <td class="is-num">{{ quantityOf(categoryKey, row) }}</td>
+            <td>{{ unitOf(categoryKey, row) }}</td>
           </tr>
         </tbody>
       </table>
@@ -62,21 +71,53 @@ const emit = defineEmits<{
   toggle: []
 }>()
 
-// 填充类总采购量按克自动换算为 kg：克/g → kg，其他单位原样显示
-function formatQuantity(catKey: string, row: CalcRowVM): string {
-  if (catKey !== 'filling') return `${row.total_quantity} ${row.unit}`
+// 填充类总采购量按克自动换算为 kg：克/g → kg，其他单位原样显示。
+// 「数量」与「单位」各自成列（单位独立成列后，换算后的单位必须跟着变，不能各说各话）。
+
+/** 填充类且单位为克/g → 换算系数 1000（其余一律 1）。 */
+function gramScale(catKey: string, row: CalcRowVM): number {
+  if (catKey !== 'filling') return 1
   const unit = (row.unit || '').trim()
-  if (unit === '克' || unit.toLowerCase() === 'g') {
-    const kg = row.total_quantity / 1000
-    // 最多保留 3 位小数，去掉尾随零
-    const formatted = `${parseFloat(kg.toFixed(3))}`
-    return `${formatted} kg`
-  }
-  return `${row.total_quantity} ${row.unit}`
+  return unit === '克' || unit.toLowerCase() === 'g' ? 1000 : 1
+}
+
+/** 总采购量数值列：换算后最多保留 3 位小数，去掉尾随零。 */
+function quantityOf(catKey: string, row: CalcRowVM): string {
+  const scale = gramScale(catKey, row)
+  if (scale === 1) return `${row.total_quantity}`
+  return `${parseFloat((row.total_quantity / scale).toFixed(3))}`
+}
+
+/** 单位列：克 → kg；其余原样（空单位回落 '-'，与其它文本列一致）。 */
+function unitOf(catKey: string, row: CalcRowVM): string {
+  if (gramScale(catKey, row) === 1000) return 'kg'
+  return (row.unit || '').trim() || '-'
 }
 </script>
 
 <style scoped>
+/* 列宽配比（colgroup 上的百分比）。
+   背景：auto 布局按「内容宽比例」分配多余空间，实测 1600px 视口下空白占全表 47.4%，
+   其中「物料名称」一列独占 63.8px（是其文字宽的 1.4 倍），而「总采购量」表头
+   本身就有 60px 文字、只分到 80px 列宽，视觉上数字被挤到贴边、名称后却空一大截。
+   这里按「表头文字宽 + 典型内容宽」给出目标配比，仍保留 auto 布局：
+   百分比是**目标值**而非硬约束，窄列下浏览器仍会保证内容不溢出（不换行、不截断）。 */
+.mc-col-supplier {
+  width: 20%;
+}
+.mc-col-name {
+  width: 24%;
+}
+.mc-col-spec {
+  width: 25%;
+}
+.mc-col-qty {
+  width: 19%;
+}
+.mc-col-unit {
+  width: 12%;
+}
+
 /* 区块之间 1px 分隔线，末尾不加 */
 .mc-category-block {
   border-bottom: var(--bw) solid var(--color-border-light);
