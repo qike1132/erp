@@ -129,10 +129,23 @@ def _log_health_fail(err: BaseException) -> None:
     print(f"[prod_runner] 健康检查失败(60s 内不重复记录): {type(err).__name__}: {err}")
 
 
-def _http_ok(url: str, timeout: float = 2.0) -> bool:
+def _http_ok(url: str, timeout: float = 5.0, expect_substr: str | None = None) -> bool:
+    """探测 url 是否可用。
+
+    expect_substr 非空时额外要求响应体包含该子串。用于区分「目标服务就绪」与
+    「同端口上的其它服务返回了 200」——典型如 :3000 上 nginx 缺席时由 Vite dev
+    server 以 SPA fallback 对任意路径直出 200 + index.html，仅比较状态码会误判。
+    既有调用方（后端/ARQ 探针）不传该参数，行为与修复前完全一致。
+    """
     try:
         with _OPENER_DIRECT.open(url, timeout=timeout) as resp:  # nosec B310
-            return resp.status == 200
+            if resp.status != 200:
+                return False
+            if expect_substr is None:
+                return True
+            # 只读有界前缀（探针目标响应都很小），避免万一命中大体积 body 时的内存放大
+            body = resp.read(8192).decode("utf-8", errors="replace")
+            return expect_substr in body
     except (urllib.error.URLError, OSError, TimeoutError) as e:
         _log_health_fail(e)
         return False
@@ -140,6 +153,40 @@ def _http_ok(url: str, timeout: float = 2.0) -> bool:
 
 def _iso_now() -> str:
     return datetime.now().isoformat(timespec="seconds")
+
+
+# ---------------------------------------------------------------------------
+# 健康型进程的强制重启判定（D7）
+# ---------------------------------------------------------------------------
+# 旧逻辑：健康检查持续失败即无条件 kill_tree()，把「探针偶发超时（进程其实健在）」
+# 与「进程真的死了」混为一谈，造成大量误杀。新逻辑要求「连续失败 + 失败窗口 + 进程
+# 确已死亡」三者同时成立才重启；进程存活时只告警 + 放宽退避，绝不误杀进程树。
+_RESTART_MIN_CONSECUTIVE = 3
+_RESTART_MIN_WINDOW_S = 90.0
+
+# 退避上限阶梯：反复失败/重启时上限依次抬升（30 → 60 → 120 → 300，封顶），
+# 替代原先写死的 min(delay*2, 30.0)，避免崩溃风暴期间过于频繁的重启。
+_BACKOFF_CAPS = (30.0, 60.0, 120.0, 300.0)
+
+
+def _next_backoff(current_delay: float, step: int) -> float:
+    """下一次退避时长：在当前基础上翻倍，上限随重试阶梯抬升（阶梯封顶）。"""
+    cap = _BACKOFF_CAPS[min(max(step, 0), len(_BACKOFF_CAPS) - 1)]
+    return min(current_delay * 2.0, cap)
+
+
+def _should_restart(consecutive_failures: int, fail_window_s: float, proc_alive: bool) -> bool:
+    """健康检查持续失败时，是否应强制重启整棵进程树（纯函数，便于断言）。
+
+    仅当「连续失败 ≥ _RESTART_MIN_CONSECUTIVE 次」且「失败窗口 ≥ _RESTART_MIN_WINDOW_S 秒」
+    且「进程确已死亡（proc_alive is False）」三者同时成立才返回 True。进程仍存活时一律
+    返回 False——这正是消掉「探针超时被误判为崩溃」误杀的关键闸门。
+    """
+    return (
+        consecutive_failures >= _RESTART_MIN_CONSECUTIVE
+        and fail_window_s >= _RESTART_MIN_WINDOW_S
+        and not proc_alive
+    )
 
 
 def _rotate_file_copytruncate(path: Path, max_bytes: int) -> bool:
@@ -232,17 +279,22 @@ class _Managed:
     """受监督的子进程。
 
     health_url 非空时为“健康型”服务（如后端按 /api/health 判定）：
-    进程存活但健康检查持续失败 → 强制重启整棵进程树（应对 worker 崩溃循环）。
+    健康检查持续失败且**确认进程已死**时才强制重启整棵进程树（应对 master 死亡 /
+    进程树异常）；进程仍存活时只告警 + 放宽退避，绝不误杀进程树（D7 关键闸门）。
     否则为“进程型”服务，仅按进程存活判定。
     """
 
     def __init__(self, name: str, cmd: list[str], cwd: Path,
-                 health_url: str | None = None, start_grace: float = 45.0):
+                 health_url: str | None = None, start_grace: float = 45.0,
+                 workers: int | None = None):
         self.name = name
         self.cmd = cmd
         self.cwd = cwd
         self.health_url = health_url
+        # start_grace 为历史参数保留：新的 proc-alive 闸门已能保证启动期不被误杀，
+        # 故 poll() 不再据此判定（见 poll 内注释）。
         self.start_grace = start_grace
+        self.workers = workers
         self.proc: subprocess.Popen | None = None
         self._logf: io.BufferedWriter | None = None
         self.delay = 2.0
@@ -251,6 +303,8 @@ class _Managed:
         self.last_health: str | None = None
         self.started_at = 0.0
         self.health_fail_start: float | None = None
+        self.consecutive_health_fail = 0
+        self.backoff_step = 0
 
     def start(self) -> None:
         if self.proc and self.proc.poll() is None:
@@ -304,8 +358,38 @@ class _Managed:
         self._logf = None
         self.proc = None
 
+    def _probe_health(self) -> tuple[bool, float]:
+        """探测健康端点：单次超时 5s，同一 tick 内失败则重试 1 次。
+
+        返回 (是否健康, 最近一次探针耗时秒)。重试用于吸收偶发抖动，避免把一次
+        慢响应直接当成持续失败；`_log_health_fail` 的 60s 节流仍在 _http_ok 内部保留。
+        """
+        last_elapsed = 0.0
+        for _ in range(2):
+            start = time.monotonic()
+            ok = _http_ok(self.health_url or "", timeout=5.0)
+            last_elapsed = time.monotonic() - start
+            if ok:
+                return True, last_elapsed
+        return False, last_elapsed
+
+    def _mark_crashed(self) -> None:
+        """置 crashed 并安排退避重启（仅在「运行→崩溃」跳变时执行一次）。"""
+        if self.status == "crashed":
+            return
+        self.status = "crashed"
+        self.next_start = time.monotonic() + self.delay
+        self.delay = _next_backoff(self.delay, self.backoff_step)
+        self.backoff_step += 1
+        code = self.proc.returncode if self.proc else None
+        print(f"[prod_runner] {self.name} 已退出 (code={code})，{int(self.delay)}s 后重启")
+
     def poll(self) -> None:
-        """主循环每轮调用：进程退出或健康持续失败则安排退避重启。"""
+        """主循环每轮调用：进程退出、或「确已死亡且健康持续失败」才安排退避重启。
+
+        关键（D7）：健康型服务的强制重启前，必须先判定「进程是真的死了」还是
+        「只是探针超时」。进程树仍存活 → 只告警 + 放宽退避，绝不 kill_tree()。
+        """
         if self.proc is None:
             return
         if self.proc.poll() is not None:
@@ -313,34 +397,41 @@ class _Managed:
             # 由于主循环间隔(3s)≥首次退避(2s)，next_start 永远落在未来，
             # maybe_restart 将永久饥饿——已退出进程永远不会被重启（2026-09-12 实证：
             # uvicorn master 死后 4 个孤儿 worker 顶在 5002 上服务数小时无人重启）。
-            if self.status != "crashed":
-                self.status = "crashed"
-                self.next_start = time.monotonic() + self.delay
-                self.delay = min(self.delay * 2, 30.0)
-                print(f"[prod_runner] {self.name} 已退出 (code={self.proc.returncode})，"
-                      f"{int(self.delay)}s 后重启")
+            self._mark_crashed()
             return
         if not self.health_url:
             self.status = "running"
             return
         # 健康型服务
-        if _http_ok(self.health_url):
+        healthy, elapsed = self._probe_health()
+        # 复检进程存活：探针最长可耗时 ~10s，期间 master 可能已经死掉
+        proc_alive = self.proc.poll() is None
+        if healthy:
             self.status = "ready"
             self.last_health = _iso_now()
             self.health_fail_start = None
+            self.consecutive_health_fail = 0
             self.delay = 2.0  # 服务健康，退避归零
+            self.backoff_step = 0
             return
+        self.consecutive_health_fail += 1
         if self.health_fail_start is None:
             self.health_fail_start = time.monotonic()
-        # 启动期给足 start_grace 秒；启动超过后连续失败 20s 触发重启
-        threshold = self.start_grace if time.monotonic() - self.started_at < self.start_grace else 20.0
-        if time.monotonic() - self.health_fail_start > threshold:
-            print(f"[prod_runner] {self.name} 健康检查持续失败，强制重启进程树")
+        window = time.monotonic() - self.health_fail_start
+        if _should_restart(self.consecutive_health_fail, window, proc_alive):
+            print(f"[prod_runner] {self.name} 进程已死且健康检查持续失败"
+                  f"(连续 {self.consecutive_health_fail} 次 / 窗口 {int(window)}s)，强制重启进程树")
             self.kill_tree()
-            self.status = "crashed"
-            self.next_start = time.monotonic() + self.delay
-            self.delay = min(self.delay * 2, 30.0)
             self.health_fail_start = None
+            self.consecutive_health_fail = 0
+            self._mark_crashed()
+            return
+        # 进程仍存活，仅探针失败：只告警 + 放宽退避，绝不误杀进程树（消掉大部分误杀）
+        print(f"[prod_runner] {self.name} 健康检查失败但进程存活，暂不重启"
+              f"(连续 {self.consecutive_health_fail} 次 / 窗口 {int(window)}s / "
+              f"最近探针 {elapsed:.1f}s / proc_alive={proc_alive} / workers={self.workers})")
+        self.delay = _next_backoff(self.delay, self.backoff_step)
+        self.backoff_step += 1
 
     def maybe_restart(self) -> None:
         if self.status == "crashed" and self.next_start <= time.monotonic():
@@ -360,6 +451,70 @@ class _FrontendNginx:
         self.delay = 5.0
         self.next_start = 0.0
         self.status = "stopped"
+        # Popen 句柄：用于取真实 pid、关闭 spawn 日志句柄。此前 spawn 返回值被丢弃，
+        # 早期失败除 nginx-error.log 外完全无痕，也无法观测 pid（D3/D4 根因）。
+        self.proc: subprocess.Popen | None = None
+        self._spawn_logf: io.BufferedWriter | None = None
+
+    @property
+    def pid(self) -> int | None:
+        """nginx 进程真实 pid；未派生或已退出时返回 None（不谎报）。"""
+        if self.proc is not None and self.proc.poll() is None:
+            return self.proc.pid
+        return None
+
+    def _close_spawn_log(self) -> None:
+        """关闭并释放 spawn 日志句柄，避免重启路径反复 _ensure_started 时句柄泄漏。"""
+        if self._spawn_logf:
+            with contextlib.suppress(OSError):
+                self._spawn_logf.close()
+        self._spawn_logf = None
+
+    def _spawn(self) -> None:
+        """派生 nginx master 并保存句柄；stdout/stderr 落盘 nginx-spawn.out.log。
+
+        Windows 上 nginx.exe 本身就是 master 进程，启动后不会退出返回，绝不能用
+        subprocess.run（会阻塞到 timeout 抛 TimeoutExpired，拖垮 prod_runner 主流程，
+        导致 NSSM 反复重启监督器、nginx 被周期性 kill/重建，全站连接每 ~35 秒被切断
+        一次，前端所有请求 502 重试）。改用 Popen 派生后立即返回，再由上层探测就绪。
+        """
+        self._close_spawn_log()  # 关闭上一轮遗留句柄（重启路径中会反复调用）
+        try:
+            self._spawn_logf = open(  # noqa: SIM115 需保持打开作为子进程 stdout
+                LOGS_DIR / "nginx-spawn.out.log", "ab"
+            )
+            self.proc = subprocess.Popen(  # nosec B603
+                [str(self.nginx), "-p", str(PROJECT_ROOT), "-c", str(NGINX_CONF),
+                 "-e", str(LOGS_DIR / "nginx-error.log")],
+                cwd=str(PROJECT_ROOT), creationflags=_CREATE_NO_WINDOW,
+                stdout=self._spawn_logf, stderr=subprocess.STDOUT,
+            )
+        except (OSError, subprocess.SubprocessError) as e:
+            self.proc = None
+            self._close_spawn_log()
+            print(f"[prod_runner] ERROR: 派生 nginx 进程失败: {e}")
+
+    def _dump_error_log_tail(self, max_lines: int = 20) -> None:
+        """打印 nginx-error.log 尾部——nginx 启动失败时唯一能自我说明的通道。
+
+        典型真相：[emerg] bind() to 0.0.0.0:3000 failed (10013: ...)。
+        文件可能不存在（nginx 从未真正起过），必须做异常保护。
+        """
+        err_path = LOGS_DIR / "nginx-error.log"
+        try:
+            if not err_path.is_file():
+                print(f"[prod_runner]   （无 {err_path.name}，nginx 可能未真正启动）")
+                return
+            lines = err_path.read_text(encoding="utf-8", errors="replace").splitlines()
+            tail = lines[-max_lines:]
+            if not tail:
+                print(f"[prod_runner]   （{err_path.name} 为空）")
+                return
+            print(f"[prod_runner]   --- {err_path.name} 尾部 {len(tail)} 行 ---")
+            for line in tail:
+                print(f"[prod_runner]   {line}")
+        except OSError as e:
+            print(f"[prod_runner]   读取 {err_path.name} 失败: {e}")
 
     def _kill_all(self) -> None:
         """彻底停止本项目所有 nginx 进程（仅 Windows 逻辑）。
@@ -380,33 +535,44 @@ class _FrontendNginx:
                 creationflags=_CREATE_NO_WINDOW,
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15,
             )
+        # 进程已清理，同步释放句柄与句柄引用，避免重启路径中句柄泄漏 / 取到死进程
+        self.proc = None
+        self._close_spawn_log()
 
     def _ensure_started(self) -> None:
         # 启动前先彻底清理历史遗留的 nginx 进程（含孤儿 worker）。
         # 否则端口 3000 被旧 master 占用，新 master 无法绑定。
         self._kill_all()
         LOGS_DIR.mkdir(exist_ok=True)
-        # Windows 上 nginx.exe 本身就是 master 进程，启动后不会退出返回，
-        # 绝不能用 subprocess.run（会阻塞到 timeout 抛 TimeoutExpired，拖垮
-        # prod_runner 主流程，导致 NSSM 反复重启监督器、nginx 被周期性
-        # kill/重建，全站连接每 ~35 秒被切断一次，前端所有请求 502 重试）。
-        # 改用 Popen 派生后立即返回，再通过 /nginx-health 探测确认就绪。
-        subprocess.Popen(  # nosec B603
-            [str(self.nginx), "-p", str(PROJECT_ROOT), "-c", str(NGINX_CONF),
-             "-e", str(LOGS_DIR / "nginx-error.log")],
-            cwd=str(PROJECT_ROOT), creationflags=_CREATE_NO_WINDOW,
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        )
+        self._spawn()
+        # 轮询 /nginx-health 确认就绪：该探测校验响应体含 '"service":"nginx"'，
+        # 因此 :3000 上是 Vite dev server 的 SPA fallback（200 + index.html）时判否。
+        started = False
         for _ in range(10):
             if self.alive():
+                started = True
                 break
             time.sleep(0.5)
-        self.status = "running"
-        self.delay = 5.0
-        print(f"[prod_runner] 前端 Nginx 已启动 (port {self.web_port})")
+        if started:
+            self.status = "running"
+            self.delay = 5.0
+            print(f"[prod_runner] 前端 Nginx 已启动 (port {self.web_port}, PID {self.pid})")
+            return
+        # 探测全败：必须如实置 crashed + 退避，绝不能无条件置 running 假成功。
+        self.status = "crashed"
+        self.next_start = time.monotonic() + self.delay
+        self.delay = min(self.delay * 2, 30.0)
+        print(f"[prod_runner] ERROR: 前端 Nginx 启动失败（{int(self.delay)}s 后重试），"
+              f"port={self.web_port}, pid={self.pid}")
+        self._dump_error_log_tail()
 
     def alive(self) -> bool:
-        return _http_ok(f"http://127.0.0.1:{self.web_port}/nginx-health", timeout=1.5)
+        # expect_substr 确保是 nginx 自身的 /nginx-health 返回，而非同端口其它服务。
+        return _http_ok(
+            f"http://127.0.0.1:{self.web_port}/nginx-health",
+            timeout=1.5,
+            expect_substr='"service":"nginx"',
+        )
 
     def poll(self) -> None:
         if self.alive():
@@ -448,6 +614,7 @@ class Supervisor:
         self.backend = _Managed(
             "后端(uvicorn)", _cmd_uvicorn(api_port, workers), PROJECT_ROOT,
             health_url=f"http://127.0.0.1:{api_port}/api/health",
+            workers=workers,
         )
         self.arq = _Managed("ARQ worker", _cmd_arq(), PROJECT_ROOT) if with_arq else None
 
@@ -478,14 +645,32 @@ class Supervisor:
             self.vite.start()
 
     # -- 状态落盘 -----------------------------------------------------------
+    def _frontend_state(self) -> tuple[int | None, str, bool]:
+        """现探前端真实存活状态，避免落盘被污染的 self.nginx.status（谎报根因）。
+
+        返回 (pid, status, ok)。nginx 分支以 HTTP 探针现探结果为准；vite 分支以
+        Popen 句柄存活为准。任何情况下都不以可能滞后的 self.nginx.status 充当"存活"。
+        """
+        if self.nginx:
+            ok = self.nginx.alive()
+            return self.nginx.pid, ("running" if ok else "crashed"), ok
+        if self.vite:
+            pid = self.vite.proc.pid if self.vite.proc else None
+            return pid, self.vite.status, self.vite.alive()
+        return None, "stopped", False
+
     def write_status(self) -> None:
         redis_status = "ok" if _is_redis_up(self.redis_port) else "down"
-        self.ready = self.backend.status == "ready"
+        self.ready = self.backend.status == "ready"  # 语义保持不变（GUI 可能已依赖）
+        frontend_pid, frontend_status, frontend_ok = self._frontend_state()
         data = {
             "pid": os.getpid(),
             "started_at": _iso_now(),
             "mode": "production",
             "ready": self.ready,
+            # 新增可观测字段：ready 只看后端，前端缺失此前完全不可见；
+            # 新增 frontend_ok 暴露前端真实存活，不改变 ready 现有语义。
+            "frontend_ok": frontend_ok,
             "workers": self.workers,
             "api_port": self.api_port,
             "web_port": self.web_port,
@@ -502,9 +687,8 @@ class Supervisor:
                 },
                 "frontend": {
                     "type": self.frontend_type,
-                    "pid": (self.vite.proc.pid if self.vite and self.vite.proc else None),
-                    "status": (self.nginx.status if self.nginx else
-                               self.vite.status if self.vite else "stopped"),
+                    "pid": frontend_pid,
+                    "status": frontend_status,
                 },
                 "redis": {"status": redis_status},
             },

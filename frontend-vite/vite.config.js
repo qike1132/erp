@@ -52,30 +52,13 @@ export default defineConfig(({ mode }) => {
                                 cacheableResponse: { statuses: [0, 200] },
                             },
                         },
+                        // ERP 为数据一致性敏感系统：全部 API 请求一律 NetworkOnly（不缓存）。
+                        // 此前读接口用 StaleWhileRevalidate / 兜底 NetworkFirst，Service Worker
+                        // 会返回陈旧业务数据；且 dev 禁用、prod 启用，制造「生产与 debug 表现
+                        // 不一致」。API 缓存条目整体移除，仅保留上方静态字体缓存。
                         {
-                            urlPattern: /\/api\/v1\/(dashboard|products|stock|report|customer)\/.*/i,
-                            method: 'GET',
-                            handler: 'StaleWhileRevalidate',
-                            options: {
-                                cacheName: 'api-read-cache',
-                                expiration: { maxEntries: 200, maxAgeSeconds: 60 * 2 },
-                                cacheableResponse: { statuses: [0, 200] },
-                            },
-                        },
-                        {
-                            urlPattern: /\/api\/v1\/(order|stock|batch|purchase)\/.*/i,
+                            urlPattern: /\/api\//i,
                             handler: 'NetworkOnly',
-                        },
-                        {
-                            urlPattern: /\/api\/v1\//i,
-                            handler: 'NetworkFirst',
-                            options: {
-                                cacheName: 'api-cache',
-                                expiration: { maxEntries: 50, maxAgeSeconds: 60 },
-                                cacheableResponse: { statuses: [0, 200] },
-                                // 后端故障时 1.5s 内回退到缓存，避免停留在"加载中"等待过久
-                                networkTimeoutSeconds: 1.5,
-                            },
                         },
                     ],
                 },

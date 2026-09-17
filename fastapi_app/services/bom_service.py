@@ -460,6 +460,74 @@ async def save_bom(db: AsyncSession, product_id: int, data: dict, username: str)
     return 'BOM 保存成功'
 
 
+def _add_default_scope_items_to_role(
+    db: AsyncSession,
+    source_product,
+    target_product_id: int,
+    role_id: int,
+) -> int:
+    """把源产品「产品级默认作用域」的面料/辅料/填充物写入目标产品的目标角色。
+
+    仅处理 role_id 为 NULL 的默认作用域物料（角色级物料无法并入单一角色，另行统计为
+    skipped_role_items）。返回本次新增的物料行数（copied_count）。
+
+    说明：本函数为纯机械抽取，行为与抽取前 `_copy_bom_into_role` 的内联实现完全等价。
+    """
+    copied_count = 0
+
+    default_material = getattr(source_product, 'material', None)
+    if default_material is not None and getattr(default_material, 'cotton_usage', Decimal('0')) > 0:
+        db.add(ProductMaterial(
+            product_id=target_product_id,
+            role_id=role_id,
+            material_code=getattr(default_material, 'material_code', '') or '',
+            cotton_usage=default_material.cotton_usage,
+            specification=getattr(default_material, 'specification', '') or '',
+            supplier_id=getattr(default_material, 'supplier_id', None),
+            supplier_name=getattr(default_material, 'supplier_name', '') or '',
+            unit=getattr(default_material, 'unit', '') or '克',
+            remark=getattr(default_material, 'remark', '') or '',
+        ))
+        copied_count += 1
+
+    for old_fabric in (getattr(source_product, 'fabrics', None) or []):
+        if old_fabric.role_id is not None:
+            continue
+        db.add(ProductFabric(
+            product_id=target_product_id,
+            role_id=role_id,
+            material_code=getattr(old_fabric, 'material_code', '') or '',
+            fabric_name=old_fabric.fabric_name,
+            specification=getattr(old_fabric, 'specification', '') or '',
+            quantity=old_fabric.quantity,
+            supplier_id=getattr(old_fabric, 'supplier_id', None),
+            supplier_name=getattr(old_fabric, 'supplier_name', '') or '',
+            unit=getattr(old_fabric, 'unit', '') or '码',
+            remark=getattr(old_fabric, 'remark', '') or '',
+        ))
+        copied_count += 1
+
+    for old_accessory in (getattr(source_product, 'accessories', None) or []):
+        if old_accessory.role_id is not None:
+            continue
+        db.add(ProductAccessory(
+            product_id=target_product_id,
+            role_id=role_id,
+            material_code=getattr(old_accessory, 'material_code', '') or '',
+            accessory_name=old_accessory.accessory_name,
+            specification=getattr(old_accessory, 'specification', '') or '',
+            quantity=old_accessory.quantity,
+            supplier_id=getattr(old_accessory, 'supplier_id', None),
+            supplier_name=getattr(old_accessory, 'supplier_name', '') or '',
+            unit=getattr(old_accessory, 'unit', '') or '个',
+            material_category=getattr(old_accessory, 'material_category', '') or 'accessory',
+            remark=getattr(old_accessory, 'remark', '') or '',
+        ))
+        copied_count += 1
+
+    return copied_count
+
+
 async def _copy_bom_into_role(
     db: AsyncSession,
     source_product,
@@ -527,58 +595,10 @@ async def _copy_bom_into_role(
             ProductMaterial.role_id == role_id,
         ))
 
-    copied_count = 0
-
-    # c. 源产品默认作用域 → 目标角色
-    default_material = getattr(source_product, 'material', None)
-    if default_material is not None and getattr(default_material, 'cotton_usage', Decimal('0')) > 0:
-        db.add(ProductMaterial(
-            product_id=target_product_id,
-            role_id=role_id,
-            material_code=getattr(default_material, 'material_code', '') or '',
-            cotton_usage=default_material.cotton_usage,
-            specification=getattr(default_material, 'specification', '') or '',
-            supplier_id=getattr(default_material, 'supplier_id', None),
-            supplier_name=getattr(default_material, 'supplier_name', '') or '',
-            unit=getattr(default_material, 'unit', '') or '克',
-            remark=getattr(default_material, 'remark', '') or '',
-        ))
-        copied_count += 1
-
-    for old_fabric in (getattr(source_product, 'fabrics', None) or []):
-        if old_fabric.role_id is not None:
-            continue
-        db.add(ProductFabric(
-            product_id=target_product_id,
-            role_id=role_id,
-            material_code=getattr(old_fabric, 'material_code', '') or '',
-            fabric_name=old_fabric.fabric_name,
-            specification=getattr(old_fabric, 'specification', '') or '',
-            quantity=old_fabric.quantity,
-            supplier_id=getattr(old_fabric, 'supplier_id', None),
-            supplier_name=getattr(old_fabric, 'supplier_name', '') or '',
-            unit=getattr(old_fabric, 'unit', '') or '码',
-            remark=getattr(old_fabric, 'remark', '') or '',
-        ))
-        copied_count += 1
-
-    for old_accessory in (getattr(source_product, 'accessories', None) or []):
-        if old_accessory.role_id is not None:
-            continue
-        db.add(ProductAccessory(
-            product_id=target_product_id,
-            role_id=role_id,
-            material_code=getattr(old_accessory, 'material_code', '') or '',
-            accessory_name=old_accessory.accessory_name,
-            specification=getattr(old_accessory, 'specification', '') or '',
-            quantity=old_accessory.quantity,
-            supplier_id=getattr(old_accessory, 'supplier_id', None),
-            supplier_name=getattr(old_accessory, 'supplier_name', '') or '',
-            unit=getattr(old_accessory, 'unit', '') or '个',
-            material_category=getattr(old_accessory, 'material_category', '') or 'accessory',
-            remark=getattr(old_accessory, 'remark', '') or '',
-        ))
-        copied_count += 1
+    # c. 源产品默认作用域 → 目标角色（抽出为纯机械辅助函数，保持行为等价、降低本函数行数）
+    copied_count = _add_default_scope_items_to_role(
+        db, source_product, target_product_id, role_id,
+    )
 
     # 源产品角色级物料无法并入单一角色（会撞唯一约束），统计跳过数供前端提示
     skipped_role_items = (

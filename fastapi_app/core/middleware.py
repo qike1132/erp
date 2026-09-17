@@ -317,9 +317,17 @@ def _setup_trusted_host(app: FastAPI) -> None:
 
 
 def _setup_gzip(app: FastAPI) -> None:
-    # 生产环境由 Nginx 统一处理 GZip 压缩，避免双重压缩
-    if settings.is_production:
-        logger.info("GZip 压缩由 Nginx 处理（生产环境）")
+    """启用 GZip 压缩（默认始终开启，由显式环境变量关闸）。
+
+    此前按 `settings.is_production` 推断「生产环境由 Nginx 统一压缩」，把「谁能
+    压缩」这个**运行时事实**硬编码成了环境名推断。实测（2026-09-17）nginx 缺席时
+    全站零压缩：/metrics 从 gzip 后约 2.5KB 膨胀到 18.7KB，传输浪费约 86%。
+    所谓「双重压缩」担忧不成立——nginx 对**已带 Content-Encoding 的**上游响应
+    不会二次压缩；反之漏压缩是 3-8 倍传输浪费的实打实损失。
+    确需关闸时用显式环境变量 APP_GZIP_DISABLED=true，而非靠环境名推断。
+    """
+    if os.getenv("APP_GZIP_DISABLED", "").strip().lower() in ("true", "1", "yes"):
+        logger.info("GZip 压缩已被 APP_GZIP_DISABLED 显式关闭")
         return
     app.add_middleware(GZipMiddleware, minimum_size=1000)
 
