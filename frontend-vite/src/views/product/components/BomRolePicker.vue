@@ -5,7 +5,7 @@
       <FontAwesomeIcon class="brp-caret" :icon="open ? 'chevron-up' : 'chevron-down'" aria-hidden="true" />
     </button>
 
-    <div v-if="open" class="brp-panel" role="dialog" aria-label="全局角色字典">
+    <div v-if="open" class="brp-panel" role="dialog" aria-label="全局角色字典" @click.stop>
       <div class="brp-head">
         <input
           v-model="keyword"
@@ -194,8 +194,16 @@ async function remove(role: RoleItem) {
 
 function onDocumentClick(event: MouseEvent) {
   if (!open.value) return
+  // 面板内点击已被根节点 @click.stop 拦截，不会到达这里；此处两道防御：
+  // 1) 脱离文档树的 target 直接忽略 —— 真实鼠标点击面板内按钮时，该按钮的
+  //    自身处理器返回后浏览器会执行一次 microtask 检查点，Vue 队列里的重渲染
+  //    随即把它换成别的节点；等事件冒泡到 document 时 event.target 已 isConnected=false，
+  //    若仍按 contains 判定会被误判为「点击面板外」而关闭面板（D-1）。
+  //    （编程式 el.click() 在脚本栈内同步派发，不会触发该检查点，故不复现。）
+  // 2) 正常面板外点击的节点仍在文档树中，照常走 contains 关闭。
+  if (!(event.target instanceof Node) || !event.target.isConnected) return
   const el = rootRef.value
-  if (el && event.target instanceof Node && !el.contains(event.target)) close()
+  if (el && !el.contains(event.target)) close()
 }
 
 onMounted(() => document.addEventListener('click', onDocumentClick))
