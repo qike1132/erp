@@ -148,6 +148,43 @@
   --gradient-page-title: linear-gradient(135deg, #d4f1f4 0%, #b0e0e6 50%, #87ceeb 100%);
 }
 
+/* ============ Layout Tokens（间距 / 字号 / 圆角） ============
+   此前令牌里只有颜色、圆角、阴影、层级、渐变，**没有间距与字号刻度**，
+   于是各页面自由发挥 —— 实测物料计算器一页出现 7 档圆角、7 档字号、4 档字重。
+   这里补一套最小可用刻度。
+
+   ⚠️ 刻意避开 `--text-*` / `--spacing-*` 前缀：那是 Tailwind v4 的主题命名空间，
+   同名会覆盖其生成的工具类（如 text-sm / p-4）输出，波及全站。
+   ⚠️ 放在 @theme 之外：Tailwind 只处理 @theme，这里保持为普通 CSS 变量。
+*/
+:root {
+  /* Spacing（4px 基准） */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+
+  /* Font size */
+  --fs-cap: 11px; /* 角标 / 辅助说明 */
+  --fs-xs: 12px; /* 次要文本、表头 */
+  --fs-sm: 13px; /* 正文（列表、表格） */
+  --fs-base: 14px; /* 强调正文 */
+  --fs-lg: 16px; /* 区块标题 */
+  --fs-title: 18px; /* 页面标题 */
+  --fs-metric: 22px; /* 关键数值 */
+
+  /* Radius（收敛：同页最多 4 档） */
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 12px;
+
+  /* Border */
+  --bw: 1px;
+}
+
 /* ============ Base Styles ============ */
 @layer base {
   *,
@@ -435,6 +472,130 @@ h6 { font-size: 0.8125rem; }
        scrollbar 出现/消失 → 容器宽度变化 → 卡片上下/左右跳动 */
     scrollbar-gutter: stable;
     overflow-anchor: none;
+  }
+
+  /* ============ Page Column（多列页面的列头与列内工具条） ============
+     这些类由**子组件**渲染。父组件的 scoped 样式命中不了子组件内部元素
+     —— Vue 只把父级 data-v 挂到子组件的**根元素**上，写在 View 的 scoped 块里
+     会静默失效（历史 bug：.mc-col-title 声明了 padding/700/下边框，实测却是
+     0px / 400 / 无边框，三个列标题退化成正文同级文本）。故放在全局。
+     ⚠️ 不要再把 .mc-col-title 写回任何 View 的 scoped 块。 */
+  .mc-col-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 44px;
+    padding: 0 12px;
+    flex-shrink: 0;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.4;
+    color: var(--color-text);
+    border-bottom: 1px solid var(--color-border-light);
+  }
+
+  /* FontAwesomeIcon 渲染的是 <svg>，选择器用 i 会静默失效 */
+  .mc-col-title svg {
+    width: 14px;
+    height: 14px;
+    color: var(--color-primary-500);
+    flex-shrink: 0;
+  }
+
+  /* 列头右侧的计数 / 合计等尾部信息 */
+  .mc-col-tail {
+    margin-left: auto;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--color-text-muted);
+    white-space: nowrap;
+  }
+  .mc-col-tail b {
+    color: var(--color-primary-700);
+    font-weight: 600;
+  }
+
+  /* 列内工具条：搜索 + 过滤同行，避免各自占一整行（原先 153px → 46px） */
+  .mc-col-tools {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    flex-shrink: 0;
+  }
+
+  /* 通用分段控件（列内过滤、作用域切换） */
+  .mc-seg {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    height: 30px;
+    padding: 2px;
+    background: var(--color-slate-100);
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    flex-shrink: 0;
+  }
+  .mc-seg > button {
+    display: inline-flex;
+    align-items: center;
+    height: 100%;
+    padding: 0 10px;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--color-text-secondary);
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+  .mc-seg > button:hover {
+    color: var(--color-text);
+  }
+  .mc-seg > button.active {
+    background: #fff;
+    color: var(--color-primary-700);
+    box-shadow: 0 1px 2px rgba(16, 24, 40, 0.07);
+  }
+
+  /* ============ Compact Data Table（列内结果表） ============ */
+  .mc-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    /* 必须显式声明 line-height：靠继承 body 行高会让行高随全局样式漂移
+       （实测继承 1.6 时行高 32.2px，显式 1.35 → 29.2px，与「紧凑表 30px 量级」的设计意图一致） */
+    line-height: 1.35;
+  }
+  .mc-table thead th {
+    padding: 5px 8px;
+    text-align: left;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--color-text-muted);
+    background: var(--color-slate-50);
+    border-bottom: 1px solid var(--color-border-light);
+    white-space: nowrap;
+  }
+  .mc-table tbody td {
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--color-border-light);
+    color: var(--color-text);
+    white-space: nowrap;
+  }
+  .mc-table tbody tr:last-child td {
+    border-bottom: 0;
+  }
+  .mc-table th.is-num,
+  .mc-table td.is-num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  .mc-table td.is-num {
+    font-weight: 500;
   }
 
   /* ============ Page Card Toolbar (Dashboard's top toolbar inside the card) ============ */

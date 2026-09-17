@@ -3,118 +3,79 @@
     <div class="mc-col-title">
       <FontAwesomeIcon icon="chart-pie" aria-hidden="true" />
       物料用量计算结果
+      <span class="mc-col-tail">合计 <b>{{ totalRows }}</b> 项</span>
     </div>
 
-    <div class="mc-result-content">
-      <!-- 空态 -->
-      <div v-if="!hasGroups && !hasResults" class="mc-empty-state">
-        <FontAwesomeIcon icon="calculator" aria-hidden="true" />
-        <span>选择产品并输入数量后自动计算</span>
+    <!-- 空态：既无分块也无扁平结果 -->
+    <div v-if="isEmpty" class="mc-empty-state">
+      <FontAwesomeIcon icon="calculator" aria-hidden="true" />
+      <span>选择产品并输入数量后自动计算</span>
+    </div>
+
+    <template v-else>
+      <!-- 作用域条：≥2 个作用域 → 左侧分段控件切换；单作用域 → 纯文本名。
+           右侧常驻当前作用域的产品名与数量，切换时同步更新。 -->
+      <div class="mc-scope-bar">
+        <div v-if="scopeTabs.length > 1" class="mc-seg" role="tablist" aria-label="切换作用域">
+          <button
+            v-for="(g, gi) in scopeTabs"
+            :key="groupKey(g)"
+            type="button"
+            role="tab"
+            :title="scopeTabLabels[gi]"
+            :class="{ active: groupKey(g) === activeScopeKey }"
+            :aria-selected="groupKey(g) === activeScopeKey"
+            @click="activeScopeKey = groupKey(g)"
+          >
+            {{ scopeTabLabels[gi] }}
+          </button>
+        </div>
+        <span v-else-if="activeGroup" class="mc-scope-name">{{ groupName(activeGroup) }}</span>
+
+        <span class="mc-scope-meta">
+          <span v-if="activeGroup?.product_name" class="mc-scope-product">{{ activeGroup.product_name }}</span>
+          <span v-if="activeGroup" class="mc-scope-qty">数量 <b>{{ activeGroup.quantity }}</b></span>
+        </span>
       </div>
 
-      <!-- 分块卡模式：每个作用域一张卡，默认 BOM 恒首块（顺序不动） -->
-      <template v-else-if="hasGroups">
-        <div
-          v-for="(group, gi) in calcGroups"
-          :key="groupKey(group)"
-          class="mc-scope-card"
-        >
-          <div class="mc-scope-head">
-            <span class="mc-scope-badge" :class="group.role_id == null ? 'is-default' : 'is-role'">
-              {{ group.role_id == null ? '默认' : '#' + (gi + 1) }}
-            </span>
-            <span class="mc-scope-name">{{ groupName(group) }}</span>
-            <span v-if="group.product_name" class="mc-scope-product">{{ group.product_name }}</span>
-            <span class="mc-scope-qty">数量 {{ group.quantity }}</span>
-          </div>
+      <div class="mc-result-content">
+        <!-- 分块卡 / 扁平回退共用同一份 section 视图模型（0 项分类不进入数组） -->
+        <CalcCategoryBlock
+          v-for="section in sections"
+          :key="section.key"
+          :category-key="section.key"
+          :label="section.label"
+          :icon="section.icon"
+          :rows="section.rows"
+          :collapsed="sectionCollapsed(section.key)"
+          @toggle="toggleSection(section.key)"
+        />
 
-          <div
-            v-for="cat in categoryList"
-            :key="cat.key"
-            class="mc-category-block"
-            :class="'mc-cat-' + cat.key"
-          >
-            <button
-              class="mc-category-header"
-              :aria-label="`${cat.label} (${catRows(group, cat.key).length} 项)`"
-              @click="toggle(groupKey(group), cat.key)"
-            >
-              <FontAwesomeIcon :icon="cat.icon" class="mc-cat-icon" aria-hidden="true" />
-              <span class="mc-cat-label">{{ cat.label }}</span>
-              <span class="mc-cat-count">({{ catRows(group, cat.key).length }} 项)</span>
-              <FontAwesomeIcon
-                icon="chevron-down"
-                :class="['mc-cat-toggle', isCollapsed(groupKey(group), cat.key) ? '' : 'expanded']"
-                aria-hidden="true"
-              />
-            </button>
-
-            <div
-              v-if="!isCollapsed(groupKey(group), cat.key) && catRows(group, cat.key).length"
-              class="mc-category-table"
-            >
-              <UiDataTable :data="catRows(group, cat.key)" :columns="calcColumns" row-key="__rk">
-                <template #column-body-supplier_name="{ row }">{{ (row as CalcRowVM).supplier_name || '-' }}</template>
-                <template #column-body-material_name="{ row }">{{ (row as CalcRowVM).material_name }}</template>
-                <template #column-body-specification="{ row }">{{ (row as CalcRowVM).specification || '-' }}</template>
-                <template #column-body-total_quantity="{ row }">
-                  <span class="mc-qty-cell">{{ formatFillingQty(cat.key, row as CalcRowVM) }}</span>
-                </template>
-              </UiDataTable>
-            </div>
-          </div>
-        </div>
-      </template>
-
-      <!-- 扁平回退：旧后端 / groups 缺失时（A-5），行为与旧版一致 -->
-      <template v-else>
-        <div
-          v-for="cat in categoryList"
-          :key="cat.key"
-          class="mc-category-block"
-          :class="'mc-cat-' + cat.key"
-        >
-          <button
-            class="mc-category-header"
-            :aria-label="`${cat.label} (${flatRows(cat.key).length} 项)`"
-            @click="toggle('flat', cat.key)"
-          >
-            <FontAwesomeIcon :icon="cat.icon" class="mc-cat-icon" aria-hidden="true" />
-            <span class="mc-cat-label">{{ cat.label }}</span>
-            <span class="mc-cat-count">({{ flatRows(cat.key).length }} 项)</span>
-            <FontAwesomeIcon
-              icon="chevron-down"
-              :class="['mc-cat-toggle', isCollapsed('flat', cat.key) ? '' : 'expanded']"
-              aria-hidden="true"
-            />
-          </button>
-
-          <div v-if="!isCollapsed('flat', cat.key) && flatRows(cat.key).length" class="mc-category-table">
-            <UiDataTable :data="flatRows(cat.key)" :columns="calcColumns" row-key="__rk">
-              <template #column-body-supplier_name="{ row }">{{ (row as CalcRowVM).supplier_name || '-' }}</template>
-              <template #column-body-material_name="{ row }">{{ (row as CalcRowVM).material_name }}</template>
-              <template #column-body-specification="{ row }">{{ (row as CalcRowVM).specification || '-' }}</template>
-              <template #column-body-total_quantity="{ row }">
-                <span class="mc-qty-cell">{{ formatFillingQty(cat.key, row as CalcRowVM) }}</span>
-              </template>
-            </UiDataTable>
-          </div>
-        </div>
-      </template>
-    </div>
+        <p v-if="!sections.length" class="mc-result-hint">当前作用域暂无用量数据</p>
+      </div>
+    </template>
   </div>
 </template>
 
 <script setup lang="ts">
-// 物料用量计算结果列：分块卡渲染（默认 BOM 恒首）+ 扁平回退（A-5）。
-// 缺陷②修复（A-9）：row-key 由不唯一的 material_name 改为复合键 `__rk`，
-// 保证「同分类同名但规格/供应商/单位不同」的行全部渲染、不丢行。
-import { reactive, computed } from 'vue'
+/**
+ * 物料用量计算结果列。
+ *
+ * 渲染契约：
+ * - 分块模式（`calcGroups` 非空）：顶部作用域条切换，**同一时刻只渲染 1 个作用域**的用量表；
+ *   默认 BOM 恒首块 → 初始选中它。窄列里纵向堆叠多张卡会把每张表压到只剩表头，故改为切换。
+ * - 扁平回退（A-5，旧后端 / `calcGroups` 缺失）：行为与旧版一致，走同一份 section 视图模型。
+ * - 复合 row-key（A-9）：`__rk` 由「分类 + 名称 + 规格 + 供应商 + 单位」拼成，
+ *   保证「同分类同名但规格/供应商/单位不同」的行全部渲染、不丢行。
+ * - 0 项分类不渲染表头（原先会渲染 `(0 项)` 空块，是纯噪声）。
+ *
+ * 单个分类区块（折叠头 + 紧凑表 + 单位换算）在 `CalcCategoryBlock.vue`。
+ */
+import { reactive, ref, computed, watch } from 'vue'
 import type { MaterialCalcRow, MaterialCalcScopeGroup } from '@/api'
-import UiDataTable from '@/components/ui/UiDataTable.vue'
-import type { TableColumn } from '@/components/ui/UiDataTable.vue'
 import { CALC_CATEGORY_LIST } from '@/composables/useMaterialCalculator'
 import { scopeKeyOf, scopeNameOf } from '@/utils/roleMatrix'
+import CalcCategoryBlock from './CalcCategoryBlock.vue'
 
 const props = defineProps<{
   calcResults: Record<string, MaterialCalcRow[]>
@@ -126,20 +87,80 @@ const props = defineProps<{
 /** 带复合 row-key 的行视图模型。 */
 type CalcRowVM = MaterialCalcRow & { __rk: string }
 
+/** 分类区块的统一视图模型（分块 / 扁平两种来源归一化后的产物）。 */
+interface ResultSection {
+  key: string
+  label: string
+  icon: string
+  rows: CalcRowVM[]
+}
+
 // 折叠状态：键 = `<scopeKey>::<category>`，不同作用域互不影响
 const collapsed = reactive<Record<string, boolean>>({})
 const categoryList = CALC_CATEGORY_LIST
 
 const hasGroups = computed(() => (props.calcGroups?.length ?? 0) > 0)
+/** 既无分块也无扁平结果 → 首次进入或尚未计算 */
+const isEmpty = computed(() => !hasGroups.value && !props.hasResults)
 
-/** 作用域唯一键（`p|<pid>|r|<rid|default>`）。 */
-function groupKey(group: MaterialCalcScopeGroup): string {
-  return scopeKeyOf(group)
+// ============================================================
+// 作用域切换
+// ============================================================
+const scopeTabs = computed<MaterialCalcScopeGroup[]>(() => props.calcGroups ?? [])
+const scopeKeys = computed(() => scopeTabs.value.map((g) => scopeKeyOf(g)))
+const activeScopeKey = ref('')
+
+// 结果重算后旧作用域可能消失（取消选品 / 换角色）→ 回落到首块，避免空渲染
+watch(
+  scopeKeys,
+  (keys) => {
+    if (!keys.includes(activeScopeKey.value)) activeScopeKey.value = keys[0] ?? ''
+  },
+  { immediate: true },
+)
+
+const activeGroup = computed<MaterialCalcScopeGroup | null>(
+  () => scopeTabs.value.find((g) => scopeKeyOf(g) === activeScopeKey.value) ?? null,
+)
+
+/**
+ * 分段控件标签：用「能唯一区分各作用域」的最短维度。
+ * 真实数据常见「多个产品 × 各自默认 BOM」——此时 `role_name` 全是「默认BOM」，
+ * 直接展示角色名会得到两个同名标签，用户无法判断在切什么。降级次序：
+ *   角色名互不相同 → 用角色名；否则产品名互不相同 → 用产品名；再否则两者拼接。
+ */
+const scopeTabLabels = computed<string[]>(() => {
+  const list = scopeTabs.value
+  if (!list.length) return []
+  const roleNames = list.map((g) => groupName(g))
+  const productNames = list.map((g) => (g.product_name ?? '').trim())
+  const allUnique = (arr: string[]) => {
+    const nonEmpty = arr.filter(Boolean)
+    return nonEmpty.length === arr.length && new Set(nonEmpty).size === arr.length
+  }
+  const useRole = allUnique(roleNames)
+  const useProduct = !useRole && allUnique(productNames)
+  return list.map((_g, i) => {
+    if (useRole) return roleNames[i] ?? ''
+    if (useProduct) return productNames[i] ?? ''
+    return [productNames[i] ?? '', roleNames[i] ?? ''].filter(Boolean).join(' · ')
+  })
+})
+
+/** 当前折叠/展开状态所属的作用域前缀（扁平回退固定为 `flat`）。 */
+const scopePrefix = computed(() => activeScopeKey.value || 'flat')
+
+// ============================================================
+// 视图模型
+// ============================================================
+/** 作用域唯一键（`p|<pid>|r|<rid|default>`）。接受 null 以兼容模板中 `v-else-if` 的收窄失效。 */
+function groupKey(group: MaterialCalcScopeGroup | null): string {
+  return group ? scopeKeyOf(group) : ''
 }
 
 /** 作用域展示名（默认 BOM → 默认BOM；角色名缺失 → 角色#<id>）。 */
-function groupName(group: MaterialCalcScopeGroup): string {
-  return scopeNameOf(group)
+function groupName(group: MaterialCalcScopeGroup | null): string {
+  return group ? scopeNameOf(group) : ''
 }
 
 /** 读取某分类的行数组（安全索引，避免 undefined）。 */
@@ -164,205 +185,140 @@ function rowKeyOf(prefix: string, category: string, row: MaterialCalcRow): strin
   ].join('|')
 }
 
-/** 给行附加 `__rk`（供 UiDataTable 作为 row-key 字段）。 */
+/** 给行附加 `__rk`（作为 v-for 的唯一键）。 */
 function toVM(rows: MaterialCalcRow[] | undefined, prefix: string, category: string): CalcRowVM[] {
   return (rows ?? []).map((row) => ({ ...row, __rk: rowKeyOf(prefix, category, row) }))
 }
 
-function catRows(group: MaterialCalcScopeGroup, category: string): CalcRowVM[] {
-  return toVM(groupCat(group, category), scopeKeyOf(group), category)
-}
+/** 分类区块列表：分块来源取当前作用域，扁平来源取 `calcResults`；0 项分类剔除。 */
+const sections = computed<ResultSection[]>(() => {
+  const group = activeGroup.value
+  return categoryList
+    .map((cat) => ({
+      key: cat.key as string,
+      label: cat.label,
+      icon: cat.icon,
+      rows: group
+        ? toVM(groupCat(group, cat.key), scopeKeyOf(group), cat.key)
+        : toVM(props.calcResults?.[cat.key], 'flat', cat.key),
+    }))
+    .filter((section) => section.rows.length > 0)
+})
 
-function flatRows(category: string): CalcRowVM[] {
-  return toVM(props.calcResults?.[category], 'flat', category)
-}
+/** 列头右侧合计（当前作用域全部行的总数）。 */
+const totalRows = computed(() => sections.value.reduce((sum, s) => sum + s.rows.length, 0))
 
-function toggle(scope: string, category: string) {
-  const key = `${scope}::${category}`
+function toggleSection(category: string) {
+  const key = `${scopePrefix.value}::${category}`
   collapsed[key] = !collapsed[key]
 }
 
-function isCollapsed(scope: string, category: string): boolean {
-  return !!collapsed[`${scope}::${category}`]
+function sectionCollapsed(category: string): boolean {
+  return !!collapsed[`${scopePrefix.value}::${category}`]
 }
-
-// 填充类总采购量按克自动换算为 kg：克/g → kg，其他单位原样显示
-function formatFillingQty(catKey: string, row: MaterialCalcRow): string {
-  if (catKey !== 'filling') return `${row.total_quantity} ${row.unit}`
-  const unit = (row.unit || '').trim()
-  if (unit === '克' || unit.toLowerCase() === 'g') {
-    const kg = row.total_quantity / 1000
-    // 最多保留 3 位小数，去掉尾随零
-    const formatted = `${parseFloat(kg.toFixed(3))}`
-    return `${formatted} kg`
-  }
-  return `${row.total_quantity} ${row.unit}`
-}
-
-/** UiDataTable 列定义 */
-const calcColumns: TableColumn[] = [
-  { field: 'supplier_name', header: '供应商', align: 'left' },
-  { field: 'material_name', header: '物料名称', align: 'left' },
-  { field: 'specification', header: '规格', align: 'left' },
-  { field: 'total_quantity', header: '总采购量', align: 'right' },
-]
 </script>
 
 <style scoped>
-/* === Results === */
-.mc-result-content {
-  padding: 16px;
-  flex: 1;
-  overflow-y: auto;
-  min-height: 0;
-}
+/* 列头（.mc-col-title / .mc-col-tail）来自全局 app.css —— scoped 命中不了，
+   且历史上正因写在 scoped 里导致 padding/字重/下边框三项静默失效。
+   分类区块样式在 CalcCategoryBlock.vue。 */
 
-/* 作用域分块卡 */
-.mc-scope-card {
-  margin-bottom: 18px;
-  border: 1px solid var(--color-border-light, #e2e8f0);
-  border-radius: 12px;
-  padding: 10px 10px 4px;
-  background: var(--color-surface-card, #fff);
-}
-
-.mc-scope-head {
+/* === 作用域条（固定，不随结果滚动） === */
+.mc-scope-bar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 4px 6px 10px;
+  gap: var(--sp-2);
+  min-height: 40px;
+  min-width: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: var(--bw) solid var(--color-border-light);
+  flex-shrink: 0;
 }
 
-.mc-scope-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 34px;
-  padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 700;
-  color: #fff;
+/* 作用域数多 / 产品名长时，让分段控件自身横向滚动而不是撑破窄列。
+   （本组件模板内的元素，scoped 能命中全局类 .mc-seg） */
+.mc-scope-bar .mc-seg {
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
-
-.mc-scope-badge.is-default { background: var(--color-text-muted, #64748b); }
-.mc-scope-badge.is-role { background: var(--color-primary-600, #2563eb); }
+.mc-scope-bar .mc-seg::-webkit-scrollbar {
+  display: none;
+}
+.mc-scope-bar .mc-seg > button {
+  min-width: 0;
+  /* 220px：实测最长真实产品名「招财猫盲盒毛绒挂件(混4款)」需 167px，
+     160px 会白截断 7px（作用域条可用 352px、两标签完整只需 223px）。
+     上限只用于防止单个超长名吃掉整条 bar，超出部分由 .mc-seg 横向滚动兜底 */
+  max-width: 220px;
+  flex-shrink: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 .mc-scope-name {
-  font-size: 14px;
-  font-weight: 700;
+  font-size: var(--fs-sm);
+  font-weight: 600;
   color: var(--color-text);
-}
-
-.mc-scope-product {
-  font-size: 12px;
-  color: var(--color-text-secondary);
-}
-
-.mc-scope-qty {
-  margin-left: auto;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--color-primary-700);
-}
-
-.mc-category-block {
-  margin-bottom: 12px;
-}
-
-.mc-category-header {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 12px 16px;
-  border-radius: 11px;
-  border: none;
-  cursor: pointer;
-  transition: background 0.3s ease;
-  text-align: left;
-}
-
-.mc-cat-icon {
-  font-size: 15px;
-}
-
-.mc-cat-label {
-  font-size: 14px;
-  font-weight: 700;
-}
-
-.mc-cat-count {
-  font-size: 12px;
-  color: var(--color-text-secondary);
-}
-
-.mc-cat-toggle {
-  margin-left: auto;
-  font-size: 11px;
-  color: var(--color-text-muted, #94a3b8);
-  transition: transform 0.25s ease;
-}
-
-.mc-cat-toggle.expanded {
-  transform: rotate(180deg);
-}
-
-/* Category color variants */
-.mc-cat-filling .mc-category-header {
-  background: linear-gradient(135deg, var(--color-info-50), var(--color-surface-card));
-}
-
-.mc-cat-filling .mc-cat-icon,
-.mc-cat-filling .mc-cat-label {
-  color: var(--color-primary-700);
-}
-
-.mc-cat-fabric .mc-category-header {
-  background: linear-gradient(135deg, var(--color-success-50), var(--color-surface-card));
-}
-
-.mc-cat-fabric .mc-cat-icon,
-.mc-cat-fabric .mc-cat-label {
-  color: var(--color-success-700);
-}
-
-.mc-cat-accessory .mc-category-header {
-  background: linear-gradient(135deg, var(--color-warning-50), var(--color-surface-card));
-}
-
-.mc-cat-accessory .mc-cat-icon,
-.mc-cat-accessory .mc-cat-label {
-  color: var(--color-warning-800);
-}
-
-.mc-category-table {
-  margin-top: 8px;
-  border-radius: 10px;
-  overflow: hidden;
-  border: 1px solid var(--color-border-light, #e2e8f0);
-}
-
-.mc-qty-cell {
-  text-align: right;
-  font-weight: 600;
   white-space: nowrap;
 }
 
-/* === Empty State === */
+.mc-scope-meta {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.mc-scope-product {
+  font-size: var(--fs-cap);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mc-scope-qty {
+  font-size: var(--fs-cap);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+.mc-scope-qty b {
+  color: var(--color-primary-700);
+  font-weight: 600;
+}
+
+/* === 结果滚动区 === */
+.mc-result-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--sp-1) var(--sp-3) var(--sp-3);
+}
+
+/* === 空态 === */
 .mc-empty-state {
   display: flex;
+  flex: 1;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  padding: 40px 20px;
-  color: var(--color-text-muted, #94a3b8);
-  font-size: 14px;
+  gap: var(--sp-2);
+  padding: var(--sp-6) var(--sp-4);
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+}
+.mc-empty-state :deep(svg) {
+  width: 24px;
+  height: 24px;
+  opacity: 0.5;
 }
 
-.mc-empty-state i {
-  font-size: 28px;
-  opacity: 0.5;
+.mc-result-hint {
+  margin: var(--sp-6) 0 0;
+  text-align: center;
+  font-size: var(--fs-xs);
+  color: var(--color-text-muted);
 }
 </style>
