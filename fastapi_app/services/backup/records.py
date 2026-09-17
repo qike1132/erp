@@ -190,13 +190,30 @@ async def write_backup_record(
 
 
 def list_backup_files() -> list[dict]:  # log-context: internal helper 无请求上下文
-    """列出服务器上的所有备份文件"""
+    """列出服务器上的所有备份文件。
+
+    返回条目同时携带 ``filename`` 与 ``mtime`` 两个字段：
+
+    - ``filename`` 是对外序列化契约键 —— ``GET /backup/list`` 原样透传该条目，
+      ``sync_backup_records`` 与 ``verify.query_service`` 也按此键消费，不可更名；
+    - ``mtime`` 供校验/统计侧判定"最近备份时间"使用，语义与
+      ``cleanup_old_backups`` 内部扫描保持同名同义。
+
+    历史上漏发 ``mtime``（且校验侧按不存在的 ``name`` 取值）会让健康检查
+    把"最近备份时间"算成 1970-01-01，凭空报出"超过24小时"告警。
+    """
     backups = []
     if BACKUP_DIR.exists():
         for f in sorted(BACKUP_DIR.iterdir(), reverse=True):
             if not _is_backup_file(f):
                 continue
-            entry: dict = {'filename': f.name, 'size': f.stat().st_size}
+            try:
+                stat = f.stat()
+            except OSError as e:
+                # 保留策略可能在扫描期间删除文件，属良性竞态：跳过而非让整个列表失败
+                logger.warning(f'跳过无法读取元信息的备份文件 {f.name}: {e}')
+                continue
+            entry: dict = {'filename': f.name, 'mtime': stat.st_mtime, 'size': stat.st_size}
             if f.name.endswith('.zip'):
                 try:
                     with zipfile.ZipFile(f, 'r') as zf:

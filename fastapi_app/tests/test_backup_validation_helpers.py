@@ -130,7 +130,7 @@ class TestCheckLastBackup:
     def test_check_last_backup_recent_returns_healthy(self):
         """最近备份在 24h 内应返回 healthy"""
         recent_time = (datetime.now() - timedelta(hours=2)).timestamp()
-        files = [{'name': 'bk1.zip', 'mtime': recent_time}]
+        files = [{'filename': 'bk1.zip', 'mtime': recent_time}]
         with patch.object(validation.backup_service, 'list_backup_files', return_value=files):
             result, issues = validation._check_last_backup()
         assert result['status'] == 'healthy'
@@ -141,7 +141,7 @@ class TestCheckLastBackup:
     def test_check_last_backup_stale_returns_warning(self):
         """最近备份超过 24h 应返回 warning 并记录 issue"""
         stale_time = (datetime.now() - timedelta(hours=48)).timestamp()
-        files = [{'name': 'bk_old.zip', 'mtime': stale_time}]
+        files = [{'filename': 'bk_old.zip', 'mtime': stale_time}]
         with patch.object(validation.backup_service, 'list_backup_files', return_value=files):
             result, issues = validation._check_last_backup()
         assert result['status'] == 'warning'
@@ -181,7 +181,7 @@ class TestCheckBackupIntegrity:
         """所有抽样文件完整可读时应返回 healthy"""
         f = tmp_path / "ok.zip"
         f.write_bytes(b"data")
-        files = [{'name': 'ok.zip', 'mtime': 0}]
+        files = [{'filename': 'ok.zip', 'mtime': 0}]
         with patch.object(validation.backup_service, 'list_backup_files', return_value=files), \
              patch.object(validation.backup_service, 'BACKUP_DIR', tmp_path):
             result, _issues = validation._check_backup_integrity()
@@ -191,7 +191,7 @@ class TestCheckBackupIntegrity:
 
     def test_check_backup_integrity_missing_file_returns_degraded(self, tmp_path):
         """抽样文件不存在时应返回 degraded 并记录 issue"""
-        files = [{'name': 'ghost.zip', 'mtime': 0}]
+        files = [{'filename': 'ghost.zip', 'mtime': 0}]
         with patch.object(validation.backup_service, 'list_backup_files', return_value=files), \
              patch.object(validation.backup_service, 'BACKUP_DIR', tmp_path):
             result, issues = validation._check_backup_integrity()
