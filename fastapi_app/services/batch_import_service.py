@@ -720,21 +720,24 @@ async def import_comprehensive_service(db: AsyncSession, file: UploadFile) -> Co
             success, sheets, err = await read_excel_sheets_async(temp_path)
             if not success:
                 return ComprehensiveImportResult(success=False, message=f'Excel读取失败: {err}')
-        results = ComprehensiveImportResult()
-        # Sheet 名称到类型的映射
-        sheet_mapping = {'产品管理': 'product', '订单管理': 'order', '备货管理': 'stockin', '出货管理': 'stockout'}
-        for sheet_name in sheets:
-            sheet_type = _identify_sheet_type(sheet_name, sheet_mapping)
-            if not sheet_type:
-                continue
-            success, data_list, err = await parse_excel_file_async(temp_path, sheet_name)
-            if not success:
-                results.errors.append(f'Sheet {sheet_name} 读取失败: {err}')
-                continue
-            if not data_list:
-                continue
-            await _process_comprehensive_sheet(db, sheet_type, sheet_name, data_list, results)
-        results.message = '导入完成！'
+            # ⚠️ 全部 Sheet 解析必须在本 async with 块内完成：
+            # _save_uploaded_file 是 @asynccontextmanager，finally 会 os.unlink(temp_path)，
+            # 一旦出块 temp_path 即失效，再读会得到 'no workbook found at path'。
+            results = ComprehensiveImportResult(success=True)
+            # Sheet 名称到类型的映射
+            sheet_mapping = {'产品管理': 'product', '订单管理': 'order', '备货管理': 'stockin', '出货管理': 'stockout'}
+            for sheet_name in sheets:
+                sheet_type = _identify_sheet_type(sheet_name, sheet_mapping)
+                if not sheet_type:
+                    continue
+                success, data_list, err = await parse_excel_file_async(temp_path, sheet_name)
+                if not success:
+                    results.errors.append(f'Sheet {sheet_name} 读取失败: {err}')
+                    continue
+                if not data_list:
+                    continue
+                await _process_comprehensive_sheet(db, sheet_type, sheet_name, data_list, results)
+            results.message = '导入完成！'
         # 提交交给请求级事务（get_async_db）：全部 Sheet 在同一事务内原子落库，
         # 单 Sheet 失败已被 savepoint 隔离，无需在此手动 commit
         return results
