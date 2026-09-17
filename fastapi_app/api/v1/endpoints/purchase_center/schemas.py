@@ -5,6 +5,17 @@
 
 from pydantic import BaseModel, Field
 
+# BOM 保存 DTO 已收口到 canonical 位置 fastapi_app/schemas/purchase_center.py（见架构 §9.3）；
+# 此处 re-export 以保持既有导入路径 `...endpoints.purchase_center.schemas` 可用。
+from fastapi_app.schemas.purchase_center import (  # noqa: F401
+    AccessoryItem,
+    BomSaveRequest,
+    FabricItem,
+    FillingItem,
+    PackagingItem,
+    RoleItem,
+)
+
 
 class OrderIdsRequest(BaseModel):
     """订单ID列表请求"""
@@ -30,86 +41,6 @@ class CustomerSyncRequest(BaseModel):
 class CustomerBatchRequest(BaseModel):
     """客户批量查询请求"""
     ids: list[int] = Field(..., min_length=1, max_length=500, description="客户ID列表")
-
-class FillingItem(BaseModel):
-    """BOM 填充物明细（ProductMaterial）。
-
-    允许额外字段以兼容前端未声明的扩展字段。
-    """
-    model_config = {"extra": "allow"}
-    id: int | None = None
-    role_id: int | None = None
-    role_key: str | None = None
-    cotton_usage: float = 0
-    supplier_id: int | None = None
-    supplier_name: str = ''
-    specification: str = ''
-    unit: str = ''
-    remark: str = ''
-
-
-class FabricItem(BaseModel):
-    """BOM 面料明细（ProductFabric）。
-
-    允许额外字段以兼容前端未声明的扩展字段。
-    """
-    model_config = {"extra": "allow"}
-    id: int | None = None
-    role_id: int | None = None
-    role_key: str | None = None
-    fabric_name: str = ''
-    specification: str = ''
-    unit: str = ''
-    quantity: float = 0
-    supplier_id: int | None = None
-    supplier_name: str = ''
-    remark: str = ''
-
-
-class AccessoryItem(BaseModel):
-    """BOM 辅料明细（ProductAccessory）。
-
-    允许额外字段以兼容前端未声明的扩展字段。
-    """
-    model_config = {"extra": "allow"}
-    id: int | None = None
-    role_id: int | None = None
-    role_key: str | None = None
-    accessory_name: str = ''
-    specification: str = ''
-    unit: str = ''
-    quantity: float = 0
-    supplier_id: int | None = None
-    supplier_name: str = ''
-    remark: str = ''
-
-
-class PackagingItem(BaseModel):
-    """BOM 包装明细（预留字段，允许额外字段）。"""
-    model_config = {"extra": "allow"}
-
-
-class RoleItem(BaseModel):
-    """BOM 角色明细（ProductRole）。
-
-    允许额外字段以兼容前端未声明的扩展字段。
-    """
-    model_config = {"extra": "allow"}
-    id: int | None = None
-    role_key: str | None = None
-    role_name: str = ''
-    name: str | None = None
-
-
-class BomSaveRequest(BaseModel):
-    """保存BOM请求"""
-    filling: FillingItem | None = None
-    fabrics: list[FabricItem] = []
-    accessories: list[AccessoryItem] = []
-    packagings: list[PackagingItem] = []
-    roles: list[RoleItem] = []
-    fillings: list[FillingItem] = []
-    default_bom_label: str | None = None
 
 class BomCopyRequest(BaseModel):
     """复制BOM请求"""

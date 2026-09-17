@@ -47,6 +47,7 @@ from fastapi_app.shared_models import (
     ProductMaterial,
     ProductRole,
 )
+from fastapi_app.services.product.bom_role_resolver import resolve_role_rows
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +111,20 @@ def _loaded_relation(entity, name: str):
     return getattr(entity, name, None)
 
 
+def _role_display_name(product_role) -> str:
+    """角色展示名：优先全局角色名（§7#10），回退回滚镜像列 ``role_name``。
+
+    调用方（``get_bom``）必须已 ``selectinload(ProductRole.global_role)``，
+    否则 ``lazy='raise'`` 关系会抛 ``InvalidRequestError``（生产 500 历史根因）。
+    """
+    global_role = getattr(product_role, 'global_role', None)
+    if global_role is not None:
+        name = getattr(global_role, 'name', None)
+        if name:
+            return name
+    return product_role.role_name or ''
+
+
 def _role_has_materials(product, role_id: int) -> bool:
     """判断产品在指定角色名下是否已有 BOM 物料。
 
@@ -145,6 +160,9 @@ async def get_bom(db: AsyncSession, product_id: int) -> dict | None:
 
     产品不存在时返回 ``None`` —— 注解必须带 ``| None``，
     否则调用方会误以为返回值恒为 dict 而漏掉空值检查。
+
+    ``roles`` 每项含 ``{id(product_role.id), global_role_id, name}``，展示名取自全局
+    角色名（回退镜像列），并按 ``(name, id)`` 升序（REQ-P0-10 / §7#2、#10）。
     """
     result = await db.execute(
         select(Product).options(
@@ -152,19 +170,28 @@ async def get_bom(db: AsyncSession, product_id: int) -> dict | None:
             selectinload(Product.material_rows),
             selectinload(Product.fabrics),
             selectinload(Product.accessories),
-            selectinload(Product.roles),
+            selectinload(Product.roles).selectinload(ProductRole.global_role),
         ).where(Product.id == product_id)
     )
     product = result.scalars().first()
     if not product:
         return None
     all_materials = product.get_all_materials() if product.has_bom() else []
+    role_items = [
+        {
+            'id': r.id,
+            'global_role_id': r.global_role_id,
+            'name': _role_display_name(r),
+        }
+        for r in product.roles
+    ]
+    role_items.sort(key=lambda item: (item['name'], item['id']))
     return {
         'id': product.id,
         'name': product.name,
         'barcode': product.barcode,
         'default_bom_label': product.default_bom_label,
-        'roles': [{'id': r.id, 'name': r.role_name} for r in product.roles],
+        'roles': role_items,
         'materials': all_materials,
     }
 
@@ -283,48 +310,31 @@ async def save_bom(db: AsyncSession, product_id: int, data: dict, username: str)
             product.default_bom_label = label
 
     # ===== 角色保存（roles 键存在才执行全量替换，旧客户端不传则保持原状） =====
+    # 角色段解析抽到 bom_role_resolver（支持 global_role_id / role_key / id 三路径），
+    # 避免本文件继续膨胀（958 行已超服务文件上限，风险 M2）。
     temp_role_map: dict = {}  # 客户端临时 role_key -> 新建角色真实 id
     if 'roles' in data:
-        roles_data = data.get('roles') or []
-        role_ids: list[int] = []
-        for role_item in roles_data:
-            role_name = (role_item.get('role_name') or role_item.get('name') or '').strip()
-            rid = role_item.get('id')
-            role_key = role_item.get('role_key')
-            if rid:
-                existing_role = next((r for r in product.roles if r.id == rid), None)
-                if existing_role:
-                    role_ids.append(existing_role.id)
-                    if role_key:
-                        temp_role_map[role_key] = existing_role.id
-                    if existing_role.role_name != role_name and role_name:
-                        db.add(ModificationLog(
-                            target_type='role', target_id=existing_role.id,
-                            field_name='role_name', old_value=existing_role.role_name,
-                            new_value=role_name, modifier_name=username,
-                        ))
-                        existing_role.role_name = role_name
-            elif role_name:
-                new_role = ProductRole(product_id=product_id, role_name=role_name)
-                db.add(new_role)
-                await db.flush()
-                role_ids.append(new_role.id)
-                if role_key:
-                    temp_role_map[role_key] = new_role.id
+        resolution = await resolve_role_rows(
+            payload_roles=data.get('roles') or [],
+            existing_product_roles=list(product.roles),
+            db=db,
+            product_id=product_id,
+            username=username,
+        )
+        temp_role_map = resolution.temp_role_map
+        role_ids = resolution.role_ids
         # 删除未出现在 payload 中的角色（物料由 DB 级 FK ON DELETE CASCADE 清理）
         to_delete = [r for r in product.roles if r.id not in role_ids]
-        if to_delete:
-            for role in to_delete:
-                db.add(ModificationLog(
-                    target_type='role', target_id=role.id,
-                    field_name='deleted',
-                    old_value=role.role_name or '', new_value='(已删除)',
-                    modifier_name=username,
-                ))
-                # AsyncSession.delete 是**协程**（SQLAlchemy 2.0 async API），
-                # 漏 await 会导致协程被丢弃、角色**静默不删除**。
-                # 同块内的 db.add() 是同步方法，故只有 delete 需 await。
-                await db.delete(role)
+        for role in to_delete:
+            db.add(ModificationLog(
+                target_type='role', target_id=role.id,
+                field_name='deleted',
+                old_value=role.role_name or '', new_value='(已删除)',
+                modifier_name=username,
+            ))
+            # AsyncSession.delete 是**协程**（SQLAlchemy 2.0 async API），
+            # 漏 await 会导致协程被丢弃、角色**静默不删除**。
+            await db.delete(role)
 
     def _resolve_role_id(item: dict):
         """物料项 role_id：优先真实 id，其次用 role_key 映射新建角色"""

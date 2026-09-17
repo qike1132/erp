@@ -93,6 +93,16 @@ def get_product_search_service():
     return get_service("product_search", lambda: product_search_service)
 
 
+def get_role_service():
+    """获取全局角色字典服务（默认返回模块，可被测试 override）。
+
+    角色服务以模块级函数形式提供（``list_roles`` / ``create_role`` / ``rename_role`` /
+    ``delete_role``），此处返回该模块对象，沿用既有 ``get_xxx_service`` 覆盖模式。
+    """
+    from fastapi_app.services.product import role_service
+    return get_service("role_service", lambda: role_service)
+
+
 # ---------------------------------------------------------------------------
 # 备份域服务（默认返回模块级单例，可被测试 override）
 # ---------------------------------------------------------------------------

@@ -4,6 +4,7 @@
 原 purchase_center.py (1400+ LOC) 拆分为：
 - schemas.py        → Pydantic 请求模型
 - product_routes.py → 产品/BOM 相关路由
+- role_routes.py    → 全局角色字典 CRUD 路由
 - customer_routes.py → 客户管理相关路由
 - order_routes.py    → 采购订单 CRUD 路由
 - print_routes.py    → 汇总打印 / Excel 导出路由
@@ -21,9 +22,11 @@ from fastapi_app.api.v1.endpoints.purchase_center.misc_routes import router as m
 from fastapi_app.api.v1.endpoints.purchase_center.order_routes import router as order_router
 from fastapi_app.api.v1.endpoints.purchase_center.print_routes import router as print_router
 from fastapi_app.api.v1.endpoints.purchase_center.product_routes import router as product_router
+from fastapi_app.api.v1.endpoints.purchase_center.role_routes import router as role_router
 
 router = APIRouter()
 router.include_router(product_router)
+router.include_router(role_router)
 router.include_router(customer_router)
 router.include_router(order_router)
 router.include_router(print_router)

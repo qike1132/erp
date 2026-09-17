@@ -58,10 +58,13 @@ def _mock_product(roles=None, materials=None, has_bom=True):
     return product
 
 
-def _mock_role(rid, name):
+def _mock_role(rid, name, global_role_id=None):
     role = MagicMock()
     role.id = rid
     role.role_name = name
+    role.global_role_id = global_role_id
+    # lazy='raise' 关系：测试桩显式置 None，_role_display_name 才会回退到 role_name 镜像列
+    role.global_role = None
     return role
 
 
@@ -72,7 +75,7 @@ def _mock_execute_result(product):
 
 
 class TestGetBom:
-    """get_bom 返回角色列表"""
+    """get_bom 返回角色列表（含 global_role_id，按 (name, id) 升序）"""
 
     async def test_get_bom_returns_roles(self, mock_db):
         product = _mock_product(roles=[_mock_role(11, '白雪公主'), _mock_role(12, '灰姑娘')])
@@ -80,9 +83,29 @@ class TestGetBom:
 
         result = await bom_service.get_bom(mock_db, 1)
 
+        # 排序键 (name, id)：'灰姑娘'(U+7070) < '白雪公主'(U+767D)
         assert result['roles'] == [
-            {'id': 11, 'name': '白雪公主'},
-            {'id': 12, 'name': '灰姑娘'},
+            {'id': 12, 'global_role_id': None, 'name': '灰姑娘'},
+            {'id': 11, 'global_role_id': None, 'name': '白雪公主'},
+        ]
+
+    async def test_get_bom_roles_include_global_role_id(self, mock_db):
+        """角色项携带 global_role_id；排序按 (name, id) 稳定升序。"""
+        product = _mock_product(roles=[
+            _mock_role(13, '爸爸', global_role_id=101),
+            _mock_role(11, '白雪公主', global_role_id=100),
+            _mock_role(12, '爸爸', global_role_id=102),
+        ])
+        mock_db.execute = AsyncMock(return_value=_mock_execute_result(product))
+
+        result = await bom_service.get_bom(mock_db, 1)
+
+        # 排序键 (name, id)：'爸爸'(U+7238) < '白雪公主'(U+767D)；
+        # 同名 '爸爸' 再按 id 升序（12 先于 13）——验证 id 兜底不依赖插入顺序。
+        assert result['roles'] == [
+            {'id': 12, 'global_role_id': 102, 'name': '爸爸'},
+            {'id': 13, 'global_role_id': 101, 'name': '爸爸'},
+            {'id': 11, 'global_role_id': 100, 'name': '白雪公主'},
         ]
 
     async def test_get_bom_no_roles_returns_empty(self, mock_db):
@@ -262,6 +285,44 @@ class TestSaveBom:
         fabrics = self._added_of(mock_db, bom_service.ProductFabric)
         assert len(fabrics) == 1
         assert fabrics[0].fabric_name == '面料A'
+
+    async def test_save_role_with_global_role_id_links_existing(self, mock_db):
+        """global_role_id 路径：关联已有全局角色（不新建全局角色）。"""
+        from fastapi_app.shared_models import ProductRole as OrmProductRole
+        from fastapi_app.shared_models import Role as OrmRole
+        product = _mock_product(roles=[])
+        self._setup_db(mock_db, product)
+
+        await bom_service.save_bom(
+            mock_db, 1,
+            {'roles': [{'global_role_id': 101, 'role_name': '爸爸'}],
+             'filling': None, 'fabrics': [], 'accessories': []},
+            'tester',
+        )
+
+        roles = self._added_of(mock_db, OrmProductRole)
+        assert len(roles) == 1
+        assert roles[0].global_role_id == 101
+        assert roles[0].role_name == '爸爸'
+        assert self._added_of(mock_db, OrmRole) == []  # 不新建全局角色
+
+    async def test_save_role_key_creates_global_role(self, mock_db):
+        """role_key 路径：新建全局角色，物料经 role_key 归属其关联行。"""
+        from fastapi_app.shared_models import Role as OrmRole
+        product = _mock_product(roles=[])
+        self._setup_db(mock_db, product)
+
+        await bom_service.save_bom(
+            mock_db, 1,
+            {'roles': [{'role_key': 'rk-9', 'role_name': '全新角色'}], 'filling': None,
+             'fabrics': [{'fabric_name': '面料X', 'quantity': 1, 'role_key': 'rk-9'}],
+             'accessories': []},
+            'tester',
+        )
+
+        globals_ = self._added_of(mock_db, OrmRole)
+        assert len(globals_) == 1
+        assert globals_[0].name == '全新角色'
 
     async def test_filling_not_in_payload_is_deleted(self, mock_db):
         """F2 回归：未被提交的填充行在保存时被删除（不残留幽灵行）"""

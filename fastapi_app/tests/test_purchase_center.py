@@ -31,9 +31,10 @@ class TestPurchaseCenterSchemas:
         assert po.customer_name == "客户A"
 
     def test_bom_save_request(self):
+        # DTO 收口后 canonical 为强类型版：filling 为 FillingItem（非 dict）
         from fastapi_app.schemas.purchase_center import BomSaveRequest
         bom = BomSaveRequest(filling={'cotton_usage': 100}, fabrics=[], accessories=[])
-        assert bom.filling['cotton_usage'] == 100
+        assert bom.filling.cotton_usage == 100
 
     def test_supplier_summary_response(self):
         from fastapi_app.schemas.purchase_center import SupplierSummary, SupplierSummaryItem, SupplierSummaryResponse

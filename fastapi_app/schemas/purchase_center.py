@@ -4,7 +4,7 @@
 
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # ============================================================
 # 产品/BOM 相关
@@ -57,19 +57,83 @@ class SearchSuggestionResponse(BaseModel):
     suggestions: list[SearchSuggestionItem] = []
 
 
+# ------------------------------------------------------------
+# BOM 保存（强类型 DTO，canonical 位置）
+# 由 api/v1/endpoints/purchase_center/schemas.py re-export，保持既有导入路径可用。
+# ------------------------------------------------------------
+
+class FillingItem(BaseModel):
+    """BOM 填充物明细（ProductMaterial）。允许额外字段以兼容前端扩展字段。"""
+    model_config = {'extra': 'allow'}
+    id: int | None = None
+    role_id: int | None = None
+    role_key: str | None = None
+    cotton_usage: float = 0
+    supplier_id: int | None = None
+    supplier_name: str = ''
+    specification: str = ''
+    unit: str = ''
+    remark: str = ''
+
+
+class FabricItem(BaseModel):
+    """BOM 面料明细（ProductFabric）。允许额外字段以兼容前端扩展字段。"""
+    model_config = {'extra': 'allow'}
+    id: int | None = None
+    role_id: int | None = None
+    role_key: str | None = None
+    fabric_name: str = ''
+    specification: str = ''
+    unit: str = ''
+    quantity: float = 0
+    supplier_id: int | None = None
+    supplier_name: str = ''
+    remark: str = ''
+
+
+class AccessoryItem(BaseModel):
+    """BOM 辅料明细（ProductAccessory）。允许额外字段以兼容前端扩展字段。"""
+    model_config = {'extra': 'allow'}
+    id: int | None = None
+    role_id: int | None = None
+    role_key: str | None = None
+    accessory_name: str = ''
+    specification: str = ''
+    unit: str = ''
+    quantity: float = 0
+    supplier_id: int | None = None
+    supplier_name: str = ''
+    remark: str = ''
+
+
+class PackagingItem(BaseModel):
+    """BOM 包装明细（预留字段，允许额外字段）。"""
+    model_config = {'extra': 'allow'}
+
+
+class RoleItem(BaseModel):
+    """BOM 角色明细（ProductRole）。
+
+    支持三种入参：``global_role_id``（关联已有全局角色）/ ``role_key``（新建全局角色，
+    客户端临时键）/ ``id``（既有产品角色关联行）。允许额外字段以兼容前端扩展字段。
+    """
+    model_config = {'extra': 'allow'}
+    id: int | None = None
+    global_role_id: int | None = None
+    role_key: str | None = None
+    role_name: str = ''
+    name: str | None = None
+
+
 class BomSaveRequest(BaseModel):
-    """保存BOM请求"""
-    filling: dict | None = None
-    fabrics: list[dict] = []
-    accessories: list[dict] = []
-    packagings: list[dict] = []
-    roles: list[dict] = []
-    fillings: list[dict] = []
+    """保存BOM请求（强类型版，canonical）。"""
+    filling: FillingItem | None = None
+    fabrics: list[FabricItem] = []
+    accessories: list[AccessoryItem] = []
+    packagings: list[PackagingItem] = []
+    roles: list[RoleItem] = []
+    fillings: list[FillingItem] = []
     default_bom_label: str | None = None
-
-
-class MaterialCalculateRequest(BaseModel):
-    orders: list[dict]
 
 
 class MaterialCalculateResponse(BaseModel):
@@ -80,6 +144,37 @@ class MaterialCalculateResponse(BaseModel):
     packaging: list = []
     total_categories: dict | None = None
     message: str | None = None
+
+
+# ============================================================
+# 全局角色字典（role）DTO
+# ============================================================
+
+class RoleItemDTO(BaseModel):
+    """角色项投影：``id`` = role.id；``global_role_id`` 供 get_bom 角色投影复用。"""
+    id: int
+    global_role_id: int | None = None
+    name: str
+
+
+class RoleCreate(BaseModel):
+    """新建全局角色请求。"""
+    name: str = Field(..., min_length=1, max_length=100, description='角色名（trim 后存储）')
+
+
+class RoleRename(BaseModel):
+    """重命名全局角色请求。"""
+    name: str = Field(..., min_length=1, max_length=100, description='新角色名（trim 后存储）')
+
+
+class RoleListResponse(BaseModel):
+    success: bool = True
+    roles: list[RoleItemDTO] = []
+
+
+class RoleDeleteResponse(BaseModel):
+    success: bool = True
+    message: str = ''
 
 
 # ============================================================
