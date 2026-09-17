@@ -569,6 +569,12 @@ h6 { font-size: 0.8125rem; }
     /* 必须显式声明 line-height：靠继承 body 行高会让行高随全局样式漂移
        （实测继承 1.6 时行高 32.2px，显式 1.35 → 29.2px，与「紧凑表 30px 量级」的设计意图一致） */
     line-height: 1.35;
+    /* ⚠️ 必须 fixed，不能靠 auto + 百分比：auto 布局下 colgroup 的百分比只是「建议值」，
+       min-content 才是硬约束 —— 实测「5 列 nowrap + 长供应商名」时表宽恒为 534.8px，
+       而容器在 1920 只有 501.3px（1440 → 341.3、1280 → 288），表格溢出后被祖先
+       .mc-col{overflow:hidden} 裁掉，右端「单位」列不可见且无法横向滚动抵达。
+       改 fixed 后列宽由 colgroup 决定、表宽恒等于容器宽，配合下方的省略号不丢可用性。 */
+    table-layout: fixed;
   }
   .mc-table thead th {
     padding: 5px 8px;
@@ -578,13 +584,20 @@ h6 { font-size: 0.8125rem; }
     color: var(--color-text-muted);
     background: var(--color-slate-50);
     border-bottom: 1px solid var(--color-border-light);
-    white-space: nowrap;
+    /* 表头**允许换行**，数据单元格才用 nowrap + 省略号。
+       理由：窄列（实测 1280 宽）下属过约束，「规格/色号」会被截成「规格/色…」——
+       列名被截断比内容被截断更难恢复认知（用户不知道这列是什么）。
+       换行只在真的放不下时发生，宽列仍是单行。 */
+    white-space: normal;
+    overflow: hidden;
   }
   .mc-table tbody td {
     padding: 6px 8px;
     border-bottom: 1px solid var(--color-border-light);
     color: var(--color-text);
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .mc-table tbody tr:last-child td {
     border-bottom: 0;

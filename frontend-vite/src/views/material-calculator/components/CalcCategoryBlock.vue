@@ -35,9 +35,11 @@
         </thead>
         <tbody>
           <tr v-for="row in rows" :key="row.__rk">
-            <td>{{ row.supplier_name || '-' }}</td>
-            <td>{{ row.material_name }}</td>
-            <td>{{ row.specification || '-' }}</td>
+            <!-- .mc-table 是 table-layout:fixed + nowrap，长文本会被省略号截断
+                 → 用 title 保证全文仍可悬浮查看（否则截断等于信息丢失） -->
+            <td :title="row.supplier_name || ''">{{ row.supplier_name || '-' }}</td>
+            <td :title="row.material_name || ''">{{ row.material_name }}</td>
+            <td :title="row.specification || ''">{{ row.specification || '-' }}</td>
             <td class="is-num">{{ quantityOf(categoryKey, row) }}</td>
             <td>{{ unitOf(categoryKey, row) }}</td>
           </tr>
@@ -98,24 +100,25 @@ function unitOf(catKey: string, row: CalcRowVM): string {
 <style scoped>
 /* 列宽配比（colgroup 上的百分比）。
    背景：auto 布局按「内容宽比例」分配多余空间，实测 1600px 视口下空白占全表 47.4%，
-   其中「物料名称」一列独占 63.8px（是其文字宽的 1.4 倍），而「总采购量」表头
-   本身就有 60px 文字、只分到 80px 列宽，视觉上数字被挤到贴边、名称后却空一大截。
-   这里按「表头文字宽 + 典型内容宽」给出目标配比，仍保留 auto 布局：
-   百分比是**目标值**而非硬约束，窄列下浏览器仍会保证内容不溢出（不换行、不截断）。 */
+   且分配结果与表头需求倒挂——「总采购量」表头文字就有 60px 却只分到 75px 列宽，
+   比表头仅 33px 的「供应商」(78.9px) 还窄；「物料名称」则独占 50px 纯空白。
+   配比依据 = 各列「表头文字宽 + 典型内容宽 + 16px 内边距」，再把剩余空间均分：
+   实测需求 49/60/65/76/38px，余量 107px 五等分 → 目标 70/81/86/97/59px。
+   仍保留 auto 布局：百分比是**目标值**而非硬约束，窄列下浏览器会保证内容不溢出。 */
 .mc-col-supplier {
-  width: 20%;
+  width: 18%;
 }
 .mc-col-name {
-  width: 24%;
+  width: 21%;
 }
 .mc-col-spec {
-  width: 25%;
+  width: 22%;
 }
 .mc-col-qty {
-  width: 19%;
+  width: 24%;
 }
 .mc-col-unit {
-  width: 12%;
+  width: 15%;
 }
 
 /* 区块之间 1px 分隔线，末尾不加 */
