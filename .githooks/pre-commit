@@ -169,8 +169,15 @@ for f in $staged; do
             secret_hits="${secret_hits}  ✗ $f  —— 命中私钥/云凭据特征
 "
         else
+            # 逐步收窄误报（本仓实测踩到两次，故留注释）：
+            #   ① 占位符样式（<...> / YOUR_ / changeme / example ...）
+            #   ② **右侧是表达式而非字面量**：如 `password = userinfo.split(":", 1)[1]`
+            #      —— 它是解析 DSN 的代码，不是硬编码凭据。判据：运算符后紧跟
+            #      「标识符 + ( 或 [」，即函数调用/下标取值。
+            #      （若不放宽，本仓自己的 scripts/diag/runtime_mode_probe.py 会被拦住）
             pwd_matches=$(grep -Ei -e "$pwd_pattern" "$tmpf" | \
-                grep -Eiv -e '(<[^>]+>|YOUR_|CHANGE_?ME|changeme|placeholder|example|xxxx|dummy|fake|testkey|your[-_])')
+                grep -Eiv -e '(<[^>]+>|YOUR_|CHANGE_?ME|changeme|placeholder|example|xxxx|dummy|fake|testkey|your[-_])' | \
+                grep -Eiv -e '[:=][[:space:]]*[A-Za-z0-9_.]*[\(\[]')
             if [ -n "$pwd_matches" ]; then
                 secret_hits="${secret_hits}  ✗ $f  —— 疑似明文口令/密钥赋值
 "

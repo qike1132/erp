@@ -244,3 +244,62 @@ def register_health_routes(app: FastAPI) -> None:
             status_code=503,
             media_type="application/json",
         )
+
+    @app.get("/api/health/arq", tags=["健康检查"])
+    async def arq_health_probe():
+        """ARQ worker 专用健康探针（严格：离线即 503）。供外部监控轮询。
+
+        ⛔ 为什么单开一个端点，而不是把 ARQ 并进 /api/health（2026-09-17 审计 S3）
+        -------------------------------------------------------------------------
+        1. `/api/health` 被 `prod_runner.py:663` 当作**后端健康门**每 3s 轮询。
+           若把 ARQ 状态并进去，ARQ 一旦掉线就会让 `/api/health` 变成不健康，
+           ⇒ 把「ARQ 故障」**误标成「后端故障」**，把运维引向重启一个完全正常的服务
+           （本仓库已有此类误判先例）。
+        2. ARQ broker 不可达时探测最长耗时 `_HEALTH_PROBE_TIMEOUT=2s`；
+           并入 `/api/health` 会拖慢 prod_runner 的健康轮询（其单次超时仅 5s）。
+
+        ⇒ 因此本端点**只做增量暴露**，不改变任何既有端点的语义。
+
+        ⚠️ 为什么要监控它：`erp-arq` 是**定时备份的唯一调度者**（`scheduler_poller`
+        每 5 分钟扫 `backup_schedule`）。ARQ 静默停摆 = 数据保护静默失效，
+        而在本端点存在之前，该故障**没有任何对外信号**（`/api/health` 依旧 healthy）。
+
+        三态语义（复用仓内唯一判活契约 `core/arq_app.check_worker_health`，
+        即 ARQ 官方哨兵键 `queue_name + ':health-check'`，端口在 broker 实例上）：
+
+        | status          | HTTP | 含义                                    | 监控应做什么            |
+        |-----------------|------|-----------------------------------------|-------------------------|
+        | `running`       | 200  | 哨兵键存在且心跳新鲜                    | 正常                    |
+        | `not_running`   | 503  | 键不存在 ⇒ worker 确实不在线            | 拉起 `erp-arq`          |
+        | `probe_unknown` | 503  | **探测自身**失败（连不上 broker/超时）  | 查 broker，**勿**判定 ARQ 已死 |
+
+        ⚠️ `probe_unknown` 与 `not_running` 必须区分：文案与语义都不同，
+        否则会把运维引向「重启一个正常的 worker」而忽略真正出问题的 broker。
+        """
+        from fastapi_app.core.arq_app import check_worker_health
+
+        try:
+            is_healthy, message = await check_worker_health()
+        except Exception as exc:  # broad-except: 健康探测自身不得抛出，任何异常都须转成"未知"态
+            logger.warning('ARQ 健康端点探测自身异常: %s', exc)
+            return Response(
+                content=json.dumps(
+                    {"status": "probe_unknown",
+                     "message": "ARQ 健康探测自身异常: %s" % type(exc).__name__},
+                    ensure_ascii=False,
+                ),
+                status_code=503,
+                media_type="application/json",
+            )
+
+        if is_healthy:
+            return {"status": "running", "message": message}
+
+        # check_worker_health 用**文案**区分「未运行」与「探测失败」（它只返回 bool），
+        # 故此处按文案分流。若将来该契约改为结构化返回，应同步替换此处判断。
+        state = "not_running" if "未运行" in message else "probe_unknown"
+        return Response(
+            content=json.dumps({"status": state, "message": message}, ensure_ascii=False),
+            status_code=503,
+            media_type="application/json",
+        )
