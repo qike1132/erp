@@ -212,7 +212,23 @@ else
     echo "pre-commit: 未安装 pre-commit，跳过第 3 层门禁（ruff/质量门禁/分层门禁）" >&2
     echo "pre-commit: 建议安装以恢复完整保护：pip install pre-commit" >&2
     # 退而求其次：至少把质量门禁跑起来（它是纯 python 脚本）
-    if [ -f "scripts/quality_gate.py" ]; then
+    # ⚡ 性能门：质量门禁是**全仓扫描**（AST + 前端组件），实测在 Windows/git-bash 下
+    #    会让一次提交多花数十秒。而它只检查 .py / .vue，因此仅当暂存里确实有这两类文件时
+    #    才运行——纯文档/配置提交直接跳过，避免把提交变成慢操作而诱发 --no-verify 滥用。
+    need_gate=0
+    old_ifs2=$IFS
+    IFS='
+'
+    for f in $staged; do
+        case "$f" in
+            *.py|*.vue) need_gate=1; break ;;
+        esac
+    done
+    IFS=$old_ifs2
+
+    if [ "$need_gate" -eq 0 ]; then
+        echo "pre-commit: 暂存内容不含 .py/.vue，跳过代码质量门禁（第 3 层）" >&2
+    elif [ -f "scripts/quality_gate.py" ]; then
         py=""
         # 依次尝试：PATH 上的解释器 → 本机已知解释器绝对路径
         # （git-bash 的 PATH 常常找不到 Windows Python，故显式兜底）
