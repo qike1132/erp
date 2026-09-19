@@ -306,5 +306,16 @@ _firefox_profile_*/
 # （.codeartsdoer/.workbuddy/.qoder/.freebuff/.codebuddy 已在文件上方忽略）
 /.trae/
 # 临时/过程性产物目录（未跟踪，但此前散落在工作区）
-/_qa_tmp/
+# _qa_tmp / _qa_tmp2 / _qa_tmp3 …（不带尾斜杠：尾斜杠只匹配目录，
+# 去掉后才能同时覆盖同名文件，且不依赖路径是否已存在于磁盘）
+/_qa_tmp*
+# 归属未明的研究草稿：目录 + 同名 md 文件
+# （尾斜杠只匹配目录，故此处不带斜杠，才能同时覆盖 _dsh_research_awesome1.md 这类文件）
+/_dsh_research*
 /_fix_backup_*/
+
+# === 2026-09-19 工作区卫生棘轮：过程件不入库（deliverables 只进最终交付物）===
+/deliverables/**/_*.py
+/deliverables/**/_*.out
+/deliverables/**/_*.txt
+/deliverables/**/*.BEFORE-*
