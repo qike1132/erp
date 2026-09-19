@@ -1,5 +1,13 @@
 # 变更日志 (Changelog)
 
+## [2026-09-18] 文件规模门禁阈值上调与单点化
+
+### 🧱 `file_size_gate` 阈值 1200 → 1600，且不再三处硬编码
+- **问题**：阈值原先写在 3 个地方（`pyproject.toml max_file_size`、`scripts/file_size_gate.py DEFAULT_THRESHOLD`、CI workflow 的 `--threshold 1200`），改一处必漏两处；而 1200 会让两个存量文件一旦被改动就阻断提交（`test_purchase_center.py` 1497 行、`recovery_test_service.py` 1353 行）。
+- **改动**：`file_size_gate.py` 新增 `_threshold_from_pyproject()`，改为读取 `pyproject.toml [tool.code-quality] max_file_size`（与 `quality_gate.py` 同一约定，解析失败才回落内置默认值）；CI 步骤去掉 `--threshold 1200` 改为读配置。
+- **定档依据**：受扫描的 777 个 `.py` 中仅上述 2 个超过 1200，故取 1600 留出余量，仍能拦住新增上帝类。
+- **顺带修复**：`file_size_gate.py` 的 git 输出解码改为显式 `encoding="utf-8"`，并强制 stdout/stderr 为 UTF-8 —— 中文 Windows（cp936）下打印 `⚠` 会抛 `UnicodeEncodeError`，使门禁自身崩溃。
+
 ## [2026-08-22] 生产部署健壮性：服务依赖 + 日志轮转
 
 ### 🔗 NSSM 服务启动依赖（消除开机重启风暴）

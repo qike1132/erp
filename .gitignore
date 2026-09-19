@@ -299,3 +299,12 @@ _firefox_profile_*/
 
 # 审计/排查一次性产物（与上方 /_*.py、/_*.sh、/_*.txt 同源约定）
 /_*.json
+
+# === 2026-09-18 仓库卫生整改（第 3 项）===
+# AI 编码工具的本地配置目录：仅服务本机 agent，不是项目资产。
+# 此前 .gitignore 漏了 .trae/，导致 190 个 agent 规则快照文件被提交入库。
+# （.codeartsdoer/.workbuddy/.qoder/.freebuff/.codebuddy 已在文件上方忽略）
+/.trae/
+# 临时/过程性产物目录（未跟踪，但此前散落在工作区）
+/_qa_tmp/
+/_fix_backup_*/

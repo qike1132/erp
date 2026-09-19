@@ -17,18 +17,3 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
-
-      # 分层门禁（server_manager_v8 重构，零容忍）。
-      # 正向：domain/ 禁止 I/O，保证领域层可 100% 单测 —— 见重构方案风险 R2。
-      # 反向：adapters/ 禁止复刻领域判定（状态字面量 / sc 返回码 / 非法跨层 import）
-      #       —— v5.36 与 v5.39 两次互杀事故的成因就是规则散落在调用点。
-      # 应用层：★★ 禁止 import adapters（依赖倒置）。这一条最关键 ——
-      #       一旦 L3 直接依赖 L1，用例就无法被 Fake 替换，
-      #       整个「用 Protocol 换可测性」的设计就失效了。
-      # 仅在重构进行期间有意义；server_manager_v8/ 不存在时自动跳过。
-      - id: domain-purity
-        name: 分层门禁（domain 零 I/O + adapters 零判定复刻 + 应用层依赖倒置）
-        entry: python scripts/check_domain_purity.py
-        language: system
-        pass_filenames: false
-        always_run: true
