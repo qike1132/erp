@@ -9,7 +9,7 @@
  * BeileOrderTab 通过 injectBeileOrders() 注入同一实例，
  * 消除 ref 反向桥接导致的父子联动重渲染。
  */
-import { reactive, computed, ref, watch, provide, inject, type InjectionKey } from 'vue'
+import { reactive, computed, ref, watch, provide, inject, onUnmounted, type InjectionKey } from 'vue'
 import { useRoute } from 'vue-router'
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/vue-query'
 import { orderApi } from '@/api'
@@ -444,9 +444,18 @@ export function useBeileOrders() {
     }
   }
 
-  // ==================== 选中（批量打印） ====================
-  /** 选中的订单 id 集合 */
-  const selectedIds = ref<Set<number>>(new Set())
+  // ==================== 选中（导出 / 批量打印） ====================
+  /**
+   * 行选中键：record_type + id 复合。订单（Order）与备货（StockIn）来自不同表，
+   * id 可能撞号（后端 handleConfirm 注释同源提示），纯 id 作键会让勾选串扰到
+   * 另一类记录 → 导出/打印多带未勾选的行。
+   */
+  function rowKey(item: Pick<BeileOrderRow, 'id' | 'record_type'>): string {
+    return `${item.record_type ?? 'order'}:${item.id}`
+  }
+
+  /** 选中的行键集合（rowKey 复合键） */
+  const selectedIds = ref<Set<string>>(new Set())
   const selectedCount = computed(() => selectedIds.value.size)
 
   /** 当前展示列表是否有数据（导出按钮启用条件） */
@@ -454,21 +463,22 @@ export function useBeileOrders() {
 
   /** 当前页是否全选 */
   const isAllSelected = computed(() =>
-    displayOrders.value.length > 0 && displayOrders.value.every((o) => selectedIds.value.has(o.id)),
+    displayOrders.value.length > 0 && displayOrders.value.every((o) => selectedIds.value.has(rowKey(o))),
   )
 
   /** 切换单行选中（直接 mutate reactive Set，避免 O(n) 拷贝） */
-  function toggleSelect(id: number) {
-    if (selectedIds.value.has(id)) selectedIds.value.delete(id)
-    else selectedIds.value.add(id)
+  function toggleSelect(item: Pick<BeileOrderRow, 'id' | 'record_type'>) {
+    const key = rowKey(item)
+    if (selectedIds.value.has(key)) selectedIds.value.delete(key)
+    else selectedIds.value.add(key)
   }
 
   /** 全选 / 取消全选当前页 */
   function toggleSelectAll(checked: boolean) {
     if (checked) {
-      displayOrders.value.forEach((o) => selectedIds.value.add(o.id))
+      displayOrders.value.forEach((o) => selectedIds.value.add(rowKey(o)))
     } else {
-      displayOrders.value.forEach((o) => selectedIds.value.delete(o.id))
+      displayOrders.value.forEach((o) => selectedIds.value.delete(rowKey(o)))
     }
   }
 
@@ -492,13 +502,34 @@ export function useBeileOrders() {
   // 汇总表 tbody 的构建（含逐 SKU 粒度）已提到模块作用域：`buildSummaryTbody(items, keyword)`，
   // 以便被导出/打印复用，并可被单测直接导入验证（页面 = 导出 = 打印 单一真源，AC-12）。
 
-  /** 导出当前页数据为 XLS */
+  /**
+   * 导出范围为「已勾选」的行（BUG 修复：原实现恒导出当前页全部，与用户勾选不一致）：
+   * - 有勾选 → 仅导出勾选的订单/备货（导出文件内容 == 勾选集合）；
+   * - 无勾选 → 导出当前页全部（未表达勾选意图时的兜底，保持既有能力——
+   *   仅导出权限无打印权限的用户看不到复选框，不能被强制要求勾选）。
+   * 返回 (targets, selectedCount)：selectedCount>0 时标题附条数便于核对。
+   */
+  function exportTargets(): { targets: BeileOrderRow[]; selectedCount: number } {
+    if (selectedCount.value > 0) {
+      const targets = displayOrders.value.filter((o) => selectedIds.value.has(rowKey(o)))
+      return { targets, selectedCount: targets.length }
+    }
+    return { targets: displayOrders.value, selectedCount: 0 }
+  }
+
+  /** 导出为 XLS：有勾选仅导勾选行，无勾选导出当前页 */
   function handleExport() {
+    const { targets, selectedCount: picked } = exportTargets()
+    if (targets.length === 0) {
+      // 勾选已全部失效（如确认流程移除了勾选行）或列表被并发清空——不产生空文件
+      toast.warning(picked > 0 ? '勾选的订单已不在当前列表，请重新勾选' : '当前页暂无数据可导出')
+      return
+    }
     runExport(() => {
       const thead = `<tr>${SUMMARY_HEADERS.map((h, i) => `<th style="width:${SUMMARY_COL_WIDTHS[i]}px">${h}</th>`).join('')}</tr>`
-      const tbody = buildSummaryTbody(displayOrders.value, appliedProduct.value)
+      const tbody = buildSummaryTbody(targets, appliedProduct.value)
       const statusLabel = confirmStatus.value === 'unconfirmed' ? '未确认' : '已确认'
-      const title = `湖北订单汇总（${statusLabel}）`
+      const title = `湖北订单汇总（${statusLabel}${picked > 0 ? `·已选 ${picked} 条` : ''}）`
       const html = `<div style="text-align:center;margin-bottom:20px;"><h2>${title}</h2></div><table><thead>${thead}</thead><tbody>${tbody}</tbody></table>`
       const date = new Date().toISOString().slice(0, 10)
       downloadXls(html, `湖北订单_${statusLabel}_${date}.xls`)
@@ -507,7 +538,7 @@ export function useBeileOrders() {
 
   /** 批量打印选中订单汇总表 */
   function handlePrint() {
-    const targets = displayOrders.value.filter((o) => selectedIds.value.has(o.id))
+    const targets = displayOrders.value.filter((o) => selectedIds.value.has(rowKey(o)))
     if (targets.length === 0) {
       toast.warning('请先勾选要打印的订单')
       return
@@ -528,6 +559,44 @@ export function useBeileOrders() {
   // 已确认的客户筛选变化时回到首页
   watch(() => appliedCustomer.value, () => {
     page.value = 1
+  })
+
+  // 产品筛选（含键入自动应用 / 下拉选择）变化时回到首页：
+  // 原实现仅客户筛选回首页，翻到后页再筛选会停在空页（显示「未匹配」）
+  watch(appliedProduct, () => {
+    page.value = 1
+  })
+
+  /**
+   * 自由键入自动应用（BUG-1 修复）：
+   * /beile-order 页搜索框无查询按钮（HubeiView :show-actions="false"），
+   * appliedProduct 仅在「点击下拉建议项」时更新；用户直接键入关键字
+   * （如「变形金刚」）后未点建议 → 列表完全不过滤 → 出现大量不相关结果。
+   * 停顿 600ms 自动把输入文本确认为筛选值（服务端 product 过滤 + 客户端
+   * displayOrders 二次过滤同键生效）；清空输入由 HubeiSearchBar 的 reset
+   * 事件走 handleReset，此处兜底同步复位 appliedProduct。
+   * 600ms > 下拉搜索防抖 500ms，快速连续键入不会逐键触发查询抖动。
+   */
+  let applyKwTimer: ReturnType<typeof setTimeout> | null = null
+  watch(() => filters.orderNo, (val) => {
+    if (applyKwTimer) {
+      clearTimeout(applyKwTimer)
+      applyKwTimer = null
+    }
+    const v = val.trim()
+    if (!v) {
+      if (appliedProduct.value) appliedProduct.value = ''
+      return
+    }
+    if (v === appliedProduct.value.trim()) return
+    applyKwTimer = setTimeout(() => {
+      applyKwTimer = null
+      appliedProduct.value = v
+    }, 600)
+  })
+
+  onUnmounted(() => {
+    if (applyKwTimer) clearTimeout(applyKwTimer)
   })
 
   // 每页条数变化时回到第一页
@@ -570,6 +639,7 @@ export function useBeileOrders() {
     confirmingIds,
     handleConfirm,
     // 选中
+    rowKey,
     selectedIds,
     selectedCount,
     hasDisplayOrders,

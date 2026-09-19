@@ -8,7 +8,7 @@
     @click="openDetail(item)"
   >
     <div v-if="selectable" class="bo-td bo-td-center bo-td-select" style="width: 40px;" @click.stop>
-      <UiCheckbox :checked="selected" :aria-label="`选择订单 ${item.order_no || item.id}`" @update:checked="$emit('toggleSelect', item.id)" />
+      <UiCheckbox :checked="selected" :aria-label="`选择订单 ${item.order_no || item.id}`" @update:checked="$emit('toggleSelect', item)" />
     </div>
 
     <!-- 订单类型：订单/备货徽章（原订单号列删除，改展示类型） -->
@@ -125,8 +125,8 @@ const emit = defineEmits<{
   open: [item: BeileOrderRowType]
   /** 确认订单 */
   confirm: [item: BeileOrderRowType]
-  /** 切换行选中状态 */
-  toggleSelect: [id: number]
+  /** 切换行选中状态（携带整行：选中键 = record_type:id 复合，防订单/备货 id 撞号串扰） */
+  toggleSelect: [item: BeileOrderRowType]
 }>()
 
 /** SKU 数量（订单级汇总事实） */

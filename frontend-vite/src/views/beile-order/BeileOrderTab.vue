@@ -54,7 +54,7 @@
                       :is-confirming="confirmingIds.has(item.id)"
                       :highlight-id="highlightId"
                       :selectable="canPrint"
-                      :selected="selectedIds.has(item.id)"
+                      :selected="selectedIds.has(rowKey(item))"
                       @open="openDetail"
                       @confirm="handleConfirm"
                       @toggle-select="toggleSelect"
@@ -67,7 +67,7 @@
 
           <div v-if="displayOrders.length === 0" class="bo-empty bo-empty-inline">
             <FontAwesomeIcon icon="search-minus" aria-hidden="true" />
-            <span>当前页未匹配到该订单号</span>
+            <span>未找到包含该关键字的订单</span>
           </div>
         </div>
 
@@ -132,6 +132,7 @@ const {
   openDetail,
   confirmingIds,
   handleConfirm,
+  rowKey,
   selectedIds,
   isAllSelected,
   toggleSelect,

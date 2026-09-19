@@ -247,6 +247,83 @@ describe('BeileOrderTab 导出与打印功能', () => {
     expect(printBtn.attributes('disabled')).toBeDefined()
   })
 
+  it('仅导出勾选的订单：勾选 1 条后导出文件不含未勾选行，标题附已选条数（BUG：导出与勾选不一致）', async () => {
+    const wrapper = await mountTab()
+    const checkboxes = wrapper.findAll('.bo-td-select input, .bo-td-select [role="checkbox"]')
+    expect(checkboxes.length).toBe(2)
+    await checkboxes[0]!.trigger('click')
+    await nextTick()
+    expect(wrapper.find('.bo-selected-count').text()).toContain('1')
+    await wrapper.find('.bo-toolbar-btn--export').trigger('click')
+    await flushPromises()
+    expect(mocks.downloadXlsMock).toHaveBeenCalledTimes(1)
+    const [html] = mocks.downloadXlsMock.mock.calls[0]!
+    // 勾选行（订单 101：客户A/产品A）出现
+    expect(html).toContain('客户A')
+    expect(html).toContain('产品A')
+    // 未勾选行（备货 201：备货客户/产品C）不出现
+    expect(html).not.toContain('备货客户')
+    expect(html).not.toContain('产品C')
+    // 标题附条数，便于核对导出范围 == 勾选集合
+    expect(html).toContain('已选 1 条')
+  })
+
+  it('订单与备货 id 撞号时勾选其一仅导出其一（选中键 = record_type:id 复合）', async () => {
+    // 订单 id=201 与备货 id=201 同页（不同表 id 可能撞号，后端同源提示）
+    mocks.queryData.value = makeListResponse({
+      total: 2,
+      data: [
+        {
+          id: 201,
+          record_type: 'order',
+          confirmed: false,
+          confirmed_at: null,
+          confirmed_by: null,
+          order_no: 'PO-201',
+          customer: '订单客户',
+          order_date: '2026-08-12',
+          product_name: '订单品',
+          product_id: 1,
+          quantity: 10,
+          deduct_quantity: 0,
+          deduct_stock: false,
+          note: '',
+          status: '待备货',
+          factories: ['湖北'],
+          items: [{ id: 1, product_name: '订单品', product_barcode: '690001', quantity: 10, note: '' }],
+        },
+        {
+          id: 201,
+          record_type: 'stockin',
+          confirmed: false,
+          confirmed_at: null,
+          confirmed_by: null,
+          customer: '备货客户',
+          order_date: '2026-08-10',
+          product_name: '备货品',
+          product_id: 3,
+          quantity: 3,
+          deduct_quantity: 0,
+          deduct_stock: false,
+          note: '',
+          status: '已入库',
+          factories: ['湖北'],
+          items: [],
+        },
+      ] as unknown as OrderListApiResponse['data'],
+    })
+    const wrapper = await mountTab()
+    const checkboxes = wrapper.findAll('.bo-td-select input, .bo-td-select [role="checkbox"]')
+    await checkboxes[0]!.trigger('click') // 仅勾选订单行（id 与备货行相同）
+    await nextTick()
+    expect(wrapper.find('.bo-selected-count').text()).toContain('1')
+    await wrapper.find('.bo-toolbar-btn--export').trigger('click')
+    await flushPromises()
+    const [html] = mocks.downloadXlsMock.mock.calls[0]!
+    expect(html).toContain('订单客户')
+    expect(html).not.toContain('备货客户')
+  })
+
   it('勾选订单后打印按钮启用，点击调用 printTable 汇总表', async () => {
     const wrapper = await mountTab()
     const checkboxes = wrapper.findAll('.bo-td-select input, .bo-td-select [role="checkbox"]')

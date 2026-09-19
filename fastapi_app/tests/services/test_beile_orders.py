@@ -326,6 +326,28 @@ async def test_confirm_beile_order_rejected_when_not_ordered(db):
     assert order.confirmed_at is None
 
 
+def test_fmt_beile_time_converts_utc_to_beijing():
+    """BUG 修复回归：beile-list 的时间输出必须 UTC→北京时间（+8）。
+
+    旧实现对 order_date / stockin_date（timestamptz，DB 存 UTC）与
+    confirmed_at（naive UTC）裸 strftime，把 UTC 时刻当地面时间输出 →
+    页面「下单时间」比实际早 8 小时（实证：订单号 PO-20260918-0001
+    显示 2026-09-17 22:20，与订单号日期矛盾）。
+    """
+    from datetime import UTC
+
+    from fastapi_app.services.order.beile import _fmt_beile_time
+
+    # timestamptz 列：DB 读回 aware UTC → 转 +8
+    assert _fmt_beile_time(datetime(2026, 9, 18, 5, 38, tzinfo=UTC)) == '2026-09-18 13:38'
+    # naive 列（confirmed_at 写入口径 = now(UTC).replace(tzinfo=None)）→ 按 UTC 解释转 +8
+    assert _fmt_beile_time(datetime(2026, 9, 18, 6, 31)) == '2026-09-18 14:31'
+    # 跨日边界：UTC 22:20 → 次日 06:20（「下单时间与订单号日期对不上」的关键场景）
+    assert _fmt_beile_time(datetime(2026, 9, 17, 22, 20, tzinfo=UTC)) == '2026-09-18 06:20'
+    # NULL → ''（前端展示 '-'）
+    assert _fmt_beile_time(None) == ''
+
+
 async def test_confirm_already_confirmed_unordered_returns_idempotent_200(db):
     """CR-1：幂等早退必须在门控之前。
 

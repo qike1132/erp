@@ -4,7 +4,7 @@
 从 order_crud.py 按职责拆出，行为与原实现完全一致。
 """
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 from typing import NamedTuple
 
 from sqlalchemy import desc, func, literal, or_, select, union_all, update
@@ -33,6 +33,25 @@ logger = logging.getLogger(__name__)
 
 # 未在采购中心完成下单时拒绝确认的统一文案（与前端 NOT_ORDERED_DETAIL 逐字一致，设计 §11.4）
 BEILE_NOT_ORDERED_DETAIL = '该订单未在采购中心完成下单，请先在采购中心完成下单后再确认'
+
+# beile-list 时间展示时区：用户全部在国内（工厂内网，中国无夏令时，固定 UTC+8）。
+# order_date / stockin_date 列为 timestamptz（DB 存储 UTC）、confirmed_at 列为 naive
+# TIMESTAMP 且写入的是 naive UTC（confirm_* 写入处 now(UTC).replace(tzinfo=None)），
+# 裸 strftime 会把 UTC 时刻当地面时间输出 → 页面「下单时间」比实际早 8 小时
+# （实证：订单号 PO-20260918-0001 显示 2026-09-17 22:20）。
+_BEILE_TZ = timezone(timedelta(hours=8))
+
+
+def _fmt_beile_time(dt: datetime | None) -> str:
+    """UTC（aware timestamptz 或 naive UTC）→ 北京时间 'YYYY-MM-DD HH:MM'。
+
+    页面行 / 详情弹窗 / 导出 XLS / 打印预览共用该输出（前端不做二次时区换算）。
+    """
+    if not dt:
+        return ''
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(_BEILE_TZ).strftime('%Y-%m-%d %H:%M')
 
 
 def _build_beile_unified_query(confirmed: bool | None, customer, factory, product_kw=None):
@@ -515,13 +534,13 @@ def _build_beile_order_record(order: Order, factory: str, pos: list, sku_rows: l
         'product_id': first_item.product_id if first_item else None,
         'product_name': first_item.product_name if first_item else None,
         'quantity': first_item.quantity if first_item else 0,
-        'order_date': order.order_date.strftime('%Y-%m-%d %H:%M') if order.order_date else '',
+        'order_date': _fmt_beile_time(order.order_date),
         'record_type': 'order',
         'items': items_data,
         'factories': [factory],
         # 湖北订单确认状态：confirmed_at IS NULL 视为「未确认订单」
         'confirmed': order.confirmed_at is not None,
-        'confirmed_at': order.confirmed_at.strftime('%Y-%m-%d %H:%M') if order.confirmed_at else '',
+        'confirmed_at': _fmt_beile_time(order.confirmed_at),
         'confirmed_by': order.confirmed_by.username if order.confirmed_by else None,
     }
     return _apply_ordered_fields(record, pos, sku_rows)
@@ -563,13 +582,13 @@ def _build_beile_stockin_record(
         'product_id': stockin.product_id,
         'product_name': product_name,
         'quantity': stockin.quantity,
-        'order_date': stockin.stockin_date.strftime('%Y-%m-%d %H:%M') if stockin.stockin_date else '',
+        'order_date': _fmt_beile_time(stockin.stockin_date),
         'record_type': 'stockin',
         'items': items_data,
         'factories': [factory],
         # 湖北备货确认状态（与订单确认流程对齐）：confirmed_at IS NULL 视为「未确认备货」
         'confirmed': stockin.confirmed_at is not None,
-        'confirmed_at': stockin.confirmed_at.strftime('%Y-%m-%d %H:%M') if stockin.confirmed_at else '',
+        'confirmed_at': _fmt_beile_time(stockin.confirmed_at),
         'confirmed_by': stockin.confirmed_by.username if stockin.confirmed_by else None,
     }
     return _apply_ordered_fields(record, pos, sku_rows, pos_exact=pos_exact)
