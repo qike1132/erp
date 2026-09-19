@@ -27,17 +27,18 @@ const form = defineModel<FormState>('form', { required: true })
   border-radius: 12px;
   background: white;
   border: 1px solid var(--color-border-light);
-  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
 }
 .co-type-btn {
   padding: 5px 14px;
+  min-height: 32px;
   border: none;
   border-radius: 9px;
   background: transparent;
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.3s ease, color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
+  transition: background 0.2s ease, color 0.2s ease;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -46,13 +47,14 @@ const form = defineModel<FormState>('form', { required: true })
 .co-type-btn:hover {
   background: var(--color-primary-50);
   color: var(--color-primary-600);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-  transform: translateY(-1px);
+}
+.co-type-btn:focus-visible {
+  outline: 2px solid var(--color-primary-500);
+  outline-offset: 2px;
 }
 .co-type-btn.active {
-  background: linear-gradient(135deg, var(--color-primary-50), var(--color-primary-100));
+  background: var(--color-primary-50);
   color: var(--color-primary-700);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 2px 8px rgba(91, 141, 239, 0.2);
-  transform: translateY(-1px);
+  box-shadow: inset 0 0 0 1px var(--color-primary-200, var(--color-primary-100));
 }
 </style>

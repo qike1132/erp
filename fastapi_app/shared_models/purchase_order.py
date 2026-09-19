@@ -6,7 +6,19 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, desc, func
+from sqlalchemy import (
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    desc,
+    func,
+)
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -47,6 +59,12 @@ class PurchaseOrder(Base):
     source_order_ids: Mapped[str | None] = mapped_column(Text, comment='关联的原始订单IDs(JSON数组)')
     product_name: Mapped[str | None] = mapped_column(String(200), comment='产品名称')
     product_quantity: Mapped[float | None] = mapped_column(Numeric(12, 2), comment='订单数量')
+    spare_quantity: Mapped[float | None] = mapped_column(
+        Numeric(12, 2), comment='备品数量=ceil(订单数量×损耗率‰)，随下单/保存写入',
+    )
+    spare_rate: Mapped[float | None] = mapped_column(
+        Numeric(8, 2), comment='损耗率快照(千分之几)，用于追溯备品按多少损耗率算出',
+    )
     total_amount: Mapped[float | None] = mapped_column(Numeric(12, 2), default=0, comment='订单总金额')
     create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), comment='创建时间')
     update_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), comment='更新时间')
@@ -56,6 +74,11 @@ class PurchaseOrder(Base):
 
     items: Mapped[list[PurchaseOrderItem]] = relationship(
         'PurchaseOrderItem', backref='order', cascade='all, delete-orphan', lazy='raise'
+    )
+    # 逐 SKU 数量快照（方案 C）：本仓 ORM 约定 lazy='raise'，读取必须显式
+    # selectinload / joinedload；删除采购单时随主表级联清理（含 DB 级 ondelete='CASCADE'）。
+    skus: Mapped[list[PurchaseOrderSku]] = relationship(
+        'PurchaseOrderSku', backref='order', cascade='all, delete-orphan', lazy='raise'
     )
     supplier_rel: Mapped[Supplier | None] = relationship(
         "Supplier", back_populates="purchase_orders", lazy="raise"
@@ -123,6 +146,8 @@ class PurchaseOrder(Base):
             'source_order_id': self.source_order_id,
             'product_name': product_name,
             'product_quantity': float(self.product_quantity) if self.product_quantity else None,
+            'spare_quantity': float(self.spare_quantity) if self.spare_quantity is not None else None,
+            'spare_rate': float(self.spare_rate) if self.spare_rate is not None else None,
             'create_time': self.create_time.strftime('%Y-%m-%d %H:%M:%S') if self.create_time else None,
             'update_time': self.update_time.strftime('%Y-%m-%d %H:%M:%S') if self.update_time else None,
             'completed_at': self.completed_at.strftime('%Y-%m-%d %H:%M:%S') if self.completed_at else None,
@@ -186,3 +211,60 @@ class PurchaseOrderItem(Base):
             'supplier_name': self.supplier_name,
             'remark': self.remark
         }
+
+
+class PurchaseOrderSku(Base):
+    """采购订单逐 SKU 数量快照（方案 C：治本）。
+
+    **背景**（见 evidence/beile_multisku/多SKU订单数量显示-根因与方案.md RC-1）：
+    汇总下单时「1 个客户 = 1 张采购单」，多 SKU 的产品名被 '、'.join 拼接、
+    数量被求和写入 ``purchase_order.product_quantity``，于是「每个 SKU 各自
+    下单多少」自落库起即**不可还原**，下游 /beile-order 只能给出订单级标量。
+    本表把逐 SKU 的订单数量/备品量快照落库，供逐 SKU 展示与备品拆分。
+
+    **口径**：一行 = 一个来源记录中的**一个产品名**（同一来源同产品名的多行会
+    在写路径合并，见 services/purchase_order_sku.write_po_sku_rows）。
+    恒等式：``Σ order_qty == purchase_order.product_quantity``（同一采集口径）。
+
+    **source_record_type 必须保留**：本仓 order.id 与 stockin.id 会撞号
+    （见 services/order/beile.py 内既有注释），没有该判别列会导致读路径串号。
+    """
+
+    __tablename__ = 'purchase_order_sku'
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    po_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey('purchase_order.id', ondelete='CASCADE'),
+        nullable=False, comment='所属采购单ID',
+    )
+    product_name: Mapped[str | None] = mapped_column(String(200), comment='该 SKU 产品名（单 SKU，不拼接）')
+    product_barcode: Mapped[str | None] = mapped_column(String(50), comment='该 SKU 条码')
+    order_qty: Mapped[float | None] = mapped_column(Numeric(12, 2), comment='该 SKU 在来源记录中的订单数量')
+    spare_qty: Mapped[float | None] = mapped_column(
+        Numeric(12, 2), comment='该 SKU 备品数量=ceil(order_qty×损耗率‰)',
+    )
+    spare_rate: Mapped[float | None] = mapped_column(Numeric(8, 2), comment='损耗率快照(千分之几)')
+    source_order_id: Mapped[int | None] = mapped_column(Integer, comment='来源客户订单/备货 id')
+    source_record_type: Mapped[str | None] = mapped_column(
+        String(10), comment="来源记录类型: 'order' / 'stockin'",
+    )
+    create_time: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), comment='创建时间',
+    )
+
+    __table_args__ = (
+        # 唯一约束：保证写路径幂等（重复生成/回填不产生重复行）。
+        # 选 (po_id, source_record_type, source_order_id, product_name) 的理由：
+        #   1) 写路径已按同一四元组合并（同来源同产品名合并为一行），故不会冲突；
+        #   2) 回填脚本以「先删后插」实现幂等，唯一约束是第二道防线；
+        #   3) 不纳入 product_barcode：条码可为 NULL，PG 下 NULL != NULL 会使约束失效。
+        UniqueConstraint(
+            'po_id', 'source_record_type', 'source_order_id', 'product_name',
+            name='uq_po_sku_po_source_product',
+        ),
+        Index('idx_purchase_order_sku_po', 'po_id'),
+        Index('idx_purchase_order_sku_source', 'source_record_type', 'source_order_id'),
+    )
+
+    def __repr__(self):
+        return f'<PurchaseOrderSku po={self.po_id} {self.product_name}>'

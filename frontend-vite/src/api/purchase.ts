@@ -99,8 +99,20 @@ export const bomApi = {
 export const purchaseApi = {
   orders: (params?: QueryParams) => get<{ orders: PurchaseOrder[]; total: number; pages: number; current_page: number }>('/purchase-center/orders', params),
   unprocessedOrders: (params?: { page?: number; per_page?: number }) => get<{ orders: UnprocessedOrder[]; total: number; pages: number; current_page: number }>('/purchase-center/unprocessed-orders', params),
-  completeOrder: (id: number) => post(`/purchase-center/orders/complete`, { order_id: id }),
-  batchComplete: (ids: number[]) => post('/purchase-center/orders/batch-complete', { ids }),
+  /**
+   * 下单完成。
+   * @param spareRate 损耗率（千分之几）；省略时不进请求体 → 后端保留该采购单已存值
+   */
+  completeOrder: (id: number, spareRate?: number) =>
+    post('/purchase-center/orders/complete',
+      spareRate === undefined ? { order_id: id } : { order_id: id, spare_rate: spareRate }),
+  /**
+   * 批量下单完成。
+   * @param spareRate 损耗率（千分之几）；省略时不进请求体 → 后端保留各单已存值
+   */
+  batchComplete: (ids: number[], spareRate?: number) =>
+    post('/purchase-center/orders/batch-complete',
+      spareRate === undefined ? { ids } : { ids, spare_rate: spareRate }),
   deleteOrder: (id: number) => del(`/purchase-center/orders/${id}`),
   batchDelete: (ids: number[]) => post('/purchase-center/orders/batch-delete', { ids }),
   updateOrder: (id: number, data: Partial<PurchaseOrder>) => put(`/purchase-center/orders/${id}`, data),
@@ -113,7 +125,18 @@ export const purchaseApi = {
   suggestions: (field: string, q: string) => get<string[]>('/purchase-center/orders/completed/suggestions', { field, q }),
   factorySummary: (ids: number[]) => post<Record<string, unknown>>('/purchase-center/orders/factory-summary', { ids }),
   supplierSummary: (ids: number[]) => post<Record<string, unknown>[]>('/purchase-center/orders/supplier-summary', { ids }),
-  saveFactoryEdits: (edits: Record<string, unknown>[]) => post('/purchase-center/orders/factory-summary/save', { edits }),
+  /**
+   * 保存工厂汇总编辑。
+   * - `edits` 可为空（用户仅交互了损耗率、无布料改动）；
+   * - `spareRate` 省略时不进请求体 → 后端保留已存率（避免用 0 覆盖）；
+   * - `orderIds` 为本次汇总涉及的采购单 ID，用于无编辑项时定位写入备品的目标。
+   */
+  saveFactoryEdits: (edits: Record<string, unknown>[], spareRate?: number, orderIds?: number[]) =>
+    post('/purchase-center/orders/factory-summary/save', {
+      edits,
+      ...(spareRate !== undefined ? { spare_rate: spareRate } : {}),
+      ...(orderIds && orderIds.length > 0 ? { order_ids: orderIds } : {}),
+    }),
   summaryPrint: (ids: number[], format: string) => post<ExportResponse>('/purchase-center/orders/summary-print', { ids, format }),
   supplierSummaryExport: (ids: number[]) =>
     postDownload('/purchase-center/orders/supplier-summary-export', { ids }, ids.length > 1 ? '供应商采购订单汇总.zip' : '供应商采购订单汇总.xlsx'),

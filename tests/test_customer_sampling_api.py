@@ -1,6 +1,6 @@
 """按客户分类打样信息模块 API 端点集成测试
 
-测试范围：15 个端点的正常路径与异常路径（404/409/400）
+测试范围：22 个端点的正常路径与异常路径（404/409/400）
 
 策略：
 - 使用 httpx AsyncClient + ASGITransport 连接 FastAPI app
@@ -579,30 +579,7 @@ class TestCustomerSamplingApi:
         resp = await client.get(f"{API_PREFIX}/projects/99999/versions")
         assert resp.status_code == 404
 
-    # ==================== 12. 创建新版本 ====================
-
-    async def test_create_version(self, cs_api):
-        """POST /projects/{id}/versions 创建 T2"""
-        client, _ = cs_api
-        pid, _ = await _create_project_via_api(client, "创建版本产品")
-        # 新增部位
-        await client.post(f"{API_PREFIX}/projects/{pid}/parts", json={"part_name": "身体", "fabric_name": "绒布"})
-
-        resp = await client.post(
-            f"{API_PREFIX}/projects/{pid}/versions",
-            json={"reason": "新增身体部位"},
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["version_no"] == "T2"
-
-    async def test_create_version_project_not_found(self, cs_api):
-        """POST /projects/{id}/versions 项目不存在 → 404"""
-        client, _ = cs_api
-        resp = await client.post(f"{API_PREFIX}/projects/99999/versions", json={})
-        assert resp.status_code == 404
-
-    # ==================== 13. 版本详情 ====================
+    # ==================== 12. 版本详情 ====================
 
     async def test_get_version_detail_t1(self, cs_api):
         """GET /versions/{id} T1 基线版本"""
@@ -620,13 +597,29 @@ class TestCustomerSamplingApi:
         assert data["change_summary"] is None
 
     async def test_get_version_detail_t2(self, cs_api):
-        """GET /versions/{id} T2 变更版本"""
-        client, _ = cs_api
+        """GET /versions/{id} T2 变更版本（直接落库种子：创建版本接口已随功能移除）"""
+        from sqlalchemy import select
+
+        from fastapi_app.shared_models import CustomerSamplingFabricVersion, CustomerSamplingRole
+
+        client, db = cs_api
         pid, _ = await _create_project_via_api(client, "T2详情产品")
         await client.post(f"{API_PREFIX}/projects/{pid}/parts", json={"part_name": "身体", "fabric_name": "绒布"})
-        v2 = (await client.post(f"{API_PREFIX}/projects/{pid}/versions", json={})).json()
 
-        resp = await client.get(f"{API_PREFIX}/versions/{v2['version_id']}")
+        role = (await db.execute(
+            select(CustomerSamplingRole).where(CustomerSamplingRole.project_id == pid)
+        )).scalars().first()
+        v2 = CustomerSamplingFabricVersion(
+            project_id=pid,
+            role_id=role.id,
+            version_no="T2",
+            snapshot_data=[{"part_name": "身体", "fabric_name": "绒布"}],
+            change_summary=[{"change_type": "add", "part_name": "身体"}],
+        )
+        db.add(v2)
+        await db.flush()
+
+        resp = await client.get(f"{API_PREFIX}/versions/{v2.id}")
         assert resp.status_code == 200
         data = resp.json()
         assert data["version_no"] == "T2"
@@ -642,7 +635,7 @@ class TestCustomerSamplingApi:
         resp = await client.get(f"{API_PREFIX}/versions/99999")
         assert resp.status_code == 404
 
-    # ==================== 14. 变更日志 ====================
+    # ==================== 13. 变更日志 ====================
 
     async def test_list_change_logs(self, cs_api):
         """GET /projects/{id}/change-logs 变更日志"""
@@ -687,8 +680,12 @@ class TestCustomerSamplingApi:
     # ==================== 完整业务流程 ====================
 
     async def test_full_workflow(self, cs_api):
-        """完整业务流程：创建项目 → 新增部位 → 创建版本 → 查询 diff → 变更日志"""
-        client, _ = cs_api
+        """完整业务流程：创建项目 → 新增部位 → 查询版本 → 变更日志"""
+        from sqlalchemy import select
+
+        from fastapi_app.shared_models import CustomerSamplingFabricVersion, CustomerSamplingRole
+
+        client, db = cs_api
 
         # 1. 创建项目
         pid, seq = await _create_project_via_api(client, "完整流程产品", remark="E2E测试")
@@ -701,25 +698,34 @@ class TestCustomerSamplingApi:
         )
         assert resp.status_code == 200
 
-        # 3. 创建 T2 版本
-        v2 = await client.post(f"{API_PREFIX}/projects/{pid}/versions", json={"reason": "首次打样"})
-        assert v2.status_code == 200
-        v2_id = v2.json()["version_id"]
+        # 3. 直接落库 T2 版本快照（创建版本接口已随功能移除）
+        role = (await db.execute(
+            select(CustomerSamplingRole).where(CustomerSamplingRole.project_id == pid)
+        )).scalars().first()
+        v2 = CustomerSamplingFabricVersion(
+            project_id=pid,
+            role_id=role.id,
+            version_no="T2",
+            snapshot_data=[{"part_name": "身体", "fabric_name": "绒布"}],
+            change_summary=[{"change_type": "add", "part_name": "身体"}],
+            reason="首次打样",
+        )
+        db.add(v2)
+        await db.flush()
 
         # 4. 查询 T2 diff
-        detail = await client.get(f"{API_PREFIX}/versions/{v2_id}")
+        detail = await client.get(f"{API_PREFIX}/versions/{v2.id}")
         assert detail.status_code == 200
         diff_data = detail.json()
         assert diff_data["change_summary"] is not None
         assert diff_data["change_summary"][0]["change_type"] == "add"
 
-        # 5. 变更日志应记录 create_project / create_part / create_version
+        # 5. 变更日志应记录 create_project / create_part
         logs = await client.get(f"{API_PREFIX}/projects/{pid}/change-logs")
         assert logs.status_code == 200
         actions = {log["action"] for log in logs.json()["items"]}
         assert "create_project" in actions
         assert "create_part" in actions
-        assert "create_version" in actions
 
         # 6. 分组查询应包含该项目
         grouped = await client.get(f"{API_PREFIX}/grouped-list")

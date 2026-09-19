@@ -1,7 +1,7 @@
 /**
  * usePatternRoomPartActions — 部位/版本/角色操作编排 Hook
  *
- * 封装部位批量创建弹窗、版本创建弹窗、设置最终版本、复制/删除部位版本、
+ * 封装部位批量创建弹窗、设置最终版本、复制/删除部位版本、
  * 内联编辑保存、角色 TAB 切换与增删。
  * 逻辑自 PatternRoomView.vue 原样搬移。
  */
@@ -60,8 +60,6 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
 
   /** 部位批量创建弹窗可见性 */
   const partFormVisible = ref(false)
-  /** 版本创建弹窗可见性 */
-  const versionCreateVisible = ref(false)
 
   function openCreatePartDialog() {
     if (!canManage.value) {
@@ -290,14 +288,6 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
     }
   }
 
-  function openCreateVersionDialog() {
-    if (!canManage.value) {
-      toast.warning('无操作权限')
-      return
-    }
-    versionCreateVisible.value = true
-  }
-
   /** 是否当前版本（选中版本为项目最新版本） */
   const isCurrentVersion = computed(() => {
     const proj = projectHook.currentProject.value
@@ -308,27 +298,6 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
 
   function onSwitchVersion(versionId: number) {
     versionHook.fetchVersionDetail(versionId)
-  }
-
-  async function onVersionCreateConfirm(reason: string | null) {
-    const res = await versionHook.createVersion(reason ?? undefined)
-    if (res) {
-      toast.success(res.message || `已创建版本 ${res.version_no ?? ''}`)
-      versionCreateVisible.value = false
-      // 并行刷新角色列表 + 项目详情（原串行 await）
-      if (selectedProjectId.value) {
-        await Promise.all([
-          roleHook.fetchRoles(selectedProjectId.value),
-          projectHook.fetchDetail(selectedProjectId.value),
-        ])
-      }
-      // 空快照提示
-      if (partHook.partsByVersion.value.length === 0) {
-        toast.warning('当前无部位布料信息，已创建空版本，建议先维护部位布料')
-      }
-    } else {
-      toast.error(versionHook.error.value || '创建新版本失败')
-    }
   }
 
   function onSelectRole(roleId: number) {
@@ -377,7 +346,6 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
 
   return {
     partFormVisible,
-    versionCreateVisible,
     editingPartId,
     editForm,
     openCreatePartDialog,
@@ -388,10 +356,8 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
     onStartEdit,
     onCancelEdit,
     onDeleteVersion,
-    openCreateVersionDialog,
     isCurrentVersion,
     onSwitchVersion,
-    onVersionCreateConfirm,
     onSelectRole,
     onAddRole,
     onRemoveRole,

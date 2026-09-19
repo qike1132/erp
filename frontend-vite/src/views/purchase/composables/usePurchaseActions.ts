@@ -113,7 +113,8 @@ export function usePurchaseActions(deps: PurchaseActionDeps) {
     const ok = await confirm.confirm('确认将此订单标记为下单完成？', '', 'warning')
     if (!ok) return
     try {
-      await purchaseOrders.completeOrder(orderId)
+      // 损耗率仅在其被用户交互过时随动作提交；未交互则不发送，避免用 0 覆盖已存率
+      await purchaseOrders.completeOrder(orderId, summary.lossRateTouched ? summary.lossRate : undefined)
       showToast('订单已完成下单', 'success')
       queryClient.invalidateQueries({ queryKey: ['orders-list'] })
     } catch (err: unknown) {
@@ -133,7 +134,7 @@ export function usePurchaseActions(deps: PurchaseActionDeps) {
     )
     if (!ok) return
     try {
-      const count = await purchaseOrders.batchComplete()
+      const count = await purchaseOrders.batchComplete(summary.lossRateTouched ? summary.lossRate : undefined)
       showToast(`成功完成 ${count} 个订单`, 'success')
       queryClient.invalidateQueries({ queryKey: ['orders-list'] })
     } catch (err: unknown) {
@@ -180,6 +181,20 @@ export function usePurchaseActions(deps: PurchaseActionDeps) {
     summary.updateFactoryQty(Number(gi), Number(si), Number(fi), parseFloat(value) || 0)
   }
 
+  /**
+   * 非编辑态输入损耗率 → 自动落库。
+   *
+   * 防抖（300ms）保留在 SummaryModal.vue 组件层；此处只负责调用 composable 的落库
+   * 逻辑，并在失败时通过 toast 明确告知用户（不允许静默吞掉），本地展示保持可用。
+   */
+  async function handleApplyLossRate(rate: number) {
+    try {
+      await summary.applyLossRateAndSave(rate)
+    } catch (err: unknown) {
+      showToast((err as Error).message || '损耗率保存失败', 'error')
+    }
+  }
+
   function handleCompletedPageChange(page: number) {
     completed.page = page
     // 页码变更由 Vue Query queryKey 自动触发 fetch，不 invalidate 以保留 prefetch 缓存。
@@ -209,6 +224,7 @@ export function usePurchaseActions(deps: PurchaseActionDeps) {
     handleOrderPageChange,
     handleSaveFactoryEdits,
     handleUpdateFactoryQty,
+    handleApplyLossRate,
     handleCompletedPageChange,
     handleRemoveCompletedFilter,
     handleExport,

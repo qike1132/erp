@@ -3,7 +3,7 @@
     :model-value="modelValue"
     :ignore-filter="true"
     :open-on-click="true"
-    :open-on-focus="true"
+    :open-on-focus="false"
     @update:model-value="onSelect"
     @update:open="onOpenChange"
   >
@@ -14,14 +14,17 @@
           :placeholder="placeholder"
           :disabled="disabled"
           :aria-label="label || placeholder"
+          :aria-required="required || undefined"
           :name="name"
+          :id="id"
           class="ui-select-input"
           @input="onInput"
         />
         <ComboboxTrigger
           class="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted border-none bg-transparent cursor-pointer p-0"
           :disabled="disabled"
-          aria-label="选择选项"
+          tabindex="-1"
+          aria-hidden="true"
         >
           <FontAwesomeIcon icon="chevron-down" class="text-xs" aria-hidden="true" />
         </ComboboxTrigger>
@@ -84,6 +87,10 @@ const props = withDefaults(
     emptyText?: string
     contentClass?: string
     name?: string
+    /** 与外层 <label for> 配对使用；同时为 E2E 提供稳定锚点 */
+    id?: string
+    /** 必填项：向辅助技术暴露 aria-required（视觉星号不足以表达必填语义） */
+    required?: boolean
   }>(),
   {
     options: () => [],

@@ -148,10 +148,26 @@ class TestAuthEndpointsAlive:
             await _delete_temp_user(api, username)
 
     async def test_refresh_requires_auth(self, api: httpx.AsyncClient) -> None:
-        """``/auth/refresh`` 未鉴权必须 401（不能靠它绕过登录）。"""
+        """``/auth/refresh`` 未鉴权必须被拒（不能靠它绕过登录）。
+
+        断言的是**安全性质**（拿不到新令牌），不是某个具体状态码。两种拒绝都合法：
+
+        - **401**：中间件放行到端点，端点因「缺少刷新令牌」拒绝；
+        - **403**：被 CSRF 中间件拦下 —— ``/auth/refresh`` 不在豁免名单
+          （只有 login / logout / vitals 豁免），无 Bearer 且无 CSRF
+          cookie/header 的裸请求在此被拒。
+
+        实测生产后端返回 403（CSRF 先于端点生效）。两者都满足「不能绕过登录」，
+        故不断言具体码，只锁定真正要防的失效模式：**返回 200 且发出令牌**。
+        """
         resp = await api.post("/api/v1/auth/refresh")
-        assert resp.status_code == 401, (
-            f"未鉴权 refresh 返回 {resp.status_code}，应为 401。body={resp.text[:200]}"
+        assert resp.status_code in (401, 403), (
+            f"未鉴权 refresh 返回 {resp.status_code}，应为 401 或 403（均属拒绝）。"
+            f"body={resp.text[:200]}"
+        )
+        body = resp.text
+        assert "access_token" not in body, (
+            f"未鉴权 refresh 竟返回了令牌 —— 可绕过登录。body={body[:300]}"
         )
 
     async def test_check_endpoint_reports_auth_state(self, api: httpx.AsyncClient) -> None:
@@ -186,7 +202,7 @@ async def _create_temp_user(api: httpx.AsyncClient) -> tuple[str, str] | None:
 
     from tests.e2e_api.conftest import _mint_token
 
-    token = _mint_token("admin")
+    token = _mint_token("admin").token
     if not token:
         return None
 
@@ -210,16 +226,17 @@ async def _delete_temp_user(api: httpx.AsyncClient, username: str) -> None:
     """按 username 查 id 后删除。失败静默 —— 清理失败不应让用例变红，但会留痕。"""
     from sqlalchemy import create_engine, text
 
-    from fastapi_app.core.config import settings
-    from tests.e2e_api.conftest import _mint_token
+    from tests.e2e_api.conftest import _mint_token, real_database_url
 
-    token = _mint_token("admin")
+    token = _mint_token("admin").token
     if not token:
         return
     headers = {"Authorization": f"Bearer {token}"}
 
     try:
-        engine = create_engine(settings.DATABASE_URL)
+        # real_database_url()：不能用 settings.DATABASE_URL（已被 autouse fixture
+        # 改成空测试库），否则查不到刚创建的用户，临时用户会留在真实库里。
+        engine = create_engine(real_database_url())
         with engine.connect() as conn:
             row = conn.execute(
                 text('SELECT id FROM "user" WHERE username = :u'), {"u": username}

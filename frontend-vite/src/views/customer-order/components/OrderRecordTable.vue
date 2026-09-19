@@ -3,13 +3,24 @@
     <template v-if="isFetchingRecords && orderRecords.length > 0">
       <div class="co-fetching-bar"><div class="co-fetching-progress" /></div>
     </template>
+    <!-- 错误态：与空态在视觉和语义上都分开，避免把「请求失败」呈现成「没有数据」 -->
+    <div v-if="errorMessage" class="co-state-placeholder co-state-error" role="alert">
+      <div class="co-empty-illustration co-error-icon">
+        <FontAwesomeIcon icon="triangle-exclamation" aria-hidden="true" />
+      </div>
+      <p class="co-state-text">{{ errorMessage }}</p>
+      <UiButton variant="outline" size="sm" @click="emit('retry')">
+        <FontAwesomeIcon icon="undo" style="margin-right: 4px" aria-hidden="true" />重试
+      </UiButton>
+    </div>
     <UiDataTable
+      v-else
       :data="orderRecords"
       :columns="orderColumns"
       :loading="isLoadingRecords && orderRecords.length === 0"
       :paginator="totalPages > 1"
       :rows="perPage"
-      :total-records="totalPages * perPage"
+      :total-records="totalRecords"
       row-key="id"
       @page="onPageChange"
     >
@@ -53,7 +64,11 @@
       </template>
       <template #column-body-actions="{ row }">
         <div class="co-action-group">
-          <button class="co-btn-icon co-btn-info" aria-label="详情" @click="emit('view-detail', row as OrderRecord)">
+          <button
+            class="co-btn-icon co-btn-info"
+            :aria-label="`查看 ${(row as OrderRecord).order_no || ''} 的详情`"
+            @click="emit('view-detail', row as OrderRecord)"
+          >
             <FontAwesomeIcon icon="eye" aria-hidden="true" />
           </button>
         </div>
@@ -65,6 +80,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import UiDataTable from '@/components/ui/UiDataTable.vue'
+import UiButton from '@/components/ui/UiButton.vue'
 import type { TableColumn } from '@/components/ui/UiDataTable.vue'
 import type { OrderRecord } from '../composables/types'
 
@@ -73,7 +89,9 @@ const props = defineProps<{
   orderRecords: OrderRecord[]
   isLoadingRecords: boolean
   isFetchingRecords: boolean
+  errorMessage: string
   totalPages: number
+  totalRecords: number
   perPage: number
   fetchOrders: () => void
 }>()
@@ -82,6 +100,7 @@ const emit = defineEmits<{
   'view-detail': [record: OrderRecord]
   'update:perPage': [value: number]
   'change-page': [page: number]
+  retry: []
 }>()
 
 const orderColumns = computed<TableColumn[]>(() => {
@@ -148,6 +167,17 @@ function onPageChange(event: { page: number; rows: number }) {
 }
 .co-state-empty {
   color: var(--color-text-muted);
+}
+.co-state-error {
+  color: var(--color-danger-500);
+  gap: 14px;
+}
+.co-state-error .co-state-text {
+  color: var(--color-danger-600, var(--color-danger-500));
+}
+.co-state-error .co-error-icon {
+  opacity: 1;
+  color: var(--color-danger-500);
 }
 .co-state-text {
   font-size: 14px;

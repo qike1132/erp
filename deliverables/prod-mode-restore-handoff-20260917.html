@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>生产托管恢复 · 待执行动作（滨发 ERP 192.168.0.95）</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#ffffff; --line:#e3e6ea; --line-strong:#cfd4da;
+    --tx:#1c2126; --tx2:#5b6570; --tx3:#8a939d;
+    --red:#c8322f; --redbg:#fdf3f2; --amber:#9a6100; --amberbg:#fdf8ee;
+    --blue:#1f5fa8; --bluebg:#f2f7fc; --green:#1f7a45; --greenbg:#f2f9f4;
+    --mono:ui-monospace,"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--tx);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei UI","Microsoft YaHei",sans-serif;
+    font-size:13.5px;line-height:1.65}
+  .wrap{max-width:940px;margin:0 auto;padding:28px 20px 56px}
+  header{border-bottom:1px solid var(--line-strong);padding-bottom:14px;margin-bottom:22px}
+  h1{font-size:19px;font-weight:600;margin:0 0 6px}
+  .meta{color:var(--tx3);font-size:12.5px}
+  h2{font-size:14.5px;font-weight:600;margin:26px 0 10px;padding-left:9px;border-left:3px solid var(--line-strong)}
+  h3{font-size:13.5px;font-weight:600;margin:16px 0 7px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:14px 16px;margin-bottom:12px}
+  .card.urgent{border-color:#e7c3c1;background:var(--redbg)}
+  .card.warn{border-color:#ecd9b0;background:var(--amberbg)}
+  .card.ok{border-color:#c7e2d2;background:var(--greenbg)}
+  .tag{display:inline-block;font-size:11px;font-weight:600;padding:2px 7px;border-radius:4px;
+    border:1px solid currentColor;margin-right:8px;vertical-align:1px}
+  .t-red{color:var(--red)} .t-amber{color:var(--amber)}
+  .t-blue{color:var(--blue)} .t-green{color:var(--green)}
+  code{font-family:var(--mono);font-size:12.5px;background:#eef0f3;padding:1px 5px;border-radius:3px}
+  pre{font-family:var(--mono);font-size:12.5px;background:#1f2429;color:#e6e9ec;
+    padding:12px 14px;border-radius:6px;overflow-x:auto;margin:8px 0;line-height:1.55}
+  pre .c{color:#98a2ac}
+  table{width:100%;border-collapse:collapse;font-size:12.8px;margin:8px 0}
+  th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{background:#f0f2f5;font-weight:600;color:var(--tx2);border-bottom:1px solid var(--line-strong)}
+  td.mono{font-family:var(--mono);font-size:12.2px}
+  ul{margin:6px 0;padding-left:20px} li{margin:3px 0}
+  .sev{font-size:11.5px;font-weight:600;padding:1px 6px;border-radius:3px}
+  .s-high{background:#fbe3e2;color:var(--red)}
+  .s-mid{background:#fbf0da;color:var(--amber)}
+  .s-low{background:#e8eef5;color:var(--blue)}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media(max-width:720px){.grid2{grid-template-columns:1fr}}
+  .muted{color:var(--tx2)} .small{font-size:12.3px;color:var(--tx3)}
+  .check{list-style:none;padding-left:0}
+  .check li{padding-left:22px;position:relative}
+  .check li::before{content:"□";position:absolute;left:2px;color:var(--tx3)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>生产托管恢复 · 待执行动作</h1>
+  <div class="meta">滨发 ERP ｜ 生产机 192.168.0.95 ｜ 生成于 2026-09-17 17:15 ｜ 依据实测证据，非推测</div>
+</header>
+
+<div class="card urgent">
+  <span class="tag t-red">紧急 · 需你操作</span><strong>请在 ERP服务器管理器_v5.33.exe 点击「生产模式」</strong>
+  <div style="margin-top:8px" class="muted">
+    当前站点由<strong>本会话的后台任务临时承载</strong>（等效命令行的 prod_runner + ARQ），
+    <strong>会话一旦结束即失效</strong>。工作台的「生产模式」会把承载交回 NSSM 服务
+    （开机自启 + 崩溃自愈即刻恢复），其内建顺序为：停开发 → 清 3000/5002 端口 →
+    校验 redis/broker → <code>nssm start erp-prod</code> → <code>nssm start erp-arq</code>。
+    它还会顺带清掉游离进程，不会与临时承载抢端口。
+  </div>
+</div>
+
+<h2>一、为什么必须由你操作（提权边界）</h2>
+<table>
+  <tr><th style="width:230px">动作</th><th style="width:88px">非提权结果</th><th>说明</th></tr>
+  <tr><td class="mono">nssm start erp-prod</td><td><span class="sev s-high">失败</span></td>
+      <td class="mono">rc=3 · stderr「Can't open service! OpenService(): 拒绝访问。」</td></tr>
+  <tr><td class="mono">Unregister-ScheduledTask</td><td><span class="sev s-high">失败</span></td><td>拒绝访问</td></tr>
+  <tr><td class="mono">Start-Service</td><td><span class="sev s-high">失败</span></td><td>拒绝访问</td></tr>
+  <tr><td class="mono">schtasks.exe</td><td><span class="sev s-high">被拦截</span></td>
+      <td>已被安全策略列入程序黑名单，且策略禁止任何等价绕行</td></tr>
+  <tr><td class="mono">nssm status（只读）</td><td><span class="sev s-low">可用</span></td><td>QUERY_STATUS 不需提权</td></tr>
+</table>
+<p class="small">另：本会话派生的子进程会被回收（子进程日志 0 字节 = 被杀，而非自身崩溃），
+因此无法从命令行持久承载服务。</p>
+
+<h2>二、提权后删除两条已损坏的计划任务</h2>
+<div class="card">
+  <p style="margin:0 0 6px">两条任务的<strong>目标文件都已不存在</strong>，且 <code>Author</code> 是另一台机器
+  <code>DESKTOP-FKCGN3O</code>（本机为 <code>DESKTOP-11111</code>），属迁机遗留，全仓无任何脚本引用。
+  它们只会持续产生误导性的失败记录。请在<strong>管理员 PowerShell</strong>执行：</p>
+<pre><span class="c"># 开机自启任务：目标 start_production.py 不存在；末次运行 2026-04-07，结果 0xC000013A</span>
+Unregister-ScheduledTask -TaskName ERPSystem -Confirm:$false
+
+<span class="c"># 每日 10:00 备份任务：目标 ...\Desktop\erp_system\db_backup.py 不存在；每次返回 0x2</span>
+Unregister-ScheduledTask -TaskName ERP_Database_Backup -Confirm:$false</pre>
+  <p class="small" style="margin:8px 0 0">删除后本机自启只剩 NSSM 服务这一条正规通道
+  （<code>erp-prod</code> / <code>erp-arq</code> / <code>erp-redis</code> / <code>erp-redis-broker</code> 均为 <code>StartMode=Auto</code>），
+  这才是权威口径。</p>
+</div>
+
+<h2>三、本轮已完成（可复核）</h2>
+<div class="grid2">
+  <div class="card ok">
+    <h3 style="margin-top:0">前端已重建并发布</h3>
+    <p style="margin:0" class="small">新 <code>dist</code> 含 <code>搜索全局角色名</code>／<code>选择已有角色</code>
+    （旧 dist 不含）→ 14:18 与 14:59 的 BOM 全局角色 UI 已上线，<strong>前端功能不再回退</strong>。
+    旧版本留在 <code>dist-old</code> 可回退（可清理）。</p>
+  </div>
+  <div class="card ok">
+    <h3 style="margin-top:0">自动全量备份已补齐并实测成功</h3>
+    <p style="margin:0" class="small">新增调度 <code>每日全量备份 / full / 0 2 * * *</code>（id=19）。
+    ARQ 启动后轮询器已补跑并成功：
+    <code>backup_record id=116 · type=full · trigger=auto · success</code>。</p>
+  </div>
+</div>
+<table>
+  <tr><th style="width:190px">验证项</th><th>实测结果</th></tr>
+  <tr><td>生产承载</td><td><code>/</code> <code>/nginx-health</code> <code>/api/health</code> 全部 <strong>200</strong>；响应头 <code>server: nginx</code></td></tr>
+  <tr><td>运行模式</td><td><code>prod_runner.json</code> = <code>production / ready=True / frontend_type=nginx / workers=8</code></td></tr>
+  <tr><td>物料计算器（原始报障）</td><td>真实浏览器（Edge）<code>POST /calculate</code> → <strong>200 + success:true</strong>，<code>material_code:""</code> 已归一，<code>.mc-scope-card=1</code>，<strong>0 页面错误 / 0 console 错误</strong></td></tr>
+  <tr><td>遗留项2（unit 可空）</td><td>代码已 <code>or ''</code> 归一（<code>purchase_product_service.py</code> 282/313 行）；生产库 <code>unit</code> 三表 NULL=0。代码侧覆盖，无需改 schema</td></tr>
+</table>
+
+<h2>四、切换后建议核对</h2>
+<div class="card">
+<ul class="check">
+  <li><code>Get-Service erp-prod,erp-arq</code> → 均为 <code>Running</code></li>
+  <li><code>:3000</code> 仍归 <code>nginx.exe</code>；<code>:5002</code> 归带 <code>--workers</code> 的 uvicorn</li>
+  <li>浏览器访问 <code>http://192.168.0.95:3000/product</code>，确认 BOM 编辑器出现「选择已有角色」</li>
+  <li>物料计算器输入数量可出结果</li>
+  <li>清理残留目录 <code>frontend-vite/dist-old</code></li>
+</ul>
+</div>
+
+<h2>五、遗留的次要治理项（不紧急）</h2>
+<table>
+  <tr><th style="width:70px">严重度</th><th>问题</th><th>建议</th></tr>
+  <tr><td><span class="sev s-mid">中</span></td>
+      <td>备份调度两条都排在 <code>0 2 * * *</code>（人工改的<em>自定义增量备份</em>与新增的全量同一分钟）</td>
+      <td>把增量改回规范节奏 <code>0 6,10,14,18,22 * * *</code></td></tr>
+  <tr><td><span class="sev s-low">低</span></td>
+      <td><code>backup_schedule.last_status</code> 长期卡在 <code>running</code>（id=18/19 均如此），完成态未回写</td>
+      <td>后续排查 scheduler_poller 的完成回写路径</td></tr>
+  <tr><td><span class="sev s-low">低</span></td>
+      <td>本轮产生大量只读探针脚本（<code>_*.py</code> / <code>_*.txt</code>）遗留在仓库根</td>
+      <td>与既有约定一致，可择机归档到 <code>temp/</code></td></tr>
+</table>
+
+<p class="small" style="margin-top:22px;border-top:1px solid var(--line);padding-top:12px">
+  证据来源：进程端口归属（psutil）、NSSM 参数读取、CIM 服务状态、计划任务 LastTaskResult、
+  <code>information_schema</code> 与 <code>backup_schedule</code>/<code>backup_record</code> 实测查询、
+  产物字符串 grep、真实浏览器（Playwright + Edge）端到端用例。
+</p>
+
+</div>
+</body>
+</html>

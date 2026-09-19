@@ -9,7 +9,6 @@
 import logging
 from datetime import UTC, datetime
 
-from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,11 +16,10 @@ from sqlalchemy.orm import joinedload
 
 from fastapi_app.core.cache import CacheDomain
 from fastapi_app.core.cache_invalidation import InvalidationStrategy, cache_mgr
-from fastapi_app.core.config import settings
 from fastapi_app.core.domain_events import DomainEvent, DomainEventType
 from fastapi_app.core.domain_events import publish as publish_domain_event
 from fastapi_app.core.exception_handler import safe_publish_event
-from fastapi_app.core.exceptions import db_transaction
+from fastapi_app.core.exceptions import BusinessError, ConflictError, NotFoundError, db_transaction
 from fastapi_app.services.notification_service import StockEvent, publish_stock_event
 from fastapi_app.shared_models import (
     InventoryLog,
@@ -246,22 +244,18 @@ async def delete_supplier(db: AsyncSession, supplier_id: int) -> None:
         supplier_id: 供应商 ID。
 
     Raises:
-        HTTPException: 404 供应商不存在；400 存在关联数据；500 删除失败。
+        NotFoundError: 404 供应商不存在。
+        BusinessError: 400 存在关联数据，无法删除。
     """
-    try:
-        async with db_transaction(db):
-            supplier = await get_supplier_by_id(db, supplier_id)
-            if not supplier:
-                raise HTTPException(status_code=404, detail="供应商不存在")
+    supplier = await get_supplier_by_id(db, supplier_id)
+    if not supplier:
+        raise NotFoundError("供应商不存在")
 
-            if await supplier_has_bom_or_orders(db, supplier_id):
-                raise HTTPException(status_code=400, detail="该供应商已有相关BOM或采购订单数据，无法删除")
+    if await supplier_has_bom_or_orders(db, supplier_id):
+        raise BusinessError("该供应商已有相关BOM或采购订单数据，无法删除")
 
-            await db.delete(supplier)
-    except HTTPException:
-        raise
-    except SQLAlchemyError as e:
-        raise HTTPException(status_code=500, detail=f"删除失败: {settings.sanitize_error(e)}") from e
+    await db.delete(supplier)
+    await db.flush()  # flush-only：提交由请求级 get_async_db 统一负责
 
 
 async def create_country(db: AsyncSession, name: str) -> Country:
@@ -275,12 +269,13 @@ async def create_country(db: AsyncSession, name: str) -> Country:
         Country: 创建后的国家对象（含 ID）。
 
     Raises:
-        HTTPException: 400 名称为空；409 国家已存在。
+        BusinessError: 400 名称为空。
+        ConflictError: 409 国家已存在。
     """
     if not name:
-        raise HTTPException(status_code=400, detail="国家名称不能为空")
+        raise BusinessError("国家名称不能为空")
     if await get_country_by_name(db, name):
-        raise HTTPException(status_code=409, detail="该国家已存在")
+        raise ConflictError("该国家已存在")
     country = Country(name=name)
     db.add(country)
     await db.flush()
@@ -296,11 +291,11 @@ async def delete_country(db: AsyncSession, country_id: int) -> None:
         country_id: 国家 ID。
 
     Raises:
-        HTTPException: 404 国家不存在。
+        NotFoundError: 404 国家不存在。
     """
     country = await get_country_by_id(db, country_id)
     if not country:
-        raise HTTPException(status_code=404, detail="国家不存在")
+        raise NotFoundError("国家不存在")
     await db.delete(country)
 
 

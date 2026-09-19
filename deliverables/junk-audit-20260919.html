@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>垃圾文件识别审计 · 2026-09-19 · D:\erp_system</title>
+<style>
+:root{--ink:#1a1a2e;--ink2:#4a5060;--mut:#8a90a0;--bg:#f6f7f9;--card:#fff;--line:#e4e7ec;
+--grn:#0f8a4d;--grn-bg:#ecf8f1;--red:#c93838;--red-bg:#fdf0f0;--amb:#b26a00;--amb-bg:#fdf6e8;
+--blu:#2456c4;--blu-bg:#eef3fc;--mono:Consolas,'Courier New',monospace}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font:14px/1.65 -apple-system,'Segoe UI','Microsoft YaHei',sans-serif;color:var(--ink);background:var(--bg);padding:28px 20px 60px}
+.wrap{max-width:1180px;margin:0 auto}
+h1{font-size:22px;font-weight:700;letter-spacing:.2px}
+.sub{color:var(--mut);font-size:12.5px;margin-top:6px}
+h2{font-size:16px;font-weight:700;margin:34px 0 12px;padding-left:10px;border-left:4px solid var(--ink)}
+h2.g{border-color:var(--grn)}h2.r{border-color:var(--red)}h2.a{border-color:var(--amb)}h2.b{border-color:var(--blu)}
+h3{font-size:13.5px;font-weight:700;margin:18px 0 8px;color:var(--ink2)}
+p{margin:6px 0}
+.cards{display:flex;gap:12px;flex-wrap:wrap;margin:16px 0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:14px 18px;min-width:170px;flex:1}
+.card .k{font-size:11.5px;color:var(--mut);letter-spacing:.5px}
+.card .v{font-size:21px;font-weight:700;margin-top:3px}
+.card .d{font-size:11.5px;color:var(--ink2);margin-top:2px}
+.card.g .v{color:var(--grn)}.card.r .v{color:var(--red)}.card.a .v{color:var(--amb)}
+.note{border:1px solid var(--line);border-left:4px solid var(--blu);background:var(--blu-bg);border-radius:6px;padding:10px 14px;font-size:13px;margin:10px 0}
+.note.warn{border-left-color:var(--red);background:var(--red-bg)}
+.note.amb{border-left-color:var(--amb);background:var(--amb-bg)}
+.note.grn{border-left-color:var(--grn);background:var(--grn-bg)}
+table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:8px;overflow:hidden;font-size:12.8px;margin:10px 0}
+th{background:#f0f2f5;text-align:left;padding:8px 10px;font-weight:600;white-space:nowrap;color:var(--ink2);font-size:12px}
+td{padding:7px 10px;border-top:1px solid var(--line);vertical-align:top}
+tr.g td:first-child{box-shadow:inset 3px 0 0 var(--grn)}
+tr.r td:first-child{box-shadow:inset 3px 0 0 var(--red)}
+tr.a td:first-child{box-shadow:inset 3px 0 0 var(--amb)}
+.tblwrap{overflow-x:auto}
+.mono{font-family:var(--mono);font-size:12px}
+.path{font-family:var(--mono);font-size:12px;word-break:break-all}
+.num{white-space:nowrap;text-align:right;font-variant-numeric:tabular-nums}
+.tag{display:inline-block;padding:1px 8px;border-radius:10px;font-size:11px;font-weight:600;white-space:nowrap}
+.tg{background:var(--grn-bg);color:var(--grn)}.tr{background:var(--red-bg);color:var(--red)}.ta{background:var(--amb-bg);color:var(--amb)}.tb{background:var(--blu-bg);color:var(--blu)}
+ul,ol{margin:6px 0 6px 22px}
+li{margin:3px 0}
+.small{font-size:12px;color:var(--ink2)}
+.mut{color:var(--mut)}
+.footer{margin-top:40px;padding-top:14px;border-top:1px solid var(--line);font-size:12px;color:var(--mut)}
+@media print{body{background:#fff;padding:0}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>垃圾文件识别审计（只读）</h1>
+<div class="sub">D:\erp_system ｜ 2026-09-19 10:29–10:40 ｜ 承接 09-18 审计（<span class="mono">junk-audit-20260918.html</span>，当日已回收 68 项 / 196.91MB）｜ 本轮零删除、零移动、零改名</div>
+
+<h2>① 摘要与结论先行</h2>
+<div class="cards">
+  <div class="card"><div class="k">仓库现状</div><div class="v">1,527.33 MB</div><div class="d">顶层 206 条目（昨日收口后 102 条，昨晚并行会话新增约 104 个根级 <span class="mono">_*</span> 产物）</div></div>
+  <div class="card g"><div class="k">✅ 可安全删除</div><div class="v">≈34.3 MB</div><div class="d">≈1,436 文件 / 11 组，全部 untracked，逐项过了 git 跟踪门</div></div>
+  <div class="card a"><div class="k">🟡 灰区·需决策</div><div class="v">≈195 MB</div><div class="d">备份轮转 / AI 工具数据 / QA 取证 / 归属未明</div></div>
+  <div class="card r"><div class="k">⛔ 必须保留</div><div class="v">≈1.28 GB</div><div class="d">源码 / .git / node_modules / 备份链 / 业务数据 / 运行时</div></div>
+</div>
+
+<div class="note warn"><b>先读：本环境的删除反噬机制（09-18 实证）。</b>会话内所有删除被重定向进 <span class="mono">D:\$Recycle.Bin</span>；单次删除路径数 &gt; 50 触发 <span class="mono">SAFE_DELETE_BULK_CONFIRM_REQUIRED</span>，升级后按<b>父目录树整体回收</b>。09-18 一次 <span class="mono">git repack -ad</span> 曾使整棵 <span class="mono">.git</span> 三秒内进回收站。因此本报告只做清单，任何落地执行都必须走「同卷重命名迁出」范式（见 §5）。</div>
+
+<div class="note grn"><b>✅ 执行结果（10:51）：绿区已回收。</b>225 项 / 33.66MB / 1,418 文件经同卷重命名迁出至 <span class="path">D:\erp_ws_archive\20260919_junk_reclaim\</span>（MANIFEST.json + restore.py + EXECUTION_LOG.txt，零删除原语）：迁移即验与独立终局复验均 0 失败、0 挂起；24 个受保护路径全部在位（dist 193f、node_modules 39,056f 未动）；git HEAD 未变（36cb1a76）、<span class="mono">git fsck --connectivity-only</span> rc=0；git status 578→542（差值=归档的未跟踪散件，逻辑自洽）。恢复命令：<span class="mono">python D:\erp_ws_archive\20260919_junk_reclaim\restore.py [路径前缀]</span>。灰区/红区未动；<span class="path">nul</span> 仍待人工 <span class="mono">del \\?\D:\erp_system\nul</span>。</div>
+
+<h3>与昨日审计的衔接（基线已变）</h3>
+<table><thead><tr><th>昨日状态</th><th>今日实测</th><th>说明</th></tr></thead><tbody>
+<tr><td class="path">frontend-vite 下 6 个旧 dist 快照（26.87MB，挂起）</td><td><b>已消失</b></td><td>09-18 晚 22:3x 发布流程已处理；其 <span class="mono">dist-new</span> 残留转为 <span class="path">backups\frontend-dist-new-stale-20260918-223{437,551,556}</span> 三份——内容指纹（index.html md5=<span class="mono">a904af0e255f</span>）完全相同，属三重冗余</td></tr>
+<tr><td class="path">frontend-vite\dist-new（watcher 持锁无法清理）</td><td><b>已消失</b></td><td>昨日「build:atomic 必失败」的直接成因已解除</td></tr>
+<tr><td class="path">build\（47MB）、_fix_backup_20260917、_dist_stage</td><td><b>已消失</b></td><td>其他会话处理</td></tr>
+<tr><td class="path">nul（126B，待人工删除）</td><td><b>仍在</b></td><td>本轮 PENDING 探针一度误报「已消失」——设备名文件 <span class="mono">os.stat</span> 返回字符设备导致 <span class="mono">isfile=False</span>，与技能记载的元数据失真同源。经 <span class="mono">\\?\</span> 扩展路径复核：126 字节实存，内容为 08-22 一条失败 <span class="mono">dir /b</span> 命令的错误输出</td></tr>
+<tr><td>顶层 102 条目</td><td><b>206 条目</b></td><td>昨晚 20:00–22:40 并行会话（多 SKU 修复 + 迁移 047 + e2e_api 修复）新产生约 104 个根级 <span class="mono">_*</span> 产物，本轮已全部定性</td></tr>
+</tbody></table>
+
+<div class="note warn"><b>⚠️ 新发现：6 个回归脚本失踪（数据丢失风险）。</b>工作日志中声明「保留」的回归脚本 <span class="path">_beile_qty_e2e_check.py、_beile_xiaoyi_e2e_check.py、_customer_order_import_e2e_check.py、_customer_order_fix_e2e_check.py、_staging_api_contract_check.py、_beile_multisku_probe.py</span> 在仓库内（排除 node_modules/.git 等后全盘遍历）与归档位 <span class="path">D:\erp_ws_archive</span> 均未找到。它们是「修复前红 → 修复后绿」的证据链。疑被移入回收站或改名。<b>建议：</b>① 从回收站找回或重新生成；② 治本——回归脚本固化到 git 跟踪目录（如 <span class="path">frontend-vite/e2e/</span>），不再放仓库根（根目录是清理重灾区）。</div>
+
+<div class="note"><b>运行态（扫描时刻实测）：</b>:3000 = vite dev server（PID 27616，<span class="mono">--port 5173 --port 3000</span>，父链经 .trae-cn node）；:5002 = uvicorn <span class="mono">--reload</span> 开发模式（PID 20644）；<b>无 nginx 进程</b>（80/443 未监听）→ 整体为 dev 承载形态；Redis :6379/:6380 双实例正常（NSSM）。<span class="path">logs\fastapi_20260919.log</span> 最新 mtime = 扫描时刻本身（10:29:42）⇒ <b>logs/ 正被实时写入</b>。<span class="path">frontend-vite\dist</span>（今日 09:59 构建，入口 <span class="mono">index-DYvJ1zPJ.js</span>）当前不被服务，但仍是切回生产托管后的唯一产物。</div>
+
+<h2 class="g">② ✅ 可安全删除（11 组，≈34.3MB / ≈1,436 文件）</h2>
+<p class="small">判定标准：① 未被 git 跟踪（逐项过 <span class="mono">git ls-files</span> 前置门，本轮绿区清单 <b>0 个 tracked</b>）；② 可再生成（缓存/构建产物）或纯一次性取证输出；③ 无任何进程/业务引用。执行方式必须为「重命名迁出归档」而非删除（§5）。</p>
+<div class="tblwrap"><table>
+<thead><tr><th>#</th><th>路径</th><th class="num">体积</th><th class="num">文件</th><th>类型</th><th>判定依据</th></tr></thead>
+<tbody>
+<tr class="g"><td>1</td><td class="path">全仓 __pycache__\（59 个目录，不含 node_modules/.git/.workbuddy）</td><td class="num">17.39MB</td><td class="num">1,215</td><td>字节码缓存</td><td>.gitignore L2；<span class="mono">.pyc</span> 由源码即时重建。<b>注意</b>：dev 后端（--reload）运行中会重建，迁出后复现属正常，勿反复搬</td></tr>
+<tr class="g"><td>2</td><td class="path">.ruff_cache\</td><td class="num">3.33MB</td><td class="num">40</td><td>linter 缓存</td><td>L155；09-18 20:45 由昨晚 lint 运行重建</td></tr>
+<tr class="g"><td>3</td><td class="path">.pytest_cache\</td><td class="num">0.27MB</td><td class="num">5</td><td>pytest 缓存</td><td>L154；昨日已迁出过一次，并行会话跑 pytest 自动重建（<span class="mono">CACHEDIR.TAG</span> mtime 09-18 09:58）</td></tr>
+<tr class="g"><td>4</td><td class="path">根级 _* 一次性产物（119 项）</td><td class="num">1.98MB</td><td class="num">119</td><td>测试/探测输出</td><td>全部 untracked；已剔除 2 个回归脚本（<span class="mono">_beile_detail_align_check.py</span>、<span class="mono">_beile_detail_meta_check.py</span>）与唯一 tracked 的 <span class="mono">_proc5002.json</span>。大件：<span class="mono">_d_r2_pytest_full.txt</span>=443KB、<span class="mono">_pytest_full_after.txt</span>=441KB、<span class="mono">_pytest_full.txt</span>=437KB、<span class="mono">_pytest_combined*.txt</span>≈116KB，其余 113 项均 &lt;46KB（全量明细见 <span class="mono">_scan_junk_20260919.out</span> §ROUND2c）</td></tr>
+<tr class="g"><td>5</td><td class="path">scripts\stock_sim\journal\ ＋ live_run.log、live_run3.log</td><td class="num">8.61MB</td><td class="num">10</td><td>仿真运行输出/日志</td><td>journal 被 L249 显式忽略（「按时间戳落盘的运行记录，非源码」）；日志命中 L70 <span class="mono">*.log</span>；mtime 09-10 后未再写。同目录 <span class="mono">simulator.py</span> 等 4 文件 tracked，保留。⚠️ journal 若需仿真复盘可先归档再弃</td></tr>
+<tr class="g"><td>6</td><td class="path">frontend-vite\.tmp\</td><td class="num">1.67MB</td><td class="num">6</td><td>vite 临时目录</td><td>L133 <span class="mono">.tmp/</span>；mtime 04-28，五个月未动</td></tr>
+<tr class="g"><td>7</td><td class="path">frontend-vite\ 一级散件（36 项）</td><td class="num">0.13MB</td><td class="num">36</td><td>构建/测试输出</td><td>逐文件 tracked 核查全部 untracked：<span class="mono">_vitest_*.txt</span>×9、<span class="mono">_eng_*.txt</span>、<span class="mono">_qa_edward_*</span>、<span class="mono">_d_r2_vitest_*</span>、<span class="mono">_lead_*.out</span> 等输出，加旧日志 <span class="mono">.vite-startup.log</span>(04-28)、<span class="mono">build.log</span>(08-09)。<b>同级的 pattern-room-screenshot*.png ×3 是 tracked，不在其列</b></td></tr>
+<tr class="g"><td>8</td><td class="path">%SystemDrive%\</td><td class="num">0.91MB</td><td class="num">3</td><td>事故目录</td><td>内容已核证第二层：<span class="path">ProgramData\Microsoft\Windows\Caches\</span> 下 3 个 Windows 图标缓存 db 副本——某命令未展开 <span class="mono">%SystemDrive%</span> 变量把系统缓存拷进了仓库（09-18 21:42）。untracked，纯事故残留</td></tr>
+<tr class="g"><td>9</td><td class="path">.route_dump.py（根）</td><td class="num">0.3KB</td><td class="num">1</td><td>一次性 dump</td><td>09-18 21:41 路由探针产物，untracked</td></tr>
+<tr class="g"><td>10</td><td class="path">build-v533.log（根）</td><td class="num">8.5KB</td><td class="num">1</td><td>构建日志</td><td>PyInstaller 6.19.0 输出（09-16 10:00），untracked</td></tr>
+<tr class="g"><td>11</td><td class="path">nul（根）</td><td class="num">126B</td><td class="num">1</td><td>设备名残留</td><td><b>特殊：仅可人工</b> <span class="mono">del \\?\D:\erp_system\nul</span>。自动迁移实测 MoveFileW 恒 WinError 5（NTFS 设备命名空间边界）；内容=08-22 失败 <span class="mono">dir /b</span> 的错误输出，无业务价值</td></tr>
+</tbody></table></div>
+<p class="small num">小计 ≈34.3MB / ≈1,436 文件（第 1 项含 scripts\stock_sim\__pycache__，已去重计算）</p>
+
+<h3>看似垃圾、实际必须保留（反向清单——本轮逐项反证结果）</h3>
+<table>
+<thead><tr><th>条目</th><th>为何「像垃圾」</th><th>必须保留的原因</th></tr></thead>
+<tbody>
+<tr class="r"><td class="path">env_backup\</td><td>名字像备份残留</td><td><b>在研源码包</b>（服务器管理器「备份与恢复」模块，AES-256-GCM），且被 git 跟踪——假阳性先例 #1</td></tr>
+<tr class="r"><td class="path">static\uploads\（42.98MB / 55f）</td><td>gitignore L218 标注「运行时上传文件」</td><td><b>业务数据</b>：客户打样图片（原图+.blur+.thumb 三件套）——假阳性先例 #2，「被 gitignore」≠「可删」</td></tr>
+<tr class="r"><td class="path">frontend-vite\dist（3.62MB / 193f）</td><td>当前 :3000 由 vite dev 承载，dist「没人用」</td><td>nginx 切回生产后的<b>唯一生产产物</b>（今日 09:59 构建，入口 <span class="mono">index-DYvJ1zPJ.js</span>）——假阳性先例 #3</td></tr>
+<tr class="r"><td class="path">frontend-vite\tsconfig.node.tsbuildinfo ＋ tsconfig.tsbuildinfo</td><td>命中 L187 <span class="mono">*.tsbuildinfo</span></td><td>node 版<b>已被跟踪入库</b>（tracked-in-advance，动手会变成 git 变更）；src 版今日 10:26 被 vue-tsc 活跃使用</td></tr>
+<tr class="r"><td class="path">frontend-vite\pattern-room-screenshot{,-v2,-v3}.png</td><td>旧设计截图</td><td><b>3 个全部被 git 跟踪</b>（本轮实测），动手即 git 变更</td></tr>
+<tr class="r"><td class="path">tests\*.txt（12 项）＋ tests\stress\results_*.csv（8 项）</td><td>命中 L279-280 忽略规则</td><td><b>20 个全部 tracked</b>（tracked-in-advance）；其中压测 CSV 是 <span class="mono">benchmark_compare.py</span> 的契约基线</td></tr>
+<tr class="r"><td class="path">analyze_ruff.py、scan_quality.ps1、scan_quality2.ps1、analyze-appdata.ps1、remove_packaging.ps1（根）</td><td>命中 L267-270 忽略规则</td><td><b>全部 tracked</b>（tracked-in-advance）；要清须先 <span class="mono">git rm --cached</span> + 提交</td></tr>
+<tr class="r"><td class="path">_proc5002.json（根）</td><td>命中 L266/L301</td><td>tracked（09-18 已实证的「跟踪在先、忽略在后」案例）</td></tr>
+<tr class="r"><td class="path">_beile_detail_align_check.py、_beile_detail_meta_check.py</td><td>根级 <span class="mono">_*.py</span></td><td>L221 注释明示：<span class="mono">*_check.py / *_e2e_check.py</span> 为回归脚本，保留</td></tr>
+<tr class="r"><td class="path">.pytest_cache / __pycache__（迁出后重现时）</td><td>「刚清完怎么又有了」</td><td>并行会话跑 pytest / dev 后端自动重建，<b>非迁出失败</b>，勿反复搬</td></tr>
+</tbody></table>
+
+<h2 class="r">③ ⛔ 必须保留（≈1.28GB，误删后果分级标注）</h2>
+<div class="tblwrap"><table>
+<thead><tr><th>分类</th><th>条目</th><th class="num">体积</th><th>不可删原因 / 误删后果</th></tr></thead>
+<tbody>
+<tr class="r"><td><span class="tag tr">A 版本库</span></td><td class="path">.git</td><td class="num">491.97MB</td><td><b>整个项目历史与未提交特性集（当前 578 条变更未提交）。</b>误删=仓库全毁。内含 194.5MB 冗余 pack（in-pack 25,575 / size-pack 332.5MiB），但<b>会话内严禁 repack/gc/prune/clean</b>（回收站反噬实证）；如需瘦身由用户在普通终端、且待特性集提交收口后自行执行</td></tr>
+<tr class="r"><td><span class="tag tr">A 提交保护</span></td><td class="path">.githooks\ ＋ .pre-commit-config.yaml</td><td class="num">12KB</td><td><span class="mono">core.hooksPath=.githooks</span> 生效中（密钥扫描 + 质量门禁三层防护）；误删=提交防线消失</td></tr>
+<tr class="r"><td><span class="tag tr">B 生产资产</span></td><td class="path">frontend-vite\dist</td><td class="num">3.62MB</td><td>唯一生产产物（今日 09:59 构建）。误删=切回生产托管时站点 404</td></tr>
+<tr class="r"><td><span class="tag tr">B 生产资产</span></td><td class="path">frontend-vite\node_modules</td><td class="num">390.37MB</td><td>39,056 文件依赖树。误删=dev server / vitest / vue-tsc / 构建全部不可用</td></tr>
+<tr class="r"><td><span class="tag tr">C 配置凭据</span></td><td class="path">.env、.env.production、.env.development、.env.example*、config\（含 redis.production.conf）、server_manager_config.json</td><td class="num">≈25KB</td><td>配置权威（<span class="mono">UVICORN_WORKERS=8</span> 在 .env:171）与生产凭据（Redis 密码等）。误删=服务无法按现配置启动</td></tr>
+<tr class="r"><td><span class="tag tr">D 备份链</span></td><td class="path">backups\server\（152.77MB / 44 项，含 pre_restore\ 32.57MB）</td><td class="num">152.77MB</td><td>自动备份链 + 恢复前置快照。误删=灾难恢复能力丧失</td></tr>
+<tr class="r"><td><span class="tag tr">D 备份链</span></td><td class="path">backups\db\（046 迁移前 dump）、backups\db-pre045\</td><td class="num">4.8MB</td><td>迁移 <span class="mono">pg_standalone_046/047</span> 的回滚点</td></tr>
+<tr class="r"><td><span class="tag tr">D 备份链</span></td><td class="path">backups\material-calculator-rollback-20260911、backups\stale-restore-20260911</td><td class="num">0.13MB</td><td>gitignore L228 注释明示「刻意保留跟踪的回滚源副本，勿 git rm --cached」</td></tr>
+<tr class="r"><td><span class="tag tr">D 备份链</span></td><td class="path">backups\{daily,weekly,monthly,manual,pre_restore,recovery_logs}\（6 个空目录）</td><td class="num">0</td><td>备份模块的运行时目标位；删除后备份任务可能因目录缺失报错</td></tr>
+<tr class="r"><td><span class="tag tr">D 回滚点</span></td><td class="path">backups\frontend-dist-20260918-223320\</td><td class="num">3.62MB</td><td>index.html md5=<span class="mono">f592e8f061e8</span>，是今日 09:59 现役 dist 重建前的<b>前一身</b>=当前唯一前端回滚点</td></tr>
+<tr class="r"><td><span class="tag tr">E 业务数据</span></td><td class="path">static\uploads\</td><td class="num">42.98MB</td><td>客户打样图片（见 §2 反向清单）</td></tr>
+<tr class="r"><td><span class="tag tr">F 源码文档</span></td><td class="path">fastapi_app\、frontend-vite\src\、scripts\、migrations\、tests\、utils\、docs\、evidence\、deliverables\、requirements\、env_backup\ 及根级全部 tracked 文件（server_manager.py、*.spec、*.bat/*.ps1、pytest.ini/mypy.ini/ruff.toml/pyproject.toml、CHANGELOG.md 等）</td><td class="num">≈150MB</td><td>源码、迁移脚本、文档、E2E 证据与交付报告。<span class="path">docs\</span> 有外部删除前科（铁律 #14：禁 <span class="mono">git add docs</span>）。<span class="path">evidence\</span>（14.78MB）含今日 10:26 仍在新增的 E2E 取证</td></tr>
+<tr class="r"><td><span class="tag tr">G 运行时</span></td><td class="path">logs\</td><td class="num">12.47MB</td><td><b>扫描时刻仍在写入</b>（fastapi_20260919.log mtime=10:29:42）；dev 后端 + 未来的生产服务都在此落日志。轮转属代码层决策，不入回收清单</td></tr>
+<tr class="r"><td><span class="tag tr">G 运行时</span></td><td class="path">temp\ 下 client_body_temp / fastcgi_temp / proxy_temp / scgi_temp / uwsgi_temp（5 个空目录）</td><td class="num">0</td><td>nginx 运行时临时目录（当前 nginx 未运行）；nginx 启动需要该布局，误删可能在启动期报错</td></tr>
+<tr class="r"><td><span class="tag tr">G 会话数据</span></td><td class="path">.workbuddy\</td><td class="num">72.37MB</td><td>本项目 AI 工作记忆 / 技能 / 工件；且为系统保护区（禁删清单明列）</td></tr>
+</tbody></table></div>
+
+<h2 class="a">④ 🟡 灰区：需你决策（≈195MB）</h2>
+<p class="small">既不该自动回收、也非必须永久保留的项目。共同点：有回滚价值 / 归属未明 / 涉及外部工具状态。</p>
+<div class="tblwrap"><table>
+<thead><tr><th>#</th><th>条目</th><th class="num">体积</th><th>性质</th><th>建议</th></tr></thead>
+<tbody>
+<tr class="a"><td>1</td><td class="path">backups\frontend-dist-*（12 个快照）</td><td class="num">43.5MB</td><td>三套备份约定并存（<span class="mono">dist.bak-*</span> 手工 / <span class="mono">dist_prev_*</span> 让位 / <span class="mono">backups\frontend-dist-*</span> 规范位）且无轮转——堆积根因</td><td>实测可<b>无损去重 3 个</b>：<span class="mono">new-stale-…223{551,556}</span> 与 437 同 md5（<span class="mono">a904af0e255f</span>）；<span class="mono">old-20260918-223437</span> 与 <span class="mono">frontend-dist-20260918-223320</span> 同 md5（<span class="mono">f592e8f061e8</span>）⇒ 去重回收 10.86MB。并建议立轮转策略（只留最近 2–3 个 + 当前回滚点），否则清完还会长回来</td></tr>
+<tr class="a"><td>2</td><td class="path">backups\version-prune-20260916\</td><td class="num">119.32MB</td><td>3 天前的版本清理快照（archive/build/dist + v5.33 exe + 3 个 server_manager.py BEFORE 副本）</td><td>若 v5.33–v5.40 线已稳定，可整体归档到 <span class="mono">D:\erp_ws_archive</span></td></tr>
+<tr class="a"><td>3</td><td class="path">dist-v533-sentinel\</td><td class="num">18.58MB</td><td>单个 <span class="mono">ERP服务器管理器_v5.33.exe</span>（09-16 23:39），gitignored（L283）；同版本 exe 亦存于 version-prune</td><td>确认 GUI 打包线稳定后可回收</td></tr>
+<tr class="a"><td>4</td><td class="path">AI 工具本地数据 8 处：.freebuff(19.24MB，FreeBuff sqlite 08-18 后未写)、.codeartsdoer(14.46MB)、.trae(1.59MB)、.lean-ctx(0.74MB)、.qoder、.resultverify、.workbuddy-ai、.codebuddy</td><td class="num">≈36.2MB</td><td>gitignored（L163-164、L179、L215-216、L284、L307），均为 AI 工具本机状态</td><td>大件两处建议归档；小件可一并处理。删除会丢失对应工具的本地历史/索引</td></tr>
+<tr class="a"><td>5</td><td class="path">.archive\.legacy_backup_20260323_085111\</td><td class="num">1.26MB / 151f</td><td>今年 3 月的遗留备份，<b>151 个文件仍被 git 跟踪</b></td><td>不能走文件回收；须 <span class="mono">git rm --cached</span> + 提交后归档（你确认无回滚价值后）</td></tr>
+<tr class="a"><td>6</td><td class="path">_qa_tmp\(0.88MB)、_qa_tmp2\(1.63MB)、_qa_tmp3\(0.41MB)、temp\beile-order-typography\(1.64MB)</td><td class="num">4.56MB</td><td>昨日 QA / 今日排版审计的取证原始数据（截图、pytest 全量输出、探针 JSON），被对应报告引用</td><td>随发布收口统一归档（建议保留至对应报告验收通过）</td></tr>
+<tr class="a"><td>7</td><td class="path">_dsh_research\（9 个 .md）＋ _dsh_research_awesome1.md</td><td class="num">2.85MB</td><td>今日 08:36 由并行会话创建，内容为 DSH Desktop 相关研究，归属未明</td><td><b>本轮不处置</b>（铁律 #19：非自己产生的改动，先问归属）</td></tr>
+<tr class="a"><td>8</td><td class="path">_qa_e2e_r2.py、_qa_e2e_r3.py、_qa_e2e_multisku.py、_qa_e2e_multisku2.py（根）</td><td class="num">44KB</td><td>昨晚的 E2E 取证脚本，未按 <span class="mono">*_check.py</span> 规范命名 ⇒ 不受保留约定保护</td><td>建议改名收编为回归脚本（与今日 2 个 <span class="mono">_check.py</span> 一致），否则归档</td></tr>
+<tr class="a"><td>9</td><td class="path">.env.bak-20260911</td><td class="num">4.7KB</td><td>环境配置历史快照（含敏感凭据，命中 <span class="mono">.env.backup</span> 规则）</td><td>当前 .env 正常运行，此回滚点已 8 个月未变；保守起见保留，或确认后随凭据轮换一并处理</td></tr>
+</tbody></table></div>
+
+<h2 class="b">⑤ 执行约束（若你批准回收绿区）</h2>
+<ol>
+<li><b>零删除原语</b>：一律「同卷 <span class="mono">os.rename</span> 迁出」至 <span class="path">D:\erp_ws_archive\20260919_junk_reclaim\</span>（MANIFEST.json + payload\ + restore.py 复制式恢复）。</li>
+<li><b>单批 &lt; 50 路径</b>：全仓 <span class="mono">__pycache__</span> 有 59 个目录、frontend-vite 散件 36 项 ⇒ 必须按父目录分批提交，严禁一次性全量。</li>
+<li><b>逐项 git ls-files 前置门</b>：动手前重跑（本报告结论基于 10:29 快照，并行会话随时可能让文件变 tracked）。</li>
+<li><b>vite dev 运行中</b>：frontend-vite 内 rename 可能 WinError 5（watcher 持锁，昨日 6/6 实测）⇒ 第 6/7 组建议停 :3000 后做；失败即记挂起，不重试不硬来。</li>
+<li><b>nul 仅人工</b>：<span class="mono">del \\?\D:\erp_system\nul</span>，任何自动路径都过不去（MoveFileW WinError 5）。</li>
+<li><b>.git 绝对禁触</b>：会话内禁 repack/gc/prune/clean/maintenance。</li>
+<li><b>迁移后必做</b>：终局复验（源消失+目标在+文件数一致，独立于迁移代码）→ 16 个受保护路径点名 → <span class="mono">git rev-parse HEAD</span> 不变 + <span class="mono">git fsck --connectivity-only</span> rc=0。</li>
+<li><b>并行会话风险</b>：当前有活跃并行会话（今晨 10:26 还拉起了 dev 栈）；<span class="mono">.pytest_cache</span>/__pycache__ 迁出后被重建属正常，勿判失败。</li>
+</ol>
+
+<h2>⑥ 本次分析新增文件披露</h2>
+<table>
+<thead><tr><th>文件</th><th class="num">大小</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td class="path">_scan_junk_20260919.py / .out</td><td class="num">14.5KB / 725 行</td><td>三轮只读扫描脚本与全量输出（顶层 206 条目、目录拆解、dist 指纹、根级 127+30 文件逐一 tracked 核查、运行态探针）</td></tr>
+<tr><td class="path">_scan_junk_20260919_b.py / .out</td><td class="num">— / 186 行</td><td>定点核证：可疑目录逐层内容、12 个 dist 快照 md5、回归脚本全盘定位、绿区分组体积核算、nul 扩展路径复核</td></tr>
+</tbody></table>
+<p class="small">4 个文件均 untracked（命中 <span class="mono">/_*.py</span> 忽略规则）。<b>建议随绿区第 4 组一并归档</b>。方法载体：erp-junk-cleanup-audit 技能；昨日归档位复核：<span class="path">D:\erp_ws_archive\20260918_junk_reclaim\</span>（MANIFEST 76 项 / 223.78MB，现存 197.05MB / 720 文件）、<span class="path">20260918_workspace_cleanup\</span>（340.83MB / 27,361 文件）。</p>
+
+<div class="footer">生成：2026-09-19 10:4x ｜ 数据快照 10:29–10:40 ｜ 本轮未删除、未移动、未改名任何业务文件 ｜ 证据可复核：两份扫描输出 + git ls-files + 12 个 dist md5 + 进程/端口实测</div>
+</div>
+</body>
+</html>

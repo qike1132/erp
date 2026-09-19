@@ -71,7 +71,12 @@ from fastapi_app.shared_models.product_material import (
 )
 from fastapi_app.shared_models.production_plan import ProductionPlan, ProductionPlanLog, StagingPurchasePlan
 from fastapi_app.shared_models.purchase_center import ModificationLog, SavedQuery
-from fastapi_app.shared_models.purchase_order import PurchaseOrder, PurchaseOrderItem, PurchaseOrderStatus
+from fastapi_app.shared_models.purchase_order import (
+    PurchaseOrder,
+    PurchaseOrderItem,
+    PurchaseOrderSku,
+    PurchaseOrderStatus,
+)
 from fastapi_app.shared_models.purchase_plan import PurchasePlan, PurchasePlanDetail, ShipmentRecord
 from fastapi_app.shared_models.staging_order import StagingOrder
 from fastapi_app.shared_models.staging_stock_in import StagingStockIn
@@ -137,6 +142,7 @@ __all__ = [
     'ProductionPlanLog',
     'PurchaseOrder',
     'PurchaseOrderItem',
+    'PurchaseOrderSku',
     'PurchaseOrderStatus',
     'PurchasePlan',
     'PurchasePlanDetail',

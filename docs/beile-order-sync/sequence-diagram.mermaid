@@ -1,0 +1,102 @@
+%% 主流程一：汇总下单保存损耗率（/purchase 保存修改）
+sequenceDiagram
+    autonumber
+    participant U as 采购操作员
+    participant M as SummaryModal.vue
+    participant S as useSummaryModal.ts
+    participant A as usePurchaseActions.ts
+    participant API as purchaseApi
+    participant R as order_routes.py
+    participant C as purchase_order_crud
+    participant U2 as SpareUtil
+    participant DB as PostgreSQL
+    participant Cache as L1+L2 缓存
+
+    U->>M: 输入损耗率(千分之几, 0..1000)
+    M->>S: applyLossRate(rate) debounce 300ms -> lossRateTouched=true
+    U->>M: 点击「保存修改」(编辑态)
+    M->>A: saveEdits
+    A->>S: saveFactoryEdits()
+    S->>API: saveFactoryEdits(edits, spare_rate=lossRate)
+    API->>R: POST /orders/factory-summary/save {edits, spare_rate}
+    R->>C: save_factory_summary_edits(db, edits, spare_rate)
+    loop 每个编辑分组
+        C->>DB: 更新 PurchaseOrderItem.quantity
+        C->>DB: 定位所属 PurchaseOrder
+        C->>U2: normalize_spare_rate(rate)
+        C->>U2: calc_spare_quantity(product_quantity, rate)
+        C->>DB: 覆盖写 PurchaseOrder.spare_rate / spare_quantity
+    end
+    C-->>R: {updated_count}
+    R->>DB: commit (db_transaction)
+    R->>Cache: invalidate_cache('orders:p*') + invalidate_cache('orders:beile:*')
+    R-->>API: success
+    API-->>S: {success}
+    S-->>A: 保存成功
+
+%% 主流程二：下单完成并同步到 /beile-order
+sequenceDiagram
+    autonumber
+    participant U as 采购操作员
+    participant P as ActiveOrdersPanel.vue
+    participant A as usePurchaseActions.ts
+    participant PO as usePurchaseOrders.ts
+    participant API as purchaseApi
+    participant R as order_routes.py
+    participant C as purchase_order_crud
+    participant U2 as SpareUtil
+    participant DB as PostgreSQL
+    participant Cache as L1+L2 缓存
+    participant BE as services/order/beile.py
+    participant BV as /beile-order 前端
+
+    Note over P: 行内「下单完成」按钮 (ActiveOrdersPanel :95-100)
+    U->>P: 点击「下单完成」
+    P->>A: completeOrder(orderId)
+    A->>PO: completeOrder(orderId, spare_rate=当前损耗率若已交互)
+    PO->>API: completePurchaseOrder(id, spare_rate)
+    API->>R: POST /orders/complete {order_id, spare_rate?}
+    R->>C: complete_purchase_order(db, id, user, spare_rate)
+    C->>DB: status='completed', completed_at=now
+    alt spare_rate 提供
+        C->>U2: normalize + calc
+        C->>DB: 覆盖写 spare_rate / spare_quantity
+    else spare_rate 为 None
+        C->>DB: 保留该采购单已存 spare_rate/spare_quantity
+    end
+    C-->>R: {id, order_no, status}
+    R->>DB: commit
+    R->>Cache: invalidate_cache('orders:p*') + invalidate_cache('orders:beile:*')
+    R-->>API: success
+
+    Note over BV: 用户切到 /beile-order（无需手动刷新）
+    BV->>BE: GET /orders/beile-list
+    BE->>Cache: 查 orders:beile:list:...
+    BE->>DB: SELECT completed 采购单（一次）
+    BE->>BE: 内存建 by_order_id / by_customer_product 映射
+    BE->>DB: 拉当前页 Order / StockIn
+    BE->>BE: MAX 口径 -> purchase_order_qty/spare_quantity/spare_rate/is_ordered
+    BE-->>BV: {data:[...], unconfirmed_count}
+    BV->>BV: 数量列=实际下单量 + 备品列 + 未下单徽章/门控
+
+%% 门控：未下单确认被拒（后端）
+sequenceDiagram
+    autonumber
+    participant BV as /beile-order
+    participant E as order.py confirm 端点
+    participant BE as beile.py confirm_beile_order
+    participant DB as PostgreSQL
+
+    BV->>E: POST /orders/{id}/confirm
+    E->>BE: confirm_beile_order(db, id, user)
+    BE->>DB: 查订单(湖北+未删除, FOR UPDATE)
+    BE->>DB: 查是否存在 completed 关联采购单
+    alt 不存在 completed 关联单
+        BE-->>E: raise ConflictError
+        E-->>BV: 409 detail=该订单未在采购中心完成下单，请先在采购中心完成下单后再确认
+        BV->>BV: toast.error(detail)
+    else 存在
+        BE->>DB: 写 confirmed_at / confirmed_by_id；标记通知已读
+        BE-->>E: {success:true}
+        E-->>BV: 200
+    end

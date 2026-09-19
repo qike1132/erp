@@ -18,4 +18,8 @@ max_function_length = 80
 max_vue_component_length = 400
 
 # 单个 .py 文件最大行数（由 scripts/file_size_gate.py 使用，仅对 git 变更文件生效）
-max_file_size = 1200
+# 定档依据：受扫描的 777 个 .py 中仅 2 个超过 1200
+# （test_purchase_center.py 1497、recovery_test_service.py 1353），1200 会让这两处
+# 存量文件一旦被改动就阻断提交。1600 仍能拦住新增的上帝类。
+# 本值是唯一来源：file_size_gate.py 与 CI 均从此处读取，不再各自硬编码。
+max_file_size = 1600

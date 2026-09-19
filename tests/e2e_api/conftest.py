@@ -55,6 +55,7 @@ from __future__ import annotations
 
 import os
 import sys
+import typing
 from pathlib import Path
 
 import pytest
@@ -69,6 +70,48 @@ import httpx  # noqa: E402
 from fastapi_app.core.config import settings  # noqa: E402
 
 BASE_URL = os.environ.get("E2E_API_BASE_URL", "http://127.0.0.1:5002").rstrip("/")
+
+# 真实库 URL —— 必须在**收集期**固化，不能等到用例运行期再读 settings。
+#
+# 原因：`tests/conftest.py` 的 `app_on_test_db`（session 级 autouse）会把
+# `settings.DATABASE_URL` 重定向到 `erp_system_test`（空库），供 tests/ 下的
+# 进程内 ASGI 套件使用。本目录不走那条路径（直连真实后端 HTTP），却同样继承
+# 了那个 fixture —— 于是造数与 `_mint_token` 都打到空测试库：admin 查不到、
+# 整个目录被 skip 成"绿"，P1 写入路径回归**从未真正执行过**。
+#
+# 为什么用环境变量而不是模块常量：本文件可能被 pytest（`import conftest`）与
+# 业务代码（`from tests.e2e_api import conftest`）以**两个不同的模块身份**各
+# 导入一次，后者发生在用例运行期（settings 已被改写）→ 模块常量会被算成空库。
+# 环境变量是进程级的，且 autouse fixture 只改 settings 不碰 os.environ，故
+# `setdefault` 能保证留下的一定是收集期的真实值。
+_REAL_DB_ENV_KEY = "ERP_E2E_REAL_DATABASE_URL"
+os.environ.setdefault(_REAL_DB_ENV_KEY, str(settings.DATABASE_URL))
+
+
+def real_database_url() -> str:
+    """真实后端所用库的同步 URL（收集期固化，见上方说明）。"""
+    return os.environ[_REAL_DB_ENV_KEY]
+
+
+def _mask_dsn(dsn: str) -> str:
+    """隐去 DSN 中的口令，便于在失败信息里安全地指出「连的是哪个库」。"""
+    from urllib.parse import urlparse, urlunparse
+
+    try:
+        parsed = urlparse(dsn)
+        if parsed.password is None:
+            return dsn
+        netloc = parsed.netloc.replace(f":{parsed.password}@", ":***@")
+        return urlunparse(parsed._replace(netloc=netloc))
+    except ValueError:
+        return "<unparsable-dsn>"
+
+
+class _MintOutcome(typing.NamedTuple):
+    """铸 token 的三态结果 —— 用于把「环境缺失」与「环境损坏」区分开。"""
+
+    token: str | None
+    db_reachable: bool
 
 # 单请求超时。给足 20s：真实库上 dashboard/stats 这类聚合查询在冷缓存时较慢，
 # 但 20s 仍未返回说明后端真的卡住了，应当失败而不是无限等待。
@@ -138,39 +181,58 @@ async def api() -> httpx.AsyncClient:
 # ============================================================
 # Token 铸造（不依赖任何口令）
 # ============================================================
-def _mint_token(username: str = "admin") -> str | None:
+def _mint_token(username: str = "admin") -> _MintOutcome:
     """现铸一个指定用户的 access token。
 
     与 ``scripts/contract_snapshot.py::mint_token`` 同源做法：
     查 user 表拿 id，再 ``create_access_token({'sub': str(uid)})``。
     口令可能被改，但 user 表的主键不会 —— 所以这条路径最稳。
+
+    用收集期固化的 ``real_database_url()``（真实库），**不能**读
+    ``settings.DATABASE_URL`` —— 后者已被 tests/conftest.py 的 autouse
+    fixture 改成空测试库，见该函数处的说明。
+
+    返回三态：能连库且查到用户 → token；能连库但查不到用户 → ``(None, True)``；
+    连不上库 → ``(None, False)``。调用方据此决定 **skip 还是 fail** ——
+    「库可达但 admin 不存在」是缺陷，不是环境缺失，绝不能静默跳过。
     """
     try:
         from sqlalchemy import create_engine, text
 
         from fastapi_app.core.auth.token import create_access_token
 
-        engine = create_engine(settings.DATABASE_URL)
+        engine = create_engine(real_database_url())
         with engine.connect() as conn:
             row = conn.execute(
                 text('SELECT id FROM "user" WHERE username = :u'), {"u": username}
             ).fetchone()
         if row is None:
-            return None
-        return create_access_token({"sub": str(row[0])})
-    except Exception:  # noqa: BLE001 - 铸 token 失败应让用例失败并说明，而非中断收集
-        return None
+            return _MintOutcome(None, True)
+        return _MintOutcome(create_access_token({"sub": str(row[0])}), True)
+    except Exception:  # noqa: BLE001 - 连不上库属环境缺失，交由调用方 skip
+        return _MintOutcome(None, False)
 
 
 @pytest.fixture(scope="session")
 def admin_token() -> str:
-    token = _mint_token("admin")
-    if not token:
+    outcome = _mint_token("admin")
+    if outcome.token:
+        return outcome.token
+
+    if not outcome.db_reachable:
         pytest.skip(
-            "无法读到 admin 用户（数据库不可达或 admin 不存在）。"
-            "请确认后端所用的库可直连，或检查 user 表中是否存在 username='admin'。"
+            "无法连接数据库（无法铸 admin token）。"
+            "请确认后端所用的库可直连。"
         )
-    return token
+
+    # 库连得上、admin 却查不到 —— 这是**缺陷**（或后端指向了另一个库），
+    # 不是"环境缺失"。此处刻意 FAIL 而不是 skip：本目录曾因静默 skip
+    # 把「P1 写入路径回归从未真正执行」隐藏成一片绿。
+    pytest.fail(
+        "数据库可达，但 user 表中不存在 username='admin'。"
+        "请检查后端所用的库是否与本套件直连的是同一个"
+        f"（当前: {_mask_dsn(real_database_url())}）。"
+    )
 
 
 @pytest.fixture(scope="session")

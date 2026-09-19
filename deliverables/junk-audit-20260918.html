@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>D:\erp_system 垃圾文件识别与清理风险审计 · 2026-09-18</title>
+<style>
+  :root{
+    --bg:#f7f8fa; --panel:#ffffff; --line:#e5e7eb; --line-2:#eef0f3;
+    --text:#1f2329; --text-2:#4e5969; --text-3:#86909c;
+    --red:#c9372c; --red-bg:#fdf3f2; --red-line:#f5c6c0;
+    --amber:#a8710a; --amber-bg:#fdf8ec; --amber-line:#f0dcae;
+    --green:#1f7a4d; --green-bg:#f2faf5; --green-line:#c4e3d1;
+    --blue:#1a5fb4; --blue-bg:#f2f7fd; --blue-line:#c8ddf5;
+    --mono:"Cascadia Mono","Consolas","SFMono-Regular",Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font:14px/1.65 -apple-system,"Segoe UI","Microsoft YaHei",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .wrap{max-width:1220px;margin:0 auto;padding:36px 28px 80px}
+  header{border-bottom:1px solid var(--line);padding-bottom:22px;margin-bottom:28px}
+  h1{margin:0 0 8px;font-size:24px;font-weight:600;letter-spacing:-.2px}
+  .sub{color:var(--text-2);font-size:13px}
+  .sub b{color:var(--text);font-weight:600}
+  .meta{margin-top:14px;display:flex;flex-wrap:wrap;gap:8px}
+  .tag{display:inline-block;padding:2px 9px;border-radius:3px;font-size:12px;
+    border:1px solid var(--line);background:#fff;color:var(--text-2)}
+  h2{font-size:16px;font-weight:600;margin:38px 0 6px;padding-top:20px;border-top:1px solid var(--line)}
+  h2 .n{color:var(--text-3);font-weight:400;margin-right:8px;font-variant-numeric:tabular-nums}
+  .lead{color:var(--text-2);margin:8px 0 16px;font-size:13.5px}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin:18px 0 6px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:14px 16px}
+  .card .k{font-size:12px;color:var(--text-3);margin-bottom:6px}
+  .card .v{font-size:22px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.2}
+  .card .d{font-size:12px;color:var(--text-3);margin-top:5px}
+  .c-green .v{color:var(--green)} .c-red .v{color:var(--red)} .c-amber .v{color:var(--amber)} .c-blue .v{color:var(--blue)}
+  table{width:100%;border-collapse:collapse;background:var(--panel);
+    border:1px solid var(--line);border-radius:6px;overflow:hidden;font-size:13px}
+  th{background:#fafbfc;text-align:left;font-weight:600;color:var(--text-2);
+    padding:9px 11px;border-bottom:1px solid var(--line);white-space:nowrap;font-size:12.5px}
+  td{padding:9px 11px;border-bottom:1px solid var(--line-2);vertical-align:top}
+  tr:last-child td{border-bottom:none}
+  tbody tr:hover{background:#fafbfc}
+  td.p{font-family:var(--mono);font-size:12px;word-break:break-all;color:var(--text)}
+  td.s{font-family:var(--mono);font-size:12px;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+  td.t{color:var(--text-2);font-size:12.5px;white-space:nowrap}
+  .badge{display:inline-block;padding:1px 7px;border-radius:3px;font-size:11.5px;
+    font-weight:600;white-space:nowrap;border:1px solid}
+  .b-green{color:var(--green);background:var(--green-bg);border-color:var(--green-line)}
+  .b-red{color:var(--red);background:var(--red-bg);border-color:var(--red-line)}
+  .b-amber{color:var(--amber);background:var(--amber-bg);border-color:var(--amber-line)}
+  .b-blue{color:var(--blue);background:var(--blue-bg);border-color:var(--blue-line)}
+  .b-gray{color:var(--text-3);background:#fafbfc;border-color:var(--line)}
+  .box{border-radius:6px;padding:14px 16px;margin:16px 0;font-size:13.5px;border:1px solid}
+  .box h3{margin:0 0 8px;font-size:13.5px;font-weight:600}
+  .box ul{margin:6px 0 0;padding-left:20px}
+  .box li{margin:4px 0}
+  .danger{background:var(--red-bg);border-color:var(--red-line)} .danger h3{color:var(--red)}
+  .warn{background:var(--amber-bg);border-color:var(--amber-line)} .warn h3{color:var(--amber)}
+  .ok{background:var(--green-bg);border-color:var(--green-line)} .ok h3{color:var(--green)}
+  .info{background:var(--blue-bg);border-color:var(--blue-line)} .info h3{color:var(--blue)}
+  code{font-family:var(--mono);font-size:12px;background:#f2f3f5;
+    padding:1px 5px;border-radius:3px;border:1px solid var(--line-2)}
+  .box code{background:rgba(255,255,255,.75)}
+  .fn{font-family:var(--mono);font-size:12px;color:var(--text);word-break:break-all}
+  footer{margin-top:44px;padding-top:18px;border-top:1px solid var(--line);
+    color:var(--text-3);font-size:12px}
+  .missing{color:var(--green);font-weight:600}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>D:\erp_system 垃圾文件识别与清理风险审计</h1>
+  <div class="sub">滨发 ERP · 生产机兼开发机 <b>192.168.0.95</b>｜审计 <b>2026-09-18 09:51—10:05</b>｜落地执行 <b>09:58—10:10</b>｜<b>§01—§06 = 只读扫描结论（审计时点快照）；§07 = 经确认后的执行记录 —— 未使用任何删除原语，一律同卷重命名迁出；§08 = <span class="fn">dist</span> 快照身份谱系附录</b></div>
+  <div class="meta">
+    <span class="tag">审计时仓库 ≈ 1.73 GB</span>
+    <span class="tag">顶层条目 147 → 102</span>
+    <span class="tag">git 跟踪文件 2309 个</span>
+    <span class="tag">当前运行模式：dev（非生产托管）</span>
+    <span class="tag">已回收 196.91 MB</span>
+  </div>
+</header>
+
+<div class="cards">
+  <div class="card c-green"><div class="k">可安全回收（低风险）</div><div class="v">≈ 159 MB</div><div class="d">纯生成物 / 缓存 / 陈旧产物</div></div>
+  <div class="card c-amber"><div class="k">需用户决策（灰区）</div><div class="v">≈ 329 MB</div><div class="d">存档 / 其他工具数据 / 会话证据</div></div>
+  <div class="card c-red"><div class="k">⛔ 高风险禁删</div><div class="v">≈ 1.24 GB</div><div class="d">误删即业务故障或数据丢失</div></div>
+  <div class="card c-blue"><div class="k">本次分析新增文件</div><div class="v">10 个</div><div class="d">扫描/迁移脚本与产出，已移出至归档 tools/</div></div>
+</div>
+
+<div class="box danger">
+  <h3>结论先行：本环境存在一条「删除反噬」通道，任何清理动作都必须先读懂它</h3>
+  <p style="margin:6px 0 0">本环境（WorkBuddy 会话内）<b>所有删除操作被重定向进 <span class="fn">D:\$Recycle.Bin</span></b>，且拦截面覆盖 git 自身的文件 <span class="fn">unlink</span>。<b>单次删除路径数 &gt; 50 会触发 <code>SAFE_DELETE_BULK_CONFIRM_REQUIRED</code>，升级后按「父目录树整体回收」</b>。</p>
+  <p style="margin:8px 0 0">2026-09-18 已实证事故：执行 <code>git repack -ad</code> 回收冗余对象时，<span class="fn">.git\objects\pack</span> → <span class="fn">.git\objects</span> → <span class="fn">.git</span> 在三秒内被自底向上整体回收，仓库随即 <code>fatal: not a git repository</code>。</p>
+  <p style="margin:8px 0 0"><b>因此：清大目录一律先 <code>mv</code> 改名或移出仓库（重命名不触发拦截），禁止 <code>rm</code> / <code>Remove-Item</code> / <code>shutil.rmtree</code>；且会话内禁止对 <span class="fn">.git</span> 执行任何批量删除型运维。</b></p>
+</div>
+
+<h2><span class="n">01</span>可安全回收清单（低风险 · 纯生成物）</h2>
+<p class="lead">判定依据：① 被 <span class="fn">.gitignore</span> 显式声明为「临时/产物」；② 由工具链自动重建，删除仅损失一次重建耗时；③ 全部为 <code>git ls-files</code> 未跟踪状态，回收后不会污染工作树。</p>
+
+<table>
+<thead><tr><th style="width:34%">完整路径</th><th style="width:9%">大小</th><th style="width:15%">类型</th><th>判定为垃圾的理由</th></tr></thead>
+<tbody>
+<tr><td class="p">D:\erp_system\.mypy_cache\</td><td class="s">110.43 MB<br><span style="color:#86909c">37 f</span></td><td class="t">工具缓存</td><td>mypy 增量类型检查缓存。<span class="fn">.gitignore</span> 第 153 行显式忽略。删除后下次 <code>mypy</code> 全量重建，仅变慢。<b>本清单中体积最大的一项。</b></td></tr>
+<tr><td class="p">D:\erp_system\build-v533\<br>D:\erp_system\build-v533-new\<br>D:\erp_system\build-v533-next\<br>D:\erp_system\build-v533-sentinel\</td><td class="s">1.38 MB ×4<br><span style="color:#86909c">= 5.52 MB</span></td><td class="t">打包中间产物</td><td>四份 PyInstaller workpath，内容逐文件核对为<b>完全同构</b>（<span class="fn">base_library.zip</span> 1402481B + 同尺寸 <span class="fn">localpycs\*.pyc</span>），仅时间戳不同（09-16 10:00 / 16:33 / 20:38 / 23:33）。均未跟踪，重新打包自动重建。</td></tr>
+<tr><td class="p">frontend-vite\dist.bak-20260829\<br>frontend-vite\dist.bak-20260829-2\<br>frontend-vite\dist.bak-20260824\</td><td class="s">7.78 / 3.89 / 3.87 MB</td><td class="t">陈旧前端产物</td><td>8 月下旬手工备份的旧 dist，与当前 dist 结构同源（195—390 文件）。当前生产产物为 <span class="fn">frontend-vite\dist\</span>（见 §02）。</td></tr>
+<tr><td class="p">frontend-vite\dist_prev_20260829_164650\<br>frontend-vite\dist_prev_20260829_180908\<br>frontend-vite\dist_prev_20260911_213006\</td><td class="s">3.89 / 3.89 / 3.55 MB</td><td class="t">陈旧前端产物</td><td><span class="fn">.gitignore</span> 第 243 行 <code>/frontend-vite/dist_prev_*/</code> 显式忽略，定位为「交换/历史产物」。均早于 09-17 发布。<br><b>⚠️ 同前缀的 <span class="fn">dist_prev_20260918_092043</span>（今日 09:20）不在本清单内，见 §03。</b></td></tr>
+<tr><td class="p">D:\erp_system\temp\</td><td class="s">14.00 MB<br><span style="color:#86909c">506 f</span></td><td class="t">会话临时区</td><td><span class="fn">.gitignore</span> 第 201/273 行双重忽略。内容为历史排障脚本（<span class="fn">_leader_*.py</span>、<span class="fn">_qa_verify*.py</span>）、源码审计输出、前后对比截图、<span class="fn">mc_audit\</span>（3.53 MB）、nginx <span class="fn">client_body_temp\</span>。全部可弃。</td></tr>
+<tr><td class="p">D:\erp_system\.tmp-crypt-verify\</td><td class="s">3.66 MB</td><td class="t">依赖下载缓存</td><td><span class="fn">.gitignore</span> 第 247 行显式忽略，注明「依赖校验用临时下载（wheel 等）」。</td></tr>
+<tr><td class="p">D:\erp_system\__pycache__\</td><td class="s">0.47 MB</td><td class="t">字节码缓存</td><td>Python <span class="fn">.pyc</span> 缓存，解释器自动重建。</td></tr>
+<tr><td class="p">D:\erp_system\.ruff_cache\</td><td class="s">0.75 MB</td><td class="t">工具缓存</td><td>ruff lint 缓存，自动重建。</td></tr>
+<tr><td class="p">D:\erp_system\.pytest_cache\</td><td class="s">0.35 MB</td><td class="t">工具缓存</td><td>pytest 缓存。注：内存库记录该目录曾因 DACL 损坏需提权修复，若回收后报错属已知现象而非新增故障。</td></tr>
+<tr><td class="p">D:\erp_system\.coverage</td><td class="s">52 KB</td><td class="t">覆盖率数据</td><td><span class="fn">.gitignore</span> 第 96 行显式忽略。未跟踪。</td></tr>
+<tr><td class="p">frontend-vite\tsconfig.tsbuildinfo</td><td class="s">20 KB</td><td class="t">TS 增量缓存</td><td><span class="fn">.gitignore</span> 第 187 行 <code>*.tsbuildinfo</code>。删除后 <code>vue-tsc -b</code> 全量重编。同理忽略 <span class="fn">.vitest_baseline.log</span>（13 KB）。<br><b>⚠️ 更正：</b>同前缀的 <span class="fn">tsconfig.node.tsbuildinfo</span> 经 <code>git ls-files</code> <b>核实已被跟踪</b>（忽略规则晚于入库），故已从回收清单剔除 —— 详见 §07。</td></tr>
+<tr><td class="p">frontend-vite\build_final_typeclean.log<br>frontend-vite\build_route_fix3.log<br>frontend-vite\build_route_fix2.log<br>frontend-vite\build_route_fix.log<br>frontend-vite\build_now.log<br>frontend-vite\build_final.log<br>frontend-vite\build_final2.log</td><td class="s">≈ 220 KB<br><span style="color:#86909c">7 f</span></td><td class="t">构建日志</td><td>08-09 / 08-17 的构建输出转储。命中 <span class="fn">.gitignore</span> <code>*.log</code> 与 <code>build_*.txt|build.err</code> 治理条款。</td></tr>
+<tr><td class="p">D:\erp_system\nul<br>D:\erp_system\main</td><td class="s">126 B<br>0 B</td><td class="t">重定向残留</td><td><span class="fn">.gitignore</span> 第 83 行显式列出 <code>nul</code>（Windows 设备名被 bash 当普通文件名创建）。<br><b>⚠️ 更正：<span class="fn">nul</span> 实为磁盘上真实存在的 126 字节文件</b>（首轮扫读取普通路径，被 Win32 解析为 NUL 设备而误报 0 B；改用 <code>\\?\</code> 扩展长度路径核实：<code>GetFileAttributesW=32</code>、<code>getsize=126</code>）。已在执行阶段迁出 <span class="fn">main</span>；<span class="fn">nul</span> 因设备命名空间限制需人工处理 —— 详见 §07。</td></tr>
+<tr><td class="p">D:\erp_system\query<br>D:\erp_system\queryex</td><td class="s">13 B<br>14 B</td><td class="t">客户端残留</td><td>内容分别为 <code>﻿erp-prod\r\n</code> / <code>﻿erp-redis\r\n</code>，系 <code>sc</code>/<code>nssm</code> 输出重定向误建。<span class="fn">.gitignore</span> 第 113—115 行显式列出 <code>query</code>/<code>queryex</code>。</td></tr>
+<tr><td class="p">D:\erp_system\x\<br>D:\erp_system\tmp_acl_src_sandboxed\</td><td class="s">0 B<br>0 B</td><td class="t">空目录</td><td>各含 0 文件、0 子项，无任何内容。</td></tr>
+<tr><td class="p">D:\erp_system\backup_site_main.css</td><td class="s">54 KB</td><td class="t">探测残留</td><td><span class="fn">.gitignore</span> 第 212 行显式忽略，注明「探测用静态站点」。未跟踪。</td></tr>
+<tr><td class="p">D:\erp_system\logs\fastapi_20260917.log.2026-09-17</td><td class="s">1.15 MB</td><td class="t">轮转日志</td><td>09-17 的轮转归档。<b>⚠️ 仅此一个轮转文件可弃，其余 <span class="fn">logs\</span> 内容均在运行写入中，见 §02。</b></td></tr>
+<tr><td class="p">根级一次性产物（18 个，全部未跟踪）<br><span style="font-family:var(--mono);font-size:11.5px;color:#4e5969">_eng_tmp_full.log · _eng_tmp_green.log · _eng_tmp_lint.log · _eng_tmp_red.log · _eng_tmp_test.log · _eng_tmp_tsc.log · _perf_selfcheck_pre.txt · _perf_selfcheck_pre2.txt · _perf_selfcheck_run.txt · _commit_msg_fix3.txt · _commit_msg_hookperf.txt · _probe_urgency.txt · _fix_hook_out.txt · _verify_release.txt · _verify_live_final.txt · _apply_mig046_prod_run.txt · _build_frontend_run.txt · _scan_top.txt</span></td><td class="s">≈ 40 KB</td><td class="t">运行输出转储</td><td>本轮及前序会话的命令输出落盘。全部命中 <span class="fn">.gitignore</span> <code>/_*.txt</code> 与 <code>*.log</code>。内容已被记忆库或报告吸收，无独立留存价值。</td></tr>
+<tr><td class="p">D:\erp_system\_append_memory_20260918.py<br>D:\erp_system\_fix_memory_numbering.py</td><td class="s">6 KB / 2 KB</td><td class="t">一次性脚本</td><td>记忆库写入与编号整理脚本，执行完毕，命中 <code>/_*.py</code>。</td></tr>
+<tr><td class="p">D:\erp_system\.m5_colcheck.py<br>.m5_drill.py · .m5_e2e_verify.py · .m5_pgdump_probe.py · .m5_restore_probe.py · .m5_restore_state.py · .m5_role_probe.py · .m5_status_probe.py · .m5_verify_diff.py</td><td class="s">≈ 22 KB<br><span style="color:#86909c">9 f</span></td><td class="t">一次性探针</td><td>08-23 / 08-24 的 M5 验收临时探测脚本。<span class="fn">.gitignore</span> 第 207 行 <code>/.m5_*.py</code> 显式忽略，全部未跟踪。</td></tr>
+</tbody>
+</table>
+
+<div class="box ok" style="margin-top:14px">
+  <h3>⚠️ 在本清单中但必须保留的三类「看似垃圾」资产</h3>
+  <ul>
+    <li><span class="fn">frontend-vite\dist_prev_20260918_092043\</span>（3.62 MB，今日 09:20）—— 当前生产 dist 的<b>唯一回滚副本</b>。发布脚本 <span class="fn">swap-dist.mjs</span> 成功后会删除旧副本，故这一个是刻意留下的退路。</li>
+    <li>根级所有以 <code>_check.py</code> / <code>_e2e_check.py</code> 结尾的脚本 —— <span class="fn">.gitignore</span> 第 221 行注释明确：「<b>以 _check / _e2e_check 结尾的为回归脚本，保留不忽略</b>」。它们是 E2E 回归资产，<b>不是垃圾</b>。</li>
+    <li><span class="fn">env_backup\</span>（<span class="fn">__init__.py</span> + <span class="fn">manifest.py</span>，本环境唯一被 git 跟踪的「backup」目录）—— 名义像备份残留，实测是<b>服务器管理器「备份与恢复」模块的源码包</b>（AES-256-GCM 打包/验包/解包内核）。<b>禁删。</b></li>
+  </ul>
+</div>
+
+<h2><span class="n">02</span>⛔ 高风险文件清单（误删可能导致系统故障或数据丢失）</h2>
+<p class="lead">以下条目<b>不在任何清理建议范围内</b>。列出的目的是明确标注禁区边界，并说明越界的后果。</p>
+
+<table>
+<thead><tr><th style="width:34%">完整路径</th><th style="width:9%">大小</th><th style="width:13%">后果等级</th><th>误删后果</th></tr></thead>
+<tbody>
+<tr><td class="p">D:\erp_system\.git\</td><td class="s">491.48 MB</td><td><span class="badge b-red">灾难级</span></td><td>版本库本体。<b>且禁止以「回收空间」为名执行 <code>repack</code>/<code>gc</code>/<code>prune</code>/<code>clean -fdx</code>/<code>worktree prune</code></b> —— 09-18 已实证会把整棵 <span class="fn">.git</span> 收进回收站。现存 194.5 MB 冗余 pack 亦<b>不在本会话内清理</b>。</td></tr>
+<tr><td class="p">D:\erp_system\frontend-vite\dist\</td><td class="s">3.62 MB<br><span style="color:#86909c">192 f</span></td><td><span class="badge b-red">灾难级</span></td><td>nginx root 指向此目录，是<b>唯一生产前端产物</b>。删除后生产站点直接 404 / 白屏。⚠️ 当前 nginx 未运行，更易被误判为「没人用」。</td></tr>
+<tr><td class="p">D:\erp_system\frontend-vite\node_modules\</td><td class="s">390.37 MB<br><span style="color:#86909c">39056 f</span></td><td><span class="badge b-red">高</span></td><td>前端依赖。误删需 <code>npm ci</code> 全量重装（中断会导致包截断损坏，历史上踩过 <span class="fn">@babel/generator</span> SyntaxError）。36 万文件规模，<b>删除动作本身即会触发批量回收升级</b>。</td></tr>
+<tr><td class="p">D:\erp_system\.env<br>D:\erp_system\.env.production<br>D:\erp_system\.env.development</td><td class="s">6.5 / 2.0 / 1.7 KB</td><td><span class="badge b-red">高</span></td><td><b>配置权威来源</b>。内存库记录：<code>UVICORN_WORKERS=8</code> 实际生效点是 <span class="fn">.env</span>（第 171 行），NSSM 同名环境变量是死配置。删除后 worker 数、DB/Redis 连接、JWT 密钥全部丢失。三者均未跟踪，<b>无 git 副本</b>。</td></tr>
+<tr><td class="p">D:\erp_system\backups\db\erp_system_pre046_20260918-074153.dump<br>D:\erp_system\backups\db-pre045\erp_system_pre045_20260917-155957.dump</td><td class="s">2.42 MB<br>2.38 MB</td><td><span class="badge b-red">灾难级</span></td><td>迁移 046 / 045 执行<b>前的生产库快照</b>，是 schema 迁移失败后的唯一回退依据。</td></tr>
+<tr><td class="p">D:\erp_system\backups\server\*.zip<br>（34 个 .zip + 34 个 .meta，含 <span class="fn">erp_auto_daily_*</span> / <span class="fn">erp_incremental_*</span> / <span class="fn">erp_backup_*</span>）</td><td class="s">≈ 140 MB<br><span style="color:#86909c">152.77 MB 整目录</span></td><td><span class="badge b-red">灾难级</span></td><td>08-27 至 09-18 的<b>生产库定时备份链</b>。最新一份 <span class="fn">erp_auto_daily_20260918_020504.zip</span>（8.28 MB）距今不足 8 小时。<b>注意 <span class="fn">.gitignore</span> 已忽略整个 <span class="fn">/backups/</span>，这些文件没有 git 副本。</b></td></tr>
+<tr><td class="p">D:\erp_system\backups\server\pre_restore\</td><td class="s">32.57 MB<br><span style="color:#86909c">5 f</span></td><td><span class="badge b-red">灾难级</span></td><td>历次<b>恢复操作前</b>的快照。数据库已损坏时这是最后一道防线。</td></tr>
+<tr><td class="p">D:\erp_system\backups\material-calculator-rollback-20260911\</td><td class="s">91 KB<br><span style="color:#86909c">11 f（已跟踪）</span></td><td><span class="badge b-red">高</span></td><td>物料计算器改版的回滚源副本。<span class="fn">.gitignore</span> 第 228—229 行注释明确：「<b>刻意保留跟踪，请勿 git rm --cached</b>」。</td></tr>
+<tr><td class="p">D:\erp_system\backups\stale-restore-20260911\</td><td class="s">44 KB<br><span style="color:#86909c">6 f（已跟踪）</span></td><td><span class="badge b-red">高</span></td><td>同上，被误还原文件的原始副本（含 <span class="fn">vite.config.js</span>/<span class="fn">.ts</span>、<span class="fn">PatternRoomView.vue</span> 等）。</td></tr>
+<tr><td class="p">D:\erp_system\static\uploads\</td><td class="s">42.75 MB<br><span style="color:#86909c">54 f（24 已跟踪）</span></td><td><span class="badge b-red">灾难级</span></td><td><b>业务数据，不是构建产物。</b>内容为 <span class="fn">customer-sampling\20260817\*.webp</span>（原图 + <span class="fn">.blur.webp</span> + <span class="fn">.thumb.webp</span> 三件套）等客户/产品图片。<span class="fn">.gitignore</span> 第 218 行虽标注「运行时上传文件」，但 24 个已被跟踪入库 —— 删除即造成页面图片 404 且不可再生。</td></tr>
+<tr><td class="p">D:\erp_system\logs\erp-arq.log<br>logs\后端(uvicorn).out.log<br>logs\nginx-access.log<br>logs\prod_runner.json<br>logs\nginx.pid</td><td class="s">2.80 MB / 635 KB<br>268 KB / 569 B / 7 B</td><td><span class="badge b-red">高</span></td><td><b>正在被运行中的进程实时写入</b>（实测 mtime = 审计时刻 09:52）。ARQ 判活依赖 <code>:6380</code> 哨兵键与日志新鲜度；<span class="fn">nginx.pid</span> 被 nginx 用于进程识别。运行期删除会破坏监控与排障证据链。</td></tr>
+<tr><td class="p">D:\erp_system\.workbuddy\（含 memory\、artifacts\ 47.73 MB/1426 f、tmp\ 24 MB）</td><td class="s">72.26 MB</td><td><span class="badge b-red">灾难级</span></td><td>项目记忆库（27 个 <span class="fn">.md</span>，含全部运维铁律与事故复盘）与工作产物。<b>属系统级禁删区，即使 <span class="fn">tmp\</span> 子目录也不在本轮建议内。</b></td></tr>
+<tr><td class="p">D:\erp_system\.githooks\pre-commit<br>D:\erp_system\.githooks\allowlist.txt</td><td class="s">11.8 KB<br>936 B</td><td><span class="badge b-red">高</span></td><td>提交守卫三层防线（危险路径 + 密钥内容扫描 + 质量门禁）。历史上曾整体失效，导致 428 个 Edge 凭据文件入库并推送。</td></tr>
+<tr><td class="p">D:\erp_system\migrations\<br>D:\erp_system\config\</td><td class="s">0.93 MB<br>0.05 MB</td><td><span class="badge b-red">高</span></td><td>Alembic 迁移链（灾备恢复依赖）与运行时配置（含 <span class="fn">jwt\*.pem</span> 密钥、<span class="fn">redis.production.conf</span>）。</td></tr>
+<tr><td class="p">D:\erp_system\server_manager.py<br>server_manager_config.json<br>start.py · run.py<br>erp_system.spec · server_manager.spec</td><td class="s">143 KB / 293 B<br>等</td><td><span class="badge b-red">高</span></td><td>GUI 管理器运行期入口与配置（<span class="fn">server_manager_config.json</span> 含 api_port=5002 / web_port=3000 / redis_port=6379 等实际端口绑定），及 PyInstaller 打包入口。均为 git 跟踪的正式源文件。</td></tr>
+<tr><td class="p">D:\erp_system\docs\<br>D:\erp_system\evidence\<br>D:\erp_system\deliverables\</td><td class="s">40.39 / 10.64<br>/ 2.83 MB</td><td><span class="badge b-red">高</span></td><td>文档树（651 文件，曾被一次 <code>git add docs</code> 批量操作毁掉整棵）、E2E 断言证据（82 个已跟踪文件）、交付报告。三者均被 git 跟踪，但<b>禁止对 <span class="fn">docs</span> 使用 <code>git add docs</code></b>（历史事故）。</td></tr>
+</tbody>
+</table>
+
+<div class="box info">
+  <h3>已核实排除的一处疑似风险</h3>
+  <p style="margin:6px 0 0"><span class="fn">backups\.backup_encryption.key</span> —— <span class="fn">.gitignore</span> 第 41 行列出该路径，初判为「删除即导致全部备份不可解密」的灾难级项。<b>实测该文件不存在</b>（<span class="badge b-green">已核实</span>），故不构成现存风险。但 <span class="fn">env_backup</span> 模块的 AES-256-GCM 主密码体系仍在开发中，未来若落地，该密钥文件将升为灾难级。</p>
+</div>
+
+<h2><span class="n">03</span>需用户决策的灰区（含有效价值，不宜由工具单方判定）</h2>
+<p class="lead">这些条目<b>技术上可删</b>，但要么承载回滚点、要么属其他工具的私有数据、要么是尚未收口的会话证据。<b>建议逐项由你确认后再动。</b></p>
+
+<table>
+<thead><tr><th style="width:34%">完整路径</th><th style="width:9%">大小</th><th style="width:15%">争议点</th><th>建议</th></tr></thead>
+<tbody>
+<tr><td class="p">D:\erp_system\.archive\</td><td class="s">80.46 MB<br><span style="color:#86909c">477 f</span></td><td class="t">隔离区，性质混杂</td><td>设计上就是「清理过渡隔离区」（<span class="fn">.gitignore</span> 第 161 行），但其中 <span class="fn">.legacy_backup_20260323_085111\</span> 有 <b>151 个文件已被 git 跟踪</b>，删除会产生真实 git 变更。可弃部分：<span class="fn">cleanup-20260815\cache-dirs\</span>（45.72 MB pytest 缓存副本）、<span class="fn">ai-tool-dirs\</span>（32.02 MB）。<b>建议先只回收这两个子目录。</b></td></tr>
+<tr><td class="p">D:\erp_system\backups\version-prune-20260916\</td><td class="s">119.32 MB<br><span style="color:#86909c">23 f</span></td><td class="t">版本存档</td><td>v5.33 剪枝前的版本存档：4 份 <span class="fn">server_manager.py.BEFORE-*</span> 源码快照 + <span class="fn">archive\</span>（58.38 MB）+ <span class="fn">build\</span>（23.53 MB）+ <span class="fn">dist\</span>（18.52 MB）+ v5.33 exe（18.54 MB）。未跟踪、体积最大，但属<b>唯一的 v5.33 整体回滚包</b>。</td></tr>
+<tr><td class="p">D:\erp_system\dist-v533-sentinel\</td><td class="s">18.58 MB<br><span style="color:#86909c">2 f</span></td><td class="t">回滚二进制</td><td>含 <span class="fn">ERP服务器管理器_v5.33.exe</span>（18.58 MB）。内存库记载 v5.33 exe 曾「入库作回滚点」，但当前 <code>git ls-files</code> 显示该目录 0 跟踪文件 —— <b>磁盘上是唯一副本，删除即失去 v5.33 可执行回滚能力</b>。</td></tr>
+<tr><td class="p">D:\erp_system\build\</td><td class="s">47.35 MB<br><span style="color:#86909c">41 f</span></td><td class="t">打包 workpath</td><td><span class="fn">server_manager\</span> 与 <span class="fn">pyi-sm\</span> 各 23.53 MB，为<b>近似重复</b>的 PyInstaller 中间物（含 <span class="fn">ERP服务器管理器_v5.40.pkg</span> 18.20 MB）。理论可再生，但重新打包耗时且需工具链完整。另有 08-15 的旧诊断脚本（<span class="fn">pkg*.txt</span>、<span class="fn">_clean*.py</span>、<span class="fn">_diag_*.py</span>）可弃。</td></tr>
+<tr><td class="p">D:\erp_system\.freebuff\<br>D:\erp_system\.codeartsdoer\<br>D:\erp_system\.trae\ · .qoder\ · .codebuddy\ · .arts\ · .workbuddy-ai\ · .lean-ctx\ · .resultverify\</td><td class="s">19.24 / 14.46<br>/ 1.59 等<br><span style="color:#86909c">合计 ≈ 37 MB</span></td><td class="t">其他 AI 工具私有数据</td><td><span class="fn">.freebuff\desktop-v2.db</span> + <span class="fn">-wal</span> 各 9.6 MB，自 08-18 未更新；<span class="fn">.codeartsdoer\review\</span> 12.23 MB。</td></tr>
+<tr><td class="p">D:\erp_system\_qa_tmp\</td><td class="s">5.37 MB<br><span style="color:#86909c">111 f</span></td><td class="t">本次会话 QA 证据</td><td>今日 07:5x—09:2x 的对抗性 QA 产物（<span class="fn">BASELINE_hash.txt</span>、<span class="fn">mutation_RED_evidence_CR1.txt</span>、<span class="fn">edward_pre\</span>、<span class="fn">orig\</span>+<span class="fn">orig2\</span> 变异基线）。<b>未在任何 gitignore 规则内</b>，属「未收口证据」。建议保留至本次发布正式收口，之后整体回收。</td></tr>
+<tr><td class="p">D:\erp_system\_fix_backup_20260917\</td><td class="s">≈ 43 KB<br><span style="color:#86909c">2 f</span></td><td class="t">修复前副本</td><td>09-17 20:32 的 <span class="fn">backup\validation.py</span>（36.5 KB）与 <span class="fn">core\arq_app.py</span>（7.1 KB）修改前副本 —— 对应 <code>/api/health/arq</code> 三态探测那次改动。<b>改动刚落地一天，建议再留一个发布周期。</b></td></tr>
+<tr><td class="p">根级 12 个遗留脚本（全部已被 git 跟踪）<br><span style="font-family:var(--mono);font-size:11.5px;color:#4e5969">build_cmd.bat · build_1_3_apk.bat · build_fix.bat · release.bat · build_exe.bat · build_server_manager.bat · build_v8_gui.bat · scan_quality.ps1 · scan_quality2.ps1 · analyze_ruff.py · analyze-appdata.ps1 · remove_packaging.ps1 · fix-pytest-cache-acl.cmd · check_workspace_acl.py · README_DEPLOY.txt</span></td><td class="s">&lt; 30 KB</td><td class="t">遗留构建脚本</td><td>部分为 2026-04/05 的 Android 时代产物（<span class="fn">build_1_3_apk.bat</span>），而本 ERP 明确<b>不含 Android App</b>；部分（<span class="fn">scan_quality*.ps1</span>、<span class="fn">analyze_*.py</span>）已被 <span class="fn">.gitignore</span> 标为一次性脚本。<b>但它们已被跟踪，删除属 git 变更而非文件清理</b> —— 需走 <code>git rm</code> 并遵守「禁用 <code>git add -A</code>」「按路径白名单提交」「提交前 <code>git diff --cached --name-status</code> 精确核验」三条铁律。</td></tr>
+<tr><td class="p">D:\erp_system\.env.bak-20260911</td><td class="s">4.69 KB</td><td class="t">配置备份</td><td>09-11 的 <span class="fn">.env</span> 备份。命中 <code>*.bak-2026*</code> 忽略规则，但内容是<b>生产配置快照（含凭据）</b>。建议确认现 <span class="fn">.env</span> 无回退需求后再删。</td></tr>
+<tr><td class="p">D:\erp_system\frontend-vite\_eng_*.log/_txt<br>frontend-vite\_qa_edward_*.mjs/_txt</td><td class="s">≈ 26 KB<br><span style="color:#86909c">6 f</span></td><td class="t">本次会话工程产物</td><td>今日 09:18—09:28 的 tsc/vitest/保真度探针输出。同 <span class="fn">_qa_tmp\</span>，属发布前证据，建议与发布一同收口。</td></tr>
+</tbody>
+</table>
+
+<h2><span class="n">04</span>执行约束（本环境特有，违反会触发故障或静默失效）</h2>
+
+<div class="box danger">
+  <h3>删除动作的四条强制约束</h3>
+  <ul>
+    <li><b>单次删除路径数必须 &lt; 50。</b>超过即触发 <code>SAFE_DELETE_BULK_CONFIRM_REQUIRED</code>，系统按「父目录树」整体回收 —— 这正是 <span class="fn">.git</span> 被清空事故的机制。<span class="fn">node_modules</span>（39056 文件）、<span class="fn">temp</span>（506 文件）、<span class="fn">_qa_tmp</span>（111 文件）、<span class="fn">.mypy_cache</span> 均远超阈值，<b>绝不可直接删除</b>。</li>
+    <li><b>清大目录一律先 <code>mv</code> 改名或移出仓库。</b>重命名不触发拦截。可行性已实证（<span class="fn">dist</span> → <span class="fn">dist_prev_&lt;时间戳&gt;</span> 的标准发布流程即建立在此机制上）。</li>
+    <li><b>禁用 PowerShell <code>Remove-Item</code> 清理项目根下文件</b> —— 实测会「静默失效」：无报错、退出码 0/1，但文件仍在。临时文件清理须用 Python <code>os.remove</code>，并以 <code>glob</code> 复核结果为 0。</li>
+    <li><b>会话内禁止对 <span class="fn">.git</span> 执行批量删除型运维</b>（<code>repack</code>/<code>gc</code>/<code>prune</code>/<code>clean -fdx</code>/<code>maintenance</code>/<code>worktree prune</code>）。需要时请在普通终端（不经本环境 shim 的 Git Bash / PowerShell）执行。</li>
+  </ul>
+</div>
+
+<div class="box warn">
+  <h3>⚠️ 当前运行态使部分清理动作变得不安全（实测于 09:51—09:55）</h3>
+  <p style="margin:6px 0 8px">审计时刻实测进程与端口：</p>
+  <ul>
+    <li><span class="fn">:3000</span> 由 <b>vite 开发服务器</b>占用（PID 3300，<code>vite.js --host 0.0.0.0 --port 5173 --port 3000</code>），父进程链上溯至 <span class="fn">cmd.exe → .trae-cn\node.exe</span>。</li>
+    <li><span class="fn">:5002</span> 由 <b>uvicorn 开发模式</b>占用（PID 15196，<code>-m uvicorn fastapi_app.main:app --port 5002 --reload --reload-dir fastapi_app</code>，无 <code>--workers</code>）。</li>
+    <li><b>无 nginx 进程在运行</b>；Redis 双实例在 <span class="fn">:6379</span> / <span class="fn">:6380</span> 正常监听（NSSM PID 2044 / 21512）。</li>
+  </ul>
+  <p style="margin:8px 0 0">按项目铁律 §3 的判据，<b>当前站点整体运行在 dev 模式，而非生产托管</b>。由此产生两个直接后果：</p>
+  <ul>
+    <li><b>vite watcher 持有 <span class="fn">frontend-vite\</span> 的目录句柄</b> —— 在该目录内删除/重命名可能返回 <code>EPERM</code>（历史已见：<code>build:atomic</code> 的 rename 在 dev 运行时必然失败）。故 §01 中 frontend 相关的回收<b>建议在停掉 dev 服务后执行</b>。</li>
+    <li><code>--reload --reload-dir fastapi_app</code> 会在 <span class="fn">fastapi_app\</span> 下文件变动时触发热重载。该目录内无回收项，但需避免误伤。</li>
+    <li>「<span class="fn">dist</span> 没在被服务」<b>不等于</b> <span class="fn">dist</span> 可删 —— nginx 一旦按正规通道拉起，缺失 <span class="fn">dist</span> 将直接导致站点 404。</li>
+  </ul>
+</div>
+
+<h2><span class="n">05</span>建议执行顺序</h2>
+<table>
+<thead><tr><th style="width:6%">步</th><th style="width:26%">动作</th><th>要点</th></tr></thead>
+<tbody>
+<tr><td class="t">1</td><td class="t">先回收零风险项</td><td><span class="fn">.mypy_cache\</span>、<span class="fn">build-v533{,-new,-next,-sentinel)}\</span>、<span class="fn">__pycache__\</span>、<span class="fn">.ruff_cache\</span>、<span class="fn">.pytest_cache\</span>、<span class="fn">.coverage</span>、<span class="fn">tsconfig*.tsbuildinfo</span>、<span class="fn">nul</span>/<span class="fn">main</span>/<span class="fn">query</span>/<span class="fn">queryex</span>/<span class="fn">x\</span>/<span class="fn">tmp_acl_src_sandboxed\</span>、<span class="fn">backup_site_main.css</span>、根级一次性产物（§01 各行）。预计回收 <b>≈ 130 MB</b>，无功能影响。</td></tr>
+<tr><td class="t">2</td><td class="t">停 dev 服务后再回收 frontend 陈旧产物</td><td>停掉 vite（:3000）后，回收 6 个 8 月/9-11 的 <span class="fn">dist.*</span>/<span class="fn">dist_prev_*</span> 与 7 个 <span class="fn">build_*.log</span>，预计 <b>≈ 27 MB</b>。<b>必须保留 <span class="fn">dist\</span> 与 <span class="fn">dist_prev_20260918_092043\</span>。</b></td></tr>
+<tr><td class="t">3</td><td class="t">清空 <span class="fn">temp\</span></td><td>整体 <code>mv</code> 至仓库外（如 <span class="fn">%LOCALAPPDATA%\Temp\</span>）或改名，预计 <b>14 MB</b>。<b>不要用 <code>rm -rf</code></b>（506 文件 &gt; 50 阈值）。</td></tr>
+<tr><td class="t">4</td><td class="t">逐项决策灰区</td><td>按 §03 表格逐条确认。其中 <span class="fn">backups\version-prune-20260916\</span>（119 MB）、<span class="fn">.archive\</span>（80 MB）、<span class="fn">build\</span>（47 MB）三项体积最大，但都承载回滚或工具链价值 —— <b>建议优先只处理 <span class="fn">.archive\cleanup-20260815\cache-dirs\</span> 与 <span class="fn">.archive\cleanup-20260815\ai-tool-dirs\</span>（78 MB）</b>，其余等确认后再说。</td></tr>
+<tr><td class="t">5</td><td class="t">最后收口本次分析产物</td><td>下方 §06 的 6 个文件可随步骤 1 一并回收。</td></tr>
+</tbody>
+</table>
+
+<h2><span class="n">06</span>本次分析新增文件（透明披露）</h2>
+<p class="lead">为完成本次审计与落地，我在仓库根目录新建过以下扫描/迁移产物，均为未跟踪状态、不含敏感信息。<b>审计阶段（§01—§06）除这些文件外未对仓库做任何写入、删除、移动或重命名；</b>执行阶段（§07）追加了迁移与验证脚本。<b>全部 10 个文件已于执行收尾时移出仓库至 <span class="fn">D:\erp_ws_archive\20260918_junk_reclaim\tools\</span>（非删除，可追溯），根目录已恢复无本次残留。</b></p>
+<table>
+<thead><tr><th style="width:40%">完整路径</th><th style="width:9%">大小</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td class="p">D:\erp_system\_scan_junk_1.py / _scan_junk_1.out</td><td class="s">2.4 KB / 24 KB</td><td>顶层与一级目录体积拆解（frontend-vite、backups、static、build、logs 等 15 个目标）。</td></tr>
+<tr><td class="p">D:\erp_system\_scan_junk_2.py / _scan_junk_2.out</td><td class="s">2.7 KB / 15 KB</td><td>备份区、归档区、隐藏条目、散落构建产物、git 跟踪状态判定。</td></tr>
+<tr><td class="p">D:\erp_system\_scan_junk_3.py / _scan_junk_3.out</td><td class="s">4.1 KB / 8 KB</td><td>目录级跟踪状态计数、build-v533 四目录同构性比对、可疑根级条目性质。</td></tr>
+<tr><td class="p">D:\erp_system\_scan_junk_4.py / _scan_junk_4.out</td><td class="s">1.5 KB / 3.5 KB</td><td>运行期进程与监听端口枚举（psutil，系统 Python）。</td></tr>
+<tr><td class="p">D:\erp_system\_scan_junk_5.out</td><td class="s">1.2 KB</td><td>uvicorn / vite 进程完整命令行 —— 用于判定 dev/prod 运行模式。</td></tr>
+<tr><td class="p">D:\erp_system\_scan_top.txt</td><td class="s">4.5 KB</td><td>顶层 147 个条目的大小/文件数/修改时间明细表。</td></tr>
+</tbody>
+</table>
+
+<h2><span class="n">07</span>执行记录（用户确认后落地 · 2026-09-18 09:58—10:10）</h2>
+<p class="lead">按确认的三段顺序执行。<b>全程未使用任何删除原语（<code>rm</code> / <code>rmtree</code> / <code>Remove-Item</code>），一律「同卷重命名迁出」；逐项迁移后立即验证，失败即中止；迁出与迁出前均由 <code>git ls-files</code> 复核跟踪状态。</b></p>
+
+<div class="cards">
+  <div class="card c-green"><div class="k">成功迁出</div><div class="v">68 项</div><div class="d">196.91 MB / 694 文件</div></div>
+  <div class="card c-amber"><div class="k">挂起（待停 vite）</div><div class="v">6 项</div><div class="d">26.87 MB</div></div>
+  <div class="card c-red"><div class="k">git 变更</div><div class="v">0 个</div><div class="d">全部迁出项均未被跟踪</div></div>
+  <div class="card c-blue"><div class="k">仓库顶层合计</div><div class="v">1571 MB</div><div class="d">迁出前 ≈1767 MB（减 ≈196 MB）</div></div>
+</div>
+
+<table>
+<thead><tr><th style="width:26%">阶段</th><th style="width:11%">项数</th><th style="width:13%">体积</th><th>结果</th></tr></thead>
+<tbody>
+<tr><td class="t">① 零风险生成物 / 缓存 / 空文件 / 一次性产物</td><td class="s">66</td><td class="s">119.17 MB</td><td><span class="badge b-green">全部成功</span> 含 <span class="fn">.mypy_cache</span>(110.43MB)、<span class="fn">build-v533*</span>×4、<span class="fn">.ruff_cache</span>(301f)、<span class="fn">.pytest_cache</span>（后由并行会话重建，见下方更正）、<span class="fn">__pycache__</span>、<span class="fn">.coverage</span>、<span class="fn">tsconfig.tsbuildinfo</span>、<span class="fn">main</span>/<span class="fn">query</span>/<span class="fn">queryex</span>/<span class="fn">x</span>/<span class="fn">tmp_acl_src_sandboxed</span>、<span class="fn">backup_site_main.css</span>、10 个 <span class="fn">frontend-vite/build_*.log</span>、<span class="fn">.m5_*.py</span>×9、17 个根级一次性产物、1 个轮转日志。</td></tr>
+<tr><td class="t">② frontend 陈旧产物</td><td class="s">0 / 6</td><td class="s">26.87 MB</td><td><span class="badge b-amber">挂起</span> 6 项全部 <code>PermissionError [WinError 5]</code> ⇒ <b>与预判一致，证实必须先停 vite</b>。</td></tr>
+<tr><td class="t">③ <span class="fn">.archive\cleanup-20260815\</span> 两个子目录</td><td class="s">2</td><td class="s">77.74 MB</td><td><span class="badge b-green">全部成功</span> <span class="fn">cache-dirs</span>(45.72MB/31f) + <span class="fn">ai-tool-dirs</span>(32.02MB/235f)。同目录的 <span class="fn">root-files</span>、<span class="fn">build-artifacts</span> 按「只清这两项」的授权<b>未触碰</b>。</td></tr>
+</tbody>
+</table>
+
+<div class="box info">
+  <h3>验证证据（迁出后实测）</h3>
+  <ul>
+    <li><b>迁出彻底性</b>：15 个抽样源路径全部「已消失」；归档区文件数与预期逐项相等（68/68 通过「终局复验」环节——该环节独立于迁移代码，对全部已迁出项重算「源已消失 + 目标存在 + 文件数一致」）。</li>
+    <li><b>体积核减</b>：仓库顶层合计 <b>≈1767 MB → 1571.30 MB</b>（减幅 ≈196 MB，与迁出量 196.91 MB 吻合，构成独立交叉验证）；顶层条目 <b>147 → 111</b>。</li>
+    <li><b>零 git 污染</b>：所有迁出项迁出前 <code>git ls-files</code> 均为 0 ⇒ 工作树未产生任何删除类变更。HEAD 仍为 <code>36cb1a76</code>，<code>git fsck --connectivity-only</code> <b>rc=0</b>（仅既有 dangling 对象提示）。</li>
+    <li><b>受保护资产 16 项全数完好</b>：<span class="fn">frontend-vite\dist</span>（<b>192 文件不变</b>）、<span class="fn">dist_prev_20260918_092043</span>、<span class="fn">.env*</span>、<span class="fn">static\uploads</span>、<span class="fn">backups\db\*pre046*.dump</span>、<span class="fn">backups\material-calculator-rollback-20260911</span>、<span class="fn">env_backup</span>、<span class="fn">docs</span>、<span class="fn">evidence</span>、<span class="fn">.githooks\pre-commit</span>、<span class="fn">.workbuddy\memory\MEMORY.md</span>、<span class="fn">logs\*</span>(运行中) 等 —— 逐项点名核对，<b>0 缺失</b>。</li>
+    <li><b>归档可逆</b>：<span class="fn">D:\erp_ws_archive\20260918_junk_reclaim\</span> 含 <span class="fn">MANIFEST.json</span>（逐项记录原路径 / 目标路径 / 字节 / 文件数 / 事由）+ <span class="fn">payload\</span>（保持原相对路径）+ <span class="fn">restore.py</span>。<code>python restore.py</code> 即<b>复制式</b>恢复（归档原件保留作第二重备份）。</li>
+  </ul>
+</div>
+
+<div class="box warn">
+  <h3>执行中发现的三处报告更正（原报告已同步修订）</h3>
+  <ul>
+    <li><b><span class="fn">frontend-vite\tsconfig.node.tsbuildinfo</span> 实际已被 git 跟踪</b> —— 命中 <span class="fn">.gitignore</span> 的 <code>*.tsbuildinfo</code>，但入库早于该规则（同 <span class="fn">_proc5002.json</span> 的模式）。<b>已从回收清单剔除</b>，否则会把「文件回收」变成「git 变更」。如需清理须走 <code>git rm --cached</code> + 提交。</li>
+    <li><b><span class="fn">nul</span> 不是空文件，而是 126 字节的真实文件</b> —— 普通路径 API（含 <code>os.path.abspath</code>，它经 <code>GetFullPathNameW</code>）会把 <span class="fn">D:\erp_system\nul</span> 规范化成 DOS 设备路径 <code>\\.\nul</code>，故首轮扫读报 0 B；改用 <code>\\?\D:\erp_system\nul</code> 核实为真实文件（<code>GetFileAttributesW=32</code>=ARCHIVE、<code>getsize=126</code>）。执行时的两次失败也印证了这一点：首次更名报 <code>WinError 183</code>（目标路径被解析成 NUL 设备 ⇒ 报「文件已存在」），修正前缀写法后仍报 <code>WinError 5</code>。<b>这是本报告自身的一处观测字段失真，已更正。</b></li>
+    <li><b><span class="fn">.pytest_cache</span> 被并行会话自动重建</b> —— 迁出 10 分钟后复验发现源路径重现，追查其 <span class="fn">CACHEDIR.TAG</span> 与 <span class="fn">v\cache\nodeids</span> 的 mtime 为 <b>09:58:55 / 10:01:16</b> ⇒ 是并行会话在运行 pytest 时重建。<b>这不是迁出失败</b>，而是「pytest 一跑即重建」的必然结果；只要该会话仍在工作，它就会反复出现。已如实记录，未作二次处理（重复搬迁无意义）。</li>
+  </ul>
+</div>
+
+<div class="box ok">
+  <h3>唯一挂起项与交接命令</h3>
+  <p style="margin:6px 0 8px">6 个陈旧 dist（<span class="fn">dist.bak-20260829</span> / <span class="fn">-2</span> / <span class="fn">-20260824</span> / <span class="fn">dist_prev_20260829_164650</span> / <span class="fn">_180908</span> / <span class="fn">dist_prev_20260911_213006</span>，合计 <b>26.87 MB</b>）被 vite dev server 句柄锁定。</p>
+  <p style="margin:8px 0 0"><b>注意</b>：本轮<i>未</i>停 vite —— 实测 <span class="fn">:3000</span> 上的 vite 由 <span class="fn">cmd.exe</span> 经 <span class="fn">.trae-cn\node.exe</span> 拉起，<b>非本会话进程，且存在活跃并行会话</b>，故不越权终止。请由你择机停掉 dev server 后执行：</p>
+  <ul>
+    <li>已备好专用脚本（自包含、可安全重复运行、失败即原样保留）：<br><code>& "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" "D:\erp_ws_archive\20260918_junk_reclaim\reclaim_deferred.py"</code></li>
+    <li>脚本内已硬编码<b>保护名单</b>：<span class="fn">frontend-vite\dist</span> 与 <span class="fn">dist_prev_20260918_092043</span> 永不在处理范围内。</li>
+    <li>执行完成后它会自动回写 <span class="fn">MANIFEST.json</span>，恢复方式仍是 <code>python restore.py</code>。</li>
+  </ul>
+  <p style="margin:8px 0 0"><b>唯一无法自动处理项</b>：<span class="fn">nul</span>（126 B）—— 即使使用 <code>\\?\</code> 扩展长度路径，<code>MoveFileW</code> 仍返回 <code>WinError 5</code>（NTFS 设备命名空间边界）。仅 126 字节，建议保留不动；如需清除，请在<b>普通管理员终端</b>执行 <code>del \\?\D:\erp_system\nul</code>。</p>
+</div>
+
+<div class="box danger">
+  <h3>遗留未动（按授权范围刻意保留，非遗漏）</h3>
+  <ul>
+    <li><b>灰区其余项</b>：<span class="fn">backups\version-prune-20260916</span>(119.32MB)、<span class="fn">.archive</span> 余下部分（<span class="fn">root-files</span>/<span class="fn">build-artifacts</span>/<span class="fn">.legacy_backup_*</span>）、<span class="fn">build</span>(47.35MB)、<span class="fn">dist-v533-sentinel</span>(18.58MB)、<span class="fn">.freebuff</span>(19.24MB)、<span class="fn">.codeartsdoer</span>(14.46MB)、<span class="fn">temp</span>(14MB)、<span class="fn">_qa_tmp</span>(5.37MB)、<span class="fn">_fix_backup_20260917</span>。</li>
+    <li><b>禁删清单全部未触碰</b>：<span class="fn">.git</span>（含 194.5MB 冗余 pack —— <b>会话内不得清理</b>）、<span class="fn">node_modules</span>、<span class="fn">backups\server</span> 备份链、<span class="fn">logs</span> 运行中日志、<span class="fn">.workbuddy</span> 等。</li>
+    <li><b>本次分析的工具链已移出仓库</b>（非删除）：<span class="fn">D:\erp_ws_archive\20260918_junk_reclaim\tools\</span>，含全部扫描与迁移脚本及 <span class="fn">TOOLCHAIN.json</span>。</li>
+  </ul>
+  <p style="margin:8px 0 0">仓库顶层条目变化：<b>147 → 111</b>（迁出 36 个顶层条目）→ <b>102</b>（工具链移出后）。根目录现存的 25 个 <span class="fn">_*</span> 条目中，<b>17 个是 <code>*_check.py</code> / <code>*_e2e_check.py</code> 回归脚本（<span class="fn">.gitignore</span> 明示保留）</b>，其余为灰区/一次性运维脚本，均按授权保留。</p>
+</div>
+
+<h2><span class="n">08</span>附录：<span class="fn">frontend-vite</span> 下 8 个 <span class="fn">dist</span> 快照的身份谱系</h2>
+<p class="lead">回答「这些目录是什么」。判定方法：不依赖目录名，而是**按构建产物的内容指纹**（入口 chunk 名、<span class="fn">SummaryModal</span> chunk 名、以及只在特定修复中才出现的标识符）反查每个快照对应哪一次发布。</p>
+
+<div class="box info">
+  <h3>先厘清：它们是三套并存的手工备份约定留下的</h3>
+  <ul>
+    <li><span class="fn">dist.bak-&lt;YYYYMMDD&gt;</span> —— 手工 <code>cp -r dist …</code> 备份。**最早的一套**，2026-08 遗留。</li>
+    <li><span class="fn">dist_prev_&lt;YYYYMMDD_HHMMSS&gt;</span> —— 发布时**改名让位**（<code>mv dist dist_prev_&lt;ts&gt;</code>）后再构建。原因为规避 vite watcher 导致的 <code>EPERM</code>（见 <span class="fn">swap-dist.mjs</span> 头部说明）。</li>
+    <li><span class="fn">backups\frontend-dist-&lt;ts&gt;</span> —— <span class="fn">swap-dist.mjs</span> 头部**推荐的规范位置**（另有 5 个，位于 <span class="fn">backups\</span>）。</li>
+  </ul>
+  <p style="margin:8px 0 0"><b>为何持续堆积</b>：<span class="fn">swap-dist.mjs</span> 在交换成功后会**立刻 <code>rm dist-old</code>** —— 即「发布成功后并没有可回退的副本」。每次发布要留退路就只能再手工备份一次，且**无轮转/清理策略**，于是 3 套约定叠加、无人回收。</p>
+</div>
+
+<table>
+<thead><tr><th style="width:24%">快照</th><th style="width:15%">index.html 构建时刻</th><th style="width:11%">文件/MB</th><th style="width:20%">入口 / SummaryModal chunk</th><th>身份判定（内容指纹）</th></tr></thead>
+<tbody>
+<tr><td class="p">frontend-vite\dist<br><span style="color:#1f7a4d;font-weight:600">（当前线上产物）</span></td><td class="s">2026-09-18<br>09:21:50</td><td class="s">192 / 3.62</td><td class="p">index-2u-7TOux.js<br>SummaryModal-BVc2JlzP.js</td><td><span class="badge b-green">今日 09:21 上线版</span> 唯一同时含 <b>BUG1 修复</b>（<span class="fn">applyLossRateAndSave</span>）+ <b>BUG2 修复</b>（SummaryModal 传 <span class="fn">close-on-overlay-click</span>）+ 三态提示 + <span class="fn">spare_quantity</span> + 贝乐订单同步。</td></tr>
+<tr><td class="p">dist_prev_20260918_092043</td><td class="s">2026-09-18<br>07:58:55</td><td class="s">192 / 3.62</td><td class="p">index-BhIyDo2D.js<br>SummaryModal-FckAWFnA.js</td><td><span class="badge b-red">今日发布的唯一回滚点</span> 09:21 上线**前**那一版：含 <span class="fn">spare_quantity</span>+贝乐同步+<span class="fn">lossRateTouched</span>，但**不含** BUG1/BUG2 修复。<br><b>与线上版 vendor 哈希完全相同</b>（<span class="fn">vendor-vue-ClQujFAc</span> / <span class="fn">vendor-fontawesome-C6jq8ZFs</span> / <span class="fn">vendor-query-IsYXmFLx</span>）⇒ 两版差异**纯在业务代码**，回滚不会引入依赖不一致。</td></tr>
+<tr><td class="p">dist_prev_20260911_213006</td><td class="s">2026-09-11<br>14:05:16</td><td class="s">188 / 3.55</td><td class="p">index-DsYn2Kg0.js<br>SummaryModal-DgwNbI1M.js</td><td>09-11 的发布前快照。文件数最少（188）。无今日任何特性。</td></tr>
+<tr><td class="p">dist_prev_20260829_180908</td><td class="s">2026-08-29<br>17:58:21</td><td class="s">195 / 3.89</td><td class="p">index-BgXbEfeX.js<br>SummaryModal-D5f-u1T0.js</td><td>08-29 下午两次连续发布中的后一次前快照。</td></tr>
+<tr><td class="p">dist_prev_20260829_164650</td><td class="s">2026-08-29<br>16:18:16</td><td class="s">195 / 3.89</td><td class="p">index-DyJSts4s.js<br>SummaryModal-Opcnx-Z0.js</td><td>同上，前一次。</td></tr>
+<tr><td class="p">dist.bak-20260829-2</td><td class="s">2026-08-29<br>09:18:25</td><td class="s">195 / 3.89</td><td class="p">index-BfkfHxhR.js<br>SummaryModal-X9-_KnPf.js</td><td>08-29 上午手工备份。后缀 <span class="fn">-2</span> 说明当日已备份过一次。</td></tr>
+<tr><td class="p">dist.bak-20260829<br><span style="color:#a8710a">（结构异常）</span></td><td class="s">2026-08-28<br>08:43:36</td><td class="s">390 / 7.78</td><td class="p">index-DKUtiyvE.js<br>SummaryModal-CF6RAEJO.js</td><td><span class="badge b-amber">嵌套污染</span> 文件数为其他快照的 <b>2 倍</b>，原因是备份时把源目录复制进了目标目录 —— 实测含 <span class="fn">assets\</span>(188) + <span class="fn">dist\</span>(195) 两个子目录 + 7 个顶层文件。<b>不是重复文件，是「备份里套着一份 dist」。</b><br>注：目录名写 <span class="fn">20260829</span>，但 <span class="fn">index.html</span> 构建于 <b>08-28 08:43</b> ⇒ 名称只是备份时间，不代表内容日期。</td></tr>
+<tr><td class="p">dist.bak-20260824</td><td class="s">2026-08-23<br>10:59:44</td><td class="s">195 / 3.87</td><td class="p">index-D-noW21f.js<br>SummaryModal-Dneh3rgK.js</td><td>现存最早的快照。含 <span class="fn">applyLossRate</span>（本地展示函数）但**无** <span class="fn">applyLossRateAndSave</span>、无 <span class="fn">lossRateTouched</span> ⇒ 早于损耗率特性。</td></tr>
+</tbody>
+</table>
+
+<div class="box warn">
+  <h3>两处指纹陷阱（已用第二遍判别性标记纠正）</h3>
+  <ul>
+    <li><b><span class="fn">close-on-overlay-click</span> 在所有快照里都存在</b> —— 因为该 prop 属共享组件 <span class="fn">UiDialog</span>（并在 <span class="fn">DashboardView</span> 有先例），旧版本也含该字符串。**不能用它判「BUG2 是否修复」**；判别依据必须是 <span class="fn">SummaryModal</span> 那个 chunk 自身是否传了该 prop —— 实测**仅当前 <span class="fn">dist</span> 为真**。</li>
+    <li><b><span class="fn">magnifyByLossRate</span> 在所有快照中都检索不到</b> —— 属已知假阴性：被单 chunk 内联的导出函数会被 minify 改名（<span class="fn">rules-ops.md</span> §9 已固化该教训）⇒ 此类标记不可用作判据，须改用用户可见文案（<code>已保存</code> / <code>损耗率保存失败</code>）。</li>
+    <li><b>目录名 ≠ 内容日期</b>：<span class="fn">dist.bak-20260829</span> 的内容构建于 08-28。**判定新旧一律看 <span class="fn">index.html</span> 的 mtime 与入口 chunk 哈希，不看目录名。**</li>
+  </ul>
+</div>
+
+<div class="box ok">
+  <h3>结论：这 7 个的处置定位</h3>
+  <ul>
+    <li><b>必须保留（1 个）</b>：<span class="fn">dist_prev_20260918_092043</span> —— 今日发布的唯一回滚点，且与线上版共享同一套 vendor ⇒ 回滚干净。已在 §07 的挂起脚本里硬编码进保护名单。</li>
+    <li><b>可回收（6 个，26.87 MB）</b>：其余全部构建于 08-23 ~ 09-11，<b>比当前线上版落后 1 周至 4 周</b>，且均不含今日任何修复。详见 §05 阶段 2 / §07 挂起项。</li>
+    <li><b>建议顺手修根因</b>：给发布流程加一条<b>轮转策略</b>（例如只保留最近 2 个 <span class="fn">dist_prev_*</span>），并统一到 <span class="fn">backups\frontend-dist-&lt;ts&gt;</span> 单一约定 —— 否则今天清完，下个月仍会长回来。</li>
+  </ul>
+</div>
+
+<footer>
+  <p style="margin:0 0 6px">审计方法：仅读文件系统元数据（<code>os.walk</code>/<code>os.stat</code>）+ <code>git ls-files</code> 跟踪状态查询 + <code>psutil</code> 进程与端口枚举。全程未写入、未删除、未启停任何服务，未连接生产数据库。</p>
+  <p style="margin:0">判定依据来源：<span class="fn">.gitignore</span>（303 行，含 2026-08-15 / 08-22 / 08-26 / 09-11 / 09-13 / 09-17 六轮治理条款）、<span class="fn">.workbuddy\memory\</span> 项目记忆库（含 2026-09-18 <span class="fn">.git</span> 批量删除事故记录与 §批量删除禁区铁律）、以及实测进程状态。<br>
+  报告生成：2026-09-18 10:05（执行记录 §07 于 10:10 追加）。<b>落地方式：全部同卷重命名迁出，零删除原语；恢复入口 <span class="fn">D:\erp_ws_archive\20260918_junk_reclaim\restore.py</span>（复制式，归档原件保留）。</b>仍挂起 6 项（26.87 MB）待停 vite 后执行、1 项（<span class="fn">nul</span>，126 B）需人工处理。</p>
+</footer>
+
+</div>
+</body>
+</html>

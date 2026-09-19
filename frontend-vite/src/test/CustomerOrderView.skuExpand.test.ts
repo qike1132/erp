@@ -259,7 +259,8 @@ describe('CustomerOrderView SKU expand behavior (SubTask 7.4)', () => {
     await switchToRecordsTab(wrapper)
 
     // Click the row's detail button → openDetail(item) → orderApi.detail(id)
-    const detailBtn = wrapper.find('button[aria-label="详情"]')
+    // 详情按钮的可访问名按行带上订单号（便于读屏器区分），故用前缀匹配而非全等
+    const detailBtn = wrapper.find('button[aria-label^="查看"]')
     expect(detailBtn.exists(), 'detail button should exist').toBe(true)
     await detailBtn.trigger('click')
     await flushPromises()
@@ -315,7 +316,8 @@ describe('CustomerOrderView SKU expand behavior (SubTask 7.4)', () => {
     await flushPromises()
     await switchToRecordsTab(wrapper)
 
-    const detailBtn = wrapper.find('button[aria-label="详情"]')
+    // 详情按钮的可访问名按行带上订单号（便于读屏器区分），故用前缀匹配而非全等
+    const detailBtn = wrapper.find('button[aria-label^="查看"]')
     expect(detailBtn.exists()).toBe(true)
     await detailBtn.trigger('click')
     await flushPromises()
@@ -365,7 +367,8 @@ describe('CustomerOrderView SKU expand behavior (SubTask 7.4)', () => {
     await flushPromises()
     await switchToRecordsTab(wrapper)
 
-    const detailBtn = wrapper.find('button[aria-label="详情"]')
+    // 详情按钮的可访问名按行带上订单号（便于读屏器区分），故用前缀匹配而非全等
+    const detailBtn = wrapper.find('button[aria-label^="查看"]')
     expect(detailBtn.exists()).toBe(true)
     await detailBtn.trigger('click')
     await flushPromises()

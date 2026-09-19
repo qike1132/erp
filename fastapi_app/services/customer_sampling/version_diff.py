@@ -1,4 +1,4 @@
-"""版本域：版本列表/详情、创建新版本（快照 + 字段级 diff）、跨版本部位汇总。
+"""版本域：版本列表/详情、跨版本部位汇总（快照 + 字段级 diff）。
 
 对应需求规格：.codeartsdoer/specs/customer_sampling/spec.md
 """
@@ -26,8 +26,6 @@ from .common import (
     _ensure_project_exists,
     _ensure_role_belongs_to_project,
     _get_default_role_id,
-    _get_user_name,
-    _write_change_log,
 )
 
 
@@ -368,119 +366,3 @@ async def get_parts_by_version(
         'final_version': final_version,
     }
 
-
-
-async def create_version(
-    db: AsyncSession,
-    project_id: int,
-    *,
-    reason: str | None = None,
-    role_id: int | None = None,
-    user_id: int | None = None,
-) -> dict:
-    """创建新版本（角色维度独立）
-
-    流程（design.md 2.1.3.2 + 角色维度）：
-    1. 加载角色（FOR UPDATE 行锁），未传 role_id 时默认指向项目的默认角色
-    2. 获取该角色当前最大版本号 T_n，生成下一版本号 T_{n+1}
-    3. 快照该角色当前所有部位布料信息（序列化为 JSONB）
-    4. 计算 T_{n+1} 相对 T_n 的字段级 diff
-    5. 写入 customer_sampling_fabric_version（snapshot_data + change_summary + role_id）
-    6. 写入 customer_sampling_change_log（审计记录）
-    7. 更新 role.current_version = T_{n+1}，role.version 乐观锁 +1
-    """
-    await _ensure_project_exists(db, project_id)
-    if role_id is None:
-        role_id = await _get_default_role_id(db, project_id)
-    else:
-        await _ensure_role_belongs_to_project(db, role_id, project_id)
-
-    # FOR UPDATE 锁角色行，防止并发创建版本冲突
-    role_result = await db.execute(
-        select(CustomerSamplingRole)
-        .where(CustomerSamplingRole.id == role_id)
-        .with_for_update()
-    )
-    role = role_result.scalar_one_or_none()
-    if role is None:
-        raise NotFoundError('角色不存在')
-
-    # 获取该角色当前最大版本号
-    current_version = role.current_version or 'T1'
-    # 版本号推算基于该角色全部已存在版本（快照表 + 部位表 + current_version 取最大），
-    # 防止 current_version 被回拨（如"设置最终版本"为 T1）后生成与既有版本冲突的编号
-    ver_rows = (await db.execute(
-        select(CustomerSamplingFabricVersion.version_no).where(
-            CustomerSamplingFabricVersion.role_id == role_id,
-        )
-    )).all()
-    part_ver_rows = (await db.execute(
-        select(CustomerSamplingPart.version_no).where(
-            CustomerSamplingPart.role_id == role_id,
-        )
-    )).all()
-    all_nums = [_version_num(v) for (v,) in ver_rows]
-    all_nums += [_version_num(v) for (v,) in part_ver_rows]
-    all_nums.append(_version_num(current_version))
-    new_version_no = f'T{max(all_nums, default=0) + 1}'
-
-    # 快照该角色当前所有部位布料信息
-    parts_result = await db.execute(
-        select(CustomerSamplingPart)
-        .where(
-            CustomerSamplingPart.project_id == project_id,
-            CustomerSamplingPart.role_id == role_id,
-        )
-        .order_by(CustomerSamplingPart.sort_order)
-    )
-    parts = parts_result.scalars().all()
-    snapshot_data = [p.to_snapshot_dict() for p in parts]
-
-    # 加载前一版本快照（T_n）用于 diff 计算
-    prev_version_result = await db.execute(
-        select(CustomerSamplingFabricVersion)
-        .where(
-            CustomerSamplingFabricVersion.role_id == role_id,
-            CustomerSamplingFabricVersion.version_no == current_version,
-        )
-    )
-    prev_version = prev_version_result.scalar_one_or_none()
-
-    # 计算 diff
-    if prev_version is not None and prev_version.snapshot_data is not None:
-        change_summary = _compute_diff(snapshot_data, prev_version.snapshot_data)
-    else:
-        # 前一版本不存在（理论上不应发生，因 T1 在创建项目时自动创建）
-        change_summary = None
-
-    # 写入新版本快照
-    new_version = CustomerSamplingFabricVersion(
-        project_id=project_id,
-        role_id=role_id,
-        version_no=new_version_no,
-        snapshot_data=snapshot_data,
-        change_summary=change_summary,
-        reason=reason,
-        created_by=user_id,
-    )
-    db.add(new_version)
-    await db.flush()
-
-    # 更新角色 current_version，乐观锁 +1
-    role.current_version = new_version_no
-    role.version += 1
-    await db.flush()
-
-    # 写审计日志
-    operator_name = await _get_user_name(db, user_id)
-    await _write_change_log(
-        db, project_id, 'create_version', user_id, operator_name,
-        target_version=new_version_no,
-    )
-
-    logger.info(
-        '创建新版本: project_id=%s, role_id=%s, version_no=%s, parts_count=%d, diff_count=%s',
-        project_id, role_id, new_version_no, len(snapshot_data),
-        len(change_summary) if change_summary else 0,
-    )
-    return {'version_id': new_version.id, 'version_no': new_version_no}

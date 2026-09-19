@@ -26,7 +26,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useQueryClient } from '@tanstack/vue-query'
-import { upload, download } from '@/api/request'
+import { batchApi } from '@/api'
 import { showToast } from '@/composables/useToast'
 import { getErrorMessage } from '@/types/errors'
 
@@ -59,7 +59,7 @@ async function handleBatchImport() {
   const formData = new FormData()
   formData.append('file', excelFile.value)
   try {
-    await upload('/batch/import-products', formData)
+    await batchApi.importProducts(formData)
     showToast('导入成功', 'success')
     excelFile.value = null
     queryClient.invalidateQueries({ queryKey: ['products-list'] })
@@ -71,7 +71,7 @@ async function handleBatchImport() {
 }
 
 function downloadTemplate() {
-  download('/batch/download-template', '产品导入模板.xlsx')
+  void batchApi.downloadTemplate('产品导入模板.xlsx')
 }
 </script>
 

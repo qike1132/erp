@@ -152,13 +152,15 @@
       :supplier-data="summary.supplierData"
       :edit-mode="summary.editMode"
       :loss-rate="summary.lossRate"
+      :loss-rate-save-state="summary.lossRateSaveState"
+      :loss-rate-mixed="summary.lossRateMixed"
       :order-count="purchaseOrders.selectedIds.length"
       :supplier-groups="summary.supplierGroups"
       @close="summary.close"
       @toggle-edit-mode="summary.toggleEditMode"
       @save-edits="handleSaveFactoryEdits"
       @update-qty="handleUpdateFactoryQty"
-      @apply-loss-rate="summary.applyLossRate"
+      @apply-loss-rate="handleApplyLossRate"
       @export-factory="summary.exportFactory"
       @export-supplier="summary.exportSupplier"
       @print-factory="summary.printFactory"
@@ -198,6 +200,7 @@ const {
   handleOrderPageChange,
   handleSaveFactoryEdits,
   handleUpdateFactoryQty,
+  handleApplyLossRate,
   handleViewDetail,
   handleCompletedPageChange,
   handleRemoveCompletedFilter,

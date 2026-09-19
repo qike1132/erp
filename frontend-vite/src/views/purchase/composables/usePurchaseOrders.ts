@@ -94,8 +94,8 @@ export function usePurchaseOrders(options?: { refetchInterval?: () => number | f
     selectedIds.value = []
   }
 
-  async function completeOrder(orderId: number) {
-    const res = (await purchaseApi.completeOrder(orderId)) as ApiResponse
+  async function completeOrder(orderId: number, spareRate?: number) {
+    const res = (await purchaseApi.completeOrder(orderId, spareRate)) as ApiResponse
     if (res.success) {
       await load()
       return true
@@ -103,9 +103,9 @@ export function usePurchaseOrders(options?: { refetchInterval?: () => number | f
     throw new Error(res.message || '操作失败')
   }
 
-  async function batchComplete() {
+  async function batchComplete(spareRate?: number) {
     const count = selectedIds.value.length
-    const res = (await purchaseApi.batchComplete([...selectedIds.value])) as ApiResponse & { completed_count?: number }
+    const res = (await purchaseApi.batchComplete([...selectedIds.value], spareRate)) as ApiResponse & { completed_count?: number }
     if (res.success) {
       clearSelection()
       await load()

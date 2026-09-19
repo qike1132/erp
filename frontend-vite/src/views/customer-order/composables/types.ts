@@ -24,6 +24,14 @@ export type OrderDetailData = OrderItem & {
 export interface StagedItem {
   /** 唯一标识，用于异步操作后安全定位（避免索引失效） */
   uid: string
+  /**
+   * 条目来源：manual = 本页手工新增（仅存在于前端）；
+   * import = Excel 批量导入（服务端 staging_* 表是权威副本）。
+   *
+   * 服务端导入前会清空当前会话的暂存区，因此重复导入必须用它替换上一次
+   * 导入的条目，否则同一批数据会在列表里翻倍（提交时产生重复订单）。
+   */
+  origin?: 'manual' | 'import'
   type: 'order' | 'stockin'
   orderType: 'normal' | 'custom'
   customer: string

@@ -172,31 +172,84 @@ async def get_supplier_order_summary(db: AsyncSession, order_ids: list | None = 
 
     cust_order_map = await _fetch_supplier_cust_order_map(db, orders)
 
-    product_ids = list({pid for pid, _ in cust_order_map.values() if pid})
+    # 与工厂汇总同口径：覆盖该采购单的**全部 SKU**（多 SKU 下 Order.product_id 仅首个）
+    po_pids_map = await fetch_po_sku_pids_map(db, orders)
+    product_ids = list({pid for pids in po_pids_map.values() for pid in pids if pid})
+    if not product_ids:
+        product_ids = list({pid for pid, _ in cust_order_map.values() if pid})
+
     bom_data = await _fetch_bom_data(db, product_ids)
 
     po_ids = [o.id for o in orders]
     items_map, items_by_order = await _fetch_po_items_map(db, po_ids)
 
-    mat_map = _build_supplier_mat_map(orders, bom_data, items_map, items_by_order, cust_order_map)
+    mat_map = _build_supplier_mat_map(
+        orders, bom_data, items_map, items_by_order, cust_order_map,
+        po_pids_map=po_pids_map,
+    )
     materials = sorted(mat_map.values(), key=lambda x: (x['supplier_name'], x['material_name']))
     return {'materials': materials, 'order_count': len(orders)}
+
+
+def _summarize_spare_rate(orders) -> tuple[float | None, bool]:
+    """汇总本次汇总所涉采购单的「已存损耗率」并给出可直接回显的单一值。
+
+    该接口是弹窗打开时读取状态的唯一入口，因此必须返回「它正在编辑的那个状态」：
+    若只返回 groups/order_count 而不返回损耗率，前端只能显示默认 0，导致
+    「已保存 → 关闭重开回显 0」的断链。
+
+    取值契约（逐条与前端约定一致）：
+    - 所有单均未记录损耗率（列全为 NULL）→ ``(None, False)``；
+    - 所有单记录到同一个率 → ``(该值, False)``，**包括 0**：0 是合法的「已记录」值，
+      绝不能被当成缺失（同源先例见
+      ``test_beile_orders.test_ordered_spare_rate_zero_survives``）；
+    - 各单记录不一致（含「部分有值、部分为 NULL」）→ ``(None, True)``，
+      由前端提示「各订单损耗率不一致」；
+    - ``spare_rate_mixed`` 仅用于区分「无一值」与「值不一致」两种同为 None 的情形。
+
+    关键：NULL 语义是「从未记录过损耗率」，它与任何已记录值（含 0）都**不相同**，
+    因此比较必须覆盖含 NULL 的完整集合，**不得先滤掉 None**。否则 ``[5, None]``
+    会被误判为「本批所有单都是 5‰」——既抑制「不一致」提示，又把这个率带进备品/打印/导出。
+
+    实现只在已加载的 ORM 实例上读取属性，不产生额外 DB 往返：``orders`` 由调用方
+    以 ``select(PurchaseOrder)`` 一次性取回，``spare_rate`` 已在其中。
+    """
+    raw_rates = [o.spare_rate for o in orders]
+    if not raw_rates:
+        return None, False
+    first = raw_rates[0]
+    if any(r != first for r in raw_rates[1:]):
+        return None, True
+    return (float(first) if first is not None else None), False
 
 
 async def get_factory_order_summary(
     db: AsyncSession, order_ids: list | None = None,
 ) -> dict:
     if not order_ids:
-        return {'groups': [], 'order_count': 0}
+        return {
+            'groups': [], 'order_count': 0,
+            'spare_rate': None, 'spare_rate_mixed': False,
+        }
 
     result = await db.execute(
         select(PurchaseOrder).where(PurchaseOrder.id.in_(order_ids))
     )
     orders = result.scalars().unique().all()
 
+    # 损耗率快照：从已加载的 ORM 实例直接取，零额外查询
+    spare_rate, spare_rate_mixed = _summarize_spare_rate(orders)
+
     cust_order_map = await _fetch_factory_cust_order_map(db, orders)
 
-    product_ids = list({pid for pid, _, _ in cust_order_map.values() if pid})
+    # 覆盖**全部 SKU**：多 SKU 采购单必须遍历 OrderItem 才知道涉及哪些产品，
+    # 否则 BOM 只按首个 SKU 加载 → 汇总漏料（见 services/purchase/_common.py
+    # fetch_po_sku_pids_map 的说明）。
+    po_pids_map = await fetch_po_sku_pids_map(db, orders)
+    product_ids = list({pid for pids in po_pids_map.values() for pid in pids if pid})
+    if not product_ids:
+        product_ids = list({pid for pid, _, _ in cust_order_map.values() if pid})
+
     prod_name_map = await _fetch_prod_name_map(db, product_ids)
 
     bom_data = await _fetch_bom_data(db, product_ids, prod_name_map)
@@ -204,10 +257,26 @@ async def get_factory_order_summary(
     po_ids = [o.id for o in orders]
     items_map, items_by_order = await _fetch_po_items_map(db, po_ids)
 
-    group_map = _build_factory_group_map(orders, bom_data, items_map, items_by_order, cust_order_map, prod_name_map)
+    # 逐 SKU 展示明细：优先方案 C 的逐 SKU 快照（权威），无快照的单回退 OrderItem 口径
+    # （局部 import：本模块顶层保持「不依赖其它 service 模块」的既有约定）
+    from fastapi_app.services.purchase_order_sku import fetch_po_sku_map
+
+    sku_rows = await fetch_po_sku_map(db, po_ids)
+    if len(sku_rows) < len(po_ids):
+        sku_lines = await fetch_po_sku_lines_map(db, orders)
+        for po_id in po_ids:
+            sku_rows.setdefault(po_id, sku_lines.get(po_id, []))
+
+    group_map = _build_factory_group_map(
+        orders, bom_data, items_map, items_by_order, cust_order_map, prod_name_map,
+        po_pids_map=po_pids_map, po_sku_map=sku_rows,
+    )
     groups = _serialize_factory_groups(group_map)
 
-    return {'groups': groups, 'order_count': len(orders)}
+    return {
+        'groups': groups, 'order_count': len(orders),
+        'spare_rate': spare_rate, 'spare_rate_mixed': spare_rate_mixed,
+    }
 
 
 async def export_completed_orders(
@@ -601,4 +670,6 @@ from fastapi_app.services.purchase_order_query_helpers import (  # noqa: F401
     _serialize_factory_groups,
     _serialize_po_item,
     _serialize_po_list_item,
+    fetch_po_sku_lines_map,
+    fetch_po_sku_pids_map,
 )

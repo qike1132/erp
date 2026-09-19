@@ -18,6 +18,7 @@
         <div class="page-card-body">
           <!-- 左栏：录入表单 -->
           <OrderInputPanel
+            ref="inputPanelRef"
             v-model:is-drag-over="isDragOver"
             v-model:form="form"
             :is-order="isOrder"
@@ -25,12 +26,14 @@
             :order-type-options="orderTypeOptions"
             :customer-options="customerOptions"
             :country-options="countryStore.countryOptions"
-            :can-add="canAdd"
+            :missing-fields="missingFields"
             :available-stock="availableStock"
+            :stock-error="stockError"
             :deduct-info-visible="deductInfoVisible"
             :excel-file="excelFile"
             :importing="importing"
             :search-products="searchProducts"
+            :product-search-failed="productSearchFailed"
             :select-product="selectProduct"
             :handle-deduct-preview="handleDeductPreview"
             :open-deduct-edit="openDeductEdit"
@@ -74,13 +77,16 @@
           :is-loading-records="isLoadingRecords"
           v-model:filter-end="filterEnd"
           :is-fetching-records="isFetchingRecords"
+          :error-message="errorMessage"
           :current-page="currentPage"
           :total-pages="totalPages"
+          :total-records="totalRecords"
           :fetch-orders="fetchOrders"
           :reset-filter="resetFilter"
           @change-record-type="handleChangeRecordType"
           @view-detail="openDetail"
           @change-page="handleChangePage"
+          @retry="fetchOrders"
         />
       </div>
 
@@ -128,9 +134,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch, nextTick } from 'vue'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import { showToast } from '@/composables/useToast'
+import { QUANTITY_RANGE_MESSAGE } from './composables/quantityRange'
 import { useOrderForm } from './composables/useOrderForm'
 import { useOrderList } from './composables/useOrderList'
 import { useOrderActions } from './composables/useOrderActions'
@@ -147,10 +154,12 @@ const {
   isOrder,
   isCustomOrder,
   orderTypeOptions,
-  canAdd,
+  missingFields,
+  quantityOutOfRange,
   customerOptions,
   countryStore,
   searchProducts,
+  productSearchFailed,
   selectProduct,
   countryDialogVisible,
   newCountryName,
@@ -158,10 +167,14 @@ const {
   saveCountry,
   availableStock,
   deductInfoVisible,
+  stockError,
   handleDeductPreview,
   openDeductEdit,
   resetFormAfterAdd,
 } = useOrderForm()
+
+/** 录入面板引用：新增成功后把焦点交回产品输入框 */
+const inputPanelRef = ref<InstanceType<typeof OrderInputPanel> | null>(null)
 
 const {
   showFilter,
@@ -176,6 +189,8 @@ const {
   totalPages,
   isLoadingRecords,
   isFetchingRecords,
+  errorMessage,
+  totalRecords,
   orderRecords,
   recordType,
   recordTypeOptions,
@@ -219,16 +234,21 @@ const {
 } = useOrderActions(form, isOrder, fetchOrders)
 
 function addStaged() {
-  if (!canAdd.value) {
-    if (!form.productId && form.productSearch) {
-      showToast('请从下拉列表中选择产品', 'warning')
-    } else {
-      showToast('请填写日期、客户和产品', 'warning')
-    }
+  // 主操作始终可点：缺项时把「缺什么」说出来，而不是把按钮变灰后沉默。
+  // （原先按钮被 :disabled 拦掉，这段提示在鼠标与键盘两条路径上都不可能出现）
+  if (missingFields.value.length) {
+    showToast(`请先填写：${missingFields.value.join('、')}`, 'warning')
+    return
+  }
+  // 提交前最终校验：字段实时标红可能被绕过（回车 / 直接点按钮），越界一律不进暂存区
+  if (quantityOutOfRange.value) {
+    showToast(QUANTITY_RANGE_MESSAGE, 'warning')
     return
   }
   stagedItems.value.push({
     uid: genUid(),
+    // 手工条目只存在于前端：导入时不会被服务端结果替换
+    origin: 'manual',
     type: form.type,
     orderType: form.orderType,
     customer: form.customer,
@@ -242,6 +262,11 @@ function addStaged() {
     deductQuantity: isOrder.value && form.deductStock ? form.deductQuantity : 0,
   })
   resetFormAfterAdd()
+  // 连续录入：焦点交回产品输入框，用户不必从页首重新 Tab 16 个框架层停点
+  void nextTick(() => {
+    inputPanelRef.value?.focusProductInput()
+    showToast(`已添加 1 条，暂存区共 ${stagedItems.value.length} 条`, 'success')
+  })
 }
 
 /** 记录类型切换：重置分页并重新查询 */
@@ -261,9 +286,8 @@ const activeTab = ref<'input' | 'records'>('input')
 
 // 切换到记录查询tab时自动加载数据
 watch(activeTab, (tab) => {
-  if (tab === 'records' && orderRecords.value.length === 0) {
-    fetchOrders()
-  }
+  // 每次进入都重新拉取：暂存区提交可能新增了订单，若沿用旧列表会显示过期数据
+  if (tab === 'records') fetchOrders()
 })
 </script>
 
@@ -304,7 +328,7 @@ watch(activeTab, (tab) => {
 
 /* 栏间分隔线 */
 .co-tab-content :deep(.co-col + .co-col) {
-  border-left: 2px solid var(--color-border, #cbd5e1);
+  border-left: 1px solid var(--color-border, #cbd5e1);
 }
 
 /* ===== Tab 切换栏 ===== */
@@ -315,7 +339,7 @@ watch(activeTab, (tab) => {
   border-radius: 12px;
   background: white;
   border: 1px solid var(--color-border-light);
-  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
 }
 .co-tab-btn {
   display: inline-flex;
@@ -323,6 +347,7 @@ watch(activeTab, (tab) => {
   justify-content: center;
   gap: 6px;
   padding: 8px 14px;
+  min-height: 32px;
   border: none;
   border-radius: 9px;
   font-size: 13px;
@@ -330,18 +355,20 @@ watch(activeTab, (tab) => {
   color: var(--color-text-secondary);
   background: transparent;
   cursor: pointer;
-  transition: background 0.3s ease, color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
+  transition: background 0.2s ease, color 0.2s ease;
 }
+/* hover 只改颜色，不做位移：列表/切换器上的位移会造成扫读抖动与每帧重排 */
 .co-tab-btn:hover {
   background: var(--color-primary-50);
   color: var(--color-primary-600);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-  transform: translateY(-1px);
+}
+.co-tab-btn:focus-visible {
+  outline: 2px solid var(--color-primary-500);
+  outline-offset: 2px;
 }
 .co-tab-btn.active {
-  background: linear-gradient(135deg, var(--color-primary-50), var(--color-primary-100));
+  background: var(--color-primary-50);
   color: var(--color-primary-700);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 2px 8px rgba(91, 141, 239, 0.2);
-  transform: translateY(-1px);
+  box-shadow: inset 0 0 0 1px var(--color-primary-200, var(--color-primary-100));
 }
 </style>

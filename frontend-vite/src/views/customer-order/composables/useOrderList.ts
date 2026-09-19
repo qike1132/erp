@@ -1,6 +1,7 @@
 import { ref, computed } from 'vue'
 import { orderApi, stockApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
+import { getErrorMessage } from '@/types/errors'
 import type { StockInRecord } from '@/types'
 import type { OrderRecord } from './types'
 
@@ -28,6 +29,9 @@ export function useOrderList() {
   const totalPages = ref(1)
   const isLoadingRecords = ref(false)
   const isFetchingRecords = ref(false)
+  /** 列表加载失败时的可读原因；非空即表示当前应展示错误态而非空态 */
+  const errorMessage = ref('')
+  const totalRecords = ref(0)
   const orderRecords = ref<OrderRecord[]>([])
   const recordType = ref<'order' | 'stockin'>('order')
 
@@ -72,11 +76,20 @@ export function useOrderList() {
     const isInitial = orderRecords.value.length === 0
     if (isInitial) isLoadingRecords.value = true
     else isFetchingRecords.value = true
+    errorMessage.value = ''
     try {
       if (recordType.value === 'stockin') {
         await fetchStockins(seq)
       } else {
         await fetchOrderRecords(seq)
+      }
+    } catch (e: unknown) {
+      // 不再让异常逃逸：请求失败必须变成「可识别 + 可重试」的错误态，
+      // 否则空数组会被空态槽渲染成「暂无记录」，把故障说成"没有数据"。
+      if (seq === requestSeq) {
+        errorMessage.value = getErrorMessage(e, '列表加载失败')
+        if (isInitial) orderRecords.value = []
+        totalRecords.value = 0
       }
     } finally {
       // 仅当本次请求是最新请求时才清除 loading 状态
@@ -101,6 +114,7 @@ export function useOrderList() {
     const items: OrderRecord[] = (res.data ?? []).map((i) => ({ ...i, record_type: 'order' }) as OrderRecord)
     orderRecords.value = items
     const total = res.total ?? items.length
+    totalRecords.value = total
     totalPages.value = Math.ceil(total / perPage.value) || 1
   }
 
@@ -121,6 +135,7 @@ export function useOrderList() {
       deduct_quantity: i.deducted ?? 0,
     }) as OrderRecord)
     const total = res.total ?? rawItems.length
+    totalRecords.value = total
     totalPages.value = Math.ceil(total / perPage.value) || 1
   }
 
@@ -149,6 +164,8 @@ export function useOrderList() {
     totalPages,
     isLoadingRecords,
     isFetchingRecords,
+    errorMessage,
+    totalRecords,
     orderRecords,
     recordType,
     recordTypeOptions,

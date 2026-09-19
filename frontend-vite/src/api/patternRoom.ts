@@ -6,7 +6,7 @@
  * 后端 schema:   fastapi_app/schemas/customer_sampling.py
  *
  * 保持导出名 `patternRoomApi` 不变以兼容 `api/index.ts`。
- * 内部完全重写为面向"客户分组 + 部位布料 + 版本快照"扁平结构的 15 个 API 方法。
+ * 内部完全重写为面向"客户分组 + 部位布料 + 版本快照"扁平结构的 22 个 API 方法。
  */
 import { get, post, put, del, upload } from './request'
 
@@ -328,11 +328,6 @@ export interface PartUpdateRequest {
   version: number
 }
 
-/** 创建新版本请求 */
-export interface VersionCreateRequest {
-  reason?: string | null
-}
-
 // ==================== 查询参数 ====================
 
 /** 分组列表查询参数 */
@@ -363,7 +358,7 @@ export interface ChangeLogListParams {
 /**
  * 按客户分类打样信息模块 API
  *
- * 15 个方法对应后端 15 个端点，路径前缀 /pattern-room。
+ * 22 个方法对应后端 22 个端点，路径前缀 /pattern-room。
  * 命名遵循 camelCase（前端约定），API 路径使用 kebab-case。
  */
 export const patternRoomApi = {
@@ -422,25 +417,18 @@ export const patternRoomApi = {
   listVersions: (projectId: number) =>
     get<VersionListResponse>(`/pattern-room/projects/${projectId}/versions`),
 
-  // ---------- 13. 创建新版本 ----------
-  createVersion: (projectId: number, data: VersionCreateRequest, roleId?: number) =>
-    post<ActionResponse>(
-      `/pattern-room/projects/${projectId}/versions${roleId != null ? `?role_id=${roleId}` : ''}`,
-      data,
-    ),
-
-  // ---------- 14. 版本详情 ----------
+  // ---------- 13. 版本详情 ----------
   getVersionDetail: (versionId: number) =>
     get<VersionDetailResponse>(`/pattern-room/versions/${versionId}`),
 
-  // ---------- 15. 变更日志列表 ----------
+  // ---------- 14. 变更日志列表 ----------
   listChangeLogs: (projectId: number, params?: ChangeLogListParams) =>
     get<ChangeLogListResponse>(
       `/pattern-room/projects/${projectId}/change-logs`,
       params as Record<string, unknown>,
     ),
 
-  // ---------- 16. 部位跨版本汇总 ----------
+  // ---------- 15. 部位跨版本汇总 ----------
   getPartsByVersion: (projectId: number, roleId?: number, finalOnly?: boolean) =>
     get<PartsByVersionResponse>(
       `/pattern-room/projects/${projectId}/parts-by-version`,
@@ -452,30 +440,30 @@ export const patternRoomApi = {
         : undefined) as Record<string, unknown>,
     ),
 
-  // ---------- 17. 批量新增部位 ----------
+  // ---------- 16. 批量新增部位 ----------
   batchCreateParts: (projectId: number, data: BatchPartCreateRequest, roleId?: number) =>
     post<ActionResponse>(
       `/pattern-room/projects/${projectId}/parts/batch${roleId != null ? `?role_id=${roleId}` : ''}`,
       data,
     ),
 
-  // ---------- 18. 复制部位版本 ----------
+  // ---------- 17. 复制部位版本 ----------
   copyPartVersion: (partId: number) =>
     post<ActionResponse>(`/pattern-room/parts/${partId}/copy-version`),
 
-  // ---------- 19. 角色列表 ----------
+  // ---------- 18. 角色列表 ----------
   listRoles: (projectId: number) =>
     get<RoleListResponse>(`/pattern-room/projects/${projectId}/roles`),
 
-  // ---------- 20. 新增角色 ----------
+  // ---------- 19. 新增角色 ----------
   createRole: (projectId: number, data: RoleCreateRequest) =>
     post<ActionResponse>(`/pattern-room/projects/${projectId}/roles`, data),
 
-  // ---------- 21. 编辑角色（改名 / 设置最终版本） ----------
+  // ---------- 20. 编辑角色（改名 / 设置最终版本） ----------
   updateRole: (roleId: number, data: RoleUpdateRequest) =>
     put<ActionResponse>(`/pattern-room/roles/${roleId}`, data),
 
-  // ---------- 22. 删除角色 ----------
+  // ---------- 21. 删除角色 ----------
   deleteRole: (roleId: number) =>
     del<ActionResponse>(`/pattern-room/roles/${roleId}`),
 }

@@ -1,5 +1,5 @@
 <template>
-  <button :class="buttonClasses" :disabled="disabled" :type="htmlType" aria-label="操作按钮">
+  <button :class="buttonClasses" :disabled="disabled" :type="htmlType">
     <slot />
   </button>
 </template>
@@ -50,7 +50,7 @@ const buttonClasses = computed(() =>
     baseClasses,
     variantClasses[props.variant],
     sizeClasses[props.size],
-    props.disabled ? 'opacity-50 cursor-not-allowed !translate-y-0 !shadow-none' : '',
+    props.disabled ? 'opacity-50 !cursor-not-allowed !translate-y-0 !shadow-none' : '',
   ].join(' '),
 )
 </script>

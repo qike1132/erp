@@ -10,6 +10,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -18,6 +19,7 @@ from fastapi_app.services.purchase_order_crud import (
     cleanup_orphan_pending_purchase_orders,
     create_purchase_order,
 )
+from fastapi_app.services.purchase_order_sku import write_po_sku_rows
 from fastapi_app.shared_models import (
     Product,
     ProductAccessory,
@@ -26,6 +28,7 @@ from fastapi_app.shared_models import (
 )
 from fastapi_app.shared_models.order import ORDER_STATUS_PENDING_STOCK, ORDER_STATUS_STOCKED, Order
 from fastapi_app.shared_models.purchase_order import PurchaseOrder, PurchaseOrderStatus
+
 # 作用域显示名与排序口径统一收敛到 utils.scope_order，与物料计算器共用同一实现
 # （架构设计 §7#2 / Q-05）。DEFAULT_SCOPE_LABEL 在此重新导出，保持既有导入路径可用。
 from fastapi_app.utils.scope_order import (
@@ -355,7 +358,16 @@ async def _generate_per_customer(
             product_name='、'.join(product_names) if len(product_names) > 1 else (product_names[0] if product_names else ''),
             product_quantity=total_qty,
         )
-        generated_orders.extend(result.get('orders', []))
+        created = result.get('orders', [])
+        generated_orders.extend(created)
+        # 方案 C（治本）：同步落库逐 SKU 数量快照，使「每个 SKU 各自下单多少」
+        # 可还原（主表 product_name/quantity 仍是订单级合计，保持向后兼容）。
+        # 生成时尚未设损耗率，故 spare_rate=None（备品将在设率/完成时按 SKU 重算）。
+        for created_order in created:
+            await write_po_sku_rows(
+                db, created_order.get('id'), records,
+                pid_name_map=pid_name_map, spare_rate=None,
+            )
     return generated_orders
 
 
@@ -378,31 +390,49 @@ async def generate_purchase_orders_from_customer_orders(
     if not composite_ids:
         raise ValueError('未选择任何订单')
 
-    order_ids, stockin_ids = _split_composite_ids(composite_ids)
-    cust_orders, stockins = await _load_source_records(db, order_ids, stockin_ids)
-    _assert_orders_generatable(cust_orders)
+    try:
+        # savepoint 隔离：命中 uq_po_pending_dedup 时只回滚本段写入，
+        # 使调用方（端点）仍能以幂等方式回查已存在的 pending 单返回。
+        async with db.begin_nested():
+            order_ids, stockin_ids = _split_composite_ids(composite_ids)
+            cust_orders, stockins = await _load_source_records(db, order_ids, stockin_ids)
+            _assert_orders_generatable(cust_orders)
 
-    all_source_records = list(cust_orders) + list(stockins)
-    product_ids = _collect_product_ids(all_source_records)
-    pid_name_map = await _load_product_names(db, product_ids)
-    ctx = await _load_bom_context(db, product_ids)
+            all_source_records = list(cust_orders) + list(stockins)
+            product_ids = _collect_product_ids(all_source_records)
+            pid_name_map = await _load_product_names(db, product_ids)
+            ctx = await _load_bom_context(db, product_ids)
 
-    await _cleanup_pending_for(db, order_ids, stockin_ids)
+            await _cleanup_pending_for(db, order_ids, stockin_ids)
 
-    all_items = _build_material_items(all_source_records, ctx, pid_name_map)
-    if not all_items:
-        raise ValueError('所选订单的产品未配置BOM物料，无法生成采购单')
+            all_items = _build_material_items(all_source_records, ctx, pid_name_map)
+            if not all_items:
+                raise ValueError('所选订单的产品未配置BOM物料，无法生成采购单')
 
-    generated_orders = await _generate_per_customer(
-        db, _group_by_customer(all_source_records), ctx, pid_name_map
-    )
+            generated_orders = await _generate_per_customer(
+                db, _group_by_customer(all_source_records), ctx, pid_name_map
+            )
 
-    # 更新订单状态
-    for o in cust_orders:
-        o.status = ORDER_STATUS_STOCKED
+            # 更新订单状态
+            for o in cust_orders:
+                o.status = ORDER_STATUS_STOCKED
 
-    # 不在此处 commit，由外层 db_transaction 统一管理事务原子性
-    await db.flush()
+            # 不在此处 commit，由外层 db_transaction 统一管理事务原子性
+            await db.flush()
+    except IntegrityError as e:
+        msg = str(getattr(e, 'orig', e) or '')
+        if 'uq_po_pending_dedup' not in msg:
+            raise
+        # 并发幂等：唯一约束命中，回查已存在的 pending 单并以 200 返回，避免报错
+        logger.warning('命中 uq_po_pending_dedup，回查现有 pending 单（并发幂等）', exc_info=True)
+        existing = await fetch_existing_pending_for_composite_ids(db, composite_ids)
+        return {
+            'success': True,
+            'message': f'已存在 {len(existing)} 个对应采购单（并发幂等）',
+            'created_count': len(existing),
+            'orders': existing,
+            'idempotent': True,
+        }
 
     return {
         'success': True,

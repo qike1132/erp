@@ -345,11 +345,6 @@ class PartUpdateRequest(BaseModel):
     version: int = Field(..., description='乐观锁版本号')
 
 
-class VersionCreateRequest(BaseModel):
-    """创建新版本请求"""
-    reason: str | None = Field(None, max_length=500, description='变更原因(可选)')
-
-
 class BatchPartItem(BaseModel):
     """批量新增部位单项"""
     part_name: str = Field(..., min_length=1, max_length=100, description='部位名称')

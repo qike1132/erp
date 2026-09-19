@@ -146,10 +146,17 @@ class TestConfigSecurityValidation:
         import sys
 
         # 创建一个独立的Python脚本来测试配置验证
+        #
+        # 编码必须显式钉死为 UTF-8：子进程要打印中文报错（"必须通过环境变量"），
+        # 而 `text=True` 在中文 Windows 上按 locale（GBK）解码 → 读取线程抛
+        # UnicodeDecodeError → `stdout` 变成 None → 断言报
+        # "argument of type 'NoneType' is not iterable"，看不出真实原因。
+        # 子进程侧同步设 PYTHONIOENCODING，保证它真的输出 UTF-8。
         test_script = '''
 import os
 import sys
 sys.path.insert(0, r'd:\\erp_system')
+os.environ['PYTHONIOENCODING'] = 'utf-8'
 os.environ['SECRET_KEY'] = ''
 try:
     from fastapi_app.core.config import Settings
@@ -160,7 +167,7 @@ except RuntimeError as e:
 '''
 
         result = subprocess.run([sys.executable, '-c', test_script],  # nosec B603
-                              capture_output=True, text=True, cwd='.')
+                              capture_output=True, text=True, encoding='utf-8', cwd='.')
         assert "ERROR_RAISED" in result.stdout
         assert "必须通过环境变量" in result.stdout
 

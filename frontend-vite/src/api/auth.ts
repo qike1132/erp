@@ -1,6 +1,6 @@
-import { post } from './request'
+import { post, upload } from './request'
 import service from './request'
-import type { LoginResponse, UserInfo } from '@/types'
+import type { ApiResponse, LoginResponse, UserInfo } from '@/types'
 
 export const authApi = {
   login: (data: { username: string; password: string; remember?: boolean }) => post<LoginResponse>('/auth/login', data),
@@ -18,4 +18,13 @@ export const authApi = {
    * 会退化成外层对象（`null ?? res` 结果为 res），从而造出 id=0 的伪用户。
    */
   me: () => service.get('/auth/me', { timeout: 5000 }) as Promise<UserInfo>,
+
+  /**
+   * 上传图片 / 附件（`POST /auth/upload`，multipart，需登录）。
+   *
+   * 后端限制 5MB 且校验扩展名（`ALLOWED_EXTENSIONS`），返回 `{ url, filename, file_id }`。
+   * 走 `upload` 而非 `post`：multipart 需由 axios 自行设置 boundary，不能预设 Content-Type。
+   */
+  uploadFile: (formData: FormData) =>
+    upload<ApiResponse & { url?: string; filename?: string; file_id?: number }>('/auth/upload', formData),
 }

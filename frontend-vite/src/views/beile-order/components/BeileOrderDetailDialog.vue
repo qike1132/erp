@@ -1,64 +1,63 @@
 <template>
-  <!-- 订单详情弹窗 -->
-  <UiDialog v-model:open="detailOpen" title="订单详情" max-width-class="max-w-[900px]">
-    <div v-if="detailData" class="bo-detail-body">
-      <!-- 基础信息行：一行展示 -->
-      <div class="bo-detail-meta-row">
-        <span class="bo-detail-meta-item"><span class="bo-detail-meta-label">下单时间</span> {{ detailData.order_date || '-' }}</span>
-        <span class="bo-detail-meta-sep">|</span>
-        <span class="bo-detail-meta-item"><span class="bo-detail-meta-label">客户</span> {{ detailData.customer || '-' }}</span>
-        <span class="bo-detail-meta-sep">|</span>
-        <span class="bo-detail-meta-item"><span class="bo-detail-meta-label">工厂</span> {{ detailData.factories?.join(', ') || '湖北' }}</span>
-        <span class="bo-detail-meta-sep">|</span>
-        <span class="bo-detail-meta-item"><span class="bo-detail-meta-label">总数量</span> <strong class="bo-detail-meta-num">{{ detailTotalQuantity }}</strong></span>
+  <!-- 订单详情弹窗（简化版）：一行元信息 + SKU 明细表 + 总数量 -->
+  <UiDialog v-model:open="detailOpen" :title="isStockin ? '备货详情' : '订单详情'" max-width-class="max-w-[900px]">
+    <div v-if="detailData" class="bo-detail">
+      <!-- 简洁元信息条：下单时间 + 客户（原「订单/未确认/已开单」三个徽章已移除） -->
+      <div class="bo-meta">
+        <span class="bo-meta-item"><span class="lbl">下单时间：</span>{{ detailData.order_date || '-' }}</span>
+        <span class="bo-meta-item"><span class="lbl">客户：</span>{{ detailData.customer || '-' }}</span>
       </div>
 
-      <!-- 确认信息：订单与备货均参与确认流程 -->
-      <div class="bo-detail-meta-row">
-        <span class="bo-detail-meta-item">
-          <span class="bo-detail-meta-label">确认状态</span>
-          <span v-if="detailData.confirmed" class="bo-confirm-badge bo-confirm-badge--done">已确认</span>
-          <span v-else class="bo-confirm-badge bo-confirm-badge--pending">未确认</span>
-        </span>
-        <span class="bo-detail-meta-sep">|</span>
-        <span class="bo-detail-meta-item"><span class="bo-detail-meta-label">确认时间</span> {{ detailData.confirmed_at || '-' }}</span>
-        <span class="bo-detail-meta-sep">|</span>
-        <span class="bo-detail-meta-item"><span class="bo-detail-meta-label">确认人</span> {{ detailData.confirmed_by || '-' }}</span>
-      </div>
-
-      <!-- SKU 明细表格 -->
-      <div class="bo-detail-table-wrap">
-        <table class="bo-detail-table">
-          <thead>
-            <tr>
-              <th style="width:38%">产品名称</th>
-              <th style="width:18%">产品条码</th>
-              <th style="width:10%;text-align:right">数量</th>
-              <th style="width:34%">备注</th>
-            </tr>
-          </thead>
-          <tbody>
-            <template v-if="(detailData.items || []).length > 0">
-              <tr v-for="sku in detailData.items" :key="sku.id">
-                <td class="bo-detail-td-name">{{ sku.product_name || detailData.product_name || '-' }}</td>
-                <td class="bo-detail-td-barcode">{{ sku.product_barcode || detailData.barcode || '-' }}</td>
-                <td class="bo-detail-td-qty"><strong>{{ sku.quantity ?? detailData.quantity }}</strong></td>
-                <td class="bo-detail-td-note" :title="(sku.note || detailData.note || '')">{{ sku.note || detailData.note || '-' }}</td>
+      <!-- SKU 明细（宽表 + 总数量） -->
+      <div class="bo-section">
+        <div class="bo-sec-title">SKU 明细 <span class="bo-sec-cnt">共 {{ skuList.length }} 个 SKU</span></div>
+        <div class="bo-table-wrap">
+          <table class="bo-table">
+            <thead>
+              <tr>
+                <th class="c-img">图片</th>
+                <th class="c-name">产品名称</th>
+                <th class="c-barcode">产品条码</th>
+                <th class="c-qty">订单数量</th>
+                <th class="c-qty">生产数量</th>
+                <th class="c-note">备注</th>
               </tr>
-            </template>
-            <template v-else>
-              <tr v-if="detailData.product_name">
-                <td class="bo-detail-td-name">{{ detailData.product_name }}</td>
-                <td class="bo-detail-td-barcode">{{ detailData.barcode || '-' }}</td>
-                <td class="bo-detail-td-qty"><strong>{{ detailData.quantity }}</strong></td>
-                <td class="bo-detail-td-note" :title="(detailData.note || '')">{{ detailData.note || '-' }}</td>
+            </thead>
+            <tbody>
+              <!-- 无 SKU 明细（部分备货记录）：回落为订单级单行 -->
+              <tr v-if="skuList.length === 0 && detailData.product_name">
+                <td class="c-img"><div class="bo-thumb"><FontAwesomeIcon icon="box" aria-hidden="true" /></div></td>
+                <td class="c-name">{{ detailData.product_name }}</td>
+                <td class="c-barcode">{{ detailData.barcode || '-' }}</td>
+                <td class="c-qty num" :class="{ 'is-po': detailData.is_ordered === true }">{{ totalOrderQty }}</td>
+                <td class="c-qty num">{{ totalProdQty ?? '—' }}</td>
+                <td class="c-note" :title="detailData.note || ''">{{ detailData.note || '-' }}</td>
               </tr>
-              <tr v-else>
-                <td colspan="4" class="bo-detail-td-empty">暂无 SKU 明细</td>
+              <tr v-else-if="skuList.length === 0">
+                <td colspan="6" class="c-empty">暂无 SKU 明细</td>
               </tr>
-            </template>
-          </tbody>
-        </table>
+              <!-- 逐 SKU 明细 -->
+              <tr v-for="sku in skuList" v-else :key="sku.id">
+                <td class="c-img">
+                  <div class="bo-thumb">
+                    <img v-if="sku.product_image" :src="resolveStaticUrl(sku.product_image)" :alt="sku.product_name || ''" @error="onImgError" />
+                    <FontAwesomeIcon v-else icon="box" aria-hidden="true" />
+                  </div>
+                </td>
+                <td class="c-name" :title="sku.product_name || ''">{{ sku.product_name || detailData.product_name || '-' }}</td>
+                <td class="c-barcode">{{ sku.product_barcode || '-' }}</td>
+                <td class="c-qty num" :class="{ 'is-po': skuIsOrdered(detailData, sku) }">{{ fmtNum(skuOrderQty(detailData, sku)) }}</td>
+                <td class="c-qty num">{{ skuProductionQty(detailData, sku) != null ? fmtNum(skuProductionQty(detailData, sku)!) : '—' }}</td>
+                <td class="c-note" :title="sku.note || detailData.note || ''">{{ sku.note || detailData.note || '-' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <!-- 总数量（右下角，带千分位） -->
+        <div class="bo-total">
+          <span class="bo-total-item"><span class="k">总数量</span><span class="v num">{{ fmtNum(totalOrderQty) }}</span><span class="u">件</span></span>
+          <span class="bo-total-item"><span class="k">总生产数量</span><span class="v num v-blue">{{ totalProdQty != null ? fmtNum(totalProdQty) : '—' }}</span><span class="u">件</span></span>
+        </div>
       </div>
     </div>
     <template #footer>
@@ -69,14 +68,28 @@
 
 <script setup lang="ts">
 /**
- * BeileOrderDetailDialog.vue — 湖北订单详情弹窗
+ * BeileOrderDetailDialog.vue — 湖北订单详情弹窗（两级结构之二，简化版）
  *
- * 从 BeileOrderTab.vue 拆出：基础信息 + 确认信息 + SKU 明细表格。
+ * 简化布局：
+ * - 一行元信息条：下单时间 / 客户（原「订单信息」两列 kv 网格、「订单/未确认/已开单」三个徽章均已移除）；
+ * - SKU 明细：宽表（图片/产品名称/条码/订单数量/生产数量/备注），数量带千分位；
+ * - 右下角总数量 / 总生产数量（带千分位）。
+ *
+ * 数量口径复用 useBeileOrders 的 rowTotal* / skuOrderQty / skuProductionQty，
+ * 与列表行 / 导出 XLS / 打印预览同源（AC-12）。
  */
 import { computed } from 'vue'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import UiButton from '@/components/ui/UiButton.vue'
-import type { BeileOrderRow } from '@/views/beile-order/composables/useBeileOrders'
+import { resolveStaticUrl } from '@/api/request'
+import {
+  rowTotalOrderQty,
+  rowTotalProductionQty,
+  skuIsOrdered,
+  skuOrderQty,
+  skuProductionQty,
+  type BeileOrderRow,
+} from '@/views/beile-order/composables/useBeileOrders'
 
 const props = defineProps<{
   /** 当前查看的订单行 */
@@ -86,127 +99,217 @@ const props = defineProps<{
 /** 弹窗开关（父组件 v-model:open） */
 const detailOpen = defineModel<boolean>('open', { default: false })
 
-/** 详情总数量：优先按 SKU 明细汇总，无明细时用订单总量 */
-const detailTotalQuantity = computed(() => {
-  if (!props.detailData) return 0
-  const items = props.detailData.items || []
-  if (items.length === 0) return props.detailData.quantity || 0
-  return items.reduce((sum, s) => sum + (s.quantity || 0), 0)
-})
+const isStockin = computed(() => props.detailData?.record_type === 'stockin')
+const skuList = computed(() => props.detailData?.items || [])
+const totalOrderQty = computed(() => (props.detailData ? rowTotalOrderQty(props.detailData) : 0))
+const totalProdQty = computed(() => (props.detailData ? rowTotalProductionQty(props.detailData) : null))
+
+/** 数字千分位格式化：1234567 → 1,234,567 */
+function fmtNum(v: number): string {
+  return v.toLocaleString('en-US')
+}
+
+/** 图片加载失败时隐藏 img（回退占位图标） */
+function onImgError(e: Event) {
+  const img = e.target as HTMLImageElement
+  img.style.display = 'none'
+}
 </script>
 
 <style scoped>
-/* ===== 订单详情弹窗 ===== */
-.bo-detail-body {
+.bo-detail {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  font-size: 14px;
-  color: var(--color-text);
-}
-
-/* 基础信息行：一行内联展示 */
-.bo-detail-meta-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 12px;
-  padding: 10px 14px;
-  background: #f8fafc;
-  border-radius: 8px;
   font-size: 13px;
   color: var(--color-text);
 }
-.bo-detail-meta-item {
-  display: inline-flex;
+
+/* 元信息条 */
+.bo-meta {
+  display: flex;
   align-items: center;
-  gap: 4px;
-  white-space: nowrap;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 2px 0 16px;
 }
-.bo-detail-meta-label {
-  color: var(--color-text-muted, #64748b);
-  font-size: 12px;
+.bo-meta-item {
+  font-size: 13px;
+  color: var(--color-text-secondary);
 }
-.bo-detail-meta-sep {
-  color: #cbd5e1;
-  user-select: none;
-}
-.bo-detail-meta-num {
-  color: var(--color-primary-700, #2d5ab8);
+.bo-meta-item .lbl {
+  color: var(--color-text-muted);
 }
 
-/* 确认状态徽章（确认信息行用） */
-.bo-confirm-badge {
-  display: inline-flex;
+/* 分区标题（蓝色竖条 + 加粗） */
+.bo-section {
+  border-top: 1px solid var(--color-border-light, #e2e8f0);
+  padding-top: 16px;
+}
+.bo-sec-title {
+  display: flex;
   align-items: center;
-  justify-content: center;
-  padding: 3px 10px;
-  border-radius: 8px;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--color-text);
+  margin-bottom: 14px;
+}
+.bo-sec-title::before {
+  content: '';
+  width: 3px;
+  height: 15px;
+  background: var(--color-primary-500, #3b82f6);
+  border-radius: 1px;
+}
+.bo-sec-cnt {
   font-size: 12px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-.bo-confirm-badge--pending {
-  background: var(--color-warning-50);
-  color: var(--color-warning-600);
-}
-.bo-confirm-badge--done {
-  background: var(--color-success-50);
-  color: var(--color-success-700);
+  font-weight: 500;
+  color: var(--color-text-muted);
 }
 
-/* SKU 明细表格 */
-.bo-detail-table-wrap {
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
+/* SKU 表 */
+.bo-table-wrap {
+  border: 1px solid var(--color-border-light, #e2e8f0);
+  border-radius: 6px;
   overflow: hidden;
 }
-.bo-detail-table {
+.bo-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
 }
-.bo-detail-table thead th {
-  padding: 10px 12px;
+.bo-table thead th {
+  padding: 9px 12px;
   font-weight: 600;
   font-size: 12px;
-  color: #64748b;
-  background: #f8fafc;
-  border-bottom: 1px solid #e2e8f0;
+  color: var(--color-text-secondary, #64748b);
+  background: var(--color-surface, #f8fafc);
+  border-bottom: 1px solid var(--color-border-light, #e2e8f0);
   white-space: nowrap;
   text-align: left;
 }
-.bo-detail-table tbody td {
-  padding: 10px 12px;
+.bo-table tbody td {
+  padding: 9px 12px;
   border-bottom: 1px solid #f1f5f9;
   vertical-align: middle;
+  color: var(--color-text);
 }
-.bo-detail-table tbody tr:last-child td {
+.bo-table tbody tr:last-child td {
   border-bottom: none;
 }
-.bo-detail-td-name {
+.bo-table tbody tr:hover td {
+  background: #fbfcff;
+}
+.c-img {
+  width: 56px;
+  text-align: center;
+}
+.c-name {
+  min-width: 200px;
   font-weight: 500;
+}
+.c-barcode {
+  width: 130px;
+  color: var(--color-text-secondary);
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 12px;
   white-space: nowrap;
 }
-.bo-detail-td-qty {
+.c-qty {
+  width: 110px;
   text-align: right;
   font-weight: 600;
-  color: var(--color-primary-700, #2d5ab8);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
-.bo-detail-td-note {
-  color: var(--color-text-secondary, #475569);
-  font-size: 12px;
-  word-break: break-word;
+/* 表头对齐修正（列对齐）：
+   `.bo-table thead th` 的 `text-align: left`（选择器权重 0,1,2）会覆盖列级对齐类
+   （.c-qty / .c-img 均为 0,1,0），使数值列表头左对齐、其下数字右对齐，
+   图片列表头左对齐、其下缩略图居中 —— 表头与数据列错位。
+   此处按列还原表头对齐（数值列右对齐、图片列居中），与 tbody 单元格一致。 */
+.bo-table thead th.c-qty {
+  text-align: right;
 }
-.bo-detail-td-empty {
+.bo-table thead th.c-img {
   text-align: center;
-  color: #94a3b8;
+}
+.c-qty.is-po {
+  color: var(--color-primary-700, #2d5ab8);
+  font-weight: 700;
+}
+.c-note {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.c-empty {
+  text-align: center;
+  color: var(--color-text-muted);
   padding: 28px 12px !important;
 }
+.num {
+  font-variant-numeric: tabular-nums;
+}
 
-/* 响应式 */
-@media (max-width: 640px) {
-  .bo-detail-meta-row { flex-direction: column; align-items: flex-start; }
-  .bo-detail-meta-sep { display: none; }
+/* 缩略图占位 */
+.bo-thumb {
+  width: 36px;
+  height: 36px;
+  margin: 0 auto;
+  border-radius: 4px;
+  border: 1px solid var(--color-border-light, #e2e8f0);
+  background: #f7f7f7;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #c8c8c8;
+  font-size: 14px;
+  overflow: hidden;
+}
+.bo-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* 总数量（右下角） */
+.bo-total {
+  display: flex;
+  justify-content: flex-end;
+  align-items: baseline;
+  gap: 32px;
+  padding: 14px 4px 0;
+}
+.bo-total-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.bo-total .k {
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+.bo-total .v {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+.bo-total .v-blue {
+  color: var(--color-primary-700, #2d5ab8);
+}
+.bo-total .u {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+/* 徽章样式（.bo-type-badge / .bo-open-badge / .bo-confirm-badge）已随
+   「订单 / 未确认 / 已开单」三个标签一并移除；列表行 BeileOrderRow 仍保留其自有定义。 */
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
 }
 </style>

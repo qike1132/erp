@@ -5,18 +5,36 @@
 """
 import logging
 from datetime import UTC, datetime
+from typing import NamedTuple
 
 from sqlalchemy import desc, func, literal, or_, select, union_all, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 
 from fastapi_app.core.cache import cache_result
-from fastapi_app.core.exceptions import NotFoundError
+from fastapi_app.core.exceptions import ConflictError, NotFoundError
 from fastapi_app.services import escape_like
 from fastapi_app.services.notification_service import BEILE_UNCONFIRMED_TYPE
-from fastapi_app.shared_models import Notification, Order, OrderItem, Product, StockIn, User
+from fastapi_app.services.purchase_order_sku import po_sku_available
+from fastapi_app.services.purchase_utils import parse_source_order_ids
+from fastapi_app.shared_models import (
+    Notification,
+    Order,
+    OrderItem,
+    Product,
+    PurchaseOrder,
+    PurchaseOrderSku,
+    PurchaseOrderStatus,
+    StockIn,
+    User,
+)
 
 logger = logging.getLogger(__name__)
+
+# 未在采购中心完成下单时拒绝确认的统一文案（与前端 NOT_ORDERED_DETAIL 逐字一致，设计 §11.4）
+BEILE_NOT_ORDERED_DETAIL = '该订单未在采购中心完成下单，请先在采购中心完成下单后再确认'
+
+
 def _build_beile_unified_query(confirmed: bool | None, customer, factory, product_kw=None):
     """构建 Order+StockIn 的 UNION ALL 子查询。
 
@@ -82,7 +100,7 @@ async def _fetch_beile_records_by_ids(db: AsyncSession, order_ids: list[int], st
             select(Order)
             .options(
                 joinedload(Order.confirmed_by),
-                selectinload(Order.items),
+                selectinload(Order.items).joinedload(OrderItem.product),
             )
             .where(Order.id.in_(order_ids))
         )
@@ -105,10 +123,210 @@ async def _fetch_beile_records_by_ids(db: AsyncSession, order_ids: list[int], st
     return orders_map, stockins_map
 
 
+async def _fetch_completed_po_maps(
+    db: AsyncSession,
+) -> tuple[dict[int, list], dict[tuple[str, str], list], dict[int, object]]:
+    """一次查询 completed 采购单，内存建三套映射（无 N+1，仅取必要列）。
+
+    返回：
+      by_order_id[order_id] = [row, ...]
+          由 `source_order_ids` 精确元素匹配（**非 LIKE**，规避 '6509' 误命中 '[65091]'）。
+          **语义不变**，order 路径零变化。
+      by_customer_product[(customer, product_name)] = [row, ...]
+          供备货行**模糊**匹配（PRD Q2 采纳的规则）。**该匹配只决定 `is_ordered`
+          信号，绝不决定数量**（数量口径见 :func:`_apply_ordered_fields` 的 pos_exact 契约）。
+      po_by_id[po_id] = row
+          按采购单主键反查同一轻量行，供备货**精确（带类型）匹配**按去重后的 po_id 取用
+          （与 ``purchase_order_sku.source_record_type`` 配合，精确区分 order / stockin）。
+
+    全库 completed 采购单量级极小（数十条），一次全量拉取成本可忽略，
+    且彻底规避 SQL 侧 JSON 解析的类型 / 转义风险（设计 §5.2）。
+    """
+    rows = (await db.execute(
+        select(
+            PurchaseOrder.id,  # 供逐 SKU 快照做「覆盖完整性」比对（缺列会误判为未覆盖）
+            PurchaseOrder.source_order_ids,
+            PurchaseOrder.customer_name,
+            PurchaseOrder.product_name,
+            PurchaseOrder.product_quantity,
+            PurchaseOrder.spare_quantity,
+            PurchaseOrder.spare_rate,
+        ).where(PurchaseOrder.status == PurchaseOrderStatus.COMPLETED)
+    )).all()
+
+    by_order_id: dict[int, list] = {}
+    by_customer_product: dict[tuple[str, str], list] = {}
+    po_by_id: dict[int, object] = {}
+    for r in rows:
+        for oid in parse_source_order_ids(r.source_order_ids):
+            by_order_id.setdefault(oid, []).append(r)
+        by_customer_product.setdefault((r.customer_name or '', r.product_name or ''), []).append(r)
+        po_by_id[r.id] = r
+    return by_order_id, by_customer_product, po_by_id
+
+
+class _PoSkuRow(NamedTuple):
+    """completed 采购单的一条逐 SKU 快照（读路径内存视图，避免 ORM 懒加载）。"""
+
+    po_id: int
+    product_name: str
+    order_qty: float
+    spare_qty: float
+    spare_rate: float | None
+
+
+def _norm_name(value) -> str:
+    """产品名归一化：strip + 大小写折叠，规避同一 SKU 因空白/大小写差异匹配失败。"""
+    return str(value or '').strip().casefold()
+
+
+async def _fetch_po_sku_maps(db: AsyncSession) -> tuple[dict, dict]:
+    """一次查询 completed 采购单的逐 SKU 快照，内存建映射（无 N+1）。
+
+    - ``sku_by_source[(record_type, source_id)] = [_PoSkuRow, ...]``：按来源精确匹配；
+    - ``sku_by_po_id[po_id] = [_PoSkuRow, ...]``：按采购单聚合（备货近似路径备用）。
+
+    表缺失（迁移未执行）时优雅降级为空映射 → 行注入回退订单级口径，绝不抛错。
+    """
+    empty: tuple[dict, dict] = ({}, {})
+    if not await po_sku_available(db):
+        return empty
+    try:
+        async with db.begin_nested():
+            rows = (await db.execute(
+                select(
+                    PurchaseOrderSku.po_id,
+                    PurchaseOrderSku.product_name,
+                    PurchaseOrderSku.order_qty,
+                    PurchaseOrderSku.spare_qty,
+                    PurchaseOrderSku.spare_rate,
+                    PurchaseOrderSku.source_order_id,
+                    PurchaseOrderSku.source_record_type,
+                )
+                .join(PurchaseOrder, PurchaseOrder.id == PurchaseOrderSku.po_id)
+                .where(PurchaseOrder.status == PurchaseOrderStatus.COMPLETED)
+            )).all()
+    except Exception:  # noqa: BLE001 - 表缺失/方言差异一律降级为「无逐 SKU 数据」
+        logger.warning('读取 purchase_order_sku 失败，逐 SKU 注入降级为订单级口径', exc_info=True)
+        return empty
+
+    sku_by_source: dict[tuple[str, int], list] = {}
+    sku_by_po_id: dict[int, list] = {}
+    for r in rows:
+        if r.source_order_id is None:
+            continue
+        row = _PoSkuRow(
+            po_id=r.po_id,
+            product_name=r.product_name or '',
+            order_qty=float(r.order_qty or 0),
+            spare_qty=float(r.spare_qty or 0),
+            spare_rate=float(r.spare_rate) if r.spare_rate is not None else None,
+        )
+        sku_by_source.setdefault((r.source_record_type or '', int(r.source_order_id)), []).append(row)
+        sku_by_po_id.setdefault(r.po_id, []).append(row)
+    return sku_by_source, sku_by_po_id
+
+
+def _rollup_sku_rows(sku_rows: list) -> tuple[float, float]:
+    """把某来源的逐 SKU 快照汇总为订单级 (下单数量, 备品数量)。
+
+    口径（RC-2 修正）：**先按产品名取 MAX（同 SKU 拆多供应商去重，与既有订单级
+    去重口径一致），再对各产品求和** —— 得到「该订单自己的」数量，而不是
+    ``MAX(product_quantity)``（后者在一张采购单覆盖多张订单时会系统性高估）。
+    """
+    per_product: dict[str, float] = {}
+    per_product_spare: dict[str, float] = {}
+    for row in sku_rows:
+        key = _norm_name(row.product_name)
+        per_product[key] = max(per_product.get(key, 0.0), float(row.order_qty or 0))
+        per_product_spare[key] = max(per_product_spare.get(key, 0.0), float(row.spare_qty or 0))
+    return sum(per_product.values()), sum(per_product_spare.values())
+
+
+def _inject_per_sku_fields(record: dict, sku_rows: list) -> None:
+    """为 ``items[]`` 的每个 SKU 注入逐 SKU 维度字段（方案 C）。
+
+    - ``purchase_order_qty`` / ``spare_quantity``：该 SKU 维度的实际值（同 SKU
+      拆多供应商时取 MAX）；``is_ordered`` 为该 SKU 维度；``per_sku_source`` 标识
+      数据来源（``'po_sku'`` 逐 SKU 快照 / ``'order_level'`` 降级）。
+
+    契约：未命中逐 SKU 快照时上述两字段显式置 ``None``（**不得**回填订单级标量、
+    不得编造 0）；``is_ordered`` 回退为订单级 ``is_ordered``。消费方必须做 null 安全
+    处理（前端 ``skuOrderQty`` / ``skuProductionQty`` 均带 ``!= null`` 守卫）。
+    """
+    ordered = record.get('is_ordered') is True
+    for item in record.get('items', []) or []:
+        target = _norm_name(item.get('product_name'))
+        matched = [r for r in sku_rows if _norm_name(r.product_name) == target]
+        if matched:
+            item['purchase_order_qty'] = max(float(r.order_qty or 0) for r in matched)
+            item['spare_quantity'] = max(float(r.spare_qty or 0) for r in matched)
+            item['is_ordered'] = True
+            item['per_sku_source'] = 'po_sku'
+        else:
+            # 逐 SKU 行不可得（未迁移 / 历史未回填 / 该 SKU 未被采购单覆盖）→ 降级
+            item['purchase_order_qty'] = None
+            item['spare_quantity'] = None
+            item['is_ordered'] = ordered
+            item['per_sku_source'] = 'order_level'
+
+
+def _apply_ordered_fields(
+    record: dict, pos: list, sku_rows: list | None = None, pos_exact: bool = True,
+) -> dict:
+    """把「是否已下单 / 下单数量 / 备品」注入 beile 行，并逐 SKU 展开（方案 C）。
+
+    数量口径契约（D-R2-1 / D-R2-2 修正后）：
+
+    - ``pos_exact=True``（**order 路径恒定**；备货路径仅在有精确逐 SKU 行时）：
+      订单级数量优先取「**该来源自己的**逐 SKU 行汇总」（按产品名 MAX 再求和，见
+      :func:`_rollup_sku_rows`），修掉 RC-2「一张采购单覆盖 N 张订单时每单都显示同一
+      合计」的系统性高估；逐 SKU 行不可得（未迁移 / 历史未回填 / 覆盖不完整）时
+      **回退订单级** ``MAX(product_quantity)``；未下单时
+      ``purchase_order_qty = record['quantity']``。此分支为既有口径，**不得改动**。
+    - ``pos_exact=False``（备货**模糊**匹配路径）：模糊的 ``(customer, product_name)``
+      匹配**只决定 `is_ordered` 信号，绝不决定数量**——为避免把模糊命中集合里的
+      ``MAX(product_quantity)`` 当成该备货自己的数量（编造数字），
+      ``purchase_order_qty`` / ``spare_quantity`` 一律置 ``None``。
+      ``spare_rate`` 仍取模糊命中的 max，**仅作展示提示**（不代表该备货的准确损耗率）。
+
+    任何分支都不得抛错。
+    """
+    sku_rows = sku_rows or []
+    covered_po_ids = {r.po_id for r in sku_rows}
+    po_ids = {p.id for p in pos}
+    # 覆盖完整性：该来源的每张关联采购单都必须有逐 SKU 快照，否则汇总不完整 → 回退 MAX
+    rollup_ok = bool(sku_rows) and bool(po_ids) and covered_po_ids >= po_ids
+
+    if pos:
+        rates = [float(p.spare_rate) for p in pos if p.spare_rate is not None]
+        record['spare_rate'] = max(rates) if rates else None
+        record['is_ordered'] = True
+        if not pos_exact:
+            # 模糊来源不得产出数量（见 docstring 契约）——仅保留 is_ordered 信号
+            record['purchase_order_qty'] = None
+            record['spare_quantity'] = None
+        elif rollup_ok:
+            total_qty, total_spare = _rollup_sku_rows(sku_rows)
+            record['purchase_order_qty'] = total_qty
+            record['spare_quantity'] = total_spare
+        else:
+            record['purchase_order_qty'] = max((float(p.product_quantity or 0) for p in pos), default=0)
+            record['spare_quantity'] = max((float(p.spare_quantity or 0) for p in pos), default=0)
+    else:
+        record['purchase_order_qty'] = record.get('quantity') or 0
+        record['spare_quantity'] = 0
+        record['spare_rate'] = None
+        record['is_ordered'] = False
+
+    _inject_per_sku_fields(record, sku_rows)
+    return record
+
+
 @cache_result(
     key_prefix="orders:beile:unconfirmed_count",
     ttl=60,
-    local_ttl=15,
+    local_ttl=0,
     key_builder=lambda *args, **kwargs: f"f{kwargs.get('factory', '')}",
 )
 async def get_beile_unconfirmed_count(db: AsyncSession, factory: str = '湖北') -> int:
@@ -116,6 +334,11 @@ async def get_beile_unconfirmed_count(db: AsyncSession, factory: str = '湖北')
 
     全局统计量，与列表筛选/分页无关（顶部横幅使用），单独缓存：
     避免随列表查询键（页码/客户/关键字/确认状态）的每个变体重算。
+
+    local_ttl=0：禁用 L1，仅走 L2。生产为多 worker（UVICORN_WORKERS=8）且
+    `CACHE_L1_BROADCAST_ENABLED` 关闭，L1 无法跨 worker 失效；禁用 L1 后，
+    采购侧 `invalidate_cache('orders:beile:*')` 删除 L2 键即可让所有 worker 立即回源，
+    满足 AC-10「写入即失效 ≤1s」。代价仅每次请求一次本地 Redis GET。
     """
     unconfirmed_orders_result = await db.execute(
         select(func.count(Order.id)).where(
@@ -136,7 +359,7 @@ async def get_beile_unconfirmed_count(db: AsyncSession, factory: str = '湖北')
 @cache_result(
     key_prefix="orders:beile:list",
     ttl=60,
-    local_ttl=15,
+    local_ttl=0,
     key_builder=lambda *args, **kwargs: f"p{kwargs.get('page', 1)}:pp{kwargs.get('per_page', 50)}:c{kwargs.get('customer', '')}:f{kwargs.get('factory', '')}:cs{kwargs.get('confirm_status', '')}:pk{kwargs.get('product_kw', '')}",
 )
 async def get_beile_orders_with_stockins(
@@ -155,6 +378,17 @@ async def get_beile_orders_with_stockins(
     - confirm_status='confirmed'：仅返回已确认（confirmed_at 非空）的订单+备货
     - 其他取值（含 None）不生效，返回完整订单+备货列表
 
+    每行额外注入 `purchase_order_qty` / `spare_quantity` / `spare_rate` / `is_ordered`
+    （口径见 `_apply_ordered_fields`）：
+    - 订单行：由 `source_order_ids` **精确**匹配，数量取「该订单自身逐 SKU 之和」，
+      回退 `MAX(product_quantity)`；
+    - 备货行：优先按 `purchase_order_sku.source_record_type='stockin'` **精确**匹配并取
+      逐 SKU 汇总；无精确逐 SKU 行时，`(customer, product_name)` **模糊**匹配只决定
+      `is_ordered` 信号，数量置 `None`（**不得**把模糊命中的 `MAX(product_quantity)`
+      当成该备货数量 —— D-R2-1/2）。
+
+    local_ttl=0：禁用 L1 以支持多 worker 下「写入即失效」（见 get_beile_unconfirmed_count）。
+
     参考 purchase_order_query.get_unprocessed_orders 的实现方案。
     """
     confirmed: bool | None = None
@@ -165,10 +399,16 @@ async def get_beile_orders_with_stockins(
 
     unified = _build_beile_unified_query(confirmed, customer, factory, product_kw)
 
-    # ---- 1. 未确认湖北记录总数（全局量，独立缓存，见 get_beile_unconfirmed_count） ----
+    # ---- 1. 未确认湖北记录总数（全局量，独立缓存） ----
     unconfirmed_count = await get_beile_unconfirmed_count(db, factory)
 
-    # ---- 2. 分页查询当前页（窗口列一并取 total，UNION 只执行一次） ----
+    # ---- 2. completed 采购单映射（一次查询，供行级注入，无 N+1） ----
+    by_order_id, by_customer_product, po_by_id = await _fetch_completed_po_maps(db)
+
+    # ---- 2b. 逐 SKU 快照映射（方案 C；表缺失时优雅降级为空映射） ----
+    sku_by_source, _sku_by_po = await _fetch_po_sku_maps(db)
+
+    # ---- 3. 分页查询当前页（窗口列一并取 total，UNION 只执行一次） ----
     offset = (page - 1) * per_page
     page_result = await db.execute(
         select(
@@ -201,36 +441,64 @@ async def get_beile_orders_with_stockins(
 
     total = rows[0].total_count or 0
 
-    # ---- 3. 按来源批量查询完整数据 ----
+    # ---- 4. 按来源批量查询完整数据 ----
     order_ids = [r.source_id for r in rows if r.record_type == 'order']
     stockin_ids = [r.source_id for r in rows if r.record_type == 'stockin']
 
     orders_map, stockins_map = await _fetch_beile_records_by_ids(db, order_ids, stockin_ids)
 
-    # ---- 4. 构建 records（保持 SQL 排序顺序）----
+    # ---- 5. 构建 records（保持 SQL 排序顺序）----
     items: list[dict] = []
     for r in rows:
         if r.record_type == 'order':
             o = orders_map.get(r.source_id)
             if o:
-                items.append(_build_beile_order_record(o, factory))
+                items.append(_build_beile_order_record(
+                    o, factory, by_order_id.get(o.id, []), sku_by_source.get(('order', o.id), []),
+                ))
         else:
             s = stockins_map.get(r.source_id)
             if s:
-                items.append(_build_beile_stockin_record(s, factory))
+                stockin_product = s.product.name if s.product else None
+                # 精确（带类型）匹配：以该备货自身为 source 的逐 SKU 快照
+                # （source_record_type='stockin' AND source_order_id=stockin.id）。
+                exact_rows = sku_by_source.get(('stockin', s.id), [])
+                if exact_rows:
+                    # 按去重后的 po_id 取采购单行（保持 SQL 稳定顺序）
+                    seen_po_ids: set[int] = set()
+                    ordered_po_ids: list[int] = []
+                    for sku_row in exact_rows:
+                        if sku_row.po_id in po_by_id and sku_row.po_id not in seen_po_ids:
+                            seen_po_ids.add(sku_row.po_id)
+                            ordered_po_ids.append(sku_row.po_id)
+                    pos = [po_by_id[pid] for pid in ordered_po_ids]
+                    pos_exact = True
+                else:
+                    # 无精确逐 SKU 行 → 保留模糊匹配以维持「已下单」信号，
+                    # 但 pos_exact=False 使数量一律为 None（禁止把 MAX(product_quantity) 当数量）
+                    pos = by_customer_product.get((s.customer or '', stockin_product or ''), [])
+                    pos_exact = False
+                items.append(_build_beile_stockin_record(
+                    s, factory, pos, exact_rows, pos_exact=pos_exact,
+                ))
 
     return {'items': items, 'total': total, 'page': page, 'per_page': per_page,
             'unconfirmed_count': unconfirmed_count}
 
 
-def _build_beile_order_record(order: Order, factory: str) -> dict:
-    """构建湖北订单列表中的订单记录（含多 SKU）。"""
+def _build_beile_order_record(order: Order, factory: str, pos: list, sku_rows: list | None = None) -> dict:
+    """构建湖北订单列表中的订单记录（含多 SKU）。
+
+    `pos` 为该客户订单关联的 completed 采购单行集合（source_order_ids 精确匹配）。
+    `sku_rows` 为该订单的逐 SKU 快照行（方案 C；缺省时降级为订单级口径）。
+    """
     items_data = [
         {
             'id': item.id,
             'product_id': item.product_id,
             'product_name': item.product_name,
             'product_barcode': item.product_barcode,
+            'product_image': item.product.image or '' if item.product else '',
             'quantity': item.quantity,
             'order_type': item.order_type,
             'country': item.country or '',
@@ -240,7 +508,7 @@ def _build_beile_order_record(order: Order, factory: str) -> dict:
         for item in (order.items or [])
     ]
     first_item = order.items[0] if order.items else None
-    return {
+    record = {
         'id': order.id,
         'order_no': order.order_no,
         'customer': order.customer,
@@ -256,24 +524,39 @@ def _build_beile_order_record(order: Order, factory: str) -> dict:
         'confirmed_at': order.confirmed_at.strftime('%Y-%m-%d %H:%M') if order.confirmed_at else '',
         'confirmed_by': order.confirmed_by.username if order.confirmed_by else None,
     }
+    return _apply_ordered_fields(record, pos, sku_rows)
 
 
-def _build_beile_stockin_record(stockin: StockIn, factory: str) -> dict:
-    """构建湖北订单列表中的备货记录。"""
+def _build_beile_stockin_record(
+    stockin: StockIn, factory: str, pos: list, sku_rows: list | None = None,
+    pos_exact: bool = True,
+) -> dict:
+    """构建湖北订单列表中的备货记录。
+
+    `pos`：
+      - `pos_exact=True`  → 以该备货自身为来源（`source_record_type='stockin'`）的
+        精确逐 SKU 快照所属的 completed 采购单行集合；
+      - `pos_exact=False` → 按 (customer, product_name) **模糊**匹配到的 completed
+        采购单行集合（PRD Q2）；此时仅用于确定「已下单」信号，**不产出数量**。
+    `sku_rows` 为该备货的逐 SKU 快照行（方案 C；缺省时降级为订单级口径）。
+    `pos_exact` 直接透传给 :func:`_apply_ordered_fields`，见其数量口径契约。
+    """
     product_name = stockin.product.name if stockin.product else None
     product_barcode = stockin.product.barcode if stockin.product else None
+    product_image = stockin.product.image or '' if stockin.product else ''
     items_data = [{
         'id': stockin.id,
         'product_id': stockin.product_id,
         'product_name': product_name,
         'product_barcode': product_barcode,
+        'product_image': product_image,
         'quantity': stockin.quantity,
         'order_type': stockin.order_type,
         'country': stockin.country or '',
         'deduct_quantity': 0,
         'note': stockin.note or '',
     }]
-    return {
+    record = {
         'id': stockin.id,
         'order_no': stockin.stockin_no,
         'customer': stockin.customer,
@@ -289,6 +572,28 @@ def _build_beile_stockin_record(stockin: StockIn, factory: str) -> dict:
         'confirmed_at': stockin.confirmed_at.strftime('%Y-%m-%d %H:%M') if stockin.confirmed_at else '',
         'confirmed_by': stockin.confirmed_by.username if stockin.confirmed_by else None,
     }
+    return _apply_ordered_fields(record, pos, sku_rows, pos_exact=pos_exact)
+
+
+async def _order_has_completed_po(db: AsyncSession, order_id: int) -> bool:
+    """该客户订单是否已存在 completed 关联采购单（source_order_ids 精确元素匹配，非 LIKE）。"""
+    source_ids_list = (await db.execute(
+        select(PurchaseOrder.source_order_ids).where(
+            PurchaseOrder.status == PurchaseOrderStatus.COMPLETED
+        )
+    )).scalars().all()
+    return any(order_id in parse_source_order_ids(s) for s in source_ids_list)
+
+
+async def _stockin_has_completed_po(db: AsyncSession, customer: str | None, product_name: str | None) -> bool:
+    """该备货是否已存在 (customer, product_name) 匹配的 completed 采购单（近似匹配）。"""
+    rows = (await db.execute(
+        select(PurchaseOrder.customer_name, PurchaseOrder.product_name).where(
+            PurchaseOrder.status == PurchaseOrderStatus.COMPLETED
+        )
+    )).all()
+    target = (customer or '', product_name or '')
+    return any((r.customer_name or '', r.product_name or '') == target for r in rows)
 
 
 async def confirm_beile_order(db: AsyncSession, order_id: int, current_user: User) -> dict:
@@ -297,7 +602,13 @@ async def confirm_beile_order(db: AsyncSession, order_id: int, current_user: Use
     业务规则：
     - 仅允许确认 factory=湖北 的订单，与其他地区（东莞等）订单独立隔离：
       非湖北工厂订单通过本接口一律返回 404，防止跨区域串改。
-    - 幂等：订单已确认时直接返回成功，不重复记录确认人。
+    - 顺序（CR-1 明确）：查记录 → 不存在 404 → **已确认 → 幂等成功 200** →
+      未确认 → 门控（未下单 → `ConflictError` 409）→ 写入。
+      「幂等早退」必须在门控**之前**：门控的目的是防止误确认**尚未下单且尚未确认**
+      的记录；对**已确认**的历史记录既无动作也无风险，若被门控拦成 409 即为行为回退。
+    - 门控：未确认 且 未在采购中心完成下单（无 completed 关联采购单）时抛
+      `ConflictError`（409），文案 `BEILE_NOT_ORDERED_DETAIL`（PRD P0-4 / AC-5）。
+    - 幂等：订单已确认时直接返回成功（`already_confirmed=True`），不重复记录确认人。
     - 只写入 confirmed_at / confirmed_by_id，不影响 order.status
       （派生状态机不受确认流程干扰）。
     """
@@ -314,9 +625,15 @@ async def confirm_beile_order(db: AsyncSession, order_id: int, current_user: Use
     if not order:
         raise NotFoundError('订单不存在或非湖北工厂订单')
 
+    # CR-1：幂等早退必须在门控之前（已确认记录不再过未下单门控，避免 200 回退为 409）
     if order.confirmed_at is not None:
         logger.info('湖北订单重复确认（幂等）：order_id=%s，操作人：%s', order_id, current_user.username)
         return {'success': True, 'message': '订单已确认', 'already_confirmed': True}
+
+    # 门控：未在采购中心完成下单则拒绝确认（交全局 handler 转 409）
+    if not await _order_has_completed_po(db, order.id):
+        logger.info('湖北订单确认被拒（未下单）：order_no=%s，操作人：%s', order.order_no, current_user.username)
+        raise ConflictError(BEILE_NOT_ORDERED_DETAIL)
 
     order.confirmed_at = datetime.now(UTC).replace(tzinfo=None)  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
     order.confirmed_by_id = current_user.id
@@ -345,11 +662,17 @@ async def confirm_beile_stockin(db: AsyncSession, stockin_id: int, current_user:
     业务规则：
     - 仅允许确认 factory=湖北 的备货记录，与其他地区独立隔离：
       非湖北工厂备货通过本接口一律返回 404，防止跨区域串改。
-    - 幂等：备货已确认时直接返回成功，不重复记录确认人。
+    - 顺序（CR-1 明确）：查记录 → 不存在 404 → **已确认 → 幂等成功 200** →
+      未确认 → 门控（未下单 → `ConflictError` 409）→ 写入。
+      「幂等早退」必须在门控**之前**（理由同 `confirm_beile_order`）。
+    - 门控：未确认 且 无 (customer, product_name) 匹配的 completed 采购单时抛
+      `ConflictError`（409）（PRD P0-4 / AC-9）。
+    - 幂等：备货已确认时直接返回成功（`already_confirmed=True`），不重复记录确认人。
     - 只写入 confirmed_at / confirmed_by_id，不影响库存业务数据。
     """
     result = await db.execute(
         select(StockIn)
+        .options(selectinload(StockIn.product))
         .where(
             StockIn.id == stockin_id,
             StockIn.product.has(Product.factory == '湖北'),
@@ -360,9 +683,16 @@ async def confirm_beile_stockin(db: AsyncSession, stockin_id: int, current_user:
     if not stockin:
         raise NotFoundError('备货记录不存在或非湖北工厂备货')
 
+    # CR-1：幂等早退必须在门控之前（已确认记录不再过未下单门控，避免 200 回退为 409）
     if stockin.confirmed_at is not None:
         logger.info('湖北备货重复确认（幂等）：stockin_id=%s，操作人：%s', stockin_id, current_user.username)
         return {'success': True, 'message': '备货已确认', 'already_confirmed': True}
+
+    # 门控：无匹配 completed 采购单则拒绝确认
+    product_name = stockin.product.name if stockin.product else None
+    if not await _stockin_has_completed_po(db, stockin.customer, product_name):
+        logger.info('湖北备货确认被拒（未下单）：stockin_no=%s，操作人：%s', stockin.stockin_no, current_user.username)
+        raise ConflictError(BEILE_NOT_ORDERED_DETAIL)
 
     stockin.confirmed_at = datetime.now(UTC).replace(tzinfo=None)  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
     stockin.confirmed_by_id = current_user.id
@@ -372,4 +702,3 @@ async def confirm_beile_stockin(db: AsyncSession, stockin_id: int, current_user:
 
     logger.info('湖北备货确认成功：stockin_no=%s，操作人：%s', stockin.stockin_no, current_user.username)
     return {'success': True, 'message': '备货已确认', 'already_confirmed': False}
-

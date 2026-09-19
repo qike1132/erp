@@ -39,7 +39,6 @@
 import { ref } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 import { ocrApi } from '@/api'
-import { upload as apiUpload } from '@/api/request'
 import UiCard from '@/components/ui/UiCard.vue'
 import UiUpload from '@/components/ui/UiUpload.vue'
 import UiProgress from '@/components/ui/UiProgress.vue'
@@ -129,7 +128,7 @@ async function handleUpload(options: UploadOptions) {
 
     const formData = new FormData()
     formData.append('file', options.file)
-    await apiUpload(`/ocr-import/upload?session_id=${sid}`, formData)
+    await ocrApi.upload(sid, formData)
 
     showToast('文件上传成功，开始识别...', 'success')
   } catch (err: unknown) {

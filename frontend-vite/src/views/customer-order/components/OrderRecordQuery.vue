@@ -24,12 +24,15 @@
       :order-records="orderRecords"
       :is-loading-records="isLoadingRecords"
       :is-fetching-records="isFetchingRecords"
+      :error-message="errorMessage"
       :total-pages="totalPages"
+      :total-records="totalRecords"
       :per-page="perPage"
       :fetch-orders="fetchOrders"
       @view-detail="(r) => emit('view-detail', r)"
       @update:per-page="(v) => emit('update:perPage', v)"
       @change-page="(p) => emit('change-page', p)"
+      @retry="() => emit('retry')"
     />
   </div>
 </template>
@@ -51,8 +54,10 @@ const props = defineProps<{
   orderRecords: OrderRecord[]
   isLoadingRecords: boolean
   isFetchingRecords: boolean
+  errorMessage: string
   currentPage: number
   totalPages: number
+  totalRecords: number
   perPage: number
   showFilter: boolean
   filterCustomer: string
@@ -77,6 +82,7 @@ const emit = defineEmits<{
   'view-detail': [record: OrderRecord]
   'update:perPage': [value: number]
   'change-page': [page: number]
+  retry: []
 }>()
 
 const showFilter = computed({

@@ -10,6 +10,9 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, ClassVar
 
+from sqlalchemy import inspect as sa_inspect
+from sqlalchemy.exc import SQLAlchemyError
+
 if TYPE_CHECKING:
     from fastapi_app.shared_models import Order
 
@@ -227,14 +230,44 @@ class OrderSerializer:
             result["items"] = []
 
         if OrderField.FACTORIES in config.fields:
-            # 从订单明细聚合工厂名（去重排序），空列表表示无工厂配置
-            result["factories"] = sorted({
-                item.product.factory
-                for item in (order.items or [])
-                if item.product and item.product.factory
-            })
+            # 工厂名聚合（去重排序，空列表表示无工厂配置）。
+            # 优先使用调用方批量预取的结果：单次 SQL 完成，且不会在异步会话里
+            # 触发 item.product 的惰性加载（那会抛 MissingGreenlet 并使整个列表接口 500）。
+            precomputed = context.get("item_factories")
+            if precomputed is not None:
+                result["factories"] = precomputed
+            else:
+                result["factories"] = cls._loaded_item_factories(order)
 
         return result
+
+    @classmethod
+    def _loaded_item_factories(cls, order: Order) -> list[str]:
+        """仅从**已加载**的明细关系聚合工厂名。
+
+        异步会话不允许隐式 IO，因此这里先探测 `items` / `product` 的加载状态：
+        未加载就返回空列表，由调用方改用批量预取（见 `order/queries._batch_item_factories`），
+        绝不触发惰性加载。
+        """
+        try:
+            unloaded = sa_inspect(order).unloaded
+        except SQLAlchemyError:
+            # 非 ORM 实例（测试替身等）：按已加载处理，保持既有行为
+            unloaded = frozenset()
+        if "items" in unloaded:
+            return []
+
+        factories: set[str] = set()
+        for item in order.items or []:
+            try:
+                if "product" in sa_inspect(item).unloaded:
+                    continue
+            except SQLAlchemyError:
+                pass
+            product = item.product
+            if product is not None and product.factory:
+                factories.add(product.factory)
+        return sorted(factories)
 
     @classmethod
     def _format_value(cls, field: OrderField, value):

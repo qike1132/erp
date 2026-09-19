@@ -1,0 +1,1004 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>customer-order 前端交互审查报告 · 2026-09-18</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --surface:#fff; --surface-2:#fafbfc; --surface-3:#f2f4f7;
+    --ink:#1d2129; --ink-2:#4e5969; --ink-3:#86909c; --ink-4:#c9cdd4;
+    --line:#e8eaed; --line-2:#eff1f4; --line-strong:#d9dce1;
+    --brand:#1668dc; --brand-soft:#f0f6ff; --brand-line:#c5ddfa; --brand-ink:#0e42a0;
+    --sev:#d92d20; --sev-soft:#fef4f3; --sev-line:#f6d0cc;
+    --med:#a8690f; --med-soft:#fffaef; --med-line:#f2ddb4;
+    --mld:#5f6a7a; --mld-soft:#f4f5f7; --mld-line:#e4e6ea;
+    --ok:#0f7b4f; --ok-soft:#f1f8f4; --ok-line:#cbe6d8;
+    --r-sm:8px; --r:12px; --r-lg:16px;
+    --sh-1:0 1px 2px rgba(29,33,41,.04);
+    --sh-2:0 2px 10px rgba(29,33,41,.07);
+    --mono:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    --topbar:57px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.7 var(--sans);
+       -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+  ::selection{background:#d6e6ff}
+  a{color:var(--brand)}
+  :focus-visible{outline:2px solid var(--brand);outline-offset:2px;border-radius:4px}
+
+  .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
+           clip:rect(0 0 0 0);white-space:nowrap;border:0}
+  .skip{position:absolute;left:-9999px;top:0;z-index:40;background:#fff;color:var(--brand);
+        border:1px solid var(--brand-line);border-top:0;border-radius:0 0 var(--r-sm) 0;
+        padding:9px 16px;font-size:13px;text-decoration:none}
+  .skip:focus{left:0}
+
+  /* ---------- 顶栏 ---------- */
+  .topbar{position:sticky;top:0;z-index:30;background:rgba(255,255,255,.88);
+          backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+          border-bottom:1px solid var(--line)}
+  .topbar-in{max-width:1320px;margin:0 auto;padding:0 28px;height:var(--topbar);
+             display:flex;align-items:center;gap:14px}
+  .brandmark{display:flex;align-items:center;gap:10px;min-width:0}
+  .brandmark i{width:18px;height:18px;border-radius:5px;background:var(--brand);
+               box-shadow:inset 0 0 0 1.5px rgba(255,255,255,.55);flex:none}
+  .brandmark .bt{font-weight:500;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .brandmark .bp{font-size:12px;color:var(--ink-3);font-family:var(--mono);
+                 white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .topbar .spacer{flex:1}
+  .tbtn{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 12px;border-radius:var(--r-sm);
+        border:1px solid var(--line-strong);background:#fff;color:var(--ink-2);font:inherit;
+        font-size:12.5px;cursor:pointer;transition:border-color .18s,color .18s,background .18s}
+  .tbtn:hover{border-color:var(--brand-line);color:var(--brand);background:var(--brand-soft)}
+  .tbtn .dot{width:5px;height:5px;border-radius:50%;background:currentColor;opacity:.6}
+
+  /* ---------- 版式骨架 ---------- */
+  .layout{max-width:1320px;margin:0 auto;padding:26px 28px 72px;
+          display:grid;grid-template-columns:220px minmax(0,1fr);gap:34px;align-items:start}
+  .doc{min-width:0}
+
+  /* ---------- 目录 ---------- */
+  .toc{position:sticky;top:calc(var(--topbar) + 22px);max-height:calc(100vh - var(--topbar) - 44px);
+       overflow-y:auto;overscroll-behavior:contain}
+  .toc-title{font-size:11.5px;color:var(--ink-3);letter-spacing:.06em;margin:0 0 8px 10px}
+  .toc ol{list-style:none;margin:0;padding:0;counter-reset:t}
+  .toc li{margin:1px 0}
+  .toc a{display:block;position:relative;padding:5px 10px 5px 12px;font-size:12.8px;
+         color:var(--ink-2);text-decoration:none;border-radius:7px;line-height:1.45;
+         transition:background .16s,color .16s}
+  .toc a::before{content:"";position:absolute;left:0;top:7px;bottom:7px;width:2px;
+                 border-radius:2px;background:transparent;transition:background .16s}
+  .toc a:hover{background:var(--surface-3);color:var(--ink)}
+  .toc a[aria-current="true"]{background:var(--brand-soft);color:var(--brand-ink);font-weight:500}
+  .toc a[aria-current="true"]::before{background:var(--brand)}
+  .toc .sub a{padding-left:24px;font-size:12.2px;color:var(--ink-3)}
+  .toc .sub a[aria-current="true"]{color:var(--brand-ink)}
+
+  /* ---------- 标题 ---------- */
+  h1{margin:0 0 8px;font-size:23px;line-height:1.35;letter-spacing:-.3px;font-weight:500}
+  h2{font-size:17.5px;line-height:1.45;font-weight:500;margin:44px 0 14px;padding-bottom:9px;
+     border-bottom:1px solid var(--line);scroll-margin-top:calc(var(--topbar) + 16px)}
+  h2:first-child{margin-top:0}
+  h3{font-size:14.5px;line-height:1.55;font-weight:500;margin:28px 0 8px;
+     scroll-margin-top:calc(var(--topbar) + 16px)}
+  h3 + .ev,h3 + pre{margin-top:10px}
+  h4{margin:0 0 12px;font-size:12.5px;font-weight:500;color:var(--ink-2)}
+  p{margin:9px 0;color:var(--ink-2)}
+  strong{font-weight:500;color:var(--ink)}
+  em{font-style:normal;color:var(--ink-3)}
+  ul{margin:9px 0 9px 18px;padding:0;color:var(--ink-2)}
+  li{margin:5px 0}
+  li::marker{color:var(--ink-4)}
+
+  /* ---------- 顶部摘要卡 ---------- */
+  .hero{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);
+        padding:26px 30px;box-shadow:var(--sh-1)}
+  .hero .sub{color:var(--ink-3);font-size:13px;line-height:1.75}
+  .meta{margin-top:20px;padding-top:18px;border-top:1px solid var(--line-2);
+        display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px 22px}
+  .meta div{font-size:12.8px;line-height:1.6;color:var(--ink-2)}
+  .meta b{display:block;color:var(--ink-3);font-weight:400;font-size:11.5px;
+          letter-spacing:.02em;margin-bottom:3px}
+  .meta .chip{font-size:11px;padding:1px 7px;gap:4px}
+  .meta .chip::before{width:4px;height:4px}
+
+  /* ---------- 卡片类 ---------- */
+  .panel,.lead,.card{background:var(--surface);border:1px solid var(--line);
+                     border-radius:var(--r);padding:20px 24px;box-shadow:var(--sh-1)}
+  .lead{margin:14px 0}
+  .lead ol{margin:12px 0 6px 20px;padding:0}
+  .lead li{margin:10px 0;color:var(--ink-2)}
+  .lead li::marker{color:var(--brand);font-weight:500}
+
+  /* ---------- 徽标 ---------- */
+  .chips{display:inline-flex;gap:6px;flex-wrap:wrap;vertical-align:middle}
+  .chip{display:inline-flex;align-items:center;gap:5px;padding:1px 9px;border-radius:999px;
+        font-size:11.5px;font-weight:500;line-height:1.75;white-space:nowrap;
+        border:1px solid transparent}
+  .chip::before{content:"";width:5px;height:5px;border-radius:50%;background:currentColor;flex:none}
+  .c-sev{background:var(--sev-soft);color:var(--sev);border-color:var(--sev-line)}
+  .c-med{background:var(--med-soft);color:var(--med);border-color:var(--med-line)}
+  .c-mld{background:var(--mld-soft);color:var(--mld);border-color:var(--mld-line)}
+  .c-ok{background:var(--ok-soft);color:var(--ok);border-color:var(--ok-line)}
+  h3 .chip{margin-left:8px;vertical-align:1px}
+  .tag{display:inline-block;font-size:11px;padding:1px 6px;border-radius:5px;
+       background:var(--surface-3);color:var(--ink-3);font-family:var(--mono)}
+  .kv{font-family:var(--mono);font-size:12.1px;color:var(--ink-3);line-height:1.7;margin:10px 0}
+  .nowrap{white-space:nowrap}
+
+  /* ---------- 实测证据块 ---------- */
+  .ev{position:relative;background:var(--surface-2);border:1px solid var(--line);
+      border-left:2px solid var(--line-strong);border-radius:10px;padding:12px 16px;
+      margin:12px 0;font-size:12.8px;line-height:2;color:var(--ink-2)}
+  .ev > b:first-child{display:inline-block;font-size:11.5px;font-weight:500;color:var(--ink-2);
+      background:#fff;border:1px solid var(--line);border-radius:6px;padding:0 7px;
+      margin-bottom:4px;letter-spacing:.02em}
+  /* 实测值胶囊：证据块与表格单元格共用 */
+  .m{font-family:var(--mono);font-size:12.1px;color:var(--ink);
+     background:#fff;border:1px solid var(--line);border-radius:5px;
+     padding:1px 5px;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+  .ev br + br{display:none}
+
+  /* ---------- 代码 ---------- */
+  code{font-family:var(--mono);font-size:12.4px;background:var(--surface-3);
+       padding:1px 5px;border-radius:5px;color:#123a63;word-break:break-word}
+  pre{margin:12px 0;background:var(--surface-2);border:1px solid var(--line);
+      border-left:2px solid var(--brand-line);border-radius:10px;padding:13px 16px;
+      overflow-x:auto;font-family:var(--mono);font-size:12.3px;line-height:1.75;
+      color:var(--ink);tab-size:2}
+  pre .c{color:var(--ink-3)}
+  pre .add{color:var(--ok)}
+  pre .del{color:var(--sev)}
+
+  /* ---------- 表格 ---------- */
+  .tblwrap{border:1px solid var(--line);border-radius:var(--r);overflow:auto;
+           margin:14px 0;background:var(--surface);box-shadow:var(--sh-1);
+           -webkit-overflow-scrolling:touch}
+  table{width:100%;border-collapse:separate;border-spacing:0;font-size:12.9px}
+  .tblwrap table{min-width:560px}
+  th,td{padding:10px 14px;text-align:left;vertical-align:top;
+        border-bottom:1px solid var(--line-2)}
+  th{background:var(--surface-2);font-weight:500;color:var(--ink-2);white-space:nowrap;
+     font-size:12.3px;position:sticky;top:0;z-index:2;
+     box-shadow:inset 0 -1px 0 var(--line)}
+  tr:last-child td{border-bottom:0}
+  tr:hover td{background:#fcfdfe}
+  .tblwrap tr[hidden]{display:none}
+  td:first-child{white-space:nowrap;color:var(--ink-2)}
+  td code{font-size:12.1px}
+  td strong{font-weight:500;color:var(--ink);font-variant-numeric:tabular-nums;
+            background:var(--brand-soft);border-radius:5px;padding:1px 5px}
+  .tblwrap td .chip{vertical-align:1px}
+  @media(max-width:720px){
+    .tblwrap.stack table{min-width:0}
+    .tblwrap.stack thead,.tblwrap.stack tr:has(th){display:none}
+    .tblwrap.stack tr{display:block;background:var(--surface);border:1px solid var(--line);
+                      border-radius:var(--r-sm);margin:10px;padding:4px 0}
+    .tblwrap.stack tr:first-child td{border-radius:0}
+    .tblwrap.stack tr:last-child td{border-bottom:1px solid var(--line-2)}
+    .tblwrap.stack tr:last-child td:last-child{border-bottom:0}
+    .tblwrap.stack td{display:block;border:0;padding:6px 14px;white-space:normal}
+    .tblwrap.stack td::before{content:attr(data-label);display:block;font-size:11px;
+        color:var(--ink-3);line-height:1.6;margin-bottom:1px}
+    .tblwrap.stack tr:hover td{background:transparent}
+    .tblwrap.stack td:first-child{white-space:normal;color:var(--ink);
+        font-size:13.5px;padding-top:10px}
+    .tblwrap.stack td:first-child::before{display:none}
+    .tblwrap.stack td:nth-child(2):has(.chip){padding-top:0}
+  }
+
+  /* ---------- 线框对照 ---------- */
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px}
+  .wire{position:relative;background:var(--surface);border:1px solid var(--line);
+        border-radius:var(--r);padding:18px 18px 16px;box-shadow:var(--sh-1);overflow:hidden}
+  .wire::before{content:"";position:absolute;inset:0 0 auto 0;height:2px}
+  .wire:first-child::before{background:var(--sev)}
+  .wire:last-child::before{background:var(--ok)}
+  .wire h4{margin:0 0 14px;font-size:12.5px;color:var(--ink-2);font-weight:500}
+  .wire .box{border:1px dashed var(--line-strong);border-radius:var(--r-sm);padding:9px;
+             background:var(--surface-2);font-size:11.5px;color:var(--ink-3);text-align:center}
+  .wire .row{display:flex;gap:8px;margin-bottom:8px}
+  .wire .row>*{flex:1;min-width:0}
+  .wire .fld{height:34px;display:flex;align-items:center;justify-content:center;
+             border:1px solid var(--line);border-radius:var(--r-sm);background:#fff;
+             color:var(--ink-4);font-size:11px;white-space:nowrap;overflow:hidden;
+             text-overflow:ellipsis;padding:0 8px}
+  .wire .fld.err{border-color:var(--sev-line);background:var(--sev-soft);color:var(--sev)}
+  .wire .fld.ok{border-color:var(--ok-line);background:var(--ok-soft);color:var(--ok)}
+  .wire .btn{height:34px;display:flex;align-items:center;justify-content:center;
+             border-radius:var(--r-sm);background:var(--brand);color:#fff;
+             font-size:11.5px;font-weight:500}
+  .wire .btn.dis{background:var(--surface-3);color:var(--ink-4)}
+  .wire .ghost{height:34px;display:flex;align-items:center;justify-content:center;
+               border:1px dashed var(--sev-line);background:var(--sev-soft);
+               border-radius:var(--r-sm);color:var(--sev);font-size:11px}
+  .wire > div[style]{font-size:11.5px !important}
+
+  /* ---------- 页脚 / 回顶 ---------- */
+  footer{margin-top:56px;padding-top:20px;border-top:1px solid var(--line);
+         color:var(--ink-3);font-size:12px;line-height:1.8}
+  .totop{position:fixed;right:22px;bottom:22px;z-index:25;width:38px;height:38px;
+         border-radius:50%;border:1px solid var(--line-strong);background:#fff;
+         color:var(--ink-2);cursor:pointer;display:flex;align-items:center;
+         justify-content:center;box-shadow:var(--sh-2);opacity:0;visibility:hidden;
+         transition:opacity .2s,visibility .2s,border-color .18s,color .18s}
+  .totop.on{opacity:1;visibility:visible}
+  .totop:hover{border-color:var(--brand-line);color:var(--brand)}
+  .totop svg{width:14px;height:14px}
+
+  /* ---------- 筛选条（脚本注入） ---------- */
+  .filterbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:14px 0 -2px}
+  .filterbar .fl{font-size:12px;color:var(--ink-3);margin-right:2px}
+  .fbtn{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 11px;
+        border-radius:999px;border:1px solid var(--line-strong);background:#fff;
+        color:var(--ink-2);font:inherit;font-size:12px;cursor:pointer;
+        transition:border-color .16s,background .16s,color .16s}
+  .fbtn:hover{border-color:var(--brand-line);color:var(--brand)}
+  .fbtn[aria-pressed="true"]{background:var(--brand);border-color:var(--brand);color:#fff}
+  .fbtn[aria-pressed="true"] .cnt{background:rgba(255,255,255,.25);color:#fff}
+  .fbtn .cnt{font-family:var(--mono);font-size:11px;background:var(--surface-3);
+             border-radius:999px;padding:0 5px;line-height:1.6}
+  .empty-note{display:none;padding:16px;color:var(--ink-3);font-size:12.5px}
+
+  /* ---------- 响应式 ---------- */
+  @media(max-width:1000px){
+    .layout{grid-template-columns:1fr;gap:14px;padding:18px 18px 64px}
+    .toc{position:sticky;top:var(--topbar);z-index:20;max-height:none;
+         margin:0 -18px;padding:9px 18px;background:rgba(246,247,249,.94);
+         backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+         border-bottom:1px solid var(--line);overflow-y:visible;
+         display:flex;gap:7px;overflow-x:auto;scrollbar-width:none}
+    .toc::-webkit-scrollbar{display:none}
+    .toc-title,.toc .sub{display:none}
+    .toc ol{display:flex;gap:7px}
+    .toc li{margin:0}
+    .toc a{white-space:nowrap;padding:4px 11px;border:1px solid var(--line);
+           background:#fff;border-radius:999px;font-size:12.3px}
+    .toc a::before{display:none}
+    .toc a[aria-current="true"]{border-color:var(--brand);background:var(--brand);color:#fff}
+    .topbar-in{padding:0 18px}
+    .grid2{grid-template-columns:1fr}
+  }
+  @media(max-width:640px){
+    h1{font-size:20px}
+    h2{font-size:16.5px;margin-top:36px}
+    h3{font-size:14px}
+    .brandmark .bp{display:none}
+    .hero{padding:20px 18px}
+    .panel,.lead,.card{padding:16px 16px}
+    .ev{padding:11px 13px;line-height:1.95}
+    .ev .m{white-space:normal}
+    .totop{right:14px;bottom:14px}
+    .layout{padding:14px 14px 60px}
+    .toc{margin:0 -14px;padding:8px 14px}
+  }
+
+  /* ---------- 打印 ---------- */
+  @media print{
+    :root{--bg:#fff;--topbar:0px}
+    html{scroll-behavior:auto}
+    body{background:#fff;font-size:11.5pt}
+    .topbar,.toc,.totop,.filterbar{display:none !important}
+    .layout{display:block;max-width:none;padding:0}
+    .hero,.panel,.lead,.card,.wire,.tblwrap,.ev{box-shadow:none}
+    h2,h3{break-after:avoid}
+    .tblwrap,.ev,pre,.wire,.panel,.lead,.card{break-inside:avoid}
+    .tblwrap{overflow:visible}
+    .tblwrap table{min-width:0}
+    .tblwrap th{position:static}
+    .ev .m,td code,code{white-space:normal;word-break:break-word}
+    a{color:inherit;text-decoration:none}
+  }
+</style>
+</head>
+<body>
+<a class="skip" href="#doc">跳到正文</a>
+
+<header class="topbar">
+  <div class="topbar-in">
+    <div class="brandmark">
+      <i aria-hidden="true"></i>
+      <span class="bt">前端交互审查报告</span>
+      <span class="bp">customer-order</span>
+    </div>
+    <div class="spacer"></div>
+    <button class="tbtn" type="button" id="printBtn"><span class="dot" aria-hidden="true"></span>打印 / 导出 PDF</button>
+  </div>
+</header>
+
+<div class="layout">
+
+  <nav class="toc" id="toc" aria-label="报告目录">
+    <p class="toc-title">目录</p>
+    <ol>
+      <li><a href="#s1">1　一句话结论</a></li>
+      <li><a href="#s2">2　取证方法</a></li>
+      <li><a href="#s3">3　问题清单总表</a></li>
+      <li><a href="#s4">4　严重问题详述</a></li>
+      <li class="sub"><a href="#h-s1">S1　接口 500 → 空态</a></li>
+      <li class="sub"><a href="#h-s2">S2　导入键盘不可达</a></li>
+      <li class="sub"><a href="#h-s3">S3　禁用态零反馈</a></li>
+      <li class="sub"><a href="#h-s4">S4　必填无语义</a></li>
+      <li class="sub"><a href="#h-s5">S5　焦点被弹到 body</a></li>
+      <li class="sub"><a href="#h-s6">S6　按钮可访问名同质</a></li>
+      <li><a href="#s5">5　其余问题与改法</a></li>
+      <li class="sub"><a href="#h-m1">M1–M11　中优先级</a></li>
+      <li class="sub"><a href="#h-l1-l5">L1–L5　低优先项</a></li>
+      <li><a href="#s6">6　改后骨架对照</a></li>
+      <li><a href="#s7">7　性能口径</a></li>
+      <li><a href="#s8">8　落地顺序与验收</a></li>
+      <li class="sub"><a href="#h-p0">P0　半天可完成</a></li>
+      <li class="sub"><a href="#h-p1">P1　本轮迭代</a></li>
+      <li class="sub"><a href="#h-p2">P2　体验精修</a></li>
+      <li><a href="#s9">9　附录</a></li>
+      <li class="sub"><a href="#h-9-1">9.1　关键实测值</a></li>
+      <li class="sub"><a href="#h-9-2">9.2　建议保持</a></li>
+    </ol>
+  </nav>
+
+  <main class="doc" id="doc">
+
+<header class="hero">
+  <h1>customer-order 前端交互审查报告</h1>
+  <p class="sub">目标页面：<code>http://192.168.0.95:3000/customer-order</code>　·　审查范围：加载与首屏、表单反馈、按钮响应态、错误与异常、响应式、操作路径、可访问性</p>
+  <div class="meta">
+    <div><b>审查时间</b>2026-09-18 14:56–15:40（GMT+8）</div>
+    <div><b>取证方式</b>Playwright + 系统 Edge（msedge，headless）·9 种视口 · 原生 DOM 实测</div>
+    <div><b>站点形态</b>当前由 vite dev server 承载（非生产托管）</div>
+    <div><b>登录态</b>本地签发 ES256 JWT，注入 <code>access_token</code> Cookie（uid=23 / admin）</div>
+    <div><b>只读声明</b>全程未提交订单、未保存、未真删；删除流程走到确认框后取消</div>
+    <div><b>问题计数</b><span class="chip c-sev">severe 6</span> <span class="chip c-med">medium 11</span> <span class="chip c-mld">mild 5</span></div>
+  </div>
+</header>
+
+<h2 id="s1">1 · 一句话结论</h2>
+<div class="lead">
+  <p style="color:var(--ink)">页面骨架、视觉分层、空态与弹窗礼仪做得相当好（弹窗焦点陷阱、Escape、焦点归还、滚动锁定、<code>prefers-reduced-motion</code> 兜底、9 种视口零横向溢出全部实测通过）。真正的问题不在"长得怎么样"，而集中在<strong>三条根因</strong>：</p>
+  <ol>
+    <li><strong>异常被渲染成"没有数据"。</strong>记录查询「订单」接口实测返回 <strong>HTTP 500</strong>，界面给用户的是「暂无订单记录」——没有错误条、没有 toast、没有重试入口。同一模式在本页另有 3 处静默 <code>catch</code>。用户永远无法区分"确实没有"和"加载失败"。</li>
+    <li><strong>校验反馈缺位，关键按钮变成静默死路。</strong>「新增订单」在条件不足时只是变灰——没有必填提示、没有字段级错误、没有原因说明，而且点击连一个 toast 都不产生（实测 toast 数 0→0）。因为校验文案写在按钮的 <code>click</code> 里，而按钮已被 <code>disabled</code>，那段代码<strong>永远不可达</strong>。</li>
+    <li><strong>可访问名 / 语义 / 键盘可达性被统一忽略。</strong>整个 Excel 批量导入区<strong>键盘完全不可达</strong>（无 <code>tabindex</code>/<code>role</code>，文件 input <code>display:none</code> 且不在 label 内）；<code>UiButton</code> 把 <code>aria-label="操作按钮"</code> 硬编码到每个按钮上，导致删除确认框里的<strong>「取消」与「确认」对读屏器完全同名</strong>；5 个必填星号没有任何程序化语义；数量输入框连可访问名都没有。</li>
+  </ol>
+  <p>另有一项必须先讲清的前提：<strong>当前 3000 端口跑的是 dev 构建</strong>（HTML 命中 <code>/@vite/client</code> + <code>/src/main.ts</code>，首屏 247 个 script 请求 / 9.84 MB）。所以本次测到的 FCP 224ms 等数字<strong>不代表用户代价</strong>；生产侧改用产物静态核算（首屏关键 JS 135 KB gzip），结论见 §7。</p>
+</div>
+
+<h2 id="s2">2 · 取证方法（双证据）</h2>
+<p>每条结论都同时给出「源码声明」与「真实渲染实测」两侧证据；只有单侧证据的观察一律降级为"待验证"或直接不写。</p>
+<div class="tblwrap stack"><table>
+  <tr><th style="width:150px">证据类型</th><th>能证明什么</th><th>本次采集方式</th></tr>
+  <tr><td data-label="证据类型">源码声明</td><td data-label="能证明什么">设计意图、期望值、控制流可达性</td><td data-label="本次采集方式">读 <code>views/customer-order/</code> 全部组件 + <code>composables/</code> 全部 hook + 复用的 <code>components/ui/*</code>，记录 <code>文件:行号</code></td></tr>
+  <tr><td data-label="证据类型">渲染像素 / DOM</td><td data-label="能证明什么">是否真的生效、生效后的实际值、有无多余节点</td><td data-label="本次采集方式"><code>getBoundingClientRect</code> / <code>getComputedStyle</code> / <code>document.activeElement</code> / <code>validity</code>，落盘 JSON 复算</td></tr>
+  <tr><td data-label="证据类型">键盘路径</td><td data-label="能证明什么">可达性、Tab 位数量、焦点环、焦点漂移</td><td data-label="本次采集方式">真实 <code>keyboard.press('Tab')</code> 逐步记录 <code>activeElement</code>（30+6 步）</td></tr>
+  <tr><td data-label="证据类型">接口真值</td><td data-label="能证明什么">失败是真失败还是前端误判</td><td data-label="本次采集方式"><code>httpx.Client(trust_env=False)</code> 直连复验 + 浏览器 <code>response</code> 事件抓状态码与响应体</td></tr>
+  <tr><td data-label="证据类型">控制台</td><td data-label="能证明什么">未处理拒绝、Vue 警告</td><td data-label="本次采集方式"><code>console</code> / <code>pageerror</code> 事件全量捕获</td></tr>
+  <tr><td data-label="证据类型">产物静态核算</td><td data-label="能证明什么">生产首屏真实代价</td><td data-label="本次采集方式">读 <code>dist/index.html</code> 的 <code>modulepreload</code> 列表 + 逐 chunk 计算 gzip 体积</td></tr>
+</table></div>
+<p class="kv">脚本与原始数据：<code>temp/_co_audit/{pass1..pass6,sidebar}.json</code>、截图 <code>temp/_co_audit/p*.png</code>（内部验证物，未写入仓库根）。</p>
+
+<h2 id="s3">3 · 问题清单总表（按优先级）</h2>
+<div class="tblwrap stack"><table>
+  <tr>
+    <th style="width:44px">#</th><th style="width:74px">级别</th><th style="width:190px">问题</th>
+    <th>实测影响（量化）</th><th style="width:140px">根因簇</th>
+  </tr>
+  <tr>
+    <td data-label="#">S1</td><td data-label="级别"><span class="chip c-sev">severe</span></td>
+    <td data-label="问题">记录查询「订单」接口 500，界面显示「暂无订单记录」</td>
+    <td data-label="实测影响（量化）">接口 <span class="m">500 greenlet_spawn has not been called</span>；界面 <span class="m">cellText="暂无订单记录"</span>；错误条 0 / toast 0 / 重试按钮 0；控制台 <span class="m">[Unhandled Rejection] AxiosError 500</span></td>
+    <td data-label="根因簇">RC-1 异常→空态</td>
+  </tr>
+  <tr>
+    <td data-label="#">S2</td><td data-label="级别"><span class="chip c-sev">severe</span></td>
+    <td data-label="问题">Excel 批量导入全链路键盘不可达</td>
+    <td data-label="实测影响（量化）">投放区 <span class="m">tabindex=null role=null aria-label=null</span>；file input <span class="m">display:none / focusable=false / inLabel=false / labelled=false</span> → 键盘用户 0 条可达路径</td>
+    <td data-label="根因簇">RC-2 可达性</td>
+  </tr>
+  <tr>
+    <td data-label="#">S3</td><td data-label="级别"><span class="chip c-sev">severe</span></td>
+    <td data-label="问题">「新增订单」禁用态零反馈；校验文案是死代码</td>
+    <td data-label="实测影响（量化）">点击前/后 toast 数 <span class="m">0 → 0</span>；<span class="m">disabled=true / aria-disabled=null / title=null / cursor=pointer</span>（禁用却显示手型光标）</td>
+    <td data-label="根因簇">RC-2 / RC-3</td>
+  </tr>
+  <tr>
+    <td data-label="#">S4</td><td data-label="级别"><span class="chip c-sev">severe</span></td>
+    <td data-label="问题">必填语义只存在于视觉层</td>
+    <td data-label="实测影响（量化）">星号 <span class="m">5</span> 个，但 <span class="m">aria-required=0 / required=0 / label[for]=0</span>（label 共 8 个）；数量输入框 <span class="m">aria=null ph=null id=null labelled=false</span> → 无任何可访问名</td>
+    <td data-label="根因簇">RC-2 可达性</td>
+  </tr>
+  <tr>
+    <td data-label="#">S5</td><td data-label="级别"><span class="chip c-sev">severe</span></td>
+    <td data-label="问题">新增一条后焦点被弹到 <code>&lt;body&gt;</code></td>
+    <td data-label="实测影响（量化）">新增后 <span class="m">focusNow="body"</span>、<span class="m">addDisabled=true</span>（按钮转为 disabled → 焦点丢失）；重复录入被迫从页首重走 16 个框架层 Tab 位</td>
+    <td data-label="根因簇">RC-3 校验反馈</td>
+  </tr>
+  <tr>
+    <td data-label="#">S6</td><td data-label="级别"><span class="chip c-sev">severe</span></td>
+    <td data-label="问题"><code>UiButton</code> 硬编码 <code>aria-label="操作按钮"</code>，全站按钮同名</td>
+    <td data-label="实测影响（量化）">本页命中：「新增订单」「筛选」「提交订单 (1)」、国家 + 号按钮，以及确认框的 <strong>「取消」「确认」</strong> 全部 <span class="m">aria-label="操作按钮"</span> → 危险操作对读屏器不可区分（WCAG 4.1.2）</td>
+    <td data-label="根因簇">RC-2 可达性</td>
+  </tr>
+  <tr>
+    <td data-label="#">M1</td><td data-label="级别"><span class="chip c-med">medium</span></td>
+    <td data-label="问题">「模板」按钮的 <code>aria-label</code> 是未渲染的 mustache 字符串</td>
+    <td data-label="实测影响（量化）">Tab 到该按钮，可访问名实测为 <span class="m">模板 {{ importing ? '导入中…' : '导入' }}</span>（Vue 不支持属性内插值）</td>
+    <td data-label="根因簇">RC-2</td>
+  </tr>
+  <tr>
+    <td data-label="#">M2</td><td data-label="级别"><span class="chip c-med">medium</span></td>
+    <td data-label="问题">「抵扣备货」误报「暂无可用备货」，且无 pending 态</td>
+    <td data-label="实测影响（量化）">未选客户/产品时点开，实测 <span class="m">infoText="暂无可用备货"</span>（实际是检查提前 return 未执行）；<span class="m">aria-pressed=null</span>；<code>handleDeductPreview</code> 为 async 无禁用态 → 连点发两次 <code>/aux/available-stockins</code></td>
+    <td data-label="根因簇">RC-3</td>
+  </tr>
+  <tr>
+    <td data-label="#">M3</td><td data-label="级别"><span class="chip c-med">medium</span></td>
+    <td data-label="问题">数量越界静默禁用提交</td>
+    <td data-label="实测影响（量化）">输入 99999999 → <span class="m">rangeOverflow=true / valid=false</span>，但 <span class="m">borderColor=rgb(109,149,240)</span>（正常焦点蓝）、<span class="m">aria-invalid=null</span>、按钮变灰无说明</td>
+    <td data-label="根因簇">RC-3</td>
+  </tr>
+  <tr>
+    <td data-label="#">M4</td><td data-label="级别"><span class="chip c-med">medium</span></td>
+    <td data-label="问题">三处切换器缺 tab 语义，激活态只靠 CSS 类</td>
+    <td data-label="实测影响（量化）">顶部 Tab：<span class="m">role=null / aria-selected=null / aria-current=null</span>，页面 <span class="m">[role=tab] 计数 0</span>；记录类型与表单类型切换器 <span class="m">aria-pressed=null</span></td>
+    <td data-label="根因簇">RC-2</td>
+  </tr>
+  <tr>
+    <td data-label="#">M5</td><td data-label="级别"><span class="chip c-med">medium</span></td>
+    <td data-label="问题"><code>UiSelect</code> 聚焦即展开下拉，并额外占用 Tab 位</td>
+    <td data-label="实测影响（量化）">Tab 落到两个 <code>.ui-select-input</code> 时实测 <span class="m">panelOpen=true</span>（<code>open-on-focus</code>）；每 1 个下拉额外 1 个 15×24 的 trigger Tab 位，可访问名重复 <span class="m">"选择选项" ×2</span></td>
+    <td data-label="根因簇">RC-2</td>
+  </tr>
+  <tr>
+    <td data-label="#">M6</td><td data-label="级别"><span class="chip c-med">medium</span></td>
+    <td data-label="问题">日期字段占 2 个 Tab 位，第 2 位无焦点环；字段内出现两个日历图标</td>
+    <td data-label="实测影响（量化）">DOM 仅 1 个 <code>.date-input</code>，但连续两次 Tab 都落在它（<span class="m">sameAsDateInput=true</span>），第 2 次 <span class="m">outline=none 3px</span>；第 3 位是 18×14 的 <code>.date-icon</code>（点击目标最小者）</td>
+    <td data-label="根因簇">RC-2</td>
+  </tr>
+  <tr>
+    <td data-label="#">M7</td><td data-label="级别"><span class="chip c-med">medium</span></td>
+    <td data-label="问题">错误 toast 2.5s 自动消失且默认不可关闭</td>
+    <td data-label="实测影响（量化）"><code>duration:2500, closable:false</code> 为全局默认，本页所有 <code>showToast</code> 均未覆写 → 「订单创建失败（0/3）：&lt;原因&gt;」2.5s 后无从复看；toast 为 <span class="m">role=alert</span> 却挂在 <span class="m">aria-live=polite</span> 容器内（礼貌级冲突）</td>
+    <td data-label="根因簇">RC-1</td>
+  </tr>
+  <tr>
+    <td data-label="#">M8</td><td data-label="级别"><span class="chip c-med">medium</span></td>
+    <td data-label="问题">暂存区增删无任何播报</td>
+    <td data-label="实测影响（量化）">新增后 <span class="m">cards=1 / toast=null</span>，列表容器 <span class="m">aria-live=null</span>，全页仅 1 个 live region（=toast 容器）→ 键盘用户看不到右侧列表变化</td>
+    <td data-label="根因簇">RC-2</td>
+  </tr>
+  <tr>
+    <td data-label="#">M9</td><td data-label="级别"><span class="chip c-med">medium</span></td>
+    <td data-label="问题">≤768px 双列表单不折行</td>
+    <td data-label="实测影响（量化）">视口 390px 时 <span class="m">.co-form-row cols="139px 139px"</span>，客户下拉宽 139px（左右内边距占 56px）；表单内滚动比 <span class="m">1.48</span>（外层网格在 1024 已折行，内层从不折行）</td>
+    <td data-label="根因簇">布局</td>
+  </tr>
+  <tr>
+    <td data-label="#">M10</td><td data-label="级别"><span class="chip c-med">medium</span></td>
+    <td data-label="问题">三处 <code>catch</code> 静默吞错，失败呈现为"空"</td>
+    <td data-label="实测影响（量化）">产品搜索失败 → 面板实测渲染 <span class="m">"无匹配结果"</span>；可用备货失败 → 0（叠加 M2 变成"暂无可用备货"）；联想失败 → 空列表</td>
+    <td data-label="根因簇">RC-1</td>
+  </tr>
+  <tr>
+    <td data-label="#">M11</td><td data-label="级别"><span class="chip c-med">medium</span></td>
+    <td data-label="问题">表格语义与可读性不全</td>
+    <td data-label="实测影响（量化）">表头 <span class="m">12px</span> &lt; 表体 <span class="m">14px</span>；<span class="m">th[scope]=0 / aria-sort=0</span>；表体容器 <span class="m">scrollWidth 1822px</span> 而表头 <span class="m">position:static</span>（横向滚动时表头不吸附）</td>
+    <td data-label="根因簇">RC-2</td>
+  </tr>
+  <tr>
+    <td data-label="#">L1</td><td data-label="级别"><span class="chip c-mld">mild</span></td>
+    <td data-label="问题">点击目标 &lt; 32px 共 7 / 34 个</td>
+    <td data-label="实测影响（量化）">最小 <span class="m">.date-icon 18×14</span>；select trigger <span class="m">15×24</span>；模板/导入 <span class="m">40×26</span>；记录类型切换 <span class="m">h=27</span></td>
+    <td data-label="根因簇">尺寸</td>
+  </tr>
+  <tr>
+    <td data-label="#">L2</td><td data-label="级别"><span class="chip c-mld">mild</span></td>
+    <td data-label="问题">hover 用 <code>translateY</code> 位移，列表扫读抖动</td>
+    <td data-label="实测影响（量化）"><code>.co-staged-card / .co-btn-icon / .co-tab-btn / .co-type-btn</code> hover 均 <span class="m">translateY(-1px)</span>；全页 <span class="m">94 / 344</span> 个元素带 transition/animation（27%）</td>
+    <td data-label="根因簇">动效</td>
+  </tr>
+  <tr>
+    <td data-label="#">L3</td><td data-label="级别"><span class="chip c-mld">mild</span></td>
+    <td data-label="问题">进入表单需先经过 16 个框架层 Tab 位</td>
+    <td data-label="实测影响（量化）">首个内容 Tab 位是第 17 位；第 1 位是 <code>skip-link</code>「跳到主内容」（<span class="m">href="#main-content"，目标存在</span>）——兜底可用但入口偏长</td>
+    <td data-label="根因簇">路径</td>
+  </tr>
+  <tr>
+    <td data-label="#">L4</td><td data-label="级别"><span class="chip c-mld">mild</span></td>
+    <td data-label="问题">分页总数按 <code>totalPages × perPage</code> 估算（源码级）</td>
+    <td data-label="实测影响（量化）">21 条 / 每页 20 会显示「共 40 条」，末页条数也随之失真。当前数据量（订单 1 条、备货 4 条）不足以触发分页渲染，<strong>未在渲染层复现</strong></td>
+    <td data-label="根因簇">数据准确性</td>
+  </tr>
+  <tr>
+    <td data-label="#">L5</td><td data-label="级别"><span class="chip c-mld">mild</span></td>
+    <td data-label="问题">导入完成后未清空 file input 的 <code>value</code>（源码级）</td>
+    <td data-label="实测影响（量化）"><code>excelFile</code> 被置 null 但 <code>&lt;input type=file&gt;</code> 的 value 未复位 → 按浏览器规范，再次选择<strong>同一个文件</strong>不触发 <code>change</code>，"再导一次"会静默无反应</td>
+    <td data-label="根因簇">RC-3</td>
+  </tr>
+</table></div>
+
+<h2 id="s4">4 · 严重问题详述</h2>
+
+<h3 id="h-s1">S1 · 记录查询「订单」接口 500，被渲染成「暂无订单记录」<span class="chip c-sev">severe</span></h3>
+<p><strong>现象。</strong>切到「记录查询」页签，订单列表显示空态「暂无订单记录」，看起来像是业务上没有订单。</p>
+<p><strong>成因。</strong><code>useOrderList.ts:70-88</code> 的 <code>fetchOrders</code> 没有 <code>try/catch</code>；请求失败时 <code>orderRecords</code> 保持 <code>[]</code>，<code>finally</code> 又把 loading 清掉，于是 <code>OrderRecordTable.vue:16-21</code> 的 <code>#empty</code> 槽正好被渲染出来。错误信息只落在控制台，页面上一层兜底都没有。</p>
+<div class="ev">
+  <b>实测（浏览器 response 事件 + 直连复验，两者一致）</b><br>
+  <span class="m">GET /api/v1/orders/list?page=1&per_page=20 → 500</span><br>
+  <span class="m">{"success":false,"detail":"获取订单列表失败: greenlet_spawn has not been called; can't call await_only() here. Was IO attempted in an unexpected place?"}</span><br>
+  对照：<span class="m">GET /api/v1/stock/in/list → 200</span>（4 条数据，表格正常渲染）→ 说明是订单链路的契约/懒加载缺陷，不是权限、不是网络<br>
+  用户可见：<span class="m">cellText = "暂无订单记录"</span>　<code>anyErrorBanner=false</code>　<code>anyToast=false</code>　<code>retryButton=false</code><br>
+  控制台：<span class="m">[Unhandled Rejection] AxiosError: Request failed with status code 500</span> + <span class="m">pageerror</span>
+</div>
+<p><strong>影响。</strong>「记录查询」的订单视图对这个用户<strong>完全不可用</strong>，而且以最糟的方式失败——它主动告诉用户"没有订单"。业务侧会据此得出错误结论（例如误判订单未录入）。这是本次审查中优先级最高的一项：<strong>后端修契约 + 前端修兜底，两边都要改</strong>。</p>
+<p><strong>改法。</strong>前端最小改动：</p>
+<pre><span class="c">// useOrderList.ts · fetchOrders</span>
+async function fetchOrders() {
+  const seq = ++requestSeq
+  const isInitial = orderRecords.value.length === 0
+  if (isInitial) isLoadingRecords.value = true
+  else isFetchingRecords.value = true
+  errorMessage.value = ''                        <span class="add">// ← 新增：错误态</span>
+  try {
+    if (recordType.value === 'stockin') await fetchStockins(seq)
+    else await fetchOrderRecords(seq)
+  } catch (e) {
+    if (seq === requestSeq) {
+      errorMessage.value = getErrorMessage(e, '订单列表加载失败')   <span class="add">// ← 不再吞掉</span>
+      if (isInitial) orderRecords.value = []      <span class="add">// 只在无数据时清空，避免闪掉已有列表</span>
+    }
+  } finally {
+    if (seq === requestSeq) { isLoadingRecords.value = false; isFetchingRecords.value = false }
+  }
+}</pre>
+<pre><span class="c">// OrderRecordTable.vue · 空态槽加错误分支</span>
+&lt;template #empty&gt;
+  &lt;div v-if="errorMessage" class="co-state-placeholder co-state-error"&gt;
+    &lt;p&gt;{{ errorMessage }}&lt;/p&gt;
+    &lt;UiButton variant="outline" @click="fetchOrders()"&gt;重试&lt;/UiButton&gt;   <span class="add">// ← 必须给出口</span>
+  &lt;/div&gt;
+  &lt;div v-else class="co-state-placeholder co-state-empty"&gt;…暂无记录…&lt;/div&gt;
+&lt;/template&gt;</pre>
+<p class="kv">后端侧：500 的 <code>greenlet_spawn has not been called</code> 是 SQLAlchemy 异步会话里发生同步惰性加载（典型是序列化时关系属性未预加载）。修法是补 <code>selectinload/joinedload</code> 或在响应模型中避免触发惰性关系。此项属于后端范畴，报告只做记录，不在此处展开。</p>
+
+<h3 id="h-s2">S2 · Excel 批量导入整条链路键盘不可达<span class="chip c-sev">severe</span></h3>
+<p><strong>现象。</strong>用键盘无法触达"拖拽文件到标题栏 / 模板 / 导入"这条导入链路。</p>
+<p><strong>成因。</strong><code>OrderExcelImport.vue:3-10</code> 的投放区是一个带 <code>@click</code> 的 <code>&lt;div&gt;</code>：没有 <code>tabindex</code>、没有 <code>role</code>、没有键盘事件，所以它进不了 Tab 序列。文件 input（<code>:22-28</code>）是 <code>style="display:none"</code>，既不在 Tab 序列里，也<strong>没有嵌在 label 内</strong>；同位那个 <code>&lt;label&gt;</code>（<code>:11-15</code>）没有 <code>for</code>，点它本身什么都不会发生（真正打开文件框的是父 div 的 click）。</p>
+<div class="ev">
+  <b>实测</b><br>
+  投放区：<span class="m">{tag:"div", tabindex:null, role:null, ariaLabel:null}</span><br>
+  文件 input：<span class="m">{display:"none", focusable:false, inLabel:false, id:null, labelled:false}</span><br>
+  搜索"模板"按钮的 Tab 序列路径可证：Tab 能到「模板」按钮，但<strong>永远到不了投放区与文件选择</strong>
+</div>
+<p><strong>影响。</strong>只用键盘的岗位（内网 ERP 很常见：纯键盘批量录入）完全无法使用批量导入，只能退回逐条手工录入——而这正是导入功能要解决的场景。同时它也让"导入"这条路径在自动化可访问性扫描里必然报错。</p>
+<p><strong>改法。</strong></p>
+<pre><span class="c">// OrderExcelImport.vue · 把投放区变成真正的 button 语义 + 把 input 挂进 label</span>
+&lt;div class="co-section-header co-droppable"
+     <span class="add">role="button" tabindex="0"</span>
+     <span class="add">:aria-label="`批量导入：${excelFile ? excelFile.name : '未选择文件'}，支持 .xlsx / .xls`"</span>
+     <span class="add">@keydown.enter.prevent="excelInputRef?.click()"</span>
+     <span class="add">@keydown.space.prevent="excelInputRef?.click()"</span>
+     @click="excelInputRef?.click()" …&gt;
+  <span class="c">&lt;!-- 让 label 真正关联到 input，而不是靠父 div 的 click 兜着 --&gt;</span>
+  &lt;label class="co-droppable-label" <span class="add">for="co-excel-input"</span>&gt;…&lt;/label&gt;
+  …
+  &lt;input <span class="add">id="co-excel-input"</span> ref="excelInputRef" type="file" accept=".xlsx,.xls" class="sr-only" /&gt;
+&lt;/div&gt;</pre>
+<p class="kv">注意 <code>class="sr-only"</code> 而非 <code>style="display:none"</code>：display:none 的元素连焦点都拿不到，要用视觉隐藏。<code>@dragleave</code> 在子元素间移动时也会触发（高亮闪烁），建议改成计数器或判断 <code>relatedTarget</code> 是否仍在容器内。</p>
+
+<h3 id="h-s3">S3 · 「新增订单」禁用态零反馈，校验文案是死代码<span class="chip c-sev">severe</span></h3>
+<p><strong>现象。</strong>填了客户、日期、数量却还没选产品时，主按钮「新增订单」是灰的。点它没有任何反应——没有提示、没有抖动、没有说明缺哪一项。</p>
+<p><strong>成因是一条"自我否定"的链路。</strong><code>CustomerOrderView.vue:221-229</code> 写了三段很贴心的校验文案（「请从下拉列表中选择产品」/「请填写日期、客户和产品」），但它们位于 <code>addStaged()</code> 内部；而 <code>OrderInputPanel.vue:105</code> 的按钮是 <code>:disabled="!canAdd"</code> —— 条件不足时按钮就被禁用，<code>click</code> 事件根本不会派发，于是<strong>那三句文案永远执行不到</strong>。</p>
+<div class="ev">
+  <b>实测</b><br>
+  按钮态：<span class="m">disabled=true　aria-disabled=null　title=null　cursor=pointer　opacity=0.5</span><br>
+  点击"新增订单"：toast 容器子节点数 <span class="m">0 → 0</span>（零反馈）<br>
+  对照：品牌色按钮的禁用态在视觉上只是变淡，<strong>光标却是手型</strong>（<code>cursor-not-allowed</code> 未生效），进一步暗示"可以点"
+</div>
+<p><strong>影响。</strong>这是本页最主要的一种挫败感来源：用户不知道卡在哪、只能瞎试。对不熟悉"必须先点下拉项、打字不算"这个隐藏规则的新人尤其致命。</p>
+<p><strong>改法。</strong>把"为什么不能提交"从按钮内部搬到字段上，并允许点击获得解释：</p>
+<pre><span class="c">// 方案 A（推荐）：按钮不再 disabled，改为可点 + 明确报错</span>
+&lt;UiButton variant="primary"
+          <span class="add">:aria-disabled="!canAdd"</span>          <span class="c">// 语义上仍提示不可提交</span>
+          :class="{ 'is-blocked': !canAdd }"  <span class="c">// 视觉上用弱化样式，但保留 pointer</span>
+          @click="emit('add-staged')"&gt;          <span class="c">// 让 addStaged 的校验文案真正可达</span>
+  {{ isOrder ? '新增订单' : '新增备货' }}
+&lt;/UiButton&gt;
+
+<span class="c">// 方案 B：保持 disabled，但把原因写到字段级 + 顶部提示</span>
+<span class="c">// canAdd 拆成 missingFields 计算属性，逐个字段渲染 .co-field-error</span>
+&lt;div v-if="missingFields.length" class="co-form-hint" role="status"&gt;
+  还差：{{ missingFields.join('、') }}
+&lt;/div&gt;</pre>
+<p class="kv">顺带修 <code>cursor</code>：<code>UiButton.vue:53</code> 的 <code>cursor-not-allowed</code> 与基础类的 <code>cursor-pointer</code> 同 specificity，实测 <code>computed cursor = pointer</code>，需要把禁用分支的选择器提权（如 <code>!cursor-not-allowed</code> 或改写基础类）。</p>
+
+<h3 id="h-s4">S4 · 必填语义只存在于视觉层<span class="chip c-sev">severe</span></h3>
+<p><strong>现象。</strong>5 个必填项用红色 <code>*</code> 标注，但这套信息只给眼睛看。</p>
+<div class="ev">
+  <b>实测</b><br>
+  <span class="m">.co-required 数量 = 5</span>　但　<span class="m">aria-required = 0</span>　<span class="m">required = 0</span>　<span class="m">label[for] = 0</span>（<code>label</code> 总数 8）<br>
+  8 个 label 全部未关联控件，列表：<span class="m">订单类型* / 订单时间* / 客户名称* / 产品名称* / 订单数量* / 抵扣备货数量 / 备注 / 拖拽文件…</span><br>
+  数量输入框：<span class="m">{aria:null, placeholder:null, id:null, labelled:false}</span> → <strong>唯一的标识是相邻的视觉文本，读屏器读不出来</strong>
+</div>
+<p><strong>成因。</strong><code>OrderInputPanel.vue</code> 里所有 <code>&lt;label class="co-label"&gt;</code>（第 11、20、36、44、55、71、85 行）既没有 <code>for</code>，控件也没有 <code>id</code>；数量框（第 72 行）只有 <code>name="quantity"</code>，没有 <code>aria-label</code>/<code>aria-labelledby</code>。</p>
+<p><strong>影响。</strong>读屏器用户听到的是一串没有名字的编辑框，无法知道哪个是数量、哪些是必填；表单填写成本成倍上升。同时这也让自动化表单校验（E2E）失去了稳定的选择器锚点。</p>
+<p><strong>改法。</strong>最小侵入式：给控件加 <code>id</code>、给 label 加 <code>for</code>，必填项统一加 <code>aria-required="true"</code>。</p>
+<pre>&lt;label class="co-label" <span class="add">for="co-order-type"</span>&gt;订单类型 &lt;span class="co-required" <span class="add">aria-hidden="true"</span>&gt;*&lt;/span&gt;&lt;/label&gt;
+&lt;UiSelect <span class="add">id="co-order-type"</span> <span class="add">aria-required="true"</span> … /&gt;
+
+&lt;label class="co-label" <span class="add">for="co-quantity"</span>&gt;订单数量 &lt;span class="co-required" aria-hidden="true"&gt;*&lt;/span&gt;&lt;/label&gt;
+&lt;input <span class="add">id="co-quantity"</span> <span class="add">aria-required="true"</span> v-model.number="form.quantity" type="number" … /&gt;</pre>
+<p class="kv">星号本身加 <code>aria-hidden</code> 是必要的：否则读屏器会把"星号"读进字段名。</p>
+
+<h3 id="h-s5">S5 · 新增一条后焦点被弹到 <code>&lt;body&gt;</code><span class="chip c-sev">severe</span></h3>
+<p><strong>现象。</strong>用键盘提交一条后，焦点丢失——下一次按 Tab 会从文档开头（框架层）重新开始。</p>
+<p><strong>成因。</strong>点击「新增订单」后 <code>resetFormAfterAdd()</code>（<code>useOrderForm.ts:153-163</code>）清空产品与数量，<code>canAdd</code> 立刻变 false，按钮渲染为 <code>disabled</code>；而<strong>被禁用的元素无法保持焦点</strong>，浏览器把焦点回退到 <code>&lt;body&gt;</code>。</p>
+<div class="ev">
+  <b>实测</b><br>
+  新增后：<span class="m">cards=1</span>（数据确实进去了）　同时　<span class="m">addDisabled=true</span>　且　<span class="m">focusNow="body"</span><br>
+  回到表单需要重走 16 个框架层 Tab 位（§L3）
+</div>
+<p><strong>影响。</strong>本页的核心操作是"连续录入多条然后批量提交"。焦点被弹回页首意味着<strong>每条录入要多按 17 次 Tab</strong>；一次填 20 条就是 340 次多余按键。这是"操作流畅度"维度的头号问题。</p>
+<p><strong>改法。</strong>录入后把焦点显式交还给"下一个该填的字段"，而不是让浏览器随手丢掉：</p>
+<pre><span class="c">// CustomerOrderView.vue · addStaged 末尾</span>
+resetFormAfterAdd()
+<span class="c">// 焦点送到产品输入框（连续录入的下一个起点），并保持按钮不被禁用</span>
+await nextTick()
+<span class="add">document.getElementById('co-product-search')?.focus()</span>
+
+<span class="c">// 配套：把"重置后按钮变灰"这一步去掉（见 S3 方案 A），</span>
+<span class="c">// 否则下一次点击仍会因为按钮 disabled 而再次丢失焦点。</span></pre>
+<p class="kv">完整修法需要 S3 一起处理：只要按钮仍在"提交后被禁用"，焦点就会反复丢失。两条应合并为一个改动单元。</p>
+
+<h3 id="h-s6">S6 · <code>UiButton</code> 硬编码 <code>aria-label="操作按钮"</code><span class="chip c-sev">severe</span></h3>
+<p><strong>现象。</strong>全站每一个 <code>UiButton</code> 的可访问名都是同一个字符串「操作按钮」。</p>
+<p><strong>成因。</strong><code>components/ui/UiButton.vue:2</code>：</p>
+<pre>&lt;button :class="buttonClasses" :disabled="disabled" :type="htmlType" <span class="del">aria-label="操作按钮"</span>&gt;</pre>
+<p>按可访问名计算规则，<code>aria-label</code> 的优先级<strong>高于</strong>元素内的文本，所以按钮里写的中文全部被这个常量覆盖掉了。</p>
+<div class="ev">
+  <b>实测（本页命中的按钮，可访问名一律为 <code>操作按钮</code>）</b><br>
+  「新增订单」→ <span class="m">aria-label="操作按钮"</span>　「筛选」→ <span class="m">"操作按钮"</span>（且 <code>aria-expanded=null</code>，展开状态也不播报）<br>
+  「提交订单 (1)」→ <span class="m">"操作按钮"</span>　国家「+」按钮（仅图标，60×36）→ <span class="m">"操作按钮"</span><br>
+  删除确认框：<strong>「取消」与「确认」两个按钮同为 <span class="m">"操作按钮"</span></strong>
+</div>
+<p><strong>影响。</strong>对读屏器用户来说，页面上的按钮没有任何信息量；而在删除确认框里，<strong>取消和确认无法区分</strong>——这是一个不可恢复操作的错误率放大器（WCAG 4.1.2 Name, Role, Value 失败）。由于这是共享组件，影响面是全部 13 个使用 <code>UiButton</code> 的视图。</p>
+<p><strong>改法。</strong>删掉这一行即可，让按钮文本自然成为可访问名；仅图标按钮由调用方按需传 <code>aria-label</code>：</p>
+<pre>&lt;button :class="buttonClasses" :disabled="disabled" :type="htmlType"
+        <span class="add">v-bind="iconOnly ? { 'aria-label': ariaLabel } : {}"</span>&gt;
+  &lt;slot /&gt;
+&lt;/button&gt;
+
+<span class="c">// 删除确认框（UiConfirmDialog.vue）：给两个按钮显式命名</span>
+&lt;UiButton variant="outline" <span class="add">aria-label="取消删除"</span> @click="…"&gt;取消&lt;/UiButton&gt;
+&lt;UiButton variant="danger"  <span class="add">aria-label="确认删除"</span> @click="…"&gt;确认&lt;/UiButton&gt;</pre>
+<p class="kv">这条是"一行删除换全站可访问性"的高性价比修复，建议排在 P0。</p>
+
+<h2 id="s5">5 · 其余问题与改法</h2>
+
+<h3 id="h-m1">M1 · 「模板」按钮的 mustache 字符串泄漏到可访问名</h3>
+<p><code>OrderExcelImport.vue:17</code> 写的是 <code>aria-label="模板 {{ importing ? '导入中…' : '导入' }}"</code>。Vue 的模板插值<strong>只在文本节点生效，不支持属性值内插值</strong>——所以这串字面量原样进了 DOM（实测 Tab 到该按钮，可访问名为 <span class="m">模板 {{ importing ? '导入中…' : '导入' }}</span>）。改为 <code>:aria-label="importing ? '正在导入模板' : '下载导入模板'"</code>，并顺手纠正语义：这个按钮是<strong>下载模板</strong>，不是导入。</p>
+
+<h3 id="h-m2">M2 · 「抵扣备货」误报「暂无可用备货」</h3>
+<pre><span class="c">// useOrderForm.ts:110-114 — 前置条件不全时提前返回，availableStock 停留在 0</span>
+async function fetchAvailableStock() {
+  if (!form.productId || !form.customer) { availableStock.value = 0; <span class="del">return</span> }
+  …
+}
+<span class="c">// OrderDeductControl.vue:29 — 于是模板把"没检查"渲染成了"没有库存"</span>
+&lt;small v-else …&gt;暂无可用备货&lt;/small&gt;</pre>
+<p>实测：未选客户/产品时点开抵扣，<code>infoText = "暂无可用备货"</code>。这是<strong>对用户说了假话</strong>——比"没反应"更糟。</p>
+<p><strong>改法。</strong>给 <code>fetchAvailableStock</code> 增加三态（<code>idle / loading / ready</code>），并用不同文案区分：<code>idle</code> → "请先选择客户与产品"；<code>loading</code> → 骨架/spinner；<code>ready</code> 且 0 → "该客户暂无可用备货"。同时给 <code>handleDeductPreview</code> 加 pending 禁用（防连点发两次请求），给开关加 <code>aria-pressed</code>。</p>
+
+<h3 id="h-m3">M3 · 数量越界静默禁用</h3>
+<p>输入 <code>99999999</code> 后 <code>rangeOverflow=true / valid=false</code>，但边框仍是正常焦点蓝、<code>aria-invalid=null</code>，唯一变化是提交按钮变灰。修法：<code>input:user-invalid</code>（或监听 <code>validity.rangeOverflow</code>）时套红色边框 + 下方文案「数量不能超过 9,999,999」，并加 <code>aria-invalid</code> + <code>aria-describedby</code> 指到该文案。</p>
+
+<h3 id="h-m4">M4 · 三处切换器缺 tab 语义</h3>
+<p>顶部「录入 / 记录查询」、记录类型「订单 / 备货」、表单类型「订单 / 备货」都是"用颜色表示当前项"的按钮组。实测三者 <code>role=null</code>、<code>aria-selected=null</code>、<code>aria-pressed=null</code>，页面 <code>[role=tab]</code> 计数为 0。修法二选一：真做成 Tabs（<code>role=tablist/tab</code> + <code>aria-selected</code> + 左右方向键切换），或保守地给按钮组加 <code>role=group</code> + 当前项 <code>aria-pressed="true"</code>。</p>
+
+<h3 id="h-m5">M5 · <code>UiSelect</code> 聚焦即展开 + 额外 Tab 位</h3>
+<p><code>UiSelect.vue:5-6</code> 同时开了 <code>open-on-click</code> 与 <code>open-on-focus</code>。实测 Tab 一落到两个下拉，<code>panelOpen</code> 立即为 <code>true</code>——面板会盖住下面的字段，键盘用户必须按 Escape 才能继续；顺带每个下拉还多出一个 15×24 的 trigger 焦点位（可访问名与下拉本体重复，实测 <code>"选择选项" ×2</code>）。修法：去掉 <code>open-on-focus</code>（保留 <code>open-on-click</code>），并把 trigger 设为 <code>tabindex="-1"</code>（它只是鼠标用的装饰件，键盘用 Alt+↓/Enter 即可）。</p>
+
+<h3 id="h-m6">M6 · 日期字段占用 2 个 Tab 位，其中一位无焦点环</h3>
+<p>DOM 里只有 1 个 <code>.date-input</code>（实测 <code>dateInputCount=1</code>），但连续两次 Tab 的 <code>document.activeElement</code> 都指向它，第 2 次 <code>outline: none 3px</code>（无焦点环）。截图里该字段内可见<strong>两个日历图标</strong>：一个是自绘的 <code>.date-icon</code> 按钮，另一个是 Chromium 原生 picker indicator——<code>UiDatePicker.vue:79-80</code> 的 <code>-webkit-appearance:none</code> 在 Edge 这版内核里没把它藏掉，而它恰好是可聚焦的。合计一个逻辑字段吃掉 3 个 Tab 位（input ×2 + icon）。修法：<code>::-webkit-calendar-picker-indicator{ display:none }</code> 明确隐藏，<code>.date-icon</code> 提到 <code>width/height: 32px</code> 的命中区，并让它成为唯一的"打开选择器"入口。</p>
+
+<h3 id="h-m7">M7 · 错误 toast 2.5 秒消失且不可关闭</h3>
+<p><code>useToast.ts:24-28</code> 的全局默认是 <code>duration: 2500, closable: false</code>，本页所有 <code>showToast</code> 调用都未覆写。于是「订单创建失败（0/3）：实际原因…」在 2.5 秒后消失，既不能手动关也不能复看，用户来不及读完原因。<strong>改法</strong>：错误级 toast 默认 <code>duration: 0</code>（常驻）或 ≥8000ms 且 <code>closable: true</code>；成功级保持短时。顺带修 <code>useToast.ts:96</code> 与 <code>:143</code> 的礼貌级冲突——容器 <code>aria-live="polite"</code> 而每个 toast 又 <code>role="alert"</code>（assertive），建议二者取其一。</p>
+
+<h3 id="h-m8">M8 · 暂存区增删没有任何播报</h3>
+<p>新增一条后实测 <code>cards=1</code> 而 <code>toast=null</code>，列表容器 <code>aria-live=null</code>，全页 live region 只有 toast 容器 1 个。对键盘/读屏用户来说，点击「新增订单」后<strong>屏幕上的唯一反馈发生在视野之外（右栏列表）</strong>。修法：给暂存列表外层加 <code>aria-live="polite"</code>，并在计数徽章上给 <code>role="status"</code>（"共 1 个"），或至少补一句成功 toast（"已加入暂存：产品 × 12"）。</p>
+
+<h3 id="h-m9">M9 · ≤768px 双列表单不折行</h3>
+<p>外层网格在 1024px 折为单列（<code>CustomerOrderView.vue:301-305</code>），筛选行在 768px 折行（<code>OrderRecordFilter.vue:168-171</code>），但<strong>表单内部的 <code>.co-form-row</code> 从未折行</strong>（<code>OrderInputPanel.vue:206-211</code>）。实测 390px 视口下两列各 139px，客户下拉仅剩约 83px 文本空间。修法：给 <code>.co-form-row</code> 加 <code>@media (max-width:768px){ grid-template-columns:1fr }</code>；若判定平板/手机应由 <code>/m/customer-order</code> 承载，则在 768px 以下直接路由重定向，避免两套 UI 同时可维护。</p>
+
+<h3 id="h-m10">M10 · 三处 <code>catch</code> 把失败说成"空"</h3>
+<pre><span class="c">// useOrderForm.ts:28-30　产品搜索失败 → 面板显示"无匹配结果"（实测）</span>
+catch { return [] }
+<span class="c">// useOrderForm.ts:119-121　可用备货失败 → 0（再叠加 M2 就是"暂无可用备货"）</span>
+catch { availableStock.value = 0 }
+<span class="c">// UiAutocomplete.vue:165-170　联想失败 → 空列表</span>
+.catch(() => { internalSuggestions.value = []; loading.value = false })</pre>
+<p>三处与 S1 是同一个根因家族。建议统一约定：<strong>请求失败必须产生一个可区分的状态</strong>（错误态 / 重试），不得降级为"空数据"。至少应把失败向上抛或写入一个 <code>error</code> ref，由调用方决定是否提示。</p>
+
+<h3 id="h-m11">M11 · 表格语义与可读性</h3>
+<p>实测：表头 <code>fontSize 12px</code> &lt; 表体 <code>14px</code>（层级倒置）；9 个 <code>th</code> 全部无 <code>scope</code>、无 <code>aria-sort</code>；表体容器 <code>scrollWidth 1822px</code> 而 <code>thead</code> 为 <code>position: static</code>——横向滚动时列头会滚走，长行数据失去列对齐参考。修法：表头字号提到 13px 并加深字重/颜色；给列头补 <code>scope="col"</code>；可排序列补 <code>aria-sort</code>；给表头加 <code>position: sticky; top: 0</code> + 背景色。</p>
+
+<h3 id="h-l1-l5">L1–L5 · 低优先项</h3>
+<ul>
+  <li><strong>L1 点击目标</strong>：34 个可点元素中 7 个 &lt;32px。最小者 <code>.date-icon 18×14</code>；<code>UiSelect</code> 的 trigger <code>15×24</code>；模板/导入 <code>40×26</code>；记录类型切换 <code>h=27</code>。建议统一到 ≥32px（图标按钮 36px 已是页面里更合理的档位，向它看齐即可）。</li>
+  <li><strong>L2 hover 位移</strong>：<code>.co-staged-card:hover</code>、<code>.co-btn-icon:hover</code>、<code>.co-tab-btn:hover</code>、<code>.co-type-btn:hover</code> 都用 <code>translateY(-1px)</code>。在可滚动的密集列表里，鼠标移动会造成行位抖动，破坏扫读。建议改为背景/边框/阴影变化。<em>（正面：<code>app.css:660-667</code> 已有全局 <code>prefers-reduced-motion</code> 兜底，实测生效——这条只是默认动效本身偏多：全页 94/344 个元素带 transition。）</em></li>
+  <li><strong>L3 入口路径</strong>：首个内容 Tab 位是整页第 17 位。已有 <code>skip-link</code>（<code>href="#main-content"</code>，目标存在）作为兜底，实测可用；但配合 S5 的焦点丢失，问题会被放大。建议把 <code>#main-content</code> 设为可聚焦（<code>tabindex="-1"</code>）以确保跳转后焦点真正落进去。</li>
+  <li><strong>L4 分页总数</strong>：<code>OrderRecordTable.vue:12</code> 传 <code>:total-records="totalPages * perPage"</code>，最终由 <code>UiPagination.vue:13</code> 渲染成「共 N 条」。这是估算值而非真值（21 条会显示 40 条）。修法：让 <code>useOrderList</code> 暴露真实的 <code>total</code> 并透传。<em>当前数据量不足以渲染分页器，本项未在渲染层复现，属源码级判断。</em></li>
+  <li><strong>L5 同文件重选</strong>：<code>useOrderImport.ts:195</code> 把 <code>excelFile</code> 置 null，但没有复位 <code>&lt;input type=file&gt;</code> 的 <code>value</code>。按浏览器规范，再次选择同一个文件不会触发 <code>change</code>，表现为"导入按钮点了没反应"。修法：<code>handleImport</code> 成功后 <code>excelInputRef.value.value = ''</code>。<em>属源码推导，未做浏览器复现（Playwright 程序化设置 value 无法反映真实选择行为）。</em></li>
+</ul>
+
+<h2 id="s6">6 · 改后骨架对照（新增录入区）</h2>
+<div class="grid2">
+  <div class="wire">
+    <h4>现状 · 焦点与反馈路径</h4>
+    <div class="row"><div class="fld">订单类型</div><div class="fld">客户名称</div></div>
+    <div class="row"><div class="fld">订单时间</div><div class="fld">产品名称</div></div>
+    <div class="row"><div class="fld">数量</div><div class="fld">抵扣备货</div></div>
+    <div class="row"><div class="fld">备注</div></div>
+    <div class="box" style="margin-bottom:8px">批量导入（div，无 tabindex / 无 role）</div>
+    <div class="row"><div class="btn dis">新增订单（disabled · 点击零反馈）</div></div>
+    <div style="font-size:11.5px;color:#d92d20;margin-top:6px">录入后 → 焦点落到 &lt;body&gt;，重回表单需 17 次 Tab</div>
+  </div>
+  <div class="wire">
+    <h4>改后 · 反馈前移到字段</h4>
+    <div class="row"><div class="fld ok">订单类型</div><div class="fld">客户名称</div></div>
+    <div class="row"><div class="fld">订单时间</div><div class="fld">产品名称</div></div>
+    <div class="row"><div class="fld err">数量 · 不能超过 9,999,999</div><div class="fld">抵扣备货</div></div>
+    <div class="row"><div class="fld">备注</div></div>
+    <div class="box" style="margin-bottom:8px">批量导入（role=button · tabindex=0 · Enter/Space 可用）</div>
+    <div class="row"><div class="btn">新增订单（可点 · 缺项时提示缺哪一项）</div></div>
+    <div class="ghost" style="margin-top:8px">还差：产品名称、客户名称</div>
+    <div style="font-size:11.5px;color:#0f9d58;margin-top:6px">录入后 → 焦点回到产品框；列表变化由 aria-live 播报</div>
+  </div>
+</div>
+
+<h2 id="s7">7 · 性能口径（重要前提）</h2>
+<p>本次审查发现 <code>:3000</code> 当前<strong>不是生产托管</strong>，而是 vite dev server。判据（生产前端四判据中最硬的一条：取回 HTML 看形态）：</p>
+<div class="ev">
+  <span class="m">GET / → 含 "/@vite/client" 与 "/src/main.ts"，不含 assets/index-*.js</span><br>
+  <span class="m">GET /customer-order → 同上</span><br>
+  <span class="m">首屏 script 请求 247 个 / transferSize 9,838,465 B（9.84 MB）</span>，全部为未打包模块
+</div>
+<div class="tblwrap stack"><table>
+  <tr><th>口径</th><th>数值</th><th>能否代表用户代价</th></tr>
+  <tr><td data-label="口径">dev 实测（本次）</td><td data-label="数值">FCP 224ms · DCL 286ms · load 303ms · 247 请求 / 9.84 MB · DOM 344 节点</td><td data-label="能否代表用户代价"><span class="chip c-sev">否</span> 内网本机回环，且模块未打包</td></tr>
+  <tr><td data-label="口径">生产产物静态核算</td><td data-label="数值"><code>dist/index.html</code> → 入口 <code>index-SFw_bttx.js</code> 50.8 KB + 其 4 个静态依赖（modulepreload 的 vendor-vue/query/fontawesome/axios）344.1 KB = <strong>394.9 KB raw / 135 KB gzip</strong>；CSS 54.9 KB / 10.8 KB gzip</td><td data-label="能否代表用户代价"><span class="chip c-ok">是</span> 首屏关键 JS <strong>135 KB gzip</strong></td></tr>
+  <tr><td data-label="口径">懒加载是否合理</td><td data-label="数值"><code>vendor-primevue</code> 672 KB、<code>vendor-echarts</code> 557 KB <strong>均不在 preload 列表</strong>（按需加载）；订单页自身路由 chunk <code>CustomerOrderView-*.js</code> 仅 52.8 KB / 14.7 KB gzip</td><td data-label="能否代表用户代价"><span class="chip c-ok">是</span> 拆分策略正确</td></tr>
+  <tr><td data-label="口径">外壳级失败兜底（正面）</td><td data-label="数值"><code>index.html</code> 内联加载指示器 + <strong>8s 看门狗</strong>：主 JS 加载失败/挂载报错时把「加载中…」替换为「页面加载失败，请检查网络后重试」+ 重新加载按钮</td><td data-label="能否代表用户代价"><span class="chip c-ok">是</span> 与 S1 形成鲜明对比：外壳做了，页面级数据请求没做</td></tr>
+</table></div>
+<p><strong>结论：</strong>从生产口径看，首屏 135 KB gzip JS + 11 KB gzip CSS 对内网 ERP 是合理水平，<strong>没有必须立即处理的性能阻塞项</strong>；dev 下的 9.84 MB / 247 请求不应被当作性能问题来优化。真正值得动的性能/体验项只有两条，且都属于"数据流"而非"体积"：① 页面挂载即拉 <code>/customers/active-names</code> 与 <code>/aux/countries</code>（后者只在"定制订单"下才用得到，但每次进页都请求，实测两请求均在首屏发出）；② 客户下拉在数据回来前没有任何加载态，列表就绪前打开是空的（选项来自异步 store，无 loading 占位）。</p>
+<p class="kv">另注：<code>dist</code> 目录时间戳为 2026-09-18 15:02，晚于本次审查开始时刻——若近期有并行构建/发布，请以实际部署时点为准（工程约定：构建前先确认无并行会话在构建同一仓库）。</p>
+
+<h2 id="s8">8 · 落地顺序与验收断言</h2>
+<p>断言全部取自本次实测指标，改完可直接用同一脚本复测比对。</p>
+
+<h3 id="h-p0">P0 · 半天内可完成、影响面最大</h3>
+<div class="tblwrap stack"><table>
+  <tr><th style="width:150px">动作</th><th style="width:200px">验收断言（改前 → 改后）</th><th>备注</th></tr>
+  <tr>
+    <td data-label="动作">S6 删除 <code>UiButton</code> 的硬编码 aria-label</td>
+    <td data-label="验收断言（改前 → 改后）"><code>button[aria-label="操作按钮"]</code> 计数 <strong>≥1 → 0</strong>；确认框两个按钮可访问名 <strong>相同 → 互不相同</strong></td>
+    <td data-label="备注">一行删除，全站收益；建议同批给 UiConfirmDialog 补显式命名</td>
+  </tr>
+  <tr>
+    <td data-label="动作">S1 <code>fetchOrders</code> 补 catch + 错误态 + 重试</td>
+    <td data-label="验收断言（改前 → 改后）">500 场景下界面由 <strong>「暂无订单记录」→ 错误文案 + 重试按钮</strong>；控制台不再出现 <code>Unhandled Rejection</code></td>
+    <td data-label="备注">需后端同步修 <code>greenlet_spawn</code> 惰性加载，否则重试仍失败</td>
+  </tr>
+  <tr>
+    <td data-label="动作">S4 label/for + <code>aria-required</code> + 数量框命名</td>
+    <td data-label="验收断言（改前 → 改后）"><code>label[for]</code> <strong>0 → 5</strong>；<code>aria-required</code> <strong>0 → 5</strong>；数量框可访问名 <strong>空 → "订单数量"</strong></td>
+    <td data-label="备注">顺带给 E2E 提供稳定选择器锚点</td>
+  </tr>
+  <tr>
+    <td data-label="动作">M1 修「模板」按钮 aria-label</td>
+    <td data-label="验收断言（改前 → 改后）">该按钮可访问名 <strong>不再是 mustache 字面量</strong></td>
+    <td data-label="备注">同时纠正语义（下载模板 ≠ 导入）</td>
+  </tr>
+</table></div>
+
+<h3 id="h-p1">P1 · 本轮迭代内完成（交互主线）</h3>
+<div class="tblwrap stack"><table>
+  <tr><th style="width:190px">动作</th><th>验收断言</th></tr>
+  <tr><td data-label="动作">S3 + S5 合并改动单元：按钮不再静默禁用、字段级缺项提示、录入后焦点归还</td>
+      <td data-label="验收断言">① 缺项点击「新增订单」<strong>toast 0 → ≥1</strong>；② 新增后 <code>document.activeElement</code> <strong>body → 产品输入框</strong>；③ 禁用按钮 <code>cursor</code> <strong>pointer → not-allowed</strong>（若采用方案 B）</td></tr>
+  <tr><td data-label="动作">S2 投放区语义化 + 文件 input 关联</td>
+      <td data-label="验收断言">投放区 <code>tabindex</code> <strong>null → "0"</strong>、<code>role</code> <strong>null → "button"</strong>；Enter 能打开文件选择框；<code>input.labels.length</code> <strong>0 → 1</strong></td></tr>
+  <tr><td data-label="动作">M2 抵扣三态 + 防连点 + <code>aria-pressed</code></td>
+      <td data-label="验收断言">未选客户时文案 <strong>「暂无可用备货」→「请先选择客户与产品」</strong>；连点两次 <code>/aux/available-stockins</code> 请求数 <strong>2 → 1</strong></td></tr>
+  <tr><td data-label="动作">M3 数量越界错误态</td>
+      <td data-label="验收断言">越界时 <code>aria-invalid</code> <strong>null → "true"</strong>，边框 <strong>正常蓝 → 危险红</strong>，出现说明文案</td></tr>
+  <tr><td data-label="动作">M7 错误 toast 常驻/可关</td>
+      <td data-label="验收断言">错误级 toast 在 5s 后仍可读；<code>closable</code> <strong>false → true</strong>；礼貌级冲突消除</td></tr>
+  <tr><td data-label="动作">M10 三处静默 catch 改为可区分错误态</td>
+      <td data-label="验收断言">断网/500 时产品面板 <strong>「无匹配结果」→ 错误提示</strong>，可用备货 <strong>0 → 错误态而非"暂无"</strong></td></tr>
+</table></div>
+
+<h3 id="h-p2">P2 · 体验精修（可排后续）</h3>
+<div class="tblwrap stack"><table>
+  <tr><th style="width:190px">动作</th><th>验收断言</th></tr>
+  <tr><td data-label="动作">M5 去掉 <code>open-on-focus</code>，trigger <code>tabindex="-1"</code></td>
+      <td data-label="验收断言">Tab 落到下拉时 <code>panelOpen</code> <strong>true → false</strong>；可访问名重复项 <strong>"选择选项"×2 → 0</strong>；表单 Tab 位数 <strong>-2</strong></td></tr>
+  <tr><td data-label="动作">M6 隐藏原生 picker indicator、放大 <code>.date-icon</code></td>
+      <td data-label="验收断言">日期字段内可见日历图标 <strong>2 → 1</strong>；该字段占 Tab 位 <strong>3 → 2</strong>；<code>.date-icon</code> 尺寸 <strong>18×14 → ≥32×32</strong></td></tr>
+  <tr><td data-label="动作">M4 三处切换器补 tab 语义</td>
+      <td data-label="验收断言">页面 <code>[role=tab]</code> <strong>0 → 2</strong>；<code>aria-selected</code>/<code>aria-pressed</code> 均有值</td></tr>
+  <tr><td data-label="动作">M8 暂存区 live region</td>
+      <td data-label="验收断言">新增后 count 徽章有 <code>role=status</code> 或容器 <code>aria-live="polite"</code>；新增有成功提示</td></tr>
+  <tr><td data-label="动作">M9 ≤768px 表单单列 / 或路由重定向</td>
+      <td data-label="验收断言">390px 视口 <code>.co-form-row</code> 列数 <strong>2 → 1</strong>；<code>.ui-select-input</code> 宽 <strong>139px → ≥290px</strong></td></tr>
+  <tr><td data-label="动作">M11 表格语义与表头吸附</td>
+      <td data-label="验收断言"><code>th[scope=col]</code> <strong>0 → 9</strong>；<code>thead position</code> <strong>static → sticky</strong>；表头字号 <strong>12px → 13px</strong></td></tr>
+  <tr><td data-label="动作">L1/L2 点击目标与 hover 动效</td>
+      <td data-label="验收断言">命中区 <strong>&lt;32px 计数 7 → 0</strong>；hover 不再出现 <code>translateY</code></td></tr>
+  <tr><td data-label="动作">L4/L5 分页真值、重选同文件</td>
+      <td data-label="验收断言">分页显示真实 <code>total</code>；导入成功后 <code>input.value === ""</code>，可重复导入同一文件</td></tr>
+</table></div>
+
+<h2 id="s9">9 · 附录：实测数据与值得保留的既有做法</h2>
+<h3 id="h-9-1">9.1 关键实测值</h3>
+<div class="tblwrap stack"><table>
+  <tr><th style="width:230px">指标</th><th>实测</th></tr>
+  <tr><td data-label="指标">视口 / 横向溢出</td><td data-label="实测">1920·1600·1440·1366·1280·1024·900·768·390 共 9 档，<strong>全部无横向溢出</strong>（<code>scrollWidth === clientWidth</code>）</td></tr>
+  <tr><td data-label="指标">外层网格</td><td data-label="实测">≥1280px 两列 <code>483–803px</code>；≤1024px 折为单列 <code>710px</code>；390px 单列 <code>330px</code></td></tr>
+  <tr><td data-label="指标">表单可见高度</td><td data-label="实测">1920×1080 下 <code>888 / 888</code>（不滚动）；1366×768 起转为内滚动（<code>ratio 1.32–1.48</code>）</td></tr>
+  <tr><td data-label="指标">可聚焦元素</td><td data-label="实测">32 个；其中框架层 16 个先于页面内容</td></tr>
+  <tr><td data-label="指标">控件高度谱</td><td data-label="实测"><code>UiSelect 47</code> · <code>日期 47</code> · <code>联想 44</code> · <code>数量 42</code> → <strong>同一行 3 档高度</strong>；按钮 <code>46 / 36 / 31 / 27 / 26 / 24 / 14</code> 共 7 档</td></tr>
+  <tr><td data-label="指标">焦点环</td><td data-label="实测">Tab 序列中 33/34 个停点有可见焦点环；唯一缺失 = 日期输入的第 2 站</td></tr>
+  <tr><td data-label="指标">控制台</td><td data-label="实测">除 S1 的 500 外<strong>无任何 Vue 警告或报错</strong>（<code>[API]</code> 调试日志除外）</td></tr>
+  <tr><td data-label="指标">接口</td><td data-label="实测"><code>/orders/list 500</code>；<code>/stock/in/list 200(4 条)</code>；<code>/auth/me 200</code>（<code>factory:null</code>，故本用户无工厂锁定）；<code>/customers/active-names 200</code>；<code>/aux/countries 200</code>；<code>/aux/product-search 200</code></td></tr>
+</table></div>
+
+<h3 id="h-9-2">9.2 已验证良好、建议保持</h3>
+<ul>
+  <li><strong>弹窗礼仪完整</strong>：<code>role="dialog"</code> + <code>aria-labelledby</code> 指向真实标题；打开时焦点移入、初始停在「取消」这种安全项；Tab 循环被困在弹窗内（实测 6 次 Tab 全部 <code>inside=true</code>）；Escape 可关；<strong>关闭后焦点归还到触发按钮</strong>（<code>.co-btn-danger</code>）；<code>body overflow: hidden</code> 锁定滚动。</li>
+  <li><strong>动效可访问性</strong>：<code>app.css:660-667</code> 全局 <code>prefers-reduced-motion</code> 兜底；<code>app.css:669-672</code> 全局 <code>:focus-visible</code> 描边。</li>
+  <li><strong>竞态防护</strong>：列表与联想两条请求路径都有 <code>requestSeq</code> 丢弃过期响应。</li>
+  <li><strong>批量提交的部分失败语义</strong>：<code>useStagedItems.ts:102-131</code> 只移除成功项、保留失败项供重试，并按后端 <code>created_count</code> 真实播报（0 条成功时报错而非报成功）。</li>
+  <li><strong>发布体积分层</strong>：primevue / echarts 不进 preload，订单页自身 chunk 仅 14.7 KB gzip。</li>
+</ul>
+
+<footer>
+  取证脚本与原始数据：<code>D:\erp_system\temp\_co_audit\</code>（pass1–pass6 JSON + 截图 + 各轮日志）。<br>
+  本报告全程只读：未提交订单、未保存、未删除任何数据；删除流程仅走到确认框并取消。
+</footer>
+
+  </main>
+</div>
+
+<button class="totop" id="totop" type="button" aria-label="回到顶部">
+  <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13.2V3.2M3.6 7.6 8 3.2l4.4 4.4"/></svg>
+</button>
+
+<script>
+(function () {
+  'use strict';
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduce) document.documentElement.style.scrollBehavior = 'auto';
+
+  /* ---------- 1. 目录滚动高亮 ---------- */
+  var toc = document.getElementById('toc');
+  var links = toc ? [].slice.call(toc.querySelectorAll('a[href^="#"]')) : [];
+  var pairs = links.map(function (a) {
+    var el = document.getElementById(a.getAttribute('href').slice(1));
+    return el ? { a: a, el: el } : null;
+  }).filter(Boolean).sort(function (p, q) {
+    return (p.el.compareDocumentPosition(q.el) & Node.DOCUMENT_POSITION_FOLLOWING) ? -1 : 1;
+  });
+
+  var current = null;
+  function topbarH() {
+    var t = document.querySelector('.topbar');
+    return t ? t.getBoundingClientRect().height : 0;
+  }
+  function sync() {
+    if (!pairs.length) return;
+    var line = topbarH() + 28;
+    var pick = pairs[0];
+    for (var i = 0; i < pairs.length; i++) {
+      if (pairs[i].el.getBoundingClientRect().top <= line) pick = pairs[i];
+    }
+    if (pick === current) return;
+    if (current) current.a.removeAttribute('aria-current');
+    pick.a.setAttribute('aria-current', 'true');
+    current = pick;
+    if (window.innerWidth <= 1000 && pick.a.scrollIntoView) {
+      pick.a.scrollIntoView({ inline: 'nearest', block: 'nearest' });
+    }
+  }
+
+  /* ---------- 2. 问题清单筛选 ---------- */
+  function buildFilter() {
+    var target = null, rows = [];
+    [].slice.call(document.querySelectorAll('.tblwrap.stack')).forEach(function (w) {
+      var rs = [].slice.call(w.querySelectorAll('tr')).filter(function (r) {
+        return !r.querySelector('th') && r.querySelector('.chip');
+      });
+      if (rs.length > rows.length) { target = w; rows = rs; }
+    });
+    if (!target || rows.length < 4) return;
+    var wrap = target;
+    var defs = [
+      { key: 'all', label: '全部' },
+      { key: 'c-sev', label: 'severe' },
+      { key: 'c-med', label: 'medium' },
+      { key: 'c-mld', label: 'mild' }
+    ];
+    var bar = document.createElement('div');
+    bar.className = 'filterbar';
+    var tip = document.createElement('span');
+    tip.className = 'fl';
+    tip.textContent = '按级别筛选';
+    bar.appendChild(tip);
+
+    var note = document.createElement('div');
+    note.className = 'empty-note';
+    note.textContent = '该级别下没有条目。';
+
+    var btns = [];
+    defs.forEach(function (d) {
+      var n = d.key === 'all' ? rows.length : rows.filter(function (r) {
+        var c = r.querySelector('.chip');
+        return c && c.classList.contains(d.key);
+      }).length;
+      if (d.key !== 'all' && n === 0) return;
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'fbtn';
+      b.setAttribute('aria-pressed', d.key === 'all' ? 'true' : 'false');
+      b.dataset.key = d.key;
+      b.innerHTML = d.label + ' <span class="cnt">' + n + '</span>';
+      b.addEventListener('click', function () {
+        btns.forEach(function (o) { o.setAttribute('aria-pressed', 'false'); });
+        b.setAttribute('aria-pressed', 'true');
+        var show = 0;
+        rows.forEach(function (r) {
+          var c = r.querySelector('.chip');
+          var hit = d.key === 'all' || (c && c.classList.contains(d.key));
+          if (hit) r.removeAttribute('hidden'); else r.setAttribute('hidden', '');
+          if (hit) show++;
+        });
+        note.style.display = show ? 'none' : 'block';
+      });
+      btns.push(b);
+      bar.appendChild(b);
+    });
+    wrap.parentNode.insertBefore(bar, wrap);
+    wrap.parentNode.insertBefore(note, wrap);
+  }
+
+  /* ---------- 3. 回到顶部 ---------- */
+  var btn = document.getElementById('totop');
+  if (btn) {
+    btn.addEventListener('click', function () {
+      window.scrollTo({ top: 0, behavior: reduce ? 'auto' : 'smooth' });
+    });
+  }
+
+  /* ---------- 4. 打印 ---------- */
+  var pb = document.getElementById('printBtn');
+  if (pb) pb.addEventListener('click', function () { window.print(); });
+
+  /* ---------- 启动 ---------- */
+  var ticking = false;
+  window.addEventListener('scroll', function () {
+    if (ticking) return;
+    ticking = true;
+    window.requestAnimationFrame(function () {
+      sync();
+      if (btn) btn.classList.toggle('on', window.scrollY > 420);
+      ticking = false;
+    });
+  }, { passive: true });
+  window.addEventListener('resize', sync);
+  sync();
+  try { buildFilter(); } catch (e) { /* 筛选条失败不影响正文 */ }
+})();
+</script>
+</body>
+</html>

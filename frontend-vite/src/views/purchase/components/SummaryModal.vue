@@ -1,5 +1,15 @@
 <template>
-  <UiDialog :open="open" class="max-w-[1000px]" @update:open="$emit('close')">
+  <!--
+    汇总下单弹窗内会录入损耗率、逐行改数量，属于「有未保存内容」的编辑型弹窗，
+    误触遮罩/空白处关闭会直接丢失输入，故显式关闭遮罩点击关闭行为。
+    （UiDialog 默认允许遮罩点击关闭；此处仅对本弹窗覆盖，不影响其它弹窗。）
+  -->
+  <UiDialog
+    :open="open"
+    class="max-w-[1000px]"
+    :close-on-overlay-click="false"
+    @update:open="$emit('close')"
+  >
     <template #title>
       <div class="flex items-center gap-2"><FontAwesomeIcon icon="clipboard-list" class="text-primary-500" aria-hidden="true" /> 汇总下单</div>
     </template>
@@ -26,232 +36,61 @@
 
     <div class="py-4">
       <!-- Factory Tab -->
-      <template v-if="activeTab === 'factory' && factoryData">
-        <div
-          class="mb-3 p-3 rounded-lg flex justify-between items-center bg-gradient-to-r from-primary-400/10 to-purple-600/10"
-        >
-          <div>
-            <div class="font-semibold text-sm mb-1.5">
-              <FontAwesomeIcon icon="industry" class="text-primary-400" aria-hidden="true" /> 工厂内部采购订单汇总
-            </div>
-            <div class="text-xs text-text-secondary">
-              已选择 <strong class="text-primary-400">{{ factoryData.order_count || orderCount }}</strong> 个订单
-            </div>
-          </div>
-          <div class="flex gap-2 items-center">
-            <div v-if="!editMode" class="flex items-center gap-2">
-              <button
-                class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg border border-border bg-transparent text-text-secondary hover:text-primary-500 hover:border-primary-500 hover:bg-primary-50 transition-colors"
-                @click="$emit('toggleEditMode', true)"
-              >
-                <FontAwesomeIcon icon="edit" aria-hidden="true" /> 自定义编辑
-              </button>
-              <label class="text-xs text-text-secondary whitespace-nowrap">损耗率（千分之几）</label>
-              <input
-                type="number"
-                class="w-16 text-right py-1 px-1.5 text-[13px] border border-border rounded focus:outline-none focus-visible:outline-2 focus-visible:outline-primary-500 focus-visible:outline-offset-2 focus:border-primary-500"
-                :value="lossRate"
-                min="0"
-                max="1000"
-                step="any"
-                @input="onLossRateInput"
-              />
-            </div>
-            <template v-else>
-              <button
-                class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-warning-500 rounded-lg border-none transition-colors hover:bg-warning-600"
-                @click="$emit('toggleEditMode', false)"
-              >
-                <FontAwesomeIcon icon="times" aria-hidden="true" /> 取消编辑
-              </button>
-              <button
-                class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-success-500 rounded-lg border-none transition-colors hover:bg-success-600"
-                @click="$emit('saveEdits')"
-              >
-                <FontAwesomeIcon icon="save" aria-hidden="true" /> 保存修改
-              </button>
-            </template>
-          </div>
-        </div>
-
-        <div class="max-h-[calc(100vh-320px)] overflow-auto">
-          <table class="w-full border-collapse font-[SimSun,_宋体] text-[13px] bg-white">
-            <thead>
-              <tr class="bg-border-light">
-                <th class="w-[9%]">客户</th>
-                <th class="w-[15%]">产品名称</th>
-                <th class="w-[7%]">订单数量</th>
-                <th class="w-[7%]">备品数量</th>
-                <th class="w-[10%]">供应商</th>
-                <th class="w-[22%]">布料名称</th>
-                <th class="w-[15%]">规格型号</th>
-                <th class="w-[8%]">数量</th>
-                <th class="w-[7%]">单位</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="row in flatFactoryRows" :key="`${row.gi}-${row.si}-${row.fi}`">
-                <td v-if="row.isFirstFabricRow" :rowspan="row.groupFabricCount" class="font-bold">
-                  {{ row.group.customer_name }}
-                </td>
-                <td v-if="row.isFirstFabricRow" :rowspan="row.groupFabricCount">
-                  {{ row.group.product_name }}
-                </td>
-                <td v-if="row.isFirstFabricRow" :rowspan="row.groupFabricCount">
-                  {{ formatQty(getGroupOrderQty(row.group)) }}
-                </td>
-                <td v-if="row.isFirstFabricRow" :rowspan="row.groupFabricCount">
-                  {{ formatQty(calcSpareQuantity(getGroupOrderQty(row.group), lossRate)) }}
-                </td>
-                <td v-if="row.isFirstSupplier" :rowspan="row.supplierFabricCount">
-                  {{ row.supplier.supplier_name }}
-                </td>
-                <td>{{ row.fabric.fabric_name }}</td>
-                <td>{{ row.fabric.specification || '' }}</td>
-                <td>
-                  <template v-if="editMode">
-                    <input
-                      type="number"
-                      class="w-20 text-right py-1 px-1.5 text-[13px] inline-block border border-border rounded focus:outline-none focus-visible:outline-2 focus-visible:outline-primary-500 focus-visible:outline-offset-2 focus:border-primary-500"
-                      :value="row.fabric.quantity"
-                      min="0"
-                      @change="$emit('updateQty', row.gi, row.si, row.fi, ($event.target as HTMLInputElement).value)"
-                      @focus="($event.target as HTMLInputElement).select()"
-                    />
-                  </template>
-                  <template v-else>
-                    {{ formatQty(row.fabric.quantity) }}
-                  </template>
-                </td>
-                <td>{{ row.fabric.unit || '' }}</td>
-              </tr>
-              <tr class="bg-border-light font-bold">
-                <td colspan="3" class="text-center">合计</td>
-                <td>
-                  {{ formatQty(spareQuantityGrandTotal) }}
-                </td>
-                <td colspan="3" />
-                <td>
-                  {{ formatQty(factoryGrandTotal) }}
-                </td>
-                <td />
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <div class="mt-4 pt-3 border-t border-border flex justify-between items-center">
-          <div class="flex gap-2">
-            <button
-              class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-success-500 rounded-lg border-none transition-colors hover:bg-success-600"
-              @click="$emit('exportFactory')"
-            >
-              <FontAwesomeIcon icon="file-excel" aria-hidden="true" /> 导出 Excel
-            </button>
-          </div>
-          <div class="flex gap-2">
-            <button
-              class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg border border-border bg-transparent text-text-secondary hover:text-primary-500 hover:border-primary-500 hover:bg-primary-50 transition-colors"
-              @click="$emit('close')"
-            >
-              关闭
-            </button>
-            <button
-              class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-primary-500 rounded-lg border-none transition-colors hover:bg-primary-600"
-              @click="$emit('printFactory')"
-            >
-              <FontAwesomeIcon icon="print" aria-hidden="true" /> 打印预览
-            </button>
-          </div>
-        </div>
-      </template>
+      <SummaryFactoryTab
+        v-if="activeTab === 'factory' && factoryData"
+        :factory-data="factoryData"
+        :edit-mode="editMode"
+        :loss-rate="lossRate"
+        :order-count="orderCount"
+        :loss-rate-save-state="lossRateSaveState"
+        :loss-rate-mixed="lossRateMixed"
+        @close="$emit('close')"
+        @toggle-edit-mode="$emit('toggleEditMode', $event)"
+        @save-edits="$emit('saveEdits')"
+        @update-qty="(gi, si, fi, value) => $emit('updateQty', gi, si, fi, value)"
+        @loss-rate-input="applyLossRateDebounced"
+        @export-factory="$emit('exportFactory')"
+        @print-factory="$emit('printFactory')"
+      />
 
       <!-- Supplier Tab -->
-      <template v-if="activeTab === 'supplier' && supplierData">
-        <div
-          class="mb-3 p-3 rounded-lg flex justify-between items-center bg-gradient-to-r from-rose/10 to-rose-deep/10"
-        >
-          <div>
-            <div class="font-semibold text-sm mb-1.5"><FontAwesomeIcon icon="truck" class="text-rose" aria-hidden="true" /> 供应商采购订单汇总</div>
-            <div class="text-xs text-text-secondary">
-              已选择 <strong class="text-rose">{{ supplierData.order_count || orderCount }}</strong> 个订单，涵盖
-              <strong class="text-rose">{{ supplierGroups.length }}</strong> 家供应商，共
-              <strong class="text-rose">{{ (supplierData.materials || []).length }}</strong> 种物料
-            </div>
-          </div>
-        </div>
-
-        <div class="max-h-[calc(100vh-320px)] overflow-auto">
-          <table class="w-full border-collapse font-[SimSun,_宋体] text-[13px] bg-white">
-            <thead>
-              <tr class="bg-border-light">
-                <th class="w-[12%]">供应商</th>
-                <th class="w-[30%]">物料名称</th>
-                <th class="w-[28%]">规格型号</th>
-                <th class="w-[30%]">数量</th>
-              </tr>
-            </thead>
-            <tbody>
-              <template v-for="(sg, sgi) in supplierGroups" :key="sgi">
-                <tr v-for="(m, mi) in sg.materials" :key="mi">
-                  <td v-if="mi === 0" :rowspan="sg.materials.length" class="font-bold">
-                    {{ sg.supplierName }}
-                  </td>
-                  <td>{{ m.material_name }}</td>
-                  <td>{{ m.specification || '' }}</td>
-                  <td>{{ formatQty(m.total_quantity) }} {{ m.unit || '' }}</td>
-                </tr>
-              </template>
-              <tr class="bg-border-light font-bold">
-                <td class="text-center">合计</td>
-                <td />
-                <td />
-                <td>
-                  {{ formatQty(supplierGrandTotal) }}
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <div class="mt-4 pt-3 border-t border-border flex justify-between items-center">
-          <div class="flex gap-2">
-            <button
-              class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-success-500 rounded-lg border-none transition-colors hover:bg-success-600"
-              @click="$emit('exportSupplier')"
-            >
-              <FontAwesomeIcon icon="file-archive" aria-hidden="true" /> 导出汇总
-            </button>
-          </div>
-          <div class="flex gap-2">
-            <button
-              class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg border border-border bg-transparent text-text-secondary hover:text-primary-500 hover:border-primary-500 hover:bg-primary-50 transition-colors"
-              @click="$emit('close')"
-            >
-              关闭
-            </button>
-            <button
-              class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-primary-500 rounded-lg border-none transition-colors hover:bg-primary-600"
-              @click="$emit('printSupplier')"
-            >
-              <FontAwesomeIcon icon="print" aria-hidden="true" /> 打印预览
-            </button>
-          </div>
-        </div>
-      </template>
+      <SummarySupplierTab
+        v-if="activeTab === 'supplier' && supplierData"
+        :supplier-data="supplierData"
+        :order-count="orderCount"
+        :supplier-groups="supplierGroups"
+        @close="$emit('close')"
+        @export-supplier="$emit('exportSupplier')"
+        @print-supplier="$emit('printSupplier')"
+      />
     </div>
   </UiDialog>
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+/**
+ * SummaryModal.vue — 汇总下单弹窗外壳（页签切换 + 事件转发）。
+ *
+ * 两个页签各自独立成组件（与 SummarySupplierTab.vue 对称）：
+ * - `SummaryFactoryTab.vue` — 工厂内部订单（含损耗率输入、逐 SKU 分行、编辑态数量输入）
+ * - `SummarySupplierTab.vue` — 供应商采购订单
+ *
+ * 拆分为的是把本文件压回质量门禁的「单 SFC ≤400 行」阈值。**对外契约零改动**：
+ * props / emits 与拆分前逐字一致，PurchaseView.vue 无需任何改动；子组件事件在此
+ * 原样转发，行为与视觉不变（表格外观由子组件各自的 `summary-tables.scss` 提供）。
+ *
+ * ⚠️ 损耗率防抖（300ms）**留在本组件**，不下放到 SummaryFactoryTab：工厂页签位于
+ * `v-if` 之下，用户在防抖窗口内切页签会让该子组件卸载，若定时器在子组件内则
+ * `emit` 无监听者、刚输入的损耗率被静默丢弃。本组件不随页签切换卸载，行为与拆分前一致。
+ */
+import { ref } from 'vue'
 import { useDebounceFn } from '@vueuse/core'
 import UiDialog from '@/components/ui/UiDialog.vue'
-import { fmtQty as formatQty } from '@/utils/formatQty'
-import { calcSpareQuantity, getGroupOrderQty } from '../composables/useSummaryModal'
-import type { FactorySummaryData, SupplierSummaryData, MaterialItem, FactoryGroup, SupplierGroup, FabricItem } from '../composables/useSummaryModal'
+import SummaryFactoryTab from './SummaryFactoryTab.vue'
+import SummarySupplierTab from './SummarySupplierTab.vue'
+import type { FactorySummaryData, SupplierSummaryData, MaterialItem } from '../composables/useSummaryModal'
 
-const props = defineProps<{
+defineProps<{
   open: boolean
   factoryData: FactorySummaryData | null
   supplierData: SupplierSummaryData | null
@@ -259,6 +98,10 @@ const props = defineProps<{
   lossRate: number
   orderCount: number
   supplierGroups: { supplierName: string; materials: MaterialItem[] }[]
+  /** 损耗率自动落库的可见反馈状态（缺省视为 idle；由 useSummaryModal 提供） */
+  lossRateSaveState?: 'idle' | 'saving' | 'saved' | 'error'
+  /** 各单损耗率不一致（缺省视为 false；由 useSummaryModal 提供）→ 输入框旁提示 */
+  lossRateMixed?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -275,72 +118,11 @@ const emit = defineEmits<{
 
 const activeTab = ref<'factory' | 'supplier'>('factory')
 
-// P1-4: 防抖 300ms，避免损耗率输入每次按键触发全量 groups×suppliers×fabrics×materials 重算
+/**
+ * P1-4: 损耗率输入防抖 300ms，避免每次按键触发全量 groups×suppliers×fabrics×materials 重算。
+ * 定时器归属本组件（弹窗外壳）而非页签子组件，确保防抖窗口内切换页签不丢输入。
+ */
 const applyLossRateDebounced = useDebounceFn((v: number) => emit('applyLossRate', v), 300)
-
-function onLossRateInput(e: Event) {
-  const val = parseFloat((e.target as HTMLInputElement).value)
-  if (isNaN(val) || val < 0) {
-    applyLossRateDebounced(0)
-    return
-  }
-  applyLossRateDebounced(Math.min(val, 1000))
-}
-
-const factoryGrandTotal = computed(() => {
-  let t = 0
-  props.factoryData?.groups?.forEach((g) =>
-    g.suppliers?.forEach((s) => s.fabrics?.forEach((f) => (t += parseFloat(String(f.quantity)) || 0))),
-  )
-  return t
-})
-
-// 备品数量合计 = 各产品备品数量之和（每个产品均按 ceil 后的值累加，与列展示口径一致）
-const spareQuantityGrandTotal = computed(() => {
-  let t = 0
-  props.factoryData?.groups?.forEach((g) => {
-    t += calcSpareQuantity(getGroupOrderQty(g), props.lossRate)
-  })
-  return t
-})
-
-const supplierGrandTotal = computed(() => {
-  let t = 0
-  props.supplierGroups.forEach((g) => g.materials.forEach((m) => (t += parseFloat(String(m.total_quantity)) || 0)))
-  return t
-})
-
-// P1-7: 预计算 flatFactoryRows，避免模板内每行调用 isFirstFabricRow/getGroupFabricCount
-const flatFactoryRows = computed(() => {
-  const rows: {
-    gi: number; si: number; fi: number
-    group: FactoryGroup
-    supplier: SupplierGroup
-    fabric: FabricItem
-    isFirstFabricRow: boolean
-    groupFabricCount: number
-    isFirstSupplier: boolean
-    supplierFabricCount: number
-  }[] = []
-  const groups = props.factoryData?.groups || []
-  groups.forEach((group, gi) => {
-    const suppliers = group.suppliers || []
-    const groupFabricCount = suppliers.reduce((s, sup) => s + (sup.fabrics?.length || 0), 0)
-    suppliers.forEach((supplier, si) => {
-      const fabrics = supplier.fabrics || []
-      fabrics.forEach((fabric, fi) => {
-        rows.push({
-          gi, si, fi, group, supplier, fabric,
-          isFirstFabricRow: fi === 0 && si === 0,
-          groupFabricCount,
-          isFirstSupplier: fi === 0,
-          supplierFabricCount: fabrics.length,
-        })
-      })
-    })
-  })
-  return rows
-})
 </script>
 
 <style scoped>
@@ -384,16 +166,5 @@ const flatFactoryRows = computed(() => {
   background: linear-gradient(135deg, var(--color-danger-50), var(--color-danger-100));
   color: var(--color-danger-700);
   box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 2px 8px rgba(234, 84, 85, 0.2);
-}
-
-table th,
-table td {
-  border: 1px solid var(--color-text);
-  padding: 8px;
-  vertical-align: middle;
-  text-align: center;
-}
-table th {
-  font-weight: bold;
 }
 </style>

@@ -7,7 +7,7 @@
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
-from sqlalchemy.exc import DisconnectionError, IntegrityError, OperationalError, SQLAlchemyError
+from sqlalchemy.exc import DisconnectionError, OperationalError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.api.v1.endpoints.purchase_center.schemas import (
@@ -45,14 +45,18 @@ router = APIRouter()
 
 
 async def _invalidate_orders_cache() -> None:
-    """失效采购订单列表缓存（L1 + L2）。
+    """失效采购订单列表 + 湖北订单（beile）列表/计数缓存（L1 + L2）。
 
-    仅失效 get_purchase_orders 的缓存（key_prefix='orders'，key 以 'p' 开头）。
-    不影响 get_unprocessed_orders 的缓存（key_prefix='orders:unprocessed'），
-    因为未处理列表只与客户订单/StockIn 状态相关，采购订单写操作无需让其失效。
+    - 失效 get_purchase_orders 的缓存（key_prefix='orders'，key 以 'p' 开头）。
+    - 失效湖北订单页（/beile-order）的列表与计数缓存（`orders:beile:*`）：
+      采购侧「下单完成 / 批量完成 / 汇总保存 / 增删改」后 beile 页需**写入即失效**，
+      否则会读到最长 60s TTL 的旧数量与旧门控状态（PRD P1-1 / AC-10）。
+    - 不影响 get_unprocessed_orders 的缓存（key_prefix='orders:unprocessed'），
+      因为未处理列表只与客户订单/StockIn 状态相关。
     """
     try:
         await invalidate_cache('orders:p*')
+        await invalidate_cache('orders:beile:*')
     except (OSError, ValueError):
         logger.warning('缓存失效失败(order_routes)', exc_info=True)
 
@@ -113,9 +117,9 @@ async def api_one_click_generate_order(
     接收可选的 X-Idempotency-Key 请求头。同键的请求在 10 分钟内会复用上次结果，
     避免前端重试 / 网络重发导致的重复创建。
 
-    唯一约束 uq_po_pending_dedup 是数据库层的最后防线。若极小概率的并发场景
-    触发了该约束，会在 commit 时抛出 IntegrityError；此处手动管理事务
-    以便捕获并以幂等方式回查已有 pending 单返回。
+    唯一约束 uq_po_pending_dedup 是数据库层的最后防线。并发命中该约束时
+    由服务层用 savepoint 回滚本段写入并回查已有 pending 单，以幂等方式返回。
+    事务边界遵守 docs/TRANSACTION_BOUNDARY_GUIDE.md：端点层不做 commit/rollback。
 
     Args:
         data: 一键生成请求，包含复合 ID 列表。
@@ -130,50 +134,20 @@ async def api_one_click_generate_order(
         HTTPException 400: 业务校验失败。
         HTTPException 500: 生成采购订单失败。
     """
-    try:
+    def _value_error_to_http(exc: Exception) -> HTTPException:
+        return HTTPException(status_code=400, detail=str(exc))
+
+    def _error_to_http(exc: Exception) -> HTTPException:
+        logger.exception('一键生成采购订单失败')
+        return HTTPException(status_code=500, detail='生成采购订单失败，请稍后重试')
+
+    async with db_transaction(db, error_map={
+        ValueError: _value_error_to_http,
+        (SQLAlchemyError, RuntimeError): _error_to_http,
+    }):
         result = await svc.generate_purchase_orders_from_customer_orders(
             db, data.composite_ids, idempotency_key=x_idempotency_key or '',
         )
-        await db.commit()
-    except IntegrityError as e:
-        msg = str(getattr(e, 'orig', e) or '')
-        if 'uq_po_pending_dedup' in msg:
-            # 命中幂等唯一约束，回滚后回查现有 pending 单返回
-            logger.warning(
-                'api_one_click_generate_order: 命中 uq_po_pending_dedup，回滚后回查现有 pending 单',
-                exc_info=True,
-            )
-            try:
-                await db.rollback()
-            except Exception:  # defensive: rollback 失败不应掩盖原幂等处理
-                logger.warning("api_one_click_generate_order: rollback 失败（幂等路径）", exc_info=True)
-            existing = await svc.fetch_existing_pending_for_composite_ids(db, data.composite_ids)
-            await _invalidate_orders_cache()
-            return success_response(
-                message=f'已存在 {len(existing)} 个对应采购单（并发幂等）',
-                created_count=len(existing),
-                orders=existing,
-                idempotent=True,
-            )
-        try:
-            await db.rollback()
-        except Exception:  # defensive: rollback 失败不应掩盖原异常
-            logger.warning("api_one_click_generate_order: rollback 失败（IntegrityError 路径）", exc_info=True)
-        logger.exception('一键生成采购订单失败 (IntegrityError)')
-        raise HTTPException(status_code=500, detail='生成采购订单失败，请稍后重试') from e
-    except ValueError as e:
-        try:
-            await db.rollback()
-        except Exception:  # defensive: rollback 失败不应掩盖原异常
-            logger.warning("api_one_click_generate_order: rollback 失败（ValueError 路径）", exc_info=True)
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    except (SQLAlchemyError, RuntimeError) as e:
-        try:
-            await db.rollback()
-        except Exception:  # defensive: rollback 失败不应掩盖原异常
-            logger.warning("api_one_click_generate_order: rollback 失败（SQLAlchemyError 路径）", exc_info=True)
-        logger.exception('一键生成采购订单失败')
-        raise HTTPException(status_code=500, detail='生成采购订单失败，请稍后重试') from e
     await _invalidate_orders_cache()
     # 一键生成会将客户订单状态从'待备货'改为'已备货'，需同时失效未处理列表缓存
     await _invalidate_unprocessed_cache()
@@ -447,7 +421,9 @@ async def api_complete_purchase_order(
     """
     try:
         async with db_transaction(db):
-            result = await svc.complete_purchase_order(db, data.order_id, _current_user.username)
+            result = await svc.complete_purchase_order(
+                db, data.order_id, _current_user.username, data.spare_rate,
+            )
     except HTTPException as e:
         if e.status_code == 400:
             raise HTTPException(status_code=404, detail=e.detail) from e
@@ -480,7 +456,9 @@ async def api_batch_complete_purchase_orders(
     """
     try:
         async with db_transaction(db):
-            result = await svc.batch_complete_purchase_orders(db, data.ids, _current_user.username)
+            result = await svc.batch_complete_purchase_orders(
+                db, data.ids, _current_user.username, data.spare_rate,
+            )
         await _invalidate_orders_cache()
         return success_response(**result)
     except RuntimeError as e:
@@ -623,11 +601,34 @@ async def api_save_factory_summary_edits(
         dict[str, Any]: 包含 success 标志和保存结果的字典。
 
     Raises:
+        HTTPException 422: 请求无任何可落库内容（既无编辑项，也无「损耗率 + 目标采购单」组合）。
         HTTPException 500: 操作失败。
     """
+    # 契约护栏（FIX-5 收紧）：
+    # `edits` 放宽为可空是为支持「仅改损耗率也要落库」（PRD Q1）——该路径前端恒发
+    # edits=[] + spare_rate + order_ids（见 useSummaryModal.sendLossRate）。除此之外：
+    #   - 仅 `{order_ids:[...]}`（有目标无内容）：无 edit 也无 rate，不会产生任何写入；
+    #   - 仅 `{spare_rate:...}`（无目标订单）：后端无从定位要写入的采购单；
+    # 两者都是「无可保存内容」，必须 422 而非静默 200（否则客户端以为已落库）。
+    # 判据：存在可落库内容 ⇔ edits 非空，或（order_ids 非空 且 spare_rate 非 None）。
+    #
+    # ⚠️ 「edits 非空」必须理解为**存在真正可落库的编辑项**，而非列表长度 > 0：
+    #   服务层对每个条目有 `if not item_ids or new_quantity is None: continue` 的跳过逻辑
+    #   （purchase_order_crud.apply_factory_summary_edits），因此 `edits=[{}]`、
+    #   `edits=[{'item_ids': []}]`、`edits=[{'quantity': None}]` 都会**零写入却返回 200**，
+    #   正是本护栏要消灭的「静默成功」。故此处按服务层同一判据过滤后再判空。
+    effective_edits = [e for e in data.edits if e.item_ids and e.quantity is not None]
+    has_content = bool(effective_edits) or (bool(data.order_ids) and data.spare_rate is not None)
+    if not has_content:
+        raise HTTPException(status_code=422, detail='无可保存内容')
     try:
         async with db_transaction(db):
-            result = await svc.save_factory_summary_edits(db, [e.model_dump() for e in data.edits])
+            result = await svc.save_factory_summary_edits(
+                db, [e.model_dump() for e in data.edits], _current_user.username,
+                data.spare_rate, data.order_ids,
+            )
+        # 保存会写损耗率/备品（影响 beile 页数量与门控），写入即失效
+        await _invalidate_orders_cache()
         return success_response(**result)
     except RuntimeError as e:
         logger.exception('保存工厂订单编辑失败')

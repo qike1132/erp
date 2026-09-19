@@ -4,11 +4,10 @@
  * 承载暂存条目编辑弹窗与可用备货量查询。逻辑原样搬移。
  */
 import { ref, type Ref } from 'vue'
-import { get } from '@/api/request'
+import { auxApi } from '@/api'
+import { showToast } from '@/composables/useToast'
+import { QUANTITY_RANGE_MESSAGE, isQuantityOutOfRange } from './quantityRange'
 import type { StagedItem, AvailableStockinItem } from './types'
-
-/** /aux/available-stockins 响应（兼容数组与 { stockins } / { items } 包裹两种结构） */
-type AvailableStockinsResponse = { stockins?: AvailableStockinItem[]; items?: AvailableStockinItem[] } | AvailableStockinItem[]
 
 export function useStagedEdit(stagedItems: Ref<StagedItem[]>) {
   const editStagedVisible = ref(false)
@@ -24,12 +23,9 @@ export function useStagedEdit(stagedItems: Ref<StagedItem[]>) {
     editStagedData.value = data
     editStagedVisible.value = true
     if (data.type === 'order' && data.productId && data.customer) {
-      get<AvailableStockinsResponse>('/aux/available-stockins', {
-        product_id: data.productId,
-        customer: data.customer,
-      })
+      auxApi.availableStockins({ product_id: data.productId, customer: data.customer })
         .then((res) => {
-          const items: AvailableStockinItem[] = Array.isArray(res) ? res : (res.stockins ?? res.items ?? [])
+          const items: AvailableStockinItem[] = Array.isArray(res) ? res : []
           editAvailableStock.value = items.reduce(
             (s: number, i: AvailableStockinItem) => s + (i.available ?? i.quantity - (i.deducted || 0)),
             0,
@@ -41,6 +37,12 @@ export function useStagedEdit(stagedItems: Ref<StagedItem[]>) {
     }
   }
   function saveEditStaged() {
+    // 提交前最终校验：输入框的实时标红可能被用户绕过（回车/直接点保存），
+    // 这里再挡一次，避免越界数量进入暂存区。
+    if (editStagedData.value && isQuantityOutOfRange(editStagedData.value.quantity)) {
+      showToast(QUANTITY_RANGE_MESSAGE, 'warning')
+      return
+    }
     if (editStagedIdx.value >= 0 && editStagedData.value) {
       if (editStagedData.value.deductQuantity > 0) editStagedData.value.deductStock = true
       stagedItems.value[editStagedIdx.value] = { ...editStagedData.value }

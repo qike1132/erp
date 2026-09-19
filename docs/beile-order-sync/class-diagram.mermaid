@@ -1,0 +1,64 @@
+classDiagram
+    class PurchaseOrder {
+        +int id
+        +str order_no
+        +str customer_name
+        +str status
+        +str source_order_ids
+        +str product_name
+        +float product_quantity
+        +float spare_quantity
+        +float spare_rate
+        +datetime completed_at
+        +to_dict() dict
+    }
+    class PurchaseOrderItem {
+        +int id
+        +int order_id
+        +str material_name
+        +float quantity
+    }
+    class Order {
+        +int id
+        +str order_no
+        +str customer
+        +int quantity
+        +datetime confirmed_at
+        +items list
+    }
+    class StockIn {
+        +int id
+        +str stockin_no
+        +str customer
+        +int product_id
+        +int quantity
+        +confirmed_at
+    }
+    class SpareUtil {
+        +normalize_spare_rate(rate) float_or_None
+        +calc_spare_quantity(qty, rate) int
+    }
+    class BeileService {
+        +get_beile_orders_with_stockins(db) dict
+        +get_beile_unconfirmed_count(db, factory) int
+        +confirm_beile_order(db, order_id, user) dict
+        +confirm_beile_stockin(db, stockin_id, user) dict
+        -_fetch_completed_po_maps(db) tuple
+        -_build_beile_order_record(order, factory, pos) dict
+        -_build_beile_stockin_record(stockin, factory, pos) dict
+    }
+    class PurchaseCrud {
+        +complete_purchase_order(db, order_id, username, spare_rate) dict
+        +batch_complete_purchase_orders(db, ids, username, spare_rate) dict
+        +save_factory_summary_edits(db, data, username, spare_rate) dict
+    }
+
+    PurchaseOrder "1" --> "*" PurchaseOrderItem : items
+    Order "1" <.. "*" PurchaseOrder : source_order_ids(JSON) 近似关联
+    StockIn ..> PurchaseOrder : (customer, product_name) 近似匹配
+    BeileService ..> Order : 读取
+    BeileService ..> StockIn : 读取
+    BeileService ..> PurchaseOrder : completed 映射
+    BeileService ..> SpareUtil : 使用公式
+    PurchaseCrud ..> PurchaseOrder : 写 spare_rate/spare_quantity
+    PurchaseCrud ..> SpareUtil : 使用公式

@@ -774,6 +774,62 @@ class TestPurchaseCenterEndpoints:
         assert resp.status_code in (400, 422)
 
     @pytest.mark.asyncio
+    async def test_factory_summary_save_empty_edits_with_spare_rate_ok(self, client):
+        """契约配对：`edits` 放宽为可空后，「仅改损耗率」必须仍可保存。
+
+        与上一条 `test_factory_summary_save_empty` 共同锁定放宽后的边界：
+        - 完全空 `{}`  → 422（无可保存内容，护栏拒绝）；
+        - `edits=[] + spare_rate + order_ids` → 200（新需求合法路径，不得被护栏误伤）。
+        """
+        with patch(
+            'fastapi_app.services.purchase_center_service.save_factory_summary_edits',
+            new_callable=AsyncMock,
+            return_value={'updated_count': 0, 'spare_updated_count': 1},
+        ) as mock_svc:
+            resp = await client.post(
+                "/api/v1/purchase-center/orders/factory-summary/save",
+                json={'edits': [], 'spare_rate': 50, 'order_ids': [1]},
+            )
+        assert resp.status_code == 200
+        assert resp.json().get('success') is True
+        mock_svc.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_factory_summary_save_no_content_payloads_422(self, client):
+        """FIX-5 收紧：无任何可落库内容的 payload 必须 422（不得静默 200）。
+
+        - `{order_ids:[...]}`（有目标无内容）：无 edit 也无 rate → 422；
+        - `{spare_rate:...}`（无目标订单）：后端无从定位采购单 → 422；
+        - `{edits:[...]}`（仅布料改动）：正常内容 → 200。
+        与 `test_factory_summary_save_empty_edits_with_spare_rate_ok` 共同锁定收紧后的边界。
+        """
+        with patch(
+            'fastapi_app.services.purchase_center_service.save_factory_summary_edits',
+            new_callable=AsyncMock,
+            return_value={'updated_count': 1, 'spare_updated_count': 0},
+        ) as mock_svc:
+            # 有目标无内容 → 422
+            r1 = await client.post(
+                "/api/v1/purchase-center/orders/factory-summary/save",
+                json={'order_ids': [1]},
+            )
+            # 无目标订单 → 422
+            r2 = await client.post(
+                "/api/v1/purchase-center/orders/factory-summary/save",
+                json={'spare_rate': 50},
+            )
+            # 仅布料改动（正常内容）→ 200
+            r3 = await client.post(
+                "/api/v1/purchase-center/orders/factory-summary/save",
+                json={'edits': [{'item_ids': [1], 'quantity': 12}]},
+            )
+        assert r1.status_code == 422, f'有目标无内容应 422，实测 {r1.status_code}'
+        assert r2.status_code == 422, f'无目标订单应 422，实测 {r2.status_code}'
+        assert r3.status_code == 200, f'仅布料改动应 200，实测 {r3.status_code}'
+        # 两个被拒请求不得触达 service；仅正常内容那一次调用
+        mock_svc.assert_awaited_once()
+
+    @pytest.mark.asyncio
     async def test_supplier_summary_empty(self, client):
         resp = await client.post("/api/v1/purchase-center/orders/supplier-summary", json={})
         assert resp.status_code in (400, 422)

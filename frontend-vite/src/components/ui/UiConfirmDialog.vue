@@ -1,5 +1,12 @@
 <template>
-  <UiDialog :open="open" max-width-class="max-w-[420px]" :close-on-overlay-click="closeOnOverlayClick" @update:open="onOpenUpdate">
+  <UiDialog
+    :open="open"
+    :sr-title="text"
+    :description="sub || text"
+    max-width-class="max-w-[420px]"
+    :close-on-overlay-click="closeOnOverlayClick"
+    @update:open="onOpenUpdate"
+  >
     <div class="p-8">
       <div :class="['w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl', iconBgClass]">
         <FontAwesomeIcon :icon="iconName" aria-hidden="true" />
@@ -12,8 +19,8 @@
       </div>
     </div>
     <template #footer>
-      <UiButton variant="outline" @click="$emit('cancel')"> 取消 </UiButton>
-      <UiButton :variant="confirmVariant" @click="$emit('confirm')"> 确认 </UiButton>
+      <UiButton variant="outline" :aria-label="cancelLabel" @click="$emit('cancel')"> 取消 </UiButton>
+      <UiButton :variant="confirmVariant" :aria-label="confirmLabel" @click="$emit('confirm')"> 确认 </UiButton>
     </template>
   </UiDialog>
 </template>
@@ -56,4 +63,12 @@ const iconBgClass = computed(() =>
 const iconName = computed(() => (props.type === 'danger' ? 'trash-alt' : 'triangle-exclamation'))
 
 const confirmVariant = computed(() => (props.type === 'danger' ? 'danger' : 'primary'))
+
+/**
+ * 两个按钮的可访问名必须互不相同并带上下文语境。
+ * 可见文字「取消 / 确认」本身够用，但一旦被上层统一覆盖就会退化成同名按钮，
+ * 读屏器用户将无法区分——这里显式带上问句，保证任何情况下都可辨认。
+ */
+const cancelLabel = computed(() => `取消，${props.text}`)
+const confirmLabel = computed(() => `确认，${props.text}`)
 </script>

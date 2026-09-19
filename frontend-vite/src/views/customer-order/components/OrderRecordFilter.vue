@@ -19,28 +19,28 @@
   <div v-if="showFilter" class="co-filter-panel">
     <div class="co-filter-row">
       <div class="co-filter-field">
-        <label class="co-label"><FontAwesomeIcon icon="user" aria-hidden="true" /> 客户</label>
-        <UiSelect :model-value="filterCustomer" placeholder="全部" :options="customerOptions" style="width: 100%" @update:model-value="$emit('update:filterCustomer', $event)" />
+        <label class="co-label" for="co-filter-customer"><FontAwesomeIcon icon="user" aria-hidden="true" /> 客户</label>
+        <UiSelect id="co-filter-customer" label="按客户筛选" :model-value="filterCustomer" placeholder="全部" :options="customerOptions" style="width: 100%" @update:model-value="$emit('update:filterCustomer', $event)" />
       </div>
       <div class="co-filter-field">
-        <label class="co-label"><FontAwesomeIcon icon="tag" aria-hidden="true" /> 订单类型</label>
-        <UiSelect :model-value="filterOrderType" placeholder="全部" :options="filterOrderTypeOptions" style="width: 100%" @update:model-value="$emit('update:filterOrderType', $event)" />
+        <label class="co-label" for="co-filter-order-type"><FontAwesomeIcon icon="tag" aria-hidden="true" /> 订单类型</label>
+        <UiSelect id="co-filter-order-type" label="按订单类型筛选" :model-value="filterOrderType" placeholder="全部" :options="filterOrderTypeOptions" style="width: 100%" @update:model-value="$emit('update:filterOrderType', $event)" />
       </div>
       <div v-if="recordType === 'order'" class="co-filter-field">
-        <label class="co-label"><FontAwesomeIcon icon="info-circle" aria-hidden="true" /> 状态</label>
-        <UiSelect :model-value="filterStatus" placeholder="全部" :options="statusOptions" style="width: 100%" @update:model-value="$emit('update:filterStatus', $event)" />
+        <label class="co-label" for="co-filter-status"><FontAwesomeIcon icon="info-circle" aria-hidden="true" /> 状态</label>
+        <UiSelect id="co-filter-status" label="按状态筛选" :model-value="filterStatus" placeholder="全部" :options="statusOptions" style="width: 100%" @update:model-value="$emit('update:filterStatus', $event)" />
       </div>
       <div v-if="recordType === 'order'" class="co-filter-field">
-        <label class="co-label"><FontAwesomeIcon icon="industry" aria-hidden="true" /> 工厂</label>
-        <UiSelect :model-value="filterFactory" placeholder="全部" :options="factoryOptions" :disabled="factoryDisabled" style="width: 100%" @update:model-value="$emit('update:filterFactory', $event)" />
+        <label class="co-label" for="co-filter-factory"><FontAwesomeIcon icon="industry" aria-hidden="true" /> 工厂</label>
+        <UiSelect id="co-filter-factory" label="按工厂筛选" :model-value="filterFactory" placeholder="全部" :options="factoryOptions" :disabled="factoryDisabled" style="width: 100%" @update:model-value="$emit('update:filterFactory', $event)" />
       </div>
       <div class="co-filter-field">
-        <label class="co-label"><FontAwesomeIcon icon="calendar-alt" aria-hidden="true" /> 开始日期</label>
-        <UiDatePicker :model-value="filterStart" style="width: 100%" @update:model-value="$emit('update:filterStart', $event)" />
+        <label class="co-label" for="co-filter-start"><FontAwesomeIcon icon="calendar-alt" aria-hidden="true" /> 开始日期</label>
+        <UiDatePicker id="co-filter-start" label="开始日期" :model-value="filterStart" style="width: 100%" @update:model-value="$emit('update:filterStart', $event)" />
       </div>
       <div class="co-filter-field">
-        <label class="co-label"><FontAwesomeIcon icon="calendar-alt" aria-hidden="true" /> 结束日期</label>
-        <UiDatePicker :model-value="filterEnd" style="width: 100%" @update:model-value="$emit('update:filterEnd', $event)" />
+        <label class="co-label" for="co-filter-end"><FontAwesomeIcon icon="calendar-alt" aria-hidden="true" /> 结束日期</label>
+        <UiDatePicker id="co-filter-end" label="结束日期" :model-value="filterEnd" style="width: 100%" @update:model-value="$emit('update:filterEnd', $event)" />
       </div>
       <div class="co-filter-field co-filter-action">
         <UiButton variant="primary" size="sm" @click="$emit('search')">

@@ -156,11 +156,36 @@ async def _fetch_orders_page(db: AsyncSession, query, conditions: list,
     )
     return result.scalars().unique().all()
 
-def _serialize_orders(orders: list, deduct_map: dict) -> list:
+async def _batch_item_factories(db: AsyncSession, order_ids: list[int]) -> dict[int, list[str]]:
+    """批量查询每个订单涉及的 SKU 工厂名（单次 JOIN 聚合）。
+
+    `factories` 字段需要 item → product.factory 这一跳，而 `selectinload(Order.items)`
+    **不会**连带加载 `OrderItem.product`；异步会话里访问未加载的关系会抛 MissingGreenlet，
+    使整个订单列表接口 500。这里用一次 JOIN 把结果预取出来交给序列化器。
+    """
+    if not order_ids:
+        return {}
+    result = await db.execute(
+        select(OrderItem.order_id, Product.factory)
+        .join(Product, OrderItem.product_id == Product.id)
+        .where(OrderItem.order_id.in_(order_ids), Product.factory.isnot(None))
+        .distinct()
+    )
+    grouped: dict[int, set[str]] = {}
+    for order_id, factory in result.all():
+        if factory:
+            grouped.setdefault(order_id, set()).add(factory)
+    return {oid: sorted(names) for oid, names in grouped.items()}
+
+def _serialize_orders(orders: list, deduct_map: dict, factory_map: dict | None = None) -> list:
     """序列化订单列表。"""
+    factories = factory_map or {}
     return [
         OrderSerializer.serialize(
-            order, OrderSerializer.LIST_CONFIG, deduct_quantity=deduct_map.get(order.id, 0)
+            order,
+            OrderSerializer.LIST_CONFIG,
+            deduct_quantity=deduct_map.get(order.id, 0),
+            item_factories=factories.get(order.id, []),
         )
         for order in orders
     ]
@@ -210,8 +235,9 @@ async def get_orders(db: AsyncSession, page: int = 1, per_page: int = 50,
     # 单次 SQL 聚合获取所有订单的抵扣数量，替代 selectinload + Python 遍历
     order_ids = [o.id for o in orders]
     deduct_map = await _batch_deduct_quantities(db, order_ids)
+    factory_map = await _batch_item_factories(db, order_ids)
 
-    orders_data = _serialize_orders(orders, deduct_map)
+    orders_data = _serialize_orders(orders, deduct_map, factory_map)
     return {'items': orders_data, 'total': total, 'page': page, 'per_page': per_page}
 
 async def get_my_approvals(db: AsyncSession, current_user: User) -> list[dict]:

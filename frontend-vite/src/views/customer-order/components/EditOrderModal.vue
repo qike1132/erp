@@ -78,16 +78,32 @@
         <div class="oe-section-title"><FontAwesomeIcon icon="pen" aria-hidden="true" /> 编辑内容</div>
         <div class="oe-edit-grid">
           <div class="oe-edit-cell">
-            <label class="oe-edit-label">数量</label>
+            <label class="oe-edit-label" for="oe-quantity">数量</label>
             <div class="oe-edit-control">
-              <button class="oe-stepper-btn" aria-label="减少" @click="editForm.quantity = Math.max(1, editForm.quantity - 1)">
+              <button class="oe-stepper-btn" aria-label="减少数量" @click="editForm.quantity = Math.max(QUANTITY_MIN, editForm.quantity - 1)">
                 <FontAwesomeIcon icon="minus" aria-hidden="true" />
               </button>
-              <input v-model.number="editForm.quantity" type="number" class="oe-stepper-input" min="1" step="1" autocomplete="off" aria-label="数值输入" />
-              <button class="oe-stepper-btn" aria-label="增加" @click="editForm.quantity = editForm.quantity + 1">
+              <input
+                id="oe-quantity"
+                v-model.number="editForm.quantity"
+                type="number"
+                class="oe-stepper-input"
+                :class="{ 'form-input-invalid': quantityInvalid }"
+                :min="QUANTITY_MIN"
+                :max="QUANTITY_MAX"
+                step="1"
+                autocomplete="off"
+                aria-label="订单数量"
+                :aria-invalid="quantityAriaInvalid(editForm.quantity)"
+                aria-describedby="oe-quantity-error"
+              />
+              <button class="oe-stepper-btn" aria-label="增加数量" @click="editForm.quantity = Math.min(QUANTITY_MAX, editForm.quantity + 1)">
                 <FontAwesomeIcon icon="plus" aria-hidden="true" />
               </button>
             </div>
+            <p v-if="quantityInvalid" id="oe-quantity-error" class="field-error-text" role="alert">
+              {{ QUANTITY_RANGE_MESSAGE }}
+            </p>
           </div>
           <div class="oe-edit-cell">
             <label class="oe-edit-label">抵扣备货</label>
@@ -126,6 +142,13 @@ import { computed } from 'vue'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import UiButton from '@/components/ui/UiButton.vue'
 import type { OrderDetailData } from '../composables/types'
+import {
+  QUANTITY_MAX,
+  QUANTITY_MIN,
+  QUANTITY_RANGE_MESSAGE,
+  isQuantityOutOfRange,
+  quantityAriaInvalid,
+} from '../composables/quantityRange'
 
 interface EditFormState {
   quantity: number
@@ -151,6 +174,9 @@ const editForm = defineModel<EditFormState>('editForm', { required: true })
 const emit = defineEmits<{
   'update:open': [value: boolean]
 }>()
+
+/** 数量越界时的字段级错误态（与主录入 / 编辑暂存共用同一范围与文案） */
+const quantityInvalid = computed(() => isQuantityOutOfRange(editForm.value?.quantity))
 
 const openModel = computed({
   get: () => props.open,

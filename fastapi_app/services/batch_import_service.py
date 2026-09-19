@@ -17,11 +17,11 @@ import os
 from collections.abc import Callable
 from datetime import datetime
 
-from fastapi import HTTPException, Response, UploadFile
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi_app.schemas.batch import BatchImportResult, ComprehensiveImportResult
+from fastapi_app.core.exceptions import BusinessError, NotFoundError
+from fastapi_app.schemas.batch import BatchImportResult, ComprehensiveImportResult, ExcelUpload
 from fastapi_app.services.inventory_service import calculate_available_shipment_quantity
 from fastapi_app.services.numbering import (
     generate_case_stockin_number,
@@ -172,26 +172,25 @@ async def _process_comprehensive_sheet(
         results.errors.append(f'Sheet {sheet_name} 导入失败')
 
 
-async def download_template_service() -> Response:
+async def read_template_bytes() -> tuple[bytes, str]:
     """下载统一导入模板 - 直接读取静态文件。
 
     Args:
         current_user: 当前登录用户（仅需通过权限校验）。
 
     Returns:
-        Response: Excel 文件流响应。
+        tuple[bytes, str]: (文件内容, 文件名)。由端点层构造文件流响应。
 
     Raises:
-        HTTPException: 模板文件不存在时抛出 404；读取失败时抛出 500。
+        NotFoundError: 模板文件不存在。
+        BusinessError: 模板文件为空或读取失败。
     """
-    from urllib.parse import quote
-
     template_path = os.path.join(
         os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
         'static', 'files', '统一导入模板.xlsx',
     )
     if not os.path.exists(template_path):
-        raise HTTPException(status_code=404, detail='模板文件不存在')
+        raise NotFoundError('模板文件不存在')
     try:
 
         def _read_file():
@@ -199,26 +198,14 @@ async def download_template_service() -> Response:
                 return fh.read()
         file_content = await asyncio.to_thread(_read_file)
         if not file_content:
-            raise HTTPException(status_code=500, detail='模板文件为空')
-        filename = '统一导入模板.xlsx'
-        encoded_filename = quote(filename)
-        return Response(
-            content=file_content,
-            media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            headers={
-                'Content-Disposition': f"attachment; filename*=UTF-8''{encoded_filename}",
-                'Content-Length': str(len(file_content)),
-                'Cache-Control': 'no-cache, no-store, must-revalidate',
-            },
-        )
-    except HTTPException:
-        raise
+            raise BusinessError('模板文件为空')
+        return file_content, '统一导入模板.xlsx'
     except (OSError, ValueError) as exc:
         logger.error(f'模板读取失败: {exc}', exc_info=True)
-        raise HTTPException(status_code=500, detail='模板读取失败，请稍后重试') from exc
+        raise BusinessError('模板读取失败，请稍后重试') from exc
 
 
-async def import_orders_service(db: AsyncSession, file: UploadFile) -> BatchImportResult:
+async def import_orders_service(db: AsyncSession, file: ExcelUpload) -> BatchImportResult:
     """批量导入订单 - 支持统一模板格式。
 
     Args:
@@ -291,7 +278,7 @@ async def import_orders_service(db: AsyncSession, file: UploadFile) -> BatchImpo
         return BatchImportResult(success=False, message='导入失败，请稍后重试')
 
 
-async def import_case_stockouts_service(db: AsyncSession, file: UploadFile) -> BatchImportResult:
+async def import_case_stockouts_service(db: AsyncSession, file: ExcelUpload) -> BatchImportResult:
     """批量导入皮套出库。
 
     Args:
@@ -376,7 +363,7 @@ async def import_case_stockouts_service(db: AsyncSession, file: UploadFile) -> B
         return BatchImportResult(success=False, message='导入失败，请稍后重试')
 
 
-async def import_case_stockins_service(db: AsyncSession, file: UploadFile) -> BatchImportResult:
+async def import_case_stockins_service(db: AsyncSession, file: ExcelUpload) -> BatchImportResult:
     """批量导入皮套入库。
 
     Args:
@@ -457,7 +444,7 @@ async def import_case_stockins_service(db: AsyncSession, file: UploadFile) -> Ba
         return BatchImportResult(success=False, message='导入失败，请稍后重试')
 
 
-async def import_stockins_service(db: AsyncSession, file: UploadFile) -> BatchImportResult:
+async def import_stockins_service(db: AsyncSession, file: ExcelUpload) -> BatchImportResult:
     """批量导入备货 - 支持统一导入模板。
 
     Args:
@@ -528,7 +515,7 @@ async def import_stockins_service(db: AsyncSession, file: UploadFile) -> BatchIm
         return BatchImportResult(success=False, message='导入失败，请稍后重试')
 
 
-async def import_stockouts_service(db: AsyncSession, file: UploadFile) -> BatchImportResult:
+async def import_stockouts_service(db: AsyncSession, file: ExcelUpload) -> BatchImportResult:
     """批量导入出库。
 
     Args:
@@ -628,7 +615,7 @@ async def import_stockouts_service(db: AsyncSession, file: UploadFile) -> BatchI
         return BatchImportResult(success=False, message='导入失败，请稍后重试')
 
 
-async def import_products_service(db: AsyncSession, file: UploadFile) -> BatchImportResult:
+async def import_products_service(db: AsyncSession, file: ExcelUpload) -> BatchImportResult:
     """批量导入产品 - 支持统一模板格式。
 
     Args:
@@ -699,7 +686,7 @@ async def import_products_service(db: AsyncSession, file: UploadFile) -> BatchIm
         return BatchImportResult(success=False, message='导入失败，请稍后重试')
 
 
-async def import_comprehensive_service(db: AsyncSession, file: UploadFile) -> ComprehensiveImportResult:
+async def import_comprehensive_service(db: AsyncSession, file: ExcelUpload) -> ComprehensiveImportResult:
     """综合批量导入 - 支持4个Sheet自动识别。
 
     自动识别 Sheet 类型：产品管理、订单管理、备货管理、出货管理。
@@ -772,7 +759,6 @@ from fastapi_app.services.batch_import_parser import (  # noqa: F401
     parse_excel_file_async,
     read_excel_sheets_async,
 )
-
 
 # ==================== Sheet 类型分派注册表（OCP） ====================
 # 定义在 re-export 之后，确保引用的导入函数已解析。

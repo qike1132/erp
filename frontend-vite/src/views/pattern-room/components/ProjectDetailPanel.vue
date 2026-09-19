@@ -21,16 +21,6 @@
             v-if="canManage"
             type="button"
             class="pdp-head-btn"
-            title="基于当前部位布料信息快照创建新版本"
-            @click="$emit('create-version')"
-          >
-            <FontAwesomeIcon icon="layer-group" aria-hidden="true" />
-            创建新版本
-          </button>
-          <button
-            v-if="canManage"
-            type="button"
-            class="pdp-head-btn"
             @click="$emit('add-part')"
           >
             录入信息
@@ -99,7 +89,6 @@ defineEmits<{
   'add-role': [roleName: string]
   'remove-role': [role: RoleBrief]
   'add-part': []
-  'create-version': []
   'print': []
 }>()
 </script>

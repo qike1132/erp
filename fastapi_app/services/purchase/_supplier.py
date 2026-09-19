@@ -67,17 +67,40 @@ def _resolve_po_qty_and_pid(po, cust_order_map: dict[int, tuple[int, float]]) ->
             break
     return order_qty, pid
 
-def _build_supplier_mat_map(orders, bom_data, items_map, items_by_order, cust_order_map) -> dict[tuple, dict]:
+def _build_supplier_mat_map(orders, bom_data, items_map, items_by_order, cust_order_map,
+                            po_pids_map=None) -> dict[tuple, dict]:
+    """构建 (供应商, 物料, 规格, 单位) → 汇总物料行。
+
+    ``po_pids_map``（``{po_id: [product_id, ...]}``）给出该采购单覆盖的**全部 SKU**，
+    物料集合取各 SKU BOM 的并集；未传时退化为「首个 SKU」的旧口径。
+    跨 SKU 去重规则与 ``_factory._build_factory_group_map`` 完全一致：物料数量取
+    跨 SKU 合并后的采购单明细，故同一物料键只能累加一次，否则数量翻倍。
+    """
     mat_map: dict[tuple, dict] = {}
     for po in orders:
         order_qty, pid = _resolve_po_qty_and_pid(po, cust_order_map)
-        bom_list = bom_data.get(pid, [])
-        if bom_list:
+
+        if po_pids_map is None:
+            pids = [pid] if pid else []
+        else:
+            pids = list(po_pids_map.get(po.id) or ([pid] if pid else []))
+
+        seen_materials: set[tuple] = set()
+        has_bom = False
+        for idx, sku_pid in enumerate(pids):
+            bom_list = bom_data.get(sku_pid, [])
+            if bom_list:
+                has_bom = True
             for bom in bom_list:
                 if _is_filling_category(bom.get('category')):
                     continue
                 sup = bom['supplier_name'] or po.supplier_name or '未指定供应商'
                 key = (sup, bom['material_name'], bom['specification'], bom['unit'])
+                # 必须先判重再登记（登记不能在 idx==0 时被跳过），否则第 2 个 SKU
+                # 会再累加一次同一物料 → 数量翻倍。
+                if idx > 0 and key in seen_materials:
+                    continue
+                seen_materials.add(key)
                 ikey = (po.id, bom['material_name'], bom['specification'], bom['unit'])
                 matching_items = items_map.get(ikey, [])
                 total_qty = sum(float(it.quantity or 0) for it in matching_items) if matching_items else bom['quantity'] * order_qty
@@ -91,7 +114,8 @@ def _build_supplier_mat_map(orders, bom_data, items_map, items_by_order, cust_or
                         'unit': bom['unit'],
                         'supplier_name': sup,
                     }
-        else:
+
+        if not has_bom:
             # BOM 不可用时回退：直接使用 PO 明细作为物料数据
             for item in items_by_order.get(po.id, []):
                 if _is_filling_category(item.material_category):

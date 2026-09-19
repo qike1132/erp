@@ -96,14 +96,6 @@
       @submit-batch="onPartSubmitBatch"
     />
 
-    <VersionCreateDialog
-      :open="versionCreateVisible"
-      :current-version="projectHook.currentProject.value?.current_version ?? 'T1'"
-      :submitting="versionHook.submitting.value"
-      @update:open="versionCreateVisible = $event"
-      @confirm="onVersionCreateConfirm"
-    />
-
     <PrintDialog
       ref="printDialogRef"
       :project="projectHook.currentProject.value"
@@ -138,7 +130,6 @@ import CustomerGroupList from './components/CustomerGroupList.vue'
 import ProjectDetailPanel from './components/ProjectDetailPanel.vue'
 import ProjectFormDialog from './components/ProjectFormDialog.vue'
 import PartFormDialog from './components/PartFormDialog.vue'
-import VersionCreateDialog from './components/VersionCreateDialog.vue'
 import PrintDialog from './components/PrintDialog.vue'
 import PatternRoomSplitBody from './components/PatternRoomSplitBody.vue'
 
@@ -167,7 +158,7 @@ const projectHook = useSamplingProject()
 const selectedProjectId = ref<number | null>(null)
 const roleHook = useSamplingRole(selectedProjectId)
 const partHook = useSamplingPart(selectedProjectId, roleHook.currentRoleId)
-const versionHook = useSamplingVersion(selectedProjectId, roleHook.currentRoleId)
+const versionHook = useSamplingVersion(selectedProjectId)
 
 const {
   statusFilter,
@@ -250,7 +241,6 @@ const {
 
 const {
   partFormVisible,
-  versionCreateVisible,
   // 部位内联编辑状态：由 usePatternRoomPartActions → usePartInlineEdit 提供，
   // 需下发到 ProjectDetailPanel → PartsVersionTableV2 → PartsVersionRowV2。
   // 此前漏接导致 editingPartId/editForm 恒为 undefined，内联编辑不可用。
@@ -262,7 +252,6 @@ const {
   onCopyPartVersion,
   onSaveEdit,
   onDeleteVersion,
-  onVersionCreateConfirm,
   onSelectRole,
   onAddRole,
   onRemoveRole,

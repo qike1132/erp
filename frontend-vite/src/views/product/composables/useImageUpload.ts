@@ -1,4 +1,4 @@
-import { upload } from '@/api/request'
+import { authApi } from '@/api'
 import { showToast } from '@/composables/useToast'
 
 /** 允许的图片类型（拖拽 / 选择文件 / 粘贴 三个入口共用同一份白名单） */
@@ -66,7 +66,7 @@ export function uploadImage(file: File, onSuccess: (url: string) => void): void 
   if (!valid) return
   const formData = new FormData()
   formData.append('file', valid)
-  upload<{ url: string }>('/auth/upload', formData)
+      authApi.uploadFile(formData)
     .then((data) => {
       if (data.url) onSuccess(data.url)
     })

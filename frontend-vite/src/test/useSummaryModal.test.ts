@@ -9,8 +9,9 @@
  *    合计行按表头列位对齐（第 4 列备品数量合计、第 8 列数量合计），
  *    以及数据行备品数量与合计口径一致（含字符串 qty 的防御性 parseFloat 场景）
  */
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
+import { ref } from 'vue'
 
 // 隔离外部依赖：useSummaryModal.ts 顶层 import purchaseApi from '@/api'，
 // 测试不发起真实请求，用最小 stub 替换即可。
@@ -25,9 +26,23 @@ vi.mock('@/api', () => ({
   },
 }))
 
-import { calcSpareQuantity, getGroupOrderQty, buildFactoryHtml } from '@/views/purchase/composables/useSummaryModal'
+// 「close() 复位 + handleCompleteOrder 集成」用例需要引入 usePurchaseActions，
+// 它依赖 useToast / useExport 两个 composable，这里最小打桩避免触碰真实 DOM/下载。
+vi.mock('@/composables/useToast', () => ({
+  showToast: vi.fn(),
+  toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() },
+}))
+
+vi.mock('@/composables/useExport', async () => {
+  const { ref: r } = await import('vue')
+  return { useExport: () => ({ exporting: r(false), runExport: vi.fn() }) }
+})
+
+import { calcSpareQuantity, getGroupOrderQty, magnifyByLossRate, buildFactoryHtml, useSummaryModal } from '@/views/purchase/composables/useSummaryModal'
+import { usePurchaseActions } from '@/views/purchase/composables/usePurchaseActions'
 import SummaryModal from '@/views/purchase/components/SummaryModal.vue'
 import { fmtQty } from '@/utils/formatQty'
+import { purchaseApi } from '@/api'
 import type { FactorySummaryData } from '@/views/purchase/composables/useSummaryModal'
 
 // reka-ui 的 Dialog 依赖 teleport/portal，jsdom 下直接 stub 成普通容器渲染插槽内容更稳。
@@ -93,6 +108,53 @@ describe('calcSpareQuantity 纯函数', () => {
   })
 })
 
+/**
+ * magnifyByLossRate —— 「损耗加放」的**唯一来源**（纯函数）。
+ *
+ * 语义 = Math.round((qty + qty × lossRate/1000) × 100) / 100，即
+ * `qty × (1 + lossRate/1000)` 后四舍五入到 2 位小数。屏幕数量列、工厂/供应商合计、
+ * 打印预览、Excel 导出共用此一处派生；它**绝不写回** factoryData / supplierData。
+ *
+ * 逐字等价保证：与原「applyLossRate 就地放大」使用的
+ * `Math.round((v + v*(r/1000))*100)/100` 完全同式，故 rate=0 时也必须执行两位小数
+ * 四舍五入（而非直接返回原值），以维持既有输出零回归。
+ */
+describe('magnifyByLossRate 纯函数（损耗加放的唯一来源）', () => {
+  it('rate=0 → 仍执行「两位小数四舍五入」（与旧就地放大实现逐字等价）', () => {
+    // 旧实现：Math.round((v + v*0/1000)*100)/100 === Math.round(v*100)/100
+    expect(magnifyByLossRate(10, 0)).toBe(10)
+    expect(magnifyByLossRate(3.14159, 0)).toBe(3.14) // round(314.159)/100
+    expect(magnifyByLossRate(2.005, 0)).toBe(2.01) // round(200.5)/100 = 201/100
+  })
+
+  it('rate=5 → ×1.005（四舍五入到 2 位小数）', () => {
+    expect(magnifyByLossRate(10, 5)).toBe(10.05) // 10×1.005=10.05
+    expect(magnifyByLossRate(20, 5)).toBe(20.1) // 20×1.005=20.1
+    expect(magnifyByLossRate(5, 5)).toBe(5.03) // 5×1.005=5.025 → round(502.5)/100
+  })
+
+  it('rate=1000 → ×2', () => {
+    expect(magnifyByLossRate(7, 1000)).toBe(14)
+  })
+
+  it('非有限 rate（NaN/±Infinity）→ 按 0 兜底（等价于不放大）', () => {
+    expect(magnifyByLossRate(10, NaN)).toBe(10)
+    expect(magnifyByLossRate(10, Infinity)).toBe(10)
+    expect(magnifyByLossRate(10, -Infinity)).toBe(10)
+  })
+
+  it('非法 qty（NaN/Infinity/null/字符串数字）→ 兜底 0（Number.isFinite 语义）', () => {
+    // Number.isFinite 对非 number 类型一律 false → 计为 0。
+    // 三个调用点（SummaryModal.displayFabricQty / buildFactoryHtml / supplierGroups）
+    // 均在传入前执行 parseFloat，故真实渲染路径不会命中此兜底。
+    expect(magnifyByLossRate(NaN, 5)).toBe(0)
+    expect(magnifyByLossRate(Infinity, 5)).toBe(0)
+    expect(magnifyByLossRate(null as unknown as number, 5)).toBe(0)
+    expect(magnifyByLossRate(undefined as unknown as number, 5)).toBe(0)
+    expect(magnifyByLossRate('10' as unknown as number, 5)).toBe(0)
+  })
+})
+
 describe('SummaryModal 备品数量合计口径', () => {
   const factoryData: FactorySummaryData = {
     success: true,
@@ -126,13 +188,13 @@ describe('SummaryModal 备品数量合计口径', () => {
     ],
   }
 
-  function mountModal(lossRate: number, data: FactorySummaryData = factoryData) {
+  function mountModal(lossRate: number, data: FactorySummaryData = factoryData, editMode = false) {
     return mount(SummaryModal, {
       props: {
         open: true,
         factoryData: data,
         supplierData: null,
-        editMode: false,
+        editMode,
         lossRate,
         orderCount: 2,
         supplierGroups: [],
@@ -149,13 +211,66 @@ describe('SummaryModal 备品数量合计口径', () => {
   })
 
   it('合计行按表头列位对齐：第 4 列备品数量合计、第 8 列数量合计（lossRate=5）', () => {
-    // 备品合计：group0 ceil(100*5/1000)=1；group1 ceil(50*5/1000)=1 → 2
-    // 数量合计：10+20+5 = 35
+    // 备品合计：group0 ceil(100*5/1000)=1；group1 ceil(50*5/1000)=1 → 2（口径不变）
+    // 数量合计（新契约）：数量列是「损耗率的纯函数」——非编辑态按 magnifyByLossRate 派生后累加：
+    //   10×1.005=10.05 + 20×1.005=20.1 + 5×1.005=5.03 = 35.18 → fmtQty('35.2')
+    // （旧契约「仅注入 rate prop 不触发放大」已移除，故不再等于原始值 35）
     const wrapper = mountModal(5)
     const rows = wrapper.findAll('tbody tr')
     const totalCols = expandColspan(rows[rows.length - 1]!.findAll('td'))
-    expect(totalCols[3]).toBe(fmtQty(2)) // 第4列 备品数量
-    expect(totalCols[7]).toBe(fmtQty(35)) // 第8列 数量
+    expect(totalCols[3]).toBe(fmtQty(2)) // 第4列 备品数量（口径不变）
+    expect(totalCols[7]).toBe(fmtQty(35.18)) // 第8列 数量（派生值累加）
+  })
+
+  it('【真实用户路径】openSummary → applyLossRate(5) → 合计按派生值（与 prop 注入同源，而非仅覆盖 prop）', async () => {
+    vi.mocked(purchaseApi.factorySummary).mockResolvedValue(factoryData as never)
+    vi.mocked(purchaseApi.supplierSummary).mockResolvedValue({ success: true, materials: [] } as never)
+    const m = useSummaryModal()
+    await m.openSummary([7, 8])
+
+    const mountWithSummary = () =>
+      mount(SummaryModal, {
+        props: {
+          open: true,
+          factoryData: m.factoryData,
+          supplierData: m.supplierData,
+          editMode: m.editMode,
+          lossRate: m.lossRate,
+          orderCount: 2,
+          supplierGroups: m.supplierGroups,
+        },
+        global: { stubs },
+      })
+
+    // 未交互损耗率（rate=0）→ 合计为原始值
+    const before = mountWithSummary()
+    const beforeTotal = expandColspan(before.findAll('tbody tr').slice(-1)[0]!.findAll('td'))
+    expect(beforeTotal[7]).toBe(fmtQty(35))
+    before.unmount()
+
+    // 用户输入损耗率（真实动作路径）→ 仅率状态变化，展示派生随之放大
+    m.applyLossRate(5)
+    const after = mountWithSummary()
+    const afterTotal = expandColspan(after.findAll('tbody tr').slice(-1)[0]!.findAll('td'))
+    expect(afterTotal[3]).toBe(fmtQty(2)) // 备品口径不变
+    expect(afterTotal[7]).toBe(fmtQty(35.18)) // 与 mountModal(5) 的 prop 注入结果一致
+    // 原始数量不被就地改写（落库真值保持 10/20/5）
+    expect(m.factoryData!.groups[0]!.suppliers[0]!.fabrics[0]!.quantity).toBe(10)
+    after.unmount()
+  })
+
+  it('【UX 一致性】编辑态合计 = 原始值（与输入框一致）；非编辑态合计 = 派生值（同数据 rate=5 对照）', () => {
+    // 非编辑态：数量列展示派生值 → 合计也是派生值
+    const view = mountModal(5, factoryData, false)
+    const totalView = expandColspan(view.findAll('tbody tr').slice(-1)[0]!.findAll('td'))
+    expect(totalView[3]).toBe(fmtQty(2)) // 备品口径不受编辑态影响
+    expect(totalView[7]).toBe(fmtQty(35.18))
+
+    // 编辑态：数量输入框绑定原始值 10/20/5 → 合计必须按原始值累加（10+20+5=35），否则自相矛盾
+    const edit = mountModal(5, factoryData, true)
+    const totalEdit = expandColspan(edit.findAll('tbody tr').slice(-1)[0]!.findAll('td'))
+    expect(totalEdit[3]).toBe(fmtQty(2)) // 备品合计口径保持不动
+    expect(totalEdit[7]).toBe(fmtQty(35)) // 原始值累加，与输入框一致
   })
 
   it('数据行备品数量与合计口径一致（lossRate=0 → 全 0）', () => {
@@ -249,7 +364,9 @@ describe('buildFactoryHtml 打印/导出共用 HTML', () => {
     const cells = [...firstRow.querySelectorAll('td')]
     // 1客户/2产品名称/3订单数量/4备品数量/5供应商/6布料名称/7规格型号/8数量/9单位
     expect(cells[3]!.textContent).toBe(fmtQty(1)) // ceil(100*5/1000)=1
-    expect(cells[7]!.textContent).toBe(fmtQty(10)) // 数量
+    // 「数量」列 = 损耗加放的展示派生值：10×1.005=10.05 → fmtQty='10.1'。
+    // 与旧实现（applyLossRate 就地放大后读 fabric.quantity）输出逐字一致，仅来源改为渲染时按率派生。
+    expect(cells[7]!.textContent).toBe(fmtQty(10.05))
     expect(cells[8]!.textContent).toBe('米') // 单位
   })
 
@@ -258,5 +375,289 @@ describe('buildFactoryHtml 打印/导出共用 HTML', () => {
     const row = doc.querySelector('tbody tr')!
     const cells = [...row.querySelectorAll('td')]
     expect(cells[3]!.textContent).toBe(fmtQty(0))
+  })
+})
+
+/**
+ * saveFactoryEdits 提交语义（PRD Q1 / AC-7）：
+ * - 损耗率**未交互**时不得发送 spare_rate（否则用 0 覆盖已存率）；
+ * - 损耗率**已交互**（即使无布料改动、即使值恰为 0）时必须携带 spare_rate，
+ *   并把本次涉及的 order_ids 一并提交，供后端定位写入备品的目标采购单。
+ */
+describe('saveFactoryEdits 提交语义（spare_rate 只在交互后提交）', () => {
+  const factorySummaryResponse: FactorySummaryData = {
+    success: true,
+    order_count: 1,
+    groups: [
+      {
+        customer_name: '客户A',
+        product_name: '产品1',
+        product_quantity: 100,
+        suppliers: [
+          {
+            supplier_name: '供应商1',
+            fabrics: [{ fabric_name: '布料A', specification: 'S1', quantity: 10, unit: '米', item_ids: [101] }],
+          },
+        ],
+      },
+    ],
+  }
+  const supplierSummaryResponse = { success: true, materials: [] as unknown[] }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(purchaseApi.factorySummary).mockResolvedValue(factorySummaryResponse as never)
+    vi.mocked(purchaseApi.supplierSummary).mockResolvedValue(supplierSummaryResponse as never)
+    vi.mocked(purchaseApi.saveFactoryEdits).mockResolvedValue({ success: true } as never)
+  })
+
+  it('损耗率未交互且无布料改动 → 不发起请求（保持原直接退出行为）', async () => {
+    const m = useSummaryModal()
+    await m.openSummary([7, 8])
+
+    const res = await m.saveFactoryEdits()
+
+    expect(res).toBeUndefined()
+    expect(purchaseApi.saveFactoryEdits).not.toHaveBeenCalled()
+    expect(m.editMode).toBe(false)
+  })
+
+  it('交互损耗率（无手动改布料）→ 必须提交，且携带 spare_rate 与 order_ids', async () => {
+    const m = useSummaryModal()
+    await m.openSummary([7, 8])
+    m.applyLossRate(5)
+
+    await m.saveFactoryEdits()
+
+    expect(purchaseApi.saveFactoryEdits).toHaveBeenCalledTimes(1)
+    const [editsArg, rateArg, idsArg] = vi.mocked(purchaseApi.saveFactoryEdits).mock.calls[0]!
+    // spare_rate 与 order_ids 必须随请求提交
+    expect(rateArg).toBe(5)
+    expect(idsArg).toEqual([7, 8])
+    // 新契约：applyLossRate 只记录「率」，不改写任何数量；放大值仅是展示派生值。
+    // 故「保存修改」的 diff 天然为空 —— 绝不把 10.05 这类展示值当作真实数量落库。
+    expect(editsArg).toEqual([])
+  })
+
+  it('仅交互损耗率且值为 0（无任何布料改动）→ 仍须提交 spare_rate=0 与 order_ids', async () => {
+    const m = useSummaryModal()
+    await m.openSummary([7, 8])
+    m.applyLossRate(0)
+
+    await m.saveFactoryEdits()
+
+    // rate=0 不改变布料数量（无编辑明细），但「已交互」必须提交，否则无法只改损耗率保存
+    expect(purchaseApi.saveFactoryEdits).toHaveBeenCalledTimes(1)
+    expect(purchaseApi.saveFactoryEdits).toHaveBeenCalledWith([], 0, [7, 8])
+  })
+
+  it('有布料改动但损耗率未交互 → 提交 edits，且不携带 spare_rate（第二参为 undefined）', async () => {
+    const m = useSummaryModal()
+    await m.openSummary([7, 8])
+    m.updateFactoryQty(0, 0, 0, 12)
+
+    await m.saveFactoryEdits()
+
+    expect(purchaseApi.saveFactoryEdits).toHaveBeenCalledTimes(1)
+    expect(purchaseApi.saveFactoryEdits).toHaveBeenCalledWith(
+      [{ item_ids: [101], quantity: 12 }],
+      undefined,
+      [7, 8],
+    )
+  })
+})
+
+/**
+ * applyLossRateAndSave 损耗率自动落库（BUG-1 修复）：
+ * 非编辑态输入损耗率（组件层 300ms 防抖后）必须自动把 spare_rate 落库到本次汇总
+ * 涉及的全部采购单，形成「输入框 → 数据库」的持久化路径。断言点：
+ *  1. 以空 edits 调用 purchaseApi.saveFactoryEdits，参数为 ([], <rate>, <orderIds>)；
+ *  2. orderIds 为空时不发请求（且此时 lossRateTouched 仍为 true，说明已交互未落库）；
+ *  3. 落库成功后 lossRateTouched 复位为 false（避免后续完成下单重复提交）；
+ *  4. 失败（reject 或 success:false）时抛出供上层 toast，不静默吞掉，本地展示保持可用。
+ */
+describe('applyLossRateAndSave 损耗率自动落库', () => {
+  const factorySummaryResponse: FactorySummaryData = {
+    success: true,
+    order_count: 1,
+    groups: [
+      {
+        customer_name: '客户A',
+        product_name: '产品1',
+        product_quantity: 100,
+        suppliers: [
+          {
+            supplier_name: '供应商1',
+            fabrics: [{ fabric_name: '布料A', specification: 'S1', quantity: 10, unit: '米', item_ids: [101] }],
+          },
+        ],
+      },
+    ],
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(purchaseApi.factorySummary).mockResolvedValue(factorySummaryResponse as never)
+    vi.mocked(purchaseApi.supplierSummary).mockResolvedValue({ success: true, materials: [] } as never)
+    vi.mocked(purchaseApi.saveFactoryEdits).mockResolvedValue({ success: true } as never)
+  })
+
+  it('交互损耗率 → 自动以空 edits 提交 ([], rate, orderIds)，并同步更新本地展示', async () => {
+    const m = useSummaryModal()
+    await m.openSummary([7, 8])
+
+    await m.applyLossRateAndSave(5)
+
+    // edits 恒为空：绝不把放大的展示数量当作 edits 提交
+    expect(purchaseApi.saveFactoryEdits).toHaveBeenCalledTimes(1)
+    expect(purchaseApi.saveFactoryEdits).toHaveBeenCalledWith([], 5, [7, 8])
+    // 新契约：applyLossRate 不再就地改写数据 —— 原始数量保持 10（落库唯一真值）
+    expect(m.factoryData!.groups[0]!.suppliers[0]!.fabrics[0]!.quantity).toBe(10)
+    // 展示派生值仍按率放大（保留原意图）：10×1.005=10.05，只是不再写回 state
+    expect(magnifyByLossRate(m.factoryData!.groups[0]!.suppliers[0]!.fabrics[0]!.quantity, m.lossRate)).toBeCloseTo(10.05, 5)
+  })
+
+  it('orderIds 为空 → 不发请求（lossRateTouched 仍为 true，表示已交互未落库）', async () => {
+    const m = useSummaryModal()
+    // 未 openSummary：orderIds 仍为空数组
+    await m.applyLossRateAndSave(5)
+
+    expect(purchaseApi.saveFactoryEdits).not.toHaveBeenCalled()
+    expect(m.lossRateTouched).toBe(true)
+  })
+
+  it('落库成功 → lossRateTouched 复位为 false（后续完成下单无需重复提交）', async () => {
+    const m = useSummaryModal()
+    await m.openSummary([7, 8])
+
+    await m.applyLossRateAndSave(5)
+
+    expect(m.lossRateTouched).toBe(false)
+  })
+
+  it('请求 reject → 抛出供上层 toast，lossRateTouched 保留 true，本地展示保持可用', async () => {
+    vi.mocked(purchaseApi.saveFactoryEdits).mockRejectedValueOnce(new Error('网络错误'))
+    const m = useSummaryModal()
+    await m.openSummary([7, 8])
+
+    await expect(m.applyLossRateAndSave(5)).rejects.toThrow('网络错误')
+
+    expect(m.lossRateTouched).toBe(true)
+    expect(m.lossRate).toBe(5)
+    // 新契约：失败态下原始数量同样不被就地改写（本地展示仍可用，派生值由渲染层计算）
+    expect(m.factoryData!.groups[0]!.suppliers[0]!.fabrics[0]!.quantity).toBe(10)
+  })
+
+  it('后端返回 success:false → 同样抛出，不静默吞掉', async () => {
+    vi.mocked(purchaseApi.saveFactoryEdits).mockResolvedValueOnce({ success: false, message: '保存失败' } as never)
+    const m = useSummaryModal()
+    await m.openSummary([7, 8])
+
+    await expect(m.applyLossRateAndSave(5)).rejects.toThrow('保存失败')
+    expect(m.lossRateTouched).toBe(true)
+  })
+})
+
+/**
+ * close() 复位损耗率（消除陈旧率跨单泄漏）：
+ * 非编辑态输入损耗率后若落库失败，lossRate/lossRateTouched 会保留（语义正确）；
+ * 但用户在关闭弹窗后可能直接对「另一张无关订单」点下单完成，此时
+ * usePurchaseActions.handleCompleteOrder 会读 `lossRateTouched ? lossRate : undefined`
+ * 把陈旧率推给该单。故 close() 必须丢弃「尚未落库的损耗率交互」。
+ *
+ * 断言点：
+ *  a) close() 后 lossRate=0、lossRateTouched=false（成功落库后关闭 / 失败后关闭 两条路径）；
+ *  b) 集成口径：失败 → close() → handleCompleteOrder(999) 实参为 (999, undefined) 不夹带 spare_rate；
+ *     并给反向对照（close() 之前确实夹带 spare_rate=5），证明接线有效、断言非恒真。
+ */
+describe('close() 复位损耗率（消除陈旧率跨单泄漏）', () => {
+  const factorySummaryResponse: FactorySummaryData = {
+    success: true,
+    order_count: 1,
+    groups: [
+      {
+        customer_name: '客户A',
+        product_name: '产品1',
+        product_quantity: 100,
+        suppliers: [
+          {
+            supplier_name: '供应商1',
+            fabrics: [{ fabric_name: '布料A', specification: 'S1', quantity: 10, unit: '米', item_ids: [101] }],
+          },
+        ],
+      },
+    ],
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(purchaseApi.factorySummary).mockResolvedValue(factorySummaryResponse as never)
+    vi.mocked(purchaseApi.supplierSummary).mockResolvedValue({ success: true, materials: [] } as never)
+    vi.mocked(purchaseApi.saveFactoryEdits).mockResolvedValue({ success: true } as never)
+  })
+
+  /** 引入真实 useSummaryModal + 打桩 purchaseOrders，走 handleCompleteOrder 真实接线 */
+  function buildActions(summary: ReturnType<typeof useSummaryModal>) {
+    const purchaseOrders = {
+      completeOrder: vi.fn().mockResolvedValue(true),
+      batchComplete: vi.fn().mockResolvedValue(2),
+      selectedIds: [1, 2],
+    }
+    const actions = usePurchaseActions({
+      unprocessed: {} as never,
+      purchaseOrders: purchaseOrders as never,
+      completed: {} as never,
+      summary,
+      confirm: { confirm: vi.fn().mockResolvedValue(true) } as never,
+      queryClient: { invalidateQueries: vi.fn() } as never,
+      isSubmitting: ref(false),
+    })
+    return { actions, purchaseOrders }
+  }
+
+  it('成功落库后 close() → lossRate=0 且 lossRateTouched=false', async () => {
+    const m = useSummaryModal()
+    await m.openSummary([7, 8])
+    await m.applyLossRateAndSave(5)
+    expect(m.lossRateTouched).toBe(false)
+
+    m.close()
+
+    expect(m.lossRate).toBe(0)
+    expect(m.lossRateTouched).toBe(false)
+  })
+
+  it('落库失败后 close() → lossRate=0 且 lossRateTouched=false（失败态在关闭时被丢弃）', async () => {
+    vi.mocked(purchaseApi.saveFactoryEdits).mockRejectedValueOnce(new Error('网络错误'))
+    const m = useSummaryModal()
+    await m.openSummary([7, 8])
+    await expect(m.applyLossRateAndSave(5)).rejects.toThrow('网络错误')
+    // 失败当时仍保留（语义正确：尚未落库）
+    expect(m.lossRateTouched).toBe(true)
+    expect(m.lossRate).toBe(5)
+
+    m.close()
+
+    expect(m.lossRate).toBe(0)
+    expect(m.lossRateTouched).toBe(false)
+  })
+
+  it('【集成】失败 → close() → 完成另一张订单不夹带 spare_rate；对照：close() 前会夹带', async () => {
+    vi.mocked(purchaseApi.saveFactoryEdits).mockRejectedValueOnce(new Error('网络错误'))
+    const m = useSummaryModal()
+    await m.openSummary([7, 8])
+    await expect(m.applyLossRateAndSave(5)).rejects.toThrow('网络错误')
+
+    // 反向对照：close() 之前 lossRateTouched=true → handleCompleteOrder 确实夹带 spare_rate=5
+    const pre = buildActions(m)
+    await pre.actions.handleCompleteOrder(999)
+    expect(pre.purchaseOrders.completeOrder).toHaveBeenCalledWith(999, 5)
+
+    // 关闭弹窗 → 未落库的损耗率交互被丢弃
+    m.close()
+    const post = buildActions(m)
+    await post.actions.handleCompleteOrder(999)
+    // 实参第二项必须为 undefined（api 层据此不进 body）→ 不再泄漏陈旧率
+    expect(post.purchaseOrders.completeOrder).toHaveBeenCalledWith(999, undefined)
   })
 })

@@ -9,8 +9,8 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from fastapi import HTTPException
 
+from fastapi_app.core.exceptions import UnauthorizedError
 from fastapi_app.services import auth_service
 
 
@@ -39,10 +39,10 @@ class TestAuthenticateLogin:
                     new=AsyncMock(return_value=None)), \
              patch('fastapi_app.core.security.verify_password', return_value=False), \
              patch('fastapi_app.services.auth_service.run_in_threadpool', new=AsyncMock()):
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(UnauthorizedError) as exc_info:
                 await auth_service.authenticate_login(db, "nouser", "pass", False, "1.2.3.4")
         assert exc_info.value.status_code == 401
-        assert "用户名或密码错误" in exc_info.value.detail
+        assert "用户名或密码错误" in exc_info.value.message
 
     @pytest.mark.asyncio
     async def test_user_disabled_raises_401(self):
@@ -52,7 +52,7 @@ class TestAuthenticateLogin:
         with patch('fastapi_app.services.user_service.get_user_with_permissions_by_username',
                     new=AsyncMock(return_value=disabled_user)), \
              patch('fastapi_app.services.auth_service.run_in_threadpool', new=AsyncMock()):
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(UnauthorizedError) as exc_info:
                 await auth_service.authenticate_login(db, "admin", "pass", False, "1.2.3.4")
         assert exc_info.value.status_code == 401
 
@@ -64,7 +64,7 @@ class TestAuthenticateLogin:
         with patch('fastapi_app.services.user_service.get_user_with_permissions_by_username',
                     new=AsyncMock(return_value=user)), \
              patch('fastapi_app.services.auth_service.run_in_threadpool', new=AsyncMock(return_value=False)):
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(UnauthorizedError) as exc_info:
                 await auth_service.authenticate_login(db, "admin", "wrong", False, "1.2.3.4")
         assert exc_info.value.status_code == 401
 

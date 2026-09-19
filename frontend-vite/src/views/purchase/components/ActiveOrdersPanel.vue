@@ -54,9 +54,6 @@
                 </td>
                 <td class="pc-td-nowrap">
                   <div class="pc-order-meta-cell">
-                    <div class="pc-order-badges">
-                      <span v-if="(o.sku_items?.length || 0) > 1" class="pc-sku-badge" :title="`${o.sku_items?.length} 个 SKU`">{{ o.sku_items?.length }} SKU</span>
-                    </div>
                     <span class="pc-order-date">{{ formatDate(o.create_time || o.order_date) }}</span>
                   </div>
                 </td>
@@ -147,9 +144,4 @@ defineEmits<{
 
 <style scoped lang="scss">
 @use './order-panels.scss' as *;
-
-.pc-order-badges .pc-sku-badge {
-  margin: 0;
-  flex-shrink: 0;
-}
 </style>

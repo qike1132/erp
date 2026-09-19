@@ -21,6 +21,10 @@ function orderTimeLabel(orderTime: string): string {
 /**
  * 备品数量 = ceil(订单数量 × 损耗率‰)。
  * 损耗率 ≤ 0 或 qty 非法/非正时返回 0。屏幕表格、打印预览、Excel 导出共用这一处来源。
+ *
+ * ⚠️ 本函数是备品公式的**前端唯一来源**，必须与后端
+ * `fastapi_app/services/purchase_utils.calc_spare_quantity` 语义逐字一致；
+ * 任何一处改动必须同步另一处。
  */
 export function calcSpareQuantity(qty: number, lossRate: number): number {
   if (!lossRate || lossRate <= 0 || !Number.isFinite(qty) || qty <= 0) return 0
@@ -35,6 +39,24 @@ export function calcSpareQuantity(qty: number, lossRate: number): number {
 export function getGroupOrderQty(group: FactoryGroup): number {
   const v = parseFloat(String(group.product_quantity || group.order_quantity || 0))
   return Number.isNaN(v) ? 0 : v
+}
+
+/**
+ * 损耗加放纯函数：按损耗率（千分之几）放大数量，四舍五入到 2 位小数。
+ *
+ * 语义 = `qty × (1 + lossRate / 1000)`。屏幕「数量」列、工厂/供应商合计、
+ * 打印预览、Excel 导出共用这一处来源。
+ *
+ * 本函数**只做展示派生**，绝不写回 factoryData / supplierData ——
+ * 原始数量才是落库唯一真值，放大值永远只是预览。
+ *
+ * 防御口径：非法输入（NaN / Infinity / 非数字）按 0 处理；
+ * `lossRate = 0` 时同样执行「两位小数四舍五入」，保证与既有输出逐字一致、零回归。
+ */
+export function magnifyByLossRate(qty: number, lossRate: number): number {
+  const v = Number.isFinite(qty) ? qty : 0
+  const r = Number.isFinite(lossRate) ? lossRate : 0
+  return Math.round((v + v * (r / 1000)) * 100) / 100
 }
 
 /**
@@ -85,17 +107,24 @@ export function buildFactoryHtml(data: FactorySummaryData, lossRate: number): st
         if (globalFabricIdx === 0) {
           const rowCount = suppliers.reduce((s: number, sup: SupplierGroup) => s + (sup.fabrics?.length || 0), 0)
           tableHtml += `<td rowspan="${rowCount}" style="font-weight:bold;">${escapeHtml(group.customer_name)}</td>`
-          tableHtml += `<td rowspan="${rowCount}">${escapeHtml(group.product_name)}</td>`
-          const qty = getGroupOrderQty(group)
-          tableHtml += `<td rowspan="${rowCount}">${escapeHtml(fmtQty(qty))}</td>`
-          tableHtml += `<td rowspan="${rowCount}">${escapeHtml(fmtQty(calcSpareQuantity(qty, lossRate)))}</td>`
+          // 产品名称 / 订单数量 / 备品数量：与屏幕表格同源逐 SKU 分行（单 SKU 时即一行）
+          const skuLines = buildSkuDisplayLines(group, lossRate)
+          const cell = (pick: (l: SkuDisplayLine) => string) =>
+            skuLines
+              .map((l) => (l.isTotal ? `<strong>${escapeHtml(pick(l))}</strong>` : escapeHtml(pick(l))))
+              .join('<br>')
+          tableHtml += `<td rowspan="${rowCount}">${cell((l) => l.name)}</td>`
+          tableHtml += `<td rowspan="${rowCount}">${cell((l) => fmtQty(l.qty))}</td>`
+          tableHtml += `<td rowspan="${rowCount}">${cell((l) => fmtQty(l.spare))}</td>`
         }
         if (fi === 0) {
           tableHtml += `<td rowspan="${fabricCount}" style="font-weight:bold;">${escapeHtml(supplier.supplier_name)}</td>`
         }
         tableHtml += `<td>${escapeHtml(fabric.fabric_name)}</td>`
         tableHtml += `<td>${escapeHtml(fabric.specification || '')}</td>`
-        tableHtml += `<td>${escapeHtml(fmtQty(fabric.quantity))}</td>`
+        // 「数量」列为损耗加放的展示派生值（原始数量 × (1 + rate/1000)），
+        // 与屏幕表格、合计口径同源；此处不改动 fabric.quantity 本身。
+        tableHtml += `<td>${escapeHtml(fmtQty(magnifyByLossRate(parseFloat(String(fabric.quantity)) || 0, lossRate)))}</td>`
         tableHtml += `<td>${escapeHtml(fabric.unit || '')}</td>`
         tableHtml += '</tr>'
         globalFabricIdx++
@@ -150,12 +179,62 @@ export interface SupplierGroup {
   fabrics: FabricItem[]
 }
 
+/** 汇总分组的逐 SKU 展示明细（后端 factory-summary 返回） */
+export interface SkuLine {
+  product_name: string
+  product_barcode?: string
+  order_qty: number
+}
+
+/** 逐 SKU 展示行：屏幕表格 / 打印预览 / Excel 导出共用同一形状 */
+export interface SkuDisplayLine {
+  name: string
+  qty: number
+  spare: number
+  /** 订单级「合计」子行（仅多 SKU 时追加） */
+  isTotal: boolean
+}
+
+/**
+ * 逐 SKU 展示行 —— 屏幕「产品名称 / 订单数量 / 备品数量」三列、打印预览、Excel 导出
+ * **共用这一处来源**，保证三者逐字一致。
+ *
+ * 口径（重要）：
+ * - 逐 SKU 只有**订单数量**是权威的（来自 `purchase_order_sku` 快照）；
+ * - 多 SKU 时追加一行「合计」，合计取**订单级真值** `getGroupOrderQty(group)`
+ *   （= 采购单 `product_quantity`），不依赖逐 SKU 之和，避免快照与主表不一致时
+ *   展示出「对不上」的数字；
+ * - **物料数量在采购单侧是跨 SKU 合并值，无法拆分到 SKU**，故「布料名称 / 规格 / 数量」
+ *   仍是订单级展示（与 /beile-order 已确立的口径一致，不编造无法追溯的数）；
+ * - 单 SKU 或后端未返回 `skus` 时，只产出一行订单级数据 —— 与改动前逐字一致（零回归）。
+ */
+export function buildSkuDisplayLines(group: FactoryGroup, lossRate: number): SkuDisplayLine[] {
+  const total = getGroupOrderQty(group)
+  const skus = group.skus || []
+  if (skus.length <= 1) {
+    return [{
+      name: group.product_name || '',
+      qty: total,
+      spare: calcSpareQuantity(total, lossRate),
+      isTotal: false,
+    }]
+  }
+  const lines: SkuDisplayLine[] = skus.map((s) => {
+    const qty = parseFloat(String(s.order_qty ?? 0)) || 0
+    return { name: s.product_name || '', qty, spare: calcSpareQuantity(qty, lossRate), isTotal: false }
+  })
+  lines.push({ name: '合计', qty: total, spare: calcSpareQuantity(total, lossRate), isTotal: true })
+  return lines
+}
+
 export interface FactoryGroup {
   customer_name: string
   product_name: string
   product_quantity?: number
   order_quantity?: number
   suppliers: SupplierGroup[]
+  /** 逐 SKU 明细；旧后端不返回 → undefined（前端按订单级单行降级） */
+  skus?: SkuLine[]
 }
 
 /** 工厂内部采购汇总响应（/purchase/factory-summary） */
@@ -164,6 +243,13 @@ export interface FactorySummaryData {
   message?: string
   /** 选中订单数（模板展示用） */
   order_count?: number
+  /**
+   * 本次汇总所涉采购单「已落库」的损耗率快照（后端 get_factory_order_summary 返回）。
+   * 0 是合法的「已记录」值；未记录为 null / 缺省。旧后端不返回此字段 → undefined。
+   */
+  spare_rate?: number | null
+  /** 各单损耗率不一致：true 时 spare_rate 恒为 null，供 UI 提示「各订单损耗率不一致」 */
+  spare_rate_mixed?: boolean
   groups: FactoryGroup[]
 }
 
@@ -199,10 +285,32 @@ export function useSummaryModal() {
   const supplierOriginalData = ref<SupplierSummaryData | null>(null)
   const editMode = ref(false)
   const lossRate = ref(0)
+  /**
+   * 服务端**当前已落库**的损耗率基线（openSummary 时按汇总接口的 spare_rate 播种，
+   * 自动落库成功后同步更新）。供「取消编辑」时恢复到真值，而非错误地清零。
+   */
+  const persistedLossRate = ref(0)
+  /** 各单损耗率不一致（后端 spare_rate_mixed）：true 时 lossRate 显示 0 不代表「未设置过」 */
+  const lossRateMixed = ref(false)
+  /** 损耗率是否被用户交互过：仅在交互过时随动作提交 spare_rate（避免用 0 覆盖已存值） */
+  const lossRateTouched = ref(false)
   const orderIds = ref<number[]>([])
   const supplierOrder = ref<string[]>([])
   /** 订单时间（选中订单中最晚 create_time，回退 order_date；由 openSummary 调用方传入） */
   const orderTime = ref('')
+  /**
+   * 损耗率自动落库的可见反馈状态。
+   * idle：未发起 / 已复位；saving：有请求在途；saved：最后一次输入已成功落库；error：任一次发送失败。
+   */
+  const lossRateSaveState = ref<'idle' | 'saving' | 'saved' | 'error'>('idle')
+
+  /**
+   * 损耗率自动落库的串行化状态（**实例闭包内**，禁止模块级全局，避免多实例互相干扰）：
+   * - drainPromise：当前「排空循环」的句柄，非空表示有请求在途 / 队列待排空；
+   * - pendingRate：在途期间累积的**最新**待发率（中间值允许合并跳过）。
+   */
+  let drainPromise: Promise<void> | null = null
+  let pendingRate: number | null = null
 
   const supplierGroups = computed(() => {
     if (!supplierData.value?.materials) return []
@@ -215,7 +323,12 @@ export function useSummaryModal() {
         map[s] = []
         newOrder.push(s)
       }
-      map[s].push(m)
+      // 展示副本：按损耗率派生放大数量。**不写回 supplierData** ——
+      // 原始数量是落库唯一真值，供应商页表格 / 合计 / 打印 / 导出都吃这份派生值。
+      map[s].push({
+        ...m,
+        total_quantity: magnifyByLossRate(parseFloat(String(m.total_quantity)) || 0, lossRate.value),
+      })
     })
     const order = supplierOrder.value.length > 0 ? supplierOrder.value : newOrder
     order.forEach((s) => {
@@ -246,19 +359,41 @@ export function useSummaryModal() {
     })
     supplierOrder.value = initOrder
     editMode.value = false
+    // 回显播种：把汇总接口返回的「已落库损耗率」作为编辑基线。
+    // - spare_rate 是 number（含 0）时原样回显；否则（null / 旧后端未提供 undefined）落 0，
+    //   与改动前行为完全一致，零回归。
+    // - lossRateTouched 必须保持 false：回显是「服务端状态」而非「用户交互」，
+    //   若置 true，「打开看一眼 → 去完成某张订单」会把该率夹带提交（见 usePurchaseActions）。
+    const raw = fRes.spare_rate
+    const persisted = typeof raw === 'number' && Number.isFinite(raw) ? raw : 0
+    lossRate.value = persisted
+    persistedLossRate.value = persisted
+    lossRateTouched.value = false
+    lossRateSaveState.value = 'idle'
+    lossRateMixed.value = fRes.spare_rate_mixed === true
     tab.value = 'factory'
     open.value = true
   }
 
   function toggleEditMode(enable: boolean) {
     if (!enable) {
+      // 取消编辑：丢弃本地改动与损耗率交互，回到服务端原值（数量永远是原始真值）。
       factoryData.value = cloneRaw(factoryOriginalData.value)
       supplierData.value = cloneRaw(supplierOriginalData.value)
-      lossRate.value = 0
+      // 弹窗仍开着、服务端仍存着该率，故恢复到「已落库」基线而非清零，
+      // 否则「打开看到 5 → 自定义编辑 → 取消编辑」会自相矛盾地变成 0。
+      // 同时复位交互标记与保存反馈（消掉残留的「已保存」小字）。
+      lossRate.value = persistedLossRate.value
+      lossRateTouched.value = false
+      lossRateSaveState.value = 'idle'
     }
     editMode.value = enable
   }
 
+  /**
+   * 编辑态逐行改数量：就地更新 factoryData 中该布料的真实数量（并同步供应商汇总），
+   * 由「保存修改」统一落库。非编辑态展示的放大值不参与此处。
+   */
   function updateFactoryQty(gi: number, si: number, fi: number, value: number) {
     const fabric = factoryData.value?.groups?.[gi]?.suppliers?.[si]?.fabrics?.[fi]
     if (!fabric) return
@@ -284,33 +419,106 @@ export function useSummaryModal() {
     }
   }
 
+  /**
+   * 用户交互损耗率（非编辑态输入）：只记录「率」与「已交互」标记。
+   *
+   * 本函数**不改动 factoryData / supplierData 的任何数量**。
+   * 「损耗加放」后的数量是展示派生值，由 magnifyByLossRate 在渲染 / 合计 / 打印 / 导出时
+   * 按原始数量实时计算（同一处来源）。原始数量只经编辑态「保存修改」落库；
+   * 损耗率本身由 applyLossRateAndSave 落库。
+   */
   function applyLossRate(rate: number) {
     lossRate.value = rate
-    if (!factoryOriginalData.value?.groups) return
-    factoryData.value?.groups?.forEach((group, gi) => {
-      group.suppliers?.forEach((supplier, si) => {
-        supplier.fabrics?.forEach((fabric, fi) => {
-          const originalFabric = factoryOriginalData.value?.groups?.[gi]?.suppliers?.[si]?.fabrics?.[fi]
-          if (originalFabric) {
-            const originalQty = parseFloat(String(originalFabric.quantity)) || 0
-            const newQty = originalQty + originalQty * (rate / 1000)
-            fabric.quantity = Math.round(newQty * 100) / 100
-          }
-        })
-      })
-    })
-    if (supplierOriginalData.value?.materials) {
-      supplierData.value?.materials?.forEach((m, mi) => {
-        const origM = supplierOriginalData.value?.materials?.[mi]
-        if (origM) {
-          const originalQty = parseFloat(String(origM.total_quantity)) || 0
-          const newQty = originalQty + originalQty * (rate / 1000)
-          m.total_quantity = Math.round(newQty * 100) / 100
-        }
-      })
+    // 记录用户已交互损耗率：即使无布料改动，保存/下单时也要把率提交落库（PRD Q1）
+    lossRateTouched.value = true
+  }
+
+  /**
+   * 单次损耗率落库请求：只提交 spare_rate 与 order_ids，`edits` 恒为空。
+   *
+   * `edits` 恒空的理由：数量落库只走编辑态「保存修改」，
+   * 自动落库只负责把用户输入的损耗率持久化到本次汇总涉及的采购单。
+   */
+  async function sendLossRate(rate: number) {
+    const res = await purchaseApi.saveFactoryEdits(
+      [],
+      rate,
+      orderIds.value,
+    ) as unknown as SaveFactoryEditsResponse
+    if (!res.success) {
+      throw new Error(res.message || '损耗率保存失败')
     }
   }
 
+  /**
+   * 用户交互损耗率后的自动落库（串行化 + 可见反馈）。
+   *
+   * 串行契约：
+   *  1. 同一时刻至多一个 `factory-summary/save` 的损耗率请求在途；
+   *  2. 在途期间到来的新率合并为「最新值」，等当前请求结束后再发（中间值可跳过）；
+   *  3. 因此最后一次发出的 rate 恒等于用户最后一次输入，服务端不会出现乱序覆盖；
+   *  4. `lossRateTouched` 仅在**最后一次输入成功落库**后才复位为 false。
+   *
+   * 失败契约：任一次发送失败 → 抛出（上层 toast）、`lossRateTouched` 保持 true、
+   * 清空待发队列（用户重新输入即重试）、状态置 error。
+   *
+   * 并发调用者共享同一个「排空循环」句柄，故本轮成败对全部参与者一致。
+   */
+  async function applyLossRateAndSave(rate: number) {
+    // 1) 先更新本地展示所依赖的率状态（数量为派生值，无需改写数据）
+    applyLossRate(rate)
+    // 2) 无目标采购单时不打网络，也不改变保存状态
+    if (orderIds.value.length === 0) return
+
+    // 3) 已有排空循环在跑：合并为最新待发值，复用同一句柄等待本轮结束
+    if (drainPromise) {
+      pendingRate = rate
+      return drainPromise
+    }
+
+    // 4) 启动排空循环：每次发送前取走「期间累积的最新值」，保证最后发送 = 最后输入
+    const run = (async () => {
+      let next: number | null = rate
+      try {
+        while (next !== null) {
+          // 目标采购单已失效（例如弹窗在途期间被关闭）：不再发送无 order_ids 的请求
+          if (orderIds.value.length === 0) break
+          lossRateSaveState.value = 'saving'
+          const sent = next
+          await sendLossRate(sent)
+          // 本次发送该率已成功落库 → 同步「已落库」基线（供取消编辑时恢复），
+          // 并清掉「各单不一致」标记（本次已把所有涉及单统一为该值）。
+          persistedLossRate.value = sent
+          lossRateMixed.value = false
+          next = pendingRate
+          pendingRate = null
+        }
+        // 队列排空且目标仍有效：最后一次输入已成功落库 → 复位标记并给出成功反馈
+        if (orderIds.value.length > 0) {
+          lossRateTouched.value = false
+          lossRateSaveState.value = 'saved'
+        }
+      } catch (err) {
+        // 任一发送失败：清空待发队列（重新输入即重试），保留 lossRateTouched=true
+        pendingRate = null
+        lossRateSaveState.value = 'error'
+        throw err
+      } finally {
+        drainPromise = null
+      }
+    })()
+    drainPromise = run
+
+    return run
+  }
+
+  /**
+   * 编辑态「保存修改」：以 `factoryData` 与 `factoryOriginalData` 的**差异**组装 edits。
+   *
+   * 二者现在都只承载原始真值（损耗加放不再就地改写数量），因此 diff 只会得到
+   * 用户在编辑态真实改过的数量，天然不含任何「放大派生的伪编辑」。
+   * 本函数的 diff 逻辑无需为损耗率改动做任何调整。
+   */
   async function saveFactoryEdits() {
     const edits: { item_ids: number[]; quantity: number }[] = []
     const current = factoryData.value
@@ -328,11 +536,18 @@ export function useSummaryModal() {
         })
       })
     }
-    if (edits.length === 0) {
+    const rateTouched = lossRateTouched.value
+    // 无任何布料改动且损耗率未被交互：无需请求（保持原直接退出行为）
+    if (edits.length === 0 && !rateTouched) {
       editMode.value = false
       return
     }
-    const res = await purchaseApi.saveFactoryEdits(edits) as unknown as SaveFactoryEditsResponse
+    // 损耗率仅在交互过时提交；未交互则不发送 spare_rate（避免用 0 覆盖已存率）
+    const res = await purchaseApi.saveFactoryEdits(
+      edits,
+      rateTouched ? lossRate.value : undefined,
+      orderIds.value,
+    ) as unknown as SaveFactoryEditsResponse
     if (res.success) {
       edits.forEach((edit) => {
         factoryData.value?.groups?.forEach((group) => {
@@ -347,6 +562,7 @@ export function useSummaryModal() {
         })
       })
       factoryOriginalData.value = cloneRaw(factoryData.value)
+      lossRateTouched.value = false
       try {
         const sRes = await purchaseApi.supplierSummary(orderIds.value) as unknown as SupplierSummaryData
         if (sRes.success) {
@@ -365,6 +581,15 @@ export function useSummaryModal() {
     orderIds.value = []
     supplierOrder.value = []
     orderTime.value = ''
+    // 关闭弹窗即丢弃「尚未落库的损耗率交互」：否则失败态残留的 lossRate/lossRateTouched
+    // 会被后续 handleCompleteOrder/handleBatchComplete 读取，把陈旧损耗率推给无关订单。
+    lossRate.value = 0
+    lossRateTouched.value = false
+    // 已落库基线随弹窗关闭复位：下次 openSummary 会按汇总接口的 spare_rate 重新播种。
+    persistedLossRate.value = 0
+    lossRateMixed.value = false
+    // 保存反馈随弹窗关闭复位（状态由下一次输入或关闭重置，不使用定时器）
+    lossRateSaveState.value = 'idle'
   }
 
   function printFactory() {
@@ -411,6 +636,10 @@ export function useSummaryModal() {
     supplierData,
     editMode,
     lossRate,
+    persistedLossRate,
+    lossRateMixed,
+    lossRateTouched,
+    lossRateSaveState,
     orderIds,
     supplierGroups,
     openSummary,
@@ -418,6 +647,7 @@ export function useSummaryModal() {
     toggleEditMode,
     updateFactoryQty,
     applyLossRate,
+    applyLossRateAndSave,
     saveFactoryEdits,
     printFactory,
     printSupplier,

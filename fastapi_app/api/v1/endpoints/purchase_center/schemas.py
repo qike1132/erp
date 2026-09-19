@@ -22,8 +22,12 @@ class OrderIdsRequest(BaseModel):
     ids: list[int] = Field(..., min_length=1, max_length=500, description="订单ID列表")
 
 class OrderIdRequest(BaseModel):
-    """单个订单ID请求"""
+    """单个订单ID请求
+
+    `spare_rate`：下单完成时携带的损耗率（千分之几）；`None` 表示不覆盖该采购单已存值。
+    """
     order_id: int = Field(..., description="订单ID")
+    spare_rate: float | None = Field(None, description="损耗率(千分之几)，None=不覆盖已存值")
 
 class OrderIdsAltRequest(BaseModel):
     """订单ID列表请求(备用字段名)"""
@@ -95,8 +99,12 @@ class PurchaseOrderUpdateRequest(BaseModel):
     modify_reason: str = ''
 
 class BatchCompleteRequest(BaseModel):
-    """批量完成订单请求"""
+    """批量完成订单请求
+
+    `spare_rate`：批量确认时对所有涉及采购单统一覆盖的损耗率（千分之几）；`None` 表示不覆盖。
+    """
     ids: list[int] = Field(..., min_length=1, max_length=500, description="订单ID列表")
+    spare_rate: float | None = Field(None, description="损耗率(千分之几)，None=不覆盖已存值")
 
 class OneClickGenerateRequest(BaseModel):
     """一键生成采购订单请求"""
@@ -121,8 +129,16 @@ class FactorySummaryEditItem(BaseModel):
 
 
 class FactorySummarySaveRequest(BaseModel):
-    """保存工厂订单编辑请求"""
-    edits: list[FactorySummaryEditItem] = Field(..., min_length=1, description="编辑列表")
+    """保存工厂订单编辑请求。
+
+    - `edits` 允许为空：损耗率输入框在非编辑态即可交互，用户可能「只改了损耗率、
+      没有任何布料改动」，此时仅靠 `order_ids` + `spare_rate` 也要能落库。
+    - `order_ids`：本次汇总涉及的采购单 ID 列表，用于在无编辑项时定位要写入备品的采购单。
+    - `spare_rate`：对该次涉及的所有采购单覆盖写的损耗率（千分之几）；`None` 表示不覆盖。
+    """
+    edits: list[FactorySummaryEditItem] = Field(default_factory=list, description="编辑列表（可为空）")
+    order_ids: list[int] = Field(default_factory=list, description="本次涉及的采购单ID列表")
+    spare_rate: float | None = Field(None, description="损耗率(千分之几)，None=不覆盖已存值")
 
 class SummaryPrintRequest(BaseModel):
     """汇总打印请求"""

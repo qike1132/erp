@@ -2,7 +2,7 @@
 import { ref, reactive, computed, watch, onUnmounted, type Ref } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 import { planApi, customerApi } from '@/api'
-import { get } from '@/api/request'
+import { auxApi } from '@/api'
 import { showToast } from '@/composables/useToast'
 import { getErrorMessage } from '@/types/errors'
 
@@ -90,7 +90,7 @@ export function useCreateShipmentPlan(open: Ref<boolean>, onCreated: () => void)
   async function searchProducts(q: string): Promise<ProductSuggestion[]> {
     if (!q.trim()) return []
     try {
-      const d = await get<ProductSuggestion[]>('/aux/product-search', { q })
+    const d = await auxApi.productSearch(q) as ProductSuggestion[]
       return Array.isArray(d) ? d : []
     } catch {
       return []

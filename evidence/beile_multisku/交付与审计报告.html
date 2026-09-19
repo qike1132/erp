@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<!--
+  页面主题：湖北订单页「多 SKU 订单数量显示」修复 —— 交付与审计报告
+  整体风格：深色扁平技术报告（复用 ERP v8 设计令牌），证据优先、弱化装饰
+  使用方法：双击直接打开；无任何外部依赖；Ctrl/Cmd+P 可导出 PDF
+  说明：正文所有数值均为生产库真实实测值（2026-09-18）
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>多 SKU 订单数量显示修复 · 交付与审计报告</title>
+<style>
+:root{
+  --bg-1:#0A0F1C; --bg-2:#0F1626; --bg-3:#141D33;
+  --surface:#101827; --surface-2:#151F33; --surface-3:#1A2540;
+  --line:#1C2740; --line-2:#28364F; --line-3:#36486B;
+  --ink:#EAF0FA; --ink-2:#A6B4CE; --ink-3:#6B7C9E; --ink-4:#495A78;
+  --brand:#3B82F6; --brand-soft:rgba(59,130,246,.14); --brand-2:#06B6D4;
+  --ok:#52C41A; --ok-soft:rgba(82,196,26,.13);
+  --warn:#FA8C16; --warn-soft:rgba(250,140,22,.13);
+  --danger:#F5222D; --danger-soft:rgba(245,34,45,.13);
+  --violet:#8B5CF6; --violet-soft:rgba(139,92,246,.14);
+  --r-sm:6px; --r:10px; --r-lg:14px;
+  --topbar:52px;
+  --mono:ui-monospace,"Cascadia Mono",Consolas,"Courier New",monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",Helvetica,Arial,sans-serif;
+}
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0;background:var(--bg-1);color:var(--ink);
+  font-family:var(--sans);font-size:14.5px;line-height:1.72;
+  font-variant-numeric:tabular-nums;
+}
+a{color:var(--brand);text-decoration:none}
+a:hover{text-decoration:underline}
+.skip{position:absolute;left:-9999px}
+.skip:focus{left:12px;top:12px;z-index:99;background:var(--brand);color:#fff;padding:8px 14px;border-radius:var(--r-sm)}
+
+/* ---------- 顶栏 ---------- */
+.topbar{position:sticky;top:0;z-index:40;background:rgba(10,15,28,.88);
+  backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.topbar-in{max-width:1240px;margin:0 auto;height:var(--topbar);padding:0 22px;
+  display:flex;align-items:center;gap:14px}
+.brand{display:flex;align-items:center;gap:9px;font-weight:650;letter-spacing:.2px}
+.brand .dot{width:9px;height:9px;border-radius:2px;background:var(--brand-2)}
+.brand small{color:var(--ink-3);font-weight:500;font-size:12.5px}
+.topbar-in .sp{flex:1}
+.pbtn{background:var(--surface-2);border:1px solid var(--line-2);color:var(--ink-2);
+  padding:6px 13px;border-radius:var(--r-sm);cursor:pointer;font:inherit;font-size:13px}
+.pbtn:hover{border-color:var(--line-3);color:var(--ink)}
+
+/* ---------- 布局 ---------- */
+.layout{max-width:1240px;margin:0 auto;padding:26px 22px 90px;
+  display:grid;grid-template-columns:224px minmax(0,1fr);gap:34px;align-items:start}
+.toc{position:sticky;top:calc(var(--topbar) + 22px)}
+.toc h4{margin:0 0 10px;font-size:11.5px;letter-spacing:1.4px;text-transform:uppercase;color:var(--ink-4);font-weight:600}
+.toc ol{list-style:none;margin:0;padding:0;counter-reset:t}
+.toc li{margin:0}
+.toc a{display:block;padding:5px 12px 5px 11px;border-left:2px solid var(--line);
+  color:var(--ink-3);font-size:13.2px;line-height:1.5;border-radius:0 var(--r-sm) var(--r-sm) 0}
+.toc a:hover{color:var(--ink-2);background:var(--surface);text-decoration:none}
+.toc a[aria-current="true"]{color:var(--ink);border-left-color:var(--brand);background:var(--brand-soft)}
+.doc{min-width:0}
+
+/* ---------- 标题 ---------- */
+h1{margin:0 0 6px;font-size:27px;line-height:1.34;letter-spacing:-.2px;font-weight:680}
+.sub{color:var(--ink-3);font-size:13.5px;margin:0 0 26px}
+h2{margin:46px 0 14px;font-size:18.5px;font-weight:640;letter-spacing:-.1px;
+  scroll-margin-top:calc(var(--topbar) + 16px)}
+h2:first-of-type{margin-top:8px}
+h2 .n{display:inline-block;min-width:24px;color:var(--brand);font-family:var(--mono);font-size:14px;margin-right:8px}
+h3{margin:26px 0 9px;font-size:15.2px;font-weight:620;color:var(--ink);
+  scroll-margin-top:calc(var(--topbar) + 16px)}
+p{margin:0 0 13px;color:var(--ink-2)}
+ul,ol{padding-left:22px;color:var(--ink-2);margin:0 0 14px}
+li{margin:3px 0}
+strong{color:var(--ink);font-weight:620}
+hr{border:0;border-top:1px solid var(--line);margin:38px 0}
+
+/* ---------- 结论卡 ---------- */
+.verdict{background:linear-gradient(180deg,var(--surface-2),var(--surface));
+  border:1px solid var(--line-2);border-radius:var(--r-lg);padding:20px 22px;margin:0 0 26px}
+.verdict h3{margin:0 0 12px;font-size:14.5px}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:16px 0 4px}
+.kpi{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px}
+.kpi .k{font-size:11.5px;color:var(--ink-4);letter-spacing:.6px;text-transform:uppercase;font-weight:600}
+.kpi .v{font-size:21px;font-weight:670;margin-top:3px;font-family:var(--mono)}
+.kpi .v.ok{color:var(--ok)}
+.kpi .v.brand{color:var(--brand-2)}
+.kpi .d{font-size:12px;color:var(--ink-3);margin-top:1px}
+
+/* ---------- 标签 ---------- */
+.tag{display:inline-block;padding:1.5px 8px;border-radius:var(--r-full,999px);
+  font-size:11.5px;font-weight:620;line-height:1.7;white-space:nowrap;
+  border:1px solid transparent;font-family:var(--sans)}
+.tag.ok{background:var(--ok-soft);color:#7BD44A;border-color:rgba(82,196,26,.3)}
+.tag.b{background:var(--brand-soft);color:#7DB4FB;border-color:rgba(59,130,246,.3)}
+.tag.w{background:var(--warn-soft);color:#FFAE55;border-color:rgba(250,140,22,.3)}
+.tag.d{background:var(--danger-soft);color:#FF6B70;border-color:rgba(245,34,45,.3)}
+.tag.v{background:var(--violet-soft);color:#B69CFB;border-color:rgba(139,92,246,.3)}
+.tag.m{background:var(--surface-3);color:var(--ink-3);border-color:var(--line-2)}
+
+/* ---------- 表格 ---------- */
+.tblwrap{overflow:auto;border:1px solid var(--line);border-radius:var(--r);margin:0 0 18px;background:var(--surface)}
+.tblwrap table{border-collapse:collapse;width:100%;min-width:520px}
+.tblwrap th,.tblwrap td{padding:9px 13px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+.tblwrap thead th{background:var(--surface-2);color:var(--ink-3);font-size:12px;
+  font-weight:620;letter-spacing:.5px;text-transform:uppercase;position:sticky;top:0;white-space:nowrap}
+.tblwrap tbody tr:last-child td{border-bottom:0}
+.tblwrap tbody tr:hover{background:rgba(255,255,255,.017)}
+.tblwrap td strong{color:var(--ink)}
+code{font-family:var(--mono);font-size:12.6px;background:var(--surface-3);
+  border:1px solid var(--line-2);border-radius:4px;padding:1px 5px;color:#9EC5FE;overflow-wrap:anywhere}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+/* ---------- 证据块 ---------- */
+.ev{border-left:2px solid var(--brand);background:var(--surface);
+  border-radius:0 var(--r) var(--r) 0;padding:12px 16px;margin:0 0 16px}
+.ev>b:first-child{display:block;font-size:11.5px;letter-spacing:.7px;text-transform:uppercase;
+  color:var(--brand);margin-bottom:6px;font-weight:640}
+.ev p:last-child,.ev ul:last-child{margin-bottom:0}
+.ev pre{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
+pre{background:#0B1120;border:1px solid var(--line);border-radius:var(--r);
+  padding:13px 15px;overflow:auto;font-family:var(--mono);font-size:12.4px;line-height:1.66;
+  color:#C8D6F0;margin:0 0 16px}
+pre .c{color:var(--ink-4)}
+pre .g{color:#7BD44A}
+pre .r{color:#FF6B70}
+pre .y{color:#FFAE55}
+
+/* ---------- 根因链 ---------- */
+.chain{list-style:none;padding:0;margin:0 0 18px;counter-reset:rc}
+.chain li{position:relative;padding:12px 16px 12px 52px;border:1px solid var(--line);
+  border-radius:var(--r);background:var(--surface);margin-bottom:9px;counter-increment:rc}
+.chain li::before{content:"RC-" counter(rc);position:absolute;left:14px;top:12px;
+  font-family:var(--mono);font-size:11.5px;font-weight:640;color:var(--brand-2)}
+.chain li b{display:block;margin-bottom:3px;color:var(--ink);font-weight:620;font-size:14.2px}
+.chain li span{color:var(--ink-2);font-size:13.6px}
+
+/* ---------- 时间轴 ---------- */
+.tl{list-style:none;padding:0;margin:0 0 18px;border-left:2px solid var(--line-2);margin-left:5px}
+.tl li{position:relative;padding:0 0 18px 20px}
+.tl li::before{content:"";position:absolute;left:-7px;top:6px;width:10px;height:10px;
+  border-radius:50%;background:var(--bg-1);border:2px solid var(--brand)}
+.tl li.ok::before{border-color:var(--ok)}
+.tl time{font-family:var(--mono);font-size:12px;color:var(--ink-4);display:block}
+.tl b{color:var(--ink);font-weight:620}
+.tl span{color:var(--ink-2);font-size:13.6px}
+
+.callout{border:1px solid var(--line-2);border-left:2px solid var(--warn);
+  background:var(--warn-soft);border-radius:0 var(--r) var(--r) 0;padding:12px 16px;margin:0 0 16px}
+.callout>b:first-child{color:#FFAE55}
+.callout p{color:var(--ink-2);margin:0 0 8px}
+.callout p:last-child{margin:0}
+
+.totop{position:fixed;right:22px;bottom:22px;width:40px;height:40px;border-radius:50%;
+  background:var(--surface-2);border:1px solid var(--line-2);color:var(--ink-2);
+  cursor:pointer;display:none;align-items:center;justify-content:center;font-size:16px;z-index:50}
+.totop.on{display:flex}
+.totop:hover{border-color:var(--line-3);color:var(--ink)}
+footer{margin-top:60px;padding-top:20px;border-top:1px solid var(--line);
+  color:var(--ink-4);font-size:12.5px}
+
+@media(max-width:1000px){
+  .layout{grid-template-columns:minmax(0,1fr);gap:0;padding:18px 16px 80px}
+  .toc{position:static;margin:0 0 22px;border:1px solid var(--line);border-radius:var(--r);
+    background:var(--surface);padding:10px 8px}
+  .toc h4{padding-left:6px}
+  .toc ol{display:flex;gap:6px;overflow-x:auto;padding-bottom:3px}
+  .toc a{white-space:nowrap;border-left:0;border-bottom:2px solid transparent;
+    border-radius:var(--r-sm);padding:5px 10px}
+  .toc a[aria-current="true"]{border-left:0;border-bottom-color:var(--brand)}
+  .kpis{grid-template-columns:repeat(2,1fr)}
+}
+@media(max-width:720px){
+  h1{font-size:22px}
+  .tblwrap.stack table{min-width:0}
+  .tblwrap.stack tr:has(th){display:none}
+  .tblwrap.stack thead{display:none}
+  .tblwrap.stack tr{display:block;border:1px solid var(--line);border-radius:var(--r-sm);margin:9px}
+  .tblwrap.stack td{display:block;border:0;padding:5px 11px}
+  .tblwrap.stack td::before{content:attr(data-label);display:block;
+    font-size:11px;color:var(--ink-4);letter-spacing:.4px;text-transform:uppercase}
+  .tblwrap tr[hidden]{display:none}
+}
+@media print{
+  .topbar,.toc,.totop,.skip{display:none !important}
+  body{background:#fff;color:#111}
+  .layout{display:block;max-width:none;padding:0;gap:0}
+  h2,h3{break-after:avoid;color:#111}
+  .tblwrap,.ev,pre,.verdict,.callout,.chain li,.tl li{break-inside:avoid}
+  .tblwrap{overflow:visible;background:#fff}
+  .tblwrap thead th{position:static;background:#f3f5f8;color:#333}
+  pre{background:#f6f8fa;color:#1a2330;border-color:#d5dbe4}
+  .ev,.verdict,.callout,.chain li,.tblwrap{background:#fff;border-color:#d5dbe4}
+  .ink p,.sub,footer{color:#333}
+  code{background:#f6f8fa;color:#1a4faa;border-color:#d5dbe4}
+  p,li,span,td,strong{color:#1a2330 !important}
+  h1,h2,h3{color:#0b0f18 !important}
+}
+</style>
+</head>
+<body>
+<a class="skip" href="#doc">跳到正文</a>
+
+<header class="topbar">
+  <div class="topbar-in">
+    <span class="brand"><span class="dot"></span>滨发 ERP<small>湖北订单 · 多 SKU 数量显示</small></span>
+    <span class="sp"></span>
+    <button class="pbtn" onclick="window.print()">导出 PDF</button>
+  </div>
+</header>
+
+<div class="layout">
+  <nav class="toc" aria-label="报告目录">
+    <h4>目录</h4>
+    <ol>
+      <li><a href="#s1">1 · 结论摘要</a></li>
+      <li><a href="#s2">2 · 问题与根因链</a></li>
+      <li><a href="#s3">3 · 治本方案</a></li>
+      <li><a href="#s4">4 · 生产落地</a></li>
+      <li><a href="#s5">5 · 备货行缺陷</a></li>
+      <li><a href="#s6">6 · 验证链</a></li>
+      <li><a href="#s7">7 · 遗留与取舍</a></li>
+      <li><a href="#s8">8 · 变更清单</a></li>
+      <li><a href="#s9">9 · 证据索引</a></li>
+    </ol>
+  </nav>
+
+  <main class="doc" id="doc">
+    <h1>湖北订单页「多 SKU 订单数量」显示修复</h1>
+    <p class="sub">交付与审计报告 · 生产库已落地并生效 · 2026-09-18</p>
+
+    <div class="verdict">
+      <h3>结论：已修复并投产，全部断言可在真实环境复现</h3>
+      <p style="margin-bottom:4px">问题表面是「前端显示不了每个 SKU 的数量」，实质是<b>数据模型层从未持久化逐 SKU 下单量</b>。
+      采用治本方案（新增逐 SKU 快照表）后，前端展示、导出、打印三处同源，并顺带修掉一处页面可见的
+      <b>97 倍数值放大</b>缺陷。</p>
+      <div class="kpis">
+        <div class="kpi"><div class="k">迁移版本</div><div class="v brand">047</div><div class="d">CREATE TABLE，可回滚</div></div>
+        <div class="kpi"><div class="k">回填行数</div><div class="v brand">19</div><div class="d">17 张采购单 · 幂等</div></div>
+        <div class="kpi"><div class="k">对账不一致</div><div class="v ok">0</div><div class="d">Σ order_qty == 主表</div></div>
+        <div class="kpi"><div class="k">构建门禁</div><div class="v ok">EXIT 0</div><div class="d">vue-tsc -b / vitest</div></div>
+      </div>
+    </div>
+
+    <h2 id="s1"><span class="n">1</span>结论摘要</h2>
+    <div class="tblwrap stack">
+      <table>
+        <thead><tr><th>维度</th><th>结果</th><th>判定</th></tr></thead>
+        <tbody>
+          <tr><td data-label="维度">逐 SKU 展示</td><td data-label="结果">同一订单 3 个 SKU 各自显示 10000，产品名与数值一一对应，折叠「▸ 3 个 SKU」= 合计 30000</td><td data-label="判定"><span class="tag ok">通过</span></td></tr>
+          <tr><td data-label="维度">订单级去重口径</td><td data-label="结果">单 SKU 拆 4 张采购单仍为 10000（非 40000）；一单覆盖多订单时各取自身数量</td><td data-label="判定"><span class="tag ok">通过</span></td></tr>
+          <tr><td data-label="维度">导出 / 打印同源</td><td data-label="结果">真实浏览器触发下载并解析产物，与页面逐行一致</td><td data-label="判定"><span class="tag ok">通过</span></td></tr>
+          <tr><td data-label="维度">服务端筛选</td><td data-label="结果">实发 <code>?product=…</code>；筛选前后同一 SKU 数值不漂移</td><td data-label="判定"><span class="tag ok">通过</span></td></tr>
+          <tr><td data-label="维度">布局</td><td data-label="结果">1600 无横向滚动；1280 有横滚且表头/表体 <code>scrollLeft</code> 同步；多 SKU 行不裁切</td><td data-label="判定"><span class="tag ok">通过</span></td></tr>
+          <tr><td data-label="维度">降级不编造</td><td data-label="结果">无精确依据时数量置 <code>null</code>，生产数量显示「—」，不产生假数字</td><td data-label="判定"><span class="tag ok">通过</span></td></tr>
+          <tr><td data-label="维度">备货行 97 倍放大</td><td data-label="结果">修复前 969461 / 980126 → 修复后 10000 /「—」</td><td data-label="判定"><span class="tag ok">已修</span></td></tr>
+          <tr><td data-label="维度">13 张历史单</td><td data-label="结果">源订单已被清理（真性脏数据），永久走降级口径，页面不渲染，无用户可见差异</td><td data-label="判定"><span class="tag w">已定性</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 id="s2"><span class="n">2</span>问题与根因链</h2>
+    <p>用户现象：同一订单、同一下单时间包含约 20 个 SKU 时，页面无法显示每个 SKU 各自的订单数量。
+    逐层下钻后确认这是<b>五层叠加</b>的问题，任一单点修复都不足以解决。</p>
+    <ol class="chain">
+      <li><b>数据模型层（主因）</b><span>汇总下单一律「1 个客户 = 1 张采购单」，多 SKU 产品名被
+        <code>'、'.join</code> 拼接、数量被求和写入 <code>purchase_order.product_quantity</code>。
+        <b>逐 SKU 下单量自落库起即不可还原。</b></span></li>
+      <li><b>读路径口径错误</b><span>订单级数量取 <code>MAX(product_quantity)</code>。该写法本意是「同 SKU 拆多供应商去重」，
+        但当一张采购单覆盖多张客户订单时（实测有单覆盖 15 张），<b>每张订单都显示同一合计</b>，系统性高估。</span></li>
+      <li><b>前端列语义漂移</b><span>数量列在「无筛选时显示 63791」与「筛选后显示 32766」两个值之间跳变 —— 同一行两个真相。</span></li>
+      <li><b>虚拟列表测量自相矛盾</b><span><code>measureItems()</code> 量的是<b>被 inline 固定高约束后</b>的盒子，
+        而 <code>getItemStyle()</code> 又把 <code>estimatedHeight(54)</code> 写回固定高 ⇒ 行高恒 54px，
+        配合 <code>.bo-td{overflow:hidden}</code> 直接裁掉超出内容。20 SKU 行自然高约 464px，会被裁成 2 行。</span></li>
+      <li><b>筛选作用域</b><span>前端从不向后端传产品筛选参数，只在当前页 18 条上做客户端过滤 ⇒
+        「搜到 0 行」被误报为「订单不存在」。</span></li>
+    </ol>
+    <div class="ev"><b>关键判断</b>
+      <p>RC-4 若不先修，直接实现逐 SKU 展开会让症状<b>更糟</b>（20 SKU 行被裁成 2 行）。
+      因此它被列为方案硬前置 P-0。</p>
+    </div>
+    <h2 id="s3"><span class="n">3</span>治本方案：逐 SKU 数量快照</h2>
+    <p>核心是新增 <code>purchase_order_sku</code> 表，把逐 SKU 的订单数量、备品量、损耗率在<b>写路径</b>落库，
+    使「每个 SKU 各自的下单量」成为可还原的事实，而不是靠前端猜测。</p>
+    <div class="tblwrap stack">
+      <table>
+        <thead><tr><th>字段</th><th>含义</th><th>备注</th></tr></thead>
+        <tbody>
+          <tr><td data-label="字段"><code>po_id</code></td><td data-label="含义">所属采购单</td><td data-label="备注">FK → <code>purchase_order.id</code> ON DELETE CASCADE</td></tr>
+          <tr><td data-label="字段"><code>product_name</code></td><td data-label="含义">SKU 产品名</td><td data-label="备注">读路径按归一化名称匹配</td></tr>
+          <tr><td data-label="字段"><code>order_qty</code></td><td data-label="含义">该 SKU 的订单数量</td><td data-label="备注">合并后数量，不摊派</td></tr>
+          <tr><td data-label="字段"><code>spare_qty</code></td><td data-label="含义">备品量</td><td data-label="备注"><code>ceil(order_qty × 损耗率‰)</code>，费率变更时重算</td></tr>
+          <tr><td data-label="字段"><code>spare_rate</code></td><td data-label="含义">损耗率快照</td><td data-label="备注">千分之几，可追溯</td></tr>
+          <tr><td data-label="字段"><code>source_order_id</code><br><code>source_record_type</code></td><td data-label="含义">来源记录定位</td><td data-label="备注"><b>必须含类型</b>：本仓 order.id 与 stockin.id 会撞号，缺列会串号</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="ev"><b>口径恒等式</b>
+      <p><code>Σ order_qty == purchase_order.product_quantity</code>（同一采集口径）。
+      唯一约束 <code>(po_id, source_record_type, source_order_id, product_name)</code> 作为第二道防线；
+      不纳入 <code>product_barcode</code>（可空，PG 下 <code>NULL != NULL</code> 会使约束失效）。</p>
+    </div>
+
+    <h3>3.1 三个配套硬前置</h3>
+    <div class="tblwrap stack">
+      <table>
+        <thead><tr><th>编号</th><th>内容</th><th>解决</th></tr></thead>
+        <tbody>
+          <tr><td data-label="编号"><span class="tag m">P-0</span></td><td data-label="内容">修 <code>VirtualList</code> 变高测量自相矛盾</td><td data-label="解决">20 SKU 行不再被裁切，行高随内容增长</td></tr>
+          <tr><td data-label="编号"><span class="tag m">P-1</span></td><td data-label="内容">消除数量列语义漂移 + 逐 SKU 渲染 + 折叠展开</td><td data-label="解决">同一行只有一个真相；默认折叠「▸ N 个 SKU」控密度</td></tr>
+          <tr><td data-label="编号"><span class="tag m">P-2</span></td><td data-label="内容">产品筛选改走服务端</td><td data-label="解决">筛选在整个结果集生效，而非仅当前 18 行</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout">
+      <b>一个易错点（已修）</b>
+      <p>后端 Query 参数名是 <code>product</code>，<b>不是</b> <code>product_kw</code>。最初按 <code>product_kw</code> 传递时服务端筛选静默失效 —— 属于「看起来改了但实际没生效」的典型陷阱。</p>
+    </div>
+
+    <h2 id="s4"><span class="n">4</span>生产落地：迁移与回填</h2>
+    <p>方案代码就绪但<b>不迁移就只是「代码就绪，线上不生效」</b>。已获批准后执行两步。落地前的只读核验确认了这一点：</p>
+    <pre><span class="c">=== 迁移前 ===</span>
+alembic_version   = pg_standalone_046_po_spare_fields
+to_regclass(purchase_order_sku) = <span class="r">None</span>          <span class="c">← 表不存在，线上走降级口径</span>
+purchase_order 行数 = 44</pre>
+
+    <h3>4.1 迁移</h3>
+    <pre><span class="c"># 正解：用驱动脚本显式指定绝对 script_location，保持 cwd 不变</span>
+<span class="g">OK</span>  046 -> 047  采购单逐 SKU 数量快照：新增 purchase_order_sku 表
+
+<span class="c">=== 迁移后 ===</span>
+alembic_version = pg_standalone_047_purchase_order_sku
+索引命中：Index Scan using idx_purchase_order_sku_source
+约束：pkey / fkey(ON DELETE CASCADE) / uq_po_sku_po_source_product
+行数：0</pre>
+    <div class="callout">
+      <b>踩坑记录（值得记住）</b>
+      <p><code>migrations/alembic.ini</code> 的 <code>script_location = .</code> 是相对<b>当前工作目录</b>解析的，
+      从仓库根直接执行会报 <code>ImportError: Can't find Python file env.py</code>。</p>
+      <p>解法是用驱动脚本把 <code>script_location</code> 设为绝对路径、<b>保持 cwd 不变</b>——
+      若改成 <code>cd migrations</code>，<code>.env</code> 与 settings 的相对解析会跟着偏移，风险更高。</p>
+    </div>
+
+    <h3>4.2 回填</h3>
+    <div class="tblwrap stack">
+      <table>
+        <thead><tr><th>项</th><th>实测</th></tr></thead>
+        <tbody>
+          <tr><td data-label="项">写入</td><td data-label="实测"><strong>19 行 / 17 张</strong> completed 采购单</td></tr>
+          <tr><td data-label="项">对账</td><td data-label="实测">17 张全部 <code>Σ order_qty == product_quantity</code>，<b>不一致 0 张</b></td></tr>
+          <tr><td data-label="项">幂等</td><td data-label="实测">二次 <code>--apply</code> 后仍为 19 行 / 17 单，唯一约束冲突 0</td></tr>
+          <tr><td data-label="项">来源类型分布</td><td data-label="实测"><code>order=14 / stockin=5</code> —— 证明 order 与 stockin 的 id 撞号处理生效</td></tr>
+          <tr><td data-label="项">跳过</td><td data-label="实测">13 张源记录缺失 → <b>不写任何行</b>（绝不静默写 0 值行）</td></tr>
+          <tr><td data-label="项">备品口径抽查</td><td data-label="实测"><code>99999×10‰ → 1000</code>、<code>969461×11‰ → 10665</code>，与公式一致</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="ev"><b>对抗性核查：13 张「源缺失」是真脏数据，不是脚本查源缺陷</b>
+      <p>其中包含用户最初报告的 PO 20342（覆盖 15 张单），因此必须查证。反查结论：
+      <code>order</code> 表 id 范围 <code>min=64987 ~ max=68743</code>，而缺失 id（35026 / 35031 / 64764~64986）
+      <b>全部低于 64987</b> —— 源订单已被保留策略清理。这些单的来源订单本身已不在页面上出现，故降级不产生用户可见差异。</p>
+    </div>
+    <div class="ev"><b>混合态安全阀（设计上已覆盖）</b>
+      <p>回填只覆盖 17/30 张单，属于「部分回填」混合态。读路径的 <code>rollup_ok</code> 要求
+      「该来源的<b>全部</b>关联采购单都有逐 SKU 快照」，否则回退旧口径 —— 不会因部分回填产出错误数值。</p>
+    </div>
+    <h2 id="s5"><span class="n">5</span>QA 发现并修复的备货行缺陷</h2>
+    <p>多 SKU 主链路通过后，独立回归在<b>备货（stockin）行</b>揪出两处缺陷，其中一处页面可见、数值放大近 97 倍。</p>
+
+    <h3>5.1 现象与独立复现</h3>
+    <div class="tblwrap stack">
+      <table>
+        <thead><tr><th>备货单</th><th>客户 / 产品</th><th>自身数量</th><th>模糊命中采购单</th><th>精确逐 SKU</th><th>修复前注入值</th></tr></thead>
+        <tbody>
+          <tr><td data-label="备货单"><strong>35045</strong></td><td data-label="客户">TOP TOY / 变形金刚</td><td data-label="自身数量">10000</td><td data-label="模糊命中">[20397] → 969461</td><td data-label="精确逐 SKU"><span class="tag d">0 行</span></td><td data-label="修复前">969461 / 980126</td></tr>
+          <tr><td data-label="备货单"><strong>35042</strong></td><td data-label="客户">MINISO国内 / Nommi</td><td data-label="自身数量">10000</td><td data-label="模糊命中">[20351,20352,20385,20384,20383] → 12424</td><td data-label="精确逐 SKU">1 行 = 10000</td><td data-label="修复前">行级 12424 ≠ 10000</td></tr>
+          <tr><td data-label="备货单">35043</td><td data-label="客户">MINISO国际 / 妹妹二代</td><td data-label="自身数量">10000</td><td data-label="模糊命中">4 张全 10000</td><td data-label="精确逐 SKU">4 行</td><td data-label="修复前"><span class="tag ok">10000（正确）</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>根因三层，缺一不可：备货行只能用「(客户名, 产品名) 模糊匹配」找采购单 → 命中集合的
+    <code>MAX(product_quantity)</code> 被当成该备货自己的数量 → 前端「单 SKU 且已下单则回退订单级」把该值直接显示为 SKU 数量。</p>
+    <div class="ev"><b>注意：属既有缺陷，非本轮引入</b>
+      <p>修复前页面同样显示 969461，但本轮的降级规则使其继续暴露，且违反「降级不得编造数字」的硬要求，因此必修。</p>
+    </div>
+
+    <h3>5.2 治本修复</h3>
+    <p>修复契机是：<b>回填后的 <code>source_record_type</code> 让备货行首次具备「精确（带类型）匹配」能力</b>。</p>
+    <div class="tblwrap stack">
+      <table>
+        <thead><tr><th>层</th><th>改动</th></tr></thead>
+        <tbody>
+          <tr><td data-label="层">读路径</td><td data-label="改动">备货行优先用逐 SKU 快照的 <code>po_id</code> 集合构造 <code>pos</code>；<code>_fetch_completed_po_maps</code> 增返回 <code>po_by_id</code></td></tr>
+          <tr><td data-label="层">口径契约</td><td data-label="改动">新增 <code>pos_exact</code>：<b>模糊来源只决定 <code>is_ordered</code>，数量一律置 <code>null</code></b>。保留「已下单」信号，因此 <code>unordered_count</code> 不变</td></tr>
+          <tr><td data-label="层">前端守卫</td><td data-label="改动">4 个口径函数（<code>skuOrderQty</code> / <code>skuProductionQty</code> / <code>rowTotalOrderQty</code> / <code>rowTotalProductionQty</code>）加 <code>!= null</code> 守卫 —— 否则 <code>null</code> 会被 <code>?? 0</code> 渲染成<b>新的错误 0</b></td></tr>
+          <tr><td data-label="层">加粗语义</td><td data-label="改动"><code>skuIsOrdered</code> 同步加守卫：未拿到采购单实际下单量就不加粗（与该四个函数口径统一）</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="ev"><b>修复后（直调真实服务入口实测，81 行全量扫描）</b>
+      <pre><span class="g">35045</span>  purchase_order_qty=<span class="y">None</span>  spare_quantity=<span class="y">None</span>  is_ordered=True   <span class="c">→ 渲染 10000 /「—」</span>
+<span class="g">35042</span>  行级 10000 == 逐 SKU 10000
+<span class="g">35043</span>  10000（无回归）
+<span class="g">65003</span>  3 个 SKU 各 10000，订单级 30000
+<span class="g">64997</span>  10000（非 40000）
+
+不变量扫描：可疑备货行（已下单+有数量+无 po_sku 来源）= <span class="g">0</span>
+            order 行「is_ordered 但数量 None」= <span class="g">0</span></pre>
+    </div>
+
+    <h2 id="s6"><span class="n">6</span>验证链</h2>
+    <p>验证分三层：生产库取证 → 真实浏览器端到端 → 门禁回归。所有结论均由<b>主理人自行复跑</b>，不采信执行方自述。</p>
+
+    <h3>6.1 治理动作（本次的一条关键纪律）</h3>
+    <div class="tblwrap stack">
+      <table>
+        <thead><tr><th>情形</th><th>处置</th></tr></thead>
+        <tbody>
+          <tr><td data-label="情形">工程师修改了自己曾写过的用例断言</td><td data-label="处置">核验后接受：该断言记录的正是被修复的缺陷行为，属必要的契约更新</td></tr>
+          <tr><td data-label="情形">QA 作者的用例断言因契约变更而失败</td><td data-label="处置"><b>指派 QA（文件作者）更新</b>，禁止被验证方自行修改验证方用例</td></tr>
+          <tr><td data-label="情形">测试文件期望值出现无法溯源的翻转</td><td data-label="处置">独立核验语义正确性 + 三支用例自洽性，再要求归属确认；最终由 QA 认领并更正其先前表述</td></tr>
+          <tr><td data-label="情形">生产库行数悄悄从 19 变为 23</td><td data-label="处置">逐行审计 → 归因于 <code>21:40:40</code> 经应用写路径生成的新采购单（<code>status=pending</code>，不影响展示），非越界写入</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>6.2 真实浏览器端到端（Edge）</h3>
+    <div class="tblwrap stack">
+      <table>
+        <thead><tr><th>断言</th><th>实测</th></tr></thead>
+        <tbody>
+          <tr><td data-label="断言">3 SKU 逐 SKU 分行</td><td data-label="实测">折叠「▸ 3 个 SKU」=30000；展开 3 行各 10000/10000 + 合计 30000；行高随内容增长，无裁切</td></tr>
+          <tr><td data-label="断言">详情弹窗</td><td data-label="实测">表头含订单数量 → 生产数量，3 行名称/条码/数值逐一对上</td></tr>
+          <tr><td data-label="断言">备货 35045 无假数字</td><td data-label="实测">DOM、导出、打印<b>三处均无</b> 969461 / 980126</td></tr>
+          <tr><td data-label="断言">null 安全</td><td data-label="实测"><code>null</code>/<code>None</code>/<code>NaN</code> 渲染 token = 0；console errors = 0</td></tr>
+          <tr><td data-label="断言">导出 / 打印同源</td><td data-label="实测">真实触发下载并解析产物，与页面逐行一致</td></tr>
+          <tr><td data-label="断言">服务端筛选</td><td data-label="实测">实发 <code>?product=…</code>；筛选前后同一 SKU 数值不漂移</td></tr>
+          <tr><td data-label="断言">1280 / 1600</td><td data-label="实测">1600 无横滚；1280 有横滚且表头/表体 <code>scrollLeft</code> 同步 delta=0</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>6.3 门禁（主理人自行复跑）</h3>
+    <pre>vue-tsc -b                      <span class="g">EXIT 0</span>
+前端定向 vitest                  <span class="g">8 / 8 passed</span>
+后端相关测试集                   <span class="g">51 passed</span>（修复过程中 1 failed，为 QA 待更新的过期断言）
+后端全量                        <span class="y">6 failed / 1592 passed / 2 skipped</span>
+                                <span class="c">↑ 6 项全为环境类：站点跑 vite dev 模式而非 nginx，与本修复无关</span></pre>
+    <div class="callout">
+      <b>构建门禁必须是 <code>vue-tsc -b</code></b>
+      <p>用普通 <code>tsc -b</code> 会因无法解析 <code>.vue</code> 模块导出而误报
+      <code>TS2614: no exported member 'TableColumn'</code>（出现在 <code>views/case</code>、<code>views/report</code>），
+      看起来像大面积报错，实则与本次改动无关。</p>
+    </div>
+    <h2 id="s7"><span class="n">7</span>遗留事项与设计取舍</h2>
+
+    <h3>7.1 一处需要业务方知情的语义取舍</h3>
+    <div class="callout">
+      <b>备货行「无精确依据时不显示数量」的代价</b>
+      <p>新契约下，<b>当模糊匹配恰好正确时</b>（例如只有一个候选采购单），备货行也会退化为
+      「自身数量 + 生产数量『—』」，即损失了那份本来正确的信息。</p>
+      <p>判断依据：无法区分「对的模糊」与「错的模糊」（id 撞号且历史数据无类型信息），
+      <b>宁可不给无法证明的数字</b>；真实生产 30 张 completed 采购单<b>全部</b>有非空
+      <code>source_order_ids</code>，故该退化只影响无逐 SKU 快照的历史备货；正路径（以该备货为来源生成的采购单会写入
+      <code>source_record_type='stockin'</code> 快照）已就位。</p>
+    </div>
+
+    <h3>7.2 遗留清单</h3>
+    <div class="tblwrap stack">
+      <table>
+        <thead><tr><th>编号</th><th>事项</th><th>影响</th><th>状态</th></tr></thead>
+        <tbody>
+          <tr><td data-label="编号"><span class="tag m">R-1</span></td><td data-label="事项">13 张历史采购单源订单已被清理，永久走降级口径</td><td data-label="影响">这些单在页面<b>不渲染</b>，无用户可见差异</td><td data-label="状态"><span class="tag w">已定性</span></td></tr>
+          <tr><td data-label="编号"><span class="tag m">R-2</span></td><td data-label="事项">备货行模糊匹配正确时亦不显示数量</td><td data-label="影响">仅历史数据；正路径已覆盖</td><td data-label="状态"><span class="tag w">需业务确认</span></td></tr>
+          <tr><td data-label="编号"><span class="tag m">R-3</span></td><td data-label="事项">导出标题「湖北订单汇总（未确认）」但结果集含已确认行</td><td data-label="影响">既有文案问题，非本轮引入</td><td data-label="状态"><span class="tag m">低优先</span></td></tr>
+          <tr><td data-label="编号"><span class="tag m">R-4</span></td><td data-label="事项">13 张源缺失单的采购单主表数量与非快照口径的偏差</td><td data-label="影响">读路径降级为 <code>MAX</code>，与该单本身口径一致</td><td data-label="状态"><span class="tag m">低优先</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 id="s8"><span class="n">8</span>变更清单</h2>
+    <div class="tblwrap stack">
+      <table>
+        <thead><tr><th>文件</th><th>类型</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td data-label="文件"><code>shared_models/purchase_order.py</code></td><td data-label="类型"><span class="tag b">模型</span></td><td data-label="说明">新增 <code>PurchaseOrderSku</code>（<code>lazy='raise'</code>，读路径显式预加载）</td></tr>
+          <tr><td data-label="文件"><code>services/purchase_order_sku.py</code></td><td data-label="类型"><span class="tag v">新增</span></td><td data-label="说明">构建 / 写入 / 可用性探测 / 备品重算</td></tr>
+          <tr><td data-label="文件"><code>services/purchase_order_generate.py</code></td><td data-label="类型"><span class="tag b">改</span></td><td data-label="说明">生成采购单时写逐 SKU 快照</td></tr>
+          <tr><td data-label="文件"><code>services/purchase_order_crud.py</code></td><td data-label="类型"><span class="tag b">改</span></td><td data-label="说明">费率变更时重算逐 SKU 备品</td></tr>
+          <tr><td data-label="文件"><code>services/order/beile.py</code></td><td data-label="类型"><span class="tag b">改</span></td><td data-label="说明">读路径：精确匹配、逐 SKU 注入、<code>pos_exact</code> 契约、优雅降级</td></tr>
+          <tr><td data-label="文件"><code>migrations/versions/pg_standalone_047_*.py</code></td><td data-label="类型"><span class="tag v">新增</span></td><td data-label="说明">CREATE TABLE IF NOT EXISTS + 索引 + 唯一约束，可回滚</td></tr>
+          <tr><td data-label="文件"><code>scripts/backfill_purchase_order_sku.py</code></td><td data-label="类型"><span class="tag v">新增</span></td><td data-label="说明">默认 dry-run；幂等先删后插；对账分类</td></tr>
+          <tr><td data-label="文件"><code>views/beile-order/composables/useBeileOrders.ts</code></td><td data-label="类型"><span class="tag b">改</span></td><td data-label="说明">同源口径函数 + null 守卫 + 服务端筛选参数</td></tr>
+          <tr><td data-label="文件"><code>components/BeileOrderRow.vue</code></td><td data-label="类型"><span class="tag b">改</span></td><td data-label="说明">逐 SKU 行渲染 + 合计子行 + 折叠展开</td></tr>
+          <tr><td data-label="文件"><code>BeileOrderTab.vue</code></td><td data-label="类型"><span class="tag b">改</span></td><td data-label="说明">横向滚动容器，表头与表体滚动同步</td></tr>
+          <tr><td data-label="文件"><code>components/ui/VirtualList.vue</code></td><td data-label="类型"><span class="tag b">改</span></td><td data-label="说明">修变高测量自相矛盾</td></tr>
+          <tr><td data-label="文件"><code>BeileOrderDetailDialog.vue</code></td><td data-label="类型"><span class="tag b">改</span></td><td data-label="说明">数量 → 订单数量，新增生产数量列</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="ev"><b>提交状态</b>
+      <p>本轮所有改动<b>均在工作树中、未提交</b>。原因是仓库工作树同时存在其他人未提交的重构
+      （如 <code>useOrderImport.ts</code>）与大量未跟踪文件，自动提交会把无关文件一并卷入。
+      建议由维护者按功能域拆分提交。</p>
+    </div>
+
+    <h2 id="s9"><span class="n">9</span>证据索引</h2>
+    <div class="tblwrap stack">
+      <table>
+        <thead><tr><th>类别</th><th>文件</th><th>内容</th></tr></thead>
+        <tbody>
+          <tr><td data-label="类别">根因分析</td><td data-label="文件"><code>evidence/beile_multisku/多SKU订单数量显示-根因与方案.md</code></td><td data-label="内容">五层根因链与方案 A/B/C 对比</td></tr>
+          <tr><td data-label="类别">迁移取证</td><td data-label="文件"><code>_probe_migrate_state.py</code> / <code>_probe_sku_table.py</code></td><td data-label="内容">迁移前后 alembic 版本、表结构、约束与索引</td></tr>
+          <tr><td data-label="类别">回填取证</td><td data-label="文件"><code>_probe_sku_verify.py</code> / <code>_audit_sku_rows.py</code></td><td data-label="内容">逐单对账、唯一约束冲突自检、行数变化审计</td></tr>
+          <tr><td data-label="类别">读路径取证</td><td data-label="文件"><code>_probe_readpath.py</code> / <code>_verify_r2_fix.py</code></td><td data-label="内容">直调真实服务入口的逐 SKU 注入与不变量扫描</td></tr>
+          <tr><td data-label="类别">缺陷复现</td><td data-label="文件"><code>_probe_stockin_defect.py</code></td><td data-label="内容">备货行模糊匹配 97 倍放大的独立复现</td></tr>
+          <tr><td data-label="类别">QA 证据</td><td data-label="文件"><code>_qa_tmp2/</code> / <code>_qa_tmp3/</code></td><td data-label="内容">真实浏览器 E2E JSON、截图、导出产物解析、门禁日志</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <footer>
+      报告生成于 2026-09-18 · 所有数值取自生产库真实实测 · 站点以 vite dev server 承载，本轮前后端改动已实时生效，无需重新构建或重启。
+    </footer>
+  </main>
+</div>
+
+<button class="totop" id="totop" aria-label="回到顶部">↑</button>
+
+<script>
+(function(){
+  var links = Array.prototype.slice.call(document.querySelectorAll('.toc a'));
+  var targets = links.map(function(a){
+    return { a: a, el: document.querySelector(a.getAttribute('href')) };
+  }).filter(function(t){ return t.el; });
+
+  var topbar = 52 + 28;
+  function sync(){
+    var best = targets[0];
+    for (var i = 0; i < targets.length; i++){
+      var top = targets[i].el.getBoundingClientRect().top;
+      if (top <= topbar) best = targets[i];
+    }
+    links.forEach(function(a){ a.removeAttribute('aria-current'); });
+    if (best) best.a.setAttribute('aria-current', 'true');
+  }
+
+  var ticking = false;
+  function onScroll(){
+    if (ticking) return;
+    ticking = true;
+    window.requestAnimationFrame(function(){
+      sync();
+      var b = document.getElementById('totop');
+      if (window.scrollY > 420) b.classList.add('on'); else b.classList.remove('on');
+      ticking = false;
+    });
+  }
+  window.addEventListener('scroll', onScroll, { passive: true });
+  window.addEventListener('resize', onScroll);
+  onScroll();
+
+  document.getElementById('totop').addEventListener('click', function(){
+    var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    window.scrollTo({ top: 0, behavior: reduce ? 'auto' : 'smooth' });
+  });
+
+  // 锚点点击后把焦点交给正文，便于键盘/读屏继续阅读
+  links.forEach(function(a){
+    a.addEventListener('click', function(){
+      var el = document.querySelector(a.getAttribute('href'));
+      if (el) { el.setAttribute('tabindex', '-1'); el.focus({ preventScroll: true }); }
+    });
+  });
+})();
+</script>
+</body>
+</html>

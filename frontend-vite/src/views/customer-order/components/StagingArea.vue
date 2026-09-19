@@ -2,9 +2,9 @@
   <div class="co-col">
     <div class="co-col-title">
       <span><FontAwesomeIcon icon="layer-group" aria-hidden="true" /> 暂存列表</span>
-      <span v-if="stagedItems.length" class="count-badge-subtle">共 {{ stagedItems.length }} 个</span>
+      <span v-if="stagedItems.length" class="count-badge-subtle" role="status" aria-live="polite">共 {{ stagedItems.length }} 个</span>
     </div>
-    <div class="co-col-scroll">
+    <div class="co-col-scroll" :aria-label="`暂存列表，共 ${stagedItems.length} 条`">
       <template v-if="stagedItems.length">
         <div
           v-for="(item, idx) in stagedItems"
@@ -29,10 +29,18 @@
               </span>
             </div>
             <div class="co-staged-actions">
-              <button class="co-btn-icon co-btn-warn" aria-label="编辑" @click="emit('edit-staged', item.uid)">
+              <button
+                class="co-btn-icon co-btn-warn"
+                :aria-label="`编辑 ${item.customer} 的 ${item.productName}`"
+                @click="emit('edit-staged', item.uid)"
+              >
                 <FontAwesomeIcon icon="edit" aria-hidden="true" />
               </button>
-              <button class="co-btn-icon co-btn-danger" aria-label="删除" @click="emit('remove-staged', item.uid)">
+              <button
+                class="co-btn-icon co-btn-danger"
+                :aria-label="`删除 ${item.customer} 的 ${item.productName}`"
+                @click="emit('remove-staged', item.uid)"
+              >
                 <FontAwesomeIcon icon="trash" aria-hidden="true" />
               </button>
             </div>
@@ -112,15 +120,16 @@ const emit = defineEmits<{
 
 /* ===== 暂存列表 ===== */
 .co-staged-card {
-  border: 2px solid var(--color-border-light, #e2e8f0);
+  border: 1px solid var(--color-border-light, #e2e8f0);
   border-radius: 10px;
   padding: 10px 14px;
   margin-bottom: 8px;
-  transition: border-color 0.3s ease, transform 0.3s ease;
+  transition: border-color 0.2s ease, background 0.2s ease;
 }
+/* hover 用描边/底色表达，不做位移（列表扫读时位移会造成抖动与重排） */
 .co-staged-card:hover {
   border-color: var(--color-primary-300);
-  transform: translateY(-1px);
+  background: var(--color-surface, #f8fafc);
 }
 .co-staged-main {
   display: flex;
@@ -195,7 +204,6 @@ const emit = defineEmits<{
 }
 .co-btn-warn:hover {
   background: var(--color-warning-100);
-  transform: translateY(-1px);
 }
 .co-btn-danger {
   background: var(--color-danger-50);
@@ -203,7 +211,6 @@ const emit = defineEmits<{
 }
 .co-btn-danger:hover {
   background: var(--color-danger-100);
-  transform: translateY(-1px);
 }
 .co-btn-danger:disabled {
   opacity: 0.4;

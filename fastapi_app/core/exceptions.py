@@ -46,6 +46,13 @@ class PermissionDeniedError(AppError):
         super().__init__(message=message, code="PERMISSION_DENIED", status_code=403)
 
 
+class UnauthorizedError(AppError):
+    """未认证异常（登录失败/凭据无效）"""
+
+    def __init__(self, message: str = "用户名或密码错误"):
+        super().__init__(message=message, code="UNAUTHORIZED", status_code=401)
+
+
 class ConflictError(AppError):
     """资源冲突异常（如并发修改、唯一约束冲突）"""
 

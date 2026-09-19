@@ -1,0 +1,5 @@
+# Build artifacts generated from TS config sources (do not commit; keeps Vite resolving vite.config.ts)
+vite.config.js
+vite.config.d.ts
+*.tsbuildinfo
+pattern-room-screenshot*.png

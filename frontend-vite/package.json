@@ -15,6 +15,7 @@
     "build:open:fast": "node scripts/build-refresh.mjs --fast",
     "check:routes": "node scripts/check-route-alignment.mjs",
     "check:api": "node scripts/check-api-alignment.mjs",
+    "check:api:pc": "node scripts/check-pc-api-bypass.mjs",
     "preview": "vite preview",
     "type-check": "vue-tsc --noEmit",
     "lint": "eslint src/ --ext .ts,.vue",

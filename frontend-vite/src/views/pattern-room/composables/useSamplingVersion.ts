@@ -1,7 +1,7 @@
 /**
  * useSamplingVersion — 版本管理 Hook
  *
- * 封装版本列表查询、版本详情查询、创建新版本的状态管理与 API 调用。
+ * 封装版本列表查询、版本详情查询的状态管理与 API 调用。
  * 接收响应式 projectId，watch 自动重新加载版本列表。
  * 对应 design.md 2.4.6 E4。
  */
@@ -10,15 +10,12 @@ import { patternRoomApi } from '@/api/patternRoom'
 import type {
   VersionBrief,
   VersionDetailResponse,
-  ActionResponse,
 } from '@/api/patternRoom'
 import { toast } from '@/composables/useToast'
-import { getErrorStatus } from '@/types/errors'
 import { resolveSamplingErrorMessage } from './useSamplingErrors'
 
 export function useSamplingVersion(
   projectId: Ref<number | null>,
-  currentRoleId: Ref<number | null> = ref(null),
 ) {
   /** 版本列表（按 version_no 升序） */
   const versions = ref<VersionBrief[]>([])
@@ -28,8 +25,6 @@ export function useSamplingVersion(
   const versionDetail = ref<VersionDetailResponse | null>(null)
   /** 加载中 */
   const loading = ref(false)
-  /** 提交中（创建新版本） */
-  const submitting = ref(false)
   /** 错误信息 */
   const error = ref<string | null>(null)
 
@@ -91,44 +86,6 @@ export function useSamplingVersion(
     }
   }
 
-  /**
-   * 创建新版本（快照当前部位布料 + 计算相对前一版本 diff）
-   * @param reason 变更原因（可选）
-   * @returns 创建结果 { version_id, version_no } 或 null
-   * - 409 冲突时自动刷新版本列表，便于用户看到最新数据后重试
-   */
-  async function createVersion(reason?: string): Promise<ActionResponse | null> {
-    if (projectId.value == null) return null
-    submitting.value = true
-    error.value = null
-    try {
-      const res = await patternRoomApi.createVersion(
-        projectId.value,
-        { reason },
-        currentRoleId.value ?? undefined,
-      )
-      // 刷新版本列表
-      await fetchVersions(projectId.value)
-      // 自动切换到新版本
-      if (res.version_id != null) {
-        await fetchVersionDetail(res.version_id)
-      }
-      return res
-    } catch (e) {
-      console.error('[useSamplingVersion] 创建新版本失败:', e)
-      const message = resolveSamplingErrorMessage(e, '创建新版本失败')
-      error.value = message
-      toast.error(message)
-      // 乐观锁冲突：自动刷新版本列表，让用户基于最新数据重试
-      if (getErrorStatus(e) === 409 && projectId.value != null) {
-        await fetchVersions(projectId.value)
-      }
-      return null
-    } finally {
-      submitting.value = false
-    }
-  }
-
   /** 是否基线版本（T1） */
   const isBaseline = computed(() => versionDetail.value?.is_baseline ?? false)
   /** 是否降级展示（前一版本缺失） */
@@ -170,14 +127,12 @@ export function useSamplingVersion(
     currentVersionId,
     versionDetail,
     loading,
-    submitting,
     error,
     isBaseline,
     isDegraded,
     currentVersionNo,
     fetchVersions,
     fetchVersionDetail,
-    createVersion,
     clearVersions,
   }
 }

@@ -6,13 +6,13 @@
 import logging
 from datetime import timedelta
 
-from fastapi import HTTPException
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
 from fastapi_app.core.config import settings
 from fastapi_app.core.deps import create_access_token, create_refresh_token
+from fastapi_app.core.exceptions import UnauthorizedError
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ async def authenticate_login(
         dict: 包含 access_token, refresh_token, token_max_age, refresh_max_age, user。
 
     Raises:
-        HTTPException: 401 用户名或密码错误。
+        UnauthorizedError: 401 用户名或密码错误。
     """
     from fastapi_app.core.security import check_needs_rehash, hash_password, needs_migration, verify_password
     from fastapi_app.services import user_service
@@ -47,14 +47,14 @@ async def authenticate_login(
     if not user:
         await run_in_threadpool(verify_password, "timing_sidechannel_dummy", _DUMMY_HASH)
         logger.warning("[Login] 登录失败: IP=%s", client_ip)
-        raise HTTPException(status_code=401, detail="用户名或密码错误")
+        raise UnauthorizedError()
     if not user.status:
         await run_in_threadpool(verify_password, "timing_sidechannel_dummy", _DUMMY_HASH)
         logger.warning("[Login] 登录失败: IP=%s", client_ip)
-        raise HTTPException(status_code=401, detail="用户名或密码错误")
+        raise UnauthorizedError()
     if not await run_in_threadpool(verify_password, password, user.password):
         logger.warning("[Login] 登录失败: IP=%s", client_ip)
-        raise HTTPException(status_code=401, detail="用户名或密码错误")
+        raise UnauthorizedError()
 
     if needs_migration(user.password):
         try:

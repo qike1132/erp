@@ -9,6 +9,7 @@
       :name="name"
       :autocomplete="autocomplete"
       :aria-label="label || '选择日期'"
+      :aria-required="required || undefined"
       class="date-input"
       @input="$emit('update:modelValue', ($event.target as HTMLInputElement).value)"
       @click="openPicker"
@@ -22,6 +23,13 @@ import { computed, ref } from 'vue'
 
 let _idCounter = 0
 
+/**
+ * 回退 id 在 setup 阶段一次性求值。
+ * 不能放进 computed getter：那样每次重算都会自增，id 会变，
+ * 任何 label[for] / aria-describedby 关联都会在重渲染后失配。
+ */
+const fallbackId = `ui-datepicker-${++_idCounter}`
+
 const props = withDefaults(
   defineProps<{
     modelValue?: string
@@ -31,6 +39,8 @@ const props = withDefaults(
     id?: string
     name?: string
     autocomplete?: string
+    /** 必填项：向辅助技术暴露 aria-required */
+    required?: boolean
   }>(),
   {},
 )
@@ -39,7 +49,7 @@ defineEmits<{
   'update:modelValue': [value: string]
 }>()
 
-const inputId = computed(() => props.id || `ui-datepicker-${++_idCounter}`)
+const inputId = computed(() => props.id || fallbackId)
 
 const inputRef = ref<HTMLInputElement | null>(null)
 
@@ -98,7 +108,7 @@ function openPicker() {
 
 .date-icon {
   position: absolute;
-  right: 0.875rem;
+  right: 0.5rem;
   top: 50%;
   transform: translateY(-50%);
   color: var(--color-ocean-text);
@@ -106,9 +116,33 @@ function openPicker() {
   cursor: pointer;
   background: none;
   border: none;
+  /* 命中区放大到 32×32：原实现仅 18×14，远低于最小可点击尺寸 */
+  min-width: 32px;
+  min-height: 32px;
   padding: 0;
   display: flex;
   align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+}
+.date-icon:hover {
+  background: var(--color-primary-50);
+}
+.date-icon:focus-visible {
+  outline: 2px solid var(--color-primary-500);
+  outline-offset: 2px;
+}
+
+/* 隐藏 Chromium 的原生日历指示器，避免与自定义 .date-icon 叠成两个图标 */
+.date-input::-webkit-calendar-picker-indicator {
+  opacity: 0;
+  position: absolute;
+  right: 0;
+  width: 40px;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  cursor: pointer;
 }
 
 /* Firefox date input fix */

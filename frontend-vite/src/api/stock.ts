@@ -1,8 +1,24 @@
 import { get, post, del, upload, download } from './request'
 import type {
-  Product, StagingOrder, InventoryItem, InventoryResponse, StockInRecord, StockOutRecord,
-  ShipmentInfo, ApiResponse, QueryParams,
+  Product, StagingListResponse, StagingRow, StagingImportResult, InventoryItem,
+  InventoryResponse, StockInRecord, StockOutRecord, ShipmentInfo, ApiResponse, QueryParams,
 } from '@/types'
+
+/**
+ * `/aux/batch-submit-orders` / `-stockins` / `-stockouts` 的批量提交响应。
+ *
+ * 后端逐个返回 results；调用方按 `results[].success` 判定部分失败（HTTP 恒为 200）。
+ * 保留 `data` 键以兼容历史 `{ data }` 包裹响应。
+ */
+export interface BatchSubmitResponse {
+  success?: boolean
+  created_count?: number
+  results?: { success: boolean; error?: string }[]
+  data?: BatchSubmitResponse
+}
+
+/** 暂存区导入链路超时：Excel 解析 + 写暂存区可能远超全局 15s（同 planApi 的导入约定） */
+const STAGING_IMPORT_TIMEOUT = 120_000
 
 export const stockApi = {
   stats: async () => {
@@ -17,27 +33,53 @@ export const stockApi = {
   searchProducts: (q: string) => get<{ products?: Product }>('/aux/product-search', { q }),
   availableShipment: (productId: number, customer: string, orderType?: string, country?: string) =>
     get<ApiResponse<ShipmentInfo>>('/aux/available-shipment', { product_id: productId, customer, ...(orderType ? { order_type: orderType } : {}), ...(country ? { country } : {}) }),
+  /**
+   * 暂存备货（后端 `staging_stockin.py`）。可用端点：
+   * `GET ''`、`POST /import`、`POST /confirm`、`PUT /{id}`、`DELETE /clear`、`DELETE /{id}`。
+   *
+   * ⚠️ 修正记录（2026-09-18）：`POST /staging-stockins`（无 body 的"新增"）**后端不存在**，
+   * 已移除；list 原声明为裸数组，真实响应是 `{success, data, total}`，已纠正。
+   */
   stagingStockins: {
-    list: () => get<StagingOrder[]>('/staging-stockins'),
-    add: (data: Partial<StagingOrder>) => post<StagingOrder>('/staging-stockins', data),
+    /** 列表查询；`params` 用于分页取全（后端单页上限 500，默认仅 100 条） */
+    list: <T = StagingRow>(sessionId?: string, params?: { page?: number; per_page?: number }) =>
+      get<StagingListResponse<T>>('/staging-stockins', {
+        ...(sessionId ? { session_id: sessionId } : {}),
+        ...params,
+      }),
     delete: (id: number) => del(`/staging-stockins/${id}`),
     confirm: () => post('/staging-stockins/confirm'),
     clear: () => del('/staging-stockins/clear'),
-    importExcel: (formData: FormData) => upload('/staging-stockins/import', formData),
+    importExcel: (formData: FormData) =>
+      upload<StagingImportResult>('/staging-stockins/import', formData, undefined, STAGING_IMPORT_TIMEOUT),
   },
+  /**
+   * 暂存出货（后端 `staging_stockout.py`）。可用端点同上，但 **`session_id` 为必填 Query**：
+   * `GET ''?session_id=`、`POST /import?session_id=`、`POST /confirm?session_id=`、
+   * `DELETE /clear?session_id=`、`PUT /{id}`、`DELETE /{id}`。
+   *
+   * ⚠️ 修正记录（2026-09-18）：`POST /staging-stockouts` 不存在（已移除）；
+   * `list(sessionId?)` / `clear(sessionId?)` 原为可选参数——不传会被后端判 **422**，
+   * 已改为**必填**以在编译期暴露该错误；list 返回类型同步纠正为 `{success, data, total}`。
+   */
   stagingStockouts: {
-    list: (sessionId?: string) => get<StagingOrder[]>('/staging-stockouts', sessionId ? { session_id: sessionId } : undefined),
-    add: (data: Partial<StagingOrder>) => post<StagingOrder>('/staging-stockouts', data),
+    list: (sessionId: string) =>
+      get<StagingListResponse<StagingRow>>('/staging-stockouts', { session_id: sessionId }),
     delete: (id: number) => del(`/staging-stockouts/${id}`),
     confirm: (sessionId: string) =>
       post(`/staging-stockouts/confirm?session_id=${encodeURIComponent(sessionId)}`),
-    clear: (sessionId?: string) =>
-      del(`/staging-stockouts/clear${sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ''}`),
+    clear: (sessionId: string) =>
+      del(`/staging-stockouts/clear?session_id=${encodeURIComponent(sessionId)}`),
     importExcel: (formData: FormData, sessionId: string) =>
-      upload<{ success: boolean; message: string; imported: number; errors: string[] }>(`/staging-stockouts/import?session_id=${encodeURIComponent(sessionId)}`, formData),
+      upload<StagingImportResult>(`/staging-stockouts/import?session_id=${encodeURIComponent(sessionId)}`, formData, undefined, STAGING_IMPORT_TIMEOUT),
   },
-  batchSubmitStockins: (stockins: Record<string, unknown>[]) => post('/aux/batch-submit-stockins', { stockins }),
-  batchSubmitStockouts: (stockouts: Record<string, unknown>[]) => post('/aux/batch-submit-stockouts', { stockouts }),
+  /** 批量提交订单（手工录入的主路径；逐条结果见 `results`） */
+  batchSubmitOrders: (orders: Record<string, unknown>[]) =>
+    post<BatchSubmitResponse>('/aux/batch-submit-orders', { orders }),
+  batchSubmitStockins: (stockins: Record<string, unknown>[]) =>
+    post<BatchSubmitResponse>('/aux/batch-submit-stockins', { stockins }),
+  batchSubmitStockouts: (stockouts: Record<string, unknown>[]) =>
+    post<BatchSubmitResponse>('/aux/batch-submit-stockouts', { stockouts }),
   exportInventory: (params?: QueryParams) => download('/stock/export-inventory', '库存汇总.xlsx', params),
   downloadTemplate: () => download('/batch/download-template', '统一导入模板.xlsx'),
 }

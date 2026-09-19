@@ -6,6 +6,8 @@
 - 提供订单、备货、出库、皮套出库/入库、产品的批量导入接口
 - 提供综合批量导入接口（支持4个Sheet自动识别）
 """
+from urllib.parse import quote
+
 from fastapi import APIRouter, Depends, File, Response, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,7 +15,6 @@ from fastapi_app.core.database import get_async_db
 from fastapi_app.core.deps import require_permission
 from fastapi_app.schemas.batch import BatchImportResult, ComprehensiveImportResult
 from fastapi_app.services.batch_import_service import (
-    download_template_service,
     import_case_stockins_service,
     import_case_stockouts_service,
     import_comprehensive_service,
@@ -21,6 +22,7 @@ from fastapi_app.services.batch_import_service import (
     import_products_service,
     import_stockins_service,
     import_stockouts_service,
+    read_template_bytes,
 )
 from fastapi_app.shared_models import User
 
@@ -42,7 +44,16 @@ async def download_template(
     Raises:
         HTTPException: 模板文件不存在时抛出 404；读取失败时抛出 500。
     """
-    return await download_template_service()
+    file_content, filename = await read_template_bytes()
+    return Response(
+        content=file_content,
+        media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        headers={
+            'Content-Disposition': f"attachment; filename*=UTF-8''{quote(filename)}",
+            'Content-Length': str(len(file_content)),
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+        },
+    )
 
 
 @router.post('/import-orders', response_model=BatchImportResult, summary='批量导入订单')

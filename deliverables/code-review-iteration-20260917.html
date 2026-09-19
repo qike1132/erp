@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>迭代审核报告 · 2026-09-17 三个修复提交</title>
+<style>
+  :root{
+    --bg:#f6f7f9;--card:#fff;--line:#e3e6ea;--line2:#cfd4da;--tx:#1c2126;--tx2:#5b6570;--tx3:#8a939d;
+    --red:#c8322f;--redbg:#fdf3f2;--amber:#8a5a00;--amberbg:#fdf8ee;--blue:#1f5fa8;--bluebg:#f2f7fc;
+    --green:#1f7a45;--greenbg:#f2f9f4;--mono:ui-monospace,Consolas,"Liberation Mono",Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--tx);font-size:13.5px;line-height:1.65;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei UI","Microsoft YaHei",sans-serif}
+  .wrap{max-width:1000px;margin:0 auto;padding:28px 20px 60px}
+  header{border-bottom:1px solid var(--line2);padding-bottom:14px;margin-bottom:20px}
+  h1{font-size:19px;font-weight:600;margin:0 0 6px}
+  .meta{color:var(--tx3);font-size:12.5px}
+  h2{font-size:14.5px;font-weight:600;margin:26px 0 10px;padding-left:9px;border-left:3px solid var(--line2)}
+  h3{font-size:13.5px;font-weight:600;margin:16px 0 6px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:13px 15px;margin-bottom:11px}
+  .card.b{border-color:#e0b9b7;background:var(--redbg)}
+  .card.s{border-color:#ecd9b0;background:var(--amberbg)}
+  .card.n{border-color:#d5dee8;background:var(--bluebg)}
+  .card.g{border-color:#c7e2d2;background:var(--greenbg)}
+  .pill{display:inline-block;font-size:11.5px;font-weight:600;padding:1px 7px;border-radius:4px;margin-right:7px;
+    border:1px solid currentColor;vertical-align:1px}
+  .p-b{color:var(--red)}.p-s{color:var(--amber)}.p-n{color:var(--blue)}.p-g{color:var(--green)}
+  code{font-family:var(--mono);font-size:12.5px;background:#eef0f3;padding:1px 5px;border-radius:3px}
+  pre{font-family:var(--mono);font-size:12.4px;background:#1f2429;color:#e6e9ec;padding:11px 13px;
+    border-radius:6px;overflow-x:auto;margin:8px 0;line-height:1.55}
+  pre .c{color:#98a2ac}.pre-add{color:#a8e6b8}.pre-del{color:#f0a8a8}
+  table{width:100%;border-collapse:collapse;font-size:12.8px;margin:8px 0}
+  th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{background:#f0f2f5;font-weight:600;color:var(--tx2);border-bottom:1px solid var(--line2)}
+  td.mono,th.mono{font-family:var(--mono);font-size:12.2px}
+  ul{margin:6px 0;padding-left:20px}li{margin:3px 0}
+  .sev{font-size:11.5px;font-weight:600;padding:1px 6px;border-radius:3px;white-space:nowrap}
+  .s-hi{background:#fbe3e2;color:var(--red)}.s-md{background:#fbf0da;color:var(--amber)}
+  .s-lo{background:#e8eef5;color:var(--blue)}.s-ok{background:#e4f3e9;color:var(--green)}
+  .muted{color:var(--tx2)}.small{font-size:12.3px;color:var(--tx3)}
+  .ev{border-left:2px solid var(--line2);padding:2px 0 2px 10px;margin:7px 0;color:var(--tx2);font-size:12.6px}
+  .verdict{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:12px 0}
+  .vbox{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+  .vbox .k{font-size:11.5px;color:var(--tx3)}
+  .vbox .v{font-size:16px;font-weight:600;margin-top:2px}
+  @media(max-width:760px){.verdict{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>迭代审核报告：本轮三个修复提交</h1>
+  <div class="meta">
+    滨发 ERP ｜ 审核对象 <code>26243d8</code> <code>4e01dd4</code> <code>522aa77</code> ｜
+    审核 2026-09-17 17:20 ｜ 全部结论均以执行取证，非阅读推断
+  </div>
+</header>
+
+<h2>总体结论</h2>
+<div class="card g">
+  <p style="margin:0 0 8px"><strong>可以合入。</strong>三个修复方向都正确，根因定位准确（尤其 CSRF 的"能登录、但写不了"这一现象学描述非常到位），
+  测试纪律良好：新测试不 mock 生产者、门禁零新增、HTTPS 路径未被弱化。未发现 blocker。</p>
+  <p style="margin:0 0 8px">本次审核发现 <strong>6 项可改进</strong>（0 blocker / 4 建议 / 2 次要），
+  其中 3 项已用<strong>可复现实验</strong>证实，2 项是同一根因的不同表现。</p>
+  <p style="margin:0"><strong>状态更新（17:20）</strong>：S4 与 S5 已落地并提交
+  <code>e631cf1</code>，且经 <code>WatchFiles … Reloading</code>（17:18:55）确认<strong>已在运行中的后端生效</strong>。
+  S1 / S2 / S3 / S6 仍待决策。</p>
+</div>
+
+<div class="verdict">
+  <div class="vbox"><div class="k">相关测试</div><div class="v" style="color:var(--green)">32 passed</div></div>
+  <div class="vbox"><div class="k">质量门禁</div><div class="v" style="color:var(--green)">PASS · 零新增</div></div>
+  <div class="vbox"><div class="k">生产端到端</div><div class="v" style="color:var(--green)">/calculate 200</div></div>
+  <div class="vbox"><div class="k">Blocker</div><div class="v" style="color:var(--green)">0</div></div>
+</div>
+
+<table>
+  <tr><th class="mono" style="width:88px">提交</th><th style="width:210px">主题</th><th class="mono" style="width:200px">改动面</th><th>审核判定</th></tr>
+  <tr><td class="mono">26243d8</td><td>CSRF cookie Secure 按 scheme 判定</td><td class="mono">middleware.py +14/-1<br>新测试 70 行</td>
+      <td><span class="sev s-ok">方向正确</span> 发现测试非隔离（S2）、注释失真（S5）</td></tr>
+  <tr><td class="mono">4e01dd4</td><td>CORS 放行局域网明文 origin</td><td class="mono">config.py +70/-13<br>新测试 107 行</td>
+      <td><span class="sev s-ok">方向正确</span> 前缀仿冒已堵；发现归一不一致（S3）</td></tr>
+  <tr><td class="mono">522aa77</td><td>物料计算结果文本字段归一</td><td class="mono">service +18/-7<br>新测试 139 行</td>
+      <td><span class="sev s-ok">方向正确</span> 发现契约不对称（S1）、数值字段未加固（S4）、数字漂移（S6）</td></tr>
+</table>
+
+<h2>🟡 改进建议</h2>
+
+<div class="card s">
+  <h3 style="margin-top:0"><span class="pill p-s">S1</span>契约只在 <code>groups</code> 强制，扁平字段完全不受校验</h3>
+  <p style="margin:4px 0"><strong>位置</strong>：<code>fastapi_app/schemas/purchase_center.py</code> 第 170–175 行</p>
+<pre>filling: list = []          <span class="c"># 无类型 → Pydantic 不校验内容</span>
+fabric: list = []
+accessory: list = []
+packaging: list = []
+groups: list[MaterialCalcScopeGroup] = []   <span class="c"># 强类型 → 校验 → 本次 500 在此暴露</span></pre>
+  <p style="margin:6px 0"><strong>为什么值得改</strong>：同一份数据、同一次响应，
+  在 <code>groups</code> 里是"契约"，在扁平字段里是"任意 list"。这正是本缺陷长期潜伏、
+  直到新增 <code>groups</code> 才爆的结构性原因——不是运气问题，是校验面的不对称。</p>
+  <p style="margin:6px 0"><strong>建议</strong>：把四个扁平字段改为 <code>list[MaterialCalcRow]</code>。
+  数据现已归一，改后不会产生新的 500，且能把同类缺陷在扁平层就拦住。</p>
+  <div class="ev"><strong>注意</strong>：这会<em>新增</em>校验，属行为收紧。建议先本地跑一次真实 payload
+  （<code>_verify_fix_prod_data.py</code> 已有现成入口）确认全绿，再提交。</div>
+</div>
+
+<div class="card s">
+  <h3 style="margin-top:0"><span class="pill p-s">S2</span>CSRF 测试并非隔离测试：通过与否取决于本机 <code>.env</code>（已复现）</h3>
+  <p style="margin:4px 0"><strong>位置</strong>：<code>test_csrf_cookie_secure_scheme.py</code> 第 55–70 行</p>
+  <p style="margin:6px 0"><strong>机理</strong>：<code>_csrf_secure</code> 在 <code>_setup_csrf()</code> 内
+  <strong>只求值一次</strong>（<code>middleware.py</code> 第 87–90 行），即 app 创建/import 时冻结；
+  而测试的 <code>monkeypatch.setenv("APP_ENV","production")</code> 发生在之后。
+  于是第 58–59 行的守卫断言
+  <code>assert settings.is_production is True</code>
+  <strong>只能证明属性是动态的，证明不了中间件处于生产态</strong>——它断言了一个自己控制不到的条件。</p>
+  <div class="ev"><strong>复现（实测）</strong>：
+  <code>APP_ENV=development</code> 强制运行时 →
+<pre style="margin:6px 0">E AssertionError: HTTPS 下应带 Secure：fastapi_csrf_token=...; Path=/; SameSite=lax
+1 failed in 1.84s        <span class="c"># 代码正确，测试却红了</span>
+APP_ENV=production → 1 passed；不干预（本机）→ 1 passed</pre>
+  即在开发配置的机器/CI 上会<strong>假红</strong>，维护者一旦"顺手改绿"，就会丢掉 HTTPS 侧的防退化断言。</div>
+  <p style="margin:6px 0"><strong>建议</strong>（择一）：
+  ① 在 <code>conftest.py</code> 里给该测试设置 <code>CSRF_COOKIE_SECURE=true</code> 后再 import app；或
+  ② 把 <code>_csrf_secure</code> 的读取从 <code>_setup_csrf</code> 移入请求处理内（每次请求读 env），
+  顺便让该测试真正隔离。方案 ② 同时消除"S1 类"的 import 期固化隐患。</p>
+</div>
+
+<div class="card s">
+  <h3 style="margin-top:0"><span class="pill p-s">S3</span>"这个 origin 是否放行"一个概念、四处实现，且规则发散</h3>
+  <p style="margin:4px 0">同一逻辑目前有四份实现，差异<em>刚好</em>落在容易踩的边界上：</p>
+  <table>
+    <tr><th class="mono" style="width:300px">实现位置</th><th>规则</th></tr>
+    <tr><td class="mono">config._is_production_allowed_origin</td><td>https 全放 / http 仅 localhost 与私有 IP 字面量</td></tr>
+    <tr><td class="mono">middleware._is_allowed_origin</td><td>生产=精确成员匹配，但做 <code>rstrip('/')</code> 归一</td></tr>
+    <tr><td class="mono">Starlette CORSMiddleware</td><td><code>return origin in self.allow_origins</code> —— <strong>精确匹配，不归一</strong>（已核实源码第 105 行）</td></tr>
+    <tr><td class="mono">auth._set_login_cookies</td><td>https 判定用<strong>严格全等</strong>；CSRF 用 <code>split(',')[0].strip().lower()</code></td></tr>
+  </table>
+  <p style="margin:6px 0"><strong>后果一（可复现）</strong>：若 <code>CORS_ORIGINS</code> 里写成
+  <code>http://192.168.0.95:3000/</code>（带尾斜杠），<code>filter_cors_origins</code> 会判"放行"并保留该串，
+  但 Starlette 永不匹配、浏览器 CORS 照旧失败——**过滤器说允许，中间件却拒绝**，
+  而 CSRF 分支又容忍它。排障时三方口径不一致，极难定位。</p>
+  <p style="margin:6px 0"><strong>后果二</strong>：多跳/大写 <code>X-Forwarded-Proto: https, http</code> 或
+  <code>HTTPS</code> 时，CSRF 判定为 https、登录 cookie 判定为非 https →
+  同一请求内 <code>access_token</code> 与 <code>fastapi_csrf_token</code> 的 Secure 属性不一致。</p>
+  <div class="ev">提交信息称 CSRF 判定"与 <code>_set_login_cookies</code> 同源"——实际是两份独立实现，
+  只是<em>当前 nginx 恰好发单值 <code>$scheme</code></em> 才没暴露差异。</div>
+  <p style="margin:6px 0"><strong>建议</strong>：抽公共工具并在载入时归一，
+  例如 <code>core/security_utils.py</code> 提供
+  <code>is_secure_request(request)</code> 与 <code>normalize_origin(origin)</code>，
+  四处统一调用；<code>filter_cors_origins</code> 出口即 <code>rstrip('/')</code>。</p>
+</div>
+
+<div class="card s">
+  <h3 style="margin-top:0"><span class="pill p-s">S4</span>文本字段已加固，数值字段仍裸露：<code>Decimal(str(None))</code> 会炸</h3>
+  <p style="margin:4px 0"><strong>位置</strong>：<code>purchase_product_service.py</code> 第 289 行
+  <code>per_unit = Decimal(str(mat.get('unit_usage', 0)))</code></p>
+  <p style="margin:6px 0"><strong>风险</strong>：若某生产者给出 <code>unit_usage=None</code>，
+  <code>str(None)</code> → <code>Decimal('None')</code> → 抛 <code>InvalidOperation</code>。
+  它是 <code>ArithmeticError</code> 子类，<strong>不在</strong>接口的捕获元组
+  <code>(ValueError, OperationalError, DisconnectionError, RuntimeError)</code> 内
+  （<code>product_routes.py</code> 第 311 行）→ 又一个无友好文案的 500。</p>
+  <div class="ev"><strong>当前安全的原因不对称</strong>：之所以现在不炸，是三张表的
+  <code>to_dict()</code> 各自写了 <code>float(x) if x else 0</code> 兜底（已逐处核实）——
+  是<strong>生产者自觉</strong>，不是聚合内核保证。文本字段走的是内核显式归一，两者防护层级不同。
+  <code>packaging</code> 分类目前靠 accessory 的 <code>material_category</code> 复用，
+  一旦将来接入新的包材表，这个缺口就会打开。</div>
+  <p style="margin:6px 0"><strong>建议</strong>：内核对称加固，一行即可：</p>
+<pre>per_unit = Decimal(str(mat.get('unit_usage') <span class="pre-add">or 0</span>))   <span class="c"># 与文本字段同一处理哲学</span></pre>
+</div>
+
+<div class="card s">
+  <h3 style="margin-top:0"><span class="pill p-s">S5</span>注释与实现不符：<code>CSRF_COOKIE_SECURE=true</code> 已不能"强制开启"</h3>
+  <p style="margin:4px 0"><code>middleware.py</code> 第 186 行注释称"<code>CSRF_COOKIE_SECURE=true</code> 仍可强制开启"，
+  但第 193 行是：</p>
+<pre>_csrf_sec = _csrf_secure if (_is_https and not _has_bearer_resp) else False
+<span class="c"># _is_https=False 时，无论 _csrf_secure 为何值，结果恒为 False</span></pre>
+  <p style="margin:6px 0"><strong>影响</strong>：安全相关开关的语义被悄悄改写而文档未动。
+  运维若在明文 HTTP 上设 <code>CSRF_COOKIE_SECURE=true</code> 期望"强制 Secure"，实际不会生效。
+  建议二者取一：实现真正的 force 语义（<code>if _csrf_secure and _is_https or _csrf_force</code>），
+  或把注释改为"仅决定 https 下是否打 Secure，不再具备强制力"。</p>
+</div>
+
+<div class="card n">
+  <h3 style="margin-top:0"><span class="pill p-n">S6</span>实测数字漂移：文档写"11 行 NULL"，实测为 10</h3>
+  <p style="margin:4px 0"><code>test_calculate_material_null_code.py</code> 第 12、74、80、86 行与提交信息均写
+  「生产实测 11 行 <code>material_code</code> 为 NULL」，本次复测为
+  <strong>10 行 = product_fabric 8 + product_material 1 + product_accessory 1</strong>。</p>
+  <div class="ev">数字本身不影响正确性，但它是回归文档的"事实锚"。
+  建议在 docstring 里补上<strong>测量时间与查询语句</strong>，让后续复测可自证，而不是逐年漂移。</div>
+</div>
+
+<h2>💭 次要项</h2>
+<div class="card n">
+  <ul style="margin:0">
+    <li><strong>内网域名被静默拒收</strong>：<code>_is_production_allowed_origin</code> 只认 IP 字面量
+    （刻意为之，避免依赖不可控的内网 DNS）。设计合理，但 <code>.env.production.example</code> 的示例
+    若有人填 <code>http://erp.lan</code> 会静默失效——建议在该行旁明确标注"必须写 IP，域名不放行"。</li>
+    <li><strong>绑定面口径不一致</strong>：<code>prod_runner.py</code> 第 220 行显式
+    <code>--host 0.0.0.0</code>（附充分理由与 <code># nosec B104</code>），
+    而 <code>.env.production.example</code> 文档写"生产默认绑定 127.0.0.1（仅本机回环）"。
+    两处都对，但读者会困惑。另一并发事实：:5002 在局域网可达，直连绕过 nginx 时
+    <code>X-Forwarded-Proto</code> 变为客户端可控（影响仅限自伤式 cookie 失效，非提权）。
+    建议文档对齐，或把 5002 限制为回环/防火墙白名单。</li>
+    <li><strong>尾斜杠足迹</strong>见 S3；建议在 <code>filter_cors_origins</code> 出口统一 <code>rstrip('/')</code>，
+    顺带消灭"过滤器放行 / 中间件拒绝"的错位。</li>
+  </ul>
+</div>
+
+<h2>值得肯定的设计</h2>
+<div class="card g">
+  <ul style="margin:0">
+    <li><strong>新测试正确地落实了"跨层契约禁止伪造生产者"</strong>：
+    物料行一律由真实 <code>to_dict()</code> 产出，并额外加了
+    <code>test_producer_really_emits_none</code> 作为<strong>前置事实断言</strong>——
+    先证明生产者确实会产出 <code>None</code>，再断言下游不得携带 <code>None</code>。
+    这种"先证实前提、再断言结论"的写法，正是既有 <code>_mat(code='')</code> 之所以漏掉缺陷的镜像修补。</li>
+    <li><strong>已独立验证该断言确有"牙"</strong>：注入未经归一的 <code>None</code> 后，
+    模型在 <code>groups.0.fabric.0</code> 的 4 个字段上同时报错；
+    真实路径归一后则通过。即"去掉 <code>or ''</code> → 测试必红"，绊线真实有效。</li>
+    <li><strong>CORS 用 <code>urlparse</code> 取 host 而非 <code>startswith</code></strong>：
+    主动堵掉了 <code>http://192.168.0.95.evil.com</code> 这类前缀仿冒，且顺带修掉了旧规则里
+    <code>startswith("http://localhost")</code> 的同类问题。这是教科书式的防御性修正。</li>
+    <li><strong>抽取 <code>filter_cors_origins</code> 换取可测性</strong>：把 import 期求值的内联推导式
+    改为模块级纯函数，理由（"否则只能靠改环境变量才能验证"）写在 docstring 里，动机清晰。</li>
+    <li><strong>门禁纪律</strong>：五项计数与基线完全一致（0 / 9 / 53 / 7 / 9），
+    未用 <code>--update-baseline</code> 洗白任何新增，符合棘轮约定。</li>
+  </ul>
+</div>
+
+<h2>已核实、无回归的项（明确安心结论）</h2>
+<div class="card g">
+  <table style="margin:0">
+    <tr><th style="width:270px">待证事项</th><th>核实方式与结论</th></tr>
+    <tr><td>CORS 放宽是否连带削弱 CSRF</td>
+        <td><strong>否</strong>。CSRF 的 origin 校验只在「有 Bearer 且无 cookie」分支生效，
+        而 Bearer 不会被浏览器自动携带，该分支不构成 CSRF 面</td></tr>
+    <tr><td>HTTPS 部署是否被弱化</td>
+        <td><strong>否</strong>。带 <code>X-Forwarded-Proto: https</code> 时仍下发 <code>Secure</code>（测试 + 守卫均验证）</td></tr>
+    <tr><td>客户端能否伪造 <code>X-Forwarded-Proto</code></td>
+        <td><strong>经 nginx 不能</strong>。<code>config/nginx-windows.conf</code> 第 58/115 行用
+        <code>proxy_set_header ... $scheme</code>，会覆盖客户端值</td></tr>
+    <tr><td>生产是否真的修好</td>
+        <td><strong>是</strong>。新生产构建下真实浏览器 <code>POST /calculate</code> → 200 + <code>success:true</code>，
+        <code>.mc-scope-card=1</code>，0 页面 / 0 console 错误</td></tr>
+    <tr><td>旧测试是否本就拦不住</td>
+        <td><strong>确实拦不住</strong>。已核实 <code>_mat()</code> 签名默认 <code>code=''</code>、
+        <code>supplier=''</code>、<code>spec=''</code>、<code>unit=''</code>，从不产出 <code>None</code></td></tr>
+  </table>
+</div>
+
+<h2>建议的处理顺序</h2>
+<table>
+  <tr><th style="width:70px">顺序</th><th style="width:90px">项</th><th>理由</th></tr>
+  <tr><td>1</td><td><span class="sev s-md">S4</span></td>
+      <td>一行改动即可消除潜在 500，且它是同类缺陷（"契约未覆盖到的字段"）的最后一处裸露点</td></tr>
+  <tr><td>2</td><td><span class="sev s-md">S5</span></td>
+      <td>安全开关的注释与实现不符，属"会误导运维"的一类，改动成本极低</td></tr>
+  <tr><td>3</td><td><span class="sev s-md">S2</span></td>
+      <td>消除假红，避免维护者把测试改弱而丢掉 HTTPS 侧保护</td></tr>
+  <tr><td>4</td><td><span class="sev s-md">S3</span></td>
+      <td>四处实现收敛为公共工具，是 S2/S5 的共同根因，可一并收口</td></tr>
+  <tr><td>5</td><td><span class="sev s-md">S1</span></td>
+      <td>契约收紧，需先在真实 payload 上验证，单独提交以便回滚</td></tr>
+  <tr><td>6</td><td><span class="sev s-lo">S6</span> + 次要项</td>
+      <td>文档同步，可随任意一次提交顺带完成</td></tr>
+</table>
+
+<p class="small" style="margin-top:22px;border-top:1px solid var(--line);padding-top:12px">
+  取证方式：<code>git show</code> 逐提交 diff ｜ 四个测试文件单独运行（32 passed）｜
+  <code>scripts/quality_gate.py</code>（PASS，五项与基线一致）｜
+  强制环境变量对照实验（<code>APP_ENV=development</code> 复现假红）｜
+  模型校验注入实验（证明断言有牙）｜ Starlette 源码核对（<code>cors.py:105</code> 精确匹配）｜
+  生产库 <code>information_schema</code> + NULL 计数 ｜ nginx 配置核验 ｜
+  真实浏览器端到端（Playwright + Edge）。
+</p>
+
+</div>
+</body>
+</html>

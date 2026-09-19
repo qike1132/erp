@@ -12,9 +12,7 @@ import tempfile
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime
 
-from fastapi import UploadFile
-
-from fastapi_app.schemas.batch import BatchImportResult
+from fastapi_app.schemas.batch import BatchImportResult, ExcelUpload
 from fastapi_app.utils import parse_date_value as _shared_parse_date_value
 from fastapi_app.utils import validate_customer_name as _shared_validate_customer_name
 
@@ -96,7 +94,7 @@ def cleanup_temp_file(file_path: str) -> None:
 # ==================== 上传文件工具 ====================
 
 @asynccontextmanager
-async def _save_uploaded_file(file: UploadFile):
+async def _save_uploaded_file(file: ExcelUpload):
     """保存上传文件到临时路径，退出时自动清理。
 
     Args:
@@ -223,7 +221,7 @@ def _parse_import_row(
     return str(customer), product.id, qty
 
 
-def _validate_xlsx_file(file: UploadFile) -> BatchImportResult | None:
+def _validate_xlsx_file(file: ExcelUpload) -> BatchImportResult | None:
     """校验上传文件是否为 .xlsx 格式。
 
     Args:
@@ -238,7 +236,7 @@ def _validate_xlsx_file(file: UploadFile) -> BatchImportResult | None:
 
 
 async def _read_excel_sheets(
-    file: UploadFile, keywords: list[str], not_found_msg: str,
+    file: ExcelUpload, keywords: list[str], not_found_msg: str,
 ) -> tuple[list | None, str | None]:
     """读取上传的 Excel 文件并解析目标 sheet 数据。
 

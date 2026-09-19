@@ -253,13 +253,15 @@ function onThumbError(e: Event, proj: { product_image_url?: string | null }) {
   opacity: 0;
 }
 
-/* 清晰缩略图：默认透明，加载完成后淡入（避免占位闪烁） */
+/* 清晰缩略图：默认透明，加载完成后淡入（避免占位闪烁）
+   使用 contain 完整展示产品图（cover 会裁掉边缘，产品主体易被切掉），
+   留白区域由容器背景色与下方模糊底图填充。 */
 .cgl-thumb-img {
   position: relative;
   z-index: 3;
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
   opacity: 0;
   transition: opacity 0.3s ease;
 }

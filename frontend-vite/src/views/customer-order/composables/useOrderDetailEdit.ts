@@ -5,10 +5,10 @@
  */
 import { ref, reactive } from 'vue'
 import { useQueryClient } from '@tanstack/vue-query'
-import { get } from '@/api/request'
-import { orderApi } from '@/api'
+import { auxApi, orderApi } from '@/api'
 import { showToast } from '@/composables/useToast'
 import { getErrorMessage } from '@/types/errors'
+import { QUANTITY_RANGE_MESSAGE, isQuantityOutOfRange } from './quantityRange'
 import type { OrderRecord, OrderDetailData } from './types'
 
 export function useOrderDetailEdit(fetchOrders: () => Promise<void>) {
@@ -33,9 +33,15 @@ export function useOrderDetailEdit(fetchOrders: () => Promise<void>) {
       // 查询可用备货量
       if (data.product?.id && data.customer) {
         try {
-          const availRes = await get<{ available_quantity?: number; available?: number; data?: { available_quantity?: number; available?: number } }>('/aux/available-stockins', { product_id: data.product.id, customer: data.customer })
-          const availData = availRes.data ?? availRes
-          availableStockin.value = (availData.available_quantity ?? availData.available ?? 0) + (data.deduct_quantity || 0)
+          // 契约修正（2026-09-18）：后端 `response_model=list[AvailableStockinItem]` 返回**裸数组**，
+          // 原实现按单对象读 `available_quantity` / `available`（两个键都不存在于数组响应），
+          // 故 `availableStockin` 恒为 0、编辑弹窗的「可用」提示永不显示。此处与
+          // useOrderForm / useStagedEdit 口径统一为「按条累加 available」。
+          const availRes = await auxApi.availableStockins({ product_id: data.product.id, customer: data.customer })
+          const total = (Array.isArray(availRes) ? availRes : []).reduce(
+            (s, i) => s + (i.available ?? i.quantity ?? 0), 0,
+          )
+          availableStockin.value = total + (data.deduct_quantity || 0)
         } catch {
           availableStockin.value = 0
         }
@@ -51,6 +57,12 @@ export function useOrderDetailEdit(fetchOrders: () => Promise<void>) {
 
   async function saveEditOrder() {
     if (!detailData.value || saving.value) return
+    // 提交前最终校验：字段实时标红可能被绕过（回车 / 直接点保存），
+    // 越界数量一律不提交，避免把非法值写进订单。
+    if (isQuantityOutOfRange(editForm.quantity)) {
+      showToast(QUANTITY_RANGE_MESSAGE, 'warning')
+      return
+    }
     saving.value = true
     try {
       const originalDeduct = detailData.value.deduct_quantity || 0

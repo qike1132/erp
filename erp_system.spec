@@ -3,7 +3,7 @@
 ⚠️ 已废弃（2026-09-17 标注）：本 spec 指向的历史 EXE 打包链路（run.py 入口）
 已不再是生产部署方式——生产由 NSSM 托管 `python -m fastapi_app.core.prod_runner`。
 datas/hiddenimports 引用已过期，请勿再用于构建；保留仅供历史参考。
-GUI 打包请用 server_manager.spec（v5.40）或 packaging/server_manager_v8.spec。
+GUI 打包请用 server_manager.spec（v5.40）。
 
 ERP 系统 PyInstaller 打包配置文件（FastAPI 版）
 使用方法: pyinstaller erp_system.spec

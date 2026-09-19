@@ -14,8 +14,8 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from fastapi import HTTPException
 
+from fastapi_app.core.exceptions import BusinessError, ConflictError, NotFoundError
 from fastapi_app.services import auxiliary_service
 
 
@@ -185,7 +185,7 @@ class TestDeleteSupplier:
         """供应商不存在时应抛 404"""
         db = AsyncMock()
         with patch.object(auxiliary_service, 'get_supplier_by_id', new=AsyncMock(return_value=None)):
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(NotFoundError) as exc_info:
                 await auxiliary_service.delete_supplier(db, 999)
         assert exc_info.value.status_code == 404
 
@@ -196,7 +196,7 @@ class TestDeleteSupplier:
         supplier = MagicMock()
         with patch.object(auxiliary_service, 'get_supplier_by_id', new=AsyncMock(return_value=supplier)), \
              patch.object(auxiliary_service, 'supplier_has_bom_or_orders', new=AsyncMock(return_value=True)):
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(BusinessError) as exc_info:
                 await auxiliary_service.delete_supplier(db, 1)
         assert exc_info.value.status_code == 400
 
@@ -209,7 +209,7 @@ class TestCreateCountry:
     async def test_raises_400_when_name_empty(self):
         """国家名称为空时应抛 400"""
         db = AsyncMock()
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(BusinessError) as exc_info:
             await auxiliary_service.create_country(db, "")
         assert exc_info.value.status_code == 400
 
@@ -219,7 +219,7 @@ class TestCreateCountry:
         db = AsyncMock()
         existing = MagicMock()
         with patch.object(auxiliary_service, 'get_country_by_name', new=AsyncMock(return_value=existing)):
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(ConflictError) as exc_info:
                 await auxiliary_service.create_country(db, "中国")
         assert exc_info.value.status_code == 409
 
@@ -247,7 +247,7 @@ class TestDeleteCountry:
         """国家不存在时应抛 404"""
         db = AsyncMock()
         with patch.object(auxiliary_service, 'get_country_by_id', new=AsyncMock(return_value=None)):
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(NotFoundError) as exc_info:
                 await auxiliary_service.delete_country(db, 999)
         assert exc_info.value.status_code == 404
 

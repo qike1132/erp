@@ -17,7 +17,6 @@ from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Body, Depends, File, Header, HTTPException, Query, UploadFile
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.api.v1.endpoints.backup._deps import (
@@ -26,6 +25,7 @@ from fastapi_app.api.v1.endpoints.backup._deps import (
     require_backup_permission,
 )
 from fastapi_app.core.database import get_async_db
+from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.core.response import success_response
 from fastapi_app.schemas.backup import (
     AsyncTaskResponse,
@@ -114,6 +114,17 @@ async def _read_backup_file(file: UploadFile) -> tuple[bytes, bool, str]:
     return content, is_zip, filename
 
 
+def _restore_error_to_http(exc: Exception) -> HTTPException:
+    """恢复失败统一映射为 500，并保留原因。
+
+    与 zip 分支 `BackupError → HTTPException(500, str(e))` 的既有约定一致；
+    覆盖 db_transaction 对 ValueError 的默认 400 转换，保持 JSON 路径原有状态码不变
+    （恢复失败是服务端问题，不应报 400 让客户端以为是自己传错了备份）。
+    """
+    logger.exception('备份恢复失败')
+    return HTTPException(status_code=500, detail=str(exc) or '备份恢复失败')
+
+
 # ---------------------------------------------------------------------------
 # POST /import
 # ---------------------------------------------------------------------------
@@ -145,13 +156,18 @@ async def import_backup(
     await _acquire_sync_restore_lock('sync_import')
     try:
         if is_zip:
+            # zip 路径的提交点在策略层（strategies.py `await db.commit()`，已按
+            # TRANSACTION_BOUNDARY_GUIDE §2.2 标注豁免）；端点层不重复提交。
+            # 捕获 `BackupError` 而非仅 `RestoreError`：JSON 分支映射的是整个家族，
+            # 若此处只认 RestoreError，则 BackupFileError/BackupLockError 等兄弟异常
+            # 会越过本 handler 落到全局兜底，detail 丢失、与 JSON 分支行为分叉。
             try:
                 result = await backup_service.restore_from_zip(
                     content, db,
                     decrypt_password=decrypt_password,
                     confirm_sensitive=confirm_sensitive,
                 )
-            except RestoreError as e:
+            except BackupError as e:
                 raise HTTPException(status_code=500, detail=str(e)) from e
             result['pre_restore_backup'] = pre_restore_info
             total_rows = sum(td.get('rows', 0) for td in result.get('_manifest_tables', {}).values())
@@ -170,12 +186,15 @@ async def import_backup(
         if 'tables' not in backup_data:
             raise HTTPException(status_code=400, detail='JSON 备份文件缺少 tables 字段')
 
-        try:
+        # 事务边界（docs/TRANSACTION_BOUNDARY_GUIDE.md §2.3）：端点层不再出现 raw commit/rollback。
+        # 恢复路径仍要求「响应前提交」——提交失败必须让客户端拿到 500，而不是先收到成功再静默丢失，
+        # 故用 db_transaction 而非依赖 get_async_db 的响应后提交。
+        async with db_transaction(db, error_map={
+            BackupError: _restore_error_to_http,
+            ValueError: _restore_error_to_http,
+        }):
             result = await backup_service.restore_legacy_json(backup_data, db)
-        except (BackupError, SQLAlchemyError, RuntimeError, ValueError):
-            raise
         verification_ok = result.get('verification', {}).get('overall_pass', True)
-        await db.commit()
         return {
             'success': verification_ok, 'format': 'json',
             'total_inserted': result['total_inserted'], 'results': result['results'],
@@ -232,13 +251,14 @@ async def restore_server_backup(
             pre_restore_info = {'success': False, 'error': '创建安全备份失败'}
         await _acquire_sync_restore_lock('sync_restore_by_name')
         try:
+            # 同 /import 的 zip 分支：提交点在策略层，此处只统一异常→HTTP 的映射
             try:
                 result = await backup_service.restore_from_zip(
                     content, db,
                     decrypt_password=decrypt_password,
                     confirm_sensitive=confirm_sensitive,
                 )
-            except RestoreError as e:
+            except BackupError as e:
                 raise HTTPException(status_code=500, detail=str(e)) from e
         finally:
             await backup_service.release_restore_lock()
@@ -261,11 +281,12 @@ async def restore_server_backup(
 
     await _acquire_sync_restore_lock('sync_restore_by_name_json')
     try:
-        result = await backup_service.restore_legacy_json(backup_data, db)
-        await db.commit()
-    except (BackupError, SQLAlchemyError, RuntimeError, ValueError):
-        await db.rollback()
-        raise
+        # 同 /import：提交点归 db_transaction，异常回滚由它统一负责
+        async with db_transaction(db, error_map={
+            BackupError: _restore_error_to_http,
+            ValueError: _restore_error_to_http,
+        }):
+            result = await backup_service.restore_legacy_json(backup_data, db)
     finally:
         await backup_service.release_restore_lock()
     verification_ok = result.get('verification', {}).get('overall_pass', True)

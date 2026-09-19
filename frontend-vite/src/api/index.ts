@@ -25,6 +25,7 @@ export type {
 export { customerApi } from './customer'
 export { supplierApi } from './supplier'
 export { stockApi } from './stock'
+export type { BatchSubmitResponse } from './stock'
 export { approvalApi } from './approval'
 export { batchApi } from './batch'
 export { materialApi } from './material'

@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>汇总下单「只有一个 SKU」根因诊断 · 2026-09-18</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --line:#e4e7ec; --ink:#16181d; --ink2:#4a5160;
+    --ink3:#7b8494; --accent:#1f5fd0; --danger:#c0392b; --warn:#b7791f; --ok:#1e7a4d;
+    --code:#f2f4f7;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font:14px/1.72 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
+  .wrap{max-width:1000px;margin:0 auto;padding:40px 24px 72px}
+  header{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:26px 28px;margin-bottom:20px}
+  h1{margin:0 0 6px;font-size:22px;letter-spacing:.2px}
+  .sub{color:var(--ink3);font-size:13px}
+  .meta{margin-top:14px;display:flex;flex-wrap:wrap;gap:8px}
+  .tag{font-size:12px;padding:3px 9px;border-radius:999px;background:#eef2f8;color:var(--ink2);border:1px solid var(--line)}
+  section{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:22px 28px;margin-bottom:16px}
+  h2{font-size:16px;margin:0 0 14px;padding-bottom:9px;border-bottom:1px solid var(--line)}
+  h3{font-size:14px;margin:20px 0 8px;color:var(--ink2)}
+  p{margin:9px 0}
+  table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13px}
+  th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+  th{background:#f0f2f5;font-weight:600;color:var(--ink2);white-space:nowrap}
+  td.num{text-align:right;font-variant-numeric:tabular-nums}
+  code{background:var(--code);padding:1.5px 5px;border-radius:4px;font-family:Consolas,"Courier New",monospace;font-size:12.5px}
+  pre{background:var(--code);border:1px solid var(--line);border-left:3px solid var(--accent);
+      border-radius:6px;padding:12px 14px;overflow:auto;font-size:12.5px;line-height:1.6;margin:10px 0}
+  .callout{border-left:3px solid var(--accent);background:#f4f8ff;padding:12px 16px;border-radius:6px;margin:14px 0}
+  .callout.danger{border-color:var(--danger);background:#fdf3f2}
+  .callout.warn{border-color:var(--warn);background:#fdf9ef}
+  .callout.ok{border-color:var(--ok);background:#f2faf5}
+  .sev{display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:4px;color:#fff;margin-right:8px}
+  .s-high{background:var(--danger)} .s-mid{background:var(--warn)} .s-low{background:#5b6b7f}
+  ul{margin:8px 0 8px 20px;padding:0}
+  li{margin:5px 0}
+  .k{color:var(--ink3)}
+  .path{font-family:Consolas,monospace;font-size:12.5px;color:var(--ink2)}
+  footer{color:var(--ink3);font-size:12px;text-align:center;padding:22px 0 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>汇总下单「只有一个 SKU」根因诊断</h1>
+  <div class="sub">/purchase 汇总下单弹窗 · 真实数据复现 · 后端口径缺陷</div>
+  <div class="meta">
+    <span class="tag">报告日期 2026-09-18</span>
+    <span class="tag">取证方式：只读（未写库 / 未改生产数据 / 未重启服务）</span>
+    <span class="tag">样本：采购单 CG-20260918-0008（奥飞，4 SKU）</span>
+    <span class="tag">后端修复已落地并回归通过</span>
+  </div>
+</header>
+
+<section>
+  <h2>0 · 结论（TL;DR）</h2>
+  <div class="callout danger">
+    <strong>这不是前端渲染问题，也不是数据缺失。</strong>
+    采购单 <code>CG-20260918-0008</code> 在库中<strong>完整保存了 4 个 SKU</strong>（主表名称 = 4 个产品名的「、」拼接串，
+    <code>purchase_order_sku</code> 有 4 行逐 SKU 快照）。
+    缺陷在于「汇总」查询在解析产品与展开 BOM 时读了 <code>Order.product_id</code> ——
+    那是多 SKU 模型下的<strong>兼容字段，只等于首个 SKU</strong>（<code>Order.quantity</code> 则是所有 SKU 之和），
+    于是 4 个 SKU 的采购单被当成 1 个 SKU：<strong>产品名只剩「妹妹二代」，另外 3 个 SKU 的物料全部不进汇总。</strong>
+  </div>
+  <p class="k">一句话：<strong>数量是对的（合计 3,996,444），名称与物料集合是错的（只覆盖第 1 个 SKU）。</strong></p>
+</section>
+
+<section>
+  <h2>1 · 真实数据基线</h2>
+  <table>
+    <tr><th>对象</th><th>库中真实值</th></tr>
+    <tr><td>客户订单</td><td>id <code>68756</code> / 单号 <code>PO-20260918-0017</code> / 客户 奥飞 / 状态 已备货</td></tr>
+    <tr><td>订单兼容字段</td><td><code>product_id = 20533</code>（<strong>首个</strong> SKU「妹妹二代」）、<code>quantity = 3996444</code>（4 个 SKU 之和）</td></tr>
+    <tr><td>订单 SKU 明细</td><td><code>order_item</code> 4 行：妹妹二代 / Nommi糯米儿-宝藏收藏家系列毛绒盲盒 / 企鹅的订单 / 变形金刚，<strong>各 999,111</strong></td></tr>
+    <tr><td>采购单</td><td>id <code>20404</code> / 单号 <code>CG-20260918-0008</code> / <code>source_order_ids = [68756]</code></td></tr>
+    <tr><td>采购单主表名称</td><td>「Nommi糯米儿-宝藏收藏家系列毛绒盲盒、企鹅的订单、变形金刚、妹妹二代」<span class="k">（完整 4 个）</span></td></tr>
+    <tr><td>逐 SKU 快照</td><td><code>purchase_order_sku</code> 4 行（id 45–48），各 <code>order_qty = 999111</code></td></tr>
+    <tr><td>采购明细</td><td><code>purchase_order_item</code> 共 11 种物料（含 2 种填充物、2 种配件）</td></tr>
+  </table>
+  <p class="k">迁移版本已为 <code>pg_standalone_047_purchase_order_sku</code>，方案 C 的逐 SKU 表已建并且本单已写入 —— 数据层没有丢失。</p>
+</section>
+
+<section>
+  <h2>2 · 根因（两层，同一反模式）</h2>
+
+  <h3>RC-1 产品名被「首个 SKU」覆盖 —— 直接造成「只有一个 SKU」</h3>
+  <p class="path">fastapi_app/services/purchase/_factory.py</p>
+  <pre># 修复前
+def _resolve_factory_po_info(po, cust_order_map, prod_name_map):
+    cust  = po.customer_name or '未知客户'
+    prod  = po.product_name or '未知产品'      # 主表：4 个名称的完整清单
+    order_qty = float(po.product_quantity or 0)
+    pid, cust, order_qty = _resolve_factory_source_info(po, cust_order_map, cust, order_qty)
+    if pid and pid in prod_name_map:
+        prod = prod_name_map[pid]              # ← 无条件覆盖为首个 SKU 的名称
+    return cust, prod, order_qty, pid</pre>
+  <p><code>pid</code> 来自 <code>_fetch_factory_cust_order_map</code>，它读的是
+     <code>select(Order.id, Order.product_id, Order.quantity, Order.customer)</code>，
+     源码里还留着 <code>TODO(multi-sku-order)</code> 注释自陈这一点。
+     <strong>主表里已经正确的完整名称，被一个「首个 SKU」的标量覆盖掉了。</strong></p>
+
+  <h3>RC-2 BOM 只按首个 SKU 展开 —— 造成汇总漏料</h3>
+  <p class="path">fastapi_app/services/purchase/_factory.py ｜ _supplier.py</p>
+  <pre>bom_list = bom_data.get(pid, [])     # ← pid 只有首个 SKU
+for bom in bom_list:
+    _accumulate_factory_bom(...)
+
+# 且 product_ids 也只收集首个 SKU 的 pid：
+product_ids = list({pid for pid, _, _ in cust_order_map.values() if pid})</pre>
+  <p>结果：<strong>只有第 1 个 SKU（妹妹二代）的 BOM 参与汇总</strong>，其余 3 个 SKU 的物料既不在工厂页、也不在供应商页。
+     本单实测丢失 <code>哈哈</code>（面料，码）与 <code>织带</code>（配件，个）。</p>
+
+  <div class="callout warn">
+    <strong>双层同源</strong>：工厂内部汇总（<code>_factory.py</code>）与供应商采购汇总（<code>_supplier.py</code>）
+    各有一份同样的实现，<code>TODO(multi-sku-order)</code> 注释亦成对出现 —— 修复必须两处同时做，否则两个页签会给出不一致的口径。
+  </div>
+</section>
+
+<section>
+  <h2>3 · 影响面（严重度分层）</h2>
+  <table>
+    <tr><th>严重度</th><th>受影响路径</th><th>表现 / 后果</th></tr>
+    <tr>
+      <td><span class="sev s-high">高</span></td>
+      <td>汇总弹窗「工厂内部订单」页签<br>→ 屏幕表格 / 打印预览 / 导出 Excel</td>
+      <td>产品名只显示 1 个 SKU；<strong>另外 3 个 SKU 的物料不在表内</strong>。该表是给工厂/供应商下单的依据，
+          <strong>存在漏料下单的业务风险</strong>。三处输出同源于一个 <code>factoryData</code>，故同时出错。</td>
+    </tr>
+    <tr>
+      <td><span class="sev s-high">高</span></td>
+      <td>汇总弹窗「供应商采购订单」页签</td>
+      <td>同一物料集合，实测同样只有 7 种（应为 9 种）。</td>
+    </tr>
+    <tr>
+      <td><span class="sev s-mid">中</span></td>
+      <td>「进行中采购单 / 未处理订单」列表</td>
+      <td><strong>正确</strong>：这两处走 <code>OrderItem</code> 与 <code>_build_po_source_sku_map</code>，4 个 SKU 逐行显示。
+          但与汇总弹窗不一致 —— 用户正是对比这两处发现的问题。</td>
+    </tr>
+    <tr>
+      <td><span class="sev s-low">低</span></td>
+      <td>采购单落库数据 / <code>/beile-order</code> 逐 SKU</td>
+      <td><strong>不受影响</strong>：<code>purchase_order</code> 主表、<code>purchase_order_item</code>、
+          <code>purchase_order_sku</code> 均正确，无需数据回填。</td>
+    </tr>
+  </table>
+  <div class="callout ok">
+    <strong>重要</strong>：本缺陷<strong>不污染数据库</strong>，只影响「汇总视图」。修复后无需回填、无需迁移。
+  </div>
+</section>
+
+<section>
+  <h2>4 · 已落地的修复</h2>
+  <p>思路：<strong>凡「按采购单展开产品 / BOM」一律遍历该采购单覆盖的全部 SKU（<code>order_item</code>），
+     彻底不再读 <code>Order.product_id</code> 兼容字段</strong>；数量仍取采购单明细（含人工编辑后的真值），不重算、不摊派。</p>
+  <table>
+    <tr><th>文件</th><th>改动</th></tr>
+    <tr>
+      <td class="path">services/purchase/_common.py</td>
+      <td>新增 <code>fetch_po_sku_pids_map(db, orders)</code>：采购单 → 该单覆盖的<strong>全部 SKU</strong> 的 product_id
+          （去重保序；回退链 OrderItem → Order → StockIn，与 <code>_build_po_source_sku_map</code> 同口径）。</td>
+    </tr>
+    <tr>
+      <td class="path">services/purchase/_factory.py</td>
+      <td>① <code>_resolve_factory_po_info</code> 不再用首个 SKU 名称覆盖主表 <code>product_name</code>（仅主表为空时才退化）；
+          ② <code>_build_factory_group_map</code> 遍历全部 SKU 的 BOM 取并集，并对<strong>跨 SKU 重复物料去重</strong>。</td>
+    </tr>
+    <tr>
+      <td class="path">services/purchase/_supplier.py</td>
+      <td><code>_build_supplier_mat_map</code> 做对称改动（同样遍历全部 SKU + 跨 SKU 去重）。</td>
+    </tr>
+    <tr>
+      <td class="path">services/purchase_order_query.py</td>
+      <td><code>get_factory_order_summary</code> / <code>get_supplier_order_summary</code> 的 <code>product_ids</code>
+          改为「全部 SKU 并集」，并把 <code>po_pids_map</code> 传入构建函数。</td>
+    </tr>
+    <tr>
+      <td class="path">tests/services/test_factory_summary_multisku.py</td>
+      <td>新增 4 条回归：C1 名称完整、C2 物料并集、C3 共享物料<strong>不得翻倍</strong>、C4 单 SKU 零回归。</td>
+    </tr>
+  </table>
+
+  <div class="callout warn">
+    <strong>修复过程中的一个真实陷阱（已修正并被 C3 用例锁死）</strong>：物料数量取自
+    <code>purchase_order_item</code>，而它是<strong>跨 SKU 合并</strong>后的合计。若简单地对每个 SKU 都累加一遍，
+    共享物料（如本单的「安伦」被 4 个 SKU 共用）会<strong>翻 4 倍</strong>。
+    实测第一版实现即产出 2 倍值（安伦 239,786.64 → 479,573.28），已修正为先判重再登记。
+  </div>
+</section>
+
+<section>
+  <h2>5 · 验证证据</h2>
+
+  <h3>5.1 A/B 对照（同一份真实数据，仅切换该处取数口径）</h3>
+  <p class="k">脚本：<code>_probe_factory_summary_ab.py</code>（只读）｜产物：<code>_probe_factory_summary_ab.out</code></p>
+  <table>
+    <tr><th>口径</th><th>产品名称</th><th>工厂汇总物料数</th><th>物料清单</th></tr>
+    <tr>
+      <td>修复前（首个 SKU）</td>
+      <td style="color:#c0392b">妹妹二代</td>
+      <td class="num" style="color:#c0392b">7</td>
+      <td>安伦 / 小兔毛 / 本白超如 / 漂白 / 网纱 / 超柔 / 金光绒</td>
+    </tr>
+    <tr>
+      <td>修复后（全部 SKU）</td>
+      <td style="color:#1e7a4d">Nommi…盲盒、企鹅的订单、变形金刚、妹妹二代</td>
+      <td class="num" style="color:#1e7a4d">9</td>
+      <td>＋ <strong>哈哈</strong> / <strong>织带</strong></td>
+    </tr>
+  </table>
+
+  <h3>5.2 数量口径一致性（防翻倍）</h3>
+  <p class="k">脚本：<code>_probe_factory_summary_gap.py</code>｜逐条比对「供应商汇总数量」与「采购单明细数量」</p>
+  <table>
+    <tr><th>物料</th><th>规格</th><th>单位</th><th>汇总数量</th><th>采购单实际</th><th>结论</th></tr>
+    <tr><td>小兔毛</td><td>17</td><td>码</td><td class="num">139,875.54</td><td class="num">139,875.54</td><td>一致</td></tr>
+    <tr><td>哈哈</td><td>哈哈</td><td>码</td><td class="num">999,111.00</td><td class="num">999,111.00</td><td>一致（修复前缺失）</td></tr>
+    <tr><td>织带</td><td>12</td><td>个</td><td class="num">999,111.00</td><td class="num">999,111.00</td><td>一致（修复前缺失）</td></tr>
+    <tr><td>安伦</td><td>11</td><td>码</td><td class="num">239,786.64</td><td class="num">239,786.64</td><td>一致（未翻倍）</td></tr>
+    <tr><td>金光绒</td><td>47</td><td>码</td><td class="num">1,258,879.86</td><td class="num">1,258,879.86</td><td>一致（未翻倍）</td></tr>
+    <tr><td colspan="6" class="k">其余 4 种物料同样一致；<strong>不一致条数 = 0</strong>。填充物 2 种按设计被 <code>_is_filling_category</code> 排除。</td></tr>
+  </table>
+
+  <h3>5.3 自动化回归</h3>
+  <pre>pytest fastapi_app/tests/services/test_factory_order_summary_spare_rate.py \
+       fastapi_app/tests/services/test_factory_summary_multisku.py
+→ 21 passed</pre>
+  <p class="k">C4（单 SKU 零回归）确保既有 30 张历史采购单的汇总输出逐字不变；C1–C3 为本次缺陷的判别用例。</p>
+</section>
+
+<section>
+  <h2>6 · 生效状态（2026-09-18 22:36 更新）</h2>
+
+  <div class="callout ok">
+    <strong>✅ 后端修复已在线生效 —— 无需提权重载。</strong>
+    实测后端以 <code>uvicorn ... --reload --reload-dir fastapi_app</code>（dev 单 worker，父进程为服务器管理器 GUI）运行，
+    reload worker 于 <strong>22:10:17</strong> 重启，晚于全部改动文件 mtime（≤ 22:04:56）⇒ 新代码已在运行进程中。
+  </div>
+
+  <div class="callout warn">
+    <strong>⚠️ 站点当前跑在开发模式，不是生产托管。</strong>
+    实测 <code>:3000</code> 由 <strong>vite dev server</strong> 承载（返回 HTML 含 <code>/@vite/client</code> 与 <code>/src/main.ts</code>，
+    无 hashed assets），且<strong>本机当前没有 nginx 进程</strong>。因此：
+    <ul>
+      <li>前端改动<b>已通过 HMR 立即生效</b>（你刷新页面即可看到逐 SKU 分行）；</li>
+      <li>本次构建的 <code>dist</code> 是<b>生产产物</b>，在切到生产托管之前不会被任何请求服务。</li>
+    </ul>
+  </div>
+</section>
+
+<section>
+  <h2>7 · 方案 B 实施与发布记录</h2>
+
+  <h3>7.1 后端：新增逐 SKU 明细 <code>skus[]</code></h3>
+  <table>
+    <tr><th>文件</th><th>改动</th></tr>
+    <tr>
+      <td class="path">services/purchase_order_sku.py</td>
+      <td>新增 <code>fetch_po_sku_map(db, po_ids)</code>（读逐 SKU 快照，同名单条码合并）与 <code>merge_sku_lines</code>；
+          表不可用时返回空 dict，由调用方降级，绝不 500。</td>
+    </tr>
+    <tr>
+      <td class="path">services/purchase/_common.py</td>
+      <td>新增 <code>fetch_po_sku_lines_map</code>：无快照的采购单回退 <code>OrderItem</code> 口径（Order → StockIn 兜底），
+          保证历史单也能逐 SKU 展示。</td>
+    </tr>
+    <tr>
+      <td class="path">services/purchase/_factory.py</td>
+      <td>分组装配 <code>skus[]</code>；无明细时回退为订单级单行（前端因此无需兼容分支）。</td>
+    </tr>
+  </table>
+  <p class="k">真实数据验证（采购单 20404）：<code>skus</code> 返回 4 行，<code>Σ order_qty = 3,996,444 = product_quantity</code>；单 SKU 单（20397 / 20373）仍为 1 行。</p>
+
+  <h3>7.2 前端：逐 SKU 分行 + 合计子行</h3>
+  <table>
+    <tr><th>文件</th><th>改动</th></tr>
+    <tr>
+      <td class="path">purchase/composables/useSummaryModal.ts</td>
+      <td>新增 <code>buildSkuDisplayLines(group, lossRate)</code> —— 屏幕三列 / 打印预览 / Excel 导出的<b>唯一来源</b>；
+          新增 <code>SkuLine</code> / <code>SkuDisplayLine</code> 类型与 <code>FactoryGroup.skus</code>。</td>
+    </tr>
+    <tr>
+      <td class="path">purchase/components/SummaryModal.vue</td>
+      <td>「产品名称 / 订单数量 / 备品数量」三列逐 SKU 分行 + 「合计」子行（加粗、细分隔线，无动效）。</td>
+    </tr>
+  </table>
+  <p><strong>口径声明</strong>：逐 SKU <b>只有订单数量</b>是权威的（来自 <code>purchase_order_sku</code>）；
+     「合计」取<b>订单级真值</b> <code>product_quantity</code>，不依赖逐 SKU 之和；
+     备品按各 SKU 自身数量 ceil、合计按订单级数量 ceil。
+     <b>物料列仍为订单级</b> —— 采购单侧物料数量是跨 SKU 合并值，无法拆分到 SKU，前端不编造无法追溯的数
+     （与 <code>/beile-order</code> 已确立的口径一致）。
+     单 SKU 或旧后端（无 <code>skus</code>）时只渲染一行，与改动前逐字一致。</p>
+
+  <h3>7.3 回归验证</h3>
+  <table>
+    <tr><th>项</th><th>结果</th></tr>
+    <tr><td>后端 pytest（汇总 + 逐 SKU 相关，含新增 C1–C7）</td><td><strong>34 passed</strong></td></tr>
+    <tr><td>前端 vitest 全量</td><td><strong>479 passed / 42 files</strong>（含既有汇总用例 37 + 12，零回归）</td></tr>
+    <tr><td>前端类型门禁 <code>vue-tsc -b</code></td><td><strong>EXIT=0</strong></td></tr>
+    <tr><td>新增用例</td><td>后端 <code>test_factory_summary_multisku.py</code>（C1–C7）；前端 <code>SummaryModal.multisku.test.ts</code>（8 条，含真实组件挂载断言 DOM 行数）</td></tr>
+  </table>
+
+  <div class="callout warn">
+    <strong>一处既有护栏用例需要适配（已修，判据未放松）</strong>：<code>test_spare_rate_reading_adds_no_db_roundtrip</code>
+    用「两次调用 SQL 语句数相等」证明「读损耗率不产生额外往返」。本次新增的 <code>purchase_order_sku</code>
+    表能力探测（SAVEPOINT + SELECT + ROLLBACK）只在<b>首次调用</b>发生且结果缓存在 <code>db.info</code>，
+    属缓存冷启动差异、与损耗率数据无关。修法是在测量前<b>预热</b>该探测，三条断言原样保留。
+  </div>
+
+  <h3>7.4 生产构建与发布</h3>
+  <p>构建前已备份：<code>backups/frontend-dist-20260918-223320</code>（192 文件，校验一致）。</p>
+  <p>构建走 <strong>vite root 之外</strong>的暂存目录（<code>_dist_stage</code>）再原子换入 <code>frontend-vite/dist</code>，
+  依据是 <code>scripts/swap-dist.mjs</code> 记载的根因：vite dev watcher 只忽略 <code>build.outDir</code>（dist）、
+  <b>不忽略 <code>dist-new</code></b>，故 <code>rename(dist-new → dist)</code> 必 EPERM。本次实测复现了该 EPERM。</p>
+  <table>
+    <tr><th>生效四件套</th><th>实测</th></tr>
+    <tr><td>① 新入口 chunk</td><td><code>index-7WYBnKmo.js</code>（index.html mtime 22:34:02）</td></tr>
+    <tr><td>② 新 chunk 存在且含修复标识</td><td><code>SummaryModal-DDK9I57c.js</code> 含 <code>sm-sku-line</code> / <code>sm-sku-line--total</code></td></tr>
+    <tr><td>③ 旧 chunk 已清除</td><td>旧 <code>SummaryModal-C7SIs-va.js</code> 已不在产物中</td></tr>
+    <tr><td>④ 无 <code>dist-new</code>/<code>dist-old</code> 残留</td><td><code>dist-old</code> 无残留 ✅；<code>dist-new</code> <b>仍存在</b> ❌（见下）</td></tr>
+  </table>
+  <div class="callout danger">
+    <strong>唯一未闭环项：<code>frontend-vite/dist-new</code> 残留无法在 dev server 运行期间清理。</strong>
+    实测 <code>rename(dist-new → …)</code> 抛 <code>PermissionError [WinError 5] 拒绝访问</code>，
+    与上述 watcher 持锁的根因一致。<b>该残留早于本次任务（mtime 10:10，内容为更早版本）</b>，不影响功能
+    （dev server 不使用它，nginx root 指向 <code>dist</code>）。
+    清理前置条件：<b>先停 dev server</b>，再 <code>mv</code> 走（不要 <code>rm</code>，本环境批量删除会触发回收站保护）。
+  </div>
+
+  <h3>7.5 尚未执行</h3>
+  <ul>
+    <li><b>真实浏览器 E2E 点击流</b>：需要登录凭据（仓库内无可用凭据，未做凭据挖掘）。当前已用「真实数据库 → 真实 service 函数」
+        与「真实组件挂载 + DOM 断言」两端夹逼；若你提供访问方式，可补一次 Playwright/Edge 断言式回归。</li>
+    <li><b>切换到生产托管</b>（nginx + NSSM <code>erp-prod</code>）：属提权 GUI 通道操作，会中断线上接口，需你确认后再执行。
+        完成后才谈得上「HTTP 层四件套」（新 chunk 200 / 旧 chunk 404）。</li>
+  </ul>
+</section>
+
+<footer>
+  取证与修复过程严格只读：未写入生产库、未修改业务数据。<br>
+  后端改动：<code>services/purchase_order_sku.py</code>、<code>services/purchase/_common.py</code>、
+  <code>services/purchase/_factory.py</code>、<code>services/purchase/_supplier.py</code>、
+  <code>services/purchase_order_query.py</code>、<code>services/purchase_order_query_helpers.py</code>（re-export）<br>
+  前端改动：<code>purchase/composables/useSummaryModal.ts</code>、<code>purchase/components/SummaryModal.vue</code>
+</footer>
+
+</div>
+</body>
+</html>

@@ -55,7 +55,6 @@
                 <td class="pc-td-nowrap">
                   <div class="pc-order-meta-cell">
                     <div class="pc-order-badges">
-                      <span v-if="(o.sku_count || 1) > 1" class="pc-sku-badge" :title="`${o.sku_count} 个 SKU`">{{ o.sku_count }} SKU</span>
                       <span v-if="o.record_type === 'stockin'" class="pc-type-badge pc-type-badge--stockin">备货</span>
                       <span v-else class="pc-type-badge pc-type-badge--order">订单</span>
                     </div>
@@ -207,8 +206,7 @@ defineEmits<{
   color: var(--color-warning-600, #e88e2e);
 }
 
-.pc-order-badges .pc-type-badge,
-.pc-order-badges .pc-sku-badge {
+.pc-order-badges .pc-type-badge {
   margin: 0;
   flex-shrink: 0;
 }

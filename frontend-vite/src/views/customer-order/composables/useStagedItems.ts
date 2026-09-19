@@ -6,17 +6,28 @@
  */
 import { ref, computed, type Ref, type ComputedRef } from 'vue'
 import { useQueryClient } from '@tanstack/vue-query'
-import { post } from '@/api/request'
+import { stockApi, type BatchSubmitResponse } from '@/api'
 import { showToast } from '@/composables/useToast'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { getErrorMessage } from '@/types/errors'
 import type { StagedItem } from './types'
 
-/** /aux/batch-submit-orders 批量提交响应（兼容裸返回与 { data } 包裹两种结构） */
-export interface BatchSubmitOrdersResponse {
-  created_count?: number
-  results?: { success: boolean; error?: string }[]
-  data?: BatchSubmitOrdersResponse
+/** 兼容旧名，实际类型来自 API 层（避免两处定义漂移） */
+export type BatchSubmitOrdersResponse = BatchSubmitResponse
+
+/**
+ * 单类条目（订单 / 备货）的提交结果。
+ *
+ * 关键不变量：`failed` 只在**真的发出过请求并失败**时为 true；
+ * 未尝试（`attempted === false`）既不等于成功、也不等于失败。
+ * 移除条目与播报文案都由此结构派生，二者因此不可能互相矛盾。
+ */
+export interface SubmitOutcome {
+  attempted: boolean
+  failed: boolean
+  /** 该类本次涉及的条目数（未尝试时为 0） */
+  count: number
+  res: BatchSubmitOrdersResponse | null
 }
 
 /**
@@ -50,88 +61,110 @@ export function useStagedItems() {
 
   const submitting = ref(false)
 
+  /**
+   * 提交一类条目。成功/失败只记录事实并提示错误，不抛出，
+   * 交由 submitAll 统一决策「移除什么、播报什么」。
+   */
+  async function submitGroup(
+    submit: (payload: Record<string, unknown>[]) => Promise<BatchSubmitOrdersResponse>,
+    payload: Record<string, unknown>[],
+    label: string,
+  ): Promise<SubmitOutcome> {
+    if (!payload.length) return { attempted: false, failed: false, count: 0, res: null }
+    try {
+      const res = await submit(payload)
+      return { attempted: true, failed: false, count: payload.length, res }
+    } catch (e: unknown) {
+      showToast(getErrorMessage(e, `${label}提交失败`), 'error')
+      return { attempted: true, failed: true, count: payload.length, res: null }
+    }
+  }
+
+  function buildOrderPayload() {
+    return stagedOrders.value.map((i) => ({
+      product_id: i.productId,
+      customer: i.customer,
+      quantity: i.quantity,
+      deduct_stock: i.deductStock || false,
+      deduct_quantity: i.deductQuantity || 0,
+      note: i.note || '',
+      order_date: i.date || '',
+      order_type: i.orderType === 'custom' ? 'custom' : 'regular',
+      country: i.country || '',
+    }))
+  }
+
+  function buildStockinPayload() {
+    return stagedStockins.value.map((i) => ({
+      product_id: i.productId,
+      customer: i.customer,
+      quantity: i.quantity,
+      note: i.note || '',
+      stockin_date: i.date || '',
+      order_type: i.orderType === 'custom' ? 'custom' : 'regular',
+      country: i.country || '',
+    }))
+  }
+
+  /** 只移除已确认提交成功的条目，失败与未尝试的一律保留供重试 */
+  function dropUids(uids: string[]) {
+    if (!uids.length) return
+    stagedItems.value = stagedItems.value.filter((i) => !uids.includes(i.uid))
+  }
+
+  /**
+   * 统一播报。所有措辞都由 order/stockin 两个真实结果派生，
+   * 因此不会出现「播报成功但实际未提交」这类与事实相反的反馈。
+   */
+  function reportSubmit(order: SubmitOutcome, stockin: SubmitOutcome) {
+    const done: string[] = []
+    const kept: string[] = []
+    if (order.attempted && !order.failed) done.push(`订单 ${order.count} 条`)
+    if (stockin.attempted && !stockin.failed) done.push(`备货 ${stockin.count} 条`)
+    if (order.attempted && order.failed) kept.push(`订单 ${order.count} 条`)
+    if (stockin.attempted && stockin.failed) kept.push(`备货 ${stockin.count} 条`)
+
+    if (kept.length) {
+      const head = done.length ? `已提交：${done.join('、')}；` : ''
+      showToast(`${head}提交失败：${kept.join('、')}（已保留，可重新提交）`, done.length ? 'warning' : 'error')
+      return
+    }
+    if (!order.attempted) {
+      showToast('提交成功', 'success')
+      return
+    }
+    const res = order.res?.data ?? order.res
+    const createdCount = res?.created_count ?? 0
+    if (createdCount === 0) {
+      const firstError = (res?.results ?? []).filter((r) => !r.success)[0]?.error || '未知原因'
+      showToast(`订单创建失败（0/${order.count}）：${firstError}`, 'error')
+      return
+    }
+    showToast(`提交成功：已创建 ${createdCount} 个主订单（含 ${order.count} 个 SKU）`, 'success')
+  }
+
   async function submitAll() {
     if (!stagedItems.value.length || submitting.value) return
     submitting.value = true
     try {
-      const orderPayload = stagedOrders.value.map((i) => ({
-        product_id: i.productId,
-        customer: i.customer,
-        quantity: i.quantity,
-        deduct_stock: i.deductStock || false,
-        deduct_quantity: i.deductQuantity || 0,
-        note: i.note || '',
-        order_date: i.date || '',
-        order_type: i.orderType === 'custom' ? 'custom' : 'regular',
-        country: i.country || '',
-      }))
-      const stockinPayload = stagedStockins.value.map((i) => ({
-        product_id: i.productId,
-        customer: i.customer,
-        quantity: i.quantity,
-        note: i.note || '',
-        stockin_date: i.date || '',
-        order_type: i.orderType === 'custom' ? 'custom' : 'regular',
-        country: i.country || '',
-      }))
-
       const orderUids = stagedOrders.value.map((i) => i.uid)
       const stockinUids = stagedStockins.value.map((i) => i.uid)
 
-      let orderFailed = false
-      let stockinFailed = false
-      let orderRes: BatchSubmitOrdersResponse | null = null
+      // 两类条目各自独立提交：其一失败不阻断另一类，
+      // 也不会把「从未尝试」错当成「已成功」（后者曾导致条目被静默移出暂存区）。
+      const order = await submitGroup(
+        stockApi.batchSubmitOrders, buildOrderPayload(), '订单')
+      const stockin = await submitGroup(
+        stockApi.batchSubmitStockins, buildStockinPayload(), '备货')
 
-      if (orderPayload.length) {
-        try {
-          orderRes = await post<BatchSubmitOrdersResponse>('/aux/batch-submit-orders', { orders: orderPayload })
-        } catch (e: unknown) {
-          showToast(getErrorMessage(e, '订单提交失败'), 'error')
-          orderFailed = true
-        }
-      }
-      if (!orderFailed && stockinPayload.length) {
-        try {
-          await post('/aux/batch-submit-stockins', { stockins: stockinPayload })
-        } catch (e: unknown) {
-          showToast(getErrorMessage(e, '备货提交失败'), 'error')
-          stockinFailed = true
-        }
-      }
+      // 移除与播报共用同一组事实，二者不可能不一致
+      if (order.attempted && !order.failed) dropUids(orderUids)
+      if (stockin.attempted && !stockin.failed) dropUids(stockinUids)
 
-      // 仅移除成功提交的项，保留失败的项供用户重试
-      if (!orderFailed) {
-        stagedItems.value = stagedItems.value.filter((i) => !orderUids.includes(i.uid))
-      }
-      if (!stockinFailed) {
-        stagedItems.value = stagedItems.value.filter((i) => !stockinUids.includes(i.uid))
-      }
+      reportSubmit(order, stockin)
 
-      // 反馈：部分失败时明确告知用户状态
-      if (orderFailed && !stockinFailed && stockinPayload.length) {
-        showToast('备货已提交成功，但订单提交失败，请重新提交订单', 'warning')
-      } else if (!orderFailed && stockinFailed && orderPayload.length) {
-        showToast(`订单已提交成功，但备货提交失败，请重新提交备货`, 'warning')
-      } else if (!orderFailed && !stockinFailed) {
-        if (orderPayload.length && orderRes) {
-          const resData = orderRes.data ?? orderRes
-          const createdCount = resData?.created_count ?? 0
-          const skuCount = orderPayload.length
-          if (createdCount === 0) {
-            // 订单全部失败：提取后端返回的错误详情
-            const failedResults = (resData?.results ?? []).filter((r) => !r.success)
-            const firstError = failedResults[0]?.error || '未知原因'
-            showToast(`订单创建失败（0/${skuCount}）：${firstError}`, 'error')
-          } else {
-            showToast(`提交成功：已创建 ${createdCount} 个主订单（含 ${skuCount} 个 SKU）`, 'success')
-          }
-        } else {
-          showToast('提交成功', 'success')
-        }
-      }
-
-      if (!orderFailed) queryClient.invalidateQueries({ queryKey: ['orders-list'] })
-      if (!stockinFailed) queryClient.invalidateQueries({ queryKey: ['stockins-list'] })
+      if (order.attempted && !order.failed) queryClient.invalidateQueries({ queryKey: ['orders-list'] })
+      if (stockin.attempted && !stockin.failed) queryClient.invalidateQueries({ queryKey: ['stockins-list'] })
     } finally {
       submitting.value = false
     }

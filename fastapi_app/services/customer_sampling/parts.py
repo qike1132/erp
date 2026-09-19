@@ -215,7 +215,7 @@ async def delete_part(
 
     - 历史版本快照中该部位数据保留（快照不可变，spec 5.5.1.6）
     - 允许删除任意版本（含角色当前最终版本）：
-      快照不可变，diff 基于快照计算，删除后 create_version 会正确记录为 delete 变更；
+      快照不可变，diff 基于快照计算；
       最终版本删除的强确认提示由前端 onDeleteVersion 承担，后端不做硬性拦截。
     """
     result = await db.execute(
@@ -392,7 +392,7 @@ async def copy_part_version(
     if part is None:
         raise NotFoundError('部位不存在')
 
-    # 锁定角色行（串行化同角色并发的版本号推算，见 create_version 同款锁）
+    # 锁定角色行（串行化同角色并发的版本号推算，防止版本号冲突）
     role_lock = await db.execute(
         select(CustomerSamplingRole.id)
         .where(CustomerSamplingRole.id == part.role_id)

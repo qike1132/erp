@@ -2,7 +2,23 @@
 批量导入 Pydantic 数据模型
 """
 
+from typing import Protocol, runtime_checkable
+
 from pydantic import BaseModel, Field
+
+
+@runtime_checkable
+class ExcelUpload(Protocol):
+    """上传的 Excel 文件的最小契约（传输层无关）。
+
+    FastAPI 的 ``UploadFile`` 结构化地满足本协议；服务层因此无需 import
+    ``fastapi.UploadFile``，ARQ 任务 / CLI 也可传入任意等价实现。
+    """
+
+    filename: str | None
+
+    async def read(self, size: int = -1) -> bytes:
+        ...
 
 
 class BatchImportResult(BaseModel):

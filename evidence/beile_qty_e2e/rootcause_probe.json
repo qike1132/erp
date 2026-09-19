@@ -1,0 +1,95 @@
+{
+ "ancestor_chain_1280": {
+  "hdrSW": 1300,
+  "hdrCW": 1020,
+  "wrapSW": 1300,
+  "wrapCW": 1020,
+  "chain": [
+   {
+    "cls": "bo-grid bo-grid-header",
+    "sw": 1300,
+    "cw": 1020,
+    "ovx": "visible"
+   },
+   {
+    "cls": "bo-table-wrap",
+    "sw": 1300,
+    "cw": 1020,
+    "ovx": "hidden"
+   },
+   {
+    "cls": "bo-card-main",
+    "sw": 1020,
+    "cw": 1020,
+    "ovx": "hidden"
+   },
+   {
+    "cls": "bo-inventory",
+    "sw": 1020,
+    "cw": 1020,
+    "ovx": "visible"
+   },
+   {
+    "cls": "hu-tab-content",
+    "sw": 1020,
+    "cw": 1020,
+    "ovx": "visible"
+   },
+   {
+    "cls": "page-card-body",
+    "sw": 1020,
+    "cw": 1020,
+    "ovx": "auto"
+   },
+   {
+    "cls": "page-card page-card-main",
+    "sw": 1020,
+    "cw": 1020,
+    "ovx": "hidden"
+   },
+   {
+    "cls": "hu-container",
+    "sw": 1022,
+    "cw": 1022,
+    "ovx": "hidden"
+   },
+   {
+    "cls": "content-container no-padding",
+    "sw": 1022,
+    "cw": 1022,
+    "ovx": "visible"
+   },
+   {
+    "cls": "main-content no-header immersive",
+    "sw": 1022,
+    "cw": 1022,
+    "ovx": "visible"
+   },
+   {
+    "cls": "app-layout",
+    "sw": 1280,
+    "cw": 1280,
+    "ovx": "hidden"
+   },
+   {
+    "cls": "",
+    "sw": 1280,
+    "cw": 1280,
+    "ovx": "visible"
+   },
+   {
+    "cls": "",
+    "sw": 1280,
+    "cw": 1280,
+    "ovx": "hidden"
+   }
+  ]
+ },
+ "experiment_hide_production_col": {
+  "colIndex": 6,
+  "before": 1300,
+  "after": 1190,
+  "wrapCW": 1020
+ },
+ "min_viewport_no_overflow": 1600
+}

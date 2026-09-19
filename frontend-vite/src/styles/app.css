@@ -296,6 +296,29 @@ h6 { font-size: 0.8125rem; }
   line-height: 1;
 }
 
+/* ============ Form Validation States ============ */
+/* 字段级校验的统一表达：所有表单输入共用同一组类，避免各处各写一套平行实现。
+   用法：给输入框加 .form-input-invalid（由 :class / :aria-invalid 按校验结果切换），
+   紧随其后放 .field-error-text 承载提示文案。 */
+.form-input-invalid {
+  border-color: var(--color-danger-500) !important;
+  background: var(--color-danger-50);
+}
+.form-input-invalid:focus,
+.form-input-invalid:focus-visible {
+  /* !important：字段自身可能带 scoped 的 :focus 规则（同特异性），
+     越界状态必须稳定压过常态聚焦环，否则报错字段会显示蓝色聚焦环 */
+  border-color: var(--color-danger-500) !important;
+  box-shadow: 0 0 0 3px rgba(234, 84, 85, 0.18) !important;
+}
+.field-error-text {
+  display: block;
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-danger-600);
+}
+
 /* ============ Component Animations ============ */
 @layer utilities {
   .animate-fade-in {

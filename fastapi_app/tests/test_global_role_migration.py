@@ -277,8 +277,28 @@ class TestGlobalRoleMigrationChainHealth:
         heads = script_dir.get_heads()
         assert len(heads) == 1, f"迁移链分叉，存在多个 head: {heads}"
 
-    def test_global_role_is_head(self, script_dir):
-        assert script_dir.get_heads() == ["pg_standalone_045_global_role"]
+    def test_head_is_dynamically_derived_leaf(self, script_dir):
+        """迁移图的 head 必须等于「从图里动态推导的叶子修订」——不再写死修订字符串。
+
+        历史写法 ``get_heads() == ['pg_standalone_045_global_role']`` 会在任何下游迁移
+        （如本次新增 046/047）加入后误报为掉链/分叉（实为链被正确延长）。
+        改为：从 revision 图推导出「不是任何人的 down_revision 的修订」= 叶子集合，
+        再与 ``ScriptDirectory.get_heads()`` 交叉校验；今后新增迁移自动跟随，无需改本用例。
+        045 仍在主链上（由 ``test_global_role_in_chain`` 保证）。
+        """
+        revs = list(script_dir.walk_revisions())
+        downs: set[str] = set()
+        for rev in revs:
+            d = rev.down_revision
+            if isinstance(d, (tuple, list)):
+                downs.update(str(x) for x in d if x)
+            elif d:
+                downs.add(str(d))
+        leaves = sorted({rev.revision for rev in revs} - downs)
+        assert leaves, "迁移图未推导出任何叶子（head）修订"
+        assert script_dir.get_heads() == leaves, (
+            f"动态推导 head {leaves} 与 ScriptDirectory.get_heads() {script_dir.get_heads()} 不一致"
+        )
 
     def test_global_role_in_chain(self, chain_revisions):
         assert "pg_standalone_045_global_role" in chain_revisions

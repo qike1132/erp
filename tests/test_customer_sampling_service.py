@@ -10,7 +10,7 @@
    - service 异常路径：NotFoundError / ConflictError / BusinessError
 
 3. 集成测试（标记 integration，主库 + 事务回滚隔离）
-   - 完整业务流程：分组聚合、项目 CRUD、部位 CRUD、版本创建+diff、变更日志
+   - 完整业务流程：分组聚合、项目 CRUD、部位 CRUD、版本快照读取+diff、变更日志
 
 对应需求规格：.codeartsdoer/specs/customer_sampling/spec.md
 对应技术设计：.codeartsdoer/specs/customer_sampling/design.md
@@ -42,7 +42,6 @@ from fastapi_app.services.customer_sampling_service import (
     _normalize_value,
     create_part,
     create_project,
-    create_version,
     delete_part,
     delete_project,
     get_grouped_list,
@@ -474,7 +473,7 @@ async def cs_db():
     from fastapi_app.shared_models import Base
 
     # 让 app 全局引擎在当前测试 loop 上按 conftest 重定向后的 URL 重建：
-    # create_project/create_version 经 numbering_sequence.allocate_sequence 直接
+    # create_project 经 numbering_sequence.allocate_sequence 直接
     # 引用 _AsyncSessionLocal（非请求路径），不先跑守卫则该引用为 None → TypeError。
     from fastapi_app.core import database as _db_mod
     await _db_mod.ensure_engine_for_current_loop()
@@ -516,6 +515,43 @@ async def _create_supplier(db, name='测试供应商A'):
     db.add(supplier)
     await db.flush()
     return supplier
+
+
+async def _seed_fabric_version(db, project_id, version_no, snapshot_data, change_summary=None,
+                               reason=None, role_id=None):
+    """直接落库一条版本快照记录
+
+    原 create_version service 已随「创建新版本」功能移除，此处保留版本快照的
+    读取类测试（版本详情 / 跨版本汇总 / 级联删除）所需的种子数据构造。
+    未指定 role_id 时挂到项目默认角色，并同步该角色的 current_version。
+    """
+    from sqlalchemy import select
+
+    from fastapi_app.shared_models import CustomerSamplingFabricVersion, CustomerSamplingRole
+
+    if role_id is None:
+        role = (await db.execute(
+            select(CustomerSamplingRole).where(CustomerSamplingRole.project_id == project_id)
+        )).scalars().first()
+        role_id = role.id
+    else:
+        role = (await db.execute(
+            select(CustomerSamplingRole).where(CustomerSamplingRole.id == role_id)
+        )).scalars().first()
+
+    version = CustomerSamplingFabricVersion(
+        project_id=project_id,
+        role_id=role_id,
+        version_no=version_no,
+        snapshot_data=snapshot_data,
+        change_summary=change_summary,
+        reason=reason,
+    )
+    db.add(version)
+    if role is not None:
+        role.current_version = version_no
+    await db.flush()
+    return version
 
 
 @pytest.mark.integration
@@ -862,9 +898,9 @@ class TestServiceIntegration:
         assert names == ['身体', '头部', '四肢']
 
     async def test_version_create_with_diff(self, cs_db):
-        """版本创建：快照 + diff 计算
+        """版本详情：快照 + diff 读取
 
-        流程：创建项目(T1) → 新增部位 → 创建 T2 → T2 应有 diff
+        流程：创建项目(T1) → 新增部位 → 落库 T2 快照 → T2 应可读出 diff
         """
         r = await create_project(cs_db, product_name='版本diff测试')
         await cs_db.flush()
@@ -878,13 +914,20 @@ class TestServiceIntegration:
         )
         await cs_db.flush()
 
-        # 创建 T2
-        v2 = await create_version(cs_db, r['id'], reason='新增身体部位')
-        await cs_db.flush()
-        assert v2['version_no'] == 'T2'
+        # 落库 T2 快照（diff 为 T1 空快照 → T2 的 add）
+        v2 = await _seed_fabric_version(
+            cs_db, r['id'], 'T2',
+            snapshot_data=[{'part_name': '身体', 'fabric_name': '绒布'}],
+            change_summary=[{
+                'change_type': 'add', 'part_name': '身体',
+                'new_value': {'part_name': '身体', 'fabric_name': '绒布'},
+                'old_value': None, 'field_diffs': [],
+            }],
+            reason='新增身体部位',
+        )
 
         # 查询 T2 详情：应返回 change_summary（diff）
-        detail_v2 = await get_version_detail(cs_db, v2['version_id'])
+        detail_v2 = await get_version_detail(cs_db, v2.id)
         assert detail_v2['version_no'] == 'T2'
         assert detail_v2['is_baseline'] is False
         assert detail_v2['degraded'] is False
@@ -925,19 +968,27 @@ class TestServiceIntegration:
         # 新增部位 → T2
         await create_part(cs_db, r['id'], part_name='身体', fabric_name='绒布', unit_price=10)
         await cs_db.flush()
-        await create_version(cs_db, r['id'])
-        await cs_db.flush()
+        await _seed_fabric_version(
+            cs_db, r['id'], 'T2',
+            snapshot_data=[{'part_name': '身体', 'fabric_name': '绒布', 'unit_price': 10.0}],
+        )
 
         # 修改部位布料 → T3
         parts = await list_parts(cs_db, r['id'])
         part = parts['items'][0]
         await update_part(cs_db, part['id'], fabric_name='棉布', unit_price=15, version=part['version'])
         await cs_db.flush()
-        v3 = await create_version(cs_db, r['id'])
-        await cs_db.flush()
+        v3 = await _seed_fabric_version(
+            cs_db, r['id'], 'T3',
+            snapshot_data=[{'part_name': '身体', 'fabric_name': '棉布', 'unit_price': 15.0}],
+            change_summary=_compute_diff(
+                [{'part_name': '身体', 'fabric_name': '棉布', 'unit_price': 15.0}],
+                [{'part_name': '身体', 'fabric_name': '绒布', 'unit_price': 10.0}],
+            ),
+        )
 
         # T3 diff 应为 modify
-        detail_v3 = await get_version_detail(cs_db, v3['version_id'])
+        detail_v3 = await get_version_detail(cs_db, v3.id)
         assert detail_v3['version_no'] == 'T3'
         assert detail_v3['change_summary'] is not None
         assert len(detail_v3['change_summary']) == 1
@@ -956,19 +1007,27 @@ class TestServiceIntegration:
         await create_part(cs_db, r['id'], part_name='身体')
         await create_part(cs_db, r['id'], part_name='头部')
         await cs_db.flush()
-        await create_version(cs_db, r['id'])
-        await cs_db.flush()
+        await _seed_fabric_version(
+            cs_db, r['id'], 'T2',
+            snapshot_data=[{'part_name': '身体'}, {'part_name': '头部'}],
+        )
 
         # 删除"头部" → T3
         parts = await list_parts(cs_db, r['id'])
         head = next(p for p in parts['items'] if p['part_name'] == '头部')
         await delete_part(cs_db, head['id'])
         await cs_db.flush()
-        v3 = await create_version(cs_db, r['id'])
-        await cs_db.flush()
+        v3 = await _seed_fabric_version(
+            cs_db, r['id'], 'T3',
+            snapshot_data=[{'part_name': '身体'}],
+            change_summary=_compute_diff(
+                [{'part_name': '身体'}],
+                [{'part_name': '身体'}, {'part_name': '头部'}],
+            ),
+        )
 
         # T3 diff 应为 delete
-        detail_v3 = await get_version_detail(cs_db, v3['version_id'])
+        detail_v3 = await get_version_detail(cs_db, v3.id)
         assert detail_v3['change_summary'] is not None
         types = {d['change_type'] for d in detail_v3['change_summary']}
         assert 'delete' in types
@@ -980,11 +1039,13 @@ class TestServiceIntegration:
         r = await create_project(cs_db, product_name='删除复活回归')
         await cs_db.flush()
 
-        # 添加部位并创建版本 T2，使该部位被 T2 快照记录
+        # 添加部位并落库版本 T2，使该部位被 T2 快照记录
         await create_part(cs_db, r['id'], part_name='袖口')
         await cs_db.flush()
-        await create_version(cs_db, r['id'])
-        await cs_db.flush()
+        await _seed_fabric_version(
+            cs_db, r['id'], 'T2',
+            snapshot_data=[{'part_name': '袖口'}],
+        )
 
         view_before = await get_parts_by_version(cs_db, r['id'])
         assert any(p['part_name'] == '袖口' for p in view_before['items'])
@@ -1000,14 +1061,16 @@ class TestServiceIntegration:
         assert not any(p['part_name'] == '袖口' for p in view_after['items'])
 
     async def test_snapshot_backfill_still_works_for_missing_version(self, cs_db):
-        """快照补充仍生效：创建版本后未复制到 part 表的版本列由快照补充"""
+        """快照补充仍生效：落库版本后未复制到 part 表的版本列由快照补充"""
         r = await create_project(cs_db, product_name='快照补充回归')
         await cs_db.flush()
 
         await create_part(cs_db, r['id'], part_name='身体')
         await cs_db.flush()
-        await create_version(cs_db, r['id'])
-        await cs_db.flush()
+        await _seed_fabric_version(
+            cs_db, r['id'], 'T2',
+            snapshot_data=[{'part_name': '身体'}],
+        )
 
         # T2 列数据来自 T2 快照补充（part 表仍只有 T1 行）
         view = await get_parts_by_version(cs_db, r['id'])
@@ -1021,10 +1084,8 @@ class TestServiceIntegration:
 
         await create_part(cs_db, r['id'], part_name='身体')
         await cs_db.flush()
-        await create_version(cs_db, r['id'])
-        await cs_db.flush()
-        await create_version(cs_db, r['id'])
-        await cs_db.flush()
+        await _seed_fabric_version(cs_db, r['id'], 'T2', snapshot_data=[{'part_name': '身体'}])
+        await _seed_fabric_version(cs_db, r['id'], 'T3', snapshot_data=[{'part_name': '身体'}])
 
         versions = await list_versions(cs_db, r['id'])
         assert len(versions['items']) == 3
@@ -1048,13 +1109,6 @@ class TestServiceIntegration:
         actions2 = [log['action'] for log in logs2['items']]
         assert 'create_part' in actions2
 
-        # 创建版本 → create_version 日志
-        await create_version(cs_db, r['id'])
-        await cs_db.flush()
-        logs3 = await list_change_logs(cs_db, r['id'])
-        actions3 = [log['action'] for log in logs3['items']]
-        assert 'create_version' in actions3
-
     async def test_change_logs_paginated(self, cs_db):
         """变更日志分页"""
         r = await create_project(cs_db, product_name='分页日志测试')
@@ -1070,8 +1124,7 @@ class TestServiceIntegration:
         await cs_db.flush()
         await create_part(cs_db, r['id'], part_name='身体')
         await cs_db.flush()
-        await create_version(cs_db, r['id'])
-        await cs_db.flush()
+        await _seed_fabric_version(cs_db, r['id'], 'T2', snapshot_data=[{'part_name': '身体'}])
 
         project_id = r['id']
         await delete_project(cs_db, project_id)

@@ -1,0 +1,214 @@
+/**
+ * QA(Edward) 独立对抗测试 —— 【上线前最高优先级】字符串数字导致的「整列归零」风险。
+ *
+ * 背景：后端 Decimal 序列化后 `quantity` / `total_quantity` / `product_quantity` 可能是**字符串**
+ * （如 '10'）。`magnifyByLossRate` 用 `Number.isFinite(qty)` 做防御，而 `Number.isFinite('10')`
+ * 恒为 **false** → 若任一调用点漏掉 parseFloat，整列会被算成 0（用户看到「数量列全 0」）。
+ *
+ * 本文件不复述工程师结论，直接以「字符串入参 + 真实渲染路径」硬验每个调用点，
+ * 并显式量化漏 parseFloat 时的失败态（证明该护栏非恒真）。
+ *
+ * 覆盖调用点：
+ *  - useSummaryModal.ts  buildFactoryHtml  : magnifyByLossRate(parseFloat(String(fabric.quantity))||0, ...)
+ *  - useSummaryModal.ts  supplierGroups    : magnifyByLossRate(parseFloat(String(m.total_quantity))||0, ...)
+ *  - SummaryModal.vue    displayFabricQty  : magnifyByLossRate(parseFloat(String(fabric.quantity))||0, ...)
+ *  - SummaryModal.vue    factoryGrandTotal : editMode ? parseFloat(...) : displayFabricQty(...)
+ *  - SummaryModal.vue    supplierGrandTotal: parseFloat(String(m.total_quantity))||0
+ */
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { mount } from '@vue/test-utils'
+
+vi.mock('@/api', () => ({
+  purchaseApi: {
+    orders: vi.fn(),
+    unprocessedOrders: vi.fn(),
+    factorySummary: vi.fn(),
+    supplierSummary: vi.fn(),
+    saveFactoryEdits: vi.fn(),
+    supplierSummaryExport: vi.fn(),
+  },
+}))
+
+vi.mock('@/composables/useToast', () => ({
+  showToast: vi.fn(),
+  toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() },
+}))
+
+vi.mock('@/composables/useExport', async () => {
+  const { ref: r } = await import('vue')
+  return { useExport: () => ({ exporting: r(false), runExport: vi.fn() }) }
+})
+
+import { magnifyByLossRate, buildFactoryHtml, useSummaryModal } from '@/views/purchase/composables/useSummaryModal'
+import SummaryModal from '@/views/purchase/components/SummaryModal.vue'
+import { fmtQty } from '@/utils/formatQty'
+import { purchaseApi } from '@/api'
+import type { FactorySummaryData, SupplierSummaryData } from '@/views/purchase/composables/useSummaryModal'
+
+const stubs = {
+  UiDialog: { template: '<div class="ui-dialog-stub"><slot name="title" /><slot /></div>' },
+}
+
+/** 后端 Decimal → 字符串 的模拟响应（quantity / total_quantity / product_quantity 全为字符串） */
+const STRING_FACTORY: FactorySummaryData = {
+  success: true,
+  order_count: 1,
+  groups: [
+    {
+      customer_name: '客户A',
+      product_name: '产品1',
+      product_quantity: '100' as unknown as number,
+      suppliers: [
+        {
+          supplier_name: '供应商1',
+          fabrics: [
+            { fabric_name: '布料A', specification: 'S1', quantity: '10' as unknown as number, unit: '米', item_ids: [101] },
+            { fabric_name: '布料B', specification: 'S2', quantity: '20' as unknown as number, unit: '米', item_ids: [102] },
+          ],
+        },
+      ],
+    },
+  ],
+}
+
+const STRING_SUPPLIER: SupplierSummaryData = {
+  success: true,
+  materials: [
+    { material_name: '布料A', specification: 'S1', total_quantity: '20' as unknown as number, unit: '米', supplier_name: '供应商1' },
+  ],
+}
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  vi.mocked(purchaseApi.factorySummary).mockResolvedValue(STRING_FACTORY as never)
+  vi.mocked(purchaseApi.supplierSummary).mockResolvedValue(STRING_SUPPLIER as never)
+  vi.mocked(purchaseApi.saveFactoryEdits).mockResolvedValue({ success: true } as never)
+})
+
+describe('【上线阻断项】字符串 quantity 不得导致「数量列/合计 归零」', () => {
+  it('前提量化：magnifyByLossRate 本身对字符串会归零（证明「调用点必须 parseFloat」非空谈）', () => {
+    // Number.isFinite('10') === false → 直接传字符串 → 0（这就是整列归零的根因）
+    expect(magnifyByLossRate('10' as unknown as number, 5)).toBe(0)
+    // 正确做法（调用点已 parseFloat）：
+    expect(magnifyByLossRate(parseFloat('10'), 5)).toBe(10.05)
+  })
+
+  it('buildFactoryHtml：字符串 quantity → 「数量」列 = 派生值（非 0.0）', () => {
+    const html = buildFactoryHtml(STRING_FACTORY, 5)
+    const doc = new DOMParser().parseFromString(`<table>${html}</table>`, 'text/html')
+    const rows = [...doc.querySelectorAll('tbody tr')]
+    // 每行末两格恒为 [数量, 单位]（rowspan 压缩使前几行 td 数变少，不能用固定下标 7）
+    const qtyOf = (i: number) => {
+      const tds = [...rows[i]!.querySelectorAll('td')]
+      return tds[tds.length - 2]!.textContent
+    }
+    expect(qtyOf(0)).toBe(fmtQty(10.05)) // '10.1'
+    expect(qtyOf(1)).toBe(fmtQty(20.1)) // '20.1'
+    expect(qtyOf(0)).not.toBe(fmtQty(0))
+    expect(qtyOf(1)).not.toBe(fmtQty(0))
+  })
+
+  it('supplierGroups（真实 openSummary 路径）：字符串 total_quantity → 展示副本 = 派生值（非 0）', async () => {
+    const m = useSummaryModal()
+    await m.openSummary([7, 8])
+    m.applyLossRate(5)
+
+    expect(m.supplierGroups).toHaveLength(1)
+    expect(m.supplierGroups[0]!.materials[0]!.total_quantity).toBe(20.1)
+    expect(m.supplierGroups[0]!.materials[0]!.total_quantity).not.toBe(0)
+    // 原始数据（字符串）不被写回
+    expect(m.supplierData!.materials[0]!.total_quantity).toBe('20')
+  })
+
+  it('组件渲染（真实路径，非编辑态）：工厂「数量」列与合计均按派生值，绝不为 0', async () => {
+    const m = useSummaryModal()
+    await m.openSummary([7, 8])
+    m.applyLossRate(5)
+
+    const wrapper = mount(SummaryModal, {
+      props: {
+        open: true,
+        factoryData: m.factoryData,
+        supplierData: m.supplierData,
+        editMode: false,
+        lossRate: m.lossRate,
+        orderCount: 1,
+        supplierGroups: m.supplierGroups,
+      },
+      global: { stubs },
+    })
+
+    const dataRows = wrapper.findAll('tbody tr').slice(0, 2)
+    // 每行末两格恒为 [数量, 单位]（rowspan 压缩使第 2 行 td 数变少，不能用固定下标 7）
+    const qtyOf = (row: (typeof dataRows)[number]) => {
+      const tds = row.findAll('td')
+      return tds[tds.length - 2]!.text()
+    }
+    const qty0 = qtyOf(dataRows[0]!)
+    const qty1 = qtyOf(dataRows[1]!)
+    expect(qty0).toBe(fmtQty(10.05))
+    expect(qty1).toBe(fmtQty(20.1))
+    expect(qty0).not.toBe(fmtQty(0))
+    expect(qty1).not.toBe(fmtQty(0))
+
+    // 合计行第 8 列 = 10.05 + 20.1 → 与列展示口径一致的派生合计
+    const totalCols = wrapper.findAll('tbody tr').at(-1)!.findAll('td')
+    expect(totalCols[3]!.text()).toBe(fmtQty(10.05 + 20.1))
+    expect(totalCols[3]!.text()).not.toBe(fmtQty(0))
+
+    wrapper.unmount()
+  })
+
+  it('组件渲染（真实路径）：供应商页「数量」列与合计 = 派生值，绝不为 0', async () => {
+    const m = useSummaryModal()
+    await m.openSummary([7, 8])
+    m.applyLossRate(5)
+
+    const wrapper = mount(SummaryModal, {
+      props: {
+        open: true,
+        factoryData: m.factoryData,
+        supplierData: m.supplierData,
+        editMode: false,
+        lossRate: m.lossRate,
+        orderCount: 1,
+        supplierGroups: m.supplierGroups,
+      },
+      global: { stubs },
+    })
+    // 切到供应商 Tab
+    await wrapper.findAll('.sm-tab-btn')[1]!.trigger('click')
+
+    const bodyText = wrapper.find('tbody').text()
+    expect(bodyText).toContain(fmtQty(20.1))
+    expect(bodyText).not.toContain(fmtQty(0))
+    wrapper.unmount()
+  })
+
+  it('编辑态：输入框绑定原始字符串，合计按 parseFloat 原始值累加，绝不为 0', async () => {
+    const m = useSummaryModal()
+    await m.openSummary([7, 8])
+    m.applyLossRate(5)
+
+    const wrapper = mount(SummaryModal, {
+      props: {
+        open: true,
+        factoryData: m.factoryData,
+        supplierData: m.supplierData,
+        editMode: true,
+        lossRate: m.lossRate,
+        orderCount: 1,
+        supplierGroups: m.supplierGroups,
+      },
+      global: { stubs },
+    })
+    const inputs = wrapper.findAll('input[type="number"]')
+    expect((inputs[0]!.element as HTMLInputElement).value).toBe('10')
+    expect((inputs[1]!.element as HTMLInputElement).value).toBe('20')
+
+    const totalCols = wrapper.findAll('tbody tr').at(-1)!.findAll('td')
+    expect(totalCols[3]!.text()).toBe(fmtQty(30)) // 10 + 20（原始值）
+    expect(totalCols[3]!.text()).not.toBe(fmtQty(0))
+    wrapper.unmount()
+  })
+})

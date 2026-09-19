@@ -12,15 +12,16 @@
         ]"
         @interact-outside="onInteractOutside"
       >
-        <!-- 始终渲染 DialogTitle（aria-labelledby 要求），无标题时隐藏但保持可访问性 -->
+        <!-- 始终渲染 DialogTitle / DialogDescription（aria-labelledby / aria-describedby 要求）。
+             无可见标题时用 srTitle 提供真实名称，而不是让读屏器只听到「对话框」。 -->
         <DialogTitle
           v-if="!title && !$slots.title"
           class="sr-only"
         >
-          对话框
+          {{ srTitle || '对话框' }}
         </DialogTitle>
         <DialogDescription class="sr-only">
-          对话框内容
+          {{ description || '对话框内容' }}
         </DialogDescription>
         <div
           v-if="title || $slots.title"
@@ -57,6 +58,10 @@ const props = withDefaults(
   defineProps<{
     open: boolean
     title?: string
+    /** 无可见标题时，提供给读屏器的真实名称（如确认框的问句） */
+    srTitle?: string
+    /** 提供给读屏器的描述文本 */
+    description?: string
     maxWidthClass?: string
     overlayZClass?: string
     contentZClass?: string

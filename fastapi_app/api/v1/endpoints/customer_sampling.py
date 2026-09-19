@@ -3,7 +3,7 @@
 前缀: /api/v1/pattern-room（保持路径不变，用户无感切换）
 权限: 所有端点需登录（router 级 dependencies），写操作需 customer_sampling_manage 权限
 
-对应 design.md 2.2.2 的 15 个接口端点。
+对应 design.md 2.2.2 的 22 个接口端点。
 """
 import functools
 from typing import Any
@@ -35,7 +35,6 @@ from fastapi_app.schemas.customer_sampling import (
     RoleCreateRequest,
     RoleListResponse,
     RoleUpdateRequest,
-    VersionCreateRequest,
     VersionDetailResponse,
     VersionListResponse,
 )
@@ -372,32 +371,7 @@ async def api_list_versions(
     return await svc.list_versions(db, project_id)
 
 
-# ==================== 13. 创建新版本 ====================
-
-@router.post('/projects/{project_id}/versions', response_model=ActionResponse)
-@_svc_error_guard('创建失败')
-async def api_create_version(
-    project_id: int,
-    data: VersionCreateRequest,
-    role_id: int | None = Query(None, description='角色ID（未传时默认指向默认角色，每个角色版本独立）'),
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_permission(PERM)),
-) -> dict[str, Any]:
-    """创建新版本（角色维度独立，快照该角色当前部位布料 + 计算相对前一版本 diff）"""
-    async with db_transaction(db):
-        result = await svc.create_version(
-            db,
-            project_id,
-            reason=data.reason,
-            role_id=role_id,
-            user_id=current_user.id,
-        )
-    return success_response(
-        **{'message': f"已创建版本 {result['version_no']}", **result},
-    )
-
-
-# ==================== 14. 版本详情 ====================
+# ==================== 13. 版本详情 ====================
 
 @router.get('/versions/{version_id}', response_model=VersionDetailResponse)
 @_svc_error_guard('查询失败')

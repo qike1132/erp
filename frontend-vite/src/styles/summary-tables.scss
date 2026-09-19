@@ -1,0 +1,26 @@
+// ============================================================================
+// 汇总下单弹窗「表格外观」共享样式
+// SummaryFactoryTab.vue / SummarySupplierTab.vue 共用（工厂表 / 供应商表）。
+//
+// 为什么必须共享：这两张表原本内联在 SummaryModal.vue 中，由该组件的
+// `table th, table td` 作用域规则提供边框与内边距。拆分为子组件后，Vue 的
+// scoped 样式不会进入子组件内部（多根节点组件更不会继承父 scope id），
+// 表格边框会静默消失。故把表格外观抽到本文件，由两个子组件各自 `@use` 引入，
+// 使拆分前后视觉逐字一致。
+//
+// 引入方式（子组件内）：
+//   <style scoped lang="scss">
+//   @use '@/styles/summary-tables.scss' as *;
+//   </style>
+// ============================================================================
+
+table th,
+table td {
+  border: 1px solid var(--color-text);
+  padding: 8px;
+  vertical-align: middle;
+  text-align: center;
+}
+table th {
+  font-weight: bold;
+}

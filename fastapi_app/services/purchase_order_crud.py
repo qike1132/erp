@@ -17,12 +17,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.float_utils import round_qty
 from fastapi_app.services.numbering import generate_purchase_order_number
+from fastapi_app.services.purchase_order_sku import resync_po_sku_spare
+from fastapi_app.services.purchase_utils import calc_spare_quantity, normalize_spare_rate
 from fastapi_app.shared_models import (
     MaterialRegistration,
     MaterialRegistrationItem,
     ModificationLog,
     PurchaseOrder,
     PurchaseOrderItem,
+    PurchaseOrderSku,
     PurchaseOrderStatus,
 )
 
@@ -258,13 +261,55 @@ async def delete_purchase_order(db: AsyncSession, order_id: int) -> dict:
     await db.execute(
         delete(PurchaseOrderItem).where(PurchaseOrderItem.order_id == order_id)
     )
+    # 逐 SKU 数量快照（方案 C）同样以单条 DELETE 显式清理：
+    # order.skus 关系为 lazy='raise'，显式删除可避免依赖 ORM 级联时对集合的惰性加载，
+    # 且在未开启外键约束的 SQLite（测试）下也能保证无残留孤儿行。
+    await db.execute(
+        delete(PurchaseOrderSku).where(PurchaseOrderSku.po_id == order_id)
+    )
 
     await db.delete(order)
     await db.flush()
     return {'id': order_id, 'order_no': order.order_no}
 
 
-async def complete_purchase_order(db: AsyncSession, order_id: int, username: str = 'unknown') -> dict:
+def _apply_spare_rate(order: PurchaseOrder, spare_rate: float | None) -> None:
+    """按损耗率覆盖写采购单备品：率归一化后写回，备品按该单产品数量重算。
+
+    仅在 `spare_rate` 非 None 时调用（None 语义为「不覆盖已存值」，见 PRD Q1）。
+    """
+    order.spare_rate = normalize_spare_rate(spare_rate)
+    order.spare_quantity = calc_spare_quantity(order.product_quantity, order.spare_rate)
+
+
+async def _write_spare_rate_to_orders(
+    db: AsyncSession, order_ids: list[int], spare_rate: float | None,
+) -> int:
+    """批量取回涉及的采购单并覆盖写损耗率 / 备品。
+
+    单次 ``WHERE id IN (...)`` 取回，避免循环内逐单查询（N+1）。
+    返回被写入的采购单数量；`spare_rate` 为 None 时直接跳过（不覆盖）。
+    """
+    if spare_rate is None:
+        return 0
+    unique_ids = [oid for oid in dict.fromkeys(order_ids) if oid]
+    if not unique_ids:
+        return 0
+    result = await db.execute(select(PurchaseOrder).where(PurchaseOrder.id.in_(unique_ids)))
+    written = 0
+    applied_ids: list[int] = []
+    for order in result.scalars().all():
+        _apply_spare_rate(order, spare_rate)
+        applied_ids.append(order.id)
+        written += 1
+    # 逐 SKU 快照的备品按新率同步重算（保持逐 SKU 行与主表备品口径一致）
+    await resync_po_sku_spare(db, applied_ids, spare_rate)
+    return written
+
+
+async def complete_purchase_order(
+    db: AsyncSession, order_id: int, username: str = 'unknown', spare_rate: float | None = None,
+) -> dict:
     order = await db.get(PurchaseOrder, order_id)
     if not order:
         raise ValueError('采购订单不存在')
@@ -295,11 +340,18 @@ async def complete_purchase_order(db: AsyncSession, order_id: int, username: str
 
     order.status = PurchaseOrderStatus.COMPLETED
     order.completed_at = now
+    # 携带损耗率则覆盖写备品；None 时保留该单已存值（PRD Q1）
+    if spare_rate is not None:
+        _apply_spare_rate(order, spare_rate)
+        # 逐 SKU 快照的备品按新率同步重算（保持逐 SKU 行与主表备品口径一致）
+        await resync_po_sku_spare(db, [order.id], spare_rate)
     await db.flush()
     return {'id': order.id, 'order_no': order.order_no, 'status': 'completed'}
 
 
-async def batch_complete_purchase_orders(db: AsyncSession, order_ids: list, username: str = 'unknown') -> dict:
+async def batch_complete_purchase_orders(
+    db: AsyncSession, order_ids: list, username: str = 'unknown', spare_rate: float | None = None,
+) -> dict:
     """
     批量完成采购订单并登记来料。
 
@@ -323,6 +375,7 @@ async def batch_complete_purchase_orders(db: AsyncSession, order_ids: list, user
 
     completed = 0
     errors = []
+    resync_ids: list[int] = []
     now = datetime.now(UTC).replace(tzinfo=None)
 
     for oid in order_ids:
@@ -341,9 +394,17 @@ async def batch_complete_purchase_orders(db: AsyncSession, order_ids: list, user
 
             order.status = PurchaseOrderStatus.COMPLETED
             order.completed_at = now
+            # 携带损耗率则对该单覆盖写备品（沿用批量取回的 orders，无新增逐单查询）
+            if spare_rate is not None:
+                _apply_spare_rate(order, spare_rate)
+                resync_ids.append(order.id)
             completed += 1
         except (ValueError, TypeError) as e:
             errors.append(f'订单处理失败: {e!s}')
+
+    # 逐 SKU 快照的备品按新率批量同步重算（一次查询，无 N+1）
+    if resync_ids:
+        await resync_po_sku_spare(db, resync_ids, spare_rate)
 
     await db.flush()
     return {'completed': completed, 'errors': errors}
@@ -351,8 +412,16 @@ async def batch_complete_purchase_orders(db: AsyncSession, order_ids: list, user
 
 async def save_factory_summary_edits(
     db: AsyncSession, data: list, username: str = 'unknown',
+    spare_rate: float | None = None, order_ids: list[int] | None = None,
 ) -> dict:
+    """应用工厂汇总编辑，并按损耗率覆盖写所涉采购单的备品。
+
+    - `data`：编辑项列表，**可为空**（用户仅交互了损耗率、无任何布料改动）。
+    - `order_ids`：本次汇总涉及的采购单 ID，用于在无编辑项时定位写入目标。
+    - `spare_rate` 非 None 时，对「被编辑明细所属采购单 ∪ order_ids」覆盖写率与备品。
+    """
     updated = 0
+    involved_po_ids: list[int] = list(order_ids or [])
     for entry in data:
         item_ids = entry.get('item_ids', [])
         new_quantity = entry.get('quantity')
@@ -370,6 +439,8 @@ async def save_factory_summary_edits(
 
         if not items:
             continue
+
+        involved_po_ids.extend(it.order_id for it in items)
 
         if len(items) == 1:
             items[0].quantity = Decimal(str(new_quantity))
@@ -390,8 +461,11 @@ async def save_factory_summary_edits(
                     it.total_price = (it.unit_price or 0) * it.quantity
                     updated += 1
 
+    # 编辑应用完毕后，再批量覆盖写所涉采购单的损耗率 / 备品（一次查询，无 N+1）
+    spare_written = await _write_spare_rate_to_orders(db, involved_po_ids, spare_rate)
+
     await db.flush()
-    return {'updated_count': updated}
+    return {'updated_count': updated, 'spare_updated_count': spare_written}
 
 
 async def _build_order_summary(db: AsyncSession, order) -> dict:

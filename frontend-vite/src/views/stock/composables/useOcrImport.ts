@@ -1,5 +1,4 @@
 import { ref, reactive, onUnmounted } from 'vue'
-import { post } from '@/api/request'
 import { ocrApi } from '@/api'
 import { showToast } from '@/composables/useToast'
 import type { ApiResponse } from '@/types'
@@ -66,7 +65,7 @@ export function useOcrImport(onComplete: () => void) {
     try {
       const fd = new FormData()
       pdfFiles.value.forEach(f => fd.append('files', f))
-      const res = await post('/ocr-import/preview', fd) as ApiResponse
+      const res = await ocrApi.preview(fd) as unknown as ApiResponse
       showToast(res.message || '预览完成', 'info')
     } catch (err: unknown) {
       const error = err as { response?: { data?: { detail?: string } } }

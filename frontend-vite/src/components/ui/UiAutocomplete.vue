@@ -64,6 +64,12 @@ const props = withDefaults(
     /** 选中建议后抑制下拉面板再次自动展开（编辑已提交的搜索词时不再弹面板，
      * 避免面板遮挡下方内容造成闪烁）；清空输入后自动恢复。 */
     suppressAfterSelect?: boolean
+    /** 内层 input 的 id，用于与外层 <label for> 配对 */
+    id?: string
+    /** 无结果时面板内的文案。调用方可用它区分「无匹配」与「请求失败」 */
+    emptyText?: string
+    /** 必填项：向辅助技术暴露 aria-required */
+    required?: boolean
   }>(),
   {
     modelValue: '',
@@ -104,6 +110,13 @@ const suppressSearch = ref(false)
 /** 供父组件控制抑制状态（如点击查询按钮提交后主动抑制） */
 function setSuppressed(v: boolean) {
   suppressSearch.value = v
+}
+
+const acRef = ref<{ $el?: HTMLElement } | null>(null)
+
+/** 把焦点交回输入框（连续录入场景：提交一条后无需重新 Tab 寻找入口） */
+function focusInput() {
+  acRef.value?.$el?.querySelector('input')?.focus()
 }
 
 // ============================================================
@@ -200,21 +213,25 @@ watch(
   },
 )
 
-defineExpose({ setSuppressed })
+defineExpose({ setSuppressed, focusInput })
 </script>
 
 <template>
   <AutoComplete
+    ref="acRef"
     :model-value="modelValue"
     :suggestions="internalSuggestions"
     :option-label="(optionLabel as string)"
     :placeholder="placeholder"
     :disabled="disabled"
+    :input-id="id"
     :loading="showLoading ? loading : false"
     :delay="searchDelayMs"
     :min-length="minQueryLength"
     :append-to="(appendTo as string | undefined)"
     :show-empty-message="!suppressSearch"
+    :empty-search-message="emptyText"
+    :pt="required ? { pcInputText: { root: { 'aria-required': 'true' } } } : undefined"
     @update:model-value="onInputChange"
     @complete="onComplete"
     @item-select="onItemSelect"

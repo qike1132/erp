@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi_app.core.cache_keys import CACHE_KEY_PREFIX, CacheNamespace, build_cache_key
 from fastapi_app.core.database import get_async_db as get_db
 from fastapi_app.core.deps import require_permission
+from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.core.redis_wrapper import safe_delete_pattern, safe_get, safe_set
 from fastapi_app.schemas.supplier import (
     SupplierActionResponse,
@@ -83,30 +84,37 @@ async def _run_supplier_write(db: AsyncSession, action, success_msg: str) -> Sup
     """供应商写操作统一的事务 + 缓存失效编排（批次1 收敛原 4 处端点样板）。
 
     服务层 flush-only，以 ValueError 表达业务校验（'不存在'→404，其余→400）；
-    缓存失效在提交前后各执行一次，覆盖"提交窗口期内并发读回填旧缓存"的竞态。
+    事务边界遵守 docs/TRANSACTION_BOUNDARY_GUIDE.md：端点层不做 commit/rollback，
+    统一交给 db_transaction；提交后再失效一次缓存，覆盖"提交窗口期内并发读
+    回填旧缓存"的竞态。
     """
-    try:
-        await action()
-        await _invalidate_supplier_caches()  # 提交前失效，避免并发读回填旧缓存
-        await db.commit()
-    except ValueError as e:
-        await db.rollback()
-        msg = str(e)
+    def _value_error_to_http(exc: Exception) -> HTTPException:
+        msg = str(exc)
         if '不存在' in msg:
             logger.warning('供应商写操作失败（不存在）: %s', msg)
-            raise HTTPException(status_code=404, detail='供应商不存在') from e
+            return HTTPException(status_code=404, detail='供应商不存在')
         logger.warning('供应商写操作失败（业务校验）: %s', msg)
-        raise HTTPException(status_code=400, detail=msg) from e
-    except IntegrityError:
+        return HTTPException(status_code=400, detail=msg)
+
+    def _integrity_to_http(exc: Exception) -> HTTPException:
         # 兜底：服务层未覆盖到的外键引用（如 MaterialRegistration）
-        await db.rollback()
         logger.info('供应商写操作被拒（存在关联单据）')
-        raise HTTPException(status_code=400, detail='该供应商已有相关单据，无法删除！建议禁用该供应商。') from None
-    except SQLAlchemyError:
-        await db.rollback()
+        return HTTPException(status_code=400, detail='该供应商已有相关单据，无法删除！建议禁用该供应商。')
+
+    def _sqlalchemy_to_http(exc: Exception) -> HTTPException:
         logger.exception('供应商写操作失败')
-        raise HTTPException(status_code=500, detail='操作失败，请稍后重试') from None
-    await _invalidate_supplier_caches()  # 提交后再失效一次，确保窗口期内回填的旧缓存被清除
+        return HTTPException(status_code=500, detail='操作失败，请稍后重试')
+
+    # 注册顺序即匹配优先级：IntegrityError 是 SQLAlchemyError 子类，必须在前
+    error_map = {
+        ValueError: _value_error_to_http,
+        IntegrityError: _integrity_to_http,
+        SQLAlchemyError: _sqlalchemy_to_http,
+    }
+    async with db_transaction(db, error_map=error_map):
+        await action()
+        await _invalidate_supplier_caches()  # 提交前失效，避免并发读回填旧缓存
+        db.info.setdefault('post_commit_callbacks', []).append(_invalidate_supplier_caches)
     return SupplierActionResponse(message=success_msg)
 
 
@@ -268,20 +276,20 @@ async def toggle_status(
         HTTPException 500: 数据库操作异常。
     """
     # SELECT ... FOR UPDATE 取行锁后再修改状态，防止并发 toggle 互相覆盖（锁逻辑下沉在 service 层）
-    # manual-tx: 提交后需 refresh 取新状态返回，保留手动事务；缓存失效语义与 _run_supplier_write 一致
-    supplier = await purchase_supplier_service.get_supplier_for_update(db, supplier_id)
-    if not supplier:
-        raise HTTPException(status_code=404, detail='供应商不存在')
-    # status 字段可为 None（旧数据），用 bool() 规范化后取反
-    supplier.status = not bool(supplier.status)
-    try:
-        await _invalidate_supplier_caches()  # 提交前失效
-        await db.commit()
-        await db.refresh(supplier)
-    except SQLAlchemyError as e:
-        await db.rollback()
+    # 事务统一交给 db_transaction（提交点唯一，遵守 TRANSACTION_BOUNDARY_GUIDE）
+    def _sqlalchemy_to_http(exc: Exception) -> HTTPException:
         logger.exception('切换供应商状态失败: supplier_id=%s', supplier_id)
-        raise HTTPException(status_code=500, detail='操作失败，请稍后重试') from e
-    await _invalidate_supplier_caches()  # 提交后再失效
+        return HTTPException(status_code=500, detail='操作失败，请稍后重试')
+
+    async with db_transaction(db, error_map={SQLAlchemyError: _sqlalchemy_to_http}):
+        supplier = await purchase_supplier_service.get_supplier_for_update(db, supplier_id)
+        if not supplier:
+            raise HTTPException(status_code=404, detail='供应商不存在')
+        # status 字段可为 None（旧数据），用 bool() 规范化后取反
+        supplier.status = not bool(supplier.status)
+        await db.flush()
+        await _invalidate_supplier_caches()  # 提交前失效
+        db.info.setdefault('post_commit_callbacks', []).append(_invalidate_supplier_caches)
+    # expire_on_commit=False：内存中的 status 已是切换后的值，无需 refresh
     status_text = '启用' if supplier.status else '禁用'
     return SupplierToggleResponse(status=supplier.status, message=f'供应商已{status_text}')

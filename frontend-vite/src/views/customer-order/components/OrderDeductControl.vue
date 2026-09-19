@@ -5,6 +5,7 @@
       <button
         type="button"
         :class="['co-btn-deduct', form.deductStock && 'active']"
+        :aria-pressed="form.deductStock"
         @click="handleDeductPreview"
       >
         <FontAwesomeIcon icon="boxes" aria-hidden="true" />抵扣备货
@@ -13,13 +14,17 @@
         type="button"
         class="co-deduct-display"
         :style="{ borderColor: form.deductQuantity > 0 ? 'var(--color-ocean-deep)' : 'var(--color-text-muted)' }"
+        :aria-label="`抵扣数量 ${form.deductQuantity}，点击修改`"
         @click="openDeductEdit"
       >
         <FontAwesomeIcon icon="edit" style="font-size: 11px" aria-hidden="true" />抵扣: <strong>{{ form.deductQuantity }}</strong>
       </button>
     </div>
-    <div v-if="deductInfoVisible" class="co-deduct-info">
-      <small v-if="availableStock > 0" style="color: var(--color-success-700)">
+    <div v-if="deductInfoVisible" class="co-deduct-info" aria-live="polite">
+      <small v-if="stockError" style="color: var(--color-danger-500)">
+        <FontAwesomeIcon icon="exclamation-circle" aria-hidden="true" /> {{ stockError }}
+      </small>
+      <small v-else-if="availableStock > 0" style="color: var(--color-success-700)">
         <FontAwesomeIcon icon="check-circle" aria-hidden="true" /> 可用备货: <strong>{{ availableStock }}</strong> 件
         <span v-if="form.deductQuantity > 0" style="margin-left: 8px; color: var(--color-ocean-text)">
           <FontAwesomeIcon icon="arrow-right" aria-hidden="true" /> 抵扣后剩余:
@@ -37,6 +42,8 @@ import type { FormState } from '../composables/types'
 defineProps<{
   availableStock: number
   deductInfoVisible: boolean
+  /** 可用备货查询失败的原因；非空时优先展示，避免把故障说成「暂无可用备货」 */
+  stockError: string
   handleDeductPreview: () => void
   openDeductEdit: () => void
 }>()

@@ -69,6 +69,23 @@ export interface OrderSKU {
   deduct_quantity: number
   note: string | null
   has_processes?: boolean
+  /** 该 SKU 的产品图片路径（后端 beile-list 注入，空串表示无图） */
+  product_image?: string | null
+  /**
+   * ===== 方案 C：逐 SKU 下单量快照（后端 /orders/beile-list 注入）=====
+   * 该 SKU 维度的实际下单数量（同一 SKU 拆多供应商时取 MAX）；无逐 SKU 快照时为 null。
+   */
+  purchase_order_qty?: number | null
+  /** 该 SKU 维度的备品数量（生产数量的计算输入）；无逐 SKU 快照时为 null。 */
+  spare_quantity?: number | null
+  /** 该 SKU 维度是否已下单：有逐 SKU 快照以快照为准，否则回退订单级 is_ordered。 */
+  is_ordered?: boolean
+  /**
+   * 逐 SKU 字段来源：
+   * - 'po_sku' = 命中 purchase_order_sku 逐 SKU 快照（方案 C，可展示该 SKU 真实下单量/生产量）；
+   * - 'order_level' = 未迁移 / 历史未回填 / 该 SKU 未被采购单覆盖，降级为订单级口径。
+   */
+  per_sku_source?: 'po_sku' | 'order_level'
 }
 
 export interface OrderItem {
@@ -435,6 +452,78 @@ export interface StagingOrder {
   barcode?: string
   quantity: number
   customer?: string
+}
+
+/**
+ * 暂存区条目（后端 `StagingOrder` / `StagingStockIn` / `StagingStockOut` 的 `to_dict()` 实际字段）。
+ *
+ * ⚠️ 列表接口返回的是**扁平行**；三种暂存实体的日期字段名不同：
+ * 订单 `order_date`、备货 `stockin_date`、出货 `stockout_date`。
+ */
+export interface StagingRow {
+  id: number
+  customer: string
+  product_id: number | null
+  product_name: string
+  product_barcode: string
+  quantity: number
+  note: string
+  order_type: string
+  country: string
+  status: string
+  is_validated: boolean
+  validation_error: string
+  created_at: string
+  /** 订单暂存专用 */
+  order_date?: string
+  /** 备货暂存专用 */
+  stockin_date?: string
+  /** 出货暂存专用 */
+  stockout_date?: string
+  deduct_stock?: boolean
+  deduct_quantity?: number
+  import_batch_id?: string
+}
+
+/**
+ * 暂存区列表响应（后端 `schemas/staging.py::StagingListResponse`）。
+ *
+ * ⚠️ 条目挂在 **`data`** 上，且**不是** `items` / `staging_orders` / `staging_stockins`。
+ * 三个列表端点（`/staging-orders`、`/staging-stockins`、`/staging-stockouts`）契约一致。
+ * （2026-09-18：customer-order 导入后列表恒空，即为误读为 `staging_orders` 所致。）
+ */
+export interface StagingListResponse<T = StagingRow> {
+  success: boolean
+  data: T[]
+  total: number
+}
+
+/**
+ * 暂存区导入结果（后端 `StagingOrderImportResult` / `StagingStockInImportResult` /
+ * `StagingStockOutImportResult`，三者字段一致）。
+ *
+ * 字段为可选：调用方按"防御式读取"消费（后端返回 `success:false` 时仍是 HTTP 200，
+ * 必须显式判 `success`，不能只看 HTTP 状态码）。
+ */
+export interface StagingImportResult {
+  success?: boolean
+  message?: string
+  imported?: number
+  session_id?: string
+  errors?: string[]
+}
+
+/**
+ * 批量导入结果（后端 `schemas/batch.py::BatchImportResult`）。
+ *
+ * 用于 `/batch/batch-import`、`/batch/import-orders`、`/batch/import-stockins` 等 Excel 导入端点。
+ * 注意与 `StagingImportResult` 区分：本类型**不含** `errors` 明细，而多出 `skipped`。
+ */
+export interface BatchImportResult {
+  success: boolean
+  message: string
+  imported: number
+  skipped: number
 }
 
 export interface ShipmentRecord {
