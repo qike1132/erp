@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>外发工序 · 批量发货（多 SKU 工序一键发货）原型</title>
+<style>
+  :root {
+    --primary: #2563eb; --primary-50: #eff6ff; --primary-100: #dbeafe; --primary-200: #bfdbfe;
+    --primary-600: #2563eb; --primary-700: #1d4ed8;
+    --success: #16a34a; --success-50: #f0fdf4; --success-100: #dcfce7;
+    --warning: #d97706; --warning-50: #fffbeb; --warning-100: #fef3c7;
+    --danger: #dc2626;
+    --border: #e2e8f0; --text: #1e293b; --muted: #64748b; --surface: #f8fafc;
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+    background: #f1f5f9; color: var(--text); font-size: 14px; line-height: 1.5;
+  }
+  .topbar {
+    background: #fff; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 24px; padding: 0 24px; height: 56px;
+    position: sticky; top: 0; z-index: 10;
+  }
+  .brand { font-weight: 800; font-size: 16px; color: var(--primary-600); white-space: nowrap; }
+  .tabs { display: flex; gap: 4px; height: 100%; }
+  .tabs button {
+    border: none; background: transparent; cursor: pointer; font-size: 14px; color: var(--muted);
+    font-weight: 600; padding: 0 16px; height: 100%; border-bottom: 3px solid transparent; font-family: inherit;
+  }
+  .tabs button:hover { color: var(--text); }
+  .tabs button.active { color: var(--primary-600); border-bottom-color: var(--primary-600); }
+
+  .container { max-width: 1160px; margin: 0 auto; padding: 28px 24px 48px; }
+  h1 { font-size: 22px; font-weight: 800; margin-bottom: 6px; }
+  .sub { color: var(--muted); margin-bottom: 20px; }
+
+  .toolbar {
+    background: #fff; border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 14px 16px; display: flex; align-items: center; gap: 16px; margin-bottom: 16px; flex-wrap: wrap;
+  }
+  .search { flex: 1; min-width: 240px; }
+  .search input {
+    width: 100%; padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px;
+    font-size: 14px; font-family: inherit; color: var(--text);
+  }
+  .search input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(37,99,235,.12); }
+  .hint { color: var(--muted); font-size: 13px; white-space: nowrap; }
+  .hint b { color: var(--primary-600); }
+  .primary {
+    background: linear-gradient(135deg,#3b82f6,#2563eb); color: #fff; border: none; padding: 10px 22px;
+    border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 700;
+    box-shadow: 0 2px 6px rgba(37,99,235,.25); font-family: inherit; white-space: nowrap;
+  }
+  .primary:hover { background: linear-gradient(135deg,#2563eb,#1d4ed8); }
+  .primary:disabled { opacity: .55; cursor: not-allowed; }
+
+  .table-wrap { background: #fff; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  table { width: 100%; border-collapse: collapse; }
+  thead th {
+    background: var(--surface); text-align: left; font-size: 12px; font-weight: 700; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .04em; padding: 10px 12px; border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  tbody td { padding: 11px 12px; border-bottom: 1px solid #eef2f7; vertical-align: middle; }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:hover { background: #fafcff; }
+  tbody tr.checked { background: var(--primary-50); }
+
+  .order-no { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+  .customer { white-space: nowrap; }
+  .sku-name { font-weight: 600; }
+  .sku-name .cnt { color: var(--muted); font-weight: 400; font-size: 12px; }
+  .process-chip {
+    display: inline-block; font-size: 12px; font-weight: 700; color: var(--primary-700);
+    background: var(--primary-50); border: 1px solid var(--primary-200); border-radius: 6px; padding: 2px 9px;
+  }
+  .num { font-weight: 700; }
+  .num.shipped { color: var(--success); }
+  .num.remain { color: var(--warning); }
+
+  .ship-input {
+    width: 96px; padding: 7px 10px; border: 1px solid #cbd5e1; border-radius: 7px;
+    font-size: 13px; font-family: inherit; text-align: right; color: var(--text);
+  }
+  .ship-input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(37,99,235,.12); }
+
+  .checkbox { width: 17px; height: 17px; cursor: pointer; accent-color: var(--primary); }
+
+  .summary {
+    background: #fff; border: 1px solid var(--border); border-radius: var(--radius);
+    margin-top: 16px; padding: 14px 18px; display: flex; align-items: center; gap: 24px; flex-wrap: wrap;
+  }
+  .summary .stat { display: flex; flex-direction: column; }
+  .summary .stat span { font-size: 11.5px; color: var(--muted); font-weight: 600; }
+  .summary .stat strong { font-size: 20px; font-weight: 800; }
+  .summary .stat strong.warn { color: var(--warning); }
+  .summary .stat strong.blue { color: var(--primary-600); }
+  .summary .stat strong.green { color: var(--success); }
+
+  .rules { background: var(--warning-50); border: 1px solid #fde68a; border-radius: var(--radius); padding: 14px 18px; margin-top: 16px; }
+  .rules h3 { font-size: 13px; font-weight: 700; color: var(--warning); margin-bottom: 8px; }
+  .rules ul { padding-left: 18px; color: #92400e; font-size: 13px; }
+  .rules li { margin: 3px 0; }
+
+  .toast {
+    position: fixed; left: 50%; bottom: 32px; transform: translateX(-50%) translateY(20px);
+    background: #1e293b; color: #fff; padding: 12px 20px; border-radius: 10px; font-size: 14px;
+    opacity: 0; pointer-events: none; transition: all .25s ease; box-shadow: 0 8px 24px rgba(0,0,0,.18);
+    max-width: 90vw; text-align: center;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .toast.ok { background: var(--success); }
+</style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">ERP · 湖北外发</div>
+    <nav class="tabs">
+      <button>湖北订单</button>
+      <button class="active">外发工序</button>
+      <button>工序预设</button>
+    </nav>
+  </header>
+
+  <main class="container">
+    <h1>外发工序 · 批量发货</h1>
+    <p class="sub">勾选多个 SKU 的待发货工序，每道工序可单独填发货数量（缺省=剩余未发），一键发货、单事务原子。</p>
+
+    <div class="toolbar">
+      <div class="search">
+        <input id="searchInput" placeholder="筛选：订单号 / 客户 / SKU / 工序">
+      </div>
+      <span class="hint">已选 <b id="checkedCount">0</b> 道工序 · 本次共发 <b id="shipSum">0</b> 件</span>
+      <button class="primary" id="shipBtn">一键发货</button>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:38px;"><input type="checkbox" id="checkAll" class="checkbox"></th>
+            <th style="width:150px;">订单号</th>
+            <th style="width:110px;">客户</th>
+            <th>SKU</th>
+            <th style="width:90px;">工序</th>
+            <th style="width:80px;">订单数量</th>
+            <th style="width:70px;">已发</th>
+            <th style="width:80px;">剩余未发</th>
+            <th style="width:120px;">本次发货数量</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+
+    <div class="summary">
+      <div class="stat"><span>待发货工序</span><strong class="warn" id="statPending">6</strong></div>
+      <div class="stat"><span>涉及订单</span><strong id="statOrders">3</strong></div>
+      <div class="stat"><span>涉及 SKU</span><strong class="blue" id="statSkus">3</strong></div>
+      <div class="stat"><span>剩余未发合计</span><strong class="warn" id="statRemain">0</strong></div>
+    </div>
+
+    <div class="rules">
+      <h3>发货规则</h3>
+      <ul>
+        <li>本次发货数量必须 &gt; 0，且不超过「剩余未发」（订单数量 − 已发）。</li>
+        <li>已收货的工序不能再发货；多 SKU、多订单可同批提交，任一条失败整批回滚。</li>
+        <li>发货后自动累加已发数量并写入发货流水（时间/工序/数量/操作人）。</li>
+      </ul>
+    </div>
+  </main>
+
+  <div class="toast" id="toast"></div>
+
+<script>
+  // 模拟待发货工序（跨订单、跨 SKU，各 SKU 工序数量/剩余数量不一致）
+  const rows = [
+    { id: 1, order: 'PO-20260810-4888', customer: '名创优品海外', sku: '变形金刚', proc: '转印', qty: 15594, shipped: 0 },
+    { id: 2, order: 'PO-20260810-4888', customer: '名创优品海外', sku: '变形金刚', proc: '缝制', qty: 15594, shipped: 0 },
+    { id: 3, order: 'PO-20260810-4912', customer: '名创优品海外', sku: '妹妹二代', proc: '电绣', qty: 22268, shipped: 0 },
+    { id: 4, order: 'PO-20260810-4912', customer: '名创优品海外', sku: '妹妹二代', proc: '转印', qty: 22268, shipped: 0 },
+    { id: 5, order: 'PO-20260810-4895', customer: '名创优品', sku: '妹妹二代', proc: '电绣', qty: 7276, shipped: 2000 },
+    { id: 6, order: 'PO-20260810-4895', customer: '名创优品', sku: 'Nommi糯米儿', proc: '包装', qty: 42908, shipped: 0 },
+  ];
+  rows.forEach(r => { r.remain = r.qty - r.shipped; r.checked = true; r.ship = r.remain; });
+
+  const tbody = document.getElementById('tbody');
+  const toast = document.getElementById('toast');
+  const searchInput = document.getElementById('searchInput');
+
+  function showToast(msg, ok) {
+    toast.textContent = msg;
+    toast.className = 'toast show' + (ok ? ' ok' : '');
+    clearTimeout(toast._t);
+    toast._t = setTimeout(() => { toast.className = 'toast'; }, 2800);
+  }
+
+  function updateSummary() {
+    const checked = rows.filter(r => r.checked);
+    document.getElementById('checkedCount').textContent = checked.length;
+    document.getElementById('shipSum').textContent = checked.reduce((s, r) => s + (r.ship || 0), 0);
+    document.getElementById('statPending').textContent = rows.length;
+    document.getElementById('statOrders').textContent = new Set(rows.map(r => r.order)).size;
+    document.getElementById('statSkus').textContent = new Set(rows.map(r => r.sku)).size;
+    document.getElementById('statRemain').textContent = rows.reduce((s, r) => s + r.remain, 0);
+    document.getElementById('checkAll').checked = rows.length > 0 && rows.every(r => r.checked);
+    document.getElementById('shipBtn').disabled = checked.length === 0;
+  }
+
+  function visibleRows() {
+    const kw = searchInput.value.trim().toLowerCase();
+    if (!kw) return rows;
+    return rows.filter(r =>
+      r.order.toLowerCase().includes(kw) || r.customer.toLowerCase().includes(kw) ||
+      r.sku.toLowerCase().includes(kw) || r.proc.toLowerCase().includes(kw));
+  }
+
+  function render() {
+    tbody.innerHTML = '';
+    visibleRows().forEach(r => {
+      const tr = document.createElement('tr');
+      if (r.checked) tr.classList.add('checked');
+
+      // 勾选
+      const tdCk = document.createElement('td');
+      tdCk.innerHTML = '<input type="checkbox" class="checkbox">';
+      const ck = tdCk.querySelector('input');
+      ck.checked = r.checked;
+      ck.onchange = () => { r.checked = ck.checked; render(); };
+      tr.appendChild(tdCk);
+
+      // 订单号
+      tr.insertCell().innerHTML = '<span class="order-no">' + r.order + '</span>';
+      // 客户
+      tr.insertCell().innerHTML = '<span class="customer">' + r.customer + '</span>';
+      // SKU
+      const tdSku = tr.insertCell();
+      tdSku.innerHTML = '<div class="sku-name"></div>';
+      tdSku.querySelector('.sku-name').textContent = r.sku;
+      // 工序
+      tr.insertCell().innerHTML = '<span class="process-chip">' + r.proc + '</span>';
+      // 订单数量
+      tr.insertCell().innerHTML = '<span class="num">' + r.qty.toLocaleString() + '</span>';
+      // 已发
+      tr.insertCell().innerHTML = '<span class="num shipped">' + r.shipped.toLocaleString() + '</span>';
+      // 剩余未发
+      tr.insertCell().innerHTML = '<span class="num remain">' + r.remain.toLocaleString() + '</span>';
+      // 本次发货数量
+      const tdShip = tr.insertCell();
+      tdShip.innerHTML = '<input type="number" class="ship-input" min="1" max="' + r.remain + '">';
+      const inp = tdShip.querySelector('input');
+      inp.value = r.ship;
+      inp.oninput = () => {
+        let v = parseInt(inp.value, 10) || 0;
+        if (v > r.remain) { v = r.remain; inp.value = v; showToast('发货数量不能超过剩余未发（' + r.remain + '）', false); }
+        r.ship = v;
+        updateSummary();
+      };
+      tr.appendChild(tdShip);
+
+      tbody.appendChild(tr);
+    });
+    updateSummary();
+  }
+
+  document.getElementById('checkAll').onchange = (e) => {
+    const v = e.target.checked;
+    rows.forEach(r => { r.checked = v; });
+    render();
+  };
+  searchInput.oninput = render;
+
+  document.getElementById('shipBtn').onclick = () => {
+    const checked = rows.filter(r => r.checked);
+    if (checked.length === 0) { showToast('请先勾选要发货的工序', false); return; }
+    const invalid = checked.find(r => !(r.ship > 0));
+    if (invalid) { showToast('「' + invalid.sku + ' · ' + invalid.proc + '」发货数量必须大于 0', false); return; }
+    const total = checked.reduce((s, r) => s + r.ship, 0);
+    showToast('已发货 ' + checked.length + ' 道工序、共 ' + total.toLocaleString() + ' 件（单事务原子，已写入发货流水）', true);
+  };
+
+  render();
+</script>
+</body>
+</html>

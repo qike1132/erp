@@ -348,6 +348,89 @@ def test_fmt_beile_time_converts_utc_to_beijing():
     assert _fmt_beile_time(None) == ''
 
 
+def test_apply_ordered_fields_search_scope_qty_only_matched():
+    """SKU 级搜索的数量口径：search_qty_items 非 None 时数量只统计命中集合。
+
+    BUG 修复回归：旧实现搜索命中后数量仍为全单口径（rollup 全部 SKU /
+    MAX(product_quantity) / record['quantity']），用户视角即「搜索变形金刚
+    显示整个订单的总数量」。
+    """
+    from fastapi_app.services.order.beile import _apply_ordered_fields
+
+    # 未下单：命中 items 求和（不是全单 record['quantity']=100）
+    rec = {'quantity': 100}
+    _apply_ordered_fields(rec, pos=[], sku_rows=[], search_qty_items=[{'quantity': 60}])
+    assert rec['purchase_order_qty'] == 60
+    assert rec['spare_quantity'] == 0
+    assert rec['is_ordered'] is False
+
+    class _Po:
+        id = 101
+        spare_rate = 5
+
+    class _SkuRow:
+        po_id = 101
+        product_name = '变形金刚'
+        order_qty = 66
+        spare_qty = 6
+        spare_rate = 5
+
+    # 已下单 + 命中集合的逐 SKU 快照（caller 已预过滤）→ rollup 命中集合
+    rec2: dict = {}
+    _apply_ordered_fields(rec2, pos=[_Po()], sku_rows=[_SkuRow()], search_qty_items=[{'quantity': 60}])
+    assert rec2['is_ordered'] is True
+    assert rec2['purchase_order_qty'] == 66
+    assert rec2['spare_quantity'] == 6
+
+    # 已下单 + 无逐 SKU 快照 → None（不把全单 MAX(product_quantity) 编造成命中集合数量）
+    rec3: dict = {}
+    _apply_ordered_fields(rec3, pos=[_Po()], sku_rows=[], search_qty_items=[{'quantity': 60}])
+    assert rec3['purchase_order_qty'] is None
+    assert rec3['spare_quantity'] is None
+
+
+async def test_beile_list_search_narrows_items_and_qty_to_matched_skus(db, monkeypatch):
+    """SKU 级搜索（端到端）：命中订单的 items 只保留命中 SKU，数量只统计命中集合。
+
+    多 SKU 订单 o5（变形金刚 60 + 蛋黄派 40）搜索「变形金刚」：
+    - items 收窄为 [变形金刚]；
+    - 未下单数量 = 60（命中求和），绝不再是全单 100；
+    - 对照无关键字：items 全量、数量为全单口径。
+    """
+    # /beile-list 带 60s L2 缓存，先前用例的同 key 结果会短路本用例 → 关闭缓存
+    from fastapi_app.core import cache as cache_module
+
+    monkeypatch.setattr(cache_module, '_get_redis_cache', lambda: None)
+    cache_module.invalidate_local_cache('orders:beile:*')
+
+    await _seed(db)
+    o5 = Order(
+        id=15, order_no='PO-015', customer='多SKU客户', order_date=datetime(2026, 9, 5, 10, 0, 0),
+        product_id=1, quantity=100,
+        items=[
+            OrderItem(product_id=1, product_name='变形金刚', product_barcode='690001', quantity=60),
+            OrderItem(product_id=2, product_name='蛋黄派', product_barcode='690002', quantity=40),
+        ],
+    )
+    db.add(o5)
+    await db.commit()
+
+    result = await get_beile_orders_with_stockins(db, page=1, per_page=50, product_kw='变形金刚')
+    o5row = next(r for r in result['items'] if r['record_type'] == 'order' and r['id'] == 15)
+    assert [it['product_name'] for it in o5row['items']] == ['变形金刚']
+    assert o5row['is_ordered'] is False
+    assert o5row['purchase_order_qty'] == 60
+
+    # 对照：无关键字时 items 全量、既有口径不变（零回归）
+    plain = await get_beile_orders_with_stockins(db, page=1, per_page=50)
+    row15 = next(r for r in plain['items'] if r['record_type'] == 'order' and r['id'] == 15)
+    assert [it['product_name'] for it in row15['items']] == ['变形金刚', '蛋黄派']
+    # 既有兼容字段语义（铁律 D★）：未下单 purchase_order_qty = record['quantity'] = 首个 SKU 原数量
+    assert row15['purchase_order_qty'] == 60
+    # 前端 rowTotalOrderQty 的实际口径（items 求和）= 全单 100
+    assert sum(it['quantity'] or 0 for it in row15['items']) == 100
+
+
 async def test_confirm_already_confirmed_unordered_returns_idempotent_200(db):
     """CR-1：幂等早退必须在门控之前。
 

@@ -100,12 +100,12 @@ async def _setup_redis_caches():
             redis_host = os.getenv('REDIS_HOST', 'localhost')
             redis_port = int(os.getenv('REDIS_PORT', 6379))
             redis_db = int(os.getenv('REDIS_DB', 0))
-            redis_password = os.getenv('REDIS_PASSWORD')
+            redis_pwd = os.getenv('REDIS_PASSWORD')
             await redis_cache.init_app(
                 redis_host=redis_host,
                 redis_port=redis_port,
                 redis_db=redis_db,
-                redis_password=redis_password,
+                redis_password=redis_pwd,
             )
         stats = await redis_cache.get_stats()
         logger.info("Redis缓存管理器初始化完成: %s", stats.get('backend', 'unknown'))
@@ -167,7 +167,7 @@ async def lifespan(application: FastAPI):
                 '备份记录同步完成: 补录 %d 条, 清理孤立 %d 条, 修正僵尸 %d 条',
                 sync_result['backfilled'], sync_result['orphaned'], sync_result.get('zombie_fixed', 0),
             )
-    except Exception as e:  # broad-except: 启动自检的旁路步骤，失败不得阻断应用启动
+    except Exception as e:  # defensive: 启动容错——备份记录同步失败不得阻断应用启动
         logger.warning('启动时备份记录同步失败（不影响启动）: %s', e)
 
     # 预热库存缓存（后台执行，不阻塞启动）

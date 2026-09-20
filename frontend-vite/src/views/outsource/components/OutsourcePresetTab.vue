@@ -86,7 +86,7 @@ import { useAuthStore } from '@/stores/auth'
 import { toast } from '@/composables/useToast'
 
 const props = defineProps<{
-  pendingProducts: { product_id: number; product_name: string; product_barcode: string | null }[]
+  pendingProducts: { product_id: number; product_name: string; product_barcode: string | null; factory: string | null }[]
 }>()
 
 const emit = defineEmits<{
@@ -148,7 +148,7 @@ const productCards = computed<ProductCard[]>(() => {
         product_id: p.product_id,
         product_name: p.product_name,
         product_barcode: p.product_barcode,
-        factory: null,
+        factory: p.factory ?? null,
         processes: [],
       })
       seen.add(p.product_id)

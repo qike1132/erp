@@ -147,6 +147,75 @@ async def generate_order_processes(
     created, skipped = await sync_outsource_processes_for_order(db, order, username)
     return {'created': created, 'skipped': skipped}
 
+
+async def sync_orders_for_product(
+    db: AsyncSession, product_id: int, username: str | None = None,
+) -> dict:
+    """预设变更后，把该 SKU 的所有订单实例对齐到当前启用预设（新增/移除/顺序）。
+
+    - 新增：预设已启用、实例缺失的工序 → 补一条 pending 实例；
+    - 移除：实例存在但不在启用预设中，且**未发货且无收货** → 删除；
+      已发货/已收货的实例一律保留（保护发货/收货流水，不随预设删除而丢失）；
+    - 顺序：仍存在的实例 sort_order 对齐到预设（其余字段不动）。
+
+    范围：全部未删除订单（含历史）中该 SKU 的明细。返回 {'created','removed','kept'}。
+    """
+    presets = await get_presets_for_products(db, [product_id])
+    preset_map = {p.process_type: (p.sort_order or 0) for p in presets.get(product_id, [])}
+
+    item_rows = (await db.execute(
+        select(
+            OrderItem.id.label('item_id'),
+            OrderItem.order_id.label('order_id'),
+            OrderItem.product_name.label('product_name'),
+        )
+        .join(Order, Order.id == OrderItem.order_id)
+        .where(OrderItem.product_id == product_id, Order.is_deleted.isnot(True))
+    )).all()
+    if not item_rows:
+        return {'created': 0, 'removed': 0, 'kept': 0}
+
+    item_by_id = {r.item_id: (r.order_id, r.product_name) for r in item_rows}
+    instances = (await db.execute(
+        select(OrderOutsourceProcess).where(
+            OrderOutsourceProcess.order_item_id.in_(list(item_by_id))
+        )
+    )).scalars().all()
+
+    existing_by_item: dict[int, dict[str, OrderOutsourceProcess]] = {}
+    for inst in instances:
+        existing_by_item.setdefault(inst.order_item_id, {})[inst.process_type] = inst
+
+    created = removed = kept = 0
+    for item_id, (order_id, product_name) in item_by_id.items():
+        existing = existing_by_item.get(item_id, {})
+        # 新增 / 顺序对齐
+        for ptype, sort_order in preset_map.items():
+            inst = existing.get(ptype)
+            if inst is None:
+                db.add(OrderOutsourceProcess(
+                    order_id=order_id, order_item_id=item_id, product_id=product_id,
+                    product_name=product_name, process_type=ptype,
+                    sort_order=sort_order, status='pending', created_by=username,
+                ))
+                created += 1
+            elif (inst.sort_order or 0) != sort_order:
+                inst.sort_order = sort_order
+        # 移除：仅未发货且无收货的；已发货/已收货的保留
+        for ptype, inst in existing.items():
+            if ptype in preset_map:
+                continue
+            if (inst.shipped_quantity or 0) == 0 and (inst.received_quantity or 0) == 0:
+                await db.delete(inst)
+                removed += 1
+            else:
+                kept += 1
+
+    if created or removed:
+        await db.flush()
+    return {'created': created, 'removed': removed, 'kept': kept}
+
+
 async def update_order_process(db: AsyncSession, process_id: int, data: dict) -> dict:
     """更新订单外发工序（计划时间/工序类型/备注，部分更新）。"""
     p = await db.get(OrderOutsourceProcess, process_id)
@@ -250,6 +319,25 @@ async def ship_order_processes_batch(
             raise ValueError(f'外发工序 {process_id}：{e}') from e
         if item['order_id'] != order_id:
             raise ValueError(f'外发工序 {process_id} 不属于订单 {order_id}')
+        results.append(item)
+    return results
+
+
+async def ship_processes_multi(
+    db: AsyncSession, items: list[tuple[int, int]], username: str | None = None,
+) -> list[dict]:
+    """跨订单批量发货（单事务、原子）。
+
+    与 ship_order_processes_batch 的区别：不限定同一订单（批量发货面板跨订单/SKU）。
+    逐条复用 ship_order_process（含行锁、数量校验、流水），任一条失败即抛错，
+    由外层 db_transaction 回滚整批。
+    """
+    results: list[dict] = []
+    for process_id, quantity in items:
+        try:
+            item = await ship_order_process(db, process_id, quantity, username)
+        except ValueError as e:
+            raise ValueError(f'外发工序 {process_id}：{e}') from e
         results.append(item)
     return results
 

@@ -32,6 +32,7 @@ const pcRoutes: RouteRecordRaw[] = [
       // /beile-order 湖北订单；/outsource 外发工序；/outsource/presets 工序预设
       { path: 'beile-order', name: 'BeileOrder', component: () => import('@/views/hubei/HubeiView.vue'), meta: { hideHeader: true } },
       { path: 'outsource', name: 'Outsource', component: () => import('@/views/outsource/OutsourceOrderView.vue'), meta: { hideHeader: true } },
+      { path: 'outsource/shipments', name: 'OutsourceShipments', component: () => import('@/views/outsource/OutsourceShipmentView.vue'), meta: { hideHeader: true } },
       { path: 'outsource/presets', name: 'OutsourcePresets', component: () => import('@/views/outsource/OutsourcePresetView.vue'), meta: { hideHeader: true } },
       { path: 'customer', name: 'Customer', component: () => import('@/views/customer/CustomerView.vue'), meta: { hideHeader: true } },
       {

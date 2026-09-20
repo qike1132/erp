@@ -23,10 +23,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_permission
-from fastapi_app.core.exceptions import db_transaction
+from fastapi_app.core.exceptions import NotFoundError, db_transaction
 from fastapi_app.schemas.order import OrderListResponse
 from fastapi_app.schemas.outsource import (
     GenerateProcessResponse,
+    HubeiProductSearchItem,
     OrderActionResponse,
     OrderProcessFlowListResponse,
     OrderProcessListResponse,
@@ -40,6 +41,15 @@ from fastapi_app.schemas.outsource import (
     ProcessTypeListResponse,
     ProcessTypeResponse,
     ProcessTypeUpdate,
+    ShipmentBatchCreate,
+    ShipmentBatchResponse,
+    ShipmentCreate,
+    ShipmentListResponse,
+    ShipmentReceiveResponse,
+    ShipmentResponse,
+    ShipProcessMulti,
+    ShippableProcessItem,
+    UnshippedProcessItem,
 )
 from fastapi_app.services import outsource_service
 from fastapi_app.shared_models import User
@@ -105,6 +115,10 @@ async def create_process_type(
         pt = await outsource_service.create_process_type(
             db, data.model_dump(), username=user.username,
         )
+        # 预设变更后自动同步：把该 SKU 的所有订单实例对齐到当前预设（新增补齐）
+        await outsource_service.sync_orders_for_product(
+            db, data.product_id, username=user.username,
+        )
     return ProcessTypeResponse(**pt)
 
 
@@ -120,9 +134,16 @@ async def batch_create_process_types(
             db, product_id=data.product_id,
             process_types=data.process_types, username=user.username,
         )
+        # 预设变更后自动同步：把该 SKU 的所有订单实例对齐到当前预设
+        sync = await outsource_service.sync_orders_for_product(
+            db, data.product_id, username=user.username,
+        )
     return GenerateProcessResponse(
         success=True,
-        message=f"已添加 {result['created']} 道工序，跳过 {result['skipped']} 道重复工序",
+        message=(
+            f"已添加 {result['created']} 道工序，跳过 {result['skipped']} 道重复工序；"
+            f"已同步订单工序（新增 {sync['created']}、移除 {sync['removed']}、保留 {sync['kept']}）"
+        ),
         created=result['created'],
         skipped=result['skipped'],
     )
@@ -142,6 +163,10 @@ async def update_process_type(
         pt = await outsource_service.update_process_type(
             db, pt_id, data.model_dump(exclude_unset=True),
         )
+        # 预设变更后自动同步：把该 SKU 的所有订单实例对齐到当前预设
+        await outsource_service.sync_orders_for_product(
+            db, pt['product_id'], username=_user.username,
+        )
     return ProcessTypeResponse(**pt)
 
 
@@ -153,8 +178,18 @@ async def delete_process_type(
 ) -> OrderActionResponse:
     """删除 SKU 外发工序预设。"""
     async with db_transaction(db):
-        await outsource_service.delete_process_type(db, pt_id)
-    return OrderActionResponse(success=True, message="工序预设已删除")
+        product_id = await outsource_service.delete_process_type(db, pt_id)
+        # 预设变更后自动同步：把该 SKU 的所有订单实例对齐到当前预设（移除未发货工序）
+        sync = await outsource_service.sync_orders_for_product(
+            db, product_id, username=_user.username,
+        )
+    return OrderActionResponse(
+        success=True,
+        message=(
+            f"工序预设已删除；已同步订单工序"
+            f"（新增 {sync['created']}、移除 {sync['removed']}、保留 {sync['kept']}）"
+        ),
+    )
 
 
 # ==================== 订单外发工序 ====================
@@ -263,6 +298,30 @@ async def ship_order_processes_batch(
     return OrderProcessListResponse(data=items, total=len(items))
 
 
+@router.get("/processes/shippable", response_model=list[ShippableProcessItem])
+async def list_shippable_processes(
+    db: AsyncSession = Depends(get_async_read_db),
+    _user: User = Depends(require_permission("outsource_ship")),
+) -> list[ShippableProcessItem]:
+    """跨全部湖北订单聚合待发货工序（批量发货面板数据源）。"""
+    items = await outsource_service.list_shippable_processes(db)
+    return [ShippableProcessItem(**it) for it in items]
+
+
+@router.post("/processes/ship-multi", response_model=OrderProcessListResponse)
+async def ship_processes_multi(
+    data: ShipProcessMulti,
+    db: AsyncSession = Depends(get_async_db),
+    user: User = Depends(require_permission("outsource_ship")),
+) -> OrderProcessListResponse:
+    """跨订单批量发货（单事务原子）：一次请求完成多道工序发货，任一条失败整批回滚。"""
+    async with db_transaction(db):
+        items = await outsource_service.ship_processes_multi(
+            db, [(i.process_id, i.quantity) for i in data.items], username=user.username,
+        )
+    return OrderProcessListResponse(data=items, total=len(items))
+
+
 @router.post("/orders/{order_id}/processes/receive-batch", response_model=OrderProcessListResponse)
 async def receive_order_processes_batch(
     order_id: int,
@@ -290,3 +349,125 @@ async def delete_order_process(
     async with db_transaction(db):
         await outsource_service.delete_order_process(db, process_id)
     return OrderActionResponse(success=True, message="外发工序已删除")
+
+
+# ==================== 湖北 SKU 搜索 / 未到货明细 ====================
+
+@router.get("/products/search", response_model=list[HubeiProductSearchItem])
+async def search_hubei_products(
+    q: str = Query('', max_length=100, description="搜索关键词"),
+    db: AsyncSession = Depends(get_async_read_db),
+    _user: User = Depends(require_permission("outsource_view")),
+) -> list[HubeiProductSearchItem]:
+    """搜索工厂=湖北 的 SKU（工序预设页搜索框数据源）。
+
+    与 /product 的工厂标记联动：标记为湖北的 SKU 自动成为 presets 搜索候选。
+    """
+    items = await outsource_service.search_hubei_products(db, q)
+    return [HubeiProductSearchItem(**it) for it in items]
+
+
+@router.get("/unshipped", response_model=list[UnshippedProcessItem])
+async def list_unshipped_processes(
+    db: AsyncSession = Depends(get_async_read_db),
+    _user: User = Depends(require_permission("outsource_view")),
+) -> list[UnshippedProcessItem]:
+    """跨全部湖北订单聚合未发完工序明细（导出/打印未到货清单）。"""
+    items = await outsource_service.list_unshipped_processes(db)
+    return [UnshippedProcessItem(**it) for it in items]
+
+
+# ==================== 外发发货单（一键发货工作流） ====================
+
+@router.post("/shipments", response_model=ShipmentResponse)
+async def create_shipment(
+    data: ShipmentCreate,
+    db: AsyncSession = Depends(get_async_db),
+    user: User = Depends(require_permission("outsource_ship")),
+) -> ShipmentResponse:
+    """一键发货：按订单生成发货单（贝乐用户端「待收货」订单）并逐工序发货。
+
+    单事务原子：任一工序发货失败整批回滚。发货完成后向 outsource_receive
+    权限账号派发「新发货单待收货」通知。
+    """
+    async with db_transaction(db):
+        result = await outsource_service.create_shipment(
+            db, data.order_id,
+            [(i.process_id, i.quantity) for i in data.items],
+            username=user.username,
+        )
+    return ShipmentResponse(**result)
+
+
+@router.post("/shipments/batch", response_model=ShipmentBatchResponse)
+async def create_shipments_batch(
+    data: ShipmentBatchCreate,
+    db: AsyncSession = Depends(get_async_db),
+    user: User = Depends(require_permission("outsource_ship")),
+) -> ShipmentBatchResponse:
+    """批量发货（多订单一次性）：每个订单生成一张发货单，单事务原子。
+
+    orders: [{order_id, items:[{process_id, quantity}]}, ...]。
+    任一订单发货失败整批回滚。每订单发货单独立、customer 独立，确认收货仍按单张发货单闭环。
+    """
+    async with db_transaction(db):
+        results = await outsource_service.create_shipments_batch(
+            db,
+            [(o.order_id, [(i.process_id, i.quantity) for i in o.items]) for o in data.orders],
+            username=user.username,
+        )
+    return ShipmentBatchResponse(
+        success=True,
+        data=results,
+        total=len(results),
+        message=f'已生成 {len(results)} 张发货单',
+    )
+
+
+@router.get("/shipments", response_model=ShipmentListResponse)
+async def list_shipments(
+    status: str | None = Query(None, description="状态筛选：shipped=待收货 / received=已完成"),
+    page: int = Query(1, ge=1, description="页码"),
+    per_page: int = Query(50, ge=1, le=500, description="每页数量"),
+    db: AsyncSession = Depends(get_async_read_db),
+    _user: User = Depends(require_permission("outsource_view")),
+) -> ShipmentListResponse:
+    """发货单列表（待收货/已完成筛选 + 计数横幅）。"""
+    result = await outsource_service.list_shipments(
+        db, status=status, page=page, per_page=per_page,
+    )
+    return ShipmentListResponse(
+        data=result['items'],
+        total=result['total'],
+        page=result['page'],
+        per_page=result['per_page'],
+        shipped_count=result['shipped_count'],
+        received_count=result['received_count'],
+    )
+
+
+@router.get("/shipments/{shipment_id}", response_model=ShipmentResponse)
+async def get_shipment(
+    shipment_id: int,
+    db: AsyncSession = Depends(get_async_read_db),
+    _user: User = Depends(require_permission("outsource_view")),
+) -> ShipmentResponse:
+    """发货单明细（SKU + 工序 + 发货/收货数量）。"""
+    result = await outsource_service.get_shipment(db, shipment_id)
+    if not result:
+        raise NotFoundError('发货单不存在')
+    return ShipmentResponse(**result)
+
+
+@router.post("/shipments/{shipment_id}/receive", response_model=ShipmentReceiveResponse)
+async def receive_shipment(
+    shipment_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    user: User = Depends(require_permission("outsource_receive")),
+) -> ShipmentReceiveResponse:
+    """确认收货（贝乐账号）：发货单状态 shipped → received，闭环。幂等。"""
+    async with db_transaction(db):
+        result = await outsource_service.receive_shipment(
+            db, shipment_id, username=user.username,
+        )
+    return ShipmentReceiveResponse(**result)

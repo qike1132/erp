@@ -28,7 +28,6 @@ from fastapi_app.api.v1.endpoints.backup._deps import (
     require_backup_permission,
 )
 from fastapi_app.core.database import get_async_read_db
-from fastapi_app.core.response import success_response
 from fastapi_app.schemas.backup import (
     BackupHealthCheckResponse,
     BackupIntegrityCheckResponse,
@@ -70,7 +69,7 @@ async def validate_backup(
         summary = backup_service.validate_backup_file(content, file.filename or '')
     except BackupFileError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    return success_response(summary=summary)
+    return {'success': True, 'summary': summary}
 
 
 # ---------------------------------------------------------------------------
@@ -183,7 +182,7 @@ def _check_backup_integrity() -> tuple[dict, list[str]]:  # log-context: interna
         sample_files = random.sample(backup_files, min(3, len(backup_files)))  # nosec B311
         integrity_results = []
         for file_info in sample_files:
-            filename = file_info.get('filename', '')
+            filename = file_info.get('name', '')
             filepath = backup_service.BACKUP_DIR / filename
             try:
                 if filepath.exists() and filepath.is_file():
@@ -416,7 +415,8 @@ async def validate_backup_file(
                 # 检查环境变量
                 env_password = os.environ.get('BACKUP_ENCRYPTION_PASSWORD')
                 if not env_password:
-                    return success_response(**{
+                    return {
+                        'success': True,
                         'filename': filename,
                         'valid': False,
                         'encrypted': True,
@@ -426,7 +426,8 @@ async def validate_backup_file(
                         'table_count': None,
                         'total_rows': None,
                         'created_at': None,
-                        'issues': ['文件已加密但未提供密码']})
+                        'issues': ['文件已加密但未提供密码']
+                    }
                 password_to_use = env_password
             else:
                 password_to_use = x_backup_password
@@ -436,7 +437,8 @@ async def validate_backup_file(
                 content = decrypted_content
             except Exception:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
                 logger.exception('验证备份文件时解密失败: %s', filename)
-                return success_response(**{
+                return {
+                    'success': True,
                     'filename': filename,
                     'valid': False,
                     'encrypted': True,
@@ -446,7 +448,8 @@ async def validate_backup_file(
                     'table_count': None,
                     'total_rows': None,
                     'created_at': None,
-                    'issues': ['解密失败']})
+                    'issues': ['解密失败']
+                }
         else:
             pass
 
@@ -525,7 +528,8 @@ async def validate_backup_file(
                 pass  # 元数据提取失败不影响验证结果; defensive: 异常静默处理,不影响主流程
 
         # 构建响应
-        result = success_response(**{
+        result = {
+            'success': True,
             'filename': filename,
             'valid': valid,
             'encrypted': encrypted,
@@ -537,7 +541,8 @@ async def validate_backup_file(
             'created_at': created_at,
             'issues': issues,
             'cache_hit': False,
-            'cache_key': cache_key})
+            'cache_key': cache_key
+        }
 
         # 缓存验证结果（仅当验证成功时）
         if valid:
@@ -564,7 +569,8 @@ async def validate_backup_integrity(
     try:
         backup_files = backup_service.list_backup_files()
         if not backup_files:
-            return success_response(**{
+            return {
+                'success': True,
                 'checked_at': datetime.now().isoformat(),
                 'total_files': 0,
                 'valid_files': 0,
@@ -573,11 +579,12 @@ async def validate_backup_integrity(
                 'missing_files': [],
                 'details': [],
                 'cache_hit': False,
-                'cache_key': None})
+                'cache_key': None
+            }
 
         # 检查缓存
         cache_key = hashlib.md5(
-            '_'.join(sorted(f['filename'] for f in backup_files)).encode(),
+            '_'.join(sorted(f['name'] for f in backup_files)).encode(),
             usedforsecurity=False
         ).hexdigest()
 
@@ -592,7 +599,7 @@ async def validate_backup_integrity(
         missing_files = []
 
         for file_info in backup_files:
-            filename = file_info.get('filename', '')
+            filename = file_info.get('name', '')
             filepath = backup_service.BACKUP_DIR / filename
 
             try:
@@ -691,7 +698,8 @@ async def validate_backup_integrity(
 
         valid_files = len(backup_files) - len(corrupted_files) - len(missing_files)
 
-        result = success_response(**{
+        result = {
+            'success': True,
             'checked_at': datetime.now().isoformat(),
             'total_files': len(backup_files),
             'valid_files': valid_files,
@@ -700,7 +708,8 @@ async def validate_backup_integrity(
             'missing_files': missing_files,
             'details': details,
             'cache_hit': False,
-            'cache_key': cache_key})
+            'cache_key': cache_key
+        }
 
         # 缓存结果
         await _validation_cache.set(cache_key, result)
@@ -775,13 +784,12 @@ async def get_backup_statistics(
             # 按修改时间排序
             sorted_backups = sorted(backup_files, key=lambda x: x.get('mtime', 0), reverse=True)
             for backup in sorted_backups[:10]:  # 只取最近10个
-                fname = backup.get('filename', '')
                 recent_backups.append({
-                    'filename': fname,
+                    'filename': backup.get('name', ''),
                     'size_bytes': backup.get('size', 0),
                     'modified_time': datetime.fromtimestamp(backup.get('mtime', 0)).isoformat(),
-                    'type': 'full' if 'full' in fname.lower() else 'incremental' if 'inc' in fname.lower() else 'unknown',
-                    'encrypted': fname.endswith('.enc'),
+                    'type': 'full' if 'full' in backup.get('name', '').lower() else 'incremental' if 'inc' in backup.get('name', '').lower() else 'unknown',
+                    'encrypted': backup.get('name', '').endswith('.enc'),
                 })
 
         # 8. 计算备份频率
@@ -803,7 +811,8 @@ async def get_backup_statistics(
                 'total_days': 30,  # 统计周期
             }
 
-        return success_response(**{
+        return {
+            'success': True,
             'timestamp': datetime.now().isoformat(),
             'total_backups': total_backups,
             'total_size_bytes': total_size_bytes,
@@ -818,7 +827,8 @@ async def get_backup_statistics(
                 'success': success_records,
                 'failure': total_records - success_records,
                 'period_days': 30,
-            }})
+            }
+        }
 
     except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
         logger.exception('获取备份统计信息失败')

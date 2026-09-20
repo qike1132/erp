@@ -3,15 +3,18 @@
   <div v-for="group in processGroups" :key="String(group.itemId)" class="oso-proc-group">
     <div class="oso-proc-group-head">
       <span class="oso-proc-sku">{{ group.skuName || 'SKU' }}</span>
-      <span class="oso-proc-qty">× {{ group.skuQty }}</span>
+      <span class="oso-proc-qty">订单数量 {{ group.skuQty }}</span>
       <span class="oso-proc-count">{{ group.processes.length }} 道工序</span>
     </div>
     <table class="oso-proc-table">
       <thead>
         <tr>
           <th class="oso-col-proc">工序</th>
-          <th class="oso-col-qty">发货数量</th>
+          <th class="oso-col-qty">已发数量</th>
+          <th class="oso-col-time">发货时间</th>
+          <th class="oso-col-qty">剩余未发</th>
           <th class="oso-col-qty">收货数量</th>
+          <th class="oso-col-time">湖北收货时间</th>
           <th class="oso-col-status">状态</th>
         </tr>
       </thead>
@@ -20,7 +23,6 @@
           <td class="oso-col-proc">
             <span class="oso-proc-seq">{{ idx + 1 }}</span>
             <span class="oso-proc-name">{{ p.process_type }}</span>
-            <span v-if="(p.shipped_quantity || 0) > 0" class="oso-proc-cum">已发 {{ p.shipped_quantity }}</span>
           </td>
           <td class="oso-col-qty">
             <template v-if="canShip && remainingShipQty(p) > 0 && (p.received_quantity || 0) === 0">
@@ -38,6 +40,12 @@
               <span class="oso-qty-val">{{ p.shipped_quantity || '-' }}</span>
             </template>
           </td>
+          <td class="oso-col-time">
+            <span class="oso-time-val">{{ p.actual_start_time || '-' }}</span>
+          </td>
+          <td class="oso-col-qty">
+            <strong class="oso-remain">{{ remainingShipQty(p) }}</strong>
+          </td>
           <td class="oso-col-qty">
             <template v-if="canReceive && remainingReceiveQty(p) > 0">
               <input
@@ -53,6 +61,9 @@
             <template v-else>
               <span class="oso-qty-val">{{ p.received_quantity || '-' }}</span>
             </template>
+          </td>
+          <td class="oso-col-time">
+            <span class="oso-time-val">{{ p.actual_end_time || '-' }}</span>
           </td>
           <td class="oso-col-status">
             <span :class="['oso-status-badge', `oso-status-${p.status}`]">{{ statusLabel(p.status) }}</span>
@@ -124,9 +135,12 @@ defineProps<{
 }
 .oso-proc-table tbody tr:hover { background: #fafbfc; }
 
-.oso-col-proc { width: 45%; }
-.oso-col-qty { width: 20%; }
-.oso-col-status { width: 15%; }
+.oso-col-proc { width: 22%; }
+.oso-col-qty { width: 11%; }
+.oso-col-time { width: 15%; }
+.oso-col-status { width: 11%; }
+.oso-time-val { font-size: 12px; color: var(--color-text-secondary); white-space: nowrap; }
+.oso-remain { color: var(--color-warning-600); font-weight: 700; }
 
 .oso-proc-seq {
   display: inline-flex;

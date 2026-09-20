@@ -21,37 +21,34 @@
           <FontAwesomeIcon icon="exclamation-triangle" aria-hidden="true" />
           <span>提醒：共有 <strong>{{ unconfirmedCount }}</strong> 条订单记录待确认，请及时确认</span>
         </div>
-        <!-- 右侧操作区：搜索框 + 导出/打印（右上角） -->
-        <div class="hu-header-actions">
-          <HubeiSearchBar
-            v-model:product-query="filterOrderNo"
-            v-model:customer-query="filterCustomer"
-            :show-customer-search="false"
-            :show-actions="false"
-            @select-product="onSelectProduct"
-            @reset="onReset"
-          />
-          <div class="hu-order-actions">
-            <span v-if="canPrint && selectedCount > 0" class="bo-selected-count">已选 {{ selectedCount }} 条</span>
-            <button
-              v-if="canExport"
-              type="button"
-              class="bo-toolbar-btn bo-toolbar-btn--export"
-              :disabled="exporting || displayOrders.length === 0"
-              @click="handleExport"
-            >
-              <FontAwesomeIcon icon="file-csv" aria-hidden="true" /> 导出
-            </button>
-            <button
-              v-if="canPrint"
-              type="button"
-              class="bo-toolbar-btn bo-toolbar-btn--print"
-              :disabled="selectedCount === 0"
-              @click="handlePrint"
-            >
-              <FontAwesomeIcon icon="print" aria-hidden="true" /> 打印
-            </button>
-          </div>
+        <HubeiSearchBar
+          v-model:product-query="filterOrderNo"
+          v-model:customer-query="filterCustomer"
+          :show-customer-search="false"
+          :show-actions="false"
+          @select-product="onSelectProduct"
+          @reset="onReset"
+        />
+        <!-- 导出 / 打印按钮：位于产品搜索框右侧 -->
+        <div class="bo-header-actions">
+          <button
+            v-if="canExport"
+            type="button"
+            class="bo-header-btn bo-header-btn--export"
+            :disabled="exporting || !hasDisplayOrders"
+            @click="handleExport"
+          >
+            <FontAwesomeIcon icon="file-csv" aria-hidden="true" /> 导出
+          </button>
+          <button
+            v-if="canPrint"
+            type="button"
+            class="bo-header-btn bo-header-btn--print"
+            :disabled="selectedCount === 0"
+            @click="handlePrint"
+          >
+            <FontAwesomeIcon icon="print" aria-hidden="true" /> 打印
+          </button>
         </div>
       </div>
 
@@ -77,8 +74,6 @@
  *   避免子组件状态变化触发父组件 computed 重算与联动重渲染。
  * - 筛选：产品搜索状态经 computed 双向绑定到 composable 的 filters；
  *   确认状态 TAB（未确认/已确认）调用 setConfirmStatus（含回到首页）。
- * - 提示：顶部仅保留「未确认」汇总横幅；「未下单」汇总横幅已按业务反馈移除
- *   （行内「未开单」徽章与确认按钮禁用态/门控提示保持不变）。
  */
 import { computed } from 'vue'
 import BeileOrderTab from '@/views/beile-order/BeileOrderTab.vue'
@@ -92,12 +87,11 @@ const {
   setConfirmStatus,
   applyProductFilter,
   handleReset,
-  // 导出 / 打印（按钮位于页头右上角 .hu-header-actions）
-  displayOrders,
-  selectedCount,
   canExport,
   canPrint,
   exporting,
+  selectedCount,
+  hasDisplayOrders,
   handleExport,
   handlePrint,
 } = provideBeileOrders()
@@ -124,71 +118,10 @@ function onReset() {
 <style scoped lang="scss">
 @use '@/styles/hubei-page.scss' as *;
 
-/* 头部布局：TAB 与提醒靠左，搜索框 + 导出/打印靠右（右上角） */
-.hu-header-actions {
+/* 头部布局：TAB 靠左，搜索框 + 导出/打印按钮靠右 */
+.page-card-header :deep(.hu-filter-bar) {
   margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: 12px;
   flex-shrink: 0;
-}
-.hu-header-actions :deep(.hu-filter-bar) {
-  flex-shrink: 0;
-}
-.hu-order-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
-/* ===== 导出 / 打印按钮（自 BeileOrderTab 工具栏上移至页头右上角） ===== */
-.bo-selected-count {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--color-primary-600, #2563eb);
-}
-.bo-toolbar-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 14px;
-  font-size: 13px;
-  font-weight: 600;
-  border: 1px solid var(--color-border-light, #e2e8f0);
-  border-radius: 8px;
-  background: #fff;
-  color: var(--color-text-secondary, #475569);
-  cursor: pointer;
-  font-family: inherit;
-  transition: all 0.15s ease;
-  white-space: nowrap;
-}
-.bo-toolbar-btn:hover:not(:disabled) {
-  border-color: var(--color-primary-300, #93c5fd);
-  color: var(--color-primary-600, #2563eb);
-  background: var(--color-primary-50, #eff6ff);
-}
-.bo-toolbar-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-.bo-toolbar-btn--export:hover:not(:disabled) {
-  border-color: var(--color-success-400, #4ade80);
-  color: var(--color-success-600, #16a34a);
-  background: var(--color-success-50, #f0fdf4);
-}
-.bo-toolbar-btn--print:hover:not(:disabled) {
-  border-color: var(--color-warning-400, #fbbf24);
-  color: var(--color-warning-600, #d97706);
-  background: var(--color-warning-50, #fffbeb);
-}
-
-/* 页头去重后：宽度不足时允许换行，保证 scrollWidth ≤ clientWidth
-   （1280/1440/1600 三档均无横向溢出、无裁切） */
-.page-card-header {
-  flex-wrap: wrap;
-  row-gap: 8px;
 }
 
 /* ===== 确认状态筛选（未确认/已确认 TAB，湖北订单确认流程） ===== */
@@ -275,5 +208,48 @@ function onReset() {
 .bo-unconfirmed-hint strong {
   color: var(--color-warning-800);
   font-size: 15px;
+}
+
+/* ===== 导出 / 打印按钮（位于产品搜索框右侧） ===== */
+.bo-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.bo-header-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  border: 1px solid var(--color-border-light, #e2e8f0);
+  border-radius: 9px;
+  background: #fff;
+  color: var(--color-text-secondary, #475569);
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+.bo-header-btn:hover:not(:disabled) {
+  border-color: var(--color-primary-300, #93c5fd);
+  color: var(--color-primary-600, #2563eb);
+  background: var(--color-primary-50, #eff6ff);
+}
+.bo-header-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.bo-header-btn--export:hover:not(:disabled) {
+  border-color: var(--color-success-400, #4ade80);
+  color: var(--color-success-600, #16a34a);
+  background: var(--color-success-50, #f0fdf4);
+}
+.bo-header-btn--print:hover:not(:disabled) {
+  border-color: var(--color-warning-400, #fbbf24);
+  color: var(--color-warning-600, #d97706);
+  background: var(--color-warning-50, #fffbeb);
 }
 </style>

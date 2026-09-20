@@ -9,7 +9,7 @@
  * BeileOrderTab 通过 injectBeileOrders() 注入同一实例，
  * 消除 ref 反向桥接导致的父子联动重渲染。
  */
-import { reactive, computed, ref, watch, provide, inject, onUnmounted, type InjectionKey } from 'vue'
+import { reactive, computed, ref, watch, provide, inject, type InjectionKey } from 'vue'
 import { useRoute } from 'vue-router'
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/vue-query'
 import { orderApi } from '@/api'
@@ -24,15 +24,6 @@ import { printHtml } from '@/utils/print'
 /** 每页条数选项（分页组件下拉可选） */
 export const PAGE_SIZE_OPTIONS = [18, 30, 50, 100]
 
-/**
- * 未下单固定文案（与后端 409 detail 逐字一致，设计 §11.4）：
- * - TOAST：前端门控前置拦截时的 toast 文案；
- * - TIP：数量列「未下单」徽章 / 确认按钮禁用态的 hover tooltip。
- */
-export const NOT_ORDERED_TOAST = '请先在采购中心完成下单'
-export const NOT_ORDERED_TIP = '该订单未在采购中心完成下单'
-export const NOT_ORDERED_DETAIL = '该订单未在采购中心完成下单，请先在采购中心完成下单后再确认'
-
 /** 湖北订单行：OrderItem 在后端实际响应中还包含 order_no / customer / product（未在 OrderItem 类型中声明） */
 export type BeileOrderRow = OrderItem & {
   order_no?: string
@@ -45,24 +36,6 @@ export type BeileOrderRow = OrderItem & {
   confirmed?: boolean
   confirmed_at?: string
   confirmed_by?: string
-  /**
-   * 订单级下单数量（合计口径，方案 C 修正后）：
-   * - order 行 / 备货**精确**匹配 → 该来源自身逐 SKU 快照「按产品名 MAX 去重再求和」；
-   *   逐 SKU 快照不可得时回退 completed 采购单 product_quantity 的 MAX；
-   * - 备货**模糊**匹配（无精确逐 SKU 行） → **null**（模糊匹配只决定 is_ordered，不产出数量，
-   *   D-R2-1）；此消费方一律按 `!= null` 守卫后再用，绝不用 `?? 0` 渲染成 0；
-   * - 未下单 → 原数量。
-   */
-  purchase_order_qty?: number | null
-  /**
-   * 订单级备品数量（生产数量的计算输入，独立展示列已删除）：口径同 purchase_order_qty；
-   * 备货模糊匹配降级时为 null；未下单 = 0。
-   */
-  spare_quantity?: number | null
-  /** 损耗率快照(千分之几)：未下单 / 历史 NULL = null */
-  spare_rate?: number | null
-  /** 是否已下单（存在 status='completed' 的关联采购单） */
-  is_ordered?: boolean
   product?: { id: number; name: string; barcode: string; image: string }
 }
 
@@ -70,190 +43,6 @@ export type BeileOrderRow = OrderItem & {
 function skuMatchesKeyword(sku: { product_name?: string | null; product_barcode?: string | null }, kw: string): boolean {
   return (sku.product_name || '').toLowerCase().includes(kw)
     || (sku.product_barcode || '').toLowerCase().includes(kw)
-}
-
-// ==================== 逐 SKU / 订单级数量口径（页面 = 导出 = 打印 单一真源） ====================
-// 方案 C：后端已持久化 purchase_order_sku 逐 SKU 快照，并在 /beile-list 的 items[] 上注入
-// purchase_order_qty / spare_quantity / is_ordered / per_sku_source。以下函数是「数量口径」的
-// 唯一权威实现，BeileOrderRow.vue、详情弹窗、导出/打印三处共用，杜绝口径再次漂移。
-
-/**
- * 订单级「订单数量」合计（全量 SKU，**不随筛选变化** → 消除 RC-3 语义漂移）：
- * 已下单**且订单级数量可得** → purchase_order_qty（方案 C 修正为「该来源自身逐 SKU 之和」）；
- * 订单级数量为 null（如备货模糊匹配降级，见后端 pos_exact=False）→ 回退各 SKU 客户订单量之和，
- * **绝不用 `?? 0` 渲染成 0**；
- * 未下单 → 各 SKU 客户订单量之和；无 SKU 明细 → 订单 quantity。
- */
-export function rowTotalOrderQty(row: BeileOrderRow): number {
-  if (row.is_ordered === true && row.purchase_order_qty != null) return row.purchase_order_qty
-  const items = row.items || []
-  if (items.length > 0) return items.reduce((sum, s) => sum + (s.quantity || 0), 0)
-  return row.quantity || 0
-}
-
-/**
- * 订单级「生产数量」合计 = 订单数量 + 备品数量（计算字段，不落库）；
- * 未下单**或订单级数量为 null（不可得）** → null（展示为「—」，无派生意义，不得编造 0）。
- */
-export function rowTotalProductionQty(row: BeileOrderRow): number | null {
-  if (row.is_ordered !== true || row.purchase_order_qty == null) return null
-  return row.purchase_order_qty + (row.spare_quantity ?? 0)
-}
-
-/**
- * 数量口径计算所需的「最小 SKU 字段集」。
- *
- * OrderSKU（页面逐 SKU 行）与导出/打印用的「无明细回落行」都满足该形状，
- * 使同一套口径函数（skuOrderQty / skuProductionQty / skuIsOrdered）可被
- * 页面、导出 XLS、打印预览三处复用，而无需强转完整 OrderSKU。
- */
-export type SkuQtyFields = {
-  product_name?: string | null
-  product_barcode?: string | null
-  quantity?: number
-  purchase_order_qty?: number | null
-  spare_quantity?: number | null
-  per_sku_source?: 'po_sku' | 'order_level'
-}
-
-/**
- * 行内可见 SKU（页面行与导出/打印共用同一真源）：
- * 应用产品筛选时仅保留名称/条码命中者；命中为空则回退全部（避免空列表）。
- *
- * 泛型保留入参元素类型：页面传入 OrderSKU[] 仍得到 OrderSKU[]（需要 `id`），
- * 导出回落的 `SkuQtyFields[]` 亦不被丢失类型信息。
- */
-export function filterVisibleSkus<T extends SkuQtyFields>(items: T[], keyword: string): T[] {
-  const kw = keyword.trim().toLowerCase()
-  if (!kw) return items
-  const matched = items.filter((s) => skuMatchesKeyword(s, kw))
-  return matched.length > 0 ? matched : items
-}
-
-/**
- * 逐 SKU「订单数量」：
- * 1) 命中逐 SKU 快照（per_sku_source === 'po_sku'）→ 该 SKU 实际下单量（同 SKU 拆多供应商取 MAX）；
- * 2) 单 SKU 行且整行已下单**且订单级数量可得**（purchase_order_qty != null）→ 回退订单级值；
- *    ⚠️ 订单级数量为 null（备货模糊匹配降级）时必须落到规则 3 —— 否则会被 `?? 0` 渲染成 0（新的错误显示）；
- * 3) 其余 → 该 SKU 客户订单原数量（始终准确可得）。
- */
-export function skuOrderQty(row: BeileOrderRow, sku: SkuQtyFields): number {
-  if (sku.per_sku_source === 'po_sku' && sku.purchase_order_qty != null) return sku.purchase_order_qty
-  if (row.is_ordered === true && (row.items?.length ?? 0) === 1 && row.purchase_order_qty != null) {
-    return row.purchase_order_qty
-  }
-  return sku.quantity || 0
-}
-
-/**
- * 逐 SKU「生产数量」：
- * 1) 命中逐 SKU 快照 → 该 SKU 下单量 + 该 SKU 备品量；
- * 2) 单 SKU 行且整行已下单**且订单级数量可得** → 回退订单级 (下单量 + 备品量)；
- *    ⚠️ 订单级数量为 null 时不回退（否则会把 null 当 0 编造生产数量）；
- * 3) 其余 → null（展示「—」）。订单级标量无法拆分到 SKU，宁可显示「—」也不编造数字。
- */
-export function skuProductionQty(row: BeileOrderRow, sku: SkuQtyFields): number | null {
-  if (sku.per_sku_source === 'po_sku' && sku.purchase_order_qty != null) {
-    return (sku.purchase_order_qty || 0) + (sku.spare_quantity || 0)
-  }
-  if (row.is_ordered === true && (row.items?.length ?? 0) === 1 && row.purchase_order_qty != null) {
-    return row.purchase_order_qty + (row.spare_quantity ?? 0)
-  }
-  return null
-}
-
-/**
- * 逐 SKU 的「订单数量」是否来自采购单实际下单量（决定是否加粗）。
- * 加粗 ⇔ 该数值确实来自采购单：
- * 1) 命中逐 SKU 快照（per_sku_source === 'po_sku'）→ 真·采购单实际下单量；
- * 2) 单 SKU 行且整行已下单**且订单级数量可得**（purchase_order_qty != null）→ 订单级即等于该 SKU。
- * ⚠️ 订单级数量为 null（备货模糊匹配降级，D-R2-1）时该 SKU 显示的是**自身订单原数量回退值**，
- *    并非采购单实际下单量 → **不加粗**（与 skuOrderQty / skuProductionQty / rowTotal* 守卫口径一致）。
- */
-export function skuIsOrdered(row: BeileOrderRow, sku: SkuQtyFields): boolean {
-  if (sku.per_sku_source === 'po_sku') return true
-  return row.is_ordered === true && (row.items?.length ?? 0) === 1 && row.purchase_order_qty != null
-}
-
-// ==================== 汇总表（导出 XLS = 打印预览，与页面同一真源） ====================
-
-/** HTML 特殊字符转义（导出 / 打印共用） */
-export function escapeHtml(str: string): string {
-  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
-}
-
-/**
- * 汇总表「小义开单」列口径（订单级事实，与 /beile-order 页面同源）：
- * is_ordered === true → 「已开单」；否则 → 「未开单」。
- */
-export function summaryOpenedLabel(item: BeileOrderRow): string {
-  return item.is_ordered === true ? '已开单' : '未开单'
-}
-
-/** 生产数量单元格文本：null（无法派生）→ 「—」 */
-function summaryProductionText(v: number | null): string {
-  return v === null ? '—' : String(v)
-}
-
-/**
- * 构建汇总表 tbody HTML（页面 = 导出 XLS = 打印预览同源，AC-12）。
- *
- * 粒度（任务书 D.13 裁决）：
- * - 「订单数量 / 生产数量」**逐 SKU 输出**，复用页面同一真源函数
- *   （skuOrderQty / skuProductionQty），不再整段 rowspan 到订单级；
- * - 「小义开单」为订单级事实，保持整单 rowspan；
- * - 「订单类型 / 下单时间 / 客户名称 / 工厂」为订单级，整单 rowspan；
- * - 多 SKU 订单额外追加一行订单级「合计」（rowTotalOrderQty / rowTotalProductionQty 口径），
- *   保证导出/打印不丢失订单总量。
- *
- * @param items 待输出订单行（导出=当前展示页；打印=选中行）
- * @param keyword 已应用的产品关键字：与页面行一致，仅输出命中该关键字的 SKU
- */
-export function buildSummaryTbody(items: BeileOrderRow[], keyword: string): string {
-  let html = ''
-  for (const item of items) {
-    const type = item.record_type === 'stockin' ? '备货' : '订单'
-    const factory = (item.factories || ['湖北']).join(', ')
-    // 订单级列（订单类型 / 下单时间 / 客户名称 / 工厂）：整单 rowspan
-    const orderCells = [type, item.order_date || '', item.customer || '', factory]
-    const openedText = summaryOpenedLabel(item)
-    const note = item.note || ''
-
-    // 无 SKU 明细的备货记录：回落为单行（与页面 BeileOrderRow 的 fallback 同构）
-    const baseSkus: SkuQtyFields[] = (item.items && item.items.length > 0)
-      ? item.items
-      : [{ product_name: item.product_name ?? null, quantity: item.quantity ?? 0 }]
-    const skus = filterVisibleSkus(baseSkus, keyword)
-
-    const hasTotalRow = skus.length > 1
-    // 订单级列的 rowspan = 逐 SKU 行数 +（多 SKU 时的）合计行
-    const span = skus.length + (hasTotalRow ? 1 : 0)
-    const spanAttr = span > 1 ? ` rowspan="${span}"` : ''
-
-    skus.forEach((sku, idx) => {
-      const cells: string[] = []
-      if (idx === 0) {
-        for (const c of orderCells) cells.push(`<td${spanAttr}>${escapeHtml(c)}</td>`)
-      }
-      cells.push(`<td>${escapeHtml(sku.product_name || '-')}</td>`)
-      cells.push(`<td>${escapeHtml(String(skuOrderQty(item, sku)))}</td>`)
-      cells.push(`<td>${escapeHtml(summaryProductionText(skuProductionQty(item, sku)))}</td>`)
-      if (idx === 0) cells.push(`<td${spanAttr}>${escapeHtml(openedText)}</td>`)
-      cells.push(`<td>${idx === 0 ? escapeHtml(note) : ''}</td>`)
-      html += `<tr>${cells.join('')}</tr>`
-    })
-
-    if (hasTotalRow) {
-      // 订单级合计行：与页面折叠行 / rowTotal* 同源，保证「合计 == 订单总量」
-      html += '<tr>'
-        + '<td>合计</td>'
-        + `<td>${escapeHtml(String(rowTotalOrderQty(item)))}</td>`
-        + `<td>${escapeHtml(summaryProductionText(rowTotalProductionQty(item)))}</td>`
-        + '<td></td>'
-        + '</tr>'
-    }
-  }
-  return html
 }
 
 /** 湖北订单列表：查询 + 筛选 + 分页 + 确认流程 + 选中/导出/打印 */
@@ -283,19 +72,11 @@ export function useBeileOrders() {
     isFetching,
     refetch,
   } = useQuery({
-    /**
-     * 湖北订单列表查询 key：随筛选/分页变化（乐观更新时复用同一 key）。
-     * 已加入 appliedProduct：产品筛选改为服务端生效（`product`）后，
-     * 关键字变化必须触发重新查询（P-2 / RC-5）。
-     */
-    queryKey: ['beile-orders', appliedCustomer, appliedProduct, confirmStatus, () => page.value, () => perPage.value],
+    /** 湖北订单列表查询 key：随筛选/分页变化（乐观更新时复用同一 key） */
+    queryKey: ['beile-orders', appliedCustomer, confirmStatus, () => page.value, () => perPage.value],
     queryFn: () =>
       orderApi.beileList({
         customer: appliedCustomer.value || undefined,
-        // 产品筛选服务端生效（按 SKU 名/条码）。
-        // ⚠️ 后端 Query 参数名是 `product`（见 endpoints/order.py::list_beile_orders），
-        //    不是 `product_kw` —— 写错会被 FastAPI 静默忽略、等同无筛选（RC-5 失效）。
-        product: appliedProduct.value || undefined,
         confirm_status: confirmStatus.value || undefined,
         page: page.value,
         per_page: perPage.value,
@@ -314,6 +95,9 @@ export function useBeileOrders() {
 
   /** 湖北订单确认流程：未确认订单总数（全局，列表顶部横幅用） */
   const unconfirmedCount = computed(() => ordersData.value?.unconfirmed_count ?? 0)
+
+  /** 搜索产品时是否显示产品名称列：仅当已应用产品关键字筛选时显示 */
+  const showProductColumn = computed(() => appliedProduct.value.trim() !== '')
 
   /**
    * 客户端二次过滤：当前页订单中 product_name/barcode 模糊匹配。
@@ -387,9 +171,9 @@ export function useBeileOrders() {
 
   const queryClient = useQueryClient()
 
-  /** 当前查询 key（乐观更新 setQueryData 复用；须与 useQuery 的 queryKey 完全一致） */
+  /** 当前查询 key（乐观更新 setQueryData 复用） */
   const queryKey = computed(() =>
-    ['beile-orders', appliedCustomer.value, appliedProduct.value, confirmStatus.value, page.value, perPage.value] as const,
+    ['beile-orders', appliedCustomer.value, confirmStatus.value, page.value, perPage.value] as const,
   )
 
   /**
@@ -397,18 +181,9 @@ export function useBeileOrders() {
    * 确认后由后端落库 confirmed_at。在「未确认」筛选下成功后立即
    * 从列表移除该行并递减未确认计数，无需等待定时刷新；
    * 其他筛选下照常 refetch。
-   *
-   * 门控（PRD P0-4 前端侧 / CR-1 收敛）：仅当「**未确认 且 未下单**」时
-   * toast 拦截，不发请求；已确认的历史记录不会触发门控（既无动作也无风险）；
-   * 后端另有 409 兜底（双端拦截）。
    */
   async function handleConfirm(item: BeileOrderRow) {
     if (item.confirmed) return
-    // 门控（CR-1 收敛）：此处 item.confirmed 必为假，仅需判「未下单」
-    if (item.is_ordered === false) {
-      toast.error(NOT_ORDERED_TOAST)
-      return
-    }
     if (confirmingIds.value.has(item.id)) return
     confirmingIds.value.add(item.id)
     try {
@@ -444,18 +219,9 @@ export function useBeileOrders() {
     }
   }
 
-  // ==================== 选中（导出 / 批量打印） ====================
-  /**
-   * 行选中键：record_type + id 复合。订单（Order）与备货（StockIn）来自不同表，
-   * id 可能撞号（后端 handleConfirm 注释同源提示），纯 id 作键会让勾选串扰到
-   * 另一类记录 → 导出/打印多带未勾选的行。
-   */
-  function rowKey(item: Pick<BeileOrderRow, 'id' | 'record_type'>): string {
-    return `${item.record_type ?? 'order'}:${item.id}`
-  }
-
-  /** 选中的行键集合（rowKey 复合键） */
-  const selectedIds = ref<Set<string>>(new Set())
+  // ==================== 选中（批量打印） ====================
+  /** 选中的订单 id 集合 */
+  const selectedIds = ref<Set<number>>(new Set())
   const selectedCount = computed(() => selectedIds.value.size)
 
   /** 当前展示列表是否有数据（导出按钮启用条件） */
@@ -463,22 +229,21 @@ export function useBeileOrders() {
 
   /** 当前页是否全选 */
   const isAllSelected = computed(() =>
-    displayOrders.value.length > 0 && displayOrders.value.every((o) => selectedIds.value.has(rowKey(o))),
+    displayOrders.value.length > 0 && displayOrders.value.every((o) => selectedIds.value.has(o.id)),
   )
 
   /** 切换单行选中（直接 mutate reactive Set，避免 O(n) 拷贝） */
-  function toggleSelect(item: Pick<BeileOrderRow, 'id' | 'record_type'>) {
-    const key = rowKey(item)
-    if (selectedIds.value.has(key)) selectedIds.value.delete(key)
-    else selectedIds.value.add(key)
+  function toggleSelect(id: number) {
+    if (selectedIds.value.has(id)) selectedIds.value.delete(id)
+    else selectedIds.value.add(id)
   }
 
   /** 全选 / 取消全选当前页 */
   function toggleSelectAll(checked: boolean) {
     if (checked) {
-      displayOrders.value.forEach((o) => selectedIds.value.add(rowKey(o)))
+      displayOrders.value.forEach((o) => selectedIds.value.add(o.id))
     } else {
-      displayOrders.value.forEach((o) => selectedIds.value.delete(rowKey(o)))
+      displayOrders.value.forEach((o) => selectedIds.value.delete(o.id))
     }
   }
 
@@ -490,46 +255,60 @@ export function useBeileOrders() {
   const canExport = computed(() => authStore.hasPermission('beile_order_export'))
   const canPrint = computed(() => authStore.hasPermission('beile_order_print'))
 
-  /** 汇总表列头（含产品明细）：订单数量后依次为「生产数量」「小义开单」（页面 = 导出 XLS = 打印预览同源，AC-12）。
-   *  「备品数量」独立列已删除（用户裁决 2026-09-18）：spare_quantity 仅作为生产数量的计算输入，不再单独展示 */
+  /** 汇总表列头（含产品明细） */
   const SUMMARY_HEADERS = [
-    '订单类型', '下单时间', '客户名称', '工厂', '产品名称', '订单数量', '生产数量', '小义开单', '备注',
+    '订单类型', '下单时间', '客户名称', '工厂', '产品名称', '数量', '备注',
   ]
 
-  /** 汇总表各列宽度（px），用于导出 XLS 列宽分配（列数与 SUMMARY_HEADERS 一致） */
-  const SUMMARY_COL_WIDTHS = [90, 120, 130, 80, 220, 90, 90, 90, 180]
+  /** 汇总表各列宽度（px），用于导出 XLS 列宽分配 */
+  const SUMMARY_COL_WIDTHS = [90, 120, 130, 80, 220, 80, 180]
 
-  // 汇总表 tbody 的构建（含逐 SKU 粒度）已提到模块作用域：`buildSummaryTbody(items, keyword)`，
-  // 以便被导出/打印复用，并可被单测直接导入验证（页面 = 导出 = 打印 单一真源，AC-12）。
-
-  /**
-   * 导出范围为「已勾选」的行（BUG 修复：原实现恒导出当前页全部，与用户勾选不一致）：
-   * - 有勾选 → 仅导出勾选的订单/备货（导出文件内容 == 勾选集合）；
-   * - 无勾选 → 导出当前页全部（未表达勾选意图时的兜底，保持既有能力——
-   *   仅导出权限无打印权限的用户看不到复选框，不能被强制要求勾选）。
-   * 返回 (targets, selectedCount)：selectedCount>0 时标题附条数便于核对。
-   */
-  function exportTargets(): { targets: BeileOrderRow[]; selectedCount: number } {
-    if (selectedCount.value > 0) {
-      const targets = displayOrders.value.filter((o) => selectedIds.value.has(rowKey(o)))
-      return { targets, selectedCount: targets.length }
-    }
-    return { targets: displayOrders.value, selectedCount: 0 }
+  /** HTML 特殊字符转义 */
+  function escapeHtml(str: string): string {
+    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
   }
 
-  /** 导出为 XLS：有勾选仅导勾选行，无勾选导出当前页 */
-  function handleExport() {
-    const { targets, selectedCount: picked } = exportTargets()
-    if (targets.length === 0) {
-      // 勾选已全部失效（如确认流程移除了勾选行）或列表被并发清空——不产生空文件
-      toast.warning(picked > 0 ? '勾选的订单已不在当前列表，请重新勾选' : '当前页暂无数据可导出')
-      return
+  /**
+   * 构建汇总表 tbody HTML。
+   * 同一订单的订单类型/下单时间/客户名称/工厂列用 rowspan 合并单元格，
+   * 产品名称/数量/备注每行独立输出。
+   */
+  function buildSummaryTbody(items: BeileOrderRow[]): string {
+    let html = ''
+    for (const item of items) {
+      const type = item.record_type === 'stockin' ? '备货' : '订单'
+      const factory = (item.factories || ['湖北']).join(', ')
+      const orderCells = [type, item.order_date || '', item.customer || '', factory]
+      const note = item.note || ''
+
+      const skus = (item.items && item.items.length > 0)
+        ? item.items
+        : [{ product_name: item.product_name, quantity: item.quantity }]
+
+      const rowspan = skus.length
+      skus.forEach((sku, idx) => {
+        const cells: string[] = []
+        if (idx === 0) {
+          for (const c of orderCells) {
+            cells.push(`<td${rowspan > 1 ? ` rowspan="${rowspan}"` : ''}>${escapeHtml(c)}</td>`)
+          }
+        }
+        cells.push(`<td>${escapeHtml(sku.product_name || '-')}</td>`)
+        cells.push(`<td>${escapeHtml(String(sku.quantity || 0))}</td>`)
+        cells.push(`<td>${idx === 0 ? escapeHtml(note) : ''}</td>`)
+        html += `<tr>${cells.join('')}</tr>`
+      })
     }
+    return html
+  }
+
+  /** 导出当前页数据为 XLS */
+  function handleExport() {
     runExport(() => {
       const thead = `<tr>${SUMMARY_HEADERS.map((h, i) => `<th style="width:${SUMMARY_COL_WIDTHS[i]}px">${h}</th>`).join('')}</tr>`
-      const tbody = buildSummaryTbody(targets, appliedProduct.value)
+      const tbody = buildSummaryTbody(displayOrders.value)
       const statusLabel = confirmStatus.value === 'unconfirmed' ? '未确认' : '已确认'
-      const title = `湖北订单汇总（${statusLabel}${picked > 0 ? `·已选 ${picked} 条` : ''}）`
+      const title = `湖北订单汇总（${statusLabel}）`
       const html = `<div style="text-align:center;margin-bottom:20px;"><h2>${title}</h2></div><table><thead>${thead}</thead><tbody>${tbody}</tbody></table>`
       const date = new Date().toISOString().slice(0, 10)
       downloadXls(html, `湖北订单_${statusLabel}_${date}.xls`)
@@ -538,13 +317,13 @@ export function useBeileOrders() {
 
   /** 批量打印选中订单汇总表 */
   function handlePrint() {
-    const targets = displayOrders.value.filter((o) => selectedIds.value.has(rowKey(o)))
+    const targets = displayOrders.value.filter((o) => selectedIds.value.has(o.id))
     if (targets.length === 0) {
       toast.warning('请先勾选要打印的订单')
       return
     }
     const thead = `<tr>${SUMMARY_HEADERS.map((h) => `<th>${escapeHtml(h)}</th>`).join('')}</tr>`
-    const tbody = buildSummaryTbody(targets, appliedProduct.value)
+    const tbody = buildSummaryTbody(targets)
     const printStyle = `
       body { font-family: SimSun, 宋体; padding: 20px; }
       table { width: 100%; border-collapse: collapse; }
@@ -559,44 +338,6 @@ export function useBeileOrders() {
   // 已确认的客户筛选变化时回到首页
   watch(() => appliedCustomer.value, () => {
     page.value = 1
-  })
-
-  // 产品筛选（含键入自动应用 / 下拉选择）变化时回到首页：
-  // 原实现仅客户筛选回首页，翻到后页再筛选会停在空页（显示「未匹配」）
-  watch(appliedProduct, () => {
-    page.value = 1
-  })
-
-  /**
-   * 自由键入自动应用（BUG-1 修复）：
-   * /beile-order 页搜索框无查询按钮（HubeiView :show-actions="false"），
-   * appliedProduct 仅在「点击下拉建议项」时更新；用户直接键入关键字
-   * （如「变形金刚」）后未点建议 → 列表完全不过滤 → 出现大量不相关结果。
-   * 停顿 600ms 自动把输入文本确认为筛选值（服务端 product 过滤 + 客户端
-   * displayOrders 二次过滤同键生效）；清空输入由 HubeiSearchBar 的 reset
-   * 事件走 handleReset，此处兜底同步复位 appliedProduct。
-   * 600ms > 下拉搜索防抖 500ms，快速连续键入不会逐键触发查询抖动。
-   */
-  let applyKwTimer: ReturnType<typeof setTimeout> | null = null
-  watch(() => filters.orderNo, (val) => {
-    if (applyKwTimer) {
-      clearTimeout(applyKwTimer)
-      applyKwTimer = null
-    }
-    const v = val.trim()
-    if (!v) {
-      if (appliedProduct.value) appliedProduct.value = ''
-      return
-    }
-    if (v === appliedProduct.value.trim()) return
-    applyKwTimer = setTimeout(() => {
-      applyKwTimer = null
-      appliedProduct.value = v
-    }, 600)
-  })
-
-  onUnmounted(() => {
-    if (applyKwTimer) clearTimeout(applyKwTimer)
   })
 
   // 每页条数变化时回到第一页
@@ -625,6 +366,7 @@ export function useBeileOrders() {
     refetch,
     orders,
     unconfirmedCount,
+    showProductColumn,
     displayOrders,
     highlightId,
     applyProductFilter,
@@ -639,7 +381,6 @@ export function useBeileOrders() {
     confirmingIds,
     handleConfirm,
     // 选中
-    rowKey,
     selectedIds,
     selectedCount,
     hasDisplayOrders,

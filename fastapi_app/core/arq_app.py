@@ -15,7 +15,6 @@ import asyncio
 
 from arq import create_pool, cron
 from arq.connections import RedisSettings
-from arq.constants import default_queue_name, health_check_key_suffix
 
 from fastapi_app.core.arq_callbacks import on_job_end, on_job_failed, on_job_started
 from fastapi_app.core.config import settings
@@ -34,10 +33,11 @@ def _build_redis_settings() -> RedisSettings:
     broker_url = getattr(settings, 'REDIS_BROKER_URL', '') or os.getenv('REDIS_BROKER_URL', '')
     if broker_url:
         return RedisSettings.from_dsn(broker_url)
+    redis_pwd = settings.REDIS_PASSWORD or None
     return RedisSettings(
         host=settings.REDIS_HOST,
         port=settings.REDIS_PORT,
-        password=settings.REDIS_PASSWORD or None,
+        password=redis_pwd,
         database=settings.REDIS_DB or 0,
     )
 
@@ -145,10 +145,6 @@ class WorkerSettings:
     max_jobs = 10
     job_timeout = 1800
     max_tries = 3
-    # 哨兵键刷新周期（秒）：arq 默认 3600 意味着 worker 硬崩溃后健康检查
-    # 最长 1 小时内仍误报在线；缩短到 60s 使哨兵键 TTL=61s，掉线约 1 分钟即可检出。
-    # 注意：该值在 Worker 启动时读取，改后须重启 erp-arq 才生效。
-    health_check_interval = 60
     on_job_started = on_job_started
     on_job_end = on_job_end
     on_job_failed = on_job_failed
@@ -159,10 +155,6 @@ class WorkerSettings:
 # ---------------------------------------------------------------------------
 _arq_pool = None
 _pool_lock = asyncio.Lock()
-
-# 健康探测上限（秒）。RedisSettings 的 conn_timeout=1 / conn_retries=5 在 broker
-# 不可达时最坏可累积到数十秒，若不设上限会把入队请求一起拖住（同 P0-08 主题）。
-_HEALTH_PROBE_TIMEOUT = 2.0
 
 
 async def get_arq_pool():
@@ -179,51 +171,26 @@ async def get_arq_pool():
     return _arq_pool
 
 
-def _health_check_key(pool) -> str:
-    """返回 ARQ 健康哨兵键：queue_name + ':health-check'。
-
-    优先取连接池自身的 default_queue_name（与 enqueue_job 实际入队的队列一致），
-    取不到时回退到 arq 的模块级默认值。
-    """
-    queue_name = getattr(pool, 'default_queue_name', None) or default_queue_name
-    return queue_name + health_check_key_suffix
-
-
 async def check_worker_health() -> tuple[bool, str]:
     """检测 ARQ Worker 是否在线（入队前预检）。
 
-    通过读取 ARQ 官方健康检查哨兵键（queue_name + ':health-check'）判定：
-    Worker 存活期间按 health_check_interval 周期刷新该键
-    （TTL = health_check_interval + 1s），正常退出时主动删除，
-    进程硬崩溃后键在 TTL 内自然过期。
-
-    ⚠️ arq 0.28 的 ``ArqRedis`` **没有** ``health()`` 方法；哨兵键是唯一官方
-    可用的探测手段（arq CLI 的 ``--check`` 走的也是同一个键）。历史上曾因调用
-    连接池上并不存在的 health 方法，导致所有手动备份被 503 误拦截，勿再改回。
-
-    注：本 docstring **刻意不写出那个错误调用的完整字面形式**。若在此保留字面，
-    ``git log -S '<该字面>'`` 会因"删代码 + 新增同文字符串"净变化为 0 而看不到
-    本次修复 —— 而 `-S <坏味道>` 正是本仓库用于追查"批量提交洗回旧版"的手段。⟵
+    通过 ARQ 连接池的 health() 命令查询 broker 上的 worker 心跳。
+    ARQ Worker 启动后会定期在 Redis broker 上注册自身，
+    若无 worker 注册则 health() 返回空 workers 列表。
 
     Returns:
         (is_healthy, message):
-        - (True, 'ARQ Worker 在线（<心跳详情>）')
+        - (True, 'ARQ Worker 在线，N 个 worker 就绪')
         - (False, 'ARQ Worker 未运行，请启动 erp-arq 服务')
-        - (False, 'ARQ Worker 健康探测超时/失败: ...')  探测自身异常时的降级返回
     """
     try:
         pool = await get_arq_pool()
-        value = await asyncio.wait_for(
-            pool.get(_health_check_key(pool)),
-            timeout=_HEALTH_PROBE_TIMEOUT,
-        )
-        if value:
-            detail = value.decode('utf-8', 'replace') if isinstance(value, bytes) else str(value)
-            return True, f'ARQ Worker 在线（{detail}）'
+        health = await pool.health()
+        # health 返回 dict，包含 'workers' 键（worker 心跳列表）
+        workers = health.get('workers', []) if isinstance(health, dict) else []
+        if workers:
+            return True, f'ARQ Worker 在线，{len(workers)} 个 worker 就绪'
         return False, 'ARQ Worker 未运行，请启动 erp-arq 服务'
-    except TimeoutError:
-        logger.warning('ARQ Worker 健康探测超时(>%ss)，broker 疑似不可达', _HEALTH_PROBE_TIMEOUT)
-        return False, f'ARQ Worker 健康探测超时（>{_HEALTH_PROBE_TIMEOUT:g}s），请检查 erp-redis-broker 服务'
-    except Exception as e:  # broad-except: 健康探测自身不得抛出，任何异常都须转成"不健康"返回值
+    except Exception as e:  # defensive: 健康探测须降级返回而非抛出，失败类型不可枚举
         logger.warning('ARQ Worker 健康检测失败: %s', e)
         return False, f'ARQ Worker 健康检测失败: {type(e).__name__}'

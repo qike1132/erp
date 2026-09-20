@@ -56,6 +56,10 @@ from fastapi_app.shared_models.outsource import (
     OrderOutsourceProcess,
     OrderOutsourceProcessFlow,
     OutsourceProcessType,
+    OutsourceShipment,
+    OutsourceShipmentItem,
+    SHIPMENT_STATUS_RECEIVED,
+    SHIPMENT_STATUS_SHIPPED,
 )
 from fastapi_app.shared_models.packaging_record import PackagingRecord
 from fastapi_app.shared_models.pattern_maker import PatternMaker
@@ -130,6 +134,10 @@ __all__ = [
     'OrderSyncConfig',
     'OrderSyncRecord',
     'OutsourceProcessType',
+    'OutsourceShipment',
+    'OutsourceShipmentItem',
+    'SHIPMENT_STATUS_RECEIVED',
+    'SHIPMENT_STATUS_SHIPPED',
     'PackagingRecord',
     'PatternMaker',
     'Permission',

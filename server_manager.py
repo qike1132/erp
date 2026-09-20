@@ -1810,8 +1810,11 @@ class ServerManagerApp:
             self._process = subprocess.Popen(
                 # dev 后端仅绑回环（本机即生产机，0.0.0.0 会让局域网绕过 nginx 直连）；
                 # 确需局域网调试时改回 '0.0.0.0' 并重新打包
+                # --reload-dir 必须是绝对路径：相对路径在 GUI 进程 cwd ≠ 仓库根时
+                # watchfiles 监控目录解析失败 → 代码改动永不触发热重载（2026-09-19 实证）
                 ['python', '-u', '-m', 'uvicorn', 'fastapi_app.main:app', '--host', '127.0.0.1',
-                 '--port', str(_PORTS.api), '--log-level', 'info', '--reload', '--reload-dir', 'fastapi_app'],
+                 '--port', str(_PORTS.api), '--log-level', 'info', '--reload',
+                 '--reload-dir', str(_PROJECT_DIR / 'fastapi_app')],
                 executable=_PYTHON_EXE, cwd=str(_PROJECT_DIR), env=env, stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT, creationflags=_NO_WINDOW if _IS_WINDOWS else 0, text=False)
             self._msg_queue.put(('log', {'text': f'后端进程已启动 (PID: {self._process.pid})'}))

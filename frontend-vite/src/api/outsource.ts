@@ -76,9 +76,108 @@ export interface ProcessFlowListResponse {
   total: number
 }
 
+/** 湖北工厂 SKU 搜索建议项（工序预设页搜索框数据源） */
+export interface HubeiProductSearchItem {
+  id: number
+  name: string
+  barcode?: string | null
+  factory?: string | null
+}
+
+/** 未到货（未发完）工序明细：未到数量 = 订单数量 - 已发数量 */
+export interface UnshippedProcessItem {
+  order_id: number
+  order_no: string
+  customer: string
+  order_date?: string | null
+  product_name?: string | null
+  product_barcode?: string | null
+  process_type: string
+  target_qty: number
+  shipped_qty: number
+  remaining: number
+}
+
+/** 待发货工序（批量发货面板数据源） */
+export interface ShippableProcessItem {
+  process_id: number
+  order_id: number
+  order_no: string
+  customer: string
+  product_name?: string | null
+  process_type: string
+  target_qty: number
+  shipped_qty: number
+  remaining: number
+}
+
+/** 发货单明细行（SKU + 工序 + 发货/收货数量） */
+export interface ShipmentItem {
+  id: number
+  process_id?: number | null
+  product_id?: number | null
+  product_name?: string | null
+  process_type: string
+  /** 订单要求的该工序总数量（工序已删除时为空） */
+  order_qty?: number | null
+  shipped_quantity: number
+  received_quantity: number
+}
+
+/** 发货单（一键发货生成，贝乐用户端「待收货」订单） */
+export interface Shipment {
+  id: number
+  shipment_no: string
+  order_id?: number | null
+  customer?: string | null
+  status: 'shipped' | 'received'
+  shipped_at?: string | null
+  received_at?: string | null
+  shipped_by?: string | null
+  received_by?: string | null
+  remark?: string | null
+  create_time?: string | null
+  item_count: number
+  total_shipped: number
+  items?: ShipmentItem[]
+}
+
+export interface ShipmentListResponse {
+  success: boolean
+  data: Shipment[]
+  total: number
+  page: number
+  per_page: number
+  shipped_count: number
+  received_count: number
+}
+
+export interface ShipmentReceiveResponse {
+  success: boolean
+  message: string
+  already_received: boolean
+}
+
+/** 批量发货：单个订单的发货明细 */
+export interface ShipmentBatchOrder {
+  order_id: number
+  items: { process_id: number; quantity: number }[]
+}
+
+export interface ShipmentBatchResponse {
+  success: boolean
+  data: Shipment[]
+  total: number
+  message: string
+}
+
 export const outsourceApi = {
   /** 湖北工厂订单列表（强制 factory=湖北，含备货） */
   orders: (params?: QueryParams) => get<OrderListApiResponse>('/outsource/orders', params),
+  /** 搜索工厂=湖北 的 SKU（工序预设页搜索框数据源） */
+  productSearch: (q: string) => get<HubeiProductSearchItem[]>('/outsource/products/search', { q }),
+  /** 跨全部湖北订单聚合未发完工序明细（导出/打印未到货清单） */
+  unshipped: () => get<UnshippedProcessItem[]>('/outsource/unshipped'),
   /** SKU 工序预设 */
   processTypes: (params?: QueryParams) => get<ProcessTypeListResponse>('/outsource/process-types', params),
   /** 为一个 SKU 批量添加多个工序预设（自由输入工序名称） */
@@ -92,7 +191,25 @@ export const outsourceApi = {
   /** 批量发货（单事务原子）：一次请求完成多道工序发货，任一条失败整批回滚 */
   shipProcessesBatch: (orderId: number, items: { process_id: number; quantity: number }[]) =>
     post<OrderProcessListResponse>(`/outsource/orders/${orderId}/processes/ship-batch`, { items }),
+  /** 跨全部湖北订单聚合待发货工序（批量发货面板数据源） */
+  shippable: () => get<ShippableProcessItem[]>('/outsource/processes/shippable'),
+  /** 跨订单批量发货（单事务原子） */
+  shipMulti: (items: { process_id: number; quantity: number }[]) =>
+    post<OrderProcessListResponse>('/outsource/processes/ship-multi', { items }),
   /** 批量收货（单事务原子）：quantity 缺省时后端按剩余待收数量收货 */
   receiveProcessesBatch: (orderId: number, items: { process_id: number; quantity?: number }[]) =>
-    post<OrderProcessListResponse>(`/outsource/orders/${orderId}/processes/receive-batch`, { items })
+    post<OrderProcessListResponse>(`/outsource/orders/${orderId}/processes/receive-batch`, { items }),
+  /** 发货单列表（待收货/已完成筛选 + 计数横幅） */
+  shipments: (params?: { status?: string; page?: number; per_page?: number }) =>
+    get<ShipmentListResponse>('/outsource/shipments', params),
+  /** 一键发货：按订单生成发货单并逐工序发货 */
+  createShipment: (orderId: number, items: { process_id: number; quantity: number }[]) =>
+    post<Shipment>('/outsource/shipments', { order_id: orderId, items }),
+  /** 批量发货（多订单一次性）：每订单生成一张发货单，单事务原子 */
+  createShipmentsBatch: (orders: ShipmentBatchOrder[]) =>
+    post<ShipmentBatchResponse>('/outsource/shipments/batch', { orders }),
+  /** 发货单明细 */
+  shipmentDetail: (id: number) => get<Shipment>(`/outsource/shipments/${id}`),
+  /** 确认收货（贝乐账号） */
+  receiveShipment: (id: number) => post<ShipmentReceiveResponse>(`/outsource/shipments/${id}/receive`)
 }

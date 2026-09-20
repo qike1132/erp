@@ -4,7 +4,7 @@
 """
 import logging
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
@@ -179,13 +179,37 @@ async def update_process_type(db: AsyncSession, pt_id: int, data: dict) -> dict:
     product = await db.get(Product, pt.product_id)
     return _serialize_process_type(pt, product)
 
-async def delete_process_type(db: AsyncSession, pt_id: int) -> None:
-    """删除 SKU 工序预设。"""
+async def delete_process_type(db: AsyncSession, pt_id: int) -> int:
+    """删除 SKU 工序预设，返回其 product_id（供调用方同步订单实例）。"""
     pt = await db.get(OutsourceProcessType, pt_id)
     if not pt:
         raise ValueError('工序预设不存在')
+    product_id = pt.product_id
     await db.delete(pt)
     await db.flush()
+    return product_id
+
+async def search_hubei_products(
+    db: AsyncSession, q: str, limit: int = 20,
+) -> list[dict]:
+    """搜索工厂=湖北 的 SKU（工序预设页搜索框数据源）。
+
+    按名称/条码模糊匹配；只返回 factory == '湖北' 的产品，
+    使 /product 中标记为湖北的 SKU 自动成为 presets 搜索框的候选。
+    """
+    stmt = select(Product.id, Product.name, Product.barcode, Product.factory).where(
+        Product.factory == '湖北'
+    )
+    if q and q.strip():
+        kw = f'%{escape_like(q.strip())}%'
+        stmt = stmt.where(or_(Product.name.like(kw), Product.barcode.like(kw)))
+    stmt = stmt.order_by(Product.name, Product.id).limit(limit)
+    rows = (await db.execute(stmt)).all()
+    return [
+        {'id': row.id, 'name': row.name, 'barcode': row.barcode, 'factory': row.factory}
+        for row in rows
+    ]
+
 
 async def get_presets_for_products(db: AsyncSession, product_ids: list[int]) -> dict[int, list[OutsourceProcessType]]:
     """批量加载多个产品的启用工序预设，按产品分组并按 sort_order 排序。"""

@@ -4,7 +4,7 @@
 """
 import logging
 
-from sqlalchemy import select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.services.outsource._common import (
@@ -18,6 +18,8 @@ from fastapi_app.shared_models import (
     OrderItem,
     OrderOutsourceProcess,
     OrderOutsourceProcessFlow,
+    OutsourceProcessType,
+    Product,
 )
 
 logger = logging.getLogger(__name__)
@@ -163,4 +165,132 @@ async def list_order_flows(db: AsyncSession, order_id: int) -> list[dict]:
             'create_time': _fmt_dt(flow.create_time),
         }
         for flow, process_type in result.all()
+    ]
+
+
+async def list_unshipped_processes(db: AsyncSession) -> list[dict]:
+    """跨全部湖北订单聚合「未发完」工序明细（导出/打印未到货清单）。
+
+    口径（用户裁决）：未到数量 = 订单数量 - 已发数量，仅保留 > 0 的工序。
+
+    **工序来源为 SKU 预设**（outsource_process_type，is_active）——即用户为每个 SKU
+    配置的应做工序，而非下单时生成、之后不再随预设更新的订单工序实例快照。这样
+    预设变更（增删工序）后导出/打印即时生效，与每个 SKU 的预设完全一致。
+
+    已发数量左连接订单工序实例（按 order_id + order_item_id + process_type 精确匹配）；
+    无对应实例的预设工序视为未发（已发数量 0）。
+    排除软删除订单（与 beile-list 一致）；下单时间按北京时间展示（与列表同口径）。
+    """
+    from fastapi_app.services.order.beile import _fmt_beile_time
+
+    shipped_qty = func.coalesce(OrderOutsourceProcess.shipped_quantity, 0)
+    stmt = (
+        select(
+            Order.id.label('order_id'),
+            Order.order_no,
+            Order.customer,
+            Order.order_date,
+            Product.name.label('product_name'),
+            Product.barcode.label('product_barcode'),
+            OutsourceProcessType.process_type,
+            OrderItem.quantity.label('target_qty'),
+            shipped_qty.label('shipped_qty'),
+        )
+        .select_from(OrderItem)
+        .join(Order, Order.id == OrderItem.order_id)
+        .join(Product, Product.id == OrderItem.product_id)
+        .join(
+            OutsourceProcessType,
+            and_(
+                OutsourceProcessType.product_id == OrderItem.product_id,
+                OutsourceProcessType.is_active.is_(True),
+            ),
+        )
+        .outerjoin(
+            OrderOutsourceProcess,
+            and_(
+                OrderOutsourceProcess.order_id == OrderItem.order_id,
+                OrderOutsourceProcess.order_item_id == OrderItem.id,
+                OrderOutsourceProcess.process_type == OutsourceProcessType.process_type,
+            ),
+        )
+        .where(
+            Order.is_deleted.isnot(True),
+            Product.factory == '湖北',
+            OrderItem.quantity > shipped_qty,
+        )
+        .order_by(
+            Order.order_date,
+            Order.id,
+            OrderItem.id,
+            OutsourceProcessType.sort_order,
+            OutsourceProcessType.id,
+        )
+    )
+    rows = (await db.execute(stmt)).all()
+    return [
+        {
+            'order_id': row.order_id,
+            'order_no': row.order_no,
+            'customer': row.customer,
+            'order_date': _fmt_beile_time(row.order_date),
+            'product_name': row.product_name,
+            'product_barcode': row.product_barcode,
+            'process_type': row.process_type,
+            'target_qty': int(row.target_qty or 0),
+            'shipped_qty': int(row.shipped_qty or 0),
+            'remaining': int((row.target_qty or 0) - (row.shipped_qty or 0)),
+        }
+        for row in rows
+    ]
+
+
+async def list_shippable_processes(db: AsyncSession) -> list[dict]:
+    """跨全部湖北订单聚合「待发货」工序实例（批量发货面板数据源）。
+
+    待发货 = 已发 < 目标 且 未收货（received 为空/0）。返回 process_id 供批量发货定位实例。
+    目标数量优先 SKU 明细（order_item.quantity），单 SKU 旧订单回退订单数量。
+    """
+    target_qty = func.coalesce(OrderItem.quantity, Order.quantity)
+    shipped_qty = func.coalesce(OrderOutsourceProcess.shipped_quantity, 0)
+    received_qty = func.coalesce(OrderOutsourceProcess.received_quantity, 0)
+    stmt = (
+        select(
+            OrderOutsourceProcess.id.label('process_id'),
+            Order.id.label('order_id'),
+            Order.order_no,
+            Order.customer,
+            OrderOutsourceProcess.product_name,
+            OrderOutsourceProcess.process_type,
+            target_qty.label('target_qty'),
+            shipped_qty.label('shipped_qty'),
+        )
+        .join(Order, Order.id == OrderOutsourceProcess.order_id)
+        .outerjoin(OrderItem, OrderItem.id == OrderOutsourceProcess.order_item_id)
+        .where(
+            Order.is_deleted.isnot(True),
+            received_qty == 0,
+            shipped_qty < target_qty,
+        )
+        .order_by(
+            Order.order_date,
+            Order.id,
+            OrderOutsourceProcess.order_item_id,
+            OrderOutsourceProcess.sort_order,
+        )
+    )
+    rows = (await db.execute(stmt)).all()
+    return [
+        {
+            'process_id': row.process_id,
+            'order_id': row.order_id,
+            'order_no': row.order_no,
+            'customer': row.customer,
+            'product_name': row.product_name,
+            'process_type': row.process_type,
+            'target_qty': int(row.target_qty or 0),
+            'shipped_qty': int(row.shipped_qty or 0),
+            'remaining': int((row.target_qty or 0) - (row.shipped_qty or 0)),
+        }
+        for row in rows
     ]

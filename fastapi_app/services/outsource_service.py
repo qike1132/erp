@@ -23,9 +23,11 @@ from fastapi_app.services.outsource._order_processes import (  # noqa: F401
     sync_outsource_processes_for_order,
     auto_generate_for_order,
     generate_order_processes,
+    sync_orders_for_product,
     update_order_process,
     ship_order_process,
     ship_order_processes_batch,
+    ship_processes_multi,
     receive_order_process,
     receive_order_processes_batch,
     delete_order_process,
@@ -37,10 +39,20 @@ from fastapi_app.services.outsource._process_types import (  # noqa: F401
     update_process_type,
     delete_process_type,
     get_presets_for_products,
+    search_hubei_products,
 )
 from fastapi_app.services.outsource._queries import (  # noqa: F401
     _process_target_quantity,
     list_outsource_orders,
     list_order_processes,
     list_order_flows,
+    list_unshipped_processes,
+    list_shippable_processes,
+)
+from fastapi_app.services.outsource._shipments import (  # noqa: F401
+    create_shipment,
+    create_shipments_batch,
+    get_shipment,
+    list_shipments,
+    receive_shipment,
 )

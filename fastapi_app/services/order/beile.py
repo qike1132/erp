@@ -292,6 +292,7 @@ def _inject_per_sku_fields(record: dict, sku_rows: list) -> None:
 
 def _apply_ordered_fields(
     record: dict, pos: list, sku_rows: list | None = None, pos_exact: bool = True,
+    search_qty_items: list[dict] | None = None,
 ) -> dict:
     """把「是否已下单 / 下单数量 / 备品」注入 beile 行，并逐 SKU 展开（方案 C）。
 
@@ -308,6 +309,12 @@ def _apply_ordered_fields(
       ``MAX(product_quantity)`` 当成该备货自己的数量（编造数字），
       ``purchase_order_qty`` / ``spare_quantity`` 一律置 ``None``。
       ``spare_rate`` 仍取模糊命中的 max，**仅作展示提示**（不代表该备货的准确损耗率）。
+    - ``search_qty_items is not None``（**搜索态**，product_kw 命中、items 已收窄为
+      命中 SKU 集合）：数量只统计**命中的 SKU**，绝不允许落到全单口径——
+      已下单有逐 SKU 快照（caller 已预过滤为命中集合）→ rollup；
+      无快照 → 置 ``None``（不把全单 ``MAX(product_quantity)`` 编造成命中集合的
+      数量，D-R2-1 同源；前端回退命中 items 求和 / 生产数量显示「—」）；
+      未下单 → 命中 items 的客户订单量之和。
 
     任何分支都不得抛错。
     """
@@ -325,6 +332,15 @@ def _apply_ordered_fields(
             # 模糊来源不得产出数量（见 docstring 契约）——仅保留 is_ordered 信号
             record['purchase_order_qty'] = None
             record['spare_quantity'] = None
+        elif search_qty_items is not None:
+            # 搜索态：只统计命中 SKU 集合（sku_rows 已被 caller 预过滤为命中集合）
+            if sku_rows:
+                total_qty, total_spare = _rollup_sku_rows(sku_rows)
+                record['purchase_order_qty'] = total_qty
+                record['spare_quantity'] = total_spare
+            else:
+                record['purchase_order_qty'] = None
+                record['spare_quantity'] = None
         elif rollup_ok:
             total_qty, total_spare = _rollup_sku_rows(sku_rows)
             record['purchase_order_qty'] = total_qty
@@ -333,7 +349,10 @@ def _apply_ordered_fields(
             record['purchase_order_qty'] = max((float(p.product_quantity or 0) for p in pos), default=0)
             record['spare_quantity'] = max((float(p.spare_quantity or 0) for p in pos), default=0)
     else:
-        record['purchase_order_qty'] = record.get('quantity') or 0
+        record['purchase_order_qty'] = (
+            sum(float(it.get('quantity') or 0) for it in search_qty_items)
+            if search_qty_items is not None else (record.get('quantity') or 0)
+        )
         record['spare_quantity'] = 0
         record['spare_rate'] = None
         record['is_ordered'] = False
@@ -474,6 +493,7 @@ async def get_beile_orders_with_stockins(
             if o:
                 items.append(_build_beile_order_record(
                     o, factory, by_order_id.get(o.id, []), sku_by_source.get(('order', o.id), []),
+                    product_kw=product_kw,
                 ))
         else:
             s = stockins_map.get(r.source_id)
@@ -505,12 +525,33 @@ async def get_beile_orders_with_stockins(
             'unconfirmed_count': unconfirmed_count}
 
 
-def _build_beile_order_record(order: Order, factory: str, pos: list, sku_rows: list | None = None) -> dict:
+def _build_beile_order_record(
+    order: Order, factory: str, pos: list, sku_rows: list | None = None,
+    product_kw: str | None = None,
+) -> dict:
     """构建湖北订单列表中的订单记录（含多 SKU）。
 
     `pos` 为该客户订单关联的 completed 采购单行集合（source_order_ids 精确匹配）。
     `sku_rows` 为该订单的逐 SKU 快照行（方案 C；缺省时降级为订单级口径）。
+
+    ``product_kw``（搜索态，SKU 级搜索语义）：SQL 侧「任一 SKU 命中即整单返回」，
+    此处在行构建时把 ``items`` 收窄为**命中的 SKU**，并同步预过滤 ``sku_rows``，
+    使订单级数量（purchase_order_qty / spare_quantity / items 求和回退）都只统计
+    命中集合——列表的「订单数量 / 生产数量」即「搜索到的 SKU 的数量」，
+    不再显示整个订单的总数量。产品名称列直接读收窄后的 items。
     """
+    matched_items: list[OrderItem] | None = None
+    kwl = (product_kw or '').strip().casefold()
+    if kwl:
+        cand = [
+            it for it in (order.items or [])
+            if kwl in _norm_name(it.product_name) or kwl in _norm_name(it.product_barcode)
+        ]
+        # 防御：SQL 已保证整单至少一个 SKU 命中；Python 侧因转义/时序差异过滤为空时
+        # 回退全量，绝不出「空 items 订单」（空单会把合计行清零）
+        matched_items = cand if cand else list(order.items or [])
+    source_items = matched_items if matched_items is not None else (order.items or [])
+
     items_data = [
         {
             'id': item.id,
@@ -524,9 +565,9 @@ def _build_beile_order_record(order: Order, factory: str, pos: list, sku_rows: l
             'deduct_quantity': item.deduct_quantity or 0,
             'note': item.note or '',
         }
-        for item in (order.items or [])
+        for item in source_items
     ]
-    first_item = order.items[0] if order.items else None
+    first_item = source_items[0] if source_items else None
     record = {
         'id': order.id,
         'order_no': order.order_no,
@@ -543,6 +584,11 @@ def _build_beile_order_record(order: Order, factory: str, pos: list, sku_rows: l
         'confirmed_at': _fmt_beile_time(order.confirmed_at),
         'confirmed_by': order.confirmed_by.username if order.confirmed_by else None,
     }
+    if matched_items is not None:
+        # 搜索态：逐 SKU 快照同步收窄为命中集合，数量口径随之只统计命中 SKU
+        matched_names = {_norm_name(i.product_name) for i in matched_items}
+        sku_rows = [r for r in (sku_rows or []) if _norm_name(r.product_name) in matched_names]
+        return _apply_ordered_fields(record, pos, sku_rows, search_qty_items=items_data)
     return _apply_ordered_fields(record, pos, sku_rows)
 
 

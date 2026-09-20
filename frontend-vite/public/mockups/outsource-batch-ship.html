@@ -1,0 +1,804 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>批量发货 · 交互重设计方案（效果图）</title>
+<style>
+:root{
+  --primary:#2563eb; --primary-700:#1d4ed8;
+  --primary-50:#eff6ff; --primary-100:#dbeafe; --primary-200:#bfdbfe; --primary-300:#93c5fd;
+  --text:#1e293b; --text-2:#475569; --text-3:#64748b; --text-4:#94a3b8;
+  --border:#e2e8f0; --border-2:#eef2f7;
+  --surface:#f8fafc;
+  --success:#16a34a; --success-bg:#f0fdf4; --success-border:#bbf7d0;
+  --warn:#d97706; --warn-600:#d97706; --warn-bg:#fffbeb; --warn-border:#fde68a;
+  --danger:#dc2626; --danger-bg:#fef2f2; --danger-border:#fecaca;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --shadow-card: 0 1px 3px rgba(15,23,42,.05), 0 6px 20px rgba(15,23,42,.06);
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  font-family:"Microsoft YaHei","Segoe UI",system-ui,-apple-system,sans-serif;
+  background:linear-gradient(180deg,#f8fafc,#eef2f7 60%);
+  color:var(--text); font-size:14px; line-height:1.5;
+  padding:28px 16px 80px;
+}
+.wrap{max-width:1140px;margin:0 auto}
+
+/* ===== 页面头 ===== */
+.page-head h1{font-size:22px;font-weight:800;margin:0 0 6px;letter-spacing:.01em}
+.page-head .sub{color:var(--text-3);font-size:13px;margin:0 0 20px}
+.page-head .sub code{background:#eef2f7;border-radius:5px;padding:1px 6px;font-family:var(--mono);font-size:12px;color:var(--text-2)}
+
+/* ===== 设计说明 ===== */
+.notes{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px;margin-bottom:26px}
+.note{
+  background:#fff;border:1px solid var(--border);border-radius:14px;padding:14px 16px;
+  box-shadow:var(--shadow-card); position:relative;
+}
+.note .n-no{
+  display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:999px;
+  background:var(--primary-50);color:var(--primary);font-weight:800;font-size:12px;
+  border:1px solid var(--primary-200); margin-bottom:8px;
+}
+.note h3{margin:0 0 4px;font-size:13.5px;font-weight:700}
+.note p{margin:0;font-size:12.5px;color:var(--text-3);line-height:1.6}
+.note em{font-style:normal;color:var(--primary);font-weight:700}
+
+.section-title{display:flex;align-items:center;gap:10px;margin:30px 0 12px;font-size:15px;font-weight:800}
+.section-title .t-chip{font-size:11.5px;font-weight:600;color:var(--text-3);background:#fff;border:1px solid var(--border);border-radius:999px;padding:2px 10px}
+.section-title .hint{font-size:12px;font-weight:400;color:var(--text-4)}
+
+/* ===== 桌面端舞台（页面上下文 + 遮罩 + 弹窗） ===== */
+.stage{
+  position:relative; width:1060px; height:700px; margin:0 auto;
+  background:#eef2f7; border-radius:16px; overflow:hidden;
+  box-shadow:0 12px 44px rgba(15,23,42,.14);
+}
+.page-bg{position:absolute;inset:0;padding:18px 22px;opacity:.5;pointer-events:none}
+.pb-top{display:flex;align-items:center;gap:10px}
+.pb-tabs{display:inline-flex;background:#fff;border:1px solid var(--border);border-radius:10px;padding:3px;gap:3px}
+.pb-tab{font-size:12px;padding:5px 12px;border-radius:7px;color:var(--text-3)}
+.pb-tab.on{background:var(--primary-50);color:var(--primary);font-weight:700}
+.pb-chip{font-size:12px;padding:5px 12px;border-radius:8px;background:#fff;border:1px solid var(--border);color:var(--text-3)}
+.pb-chip.on{background:var(--primary);border-color:var(--primary);color:#fff;font-weight:700}
+.pb-btn{margin-left:auto;font-size:12px;padding:5px 12px;border-radius:8px;background:var(--primary);color:#fff;font-weight:700}
+.pb-table{margin-top:14px;background:#fff;border-radius:12px;border:1px solid var(--border);overflow:hidden}
+.pb-th,.pb-tr{display:grid;grid-template-columns:1.3fr 1fr 1fr .8fr .8fr 1fr .8fr .8fr;gap:8px;padding:9px 14px;font-size:12px}
+.pb-th{background:var(--surface);color:var(--text-3);font-weight:700}
+.pb-tr{border-top:1px solid var(--border-2);color:var(--text-2)}
+.overlay{position:absolute;inset:0;background:rgba(15,23,42,.4);backdrop-filter:blur(2px)}
+
+/* ===== 弹窗 ===== */
+.dialog{
+  position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+  width:980px;height:624px;background:#fff;border-radius:16px;overflow:hidden;
+  box-shadow:0 24px 70px rgba(15,23,42,.38);
+  display:flex;flex-direction:column;
+}
+.dlg-head{
+  display:flex;align-items:center;gap:12px;padding:14px 20px;border-bottom:1px solid var(--border);
+  flex-shrink:0;
+}
+.dlg-head .t{font-size:16px;font-weight:800}
+.dlg-head .t-sub{font-size:12px;color:var(--text-4);font-weight:400;margin-left:2px}
+.icon-x{
+  margin-left:auto;width:30px;height:30px;border-radius:999px;border:none;background:var(--surface);
+  color:var(--text-3);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:14px;
+  transition:.15s;
+}
+.icon-x:hover{background:var(--danger-bg);color:var(--danger)}
+
+.dlg-body{flex:1;display:flex;min-height:0}
+
+/* ---- 左栏：待发货订单 ---- */
+.pane-left{width:392px;flex-shrink:0;border-right:1px solid var(--border);display:flex;flex-direction:column;min-height:0}
+.l-toolbar{padding:12px 12px 8px;display:flex;gap:8px;flex-shrink:0}
+.search{
+  flex:1;display:flex;align-items:center;gap:7px;background:#fff;border:1px solid #cbd5e1;border-radius:9px;
+  padding:0 10px;transition:.15s;
+}
+.search:focus-within{border-color:var(--primary-300);box-shadow:0 0 0 3px rgba(37,99,235,.1)}
+.search svg{flex-shrink:0;color:var(--text-4)}
+.search input{border:none;outline:none;background:transparent;font:inherit;font-size:13px;padding:8px 0;width:100%;color:var(--text)}
+.search input::placeholder{color:var(--text-4)}
+.cust-select{
+  border:1px solid #cbd5e1;border-radius:9px;font:inherit;font-size:12.5px;color:var(--text-2);
+  padding:0 8px;background:#fff;outline:none;max-width:118px;cursor:pointer;
+}
+.cust-select:focus{border-color:var(--primary-300);box-shadow:0 0 0 3px rgba(37,99,235,.1)}
+.l-meta{
+  display:flex;align-items:center;padding:2px 16px 8px;font-size:12px;color:var(--text-3);flex-shrink:0;
+}
+.l-meta b{color:var(--text);margin:0 2px}
+.l-meta .link{margin-left:auto}
+.link{
+  border:none;background:transparent;color:var(--primary);font:inherit;font-size:12.5px;font-weight:700;
+  cursor:pointer;padding:4px 6px;border-radius:6px;transition:.15s;
+}
+.link:hover{background:var(--primary-50)}
+.link:disabled{color:#b6c2d2;cursor:not-allowed;background:transparent}
+
+.l-list{flex:1;overflow-y:auto;padding:2px 12px 12px;scrollbar-gutter:stable}
+.o-card{
+  display:flex;align-items:center;gap:10px;padding:9px 12px;margin-bottom:7px;
+  background:#fff;border:1px solid var(--border);border-radius:11px;cursor:pointer;
+  transition:border-color .15s, background .15s, box-shadow .15s;user-select:none;
+}
+.o-card:hover{border-color:var(--primary-300);background:#fbfdff}
+.o-card.is-on{border-color:var(--primary-300);background:var(--primary-50);box-shadow:inset 3px 0 0 var(--primary)}
+.o-card .cbx{width:16px;height:16px;accent-color:var(--primary);flex-shrink:0;cursor:pointer;margin:0}
+.o-main{flex:1;min-width:0}
+.o-no{font-family:var(--mono);font-size:12.5px;font-weight:700;color:var(--text);letter-spacing:.01em}
+.o-meta{font-size:11.5px;color:var(--text-3);margin-top:2px}
+.o-meta em{font-style:normal;font-family:var(--mono);font-weight:700;color:var(--warn-600)}
+.o-cust{
+  flex-shrink:0;font-size:11.5px;font-weight:600;color:var(--text-2);
+  background:var(--surface);border:1px solid var(--border-2);border-radius:999px;padding:2px 9px;
+}
+.o-card.is-on .o-cust{background:#fff;border-color:var(--primary-200);color:var(--primary-700)}
+.l-empty{padding:36px 16px;text-align:center;color:var(--text-4);font-size:12.5px}
+
+/* ---- 右栏：发货清单 ---- */
+.pane-right{flex:1;display:flex;flex-direction:column;min-height:0;background:var(--surface)}
+.r-head{
+  display:flex;align-items:center;gap:8px;padding:12px 16px 10px;flex-shrink:0;
+}
+.r-title{font-size:13px;font-weight:800}
+.chip{
+  font-size:11.5px;font-weight:700;font-family:var(--mono);
+  background:var(--primary-50);color:var(--primary);border:1px solid var(--primary-200);
+  border-radius:999px;padding:1px 9px;
+}
+.chip.mute{background:#fff;color:var(--text-4);border-color:var(--border)}
+.r-head .link{margin-left:auto;font-size:12px}
+
+.r-list{flex:1;overflow-y:auto;padding:0 16px 14px;scrollbar-gutter:stable}
+.cart-card{background:#fff;border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:10px;box-shadow:0 1px 2px rgba(15,23,42,.04)}
+.cart-head{display:flex;align-items:center;gap:9px;padding:9px 12px;border-bottom:1px solid var(--border-2);background:#fff}
+.cart-no{font-family:var(--mono);font-size:12.5px;font-weight:800}
+.cart-cust{font-size:11.5px;font-weight:600;color:var(--text-3);background:var(--surface);border:1px solid var(--border-2);border-radius:999px;padding:1px 8px}
+.cart-sum{margin-left:auto;font-size:12px;color:var(--text-3)}
+.cart-sum b{font-family:var(--mono);font-size:13px;color:var(--primary);font-weight:800}
+.rm-btn{
+  flex-shrink:0;width:24px;height:24px;border-radius:7px;border:none;background:transparent;color:var(--text-4);
+  cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;transition:.15s;
+}
+.rm-btn:hover{background:var(--danger-bg);color:var(--danger)}
+.crow{display:flex;align-items:center;gap:10px;padding:7px 12px;transition:background .15s}
+.crow:hover{background:#fbfdff}
+.crow+.crow{border-top:1px solid var(--border-2)}
+.crow .cbx{width:15px;height:15px;accent-color:var(--primary);flex-shrink:0;cursor:pointer;margin:0}
+.crow.off{opacity:.45}
+.crow.off .qty{pointer-events:none}
+.sku{flex:1;min-width:0;font-size:12.5px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.proc{
+  flex-shrink:0;font-size:11px;font-weight:700;color:var(--primary-700);
+  background:var(--primary-50);border:1px solid var(--primary-200);border-radius:6px;padding:1px 7px;
+}
+.remain{flex-shrink:0;font-size:11px;color:var(--text-4);font-family:var(--mono)}
+.qty{
+  width:94px;flex-shrink:0;padding:6px 9px;font-family:var(--mono);font-size:12.5px;font-weight:700;
+  text-align:right;color:var(--text);border:1px solid #cbd5e1;border-radius:8px;outline:none;
+  font-variant-numeric:tabular-nums;transition:.15s;
+}
+.qty:focus{border-color:var(--primary-300);box-shadow:0 0 0 3px rgba(37,99,235,.12)}
+.qty.is-bad{border-color:#f87171;background:var(--danger-bg)}
+.qty.is-bad:focus{border-color:var(--danger);box-shadow:0 0 0 3px rgba(220,38,38,.12)}
+
+.cart-empty{
+  border:1.5px dashed #cbd5e1;border-radius:14px;background:#fff;
+  padding:48px 24px;text-align:center;color:var(--text-4);
+}
+.cart-empty .ce-ico{
+  width:52px;height:52px;border-radius:16px;background:var(--primary-50);color:var(--primary-300);
+  display:flex;align-items:center;justify-content:center;margin:0 auto 12px;
+}
+.cart-empty .ce-t{font-size:13.5px;font-weight:700;color:var(--text-3);margin-bottom:4px}
+.cart-empty .ce-s{font-size:12px;line-height:1.7}
+
+/* ---- 底栏 ---- */
+.dlg-foot{
+  flex-shrink:0;border-top:1px solid var(--border);padding:11px 16px;
+  display:flex;align-items:center;gap:12px;min-height:60px;background:#fff;
+}
+.bar-info{flex:1;min-width:0;font-size:12.5px;color:var(--text-2);display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.bar-info b{font-family:var(--mono);font-size:14px;font-weight:800;color:var(--primary);font-variant-numeric:tabular-nums}
+.bar-info .sep{color:#cbd5e1}
+.zero{color:var(--text-4)!important}
+.bar-err{
+  display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:700;color:var(--danger);
+  background:var(--danger-bg);border:1px solid var(--danger-border);border-radius:7px;padding:2px 9px;
+}
+.bar-warn-ico{color:var(--warn-600);flex-shrink:0}
+.btn{
+  border:none;border-radius:10px;font:inherit;font-size:13px;font-weight:700;cursor:pointer;
+  padding:9px 18px;transition:.18s;white-space:nowrap;display:inline-flex;align-items:center;gap:7px;
+}
+.btn-primary{
+  color:#fff;background:linear-gradient(135deg,#3b82f6,#2563eb);
+  box-shadow:0 2px 8px rgba(37,99,235,.3);
+}
+.btn-primary:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 6px 18px rgba(37,99,235,.36)}
+.btn-ghost{
+  color:var(--text-2);background:#fff;border:1px solid var(--border);
+}
+.btn-ghost:hover{border-color:var(--primary-300);color:var(--primary);background:var(--primary-50)}
+.btn:disabled{opacity:.45;cursor:not-allowed;transform:none!important;box-shadow:none}
+.bar-confirm .bar-info b{color:var(--warn-600)}
+.bar-confirm{animation:barIn .22s ease}
+@keyframes barIn{from{opacity:.3;transform:translateY(3px)}to{opacity:1;transform:none}}
+
+/* ---- 成功态 ---- */
+.success{flex:1;overflow-y:auto;padding:18px 20px}
+.s-head{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:800;color:var(--success);margin-bottom:12px}
+.s-row{
+  display:flex;align-items:center;gap:14px;background:var(--success-bg);border:1px solid var(--success-border);
+  border-radius:11px;padding:10px 14px;margin-bottom:8px;font-size:12.5px;
+}
+.s-row .no{font-family:var(--mono);font-weight:800;color:var(--text)}
+.s-row .cu{color:var(--text-2)}
+.s-row .qt{font-family:var(--mono);color:var(--text-2)}
+.s-badge{
+  margin-left:auto;font-size:11px;font-weight:700;color:var(--warn-600);
+  background:var(--warn-bg);border:1px solid var(--warn-border);border-radius:7px;padding:2px 9px;
+}
+.submitting-layer{
+  position:absolute;inset:0;background:rgba(255,255,255,.82);backdrop-filter:blur(2px);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;z-index:9;
+  font-size:13.5px;font-weight:700;color:var(--primary);
+}
+.spin{
+  width:26px;height:26px;border-radius:50%;border:3px solid var(--primary-100);border-top-color:var(--primary);
+  animation:sp .7s linear infinite;
+}
+@keyframes sp{to{transform:rotate(360deg)}}
+
+/* ===== 移动端 ===== */
+.phone-row{display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start}
+.phone{
+  width:392px;flex-shrink:0;background:#0f172a;border-radius:38px;padding:11px;
+  box-shadow:0 18px 50px rgba(15,23,42,.3);
+}
+.phone-screen{background:#fff;border-radius:28px;overflow:hidden;height:730px;display:flex;flex-direction:column}
+.ph-head{display:flex;align-items:center;padding:15px 16px 11px;font-size:15px;font-weight:800;flex-shrink:0}
+.ph-head .icon-x{margin-left:auto;width:28px;height:28px}
+.ph-toolbar{padding:0 14px 9px;flex-shrink:0;display:flex;gap:8px}
+.ph-tabs{
+  display:flex;gap:4px;padding:3px;margin:0 14px 10px;background:var(--surface);
+  border:1px solid var(--border);border-radius:11px;flex-shrink:0;
+}
+.ph-tab{
+  flex:1;text-align:center;font-size:12.5px;font-weight:700;color:var(--text-3);
+  padding:7px 0;border-radius:8px;
+}
+.ph-tab.on{background:#fff;color:var(--primary);box-shadow:0 1px 4px rgba(15,23,42,.1)}
+.ph-tab .cnt{font-family:var(--mono);font-size:11px;margin-left:3px}
+.ph-body{flex:1;overflow-y:auto;padding:0 14px 14px;background:var(--surface)}
+.ph-body .cart-card{margin-bottom:10px}
+/* 移动端卡片头：2×2 网格（单号/✕ · 客户/件数），避免移除按钮换行错位 */
+.ph-body .cart-head{
+  display:grid;grid-template-columns:1fr auto;
+  grid-template-areas:"no rm" "cust sum";row-gap:3px;align-items:center;
+}
+.ph-body .cart-no{grid-area:no}
+.ph-body .cart-head .rm-btn{grid-area:rm}
+.ph-body .cart-cust{grid-area:cust;justify-self:start}
+.ph-body .cart-sum{grid-area:sum;margin-left:0;justify-self:end}
+.ph-body .crow{flex-wrap:wrap;padding:8px 12px}
+.ph-body .sku{flex:1 1 100%}
+.ph-bar{
+  flex-shrink:0;border-top:1px solid var(--border);padding:11px 14px 16px;background:#fff;
+  display:flex;flex-direction:column;gap:9px;
+}
+.ph-bar .bar-info{justify-content:center}
+.ph-bar .btn{width:100%;justify-content:center}
+.phone-note{flex:1;min-width:240px;font-size:12.5px;color:var(--text-3);line-height:1.9}
+.phone-note h3{font-size:13.5px;color:var(--text);margin:0 0 8px}
+.phone-note ul{margin:0;padding-left:18px}
+.phone-note li{margin-bottom:5px}
+
+/* ===== 缩放预览（小屏截图/查看用） ===== */
+body.fit .stage, body.fit .phone-row{zoom:.5}
+body.fit .phone-row{gap:44px}
+.fit-toggle{
+  position:fixed;right:22px;bottom:22px;z-index:99;
+  border:1px solid var(--border);background:#fff;color:var(--text-2);font:inherit;font-size:12.5px;font-weight:700;
+  padding:9px 16px;border-radius:999px;cursor:pointer;box-shadow:0 8px 24px rgba(15,23,42,.14);
+}
+.fit-toggle:hover{border-color:var(--primary-300);color:var(--primary)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="page-head">
+    <h1>批量发货 · 交互重设计方案</h1>
+    <p class="sub">页面 <code>/outsource/shipments</code> 的「批量发货」弹窗 · 本页为<b>可交互效果图</b>：点击左侧订单卡片即可体验完整流程 · 2026-09-20</p>
+  </header>
+
+  <!-- 设计说明 -->
+  <div class="notes">
+    <div class="note">
+      <span class="n-no">1</span>
+      <h3>一栏一件事</h3>
+      <p>左栏「待发货订单」只管<em>浏览挑选</em>，右栏「发货清单」只管<em>核对编辑</em>。不再有任何一物两用的点击区域，点卡片=勾选，行为单一可预期。</p>
+    </div>
+    <div class="note">
+      <span class="n-no">2</span>
+      <h3>两次点击完成发货</h3>
+      <p>勾选订单即加入清单，数量默认=剩余未发。绝大多数场景只需「勾选 → 生成发货单」，无需逐行填数。</p>
+    </div>
+    <div class="note">
+      <span class="n-no">3</span>
+      <h3>数量编辑集中在清单</h3>
+      <p>要改的数量都在右侧同一处，改完即见合计变化；不想发的工序在清单里取消勾选即可，不用在几百行列表里找输入框。</p>
+    </div>
+    <div class="note">
+      <span class="n-no">4</span>
+      <h3>移动端双 Tab</h3>
+      <p>窄屏下自动切为「待选 / 已选」双 Tab，底部合计条常驻，仅在确认时切换为确认条，防误触不跳页。</p>
+    </div>
+  </div>
+
+  <!-- ============ 桌面端 ============ -->
+  <div class="section-title">① 桌面端 · 可交互原型 <span class="t-chip">点左侧订单卡片试试</span> <span class="hint">弹窗置于真实页面背景中</span></div>
+
+  <div class="stage" id="stage">
+    <!-- 页面背景（示意） -->
+    <div class="page-bg">
+      <div class="pb-top">
+        <div class="pb-tabs"><span class="pb-tab">外发工序</span><span class="pb-tab on">发货单</span><span class="pb-tab">工序预设</span></div>
+        <span class="pb-chip on">待收货</span><span class="pb-chip">已完成</span>
+        <span class="pb-btn">批量发货</span>
+      </div>
+      <div class="pb-table">
+        <div class="pb-th"><span>发货单号</span><span>客户名称</span><span>来源订单号</span><span>明细数</span><span>发货总量</span><span>发货时间</span><span>状态</span><span>操作</span></div>
+        <div class="pb-tr"><span>FH-20260919-0003</span><span>MINISO国际</span><span>#65003</span><span>8</span><span>80,000</span><span>2026-09-19 00:24</span><span>待收货</span><span>明细</span></div>
+        <div class="pb-tr"><span>FH-20260919-0002</span><span>MINISO国内</span><span>#64987</span><span>6</span><span>60,000</span><span>2026-09-19 00:24</span><span>待收货</span><span>明细</span></div>
+        <div class="pb-tr"><span>FH-20260919-0001</span><span>MINISO国内</span><span>#64997</span><span>2</span><span>20,000</span><span>2026-09-18 23:05</span><span>待收货</span><span>明细</span></div>
+      </div>
+    </div>
+    <div class="overlay"></div>
+
+    <!-- 弹窗 -->
+    <div class="dialog">
+      <div class="dlg-head">
+        <span class="t">批量发货</span>
+        <span class="t-sub">从左侧选择订单，右侧核对发货明细</span>
+        <button class="icon-x" title="关闭">✕</button>
+      </div>
+
+      <div class="dlg-body" id="dlgBody">
+        <!-- 左栏 -->
+        <aside class="pane-left">
+          <div class="l-toolbar">
+            <label class="search">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/></svg>
+              <input id="kw" type="text" placeholder="搜索订单号 / 客户">
+            </label>
+            <select class="cust-select" id="custFilter"><option value="">全部客户</option></select>
+          </div>
+          <div class="l-meta">
+            <span>待发货订单 <b id="lCount">6</b> 单</span>
+            <button class="link" id="btnAll">全选</button>
+          </div>
+          <div class="l-list" id="lList"></div>
+        </aside>
+
+        <!-- 右栏 -->
+        <section class="pane-right">
+          <div class="r-head">
+            <span class="r-title">发货清单</span>
+            <span class="chip mute" id="rChip">0 单</span>
+            <button class="link" id="btnClear" disabled>清空</button>
+          </div>
+          <div class="r-list" id="rList"></div>
+        </section>
+      </div>
+
+      <div class="dlg-foot" id="dlgFoot"></div>
+    </div>
+  </div>
+
+  <!-- ============ 移动端 ============ -->
+  <div class="section-title">② 移动端 · 「待选 / 已选」双 Tab <span class="t-chip">布局示意（已选 Tab）</span></div>
+
+  <div class="phone-row">
+    <div class="phone">
+      <div class="phone-screen">
+        <div class="ph-head">批量发货 <button class="icon-x">✕</button></div>
+        <div class="ph-toolbar">
+          <label class="search" style="flex:1">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/></svg>
+            <input type="text" placeholder="搜索订单号 / 客户">
+          </label>
+        </div>
+        <div class="ph-tabs">
+          <div class="ph-tab">待选订单<span class="cnt">6</span></div>
+          <div class="ph-tab on">已选清单<span class="cnt">2</span></div>
+        </div>
+        <div class="ph-body">
+          <div class="cart-card">
+            <div class="cart-head">
+              <span class="cart-no">PO-20260804-0010</span>
+              <span class="cart-cust">TOP TOY</span>
+              <span class="cart-sum"><b>20,000</b> 件</span>
+              <button class="rm-btn">✕</button>
+            </div>
+            <div class="crow">
+              <input type="checkbox" class="cbx" checked>
+              <span class="sku">变形金刚</span>
+              <span class="proc">转印</span>
+              <span class="remain">剩 10,000</span>
+              <input class="qty" type="number" value="10000">
+            </div>
+            <div class="crow">
+              <input type="checkbox" class="cbx" checked>
+              <span class="sku">变形金刚</span>
+              <span class="proc">缝制</span>
+              <span class="remain">剩 10,000</span>
+              <input class="qty" type="number" value="10000">
+            </div>
+          </div>
+          <div class="cart-card">
+            <div class="cart-head">
+              <span class="cart-no">PO-20260810-4878</span>
+              <span class="cart-cust">MINISO国际</span>
+              <span class="cart-sum"><b>77,652</b> 件</span>
+              <button class="rm-btn">✕</button>
+            </div>
+            <div class="crow">
+              <input type="checkbox" class="cbx" checked>
+              <span class="sku">维尼熊</span>
+              <span class="proc">电绣</span>
+              <span class="remain">剩 38,826</span>
+              <input class="qty" type="number" value="38826">
+            </div>
+            <div class="crow">
+              <input type="checkbox" class="cbx" checked>
+              <span class="sku">维尼熊</span>
+              <span class="proc">转印</span>
+              <span class="remain">剩 38,826</span>
+              <input class="qty" type="number" value="38826">
+            </div>
+          </div>
+        </div>
+        <div class="ph-bar">
+          <div class="bar-info">已选 <b>2</b> 单 · <b>4</b> 道工序 · 共 <b>97,652</b> 件</div>
+          <button class="btn btn-primary" style="width:100%;justify-content:center">生成发货单（2 单 / 97,652 件）</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="phone-note">
+      <h3>移动端要点</h3>
+      <ul>
+        <li>桌面双栏 → 移动端「待选 / 已选」双 Tab，Tab 上带数量角标，随时知道选了几单</li>
+        <li>底部合计条常驻，主按钮全宽；点「生成发货单」后底栏原地切换为确认条，不跳页</li>
+        <li>卡片行内折行显示，数量输入框加大到 44px 触控高度</li>
+        <li>与桌面端同一套组件与配色，只变布局不变逻辑</li>
+      </ul>
+    </div>
+  </div>
+
+</div>
+
+<button class="fit-toggle" id="fitToggle">缩放预览</button>
+
+<script>
+// ================= 数据 =================
+const ORDERS = [
+  { id:1, no:'PO-20260804-0007', cust:'MINISO国际', rows:[
+    { sku:'妹妹二代', proc:'电绣', remain:100000 },
+    { sku:'妹妹二代', proc:'转印', remain:100000 },
+  ]},
+  { id:2, no:'PO-20260804-0010', cust:'TOP TOY', rows:[
+    { sku:'变形金刚', proc:'转印', remain:10000 },
+    { sku:'变形金刚', proc:'缝制', remain:10000 },
+  ]},
+  { id:3, no:'PO-20260805-0001', cust:'TOP TOY', rows:[
+    { sku:'擎天柱', proc:'电绣', remain:1200000 },
+    { sku:'擎天柱', proc:'转印', remain:1500000 },
+    { sku:'擎天柱', proc:'缝制', remain:900000 },
+    { sku:'大黄蜂', proc:'电绣', remain:1400000 },
+    { sku:'大黄蜂', proc:'转印', remain:1600000 },
+    { sku:'大黄蜂', proc:'缝制', remain:1287120 },
+  ]},
+  { id:4, no:'PO-20260810-4878', cust:'MINISO国际', rows:[
+    { sku:'维尼熊', proc:'电绣', remain:38826 },
+    { sku:'维尼熊', proc:'转印', remain:38826 },
+  ]},
+  { id:5, no:'PO-20260810-4879', cust:'MINISO国内', rows:[
+    { sku:'史迪奇', proc:'电绣', remain:120840 },
+    { sku:'史迪奇', proc:'转印', remain:120840 },
+  ]},
+  { id:6, no:'PO-20260918-0017', cust:'奥飞', rows:[
+    { sku:'超级飞侠', proc:'电绣', remain:999111 },
+    { sku:'超级飞侠', proc:'转印', remain:999111 },
+    { sku:'超级飞侠', proc:'缝制', remain:999111 },
+    { sku:'超级飞侠', proc:'包装', remain:999111 },
+  ]},
+];
+
+// state: cart = [{ order, rows:[{rowIdx, on, qty}] }]
+let cart = [];
+let phase = 'edit';          // edit | confirm | success
+
+const $ = (s) => document.querySelector(s);
+const fmt = (n) => Number(n).toLocaleString();
+const dlgFoot = $('#dlgFoot');
+// 成功态会整体替换 dlgBody，这些引用需在结构还原后重新同步
+let lList, rList, rChip;
+function syncRefs() { lList = $('#lList'); rList = $('#rList'); rChip = $('#rChip'); }
+const bodyHTML = $('#dlgBody').innerHTML;
+function restorePanes() {
+  const body = $('#dlgBody');
+  if (!body.querySelector('.pane-left')) body.innerHTML = bodyHTML;
+  syncRefs();
+}
+
+// ================= 左栏 =================
+function filtered() {
+  const kw = $('#kw').value.trim();
+  const cu = $('#custFilter').value;
+  return ORDERS.filter(o =>
+    (!cu || o.cust === cu) &&
+    (!kw || o.no.includes(kw) || o.cust.includes(kw))
+  );
+}
+
+function renderLeft() {
+  const list = filtered();
+  $('#lCount').textContent = list.length;
+  if (!list.length) { lList.innerHTML = '<div class="l-empty">没有匹配的订单</div>'; return; }
+  lList.innerHTML = list.map(o => {
+    const on = cart.some(c => c.order.id === o.id);
+    const total = o.rows.reduce((s, r) => s + r.remain, 0);
+    return `
+      <div class="o-card ${on ? 'is-on' : ''}" data-id="${o.id}">
+        <input type="checkbox" class="cbx" ${on ? 'checked' : ''} data-id="${o.id}">
+        <div class="o-main">
+          <div class="o-no">${o.no}</div>
+          <div class="o-meta">${o.rows.length} 道工序 · <em>${fmt(total)}</em> 件待发</div>
+        </div>
+        <span class="o-cust">${o.cust}</span>
+      </div>`;
+  }).join('');
+}
+
+// ================= 右栏 =================
+function cartStats() {
+  let orders = cart.length, procs = 0, sum = 0, bad = 0;
+  cart.forEach(c => c.rows.forEach(r => {
+    if (!r.on) return;
+    procs++;
+    sum += Number(r.qty) || 0;
+    if (!Number.isInteger(Number(r.qty)) || Number(r.qty) < 1 || Number(r.qty) > c.order.rows[r.rowIdx].remain) bad++;
+  }));
+  return { orders, procs, sum, bad };
+}
+
+function renderCart() {
+  rChip.textContent = cart.length + ' 单';
+  rChip.className = 'chip' + (cart.length ? '' : ' mute');
+  $('#btnClear').disabled = !cart.length;
+
+  if (!cart.length) {
+    rList.innerHTML = `
+      <div class="cart-empty">
+        <div class="ce-ico">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h18v13H3z"/><path d="M3 7l2.2-4h13.6L21 7"/><path d="M12 11v5M9.5 13.5h5"/></svg>
+        </div>
+        <div class="ce-t">发货清单还是空的</div>
+        <div class="ce-s">从左侧勾选要发货的订单，在这里核对数量<br>数量默认等于剩余未发，可直接提交</div>
+      </div>`;
+    return;
+  }
+
+  rList.innerHTML = cart.map(c => {
+    let sub = 0;
+    c.rows.forEach(r => { if (r.on) sub += Number(r.qty) || 0; });
+    const rows = c.rows.map(r => {
+      const def = c.order.rows[r.rowIdx];
+      return `
+        <div class="crow ${r.on ? '' : 'off'}" data-oid="${c.order.id}" data-ri="${r.rowIdx}">
+          <input type="checkbox" class="cbx" ${r.on ? 'checked' : ''} data-oid="${c.order.id}" data-ri="${r.rowIdx}">
+          <span class="sku">${def.sku}</span>
+          <span class="proc">${def.proc}</span>
+          <span class="remain">剩 ${fmt(def.remain)}</span>
+          <input class="qty" type="number" value="${r.qty}" data-oid="${c.order.id}" data-ri="${r.rowIdx}">
+        </div>`;
+    }).join('');
+    return `
+      <div class="cart-card" data-oid="${c.order.id}">
+        <div class="cart-head">
+          <span class="cart-no">${c.order.no}</span>
+          <span class="cart-cust">${c.order.cust}</span>
+          <span class="cart-sum"><b data-sub="${c.order.id}">${fmt(sub)}</b> 件</span>
+          <button class="rm-btn" data-rm="${c.order.id}" title="移出清单">✕</button>
+        </div>
+        <div class="cart-rows">${rows}</div>
+      </div>`;
+  }).join('');
+}
+
+// ================= 底栏 =================
+function renderFoot() {
+  const st = cartStats();
+  if (phase === 'success') {
+    dlgFoot.innerHTML = `
+      <div class="bar-info"><span style="color:var(--text-3)">发货单已生成，可在「发货单」列表查看待收货状态</span></div>
+      <button class="btn btn-ghost" id="btnReset">再发一批</button>
+      <button class="btn btn-primary" id="btnDone">完成并关闭</button>`;
+    $('#btnReset').onclick = () => { cart = []; phase = 'edit'; restorePanes(); renderAll(); };
+    $('#btnDone').onclick = () => { cart = []; phase = 'edit'; restorePanes(); renderAll(); };
+    return;
+  }
+  if (phase === 'confirm') {
+    dlgFoot.innerHTML = `
+      <div class="bar-confirm bar-info">
+        <svg class="bar-warn-ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 2.5 20h19L12 3z"/><path d="M12 10v4M12 17.2v.1"/></svg>
+        将按订单生成 <b>${st.orders}</b> 张发货单、共 <b>${st.procs}</b> 道工序 / <b>${fmt(st.sum)}</b> 件，并通知贝乐收货账号
+      </div>
+      <button class="btn btn-ghost" id="btnBack">返回调整</button>
+      <button class="btn btn-primary" id="btnConfirm">确认发货</button>`;
+    $('#btnBack').onclick = () => { phase = 'edit'; renderAll(); };
+    $('#btnConfirm').onclick = doSubmit;
+    return;
+  }
+
+  const disabled = st.procs === 0 || st.bad > 0;
+  dlgFoot.innerHTML = `
+    <div class="bar-info">
+      <span>已选 <b class="${st.orders ? '' : 'zero'}">${st.orders}</b> 单</span><span class="sep">·</span>
+      <span><b class="${st.procs ? '' : 'zero'}">${st.procs}</b> 道工序</span><span class="sep">·</span>
+      <span>共 <b class="${st.sum ? '' : 'zero'}">${fmt(st.sum)}</b> 件</span>
+      ${st.bad ? `<span class="bar-err">⚠ ${st.bad} 行数量有误</span>` : ''}
+    </div>
+    <button class="btn btn-primary" id="btnGen" ${disabled ? 'disabled' : ''}>
+      生成发货单${st.orders ? `（${st.orders} 单 / ${fmt(st.sum)} 件）` : ''}
+    </button>`;
+  const g = $('#btnGen');
+  if (g) g.onclick = () => { phase = 'confirm'; renderAll(); };
+}
+
+// ================= 汇总重算（不重建 DOM，保住输入焦点） =================
+function refresh() {
+  const st = cartStats();
+  // 行状态 / 校验
+  rList.querySelectorAll('.crow').forEach(cr => {
+    const oid = +cr.dataset.oid, ri = +cr.dataset.ri;
+    const c = cart.find(x => x.order.id === oid);
+    if (!c) return;
+    const r = c.rows.find(x => x.rowIdx === ri);
+    const def = c.order.rows[ri];
+    cr.classList.toggle('off', !r.on);
+    cr.querySelector('.cbx').checked = r.on;
+    const q = cr.querySelector('.qty');
+    if (q.value !== String(r.qty)) q.value = r.qty;   // 避免重置光标位置
+    const bad = r.on && (!Number.isInteger(Number(r.qty)) || Number(r.qty) < 1 || Number(r.qty) > def.remain);
+    q.classList.toggle('is-bad', bad);
+  });
+  // 订单小计
+  cart.forEach(c => {
+    let sub = 0;
+    c.rows.forEach(r => { if (r.on) sub += Number(r.qty) || 0; });
+    const el = rList.querySelector(`[data-sub="${c.order.id}"]`);
+    if (el) el.textContent = fmt(sub);
+  });
+  renderFoot();
+}
+
+function renderAll() {
+  renderLeft();
+  renderCart();
+  renderFoot();
+  if (phase === 'success') renderSuccessBody();
+}
+
+function renderSuccessBody() {
+  const n = cartStats();
+  const rows = cart.map((c, i) => `
+    <div class="s-row">
+      <span class="no">FH-20260920-${String(i + 1).padStart(4, '0')}</span>
+      <span class="cu">${c.order.cust}</span>
+      <span class="qt">${c.rows.filter(r => r.on).length} 道工序 · ${fmt(c.rows.reduce((s, r) => s + (r.on ? Number(r.qty) : 0), 0))} 件</span>
+      <span class="s-badge">待贝乐收货</span>
+    </div>`).join('');
+  $('#dlgBody').innerHTML = `
+    <div class="success">
+      <div class="s-head">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8.5 12.2 2.4 2.4 4.6-5"/></svg>
+        发货完成：已生成 ${n.orders} 张发货单
+      </div>
+      ${rows}
+    </div>`;
+}
+
+// ================= 事件 =================
+function toggleOrder(id) {
+  const i = cart.findIndex(c => c.order.id === id);
+  if (i >= 0) { cart.splice(i, 1); }
+  else {
+    const o = ORDERS.find(x => x.id === id);
+    cart.push({ order: o, rows: o.rows.map((r, ri) => ({ rowIdx: ri, on: true, qty: r.remain })) });
+  }
+  phase = 'edit';
+  restorePanes();
+  renderAll();
+}
+</script>
+<script>
+// 事件委托（结构还原后依然生效）
+document.addEventListener('click', (e) => {
+  const card = e.target.closest('.o-card');
+  if (card) { toggleOrder(+card.dataset.id); return; }
+  const rm = e.target.closest('.rm-btn');
+  if (rm) { toggleOrder(+rm.dataset.rm); return; }
+});
+document.addEventListener('change', (e) => {
+  const cb = e.target;
+  if (!cb.classList) return;
+  if (cb.classList.contains('cbx')) {
+    if (cb.closest('.o-card')) return;                       // 左栏卡片勾选由 click 处理
+    const oid = +cb.dataset.oid, ri = +cb.dataset.ri;
+    const c = cart.find(x => x.order.id === oid);
+    if (c) { const r = c.rows.find(x => x.rowIdx === ri); r.on = cb.checked; refresh(); }
+  }
+});
+document.addEventListener('input', (e) => {
+  const q = e.target;
+  if (q.classList && q.classList.contains('qty')) {
+    const oid = +q.dataset.oid, ri = +q.dataset.ri;
+    const c = cart.find(x => x.order.id === oid);
+    if (c) { const r = c.rows.find(x => x.rowIdx === ri); r.qty = q.value === '' ? '' : Number(q.value); refresh(); }
+  }
+  if (q.id === 'kw') { renderLeft(); }
+});
+document.addEventListener('change', (e) => {
+  if (e.target.id === 'custFilter') renderLeft();
+});
+document.addEventListener('click', (e) => {
+  if (e.target.id === 'btnAll') {
+    filtered().forEach(o => { if (!cart.some(c => c.order.id === o.id)) {
+      cart.push({ order: o, rows: o.rows.map((r, ri) => ({ rowIdx: ri, on: true, qty: r.remain })) });
+    }});
+    phase = 'edit'; renderAll();
+  }
+  if (e.target.id === 'btnClear') { cart = []; phase = 'edit'; renderAll(); }
+});
+</script>
+<script>
+// ================= 提交（模拟） =================
+function doSubmit() {
+  const layer = document.createElement('div');
+  layer.className = 'submitting-layer';
+  layer.innerHTML = `<div class="spin"></div><span>正在生成发货单…（${cartStats().orders} 单 / ${fmt(cartStats().sum)} 件）</span>`;
+  document.querySelector('.dialog').appendChild(layer);
+  setTimeout(() => { layer.remove(); phase = 'success'; renderAll(); }, 700);
+}
+
+// ================= 初始化 =================
+(function init() {
+  // 客户下拉
+  const custs = [...new Set(ORDERS.map(o => o.cust))];
+  const sel = document.getElementById('custFilter');
+  custs.forEach(c => { const op = document.createElement('option'); op.value = op.textContent = c; sel.appendChild(op); });
+  syncRefs();
+  renderAll();
+
+  // 缩放预览
+  const btn = document.getElementById('fitToggle');
+  const apply = (on) => {
+    document.body.classList.toggle('fit', on);
+    btn.textContent = on ? '实际尺寸' : '缩放预览';
+  };
+  if (window.innerWidth < 1200) apply(true);
+  btn.onclick = () => apply(!document.body.classList.contains('fit'));
+})();
+</script>
+</body>
+</html>

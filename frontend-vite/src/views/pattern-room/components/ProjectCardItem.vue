@@ -270,7 +270,8 @@ function onThumbError(e: Event, proj: { product_image_url?: string | null }) {
   opacity: 1;
 }
 
-.cgl-card-thumb-placeholder svg {
+/* 仅作用于占位图的 T 恤图标（直接子元素），避免污染已完成角标内的对勾图标 */
+.cgl-card-thumb-placeholder > svg {
   font-size: 48px;
   color: var(--color-text-secondary);
   opacity: 0.5;

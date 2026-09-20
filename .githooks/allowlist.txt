@@ -29,3 +29,8 @@ scripts/prod_audit/tests/test_self_audit.py
 .github/workflows/ci-cd.yml
 fastapi_app/api/v1/endpoints/backup/restore.py
 tests/e2e_api/test_auth_flow.py
+
+# 2026-09-20 外发迭代提交复核：审计报告行文**自引用**密钥头样式字符串
+# （转述 scripts/prod_audit 测试夹具的查处结论，非真钥），属文档自指豁免
+# （同 .githooks/pre-commit 自指豁免先例）。
+deliverables/engineering-assurance/_member-cody.md

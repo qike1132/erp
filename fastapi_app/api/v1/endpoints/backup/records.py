@@ -20,7 +20,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.api.v1.endpoints.backup._deps import require_backup_permission
 from fastapi_app.core.database import get_async_db, get_async_read_db
-from fastapi_app.core.response import success_response
 from fastapi_app.schemas.backup import (
     BackupDeleteResponse,
     BackupListResponse,
@@ -72,7 +71,7 @@ async def list_backup_tables(
     except (SQLAlchemyError, OperationalError, RuntimeError) as e:
         logger.error(f'列出备份表失败: {e}')
         raise HTTPException(status_code=500, detail='获取表信息失败，请查看服务器日志') from e
-    return success_response(tables=table_info, total=len(table_info))
+    return {'success': True, 'tables': table_info, 'total': len(table_info)}
 
 
 # ---------------------------------------------------------------------------
@@ -82,7 +81,7 @@ async def list_backup_tables(
 async def list_server_backups(user: User = Depends(require_backup_permission('list_server_backups'))):
     """列出服务器默认路径上的所有备份文件"""
     backups = backup_service.list_backup_files()
-    return success_response(backups=backups, total=len(backups))
+    return {'success': True, 'backups': backups, 'total': len(backups)}
 
 
 # ---------------------------------------------------------------------------
@@ -117,7 +116,7 @@ async def delete_server_backup(
         await db.execute(_sa_delete(BackupRecord).where(BackupRecord.filename == safe_name))
     except SQLAlchemyError as e:
         logger.error(f'清理备份记录 {safe_name} 失败: {e}')
-    return success_response(deleted=deleted)
+    return {'success': True, 'deleted': deleted}
 
 
 # ---------------------------------------------------------------------------
@@ -146,7 +145,8 @@ async def get_backup_records(
     """
     records, total = await backup_query_service.get_merged_backup_records(db, page, page_size)
 
-    return success_response(**{
+    return {
+        'success': True,
         'records': [
             {
                 'id': r.get('id'),
@@ -171,7 +171,8 @@ async def get_backup_records(
             }
             for r in records
         ],
-        'total': total, 'page': page, 'page_size': page_size})
+        'total': total, 'page': page, 'page_size': page_size,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -198,7 +199,7 @@ async def get_backup_schedule(
         }
         for r in rows
     ]
-    return success_response(tasks=tasks)
+    return {'success': True, 'tasks': tasks}
 
 
 # ---------------------------------------------------------------------------
@@ -220,14 +221,16 @@ async def create_backup_schedule(
         )
     except schedule_service.BackupSettingsError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    return success_response(**{
+    return {
+        'success': True,
         'tasks': [{
             'id': row.id, 'name': row.name,
             'task': schedule_service.TASK_TYPE_TO_FUNC.get(row.task_type, ''),
             'task_type': row.task_type, 'cron_expr': row.cron_expr,
             'schedule': row.cron_expr, 'enabled': row.enabled,
             'last_run': row.last_run_at, 'last_status': row.last_status,
-        }]})
+        }],
+    }
 
 
 @router.put('/schedule/{schedule_id}', response_model=BackupScheduleOut)
@@ -245,14 +248,16 @@ async def update_backup_schedule(
         )
     except schedule_service.BackupSettingsError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    return success_response(**{
+    return {
+        'success': True,
         'tasks': [{
             'id': row.id, 'name': row.name,
             'task': schedule_service.TASK_TYPE_TO_FUNC.get(row.task_type, ''),
             'task_type': row.task_type, 'cron_expr': row.cron_expr,
             'schedule': row.cron_expr, 'enabled': row.enabled,
             'last_run': row.last_run_at, 'last_status': row.last_status,
-        }]})
+        }],
+    }
 
 
 @router.delete('/schedule/{schedule_id}', response_model=BackupTriggerOut)
@@ -265,7 +270,7 @@ async def delete_backup_schedule(
     deleted = await schedule_service.delete_schedule(db, schedule_id)
     if not deleted:
         raise HTTPException(status_code=404, detail=f'调度任务 {schedule_id} 不存在')
-    return success_response(task_name=str(schedule_id), message='调度任务已删除')
+    return {'success': True, 'task_name': str(schedule_id), 'message': '调度任务已删除'}
 
 
 # ---------------------------------------------------------------------------
@@ -291,7 +296,7 @@ async def trigger_backup_schedule(
             await pool.enqueue_job(func_name)
         except (RuntimeError, OSError, ConnectionError) as e:
             raise HTTPException(status_code=500, detail='触发任务失败，请查看服务器日志') from e
-        return success_response(task_name=task_name, message=f'任务 {task_name} 已触发')
+        return {'success': True, 'task_name': task_name, 'message': f'任务 {task_name} 已触发'}
 
     # 2) backup_schedule 表（M2 起定时备份走这里）
     from fastapi_app.core.database import get_async_db_context
@@ -309,4 +314,4 @@ async def trigger_backup_schedule(
         await pool.enqueue_job(func_name)
     except (RuntimeError, OSError, ConnectionError) as e:
         raise HTTPException(status_code=500, detail='触发任务失败，请查看服务器日志') from e
-    return success_response(task_name=task_name, message=f'任务 {task_name} 已触发')
+    return {'success': True, 'task_name': task_name, 'message': f'任务 {task_name} 已触发'}

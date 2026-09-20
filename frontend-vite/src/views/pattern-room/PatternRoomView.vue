@@ -61,6 +61,8 @@
               @set-final-version="onSetFinalVersion"
               @copy-version="onCopyPartVersion"
               @delete-version="onDeleteVersion"
+              @start-edit="onStartEdit"
+              @cancel-edit="onCancelEdit"
               @save-edit="onSaveEdit"
               @select-role="onSelectRole"
               @add-role="onAddRole"
@@ -242,14 +244,16 @@ const {
 const {
   partFormVisible,
   // 部位内联编辑状态：由 usePatternRoomPartActions → usePartInlineEdit 提供，
-  // 需下发到 ProjectDetailPanel → PartsVersionTableV2 → PartsVersionRowV2。
-  // 此前漏接导致 editingPartId/editForm 恒为 undefined，内联编辑不可用。
+  // 需下发到 ProjectDetailPanel → PartsVersionTableV2 → PartsVersionRowV2，
+  // 并接管其 start-edit / cancel-edit 事件，否则"修改版本"按钮无效。
   editingPartId,
   editForm,
   openCreatePartDialog,
   onPartSubmitBatch,
   onSetFinalVersion,
   onCopyPartVersion,
+  onStartEdit,
+  onCancelEdit,
   onSaveEdit,
   onDeleteVersion,
   onSelectRole,

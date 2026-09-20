@@ -188,3 +188,13 @@ async def generate_customer_sampling_number(db: AsyncSession) -> str:
     """
     from fastapi_app.shared_models import CustomerSamplingProject
     return await generate_number_async('CS', CustomerSamplingProject, 'created_at', 'sequence_no', db)
+
+
+async def generate_shipment_number(db: AsyncSession) -> str:
+    """生成外发发货单编号 FH-YYYYMMDD-XXXX
+
+    格式与订单/备货编号一致（PREFIX-YYYYMMDD-XXXX），前缀 FH = 发货（FaHuo）。
+    唯一性由 numbering 服务的 advisory lock + 计数表原子递增跨进程保证。
+    """
+    from fastapi_app.shared_models import OutsourceShipment
+    return await generate_number_async('FH', OutsourceShipment, 'create_time', 'shipment_no', db)

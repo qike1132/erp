@@ -76,29 +76,14 @@ function setItemRef(el: unknown, index: number) {
   }
 }
 
-/**
- * 取「承载内容自然高度」的元素。
- *
- * 变高模式下 `.virtual-list-item` 自身被赋予 inline `min-height`（见 getItemStyle），
- * 若直接量它，量到的会是 `max(内容高, 缓存高)` —— 一旦某行曾展开（缓存变大），
- * 收起后会被 `min-height` 顶住、永远量不到缩小后的真实高（RC-4 的自相矛盾测量）。
- * 因此优先量首个元素子节点（即插槽内容根节点，其高度由内容决定、不受本项
- * `min-height` 约束），拿不到时退化为量本项自身。
- */
-function resolveMeasureTarget(el: HTMLElement): HTMLElement {
-  const first = el.firstElementChild
-  return first instanceof HTMLElement ? first : el
-}
-
 function measureItems() {
   if (!props.dynamicHeight) return
   const currentGen = ++itemRefGeneration
   let changed = false
   for (const [idx, el] of itemRefs) {
     if (itemRefGeneration !== currentGen) return
-    const h = resolveMeasureTarget(el).getBoundingClientRect().height
-    // h <= 0 视为不可信测量（display:none / 未布局），保留旧值不覆盖
-    if (h > 0 && _heightMap.get(idx) !== h) {
+    const h = el.getBoundingClientRect().height
+    if (_heightMap.get(idx) !== h) {
       _heightMap.set(idx, h)
       changed = true
     }
@@ -106,15 +91,6 @@ function measureItems() {
   itemRefs.clear()
   // 仅在实际高度变化时才触发前缀和重算，高度稳定后零开销
   if (changed) _heightVersion.value++
-}
-
-/**
- * 作废指定项的高度缓存并立即重测（行内展开/收起等局部内容变化时由父组件调用）。
- * 不清除则 `min-height` 会一直顶住旧高度，导致收起的行收不回去。
- */
-function remeasureItem(index: number) {
-  if (!props.dynamicHeight) return
-  if (_heightMap.delete(index)) _heightVersion.value++
 }
 
 function _getItemHeight(index: number): number {
@@ -197,9 +173,7 @@ function getItemStyle(index: number) {
     return { height: `${props.itemHeight}px` }
   }
   const h = _heightMap.get(index) || estimatedH.value
-  // 变高模式改用 min-height：既为未测量项提供稳定占位，又允许内容自然生长，
-  // 使 measureItems 能学到内容真实高度（RC-4 硬前置修复）
-  return { minHeight: `${h}px` }
+  return { height: `${h}px` }
 }
 
 function getItemKey(item: VirtualItem<T>): string | number {
@@ -284,7 +258,6 @@ defineExpose({
   scrollToTop,
   scrollToBottom,
   measureItems,
-  remeasureItem,
 })
 </script>
 

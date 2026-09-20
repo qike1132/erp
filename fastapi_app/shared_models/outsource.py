@@ -4,9 +4,14 @@
 承载湖北外发业务：
 - outsource_process_type: 按 SKU 预设的固定外发工序类型（电绣/转印/配件等）
 - order_outsource_process: 订单级外发工序实例（计划/实际完成时间、状态流转）
+- outsource_shipment: 发货单（一键发货生成，贝乐侧为「待收货订单」）
+- outsource_shipment_item: 发货单明细（每道被发货工序一行）
 
 "返单自动带出工序"：创建订单（含湖北工厂 SKU）时，根据 SKU 预设
 自动生成 order_outsource_process 记录，使返单无需重复配置。
+
+"一键发货工作流"：发货按钮 → 生成 outsource_shipment（发货单）→ 贝乐用户端
+看到「待收货」新订单 → 贝乐确认收货 → shipment 状态流转为「已完成」闭环。
 """
 from __future__ import annotations
 
@@ -153,3 +158,95 @@ class OrderOutsourceProcessFlow(Base):
 
     def __repr__(self):
         return f'<OrderOutsourceProcessFlow process_id={self.process_id} action={self.action} qty={self.quantity}>'
+
+
+# 发货单状态的唯一权威定义：业务代码引用这些常量，禁止新增字面量。
+# shipped  = 已发货（工厂视角）= 贝乐用户端「待收货」
+# received = 已收货（贝乐确认收货后）= 「已完成」闭环
+SHIPMENT_STATUS_SHIPPED = 'shipped'
+SHIPMENT_STATUS_RECEIVED = 'received'
+
+VALID_SHIPMENT_STATUSES = frozenset({SHIPMENT_STATUS_SHIPPED, SHIPMENT_STATUS_RECEIVED})
+
+
+class OutsourceShipment(Base):
+    """发货单：一键发货生成的单据，同时也是推送给贝乐用户端的「待收货订单」。
+
+    状态机（shipped → received）：
+    - shipped：一键发货后生成，贝乐用户端显示为「待收货」；
+    - received：贝乐确认收货后置为「已完成」，闭环。
+    """
+
+    __tablename__ = 'outsource_shipment'
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    shipment_no: Mapped[str] = mapped_column(String(24), unique=True, nullable=False, index=True, comment='发货单号 FH-YYYYMMDD-XXXX')
+    order_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey('order.id', ondelete='SET NULL'), nullable=True, index=True,
+        comment='来源订单ID（一键发货按订单发起；订单删除后置空保留发货单审计）',
+    )
+    customer: Mapped[str | None] = mapped_column(String(100), nullable=True, comment='冗余客户名称')
+    status: Mapped[str] = mapped_column(
+        String(20), default=SHIPMENT_STATUS_SHIPPED, nullable=False, index=True,
+        comment='状态：shipped=已发货(待收货)/received=已收货(已完成)',
+    )
+    shipped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, comment='发货时间')
+    received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, comment='收货时间')
+    shipped_by: Mapped[str | None] = mapped_column(String(50), nullable=True, comment='发货人')
+    received_by: Mapped[str | None] = mapped_column(String(50), nullable=True, comment='收货人')
+    remark: Mapped[str | None] = mapped_column(Text, nullable=True, comment='备注')
+    create_time: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), comment='创建时间'
+    )
+    update_time: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), comment='更新时间'
+    )
+
+    items: Mapped[list['OutsourceShipmentItem']] = relationship(
+        'OutsourceShipmentItem',
+        cascade='all, delete-orphan',
+        back_populates='shipment',
+        order_by='OutsourceShipmentItem.id',
+    )
+
+    __table_args__ = (
+        Index('ix_outsource_shipment_status_create', 'status', 'create_time'),
+    )
+
+    def __repr__(self):
+        return f'<OutsourceShipment {self.shipment_no} status={self.status}>'
+
+
+class OutsourceShipmentItem(Base):
+    """发货单明细：发货单下每一道被发货的工序一行（SKU + 工序 + 数量）。"""
+
+    __tablename__ = 'outsource_shipment_item'
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    shipment_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey('outsource_shipment.id', ondelete='CASCADE'), nullable=False, index=True,
+        comment='发货单ID',
+    )
+    process_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey('order_outsource_process.id', ondelete='SET NULL'), nullable=True, index=True,
+        comment='对应外发工序实例ID（工序删除后置空保留明细审计）',
+    )
+    product_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey('product.id', ondelete='SET NULL'), nullable=True, comment='产品(SKU)ID'
+    )
+    product_name: Mapped[str | None] = mapped_column(String(200), nullable=True, comment='冗余产品名称')
+    process_type: Mapped[str] = mapped_column(String(50), nullable=False, comment='工序类型：电绣/转印/配件等')
+    shipped_quantity: Mapped[int] = mapped_column(Integer, default=0, nullable=False, comment='发货数量')
+    received_quantity: Mapped[int] = mapped_column(Integer, default=0, nullable=False, comment='收货数量')
+    create_time: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), comment='创建时间'
+    )
+
+    shipment: Mapped[OutsourceShipment] = relationship('OutsourceShipment', back_populates='items')
+
+    __table_args__ = (
+        Index('ix_outsource_shipment_item_process', 'process_id'),
+    )
+
+    def __repr__(self):
+        return f'<OutsourceShipmentItem shipment_id={self.shipment_id} type={self.process_type} shipped={self.shipped_quantity}>'

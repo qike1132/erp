@@ -58,10 +58,11 @@ import { ref } from 'vue'
 import OutsourcePresetTab from '@/views/outsource/components/OutsourcePresetTab.vue'
 import HubeiRouteTabs from '@/views/hubei/HubeiRouteTabs.vue'
 import UiAutocomplete from '@/components/ui/UiAutocomplete.vue'
-import { productApi } from '@/api'
+import { outsourceApi } from '@/api'
+import type { HubeiProductSearchItem } from '@/api/outsource'
 
 /** 已搜索选中但尚无预设的产品（保证能直接为其配置） */
-const pendingProducts = ref<{ product_id: number; product_name: string; product_barcode: string | null }[]>([])
+const pendingProducts = ref<{ product_id: number; product_name: string; product_barcode: string | null; factory: string | null }[]>([])
 
 function removePending(productId: number) {
   pendingProducts.value = pendingProducts.value.filter((x) => x.product_id !== productId)
@@ -70,18 +71,13 @@ function removePending(productId: number) {
 // ===== 产品搜索 =====
 const searchText = ref('')
 
-type ProductSuggestion = { id: number; name: string; barcode?: string }
+type ProductSuggestion = HubeiProductSearchItem
 
 async function searchProducts(q: string): Promise<ProductSuggestion[]> {
   if (!q.trim()) return []
   try {
-    const res = await productApi.search(q)
-    const list = Array.isArray(res) ? res : ((res as unknown as { items?: unknown[] }).items ?? [])
-    return (list as Array<Record<string, unknown>>).slice(0, 8).map((p) => ({
-      id: Number(p.id),
-      name: String(p.name ?? ''),
-      barcode: p.barcode ? String(p.barcode) : undefined,
-    }))
+    // 仅返回工厂=湖北 的 SKU（后端已过滤），与 /product 的工厂标记联动
+    return (await outsourceApi.productSearch(q)).slice(0, 8)
   } catch {
     return []
   }
@@ -91,7 +87,7 @@ function onPickProduct(p: ProductSuggestion) {
   if (!pendingProducts.value.some((x) => x.product_id === p.id)) {
     pendingProducts.value = [
       ...pendingProducts.value,
-      { product_id: p.id, product_name: p.name, product_barcode: p.barcode || null },
+      { product_id: p.id, product_name: p.name, product_barcode: p.barcode || null, factory: p.factory || '湖北' },
     ]
   }
   searchText.value = ''
