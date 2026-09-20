@@ -104,9 +104,9 @@ export function useOutsourceProcess(detailDataProp: Ref<OutsourceOrderRow | null
     return Math.max(0, (p.shipped_quantity || 0) - (p.received_quantity || 0))
   }
 
-  /** 可一键发货的工序数（有待发剩余且未开始收货） */
+  /** 可一键发货的工序数（有待发剩余即可：收货只闭环本批，不封锁后续批次） */
   const pendingCount = computed(
-    () => processes.value.filter((p) => remainingShipQty(p) > 0 && (p.received_quantity || 0) === 0).length,
+    () => processes.value.filter((p) => remainingShipQty(p) > 0).length,
   )
   /** 可一键收货的工序数（有待收剩余） */
   const shippedCount = computed(() => processes.value.filter((p) => remainingReceiveQty(p) > 0).length)
@@ -193,9 +193,9 @@ export function useOutsourceProcess(detailDataProp: Ref<OutsourceOrderRow | null
     return (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || fallback
   }
 
-  /** 一键发货：所有有待发剩余且未开始收货的工序，单请求单事务批量发货（数量取各行输入，缺省剩余） */
+  /** 一键发货：所有有待发剩余的工序，单请求单事务批量发货（数量取各行输入，缺省剩余） */
   async function handleBulkShip() {
-    const targets = processes.value.filter((p) => remainingShipQty(p) > 0 && (p.received_quantity || 0) === 0)
+    const targets = processes.value.filter((p) => remainingShipQty(p) > 0)
     if (targets.length === 0) {
       toast.info('没有待发货的工序')
       return

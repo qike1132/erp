@@ -464,12 +464,36 @@ class TestProcessStatusFlow:
         assert p.actual_start_time is not None
 
     @pytest.mark.asyncio
-    async def test_ship_received_process(self, mock_async_db):
-        """已收货工序无法再发货"""
-        p = make_order_process(pid=1, status='received')
-        mock_async_db.get = AsyncMock(return_value=p)
+    async def test_ship_partially_received_process(self, mock_async_db):
+        """回归：已部分收货但未发满的工序，仍可继续发下一批（收货只闭环本批）。"""
+        p = make_order_process(pid=1, item_id=1)
+        p.shipped_quantity = 40
+        p.received_quantity = 40
+        item = MagicMock()
+        item.quantity = 100
+        # db.get：工序返回 p，OrderItem 返回带目标数量的 item
+        async def fake_get(model, pk, **_kwargs):
+            return item if model is OrderItem else p
+        mock_async_db.get = AsyncMock(side_effect=fake_get)
 
-        with pytest.raises(ValueError, match='已收货'):
+        result = await ship_order_process(mock_async_db, 1, 60, 'admin')
+
+        assert p.shipped_quantity == 100
+        assert result['status'] == 'shipped'
+
+    @pytest.mark.asyncio
+    async def test_ship_fully_shipped_process(self, mock_async_db):
+        """已发满目标数量的工序无法再发货"""
+        p = make_order_process(pid=1, item_id=1)
+        p.shipped_quantity = 100
+        p.received_quantity = 100
+        item = MagicMock()
+        item.quantity = 100
+        async def fake_get(model, pk, **_kwargs):
+            return item if model is OrderItem else p
+        mock_async_db.get = AsyncMock(side_effect=fake_get)
+
+        with pytest.raises(ValueError, match='已全部发货'):
             await ship_order_process(mock_async_db, 1, 50)
 
     @pytest.mark.asyncio
@@ -1429,8 +1453,8 @@ class TestListShippableProcesses:
         return engine, async_sessionmaker(engine, expire_on_commit=False)
 
     @pytest.mark.asyncio
-    async def test_only_unshipped_and_unreceived(self, tmp_path):
-        """待发货 = 已发 < 目标 且 未收货；已收货/已发满的不出现。"""
+    async def test_only_unshipped_processes_listed(self, tmp_path):
+        """待发货 = 已发 < 目标；已发满/已收齐的不出现。"""
         from fastapi_app.services.outsource_service import list_shippable_processes
         from fastapi_app.shared_models import (
             Order as OrderModel,
@@ -1455,6 +1479,73 @@ class TestListShippableProcesses:
 
             procs = [(r['process_type'], r['remaining']) for r in rows]
             assert procs == [('电绣', 100), ('转印', 70)]
+        finally:
+            await engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_partially_shipped_then_received_still_listed(self, tmp_path):
+        """回归：部分发货并已收货、但未发满的工序，仍须留在待发货列表（可继续发下一批）。
+
+        收货只闭环「本批」而非关闭整单；此前以 received_quantity > 0 过滤，
+        导致「王者荣耀」这类分批场景在首次收货后从批量发货面板消失，剩余数量再也发不出去。
+        """
+        from fastapi_app.services.outsource_service import list_shippable_processes
+        from fastapi_app.shared_models import (
+            Order as OrderModel,
+            OrderItem as OrderItemModel,
+            Product as ProductModel,
+        )
+
+        engine, session_factory = await self._session(tmp_path)
+        try:
+            async with session_factory() as session:
+                session.add(ProductModel(id=1, name='王者荣耀', factory='湖北'))
+                session.add(OrderModel(id=1, order_no='PO-1', customer='C', product_id=1, quantity=100))
+                session.add(OrderItemModel(id=10, order_id=1, product_id=1, quantity=100))
+                # 发 40 收 40，目标 100 → 剩余 60，仍应可发
+                session.add(OrderOutsourceProcess(
+                    id=1, order_id=1, order_item_id=10, product_id=1, product_name='王者荣耀',
+                    process_type='电绣', sort_order=1, status='shipped',
+                    shipped_quantity=40, received_quantity=40,
+                ))
+                await session.commit()
+
+            async with session_factory() as session:
+                rows = await list_shippable_processes(session)
+
+            assert [(r['process_type'], r['target_qty'], r['shipped_qty'], r['remaining']) for r in rows] == [
+                ('电绣', 100, 40, 60),
+            ]
+        finally:
+            await engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_fully_received_not_listed(self, tmp_path):
+        """已收齐（收货累计 >= 目标）的工序不再出现在待发货列表。"""
+        from fastapi_app.services.outsource_service import list_shippable_processes
+        from fastapi_app.shared_models import (
+            Order as OrderModel,
+            OrderItem as OrderItemModel,
+            Product as ProductModel,
+        )
+
+        engine, session_factory = await self._session(tmp_path)
+        try:
+            async with session_factory() as session:
+                session.add(ProductModel(id=1, name='王者荣耀', factory='湖北'))
+                session.add(OrderModel(id=1, order_no='PO-1', customer='C', product_id=1, quantity=100))
+                session.add(OrderItemModel(id=10, order_id=1, product_id=1, quantity=100))
+                session.add(OrderOutsourceProcess(
+                    id=1, order_id=1, order_item_id=10, product_id=1, product_name='王者荣耀',
+                    process_type='电绣', sort_order=1, status='received',
+                    shipped_quantity=100, received_quantity=100,
+                ))
+                await session.commit()
+
+            async with session_factory() as session:
+                rows = await list_shippable_processes(session)
+
+            assert rows == []
         finally:
             await engine.dispose()
 

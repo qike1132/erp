@@ -25,7 +25,7 @@
             <span class="oso-proc-name">{{ p.process_type }}</span>
           </td>
           <td class="oso-col-qty">
-            <template v-if="canShip && remainingShipQty(p) > 0 && (p.received_quantity || 0) === 0">
+            <template v-if="canShip && remainingShipQty(p) > 0">
               <input
                 class="oso-qty-input"
                 type="number"

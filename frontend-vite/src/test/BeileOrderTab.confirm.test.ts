@@ -370,9 +370,169 @@ describe('BeileOrderTab 状态列与确认按钮行为', () => {
     // 默认确认状态为未确认
     expect(boHandle.confirmStatus.value).toBe('unconfirmed')
 
-    // 未确认 TAB 下确认状态列隐藏、确认操作列显示
-    const headers = wrapper.findAll('.bo-th').map((h) => h.text())
-    expect(headers).toContain('确认操作')
-    expect(headers).not.toContain('确认状态')
+    // 未确认 TAB 下：行内显示「确认订单」按钮，不显示确认状态徽章
+    const row = wrapper.findAll('.vl-row')[0]!
+    expect(row.find('.bo-confirm-btn').exists()).toBe(true)
+    expect(row.find('.bo-confirm-badge').exists()).toBe(false)
+  })
+
+  it('未下单订单：确认按钮禁用，且点击被前端门控拦截（不调接口 + 提示）', async () => {
+    mocks.queryData.value = makeListResponse({
+      total: 1,
+      unconfirmed_count: 1,
+      data: [
+        {
+          id: 101,
+          record_type: 'order',
+          confirmed: false,
+          confirmed_at: null,
+          confirmed_by: null,
+          order_no: 'PO-101',
+          customer: '未下单客户',
+          order_date: '2026-08-12',
+          product_name: '产品A',
+          product_id: 1,
+          quantity: 10,
+          deduct_quantity: 0,
+          deduct_stock: false,
+          note: '',
+          status: '待备货',
+          factories: ['湖北'],
+          items: [{ id: 1, product_name: '产品A', quantity: 10 }],
+          is_ordered: false,
+          purchase_order_qty: 0,
+          spare_quantity: 0,
+        },
+      ] as unknown as OrderListApiResponse['data'],
+    })
+
+    const wrapper = await mountTab()
+    ;boHandle.setConfirmStatus('unconfirmed')
+    await nextTick()
+
+    const btn = wrapper.find('.vl-row .bo-confirm-btn')
+    expect(btn.exists()).toBe(true)
+    // 按钮禁用（disabled 属性 + 文案/tooltip）
+    expect((btn.element as HTMLButtonElement).disabled).toBe(true)
+    expect(btn.attributes('title')).toBe('请先在采购中心完成下单')
+
+    // 点击禁用按钮不触发任何确认（disabled 元素在 jsdom 下不派发 click）
+    await btn.trigger('click')
+    await flushPromises()
+    expect(mocks.confirmBeileOrderMock).not.toHaveBeenCalled()
+
+    // 直接调用底层 handler，证明 composable 级门控：不发请求 + toast 提示
+    const item = boHandle.orders.value[0]!
+    expect(item.is_ordered).toBe(false)
+    await boHandle.handleConfirm(item)
+    await flushPromises()
+    expect(mocks.confirmBeileOrderMock).not.toHaveBeenCalled()
+    const { toast } = await import('@/composables/useToast')
+    expect(toast.error).toHaveBeenCalledWith('请先在采购中心完成下单')
+  })
+
+  it('已下单订单：数量列显示实际下单数量、「小义开单」列显示「已开单」、生产数量 = 订单数量+备品数量（备品独立列已删除）', async () => {
+    mocks.queryData.value = makeListResponse({
+      total: 1,
+      unconfirmed_count: 1,
+      data: [
+        {
+          id: 101,
+          record_type: 'order',
+          confirmed: false,
+          confirmed_at: null,
+          confirmed_by: null,
+          order_no: 'PO-101',
+          customer: '已下单客户',
+          order_date: '2026-08-12',
+          product_name: '产品A',
+          product_id: 1,
+          quantity: 10,
+          deduct_quantity: 0,
+          deduct_stock: false,
+          note: '',
+          status: '待备货',
+          factories: ['湖北'],
+          items: [{ id: 1, product_name: '产品A', quantity: 10 }],
+          is_ordered: true,
+          purchase_order_qty: 8,
+          spare_quantity: 2,
+          spare_rate: 5,
+        },
+      ] as unknown as OrderListApiResponse['data'],
+    })
+
+    const wrapper = await mountTab()
+    ;boHandle.setConfirmStatus('unconfirmed')
+    await nextTick()
+
+    const row = wrapper.findAll('.vl-row')[0]!
+    // 数量列：加粗显示实际下单数量 8（而非客户订单原数量 10）
+    const orderedQty = row.find('.bo-qty--ordered')
+    expect(orderedQty.exists()).toBe(true)
+    expect(orderedQty.text()).toBe('8')
+    // 生产数量：显示 订单数量 + 备品数量 = 8 + 2 = 10（备品独立列已删除）
+    expect(row.find('.bo-prod').text()).toBe('10')
+    // 「小义开单」列：is_ordered=true → 成功态「已开单」，无警示态
+    const openBadge = row.find('.bo-open-badge--done')
+    expect(openBadge.exists()).toBe(true)
+    expect(openBadge.text()).toBe('已开单')
+    expect(row.find('.bo-open-badge--pending').exists()).toBe(false)
+    // 确认按钮可用
+    const btn = row.find('.bo-confirm-btn')
+    expect(btn.exists()).toBe(true)
+    expect((btn.element as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('已确认的历史行（已确认 + 未下单，CR-1）：小义开单仅中性灰「未开单」（无警示色/无 tooltip）、数量走原口径、无确认按钮', async () => {
+    mocks.queryData.value = makeListResponse({
+      total: 1,
+      unconfirmed_count: 0,
+      data: [
+        {
+          id: 101,
+          record_type: 'order',
+          confirmed: true,
+          confirmed_at: '2026-08-12T10:00:00',
+          confirmed_by: 'admin',
+          order_no: 'PO-101',
+          customer: '历史客户',
+          order_date: '2026-08-12',
+          product_name: '产品A',
+          product_id: 1,
+          quantity: 10,
+          deduct_quantity: 0,
+          deduct_stock: false,
+          note: '',
+          status: '待备货',
+          factories: ['湖北'],
+          items: [{ id: 1, product_name: '产品A', quantity: 10 }],
+          is_ordered: false,
+          purchase_order_qty: 10,
+          spare_quantity: 0,
+        },
+      ] as unknown as OrderListApiResponse['data'],
+    })
+
+    const wrapper = await mountTab()
+    ;boHandle.setConfirmStatus('confirmed')
+    await nextTick()
+
+    const row = wrapper.findAll('.vl-row')[0]!
+    // 数量：原数量 10（订单级汇总），且已去徽章
+    const qtyCell = row.find('.bo-qty')
+    expect(qtyCell.text()).toBe('10')
+    expect(qtyCell.classes()).not.toContain('bo-qty--ordered')
+    // CR-1 守卫：已确认历史行不得出现警示态「未开单」，只用中性灰（不制造红色噪音）
+    expect(row.find('.bo-open-badge--pending').exists()).toBe(false)
+    expect(row.find('.bo-open-badge--done').exists()).toBe(false)
+    const muted = row.find('.bo-open-badge--muted')
+    expect(muted.exists()).toBe(true)
+    expect(muted.text()).toBe('未开单')
+    expect(muted.attributes('title')).toBeUndefined()
+    // 已确认：确认状态列显示「已确认」徽章
+    expect(row.find('.bo-confirm-badge--done').exists()).toBe(true)
+    // 已确认 TAB 下确认操作列隐藏；即便在未确认 TAB 也因 confirmed=true 走「已确认」分支，无按钮
+    expect(row.find('.bo-confirm-btn').exists()).toBe(false)
   })
 })

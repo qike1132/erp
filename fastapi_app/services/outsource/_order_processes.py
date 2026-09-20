@@ -241,15 +241,17 @@ async def update_order_process(db: AsyncSession, process_id: int, data: dict) ->
     return _serialize_order_process(p)
 
 async def ship_order_process(db: AsyncSession, process_id: int, shipped_quantity: int, username: str | None = None) -> dict:
-    """发货（分批）：每次发货追加流水并累加数量，校验不超过剩余目标数量。"""
+    """发货（分批）：每次发货追加流水并累加数量，校验不超过剩余目标数量。
+
+    收货只闭环「本批」：部分发货并收货后，剩余目标数量仍可继续发下一批，
+    故不以 received_quantity > 0 拒绝发货（否则未发满的工序收货后就再也发不出去）。
+    """
     # with_for_update：数量是「读-改-写」，必须锁行，否则并发发货会相互覆盖（丢失更新）
     p = await db.get(OrderOutsourceProcess, process_id, with_for_update=True)
     if not p:
         raise ValueError('外发工序不存在')
     if shipped_quantity <= 0:
         raise ValueError('发货数量必须大于 0')
-    if (p.received_quantity or 0) > 0:
-        raise ValueError('该工序已收货，无法再发货')
 
     shipped_now = p.shipped_quantity or 0
     target = await _process_target_quantity(db, p)

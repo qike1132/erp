@@ -248,12 +248,14 @@ async def list_unshipped_processes(db: AsyncSession) -> list[dict]:
 async def list_shippable_processes(db: AsyncSession) -> list[dict]:
     """跨全部湖北订单聚合「待发货」工序实例（批量发货面板数据源）。
 
-    待发货 = 已发 < 目标 且 未收货（received 为空/0）。返回 process_id 供批量发货定位实例。
+    待发货 = 已发 < 目标。返回 process_id 供批量发货定位实例。
+
+    收货是「分批闭环」而非「整单关闭」：部分发货并收货后剩余数量仍可继续发下一批，
+    故不得以 received_quantity > 0 排除（否则未发满的工序会从面板消失，无法再发货）。
     目标数量优先 SKU 明细（order_item.quantity），单 SKU 旧订单回退订单数量。
     """
     target_qty = func.coalesce(OrderItem.quantity, Order.quantity)
     shipped_qty = func.coalesce(OrderOutsourceProcess.shipped_quantity, 0)
-    received_qty = func.coalesce(OrderOutsourceProcess.received_quantity, 0)
     stmt = (
         select(
             OrderOutsourceProcess.id.label('process_id'),
@@ -269,7 +271,6 @@ async def list_shippable_processes(db: AsyncSession) -> list[dict]:
         .outerjoin(OrderItem, OrderItem.id == OrderOutsourceProcess.order_item_id)
         .where(
             Order.is_deleted.isnot(True),
-            received_qty == 0,
             shipped_qty < target_qty,
         )
         .order_by(

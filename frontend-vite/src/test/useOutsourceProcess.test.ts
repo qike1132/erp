@@ -146,15 +146,47 @@ describe('useOutsourceProcess 一键发货/收货（单请求批量）', () => {
   })
 
   it('一键发货只发 1 个批量请求，携带全部待发工序与数量', async () => {
-    vi.mocked(outsourceApi.shipProcessesBatch).mockResolvedValue({ success: true, total: 1, data: [] } as never)
+    vi.mocked(outsourceApi.shipProcessesBatch).mockResolvedValue({ success: true, total: 2, data: [] } as never)
     const hook = await setup(twoShippable)
 
     await hook.handleBulkShip()
 
-    // 仅「电绣」有待发剩余（10-4=6）；「转印」已收货，不再计入目标
+    // 「电绣」剩余 10-4=6；「转印」已收 2 但目标 10、已发 2，剩余 8 仍可发下一批
     expect(outsourceApi.shipProcessesBatch).toHaveBeenCalledTimes(1)
-    expect(outsourceApi.shipProcessesBatch).toHaveBeenCalledWith(1, [{ process_id: 1, quantity: 6 }])
+    expect(outsourceApi.shipProcessesBatch).toHaveBeenCalledWith(1, [
+      { process_id: 1, quantity: 6 },
+      { process_id: 2, quantity: 8 },
+    ])
     expect(toast.success).toHaveBeenCalled()
+  })
+
+  it('回归：已部分收货但未发满的工序仍可继续发货', async () => {
+    // 「王者荣耀」场景：目标 10、已发 4 已收 4 → 剩余 6 必须仍可发
+    const partiallyReceived = [
+      makeProcess({ id: 1, process_type: '电绣', status: 'shipped', shipped_quantity: 4, received_quantity: 4 }),
+    ]
+    vi.mocked(outsourceApi.shipProcessesBatch).mockResolvedValue({ success: true, total: 1, data: [] } as never)
+    const hook = await setup(partiallyReceived)
+
+    expect(hook.pendingCount.value).toBe(1)
+
+    await hook.handleBulkShip()
+
+    expect(outsourceApi.shipProcessesBatch).toHaveBeenCalledWith(1, [{ process_id: 1, quantity: 6 }])
+  })
+
+  it('已发满目标的工序不再参与一键发货', async () => {
+    const fullyShipped = [
+      makeProcess({ id: 1, process_type: '电绣', status: 'received', shipped_quantity: 10, received_quantity: 10 }),
+    ]
+    const hook = await setup(fullyShipped)
+
+    expect(hook.pendingCount.value).toBe(0)
+
+    await hook.handleBulkShip()
+
+    expect(outsourceApi.shipProcessesBatch).not.toHaveBeenCalled()
+    expect(toast.info).toHaveBeenCalledWith('没有待发货的工序')
   })
 
   it('一键收货只发 1 个批量请求', async () => {
