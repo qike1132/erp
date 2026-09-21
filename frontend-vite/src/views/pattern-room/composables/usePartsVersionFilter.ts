@@ -16,6 +16,7 @@ export function usePartsVersionFilter(
   projectId: Ref<number | null | undefined>,
   currentRoleId: Ref<number | null>,
   onSetFinalVersion: (versionNo: string) => void,
+  editingPartId?: Ref<number | undefined>,
 ) {
   const selectedVersion = ref<Record<string, string | null>>({})
   const expandedParts = ref<Set<string>>(new Set())
@@ -97,7 +98,18 @@ export function usePartsVersionFilter(
       const sel = selVer[name]
       const versionExists = sel ? group.some((i) => i.version_no === sel) : false
       const shouldFold = Boolean(sel) && versionExists && !expanded.has(name)
-      const filteredItems = shouldFold ? group.filter((i) => i.version_no === sel) : group
+      // 折叠态下若编辑行不在折叠显示集内，则只显示该编辑行：
+      // 复制版本后新行自动进入编辑态，需单行展示并隐藏其他版本
+      const editingItem =
+        editingPartId != null && editingPartId.value != null
+          ? group.find((i) => i.id === editingPartId.value)
+          : undefined
+      const filteredItems =
+        shouldFold && editingItem && editingItem.version_no !== sel
+          ? [editingItem]
+          : shouldFold
+            ? group.filter((i) => i.version_no === sel)
+            : group
 
       // 排序：按版本号数值升序，无版本号排最后
       const sorted = [...filteredItems].sort((a, b) => {

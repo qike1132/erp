@@ -49,7 +49,7 @@ import { computed, toRef } from 'vue'
 import UiSpinner from '@/components/ui/UiSpinner.vue'
 import PartsVersionRowV2 from './PartsVersionRowV2.vue'
 import type { PartDetail } from '@/api/patternRoom'
-import { PART_EDIT_FIELDS } from '../composables/usePartInlineEdit'
+import { PART_EDIT_FIELDS, injectPartInlineEdit } from '../composables/usePartInlineEdit'
 import { usePartsVersionFilter } from '../composables/usePartsVersionFilter'
 
 const props = defineProps<{
@@ -72,12 +72,16 @@ const finalVersionRef = toRef(props, 'finalVersion')
 const projectIdRef = computed(() => props.projectId)
 const currentRoleIdRef = toRef(props, 'currentRoleId')
 
+// 折叠计算需感知编辑态：复制版本后新行自动进入编辑态，须单行展示而非被折叠隐藏
+const { editingPartId } = injectPartInlineEdit()
+
 const { selectedVersion, toggleVersion, toggleExpand, groupedRows } = usePartsVersionFilter(
   partsByVersionRef,
   finalVersionRef,
   projectIdRef,
   currentRoleIdRef,
   (versionNo) => emit('set-final-version', versionNo),
+  editingPartId,
 )
 </script>
 

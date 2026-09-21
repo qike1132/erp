@@ -5,13 +5,13 @@
  * 内联编辑保存、角色 TAB 切换与增删。
  * 逻辑自 PatternRoomView.vue 原样搬移。
  */
-import { ref, type Ref } from 'vue'
+import { nextTick, ref, type Ref } from 'vue'
 import { toast } from '@/composables/useToast'
 import type { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { patternRoomApi } from '@/api/patternRoom'
 import type { BatchPartCreateRequest, PartDetail, PartUpdateRequest } from '@/api/patternRoom'
 import { getErrorMessage, getErrorStatus } from '@/types/errors'
-import { PART_EDIT_FIELDS, usePartInlineEdit, type PartEditData } from './usePartInlineEdit'
+import { createEmptyEditData, PART_EDIT_FIELDS, usePartInlineEdit, type PartEditData } from './usePartInlineEdit'
 import { createManageGuard } from './useManageGuard'
 import { resolveSamplingErrorMessage } from './useSamplingErrors'
 import type { useSamplingProject } from './useSamplingProject'
@@ -130,7 +130,8 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
     }
   }
 
-  /** 复制部位版本：在该部位名称下新增一个版本号 +1 的空白记录 */
+  /** 复制部位版本：在该部位名称下新增一个版本号 +1 的空白记录，
+   *  并将新版本设为该角色最终版本，随后自动进入新记录的编辑态 */
   async function onCopyPartVersion(part: PartDetail) {
     if (!requireManage()) return
     if (part.id == null) {
@@ -141,11 +142,31 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
       const res = await patternRoomApi.copyPartVersion(part.id)
       if (res.success) {
         toast.success(res.message || `已复制版本 ${res.version_no ?? ''}`)
+        // 新版本默认成为最终版本：必须先写库再拉取部位数据，
+        // 否则 parts-by-version 返回的 final_version 仍是旧版本，
+        // 折叠态会继续只显示旧版本行，新版本不可见
+        const currentRole = roleHook.getCurrentRole()
+        if (currentRole && res.version_no) {
+          await roleHook.setRoleCurrentVersion(
+            currentRole.id,
+            res.version_no,
+            currentRole.version,
+          )
+        }
         if (selectedProjectId.value) {
           await partHook.fetchPartsByVersion(
             selectedProjectId.value,
             roleHook.currentRoleId.value ?? undefined,
           )
+        }
+        // fetchPartsByVersion 整体替换 partsByVersion 会触发 usePartInlineEdit 的
+        // watch 清空 editingPartId，必须等 watch 冲刷完（nextTick）再设置，否则被冲掉
+        if (res.id != null) {
+          await nextTick()
+          editingPartId.value = res.id
+          Object.assign(editForm, createEmptyEditData())
+        } else {
+          toast.warning('已复制，但未返回新记录，请手动点击编辑')
         }
       } else {
         toast.error(res.message || '复制版本失败')
