@@ -18,7 +18,10 @@ RESTORE_LOCK_ID = 20240426
 BACKUP_LOCK_ID = 20240427
 BACKUP_OPERATION_TIMEOUT = int(os.environ.get('BACKUP_OPERATION_TIMEOUT', '1800'))
 _backup_in_progress: asyncio.Lock = asyncio.Lock()
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
+# 项目根目录：本文件位于 <root>/fastapi_app/services/backup/，故取 parents[3]。
+# 勿改成手写 parent 链——拆包时曾多算一层导致指向盘符根（D:\），
+# 备份打包/恢复到错误路径，上传文件与 config 密钥长期未进入备份。
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 UPLOADS_DIR = PROJECT_ROOT / 'static' / 'uploads'
 CONFIG_DIR = PROJECT_ROOT / 'config'
 ENV_FILE = PROJECT_ROOT / '.env.production'

@@ -6,7 +6,7 @@
   >
     <div class="cgl-card-left">
       <div
-        v-if="proj.product_image_url"
+        v-if="proj.product_image_url && !imgFailed"
         class="cgl-card-thumb"
         :class="{ 'is-loaded': thumbLoaded }"
         role="button"
@@ -24,6 +24,7 @@
           aria-hidden="true"
           decoding="async"
           fetchpriority="low"
+          @error="onBlurError"
         />
         <!-- 清晰缩略图：加载完成后淡入 -->
         <img
@@ -138,6 +139,14 @@ const emit = defineEmits<{
 /** 本卡片缩略图加载完成状态（内部管理，避免父级 Set 更新引发全量卡片重渲染） */
 const thumbLoaded = ref(false)
 
+/**
+ * 图片最终加载失败标记。
+ * 历史数据存在 storage_key 指向的文件已丢失的情况（URL 仍非空但服务端 404），
+ * 缩略图与原图均失败后置真，切换到 T 恤占位分支，
+ * 否则骨架屏动画会永久闪烁（thumbLoaded 恒为 false）。
+ */
+const imgFailed = ref(false)
+
 /** 时间格式化缓存（同一 ISO 字符串多次渲染复用结果） */
 const _timeFormatCache = new Map<string, string>()
 function formatTime(iso: string): string {
@@ -156,25 +165,33 @@ function formatTime(iso: string): string {
  * 缩略图加载失败时回退到原图。
  * - 历史数据（缩略图未生成）会出现 404，需要回退
  * - 设置 data-fallback 标记位防止反复重试；回退图加载成功同样触发淡入
+ * - 原图也失败（文件已丢失）时置 imgFailed，切换到占位分支停止骨架屏
  */
 function onThumbError(e: Event, proj: { product_image_url?: string | null }) {
   const img = e.target as HTMLImageElement
   if (img.dataset.fallback || !proj.product_image_url) {
-    img.src = ''
+    imgFailed.value = true
     return
   }
   img.dataset.fallback = '1'
   img.src = proj.product_image_url
 }
+
+/** 模糊占位图加载失败：仅隐藏自身，不影响清晰图的加载与回退链路 */
+function onBlurError(e: Event) {
+  ;(e.target as HTMLImageElement).style.display = 'none'
+}
 </script>
 
 <style scoped>
-/* 项目卡片（固定高度，配合虚拟滚动） */
+/* 项目卡片（固定高度，配合虚拟滚动）
+   高度消费父级 .cgl-list-scroll 定义的 --pr-card-h（单一事实来源），
+   本组件不再硬编码，回退值与 CustomerProjectArea 的 DEFAULT_CARD_H 保持一致 */
 .cgl-project-card {
   display: flex;
   gap: 10px;
   width: 100%;
-  height: 216px;
+  height: var(--pr-card-h, 216px);
   margin-bottom: 6px;
   padding: 8px;
   box-sizing: border-box;
