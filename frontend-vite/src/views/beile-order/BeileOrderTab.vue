@@ -27,6 +27,8 @@
                 <div class="bo-th bo-th-center" style="width: 150px;">下单时间</div>
                 <div class="bo-th bo-th-center" style="width: 170px;">客户名称</div>
                 <div class="bo-th bo-th-center" style="width: 100px;">工厂</div>
+                <!-- 产品名称：搜索态专属列（后端按 product 参数收窄 items 到命中 SKU） -->
+                <div v-if="appliedProduct" class="bo-th bo-th-center" style="width: 180px;">产品名称</div>
                 <div class="bo-th bo-th-center" style="width: 90px;">SKU</div>
                 <div class="bo-th bo-th-center" style="width: 110px;">订单数量</div>
                 <div class="bo-th bo-th-center" style="width: 110px;" title="生产数量 = 订单数量 + 备品数量">生产数量</div>
@@ -55,6 +57,7 @@
                       :highlight-id="highlightId"
                       :selectable="canPrint"
                       :selected="selectedIds.has(rowKey(item))"
+                      :has-keyword="!!appliedProduct"
                       @open="openDetail"
                       @confirm="handleConfirm"
                       @toggle-select="toggleSelect"
@@ -157,6 +160,7 @@ function measureListArea() {
 function tableMinWidth() {
   let w = 90 + 150 + 170 + 100 + 90 + 110 + 110 + 110 + 160
   if (canPrint.value) w += 40
+  if (appliedProduct.value) w += 180
   if (confirmStatus.value !== 'unconfirmed') w += 110
   if (confirmStatus.value !== 'confirmed') w += 130
   return w

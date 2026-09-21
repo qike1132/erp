@@ -29,6 +29,11 @@
       <span class="bo-cell-main">{{ item.factories?.join(', ') || '湖北' }}</span>
     </div>
 
+    <!-- 产品名称：搜索态专属列（后端已把 items 收窄为命中 SKU，此处直接读收窄结果） -->
+    <div v-if="hasKeyword" class="bo-td bo-td-center bo-td-nowrap" style="width: 180px;">
+      <span class="bo-search-name" :title="searchName">{{ searchName }}</span>
+    </div>
+
     <!-- SKU 数：多 SKU 订单用徽章提示，点击同样进入详情 -->
     <div class="bo-td bo-td-center" style="width: 90px;">
       <span class="bo-sku-count" :class="{ 'bo-sku-count--multi': skuCount > 1 }">{{ skuCount }} 项</span>
@@ -118,6 +123,8 @@ const props = defineProps<{
   selectable: boolean
   /** 当前行是否被选中 */
   selected: boolean
+  /** 搜索态：展示「产品名称」列（命中产品名，后端已收窄 items） */
+  hasKeyword?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -135,6 +142,18 @@ const skuCount = computed(() => (props.item.items || []).length)
 const totalOrderQty = computed(() => rowTotalOrderQty(props.item))
 /** 订单级「生产数量」汇总；未下单 → null */
 const totalProdQty = computed(() => rowTotalProductionQty(props.item))
+
+/**
+ * 搜索态「命中产品名」：items 已由后端收窄为命中的 SKU，多 SKU 用顿号连接；
+ * 无 items 明细（如备货行）时回落订单级 product_name。
+ */
+const searchName = computed(() => {
+  const names = (props.item.items || [])
+    .map((s) => s.product_name)
+    .filter((n): n is string => !!n)
+  if (names.length > 0) return [...new Set(names)].join('、')
+  return props.item.product_name || '-'
+})
 
 /** 行点击：交给父组件打开详情弹窗（300ms 防连点） */
 let lastOpenAt = 0
@@ -251,6 +270,14 @@ function handleConfirm(item: BeileOrderRowType) {
 .bo-cell-main {
   font-weight: 600;
   color: var(--color-text);
+}
+/* 搜索态「产品名称」：命中的产品名（多 SKU 顿号连接），过长省略 */
+.bo-search-name {
+  font-weight: 600;
+  color: var(--color-text);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .bo-cell-muted {
   color: var(--color-text-muted);
