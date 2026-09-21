@@ -175,9 +175,14 @@ for f in $staged; do
             #      —— 它是解析 DSN 的代码，不是硬编码凭据。判据：运算符后紧跟
             #      「标识符 + ( 或 [」，即函数调用/下标取值。
             #      （若不放宽，本仓自己的 scripts/diag/runtime_mode_probe.py 会被拦住）
+            #   ③ 同 ② 的变体：右侧是**布尔合并表达式**，如
+            #      `effective_encryption_password = encrypt_password or get_...()`
+            #      —— 仍是变量合并而非字面量，但 `or` 打断了 ② 的「标识符+(」判据。
+            #      判据：标识符 + or/and + 标识符（可带调用）。
+            #      （若不放宽，备份加密决策行会被反复拦住；该行右侧无任何字面值）
             pwd_matches=$(grep -Ei -e "$pwd_pattern" "$tmpf" | \
                 grep -Eiv -e '(<[^>]+>|YOUR_|CHANGE_?ME|changeme|placeholder|example|xxxx|dummy|fake|testkey|your[-_])' | \
-                grep -Eiv -e '[:=][[:space:]]*[A-Za-z0-9_.]*[\(\[]')
+                grep -Eiv -e '[:=][[:space:]]*[A-Za-z0-9_.]*([\(\[]|[[:space:]]+(or|and)[[:space:]]+[A-Za-z0-9_.]*[\(\[]?)')
             if [ -n "$pwd_matches" ]; then
                 secret_hits="${secret_hits}  ✗ $f  —— 疑似明文口令/密钥赋值
 "

@@ -308,6 +308,22 @@ async def _do_create_full_backup(
             }
 
         zip_path = tmpdir_path / 'backup.zip'
+        # P0-1 加密决策单点化：服务层只认显式入参 + 环境变量，绝不生成随机密钥。
+        # 决策须前置到打包之前：敏感配置（jwt 私钥 / .env.production）仅在加密备份中
+        # 打包，需在写 zip 前确定本次是否加密。
+        # - encrypt=False / None（未显式要求加密）：环境变量有密码则加密，否则明文+告警
+        # - encrypt=True：必须有密码（入参或环境变量），否则直接报错（宁可失败不可造出打不开的备份）
+        if encrypt is True and not (encrypt_password or get_backup_encryption_password()):
+            raise BackupError('请求加密全量备份但未配置密码（encrypt_password 参数 / BACKUP_ENCRYPTION_PASSWORD 环境变量均未提供）')
+        if encrypt is False:
+            effective_encryption_password = None
+        else:
+            effective_encryption_password = encrypt_password or get_backup_encryption_password()
+            if encrypt is None and not effective_encryption_password:
+                logger.warning("create_full_backup 未显式指定 encrypt，且无可用密码，本次备份不加密")
+        # 敏感配置随加密包分发：密钥泄露风险与备份加密绑定，明文包始终排除
+        include_sensitive_config = bool(effective_encryption_password)
+
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED, compresslevel=3) as zf:
             if pg_dump_available and dump_path.is_file():
                 zf.write(dump_path, 'database/dump.sql.gz')
@@ -337,7 +353,7 @@ async def _do_create_full_backup(
             for file_name, relative_path in config_files_to_check:
                 file_path = CONFIG_DIR / file_name
                 if file_path.is_file():
-                    if should_exclude_file(file_path, relative_path):
+                    if should_exclude_file(file_path, relative_path, include_sensitive_config):
                         config_files_excluded.append(relative_path)
                         logger.info(f"排除配置文件: {relative_path}")
                     else:
@@ -346,6 +362,7 @@ async def _do_create_full_backup(
             manifest['includes']['config_files'] = config_files_added
             if config_files_excluded:
                 manifest['includes']['config_files_excluded'] = config_files_excluded
+            manifest['includes']['sensitive_config_included'] = include_sensitive_config
             if progress_cb:
                 await progress_cb('backup_config', 1.0, f'配置 {len(config_files_added)} 个')
 
@@ -400,17 +417,7 @@ async def _do_create_full_backup(
         if progress_cb:
             await progress_cb('generate_checksum', 1.0, '校验和已生成')
 
-        # P0-1 加密决策单点化：服务层只认显式入参 + 环境变量，绝不生成随机密钥。
-        # - encrypt=False / None（未显式要求加密）：环境变量有密码则加密，否则明文+告警
-        # - encrypt=True：必须有密码（入参或环境变量），否则直接报错（宁可失败不可造出打不开的备份）
-        if encrypt is True and not (encrypt_password or get_backup_encryption_password()):
-            raise BackupError('请求加密全量备份但未配置密码（encrypt_password 参数 / BACKUP_ENCRYPTION_PASSWORD 环境变量均未提供）')
-        if encrypt is False:
-            effective_encryption_password = None
-        else:
-            effective_encryption_password = encrypt_password or get_backup_encryption_password()
-            if encrypt is None and not effective_encryption_password:
-                logger.warning("create_full_backup 未显式指定 encrypt，且无可用密码，本次备份不加密")
+        # 加密决策已在打包前完成（见上方 include_sensitive_config），此处只执行
         if effective_encryption_password:
             # ITER-1 T3：新写备份统一走分块格式（chunked-v1），旧格式仍可读。
             # 回退开关 BACKUP_ENCRYPTION_CHUNKED=false，无需回滚代码。

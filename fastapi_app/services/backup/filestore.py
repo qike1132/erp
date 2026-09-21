@@ -5,7 +5,9 @@ import logging
 import zipfile
 
 from ._constants import (
+    _EXCLUDE_FILES,
     _SENSITIVE_AND_EXCLUDED_FILES,
+    _SENSITIVE_CONFIG_FILES,
     CONFIG_DIR,
     UPLOADS_DIR,
 )
@@ -13,19 +15,28 @@ from ._constants import (
 logger = logging.getLogger(__name__)
 
 
-def should_exclude_file(file_path, relative_path: str) -> bool:
+def should_exclude_file(file_path, relative_path: str, include_sensitive: bool = False) -> bool:
     """检查文件是否应该被排除在备份之外
 
     Args:
         file_path: 文件的完整路径
         relative_path: 相对于配置目录或上传目录的相对路径
+        include_sensitive: 本次备份是否加密。加密备份才打包敏感配置
+            （jwt 私钥 / .env.production）——密钥随包分发，必须与备份加密绑定；
+            明文备份仍排除，避免私钥以明文形式落盘。
+            注意 BACKUP_EXCLUDE_FILES 的显式排除项始终生效，不受此开关影响。
 
     Returns:
         True 如果文件应该被排除，否则 False
     """
-    # 检查是否为敏感配置文件
-    if relative_path in _SENSITIVE_AND_EXCLUDED_FILES:
-        logger.debug(f"排除敏感/排除文件: {relative_path}")
+    # BACKUP_EXCLUDE_FILES 显式排除项：任何情况下都不打包
+    if relative_path in _EXCLUDE_FILES:
+        logger.debug(f"排除显式配置项: {relative_path}")
+        return True
+
+    # 敏感配置文件：仅加密备份打包（明文包排除，防私钥明文泄露）
+    if relative_path in _SENSITIVE_CONFIG_FILES and not include_sensitive:
+        logger.info(f"明文备份排除敏感文件: {relative_path}")
         return True
 
     # 检查文件扩展名是否在排除列表中
