@@ -15,18 +15,14 @@
         <colgroup>
           <col style="width: 100px" />
           <col style="width: 60px" />
-          <col style="width: 110px" />
-          <col style="width: 110px" />
-          <col style="width: 110px" />
+          <col v-for="field in PART_EDIT_FIELDS" :key="field.key" :style="{ width: field.width }" />
           <col style="width: 110px" />
         </colgroup>
         <thead>
           <tr>
             <th class="pvt-part-name-th">部位名称</th>
             <th>版本</th>
-            <th>供应商</th>
-            <th>布料名称</th>
-            <th>色号</th>
+            <th v-for="field in PART_EDIT_FIELDS" :key="field.key">{{ field.label }}</th>
             <th class="pvt-actions-th">功能</th>
           </tr>
         </thead>
@@ -34,17 +30,12 @@
           <template v-for="group in groupedRows" :key="group.part_name">
             <PartsVersionRowV2
               :group="group"
-              :editing-part-id="editingPartId"
-              :edit-form="editForm"
               :can-manage="canManage"
               :selected-version="selectedVersion"
               :final-version="finalVersion"
               @toggle-expand="toggleExpand"
               @toggle-version="toggleVersion"
               @set-final-version="$emit('set-final-version', $event)"
-              @start-edit="$emit('start-edit', $event)"
-              @save-edit="$emit('save-edit', $event)"
-              @cancel-edit="$emit('cancel-edit')"
               @copy-version="$emit('copy-version', $event)"
               @delete-version="$emit('delete-version', $event)"
             />
@@ -60,7 +51,7 @@ import { computed, toRef } from 'vue'
 import UiSpinner from '@/components/ui/UiSpinner.vue'
 import PartsVersionRowV2 from './PartsVersionRowV2.vue'
 import type { PartDetail } from '@/api/patternRoom'
-import type { PartEditData } from '../composables/usePartInlineEdit'
+import { PART_EDIT_FIELDS } from '../composables/usePartInlineEdit'
 import { usePartsVersionFilter } from '../composables/usePartsVersionFilter'
 
 const props = defineProps<{
@@ -70,19 +61,12 @@ const props = defineProps<{
   currentRoleId: number | null
   partLoading: boolean
   canManage: boolean
-  /** 正在编辑的部位 ID（内联编辑状态由父级上移管理） */
-  editingPartId: number | undefined
-  /** 内联编辑表单 */
-  editForm: PartEditData
 }>()
 
 defineEmits<{
   'set-final-version': [versionNo: string]
   'copy-version': [part: PartDetail]
   'delete-version': [part: PartDetail]
-  'start-edit': [part: PartDetail]
-  'cancel-edit': []
-  'save-edit': [part: PartDetail]
 }>()
 
 const partsByVersionRef = toRef(props, 'partsByVersion')

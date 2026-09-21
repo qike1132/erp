@@ -38,8 +38,6 @@
             <ProjectDetailPanel
               :project="projectHook.currentProject.value"
               :parts-by-version="partHook.partsByVersion.value"
-              :editing-part-id="editingPartId"
-              :edit-form="editForm"
               :version-list="partHook.versionList.value"
               :final-version="partHook.finalVersion.value"
               :version-loading="versionHook.loading.value"
@@ -51,9 +49,6 @@
               @set-final-version="onSetFinalVersion"
               @copy-version="onCopyPartVersion"
               @delete-version="onDeleteVersion"
-              @start-edit="onStartEdit"
-              @cancel-edit="onCancelEdit"
-              @save-edit="onSaveEdit"
               @select-role="onSelectRole"
               @add-role="onAddRole"
               @remove-role="onRemoveRole"
@@ -137,6 +132,7 @@ import { usePatternRoomProjectActions } from './composables/usePatternRoomProjec
 import { usePatternRoomPartActions } from './composables/usePatternRoomPartActions'
 import { usePatternRoomLayout } from './composables/usePatternRoomLayout'
 import { usePatternRoomGroupFilter } from './composables/usePatternRoomGroupFilter'
+import { providePartInlineEdit } from './composables/usePartInlineEdit'
 
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { usePermission } from '@/composables/usePermission'
@@ -233,9 +229,6 @@ const {
 
 const {
   partFormVisible,
-  // 部位内联编辑状态：由 usePatternRoomPartActions → usePartInlineEdit 提供，
-  // 需下发到 ProjectDetailPanel → PartsVersionTableV2 → PartsVersionRowV2，
-  // 并接管其 start-edit / cancel-edit 事件，否则"修改版本"按钮无效。
   editingPartId,
   editForm,
   openCreatePartDialog,
@@ -257,6 +250,18 @@ const {
   partHook,
   versionHook,
   roleHook,
+})
+
+// 部位内联编辑态经 provide/inject 直达 PartsVersionRowV2，
+// 不再经 ProjectDetailPanel → PartsVersionTableV2 两层透传 props/events。
+// 注意：提供的必须是带权限守卫的 onStartEdit/onSaveEdit（而非 usePartInlineEdit
+// 的原始函数），否则行内编辑会绕过 canManage 校验。
+providePartInlineEdit({
+  editingPartId,
+  editForm,
+  startEdit: onStartEdit,
+  saveEdit: onSaveEdit,
+  cancelEdit: onCancelEdit,
 })
 
 watch(selectedProjectId, (newId) => {

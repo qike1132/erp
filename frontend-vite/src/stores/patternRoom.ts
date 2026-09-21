@@ -12,13 +12,14 @@
  * 本 store 为 pattern-room 提供同等能力，且不改动现有 composable 的对外 API。
  */
 import { defineStore } from 'pinia'
-import { patternRoomApi, type GroupedListResponse } from '@/api/patternRoom'
+import { patternRoomApi, type GroupedListResponse, type ProjectStatus } from '@/api/patternRoom'
 import type { GroupedListParams } from '@/api/patternRoom'
 import { patternMakerApi, type PatternMaker } from '@/api/patternMaker'
 
-/** 缓存新鲜期：30s 内直接命中，不发请求 */
-const GROUPED_STALE_MS = 30_000
-const MAKERS_STALE_MS = 30_000
+/** 缓存新鲜期：30s 内直接命中，不发请求（分组列表与版师列表共用同一新鲜窗口） */
+export const PATTERN_ROOM_STALE_MS = 30_000
+/** 分组列表每页条数（分页请求与本地分页状态共用，避免两处各写 20） */
+export const PATTERN_ROOM_PAGE_SIZE = 20
 /** sessionStorage 持久化 key（仅当前标签页有效，关闭标签页自动清除） */
 const SESSION_KEY = 'fb_pattern_room_cache_v1'
 /** 持久化体积上限：超限跳过写入，避免撑爆 sessionStorage（默认 5MB） */
@@ -40,9 +41,53 @@ interface PersistedShape {
   savedAt: number
 }
 
-/** 分组查询缓存 key：归一化 status/keyword/page，避免等价请求产生多个缓存条目 */
-function makeGroupedKey(keyword?: string, status?: string, page?: number): string {
+/** 分组查询缓存 key：归一化 status/keyword/page，避免等价请求产生多个缓存条目。
+ *  导出供 useCustomerSampling 复用，避免"视图守卫 key"与"缓存 key"两处规则漂移。 */
+export function makeGroupedKey(keyword?: string, status?: ProjectStatus, page?: number): string {
   return JSON.stringify([status ?? 'in_progress', (keyword ?? '').trim(), page ?? 1])
+}
+
+/** SWR 命中结果：cache-fresh 无需请求；cache-stale 已渲染旧数据并已发起后台刷新；miss 需前台加载 */
+export type SwrOutcome = 'cache-fresh' | 'cache-stale' | 'miss'
+
+/**
+ * 统一的 SWR 读取策略（KD-1：消除 useCustomerSampling 与 usePatternRoomPatternMakers
+ * 各自实现一遍的"新鲜→直取／过期→先渲染旧数据再后台刷新"分支）。
+ *
+ * 调用方职责：提供快照读取、拉取、数据落地与"当前视图是否仍有效"的守卫。
+ * 本函数不持有状态，仅编排既有 store 能力，因此行为与原先两处内联实现完全一致。
+ *
+ * @param getSnapshot 读取缓存快照（无缓存返回 null）
+ * @param fetch 真实请求（含并发去重，由 store 提供）
+ * @param apply 将数据写入调用方状态
+ * @param isCurrent 后台刷新返回时判断视图是否仍是发起时的查询，避免旧响应覆盖新数据
+ * @param logLabel 后台刷新失败时的完整日志前缀（由调用方保持各自原有文案）
+ */
+export async function resolveSwr<T>(opts: {
+  getSnapshot: () => { data: T; isFresh: boolean } | null
+  fetch: () => Promise<T | null>
+  apply: (data: T) => void
+  isCurrent: () => boolean
+  logLabel: string
+}): Promise<SwrOutcome> {
+  const { getSnapshot, fetch, apply, isCurrent, logLabel } = opts
+
+  const snapshot = getSnapshot()
+  if (!snapshot) return 'miss'
+
+  // 命中缓存：先渲染（可能是旧数据，保证不闪 loading）
+  apply(snapshot.data)
+  if (snapshot.isFresh) return 'cache-fresh'
+
+  // 过期缓存：后台静默刷新，仅在视图仍是该查询时应用结果
+  void fetch()
+    .then((data) => {
+      if (data && isCurrent()) apply(data)
+    })
+    .catch((e) => {
+      console.error(`${logLabel}:`, e)
+    })
+  return 'cache-stale'
 }
 
 function loadPersisted(): PersistedShape | null {
@@ -103,12 +148,12 @@ export const usePatternRoomStore = defineStore('patternRoom', () => {
   /** 读取分组列表缓存快照；无缓存返回 null，存在则附带是否新鲜标记 */
   function getGroupedSnapshot(
     keyword?: string,
-    status?: string,
+    status?: ProjectStatus,
     page?: number,
   ): { data: GroupedListResponse; isFresh: boolean } | null {
     const entry = groupedCache[makeGroupedKey(keyword, status, page)]
     if (!entry) return null
-    return { data: entry.data, isFresh: Date.now() - entry.loadedAt < GROUPED_STALE_MS }
+    return { data: entry.data, isFresh: Date.now() - entry.loadedAt < PATTERN_ROOM_STALE_MS }
   }
 
   /**
@@ -117,14 +162,14 @@ export const usePatternRoomStore = defineStore('patternRoom', () => {
    */
   async function fetchGrouped(
     keyword?: string,
-    status?: string,
+    status?: ProjectStatus,
     page?: number,
   ): Promise<GroupedListResponse | null> {
     const key = makeGroupedKey(keyword, status, page)
     const existing = _inflightGrouped.get(key)
     if (existing) return existing
 
-    const params: GroupedListParams = { per_page: 20 }
+    const params: GroupedListParams = { per_page: PATTERN_ROOM_PAGE_SIZE }
     const kw = (keyword ?? '').trim()
     if (kw) params.keyword = kw
     // 未显式传 status 时不发送（后端默认 in_progress），保持调用方原有请求契约
@@ -162,7 +207,7 @@ export const usePatternRoomStore = defineStore('patternRoom', () => {
     if (!patternMakersCache) return null
     return {
       data: patternMakersCache.data,
-      isFresh: Date.now() - patternMakersCache.loadedAt < MAKERS_STALE_MS,
+      isFresh: Date.now() - patternMakersCache.loadedAt < PATTERN_ROOM_STALE_MS,
     }
   }
 

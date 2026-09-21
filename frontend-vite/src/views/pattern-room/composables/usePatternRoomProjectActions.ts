@@ -9,7 +9,9 @@ import { ref, type Ref } from 'vue'
 import { toast } from '@/composables/useToast'
 import type { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { patternRoomApi } from '@/api/patternRoom'
-import type { ProjectCreateRequest, ProjectUpdateRequest } from '@/api/patternRoom'
+import type { ProjectCreateRequest, ProjectUpdateRequest, ProjectStatus } from '@/api/patternRoom'
+import { getErrorMessage } from '@/types/errors'
+import { createManageGuard } from './useManageGuard'
 import type { useCustomerSampling } from './useCustomerSampling'
 import type { useSamplingProject } from './useSamplingProject'
 
@@ -31,7 +33,7 @@ interface UsePatternRoomProjectActionsOptions {
   /** 搜索关键词 */
   searchKeyword: Ref<string>
   /** 状态筛选 */
-  statusFilter: Ref<string>
+  statusFilter: Ref<ProjectStatus>
   /** 是否窄屏 */
   isNarrow: Ref<boolean>
   /** 窄屏抽屉展开状态 */
@@ -57,6 +59,9 @@ export function usePatternRoomProjectActions(options: UsePatternRoomProjectActio
     onSelectProject,
   } = options
 
+  /** 统一写权限守卫（替代 6 处重复的 canManage 检查） */
+  const requireManage = createManageGuard(canManage)
+
   /** 项目表单弹窗可见性 */
   const projectFormVisible = ref(false)
   /** 项目表单模式：新增 / 编辑 */
@@ -65,10 +70,7 @@ export function usePatternRoomProjectActions(options: UsePatternRoomProjectActio
   const pendingProjectImage = ref<File | null>(null)
 
   function openCreateProjectDialog() {
-    if (!canManage.value) {
-      toast.warning('无操作权限')
-      return
-    }
+    if (!requireManage()) return
     projectFormMode.value = 'create'
     formPatternMakerId.value = null
     pendingProjectImage.value = null
@@ -76,10 +78,7 @@ export function usePatternRoomProjectActions(options: UsePatternRoomProjectActio
   }
 
   function openEditProjectDialog() {
-    if (!canManage.value) {
-      toast.warning('无操作权限')
-      return
-    }
+    if (!requireManage()) return
     if (!projectHook.currentProject.value) return
     projectFormMode.value = 'edit'
     formPatternMakerId.value = projectHook.currentProject.value.pattern_maker_id ?? null
@@ -89,10 +88,7 @@ export function usePatternRoomProjectActions(options: UsePatternRoomProjectActio
 
   /** 从产品卡片点击「编辑」：加载该产品详情后打开编辑弹窗（支持编辑未选中卡片） */
   async function onEditProjectFromCard(id: number) {
-    if (!canManage.value) {
-      toast.warning('无操作权限')
-      return
-    }
+    if (!requireManage()) return
     selectedProjectId.value = id
     const detail = await projectHook.fetchDetail(id)
     if (!detail) return
@@ -106,10 +102,7 @@ export function usePatternRoomProjectActions(options: UsePatternRoomProjectActio
 
   /** 从产品卡片点击「完成」：确认后标记项目为已完成并刷新分组列表 */
   async function onCompleteProjectFromCard(id: number) {
-    if (!canManage.value) {
-      toast.warning('无操作权限')
-      return
-    }
+    if (!requireManage()) return
     const ok = await confirmDialog.confirm(
       '确认将该打样项目标记为完成？',
       '标记后项目状态变为「已完成」，仍可继续编辑。',
@@ -121,22 +114,19 @@ export function usePatternRoomProjectActions(options: UsePatternRoomProjectActio
         toast.success('已标记为完成')
         // 静默刷新分组列表：状态变更是增量更新，不能用 loading 全面板交换
         // （v-if 摘除重挂载会丢失虚拟列表滚动位置与组内分页状态，视觉上等同整页刷新）
-        await groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, groupHook.currentPage.value, true, true)
+        await groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, groupHook.currentPage.value, 'silent')
       } else {
         toast.error(res.message || '标记完成失败')
       }
     } catch (e) {
       console.error('[PatternRoomView] 标记完成失败:', e)
-      toast.error('标记完成失败')
+      toast.error(getErrorMessage(e, '标记完成失败'))
     }
   }
 
   /** 从产品卡片点击「取消」：确认后将打样项目移至已取消 */
   async function onCancelProjectFromCard(id: number) {
-    if (!canManage.value) {
-      toast.warning('无操作权限')
-      return
-    }
+    if (!requireManage()) return
     const ok = await confirmDialog.confirm(
       '确认取消该打样项目？',
       '取消后项目将移至「已取消」TAB，仍可恢复为进行中。',
@@ -147,13 +137,13 @@ export function usePatternRoomProjectActions(options: UsePatternRoomProjectActio
       if (res.success) {
         toast.success('已取消')
         // 静默刷新分组列表：同完成操作，避免 loading 全面板交换丢失页面状态与滚动位置
-        await groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, groupHook.currentPage.value, true, true)
+        await groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, groupHook.currentPage.value, 'silent')
       } else {
         toast.error(res.message || '取消失败')
       }
     } catch (e) {
       console.error('[PatternRoomView] 取消项目失败:', e)
-      toast.error('取消失败')
+      toast.error(getErrorMessage(e, '取消失败'))
     }
   }
 
@@ -179,7 +169,7 @@ export function usePatternRoomProjectActions(options: UsePatternRoomProjectActio
             if (upRes.file_id != null) proj.product_image_file_id = upRes.file_id
           }
           // 刷新分组列表，让卡片缩略图显示新图片
-          void groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, groupHook.currentPage.value, true)
+          void groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, groupHook.currentPage.value, 'fresh')
         } else {
           toast.warning(failMessage)
         }
@@ -199,7 +189,7 @@ export function usePatternRoomProjectActions(options: UsePatternRoomProjectActio
       projectFormVisible.value = false
       pendingProjectImage.value = null
       // 刷新分组列表并选中新项目（保持当前状态筛选）
-      await groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, groupHook.currentPage.value, true)
+      await groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, groupHook.currentPage.value, 'fresh')
       onSelectProject(newProjectId)
       // 后台上传暂存图片（不阻塞成功反馈）
       if (pendingImage) {
@@ -222,7 +212,7 @@ export function usePatternRoomProjectActions(options: UsePatternRoomProjectActio
       pendingProjectImage.value = null
       // 刷新详情与分组列表（保持当前状态筛选）
       await projectHook.fetchDetail(projectId)
-      await groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, groupHook.currentPage.value, true)
+      await groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, groupHook.currentPage.value, 'fresh')
       // 后台上传暂存图片（不阻塞成功反馈）
       if (pendingImage) {
         uploadPendingImage(projectId, pendingImage, '图片上传失败，其他信息已更新')
@@ -234,10 +224,7 @@ export function usePatternRoomProjectActions(options: UsePatternRoomProjectActio
 
   /** 删除项目（级联删除部位/版本/日志，带二次确认） */
   async function confirmDeleteProject() {
-    if (!canManage.value) {
-      toast.warning('无操作权限')
-      return
-    }
+    if (!requireManage()) return
     if (!projectHook.currentProject.value) return
     const proj = projectHook.currentProject.value
     const ok = await confirmDialog.confirm(
@@ -251,7 +238,7 @@ export function usePatternRoomProjectActions(options: UsePatternRoomProjectActio
       toast.success('删除成功')
       selectedProjectId.value = null
       projectHook.clearCurrent()
-      await groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, groupHook.currentPage.value, true)
+      await groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, groupHook.currentPage.value, 'fresh')
     } else {
       toast.error(projectHook.error.value || '删除失败')
     }

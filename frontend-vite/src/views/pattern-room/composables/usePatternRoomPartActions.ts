@@ -11,7 +11,9 @@ import type { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { patternRoomApi } from '@/api/patternRoom'
 import type { BatchPartCreateRequest, PartDetail, PartUpdateRequest } from '@/api/patternRoom'
 import { getErrorMessage, getErrorStatus } from '@/types/errors'
-import { usePartInlineEdit } from './usePartInlineEdit'
+import { PART_EDIT_FIELDS, usePartInlineEdit, type PartEditData } from './usePartInlineEdit'
+import { createManageGuard } from './useManageGuard'
+import { resolveSamplingErrorMessage } from './useSamplingErrors'
 import type { useSamplingProject } from './useSamplingProject'
 import type { useSamplingPart } from './useSamplingPart'
 import type { useSamplingVersion } from './useSamplingVersion'
@@ -58,14 +60,14 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
     roleHook,
   } = options
 
+  /** 统一写权限守卫（替代 9 处重复的 canManage 检查） */
+  const requireManage = createManageGuard(canManage)
+
   /** 部位批量创建弹窗可见性 */
   const partFormVisible = ref(false)
 
   function openCreatePartDialog() {
-    if (!canManage.value) {
-      toast.warning('无操作权限')
-      return
-    }
+    if (!requireManage()) return
     partFormVisible.value = true
   }
 
@@ -97,7 +99,7 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
       }
     } catch (e) {
       console.error('[PatternRoomView] 批量创建部位失败:', e)
-      toast.error('批量创建部位失败')
+      toast.error(getErrorMessage(e, '批量创建部位失败'))
     } finally {
       partHook.submitting.value = false
     }
@@ -105,10 +107,7 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
 
   /** 设置最终版本：更新当前角色的 current_version */
   async function onSetFinalVersion(versionNo: string) {
-    if (!canManage.value) {
-      toast.warning('无操作权限')
-      return
-    }
+    if (!requireManage()) return
     if (!selectedProjectId.value) return
     const currentRole = roleHook.getCurrentRole()
     if (!currentRole) {
@@ -127,16 +126,13 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
       }
     } catch (e) {
       console.error('[PatternRoomView] 设置最终版本失败:', e)
-      toast.error('设置最终版本失败')
+      toast.error(getErrorMessage(e, '设置最终版本失败'))
     }
   }
 
   /** 复制部位版本：在该部位名称下新增一个版本号 +1 的空白记录 */
   async function onCopyPartVersion(part: PartDetail) {
-    if (!canManage.value) {
-      toast.warning('无操作权限')
-      return
-    }
+    if (!requireManage()) return
     if (part.id == null) {
       toast.warning('该记录为历史快照，无法复制版本')
       return
@@ -178,10 +174,7 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
   )
 
   function onStartEdit(part: PartDetail) {
-    if (!canManage.value) {
-      toast.warning('无操作权限')
-      return
-    }
+    if (!requireManage()) return
     startEdit(part)
   }
 
@@ -191,10 +184,7 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
 
   /** 保存内联编辑：退出编辑态并将当前表单数据提交到 onSaveEditData */
   function onSaveEdit(part: PartDetail) {
-    if (!canManage.value) {
-      toast.warning('无操作权限')
-      return
-    }
+    if (!requireManage()) return
     if (part.id == null) {
       toast.warning('该记录为历史快照，无法编辑')
       return
@@ -203,32 +193,23 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
   }
 
   /** 保存内联编辑的载荷处理（表单数据由 usePartInlineEdit 注入） */
-  async function onSaveEditData(
-    part: PartDetail,
-    data: { supplier_name: string; fabric_name: string; fabric_color_no: string },
-  ) {
-    if (!canManage.value) {
-      toast.warning('无操作权限')
-      return
-    }
+  async function onSaveEditData(part: PartDetail, data: PartEditData) {
+    if (!requireManage()) return
     if (part.id == null) {
       toast.warning('该记录为历史快照，无法编辑')
       return
     }
     try {
+      // 载荷与本地 patch 均从字段元数据派生，新增字段无需改动此处
       const payload: PartUpdateRequest = {
         version: part.version ?? 0,
-        supplier_name: data.supplier_name || null,
-        fabric_name: data.fabric_name || null,
-        fabric_color_no: data.fabric_color_no || null,
+        ...Object.fromEntries(PART_EDIT_FIELDS.map((f) => [f.key, data[f.key] || null])),
       }
       const res = await patternRoomApi.updatePart(part.id, payload)
       if (res.success) {
         toast.success('保存成功')
         partHook.patchPart(part.id, {
-          supplier_name: data.supplier_name || '',
-          fabric_name: data.fabric_name || '',
-          fabric_color_no: data.fabric_color_no || '',
+          ...Object.fromEntries(PART_EDIT_FIELDS.map((f) => [f.key, data[f.key] || ''])),
           // 回写乐观锁新版本号，避免第二次编辑携带旧 version 触发 409
           version: res.version ?? (part.version + 1),
         })
@@ -237,11 +218,10 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
       }
     } catch (e) {
       console.error('[PatternRoomView] 保存部位编辑失败:', e)
-      const status = getErrorStatus(e)
-      const errMsg = status === 409 ? '数据已被他人更新，请刷新后重试' : '保存失败'
-      toast.error(errMsg)
+      // 统一走中心化解析：409 文案不变，非 409 时保留后端 detail（原先被泛化文案丢弃）
+      toast.error(resolveSamplingErrorMessage(e, '保存失败'))
       // 409 乐观锁冲突：局部 patch 未更新 version，需全量刷新获取最新数据
-      if (status === 409 && selectedProjectId.value) {
+      if (getErrorStatus(e) === 409 && selectedProjectId.value) {
         await partHook.fetchPartsByVersion(
           selectedProjectId.value,
           roleHook.currentRoleId.value ?? undefined,
@@ -252,10 +232,7 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
 
   /** 删除部位版本 */
   async function onDeleteVersion(part: PartDetail) {
-    if (!canManage.value) {
-      toast.warning('无操作权限')
-      return
-    }
+    if (!requireManage()) return
     if (part.id == null) {
       toast.warning('该记录为历史快照，无法删除')
       return
@@ -284,7 +261,7 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
       }
     } catch (e) {
       console.error('[PatternRoomView] 删除部位版本失败:', e)
-      toast.error('删除部位版本失败')
+      toast.error(getErrorMessage(e, '删除部位版本失败'))
     }
   }
 
@@ -306,10 +283,7 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
   }
 
   async function onAddRole(roleName: string) {
-    if (!canManage.value) {
-      toast.warning('无操作权限')
-      return
-    }
+    if (!requireManage()) return
     if (!selectedProjectId.value) return
     const res = await roleHook.createRole(roleName)
     if (res) {
@@ -320,10 +294,7 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
   }
 
   async function onRemoveRole(role: RoleRemovePayload) {
-    if (!canManage.value) {
-      toast.warning('无操作权限')
-      return
-    }
+    if (!requireManage()) return
     if (role.is_default) {
       toast.warning('默认角色不可删除')
       return

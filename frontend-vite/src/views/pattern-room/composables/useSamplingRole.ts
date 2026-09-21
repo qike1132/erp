@@ -13,6 +13,12 @@ import { toast } from '@/composables/useToast'
 import { getErrorStatus } from '@/types/errors'
 import { resolveSamplingErrorMessage } from './useSamplingErrors'
 
+/** 角色操作的 409/404 专用文案（5 处调用共用，避免逐处复制漂移） */
+const ROLE_ERROR_OPTS = {
+  conflict: '该角色已被他人更新，请刷新后重试',
+  notFound: '角色不存在，可能已被删除',
+} as const
+
 export function useSamplingRole(projectId: Ref<number | null>) {
   /** 角色列表（按 sort_order 升序） */
   const roles = ref<RoleBrief[]>([])
@@ -56,11 +62,7 @@ export function useSamplingRole(projectId: Ref<number | null>) {
     } catch (e) {
       if (reqId !== _requestId) return
       console.error('[useSamplingRole] 查询角色列表失败:', e)
-      const message = resolveSamplingErrorMessage(
-        e,
-        '加载角色列表失败',
-        { conflict: '该角色已被他人更新，请刷新后重试', notFound: '角色不存在，可能已被删除' },
-      )
+      const message = resolveSamplingErrorMessage(e, '加载角色列表失败', ROLE_ERROR_OPTS)
       error.value = message
       toast.error(message)
       roles.value = []
@@ -86,11 +88,7 @@ export function useSamplingRole(projectId: Ref<number | null>) {
       return res
     } catch (e) {
       console.error('[useSamplingRole] 新增角色失败:', e)
-      const message = resolveSamplingErrorMessage(
-        e,
-        '新增角色失败',
-        { conflict: '该角色已被他人更新，请刷新后重试', notFound: '角色不存在，可能已被删除' },
-      )
+      const message = resolveSamplingErrorMessage(e, '新增角色失败', ROLE_ERROR_OPTS)
       error.value = message
       toast.error(message)
       return null
@@ -112,11 +110,7 @@ export function useSamplingRole(projectId: Ref<number | null>) {
       return res
     } catch (e) {
       console.error('[useSamplingRole] 改名角色失败:', e)
-      const message = resolveSamplingErrorMessage(
-        e,
-        '改名失败',
-        { conflict: '该角色已被他人更新，请刷新后重试', notFound: '角色不存在，可能已被删除' },
-      )
+      const message = resolveSamplingErrorMessage(e, '改名失败', ROLE_ERROR_OPTS)
       error.value = message
       toast.error(message)
       // 乐观锁冲突：自动刷新列表
@@ -148,11 +142,7 @@ export function useSamplingRole(projectId: Ref<number | null>) {
       return res
     } catch (e) {
       console.error('[useSamplingRole] 设置角色最终版本失败:', e)
-      const message = resolveSamplingErrorMessage(
-        e,
-        '设置最终版本失败',
-        { conflict: '该角色已被他人更新，请刷新后重试', notFound: '角色不存在，可能已被删除' },
-      )
+      const message = resolveSamplingErrorMessage(e, '设置最终版本失败', ROLE_ERROR_OPTS)
       error.value = message
       toast.error(message)
       if (getErrorStatus(e) === 409 && projectId.value != null) {
@@ -177,11 +167,7 @@ export function useSamplingRole(projectId: Ref<number | null>) {
       return res
     } catch (e) {
       console.error('[useSamplingRole] 删除角色失败:', e)
-      const message = resolveSamplingErrorMessage(
-        e,
-        '删除角色失败',
-        { conflict: '该角色已被他人更新，请刷新后重试', notFound: '角色不存在，可能已被删除' },
-      )
+      const message = resolveSamplingErrorMessage(e, '删除角色失败', ROLE_ERROR_OPTS)
       error.value = message
       toast.error(message)
       return null

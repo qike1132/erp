@@ -6,26 +6,27 @@
  */
 import { ref } from 'vue'
 import { useDebouncedSearch } from '@/composables/useDebouncedSearch'
+import type { ProjectStatus } from '@/api/patternRoom'
 import type { useCustomerSampling } from './useCustomerSampling'
 
 type GroupHook = ReturnType<typeof useCustomerSampling>
 
 export function usePatternRoomGroupFilter(groupHook: GroupHook) {
   /** 状态筛选：in_progress/completed/cancelled */
-  const statusFilter = ref<string>('in_progress')
+  const statusFilter = ref<ProjectStatus>('in_progress')
   /** 搜索关键词 */
   const searchKeyword = ref('')
 
-  function onStatusChange(val: string) {
+  function onStatusChange(val: ProjectStatus) {
     statusFilter.value = val
     // 所有状态现在都用分组卡片视图 + 分页，所以直接加载（用户主动筛选 → 强制刷新）
-    groupHook.loadGrouped(searchKeyword.value || undefined, val, 1, true)
+    groupHook.loadGrouped(searchKeyword.value || undefined, val, 1, 'fresh')
   }
 
   /** 分组视图翻页 */
   function onGroupPageChange(page: number) {
     if (page === groupHook.currentPage.value) return
-    groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, page, true)
+    groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, page, 'fresh')
   }
 
   /** 搜索（防抖） */
@@ -33,7 +34,7 @@ export function usePatternRoomGroupFilter(groupHook: GroupHook) {
   function onSearch(keyword: string) {
     searchKeyword.value = keyword
     debounceSearch(() => {
-      groupHook.loadGrouped(keyword || undefined, statusFilter.value, 1, true)
+      groupHook.loadGrouped(keyword || undefined, statusFilter.value, 1, 'fresh')
     })
   }
 

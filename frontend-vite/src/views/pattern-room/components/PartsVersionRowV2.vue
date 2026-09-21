@@ -43,35 +43,15 @@
         </button>
       </div>
     </td>
-    <td>
+    <td v-for="field in PART_EDIT_FIELDS" :key="field.key">
       <input
         v-if="editingPartId === part.id"
-        v-model="editForm.supplier_name"
+        v-model="editForm[field.key]"
         class="pvt-inline-input"
-        placeholder="供应商"
-        maxlength="200"
+        :placeholder="field.placeholder"
+        :maxlength="field.inlineMaxlength"
       />
-      <template v-else>{{ part.supplier_name || '-' }}</template>
-    </td>
-    <td>
-      <input
-        v-if="editingPartId === part.id"
-        v-model="editForm.fabric_name"
-        class="pvt-inline-input"
-        placeholder="布料名称"
-        maxlength="200"
-      />
-      <template v-else>{{ part.fabric_name || '-' }}</template>
-    </td>
-    <td>
-      <input
-        v-if="editingPartId === part.id"
-        v-model="editForm.fabric_color_no"
-        class="pvt-inline-input"
-        placeholder="色号"
-        maxlength="50"
-      />
-      <template v-else>{{ part.fabric_color_no || '-' }}</template>
+      <template v-else>{{ part[field.key] || '-' }}</template>
     </td>
     <td class="pvt-actions-col">
       <div v-if="editingPartId === part.id" class="pvt-row-actions">
@@ -79,7 +59,7 @@
           type="button"
           class="pvt-action-btn pvt-action-btn--success"
           title="保存"
-          @click="$emit('save-edit', part)"
+          @click="saveEdit(part)"
         >
           <FontAwesomeIcon icon="check" aria-hidden="true" />
         </button>
@@ -87,7 +67,7 @@
           type="button"
           class="pvt-action-btn pvt-action-btn--muted"
           title="取消"
-          @click="$emit('cancel-edit')"
+          @click="cancelEdit()"
         >
           <FontAwesomeIcon icon="times" aria-hidden="true" />
         </button>
@@ -108,7 +88,7 @@
           class="pvt-action-btn pvt-action-btn--warning"
           :title="part.id == null ? '历史快照，无法编辑' : '修改版本'"
           :disabled="!canManage || part.id == null"
-          @click="$emit('start-edit', part)"
+          @click="startEdit(part)"
         >
           <FontAwesomeIcon icon="pen" aria-hidden="true" />
         </button>
@@ -128,27 +108,24 @@
 <script setup lang="ts">
 import type { PartDetail } from '@/api/patternRoom'
 import type { GroupedRow } from '../composables/usePartsVersionFilter'
-import type { PartEditData } from '../composables/usePartInlineEdit'
+import { PART_EDIT_FIELDS, injectPartInlineEdit } from '../composables/usePartInlineEdit'
 
 defineProps<{
   group: GroupedRow
-  editingPartId: number | undefined
   canManage: boolean
   selectedVersion: Record<string, string | null>
   /** 当前角色最终版本（用于隐藏"已最终"行的设最终按钮） */
   finalVersion: string
 }>()
 
-// 行内编辑表单：父组件传入同一 reactive 对象，就地编辑字段
-const editForm = defineModel<PartEditData>('editForm', { required: true })
+// 编辑态（editingPartId / editForm / startEdit / saveEdit / cancelEdit）经
+// provide/inject 直连，避免经 ProjectDetailPanel、PartsVersionTableV2 两层透传
+const { editingPartId, editForm, startEdit, saveEdit, cancelEdit } = injectPartInlineEdit()
 
 defineEmits<{
   'toggle-expand': [partName: string]
   'toggle-version': [partName: string, versionNo: string]
   'set-final-version': [versionNo: string]
-  'start-edit': [part: PartDetail]
-  'save-edit': [part: PartDetail]
-  'cancel-edit': []
   'copy-version': [part: PartDetail]
   'delete-version': [part: PartDetail]
 }>()

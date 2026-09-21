@@ -45,14 +45,9 @@
         :current-role-id="currentRoleId"
         :part-loading="partLoading"
         :can-manage="canManage"
-        :editing-part-id="editingPartId"
-        :edit-form="editForm"
         @set-final-version="$emit('set-final-version', $event)"
         @copy-version="$emit('copy-version', $event)"
         @delete-version="$emit('delete-version', $event)"
-        @start-edit="$emit('start-edit', $event)"
-        @cancel-edit="$emit('cancel-edit')"
-        @save-edit="$emit('save-edit', $event)"
       />
     </template>
   </div>
@@ -63,7 +58,6 @@ import EmptyState from './EmptyState.vue'
 import RoleTabs from './RoleTabs.vue'
 import PartsVersionTableV2 from './PartsVersionTableV2.vue'
 import type { ProjectDetailResponse, PartDetail, RoleBrief } from '@/api/patternRoom'
-import type { PartEditData } from '../composables/usePartInlineEdit'
 
 defineProps<{
   project: ProjectDetailResponse | null
@@ -74,17 +68,12 @@ defineProps<{
   canPrint: boolean
   roles: RoleBrief[]
   currentRoleId: number | null
-  editingPartId: number | undefined
-  editForm: PartEditData
 }>()
 
 defineEmits<{
   'set-final-version': [versionNo: string]
   'copy-version': [part: PartDetail]
   'delete-version': [part: PartDetail]
-  'start-edit': [part: PartDetail]
-  'cancel-edit': []
-  'save-edit': [part: PartDetail]
   'select-role': [roleId: number]
   'add-role': [roleName: string]
   'remove-role': [role: RoleBrief]

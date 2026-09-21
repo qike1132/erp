@@ -35,26 +35,29 @@
 </template>
 
 <script setup lang="ts">
+import type { ProjectStatus } from '@/api/patternRoom'
+
 defineProps<{
   /** 当前状态筛选（受控：由父级 statusFilter 传入，避免父子状态漂移） */
-  statusFilter: string
+  statusFilter: ProjectStatus
   /** 是否可新建打样（无权限时隐藏按钮） */
   canManage: boolean
 }>()
 
 const emit = defineEmits<{
   search: [keyword: string]
-  'status-change': [value: string]
+  'status-change': [value: ProjectStatus]
   'add-project': []
 }>()
 
-const STATUS_OPTIONS = [
+/** 状态胶囊选项（value 受 ProjectStatus 约束，标签改动集中在此处） */
+const STATUS_OPTIONS: readonly { value: ProjectStatus; label: string }[] = [
   { value: 'in_progress', label: '进行中' },
   { value: 'completed', label: '已完成' },
   { value: 'cancelled', label: '已取消' },
-] as const
+]
 
-function onStatusChange(value: string) {
+function onStatusChange(value: ProjectStatus) {
   emit('status-change', value)
 }
 

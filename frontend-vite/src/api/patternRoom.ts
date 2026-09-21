@@ -15,6 +15,9 @@ import { get, post, put, del, upload } from './request'
 /** 变更类型：新增 / 修改 / 删除 */
 export type ChangeType = 'add' | 'modify' | 'delete'
 
+/** 打样项目状态（收敛裸字符串，避免各处字面量拼写漂移） */
+export type ProjectStatus = 'in_progress' | 'completed' | 'cancelled'
+
 // ==================== 通用响应 ====================
 
 /** 操作响应（创建/更新/删除/上传）
@@ -212,7 +215,7 @@ export interface ProjectSummary {
   product_image_blur_url: string | null
   current_version: string
   /** 状态：in_progress / completed / cancelled */
-  status: string
+  status: ProjectStatus
   /** 完成时间（状态为 completed 时有值） */
   completed_at: string | null
   /** 部位数量 */
@@ -261,7 +264,7 @@ export interface ProjectDetailResponse {
   pattern_maker_name: string
   current_version: string
   /** 状态：in_progress / completed / cancelled */
-  status: string
+  status: ProjectStatus
   remark: string
   created_by_name: string | null
   created_at: string
@@ -383,7 +386,7 @@ export const patternRoomApi = {
     put<ActionResponse>(`/pattern-room/projects/${id}`, data),
 
   // ---------- 5b. 更新项目状态（完成/进行中/取消） ----------
-  updateProjectStatus: (id: number, status: string) =>
+  updateProjectStatus: (id: number, status: ProjectStatus) =>
     put<ActionResponse>(`/pattern-room/projects/${id}/status`, { status }),
 
   // ---------- 6. 删除打样项目 ----------

@@ -62,7 +62,7 @@ import CustomerGroupSearchBar from './CustomerGroupSearchBar.vue'
 import CustomerMakerPanel from './CustomerMakerPanel.vue'
 import CustomerProjectArea from './CustomerProjectArea.vue'
 import ImagePreviewModal from './ImagePreviewModal.vue'
-import type { PatternMakerGroup } from '@/api/patternRoom'
+import type { PatternMakerGroup, ProjectStatus } from '@/api/patternRoom'
 import { useProjectGrouping } from '../composables/useProjectGrouping'
 
 const props = defineProps<{
@@ -72,7 +72,7 @@ const props = defineProps<{
   selectedProjectId: number | null
   canManage: boolean
   /** 当前状态筛选（透传给搜索栏做受控高亮） */
-  statusFilter: string
+  statusFilter: ProjectStatus
   groupPage: number
   groupPages: number
   groupTotal: number
@@ -85,7 +85,7 @@ defineEmits<{
   'cancel-project': [id: number]
   search: [keyword: string]
   'add-project': []
-  'status-change': [value: string]
+  'status-change': [value: ProjectStatus]
   'update-group-page': [page: number]
 }>()
 

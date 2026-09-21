@@ -7,11 +7,20 @@
  * 数据层接入 patternRoom Store（SWR 缓存）：
  * - 30s 内新鲜数据直接返回，不发请求 → 多次进入打样间不再重复加载
  * - 缓存过期时先展示旧数据 + 后台静默刷新，不闪「加载中」
- * - force=true 时跳过缓存（写操作 / 筛选切换后保证数据新鲜）
+ * - mode='fresh' 跳过缓存（写操作 / 筛选切换后保证数据新鲜）
  */
 import { ref, computed } from 'vue'
-import type { PatternMakerGroup, GroupedListResponse } from '@/api/patternRoom'
-import { usePatternRoomStore } from '@/stores/patternRoom'
+import type { PatternMakerGroup, GroupedListResponse, ProjectStatus } from '@/api/patternRoom'
+import { usePatternRoomStore, makeGroupedKey, resolveSwr, PATTERN_ROOM_PAGE_SIZE } from '@/stores/patternRoom'
+
+/**
+ * 分组列表加载模式（替代原先两个布尔标志参数，调用点无需回读实现即可读懂语义）：
+ * - cache：优先命中 SWR 缓存（默认；新鲜直接返回，过期先渲染旧数据再后台刷新）
+ * - fresh：跳过缓存强制请求，前台 loading（写操作 / 用户主动筛选后）
+ * - silent：跳过缓存强制请求，且不置 loading（卡片级增量写操作后的列表同步，
+ *   避免 v-if 分支交换导致整个列表面板摘除重挂载、丢失滚动位置与组内分页状态）
+ */
+export type GroupedLoadMode = 'cache' | 'fresh' | 'silent'
 
 export function useCustomerSampling() {
   /** 版师分组列表（按组内最新更新时间倒序，"未分类"在最后） */
@@ -28,15 +37,10 @@ export function useCustomerSampling() {
   const pages = ref(0)
   /** 分页：当前页 */
   const currentPage = ref(1)
-  /** 每页条数 */
-  const perPage = 20
+  /** 每页条数（与 store 请求分页共用同一常量，避免两处各写 20） */
+  const perPage = PATTERN_ROOM_PAGE_SIZE
 
   const store = usePatternRoomStore()
-
-  /** 归一化查询 key（与 store 内部一致，用于后台刷新应用守卫） */
-  function normalizeKey(keyword?: string, status?: string, page?: number): string {
-    return JSON.stringify([status ?? 'in_progress', (keyword ?? '').trim(), page ?? 1])
-  }
 
   /** 最近一次前台加载对应的查询 key：后台刷新结果仅在该 key 仍是当前视图时应用，
    *  避免用户切换筛选/翻页后旧响应回写覆盖新数据 */
@@ -61,36 +65,36 @@ export function useCustomerSampling() {
    * @param keyword 关键词（匹配序列号/产品名）
    * @param status 状态筛选（in_progress/completed/cancelled），为空表示全部
    * @param page 页码（默认 1）
-   * @param force 跳过缓存强制请求（写操作 / 用户主动筛选后传 true）
-   * @param silent 静默刷新：不置 loading（避免 v-if 分支交换导致整个列表面板
-   *   摘除重挂载——视觉上等同整页刷新，且虚拟列表滚动位置/组内分页状态丢失）。
-   *   适用于卡片级增量写操作（完成/取消项目）后的列表同步；失败时保留当前视图仅记日志。
+   * @param mode 加载模式，默认 'cache'。语义见 GroupedLoadMode 定义。
    */
-  async function loadGrouped(keyword?: string, status?: string, page?: number, force = false, silent = false): Promise<void> {
+  async function loadGrouped(
+    keyword?: string,
+    status?: ProjectStatus,
+    page?: number,
+    mode: GroupedLoadMode = 'cache',
+  ): Promise<void> {
+    // 由 mode 推导原有两个开关，保持内部逻辑与行为完全不变
+    const force = mode !== 'cache'
+    const silent = mode === 'silent'
     const reqId = ++_requestId
-    const key = normalizeKey(keyword, status, page)
-    // 非强制时优先命中缓存：
-    // - 新鲜缓存 → 直接渲染，零请求零 loading
-    // - 过期缓存 → 先渲染旧数据，后台静默刷新（不闪 loading）
+    const key = makeGroupedKey(keyword, status, page)
+    // 三态路径均需更新 viewKey：否则 force 路径下遗留的旧 key 会让在途的
+    // 后台刷新误判"视图未变"而把旧筛选的数据回写到新视图
+    viewKey = key
+    // 非强制时优先命中缓存：策略由 store 的 resolveSwr 统一实现（KD-1），
+    // 语义为「新鲜 → 直接渲染零请求；过期 → 先渲染旧数据 + 后台静默刷新；未命中 → 前台加载」
     if (!force) {
-      const snapshot = store.getGroupedSnapshot(keyword, status, page)
-      if (snapshot) {
-        viewKey = key
-        applyData(snapshot.data)
-        if (snapshot.isFresh) return
-        void store.fetchGrouped(keyword, status, page)
-          .then((res) => {
-            // 仅当视图仍是该查询时应用，避免覆盖用户后续切换的筛选/页码
-            if (res && viewKey === key && reqId === _requestId) applyData(res)
-          })
-          .catch((e) => {
-            console.error('[useCustomerSampling] 后台刷新分组列表失败:', e)
-          })
-        return
-      }
+      const outcome = await resolveSwr({
+        getSnapshot: () => store.getGroupedSnapshot(keyword, status, page),
+        fetch: () => store.fetchGrouped(keyword, status, page),
+        apply: applyData,
+        // 仅当视图仍是该查询（且未被更新的请求取代）时应用后台刷新结果
+        isCurrent: () => viewKey === key && reqId === _requestId,
+        logLabel: '[useCustomerSampling] 后台刷新分组列表失败',
+      })
+      if (outcome !== 'miss') return
     }
 
-    viewKey = key
     if (!silent) loading.value = true
     error.value = null
     try {

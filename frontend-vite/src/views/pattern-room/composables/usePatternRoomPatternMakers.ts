@@ -9,7 +9,9 @@ import { toast } from '@/composables/useToast'
 import type { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { patternMakerApi } from '@/api/patternMaker'
 import type { PatternMaker } from '@/api/patternMaker'
-import { usePatternRoomStore } from '@/stores/patternRoom'
+import { getErrorMessage } from '@/types/errors'
+import { usePatternRoomStore, resolveSwr } from '@/stores/patternRoom'
+import { createManageGuard } from './useManageGuard'
 
 type ConfirmDialog = ReturnType<typeof useConfirmDialog>
 
@@ -23,6 +25,8 @@ export function usePatternRoomPatternMakers(
   const formPatternMakerId = ref<number | null>(null)
 
   const store = usePatternRoomStore()
+  /** 统一写权限守卫（替代 2 处重复的 canManage 检查） */
+  const requireManage = createManageGuard(canManage)
   /** 前台加载序号：后台静默刷新结果仅在无新加载时应用 */
   let seq = 0
 
@@ -33,22 +37,18 @@ export function usePatternRoomPatternMakers(
   async function loadPatternMakers(force = false): Promise<void> {
     // 无管理权限不请求版师列表：接口要求 customer_sampling_manage，避免导航竞态下触发 403
     if (!canManage.value) return
+    // SWR 策略由 store 的 resolveSwr 统一实现（KD-1），与 useCustomerSampling 共用同一分支
     if (!force) {
-      const snapshot = store.getMakersSnapshot()
-      if (snapshot) {
-        patternMakers.value = snapshot.data
-        if (snapshot.isFresh) return
-        // 过期缓存：先展示旧数据，后台静默刷新
-        const seqAtStart = seq
-        void store.fetchMakers()
-          .then((data) => {
-            if (data && seq === seqAtStart) patternMakers.value = data
-          })
-          .catch((e) => {
-            console.error('[PatternRoomView] 后台刷新版师列表失败:', e)
-          })
-        return
-      }
+      const seqAtStart = seq
+      const outcome = await resolveSwr({
+        getSnapshot: () => store.getMakersSnapshot(),
+        fetch: () => store.fetchMakers(),
+        apply: (data) => { patternMakers.value = data },
+        // 前台加载会递增 seq，据此丢弃已过期的后台刷新结果
+        isCurrent: () => seq === seqAtStart,
+        logLabel: '[PatternRoomView] 后台刷新版师列表失败',
+      })
+      if (outcome !== 'miss') return
     }
 
     seq += 1
@@ -62,10 +62,7 @@ export function usePatternRoomPatternMakers(
 
   /** 新增版师：调用接口、刷新列表并选中新增项 */
   async function handleAddPatternMaker(name: string) {
-    if (!canManage.value) {
-      toast.warning('无操作权限')
-      return
-    }
+    if (!requireManage()) return
     try {
       const res = await patternMakerApi.create({ name })
       if (res.success) {
@@ -80,16 +77,13 @@ export function usePatternRoomPatternMakers(
       }
     } catch (e) {
       console.error('[PatternRoomView] 新增版师失败:', e)
-      toast.error('版师添加失败')
+      toast.error(getErrorMessage(e, '版师添加失败'))
     }
   }
 
   /** 删除版师：调用接口、刷新列表，若删除的是当前选中项则清空选择 */
   async function handleDeletePatternMaker(id: number) {
-    if (!canManage.value) {
-      toast.warning('无操作权限')
-      return
-    }
+    if (!requireManage()) return
     const ok = await confirmDialog.confirm(
       '确认删除该版师？',
       '关联的打样项目将变为「未分类」，不会删除项目数据。',
@@ -110,7 +104,7 @@ export function usePatternRoomPatternMakers(
       }
     } catch (e) {
       console.error('[PatternRoomView] 删除版师失败:', e)
-      toast.error('版师删除失败')
+      toast.error(getErrorMessage(e, '版师删除失败'))
     }
   }
 

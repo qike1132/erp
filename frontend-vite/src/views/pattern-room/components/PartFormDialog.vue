@@ -4,14 +4,16 @@ import UiDialog from '@/components/ui/UiDialog.vue'
 import UiButton from '@/components/ui/UiButton.vue'
 import { toast } from '@/composables/useToast'
 import type { BatchPartCreateRequest } from '@/api/patternRoom'
+import { PART_EDIT_FIELDS, createEmptyEditData, type PartEditData } from '../composables/usePartInlineEdit'
 
-/** 批量新增部位表单行 */
-interface PartFormRow {
+/**
+ * 批量新增部位表单行。
+ * `uid` 用于 v-for 稳定 key：原先用 index 作 key，删除中间行时输入框组件会被
+ * 复用错位（焦点/原生输入状态串行）。
+ */
+interface PartFormRow extends PartEditData {
+  uid: number
   part_name: string
-  supplier_id: number | null
-  supplier_name: string
-  fabric_name: string
-  fabric_color_no: string
 }
 
 const props = defineProps<{
@@ -24,15 +26,16 @@ const emit = defineEmits<{
   'submit-batch': [data: BatchPartCreateRequest]
 }>()
 
+/** 行 uid 自增计数器（仅用于 key，无业务含义） */
+let nextRowUid = 1
+
 const rows = ref<PartFormRow[]>([createEmptyRow()])
 
 function createEmptyRow(): PartFormRow {
   return {
+    uid: nextRowUid++,
     part_name: '',
-    supplier_id: null,
-    supplier_name: '',
-    fabric_name: '',
-    fabric_color_no: '',
+    ...createEmptyEditData(),
   }
 }
 
@@ -51,8 +54,8 @@ function addRow() {
   rows.value.push(createEmptyRow())
 }
 
-function removeRow(index: number) {
-  rows.value.splice(index, 1)
+function removeRow(uid: number) {
+  rows.value = rows.value.filter((r) => r.uid !== uid)
   if (rows.value.length === 0) {
     rows.value.push(createEmptyRow())
   }
@@ -77,11 +80,9 @@ function handleSubmit() {
 
   const items = filledRows.map((r) => ({
     part_name: r.part_name.trim(),
-    supplier_id: r.supplier_id,
-    supplier_name: r.supplier_name.trim() || null,
-    fabric_name: r.fabric_name.trim() || null,
-    fabric_color_no: r.fabric_color_no.trim() || null,
-  }))
+    supplier_id: null,
+    ...Object.fromEntries(PART_EDIT_FIELDS.map((f) => [f.key, r[f.key].trim() || null])),
+  })) as BatchPartCreateRequest['items']
 
   emit('submit-batch', { items })
 }
@@ -103,16 +104,19 @@ function closeDialog() {
         <span class="batch-part-form__cell batch-part-form__cell--name">
           部位名称 <span class="required-mark">*</span>
         </span>
-        <span class="batch-part-form__cell batch-part-form__cell--supplier">供应商</span>
-        <span class="batch-part-form__cell batch-part-form__cell--fabric">布料名称</span>
-        <span class="batch-part-form__cell batch-part-form__cell--color">色号</span>
+        <span
+          v-for="field in PART_EDIT_FIELDS"
+          :key="field.key"
+          class="batch-part-form__cell"
+          :class="`batch-part-form__cell--${field.modifier}`"
+        >{{ field.label }}</span>
         <span class="batch-part-form__cell batch-part-form__cell--action" />
       </div>
 
       <div class="batch-part-form__body">
         <div
-          v-for="(row, index) in rows"
-          :key="index"
+          v-for="row in rows"
+          :key="row.uid"
           class="batch-part-form__row"
         >
           <div class="batch-part-form__cell batch-part-form__cell--name">
@@ -125,33 +129,18 @@ function closeDialog() {
             />
           </div>
 
-          <div class="batch-part-form__cell batch-part-form__cell--supplier">
+          <div
+            v-for="field in PART_EDIT_FIELDS"
+            :key="field.key"
+            class="batch-part-form__cell"
+            :class="`batch-part-form__cell--${field.modifier}`"
+          >
             <input
-              v-model="row.supplier_name"
+              v-model="row[field.key]"
               class="batch-part-input"
-              placeholder="供应商"
+              :placeholder="field.placeholder"
               type="text"
-              maxlength="100"
-            />
-          </div>
-
-          <div class="batch-part-form__cell batch-part-form__cell--fabric">
-            <input
-              v-model="row.fabric_name"
-              class="batch-part-input"
-              placeholder="布料名称"
-              type="text"
-              maxlength="200"
-            />
-          </div>
-
-          <div class="batch-part-form__cell batch-part-form__cell--color">
-            <input
-              v-model="row.fabric_color_no"
-              class="batch-part-input"
-              placeholder="色号"
-              type="text"
-              maxlength="50"
+              :maxlength="field.formMaxlength"
             />
           </div>
 
@@ -161,7 +150,7 @@ function closeDialog() {
               type="button"
               class="row-remove-btn"
               title="删除此行"
-              @click="removeRow(index)"
+              @click="removeRow(row.uid)"
             >
               <FontAwesomeIcon icon="times" aria-hidden="true" />
             </button>

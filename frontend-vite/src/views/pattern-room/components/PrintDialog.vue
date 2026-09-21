@@ -46,21 +46,17 @@
                 <tr>
                   <th class="pd-th-part">部位名称</th>
                   <th>版本</th>
-                  <th>供应商</th>
-                  <th>布料名称</th>
-                  <th>色号</th>
+                  <th v-for="field in PART_EDIT_FIELDS" :key="field.key">{{ field.label }}</th>
                 </tr>
               </thead>
               <tbody>
                 <tr v-for="(part, idx) in group.items" :key="part.id ?? `${group.roleId}-${idx}`">
                   <td>{{ part.part_name || '-' }}</td>
                   <td>{{ part.version_no || '-' }}</td>
-                  <td>{{ part.supplier_name || '-' }}</td>
-                  <td>{{ part.fabric_name || '-' }}</td>
-                  <td>{{ part.fabric_color_no || '-' }}</td>
+                  <td v-for="field in PART_EDIT_FIELDS" :key="field.key">{{ part[field.key] || '-' }}</td>
                 </tr>
                 <tr v-if="group.items.length === 0">
-                  <td colspan="5" class="pd-empty">暂无部位数据</td>
+                  <td :colspan="2 + PART_EDIT_FIELDS.length" class="pd-empty">暂无部位数据</td>
                 </tr>
               </tbody>
             </table>
@@ -78,6 +74,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import type { ProjectDetailResponse, PartDetail, RoleBrief } from '@/api/patternRoom'
+import { PART_EDIT_FIELDS } from '../composables/usePartInlineEdit'
 
 const props = defineProps<{
   project: ProjectDetailResponse | null

@@ -178,12 +178,12 @@ describe('useCustomerSampling', () => {
     }
   })
 
-  it('force=true：跳过缓存强制请求', async () => {
+  it("mode='fresh'：跳过缓存强制请求", async () => {
     vi.mocked(patternRoomApi.getGroupedList).mockResolvedValue({ groups: [], total_projects: 0 } as unknown as GroupedListResponse)
 
     const hook = useCustomerSampling()
     await hook.loadGrouped()
-    await hook.loadGrouped(undefined, undefined, 1, true)
+    await hook.loadGrouped(undefined, undefined, 1, 'fresh')
 
     expect(patternRoomApi.getGroupedList).toHaveBeenCalledTimes(2)
     expect(hook.loading.value).toBe(false)
