@@ -15,6 +15,7 @@ export function usePartsVersionFilter(
   finalVersion: Ref<string>,
   projectId: Ref<number | null | undefined>,
   currentRoleId: Ref<number | null>,
+  onSetFinalVersion: (versionNo: string) => void,
 ) {
   const selectedVersion = ref<Record<string, string | null>>({})
   const expandedParts = ref<Set<string>>(new Set())
@@ -53,6 +54,8 @@ export function usePartsVersionFilter(
     } else {
       selectedVersion.value = { ...selectedVersion.value, [partName]: versionNo }
       expandedParts.value.delete(partName)
+      // 选中即写库：打印按角色的 current_version 取数，不写库则打印与所选版本不一致
+      onSetFinalVersion(versionNo)
     }
   }
 

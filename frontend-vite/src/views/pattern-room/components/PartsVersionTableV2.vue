@@ -32,10 +32,8 @@
               :group="group"
               :can-manage="canManage"
               :selected-version="selectedVersion"
-              :final-version="finalVersion"
               @toggle-expand="toggleExpand"
               @toggle-version="toggleVersion"
-              @set-final-version="$emit('set-final-version', $event)"
               @copy-version="$emit('copy-version', $event)"
               @delete-version="$emit('delete-version', $event)"
             />
@@ -63,7 +61,7 @@ const props = defineProps<{
   canManage: boolean
 }>()
 
-defineEmits<{
+const emit = defineEmits<{
   'set-final-version': [versionNo: string]
   'copy-version': [part: PartDetail]
   'delete-version': [part: PartDetail]
@@ -79,6 +77,7 @@ const { selectedVersion, toggleVersion, toggleExpand, groupedRows } = usePartsVe
   finalVersionRef,
   projectIdRef,
   currentRoleIdRef,
+  (versionNo) => emit('set-final-version', versionNo),
 )
 </script>
 

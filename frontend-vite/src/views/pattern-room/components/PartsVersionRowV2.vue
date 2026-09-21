@@ -19,29 +19,17 @@
       </div>
     </td>
     <td class="pvt-version-col">
-      <div class="pvt-version-cell">
-        <button
-          v-if="part.version_no"
-          class="pvt-vp-chip"
-          :class="{ 'pvt-vp-chip--active': selectedVersion[group.part_name] === part.version_no, 'pvt-vp-chip--disabled': group.totalVersionCount <= 1 }"
-          :title="group.totalVersionCount <= 1 ? '该部位只有一个版本' : (selectedVersion[group.part_name] === part.version_no ? '点击取消选择，显示所有版本' : '查看 ' + part.version_no + ' 版本')"
-          :disabled="group.totalVersionCount <= 1"
-          @click.stop="$emit('toggle-version', group.part_name, part.version_no!)"
-        >
-          {{ part.version_no }}
-        </button>
-        <span v-else>-</span>
-        <!-- 显式"设为最终版本"入口：版本 chip 仅承担本地查看，写操作单独成按钮 -->
-        <button
-          v-if="canManage && part.version_no && group.totalVersionCount > 1 && part.version_no !== finalVersion"
-          type="button"
-          class="pvt-final-btn"
-          title="设为最终版本"
-          @click.stop="$emit('set-final-version', part.version_no)"
-        >
-          <FontAwesomeIcon icon="flag" aria-hidden="true" />
-        </button>
-      </div>
+      <button
+        v-if="part.version_no"
+        class="pvt-vp-chip"
+        :class="{ 'pvt-vp-chip--active': selectedVersion[group.part_name] === part.version_no, 'pvt-vp-chip--disabled': group.totalVersionCount <= 1 }"
+        :title="group.totalVersionCount <= 1 ? '该部位只有一个版本' : (selectedVersion[group.part_name] === part.version_no ? '点击取消选择，显示所有版本' : '选择 ' + part.version_no + ' 为最终版本')"
+        :disabled="!canManage || group.totalVersionCount <= 1"
+        @click.stop="$emit('toggle-version', group.part_name, part.version_no!)"
+      >
+        {{ part.version_no }}
+      </button>
+      <span v-else>-</span>
     </td>
     <td v-for="field in PART_EDIT_FIELDS" :key="field.key">
       <input
@@ -114,8 +102,6 @@ defineProps<{
   group: GroupedRow
   canManage: boolean
   selectedVersion: Record<string, string | null>
-  /** 当前角色最终版本（用于隐藏"已最终"行的设最终按钮） */
-  finalVersion: string
 }>()
 
 // 编辑态（editingPartId / editForm / startEdit / saveEdit / cancelEdit）经
@@ -125,7 +111,6 @@ const { editingPartId, editForm, startEdit, saveEdit, cancelEdit } = injectPartI
 defineEmits<{
   'toggle-expand': [partName: string]
   'toggle-version': [partName: string, versionNo: string]
-  'set-final-version': [versionNo: string]
   'copy-version': [part: PartDetail]
   'delete-version': [part: PartDetail]
 }>()
@@ -215,31 +200,6 @@ defineEmits<{
 .pvt-version-col {
   text-align: center;
   color: var(--color-text-primary, #1a1a2e);
-}
-.pvt-version-cell {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-.pvt-final-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  padding: 0;
-  font-size: 9px;
-  color: var(--color-warning-500, #ff9f43);
-  background: #fff;
-  border: 1px solid var(--color-warning-300, #fdba74);
-  border-radius: 4px;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-.pvt-final-btn:hover {
-  color: #fff;
-  background: var(--color-warning-500, #ff9f43);
-  border-color: var(--color-warning-500, #ff9f43);
 }
 .pvt-actions-col {
   padding: 6px 10px !important;

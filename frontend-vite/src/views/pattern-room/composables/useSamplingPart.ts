@@ -79,7 +79,7 @@ export function useSamplingPart(
 
   /**
    * 本地更新最终版本号（不重新拉取数据）
-   * 用于"设置最终版本"场景：后端仅更新 project.current_version，
+   * 用于"设置最终版本"场景：后端仅更新角色 current_version，
    * 部位数据本身未变化，重新拉取会触发 loading 态与整体替换 partsByVersion，
    * 导致表格闪烁；直接本地更新可保持数据引用稳定，仅触发局部折叠。
    */

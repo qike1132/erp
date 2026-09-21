@@ -85,7 +85,6 @@ import {
   faFilePdf,
   faFileZipper,
   faFilter,
-  faFlag,
   faFloppyDisk,
   faFolder,
   faFolderOpen,
@@ -278,7 +277,6 @@ const SOLID_ICONS = [
   faFilePdf,
   faFileZipper,
   faFilter,
-  faFlag,
   faFloppyDisk,
   faFolder,
   faFolderOpen,
@@ -437,7 +435,6 @@ const FA5_ALIASES: { fa5Name: string; icon: IconDefinition }[] = [
   { fa5Name: 'magnifying-glass', icon: faMagnifyingGlass },
   { fa5Name: 'square', icon: faSquare },
   { fa5Name: 'pen', icon: faPen },
-  { fa5Name: 'flag', icon: faFlag },
   { fa5Name: 'comment-dots', icon: faCommentDots },
 ]
 for (const { fa5Name, icon } of FA5_ALIASES) {
