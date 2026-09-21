@@ -57,3 +57,22 @@ export interface SkuDateItem {
   customer: string;
   status: string;
 }
+
+/** 日历卡片的日期状态标记（样式类 + 展示文案），无状态时为 null */
+export type DayCardStatus = { cls: string; lbl: string } | null;
+
+/** 排产日历单日卡片（由 PurchasePlanDailyTab 派生，供 PlanDayCard 渲染） */
+export interface PlanDayCard {
+  date: string;
+  label: string;
+  match: boolean;
+  status: DayCardStatus;
+  /** 预览明细，最多 PREVIEW_LIMIT 条 */
+  items: { customer: string; product: string; qty: number }[];
+  /** 未在 items 中展示的剩余条数 */
+  extra: number;
+  /** 当日计划总条数（items 可能被截断，故单独记录） */
+  planCount: number;
+  totalQty: number;
+  customerCount: number;
+}

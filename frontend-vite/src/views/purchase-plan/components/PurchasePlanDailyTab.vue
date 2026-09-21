@@ -7,35 +7,25 @@
       <div v-if="isFetching" class="sp-fetching-bar"><div class="sp-fetching-progress" /></div>
 
       <div class="sp-cal-layout">
-        <!-- 左：排产日历矩阵 -->
+        <!-- 左：排产日历 -->
         <div class="sp-panel sp-cal-panel">
           <div class="sp-panel-head">
             <span>{{ m }} 月排产日历</span>
             <span class="xs">红=延期 · 琥珀=临期 · 绿=已完成</span>
           </div>
           <div class="sp-cal">
-            <div class="sp-dow"><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span></div>
-            <div class="sp-grid">
-              <div
-                v-for="c in cells"
-                :key="c.key"
-                class="sp-cell"
-                :class="cellClass(c)"
-                @click="chooseCell(c)"
-              >
-                <template v-if="c.day">
-                  <span class="d num">{{ c.day }}</span>
-                  <template v-if="c.row && c.match">
-                    <span v-if="c.status" class="st" :class="c.status.cls">{{ c.status.lbl }}</span>
-                    <span class="q num">{{ c.row.totalQty }}<small>件</small></span>
-                  </template>
-                </template>
-              </div>
+            <div class="sp-day-grid">
+              <PlanDayCard
+                v-for="c in dayCards"
+                :key="c.date"
+                :card="c"
+                :sel="sel"
+                @select="selectDate"
+              />
             </div>
           </div>
           <div v-if="isSearching" class="sp-search-hint">搜索命中 {{ matchedDates.size }} 个排产日</div>
           <div class="sp-legend">
-            <span><i class="lg-blank" />无计划</span>
             <span><i class="lg-r" />延期</span>
             <span><i class="lg-a" />临期≤3天</span>
             <span><i class="lg-g" />已完成</span>
@@ -76,9 +66,11 @@
 </template>
 
 <script setup lang="ts">
-// 每日计划 Tab —— 排产日历矩阵 + 右侧风险/客户栏（v5 方案）
+// 每日计划 Tab —— 排产日历卡片 + 右侧风险/客户栏（v5 方案）
+// 仅渲染有计划的日子：每天一张卡片，卡片内逐行列「客户 / 产品 / 数量」。
 import { computed } from 'vue';
-import type { Row, CustSumItem } from './types';
+import PlanDayCard from './PlanDayCard.vue';
+import type { Row, CustSumItem, SkuDateItem, DayCardStatus } from './types';
 
 const props = defineProps<{
   y: number;
@@ -89,6 +81,7 @@ const props = defineProps<{
   rows: Row[];
   filtered: Row[];
   customers: CustSumItem[];
+  skuDateIndex: Record<string, SkuDateItem[]>;
   sel: string;
 }>();
 
@@ -105,24 +98,7 @@ function getDaysDiff(dateStr: string): number {
   return Math.round((new Date(dateStr + 'T00:00:00').getTime() - TODAY.getTime()) / DAY_MS);
 }
 
-type CellStatus = { cls: string; lbl: string } | null;
-
-// 日历格子：从 rows 构建某月全部日期，按 7 列（周一开头）排列，状态信息并入格子一次算好
-const cells = computed(() => {
-  const firstDow = new Date(props.y, props.m - 1, 1).getDay();
-  const lead = (firstDow + 6) % 7; // 0=周一开头
-  const dim = new Date(props.y, props.m, 0).getDate();
-  const byDate = new Map(props.rows.map(r => [r.date, r]));
-  const arr: { key: string; day: number | null; row: Row | null; match: boolean; status: CellStatus }[] = [];
-  for (let i = 0; i < lead; i++) arr.push({ key: 'lead-' + i, day: null, row: null, match: false, status: null });
-  for (let d = 1; d <= dim; d++) {
-    const iso = `${props.y}-${String(props.m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-    const row = byDate.get(iso) ?? null;
-    arr.push({ key: iso, day: d, row, match: true, status: row ? statusFor(row) : null });
-  }
-  while (arr.length % 7 !== 0) arr.push({ key: 'trail-' + arr.length, day: null, row: null, match: false, status: null });
-  return arr;
-});
+type CellStatus = DayCardStatus;
 
 const matchedDates = computed(() => new Set(props.filtered.map(r => r.date)));
 const isSearching = computed(() => props.filtered.length > 0 && props.filtered.length < props.rows.length);
@@ -137,23 +113,42 @@ function statusFor(row: Row): CellStatus {
   return null;
 }
 
-function cellClass(c: { day: number | null; row: Row | null; match: boolean; status: CellStatus }): string[] {
-  const cls = ['sp-cell'];
-  if (!c.day) return cls;
-  if (isSearching.value && !c.match) { cls.push('sp-cell-blank'); return cls; }
-  if (c.status === null) { cls.push('sp-cell-blank'); return cls; }
-  cls.push('sp-cell-live');
-  if (c.status.cls === 'st-r') cls.push('sp-cell-danger');
-  else if (c.status.cls === 'st-a') cls.push('sp-cell-due');
-  else cls.push('sp-cell-done');
-  if (c.row && props.sel === c.row.date) cls.push('sp-cell-selected');
-  return cls;
-}
+// sku_date_index 的键为「客户|产品」，此处按日期反转成 日期 → 明细行 的索引
+const itemsByDate = computed(() => {
+  const map = new Map<string, { customer: string; product: string; qty: number }[]>();
+  for (const [key, entries] of Object.entries(props.skuDateIndex ?? {})) {
+    const sep = key.indexOf('|');
+    const customer = sep < 0 ? key : key.slice(0, sep);
+    const product = sep < 0 ? '' : key.slice(sep + 1);
+    for (const e of entries) {
+      const list = map.get(e.date);
+      if (list) list.push({ customer, product, qty: e.qty });
+      else map.set(e.date, [{ customer, product, qty: e.qty }]);
+    }
+  }
+  for (const list of map.values()) list.sort((a, b) => b.qty - a.qty);
+  return map;
+});
 
-function chooseCell(c: { day: number | null; row: Row | null }): void {
-  if (!c.row) return;
-  selectDate(c.row.date);
-}
+// 每天一张卡片：只保留有计划的日期，无计划的日期不渲染
+// 计划条数可能很多，卡片内只预览前 PREVIEW_LIMIT 条，其余折叠为「还有 N 条」
+const PREVIEW_LIMIT = 3;
+const dayCards = computed(() =>
+  props.rows.map(row => {
+    const all = itemsByDate.value.get(row.date) ?? [];
+    return {
+      date: row.date,
+      label: `${row._fullDate} 周${row._weekday}`,
+      match: !isSearching.value || matchedDates.value.has(row.date),
+      status: statusFor(row),
+      items: all.slice(0, PREVIEW_LIMIT),
+      extra: Math.max(0, all.length - PREVIEW_LIMIT),
+      planCount: all.length,
+      totalQty: row.totalQty,
+      customerCount: row.customerCount,
+    };
+  }),
+);
 
 function selectDate(date: string): void {
   emit('update:sel', props.sel === date ? '' : date);
@@ -230,69 +225,12 @@ const distRows = computed(() => {
   font-weight: 500;
 }
 
-/* 日历 */
+/* 排产日历：仅计划日卡片（卡片自身样式见 PlanDayCard.vue） */
 .sp-cal { padding: 16px 18px; }
-.sp-dow {
+.sp-day-grid {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  gap: 8px;
-  margin-bottom: 8px;
-}
-.sp-dow span {
-  font-size: 12px;
-  color: var(--color-muted, #8c96ad);
-  text-align: center;
-  font-weight: 600;
-}
-.sp-grid {
-  display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  gap: 8px;
-}
-.sp-cell {
-  min-height: 78px;
-  border: 1px solid var(--color-border-light, #e2e8f0);
-  border-radius: 10px;
-  padding: 6px 8px;
-  background: white;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  transition: box-shadow 0.2s ease, border-color 0.2s ease;
-  cursor: default;
-}
-.sp-cell:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.06); }
-.sp-cell-blank { background: #fafbfe; }
-.sp-cell .d { font-size: 12px; color: var(--color-text-2, #5a6b8c); font-weight: 600; }
-.sp-cell .q { font-size: 18px; font-weight: 800; color: var(--color-heading); margin-top: auto; line-height: 1; }
-.sp-cell .q small { font-size: 10px; color: var(--color-muted, #8c96ad); font-weight: 600; }
-.sp-cell .st {
-  font-size: 10px;
-  font-weight: 700;
-  padding: 1px 6px;
-  border-radius: 5px;
-  width: fit-content;
-}
-.st-r { background: var(--color-danger-100); color: var(--color-danger-700); }
-.st-a { background: var(--color-warning-100); color: var(--color-warning-700); }
-.st-g { background: var(--color-success-100); color: var(--color-success-700); }
-
-.sp-cell-live { cursor: pointer; }
-.sp-cell-danger {
-  border: 1.5px solid var(--color-danger-500);
-  background: linear-gradient(180deg, #fff, var(--color-danger-100));
-}
-.sp-cell-due {
-  border: 1.5px solid var(--color-warning-500);
-  background: linear-gradient(180deg, #fff, var(--color-warning-100));
-}
-.sp-cell-done {
-  border: 1.5px solid var(--color-success-500);
-  background: linear-gradient(180deg, #fff, var(--color-success-100));
-}
-.sp-cell-selected {
-  outline: 2px solid var(--color-primary-500);
-  outline-offset: 1px;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 12px;
 }
 
 .sp-search-hint { padding: 6px 18px; font-size: 12px; color: var(--color-primary-600); }
@@ -306,7 +244,6 @@ const distRows = computed(() => {
 }
 .sp-legend span { display: inline-flex; align-items: center; gap: 6px; }
 .sp-legend i { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
-.lg-blank { background: #fafbfe; border: 1px solid var(--color-border-light, #e2e8f0); }
 .lg-r { background: var(--color-danger-100); }
 .lg-a { background: var(--color-warning-100); }
 .lg-g { background: var(--color-success-100); }
