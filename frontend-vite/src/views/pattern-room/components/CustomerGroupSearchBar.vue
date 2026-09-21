@@ -1,13 +1,23 @@
 <template>
-  <!-- 搜索框 -->
-  <div class="cgl-search">
-    <FontAwesomeIcon icon="search" class="cgl-search-icon" aria-hidden="true" />
-    <input
-      class="cgl-search-input"
-      type="text"
-      placeholder="搜索版师或项目..."
-      @input="onSearchInput"
-    />
+  <!-- 搜索框 + 新建打样 -->
+  <div class="cgl-search-row">
+    <div class="cgl-search">
+      <FontAwesomeIcon icon="search" class="cgl-search-icon" aria-hidden="true" />
+      <input
+        class="cgl-search-input"
+        type="text"
+        placeholder="搜索版师或项目..."
+        @input="onSearchInput"
+      />
+    </div>
+    <button
+      v-if="canManage"
+      type="button"
+      class="cgl-add-btn"
+      @click="$emit('add-project')"
+    >
+      新建打样
+    </button>
   </div>
 
   <!-- 状态筛选胶囊 -->
@@ -28,11 +38,14 @@
 defineProps<{
   /** 当前状态筛选（受控：由父级 statusFilter 传入，避免父子状态漂移） */
   statusFilter: string
+  /** 是否可新建打样（无权限时隐藏按钮） */
+  canManage: boolean
 }>()
 
 const emit = defineEmits<{
   search: [keyword: string]
   'status-change': [value: string]
+  'add-project': []
 }>()
 
 const STATUS_OPTIONS = [
@@ -52,15 +65,22 @@ function onSearchInput(e: Event) {
 </script>
 
 <style scoped>
-.cgl-search {
-  position: relative;
+.cgl-search-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 12px;
   border-bottom: 1px solid var(--color-border-light, #e5e7eb);
   flex-shrink: 0;
 }
+.cgl-search {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
 .cgl-search-icon {
   position: absolute;
-  left: 22px;
+  left: 10px;
   top: 50%;
   transform: translateY(-50%);
   color: var(--color-text-secondary, #9ca3af);
@@ -78,6 +98,27 @@ function onSearchInput(e: Event) {
 }
 .cgl-search-input:focus {
   border-color: var(--color-primary-400);
+}
+.cgl-add-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 14px;
+  border: none;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-primary-700);
+  background: linear-gradient(135deg, var(--color-primary-50), var(--color-primary-100));
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08), 0 2px 8px rgba(91, 141, 239, 0.2);
+  cursor: pointer;
+  white-space: nowrap;
+  font-family: inherit;
+  transition: background 0.3s ease, color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
+}
+.cgl-add-btn:hover {
+  background: linear-gradient(135deg, var(--color-primary-100), var(--color-primary-200));
+  transform: translateY(-1px);
 }
 .cgl-status-filter {
   display: inline-flex;

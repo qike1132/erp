@@ -2,8 +2,10 @@
   <div class="cgl-container">
     <CustomerGroupSearchBar
       :status-filter="statusFilter"
+      :can-manage="canManage"
       @search="$emit('search', $event)"
       @status-change="$emit('status-change', $event)"
+      @add-project="$emit('add-project')"
     />
 
     <div v-if="loading" class="cgl-loading">
@@ -15,7 +17,7 @@
       v-else-if="!hasData"
       icon="boxes"
       title="暂无打样项目"
-      description="点击右上角「新增打样项目」创建第一个项目"
+      description="点击上方「新建打样」创建第一个项目"
     />
 
     <div v-else class="cgl-body">

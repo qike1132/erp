@@ -1,16 +1,6 @@
 <template>
   <div class="pr-container">
     <div class="page-card page-card-main">
-      <div class="page-card-header pr-top-bar">
-        <button
-          v-if="canManage"
-          class="pr-add-btn pr-add-btn--primary"
-          @click="openCreateProjectDialog"
-        >
-          新建打样
-        </button>
-      </div>
-
       <div class="page-card-body pr-body">
         <UiAlert
           v-if="groupHook.error.value"
@@ -285,43 +275,6 @@ watch(selectedProjectId, (newId) => {
   flex-direction: column;
   box-sizing: border-box;
   width: 100%;
-}
-.pr-top-bar {
-  flex-wrap: wrap;
-  gap: 12px;
-  align-items: center;
-}
-.pr-add-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 14px;
-  border: none;
-  border-radius: 9px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--color-text-secondary, #6b7280);
-  background: transparent;
-  cursor: pointer;
-  transition: background 0.3s ease, color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
-  white-space: nowrap;
-  font-family: inherit;
-}
-.pr-add-btn:hover {
-  background: var(--color-primary-50);
-  color: var(--color-primary-600);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-  transform: translateY(-1px);
-}
-.pr-add-btn--primary {
-  background: linear-gradient(135deg, var(--color-primary-50), var(--color-primary-100));
-  color: var(--color-primary-700);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 2px 8px rgba(91, 141, 239, 0.2);
-  transform: translateY(-1px);
-}
-.pr-add-btn--primary:hover {
-  background: linear-gradient(135deg, var(--color-primary-100), var(--color-primary-200));
-  color: var(--color-primary-700);
 }
 .pr-body {
   display: flex;
