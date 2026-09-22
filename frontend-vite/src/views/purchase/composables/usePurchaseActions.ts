@@ -2,6 +2,7 @@ import type { Ref } from 'vue'
 import type { QueryClient } from '@tanstack/vue-query'
 import { purchaseApi } from '@/api'
 import { showToast } from '@/composables/useToast'
+import { getErrorMessage } from '@/types/errors'
 import { useExport } from '@/composables/useExport'
 import type { UnprocessedOrder } from '@/types'
 import { useUnprocessedOrders } from './useUnprocessedOrders'
@@ -63,8 +64,7 @@ export function usePurchaseActions(deps: PurchaseActionDeps) {
         queryClient.invalidateQueries({ queryKey: ['orders-list'] })
       } else showToast(res.message || '审核失败', 'error')
     } catch (err: unknown) {
-      const detail = (err as { response?: { data?: { detail?: string } }; message?: string })?.response?.data?.detail || (err as Error).message || ''
-      showToast('审核失败: ' + detail, 'error')
+      showToast('审核失败: ' + getErrorMessage(err, ''), 'error')
     } finally {
       isSubmitting.value = false
     }
@@ -92,8 +92,7 @@ export function usePurchaseActions(deps: PurchaseActionDeps) {
         queryClient.invalidateQueries({ queryKey: ['orders-list'] })
       } else showToast(res.message || '审核失败', 'error')
     } catch (err: unknown) {
-      const detail = (err as { response?: { data?: { detail?: string } }; message?: string })?.response?.data?.detail || (err as Error).message || ''
-      showToast('审核失败: ' + detail, 'error')
+      showToast('审核失败: ' + getErrorMessage(err, ''), 'error')
     } finally {
       isSubmitting.value = false
     }

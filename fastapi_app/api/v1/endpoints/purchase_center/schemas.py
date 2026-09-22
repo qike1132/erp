@@ -56,11 +56,11 @@ class BomCopyRequest(BaseModel):
 class MaterialOrderItem(BaseModel):
     """物料计算单个订单项"""
     product_id: int = Field(..., gt=0, description="产品ID")
-    quantity: float = Field(..., gt=0, description="订单数量，必须大于0")
+    quantity: float = Field(..., gt=0, le=1_000_000, description="订单数量，必须大于0且不超过100万")
 
 class CalculateMaterialRequest(BaseModel):
     """物料计算请求"""
-    orders: list[MaterialOrderItem] = Field(..., min_length=1, description="订单物料列表")
+    orders: list[MaterialOrderItem] = Field(..., min_length=1, max_length=200, description="订单物料列表，上限200（与产品选择上限对齐）")
 
 class PurchaseOrderMaterialItem(BaseModel):
     """采购订单物料明细。

@@ -214,6 +214,8 @@ dist_v6/
 # 工具报告/验证目录
 /.qoder/
 /.resultverify/
+# brooks-lint 插件的本地运行记录（非项目产物）
+/.brooks-lint-history.json
 # 运行时上传文件
 /static/uploads/
 

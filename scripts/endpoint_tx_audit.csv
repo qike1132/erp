@@ -208,7 +208,6 @@ purchase_center/order_routes.py,api_delete_purchase_order,DELETE,/orders/{order_
 purchase_center/order_routes.py,api_complete_purchase_order,POST,/orders/complete,mixed,yes
 purchase_center/order_routes.py,api_batch_complete_purchase_orders,POST,/orders/batch-complete,mixed,yes
 purchase_center/order_routes.py,api_batch_delete_purchase_orders,POST,/orders/batch-delete,mixed,yes
-purchase_center/order_routes.py,api_get_order_print_data,GET,/orders/{order_id}/print,mixed,yes
 purchase_center/order_routes.py,api_get_orders_batch_print_data,POST,/orders/batch-print,mixed,yes
 purchase_center/order_routes.py,api_get_unprocessed_orders,GET,/unprocessed-orders,mixed,yes
 purchase_center/order_routes.py,api_get_factory_order_summary,POST,/orders/factory-summary,mixed,yes

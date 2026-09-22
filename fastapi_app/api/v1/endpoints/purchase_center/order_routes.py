@@ -490,31 +490,6 @@ async def api_batch_delete_purchase_orders(
     return success_response(**result)
 
 
-@router.get('/orders/{order_id}/print', response_model=PurchaseOrderDetailResponse)
-async def api_get_order_print_data(
-    order_id: int,
-    db: AsyncSession = Depends(get_read_db),
-    _current_user=Depends(require_permission('product_manage')),
-) -> dict[str, Any]:
-    """获取采购订单打印数据。
-
-    Args:
-        order_id: 订单 ID。
-        db: 异步数据库会话（只读副本）。
-        _current_user: 当前登录用户（权限校验依赖）。
-
-    Returns:
-        dict[str, Any]: 包含 success 标志和 order 详情的字典。
-
-    Raises:
-        HTTPException 404: 订单不存在。
-    """
-    result = await svc.get_purchase_order(db, order_id)
-    if not result:
-        raise HTTPException(status_code=404, detail='订单不存在')
-    return success_response(order=result)
-
-
 @router.post('/orders/batch-print', response_model=PurchaseOrderActionResponse)
 async def api_get_orders_batch_print_data(
     data: OrderIdsRequest,

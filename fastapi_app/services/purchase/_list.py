@@ -87,12 +87,6 @@ def _is_filling_category(category: str | None) -> bool:
     return cat == 'filling' or '填充' in category
 
 
-_PO_SORT_MAP = {
-    'create_time': PurchaseOrder.create_time,
-    'order_no': PurchaseOrder.order_no,
-    'total_amount': PurchaseOrder.total_amount,
-}
-
 def _apply_po_list_filters(query, count_query, *, status, supplier_id,
                            keyword, date_from, date_to):
     if status:

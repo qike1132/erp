@@ -7,7 +7,7 @@ class SupplierCreate(BaseModel):
     contact_person: str | None = Field(default=None, max_length=50, description="联系人")
     phone: str | None = Field(default=None, max_length=20, description="电话")
     address: str | None = Field(default=None, max_length=200, description="地址")
-    remark: str | None = Field(default=None, description="备注")
+    remark: str | None = Field(default=None, max_length=500, description="备注")
 
 
 class SupplierUpdate(BaseModel):
@@ -15,7 +15,7 @@ class SupplierUpdate(BaseModel):
     contact_person: str | None = Field(default=None, max_length=50, description="联系人")
     phone: str | None = Field(default=None, max_length=20, description="电话")
     address: str | None = Field(default=None, max_length=200, description="地址")
-    remark: str | None = Field(default=None, description="备注")
+    remark: str | None = Field(default=None, max_length=500, description="备注")
     # status 字段已移除：状态切换由独立的 /toggle-status 端点处理
 
 

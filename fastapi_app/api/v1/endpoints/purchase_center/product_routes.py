@@ -91,7 +91,7 @@ async def api_get_products_batch_bom(
 
 @router.get('/products/search-suggestions', response_model=SearchSuggestionResponse)
 async def api_get_search_suggestions(
-    q: str = Query('', description='搜索关键词'),
+    q: str = Query('', max_length=100, description='搜索关键词'),
     db: AsyncSession = Depends(get_read_db),
     _current_user=Depends(require_permission('product_manage')),
 ) -> dict[str, Any]:

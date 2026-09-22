@@ -21,7 +21,7 @@
       </div>
       <div class="sp-form-field">
         <label class="sp-form-label"><FontAwesomeIcon icon="note-sticky" aria-hidden="true" /> 备注</label>
-        <textarea v-model="form.remark" rows="2" class="sp-form-input" :placeholder="mode === 'add' ? '例如：长期合作供应商' : ''" aria-label="备注" />
+        <textarea v-model="form.remark" rows="2" maxlength="500" class="sp-form-input" :placeholder="mode === 'add' ? '例如：长期合作供应商' : ''" aria-label="备注" />
       </div>
     </form>
     <template #footer>
@@ -54,7 +54,8 @@ const emit = defineEmits<{
   submit: []
 }>()
 
-const disabled = computed(() => (props.mode === 'add' ? !form.value.name || props.submitting : props.submitting))
+// 名称非空校验 + 提交中禁用，防止校验失败提示后连点重复提交
+const disabled = computed(() => !form.value.name?.trim() || props.submitting)
 </script>
 
 <style scoped>

@@ -6,7 +6,7 @@
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from fastapi_app.api.v1.endpoints import supplier as supplier_module
 from fastapi_app.services import purchase_supplier_service
@@ -116,6 +116,23 @@ class TestCreateSupplierEndpoint:
 
         assert resp.status_code == 422
 
+    @pytest.mark.asyncio
+    async def test_create_integrity_error_returns_400_duplicate_name(self, client, mock_db, monkeypatch):
+        """并发重名竞态：服务层查重通过但落库触发 unique 约束，应返回 400 且提示"名称已存在"。"""
+        async def raise_integrity_error(*args, **kwargs):
+            raise IntegrityError("duplicate key value violates unique constraint", params=None, orig=Exception())
+
+        monkeypatch.setattr(supplier_module, "_invalidate_supplier_caches", AsyncMock())
+        monkeypatch.setattr(purchase_supplier_service, "create_supplier", raise_integrity_error)
+
+        resp = await client.post("/api/v1/suppliers/create", json={"name": "并发重名"})
+
+        assert resp.status_code == 400
+        assert "名称已存在" in resp.json()["detail"]
+        # 竞态路径不得误报"无法删除"
+        assert "无法删除" not in resp.json()["detail"]
+        mock_db.rollback.assert_awaited()
+
 
 class TestEditSupplierEndpoint:
     @pytest.mark.asyncio
@@ -175,3 +192,18 @@ class TestDeleteSupplierEndpoint:
 
         assert resp.status_code == 400
         assert "无法删除" in resp.json()["detail"]
+
+    @pytest.mark.asyncio
+    async def test_delete_integrity_error_returns_400_association(self, client, mock_db, monkeypatch):
+        """并发新增关联单据触发外键约束时，应返回 400 且保留删除语义提示。"""
+        async def raise_integrity_error(*args, **kwargs):
+            raise IntegrityError("foreign key constraint violation", params=None, orig=Exception())
+
+        monkeypatch.setattr(supplier_module, "_invalidate_supplier_caches", AsyncMock())
+        monkeypatch.setattr(purchase_supplier_service, "delete_supplier", raise_integrity_error)
+
+        resp = await client.delete("/api/v1/suppliers/delete/1")
+
+        assert resp.status_code == 400
+        assert "无法删除" in resp.json()["detail"]
+        mock_db.rollback.assert_awaited()

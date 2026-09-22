@@ -80,13 +80,22 @@ async def _set_cached_supplier_list(per_page: int, items: list[dict], total: int
     )
 
 
-async def _run_supplier_write(db: AsyncSession, action, success_msg: str) -> SupplierActionResponse:
+async def _run_supplier_write(
+    db: AsyncSession, action, success_msg: str, operation: str,
+) -> SupplierActionResponse:
     """供应商写操作统一的事务 + 缓存失效编排（批次1 收敛原 4 处端点样板）。
 
     服务层 flush-only，以 ValueError 表达业务校验（'不存在'→404，其余→400）；
     事务边界遵守 docs/TRANSACTION_BOUNDARY_GUIDE.md：端点层不做 commit/rollback，
     统一交给 db_transaction；提交后再失效一次缓存，覆盖"提交窗口期内并发读
     回填旧缓存"的竞态。
+
+    Args:
+        db: 异步数据库会话。
+        action: 服务层写操作协程（flush-only，不 commit）。
+        success_msg: 成功提示消息。
+        operation: 操作类型（'create'/'edit'/'delete'），用于按语义区分
+            IntegrityError 的用户提示。
     """
     def _value_error_to_http(exc: Exception) -> HTTPException:
         msg = str(exc)
@@ -97,9 +106,15 @@ async def _run_supplier_write(db: AsyncSession, action, success_msg: str) -> Sup
         return HTTPException(status_code=400, detail=msg)
 
     def _integrity_to_http(exc: Exception) -> HTTPException:
-        # 兜底：服务层未覆盖到的外键引用（如 MaterialRegistration）
-        logger.info('供应商写操作被拒（存在关联单据）')
-        return HTTPException(status_code=400, detail='该供应商已有相关单据，无法删除！建议禁用该供应商。')
+        # 兜底映射：服务层的查重/关联检查（SELECT-then-write）与真正落库之间存在
+        # 竞态窗口，唯一约束/外键冲突会以 IntegrityError 抛到这里。
+        # 按操作语义提示：create/edit 是并发重名（name 有 unique 约束），
+        # delete 是并发新增了关联单据（外键约束）。
+        if operation == 'delete':
+            logger.info('供应商删除被拒（并发新增关联单据）')
+            return HTTPException(status_code=400, detail='该供应商已有相关单据，无法删除！建议禁用该供应商。')
+        logger.info('供应商写操作被拒（并发重名）: operation=%s', operation)
+        return HTTPException(status_code=400, detail='供应商名称已存在，请更换名称')
 
     def _sqlalchemy_to_http(exc: Exception) -> HTTPException:
         logger.exception('供应商写操作失败')
@@ -189,6 +204,7 @@ async def create_supplier(
             'phone': data.phone, 'address': data.address, 'remark': data.remark,
         }),
         '供应商添加成功',
+        operation='create',
     )
 
 
@@ -222,6 +238,7 @@ async def edit_supplier(
             'phone': data.phone, 'address': data.address, 'remark': data.remark,
         }),
         '供应商编辑成功',
+        operation='edit',
     )
 
 
@@ -233,9 +250,6 @@ async def delete_supplier(
 ) -> SupplierActionResponse:
     """删除供应商。
 
-    事务模式：手动 commit + catch IntegrityError。
-    原因：db_transaction 会将 IntegrityError 转为 HTTP 500，无法对外层提供 400 友好提示。
-
     Args:
         supplier_id: 供应商 ID。
         _current_user: 当前登录用户（权限校验依赖）。
@@ -245,13 +259,16 @@ async def delete_supplier(
         SupplierActionResponse: 操作结果。
 
     Raises:
-        HTTPException 400: 该供应商已有相关单据，无法删除。
+        HTTPException 400: 服务层关联检查失败（ValueError），
+            或并发新增关联单据触发外键约束（IntegrityError）。
+        HTTPException 404: 供应商不存在。
         HTTPException 500: 数据库操作异常。
     """
     return await _run_supplier_write(
         db,
         lambda: purchase_supplier_service.delete_supplier(db, supplier_id),
         '供应商删除成功',
+        operation='delete',
     )
 
 
