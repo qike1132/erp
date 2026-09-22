@@ -174,7 +174,7 @@ watch(searchQuery, (q) => {
     try {
       const res = await purchaseApi.searchSuggestions(q)
       searchResults.value = res.suggestions ?? []
-    } finally { searchLoading.value = false }
+    } catch { searchResults.value = [] } finally { searchLoading.value = false }
   }, 300)
 })
 

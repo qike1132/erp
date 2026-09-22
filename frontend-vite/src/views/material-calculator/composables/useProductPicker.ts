@@ -1,16 +1,16 @@
-// 物料计算器产品列表：产品查询 / 搜索建议 / BOM 过滤（从 MaterialCalculatorView.vue 抽出，行为不变）
+// 物料计算器产品选择器：产品查询 / 搜索建议 / BOM 过滤（从 MaterialCalculatorView.vue 抽出，行为不变）
 import { ref, computed, onUnmounted } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 import { purchaseApi, type MaterialCalcProduct } from '@/api'
 import { useDebouncedSearch } from '@/composables/useDebouncedSearch'
 
-export function useMaterialCalc() {
+export function useProductPicker() {
   const searchQuery = ref('')
   const searchSuggestions = ref<MaterialCalcProduct[]>([])
   const bomFilter = ref<'all' | 'true' | 'false'>('all')
 
-  // 搜索建议防抖（250ms）；hideSuggestionsTimer 为建议列表隐藏延迟，独立保留
-  const { debounceSearch } = useDebouncedSearch(250)
+  // 搜索建议防抖（300ms，与移动端统一）；hideSuggestionsTimer 为建议列表隐藏延迟，独立保留
+  const { debounceSearch } = useDebouncedSearch(300)
   let hideSuggestionsTimer: ReturnType<typeof setTimeout> | null = null
 
   onUnmounted(() => {

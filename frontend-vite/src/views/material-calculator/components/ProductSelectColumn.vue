@@ -36,7 +36,7 @@ import type { MaterialCalcProduct } from '@/api'
 import ProductSearchPanel from './ProductSearchPanel.vue'
 import ProductFilterBar from './ProductFilterBar.vue'
 import ProductList from './ProductList.vue'
-import { useMaterialCalc } from '../composables/useMaterialCalc'
+import { useProductPicker } from '../composables/useProductPicker'
 
 defineProps<{
   selectedProductIds: number[]
@@ -51,7 +51,7 @@ const {
   searchQuery, searchSuggestions, bomFilter, loadingProducts, productCapHint,
   filteredProducts,
   onSearchInput, onMcSearchFocus, hideMcSuggestions,
-} = useMaterialCalc()
+} = useProductPicker()
 
 const filterOptions: Array<{ label: string; value: 'all' | 'true' | 'false' }> = [
   { label: '全部', value: 'all' },
