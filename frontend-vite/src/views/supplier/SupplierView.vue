@@ -9,7 +9,7 @@
 
       <div class="sp-toolbar">
         <div class="sp-search-wrapper">
-          <UiSearchInput v-model="searchTerm" placeholder="搜索供应商名称..." @search="onSearchInput" @update:model-value="onSearchInput" @clear="clearSearch" /></div>
+          <UiSearchInput v-model="searchTerm" placeholder="搜索供应商名称..." @update:model-value="onSearchInput" @clear="clearSearch" /></div>
       </div>
 
       <SupplierTable

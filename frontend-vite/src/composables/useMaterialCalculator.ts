@@ -38,6 +38,9 @@ export function clampQuantity(v: unknown): number {
  * - `calcGroups`：按「产品 × 作用域(角色)」分块（默认 BOM 恒首）；
  * - `matrix`：由 `calcGroups` 派生的跨角色对比矩阵（纯函数，A-5 缺失时为空矩阵）。
  */
+// 订单物料条目上限（与后端 CalculateMaterialRequest.orders max_length=200 对齐）
+const MAX_ORDER_ITEMS = 200
+
 export function useMaterialCalculator() {
   const orderItems = ref<OrderItem[]>([])
   const calcResults = ref<Record<string, MaterialCalcRow[]>>({})
@@ -65,6 +68,10 @@ export function useMaterialCalculator() {
   function addProduct(p: MaterialCalcProduct, defaultQuantity: number = 0): boolean {
     if (!p.has_bom) {
       showToast(`"${p.name}" 没有BOM，无法计算物料`, 'warning')
+      return false
+    }
+    if (orderItems.value.length >= MAX_ORDER_ITEMS) {
+      showToast(`最多添加 ${MAX_ORDER_ITEMS} 个产品进行计算，请先移除部分产品`, 'warning')
       return false
     }
     if (selectedProductIds.value.includes(p.id)) return false
