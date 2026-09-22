@@ -65,7 +65,8 @@
           v-if="group.collapsed || part.version_no === group.latestVersionNo"
           type="button"
           class="pvt-action-btn pvt-action-btn--info"
-          title="复制版本"
+          :title="part.id == null ? '历史快照，无法复制' : '复制版本'"
+          :disabled="!canManage || part.id == null"
           @click="$emit('copy-version', part)"
         >
           <FontAwesomeIcon icon="copy" aria-hidden="true" />
@@ -83,7 +84,8 @@
         <button
           type="button"
           class="pvt-action-btn pvt-action-btn--danger"
-          title="删除版本"
+          :title="part.id == null ? '历史快照，无法删除' : '删除版本'"
+          :disabled="!canManage || part.id == null"
           @click="$emit('delete-version', part)"
         >
           <FontAwesomeIcon icon="trash-alt" aria-hidden="true" />
@@ -224,6 +226,11 @@ defineEmits<{
 }
 .pvt-action-btn i {
   font-size: 10px;
+}
+.pvt-action-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+  pointer-events: none;
 }
 .pvt-action-btn--info {
   color: var(--color-primary-600, #3b82f6);

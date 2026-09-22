@@ -29,6 +29,14 @@ _SNAPSHOT_FIELDS = (
     'unit_price', 'delivery_days', 'remark',
 )
 
+
+def _escape_like(keyword: str) -> str:
+    r"""转义 LIKE/ILIKE 通配符（% _ \），使关键词按字面匹配。
+
+    使用 ESCAPE '\' 子句；keyword 中的 % 不会被误当作"任意字符串"导致全量匹配。
+    """
+    return keyword.replace('\\', '\\\\').replace('%', r'\%').replace('_', r'\_')
+
 async def _ensure_part_name_unique(
     db: AsyncSession,
     project_id: int,

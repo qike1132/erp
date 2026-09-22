@@ -240,6 +240,8 @@ export interface GroupedListResponse {
   total: number
   pages: number
   current_page: number
+  /** 命中后端 5000 条分组截断上限（分组统计不含全部匹配项目） */
+  truncated?: boolean
 }
 
 /** 打样项目列表响应（分页） */
@@ -290,6 +292,8 @@ export interface ProjectCreateRequest {
 export interface ProjectUpdateRequest {
   product_name?: string | null
   pattern_maker_id?: number | null
+  /** 清除版师关联（后端清除 pattern_maker_id，优先级高于 pattern_maker_id） */
+  clear_pattern_maker?: boolean
   remark?: string | null
   product_image_file_id?: number | null
   /** 移除已有产品图片（后端清除 product_image_file_id） */

@@ -12,7 +12,7 @@
           v-if="projectAreaHeight > 0"
           ref="virtualListRef"
           :items="pageProjects"
-          :item-height="PROJECT_CARD_SLOT_H"
+          :item-height="projectCardSlotH"
           :container-height="projectAreaHeight"
           :item-key="(p: ProjectSummary) => p.id"
           class="cgl-virtual-list"
@@ -51,7 +51,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, computed, watch, nextTick, onMounted } from 'vue'
 import UiSpinner from '@/components/ui/UiSpinner.vue'
 import UiPagination from '@/components/ui/UiPagination.vue'
 import VirtualList from '@/components/ui/VirtualList.vue'
@@ -76,13 +76,30 @@ defineEmits<{
   preview: [url: string]
 }>()
 
-const PROJECT_CARD_H = 216
-const PROJECT_CARD_SLOT_H = PROJECT_CARD_H + 6
+/** 卡片高度单一事实来源：CSS 变量 --pr-card-h（ProjectCardItem 同步消费），
+ *  JS 侧运行时读取，改样式无需同步两处常量 */
+const CSS_VAR_CARD_H = '--pr-card-h'
+/** 卡片 CSS 高度默认值（与 ProjectCardItem 样式中的回退值保持一致） */
+const DEFAULT_CARD_H = 216
+/** 卡片槽位高度（卡片高 + margin-bottom 6px） */
+const projectCardSlotH = ref(DEFAULT_CARD_H + 6)
+
+function readCardSlotH(): number {
+  const el = projectAreaRef.value
+  if (!el) return DEFAULT_CARD_H + 6
+  const h = Number.parseFloat(getComputedStyle(el).getPropertyValue(CSS_VAR_CARD_H))
+  return (Number.isFinite(h) && h > 0 ? h : DEFAULT_CARD_H) + 6
+}
 /** 组内项目分页每页条数 */
 const PROJECT_PAGE_SIZE = 20
 
 const { areaRef: projectAreaRef, height: projectAreaHeight, measure: measureProjectArea } = useVirtualAreaMeasure()
 const virtualListRef = ref<{ scrollToTop: () => void } | null>(null)
+
+onMounted(() => {
+  // 挂载后 CSS 变量已可解析，读取真实卡片槽位高度
+  projectCardSlotH.value = readCardSlotH()
+})
 
 /** 组内项目分页状态：切换版师分组时重置回第 1 页 */
 const projectPage = ref(1)
@@ -97,7 +114,11 @@ const pageProjects = computed(() => {
 watch(
   () => props.groups,
   () => {
-    nextTick(() => requestAnimationFrame(measureProjectArea))
+    nextTick(() => {
+      // 卡片高度来自 CSS 变量，布局稳定后重读一次
+      projectCardSlotH.value = readCardSlotH()
+      requestAnimationFrame(measureProjectArea)
+    })
   },
 )
 
@@ -147,7 +168,9 @@ watch(projectPage, () => {
   padding: 8px;
   contain: layout;
 }
+/* 卡片高度单一事实来源：ProjectCardItem 通过 var(--pr-card-h) 消费（scoped 变量随 DOM 属性下传） */
 .cgl-list-scroll {
+  --pr-card-h: 216px;
   flex: 1;
   min-height: 0;
 }

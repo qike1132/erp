@@ -136,6 +136,8 @@ function handleSubmit() {
     const data: ProjectUpdateRequest = {
       product_name: form.product_name || null,
       pattern_maker_id: props.patternMakerId,
+      // 用户将版师选回"请选择"时需显式清除后端关联
+      clear_pattern_maker: props.patternMakerId === null,
       // 空串即"清空备注"（后端 None 语义为不修改）
       remark: form.remark,
       clear_image: imageRemoved.value,

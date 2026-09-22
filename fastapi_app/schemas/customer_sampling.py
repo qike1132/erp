@@ -237,6 +237,8 @@ class GroupedListResponse(BaseModel):
     total: int = 0
     pages: int = 1
     current_page: int = 1
+    """命中 5000 条分组截断上限时为 True（此时分组统计不含全部项目）"""
+    truncated: bool = False
 
 
 class ProjectListResponse(BaseModel):
@@ -297,9 +299,11 @@ class ProjectUpdateRequest(BaseModel):
     序列号与历史版本快照不可修改。
     version 为乐观锁版本号，必填。
     clear_image=True 时清除产品图片（None 语义为"不修改"，无法表达清空）。
+    clear_pattern_maker=True 时清除版师关联（None 语义为"不修改"，无法表达清空）。
     """
     product_name: str | None = Field(None, min_length=1, max_length=200)
     pattern_maker_id: int | None = None
+    clear_pattern_maker: bool = Field(False, description='清除版师关联（默认 False）')
     remark: str | None = Field(None, max_length=2000)
     product_image_file_id: int | None = None
     clear_image: bool = Field(False, description='清除产品图片（默认 False）')

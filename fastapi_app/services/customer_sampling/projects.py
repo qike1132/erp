@@ -26,6 +26,7 @@ from .common import (
     _ensure_part_name_unique,
     _ensure_project_exists,
     _ensure_role_belongs_to_project,
+    _escape_like,
     _get_default_role_id,
     _get_user_name,
     _resolve_pattern_maker_name,
@@ -137,12 +138,32 @@ async def create_project(
     )
     return {'id': project.id, 'sequence_no': sequence_no}
 
+async def _sync_default_role_current_version(
+    db: AsyncSession,
+    project_id: int,
+    current_version: str,
+) -> None:
+    """同步默认角色的 current_version（保持向后兼容）
+
+    旧端点仍调 update_project 设置最终版本时，默认角色同步生效。
+    抽为独立函数以控制 update_project 长度（质量门禁：单函数 ≤80 行）。
+    """
+    default_role_id = await _get_default_role_id(db, project_id)
+    dr_result = await db.execute(
+        select(CustomerSamplingRole).where(CustomerSamplingRole.id == default_role_id)
+    )
+    default_role = dr_result.scalar_one_or_none()
+    if default_role is not None and default_role.current_version != current_version:
+        default_role.current_version = current_version
+
+
 async def update_project(
     db: AsyncSession,
     project_id: int,
     *,
     product_name: str | None = None,
     pattern_maker_id: int | None = None,
+    clear_pattern_maker: bool = False,
     remark: str | None = None,
     product_image_file_id: int | None = None,
     clear_image: bool = False,
@@ -154,7 +175,9 @@ async def update_project(
 
     - 乐观锁校验（version 不匹配抛 ConflictError 409，SELECT ... FOR UPDATE 行锁防并发丢失更新）
     - 可修改：product_name、pattern_maker_id、pattern_maker_name、remark、product_image_file_id
-    - clear_image=True 时清除产品图片（优先级低于 product_image_file_id）
+    - clear_image=True 时清除产品图片（product_image_file_id 优先于 clear_image）
+    - clear_pattern_maker=True 时清除版师关联（清除优先于 pattern_maker_id；
+      注意两者优先级约定不同，调用方应避免同时传"新值+清除"）
     - 序列号与历史版本快照不可修改
     - 返回更新后的乐观锁版本号，供前端局部回写
     """
@@ -179,7 +202,14 @@ async def update_project(
         field_diffs.append({'field': 'product_name', 'old': project.product_name, 'new': product_name})
         project.product_name = product_name
 
-    if pattern_maker_id is not None and pattern_maker_id != project.pattern_maker_id:
+    if clear_pattern_maker and project.pattern_maker_id is not None:
+        # 清除版师关联（优先级高于 pattern_maker_id；注意与 clear_image 语义不同：
+        # clear_image 是 ID 优先，clear_pattern_maker 是清除优先）
+        field_diffs.append({'field': 'pattern_maker_id', 'old': project.pattern_maker_id, 'new': None})
+        field_diffs.append({'field': 'pattern_maker_name', 'old': project.pattern_maker_name, 'new': ''})
+        project.pattern_maker_id = None
+        project.pattern_maker_name = ''
+    elif pattern_maker_id is not None and pattern_maker_id != project.pattern_maker_id:
         # 校验新版师存在性
         new_pattern_maker_name = await _resolve_pattern_maker_name(db, pattern_maker_id)
         if not new_pattern_maker_name:
@@ -204,14 +234,7 @@ async def update_project(
         field_diffs.append({'field': 'current_version', 'old': project.current_version, 'new': current_version})
         project.current_version = current_version
         # 同步更新默认角色的 current_version（保持向后兼容）
-        # 旧端点仍调 update_project 设置最终版本时，默认角色同步生效
-        default_role_id = await _get_default_role_id(db, project_id)
-        dr_result = await db.execute(
-            select(CustomerSamplingRole).where(CustomerSamplingRole.id == default_role_id)
-        )
-        default_role = dr_result.scalar_one_or_none()
-        if default_role is not None and default_role.current_version != current_version:
-            default_role.current_version = current_version
+        await _sync_default_role_current_version(db, project_id, current_version)
 
     # 乐观锁 +1
     project.version += 1
@@ -407,11 +430,12 @@ async def list_projects(
 
     conditions = []
     if keyword:
-        like = f'%{keyword}%'
+        # 用户输入中的 % _ 先转义，避免"100%"这类词被当作通配符全量匹配
+        like = f'%{_escape_like(keyword)}%'
         conditions.append(
             or_(
-                CustomerSamplingProject.sequence_no.ilike(like),
-                CustomerSamplingProject.product_name.ilike(like),
+                CustomerSamplingProject.sequence_no.ilike(like, escape='\\'),
+                CustomerSamplingProject.product_name.ilike(like, escape='\\'),
             )
         )
     if pattern_maker_id is not None:

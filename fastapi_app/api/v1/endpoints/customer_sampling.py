@@ -155,6 +155,7 @@ async def api_update_project(
             project_id,
             product_name=data.product_name,
             pattern_maker_id=data.pattern_maker_id,
+            clear_pattern_maker=data.clear_pattern_maker,
             remark=data.remark,
             product_image_file_id=data.product_image_file_id,
             clear_image=data.clear_image,

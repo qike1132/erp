@@ -15,12 +15,12 @@ from fastapi_app.shared_models import (
     CustomerSamplingProject,
 )
 
+from .common import _escape_like
+from .upload import _batch_get_image_urls
+
 logger = logging.getLogger(__name__)
 
 _GROUPED_LIST_MAX_PROJECTS = 5000
-
-
-from .upload import _batch_get_image_urls
 
 # 列表查询统一 noload 选项：抑制 CustomerSamplingProject 模型 relationship 的
 # 惰性加载（parts/roles/fabric_versions/change_logs/product_image/creator，
@@ -65,12 +65,17 @@ async def get_grouped_list(
     # 构建查询条件
     conditions = []
     if keyword:
-        # 关键词作为绑定参数，通配符由 SQL 侧 concat 拼接（不在 Python 侧拼 SQL 片段）
-        kw_pattern = func.concat('%', keyword, '%')
+        # 关键词作为绑定参数，通配符由 SQL 侧 concat 拼接（不在 Python 侧拼 SQL 片段）；
+        # 用户输入中的 % _ 先转义，避免"100%"这类词被当作通配符全量匹配
+        kw_pattern = func.concat('%', _escape_like(keyword), '%')
         conditions.append(
             or_(
-                CustomerSamplingProject.sequence_no.ilike(kw_pattern),
-                CustomerSamplingProject.product_name.ilike(kw_pattern),
+                CustomerSamplingProject.sequence_no.ilike(
+                    kw_pattern, escape='\\',
+                ),
+                CustomerSamplingProject.product_name.ilike(
+                    kw_pattern, escape='\\',
+                ),
             )
         )
     if pattern_maker_id is not None:
@@ -182,6 +187,8 @@ async def get_grouped_list(
         'total': total_groups,
         'pages': pages,
         'current_page': page,
+        # 命中 5000 条轻量查询上限时标记截断（分组统计不含全部匹配项目）
+        'truncated': len(light_rows) < total_projects,
     }
 
 

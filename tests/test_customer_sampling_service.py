@@ -564,6 +564,7 @@ class TestServiceIntegration:
         assert result['success'] is True
         assert result['groups'] == []
         assert result['total_projects'] == 0
+        assert result['truncated'] is False
 
     async def test_grouped_list_with_unclassified(self, cs_db):
         """分组查询：未关联版师的项目归入"未分类"分组"""
@@ -613,6 +614,17 @@ class TestServiceIntegration:
         assert result['total_projects'] == 2
         group = result['groups'][0]
         assert group['project_count'] == 2
+
+    async def test_grouped_list_keyword_escape_wildcards(self, cs_db):
+        """分组查询：关键词含 % 时按字面匹配（ILIKE 通配符转义）"""
+        await create_project(cs_db, product_name='100%棉T恤')
+        await create_project(cs_db, product_name='1100件订单')
+        await cs_db.flush()
+
+        # '100%' 作为字面词只命中含 "100%" 的项目；
+        # 若未转义，% 会被当作通配符导致 '1100件订单'（含 "100"）也被命中
+        result = await get_grouped_list(cs_db, keyword='100%')
+        assert result['total_projects'] == 1
 
     async def test_grouped_list_default_in_progress(self, cs_db):
         """分组查询：status 缺省默认只返回进行中项目（兜底，避免混入已完成项目）"""
@@ -710,6 +722,7 @@ class TestServiceIntegration:
         assert counts['未分类'] == 1  # 完整分组不被截断拆散
         assert counts['大组版师'] == 2  # 2 条来自截断加载（上限 3 条扣掉未分类 1 条）
         assert any('truncated' in r.message for r in caplog.records)
+        assert result['truncated'] is True  # 返回值显式标记截断（E-2 修复新增字段）
 
     async def test_project_create_auto_t1(self, cs_db):
         """创建项目：自动生成序列号 + T1 基线版本"""
@@ -782,6 +795,20 @@ class TestServiceIntegration:
         detail2 = await get_project_detail(cs_db, r['id'])
         assert detail2['pattern_maker_id'] == maker.id
         assert detail2['pattern_maker_name'] == '关联版师'
+
+    async def test_project_update_clear_pattern_maker(self, cs_db):
+        """编辑项目：clear_pattern_maker=True 清除版师关联（清除优先于 pattern_maker_id）"""
+        maker = await _create_pattern_maker(cs_db, '待清空版师')
+        r = await create_project(cs_db, product_name='清空版师测试', pattern_maker_id=maker.id)
+        await cs_db.flush()
+
+        detail = await get_project_detail(cs_db, r['id'])
+        await update_project(cs_db, r['id'], clear_pattern_maker=True, version=detail['version'])
+        await cs_db.flush()
+
+        detail2 = await get_project_detail(cs_db, r['id'])
+        assert detail2['pattern_maker_id'] is None
+        assert detail2['pattern_maker_name'] == ''
 
     async def test_project_update_status(self, cs_db):
         """更新项目状态：置为已完成，详情与分组摘要均带状态，审计日志可追溯"""
