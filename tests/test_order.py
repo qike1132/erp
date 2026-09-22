@@ -506,6 +506,98 @@ class TestGetBeileOrders:
         assert result['total'] == 0
 
 
+class TestBeileSoftDeleteFilter:
+    """湖北订单软删除过滤（Order.is_deleted 与 StockIn.is_deleted 语义对齐）
+
+    用真实 SQLite 执行 UNION 子查询，验证软删行不出现在合并列表：
+    若 StockIn 侧丢失 is_deleted 过滤，软删备货行会重新混入列表与计数。
+    """
+
+    @staticmethod
+    async def _session(tmp_path):
+        """真实 SQLite 库（只建 union 涉及的表及其外键依赖，避开 JSONB 等 PG 专属列）"""
+        from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+        from fastapi_app.shared_models import Base
+
+        # 外键链：order/order_item/stock_in → product/user
+        needed = {'order', 'order_item', 'stock_in', 'product', 'user'}
+        tables = [t for t in Base.metadata.sorted_tables if t.name in needed]
+        engine = create_async_engine(f'sqlite+aiosqlite:///{tmp_path / "beile.db"}')
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all, tables=tables)
+        sf = async_sessionmaker(engine, expire_on_commit=False)
+        yield sf, engine
+
+    @pytest.mark.asyncio
+    async def test_soft_deleted_stockin_excluded_from_unified_query(self, tmp_path):
+        """软删 StockIn 不进合并子查询；未删行正常返回"""
+        agen = self._session(tmp_path)
+        sf, engine = await agen.__anext__()
+
+        from fastapi_app.services.order.beile import _build_beile_unified_query
+        from fastapi_app.shared_models import Product, StockIn
+        from sqlalchemy import select as sa_select
+
+        async with sf() as db:
+            product = Product(name='软删测试品', factory='湖北')
+            db.add(product)
+            await db.flush()
+
+            db.add(StockIn(stockin_no='SI-KEEP', customer='客户A', product_id=product.id,
+                           quantity=10, confirmed_at=None))
+            db.add(StockIn(stockin_no='SI-DELETED', customer='客户B', product_id=product.id,
+                           quantity=20, confirmed_at=None, is_deleted=True))
+            await db.flush()
+
+            subq = _build_beile_unified_query(confirmed=None, factory='湖北',
+                                              customer=None, product_kw=None)
+            rows = (await db.execute(sa_select(subq))).all()
+            stockin_rows = {r.order_no for r in rows if r.record_type == 'stockin'}
+
+            assert 'SI-KEEP' in stockin_rows, '未软删备货应出现在合并查询中'
+            assert 'SI-DELETED' not in stockin_rows, '软删备货不应出现在合并查询中'
+
+        await engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_soft_deleted_order_excluded_from_unified_query(self, tmp_path):
+        """软删 Order 不进合并子查询（既有行为的回归锚点）"""
+        agen = self._session(tmp_path)
+        sf, engine = await agen.__anext__()
+
+        from fastapi_app.services.order.beile import _build_beile_unified_query
+        from fastapi_app.shared_models import Order, OrderItem, Product
+        from sqlalchemy import select as sa_select
+
+        async with sf() as db:
+            product = Product(name='订单软删测试品', factory='湖北')
+            db.add(product)
+            await db.flush()
+
+            keep = Order(order_no='ORD-KEEP', customer='客户A', product_id=product.id, quantity=10)
+            deleted = Order(order_no='ORD-DELETED', customer='客户B', product_id=product.id,
+                            quantity=20, is_deleted=True)
+            db.add_all([keep, deleted])
+            await db.flush()
+            # 工厂过滤经 order_item.product 走（无 item 的订单不进合并列表）
+            db.add(OrderItem(order_id=keep.id, product_id=product.id,
+                             product_name=product.name, quantity=10))
+            db.add(OrderItem(order_id=deleted.id, product_id=product.id,
+                             product_name=product.name, quantity=20))
+            await db.flush()
+
+            subq = _build_beile_unified_query(confirmed=None, factory='湖北',
+                                              customer=None, product_kw=None)
+            rows = (await db.execute(sa_select(subq))).all()
+            order_rows = {r.order_no for r in rows if r.record_type == 'order'}
+
+            assert 'ORD-KEEP' in order_rows
+            assert 'ORD-DELETED' not in order_rows
+
+        await engine.dispose()
+
+
 class TestUpdateDeductQuantity:
     """订单抵扣管理"""
 

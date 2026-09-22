@@ -33,14 +33,14 @@ function baseItem(extra: Record<string, unknown> = {}): BeileOrderRowType {
   } as unknown as BeileOrderRowType
 }
 
-function mountRow(item: BeileOrderRowType) {
+function mountRow(item: BeileOrderRowType, confirmable = true) {
   return mount(BeileOrderRow, {
     props: {
       item,
       confirmStatus: 'unconfirmed',
       isConfirming: false,
       highlightId: null,
-      confirmable: true,
+      confirmable,
       selectable: false,
       selected: false,
     },
@@ -140,5 +140,15 @@ describe('BeileOrderRow 汇总单行（两级结构之一级）', () => {
   it('口径稳定（RC-3）：订单级汇总 30 不随筛选而变化（行内不再按关键字过滤 SKU）', () => {
     const wrapper = mountRow(multiUnordered())
     expect(wrapper.find('.bo-qty').text()).toBe('30')
+  })
+
+  it('confirmable 门控：有权限（true）渲染确认按钮，无权限（false）隐藏', () => {
+    // 有权限：确认按钮存在
+    const withPerm = mountRow(baseItem({ confirmed: false }))
+    expect(withPerm.find('.bo-confirm-btn').exists()).toBe(true)
+
+    // 无权限：确认按钮不渲染（beile_order_confirm 门控）
+    const noPerm = mountRow(baseItem({ confirmed: false }), false)
+    expect(noPerm.find('.bo-confirm-btn').exists()).toBe(false)
   })
 })

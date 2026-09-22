@@ -53,6 +53,28 @@ class TestPurchaseCenterSchemas:
         assert resp.supplier_count == 1
         assert len(resp.suppliers) == 1
 
+    def test_calculate_material_request_bounds(self):
+        """物料计算请求边界：quantity ≤ 100 万、orders ≤ 200 条，越界须拒绝。"""
+        from pydantic import ValidationError
+
+        from fastapi_app.api.v1.endpoints.purchase_center.schemas import CalculateMaterialRequest
+
+        # 正常与边界值应通过
+        ok = CalculateMaterialRequest(orders=[{"product_id": 1, "quantity": 10}])
+        assert ok.orders[0].quantity == 10
+        edge = CalculateMaterialRequest(
+            orders=[{"product_id": 1, "quantity": 1_000_000}] * 200
+        )
+        assert len(edge.orders) == 200
+
+        # quantity 超上限应拒绝（防止超大数值渗入聚合运算产生 Infinity/NaN）
+        with pytest.raises(ValidationError):
+            CalculateMaterialRequest(orders=[{"product_id": 1, "quantity": 1_000_000.1}])
+
+        # orders 超长应拒绝（防止无界列表撑爆 SQL IN 子句与 selectinload）
+        with pytest.raises(ValidationError):
+            CalculateMaterialRequest(orders=[{"product_id": 1, "quantity": 1}] * 201)
+
 
 # ============================================================
 # Service 测试
