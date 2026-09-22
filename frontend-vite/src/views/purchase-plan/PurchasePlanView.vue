@@ -331,7 +331,13 @@ function exportCSV() {
 .sp-kpi-strip {
   display: flex;
   align-items: stretch;
-  background: white;
+  /* 允许换行：窄屏下 6 段并排会把「临期≤3天」挤出可视区，
+     而 overflow:hidden 会静默吞掉它 —— 用户看不到该指标却不报错。 */
+  flex-wrap: wrap;
+  /* 分隔线用 1px 间隙透出底色实现：换行后横向/纵向分隔线都自然成立，
+     且不会在外边缘留下多余边框（逐项 border 无法判断某行是否为末行）。 */
+  gap: 1px;
+  background: var(--color-border-light, #e2e8f0);
   border: 1px solid var(--color-border-light, #e2e8f0);
   border-radius: 14px;
   box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
@@ -339,16 +345,15 @@ function exportCSV() {
 }
 
 .sp-kpi {
-  flex: 1;
+  flex: 1 1 110px;
   min-width: 0;
-  padding: 11px 16px;
-  border-right: 1px solid var(--color-border-light, #e2e8f0);
+  padding: 11px 14px;
+  background: white;
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
-.sp-kpi:last-child { border-right: none; }
-.sp-kpi-rate { flex: 1.4; }
+.sp-kpi-rate { flex: 1.4 1 150px; }
 .sp-kpi-l {
   font-size: 11px;
   font-weight: 600;

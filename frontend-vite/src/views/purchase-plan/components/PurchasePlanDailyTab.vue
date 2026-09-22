@@ -70,7 +70,7 @@
 // 仅渲染有计划的日子：每天一张卡片，卡片内逐行列「客户 / 产品 / 数量」。
 import { computed } from 'vue';
 import PlanDayCard from './PlanDayCard.vue';
-import type { Row, CustSumItem, SkuDateItem, DayCardStatus } from './types';
+import type { Row, CustSumItem, SkuDateItem, DayCardStatus, PlanDayCustomerGroup } from './types';
 
 const props = defineProps<{
   y: number;
@@ -126,24 +126,64 @@ const itemsByDate = computed(() => {
       else map.set(e.date, [{ customer, product, qty: e.qty }]);
     }
   }
-  for (const list of map.values()) list.sort((a, b) => b.qty - a.qty);
   return map;
 });
 
+// 按客户分组：同一客户在该日的多条产品明细归到一组，组内按数量降序。
+// 客户合计取该客户当日全部产品之和，故分组展示时数量永远可信。
+const groupsByDate = computed(() => {
+  const out = new Map<string, PlanDayCustomerGroup[]>();
+  for (const [date, items] of itemsByDate.value) {
+    const byCustomer = new Map<string, PlanDayCustomerGroup>();
+    for (const it of items) {
+      let g = byCustomer.get(it.customer);
+      if (!g) {
+        g = { customer: it.customer, qty: 0, products: [] };
+        byCustomer.set(it.customer, g);
+      }
+      g.qty += it.qty;
+      g.products.push({ product: it.product, qty: it.qty });
+    }
+    const list = [...byCustomer.values()];
+    for (const g of list) g.products.sort((a, b) => b.qty - a.qty);
+    list.sort((a, b) => b.qty - a.qty);
+    out.set(date, list);
+  }
+  return out;
+});
+
+/**
+ * 卡片高度上限：产品行预算。
+ * 截断以「客户分组」为单位整组取舍，绝不拆分某客户 —— 否则该组显示的
+ * 客户合计会大于其可见产品之和，数字自相矛盾。
+ */
+const PRODUCT_ROW_BUDGET = 4;
+
 // 每天一张卡片：只保留有计划的日期，无计划的日期不渲染
-// 计划条数可能很多，卡片内只预览前 PREVIEW_LIMIT 条，其余折叠为「还有 N 条」
-const PREVIEW_LIMIT = 3;
 const dayCards = computed(() =>
   props.rows.map(row => {
-    const all = itemsByDate.value.get(row.date) ?? [];
+    const all = groupsByDate.value.get(row.date) ?? [];
+    const planCount = all.reduce((n, g) => n + g.products.length, 0);
+
+    const groups: PlanDayCustomerGroup[] = [];
+    let shown = 0;
+    for (const g of all) {
+      // 预算不足以整组放下即停止；首组始终保留，避免出现空卡片
+      if (shown > 0 && shown + g.products.length > PRODUCT_ROW_BUDGET) break;
+      groups.push(g);
+      shown += g.products.length;
+    }
+
     return {
       date: row.date,
       label: `${row._fullDate} 周${row._weekday}`,
       match: !isSearching.value || matchedDates.value.has(row.date),
       status: statusFor(row),
-      items: all.slice(0, PREVIEW_LIMIT),
-      extra: Math.max(0, all.length - PREVIEW_LIMIT),
-      planCount: all.length,
+      groups,
+      extra: planCount - shown,
+      // 截断可能连带藏掉整个客户，此时只报「还有 N 个产品」会掩盖客户数缺口
+      extraCustomers: all.length - groups.length,
+      planCount,
       totalQty: row.totalQty,
       customerCount: row.customerCount,
     };
@@ -190,14 +230,16 @@ const distRows = computed(() => {
 
 .sp-cal-layout {
   display: grid;
-  grid-template-columns: 1fr 344px;
+  grid-template-columns: minmax(0, 1fr) 344px;
   gap: 16px;
   align-items: start;
 }
 
-@media (max-width: 960px) {
+/* 侧栏在窄屏下沉；断点取 1100px 而非 960px —— 1080px 视口下日历只剩 406px 宽，
+   4 列小卡片会把产品名挤成逐字换行（"Nommi糯米儿-宝藏收藏家系列毛绒盲盒" 撑高整张卡）。 */
+@media (max-width: 1100px) {
   .sp-cal-layout {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -229,24 +271,27 @@ const distRows = computed(() => {
 .sp-cal { padding: 16px 18px; }
 .sp-day-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 12px;
+  /* 自适应列数：容器够宽就并排，不够就自动降到 1 列。
+     下限 340px —— 低于此宽度产品名会频繁折行，卡片高度失控。 */
+  grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr));
+  gap: 14px;
 }
 
 .sp-search-hint { padding: 6px 18px; font-size: 12px; color: var(--color-primary-600); }
 .sp-legend {
   display: flex;
-  gap: 16px;
+  gap: 18px;
   flex-wrap: wrap;
   padding: 12px 18px 14px;
   font-size: 12px;
-  color: var(--color-muted, #8c96ad);
+  color: var(--color-text-muted);
 }
-.sp-legend span { display: inline-flex; align-items: center; gap: 6px; }
-.sp-legend i { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
-.lg-r { background: var(--color-danger-100); }
-.lg-a { background: var(--color-warning-100); }
-.lg-g { background: var(--color-success-100); }
+.sp-legend span { display: inline-flex; align-items: center; gap: 7px; }
+/* 色条形状与卡片左侧状态条一致，让图例真正解释卡片上的视觉编码 */
+.sp-legend i { width: 3px; height: 13px; border-radius: 2px; display: inline-block; }
+.lg-r { background: var(--color-danger-500); }
+.lg-a { background: var(--color-warning-500); }
+.lg-g { background: var(--color-success-500); }
 
 /* 右侧 */
 .sp-side { display: flex; flex-direction: column; gap: 16px; }

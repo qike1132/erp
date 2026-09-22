@@ -61,17 +61,27 @@ export interface SkuDateItem {
 /** 日历卡片的日期状态标记（样式类 + 展示文案），无状态时为 null */
 export type DayCardStatus = { cls: string; lbl: string } | null;
 
+/** 日历卡片内的单个客户分组：客户名 + 当日该客户合计 + 其下产品明细 */
+export interface PlanDayCustomerGroup {
+  customer: string;
+  /** 该客户当日计划总量 */
+  qty: number;
+  products: { product: string; qty: number }[];
+}
+
 /** 排产日历单日卡片（由 PurchasePlanDailyTab 派生，供 PlanDayCard 渲染） */
 export interface PlanDayCard {
   date: string;
   label: string;
   match: boolean;
   status: DayCardStatus;
-  /** 预览明细，最多 PREVIEW_LIMIT 条 */
-  items: { customer: string; product: string; qty: number }[];
-  /** 未在 items 中展示的剩余条数 */
+  /** 按客户分组后的展示数据，已按产品行数预算裁剪 */
+  groups: PlanDayCustomerGroup[];
+  /** 未在 groups 中展示的计划条数 */
   extra: number;
-  /** 当日计划总条数（items 可能被截断，故单独记录） */
+  /** 因整组截断而未展示的客户数（用于让汇总文案与实际可见内容一致） */
+  extraCustomers: number;
+  /** 当日计划总条数（groups 可能被截断，故单独记录） */
   planCount: number;
   totalQty: number;
   customerCount: number;
