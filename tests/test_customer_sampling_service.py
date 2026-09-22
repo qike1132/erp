@@ -797,13 +797,13 @@ class TestServiceIntegration:
         assert detail2['pattern_maker_name'] == '关联版师'
 
     async def test_project_update_clear_pattern_maker(self, cs_db):
-        """编辑项目：clear_pattern_maker=True 清除版师关联（清除优先于 pattern_maker_id）"""
+        """编辑项目：pattern_maker_id 显式传 None 清除版师关联（三态语义：None=清空，缺省=不修改）"""
         maker = await _create_pattern_maker(cs_db, '待清空版师')
         r = await create_project(cs_db, product_name='清空版师测试', pattern_maker_id=maker.id)
         await cs_db.flush()
 
         detail = await get_project_detail(cs_db, r['id'])
-        await update_project(cs_db, r['id'], clear_pattern_maker=True, version=detail['version'])
+        await update_project(cs_db, r['id'], pattern_maker_id=None, version=detail['version'])
         await cs_db.flush()
 
         detail2 = await get_project_detail(cs_db, r['id'])

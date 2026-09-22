@@ -185,13 +185,12 @@ function onBlurError(e: Event) {
 
 <style scoped>
 /* 项目卡片（固定高度，配合虚拟滚动）
-   高度消费父级 .cgl-list-scroll 定义的 --pr-card-h（单一事实来源），
-   本组件不再硬编码，回退值与 CustomerProjectArea 的 DEFAULT_CARD_H 保持一致 */
+   高度消费父级 :style 注入的 --pr-card-h（CustomerProjectArea 的 DEFAULT_CARD_H 唯一字面量），本组件不硬编码 */
 .cgl-project-card {
   display: flex;
   gap: 10px;
   width: 100%;
-  height: var(--pr-card-h, 216px);
+  height: var(--pr-card-h);
   margin-bottom: 6px;
   padding: 8px;
   box-sizing: border-box;

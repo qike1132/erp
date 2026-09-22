@@ -298,15 +298,13 @@ class ProjectUpdateRequest(BaseModel):
 
     序列号与历史版本快照不可修改。
     version 为乐观锁版本号，必填。
-    clear_image=True 时清除产品图片（None 语义为"不修改"，无法表达清空）。
-    clear_pattern_maker=True 时清除版师关联（None 语义为"不修改"，无法表达清空）。
+    pattern_maker_id / product_image_file_id 为三态语义（依 model_fields_set 区分）：
+    字段缺省 = 不修改；显式传 null = 清空；传值 = 设置。
     """
     product_name: str | None = Field(None, min_length=1, max_length=200)
     pattern_maker_id: int | None = None
-    clear_pattern_maker: bool = Field(False, description='清除版师关联（默认 False）')
     remark: str | None = Field(None, max_length=2000)
     product_image_file_id: int | None = None
-    clear_image: bool = Field(False, description='清除产品图片（默认 False）')
     current_version: str | None = Field(
         None, max_length=8, pattern=_VERSION_NO_PATTERN,
         description='当前版本/最终版本 T1/T2/T3...',

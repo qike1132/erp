@@ -149,16 +149,21 @@ async def api_update_project(
     current_user: User = Depends(require_permission(PERM)),
 ) -> dict[str, Any]:
     """编辑打样项目（乐观锁校验，返回新版本号供前端回写）"""
+    # 三态语义：请求体缺省字段不传给 service（不修改），显式 null 传 None（清空）
     async with db_transaction(db):
         result = await svc.update_project(
             db,
             project_id,
             product_name=data.product_name,
-            pattern_maker_id=data.pattern_maker_id,
-            clear_pattern_maker=data.clear_pattern_maker,
+            **(
+                {'pattern_maker_id': data.pattern_maker_id}
+                if 'pattern_maker_id' in data.model_fields_set else {}
+            ),
             remark=data.remark,
-            product_image_file_id=data.product_image_file_id,
-            clear_image=data.clear_image,
+            **(
+                {'product_image_file_id': data.product_image_file_id}
+                if 'product_image_file_id' in data.model_fields_set else {}
+            ),
             current_version=data.current_version,
             version=data.version,
             user_id=current_user.id,

@@ -101,7 +101,7 @@ const form = reactive({
 
 const roleNames = ref<string[]>([''])
 
-/** 编辑模式下是否移除了已有产品图片（提交时带 clear_image，后端清除旧图） */
+/** 编辑模式下是否移除了已有产品图片（提交时 product_image_file_id 显式传 null，后端清除旧图） */
 const imageRemoved = ref(false)
 
 const { previewUrl, setPreview, applyImageFile, removeImage } = useFormImageUpload(
@@ -135,12 +135,12 @@ function handleSubmit() {
   if (isEditing.value) {
     const data: ProjectUpdateRequest = {
       product_name: form.product_name || null,
+      // 三态：null = 清空版师（用户选回"请选择"）；有值 = 设置/保持
       pattern_maker_id: props.patternMakerId,
-      // 用户将版师选回"请选择"时需显式清除后端关联
-      clear_pattern_maker: props.patternMakerId === null,
       // 空串即"清空备注"（后端 None 语义为不修改）
       remark: form.remark,
-      clear_image: imageRemoved.value,
+      // 三态：undefined（序列化时丢弃，不修改）或 null（清空图片）
+      ...(imageRemoved.value ? { product_image_file_id: null } : {}),
       version: props.project!.version,
     }
     emit('submit-update', data)

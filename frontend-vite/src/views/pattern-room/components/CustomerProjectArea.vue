@@ -7,7 +7,11 @@
       <span>该版师暂无项目</span>
     </div>
     <template v-else>
-      <div ref="projectAreaRef" class="cgl-list-scroll">
+      <div
+        ref="projectAreaRef"
+        class="cgl-list-scroll"
+        :style="{ [CSS_VAR_CARD_H]: DEFAULT_CARD_H + 'px' }"
+      >
         <VirtualList
           v-if="projectAreaHeight > 0"
           ref="virtualListRef"
@@ -76,10 +80,9 @@ defineEmits<{
   preview: [url: string]
 }>()
 
-/** 卡片高度单一事实来源：CSS 变量 --pr-card-h（ProjectCardItem 同步消费），
- *  JS 侧运行时读取，改样式无需同步两处常量 */
+/** 卡片高度单一事实来源：DEFAULT_CARD_H 是唯一字面量，经模板 :style 注入 CSS 变量，
+ *  ProjectCardItem 与本组件运行时读取消费同一来源，改高度只需改此处 */
 const CSS_VAR_CARD_H = '--pr-card-h'
-/** 卡片 CSS 高度默认值（与 ProjectCardItem 样式中的回退值保持一致） */
 const DEFAULT_CARD_H = 216
 /** 卡片槽位高度（卡片高 + margin-bottom 6px） */
 const projectCardSlotH = ref(DEFAULT_CARD_H + 6)
@@ -168,9 +171,8 @@ watch(projectPage, () => {
   padding: 8px;
   contain: layout;
 }
-/* 卡片高度单一事实来源：ProjectCardItem 通过 var(--pr-card-h) 消费（scoped 变量随 DOM 属性下传） */
+/* --pr-card-h 由模板 :style 注入（DEFAULT_CARD_H 唯一字面量），此处不再定义 */
 .cgl-list-scroll {
-  --pr-card-h: 216px;
   flex: 1;
   min-height: 0;
 }

@@ -22,6 +22,10 @@ from fastapi_app.shared_models import (
 
 logger = logging.getLogger(__name__)
 
+# 可空字段的"未传参"哨兵：区分「显式传 null = 清空」与「未传 = 不修改」。
+# 仅 update_project 签名内部使用，调用方经 endpoint 的 model_fields_set 判定后传参。
+_UNSET = object()
+
 from .common import (
     _ensure_part_name_unique,
     _ensure_project_exists,
@@ -162,11 +166,9 @@ async def update_project(
     project_id: int,
     *,
     product_name: str | None = None,
-    pattern_maker_id: int | None = None,
-    clear_pattern_maker: bool = False,
+    pattern_maker_id: int | None | object = _UNSET,
     remark: str | None = None,
-    product_image_file_id: int | None = None,
-    clear_image: bool = False,
+    product_image_file_id: int | None | object = _UNSET,
     current_version: str | None = None,
     version: int,
     user_id: int | None = None,
@@ -175,9 +177,8 @@ async def update_project(
 
     - 乐观锁校验（version 不匹配抛 ConflictError 409，SELECT ... FOR UPDATE 行锁防并发丢失更新）
     - 可修改：product_name、pattern_maker_id、pattern_maker_name、remark、product_image_file_id
-    - clear_image=True 时清除产品图片（product_image_file_id 优先于 clear_image）
-    - clear_pattern_maker=True 时清除版师关联（清除优先于 pattern_maker_id；
-      注意两者优先级约定不同，调用方应避免同时传"新值+清除"）
+    - pattern_maker_id / product_image_file_id 为三态语义：
+      缺省（_UNSET）= 不修改；显式传 None = 清空；传值 = 设置
     - 序列号与历史版本快照不可修改
     - 返回更新后的乐观锁版本号，供前端局部回写
     """
@@ -202,33 +203,31 @@ async def update_project(
         field_diffs.append({'field': 'product_name', 'old': project.product_name, 'new': product_name})
         project.product_name = product_name
 
-    if clear_pattern_maker and project.pattern_maker_id is not None:
-        # 清除版师关联（优先级高于 pattern_maker_id；注意与 clear_image 语义不同：
-        # clear_image 是 ID 优先，clear_pattern_maker 是清除优先）
-        field_diffs.append({'field': 'pattern_maker_id', 'old': project.pattern_maker_id, 'new': None})
-        field_diffs.append({'field': 'pattern_maker_name', 'old': project.pattern_maker_name, 'new': ''})
-        project.pattern_maker_id = None
-        project.pattern_maker_name = ''
-    elif pattern_maker_id is not None and pattern_maker_id != project.pattern_maker_id:
-        # 校验新版师存在性
-        new_pattern_maker_name = await _resolve_pattern_maker_name(db, pattern_maker_id)
-        if not new_pattern_maker_name:
-            raise NotFoundError('所选版师不存在')
-        field_diffs.append({'field': 'pattern_maker_id', 'old': project.pattern_maker_id, 'new': pattern_maker_id})
-        field_diffs.append({'field': 'pattern_maker_name', 'old': project.pattern_maker_name, 'new': new_pattern_maker_name})
-        project.pattern_maker_id = pattern_maker_id
-        project.pattern_maker_name = new_pattern_maker_name
+    if pattern_maker_id is not _UNSET and pattern_maker_id != project.pattern_maker_id:
+        if pattern_maker_id is None:
+            # 显式传 null：清除版师关联
+            field_diffs.append({'field': 'pattern_maker_id', 'old': project.pattern_maker_id, 'new': None})
+            field_diffs.append({'field': 'pattern_maker_name', 'old': project.pattern_maker_name, 'new': ''})
+            project.pattern_maker_id = None
+            project.pattern_maker_name = ''
+        else:
+            # 传新值：校验新版师存在性
+            new_pattern_maker_name = await _resolve_pattern_maker_name(db, pattern_maker_id)
+            if not new_pattern_maker_name:
+                raise NotFoundError('所选版师不存在')
+            field_diffs.append({'field': 'pattern_maker_id', 'old': project.pattern_maker_id, 'new': pattern_maker_id})
+            field_diffs.append({'field': 'pattern_maker_name', 'old': project.pattern_maker_name, 'new': new_pattern_maker_name})
+            project.pattern_maker_id = pattern_maker_id
+            project.pattern_maker_name = new_pattern_maker_name
 
     if remark is not None and remark != (project.remark or ''):
         field_diffs.append({'field': 'remark', 'old': project.remark, 'new': remark})
         project.remark = remark
 
-    if product_image_file_id is not None and product_image_file_id != project.product_image_file_id:
+    if product_image_file_id is not _UNSET and product_image_file_id != project.product_image_file_id:
+        # 显式传 null = 清除图片；传值 = 替换图片（旧图统一走下方清理）
         field_diffs.append({'field': 'product_image_file_id', 'old': project.product_image_file_id, 'new': product_image_file_id})
         project.product_image_file_id = product_image_file_id
-    elif clear_image and project.product_image_file_id is not None:
-        field_diffs.append({'field': 'product_image_file_id', 'old': project.product_image_file_id, 'new': None})
-        project.product_image_file_id = None
 
     if current_version is not None and current_version != project.current_version:
         field_diffs.append({'field': 'current_version', 'old': project.current_version, 'new': current_version})
