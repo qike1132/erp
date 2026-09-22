@@ -130,7 +130,7 @@ async def list_beile_orders(
 async def confirm_beile_order(
     order_id: int,
     db: AsyncSession = Depends(get_async_db),
-    user: User = Depends(require_permission("beile_order_view")),
+    user: User = Depends(require_permission("beile_order_confirm")),
 ) -> OrderActionResponse:
     """确认湖北订单（beile-order 页面）。
 
@@ -148,7 +148,7 @@ async def confirm_beile_order(
 async def confirm_beile_stockin(
     stockin_id: int,
     db: AsyncSession = Depends(get_async_db),
-    user: User = Depends(require_permission("beile_order_view")),
+    user: User = Depends(require_permission("beile_order_confirm")),
 ) -> OrderActionResponse:
     """确认湖北备货（beile-order 页面，与订单确认流程对齐）。
 

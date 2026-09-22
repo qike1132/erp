@@ -93,6 +93,7 @@ def _build_beile_unified_query(confirmed: bool | None, customer, factory, produc
         StockIn.customer.label('customer'),
         StockIn.stockin_date.label('sort_date'),
     ).where(
+        StockIn.is_deleted.isnot(True),
         StockIn.product.has(Product.factory == factory),
     )
     if confirmed is not None:
@@ -160,6 +161,7 @@ async def _fetch_completed_po_maps(
 
     全库 completed 采购单量级极小（数十条），一次全量拉取成本可忽略，
     且彻底规避 SQL 侧 JSON 解析的类型 / 转义风险（设计 §5.2）。
+    超过 1000 条视为量级异常（缓存 TTL 内每次列表查询都会全量拉取），告警日志提示改分页聚合。
     """
     rows = (await db.execute(
         select(
@@ -172,6 +174,8 @@ async def _fetch_completed_po_maps(
             PurchaseOrder.spare_rate,
         ).where(PurchaseOrder.status == PurchaseOrderStatus.COMPLETED)
     )).all()
+    if len(rows) > 1000:
+        logger.warning('completed 采购单已达 %s 条（>1000），_fetch_completed_po_maps 全量内存建映射应改为分页聚合', len(rows))
 
     by_order_id: dict[int, list] = {}
     by_customer_product: dict[tuple[str, str], list] = {}
@@ -387,6 +391,7 @@ async def get_beile_unconfirmed_count(db: AsyncSession, factory: str = '湖北')
     )
     unconfirmed_stockins_result = await db.execute(
         select(func.count(StockIn.id)).where(
+            StockIn.is_deleted.isnot(True),
             StockIn.confirmed_at.is_(None),
             StockIn.product.has(Product.factory == factory),
         )
@@ -740,6 +745,7 @@ async def confirm_beile_stockin(db: AsyncSession, stockin_id: int, current_user:
         .options(selectinload(StockIn.product))
         .where(
             StockIn.id == stockin_id,
+            StockIn.is_deleted.isnot(True),
             StockIn.product.has(Product.factory == '湖北'),
         )
         .with_for_update()

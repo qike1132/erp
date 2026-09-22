@@ -403,7 +403,7 @@ function mountRow(item: BeileOrderRowType) {
   return mount(BeileOrderRow, {
     props: {
       item, confirmStatus: 'unconfirmed', isConfirming: false,
-      highlightId: null, selectable: false, selected: false,
+      highlightId: null, confirmable: true, selectable: false, selected: false,
     },
     global: { stubs: { UiCheckbox: true } },
   })

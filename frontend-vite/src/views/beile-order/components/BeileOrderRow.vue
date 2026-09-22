@@ -70,7 +70,7 @@
     <!-- 确认操作列：未确认记录显示确认按钮 -->
     <div v-if="confirmStatus !== 'confirmed'" class="bo-td bo-td-center" style="width: 130px;">
       <button
-        v-if="!item.confirmed"
+        v-if="confirmable && !item.confirmed"
         class="bo-confirm-btn"
         :disabled="isConfirming || (item.confirmed === false && item.is_ordered === false)"
         :title="item.confirmed === false && item.is_ordered === false ? NOT_ORDERED_TOAST : ''"
@@ -119,6 +119,8 @@ const props = defineProps<{
   isConfirming: boolean
   /** 通知跳转高亮的订单 id（URL order_id） */
   highlightId: string | null
+  /** 是否显示确认按钮（beile_order_confirm 权限门控） */
+  confirmable: boolean
   /** 是否显示行选择复选框 */
   selectable: boolean
   /** 当前行是否被选中 */

@@ -9,7 +9,7 @@
       </div>
       <div v-else-if="orders.length === 0" class="bo-empty">
         <FontAwesomeIcon icon="clipboard-list" aria-hidden="true" />
-        <span>暂无外发工序</span>
+        <span>暂无订单</span>
       </div>
       <template v-else>
         <div v-if="isFetching" class="bo-fetching-bar"><div class="bo-fetching-progress" /></div>
@@ -17,7 +17,7 @@
         <div class="bo-table-wrap">
           <!-- 水平滚动容器：表头与虚拟列表主体同处其中 → 横向滚动天然同步 -->
           <div class="bo-table-scroll">
-            <div class="bo-table-inner" :style="{ minWidth: tableMinWidth + 'px' }">
+            <div class="bo-table-inner" :style="{ minWidth: tableMinWidth() + 'px' }">
               <!-- 表头（独立于虚拟滚动，粘在顶部）；右内边距 = 纵向滚动条宽度，保证与行左对齐 -->
               <div class="bo-grid bo-grid-header" :style="{ paddingRight: scrollbarWidth + 'px' }">
                 <div v-if="canPrint" class="bo-th bo-th-center bo-th-select" style="width: 40px;">
@@ -55,6 +55,7 @@
                       :confirm-status="confirmStatus"
                       :is-confirming="confirmingIds.has(item.id)"
                       :highlight-id="highlightId"
+                      :confirmable="canConfirm"
                       :selectable="canPrint"
                       :selected="selectedIds.has(rowKey(item))"
                       :has-keyword="!!appliedProduct"
@@ -140,6 +141,7 @@ const {
   isAllSelected,
   toggleSelect,
   toggleSelectAll,
+  canConfirm,
   canPrint,
 } = injectBeileOrders()
 

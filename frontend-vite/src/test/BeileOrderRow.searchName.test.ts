@@ -40,6 +40,7 @@ function mountRow(item: BeileOrderRowType, hasKeyword: boolean) {
       confirmStatus: 'unconfirmed',
       isConfirming: false,
       highlightId: null,
+      confirmable: true,
       selectable: false,
       selected: false,
       hasKeyword,

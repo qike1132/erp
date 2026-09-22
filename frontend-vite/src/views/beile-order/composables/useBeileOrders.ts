@@ -486,7 +486,8 @@ export function useBeileOrders() {
   const authStore = useAuthStore()
   const { exporting, runExport } = useExport()
 
-  /** 权限：导出 / 打印（超级管理员自动放行） */
+  /** 权限：确认 / 导出 / 打印（超级管理员自动放行） */
+  const canConfirm = computed(() => authStore.hasPermission('beile_order_confirm'))
   const canExport = computed(() => authStore.hasPermission('beile_order_export'))
   const canPrint = computed(() => authStore.hasPermission('beile_order_print'))
 
@@ -646,7 +647,8 @@ export function useBeileOrders() {
     isAllSelected,
     toggleSelect,
     toggleSelectAll,
-    // 导出 / 打印
+    // 确认 / 导出 / 打印
+    canConfirm,
     canExport,
     canPrint,
     exporting,
