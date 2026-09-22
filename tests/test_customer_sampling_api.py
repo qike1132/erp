@@ -319,6 +319,54 @@ class TestCustomerSamplingApi:
         detail2 = (await client.get(f"{API_PREFIX}/projects/{pid}")).json()
         assert detail2["product_name"] == "编辑后"
 
+    async def test_update_project_tri_state_null_clears(self, cs_api):
+        """PUT /projects/{id} 显式传 null pattern_maker_id → 清空版师关联（三态：null=清空）"""
+        client, db = cs_api
+        from fastapi_app.shared_models import PatternMaker
+
+        maker = PatternMaker(name="三态清空版师")
+        db.add(maker)
+        await db.flush()
+
+        pid, _ = await _create_project_via_api(client, "三态清空测试", pattern_maker_id=maker.id)
+        detail = (await client.get(f"{API_PREFIX}/projects/{pid}")).json()
+        assert detail["pattern_maker_id"] == maker.id
+
+        resp = await client.put(
+            f"{API_PREFIX}/projects/{pid}",
+            json={"pattern_maker_id": None, "version": detail["version"]},
+        )
+        assert resp.status_code == 200
+
+        detail2 = (await client.get(f"{API_PREFIX}/projects/{pid}")).json()
+        assert detail2["pattern_maker_id"] is None
+        assert detail2["pattern_maker_name"] == ""
+
+    async def test_update_project_tri_state_omitted_keeps_value(self, cs_api):
+        """PUT /projects/{id} 请求体缺省 pattern_maker_id → 不修改（三态：缺省=不修改）"""
+        client, db = cs_api
+        from fastapi_app.shared_models import PatternMaker
+
+        maker = PatternMaker(name="三态保持版师")
+        db.add(maker)
+        await db.flush()
+
+        pid, _ = await _create_project_via_api(client, "三态保持测试", pattern_maker_id=maker.id)
+        detail = (await client.get(f"{API_PREFIX}/projects/{pid}")).json()
+        assert detail["pattern_maker_id"] == maker.id
+
+        # 只改产品名、pattern_maker_id 字段缺省 → 版师关联保持不变
+        # （若 endpoint 无条件透传 None，三态 service 会误判为"清空"，此测试即失败）
+        resp = await client.put(
+            f"{API_PREFIX}/projects/{pid}",
+            json={"product_name": "改名不动画师", "version": detail["version"]},
+        )
+        assert resp.status_code == 200
+
+        detail2 = (await client.get(f"{API_PREFIX}/projects/{pid}")).json()
+        assert detail2["pattern_maker_id"] == maker.id
+        assert detail2["pattern_maker_name"] == "三态保持版师"
+
     async def test_update_project_optimistic_lock(self, cs_api):
         """PUT /projects/{id} 乐观锁冲突 → 409"""
         client, _ = cs_api
