@@ -1,5 +1,4 @@
 import { ref, onBeforeUnmount } from 'vue'
-import { toast } from '@/composables/useToast'
 
 const UPLOAD_MAX_EDGE = 1600
 const UPLOAD_QUALITY = 0.82
@@ -59,14 +58,8 @@ export function useFormImageUpload(
 
   async function applyImageFile(file: File) {
     const allowed = ['image/jpeg', 'image/png', 'image/webp']
-    if (!allowed.includes(file.type)) {
-      toast.warning('仅支持 JPEG / PNG / WebP 格式')
-      return
-    }
-    if (file.size > 10 * 1024 * 1024) {
-      toast.warning('图片大小不能超过 10MB')
-      return
-    }
+    if (!allowed.includes(file.type)) return
+    if (file.size > 10 * 1024 * 1024) return
     const finalFile = await compressImageFile(file)
     revokePreview()
     previewUrl.value = URL.createObjectURL(finalFile)

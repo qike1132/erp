@@ -12,7 +12,6 @@
  * 本 store 为 pattern-room 提供同等能力，且不改动现有 composable 的对外 API。
  */
 import { defineStore } from 'pinia'
-import { toast } from '@/composables/useToast'
 import { patternRoomApi, type GroupedListResponse, type ProjectStatus } from '@/api/patternRoom'
 import type { GroupedListParams } from '@/api/patternRoom'
 import { patternMakerApi, type PatternMaker } from '@/api/patternMaker'
@@ -181,10 +180,6 @@ export const usePatternRoomStore = defineStore('patternRoom', () => {
       .then((res) => {
         groupedCache = { ...groupedCache, [key]: { data: res, loadedAt: Date.now() } }
         persist()
-        // 数据被截断时明确告知用户统计不完整（打印/导出等场景易误读）
-        if (res.truncated) {
-          toast.warning('项目数量超过系统上限，当前仅显示部分分组数据，请用筛选条件缩小范围')
-        }
         return res
       })
       .catch((e: unknown) => {

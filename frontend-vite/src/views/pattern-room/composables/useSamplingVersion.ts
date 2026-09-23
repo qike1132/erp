@@ -11,7 +11,6 @@ import type {
   VersionBrief,
   VersionDetailResponse,
 } from '@/api/patternRoom'
-import { toast } from '@/composables/useToast'
 import { resolveSamplingErrorMessage } from './useSamplingErrors'
 
 export function useSamplingVersion(
@@ -50,7 +49,6 @@ export function useSamplingVersion(
       console.error('[useSamplingVersion] 查询版本列表失败:', e)
       const message = resolveSamplingErrorMessage(e, '加载版本列表失败')
       error.value = message
-      toast.error(message)
       versions.value = []
     } finally {
       if (reqId === _requestId) loading.value = false
@@ -78,7 +76,6 @@ export function useSamplingVersion(
       console.error('[useSamplingVersion] 查询版本详情失败:', e)
       const message = resolveSamplingErrorMessage(e, '加载版本详情失败')
       error.value = message
-      toast.error(message)
       versionDetail.value = null
       return null
     } finally {

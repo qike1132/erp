@@ -2,7 +2,6 @@
 import { ref, computed, watch } from 'vue'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import UiButton from '@/components/ui/UiButton.vue'
-import { toast } from '@/composables/useToast'
 import type { BatchPartCreateRequest } from '@/api/patternRoom'
 import { PART_EDIT_FIELDS, createEmptyEditData, type PartEditData } from '../composables/usePartInlineEdit'
 
@@ -71,10 +70,7 @@ function handleSubmit() {
   const seen = new Set<string>()
   for (const row of filledRows) {
     const name = row.part_name.trim()
-    if (seen.has(name)) {
-      toast.warning('存在重复部位')
-      return
-    }
+    if (seen.has(name)) return
     seen.add(name)
   }
 

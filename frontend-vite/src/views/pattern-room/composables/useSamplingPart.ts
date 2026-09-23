@@ -14,7 +14,6 @@
 import { ref, computed, watch, type Ref } from 'vue'
 import { patternRoomApi } from '@/api/patternRoom'
 import type { PartDetail } from '@/api/patternRoom'
-import { toast } from '@/composables/useToast'
 import { resolveSamplingErrorMessage } from './useSamplingErrors'
 
 export function useSamplingPart(
@@ -68,7 +67,6 @@ export function useSamplingPart(
       // 否则用户只看到空表，会误判为"该项目没有部位"
       const message = resolveSamplingErrorMessage(e, '加载部位数据失败')
       error.value = message
-      toast.error(message)
       partsByVersion.value = []
       versionList.value = []
       finalVersion.value = 'T1'

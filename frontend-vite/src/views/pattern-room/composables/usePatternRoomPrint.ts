@@ -6,7 +6,6 @@
  * 逻辑自 PatternRoomView.vue 原样搬移。
  */
 import { ref, computed, onScopeDispose, type Ref } from 'vue'
-import { toast } from '@/composables/useToast'
 import { patternRoomApi } from '@/api/patternRoom'
 import type { PartDetail, RoleBrief } from '@/api/patternRoom'
 
@@ -68,10 +67,9 @@ export function usePatternRoomPrint(options: UsePatternRoomPrintOptions) {
       })
       printParts.value = allParts
     } catch (e) {
-      // 降级：使用当前角色的数据，并明确告知用户打印内容不完整
+      // 降级：使用当前角色的数据（打印内容不完整，仅记录日志）
       console.warn('[usePatternRoomPrint] 逐角色加载打印数据失败，降级为当前角色数据:', e)
       printParts.value = partsByVersion.value
-      toast.warning('部分角色数据加载失败，打样单仅包含当前角色数据，请检查后重试')
     }
     // 打印前刷新打印时间
     printDialogRef.value?.updatePrintTime()

@@ -1,324 +1,86 @@
 """
-ERP 服务器管理器 GUI —— 单文件 Tkinter 极简控制器。
-(版本随 _VERSION; 代码审查发现的问题以「审查 #N」标注, 详见
-.workbuddy/artifacts/服务器管理器v5.39代码审查报告-2026-09-11.md)
-
-v5.40 变更(2026-09-11 全量审查修复):
-  - 🔴#1  sc 状态判定只认 rc==1060(或无 STATE 行的 1060 错误文本), 根除 PID=1060 误判「未安装」
-  - 🔴#2  开发启动兜底 except 先 abort 已起进程再置空句柄, 杜绝后端孤儿
-  - 🔴#3  配置标量键(max_log_lines 等)统一归一化, 配置写坏不再炸启动
-  - 🟡    _taskkill_many 补树语义 / 残留清理加项目标记校验 / 端口释放统一留痕 /
-          共享状态改经 state_set 消息(线程契约) / 接管 Tk 回调异常 / 前端日志真批量 /
-          SUCCESS 日志级别 / .env 引号剥离 / 历史日志 30 天轮转 / 删除 wmic 死代码
-
-四件事: ① 一键启动开发模式(Redis+uvicorn+Vite) ② 一键启动生产模式(NSSM erp-prod/erp-arq)
-③ 双模式互斥 ④ 一键紧急停止(分级: 单击=停止当前模式(含生产服务)+释放 5002/3000，Redis 服务保持运行;
-长按≥1.5s=在轻量基础上接管 Redis 服务 + 残留清理 + 释放 6379)
-另有日志集成: 启动/停止/运行状态/错误四类事件，落盘 + UI 实时展示。
-
-Redis 生命周期(v5.37 归管理器负责): 生产监督器 prod_runner 明确不管理 Redis
-(其注释原话「仅检查连通，预期为独立 Windows 服务，不拉起」)，故缓存 erp-redis / broker
-erp-redis-broker 两个 Windows 服务由本管理器经 sc start/stop 托管；管理器自有的
-redis-server.exe 进程方案仅在「配置里所有 Redis 服务都【明确未安装】」时作为回落保留。
-服务状态语义(v5.37 关键): 只有 sc 返回 1060 才判「未安装」；其它查询失败一律判「未知」，
-且「未知」按运行中保守处理 —— 绝不把「查不出来」当成「不存在」。该三态语义已贯通到
-展示层: 点位显示「状态未知」而非「已停止」，全局徽章显示「生产模式 · 状态未知」而非「未运行」。
-
-安全约定(项目静态扫描门禁): 所有 subprocess 的 argv[0] 均为字符串字面量
-(python/npm.cmd/nssm/sc/taskkill/netstat/wmic/redis-server)，运行时解析的绝对路径一律经
-executable= 传入；禁止 shell=True，禁止把变量拼进命令字符串。
-
-中文 Windows 关键坑: sc/nssm/netstat/wmic 输出为 OEM 代码页(GBK)，PYTHONUTF8=1 下按 UTF-8
-解码会抛异常导致 stdout 丢失、中文服务名被误判「未安装」——统一走 _cap()→encoding='oem'。
-
-线程模型: Tk 组件绝不跨线程触碰。后台线程只向 _msg_queue 投递消息，主线程 _poll_queue()
-每 200ms 消费(单条异常必须吞掉，否则调度链断裂、日志与状态全停摆)。
+ERP 服务器管理器 GUI v5.5
+功能:
+  - 一键启动前后端：同时启动 FastAPI 后端 + Vue/Vite 前端 + Redis服务
+  - 一键重启：停止所有进程和端口，然后重新启动服务
+  - 全部停止：停止所有前后端进程、Redis服务，清理所有Python相关残留进程
+  - 启动进度反馈：4步骤进度显示，实时状态更新
+  - Redis状态监控：实时显示Redis运行状态，支持外部Redis进程管理
+  - 单实例限制 — 同一时间只能运行一个管理器
+  - 窗口居中显示 (无闪烁，小屏幕自适应)
+  - 系统托盘集成 — 关闭按钮隐藏到托盘，最小化保留任务栏图标
+  - 性能优化 — Font 度量缓存、批量日志写入、队列通信、主线程零阻塞
+  - 彻底进程管理 — 完整进程树收集 + 递归 kill + 端口占用验证释放
+  - 日志自动清理
+  - 状态强制重置：遇到状态卡顿时，支持强制重置并重新启动
+  - 高端暗色 UI — Linear/Vercel 风格配色 + 微交互动画
 """
-import contextlib
 import hashlib
 import json
 import locale
 import logging
+import math
 import os
 import queue
+import re
 import shutil
 import socket
 import subprocess
 import sys
 import threading
 import time
-import traceback
 import urllib.request
 from datetime import datetime
 from pathlib import Path
-from typing import NamedTuple, Optional
-import tkinter as tk
-import tkinter.font as tkfont
-from tkinter import filedialog, messagebox, ttk
-_VERSION = 'v5.40'
-_WINDOW_TITLE = 'ERP 服务器管理器'
+
 _IS_WINDOWS = sys.platform == 'win32'
-_NO_WINDOW = subprocess.CREATE_NO_WINDOW if _IS_WINDOWS else 0
-# 健康探针必须直连本机，绝不走系统代理。
-# 根因(2026-09-10 实证): 本机设置了 HTTP_PROXY/HTTPS_PROXY=127.0.0.1:57562(代理客户端)
-# 且无 NO_PROXY，urllib 默认会读取系统代理——包括 Windows 注册表代理设置——导致
-# 探测 127.0.0.1:5002/3000 的请求被路由进代理。代理客户端抖动时健康检查间歇性失败:
-# prod_runner 触发「连续失败 20s → 强制重启」的后端重启风暴(应用本身完全正常，
-# 被杀前 0 秒间隔、业务日志连续)；管理器的启动就绪判定同样会被误导。
-# ProxyHandler({}) 显式清空代理，保证探针永远直连。
-_OPENER_DIRECT = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-_DEFAULT_API_PORT, _DEFAULT_WEB_PORT, _DEFAULT_REDIS_PORT = 5002, 3000, 6379
+
+if _IS_WINDOWS:
+    import io
+    for stream in (sys.stdout, sys.stderr):
+        if stream:
+            try:
+                stream.reconfigure(encoding='utf-8', errors='replace')
+            except Exception:
+                if hasattr(stream, 'buffer'):
+                    stream = io.TextIOWrapper(stream.buffer, encoding='utf-8', errors='replace', line_buffering=True)
+
+import contextlib
+import tkinter as tk
+from tkinter import messagebox, ttk
+
+_VERSION = 'v5.33'
+_WINDOW_TITLE = f'ERP 服务器管理器 {_VERSION}'
+_REDIS_PORT = 6379
 _REDIS_EXE_PATHS = [Path(r'C:\Redis\redis-server.exe'), Path(r'C:\Program Files\Redis\redis-server.exe')]
 _REDIS_CONF_PATHS = [Path(r'C:\Redis\redis.windows.conf'), Path(r'C:\Redis\redis.conf')]
-_SVC_API, _SVC_ARQ = 'erp-prod', 'erp-arq'
-# 由管理器托管的 Redis Windows 服务(缓存 6379 + broker/result 6380)。
-# 说明: rediserp 是陈旧注册(net start 显示在运行但无对应进程)，刻意不纳入本列表。
-_DEFAULT_REDIS_SERVICES = ['erp-redis', 'erp-redis-broker']
-_NSSM_CANDIDATES = [Path(r'C:\nssm\nssm.exe'), Path(r'C:\Program Files\nssm\nssm.exe'),
-                    Path(r'C:\Program Files (x86)\nssm\nssm.exe'), Path(r'C:\tools\nssm\nssm.exe')]
-_PROD_STATUS_FILE_NAME = 'prod_runner.json'
-_CONFIG_FILE_NAME = 'server_manager_config.json'
-_NPM_CMD = 'npm.cmd' if _IS_WINDOWS else 'npm'
-# psutil 可选依赖: 残留进程扫描/批量终止必需; 缺失时优雅降级(记 WARNING，不做宽特征兜底)
-try:
-    import psutil
-except ImportError:
-    psutil = None
-# 语义色(业务态不得用装饰色)
-_C = {'bg': '#F5F7FA', 'card': '#FFFFFF', 'border': '#E5E6EB', 'text': '#1D2129', 'muted': '#86909C',
-      'green': '#00A870', 'gray': '#86909C', 'red': '#D54941', 'orange': '#FF8800', 'blue': '#1668DC'}
-_DOT_COLOR = {'running': _C['green'], 'stopped': _C['gray'], 'error': _C['red'],
-              'starting': _C['orange'], 'not_installed': _C['gray'], 'unknown': _C['gray']}
-# 点位状态后缀文案(v5.37/D12): 「未知」必须显式标为「状态未知」，绝不能落成「已停止」
-_DOT_TEXT = {'running': '运行中', 'stopped': '已停止', 'starting': '启动中',
-             'not_installed': '未安装', 'unknown': '状态未知'}
-# 状态枚举 → (文案, 颜色)
-_STATUS_META = {'running': ('运行中', _C['green']), 'stopped': ('已停止', _C['gray']),
-                'error': ('异常', _C['red']), 'switching': ('切换中', _C['orange']),
-                'deploying': ('启动中', _C['orange']), 'not_installed': ('未安装', _C['gray']),
-                'unknown': ('状态未知', _C['gray'])}
-
-# ===================== v5.33 视觉表现层恢复（2026-09-16） =====================
-# 背景: 用户要求恢复 v5.33 的圆角按钮 + 微交互动画 + Apple/iOS 配色。
-# 规格来源: backups/version-prune-20260916/ERP服务器管理器_v5.33.exe.ORG-BEFORE-REPACK
-#           （v5.33 源码已不存在，仅存编译产物 → 经 pyinstxtractor-ng 解包 +
-#            marshal 反序列化 + dis 反汇编逐指令提取，见 _v533_ui_spec.txt）。
-# ★ 恢复原则: 只恢复「表现层」，不改变任何业务逻辑与状态机语义；
-#   _C 保留（业务代码仍引用其语义键），_PALETTE 为 v5.33 视觉层新增的独立色板。
-
-# v5.33 原始色板（19 色，iOS/Apple 系统色系）
-_V533_COLORS = {
-    'accent': '#007aff', 'accent_hover': '#0064d1',
-    'accent_tint': '#e8f1ff', 'accent_tint_h': '#d5e8ff', 'accent_border': '#c8dcfb',
-    'success': '#34c759', 'success_hover': '#2ba847',
-    'success_tint': '#e6f9ec', 'success_tint_h': '#d3f3dc', 'success_border': '#bbe6c5',
-    'danger': '#ff3b30', 'danger_hover': '#d92d22',
-    'danger_tint': '#ffece9', 'danger_tint_h': '#ffdad3', 'danger_border': '#f5b8b1',
-    'white': '#ffffff', 'bg_input': '#f2f2f7', 'ring': '#e5e5ea', 'text_primary': '#1d1d1f',
-    # warning 系（v5.33 过渡态橙，用于启动中/切换中徽章与 WARNING 日志级别）
-    'warning': '#ff9500', 'warning_hover': '#d97e00',
-    'warning_tint': '#fff4e5', 'warning_border': '#ffdcb0',
-    # ★ 以下色值全部为【运行时像素实测校正】，来源:
-    #   .workbuddy/artifacts/v533-ui-restore/ui-ref-v533-original.png
-    #   （启动备份中的原始 v5.33 exe，1096×799 客户区截屏，按区域取色值众数）
-    #   字节码里的 #f2f2f7 / #e5e5ea 实为「输入框底 / 分隔线」用色，与页面底色不同，
-    #   仅凭常量表会得出错误结论 —— 故以实测像素为准。
-    'page_bg': '#f5f5f7',            # 页面底色（实测）—— 非 #f2f2f7
-    'text_dim': '#6e6e73',           # 次级文字（实测）
-    'bg': '#f5f5f7', 'bg_card': '#ffffff',
-    'border_card': '#e3e3e6',        # 卡片描边（实测）
-    'log_surface': '#f9f9fb',        # 日志区底（实测）
-    # 按钮语义色（实测校准）
-    #   开发模式「启动」= 绿实心；生产模式「启动服务」= 蓝实心；
-    #   「停止/卸载」= 白底 + 红描边；「重启」= 白底 + 蓝描边。
-    'green_disabled': '#a8e0b8',     # 绿按钮禁用底
-    'btn_secondary_bg': '#ffffff', 'btn_secondary_border': '#d2d2d7',
-    'disabled_bg': '#f2f2f7', 'disabled_fg': '#adadb1',
+# 生产模式：Windows 服务 (NSSM) 名称与 NSSM 常见安装位置
+_SVC_API = 'erp-prod'
+_SVC_ARQ = 'erp-arq'
+# Redis 服务：缓存 6379 与 ARQ broker 6380 各一个实例。
+#   ★ erp-arq 必须依赖 _SVC_REDIS_BROKER：没有 DependOnService 时，开机由 SCM
+#     并行启动，erp-arq 会抢在 broker 之前连 6380 → 超时退出 → NSSM 5s 后重拉，
+#     形成无限重启循环，cron/备份/报表全部静默不执行（2026-09-16 实测现场）。
+_SVC_REDIS_CACHE = 'erp-redis'
+_SVC_REDIS_BROKER = 'erp-redis-broker'
+# erp-prod 依赖缓存实例（Redis 不可用时后端缓存层大面积降级）
+_SVC_DEPENDS = {
+    _SVC_API: [_SVC_REDIS_CACHE],
+    _SVC_ARQ: [_SVC_REDIS_BROKER],
 }
-# 语义映射到 _C 键的别名（供业务代码按需取 v5.33 视觉值）
-_PALETTE = {
-    'bg': _V533_COLORS['bg'], 'bg_card': _V533_COLORS['bg_card'],
-    'border_card': _V533_COLORS['border_card'],
-    'text_primary': _V533_COLORS['text_primary'], 'text_dim': _V533_COLORS['text_dim'],
-    'accent': _V533_COLORS['accent'], 'accent_hover': _V533_COLORS['accent_hover'],
-    'accent_h': _V533_COLORS['accent_hover'],   # v5.33 脉冲动画用键名（原样保留）
-    'accent_tint': _V533_COLORS['accent_tint'], 'accent_tint_h': _V533_COLORS['accent_tint_h'],
-    'success': _V533_COLORS['success'], 'success_hover': _V533_COLORS['success_hover'],
-    'success_tint': _V533_COLORS['success_tint'], 'success_tint_h': _V533_COLORS['success_tint_h'],
-    'danger': _V533_COLORS['danger'], 'danger_hover': _V533_COLORS['danger_hover'],
-    'danger_tint': _V533_COLORS['danger_tint'], 'danger_tint_h': _V533_COLORS['danger_tint_h'],
-    'warning': _V533_COLORS['warning'], 'warning_tint': _V533_COLORS['warning_tint'],
-    'warning_border': _V533_COLORS['warning_border'],
-    'ring': _V533_COLORS['ring'], 'bg_input': _V533_COLORS['bg_input'],
-}
-# v5.33 视觉层专用的状态色（仅换颜色，文案沿用 _STATUS_META，不改任何语义）。
-_STATUS_COLOR_KEY_V533 = {'running': 'success', 'error': 'danger', 'stopped': None,
-                          'switching': None, 'deploying': None, 'not_installed': None, 'unknown': None}
-_BADGE_META_V533 = {
-    k: (text, _V533_COLORS[_STATUS_COLOR_KEY_V533[k]] if _STATUS_COLOR_KEY_V533.get(k) else color)
-    for k, (text, color) in _STATUS_META.items()
-}
-# 按钮 变体×色调 调色板（v5.33 原样：fill/fill_h/tint/tint_h/fg/subtle_border/transparent_fill）
-_BUTTON_VARIANT_PALETTE = {
-    'accent': {'fill': '#007aff', 'fill_h': '#0064d1', 'tint': '#e8f1ff', 'tint_h': '#d5e8ff',
-               'fg': '#ffffff', 'subtle_border': '#c8dcfb', 'transparent_fill': '#ffffff'},
-    'success': {'fill': '#34c759', 'fill_h': '#2ba847', 'tint': '#e6f9ec', 'tint_h': '#d3f3dc',
-                'fg': '#ffffff', 'subtle_border': '#bbe6c5', 'transparent_fill': '#ffffff'},
-    'danger': {'fill': '#ff3b30', 'fill_h': '#d92d22', 'tint': '#ffece9', 'tint_h': '#ffdad3',
-               'fg': '#ffffff', 'subtle_border': '#f5b8b1', 'transparent_fill': '#ffffff'},
-    'neutral': {'fill': '#f2f2f7', 'fill_h': '#e5e5ea', 'tint': '#f2f2f7', 'tint_h': '#e5e5ea',
-                'fg': '#1d1d1f', 'subtle_border': '#e5e5ea', 'transparent_fill': '#ffffff'},
-}
-# 按钮尺寸/动效（v5.33 原规格）
-_BTN_RADIUS, _BTN_HOVER_SHIFT, _BTN_ANIM_MS, _BTN_PRESS_DY = 10, -12, 180, 1
-# 徽章脉冲与窗口淡入（v5.33 原规格）
-_BADGE_PULSE_MS = 900
-_FADE_STEPS, _FADE_INTERVAL_MS = 10, 30      # 窗口淡入 10 步 × 30ms = 300ms
-_PULSE_STEPS, _PULSE_INTERVAL_MS = 10, 30    # 边框脉冲 10 步 × 30ms = 660ms（三角波往复）
-_CARD_INTRO_STAGGER_MS = 80                  # 卡片入场错峰间隔
-
-
-def _apply_v533_visual_layer():
-    """把 _C 语义色整体切换为 v5.33 的 Apple/iOS 色值（视觉层唯一开关）。
-
-    ★ 为什么改 _C 而不是让各处改引 _PALETTE:
-      _C 在本文件中被 200+ 处以 _C['xxx'] 形式引用（含 Label/Frame/Canvas 的 bg/fg）。
-      若逐处改引，一是改动面巨大易漏，二是后续新增控件会再次落回旧色板，形成双色板漂移。
-      在**模块初始化阶段**（任何控件创建之前）一次性替换 _C 的取值，即可获得
-      「一处切换、全应用生效」的效果，且不触碰任何业务逻辑。
-
-    ★ 安全性: _DOT_COLOR / _STATUS_META 在 _C 替换**之前**已用旧对象建立完毕
-      （见上方定义顺序），此处不重建它们，避免改变状态语义映射。
-      _V533_COLORS 与 _BUTTON_VARIANT_PALETTE 仍保有原始色值，互不干扰。
-
-    ★ 可回滚: 删除本函数的调用即完整回到 v5.40 原配色，无残留。
-    """
-    _C.update({
-        'bg': _V533_COLORS['page_bg'],           # #f5f5f7  iOS 分组背景（实测校准值）
-        'card': _V533_COLORS['bg_card'],         # #ffffff
-        'border': _V533_COLORS['border_card'],   # #e3e3e6
-        'text': _V533_COLORS['text_primary'],    # #1d1d1f
-        'muted': _V533_COLORS['text_dim'],       # #6e6e73  iOS 次级文字（实测校准值）
-        'green': _V533_COLORS['success'],        # #34c759
-        'gray': _V533_COLORS['text_dim'],        # #6e6e73
-        'red': _V533_COLORS['danger'],           # #ff3b30
-        'orange': _V533_COLORS['warning'],       # #ff9500
-        'blue': _V533_COLORS['accent'],          # #007aff  iOS 系统蓝
-    })
-
-
-def _hex_to_rgb_v533(hex_c):
-    """'#rrggbb' → (r, g, b)。v5.33 原函数（名 _hex_to_rgb 已被当前版本占用）。"""
-    hex_c = hex_c.lstrip('#')
-    return int(hex_c[0:2], 16), int(hex_c[2:4], 16), int(hex_c[4:6], 16)
-
-
-def _shift_color(hex_c, amount):
-    """颜色偏移 - 模块级公共函数（v5.33 原样恢复）。
-
-    amount 为正则每个通道加亮，为负则加深；通道值钳制在 [0, 255]。
-    """
-    r, g, b = (max(0, min(255, int(c) + amount)) for c in _hex_to_rgb_v533(hex_c))
-    return f'#{r:02x}{g:02x}{b:02x}'
-
-
-def _lerp_color(c1, c2, t):
-    """颜色线性插值 - 模块级公共函数（v5.33 原样恢复）。
-
-    t=0 返回 c1，t=1 返回 c2；用于 Hover 的平滑过渡与卡片入场渐变。
-    """
-    r1, g1, b1 = _hex_to_rgb_v533(c1)
-    r2, g2, b2 = _hex_to_rgb_v533(c2)
-    r = int(r1 + (r2 - r1) * t)
-    g = int(g1 + (g2 - g1) * t)
-    b = int(b1 + (b2 - b1) * t)
-    return f'#{r:02x}{g:02x}{b:02x}'
-
-
-def _font_exists(name):
-    """字体存在性探测（v5.33 原样恢复，带缓存）。用于图标字体优雅降级。"""
-    if not _FONT_CACHE:
-        try:
-            import tkinter.font as tkfont
-            root = tk._default_root or tk.Tk()
-            _FONT_CACHE.update({f: True for f in tkfont.families(root)})
-        except Exception:
-            return False
-    return name in _FONT_CACHE
-
-
-_FONT_CACHE = {}
-
-# ★ v5.33 视觉层生效点 —— 必须位于 _C / _DOT_COLOR / _STATUS_META / _PALETTE
-#   / _BADGE_META_V533 全部定义完之后、任何控件创建之前。
-#   在此处调用可保证：派生表仍绑定旧对象（互不污染），而所有控件的 _C['xxx'] 取值
-#   在创建时已是 v5.33 色值。
-_apply_v533_visual_layer()
-
+# ARQ broker 端口（与 config/redis-broker.conf 的 port 一致）
+_REDIS_BROKER_PORT = 6380
+_NSSM_CANDIDATES = [
+    Path(r'C:\nssm\nssm.exe'),
+    Path(r'C:\Program Files\nssm\nssm.exe'),
+    Path(r'C:\Program Files (x86)\nssm\nssm.exe'),
+    Path(r'C:\tools\nssm\nssm.exe'),
+]
+_PROD_STATUS_FILE = Path(r'logs\prod_runner.json')
 
 _mutex_handle = None
 
-
-class _Ports:
-    """端口配置单例: 业务代码统一经 _PORTS 取端口，配置保存后热更新。"""
-
-    def __init__(self):
-        self.api, self.web, self.redis = _DEFAULT_API_PORT, _DEFAULT_WEB_PORT, _DEFAULT_REDIS_PORT
-_PORTS = _Ports()
-
-
-def _cap(timeout=15, oem=True):
-    """subprocess.run 公共 kwargs: 无窗口 + 捕获输出。
-
-    oem=True 按 OEM 代码页解码(sc/nssm/netstat/wmic 在中文 Windows 上是 GBK)。
-    """
-    kw = dict(creationflags=_NO_WINDOW, capture_output=True, timeout=timeout)
-    if oem and _IS_WINDOWS:
-        kw.update(encoding='oem', errors='replace')
-    else:
-        # errors='replace' 必给: PYTHONUTF8=1 环境下 text 模式默认 UTF-8 解码，
-        # 遇到 OEM 输出会在读取线程抛 UnicodeDecodeError 致 stdout 丢失。
-        kw.update(text=True, errors='replace')
-    return kw
-
-
-def _parse_sc_state(code, out):
-    """sc query 输出 → 服务状态文本('未安装'|'未知'|STATE 行文本)。纯函数, 供单测。
-
-    ★ v5.40 修复(审查 #1): 「未安装」只认 rc==1060，或输出是 1060 错误文本且【没有】STATE 行。
-      旧版裸写 `'1060' in out` —— 运行中服务的输出含 `PID : 1060` 时(开机早期自启服务的
-      PID 完全可能落在 1060)会被误判「未安装」，导致 _ensure_production_stopped 跳过停止，
-      开发模式直接抢占 5002/3000 与生产互杀 —— 恰好复发 v5.36 堵住的互杀事故。
-    """
-    if code == 1060 or ('1060' in out and 'STATE' not in out):
-        return '未安装'
-    if code != 0 or 'SERVICE_NAME' not in out:
-        return '未知'
-    for line in out.splitlines():
-        if 'STATE' in line:
-            parts = line.split(':', 1)
-            if len(parts) > 1:
-                return ' '.join(parts[1].split())[:28]
-    return '未知'
-
-
-def _enable_dpi_awareness():
-    """DPI 感知，必须在 tk.Tk() 之前调用；只取 System DPI Aware。
-
-    Per-Monitor v2 与 Tk 8.6 不兼容，RDP 重连/DPI 变化会造成窗口重绘风暴。
-    """
-    if not _IS_WINDOWS:
-        return
-    import ctypes
-    try:
-        ctypes.windll.shcore.SetProcessDpiAwareness(1)
-    except Exception:
-        with contextlib.suppress(Exception):
-            ctypes.windll.user32.SetProcessDPIAware()
-
-
 def _ensure_single_instance():
-    """内核互斥体单实例。True=首次启动，False=已有实例。"""
     global _mutex_handle
     if not _IS_WINDOWS:
         return True
@@ -326,20 +88,17 @@ def _ensure_single_instance():
         import ctypes
         kernel32 = ctypes.windll.kernel32
         kernel32.SetLastError(0)
-        profile = os.environ.get('USERPROFILE', str(Path.home()))
-        user_hash = hashlib.sha256(profile.encode('utf-8', 'replace')).hexdigest()[:8]
+        user_hash = hashlib.sha256(os.environ.get('USERPROFILE', str(Path.home())).encode()).hexdigest()[:8]
         handle = kernel32.CreateMutexW(None, False, f'ERP_Server_Manager_{user_hash}_v1')
-        if ctypes.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+        if ctypes.GetLastError() == 183:
             return False
         _mutex_handle = handle
         return True
     except Exception as e:
-        logging.warning(f'互斥体创建异常: {e}')
+        logging.warning(f"互斥体创建异常: {e}")
         return True
 
-
 def _activate_existing_window():
-    """把已在运行的窗口置前。"""
     if not _IS_WINDOWS:
         return
     try:
@@ -347,24 +106,21 @@ def _activate_existing_window():
         user32 = ctypes.windll.user32
         hwnd = user32.FindWindowW(None, _WINDOW_TITLE)
         if hwnd:
-            user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+            user32.ShowWindow(hwnd, 9)
             user32.SetForegroundWindow(hwnd)
     except Exception:
         pass
 
-
 def _get_project_dir():
-    """项目根定位: 源码=本文件目录; exe=exe 目录 → erp_project_path.txt → d:\\erp_system。"""
     if getattr(sys, 'frozen', False):
         exe_dir = Path(sys.executable).parent
         if (exe_dir / 'fastapi_app').is_dir():
             return exe_dir
         path_cfg = exe_dir / 'erp_project_path.txt'
         if path_cfg.is_file():
-            with contextlib.suppress(Exception):
-                cfg_path = Path(path_cfg.read_text(encoding='utf-8').strip()).resolve()
-                if cfg_path.is_dir() and (cfg_path / 'fastapi_app').is_dir():
-                    return cfg_path
+            cfg_path = Path(path_cfg.read_text(encoding='utf-8').strip()).resolve()
+            if cfg_path.is_dir() and (cfg_path / 'fastapi_app').is_dir():
+                return cfg_path
         for candidate in [Path(r'd:\erp_system')]:
             if candidate.is_dir() and (candidate / 'fastapi_app').is_dir():
                 with contextlib.suppress(Exception):
@@ -373,25 +129,30 @@ def _get_project_dir():
         return exe_dir
     return Path(__file__).resolve().parent
 
-
 def _validate_python_exe(python_exe):
-    """纯文件系统校验(不执行): which 归一化 + 绝对路径 + .exe 后缀 + 存在。"""
     if not python_exe:
         return False
-    resolved = shutil.which(python_exe)
-    if not resolved:
+    try:
+        result = subprocess.run([python_exe, '--version'], creationflags=subprocess.CREATE_NO_WINDOW if _IS_WINDOWS else 0, capture_output=True, text=True, timeout=5)
+        return result.returncode == 0 and 'Python' in result.stdout
+    except Exception:
         return False
-    exe = Path(resolved)
-    return exe.is_absolute() and exe.suffix.lower() == '.exe' and exe.is_file()
 
+_PROJECT_DIR = _get_project_dir()
+_FRONTEND_DIR = _PROJECT_DIR / "frontend-vite"
+_API_PORT = 5002
+_WEB_PORT = 3000
 
 def _get_python_executable():
-    """定位 Python: 源码=sys.executable; frozen 依次找 venv/py.exe/PATH/常见安装目录。"""
     if not getattr(sys, 'frozen', False):
         return sys.executable
     project_dir = _get_project_dir()
-    for venv_name in ('.venv313', '.venv', 'venv'):
-        venv_py = project_dir / venv_name / 'Scripts' / 'python.exe'
+    venv_candidates = [
+        project_dir / '.venv313' / 'Scripts' / 'python.exe',
+        project_dir / '.venv' / 'Scripts' / 'python.exe',
+        project_dir / 'venv' / 'Scripts' / 'python.exe',
+    ]
+    for venv_py in venv_candidates:
         if venv_py.is_file():
             return str(venv_py)
     py_exe = Path(os.environ.get('SYSTEMROOT', r'C:\Windows')) / 'py.exe'
@@ -400,868 +161,1080 @@ def _get_python_executable():
     python_in_path = shutil.which('python')
     if python_in_path:
         return python_in_path
-    local_appdata = os.environ.get('LOCALAPPDATA', '')
-    for candidate in (Path(local_appdata) / 'Programs' / 'Python' / 'Python313' / 'python.exe',
-                      Path(r'C:\Python313\python.exe'),
-                      Path(local_appdata) / 'Programs' / 'Python' / 'Python312' / 'python.exe',
-                      Path(r'C:\Python312\python.exe')):
+    for candidate in [Path(os.environ.get('LOCALAPPDATA', '')) / 'Programs' / 'Python' / 'Python313' / 'python.exe', Path(r'C:\Python313\python.exe'), Path(os.environ.get('LOCALAPPDATA', '')) / 'Programs' / 'Python' / 'Python312' / 'python.exe', Path(r'C:\Python312\python.exe')]:
         if candidate.is_file():
             return str(candidate)
     return None
-_PROJECT_DIR = _get_project_dir()
-_FRONTEND_DIR = _PROJECT_DIR / 'frontend-vite'
-_PROD_STATUS_FILE = _PROJECT_DIR / 'logs' / _PROD_STATUS_FILE_NAME
-_CONFIG_FILE = _PROJECT_DIR / _CONFIG_FILE_NAME
+
 _PYTHON_EXE = _get_python_executable()
 if _PYTHON_EXE and not _validate_python_exe(_PYTHON_EXE):
     _PYTHON_EXE = None
-_APP_CONFIG_DEFAULTS = {'api_port': _DEFAULT_API_PORT, 'web_port': _DEFAULT_WEB_PORT,
-                        'redis_port': _DEFAULT_REDIS_PORT, 'redis_exe': '', 'nssm_path': '',
-                        'max_log_lines': 2000, 'log_keep_lines': 1600, 'full_stop_hold_ms': 1500,
-                        'redis_services': list(_DEFAULT_REDIS_SERVICES), 'redis_service_wait_s': 30}
 
+_font_cache = {}
 
-def _load_app_config():
-    """逐键白名单合并; 文件不存在/损坏时回落默认值(绝不因配置崩溃)。
-
-    list 类型键(redis_services)额外做元素类型校验: 非 list / 含非 str 元素 / 空列表
-    → 回落默认值(D5: 空列表等于「不再托管任何 Redis 服务」，几乎不可能是用户本意)。
-    redis_service_wait_s 做正整数归一化，非法值回落默认 30。
-    D4: 返回值里的 redis_services 始终是独立副本，绝不与模块级默认值共享别名。
-    D10: 配置文件损坏时记 WARNING(仍回落默认 —— 否则用户会误以为配置生效)。
-    """
-    cfg = dict(_APP_CONFIG_DEFAULTS)
+def _font_exists(name):
+    if name in _font_cache:
+        return _font_cache[name]
     try:
-        if _CONFIG_FILE.is_file():
-            stored = json.loads(_CONFIG_FILE.read_text(encoding='utf-8'))
-            if isinstance(stored, dict):
-                cfg.update({k: v for k, v in stored.items() if k in cfg})
-    except Exception as e:
-        logging.getLogger('server_manager').warning(f'配置文件读取/解析失败，已回落默认配置: {type(e).__name__}: {e}')
-    services = cfg.get('redis_services')
-    valid = isinstance(services, list) and bool(services) and all(isinstance(s, str) and s for s in services)
-    if valid:
-        cfg['redis_services'] = list(services)  # D4: 显式拷贝，杜绝与默认值/存储对象共享别名
-    else:
-        if isinstance(services, list) and not services:
-            logging.getLogger('server_manager').warning('redis_services 为空列表，按非法配置处理，回落默认托管列表')
-        cfg['redis_services'] = list(_DEFAULT_REDIS_SERVICES)
-    try:
-        cfg['redis_service_wait_s'] = max(1, int(cfg.get('redis_service_wait_s')))
-    except (TypeError, ValueError):
-        cfg['redis_service_wait_s'] = int(_APP_CONFIG_DEFAULTS['redis_service_wait_s'])
-    # v5.40 修复(审查 #3): 标量键统一归一化 —— 此前 max_log_lines/log_keep_lines/full_stop_hold_ms
-    # 由 __init__ 直接 int()，配置写坏(如 "abc"/数组)会抛 ValueError 炸掉启动，
-    # 违背本函数「绝不因配置崩溃」的承诺。非法值回落默认并留 WARNING(D10)。
-    for key, default, floor in (('max_log_lines', 2000, 100), ('log_keep_lines', 1600, 50),
-                                ('full_stop_hold_ms', 1500, 200)):
-        try:
-            val = max(floor, int(cfg.get(key)))
-        except (TypeError, ValueError):
-            val = default
-            logging.getLogger('server_manager').warning(
-                f'配置项 {key} 非法({cfg.get(key)!r})，回落默认值 {default}')
-        cfg[key] = val
-    # keep 必须 < max，否则日志裁剪退化为空操作
-    if cfg['log_keep_lines'] >= cfg['max_log_lines']:
-        cfg['log_keep_lines'] = max(50, cfg['max_log_lines'] - 200)
-    return cfg
-
-
-def _save_app_config(cfg):
-    try:
-        _CONFIG_FILE.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding='utf-8')
-        return True
+        import tkinter.font as tkfont
+        root = tk._default_root or tk.Tk()
+        result = name in tkfont.families(root)
     except Exception:
-        return False
+        result = False
+    _font_cache[name] = result
+    return result
 
+def _shift_color(hex_c, amount):
+    """颜色偏移 - 模块级公共函数"""
+    r = max(0, min(255, int(hex_c[1:3], 16) + amount))
+    g = max(0, min(255, int(hex_c[3:5], 16) + amount))
+    b = max(0, min(255, int(hex_c[5:7], 16) + amount))
+    return f'#{r:02x}{g:02x}{b:02x}'
 
-def _apply_config_to_runtime(cfg):
-    """端口热更新，1..65535 范围校验。返回非法端口键列表(v5.40/审查 #22: 配置损坏必须留痕，不静默)。"""
-    invalid = []
-    for attr, key in (('api', 'api_port'), ('web', 'web_port'), ('redis', 'redis_port')):
-        try:
-            v = int(cfg.get(key))
-        except (TypeError, ValueError):
-            invalid.append(key)
-            continue
-        if 1 <= v <= 65535:
-            setattr(_PORTS, attr, v)
-        else:
-            invalid.append(key)
-    return invalid
-_APP_CONFIG = _load_app_config()
-_INVALID_CONFIG_KEYS = _apply_config_to_runtime(_APP_CONFIG)
+def _lerp_color(c1, c2, t):
+    """颜色线性插值 - 模块级公共函数"""
+    r1, g1, b1 = int(c1[1:3], 16), int(c1[3:5], 16), int(c1[5:7], 16)
+    r2, g2, b2 = int(c2[1:3], 16), int(c2[3:5], 16), int(c2[5:7], 16)
+    return f'#{int(r1+(r2-r1)*t):02x}{int(g1+(g2-g1)*t):02x}{int(b1+(b2-b1)*t):02x}'
 
-
-def _hex_to_rgb(hex_c):
-    return int(hex_c[1:3], 16), int(hex_c[3:5], 16), int(hex_c[5:7], 16)
-
-
-def _rgb_to_hex(r, g, b):
-    return f'#{max(0, min(255, int(r))):02x}{max(0, min(255, int(g))):02x}{max(0, min(255, int(b))):02x}'
-
-
-def _blend(fg_hex, bg_hex, alpha):
-    """rgba 扁平化: Tk 颜色不支持 alpha，按底色压成不透明 hex。"""
-    fr, fg, fb = _hex_to_rgb(fg_hex)
-    br, bg, bb = _hex_to_rgb(bg_hex)
-    return _rgb_to_hex(fr * alpha + br * (1 - alpha), fg * alpha + bg * (1 - alpha), fb * alpha + bb * (1 - alpha))
-
+# 按钮视觉变体调色板 - 与 ServerManagerApp._PALETTE 严格对齐
+# solid    状态：fill=fill（实色）/hover=fill_h（加深）/fg=#ffffff
+# outlined 状态：fill=#ffffff /hover=tint_h（淡染色）/fg=fill / 边框=fill
+# subtle   状态：fill=tint（极浅色）/hover=tint_h /fg=fill / 边框=subtle_border
+_BUTTON_VARIANT_PALETTE = {
+    'accent': {
+        'fill': '#007aff', 'fill_h': '#0064d1', 'tint': '#e8f1ff', 'tint_h': '#d5e8ff',
+        'fg': '#ffffff', 'subtle_border': '#c8dcfb',
+        'transparent_fill': '#ffffff',
+    },
+    'success': {
+        'fill': '#34c759', 'fill_h': '#2ba847', 'tint': '#e6f9ec', 'tint_h': '#d3f3dc',
+        'fg': '#ffffff', 'subtle_border': '#bbe6c5',
+        'transparent_fill': '#ffffff',
+    },
+    'danger': {
+        'fill': '#ff3b30', 'fill_h': '#d92d22', 'tint': '#ffece9', 'tint_h': '#ffdad3',
+        'fg': '#ffffff', 'subtle_border': '#f5b8b1',
+        'transparent_fill': '#ffffff',
+    },
+    'neutral': {
+        'fill': '#f2f2f7', 'fill_h': '#e5e5ea', 'tint': '#f2f2f7', 'tint_h': '#e5e5ea',
+        'fg': '#1d1d1f', 'subtle_border': '#e5e5ea',
+        'transparent_fill': '#ffffff',
+    },
+}
 
 def _taskkill(pid, force=True, tree=True):
-    """统一进程终止: 参数列表 + 字面量 argv[0]，绝无 shell 参与。"""
-    if not _IS_WINDOWS or not pid:
+    """统一的进程终止函数"""
+    if not _IS_WINDOWS:
         return
-    argv = ['taskkill'] + (['/F'] if force else []) + (['/T'] if tree else []) + ['/PID', str(int(pid))]
-    with contextlib.suppress(Exception):
-        subprocess.run(argv, **_cap(10, oem=False))
-
+    cmd = ['taskkill', '/F' if force else '', '/T' if tree else '', '/PID', str(pid)]
+    cmd = [c for c in cmd if c]
+    subprocess.run(cmd, creationflags=subprocess.CREATE_NO_WINDOW, capture_output=True, timeout=10)
 
 def _taskkill_many(pids, force=True, tree=True):
-    """批量终止; 优先 psutil(秒级无进程创建开销)，缺失时逐个 taskkill。
+    """批量终止多个 PID — 一次 taskkill 调用处理多个 /PID。
 
-    ★ v5.40 修复(审查 #4): psutil 路径必须与 taskkill /T 同语义 —— 终止【自身+全部后代】。
-      此前只杀 netstat 报告的单个 PID: 监听 socket 句柄会被 --reload supervisor / npm 等
-      父子进程共享继承，单杀一个后其余进程仍持有句柄，端口释放 3 轮重试空转后静默失效。
-      注意绝不能向上杀祖先链(可能殃及 explorer 等无辜进程)。
+    为什么必须批量：taskkill 单进程约 100ms+，若端口被大量残留进程占用
+    （例如数百个 nginx worker），逐个调用会耗时数十秒甚至分钟，导致启动流程
+    卡死在"清理端口"阶段。taskkill 原生支持多个 /PID 参数，分批 40 个/次即可。
     """
     if not _IS_WINDOWS or not pids:
         return
-    if psutil is not None:
-        killed = set()
-        for pid in pids:
-            if pid in killed:
-                continue
-            try:
-                proc = psutil.Process(int(pid))
-            except Exception:
-                _taskkill(pid, force=force, tree=tree)
-                continue
-            family = [proc]
-            with contextlib.suppress(Exception):
-                family.extend(proc.children(recursive=True))
-            for p in family:
-                killed.add(p.pid)
-                with contextlib.suppress(Exception):
-                    p.kill()
-        return
-    for pid in pids:
-        _taskkill(pid, force=force, tree=tree)
+    pids = [str(p) for p in pids]
+    for i in range(0, len(pids), 40):
+        cmd = ['taskkill', '/F' if force else '', '/T' if tree else '']
+        for pid in pids[i:i + 40]:
+            cmd += ['/PID', pid]
+        cmd = [c for c in cmd if c]
+        try:
+            subprocess.run(cmd, creationflags=subprocess.CREATE_NO_WINDOW, capture_output=True, timeout=30)
+        except Exception:
+            pass
 
+def _is_prod_runner_cmdline(cmdline):
+    """精确判定「生产监督器」进程（P0-4 修复的基础判据）。
+
+    为什么不能用 `'prod_runner' in cmdline`：宽子串会命中编辑器/日志查看器打开
+    该文件、以及 NSSM 正在监管的服务进程 —— 误杀后者会被 AppExit=Default Restart
+    在 5 秒后拉起，形成「杀不死」死循环。
+
+    只认两种独立参数形态：
+      1) 模块式 `-m fastapi_app.core.prod_runner`（NSSM 安装时的 AppParameters）
+      2) 脚本式 `.../fastapi_app/core/prod_runner.py`
+    """
+    if not cmdline:
+        return False
+    for token in re.split(r'[\s"\']+', cmdline):
+        tok = token.strip('",;').replace('\\', '/')
+        if not tok:
+            continue
+        if tok == 'fastapi_app.core.prod_runner':
+            return True
+        if tok.endswith('fastapi_app/core/prod_runner.py'):
+            return True
+    return False
+
+
+def _kill_port_process(port, msg_queue=None):
+    """终止占用指定端口的进程"""
+    try:
+        result = subprocess.run(['netstat', '-ano'], creationflags=subprocess.CREATE_NO_WINDOW, capture_output=True, text=True, timeout=5)
+        for line in result.stdout.split('\n'):
+            if f':{port}' in line and 'LISTENING' in line:
+                parts = line.split()
+                if len(parts) >= 5 and parts[-1].isdigit():
+                    _taskkill(int(parts[-1]))
+                    if msg_queue:
+                        msg_queue.put(('log', {'text': f"已终止端口{port}占用进程 (PID: {parts[-1]})"}))
+                    return True
+    except Exception:
+        pass
+    return False
 
 def _get_port_occupier(port):
-    """占用指定端口的进程信息 [(pid, name), ...]。"""
+    """获取占用指定端口的进程信息列表 [(pid, name), ...]"""
     occupiers = []
     try:
-        result = subprocess.run(['netstat', '-ano'], **_cap(5))
-        pids = {line.split()[-1] for line in (result.stdout or '').splitlines()
-                if f':{port}' in line and ('LISTENING' in line or 'ESTABLISHED' in line)
-                and len(line.split()) >= 5 and line.split()[-1].isdigit()}
+        result = subprocess.run(['netstat', '-ano'], creationflags=subprocess.CREATE_NO_WINDOW, capture_output=True, text=True, timeout=5)
+        pids = set()
+        for line in result.stdout.split('\n'):
+            if f':{port}' in line and ('LISTENING' in line or 'ESTABLISHED' in line):
+                parts = line.split()
+                if len(parts) >= 5 and parts[-1].isdigit():
+                    pids.add(parts[-1])
         for pid in pids:
-            name = '未知进程'
-            with contextlib.suppress(Exception):
-                tasklist = subprocess.run(['tasklist', '/FI', f'PID eq {pid}', '/FO', 'CSV', '/NH'], **_cap(5))
-                lines = [ln.strip() for ln in (tasklist.stdout or '').splitlines() if ln.strip()]
-                if lines and len(lines[0].split('","')) >= 2:
-                    name = lines[0].split('","')[0].strip('"')
-            occupiers.append((pid, name))
-    except Exception as e:
-        # D14: 该函数已在轻量停止的端口释放关键路径上，查询失败必须留痕
-        # (保持「尽力而为、不阻断」的失败语义，仍返回已收集项)
-        logging.getLogger('server_manager').warning(f'查询端口 {port} 占用者失败: {type(e).__name__}: {e}')
+            try:
+                tasklist = subprocess.run(['tasklist', '/FI', f'PID eq {pid}', '/FO', 'CSV', '/NH'], creationflags=subprocess.CREATE_NO_WINDOW, capture_output=True, text=True, timeout=5)
+                lines = [l.strip() for l in tasklist.stdout.split('\n') if l.strip()]
+                if lines:
+                    parts = lines[0].split('","')
+                    if len(parts) >= 2:
+                        name = parts[0].strip('"')
+                        occupiers.append((pid, name))
+            except Exception:
+                occupiers.append((pid, '未知进程'))
+    except Exception:
+        pass
     return occupiers
+
+# ===================== 动作闸门（P0-3 重构：单一持有者 / 自动释放 / 可协作取消） =====================
+# 为什么要有这个类（2026-09-16 审计实测出的两个缺陷）：
+#   ① 旧实现把「取锁 / 起线程 / 解锁」拆在三个方法里：任何一处异常（例如 UI 刷新报
+#      TclError）就会永久持锁 → 所有动作按钮永久置灰、状态卡在 starting，只能重启进程。
+#   ② 紧急停止绕过互斥，却没有任何取消机制：在飞行中的启动流程会继续把 Redis / 后端
+#      拉起来（实测 UI 已显示 none 而后端进程真的在跑）。
+# 本类的三条结构性约束：
+#   1. 单一持有者 —— 只有 start() 一个入口，且它自己负责起线程；调用方拿不到
+#      「只获取不释放」的用法；
+#   2. 自动释放 —— worker 无论正常返回 / 抛异常 / 被取消，都由 try/finally 收尾，
+#      另有看门狗兜底「worker 永不返回」；
+#   3. 可协作取消 —— cancel() 置标志，worker 在步骤边界调 checkpoint() 立即中止，
+#      不再产生后续副作用。
+_OP_WATCHDOG_SEC = 600          # 单次动作上限（安装服务最坏 ≈ 400s，故取 600）
+_EMERGENCY_JOIN_SEC = 8         # 紧急停止等待在飞行动作自行退出的上限
+
+
+class _ActionCancelled(BaseException):
+    """动作被取消的信号。
+
+    ★ 刻意继承 BaseException 而非 Exception：本模块有 17 处 `except Exception: pass`，
+    若继承 Exception，取消信号会在半路被吞掉、流程继续执行后续副作用 ——
+    那正是「紧急停止后进程又被拉起来」的来路。
+    """
+
+
+class ActionGate:
+    """动作闸门：一个不变量，一个主人，一条执行路径。"""
+
+    def __init__(self, watchdog_seconds=_OP_WATCHDOG_SEC, on_event=None):
+        self._lock = threading.Lock()
+        self._owner = ''
+        self._cancel = threading.Event()
+        self._cancel_reason = ''      # 谁取消的（紧急停止 / 看门狗超时）—— 日志里必须能区分
+        self._watchdog = None
+        self._active_run = None
+        self._run_seq = 0
+        self._local = threading.local()   # 每个 worker 线程记录自己的 run_id（用于识别僵尸 worker）
+        self._watchdog_seconds = watchdog_seconds
+        self._on_event = on_event or (lambda kind, payload: None)
+
+    # ---------- 只读状态（唯一的"占用"真相源就是这把锁） ----------
+    @property
+    def owner(self):
+        return self._owner
+
+    def busy(self):
+        return self._lock.locked()
+
+    def cancelled(self):
+        return self._cancel.is_set()
+
+    # ---------- 唯一入口 ----------
+    def start(self, name, worker, *args):
+        """开始一个动作；已有动作在执行则拒绝（不排队、不阻塞，由调用方决定提示）。"""
+        if not self._lock.acquire(blocking=False):
+            self._on_event('rejected', {'owner': self._owner, 'attempt': name})
+            return False
+        self._run_seq += 1
+        run_id = self._run_seq
+        self._active_run = run_id
+        self._owner = name
+        self._cancel.clear()
+        self._cancel_reason = ''
+        timer = threading.Timer(self._watchdog_seconds, self._watchdog_fire, args=(run_id, name))
+        timer.daemon = True
+        self._watchdog = timer
+        timer.start()
+        self._on_event('started', {'owner': name})
+        threading.Thread(target=self._run, args=(run_id, name, worker, args), daemon=True).start()
+        return True
+
+    def cancel(self, reason='紧急停止'):
+        """请求取消在飞行动作（紧急停止调用）。无动作时仅置标志，下一次 start 会清掉。
+
+        ★ 空闲时不发事件：紧急停止在没动作在跑时也会调 cancel()，若照样上报，
+        日志里会反复出现「正在取消动作：（空闲）…」这类噪音。
+        """
+        self._cancel.set()
+        self._cancel_reason = reason or self._cancel_reason
+        if self._active_run is not None:
+            self._on_event('cancel-requested', {'owner': self._owner, 'reason': reason})
+
+    def checkpoint(self):
+        """worker 的步骤边界：已取消 / 所属动作已作废则抛 _ActionCancelled，阻断后续副作用。
+
+        ★ 除了取消标志，还要看「这次运行是否还是当前运行」：看门狗强制释放后，旧 worker
+        可能仍在跑，而下一个动作会 clear() 掉取消标志 —— 只查标志的话，僵尸 worker 会被
+        「复活」并把进程拉起来。run_id 比对让它永久作废。
+        非闸门线程（run_id 为 None）仍按取消标志判断，保持原有语义。
+        """
+        my_run = getattr(self._local, 'run_id', None)
+        is_zombie = my_run is not None and my_run != self._active_run
+        if is_zombie or self._cancel.is_set():
+            raise _ActionCancelled()
+
+    def wait_idle(self, timeout=_EMERGENCY_JOIN_SEC):
+        """等待在飞行动作退出；False = 超时（调用方应继续强制清扫）。"""
+        deadline = time.monotonic() + timeout
+        while self._active_run is not None and time.monotonic() < deadline:
+            time.sleep(0.1)
+        return self._active_run is None
+
+    # ---------- 内部：执行与收尾 ----------
+    def _run(self, run_id, name, worker, args):
+        self._local.run_id = run_id
+        try:
+            worker(*args)
+        except _ActionCancelled:
+            # 带上真实取消原因：看门狗超时不能用「紧急停止」四个字糊过去（审计实测到该歧义）
+            self._on_event('cancelled', {'owner': name, 'reason': self._cancel_reason})
+        except BaseException as e:      # noqa: BLE001 — 收尾责任在此，必须转成事件上报
+            self._on_event('failed', {'owner': name, 'error': f'{type(e).__name__}: {e}'})
+        finally:
+            self._finish(run_id)
+
+    def _watchdog_fire(self, run_id, name):
+        if run_id != self._active_run:
+            return
+        self._on_event('watchdog', {'owner': name, 'seconds': self._watchdog_seconds})
+        self._cancel_reason = f'看门狗超时 {self._watchdog_seconds}s'
+        self._cancel.set()
+        self._finish(run_id)
+
+    def _finish(self, run_id):
+        if run_id != self._active_run:
+            return                      # 已被看门狗收尾，不重复释放
+        self._active_run = None
+        self._owner = ''
+        timer, self._watchdog = self._watchdog, None
+        if timer is not None:
+            timer.cancel()
+        self._lock.release()
+        self._on_event('finished', {'owner': ''})
 
 
 class RoundedButton(tk.Canvas):
-    """基于 Canvas 的圆角按钮 — v5.33 视觉层恢复（含 Hover/Press 微交互）。
+    """基于 Canvas 的圆角按钮 — 三种视觉变体：solid / outlined / subtle。
 
-    三种视觉变体：solid / outlined / subtle。
-    规格（v5.33 原始规格，经字节码提取确认）：
+    设计规格（统一）：
         高度    36px (padx=16, pady=6 + font linespace ≈ 36)；mini 26px (pady=2)
         圆角    10px (mini 8px)
         字号    9pt bold (mini 8pt)
-        Hover   180ms 平滑过渡到 +12 加深色（solid）/ 主色 12% 透明染（outlined/subtle）
+        间距    水平 8px（在调用方以 padx=(8,0) 实施）
+        Hover   180ms 平滑过渡到 +12 加深色（solid） / 主色 12% 透明染（outlined / subtle）
         Press   立即下沉 1px、背景再加深 6%
         Disabled 背景 #f2f2f7 / 文字 #aeaeb2 / 边框 #e5e5ea / cursor not-allowed
-
-    ★ 恢复要点: 本类为**纯表现层**，通过 command 回调驱动业务，
-      不直接触碰任何状态机字段，故不影响 v5.40 的线程契约与 TOCTOU 防护。
-
-    ★★ 命名陷阱（务必勿改回）: 自绘宽高属性必须叫 _cw / _ch，
-      **绝不能叫 _w / _h** —— `_w` 是 tkinter.Misc 内部的窗口路径名字符串
-      （`self.tk.call(..., self._w)` 全靠它定位控件）。若在子类里用 int 覆盖它，
-      所有 Tk 调用都会收到一个整数当窗口名，抛
-      `TclError: bad argument "110": must be name of window`
-      （110 也正是按钮自身的像素宽度）。该故障点远离赋值处，极难排查。
     """
 
-    _DISABLED_BG, _DISABLED_FG, _DISABLED_BORDER = '#f2f2f7', '#aeaeb2', '#e5e5ea'
+    _DISABLED_BG = '#f2f2f7'
+    _DISABLED_FG = '#aeaeb2'
+    _DISABLED_BORDER = '#e5e5ea'
 
-    def __init__(self, parent, text='', variant='solid', tone='accent', command=None,
-                 font=None, padx=16, pady=6, radius=_BTN_RADIUS, state='normal',
-                 canvas_bg=None, hover_fill=None, fg=None, **kw):
-        self._text = text
-        self._variant = variant if variant in ('solid', 'outlined', 'subtle') else 'solid'
-        self._command = command
-        self._font = font or ('Microsoft YaHei UI', 9, 'bold')
-        self._radius = radius
-        self._state = state
-        self._hover = False
-        self._press = False
-        self._anim_after_id = None
+    def __init__(self, parent, text='', variant='solid', tone='accent',
+                 command=None, font=('Microsoft YaHei UI', 9, 'bold'),
+                 padx=16, pady=6, radius=10, state='normal', canvas_bg=None,
+                 hover_fill=None, fg=None, fill=None, **kw):
+        """variant: 'solid'(实色填充) / 'outlined'(边框+透明) / 'subtle'(淡色填充)
+        tone:    'accent' / 'success' / 'danger' / 'neutral'
+        其余旧参数（fill/hover_fill/fg）保留向后兼容。"""
+        # 兼容旧 API：若调用方显式给了 fill 但未给 variant/toner，按旧模式当 solid 处理
+        legacy = fill is not None and variant == 'solid' and tone == 'accent'
+        if fill is not None and (fg is not None or hover_fill is not None):
+            legacy = True
 
-        palette = _BUTTON_VARIANT_PALETTE.get(tone) or _BUTTON_VARIANT_PALETTE['accent']
-        cfg_fill = palette['fill']
-        cfg_hover = hover_fill or palette['fill_h']
-        cfg_fg = fg or palette['fg']
-        cfg_outline = palette['subtle_border']
-        cfg_outline_hover = _shift_color(cfg_outline, -12)
-        cfg_outline_w = 1
-
-        eff_variant = self._variant
-        if self._variant == 'outlined':
-            self._fill = canvas_bg or _PALETTE['bg_card']
-            self._hover_fill = palette['tint']
-            self._fg = cfg_fill if fg is None else cfg_fg
-            cfg_outline = cfg_fill
-            cfg_outline_hover = cfg_hover
-        elif self._variant == 'subtle':
-            self._fill = palette['tint']
-            self._hover_fill = palette['tint_h']
-            self._fg = cfg_fill if fg is None else cfg_fg
+        palette = _BUTTON_VARIANT_PALETTE
+        if legacy:
+            # 老路子：fill/hover_fill 直接用调用方传入的；fg 走调用方
+            cfg_fill = fill
+            cfg_hover = hover_fill or _shift_color(fill, 18)
+            cfg_fg = fg or '#ffffff'
+            cfg_outline = ''
+            cfg_outline_hover = ''
+            cfg_outline_w = 0
+            eff_variant = 'solid-legacy'
         else:
-            self._fill = cfg_fill
-            self._hover_fill = cfg_hover
-            self._fg = cfg_fg
-        self._outline = cfg_outline if eff_variant != 'solid' else (canvas_bg or _PALETTE['bg_card'])
-        self._outline_hover = cfg_outline_hover
-        self._outline_w = cfg_outline_w if eff_variant != 'solid' else 0
+            tone_cfg = palette.get(tone, palette['accent'])
+            if variant == 'solid':
+                cfg_fill = tone_cfg['fill']
+                cfg_hover = tone_cfg['fill_h']
+                cfg_fg = tone_cfg['fg']
+                cfg_outline = ''
+                cfg_outline_hover = ''
+                cfg_outline_w = 0
+                eff_variant = 'solid'
+            elif variant == 'outlined':
+                cfg_fill = tone_cfg.get('transparent_fill', '#ffffff')
+                cfg_hover = tone_cfg['tint_h']
+                cfg_fg = tone_cfg['fill']
+                cfg_outline = tone_cfg['fill']
+                cfg_outline_hover = tone_cfg['fill_h']
+                cfg_outline_w = 1
+                eff_variant = 'outlined'
+            elif variant == 'subtle':
+                cfg_fill = tone_cfg['tint']
+                cfg_hover = tone_cfg['tint_h']
+                cfg_fg = tone_cfg['fill']
+                cfg_outline = tone_cfg.get('subtle_border', _shift_color(tone_cfg['tint'], -12))
+                cfg_outline_hover = tone_cfg['fill']
+                cfg_outline_w = 1
+                eff_variant = 'subtle'
+            else:
+                cfg_fill = tone_cfg['fill']; cfg_hover = tone_cfg['fill_h']; cfg_fg = tone_cfg['fg']
+                cfg_outline = ''; cfg_outline_hover = ''; cfg_outline_w = 0
+                eff_variant = 'solid'
 
-        # 向后兼容: fill/hover_fill/fg 旧参数若显式传入则覆盖
-        if 'fill' in kw and kw['fill']:
-            self._fill = kw.pop('fill')
-        if hover_fill:
-            self._hover_fill = hover_fill
-        if fg:
-            self._fg = fg
-        for legacy in ('fill_h', 'outline', 'outline_hover', 'outline_w'):
-            kw.pop(legacy, None)
-
-        tkfont_ = tkfont.Font(font=self._font)
-        text_w = tkfont_.measure(text)
-        linespace = tkfont_.metrics('linespace')
-        w = text_w + padx * 2
-        h = linespace + pady * 2
-        bg = canvas_bg or _PALETTE['bg_card']
-        self._bg = bg
-        super().__init__(parent, width=w, height=h, highlightthickness=0, bg=bg, bd=0)
-        self._cw, self._ch = w, h
-        # ★ 禁用态色按 tone 派生（v5.33 实测: 灰按钮 #f2f2f7/#adadb1；
-        #   绿按钮禁用底 #a8e0b8）。tone 未知时回落通用灰。
-        self._disabled_bg = _V533_COLORS['disabled_bg']
-        self._disabled_fg = _V533_COLORS['disabled_fg']
-        self._disabled_border = _V533_COLORS['disabled_bg']
-        if tone == 'success':
-            self._disabled_bg = _V533_COLORS['green_disabled']
-            self._disabled_border = _V533_COLORS['green_disabled']
+        import tkinter.font as tkfont
+        f = tkfont.Font(font=font)
+        text_w = f.measure(text)
+        # 最小宽度 80：避免窄按钮在小屏上挤成"重启"二字团
+        w = max(80, text_w + padx * 2 + cfg_outline_w * 2)
+        h = f.metrics('linespace') + pady * 2
+        canvas_bg = canvas_bg or '#ffffff'
         cursor = 'hand2' if state == 'normal' else 'arrow'
-        self.configure(cursor=cursor)
-        self.bind('<Enter>', self._hover_in)
-        self.bind('<Leave>', self._hover_out)
-        self.bind('<ButtonPress-1>', self._press_in)
-        self.bind('<ButtonRelease-1>', self._press_out)
-        self._draw()
-
-    def set_tone(self, tone):
-        """运行时切换色调（v5.33 语义: 开发/生产按钮的运行态用不同色调表达）。
-
-        重算 fill / hover / fg / outline 与禁用态色，随后重绘。
-        """
-        palette = _BUTTON_VARIANT_PALETTE.get(tone) or _BUTTON_VARIANT_PALETTE['accent']
-        if self._variant == 'outlined':
-            self._fill = self._bg
-            self._hover_fill = palette['tint']
-            self._fg = palette['fill']
-            self._outline = palette['fill']
-            self._outline_hover = palette['fill_h']
-            self._outline_w = 1
-        elif self._variant == 'subtle':
-            self._fill = palette['tint']
-            self._hover_fill = palette['tint_h']
-            self._fg = palette['fill']
-            self._outline_w = 0
-        else:
-            self._fill = palette['fill']
-            self._hover_fill = palette['fill_h']
-            self._fg = palette['fg']
-            self._outline = self._bg
-            self._outline_w = 0
-        self._disabled_bg = (_V533_COLORS['green_disabled'] if tone == 'success'
-                             else _V533_COLORS['disabled_bg'])
-        self._disabled_fg = _V533_COLORS['disabled_fg']
-        self._disabled_border = self._disabled_bg
-        self._draw()
-
-    def config(self, **kw):
-        """兼容 tk.Button API: text / state / command / bg / tone / variant 可运行时变更。"""
-        if 'text' in kw:
-            self.set_text(kw.pop('text'))
-        if 'variant' in kw:
-            v = kw.pop('variant')
-            if v in ('solid', 'outlined', 'subtle'):
-                self._variant = v
-        if 'tone' in kw:
-            self.set_tone(kw.pop('tone'))
-        if 'state' in kw:
-            self._state = kw.pop('state')
-            self.configure(cursor='hand2' if self._state == 'normal' else 'arrow')
-        if 'command' in kw:
-            self._command = kw.pop('command')
-        if 'bg' in kw:
-            self._bg = kw.pop('bg')
-            super().configure(bg=self._bg)
-        if kw:
-            with contextlib.suppress(Exception):
-                super().configure(**kw)
-        self._draw()
-
-    configure = config
-
-    def set_text(self, text):
-        """更新文案并自适应宽度（保持与 tk.Button 等价的语义）。"""
+        super().__init__(parent, width=w, height=h, highlightthickness=0, cursor=cursor, bg=canvas_bg, **kw)
         self._text = text
-        f = tkfont.Font(font=self._font)
-        self._cw = f.measure(text) + 32
-        self._ch = f.metrics('linespace') + 12
-        with contextlib.suppress(Exception):
-            super().configure(width=self._cw, height=self._ch)
+        self._fill, self._hover_fill, self._fg = cfg_fill, cfg_hover, cfg_fg
+        self._outline = cfg_outline
+        self._outline_hover = cfg_outline_hover
+        self._outline_w = cfg_outline_w
+        self._variant = eff_variant
+        self._font, self._radius, self._command = font, radius, command
+        self._state, self._hover, self._press = state, False, False
+        self._anim_after_id = None
+        self.bind('<Configure>', self._draw)
+        self.bind('<Enter>', lambda e: self._hover_in())
+        self.bind('<Leave>', lambda e: self._hover_out())
+        self.bind('<ButtonPress-1>', lambda e: self._press_in())
+        self.bind('<ButtonRelease-1>', lambda e: self._press_out())
+        # 初始立即绘制（不依赖 <Configure>），避免按钮首次显示为空白、鼠标移上才出现
         self._draw()
-
-    # ---- geometry 转发（tk.Canvas 没有 pack/grid/place），使 RoundedButton 可
-    #      与 tk.Button 完全同样的方式装配，避免调用点被迫区分控件类型。----
-    # ★ 必须用 *args/**kw 透传，不能声明 `cnf=None` 再 `super().pack(cnf, **kw)`:
-    #   tk.Canvas.pack 的签名是 pack(cnf={}, **kw)，其内部走 _options(cnf, kw)。
-    #   若把 None 当作位置参数传入，_options 会把该 None 与 kw 合并失败，
-    #   进而把 pady=(10,12) 摊平成 "10 12" 并触发
-    #   `TclError: bad argument "110": must be name of window`（实测复现）。
-    #   透传 *args 则无参数时 args 为空，等价于原生调用，零副作用。
-    def pack(self, *args, **kw):
-        super().pack(*args, **kw)
-        return self
-
-    def grid(self, *args, **kw):
-        super().grid(*args, **kw)
-        return self
-
-    def place(self, *args, **kw):
-        super().place(*args, **kw)
-        return self
 
     def _round_rect(self, x1, y1, x2, y2, r, **kw):
-        """绘制圆角矩形（Canvas 无原生圆角，用 polygon + smooth 近似）。"""
-        pts = [x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r, x2, y2 - r, x2, y2,
-               x2 - r, y2, x1 + r, y2, x1, y2, x1, y2 - r, x1, y1 + r, x1, y1]
+        pts = [x1+r, y1, x2-r, y1, x2, y1, x2, y1+r, x2, y2-r, x2, y2, x2-r, y2, x1+r, y2, x1, y2, x1, y2-r, x1, y1+r, x1, y1]
         return self.create_polygon(pts, smooth=True, **kw)
 
-    def _draw(self):
-        with contextlib.suppress(Exception):
-            self.delete('all')
-            disabled = (self._state == 'disabled')
-            if disabled:
-                fill, fg, outline = self._disabled_bg, self._disabled_fg, self._disabled_border
-            else:
-                fill = self._hover_fill if (self._hover and self._outline_w == 0) else self._fill
-                if self._hover and self._outline_w:
-                    fill = self._hover_fill
+    def _draw(self, _=None):
+        self.delete('all')
+        w, h = self.winfo_width(), self.winfo_height()
+        # widget 尚未映射时 winfo_width/height 会返回 1，回退到显式请求的尺寸
+        if w < 4:
+            w = self.winfo_reqwidth()
+        if h < 4:
+            h = self.winfo_reqheight()
+        if w < 4 or h < 4:
+            return
+        r = min(self._radius, w // 2, h // 2)
+        if self._state == 'disabled':
+            bg, fg = self._DISABLED_BG, self._DISABLED_FG
+            outline, outline_w = self._DISABLED_BORDER, 1
+        else:
+            if self._press:
+                bg = _lerp_color(self._fill, self._hover_fill, 0.7)
+                outline = _lerp_color(self._outline, self._outline_hover, 0.7) if self._outline else ''
                 fg = self._fg
-                outline = self._outline_hover if self._hover else self._outline
-            dy = _BTN_PRESS_DY if (self._press and not disabled) else 0
-            x1, y1 = 0, dy
-            x2, y2 = self._cw, self._ch + dy
-            border = outline if self._outline_w else fill
-            self._round_rect(x1, y1, x2, y2, self._radius,
-                             fill=fill, outline=border, width=1)
-            self.create_text(self._cw / 2, (self._ch / 2) + dy, text=self._text,
-                             font=self._font, fill=fg)
+            elif self._hover:
+                bg = self._hover_fill
+                outline = self._outline_hover if self._outline else ''
+                fg = self._fg
+            else:
+                bg = self._fill
+                outline = self._outline
+                fg = self._fg
+            outline_w = self._outline_w
+        offset = 1 if self._press else 0
+        if outline_w and outline:
+            # 双层圆角矩形模拟边框：外层用 outline 色实心填圆角，内层缩小 outline_w 后填 bg 色
+            self._round_rect(offset, offset, w - offset, h - offset, r, fill=outline, outline='')
+            self._round_rect(offset + outline_w, offset + outline_w,
+                             w - offset - outline_w, h - offset - outline_w,
+                             max(0, r - outline_w), fill=bg, outline='')
+        else:
+            self._round_rect(offset, offset, w - offset, h - offset, r, fill=bg, outline='')
+        self.create_text(w // 2, h // 2, text=self._text, fill=fg, font=self._font)
 
-    def _animate_hover(self, target_fill):
-        """180ms 平滑过渡（4 步插值，v5.33 原规格）。"""
+    def _animate_hover(self, target_hover):
+        if self._state == 'disabled':
+            self._draw()
+            return
         if self._anim_after_id:
-            with contextlib.suppress(Exception):
-                self.after_cancel(self._anim_after_id)
+            self.after_cancel(self._anim_after_id)
             self._anim_after_id = None
-        start = self._fill
+        start_bg = self._fill if not target_hover else self._hover_fill
+        end_bg = self._hover_fill if target_hover else self._fill
+        start_outline = self._outline if not target_hover else self._outline_hover
+        end_outline = self._outline_hover if target_hover else self._outline
+        step_idx = [0]
         steps = 4
-        interval = max(1, _BTN_ANIM_MS // steps)
-
-        def step(i):
-            if i > steps:
-                self._anim_after_id = None
+        def step():
+            step_idx[0] += 1
+            t = step_idx[0] / steps
+            if t >= 1.0:
+                self._hover = target_hover
+                self._draw()
                 return
-            if self._state == 'disabled':
+            self.delete('all')
+            w, h = self.winfo_width(), self.winfo_height()
+            if w < 4 or h < 4:
                 return
-            self._fill = _lerp_color(start, target_fill, i / steps)
+            r = min(self._radius, w // 2, h // 2)
+            if self._outline_w and self._outline:
+                self._round_rect(0, 0, w, h, r, fill=_lerp_color(start_outline, end_outline, t), outline='')
+                bg = _lerp_color(start_bg, end_bg, t)
+                self._round_rect(self._outline_w, self._outline_w, w - self._outline_w, h - self._outline_w,
+                                 max(0, r - self._outline_w), fill=bg, outline='')
+            else:
+                self._round_rect(0, 0, w, h, r, fill=_lerp_color(start_bg, end_bg, t), outline='')
+            self.create_text(w // 2, h // 2, text=self._text, fill=self._fg, font=self._font)
+            self._anim_after_id = self.after(45, step)
+        step()
+
+    def _hover_in(self):
+        if self._state != 'disabled':
+            self._animate_hover(True)
+
+    def _hover_out(self):
+        if self._state != 'disabled':
+            self._animate_hover(False)
+
+    def _press_in(self):
+        if self._state != 'disabled':
+            self._press = True
             self._draw()
-            self._anim_after_id = self.after(interval, lambda: step(i + 1))
-        step(0)
 
-    def _hover_in(self, _e=None):
-        if self._state == 'disabled':
-            return
-        self._hover = True
-        self._animate_hover(self._hover_fill)
-
-    def _hover_out(self, _e=None):
-        self._hover = False
-        if self._state == 'disabled':
-            self._draw()
-            return
-        self._animate_hover(self._fill if self._outline_w else self._fill)
-
-    def _press_in(self, _e=None):
-        if self._state == 'disabled':
-            return
-        self._press = True
-        self._draw()
-
-    def _press_out(self, _e=None):
-        if self._state == 'disabled':
-            return
-        was_press = self._press
+    def _press_out(self):
+        was_pressed = self._press
         self._press = False
         self._draw()
-        # 只有「按下后在本控件内释放」才触发命令（与原生 Button 语义一致）
-        if was_press and self._command:
-            with contextlib.suppress(Exception):
-                self._command()
+        if was_pressed and self._state == 'normal' and self._command:
+            self._command()
+
+    def config(self, **kw):
+        if 'state' in kw:
+            self._state = kw.pop('state')
+            kw['cursor'] = 'arrow' if self._state == 'disabled' else 'hand2'
+        if 'text' in kw:
+            self._text = kw.pop('text')
+        super().config(**kw)
+        self._draw()
+
+
+# 状态徽章：统一状态枚举 → 文案/颜色/点样式/动画（大厂 Status Tag 设计规范）
+_STATUS_META = {
+    'running':       {'text': '运行中', 'color': 'success',     'tint': 'success_tint', 'dot': 'dot',   'anim': 'breath'},
+    'stopped':       {'text': '已停止', 'color': 'text_dim',    'tint': 'bg_input',     'dot': 'ring',  'anim': None},
+    'error':         {'text': '异常',   'color': 'danger',      'tint': 'danger_tint',  'dot': 'cross', 'anim': 'pulse'},
+    'restarting':    {'text': '重启中', 'color': 'warning',     'tint': 'warning_tint', 'dot': 'dot',   'anim': 'blink'},
+    'deploying':     {'text': '部署中', 'color': 'accent',      'tint': 'accent_tint',  'dot': 'arc',   'anim': 'spin'},
+    'not_installed': {'text': '未安装', 'color': 'text_dim',    'tint': 'bg_input',     'dot': 'ring',  'anim': None},
+    'unknown':       {'text': '状态未知', 'color': 'text_dim',  'tint': 'bg_input',     'dot': 'ring',  'anim': None},
+}
+
+_STATUS_SIZE = {
+    'lg': {'padx': 10, 'pady': 4, 'dot': 8, 'gap': 6, 'font': ('Microsoft YaHei UI', 9, 'bold'), 'radius': 10},
+    'md': {'padx': 8,  'pady': 3, 'dot': 7, 'gap': 5, 'font': ('Microsoft YaHei UI', 9, 'bold'), 'radius': 9},
+    'sm': {'padx': 6,  'pady': 2, 'dot': 6, 'gap': 4, 'font': ('Microsoft YaHei UI', 8),         'radius': 7},
+}
 
 
 class StatusBadge(tk.Canvas):
-    """圆角胶囊状态徽章(色点 + 文字)。
+    """圆角胶囊状态徽章：状态点 + 文字 + 语义色容器（大厂 Status Tag 风格）。
 
-    v5.33 视觉层恢复: ① 色值取 _BADGE_META_V533（iOS 色系）；
-    ② 恢复徽章脉冲微交互 —— 过渡态(deploying/switching)下圆点做呼吸式明暗循环。
-    ★ 脉冲只改 Canvas item 的 fill，不触碰任何状态字段，与业务状态机完全解耦。
+    与旧版"裸圆点 + 裸文字"的区别：统一状态枚举、彩色胶囊容器、
+    四种点样式（实心/空心/叉/旋转弧）、四种动画（呼吸/闪烁/脉冲/旋转）。
+    用于三种场景：状态栏(lg) / 卡片详情(md) / 监控面板组件(sm)。
     """
 
-    _PULSING_STATES = ('deploying', 'switching')
-
-    def __init__(self, parent, state='stopped', text=None, font=None, bg=None):
-        self._font = font or ('Microsoft YaHei UI', 10, 'bold')
-        self._bg = bg or _C['card']
-        self._fobj = tkfont.Font(font=self._font)
-        meta = _BADGE_META_V533.get(state, _BADGE_META_V533['stopped'])
-        self._state, self._text, self._color = state, (text or meta[0]), meta[1]
-        self._w = self._fobj.measure(self._text) + 46
-        self._pulse_after_id, self._pulse_on = None, True
-        super().__init__(parent, width=self._w, height=28, highlightthickness=0, bg=self._bg)
-        self.bind('<Configure>', self._draw)
+    def __init__(self, parent, state='stopped', text=None, size='md', palette=None, canvas_bg=None):
+        self._palette = palette or {}
+        self._size = size
+        self._spec = _STATUS_SIZE[size]
+        self._state = state
+        self._custom_text = text
+        self._anim_after_id = None
+        self._phase = 0
+        self._meta = _STATUS_META.get(state, _STATUS_META['stopped'])
+        self._anim_kind = self._meta['anim']
+        import tkinter.font as tkfont
+        self._font_obj = tkfont.Font(font=self._spec['font'])
+        w = self._calc_width()
+        h = self._font_obj.metrics('linespace') + self._spec['pady'] * 2
+        super().__init__(parent, width=w, height=h, highlightthickness=0, bg=canvas_bg or '#ffffff')
         self._draw()
-        self._sync_pulse()
+        if self._anim_kind:
+            self._tick()
 
-    def set_state(self, state, text=None):
-        meta = _BADGE_META_V533.get(state, _BADGE_META_V533['stopped'])
-        self._state, self._text, self._color = state, (text if text is not None else meta[0]), meta[1]
-        self._w = self._fobj.measure(self._text) + 46
-        with contextlib.suppress(Exception):
-            self.configure(width=self._w)
+    def _text(self):
+        return self._custom_text if self._custom_text is not None else self._meta['text']
+
+    def _calc_width(self):
+        text_w = self._font_obj.measure(self._text())
+        return self._spec['padx'] * 2 + self._spec['dot'] + self._spec['gap'] + text_w
+
+    def set_state(self, state, text=None, color_key=None, tint_key=None):
+        prev_state = self._state
+        self._state = state
+        if text is not None:
+            self._custom_text = text
+        elif state != prev_state:
+            self._custom_text = None
+        base = _STATUS_META.get(state, _STATUS_META['stopped'])
+        self._meta = dict(base)
+        if color_key is not None:
+            self._meta['color'] = color_key
+        if tint_key is not None:
+            self._meta['tint'] = tint_key
+        new_anim = self._meta['anim']
+        if new_anim != self._anim_kind:
+            self._anim_kind = new_anim
+            if self._anim_after_id:
+                self.after_cancel(self._anim_after_id)
+                self._anim_after_id = None
+            self._phase = 0
+            if self._anim_kind:
+                self._tick()
+        self.configure(width=self._calc_width())
         self._draw()
-        self._sync_pulse()
 
-    def _sync_pulse(self):
-        """进入过渡态起脉冲、离开则停（幂等）。"""
-        want = self._state in self._PULSING_STATES
-        if want and self._pulse_after_id is None:
-            self._pulse_on = True
-            self._pulse_tick()
-        elif not want and self._pulse_after_id is not None:
-            with contextlib.suppress(Exception):
-                self.after_cancel(self._pulse_after_id)
-            self._pulse_after_id = None
-            self._pulse_on = True
+    def _round_rect(self, x1, y1, x2, y2, r, **kw):
+        pts = [x1+r, y1, x2-r, y1, x2, y1, x2, y1+r, x2, y2-r, x2, y2, x2-r, y2, x1+r, y2, x1, y2, x1, y2-r, x1, y1+r, x1, y1]
+        return self.create_polygon(pts, smooth=True, **kw)
 
-    def _pulse_tick(self):
-        # TclError 防护: 窗口销毁后仍可能有排队的 after 回调。
-        try:
-            self._pulse_on = not self._pulse_on
-            self._draw()
-            self._pulse_after_id = self.after(_BADGE_PULSE_MS // 2, self._pulse_tick)
-        except tk.TclError:
-            self._pulse_after_id = None
+    def _colors(self):
+        color = self._palette.get(self._meta['color'], '#8e8e93')
+        tint = self._palette.get(self._meta['tint'], '#f2f2f7')
+        if self._anim_kind == 'blink' and (self._phase // 90) % 2 == 0:
+            color = tint
+        return color, tint
 
-    def _draw(self, _=None):
-        # TclError 防护: 窗口销毁时仍可能有排队的 <Configure> 回调，此时控件已失效，
-        # 重绘会抛 invalid command name 噪声。
-        try:
-            self.delete('all')
-            w = self.winfo_width() or self._w
-            h = self.winfo_height() or 28
-            if w < 4 or h < 4:
-                return
-            r = (h - 2) // 2
-            x1, y1, x2, y2 = 1, 1, w - 1, h - 1
-            pts = [x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r, x2, y2 - r, x2, y2, x2 - r, y2, x1 + r, y2, x1, y2, x1, y2 - r, x1, y1 + r, x1, y1]
-            self.create_polygon(pts, smooth=True, fill=_blend(self._color, self._bg, 0.13), outline=self._color)
-            cy = h // 2
-            # 脉冲: 圆点颜色在「本色 ↔ 变淡」之间切换；仅过渡态生效。
-            dot_color = self._color
-            if self._state in self._PULSING_STATES and not self._pulse_on:
-                dot_color = _blend(self._color, self._bg, 0.35)
-            self.create_oval(9, cy - 4, 17, cy + 4, fill=dot_color, outline='')
-            self.create_text(24, cy, text=self._text, fill=self._color, font=self._font, anchor='w')
-        except tk.TclError:
-            pass
+    def _draw(self):
+        self.delete('all')
+        w, h = self.winfo_width(), self.winfo_height()
+        if w < 4:
+            w = self.winfo_reqwidth()
+        if h < 4:
+            h = self.winfo_reqheight()
+        if w < 4 or h < 4:
+            return
+        color, tint = self._colors()
+        # 胶囊容器（圆角 + 同色描边）
+        self._round_rect(0, 0, w, h, self._spec['radius'], fill=tint, outline=color, width=1)
+        # 状态点
+        cy = h // 2
+        dx = self._spec['padx'] + self._spec['dot'] // 2
+        self._draw_dot(dx, cy, self._spec['dot'], color, self._meta['dot'])
+        # 文字
+        tx = self._spec['padx'] + self._spec['dot'] + self._spec['gap']
+        self.create_text(tx, cy, text=self._text(), fill=color, font=self._spec['font'], anchor='w')
+
+    def _draw_dot(self, cx, cy, d, color, style):
+        r = max(2, d // 2)
+        phase = self._phase
+        if style == 'ring':
+            self.create_oval(cx-r, cy-r, cx+r, cy+r, outline=color, width=1)
+        elif style == 'cross':
+            self.create_oval(cx-r, cy-r, cx+r, cy+r, fill=color, outline='')
+            k = max(1, r - 1)
+            self.create_line(cx-k, cy-k, cx+k, cy+k, fill='#ffffff', width=1)
+            self.create_line(cx+k, cy-k, cx-k, cy+k, fill='#ffffff', width=1)
+        elif style == 'arc':
+            self.create_arc(cx-r, cy-r, cx+r, cy+r, start=phase % 360, extent=270, style='arc', outline=color, width=2)
+        else:
+            if self._anim_kind == 'breath':
+                glow = int((math.sin(phase / 360.0 * 2 * math.pi) * 0.5 + 0.5) * (r // 2))
+                if glow:
+                    self.create_oval(cx-r-glow, cy-r-glow, cx+r+glow, cy+r+glow, fill=_shift_color(color, 40), outline='')
+            elif self._anim_kind == 'pulse':
+                ring_r = (phase % 60) / 60.0 * (r + 3)
+                if ring_r > 0.5:
+                    self.create_oval(cx-ring_r, cy-ring_r, cx+ring_r, cy+ring_r, outline=color, width=1)
+            self.create_oval(cx-r, cy-r, cx+r, cy+r, fill=color, outline='')
+
+    def _tick(self):
+        self._phase = (self._phase + 6) % 360
+        self._draw()
+        delay = {'breath': 200, 'blink': 120, 'pulse': 150, 'spin': 80}.get(self._anim_kind, 200)
+        self._anim_after_id = self.after(delay, self._tick)
+
+    def stop_animation(self):
+        if self._anim_after_id:
+            self.after_cancel(self._anim_after_id)
+            self._anim_after_id = None
+        self._anim_kind = None
+        self._phase = 0
+        self._draw()
+
+
+def _create_tray_icon_image():
+    try:
+        from PIL import Image, ImageDraw
+        img = Image.new('RGBA', (16, 16), (0, 0, 0, 0))
+        ImageDraw.Draw(img).ellipse([2, 2, 14, 14], fill=(108, 142, 255, 255))
+        return img
+    except Exception:
+        return None
 
 
 class ServerManagerApp:
-    """单窗口服务器管理器: 装配 UI + 承载全部业务逻辑。
+    """ERP 服务器管理器 — 开发/生产模式"""
 
-    线程契约(v5.40/审查 #7): _mode/_prod_running/_prod_busy/_stop_in_progress 只允许主线程
-    经 state_set 消息变更(后台线程直写已全部移除)；后台线程仅管理 _process/_frontend_process
-    的 Popen 生命周期(启动/终止/置 None —— GIL 下句柄赋值原子，且只有持有线程会写)。
-    """
-    LOG_FLUSH_MS, LOG_CLEANUP_MS, QUEUE_POLL_MS = 500, 120000, 200
+    # Apple/iOS 风格设计令牌：浅色分组卡片 + 系统色板 + 克制留白
+    _PALETTE = {
+        'bg_main': '#f5f5f7', 'bg_card': '#ffffff', 'bg_surface': '#f2f2f7', 'bg_header': '#fbfbfd', 'bg_log': '#f9f9fb', 'bg_input': '#f2f2f7',
+        'text_primary': '#1d1d1f', 'text_secondary': '#48484d', 'text_dim': '#8e8e93',
+        'border': '#e5e5ea', 'border_card': '#e8e8ed',
+        'accent': '#007aff', 'accent_h': '#2d96ff', 'accent_tint': '#e8f1ff',
+        'success': '#34c759', 'success_h': '#4fd06a', 'success_tint': '#e6f9ec',
+        'danger': '#ff3b30', 'danger_h': '#ff5548', 'danger_tint': '#ffece9',
+        'warning': '#ff9500', 'warning_tint': '#fff4e0', 'info': '#30b0c7',
+        'log_fg': '#1d1d1f', 'log_info': '#007aff', 'log_error': '#ff3b30', 'log_warn': '#ff9500', 'log_success': '#34c759',
+    }
+    MAX_LOG_LINES, LOG_KEEP_LINES, LOG_CLEANUP_MS, LOG_FLUSH_MS = 500, 300, 120000, 500
+    # 生产模式状态刷新：prod_runner 每 3s 续写 logs/prod_runner.json，超过 HOSTING_STALE_SEC
+    # 未更新即视为不可信（旧快照不得当现状展示）；收集线程超过 HOSTING_COLLECT_TIMEOUT_SEC
+    # 未回报即认定刷新链卡死并重启（否则界面会永久停止更新）。
+    HOSTING_STALE_SEC, HOSTING_COLLECT_TIMEOUT_SEC = 15, 20
+    # 生产启动宽限：NSSM start 返回后，prod_runner 还要起 uvicorn / nginx 才写第一份快照，
+    # 这段窗口里状态文件必然是**上一轮的旧快照**，不能据此判定 prod_runner 已退出。
+    # 2026-09-16 实测：点「启动服务」3s 后就弹出「已 43s 未更新…可在服务管理里重启
+    # erp-prod」——把正常启动过程说成故障，还给出了会白重启一次服务的建议。
+    # 宽限期内改报「等待首份状态」（徽章显示启动中），超期才落回真实告警。
+    HOSTING_START_GRACE_SEC = 60
 
     def __init__(self, root):
         self.root = root
         self.root.title(_WINDOW_TITLE)
-        self.root.geometry('880x640')
-        self.root.minsize(760, 560)
-        self.root.configure(bg=_C['bg'])
-        self.root.withdraw()  # 先 withdraw 再构建，避免白屏闪烁
-        self._mode = 'none'            # v5.40(P2): 活枚举 = none | starting | dual_dev | stopping
-        #                              'restarting' 已移除 —— 全文件从无写入点(死字面量)，
-        #                              保留会形成「看似可达实则永远为假」的分支，误导后续维护
-        self._process = None           # 后端 uvicorn Popen
-        self._frontend_process = None  # 前端 npm/vite Popen
-        self._redis_process = None     # 管理器启动的 Redis Popen
-        self._prod_running = False     # 生产运行中(来自服务状态轮询)
-        self._prod_unknown = False     # 生产状态「未知」(sc 查询失败) —— 仅供展示层，勿与 _prod_running 混用
-        self._prod_busy = False        # 生产启/停命令在途
-        self._redis_running_cached = None
-        self._last_hosting = {}
-        self._startup_steps, self._startup_progress, self._startup_current_step = [], 0, ''
-        self._msg_queue = queue.Queue()
+        self.root.geometry("1080x760")
+        self.root.minsize(960, 680)
+        self.root.resizable(True, True)
+        self.root.withdraw()
+        self._mode, self._process, self._frontend_process, self._redis_process = 'none', None, None, None
         self._log_buffer, self._flush_pending = [], False
-        self._after_ids = {}
-        self._shutting_down = False
-        self._hosting_collecting = False
-        self._hosting_refresh_requested = False
-        self._stop_in_progress = False   # 紧急停止防重入(§6.5)
-        self._stop_hold_fired = False
-        self._stop_hold_after = None
-        self._full_stop_hold_ms = int(_APP_CONFIG.get('full_stop_hold_ms') or 1500)
-        self._max_log_lines = int(_APP_CONFIG.get('max_log_lines') or 2000)
-        self._log_keep_lines = int(_APP_CONFIG.get('log_keep_lines') or 1600)
-        self._font_ui, self._font_ui_bold = ('Microsoft YaHei UI', 10), ('Microsoft YaHei UI', 10, 'bold')
+        self._msg_queue = queue.Queue()
+        self._server_cards = []
+        self._startup_progress, self._startup_steps, self._startup_current_step, self._current_mode_key = 0, [], "", ""
+        self._prod_running = False
+        self._prod_unknown = False      # 生产服务状态「未知」(sc query 失败) —— 仅供展示层，勿与 _prod_running 混用
+        self._hosting_collecting, self._hosting_refresh_requested = False, False
+        self._hosting_collect_started, self._hosting_last_warn = 0.0, ''
+        # 最近一次「启动/重启生产服务」的时刻（0 表示本次会话还没启动过）。
+        # 用于区分「刚启动、首份快照还没落盘」与「跑着跑着 prod_runner 掉了」。
+        self._prod_start_ts = 0.0
+        # 动作闸门（单一持有者 / 自动释放 / 可协作取消）+ 需置灰的操作按钮集合。
+        # 闸门事件回调只往消息队列投递，绝不直接操作 Tk（回调在 worker 线程执行）。
+        self._gate = ActionGate(on_event=self._on_gate_event)
+        self._action_buttons = []
         self.setup_logging()
-        # v5.40(审查 #8): 接管 Tk 回调异常 —— windowed exe 无 stderr，默认 handler 会静默丢弃，
-        # 用户只看到"点了没反应"。统一落文件日志 + UI 日志留痕。
-        self.root.report_callback_exception = self._report_callback_exception
         self._build_ui()
-        self._font_log = self._pick_log_font()
-        with contextlib.suppress(Exception):
-            self.log_text.configure(font=self._font_log)
+        self._set_window_icon()
         self._center_window()
-        self._init_tray()
-        self.root.protocol('WM_DELETE_WINDOW', self.on_closing)
         self.root.deiconify()
-        # v5.33 微交互: 窗口淡入 + 卡片错峰脉冲；窗口可见后再跑，避免 withdraw 期间空转。
-        with contextlib.suppress(Exception):
-            self._fade_in()
-            self._animate_cards_intro()
+        self._fade_in()
+        self._animate_cards_intro()
+        self._check_interval, self._after_ids = 5000, {}
         self._run_env_checks()
-        self._update_all_ui()
-        self._poll_queue()
-        self._check_server_status()
+        self.check_server_status()
         self._refresh_hosting_status()
-        self._schedule_log_flush()
         self._schedule_log_cleanup()
-        # D9: 首次运行落盘默认配置，便于用户发现并手工编辑(配置文件不存在时才写)
-        if not _CONFIG_FILE.is_file() and _save_app_config(dict(_APP_CONFIG)):
-            self.log_message(f'已生成默认配置: {_CONFIG_FILE}')
-        self.log_message(f'{_WINDOW_TITLE} {_VERSION} 已启动')
-        self.log_message(f'项目路径: {_PROJECT_DIR}')
-        self.log_message(f'端口: API {_PORTS.api} / WEB {_PORTS.web} / Redis {_PORTS.redis}')
-        for key in _INVALID_CONFIG_KEYS:
-            self.log_message(f'配置项 {key} 非法，已回落默认值，请检查 {_CONFIG_FILE.name}', 'WARNING')
-        if psutil is None:
-            self.log_message('未安装 psutil，残留进程清理将降级(仅终止自有进程树)', 'WARNING')
-    # ===================== UI 装配 =====================
+        self._schedule_log_flush()
+        self._poll_queue()
+        self._tray_icon = None
+        self._init_tray()
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+        self._ui_ready = True
+        self.logger.info(f"服务器管理器已启动 ({_VERSION})")
 
-    def _report_callback_exception(self, exc_type, exc_val, exc_tb):
-        """Tk mainloop 回调异常统一入口(v5.40/审查 #8): 落 crash 级日志 + UI 留痕，绝不静默。"""
-        tb_text = ''.join(traceback.format_exception(exc_type, exc_val, exc_tb))
-        with contextlib.suppress(Exception):
-            self.logger.error(f'UI 回调异常: {exc_type.__name__}: {exc_val}\n{tb_text}')
-        with contextlib.suppress(Exception):
-            self.log_message(f'界面操作异常: {exc_type.__name__}: {exc_val}', 'ERROR')
+    def _run_env_checks(self):
+        errors = []
+        if not _PYTHON_EXE:
+            errors.append("未找到 Python 解释器！请安装 Python 3.12+ 并确保 python 在 PATH 中，或在项目目录下创建虚拟环境 (.venv313)")
+        elif not (_PROJECT_DIR / 'fastapi_app').is_dir():
+            errors.append(f"项目目录无效: {_PROJECT_DIR}\n未找到 fastapi_app 目录，请检查 erp_project_path.txt 配置")
+        if not (_PROJECT_DIR / '.env').is_file():
+            errors.append(f"未找到 .env 配置文件: {_PROJECT_DIR / '.env'}\n服务器启动将因缺少 SECRET_KEY 而失败")
+        if errors:
+            self.root.after(500, lambda: messagebox.showwarning("环境检查警告", "\n\n".join(errors)))
+            for err in errors:
+                self.log_message(err, 'ERROR')
 
-    def _build_ui(self):
-        header = tk.Frame(self.root, bg=_C['bg'])
-        header.pack(fill=tk.X, padx=14, pady=(12, 6))
-        tk.Label(header, text=f'ERP 服务器管理器 {_VERSION}', font=('Microsoft YaHei UI', 13, 'bold'), fg=_C['text'], bg=_C['bg']).pack(side=tk.LEFT)
-        self.mode_badge = StatusBadge(header, state='stopped', bg=_C['bg'])
-        self.mode_badge.pack(side=tk.RIGHT)
-        body = tk.Frame(self.root, bg=_C['bg'])
-        body.pack(fill=tk.X, padx=14, pady=6)
-        body.columnconfigure(0, weight=1)
-        body.columnconfigure(1, weight=1)
-        dev_card, dev_inner = self._make_card(body, '开发模式')
-        dev_card.grid(row=0, column=0, sticky='nsew', padx=(0, 7))
-        self.dev_dots = {'redis': self._make_dot(dev_inner, 'Redis'),
-                         'backend': self._make_dot(dev_inner, '后端'),
-                         'frontend': self._make_dot(dev_inner, '前端')}
-        # v5.33 视觉层: 圆角按钮(Canvas) + accent 实心色调；command 回调驱动业务，untouched 状态机。
-        self.dev_btn = RoundedButton(dev_inner, text='启动开发模式', variant='solid', tone='accent',
-                                     font=self._font_ui_bold, command=self.toggle_dev)
-        self.dev_btn.pack(fill=tk.X, padx=12, pady=(10, 12))
-        prod_card, prod_inner = self._make_card(body, '生产模式')
-        prod_card.grid(row=0, column=1, sticky='nsew', padx=(7, 0))
-        self.prod_dots = {'api': self._make_dot(prod_inner, _SVC_API), 'arq': self._make_dot(prod_inner, _SVC_ARQ)}
-        self.prod_btn = RoundedButton(prod_inner, text='启动生产模式', variant='solid', tone='accent',
-                                      font=self._font_ui_bold, command=self.toggle_prod)
-        self.prod_btn.pack(fill=tk.X, padx=12, pady=(10, 12))
-        action = tk.Frame(self.root, bg=_C['bg'])
-        action.pack(fill=tk.X, padx=14, pady=(2, 6))
-        # ★ 紧急停止按钮: command 必须留空 —— RoundedButton 内部已绑定
-        #   <ButtonPress-1>/<ButtonRelease-1> 做 Hover/Press 视觉反馈，
-        #   若再让类内 _press_out 触发 command，会与下方 _on_stop_press/_on_stop_release
-        #   的分级长按语义（单击=轻量 / 长按=全清）叠加，造成一次点击触发两条停止路径。
-        #   故此处仅借 RoundedButton 的「外观」，事件语义完全由外部绑定接管。
-        self.stop_btn = RoundedButton(action, text='紧急停止', variant='solid', tone='danger',
-                                      font=self._font_ui_bold, command=None, padx=24)
-        self.stop_btn.pack(side=tk.LEFT)
-        # 分级语义必须让用户可感知: 单击=轻量停止; 长按≥阈值=全清
-        # ★ add='+' 保留 RoundedButton 内部的 Press/Release 视觉回调，二者叠加而非覆盖。
-        self.stop_btn.bind('<ButtonPress-1>', self._on_stop_press, add='+')
-        self.stop_btn.bind('<ButtonRelease-1>', self._on_stop_release, add='+')
-        tk.Label(action, text=f'单击停止当前模式 · 长按 {self._full_stop_hold_ms / 1000:.1f} 秒全清（含服务）',
-                 font=('Microsoft YaHei UI', 9), fg=_C['muted'], bg=_C['bg']).pack(side=tk.LEFT, padx=(10, 0))
-        self.status_label = tk.Label(action, text='就绪', font=('Microsoft YaHei UI', 9, 'bold'), fg=_C['text'], bg=_C['bg'])
-        self.status_label.pack(side=tk.RIGHT)
-        # v5.33 视觉层: 日志区改用带 highlight 边框的卡片式外框（LabelFrame 的 labelanchor
-        #   在浅灰底上视觉重量偏重，且与卡片圆角语言不一致）。
-        log_wrap = tk.Frame(self.root, bg=_C['card'], highlightbackground=_C['border'], highlightthickness=1, bd=0)
-        log_wrap.pack(fill=tk.BOTH, expand=True, padx=14, pady=(2, 6))
-        tk.Label(log_wrap, text='运行日志', font=('Microsoft YaHei UI', 10, 'bold'),
-                 fg=_C['text'], bg=_C['card']).pack(anchor='w', padx=12, pady=(8, 2))
-        # ★ 不用 ScrolledText: 其 Tk 原生 scrollbar 在浅灰底上风格突兀。
-        #   改为 Text + 独立 ttk.Scrollbar，视觉更贴近 v5.33 的克制表达。
-        # ★ 正文底色用 #f9f9fb（v5.33 实测）而非纯白 —— 与卡片外框形成极轻的内凹层次。
-        log_body = tk.Frame(log_wrap, bg=_V533_COLORS['log_surface'])
-        log_body.pack(fill=tk.BOTH, expand=True, padx=(12, 4), pady=(0, 10))
-        self.log_text = tk.Text(log_body, wrap=tk.WORD, font=('Microsoft YaHei UI', 9),
-                                bg=_V533_COLORS['log_surface'],
-                                fg=_C['text'], relief=tk.FLAT, bd=0, state=tk.DISABLED, height=10,
-                                highlightthickness=0, padx=2, pady=2)
-        log_scroll = ttk.Scrollbar(log_body, orient=tk.VERTICAL, command=self.log_text.yview)
-        self.log_text.configure(yscrollcommand=log_scroll.set)
-        log_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        for lvl, color in (('INFO', _C['muted']), ('WARNING', _C['orange']), ('ERROR', _C['red']), ('SUCCESS', _C['green'])):
-            self.log_text.tag_config(lvl, foreground=color)
-        controls = tk.Frame(self.root, bg=_C['bg'])
-        controls.pack(fill=tk.X, padx=14, pady=(0, 12))
-        # v5.33 视觉层: 次级操作按钮统一走 RoundedButton 的 outlined 变体
-        #   （白底 + 彩色描边 + tint 悬停），替代 flat tk.Button 的零反馈观感。
-        for text, cmd in (('清空日志', self.clear_log), ('导出日志', self.export_log), ('打开日志目录', self._open_logs_dir)):
-            RoundedButton(controls, text=text, variant='outlined', tone='accent',
-                          font=('Microsoft YaHei UI', 9), command=cmd,
-                          padx=12, pady=4, canvas_bg=_C['bg']).pack(side=tk.LEFT, padx=(0, 8))
-        self.auto_scroll_var = tk.BooleanVar(value=True)
-        tk.Checkbutton(controls, text='自动滚动', variable=self.auto_scroll_var, font=('Microsoft YaHei UI', 9),
-                       bg=_C['bg'], fg=_C['text'], activebackground=_C['bg'], selectcolor=_C['card'],
-                       cursor='hand2').pack(side=tk.RIGHT)
-        # v5.33 微交互: 窗口淡入 + 卡片边框错峰脉冲。
-        #   规格经字节码闭包反汇编逐指令复原（见 _anim_closures.txt）：
-        #     _fade_in:            attributes('-alpha', 0.0) → step(i)，i>10 置 1.0，
-        #                          否则 alpha=i/10，after(30, step(i+1)) ⇒ 10 步 / 300ms
-        #     _animate_cards_intro: for idx, card in enumerate(cards): after(80*idx, ...)
-        #                          ⇒ 卡片【错峰】入场，非同时（这点极易做错）
-        #     _pulse_card_border:  base=_PALETTE['border_card'], accent=_PALETTE['accent_h']
-        #                          t=i/10 走三角波: t<=0.5 用 (base→accent, t*2)，
-        #                          否则 (accent→base, (t-0.5)*2)；到 i>10 复位 base
-        #                          ⇒ 边框「亮一下再暗回来」660ms，仅此一次
-        self._server_cards = (dev_card, prod_card)
+    def _get_env_value(self, key: str) -> str:
+        """从项目 .env 文件读取指定键的值"""
+        env_file = _PROJECT_DIR / '.env'
+        if not env_file.is_file():
+            return ''
+        try:
+            for line in env_file.read_text(encoding='utf-8').splitlines():
+                line = line.strip()
+                if line.startswith('#') or '=' not in line:
+                    continue
+                k, _, v = line.partition('=')
+                if k.strip() == key:
+                    return v.strip()
+        except Exception:
+            pass
+        return ''
+
+    def _find_redis(self):
+        """查找Redis可执行文件和配置文件"""
+        redis_exe = next((str(p) for p in _REDIS_EXE_PATHS if p.is_file()), None)
+        redis_conf = next((str(p) for p in _REDIS_CONF_PATHS if p.is_file()), None)
+        return redis_exe, redis_conf
+
+    def _is_redis_running(self):
+        """检测 Redis 是否真正可用：TCP 连通 + 认证通过
+
+        仅做端口探测会误报（Redis 服务 Paused/停止或密码不匹配时，端口探测仍可能
+        短暂通过）。这里通过 RESP 协议发送 PING：
+        - 返回 +PONG ：无需密码，正常运行
+        - 返回 -NOAUTH：需密码，先 AUTH（用 .env 的 REDIS_PASSWORD）再 PING
+        - 其余情况：不可用
+        """
+        password = self._get_env_value('REDIS_PASSWORD')
+        try:
+            with socket.create_connection(('127.0.0.1', _REDIS_PORT), timeout=1) as sock:
+                sock.sendall(b'*1\r\n$4\r\nPING\r\n')
+                resp = sock.recv(64)
+                if resp.startswith(b'+PONG'):
+                    return True
+                if resp.startswith(b'-NOAUTH'):
+                    if not password:
+                        return False
+                    auth_cmd = (
+                        f'*2\r\n$4\r\nAUTH\r\n${len(password)}\r\n{password}\r\n'
+                    ).encode()
+                    sock.sendall(auth_cmd)
+                    auth_resp = sock.recv(64)
+                    if not auth_resp.startswith(b'+OK'):
+                        return False
+                    sock.sendall(b'*1\r\n$4\r\nPING\r\n')
+                    return sock.recv(64).startswith(b'+PONG')
+            return False
+        except Exception:
+            return False
+
+    def _redis_service_state(self, name):
+        """查询 Redis 相关 Windows 服务的状态文本（空字符串=服务不存在）。"""
+        code, out = self._run_capture(['sc', 'query', name], timeout=5)
+        if code != 0:
+            return ''
+        for line in (out or '').splitlines():
+            if 'STATE' in line.upper():
+                return line.strip()
+        return 'EXISTS'
+
+    def _start_redis_via_service(self, name):
+        """优先通过 Windows 服务启动 Redis（返回 True/False/None=服务不存在）。
+
+        ★ 为什么不直接 Popen：直接拉起的 redis-server 与 erp-redis / erp-redis-broker
+        服务没有父子关系，服务管理器会显示「服务存在但无子进程」，而实例的存活实际
+        吊在管理器进程上——管理器一退、机器一重启，Redis 就没了，且不会自愈
+        （2026-09-16 实测：6379 的监听者父进程链全是 ERP服务器管理器_v5.33.exe）。
+        改走服务后，开机自启、崩溃重拉、依赖顺序全部由 SCM 保证。
+        """
+        state = self._redis_service_state(name)
+        if not state:
+            return None
+        nssm = self._find_nssm()
+        cmd = [nssm, 'start', name] if nssm else ['sc', 'start', name]
+        self._run_capture(cmd, timeout=20)
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            self._gate.checkpoint()
+            state = self._redis_service_state(name)
+            if 'RUNNING' in state.upper():
+                return True
+            time.sleep(0.5)
+        self._msg_queue.put(('log', {'text': f'{name} 服务未在 20s 内进入 RUNNING（当前: {state or "未知"}）', 'level': 'WARNING'}))
+        return False
+
+    def _start_redis(self):
+        """启动 Redis 缓存实例（6379）。
+
+        顺序：已在运行 → 直接返回；否则先走 Windows 服务（自愈 + 开机自启），
+        服务不存在时才回退到直接 Popen（未安装服务的开发场景）。
+        """
+        if self._is_redis_running():
+            self._msg_queue.put(('log', {'text': "Redis 已在运行"}))
+            return True
+        via_svc = self._start_redis_via_service(_SVC_REDIS_CACHE)
+        if via_svc is True:
+            if self._is_redis_running():
+                self._msg_queue.put(('log', {'text': f"Redis 已由服务 {_SVC_REDIS_CACHE} 启动"}))
+                return True
+            self._msg_queue.put(('log', {'text': f"{_SVC_REDIS_CACHE} 服务已 RUNNING，但 Redis 未通过 PING 校验", 'level': 'WARNING'}))
+            return False
+        if via_svc is False:
+            self._msg_queue.put(('log', {'text': f"Redis 服务启动失败，回退为直接拉起进程", 'level': 'WARNING'}))
+        else:
+            self._msg_queue.put(('log', {'text': f"未安装 {_SVC_REDIS_CACHE} 服务，将直接拉起 Redis 进程（不随开机自启）", 'level': 'WARNING'}))
+        return self._start_redis_process()
+
+    def _start_redis_process(self):
+        """回退路径：直接把 redis-server 作为本管理器子进程拉起。"""
+        redis_exe, redis_conf = self._find_redis()
+        if not redis_exe:
+            self._msg_queue.put(('log', {'text': "Redis 未安装，请安装 Redis for Windows", 'level': 'WARNING'}))
+            return False
+        try:
+            cmd = [redis_exe] + ([redis_conf] if redis_conf else [])
+            redis_password = self._get_env_value('REDIS_PASSWORD')
+            if redis_password:
+                cmd += ['--requirepass', redis_password]
+            self._msg_queue.put(('log', {'text': f"正在启动 Redis: {redis_exe}"}))
+            # ★ 本地 proc 绑定：self._redis_process 会被并发的 _stop_redis() 置 None，
+            # 原实现直接解引用 self._redis_process.pid/.poll() → 实测 AttributeError。
+            proc = subprocess.Popen(cmd, creationflags=subprocess.CREATE_NO_WINDOW if _IS_WINDOWS else 0, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=False)
+            self._redis_process = proc
+            threading.Thread(target=self._read_stdout, args=(proc,), daemon=True).start()
+            for _ in range(15):
+                time.sleep(0.5)
+                self._gate.checkpoint()
+                if self._is_redis_running():
+                    self._msg_queue.put(('log', {'text': f"Redis 启动成功 (PID: {proc.pid})"}))
+                    return True
+                if proc.poll() is not None:
+                    self._msg_queue.put(('log', {'text': f"Redis 进程意外退出 (退出码: {proc.returncode})", 'level': 'ERROR'}))
+                    return False
+            self._msg_queue.put(('log', {'text': "Redis 启动超时，请检查端口6379是否被占用", 'level': 'WARNING'}))
+            return False
+        except Exception as e:
+            self._msg_queue.put(('log', {'text': f"Redis 启动失败: {str(e)}", 'level': 'ERROR'}))
+            return False
+
+    def _is_broker_running(self):
+        """ARQ broker(6380) 是否真的可用：TCP 连通 + AUTH/PING（与缓存实例同款校验）。"""
+        password = self._get_env_value('REDIS_PASSWORD')
+        try:
+            with socket.create_connection(('127.0.0.1', _REDIS_BROKER_PORT), timeout=1) as sock:
+                sock.sendall(b'*1\r\n$4\r\nPING\r\n')
+                resp = sock.recv(64)
+                if resp.startswith(b'+PONG'):
+                    return True
+                if resp.startswith(b'-NOAUTH'):
+                    if not password:
+                        return False
+                    auth_cmd = (f'*2\r\n$4\r\nAUTH\r\n${len(password)}\r\n{password}\r\n').encode()
+                    sock.sendall(auth_cmd)
+                    if not sock.recv(64).startswith(b'+OK'):
+                        return False
+                    sock.sendall(b'*1\r\n$4\r\nPING\r\n')
+                    return sock.recv(64).startswith(b'+PONG')
+            return False
+        except Exception:
+            return False
+
+    def _ensure_redis_broker(self):
+        """确保 ARQ broker(6380) 就绪——生产启动前调用，返回是否就绪。
+
+        没有这一步，erp-arq 服务起来就直接连不上 6380 反复重启，而整套界面
+        （服务状态、prod_runner 就绪徽章）全是绿的，用户完全无从察觉
+        cron/备份/报表已经停了（2026-09-16 现场）。
+        """
+        if self._is_broker_running():
+            return True
+        self._msg_queue.put(('log', {'text': f'ARQ broker ({_REDIS_BROKER_PORT}) 未就绪，正在启动 {_SVC_REDIS_BROKER} 服务...'}))
+        ok = self._start_redis_via_service(_SVC_REDIS_BROKER)
+        if ok is None:
+            self._msg_queue.put(('log', {
+                'text': f'未安装 {_SVC_REDIS_BROKER} 服务，erp-arq 无法运行；'
+                        f'请执行 scripts\\install_redis_services.ps1 注册 Redis 服务',
+                'level': 'ERROR'}))
+            return False
+        for _ in range(20):
+            time.sleep(0.5)
+            self._gate.checkpoint()
+            if self._is_broker_running():
+                self._msg_queue.put(('log', {'text': f'ARQ broker 已就绪 ({_SVC_REDIS_BROKER})'}))
+                return True
+        self._msg_queue.put(('log', {'text': f'ARQ broker 启动后仍未通过 PING 校验，erp-arq 可能无法工作', 'level': 'ERROR'}))
+        return False
+
+    def _stop_redis(self):
+        """停止Redis服务"""
+        stopped = False
+        if self._redis_process and self._redis_process.poll() is None:
+            try:
+                self._redis_process.terminate()
+                self._redis_process.wait(timeout=3)
+                stopped = True
+            except Exception:
+                try:
+                    self._redis_process.kill()
+                    stopped = True
+                except Exception:
+                    pass
+        if self._is_redis_running():
+            _kill_port_process(_REDIS_PORT, self._msg_queue)
+        if stopped:
+            self._msg_queue.put(('log', {'text': "Redis 已停止"}))
+        self._redis_process = None
 
     def _fade_in(self):
-        """窗口淡入（v5.33 原规格: 10 步 / 30ms = 300ms）。
-
-        ★ 必须整体包在 suppress 里: 部分 Windows 主题/远程桌面会话下
-          `attributes('-alpha', ...)` 不被支持会抛 TclError。淡入失败绝不能影响功能。
-        """
-        with contextlib.suppress(Exception):
+        try:
             self.root.attributes('-alpha', 0.0)
-
             def step(i):
-                if self._shutting_down:
-                    return
                 if i > 10:
-                    with contextlib.suppress(Exception):
-                        self.root.attributes('-alpha', 1.0)
+                    self.root.attributes('-alpha', 1.0)
                     return
-                with contextlib.suppress(Exception):
-                    self.root.attributes('-alpha', i / 10)
+                self.root.attributes('-alpha', i / 10)
                 self.root.after(30, lambda: step(i + 1))
             step(0)
+        except Exception:
+            pass
 
     def _animate_cards_intro(self):
-        """卡片错峰入场（v5.33 原规格: 第 idx 张延迟 80*idx ms 启动脉冲）。"""
-        with contextlib.suppress(Exception):
-            for idx, card in enumerate(getattr(self, '_server_cards', ())):
+        try:
+            for idx, card in enumerate(self._server_cards):
                 self.root.after(80 * idx, lambda c=card: self._pulse_card_border(c))
+        except Exception:
+            pass
 
     def _pulse_card_border(self, card):
-        """卡片边框脉冲（v5.33 原规格: 三角波往复, 10 步 / 30ms = 660ms）。
-
-        色键取自 _PALETTE: border_card（静息边框色）→ accent_h（高亮色）→ 回到静息。
-        ★ 单次动画，不做常驻循环 —— v5.33 原实现同样只跑一轮，
-          常驻脉冲会在长时间值守时构成视觉干扰。
-        """
-        base = _PALETTE['border_card']
-        accent = _PALETTE.get('accent_h') or _V533_COLORS['accent_hover']
-
+        base, accent = self._PALETTE['border_card'], self._PALETTE['accent_h']
         def tick(i):
-            if self._shutting_down:
-                return
-            try:
-                if i > 10:
-                    with contextlib.suppress(Exception):
-                        card.configure(highlightbackground=base)
-                    return
-                t = i / 10
-                if t <= 0.5:
-                    color = _lerp_color(base, accent, t * 2)
-                else:
-                    color = _lerp_color(accent, base, (t - 0.5) * 2)
+            if i > 10:
                 with contextlib.suppress(Exception):
-                    card.configure(highlightbackground=color)
-                self.root.after(30, lambda: tick(i + 1))
+                    card.configure(highlightbackground=base)
+                return
+            t = i / 10
+            color = _lerp_color(base, accent, t * 2) if t <= 0.5 else _lerp_color(accent, base, (t - 0.5) * 2)
+            try:
+                card.configure(highlightbackground=color)
             except Exception:
-                pass
+                return
+            self.root.after(30, lambda: tick(i + 1))
         tick(0)
-
-    def _make_card(self, parent, title):
-        card = tk.Frame(parent, bg=_C['card'], highlightbackground=_C['border'], highlightthickness=1, bd=0)
-        inner = tk.Frame(card, bg=_C['card'])
-        inner.pack(fill=tk.BOTH, expand=True)
-        tk.Label(inner, text=title, font=('Microsoft YaHei UI', 11, 'bold'), fg=_C['text'], bg=_C['card']).pack(anchor='w', padx=12, pady=(12, 6))
-        return card, inner
-
-    def _make_dot(self, parent, name):
-        lbl = tk.Label(parent, text=f'○ {name}', font=('Microsoft YaHei UI', 10), fg=_C['gray'], bg=_C['card'], anchor='w')
-        lbl.pack(anchor='w', padx=14, pady=2)
-        return lbl
 
     def _center_window(self):
         self.root.update_idletasks()
-        w, h = 880, 640
-        x = max(0, (self.root.winfo_screenwidth() - w) // 2)
-        y = max(0, (self.root.winfo_screenheight() - h) // 3)
-        self.root.geometry(f'{w}x{h}+{x}+{y}')
-    # ===================== 消息泵(后台线程 → 主线程唯一通道) =====================
+        try:
+            w, h = map(int, self.root.geometry().split('+')[0].split('x'))
+        except (ValueError, IndexError):
+            w, h = 960, 720
+        sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+        self.root.geometry(f'+{max(0,(min(w,sw-40)-w)//2)}+{max(0,(min(h,sh-80)-h)//2)}')
 
-    def _poll_queue(self):
-        if self._shutting_down:
-            return
-        processed = 0
-        while not self._msg_queue.empty() and processed < 30:
+    def _init_tray(self):
+        try:
+            import pystray
+            icon_image = _create_tray_icon_image()
+            if icon_image is None:
+                return
+            self._tray_image = icon_image
+            menu = pystray.Menu(pystray.MenuItem('显示窗口', self._show_window, default=True), pystray.MenuItem('退出', self._quit_from_tray))
+            self._tray_icon = pystray.Icon('ERP服务器管理器', icon_image, 'ERP 服务器管理器', menu)
+            threading.Thread(target=self._tray_icon.run, daemon=True).start()
+        except Exception as e:
+            self.logger.info(f"托盘初始化跳过: {e}")
+
+    def _set_window_icon(self):
+        try:
+            from PIL import ImageTk
+            icon_image = _create_tray_icon_image()
+            if icon_image:
+                self._window_icon = ImageTk.PhotoImage(icon_image.resize((32, 32)))
+                self.root.iconphoto(True, self._window_icon)
+        except Exception:
+            pass
+
+    def _show_window(self, icon=None, item=None):
+        self.root.after(0, lambda: (self.root.deiconify(), self.root.lift(), self.root.focus_force()))
+
+    def _quit_from_tray(self, icon=None, item=None):
+        self.root.after(0, self._do_quit)
+
+    def _do_quit(self):
+        if self._mode != 'none':
+            self._stop_process()
+            self._mode = 'none'
+        self._kill_tray()
+        for aid in self._after_ids.values():
+            with contextlib.suppress(Exception):
+                self.root.after_cancel(aid)
+        self._after_ids.clear()
+        for attr in ('_mode_badge', 'dual_dev_status'):
+            badge = getattr(self, attr, None)
+            if badge is not None and hasattr(badge, 'stop_animation'):
+                badge.stop_animation()
+        global _mutex_handle
+        if _mutex_handle and _IS_WINDOWS:
             try:
-                msg_type, data = self._msg_queue.get_nowait()
-            except queue.Empty:
-                break
-            try:
-                self._dispatch_message(msg_type, data)
-            except Exception as e:
-                # 单条失败不能中断 poll 调度链(否则日志/状态更新全部停摆) —— 故仍吞异常不重抛；
-                # ★ v5.38(D16): 但必须留痕 —— 被丢弃的消息可能承载「停止失败/端口未释放」等关键日志。
-                # 用 logger 写文件而非 log_message，避免在 dispatch 失败时递归回同一路径。
-                with contextlib.suppress(Exception):
-                    self.logger.warning(f'消息处理失败已跳过(type={msg_type}): {type(e).__name__}: {e}')
-            processed += 1
-        if not self._shutting_down:
-            self._after_ids['poll'] = self.root.after(self.QUEUE_POLL_MS, self._poll_queue)
+                import ctypes
+                ctypes.windll.kernel32.CloseHandle(_mutex_handle)
+            except Exception:
+                pass
+            _mutex_handle = None
+        self.root.destroy()
 
-    def _dispatch_message(self, msg_type, data):
-        if msg_type == 'log':
-            self.log_message(data['text'], data.get('level', 'INFO'))
-        elif msg_type == 'log_batch':
-            # v5.40(审查 #9): 支持 (text, level) 元组逐行级别; 兼容旧的纯字符串列表。
-            for item in data['lines']:
-                if isinstance(item, (tuple, list)) and len(item) == 2:
-                    self.log_message(item[0], item[1])
-                else:
-                    self.log_message(item, data.get('level', 'INFO'))
-        elif msg_type == 'dual_started':
-            self._on_dual_started(data['label'])
-        elif msg_type == 'dual_failed':
-            self._on_dual_failed(data['label'], data.get('reason', ''))
-        elif msg_type == 'ui_update':
-            self._update_all_ui()
-        elif msg_type == 'startup_progress':
-            self.status_label.config( text=f"启动中: {data.get('step', '')} ({data.get('progress', 0)}/{data.get('total', 5)})")
-        elif msg_type == 'hosting_apply':
-            self._apply_hosting_data(data['data'])
-        elif msg_type == 'hosting_refresh':
-            self._refresh_hosting_status()
-        elif msg_type == 'state_set':
-            # v5.40(审查 #7) 线程契约: _mode/_prod_running/_prod_busy/_stop_in_progress 只允许
-            # 主线程经本消息变更(后台线程直写已全部移除，GIL 之外还有状态机纪律问题)。
-            for key in ('mode', 'prod_running', 'prod_busy', 'stop_in_progress'):
-                if key in data:
-                    setattr(self, f'_{key}', data[key])
-            self._update_all_ui()
-        elif msg_type == 'toast':
-            self._show_toast(data.get('title', ''), data.get('desc', ''))
-
-    def _show_toast(self, title, desc=''):
-        """轻量提示: 写入状态栏，不弹窗打断用户。"""
-        if title:
-            self.status_label.config(text=title + (f' — {desc}' if desc else ''))
-    # ===================== 日志系统 =====================
+    def _kill_tray(self):
+        if self._tray_icon:
+            with contextlib.suppress(Exception):
+                self._tray_icon.stop()
+            self._tray_icon = None
+            with contextlib.suppress(Exception):
+                self.root.update()
 
     def setup_logging(self):
-        log_dir = (_PROJECT_DIR / 'logs').resolve()
-        if '..' in log_dir.parts or not log_dir.is_absolute():  # 路径安全门
-            log_dir = Path.cwd() / 'logs'
+        log_dir = _PROJECT_DIR / 'logs'
         log_dir.mkdir(exist_ok=True)
         log_file = log_dir / f'server_manager_{datetime.now():%Y%m%d}.log'
         fmt = logging.Formatter('[%(asctime)s] %(levelname)s: %(message)s')
         self.logger = logging.getLogger('server_manager')
         self.logger.setLevel(logging.INFO)
-        if not self.logger.handlers:  # 幂等，避免重复 handler 导致双份日志
+        if not self.logger.handlers:
             fh = logging.FileHandler(log_file, encoding='utf-8')
             fh.setFormatter(fmt)
             self.logger.addHandler(fh)
             if sys.stdout:
-                sh = logging.StreamHandler(sys.stdout)
-                sh.setFormatter(fmt)
-                self.logger.addHandler(sh)
-        self._cleanup_old_logs(log_dir)
-
-    def _cleanup_old_logs(self, log_dir, keep_days=30):
-        """v5.40(审查 #17): 清理超过 keep_days 的历史 server_manager 日志(含 crash 日志)，
-        防止按天累积无限膨胀。失败只留 WARNING，绝不影响启动。"""
-        cutoff = time.time() - max(1, keep_days) * 86400
-        try:
-            for f in log_dir.glob('server_manager_*.log'):
-                with contextlib.suppress(OSError):
-                    if f.stat().st_mtime < cutoff:
-                        f.unlink()
-        except Exception as e:
-            self.logger.warning(f'清理历史日志失败(不影响运行): {type(e).__name__}: {e}')
+                console_handler = logging.StreamHandler(sys.stdout)
+                console_handler.setFormatter(fmt)
+                self.logger.addHandler(console_handler)
 
     def log_message(self, message, level='INFO'):
-        """追加 UI 缓冲 + 同步写文件日志; UI 落屏经 after_idle 合并到主线程。"""
         timestamp = datetime.now().strftime('%H:%M:%S')
-        self._log_buffer.append((f'[{timestamp}] {level}: {message}\n', level))
-        # v5.40(审查 #10): 显式级别映射 —— 此前 SUCCESS 走 getattr(logger,'success') 拿不到
-        # 回落 warning，文件日志里所有成功消息都被记成 WARNING 干扰分析。
-        level_fn = {'info': 'info', 'success': 'info', 'warning': 'warning', 'error': 'error'}.get(str(level).lower())
-        fn = getattr(self.logger, level_fn, None) or self.logger.warning
-        with contextlib.suppress(Exception):
+        self._log_buffer.append((f"[{timestamp}] {level}: {message}\n", level))
+        fn = getattr(self.logger, level.lower(), None) or self.logger.warning
+        if fn:
             fn(message)
         if not self._flush_pending:
             self._flush_pending = True
@@ -1277,704 +1250,989 @@ class ServerManagerApp:
     def _flush_log_buffer(self):
         if not self._log_buffer:
             return
-        buf, self._log_buffer = self._log_buffer[:], []
-        try:
-            self.log_text.config(state=tk.NORMAL)
-            for entry, level in buf:
-                self.log_text.insert(tk.END, entry, level if level in ('INFO', 'WARNING', 'ERROR', 'SUCCESS') else 'INFO')
-            if self.auto_scroll_var.get():
-                self.log_text.see(tk.END)
-            self.log_text.config(state=tk.DISABLED)
-        except tk.TclError:
-            pass
+        buf = self._log_buffer[:]
+        self._log_buffer.clear()
+        self.log_text.config(state=tk.NORMAL)
+        for entry, level in buf:
+            self.log_text.insert(tk.END, entry, level)
+        self.log_text.see(tk.END)
+        self.log_text.config(state=tk.DISABLED)
 
     def _schedule_log_flush(self):
         if self._log_buffer:
             self._flush_log_buffer()
-        if not self._shutting_down:
-            self._after_ids['flush'] = self.root.after(self.LOG_FLUSH_MS, self._schedule_log_flush)
-
-    def _schedule_log_cleanup(self):
-        self._perform_log_cleanup()
-        if not self._shutting_down:
-            self._after_ids['cleanup'] = self.root.after(self.LOG_CLEANUP_MS, self._schedule_log_cleanup)
-
-    def _perform_log_cleanup(self):
-        """裁剪超限行，仅保留 keep 行，防止长跑内存膨胀。"""
-        try:
-            total = int(self.log_text.index('end-1c').split('.')[0])
-            if total > self._max_log_lines:
-                self.log_text.config(state=tk.NORMAL)
-                self.log_text.delete('1.0', f'{total - self._log_keep_lines}.0')
-                self.log_text.config(state=tk.DISABLED)
-        except (tk.TclError, ValueError):
-            pass
+        self._after_ids['flush'] = self.root.after(self.LOG_FLUSH_MS, self._schedule_log_flush)
 
     def clear_log(self):
         self.log_text.config(state=tk.NORMAL)
         self.log_text.delete('1.0', tk.END)
         self.log_text.config(state=tk.DISABLED)
-        self.log_message('日志已清空')
+        self.log_message("日志已清空")
 
     def export_log(self):
-        default_dir = (_PROJECT_DIR / 'logs').resolve()
-        filename = filedialog.asksaveasfilename(
-            initialdir=str(default_dir), initialfile=f'server_log_{datetime.now():%Y%m%d_%H%M%S}.txt',
-            defaultextension='.txt', filetypes=[('文本文件', '*.txt'), ('所有文件', '*.*')])
-        if not filename:
-            return
-        target = Path(filename).resolve()
-        # 路径安全门: 绝对路径 + 不含 '..' + 父目录存在(路径穿越防护)
-        if not target.is_absolute() or '..' in Path(filename).parts or not target.parent.is_dir():
-            self.log_message(f'导出路径无效: {filename}', 'ERROR')
-            self._show_toast('导出路径无效', '请选择有效的保存位置')
-            return
-        try:
-            content = self.log_text.get('1.0', tk.END)
-            with target.open('w', encoding='utf-8') as f:
-                f.write(content)
-            self.log_message(f'日志已导出到: {target}')
-            self._show_toast('日志已导出', str(target))
-        except Exception as e:
-            self.log_message(f'导出日志失败: {e}', 'ERROR')
-
-    def _open_logs_dir(self):
+        from tkinter import filedialog
         log_dir = _PROJECT_DIR / 'logs'
-        with contextlib.suppress(Exception):
-            log_dir.mkdir(exist_ok=True)
+        log_dir.mkdir(exist_ok=True)
+        filename = filedialog.asksaveasfilename(initialdir=log_dir, initialfile=f"server_log_{datetime.now():%Y%m%d_%H%M%S}.txt", defaultextension=".txt", filetypes=[("文本文件", "*.txt"), ("所有文件", "*.*")])
+        if filename:
+            try:
+                with open(filename, 'w', encoding='utf-8') as f:
+                    f.write(self.log_text.get('1.0', tk.END))
+                self.log_message(f"日志已导出到: {filename}")
+            except Exception as e:
+                self.log_message(f"导出日志失败: {str(e)}", 'ERROR')
+
+    def _schedule_log_cleanup(self):
+        self._perform_log_cleanup()
+        self._after_ids['cleanup'] = self.root.after(self.LOG_CLEANUP_MS, self._schedule_log_cleanup)
+
+    def _perform_log_cleanup(self):
         try:
-            os.startfile(str(log_dir))
+            total = int(self.log_text.index('end-1c').split('.')[0])
+            if total > self.MAX_LOG_LINES:
+                self.log_text.config(state=tk.NORMAL)
+                self.log_text.delete('1.0', f'{total - self.LOG_KEEP_LINES}.0')
+                self.log_text.config(state=tk.DISABLED)
+        except (tk.TclError, ValueError):
+            pass
+
+    def _stop_process(self):
+        """停止当前调试模式进程（经动作闸门串行；可被紧急停止取消）"""
+        self._gate.start('停止服务', self._stop_process_flow)
+
+    def _stop_process_flow(self):
+        proc = self._process
+        self._process = None
+        if not (proc and proc.poll() is None):
+            self._msg_queue.put(('ui_update', {}))
+            return
+        pid = proc.pid
+        self._msg_queue.put(('log', {'text': f"正在终止进程树 (根 PID: {pid})..."}))
+        try:
+            if _IS_WINDOWS:
+                child_pids = self._collect_process_tree(pid)
+                self._msg_queue.put(('log', {'text': f"发现 {len(child_pids)+1} 个关联进程"}))
+                _taskkill(pid)
+                for cpid in child_pids:
+                    with contextlib.suppress(Exception):
+                        _taskkill(cpid)
+                with contextlib.suppress(Exception):
+                    proc.wait(timeout=3)
+                self._kill_port_sync(_API_PORT)
+            else:
+                import signal
+                try:
+                    os.killpg(os.getpgid(pid), signal.SIGTERM)
+                except Exception:
+                    proc.terminate()
+                proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            try:
+                proc.kill()
+                proc.wait(timeout=3)
+            except Exception:
+                pass
+            self._msg_queue.put(('log', {'text': f"进程 (PID: {pid}) 超时，已强制 kill", 'level': 'WARNING'}))
+            self._kill_port_sync(_API_PORT)
         except Exception as e:
-            self.log_message(f'打开日志目录失败: {e}', 'ERROR')
+            self._msg_queue.put(('log', {'text': f"终止进程异常: {str(e)}", 'level': 'ERROR'}))
+            self._kill_port_sync(_API_PORT)
+        finally:
+            self._msg_queue.put(('ui_update', {}))
+
+    def _collect_process_tree(self, root_pid):
+        """递归收集子进程 PID。
+
+        ★ 必须优先 psutil：本机安全策略已永久屏蔽 wmic / sc（Program Blacklist），
+        原 wmic 实现只会静默返回空列表 —— 而 P0-4 的「受管进程集合」正建立在
+        进程树之上，拿到空集就等于失去误杀闸门。wmic 仅作降级保留。
+        """
+        pids = []
+        if not root_pid:
+            return pids
+        try:
+            import psutil
+            return [child.pid for child in psutil.Process(root_pid).children(recursive=True)]
+        except ImportError:
+            pass
+        except Exception:
+            return pids
+        try:
+            result = subprocess.run(['wmic', 'process', 'where', f'(ParentProcessId={root_pid})', 'get', 'ProcessId'], creationflags=subprocess.CREATE_NO_WINDOW, capture_output=True, text=True, timeout=5)
+            for line in result.stdout.splitlines():
+                line = line.strip()
+                if line.isdigit() and int(line) != root_pid:
+                    pids.extend(self._collect_process_tree(int(line)))
+                    pids.append(int(line))
+        except Exception:
+            pass
+        return pids
+
+    def _kill_port_sync(self, port, exclude=None):
+        """释放端口占用 —— 纯清扫原语，★ 永不 checkpoint。
+
+        紧急停止的职责就是「取消 + 清扫」：它先 cancel() 再清扫，若本方法带
+        checkpoint，清扫本身会立刻被自己的取消信号打断（实测：端口一个都没释放）。
+        取消策略属于 worker 的步骤边界，不属于清扫原语 —— 想提前退出就在调用前 checkpoint。
+
+        ★ exclude：跳过这些 PID（NSSM 受管服务进程）。受管进程绝不能被 kill ——
+        NSSM AppExit=Default Restart 会在 5 秒后把被强杀的进程拉起，形成「紧急停止
+        变成重启」。紧急停止路径先经 nssm stop 正常停受管服务，此处再用 stop 前采集
+        的受管 PID 兜底，防止 stop 超时失败时端口清理误杀受管进程触发自动重启。
+        """
+        for _ in range(3):
+            pids = self._find_port_pids(port, exclude=exclude)
+            if not pids:
+                return
+            # 批量终止：端口被海量进程占用时（如数百 nginx worker），
+            # 逐个 taskkill 会耗时数十秒，批量可秒级完成。
+            _taskkill_many(pids)
+            time.sleep(0.5)
+
+    def _find_port_pids(self, port, exclude=None):
+        exclude = {str(p) for p in (exclude or ())}
+        pids = set()
+        try:
+            output = subprocess.run(['netstat', '-ano'], creationflags=subprocess.CREATE_NO_WINDOW, capture_output=True, text=True, timeout=10)
+            for line in output.stdout.splitlines():
+                if 'LISTENING' not in line and 'TIME_WAIT' not in line:
+                    continue
+                parts = line.split()
+                if len(parts) >= 5 and ':' in parts[1] and parts[1].rsplit(':', 1)[-1] == str(port) and parts[-1].isdigit() and int(parts[-1]) > 0:
+                    if parts[-1] not in exclude:
+                        pids.add(parts[-1])
+        except Exception:
+            pass
+        return list(pids)
+
+    def _start_server(self, script_name, mode_label, mode_key='debug'):
+        if self._mode != 'none':
+            self.log_message(f"已有服务在运行或启动中，请先停止后再启动", 'WARNING')
+            return
+        if not _PYTHON_EXE:
+            self.log_message("无法启动: 未找到 Python 解释器，请安装 Python 并确保在 PATH 中", 'ERROR')
+            messagebox.showerror("启动失败", "未找到可用的 Python 解释器！\n\n请安装 Python 3.12+ 并确保 python 在 PATH 中，\n或在项目目录下创建虚拟环境 (.venv313)")
+            return
+        script = str(_PROJECT_DIR / script_name)
+        if not Path(script).is_file():
+            self.log_message(f"启动脚本不存在: {script}", 'ERROR')
+            messagebox.showerror("错误", f"启动脚本不存在:\n{script}")
+            return
+        self._gate.start(f'启动{mode_label}', self._start_debug_flow, script, mode_label, mode_key)
+
+    def _start_debug_flow(self, script, mode_label, mode_key):
+        # 状态变更也放进 worker：入口侧不再存在「已取锁、还没起线程」的中间态，
+        # 也就没有那个从审计中实测出来的“异常即永久持锁”窗口。
+        self._mode = 'starting'
+        self._current_mode_key = mode_key
+        self._msg_queue.put(('log', {'text': f"正在启动{mode_label}..."}))
+        self._msg_queue.put(('status', {'text': f"正在启动{mode_label}..."}))
+        self._msg_queue.put(('ui_update', {}))
+        self._start_thread(script, mode_label, mode_key)
+
+    def _start_thread(self, script, mode_label, mode_key):
+        try:
+            self._gate.checkpoint()
+            self._msg_queue.put(('log', {'text': '正在清理端口...'}))
+            self._kill_port_sync(_API_PORT)
+
+            env = os.environ.copy()
+            env.update({'PYTHONUNBUFFERED': '1', 'PYTHONIOENCODING': 'utf-8', 'PYTHONUTF8': '1', 'PYTHONPATH': str(_PROJECT_DIR)})
+            self._gate.checkpoint()      # 取消已请求时绝不产生新进程
+            self._process = subprocess.Popen([_PYTHON_EXE, script], cwd=str(_PROJECT_DIR), env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, creationflags=subprocess.CREATE_NO_WINDOW if _IS_WINDOWS else 0, text=False)
+            self._msg_queue.put(('log', {'text': f"进程已启动 (PID: {self._process.pid})"}))
+            threading.Thread(target=self._read_stdout, args=(self._process,), daemon=True).start()
+            time.sleep(2)
+            self._gate.checkpoint()
+            if self._process.poll() is None:
+                self._msg_queue.put(('started', {'label': mode_label, 'mode_key': mode_key}))
+            else:
+                self._process = None
+                self._mode = 'none'
+                self._current_mode_key = ""
+                self._msg_queue.put(('ui_update', {}))
+                self._msg_queue.put(('log', {'text': f"{mode_label}进程启动后立即退出", 'level': 'ERROR'}))
+                self._msg_queue.put(('status', {'text': f"{mode_label}启动失败"}))
+        except Exception as e:
+            self._process = None
+            self._mode = 'none'
+            self._current_mode_key = ""
+            self._msg_queue.put(('ui_update', {}))
+            self._msg_queue.put(('log', {'text': f"启动异常: {str(e)}", 'level': 'ERROR'}))
+            self._msg_queue.put(('status', {'text': f"{mode_label}启动失败"}))
+
+    def _read_stdout(self, proc):
+        try:
+            if proc.stdout:
+                try:
+                    # 按行读取（readline 迭代器）：读到 '\n' 即返回，不会像 read(4096) 那样
+                    # 阻塞凑块导致 uvicorn 启动日志延迟显示；'\n' 是 ASCII 字节，UTF-8 中文
+                    # 不会跨行被切断，_decode_line 的多编码回退已足够处理乱码。
+                    batch = []
+                    for raw_line in proc.stdout:
+                        line = self._decode_line(raw_line) if isinstance(raw_line, bytes) else str(raw_line).strip()
+                        if line:
+                            batch.append(line)
+                            if len(batch) >= 10:
+                                self._msg_queue.put(('log_batch', {'lines': batch[:], 'level': 'INFO'}))
+                                batch.clear()
+                    if batch:
+                        self._msg_queue.put(('log_batch', {'lines': batch, 'level': 'INFO'}))
+                finally:
+                    proc.stdout.close()
+        except Exception as e:
+            self._msg_queue.put(('log', {'text': f"读取日志异常: {str(e)}", 'level': 'ERROR'}))
 
     @staticmethod
     def _pick_log_font():
-        """日志字体: 等宽+CJK 优先，回落链保证中文不作豆腐块。"""
-        for fam in ('Microsoft YaHei Mono', 'Microsoft YaHei UI', 'NSimSun', 'SimSun', 'Consolas'):
+        """选择日志字体：优先 Microsoft YaHei Mono（等宽+CJK），回落到 Microsoft YaHei UI，
+        最后落到系统默认。Consolas 不带 CJK 字形，会让中文渲染成方块。"""
+        import tkinter.font as tkfont
+        candidates = ('Microsoft YaHei Mono', 'Microsoft YaHei UI', 'NSimSun', 'SimSun', 'Consolas')
+        for fam in candidates:
             try:
+                f = tkfont.Font(family=fam, size=9, exists=False)
+                # exists=False 不会抛错，用 families() 进一步确认系统接受了字体
                 if fam.lower() in (x.lower() for x in tkfont.families()):
                     return (fam, 9)
             except Exception:
                 continue
         return ('Microsoft YaHei UI', 9)
 
-    def _run_env_checks(self):
-        errors = []
-        if not _PYTHON_EXE:
-            errors.append('未找到 Python 解释器！请安装 Python 3.12+ 并确保 python 在 PATH 中，' '或在项目目录下创建虚拟环境 (.venv313)')
-        elif not (_PROJECT_DIR / 'fastapi_app').is_dir():
-            errors.append(f'项目目录无效: {_PROJECT_DIR}\n未找到 fastapi_app 目录，请检查 erp_project_path.txt')
-        if not (_PROJECT_DIR / '.env').is_file():
-            errors.append(f'未找到 .env 配置文件: {_PROJECT_DIR / ".env"}\n' '服务器启动将因缺少 SECRET_KEY 而失败')
-        if errors:
-            self.root.after(500, lambda: messagebox.showwarning('环境检查警告', '\n\n'.join(errors)))
-            for err in errors:
-                self.log_message(err, 'ERROR')
-
-    def _get_env_value(self, key):
-        """.env 逐行解析: 跳过注释行，partition('=') 取首个等号左值。"""
-        env_file = _PROJECT_DIR / '.env'
-        if not env_file.is_file():
-            return ''
-        try:
-            for line in env_file.read_text(encoding='utf-8').splitlines():
-                line = line.strip()
-                if line.startswith('#') or '=' not in line:
-                    continue
-                k, _, v = line.partition('=')
-                if k.strip() == key:
-                    v = v.strip()
-                    # v5.40(审查 #19): 剥掉成对引号 —— `REDIS_PASSWORD="abc"` 带引号去 AUTH 必失败
-                    if len(v) >= 2 and v[0] == v[-1] and v[0] in ('"', "'"):
-                        v = v[1:-1]
-                    return v
-        except Exception as e:
-            # D10: .env 读取失败会让 Redis AUTH 莫名失败，必须留痕(仍返回空，不改失败语义)
-            self._msg_queue.put(('log', {'text': f'读取 .env 失败({key}): {type(e).__name__}: {e}', 'level': 'WARNING'}))
-        return ''
-    # ===================== Redis =====================
-
-    def _find_redis(self):
-        custom = str(_APP_CONFIG.get('redis_exe') or '')
-        redis_exe = custom if (custom and Path(custom).is_file()) else None
-        if not redis_exe:
-            redis_exe = next((str(p) for p in _REDIS_EXE_PATHS if p.is_file()), None)
-        redis_conf = next((str(p) for p in _REDIS_CONF_PATHS if p.is_file()), None)
-        return redis_exe, redis_conf
-
-    def _is_redis_running(self):
-        """Redis 可用性: TCP 连通 + RESP 协议 PING/AUTH 确认。
-
-        仅端口探测会误报(服务 Paused / 密码不匹配时端口仍可能短暂通过)，故发 PING:
-        +PONG 可用; -NOAUTH 需先用 .env 的 REDIS_PASSWORD 认证后再 PING。
-        """
-        password = self._get_env_value('REDIS_PASSWORD')
-        try:
-            with socket.create_connection(('127.0.0.1', _PORTS.redis), timeout=1) as sock:
-                sock.sendall(b'*1\r\n$4\r\nPING\r\n')
-                resp = sock.recv(64)
-                if resp.startswith(b'+PONG'):
-                    return True
-                if resp.startswith(b'-NOAUTH'):
-                    if not password:
-                        return False
-                    sock.sendall(f'*2\r\n$4\r\nAUTH\r\n${len(password)}\r\n{password}\r\n'.encode())
-                    if not sock.recv(64).startswith(b'+OK'):
-                        return False
-                    sock.sendall(b'*1\r\n$4\r\nPING\r\n')
-                    return sock.recv(64).startswith(b'+PONG')
-            return False
-        except Exception:
-            return False
-
-    def _start_redis(self):
-        """启动 Redis(阻塞最长 ~7.5s，必须放后台线程)。失败不阻断开发模式启动。"""
-        if self._is_redis_running():
-            return True
-        redis_exe, redis_conf = self._find_redis()
-        if not redis_exe:
-            self._msg_queue.put(('log', {'text': 'Redis 未安装，请在配置中指定路径或安装 Redis for Windows', 'level': 'WARNING'}))
-            return False
-        try:
-            password = self._get_env_value('REDIS_PASSWORD')
-            common = dict(stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=False, creationflags=_NO_WINDOW if _IS_WINDOWS else 0)
-            self._msg_queue.put(('log', {'text': f'正在启动 Redis: {redis_exe}'}))
-            # argv[0] 字面量 + executable= 传入校验过的绝对路径
-            if redis_conf and password:
-                argv = ['redis-server', redis_conf, '--requirepass', password]
-            elif redis_conf:
-                argv = ['redis-server', redis_conf]
-            elif password:
-                argv = ['redis-server', '--requirepass', password]
-            else:
-                argv = ['redis-server']
-            self._redis_process = subprocess.Popen(argv, executable=redis_exe, **common)
-            threading.Thread(target=self._read_stdout, args=(self._redis_process, None), daemon=True).start()
-            for _ in range(15):
-                time.sleep(0.5)
-                if self._is_redis_running():
-                    self._msg_queue.put(('log', {'text': f'Redis 启动成功 (PID: {self._redis_process.pid})'}))
-                    return True
-                if self._redis_process.poll() is not None:
-                    self._msg_queue.put(('log', {'text': f'Redis 进程意外退出 (退出码: ' f'{self._redis_process.returncode})', 'level': 'ERROR'}))
-                    return False
-            self._msg_queue.put(('log', {'text': f'Redis 启动超时，请检查端口 {_PORTS.redis} 是否被占用', 'level': 'WARNING'}))
-            return False
-        except Exception as e:
-            self._msg_queue.put(('log', {'text': f'Redis 启动失败: {e}', 'level': 'ERROR'}))
-            return False
-
-    def _stop_owned_redis(self):
-        """只终止本管理器自己启动的 _redis_process(terminate → wait(3) → kill)。
-
-        ★ 绝不按端口强杀 6379: 该端口可能由 erp-redis Windows 服务承载，
-        无差别端口强杀会误杀原生服务进程，而本管理器无法把原生 Windows 服务
-        重新拉起(那是 SCM 的职责) —— 这正是 v5.34 的致命隐患，本版彻底移除。
-        """
-        proc = self._redis_process
-        self._redis_process = None
-        if not proc or proc.poll() is not None:
-            return
-        self._msg_queue.put(('log', {'text': f'正在终止管理器自有 Redis 进程 (PID: {proc.pid})...'}))
-        try:
-            proc.terminate()
-            proc.wait(timeout=3)
-        except Exception:
-            with contextlib.suppress(Exception):
-                proc.kill()
-        self._msg_queue.put(('log', {'text': '管理器自有 Redis 进程已终止'}))
-
-    def _wait_redis_svc_running(self, name, timeout=30):
-        """轮询 _svc_state 直到 RUNNING(Redis 服务就绪确认，不涉 nssm/HTTP)。
-
-        v5.40(审查 #20): 原 _wait_svc_running —— 加 redis 前缀与 NSSM 侧 _wait_service_* 区分。
-        命名约定: _redis_svc_*=Redis 原生服务(仅 sc); _service_*=NSSM 托管服务;
-        _svc_state/_svc_pid=两者共用的 sc 查询原语。
-        """
-        deadline = time.monotonic() + max(1, timeout)
-        while time.monotonic() < deadline:
-            if 'RUNNING' in self._svc_state(name).upper():
-                return True
-            time.sleep(1)
-        return False
-
-    def _wait_redis_svc_stopped(self, name, timeout=30):
-        """轮询 _svc_state 直到 STOPPED(Redis 服务停止确认)。v5.40(审查 #20): 原 _wait_svc_stopped。"""
-        deadline = time.monotonic() + max(1, timeout)
-        while time.monotonic() < deadline:
-            state = self._svc_state(name).upper()
-            if 'STOPPED' in state and 'STOP_PENDING' not in state:
-                return True
-            time.sleep(1)
-        return False
-
-    def _wait_redis_services_running(self, timeout=30):
-        """确保配置里的 Redis 服务全部 RUNNING。
-
-        逐服务:
-          - STATE 含 RUNNING → 跳过;
-          - _svc_absent()(明确「未安装」) → 记 WARNING 并跳过(视为该服务不存在);
-          - 其它(含「未知」) → sc start 后轮询 _svc_state 直到 RUNNING。
-        ★ v5.36: 「未知」(查询失败) 不得计入「未安装」而跳过 —— 只有明确未安装才跳过。
-        返回 (是否全部就绪, 未就绪服务名列表)。
-        """
-        services = list(_APP_CONFIG.get('redis_services') or [])
-        not_ready = []
-        for name in services:
-            state = self._svc_state(name)
-            if 'RUNNING' in state.upper():
-                continue
-            if self._svc_absent(state):
-                self._msg_queue.put(('log', {'text': f'Redis 服务 {name} 未安装，跳过', 'level': 'WARNING'}))
-                continue
-            if self._svc_unknown(state):
-                self._msg_queue.put(('log', {'text': f'Redis 服务 {name} 状态未知（sc 查询失败），按未就绪处理并尝试启动', 'level': 'WARNING'}))
-            self._msg_queue.put(('log', {'text': f'正在启动 Redis 服务 {name}...'}))
-            try:
-                r = subprocess.run(['sc', 'start', name], **_cap(30))
-                code, out = r.returncode, ((r.stdout or '') + (r.stderr or '')).strip()
-                if code != 0:
-                    self._msg_queue.put(('log', {'text': f'{name} sc start 返回非零(退出码 {code}): {out or "无输出"}', 'level': 'WARNING'}))
-            except subprocess.TimeoutExpired:
-                self._msg_queue.put(('log', {'text': f'{name} sc start 命令超时(30s)', 'level': 'ERROR'}))
-            except Exception as e:
-                self._msg_queue.put(('log', {'text': f'{name} sc start 异常: {type(e).__name__}: {e}', 'level': 'ERROR'}))
-            if self._wait_redis_svc_running(name, timeout):
-                self._msg_queue.put(('log', {'text': f'Redis 服务 {name} 已确认 RUNNING'}))
-            else:
-                not_ready.append(name)
-        return (len(not_ready) == 0), not_ready
-
-    def _stop_redis_services(self, timeout=30):
-        """停止配置里的 Redis 服务。
-
-        逐服务: RUNNING(或 STOP_PENDING) → sc stop + 轮询 _svc_state 直到 STOPPED;
-        明确 STOPPED / 明确「未安装」→ 跳过; 「未知」→ 保守尝试停止(不跳过)。
-        ★ 失败原因必须带真实文本(命令退出码 / stdout / 超时)，绝不静默吞。
-        ★ v5.36: 只有 _svc_absent() 才允许跳过；「未知」不得被当作未安装而不停。
-        返回 (是否全部成功, 失败服务名列表)。
-        """
-        services = list(_APP_CONFIG.get('redis_services') or [])
-        failed = []
-        for name in services:
-            state = self._svc_state(name)
-            if self._svc_absent(state):
-                continue
-            if self._svc_unknown(state):
-                self._msg_queue.put(('log', {'text': f'Redis 服务 {name} 状态未知（sc 查询失败），保守尝试停止', 'level': 'WARNING'}))
-            elif 'STOPPED' in state.upper() and 'STOP_PENDING' not in state.upper():
-                continue
-            self._msg_queue.put(('log', {'text': f'正在停止 Redis 服务 {name}...'}))
-            try:
-                r = subprocess.run(['sc', 'stop', name], **_cap(30))
-                code, out = r.returncode, ((r.stdout or '') + (r.stderr or '')).strip()
-                if code != 0:
-                    self._msg_queue.put(('log', {'text': f'{name} sc stop 返回非零(退出码 {code}): {out or "无输出"}', 'level': 'WARNING'}))
-            except subprocess.TimeoutExpired:
-                self._msg_queue.put(('log', {'text': f'{name} sc stop 命令超时(30s)', 'level': 'ERROR'}))
-            except Exception as e:
-                self._msg_queue.put(('log', {'text': f'{name} sc stop 异常: {type(e).__name__}: {e}', 'level': 'ERROR'}))
-            if self._wait_redis_svc_stopped(name, timeout):
-                self._msg_queue.put(('log', {'text': f'Redis 服务 {name} 已确认 STOPPED'}))
-            else:
-                failed.append(name)
-                self._msg_queue.put(('log', {'text': f'{name} 未在超时内确认 STOPPED(仍为 STOP_PENDING 或拒绝访问)', 'level': 'ERROR'}))
-        return (len(failed) == 0), failed
-
-    def _ensure_redis_ready(self):
-        """开发/生产启动前的 Redis 就绪保障(取代原来直接调 _start_redis 的做法)。
-
-        ① 调 _wait_redis_services_running() 确保配置里的 Redis 服务全部 RUNNING;
-        ② 若有任一 Redis 服务就绪 → 用 _is_redis_running()(RESP PING/AUTH)有界重试复核
-           6379 实际连通性并以它为准(仅端口探测会误报，PING 才是判据);
-        ③ 仅当**配置里所有** Redis 服务都【明确『未安装』】才回落 _start_redis()，即
-           管理器有意的自有 redis-server.exe 进程方案;
-        ④ 回落路径失败仅记 WARNING，不阻断开发模式启动(保持 v5.33 基线行为)。
-        ★ v5.36: 「未知」(查询失败) 不得被当作未安装 —— 否则会再起自有 redis-server 抢 6379。
-        """
-        services = list(_APP_CONFIG.get('redis_services') or [])
-        wait_s = int(_APP_CONFIG.get('redis_service_wait_s') or 30)
-        all_ready, not_ready = self._wait_redis_services_running(wait_s)
-        states = {name: self._svc_state(name) for name in services}
-        any_running = any('RUNNING' in st.upper() for st in states.values())
-        all_absent = bool(services) and all(self._svc_absent(st) for st in states.values())
-        if any_running:
-            reachable = False
-            for _ in range(5):  # D3: 有界重试 5 次(每次 1s) —— sc start 返回后 Redis 常仍在加载 RDB
-                if self._is_redis_running():
-                    reachable = True
-                    break
-                time.sleep(1)
-            if reachable:
-                self._msg_queue.put(('log', {'text': 'Redis 服务就绪，6379 连通性复核通过'}))
-            else:
-                self._msg_queue.put(('log', {'text': 'Redis 服务显示 RUNNING，但 6379 连通性复核失败(请检查密码/端口)', 'level': 'WARNING'}))
-            return reachable
-        if all_absent:
-            self._msg_queue.put(('log', {'text': '未检测到 Redis 服务，回落到托管自有 redis-server 进程'}))
-            ok = self._start_redis()
-            if not ok:
-                self._msg_queue.put(('log', {'text': '自有 Redis 进程回落启动失败，不阻断启动', 'level': 'WARNING'}))
-            return ok
-        # 服务存在但未能在超时内 RUNNING
-        self._msg_queue.put(('log', {'text': f'Redis 服务未就绪: {"、".join(not_ready) or "未知"} (all_ready={all_ready})', 'level': 'WARNING'}))
-        return False
-    # ===================== 进程终止 / 端口清理 =====================
-
-    def _find_port_pids(self, port):
-        pids = set()
-        try:
-            result = subprocess.run(['netstat', '-ano'], **_cap(10))
-            for line in (result.stdout or '').splitlines():
-                # v5.40(审查 #23): 只认 LISTENING —— TIME_WAIT 会自行过期且不阻塞重绑，
-                # 纳入击杀目标只会产生多余的击杀尝试。
-                if 'LISTENING' not in line:
-                    continue
-                parts = line.split()
-                if (len(parts) >= 5 and ':' in parts[1] and parts[1].rsplit(':', 1)[-1] == str(port) and parts[-1].isdigit() and int(parts[-1]) > 0):
-                    pids.add(parts[-1])
-        except Exception as e:
-            # D10: netstat 失败会让端口释放静默失效 —— 必须留痕，不改失败语义(仍返回空)
-            self._msg_queue.put(('log', {'text': f'netstat 查询端口 {port} 占用失败: {type(e).__name__}: {e}', 'level': 'WARNING'}))
-        return list(pids)
-
-    def _kill_port_sync(self, port):
-        """3 轮重试终止端口占用进程(应对 PID 复用 / 延迟释放)。"""
-        for _ in range(3):
-            pids = self._find_port_pids(port)
-            if not pids:
-                return
-            _taskkill_many(pids)
-            time.sleep(0.5)
-
-    # v5.40(审查 #12): 删除死代码 _collect_process_tree —— 全文件无调用点(taskkill /T 已覆盖
-    # 进程树清理)，且依赖在新版 Windows 上已移除的 wmic，留着只会误导维护。
-
-    def _kill_process_tree(self, pid):
-        if not pid:
-            return
-        if _IS_WINDOWS:
-            _taskkill(pid)
-        else:
-            with contextlib.suppress(Exception):
-                os.kill(pid, 15)
-
-    def _release_ports(self):
-        """释放 API/WEB 端口。v5.40(审查 #6): 击杀前统一经 _get_port_occupier 留痕占用者 ——
-        按端口击杀是清场工具本职，但用户必须知道杀了谁；留痕失败绝不阻断清场主流程(D15 教训)。"""
-        for port in (_PORTS.api, _PORTS.web):
-            try:
-                for pid, pname in _get_port_occupier(port):
-                    self._msg_queue.put(('log', {'text': f'端口 {port} 被 {pname}(PID {pid}) 占用，即将释放'}))
-            except Exception as e:
-                self._msg_queue.put(('log', {'text': f'查询端口占用者失败(不影响清场): {type(e).__name__}: {e}', 'level': 'WARNING'}))
-            self._kill_port_sync(port)
-    # ===================== 子进程日志读取 =====================
-
     @staticmethod
     def _decode_line(raw_line):
-        """级联解码: utf-8 → utf-8-sig → gb18030 → cp936 → 系统首选; 全败则 replace。"""
         if not raw_line:
             return ''
         preferred = locale.getpreferredencoding(False) or ''
+        candidates = ['utf-8', 'utf-8-sig', 'gb18030', 'cp936'] + ([preferred] if preferred else [])
         tried = set()
-        for enc in ['utf-8', 'utf-8-sig', 'gb18030', 'cp936'] + ([preferred] if preferred else []):
-            if enc.lower() in tried:
-                continue
-            tried.add(enc.lower())
-            try:
-                return raw_line.decode(enc, errors='strict').strip()
-            except Exception:
-                continue
+        for enc in candidates:
+            enc_norm = enc.lower()
+            if enc_norm not in tried:
+                tried.add(enc_norm)
+                try:
+                    return raw_line.decode(enc, errors='strict').strip()
+                except Exception:
+                    continue
         return raw_line.decode('utf-8', errors='replace').strip()
 
-    def _read_stdout(self, proc, prefix=None):
-        """后端/Redis stdout → 队列; 攒 10 行批量入队，减少主线程唤醒。"""
+    def _on_started(self, mode_label, mode_key='debug'):
+        if not self._process or self._process.poll() is not None:
+            self.log_message(f"{mode_label}启动后进程已退出", 'ERROR')
+            self._mode, self._process = 'none', None
+            self._current_mode_key = ""
+            self._update_all_ui()
+            return
+        self._mode = mode_key
+        self._update_all_ui()
+        self.status_bar_label.config(text=f"{mode_label}运行中")
+        self.log_message(f"{mode_label}启动成功 — http://localhost:5002")
+
+    def _poll_queue(self):
         try:
-            if not proc.stdout:
-                return
+            self._process_pending_messages()
+        finally:
+            # poll 链是日志/徽章/状态栏等一切 UI 更新的主干：无论处理过程中发生什么，
+            # 都必须续上下一轮，否则界面会永久停止更新。
+            self._after_ids['poll'] = self.root.after(200, self._poll_queue)
+
+    def _process_pending_messages(self):
+        processed = 0
+        while not self._msg_queue.empty() and processed < 30:
             try:
-                batch = []
-                for raw_line in proc.stdout:
-                    line = self._decode_line(raw_line) if isinstance(raw_line, bytes) else str(raw_line).strip()
-                    if not line:
-                        continue
-                    batch.append(f'{prefix} {line}' if prefix else line)
-                    if len(batch) >= 10:
-                        self._msg_queue.put(('log_batch', {'lines': batch[:], 'level': 'INFO'}))
-                        batch.clear()
-                if batch:
-                    self._msg_queue.put(('log_batch', {'lines': batch, 'level': 'INFO'}))
-            finally:
-                with contextlib.suppress(Exception):
-                    proc.stdout.close()
-        except Exception as e:
-            self._msg_queue.put(('log', {'text': f'读取日志异常: {e}', 'level': 'ERROR'}))
+                msg_type, data = self._msg_queue.get_nowait()
+            except queue.Empty:
+                break
+            try:
+                if msg_type == 'log':
+                    self.log_message(data['text'], data.get('level', 'INFO'))
+                elif msg_type == 'log_batch':
+                    for line in data['lines']:
+                        self.log_message(line, data.get('level', 'INFO'))
+                elif msg_type == 'started':
+                    self._on_started(data['label'], data.get('mode_key', 'debug'))
+                elif msg_type == 'dual_started':
+                    self._on_dual_started(data['label'])
+                elif msg_type == 'dual_failed':
+                    self._on_dual_failed(data['label'], data.get('reason', ''))
+                elif msg_type == 'ui_update':
+                    self._update_all_ui()
+                elif msg_type == 'status':
+                    self.status_bar_label.config(text=data['text'])
+                elif msg_type == 'startup_progress':
+                    self.status_bar_label.config(text=f"启动中: {data.get('step', '')} ({data.get('progress', 0)}/{data.get('total', 4)})")
+                    self._startup_current_step, self._startup_progress = data.get('step', ''), data.get('progress', 0)
+                elif msg_type == 'hosting_refresh':
+                    # 生产模式状态立即刷新（取消已排定的一轮，避免刷新链叠加）
+                    try:
+                        pending = self._after_ids.pop('hosting', None)
+                        if pending:
+                            self.root.after_cancel(pending)
+                    except Exception:
+                        pass
+                    self._refresh_hosting_status()
+                elif msg_type == 'hosting_apply':
+                    # 后台收集完成 → 主线程应用（UI 更新）
+                    self._apply_hosting_data(data['data'])
+                elif msg_type == 'op_busy':
+                    # P0-3：动作开始 → 在主线程置灰操作按钮（后台线程不碰 Tk）
+                    self._set_actions_enabled(False)
+                elif msg_type == 'op_done':
+                    # 动作结束 → 先放开按钮，再由 _update_all_ui 算出真实可用态
+                    self._set_actions_enabled(True)
+                    self._update_all_ui()
+                elif msg_type == 'op_aborted':
+                    # 动作被取消/异常中止 → 清掉过渡态，避免 UI 卡在「启动中/重启中」
+                    if self._mode in ('starting', 'restarting', 'stopping'):
+                        self._mode, self._current_mode_key = 'none', ''
+                    self._update_all_ui()
+            except Exception:
+                # 单条消息处理失败不能中断 poll 调度链，否则日志/状态更新全部停摆
+                pass
+            processed += 1
 
-    def _read_frontend_stdout(self, proc):
-        """前端 stdout 加 [WEB] 前缀; 含 error/exception/failed 关键字标 ERROR。
+    # ===================== 动作闸门接入（P0-3） =====================
+    #
+    # 背景：v5.33 全模块 0 个锁，却有 21 个函数起线程；按钮回调直接起后台线程，
+    # 彼此无任何互斥 —— 连点「启动」会产生多份 Popen 与多轮端口清理互相踩踏。
+    #
+    # 做法：所有动作只有一个入口 `self._gate.start(名称, worker, *args)`；
+    # 锁的持有期 == 整个动作期（含所有阻塞等待），因为每个 worker 内部就是完整流程。
+    # 闸门自己负责取锁/起线程/收尾/看门狗，因此“取了不释放”在结构上不可能。
+    # 紧急停止 stop_all 故意不经闸门（它的职责是打断动作），但会先 cancel()：
+    # worker 在步骤边界调 checkpoint() 即中止，不会再产生副作用。
 
-        v5.40(审查 #9): 攒 10 行后整批一条 log_batch 消息(逐行级别)入队 —— 此前逐行 put，
-        _poll_queue 每 200ms 只消费 30 条(=150 行/秒上限)，vite 报错风暴时队列积压、UI 滞后。
+    def _set_actions_enabled(self, enabled):
+        """统一置灰/恢复操作按钮 —— 只在主线程调用，与状态机互斥双保险。"""
+        state = 'normal' if enabled else 'disabled'
+        for btn in self._action_buttons:
+            with contextlib.suppress(Exception):
+                btn.config(state=state)
+
+    def _on_gate_event(self, kind, payload):
+        """闸门事件 → 消息队列（可能在 worker 线程被调用，因此禁止直接操作 Tk）。
+
+        这是闸门与 UI 之间唯一的接口：按钮置灰、过渡态复位、日志全部由这里派发。
         """
-        try:
-            if not proc.stdout:
-                return
-            batch = []
-            for raw_line in proc.stdout:
-                text = self._decode_line(raw_line) if isinstance(raw_line, bytes) else str(raw_line).strip()
-                if not text:
-                    continue
-                low = text.lower()
-                batch.append((f'[WEB] {text}', 'ERROR' if any(k in low for k in ('error', 'exception', 'failed')) else 'INFO'))
-                if len(batch) >= 10:
-                    self._msg_queue.put(('log_batch', {'lines': batch[:], 'level': 'INFO'}))
-                    batch.clear()
-            if batch:
-                self._msg_queue.put(('log_batch', {'lines': batch, 'level': 'INFO'}))
-        except Exception as e:
-            self._msg_queue.put(('log', {'text': f'读取前端日志异常: {e}', 'level': 'ERROR'}))
-    # ===================== 开发模式: 5 步流水线 =====================
+        owner = payload.get('owner') or ''
+        if kind == 'started':
+            self._msg_queue.put(('op_busy', {'name': owner}))
+        elif kind == 'finished':
+            self._msg_queue.put(('op_done', {'name': owner}))
+        elif kind == 'rejected':
+            self._msg_queue.put(('log', {'text': f'已有操作进行中（{owner or "未知动作"}），请等它完成后再试', 'level': 'WARNING'}))
+        elif kind == 'cancel-requested':
+            self._msg_queue.put(('log', {'text': f'正在取消动作：{owner or "（空闲）"}…', 'level': 'WARNING'}))
+        elif kind == 'cancelled':
+            reason = payload.get('reason') or '未知原因'
+            self._msg_queue.put(('log', {'text': f'{owner}已中止（原因：{reason}）', 'level': 'WARNING'}))
+            self._msg_queue.put(('op_aborted', {}))
+        elif kind == 'failed':
+            self._msg_queue.put(('log', {'text': f'{owner}执行异常: {payload.get("error")}', 'level': 'ERROR'}))
+            self._msg_queue.put(('op_aborted', {}))
+        elif kind == 'watchdog':
+            self._msg_queue.put(('log', {'text': f'{owner}超过 {payload.get("seconds")}s 未结束，看门狗已强制释放动作闸门', 'level': 'ERROR'}))
+            self._msg_queue.put(('op_aborted', {}))
+
+    def start_debug(self):
+        self._start_server('run.py', '调试模式', mode_key='debug')
 
     def start_dual_dev(self):
         self._start_dual_server('开发模式（前后端）')
 
+    def stop_debug(self):
+        self._stop_mode('debug', '调试模式')
+
     def stop_dual_dev(self):
-        # 与 start_dual_dev 对称: spawn 前同步登记忙状态，闭合 TOCTOU 重入窗口。
-        # 此前本路径不起任何忙标志 → 停止的数秒窗口内 _mode 恒为 'dual_dev' →
-        # _is_busy() 为 False → 再次点击可并发起第二个 _stop_dual_worker(重复 taskkill/清端口/停 Redis)。
-        # ★ 本方法由 toggle_dev 在主线程调用，此处直接赋值 _mode 符合 §线程契约
-        #   (line 462-464 / 658-663: 状态只允许主线程变更; 后台线程须经 state_set)。
-        self._mode = 'stopping'
+        self._stop_dual_mode_async('开发模式')
+
+    def _stop_mode(self, mode, label):
+        if self._mode == mode:
+            self._stop_process()
+            self._mode = 'none'
+            self._update_all_ui()
+            self.log_message(f"{label}已停止")
+        else:
+            self.log_message(f"{label}未运行")
+
+    def stop_all(self):
+        # 紧急停止：不经闸门（它的职责就是打断正在进行的动作），但要先协作式取消：
+        # 否则在飞行中的启动流程会在“停止”之后继续把 Redis / 后端拉起来（审计实测）。
+        self._gate.cancel('紧急停止')
+
+        # 先在主线程立即重置状态（双重保险）
+        self._mode = 'none'
+        self._current_mode_key = ""
+        self._prod_running = False
         self._update_all_ui()
-        threading.Thread(target=self._stop_dual_worker, args=('开发模式',), daemon=True).start()
+
+        self.log_message("正在执行停止/重置操作...")
+        self.status_bar_label.config(text="正在停止所有...")
+        def _stop_all_worker():
+            try:
+                # 先等被取消的 worker 退到边界再清扫，避免清扫之后又被它拉起来
+                if not self._gate.wait_idle(_EMERGENCY_JOIN_SEC):
+                    self._msg_queue.put(('log', {'text': '在飞行动作未在限期内退出，继续强制清扫', 'level': 'WARNING'}))
+                # ★ 先正常停止 NSSM 受管服务（不带 checkpoint，因 cancel 已置位）。
+                # 否则端口清理会强杀 erp-prod 监听 5002 的进程，被 AppExit=Default
+                # Restart 判定为崩溃、5 秒后自动重启 ——「紧急停止变成重启」的根因。
+                _, managed_pids = self._stop_managed_services()
+                # 强制停止所有进程，不管状态
+                for proc, name in [(self._frontend_process, '前端'), (self._process, '后端')]:
+                    if proc and proc.poll() is None:
+                        self._msg_queue.put(('log', {'text': f'正在终止{name}进程 (PID: {proc.pid})...'}))
+                        self._kill_process_tree(proc.pid)
+                self._frontend_process = None
+                self._process = None
+
+                self._stop_redis()
+                self._kill_residual_async()
+                # 端口清理时排除受管 PID：即使 nssm stop 超时失败，也绝不误杀受管进程触发自动重启
+                self._kill_port_sync(_API_PORT, exclude=managed_pids)
+                self._kill_port_sync(_WEB_PORT, exclude=managed_pids)
+                self._kill_port_sync(_REDIS_PORT, exclude=managed_pids)
+                self._msg_queue.put(('log', {'text': "已清理所有残留进程和端口"}))
+                self._msg_queue.put(('ui_update', {}))
+            except Exception as e:
+                self._msg_queue.put(('log', {'text': f"停止过程出错: {str(e)}", 'level': 'ERROR'}))
+        threading.Thread(target=_stop_all_worker, daemon=True).start()
+
+    def _kill_residual_async(self):
+        """清理本项目残留进程（P0-4：精确特征 + 受管进程豁免）。
+
+        stop_all 是「紧急重置」，但不能以误杀 NSSM 受管进程为代价 —— 原实现按
+        进程名把 python / node 全杀，杀掉 erp-prod 后 NSSM 5 秒拉起 → 死循环。
+        """
+        def _kill_worker():
+            if not _IS_WINDOWS:
+                return
+            try:
+                self._msg_queue.put(('log', {'text': "正在扫描残留进程..."}))
+                managed = self._managed_service_pids()
+                if managed:
+                    self._msg_queue.put(('log', {'text': f'已识别 {len(managed)} 个 NSSM 受管进程，不在清理范围内'}))
+                pids = self._find_project_residual_pids(exclude=managed)
+                if not pids:
+                    self._msg_queue.put(('log', {'text': '未发现本项目残留进程'}))
+                    return
+                self._msg_queue.put(('log', {'text': f"发现 {len(pids)} 个本项目残留进程，正在终止..."}))
+                for pid in pids:
+                    with contextlib.suppress(Exception):
+                        _taskkill(pid)
+            except Exception as e:
+                self._msg_queue.put(('log', {'text': f"清理残留进程出错: {e}", 'level': 'WARNING'}))
+        threading.Thread(target=_kill_worker, daemon=True).start()
+
+    def restart_debug(self):
+        self._gate.start('重启调试模式', self._restart_thread)
+
+    def restart_dual_dev(self):
+        self._gate.start('重启开发模式', self._restart_dual_thread)
+
+    def _restart_thread(self):
+        self._mode = 'restarting'
+        self._msg_queue.put(('ui_update', {}))
+        proc = self._process
+        self._process = None
+        if proc and proc.poll() is None:
+            self._msg_queue.put(('log', {'text': f"重启：终止进程树 (PID: {proc.pid})..."}))
+            if _IS_WINDOWS:
+                for cpid in self._collect_process_tree(proc.pid):
+                    with contextlib.suppress(Exception):
+                        _taskkill(cpid)
+                _taskkill(proc.pid)
+                with contextlib.suppress(Exception):
+                    proc.wait(timeout=3)
+            else:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except Exception:
+                    proc.kill()
+        self._kill_port_sync(_API_PORT)
+        time.sleep(0.5)
+        self._gate.checkpoint()
+        self._mode = 'restarting'
+        self._start_thread(str(_PROJECT_DIR / 'run.py'), '调试模式', mode_key='debug')
 
     def _start_dual_server(self, label):
-        """入口守卫(防 TOCTOU): 过渡态/已有服务/缺解释器/缺前端目录一律拒绝。"""
-        # v5.40(P2): 原元组含死字面量 'restarting'(从无写入点) → 已移除。
-        #   本守卫真实语义 = 仅拒绝「正在启动」; 'stopping' 不在此列，
-        #   因其已由 toggle_dev 经 _is_busy() 前置拦截。
-        if self._mode == 'starting':
-            self.log_message('开发模式正在启动中，请稍候', 'WARNING')
+        # 互斥守卫：开发模式正在启动/重启中则不操作
+        if self._mode in ('starting', 'restarting'):
+            self.log_message(f"开发模式正在启动/重启中，请稍候", 'WARNING')
             return
         if self._mode != 'none':
-            self.log_message('已有服务在运行，请先停止后再启动', 'WARNING')
+            self.log_message(f"已有服务在运行，请先停止后再启动", 'WARNING')
             return
         if not _PYTHON_EXE:
-            self.log_message('无法启动: 未找到 Python 解释器，请安装 Python 并确保在 PATH 中', 'ERROR')
-            messagebox.showerror('启动失败', '未找到可用的 Python 解释器！\n\n' '请安装 Python 3.12+ 并确保 python 在 PATH 中，\n' '或在项目目录下创建虚拟环境 (.venv313)')
+            self.log_message("无法启动: 未找到 Python 解释器，请安装 Python 并确保在 PATH 中", 'ERROR')
+            messagebox.showerror("启动失败", "未找到可用的 Python 解释器！\n\n请安装 Python 3.12+ 并确保 python 在 PATH 中，\n或在项目目录下创建虚拟环境 (.venv313)")
             return
         if not _FRONTEND_DIR.exists():
-            self.log_message(f'前端目录不存在: {_FRONTEND_DIR}', 'ERROR')
-            messagebox.showerror('错误', f'前端目录不存在:\n{_FRONTEND_DIR}')
+            self.log_message(f"前端目录不存在: {_FRONTEND_DIR}", 'ERROR')
+            messagebox.showerror("错误", f"前端目录不存在:\n{_FRONTEND_DIR}")
             return
+
+        # 互斥切换（停生产+清端口）含子进程调用，必须放后台线程，否则阻塞 Tk 主线程导致 GUI 卡死
+        self._gate.start(f'启动{label}', self._start_dual_flow, label)
+
+    def _start_dual_flow(self, label):
         self._mode = 'starting'
-        self._startup_steps = ['停止生产模式', '检查Redis服务', '启动后端服务', '启动前端服务', '完成']
-        self._startup_progress, self._startup_current_step = 0, ''
-        self._update_all_ui()
-        self.log_message(f'正在启动{label}...')
-        self.status_label.config(text=f'正在启动{label}...')
-        threading.Thread(target=self._start_dual_worker, args=(label,), daemon=True).start()
+        self._current_mode_key = 'dual_dev'
+        self._startup_progress, self._startup_steps, self._startup_current_step = 0, ['停止生产模式', '检查Redis服务', '启动后端服务', '启动前端服务', '完成'], ''
+        self._msg_queue.put(('log', {'text': f"正在启动{label}..."}))
+        self._msg_queue.put(('status', {'text': f"正在启动{label}..."}))
+        self._msg_queue.put(('ui_update', {}))
+        self._start_dual_worker(label)
 
     def _start_dual_worker(self, label):
-        """① 互斥: 停生产(NamedTuple 三元组契约) ② 清端口 → 转 _start_dual_thread 继续 ③④⑤。"""
+        """后台执行互斥切换（停生产 + 清端口），随后复用现有启动流程"""
         try:
+            self._gate.checkpoint()
             self._msg_queue.put(('startup_progress', {'step': self._startup_steps[0], 'progress': 1, 'total': len(self._startup_steps)}))
-            result = self._ensure_production_stopped()
-            if not result.ok:
-                self._msg_queue.put(('log', {'text': f'切换失败: {result.reason}', 'level': 'ERROR'}))
-                self._msg_queue.put(('dual_failed', {'label': label, 'reason': result.reason}))
+            ok, reason, stopped_any = self._ensure_production_stopped()
+            if not ok:
+                self._msg_queue.put(('log', {'text': f"切换失败: {reason}", 'level': 'ERROR'}))
+                self._msg_queue.put(('dual_failed', {'label': label, 'reason': reason}))
                 return
-            if result.stopped_any:
-                self._msg_queue.put(('log', {'text': '已自动停止生产模式'}))
-                self._msg_queue.put(('toast', {'title': '已自动停止生产模式', 'desc': '开发/生产互斥托管'}))
-            # v5.40(审查 #18): 端口清理统一由 _start_dual_thread 负责(此处原本重复清一次，双倍 netstat)
+            if stopped_any:
+                self._msg_queue.put(('log', {'text': '已自动停止生产模式', 'level': 'INFO'}))
+            self._release_ports()
             self._start_dual_thread(label)
         except Exception as e:
-            # 后台线程无 try/except 会静默终止，导致启动卡在 'starting' 且无任何日志
-            self._msg_queue.put(('log', {'text': f'启动流程异常: {e}', 'level': 'ERROR'}))
+            # 后台线程无 try/except 会静默终止，导致启动流程卡在 'starting' 且无任何日志；
+            # 这里兜底记录并重置状态，让用户能看到失败原因。
+            self._msg_queue.put(('log', {'text': f"启动流程异常: {str(e)}", 'level': 'ERROR'}))
             self._msg_queue.put(('dual_failed', {'label': label, 'reason': str(e)}))
 
     def _start_dual_thread(self, label):
-        """③ Redis → ④ 后端(30×1s) → ⑤ 前端(60×1s); 任一未就绪则回滚全部已起进程。"""
         try:
+            creationflags = subprocess.CREATE_NO_WINDOW if _IS_WINDOWS else 0
+            self._gate.checkpoint()
+
             self._msg_queue.put(('log', {'text': '正在清理端口...'}))
-            self._release_ports()
-            self._msg_queue.put(('startup_progress', {'step': self._startup_steps[1], 'progress': 2, 'total': len(self._startup_steps)}))
-            if not self._ensure_redis_ready():
-                self._msg_queue.put(('log', {'text': '警告: Redis 未就绪，部分功能可能不可用', 'level': 'WARNING'}))
-            self._msg_queue.put(('startup_progress', {'step': self._startup_steps[2], 'progress': 3, 'total': len(self._startup_steps)}))
+            self._kill_port_sync(_API_PORT)
+            self._kill_port_sync(_WEB_PORT)
+
+            self._startup_current_step, self._startup_progress = self._startup_steps[1], 2
+            self._msg_queue.put(('startup_progress', {'step': self._startup_current_step, 'progress': self._startup_progress, 'total': len(self._startup_steps)}))
+            self._gate.checkpoint()
+            if not self._start_redis():
+                self._msg_queue.put(('log', {'text': '警告: Redis 未启动，部分功能可能不可用', 'level': 'WARNING'}))
+            self._startup_current_step, self._startup_progress = self._startup_steps[2], 3
+            self._msg_queue.put(('startup_progress', {'step': self._startup_current_step, 'progress': self._startup_progress, 'total': len(self._startup_steps)}))
             env = os.environ.copy()
             env.update({'PYTHONUNBUFFERED': '1', 'PYTHONIOENCODING': 'utf-8', 'PYTHONUTF8': '1', 'PYTHONPATH': str(_PROJECT_DIR)})
-            # argv[0] 字面量 'python' + executable= 校验过的解释器绝对路径
-            self._process = subprocess.Popen(
-                # dev 后端仅绑回环（本机即生产机，0.0.0.0 会让局域网绕过 nginx 直连）；
-                # 确需局域网调试时改回 '0.0.0.0' 并重新打包
-                # --reload-dir 必须是绝对路径：相对路径在 GUI 进程 cwd ≠ 仓库根时
-                # watchfiles 监控目录解析失败 → 代码改动永不触发热重载（2026-09-19 实证）
-                ['python', '-u', '-m', 'uvicorn', 'fastapi_app.main:app', '--host', '127.0.0.1',
-                 '--port', str(_PORTS.api), '--log-level', 'info', '--reload',
-                 '--reload-dir', str(_PROJECT_DIR / 'fastapi_app')],
-                executable=_PYTHON_EXE, cwd=str(_PROJECT_DIR), env=env, stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT, creationflags=_NO_WINDOW if _IS_WINDOWS else 0, text=False)
-            self._msg_queue.put(('log', {'text': f'后端进程已启动 (PID: {self._process.pid})'}))
-            threading.Thread(target=self._read_stdout, args=(self._process, None), daemon=True).start()
-            if not self._wait_http(f'http://127.0.0.1:{_PORTS.api}/api/health', 30):
+            self._gate.checkpoint()
+            backend_cmd = [_PYTHON_EXE, '-u', '-m', 'uvicorn', 'fastapi_app.main:app', '--host', '0.0.0.0', '--port', str(_API_PORT), '--log-level', 'info', '--reload', '--reload-dir', 'fastapi_app']
+            self._process = subprocess.Popen(backend_cmd, cwd=str(_PROJECT_DIR), env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, creationflags=creationflags, text=False)
+            self._msg_queue.put(('log', {'text': f"后端进程已启动 (PID: {self._process.pid})"}))
+            threading.Thread(target=self._read_stdout, args=(self._process,), daemon=True).start()
+            backend_ready = False
+            for _ in range(30):
+                self._gate.checkpoint()
+                try:
+                    urllib.request.urlopen(f'http://127.0.0.1:{_API_PORT}/api/health', timeout=2)
+                    backend_ready = True
+                    break
+                except Exception:
+                    time.sleep(1)
+            if not backend_ready:
                 self._msg_queue.put(('log', {'text': '后端启动失败或健康检查未通过', 'level': 'ERROR'}))
-                self._abort_process(self._process, '后端')
+                if self._process and self._process.poll() is None:
+                    self._msg_queue.put(('log', {'text': f'正在终止未就绪的后端进程 (PID: {self._process.pid})...'}))
+                    self._kill_process_tree(self._process.pid)
+                    with contextlib.suppress(Exception):
+                        self._process.wait(timeout=3)
                 self._process = None
                 self._msg_queue.put(('dual_failed', {'label': label, 'reason': '后端未就绪'}))
                 return
-            self._msg_queue.put(('startup_progress', {'step': self._startup_steps[3], 'progress': 4, 'total': len(self._startup_steps)}))
-            frontend_env = os.environ.copy()
-            frontend_env['BACKEND_INTERNAL_URL'] = f'http://127.0.0.1:{_PORTS.api}'
-            self._frontend_process = subprocess.Popen(
-                [_NPM_CMD, 'run', 'dev', '--', '--port', str(_PORTS.web)], cwd=str(_FRONTEND_DIR),
-                env=frontend_env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                creationflags=_NO_WINDOW if _IS_WINDOWS else 0, text=False)
-            self._msg_queue.put(('log', {'text': f'前端进程已启动 (PID: {self._frontend_process.pid})'}))
+            self._startup_current_step, self._startup_progress = self._startup_steps[3], 4
+            self._msg_queue.put(('startup_progress', {'step': self._startup_current_step, 'progress': self._startup_progress, 'total': len(self._startup_steps)}))
+            npm_cmd = 'npm.cmd' if _IS_WINDOWS else 'npm'
+            # 启动 Vite dev server
+            self._gate.checkpoint()
+            self._frontend_process = subprocess.Popen([npm_cmd, 'run', 'dev', '--', '--port', str(_WEB_PORT)], cwd=str(_FRONTEND_DIR), env={**os.environ, 'BACKEND_INTERNAL_URL': f'http://127.0.0.1:{_API_PORT}'}, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, creationflags=creationflags, text=False)
+            self._msg_queue.put(('log', {'text': f"前端进程已启动 (PID: {self._frontend_process.pid})"}))
             threading.Thread(target=self._read_frontend_stdout, args=(self._frontend_process,), daemon=True).start()
-            if not self._wait_http(f'http://127.0.0.1:{_PORTS.web}/', 60):
+            frontend_ready = False
+            for _ in range(60):
+                self._gate.checkpoint()
+                try:
+                    urllib.request.urlopen(f'http://127.0.0.1:{_WEB_PORT}/', timeout=2)
+                    frontend_ready = True
+                    break
+                except Exception:
+                    time.sleep(1)
+            if not frontend_ready:
                 self._msg_queue.put(('log', {'text': '前端启动失败或健康检查未通过', 'level': 'ERROR'}))
-                # 尤其重要: 前后端全部终止，不留孤儿进程占端口
-                self._abort_process(self._frontend_process, '前端')
-                self._abort_process(self._process, '后端')
+                for proc, name in [(self._frontend_process, '前端'), (self._process, '后端')]:
+                    if proc and proc.poll() is None:
+                        self._msg_queue.put(('log', {'text': f'正在终止未就绪的{name}进程 (PID: {proc.pid})...'}))
+                        self._kill_process_tree(proc.pid)
+                        with contextlib.suppress(Exception):
+                            proc.wait(timeout=3)
                 self._process, self._frontend_process = None, None
                 self._msg_queue.put(('dual_failed', {'label': label, 'reason': '前端未就绪'}))
                 return
-            self._msg_queue.put(('startup_progress', {'step': self._startup_steps[4], 'progress': 5, 'total': len(self._startup_steps)}))
+            self._startup_current_step, self._startup_progress = self._startup_steps[4], 5
+            self._msg_queue.put(('startup_progress', {'step': self._startup_current_step, 'progress': self._startup_progress, 'total': len(self._startup_steps)}))
             self._msg_queue.put(('dual_started', {'label': label}))
         except Exception as e:
-            # v5.40 修复(审查 #2): 兜底 except 必须先清理已启动进程再置空句柄。
-            # 此前直接置 None —— 若异常发生在后端 Popen 之后(最现实: 机器无 Node 时前端
-            # Popen(['npm.cmd'...]) 抛 FileNotFoundError)，后端成孤儿占 5002，UI 显示失败
-            # 但实际在跑、无人监控。_abort_process 对 None 安全，两条显式失败分支同款清理序。
-            self._abort_process(self._frontend_process, '前端')
-            self._abort_process(self._process, '后端')
             self._process, self._frontend_process = None, None
-            self._msg_queue.put(('dual_failed', {'label': label, 'reason': f'异常: {e}'}))
+            self._msg_queue.put(('dual_failed', {'label': label, 'reason': f'异常: {str(e)}'}))
 
-    @staticmethod
-    def _wait_http(url, attempts, timeout=2):
-        """轮询 HTTP 健康检查: attempts 次，每次间隔 1s。直连，不走系统代理。"""
-        for _ in range(attempts):
+    def _read_frontend_stdout(self, proc):
+        batch = []
+        while True:
             try:
-                _OPENER_DIRECT.open(url, timeout=timeout)
-                return True
+                line = proc.stdout.readline()
+                if not line:
+                    break
+                text = self._decode_line(line)  # GBK/UTF-8 级联解码，修复中文 Windows 前端输出乱码
+                if text:
+                    level = 'ERROR' if any(k in text.lower() for k in ['error', 'exception', 'failed']) else 'INFO'
+                    batch.append((f'[WEB] {text}', level))
+                    if len(batch) >= 10:
+                        for t, l in batch:
+                            self._msg_queue.put(('log', {'text': t, 'level': l}))
+                        batch.clear()
             except Exception:
-                time.sleep(1)
-        return False
+                break
+        if batch:
+            for t, l in batch:
+                self._msg_queue.put(('log', {'text': t, 'level': l}))
 
-    def _abort_process(self, proc, name):
-        """终止未就绪进程树并等待回收(避免端口被孤儿占用)。"""
-        if proc and proc.poll() is None:
-            self._msg_queue.put(('log', {'text': f'正在终止未就绪的{name}进程 (PID: {proc.pid})...'}))
-            self._kill_process_tree(proc.pid)
-            with contextlib.suppress(Exception):
-                proc.wait(timeout=3)
+    def _stop_dual_mode_async(self, label):
+        self._gate.start(f'停止{label}', self._stop_dual_flow, label)
+
+    def _stop_dual_flow(self, label):
+        self._msg_queue.put(('log', {'text': f"正在停止{label}..."}))
+        frontend_proc, backend_proc = self._frontend_process, self._process
+        self._frontend_process, self._process = None, None
+        for proc, name in [(frontend_proc, '前端'), (backend_proc, '后端')]:
+            if proc and proc.poll() is None:
+                self._msg_queue.put(('log', {'text': f'正在终止{name}进程树 (PID: {proc.pid})...'}))
+                if _IS_WINDOWS:
+                    with contextlib.suppress(Exception):
+                        _taskkill(proc.pid)
+                else:
+                    try:
+                        proc.terminate()
+                        proc.wait(timeout=5)
+                    except Exception:
+                        with contextlib.suppress(Exception):
+                            proc.kill()
+                self._msg_queue.put(('log', {'text': f'{name}进程已终止 (PID: {proc.pid})'}))
+        self._stop_redis()
+        self._kill_port_sync(_API_PORT)
+        self._kill_port_sync(_WEB_PORT)
+        self._mode = 'none'
+        self._current_mode_key = ""
+        self._msg_queue.put(('ui_update', {}))
+        self._msg_queue.put(('log', {'text': f"{label}已停止，端口已释放"}))
+
+    def _restart_dual_thread(self):
+        self._mode, self._current_mode_key = 'restarting', 'dual_dev'
+        self._startup_progress, self._startup_steps, self._startup_current_step = 0, ['停止生产模式', '检查Redis服务', '启动后端服务', '启动前端服务', '完成'], ''
+        self._msg_queue.put(('ui_update', {}))
+        label = '开发模式'
+        for proc, name in [(self._frontend_process, '前端'), (self._process, '后端')]:
+            if proc and proc.poll() is None:
+                self._msg_queue.put(('log', {'text': f"重启：终止{name}进程树 (PID: {proc.pid})..."}))
+                if _IS_WINDOWS:
+                    for cpid in self._collect_process_tree(proc.pid):
+                        with contextlib.suppress(Exception):
+                            _taskkill(cpid)
+                    _taskkill(proc.pid)
+                else:
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=5)
+                    except Exception:
+                        proc.kill()
+        self._frontend_process, self._process = None, None
+        self._stop_redis()
+        self._kill_port_sync(_API_PORT)
+        self._kill_port_sync(_WEB_PORT)
+        time.sleep(0.5)
+        self._gate.checkpoint()
+        self._start_dual_thread(label)
 
     def _on_dual_started(self, label):
         backend_alive = self._process and self._process.poll() is None
         frontend_alive = self._frontend_process and self._frontend_process.poll() is None
-        if not (backend_alive and frontend_alive):
-            self.log_message(f'{label}启动后进程已退出，正在清理', 'ERROR')
-            self._abort_process(self._frontend_process, '前端')
-            self._abort_process(self._process, '后端')
-            self._set_mode_none()
+        if not backend_alive:
+            self.log_message(f"{label}启动后后端进程已退出", 'ERROR')
+            if frontend_alive:
+                self._kill_process_tree(self._frontend_process.pid)
+            self._mode, self._process, self._frontend_process = 'none', None, None
+            self._current_mode_key = ""
+            self._update_all_ui()
+            return
+        if not frontend_alive:
+            self.log_message(f"{label}启动后前端进程已退出，正在清理...", 'WARNING')
+            if self._process and self._process.poll() is None:
+                self._kill_process_tree(self._process.pid)
+            self._mode, self._process, self._frontend_process = 'none', None, None
+            self._current_mode_key = ""
+            self._update_all_ui()
+            self.status_bar_label.config(text="前端启动失败，已停止")
             return
         self._mode = 'dual_dev'
         self._update_all_ui()
-        self.status_label.config(text=f'{label}运行中')
-        self.log_message(f'{label}启动成功')
-        self.log_message(f'  → 后端: http://localhost:{_PORTS.api}')
-        self.log_message(f'  → 前端: http://localhost:{_PORTS.web}')
-        self._show_toast(f'{label}已启动', f'后端 :{_PORTS.api} · 前端 :{_PORTS.web}')
+        self.status_bar_label.config(text=f"{label}运行中")
+        self.log_message(f"{label}启动成功")
+        self.log_message(f"  → 后端: http://localhost:{_API_PORT}")
+        if frontend_alive:
+            self.log_message(f"  → 前端: http://localhost:{_WEB_PORT}")
 
     def _on_dual_failed(self, label, reason):
-        self._set_mode_none()
-        self.status_label.config(text=f'{label}启动失败: {reason}')
-        self.log_message(f'{label}启动失败: {reason}', 'ERROR')
+        self.log_message(f"{label}启动失败: {reason}", 'ERROR')
+        self._mode, self._process, self._frontend_process = 'none', None, None
+        self._current_mode_key = ""
+        self._update_all_ui()
+        self.status_bar_label.config(text=f"{label}启动失败: {reason}")
 
-    def _stop_dual_worker(self, label):
-        """停止开发: 终止前端/后端进程树 + 停自有 Redis 进程 + 释放端口 + 状态复位。
+    def _mode_label(self):
+        return {'debug': '调试模式', 'dual_dev': '开发模式（前后端）', 'restarting': '重启中', 'starting': '启动中', 'stopping': '停止中'}.get(self._mode, '')
 
-        ★ 只终止管理器自有的 Redis 进程，不动托管的 Redis 服务(共享基础设施)。
-        """
-        self._msg_queue.put(('log', {'text': f'正在停止{label}...'}))
-        # ★ v5.40 补丁: 停止路径必须保证状态复位 —— 若中途抛异常(如 taskkill/端口释放失败)，
-        #   原实现会跳过 line「state_set(mode='none')」而永久卡在 _mode='stopping'，
-        #   反而让按钮永久禁用。故用 try/finally 兜底复位，并对异常留痕不静默。
-        try:
-            frontend_proc, backend_proc = self._frontend_process, self._process
-            self._frontend_process, self._process = None, None
-            for proc, name in ((frontend_proc, '前端'), (backend_proc, '后端')):
-                if proc and proc.poll() is None:
-                    self._msg_queue.put(('log', {'text': f'正在终止{name}进程树 (PID: {proc.pid})...'}))
-                    self._kill_process_tree(proc.pid)
-                    with contextlib.suppress(Exception):
-                        proc.wait(timeout=3)
-                    self._msg_queue.put(('log', {'text': f'{name}进程已终止'}))
-            self._stop_owned_redis()
-            self._release_ports()
-        except Exception as e:
-            self._msg_queue.put(('log', {'text': f'停止{label}出错: {type(e).__name__}: {e}', 'level': 'ERROR'}))
-        finally:
-            # v5.40(审查 #7): _mode 经主线程消息复位，不再后台直写。
-            # finally 保证 'stopping' → 'none' 流转闭合(无论正常/异常均复位，不产生死状态)。
-            self._msg_queue.put(('state_set', {'mode': 'none'}))
-            self._msg_queue.put(('log', {'text': f'{label}已停止，端口已释放'}))
-            self._msg_queue.put(('toast', {'title': f'{label}已停止', 'desc': '端口已释放'}))
+    def _update_all_ui(self):
+        is_dual_dev = self._mode == 'dual_dev'
+        is_starting, is_restarting, _is_stopping = self._mode == 'starting', self._mode == 'restarting', self._mode == 'stopping'
+        is_none = self._mode == 'none'
+        current_mode_key = self._current_mode_key
+        self._update_card_ui('dual_dev', is_dual_dev, is_none, is_starting and current_mode_key == 'dual_dev', is_restarting and current_mode_key == 'dual_dev')
+        # stop_all总是可用，作为紧急重置
+        self.stop_all_btn.config(state='normal')
+        self._update_mode_badge()
+        if is_none:
+            self.status_bar_label.config(text="就绪")
+        elif self._mode in ('restarting', 'starting', 'stopping'):
+            self.status_bar_label.config(text=f"{self._mode_label()}...")
 
-    def _set_mode_none(self):
-        self._mode = 'none'
-        if not self._shutting_down:
+    def _update_card_ui(self, mode_key, is_active, is_none, is_starting=False, is_restarting=False):
+        status = getattr(self, f'{mode_key}_status')
+        start_btn = getattr(self, f'{mode_key}_start_btn')
+        restart_btn = getattr(self, f'{mode_key}_restart_btn')
+        # 统一状态枚举：starting→部署中(蓝弧) / restarting→重启中(橙闪) / active→运行中(绿呼吸) / stopped→已停止(灰空心)
+        state = 'deploying' if is_starting else 'restarting' if is_restarting else 'running' if is_active else 'stopped'
+        state_text = '启动中' if is_starting else '重启中' if is_restarting else '运行中' if is_active else '已停止'
+        status.set_state(state, state_text)
+        start_btn.config(state='disabled' if (is_starting or is_restarting) else 'normal')
+        restart_btn.config(state='disabled' if (not is_active or is_starting or is_restarting) else 'normal')
+
+    def check_server_status(self):
+        if self._mode in ('none', 'restarting', 'starting'):
+            self._after_ids['status'] = self.root.after(self._check_interval, self.check_server_status)
+            return
+        backend_crashed = self._process and self._process.poll() is not None
+        frontend_crashed = self._mode == 'dual_dev' and self._frontend_process and self._frontend_process.poll() is not None
+        if backend_crashed or frontend_crashed:
+            code = self._process.poll() if self._process else None
+            label = self._mode_label()
+            if backend_crashed and frontend_crashed:
+                self.log_message(f"{label}前后端进程均已意外终止 (退出码: {code})", 'ERROR')
+            elif backend_crashed:
+                self.log_message(f"{label}后端进程意外终止 (退出码: {code})", 'ERROR')
+            else:
+                self.log_message(f"{label}前端进程意外终止", 'ERROR')
+            if self._frontend_process and self._frontend_process.poll() is None:
+                self._kill_process_tree(self._frontend_process.pid)
+            if self._process and self._process.poll() is None:
+                self._kill_process_tree(self._process.pid)
+            self._mode, self._process, self._frontend_process = 'none', None, None
+            self._current_mode_key = ""
             self._update_all_ui()
-    # ===================== 生产模式: Windows 服务(NSSM)控制 =====================
+            self._after_ids['crash_warn'] = self.root.after(100, lambda: messagebox.showwarning("警告", f"{label}意外停止，请检查日志"))
+        self._after_ids['status'] = self.root.after(self._check_interval, self.check_server_status)
+
+    def _kill_process_tree(self, pid):
+        if not pid:
+            return
+        try:
+            if _IS_WINDOWS:
+                _taskkill(pid)
+            else:
+                import signal
+                try:
+                    os.killpg(os.getpgid(pid), signal.SIGTERM)
+                except Exception:
+                    with contextlib.suppress(Exception):
+                        os.kill(pid, signal.SIGTERM)
+        except Exception:
+            pass
+
+    def on_closing(self):
+        if self._tray_icon:
+            self.root.withdraw()
+        else:
+            self._do_quit()
+
+    def _build_ui(self):
+        self.root.configure(bg=self._PALETTE['bg_main'])
+        # ---- 顶栏 ----
+        header = tk.Frame(self.root, bg=self._PALETTE['bg_header'], height=58)
+        header.pack(fill=tk.X)
+        header.pack_propagate(False)
+        hdr = tk.Frame(header, bg=self._PALETTE['bg_header'])
+        hdr.pack(fill=tk.X, padx=24)
+        logo = tk.Frame(hdr, bg=self._PALETTE['accent'], width=32, height=32)
+        logo.pack(side=tk.LEFT, pady=(13, 0))
+        logo.pack_propagate(False)
+        tk.Label(logo, text='E', font=('Segoe UI', 15, 'bold'), fg='#ffffff', bg=self._PALETTE['accent']).place(relx=0.5, rely=0.5, anchor='center')
+        brand = tk.Frame(hdr, bg=self._PALETTE['bg_header'])
+        brand.pack(side=tk.LEFT, padx=(11, 0), pady=(11, 0))
+        tk.Label(brand, text='ERP 服务器管理器', font=('Microsoft YaHei UI', 14, 'bold'), fg=self._PALETTE['text_primary'], bg=self._PALETTE['bg_header']).pack(anchor='w')
+        tk.Label(brand, text='开发 / 生产一键切换 · 互斥托管', font=('Microsoft YaHei UI', 8), fg=self._PALETTE['text_dim'], bg=self._PALETTE['bg_header']).pack(anchor='w')
+        ver_frame = tk.Frame(hdr, bg=self._PALETTE['bg_input'], highlightbackground=self._PALETTE['border'], highlightthickness=1)
+        ver_frame.pack(side=tk.LEFT, padx=(12, 0), pady=(22, 0))
+        tk.Label(ver_frame, text=_VERSION, font=('Consolas', 8), fg=self._PALETTE['text_dim'], bg=self._PALETTE['bg_input']).pack(padx=8, pady=1)
+        ports = tk.Frame(hdr, bg=self._PALETTE['bg_header'])
+        ports.pack(side=tk.RIGHT, pady=(18, 0))
+        for label, port, tint, fg_c in [('API', _API_PORT, self._PALETTE['accent_tint'], self._PALETTE['accent']), ('WEB', _WEB_PORT, self._PALETTE['success_tint'], self._PALETTE['success'])]:
+            pill = tk.Frame(ports, bg=tint)
+            pill.pack(side=tk.LEFT, padx=(6, 0))
+            tk.Label(pill, text=f'{label} {port}', font=('Consolas', 9, 'bold'), fg=fg_c, bg=tint).pack(padx=10, pady=3)
+        tk.Frame(self.root, bg=self._PALETTE['border'], height=1).pack(fill=tk.X)
+        self._build_status_bar()
+        # ---- 内容区：开发/生产双卡并排 + 底部日志 ----
+        content = tk.Frame(self.root, bg=self._PALETTE['bg_main'])
+        content.pack(fill=tk.BOTH, expand=True, padx=20, pady=(14, 12))
+        content.columnconfigure(0, weight=1, uniform='mode_cards')
+        content.columnconfigure(1, weight=1, uniform='mode_cards')
+        content.rowconfigure(0, weight=0)
+        content.rowconfigure(1, weight=1)
+        self._build_server_card(content, 0, 0, '开发模式', 'DEV', 'FastAPI + Vue3 / Vite · 热重载 · 自动切换', 'dual_dev', self.start_dual_dev, self.stop_dual_dev, self.restart_dual_dev)
+        self._build_prod_card(content, 0, 1)
+        self._build_log_section(content)
+
+    def _card(self, parent, row, col, columnspan=1):
+        card = tk.Frame(parent, bg=self._PALETTE['bg_card'], highlightbackground=self._PALETTE['border_card'], highlightthickness=1)
+        card.grid(row=row, column=col, columnspan=columnspan, sticky='nsew', padx=(0, 10) if col == 0 else (10, 0))
+        self._server_cards.append(card)
+        return card
+
+    def _card_head(self, card, icon_text, icon_tint, icon_fg, title, desc):
+        """卡片统一头部：圆角图标 + 标题/副标题（iOS 分组列表风格）"""
+        body = tk.Frame(card, bg=self._PALETTE['bg_card'])
+        body.pack(fill=tk.BOTH, expand=True, padx=20, pady=(15, 16))
+        head = tk.Frame(body, bg=self._PALETTE['bg_card'])
+        head.pack(fill=tk.X)
+        icon = tk.Frame(head, bg=icon_tint, width=34, height=34)
+        icon.pack(side=tk.LEFT)
+        icon.pack_propagate(False)
+        tk.Label(icon, text=icon_text, font=('Segoe UI', 9, 'bold'), fg=icon_fg, bg=icon_tint).place(relx=0.5, rely=0.5, anchor='center')
+        tcol = tk.Frame(head, bg=self._PALETTE['bg_card'])
+        tcol.pack(side=tk.LEFT, padx=(10, 0), fill=tk.X, expand=True)
+        tk.Label(tcol, text=title, font=('Microsoft YaHei UI', 13, 'bold'), fg=self._PALETTE['text_primary'], bg=self._PALETTE['bg_card'], anchor='w').pack(anchor='w')
+        tk.Label(tcol, text=desc, font=('Microsoft YaHei UI', 8), fg=self._PALETTE['text_dim'], bg=self._PALETTE['bg_card'], anchor='w').pack(anchor='w')
+        tk.Frame(body, bg=self._PALETTE['border'], height=1).pack(fill=tk.X, pady=(13, 0))
+        return body
+
+    def _build_server_card(self, parent, row, col, title, script_label, desc, mode_key, start_cmd, stop_cmd, restart_cmd, columnspan=1):
+        card = self._card(parent, row, col, columnspan=columnspan)
+        body = self._card_head(card, 'DEV', self._PALETTE['success_tint'], self._PALETTE['success'], title, desc)
+        # 状态行：胶囊状态徽章（详情页场景）
+        st = tk.Frame(body, bg=self._PALETTE['bg_card'])
+        st.pack(fill=tk.X, pady=(11, 0))
+        status_badge = StatusBadge(st, state='stopped', text='已停止', size='md', palette=self._PALETTE, canvas_bg=self._PALETTE['bg_card'])
+        status_badge.pack(side=tk.LEFT)
+        # 操作按钮：主操作实心 + 次操作浅底
+        btns = tk.Frame(body, bg=self._PALETTE['bg_card'])
+        btns.pack(fill=tk.X, pady=(13, 0))
+        start_btn = RoundedButton(btns, text='启动开发', variant='solid', tone='success', command=start_cmd, canvas_bg=self._PALETTE['bg_card'])
+        self._action_buttons.append(start_btn)   # 参与「动作期间置灰」（紧急停止不登记）
+        start_btn.pack(side=tk.LEFT)
+        restart_btn = RoundedButton(btns, text='重启', variant='outlined', tone='accent', command=restart_cmd, state='disabled', canvas_bg=self._PALETTE['bg_card'])
+        self._action_buttons.append(restart_btn)
+        restart_btn.pack(side=tk.LEFT, padx=(8, 0))
+        setattr(self, f'{mode_key}_status', status_badge)
+        setattr(self, f'{mode_key}_start_btn', start_btn)
+        setattr(self, f'{mode_key}_restart_btn', restart_btn)
+
+    # ===================== 生产模式 (Windows 服务 + NSSM) =====================
 
     def _find_nssm(self):
-        """NSSM 定位: 配置项优先(校验 .exe 后缀) → PATH → 候选路径。"""
-        custom = str(_APP_CONFIG.get('nssm_path') or '')
-        if custom and Path(custom).is_file() and Path(custom).suffix.lower() == '.exe':
-            return custom
         found = shutil.which('nssm')
         if found:
             return found
-        return next((str(c) for c in _NSSM_CANDIDATES if c.is_file()), None)
+        for cand in _NSSM_CANDIDATES:
+            if cand.is_file():
+                return str(cand)
+        return None
+
+    @staticmethod
+    def _decode_output(raw):
+        """把子进程的原始字节流解码为文本（Windows 控制台程序编码并不统一）。
+
+        · nssm 走宽字符 API，输出是 **UTF-16LE**：按 utf-8 解会得到
+          "E r r o r   c r e a t i n g   s e r v i c e !" 这种隔字带空格的乱码，
+          中文错误文本更是整段变成 U+FFFD。2026-09-16 实测：nssm 明明回了
+          「指定的服务已存在。」，界面/日志里却只剩不可读字符，故障定位被直接堵死。
+        · sc.exe 走 OEM 代码页（中文系统 cp936/GBK），偶尔夹杂 UTF-8。
+
+        因此先按 BOM / NUL 密度判 UTF-16，再回落到多编码严格试探；
+        任何一步都不抛异常——解码失败只降级为 replace，绝不因此吞掉真实返回码。
+        """
+        if not raw:
+            return ''
+        if raw[:2] in (b'\xff\xfe', b'\xfe\xff'):
+            try:
+                return raw.decode('utf-16', errors='replace').lstrip('\ufeff')
+            except Exception:
+                pass
+        elif raw.count(b'\x00') * 4 > len(raw):
+            # UTF-16LE 的 ASCII 段每个字符后跟一个 \x00，NUL 占比远高于任何 8bit 编码
+            try:
+                return raw.decode('utf-16-le', errors='replace')
+            except Exception:
+                pass
+        preferred = locale.getpreferredencoding(False) or ''
+        for enc in ('utf-8', 'gb18030', 'cp936', preferred):
+            if not enc:
+                continue
+            try:
+                return raw.decode(enc, errors='strict')
+            except Exception:
+                continue
+        return raw.decode('utf-8', errors='replace')
+
+    def _run_capture(self, args, timeout=20):
+        try:
+            result = subprocess.run(args, creationflags=subprocess.CREATE_NO_WINDOW if _IS_WINDOWS else 0,
+                                    capture_output=True, timeout=timeout)
+            return (result.returncode,
+                    self._decode_output(result.stdout or b'') + self._decode_output(result.stderr or b''))
+        except Exception as e:
+            return -1, str(e)
 
     def _svc_state(self, name):
-        """返回：'未安装' | '未知' | 查询到的 STATE 文本（如 '4 RUNNING' / '1 STOPPED' / '3 STOP_PENDING'）。
+        """返回三态：'未安装' | '未知' | STATE 文本（如 '4 RUNNING' / '1 STOPPED'）。
 
-        ★ 语义区分（v5.36 修正，勿回退）：
-          只有 rc == 1060（ERROR_SERVICE_DOES_NOT_EXIST）或输出明确含 '1060' 才判「未安装」；
-          其它非 0 返回码（5=拒绝访问、被安全软件拦截、超时、异常）一律判「未知」。
-          绝不能把「查不出来」当成「不存在」——否则 _ensure_production_stopped 会静默跳过
-          仍在运行的生产服务，开发模式随即抢占 5002/3000，与生产互相厮杀。
-        解析逻辑在模块级 _parse_sc_state()（纯函数，可单测）。
+        ★ 三态语义（勿回退）：只有 rc==1060（ERROR_SERVICE_DOES_NOT_EXIST）或输出
+        明确含 1060 且【没有】STATE 行才判「未安装」；其它任何查询失败（5=拒绝访问、
+        超时、被安全软件拦截、解码异常）一律判「未知」——绝不把「查不出来」当「不存在」，
+        否则 _ensure_production_stopped 会静默跳过仍在运行的生产服务，开发模式随即
+        抢占 5002/3000 与生产互杀。
         """
-        try:
-            r = subprocess.run(['sc', 'query', name], **_cap(5))
-            out, code = (r.stdout or '') + (r.stderr or ''), r.returncode
-        except Exception:
+        code, out = self._run_capture(['sc', 'query', name], timeout=5)
+        if code == 1060 or ('1060' in out and 'STATE' not in out):
+            return '未安装'
+        if code != 0 or 'SERVICE_NAME' not in out:
             return '未知'
-        return _parse_sc_state(code, out)
-
-    @staticmethod
-    def _svc_absent(state):
-        """服务状态的「未安装」判定（统一入口，避免 '未安装' 字面量散落各调用点）。"""
-        return '未安装' in state
-
-    @staticmethod
-    def _svc_unknown(state):
-        """服务状态的「查询失败/未知」判定 —— 语义上必须与「未安装」严格区分。"""
-        return state == '未知'
+        for line in out.splitlines():
+            if 'STATE' in line:
+                parts = line.split(':', 1)
+                if len(parts) > 1:
+                    return ' '.join(parts[1].split())[:28]
+        return '未知'
 
     def _svc_pid(self, name):
-        """sc queryex 取服务当前进程 PID; 未运行返回 None。"""
-        try:
-            r = subprocess.run(['sc', 'queryex', name], **_cap(5))
-        except Exception:
+        """查询 Windows 服务当前进程 PID（sc queryex），未运行返回 None"""
+        code, out = self._run_capture(['sc', 'queryex', name], timeout=5)
+        if code != 0:
             return None
-        for line in (r.stdout or '').splitlines():
+        for line in out.splitlines():
             stripped = line.strip()
             if stripped.startswith('PID'):
                 parts = stripped.split(':', 1)
@@ -1983,767 +2241,894 @@ class ServerManagerApp:
         return None
 
     def _wait_service_stopped(self, name, timeout=45):
-        """确认 STOPPED; 有 nssm 时先发 nssm stop。
+        """发出 nssm stop 后轮询服务状态直到 STOPPED；超时返回 False。
 
-        若在 STOP_PENDING 期间强杀被管进程，会被 AppExit Default Restart 判定为崩溃而
-        自动重启、与目标模式抢占端口 —— 所以必须等 STOPPED 确认，不能只看 returncode。
+        NSSM stop 立即返回，服务进入 STOP_PENDING，优雅关闭需数秒。
+        若在 STOP_PENDING 期间强杀被管进程，会被 AppExit Default Restart
+        判定为崩溃而自动重启，与目标模式抢占端口。因此必须等待确认 STOPPED。
         """
-        nssm = self._find_nssm()
-        if nssm:
-            with contextlib.suppress(Exception):
-                subprocess.run(['nssm', 'stop', name], executable=nssm, **_cap(15))
+        self._run_capture([self._find_nssm(), 'stop', name], timeout=15)
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            if 'STOPPED' in self._svc_state(name):
+            self._gate.checkpoint()      # 取消时立即中止等待，不再空等 45s
+            state = self._svc_state(name)
+            if 'STOPPED' in state:
                 return True
             time.sleep(1)
         return False
 
-    @staticmethod
-    def _probe_http(url, timeout=2):
-        """单次 HTTP 探针: 无异常即视为通过。直连，不走系统代理。"""
-        try:
-            _OPENER_DIRECT.open(url, timeout=timeout)
-            return True
-        except Exception:
-            return False
+    def _managed_service_pids(self):
+        """NSSM 受管进程集合（服务根 PID + 整棵子树）。
 
-    def _wait_service_running(self, name, timeout=60):
-        """确认 RUNNING 且业务就绪。
-
-        erp-prod 承载 API 与 nginx，故除现有 /api/health 外再探测前端专用探针
-        /nginx-health，两项都通过才返回 True；两项探针与 RUNNING 判定共享同一
-        timeout 预算(总超时不放大)。
+        ★ P0-4 的核心闸门：受管进程**绝不能被直接 kill** —— NSSM 的
+        AppExit=Default Restart + AppRestartDelay=5000 会在 5 秒后把它拉起来，
+        杀掉→复活→再杀就是「杀不死」死循环。受管进程只能经 `nssm stop` 停止。
         """
-        need_web = name == _SVC_API
-        deadline = time.monotonic() + timeout
-        api_ready = web_ready = False
-        while time.monotonic() < deadline:
-            if 'RUNNING' not in self._svc_state(name):
-                time.sleep(1)
-                continue
-            if not api_ready:
-                api_ready = self._probe_http(f'http://127.0.0.1:{_PORTS.api}/api/health')
-            if need_web and not web_ready:
-                web_ready = self._probe_http(f'http://127.0.0.1:{_PORTS.web}/nginx-health')
-            if api_ready and (web_ready or not need_web):
-                return True
-            time.sleep(1)
-        return False
-
-    def _service_restart_guard(self, on):
-        """临时切换 NSSM 崩溃自动重启，防止强杀被管进程后 5 秒复活(§6.4)。
-
-        on=True→AppExit Default Restart(恢复); on=False→Exit(停止前临时禁用)。
-        任何 stop/restart/紧急全清路径都必须成对调用，finally 保证恢复。
-        ★ 作用域(D6，勿误读): guard 只对 **NSSM 托管的 erp-prod / erp-arq 有效**
-          (AppExit 是 NSSM 特有概念)。它对原生 Windows 服务 erp-redis / erp-redis-broker
-          **完全没有作用** —— 两者不受 NSSM 管辖。因此紧急全清里 guard 不覆盖 Redis 服务
-          的停止，属预期行为，并非遗漏。
-        """
-        nssm = self._find_nssm()
-        if not nssm:
-            return
-        value = 'Restart' if on else 'Exit'
-        for name in (_SVC_API, _SVC_ARQ):
-            with contextlib.suppress(Exception):
-                subprocess.run(['nssm', 'set', name, 'AppExit', 'Default', value], executable=nssm, **_cap(15))
-
-    def _service_one(self, name, verb, nssm):
-        """对单个服务执行 verb 并【确认目标状态】。返回 (ok, reason)。
-
-        契约: ok=True 表示目标状态已确认达成; 失败必须带真实原因(拒绝访问/超时/异常文本)。
-        绝不能用 except: pass 掩盖失败 —— 那正是 v5.33「停不掉」的根因之一(§6.2)。
-        """
-        argv = ['nssm', verb, name] if nssm else ['sc', verb, name]
-        kwargs = _cap(30)
-        if nssm:
-            kwargs['executable'] = nssm
-        try:
-            r = subprocess.run(argv, **kwargs)
-            code, out = r.returncode, ((r.stdout or '') + (r.stderr or '')).strip()
-        except subprocess.TimeoutExpired:
-            return False, f'{verb} 命令超时(30s)'
-        except Exception as e:
-            return False, f'{verb} 命令异常: {type(e).__name__}: {e}'
-        if code != 0:
-            return False, f'{verb} 命令失败(退出码 {code}): {out or "无输出"}'
-        if verb in ('start', 'restart'):
-            if self._wait_service_running(name):
-                return True, None
-            return False, f'{name} 未在超时内确认 RUNNING(可能被拒绝访问或启动即崩溃)'
-        if verb == 'stop':
-            if self._wait_service_stopped(name):
-                return True, None
-            return False, f'{name} 未在超时内确认 STOPPED(拒绝访问或仍为 STOP_PENDING)'
-        return True, None
-
-    def _service_cmd_sync(self, verb):
-        """同步 start/stop/restart(后台线程内调用)，逐服务确认结果。
-
-        stop/restart 前后成对禁用/恢复 NSSM 自动重启(finally 保证恢复)——
-        若残留清理在 STOP_PENDING 期间强杀被管进程，服务会被 5 秒复活(§6.3/§6.4)。
-        """
-        nssm = self._find_nssm()
-        guard_needed = verb in ('stop', 'restart')
-        if guard_needed:
-            self._service_restart_guard(False)
-        failures = []
-        try:
-            for name in (_SVC_API, _SVC_ARQ):
-                if '未安装' in self._svc_state(name):
-                    self._msg_queue.put(('log', {'text': f'{name} 未安装，跳过 {verb}', 'level': 'WARNING'}))
-                    continue
-                ok, reason = self._service_one(name, verb, nssm)
-                if ok:
-                    self._msg_queue.put(('log', {'text': f'{name} {verb} 已生效'}))
-                else:
-                    failures.append((name, reason))
-                    self._msg_queue.put(('log', {'text': f'{name} {verb} 失败: {reason}', 'level': 'ERROR'}))
-        finally:
-            if guard_needed:
-                self._service_restart_guard(True)
-        if failures:
-            self._msg_queue.put(('toast', {'title': f'服务 {verb} 部分失败', 'desc': '、'.join(n for n, _ in failures)}))
-        else:
-            self._msg_queue.put(('toast', {'title': f'服务 {verb} 完成', 'desc': f'{_SVC_API} + {_SVC_ARQ}'}))
-    class _ProdStopResult(NamedTuple):
-        """_ensure_production_stopped 的返回值契约。
-
-        三字段固定存在 —— 杜绝 v5.33 因超时分支返回 2 元组导致的
-        ValueError: not enough values to unpack (expected 3, got 2)(§6.1)。
-        """
-        ok: bool
-        reason: Optional[str]
-        stopped_any: bool
-
-    def _ensure_production_stopped(self):
-        """切换开发前停止生产: 停 NSSM 服务 + 清手动启动的 prod_runner 残留。
-
-        所有 return 分支一律返回 _ProdStopResult(3 字段)，从类型层面杜绝解包崩溃(§6.1)。
-        全程禁用 NSSM 崩溃自动重启(§6.4): 若 _svc_state 因解码异常误报「未安装」，
-        随后的 prod_runner 清理会误杀被管进程，AppExit Restart 会让服务 5 秒复活(§6.3)。
-        ★ v5.36: 服务状态为「未知」(sc 查询失败，如拒绝访问)时按运行中保守处理，
-          且若无法在超时内确认 STOPPED 则返回 ok=False 中止切换 —— 绝不静默放行去抢端口。
-        """
-        stopped_any = False
-        nssm_existed = self._find_nssm() is not None
-        if nssm_existed:
-            self._service_restart_guard(False)
-        try:
-            for name in (_SVC_API, _SVC_ARQ):
-                state = self._svc_state(name)
-                if self._svc_absent(state):
-                    continue
-                unknown = self._svc_unknown(state)
-                if unknown:
-                    # ★ 半查询失败不得当「不存在」: 按运行中保守处理，宁可中止切换也不放行抢端口
-                    self._msg_queue.put(('log', {'text': f'无法查询 {name} 状态（sc 查询失败），按运行中保守处理', 'level': 'WARNING'}))
-                elif 'STOPPED' in state:
-                    continue
-                self._msg_queue.put(('log', {'text': f'正在停止生产服务 {name}...'}))
-                if not self._wait_service_stopped(name):
-                    reason = (f'{name} 状态未知且未能在超时内确认 STOPPED，已中止切换' if unknown
-                              else f'{name} 停止超时（STOP_PENDING 未确认），已中止切换')
-                    return self._ProdStopResult(False, reason, False)
-                stopped_any = True
-            if psutil is not None:  # 手动启动的 prod_runner 不受 NSSM 控制
-                protected = {os.getpid()}
-                for name in (_SVC_API, _SVC_ARQ):
-                    pid = self._svc_pid(name)
-                    if pid:
-                        protected.add(pid)
-                for p in psutil.process_iter(['pid', 'name', 'cmdline']):
-                    try:
-                        pid = p.info['pid']
-                        if not pid or pid in protected:
-                            continue
-                        if 'prod_runner' in ' '.join(p.info['cmdline'] or []):
-                            self._kill_process_tree(pid)
-                            self._msg_queue.put(('log', {'text': f'已清理残留 prod_runner 进程 (PID: {pid})'}))
-                            stopped_any = True
-                    except Exception:
-                        continue
-            return self._ProdStopResult(True, None, stopped_any)
-        finally:
-            if nssm_existed:
-                self._service_restart_guard(True)
-
-    def _ensure_development_stopped(self):
-        """切换生产前停止开发: 只停开发子进程，★不动 Redis★，重置 _mode='none'。返回 stopped_any。"""
-        stopped_any = False
-        for proc, name in ((self._frontend_process, '前端'), (self._process, '后端')):
-            if proc and proc.poll() is None:
-                self._msg_queue.put(('log', {'text': f'正在终止开发{name}进程树 (PID: {proc.pid})...'}))
-                self._kill_process_tree(proc.pid)
-                with contextlib.suppress(Exception):
-                    proc.wait(timeout=5)
-                self._msg_queue.put(('log', {'text': f'开发{name}进程已终止'}))
-                stopped_any = True
-        self._process, self._frontend_process = None, None
-        # v5.40(审查 #7): _mode 经主线程消息复位(线程契约); state_set 内部会刷新 UI
-        self._msg_queue.put(('state_set', {'mode': 'none'}))
-        if stopped_any:
-            self._msg_queue.put(('log', {'text': '开发模式已停止'}))
-        return stopped_any
-    # ===================== 生产模式: 启动 / 停止(互斥切换) =====================
-
-    def start_prod(self):
-        if self._is_busy():
-            self.log_message('操作正在执行中，请稍候', 'WARNING')
-            return
-        self._prod_busy = True
-        self._update_all_ui()
-        self.log_message('正在启动生产模式...')
-        threading.Thread(target=self._start_prod_worker, daemon=True).start()
-
-    def stop_prod(self):
-        if self._is_busy():
-            self.log_message('操作正在执行中，请稍候', 'WARNING')
-            return
-        self._prod_busy = True
-        self._update_all_ui()
-        self.log_message('正在停止生产模式...')
-        threading.Thread(target=self._stop_prod_worker, daemon=True).start()
-
-    def _start_prod_worker(self):
-        """互斥: 先停开发(不动 Redis) → 清端口 → 保障 Redis → 启动 NSSM 服务并确认 RUNNING。"""
-        try:
-            if self._ensure_development_stopped():
-                self._msg_queue.put(('log', {'text': '已自动停止开发模式'}))
-                self._msg_queue.put(('toast', {'title': '已自动停止开发模式', 'desc': '开发/生产互斥托管'}))
-            self._release_ports()
-            # Redis 生命周期归管理器: 生产启动前确保 erp-redis / erp-redis-broker 服务就绪
-            if not self._ensure_redis_ready():
-                self._msg_queue.put(('log', {'text': '警告: Redis 未就绪，生产服务可能无法连接缓存/broker', 'level': 'WARNING'}))
-            self._service_cmd_sync('start')
-        except Exception as e:
-            self._msg_queue.put(('log', {'text': f'启动生产模式异常: {e}', 'level': 'ERROR'}))
-        finally:
-            # v5.40(审查 #7): _prod_busy 经主线程消息复位(线程契约); state_set 内部会刷新 UI
-            self._msg_queue.put(('state_set', {'prod_busy': False}))
-            self._msg_queue.put(('hosting_refresh', {}))
-
-    def _stop_prod_worker(self):
-        try:
-            self._service_cmd_sync('stop')
-        except Exception as e:
-            self._msg_queue.put(('log', {'text': f'停止生产模式异常: {e}', 'level': 'ERROR'}))
-        finally:
-            # v5.40(审查 #7): _prod_busy 经主线程消息复位(线程契约)
-            self._msg_queue.put(('state_set', {'prod_busy': False}))
-            self._msg_queue.put(('hosting_refresh', {}))
-    # ===================== 紧急停止(分级) =====================
-    # 分级定级理由: Redis 是 ERP 的共享基础设施(缓存 6379 + broker 6380)，单击就停它
-    # 不符合用户「默认只停自有进程树」的要求；但用户同时要求「一键紧急停止关闭所有正在
-    # 运行的服务器」，所以单击必须能停掉当前模式(含生产模式的服务)，长按才进一步接管
-    # Redis 服务与残留清理。
-
-    def _on_stop_press(self, _event=None):
-        """按下起长按计时器; 未满阈值松手 → 轻量停止。
-
-        v5.40(P2 / QA O-2): 起计时器前先过统一守卫 —— 若此刻已在进行中/过渡态，
-        直接拒绝且**不得**登记 _stop_hold_fired，否则上一轮的 _on_stop_release
-        会因 fired 残留而空转，或长按全清在轻量停止刚结束的瞬间被误触发。
-        """
-        if not self._stop_entry_guard('紧急停止'):
-            return
-        self._stop_hold_fired = False
-        self._cancel_hold_timer()
-        self._stop_hold_after = self.root.after(self._full_stop_hold_ms, self._on_stop_hold)
-
-    def _on_stop_release(self, _event=None):
-        self._cancel_hold_timer()
-        if self._stop_hold_fired:
-            self._stop_hold_fired = False
-            return
-        self.emergency_stop_light()
-
-    def _on_stop_hold(self):
-        self._stop_hold_after = None
-        self._stop_hold_fired = True
-        self.emergency_stop_full()
-
-    def _cancel_hold_timer(self):
-        if self._stop_hold_after:
-            with contextlib.suppress(Exception):
-                self.root.after_cancel(self._stop_hold_after)
-            self._stop_hold_after = None
-
-    def _stop_entry_guard(self, action):
-        """紧急停止统一入口守卫 (v5.40 P2 / QA O-2)。
-
-        收口三类竞态:
-        ① 已在进行中(_stop_in_progress) → 拒绝重复起 worker;
-        ② 其它过渡态(_mode in starting/stopping) → 拒绝抢占同一批端口;
-        ③ 生产命令在途(_prod_busy) → 拒绝与 _service_cmd_sync 交叉。
-
-        ★ 必须由主线程调用(直接读写 _stop_in_progress，符合 §线程契约)。
-        ★ 本守卫只判定不登记; _stop_in_progress 由调用方在守卫通过后立即置位，
-          以保证「判定 → 置位」无间隙(TOCTOU 闭合)。
-        """
-        if self._stop_in_progress:
-            self.log_message('操作正在执行中，请稍候', 'WARNING')
-            return False
-        if self._mode in ('starting', 'stopping'):
-            self.log_message(f'当前处于{"启动" if self._mode == "starting" else "停止"}过渡态，请稍候再执行{action}', 'WARNING')
-            return False
-        if self._prod_busy:
-            self.log_message(f'生产命令执行中，请稍候再执行{action}', 'WARNING')
-            return False
-        return True
-
-    def emergency_stop_light(self):
-        """单击: 停当前模式(开发进程树 / 生产 erp-prod+erp-arq) + 停自有 Redis 进程 + 释放 5002/3000。
-
-        Redis 服务保持运行(共享基础设施)。
-        """
-        if not self._stop_entry_guard('紧急停止'):
-            return
-        self._stop_in_progress = True
-        self.status_label.config(text='正在紧急停止（轻量）...')
-        self.log_message('正在执行紧急停止（当前模式 + 自有进程 + 5002/3000）...')
-        threading.Thread(target=self._light_stop_worker, daemon=True).start()
-
-    def emergency_stop_full(self):
-        """长按≥1.5s: 轻量停止 + 停 Redis 服务 + 扫游离残留 + 释放 6379。需二次确认。"""
-        if not self._stop_entry_guard('紧急全清'):
-            return
-        redis_svcs = ' / '.join(_APP_CONFIG.get('redis_services') or [])
-        if not messagebox.askyesno(
-                '紧急全清确认',
-                '将执行【全清（全部清场）】操作，影响面如下：\n\n'
-                f'  1. 停止生产服务 {_SVC_API} / {_SVC_ARQ}（等待 STOPPED 确认，nginx 随之优雅关闭）\n'
-                f'  2. 停止 Redis 服务 {redis_svcs}（缓存 6379 / broker 6380）\n'
-                '  3. 终止本管理器启动的前端 / 后端进程树\n'
-                '  4. 扫描并清理游离残留进程（排除服务被管进程）\n'
-                f'  5. 释放端口 {_PORTS.api} / {_PORTS.web} / {_PORTS.redis}\n\n'
-                '确定继续吗？'):
-            self.log_message('已取消紧急全清')
-            return
-        self._stop_in_progress = True
-        self.status_label.config(text='正在紧急全清...')
-        self.log_message('正在执行紧急全清...')
-        threading.Thread(target=self._full_stop_worker, daemon=True).start()
-
-    def _do_light_stop(self):
-        """轻量停止共用实现(后台线程内调用)。
-
-        ① 开发模式运行中 → 停 dev 前后端进程树;
-        ② 生产模式运行中 → _service_cmd_sync('stop') 停 erp-prod / erp-arq
-           (等 STOPPED 确认，nginx 由 prod_runner 优雅关闭);
-        ③ _stop_owned_redis() 仅终止管理器自有的 Redis 进程;
-        ④ 释放 5002 / 3000;
-        ⑤ Redis 服务保持运行(共享基础设施，单击不停)。
-        """
-        for proc, name in ((self._frontend_process, '前端'), (self._process, '后端')):
-            if proc and proc.poll() is None:
-                self._msg_queue.put(('log', {'text': f'正在终止{name}进程树 (PID: {proc.pid})...'}))
-                self._kill_process_tree(proc.pid)
-                with contextlib.suppress(Exception):
-                    proc.wait(timeout=3)
-                self._msg_queue.put(('log', {'text': f'{name}进程已终止 (PID: {proc.pid})'}))
-        self._frontend_process, self._process = None, None
-        prod_state = self._svc_state(_SVC_API)
-        # ★ v5.36: 状态「未知」(sc 查询失败) 同样视为运行中 → 停生产，绝不放行抢端口
-        if 'RUNNING' in prod_state.upper() or self._svc_unknown(prod_state) or self._prod_running:
-            self._msg_queue.put(('log', {'text': '正在停止生产服务(nginx 将由 prod_runner 优雅关闭)...'}))
-            self._service_cmd_sync('stop')
-            # v5.40(审查 #7): _prod_running 经主线程消息复位(线程契约)
-            self._msg_queue.put(('state_set', {'prod_running': False}))
-        self._stop_owned_redis()
-        # v5.40(审查 #6): 占用者留痕已统一收进 _release_ports(所有调用点都覆盖，含启动前清理)，
-        # 此处不再单独做诊断查询 —— 可观测性代码失败不得扩散到清场主流程(D15 教训)。
-        self._release_ports()      # ← 无论如何都要执行
-        self._msg_queue.put(('log', {'text': f'端口已释放: {_PORTS.api}/{_PORTS.web}（Redis 服务保持运行）'}))
-
-    def _light_stop_worker(self):
-        try:
-            self._do_light_stop()
-            self._msg_queue.put(('toast', {'title': '已执行紧急停止', 'desc': f'已停止当前模式并释放端口 {_PORTS.api}/{_PORTS.web}'}))
-        except Exception as e:
-            self._msg_queue.put(('log', {'text': f'紧急停止出错: {e}', 'level': 'ERROR'}))
-        finally:
-            self._finish_stop()
-
-    def _full_stop_worker(self):
-        """全清: 轻量停止 + 停 Redis 服务 + 扫游离残留 + 释放 6379。
-
-        ★ v5.36 关键次序(D11): guard(False) → [停 Redis 服务 + _kill_residual] → guard(True)
-          —— _kill_residual() 必须仍在 guard 窗口内(guard 存在的唯一目的就是防止残留扫描
-          误杀被管进程后 NSSM 5 秒复活，恢复早了等于窗口没覆盖它本该保护的对象)，
-          端口释放则在 guard 恢复之后。
-        ★ 6379 释放以 _stop_redis_services() 的 ok 门控(D2): 服务没停成还强杀端口会导致
-          SCM 认为 RUNNING 但进程已死，状态不一致。
-        """
-        try:
-            self._do_light_stop()
-            self._msg_queue.put(('log', {'text': '正在停止 Redis 服务...'}))
-            guard_applied = self._find_nssm() is not None
-            if guard_applied:
-                self._service_restart_guard(False)
-            ok, failed = False, []
-            try:
-                try:
-                    ok, failed = self._stop_redis_services()
-                except Exception as e:  # D7: 异常按失败处理，且不得跳过残留清理
-                    ok, failed = False, []
-                    self._msg_queue.put(('log', {'text': f'停止 Redis 服务异常(按失败处理): {type(e).__name__}: {e}', 'level': 'ERROR'}))
-                # ⑧ 残留扫描: 必须仍在 guard 窗口内
-                self._kill_residual()
-            finally:
-                if guard_applied:
-                    self._service_restart_guard(True)
-            # ⑨ 释放 6379(guard 恢复之后，且以 ok 门控)
-            if ok:
-                self._msg_queue.put(('log', {'text': 'Redis 服务已全部停止'}))
-                self._kill_port_sync(_PORTS.redis)
-                self._msg_queue.put(('log', {'text': f'端口已释放: {_PORTS.redis}'}))
-            else:
-                self._msg_queue.put(('log', {'text': f'Redis 服务未能全部停止（{"、".join(failed) or "异常"}），已跳过 6379 强制释放以避免 SCM 状态不一致，请手工确认服务状态', 'level': 'ERROR'}))
-            self._msg_queue.put(('toast', {'title': '已执行紧急全清', 'desc': '服务 + 残留进程已处理'}))
-        except Exception as e:
-            self._msg_queue.put(('log', {'text': f'紧急全清出错: {e}', 'level': 'ERROR'}))
-        finally:
-            # v5.40(审查 #7): _prod_running 经主线程消息复位(线程契约)
-            self._msg_queue.put(('state_set', {'prod_running': False}))
-            self._finish_stop()
-
-    def _finish_stop(self):
-        # v5.40(审查 #7): 状态复位经主线程消息(线程契约); state_set 内部会刷新 UI
-        self._msg_queue.put(('state_set', {'mode': 'none', 'stop_in_progress': False}))
-        if not self._shutting_down:
-            self._msg_queue.put(('hosting_refresh', {}))
-
-    def _kill_residual(self):
-        """扫描并清理游离残留进程 —— 必须排除 NSSM 被管进程，否则触发 AppExit 复活(§6.3)。
-
-        排除白名单: 本进程 PID、_SVC_API/_SVC_ARQ 的服务 PID 及其后代、cmdline 含
-        prod_runner / arq_app 的进程。psutil 缺失时记 WARNING 并跳过，绝不做
-        「python/node 宽特征」兜底 —— 那必然误杀服务工作进程，导致 5 秒自动重启。
-        """
-        if not _IS_WINDOWS:
-            return
-        if psutil is None:
-            self._msg_queue.put(('log', {'text': '缺少 psutil，跳过残留进程清理（不做宽特征兜底）', 'level': 'WARNING'}))
-            return
-        roots = {os.getpid()}
+        managed = set()
         for name in (_SVC_API, _SVC_ARQ):
             pid = self._svc_pid(name)
             if pid:
-                roots.add(pid)
-        self._msg_queue.put(('log', {'text': '正在扫描游离残留进程...'}))
-        victims = []
-        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                managed.add(pid)
+                managed.update(self._collect_process_tree(pid))
+        return managed
+
+    def _stop_managed_services(self):
+        """正常停止 NSSM 受管服务（erp-prod / erp-arq），返回受管 PID 集合供端口清理兜底。
+
+        ★ 与 _service_cmd_sync('stop') 的关键区别：本方法【不带 checkpoint】——
+        紧急停止 stop_all 已先 cancel() 置位取消标志，任何 checkpoint 都会抛
+        _ActionCancelled 把「停服务」半路打断，于是服务根本没停、端口清理又误杀
+        受管进程触发 NSSM 5 秒自动重启 —— 这正是「紧急停止变成重启」的根因。
+
+        返回 (成功停止的服务数, 受管 PID 集合)。受管 PID 无论 stop 成败都要返回，
+        供后续 _kill_port_sync 排除，避免 stop 超时失败时端口清理误杀受管进程。
+        """
+        nssm = self._find_nssm()
+        managed = self._managed_service_pids()
+        stopped = 0
+        for name in (_SVC_API, _SVC_ARQ):
+            state = self._svc_state(name)
+            if '未安装' in state or 'STOPPED' in state:
+                continue
+            self._msg_queue.put(('log', {'text': f'正在停止生产服务 {name}...'}))
+            if nssm:
+                self._run_capture([nssm, 'stop', name], timeout=30)
+            else:
+                self._run_capture(['sc', 'stop', name], timeout=30)
+            deadline = time.monotonic() + 45
+            while time.monotonic() < deadline:
+                if 'STOPPED' in self._svc_state(name):
+                    stopped += 1
+                    self._msg_queue.put(('log', {'text': f'{name} 已停止'}))
+                    break
+                time.sleep(1)
+            else:
+                self._msg_queue.put(('log', {'text': f'{name} 在 45s 内未确认 STOPPED，将在端口清理时排除其受管进程以避免误杀触发重启', 'level': 'WARNING'}))
+        return stopped, managed
+
+    def _find_loose_prod_runner_pids(self, exclude=()):
+        """精确定位「游离」的 prod_runner（不经 NSSM 托管的手工启动进程）。
+
+        判据 = 命令行命中 _is_prod_runner_cmdline（模块式/脚本式精确匹配），
+        而非原先的 `-match 'prod_runner'` 宽子串扫描。
+        """
+        exclude = set(exclude or ())
+        self_pid = os.getpid()
+        pids = []
+        try:
+            import psutil
+        except ImportError:
+            return pids
+        for proc in psutil.process_iter(['pid', 'cmdline']):
             try:
-                pid = proc.info['pid']
-                if not pid or pid in roots:
+                pid = proc.info.get('pid')
+                if not pid or pid == self_pid or pid in exclude:
                     continue
-                cmdline = ' '.join(proc.info.get('cmdline') or [])
-                low = cmdline.lower()
-                pname = (proc.info.get('name') or '').lower()
-                if 'prod_runner' in low or 'arq_app' in low:
-                    continue  # NSSM 被管业务进程: 误杀会被 AppExit 判为崩溃并自动重启
-                if any(anc.pid in roots for anc in proc.parents()):
-                    continue  # 服务进程的后代同样受保护
-                # v5.40(审查 #5): 宽特征('node' in pname)会误杀机器上所有 node.exe(编辑器插件等)。
-                # 加项目标记二级校验: cmdline 或 cwd 含 erp_system / frontend-vite 才可能是本系统进程;
-                # cwd 读取失败(权限)按无标记处理 → 放行(宁可漏杀，不可误杀)。
-                try:
-                    cwd_s = str(proc.cwd() or '').lower()
-                except Exception:
-                    cwd_s = ''
-                if not ('erp_system' in low or 'erp_system' in cwd_s
-                        or 'frontend-vite' in low or 'frontend-vite' in cwd_s):
-                    continue
-                if ('uvicorn' in low or 'vite' in low or 'node' in pname or ('python' in pname and 'fastapi_app' in low)):
-                    victims.append(pid)
+                if _is_prod_runner_cmdline(' '.join(proc.info.get('cmdline') or [])):
+                    pids.append(pid)
             except Exception:
                 continue
-        if not victims:
-            self._msg_queue.put(('log', {'text': '未发现游离残留进程'}))
-            return
-        self._msg_queue.put(('log', {'text': f'发现 {len(victims)} 个游离残留进程，正在终止...'}))
-        for pid in victims:
-            self._kill_process_tree(pid)
-        self._msg_queue.put(('log', {'text': '残留进程清理完成'}))
-    # ===================== 生产状态轮询(每 5 秒，后台收集) =====================
+        return pids
+
+    def _find_project_residual_pids(self, exclude=()):
+        """扫描本项目的残留开发/调试进程（P0-4）。
+
+        替代原先「凡名字带 python / node 一律杀」的宽特征扫描 —— 那会误杀 NSSM
+        受管的生产进程，以及机器上任何无关的 Python / Node 程序。
+        现判据：命令行或工作目录指向本项目，且不在排除集内。
+        """
+        exclude = set(exclude or ())
+        exclude.add(os.getpid())
+        with contextlib.suppress(Exception):
+            exclude.add(os.getppid())  # PyInstaller onefile 的 bootloader 父进程
+        project = str(_PROJECT_DIR).lower()
+        pids = []
+        try:
+            import psutil
+        except ImportError:
+            return pids
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+            try:
+                pid = proc.info.get('pid')
+                if not pid or pid in exclude:
+                    continue
+                cmdline = ' '.join(proc.info.get('cmdline') or []).lower().replace('/', '\\')
+                matched = project in cmdline
+                if not matched:
+                    with contextlib.suppress(Exception):
+                        matched = project in str(proc.cwd()).lower().replace('/', '\\')
+                if matched:
+                    pids.append(pid)
+            except Exception:
+                continue
+        return pids
+
+    def _ensure_production_stopped(self):
+        """切换前停止生产模式：停 NSSM 服务 + 清游离的 prod_runner 进程树。
+
+        ★ 返回契约固定为 3 元组 (ok, fail_reason, stopped_any)。
+          P0-1：原实现在超时分支返回 2 元组，而调用方按 3 元组解包
+                → ValueError → 「开发模式 100% 无法启动」。
+          P0-2：原实现在 `except Exception: pass` 之后落到 `return True, None, ...`
+                → 任何异常都被静默转成「成功」，调用方继续启动 → 双进程抢端口。
+                现改为：失败必须带真实原因返回，不存在静默成功路径。
+        """
+        stopped_any = False
+        nssm = self._find_nssm()
+        if nssm:
+            for name in (_SVC_API, _SVC_ARQ):
+                state = self._svc_state(name)
+                if 'STOPPED' in state or '未安装' in state:
+                    continue
+                self._msg_queue.put(('log', {'text': f'正在停止生产服务 {name}...'}))
+                if not self._wait_service_stopped(name):
+                    return False, f'{name} 停止超时（STOP_PENDING 未确认），已中止切换', stopped_any
+                stopped_any = True
+        # 清理游离的 prod_runner（不受 NSSM 控制）；受管进程跳过，交给 nssm stop（P0-4）
+        self._gate.checkpoint()
+        try:
+            managed = self._managed_service_pids()
+            for pid in self._find_loose_prod_runner_pids(exclude=managed):
+                self._kill_process_tree(pid)
+                self._msg_queue.put(('log', {'text': f'已清理游离 prod_runner 进程 (PID: {pid})'}))
+                stopped_any = True
+            if managed:
+                self._msg_queue.put(('log', {'text': f'已跳过 {len(managed)} 个 NSSM 受管进程（须经服务停止命令处理）'}))
+        except Exception as e:
+            # 失败如实返回：不允许「扫不到 / 扫描报错」等同于「没有残留」
+            self._msg_queue.put(('log', {'text': f'残留 prod_runner 扫描失败: {e}', 'level': 'WARNING'}))
+            return False, f'残留进程扫描失败: {e}', stopped_any
+        return True, None, stopped_any
+
+    def _ensure_development_stopped(self):
+        """切换前停止开发模式：只停开发子进程，不动 Redis，重置 GUI 状态。
+
+        与 _stop_dual_mode_async 的区别：不调用 _stop_redis()，保留共享基础设施。
+        """
+        stopped_any = False
+        for proc, name in [(self._frontend_process, '前端'), (self._process, '后端')]:
+            if proc and proc.poll() is None:
+                self._msg_queue.put(('log', {'text': f'正在终止开发{name}进程树 (PID: {proc.pid})...'}))
+                self._kill_process_tree(proc.pid)
+                try:
+                    proc.wait(timeout=5)
+                except Exception:
+                    with contextlib.suppress(Exception):
+                        proc.kill()
+                self._msg_queue.put(('log', {'text': f'开发{name}进程已终止 (PID: {proc.pid})'}))
+                stopped_any = True
+        self._process = None
+        self._frontend_process = None
+        self._mode = 'none'
+        self._current_mode_key = ""
+        self._msg_queue.put(('ui_update', {}))
+        self._msg_queue.put(('hosting_refresh', {}))
+        if stopped_any:
+            self._msg_queue.put(('log', {'text': '开发模式已停止'}))
+        return stopped_any
+
+    def _release_ports(self):
+        """清理 5002 与 3000 端口占用（复用 _kill_port_sync，其内部对多 PID 有 3 轮重试）。"""
+        self._kill_port_sync(_API_PORT)
+        self._kill_port_sync(_WEB_PORT)
+
+    def _build_prod_card(self, parent, row, col):
+        """生产模式卡片（与开发卡并排）— Windows 服务 (NSSM) 托管"""
+        card = self._card(parent, row, col)
+        body = self._card_head(card, 'PROD', self._PALETTE['accent_tint'], self._PALETTE['accent'], '生产模式', 'Windows 服务 (NSSM) · 开机自启 · 崩溃自愈')
+        # 服务状态行：胶囊徽章(整体状态)
+        st = tk.Frame(body, bg=self._PALETTE['bg_card'])
+        st.pack(fill=tk.X, pady=(11, 0))
+        self.hosting_svc_badge = StatusBadge(st, state='stopped', text='服务停止', size='md', palette=self._PALETTE, canvas_bg=self._PALETTE['bg_card'])
+        self.hosting_svc_badge.pack(side=tk.LEFT, padx=(0, 8))
+        # 组件状态网格：胶囊状态徽章（监控面板场景）
+        grid = tk.Frame(body, bg=self._PALETTE['bg_input'])
+        grid.pack(fill=tk.X, pady=(11, 0))
+        grid.columnconfigure(0, weight=1)
+        grid.columnconfigure(1, weight=1)
+        self.hosting_backend_badge = StatusBadge(grid, state='stopped', text='后端', size='sm', palette=self._PALETTE, canvas_bg=self._PALETTE['bg_input'])
+        self.hosting_backend_badge.grid(row=0, column=0, sticky='w', padx=(12, 6), pady=(8, 2))
+        self.hosting_arq_badge = StatusBadge(grid, state='stopped', text='ARQ', size='sm', palette=self._PALETTE, canvas_bg=self._PALETTE['bg_input'])
+        self.hosting_arq_badge.grid(row=0, column=1, sticky='w', padx=(6, 12), pady=(8, 2))
+        self.hosting_frontend_badge = StatusBadge(grid, state='stopped', text='前端', size='sm', palette=self._PALETTE, canvas_bg=self._PALETTE['bg_input'])
+        self.hosting_frontend_badge.grid(row=1, column=0, sticky='w', padx=(12, 6), pady=2)
+        self.hosting_redis_badge = StatusBadge(grid, state='stopped', text='Redis', size='sm', palette=self._PALETTE, canvas_bg=self._PALETTE['bg_input'])
+        self.hosting_redis_badge.grid(row=1, column=1, sticky='w', padx=(6, 12), pady=2)
+        self.hosting_ready_badge = StatusBadge(grid, state='stopped', text='就绪', size='sm', palette=self._PALETTE, canvas_bg=self._PALETTE['bg_input'])
+        self.hosting_ready_badge.grid(row=2, column=0, sticky='w', padx=(12, 6), pady=(2, 8))
+        # Worker 数（安装服务时生效）
+        wk = tk.Frame(grid, bg=self._PALETTE['bg_input'])
+        wk.grid(row=2, column=1, sticky='e', padx=(6, 12), pady=(2, 8))
+        tk.Label(wk, text='Worker', font=('Microsoft YaHei UI', 9), fg=self._PALETTE['text_dim'], bg=self._PALETTE['bg_input']).pack(side=tk.LEFT, padx=(0, 4))
+        self.hosting_workers_var = tk.StringVar(value=str(int(os.getenv('UVICORN_WORKERS', '4'))))
+        ttk.Combobox(wk, textvariable=self.hosting_workers_var, values=('2', '4', '6', '8'), width=4, state='readonly', font=('Microsoft YaHei UI', 9)).pack(side=tk.LEFT)
+        # 主操作行：启动(实心蓝) 停止(描边红) 重启(描边蓝) 刷新(描边蓝)  — 统一 36px / pady=6 / radius=10
+        btns = tk.Frame(body, bg=self._PALETTE['bg_card'])
+        btns.pack(fill=tk.X, pady=(13, 0))
+        svc_start_btn = RoundedButton(btns, text='启动服务', variant='solid', tone='accent', command=self._start_services, canvas_bg=self._PALETTE['bg_card'])
+        self._action_buttons.append(svc_start_btn)   # 变更类按钮置灰；刷新/打开日志为只读，始终可用
+        svc_start_btn.pack(side=tk.LEFT)
+        svc_stop_btn = RoundedButton(btns, text='停止', variant='outlined', tone='danger', command=self._stop_services, canvas_bg=self._PALETTE['bg_card'])
+        self._action_buttons.append(svc_stop_btn)
+        svc_stop_btn.pack(side=tk.LEFT, padx=(8, 0))
+        svc_restart_btn = RoundedButton(btns, text='重启', variant='outlined', tone='accent', command=self._restart_services, canvas_bg=self._PALETTE['bg_card'])
+        self._action_buttons.append(svc_restart_btn)
+        svc_restart_btn.pack(side=tk.LEFT, padx=(8, 0))
+        RoundedButton(btns, text='刷新', variant='outlined', tone='neutral', command=self._manual_refresh_hosting, canvas_bg=self._PALETTE['bg_card']).pack(side=tk.LEFT, padx=(8, 0))
+        # 次操作行：安装(实心绿) 卸载(描边红) 日志(描边蓝)  — 同上规格，垂直间距 8px
+        btns2 = tk.Frame(body, bg=self._PALETTE['bg_card'])
+        btns2.pack(fill=tk.X, pady=(8, 0))
+        install_btn = RoundedButton(btns2, text='安装服务', variant='solid', tone='success', command=self._install_services, canvas_bg=self._PALETTE['bg_card'])
+        self._action_buttons.append(install_btn)
+        install_btn.pack(side=tk.LEFT)
+        uninstall_btn = RoundedButton(btns2, text='卸载', variant='outlined', tone='danger', command=self._uninstall_services, canvas_bg=self._PALETTE['bg_card'])
+        self._action_buttons.append(uninstall_btn)
+        uninstall_btn.pack(side=tk.LEFT, padx=(8, 0))
+        RoundedButton(btns2, text='打开日志', variant='outlined', tone='neutral', command=self._open_logs_dir, canvas_bg=self._PALETTE['bg_card']).pack(side=tk.LEFT, padx=(8, 0))
+    def _manual_refresh_hosting(self):
+        """手动刷新生产模式状态（后台收集 + 主线程应用，不阻塞 UI）"""
+        self._refresh_hosting_status()
+        self.log_message('已手动刷新生产模式状态')
+
+    def _warn_once(self, key, text):
+        """同类警告只记一次，避免每 5s 刷屏把真实信号埋掉（状态好转时由调用方复位）。
+
+        key 必须是稳定标识 —— 把「已 N 秒未更新」这类逐轮递增的量放进 key，
+        去重就会失效，变成每 5s 刷一条。
+        """
+        if key != self._hosting_last_warn:
+            self._hosting_last_warn = key
+            self.log_message(f'[生产模式] {text}', 'WARNING')
 
     def _refresh_hosting_status(self):
-        """调度后台收集。sc query / 状态文件 IO / Redis 探测都是阻塞操作，绝不能在主线程执行。
+        """调度后台线程收集生产模式状态，收集完成后经消息队列回主线程应用。
 
-        收集期间重复请求只置 _hosting_refresh_requested，回来立刻补一轮。
+        sc query / 状态文件 IO / Redis 探测均为阻塞操作，绝不能在 Tk 主线程执行，
+        否则周期刷新（5s）会让 GUI 持续卡顿。收集期间重复调用只标记待刷新。
         """
-        if self._shutting_down:
-            return
-        if self._hosting_collecting:
-            self._hosting_refresh_requested = True
-            return
+        now = time.time()
+        if getattr(self, '_hosting_collecting', False):
+            # 这个闸只在收集线程回报后才释放。线程若挂死（如 shutil.which 卡在失效的
+            # PATH 项）或带 BaseException 退出，闸就永不释放、界面从此不再更新。
+            # 超时即认定上一轮作废并重启刷新链。
+            if now - getattr(self, '_hosting_collect_started', now) < self.HOSTING_COLLECT_TIMEOUT_SEC:
+                self._hosting_refresh_requested = True
+                return
+            self._msg_queue.put(('log', {
+                'text': f'[生产模式] 状态收集超过 {int(self.HOSTING_COLLECT_TIMEOUT_SEC)}s 未回报，'
+                        f'已放弃该轮并重启刷新链',
+                'level': 'WARNING'}))
         self._hosting_collecting = True
-        threading.Thread(target=self._collect_worker, daemon=True).start()
+        self._hosting_collect_started = now
 
-    def _collect_worker(self):
-        try:
-            data = self._collect_hosting_data()
-        except Exception:
-            data = {'collect_error': True}
-        self._msg_queue.put(('hosting_apply', {'data': data}))
+        def _collect():
+            try:
+                data = self._collect_hosting_data()
+            except BaseException as e:   # 含 BaseException 派生（_ActionCancelled 等）
+                data = {'collect_error': True, 'error': f'{type(e).__name__}: {e}'}
+            self._msg_queue.put(('hosting_apply', {'data': data}))
+        threading.Thread(target=_collect, daemon=True).start()
 
     def _collect_hosting_data(self):
-        """纯数据收集(后台线程)，不触碰任何 UI 组件。"""
-        data = {'nssm': self._find_nssm(), 'api_state': self._svc_state(_SVC_API), 'arq_state': self._svc_state(_SVC_ARQ)}
-        data['api_running'] = 'RUNNING' in data['api_state'].upper()
-        data['arq_running'] = 'RUNNING' in data['arq_state'].upper()
-        data['api_installed'] = '未安装' not in data['api_state']
-        data['arq_installed'] = '未安装' not in data['arq_state']
-        # ★ v5.37(D12): 三态语义贯通到展示层 —— 查询失败(未知)必须与「未安装/已停止」区分
-        data['api_unknown'] = self._svc_unknown(data['api_state'])
-        data['arq_unknown'] = self._svc_unknown(data['arq_state'])
+        """纯数据收集（后台线程执行）——不触碰任何 UI 组件"""
+        data = {
+            'nssm': self._find_nssm(),
+            'api_state': self._svc_state(_SVC_API),
+            'arq_state': self._svc_state(_SVC_ARQ),
+        }
+        data['api_running'] = 'RUNNING' in data['api_state'].upper() if data['api_state'] else False
+        data['api_unknown'] = data['api_state'] == '未知'
+        data['arq_unknown'] = data['arq_state'] == '未知'
         data['redis_ok'] = self._is_redis_running()
-        data['status'], data['mtime'], data['stale'], data['mtime_str'] = {}, 0, False, '—'
-        if data['api_running'] and _PROD_STATUS_FILE.is_file():
-            try:
-                data['status'] = json.loads(_PROD_STATUS_FILE.read_text(encoding='utf-8'))
-                data['mtime'] = _PROD_STATUS_FILE.stat().st_mtime
-                data['stale'] = (time.time() - data['mtime']) > 15
-                data['mtime_str'] = datetime.fromtimestamp(data['mtime']).strftime('%H:%M:%S')
-            except Exception as e:
-                data['read_err'] = f'{type(e).__name__}: {e}'
+        # broker 独立探测：它不在 prod_runner 的就绪判据里（ARQ 是独立服务），
+        # 必须单独采集，否则「ARQ 已死」和「一切正常」在界面上长得一模一样。
+        data['broker_ok'] = self._is_broker_running()
+        data['redis_svc_state'] = self._redis_service_state(_SVC_REDIS_CACHE)
+        data['broker_svc_state'] = self._redis_service_state(_SVC_REDIS_BROKER)
+        status_file = _PROJECT_DIR / 'logs' / 'prod_runner.json'
+        data['status_file'] = status_file
+        data['status'], data['read_err'], data['mtime'], data['stale'], data['mtime_str'] = {}, None, 0, False, '—'
+        if not data['api_running']:
+            return data
+        # 服务运行中：读取状态文件并校验新鲜度
+        try:
+            if status_file.is_file():
+                data['status'] = json.loads(status_file.read_text(encoding='utf-8'))
+            else:
+                data['read_err'] = f'文件不存在: {status_file}'
+        except Exception as e:
+            data['read_err'] = f'读取失败: {type(e).__name__}: {e}'
+        mtime = status_file.stat().st_mtime if status_file.is_file() else 0
+        data['mtime'] = mtime
+        data['stale'] = bool(status_file.is_file()) and (time.time() - mtime) > self.HOSTING_STALE_SEC
+        data['mtime_str'] = datetime.fromtimestamp(mtime).strftime('%H:%M:%S') if mtime else '—'
+        # ARQ 由独立 NSSM 服务托管时（--no-arq），从 erp-arq 服务查询真实 PID（IO 归入收集阶段）
+        if data['status'].get('services', {}).get('arq', {}).get('status') == 'external':
+            data['arq_svc_pid'] = self._svc_pid(_SVC_ARQ)
+        else:
+            data['arq_svc_pid'] = None
         return data
 
     def _apply_hosting_data(self, data):
-        """主线程应用生产状态(仅 UI 更新，无阻塞 IO)。"""
+        """主线程应用收集到的生产模式状态（仅 UI 更新，无阻塞 IO）"""
         try:
-            if not data.get('collect_error'):
-                self._last_hosting = data
-                self._prod_running = bool(data.get('api_running'))
-                # ★ v5.37(D12b): 独立未知标志供展示层使用；不改 _prod_running(它被 _do_light_stop 等
-                # 当作「确认在运行」的依据)。注意此处无任何基于 api_running 的停止计时告警分支，
-                # 故「未知」不会误触发「服务已停止 N 分钟」类误报。
-                self._prod_unknown = bool(data.get('api_unknown'))
-                self._redis_running_cached = bool(data.get('redis_ok'))
-                if data.get('stale'):
-                    self.log_message(f'logs/{_PROD_STATUS_FILE_NAME} 超过 15 秒未更新(可能已停止心跳)', 'WARNING')
+            self._prod_running = data.get('api_running', False)
+            # ★ 三态语义贯通：sc query 失败(未知)必须独立记录，展示层据此显示「状态未知」，
+            # 绝不能落成「已停止」——否则查不出来会被误当成生产已停、诱导误判。
+            self._prod_unknown = data.get('api_unknown', False)
+            if data.get('collect_error'):
+                self._warn_once('collect-error',
+                                f"状态收集失败（{data.get('error', '未知原因')}），界面本轮不更新")
+                return
+
+            def _detail(badge, state, text):
+                badge.set_state(state, text)
+
+            # 服务未运行：以 sc query 为权威，不读状态文件，避免残留旧数据
+            if not data['api_running']:
+                # ★ 查询失败(未知) ≠ 已停止：sc query 报「未知」时服务可能仍在运行，
+                # 不得显示「服务停止」，须显式标「状态未知」并保留原状。
+                api_unknown = data.get('api_unknown', False)
+                if api_unknown:
+                    self.hosting_svc_badge.set_state('unknown', '状态未知')
+                    _detail(self.hosting_backend_badge, 'stopped', '后端 状态未知')
+                    _detail(self.hosting_arq_badge, 'stopped', 'ARQ 状态未知')
+                    _detail(self.hosting_frontend_badge, 'stopped', '前端 状态未知')
+                    _detail(self.hosting_ready_badge, 'stopped', '就绪 状态未知')
+                else:
+                    self.hosting_svc_badge.set_state('stopped', '服务停止')
+                    _detail(self.hosting_backend_badge, 'stopped', '后端 已停止')
+                    _detail(self.hosting_arq_badge, 'stopped', 'ARQ 未运行')
+                    _detail(self.hosting_frontend_badge, 'stopped', '前端 已停止')
+                    _detail(self.hosting_ready_badge, 'stopped', '就绪 —')
+                redis_ok = data['redis_ok']
+                broker_ok = data.get('broker_ok', False)
+                # 缓存与 broker 分开显示：broker 决定 ARQ（cron/备份/报表）能否工作，
+                # 合并成一个「Redis 运行中」会把「缓存正常但队列已死」当健康上报。
+                if redis_ok and broker_ok:
+                    _detail(self.hosting_redis_badge, 'running', 'Redis 运行中')
+                elif redis_ok:
+                    _detail(self.hosting_redis_badge, 'error', f'broker({_REDIS_BROKER_PORT}) 未运行')
+                else:
+                    _detail(self.hosting_redis_badge, 'stopped', 'Redis 已停止')
+                return
+
+            read_err = data['read_err']
+            stale = data.get('stale', False)
+            mtime_str = data.get('mtime_str', '—')
+
+            status = data['status']
+            svcs = status.get('services', {})
+            self.hosting_svc_badge.set_state('running', '服务运行')
+
+            def _svc_detail(badge, label, svc, running, starting=()):
+                """按 prod_runner 上报的 status 如实映射。
+
+                关键：backend 的 running ≠ ready（进程已起、健康门未过）是「启动中」，
+                不是「已停止」—— 把它显示成红色「已停止」正是用户点「启动服务」后
+                看到的那条误导信息。
+                """
+                s = (svc or {}).get('status')
+                if s in running:
+                    _detail(badge, 'running', f'{label} 运行中')
+                elif s in starting:
+                    _detail(badge, 'deploying', f'{label} 启动中')
+                elif s in ('failed', 'crashed'):
+                    _detail(badge, 'error', f'{label} 异常({s})')
+                elif s == 'stopped':
+                    _detail(badge, 'stopped', f'{label} 已停止')
+                else:
+                    _detail(badge, 'stopped', f'{label} 未上报')
+
+            # 状态文件不足信（陈旧/缺失/读失败）时绝不把旧快照当现状展示：
+            # prod_runner 停写后，旧快照会永久冻在界面上，让人误判「已停止」
+            # 而服务其实仍在 RUNNING —— 这正是「没有实时更新」的来路。
+            if stale or read_err:
+                # 但要先摘掉「启动窗口」这一段：刚发出启动/重启、且快照还早于那次启动时，
+                # 陈旧是必然的（那是上一轮的快照），此时说「prod_runner 可能已退出、
+                # 请重启服务」是假警报，照着做只会白重启一次服务。
+                start_ts = getattr(self, '_prod_start_ts', 0.0)
+                start_age = time.time() - start_ts if start_ts else None
+                starting_up = (start_age is not None
+                               and start_age < self.HOSTING_START_GRACE_SEC
+                               and data['mtime'] < start_ts)
+                if starting_up:
+                    self._warn_once(f'starting:{data.get("mtime")}',
+                                    f'生产服务 {int(start_age)}s 前刚启动，prod_runner 尚未写入首份状态'
+                                    f'（状态文件最后更新 {mtime_str}）；界面暂按「启动中」显示')
+                    for badge, label in ((self.hosting_backend_badge, '后端'),
+                                         (self.hosting_frontend_badge, '前端'),
+                                         (self.hosting_arq_badge, 'ARQ')):
+                        _detail(badge, 'deploying', f'{label} 启动中')
+                    _detail(self.hosting_ready_badge, 'deploying', '就绪 启动中')
+                    return
+                reason = (f"已 {int(time.time() - data['mtime'])}s 未更新，最后 {mtime_str}"
+                          if stale else (read_err or '状态文件不可用'))
+                self._warn_once(f'stale:{data.get("mtime")}',
+                                f'状态文件不可信（{reason}），界面不再跟随服务状态；'
+                                f'prod_runner 可能已退出，可在服务管理里重启 {_SVC_API}')
+                for badge, label in ((self.hosting_backend_badge, '后端'),
+                                     (self.hosting_frontend_badge, '前端'),
+                                     (self.hosting_arq_badge, 'ARQ')):
+                    _detail(badge, 'stopped', f'{label} 状态未知')
+                _detail(self.hosting_ready_badge, 'stopped', f'就绪 无数据({mtime_str})')
+                return
+            self._hosting_last_warn = ''
+
+            _svc_detail(self.hosting_backend_badge, '后端', svcs.get('backend'),
+                        running=('ready',), starting=('running',))
+            arq = svcs.get('arq') or {}
+            if arq.get('status') == 'external':
+                # ARQ 由独立 NSSM 服务托管：以 sc queryex 的真实 PID 为准。
+                # ★ 但「服务在跑」不等于「ARQ 在干活」：broker 6380 不可达时 erp-arq
+                # 进程仍是 RUNNING（Python 正在重试连接），徽章若只认 PID 就会
+                # 把「死循环重启中」显示成「运行中」。broker 不健康时如实报异常。
+                arq_pid = data.get('arq_svc_pid')
+                if not arq_pid:
+                    _detail(self.hosting_arq_badge, 'stopped', 'ARQ 未运行')
+                elif not data.get('broker_ok', False):
+                    _detail(self.hosting_arq_badge, 'error', f'ARQ 异常(broker 不可达)')
+                else:
+                    _detail(self.hosting_arq_badge, 'running', 'ARQ 运行中')
+            else:
+                _svc_detail(self.hosting_arq_badge, 'ARQ', arq, running=('running', 'ready'))
+            _svc_detail(self.hosting_frontend_badge, '前端', svcs.get('frontend'),
+                        running=('running', 'ready'))
+            redis_ok = data['redis_ok']
+            broker_ok = data.get('broker_ok', False)
+            if redis_ok and broker_ok:
+                _detail(self.hosting_redis_badge, 'running', 'Redis 运行中')
+            elif redis_ok:
+                _detail(self.hosting_redis_badge, 'error', f'broker({_REDIS_BROKER_PORT}) 未运行')
+            else:
+                _detail(self.hosting_redis_badge, 'error', 'Redis 已停止')
+            if status.get('ready'):
+                # 「就绪」只在 ARQ 也健康时才算真的就绪，否则给一个可区分的文案
+                if broker_ok:
+                    _detail(self.hosting_ready_badge, 'running', '就绪 是')
+                else:
+                    _detail(self.hosting_ready_badge, 'error', '就绪 降级(broker 不可达)')
+            elif ((svcs.get('backend') or {}).get('status') in ('failed', 'crashed')
+                  or (svcs.get('frontend') or {}).get('status') in ('failed', 'crashed')):
+                _detail(self.hosting_ready_badge, 'error', '就绪 启动失败')
+            else:
+                _detail(self.hosting_ready_badge, 'deploying', '就绪 启动中')
         finally:
             self._hosting_collecting = False
-            if self._shutting_down:
-                return
+            self._update_mode_badge()
+            # 收集期间有刷新请求 → 立即补一轮；否则按 5s 周期继续
             delay = 50 if self._hosting_refresh_requested else 5000
             self._hosting_refresh_requested = False
-            self._update_all_ui()
             self._after_ids['hosting'] = self.root.after(delay, self._refresh_hosting_status)
-    # ===================== 运行状态检查(自有进程存活) =====================
 
-    def _check_server_status(self):
-        if self._shutting_down:
-            return
-        if self._mode == 'dual_dev':
-            backend_crashed = self._process and self._process.poll() is not None
-            frontend_crashed = self._frontend_process and self._frontend_process.poll() is not None
-            if backend_crashed or frontend_crashed:
-                code = self._process.poll() if self._process else None
-                which = '前后端' if (backend_crashed and frontend_crashed) else ('后端' if backend_crashed else '前端')
-                self.log_message(f'开发模式{which}进程意外终止 (退出码: {code})', 'ERROR')
-                self._abort_process(self._frontend_process, '前端')
-                self._abort_process(self._process, '后端')
-                self._set_mode_none()
-        self._after_ids['status'] = self.root.after(5000, self._check_server_status)
-    # ===================== 模式状态机 / UI 同步 =====================
+    def _svc_installed(self, name):
+        """服务是否已注册到 SCM（供安装幂等判定使用）。
 
-    def _is_busy(self):
-        # v5.40 补丁: 纳入紧急停止进行中 —— 否则紧急停止期间 toggle_dev/toggle_prod
-        # 仍可穿过此处进入启动链，形成次级竞态(与 _stop_in_progress 抢占同一批资源)。
-        # v5.40(P2): 移除死字面量 'restarting'(全文件无写入点)。
-        return (self._mode in ('starting', 'stopping')
-                or self._prod_busy
-                or self._stop_in_progress)
-
-    def toggle_dev(self):
-        if self._is_busy():
-            self.log_message('操作正在执行中，请稍候', 'WARNING')
-            return
-        self.stop_dual_dev() if self._mode == 'dual_dev' else self.start_dual_dev()
-
-    def toggle_prod(self):
-        if self._is_busy():
-            self.log_message('操作正在执行中，请稍候', 'WARNING')
-            return
-        self.stop_prod() if self._prod_running else self.start_prod()
-
-    def _update_all_ui(self):
-        """按钮状态机(§7.3): 互斥是「启动即自动停对方」，故对方按钮在自身运行时仍可用。
-
-        ★ v5.33 视觉语义（实测 ui-ref-v533-original.png）:
-          按钮外观同时表达【意图】与【可用性】——
-            · 意图=启动 → 实心彩色（开发绿 #34c759 / 生产蓝 #007aff）
-            · 意图=停止 → 白底 + 同色描边（outlined）
-            · 禁用     → 该色调的浅色底（绿 ⇒ #a8e0b8 / 其它 ⇒ #f2f2f7）
-          这与 v5.40 原实现「一律蓝实心、禁用变灰」的单一表达不同，
-          但**只改视觉映射，不改任何状态判定**（busy 判定与按钮可用性完全沿用原逻辑）。
+        与 `_svc_state` 的分工：这里只回答「在不在」，且**不把「查不出来」当成未安装**
+        —— `sc query` 失败时返回 False，随后的 `nssm install` 会用自己的错误码报出
+        真实原因（拒绝访问 / 找不到文件…），而不是被静默跳过。
         """
-        if self._shutting_down or not hasattr(self, 'dev_btn'):
-            return
-        if self._is_busy():
-            self._set_btn(self.dev_btn, '启动中…', False, 'success', 'start')
-            self._set_btn(self.prod_btn, '启动中…', False, 'accent', 'start')
+        code, out = self._run_capture(['sc', 'query', name], timeout=5)
+        return code == 0 and 'SERVICE_NAME' in out
+
+    @staticmethod
+    def _looks_like_exists_error(out):
+        """识别 nssm 的「服务已存在」失败（Windows 1073 ERROR_SERVICE_EXISTS）。
+
+        兜底用：`sc query` 可能因权限/策略/瞬时故障查不到（此时 `_svc_installed`
+        只能返回 False），此时只能靠 install 自己的错误文本判断，
+        否则一个「重复注册」会被当成真失败，把整轮安装判死。
+        """
+        text = (out or '').lower()
+        return any(marker in text for marker in ('已存在', 'already exists', '1073'))
+
+    def _nssm_install(self, nssm, name, app, params, env_extra, depends=None):
+        # Step 1: 创建服务（仅注册应用路径，不传参数，避免 NSSM 弹 GUI）
+        #   已存在时**不能再 install**：CreateService 会以 1073「指定的服务已存在。」
+        #   失败，整轮安装被判定为失败（2026-09-16 实测：erp-prod/erp-arq 早已注册，
+        #   点『安装服务』必然报「注册失败」，且乱码后连原因都读不出来）。
+        #   改为「跳过创建 + 覆盖配置」——「安装服务」可反复点击且结果幂等。
+        existed = self._svc_installed(name)
+        if existed:
+            self.log_message(f'{name} 服务已存在，跳过创建，改为更新配置')
         else:
-            dev_running = self._mode == 'dual_dev'
-            self._set_btn(self.dev_btn, '停止开发模式' if dev_running else '启动开发模式',
-                          True, 'success', 'stop' if dev_running else 'start')
-            self._set_btn(self.prod_btn, '停止生产模式' if self._prod_running else '启动生产模式',
-                          True, 'accent', 'stop' if self._prod_running else 'start')
-        self._update_mode_badge()
-        self._update_dots()
+            code, out = self._run_capture([nssm, 'install', name, app], timeout=30)
+            if code != 0:
+                if self._looks_like_exists_error(out):
+                    # 预判失败但服务其实在 → 同样按「已存在」处理，绝不因重复注册判死
+                    existed = True
+                    self.log_message(f'{name} 服务已存在（install 返回 1073），改为更新配置', 'WARNING')
+                else:
+                    self.log_message(f'{name} 注册失败: {out}', 'ERROR')
+                    return False
+        if existed and 'RUNNING' in self._svc_state(name):
+            self.log_message(f'{name} 正在运行，配置变更将在下次启动生效（可点『重启』立即生效）', 'WARNING')
+        # Step 2: 设置启动参数（NSSM AppParameters 接受空格分隔的完整命令行）
+        if params:
+            self._run_capture([nssm, 'set', name, 'AppParameters', ' '.join(params)], timeout=15)
+        # Step 3: 设置其他属性
+        #   Application 也一并写入：服务已存在时，这一步会把可执行文件路径纠正为当前值
+        #   （换过 Python / 虚拟环境后，重新点『安装服务』即可修复指向）。
+        settings = [
+            ('Application', app),
+            ('AppDirectory', str(_PROJECT_DIR)),
+            ('AppStdout', str(_PROJECT_DIR / 'logs' / f'{name}.log')),
+            ('AppStderr', str(_PROJECT_DIR / 'logs' / f'{name}.log')),
+            ('AppRotateFiles', '1'),
+            ('AppRotateBytes', '10485760'),
+            ('AppExit', 'Default Restart'),
+            ('AppRestartDelay', '5000'),
+            ('Start', 'SERVICE_AUTO_START'),
+            ('AppEnvironmentExtra', env_extra),
+            ('AppNoConsole', '1'),
+        ]
+        for key, val in settings:
+            code, out = self._run_capture([nssm, 'set', name, key, val], timeout=15)
+            if code != 0:
+                # 旧实现丢弃了全部返回码：某项没写进去也照样报「已注册」，无从判断。
+                self.log_message(f'{name} 设置 {key} 失败: {out.strip() or f"退出码 {code}"}', 'WARNING')
+        # Step 4: 依赖关系（开机由 SCM 串行保证启动顺序）
+        #   只写已注册的依赖服务：依赖一个不存在的服务会让 SCM 直接拒绝启动本服务
+        #   （错误 1068「依存服务或组无法启动」），比没有依赖更糟。
+        self._apply_depends(name, depends)
+        self.log_message(f'{name} {"已存在，配置已更新" if existed else "已注册为 Windows 服务"}（开机自启 + 崩溃自动重启）')
+        return True
 
-    def _set_btn(self, btn, text, enabled, tone='accent', intent='start'):
-        """按钮状态机 → 控件层。
+    def _apply_depends(self, name, depends):
+        """设置服务的 SCM 依赖关系（DependOnService）。"""
+        if not depends:
+            return
+        missing = [d for d in depends if not self._svc_installed(d)]
+        if missing:
+            self.log_message(
+                f'{name} 跳过依赖设置：{", ".join(missing)} 服务不存在，'
+                f'请先安装 Redis 服务（依赖不存在的服务会导致本服务无法启动）', 'WARNING')
+            return
+        nssm = self._find_nssm()
+        if not nssm:
+            return
+        code, out = self._run_capture([nssm, 'set', name, 'DependOnService', ' '.join(depends)], timeout=15)
+        if code != 0:
+            # 旧版 NSSM 无该参数，回退直接写注册表（SCM 实际读取的位置）
+            self._set_depends_registry(name, depends, out)
+        else:
+            self.log_message(f'{name} 依赖已设置: {", ".join(depends)}')
 
-        ★ v5.33 视觉层适配: 主操作按钮已由 tk.Button 换成 RoundedButton（Canvas 子类）。
-          RoundedButton.config 只认 text/state/command/bg/tone 五个键，不认 fg/cursor，
-          且禁用态配色由 tone 派生（绿按钮 #a8e0b8 / 其它 #f2f2f7），
-          外部再传 bg= 会污染 Canvas 底色、破坏圆角外观。
-          故按控件能力分流：具备 set_text（即 RoundedButton）走精简参数，
-          其余（如残留的 tk.Button）保留旧行为，保证零回归。
+    def _set_depends_registry(self, name, depends, reason=''):
+        """回退路径：直接写 HKLM\\SYSTEM\\...\\Services\\<name>\\DependOnService (REG_MULTI_SZ)。"""
+        if not _IS_WINDOWS:
+            return
+        try:
+            import winreg
+            key = winreg.OpenKey(
+                winreg.HKEY_LOCAL_MACHINE,
+                rf'SYSTEM\CurrentControlSet\Services\{name}', 0, winreg.KEY_SET_VALUE)
+            with key:
+                winreg.SetValueEx(key, 'DependOnService', 0, winreg.REG_MULTI_SZ, list(depends))
+            self.log_message(f'{name} 依赖已写入注册表: {", ".join(depends)}')
+        except OSError as e:
+            self.log_message(f'{name} 设置依赖失败（nssm: {reason.strip() or "非零退出"}）: {e}', 'WARNING')
+
+    def _install_services(self):
+        if self._mode not in ('none',):
+            self.log_message('请先停止当前手动运行的服务，再安装 Windows 服务', 'WARNING')
+            messagebox.showwarning('提示', '请先停止当前运行中的服务（开发/手动生产/调试），再安装 Windows 服务。')
+            return
+        nssm = self._find_nssm()
+        if not nssm:
+            self.log_message('未找到 NSSM，请下载 https://nssm.cc 解压到 C:\\nssm\\nssm.exe', 'ERROR')
+            messagebox.showerror('缺少 NSSM', '未找到 NSSM。\n请从 https://nssm.cc/download 下载并解压到 C:\\nssm\\nssm.exe。')
+            return
+        if not _PYTHON_EXE:
+            messagebox.showerror('缺少 Python', '未找到 Python 解释器，无法安装服务。')
+            return
+        workers = self.hosting_workers_var.get().strip() or '4'
+        self._gate.start('安装生产服务', self._install_services_flow, nssm, workers)
+
+    def _install_services_flow(self, nssm, workers):
+        env_extra = ('APP_ENV=production FASTAPI_DEBUG=false PYTHONPATH=' + str(_PROJECT_DIR) +
+                     ' PYTHONUTF8=1 PYTHONUNBUFFERED=1 UVICORN_WORKERS=' + workers)
+        self._msg_queue.put(('log', {'text': f'正在安装生产服务 (worker={workers})...'}))
+        # erp-prod 监督器 --no-arq：ARQ 由独立 erp-arq 服务托管，避免双跑定时任务
+        self._gate.checkpoint()
+        ok1 = self._nssm_install(nssm, _SVC_API, _PYTHON_EXE,
+                                 ['-m', 'fastapi_app.core.prod_runner', '--no-arq'],
+                                 env_extra, depends=_SVC_DEPENDS.get(_SVC_API))
+        self._gate.checkpoint()
+        ok2 = self._nssm_install(nssm, _SVC_ARQ, _PYTHON_EXE,
+                                 ['-m', 'arq', 'fastapi_app.core.arq_app.WorkerSettings'],
+                                 env_extra, depends=_SVC_DEPENDS.get(_SVC_ARQ))
+        if ok1 and ok2:
+            self._msg_queue.put(('log', {'text': '生产服务安装完成：erp-prod + erp-arq（开机自启、按依赖顺序启动）'}))
+        else:
+            self._msg_queue.put(('log', {'text': '生产服务安装未完全成功，请查看上方日志', 'level': 'WARNING'}))
+        self._msg_queue.put(('hosting_refresh', {}))
+
+    def _service_cmd_sync(self, verb):
+        """停止/重启生产服务：逐服务执行 + 轮询确认终态。
+
+        NSSM 的 stop/restart 都是立即返回——不等终态就报「已执行」等于什么都没说
+        （2026-09-16 用户实测：stop 打印完 5 秒后服务仍在 RUNNING）。
         """
-        with contextlib.suppress(Exception):
-            if hasattr(btn, 'set_text'):
-                # intent='stop' → outlined(白底描边)；'start' → solid(实心彩色)
-                btn.config(text=text, tone=tone,
-                           variant='outlined' if intent == 'stop' else 'solid',
-                           state=tk.NORMAL if enabled else tk.DISABLED)
+        nssm = self._find_nssm()
+        if verb == 'restart':
+            # 重启同样会换掉 prod_runner 进程：旧快照在它写下第一份新快照前必然陈旧，
+            # 与「启动服务」共用同一条宽限判据（否则重启后也会弹「可能已退出」）。
+            self._prod_start_ts = time.time()
+        for name in (_SVC_API, _SVC_ARQ):
+            self._gate.checkpoint()
+            if verb == 'stop':
+                self._msg_queue.put(('log', {'text': f'正在停止生产服务 {name}...'}))
+                if self._wait_service_stopped(name, timeout=45):
+                    self._msg_queue.put(('log', {'text': f'{name} 已停止 (state={self._svc_state(name)})'}))
+                else:
+                    self._msg_queue.put(('log', {'text': f'{name} 在 45s 内未确认 STOPPED（当前: {self._svc_state(name)}），请到服务管理器检查', 'level': 'WARNING'}))
+            elif verb == 'restart':
+                self._msg_queue.put(('log', {'text': f'正在重启生产服务 {name}...'}))
+                if nssm:
+                    self._run_capture([nssm, 'restart', name], timeout=30)
+                else:
+                    # sc 无 restart：先停后起，终态以轮询为准
+                    self._run_capture(['sc', 'stop', name], timeout=30)
+                    self._run_capture(['sc', 'start', name], timeout=30)
+                self._wait_service_running(name, timeout=25)
+        self._msg_queue.put(('hosting_refresh', {}))
+
+    def _service_cmd(self, verb):
+        self._gate.start(f'服务{verb}', self._service_cmd_sync, verb)
+
+    def _start_services(self):
+        # 互斥守卫：开发模式正在启动/重启中则拒绝（防 TOCTOU 双后端抢 5002）
+        if self._mode in ('starting', 'restarting'):
+            self.log_message('开发模式正在启动中，请稍候', 'WARNING')
+            return
+        self._gate.start('启动生产服务', self._start_services_flow)
+
+    def _start_services_flow(self):
+        # 互斥切换：停开发模式 + 清端口（含进程树终止等阻塞操作，在动作线程内完成）
+        # ★ 日志对齐开发模式：原实现只有两行「erp-prod start 已执行」——NSSM start
+        #   立即返回，不等待 RUNNING、不回灌服务日志，界面上一片安静像没反应。
+        self._msg_queue.put(('log', {'text': '正在启动生产模式 (Windows 服务 NSSM)...'}))
+        # 记下启动时刻：此后直到 prod_runner 写下第一份快照前，状态文件都还是上一轮的
+        # 旧快照，界面必须按「启动中」对待，不能报「prod_runner 可能已退出」。
+        self._prod_start_ts = time.time()
+        if self._ensure_development_stopped():
+            self._msg_queue.put(('log', {'text': '已自动停止开发模式', 'level': 'INFO'}))
+        self._gate.checkpoint()
+        self._msg_queue.put(('log', {'text': '正在清理端口...'}))
+        self._release_ports()
+        # Redis 基础设施工况：缓存实例直接拉起（走服务），broker 必须在 erp-arq
+        # 之前就绪——否则 erp-arq 连不上 6380 会陷入重启循环，而界面依旧全绿。
+        if not self._start_redis():
+            self._msg_queue.put(('log', {'text': '警告: Redis 未启动，部分功能可能不可用', 'level': 'WARNING'}))
+        self._gate.checkpoint()
+        broker_ok = self._ensure_redis_broker()
+        # NSSM 日志是追加写：先记下两个日志文件的当前大小，之后只回灌「本次启动
+        # 之后新增的字节」——直接取文件尾会把上几次运行的旧输出（旧 PID、旧崩溃栈）
+        # 当现状展示（2026-09-16 实机启动踩过）。
+        offsets = {name: self._log_size(_PROJECT_DIR / 'logs' / f'{name}.log')
+                   for name in (_SVC_API, _SVC_ARQ)}
+        ok_api, api_state, api_pid = self._start_one_service(_SVC_API)
+        if not broker_ok:
+            # broker 未就绪时 erp-arq 起不来；仍尝试一次（让日志自己说话），
+            # 但最终结论必须按失败上报，不能再用「启动完成」把它盖过去。
+            self._msg_queue.put(('log', {'text': f'ARQ broker 未就绪，{_SVC_ARQ} 预计无法工作', 'level': 'ERROR'}))
+        ok_arq, arq_state, arq_pid = self._start_one_service(_SVC_ARQ)
+        if ok_arq and not broker_ok:
+            ok_arq = False
+        # 服务 stdout/stderr 由 NSSM 重定向到 logs\{name}.log —— 回灌本次新增输出，
+        # 对齐开发模式里 Redis/uvicorn 的实时输出。
+        self._gate.checkpoint()
+        for name in (_SVC_API, _SVC_ARQ):
+            fresh = self._read_log_lines(_PROJECT_DIR / 'logs' / f'{name}.log',
+                                         start_offset=offsets[name], lines=30)
+            if fresh:
+                self._msg_queue.put(('log_batch', {'lines': [f'[{name}] {ln}' for ln in fresh], 'level': 'INFO'}))
             else:
-                btn.config(text=text, state=tk.NORMAL if enabled else tk.DISABLED,
-                           bg=_C['blue'] if enabled else _C['border'],
-                           fg='#FFFFFF' if enabled else _C['muted'],
-                           cursor='hand2' if enabled else 'arrow')
+                self._msg_queue.put(('log', {'text': f'[{name}] 本次启动暂无新日志（历史见 logs 下的 {name}.log）'}))
+        if ok_api and ok_arq:
+            self._msg_queue.put(('log', {'text': f'生产模式启动完成 → {_SVC_API}: {api_state} (PID: {api_pid}), '
+                                         f'{_SVC_ARQ}: {arq_state} (PID: {arq_pid})'}))
+        else:
+            hint = (f'；{_SVC_ARQ} 因 ARQ broker(6380) 未就绪而不可用，'
+                    f'请检查 {_SVC_REDIS_BROKER} 服务') if not broker_ok else ''
+            self._msg_queue.put(('log', {'text': f'生产模式启动未完全成功{hint}，请查看上方日志与 logs 目录下的服务日志', 'level': 'WARNING'}))
+        self._msg_queue.put(('hosting_refresh', {}))
+
+    @staticmethod
+    def _log_size(path):
+        try:
+            return os.path.getsize(path)
+        except OSError:
+            return 0
+
+    @staticmethod
+    def _read_log_lines(path, start_offset=0, lines=15, max_bytes=65536):
+        """读取日志文件自 start_offset 起新增内容的末尾 lines 行（有界读取）。
+
+        NSSM 的 stdout/stderr 重定向是追加写：start 之前先记下文件大小，之后把
+        「新增字节」的尾部回灌界面才是本次运行的输出；文件被轮转重开（大小小于
+        offset）时按全新文件处理。历史日志绝不回灌。
+        """
+        try:
+            with open(path, 'rb') as f:
+                f.seek(0, os.SEEK_END)
+                size = f.tell()
+                if start_offset > size:
+                    # 文件被轮转重开（当前大小小于记录的 offset）：按全新文件处理
+                    begin = max(0, size - max_bytes)
+                else:
+                    begin = max(start_offset, size - max_bytes, 0)
+                f.seek(begin)
+                raw = f.read().splitlines()
+            return [ln.decode('utf-8', 'replace').strip() for ln in raw[-lines:] if ln.strip()]
+        except OSError:
+            return []
+
+    def _wait_service_running(self, name, timeout=25):
+        """轮询直到服务 RUNNING；返回 (ok, state, pid)，成功/超时都写日志。
+
+        NSSM start/restart 立即返回，服务要经 START_PENDING 才到 RUNNING——
+        不轮询就报「已执行」等于什么都没说。超时仍未 RUNNING 如实告警并指路日志文件。
+        """
+        deadline = time.monotonic() + timeout
+        state = self._svc_state(name)
+        while time.monotonic() < deadline:
+            self._gate.checkpoint()
+            state = self._svc_state(name)
+            if 'RUNNING' in state.upper():
+                pid = self._svc_pid(name)
+                self._msg_queue.put(('log', {'text': f'{name} 启动成功 (state={state}, PID: {pid if pid is not None else "?"})'}))
+                return True, state, pid
+            time.sleep(1)
+        self._msg_queue.put(('log', {'text': f'{name} 在 {timeout}s 内未进入 RUNNING（当前: {state}），请查看 logs\\{name}.log', 'level': 'WARNING'}))
+        return False, state, None
+
+    def _start_one_service(self, name, timeout=25):
+        """发出启动命令并轮询确认 RUNNING；返回 (ok, state, pid)。"""
+        nssm = self._find_nssm()
+        self._msg_queue.put(('log', {'text': f'正在启动生产服务 {name}...'}))
+        if nssm:
+            code, out = self._run_capture([nssm, 'start', name], timeout=20)
+        else:
+            code, out = self._run_capture(['sc', 'start', name], timeout=20)
+        if code != 0:
+            out_l = (out or '').lower()
+            if '1056' in out or 'already' in out_l:
+                self._msg_queue.put(('log', {'text': f'{name} 已在运行中，跳过 start'}))
+            elif '1053' not in out:
+                # 1053/超时类错误不代表失败（服务可能仍在启动中），以轮询结果为准
+                self._msg_queue.put(('log', {'text': f'{name} start 返回非零 (code={code}): {(out or "").strip()[:160]}', 'level': 'WARNING'}))
+        return self._wait_service_running(name, timeout=timeout)
+
+    def _stop_services(self):
+        self._service_cmd('stop')
+
+    def _restart_services(self):
+        self._service_cmd('restart')
+
+    def _uninstall_services(self):
+        nssm = self._find_nssm()
+        if not nssm:
+            messagebox.showerror('缺少 NSSM', '未找到 NSSM，无法卸载服务。')
+            return
+        self._gate.start('卸载生产服务', self._uninstall_services_flow, nssm)
+
+    def _uninstall_services_flow(self, nssm):
+        for name in (_SVC_API, _SVC_ARQ):
+            self._gate.checkpoint()
+            self._run_capture([nssm, 'stop', name], timeout=30)
+            self._gate.checkpoint()
+            code, out = self._run_capture([nssm, 'remove', name, 'confirm'], timeout=30)
+            if code == 0:
+                self._msg_queue.put(('log', {'text': f'{name} 已卸载'}))
+            else:
+                self._msg_queue.put(('log', {'text': f'{name} 卸载失败: {out}', 'level': 'WARNING'}))
+        self._msg_queue.put(('hosting_refresh', {}))
+
+    def _open_logs_dir(self):
+        log_dir = _PROJECT_DIR / 'logs'
+        log_dir.mkdir(exist_ok=True)
+        try:
+            os.startfile(str(log_dir))
+        except Exception as e:
+            self.log_message(f'打开日志目录失败: {e}', 'ERROR')
+
+    def _build_log_section(self, parent):
+        log_card = tk.Frame(parent, bg=self._PALETTE['bg_card'], highlightbackground=self._PALETTE['border_card'], highlightthickness=1)
+        log_card.grid(row=1, column=0, columnspan=2, sticky='nsew', pady=(10, 0))
+        log_card.columnconfigure(0, weight=1)
+        log_card.rowconfigure(1, weight=1)
+        log_hdr = tk.Frame(log_card, bg=self._PALETTE['bg_card'])
+        log_hdr.grid(row=0, column=0, sticky='ew', padx=20, pady=(12, 0))
+        tk.Label(log_hdr, text='运行日志', font=('Microsoft YaHei UI', 11, 'bold'), fg=self._PALETTE['text_primary'], bg=self._PALETTE['bg_card']).pack(side=tk.LEFT)
+        tk.Label(log_hdr, text='实时输出', font=('Microsoft YaHei UI', 8), fg=self._PALETTE['text_dim'], bg=self._PALETTE['bg_card']).pack(side=tk.LEFT, padx=(8, 0))
+        log_btns = tk.Frame(log_hdr, bg=self._PALETTE['bg_card'])
+        log_btns.pack(side=tk.RIGHT)
+        for txt, cmd in [('导出', self.export_log), ('清空', self.clear_log)]:
+            pill = tk.Frame(log_btns, bg=self._PALETTE['bg_card'], cursor='hand2', highlightbackground=self._PALETTE['border'], highlightthickness=1)
+            pill.pack(side=tk.RIGHT, padx=(4, 0))
+            tk.Label(pill, text=txt, font=('Microsoft YaHei UI', 8), fg=self._PALETTE['text_secondary'], bg=self._PALETTE['bg_card'], padx=12, pady=3, cursor='hand2').pack()
+            for w in (pill, pill.winfo_children()[0]):
+                w.bind('<Button-1>', lambda e, c=cmd: c())
+                w.bind('<Enter>', lambda e, p=pill: p.config(bg=self._PALETTE['bg_input']))
+                w.bind('<Leave>', lambda e, p=pill: p.config(bg=self._PALETTE['bg_card']))
+                w.bind('<Enter>', lambda e, l=pill.winfo_children()[0]: l.config(bg=self._PALETTE['bg_input']), add='+')
+                w.bind('<Leave>', lambda e, l=pill.winfo_children()[0]: l.config(bg=self._PALETTE['bg_card']), add='+')
+        log_body = tk.Frame(log_card, bg=self._PALETTE['bg_input'], highlightbackground=self._PALETTE['border'], highlightthickness=1)
+        log_body.grid(row=1, column=0, sticky='nsew', padx=14, pady=(8, 14))
+        log_body.columnconfigure(0, weight=1)
+        log_body.rowconfigure(0, weight=1)
+        log_font = self._pick_log_font()
+        self.log_text = tk.Text(log_body, bg=self._PALETTE['bg_log'], fg=self._PALETTE['log_fg'], insertbackground=self._PALETTE['log_fg'], selectbackground=self._PALETTE['bg_input'], font=log_font, wrap=tk.WORD, state=tk.DISABLED, relief=tk.FLAT, padx=14, pady=10, cursor='arrow')
+        self.log_text.grid(row=0, column=0, sticky='nsew')
+        self.log_text.tag_configure('INFO', foreground=self._PALETTE['log_info'])
+        self.log_text.tag_configure('ERROR', foreground=self._PALETTE['log_error'])
+        self.log_text.tag_configure('WARNING', foreground=self._PALETTE['log_warn'])
+        sb = ttk.Scrollbar(log_body, command=self.log_text.yview)
+        sb.grid(row=0, column=1, sticky='ns')
+        self.log_text.config(yscrollcommand=sb.set)
+
+    def _build_status_bar(self):
+        bar = tk.Frame(self.root, bg=self._PALETTE['bg_surface'], highlightbackground=self._PALETTE['border'], highlightthickness=1)
+        bar.pack(fill=tk.X, side=tk.BOTTOM)
+        left = tk.Frame(bar, bg=self._PALETTE['bg_surface'])
+        left.pack(side=tk.LEFT, padx=20, pady=5)
+        # 运行模式徽章：一眼识别当前是开发模式 / 生产模式 / 未运行（大厂 Status Tag 风格）
+        self._mode_badge = StatusBadge(left, state='stopped', text='未运行', size='lg', palette=self._PALETTE, canvas_bg=self._PALETTE['bg_surface'])
+        self._mode_badge.pack(side=tk.LEFT, padx=(0, 10))
+        self.status_bar_label = tk.Label(left, text='就绪', font=('Microsoft YaHei UI', 9), fg=self._PALETTE['text_dim'], bg=self._PALETTE['bg_surface'])
+        self.status_bar_label.pack(side=tk.LEFT)
+        right = tk.Frame(bar, bg=self._PALETTE['bg_surface'])
+        right.pack(side=tk.RIGHT, padx=20, pady=5)
+        # 紧急停止（危险浅底）：强杀全部进程并释放端口
+        self.stop_all_btn = RoundedButton(right, text='紧急停止', variant='subtle', tone='danger', command=self.stop_all, canvas_bg=self._PALETTE['bg_surface'], pady=2, radius=8, font=('Microsoft YaHei UI', 8, 'bold'))
+        self.stop_all_btn.pack(side=tk.RIGHT, padx=(10, 0))
 
     def _update_mode_badge(self):
-        """模式徽章: 过渡态优先于稳态，生产运行由服务轮询决定。"""
-        if self._mode == 'starting' or (self._prod_busy and not self._prod_running):
-            state, text = 'deploying', '启动中'
-        elif self._mode == 'stopping' or self._prod_busy:
-            # v5.40(P2): state 由死字面量 'restarting' 改为活枚举 'switching'(→ _STATUS_META)。
-            #   此前直接传 'restarting' 而非查表，字面量一经清理即无从解析; 改用 'switching'
-            #   并在 _STATUS_META 建同名条目，语义(橙色/切换中)完全等价。
-            state, text = 'switching', '切换中'
-        elif self._mode == 'dual_dev':
-            state, text = 'running', '开发模式运行中'
-        elif self._prod_running:
-            state, text = 'running', '生产模式运行中'
-        elif self._prod_unknown:
-            # ★ v5.37(D12b): 生产状态「未知」不得显示「未运行」——否则误导现场判断生产是否在跑
-            state, text = 'unknown', '生产模式 · 状态未知'
-        else:
-            state, text = 'stopped', '未运行'
-        with contextlib.suppress(Exception):
-            self.mode_badge.set_state(state, text)
-
-    def _update_dots(self):
-        hosting = self._last_hosting
-        dev_starting = self._mode == 'starting'
-        if self._redis_running_cached is True:
-            redis_state = 'running'
-        elif self._redis_running_cached is False:
-            redis_state = 'stopped'
-        else:
-            redis_state = 'starting' if dev_starting else 'unknown'
-        self._set_dot(self.dev_dots['redis'], 'Redis', redis_state)
-        self._set_dot(self.dev_dots['backend'], '后端', self._proc_dot_state(self._process, dev_starting))
-        self._set_dot(self.dev_dots['frontend'], '前端', self._proc_dot_state(self._frontend_process, dev_starting))
-        self._set_dot(self.prod_dots['api'], _SVC_API, self._svc_dot_state(
-            hosting.get('api_installed'), hosting.get('api_running'), self._prod_busy, hosting.get('api_unknown')))
-        self._set_dot(self.prod_dots['arq'], _SVC_ARQ, self._svc_dot_state(
-            hosting.get('arq_installed'), hosting.get('arq_running'), self._prod_busy, hosting.get('arq_unknown')))
-
-    @staticmethod
-    def _proc_dot_state(proc, starting):
-        if proc and proc.poll() is None:
-            return 'running'
-        return 'starting' if starting else 'stopped'
-
-    @staticmethod
-    def _svc_dot_state(installed, running, busy, unknown=False):
-        # ★ v5.37: unknown 优先于 installed/running —— 「查不出来」绝不能显示为「没在跑」。
-        #   注意 running 在未知时天然为 False('RUNNING' not in '未知')，
-        #   若不先判 unknown 就会落到 installed=True 分支显示成「已安装·未运行」。
-        if unknown:
-            return 'unknown'
-        if installed is False:
-            return 'not_installed'
-        if running is True:
-            return 'running'
-        return 'starting' if busy else 'stopped'
-
-    def _set_dot(self, label, name, state):
-        color = _DOT_COLOR.get(state, _C['gray'])
-        glyph = '○' if state in ('stopped', 'not_installed', 'unknown') else '●'
-        suffix = _DOT_TEXT.get(state)
-        with contextlib.suppress(Exception):
-            label.config(text=f'{glyph} {name}' + (f' · {suffix}' if suffix else ''), fg=color)
-    # ===================== 窗口 / 托盘 / 退出 =====================
-
-    def _init_tray(self):
-        """系统托盘(pystray 可选依赖，延迟 import; 失败静默降级只记一行日志)。"""
-        self._tray_icon = None
+        """更新运行模式徽章：未运行 / 开发模式 / 生产模式（含过渡态）。"""
         try:
-            import pystray
-            from PIL import Image, ImageDraw
-            img = Image.new('RGBA', (16, 16), (0, 0, 0, 0))
-            ImageDraw.Draw(img).ellipse([2, 2, 14, 14], fill=(22, 104, 220, 255))
-            menu = pystray.Menu(pystray.MenuItem('显示窗口', self._show_window, default=True), pystray.MenuItem('退出', self._quit_from_tray))
-            self._tray_icon = pystray.Icon('erp_server_manager', img, _WINDOW_TITLE, menu)
-            threading.Thread(target=self._tray_icon.run, daemon=True).start()
-            self.log_message('系统托盘已启用')
-        except Exception as e:
-            self.log_message(f'系统托盘不可用，已降级为普通窗口模式: {e}', 'WARNING')
-            self._tray_icon = None
-
-    def _show_window(self, _icon=None, _item=None):
-        with contextlib.suppress(Exception):
-            self.root.after(0, self._do_show_window)
-
-    def _do_show_window(self):
-        with contextlib.suppress(Exception):
-            self.root.deiconify()
-            self.root.lift()
-            self.root.focus_force()
-
-    def _quit_from_tray(self, _icon=None, _item=None):
-        with contextlib.suppress(Exception):
-            self.root.after(0, self._do_quit)
-
-    def on_closing(self):
-        """关闭按钮: 托盘可用则最小化到托盘，否则直接退出。"""
-        if self._tray_icon is not None:
-            with contextlib.suppress(Exception):
-                self.root.withdraw()
-            self.log_message('已最小化到系统托盘')
-        else:
-            self._do_quit()
-
-    def _do_quit(self):
-        if self._shutting_down:
-            return
-        self._shutting_down = True
-        self.log_message('正在退出服务器管理器...')
-        for key, aid in list(self._after_ids.items()):
-            with contextlib.suppress(Exception):
-                self.root.after_cancel(aid)
-        if self._tray_icon is not None:
-            with contextlib.suppress(Exception):
-                self._tray_icon.stop()
-        # 退出时只回收本管理器启的进程与自有 Redis，不动托管的 Redis 服务与 NSSM 生产服务
-        for proc, name in ((self._frontend_process, '前端'), (self._process, '后端')):
-            if proc and proc.poll() is None:
-                with contextlib.suppress(Exception):
-                    self._kill_process_tree(proc.pid)
-        self._stop_owned_redis()
-        with contextlib.suppress(Exception):
-            self.root.destroy()
+            mode = self._mode
+            if mode == 'starting':
+                self._mode_badge.set_state('deploying', f'开发模式 · {self._mode_label()}')
+            elif mode in ('restarting', 'stopping'):
+                self._mode_badge.set_state('restarting', f'开发模式 · {self._mode_label()}')
+            elif mode == 'dual_dev':
+                self._mode_badge.set_state('running', '开发模式')
+            elif getattr(self, '_prod_running', False):
+                # 生产模式用品牌蓝，与开发模式(绿)区分，体现环境语义
+                self._mode_badge.set_state('running', '生产模式', color_key='accent', tint_key='accent_tint')
+            elif getattr(self, '_prod_unknown', False):
+                # ★ 三态语义贯通：生产状态「未知」不得显示「未运行」——否则误导现场
+                # 判断生产是否在跑（sc query 查不出来 ≠ 服务已停止）。
+                self._mode_badge.set_state('unknown', '生产模式 · 状态未知')
+            else:
+                self._mode_badge.set_state('stopped', '未运行')
+        except Exception:
+            pass
 
 
 def main():
-    _enable_dpi_awareness()  # 必须在 tk.Tk() 之前
     if not _ensure_single_instance():
         _activate_existing_window()
         sys.exit(0)
@@ -2752,19 +3137,20 @@ def main():
         ServerManagerApp(root)
         root.mainloop()
     except Exception as e:
+        import traceback
         tb_text = traceback.format_exc()
-        crash_dir = (_PROJECT_DIR / 'logs').resolve()
-        if '..' in crash_dir.parts or not crash_dir.is_absolute():
-            crash_dir = Path.cwd() / 'logs'
+        log_dir = Path(_PROJECT_DIR) / 'logs'
         crash_file = None
         try:
-            crash_dir.mkdir(exist_ok=True)
-            crash_file = crash_dir / f'server_manager_crash_{datetime.now():%Y%m%d_%H%M%S}.log'
-            crash_file.write_text(f'[CRASH] {datetime.now()}\n{tb_text}', encoding='utf-8')
+            log_dir.mkdir(exist_ok=True)
+            crash_file = log_dir / f'server_manager_crash_{datetime.now():%Y%m%d_%H%M%S}.log'
+            crash_file.write_text(f"[CRASH] {datetime.now()}\n{tb_text}", encoding='utf-8')
         except Exception:
             pass
         with contextlib.suppress(Exception):
-            messagebox.showerror('启动失败', f'服务器管理器启动失败:\n{e}' + (f'\n\n日志: {crash_file}' if crash_file else ''))
+            messagebox.showerror("启动失败", f"服务器管理器启动失败:\n{str(e)}" + (f"\n\n日志: {crash_file}" if crash_file else ""))
         sys.exit(1)
+
+
 if __name__ == '__main__':
     main()

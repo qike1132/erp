@@ -12,7 +12,6 @@ import type {
   ProjectUpdateRequest,
   ActionResponse,
 } from '@/api/patternRoom'
-import { toast } from '@/composables/useToast'
 import { getErrorStatus } from '@/types/errors'
 import { resolveSamplingErrorMessage } from './useSamplingErrors'
 
@@ -49,7 +48,6 @@ export function useSamplingProject() {
         error.value = message
         currentProject.value = null
       }
-      toast.error(message)
       return null
     } finally {
       if (seq === detailFetchSeq) {
@@ -72,7 +70,6 @@ export function useSamplingProject() {
       console.error('[useSamplingProject] 新增打样项目失败:', e)
       const message = resolveSamplingErrorMessage(e, '新增打样项目失败')
       error.value = message
-      toast.error(message)
       return null
     } finally {
       submitting.value = false
@@ -93,7 +90,6 @@ export function useSamplingProject() {
       console.error('[useSamplingProject] 编辑打样项目失败:', e)
       const message = resolveSamplingErrorMessage(e, '编辑打样项目失败')
       error.value = message
-      toast.error(message)
       // 乐观锁冲突：自动刷新详情，让用户基于最新数据重试
       if (getErrorStatus(e) === 409) {
         await fetchDetail(id)
@@ -117,7 +113,6 @@ export function useSamplingProject() {
       console.error('[useSamplingProject] 删除打样项目失败:', e)
       const message = resolveSamplingErrorMessage(e, '删除打样项目失败')
       error.value = message
-      toast.error(message)
       return null
     } finally {
       submitting.value = false
@@ -138,7 +133,6 @@ export function useSamplingProject() {
       console.error('[useSamplingProject] 上传产品图片失败:', e)
       const message = resolveSamplingErrorMessage(e, '图片上传失败')
       error.value = message
-      toast.error(message)
       return null
     } finally {
       submitting.value = false

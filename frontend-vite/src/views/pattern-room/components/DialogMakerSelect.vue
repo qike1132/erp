@@ -60,7 +60,6 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
-import { toast } from '@/composables/useToast'
 import type { PatternMaker } from '@/api/patternMaker'
 
 const props = defineProps<{
@@ -111,10 +110,7 @@ onBeforeUnmount(() => {
 
 function confirmAdd() {
   const name = addName.value.trim()
-  if (!name) {
-    toast.warning('请输入版师姓名')
-    return
-  }
+  if (!name) return
   emit('add-pattern-maker', name)
   addName.value = ''
   addInputOpen.value = false

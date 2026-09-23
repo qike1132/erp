@@ -9,7 +9,6 @@
 import { ref, watch, type Ref } from 'vue'
 import { patternRoomApi } from '@/api/patternRoom'
 import type { RoleBrief, ActionResponse } from '@/api/patternRoom'
-import { toast } from '@/composables/useToast'
 import { getErrorStatus } from '@/types/errors'
 import { resolveSamplingErrorMessage } from './useSamplingErrors'
 
@@ -64,7 +63,6 @@ export function useSamplingRole(projectId: Ref<number | null>) {
       console.error('[useSamplingRole] 查询角色列表失败:', e)
       const message = resolveSamplingErrorMessage(e, '加载角色列表失败', ROLE_ERROR_OPTS)
       error.value = message
-      toast.error(message)
       roles.value = []
     } finally {
       if (reqId === _requestId) loading.value = false
@@ -90,7 +88,6 @@ export function useSamplingRole(projectId: Ref<number | null>) {
       console.error('[useSamplingRole] 新增角色失败:', e)
       const message = resolveSamplingErrorMessage(e, '新增角色失败', ROLE_ERROR_OPTS)
       error.value = message
-      toast.error(message)
       return null
     } finally {
       submitting.value = false
@@ -112,7 +109,6 @@ export function useSamplingRole(projectId: Ref<number | null>) {
       console.error('[useSamplingRole] 改名角色失败:', e)
       const message = resolveSamplingErrorMessage(e, '改名失败', ROLE_ERROR_OPTS)
       error.value = message
-      toast.error(message)
       // 乐观锁冲突：自动刷新列表
       if (getErrorStatus(e) === 409 && projectId.value != null) {
         await fetchRoles(projectId.value)
@@ -144,7 +140,6 @@ export function useSamplingRole(projectId: Ref<number | null>) {
       console.error('[useSamplingRole] 设置角色最终版本失败:', e)
       const message = resolveSamplingErrorMessage(e, '设置最终版本失败', ROLE_ERROR_OPTS)
       error.value = message
-      toast.error(message)
       if (getErrorStatus(e) === 409 && projectId.value != null) {
         await fetchRoles(projectId.value)
       }
@@ -169,7 +164,6 @@ export function useSamplingRole(projectId: Ref<number | null>) {
       console.error('[useSamplingRole] 删除角色失败:', e)
       const message = resolveSamplingErrorMessage(e, '删除角色失败', ROLE_ERROR_OPTS)
       error.value = message
-      toast.error(message)
       return null
     } finally {
       submitting.value = false

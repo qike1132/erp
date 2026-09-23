@@ -5,11 +5,9 @@
  * 逻辑自 PatternRoomView.vue 原样搬移。
  */
 import { ref, type Ref } from 'vue'
-import { toast } from '@/composables/useToast'
 import type { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { patternMakerApi } from '@/api/patternMaker'
 import type { PatternMaker } from '@/api/patternMaker'
-import { getErrorMessage } from '@/types/errors'
 import { usePatternRoomStore, resolveSwr } from '@/stores/patternRoom'
 import { createManageGuard } from './useManageGuard'
 
@@ -71,13 +69,9 @@ export function usePatternRoomPatternMakers(
         if (res.id != null) {
           formPatternMakerId.value = res.id
         }
-        toast.success('版师添加成功')
-      } else {
-        toast.error(res.message || '版师添加失败')
       }
     } catch (e) {
       console.error('[PatternRoomView] 新增版师失败:', e)
-      toast.error(getErrorMessage(e, '版师添加失败'))
     }
   }
 
@@ -98,13 +92,9 @@ export function usePatternRoomPatternMakers(
         }
         store.invalidateMakers()
         await loadPatternMakers(true)
-        toast.success('版师删除成功')
-      } else {
-        toast.error(res.message || '版师删除失败')
       }
     } catch (e) {
       console.error('[PatternRoomView] 删除版师失败:', e)
-      toast.error(getErrorMessage(e, '版师删除失败'))
     }
   }
 

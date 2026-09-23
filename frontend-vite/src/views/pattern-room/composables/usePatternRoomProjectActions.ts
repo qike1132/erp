@@ -6,11 +6,9 @@
  * 逻辑自 PatternRoomView.vue 原样搬移。
  */
 import { ref, type Ref } from 'vue'
-import { toast } from '@/composables/useToast'
 import type { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { patternRoomApi } from '@/api/patternRoom'
 import type { ProjectCreateRequest, ProjectUpdateRequest, ProjectStatus } from '@/api/patternRoom'
-import { getErrorMessage } from '@/types/errors'
 import { createManageGuard } from './useManageGuard'
 import type { useCustomerSampling } from './useCustomerSampling'
 import type { useSamplingProject } from './useSamplingProject'
@@ -111,16 +109,12 @@ export function usePatternRoomProjectActions(options: UsePatternRoomProjectActio
     try {
       const res = await patternRoomApi.updateProjectStatus(id, 'completed')
       if (res.success) {
-        toast.success('已标记为完成')
         // 静默刷新分组列表：状态变更是增量更新，不能用 loading 全面板交换
         // （v-if 摘除重挂载会丢失虚拟列表滚动位置与组内分页状态，视觉上等同整页刷新）
         await groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, groupHook.currentPage.value, 'silent')
-      } else {
-        toast.error(res.message || '标记完成失败')
       }
     } catch (e) {
       console.error('[PatternRoomView] 标记完成失败:', e)
-      toast.error(getErrorMessage(e, '标记完成失败'))
     }
   }
 
@@ -135,15 +129,11 @@ export function usePatternRoomProjectActions(options: UsePatternRoomProjectActio
     try {
       const res = await patternRoomApi.updateProjectStatus(id, 'cancelled')
       if (res.success) {
-        toast.success('已取消')
         // 静默刷新分组列表：同完成操作，避免 loading 全面板交换丢失页面状态与滚动位置
         await groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, groupHook.currentPage.value, 'silent')
-      } else {
-        toast.error(res.message || '取消失败')
       }
     } catch (e) {
       console.error('[PatternRoomView] 取消项目失败:', e)
-      toast.error(getErrorMessage(e, '取消失败'))
     }
   }
 
@@ -155,9 +145,9 @@ export function usePatternRoomProjectActions(options: UsePatternRoomProjectActio
    * 后台上传暂存图片（不阻塞保存成功的即时反馈）
    *
    * 成功：用上传接口返回的 URL 本地打补丁（详情图片即时显示，无需二次请求），
-   * 并刷新分组列表让卡片缩略图更新；失败：仅提示，不打扰主流程。
+   * 并刷新分组列表让卡片缩略图更新；失败：仅记录日志，不打扰主流程。
    */
-  function uploadPendingImage(projectId: number, image: File, failMessage: string) {
+  function uploadPendingImage(projectId: number, image: File) {
     void patternRoomApi.uploadProjectImage(projectId, image)
       .then((upRes) => {
         if (upRes?.success) {
@@ -170,12 +160,10 @@ export function usePatternRoomProjectActions(options: UsePatternRoomProjectActio
           }
           // 刷新分组列表，让卡片缩略图显示新图片
           void groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, groupHook.currentPage.value, 'fresh')
-        } else {
-          toast.warning(failMessage)
         }
       })
-      .catch(() => {
-        toast.warning(failMessage)
+      .catch((e) => {
+        console.error('[PatternRoomView] 后台上传项目图片失败:', e)
       })
   }
 
@@ -184,19 +172,16 @@ export function usePatternRoomProjectActions(options: UsePatternRoomProjectActio
     if (res && res.id) {
       const newProjectId = res.id
       const pendingImage = pendingProjectImage.value
-      // 创建成功：立即反馈并关闭弹窗，图片改为后台异步上传，避免用户等待上传完成
-      toast.success('创建成功')
+      // 创建成功：立即关闭弹窗，图片改为后台异步上传，避免用户等待上传完成
       projectFormVisible.value = false
       pendingProjectImage.value = null
       // 刷新分组列表并选中新项目（保持当前状态筛选）
       await groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, groupHook.currentPage.value, 'fresh')
       onSelectProject(newProjectId)
-      // 后台上传暂存图片（不阻塞成功反馈）
+      // 后台上传暂存图片（不阻塞主流程）
       if (pendingImage) {
-        uploadPendingImage(newProjectId, pendingImage, '图片上传失败，项目已创建，请稍后在编辑中重新上传')
+        uploadPendingImage(newProjectId, pendingImage)
       }
-    } else {
-      toast.error(projectHook.error.value || '创建失败')
     }
   }
 
@@ -206,19 +191,16 @@ export function usePatternRoomProjectActions(options: UsePatternRoomProjectActio
     const res = await projectHook.update(projectId, data)
     if (res) {
       const pendingImage = pendingProjectImage.value
-      // 更新成功：立即反馈并关闭弹窗，图片改为后台异步上传，避免用户等待上传完成
-      toast.success('更新成功')
+      // 更新成功：立即关闭弹窗，图片改为后台异步上传，避免用户等待上传完成
       projectFormVisible.value = false
       pendingProjectImage.value = null
       // 刷新详情与分组列表（保持当前状态筛选）
       await projectHook.fetchDetail(projectId)
       await groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, groupHook.currentPage.value, 'fresh')
-      // 后台上传暂存图片（不阻塞成功反馈）
+      // 后台上传暂存图片（不阻塞主流程）
       if (pendingImage) {
-        uploadPendingImage(projectId, pendingImage, '图片上传失败，其他信息已更新')
+        uploadPendingImage(projectId, pendingImage)
       }
-    } else {
-      toast.error(projectHook.error.value || '更新失败')
     }
   }
 
@@ -235,12 +217,9 @@ export function usePatternRoomProjectActions(options: UsePatternRoomProjectActio
     if (!ok) return
     const res = await projectHook.remove(proj.id)
     if (res) {
-      toast.success('删除成功')
       selectedProjectId.value = null
       projectHook.clearCurrent()
       await groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, groupHook.currentPage.value, 'fresh')
-    } else {
-      toast.error(projectHook.error.value || '删除失败')
     }
   }
 

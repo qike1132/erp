@@ -105,7 +105,7 @@ export function useCustomerSampling() {
     } catch (e) {
       if (reqId !== _requestId) return
       if (silent) {
-        // 静默刷新失败：写操作本身已成功（有 toast 反馈），保留当前视图数据，
+        // 静默刷新失败：写操作本身已成功，保留当前视图数据，
         // 避免错误态再把整个面板交换成错误提示；下次激活/操作会重新校验
         console.error('[useCustomerSampling] 静默刷新分组列表失败:', e)
         return
