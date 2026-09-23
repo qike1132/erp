@@ -44,6 +44,15 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 _project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _project_root)
 
+# 测试基线：强制非生产，避免继承本机 .env 的 APP_ENV=production（与
+# fastapi_app/tests/conftest.py 同一约定）。否则 TrustedHostMiddleware 用
+# 生产 ALLOWED_HOSTS 白名单拒绝测试客户端 Host 头（400 Invalid host header）、
+# DOCS_URL/OPENAPI_URL 被置 None，根目录 tests/ 的冒烟/中间件用例在
+# 生产机上假失败。需要生产行为的用例各自内部 monkeypatch.setenv。
+# 必须在 import config/main 之前设置：config.py 的 load_dotenv(override=False)
+# 不会覆盖已存在的环境变量。
+os.environ["APP_ENV"] = "test"
+
 from fastapi_app.core.config import settings
 from fastapi_app.core.security import hash_password
 from fastapi_app.main import app
@@ -52,8 +61,9 @@ from sqlalchemy import text
 # ============================================================
 # 测试配置：注入测试专用主机名
 # ============================================================
-if "test" not in settings.ALLOWED_HOSTS:
-    settings.ALLOWED_HOSTS.append("test")
+for _host in ("test", "testserver"):
+    if _host not in settings.ALLOWED_HOSTS:
+        settings.ALLOWED_HOSTS.append(_host)
 
 
 # ============================================================

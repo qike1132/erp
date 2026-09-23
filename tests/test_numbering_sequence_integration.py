@@ -34,6 +34,10 @@ def _test_db_url() -> str:
     from fastapi_app.core.config import settings
     db_name = os.getenv('DB_NAME', 'erp_system')
     parsed = urlparse(settings.ASYNC_DATABASE_URL)
+    # 幂等：conftest 的 session 级 app_on_test_db 已把 settings.ASYNC_DATABASE_URL
+    # 重定向到 erp_system_test，此处再替换会生成不存在的 erp_system_test_test
+    if parsed.path.rstrip('/').endswith('_test'):
+        return settings.ASYNC_DATABASE_URL
     new_path = parsed.path.replace(f'/{db_name}', f'/{db_name}_test', 1)
     return urlunparse(parsed._replace(path=new_path))
 

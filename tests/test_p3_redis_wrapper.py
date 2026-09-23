@@ -62,10 +62,14 @@ def test_backup_progress_uses_redis_wrapper():
 
 
 def test_deps_uses_redis_wrapper():
-    """验证 deps.py 使用 get_client()"""
+    """验证 deps.py 不再使用旧 utils.redis_cache
+
+    deps.py 已改用进程内 _TTLCache（LRU + TTL）替代 Redis 直连，
+    权限/用户缓存不需要跨进程共享。此处仅验证旧依赖已清除。
+    """
     source = Path('fastapi_app/core/deps.py').read_text(encoding='utf-8')
-    assert 'from fastapi_app.core.redis_wrapper import get_client' in source
     assert 'from utils.redis_cache import redis_cache' not in source
+    assert '_TTLCache' in source  # 确认使用了替代方案
 
 
 def test_auth_endpoint_uses_redis_wrapper():
@@ -95,10 +99,17 @@ def test_auxiliary_endpoint_uses_redis_wrapper():
 
 
 def test_dashboard_service_uses_redis_wrapper():
-    """验证 dashboard_service.py 使用 safe_get/safe_set"""
-    source = Path('fastapi_app/services/dashboard_service.py').read_text(encoding='utf-8')
+    """验证 dashboard 缓存使用 safe_get/safe_set
+
+    dashboard_service.py 已按主题拆分为 services/dashboard/ 子包
+    （本文件是纯 re-export 兼容层），Redis 缓存实现在 activities.py。
+    """
+    source = Path('fastapi_app/services/dashboard/activities.py').read_text(encoding='utf-8')
     assert 'from fastapi_app.core.redis_wrapper import safe_get' in source
     assert 'from fastapi_app.core.redis_wrapper import safe_set' in source
+    # 兼容层与子包均不得回退到旧实现
+    facade = Path('fastapi_app/services/dashboard_service.py').read_text(encoding='utf-8')
+    assert 'from utils.redis_cache import' not in facade
     assert 'from utils.redis_cache import' not in source
 
 

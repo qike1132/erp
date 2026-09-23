@@ -160,7 +160,11 @@ class TestDatabaseSlowQueryRegistration:
         """测试 database.py 能正确导入慢查询模块"""
         from fastapi_app.core import database
         assert hasattr(database, '_async_engine')
-        assert database._async_engine is not None
+        # _async_engine 仅在 init_async_engine() 后非 None；单测不连库，此处只验证
+        # database.py 与 slow_query 模块的导入链完好（真实注册路径见
+        # test_rebuild_pool_registers_listeners 与 database.py 的 engine 初始化代码）
+        from fastapi_app.core.slow_query import setup_slow_query_listener  # noqa: F401
+        assert callable(setup_slow_query_listener)
 
     def test_slow_query_setup_function_exists(self):
         """测试 slow_query 模块导出必要函数"""
