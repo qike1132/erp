@@ -84,10 +84,15 @@ def _setup_csrf(app: FastAPI) -> None:
         import ipaddress
         import secrets
 
-        _csrf_secure = os.getenv(
-            "CSRF_COOKIE_SECURE",
-            "true" if settings.is_production else "",
-        ).lower() in ("true", "1", "yes")
+        def _csrf_secure() -> bool:
+            # 运行时判定，而非 import 时固化：测试进程会先设 APP_ENV=test 再 import
+            # main.py，若此处固化则 monkeypatch APP_ENV=production 后 HTTPS 分支仍
+            # 读不到「生产默认 true」，导致 CSRF cookie 的 Secure 属性回归测试假失败。
+            # 语义：显式 CSRF_COOKIE_SECURE 优先，否则生产默认 true、非生产 false。
+            return os.getenv(
+                "CSRF_COOKIE_SECURE",
+                "true" if settings.is_production else "",
+            ).lower() in ("true", "1", "yes")
 
         # 内网 IP 段：CSRF 攻击几乎不可能来自内网，直接豁免
         _LAN_NETWORKS = (
@@ -193,7 +198,7 @@ def _setup_csrf(app: FastAPI) -> None:
             )
             _csrf_samesite = "lax"
             _has_bearer_resp = request.headers.get("authorization", "").startswith("Bearer ")
-            _csrf_sec = _csrf_secure if (_is_https and not _has_bearer_resp) else False
+            _csrf_sec = _csrf_secure() if (_is_https and not _has_bearer_resp) else False
             response.set_cookie(
                 key="fastapi_csrf_token",
                 value=csrf_token,

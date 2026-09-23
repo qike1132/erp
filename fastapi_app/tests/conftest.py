@@ -3,11 +3,21 @@
 
 提供测试用的 FastAPI 客户端和 mock 数据库会话。
 """
+import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+
+# 测试基线：强制非生产，避免继承本机 .env 的 APP_ENV=production。
+# 否则 config.py 的 load_dotenv 会把 APP_ENV=production 注入 os.environ，
+# 导致 DOCS_URL/OPENAPI_URL/REDOC_URL 在类定义期被置为 None、/metrics 端点
+# 被生产鉴权闸门关闭，开发冒烟测试（test_integration_smoke、test_pages）
+# 在本机生产机上假失败。需要生产行为的用例各自内部 monkeypatch.setenv。
+# 必须在 import config/main 之前设置：config.py 的 load_dotenv(override=False)
+# 不会覆盖已存在的环境变量。
+os.environ["APP_ENV"] = "test"
 
 from fastapi_app.core.config import settings
 from fastapi_app.main import app

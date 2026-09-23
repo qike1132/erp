@@ -70,6 +70,20 @@ class TestProductionGatesUnderMalformedEnv:
     修改环境变量后必须 reload 模块才能反映到 Settings()。
     """
 
+    @pytest.fixture(autouse=True)
+    def _restore_settings_singleton(self):
+        """reload 会重新执行模块级 ``settings = Settings()``，把全局单例替换为
+        本用例 monkeypatch 环境下的新实例。若不恢复，后续用例里 ``from config
+        import settings`` 会拿到「生产环境固化值」的单例（如 BACKEND_CORS_ORIGINS
+        已被生产规则过滤掉 null），与当时 ``_is_production_env()`` 的判定脱节，
+        导致 test_cors_origin_production_filter 的装配一致性断言假失败。
+        """
+        import fastapi_app.core.config as config_module
+
+        saved = config_module.settings
+        yield
+        config_module.settings = saved
+
     def test_docs_urls_disabled(self, monkeypatch: pytest.MonkeyPatch):
         import importlib
 
