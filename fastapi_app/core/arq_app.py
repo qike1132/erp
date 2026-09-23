@@ -15,6 +15,7 @@ import asyncio
 
 from arq import create_pool, cron
 from arq.connections import RedisSettings
+from arq.constants import default_queue_name, health_check_key_suffix
 
 from fastapi_app.core.arq_callbacks import on_job_end, on_job_failed, on_job_started
 from fastapi_app.core.config import settings
@@ -142,6 +143,9 @@ class WorkerSettings:
     ]
     cron_jobs = cron_jobs
     redis_settings = redis_settings
+    # 哨兵键刷新周期（秒）：默认 3600 意味着 worker 硬崩溃后最长 1 小时仍误报在线，
+    # 显式缩短到 60s（TTL = interval + 1s，见 check_worker_health）。
+    health_check_interval = 60
     max_jobs = 10
     job_timeout = 1800
     max_tries = 3
@@ -171,26 +175,51 @@ async def get_arq_pool():
     return _arq_pool
 
 
+# 健康探测超时上限（秒）：broker 假死（TCP 可连不回包）时，探测须在该时长内返回
+_HEALTH_PROBE_TIMEOUT = 2.0
+
+
+def _health_check_key(pool) -> str:
+    """返回 ARQ 健康哨兵键：queue_name + ':health-check'。
+
+    优先取连接池自身的 default_queue_name（与 enqueue_job 实际入队的队列一致），
+    取不到时回退到 arq 的模块级默认值。
+    """
+    queue_name = getattr(pool, 'default_queue_name', None) or default_queue_name
+    return queue_name + health_check_key_suffix
+
+
 async def check_worker_health() -> tuple[bool, str]:
     """检测 ARQ Worker 是否在线（入队前预检）。
 
-    通过 ARQ 连接池的 health() 命令查询 broker 上的 worker 心跳。
-    ARQ Worker 启动后会定期在 Redis broker 上注册自身，
-    若无 worker 注册则 health() 返回空 workers 列表。
+    通过读取 ARQ 官方健康检查哨兵键（queue_name + ':health-check'）判定：
+    Worker 存活期间按 health_check_interval 周期刷新该键
+    （TTL = health_check_interval + 1s），正常退出时主动删除，
+    进程硬崩溃后键在 TTL 内自然过期。
+
+    ⚠️ arq 0.28 的 ``ArqRedis`` **没有** ``health()`` 方法；哨兵键是唯一官方
+    可用的探测手段（arq CLI 的 ``--check`` 走的也是同一个键）。曾因误用
+    ``pool.health()`` 导致所有手动备份被 503 误拦截，勿再改回。
 
     Returns:
         (is_healthy, message):
-        - (True, 'ARQ Worker 在线，N 个 worker 就绪')
+        - (True, 'ARQ Worker 在线（<心跳详情>）')
         - (False, 'ARQ Worker 未运行，请启动 erp-arq 服务')
+        - (False, 'ARQ Worker 健康探测超时/失败: ...')  探测自身异常时的降级返回
     """
     try:
         pool = await get_arq_pool()
-        health = await pool.health()
-        # health 返回 dict，包含 'workers' 键（worker 心跳列表）
-        workers = health.get('workers', []) if isinstance(health, dict) else []
-        if workers:
-            return True, f'ARQ Worker 在线，{len(workers)} 个 worker 就绪'
+        value = await asyncio.wait_for(
+            pool.get(_health_check_key(pool)),
+            timeout=_HEALTH_PROBE_TIMEOUT,
+        )
+        if value:
+            detail = value.decode('utf-8', 'replace') if isinstance(value, bytes) else str(value)
+            return True, f'ARQ Worker 在线（{detail}）'
         return False, 'ARQ Worker 未运行，请启动 erp-arq 服务'
-    except Exception as e:  # defensive: 健康探测须降级返回而非抛出，失败类型不可枚举
+    except TimeoutError:
+        logger.warning('ARQ Worker 健康探测超时(>%ss)，broker 疑似不可达', _HEALTH_PROBE_TIMEOUT)
+        return False, f'ARQ Worker 健康探测超时（>{_HEALTH_PROBE_TIMEOUT:g}s），请检查 erp-redis-broker 服务'
+    except Exception as e:  # broad-except: 健康探测自身不得抛出，任何异常都须转成"不健康"返回值
         logger.warning('ARQ Worker 健康检测失败: %s', e)
         return False, f'ARQ Worker 健康检测失败: {type(e).__name__}'

@@ -31,6 +31,10 @@ _record_write_fail_count: int = 0
 _BACKUP_NAME_PREFIXES = ('erp_backup_', 'erp_incremental_', 'erp_auto_')
 _BACKUP_FILE_SUFFIXES = ('.zip', '.json', '.zip.enc')
 
+# 文件名时间戳格式：'YYYYMMDD_HHMMSS'（见 normalize_backup_ts 与 _extract_timestamp）
+_TS_FILENAME_LEN = 15
+_TS_FILENAME_SEP_INDEX = 8
+
 
 def _is_backup_file(f: Path) -> bool:  # log-context: internal helper 无请求上下文
     """是否为正式备份文件(按命名约定排除演练/测试临时件)"""
@@ -157,13 +161,30 @@ async def write_backup_record(
 
 
 def list_backup_files() -> list[dict]:  # log-context: internal helper 无请求上下文
-    """列出服务器上的所有备份文件"""
+    """列出服务器上的所有备份文件。
+
+    返回条目同时携带 ``filename`` 与 ``mtime`` 两个字段：
+
+    - ``filename`` 是对外序列化契约键 —— ``GET /backup/list`` 原样透传该条目，
+      ``sync_backup_records`` 与 ``verify.query_service`` 也按此键消费，不可更名；
+    - ``mtime`` 供校验/统计侧判定"最近备份时间"使用，语义与
+      ``cleanup_old_backups`` 内部扫描保持同名同义。
+
+    历史上漏发 ``mtime``（且校验侧按不存在的 ``name`` 取值）会让健康检查
+    把"最近备份时间"算成 1970-01-01，凭空报出"超过24小时"告警。
+    """
     backups = []
     if BACKUP_DIR.exists():
         for f in sorted(BACKUP_DIR.iterdir(), reverse=True):
             if not _is_backup_file(f):
                 continue
-            entry: dict = {'filename': f.name, 'size': f.stat().st_size}
+            try:
+                stat = f.stat()
+            except OSError as e:
+                # 保留策略可能在扫描期间删除文件，属良性竞态：跳过而非让整个列表失败
+                logger.warning(f'跳过无法读取元信息的备份文件 {f.name}: {e}')
+                continue
+            entry: dict = {'filename': f.name, 'mtime': stat.st_mtime, 'size': stat.st_size}
             if f.name.endswith('.zip'):
                 try:
                     with zipfile.ZipFile(f, 'r') as zf:
@@ -211,6 +232,35 @@ def list_backup_files() -> list[dict]:  # log-context: internal helper 无请求
                     entry['error'] = str(e)
             backups.append(entry)
     return backups
+
+
+def normalize_backup_ts(ts: str | None) -> str:
+    """把备份时间戳统一为 'YYYY-MM-DD HH:MM:SS'。
+
+    备份系统里时间戳有两种来源、两种格式：
+      - 文件名中的时间戳：'YYYYMMDD_HHMMSS'（见 _extract_timestamp）
+      - manifest 的 base_timestamp：'YYYY-MM-DD HH:MM:SS'
+
+    二者格式不一致时直接做字符串比较恒为 False，曾导致清理逻辑把所有增量备份
+    判定为"不属于任何全量链"而无条件删除（数据丢失）。本函数是该修复的核心，
+    必须保证幂等：已是标准格式的输入原样返回。
+
+    Args:
+        ts: 待归一化的时间戳，允许 None / 空串 / 非法格式。
+
+    Returns:
+        规范化后的 'YYYY-MM-DD HH:MM:SS'；无法识别或为空时返回 ''（空输入）
+        或原样去空格后的字符串（非空但格式未知，交由调用方判断）。
+    """
+    if not ts:
+        return ''
+    ts = str(ts).strip()
+    if (len(ts) == _TS_FILENAME_LEN
+            and ts[_TS_FILENAME_SEP_INDEX] == '_'
+            and ts[:8].isdigit()
+            and ts[9:].isdigit()):
+        return f'{ts[:4]}-{ts[4:6]}-{ts[6:8]} {ts[9:11]}:{ts[11:13]}:{ts[13:15]}'
+    return ts
 
 
 def get_backup_status() -> dict:  # log-context: internal helper 无请求上下文
@@ -486,9 +536,11 @@ def cleanup_old_backups() -> dict:  # log-context: internal helper 无请求上�
     # 检查增量备份的基础全量备份是否还在
     for b in backups:
         if b['is_incremental'] and b['base_timestamp']:
-            # 如果基础全量备份被删除，增量备份也应该删除
-            base_exists = any(ts for ts in full_backup_timestamps if ts <= b['base_timestamp'])
-            if not base_exists:
+            # 文件名时间戳 'YYYYMMDD_HHMMSS' 与 manifest 'YYYY-MM-DD HH:MM:SS'
+            # 格式不一致，直接字符串比较恒为 False，会把所有增量误判为"无基座"而删；
+            # 必须先归一化再比较（数据丢失根因）。
+            normalized_base = normalize_backup_ts(b['base_timestamp'])
+            if not any(normalize_backup_ts(ts) <= normalized_base for ts in full_backup_timestamps):
                 to_delete.add(b['name'])
 
     # 执行删除

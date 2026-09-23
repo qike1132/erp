@@ -182,7 +182,7 @@ def _check_backup_integrity() -> tuple[dict, list[str]]:  # log-context: interna
         sample_files = random.sample(backup_files, min(3, len(backup_files)))  # nosec B311
         integrity_results = []
         for file_info in sample_files:
-            filename = file_info.get('name', '')
+            filename = file_info.get('filename', '')
             filepath = backup_service.BACKUP_DIR / filename
             try:
                 if filepath.exists() and filepath.is_file():
@@ -584,7 +584,7 @@ async def validate_backup_integrity(
 
         # 检查缓存
         cache_key = hashlib.md5(
-            '_'.join(sorted(f['name'] for f in backup_files)).encode(),
+            '_'.join(sorted(f['filename'] for f in backup_files)).encode(),
             usedforsecurity=False
         ).hexdigest()
 
@@ -599,7 +599,7 @@ async def validate_backup_integrity(
         missing_files = []
 
         for file_info in backup_files:
-            filename = file_info.get('name', '')
+            filename = file_info.get('filename', '')
             filepath = backup_service.BACKUP_DIR / filename
 
             try:
@@ -785,11 +785,11 @@ async def get_backup_statistics(
             sorted_backups = sorted(backup_files, key=lambda x: x.get('mtime', 0), reverse=True)
             for backup in sorted_backups[:10]:  # 只取最近10个
                 recent_backups.append({
-                    'filename': backup.get('name', ''),
+                    'filename': backup.get('filename', ''),
                     'size_bytes': backup.get('size', 0),
                     'modified_time': datetime.fromtimestamp(backup.get('mtime', 0)).isoformat(),
-                    'type': 'full' if 'full' in backup.get('name', '').lower() else 'incremental' if 'inc' in backup.get('name', '').lower() else 'unknown',
-                    'encrypted': backup.get('name', '').endswith('.enc'),
+                    'type': 'full' if 'full' in backup.get('filename', '').lower() else 'incremental' if 'inc' in backup.get('filename', '').lower() else 'unknown',
+                    'encrypted': backup.get('filename', '').endswith('.enc'),
                 })
 
         # 8. 计算备份频率
