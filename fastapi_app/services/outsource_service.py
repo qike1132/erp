@@ -52,6 +52,7 @@ from fastapi_app.services.outsource._queries import (  # noqa: F401
 from fastapi_app.services.outsource._shipments import (  # noqa: F401
     create_shipment,
     create_shipments_batch,
+    create_merged_shipment,
     get_shipment,
     list_shipments,
     receive_shipment,

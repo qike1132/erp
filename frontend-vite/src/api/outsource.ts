@@ -208,6 +208,9 @@ export const outsourceApi = {
   /** 批量发货（多订单一次性）：每订单生成一张发货单，单事务原子 */
   createShipmentsBatch: (orders: ShipmentBatchOrder[]) =>
     post<ShipmentBatchResponse>('/outsource/shipments/batch', { orders }),
+  /** 合并发货（跨订单/跨客户生成一张发货单） */
+  createMergedShipment: (items: { process_id: number; quantity: number }[]) =>
+    post<Shipment>('/outsource/shipments/merged', { items }),
   /** 发货单明细 */
   shipmentDetail: (id: number) => get<Shipment>(`/outsource/shipments/${id}`),
   /** 确认收货（贝乐账号） */

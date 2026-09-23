@@ -54,7 +54,7 @@
       <!-- ===== 提交中遮罩（进度反馈 + 防误操作） ===== -->
       <div v-if="submitting" class="osw-submitting" role="status" aria-live="polite">
         <UiSpinner />
-        <span>正在生成发货单…（{{ selectedOrderCount }} 单 / {{ shipSum.toLocaleString() }} 件）</span>
+        <span>正在生成发货单…（{{ shipSum.toLocaleString() }} 件）</span>
       </div>
     </div>
 
@@ -70,7 +70,7 @@
       <div v-else-if="confirmOpen" class="osw-bar osw-bar--confirm">
         <FontAwesomeIcon class="osw-bar-warn" icon="triangle-exclamation" aria-hidden="true" />
         <div class="osw-bar-info">
-          将按订单生成 <b>{{ selectedOrderCount }}</b> 张发货单、共 <b>{{ checkedCount }}</b> 道工序 /
+          将生成 <b>1</b> 张发货单、共 <b>{{ checkedCount }}</b> 道工序 /
           <b>{{ shipSum.toLocaleString() }}</b> 件，并通知贝乐收货账号
         </div>
         <UiButton variant="outline" :disabled="submitting" @click="confirmOpen = false">返回调整</UiButton>
@@ -80,7 +80,7 @@
       <!-- 汇总态：实时合计 + 主操作 -->
       <div v-else class="osw-bar">
         <div class="osw-bar-info" role="status">
-          <span>已选 <b :class="{ 'is-zero': !selectedOrderCount }">{{ selectedOrderCount }}</b> 单</span>
+          <span>涉及 <b :class="{ 'is-zero': !selectedOrderCount }">{{ selectedOrderCount }}</b> 单</span>
           <span class="osw-sep">·</span>
           <span><b :class="{ 'is-zero': !checkedCount }">{{ checkedCount }}</b> 道工序</span>
           <span class="osw-sep">·</span>
@@ -95,7 +95,7 @@
           :disabled="submitting || checkedCount === 0 || invalidCount > 0"
           @click="confirmOpen = true"
         >
-          生成发货单{{ selectedOrderCount > 0 ? `（${selectedOrderCount} 单 / ${shipSum.toLocaleString()} 件）` : '' }}
+          生成发货单{{ checkedCount > 0 ? `（${shipSum.toLocaleString()} 件）` : '' }}
         </UiButton>
       </div>
     </template>
@@ -253,29 +253,24 @@ function submit() {
     confirmOpen.value = false
     return
   }
-  // 按订单分组组装 payload（每订单一张发货单）：合并数量已拆分回各订单
-  const payloadMap = new Map<number, { order_id: number; items: { process_id: number; quantity: number }[] }>()
+  // 合并发货：把选中的所有工序数量平铺为单个明细数组，一次生成一张发货单
+  const flatItems: { process_id: number; quantity: number }[] = []
   for (const r of checkedRows.value) {
     for (const { row, quantity } of splitQty(r)) {
-      let g = payloadMap.get(row.order_id)
-      if (!g) {
-        g = { order_id: row.order_id, items: [] }
-        payloadMap.set(row.order_id, g)
-      }
-      g.items.push({ process_id: row.process_id, quantity })
+      flatItems.push({ process_id: row.process_id, quantity })
     }
   }
   submitting.value = true
   confirmOpen.value = false
-  outsourceApi.createShipmentsBatch([...payloadMap.values()])
+  outsourceApi.createMergedShipment(flatItems)
     .then((res) => {
-      result.value = { ok: true, shipments: res.data }
-      toast.success(res.message || `已生成 ${res.total} 张发货单`)
+      result.value = { ok: true, shipments: [res] }
+      toast.success('已生成 1 张发货单')
       emit('shipped')
     })
     .catch((e) => {
       const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      result.value = { ok: false, error: msg || '批量发货失败（整批已回滚）' }
+      result.value = { ok: false, error: msg || '合并发货失败（整批已回滚）' }
     })
     .finally(() => { submitting.value = false })
 }

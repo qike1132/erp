@@ -253,6 +253,11 @@ class ShipmentBatchCreate(BaseModel):
     orders: list[ShipmentBatchOrder] = Field(..., min_length=1, max_length=100, description="按订单分组的发货明细")
 
 
+class ShipmentMergeCreate(BaseModel):
+    """合并发货请求：把跨订单/跨客户的多道工序合并生成一张发货单（单事务原子）"""
+    items: list[ShipmentShipItem] = Field(..., min_length=1, max_length=200, description="合并发货明细（跨订单/跨客户）")
+
+
 class ShipmentBatchResponse(BaseModel):
     """批量发货响应（data 为本次生成的各订单发货单）"""
     success: bool = True

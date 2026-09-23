@@ -141,13 +141,16 @@ async def _dispatch_shipment_shipped_notification(
     if not user_ids:
         return 0
 
-    content = json.dumps({
+    payload = {
         'format_version': 2,
         'order_type': '发货单',
         'shipment_no': shipment_no,
-        'customer': customer,
         'items': items,
-    }, ensure_ascii=False)
+    }
+    # 合并发货单 customer 为空，通知 content 省略 customer 键，避免贝乐端展示空客户名
+    if customer:
+        payload['customer'] = customer
+    content = json.dumps(payload, ensure_ascii=False)
 
     db.add_all([
         Notification(
@@ -338,3 +341,70 @@ async def create_shipments_batch(
         except ValueError as e:
             raise ValueError(f'订单 {order_id}：{e}') from e
     return results
+
+
+async def create_merged_shipment(
+    db: AsyncSession, items: list[tuple[int, int]], username: str | None = None,
+) -> dict:
+    """合并发货：把跨订单、跨客户的多个 SKU 合并生成一张发货单。
+
+    items: [(process_id, quantity), ...]，不限定订单归属；发货单 order_id 与
+    customer 均置空（作为独立单据，明细行仍记录各工序）。任一道工序发货失败
+    即抛错，由外层 db_transaction 回滚整批。
+    """
+    if not items:
+        raise ValueError('发货明细不能为空')
+
+    shipment_no = await generate_shipment_number(db)
+    now = datetime.now(UTC).replace(tzinfo=None)  # naive UTC
+
+    shipment = OutsourceShipment(
+        shipment_no=shipment_no,
+        order_id=None,
+        customer=None,
+        status=SHIPMENT_STATUS_SHIPPED,
+        shipped_at=now,
+        shipped_by=username,
+    )
+    db.add(shipment)
+    await db.flush()  # 取 shipment.id
+
+    notify_items: list[dict] = []
+    for process_id, quantity in items:
+        p = await db.get(OrderOutsourceProcess, process_id)
+        if not p:
+            raise ValueError(f'外发工序 {process_id} 不存在')
+        # 复用既有发货逻辑（行锁 + 数量校验 + 流水）
+        await ship_order_process(db, process_id, quantity, username)
+        db.add(OutsourceShipmentItem(
+            shipment_id=shipment.id,
+            process_id=p.id,
+            product_id=p.product_id,
+            product_name=p.product_name,
+            process_type=p.process_type,
+            shipped_quantity=quantity,
+            received_quantity=0,
+        ))
+        notify_items.append({
+            'product_name': p.product_name,
+            'process_type': p.process_type,
+            'quantity': quantity,
+        })
+
+    await db.flush()
+
+    # 通知贝乐收货账号（失败仅记录日志，不影响发货单创建；合并单无客户名）
+    try:
+        await _dispatch_shipment_shipped_notification(
+            db, shipment_no, None, None, notify_items,
+        )
+    except Exception:  # noqa: BLE001 - 服务层容错：通知失败不阻断发货
+        logger.warning('合并发货单待收货通知派发失败：shipment_no=%s', shipment_no, exc_info=True)
+
+    # 重新 selectinload 明细后再序列化，避免异步会话内访问 shipment.items 触发懒加载
+    loaded = (await db.execute(
+        select(OutsourceShipment)
+        .options(selectinload(OutsourceShipment.items))
+        .where(OutsourceShipment.id == shipment.id)
+    )).scalars().unique().one()
+    return _serialize_shipment(loaded, include_items=True)

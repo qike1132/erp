@@ -19,6 +19,7 @@ from fastapi_app.services.outsource import _shipments as shipments_mod
 from fastapi_app.services.outsource._shipments import (
     create_shipment,
     create_shipments_batch,
+    create_merged_shipment,
     get_shipment,
     list_shipments,
     receive_shipment,
@@ -270,3 +271,48 @@ async def test_get_shipment_order_qty_none_when_process_deleted(db):
     detail = await get_shipment(db, created['id'])
     assert detail is not None
     assert detail['items'][0]['order_qty'] is None
+
+
+async def test_create_merged_shipment_across_orders(db):
+    """合并发货：跨订单/跨客户多道工序合并为一张发货单，order_id/customer 置空、通知省略客户名。"""
+    import json
+
+    order, process = await _seed(db)
+    # 第二个订单（不同客户）
+    order2 = Order(id=2, order_no='PO-20260919-0002', customer='客户B', order_date=datetime(2026, 9, 19, 11, 0),
+                   product_id=1, quantity=20)
+    item2 = OrderItem(id=2, order_id=2, product_id=1, product_name='电绣品', product_barcode='B1', quantity=20)
+    process2 = OrderOutsourceProcess(id=2, order_id=2, order_item_id=2, product_id=1,
+                                     product_name='电绣品', process_type='转印', sort_order=1, status='pending')
+    db.add_all([order2, item2, process2])
+    await db.commit()
+
+    result = await create_merged_shipment(db, [(process.id, 5), (process2.id, 8)], username='shipper')
+
+    assert result['order_id'] is None
+    assert result['customer'] is None
+    assert result['status'] == 'shipped'
+    assert result['item_count'] == 2
+    assert result['total_shipped'] == 13
+    assert sorted(it['process_type'] for it in result['items']) == ['电绣', '转印']
+
+    # 仅落库一张发货单，order_id/customer 均为 None
+    rows = (await db.execute(select(OutsourceShipment))).scalars().all()
+    assert len(rows) == 1
+    assert rows[0].order_id is None
+    assert rows[0].customer is None
+
+    # 两道工序各自已发货
+    p1 = await db.get(OrderOutsourceProcess, process.id)
+    p2 = await db.get(OrderOutsourceProcess, process2.id)
+    assert p1.shipped_quantity == 5
+    assert p2.shipped_quantity == 8
+
+    # 通知仅一条，且 content 不含 customer 键
+    notif = (await db.execute(select(Notification))).scalars().all()
+    assert len(notif) == 1
+    assert notif[0].type == 'outsource_shipment_shipped'
+    content = json.loads(notif[0].content)
+    assert 'customer' not in content
+    assert content['shipment_no'] == rows[0].shipment_no
+

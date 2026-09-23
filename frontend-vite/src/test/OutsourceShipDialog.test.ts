@@ -10,7 +10,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import OutsourceShipDialog from '@/views/outsource/components/OutsourceShipDialog.vue'
 
 const shippableMock = vi.fn()
-const createShipmentsBatchMock = vi.fn()
+const createMergedShipmentMock = vi.fn()
 
 vi.mock('@/composables/useToast', () => ({
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() },
@@ -18,7 +18,7 @@ vi.mock('@/composables/useToast', () => ({
 vi.mock('@/api/outsource', () => ({
   outsourceApi: {
     shippable: (...args: unknown[]) => shippableMock(...args),
-    createShipmentsBatch: (...args: unknown[]) => createShipmentsBatchMock(...args),
+    createMergedShipment: (...args: unknown[]) => createMergedShipmentMock(...args),
   },
 }))
 
@@ -240,14 +240,11 @@ describe('OutsourceShipDialog 双栏选购清单', () => {
     expect(wrapper.find('.osw-bar-info').text()).toContain('200 件')
   })
 
-  it('完整流：选两单→生成→确认态→提交，payload 按订单分组', async () => {
+  it('完整流：选两单→生成→确认态→提交，payload 平铺为单明细数组', async () => {
     shippableMock.mockResolvedValue(THREE_ROWS_TWO_ORDERS)
-    createShipmentsBatchMock.mockResolvedValue({
-      success: true, total: 2, message: '已生成 2 张发货单',
-      data: [
-        { id: 1, shipment_no: 'FH-20260920-0001', order_id: 1, customer: '客户A', status: 'shipped', item_count: 2, total_shipped: 150 },
-        { id: 2, shipment_no: 'FH-20260920-0002', order_id: 2, customer: '客户B', status: 'shipped', item_count: 1, total_shipped: 50 },
-      ],
+    createMergedShipmentMock.mockResolvedValue({
+      id: 1, shipment_no: 'FH-20260920-0001', order_id: null, customer: null,
+      status: 'shipped', item_count: 3, total_shipped: 200,
     })
 
     const wrapper = mountDialog()
@@ -263,36 +260,37 @@ describe('OutsourceShipDialog 双栏选购清单', () => {
 
     // 汇总 + 按钮带汇总（A: 50 + 100 = 150，B: 50 → 共 200）
     expect(wrapper.find('.osw-bar-info').text()).toContain('200 件')
-    await btn(wrapper, '生成发货单（2 单 / 200 件）')!.trigger('click')
+    await btn(wrapper, '生成发货单（200 件）')!.trigger('click')
     await flushPromises()
 
     // 确认态：底栏原地切换（不跳页）
     expect(wrapper.find('.osw-bar--confirm').exists()).toBe(true)
-    expect(wrapper.text()).toContain('将按订单生成 2 张发货单')
+    expect(wrapper.text()).toContain('将生成 1 张发货单')
 
     // 确认发货 → 成功面板
     await btn(wrapper, '确认发货')!.trigger('click')
     await flushPromises()
-    expect(wrapper.text()).toContain('发货完成：已生成 2 张发货单')
+    expect(wrapper.text()).toContain('发货完成：已生成 1 张发货单')
     expect(wrapper.text()).toContain('FH-20260920-0001')
     expect(wrapper.text()).toContain('待贝乐收货')
 
-    // payload 按订单分组、数量=各工序独立填写的值
-    expect(createShipmentsBatchMock).toHaveBeenCalledTimes(1)
-    const payload = createShipmentsBatchMock.mock.calls[0]![0] as {
-      order_id: number
-      items: { process_id: number; quantity: number }[]
+    // payload 平铺为单明细数组（跨订单合并，不再按订单分组）
+    expect(createMergedShipmentMock).toHaveBeenCalledTimes(1)
+    const payload = createMergedShipmentMock.mock.calls[0]![0] as {
+      process_id: number
+      quantity: number
     }[]
     expect(payload).toEqual([
-      { order_id: 1, items: [{ process_id: 1, quantity: 50 }, { process_id: 2, quantity: 100 }] },
-      { order_id: 2, items: [{ process_id: 3, quantity: 50 }] },
+      { process_id: 1, quantity: 50 },
+      { process_id: 2, quantity: 100 },
+      { process_id: 3, quantity: 50 },
     ])
   })
 
   it('失败态：错误明细 + 返回修改保留已填数据', async () => {
     shippableMock.mockResolvedValue(THREE_ROWS_TWO_ORDERS)
-    createShipmentsBatchMock.mockRejectedValue({
-      response: { data: { detail: '订单 2：发货数量超过剩余数量（剩余 50）' } },
+    createMergedShipmentMock.mockRejectedValue({
+      response: { data: { detail: '外发工序 3：发货数量超过剩余数量（剩余 50）' } },
     })
 
     const wrapper = mountDialog()
@@ -304,14 +302,14 @@ describe('OutsourceShipDialog 双栏选购清单', () => {
     await flushPromises()
     await wrapper.findAll('.osw-qty')[0]!.setValue(50)
     await flushPromises()
-    await btn(wrapper, '生成发货单（2 单 / 200 件）')!.trigger('click')
+    await btn(wrapper, '生成发货单（200 件）')!.trigger('click')
     await flushPromises()
     await btn(wrapper, '确认发货')!.trigger('click')
     await flushPromises()
 
     // 失败面板
     expect(wrapper.text()).toContain('发货失败（整批已回滚，数据未变更）')
-    expect(wrapper.text()).toContain('订单 2：发货数量超过剩余数量（剩余 50）')
+    expect(wrapper.text()).toContain('外发工序 3：发货数量超过剩余数量（剩余 50）')
 
     // 返回修改：回到双栏编辑态，勾选与数量保留
     await btn(wrapper, '返回修改')!.trigger('click')
@@ -323,7 +321,7 @@ describe('OutsourceShipDialog 双栏选购清单', () => {
 
   it('提交中：遮罩进度反馈，完成后切换成功面板', async () => {
     let resolveBatch!: (v: unknown) => void
-    createShipmentsBatchMock.mockImplementation(
+    createMergedShipmentMock.mockImplementation(
       () => new Promise((resolve) => { resolveBatch = resolve }),
     )
     shippableMock.mockResolvedValue(THREE_ROWS_TWO_ORDERS)
@@ -341,8 +339,8 @@ describe('OutsourceShipDialog 双栏选购清单', () => {
     expect(wrapper.find('.osw-submitting').text()).toContain('正在生成发货单')
 
     resolveBatch({
-      success: true, total: 1, message: '已生成 1 张发货单',
-      data: [{ id: 1, shipment_no: 'FH-20260920-0001', order_id: 1, customer: '客户A', status: 'shipped', item_count: 2, total_shipped: 200 }],
+      id: 1, shipment_no: 'FH-20260920-0001', order_id: null, customer: null,
+      status: 'shipped', item_count: 2, total_shipped: 200,
     })
     await flushPromises()
     expect(wrapper.find('.osw-submitting').exists()).toBe(false)
@@ -487,13 +485,9 @@ describe('OutsourceShipDialog 双栏选购清单', () => {
       proc({ process_id: 2, order_id: 2, order_no: 'PO-B', customer: '客户B', product_name: '变形金刚', process_type: '转印', remaining: 200 }),
       proc({ process_id: 3, order_id: 3, order_no: 'PO-C', customer: '客户C', product_name: '变形金刚', process_type: '转印', remaining: 300 }),
     ])
-    createShipmentsBatchMock.mockResolvedValue({
-      success: true, total: 3, message: '已生成 3 张发货单',
-      data: [
-        { id: 1, shipment_no: 'FH-1', order_id: 1, customer: '客户A', status: 'shipped', item_count: 1, total_shipped: 100 },
-        { id: 2, shipment_no: 'FH-2', order_id: 2, customer: '客户B', status: 'shipped', item_count: 1, total_shipped: 150 },
-        { id: 3, shipment_no: 'FH-3', order_id: 3, customer: '客户C', status: 'shipped', item_count: 1, total_shipped: 50 },
-      ],
+    createMergedShipmentMock.mockResolvedValue({
+      id: 1, shipment_no: 'FH-1', order_id: null, customer: null,
+      status: 'shipped', item_count: 1, total_shipped: 250,
     })
     const wrapper = mountDialog()
     await openAndLoad(wrapper)
@@ -526,18 +520,18 @@ describe('OutsourceShipDialog 双栏选购清单', () => {
     // 涉及订单数 = 实际拆分到的 2 单
     expect(wrapper.find('.osw-bar-info').text()).toContain('2 单')
 
-    await btn(wrapper, '生成发货单（2 单 / 250 件）')!.trigger('click')
+    await btn(wrapper, '生成发货单（250 件）')!.trigger('click')
     await flushPromises()
     await btn(wrapper, '确认发货')!.trigger('click')
     await flushPromises()
 
-    const payload = createShipmentsBatchMock.mock.calls[0]![0] as {
-      order_id: number
-      items: { process_id: number; quantity: number }[]
+    const payload = createMergedShipmentMock.mock.calls[0]![0] as {
+      process_id: number
+      quantity: number
     }[]
     expect(payload).toEqual([
-      { order_id: 1, items: [{ process_id: 1, quantity: 100 }] },
-      { order_id: 2, items: [{ process_id: 2, quantity: 150 }] },
+      { process_id: 1, quantity: 100 },
+      { process_id: 2, quantity: 150 },
     ])
   })
 
@@ -576,9 +570,9 @@ describe('OutsourceShipDialog 双栏选购清单', () => {
       proc({ process_id: 5, order_id: 5, order_no: 'PO-P', customer: '名创优品', product_name: '企鹅的订单', process_type: '配件', remaining: 9626 }),
       proc({ process_id: 6, order_id: 5, order_no: 'PO-P', customer: '名创优品', product_name: '企鹅的订单', process_type: '包装', remaining: 9626 }),
     ])
-    createShipmentsBatchMock.mockResolvedValue({
-      success: true, total: 1, message: '已生成 1 张发货单',
-      data: [{ id: 1, shipment_no: 'FH-20260920-0009', order_id: 5, customer: '名创优品', status: 'shipped', item_count: 6, total_shipped: 57756 }],
+    createMergedShipmentMock.mockResolvedValue({
+      id: 1, shipment_no: 'FH-20260920-0009', order_id: null, customer: null,
+      status: 'shipped', item_count: 6, total_shipped: 48230,
     })
 
     const wrapper = mountDialog()
@@ -603,19 +597,18 @@ describe('OutsourceShipDialog 双栏选购清单', () => {
     await wrapper.findAll('.osw-qty')[0]!.setValue(100)
     await flushPromises()
     expect(wrapper.find('.osw-bar-info').text()).toContain('48,230 件')
-    await btn(wrapper, '生成发货单（1 单 / 48,230 件）')!.trigger('click')
+    await btn(wrapper, '生成发货单（48,230 件）')!.trigger('click')
     await flushPromises()
     await btn(wrapper, '确认发货')!.trigger('click')
     await flushPromises()
 
-    const payload = createShipmentsBatchMock.mock.calls[0]![0] as {
-      order_id: number
-      items: { process_id: number; quantity: number }[]
+    const payload = createMergedShipmentMock.mock.calls[0]![0] as {
+      process_id: number
+      quantity: number
     }[]
-    expect(payload[0]!.order_id).toBe(5)
-    expect(payload[0]!.items.length).toBe(6)
-    expect(payload[0]!.items[0]).toEqual({ process_id: 1, quantity: 100 })
-    expect(payload[0]!.items.slice(1).every((it) => it.quantity === 9626)).toBe(true)
+    expect(payload.length).toBe(6)
+    expect(payload[0]).toEqual({ process_id: 1, quantity: 100 })
+    expect(payload.slice(1).every((it) => it.quantity === 9626)).toBe(true)
   })
 
   it('产品名为空时回退占位文案，长名称完整渲染不截断', async () => {

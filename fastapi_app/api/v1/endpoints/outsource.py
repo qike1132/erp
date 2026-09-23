@@ -45,6 +45,7 @@ from fastapi_app.schemas.outsource import (
     ShipmentBatchResponse,
     ShipmentCreate,
     ShipmentListResponse,
+    ShipmentMergeCreate,
     ShipmentReceiveResponse,
     ShipmentResponse,
     ShipProcessMulti,
@@ -422,6 +423,26 @@ async def create_shipments_batch(
         total=len(results),
         message=f'已生成 {len(results)} 张发货单',
     )
+
+
+@router.post("/shipments/merged", response_model=ShipmentResponse)
+async def create_merged_shipment(
+    data: ShipmentMergeCreate,
+    db: AsyncSession = Depends(get_async_db),
+    user: User = Depends(require_permission("outsource_ship")),
+) -> ShipmentResponse:
+    """合并发货：把跨订单/跨客户的多道工序合并生成一张发货单（单事务原子）。
+
+    items: [{process_id, quantity}]，不限定订单归属；发货单 order_id/customer 置空，
+    明细行仍记录各工序。任一工序发货失败整批回滚，成功后派发「待收货」通知（无客户名）。
+    """
+    async with db_transaction(db):
+        result = await outsource_service.create_merged_shipment(
+            db,
+            [(i.process_id, i.quantity) for i in data.items],
+            username=user.username,
+        )
+    return ShipmentResponse(**result)
 
 
 @router.get("/shipments", response_model=ShipmentListResponse)
