@@ -11,7 +11,6 @@
 
 import argparse
 import os
-import re
 import sys
 from pathlib import Path
 
@@ -24,16 +23,14 @@ from sqlalchemy.orm import sessionmaker
 
 from fastapi_app.core.config import settings
 from fastapi_app.core.security import hash_password
+from utils.password_validator import PasswordValidator
 
 
 def _validate_password_strength(password: str) -> None:
-    """校验密码复杂度：至少8位，含字母和数字"""
-    if len(password) < 8:
-        raise ValueError('密码长度至少 8 位')
-    if not re.search(r'[A-Za-z]', password):
-        raise ValueError('密码必须包含字母')
-    if not re.search(r'\d', password):
-        raise ValueError('密码必须包含数字')
+    """校验密码：复用 PasswordValidator，与建号/改密保持同一套策略"""
+    is_valid, error_msg = PasswordValidator.validate(password)
+    if not is_valid:
+        raise ValueError(error_msg)
 
 
 def reset_admin_password(new_password: str) -> bool:
@@ -67,7 +64,7 @@ def reset_admin_password(new_password: str) -> bool:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='重置 admin 用户密码')
-    parser.add_argument('--password', '-p', help='新密码（至少8位，含字母和数字）')
+    parser.add_argument('--password', '-p', help='新密码（至少6位，策略与系统建号一致）')
     args = parser.parse_args()
 
     password = args.password or os.environ.get('NEW_ADMIN_PASSWORD')

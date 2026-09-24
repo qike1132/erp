@@ -1,8 +1,17 @@
 <template>
-  <!-- 编辑用户工厂弹窗 -->
+  <!-- 编辑用户弹窗 -->
   <UiDialog :open="editDialogVisible" title="编辑用户" max-width-class="max-w-[480px]" @update:open="editDialogVisible = $event">
     <div class="us-edit-form">
       <div class="us-edit-username">用户名：{{ editTargetName }}</div>
+      <div class="us-form-group">
+        <label>新密码</label>
+        <div class="us-input-wrapper">
+          <input v-model="editForm.password" :type="showPwd ? 'text' : 'password'" class="us-input" :placeholder="`留空则不修改，至少${PASSWORD_MIN_LENGTH}位`" aria-label="新密码，留空则不修改" />
+          <button type="button" class="us-pwd-toggle" aria-label="查看" @click="showPwd = !showPwd">
+            <FontAwesomeIcon :icon="showPwd ? 'eye-slash' : 'eye'" aria-hidden="true" />
+          </button>
+        </div>
+      </div>
       <div class="us-form-group">
         <label>工厂</label>
         <select v-model="editForm.factory" class="us-input" aria-label="工厂">
@@ -22,17 +31,18 @@
 
 <script setup lang="ts">
 /**
- * UserEditDialog.vue — 编辑用户工厂弹窗
+ * UserEditDialog.vue — 编辑用户弹窗
  *
- * 从 UserView.vue 拆出：展示用户名 + 编辑所属工厂并保存。
+ * 从 UserView.vue 拆出：展示用户名 + 重置密码（留空不改）+ 编辑所属工厂并保存。
  * 弹窗打开时从 initialFactory 同步初值。
  */
 import { ref, reactive, watch } from 'vue'
 import { useQueryClient } from '@tanstack/vue-query'
 import { userApi } from '@/api'
+import type { UserUpdate } from '@/types'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import { showToast } from '@/composables/useToast'
-import { FACTORY_OPTIONS, extractErrorMessage } from '@/views/user/composables/useUserManagement'
+import { FACTORY_OPTIONS, PASSWORD_MIN_LENGTH, extractErrorMessage } from '@/views/user/composables/useUserManagement'
 
 const props = defineProps<{
   /** 编辑目标用户 id */
@@ -49,18 +59,32 @@ const editDialogVisible = defineModel<boolean>('open', { default: false })
 const queryClient = useQueryClient()
 
 const editSubmitting = ref(false)
-const editForm = reactive<{ factory: string }>({ factory: '' })
+const showPwd = ref(false)
+const editForm = reactive<{ factory: string; password: string }>({ factory: '', password: '' })
 
-// 弹窗打开时预填当前工厂值
+// 弹窗打开时预填当前工厂值并清空密码
 watch(editDialogVisible, (v) => {
-  if (v) editForm.factory = props.initialFactory
+  if (v) {
+    editForm.factory = props.initialFactory
+    editForm.password = ''
+    showPwd.value = false
+  }
 })
 
-/** 保存用户工厂编辑 */
+/** 保存用户工厂/密码编辑 */
 async function handleSaveEdit() {
+  const payload: UserUpdate = { factory: editForm.factory || null }
+  // 密码留空表示不修改；填了则校验长度（与新增用户保持一致）
+  if (editForm.password) {
+    if (editForm.password.length < PASSWORD_MIN_LENGTH) {
+      showToast(`密码至少 ${PASSWORD_MIN_LENGTH} 位`, 'error')
+      return
+    }
+    payload.password = editForm.password
+  }
   editSubmitting.value = true
   try {
-    await userApi.update(props.editTargetId, { factory: editForm.factory || null })
+    await userApi.update(props.editTargetId, payload)
     showToast('保存成功', 'success')
     editDialogVisible.value = false
     queryClient.invalidateQueries({ queryKey: ['users-list'] })
@@ -116,6 +140,24 @@ async function handleSaveEdit() {
   border-color: var(--color-primary-400);
   background: white;
   box-shadow: 0 0 0 4px rgba(0, 148, 191, 0.1);
+}
+.us-input-wrapper {
+  position: relative;
+}
+.us-pwd-toggle {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  padding: 4px;
+  transition: color 0.2s ease;
+}
+.us-pwd-toggle:hover {
+  color: var(--color-text-secondary);
 }
 
 /* Action Buttons */

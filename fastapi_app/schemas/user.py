@@ -2,18 +2,23 @@
 from pydantic import BaseModel, Field, field_validator
 
 from fastapi_app.schemas.product import _validate_factory
+from utils.password_validator import PasswordValidator
 
 
 class UserCreate(BaseModel):
     username: str = Field(..., min_length=1, max_length=50, description="用户名")
-    password: str = Field(..., min_length=8, max_length=128, description="密码")
+    password: str = Field(
+        ...,
+        min_length=PasswordValidator.MIN_LENGTH,
+        max_length=PasswordValidator.MAX_LENGTH,
+        description="密码",
+    )
     is_super: bool = Field(default=False, description="是否超级用户")
     factory: str | None = Field(default=None, max_length=20, description="所属工厂：东莞/湖北/NULL")
 
     @field_validator('password')
     @classmethod
     def validate_password_complexity(cls, v: str):
-        from utils.password_validator import PasswordValidator
         is_valid, error_msg = PasswordValidator.validate(v)
         if not is_valid:
             raise ValueError(error_msg)
@@ -26,7 +31,12 @@ class UserCreate(BaseModel):
 
 
 class UserUpdate(BaseModel):
-    password: str | None = Field(default=None, min_length=8, max_length=128, description="密码（不修改则不传）")
+    password: str | None = Field(
+        default=None,
+        min_length=PasswordValidator.MIN_LENGTH,
+        max_length=PasswordValidator.MAX_LENGTH,
+        description="密码（不修改则不传）",
+    )
     is_super: bool | None = Field(default=None, description="是否超级用户")
     factory: str | None = Field(default=None, max_length=20, description="所属工厂：东莞/湖北/NULL（传空字符串表示清除）")
 
@@ -35,7 +45,6 @@ class UserUpdate(BaseModel):
     def validate_password_complexity(cls, v: str | None):
         if v is None:
             return v
-        from utils.password_validator import PasswordValidator
         is_valid, error_msg = PasswordValidator.validate(v)
         if not is_valid:
             raise ValueError(error_msg)

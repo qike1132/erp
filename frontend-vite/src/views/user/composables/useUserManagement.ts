@@ -25,6 +25,9 @@ export interface UserRow {
 /** 工厂下拉选项（与后端 VALID_FACTORIES 保持一致） */
 export const FACTORY_OPTIONS = ['东莞', '湖北'] as const
 
+/** 密码最小长度（与后端 utils/password_validator.PasswordValidator.MIN_LENGTH 保持一致） */
+export const PASSWORD_MIN_LENGTH = 6
+
 /** 从错误对象中提取后端返回的 detail 信息 */
 export function extractErrorMessage(err: unknown, fallback: string): string {
   const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail

@@ -5,19 +5,19 @@ import re
 class PasswordValidator:
     """密码复杂度验证器"""
 
-    MIN_LENGTH = 8
+    MIN_LENGTH = 6
     MAX_LENGTH = 128
     REQUIRE_UPPERCASE = False
-    REQUIRE_LOWERCASE = True
-    REQUIRE_DIGIT = True
+    REQUIRE_LOWERCASE = False
+    REQUIRE_DIGIT = False
     REQUIRE_SPECIAL = False
 
     # 匹配常见特殊字符
     SPECIAL_CHAR_PATTERN = r'[!@#$%^&*(),.?":{}|<>\-_\[\]\\\/~`+=;]'
 
-    # 弱密码黑名单（内网宽松：仅拒绝最明显的弱密码）
+    # 弱密码黑名单（内网宽松：仅拒绝最明显的弱密码；"123456" 按业务要求放行）
     WEAK_PASSWORDS = frozenset({
-        "123456", "password", "admin", "Password1!", "Admin123!",
+        "password", "admin", "Password1!", "Admin123!",
     })
 
     @classmethod

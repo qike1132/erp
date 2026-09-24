@@ -328,6 +328,14 @@ export interface UserCreate {
   factory?: string | null
 }
 
+export interface UserUpdate {
+  /** 新密码（不修改则不传） */
+  password?: string
+  is_super?: boolean
+  /** 所属工厂：东莞/湖北/NULL（空字符串表示清除） */
+  factory?: string | null
+}
+
 export interface NavSection {
   /** section_key，用于权限选择模块与导航栏建立关联 */
   key?: string

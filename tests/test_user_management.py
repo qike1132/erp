@@ -447,9 +447,23 @@ class UserValidationTestCase(unittest.TestCase):
         self.assertGreater(len(username), 0, "用户名不能为空")
 
     def test_validate_password_strength(self):
-        """测试验证密码强度"""
-        password = "Pass123!@#"
-        self.assertGreaterEqual(len(password), 6, "密码长度应至少6位")
+        """密码策略边界：至少 6 位、放行 123456、仍拦截常见弱密码"""
+        from utils.password_validator import PasswordValidator
+
+        # 内网放宽：6 位简单数字密码放行（本次策略变更的核心行为，
+        # 未放宽前 MIN_LENGTH=8 会拒绝）
+        self.assertEqual(PasswordValidator.validate("123456"), (True, ""))
+        # 长度下边界：6 位通过，5 位拒绝
+        self.assertTrue(PasswordValidator.validate("abc123")[0])
+        self.assertFalse(PasswordValidator.validate("12345")[0])
+        # 长度上边界：128 位通过，129 位拒绝
+        self.assertTrue(PasswordValidator.validate("a" * 128)[0])
+        self.assertFalse(PasswordValidator.validate("a" * 129)[0])
+        # 常见弱密码黑名单（123456 已按要求放行，其余仍拦截）
+        for weak in ("password", "Password1!", "Admin123!"):
+            self.assertFalse(PasswordValidator.validate(weak)[0], f"{weak} 不应通过")
+        # 空密码拒绝
+        self.assertFalse(PasswordValidator.validate("")[0])
 
     def test_validate_phone_format(self):
         """测试验证手机号格式"""
