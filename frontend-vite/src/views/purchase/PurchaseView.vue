@@ -47,10 +47,10 @@
         <div v-else-if="activeTab === 'active'" class="pc-header-actions">
           <button
             class="pc-btn pc-btn-purple"
-            :disabled="purchaseOrders.selectedIds.length === 0"
+            :disabled="purchaseOrders.selectedIds.length === 0 || isSummarizing"
             @click="handleSummary"
           >
-            <FontAwesomeIcon icon="clipboard-list" aria-hidden="true" /> 汇总下单 ({{ purchaseOrders.selectedIds.length }})
+            <UiLoadingIcon :loading="isSummarizing" icon="clipboard-list" /> 汇总下单 ({{ purchaseOrders.selectedIds.length }})
           </button>
           <button
             class="pc-btn pc-btn-success"
@@ -183,6 +183,7 @@ import { usePurchaseHandlers } from './composables/usePurchaseHandlers'
 const {
   activeTab,
   isSubmitting,
+  isSummarizing,
   purchaseOrders,
   unprocessed,
   completed,

@@ -1,4 +1,4 @@
-import type { Ref } from 'vue'
+import { ref, type Ref } from 'vue'
 import type { QueryClient } from '@tanstack/vue-query'
 import { purchaseApi } from '@/api'
 import { showToast } from '@/composables/useToast'
@@ -30,6 +30,9 @@ interface PurchaseActionDeps {
 
 export function usePurchaseActions(deps: PurchaseActionDeps) {
   const { unprocessed, purchaseOrders, completed, summary, confirm, queryClient, isSubmitting } = deps
+
+  /** 汇总下单请求中（弹窗要等接口返回才 open，用于按钮 loading 态） */
+  const isSummarizing = ref(false)
 
   async function handleOneClickGenerate() {
     if (isSubmitting.value) return
@@ -158,10 +161,15 @@ export function usePurchaseActions(deps: PurchaseActionDeps) {
       .filter(Boolean)
       .sort()
     const orderTime = times.length > 0 ? times[times.length - 1]! : ''
+    // 弹窗要等两个汇总接口都返回才 open（useSummaryModal.openSummary），
+    // 期间无任何界面反馈，故用按钮 loading 态顶替原先的「正在汇总订单数据...」气泡。
+    isSummarizing.value = true
     try {
       await summary.openSummary([...purchaseOrders.selectedIds], orderTime)
     } catch (err: unknown) {
       showToast((err as Error).message || '汇总失败', 'error')
+    } finally {
+      isSummarizing.value = false
     }
   }
 
@@ -231,5 +239,6 @@ export function usePurchaseActions(deps: PurchaseActionDeps) {
     handleRemoveCompletedFilter,
     handleExport,
     exporting,
+    isSummarizing,
   }
 }
