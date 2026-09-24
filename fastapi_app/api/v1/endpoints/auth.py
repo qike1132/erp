@@ -393,7 +393,8 @@ async def api_refresh_token(
     )
 
     logger.info("[Refresh] 令牌刷新成功: user_id=%s", user_id)
-    return success_response(access_token=access_token, token_type="bearer")
+    # token_type 是 OAuth2 令牌类型标识（RFC 6749），非口令 —— S106 误报
+    return success_response(access_token=access_token, token_type="bearer")  # noqa: S106
 
 
 # ==================== 文件上传 ====================

@@ -80,7 +80,7 @@ def real_fallback_cache(monkeypatch):
 def _redis_available() -> bool:
     try:
         return redis_cache.redis_client is not None
-    except Exception:  # noqa: BLE001 - 环境探测
+    except Exception:  # 环境探测
         return False
 
 
@@ -191,7 +191,7 @@ class TestFallbackDeletePatternPrefix:
             'erp:product:detail:1': 3,
             'erp:products:all': 4,
         }
-        mgr._fallback_timestamps = {k: 0.0 for k in mgr._fallback_cache}
+        mgr._fallback_timestamps = dict.fromkeys(mgr._fallback_cache, 0.0)
 
         deleted = await mgr.delete_pattern(PRODUCT_LIST_CACHE_PATTERN)
 

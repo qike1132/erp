@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import gzip
 import logging
 import os
@@ -93,7 +94,7 @@ async def run_pg_dump(output_path: Path, snapshot_id: str | None = None) -> dict
             与 _proc.run_proc 一样走同步 subprocess（Windows SelectorEventLoop
             不支持 asyncio 子进程 transport）。
             """
-            proc_ = subprocess.Popen(  # noqa: S603 — 参数为白名单校验后的固定列表
+            proc_ = subprocess.Popen(  # 参数为白名单校验后的固定列表
                 pg_dump_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
             )
 
@@ -262,6 +263,13 @@ async def restore_database_via_psql(zf, db: AsyncSession, task_id: str | None = 
             ],
             env=env, timeout=30,
         )
+        # 返回码此前被丢弃：终止失败会被静默吞掉，随后「重建数据库」以晦涩的 DROP 报错收场。
+        if term_proc.returncode != 0:
+            logger.warning(
+                '终止现有连接返回非零: rc=%s, stderr=%s',
+                term_proc.returncode,
+                (term_proc.stderr or b'').decode(errors='replace').strip()[:200],
+            )
     except (TimeoutError, OSError) as e:
         logger.warning(f'终止现有连接失败: {e}')
 
@@ -342,7 +350,7 @@ async def restore_database_via_psql(zf, db: AsyncSession, task_id: str | None = 
         def _psql_import() -> None:
             """工作线程：边解压边分块写 stdin，排空 stdout/stderr 防管道死锁。"""
             try:
-                proc_ = subprocess.Popen(  # noqa: S603 — 参数为白名单校验后的固定列表
+                proc_ = subprocess.Popen(  # 参数为白名单校验后的固定列表
                     psql_args, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE, env=env,
                 )
@@ -373,10 +381,8 @@ async def restore_database_via_psql(zf, db: AsyncSession, task_id: str | None = 
                 except (OSError, EOFError) as e:
                     result['stream_error'] = f'解压备份数据流失败: {e}'
                 state['stream_done'] = True
-                try:
+                with contextlib.suppress(BrokenPipeError):
                     proc_.stdin.close()
-                except BrokenPipeError:
-                    pass
                 try:
                     proc_.wait(timeout=600)
                     result['rc'] = proc_.returncode

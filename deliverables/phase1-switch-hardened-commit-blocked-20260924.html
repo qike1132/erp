@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>phase1_switch.ps1 加固完成 · 提交受阻诊断</title>
+<style>
+  :root{
+    --bg:#0f1420; --card:#171e2e; --card2:#1d2637; --fg:#e8edf6; --muted:#9fb0c9;
+    --line:#2a3549; --red:#ff6b6b; --orange:#ffa94d; --yellow:#ffd43b; --green:#51cf66;
+    --blue:#4dabf7; --code:#0b0f17;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.7 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
+  .wrap{max-width:1060px;margin:0 auto;padding:32px 24px 72px}
+  h1{font-size:21px;margin:0 0 6px}
+  h2{font-size:17px;margin:32px 0 12px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  h3{font-size:14.5px;margin:20px 0 8px;color:var(--blue)}
+  .sub{color:var(--muted);font-size:13px;margin-bottom:20px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:15px 18px;margin:14px 0}
+  .verdict{border-left:5px solid var(--orange);background:linear-gradient(90deg,#2a2010,#171e2e)}
+  .verdict b{color:var(--orange)}
+  .warn{border-left:4px solid var(--orange)}
+  .bad{border-left:4px solid var(--red)}
+  .good{border-left:4px solid var(--green)}
+  table{width:100%;border-collapse:collapse;margin:10px 0;font-size:13px}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:var(--card2);color:var(--muted);font-weight:600}
+  tbody tr:nth-child(even){background:rgba(255,255,255,.014)}
+  code,pre{font-family:"Cascadia Code",Consolas,monospace}
+  code{background:var(--code);padding:1px 6px;border-radius:4px;font-size:12.5px;color:#ffd8a8}
+  pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:12px 14px;overflow:auto;font-size:12.5px;color:#cfe3ff;margin:8px 0}
+  .tag{display:inline-block;padding:1px 8px;border-radius:20px;font-size:11.5px;font-weight:600;white-space:nowrap}
+  .t-red{background:rgba(255,107,107,.16);color:var(--red);border:1px solid rgba(255,107,107,.4)}
+  .t-org{background:rgba(255,169,77,.16);color:var(--orange);border:1px solid rgba(255,169,77,.4)}
+  .t-grn{background:rgba(81,207,102,.16);color:var(--green);border:1px solid rgba(81,207,102,.4)}
+  .t-blu{background:rgba(77,171,247,.16);color:var(--blue);border:1px solid rgba(77,171,247,.4)}
+  ul{margin:8px 0;padding-left:22px} li{margin:4px 0}
+  .small{font-size:12.5px;color:var(--muted)}
+  .foot{margin-top:40px;padding-top:14px;border-top:1px solid var(--line);color:var(--muted);font-size:12px}
+  .okc{color:var(--green)} .badc{color:var(--red)} .wnc{color:var(--orange)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>phase1_switch.ps1 加固完成 · 提交受阻诊断</h1>
+  <div class="sub">
+    仓库：D:\erp_system｜时间：2026-09-24 09:25–09:43 (+08:00)<br>
+    用户决策：选项 <b>A —— 加护栏后入库</b>｜结果：<b>加固已完成并暂存；提交被环境缺陷 + 并行会话双重阻塞，主动停下</b>
+  </div>
+
+  <div class="card verdict">
+    <b>结论：加固 ✅ 完成（已暂存）；提交 ⛔ 未执行 —— 三重阻塞，均不应绕过。</b>
+    ① <b>环境缺陷</b>：<code>pre-commit</code> hook 的 POSIX shell 拿不到 coreutils
+    （<code>sh</code> 不在 PATH ⇒ rc=127；屏蔽 <code>BASH_ENV</code> 后 hook 能跑，但 <code>sed</code>/<code>basename</code>/<code>rm</code> 仍找不到）。
+    ② <b>沙箱</b>：跑 hook 会触发批量删除守卫（hook 对 148 个暂存文件逐个 <code>rm -f</code> 临时文件）⇒ 工具会话被终止。
+    ③ <b>并行会话仍在高频活动</b>：<code>health.py</code> 于 09:52:47（我重试的同一分钟）被改且<b>未暂存</b>，
+    另有新文件不断出现 ⇒ 提交会固化半成品快照。<b>全程未使用 <code>--no-verify</code>。</b>
+  </div>
+
+  <h2>一、加固完成（对齐 restart_prod.ps1 的 M9 范式）</h2>
+  <table>
+    <thead><tr><th>#</th><th>护栏</th><th>解决的问题</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>1</td>
+        <td><b>禁止裸杀 NSSM 托管进程树</b><br><code>Get-ManagedProcessMap()</code></td>
+        <td>原 Step 1 对「谁占了 3000/5002」无差别 <code>Stop-Process -Force</code>。
+        新实现沿 <code>ParentProcessId</code> 下钻收集 <code>erp-prod</code>/<code>erp-arq</code> 的
+        <b>整棵进程树</b>（NSSM 会 spawn 子进程持有端口，只比对服务自身 PID 会漏判），
+        命中即 <code>REFUSE</code> 并提示改用 <code>nssm restart</code>，除非显式 <code>-Force</code></td>
+      </tr>
+      <tr>
+        <td>2</td>
+        <td><b>权限前置闸</b> <code>Test-IsAdmin()</code></td>
+        <td>非管理员会话在<b>任何杀进程之前</b> <code>exit 1</code>。否则会「杀了开发进程却起不来生产服务」，
+        把站点留在<b>全停</b>状态</td>
+      </tr>
+      <tr>
+        <td>3</td>
+        <td><b><code>-DryRun</code></b></td>
+        <td>只打印将执行的动作、不做变更；且无需提权即可预览</td>
+      </tr>
+      <tr>
+        <td>4</td>
+        <td><b><code>-LogPath</code></b> 参数化</td>
+        <td>原为硬编码 <code>D:\erp_system\logs\phase1_switch.log</code>；现默认
+        <code>&lt;仓库根&gt;\logs\...</code> 并自动建目录</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>验证</h3>
+  <table>
+    <thead><tr><th>项</th><th>结果</th></tr></thead>
+    <tbody>
+      <tr><td>UTF-8 BOM</td><td><span class="tag t-grn">EF BB BF</span> 已加（原文件纯 ASCII，加固后含中文 ⇒ 按记忆铁律必须带<b>单个</b> BOM）</td></tr>
+      <tr><td>语法解析</td><td><span class="tag t-grn">0 errors</span> <code>[Parser]::ParseFile</code>（只解析不执行）</td></tr>
+      <tr><td>中文可读性</td><td><span class="tag t-grn">正常</span> 按 UTF-8 读取抽样校验</td></tr>
+      <tr><td>护栏要素自检</td><td><span class="tag t-grn">6/6</span> <code>Test-IsAdmin</code> · <code>Get-ManagedProcessMap</code> · <code>REFUSE</code> · <code>-DryRun</code> · <code>Stop-Transcript</code> · <code>ParentProcessId</code></td></tr>
+      <tr><td>实机运行</td><td><span class="tag t-org">未做</span> 本环境 shell 异常 + 提权限制 ⇒ <b>仅语法与静态校验</b>（如实标注）</td></tr>
+    </tbody>
+  </table>
+  <p class="small">已暂存：<code>A  scripts/phase1_switch.ps1</code>（9419 B）</p>
+
+  <h2>二、提交受阻诊断（环境缺陷）</h2>
+  <table>
+    <thead><tr><th>尝试</th><th>结果</th></tr></thead>
+    <tbody>
+      <tr><td><code>git commit -F &lt;msg&gt;</code></td><td class="badc">exit 1、<b>无输出</b>（会话被中断）</td></tr>
+      <tr><td><code>git commit --dry-run</code></td><td class="okc">rc=0 ✓ ⇒ <b><code>git commit</code> 未被沙箱限制</b></td></tr>
+      <tr><td>直接运行 <code>.githooks/pre-commit</code></td><td class="badc"><b>rc=127</b> —— <code>sh</code> 不在 PATH</td></tr>
+      <tr><td>屏蔽 <code>BASH_ENV</code> 后再提交</td><td class="wnc">hook <b>跑起来了</b>（进到 L48/L87），但 <code>sed</code>/<code>basename: command not found</code></td></tr>
+      <tr><td>补 <code>Git\usr\bin</code> 进 PATH 重试</td><td class="badc">仍找不到（沙箱未把 PATH 传给 hook 子进程）</td></tr>
+    </tbody>
+  </table>
+
+  <div class="card bad">
+    <b>根因链（环境缺陷，非 hook 逻辑问题）</b>
+    <ol>
+      <li><code>sh</code>/<code>bash</code> <b>均不在 PATH</b>（Git 装在 <code>C:\Program Files\Git</code>，
+        其 <code>usr\bin</code> 未入 PATH）⇒ git 执行 hook 得 rc=127。</li>
+      <li>WorkBuddy 通过 <b><code>BASH_ENV</code></b> 注入
+        <code>cli\vendor\shim\shell-runtime-bash-env.sh</code>（该文件第 1 行自述
+        "sourced via BASH_ENV for bash subprocesses"），而该 shim 第 3 行 <code>dirname</code>/<code>cd</code>
+        失败 ⇒ 任何 bash 子进程被 SIGTERM。<b>屏蔽 <code>BASH_ENV</code> 可解此环</b>（hook 从 rc=127 变为真正执行）。</li>
+      <li>但 hook 的 shell 仍拿不到 coreutils —— <code>sed</code>/<code>basename</code>/<code>dirname</code>
+        在 <code>C:\Program Files\Git\usr\bin</code> <b>确实存在</b>（已核实），是 <b>PATH 未传递</b>。</li>
+    </ol>
+    <p><b>按系统约束未使用 <code>--no-verify</code></b>（「若 hook 失败，应排查并修复根因」）。</p>
+  </div>
+
+  <h2>三、第二个阻塞原因：并行会话正在改同一个 hook</h2>
+  <div class="card warn">
+    <p>取证（09:43:01）：</p>
+    <table>
+      <thead><tr><th>文件</th><th>mtime</th><th>状态</th></tr></thead>
+      <tbody>
+        <tr><td><code>.githooks/pre-commit</code></td><td><b>09:41:11</b>（13967 B，原 12306 B）</td><td><code>M</code> 已暂存</td></tr>
+        <tr><td><code>scripts/_selftest_hook.py</code></td><td><b>09:41:23</b>（7551 B）</td><td><code>A</code> 已暂存</td></tr>
+        <tr><td><code>scripts/phase1_switch.ps1</code>（我加固的）</td><td>09:26:42（9419 B）</td><td><code>A</code> 已暂存 ✓</td></tr>
+      </tbody>
+    </table>
+    <p><b>暂存集 146 → 148</b>；<code>HEAD</code> 仍是 <code>57171c65</code> ⇒ <b>未发生任何提交</b>。</p>
+    <p>⇒ 此刻提交会 ① 把并行会话<b>半成品</b>的 hook 改动一并带入，与我的提交信息不符；
+    ② 与其工作<b>竞态</b>（他们正在做的就是修这个 hook 问题，其 <code>_selftest_hook.py</code>
+    正是记忆规则 21 要求的「改 hook 必须跑的自测」）。</p>
+    <p><b>故主动停下，交由你决定。</b></p>
+  </div>
+
+  <h2>四、建议的下一步（三选一）</h2>
+  <table>
+    <thead><tr><th>选项</th><th>做法</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><b>① 等并行会话的 hook 修复落地后再提交（推荐）</b></td>
+        <td>他们的 <code>.githooks/pre-commit</code> 改动大概率就包含 PATH/coreutils 兜底。
+        落地后（并用 <code>scripts/_selftest_hook.py</code> 6 用例自测通过）再提交，
+        既解决环境阻塞，也避免把半成品混入提交</td>
+      </tr>
+      <tr>
+        <td><b>② 在正常终端里提交</b></td>
+        <td>WorkBuddy 沙箱外（普通 PowerShell / Git Bash 会话）执行
+        <code>git commit -F _qa_tmp\commit_msg.txt</code> —— 那里 <code>sh</code> 与 coreutils 正常，hook 可运行</td>
+      </tr>
+      <tr>
+        <td><b>③ 只提交我这批、排除并行会话的 2 个文件</b></td>
+        <td>需改用「先 <code>git restore --staged</code> 移出那 2 个文件 → 提交 → 再还原」的流程；
+        <b>但当前提交本身仍被 hook 阻塞</b>，故须先解决 ①/②</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>五、边界声明</h2>
+  <ul>
+    <li><b>未提交、未推送、未使用 <code>--no-verify</code></b>；未回滚并行会话的暂存项；未改 hook。</li>
+    <li>未触碰生产库、未启停服务。</li>
+    <li>为诊断而设置的 <code>BASH_ENV</code>/<code>PATH</code> 仅作用于单次进程，<b>未持久化</b>。</li>
+    <li>我加固的 <code>phase1_switch.ps1</code> 已暂存（<code>A</code>），未实机运行验证（已标注）。</li>
+  </ul>
+
+  <h2>六、重试结果（09:52，用户选「等其修复落地再提交」之后）</h2>
+  <div class="card warn">
+    <p><b>该前提不成立</b>：并行会话的 hook 改动已于 <b>09:41:11</b> 落地，但<b>没有加 PATH/coreutils 兜底</b>
+    （hook 内只有 <code>command -v</code> 判存，无 <code>usr/bin</code> 回退）⇒ 环境阻塞依旧。</p>
+    <p>重试（09:52:23）仍报 <code>sed</code>(L48) / <code>basename</code>(L87) / <code>rm</code>(L214)
+    <code>: command not found</code>；<b>HEAD 未变 ⇒ 未提交</b>。两次尝试均以「工具会话被杀、拿不到 RC」告终。</p>
+    <p><b>hook 退出逻辑已读</b>（L281–287）：只有 <code>fail≠0</code> 才 <code>exit 1</code>；
+    缺 coreutils 只产生错误噪音、<b>不一定置 fail</b> ⇒ 说明<b>真正致命的是会话被杀</b>，不是 hook 判定。
+    推测：hook 对 148 个暂存文件逐个建临时文件并 <code>rm -f</code>（L214）⇒ 触发本沙箱
+    <b>批量删除守卫</b>（单次 &gt;50 路径即触发）⇒ 进程被终止。</p>
+    <h3>决定性新证据：并行会话此刻仍在活动</h3>
+    <ul>
+      <li><code>fastapi_app/core/health.py</code> mtime <b>09:52:47</b>（正是我重试的同一分钟），且处于
+        <b>未暂存</b>状态。改动是<b>真实 bug 修复</b>：<code>pg_stat_activity.state</code> 为 NULL 时
+        直接当字典键，<code>msgspec.json.encode</code> 会拒绝非字符串键 ⇒ 改为
+        <code>{(row[0] or 'background'): ...}</code>。</li>
+      <li>新增未跟踪 <code>scripts/purge_simulated_data.py</code>。</li>
+    </ul>
+    <p><b>⇒ 此刻提交会固化一个半成品快照，且与提交信息不符。故不再尝试。</b></p>
+  </div>
+
+  <div class="card good">
+    <b>建议的收口方式（选项 2）</b>
+    <p>等并行会话停手后，在 <b>WorkBuddy 沙箱外的普通终端</b>执行：</p>
+    <pre>cd D:\erp_system
+git commit -F _qa_tmp\commit_msg.txt</pre>
+    <p>消息文件已就绪：<code>_qa_tmp\commit_msg.txt</code>（1939 B、<b>无 BOM</b> ✓，首行
+    <code>fix(ci,ops,quality): 收口 P0 三项 —— Alembic 配置 / CI lint 门禁 / 部署与审计判据</code>）。</p>
+    <p class="small">若需连并行会话的 <code>health.py</code> 修复一并提交，先
+    <code>git add fastapi_app/core/health.py</code>；否则该改动不会进入本次提交。
+    当前暂存集 <b>148</b>（含并行会话的 <code>.githooks/pre-commit</code>(M) 与
+    <code>scripts/_selftest_hook.py</code>(A)）。</p>
+  </div>
+
+  <div class="foot">
+    全程未触碰生产数据库、未启停服务、未提交未推送、未绕过 hook。<br>
+    证据文件：<code>_qa_tmp/ps1_hardened.txt</code> · <code>hook_probe.txt</code> · <code>commit_log2.txt</code> ·
+    <code>commit2_decoded.txt</code> · <code>check2.txt</code> · <code>stop_evidence.txt</code><br>
+    生成时间：2026-09-24 09:43 (+08:00)
+  </div>
+
+</div>
+</body>
+</html>

@@ -28,7 +28,6 @@ from fastapi_app.services.purchase_product_service import (
 from fastapi_app.shared_models import Base, ProductRole, Role
 from fastapi_app.utils.scope_order import order_scopes
 
-
 # ---------------------------------------------------------------------------
 # 1) order_scopes：输入顺序无关 + 数值序（跨位数）
 # ---------------------------------------------------------------------------

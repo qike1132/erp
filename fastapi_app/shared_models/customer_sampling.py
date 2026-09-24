@@ -183,9 +183,10 @@ class CustomerSamplingProject(Base):
 class CustomerSamplingRole(Base):
     """角色表（部位布料的角色维度）
 
-    每个打样项目下可有 1..N 个角色，每个角色独立维护部位布料与版本快照。
+    每个打样项目下可有 0..N 个角色（角色一律可删除，删除后级联清掉其部位与版本），
+    每个角色独立维护部位布料与版本快照。
     每个角色拥有独立的 current_version（最终版本），与其他角色完全隔离。
-    迁移时为每个旧项目自动创建一个 is_default=True 的"默认角色"，承载所有旧数据。
+    迁移时为每个旧项目自动创建了一个 is_default=True 的"默认角色"，承载所有旧数据。
     """
     __tablename__ = 'customer_sampling_role'
 
@@ -196,7 +197,8 @@ class CustomerSamplingRole(Base):
     role_name: Mapped[str] = mapped_column(String(100), nullable=False, comment='角色名称')
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment='排序值')
     is_default: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False, server_default='false', comment='是否默认角色（不可删除）',
+        Boolean, nullable=False, default=False, server_default='false',
+        comment='是否系统自动创建的「默认」角色（仅标记来源，不限制删除）',
     )
     current_version: Mapped[str] = mapped_column(
         String(8), nullable=False, default='T1', server_default='T1', comment='该角色当前最终版本 T1/T2/T3...',

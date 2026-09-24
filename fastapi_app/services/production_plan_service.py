@@ -127,7 +127,6 @@ async def _calc_all_shipped_qty(db: AsyncSession, year: int, month: int) -> dict
     查询 stock_out 全表（含独立出货和订单抵扣）
     返回: {(customer_name, product_name): total_shipped_qty}
     """
-    start = date(year, month, 1)
     end = last_day_of_month(year, month)
     # 用范围条件而非 func.date()，使 stockout_date 上的索引可被命中
     start_dt = datetime(year, month, 1)

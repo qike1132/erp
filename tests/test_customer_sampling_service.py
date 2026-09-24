@@ -54,7 +54,6 @@ from fastapi_app.services.customer_sampling_service import (
     update_part,
     update_project,
     update_project_status,
-    upload_project_image,
 )
 
 # ============================================================
@@ -407,7 +406,7 @@ class TestServiceMockErrors:
         用 side_effect 模拟三次 execute 返回不同结果。
         """
         # 第一次 execute（_ensure_project_exists）返回项目存在
-        # 第二次 execute（_get_default_role_id）返回默认角色 id=1
+        # 第二次 execute（_get_primary_role_id）返回基准角色 id=1
         # 第三次 execute（_ensure_part_name_unique）返回已存在 id=2
         project_exists_result = _mock_result(scalar_value=1)
         default_role_result = _mock_result(scalar_value=1)
@@ -470,12 +469,11 @@ async def cs_db():
     service 层用 flush() 不 commit()，事务由端点层 db_transaction 控制。
     首次运行时通过 Base.metadata.create_all 幂等创建缺失表（开发环境安全）。
     """
-    from fastapi_app.shared_models import Base
-
     # 让 app 全局引擎在当前测试 loop 上按 conftest 重定向后的 URL 重建：
     # create_project 经 numbering_sequence.allocate_sequence 直接
     # 引用 _AsyncSessionLocal（非请求路径），不先跑守卫则该引用为 None → TypeError。
     from fastapi_app.core import database as _db_mod
+    from fastapi_app.shared_models import Base
     await _db_mod.ensure_engine_for_current_loop()
 
     engine = create_async_engine(TEST_DATABASE_URL, echo=False, pool_pre_ping=True)
@@ -748,6 +746,52 @@ class TestServiceIntegration:
         assert versions[0].version_no == 'T1'
         assert versions[0].snapshot_data == []
         assert versions[0].change_summary is None
+
+    async def test_project_create_without_initial_roles_uses_default_role(self, cs_db):
+        """创建项目：未指定自定义角色名 → 只创建一个名为「默认」的兜底角色"""
+        from sqlalchemy import select
+
+        from fastapi_app.shared_models import CustomerSamplingRole
+
+        r = await create_project(cs_db, product_name='无自定义角色')
+        await cs_db.flush()
+
+        roles = (await cs_db.execute(
+            select(CustomerSamplingRole)
+            .where(CustomerSamplingRole.project_id == r['id'])
+            .order_by(CustomerSamplingRole.sort_order)
+        )).scalars().all()
+        assert [x.role_name for x in roles] == ['默认']
+        assert roles[0].is_default is True
+
+    async def test_project_create_with_initial_roles_skips_default_role(self, cs_db):
+        """创建项目：指定自定义角色名 → 首个角色即兜底角色，不再创建「默认」"""
+        from sqlalchemy import select
+
+        from fastapi_app.shared_models import CustomerSamplingFabricVersion, CustomerSamplingRole
+
+        r = await create_project(
+            cs_db, product_name='自定义角色', initial_roles=['黄蛋', '粉蛋', ' 黄蛋 ', ''],
+        )
+        await cs_db.flush()
+
+        roles = (await cs_db.execute(
+            select(CustomerSamplingRole)
+            .where(CustomerSamplingRole.project_id == r['id'])
+            .order_by(CustomerSamplingRole.sort_order)
+        )).scalars().all()
+        # 去重、去空白，且不含「默认」；自定义角色一律非兜底（均可删除）
+        assert [x.role_name for x in roles] == ['黄蛋', '粉蛋']
+        assert [x.is_default for x in roles] == [False, False]
+        assert [x.sort_order for x in roles] == [0, 1]
+
+        # T1 基线版本挂在首个角色下
+        versions = (await cs_db.execute(
+            select(CustomerSamplingFabricVersion)
+            .where(CustomerSamplingFabricVersion.project_id == r['id'])
+        )).scalars().all()
+        assert len(versions) == 1
+        assert versions[0].role_id == roles[0].id
 
     async def test_project_detail(self, cs_db):
         """项目详情：含部位 + 版本列表"""

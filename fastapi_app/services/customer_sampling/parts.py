@@ -27,18 +27,16 @@ from .common import (
     _ensure_part_name_unique,
     _ensure_project_exists,
     _ensure_role_belongs_to_project,
-    _get_default_role_id,
+    _get_primary_role_id,
     _get_user_name,
     _resolve_pattern_maker_name,
+    _resolve_role_id,
     _resolve_supplier_name,
     _write_change_log,
 )
 from .grouping import _project_to_summary
 from .upload import _batch_get_image_urls, _get_product_image_urls
 from .version_diff import _version_num
-
-
-
 
 
 async def create_part(
@@ -64,15 +62,12 @@ async def create_part(
     - 校验项目存在
     - 校验 part_name 同项目下唯一（应用层校验 + DB 唯一索引双重保障）
     - 校验 supplier_id 存在性，冗余存储 supplier_name
-    - role_id 指定归属角色（校验属于该项目），未传时归属项目的默认角色
+    - role_id 指定归属角色（校验属于该项目），未传时归属项目的基准角色
     """
     await _ensure_project_exists(db, project_id)
-    if role_id is None:
-        role_id = await _get_default_role_id(db, project_id)
-    else:
-        await _ensure_role_belongs_to_project(db, role_id, project_id)
+    role_id = await _resolve_role_id(db, project_id, role_id)
 
-    # 校验部位名称同默认角色、同版本下唯一；默认角色已在上方解析，避免重复查询
+    # 校验部位名称同角色、同版本下唯一；角色已在上方解析，避免重复查询
     await _ensure_part_name_unique(db, project_id, part_name, role_id=role_id)
 
     # 解析供应商名称
@@ -259,13 +254,10 @@ async def batch_create_parts(
     部位与审计日志 add_all 后统一 flush（原先每条 3+ 次往返，50 条 150+ 次）。
 
     Args:
-        role_id: 归属角色ID；未传时自动解析项目的默认角色
+        role_id: 归属角色ID；未传时自动解析项目的基准角色
     """
     await _ensure_project_exists(db, project_id)
-    if role_id is None:
-        role_id = await _get_default_role_id(db, project_id)
-    else:
-        await _ensure_role_belongs_to_project(db, role_id, project_id)
+    role_id = await _resolve_role_id(db, project_id, role_id)
 
     # 供应商名称批量预取（一次 IN 查询）
     supplier_ids = {item.get('supplier_id') for item in items if item.get('supplier_id') is not None}
@@ -348,7 +340,7 @@ async def list_parts(db: AsyncSession, project_id: int, *, role_id: int | None =
     """
     await _ensure_project_exists(db, project_id)
     if role_id is None:
-        role_id = await _get_default_role_id(db, project_id, create=False)
+        role_id = await _get_primary_role_id(db, project_id)
         if role_id is None:
             return {'success': True, 'items': []}
 

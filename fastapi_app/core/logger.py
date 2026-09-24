@@ -8,7 +8,7 @@
 import logging
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
@@ -63,7 +63,7 @@ def setup_logging():
     root_logger.addHandler(console_handler)
 
     # 文件处理器（JSON 格式，按天轮转，保留 3 天）
-    log_file = log_dir / f"fastapi_{datetime.now(timezone.utc).strftime('%Y%m%d')}.log"
+    log_file = log_dir / f"fastapi_{datetime.now(UTC).strftime('%Y%m%d')}.log"
     file_handler = TimedRotatingFileHandler(
         log_file,
         when="midnight",

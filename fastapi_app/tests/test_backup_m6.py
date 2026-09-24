@@ -9,14 +9,12 @@
 与既有里程碑测试同款纪律:独立运行,不依赖 client fixture。
 """
 from pathlib import Path
-from unittest.mock import AsyncMock
 
 import pytest
 
 from fastapi_app.services.backup import schedule_service
 from fastapi_app.services.backup.exceptions import BackupError
 from fastapi_app.services.backup.orchestration.core import resolve_backup_table_scope
-
 
 # ===========================================================================
 # 1. P1-2 表级备份范围

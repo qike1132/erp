@@ -9,7 +9,7 @@
 
 与 test_backup_m1 同款纪律:本文件独立运行,不依赖 client fixture。
 """
-import asyncio
+import contextlib
 import io
 import json
 import zipfile
@@ -22,7 +22,6 @@ import pytest
 from fastapi_app.core import backup_encryption as enc
 from fastapi_app.services.backup import records as records_mod
 from fastapi_app.services.backup import restore as restore_mod
-
 
 # ===========================================================================
 # 1. P0-1 加密决策单点化
@@ -217,6 +216,7 @@ async def test_chunk_bundle_register_and_load(monkeypatch, tmp_path):
 @pytest.mark.asyncio
 async def test_chunk_bundle_sweep_removes_expired(monkeypatch, tmp_path):
     import os
+
     from fastapi_app.api.v1.endpoints.backup import export as export_mod
     monkeypatch.setattr(export_mod, '_CHUNK_BUNDLE_DIR', tmp_path)
     fresh = tmp_path / 'fresh.bundle'
@@ -324,17 +324,16 @@ class TestSourceGuards:
     @pytest.mark.asyncio
     async def test_cache_invalidator_awaits_purchase_caches(self, monkeypatch):
         """采购缓存失效协程必须被 await（审计实测：未 await 时静默失效）。"""
+        from unittest.mock import AsyncMock
+
         from fastapi_app.core import purchase_cache as pc
         from fastapi_app.services.backup.adapters import ExistingCacheInvalidatorAdapter
-        from unittest.mock import AsyncMock
 
         fake = AsyncMock()
         monkeypatch.setattr(pc, 'invalidate_purchase_caches', fake)
         # invalidate_related_caches 同步容错路径维持原样
-        try:
+        with contextlib.suppress(Exception):
             await ExistingCacheInvalidatorAdapter().invalidate_all()
-        except Exception:
-            pass
         fake.assert_awaited()
 
     def test_save_endpoint_no_double_encryption(self):

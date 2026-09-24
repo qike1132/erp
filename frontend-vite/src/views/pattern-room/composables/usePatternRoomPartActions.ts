@@ -27,7 +27,6 @@ type ConfirmDialog = ReturnType<typeof useConfirmDialog>
 interface RoleRemovePayload {
   id: number
   role_name: string
-  is_default: boolean
 }
 
 interface UsePatternRoomPartActionsOptions {
@@ -271,7 +270,6 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
 
   async function onRemoveRole(role: RoleRemovePayload) {
     if (!requireManage()) return
-    if (role.is_default) return
     const ok = await confirmDialog.confirm(
       '确认删除该角色？',
       `角色「${role.role_name}」下所有部位布料和版本快照将被级联删除，且不可恢复。`,

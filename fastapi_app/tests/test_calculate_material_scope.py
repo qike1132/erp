@@ -21,7 +21,6 @@ from fastapi_app.services.purchase_product_service import (
 )
 from fastapi_app.utils.scope_order import DEFAULT_SCOPE_LABEL
 
-
 # ---------------------------------------------------------------------------
 # 测试替身
 # ---------------------------------------------------------------------------

@@ -157,7 +157,9 @@ def register_health_routes(app: FastAPI) -> None:
             rows2 = await db.execute(text(
                 "SELECT state, COUNT(*) FROM pg_stat_activity GROUP BY state"
             ))
-            db_status = {row[0]: str(row[1]) for row in rows2.all()}
+            # state 为 NULL 的是后台进程（checkpointer/walwriter 等），
+            # NULL 不能直接当字典键（msgspec.json.encode 拒绝非字符串键），故显式命名
+            db_status = {(row[0] or 'background'): str(row[1]) for row in rows2.all()}
 
             result["db_variables"] = db_vars
             result["db_status"] = db_status
@@ -173,6 +175,7 @@ def register_health_routes(app: FastAPI) -> None:
         async def metrics(request: Request):
             # 生产环境要求 Bearer Token（fail-closed：未配置 token 即不暴露）
             from starlette.responses import JSONResponse
+
             from fastapi_app.core.config import settings as _settings
             if _settings.is_production:
                 auth = request.headers.get('authorization', '')
@@ -285,7 +288,7 @@ def register_health_routes(app: FastAPI) -> None:
             return Response(
                 content=json.dumps(
                     {"status": "probe_unknown",
-                     "message": "ARQ 健康探测自身异常: %s" % type(exc).__name__},
+                     "message": f"ARQ 健康探测自身异常: {type(exc).__name__}"},
                     ensure_ascii=False,
                 ),
                 status_code=503,

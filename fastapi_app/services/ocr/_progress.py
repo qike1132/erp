@@ -2,10 +2,9 @@
 
 从 ocr_service.py 按职责拆出,行为与原实现完全一致。
 """
+import logging
 import threading
 import uuid
-
-import logging
 
 logger = logging.getLogger(__name__)
 

@@ -80,6 +80,18 @@ jobs:
           --cov-report=html \
           --html=test-report.html \
           --junitxml=test-results.xml
+
+    - name: Run prod_audit self-test suite
+      # 与上面的「gated test suite」分开**独立进程**运行，原因有二：
+      #   1) 该套件有独立 conftest（scripts/prod_audit/tests/conftest.py），
+      #      与主套件混跑会触发已知的 conftest event-loop 污染；
+      #   2) 独立步骤让它在 CI 日志中单独可见，失败定位更快。
+      # 覆盖 L1~L12 审核层的加载 / 评分 / 上线决策 / 证据归档；其中
+      # test_l11_deployment.py 是 L11 部署就绪判据的回归锁
+      # （迁移路径须识别 migrations/、部署就绪须接受 Windows 原生 NSSM）。
+      # 注意：**不加 --cov** —— 覆盖率门槛针对 fastapi_app/utils，
+      # 把 scripts 计入会污染该指标。
+      run: pytest scripts/prod_audit/tests -q
     
     - name: Upload coverage reports
       uses: codecov/codecov-action@v5
@@ -214,32 +226,25 @@ jobs:
         python -m pip install --upgrade pip
         python -m compileall fastapi_app utils tests fastapi_app/tests
   
-  deploy-staging:
-    needs: build
-    runs-on: windows-latest
-    if: github.ref == 'refs/heads/develop'
-
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Deploy to staging (Windows native)
-      run: |
-        echo "Deploying to staging environment (Windows native)..."
-        .\deploy-windows.ps1 -Env staging
-      env:
-        APP_ENV: staging
-    
-  deploy-production:
-    needs: build
-    runs-on: windows-latest
-    if: github.ref == 'refs/heads/main'
-
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Deploy to production (Windows native)
-      run: |
-        echo "Deploying to production environment (Windows native)..."
-        .\deploy-windows.ps1 -Env production
-      env:
-        APP_ENV: production
+  # ---------------------------------------------------------------------------
+  # 部署阶段已移除（2026-09-24）—— 原 deploy-staging / deploy-production 两个 job
+  #
+  # 移除原因（三条，任一都足以让它们不可能成功）：
+  #   1) 架构不通：生产机是内网 192.168.0.95，而本 workflow 全部使用 GitHub 托管的
+  #      runner（ubuntu-latest / windows-latest）。托管 runner 无法访问内网主机，
+  #      因此这里**不可能**完成真实部署。本仓库未配置 self-hosted runner。
+  #   2) 依赖已删：两个 job 都执行 `.\deploy-windows.ps1`，该脚本已在 commit 15e13a79
+  #      （「上线前审核整改——安全加固、危险操作面收敛」）中作为「必然 exit 1 的过时
+  #      脚本」被**有意删除**（见 deliverables/audit-2026-09-17/上线前问题修复报告-20260917.md
+  #      的 M9 项、上线前审核总报告 C-M7）。不要为了过 CI 而复活它。
+  #   3) 分支不存在：deploy-staging 的 if 条件是 `refs/heads/develop`，而本仓库从未
+  #      有过 develop 分支（只有 main / fix-v533-sentinel 等）⇒ 该 job 永不执行。
+  #
+  # 真实部署路径（本机 NSSM 托管，非容器、非 CI）：
+  #   - 服务：erp-prod / erp-arq / erp-redis / erp-redis-broker（`C:\nssm\nssm.exe`）
+  #   - 步骤与提权要求见 docs/runbooks/service-lifecycle.md
+  #   - 数据库迁移见 migrations/（`python -m alembic -c migrations/alembic.ini upgrade head`）
+  #
+  # 若将来接入内网 self-hosted runner，请从 git 历史取回本段并按内网拓扑重写；
+  # 不要直接指向已删除的 deploy-windows.ps1。
+  # ---------------------------------------------------------------------------

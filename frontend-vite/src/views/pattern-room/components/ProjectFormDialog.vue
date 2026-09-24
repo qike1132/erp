@@ -33,10 +33,12 @@
           <textarea v-model="form.remark" class="pjf-textarea" rows="3" maxlength="2000" placeholder="项目备注..." aria-label="项目备注..." />
         </div>
 
-        <div class="pjf-field pjf-full">
+        <div ref="imageZoneRef" class="pjf-field pjf-full pjf-image-zone">
           <label class="pjf-label">产品图片</label>
           <DialogImageUpload
             :preview-url="previewUrl"
+            :paste-flash="pasteFlash"
+            :uploading="processing"
             @upload-file="applyImageFile"
             @remove="removeImage"
           />
@@ -63,7 +65,7 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, computed, watch } from 'vue'
+import { reactive, ref, computed, watch, onBeforeUnmount } from 'vue'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import UiButton from '@/components/ui/UiButton.vue'
 import DialogMakerSelect from './DialogMakerSelect.vue'
@@ -72,6 +74,7 @@ import DialogRoleEditor from './DialogRoleEditor.vue'
 import type { PatternMaker } from '@/api/patternMaker'
 import type { ProjectDetailResponse, ProjectCreateRequest, ProjectUpdateRequest } from '@/api/patternRoom'
 import { useFormImageUpload } from '../composables/useFormImageUpload'
+import { useImagePaste } from '@/composables/useImagePaste'
 
 const props = defineProps<{
   visible: boolean
@@ -104,7 +107,7 @@ const roleNames = ref<string[]>([''])
 /** 编辑模式下是否移除了已有产品图片（提交时 product_image_file_id 显式传 null，后端清除旧图） */
 const imageRemoved = ref(false)
 
-const { previewUrl, setPreview, applyImageFile, removeImage } = useFormImageUpload(
+const { previewUrl, processing, setPreview, applyImageFile, removeImage } = useFormImageUpload(
   (file) => {
     imageRemoved.value = false
     emit('upload-image', file)
@@ -114,6 +117,31 @@ const { previewUrl, setPreview, applyImageFile, removeImage } = useFormImageUplo
     emit('remove-image')
   },
 )
+
+/** 图片区容器（始终渲染）作为粘贴热区：预览分支下虚线框不存在，不能以它为热区 */
+const imageZoneRef = ref<HTMLElement | null>(null)
+const pasteFlash = ref(false)
+let pasteFlashTimer: ReturnType<typeof setTimeout> | undefined
+
+/** 粘贴命中时复用拖拽高亮，给出「已接收」的即时反馈 */
+function flashPasteFeedback() {
+  pasteFlash.value = true
+  clearTimeout(pasteFlashTimer)
+  pasteFlashTimer = setTimeout(() => { pasteFlash.value = false }, 600)
+}
+
+// 弹窗优先级高于底层表单/列表：弹窗打开时只有本弹窗响应粘贴
+useImagePaste({
+  target: imageZoneRef,
+  onFile: (file) => {
+    flashPasteFeedback()
+    void applyImageFile(file)
+  },
+  enabled: () => props.visible && !props.submitting,
+  priority: 10,
+})
+
+onBeforeUnmount(() => clearTimeout(pasteFlashTimer))
 
 watch(() => props.visible, (val) => {
   if (val) {

@@ -12,7 +12,6 @@ import contextlib
 import logging
 import time
 from collections import OrderedDict
-from datetime import UTC
 
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy import select
@@ -25,7 +24,6 @@ from fastapi_app.core.auth.token import (
     create_access_token,
     create_refresh_token,
 )
-from fastapi_app.core.config import settings
 from fastapi_app.core.database import get_async_db
 from fastapi_app.shared_models import Permission, User
 

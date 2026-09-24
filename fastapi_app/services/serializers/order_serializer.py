@@ -250,10 +250,10 @@ class OrderSerializer:
         绝不触发惰性加载。
         """
         try:
-            unloaded = sa_inspect(order).unloaded
+            unloaded: set[str] = sa_inspect(order).unloaded
         except SQLAlchemyError:
             # 非 ORM 实例（测试替身等）：按已加载处理，保持既有行为
-            unloaded = frozenset()
+            unloaded = set()
         if "items" in unloaded:
             return []
 

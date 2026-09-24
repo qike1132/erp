@@ -9,7 +9,6 @@ M1 备份任务化测试(TECHNICAL_PLAN.md v2 §7 M1)
 
 注意:本文件独立运行(conftest 的 client fixture 存在 event loop 污染,见项目规则)。
 """
-import os
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -23,7 +22,6 @@ from fastapi_app.services.backup.settings_service import (
     save_settings,
     validate_path,
 )
-
 
 # ===========================================================================
 # 1. validate_path
@@ -475,7 +473,6 @@ async def test_manual_full_task_uses_passed_task_id(monkeypatch, tmp_path):
 
 def test_migration_has_symmetric_downgrade():
     import ast
-    from pathlib import Path
 
     mig_path = (
         Path(__file__).resolve().parents[2]

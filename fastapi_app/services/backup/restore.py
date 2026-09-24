@@ -15,6 +15,7 @@ import io
 import json
 import logging
 import zipfile
+from typing import ClassVar
 
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -106,7 +107,8 @@ async def restore_non_dependent_components(
 class _KernelProgressReporter:
     """内核 RestorePhase → 既有 Redis 进度阶段名的映射（P1-3 接线）。"""
 
-    _PHASE_MAP = {
+    # 类级只读查找表：标注 ClassVar 明确它不参与实例状态（避免可变类属性被实例共享改写）。
+    _PHASE_MAP: ClassVar[dict[str, str]] = {
         'pre_restore_backup': 'pre_backup',
         'decrypt_archive': 'read_backup',
         'restore_database': 'restore_db',
@@ -390,6 +392,11 @@ async def get_restore_lock_info() -> dict | None:
         holder = await client.get(_RESTORE_LOCK_KEY)
         if not holder:
             return None
+        # Redis 客户端未启用 decode_responses，raw 值为 bytes；调用方
+        # (is_stale_restore_lock / clear_stale_restore_lock / 409 响应) 均按 str 处理，
+        # 不解码会让进度键被拼成 "erp:restore_progress:b'xxx'" 而永远查不到。
+        if isinstance(holder, bytes):
+            holder = holder.decode('utf-8', errors='replace')
         ttl = await client.ttl(_RESTORE_LOCK_KEY)
         return {'holder': holder, 'ttl_seconds': max(int(ttl), 0)}
     except Exception as e:  # broad-except: 读锁信息失败不影响主流程

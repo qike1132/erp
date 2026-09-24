@@ -96,48 +96,42 @@ function updatePrintTime() {
   printTime.value = new Date().toLocaleString()
 }
 
-/** 按角色分组的部位数据，每个部位只保留最终版本 */
+/**
+ * 按角色分组的部位数据。
+ *
+ * 分段来源是「角色列表」而非「部位数据」：角色的最终版本可能没有数据
+ * （current_version 指向空版本/已不存在的版本，或该角色尚未录入部位），
+ * 若仅由部位数据推导分段，整个角色会从打样单上消失。
+ * 同一角色下每个 part_name 只保留一行（版本由上游按最终版本/最新有数据版本选定）。
+ */
 const groupedParts = computed(() => {
-  const roleMap = new Map<number, string>()
-  const roleFinalVersion = new Map<number, string>()
+  const groups = new Map<number | null, { roleId: number | null; roleName: string; items: PartDetail[] }>()
+  // 先按角色列表顺序建段，保证每个角色都会出现在打样单上
   for (const r of props.roles) {
-    roleMap.set(r.id, r.role_name)
-    roleFinalVersion.set(r.id, r.current_version)
+    groups.set(r.id, { roleId: r.id, roleName: r.role_name, items: [] })
   }
 
-  const groups = new Map<number | null, { roleId: number | null; roleName: string; items: PartDetail[] }>()
-  // 每个角色下每个 part_name 只保留最终版本那一行
   const seenParts = new Map<number | null, Set<string>>()
 
   for (const part of props.parts) {
     const rid = part.role_id ?? null
-    if (!groups.has(rid)) {
-      groups.set(rid, {
-        roleId: rid,
-        roleName: rid != null ? (roleMap.get(rid) ?? `角色${rid}`) : '未分配角色',
-        items: [],
-      })
-      seenParts.set(rid, new Set())
+    let group = groups.get(rid)
+    if (!group) {
+      // 角色列表外的数据（角色已被删除等）追加到末尾，避免内容丢失
+      group = { roleId: rid, roleName: rid != null ? `角色${rid}` : '未分配角色', items: [] }
+      groups.set(rid, group)
     }
-    const seen = seenParts.get(rid)!
-    // 该部位已输出过最终版本行，跳过其他版本
+    let seen = seenParts.get(rid)
+    if (!seen) {
+      seen = new Set<string>()
+      seenParts.set(rid, seen)
+    }
     if (seen.has(part.part_name)) continue
-    // 只保留该角色的最终版本
-    const finalVersion = rid != null ? (roleFinalVersion.get(rid) ?? '') : ''
-    if (finalVersion && part.version_no !== finalVersion) continue
     seen.add(part.part_name)
-    groups.get(rid)!.items.push(part)
+    group.items.push(part)
   }
 
-  // 按角色 sort_order 排序
-  const roleOrder = new Map<number, number>()
-  props.roles.forEach((r, i) => roleOrder.set(r.id, i))
-
-  return [...groups.values()].sort((a, b) => {
-    const oa = a.roleId != null ? (roleOrder.get(a.roleId) ?? 999) : 999
-    const ob = b.roleId != null ? (roleOrder.get(b.roleId) ?? 999) : 999
-    return oa - ob
-  })
+  return [...groups.values()]
 })
 
 defineExpose({ updatePrintTime })
@@ -214,7 +208,8 @@ defineExpose({ updatePrintTime })
 .pd-image {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  /* contain：完整显示整张图片（cover 会按外框裁剪，非正方形图片内容被切掉） */
+  object-fit: contain;
   display: block;
 }
 

@@ -33,9 +33,8 @@ from fastapi_app.schemas.backup import (
     BackupTriggerOut,
 )
 from fastapi_app.services import backup as backup_service
-from fastapi_app.services.backup import schedule_service
+from fastapi_app.services.backup import BackupFileError, schedule_service
 from fastapi_app.services.backup.verify import query_service as backup_query_service
-from fastapi_app.services.backup import BackupFileError
 from fastapi_app.shared_models import User
 
 logger = logging.getLogger(__name__)
@@ -111,8 +110,9 @@ async def delete_server_backup(
             raise HTTPException(status_code=400, detail=str(e)) from e
         # 文件已不存在（例如被保留策略清理）——幂等处理，继续清理同名记录
     try:
-        from fastapi_app.shared_models.backup_record import BackupRecord
         from sqlalchemy import delete as _sa_delete
+
+        from fastapi_app.shared_models.backup_record import BackupRecord
         await db.execute(_sa_delete(BackupRecord).where(BackupRecord.filename == safe_name))
     except SQLAlchemyError as e:
         logger.error(f'清理备份记录 {safe_name} 失败: {e}')

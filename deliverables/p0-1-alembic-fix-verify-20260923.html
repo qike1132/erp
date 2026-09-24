@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>P0-① 修复验证：Alembic script_location 与 CWD 解耦</title>
+<style>
+  :root{
+    --bg:#0f1420; --card:#171e2e; --card2:#1d2637; --fg:#e8edf6; --muted:#9fb0c9;
+    --line:#2a3549; --red:#ff6b6b; --orange:#ffa94d; --yellow:#ffd43b; --green:#51cf66;
+    --blue:#4dabf7; --code:#0b0f17;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.7 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
+  .wrap{max-width:1080px;margin:0 auto;padding:32px 24px 72px}
+  h1{font-size:21px;margin:0 0 6px}
+  h2{font-size:17px;margin:34px 0 12px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  h3{font-size:14.5px;margin:20px 0 8px;color:var(--blue)}
+  .sub{color:var(--muted);font-size:13px;margin-bottom:20px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:15px 18px;margin:14px 0}
+  .verdict{border-left:5px solid var(--green);background:linear-gradient(90deg,#12281c,#171e2e)}
+  .verdict b{color:var(--green)}
+  .warn{border-left:4px solid var(--orange)}
+  .info{border-left:4px solid var(--blue)}
+  table{width:100%;border-collapse:collapse;margin:10px 0;font-size:13px}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:var(--card2);color:var(--muted);font-weight:600}
+  tbody tr:nth-child(even){background:rgba(255,255,255,.014)}
+  code,pre{font-family:"Cascadia Code",Consolas,monospace}
+  code{background:var(--code);padding:1px 6px;border-radius:4px;font-size:12.5px;color:#ffd8a8}
+  pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:12px 14px;overflow:auto;font-size:12.5px;color:#cfe3ff;margin:8px 0}
+  .tag{display:inline-block;padding:1px 8px;border-radius:20px;font-size:11.5px;font-weight:600;white-space:nowrap}
+  .t-red{background:rgba(255,107,107,.16);color:var(--red);border:1px solid rgba(255,107,107,.4)}
+  .t-org{background:rgba(255,169,77,.16);color:var(--orange);border:1px solid rgba(255,169,77,.4)}
+  .t-grn{background:rgba(81,207,102,.16);color:var(--green);border:1px solid rgba(81,207,102,.4)}
+  .t-blu{background:rgba(77,171,247,.16);color:var(--blue);border:1px solid rgba(77,171,247,.4)}
+  ul{margin:8px 0;padding-left:22px} li{margin:4px 0}
+  .small{font-size:12.5px;color:var(--muted)}
+  .foot{margin-top:42px;padding-top:14px;border-top:1px solid var(--line);color:var(--muted);font-size:12px}
+  .ok{color:var(--green)} .bad{color:var(--red)} .wn{color:var(--orange)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>P0-① 修复验证报告</h1>
+  <div class="sub">
+    问题：Alembic <code>script_location</code> 按 CWD 解析，CI 在仓库根执行 ⇒ test job 第一道门必失败<br>
+    仓库：D:\erp_system｜分支 main（未提交）｜时间：2026-09-23 23:0x (+08:00)｜性质：<b>本地只读验证，未触碰生产库</b>
+  </div>
+
+  <div class="card verdict">
+    <b>结论：已修复并双向验证通过。</b>
+    <code>script_location = .</code> → <code>%(here)s</code>；仓库根执行从「必失败」变为「正常解析」，
+    且旧写法（<code>cd migrations</code>）保持向后兼容。改动 <b>2 个跟踪文件</b>，无夹带。
+  </div>
+
+  <h2>一、改动清单</h2>
+  <table>
+    <thead><tr><th>文件</th><th>改动</th></tr></thead>
+    <tbody>
+      <tr><td><code>migrations/alembic.ini</code></td><td><code>script_location = .</code> → <code>script_location = %(here)s</code>（+ ASCII 注释记录成因与约束）</td></tr>
+      <tr><td><code>docs/runbooks/service-lifecycle.md:269</code></td><td>迁移命令改为 <code>python -m alembic -c migrations/alembic.ini upgrade head</code>（仓库根执行），补一行只读版本查询</td></tr>
+      <tr><td><code>技能 erp-prod-db-migration</code></td><td>原「坑 1：必须 <code>cwd=migrations</code> + <code>PYTHONPATH</code>」已被本次修复推翻，同步更正；补 ASCII 编码与 <code>--sql</code> 两条硬约束</td></tr>
+    </tbody>
+  </table>
+  <pre># git diff HEAD --stat
+ docs/runbooks/service-lifecycle.md |  3 ++-
+ migrations/alembic.ini             | 11 ++++++++++-
+ 2 files changed, 12 insertions(+), 2 deletions(-)</pre>
+
+  <h2>二、根因与量化证据</h2>
+  <p>CI 失败栈：<code>alembic/script/base.py:551 run_env()</code> → <code>util.load_python_file(self.dir, "env.py")</code>
+     → <code>ImportError: Can't find Python file env.py</code>（<b>rc=1</b>）。失败发生在 <code>env.py</code> 执行<b>之前</b>，故不碰数据库。</p>
+
+  <table>
+    <thead><tr><th>离线探针项</th><th>修复前</th><th>修复后</th></tr></thead>
+    <tbody>
+      <tr><td><code>script_location</code> 解析值</td><td class="bad"><code>D:\erp_system</code>（仓库根）</td><td class="ok"><code>D:\erp_system\migrations</code></td></tr>
+      <tr><td><code>env.py</code> 存在</td><td class="bad">false</td><td class="ok">true</td></tr>
+      <tr><td><code>versions/</code> 存在</td><td class="bad">false</td><td class="ok">true</td></tr>
+      <tr><td><code>heads</code></td><td class="bad">[] 且 <b>EXIT=0</b>（静默假绿）</td><td class="ok">[pg_standalone_049_stockin_soft_delete]</td></tr>
+      <tr><td>文件编码</td><td>ASCII</td><td class="ok">ASCII（0 个 &gt;127 字节）</td></tr>
+    </tbody>
+  </table>
+  <p class="small">探针：<code>_qa_tmp/alembic_probe.py</code>（离线，不连库不加载 env.py）｜证据：<code>_qa_tmp/alembic_probe_before.txt</code>、<code>_qa_tmp/alembic_verify_after.txt</code></p>
+
+  <h3>回归与周边验证（全部 EXIT=0）</h3>
+  <table>
+    <thead><tr><th>#</th><th>命令（cwd）</th><th>结果</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td><code>alembic -c migrations/alembic.ini heads</code>（仓库根）</td><td><span class="tag t-grn">EXIT=0</span> 输出 head（修复前为空且 rc=0 的假绿）</td></tr>
+      <tr><td>2</td><td><code>alembic -c migrations/alembic.ini history</code>（仓库根）</td><td><span class="tag t-grn">EXIT=0</span> 88 行</td></tr>
+      <tr><td>3</td><td><code>cd migrations &amp;&amp; PYTHONPATH=.. alembic -c alembic.ini heads</code></td><td><span class="tag t-grn">EXIT=0</span> <b>旧写法向后兼容</b></td></tr>
+      <tr><td>4</td><td><code>alembic -c migrations/alembic.ini upgrade head --sql</code>（离线）</td><td><span class="tag t-org">越过 env.py 加载</span>，成功生成 <b>4149 行 SQL</b>（证明 <code>fastapi_app</code> 可导入、引擎可构建）</td></tr>
+    </tbody>
+  </table>
+
+  <h2>三、CI 后续链路（静态逐环验证）</h2>
+  <table>
+    <thead><tr><th>环节</th><th>验证</th></tr></thead>
+    <tbody>
+      <tr><td><code>env.py</code> 可导入 <code>fastapi_app</code></td><td><span class="tag t-grn">✅</span> cwd=仓库根 ⇒ <code>sys.path[0]</code> 即仓库根，<b>无需 PYTHONPATH</b>（由 <code>--sql</code> 实测证明）</td></tr>
+      <tr><td>迁移依赖齐备</td><td><span class="tag t-grn">✅</span> <code>requirements/base.txt:23-24</code> 有 <code>psycopg[binary]==3.3.3</code> + <code>alembic==1.16.0</code></td></tr>
+      <tr><td>CI 注入的 DB 变量被消费</td><td><span class="tag t-grn">✅</span> <code>config.py:25-29</code> 读 <code>DB_HOST/DB_USER/DB_PASSWORD/DB_NAME/DB_PORT</code>，与 workflow <code>env:</code> 块同名</td></tr>
+      <tr><td><code>.env</code> 不会覆盖 CI 变量</td><td><span class="tag t-grn">✅</span> <code>config.py:10</code> 为 <code>load_dotenv(override=False)</code>；且 <code>.env</code> 已被 gitignore 且未跟踪 ⇒ CI 中不存在</td></tr>
+    </tbody>
+  </table>
+
+  <h2>四、过程中踩到 / 发现的既有问题</h2>
+
+  <div class="card warn">
+    <b><span class="tag t-org">已修</span> <code>alembic.ini</code> 必须保持纯 ASCII</b>
+    <p>Alembic 用 <code>encoding="locale"</code> 读 ini（<code>alembic/util/compat.py:144</code>），zh-CN Windows = <b>GBK</b>。
+    我第一次写入中文注释后，<b>所有</b> alembic 命令立即崩在
+    <code>UnicodeDecodeError: 'gbk' codec can't decode byte 0xa8 in position 68</code>。已改为 ASCII 英文注释。</p>
+  </div>
+
+  <div class="card info">
+    <b><span class="tag t-blu">既有</span> <code>upgrade head --sql</code>（离线 dry-run）在本仓必失败 —— <b>非本次引入</b></b>
+    <p>失败于 <code>_delete_version</code> 的 <code>KeyError</code>。<b>对照实验</b>：用旧语义（<code>cd migrations</code>）跑同一条命令，
+    同样 EXIT=1、同类 KeyError、生成的 SQL 行数<b>完全相同（4149）</b> ⇒ 与本次改动无关。</p>
+    <p>根因：迁移图为 <b>4 个 base / 9 个 fork / 5 个 merge</b>（收敛为单 head，<code>linear_graph = False</code>），
+    离线模式无法线性化。CI 实际执行的<b>在线</b> <code>upgrade head</code> 逐条走图，不受影响。
+    ⇒ 需要 dry-run 请走「克隆库 + 真实 <code>upgrade head</code>」，不要依赖 <code>--sql</code>。</p>
+    <p class="small">证据：<code>_qa_tmp/alembic_graph_ctrl.txt</code></p>
+  </div>
+
+  <div class="card warn">
+    <b><span class="tag t-org">未修 · 建议单独处理</span> 生产审计的迁移检查是假阴性</b>
+    <p><code>scripts/prod_audit/layers/l11_deployment.py:401-412</code> 查找的是
+    <code>PROJECT_ROOT/alembic.ini</code> 与 <code>PROJECT_ROOT/alembic/</code> —— <b>两者都不存在</b>
+    （真实路径是 <code>migrations/alembic.ini</code> 与 <code>migrations/versions/</code>）。</p>
+    <p>后果：该审计层会直接输出「Alembic 未配置,跳过迁移检查」并 <b>静默跳过</b>，属<b>假阴性</b>。
+    建议改指向真实路径 —— 但这会把「静默跳过」变成「真实检查」，可能浮出新的审计问题，故未擅自改动。</p>
+  </div>
+
+  <h2>五、边界声明（未做的事）</h2>
+  <ul>
+    <li><b>未在本机执行真实 <code>upgrade head</code> / <code>current</code> / <code>check</code></b> —— 修复后这些命令会真正连库，
+      有写生产库的风险，故刻意规避。CI 的端到端执行未在真实 CI 环境复现。</li>
+    <li><b>未提交、未推送</b>。本地 main 仍领先远端 3 个提交。</li>
+    <li>未启动临时 PostgreSQL 集群做全链路演练（会在这台生产机上新增进程，需先经你确认）。</li>
+  </ul>
+
+  <div class="foot">
+    全程未触碰生产数据库、未启停任何服务、未提交未推送。<br>
+    证据文件：<code>_qa_tmp/alembic_probe.py</code> · <code>alembic_probe_before.txt</code> · <code>alembic_verify_after.txt</code> ·
+    <code>alembic_sql_e2e.txt</code> · <code>alembic_graph_ctrl.txt</code> · <code>final_diff.txt</code><br>
+    生成时间：2026-09-23 23:0x (+08:00)
+  </div>
+
+</div>
+</body>
+</html>

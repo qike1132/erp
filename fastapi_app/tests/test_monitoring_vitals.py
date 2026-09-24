@@ -15,8 +15,8 @@ pytestmark = pytest.mark.unit
 
 from fastapi_app.api.v1.endpoints import monitoring
 from fastapi_app.api.v1.endpoints.monitoring import (
-    VitalEntry,
     _MAX_KEYS,
+    VitalEntry,
     _summarize_from_memory,
 )
 

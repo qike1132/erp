@@ -27,7 +27,7 @@ async def delete_role(
 ) -> dict:
     """删除角色（级联删 part + version + change_log 中关联该 role 的记录）
 
-    - 默认角色不可删除（is_default=True）
+    - 角色一律可删除（含「默认」角色），项目允许不剩任何角色
     - 删除后变更日志 project_id 仍保留（SET NULL 行为不变）
     """
     result = await db.execute(
@@ -36,9 +36,6 @@ async def delete_role(
     role = result.scalar_one_or_none()
     if role is None:
         raise NotFoundError('角色不存在')
-
-    if role.is_default:
-        raise BusinessError('默认角色不可删除')
 
     project_id = role.project_id
     role_name = role.role_name
@@ -85,7 +82,7 @@ async def create_role(
     role_name: str,
     user_id: int | None = None,
 ) -> dict:
-    """新增角色（项目内 role_name 唯一，默认角色不可重复创建）
+    """新增角色（项目内 role_name 唯一）
 
     - 新角色 sort_order = 当前最大 sort_order + 1
     - 新角色 current_version='T1'，但不会自动创建 T1 版本快照（与项目级 T1 不同）

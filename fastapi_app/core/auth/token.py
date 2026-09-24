@@ -8,8 +8,8 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import jwt
-
 from fastapi import HTTPException, status
+
 from fastapi_app.core.config import settings
 
 _signing_key_cache = None

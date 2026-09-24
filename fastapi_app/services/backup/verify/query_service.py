@@ -17,7 +17,6 @@ from sqlalchemy import func, select, text
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-
 from fastapi_app.services.backup._constants import RESTORE_LOCK_ID
 from fastapi_app.services.backup.verify.core import quote_table
 from fastapi_app.shared_models import Base

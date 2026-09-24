@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>提交前审查：144 文件暂存集</title>
+<style>
+  :root{
+    --bg:#0f1420; --card:#171e2e; --card2:#1d2637; --fg:#e8edf6; --muted:#9fb0c9;
+    --line:#2a3549; --red:#ff6b6b; --orange:#ffa94d; --yellow:#ffd43b; --green:#51cf66;
+    --blue:#4dabf7; --code:#0b0f17;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.7 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
+  .wrap{max-width:1060px;margin:0 auto;padding:32px 24px 72px}
+  h1{font-size:21px;margin:0 0 6px}
+  h2{font-size:17px;margin:32px 0 12px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  h3{font-size:14.5px;margin:20px 0 8px;color:var(--blue)}
+  .sub{color:var(--muted);font-size:13px;margin-bottom:20px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:15px 18px;margin:14px 0}
+  .verdict{border-left:5px solid var(--orange);background:linear-gradient(90deg,#2a2010,#171e2e)}
+  .verdict b{color:var(--orange)}
+  .warn{border-left:4px solid var(--orange)}
+  .bad{border-left:4px solid var(--red)}
+  .ok{border-left:4px solid var(--green)}
+  table{width:100%;border-collapse:collapse;margin:10px 0;font-size:13px}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:var(--card2);color:var(--muted);font-weight:600}
+  tbody tr:nth-child(even){background:rgba(255,255,255,.014)}
+  code,pre{font-family:"Cascadia Code",Consolas,monospace}
+  code{background:var(--code);padding:1px 6px;border-radius:4px;font-size:12.5px;color:#ffd8a8}
+  pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:12px 14px;overflow:auto;font-size:12.5px;color:#cfe3ff;margin:8px 0}
+  .tag{display:inline-block;padding:1px 8px;border-radius:20px;font-size:11.5px;font-weight:600;white-space:nowrap}
+  .t-red{background:rgba(255,107,107,.16);color:var(--red);border:1px solid rgba(255,107,107,.4)}
+  .t-org{background:rgba(255,169,77,.16);color:var(--orange);border:1px solid rgba(255,169,77,.4)}
+  .t-grn{background:rgba(81,207,102,.16);color:var(--green);border:1px solid rgba(81,207,102,.4)}
+  .t-blu{background:rgba(77,171,247,.16);color:var(--blue);border:1px solid rgba(77,171,247,.4)}
+  ul{margin:8px 0;padding-left:22px} li{margin:4px 0}
+  .small{font-size:12.5px;color:var(--muted)}
+  .foot{margin-top:40px;padding-top:14px;border-top:1px solid var(--line);color:var(--muted);font-size:12px}
+  .okc{color:var(--green)} .badc{color:var(--red)} .wnc{color:var(--orange)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>提交前审查 · 暂存集</h1>
+  <div class="sub">
+    仓库：D:\erp_system｜时间：2026-09-24 09:10–09:14 (+08:00)<br>
+    触发：按你要求 <code>git add requirements/base.txt</code>，使本批改动成为完整可提交集合<br>
+    审查依据：项目记忆的两条硬规矩 ——「提交前必须逐文件核」与「<code>docs</code> 曾被外部删除，一次提交可毁整棵文档树」
+  </div>
+
+  <div class="card verdict">
+    <b>结论：暂存集完整且范围正确（146 = 135 M + 11 A，未暂存 0），无删除项、无敏感/临时路径。</b>
+    但审查中发现 <b>1 个需你决策的项</b>：<code>scripts/phase1_switch.ps1</code>
+    已被暂存，而它是**按端口无差别 <code>Stop-Process -Force</code> 的破坏性运维脚本**，
+    且缺少本仓库既有的护栏范式。
+  </div>
+
+  <h2>一、暂存集构成</h2>
+  <table>
+    <thead><tr><th>状态</th><th>数量</th><th>内容</th></tr></thead>
+    <tbody>
+      <tr><td><code>M</code> 修改</td><td><b>135</b></td><td>P0-①②③ 的代码/配置改动</td></tr>
+      <tr><td><code>A</code> 新增</td><td><b>11</b></td><td>9 份交付报告 + 1 个新测试 + 1 个运维脚本（见下）</td></tr>
+      <tr><td>未暂存</td><td><b>0</b></td><td class="okc">✓ 集合完整</td></tr>
+    </tbody>
+  </table>
+
+  <h3>135 个修改文件按目录分布</h3>
+  <table>
+    <thead><tr><th>目录</th><th>数量</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td><code>fastapi_app/</code></td><td>111</td><td>P0-② ruff 分层修复（I001/W292/F401/UP017…）＋ 6 处 <code># defensive:</code> 恢复</td></tr>
+      <tr><td><code>tests/</code></td><td>16</td><td>同上（测试侧同批 ruff 修复）</td></tr>
+      <tr><td><code>frontend-vite/</code></td><td>2</td><td><code>PathSettings.vue</code>（重名函数）、<code>QaAdversarial.beileSync.test.ts</code>（prefer-const）</td></tr>
+      <tr><td><code>ruff.toml</code></td><td>1</td><td>为 <code>backup/__init__.py</code> 关闭 I001（保护 Redis 还原锁导入顺序契约）</td></tr>
+      <tr><td><code>.github/</code></td><td>1</td><td>ci-cd.yml：移除 2 个 deploy job ＋ 新增 prod_audit 测试步骤</td></tr>
+      <tr><td><code>docs/</code></td><td>1</td><td><code>runbooks/service-lifecycle.md</code>：迁移命令改为仓库根执行</td></tr>
+      <tr><td><code>migrations/</code></td><td>1</td><td><code>alembic.ini</code>：<code>script_location = %(here)s</code></td></tr>
+      <tr><td><code>requirements/</code></td><td>1</td><td><code>base.txt</code>：显式声明 <code>pyyaml==6.0.3</code></td></tr>
+      <tr><td><code>scripts/</code></td><td>1</td><td><code>prod_audit/layers/l11_deployment.py</code>：L11 判据修复</td></tr>
+    </tbody>
+  </table>
+
+  <h2>二、安全审查（全部通过）</h2>
+  <table>
+    <thead><tr><th>检查</th><th>结果</th></tr></thead>
+    <tbody>
+      <tr><td>删除项（<code>D</code>）</td><td class="okc">✓ 无 —— <code>docs</code> 树安全（历史事故：一次提交曾毁 651 个文档）</td></tr>
+      <tr><td>重命名（<code>R</code>）</td><td class="okc">✓ 无</td></tr>
+      <tr><td><code>_qa_tmp/</code> 临时产物</td><td class="okc">✓ clean</td></tr>
+      <tr><td><code>backups/</code> · <code>evidence/</code> · <code>logs/</code></td><td class="okc">✓ clean</td></tr>
+      <tr><td><code>.env</code> 等敏感文件</td><td class="okc">✓ clean（<code>.env</code> 已被 gitignore 且未跟踪）</td></tr>
+      <tr><td><code>dist/</code> · <code>dist-v533-sentinel/</code> · <code>node_modules/</code></td><td class="okc">✓ clean</td></tr>
+      <tr><td><code>*.pyc</code> · <code>*.log</code></td><td class="okc">✓ clean</td></tr>
+    </tbody>
+  </table>
+
+  <h2>三、⚠️ 需你决策的一项：<code>scripts/phase1_switch.ps1</code></h2>
+
+  <div class="card bad">
+    <p><b>它做什么</b>（79 行，已通读）：</p>
+    <ol>
+      <li><b>Step 1（核心风险）</b>：遍历端口 <code>3000</code>/<code>5002</code>，对监听进程
+        <b>无差别 <code>Stop-Process -Id &lt;PID&gt; -Force</code></b>（第 8–17 行）</li>
+      <li>Step 2/3：<code>Start-Service erp-prod</code> / <code>erp-arq</code>（需提权）</li>
+      <li>Step 4：<code>Disable-ScheduledTask</code> 禁用 <code>ERP_Database_Backup</code>、<code>ERPSystem</code></li>
+      <li>Step 5–7：健康检查、文档端点 404 复检、最终状态打印</li>
+    </ol>
+    <p><b>为什么值得警惕</b>：</p>
+    <ul>
+      <li><b>无白名单</b>：杀的是「谁占了这两个端口」，而非「NSSM 托管的 erp 进程」。
+        本机 3000/5002 由 NSSM 的 nginx/uvicorn 持有 ⇒ 运行即**强杀生产前端与后端**。
+        若将来端口被别的服务占用，脚本会照杀不误。</li>
+      <li><b>无护栏</b>：对比本仓库既有范式 —— <code>restart_prod.ps1</code> 在 M9 整改中获得了
+        「检测到 NSSM <code>erp-prod</code> 正在运行则拒绝裸起、须显式 <code>-Force</code>」的护栏；
+        本脚本没有等价保护，也无 <code>#Requires -RunAsAdministrator</code>、无确认、无 <code>-DryRun</code>。</li>
+      <li><b>一次性产物</b>：名字即 <code>phase1</code>（dev→prod 切换），非通用工具；入库后容易被后来者
+        当作「切到生产的标准做法」照跑。</li>
+      <li>并行会话的审查已把它标为「<b>未受仓库『零删除原语』纪律约束</b>」。</li>
+    </ul>
+    <p class="small">无凭据泄露风险（仅含端口号与日志路径）✓；<code>Stop-Process</code> 属「强杀」而非删除原语。</p>
+  </div>
+
+  <h3>三个选项（请你选）</h3>
+  <table>
+    <thead><tr><th>选项</th><th>做法</th><th>适用</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><b>A. 加护栏后入库</b>（符合 M9 先例）</td>
+        <td>补：<code>#Requires -RunAsAdministrator</code>；端口占用者若属 NSSM 托管服务则拒绝强杀
+          （须显式 <code>-Force</code>）；加 <code>-DryRun</code>；日志路径参数化</td>
+        <td>希望把切换流程固化为仓库资产</td>
+      </tr>
+      <tr>
+        <td><b>B. 移出暂存</b>（保持本地未跟踪）</td>
+        <td><code>git restore --staged scripts/phase1_switch.ps1</code>，文件留在工作区</td>
+        <td>视其为一次性操作记录，不宜入库</td>
+      </tr>
+      <tr>
+        <td><b>C. 原样入库</b></td>
+        <td>不动，随本批一起提交</td>
+        <td>你已确认该脚本的杀伤面可控</td>
+      </tr>
+    </tbody>
+  </table>
+  <p class="small">本轮<b>未擅自处置</b>：该文件由其它会话暂存，且「保留并加固」与「移出」属策略选择（M9 先例倾向加固），应由你定。</p>
+
+  <h2>四、其余 10 个新增项（均无异议）</h2>
+  <ul>
+    <li><code>scripts/prod_audit/tests/test_l11_deployment.py</code> —— L11 判据回归测试（9 用例），
+      <b>它是 CI 新步骤真正生效的前提</b> ✓</li>
+    <li>9 份交付报告（我的 <code>p0-1</code>…<code>p0-3b</code> / <code>ops-guard</code> /
+      <code>ci-prod-audit-tests</code> / <code>precommit-review</code> ＋
+      并行会话的 <code>code-review-fastapi-app</code> / <code>fix-verify-gate-regression</code>）——
+      与 <code>deliverables/</code> 既有约定一致（如 <code>deliverables/audit-2026-09-17/</code> 已入库）✓</li>
+  </ul>
+
+  <h2>五、边界声明</h2>
+  <ul>
+    <li>本轮仅执行了 <code>git add requirements/base.txt</code>（单一指定路径，
+      <b>未用 <code>git add -A</code> / <code>git add .</code> / <code>git add docs</code></b>）。</li>
+    <li><b>未提交、未推送</b>；未触碰生产库、未启停服务。</li>
+    <li>未修改 <code>scripts/phase1_switch.ps1</code>，未移出暂存（等你的决策）。</li>
+  </ul>
+
+  <div class="foot">
+    全程未触碰生产数据库、未启停服务、未提交未推送。<br>
+    证据文件：<code>_qa_tmp/idx_review.txt</code> · <code>idx_add.txt</code> · <code>idx_m.txt</code><br>
+    生成时间：2026-09-24 09:13 (+08:00)
+  </div>
+
+</div>
+</body>
+</html>

@@ -48,8 +48,8 @@ from fastapi_app.schemas.outsource import (
     ShipmentMergeCreate,
     ShipmentReceiveResponse,
     ShipmentResponse,
-    ShipProcessMulti,
     ShippableProcessItem,
+    ShipProcessMulti,
     UnshippedProcessItem,
 )
 from fastapi_app.services import outsource_service

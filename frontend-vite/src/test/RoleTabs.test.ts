@@ -73,14 +73,13 @@ describe('RoleTabs 删除入口（右键菜单）', () => {
     expect(w.emitted('remove')).toEqual([[ROLES[1]]])
   })
 
-  it('右键默认角色标签不接管浏览器原生菜单', async () => {
+  it('右键默认角色标签同样弹出菜单（角色一律可删除）', async () => {
     const w = mountTabs()
-    const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
-    tabAt(w, 0).element.dispatchEvent(event)
-    await nextTick()
+    await tabAt(w, 0).trigger('contextmenu')
 
-    expect(event.defaultPrevented).toBe(false)
-    expect(w.find('.role-tab-menu').exists()).toBe(false)
+    expect(w.find('.role-tab-menu').exists()).toBe(true)
+    await w.find('.role-tab-menu-item').trigger('click')
+    expect(w.emitted('remove')).toEqual([[ROLES[0]]])
   })
 
   it('无管理权限时不弹菜单', async () => {
@@ -158,5 +157,24 @@ describe('RoleTabs 右键菜单健壮性', () => {
 
     expect(w.find('.role-tab-menu').exists()).toBe(false)
     expect(w.emitted('remove')).toBeUndefined()
+  })
+})
+
+describe('RoleTabs 无角色态（角色可被全部删除）', () => {
+  it('项目无角色时仍渲染「新增角色」入口，避免无法再建角色', () => {
+    wrapper = mount(RoleTabs, {
+      props: { roles: [], currentRoleId: null, canManage: true },
+      attachTo: document.body,
+    })
+    expect(wrapper.find('.role-tab').exists()).toBe(false)
+    expect(wrapper.find('.role-tab-add').exists()).toBe(true)
+  })
+
+  it('无角色且无管理权限时不渲染角色栏', () => {
+    wrapper = mount(RoleTabs, {
+      props: { roles: [], currentRoleId: null, canManage: false },
+      attachTo: document.body,
+    })
+    expect(wrapper.find('.role-tabs').exists()).toBe(false)
   })
 })

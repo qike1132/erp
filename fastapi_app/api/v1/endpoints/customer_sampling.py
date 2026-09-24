@@ -439,7 +439,7 @@ async def api_create_role(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permission(PERM)),
 ) -> dict[str, Any]:
-    """新增角色（项目内 role_name 唯一，默认角色不可重复创建）"""
+    """新增角色（项目内 role_name 唯一）"""
     async with db_transaction(db):
         result = await svc.create_role(
             db, project_id, role_name=data.role_name, user_id=current_user.id,
@@ -478,7 +478,7 @@ async def api_delete_role(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permission(PERM)),
 ) -> dict[str, Any]:
-    """删除角色（默认角色不可删除，级联删 part + version）"""
+    """删除角色（角色一律可删除，级联删 part + version）"""
     async with db_transaction(db):
         await svc.delete_role(db, role_id, user_id=current_user.id)
     return success_response(message='删除成功')

@@ -118,8 +118,8 @@ class TestCaseService:
     @pytest.mark.asyncio
     async def test_create_stockin_generates_no_when_missing(self, mock_db, monkeypatch):
         """单条入库未传单号时应自动生成（stockin_no 有唯一约束，空串第二条必炸）"""
-        from fastapi_app.services.case_service import create_case_stockin
         from fastapi_app.services.case import commands
+        from fastapi_app.services.case_service import create_case_stockin
 
         async def _fake_number(db):
             return 'RK2026010100001'
@@ -135,8 +135,8 @@ class TestCaseService:
     @pytest.mark.asyncio
     async def test_create_stockout_generates_no_when_missing(self, mock_db, monkeypatch):
         """单条出库未传单号时应自动生成"""
-        from fastapi_app.services.case_service import create_case_stockout
         from fastapi_app.services.case import commands
+        from fastapi_app.services.case_service import create_case_stockout
 
         async def _fake_number(db):
             return 'CK2026010100001'

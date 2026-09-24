@@ -11,13 +11,12 @@
                    restore_meilisearch -> rebuild_pool -> verify
 """
 
+import base64
 import json
 import logging
 import re
 import uuid
-from datetime import datetime, timezone
-
-import base64
+from datetime import UTC, datetime
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +119,7 @@ async def is_redis_available() -> bool:
 # ---------------------------------------------------------------------------
 # ARQ 任务参数会被序列化进 Redis 队列（任何能读 Redis 的人可见）。加密密码
 # 不进队列，改存到以 task_id 命名的一次性短 TTL 键中，任务消费时原子取走。
-_TASK_PASSWORD_PREFIX = "erp:backup_task_pwd:"
+_TASK_PASSWORD_PREFIX = "erp:backup_task_pwd:"  # noqa: S105 - Redis 键前缀，非口令本身
 _TASK_PASSWORD_TTL = 600  # 10 分钟内未被消费即过期，覆盖 worker 最长启动延迟
 
 
@@ -254,7 +253,7 @@ async def create_progress(
         "progress": 0,
         "phase": "init",
         "phase_label": "初始化",
-        "started_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+        "started_at": datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S"),
         "completed_at": None,
         "result": None,
         "error": None,
@@ -346,7 +345,7 @@ async def complete_progress(
         else:
             data["phase_label"] = "恢复完成"
 
-    data["completed_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    data["completed_at"] = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
     data["result"] = result
 
     await client.set(key, json.dumps(data, ensure_ascii=False), ex=PROGRESS_TTL)
@@ -384,7 +383,7 @@ async def fail_progress(task_id: str, error: str) -> None:
     data["phase"] = "failed"
     data["phase_label"] = f"{op_label}失败: {sanitized[:100]}"
     data["error"] = sanitized
-    data["completed_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    data["completed_at"] = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
 
     await client.set(key, json.dumps(data, ensure_ascii=False), ex=PROGRESS_TTL)
 

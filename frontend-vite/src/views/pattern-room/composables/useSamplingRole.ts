@@ -149,7 +149,7 @@ export function useSamplingRole(projectId: Ref<number | null>) {
     }
   }
 
-  /** 删除角色（默认角色不可删除，后端会拒绝） */
+  /** 删除角色（角色一律可删除，其部位布料与版本快照级联删除） */
   async function deleteRole(roleId: number): Promise<ActionResponse | null> {
     submitting.value = true
     error.value = null

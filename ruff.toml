@@ -3,6 +3,12 @@ line-length = 120
 
 [lint]
 select = ["E", "F", "W", "I", "N", "UP", "B", "SIM", "C4", "S", "RUF"]
+# BLE001 由 `scripts/check_bare_except.py` 消费，不是 ruff 的规则。必须声明为「外部规则」，
+# 否则 RUF100（unused-noqa）会把 `# noqa: BLE001 - <理由>` 当作指向未启用规则的冗余指令，
+# 并作为 safe fix **自动删除** —— 而该标记正是质量门禁的审计豁免凭证。
+# 2026-09-23 实测：一次 `ruff --fix` 把宽泛 except 从 9 处打到 11 处，quality_gate 直接 FAIL。
+# 新代码的长期豁免语汇请优先用 `# defensive: <理由>`（ruff 不识别为指令，永不删）。
+external = ["BLE001"]
 # RUF001/002/003: 中文全角字符误报
 # S311: random 用于非加密场景（采样、测试数据生成），非安全敏感
 # S608: 已由 bandit + nosec 审查，SQL 均使用参数化绑定
@@ -31,6 +37,12 @@ ignore = [
 # 不含用户输入；bandit.yaml 已全局跳过 B608，此处保持一致避免误报。
 # 相关安全说明注释见 stock_service.py 中 _CUST_CLAUSE/_PID_CLAUSE 等常量定义处。
 "fastapi_app/services/stock_service.py" = ["S608"]
+# backup/__init__.py 的导入顺序是刻意设计的：Redis 还原锁三件套（acquire_restore_lock /
+# is_restore_in_progress / release_restore_lock）必须排在**所有星号导入之后**，否则
+# `.verify` 的星号导入会用 query_service 的 advisory 版遮蔽 Redis 版（曾致端点 finally
+# TypeError，见该文件内 P0 审计注释）。该顺序与 isort 冲突，故对本文件关闭 I001 以保护契约。
+# 守卫测试：fastapi_app/tests/test_backup_p0.py::TestSourceGuards::test_package_restore_lock_resolves_to_redis_version
+"fastapi_app/services/backup/__init__.py" = ["I001"]
 
 [format]
 quote-style = "single"

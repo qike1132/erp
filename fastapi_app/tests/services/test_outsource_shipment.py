@@ -17,9 +17,9 @@ from sqlalchemy.orm import sessionmaker
 
 from fastapi_app.services.outsource import _shipments as shipments_mod
 from fastapi_app.services.outsource._shipments import (
+    create_merged_shipment,
     create_shipment,
     create_shipments_batch,
-    create_merged_shipment,
     get_shipment,
     list_shipments,
     receive_shipment,
@@ -277,7 +277,7 @@ async def test_create_merged_shipment_across_orders(db):
     """合并发货：跨订单/跨客户多道工序合并为一张发货单，order_id/customer 置空、通知省略客户名。"""
     import json
 
-    order, process = await _seed(db)
+    _order, process = await _seed(db)
     # 第二个订单（不同客户）
     order2 = Order(id=2, order_no='PO-20260919-0002', customer='客户B', order_date=datetime(2026, 9, 19, 11, 0),
                    product_id=1, quantity=20)

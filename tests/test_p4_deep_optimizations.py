@@ -163,7 +163,7 @@ class TestDatabaseSlowQueryRegistration:
         # _async_engine 仅在 init_async_engine() 后非 None；单测不连库，此处只验证
         # database.py 与 slow_query 模块的导入链完好（真实注册路径见
         # test_rebuild_pool_registers_listeners 与 database.py 的 engine 初始化代码）
-        from fastapi_app.core.slow_query import setup_slow_query_listener  # noqa: F401
+        from fastapi_app.core.slow_query import setup_slow_query_listener
         assert callable(setup_slow_query_listener)
 
     def test_slow_query_setup_function_exists(self):

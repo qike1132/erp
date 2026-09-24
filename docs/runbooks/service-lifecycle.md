@@ -266,7 +266,8 @@ NSSM 按「每个元素设一个环境变量」（在**第一个 `=`** 处切分
 | 运行模式 + ARQ 判活探针 | `python scripts/diag/runtime_mode_probe.py` |
 | 生产巡检（只读） | `deliverables/gstack/perf-selfcheck.ps1`（**必须带 UTF-8 BOM**） |
 | 生产预检（非破坏性） | `python -m fastapi_app.core.prod_runner --check` |
-| 数据库迁移 | `cd migrations && PYTHONPATH=.. alembic upgrade head`（`alembic.ini` 在 `migrations/`，**不在仓库根**） |
+| 数据库迁移 | `python -m alembic -c migrations/alembic.ini upgrade head`（**在仓库根执行，无需 `cd`、无需 `PYTHONPATH`**；`script_location=%(here)s` 已与 CWD 解耦） |
+| 迁移版本查询（只读） | `python -m alembic -c migrations/alembic.ini heads` / `history` |
 | 环境变量修复 | `deliverables/audit-2026-09-17/fix_nssm_appenv.ps1`（**需管理员**） |
 
 ---

@@ -68,7 +68,6 @@ from fastapi_app.services.order.approval_flow import (
 )
 
 
-
 async def create_order(db: AsyncSession, product_id: int, quantity: int,
                        customer: str, note: str, current_user: User,
                        order_type: str = 'regular', country: str | None = None) -> dict:

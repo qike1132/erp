@@ -21,8 +21,8 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from arq.constants import default_queue_name, health_check_key_suffix
 from arq.connections import ArqRedis
+from arq.constants import default_queue_name, health_check_key_suffix
 
 from fastapi_app.core import arq_app
 from fastapi_app.core.arq_app import WorkerSettings, check_worker_health

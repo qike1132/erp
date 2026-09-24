@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """QA 独立对抗性回归验证 —— 生产栈 7 缺陷修复（D1~D7）。
 
 作者：QA（严过关）。本文件的断言**独立于**工程师所写测试，目的在**证伪**修复，
@@ -274,7 +273,7 @@ class TestD7PollStateMachine:
 class _SpaFallbackHandler(http.server.BaseHTTPRequestHandler):
     """模拟 Vite dev server：对任意路径返回 200 + HTML（SPA fallback）。"""
 
-    def do_GET(self) -> None:  # noqa: N802
+    def do_GET(self) -> None:
         body = (b"<!doctype html><html><head><title>ERP</title></head>"
                 b"<body><div id='app'></div></body></html>")
         self.send_response(200)

@@ -6,7 +6,6 @@ import io
 import logging
 
 import xlsxwriter
-
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 

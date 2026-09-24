@@ -88,6 +88,8 @@ def calc_spare_quantity(qty: float | None, rate: float | None) -> int:
     normalized = normalize_spare_rate(rate)
     if normalized is None or normalized <= 0:
         return 0
+    if qty is None:
+        return 0
     try:
         quantity = float(qty)
     except (TypeError, ValueError):

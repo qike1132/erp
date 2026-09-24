@@ -65,8 +65,8 @@ class TestGetterDoesNotRaiseNameError:
             pytest.fail(f'{getter} 抛 NameError（模块级单例未声明）: {e}')
         except RuntimeError:
             pass          # 第三方依赖未安装 → 属预期分支
-        except Exception:
-            pass          # 模型加载失败等环境问题，与本测试目标无关
+        except Exception:  # noqa: S110 - 模型加载失败等环境问题与本测试目标无关；
+            pass          #   不能用 contextlib.suppress 合并，否则 NameError 分支会被一并吞掉
 
 
 class TestLazyInitAndCaching:

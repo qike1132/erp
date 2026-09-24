@@ -289,7 +289,8 @@ class ProjectCreateRequest(BaseModel):
     pattern_maker_id: int | None = None
     remark: str | None = Field(None, max_length=2000, description='备注')
     initial_roles: list[str] | None = Field(
-        None, max_length=10, description='初始角色名称列表（不传时自动创建"默认"）',
+        None, max_length=10,
+        description='初始角色名称列表（传入时首个角色即兜底角色，不再创建"默认"；不传时自动创建"默认"）',
     )
 
 

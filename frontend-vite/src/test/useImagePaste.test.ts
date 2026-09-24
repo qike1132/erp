@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, type VueWrapper } from '@vue/test-utils'
 import { defineComponent, ref, type Ref } from 'vue'
-import { useImagePaste } from '../views/product/composables/useImagePaste'
+import { useImagePaste } from '../composables/useImagePaste'
 
 function makeFile(name = 'image.png', type = 'image/png'): File {
   return new File([new Uint8Array([1, 2, 3])], name, { type })

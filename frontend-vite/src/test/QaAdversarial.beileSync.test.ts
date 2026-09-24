@@ -99,7 +99,7 @@ enableAutoUnmount(afterEach)
  * 一个结构自洽的表格：每行逻辑列数应等于表头列数。
  */
 function logicalWidths(rows: Element[], nCols: number): number[] {
-  let carry = new Array<number>(nCols).fill(0)
+  const carry = new Array<number>(nCols).fill(0)
   const widths: number[] = []
   for (const tr of rows) {
     const filled = new Array<boolean>(nCols).fill(false)

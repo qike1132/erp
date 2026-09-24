@@ -11,10 +11,10 @@ import hashlib
 import logging
 from datetime import UTC, datetime
 
-from sqlalchemy import and_, func, or_, select, text
-from sqlalchemy.sql.elements import TextClause
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import joinedload, selectinload
+from sqlalchemy.orm import joinedload
+from sqlalchemy.sql.elements import TextClause
 
 from fastapi_app.core.cache import cache_result
 from fastapi_app.core.sanitizer import escape_like
@@ -778,7 +778,7 @@ def _merge_inventory_rows(stockin_rows: list[dict], stockout_rows: list[dict],
 
 async def _fetch_inventory(db: AsyncSession, pids: list[int] | None, cust: str='') -> list[dict]:
     """库存聚合查询 - 优化版：无产品筛选时跳过 ANY(:pids) 避免全表扫描"""
-    params, si_pid, so_pid, o_pid, oi_or_o_pid, si_cust, so_cust, o_cust = _build_inventory_query_clauses(pids, cust)
+    params, si_pid, so_pid, _o_pid, oi_or_o_pid, si_cust, so_cust, o_cust = _build_inventory_query_clauses(pids, cust)
     # 安全说明：以上条件片段均为模块级常量，不含用户输入；
     # 筛选值通过 :pids/:sc 绑定参数传递。
     stockin_sql = text(f'SELECT si.product_id, si.customer, SUM(si.quantity - COALESCE(sub.consumed, 0)) AS stockin_qty, 1 AS has_stockin FROM stock_in si LEFT JOIN (  SELECT stockin_id, SUM(quantity - returned_quantity) AS consumed   FROM stock_out WHERE stockin_id IS NOT NULL{si_pid}   GROUP BY stockin_id) sub ON sub.stockin_id = si.id WHERE 1=1{si_pid}{si_cust} GROUP BY si.product_id, si.customer')  # nosec B608 — 条件片段为模块级常量，值通过绑定参数传递

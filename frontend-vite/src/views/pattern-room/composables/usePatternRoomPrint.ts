@@ -23,6 +23,23 @@ interface UsePatternRoomPrintOptions {
   roles: Ref<RoleBrief[]>
 }
 
+/**
+ * 取「最新且有数据」的版本行。
+ *
+ * 用于角色最终版本无数据时的回退：`current_version` 可能指向一个空版本或
+ * 已不存在的版本（此时按最终版本过滤会得到 0 行，整个角色从打样单上消失），
+ * 而该角色的部位仍存在于更早的版本中。
+ *
+ * versions 由后端按 (长度, 字典序) 升序返回，末位即最新版本。
+ */
+function pickNewestVersionRows(items: PartDetail[], versions: string[]): PartDetail[] {
+  for (let i = versions.length - 1; i >= 0; i--) {
+    const rows = items.filter((item) => item.version_no === versions[i])
+    if (rows.length > 0) return rows
+  }
+  return items
+}
+
 export function usePatternRoomPrint(options: UsePatternRoomPrintOptions) {
   const { selectedProjectId, partsByVersion, roles } = options
 
@@ -56,15 +73,21 @@ export function usePatternRoomPrint(options: UsePatternRoomPrintOptions) {
         allRoles.map((role) => patternRoomApi.getPartsByVersion(projectId, role.id, true)),
       )
       const allParts: PartDetail[] = []
-      results.forEach((res, idx) => {
+      for (let idx = 0; idx < allRoles.length; idx++) {
         const role = allRoles[idx]!
-        const items = res.items ?? []
+        let items = results[idx]!.items ?? []
+        if (items.length === 0) {
+          // 最终版本无数据（current_version 指向空版本/已不存在的版本）：回退取该角色
+          // 全部版本中「最新且有数据」的版本，否则该角色会被整段漏打
+          const full = await patternRoomApi.getPartsByVersion(projectId, role.id)
+          items = pickNewestVersionRows(full.items ?? [], full.versions ?? [])
+        }
         // 确保每条数据带 role_id（用于 PrintDialog 按角色分组）
         for (const item of items) {
-          if (item.role_id == null) item.role_id = role.id
-          allParts.push(item)
+          const row = item.role_id == null ? { ...item, role_id: role.id } : item
+          allParts.push(row)
         }
-      })
+      }
       printParts.value = allParts
     } catch (e) {
       // 降级：使用当前角色的数据（打印内容不完整，仅记录日志）

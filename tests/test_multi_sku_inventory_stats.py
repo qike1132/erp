@@ -22,7 +22,7 @@ from fastapi_app.services.stock_inventory_service import (
     get_stock_overview_stats,
     get_stockouts,
 )
-from fastapi_app.shared_models import Base, Order, OrderItem, Product, StockOut
+from fastapi_app.shared_models import Order, OrderItem, Product, StockOut
 
 pytestmark = pytest.mark.integration
 

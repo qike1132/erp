@@ -1,4 +1,4 @@
-"""customer_sampling 公共工具：存在性校验、冗余名称解析、默认角色与审计日志。
+"""customer_sampling 公共工具：存在性校验、冗余名称解析、基准角色与审计日志。
 
 对应需求规格：.codeartsdoer/specs/customer_sampling/spec.md
 """
@@ -49,12 +49,15 @@ async def _ensure_part_name_unique(
     """校验部位名称同角色 + 同版本下唯一
 
     Args:
-        role_id: 角色ID；未传时自动解析项目的默认角色
+        role_id: 角色ID；未传时自动解析项目的基准角色（sort_order 最小的角色）
         version_no: 版本号，同一角色同一版本内部位名称唯一
         exclude_id: 编辑时排除自身 ID
     """
     if role_id is None:
-        role_id = await _get_default_role_id(db, project_id)
+        role_id = await _get_primary_role_id(db, project_id)
+        # 项目已无任何角色（可被全部删除）：没有可比对的部位，直接放行
+        if role_id is None:
+            return
     query = select(CustomerSamplingPart.id).where(
         CustomerSamplingPart.project_id == project_id,
         CustomerSamplingPart.role_id == role_id,
@@ -115,38 +118,35 @@ async def _resolve_pattern_maker_name(db: AsyncSession, pattern_maker_id: int | 
 
 
 
-async def _get_default_role_id(db: AsyncSession, project_id: int, *, create: bool = True) -> int | None:
-    """获取项目的默认角色 ID（is_default=True）
+async def _get_primary_role_id(db: AsyncSession, project_id: int) -> int | None:
+    """获取项目的基准角色 ID（sort_order 最小的角色）
 
-    若项目尚无默认角色（仅迁移前的旧项目可能发生，迁移已确保存在）：
-    - create=True（写路径）：主动创建一个默认角色并返回其 ID（防御性兜底）
-    - create=False（读路径）：返回 None，由调用方返回空数据，
-      避免只读会话（get_read_db 副本）上发生隐式写
+    用于调用方未指定 role_id 的场景（部位归属/版本对比等）。
+    角色一律可删除，项目可能一个角色都不剩，此时返回 None，
+    由调用方决定降级行为（读路径返回空数据、写路径提示先创建角色）。
     """
     result = await db.execute(
-        select(CustomerSamplingRole.id).where(
-            CustomerSamplingRole.project_id == project_id,
-            CustomerSamplingRole.is_default == True,  # noqa: E712
-        )
+        select(CustomerSamplingRole.id)
+        .where(CustomerSamplingRole.project_id == project_id)
+        .order_by(CustomerSamplingRole.sort_order, CustomerSamplingRole.id)
+        .limit(1)
     )
-    role_id = result.scalar_one_or_none()
+    return result.scalar_one_or_none()
+
+
+async def _resolve_role_id(db: AsyncSession, project_id: int, role_id: int | None) -> int:
+    """解析写路径的角色归属：显式传入时校验归属，未传时取基准角色
+
+    角色一律可删除，项目可能一个角色都不剩；部位必须归属于某个角色，
+    此时抛业务错误而非落到 NOT NULL 约束报错。
+    """
     if role_id is not None:
+        await _ensure_role_belongs_to_project(db, role_id, project_id)
         return role_id
-
-    if not create:
-        return None
-
-    # 防御性兜底：旧库未跑迁移时主动补一个默认角色
-    role = CustomerSamplingRole(
-        project_id=project_id,
-        role_name='默认',
-        sort_order=0,
-        is_default=True,
-        current_version='T1',
-    )
-    db.add(role)
-    await db.flush()
-    return role.id
+    primary_role_id = await _get_primary_role_id(db, project_id)
+    if primary_role_id is None:
+        raise BusinessError('该项目暂无角色，请先新增角色')
+    return primary_role_id
 
 
 

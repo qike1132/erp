@@ -72,12 +72,12 @@ def test_backup_recovery_test_service_import():
 def test_service_interactions():
     """测试服务间交互"""
     # 测试服务可以相互导入而不冲突
-    from fastapi_app.services.backup.metrics.alert_service import alert_service
     from fastapi_app.services.backup.cleanup.service import cleanup_service
-    from fastapi_app.services.backup.verify.health_check_service import health_check_service
+    from fastapi_app.services.backup.metrics.alert_service import alert_service
     from fastapi_app.services.backup.metrics.service import metrics_service
     from fastapi_app.services.backup.orchestration.policy_service import policy_service
     from fastapi_app.services.backup.orchestration.recovery_test_service import recovery_test_service
+    from fastapi_app.services.backup.verify.health_check_service import health_check_service
 
     assert alert_service is not None
     assert health_check_service is not None
@@ -101,12 +101,12 @@ def test_config_loading():
         'BACKUP_SMART_CLEANUP': 'false',
         'BACKUP_RECOVERY_TEST_FREQUENCY': '14'
     }):
-        from fastapi_app.services.backup.metrics.alert_service import BackupAlertService
         from fastapi_app.services.backup.cleanup.service import BackupCleanupService
-        from fastapi_app.services.backup.verify.health_check_service import BackupHealthCheckService
+        from fastapi_app.services.backup.metrics.alert_service import BackupAlertService
         from fastapi_app.services.backup.metrics.service import BackupMetricsService
         from fastapi_app.services.backup.orchestration.policy_service import BackupPolicyService
         from fastapi_app.services.backup.orchestration.recovery_test_service import DisasterRecoveryTestService
+        from fastapi_app.services.backup.verify.health_check_service import BackupHealthCheckService
 
         alert_service = BackupAlertService()
         health_service = BackupHealthCheckService()

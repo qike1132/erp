@@ -7,7 +7,6 @@
 """
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
 from sqlalchemy.exc import SQLAlchemyError
 
 from fastapi_app.services.batch_import_service import _process_comprehensive_sheet

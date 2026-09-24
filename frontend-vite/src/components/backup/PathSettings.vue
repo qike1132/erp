@@ -18,8 +18,8 @@
       </div>
     </div>
     <div class="ps-actions">
-      <button class="ps-btn ps-btn-outline" @click="onValidate">校验路径</button>
-      <button class="ps-btn ps-btn-primary" :disabled="saving" @click="onSave">{{ saving ? '保存中...' : '保存设置' }}</button>
+      <button class="ps-btn ps-btn-outline" @click="handleValidate">校验路径</button>
+      <button class="ps-btn ps-btn-primary" :disabled="saving" @click="handleSave">{{ saving ? '保存中...' : '保存设置' }}</button>
     </div>
   </div>
 </template>
@@ -62,14 +62,16 @@ async function onPathInput() {
   else if (res && res.valid) feedback.value = { tone: 'ok', text: '路径可写' }
 }
 
-async function onValidate() {
+// 注意：局部处理器不得与 props 同名（props.onValidate / props.onSave）。
+// 同名会让模板 `@click` 的解析产生歧义（vue/no-dupe-keys），故一律用 handle* 前缀。
+async function handleValidate() {
   const v = customPath.value.trim()
   if (!v) { feedback.value = { tone: 'error', text: '请输入自定义路径' }; return }
   const res = await props.onValidate(v)
   feedback.value = res && !res.valid ? { tone: 'error', text: res.error || '路径不合法' } : { tone: 'ok', text: '路径可写' }
 }
 
-function onSave() {
+function handleSave() {
   if (mode.value === 'default') { props.onSave(''); return }
   const v = customPath.value.trim()
   if (!v) { feedback.value = { tone: 'error', text: '请输入自定义路径' }; return }

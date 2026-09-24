@@ -22,7 +22,6 @@ BOM 复制·真实 ORM 语义回归测试
 """
 from decimal import Decimal
 
-import pytest
 import pytest_asyncio
 from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine

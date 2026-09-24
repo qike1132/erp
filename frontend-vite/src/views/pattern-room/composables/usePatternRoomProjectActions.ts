@@ -7,6 +7,7 @@
  */
 import { ref, type Ref } from 'vue'
 import type { useConfirmDialog } from '@/composables/useConfirmDialog'
+import { showToast } from '@/composables/useToast'
 import { patternRoomApi } from '@/api/patternRoom'
 import type { ProjectCreateRequest, ProjectUpdateRequest, ProjectStatus } from '@/api/patternRoom'
 import { createManageGuard } from './useManageGuard'
@@ -160,10 +161,12 @@ export function usePatternRoomProjectActions(options: UsePatternRoomProjectActio
           }
           // 刷新分组列表，让卡片缩略图显示新图片
           void groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, groupHook.currentPage.value, 'fresh')
+          showToast('图片上传成功', 'success')
         }
       })
       .catch((e) => {
         console.error('[PatternRoomView] 后台上传项目图片失败:', e)
+        showToast('图片上传失败，请重试', 'error')
       })
   }
 

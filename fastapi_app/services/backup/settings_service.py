@@ -13,10 +13,9 @@ import logging
 import re
 from pathlib import Path
 
+import psutil  # 磁盘空间预检(模块级导入,便于测试 patch)
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-
-import psutil  # 磁盘空间预检(模块级导入,便于测试 patch)
 
 from ._constants import BACKUP_DIR
 

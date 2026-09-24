@@ -343,10 +343,11 @@ class DisasterRecoveryTestService:
                 raise ValueError(f'备份 {name} 已加密，但未配置 BACKUP_TEST_PASSWORD，无法解密还原')
             encrypted_bytes = backup_path.read_bytes()
             plain_bytes = decrypt_backup(encrypted_bytes, password)
-            tmp_path = tempfile.NamedTemporaryFile(prefix='dr_decrypt_', suffix='.zip', delete=False)
-            tmp_path.write(plain_bytes)
-            tmp_path.close()
-            return Path(tmp_path.name)
+            with tempfile.NamedTemporaryFile(
+                prefix='dr_decrypt_', suffix='.zip', delete=False
+            ) as tmp_file:
+                tmp_file.write(plain_bytes)
+            return Path(tmp_file.name)
         except ValueError:
             raise
         except Exception as e:  # defensive: 解密失败给出明确原因
@@ -540,9 +541,9 @@ class DisasterRecoveryTestService:
                 '--single-transaction',
                 '-v', 'ON_ERROR_STOP=1',
             ]
-            proc = subprocess.run(  # noqa: S603 — 参数为固定白名单列表
+            proc = subprocess.run(  # 参数为固定白名单列表
                 psql_args, input=dump_sql,
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                capture_output=True,  # 等价于 stdout=PIPE + stderr=PIPE
                 env=env, timeout=600,
             )
             if proc.returncode != 0:

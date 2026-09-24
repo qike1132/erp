@@ -7,7 +7,6 @@
 import asyncio
 import logging
 
-from fastapi_app.core.cache import CacheDomain
 from fastapi_app.core.cache_invalidation import InvalidationStrategy, cache_mgr
 from fastapi_app.core.domain_events import DomainEvent, DomainEventType, publish_with_retry
 from fastapi_app.core.exception_handler import RUNTIME_INFRA_EXCEPTIONS

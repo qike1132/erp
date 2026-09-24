@@ -108,12 +108,12 @@ async def ensure_engine_for_current_loop() -> None:
             logger.warning('慢查询监听器初始化失败: %s', e)
         try:
             await stale.dispose(close=False)
-        except Exception:  # noqa: BLE001 - 旧 loop 引擎清理失败不应影响当前请求
+        except Exception:  # defensive: 旧 loop 引擎清理失败不应影响当前请求
             logger.debug('旧事件循环引擎清理失败（已忽略）', exc_info=True)
         if stale_read is not None:
             try:
                 await stale_read.dispose(close=False)
-            except Exception:  # noqa: BLE001 - 同上，尽力而为
+            except Exception:  # defensive: 同上，尽力而为
                 logger.debug('旧事件循环只读引擎清理失败（已忽略）', exc_info=True)
 
 
@@ -479,7 +479,7 @@ def __getattr__(name):
 
         from sqlalchemy.orm import Session
 
-        def get_sync_db() -> Generator[Session, None, None]:
+        def get_sync_db() -> Generator[Session]:
             _init_sync_engine()
             assert _SyncSessionLocal is not None  # noqa: S101
             db = _SyncSessionLocal()

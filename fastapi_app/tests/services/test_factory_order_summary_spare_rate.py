@@ -15,7 +15,6 @@
 fastapi_app/tests/services/test_beile_orders.py::test_ordered_spare_rate_zero_survives
 fastapi_app/tests/services/test_qa_beile_adversarial.py::test_qa_gating_and_list_flag_same_source
 """
-import pytest
 import pytest_asyncio
 from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine

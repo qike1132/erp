@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import server_manager as sm  # noqa: E402  (模块级代码无 Tk root, 导入安全)
+import server_manager as sm  # (模块级代码无 Tk root, 导入安全)
 
 
 def _make_app():

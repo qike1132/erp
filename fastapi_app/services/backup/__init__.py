@@ -118,15 +118,23 @@ from .verify import *  # noqa: F403
 # P0 审计修正(2026-08-24): Redis 还原锁三件套必须放在所有星号导入之后——
 # .verify 经星号导入会带入 query_service 的同名 advisory 版
 # release_restore_lock(db)，曾遮蔽 Redis 版导致端点 finally TypeError。
-from .restore import (  # noqa: E402,F811
+# 注：本文件已在 ruff.toml 的 per-file-ignores 中关闭 I001，以保护此顺序不被 isort 打乱。
+from .restore import (
     acquire_restore_lock,
+    clear_stale_restore_lock,
+    get_restore_lock_info,
     is_restore_in_progress,
+    is_stale_restore_lock,
     release_restore_lock,
+    renew_restore_lock,
     restore_from_zip,
     restore_non_dependent_components,
 )
 
-__all__ = [
+# 按模块分组排列（每组带说明注释），故意不做 isort 全局排序：
+# 全局排序会把同模块的名字拆散、注释失去意义，而 __all__ 顺序无语义作用。
+# ruff 亦将该修复标记为 unsafe（--unsafe-fixes 才会应用），故此处显式豁免。
+__all__ = [  # noqa: RUF022
     "BACKUP_CHUNK_SIZE",
     # 常量
     "BACKUP_DIR",
@@ -218,6 +226,7 @@ __all__ = [
     "build_column_type_map",
     "cleanup_old_backups",
     "cleanup_pre_restore_backups",
+    "clear_stale_restore_lock",
     "combine_backup_chunks",
     "create_backup_chunks",
     "create_binary_log_backup",
@@ -245,13 +254,16 @@ __all__ = [
     # snapshot
     "get_postgres_snapshot",
     "get_postgres_wal_info",
+    "get_restore_lock_info",
     "is_restore_in_progress",
+    "is_stale_restore_lock",
     "list_backup_files",
     "query_table_rows",
     # verify
     "quote_table",
     "release_backup_lock",
     "release_restore_lock",
+    "renew_restore_lock",
     "restore_config",
     "restore_database_from_json",
     "restore_database_via_psql",

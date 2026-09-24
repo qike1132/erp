@@ -17,7 +17,8 @@ from fastapi_app.core.database import get_async_db_context
 
 logger = logging.getLogger(__name__)
 
-# 只读角色名（与 config/postgres/init-replication.sh、deploy-windows.ps1 保持一致）
+# 只读角色名（与 config/postgres/init-replication.sh 保持一致）
+# 注：历史上还引用了 deploy-windows.ps1，该脚本已删除（commit 15e13a79）。
 _READONLY_ROLE = "erp_readonly"
 
 # 幂等 GRANT：已授权时重复执行无副作用

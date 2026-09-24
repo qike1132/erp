@@ -535,9 +535,10 @@ class TestBeileSoftDeleteFilter:
         agen = self._session(tmp_path)
         sf, engine = await agen.__anext__()
 
+        from sqlalchemy import select as sa_select
+
         from fastapi_app.services.order.beile import _build_beile_unified_query
         from fastapi_app.shared_models import Product, StockIn
-        from sqlalchemy import select as sa_select
 
         async with sf() as db:
             product = Product(name='软删测试品', factory='湖北')
@@ -566,9 +567,10 @@ class TestBeileSoftDeleteFilter:
         agen = self._session(tmp_path)
         sf, engine = await agen.__anext__()
 
+        from sqlalchemy import select as sa_select
+
         from fastapi_app.services.order.beile import _build_beile_unified_query
         from fastapi_app.shared_models import Order, OrderItem, Product
-        from sqlalchemy import select as sa_select
 
         async with sf() as db:
             product = Product(name='订单软删测试品', factory='湖北')

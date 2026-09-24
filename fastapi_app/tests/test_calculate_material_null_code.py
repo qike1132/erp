@@ -137,7 +137,7 @@ def test_response_model_accepts_real_payload():
     payload = {**flat, 'groups': groups}
     try:
         MaterialCalculateResponse.model_validate(payload)
-    except ValidationError as e:  # noqa: PERF203
+    except ValidationError as e:
         pytest.fail(f'响应模型拒绝了真实生产者的产出（线上 500 同源）：\n{e}')
 
 

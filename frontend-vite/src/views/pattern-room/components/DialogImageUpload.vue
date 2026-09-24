@@ -1,29 +1,37 @@
 <template>
-  <div class="diu-section">
+  <div class="diu-section" :class="{ 'diu-section--flash': pasteFlash || isDragOver }">
     <div v-if="previewUrl" class="diu-preview">
       <img loading="lazy" :src="previewUrl" alt="预览" class="diu-img" />
-      <button class="diu-img-remove" aria-label="移除图片" @click="$emit('remove')">&times;</button>
+      <button class="diu-img-remove" :disabled="uploading" aria-label="移除图片" @click="$emit('remove')">&times;</button>
     </div>
     <label
       v-else
-      :class="['diu-upload-area', { 'diu-upload-area--dragover': isDragOver }]"
+      :class="['diu-upload-area', { 'diu-upload-area--dragover': isDragOver, 'diu-upload-area--disabled': uploading }]"
       @dragover.prevent="onDragOver"
       @dragleave.prevent="onDragLeave"
       @drop.prevent="onDrop"
     >
       <input type="file" accept="image/jpeg,image/png,image/webp" class="diu-file-input" aria-label="上传文件" @change="onFileChange" />
       <FontAwesomeIcon icon="cloud-upload-alt" aria-hidden="true" />
-      <span>点击或拖拽图片到此处上传</span>
+      <span>点击 / 拖拽 / 粘贴图片到此处上传</span>
       <span class="diu-upload-hint">支持 JPEG/PNG/WebP，上传前自动压缩（≤1600px）</span>
     </label>
+    <div v-if="uploading" class="diu-uploading" role="status">
+      <FontAwesomeIcon icon="spinner" spin aria-hidden="true" />
+      <span>上传中…</span>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref } from 'vue'
 
-defineProps<{
+const props = defineProps<{
   previewUrl: string | null
+  /** 粘贴命中时的即时反馈（与拖拽高亮同色，600ms 后由父级复位） */
+  pasteFlash?: boolean
+  /** 图片处理中（压缩 + 暂存），期间禁用选择与拖拽入口 */
+  uploading?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -34,6 +42,7 @@ const emit = defineEmits<{
 const isDragOver = ref(false)
 
 function onFileChange(e: Event) {
+  if (props.uploading) return
   const target = e.target as HTMLInputElement
   const file = target.files?.[0]
   if (!file) return
@@ -42,6 +51,7 @@ function onFileChange(e: Event) {
 }
 
 function onDragOver(e: DragEvent) {
+  if (props.uploading) return
   if (Array.from(e.dataTransfer?.types ?? []).includes('Files')) {
     isDragOver.value = true
   }
@@ -53,6 +63,7 @@ function onDragLeave() {
 
 function onDrop(e: DragEvent) {
   isDragOver.value = false
+  if (props.uploading) return
   const file = e.dataTransfer?.files?.[0]
   if (!file) return
   emit('upload-file', file)
@@ -90,6 +101,10 @@ function onDrop(e: DragEvent) {
   align-items: center;
   justify-content: center;
 }
+.diu-img-remove:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
 .diu-upload-area {
   display: flex;
   flex-direction: column;
@@ -109,6 +124,33 @@ function onDrop(e: DragEvent) {
 .diu-upload-area--dragover {
   border-color: var(--color-primary-500);
   background: color-mix(in srgb, var(--color-primary-500) 8%, transparent);
+}
+.diu-upload-area--disabled {
+  pointer-events: none;
+  opacity: 0.6;
+}
+/* 粘贴命中复用与拖拽高亮同一套颜色变量，保证两处反馈视觉一致 */
+.diu-section--flash .diu-upload-area {
+  border-color: var(--color-primary-500);
+  background: color-mix(in srgb, var(--color-primary-500) 8%, transparent);
+}
+.diu-section--flash .diu-preview {
+  outline: 2px solid var(--color-primary-500);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+.diu-uploading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 10px;
+  border: 2px dashed var(--color-primary-500);
+  border-radius: 10px;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  background: color-mix(in srgb, var(--color-primary-500) 6%, transparent);
 }
 .diu-upload-area i {
   font-size: 24px;

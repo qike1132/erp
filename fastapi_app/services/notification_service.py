@@ -16,12 +16,14 @@ from typing import Literal
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi_app.core.exception_handler import INFRA_EXCEPTIONS
 from fastapi_app.core.redis_client import (
     get_async_redis_client,
-    redis_infra_exceptions as _redis_infra_exceptions,
     reset_async_redis_client,
 )
-from fastapi_app.core.exception_handler import INFRA_EXCEPTIONS
+from fastapi_app.core.redis_client import (
+    redis_infra_exceptions as _redis_infra_exceptions,
+)
 from fastapi_app.shared_models import AuditLog, Notification, Order, OrderItem, Product, User
 
 logger = logging.getLogger(__name__)

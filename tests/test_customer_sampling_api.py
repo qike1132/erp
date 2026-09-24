@@ -40,16 +40,15 @@ async def cs_api():
     Yields:
         (client, db): httpx AsyncClient 与事务隔离的 AsyncSession
     """
-    from fastapi_app.core.database import get_async_db, get_async_read_db
-    from fastapi_app.core.deps import _get_user_with_permissions, get_current_user_id
-    from fastapi_app.main import app
-    from fastapi_app.shared_models import Base
-
     # 让 app 的全局引擎在当前测试 loop 上按 conftest 重定向后的 URL 重建：
     # 本套件只 override 请求依赖，而 create_project 会经
     # numbering_sequence.allocate_sequence 直接引用 _AsyncSessionLocal（非请求路径），
     # 不先跑守卫的话该引用为 None → TypeError。
     from fastapi_app.core import database as _db_mod
+    from fastapi_app.core.database import get_async_db, get_async_read_db
+    from fastapi_app.core.deps import _get_user_with_permissions, get_current_user_id
+    from fastapi_app.main import app
+    from fastapi_app.shared_models import Base
     await _db_mod.ensure_engine_for_current_loop()
 
     engine = create_async_engine(TEST_DATABASE_URL, echo=False, pool_pre_ping=True)

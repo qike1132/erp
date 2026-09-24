@@ -229,7 +229,7 @@ async def _fetch_po_sku_maps(db: AsyncSession) -> tuple[dict, dict]:
                 .join(PurchaseOrder, PurchaseOrder.id == PurchaseOrderSku.po_id)
                 .where(PurchaseOrder.status == PurchaseOrderStatus.COMPLETED)
             )).all()
-    except Exception:  # noqa: BLE001 - 表缺失/方言差异一律降级为「无逐 SKU 数据」
+    except Exception:  # defensive: 表缺失/方言差异一律降级为「无逐 SKU 数据」
         logger.warning('读取 purchase_order_sku 失败，逐 SKU 注入降级为订单级口径', exc_info=True)
         return empty
 

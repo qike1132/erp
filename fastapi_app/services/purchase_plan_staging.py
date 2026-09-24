@@ -11,7 +11,6 @@
 import io
 import uuid
 
-
 import openpyxl
 from sqlalchemy import and_, delete, select
 from sqlalchemy.exc import IntegrityError

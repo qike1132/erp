@@ -52,7 +52,7 @@ class _FakeOpener:
     def __init__(self, resp: _FakeResp):
         self._resp = resp
 
-    def open(self, url: str, timeout: float | None = None):  # noqa: ARG002
+    def open(self, url: str, timeout: float | None = None):
         return self._resp
 
 

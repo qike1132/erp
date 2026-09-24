@@ -35,10 +35,13 @@ import json
 import logging
 from decimal import Decimal
 
-from sqlalchemy import delete, inspect as sa_inspect, or_, select
+from sqlalchemy import delete, or_, select
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstanceState, selectinload
 
+from fastapi_app.services.product.bom_role_resolver import resolve_role_rows
+from fastapi_app.services.product.role_service import ensure_global_role
 from fastapi_app.shared_models import (
     ModificationLog,
     Product,
@@ -47,8 +50,6 @@ from fastapi_app.shared_models import (
     ProductMaterial,
     ProductRole,
 )
-from fastapi_app.services.product.bom_role_resolver import resolve_role_rows
-from fastapi_app.services.product.role_service import ensure_global_role
 
 logger = logging.getLogger(__name__)
 

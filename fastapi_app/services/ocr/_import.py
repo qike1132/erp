@@ -12,11 +12,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.services.ocr._extractors import extract_table_structure, extract_text
-from fastapi_app.services.ocr._progress import _update_progress
 from fastapi_app.services.ocr._html_tables import (
     parse_html_shipping_tables,
     parse_shipping_document,
 )
+from fastapi_app.services.ocr._progress import _update_progress
 from fastapi_app.services.ocr_fuzzy_match import fuzzy_match_customer, fuzzy_match_product
 from fastapi_app.shared_models import Customer, Product, StagingStockOut
 

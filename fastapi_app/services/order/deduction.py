@@ -63,7 +63,6 @@ logger = logging.getLogger(__name__)
 from fastapi_app.services.order.approval_flow import _check_order_lock
 
 
-
 async def _increase_deduction(
     db: AsyncSession, order: Order, diff: int,
 ) -> None:
@@ -78,7 +77,6 @@ async def _increase_deduction(
         ValueError: 可用备货不足
     """
     from fastapi_app.services.numbering import generate_stockout_number
-    from fastapi_app.shared_models import StockIn
 
     stockins_result = await db.execute(
         select(StockIn)

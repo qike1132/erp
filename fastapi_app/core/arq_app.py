@@ -7,11 +7,10 @@ ARQ 是原生 async 任务队列，与 FastAPI async 架构一致，
 - Web 进程入队：`await get_arq_pool().enqueue_job(func_name, *args)`
 - 定时任务：cron_jobs（内置于 worker，无需独立 beat 进程）
 """
+import asyncio
 import logging
 import os
 from typing import ClassVar
-
-import asyncio
 
 from arq import create_pool, cron
 from arq.connections import RedisSettings

@@ -19,6 +19,7 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
+from fastapi_app.core.exceptions import ConflictError
 from fastapi_app.services.order.beile import (
     BEILE_NOT_ORDERED_DETAIL,
     confirm_beile_order,
@@ -27,7 +28,6 @@ from fastapi_app.services.order.beile import (
     get_beile_unconfirmed_count,
 )
 from fastapi_app.services.purchase_utils import parse_source_order_ids
-from fastapi_app.core.exceptions import ConflictError
 from fastapi_app.shared_models import (
     Base,
     MaterialRegistration,
@@ -419,6 +419,7 @@ def test_qa_fnmatch_proves_old_pattern_insufficient():
 async def test_qa_invalidate_orders_cache_covers_beile(monkeypatch):
     """_invalidate_orders_cache 必须同时清 'orders:p*' 与 'orders:beile:*'。"""
     from unittest.mock import AsyncMock
+
     from fastapi_app.api.v1.endpoints.purchase_center import order_routes
 
     mock = AsyncMock(return_value=0)
@@ -464,8 +465,8 @@ async def test_qa_local_ttl_zero_disables_l1(db):
 
 async def test_qa_beile_list_l1_disabled_end_to_end(db, monkeypatch):
     """列表函数端到端证明 local_ttl=0：同键两次调用 → 底层映射函数被调用两次。"""
-    from fastapi_app.services.order import beile as beile_module
     from fastapi_app.core.cache import invalidate_local_cache
+    from fastapi_app.services.order import beile as beile_module
 
     p = Product(id=1, name='变形金刚', barcode='690001', factory='湖北')
     o = _order(11, 'PO-11', '客户A', datetime(2026, 9, 1), p, 5)

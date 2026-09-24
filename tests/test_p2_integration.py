@@ -109,5 +109,6 @@ def test_backup_timeout_configured():
 def test_backup_in_process_lock():
     """P1-4: 进程级备份锁存在（现位于 services/backup/_constants.py）"""
     import asyncio
+
     from fastapi_app.services.backup._constants import _backup_in_progress
     assert isinstance(_backup_in_progress, asyncio.Lock)

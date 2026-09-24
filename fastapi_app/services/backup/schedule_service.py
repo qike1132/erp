@@ -42,12 +42,11 @@ def parse_cron(cron_expr: str) -> tuple[set[int] | None, ...] | None:
     if len(parts) != 5:
         return None
     fields: list[set[int] | None] = []
-    for part, (lo, hi) in zip(parts, _FIELD_RANGES):
+    for part, (lo, hi) in zip(parts, _FIELD_RANGES, strict=False):
         if part == '*':
             fields.append(None)
             continue
         vals: set[int] = set()
-        ok = True
         for token in part.split(','):
             token = token.strip()
             if not token:

@@ -12,12 +12,11 @@
 
 本测试锁定埋点契约，防止后续重构破坏可观测性。
 """
-import asyncio
 
 import pytest
 
 from fastapi_app.core import cache as cache_mod
-from fastapi_app.core.cache import _record_cache_op, _cache_local, cache_result
+from fastapi_app.core.cache import _cache_local, _record_cache_op, cache_result
 
 
 @pytest.fixture

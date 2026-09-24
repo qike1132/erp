@@ -1,6 +1,7 @@
 """备份记录与状态。"""
 from __future__ import annotations
 
+import contextlib
 import io
 import json
 import logging
@@ -141,8 +142,10 @@ async def write_backup_record(
         logger.warning(f'写入备份记录失败（不阻塞主流程）: {e}')
         # 每累计3次失败发送一次告警，避免告警风暴
         if _record_write_fail_count % 3 == 0:
-            try:
+            # 告警失败不影响主流程
+            with contextlib.suppress(Exception):
                 import asyncio
+
                 from fastapi_app.services.backup.metrics.alert_service import alert_service
                 # 尝试获取事件循环，有则发送告警，无则跳过（同步上下文无法 await）
                 try:
@@ -156,8 +159,6 @@ async def write_backup_record(
                         task_type='backup',
                         severity='error',
                     ))
-            except Exception:
-                pass  # 告警失败不影响主流程
 
 
 def list_backup_files() -> list[dict]:  # log-context: internal helper 无请求上下文
@@ -579,15 +580,17 @@ async def sync_backup_records() -> dict:
         dict: {'backfilled': N, 'orphaned': N, 'zombie_fixed': N, 'errors': [...]}
     """
     # 延迟导入避免循环依赖
+    from sqlalchemy import delete as sa_delete
+    from sqlalchemy import select
+
     from fastapi_app.core.database import get_async_db_context
-    from fastapi_app.shared_models.backup_record import BackupRecord
-    from sqlalchemy import select, delete as sa_delete
     from fastapi_app.services.backup.verify.query_service import (
-        _infer_type_from_filename,
         _infer_trigger_type_from_filename,
+        _infer_type_from_filename,
         _parse_exported_at,
         _parse_timestamp_from_filename,
     )
+    from fastapi_app.shared_models.backup_record import BackupRecord
 
     result: dict = {'backfilled': 0, 'orphaned': 0, 'zombie_fixed': 0, 'errors': []}
 
@@ -647,10 +650,8 @@ async def sync_backup_records() -> dict:
                     result['backfilled'] += 1
                 except Exception as e:
                     result['errors'].append(f'补录 {fname} 失败: {e}')
-                    try:
+                    with contextlib.suppress(Exception):  # defensive: rollback 失败不阻塞后续同步
                         await db.rollback()
-                    except Exception:
-                        pass  # defensive: rollback 失败不阻塞后续同步
 
             # 2b. 清理孤立：DB 有记录但文件不存在
             for r in rows:
@@ -661,10 +662,8 @@ async def sync_backup_records() -> dict:
                         result['orphaned'] += 1
                     except Exception as e:
                         result['errors'].append(f'清理孤立记录 {r.filename} 失败: {e}')
-                        try:
+                        with contextlib.suppress(Exception):  # defensive: rollback 失败不阻塞后续同步
                             await db.rollback()
-                        except Exception:
-                            pass  # defensive: rollback 失败不阻塞后续同步
 
             # 2c. 修正僵尸：status='running' 且对应文件存在 → 更新为 'success'
             #     （进程已结束，文件已落盘，running 状态为历史中断残留）
@@ -677,10 +676,8 @@ async def sync_backup_records() -> dict:
                         result['zombie_fixed'] += 1
                     except Exception as e:
                         result['errors'].append(f'修正僵尸记录 {r.filename} 失败: {e}')
-                        try:
+                        with contextlib.suppress(Exception):  # defensive: rollback 失败不阻塞后续同步
                             await db.rollback()
-                        except Exception:
-                            pass  # defensive: rollback 失败不阻塞后续同步
     except Exception as e:
         result['errors'].append(f'同步过程异常: {e}')
 

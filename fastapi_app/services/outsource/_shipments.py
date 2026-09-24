@@ -24,6 +24,8 @@ from fastapi_app.services.outsource._order_processes import (
     ship_order_process,
 )
 from fastapi_app.shared_models import (
+    SHIPMENT_STATUS_RECEIVED,
+    SHIPMENT_STATUS_SHIPPED,
     Notification,
     Order,
     OrderItem,
@@ -31,8 +33,6 @@ from fastapi_app.shared_models import (
     OutsourceShipment,
     OutsourceShipmentItem,
     Permission,
-    SHIPMENT_STATUS_RECEIVED,
-    SHIPMENT_STATUS_SHIPPED,
     User,
 )
 
@@ -225,7 +225,7 @@ async def create_shipment(
         await _dispatch_shipment_shipped_notification(
             db, shipment_no, order.customer, order.id, notify_items,
         )
-    except Exception:  # noqa: BLE001 - 服务层容错：通知失败不阻断发货
+    except Exception:  # defensive: 服务层容错，通知失败不阻断发货
         logger.warning('发货单待收货通知派发失败：shipment_no=%s', shipment_no, exc_info=True)
 
     # 重新 selectinload 明细后再序列化，避免异步会话内访问 shipment.items 触发懒加载
@@ -398,7 +398,7 @@ async def create_merged_shipment(
         await _dispatch_shipment_shipped_notification(
             db, shipment_no, None, None, notify_items,
         )
-    except Exception:  # noqa: BLE001 - 服务层容错：通知失败不阻断发货
+    except Exception:  # defensive: 服务层容错，通知失败不阻断发货
         logger.warning('合并发货单待收货通知派发失败：shipment_no=%s', shipment_no, exc_info=True)
 
     # 重新 selectinload 明细后再序列化，避免异步会话内访问 shipment.items 触发懒加载

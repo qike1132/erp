@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -46,10 +47,9 @@ async def _reload_redis() -> bool:
         logger.warning('Redis DEBUG RELOAD 失败: %s', stderr_text)
         try:
             shutdown_cmd = [*cmd[:-2], 'SHUTDOWN', 'NOSAVE']
-            try:
+            # SHUTDOWN 会让 Redis 断开连接，超时属预期行为
+            with contextlib.suppress(TimeoutError):
                 await run_proc(shutdown_cmd, env=cli_env, timeout=5)
-            except TimeoutError:
-                pass
             logger.info('Redis SHUTDOWN NOSAVE 已发送，等待自动重启')
             await asyncio.sleep(2)
             ping_cmd = [*cmd[:-2], 'PING']

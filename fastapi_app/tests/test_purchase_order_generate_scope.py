@@ -11,7 +11,6 @@
 - `source_role` 落成明细备注
 """
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 

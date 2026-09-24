@@ -5,7 +5,6 @@
 - _check_last_backup / _check_backup_integrity / _check_disk_space
 - _aggregate_health_status
 """
-from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -135,6 +134,7 @@ class TestCheckLastBackup:
         与真实生产者（records.py:166 仅含 filename/size）不一致，导致
         「1970-01-01」缺陷长期全绿漏检。改为真实文件系统 + 真实生产者。"""
         import zipfile as _zipfile
+
         from fastapi_app.services.backup import records as _records
         monkeypatch.setattr(_records, 'BACKUP_DIR', tmp_path)
         monkeypatch.setattr(validation.backup_service, 'BACKUP_DIR', tmp_path)
@@ -142,7 +142,8 @@ class TestCheckLastBackup:
 
     def test_check_last_backup_recent_returns_healthy(self, tmp_path, monkeypatch):
         """最近备份在 24h 内应返回 healthy"""
-        import os, time
+        import os
+        import time
         zipfile = self._use_real_dir(tmp_path, monkeypatch)
         p = tmp_path / 'erp_backup_recent.zip'
         with zipfile.ZipFile(p, 'w') as zf:
@@ -157,7 +158,8 @@ class TestCheckLastBackup:
 
     def test_check_last_backup_stale_returns_warning(self, tmp_path, monkeypatch):
         """最近备份超过 24h 应返回 warning 并记录 issue"""
-        import os, time
+        import os
+        import time
         zipfile = self._use_real_dir(tmp_path, monkeypatch)
         p = tmp_path / 'erp_backup_old.zip'
         with zipfile.ZipFile(p, 'w') as zf:

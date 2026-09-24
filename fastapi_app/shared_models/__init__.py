@@ -53,13 +53,13 @@ from fastapi_app.shared_models.order_item import OrderItem
 from fastapi_app.shared_models.order_status_log import OrderStatusLog
 from fastapi_app.shared_models.order_sync import OrderSyncConfig, OrderSyncRecord, SyncRetryQueue
 from fastapi_app.shared_models.outsource import (
+    SHIPMENT_STATUS_RECEIVED,
+    SHIPMENT_STATUS_SHIPPED,
     OrderOutsourceProcess,
     OrderOutsourceProcessFlow,
     OutsourceProcessType,
     OutsourceShipment,
     OutsourceShipmentItem,
-    SHIPMENT_STATUS_RECEIVED,
-    SHIPMENT_STATUS_SHIPPED,
 )
 from fastapi_app.shared_models.packaging_record import PackagingRecord
 from fastapi_app.shared_models.pattern_maker import PatternMaker
@@ -96,6 +96,8 @@ __all__ = [
     'CUSTOMER_SAMPLING_ACTIONS',
     'CUSTOMER_SAMPLING_CHANGE_TYPES',
     'MATERIAL_CATEGORIES',
+    'SHIPMENT_STATUS_RECEIVED',
+    'SHIPMENT_STATUS_SHIPPED',
     'ApprovalLog',
     'ApprovalRequest',
     'AuditLog',
@@ -117,7 +119,6 @@ __all__ = [
     'CustomerSamplingProject',
     'CustomerSamplingRole',
     'DailyProductionRecord',
-
     'FileRecord',
     'InventoryLog',
     'MaterialRegistration',
@@ -136,8 +137,6 @@ __all__ = [
     'OutsourceProcessType',
     'OutsourceShipment',
     'OutsourceShipmentItem',
-    'SHIPMENT_STATUS_RECEIVED',
-    'SHIPMENT_STATUS_SHIPPED',
     'PackagingRecord',
     'PatternMaker',
     'Permission',
@@ -167,6 +166,6 @@ __all__ = [
     'Supplier',
     'SyncRetryQueue',
     'User',
-    'user_permission',
     'WebVital',
+    'user_permission',
 ]

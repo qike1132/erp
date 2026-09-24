@@ -13,8 +13,8 @@ from pathlib import Path
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi_app.services.backup.verify.core import quote_table
 from fastapi_app.services.backup._constants import BACKUP_DIR
+from fastapi_app.services.backup.verify.core import quote_table
 
 logger = logging.getLogger(__name__)
 

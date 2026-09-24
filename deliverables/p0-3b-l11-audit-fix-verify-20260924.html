@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>P0-③ 收尾：L11 审计假阳性修复 + 判据设计</title>
+<style>
+  :root{
+    --bg:#0f1420; --card:#171e2e; --card2:#1d2637; --fg:#e8edf6; --muted:#9fb0c9;
+    --line:#2a3549; --red:#ff6b6b; --orange:#ffa94d; --yellow:#ffd43b; --green:#51cf66;
+    --blue:#4dabf7; --code:#0b0f17;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.7 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
+  .wrap{max-width:1100px;margin:0 auto;padding:32px 24px 72px}
+  h1{font-size:21px;margin:0 0 6px}
+  h2{font-size:17px;margin:34px 0 12px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  h3{font-size:14.5px;margin:20px 0 8px;color:var(--blue)}
+  .sub{color:var(--muted);font-size:13px;margin-bottom:20px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:15px 18px;margin:14px 0}
+  .verdict{border-left:5px solid var(--green);background:linear-gradient(90deg,#12281c,#171e2e)}
+  .verdict b{color:var(--green)}
+  .warn{border-left:4px solid var(--orange)}
+  .bad{border-left:4px solid var(--red)}
+  .info{border-left:4px solid var(--blue)}
+  table{width:100%;border-collapse:collapse;margin:10px 0;font-size:13px}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:var(--card2);color:var(--muted);font-weight:600}
+  tbody tr:nth-child(even){background:rgba(255,255,255,.014)}
+  code,pre{font-family:"Cascadia Code",Consolas,monospace}
+  code{background:var(--code);padding:1px 6px;border-radius:4px;font-size:12.5px;color:#ffd8a8}
+  pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:12px 14px;overflow:auto;font-size:12.5px;color:#cfe3ff;margin:8px 0}
+  .tag{display:inline-block;padding:1px 8px;border-radius:20px;font-size:11.5px;font-weight:600;white-space:nowrap}
+  .t-red{background:rgba(255,107,107,.16);color:var(--red);border:1px solid rgba(255,107,107,.4)}
+  .t-org{background:rgba(255,169,77,.16);color:var(--orange);border:1px solid rgba(255,169,77,.4)}
+  .t-yel{background:rgba(255,212,59,.16);color:var(--yellow);border:1px solid rgba(255,212,59,.4)}
+  .t-grn{background:rgba(81,207,102,.16);color:var(--green);border:1px solid rgba(81,207,102,.4)}
+  .t-blu{background:rgba(77,171,247,.16);color:var(--blue);border:1px solid rgba(77,171,247,.4)}
+  ul{margin:8px 0;padding-left:22px} li{margin:4px 0}
+  .small{font-size:12.5px;color:var(--muted)}
+  .foot{margin-top:42px;padding-top:14px;border-top:1px solid var(--line);color:var(--muted);font-size:12px}
+  .ok{color:var(--green)} .bad{color:var(--red)} .wn{color:var(--orange)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>P0-③ 收尾 · L11 审计假阳性修复（含判据设计）</h1>
+  <div class="sub">
+    仓库：D:\erp_system｜分支 main（未提交）｜时间：2026-09-24 08:36–08:47 (+08:00)<br>
+    交付：<code>scripts/prod_audit/layers/l11_deployment.py</code>（+187/−42）＋ 新增回归测试 9 用例
+  </div>
+
+  <div class="card verdict">
+    <b>结论：一个病根、两个反向缺陷，均已修复并双向验证。</b>
+    <code>_check_migrations</code> 的<b>假阴性</b>（静默跳过）与 <code>_check_container_config</code> 的
+    <b>假阳性</b>（稳定误报）都源于同一原因：判据照「通用 Web 项目模板」写，而本仓库是
+    <b>内网 Windows 原生 + NSSM</b>。修复后该层 issue 数 <b>1 → 0</b>，
+    新增回归测试在修复前 <b>6 failed</b>、修复后 <b>9 passed</b>。
+  </div>
+
+  <h2>一、判据设计（按约定先给设计，再改）</h2>
+
+  <h3>病根</h3>
+  <p>L11 的判据假设仓库根存在 <code>alembic.ini</code> / <code>Dockerfile</code> / <code>deploy-*.ps1</code>。
+  本仓库实际：迁移在 <code>migrations/</code>（<code>script_location = %(here)s</code>）；部署靠
+  NSSM 服务（<code>erp-prod</code> / <code>erp-arq</code> / …）+ runbook；<b>没有也不应有</b>容器编排文件。
+  于是同一个错误假设产生了两个方向相反的缺陷：</p>
+
+  <table>
+    <thead><tr><th>子检查</th><th>缺陷类型</th><th>机理</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><code>_check_migrations</code></td>
+        <td><span class="tag t-red">假阴性（更危险）</span></td>
+        <td>只找 <code>PROJECT_ROOT/alembic.ini</code> / <code>alembic/</code> / <code>fastapi_app/alembic/</code>，
+        三者皆无 ⇒ 直接 <code>return "Alembic 未配置,跳过迁移检查"</code> ⇒
+        <b>整个迁移检查永不执行</b>，真实 schema 漂移被无声放过</td>
+      </tr>
+      <tr>
+        <td><code>_check_container_config</code></td>
+        <td><span class="tag t-org">假阳性</span></td>
+        <td>只认 <code>Dockerfile</code> / <code>docker-compose.*</code> / <code>deploy-*.ps1</code>
+        （后两者已于 commit <code>15e13a79</code> 删除）⇒ 稳定输出 <code>L11-CONTAINER-001</code></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>新判据（原则：判据描述「本项目应有的状态」，而非「通用模板」）</h3>
+  <ul>
+    <li><b>迁移</b>：路径候选<b>本仓库优先</b>（<code>migrations/alembic.ini</code> → <code>alembic.ini</code>）；
+      versions 目录<b>按 ini 的 <code>script_location</code> 解析</b>（本项目为 <code>%(here)s</code>，即 ini 同目录），
+      再回落 ini 同级 / alembic 目录。找不到配置时<b>发 LOW 提示</b>——让「跳过」可见，而不是假装通过。</li>
+    <li><b>部署就绪</b>：<b>容器化 <u>或</u> Windows 原生 NSSM，二者有其一即视为已具备部署路径</b>。
+      容器路径走原「非 root 用户」校验；原生证据 = runbook 或任一 <code>*.ps1</code>/<code>scripts/*.ps1</code>
+      含 <code>nssm</code> 关键字。只有<b>两者都缺失</b>才报问题。</li>
+    <li><b>幽灵文件名清理</b>：<code>_DEPLOY_SCRIPTS</code> 里的
+      <code>deploy-windows.ps1</code> / <code>deploy_nginx.ps1</code> / <code>build_and_release.py</code>
+      换成真实存在的运维脚本，并在注释里写明「不得再把它们当作判据」。</li>
+  </ul>
+
+  <h2>二、修复前后实测（只读探针直调子检查）</h2>
+  <table>
+    <thead><tr><th>子检查</th><th>修复前 raw / 判定</th><th>修复后 raw / 判定</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><code>_check_migrations</code></td>
+        <td class="bad">raw 仅「Alembic 未配置,跳过迁移检查」<br>issue: 无（<b>静默跳过</b>）</td>
+        <td class="ok">raw: <code>alembic_ini: migrations/alembic.ini | alembic_dir: migrations | versions_dir: migrations/versions | migration_files: 88</code><br>issue: 无（<b>真检查了</b>）</td>
+      </tr>
+      <tr>
+        <td><code>_check_container_config</code></td>
+        <td class="bad">raw: <code>dockerfile=False, compose=False, deploy_script=False</code><br>issue: <b>MEDIUM L11-CONTAINER-001</b></td>
+        <td class="ok">raw: <code>dockerfile=False, container_file=False, native_nssm=True | nssm_evidence: docs/runbooks/service-lifecycle.md, restart_prod.ps1</code><br>issue: 无</td>
+      </tr>
+      <tr>
+        <td><code>_check_rollback_plan</code></td>
+        <td>raw: <code>rollback_doc: docs/TRANSACTION_BOUNDARY_GUIDE.md</code>，无 issue</td>
+        <td class="ok">同上 <b>+ <code>rollback_in_script: scripts/enhanced-rollback.ps1</code></b>，<b>结论不变</b>（门禁未受影响）</td>
+      </tr>
+    </tbody>
+  </table>
+  <p><b>TOTAL_ISSUES：1 → 0</b></p>
+
+  <h2>三、回归测试与对照实验</h2>
+  <p>新增 <code>scripts/prod_audit/tests/test_l11_deployment.py</code>（9 用例）。按「测试必须能捕获
+  <b>修复前失败、修复后通过</b>」的要求，做了单文件 <code>git checkout</code> 到 HEAD 的对照实验：</p>
+  <table>
+    <thead><tr><th>版本</th><th>结果</th></tr></thead>
+    <tbody>
+      <tr><td>修复前（HEAD 版）</td><td class="bad"><b>6 failed, 3 passed</b></td></tr>
+      <tr><td>修复后</td><td class="ok"><b>9 passed</b></td></tr>
+    </tbody>
+  </table>
+  <p class="small">失败的 6 个即判别性用例：迁移布局识别 / 迁移计数 / 不得静默跳过 / NSSM 识别 / 脚本取证 /
+  幽灵文件名。通过的两个（无部署路径仍须报错、Dockerfile 非 root 校验仍在）与层元数据守卫是<b>防过度修正</b>的
+  守卫用例——修复前后都应通过，正是设计意图。</p>
+
+  <h3>最终合并验证（2026-09-24 08:46:41）</h3>
+  <table>
+    <thead><tr><th>门禁</th><th>结果</th></tr></thead>
+    <tbody>
+      <tr><td><code>ruff check fastapi_app tests fastapi_app/tests utils</code></td><td><span class="tag t-grn">EXIT=0</span> All checks passed!</td></tr>
+      <tr><td><code>python -m mypy --config-file mypy.ini</code></td><td><span class="tag t-grn">EXIT=0</span> no issues found in 107 source files</td></tr>
+      <tr><td><code>python scripts/quality_gate.py</code></td><td><span class="tag t-grn">EXIT=0 [PASS]</span> 裸 except 5 处（基线 9）→ TIGHTEN</td></tr>
+      <tr><td><code>pytest scripts/prod_audit/tests</code></td><td><span class="tag t-grn">192 passed</span>（含新增 9 个）</td></tr>
+    </tbody>
+  </table>
+
+  <h2>四、复核中发现的三个问题</h2>
+
+  <div class="card info">
+    <b><span class="tag t-blu">已恢复</span> <code>quality_gate.py</code> 曾因我 P0-② 的 RUF100 步骤 FAIL —— 现已 PASS</b>
+    <p>我的 P0-② 用 RUF100 把 6 处 <code># noqa: BLE001 - &lt;理由&gt;</code> 降级为 <code># &lt;理由&gt;</code>，
+    而 <code>scripts/check_bare_except.py</code> 恰恰<b>要求</b> <code>noqa: XXX - &lt;理由&gt;</code> 或
+    <code># defensive: &lt;理由&gt;</code> 作为审计豁免凭证 ⇒ 凭证失效 ⇒ 该门禁 <b>9 → 11 处 → FAIL</b>。</p>
+    <p><b>现已恢复</b>：那 6 处（<code>core/database.py:111,116</code>、<code>order/beile.py:232</code>、
+    <code>outsource/_shipments.py:228,401</code>、<code>purchase_order_sku.py:86</code>）已改为门禁认可的
+    <code># defensive: &lt;理由&gt;</code> 形式。实测 <code>quality_gate.py</code> <b>EXIT=0 [PASS]</b>。
+    <span class="small">（该修复非本轮所为；本轮仅复核并确认。）</span></p>
+    <p class="small"><b>教训</b>：<code>RUF100</code> 的「unused」判定只看 ruff 自己的规则集，
+    <b>看不见其它工具（如本项目自研 AST 门禁）对同一注释的依赖</b>。凡把 noqa 当跨工具凭证的地方，
+    一律改用工具中立的 <code># defensive:</code> 形式。</p>
+  </div>
+
+  <div class="card warn">
+    <b><span class="tag t-org">未动 · 待你决定</span> prod_audit 测试套件<b>不在 CI 中运行</b></b>
+    <p>CI 的 test job 只跑 <code>pytest tests fastapi_app/tests --ignore=…</code>，
+    <b>不含 <code>scripts/prod_audit/tests</code></b>。⇒ 我这轮新增的 9 个 L11 回归测试
+    <b>在 CI 里不会被跑到</b>（只在本机/手工执行时生效），保护力有限。</p>
+    <p>是否把 <code>scripts/prod_audit/tests</code> 纳入 CI，属 CI 范围决策，未擅自改。</p>
+  </div>
+
+  <div class="card warn">
+    <b><span class="tag t-org">未动 · 待你决定</span> <code>rules_registry.yaml</code> 与实现不一致</b>
+    <p>登记表把 <code>L11-CONTAINER-001</code> 记为 <code>severity: high</code>，代码实际发 <b>MEDIUM</b>；
+    且登记语义是「容器配置<b>不合规</b>（非 root / 多阶段 / 健康检查）」，而代码用它表示
+    「<b>没有</b>部署路径」——属<b>规则误用</b>。</p>
+    <p><b>未擅自对齐的原因</b>：改成 <code>high</code> 会让该层<b>阻断</b>
+    （该层 <code>check_gate(threshold=HIGH)</code>），属门禁语义变更。
+    修复后本仓库已不再触发该规则，故对当前输出无影响。</p>
+  </div>
+
+  <h2>五、边界声明</h2>
+  <ul>
+    <li><b>未提交、未推送</b>；未触碰生产库、未启停服务、未触发任何 workflow。</li>
+    <li>未改 <code>rules_registry.yaml</code>、未改 CI 触发/测试范围、未动 <code>records.py</code> 的 5 处存量标记。</li>
+    <li>层元数据（<code>L11</code> / 「部署就绪与配置审核」/ 权重 <code>0.04</code>）<b>刻意未动</b>——
+      被 <code>test_layer_loading.py</code> 作为契约断言。</li>
+    <li><code>check_bare_except.py</code> 裸跑仍报 5 处（<code>records.py</code>），但这是 <b>HEAD 就有的存量</b>
+      （≤ 基线 9）⇒ 门禁 PASS；gate 提示可收紧基线，按项目规则<b>不直接 <code>--update-baseline</code></b>。</li>
+  </ul>
+
+  <div class="foot">
+    全程未触碰生产数据库、未启停服务、未提交未推送。<br>
+    证据文件：<code>_qa_tmp/l11_before.txt</code> · <code>l11_after.txt</code> · <code>l11_ab.txt</code>（对照实验）·
+    <code>l11_test_run.txt</code> · <code>qg_check.txt</code> · <code>qg_recheck.txt</code> · <code>final_all.txt</code><br>
+    生成时间：2026-09-24 08:47 (+08:00)
+  </div>
+
+</div>
+</body>
+</html>

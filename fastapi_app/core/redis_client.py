@@ -34,10 +34,11 @@ async def get_async_redis_client():
         return _async_redis_client
 
     try:
+        from urllib.parse import quote_plus
+
         import redis.asyncio as aioredis
 
         from fastapi_app.core.config import settings
-        from urllib.parse import quote_plus
 
         url = settings.REDIS_URL
         if settings.REDIS_PASSWORD and settings.REDIS_PASSWORD not in url:

@@ -101,7 +101,7 @@ async def test_plan_no_source_ids(db):
         id=3, order_no='PC-3', status=PurchaseOrderStatus.COMPLETED,
         product_name='Y', product_quantity=5, source_order_ids=None, spare_rate=None,
     )
-    rows, total, kind, missing = await _bf._plan_for_po(db, po)
+    rows, _total, kind, missing = await _bf._plan_for_po(db, po)
 
     assert kind == _bf._NO_SOURCE_IDS
     assert rows == []

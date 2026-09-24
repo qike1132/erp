@@ -1,11 +1,16 @@
 """L11 部署就绪与配置审核层执行器。
 
 配置管理 / 依赖锁文件 / 数据库迁移 / 健康检查端点 /
-回滚预案 / 容器化配置。
+回滚预案 / 部署就绪(容器化 **或** Windows 原生 NSSM)。
 
 约束:
     - 复用存量 ``.env.example`` / ``.env.production`` / ``core/config.py``
-    - 复用 ``deploy-windows.ps1`` / ``requirements.txt`` / ``package-lock.json``
+    - 复用 ``requirements.txt`` / ``package-lock.json``
+    - 判据须匹配**本仓库实际形态**(内网 Windows 原生 + NSSM 托管)：
+      * 迁移在 ``migrations/``(``alembic.ini`` 不在仓库根，且 ``script_location = %(here)s``)
+      * 部署证据 = NSSM 托管关键字(运维脚本 / runbook)；本仓库**没有也不应有** Dockerfile
+      * 历史遗留的 ``deploy-windows.ps1`` / ``deploy_nginx.ps1`` 已删除(commit 15e13a79)，
+        **不得**再把它们当作判据 —— 否则稳定产生假阳性(容器检查)与假阴性(迁移检查)
     - 无硬编码密钥(从环境变量或密钥管理服务读取)
 
 任务来源: ``.codeartsdoer/specs/prod_code_review/tasks.md`` 第 12 节。
@@ -70,15 +75,110 @@ _ROLLBACK_KEYWORDS: tuple[str, ...] = (
     "上一版本",
 )
 
-# 容器/部署脚本候选
+# 部署脚本候选(供回滚预案检查扫描其中是否含回滚逻辑)。
+# 注意: ``deploy-windows.ps1`` / ``deploy_nginx.ps1`` 已删除(commit 15e13a79)、
+# ``build_and_release.py`` 从未存在 —— 保留幽灵文件名只会让检查静默失效。
 _DEPLOY_SCRIPTS: tuple[str, ...] = (
-    "deploy-windows.ps1",
-    "deploy_nginx.ps1",
-    "build_and_release.py",
+    "restart_prod.ps1",
+    "scripts/enhanced-rollback.ps1",
+)
+
+# 容器化编排文件(仅当项目确实采用容器部署时才作为判据)
+_CONTAINER_FILES: tuple[str, ...] = (
     "Dockerfile",
     "docker-compose.yml",
     "docker-compose.yaml",
 )
+
+# Windows 原生部署证据:NSSM 托管关键字(匹配时大小写不敏感)
+_NSSM_KEYWORDS: tuple[str, ...] = ("nssm",)
+
+# 承载 NSSM 部署说明的文档(本项目权威部署路径)
+_DEPLOY_RUNBOOK: str = "docs/runbooks/service-lifecycle.md"
+
+# 原生部署证据的脚本扫描范围(相对仓库根,浅层 glob)
+_DEPLOY_SCRIPT_GLOBS: tuple[str, ...] = ("*.ps1", "scripts/*.ps1")
+
+# Alembic 路径候选(本仓库实际布局优先,通用布局兜底)
+_ALEMBIC_INI_CANDIDATES: tuple[str, ...] = (
+    "migrations/alembic.ini",  # ← 本仓库实际
+    "alembic.ini",  # 通用兜底
+)
+_ALEMBIC_DIR_CANDIDATES: tuple[str, ...] = (
+    "migrations",  # ← 本仓库实际
+    "alembic",  # 通用兜底
+    "fastapi_app/alembic",  # 历史变体
+)
+
+# alembic.ini 中 script_location 的解析(本项目为 ``%(here)s``,即 ini 所在目录)
+_SCRIPT_LOCATION_RE = re.compile(r"(?m)^\s*script_location\s*=\s*(.+?)\s*$")
+
+
+def _rel(path: Path | None) -> str:
+    """相对仓库根的 posix 路径(不在仓库内时回落为绝对路径)。"""
+    if path is None:
+        return "none"
+    try:
+        return path.relative_to(PROJECT_ROOT).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
+def _resolve_script_location(alembic_ini: Path | None) -> Path | None:
+    """把 alembic.ini 的 ``script_location`` 解析为绝对目录(无法解析返回 ``None``)。
+
+    支持 ``%(here)s``(Alembic 注入的默认值 = ini 所在目录;本项目 ``migrations/alembic.ini``
+    正是用 ``%(here)s``)以及相对/绝对路径。注释行以 ``#`` 开头,不会命中正则。
+    """
+    if alembic_ini is None or not alembic_ini.is_file():
+        return None
+    try:
+        text = alembic_ini.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    match = _SCRIPT_LOCATION_RE.search(text)
+    if match is None:
+        return None
+    raw = match.group(1).strip()
+    if not raw:
+        return None
+    candidate = Path(raw.replace("%(here)s", str(alembic_ini.parent)))
+    if not candidate.is_absolute():
+        candidate = alembic_ini.parent / candidate
+    return candidate.resolve()
+
+
+def _find_native_deploy_evidence() -> list[str]:
+    """返回「Windows 原生 NSSM 部署」的证据来源(相对路径),空列表表示未检出。
+
+    证据 = runbook 或任一运维脚本中出现 NSSM 托管关键字(大小写不敏感)。
+    本仓库无 Dockerfile,这是其**真实**部署路径的判据。
+    """
+    sources: list[str] = []
+
+    runbook = PROJECT_ROOT / _DEPLOY_RUNBOOK
+    if runbook.is_file() and _contains_nssm(runbook):
+        sources.append(_DEPLOY_RUNBOOK)
+
+    seen: set[Path] = set()
+    for pattern in _DEPLOY_SCRIPT_GLOBS:
+        for script in sorted(PROJECT_ROOT.glob(pattern)):
+            if script in seen or not script.is_file():
+                continue
+            seen.add(script)
+            if _contains_nssm(script):
+                sources.append(_rel(script))
+
+    return sources
+
+
+def _contains_nssm(path: Path) -> bool:
+    """文件内容是否出现 NSSM 关键字(读取失败视为否)。"""
+    try:
+        content = path.read_text(encoding="utf-8", errors="replace").lower()
+    except OSError:
+        return False
+    return any(kw in content for kw in _NSSM_KEYWORDS)
 
 
 class L11Deployment(LayerBase):
@@ -90,7 +190,7 @@ class L11Deployment(LayerBase):
         - 数据库迁移(Alembic 无 pending)
         - 健康检查端点(/health /ready)
         - 回滚预案(文档化)
-        - 容器化配置(Dockerfile / 部署脚本)
+        - 部署就绪(容器化配置 **或** Windows 原生 NSSM 部署证据,二者有其一即可)
     """
 
     layer_id: str = "L11"
@@ -393,36 +493,74 @@ class L11Deployment(LayerBase):
     async def _check_migrations(
         self, builder: IssueBuilder
     ) -> tuple[list[AuditIssue], str]:
-        """审查 Alembic 迁移是否就绪(无 pending migrations)。"""
+        """审查 Alembic 迁移是否就绪(无 pending migrations)。
+
+        路径候选**本仓库实际布局优先**: ``migrations/alembic.ini``(本项目;
+        其 ``script_location = %(here)s`` ⇒ env.py 与 versions/ 与 ini 同目录),
+        再回落通用布局(仓库根 ``alembic.ini`` / ``alembic/`` / ``fastapi_app/alembic/``)。
+
+        2026-09-24 修正: 原实现只找后三种通用布局,本仓库三者皆无 ⇒
+        **整个迁移检查被静默跳过**(假阴性: 真实 schema 漂移会被无声放过)。
+        现在找不到配置时发 LOW 提示,让「跳过」可见,而不是假装通过。
+        """
         issues: list[AuditIssue] = []
         raw_parts: list[str] = []
 
-        # Alembic 配置与版本目录候选
-        alembic_ini = PROJECT_ROOT / "alembic.ini"
-        alembic_dir = PROJECT_ROOT / "alembic"
-        # 也检查 fastapi_app 下的 alembic
-        alembic_dir_alt = FASTAPI_APP_DIR / "alembic"
+        alembic_ini = next(
+            (p for p in (PROJECT_ROOT / c for c in _ALEMBIC_INI_CANDIDATES) if p.is_file()),
+            None,
+        )
+        alembic_dir = next(
+            (p for p in (PROJECT_ROOT / c for c in _ALEMBIC_DIR_CANDIDATES) if p.is_dir()),
+            None,
+        )
 
-        if not alembic_ini.exists() and not alembic_dir.exists() and not alembic_dir_alt.exists():
-            raw_parts.append("Alembic 未配置,跳过迁移检查")
+        if alembic_ini is None and alembic_dir is None:
+            issues.append(
+                builder.build(
+                    layer_id=self.layer_id,
+                    severity=Severity.LOW,
+                    file=str(PROJECT_ROOT),
+                    line=1,
+                    description="未检出 Alembic 配置,数据库迁移检查已跳过",
+                    suggestion=(
+                        "确认迁移目录(本项目为 migrations/);"
+                        "若确不使用 Alembic,请在本层显式豁免该子检查"
+                    ),
+                    rule_id="L11-CONFIG-MISSING-001",
+                    owner=DEFAULT_OWNER,
+                    due_date=DEFAULT_DUE_DATE,
+                )
+            )
+            raw_parts.append("alembic_config: not_found (迁移检查已跳过)")
             return issues, "\n".join(raw_parts)
 
-        # 检查 versions 目录存在且有迁移文件
-        versions_dir = None
-        for candidate in (alembic_dir / "versions", alembic_dir_alt / "versions"):
-            if candidate.exists():
-                versions_dir = candidate
-                break
+        raw_parts.append(f"alembic_ini: {_rel(alembic_ini)}")
+        raw_parts.append(f"alembic_dir: {_rel(alembic_dir)}")
+
+        # versions 目录: 先按 ini 的 script_location 解析,再回落 ini 同级 / alembic 目录
+        search_roots: list[Path] = []
+        script_root = _resolve_script_location(alembic_ini)
+        if script_root is not None:
+            search_roots.append(script_root)
+        if alembic_ini is not None:
+            search_roots.append(alembic_ini.parent)
+        if alembic_dir is not None:
+            search_roots.append(alembic_dir)
+
+        versions_dir = next(
+            (r / "versions" for r in search_roots if (r / "versions").is_dir()), None
+        )
 
         if versions_dir is None:
             issues.append(
                 builder.build(
                     layer_id=self.layer_id,
                     severity=Severity.MEDIUM,
-                    file="alembic/versions/",
+                    file="migrations/versions/",
                     line=1,
                     description="Alembic versions 目录不存在",
-                    suggestion="创建 alembic/versions/ 并添加迁移脚本",
+                    suggestion="创建 migrations/versions/ 并添加迁移脚本",
                     rule_id="L11-CONFIG-MISSING-001",
                     owner=DEFAULT_OWNER,
                     due_date=DEFAULT_DUE_DATE,
@@ -431,6 +569,7 @@ class L11Deployment(LayerBase):
             return issues, "\n".join(raw_parts)
 
         migration_files = list(versions_dir.glob("*.py"))
+        raw_parts.append(f"versions_dir: {_rel(versions_dir)}")
         raw_parts.append(f"migration_files: {len(migration_files)}")
 
         if not migration_files:
@@ -438,7 +577,7 @@ class L11Deployment(LayerBase):
                 builder.build(
                     layer_id=self.layer_id,
                     severity=Severity.MEDIUM,
-                    file=str(versions_dir.relative_to(PROJECT_ROOT).as_posix()),
+                    file=_rel(versions_dir),
                     line=1,
                     description="无数据库迁移文件",
                     suggestion="使用 alembic revision --autogenerate 生成迁移",
@@ -606,38 +745,44 @@ class L11Deployment(LayerBase):
     async def _check_container_config(
         self, builder: IssueBuilder
     ) -> tuple[list[AuditIssue], str]:
-        """审查 Dockerfile 或部署脚本存在且合规(非 root / 最小化)。"""
+        """审查**部署就绪**: 容器化配置 **或** Windows 原生 NSSM 部署证据。
+
+        判据(二者有其一即视为已具备部署路径):
+            - 容器路径: ``Dockerfile`` / ``docker-compose.*`` 存在 → 追加校验非 root 用户
+            - 原生路径: NSSM 托管证据存在(runbook 或任一运维脚本含 ``nssm`` 关键字)
+
+        2026-09-24 修正: 原实现只认 ``Dockerfile`` / ``docker-compose.*`` /
+        ``deploy-*.ps1``,而本仓库是**内网 Windows 原生 + NSSM**,既无容器文件、
+        也无那两个已删除的部署脚本 ⇒ 稳定产生假阳性(详见模块 docstring)。
+        """
         issues: list[AuditIssue] = []
         raw_parts: list[str] = []
 
         dockerfile = PROJECT_ROOT / "Dockerfile"
-        docker_compose_candidates = [
-            PROJECT_ROOT / "docker-compose.yml",
-            PROJECT_ROOT / "docker-compose.yaml",
-        ]
-        deploy_scripts = [
-            PROJECT_ROOT / "deploy-windows.ps1",
-            PROJECT_ROOT / "deploy_nginx.ps1",
-            PROJECT_ROOT / "build_and_release.py",
-        ]
-
-        has_dockerfile = dockerfile.exists()
-        has_compose = any(f.exists() for f in docker_compose_candidates)
-        has_deploy_script = any(f.exists() for f in deploy_scripts)
+        has_dockerfile = dockerfile.is_file()
+        has_container_file = any((PROJECT_ROOT / name).is_file() for name in _CONTAINER_FILES)
+        nssm_evidence = _find_native_deploy_evidence()
+        has_native_deploy = bool(nssm_evidence)
 
         raw_parts.append(
-            f"dockerfile={has_dockerfile}, compose={has_compose}, deploy_script={has_deploy_script}"
+            f"dockerfile={has_dockerfile}, container_file={has_container_file}, "
+            f"native_nssm={has_native_deploy}"
         )
+        if nssm_evidence:
+            raw_parts.append(f"nssm_evidence: {', '.join(nssm_evidence)}")
 
-        if not has_dockerfile and not has_compose and not has_deploy_script:
+        if not has_container_file and not has_native_deploy:
             issues.append(
                 builder.build(
                     layer_id=self.layer_id,
                     severity=Severity.MEDIUM,
                     file=str(PROJECT_ROOT),
                     line=1,
-                    description="无 Dockerfile / docker-compose / 部署脚本",
-                    suggestion="创建 Dockerfile 或部署脚本(deploy-windows.ps1 等)",
+                    description="未检出部署路径(既无容器化配置,也无 Windows 原生 NSSM 部署证据)",
+                    suggestion=(
+                        "补充其一: Dockerfile / docker-compose.*,"
+                        f"或 NSSM 部署说明({_DEPLOY_RUNBOOK})与含 nssm 的运维脚本"
+                    ),
                     rule_id="L11-CONTAINER-001",
                     owner=DEFAULT_OWNER,
                     due_date=DEFAULT_DUE_DATE,

@@ -13,7 +13,6 @@ from fastapi_app.core.deps import get_current_user_id
 from fastapi_app.services.dashboard_service import (
     Activity,
     CustomerOutDetailResponse,
-    MobileDashboardResponse,
     NavSection,
     TodoItem,
 )

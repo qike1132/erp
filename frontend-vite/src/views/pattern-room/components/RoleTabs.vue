@@ -1,26 +1,19 @@
 <template>
-  <div v-if="roles.length > 0" class="role-tabs">
+  <div v-if="roles.length > 0 || canManage" class="role-tabs">
     <button
       v-for="role in roles"
       :key="role.id"
       type="button"
       :class="['role-tab', { 'role-tab--active': role.id === currentRoleId }]"
-      :title="canRemove(role) ? '右键打开菜单' : undefined"
-      :aria-haspopup="canRemove(role) ? 'menu' : undefined"
-      :aria-expanded="canRemove(role) ? menu?.role.id === role.id : undefined"
+      :title="canManage ? '右键打开菜单' : undefined"
+      :aria-haspopup="canManage ? 'menu' : undefined"
+      :aria-expanded="canManage ? menu?.role.id === role.id : undefined"
       @click="$emit('select', role.id)"
       @contextmenu="onContextMenu($event, role)"
       @keydown="onTabKeydown($event, role)"
     >
       <span class="role-tab-name">
         {{ role.role_name }}
-        <FontAwesomeIcon
-          v-if="role.is_default"
-          icon="fas fa-thumbtack"
-          class="role-tab-pin"
-          aria-label="默认角色"
-          title="默认角色"
-        />
       </span>
     </button>
     <button v-if="canManage" type="button" class="role-tab-add" title="新增角色" @click="onAddClick">
@@ -41,8 +34,8 @@
       />
     </div>
 
-    <!-- 行尾操作区（录入信息/打印等，推至最右） -->
-    <div v-if="$slots.actions" class="role-tabs-actions">
+    <!-- 行尾操作区（录入信息/打印等，推至最右）；无角色时部位录入等操作无从归属，不展示 -->
+    <div v-if="roles.length > 0 && $slots.actions" class="role-tabs-actions">
       <slot name="actions" />
     </div>
 
@@ -114,11 +107,6 @@ const menu = ref<{ role: RoleBrief; x: number; y: number } | null>(null)
 const triggerEl = ref<HTMLElement | null>(null)
 const menuItemEl = ref<HTMLButtonElement | null>(null)
 
-/** 默认角色不可删除，无权限时也不开放 */
-function canRemove(role: RoleBrief) {
-  return props.canManage && !role.is_default
-}
-
 /** 关闭菜单；restoreFocus 仅用于键盘路径（Esc/激活菜单项），不抢鼠标用户刚点的位置 */
 function closeMenu(restoreFocus = false) {
   if (!menu.value) return
@@ -143,15 +131,15 @@ async function openMenu(role: RoleBrief, x: number, y: number, trigger: HTMLElem
 }
 
 function onContextMenu(e: MouseEvent, role: RoleBrief) {
-  // 默认角色/无权限：不接管，走浏览器原生菜单
-  if (!canRemove(role)) return
+  // 无权限：不接管，走浏览器原生菜单
+  if (!props.canManage) return
   e.preventDefault()
   openMenu(role, e.clientX, e.clientY, e.currentTarget as HTMLElement)
 }
 
 /** 键盘入口：Enter/Space 由原生按钮触发 click，这里只处理菜单键与 Shift+F10 */
 function onTabKeydown(e: KeyboardEvent, role: RoleBrief) {
-  if (!canRemove(role)) return
+  if (!props.canManage) return
   if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
     e.preventDefault()
     const trigger = e.currentTarget as HTMLElement
@@ -247,11 +235,6 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-}
-
-.role-tab-pin {
-  font-size: 9px;
-  opacity: 0.7;
 }
 
 /* 键盘聚焦时的焦点环（标签可 Tab 聚焦，便于键盘打开右键菜单） */

@@ -73,11 +73,10 @@ def _record_cache_op(operation: str) -> None:
     说明：埋点是观测需求，不应影响主流程；因此吞掉所有异常。
     未安装 prometheus_client 时（如轻量测试环境）静默跳过。
     """
-    try:
+    # 埋点失败绝不影响缓存主流程（未安装 prometheus_client 时静默跳过）
+    with contextlib.suppress(Exception):
         from fastapi_app.core.metrics import CACHE_OPERATIONS
         CACHE_OPERATIONS.labels(operation=operation).inc()
-    except Exception:  # noqa: BLE001 - 埋点失败绝不影响缓存主流程
-        pass
 
 
 class CacheDomain(Flag):

@@ -202,7 +202,7 @@ class OutsourceShipment(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), comment='更新时间'
     )
 
-    items: Mapped[list['OutsourceShipmentItem']] = relationship(
+    items: Mapped[list[OutsourceShipmentItem]] = relationship(
         'OutsourceShipmentItem',
         cascade='all, delete-orphan',
         back_populates='shipment',

@@ -30,7 +30,22 @@ scripts/prod_audit/tests/test_self_audit.py
 fastapi_app/api/v1/endpoints/backup/restore.py
 tests/e2e_api/test_auth_flow.py
 
+# 2026-09-24 复核：守卫第 2 层的自测夹具。该脚本把本 hook 的密钥特征写成
+# 正则字面量并配合成样例（令牌前缀拼接字符串），用于验证扫描器确实能命中——
+# 属"定义而非凭据"的自指场景，与上方 .githooks/pre-commit 同类。
+# 核实方式：逐条比对文件内正则与 hook 第 2 层规则一致，且不含真实凭据值。
+# 注：本条注释刻意不复述任何字面，避免本文件自身命中第 2 层规则。
+scripts/_selftest_hook.py
+
 # 2026-09-20 外发迭代提交复核：审计报告行文**自引用**密钥头样式字符串
 # （转述 scripts/prod_audit 测试夹具的查处结论，非真钥），属文档自指豁免
 # （同 .githooks/pre-commit 自指豁免先例）。
 deliverables/engineering-assurance/_member-cody.md
+
+# 2026-09-24 复核：用户管理表单的字段透传（Vue reactive 字段 → 提交载荷），
+# 命中片段右侧均为**变量引用**，不含任何字面凭据。
+# 第 2 层「右侧是表达式而非字面量」的收窄（④）目前只对 .py 生效，
+# .vue 会落进误报，故按文件豁免（待 ④ 扩展到 .vue/.ts 后可移除本组）。
+# 注：刻意不复述命中片段，避免本文件自身命中第 2 层规则。
+frontend-vite/src/views/user/components/UserCreateForm.vue
+frontend-vite/src/views/user/components/UserEditDialog.vue

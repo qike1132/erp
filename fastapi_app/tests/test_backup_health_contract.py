@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """备份健康检查的跨层契约测试（不 mock 生产者）。
 
 历史根因（两次线上假告警）：
@@ -67,7 +66,7 @@ class TestLastBackupContract:
         assert result['hours_since_last_backup'] < 100
 
     def test_empty_dir_reports_no_backup(self, real_backup_dir):
-        result, issues = validation_mod._check_last_backup()
+        result, _issues = validation_mod._check_last_backup()
         assert result['status'] == 'warning'
         assert result['latest_backup_time'] is None
 

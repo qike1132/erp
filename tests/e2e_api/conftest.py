@@ -65,9 +65,9 @@ _ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-import httpx  # noqa: E402
+import httpx
 
-from fastapi_app.core.config import settings  # noqa: E402
+from fastapi_app.core.config import settings
 
 BASE_URL = os.environ.get("E2E_API_BASE_URL", "http://127.0.0.1:5002").rstrip("/")
 
@@ -209,7 +209,7 @@ def _mint_token(username: str = "admin") -> _MintOutcome:
         if row is None:
             return _MintOutcome(None, True)
         return _MintOutcome(create_access_token({"sub": str(row[0])}), True)
-    except Exception:  # noqa: BLE001 - 连不上库属环境缺失，交由调用方 skip
+    except Exception:  # 连不上库属环境缺失，交由调用方 skip
         return _MintOutcome(None, False)
 
 

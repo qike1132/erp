@@ -12,7 +12,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 # ===========================================================================
 # 1. _audit_export_download 单元测试
 # ===========================================================================
@@ -232,8 +231,9 @@ class TestJsonColumnRoundTrip:
         assert "'" not in out  # 不允许单引号 Python 字面量
 
     def test_deserialize_json_string_returns_struct(self):
-        from fastapi_app.services.backup.json_backup import deserialize_value
         from sqlalchemy.dialects.postgresql import JSONB
+
+        from fastapi_app.services.backup.json_backup import deserialize_value
 
         # REV-JSON 契约：合法 JSON 字符串原样透传——asyncpg jsonb codec
         # 需要的是合法 JSON 字符串（而非 Python dict）
@@ -243,16 +243,18 @@ class TestJsonColumnRoundTrip:
         assert json.loads(out)['new'] == 'cancelled'
 
     def test_deserialize_json_non_string_passthrough(self):
-        from fastapi_app.services.backup.json_backup import deserialize_value
         from sqlalchemy.dialects.postgresql import JSONB
+
+        from fastapi_app.services.backup.json_backup import deserialize_value
 
         # dict/list 归一为合法 JSON 字符串（旧 dump 直接存 python 对象的兼容路径）
         out = deserialize_value({'a': 1}, JSONB())
         assert out == '{"a": 1}'
 
     def test_deserialize_invalid_json_string_returns_str(self):
-        from fastapi_app.services.backup.json_backup import deserialize_value
         from sqlalchemy.dialects.postgresql import JSONB
+
+        from fastapi_app.services.backup.json_backup import deserialize_value
 
         # 旧备份的 Python 单引号字面量 → ast.literal_eval 还原后 json.dumps
         legacy = "{'new': 'cancelled', 'old': 'in_progress'}"

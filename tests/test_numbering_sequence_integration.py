@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from fastapi_app.services.numbering import generate_number_async
 from fastapi_app.services.numbering_sequence import allocate_sequence
-from fastapi_app.shared_models import Base, NumberingCounter, Order
+from fastapi_app.shared_models import Base, Order
 
 pytestmark = pytest.mark.integration
 

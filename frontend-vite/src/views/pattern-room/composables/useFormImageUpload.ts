@@ -1,13 +1,17 @@
 import { ref, onBeforeUnmount } from 'vue'
+import { showToast } from '@/composables/useToast'
 
 const UPLOAD_MAX_EDGE = 1600
 const UPLOAD_QUALITY = 0.82
+const UPLOAD_MAX_SIZE = 10 * 1024 * 1024
 
 export function useFormImageUpload(
   onUpload: (file: File) => void,
   onRemove: () => void,
 ) {
   const previewUrl = ref<string | null>(null)
+  /** 图片处理中（压缩 + 暂存），供上传区展示进行中状态 */
+  const processing = ref(false)
 
   function revokePreview() {
     if (previewUrl.value?.startsWith('blob:')) {
@@ -58,12 +62,23 @@ export function useFormImageUpload(
 
   async function applyImageFile(file: File) {
     const allowed = ['image/jpeg', 'image/png', 'image/webp']
-    if (!allowed.includes(file.type)) return
-    if (file.size > 10 * 1024 * 1024) return
-    const finalFile = await compressImageFile(file)
-    revokePreview()
-    previewUrl.value = URL.createObjectURL(finalFile)
-    onUpload(finalFile)
+    if (!allowed.includes(file.type)) {
+      showToast('仅支持 JPEG/PNG/WebP 格式', 'error')
+      return
+    }
+    if (file.size > UPLOAD_MAX_SIZE) {
+      showToast(`文件大小不能超过 ${UPLOAD_MAX_SIZE / 1024 / 1024}MB`, 'error')
+      return
+    }
+    processing.value = true
+    try {
+      const finalFile = await compressImageFile(file)
+      revokePreview()
+      previewUrl.value = URL.createObjectURL(finalFile)
+      onUpload(finalFile)
+    } finally {
+      processing.value = false
+    }
   }
 
   function removeImage() {
@@ -74,5 +89,5 @@ export function useFormImageUpload(
 
   onBeforeUnmount(revokePreview)
 
-  return { previewUrl, setPreview, applyImageFile, removeImage, revokePreview }
+  return { previewUrl, processing, setPreview, applyImageFile, removeImage, revokePreview }
 }

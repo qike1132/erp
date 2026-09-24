@@ -31,7 +31,7 @@ from .common import (
     _ensure_project_exists,
     _ensure_role_belongs_to_project,
     _escape_like,
-    _get_default_role_id,
+    _get_primary_role_id,
     _get_user_name,
     _resolve_pattern_maker_name,
     _resolve_supplier_name,
@@ -40,9 +40,6 @@ from .common import (
 from .grouping import _project_to_summary
 from .upload import _batch_get_image_urls, _get_product_image_urls, _register_project_image_cleanup
 from .version_diff import _version_num
-
-
-
 
 
 async def create_project(
@@ -57,9 +54,9 @@ async def create_project(
     """新增打样项目
 
     - 自动生成序列号 CS-YYYYMMDD-XXXX
-    - 自动创建"默认角色"（is_default=true）
-    - 若传入 initial_roles，额外创建用户指定的角色（去重、去空白）
-    - 自动创建 T1 基线版本挂在默认角色下（snapshot_data=[], change_summary=null）
+    - 角色：传入 initial_roles 时按用户指定创建（去重、去空白），
+      未传入时才创建一个名为「默认」的兜底角色
+    - 自动创建 T1 基线版本挂在首个角色下（snapshot_data=[], change_summary=null）
     - 校验 pattern_maker_id 存在性，冗余存储 pattern_maker_name
     """
     # 校验版师存在性
@@ -84,42 +81,14 @@ async def create_project(
     db.add(project)
     await db.flush()
 
-    # 创建默认角色（永远兜底，不可删除）
-    default_role = CustomerSamplingRole(
-        project_id=project.id,
-        role_name='默认',
-        sort_order=0,
-        is_default=True,
-        current_version='T1',
-    )
-    db.add(default_role)
-    await db.flush()
+    # 创建角色：填了自定义角色名就只建这些（不额外插「默认」），否则建一个「默认」角色
+    roles = await _create_project_roles(db, project.id, initial_roles)
+    first_role = roles[0]
 
-    # 创建用户指定的额外角色（去重、去空白、不与"默认角色"重名）
-    extra_role_names: list[str] = []
-    seen = {'默认角色'}
-    if initial_roles:
-        for name in initial_roles:
-            n = (name or '').strip()
-            if n and n not in seen:
-                seen.add(n)
-                extra_role_names.append(n)
-
-    for idx, role_name in enumerate(extra_role_names, start=1):
-        role = CustomerSamplingRole(
-            project_id=project.id,
-            role_name=role_name,
-            sort_order=idx,
-            is_default=False,
-            current_version='T1',
-        )
-        db.add(role)
-        await db.flush()
-
-    # 自动创建 T1 基线版本挂在默认角色下（快照初始为空数组）
+    # 自动创建 T1 基线版本挂在首个角色下（快照初始为空数组）
     t1_version = CustomerSamplingFabricVersion(
         project_id=project.id,
-        role_id=default_role.id,
+        role_id=first_role.id,
         version_no='T1',
         snapshot_data=[],
         change_summary=None,
@@ -138,27 +107,77 @@ async def create_project(
 
     logger.info(
         '创建打样项目: id=%s, sequence_no=%s, roles_count=%d',
-        project.id, sequence_no, 1 + len(extra_role_names),
+        project.id, sequence_no, len(roles),
     )
     return {'id': project.id, 'sequence_no': sequence_no}
 
-async def _sync_default_role_current_version(
+async def _create_project_roles(
+    db: AsyncSession,
+    project_id: int,
+    initial_roles: list[str] | None,
+) -> list[CustomerSamplingRole]:
+    """创建项目角色，返回按创建顺序排列的角色列表
+
+    - initial_roles 去重、去空白后作为自定义角色（逐个 is_default=false），
+      不再额外创建「默认」角色
+    - 未传 initial_roles 时创建名为「默认」的角色
+    - 所有角色一律可删除，不存在不可删的兜底角色
+    抽为独立函数以控制 create_project 长度（质量门禁：单函数 ≤80 行）。
+    """
+    # 去重、去空白后的用户指定角色名
+    custom_role_names: list[str] = []
+    seen: set[str] = set()
+    if initial_roles:
+        for name in initial_roles:
+            n = (name or '').strip()
+            if n and n not in seen:
+                seen.add(n)
+                custom_role_names.append(n)
+
+    roles: list[CustomerSamplingRole] = []
+    if custom_role_names:
+        for idx, role_name in enumerate(custom_role_names):
+            role = CustomerSamplingRole(
+                project_id=project_id,
+                role_name=role_name,
+                sort_order=idx,
+                is_default=False,
+                current_version='T1',
+            )
+            db.add(role)
+            await db.flush()
+            roles.append(role)
+    else:
+        default_role = CustomerSamplingRole(
+            project_id=project_id,
+            role_name='默认',
+            sort_order=0,
+            is_default=True,
+            current_version='T1',
+        )
+        db.add(default_role)
+        await db.flush()
+        roles.append(default_role)
+    return roles
+
+async def _sync_primary_role_current_version(
     db: AsyncSession,
     project_id: int,
     current_version: str,
 ) -> None:
-    """同步默认角色的 current_version（保持向后兼容）
+    """同步基准角色的 current_version（保持向后兼容）
 
-    旧端点仍调 update_project 设置最终版本时，默认角色同步生效。
-    抽为独立函数以控制 update_project 长度（质量门禁：单函数 ≤80 行）。
+    旧端点仍调 update_project 设置最终版本时，基准角色（首个角色）同步生效；
+    项目已无角色时跳过。抽为独立函数以控制 update_project 长度（质量门禁：单函数 ≤80 行）。
     """
-    default_role_id = await _get_default_role_id(db, project_id)
-    dr_result = await db.execute(
-        select(CustomerSamplingRole).where(CustomerSamplingRole.id == default_role_id)
-    )
-    default_role = dr_result.scalar_one_or_none()
-    if default_role is not None and default_role.current_version != current_version:
-        default_role.current_version = current_version
+    primary_role_id = await _get_primary_role_id(db, project_id)
+    if primary_role_id is None:
+        return
+    primary_role = (await db.execute(
+        select(CustomerSamplingRole).where(CustomerSamplingRole.id == primary_role_id)
+    )).scalar_one_or_none()
+    if primary_role is not None and primary_role.current_version != current_version:
+        primary_role.current_version = current_version
 
 
 async def update_project(
@@ -166,9 +185,9 @@ async def update_project(
     project_id: int,
     *,
     product_name: str | None = None,
-    pattern_maker_id: int | None | object = _UNSET,
+    pattern_maker_id: int | object | None = _UNSET,
     remark: str | None = None,
-    product_image_file_id: int | None | object = _UNSET,
+    product_image_file_id: int | object | None = _UNSET,
     current_version: str | None = None,
     version: int,
     user_id: int | None = None,
@@ -232,8 +251,8 @@ async def update_project(
     if current_version is not None and current_version != project.current_version:
         field_diffs.append({'field': 'current_version', 'old': project.current_version, 'new': current_version})
         project.current_version = current_version
-        # 同步更新默认角色的 current_version（保持向后兼容）
-        await _sync_default_role_current_version(db, project_id, current_version)
+        # 同步更新基准角色的 current_version（保持向后兼容）
+        await _sync_primary_role_current_version(db, project_id, current_version)
 
     # 乐观锁 +1
     project.version += 1

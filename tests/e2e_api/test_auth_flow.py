@@ -13,6 +13,8 @@
 
 from __future__ import annotations
 
+import contextlib
+
 import httpx
 import pytest
 
@@ -233,7 +235,8 @@ async def _delete_temp_user(api: httpx.AsyncClient, username: str) -> None:
         return
     headers = {"Authorization": f"Bearer {token}"}
 
-    try:
+    # 清理尽力而为：失败不应让用例变红
+    with contextlib.suppress(Exception):
         # real_database_url()：不能用 settings.DATABASE_URL（已被 autouse fixture
         # 改成空测试库），否则查不到刚创建的用户，临时用户会留在真实库里。
         engine = create_engine(real_database_url())
@@ -244,5 +247,3 @@ async def _delete_temp_user(api: httpx.AsyncClient, username: str) -> None:
         if row is None:
             return
         await api.delete(f"/api/v1/users/delete/{row[0]}", headers=headers)
-    except Exception:  # noqa: BLE001 - 清理尽力而为
-        pass

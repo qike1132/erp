@@ -5,10 +5,9 @@
 依赖 batch_import_parser 中的解析函数（parse_date_value、validate_customer_name）。
 """
 import logging
-from collections.abc import Hashable, Iterable
+from collections.abc import Callable, Hashable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Callable
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
@@ -354,7 +353,9 @@ async def import_orders_from_data(db: AsyncSession, data_list: list, *, deps: Im
 
         product, customer = await _resolve_row_identity(
             context, idx, customer, product_name, debug_messages)
-        if product is None:
+        # _resolve_row_identity 失败时返回 (None, None)，成功时 customer 必为已校验的非空 str；
+        # 显式判 None 只是把该不变式写出来（mypy 无法跨元组元素收窄），运行期行为不变。
+        if product is None or customer is None:
             return False
         product_id = product.id
 
@@ -440,7 +441,8 @@ async def import_stockins_from_data(db: AsyncSession, data_list: list, *, deps: 
 
         product, customer = await _resolve_row_identity(
             context, idx, customer, product_name, debug_messages, silent_missing=True)
-        if product is None:
+        # 同 import_orders_from_data：失败即 (None, None)，成功时 customer 必为非空 str。
+        if product is None or customer is None:
             return False
         product_id = product.id
 

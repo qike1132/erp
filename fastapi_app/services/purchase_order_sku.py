@@ -83,7 +83,7 @@ async def _probe_table(db: AsyncSession) -> bool:
         async with db.begin_nested():
             await db.execute(sa_text('SELECT 1 FROM purchase_order_sku LIMIT 1'))
         return True
-    except Exception:  # noqa: BLE001 - 表缺失/方言差异均视为「不可用」，降级处理
+    except Exception:  # defensive: 表缺失/方言差异均视为「不可用」，降级处理
         return False
 
 

@@ -136,6 +136,14 @@ alembic -c migrations/alembic.ini revision --autogenerate -m "描述"  # 生成�
 
 ## 部署
 
-- **Windows 原生部署**：`.\deploy-windows.ps1 -Env production`（见根目录 `deploy-windows.ps1`，含 PostgreSQL 流复制/PgBouncer/Redis/Celery/Nginx/监控全家桶配置）
-- **Kubernetes**：`k8s/` 目录提供生产清单
-- **环境变量**：见根目录 `.env.example`
+本系统为**内网 Windows 原生部署**，通过 NSSM 托管服务，**不使用容器、不由 CI 部署**。
+
+- **服务托管**：`erp-prod`（uvicorn `:5002` + nginx `:3000`）/ `erp-arq` / `erp-redis` / `erp-redis-broker`
+  （`nssm.exe` 位于 `C:\nssm\`，**不在 PATH**）
+- **操作步骤与提权要求**：见 `docs/runbooks/service-lifecycle.md`
+- **数据库迁移**：`python -m alembic -c migrations/alembic.ini upgrade head`
+- **环境变量**：见根目录 `.env.example`（真实值在 `.env`，不入库）
+
+> 说明：历史上的 `deploy-windows.ps1` / `deploy_nginx.ps1` 已作为过时脚本删除
+> （commit `15e13a79`）；CI 中的部署 job 亦已移除——托管 runner 无法访问内网生产机。
+> 异步任务队列使用 **ARQ**（不是 Celery），由 `erp-arq` 服务承载。

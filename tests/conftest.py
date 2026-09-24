@@ -29,6 +29,7 @@ Fixtures:
     @pytest.mark.integration  — 需要数据库的集成测试
     无标记                       — 默认单元测试（Mocks）
 """
+import contextlib
 import os
 import sys
 from datetime import UTC, datetime
@@ -53,10 +54,11 @@ sys.path.insert(0, _project_root)
 # 不会覆盖已存在的环境变量。
 os.environ["APP_ENV"] = "test"
 
+from sqlalchemy import text
+
 from fastapi_app.core.config import settings
 from fastapi_app.core.security import hash_password
 from fastapi_app.main import app
-from sqlalchemy import text
 
 # ============================================================
 # 测试配置：注入测试专用主机名
@@ -221,10 +223,9 @@ async def app_on_test_db(test_engine):
     db_mod._SyncSessionLocal = None
 
     if stale is not None:
-        try:
+        # 旧 loop 引擎清理失败不影响测试
+        with contextlib.suppress(Exception):
             await stale.dispose(close=False)
-        except Exception:  # noqa: BLE001 - 旧 loop 引擎清理失败不影响测试
-            pass
 
     yield
 
@@ -242,10 +243,9 @@ async def app_on_test_db(test_engine):
     db_mod._sync_engine = None
     db_mod._SyncSessionLocal = None
     if stale is not None:
-        try:
+        # 旧 loop 引擎清理失败不影响测试
+        with contextlib.suppress(Exception):
             await stale.dispose(close=False)
-        except Exception:  # noqa: BLE001
-            pass
 
 
 @pytest_asyncio.fixture

@@ -25,7 +25,7 @@ from .common import (
     _SNAPSHOT_FIELDS,
     _ensure_project_exists,
     _ensure_role_belongs_to_project,
-    _get_default_role_id,
+    _get_primary_role_id,
 )
 
 
@@ -282,11 +282,11 @@ async def get_parts_by_version(
             'versions': ['T1', 'T2', ...],
             'final_version': role.current_version,
     }
-    （读路径：默认角色缺失时返回空数据，不在只读会话上隐式创建）
+    （读路径：项目无角色时返回空数据）
     """
     await _ensure_project_exists(db, project_id)
     if role_id is None:
-        role_id = await _get_default_role_id(db, project_id, create=False)
+        role_id = await _get_primary_role_id(db, project_id)
         if role_id is None:
             return {'success': True, 'items': [], 'versions': [], 'final_version': 'T1'}
     else:

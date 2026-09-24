@@ -7,7 +7,6 @@ M3 还原强化测试(TECHNICAL_PLAN.md v2 §7 M3)
 3. restore_plan:manifest 差异预览(diff 计算/路径穿越/加密探测)
 4. build_schema_snapshot:L4 DDL 比对的快照采集
 """
-import io
 import json
 import zipfile
 from unittest.mock import AsyncMock, MagicMock
@@ -19,7 +18,6 @@ from fastapi_app.core import maintenance
 from fastapi_app.services.backup import restore as restore_mod
 from fastapi_app.services.backup import restore_plan as rp
 from fastapi_app.services.backup.verify import core as verify_core
-
 
 # ===========================================================================
 # 1. 还原锁 fail-closed
@@ -49,6 +47,91 @@ class TestRestoreLockFailClosed:
         client.set.return_value = True
         monkeypatch.setattr(bp, '_get_redis', AsyncMock(return_value=client))
         assert await restore_mod.acquire_restore_lock('t') is True
+
+
+# ===========================================================================
+# 1b. 还原互斥助手的锁探测/自愈链路（2026-09-24 生产事故回归）
+# ===========================================================================
+
+def _as_text(value):
+    """归一化 Redis 返回值：客户端未启用 decode_responses，raw 值为 bytes。"""
+    return value.decode() if isinstance(value, bytes) else value
+
+
+class _FakeRedis:
+    """最小 Redis 假实现（键值存储式）。
+
+    键按传入的字符串文本比较——真实 Redis 会对 str 入参自动编码，而 bytes 入参
+    经 f-string 拼接后变成 "b'xxx'" 文本；这层假实现正是用来暴露该差异。
+    """
+
+    def __init__(self, store):
+        self.store = store
+
+    async def get(self, key):
+        return self.store.get(key)
+
+    async def exists(self, key):
+        return 1 if key in self.store else 0
+
+    async def ttl(self, key):
+        return 600 if key in self.store else -2
+
+    async def eval(self, _script, _numkeys, key, arg):
+        if _as_text(self.store.get(key)) == _as_text(arg):
+            self.store.pop(key, None)
+            return 1
+        return 0
+
+
+class TestRestoreSlotMutex:
+    """ensure_restore_slot_free：锁探测 → 陈旧判定 → 自愈清除。
+
+    2026-09-24 生产事故两点回归：
+    1. 锁工具必须由包根 services.backup 导出，否则抛 AttributeError（HTTP 500）；
+    2. holder 是 bytes 时不解码，进度键会被拼成 "erp:restore_progress:b'xxx'"，
+       陈旧锁永远判定不出来，409 一直卡到 TTL 到期。
+    """
+
+    @staticmethod
+    def _store(holder, progress_status=None):
+        from fastapi_app.services.backup.restore import _RESTORE_LOCK_KEY
+
+        store = {_RESTORE_LOCK_KEY: holder}
+        if progress_status is not None:
+            store[bp.RESTORE_KEY_PREFIX + _as_text(holder)] = json.dumps({'status': progress_status})
+        return store
+
+    @pytest.mark.asyncio
+    async def test_stale_lock_self_heals(self, monkeypatch):
+        from fastapi_app.api.v1.endpoints.backup import _mutex
+        from fastapi_app.services.backup.restore import _RESTORE_LOCK_KEY
+
+        store = self._store(b'restore-task-1', 'failed')
+        monkeypatch.setattr(bp, '_get_redis', AsyncMock(return_value=_FakeRedis(store)))
+        monkeypatch.setattr(bp, 'is_redis_available', AsyncMock(return_value=True))
+
+        assert await _mutex.ensure_restore_slot_free() is None
+        assert _RESTORE_LOCK_KEY not in store  # 陈旧锁已被自愈清除
+
+    @pytest.mark.asyncio
+    async def test_live_lock_returns_409(self, monkeypatch):
+        from fastapi import HTTPException
+
+        from fastapi_app.api.v1.endpoints.backup import _mutex
+        from fastapi_app.services.backup.restore import _RESTORE_LOCK_KEY
+
+        store = self._store(b'restore-task-2', 'restore_db')
+        monkeypatch.setattr(bp, '_get_redis', AsyncMock(return_value=_FakeRedis(store)))
+        monkeypatch.setattr(bp, 'is_redis_available', AsyncMock(return_value=True))
+
+        with pytest.raises(HTTPException) as exc:
+            await _mutex.ensure_restore_slot_free()
+        assert exc.value.status_code == 409
+        assert exc.value.detail['code'] == 'TASK_RUNNING'
+        assert exc.value.detail['holder'] == 'restore-task-2'  # 必须是 str，不能是 b'...'
+        assert exc.value.detail['ttl_seconds'] == 600
+        assert _RESTORE_LOCK_KEY in store  # 真实占用不得清锁
 
 
 # ===========================================================================
@@ -82,7 +165,7 @@ class TestMaintenance:
         from starlette.requests import Request
         client = AsyncMock()
         client.get.return_value = b'1'
-        monkeypatch.setattr(bp, '_get_redis', AsyncMock(return_value=client))  # noqa: F841
+        monkeypatch.setattr(bp, '_get_redis', AsyncMock(return_value=client))
 
         async def call_next(req):
             return MagicMock(status_code=200)

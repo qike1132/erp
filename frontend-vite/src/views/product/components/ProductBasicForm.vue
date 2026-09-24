@@ -71,7 +71,7 @@ import { useQueryClient } from '@tanstack/vue-query'
 import { productApi } from '@/api'
 import { resolveStaticUrl } from '@/api/request'
 import { uploadImage, ALLOWED_IMAGE_HINT } from '../composables/useImageUpload'
-import { useImagePaste } from '../composables/useImagePaste'
+import { useImagePaste } from '@/composables/useImagePaste'
 import { showToast } from '@/composables/useToast'
 import { getErrorMessage } from '@/types/errors'
 

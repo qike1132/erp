@@ -184,6 +184,9 @@ async def sync_orders_for_product(
 
     existing_by_item: dict[int, dict[str, OrderOutsourceProcess]] = {}
     for inst in instances:
+        # order_item_id 在库中非空（上面的 in_() 也永不匹配 NULL）；此判空只是让类型收窄显式化。
+        if inst.order_item_id is None:
+            continue
         existing_by_item.setdefault(inst.order_item_id, {})[inst.process_type] = inst
 
     created = removed = kept = 0
@@ -191,16 +194,16 @@ async def sync_orders_for_product(
         existing = existing_by_item.get(item_id, {})
         # 新增 / 顺序对齐
         for ptype, sort_order in preset_map.items():
-            inst = existing.get(ptype)
-            if inst is None:
+            cur = existing.get(ptype)
+            if cur is None:
                 db.add(OrderOutsourceProcess(
                     order_id=order_id, order_item_id=item_id, product_id=product_id,
                     product_name=product_name, process_type=ptype,
                     sort_order=sort_order, status='pending', created_by=username,
                 ))
                 created += 1
-            elif (inst.sort_order or 0) != sort_order:
-                inst.sort_order = sort_order
+            elif (cur.sort_order or 0) != sort_order:
+                cur.sort_order = sort_order
         # 移除：仅未发货且无收货的；已发货/已收货的保留
         for ptype, inst in existing.items():
             if ptype in preset_map:

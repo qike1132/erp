@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>P0-③ 修复验证：移除 CI 部署 job（deploy-windows.ps1 之谜）</title>
+<style>
+  :root{
+    --bg:#0f1420; --card:#171e2e; --card2:#1d2637; --fg:#e8edf6; --muted:#9fb0c9;
+    --line:#2a3549; --red:#ff6b6b; --orange:#ffa94d; --yellow:#ffd43b; --green:#51cf66;
+    --blue:#4dabf7; --code:#0b0f17;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.7 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
+  .wrap{max-width:1080px;margin:0 auto;padding:32px 24px 72px}
+  h1{font-size:21px;margin:0 0 6px}
+  h2{font-size:17px;margin:34px 0 12px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  h3{font-size:14.5px;margin:20px 0 8px;color:var(--blue)}
+  .sub{color:var(--muted);font-size:13px;margin-bottom:20px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:15px 18px;margin:14px 0}
+  .verdict{border-left:5px solid var(--green);background:linear-gradient(90deg,#12281c,#171e2e)}
+  .verdict b{color:var(--green)}
+  .warn{border-left:4px solid var(--orange)}
+  .bad{border-left:4px solid var(--red)}
+  .info{border-left:4px solid var(--blue)}
+  table{width:100%;border-collapse:collapse;margin:10px 0;font-size:13px}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:var(--card2);color:var(--muted);font-weight:600}
+  tbody tr:nth-child(even){background:rgba(255,255,255,.014)}
+  code,pre{font-family:"Cascadia Code",Consolas,monospace}
+  code{background:var(--code);padding:1px 6px;border-radius:4px;font-size:12.5px;color:#ffd8a8}
+  pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:12px 14px;overflow:auto;font-size:12.5px;color:#cfe3ff;margin:8px 0}
+  .tag{display:inline-block;padding:1px 8px;border-radius:20px;font-size:11.5px;font-weight:600;white-space:nowrap}
+  .t-red{background:rgba(255,107,107,.16);color:var(--red);border:1px solid rgba(255,107,107,.4)}
+  .t-org{background:rgba(255,169,77,.16);color:var(--orange);border:1px solid rgba(255,169,77,.4)}
+  .t-yel{background:rgba(255,212,59,.16);color:var(--yellow);border:1px solid rgba(255,212,59,.4)}
+  .t-grn{background:rgba(81,207,102,.16);color:var(--green);border:1px solid rgba(81,207,102,.4)}
+  .t-blu{background:rgba(77,171,247,.16);color:var(--blue);border:1px solid rgba(77,171,247,.4)}
+  ul{margin:8px 0;padding-left:22px} li{margin:4px 0}
+  .small{font-size:12.5px;color:var(--muted)}
+  .foot{margin-top:42px;padding-top:14px;border-top:1px solid var(--line);color:var(--muted);font-size:12px}
+  .ok{color:var(--green)} .bad{color:var(--red)} .wn{color:var(--orange)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>P0-③ 修复验证报告 · 移除 CI 部署 job</h1>
+  <div class="sub">
+    仓库：D:\erp_system｜分支 main（未提交）｜时间：2026-09-24 08:2x–08:4x (+08:00)<br>
+    原议题：「补 <code>deploy-windows.ps1</code> 或禁用部署 job」｜<b>结论：必须禁用，「补」是错的</b>
+  </div>
+
+  <div class="card verdict">
+    <b>结论：两个 deploy job 已移除，并以注释块记录全部根因。</b>
+    关键发现：<code>deploy-windows.ps1</code> <b>不是从未存在，而是被有意删除的过时脚本</b>；
+    且即便存在，GitHub 托管 runner 也<b>架构上无法</b>访问内网生产机 192.168.0.95。
+    改动 <b>3 个文件</b>，ruff / compileall 复核仍 EXIT=0。
+  </div>
+
+  <h2>一、为什么「补脚本」是错的：三条独立证据</h2>
+
+  <div class="card bad">
+    <b><span class="tag t-red">证据 1</span> 脚本是被<u>有意删除</u>的，不是漏提交</b>
+    <p><code>git ls-tree HEAD -- deploy-windows.ps1</code> → 空（HEAD 不存在）。删除发生在 commit
+    <code>15e13a79</code>「fix(backend,ops): 上线前审核整改——安全加固、危险操作面收敛、敏感文件移出跟踪」。</p>
+    <p>审计文档明确记录了删除理由：</p>
+    <pre>deliverables/audit-2026-09-17/上线前问题修复报告-20260917.md
+  M9 | 危险/过时脚本墓地 | … 删除 deploy-windows.ps1（<b>必然 exit 1 的过时脚本</b>）、
+     deploy_nginx.ps1（Linux 脚本）
+
+deliverables/audit-2026-09-17/上线前审核总报告-2026-09-17.md
+  C-M7 | deploy-windows.ps1 过时（PG16→实际18、D:\erp→实际 D:\erp_system、
+     变量名不符）→ 当前 .env 下<b>必然 exit 1</b> | 修或删</pre>
+    <p>⇒ 补回它等于复活一个已知必然失败的脚本，并让 CI 出现「看起来在部署、实际必挂」的假动作。</p>
+  </div>
+
+  <div class="card bad">
+    <b><span class="tag t-red">证据 2</span> 托管 runner <u>架构上</u>打不到内网生产机</b>
+    <p>生产机是内网 <code>192.168.0.95</code>（本机即生产机）。而本 workflow 的 6 处 <code>runs-on</code>
+    全部是 GitHub 托管 runner（<code>ubuntu-latest</code> ×4、<code>windows-latest</code> ×2），
+    <b>仓库内无任何 self-hosted runner 配置</b>。</p>
+    <p>⇒ 托管 runner 位于公网，无法访问内网主机。即使把脚本补齐并修好，<code>deploy-production</code>
+    也<b>永远不可能</b>完成真实部署——它最多只能报一个「连不上」的错。</p>
+  </div>
+
+  <div class="card bad">
+    <b><span class="tag t-red">证据 3</span> <code>deploy-staging</code> <u>永不执行</u>（分支不存在）</b>
+    <p>其触发条件为 <code>if: github.ref == 'refs/heads/develop'</code>，而分支清单为：
+    <code>main</code>、<code>fix-v533-sentinel</code>（本地）、<code>erp/main</code>、
+    <code>erp/fix/outsource-correctness-concurrency</code>（远端）——<b>从未有过 develop 分支</b>。</p>
+    <p>⇒ 该 job 属纯死配置，任何情况下都不会运行。</p>
+  </div>
+
+  <h2>二、改动清单（3 个文件）</h2>
+  <table>
+    <thead><tr><th>文件</th><th>改动</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><code>.github/workflows/ci-cd.yml</code></td>
+        <td>删除 <code>deploy-staging</code> 与 <code>deploy-production</code> 两个 job（−29 行），
+        替换为 21 行注释块：写明三条根因、真实部署路径（NSSM + runbook）、以及「将来若接入内网
+        self-hosted runner 应从 git 历史取回并重写，不要指向已删除的脚本」</td>
+      </tr>
+      <tr>
+        <td><code>fastapi_app/README.md</code></td>
+        <td>「部署」段原为<b>三重过期</b>：① 引用已删的 <code>deploy-windows.ps1</code>；
+        ② 声称 <code>k8s/</code> 目录存在（实际不存在）；③ 写「Celery」（本项目用 <b>ARQ</b>）。
+        已改写为 NSSM 服务清单 + runbook 指引 + 迁移命令，并纠正队列技术</td>
+      </tr>
+      <tr>
+        <td><code>fastapi_app/services/backup/ro_grants.py</code></td>
+        <td>第 20 行注释「与 <code>init-replication.sh</code>、<code>deploy-windows.ps1</code> 保持一致」
+        中删掉已不存在的脚本引用（<code>init-replication.sh</code> 经核实存在且定义 <code>erp_readonly</code>）</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>三、验证</h2>
+  <table>
+    <thead><tr><th>检查</th><th>结果</th></tr></thead>
+    <tbody>
+      <tr><td>YAML 解析 + job 依赖图</td><td><span class="tag t-grn">jobs = ['test','lint','frontend','build']</span>；<b>DANGLING needs = none</b>；<code>build</code> 成为终态 job（needs: test/lint/frontend）</td></tr>
+      <tr><td>残留引用排查</td><td><span class="tag t-grn">仅剩有意保留项</span>：新注释块 + README 说明；其余为 <code>docs/designs|plans|reports/2026-08-*</code> <b>历史文档</b>（不改写历史）</td></tr>
+      <tr><td>ruff 门禁未回退</td><td><span class="tag t-grn">EXIT=0</span> All checks passed!</td></tr>
+      <tr><td>compileall</td><td><span class="tag t-grn">EXIT=0</span></td></tr>
+    </tbody>
+  </table>
+  <pre># git diff HEAD --stat（本轮）
+ .github/workflows/ci-cd.yml              | 51 ++++++++++++++------------------
+ fastapi_app/README.md                    | 14 +++++++--
+ fastapi_app/services/backup/ro_grants.py |  5 ++--</pre>
+
+  <h2>四、待你决定的相邻问题（未擅自改）</h2>
+
+  <div class="card warn">
+    <b><span class="tag t-org">P2 · 建议单独处理</span> 生产审计层 L11 现在会报一个<b>假阳性</b></b>
+    <p><code>scripts/prod_audit/layers/l11_deployment.py:612-645</code> 的判定逻辑是：
+    「无 Dockerfile <b>且</b> 无 docker-compose <b>且</b> 无部署脚本 ⇒ 报 MEDIUM
+    <code>L11-CONTAINER-001</code>「无 Dockerfile / docker-compose / 部署脚本」」。</p>
+    <p>实测：<code>Dockerfile</code> / <code>docker-compose.yml|yaml</code> / <code>deploy-windows.ps1</code> /
+    <code>deploy_nginx.ps1</code> / <code>build_and_release.py</code> / <code>k8s/</code> <b>全部不存在</b>——
+    因为本项目是<b>内网 Windows 原生 + NSSM</b>，本来就不该有容器编排文件。</p>
+    <p>⇒ 该层会稳定输出一条 MEDIUM 假阳性。修它需要把「部署就绪」的判据改为识别本项目的真实模型
+    （NSSM 服务 + <code>docs/runbooks/service-lifecycle.md</code>），并同步清理
+    <code>_DEPLOY_SCRIPTS</code> 候选列表（第 74-81 行）里两个已删脚本。</p>
+    <p><b>未擅自改的原因</b>：这会改变审计的<b>输出语义</b>（从报假阳性变成正确识别），
+    属于你生产审计管线里的行为变更，应由你确认后再动。</p>
+  </div>
+
+  <div class="card info">
+    <b><span class="tag t-blu">P3 · 可选</span> workflow 触发器仍写着不存在的 <code>develop</code></b>
+    <p><code>on: push/pull_request: branches: [main, develop]</code>——<code>develop</code> 分支不存在，
+    该触发项永不命中。<b>无害</b>（不会报错、不会多跑），但略显误导。已保留原样，仅在此记录。</p>
+  </div>
+
+  <h2>五、边界声明</h2>
+  <ul>
+    <li><b>未提交、未推送</b>（本地 main 仍领先远端 3 个提交）；未触碰生产库、未启停服务。</li>
+    <li><b>未执行、未触发任何 workflow</b>（Actions 启用状态与历史 run 仍无法确认，缺 gh/token）。</li>
+    <li>未改写 <code>docs/designs|plans|reports/2026-08-*</code> 里的历史记录（它们记录了当时的计划，
+      属历史档案而非现行指引）。</li>
+  </ul>
+
+  <div class="foot">
+    全程未触碰生产数据库、未启停服务、未提交未推送。<br>
+    证据文件：<code>_qa_tmp/p0c_recon.txt</code> · <code>p0c_files.txt</code> · <code>p0c_verify.txt</code> · <code>p0c_final.txt</code><br>
+    生成时间：2026-09-24 08:4x (+08:00)
+  </div>
+
+</div>
+</body>
+</html>

@@ -14,8 +14,6 @@ from datetime import UTC, datetime
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi_app.shared_models.numbering_counter import NumberingCounter
-
 logger = logging.getLogger(__name__)
 
 # 常量 SQL：表名/列名为字面量，全部值经绑定参数传递（无用户输入拼接）

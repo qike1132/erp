@@ -7,8 +7,6 @@
 """
 from unittest.mock import MagicMock
 
-import pytest
-
 from fastapi_app.services.fifo_allocation import allocate_fifo
 from fastapi_app.services.purchase_plan_queries import _calc_stock_status
 from fastapi_app.services.purchase_plan_shipment import _recalc_plan_status

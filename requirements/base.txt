@@ -34,6 +34,11 @@ argon2-cffi==25.1.0
 
 # ----- 环境配置 -----
 python-dotenv==1.2.2
+# PyYAML：scripts/prod_audit/config_loader.py 直接 import yaml
+# （审核工具读 audit_config.yaml / rules_registry.yaml；CI 的 prod_audit 测试步骤依赖它）。
+# 虽然 uvicorn[standard] 会传递带入 pyyaml>=5.1，但「直接导入」应显式声明，
+# 否则将来把 uvicorn[standard] 改成 uvicorn 时，审核工具与测试步骤会静默 ImportError。
+pyyaml==6.0.3
 
 # ----- 数据处理与 Excel -----
 openpyxl==3.1.5

@@ -132,7 +132,8 @@ fi
 secret_patterns='-----BEGIN [A-Z ]*PRIVATE KEY-----|-----BEGIN OPENSSH PRIVATE KEY-----|AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{36,}|xox[baprs]-[A-Za-z0-9-]{10,}|sk-[A-Za-z0-9]{32,}|AIza[0-9A-Za-z_-]{35}|-----BEGIN (RSA|EC|DSA|PGP) '
 
 # 口令赋值：仅在"看起来是真值"时命中（排除占位符与常见弱口令示例）
-pwd_pattern='([Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Pp][Aa][Ss][Ss][Ww][Dd]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Tt][Oo][Kk][Ee][Nn]|[Aa][Pp][Ii][_]?[Kk][Ee][Yy]|[Rr][Ee][Qq][Uu][Ii][Rr][Ee][Pp][Aa][Ss][Ss])[[:space:]]*[:=][[:space:]]*["'"'"']?[A-Za-z0-9+/=_.:@!#%^&*-]{12,}'
+# `[A-Za-z]{0,3}` 允许 Python 字符串前缀（r"" / b"" / rb"" 等）——否则 r"..." 形式会漏报。
+pwd_pattern='([Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Pp][Aa][Ss][Ss][Ww][Dd]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Tt][Oo][Kk][Ee][Nn]|[Aa][Pp][Ii][_]?[Kk][Ee][Yy]|[Rr][Ee][Qq][Uu][Ii][Rr][Ee][Pp][Aa][Ss][Ss])[[:space:]]*[:=][[:space:]]*[A-Za-z]{0,3}["'"'"']?[A-Za-z0-9+/=_.:@!#%^&*-]{12,}'
 
 secret_hits=""
 old_ifs=$IFS
@@ -180,9 +181,30 @@ for f in $staged; do
             #      —— 仍是变量合并而非字面量，但 `or` 打断了 ② 的「标识符+(」判据。
             #      判据：标识符 + or/and + 标识符（可带调用）。
             #      （若不放宽，备份加密决策行会被反复拦住；该行右侧无任何字面值）
-            pwd_matches=$(grep -Ei -e "$pwd_pattern" "$tmpf" | \
+            # ⚠️ 必须用 -o 提取**匹配片段**而非整行：第 ④ 层按「右值是否带引号」判定，
+            #    若拿整行去判，形如 `access_token=access_token, token_type="bearer"`
+            #    的行会因为右侧另有一个带引号字面量而整行放行（实测踩到）。
+            pwd_matches=$(grep -Eio -e "$pwd_pattern" "$tmpf" | \
                 grep -Eiv -e '(<[^>]+>|YOUR_|CHANGE_?ME|changeme|placeholder|example|xxxx|dummy|fake|testkey|your[-_])' | \
                 grep -Eiv -e '[:=][[:space:]]*[A-Za-z0-9_.]*([\(\[]|[[:space:]]+(or|and)[[:space:]]+[A-Za-z0-9_.]*[\(\[]?)')
+
+            # ④ Python 专属收窄（2026-09-24）：`.py` 里**不带引号的右值必然是表达式**
+            #    （属性读取 / 变量引用 / 函数调用），不可能是硬编码字面量密钥。
+            #    缺少这一层会把纯引用误判为凭据 —— 实测 `api/v1/endpoints/auth.py` 的
+            #    `password = data.password`、`access_token=access_token` 与
+            #    `services/backup/restore.py` 的 `decrypt_password=decrypt_password`
+            #    三处被拦，而它们**本就在 HEAD 中**（既有已推送代码），
+            #    导致任何触及这两个文件的提交都无法通过。
+            #    允许 f"" / r"" / b"" / rb"" 等前缀（Python 硬编码密钥必然是带引号的字面量）。
+            #    注意：本层只收窄「口令赋值」规则；私钥头 / 云凭据特征（$secret_patterns）
+            #    对所有文件类型仍然照常生效，不受此处影响。
+            case "$f" in
+                *.py)
+                    pwd_matches=$(printf '%s\n' "$pwd_matches" \
+                        | grep -E '[:=][[:space:]]*[A-Za-z]{0,3}["'\'']' || true)
+                    ;;
+            esac
+
             if [ -n "$pwd_matches" ]; then
                 secret_hits="${secret_hits}  ✗ $f  —— 疑似明文口令/密钥赋值
 "

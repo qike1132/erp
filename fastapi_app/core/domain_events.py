@@ -9,7 +9,7 @@ import json
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
@@ -143,7 +143,7 @@ def _append_deadletter(event: DomainEvent, error: Exception | None) -> None:
     log_dir = _Path(__file__).resolve().parents[2] / 'logs'
     log_dir.mkdir(exist_ok=True)
     record = {
-        'ts': datetime.now(timezone.utc).isoformat(),
+        'ts': datetime.now(UTC).isoformat(),
         'event_type': event.event_type.value,
         'payload': event.payload,
         'error': str(error) if error else None,

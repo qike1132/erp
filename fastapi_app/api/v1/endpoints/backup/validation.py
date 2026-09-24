@@ -8,18 +8,17 @@
 - POST /validate-integrity     执行深度完整性检查
 - GET  /stats                  获取备份统计信息
 """
-import hashlib
 import asyncio
+import hashlib
 import io
 import json
 import logging
 import os
-import time
 import zipfile
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Header, HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.api.v1.endpoints.backup._deps import (

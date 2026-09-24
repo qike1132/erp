@@ -93,8 +93,8 @@ class ExistingComponentRestoreAdapter(ComponentRestorePort):
         confirm_sensitive: bool,
         reporter: ProgressReporter | None,
     ) -> ComponentsRestoreResult:
-        from fastapi_app.services.backup.types import RestorePhase
         from fastapi_app.services.backup.restore import restore_non_dependent_components
+        from fastapi_app.services.backup.types import RestorePhase
 
         if reporter is not None:
             await reporter.report(RestorePhase.RESTORE_COMPONENTS, 0.0, "开始恢复非依赖组件...")

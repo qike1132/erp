@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>运维守卫团 · 统一报告（服务器健康 + CI/CD 排障）2026-09-23</title>
+<style>
+  :root{
+    --bg:#0f1420; --card:#171e2e; --card2:#1d2637; --fg:#e8edf6; --muted:#9fb0c9;
+    --line:#2a3549; --red:#ff6b6b; --orange:#ffa94d; --yellow:#ffd43b; --green:#51cf66;
+    --blue:#4dabf7; --code:#0b0f17;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.7 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
+  .wrap{max-width:1120px;margin:0 auto;padding:32px 24px 80px}
+  h1{font-size:23px;margin:0 0 6px;letter-spacing:.2px}
+  h2{font-size:18px;margin:38px 0 12px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  h3{font-size:14.5px;margin:22px 0 8px;color:var(--blue)}
+  .sub{color:var(--muted);font-size:13px;margin-bottom:22px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin:14px 0}
+  .verdict{border-left:5px solid var(--green);background:linear-gradient(90deg,#12281c,#171e2e)}
+  .verdict.bad{border-left-color:var(--red);background:linear-gradient(90deg,#2a1620,#171e2e)}
+  .verdict b{color:var(--green)}
+  .verdict.bad b{color:var(--red)}
+  table{width:100%;border-collapse:collapse;margin:10px 0;font-size:13px}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:var(--card2);color:var(--muted);font-weight:600}
+  tbody tr:nth-child(even){background:rgba(255,255,255,.014)}
+  code,pre{font-family:"Cascadia Code",Consolas,monospace}
+  code{background:var(--code);padding:1px 6px;border-radius:4px;font-size:12.5px;color:#ffd8a8}
+  pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:12px 14px;overflow:auto;font-size:12.5px;color:#cfe3ff;margin:8px 0}
+  .tag{display:inline-block;padding:1px 8px;border-radius:20px;font-size:11.5px;font-weight:600;white-space:nowrap}
+  .t-red{background:rgba(255,107,107,.16);color:var(--red);border:1px solid rgba(255,107,107,.4)}
+  .t-org{background:rgba(255,169,77,.16);color:var(--orange);border:1px solid rgba(255,169,77,.4)}
+  .t-yel{background:rgba(255,212,59,.16);color:var(--yellow);border:1px solid rgba(255,212,59,.4)}
+  .t-grn{background:rgba(81,207,102,.16);color:var(--green);border:1px solid rgba(81,207,102,.4)}
+  .t-blu{background:rgba(77,171,247,.16);color:var(--blue);border:1px solid rgba(77,171,247,.4)}
+  ul{margin:8px 0;padding-left:22px} li{margin:4px 0}
+  .kv{color:var(--muted)}
+  .p0{border-left:4px solid var(--red)}
+  .p1{border-left:4px solid var(--orange)}
+  .p2{border-left:4px solid var(--yellow)}
+  .small{font-size:12.5px;color:var(--muted)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:10px;margin:12px 0}
+  .kpi{background:var(--card2);border:1px solid var(--line);border-radius:9px;padding:12px 14px}
+  .kpi .lab{color:var(--muted);font-size:12px}
+  .kpi .val{font-size:20px;font-weight:700;margin-top:3px;letter-spacing:.3px}
+  .kpi .note{font-size:11.5px;color:var(--muted);margin-top:2px}
+  .ok{color:var(--green)} .warn{color:var(--orange)} .bad{color:var(--red)}
+  .foot{margin-top:46px;padding-top:14px;border-top:1px solid var(--line);color:var(--muted);font-size:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>运维守卫团 · 统一报告</h1>
+  <div class="sub">
+    目标：DESKTOP-11111（192.168.0.95）· Windows 10 企业版 LTSC Build 19044 · i5-10400 / 15.8GB<br>
+    巡检时间：2026-09-23 22:50 – 23:05 (+08:00)｜性质：<b>全程只读</b>，未 kill、未停启服务、未改配置、未 push、未触发 workflow<br>
+    团队：巡检卫士（ops-inspector）+ 流水线医师（cicd-troubleshooter）
+  </div>
+
+  <div class="card verdict">
+    <b>一句话结论：</b>生产链路健康（服务器 <b>正常</b>，nginx→FastAPI→PG/Redis/ARQ 全绿），但 <b>CI/CD 流水线一旦触发即必红</b>——三个并行 job 各自在早期步骤失败，构建与部署阶段被 <code>needs</code> 阻断永不执行。
+  </div>
+
+  <!-- ============ 一、系统健康 ============ -->
+  <h2>一、服务器健康概览</h2>
+
+  <div class="grid">
+    <div class="kpi"><div class="lab">CPU 负载</div><div class="val ok">38%</div><div class="note">阈值 &lt;70%</div></div>
+    <div class="kpi"><div class="lab">内存使用率</div><div class="val ok">70.4%</div><div class="note">11119 / 15793 MB（偏高）</div></div>
+    <div class="kpi"><div class="lab">C: 使用率</div><div class="val warn">71.5%</div><div class="note">余 60.7GB，逼近 80% 线</div></div>
+    <div class="kpi"><div class="lab">D: 使用率</div><div class="val ok">32.8%</div><div class="note">余 497.6GB</div></div>
+    <div class="kpi"><div class="lab">目标端口</div><div class="val ok">6 / 6</div><div class="note">3000/5002/5432/5433/6379/6380</div></div>
+    <div class="kpi"><div class="lab">NSSM 服务</div><div class="val ok">4 Running</div><div class="note">erp-prod / erp-arq / redis ×2</div></div>
+  </div>
+
+  <h3>生产链路自检（真实请求，已绕代理）</h3>
+  <table>
+    <thead><tr><th>检查项</th><th>结果</th><th>证据</th></tr></thead>
+    <tbody>
+      <tr><td><code>GET /api/health</code></td><td><span class="tag t-grn">200 healthy</span></td><td>22:51:13 <code>{"status":"healthy"}</code></td></tr>
+      <tr><td><code>GET :3000/</code></td><td><span class="tag t-grn">200</span> <span class="tag t-blu">production</span></td><td>返回 <code>/assets/index-*.js</code>，无 <code>@vite/client</code>／<code>/src/main.ts</code> ⇒ 由 nginx 服务 dist</td></tr>
+      <tr><td><code>GET /api/health/arq</code></td><td><span class="tag t-grn">200 running</span></td><td>j_complete=24 j_failed=0 j_ongoing=0 queued=0</td></tr>
+      <tr><td>探针 <code>runtime_mode_probe.py</code></td><td><span class="tag t-grn">无告警</span></td><td>api=prod(multi worker)／frontend=production／arq=running（心跳 25.3s 前）</td></tr>
+      <tr><td>PostgreSQL</td><td><span class="tag t-grn">主/副本 accepting</span></td><td><code>pg_isready</code> 5432 ✅ ／ 5433 ✅</td></tr>
+      <tr><td>Redis</td><td><span class="tag t-grn">可达</span></td><td>裸 PING 返回 <code>NOAUTH</code>（需认证，未绕过）；经探针认证读 6380 哨兵键成功</td></tr>
+    </tbody>
+  </table>
+
+  <h3>资源热点：占用者全是开发工具，无一是 ERP 进程</h3>
+  <table>
+    <thead><tr><th>进程</th><th>累计 CPU 秒</th><th>工作集 MB</th><th>归属</th></tr></thead>
+    <tbody>
+      <tr><td>Trae CN (16424)</td><td>119.8</td><td>551.9</td><td><span class="tag t-yel">开发工具</span></td></tr>
+      <tr><td>WorkBuddy (16592)</td><td>57.6</td><td>649.6</td><td><span class="tag t-yel">开发工具</span></td></tr>
+      <tr><td>WorkBuddy (14604 / 11648 / 15272 …)</td><td>55.8 / 42.0 / 24.5</td><td>481 / 442 / 361</td><td><span class="tag t-yel">开发工具</span></td></tr>
+      <tr><td>ERP服务器管理器_v5.33 (16508)</td><td>30.5</td><td>44.2</td><td><span class="tag t-blu">ERP 运维</span></td></tr>
+    </tbody>
+  </table>
+  <p class="small">生产侧实测进程数：<code>python</code> 11（1 prod runner + 8 uvicorn worker，各 176–191MB）、<code>postgres</code> 57、<code>nginx</code> 13、<code>redis-server</code> 2。开发工具合计占用约 4–5GB 内存——这是本机资源天花板的主要来源（生产 + 开发混跑）。</p>
+
+  <h3>风险项（服务器侧）</h3>
+
+  <div class="card p1">
+    <b><span class="tag t-org">中等</span> 1｜数据库备份链路疑似断档</b>
+    <ul>
+      <li>计划任务 <code>ERP_Database_Backup</code> 已 <b>Disabled</b>，LastRun 2026-09-23 10:00，<b>LastResult=2（找不到文件）</b>。</li>
+      <li>其目标脚本 <code>C:\Users\Administrator\Desktop\erp_system\db_backup.py</code> <b>不存在</b>（Test-Path = False）。</li>
+      <li><code>backups\db\</code> 最新 dump 停留在 <b>2026-09-18</b>（<code>erp_system_pre046_20260918-074153.dump</code>，仅此一份）。</li>
+      <li>对照：应用/配置备份在正常产出（<code>backups\server\erp_backup_20260923_222847.zip</code>，约每 8h 一份）。</li>
+    </ul>
+    <p class="small"><b>影响：</b>若生产库发生误操作，缺少近期可恢复的数据库级备份。</p>
+  </div>
+
+  <div class="card p1">
+    <b><span class="tag t-org">中等</span> 2｜nginx 启动配置路径报错（emerg）</b>
+    <ul>
+      <li><code>error.log</code> 记录：<code>[emerg] CreateFile() "D:\erp_system/conf/nginx.conf" failed (3: The system cannot find the path specified)</code>，最近两次 <b>21:40:11</b> 与 <b>22:08:39</b>。</li>
+      <li>当前 3000 端口 nginx 正常服务 dist（HTTP 200 + 探针判 production），说明<b>当前实例用的是另一份有效配置</b>，报错来自某次错误前缀的启动尝试。</li>
+    </ul>
+    <p class="small"><b>影响：</b>潜在重启隐患——若某次重启只读到错误配置路径，前端可能起不来。</p>
+  </div>
+
+  <div class="card p2">
+    <b><span class="tag t-yel">轻微</span> 3–8｜噪声与遗留项</b>
+    <ul>
+      <li>开机窗口 <b>22:07:55–56</b> 有 <code>postgres.exe</code>(0xc0000409) 与 <code>python.EXE</code>(0xc0000005) 崩溃记录，随后自动恢复。</li>
+      <li>遗留项未清理：服务 <code>rediserp</code>（Stopped）、计划任务 <code>ERPSystem</code>（Disabled，LastResult 0xC000013A）。</li>
+      <li>第三方服务开机失败噪声：AliPaladin / WpSvc / XLServicePlatform（阿里 / WPS / 迅雷），与 ERP 无关。</li>
+      <li>系统激活失败 Security-SPP <code>0xC004F074</code>（不影响业务，属合规隐患）。</li>
+      <li>C 盘 71.5% 逼近关注线，压力来自开发缓存（AppData 32.2GB、.workbuddy 4.0GB、.trae-cn 3.0GB、.gradle 0.97GB）。<b>ERP 项目本体仅 1.72GB，不是风险源。</b></li>
+    </ul>
+  </div>
+
+  <!-- ============ 二、CI/CD ============ -->
+  <h2>二、CI/CD 流水线排障</h2>
+
+  <div class="card verdict bad">
+    <b>判定：</b>流水线「一旦触发即必红」。<code>test</code> / <code>lint</code> / <code>frontend</code> 三个并行 job 各自在早期步骤失败；<code>build</code> 与两个 <code>deploy</code> 因 <code>needs</code> 依赖未满足<b>永不执行</b>。<br>
+    最先触发的失败点是 <code>test</code> 的 <code>Verify Alembic migrations</code>——<code>script_location = .</code> 按 CWD 解析，CI 在仓库根执行 ⇒ 找不到 <code>env.py</code>。
+  </div>
+
+  <h3>2.1 流水线能否真正运行</h3>
+  <table>
+    <thead><tr><th>检查</th><th>结果</th></tr></thead>
+    <tbody>
+      <tr><td>DNS / TCP 443 / TCP 22 → github.com</td><td><span class="tag t-grn">全通</span>（源 192.168.0.95）</td></tr>
+      <tr><td><code>git ls-remote erp</code>（SSH）</td><td><span class="tag t-grn">成功</span>，<code>refs/heads/main = 5634a240…</code></td></tr>
+      <tr><td>gh CLI</td><td><span class="tag t-org">未安装</span></td></tr>
+      <tr><td>Actions run 列表 API</td><td><span class="tag t-yel">404</span>（私有库匿名不可见）⇒ <b>无法获取</b></td></tr>
+      <tr><td>本地 main vs 远端</td><td><b>本地领先远端 3 个提交</b>（HEAD <code>57171c65</code>），尚未推送</td></tr>
+    </tbody>
+  </table>
+  <p class="small">结论：Git 推送通道可用；<b>Actions 是否启用、有无历史 run 无法确认</b>（缺 gh / token）。远端最后一次收到的是 <code>5634a240</code>，即最近 3 次提交从未进入过流水线。</p>
+
+  <h3>2.2 逐 job 失败风险矩阵</h3>
+  <table>
+    <thead><tr><th>Job</th><th>关键引用</th><th>存在性</th><th>判定</th></tr></thead>
+    <tbody>
+      <tr><td rowspan="4"><code>test</code></td><td><code>alembic -c migrations/alembic.ini upgrade head</code></td><td>配置错位</td><td><span class="tag t-red">必失败（首个）</span></td></tr>
+      <tr><td><code>bandit -r … -ii</code></td><td>可跑</td><td><span class="tag t-red">必失败</span>（3663 issues，exit 1）</td></tr>
+      <tr><td>pytest <code>--cov/--html</code> 插件、<code>-m "not flask_legacy"</code></td><td>齐备/已注册</td><td><span class="tag t-grn">OK</span>（无未知 marker）</td></tr>
+      <tr><td>全量单进程 pytest</td><td>conftest 作用域冲突</td><td><span class="tag t-org">高风险</span></td></tr>
+      <tr><td rowspan="4"><code>lint</code></td><td><code>ruff check …</code></td><td>ruff.toml 存在</td><td><span class="tag t-red">必失败</span>（235 errors，exit 1）</td></tr>
+      <tr><td><code>mypy --config-file mypy.ini</code></td><td>mypy.ini 存在</td><td><span class="tag t-red">必失败</span>（6 errors，exit 1）</td></tr>
+      <tr><td><code>quality_gate.py</code></td><td>存在</td><td><span class="tag t-grn">EXIT=0</span></td></tr>
+      <tr><td><code>file_size_gate.py</code></td><td>存在</td><td><span class="tag t-grn">EXIT=0</span>（CI 空变更集 ⇒ 跳过，实为失效）</td></tr>
+      <tr><td rowspan="3"><code>frontend</code></td><td><code>npm run lint</code></td><td>脚本存在</td><td><span class="tag t-red">必失败</span>（233 problems / 3 errors，exit 1）</td></tr>
+      <tr><td><code>check:api</code> / <code>:pc</code> / <code>:routes</code></td><td>3 个 .mjs 均在</td><td><span class="tag t-grn">EXIT=0</span></td></tr>
+      <tr><td><code>npm run build</code></td><td>脚本存在</td><td><span class="tag t-yel">未跑到</span></td></tr>
+      <tr><td><code>build</code></td><td><code>needs:[test,lint,frontend]</code> + compileall</td><td>目录存在</td><td><span class="tag t-yel">被阻断</span>（语法 720 文件无错）</td></tr>
+      <tr><td><code>deploy</code> ×2</td><td><code>.\deploy-windows.ps1</code></td><td><b>全仓库 0 匹配</b></td><td><span class="tag t-red">必失败</span> + 被 build 阻断</td></tr>
+    </tbody>
+  </table>
+
+  <h3>2.3 重点核实结论</h3>
+  <ul>
+    <li><b>Alembic（P0，已独立复核）</b>：<code>migrations/alembic.ini:4</code> 为 <code>script_location = .</code>。Alembic 按 <b>CWD</b> 解析该相对路径；以 CI 完全相同的命令在仓库根执行 → <code>ImportError: Can't find Python file env.py</code>，<b>EXIT=1</b>；切到 <code>migrations/</code> 下执行则正常输出 head ⇒ 确认为<b>解析基准错位</b>。
+      <pre># migrations/alembic.ini:4
+script_location = .
+# 修复建议（%(here)s 指向 alembic.ini 所在目录）
+script_location = %(here)s</pre>
+    </li>
+    <li><b>ruff / mypy（P0）</b>：ruff <b>235 errors</b>（I001×80、F401×35、W292×34…）；mypy <b>6 errors / 4 文件</b>（<code>purchase_utils.py:92</code>、<code>order_serializer.py:256</code>、<code>batch_import_core.py:362/448</code>、<code>outsource/_order_processes.py:187/194</code>）。</li>
+    <li><b>前端 lint（P0）</b>：<b>233 problems / 3 errors</b>——<code>PathSettings.vue:65,72</code> 重复键、<code>QaAdversarial.beileSync.test.ts:102</code> prefer-const。</li>
+    <li><b><code>deploy-windows.ps1</code></b>：全仓库 Glob <b>0 匹配</b>（隐藏炸弹，两个部署 job 必然失败）。</li>
+    <li><b>conftest 污染（🟠）</b>：<code>tests/conftest.py:152,189</code> 用 <code>loop_scope="session"</code>，而 <code>pytest.ini:10</code> 为 function scope；<code>fastapi_app/tests/conftest.py:109</code> 全局改 <code>dependency_overrides</code>。项目文档记载全量跑为「2706 passed / 12 failed / 2 errors」⇒ test job 大概率非全绿（精确失败项在只读约束下未复跑确认）。</li>
+    <li><b>已核实为 OK</b>：markers（<code>flask_legacy</code>/<code>e2e_api</code> 均已注册，<code>--strict-markers</code> 不报错）；<code>max_file_size=1600</code> 与 <code>file_size_gate.py</code> 一致；<code>mypy.ini</code> 可被消费；<code>requirements.txt</code> 含 pytest / pytest-cov / pytest-html / bandit / ruff / mypy；前端 5 个 CI 脚本全部真实存在（已独立复核 <code>package.json</code>）。</li>
+  </ul>
+
+  <!-- ============ 三、建议 ============ -->
+  <h2>三、建议（按优先级）</h2>
+  <p class="small">以下均为<b>建议</b>，未执行任何变更；涉及写操作请逐项确认后再动手。</p>
+  <table>
+    <thead><tr><th>优先级</th><th>域</th><th>做什么</th><th>为什么</th><th>风险</th></tr></thead>
+    <tbody>
+      <tr><td><span class="tag t-red">P0</span></td><td>CI/CD</td><td>修 <code>migrations/alembic.ini</code> 的 <code>script_location</code> → <code>%(here)s</code>（或 CI 中 <code>cd migrations</code> 再执行）</td><td>当前确定性阻断 test job 的第一道门</td><td>低</td></tr>
+      <tr><td><span class="tag t-red">P0</span></td><td>CI/CD</td><td>修 ruff 235 + mypy 6 + 前端 lint 3 处</td><td>三个 job 的硬失败点</td><td>低（机械修复，需回归）</td></tr>
+      <tr><td><span class="tag t-red">P0</span></td><td>CI/CD</td><td>补 <code>deploy-windows.ps1</code>，或给两个 deploy job 加 <code>if: false</code> 暂时禁用</td><td>文件不存在，部署 job 必失败</td><td>低</td></tr>
+      <tr><td><span class="tag t-red">P0</span></td><td>服务器</td><td>核实数据库备份机制：确认是否有<b>替代的、正在运行</b>的 PG 备份脚本；若无，修复任务脚本路径并启用</td><td><code>backups\db</code> 最新 dump 为 09-18，链路疑似断档</td><td>低（仅排查/启用）；改动前先确认脚本内容与存储位置</td></tr>
+      <tr><td><span class="tag t-org">P1</span></td><td>服务器</td><td>定位 nginx 有效配置，比对实际运行实例的 <code>-p</code>/<code>-c</code> 前缀与 <code>D:\erp_system/conf/nginx.conf</code> 差异，修正启动脚本路径</td><td>消除重启后前端起不来的隐患</td><td>中（涉及配置/重启，先备份、择窗口）</td></tr>
+      <tr><td><span class="tag t-org">P1</span></td><td>CI/CD</td><td>bandit 加 <code>--exit-zero</code> 或基线棘轮；pip-audit 加白名单；codecov 配 token</td><td>存量告警不应阻断发布</td><td>低</td></tr>
+      <tr><td><span class="tag t-yel">P2</span></td><td>CI/CD</td><td><code>file_size_gate</code> 改 <code>--all --fail</code> 才真正生效；覆盖率 40% 阈值先实测再定；拆分 <code>tests</code> 与 <code>fastapi_app/tests</code> 为两个进程跑以绕开 loop 污染</td><td>当前门禁存在静默失效与假绿</td><td>低</td></tr>
+      <tr><td><span class="tag t-yel">P2</span></td><td>服务器</td><td>观察 postgres/python 开机崩溃是否复发；如复发检查 PG 数据目录权限与启动时序</td><td>启动期崩溃可能导致偶发不可用</td><td>低（仅观察）</td></tr>
+      <tr><td><span class="tag t-yel">P2</span></td><td>服务器</td><td>清理/归档遗留项：<code>rediserp</code> 服务、<code>ERPSystem</code> 任务（当前已 Stopped/Disabled）</td><td>减少误判与误启用风险</td><td>低—中（删除前二次确认无依赖）</td></tr>
+      <tr><td><span class="tag t-grn">P3</span></td><td>服务器</td><td>治理 C 盘：清理开发工具缓存（.gradle/.npm/.trae-cn 等）与旧备份，压回 65% 以下；处理系统激活 0xC004F074</td><td>当前 71.5%，逼近关注线</td><td>低（清理缓存类）；删除前逐项确认</td></tr>
+    </tbody>
+  </table>
+
+  <!-- ============ 四、待确认 ============ -->
+  <h2>四、待确认项（未编造）</h2>
+  <table>
+    <thead><tr><th>项</th><th>状态</th><th>原因</th></tr></thead>
+    <tbody>
+      <tr><td>Actions 是否启用 / 有无历史 run</td><td><span class="tag t-yel">无法获取</span></td><td>缺 gh CLI 与 token，私有库匿名 API 返回 404</td></tr>
+      <tr><td>CI 上 pytest 真实通过率</td><td><span class="tag t-yel">未复跑</span></td><td>只读约束下未在 CI 环境执行全量套件</td></tr>
+      <tr><td>覆盖率是否 ≥ 40%</td><td><span class="tag t-yel">未测得</span></td><td>需完整跑一次带 <code>--cov</code> 的套件</td></tr>
+      <tr><td><code>npm run build</code> 是否通过</td><td><span class="tag t-yel">未跑到</span></td><td>被前置 <code>npm run lint</code> 阻断</td></tr>
+      <tr><td>pip-audit / codecov 在 CI 网络下的结果</td><td><span class="tag t-yel">无法获取</span></td><td>需 CI 运行环境与凭证</td></tr>
+      <tr><td>仓库外是否另有部署脚本</td><td><span class="tag t-yel">未确认</span></td><td>仅扫描仓库内，未越界检索用户其他目录</td></tr>
+      <tr><td>进程命令行（CommandLine）</td><td><span class="tag t-yel">无法获取</span></td><td>沙箱限制，<code>Win32_Process.CommandLine</code> 返回空</td></tr>
+      <tr><td>Redis 明文 PING</td><td><span class="tag t-yel">无法获取</span></td><td>两实例均 <code>NOAUTH</code>，未提供密码，未做认证绕过</td></tr>
+      <tr><td>PG 连接数 / 慢查询等内部指标</td><td><span class="tag t-yel">无法获取</span></td><td>未提供数据库凭据</td></tr>
+      <tr><td><code>wmic</code> / <code>sc</code> / <code>reg</code></td><td><span class="tag t-grn">按约束未调用</span></td><td>沙箱屏蔽，且为避免误操作主动规避</td></tr>
+    </tbody>
+  </table>
+
+  <div class="foot">
+    合规声明：本次巡检与排障<b>全程只读</b>——未执行 kill / taskkill / 停启服务 / 修改配置 / push / 触发 workflow；日志中的内网地址与凭据信息未外泄。<br>
+    源报告：<code>_qa_tmp/erp_inspection_report.md</code>（服务器巡检）· <code>_qa_tmp/CI-CD_排障报告.html</code>（流水线排障）<br>
+    生成时间：2026-09-23 23:05 (+08:00)｜运维守卫团
+  </div>
+
+</div>
+</body>
+</html>

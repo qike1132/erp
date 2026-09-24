@@ -15,9 +15,6 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .._constants import (
-    BACKUP_ENCRYPTION_ENABLED,
-    BACKUP_ENCRYPTION_KEY,
-    BACKUP_ENCRYPTION_PASSWORD,
     BACKUP_FORMAT_VERSION,
     BACKUP_LOCK_ID,
     BACKUP_OPERATION_TIMEOUT,

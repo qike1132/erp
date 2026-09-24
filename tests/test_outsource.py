@@ -9,6 +9,7 @@
 """
 from datetime import UTC, datetime
 from types import SimpleNamespace
+from typing import ClassVar
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -107,7 +108,7 @@ def _oracle_process_stats(processes) -> dict:
             (p.received_quantity or 0) > 0 and (p.received_quantity or 0) >= (p.shipped_quantity or 0)
             for p in ordered
         ]
-        current = next((p.process_type for p, f in zip(ordered, full) if not f), None)
+        current = next((p.process_type for p, f in zip(ordered, full, strict=False) if not f), None)
         stats[order_id] = SimpleNamespace(
             order_id=order_id,
             total_processes=len(ordered),
@@ -858,7 +859,7 @@ class TestProcessProgressSqlAggregation:
     """进度统计下推数据库：SQL 聚合结果与改造前的 Python 口径逐一对比"""
 
     # (id, order_id, order_item_id, process_type, sort_order, status, shipped, received)
-    SPECS = [
+    SPECS: ClassVar[list[tuple]] = [
         # 订单 1：3 道工序，2 已收齐 + 1 未发货 → 进行中（配件）
         (1, 1, 11, '电绣', 0, 'received', 10, 10),
         (2, 1, 11, '转印', 1, 'received', 10, 10),
@@ -1050,6 +1051,7 @@ class TestConcurrencyAndLegacyData:
     @staticmethod
     async def _session(tmp_path):
         from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
         from fastapi_app.shared_models import OrderOutsourceProcessFlow
 
         engine = create_async_engine(f'sqlite+aiosqlite:///{tmp_path / "oosp.db"}')
@@ -1250,8 +1252,14 @@ class TestListUnshippedProcesses:
 
         from fastapi_app.shared_models import (
             Order as OrderModel,
+        )
+        from fastapi_app.shared_models import (
             OrderItem as OrderItemModel,
+        )
+        from fastapi_app.shared_models import (
             OutsourceProcessType,
+        )
+        from fastapi_app.shared_models import (
             Product as ProductModel,
         )
 
@@ -1315,8 +1323,14 @@ class TestSyncOrdersForProduct:
 
         from fastapi_app.shared_models import (
             Order as OrderModel,
+        )
+        from fastapi_app.shared_models import (
             OrderItem as OrderItemModel,
+        )
+        from fastapi_app.shared_models import (
             OutsourceProcessType,
+        )
+        from fastapi_app.shared_models import (
             Product as ProductModel,
         )
         engine = create_async_engine(f'sqlite+aiosqlite:///{tmp_path / "sync.db"}')
@@ -1333,8 +1347,14 @@ class TestSyncOrdersForProduct:
         """预设=电绣/转印；实例=电绣(已发100) + 裁剪(未发，不在预设)。"""
         from fastapi_app.shared_models import (
             Order as OrderModel,
+        )
+        from fastapi_app.shared_models import (
             OrderItem as OrderItemModel,
+        )
+        from fastapi_app.shared_models import (
             OutsourceProcessType,
+        )
+        from fastapi_app.shared_models import (
             Product as ProductModel,
         )
         session.add(ProductModel(id=1, name='SKU1', factory='湖北'))
@@ -1440,7 +1460,11 @@ class TestListShippableProcesses:
 
         from fastapi_app.shared_models import (
             Order as OrderModel,
+        )
+        from fastapi_app.shared_models import (
             OrderItem as OrderItemModel,
+        )
+        from fastapi_app.shared_models import (
             Product as ProductModel,
         )
         engine = create_async_engine(f'sqlite+aiosqlite:///{tmp_path / "shippable.db"}')
@@ -1458,7 +1482,11 @@ class TestListShippableProcesses:
         from fastapi_app.services.outsource_service import list_shippable_processes
         from fastapi_app.shared_models import (
             Order as OrderModel,
+        )
+        from fastapi_app.shared_models import (
             OrderItem as OrderItemModel,
+        )
+        from fastapi_app.shared_models import (
             Product as ProductModel,
         )
 
@@ -1492,7 +1520,11 @@ class TestListShippableProcesses:
         from fastapi_app.services.outsource_service import list_shippable_processes
         from fastapi_app.shared_models import (
             Order as OrderModel,
+        )
+        from fastapi_app.shared_models import (
             OrderItem as OrderItemModel,
+        )
+        from fastapi_app.shared_models import (
             Product as ProductModel,
         )
 
@@ -1525,7 +1557,11 @@ class TestListShippableProcesses:
         from fastapi_app.services.outsource_service import list_shippable_processes
         from fastapi_app.shared_models import (
             Order as OrderModel,
+        )
+        from fastapi_app.shared_models import (
             OrderItem as OrderItemModel,
+        )
+        from fastapi_app.shared_models import (
             Product as ProductModel,
         )
 
