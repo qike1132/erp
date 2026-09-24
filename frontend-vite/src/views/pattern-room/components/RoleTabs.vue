@@ -1,32 +1,29 @@
 <template>
   <div v-if="roles.length > 0" class="role-tabs">
-    <div
+    <button
       v-for="role in roles"
       :key="role.id"
+      type="button"
       :class="['role-tab', { 'role-tab--active': role.id === currentRoleId }]"
+      :title="canRemove(role) ? '右键打开菜单' : undefined"
+      :aria-haspopup="canRemove(role) ? 'menu' : undefined"
+      :aria-expanded="canRemove(role) ? menu?.role.id === role.id : undefined"
       @click="$emit('select', role.id)"
+      @contextmenu="onContextMenu($event, role)"
+      @keydown="onTabKeydown($event, role)"
     >
       <span class="role-tab-name">
         {{ role.role_name }}
-        <FontAwesomeIcon v-if="role.is_default" icon="fas fa-thumbtack" class="role-tab-pin" aria-label="默认角色" title="默认角色" />
+        <FontAwesomeIcon
+          v-if="role.is_default"
+          icon="fas fa-thumbtack"
+          class="role-tab-pin"
+          aria-label="默认角色"
+          title="默认角色"
+        />
       </span>
-      <button
-        v-if="canManage && !role.is_default"
-        type="button"
-        class="role-tab-close"
-        title="删除角色"
-        @click.stop="$emit('remove', role)"
-      >
-        <FontAwesomeIcon icon="times" aria-hidden="true" />
-      </button>
-    </div>
-    <button
-      v-if="canManage"
-      type="button"
-      class="role-tab-add"
-      title="新增角色"
-      @click="onAddClick"
-    >
+    </button>
+    <button v-if="canManage" type="button" class="role-tab-add" title="新增角色" @click="onAddClick">
       <FontAwesomeIcon icon="plus" aria-hidden="true" />
     </button>
 
@@ -48,11 +45,26 @@
     <div v-if="$slots.actions" class="role-tabs-actions">
       <slot name="actions" />
     </div>
+
+    <!-- 右键菜单：删除角色（替代标签上的 × 按钮，避免误点） -->
+    <div
+      v-if="menu"
+      class="role-tab-menu-mask"
+      @click="closeMenu()"
+      @contextmenu.prevent="closeMenu()"
+      @wheel="closeMenu()"
+    />
+    <div v-if="menu" class="role-tab-menu" role="menu" :style="{ left: `${menu.x}px`, top: `${menu.y}px` }">
+      <button ref="menuItemEl" type="button" role="menuitem" class="role-tab-menu-item danger" @click="onMenuRemove">
+        <FontAwesomeIcon icon="trash-alt" aria-hidden="true" />
+        删除角色
+      </button>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, nextTick, watch } from 'vue'
+import { ref, nextTick, watch, onMounted, onBeforeUnmount } from 'vue'
 import type { RoleBrief } from '@/api/patternRoom'
 
 const props = defineProps<{
@@ -62,9 +74,9 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  'select': [roleId: number]
-  'add': [roleName: string]
-  'remove': [role: RoleBrief]
+  select: [roleId: number]
+  add: [roleName: string]
+  remove: [role: RoleBrief]
 }>()
 
 const adding = ref(false)
@@ -96,6 +108,86 @@ function onAddCancel() {
 watch(adding, (v) => {
   if (!v) newName.value = ''
 })
+
+/** 右键菜单：菜单坐标 + 目标角色；triggerEl 用于关闭后归还焦点 */
+const menu = ref<{ role: RoleBrief; x: number; y: number } | null>(null)
+const triggerEl = ref<HTMLElement | null>(null)
+const menuItemEl = ref<HTMLButtonElement | null>(null)
+
+/** 默认角色不可删除，无权限时也不开放 */
+function canRemove(role: RoleBrief) {
+  return props.canManage && !role.is_default
+}
+
+/** 关闭菜单；restoreFocus 仅用于键盘路径（Esc/激活菜单项），不抢鼠标用户刚点的位置 */
+function closeMenu(restoreFocus = false) {
+  if (!menu.value) return
+  menu.value = null
+  if (restoreFocus) triggerEl.value?.focus()
+}
+
+/** 打开菜单（贴近视口边缘时向内收拢，避免被裁掉），并把焦点移入首个菜单项 */
+async function openMenu(role: RoleBrief, x: number, y: number, trigger: HTMLElement) {
+  const MENU_WIDTH = 148
+  const MENU_HEIGHT = 42
+  const MARGIN = 8
+  triggerEl.value = trigger
+  menu.value = {
+    role,
+    // Math.max 兜底：视口比菜单还小时也要留在可点击范围内（不能出负坐标）
+    x: Math.max(MARGIN, Math.min(x, window.innerWidth - MENU_WIDTH - MARGIN)),
+    y: Math.max(MARGIN, Math.min(y, window.innerHeight - MENU_HEIGHT - MARGIN)),
+  }
+  await nextTick()
+  menuItemEl.value?.focus()
+}
+
+function onContextMenu(e: MouseEvent, role: RoleBrief) {
+  // 默认角色/无权限：不接管，走浏览器原生菜单
+  if (!canRemove(role)) return
+  e.preventDefault()
+  openMenu(role, e.clientX, e.clientY, e.currentTarget as HTMLElement)
+}
+
+/** 键盘入口：Enter/Space 由原生按钮触发 click，这里只处理菜单键与 Shift+F10 */
+function onTabKeydown(e: KeyboardEvent, role: RoleBrief) {
+  if (!canRemove(role)) return
+  if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
+    e.preventDefault()
+    const trigger = e.currentTarget as HTMLElement
+    const rect = trigger.getBoundingClientRect()
+    openMenu(role, rect.left + 12, rect.bottom + 4, trigger)
+  }
+}
+
+function onMenuRemove() {
+  const role = menu.value?.role
+  closeMenu(true)
+  // 菜单打开期间角色可能已被其他操作删掉，别对不存在的角色发起删除
+  if (role && props.roles.some((r) => r.id === role.id)) emit('remove', role)
+}
+
+function onDocumentKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape') closeMenu(true)
+}
+
+/** 窗口尺寸或滚动变化后菜单会与标签错位，直接关闭 */
+function onViewportChange() {
+  closeMenu()
+}
+
+onMounted(() => {
+  document.addEventListener('keydown', onDocumentKeydown)
+  window.addEventListener('resize', onViewportChange)
+  // scroll 不冒泡，需 capture 才能收到任意滚动容器（含键盘翻页滚动）的事件
+  window.addEventListener('scroll', onViewportChange, true)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', onDocumentKeydown)
+  window.removeEventListener('resize', onViewportChange)
+  window.removeEventListener('scroll', onViewportChange, true)
+})
 </script>
 
 <style scoped>
@@ -126,6 +218,7 @@ watch(adding, (v) => {
   background: #fff;
   color: var(--color-text-secondary, #6b7280);
   font-size: 13px;
+  font-family: inherit;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.15s ease;
@@ -161,30 +254,72 @@ watch(adding, (v) => {
   opacity: 0.7;
 }
 
-.role-tab-close {
-  display: inline-flex;
+/* 键盘聚焦时的焦点环（标签可 Tab 聚焦，便于键盘打开右键菜单） */
+.role-tab:focus-visible {
+  outline: 2px solid var(--color-primary-400, #60a5fa);
+  outline-offset: 1px;
+}
+
+/* 右键菜单：遮罩层负责点击/滚轮/再次右键关闭 */
+.role-tab-menu-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+}
+
+.role-tab-menu {
+  position: fixed;
+  z-index: 1001;
+  min-width: 140px;
+  padding: 5px;
+  border: 1px solid var(--color-border-light, #e2e8f0);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.16);
+  animation: role-tab-menu-pop 0.15s ease;
+}
+
+@keyframes role-tab-menu-pop {
+  from {
+    transform: scale(0.96) translateY(-4px);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1) translateY(0);
+    opacity: 1;
+  }
+}
+
+.role-tab-menu-item {
+  display: flex;
   align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  padding: 0;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
   border: none;
+  border-radius: 7px;
   background: transparent;
-  color: inherit;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  text-align: left;
   cursor: pointer;
-  border-radius: 50%;
-  font-size: 10px;
-  opacity: 0.6;
-  transition: all 0.15s ease;
+  transition: background 0.14s ease;
 }
 
-.role-tab-close:hover {
-  opacity: 1;
-  background: rgba(255, 255, 255, 0.25);
+.role-tab-menu-item.danger {
+  color: var(--color-danger-600, #d44042);
 }
 
-.role-tab--active .role-tab-close:hover {
-  background: rgba(255, 255, 255, 0.3);
+.role-tab-menu-item.danger:hover {
+  background: var(--color-danger-50, #fde8e8);
+}
+
+/* 菜单项由键盘聚焦时（打开即聚焦）给出可见焦点 */
+.role-tab-menu-item:focus-visible {
+  outline: 2px solid var(--color-primary-400, #60a5fa);
+  outline-offset: -2px;
 }
 
 .role-tab-add {
