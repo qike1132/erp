@@ -292,6 +292,30 @@ def require_permission(permission_name: str):
     return permission_checker
 
 
+def require_any_permission(*permission_names: str):
+    """
+    权限检查依赖工厂：拥有其中任一权限即可放行。
+
+    用于「同一批接口被多个页面共用、而各页面的导航权限码不同」的场景
+    （如采购中心接口同时服务于「采购中心」「物料计算器」页面），
+    避免管理员按导航勾选权限后接口仍返回 403。
+
+    注意：调用时必须至少传一个权限码；若传了空集合，`any(())` 恒为 False，
+    将拒绝所有非超管用户（fail-closed，视为误用而非放行）。
+
+    用法：
+        @router.get("/...")
+        async def endpoint(user: User = Depends(require_any_permission("product_manage", "purchase_center_manage"))):
+            ...
+    """
+
+    async def permission_checker(current_user: User=Depends(_get_user_with_permissions)) -> User:
+        if not any(current_user.has_permission(name) for name in permission_names):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='权限不足')
+        return current_user
+    return permission_checker
+
+
 def require_superuser(permission_name: str = 'user_manage'):
     """
     超级用户权限检查依赖工厂。

@@ -6,7 +6,7 @@
         <div class="bk-head-sub">生产环境 · 数据备份与恢复</div>
       </div>
       <div class="bk-header-actions">
-        <button class="bk-btn bk-btn-primary" @click="openWizard">一键还原向导</button>
+        <button class="bk-btn bk-btn-primary" @click="openWizard">还原备份</button>
         <label class="bk-btn bk-btn-outline">
           从文件上传还原
           <input type="file" accept=".zip,.json,.gz" hidden @change="onUploadRestore" />
@@ -46,13 +46,15 @@
     </section>
 
     <section class="bk-section">
-      <RestoreWizard
+      <RestoreConfirmDialog
         :open="wizardOpen"
         :server-backups="serverBackups"
-        :plan="plan"
-        :task="taskState"
         :initial-filename="wizardInitialFilename"
-        :on-preview="previewPlan"
+        :plan="plan"
+        :plan-loading="planLoading"
+        :task="taskState"
+        :result="restoreResult"
+        :on-plan="previewPlan"
         :on-execute="executeRestore"
         @close="wizardOpen = false"
       />
@@ -85,9 +87,9 @@ import BackupOverviewCards from '@/components/backup/BackupOverviewCards.vue'
 import BackupActions from '@/components/backup/BackupActions.vue'
 import ScheduleConfig from '@/components/backup/ScheduleConfig.vue'
 import PathSettings from '@/components/backup/PathSettings.vue'
-import RestoreWizard, { type ServerBackupSummary } from '@/components/backup/RestoreWizard.vue'
+import RestoreConfirmDialog, { type ServerBackupSummary, type RestoreExecuteOptions } from '@/components/backup/RestoreConfirmDialog.vue'
 import BackupRecordTable, { type BackupRecordRow } from '@/components/backup/BackupRecordTable.vue'
-import { useBackupTask } from '@/components/backup/composables/useBackupTask'
+import { useBackupTask, type BackupTaskState } from '@/components/backup/composables/useBackupTask'
 
 /* ---------- 概览 / 调度 / 设置 ---------- */
 const status = ref<Record<string, unknown> | null>(null)
@@ -102,6 +104,14 @@ const busy = ref(false)
 const uploadRestoring = ref(false)
 /** 当前任务类型，用于终态 toast 文案（备份/还原共用同一轮询） */
 const taskKind = ref<'备份' | '还原'>('备份')
+/** 还原任务终态快照：统一轮询终态会复位 taskState，弹窗据此渲染结果报告 */
+const restoreResult = ref<BackupTaskState | null>(null)
+/**
+ * 标记「当前在跑的任务是否由还原弹窗发起」。
+ * 备份任务、上传文件还原与弹窗共用同一套轮询与终态回调，若不隔离，
+ * 备份完成会把弹窗顶到「还原完成」，向操作者展示从未发生的成功报告。
+ */
+const restoreFromDialog = ref(false)
 
 /** 后端 409/500 的 detail 形如 {code, message}，取不到时回退默认文案 */
 function errText(e: unknown, fallback: string): string {
@@ -114,6 +124,12 @@ function errText(e: unknown, fallback: string): string {
 const { state: taskState } = useBackupTask(
   () => activeTaskId.value,
   () => {
+    // 统一轮询在终态会复位任务状态，先快照再复位，否则弹窗结果报告会丢失。
+    // 仅快照弹窗发起的还原，避免备份/上传还原的终态污染弹窗结果报告
+    if (restoreFromDialog.value) {
+      restoreResult.value = { ...taskState.value }
+      restoreFromDialog.value = false
+    }
     busy.value = false
     uploadRestoring.value = false
     // B7 修复：终态清空 activeTaskId，否则备份按钮终身禁用（task?.taskId
@@ -124,6 +140,10 @@ const { state: taskState } = useBackupTask(
     void loadRecords()
   },
   (error: string) => {
+    if (restoreFromDialog.value) {
+      restoreResult.value = { ...taskState.value }
+      restoreFromDialog.value = false
+    }
     busy.value = false
     uploadRestoring.value = false
     activeTaskId.value = null
@@ -139,11 +159,12 @@ const recordsPage = ref(1)
 const recordsPageSize = ref(20)
 const recordsLoading = ref(false)
 
-/* ---------- 还原向导 ---------- */
+/* ---------- 还原确认弹窗 ---------- */
 const wizardOpen = ref(false)
 const wizardInitialFilename = ref('')
 const serverBackups = ref<ServerBackupSummary[]>([])
 const plan = ref<BackupRestorePlan | null>(null)
+const planLoading = ref(false)
 
 async function loadStatus() {
   statusLoading.value = true
@@ -261,8 +282,9 @@ async function loadRecords(page = recordsPage.value) {
 }
 function onRecordRestore(filename: string) {
   wizardInitialFilename.value = filename
+  restoreResult.value = null
+  plan.value = null
   wizardOpen.value = true
-  previewPlan(filename)
 }
 async function onRecordDownload(filename: string) {
   try {
@@ -287,16 +309,26 @@ async function onRecordDelete(filename: string) {
 
 function openWizard() {
   wizardInitialFilename.value = ''
+  restoreResult.value = null
+  plan.value = null
   wizardOpen.value = true
 }
+/** 预览请求序号：快速切换备份点时只接受最后一次的响应，避免展示错配的影响范围 */
+let planSeq = 0
 async function previewPlan(filename: string) {
+  const seq = ++planSeq
+  planLoading.value = true
+  plan.value = null
   try {
-    plan.value = await backupApi.restorePlan(filename)
+    const res = await backupApi.restorePlan(filename)
+    if (seq === planSeq) plan.value = res
   } catch {
-    plan.value = { success: false, filename, error: '预览失败' }
+    if (seq === planSeq) plan.value = { success: false, filename, error: '预览失败' }
+  } finally {
+    if (seq === planSeq) planLoading.value = false
   }
 }
-async function executeRestore(filename: string, opts?: { confirmSensitive?: boolean; password?: string }) {
+async function executeRestore(filename: string, opts?: RestoreExecuteOptions): Promise<boolean> {
   busy.value = true
   taskKind.value = '还原'
   try {
@@ -304,10 +336,19 @@ async function executeRestore(filename: string, opts?: { confirmSensitive?: bool
       confirmSensitive: opts?.confirmSensitive ?? false,
       password: opts?.password,
     })
-    activeTaskId.value = res.task_id ?? null
+    if (!res.task_id) {
+      // 无 task_id 则轮询无从启动、弹窗会永久停在进度态，按入队失败处理
+      busy.value = false
+      toast.error('还原任务未返回任务号，请稍后重试')
+      return false
+    }
+    activeTaskId.value = res.task_id
+    restoreFromDialog.value = true
+    return true
   } catch (e) {
     busy.value = false
     toast.error(errText(e, '触发还原失败，请稍后重试'))
+    return false
   }
 }
 async function onUploadRestore(e: Event) {

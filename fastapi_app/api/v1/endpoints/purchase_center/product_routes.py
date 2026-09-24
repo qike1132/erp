@@ -19,7 +19,7 @@ from fastapi_app.core.cache import CacheDomain
 from fastapi_app.core.cache_invalidation import InvalidationStrategy, cache_mgr
 from fastapi_app.core.database import get_async_db as get_db
 from fastapi_app.core.database import get_async_read_db as get_read_db
-from fastapi_app.core.deps import require_permission
+from fastapi_app.core.deps import require_any_permission
 from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.core.logger import logger
 from fastapi_app.core.response import success_response
@@ -48,7 +48,7 @@ async def api_get_products(
     sort_order: Literal['asc', 'desc'] = Query('desc', description='排序方向'),
     simple: bool = Query(False, description='是否精简模式'),
     db: AsyncSession = Depends(get_read_db),
-    _current_user=Depends(require_permission('product_manage')),
+    _current_user=Depends(require_any_permission('product_manage', 'material_calculator')),
 ) -> dict[str, Any]:
     """获取产品列表（Redis 缓存，TTL 60s，通过 CacheDomain.PRODUCT 失效）。
 
@@ -66,7 +66,7 @@ async def api_get_products(
 async def api_get_products_batch_bom(
     ids: str = Query('', description='产品 ID 列表，逗号分隔'),
     db: AsyncSession = Depends(get_read_db),
-    _current_user=Depends(require_permission('product_manage')),
+    _current_user=Depends(require_any_permission('product_manage', 'material_calculator')),
 ) -> dict[str, Any]:
     """批量获取产品 BOM 信息。
 
@@ -93,7 +93,7 @@ async def api_get_products_batch_bom(
 async def api_get_search_suggestions(
     q: str = Query('', max_length=100, description='搜索关键词'),
     db: AsyncSession = Depends(get_read_db),
-    _current_user=Depends(require_permission('product_manage')),
+    _current_user=Depends(require_any_permission('product_manage', 'material_calculator')),
 ) -> dict[str, Any]:
     """获取产品搜索建议（联想）。
 
@@ -119,7 +119,7 @@ async def api_get_search_suggestions(
 @router.get('/products/statistics', response_model=ProductStatisticsResponse)
 async def api_get_products_statistics(
     db: AsyncSession = Depends(get_read_db),
-    _current_user=Depends(require_permission('product_manage')),
+    _current_user=Depends(require_any_permission('product_manage', 'material_calculator')),
 ) -> dict[str, Any]:
     """获取产品统计数据。
 
@@ -145,7 +145,7 @@ async def api_get_products_statistics(
 async def api_search_products_for_bom_copy(
     keyword: str = Query(..., min_length=1, description='搜索关键词'),
     db: AsyncSession = Depends(get_read_db),
-    _current_user=Depends(require_permission('product_manage')),
+    _current_user=Depends(require_any_permission('product_manage', 'material_calculator')),
 ) -> dict[str, Any]:
     """搜索产品（用于 BOM 复制场景）。
 
@@ -175,7 +175,7 @@ async def api_search_products_for_bom_copy(
 async def api_get_product_bom(
     product_id: int,
     db: AsyncSession = Depends(get_read_db),
-    _current_user=Depends(require_permission('product_manage')),
+    _current_user=Depends(require_any_permission('product_manage', 'material_calculator')),
 ) -> dict[str, Any]:
     """获取产品 BOM 详情。
 
@@ -207,7 +207,7 @@ async def api_save_product_bom(
     product_id: int,
     data: BomSaveRequest,
     db: AsyncSession = Depends(get_db),
-    _current_user=Depends(require_permission('product_manage')),
+    _current_user=Depends(require_any_permission('product_manage', 'material_calculator')),
 ) -> dict[str, Any]:
     """保存产品 BOM 数据。
 
@@ -237,7 +237,7 @@ async def api_save_product_bom(
 async def api_get_bom_preview(
     source_product_id: int,
     db: AsyncSession = Depends(get_read_db),
-    _current_user=Depends(require_permission('product_manage')),
+    _current_user=Depends(require_any_permission('product_manage', 'material_calculator')),
 ) -> dict[str, Any]:
     """预览源产品的 BOM（用于复制前确认）。
 
@@ -259,7 +259,7 @@ async def api_copy_bom_to_product(
     target_product_id: int,
     data: BomCopyRequest,
     db: AsyncSession = Depends(get_db),
-    _current_user=Depends(require_permission('product_manage')),
+    _current_user=Depends(require_any_permission('product_manage', 'material_calculator')),
 ) -> dict[str, Any]:
     """将源产品 BOM 复制到目标产品。
 
@@ -290,7 +290,7 @@ async def api_copy_bom_to_product(
 async def api_calculate_material(
     data: CalculateMaterialRequest,
     db: AsyncSession = Depends(get_db),
-    _current_user=Depends(require_permission('product_manage')),
+    _current_user=Depends(require_any_permission('product_manage', 'material_calculator')),
 ) -> dict[str, Any]:
     """根据订单列表计算物料需求。
 
@@ -315,7 +315,7 @@ async def api_calculate_material(
 
 @router.get('/categories', response_model=CategoriesResponse)
 async def api_get_material_categories(
-    _current_user=Depends(require_permission('product_manage')),
+    _current_user=Depends(require_any_permission('product_manage', 'material_calculator')),
 ) -> dict[str, Any]:
     """获取物料分类列表。
 

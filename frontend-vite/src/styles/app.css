@@ -627,7 +627,7 @@ h6 { font-size: 0.8125rem; }
   }
   .mc-table th.is-num,
   .mc-table td.is-num {
-    text-align: right;
+    text-align: center;
     font-variant-numeric: tabular-nums;
   }
   .mc-table td.is-num {

@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi_app.core.cache import CacheDomain
 from fastapi_app.core.cache_invalidation import InvalidationStrategy, cache_mgr
 from fastapi_app.core.database import get_async_db, get_async_read_db
-from fastapi_app.core.deps import require_permission
+from fastapi_app.core.deps import require_any_permission
 from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.schemas.material_registration import (
     ActionResponse,
@@ -57,7 +57,7 @@ async def list_registrations(
     start_date: str = Query(''),
     end_date: str = Query(''),
     exclude_completed: bool = Query(False),
-    user: User = Depends(require_permission('product_manage')),
+    user: User = Depends(require_any_permission('product_manage', 'material_registration')),
     db: AsyncSession = Depends(get_async_read_db),
 ) -> RegistrationListResponse:
     """获取来料登记列表（支持分页和多维度筛选）。
@@ -89,7 +89,7 @@ async def list_registrations(
 @router.get('/registrations/{reg_id}', response_model=RegistrationDetailResponse)
 async def get_registration(
     reg_id: int,
-    user: User = Depends(require_permission('product_manage')),
+    user: User = Depends(require_any_permission('product_manage', 'material_registration')),
     db: AsyncSession = Depends(get_async_read_db),
 ) -> RegistrationDetailResponse:
     """获取来料登记详情。
@@ -114,7 +114,7 @@ async def get_registration(
 @router.get('/supplier-detail', response_model=SupplierDetailResponse)
 async def get_supplier_detail(
     order_no: str = Query(..., min_length=1),
-    user: User = Depends(require_permission('product_manage')),
+    user: User = Depends(require_any_permission('product_manage', 'material_registration')),
     db: AsyncSession = Depends(get_async_read_db),
 ) -> SupplierDetailResponse:
     """获取按供应商分组的来料聚合详情（服务端预聚合）。
@@ -136,7 +136,7 @@ async def get_supplier_detail(
 @router.post('/registrations', response_model=RegistrationDetailResponse)
 async def create_registration(
     data: MaterialRegistrationCreate,
-    user: User = Depends(require_permission('product_manage')),
+    user: User = Depends(require_any_permission('product_manage', 'material_registration')),
     db: AsyncSession = Depends(get_async_db),
 ) -> RegistrationDetailResponse:
     """创建来料登记。
@@ -182,7 +182,7 @@ async def create_registration(
 async def update_registration(
     reg_id: int,
     data: MaterialRegistrationUpdate,
-    user: User = Depends(require_permission('product_manage')),
+    user: User = Depends(require_any_permission('product_manage', 'material_registration')),
     db: AsyncSession = Depends(get_async_db),
 ) -> RegistrationDetailResponse:
     """更新来料登记。
@@ -225,7 +225,7 @@ async def update_registration(
 @router.delete('/registrations/{reg_id}', response_model=ActionResponse)
 async def delete_registration(
     reg_id: int,
-    user: User = Depends(require_permission('product_manage')),
+    user: User = Depends(require_any_permission('product_manage', 'material_registration')),
     db: AsyncSession = Depends(get_async_db),
 ) -> ActionResponse:
     """删除来料登记。
@@ -267,7 +267,7 @@ async def delete_registration(
 @router.get('/purchase-orders/available', response_model=AvailablePurchaseOrdersResponse)
 async def available_purchase_orders(
     status: str = Query('pending'),
-    user: User = Depends(require_permission('product_manage')),
+    user: User = Depends(require_any_permission('product_manage', 'material_registration')),
     db: AsyncSession = Depends(get_async_read_db),
 ) -> AvailablePurchaseOrdersResponse:
     """获取可用采购订单列表。
@@ -285,7 +285,7 @@ async def available_purchase_orders(
 
 @router.get('/stats/overview', response_model=StatsOverviewResponse)
 async def stats_overview(
-    user: User = Depends(require_permission('product_manage')),
+    user: User = Depends(require_any_permission('product_manage', 'material_registration')),
     db: AsyncSession = Depends(get_async_read_db),
 ) -> StatsOverviewResponse:
     """获取来料登记统计概览。
@@ -303,7 +303,7 @@ async def stats_overview(
 @router.get('/stats/trend', response_model=TrendResponse)
 async def stats_trend(
     days: int = Query(30, ge=1, le=365),
-    user: User = Depends(require_permission('product_manage')),
+    user: User = Depends(require_any_permission('product_manage', 'material_registration')),
     db: AsyncSession = Depends(get_async_read_db),
 ) -> TrendResponse:
     """获取来料登记趋势数据。
@@ -323,7 +323,7 @@ async def stats_trend(
 async def receive_material(
     item_id: int,
     data: ReceiveMaterialRequest,
-    user: User = Depends(require_permission('product_manage')),
+    user: User = Depends(require_any_permission('product_manage', 'material_registration')),
     db: AsyncSession = Depends(get_async_db),
 ) -> RegistrationDetailResponse:
     """物料收货登记。
@@ -366,7 +366,7 @@ async def receive_material(
 @router.get('/purchase-orders/{order_id}/items', response_model=PurchaseOrderItemsResponse)
 async def get_purchase_order_items(
     order_id: int,
-    user: User = Depends(require_permission('product_manage')),
+    user: User = Depends(require_any_permission('product_manage', 'material_registration')),
     db: AsyncSession = Depends(get_async_read_db),
 ) -> PurchaseOrderItemsResponse:
     """获取采购订单物料明细。
@@ -391,7 +391,7 @@ async def get_purchase_order_items(
 @router.post('/export')
 async def export_registrations(
     data: ExportRequest,
-    user: User = Depends(require_permission('product_manage')),
+    user: User = Depends(require_any_permission('product_manage', 'material_registration')),
     db: AsyncSession = Depends(get_async_read_db),
 ) -> StreamingResponse:
     """导出来料登记数据（真 xlsx 文件下载）。
@@ -432,7 +432,7 @@ async def get_history(
     material_category: str = Query(''),
     start_date: str = Query(''),
     end_date: str = Query(''),
-    user: User = Depends(require_permission('product_manage')),
+    user: User = Depends(require_any_permission('product_manage', 'material_registration')),
     db: AsyncSession = Depends(get_async_read_db),
 ) -> RegistrationHistoryResponse:
     """获取来料登记历史记录（支持分页和多维度筛选）。
@@ -462,7 +462,7 @@ async def get_suggestions(
     field: str = Query(''),
     keyword: str = Query(''),
     limit: int = Query(10, ge=1, le=50),
-    user: User = Depends(require_permission('product_manage')),
+    user: User = Depends(require_any_permission('product_manage', 'material_registration')),
     db: AsyncSession = Depends(get_async_read_db),
 ) -> SuggestionsResponse:
     """获取搜索联想建议。
@@ -482,7 +482,7 @@ async def get_suggestions(
 
 @router.get('/stats/distribution', response_model=StatsDistributionResponse)
 async def stats_distribution(
-    user: User = Depends(require_permission('product_manage')),
+    user: User = Depends(require_any_permission('product_manage', 'material_registration')),
     db: AsyncSession = Depends(get_async_read_db),
 ) -> StatsDistributionResponse:
     """获取来料登记状态分布统计。

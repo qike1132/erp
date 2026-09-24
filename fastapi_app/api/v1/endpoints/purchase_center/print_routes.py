@@ -20,7 +20,7 @@ from fastapi_app.api.v1.endpoints.purchase_center.export_utils import (
 )
 from fastapi_app.api.v1.endpoints.purchase_center.schemas import OrderIdsRequest, SummaryPrintRequest
 from fastapi_app.core.database import get_async_db as get_db
-from fastapi_app.core.deps import require_permission
+from fastapi_app.core.deps import require_any_permission
 from fastapi_app.core.logger import logger
 from fastapi_app.core.response import success_response
 from fastapi_app.schemas.purchase_center import SupplierSummaryResponse
@@ -29,7 +29,7 @@ from fastapi_app.services import purchase_center_service as svc
 router = APIRouter()
 
 @router.post('/orders/summary-print', response_model=SupplierSummaryResponse)
-async def api_summary_print(data: SummaryPrintRequest, db: AsyncSession=Depends(get_db), _user=Depends(require_permission('product_manage'))):
+async def api_summary_print(data: SummaryPrintRequest, db: AsyncSession=Depends(get_db), _user=Depends(require_any_permission('product_manage', 'purchase_center_manage'))):
     ids = data.ids
     format_type = data.format
     try:
@@ -70,7 +70,7 @@ async def api_summary_print(data: SummaryPrintRequest, db: AsyncSession=Depends(
         raise HTTPException(status_code=500, detail='操作失败，请稍后重试') from e
 
 @router.post('/orders/supplier-summary-export')
-async def export_supplier_summary_excel(data: OrderIdsRequest, db: AsyncSession=Depends(get_db), _user=Depends(require_permission('product_manage'))):
+async def export_supplier_summary_excel(data: OrderIdsRequest, db: AsyncSession=Depends(get_db), _user=Depends(require_any_permission('product_manage', 'purchase_center_manage'))):
     """根据选中的采购订单 ID 列表，按每个采购订单单独导出供应商采购订单 Excel。
     重载触发标记
 

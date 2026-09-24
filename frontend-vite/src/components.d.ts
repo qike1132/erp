@@ -15,7 +15,7 @@ declare module 'vue' {
     BackupOverviewCards: typeof import('./components/backup/BackupOverviewCards.vue')['default']
     BackupRecordTable: typeof import('./components/backup/BackupRecordTable.vue')['default']
     PathSettings: typeof import('./components/backup/PathSettings.vue')['default']
-    RestoreWizard: typeof import('./components/backup/RestoreWizard.vue')['default']
+    RestoreConfirmDialog: typeof import('./components/backup/RestoreConfirmDialog.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     ScheduleConfig: typeof import('./components/backup/ScheduleConfig.vue')['default']

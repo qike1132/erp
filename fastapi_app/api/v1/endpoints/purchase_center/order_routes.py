@@ -24,7 +24,7 @@ from fastapi_app.api.v1.endpoints.purchase_center.schemas import (
 from fastapi_app.core.cache import invalidate_cache
 from fastapi_app.core.database import get_async_db as get_db
 from fastapi_app.core.database import get_async_read_db as get_read_db
-from fastapi_app.core.deps import require_permission
+from fastapi_app.core.deps import require_any_permission
 from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.core.logger import logger
 from fastapi_app.core.response import success_response
@@ -78,7 +78,7 @@ async def _invalidate_unprocessed_cache() -> None:
 async def api_create_purchase_order(
     data: PurchaseOrderCreateRequest,
     db: AsyncSession = Depends(get_db),
-    _current_user=Depends(require_permission('product_manage')),
+    _current_user=Depends(require_any_permission('product_manage', 'purchase_center_manage')),
 ) -> dict[str, Any]:
     """创建采购订单。
 
@@ -109,7 +109,7 @@ async def api_create_purchase_order(
 async def api_one_click_generate_order(
     data: OneClickGenerateRequest,
     db: AsyncSession = Depends(get_db),
-    _current_user=Depends(require_permission('product_manage')),
+    _current_user=Depends(require_any_permission('product_manage', 'purchase_center_manage')),
     x_idempotency_key: str | None = Header(None, alias='X-Idempotency-Key', max_length=64),
 ) -> dict[str, Any]:
     """一键审核并生成采购订单。
@@ -166,7 +166,7 @@ async def api_get_purchase_orders(
     sort_by: str = Query('create_time', description='排序字段'),
     sort_order: str = Query('desc', description='排序方向: asc/desc'),
     db: AsyncSession = Depends(get_read_db),
-    _current_user=Depends(require_permission('product_manage')),
+    _current_user=Depends(require_any_permission('product_manage', 'purchase_center_manage')),
 ) -> dict[str, Any]:
     """获取采购订单列表（分页 + 搜索 + 排序）。
 
@@ -215,7 +215,7 @@ async def api_get_completed_purchase_orders(
     sort_by: str = Query('completed_at', description='排序字段'),
     sort_order: str = Query('desc', description='排序方向: asc/desc'),
     db: AsyncSession = Depends(get_read_db),
-    _current_user=Depends(require_permission('product_manage')),
+    _current_user=Depends(require_any_permission('product_manage', 'purchase_center_manage')),
 ) -> dict[str, Any]:
     """获取已完成采购订单列表。
 
@@ -260,7 +260,7 @@ async def api_get_completed_purchase_orders(
 async def api_export_completed_orders(
     data: ExportCompletedRequest,
     db: AsyncSession = Depends(get_db),
-    _current_user=Depends(require_permission('product_manage')),
+    _current_user=Depends(require_any_permission('product_manage', 'purchase_center_manage')),
 ) -> dict[str, Any]:
     """导出已完成订单数据。
 
@@ -280,7 +280,7 @@ async def api_export_completed_orders(
 async def api_get_completed_order_suggestions(
     q: str = Query('', description='搜索关键词'),
     db: AsyncSession = Depends(get_read_db),
-    _current_user=Depends(require_permission('product_manage')),
+    _current_user=Depends(require_any_permission('product_manage', 'purchase_center_manage')),
 ) -> dict[str, Any]:
     """获取已完成订单的搜索建议。
 
@@ -299,7 +299,7 @@ async def api_get_completed_order_suggestions(
 @router.get('/orders/completed/quick-filters', response_model=QuickFilterResponse)
 async def api_get_completed_order_quick_filters(
     db: AsyncSession = Depends(get_read_db),
-    _current_user=Depends(require_permission('product_manage')),
+    _current_user=Depends(require_any_permission('product_manage', 'purchase_center_manage')),
 ) -> dict[str, Any]:
     """获取已完成订单的快捷筛选标签及计数。
 
@@ -318,7 +318,7 @@ async def api_get_completed_order_quick_filters(
 async def api_get_purchase_order(
     order_id: int,
     db: AsyncSession = Depends(get_read_db),
-    _current_user=Depends(require_permission('product_manage')),
+    _current_user=Depends(require_any_permission('product_manage', 'purchase_center_manage')),
 ) -> dict[str, Any]:
     """获取采购订单详情。
 
@@ -344,7 +344,7 @@ async def api_update_purchase_order(
     order_id: int,
     data: PurchaseOrderUpdateRequest,
     db: AsyncSession = Depends(get_db),
-    _current_user=Depends(require_permission('product_manage')),
+    _current_user=Depends(require_any_permission('product_manage', 'purchase_center_manage')),
 ) -> dict[str, Any]:
     """更新采购订单。
 
@@ -374,7 +374,7 @@ async def api_update_purchase_order(
 async def api_delete_purchase_order(
     order_id: int,
     db: AsyncSession = Depends(get_db),
-    _current_user=Depends(require_permission('product_manage')),
+    _current_user=Depends(require_any_permission('product_manage', 'purchase_center_manage')),
 ) -> dict[str, Any]:
     """删除采购订单。
 
@@ -403,7 +403,7 @@ async def api_delete_purchase_order(
 async def api_complete_purchase_order(
     data: OrderIdRequest,
     db: AsyncSession = Depends(get_db),
-    _current_user=Depends(require_permission('product_manage')),
+    _current_user=Depends(require_any_permission('product_manage', 'purchase_center_manage')),
 ) -> dict[str, Any]:
     """完成采购订单。
 
@@ -439,7 +439,7 @@ async def api_complete_purchase_order(
 async def api_batch_complete_purchase_orders(
     data: BatchCompleteRequest,
     db: AsyncSession = Depends(get_db),
-    _current_user=Depends(require_permission('product_manage')),
+    _current_user=Depends(require_any_permission('product_manage', 'purchase_center_manage')),
 ) -> dict[str, Any]:
     """批量完成采购订单。
 
@@ -470,7 +470,7 @@ async def api_batch_complete_purchase_orders(
 async def api_batch_delete_purchase_orders(
     data: OrderIdsAltRequest,
     db: AsyncSession = Depends(get_db),
-    _current_user=Depends(require_permission('product_manage')),
+    _current_user=Depends(require_any_permission('product_manage', 'purchase_center_manage')),
 ) -> dict[str, Any]:
     """批量删除采购订单。
 
@@ -494,7 +494,7 @@ async def api_batch_delete_purchase_orders(
 async def api_get_orders_batch_print_data(
     data: OrderIdsRequest,
     db: AsyncSession = Depends(get_db),
-    _current_user=Depends(require_permission('product_manage')),
+    _current_user=Depends(require_any_permission('product_manage', 'purchase_center_manage')),
 ) -> dict[str, Any]:
     """批量获取采购订单打印数据。
 
@@ -515,7 +515,7 @@ async def api_get_unprocessed_orders(
     page: int = Query(1, ge=1, description='页码'),
     per_page: int = Query(15, ge=1, le=500, description='每页数量'),
     db: AsyncSession = Depends(get_read_db),
-    _current_user=Depends(require_permission('product_manage')),
+    _current_user=Depends(require_any_permission('product_manage', 'purchase_center_manage')),
 ) -> dict[str, Any]:
     """获取未处理订单列表。
 
@@ -536,7 +536,7 @@ async def api_get_unprocessed_orders(
 async def api_get_factory_order_summary(
     data: OrderIdsRequest,
     db: AsyncSession = Depends(get_db),
-    _current_user=Depends(require_permission('product_manage')),
+    _current_user=Depends(require_any_permission('product_manage', 'purchase_center_manage')),
 ) -> dict[str, Any]:
     """获取工厂订单汇总。
 
@@ -563,7 +563,7 @@ async def api_get_factory_order_summary(
 async def api_save_factory_summary_edits(
     data: FactorySummarySaveRequest,
     db: AsyncSession = Depends(get_db),
-    _current_user=Depends(require_permission('product_manage')),
+    _current_user=Depends(require_any_permission('product_manage', 'purchase_center_manage')),
 ) -> dict[str, Any]:
     """保存工厂订单汇总编辑。
 
@@ -614,7 +614,7 @@ async def api_save_factory_summary_edits(
 async def api_get_supplier_order_summary(
     data: OrderIdsRequest,
     db: AsyncSession = Depends(get_db),
-    _current_user=Depends(require_permission('product_manage')),
+    _current_user=Depends(require_any_permission('product_manage', 'purchase_center_manage')),
 ) -> dict[str, Any]:
     """获取供应商订单汇总。
 
@@ -641,7 +641,7 @@ async def api_get_supplier_order_summary(
 async def api_get_supplier_summary_by_vendor(
     data: OrderIdsRequest,
     db: AsyncSession = Depends(get_db),
-    _current_user=Depends(require_permission('product_manage')),
+    _current_user=Depends(require_any_permission('product_manage', 'purchase_center_manage')),
 ) -> dict[str, Any]:
     """按供应商汇总订单。
 

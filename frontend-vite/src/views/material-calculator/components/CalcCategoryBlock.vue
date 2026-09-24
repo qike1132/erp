@@ -29,7 +29,7 @@
             <th>供应商</th>
             <th>物料名称</th>
             <th>规格/色号</th>
-            <th>总采购量</th>
+            <th class="is-num">总采购量</th>
             <th>单位</th>
           </tr>
         </thead>
@@ -101,7 +101,7 @@ function unitOf(catKey: string, row: CalcRowVM): string {
 /* 列宽配比（colgroup 上的百分比）。
    目标：让**相邻表头文字之间的空隙相等**。
 
-   空隙公式（.mc-table 是 table-layout:fixed，padding 8px，表头一律左对齐）：
+   空隙公式（.mc-table 是 table-layout:fixed，padding 8px）：
        相邻空隙 = 本列盒宽 − 本列文字宽
    （左列的右内边距 + 右列的左内边距 = 16px，正好抵消，故 padding 不参与）
    ⇒ 要空隙处处相等，只需每列盒宽 = 文字宽 + 常数 C。
@@ -109,10 +109,8 @@ function unitOf(catKey: string, row: CalcRowVM): string {
    ⇒ 5C = 394.7 − 191.6 = 203.1 ⇒ C = 40.6
    ⇒ 目标盒宽 73.6 / 84.6 / 89.2 / 84.6 / 62.6 ⇒ 百分比 18.7 / 21.4 / 22.6 / 21.4 / 15.9
 
-   ⚠️ 表头必须左对齐（故 th 不带 .is-num）。曾用 .is-num 让「总采购量」表头右对齐
-   以贴合数字，但那会让本列的空白全堆在左侧、右侧只剩 2×padding：
-   实测空隙退化成 [38, 38.9, 73, 16]，极差 57px —— 表头间距不均的主因。
-   数字右对齐的价值保留在**数据行**（td 仍带 .is-num）。
+   「总采购量」列的表头与数据同带 .is-num 并居中（见 app.css），
+   数值不再贴右边界、与表头同轴。对齐方式不改变列盒宽，故上面的百分比仍然成立。
 
    百分比在 fixed 布局下是硬约束，表宽恒等于容器宽，不会溢出（见 app.css 的 .mc-table）。 */
 .mc-col-supplier {

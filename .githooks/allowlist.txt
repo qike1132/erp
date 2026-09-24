@@ -49,3 +49,11 @@ deliverables/engineering-assurance/_member-cody.md
 # 注：刻意不复述命中片段，避免本文件自身命中第 2 层规则。
 frontend-vite/src/views/user/components/UserCreateForm.vue
 frontend-vite/src/views/user/components/UserEditDialog.vue
+
+# 2026-09-24 复核：备份还原弹窗与其配套 HOTL 计划文档。
+# 两处命中片段的右值均为**变量引用/属性读取**，不含任何字面凭据；
+# 与上方 user 表单同属第 2 层「右侧是表达式而非字面量」收窄（④）
+# 尚未覆盖 .vue/.md 所致的误报（④ 目前仅对 .py 生效）。
+# 注：刻意不复述命中片段，避免本文件自身命中第 2 层规则。
+frontend-vite/src/components/backup/RestoreConfirmDialog.vue
+docs/plans/2026-09-24-backup-restore-direct-workflow.md
