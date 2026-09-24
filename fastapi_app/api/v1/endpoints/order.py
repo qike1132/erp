@@ -139,7 +139,8 @@ async def confirm_beile_order(
     async with db_transaction(db):
         result = await order_crud.confirm_beile_order(db, order_id, user)
     # 事务提交后再失效缓存，避免并发请求用未提交前数据回填缓存
-    await cache_mgr.invalidate(InvalidationStrategy.DOMAIN, CacheDomain.ORDER)
+    await cache_mgr.invalidate(
+        InvalidationStrategy.DOMAIN, CacheDomain.ORDER | CacheDomain.REPORT)
     await cache_mgr.invalidate(InvalidationStrategy.PURCHASE)
     return OrderActionResponse(**result)
 
@@ -157,7 +158,8 @@ async def confirm_beile_stockin(
     async with db_transaction(db):
         result = await order_crud.confirm_beile_stockin(db, stockin_id, user)
     # 事务提交后再失效缓存，避免并发请求用未提交前数据回填缓存
-    await cache_mgr.invalidate(InvalidationStrategy.DOMAIN, CacheDomain.ORDER)
+    await cache_mgr.invalidate(
+        InvalidationStrategy.DOMAIN, CacheDomain.ORDER | CacheDomain.REPORT)
     await cache_mgr.invalidate(InvalidationStrategy.PURCHASE)
     return OrderActionResponse(**result)
 
@@ -358,7 +360,10 @@ async def cancel_approval(
             await order_service.cancel_approval(db, approval_id, user)
     except PermissionDeniedError as e:
         raise HTTPException(status_code=403, detail=settings.sanitize_business_error(e)) from e
-    await cache_mgr.invalidate(InvalidationStrategy.DOMAIN, CacheDomain.ORDER_AND_INVENTORY)
+    await cache_mgr.invalidate(
+        InvalidationStrategy.DOMAIN,
+        CacheDomain.ORDER_AND_INVENTORY | CacheDomain.REPORT,
+    )
     await cache_mgr.invalidate_dashboard()
     return ApprovalCancelResponse(success=True, message="审批请求已取消")
 
@@ -386,7 +391,8 @@ async def update_batch_no(
             db, order_id=order_id, batch_no=batch_no,
             sync_same_batch=False, user=user,
         )
-    await cache_mgr.invalidate(InvalidationStrategy.DOMAIN, CacheDomain.ORDER)
+    await cache_mgr.invalidate(
+        InvalidationStrategy.DOMAIN, CacheDomain.ORDER | CacheDomain.REPORT)
     await cache_mgr.invalidate_dashboard()
     return success_response(message="批次号已更新")
 

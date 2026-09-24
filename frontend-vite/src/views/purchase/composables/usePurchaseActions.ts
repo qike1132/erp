@@ -154,7 +154,6 @@ export function usePurchaseActions(deps: PurchaseActionDeps) {
       .filter(Boolean)
       .sort()
     const orderTime = times.length > 0 ? times[times.length - 1]! : ''
-    showToast('正在汇总订单数据...', 'info')
     try {
       await summary.openSummary([...purchaseOrders.selectedIds], orderTime)
     } catch (err: unknown) {

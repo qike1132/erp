@@ -8,6 +8,7 @@ import { useQueryClient } from '@tanstack/vue-query'
 import { auxApi, orderApi } from '@/api'
 import { showToast } from '@/composables/useToast'
 import { getErrorMessage } from '@/types/errors'
+import { invalidateStockDataQueries } from '@/utils/queryKeys'
 import { QUANTITY_RANGE_MESSAGE, isQuantityOutOfRange } from './quantityRange'
 import type { OrderRecord, OrderDetailData } from './types'
 
@@ -85,10 +86,7 @@ export function useOrderDetailEdit(fetchOrders: () => Promise<void>) {
             'warning',
           )
           // 仍然刷新列表以反映已保存的数量变更
-          queryClient.invalidateQueries({ queryKey: ['orders-list'] })
-          queryClient.invalidateQueries({ queryKey: ['inventory'] })
-          queryClient.invalidateQueries({ queryKey: ['stockins-list'] })
-          queryClient.invalidateQueries({ queryKey: ['stockouts-list'] })
+          invalidateStockDataQueries(queryClient)
           fetchOrders()
           return
         }
@@ -96,10 +94,7 @@ export function useOrderDetailEdit(fetchOrders: () => Promise<void>) {
 
       showToast('保存成功', 'success')
       detailOpen.value = false
-      queryClient.invalidateQueries({ queryKey: ['orders-list'] })
-      queryClient.invalidateQueries({ queryKey: ['inventory'] })
-      queryClient.invalidateQueries({ queryKey: ['stockins-list'] })
-      queryClient.invalidateQueries({ queryKey: ['stockouts-list'] })
+      invalidateStockDataQueries(queryClient)
       fetchOrders()
     } catch (e: unknown) {
       showToast(getErrorMessage(e, '保存失败'), 'error')
@@ -117,8 +112,7 @@ export function useOrderDetailEdit(fetchOrders: () => Promise<void>) {
       deductRetryPending.value = false
       showToast('抵扣数量更新成功', 'success')
       detailOpen.value = false
-      queryClient.invalidateQueries({ queryKey: ['orders-list'] })
-      queryClient.invalidateQueries({ queryKey: ['inventory'] })
+      invalidateStockDataQueries(queryClient)
       fetchOrders()
     } catch (e: unknown) {
       showToast(getErrorMessage(e, '抵扣更新仍失败，请稍后重试'), 'error')

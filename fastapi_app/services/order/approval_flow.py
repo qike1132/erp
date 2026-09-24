@@ -99,7 +99,8 @@ async def _submit_edit_approval(
     await _create_approval_log_obj(approval_request, ApprovalLog.ACTION_CREATE, current_user, {'operation_data': operation_data})
 
     await db.flush()
-    await cache_mgr.invalidate(InvalidationStrategy.DOMAIN, CacheDomain.ORDER)
+    await cache_mgr.invalidate(
+        InvalidationStrategy.DOMAIN, CacheDomain.ORDER | CacheDomain.REPORT)
     await cache_mgr.invalidate_dashboard()
     logger.info(f'订单编辑审批请求已提交：{order.order_no}，申请人：{current_user.username}')
     return {'success': True, 'message': '已提交编辑审批请求，请等待管理员审批！', 'requires_approval': True}
@@ -135,7 +136,8 @@ async def _submit_delete_approval(
     await _create_approval_log_obj(approval_request, ApprovalLog.ACTION_CREATE, current_user, {'operation_data': operation_data})
 
     await db.flush()
-    await cache_mgr.invalidate(InvalidationStrategy.DOMAIN, CacheDomain.ORDER)
+    await cache_mgr.invalidate(
+        InvalidationStrategy.DOMAIN, CacheDomain.ORDER | CacheDomain.REPORT)
     await cache_mgr.invalidate_dashboard()
     logger.info(f'订单删除审批请求已提交：{order.order_no}，申请人：{current_user.username}')
     return {'success': True, 'message': '已提交删除审批请求，请等待管理员审批！', 'requires_approval': True}

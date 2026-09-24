@@ -76,6 +76,9 @@ class CacheInvalidationManager:
         count += await self._invalidate_by_pattern('orders:*')
         count += await self._invalidate_by_pattern('stockins:*')
         count += await self._invalidate_by_pattern('stockouts:*')
+        # 报表流水由订单/备货/出货聚合而来：入库/出库/退货写入后必须一并失效，
+        # 否则报表页在 TTL 内持续展示写入前的旧数据。
+        count += await self._invalidate_by_pattern('reports:*')
         # 商品列表首屏缓存亦含 current_stock（Product.to_dict），库存/订单变更后必须一并失效，
         # 否则首屏库存显示最多陈旧一个 TTL。
         # 模式不带 'erp:' 前缀：本方法经 _invalidate_by_pattern → cache.invalidate_cache →

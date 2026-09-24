@@ -243,7 +243,10 @@ async def update_deduct_quantity(
     order.status = await compute_order_status_from_db(db, order)
 
     await db.flush()
-    await cache_mgr.invalidate(InvalidationStrategy.DOMAIN, CacheDomain.ORDER_AND_INVENTORY)
+    await cache_mgr.invalidate(
+        InvalidationStrategy.DOMAIN,
+        CacheDomain.ORDER_AND_INVENTORY | CacheDomain.REPORT,
+    )
     await _safe_invalidate_purchase_cache()
 
     logger.info(f'订单抵扣修改：{order.order_no}，{current_deduct}->{new_deduct_quantity}，操作人：{current_user.username}')

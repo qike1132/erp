@@ -43,7 +43,10 @@ async def orchestrate_batch_orders(db: AsyncSession, orders_data: list[dict]) ->
         async with db_transaction(db):
             result = await batch_create_orders(db, orders_data)
 
-        await cache_mgr.invalidate(InvalidationStrategy.DOMAIN, CacheDomain.ORDER_AND_INVENTORY)
+        await cache_mgr.invalidate(
+            InvalidationStrategy.DOMAIN,
+            CacheDomain.ORDER_AND_INVENTORY | CacheDomain.REPORT,
+        )
         # 失效 dashboard 统计缓存（order_today/order_yesterday 受影响）
         # 与单条 orders/create 端点保持一致（order.py:96）
         await cache_mgr.invalidate_dashboard()
@@ -73,7 +76,7 @@ async def orchestrate_batch_stockins(db: AsyncSession, stockins_data: list[dict]
 
         await cache_mgr.invalidate(
             InvalidationStrategy.DOMAIN,
-            CacheDomain.ORDER_AND_INVENTORY | CacheDomain.STOCKIN,
+            CacheDomain.ORDER_AND_INVENTORY | CacheDomain.STOCKIN | CacheDomain.REPORT,
         )
 
         return result
@@ -89,7 +92,10 @@ async def orchestrate_batch_stockouts(db: AsyncSession, stockouts_data: list[dic
 
     # Post-commit: cache invalidation + 采购计划重算 + 事件发布
     try:
-        await cache_mgr.invalidate(InvalidationStrategy.DOMAIN, CacheDomain.ORDER_AND_INVENTORY)
+        await cache_mgr.invalidate(
+            InvalidationStrategy.DOMAIN,
+            CacheDomain.ORDER_AND_INVENTORY | CacheDomain.REPORT,
+        )
         # 失效 dashboard 统计缓存（stockout_today 受影响）
         await cache_mgr.invalidate_dashboard()
 

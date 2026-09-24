@@ -114,7 +114,10 @@ async def approve(
     async with db_transaction(db):
         result = await approval_service.approve_request(db, approval_id, user)
     # 事务提交后失效缓存，确保后续查询看到最新数据
-    await cache_mgr.invalidate(InvalidationStrategy.DOMAIN, CacheDomain.ORDER_AND_INVENTORY)
+    await cache_mgr.invalidate(
+        InvalidationStrategy.DOMAIN,
+        CacheDomain.ORDER_AND_INVENTORY | CacheDomain.REPORT,
+    )
     await cache_mgr.invalidate(InvalidationStrategy.PURCHASE)
     # 发布库存变更事件（失败不影响审批结果）
     await _publish_stock_event(result)
@@ -174,7 +177,10 @@ async def reject(
     """
     async with db_transaction(db):
         message = await approval_service.reject_request(db, approval_id, user, data.reason)
-    await cache_mgr.invalidate(InvalidationStrategy.DOMAIN, CacheDomain.ORDER_AND_INVENTORY)
+    await cache_mgr.invalidate(
+        InvalidationStrategy.DOMAIN,
+        CacheDomain.ORDER_AND_INVENTORY | CacheDomain.REPORT,
+    )
     return ApprovalActionResponse(message=message)
 
 

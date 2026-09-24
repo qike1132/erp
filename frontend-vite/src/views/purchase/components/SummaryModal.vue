@@ -6,7 +6,7 @@
   -->
   <UiDialog
     :open="open"
-    class="max-w-[1000px]"
+    max-width-class="max-w-[1400px]"
     :close-on-overlay-click="false"
     @update:open="$emit('close')"
   >

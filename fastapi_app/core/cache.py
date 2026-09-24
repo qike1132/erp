@@ -93,7 +93,8 @@ class CacheDomain(Flag):
     ORDER_AND_INVENTORY = ORDER | INVENTORY
     STOCKOUT = auto()
     MATERIAL = auto()
-    ALL = ORDER | INVENTORY | STOCKIN | STOCKOUT | PRODUCT | CUSTOMER | SEARCH | MATERIAL
+    REPORT = auto()
+    ALL = ORDER | INVENTORY | STOCKIN | STOCKOUT | PRODUCT | CUSTOMER | SEARCH | MATERIAL | REPORT
 
 
 # 缓存域 → pattern 映射（仅允许单域 key，禁止添加组合域 key，
@@ -116,6 +117,10 @@ _DOMAIN_PATTERN_MAP: dict[CacheDomain, tuple[str, ...]] = {
     CacheDomain.SEARCH: ("search:*",),
     CacheDomain.STOCKOUT: ("stockouts:*",),
     CacheDomain.MATERIAL: ("material:*",),
+    # 报表流水（reports:order_logs / stockin_logs / stockout_logs / deduction_logs）
+    # 由订单、备货、出货数据聚合而来，因此这三类写路径都必须一并失效 REPORT 域，
+    # 否则报表页在 TTL 内持续展示写入前的旧数据。
+    CacheDomain.REPORT: ("reports:*",),
 }
 
 

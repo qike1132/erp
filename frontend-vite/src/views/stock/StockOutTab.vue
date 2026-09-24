@@ -88,6 +88,7 @@ import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { showToast } from '@/composables/useToast'
 import { toISODate } from '@/utils/format'
+import { invalidateStockDataQueries } from '@/utils/queryKeys'
 
 import StockOutInputForm from './components/StockOutInputForm.vue'
 import StockOutStagingList from './components/StockOutStagingList.vue'
@@ -272,12 +273,15 @@ const { submitBatch } = useStockOutActions(staged, submitting, () => {
   recordsRef.value?.refresh()
   queryClient.invalidateQueries({ queryKey: ['pp-monthly'] })
   queryClient.invalidateQueries({ queryKey: ['pp-summary'] })
+  // 出货会同时改变库存汇总与报表流水，统一失效派生查询
+  invalidateStockDataQueries(queryClient)
 })
 
 function onStockoutImported() {
   recordsRef.value?.refresh()
   queryClient.invalidateQueries({ queryKey: ['pp-monthly'] })
   queryClient.invalidateQueries({ queryKey: ['pp-summary'] })
+  invalidateStockDataQueries(queryClient)
 }
 
 // 切换到记录查询tab时自动加载数据（首次进入时触发）

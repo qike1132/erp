@@ -10,6 +10,7 @@ import { stockApi, type BatchSubmitResponse } from '@/api'
 import { showToast } from '@/composables/useToast'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { getErrorMessage } from '@/types/errors'
+import { invalidateStockDataQueries } from '@/utils/queryKeys'
 import type { StagedItem } from './types'
 
 /** 兼容旧名，实际类型来自 API 层（避免两处定义漂移） */
@@ -163,8 +164,10 @@ export function useStagedItems() {
 
       reportSubmit(order, stockin)
 
-      if (order.attempted && !order.failed) queryClient.invalidateQueries({ queryKey: ['orders-list'] })
-      if (stockin.attempted && !stockin.failed) queryClient.invalidateQueries({ queryKey: ['stockins-list'] })
+      // 订单 / 备货任一写入成功都会改变库存汇总与报表流水，统一失效派生查询
+      const orderSubmitted = order.attempted && !order.failed
+      const stockinSubmitted = stockin.attempted && !stockin.failed
+      if (orderSubmitted || stockinSubmitted) invalidateStockDataQueries(queryClient)
     } finally {
       submitting.value = false
     }
