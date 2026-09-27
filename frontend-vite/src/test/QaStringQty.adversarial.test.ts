@@ -151,10 +151,10 @@ describe('【上线阻断项】字符串 quantity 不得导致「数量列/合�
     expect(qty0).not.toBe(fmtQty(0))
     expect(qty1).not.toBe(fmtQty(0))
 
-    // 合计行第 8 列 = ceil(10.05) + ceil(20.1) = 11 + 21 = 32
+    // 合计行数量列 = ceil(10.05) + ceil(20.1) = 11 + 21 = 32
     const totalCols = wrapper.findAll('tbody tr').at(-1)!.findAll('td')
-    expect(totalCols[4]!.text()).toBe('32')
-    expect(totalCols[4]!.text()).not.toBe(fmtQty(0))
+    expect(totalCols[3]!.text()).toBe('32')
+    expect(totalCols[3]!.text()).not.toBe(fmtQty(0))
 
     wrapper.unmount()
   })
@@ -207,8 +207,8 @@ describe('【上线阻断项】字符串 quantity 不得导致「数量列/合�
     expect((inputs[1]!.element as HTMLInputElement).value).toBe('20.1')
 
     const totalCols = wrapper.findAll('tbody tr').at(-1)!.findAll('td')
-    expect(totalCols[4]!.text()).toBe('32') // ceil(10.05)+ceil(20.1)
-    expect(totalCols[4]!.text()).not.toBe(fmtQty(0))
+    expect(totalCols[3]!.text()).toBe('32') // ceil(10.05)+ceil(20.1)
+    expect(totalCols[3]!.text()).not.toBe(fmtQty(0))
     wrapper.unmount()
   })
 })

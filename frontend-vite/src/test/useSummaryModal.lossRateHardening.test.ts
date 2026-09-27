@@ -47,7 +47,6 @@ import { usePurchaseActions } from '@/views/purchase/composables/usePurchaseActi
 import SummaryModal from '@/views/purchase/components/SummaryModal.vue'
 import { showToast } from '@/composables/useToast'
 import { purchaseApi } from '@/api'
-import { fmtQty } from '@/utils/formatQty'
 import type { FactorySummaryData, SupplierSummaryData } from '@/views/purchase/composables/useSummaryModal'
 
 // ---------------------------------------------------------------------------
@@ -194,7 +193,7 @@ describe('A. 损耗率放大改为纯展示派生（不再就地改写数据）'
       global: { stubs: { UiDialog: { template: '<div><slot name="title" /><slot /></div>' } } },
     })
     const firstDataRow = wrapper.findAll('tbody tr')[0]!
-    expect(firstDataRow.findAll('td')[8]!.text()).toBe('101')
+    expect(firstDataRow.findAll('td')[7]!.text()).toBe('101')
     wrapper.unmount()
   })
 
@@ -203,7 +202,7 @@ describe('A. 损耗率放大改为纯展示派生（不再就地改写数据）'
     const cellOf = (html: string) => {
       const doc = new DOMParser().parseFromString(`<table>${html}</table>`, 'text/html')
       const cells = [...doc.querySelectorAll('tbody tr td')]
-      return cells[8]!.textContent // 第 9 列 = 数量
+      return cells[7]!.textContent // 第 8 列 = 数量
     }
 
     // 10 × 1.005 = 10.05 → 向上取整为 11
@@ -487,8 +486,6 @@ describe('C. 自动保存可见反馈（lossRateSaveState）', () => {
       const status = wrapper.findAll('span').find((s) => known.includes(s.text()))
       if (c.text === null) expect(status).toBeUndefined()
       else expect(status?.text()).toBe(c.text)
-      // 既有小字提示保持不动
-      expect(wrapper.text()).toContain('备品 = 订单数量 × 对应布料损耗率‰（向上取整）')
       wrapper.unmount()
     }
   })

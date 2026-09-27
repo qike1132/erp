@@ -30,7 +30,6 @@ import SummaryModal from '@/views/purchase/components/SummaryModal.vue'
 import {
   buildFactoryHtml,
   buildSkuDisplayLines,
-  calcSpareQuantity,
   magnifyByLossRate,
 } from '@/views/purchase/composables/useSummaryModal'
 import type { FactorySummaryData, FactoryGroup } from '@/views/purchase/composables/useSummaryModal'
@@ -93,7 +92,7 @@ function mountModal(group: FactoryGroup, lossRate = 10) {
   })
 }
 
-/** 取首个数据行的单元格（客户 / 产品名称 / 订单数量 / 备品数量 / 供应商 …） */
+/** 取首个数据行的单元格（客户 / 产品名称 / 订单数量 / 供应商 …） */
 function firstRowCells(wrapper: ReturnType<typeof mountModal>) {
   const rows = wrapper.findAll('tbody tr')
   expect(rows.length).toBeGreaterThan(0)
@@ -149,8 +148,7 @@ describe('buildFactoryHtml（打印预览 / Excel 导出与屏幕同源）', () 
 
     expect(html).toContain('妹妹二代<br>Nommi糯米儿-宝藏收藏家系列毛绒盲盒<br>企鹅的订单<br>变形金刚<br><strong>合计</strong>')
     expect(html).toContain(`<strong>${fmtQty(3996444)}</strong>`)
-    // 备品列已改为逐布料行：239786.64 × 10‰ → ceil=2398；数量列按同率放大展示
-    expect(html).toContain(`<td>${fmtQty(calcSpareQuantity(fabricQty, 10))}</td>`)
+    // 数量列按损耗率放大展示：239786.64 × 1.01 → ceil
     expect(html).toContain(`<td>${Math.ceil(magnifyByLossRate(fabricQty, 10))}</td>`)
   })
 
@@ -165,11 +163,11 @@ describe('buildFactoryHtml（打印预览 / Excel 导出与屏幕同源）', () 
 })
 
 describe('SummaryModal 渲染（逐 SKU 分行）', () => {
-  it('C1 多 SKU：产品名称 / 订单数量各 5 行，备品为该布料行 ceil 值，末行为「合计」', async () => {
+  it('C1 多 SKU：产品名称 / 订单数量各 5 行，末行为「合计」', async () => {
     const wrapper = mountModal(multiSkuGroup())
     const cells = firstRowCells(wrapper)
 
-    // 列序：0 客户 | 1 产品名称 | 2 订单数量 | 3 备品数量 | 4 供应商 …
+    // 列序：0 客户 | 1 产品名称 | 2 订单数量 | 3 供应商 …
     const nameLines = cells[1]!.findAll('.sm-sku-line')
     const qtyLines = cells[2]!.findAll('.sm-sku-line')
 
@@ -181,8 +179,6 @@ describe('SummaryModal 渲染（逐 SKU 分行）', () => {
       '合计',
     ])
     expect(qtyLines).toHaveLength(5)
-    expect(cells[3]!.findAll('.sm-sku-line')).toHaveLength(0)
-    expect(cells[3]!.text()).toBe(fmtQty(2398))
     expect(nameLines[4]!.classes()).toContain('sm-sku-line--total')
     expect(nameLines[0]!.classes()).not.toContain('sm-sku-line--total')
 

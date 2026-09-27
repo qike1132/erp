@@ -19,22 +19,8 @@ function orderTimeLabel(orderTime: string): string {
 }
 
 /**
- * 备品数量 = ceil(订单数量 × 损耗率‰)。
- * 损耗率 ≤ 0 或 qty 非法/非正时返回 0。屏幕表格、打印预览、Excel 导出共用这一处来源。
- *
- * ⚠️ 本函数是备品公式的**前端唯一来源**，必须与后端
- * `fastapi_app/services/purchase_utils.calc_spare_quantity` 语义逐字一致；
- * 任何一处改动必须同步另一处。
- */
-export function calcSpareQuantity(qty: number, lossRate: number): number {
-  if (!lossRate || lossRate <= 0 || !Number.isFinite(qty) || qty <= 0) return 0
-  return Math.ceil(qty * (lossRate / 1000))
-}
-
-/**
  * 订单数量取数：产品数量优先，缺失时回退订单数量。
- * 与 calcSpareQuantity 共用同一防御口径：非法/缺失输入兜底 0。
- * 屏幕表格、打印预览、Excel 导出共用这一处来源。
+ * 非法/缺失输入兜底 0。屏幕表格、打印预览、Excel 导出共用这一处来源。
  */
 export function getGroupOrderQty(group: FactoryGroup): number {
   const v = parseFloat(String(group.product_quantity || group.order_quantity || 0))
@@ -141,7 +127,6 @@ export function buildFactoryHtml(data: FactorySummaryData, lossRate: number, fab
           tableHtml += `<td rowspan="${rowCount}">${cell((l) => l.name)}</td>`
           tableHtml += `<td rowspan="${rowCount}">${cell((l) => fmtQty(l.qty))}</td>`
         }
-        tableHtml += `<td>${escapeHtml(fmtQty(calcSpareQuantity(parseFloat(String(fabric.quantity)) || 0, rate)))}</td>`
         if (fi === 0) {
           tableHtml += `<td rowspan="${fabricCount}" style="font-weight:bold;">${escapeHtml(supplier.supplier_name)}</td>`
         }
@@ -232,8 +217,6 @@ export interface SkuDisplayLine {
  * - 多 SKU 时追加一行「合计」，合计取**订单级真值** `getGroupOrderQty(group)`
  *   （= 采购单 `product_quantity`），不依赖逐 SKU 之和，避免快照与主表不一致时
  *   展示出「对不上」的数字；
- * - 备品数量已改为**逐布料行**计算（见 SummaryFactoryTab 的 `spareForFabric`），
- *   与 SKU 行无关，故不在此产出；
  * - **物料数量在采购单侧是跨 SKU 合并值，无法拆分到 SKU**，故「布料名称 / 规格 / 数量」
  *   仍是订单级展示（与 /beile-order 已确立的口径一致，不编造无法追溯的数）；
  * - 单 SKU 或后端未返回 `skus` 时，只产出一行订单级数据 —— 与改动前逐字一致（零回归）。
@@ -789,7 +772,7 @@ export function useSummaryModal() {
     const tableHtml = buildFactoryHtml(factoryData.value, lossRate.value, fabricLossRates.value)
     printHtml(
       '工厂内部采购订单汇总',
-      `${orderTimeLabel(orderTime.value)}<table><thead><tr><th>客户</th><th>产品名称</th><th>订单数量</th><th>备品数量</th><th>供应商</th><th>布料名称</th><th>规格型号</th><th>损耗率</th><th>数量</th><th>单位</th></tr></thead><tbody>${tableHtml}</tbody></table>`,
+      `${orderTimeLabel(orderTime.value)}<table><thead><tr><th>客户</th><th>产品名称</th><th>订单数量</th><th>供应商</th><th>布料名称</th><th>规格型号</th><th>损耗率</th><th>数量</th><th>单位</th></tr></thead><tbody>${tableHtml}</tbody></table>`,
       SUMMARY_PRINT_STYLE,
     )
   }
@@ -807,7 +790,7 @@ export function useSummaryModal() {
   function exportFactory() {
     if (!factoryData.value) return
     const tableHtml = buildFactoryHtml(factoryData.value, lossRate.value, fabricLossRates.value)
-    const html = `<div style="text-align:center;margin-bottom:20px"><h2>工厂内部采购订单汇总</h2></div><table><thead><tr><th>客户</th><th>产品名称</th><th>订单数量</th><th>备品数量</th><th>供应商</th><th>布料名称</th><th>规格型号</th><th>损耗率</th><th>数量</th><th>单位</th></tr></thead><tbody>${tableHtml}</tbody></table>`
+    const html = `<div style="text-align:center;margin-bottom:20px"><h2>工厂内部采购订单汇总</h2></div><table><thead><tr><th>客户</th><th>产品名称</th><th>订单数量</th><th>供应商</th><th>布料名称</th><th>规格型号</th><th>损耗率</th><th>数量</th><th>单位</th></tr></thead><tbody>${tableHtml}</tbody></table>`
     downloadAsXls(html, '工厂内部采购汇总.xls')
   }
 

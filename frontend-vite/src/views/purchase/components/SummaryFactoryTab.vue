@@ -47,7 +47,6 @@
               class="text-[11px] text-text-muted whitespace-nowrap"
             >各订单损耗率不一致</span>
           </div>
-          <span class="text-[11px] text-text-muted whitespace-nowrap">备品 = 订单数量 × 对应布料损耗率‰（向上取整）</span>
         </div>
       </div>
       <template v-else>
@@ -74,7 +73,6 @@
           <th class="w-[9%]">客户</th>
           <th class="w-[15%]">产品名称</th>
           <th class="w-[7%]">订单数量</th>
-          <th class="w-[7%]">备品数量</th>
           <th class="w-[10%]">供应商</th>
           <th class="w-[20%]">布料名称</th>
           <th class="w-[14%]">规格型号</th>
@@ -102,7 +100,6 @@
               :class="['sm-sku-line', { 'sm-sku-line--total': line.isTotal }]"
             >{{ formatQty(line.qty) }}</div>
           </td>
-          <td>{{ formatQty(spareForFabric(row.fabric, row.gi, row.si, row.fi)) }}</td>
           <td v-if="row.isFirstSupplier" :rowspan="row.supplierFabricCount">{{ row.supplier.supplier_name }}</td>
           <td>{{ row.fabric.fabric_name }}</td>
           <td>{{ row.fabric.specification || '' }}</td>
@@ -145,14 +142,9 @@
         </tr>
         <tr class="bg-border-light font-bold">
           <td colspan="3" class="text-center">合计</td>
-          <td>
-            {{ formatQty(spareQuantityGrandTotal) }}
-          </td>
           <td colspan="3" />
           <td />
-          <td>
-            {{ factoryGrandTotal }}
-          </td>
+          <td>{{ factoryGrandTotal }}</td>
           <td />
         </tr>
       </tbody>
@@ -190,12 +182,12 @@
  * SummaryFactoryTab.vue — 汇总下单弹窗「工厂内部订单」页签。
  *
  * 损耗率粒度：
- * - 顶部「统一损耗率」为批量快捷入口（同时驱动供应商页放大与订单级备品率）；
+ * - 顶部「统一损耗率」为批量快捷入口（同时驱动供应商页放大与订单级损耗率落库）；
  * - 表格内「损耗率」列为**每一行布料**的差异化损耗率，逐行修改并自动落库。
  */
 import { computed } from 'vue'
 import { fmtQty as formatQty } from '@/utils/formatQty'
-import { calcSpareQuantity, magnifyByLossRate, ceilMagnifiedByLossRate, buildSkuDisplayLines } from '../composables/useSummaryModal'
+import { magnifyByLossRate, ceilMagnifiedByLossRate, buildSkuDisplayLines } from '../composables/useSummaryModal'
 import type { FactorySummaryData, FactoryGroup, SupplierGroup, FabricItem, SkuDisplayLine } from '../composables/useSummaryModal'
 
 const props = defineProps<{
@@ -271,30 +263,12 @@ function editFabricQty(fabric: FabricItem, gi: number, si: number, fi: number): 
   return magnifyByLossRate(parseFloat(String(fabric.quantity)) || 0, rateForFabric(gi, si, fi))
 }
 
-/** 该布料行的备品数量 = ceil(该行布料用量 × 该行损耗率‰)。 */
-function spareForFabric(fabric: FabricItem, gi: number, si: number, fi: number): number {
-  return calcSpareQuantity(parseFloat(String(fabric.quantity)) || 0, rateForFabric(gi, si, fi))
-}
-
 const factoryGrandTotal = computed(() => {
   let t = 0
   props.factoryData?.groups?.forEach((g, gi) =>
     g.suppliers?.forEach((s, si) =>
       s.fabrics?.forEach((f, fi) => {
         t += displayFabricQty(f, gi, si, fi)
-      }),
-    ),
-  )
-  return t
-})
-
-// 备品数量合计 = 各布料行备品之和（每行先 ceil 后累加，与列展示口径一致）
-const spareQuantityGrandTotal = computed(() => {
-  let t = 0
-  props.factoryData?.groups?.forEach((g, gi) =>
-    g.suppliers?.forEach((s, si) =>
-      s.fabrics?.forEach((f, fi) => {
-        t += spareForFabric(f, gi, si, fi)
       }),
     ),
   )

@@ -6,7 +6,7 @@
  * - applyFabricLossRateAndSave 仅把该行损耗率保存到该行对应的明细 item_ids；
  * - 自定义编辑加载的是按该行损耗率加放后的「订单用量」，保存时反推原始真值；
  * - 取消编辑恢复该行已落库的损耗率基线；
- * - buildFactoryHtml 按逐布料行损耗率分别计算备品与放大数量。
+ * - buildFactoryHtml 按逐布料行损耗率分别计算放大数量。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
@@ -141,16 +141,14 @@ describe('逐布料行差异化损耗率', () => {
     expect(m.fabricLossRates).toEqual([[[120]], [[50]]])
   })
 
-  it('打印/导出 HTML 按逐布料行损耗率分别计算备品与数量', () => {
+  it('打印/导出 HTML 按逐布料行损耗率分别计算数量', () => {
     const html = buildFactoryHtml(factorySummary(), 0, [[[100]], [[50]]])
 
-    // 行0：数量 100×1.1=110 → 110，备品 ceil(100×100‰)=10，损耗率 100
+    // 行0：数量 100×1.1=110 → 110，损耗率 100
     expect(html).toContain('>110<')
-    expect(html).toContain('>10.0<')
     expect(html).toContain('>100<')
-    // 行1：数量 50×1.05=52.5 → 53，备品 ceil(50×50‰)=3，损耗率 50
+    // 行1：数量 50×1.05=52.5 → 53，损耗率 50
     expect(html).toContain('>53<')
-    expect(html).toContain('>3.0<')
     expect(html).toContain('>50<')
   })
 
