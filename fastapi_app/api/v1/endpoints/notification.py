@@ -8,6 +8,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi_app.api.ws import _issue_ws_ticket
 from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import get_current_user_id
 from fastapi_app.core.exceptions import db_transaction
@@ -21,6 +22,15 @@ from fastapi_app.shared_models import Notification
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+@router.get("/ws-ticket")
+async def create_websocket_ticket(
+    user_id: int = Depends(get_current_user_id),
+) -> dict:
+    """签发 30 秒有效的一次性 WebSocket 认证票据。"""
+    ticket = await _issue_ws_ticket(user_id)
+    return success_response(ticket=ticket)
 
 
 @router.get("/unread-count")

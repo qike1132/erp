@@ -1,19 +1,22 @@
 """
 WebSocket 实时通知端点
 
-从 main.py 提取。支持两种认证方式：
+从 main.py 提取。支持三种认证方式：
 1. Cookie JWT（浏览器自动携带）
-2. 首条消息认证（移动端/API客户端发送 {"type":"auth","token":"xxx"}）
+2. WebSocket 认证票据（解决 Vite/部分网关代理不转发 Cookie 的握手问题）
+3. 首条消息认证（移动端/API客户端发送 {"type":"auth","token":"xxx"}）
 
 安全机制：
 - 连接建立前校验 Origin 白名单（防跨站劫持）
-- 建立连接后进行 Cookie/消息 JWT 认证
+- 建立连接后进行 Cookie/票据/消息 JWT 认证
+- 票据有效期 30 秒且一次性使用，不暴露长期 JWT
 - disconnect 安全处理未注册连接（防二次异常）
 """
 
 import asyncio
 import json as _json
 import logging
+import secrets
 import time
 from urllib.parse import urlparse
 
@@ -28,6 +31,49 @@ from fastapi_app.shared_models import User as WSUser
 logger = logging.getLogger(__name__)
 
 _WS_AUTH_TIMEOUT = 5
+_WS_TICKET_TTL_SECONDS = 30
+_WS_TICKET_PREFIX = "ws:auth_ticket:"
+_WS_HEARTBEAT_INTERVAL_SECONDS = 30
+_WS_HEARTBEAT_TIMEOUT = 60
+_WS_RATE_LIMIT = 30
+_WS_VERIFY_INTERVAL = 60
+
+_WS_PENDING_TICKETS: dict[str, int] = {}
+
+
+async def _issue_ws_ticket(user_id: int) -> str:
+    from fastapi_app.core.redis_wrapper import safe_set
+
+    ticket = secrets.token_urlsafe(32)
+    await safe_set(
+        _WS_TICKET_PREFIX + ticket,
+        str(user_id),
+        timeout=_WS_TICKET_TTL_SECONDS,
+        context="WebSocket认证票据",
+    )
+    _WS_PENDING_TICKETS[ticket] = user_id
+    return ticket
+
+
+async def _consume_ws_ticket(ticket: str) -> int | None:
+    from fastapi_app.core.redis_wrapper import safe_delete, safe_get
+
+    if not ticket:
+        return None
+
+    user_id = _WS_PENDING_TICKETS.pop(ticket, None)
+    if user_id is None:
+        value = await safe_get(_WS_TICKET_PREFIX + ticket, context="WebSocket认证票据")
+        if value is None:
+            return None
+        try:
+            user_id = int(value)
+        except (TypeError, ValueError):
+            return None
+        await safe_delete(_WS_TICKET_PREFIX + ticket, context="WebSocket认证票据")
+    else:
+        await safe_delete(_WS_TICKET_PREFIX + ticket, context="WebSocket认证票据")
+    return user_id
 
 
 def _origin_allowed(origin: str | None) -> bool:
@@ -71,24 +117,30 @@ def register_websocket(app: FastAPI) -> None:
         user_id = None
         pending_message = None
 
-        cookie_token = websocket.cookies.get("access_token")
-        if cookie_token:
-            try:
-                from fastapi_app.core.deps import _decode_jwt_token, is_token_revoked
-                payload = _decode_jwt_token(cookie_token)
-                jti = payload.get("jti")
-                if jti and await is_token_revoked(jti):
-                    logger.warning("WebSocket Cookie认证失败: token已撤销")
-                    await websocket.close(code=4001, reason="Token revoked")
-                    return
-                else:
-                    uid = payload.get("sub")
-                    if uid:
-                        user_id = int(uid)
-            except (ValueError, TypeError) as e:
-                logger.warning("WebSocket Cookie认证失败: %s | exc_type=%s", e, type(e).__name__)
-            except Exception as e:  # 认证流程异常（如 HTTPException）不应中断连接建立  # broad-except: WebSocket 连接容错，异常时关闭连接
-                logger.warning("WebSocket Cookie认证异常: exc_type=%s msg=%s", type(e).__name__, e)
+        ticket = websocket.query_params.get("ticket")
+        ticket_user_id = await _consume_ws_ticket(ticket)
+        if ticket_user_id is not None:
+            user_id = ticket_user_id
+
+        if not user_id:
+            cookie_token = websocket.cookies.get("access_token")
+            if cookie_token:
+                try:
+                    from fastapi_app.core.deps import _decode_jwt_token, is_token_revoked
+                    payload = _decode_jwt_token(cookie_token)
+                    jti = payload.get("jti")
+                    if jti and await is_token_revoked(jti):
+                        logger.warning("WebSocket Cookie认证失败: token已撤销")
+                        await websocket.close(code=4001, reason="Token revoked")
+                        return
+                    else:
+                        uid = payload.get("sub")
+                        if uid:
+                            user_id = int(uid)
+                except (ValueError, TypeError) as e:
+                    logger.warning("WebSocket Cookie认证失败: %s | exc_type=%s", e, type(e).__name__)
+                except Exception as e:  # 认证流程异常（如 HTTPException）不应中断连接建立  # broad-except: WebSocket 连接容错，异常时关闭连接
+                    logger.warning("WebSocket Cookie认证异常: exc_type=%s msg=%s", type(e).__name__, e)
 
         if not user_id:
             try:
@@ -98,15 +150,19 @@ def register_websocket(app: FastAPI) -> None:
                 try:
                     msg = _json.loads(initial_data)
                     if msg.get("type") == "auth" and msg.get("token"):
-                        from fastapi_app.core.deps import _decode_jwt_token, is_token_revoked
-                        payload = _decode_jwt_token(msg["token"])
-                        jti = payload.get("jti")
-                        if jti and await is_token_revoked(jti):
-                            logger.warning("WebSocket首条消息认证失败: token已撤销")
+                        ticket_user_id = await _consume_ws_ticket(str(msg["token"]))
+                        if ticket_user_id is not None:
+                            user_id = ticket_user_id
                         else:
-                            uid = payload.get("sub")
-                            if uid:
-                                user_id = int(uid)
+                            from fastapi_app.core.deps import _decode_jwt_token, is_token_revoked
+                            payload = _decode_jwt_token(msg["token"])
+                            jti = payload.get("jti")
+                            if jti and await is_token_revoked(jti):
+                                logger.warning("WebSocket首条消息认证失败: token已撤销")
+                            else:
+                                uid = payload.get("sub")
+                                if uid:
+                                    user_id = int(uid)
                     else:
                         pending_message = initial_data
                 except (ValueError, TypeError, _json.JSONDecodeError) as e:
@@ -140,10 +196,6 @@ def register_websocket(app: FastAPI) -> None:
         msg_count = 0
         msg_window_start = time.monotonic()
         last_verify_time = time.monotonic()
-        time.monotonic()
-        MSG_RATE_LIMIT = 30  # max messages per minute
-        VERIFY_INTERVAL = 60  # verify user active every 60s
-        HEARTBEAT_TIMEOUT = 60  # 60s 无响应则断开（stale 连接清理）
 
         try:
             if pending_message and pending_message == "ping":
@@ -152,7 +204,7 @@ def register_websocket(app: FastAPI) -> None:
             while True:
                 try:
                     data = await asyncio.wait_for(
-                        websocket.receive_text(), timeout=HEARTBEAT_TIMEOUT
+                        websocket.receive_text(), timeout=_WS_HEARTBEAT_TIMEOUT
                     )
                 except TimeoutError:
                     logger.info("WebSocket 心跳超时断开: user_id=%s", user_id)
@@ -165,13 +217,13 @@ def register_websocket(app: FastAPI) -> None:
                     msg_count = 0
                     msg_window_start = now
                 msg_count += 1
-                if msg_count > MSG_RATE_LIMIT:
+                if msg_count > _WS_RATE_LIMIT:
                     logger.warning("WebSocket 消息频率超限: user_id=%s", user_id)
                     await websocket.close(code=4008, reason="消息频率超限")
                     break
 
                 # Periodic user active verification
-                if now - last_verify_time > VERIFY_INTERVAL:
+                if now - last_verify_time > _WS_VERIFY_INTERVAL:
                     last_verify_time = now
                     async with async_engine.connect() as conn:
                         try:

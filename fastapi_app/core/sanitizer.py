@@ -10,9 +10,8 @@ from typing import Any
 
 # 敏感字段名（不区分大小写），命中后值会被脱敏
 _SENSITIVE_KEYS = frozenset({
-    'password', 'passwd', 'pwd',
-    'token', 'access_token', 'refresh_token', 'csrf_token',
-    'secret', 'api_key', 'apikey', 'authorization',
+    'password', 'passwd', 'pwd', 'token', 'access_token', 'refresh_token', 'csrf_token',
+    'secret', 'api_key', 'apikey', 'authorization', 'ticket', 'ws_ticket',
     'x_backup_password', 'backup_password',
     'session', 'session_id', 'cookie',
 })

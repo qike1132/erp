@@ -1,6 +1,10 @@
-import { post, upload } from './request'
+import { get, post, upload } from './request'
 import service from './request'
 import type { ApiResponse, LoginResponse, UserInfo } from '@/types'
+
+export const websocketApi = {
+  ticket: () => get<{ ticket: string }>('/notifications/ws-ticket'),
+}
 
 export const authApi = {
   login: (data: { username: string; password: string; remember?: boolean }) => post<LoginResponse>('/auth/login', data),
