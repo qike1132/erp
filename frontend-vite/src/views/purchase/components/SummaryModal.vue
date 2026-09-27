@@ -44,11 +44,14 @@
         :order-count="orderCount"
         :loss-rate-save-state="lossRateSaveState"
         :loss-rate-mixed="lossRateMixed"
+        :fabric-loss-rates="fabricLossRates"
+        :fabric-loss-rate-mixed="fabricLossRateMixed"
         @close="$emit('close')"
         @toggle-edit-mode="$emit('toggleEditMode', $event)"
         @save-edits="$emit('saveEdits')"
         @update-qty="(gi, si, fi, value) => $emit('updateQty', gi, si, fi, value)"
         @loss-rate-input="applyLossRateDebounced"
+        @fabric-loss-rate-input="applyFabricLossRateDebounced"
         @export-factory="$emit('exportFactory')"
         @print-factory="$emit('printFactory')"
       />
@@ -102,6 +105,10 @@ defineProps<{
   lossRateSaveState?: 'idle' | 'saving' | 'saved' | 'error'
   /** 各单损耗率不一致（缺省视为 false；由 useSummaryModal 提供）→ 输入框旁提示 */
   lossRateMixed?: boolean
+  /** 每个布料行当前的损耗率（由 useSummaryModal 提供） */
+  fabricLossRates?: number[][][]
+  /** 每个布料行内各明细损耗率是否不一致（由 useSummaryModal 提供） */
+  fabricLossRateMixed?: boolean[][][]
 }>()
 
 const emit = defineEmits<{
@@ -110,6 +117,7 @@ const emit = defineEmits<{
   saveEdits: []
   updateQty: [gi: number | string, si: number | string, fi: number | string, value: string]
   applyLossRate: [rate: number]
+  applyFabricLossRate: [gi: number, si: number, fi: number, rate: number]
   exportFactory: []
   exportSupplier: []
   printFactory: []
@@ -123,6 +131,9 @@ const activeTab = ref<'factory' | 'supplier'>('factory')
  * 定时器归属本组件（弹窗外壳）而非页签子组件，确保防抖窗口内切换页签不丢输入。
  */
 const applyLossRateDebounced = useDebounceFn((v: number) => emit('applyLossRate', v), 300)
+
+/** 单个布料行损耗率输入防抖：与统一输入同源 300ms，切换页签不丢输入。 */
+const applyFabricLossRateDebounced = useDebounceFn((gi: number, si: number, fi: number, v: number) => emit('applyFabricLossRate', gi, si, fi, v), 300)
 </script>
 
 <style scoped>

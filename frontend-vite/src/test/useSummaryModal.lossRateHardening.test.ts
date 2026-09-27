@@ -165,7 +165,7 @@ describe('A. 损耗率放大改为纯展示派生（不再就地改写数据）'
     await m.saveFactoryEdits()
 
     const [editsArg, rateArg] = vi.mocked(purchaseApi.saveFactoryEdits).mock.calls[0]!
-    expect(editsArg).toEqual([{ item_ids: [101], quantity: 12 }])
+    expect(editsArg).toEqual([{ item_ids: [101], quantity: 11.94 }])
     expect(rateArg).toBe(5)
   })
 
@@ -180,7 +180,7 @@ describe('A. 损耗率放大改为纯展示派生（不再就地改写数据）'
 
     m.applyLossRate(8)
 
-    // 展示加放 = 100 × 1.008 = 100.8（旧实现 = 100.5 × 1.008 = 101.3，即复利）
+    // 展示加放 = 100 × 1.008 = 100.8 → 向上取整显示 101（旧实现 = 100.5 × 1.008 = 101.3，即复利）
     const wrapper = mount(SummaryModal, {
       props: {
         open: true,
@@ -194,7 +194,7 @@ describe('A. 损耗率放大改为纯展示派生（不再就地改写数据）'
       global: { stubs: { UiDialog: { template: '<div><slot name="title" /><slot /></div>' } } },
     })
     const firstDataRow = wrapper.findAll('tbody tr')[0]!
-    expect(firstDataRow.findAll('td')[7]!.text()).toBe(fmtQty(100.8)) // '100.8'
+    expect(firstDataRow.findAll('td')[8]!.text()).toBe('101')
     wrapper.unmount()
   })
 
@@ -203,13 +203,13 @@ describe('A. 损耗率放大改为纯展示派生（不再就地改写数据）'
     const cellOf = (html: string) => {
       const doc = new DOMParser().parseFromString(`<table>${html}</table>`, 'text/html')
       const cells = [...doc.querySelectorAll('tbody tr td')]
-      return cells[7]!.textContent // 第 8 列 = 数量
+      return cells[8]!.textContent // 第 9 列 = 数量
     }
 
-    // 10 × 1.005 = 10.05（与改动前的就地放大 + fmtQty 输出逐字一致）
-    expect(cellOf(buildFactoryHtml(data, 5))).toBe(fmtQty(10.05))
-    // rate=0 时仍等于原值（两位小数四舍五入口径不变）
-    expect(cellOf(buildFactoryHtml(data, 0))).toBe(fmtQty(10))
+    // 10 × 1.005 = 10.05 → 向上取整为 11
+    expect(cellOf(buildFactoryHtml(data, 5))).toBe('11')
+    // rate=0 时仍等于原值（10 取整仍为 10）
+    expect(cellOf(buildFactoryHtml(data, 0))).toBe('10')
     // 打印 / 导出的 HTML 不因展示派生而被写回：源数据保持原值
     expect(data.groups[0]!.suppliers[0]!.fabrics[0]!.quantity).toBe(10)
   })
@@ -488,7 +488,7 @@ describe('C. 自动保存可见反馈（lossRateSaveState）', () => {
       if (c.text === null) expect(status).toBeUndefined()
       else expect(status?.text()).toBe(c.text)
       // 既有小字提示保持不动
-      expect(wrapper.text()).toContain('备品 = 订单数量 × 损耗率‰（向上取整）')
+      expect(wrapper.text()).toContain('备品 = 订单数量 × 对应布料损耗率‰（向上取整）')
       wrapper.unmount()
     }
   })

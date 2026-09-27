@@ -175,6 +175,7 @@ class PurchaseOrderItem(Base):
     unit_usage: Mapped[float | None] = mapped_column(Numeric(10, 4), default=0, comment='单SKU标准用量')
     unit_price: Mapped[float | None] = mapped_column(Numeric(12, 2), default=0, comment='单价')
     total_price: Mapped[float | None] = mapped_column(Numeric(12, 2), default=0, comment='总价')
+    loss_rate: Mapped[float | None] = mapped_column(Numeric(8, 2), comment='材料损耗率快照(千分之几)，逐布料行配置')
     material_category: Mapped[str | None] = mapped_column(String(20), comment='物料分类')
     remark: Mapped[str | None] = mapped_column(Text, comment='备注')
     supplier_name: Mapped[str | None] = mapped_column(String(100), comment='供应商名称(明细级)')
@@ -207,6 +208,7 @@ class PurchaseOrderItem(Base):
             'unit_usage': float(self.unit_usage) if self.unit_usage else 0,
             'unit_price': float(self.unit_price) if self.unit_price else 0,
             'total_price': float(self.total_price) if self.total_price else 0,
+            'loss_rate': float(self.loss_rate) if self.loss_rate is not None else None,
             'material_category': self.material_category,
             'supplier_name': self.supplier_name,
             'remark': self.remark

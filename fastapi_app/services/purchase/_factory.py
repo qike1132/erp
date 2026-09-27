@@ -150,8 +150,11 @@ def _build_factory_group_map(orders, bom_data, items_map, items_by_order, cust_o
                 'order_quantity': order_qty,
                 '_supplier_map': {},
                 '_sku_lines': [],
+                '_order_ids': [],
             }
         group = group_map[key]
+        if po.id not in group['_order_ids']:
+            group['_order_ids'].append(po.id)
 
         # 逐 SKU 展示明细：优先取逐 SKU 快照，缺失时回退订单级单行
         sku_lines = (po_sku_map or {}).get(po.id) or []
@@ -207,6 +210,7 @@ def _serialize_factory_groups(group_map: dict[tuple, dict]) -> list:
             'product_name': group['product_name'],
             'product_quantity': group['product_quantity'],
             'order_quantity': group['order_quantity'],
+            'order_ids': list(group.get('_order_ids') or []),
             'suppliers': suppliers,
             # 逐 SKU 展示明细（前端逐 SKU 分行 + 合计子行）。
             # 注意：逐 SKU 只有**订单数量**是权威的；物料数量在采购单侧是跨 SKU 合并值，

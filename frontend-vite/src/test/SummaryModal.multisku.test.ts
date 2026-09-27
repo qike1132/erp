@@ -5,9 +5,8 @@
  * （产品名不再被首个 SKU 覆盖、物料取全部 SKU 并集），并在分组上新增 `skus[]`；
  * 本文件锁定**前端展示契约**：
  *
- *   C1 多 SKU：产品名称 / 订单数量 / 备品数量 三列逐 SKU 分行，并追加「合计」子行；
+ *   C1 多 SKU：产品名称 / 订单数量 两列逐 SKU 分行，并追加「合计」子行；
  *   C2 合计口径 = 订单级真值 `getGroupOrderQty`（不依赖逐 SKU 之和）；
- *   C3 备品按各 SKU 自身数量 ceil，合计按订单级数量 ceil（与既有备品公式同源）；
  *   C4 单 SKU / 旧后端（无 skus）→ 只一行，与改动前逐字一致（零回归）；
  *   C5 打印预览 / Excel 导出（buildFactoryHtml）与屏幕同源，逐 SKU 以 <br> 分行。
  *
@@ -31,6 +30,8 @@ import SummaryModal from '@/views/purchase/components/SummaryModal.vue'
 import {
   buildFactoryHtml,
   buildSkuDisplayLines,
+  calcSpareQuantity,
+  magnifyByLossRate,
 } from '@/views/purchase/composables/useSummaryModal'
 import type { FactorySummaryData, FactoryGroup } from '@/views/purchase/composables/useSummaryModal'
 import { fmtQty } from '@/utils/formatQty'
@@ -101,7 +102,7 @@ function firstRowCells(wrapper: ReturnType<typeof mountModal>) {
 
 describe('buildSkuDisplayLines（逐 SKU 展示行唯一来源）', () => {
   it('C1/C2 多 SKU：4 个 SKU 各一行 + 「合计」子行，合计取订单级真值', () => {
-    const lines = buildSkuDisplayLines(multiSkuGroup(), 10)
+    const lines = buildSkuDisplayLines(multiSkuGroup())
 
     expect(lines.map((l) => l.name)).toEqual([
       '妹妹二代',
@@ -114,20 +115,15 @@ describe('buildSkuDisplayLines（逐 SKU 展示行唯一来源）', () => {
     expect(lines[4]!.qty).toBe(3996444)
     expect(lines.slice(0, 4).every((l) => l.isTotal === false)).toBe(true)
     expect(lines[4]!.isTotal).toBe(true)
-  })
-
-  it('C3 备品逐 SKU 各自 ceil，合计按订单级数量 ceil', () => {
-    const lines = buildSkuDisplayLines(multiSkuGroup(), 10)
-
-    expect(lines.slice(0, 4).map((l) => l.spare)).toEqual([9992, 9992, 9992, 9992])
-    expect(lines[4]!.spare).toBe(39965)
+    // 备品已改为逐布料行计算，SKU 行只承载名称/数量
+    expect(lines.every((l) => !('spare' in l))).toBe(true)
   })
 
   it('C4 单 SKU 只一行（不产生「合计」子行），与改动前逐字一致', () => {
-    const lines = buildSkuDisplayLines(singleSkuGroup(), 10)
+    const lines = buildSkuDisplayLines(singleSkuGroup())
 
     expect(lines).toHaveLength(1)
-    expect(lines[0]).toEqual({ name: '变形金刚', qty: 969461, spare: 9695, isTotal: false })
+    expect(lines[0]).toEqual({ name: '变形金刚', qty: 969461, isTotal: false })
   })
 
   it('C4 旧后端不返回 skus 时降级为订单级单行（零回归）', () => {
@@ -138,7 +134,7 @@ describe('buildSkuDisplayLines（逐 SKU 展示行唯一来源）', () => {
       suppliers: [],
     }
 
-    const lines = buildSkuDisplayLines(legacy, 0)
+    const lines = buildSkuDisplayLines(legacy)
 
     expect(lines).toHaveLength(1)
     expect(lines[0]!.name).toBe('妹妹二代、企鹅的订单')
@@ -149,10 +145,13 @@ describe('buildSkuDisplayLines（逐 SKU 展示行唯一来源）', () => {
 describe('buildFactoryHtml（打印预览 / Excel 导出与屏幕同源）', () => {
   it('C5 多 SKU：产品名称与订单数量单元格以 <br> 逐 SKU 分行，「合计」加粗', () => {
     const html = buildFactoryHtml(dataWith(multiSkuGroup()), 10)
+    const fabricQty = multiSkuGroup().suppliers[0]!.fabrics[0]!.quantity
 
     expect(html).toContain('妹妹二代<br>Nommi糯米儿-宝藏收藏家系列毛绒盲盒<br>企鹅的订单<br>变形金刚<br><strong>合计</strong>')
     expect(html).toContain(`<strong>${fmtQty(3996444)}</strong>`)
-    expect(html).toContain(`<strong>${fmtQty(39965)}</strong>`)
+    // 备品列已改为逐布料行：239786.64 × 10‰ → ceil=2398；数量列按同率放大展示
+    expect(html).toContain(`<td>${fmtQty(calcSpareQuantity(fabricQty, 10))}</td>`)
+    expect(html).toContain(`<td>${Math.ceil(magnifyByLossRate(fabricQty, 10))}</td>`)
   })
 
   it('C4 单 SKU：不出现 <br> 与「合计」，输出与改动前一致', () => {
@@ -166,14 +165,13 @@ describe('buildFactoryHtml（打印预览 / Excel 导出与屏幕同源）', () 
 })
 
 describe('SummaryModal 渲染（逐 SKU 分行）', () => {
-  it('C1 多 SKU：产品名称 / 订单数量 / 备品数量 三列各 5 行，末行为「合计」', async () => {
+  it('C1 多 SKU：产品名称 / 订单数量各 5 行，备品为该布料行 ceil 值，末行为「合计」', async () => {
     const wrapper = mountModal(multiSkuGroup())
     const cells = firstRowCells(wrapper)
 
     // 列序：0 客户 | 1 产品名称 | 2 订单数量 | 3 备品数量 | 4 供应商 …
     const nameLines = cells[1]!.findAll('.sm-sku-line')
     const qtyLines = cells[2]!.findAll('.sm-sku-line')
-    const spareLines = cells[3]!.findAll('.sm-sku-line')
 
     expect(nameLines.map((n) => n.text())).toEqual([
       '妹妹二代',
@@ -183,7 +181,8 @@ describe('SummaryModal 渲染（逐 SKU 分行）', () => {
       '合计',
     ])
     expect(qtyLines).toHaveLength(5)
-    expect(spareLines).toHaveLength(5)
+    expect(cells[3]!.findAll('.sm-sku-line')).toHaveLength(0)
+    expect(cells[3]!.text()).toBe(fmtQty(2398))
     expect(nameLines[4]!.classes()).toContain('sm-sku-line--total')
     expect(nameLines[0]!.classes()).not.toContain('sm-sku-line--total')
 

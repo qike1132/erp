@@ -205,6 +205,18 @@ export function usePurchaseActions(deps: PurchaseActionDeps) {
     }
   }
 
+  /**
+   * 单个布料行的损耗率输入 → 自动落库到该行对应的采购单明细。
+   * 防抖保留在 SummaryModal.vue；此处只负责调用 composable 并在失败时 toast。
+   */
+  async function handleApplyFabricLossRate(gi: number, si: number, fi: number, rate: number) {
+    try {
+      await summary.applyFabricLossRateAndSave(gi, si, fi, rate)
+    } catch (err: unknown) {
+      showToast((err as Error).message || '布料损耗率保存失败', 'error')
+    }
+  }
+
   function handleCompletedPageChange(page: number) {
     completed.page = page
     // 页码变更由 Vue Query queryKey 自动触发 fetch，不 invalidate 以保留 prefetch 缓存。
@@ -235,6 +247,7 @@ export function usePurchaseActions(deps: PurchaseActionDeps) {
     handleSaveFactoryEdits,
     handleUpdateFactoryQty,
     handleApplyLossRate,
+    handleApplyFabricLossRate,
     handleCompletedPageChange,
     handleRemoveCompletedFilter,
     handleExport,

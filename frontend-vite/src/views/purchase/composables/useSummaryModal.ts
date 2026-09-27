@@ -60,6 +60,29 @@ export function magnifyByLossRate(qty: number, lossRate: number): number {
 }
 
 /**
+ * 损耗加放后的「数量」展示值（向上取整）：屏幕表格、打印预览、Excel 导出共用。
+ * 只在展示层取整，原始数量仍是落库唯一真值，保存反推仍使用精确的 magnifyByLossRate。
+ */
+export function ceilMagnifiedByLossRate(qty: number, lossRate: number): number {
+  return Math.ceil(magnifyByLossRate(qty, lossRate))
+}
+
+/**
+ * 损耗加放的逆运算：把「数量列展示的订单用量（已按损耗率放大）」还原为落库真值。
+ *
+ * 自定义编辑进入编辑态时输入框加载展示值（如 110），保存时用本函数按该行损耗率
+ * 反推出原始布料用量（如 110 / (1 + 100‰) = 100），保证保存后仍按同一损耗率
+ * 重算为 110，不产生复利、也不会把展示值误固化为原始数量。
+ */
+export function unmagnifyByLossRate(total: number, lossRate: number): number {
+  const v = Number.isFinite(total) ? total : 0
+  const r = Number.isFinite(lossRate) ? lossRate : 0
+  const factor = 1 + r / 1000
+  if (factor <= 0) return v
+  return Math.round((v / factor) * 100) / 100
+}
+
+/**
  * 汇总下单打印专用样式（A4 零页边距 + 单行不换行 + 全格居中）。
  *
  * 设计要点（保证打印预览与实际打印输出一致、跨浏览器稳定）：
@@ -95,36 +118,37 @@ const SUMMARY_PRINT_STYLE = `
   thead th { background: #e6e6e6; font-weight: bold; }
 `
 
-export function buildFactoryHtml(data: FactorySummaryData, lossRate: number): string {
+export function buildFactoryHtml(data: FactorySummaryData, lossRate: number, fabricRates?: number[][][]): string {
   let tableHtml = ''
-  data.groups?.forEach((group) => {
+  data.groups?.forEach((group, gi) => {
     const suppliers: SupplierGroup[] = group.suppliers || []
     let globalFabricIdx = 0
-    suppliers.forEach((supplier) => {
+    suppliers.forEach((supplier, si: number) => {
       const fabricCount = supplier.fabrics?.length || 0
       supplier.fabrics?.forEach((fabric, fi: number) => {
+        const rowRate = fabricRates?.[gi]?.[si]?.[fi]
+        const rate = typeof rowRate === 'number' && Number.isFinite(rowRate) ? rowRate : lossRate
         tableHtml += '<tr>'
         if (globalFabricIdx === 0) {
           const rowCount = suppliers.reduce((s: number, sup: SupplierGroup) => s + (sup.fabrics?.length || 0), 0)
           tableHtml += `<td rowspan="${rowCount}" style="font-weight:bold;">${escapeHtml(group.customer_name)}</td>`
-          // 产品名称 / 订单数量 / 备品数量：与屏幕表格同源逐 SKU 分行（单 SKU 时即一行）
-          const skuLines = buildSkuDisplayLines(group, lossRate)
+          // 产品名称 / 订单数量：与屏幕表格同源逐 SKU 分行（单 SKU 时即一行）。
+          const skuLines = buildSkuDisplayLines(group)
           const cell = (pick: (l: SkuDisplayLine) => string) =>
             skuLines
               .map((l) => (l.isTotal ? `<strong>${escapeHtml(pick(l))}</strong>` : escapeHtml(pick(l))))
               .join('<br>')
           tableHtml += `<td rowspan="${rowCount}">${cell((l) => l.name)}</td>`
           tableHtml += `<td rowspan="${rowCount}">${cell((l) => fmtQty(l.qty))}</td>`
-          tableHtml += `<td rowspan="${rowCount}">${cell((l) => fmtQty(l.spare))}</td>`
         }
+        tableHtml += `<td>${escapeHtml(fmtQty(calcSpareQuantity(parseFloat(String(fabric.quantity)) || 0, rate)))}</td>`
         if (fi === 0) {
           tableHtml += `<td rowspan="${fabricCount}" style="font-weight:bold;">${escapeHtml(supplier.supplier_name)}</td>`
         }
         tableHtml += `<td>${escapeHtml(fabric.fabric_name)}</td>`
         tableHtml += `<td>${escapeHtml(fabric.specification || '')}</td>`
-        // 「数量」列为损耗加放的展示派生值（原始数量 × (1 + rate/1000)），
-        // 与屏幕表格、合计口径同源；此处不改动 fabric.quantity 本身。
-        tableHtml += `<td>${escapeHtml(fmtQty(magnifyByLossRate(parseFloat(String(fabric.quantity)) || 0, lossRate)))}</td>`
+        tableHtml += `<td>${escapeHtml(String(rate))}</td>`
+        tableHtml += `<td>${escapeHtml(String(ceilMagnifiedByLossRate(parseFloat(String(fabric.quantity)) || 0, rate)))}</td>`
         tableHtml += `<td>${escapeHtml(fabric.unit || '')}</td>`
         tableHtml += '</tr>'
         globalFabricIdx++
@@ -173,6 +197,10 @@ export interface FabricItem {
   unit?: string
   item_ids?: number[]
   item_id?: number
+  /** 该布料行已落库的材料损耗率快照（千分之几）；null/缺省表示未单独配置 */
+  loss_rate?: number | null
+  /** 该布料行内各明细损耗率不一致 */
+  loss_rate_mixed?: boolean
 }
 
 export interface SupplierGroup {
@@ -191,13 +219,12 @@ export interface SkuLine {
 export interface SkuDisplayLine {
   name: string
   qty: number
-  spare: number
   /** 订单级「合计」子行（仅多 SKU 时追加） */
   isTotal: boolean
 }
 
 /**
- * 逐 SKU 展示行 —— 屏幕「产品名称 / 订单数量 / 备品数量」三列、打印预览、Excel 导出
+ * 逐 SKU 展示行 —— 屏幕「产品名称 / 订单数量」两列、打印预览、Excel 导出
  * **共用这一处来源**，保证三者逐字一致。
  *
  * 口径（重要）：
@@ -205,26 +232,27 @@ export interface SkuDisplayLine {
  * - 多 SKU 时追加一行「合计」，合计取**订单级真值** `getGroupOrderQty(group)`
  *   （= 采购单 `product_quantity`），不依赖逐 SKU 之和，避免快照与主表不一致时
  *   展示出「对不上」的数字；
+ * - 备品数量已改为**逐布料行**计算（见 SummaryFactoryTab 的 `spareForFabric`），
+ *   与 SKU 行无关，故不在此产出；
  * - **物料数量在采购单侧是跨 SKU 合并值，无法拆分到 SKU**，故「布料名称 / 规格 / 数量」
  *   仍是订单级展示（与 /beile-order 已确立的口径一致，不编造无法追溯的数）；
  * - 单 SKU 或后端未返回 `skus` 时，只产出一行订单级数据 —— 与改动前逐字一致（零回归）。
  */
-export function buildSkuDisplayLines(group: FactoryGroup, lossRate: number): SkuDisplayLine[] {
+export function buildSkuDisplayLines(group: FactoryGroup): SkuDisplayLine[] {
   const total = getGroupOrderQty(group)
   const skus = group.skus || []
   if (skus.length <= 1) {
     return [{
       name: group.product_name || '',
       qty: total,
-      spare: calcSpareQuantity(total, lossRate),
       isTotal: false,
     }]
   }
   const lines: SkuDisplayLine[] = skus.map((s) => {
     const qty = parseFloat(String(s.order_qty ?? 0)) || 0
-    return { name: s.product_name || '', qty, spare: calcSpareQuantity(qty, lossRate), isTotal: false }
+    return { name: s.product_name || '', qty, isTotal: false }
   })
-  lines.push({ name: '合计', qty: total, spare: calcSpareQuantity(total, lossRate), isTotal: true })
+  lines.push({ name: '合计', qty: total, isTotal: true })
   return lines
 }
 
@@ -236,6 +264,12 @@ export interface FactoryGroup {
   suppliers: SupplierGroup[]
   /** 逐 SKU 明细；旧后端不返回 → undefined（前端按订单级单行降级） */
   skus?: SkuLine[]
+  /** 该工序分组（客户 × 产品）涉及的采购单 ID，用于按工序保存损耗率 */
+  order_ids?: number[]
+  /** 该工序分组已落库的损耗率快照；0 为合法已记录值，null/缺省表示未记录 */
+  spare_rate?: number | null
+  /** 该工序分组内各采购单损耗率不一致 */
+  spare_rate_mixed?: boolean
 }
 
 /** 工厂内部采购汇总响应（/purchase/factory-summary） */
@@ -304,6 +338,14 @@ export function useSummaryModal() {
    * idle：未发起 / 已复位；saving：有请求在途；saved：最后一次输入已成功落库；error：任一次发送失败。
    */
   const lossRateSaveState = ref<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  /** 每个布料行（物料 + 规格 + 单位）当前的损耗率展示值，形状 [gi][si][fi] */
+  const fabricLossRates = ref<number[][][]>([])
+  /** 每个布料行已落库的损耗率基线（取消编辑时恢复） */
+  const fabricPersistedRates = ref<number[][][]>([])
+  /** 每个布料行内各明细损耗率是否不一致 */
+  const fabricLossRateMixed = ref<boolean[][][]>([])
+  /** 每个布料行对应的明细 item_ids，用于按行保存损耗率 */
+  const fabricItemIds = ref<number[][][][]>([])
 
   /**
    * 损耗率自动落库的串行化状态（**实例闭包内**，禁止模块级全局，避免多实例互相干扰）：
@@ -312,6 +354,9 @@ export function useSummaryModal() {
    */
   let drainPromise: Promise<void> | null = null
   let pendingRate: number | null = null
+  /** 按布料行串行化损耗率保存，避免同一行快速连续输入产生乱序覆盖 */
+  const fabricDrainPromises = new Map<string, Promise<void>>()
+  const fabricPendingRates = new Map<string, number>()
 
   const supplierGroups = computed(() => {
     if (!supplierData.value?.materials) return []
@@ -341,6 +386,17 @@ export function useSummaryModal() {
     return groups
   })
 
+  /** 布料行稳定键：同一 (gi,si,fi) 在数组重排前后保持一致，供按行串行化。 */
+  function fabricKey(gi: number, si: number, fi: number): string {
+    return `${gi}-${si}-${fi}`
+  }
+
+  /** 取第 gi/si/fi 个布料行当前损耗率（非法/缺失兜底 0） */
+  function rateForFabric(gi: number, si: number, fi: number): number {
+    const v = fabricLossRates.value?.[gi]?.[si]?.[fi]
+    return Number.isFinite(v) ? (v as number) : 0
+  }
+
   async function openSummary(ids: number[], orderTimeValue?: string) {
     orderIds.value = ids
     orderTime.value = orderTimeValue || ''
@@ -360,6 +416,50 @@ export function useSummaryModal() {
     })
     supplierOrder.value = initOrder
     editMode.value = false
+    // 逐布料行播种：优先取明细 loss_rate（有值则为该行已落库配置），
+    // 否则回退到分组/订单级 spare_rate，保证旧订单零回归。
+    const groups = fRes.groups || []
+    const fallbackRate = typeof fRes.spare_rate === 'number' && Number.isFinite(fRes.spare_rate) ? fRes.spare_rate : 0
+    const rates: number[][][] = []
+    const persistedRates: number[][][] = []
+    const mixedRates: boolean[][][] = []
+    const itemIds: number[][][][] = []
+    groups.forEach((g) => {
+      const groupFallback = typeof g.spare_rate === 'number' && Number.isFinite(g.spare_rate)
+        ? (g.spare_rate as number)
+        : fallbackRate
+      const gRates: number[][] = []
+      const gPersisted: number[][] = []
+      const gMixed: boolean[][] = []
+      const gItemIds: number[][][] = []
+      ;(g.suppliers || []).forEach((s) => {
+        const sRates: number[] = []
+        const sPersisted: number[] = []
+        const sMixed: boolean[] = []
+        const sItemIds: number[][] = []
+        ;(s.fabrics || []).forEach((f) => {
+          const rate = typeof f.loss_rate === 'number' && Number.isFinite(f.loss_rate)
+            ? (f.loss_rate as number)
+            : groupFallback
+          sRates.push(rate)
+          sPersisted.push(rate)
+          sMixed.push(f.loss_rate_mixed === true)
+          sItemIds.push(f.item_ids || (f.item_id ? [f.item_id] : []))
+        })
+        gRates.push(sRates)
+        gPersisted.push(sPersisted)
+        gMixed.push(sMixed)
+        gItemIds.push(sItemIds)
+      })
+      rates.push(gRates)
+      persistedRates.push(gPersisted)
+      mixedRates.push(gMixed)
+      itemIds.push(gItemIds)
+    })
+    fabricLossRates.value = rates
+    fabricPersistedRates.value = persistedRates
+    fabricLossRateMixed.value = mixedRates
+    fabricItemIds.value = itemIds
     // 回显播种：把汇总接口返回的「已落库损耗率」作为编辑基线。
     // - spare_rate 是 number（含 0）时原样回显；否则（null / 旧后端未提供 undefined）落 0，
     //   与改动前行为完全一致，零回归。
@@ -381,10 +481,11 @@ export function useSummaryModal() {
       // 取消编辑：丢弃本地改动与损耗率交互，回到服务端原值（数量永远是原始真值）。
       factoryData.value = cloneRaw(factoryOriginalData.value)
       supplierData.value = cloneRaw(supplierOriginalData.value)
+      fabricLossRates.value = cloneRaw(fabricPersistedRates.value)
+      fabricLossRateMixed.value = cloneRaw(fabricLossRateMixed.value)
       // 弹窗仍开着、服务端仍存着该率，故恢复到「已落库」基线而非清零，
       // 否则「打开看到 5 → 自定义编辑 → 取消编辑」会自相矛盾地变成 0。
       // 同时复位交互标记与保存反馈（消掉残留的「已保存」小字）。
-      lossRate.value = persistedLossRate.value
       lossRateTouched.value = false
       lossRateSaveState.value = 'idle'
     }
@@ -398,9 +499,12 @@ export function useSummaryModal() {
   function updateFactoryQty(gi: number, si: number, fi: number, value: number) {
     const fabric = factoryData.value?.groups?.[gi]?.suppliers?.[si]?.fabrics?.[fi]
     if (!fabric) return
+    // 自定义编辑输入框加载的是「订单用量展示值」（原始值 × (1 + 损耗率‰)），
+    // 保存前必须按当前工序损耗率反推原始真值，避免把展示值固化入库。
+    const newBase = unmagnifyByLossRate(value, rateForFabric(gi, si, fi))
     const oldQty = parseFloat(String(fabric.quantity)) || 0
-    const diff = value - oldQty
-    fabric.quantity = value
+    const diff = newBase - oldQty
+    fabric.quantity = newBase
 
     if (diff !== 0 && supplierData.value?.materials) {
       const fabricName = fabric.fabric_name
@@ -430,6 +534,10 @@ export function useSummaryModal() {
    */
   function applyLossRate(rate: number) {
     lossRate.value = rate
+    // 统一设置所有布料行：全局输入作为批量快捷入口，逐行输入可再单独覆盖。
+    fabricLossRates.value = fabricLossRates.value.map((g) => g.map((ss) => ss.map(() => rate)))
+    fabricLossRateMixed.value = fabricLossRateMixed.value.map((g) => g.map((ss) => ss.map(() => false)))
+    lossRateMixed.value = false
     // 记录用户已交互损耗率：即使无布料改动，保存/下单时也要把率提交落库（PRD Q1）
     lossRateTouched.value = true
   }
@@ -440,15 +548,19 @@ export function useSummaryModal() {
    * `edits` 恒空的理由：数量落库只走编辑态「保存修改」，
    * 自动落库只负责把用户输入的损耗率持久化到本次汇总涉及的采购单。
    */
-  async function sendLossRate(rate: number) {
+  async function sendLossRateToOrders(rate: number, targetOrderIds: number[]) {
     const res = await purchaseApi.saveFactoryEdits(
       [],
       rate,
-      orderIds.value,
+      targetOrderIds,
     ) as unknown as SaveFactoryEditsResponse
     if (!res.success) {
       throw new Error(res.message || '损耗率保存失败')
     }
+  }
+
+  async function sendLossRate(rate: number) {
+    return sendLossRateToOrders(rate, orderIds.value)
   }
 
   /**
@@ -490,6 +602,8 @@ export function useSummaryModal() {
           // 本次发送该率已成功落库 → 同步「已落库」基线（供取消编辑时恢复），
           // 并清掉「各单不一致」标记（本次已把所有涉及单统一为该值）。
           persistedLossRate.value = sent
+          fabricPersistedRates.value = cloneRaw(fabricLossRates.value)
+          fabricLossRateMixed.value = fabricLossRateMixed.value.map((g) => g.map((ss) => ss.map(() => false)))
           lossRateMixed.value = false
           next = pendingRate
           pendingRate = null
@@ -510,6 +624,77 @@ export function useSummaryModal() {
     })()
     drainPromise = run
 
+    return run
+  }
+
+  /**
+   * 单次布料损耗率落库请求：只提交该布料行对应明细的 loss_rate。
+   * 数量落库仍只走编辑态「保存修改」，此处不携带 quantity。
+   */
+  async function sendFabricLossRate(itemIds: number[], rate: number) {
+    const res = await purchaseApi.saveFactoryEdits(
+      [{ item_ids: itemIds, loss_rate: rate }],
+    ) as unknown as SaveFactoryEditsResponse
+    if (!res.success) {
+      throw new Error(res.message || '布料损耗率保存失败')
+    }
+  }
+
+  /**
+   * 单独修改某个布料行的损耗率：仅更新该行展示值（不触碰全局/其它行）。
+   */
+  function applyFabricLossRate(gi: number, si: number, fi: number, rate: number) {
+    const row = fabricLossRates.value[gi]?.[si]
+    if (!row || fi < 0 || fi >= row.length) return
+    row[fi] = rate
+    const mixedRow = fabricLossRateMixed.value[gi]?.[si]
+    if (mixedRow) mixedRow[fi] = false
+  }
+
+  /**
+   * 布料损耗率自动落库：按 (gi,si,fi) 串行化，同一行在途期间的新值合并为最新值。
+   * 成功后同步该行的「已落库基线」（供取消编辑时恢复）。
+   */
+  async function applyFabricLossRateAndSave(gi: number, si: number, fi: number, rate: number) {
+    applyFabricLossRate(gi, si, fi, rate)
+    const targetItemIds = fabricItemIds.value?.[gi]?.[si]?.[fi] || []
+    if (targetItemIds.length === 0) return
+
+    const key = fabricKey(gi, si, fi)
+    const existing = fabricDrainPromises.get(key)
+    if (existing) {
+      fabricPendingRates.set(key, rate)
+      return existing
+    }
+
+    const run = (async () => {
+      let next: number | null = rate
+      try {
+        while (next !== null) {
+          const ids = fabricItemIds.value?.[gi]?.[si]?.[fi] || []
+          if (ids.length === 0) break
+          lossRateSaveState.value = 'saving'
+          const sent = next
+          await sendFabricLossRate(ids, sent)
+          const persistedRow = fabricPersistedRates.value[gi]?.[si]
+          if (persistedRow) persistedRow[fi] = sent
+          const mixedRow = fabricLossRateMixed.value[gi]?.[si]
+          if (mixedRow) mixedRow[fi] = false
+          next = fabricPendingRates.get(key) ?? null
+          fabricPendingRates.delete(key)
+        }
+        if ((fabricItemIds.value?.[gi]?.[si]?.[fi] || []).length > 0) {
+          lossRateSaveState.value = 'saved'
+        }
+      } catch (err) {
+        fabricPendingRates.delete(key)
+        lossRateSaveState.value = 'error'
+        throw err
+      } finally {
+        fabricDrainPromises.delete(key)
+      }
+    })()
+    fabricDrainPromises.set(key, run)
     return run
   }
 
@@ -589,16 +774,22 @@ export function useSummaryModal() {
     // 已落库基线随弹窗关闭复位：下次 openSummary 会按汇总接口的 spare_rate 重新播种。
     persistedLossRate.value = 0
     lossRateMixed.value = false
+    fabricLossRates.value = []
+    fabricPersistedRates.value = []
+    fabricLossRateMixed.value = []
+    fabricItemIds.value = []
+    fabricDrainPromises.clear()
+    fabricPendingRates.clear()
     // 保存反馈随弹窗关闭复位（状态由下一次输入或关闭重置，不使用定时器）
     lossRateSaveState.value = 'idle'
   }
 
   function printFactory() {
     if (!factoryData.value) return
-    const tableHtml = buildFactoryHtml(factoryData.value, lossRate.value)
+    const tableHtml = buildFactoryHtml(factoryData.value, lossRate.value, fabricLossRates.value)
     printHtml(
       '工厂内部采购订单汇总',
-      `${orderTimeLabel(orderTime.value)}<table><thead><tr><th>客户</th><th>产品名称</th><th>订单数量</th><th>备品数量</th><th>供应商</th><th>布料名称</th><th>规格型号</th><th>数量</th><th>单位</th></tr></thead><tbody>${tableHtml}</tbody></table>`,
+      `${orderTimeLabel(orderTime.value)}<table><thead><tr><th>客户</th><th>产品名称</th><th>订单数量</th><th>备品数量</th><th>供应商</th><th>布料名称</th><th>规格型号</th><th>损耗率</th><th>数量</th><th>单位</th></tr></thead><tbody>${tableHtml}</tbody></table>`,
       SUMMARY_PRINT_STYLE,
     )
   }
@@ -615,8 +806,8 @@ export function useSummaryModal() {
 
   function exportFactory() {
     if (!factoryData.value) return
-    const tableHtml = buildFactoryHtml(factoryData.value, lossRate.value)
-    const html = `<div style="text-align:center;margin-bottom:20px"><h2>工厂内部采购订单汇总</h2></div><table><thead><tr><th>客户</th><th>产品名称</th><th>订单数量</th><th>备品数量</th><th>供应商</th><th>布料名称</th><th>规格型号</th><th>数量</th><th>单位</th></tr></thead><tbody>${tableHtml}</tbody></table>`
+    const tableHtml = buildFactoryHtml(factoryData.value, lossRate.value, fabricLossRates.value)
+    const html = `<div style="text-align:center;margin-bottom:20px"><h2>工厂内部采购订单汇总</h2></div><table><thead><tr><th>客户</th><th>产品名称</th><th>订单数量</th><th>备品数量</th><th>供应商</th><th>布料名称</th><th>规格型号</th><th>损耗率</th><th>数量</th><th>单位</th></tr></thead><tbody>${tableHtml}</tbody></table>`
     downloadAsXls(html, '工厂内部采购汇总.xls')
   }
 
@@ -639,6 +830,8 @@ export function useSummaryModal() {
     lossRate,
     persistedLossRate,
     lossRateMixed,
+    fabricLossRates,
+    fabricLossRateMixed,
     lossRateTouched,
     lossRateSaveState,
     orderIds,
@@ -649,6 +842,7 @@ export function useSummaryModal() {
     updateFactoryQty,
     applyLossRate,
     applyLossRateAndSave,
+    applyFabricLossRateAndSave,
     saveFactoryEdits,
     printFactory,
     printSupplier,

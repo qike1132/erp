@@ -170,11 +170,12 @@ describe('F. SummaryModal 订单级 <td> 压缩后的渲染等价性', () => {
     })
   }
 
-  it('表头 9 列且第 4 列为「备品数量」', () => {
+  it('表头 10 列且第 4 列为「备品数量」', () => {
     const wrapper = mountModal()
     const headers = wrapper.findAll('thead th').map((th) => th.text())
-    expect(headers).toHaveLength(9)
+    expect(headers).toHaveLength(10)
     expect(headers[3]).toBe('备品数量')
+    expect(headers[7]).toBe('损耗率')
   })
 
   it('表头列数 == 每一行（数据行+合计行）的逻辑列数（网格自洽）', () => {
@@ -185,43 +186,46 @@ describe('F. SummaryModal 订单级 <td> 压缩后的渲染等价性', () => {
     expect(widths.every((w) => w === nCols)).toBe(true)
   })
 
-  it('第 1 个 fabric 行的 4 个订单级单元格带 rowspan=3；后续行不再出现订单级单元格', () => {
+  it('第 1 个 fabric 行的 3 个订单级单元格带 rowspan=3、第 4 个供应商单元格 rowspan=2；后续行不再出现订单级单元格', () => {
     const wrapper = mountModal()
     const rows = wrapper.findAll('tbody tr')
     const row0 = rows[0]!.findAll('td')
-    // 4 个订单级单元格：客户 / 产品名称 / 订单数量 / 备品数量
-    for (let i = 0; i < 4; i++) {
+    expect(row0).toHaveLength(10)
+    // 3 个订单级单元格：客户 / 产品名称 / 订单数量
+    for (let i = 0; i < 3; i++) {
       expect(row0[i]!.attributes('rowspan')).toBe('3')
     }
     // 供应商单元格：供应商1 有 2 个 fabric → rowspan=2
     expect(row0[4]!.attributes('rowspan')).toBe('2')
+    expect(row0[5]!.text()).toBe('布料A1')
 
     // 第 2 个 fabric 行（同供应商1 的第 2 条）：不应再出现订单级单元格
     const row1 = rows[1]!.findAll('td')
-    expect(row1).toHaveLength(4) // 布料名称/规格型号/数量/单位
+    expect(row1).toHaveLength(6) // 备品/布料名称/规格型号/损耗率/数量/单位
     expect(row1.some((td) => td.attributes('rowspan') !== undefined)).toBe(false)
     expect(row1.map((td) => td.text()).join('|')).not.toContain('客户A')
 
-    // 第 3 个 fabric 行（供应商2 首行）：仅供应商单元格 + 布料 4 单元格
+    // 第 3 个 fabric 行（供应商2 首行）：备品 + 供应商 rowspan=1 + 布料/规格/损耗率/数量/单位
     const row2 = rows[2]!.findAll('td')
-    expect(row2).toHaveLength(5)
-    expect(row2[0]!.attributes('rowspan')).toBe('1')
+    expect(row2).toHaveLength(7)
+    expect(row2[1]!.attributes('rowspan')).toBe('1')
   })
 
-  it('合计行 = colspan3 合计 + 第4列备品合计 + colspan3 + 第8列数量合计', () => {
+  it('合计行 = colspan3 合计 + 第4列备品合计 + colspan3 + 损耗率空列 + 第9列数量合计 + 单位空列', () => {
     const wrapper = mountModal()
     const rows = wrapper.findAll('tbody tr')
     const totalTds = rows[rows.length - 1]!.findAll('td')
-    expect(totalTds).toHaveLength(5)
+    expect(totalTds).toHaveLength(6)
     expect(totalTds[0]!.attributes('colspan')).toBe('3')
     expect(totalTds[0]!.text()).toBe('合计')
-    expect(totalTds[1]!.text()).toBe(fmtQty(2)) // 备品合计 ceil(100*5/1000)+ceil(50*5/1000)=1+1（口径不变）
+    // 备品合计逐布料行 ceil 后累加：10/20/5/7 各按 5‰ → 1+1+1+1
+    expect(totalTds[1]!.text()).toBe(fmtQty(4))
     expect(totalTds[2]!.attributes('colspan')).toBe('3')
-    // 数量合计（新契约）：非编辑态数量列按 magnifyByLossRate 派生后累加
-    //   10×1.005=10.05 + 20×1.005=20.1 + 5×1.005=5.03 + 7×1.005=7.04 = 42.22 → fmtQty('42.2')
-    //   （旧契约「仅注入 rate prop 不触发放大」→ 原始 42；第4列备品口径保持不变，见上一行）
-    expect(totalTds[3]!.text()).toBe(fmtQty(42.22))
-    expect(totalTds[4]!.text()).toBe('')
+    expect(totalTds[3]!.text()).toBe('')
+    // 数量合计（新契约）：非编辑态数量列逐行向上取整后累加
+    //   10.05→11 + 20.1→21 + 5.03→6 + 7.04→8 = 46
+    expect(totalTds[4]!.text()).toBe('46')
+    expect(totalTds[5]!.text()).toBe('')
   })
 })
 

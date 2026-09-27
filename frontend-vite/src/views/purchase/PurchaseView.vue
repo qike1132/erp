@@ -154,6 +154,8 @@
       :loss-rate="summary.lossRate"
       :loss-rate-save-state="summary.lossRateSaveState"
       :loss-rate-mixed="summary.lossRateMixed"
+      :fabric-loss-rates="summary.fabricLossRates"
+      :fabric-loss-rate-mixed="summary.fabricLossRateMixed"
       :order-count="purchaseOrders.selectedIds.length"
       :supplier-groups="summary.supplierGroups"
       @close="summary.close"
@@ -161,6 +163,7 @@
       @save-edits="handleSaveFactoryEdits"
       @update-qty="handleUpdateFactoryQty"
       @apply-loss-rate="handleApplyLossRate"
+      @apply-fabric-loss-rate="handleApplyFabricLossRate"
       @export-factory="summary.exportFactory"
       @export-supplier="summary.exportSupplier"
       @print-factory="summary.printFactory"
@@ -202,6 +205,7 @@ const {
   handleSaveFactoryEdits,
   handleUpdateFactoryQty,
   handleApplyLossRate,
+  handleApplyFabricLossRate,
   handleViewDetail,
   handleCompletedPageChange,
   handleRemoveCompletedFilter,

@@ -102,8 +102,8 @@ describe('【上线阻断项】字符串 quantity 不得导致「数量列/合�
       const tds = [...rows[i]!.querySelectorAll('td')]
       return tds[tds.length - 2]!.textContent
     }
-    expect(qtyOf(0)).toBe(fmtQty(10.05)) // '10.1'
-    expect(qtyOf(1)).toBe(fmtQty(20.1)) // '20.1'
+    expect(qtyOf(0)).toBe('11') // ceil(10.05)
+    expect(qtyOf(1)).toBe('21') // ceil(20.1)
     expect(qtyOf(0)).not.toBe(fmtQty(0))
     expect(qtyOf(1)).not.toBe(fmtQty(0))
   })
@@ -146,15 +146,15 @@ describe('【上线阻断项】字符串 quantity 不得导致「数量列/合�
     }
     const qty0 = qtyOf(dataRows[0]!)
     const qty1 = qtyOf(dataRows[1]!)
-    expect(qty0).toBe(fmtQty(10.05))
-    expect(qty1).toBe(fmtQty(20.1))
+    expect(qty0).toBe('11')
+    expect(qty1).toBe('21')
     expect(qty0).not.toBe(fmtQty(0))
     expect(qty1).not.toBe(fmtQty(0))
 
-    // 合计行第 8 列 = 10.05 + 20.1 → 与列展示口径一致的派生合计
+    // 合计行第 8 列 = ceil(10.05) + ceil(20.1) = 11 + 21 = 32
     const totalCols = wrapper.findAll('tbody tr').at(-1)!.findAll('td')
-    expect(totalCols[3]!.text()).toBe(fmtQty(10.05 + 20.1))
-    expect(totalCols[3]!.text()).not.toBe(fmtQty(0))
+    expect(totalCols[4]!.text()).toBe('32')
+    expect(totalCols[4]!.text()).not.toBe(fmtQty(0))
 
     wrapper.unmount()
   })
@@ -185,7 +185,7 @@ describe('【上线阻断项】字符串 quantity 不得导致「数量列/合�
     wrapper.unmount()
   })
 
-  it('编辑态：输入框绑定原始字符串，合计按 parseFloat 原始值累加，绝不为 0', async () => {
+  it('编辑态：输入框绑定当前工序损耗率加放后的订单用量，合计按派生值累加，绝不为 0', async () => {
     const m = useSummaryModal()
     await m.openSummary([7, 8])
     m.applyLossRate(5)
@@ -203,12 +203,12 @@ describe('【上线阻断项】字符串 quantity 不得导致「数量列/合�
       global: { stubs },
     })
     const inputs = wrapper.findAll('input[type="number"]')
-    expect((inputs[0]!.element as HTMLInputElement).value).toBe('10')
-    expect((inputs[1]!.element as HTMLInputElement).value).toBe('20')
+    expect((inputs[0]!.element as HTMLInputElement).value).toBe('10.05')
+    expect((inputs[1]!.element as HTMLInputElement).value).toBe('20.1')
 
     const totalCols = wrapper.findAll('tbody tr').at(-1)!.findAll('td')
-    expect(totalCols[3]!.text()).toBe(fmtQty(30)) // 10 + 20（原始值）
-    expect(totalCols[3]!.text()).not.toBe(fmtQty(0))
+    expect(totalCols[4]!.text()).toBe('32') // ceil(10.05)+ceil(20.1)
+    expect(totalCols[4]!.text()).not.toBe(fmtQty(0))
     wrapper.unmount()
   })
 })

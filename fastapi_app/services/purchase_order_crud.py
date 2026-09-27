@@ -425,7 +425,8 @@ async def save_factory_summary_edits(
     for entry in data:
         item_ids = entry.get('item_ids', [])
         new_quantity = entry.get('quantity')
-        if not item_ids or new_quantity is None:
+        new_loss_rate = entry.get('loss_rate')
+        if not item_ids or (new_quantity is None and new_loss_rate is None):
             continue
 
         items = []
@@ -442,24 +443,31 @@ async def save_factory_summary_edits(
 
         involved_po_ids.extend(it.order_id for it in items)
 
-        if len(items) == 1:
-            items[0].quantity = Decimal(str(new_quantity))
-            items[0].total_price = (items[0].unit_price or 0) * items[0].quantity
-            updated += 1
-        else:
-            original_total = sum(float(it.quantity or 0) for it in items)
-            if original_total > 0:
-                ratio = float(new_quantity) / original_total
-                for it in items:
-                    it.quantity = Decimal(str(round_qty(float(it.quantity or 0) * ratio)))
-                    it.total_price = (it.unit_price or 0) * it.quantity
-                    updated += 1
+        if new_quantity is not None:
+            if len(items) == 1:
+                items[0].quantity = Decimal(str(new_quantity))
+                items[0].total_price = (items[0].unit_price or 0) * items[0].quantity
+                updated += 1
             else:
-                per_item = Decimal(str(round_qty(float(new_quantity) / len(items))))
-                for it in items:
-                    it.quantity = per_item
-                    it.total_price = (it.unit_price or 0) * it.quantity
-                    updated += 1
+                original_total = sum(float(it.quantity or 0) for it in items)
+                if original_total > 0:
+                    ratio = float(new_quantity) / original_total
+                    for it in items:
+                        it.quantity = Decimal(str(round_qty(float(it.quantity or 0) * ratio)))
+                        it.total_price = (it.unit_price or 0) * it.quantity
+                        updated += 1
+                else:
+                    per_item = Decimal(str(round_qty(float(new_quantity) / len(items))))
+                    for it in items:
+                        it.quantity = per_item
+                        it.total_price = (it.unit_price or 0) * it.quantity
+                        updated += 1
+
+        if new_loss_rate is not None:
+            normalized_loss = normalize_spare_rate(new_loss_rate)
+            for it in items:
+                it.loss_rate = Decimal(str(normalized_loss)) if normalized_loss is not None else None
+            updated += 1
 
     # 编辑应用完毕后，再批量覆盖写所涉采购单的损耗率 / 备品（一次查询，无 N+1）
     spare_written = await _write_spare_rate_to_orders(db, involved_po_ids, spare_rate)

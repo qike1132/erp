@@ -203,11 +203,12 @@ describe('SummaryModal 备品数量合计口径', () => {
     })
   }
 
-  it('工厂表格表头含 9 列且第 4 列为「备品数量」', () => {
+  it('工厂表格表头含 10 列且第 4 列为「备品数量」、第 8 列为「损耗率」', () => {
     const wrapper = mountModal(0)
     const headers = wrapper.findAll('thead th').map((th) => th.text())
-    expect(headers).toHaveLength(9)
+    expect(headers).toHaveLength(10)
     expect(headers[3]).toBe('备品数量')
+    expect(headers[7]).toBe('损耗率')
   })
 
   it('合计行按表头列位对齐：第 4 列备品数量合计、第 8 列数量合计（lossRate=5）', () => {
@@ -218,8 +219,8 @@ describe('SummaryModal 备品数量合计口径', () => {
     const wrapper = mountModal(5)
     const rows = wrapper.findAll('tbody tr')
     const totalCols = expandColspan(rows[rows.length - 1]!.findAll('td'))
-    expect(totalCols[3]).toBe(fmtQty(2)) // 第4列 备品数量（口径不变）
-    expect(totalCols[7]).toBe(fmtQty(35.18)) // 第8列 数量（派生值累加）
+    expect(totalCols[3]).toBe(fmtQty(3)) // 第4列 备品数量（逐布料行：10、20、5 各 ceil 后累加）
+    expect(totalCols[8]).toBe('38') // 第9列 数量：10.05→11、20.1→21、5.03→6
   })
 
   it('【真实用户路径】openSummary → applyLossRate(5) → 合计按派生值（与 prop 注入同源，而非仅覆盖 prop）', async () => {
@@ -245,32 +246,38 @@ describe('SummaryModal 备品数量合计口径', () => {
     // 未交互损耗率（rate=0）→ 合计为原始值
     const before = mountWithSummary()
     const beforeTotal = expandColspan(before.findAll('tbody tr').slice(-1)[0]!.findAll('td'))
-    expect(beforeTotal[7]).toBe(fmtQty(35))
+    expect(beforeTotal[8]).toBe('35')
     before.unmount()
 
     // 用户输入损耗率（真实动作路径）→ 仅率状态变化，展示派生随之放大
     m.applyLossRate(5)
     const after = mountWithSummary()
     const afterTotal = expandColspan(after.findAll('tbody tr').slice(-1)[0]!.findAll('td'))
-    expect(afterTotal[3]).toBe(fmtQty(2)) // 备品口径不变
-    expect(afterTotal[7]).toBe(fmtQty(35.18)) // 与 mountModal(5) 的 prop 注入结果一致
+    expect(afterTotal[3]).toBe(fmtQty(3)) // 逐布料行备品口径不变
+    expect(afterTotal[8]).toBe('38') // 与 mountModal(5) 的 prop 注入结果一致
     // 原始数量不被就地改写（落库真值保持 10/20/5）
     expect(m.factoryData!.groups[0]!.suppliers[0]!.fabrics[0]!.quantity).toBe(10)
     after.unmount()
   })
 
-  it('【UX 一致性】编辑态合计 = 原始值（与输入框一致）；非编辑态合计 = 派生值（同数据 rate=5 对照）', () => {
-    // 非编辑态：数量列展示派生值 → 合计也是派生值
+  it('【UX 一致性】非编辑态数量列向上取整为整数，编辑态输入框保留精确加放值', () => {
+    // 非编辑态：数量列逐行向上取整 → 合计也是各取整值之和
     const view = mountModal(5, factoryData, false)
     const totalView = expandColspan(view.findAll('tbody tr').slice(-1)[0]!.findAll('td'))
-    expect(totalView[3]).toBe(fmtQty(2)) // 备品口径不受编辑态影响
-    expect(totalView[7]).toBe(fmtQty(35.18))
+    expect(totalView[3]).toBe(fmtQty(3)) // 备品口径不受编辑态影响
+    expect(totalView[8]).toBe('38') // 11 + 21 + 6
+    const viewRows = view.findAll('tbody tr')
+    expect(viewRows[0]!.findAll('td')[8]!.text()).toBe('11')
+    // 同供应商第二行被 rowspan 合并，数量列在本行 tds 中的下标为 4
+    expect(viewRows[1]!.findAll('td')[4]!.text()).toBe('21')
+    expect(viewRows[2]!.findAll('td')[8]!.text()).toBe('6')
 
-    // 编辑态：数量输入框绑定原始值 10/20/5 → 合计必须按原始值累加（10+20+5=35），否则自相矛盾
+    // 编辑态：数量输入框加载 10.05/20.1/5.03 精确加放值，保存反推不因展示取整而失真
     const edit = mountModal(5, factoryData, true)
     const totalEdit = expandColspan(edit.findAll('tbody tr').slice(-1)[0]!.findAll('td'))
-    expect(totalEdit[3]).toBe(fmtQty(2)) // 备品合计口径保持不动
-    expect(totalEdit[7]).toBe(fmtQty(35)) // 原始值累加，与输入框一致
+    expect(totalEdit[3]).toBe(fmtQty(3)) // 备品合计口径保持不动
+    expect(totalEdit[8]).toBe('38') // 合计仍按整数展示
+    expect(edit.findAll('input[type="number"]').map((i) => (i.element as HTMLInputElement).value)).toEqual(['10.05', '20.1', '5.03'])
   })
 
   it('数据行备品数量与合计口径一致（lossRate=0 → 全 0）', () => {
@@ -278,7 +285,7 @@ describe('SummaryModal 备品数量合计口径', () => {
     const rows = wrapper.findAll('tbody tr')
     const totalCols = expandColspan(rows[rows.length - 1]!.findAll('td'))
     expect(totalCols[3]).toBe(fmtQty(0)) // 第4列 备品数量合计
-    expect(totalCols[7]).toBe(fmtQty(35)) // 第8列 数量合计（lossRate=0 不改变数量）
+    expect(totalCols[8]).toBe('35') // 第9列 数量合计（lossRate=0 不改变数量）
     // 首行客户×产品行的备品数量单元格（第 4 列）也为 0
     expect(rows[0]!.findAll('td')[3]!.text()).toBe(fmtQty(0))
   })
@@ -351,23 +358,24 @@ describe('buildFactoryHtml 打印/导出共用 HTML', () => {
 
   // buildFactoryHtml 只输出 tbody 行，表头由 printFactory/exportFactory 按同一 9 列拼装；测试按相同方式包裹。
   function wrapFactoryHtml(data: FactorySummaryData, lossRate: number): string {
-    return `<table><thead><tr><th>客户</th><th>产品名称</th><th>订单数量</th><th>备品数量</th><th>供应商</th><th>布料名称</th><th>规格型号</th><th>数量</th><th>单位</th></tr></thead><tbody>${buildFactoryHtml(data, lossRate)}</tbody></table>`
+    return `<table><thead><tr><th>客户</th><th>产品名称</th><th>订单数量</th><th>备品数量</th><th>供应商</th><th>布料名称</th><th>规格型号</th><th>损耗率</th><th>数量</th><th>单位</th></tr></thead><tbody>${buildFactoryHtml(data, lossRate)}</tbody></table>`
   }
 
-  it('表头含 9 个 th 且第 4 个为「备品数量」；数据行第 4 列 = 备品数量、第 8 列 = 数量、第 9 列 = 单位', () => {
+  it('表头含 10 个 th 且第 4 个为「备品数量」、第 8 个为「损耗率」；数据行第 4 列 = 备品数量、第 8 列 = 损耗率、第 9 列 = 数量、第 10 列 = 单位', () => {
     const doc = new DOMParser().parseFromString(wrapFactoryHtml(minimalData, 5), 'text/html')
     const headers = [...doc.querySelectorAll('thead th')].map((th) => th.textContent || '')
-    expect(headers).toHaveLength(9)
+    expect(headers).toHaveLength(10)
     expect(headers[3]).toBe('备品数量')
+    expect(headers[7]).toBe('损耗率')
 
     const firstRow = doc.querySelector('tbody tr')!
     const cells = [...firstRow.querySelectorAll('td')]
-    // 1客户/2产品名称/3订单数量/4备品数量/5供应商/6布料名称/7规格型号/8数量/9单位
-    expect(cells[3]!.textContent).toBe(fmtQty(1)) // ceil(100*5/1000)=1
-    // 「数量」列 = 损耗加放的展示派生值：10×1.005=10.05 → fmtQty='10.1'。
-    // 与旧实现（applyLossRate 就地放大后读 fabric.quantity）输出逐字一致，仅来源改为渲染时按率派生。
-    expect(cells[7]!.textContent).toBe(fmtQty(10.05))
-    expect(cells[8]!.textContent).toBe('米') // 单位
+    // 1客户/2产品名称/3订单数量/4备品数量/5供应商/6布料名称/7规格型号/8损耗率/9数量/10单位
+    expect(cells[3]!.textContent).toBe(fmtQty(1)) // ceil(10*5/1000)=1（逐布料行）
+    expect(cells[7]!.textContent).toBe('5') // 损耗率
+    // 「数量」列 = 损耗加放的展示派生值向上取整：10×1.005=10.05 → '11'。
+    expect(cells[8]!.textContent).toBe('11')
+    expect(cells[9]!.textContent).toBe('米') // 单位
   })
 
   it('lossRate=0 时备品数量列为 0（口径与屏幕表格一致）', () => {

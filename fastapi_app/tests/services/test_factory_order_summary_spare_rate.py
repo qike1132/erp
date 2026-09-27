@@ -328,3 +328,58 @@ async def test_null_columns_loaded_correctly(db):
     assert by_id[20001] is None
     assert by_id[20002] == 0
     assert by_id[20003] == 5
+
+
+async def _seed_same_group(db: AsyncSession, rates: list[float | None], id_base: int) -> list[int]:
+    """按给定率构造**同一工序分组**（客户 × 产品相同）的采购单，返回其 id 列表。"""
+    ids: list[int] = []
+    for i, rate in enumerate(rates, start=1):
+        oid = id_base + i
+        db.add(PurchaseOrder(
+            id=oid,
+            order_no=f'FG-{oid}',
+            customer_name='客户A',
+            product_name='漂白边伦',
+            product_quantity=100,
+            supplier_name='供应商甲',
+            spare_rate=rate,
+        ))
+        db.add(PurchaseOrderItem(
+            id=id_base + 30000 + i,
+            order_id=oid,
+            material_name='漂白边伦布料',
+            specification='S1',
+            unit='米',
+            quantity=100,
+        ))
+        ids.append(oid)
+    await db.commit()
+    return ids
+
+
+async def test_group_order_ids_and_same_spare_rate(db):
+    """逐工序分组：同一（客户 × 产品）采购单全部进入同一分组，并携带一致损耗率。"""
+    session, _ = db
+    ids = await _seed_same_group(session, [5, 5], id_base=22000)
+
+    result = await get_factory_order_summary(session, ids)
+
+    assert len(result['groups']) == 1
+    group = result['groups'][0]
+    assert sorted(group['order_ids']) == sorted(ids)
+    assert group['spare_rate'] == 5
+    assert group['spare_rate_mixed'] is False
+
+
+async def test_group_order_ids_and_mixed_spare_rate(db):
+    """逐工序分组：同一分组内各采购单损耗率不一致时，返回 None + mixed=True。"""
+    session, _ = db
+    ids = await _seed_same_group(session, [5, 10], id_base=23000)
+
+    result = await get_factory_order_summary(session, ids)
+
+    assert len(result['groups']) == 1
+    group = result['groups'][0]
+    assert sorted(group['order_ids']) == sorted(ids)
+    assert group['spare_rate'] is None
+    assert group['spare_rate_mixed'] is True

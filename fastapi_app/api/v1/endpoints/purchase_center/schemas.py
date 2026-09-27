@@ -126,6 +126,7 @@ class FactorySummaryEditItem(BaseModel):
     model_config = {"extra": "allow"}
     item_ids: list[int] = []
     quantity: float | None = None
+    loss_rate: float | None = None
 
 
 class FactorySummarySaveRequest(BaseModel):

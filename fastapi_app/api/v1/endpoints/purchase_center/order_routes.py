@@ -592,7 +592,7 @@ async def api_save_factory_summary_edits(
     #   （purchase_order_crud.apply_factory_summary_edits），因此 `edits=[{}]`、
     #   `edits=[{'item_ids': []}]`、`edits=[{'quantity': None}]` 都会**零写入却返回 200**，
     #   正是本护栏要消灭的「静默成功」。故此处按服务层同一判据过滤后再判空。
-    effective_edits = [e for e in data.edits if e.item_ids and e.quantity is not None]
+    effective_edits = [e for e in data.edits if e.item_ids and (e.quantity is not None or e.loss_rate is not None)]
     has_content = bool(effective_edits) or (bool(data.order_ids) and data.spare_rate is not None)
     if not has_content:
         raise HTTPException(status_code=422, detail='无可保存内容')

@@ -284,12 +284,28 @@ def _summarize_spare_rate(orders) -> tuple[float | None, bool]:
     以 ``select(PurchaseOrder)`` 一次性取回，``spare_rate`` 已在其中。
     """
     raw_rates = [o.spare_rate for o in orders]
+    return _summarize_rate_values(raw_rates)
+
+
+def _summarize_rate_values(raw_rates: list) -> tuple[float | None, bool]:
+    """把一组已存率值（可为 None）汇总为单一回显值 + 是否不一致标记。
+
+    与 `_summarize_spare_rate` 同一套 NULL 语义（见该函数说明），只是输入从 ORM 订单
+    改为通用率值列表，供订单级 spare_rate 与明细级 loss_rate 复用。
+    """
     if not raw_rates:
         return None, False
     first = raw_rates[0]
     if any(r != first for r in raw_rates[1:]):
         return None, True
     return (float(first) if first is not None else None), False
+
+
+def _summarize_item_loss_rate(items) -> tuple[float | None, bool]:
+    """汇总一组 PO 明细的材料损耗率（loss_rate），供单个布料行回显。"""
+    return _summarize_rate_values([
+        float(it.loss_rate) if it.loss_rate is not None else None for it in items
+    ])
 
 
 async def get_factory_order_summary(
@@ -341,6 +357,28 @@ async def get_factory_order_summary(
         po_pids_map=po_pids_map, po_sku_map=sku_rows,
     )
     groups = _serialize_factory_groups(group_map)
+
+    # 每个「工序分组」（客户 × 产品）单独给出已落库损耗率快照，供前端逐工序回显与配置。
+    orders_by_id = {o.id: o for o in orders}
+    for group in groups:
+        group_orders = [orders_by_id[oid] for oid in group.get('order_ids') or [] if oid in orders_by_id]
+        group_spare_rate, group_spare_rate_mixed = _summarize_spare_rate(group_orders)
+        group['spare_rate'] = group_spare_rate
+        group['spare_rate_mixed'] = group_spare_rate_mixed
+
+    # 每个布料行（物料 + 规格 + 单位）单独给出已落库材料损耗率快照。
+    # 前端按「行内 loss_rate 优先，回退分组/订单级 spare_rate」回显与配置。
+    items_by_id = {it.id: it for items in items_by_order.values() for it in items}
+    for group in groups:
+        for supplier in group.get('suppliers') or []:
+            for fabric in supplier.get('fabrics') or []:
+                row_items = [
+                    items_by_id[iid] for iid in (fabric.get('item_ids') or [])
+                    if iid in items_by_id
+                ]
+                fabric_loss_rate, fabric_loss_mixed = _summarize_item_loss_rate(row_items)
+                fabric['loss_rate'] = fabric_loss_rate
+                fabric['loss_rate_mixed'] = fabric_loss_mixed
 
     return {
         'groups': groups, 'order_count': len(orders),

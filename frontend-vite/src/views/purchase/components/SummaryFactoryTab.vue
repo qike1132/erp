@@ -20,7 +20,7 @@
         </button>
         <div class="flex flex-col items-end gap-0.5">
           <div class="flex items-center gap-2">
-            <label class="text-xs text-text-secondary whitespace-nowrap">损耗率（千分之几）</label>
+            <label class="text-xs text-text-secondary whitespace-nowrap">统一损耗率（千分之几）</label>
             <input
               type="number"
               class="w-16 text-right py-1 px-1.5 text-[13px] border border-border rounded focus:outline-none focus-visible:outline-2 focus-visible:outline-primary-500 focus-visible:outline-offset-2 focus:border-primary-500"
@@ -30,7 +30,6 @@
               step="any"
               @input="onLossRateInput"
             />
-            <!-- 自动落库的可见反馈：与输入框同行右侧。状态由下一次输入或关闭重置，不用计时器。 -->
             <span
               v-if="lossRateSaveState === 'saving'"
               class="text-[11px] text-text-muted whitespace-nowrap"
@@ -43,14 +42,12 @@
               v-else-if="lossRateSaveState === 'error'"
               class="text-[11px] text-danger-500 whitespace-nowrap"
             >保存失败</span>
-            <!-- 各单率不一致：此时输入框显示 0 只是「无单一值」的占位，
-                 不等于「从未设置过」，显式提示避免误解。 -->
             <span
               v-if="lossRateMixed"
               class="text-[11px] text-text-muted whitespace-nowrap"
             >各订单损耗率不一致</span>
           </div>
-          <span class="text-[11px] text-text-muted whitespace-nowrap">备品 = 订单数量 × 损耗率‰（向上取整）</span>
+          <span class="text-[11px] text-text-muted whitespace-nowrap">备品 = 订单数量 × 对应布料损耗率‰（向上取整）</span>
         </div>
       </div>
       <template v-else>
@@ -79,17 +76,18 @@
           <th class="w-[7%]">订单数量</th>
           <th class="w-[7%]">备品数量</th>
           <th class="w-[10%]">供应商</th>
-          <th class="w-[22%]">布料名称</th>
-          <th class="w-[15%]">规格型号</th>
+          <th class="w-[20%]">布料名称</th>
+          <th class="w-[14%]">规格型号</th>
+          <th class="w-[6%]">损耗率</th>
           <th class="w-[8%]">数量</th>
-          <th class="w-[7%]">单位</th>
+          <th class="w-[6%]">单位</th>
         </tr>
       </thead>
       <tbody>
         <tr v-for="row in flatFactoryRows" :key="`${row.gi}-${row.si}-${row.fi}`">
           <td v-if="row.isFirstFabricRow" :rowspan="row.groupFabricCount" class="font-bold">{{ row.group.customer_name }}</td>
           <!-- 逐 SKU 分行：多 SKU 时每 SKU 一行 + 「合计」子行（合计取订单级真值）；
-               单 SKU 时仅一行，与改动前逐字一致。三列同源，见 buildSkuDisplayLines。 -->
+               单 SKU 时仅一行，与改动前逐字一致。产品名称 / 订单数量两列同源，见 buildSkuDisplayLines。 -->
           <td v-if="row.isFirstFabricRow" :rowspan="row.groupFabricCount">
             <div
               v-for="(line, li) in groupSkuLines[row.gi]"
@@ -104,29 +102,43 @@
               :class="['sm-sku-line', { 'sm-sku-line--total': line.isTotal }]"
             >{{ formatQty(line.qty) }}</div>
           </td>
-          <td v-if="row.isFirstFabricRow" :rowspan="row.groupFabricCount">
-            <div
-              v-for="(line, li) in groupSkuLines[row.gi]"
-              :key="`s-${li}`"
-              :class="['sm-sku-line', { 'sm-sku-line--total': line.isTotal }]"
-            >{{ formatQty(line.spare) }}</div>
-          </td>
+          <td>{{ formatQty(spareForFabric(row.fabric, row.gi, row.si, row.fi)) }}</td>
           <td v-if="row.isFirstSupplier" :rowspan="row.supplierFabricCount">{{ row.supplier.supplier_name }}</td>
           <td>{{ row.fabric.fabric_name }}</td>
           <td>{{ row.fabric.specification || '' }}</td>
+          <td>
+            <template v-if="!editMode">
+              <input
+                type="number"
+                class="w-14 text-right py-1 px-1 text-[13px] border border-border rounded focus:outline-none focus-visible:outline-2 focus-visible:outline-primary-500 focus-visible:outline-offset-2 focus:border-primary-500"
+                :value="rateForFabric(row.gi, row.si, row.fi)"
+                min="0"
+                max="1000"
+                step="any"
+                @input="onFabricLossRateInput(row.gi, row.si, row.fi, $event)"
+              />
+              <span
+                v-if="isFabricRateMixed(row.gi, row.si, row.fi)"
+                class="text-[10px] text-text-muted whitespace-nowrap"
+              >不一致</span>
+            </template>
+            <template v-else>
+              {{ formatQty(rateForFabric(row.gi, row.si, row.fi)) }}
+            </template>
+          </td>
           <td>
             <template v-if="editMode">
               <input
                 type="number"
                 class="w-20 text-right py-1 px-1.5 text-[13px] inline-block border border-border rounded focus:outline-none focus-visible:outline-2 focus-visible:outline-primary-500 focus-visible:outline-offset-2 focus:border-primary-500"
-                :value="row.fabric.quantity"
+                :value="editFabricQty(row.fabric, row.gi, row.si, row.fi)"
                 min="0"
                 @change="$emit('updateQty', row.gi, row.si, row.fi, ($event.target as HTMLInputElement).value)"
                 @focus="($event.target as HTMLInputElement).select()"
               />
             </template>
             <template v-else>
-              {{ formatQty(displayFabricQty(row.fabric)) }}
+              {{ displayFabricQty(row.fabric, row.gi, row.si, row.fi) }}
             </template>
           </td>
           <td>{{ row.fabric.unit || '' }}</td>
@@ -137,8 +149,9 @@
             {{ formatQty(spareQuantityGrandTotal) }}
           </td>
           <td colspan="3" />
+          <td />
           <td>
-            {{ formatQty(factoryGrandTotal) }}
+            {{ factoryGrandTotal }}
           </td>
           <td />
         </tr>
@@ -176,18 +189,13 @@
 /**
  * SummaryFactoryTab.vue — 汇总下单弹窗「工厂内部订单」页签。
  *
- * 自 SummaryModal.vue 抽出（与既有的 SummarySupplierTab.vue 对称），
- * 目的仅是把单文件行数压回质量门禁阈值（≤400 行），**行为与视觉零改动**：
- * - 模板结构、class、DOM 顺序逐字保留；
- * - 计算逻辑（数量派生 / 备品合计 / 逐 SKU 行 / 拍平行）原样搬移；
- * - 表格边框与内边距由 `@/styles/summary-tables.scss` 提供 —— 父组件原
- *   `table th, table td` 作用域规则无法穿透到本子组件，故必须显式引入。
- *
- * 对外事件与父组件原有 emit 契约一致（由 SummaryModal 继续向 PurchaseView 转发）。
+ * 损耗率粒度：
+ * - 顶部「统一损耗率」为批量快捷入口（同时驱动供应商页放大与订单级备品率）；
+ * - 表格内「损耗率」列为**每一行布料**的差异化损耗率，逐行修改并自动落库。
  */
 import { computed } from 'vue'
 import { fmtQty as formatQty } from '@/utils/formatQty'
-import { calcSpareQuantity, getGroupOrderQty, magnifyByLossRate, buildSkuDisplayLines } from '../composables/useSummaryModal'
+import { calcSpareQuantity, magnifyByLossRate, ceilMagnifiedByLossRate, buildSkuDisplayLines } from '../composables/useSummaryModal'
 import type { FactorySummaryData, FactoryGroup, SupplierGroup, FabricItem, SkuDisplayLine } from '../composables/useSummaryModal'
 
 const props = defineProps<{
@@ -199,6 +207,10 @@ const props = defineProps<{
   lossRateSaveState?: 'idle' | 'saving' | 'saved' | 'error'
   /** 各单损耗率不一致（缺省视为 false；由 useSummaryModal 提供）→ 输入框旁提示 */
   lossRateMixed?: boolean
+  /** 每个布料行当前的损耗率，形状 [gi][si][fi]；缺省回退 lossRate */
+  fabricLossRates?: number[][][]
+  /** 每个布料行内各明细损耗率是否不一致，形状 [gi][si][fi] */
+  fabricLossRateMixed?: boolean[][][]
 }>()
 
 const emit = defineEmits<{
@@ -206,19 +218,16 @@ const emit = defineEmits<{
   toggleEditMode: [enable: boolean]
   saveEdits: []
   updateQty: [gi: number | string, si: number | string, fi: number | string, value: string]
-  /** 损耗率输入的**归一化**值（已夹取到 0..1000）。防抖由父组件负责，见下。 */
+  /** 统一损耗率输入的归一化值（已夹取到 0..1000）。防抖由父组件负责。 */
   lossRateInput: [rate: number]
+  /** 单个布料行损耗率输入的归一化值（已夹取到 0..1000）。防抖由父组件负责。 */
+  fabricLossRateInput: [gi: number, si: number, fi: number, rate: number]
   exportFactory: []
   printFactory: []
 }>()
 
 /**
- * 只做归一化，**不做防抖**：防抖必须留在父组件（SummaryModal）的 setup 作用域。
- *
- * 原因：本组件位于父组件的 `v-if` 之下，用户改完损耗率后在 300ms 防抖窗口内切到
- * 「供应商」页签时本组件会被卸载，若防抖定时器建在这里，其 `emit('applyLossRate')`
- * 将没有监听者 —— 用户刚输入的损耗率被静默丢弃、不落库。父组件（弹窗外壳）不随
- * 页签切换卸载，故由它持有防抖定时器，与拆分前行为完全一致。
+ * 只做归一化，不做防抖：防抖必须留在父组件（SummaryModal）的 setup 作用域。
  */
 function onLossRateInput(e: Event) {
   const val = parseFloat((e.target as HTMLInputElement).value)
@@ -229,50 +238,77 @@ function onLossRateInput(e: Event) {
   emit('lossRateInput', Math.min(val, 1000))
 }
 
-/**
- * 非编辑态「数量」列展示值：原始数量按损耗率加放后的**派生值**（不写回数据）。
- * 编辑态输入框仍绑定原始 `row.fabric.quantity`（那才是落库真值）。
- */
-function displayFabricQty(fabric: FabricItem): number {
-  return magnifyByLossRate(parseFloat(String(fabric.quantity)) || 0, props.lossRate)
+function onFabricLossRateInput(gi: number, si: number, fi: number, e: Event) {
+  const val = parseFloat((e.target as HTMLInputElement).value)
+  if (isNaN(val) || val < 0) {
+    emit('fabricLossRateInput', gi, si, fi, 0)
+    return
+  }
+  emit('fabricLossRateInput', gi, si, fi, Math.min(val, 1000))
+}
+
+/** 取第 gi/si/fi 个布料行当前损耗率；未提供时回退统一损耗率。 */
+function rateForFabric(gi: number, si: number, fi: number): number {
+  const v = props.fabricLossRates?.[gi]?.[si]?.[fi]
+  return typeof v === 'number' && Number.isFinite(v) ? v : props.lossRate
+}
+
+function isFabricRateMixed(gi: number, si: number, fi: number): boolean {
+  return props.fabricLossRateMixed?.[gi]?.[si]?.[fi] === true
 }
 
 /**
- * 「数量」列合计口径 —— 必须与同列单元格展示口径一致，否则输入值与合计自相矛盾：
- * - 非编辑态：数量列展示 `magnifyByLossRate` 派生值 → 合计按派生值累加；
- * - 编辑态：数量输入框绑定**原始** `fabric.quantity` → 合计必须按原始值累加。
- * 备品数量合计（spareQuantityGrandTotal）口径与编辑态无关，本次不改动。
+ * 非编辑态「数量」列展示值：原始数量按该行损耗率加放后向上取整为整数（不写回数据）。
+ * 编辑态输入框使用 editFabricQty 加载精确加放值，避免「展示取整」污染落库真值；
+ * 用户提交时由 useSummaryModal.updateFactoryQty 按该行损耗率反推原始真值后再落库。
  */
+function displayFabricQty(fabric: FabricItem, gi: number, si: number, fi: number): number {
+  return ceilMagnifiedByLossRate(parseFloat(String(fabric.quantity)) || 0, rateForFabric(gi, si, fi))
+}
+
+/** 编辑态「数量」输入框值：保留损耗加放后的精确派生值，供保存时无损反推。 */
+function editFabricQty(fabric: FabricItem, gi: number, si: number, fi: number): number {
+  return magnifyByLossRate(parseFloat(String(fabric.quantity)) || 0, rateForFabric(gi, si, fi))
+}
+
+/** 该布料行的备品数量 = ceil(该行布料用量 × 该行损耗率‰)。 */
+function spareForFabric(fabric: FabricItem, gi: number, si: number, fi: number): number {
+  return calcSpareQuantity(parseFloat(String(fabric.quantity)) || 0, rateForFabric(gi, si, fi))
+}
+
 const factoryGrandTotal = computed(() => {
   let t = 0
-  props.factoryData?.groups?.forEach((g) =>
-    g.suppliers?.forEach((s) =>
-      s.fabrics?.forEach((f) => {
-        t += props.editMode ? (parseFloat(String(f.quantity)) || 0) : displayFabricQty(f)
+  props.factoryData?.groups?.forEach((g, gi) =>
+    g.suppliers?.forEach((s, si) =>
+      s.fabrics?.forEach((f, fi) => {
+        t += displayFabricQty(f, gi, si, fi)
       }),
     ),
   )
   return t
 })
 
-// 备品数量合计 = 各产品备品数量之和（每个产品均按 ceil 后的值累加，与列展示口径一致）
+// 备品数量合计 = 各布料行备品之和（每行先 ceil 后累加，与列展示口径一致）
 const spareQuantityGrandTotal = computed(() => {
   let t = 0
-  props.factoryData?.groups?.forEach((g) => {
-    t += calcSpareQuantity(getGroupOrderQty(g), props.lossRate)
-  })
+  props.factoryData?.groups?.forEach((g, gi) =>
+    g.suppliers?.forEach((s, si) =>
+      s.fabrics?.forEach((f, fi) => {
+        t += spareForFabric(f, gi, si, fi)
+      }),
+    ),
+  )
   return t
 })
 
 /**
- * 每个汇总分组的逐 SKU 展示行（按 gi 索引，供模板三列共用同一份数据）。
- * 口径与打印/导出同源（`buildSkuDisplayLines`），保证屏幕与打印逐字一致。
+ * 每个汇总分组的逐 SKU 展示行（按 gi 索引，供「产品名称 / 订单数量」两列共用）。
  */
 const groupSkuLines = computed<SkuDisplayLine[][]>(() =>
-  (props.factoryData?.groups || []).map((g) => buildSkuDisplayLines(g, props.lossRate)),
+  (props.factoryData?.groups || []).map((g) => buildSkuDisplayLines(g)),
 )
 
-// P1-7: 预计算 flatFactoryRows，避免模板内每行调用 isFirstFabricRow/getGroupFabricCount
+// 预计算 flatFactoryRows，避免模板内每行调用 isFirstFabricRow/getGroupFabricCount
 const flatFactoryRows = computed(() => {
   const rows: {
     gi: number; si: number; fi: number
@@ -309,7 +345,7 @@ const flatFactoryRows = computed(() => {
 @use '@/styles/summary-tables.scss' as *;
 
 /*
-  逐 SKU 分行（产品名称 / 订单数量 / 备品数量 三列共用）：
+  逐 SKU 分行（产品名称 / 订单数量 两列共用）：
   - 单 SKU 时只有一行 → 不产生任何分隔线，视觉与改动前一致（零回归）；
   - 多 SKU 时行间加细分隔线，末行「合计」加粗，便于与逐 SKU 明细区分；
   - 无动效、无额外留白，保持工厂表格的紧凑密度。
