@@ -1,8 +1,13 @@
 /**
- * FontAwesome 图标懒加载清单（自动生成自 src/icons.ts 的注册列表）。
+ * FontAwesome 图标懒加载清单（唯一来源，取代原 src/icons.ts 的全量注册）。
  *
- * 作用：<FontAwesomeIcon> 首次遇到某个图标时，按需动态导入该图标并注册，
- * 避免把全部 solid 图标打进首屏 vendor 包。
+ * 作用：<FontAwesomeIcon>（懒加载包装组件）首次遇到某个图标时，按需动态导入
+ * 该图标并注册到 library，避免把全部 solid 图标打进首屏 vendor 包。
+ *
+ * 维护：新增图标名时在此追加一条 `'kebab-name': () => import('...faXxx')`；
+ * FA5 旧名写进下方 aliasToCanonical。vite.config.ts 会从本文件提取子路径写入
+ * optimizeDeps.include，务必保持 `import('@fortawesome/free-solid-svg-icons/faXxx')`
+ * 这种单引号写法。
  */
 import type { IconDefinition } from '@fortawesome/fontawesome-common-types'
 import { library } from '@fortawesome/fontawesome-svg-core'
@@ -69,6 +74,7 @@ const loaders: Record<string, Loader> = {
   'cubes': () => import('@fortawesome/free-solid-svg-icons/faCubes').then((m) => m.faCubes),
   'database': () => import('@fortawesome/free-solid-svg-icons/faDatabase').then((m) => m.faDatabase),
   'download': () => import('@fortawesome/free-solid-svg-icons/faDownload').then((m) => m.faDownload),
+  'envelope-open-text': () => import('@fortawesome/free-solid-svg-icons/faEnvelopeOpenText').then((m) => m.faEnvelopeOpenText),
   'eraser': () => import('@fortawesome/free-solid-svg-icons/faEraser').then((m) => m.faEraser),
   'exclamation': () => import('@fortawesome/free-solid-svg-icons/faExclamation').then((m) => m.faExclamation),
   'expand': () => import('@fortawesome/free-solid-svg-icons/faExpand').then((m) => m.faExpand),
@@ -95,6 +101,7 @@ const loaders: Record<string, Loader> = {
   'gauge': () => import('@fortawesome/free-solid-svg-icons/faGauge').then((m) => m.faGauge),
   'gear': () => import('@fortawesome/free-solid-svg-icons/faGear').then((m) => m.faGear),
   'gears': () => import('@fortawesome/free-solid-svg-icons/faGears').then((m) => m.faGears),
+  'globe': () => import('@fortawesome/free-solid-svg-icons/faGlobe').then((m) => m.faGlobe),
   'hand-point-left': () => import('@fortawesome/free-solid-svg-icons/faHandPointLeft').then((m) => m.faHandPointLeft),
   'hand-pointer': () => import('@fortawesome/free-solid-svg-icons/faHandPointer').then((m) => m.faHandPointer),
   'hand-sparkles': () => import('@fortawesome/free-solid-svg-icons/faHandSparkles').then((m) => m.faHandSparkles),
@@ -105,6 +112,7 @@ const loaders: Record<string, Loader> = {
   'inbox': () => import('@fortawesome/free-solid-svg-icons/faInbox').then((m) => m.faInbox),
   'industry': () => import('@fortawesome/free-solid-svg-icons/faIndustry').then((m) => m.faIndustry),
   'info': () => import('@fortawesome/free-solid-svg-icons/faInfo').then((m) => m.faInfo),
+  'keyboard': () => import('@fortawesome/free-solid-svg-icons/faKeyboard').then((m) => m.faKeyboard),
   'layer-group': () => import('@fortawesome/free-solid-svg-icons/faLayerGroup').then((m) => m.faLayerGroup),
   'link': () => import('@fortawesome/free-solid-svg-icons/faLink').then((m) => m.faLink),
   'list': () => import('@fortawesome/free-solid-svg-icons/faList').then((m) => m.faList),
@@ -133,6 +141,7 @@ const loaders: Record<string, Loader> = {
   'right-from-bracket': () => import('@fortawesome/free-solid-svg-icons/faRightFromBracket').then((m) => m.faRightFromBracket),
   'right-to-bracket': () => import('@fortawesome/free-solid-svg-icons/faRightToBracket').then((m) => m.faRightToBracket),
   'rotate-left': () => import('@fortawesome/free-solid-svg-icons/faRotateLeft').then((m) => m.faRotateLeft),
+  'rotate-right': () => import('@fortawesome/free-solid-svg-icons/faRotateRight').then((m) => m.faRotateRight),
   'route': () => import('@fortawesome/free-solid-svg-icons/faRoute').then((m) => m.faRoute),
   'scissors': () => import('@fortawesome/free-solid-svg-icons/faScissors').then((m) => m.faScissors),
   'scroll': () => import('@fortawesome/free-solid-svg-icons/faScroll').then((m) => m.faScroll),
@@ -179,6 +188,8 @@ const loaders: Record<string, Loader> = {
 }
 
 const aliasToCanonical: Record<string, string> = {
+  'archive': 'box-archive',
+  'boxes': 'boxes-stacked',
   'calendar-alt': 'calendar-days',
   'calendar-check': 'calendar-check',
   'check-circle': 'circle-check',
@@ -186,11 +197,15 @@ const aliasToCanonical: Record<string, string> = {
   'code-branch': 'code-branch',
   'code-compare': 'code-compare',
   'code-fork': 'code-fork',
+  'cog': 'gear',
+  'cogs': 'gears',
   'comment-dots': 'comment-dots',
   'compress': 'compress',
+  'edit': 'pen-to-square',
   'exclamation-circle': 'circle-exclamation',
   'exclamation-triangle': 'triangle-exclamation',
   'expand': 'expand',
+  'file-archive': 'file-zipper',
   'file-code': 'file-code',
   'file-excel': 'file-excel',
   'file-export': 'file-export',
@@ -200,10 +215,12 @@ const aliasToCanonical: Record<string, string> = {
   'file-invoice-dollar': 'file-invoice-dollar',
   'file-pdf': 'file-pdf',
   'hand-sparkles': 'hand-sparkles',
+  'history': 'clock-rotate-left',
   'hourglass-half': 'hourglass-half',
   'info-circle': 'circle-info',
   'list-alt': 'rectangle-list',
   'list-tree': 'folder-tree',
+  'magic': 'wand-magic',
   'magnifying-glass': 'magnifying-glass',
   'mobile-alt': 'mobile-screen-button',
   'network-wired': 'network-wired',
@@ -212,8 +229,11 @@ const aliasToCanonical: Record<string, string> = {
   'pencil-alt': 'pen-clip',
   'plus-circle': 'circle-plus',
   'question-circle': 'circle-question',
+  'redo': 'arrow-rotate-right',
   'right-to-bracket': 'right-to-bracket',
   'rotate-left': 'rotate-left',
+  'save': 'floppy-disk',
+  'search': 'magnifying-glass',
   'search-minus': 'magnifying-glass-minus',
   'search-plus': 'magnifying-glass-plus',
   'shipping-fast': 'truck-fast',
@@ -223,9 +243,11 @@ const aliasToCanonical: Record<string, string> = {
   'square': 'square',
   'sync-alt': 'arrows-rotate',
   'th-large': 'table-cells-large',
+  'times': 'xmark',
   'times-circle': 'circle-xmark',
   'trash-alt': 'trash-can',
   'truck-loading': 'truck-ramp-box',
+  'tshirt': 'shirt',
   'undo': 'rotate-left',
   'undo-alt': 'rotate-left',
   'user-cog': 'user-gear',

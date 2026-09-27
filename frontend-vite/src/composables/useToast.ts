@@ -5,7 +5,7 @@
  * 统一通知入口，支持配置化调用
  */
 import { icon } from '@fortawesome/fontawesome-svg-core'
-import { faCheck, faTimes, faExclamation, faInfo } from '@fortawesome/free-solid-svg-icons'
+import { loadIcon } from '@/utils/fontAwesomeLoader'
 
 const TOAST_CONTAINER_ID = '__toast_container__'
 
@@ -35,38 +35,61 @@ export function configureToast(config: Partial<ToastOptions>) {
 const THEME: Record<ToastType, {
   accent: string
   accentShadow: string
-  iconDef: typeof faCheck
+  iconName: string
   iconBg: string
   iconColor: string
 }> = {
   success: {
     accent: '#28c76f',
     accentShadow: 'rgba(40, 199, 111, 0.18)',
-    iconDef: faCheck,
+    iconName: 'check',
     iconBg: 'linear-gradient(135deg, #3dc97a, #28c76f)',
     iconColor: '#fff',
   },
   error: {
     accent: '#ea5455',
     accentShadow: 'rgba(234, 84, 85, 0.18)',
-    iconDef: faTimes,
+    iconName: 'xmark',
     iconBg: 'linear-gradient(135deg, #ed5657, #ea5455)',
     iconColor: '#fff',
   },
   warning: {
     accent: '#ff9f43',
     accentShadow: 'rgba(255, 159, 67, 0.18)',
-    iconDef: faExclamation,
+    iconName: 'exclamation',
     iconBg: 'linear-gradient(135deg, #ffa53d, #ff9f43)',
     iconColor: '#fff',
   },
   info: {
     accent: '#5b8def',
     accentShadow: 'rgba(91, 141, 239, 0.18)',
-    iconDef: faInfo,
+    iconName: 'info',
     iconBg: 'linear-gradient(135deg, #6d95f0, #5b8def)',
     iconColor: '#fff',
   },
+}
+
+/**
+ * 按需加载图标定义并渲染成 SVG 追加到 target。
+ * 图标定义走懒加载清单（避免把整套 solid 图标打进首屏），未就绪时先留空，
+ * 不阻塞 toast 文案与消失动画；加载失败静默降级为无图标。
+ */
+function appendLazyIcon(target: HTMLElement, name: string, opts: { color?: string; size: number }) {
+  loadIcon(name)
+    .then((def) => {
+      if (!def || !target.isConnected) return
+      const rendered = icon(def, opts.color ? { styles: { color: opts.color } } : undefined)
+      const svgEl = rendered.node[0] as SVGElement
+      Object.assign(svgEl.style, {
+        width: `${opts.size}px`,
+        height: `${opts.size}px`,
+      })
+      svgEl.setAttribute('aria-hidden', 'true')
+      target.appendChild(svgEl)
+    })
+    .catch(() => {
+      // 图标加载失败不影响 toast 展示
+    })
 }
 
 function getContainer(): HTMLElement {
@@ -155,17 +178,8 @@ function _renderToast(msg: string, type: ToastType, options: Required<ToastOptio
     flexShrink: '0',
     boxShadow: `0 2px 8px ${theme.accentShadow}`,
   })
-  // 使用 FontAwesome icon() API 直接渲染 SVG，替代 dom.watch() 方案
-  const renderedIcon = icon(theme.iconDef, {
-    styles: { color: theme.iconColor },
-  })
-  const svgEl = renderedIcon.node[0] as SVGElement
-  Object.assign(svgEl.style, {
-    width: '14px',
-    height: '14px',
-  })
-  svgEl.setAttribute('aria-hidden', 'true')
-  iconWrap.appendChild(svgEl)
+  // 使用 FontAwesome icon() API 渲染 SVG（定义按需加载），替代 dom.watch() 方案
+  appendLazyIcon(iconWrap, theme.iconName, { color: theme.iconColor, size: 14 })
   wrap.appendChild(iconWrap)
 
   // text
@@ -182,18 +196,8 @@ function _renderToast(msg: string, type: ToastType, options: Required<ToastOptio
   if (options.closable) {
     closeBtn = document.createElement('button')
     closeBtn.setAttribute('aria-label', '关闭通知')
-    const closeIcon = icon(faTimes)
-    const iconHtml = Array.isArray(closeIcon.html) ? closeIcon.html.join('') : closeIcon.html
-    // 安全注入：使用 DOMParser 解析 FontAwesome 图标 SVG 后 appendChild，避免直接对 closeBtn.innerHTML 赋值
-    // 内容为受控常量（faTimes 图标），非用户输入，XSS 风险极低
-    const parsedSvg = new DOMParser().parseFromString(iconHtml, 'image/svg+xml')
-    closeBtn.appendChild(document.importNode(parsedSvg.documentElement, true))
-    const closeSvg = closeBtn.querySelector('svg')
-    if (closeSvg) {
-      closeSvg.style.width = '12px'
-      closeSvg.style.height = '12px'
-      closeSvg.setAttribute('aria-hidden', 'true')
-    }
+    // 与主题图标同一懒加载路径；appendChild 注入真实 SVG 节点，天然无 XSS 风险
+    appendLazyIcon(closeBtn, 'xmark', { size: 12 })
     Object.assign(closeBtn.style, {
       background: 'none',
       border: 'none',

@@ -3,9 +3,8 @@ import { createPinia } from 'pinia'
 import { VueQueryPlugin } from '@tanstack/vue-query'
 import { persistQueryClient } from '@tanstack/query-persist-client-core'
 import { queryClient, queryPersister, shouldPersistQuery } from './utils/queryClient'
-import { FontAwesomeIcon } from '@fortawesome/vue-fontawesome'
+import { FontAwesomeIconLazy } from './components/icon/FontAwesomeIconLazy'
 import './styles/app.css'
-import './icons'
 import App from './App.vue'
 import router from './router'
 import { isMobileDevice } from './composables/useDevice'
@@ -73,7 +72,8 @@ window.addEventListener('unhandledrejection', (event) => {
 
 app.use(createPinia())
 app.use(router)
-app.component('FontAwesomeIcon', FontAwesomeIcon)
+// 懒加载版全局注册：图标首次出现时按需动态 import，避免全量 solid 图标进首屏
+app.component('FontAwesomeIcon', FontAwesomeIconLazy)
 app.use(VueQueryPlugin, { queryClient })
 
 // ===== Vue Query 缓存持久化（sessionStorage）=====

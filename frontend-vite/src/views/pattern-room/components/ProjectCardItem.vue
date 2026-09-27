@@ -40,13 +40,13 @@
           @load="thumbLoaded = true"
         />
         <span v-if="proj.status === 'completed'" class="cgl-card-status-badge">
-          <FontAwesomeIcon :icon="faCheckCircle" aria-hidden="true" /> 已完成
+          <FontAwesomeIcon icon="check-circle" aria-hidden="true" /> 已完成
         </span>
       </div>
       <div v-else class="cgl-card-thumb cgl-card-thumb-placeholder">
-        <FontAwesomeIcon :icon="faTshirt" aria-hidden="true" />
+        <FontAwesomeIcon icon="shirt" aria-hidden="true" />
         <span v-if="proj.status === 'completed'" class="cgl-card-status-badge">
-          <FontAwesomeIcon :icon="faCheckCircle" aria-hidden="true" /> 已完成
+          <FontAwesomeIcon icon="check-circle" aria-hidden="true" /> 已完成
         </span>
       </div>
     </div>
@@ -76,7 +76,7 @@
           title="编辑该打样项目"
           @click.stop="emit('edit', proj.id)"
         >
-          <FontAwesomeIcon :icon="faPen" aria-hidden="true" /> 编辑
+          <FontAwesomeIcon icon="pen" aria-hidden="true" /> 编辑
         </button>
         <button
           v-if="proj.status === 'in_progress'"
@@ -85,7 +85,7 @@
           title="标记为已完成"
           @click.stop="emit('complete', proj.id)"
         >
-          <FontAwesomeIcon :icon="faCheck" aria-hidden="true" /> 完成
+          <FontAwesomeIcon icon="check" aria-hidden="true" /> 完成
         </button>
         <button
           v-if="proj.status === 'in_progress'"
@@ -94,7 +94,7 @@
           title="取消该打样项目"
           @click.stop="emit('cancel', proj.id)"
         >
-          <FontAwesomeIcon :icon="faTimes" aria-hidden="true" /> 取消
+          <FontAwesomeIcon icon="xmark" aria-hidden="true" /> 取消
         </button>
       </div>
     </div>
@@ -109,7 +109,6 @@
  * attrs 透传绑定（保持原 VirtualList 插槽内联写法），本组件不再重复绑定。
  */
 import { ref } from 'vue'
-import { faCheck, faCheckCircle, faPen, faTimes, faTshirt } from '@fortawesome/free-solid-svg-icons'
 import type { ProjectSummary } from '@/api/patternRoom'
 
 defineProps<{

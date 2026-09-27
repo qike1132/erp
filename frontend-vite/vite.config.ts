@@ -122,7 +122,10 @@ export default defineConfig(({ mode }) => {
               'vendor-vue': ['vue', 'vue-router', 'pinia'],
               'vendor-query': ['@tanstack/vue-query'],
               'vendor-vueuse': ['@vueuse/core'],
-              'vendor-fontawesome': ['@fortawesome/fontawesome-svg-core', '@fortawesome/free-solid-svg-icons'],
+              'vendor-fontawesome': ['@fortawesome/fontawesome-svg-core', '@fortawesome/vue-fontawesome'],
+              // 图标定义单独成 chunk：仅由 fontAwesomeLoader 动态 import 触发加载，
+              // 若与上面的 core 合并会被 entry 静态引入，导致整套图标重回首屏。
+              'vendor-fa-icons': ['@fortawesome/free-solid-svg-icons'],
               'vendor-reka-ui': ['reka-ui'],
               'vendor-axios': ['axios'],
               'vendor-primevue': ['primevue'],

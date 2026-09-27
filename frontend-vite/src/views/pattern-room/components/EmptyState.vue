@@ -16,7 +16,7 @@ withDefaults(defineProps<{
   description?: string
 }>(), {
   // 字符串会被 vue-fontawesome 解析为 {prefix:'fas', iconName}，
-  // 只传图标名（icons.ts 已 library.add），不能带 "fas fa-" 类名前缀
+  // 只传图标名（由 fontAwesomeLoader 按需注册），不能带 "fas fa-" 类名前缀
   icon: 'inbox',
   title: '暂无数据',
   description: '',
