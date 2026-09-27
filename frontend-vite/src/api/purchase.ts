@@ -138,8 +138,8 @@ export const purchaseApi = {
       ...(orderIds && orderIds.length > 0 ? { order_ids: orderIds } : {}),
     }),
   summaryPrint: (ids: number[], format: string) => post<ExportResponse>('/purchase-center/orders/summary-print', { ids, format }),
-  supplierSummaryExport: (ids: number[]) =>
-    postDownload('/purchase-center/orders/supplier-summary-export', { ids }, ids.length > 1 ? '供应商采购订单汇总.zip' : '供应商采购订单汇总.xlsx'),
+  supplierSummaryExport: (ids: number[], supplierCount: number) =>
+    postDownload('/purchase-center/orders/supplier-summary-export', { ids }, supplierCount > 1 ? '供应商采购订单汇总.zip' : '供应商采购订单汇总.xlsx'),
   products: (params?: QueryParams) => get<ProductListResponse>('/purchase-center/products', params),
   searchSuggestions: (q: string) => get<SearchSuggestionResponse>('/purchase-center/products/search-suggestions', { q }),
   calculate: (orders: MaterialOrderInput[]) =>

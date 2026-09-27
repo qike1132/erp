@@ -624,7 +624,7 @@ export function useSummaryModal() {
     if (!supplierData.value) return
     if (orderIds.value.length === 0) return
     try {
-      await purchaseApi.supplierSummaryExport(orderIds.value)
+      await purchaseApi.supplierSummaryExport(orderIds.value, supplierGroups.value.length)
     } catch (e) {
       throw new Error((e as Error).message || '导出失败')
     }

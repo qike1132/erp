@@ -17,7 +17,7 @@ from sqlalchemy.orm import selectinload
 
 from fastapi_app.core.cache import cache_result
 from fastapi_app.core.sanitizer import escape_like
-from fastapi_app.shared_models import PurchaseOrder, PurchaseOrderItem
+from fastapi_app.shared_models import PurchaseOrder, PurchaseOrderItem, Supplier
 from fastapi_app.shared_models.order import ORDER_STATUS_PENDING_STOCK
 from fastapi_app.shared_models.purchase_order import PurchaseOrderStatus
 from fastapi_app.utils import calc_total_pages
@@ -189,6 +189,75 @@ async def get_supplier_order_summary(db: AsyncSession, order_ids: list | None = 
     )
     materials = sorted(mat_map.values(), key=lambda x: (x['supplier_name'], x['material_name']))
     return {'materials': materials, 'order_count': len(orders)}
+
+
+async def build_supplier_export_groups(db: AsyncSession, orders: list) -> list:
+    """按供应商归并采购订单明细，供「供应商采购订单汇总」Excel 导出使用。
+
+    归并口径（与历史实现一致）：以**明细级** supplier_name（回退订单级）为键分组，
+    同一供应商下「物料名称 + 规格 + 单位」相同的明细合并数量、跨订单累加；
+    供应商联系信息优先取 Supplier 主数据，缺失时回退采购订单冗余字段。
+
+    ``orders`` 必须已预加载 ``items``（见 get_purchase_orders_with_items）。
+
+    Returns:
+        list[dict]: 每个供应商一项，含 supplier_name / items /
+            contact_person / phone / address。
+    """
+    groups: dict[str, dict] = {}
+    redundant: dict[str, dict] = {}
+    for order in orders:
+        for item in (order.items or []):
+            supplier_name = item.supplier_name or order.supplier_name or '未指定供应商'
+            group = groups.get(supplier_name)
+            if group is None:
+                group = {'items': {}, 'orders': set()}
+                groups[supplier_name] = group
+                redundant[supplier_name] = {
+                    'contact_person': order.supplier_contact_person,
+                    'phone': order.supplier_phone,
+                    'address': order.supplier_address,
+                }
+            key = (item.material_name, item.specification or '', item.unit or '')
+            entry = group['items'].get(key)
+            if entry is None:
+                group['items'][key] = {
+                    'material_name': item.material_name,
+                    'specification': item.specification or '',
+                    'unit': item.unit or '',
+                    'quantity': float(item.quantity or 0),
+                }
+            else:
+                entry['quantity'] += float(item.quantity or 0)
+            group['orders'].add(order.order_no)
+
+    supplier_names = [name for name in groups if name != '未指定供应商']
+    supplier_map = {}
+    if supplier_names:
+        result = await db.execute(select(Supplier).where(Supplier.name.in_(supplier_names)))
+        supplier_map = {s.name: s for s in result.scalars().all()}
+
+    export_groups = []
+    for supplier_name in sorted(groups):
+        group = groups[supplier_name]
+        record = supplier_map.get(supplier_name)
+        fallback = redundant.get(supplier_name, {})
+        if record:
+            contact_person = record.contact_person or ''
+            phone = record.phone or ''
+            address = record.address or ''
+        else:
+            contact_person = fallback.get('contact_person') or ''
+            phone = fallback.get('phone') or ''
+            address = fallback.get('address') or ''
+        export_groups.append({
+            'supplier_name': supplier_name,
+            'items': list(group['items'].values()),
+            'contact_person': contact_person,
+            'phone': phone,
+            'address': address,
+        })
+    return export_groups
 
 
 def _summarize_spare_rate(orders) -> tuple[float | None, bool]:

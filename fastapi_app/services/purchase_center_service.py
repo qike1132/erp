@@ -57,6 +57,7 @@ from fastapi_app.services.purchase_order_generate import (  # noqa: F401
 from fastapi_app.services.purchase_order_query import (  # noqa: F401
     _fetch_bom_data,
     _parse_source_order_ids,
+    build_supplier_export_groups,
     export_completed_orders,
     get_completed_order_quick_filters,
     get_completed_order_suggestions,
