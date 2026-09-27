@@ -143,7 +143,8 @@ function buildSupplierHtml(groups: { supplierName: string; materials: MaterialIt
         tableHtml += `<td rowspan="${g.materials.length}" style="font-weight:bold;">${escapeHtml(g.supplierName)}</td>`
       tableHtml += `<td>${escapeHtml(m.material_name)}</td>`
       tableHtml += `<td>${escapeHtml(m.specification || '')}</td>`
-      tableHtml += `<td>${escapeHtml(fmtQty(m.total_quantity))} ${escapeHtml(m.unit || '')}</td>`
+      tableHtml += `<td>${escapeHtml(fmtQty(m.total_quantity))}</td>`
+      tableHtml += `<td>${escapeHtml(m.unit || '')}</td>`
       tableHtml += '</tr>'
     })
   })
@@ -607,7 +608,7 @@ export function useSummaryModal() {
     const tableHtml = buildSupplierHtml(supplierGroups.value)
     printHtml(
       '供应商采购订单汇总',
-      `${orderTimeLabel(orderTime.value)}<table><thead><tr><th>供应商</th><th>物料名称</th><th>规格型号</th><th>数量</th></tr></thead><tbody>${tableHtml}</tbody></table>`,
+      `${orderTimeLabel(orderTime.value)}<table><thead><tr><th>供应商</th><th>物料名称</th><th>规格型号</th><th>数量</th><th>单位</th></tr></thead><tbody>${tableHtml}</tbody></table>`,
       SUMMARY_PRINT_STYLE,
     )
   }

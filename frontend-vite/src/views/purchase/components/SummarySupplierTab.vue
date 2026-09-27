@@ -15,13 +15,14 @@
   </div>
 
   <div class="max-h-[calc(100vh-320px)] overflow-auto">
-    <table class="w-full border-collapse font-[SimSun,_宋体] text-[13px] bg-white">
+    <table class="w-full border-collapse font-sans text-[13px] bg-white">
       <thead>
         <tr class="bg-border-light">
           <th class="w-[12%]">供应商</th>
           <th class="w-[30%]">物料名称</th>
           <th class="w-[28%]">规格型号</th>
-          <th class="w-[30%]">数量</th>
+          <th class="w-[18%]">数量</th>
+          <th class="w-[12%]">单位</th>
         </tr>
       </thead>
       <tbody>
@@ -32,7 +33,8 @@
             </td>
             <td>{{ m.material_name }}</td>
             <td>{{ m.specification || '' }}</td>
-            <td>{{ formatQty(m.total_quantity) }} {{ m.unit || '' }}</td>
+            <td>{{ formatQty(m.total_quantity) }}</td>
+            <td>{{ m.unit || '' }}</td>
           </tr>
         </template>
         <tr class="bg-border-light font-bold">
@@ -42,6 +44,7 @@
           <td>
             {{ formatQty(supplierGrandTotal) }}
           </td>
+          <td />
         </tr>
       </tbody>
     </table>

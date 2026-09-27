@@ -71,7 +71,7 @@
   </div>
 
   <div class="max-h-[calc(100vh-320px)] overflow-auto">
-    <table class="w-full border-collapse font-[SimSun,_宋体] text-[13px] bg-white">
+    <table class="w-full border-collapse font-sans text-[13px] bg-white">
       <thead>
         <tr class="bg-border-light">
           <th class="w-[9%]">客户</th>
