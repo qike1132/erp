@@ -6,7 +6,8 @@
  *   A2 放大值不再被「保存修改」当作真实 edits 落库（edits 恒空）
  *   A3 无复利：多次改率后展示值只基于原始基数
  *   A4 输出保真（回归护栏）：buildFactoryHtml 的数量列口径不变
- *   A5 供应商侧展示按率放大、且不写回原始数据
+ *   A5 供应商「数量」与工厂「数量」列同源派生、且不写回原始数据
+ *   A6 自定义编辑数量 / 逐行损耗率后，供应商页数量与工厂页实时一致（DOM 级）
  * 【任务 B】损耗率自动落库请求串行化
  *   B1 并发两次输入 → 任一时刻在途 ≤ 1，最后一次发出的率 = 最后输入
  *   B2 快速三个值 → 以最后一个值收尾（中间值允许合并跳过）
@@ -213,17 +214,77 @@ describe('A. 损耗率放大改为纯展示派生（不再就地改写数据）'
     expect(data.groups[0]!.suppliers[0]!.fabrics[0]!.quantity).toBe(10)
   })
 
-  it('A5 供应商侧：展示副本按率放大、原始数据不被写回、合计口径一致', async () => {
+  it('A5 供应商「数量」与工厂「数量」列同源派生、原始数据不被写回', async () => {
+    // 供应商汇总与工厂汇总在后端同源（同一 (供应商,物料,规格,单位)），故真实数据两侧基数相同。
+    vi.mocked(purchaseApi.factorySummary).mockResolvedValue(factoryOf(20) as never)
     const m = useSummaryModal()
     await m.openSummary([7, 8])
 
     m.applyLossRate(5)
 
-    // 展示副本放大（20 × 1.005 = 20.1）
+    // 供应商展示值与工厂「数量」列同源：ceil(20 × 1.005) = 21
     expect(m.supplierGroups).toHaveLength(1)
-    expect(m.supplierGroups[0]!.materials[0]!.total_quantity).toBeCloseTo(20.1, 5)
+    expect(m.supplierGroups[0]!.materials[0]!.total_quantity).toBe(21)
     // 原始数据未被写回（旧实现会变成 20.1）
     expect(m.supplierData!.materials[0]!.total_quantity).toBe(20)
+    expect(m.factoryData!.groups[0]!.suppliers[0]!.fabrics[0]!.quantity).toBe(20)
+  })
+
+  it('A6 工厂自定义编辑数量 / 逐行损耗率后，供应商页「数量」实时一致（DOM 级）', async () => {
+    vi.mocked(purchaseApi.factorySummary).mockResolvedValue(factoryOf(20) as never)
+    vi.mocked(purchaseApi.supplierSummary).mockResolvedValue({
+      success: true,
+      materials: [
+        { material_name: '布料A', specification: 'S1', total_quantity: 20, unit: '米', supplier_name: '供应商1' },
+      ],
+    } as never)
+
+    const m = useSummaryModal()
+    await m.openSummary([7, 8])
+    // 逐行损耗率 100‰：工厂 20 × 1.1 = 22
+    await m.applyFabricLossRateAndSave(0, 0, 0, 100)
+
+    // 每次按 m 的**当前**状态重新挂载，等价于真实页面中 prop 随响应式状态重渲染。
+    const mountModal = () =>
+      mount(SummaryModal, {
+        props: {
+          open: true,
+          factoryData: m.factoryData,
+          supplierData: m.supplierData,
+          editMode: m.editMode,
+          lossRate: m.lossRate,
+          fabricLossRates: m.fabricLossRates,
+          orderCount: 1,
+          supplierGroups: m.supplierGroups,
+        },
+        global: { stubs: { UiDialog: { template: '<div><slot name="title" /><slot /></div>' } } },
+      })
+    const supplierRowQty = (w: ReturnType<typeof mountModal>) => {
+      const rows = w.findAll('tbody tr').filter((r) => r.findAll('td').length >= 4)
+      return rows[0]!.findAll('td')[3]!.text()
+    }
+
+    // 非编辑态：工厂「数量」列与供应商页「数量」逐字一致（22）
+    const before = mountModal()
+    const factoryCell = before.findAll('tbody tr')[0]!.findAll('td')[7]!.text()
+    expect(factoryCell).toBe('22')
+    await before.findAll('.sm-tab-btn')[1]!.trigger('click')
+    expect(supplierRowQty(before)).toBe(factoryCell)
+    before.unmount()
+
+    // 自定义编辑：把该行数量改成 33（真值 30）
+    m.toggleEditMode(true)
+    m.updateFactoryQty(0, 0, 0, 33)
+    expect(m.factoryData!.groups[0]!.suppliers[0]!.fabrics[0]!.quantity).toBe(30)
+
+    const after = mountModal()
+    // 编辑态输入框加载 33（= 30 × 1.1）
+    const inputValue = (after.find('input[type="number"]').element as HTMLInputElement).value
+    expect(inputValue).toBe('33')
+    // 切到供应商页签：立即同步为编辑中的 33（实时且逐字一致）
+    await after.findAll('.sm-tab-btn')[1]!.trigger('click')
+    expect(supplierRowQty(after)).toBe(inputValue)
+    after.unmount()
   })
 })
 
@@ -460,14 +521,15 @@ describe('C. 自动保存可见反馈（lossRateSaveState）', () => {
     expect(m.lossRateSaveState).toBe('idle')
   })
 
-  it('C6 组件按状态渲染内联提示（saving/saved/error 显示、idle 不渲染）', () => {
-    const cases: { state: 'idle' | 'saving' | 'saved' | 'error'; text: string | null }[] = [
+  it('C6 组件按状态渲染内联提示（saving/error/mixed 显示，saved/idle 不渲染）', () => {
+    const cases: { state: 'idle' | 'saving' | 'saved' | 'error'; mixed?: boolean; text: string | null }[] = [
       { state: 'saving', text: '保存中…' },
-      { state: 'saved', text: '已保存' },
+      { state: 'saved', text: null },
       { state: 'error', text: '保存失败' },
+      { state: 'idle', mixed: true, text: '各订单损耗率不一致' },
       { state: 'idle', text: null },
     ]
-    const known = ['保存中…', '已保存', '保存失败']
+    const known = ['保存中…', '保存失败', '各订单损耗率不一致']
 
     for (const c of cases) {
       const wrapper = mount(SummaryModal, {
@@ -480,9 +542,18 @@ describe('C. 自动保存可见反馈（lossRateSaveState）', () => {
           orderCount: 1,
           supplierGroups: [],
           lossRateSaveState: c.state,
+          lossRateMixed: c.mixed ?? false,
         },
         global: { stubs: { UiDialog: { template: '<div><slot name="title" /><slot /></div>' } } },
       })
+      // 提示位必须始终存在且承载文案；且必须是绝对定位（不参与布局）：
+      // 内联在输入框后会推挤行宽（输入抖动），在列内占一行高度会让列比按钮高、
+      // items-center 居中导致输入框与按钮上下错位。两种回退都会被下面断言拦下。
+      const slot = wrapper.find('.sm-loss-hint')
+      expect(slot.exists()).toBe(true)
+      expect(slot.classes()).toContain('absolute')
+      expect(slot.text()).toBe(c.text ?? '')
+
       const status = wrapper.findAll('span').find((s) => known.includes(s.text()))
       if (c.text === null) expect(status).toBeUndefined()
       else expect(status?.text()).toBe(c.text)

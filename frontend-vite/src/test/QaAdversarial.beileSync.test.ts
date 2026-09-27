@@ -176,7 +176,7 @@ describe('F. SummaryModal 订单级 <td> 压缩后的渲染等价性', () => {
     expect(headers[6]).toBe('损耗率')
   })
 
-  it('表头列数 == 每一行（数据行+合计行）的逻辑列数（网格自洽）', () => {
+  it('表头列数 == 每一行数据行的逻辑列数（网格自洽）', () => {
     const wrapper = mountModal()
     const nCols = wrapper.findAll('thead th').length
     const rows = wrapper.findAll('tbody tr').map((r) => r.element)
@@ -209,19 +209,13 @@ describe('F. SummaryModal 订单级 <td> 压缩后的渲染等价性', () => {
     expect(row2[0]!.attributes('rowspan')).toBe('1')
   })
 
-  it('合计行 = colspan3 合计 + colspan3 + 损耗率空列 + 第8列数量合计 + 单位空列', () => {
+  it('表格内已无「合计」行：末行是数据行，数量列仍按派生值', () => {
     const wrapper = mountModal()
     const rows = wrapper.findAll('tbody tr')
-    const totalTds = rows[rows.length - 1]!.findAll('td')
-    expect(totalTds).toHaveLength(5)
-    expect(totalTds[0]!.attributes('colspan')).toBe('3')
-    expect(totalTds[0]!.text()).toBe('合计')
-    expect(totalTds[1]!.attributes('colspan')).toBe('3')
-    expect(totalTds[2]!.text()).toBe('')
-    // 数量合计（新契约）：非编辑态数量列逐行向上取整后累加
-    //   10.05→11 + 20.1→21 + 5.03→6 + 7.04→8 = 46
-    expect(totalTds[3]!.text()).toBe('46')
-    expect(totalTds[4]!.text()).toBe('')
+    // 末行不再是合计行（首格文本不是「合计」）
+    expect(rows[rows.length - 1]!.findAll('td')[0]!.text()).not.toBe('合计')
+    // 数量列仍为损耗率派生值：10 × 1.005 = 10.05 → 11
+    expect(rows[0]!.findAll('td')[7]!.text()).toBe('11')
   })
 })
 

@@ -221,6 +221,18 @@ th{background:#e8e8e8;font-weight:bold;text-align:center}
     return build_print_html("供应商采购订单汇总", ''.join(body_parts), extra_css)
 
 
+def _qty_display_text(value) -> str:
+    """数量展示文本：整数不带小数位、非整数最多 2 位小数。
+
+    与前端 ``qtyDisplayText`` 同口径，保证导出 Excel 的「数量」与页面逐字一致
+    （旧实现直接写 ``str(float)``，整数会渲染成 "20.0"）。
+    """
+    rounded = round_qty(float(value or 0))
+    if rounded == int(rounded):
+        return str(int(rounded))
+    return f'{rounded:.2f}'.rstrip('0').rstrip('.')
+
+
 def create_supplier_workbook(supplier: dict) -> Workbook:
     """基于模板文件为单个供应商创建采购订单 Excel 工作簿"""
     template_path = os.path.normpath(_TEMPLATE_PATH)
@@ -342,7 +354,7 @@ def create_supplier_workbook(supplier: dict) -> Workbook:
             name_val = item['material_name']
             if item.get('specification'):
                 name_val = f"{item['material_name']}（{item['specification']}）"
-            qty = str(item['quantity'])
+            qty = _qty_display_text(item['quantity'])
 
             _fill_cell(ws, row, 1, idx + 1)
             _fill_cell(ws, row, 3, name_val)

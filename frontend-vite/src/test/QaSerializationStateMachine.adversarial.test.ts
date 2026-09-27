@@ -226,14 +226,14 @@ describe('C. 状态机（独立复核）', () => {
     expect(bad.lossRateSaveState).toBe('idle')
   })
 
-  it('C5 组件层真实挂载：内联提示随状态变化，idle 不渲染', () => {
+  it('C5 组件层真实挂载：内联提示随状态变化，saved/idle 不渲染', () => {
     const cases: { state: 'idle' | 'saving' | 'saved' | 'error'; text: string | null }[] = [
       { state: 'saving', text: '保存中…' },
-      { state: 'saved', text: '已保存' },
+      { state: 'saved', text: null },
       { state: 'error', text: '保存失败' },
       { state: 'idle', text: null },
     ]
-    const known = ['保存中…', '已保存', '保存失败']
+    const known = ['保存中…', '保存失败']
     for (const c of cases) {
       const w = mount(SummaryModal, {
         props: {
@@ -249,6 +249,9 @@ describe('C. 状态机（独立复核）', () => {
         global: { stubs: { UiDialog: { template: '<div><slot name="title" /><slot /></div>' } } },
       })
       const hint = w.findAll('span').find((s) => known.includes(s.text()))
+      // 提示位恒定存在且绝对定位：文案只在位内切换，不改变行宽/行高，避免表头行抖动或错位。
+      expect(w.find('.sm-loss-hint').exists()).toBe(true)
+      expect(w.find('.sm-loss-hint').classes()).toContain('absolute')
       if (c.text === null) expect(hint).toBeUndefined()
       else expect(hint?.text()).toBe(c.text)
       w.unmount()

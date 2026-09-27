@@ -10,10 +10,9 @@
  *
  * 覆盖调用点：
  *  - useSummaryModal.ts  buildFactoryHtml  : magnifyByLossRate(parseFloat(String(fabric.quantity))||0, ...)
- *  - useSummaryModal.ts  supplierGroups    : magnifyByLossRate(parseFloat(String(m.total_quantity))||0, ...)
- *  - SummaryModal.vue    displayFabricQty  : magnifyByLossRate(parseFloat(String(fabric.quantity))||0, ...)
- *  - SummaryModal.vue    factoryGrandTotal : editMode ? parseFloat(...) : displayFabricQty(...)
- *  - SummaryModal.vue    supplierGrandTotal: parseFloat(String(m.total_quantity))||0
+ *  - useSummaryModal.ts  supplierGroups    : 与工厂「数量」列同源派生（无对应行时回退 magnifyByLossRate(parseFloat(String(m.total_quantity))||0, ...)）
+ *  - SummaryFactoryTab.vue  displayFabricQty  : factoryQtyDisplayValue(parseFloat(String(fabric.quantity))||0, ...)
+ *  - SummarySupplierTab.vue 数量列        : qtyDisplayText(parseFloat(String(m.total_quantity))||0)
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
@@ -75,6 +74,8 @@ const STRING_SUPPLIER: SupplierSummaryData = {
   success: true,
   materials: [
     { material_name: '布料A', specification: 'S1', total_quantity: '20' as unknown as number, unit: '米', supplier_name: '供应商1' },
+    // 工厂侧无对应行的物料：走「原始值 × 损耗率」回退路径，用于覆盖字符串真值的解析
+    { material_name: '布料C', specification: 'S3', total_quantity: '20' as unknown as number, unit: '米', supplier_name: '供应商1' },
   ],
 }
 
@@ -108,19 +109,24 @@ describe('【上线阻断项】字符串 quantity 不得导致「数量列/合�
     expect(qtyOf(1)).not.toBe(fmtQty(0))
   })
 
-  it('supplierGroups（真实 openSummary 路径）：字符串 total_quantity → 展示副本 = 派生值（非 0）', async () => {
+  it('supplierGroups（真实 openSummary 路径）：与工厂数量同源；字符串真值解析不归零', async () => {
     const m = useSummaryModal()
     await m.openSummary([7, 8])
     m.applyLossRate(5)
 
     expect(m.supplierGroups).toHaveLength(1)
-    expect(m.supplierGroups[0]!.materials[0]!.total_quantity).toBe(20.1)
+    // 布料A 与工厂布料行同键 → 取工厂「数量」列派生值（'10' × 1.005 → 11）
+    expect(m.supplierGroups[0]!.materials[0]!.total_quantity).toBe(11)
     expect(m.supplierGroups[0]!.materials[0]!.total_quantity).not.toBe(0)
+    // 布料C 工厂侧无对应行 → 回退：字符串真值 '20' × 1.005 = 20.1（同样不得归零）
+    expect(m.supplierGroups[0]!.materials[1]!.total_quantity).toBe(20.1)
+    expect(m.supplierGroups[0]!.materials[1]!.total_quantity).not.toBe(0)
     // 原始数据（字符串）不被写回
     expect(m.supplierData!.materials[0]!.total_quantity).toBe('20')
+    expect(m.supplierData!.materials[1]!.total_quantity).toBe('20')
   })
 
-  it('组件渲染（真实路径，非编辑态）：工厂「数量」列与合计均按派生值，绝不为 0', async () => {
+  it('组件渲染（真实路径，非编辑态）：工厂「数量」列按派生值，绝不为 0', async () => {
     const m = useSummaryModal()
     await m.openSummary([7, 8])
     m.applyLossRate(5)
@@ -151,15 +157,13 @@ describe('【上线阻断项】字符串 quantity 不得导致「数量列/合�
     expect(qty0).not.toBe(fmtQty(0))
     expect(qty1).not.toBe(fmtQty(0))
 
-    // 合计行数量列 = ceil(10.05) + ceil(20.1) = 11 + 21 = 32
-    const totalCols = wrapper.findAll('tbody tr').at(-1)!.findAll('td')
-    expect(totalCols[3]!.text()).toBe('32')
-    expect(totalCols[3]!.text()).not.toBe(fmtQty(0))
+    // 表格内已无「合计」行：tbody 只剩数据行（布料A / 布料B）
+    expect(wrapper.findAll('tbody tr')).toHaveLength(2)
 
     wrapper.unmount()
   })
 
-  it('组件渲染（真实路径）：供应商页「数量」列与合计 = 派生值，绝不为 0', async () => {
+  it('组件渲染（真实路径）：供应商页「数量」列 = 派生值，绝不为 0', async () => {
     const m = useSummaryModal()
     await m.openSummary([7, 8])
     m.applyLossRate(5)
@@ -179,13 +183,20 @@ describe('【上线阻断项】字符串 quantity 不得导致「数量列/合�
     // 切到供应商 Tab
     await wrapper.findAll('.sm-tab-btn')[1]!.trigger('click')
 
-    const bodyText = wrapper.find('tbody').text()
-    expect(bodyText).toContain(fmtQty(20.1))
-    expect(bodyText).not.toContain(fmtQty(0))
+    const rows = wrapper.findAll('tbody tr')
+    const qtyOf = (row: (typeof rows)[number]) => {
+      const tds = row.findAll('td')
+      return tds[tds.length - 2]!.text()
+    }
+    expect(rows).toHaveLength(2) // 布料A + 布料C（表格内已无「合计」行）
+    // 与工厂数量同源的 11（布料A）+ 回退派生的 20.1（布料C）
+    expect(qtyOf(rows[0]!)).toBe('11')
+    expect(qtyOf(rows[1]!)).toBe('20.1')
+    expect(qtyOf(rows[0]!)).not.toBe(fmtQty(0))
     wrapper.unmount()
   })
 
-  it('编辑态：输入框绑定当前工序损耗率加放后的订单用量，合计按派生值累加，绝不为 0', async () => {
+  it('编辑态：输入框绑定当前工序损耗率加放后的订单用量，绝不为 0', async () => {
     const m = useSummaryModal()
     await m.openSummary([7, 8])
     m.applyLossRate(5)
@@ -206,9 +217,8 @@ describe('【上线阻断项】字符串 quantity 不得导致「数量列/合�
     expect((inputs[0]!.element as HTMLInputElement).value).toBe('10.05')
     expect((inputs[1]!.element as HTMLInputElement).value).toBe('20.1')
 
-    const totalCols = wrapper.findAll('tbody tr').at(-1)!.findAll('td')
-    expect(totalCols[3]!.text()).toBe('32') // ceil(10.05)+ceil(20.1)
-    expect(totalCols[3]!.text()).not.toBe(fmtQty(0))
+    // 表格内已无「合计」行：编辑态同样只剩数据行
+    expect(wrapper.findAll('tbody tr')).toHaveLength(2)
     wrapper.unmount()
   })
 })

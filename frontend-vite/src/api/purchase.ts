@@ -23,6 +23,20 @@ export interface MaterialCalcRow {
 }
 
 /**
+ * 供应商导出数量行（对应后端 `SupplierExportQuantityItem`）。
+ *
+ * 与页面「供应商采购订单」各展示行一一对应：同一
+ * (供应商, 物料, 规格, 单位) 在导出分组中命中时，用 `quantity` 覆盖该行数量。
+ */
+export interface SupplierExportQuantity {
+  supplier_name: string
+  material_name: string
+  specification: string
+  unit: string
+  quantity: number
+}
+
+/**
  * 按「产品 × 作用域(角色)」分块的物料计算结果（对应后端
  * `schemas/purchase_center.py:MaterialCalcScopeGroup`）。
  *
@@ -138,8 +152,18 @@ export const purchaseApi = {
       ...(orderIds && orderIds.length > 0 ? { order_ids: orderIds } : {}),
     }),
   summaryPrint: (ids: number[], format: string) => post<ExportResponse>('/purchase-center/orders/summary-print', { ids, format }),
-  supplierSummaryExport: (ids: number[], supplierCount: number) =>
-    postDownload('/purchase-center/orders/supplier-summary-export', { ids }, supplierCount > 1 ? '供应商采购订单汇总.zip' : '供应商采购订单汇总.xlsx'),
+  /**
+   * 导出供应商采购订单汇总 Excel。
+   * `quantities` 携带页面「供应商采购订单」各行的展示数量（含损耗率加放），
+   * 后端据此覆盖导出数量，保证导出 Excel 与页面逐行一致；
+   * 缺省时后端回退为明细原始数量口径（向后兼容）。
+   */
+  supplierSummaryExport: (ids: number[], supplierCount: number, quantities: SupplierExportQuantity[] = []) =>
+    postDownload(
+      '/purchase-center/orders/supplier-summary-export',
+      quantities.length > 0 ? { ids, supplier_quantities: quantities } : { ids },
+      supplierCount > 1 ? '供应商采购订单汇总.zip' : '供应商采购订单汇总.xlsx',
+    ),
   products: (params?: QueryParams) => get<ProductListResponse>('/purchase-center/products', params),
   searchSuggestions: (q: string) => get<SearchSuggestionResponse>('/purchase-center/products/search-suggestions', { q }),
   calculate: (orders: MaterialOrderInput[]) =>

@@ -4,8 +4,8 @@
  * 覆盖：
  * 1. getGroupOrderQty 订单数量取数（product_quantity 优先 / order_quantity 回退 / 非法兜底 0）
  * 2. buildFactoryHtml 打印/导出共用 HTML：9 列表头 + 数据行第 7 列损耗率、第 8 列数量
- * 3. SummaryModal 挂载后合计口径，合计行按表头列位对齐（第 8 列数量合计），
- *    以及数据行与合计口径一致（含字符串 qty 的防御性 parseFloat 场景）
+ * 3. SummaryModal 挂载后的数量口径：数据行「数量」列按损耗率派生取整，且工厂页签
+ *    表格内的「合计」行已删除（tbody 只剩数据行）；含字符串 qty 的防御性 parseFloat 场景
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
@@ -49,22 +49,6 @@ const stubs = {
   UiDialog: {
     template: '<div class="ui-dialog-stub"><slot name="title" /><slot /></div>',
   },
-}
-
-interface CellLike {
-  text(): string
-  attributes(name: string): string | undefined
-}
-
-/** 按 colspan 展开为逻辑列，便于与表头列位（1客户/…/9单位）对齐断言合计行 */
-function expandColspan(cells: CellLike[]): string[] {
-  const cols: string[] = []
-  cells.forEach((cell) => {
-    const span = Number(cell.attributes('colspan')) || 1
-    const text = cell.text()
-    for (let i = 0; i < span; i++) cols.push(text)
-  })
-  return cols
 }
 
 /**
@@ -114,7 +98,7 @@ describe('magnifyByLossRate 纯函数（损耗加放的唯一来源）', () => {
   })
 })
 
-describe('SummaryModal 合计口径', () => {
+describe('SummaryModal 数量口径（数据行）', () => {
   const factoryData: FactorySummaryData = {
     success: true,
     order_count: 2,
@@ -169,16 +153,24 @@ describe('SummaryModal 合计口径', () => {
     expect(headers[6]).toBe('损耗率')
   })
 
-  it('合计行按表头列位对齐：第 8 列数量合计（lossRate=5）', () => {
-    // 数量合计：数量列是「损耗率的纯函数」——非编辑态按 magnifyByLossRate 派生后向上取整累加：
-    //   10.05→11 + 20.1→21 + 5.03→6 = 38
+  it('已删除表格内的「合计」行：tbody 只剩数据行', () => {
     const wrapper = mountModal(5)
     const rows = wrapper.findAll('tbody tr')
-    const totalCols = expandColspan(rows[rows.length - 1]!.findAll('td'))
-    expect(totalCols[7]).toBe('38') // 第8列 数量：10.05→11、20.1→21、5.03→6
+    expect(rows).toHaveLength(3) // 布料A / 布料B / 布料C
+    // 任何一行都不再是「合计」行（首格文本不再是 合计）
+    expect(rows.some((r) => r.findAll('td')[0]!.text() === '合计')).toBe(false)
   })
 
-  it('【真实用户路径】openSummary → applyLossRate(5) → 合计按派生值（与 prop 注入同源，而非仅覆盖 prop）', async () => {
+  it('数据行「数量」列按损耗率派生取整（lossRate=5：10.05→11、20.1→21、5.03→6）', () => {
+    const wrapper = mountModal(5)
+    const rows = wrapper.findAll('tbody tr')
+    expect(rows[0]!.findAll('td')[7]!.text()).toBe('11')
+    // 同供应商第二行被 rowspan 合并，数量列在该行 tds 中的下标为 3
+    expect(rows[1]!.findAll('td')[3]!.text()).toBe('21')
+    expect(rows[2]!.findAll('td')[7]!.text()).toBe('6')
+  })
+
+  it('【真实用户路径】openSummary → applyLossRate(5) → 数据行数量按派生值（与 prop 注入同源，而非仅覆盖 prop）', async () => {
     vi.mocked(purchaseApi.factorySummary).mockResolvedValue(factoryData as never)
     vi.mocked(purchaseApi.supplierSummary).mockResolvedValue({ success: true, materials: [] } as never)
     const m = useSummaryModal()
@@ -198,27 +190,29 @@ describe('SummaryModal 合计口径', () => {
         global: { stubs },
       })
 
-    // 未交互损耗率（rate=0）→ 合计为原始值
+    // 数量列逐行读数：第 2 行被 rowspan 合并，数量列下标为 3
+    const qtyCells = (w: ReturnType<typeof mountWithSummary>) => {
+      const rows = w.findAll('tbody tr')
+      return [rows[0]!.findAll('td')[7]!.text(), rows[1]!.findAll('td')[3]!.text(), rows[2]!.findAll('td')[7]!.text()]
+    }
+
+    // 未交互损耗率（rate=0）→ 数量为原始值
     const before = mountWithSummary()
-    const beforeTotal = expandColspan(before.findAll('tbody tr').slice(-1)[0]!.findAll('td'))
-    expect(beforeTotal[7]).toBe('35')
+    expect(qtyCells(before)).toEqual(['10', '20', '5'])
     before.unmount()
 
     // 用户输入损耗率（真实动作路径）→ 仅率状态变化，展示派生随之放大
     m.applyLossRate(5)
     const after = mountWithSummary()
-    const afterTotal = expandColspan(after.findAll('tbody tr').slice(-1)[0]!.findAll('td'))
-    expect(afterTotal[7]).toBe('38') // 与 mountModal(5) 的 prop 注入结果一致
+    expect(qtyCells(after)).toEqual(['11', '21', '6']) // 与 mountModal(5) 的 prop 注入结果一致
     // 原始数量不被就地改写（落库真值保持 10/20/5）
     expect(m.factoryData!.groups[0]!.suppliers[0]!.fabrics[0]!.quantity).toBe(10)
     after.unmount()
   })
 
   it('【UX 一致性】非编辑态数量列向上取整为整数，编辑态输入框保留精确加放值', () => {
-    // 非编辑态：数量列逐行向上取整 → 合计也是各取整值之和
+    // 非编辑态：数量列逐行向上取整
     const view = mountModal(5, factoryData, false)
-    const totalView = expandColspan(view.findAll('tbody tr').slice(-1)[0]!.findAll('td'))
-    expect(totalView[7]).toBe('38') // 11 + 21 + 6
     const viewRows = view.findAll('tbody tr')
     expect(viewRows[0]!.findAll('td')[7]!.text()).toBe('11')
     // 同供应商第二行被 rowspan 合并，数量列在本行 tds 中的下标为 3
@@ -227,18 +221,16 @@ describe('SummaryModal 合计口径', () => {
 
     // 编辑态：数量输入框加载 10.05/20.1/5.03 精确加放值，保存反推不因展示取整而失真
     const edit = mountModal(5, factoryData, true)
-    const totalEdit = expandColspan(edit.findAll('tbody tr').slice(-1)[0]!.findAll('td'))
-    expect(totalEdit[7]).toBe('38') // 合计仍按整数展示
     expect(edit.findAll('input[type="number"]').map((i) => (i.element as HTMLInputElement).value)).toEqual(['10.05', '20.1', '5.03'])
   })
 
-  it('数据行数量与合计口径一致（lossRate=0 → 不改变数量）', () => {
+  it('数据行数量（lossRate=0 → 不改变数量）', () => {
     const wrapper = mountModal(0)
     const rows = wrapper.findAll('tbody tr')
-    const totalCols = expandColspan(rows[rows.length - 1]!.findAll('td'))
-    expect(totalCols[7]).toBe('35') // 第8列 数量合计（lossRate=0 不改变数量）
     // 首行客户×产品行的数量单元格（第 8 列）为原值
     expect(rows[0]!.findAll('td')[7]!.text()).toBe('10')
+    expect(rows[1]!.findAll('td')[3]!.text()).toBe('20')
+    expect(rows[2]!.findAll('td')[7]!.text()).toBe('5')
   })
 
   it('字符串 qty 也能正确计算（防御性 parseFloat，回归 QA 发现的行内显示 0 问题）', () => {

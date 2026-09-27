@@ -21,6 +21,30 @@ class OrderIdsRequest(BaseModel):
     """订单ID列表请求"""
     ids: list[int] = Field(..., min_length=1, max_length=500, description="订单ID列表")
 
+class SupplierExportQuantityItem(BaseModel):
+    """供应商导出数量覆盖行（页面「供应商采购订单」逐行同源）。
+
+    字段与页面展示行一一对应：同一 (supplier_name, material_name, specification, unit)
+    在页面只出现一次（后端已聚合），导出时按这些行**重建**工作簿。
+    """
+    supplier_name: str = Field('', max_length=200, description="供应商名称（空视为未指定供应商）")
+    material_name: str = Field(..., max_length=200, description="物料名称")
+    specification: str = Field('', max_length=200, description="规格型号")
+    unit: str = Field('', max_length=50, description="单位")
+    quantity: float = Field(..., description="页面展示数量（已按损耗率加放）")
+
+class SupplierSummaryExportRequest(OrderIdsRequest):
+    """供应商汇总导出请求。
+
+    ``supplier_quantities`` 携带页面「供应商采购订单」各行的展示数量（含损耗率加放与取整），
+    后端据此**重建**导出内容 —— 行集、行序、数量都取页面，使 Excel 与页面严格一致
+    （页面不展示的填充物等明细不再导出）；缺省（旧客户端）时保持原有
+    「明细行集 + 明细原始数量」口径（向后兼容）。
+    """
+    supplier_quantities: list[SupplierExportQuantityItem] = Field(
+        default_factory=list, max_length=10000, description="页面展示数量覆盖行",
+    )
+
 class OrderIdRequest(BaseModel):
     """单个订单ID请求
 

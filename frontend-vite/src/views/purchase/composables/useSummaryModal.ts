@@ -54,6 +54,47 @@ export function ceilMagnifiedByLossRate(qty: number, lossRate: number): number {
 }
 
 /**
+ * 工厂页签「数量」列的展示值（**工厂表 / 供应商表 / 打印 / 导出共用的唯一入口**）。
+ *
+ * - 非编辑态：按该行损耗率加放后向上取整（与工厂表可见整数一致）；
+ * - 编辑态：返回精确加放值，与「自定义编辑」输入框加载值一致（便于保存时无损反推真值）。
+ *
+ * 供应商页签的「数量」在同一份工厂数据上调用本函数派生，故两侧天然同源：
+ * 用户自定义调整工厂数量或逐行损耗率后，切到供应商页签立即看到同一数值（实时一致）。
+ */
+export function factoryQtyDisplayValue(baseQty: number, lossRate: number, editing: boolean): number {
+  return editing ? magnifyByLossRate(baseQty, lossRate) : ceilMagnifiedByLossRate(baseQty, lossRate)
+}
+
+/**
+ * 汇总物料键：`供应商 + 物料名 + 规格 + 单位`。
+ *
+ * 后端工厂汇总（fabric）与供应商汇总（material）同源，均按
+ * (供应商, 物料, 规格, 单位) 聚合，故两侧可用同一键一一对应。
+ * 用 `\u0000` 分隔，避免字段值本身含分隔符时发生键碰撞。
+ */
+export function summaryMaterialKey(
+  supplierName: string | null | undefined,
+  materialName: string | null | undefined,
+  specification: string | null | undefined,
+  unit: string | null | undefined,
+): string {
+  return [supplierName || '未指定供应商', materialName || '', specification || '', unit || ''].join('\u0000')
+}
+
+/**
+ * 数量展示文本（供应商页签屏幕 / 打印 / 导出共用）：最多 2 位小数并消除浮点尾差。
+ *
+ * 与工厂页「数量」列同源派生值配合使用：**不额外补 1 位小数**，否则
+ * 「工厂编辑态 10.05 → 供应商 10.1」这类舍入会造成两页签假性不一致。
+ */
+export function qtyDisplayText(val: unknown): string {
+  const n = parseFloat(String(val ?? 0))
+  if (!Number.isFinite(n)) return '0'
+  return String(Math.round(n * 100) / 100)
+}
+
+/**
  * 损耗加放的逆运算：把「数量列展示的订单用量（已按损耗率放大）」还原为落库真值。
  *
  * 自定义编辑进入编辑态时输入框加载展示值（如 110），保存时用本函数按该行损耗率
@@ -152,7 +193,7 @@ function buildSupplierHtml(groups: { supplierName: string; materials: MaterialIt
         tableHtml += `<td rowspan="${g.materials.length}" style="font-weight:bold;">${escapeHtml(g.supplierName)}</td>`
       tableHtml += `<td>${escapeHtml(m.material_name)}</td>`
       tableHtml += `<td>${escapeHtml(m.specification || '')}</td>`
-      tableHtml += `<td>${escapeHtml(fmtQty(m.total_quantity))}</td>`
+      tableHtml += `<td>${escapeHtml(qtyDisplayText(m.total_quantity))}</td>`
       tableHtml += `<td>${escapeHtml(m.unit || '')}</td>`
       tableHtml += '</tr>'
     })
@@ -341,22 +382,53 @@ export function useSummaryModal() {
   const fabricDrainPromises = new Map<string, Promise<void>>()
   const fabricPendingRates = new Map<string, number>()
 
+  /**
+   * 工厂页签「数量」列的当前展示值索引：key = (供应商,物料,规格,单位) → 汇总数量。
+   *
+   * 供应商页签的「数量」直接由此派生（见 supplierGroups），保证与工厂页签**同源**：
+   * - 同一损耗率、同一取整口径，不再出现「工厂已加放、供应商未加放」的口径差；
+   * - 用户自定义编辑工厂数量 / 逐行损耗率后，供应商页签立即反映同一数值（实时一致）。
+   *
+   * 编辑态取精确加放值（与输入框一致），非编辑态取向上取整值（与工厂表可见值一致）；
+   * 多分组（客户 × 产品）落到同一物料键时按各行展示值累加，与工厂表可见行相加一致。
+   */
+  const factoryQtyByMaterialKey = computed(() => {
+    const map = new Map<string, number>()
+    factoryData.value?.groups?.forEach((group, gi) => {
+      ;(group.suppliers || []).forEach((supplier, si) => {
+        ;(supplier.fabrics || []).forEach((fabric, fi) => {
+          const key = summaryMaterialKey(supplier.supplier_name, fabric.fabric_name, fabric.specification, fabric.unit)
+          const baseQty = parseFloat(String(fabric.quantity)) || 0
+          const qty = factoryQtyDisplayValue(baseQty, rateForFabric(gi, si, fi), editMode.value)
+          // 累加后再四舍五入到 2 位小数：多分组落到同一物料键时消除浮点尾差，
+          // 使展示值与工厂表「各行相加」严格逐字一致。
+          map.set(key, Math.round(((map.get(key) || 0) + qty) * 100) / 100)
+        })
+      })
+    })
+    return map
+  })
+
   const supplierGroups = computed(() => {
     if (!supplierData.value?.materials) return []
     const groups: { supplierName: string; materials: MaterialItem[] }[] = []
     const map: Record<string, MaterialItem[]> = {}
     const newOrder: string[] = []
+    const factoryQty = factoryQtyByMaterialKey.value
     supplierData.value.materials.forEach((m) => {
       const s = m.supplier_name || '未指定供应商'
       if (!map[s]) {
         map[s] = []
         newOrder.push(s)
       }
-      // 展示副本：按损耗率派生放大数量。**不写回 supplierData** ——
-      // 原始数量是落库唯一真值，供应商页表格 / 合计 / 打印 / 导出都吃这份派生值。
+      // 展示副本：与工厂页签「数量」列同源（见 factoryQtyByMaterialKey），**不写回 supplierData** ——
+      // 原始数量是落库唯一真值；工厂侧无对应行（异常数据）时回退到按统一损耗率放大原始值。
+      const derived = factoryQty.get(summaryMaterialKey(m.supplier_name, m.material_name, m.specification, m.unit))
       map[s].push({
         ...m,
-        total_quantity: magnifyByLossRate(parseFloat(String(m.total_quantity)) || 0, lossRate.value),
+        total_quantity: derived !== undefined
+          ? derived
+          : magnifyByLossRate(parseFloat(String(m.total_quantity)) || 0, lossRate.value),
       })
     })
     const order = supplierOrder.value.length > 0 ? supplierOrder.value : newOrder
@@ -374,10 +446,14 @@ export function useSummaryModal() {
     return `${gi}-${si}-${fi}`
   }
 
-  /** 取第 gi/si/fi 个布料行当前损耗率（非法/缺失兜底 0） */
+  /**
+   * 取第 gi/si/fi 个布料行当前损耗率。
+   * 逐行率缺失/非法时回退「统一损耗率」，与工厂表「数量」列口径一致
+   * （SummaryFactoryTab.rateForFabric 同样回退 lossRate），保证展示与保存反推同源。
+   */
   function rateForFabric(gi: number, si: number, fi: number): number {
     const v = fabricLossRates.value?.[gi]?.[si]?.[fi]
-    return Number.isFinite(v) ? (v as number) : 0
+    return typeof v === 'number' && Number.isFinite(v) ? v : lossRate.value
   }
 
   async function openSummary(ids: number[], orderTimeValue?: string) {
@@ -468,7 +544,7 @@ export function useSummaryModal() {
       fabricLossRateMixed.value = cloneRaw(fabricLossRateMixed.value)
       // 弹窗仍开着、服务端仍存着该率，故恢复到「已落库」基线而非清零，
       // 否则「打开看到 5 → 自定义编辑 → 取消编辑」会自相矛盾地变成 0。
-      // 同时复位交互标记与保存反馈（消掉残留的「已保存」小字）。
+      // 同时复位交互标记与保存反馈状态（saving/error 提示随之一并消失）。
       lossRateTouched.value = false
       lossRateSaveState.value = 'idle'
     }
@@ -794,11 +870,31 @@ export function useSummaryModal() {
     downloadAsXls(html, '工厂内部采购汇总.xls')
   }
 
+  /**
+   * 导出用数量行：直接取供应商页签**当前展示**的数量（与工厂页数量同源派生），
+   * 随导出请求发给后端覆盖 Excel 数量，保证「导出 = 页面所见」。
+   */
+  function buildSupplierExportQuantities() {
+    return supplierGroups.value.flatMap((g) =>
+      g.materials.map((m) => ({
+        supplier_name: g.supplierName,
+        material_name: m.material_name,
+        specification: m.specification || '',
+        unit: m.unit || '',
+        quantity: parseFloat(String(m.total_quantity)) || 0,
+      })),
+    )
+  }
+
   async function exportSupplier() {
     if (!supplierData.value) return
     if (orderIds.value.length === 0) return
     try {
-      await purchaseApi.supplierSummaryExport(orderIds.value, supplierGroups.value.length)
+      await purchaseApi.supplierSummaryExport(
+        orderIds.value,
+        supplierGroups.value.length,
+        buildSupplierExportQuantities(),
+      )
     } catch (e) {
       throw new Error((e as Error).message || '导出失败')
     }

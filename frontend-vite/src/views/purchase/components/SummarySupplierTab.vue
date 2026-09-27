@@ -33,19 +33,10 @@
             </td>
             <td>{{ m.material_name }}</td>
             <td>{{ m.specification || '' }}</td>
-            <td>{{ formatQty(m.total_quantity) }}</td>
+            <td>{{ qtyDisplayText(m.total_quantity) }}</td>
             <td>{{ m.unit || '' }}</td>
           </tr>
         </template>
-        <tr class="bg-border-light font-bold">
-          <td class="text-center">合计</td>
-          <td />
-          <td />
-          <td>
-            {{ formatQty(supplierGrandTotal) }}
-          </td>
-          <td />
-        </tr>
       </tbody>
     </table>
   </div>
@@ -77,11 +68,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
-import { fmtQty as formatQty } from '@/utils/formatQty'
+import { qtyDisplayText } from '../composables/useSummaryModal'
 import type { MaterialItem, SupplierSummaryData } from '../composables/useSummaryModal'
 
-const props = defineProps<{
+defineProps<{
   supplierData: SupplierSummaryData
   orderCount: number
   supplierGroups: { supplierName: string; materials: MaterialItem[] }[]
@@ -92,16 +82,6 @@ defineEmits<{
   exportSupplier: []
   printSupplier: []
 }>()
-
-/**
- * 供应商数量合计 = 各物料数量之和。props.supplierGroups 已是「按损耗率派生」的展示副本，
- * 故此处直接累加即与列展示口径一致，无需再放大一次。
- */
-const supplierGrandTotal = computed(() => {
-  let t = 0
-  props.supplierGroups.forEach((g) => g.materials.forEach((m) => (t += parseFloat(String(m.total_quantity)) || 0)))
-  return t
-})
 </script>
 
 <style scoped lang="scss">

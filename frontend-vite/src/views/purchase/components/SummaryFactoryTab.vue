@@ -18,7 +18,7 @@
         >
           <FontAwesomeIcon icon="edit" aria-hidden="true" /> 自定义编辑
         </button>
-        <div class="flex flex-col items-end gap-0.5">
+        <div class="relative flex flex-col items-end gap-0.5">
           <div class="flex items-center gap-2">
             <label class="text-xs text-text-secondary whitespace-nowrap">统一损耗率（千分之几）</label>
             <input
@@ -30,23 +30,20 @@
               step="any"
               @input="onLossRateInput"
             />
-            <span
-              v-if="lossRateSaveState === 'saving'"
-              class="text-[11px] text-text-muted whitespace-nowrap"
-            >保存中…</span>
-            <span
-              v-else-if="lossRateSaveState === 'saved'"
-              class="text-[11px] text-success-500 whitespace-nowrap"
-            >已保存</span>
-            <span
-              v-else-if="lossRateSaveState === 'error'"
-              class="text-[11px] text-danger-500 whitespace-nowrap"
-            >保存失败</span>
-            <span
-              v-if="lossRateMixed"
-              class="text-[11px] text-text-muted whitespace-nowrap"
-            >各订单损耗率不一致</span>
           </div>
+          <!--
+            提示位必须「不参与布局」：既不能内联在输入框后（文案出现/消失会改变行宽，
+            把整行左右推挤 → 输入一次数字抖动一次），也不能在列内占一行高度
+            （列变两行后会比左侧按钮高，items-center 居中会让输入框与按钮上下错位）。
+            故绝对定位在输入框下方，只做覆盖显示：行宽、行高、按钮与输入框的垂直居中都不变。
+          -->
+          <span
+            class="sm-loss-hint absolute right-0 top-full mt-0.5 text-[11px] leading-4 whitespace-nowrap"
+          >
+            <span v-if="lossRateSaveState === 'saving'" class="text-text-muted">保存中…</span>
+            <span v-else-if="lossRateSaveState === 'error'" class="text-danger-500">保存失败</span>
+            <span v-else-if="lossRateMixed" class="text-text-muted">各订单损耗率不一致</span>
+          </span>
         </div>
       </div>
       <template v-else>
@@ -140,13 +137,6 @@
           </td>
           <td>{{ row.fabric.unit || '' }}</td>
         </tr>
-        <tr class="bg-border-light font-bold">
-          <td colspan="3" class="text-center">合计</td>
-          <td colspan="3" />
-          <td />
-          <td>{{ factoryGrandTotal }}</td>
-          <td />
-        </tr>
       </tbody>
     </table>
   </div>
@@ -187,7 +177,7 @@
  */
 import { computed } from 'vue'
 import { fmtQty as formatQty } from '@/utils/formatQty'
-import { magnifyByLossRate, ceilMagnifiedByLossRate, buildSkuDisplayLines } from '../composables/useSummaryModal'
+import { factoryQtyDisplayValue, buildSkuDisplayLines } from '../composables/useSummaryModal'
 import type { FactorySummaryData, FactoryGroup, SupplierGroup, FabricItem, SkuDisplayLine } from '../composables/useSummaryModal'
 
 const props = defineProps<{
@@ -255,25 +245,13 @@ function isFabricRateMixed(gi: number, si: number, fi: number): boolean {
  * 用户提交时由 useSummaryModal.updateFactoryQty 按该行损耗率反推原始真值后再落库。
  */
 function displayFabricQty(fabric: FabricItem, gi: number, si: number, fi: number): number {
-  return ceilMagnifiedByLossRate(parseFloat(String(fabric.quantity)) || 0, rateForFabric(gi, si, fi))
+  return factoryQtyDisplayValue(parseFloat(String(fabric.quantity)) || 0, rateForFabric(gi, si, fi), false)
 }
 
 /** 编辑态「数量」输入框值：保留损耗加放后的精确派生值，供保存时无损反推。 */
 function editFabricQty(fabric: FabricItem, gi: number, si: number, fi: number): number {
-  return magnifyByLossRate(parseFloat(String(fabric.quantity)) || 0, rateForFabric(gi, si, fi))
+  return factoryQtyDisplayValue(parseFloat(String(fabric.quantity)) || 0, rateForFabric(gi, si, fi), true)
 }
-
-const factoryGrandTotal = computed(() => {
-  let t = 0
-  props.factoryData?.groups?.forEach((g, gi) =>
-    g.suppliers?.forEach((s, si) =>
-      s.fabrics?.forEach((f, fi) => {
-        t += displayFabricQty(f, gi, si, fi)
-      }),
-    ),
-  )
-  return t
-})
 
 /**
  * 每个汇总分组的逐 SKU 展示行（按 gi 索引，供「产品名称 / 订单数量」两列共用）。
