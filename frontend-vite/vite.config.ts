@@ -1,4 +1,5 @@
 import { defineConfig, loadEnv } from 'vite'
+import { readFileSync } from 'node:fs'
 import vue from '@vitejs/plugin-vue'
 import tailwindcss from '@tailwindcss/vite'
 import AutoImport from 'unplugin-auto-import/vite'
@@ -6,6 +7,17 @@ import Components from 'unplugin-vue-components/vite'
 import { PrimeVueResolver } from 'unplugin-vue-components/resolvers'
 import { VitePWA } from 'vite-plugin-pwa'
 import { resolve } from 'path'
+
+// FontAwesome 懒加载清单中的 CJS 图标子路径必须显式预构建：
+// dev 下 optimizeDeps.noDiscovery=true 不会自动发现它们，
+// 动态 import 会因 CJS 互操作失败导致图标空白。
+const fontAwesomeLoaderSource = readFileSync(
+  resolve(import.meta.dirname, 'src/utils/fontAwesomeLoader.ts'),
+  'utf-8',
+)
+const fontAwesomeIconIncludes = [
+  ...fontAwesomeLoaderSource.matchAll(/import\('@fortawesome\/free-solid-svg-icons\/([^']+)'\)/g),
+].map((m) => `@fortawesome/free-solid-svg-icons/${m[1]}`)
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
@@ -198,6 +210,7 @@ export default defineConfig(({ mode }) => {
         '@capacitor/app',
         '@capacitor/filesystem',
         '@capacitor/share',
+        ...fontAwesomeIconIncludes,
       ],
     },
   }
