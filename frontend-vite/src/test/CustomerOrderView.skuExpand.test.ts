@@ -85,6 +85,7 @@ vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
     user: { factory: '' },
     loaded: true,
+    hasPermission: vi.fn(() => true),
   }),
 }))
 

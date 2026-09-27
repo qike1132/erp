@@ -73,7 +73,7 @@ class Order(Base):
     order_no: Mapped[str] = mapped_column(String(20), unique=True, nullable=False, comment='订单编号')
     customer: Mapped[str] = mapped_column(String(100), nullable=False, index=True, comment='客户名称')
     order_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True, comment='下单时间')
-    product_id: Mapped[int] = mapped_column(Integer, ForeignKey('product.id', ondelete='RESTRICT'), nullable=False, index=True, comment='产品ID')
+    product_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('product.id', ondelete='SET NULL'), nullable=True, index=True, comment='产品ID')
     quantity: Mapped[int] = mapped_column(Integer, nullable=False, comment='订单数量')
     status: Mapped[str | None] = mapped_column(String(20), default=None, nullable=True, index=True, comment='订单状态')
     note: Mapped[str | None] = mapped_column(Text, comment='备注')

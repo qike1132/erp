@@ -81,10 +81,12 @@
           :current-page="currentPage"
           :total-pages="totalPages"
           :total-records="totalRecords"
+          :can-delete="canDelete"
           :fetch-orders="fetchOrders"
           :reset-filter="resetFilter"
           @change-record-type="handleChangeRecordType"
           @view-detail="openDetail"
+          @delete-record="handleDeleteOrder"
           @change-page="handleChangePage"
           @retry="fetchOrders"
         />
@@ -134,13 +136,17 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick } from 'vue'
+import { ref, watch, nextTick, computed } from 'vue'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import { showToast } from '@/composables/useToast'
+import { orderApi } from '@/api'
+import { useAuthStore } from '@/stores/auth'
+import { getErrorMessage } from '@/types/errors'
 import { QUANTITY_RANGE_MESSAGE } from './composables/quantityRange'
 import { useOrderForm } from './composables/useOrderForm'
 import { useOrderList } from './composables/useOrderList'
 import { useOrderActions } from './composables/useOrderActions'
+import type { OrderRecord } from './composables/types'
 
 import OrderInputPanel from './components/OrderInputPanel.vue'
 import StagingArea from './components/StagingArea.vue'
@@ -232,6 +238,26 @@ const {
   confirmDialog,
   genUid,
 } = useOrderActions(form, isOrder, fetchOrders)
+
+const authStore = useAuthStore()
+const canDelete = computed(() => authStore.hasPermission('order_manage'))
+
+async function handleDeleteOrder(record: OrderRecord) {
+  const orderNo = record.order_no || record.stockin_no || ''
+  const ok = await confirmDialog.confirm(
+    `确定删除订单「${orderNo}」吗？`,
+    '删除将级联清理订单流程节点、状态变更、审批参与者及关联记录；系统会先备份订单数据，误删后可联系管理员恢复。此操作不可撤销。',
+    'danger',
+  )
+  if (!ok) return
+  try {
+    const res = await orderApi.delete(record.id) as { message?: string }
+    showToast(res?.message || '订单删除成功', 'success')
+    fetchOrders()
+  } catch (e: unknown) {
+    showToast(getErrorMessage(e, '删除订单失败'), 'error')
+  }
+}
 
 function addStaged() {
   // 主操作始终可点：缺项时把「缺什么」说出来，而不是把按钮变灰后沉默。

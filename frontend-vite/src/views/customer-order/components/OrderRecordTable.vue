@@ -71,6 +71,14 @@
           >
             <FontAwesomeIcon icon="eye" aria-hidden="true" />
           </button>
+          <button
+            v-if="canDelete"
+            class="co-btn-icon co-btn-danger"
+            :aria-label="`删除订单 ${(row as OrderRecord).order_no || ''}`"
+            @click="emit('delete-record', row as OrderRecord)"
+          >
+            <FontAwesomeIcon icon="trash-alt" aria-hidden="true" />
+          </button>
         </div>
       </template>
     </UiDataTable>
@@ -93,11 +101,13 @@ const props = defineProps<{
   totalPages: number
   totalRecords: number
   perPage: number
+  canDelete: boolean
   fetchOrders: () => void
 }>()
 
 const emit = defineEmits<{
   'view-detail': [record: OrderRecord]
+  'delete-record': [record: OrderRecord]
   'update:perPage': [value: number]
   'change-page': [page: number]
   retry: []
@@ -254,6 +264,14 @@ function onPageChange(event: { page: number; rows: number }) {
 }
 .co-btn-info:hover {
   background: var(--color-primary-100);
+  transform: translateY(-1px);
+}
+.co-btn-danger {
+  background: var(--color-danger-50);
+  color: var(--color-danger-600);
+}
+.co-btn-danger:hover {
+  background: var(--color-danger-100);
   transform: translateY(-1px);
 }
 </style>

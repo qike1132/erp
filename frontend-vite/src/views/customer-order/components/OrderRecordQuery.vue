@@ -28,8 +28,10 @@
       :total-pages="totalPages"
       :total-records="totalRecords"
       :per-page="perPage"
+      :can-delete="canDelete"
       :fetch-orders="fetchOrders"
       @view-detail="(r) => emit('view-detail', r)"
+      @delete-record="(r) => emit('delete-record', r)"
       @update:per-page="(v) => emit('update:perPage', v)"
       @change-page="(p) => emit('change-page', p)"
       @retry="() => emit('retry')"
@@ -66,6 +68,7 @@ const props = defineProps<{
   filterFactory: string
   filterStart: string
   filterEnd: string
+  canDelete: boolean
   fetchOrders: () => void
   resetFilter: () => void
 }>()
@@ -80,6 +83,7 @@ const emit = defineEmits<{
   'update:filterEnd': [value: string]
   'change-record-type': [value: 'order' | 'stockin']
   'view-detail': [record: OrderRecord]
+  'delete-record': [record: OrderRecord]
   'update:perPage': [value: number]
   'change-page': [page: number]
   retry: []

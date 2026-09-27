@@ -359,9 +359,13 @@ async def _handle_delete_approval(db: AsyncSession, approval: ApprovalRequest, o
     Raises:
         ValueError: 关联产品不存在或库存将变为负数时抛出。
     """
-    product = await get_product_for_update(db, order.product_id)
-    if not product:
-        raise ValueError("关联产品不存在")
+    # 产品删除后 order.product_id 会被置空（迁移 052：ON DELETE SET NULL）：
+    # 此时无产品行可锁、无库存可回滚，且 inventory_log.product_id 是非空外键
+    # （ON DELETE CASCADE），故跳过库存回滚，仅清理关联记录并软删除订单。
+    product = (
+        await get_product_for_update(db, order.product_id)
+        if order.product_id is not None else None
+    )
 
     result = await db.execute(
         select(StockOut).where(StockOut.order_id == order.id)
@@ -369,23 +373,24 @@ async def _handle_delete_approval(db: AsyncSession, approval: ApprovalRequest, o
     order_stockouts = list(result.scalars().all())
     total_deducted = sum(so.quantity - so.returned_quantity for so in order_stockouts)
 
-    # 回滚每条出库记录的净抵扣数量
-    for stockout in order_stockouts:
-        net_qty = stockout.quantity - stockout.returned_quantity
-        if net_qty <= 0:
-            continue
-        db.add(InventoryLog(
-            product_id=order.product_id,
-            change_type='抵扣回滚(审批)',
-            change_quantity=net_qty,
-            related_id=order.order_no,
-            note=f'审批删除订单回滚抵扣，净退回{net_qty}件',
-        ))
+    # 回滚每条出库记录的净抵扣数量（产品已删除时无库存与日志目标可写）
+    if product is not None:
+        for stockout in order_stockouts:
+            net_qty = stockout.quantity - stockout.returned_quantity
+            if net_qty <= 0:
+                continue
+            db.add(InventoryLog(
+                product_id=order.product_id,
+                change_type='抵扣回滚(审批)',
+                change_quantity=net_qty,
+                related_id=order.order_no,
+                note=f'审批删除订单回滚抵扣，净退回{net_qty}件',
+            ))
 
-    net_change = total_deducted
-    if product.current_stock + net_change < 0:
-        raise ValueError(f'删除订单将导致库存为负数（当前库存：{product.current_stock}，净变化：{net_change:+d}）')
-    product.current_stock += net_change
+        net_change = total_deducted
+        if product.current_stock + net_change < 0:
+            raise ValueError(f'删除订单将导致库存为负数（当前库存：{product.current_stock}，净变化：{net_change:+d}）')
+        product.current_stock += net_change
 
     # 批量删除出库记录，避免逐条 ORM delete
     await db.execute(sa_delete(StockOut).where(StockOut.order_id == order.id))
@@ -405,13 +410,14 @@ async def _handle_delete_approval(db: AsyncSession, approval: ApprovalRequest, o
         ApprovalRequest.id != approval.id,
     ))
 
-    db.add(InventoryLog(
-        product_id=order.product_id,
-        change_type='订单删除(审批)',
-        change_quantity=total_deducted,
-        related_id=order.order_no,
-        note=f'审批通过删除订单：{order.order_no}，抵扣回滚数量：{total_deducted}',
-    ))
+    if product is not None:
+        db.add(InventoryLog(
+            product_id=order.product_id,
+            change_type='订单删除(审批)',
+            change_quantity=total_deducted,
+            related_id=order.order_no,
+            note=f'审批通过删除订单：{order.order_no}，抵扣回滚数量：{total_deducted}',
+        ))
 
     # 软删除订单（与 order_crud._delete_order_directly 一致），
     # 避免硬删除触发 Order→ApprovalRequest 的 CASCADE，导致当前审批被级联删除

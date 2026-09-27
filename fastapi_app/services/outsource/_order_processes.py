@@ -47,6 +47,8 @@ def _collect_order_skus(order: Order) -> list[tuple[int | None, int, str | None]
     items: list[OrderItem] = list(order.items or [])
     if items:
         return [(it.id, it.product_id, it.product_name) for it in items]
+    if order.product_id is None:
+        return []
     return [(None, order.product_id, getattr(order.product, 'name', None) if order.product else None)]
 
 async def sync_outsource_processes_for_order(

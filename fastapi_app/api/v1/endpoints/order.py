@@ -315,9 +315,12 @@ async def delete_order(
         raise HTTPException(status_code=403, detail=settings.sanitize_business_error(e)) from e
     except (ValueError, NotFoundError) as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    except OSError as e:
+        logger.error("删除订单备份失败: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail='订单删除前备份失败，操作已回滚，请稍后重试') from e
     except SQLAlchemyError as e:
         logger.error("删除订单数据库异常: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail='数据库操作失败') from e
+        raise HTTPException(status_code=500, detail='数据库操作失败，删除已回滚') from e
     # 提交/回滚统一交给 get_async_db 请求级事务，端点只做异常翻译
 
     await cache_mgr.invalidate_dashboard()
