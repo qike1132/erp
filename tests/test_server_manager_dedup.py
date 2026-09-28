@@ -5,12 +5,28 @@
 """
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 
-# 2026-09-28 包化:实现已拆到 server_manager/ 包,本文件按"整包拼接"取文本,
-# 这样 task 2-6 继续把代码拆去 service_ops/windows_ops/... 时无需再改本文件。
+# 2026-09-28 包化:实现已拆到 server_manager/ 包,本文件按"整包拼接"取文本。
+# ★ 修正(T3):此前假设"代码搬到别的模块后本文件无需改"——已实测证伪。凡用
+#   ``TEXT.index(锚点)`` 切片的断言,在实现搬家后会命中同名的瘦转发体(或按
+#   sorted(glob) 的字典序落到别的模块),切片指向错误位置。故涉模块的断言改用
+#   ``_func_src(模块, 函数名)`` 按 AST 精确定位目标模块内的函数体,不依赖任何
+#   模块顺序假设。
 PKG = Path(__file__).resolve().parent.parent / "server_manager"
 TEXT = "\n".join(p.read_text(encoding="utf-8") for p in sorted(PKG.glob("*.py")))
+
+
+def _func_src(rel_path: str, name: str) -> str:
+    """按 AST 取指定模块内某函数/方法的源码段(含缩进),不依赖 TEXT.index 顺序。"""
+    src = (PKG / rel_path).read_text(encoding="utf-8")
+    lines = src.splitlines()
+    for node in ast.walk(ast.parse(src)):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
+            return "\n".join(lines[node.lineno - 1 : node.end_lineno])
+    raise AssertionError(f"{rel_path} 内未找到 {name}")
+
 
 
 # ── b1 轮询原语 ────────────────────────────────────────────────────────────
@@ -25,10 +41,12 @@ def test_single_service_poll_primitive() -> None:
 
 
 def test_wait_service_callers() -> None:
-    for fn in ("_start_redis_via_service", "_wait_service_stopped",
-               "_stop_managed_services", "_wait_service_running"):
-        body = TEXT[TEXT.index(f"def {fn}") :][:1500]
-        assert "_wait_service(" in body, f"{fn} 未复用 _wait_service"
+    # app 侧三个调用点(T4 前仍在 app)
+    for fn in ("_wait_service_stopped", "_stop_managed_services", "_wait_service_running"):
+        assert "_wait_service(" in _func_src("app.py", fn), f"{fn} 未复用 _wait_service"
+    # redis 启停层已搬入 redis_ops(T3):按模块内语义锁复用注入的 wait_service
+    assert "_wait_service(" in _func_src("redis_ops.py", "start_redis_via_service"), \
+        "start_redis_via_service 未复用注入的 _wait_service"
 
 
 def test_emergency_stop_poll_skips_checkpoint() -> None:
@@ -39,12 +57,13 @@ def test_emergency_stop_poll_skips_checkpoint() -> None:
 
 # ── b2 Redis 探活 ─────────────────────────────────────────────────────────
 def test_single_redis_ping_primitive() -> None:
-    assert "def _redis_ping(" in TEXT, "缺少统一的 _redis_ping"
-    for fn in ("_is_redis_running", "_is_broker_running"):
-        body = TEXT[TEXT.index(f"def {fn}") :][:600]
-        assert "_redis_ping(" in body, f"{fn} 未复用 _redis_ping"
+    """RESP 探活唯一实现(T3 已迁 redis_ops):ping 内 3 次 sendall,is_* 复用它。"""
+    ping_body = _func_src("redis_ops.py", "ping")
     # RESP 报文只出现在唯一实现里(3 次 sendall:首次 PING / AUTH / AUTH 后 PING)
-    assert TEXT.count("sock.sendall") == 3, "RESP 报文散落在 _redis_ping 之外"
+    assert ping_body.count("sock.sendall") == 3, "RESP 报文应只在 ping 内(3 次 sendall)"
+    assert TEXT.count("sock.sendall") == 3, "RESP 报文散落在 ping 之外"
+    for fn in ("is_redis_running", "is_broker_running"):
+        assert "self.ping(" in _func_src("redis_ops.py", fn), f"{fn} 未复用 ping"
 
 
 # ── b3 解码器 ─────────────────────────────────────────────────────────────
@@ -65,8 +84,8 @@ def test_single_dev_terminate_primitive() -> None:
 
 # ── b5/b6 Redis 状态解析与死采集键 ──────────────────────────────────────────
 def test_redis_service_state_reuses_svc_state() -> None:
-    body = TEXT[TEXT.index("def _redis_service_state") :][:700]
-    assert "_svc_state(" in body, "Redis 服务状态未复用 _svc_state(拿不到三态语义)"
+    body = _func_src("redis_ops.py", "redis_service_state")
+    assert "_svc_state(" in body, "Redis 服务状态未复用注入的 _svc_state(拿不到三态语义)"
 
 
 def test_dead_collect_keys_removed() -> None:
