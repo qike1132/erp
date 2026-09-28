@@ -88,26 +88,29 @@ def test_file_size_gate_scan_set_includes_root_and_package() -> None:
     )
 
 
-def test_file_size_gate_reports_over_limit_package_file() -> None:
-    """行为锁:门禁要**报得出** ``server_manager/app.py`` 这条超限,而不只是看得见。
+def test_file_size_gate_package_file_within_limit() -> None:
+    """回归锁:``server_manager/app.py`` 必须守在规模阈值以内,且门禁不再报它超限。
 
-    ⚠ 本条锁的是 2026-09-28 的**已知违规**(app.py > 阈值)。控制器裁定:如实报出、
-    不放宽阈值,另开一步把它消掉。**D 步把 app.py 拆到 ≤ 阈值后**,本条的
-    ``line_count > max_file_size`` 会先红 —— 届时删除本条,把"包已纳入扫描"的
-    永久锁留给 ``test_file_size_gate_scan_set_includes_root_and_package``。
+    ★ 本条的来历(T7 改写):原文是 ``test_file_size_gate_reports_over_limit_package_file``,
+    断言的是 2026-09-28 的**已知违规**(app.py 1672 行 > 阈值 1600) —— 控制器裁定
+    「如实报出、不放宽阈值,另开一步消掉」,故该锁只在违规存续期内成立。
+
+    T7 把 hosting 视图层抽到 ``server_manager/hosting_view.py``(HostingViewMixin) 后
+    app.py 降到阈值以内,原锁按其自身 docstring 的提示**改写为永久反向锁**:app.py 一旦
+    再涨回阈值以上,或门禁又把它漏报出来,本条即红。「包已纳入扫描」这件永久的事由
+    ``test_file_size_gate_scan_set_includes_root_and_package`` 单独锁住,与本条解耦。
     """
     limit = _max_file_size()
     line_count = sum(1 for _ in APP_PY.open(encoding="utf-8", errors="replace"))
-    assert line_count > limit, (
-        f"server_manager/app.py 已降至 {line_count} 行(≤ 阈值 {limit}):"
-        "已知违规已消除,请删除本测试"
+    assert line_count <= limit, (
+        f"server_manager/app.py 已涨到 {line_count} 行(> 阈值 {limit}):"
+        "规模门禁会判红,请再抽一层出去"
     )
 
     proc = _run(["scripts/file_size_gate.py", "--all"])
     assert proc.returncode == 0, "无 --fail 的 --all 不应失败"
-    expected = f"server_manager{os.sep}app.py: {line_count} 行"
-    assert expected in proc.stdout, (
-        f"--all 未报出 {expected!r}:\n{proc.stdout}\n{proc.stderr}"
+    assert f"server_manager{os.sep}app.py" not in proc.stdout, (
+        f"--all 仍报出 server_manager{os.sep}app.py 超限:\n{proc.stdout}\n{proc.stderr}"
     )
 
 
@@ -119,16 +122,17 @@ def test_file_size_gate_reports_over_limit_package_file() -> None:
 def test_function_length_gate_scans_repo_root() -> None:
     """函数长度门禁须把仓库根并入默认扫描目录,且根目录只取**顶层** ``*.py``。
 
-    ⚠ ``server_manager`` 包**刻意不**并入默认扫描目录:app.py 的
-    ``_apply_hosting_data() = 155 行`` 会让 quality_gate(pre-commit 与 CI 都跑)
-    立刻变红;函数级拆分属 D 的范畴。(故此处的"不包含"是被裁定的,不是遗漏。)
+    ⚠ ``server_manager`` 包**刻意不**并入默认扫描目录:包内
+    ``_apply_hosting_data() = 192 行``(T7 起位于 ``server_manager/hosting_view.py``)
+    会让 quality_gate(pre-commit 与 CI 都跑)立刻变红;函数级拆分属 D 的范畴。
+    (故此处的"不包含"是被裁定的,不是遗漏。)
     """
     text = (ROOT / "scripts" / "check_function_length.py").read_text(encoding="utf-8")
     assert "PROJECT_ROOT" in text and "DEFAULT_SCAN_DIRS" in text
     # 根目录若用 rglob 会递归进 frontend-vite/node_modules,必须限定顶层。
     assert 'd.glob("*.py")' in text, "根目录扫描未限定为顶层 *.py"
     assert "server_manager" not in text, (
-        "server_manager 不应进 DEFAULT_SCAN_DIRS(app.py 的 155 行函数会让 quality_gate 变红)"
+        "server_manager 不应进 DEFAULT_SCAN_DIRS(包内 192 行函数会让 quality_gate 变红)"
     )
 
 
