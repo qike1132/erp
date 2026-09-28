@@ -41,8 +41,8 @@ def test_single_redis_ping_primitive() -> None:
     for fn in ("_is_redis_running", "_is_broker_running"):
         body = TEXT[TEXT.index(f"def {fn}") :][:600]
         assert "_redis_ping(" in body, f"{fn} 未复用 _redis_ping"
-    # RESP 报文只应出现在一处
-    assert TEXT.count("b'*1\\r\\n$4\\r\\nPING") <= 1 or TEXT.count("PING") <= 3
+    # RESP 报文只出现在唯一实现里(3 次 sendall:首次 PING / AUTH / AUTH 后 PING)
+    assert TEXT.count("sock.sendall") == 3, "RESP 报文散落在 _redis_ping 之外"
 
 
 # ── b3 解码器 ─────────────────────────────────────────────────────────────
