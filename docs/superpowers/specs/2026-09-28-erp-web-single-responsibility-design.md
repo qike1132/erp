@@ -1,7 +1,7 @@
 # 设计:消除双层守护 —— 拆出 erp-web 服务,prod_runner 只管 uvicorn
 
 - 日期:2026-09-28
-- 状态:已获用户批准(方案 1 全量 + 顺带 worker 数调整)
+- 状态:已获用户批准(方案 1 全量 + 顺带 worker 数调整);2026-09-28 迭代自审后修订(补 QA 对抗测试处置、GUI 五处元组清单、轮转函数下沉、回滚禁用自启)
 - 范围:生产编排重构(Windows / NSSM / 本机即生产 `192.168.0.95`)
 
 ## 1. 目标与非目标
@@ -65,7 +65,9 @@ NSSM 用 Job Object 托管进程树——今天 `nssm stop erp-prod` 就能干�
 - `_cmd_vite_preview` 与 Supervisor 的 vite preview 回退分支;
 - 陈旧备份文件 `fastapi_app/core/prod_runner.py.bak_ipv6`。
 
-**保留(转为只观察不管理)**:每轮主循环 HTTP 探测 `http://127.0.0.1:3000/nginx-health`(带 `expect_substr='"service":"nginx"'`),结果写入状态文件 `frontend_ok` 字段;**探测失败只报告,绝不重启**。模块 docstring 更新职责描述。
+**保留(转为只观察不管理)**:每轮主循环 HTTP 探测 `http://127.0.0.1:3000/nginx-health`(带 `expect_substr='"service":"nginx"'`),结果写入状态文件 `frontend_ok` 字段;**探测失败只报告,绝不重启**。模块 docstring 与 `check()` 自检输出同步更新(删去 vite preview 回退相关文案)。
+
+**轮转函数下沉**:`_rotate_file_copytruncate` 从 prod_runner 移至 `utils/log_rotation.py`(纯函数,无副作用),prod_runner 与 ARQ 日志轮转任务(§7)都从该处导入。
 
 **状态文件新契约**:
 
@@ -74,17 +76,20 @@ NSSM 用 Job Object 托管进程树——今天 `nssm stop erp-prod` 就能干�
 "services.frontend": {"type": "erp-web", "pid": null, "status": "external"}
 ```
 
-`frontend_ok` 仍由探针得出,GUI 就绪徽章语义不变。
+`frontend_ok` 仍由探针得出,GUI 就绪徽章语义不变。GUI 的 `_svc_detail` 对 `external` 已有既定处理范式(ARQ `external` → 另走服务状态查询,见 §6.4)。
 
 ## 6. GUI(server_manager.py)改造
 
-1. 新增常量 `_SVC_WEB = 'erp-web'`;所有迭代 `(_SVC_API, _SVC_ARQ)` 的流转(启动/停止/重启/安装/卸载/日志回灌 offset)加入 `_SVC_WEB`;
-2. `_install_services_flow` 增加 erp-web 注册(复用幂等 `_nssm_install`,env_extra 为空串);
-3. **关键**:切换开发模式的"停生产"路径与 `_release_ports` 的受管 PID 排除集必须涵盖 erp-web 的 nginx 进程——否则 dev 模式抢不到 :3000,重演历史端口互斗;
-4. 生产状态卡片前端一行改读 `erp-web` 服务状态 + Server 头探测,`prod_runner.json` 的 `frontend_ok` 作交叉验证;
+1. 新增常量 `_SVC_WEB = 'erp-web'`。硬编码 `(_SVC_API, _SVC_ARQ)` 元组的全部 5 处逐一加入 `_SVC_WEB`:
+   - `_managed_service_pids`(受管 PID 枚举,P0-4 闸门);
+   - `_stop_managed_services`(紧急停止/切换开发前的停服务);
+   - `_service_cmd_sync`(停止/重启按钮流转);
+   - `_start_services_flow` 的日志回灌 offsets 字典;
+   - `_uninstall_services_flow`(卸载清单)。
+2. `_install_services_flow` 增加 erp-web 注册(复用幂等 `_nssm_install`,env_extra 为空串;无需 Python,Application 直指 nginx.exe)。
+3. **关键**:`_svc_pid('erp-web')` 返回 nginx master PID,由 `_managed_service_pids`/`_stop_managed_services` 的既有逻辑自动纳入排除集——dev 模式切换才能抢到 :3000,不重演历史端口互斗。
+4. 生产状态卡片前端一行:仿 ARQ `external` 范式——`svcs.frontend.status == 'external'` 时改读 `erp-web` 服务状态(`_svc_state`/`_svc_pid`)而非信任快照;`frontend_ok` 探针结果作交叉验证(二者不一致时以服务状态为准,探针异常时告警)。
 5. `_is_prod_runner_cmdline` / `_find_loose_prod_runner_pids` 保留(手工游离监督器清理仍需要)。
-
-GUI 无测试基建,由用户在实机验证(交付清单附逐项验证步骤)。
 
 ## 7. nginx 日志轮转归属
 
@@ -108,16 +113,19 @@ GUI 无测试基建,由用户在实机验证(交付清单附逐项验证步骤)�
 6. python scripts/diag/runtime_mode_probe.py 打印终态判定
 ```
 
-**回滚**:`nssm stop erp-web` → `git revert` → `nssm restart erp-prod`(旧 prod_runner 重新拉起 nginx,原路恢复)。回滚步骤以注释写死在脚本里,演练时先走一遍。
+**回滚**:`nssm stop erp-web` → **`nssm set erp-web Start SERVICE_DISABLED`**(防止重启机器后 erp-web 与旧 prod_runner 拉起的 nginx 双跑互斗 :3000)→ `git revert` → `nssm restart erp-prod`(旧 prod_runner 重新拉起 nginx,原路恢复)。回滚步骤以注释写死在脚本里,演练时先走一遍。
 
 ## 10. 测试策略
 
 - **删**:`fastapi_app/tests/test_prod_runner_frontend_failure.py`(测被删的 `_FrontendNginx`);
+- **适配**:`fastapi_app/tests/test_qa_prod_stack_regression.py`——删 D2(`TestD2EnsureStarted`)、D4(`TestD4Spawn`)两个只测 `_FrontendNginx` 的类;D1 中 `test_frontend_alive_false_on_spa_fallback`、D3 中 `_prep_frontend` 相关用例随类删除;**保留** D7(重启真值表,后端守护不动)、D5(gzip)、D6(vite 配置一致性)、D1/D3 中不依赖 `_FrontendNginx` 的探针用例(`_http_ok` + `expect_substr` 行为不变);
 - **保留**:`fastapi_app/tests/test_prod_runner_backend_restart.py`(后端守护不动);
 - **新增**(TDD 先行):
-  1. Supervisor 无 nginx 管理职责、无 `_FrontendNginx`/`_find_nginx` 引用;
-  2. 状态文件 `frontend_type == "erp-web"`、探针失败只报告不重启(状态不跳 crashed、不调 kill_tree);
-  3. 迁移脚本 `-DryRun` 输出的 nssm 命令序列可断言。
+  1. Supervisor 无 nginx 管理职责、无 `_FrontendNginx`/`_find_nginx`/`_cmd_vite_preview` 引用;
+  2. 状态文件 `frontend_type == "erp-web"`、`services.frontend.status == "external"`、探针失败只报告不重启(状态不跳 crashed、不调 kill_tree);
+  3. 迁移脚本 `-DryRun` 输出的 nssm 命令序列可断言;
+  4. `utils/log_rotation.py` 的轮转函数单测(阈值以下不动、超阈值 copytruncate、保留 .1 副本、IO 失败不抛);
+  5. ARQ 轮转任务注册断言(nginx 日志路径在 cron 任务列表中)。
 - **用户手动验证**:GUI 五服务卡片、生产→开发→生产模式切换、迁移后四条硬判据(Server 头、无 @vite/client、无 /src/main.ts、gzip)。
 
 ## 11. 文档同步
