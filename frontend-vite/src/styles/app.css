@@ -633,6 +633,12 @@ h6 { font-size: 0.8125rem; }
   .mc-table td.is-num {
     font-weight: 500;
   }
+  /* 短文本列与「总采购量」同处中轴（当前只有「规格/色号」）。
+     对齐方式不参与列盒宽计算，故不影响 colgroup 的百分比配比。 */
+  .mc-table th.is-center,
+  .mc-table td.is-center {
+    text-align: center;
+  }
 
   /* ============ Page Card Toolbar (Dashboard's top toolbar inside the card) ============ */
   .page-card-toolbar {

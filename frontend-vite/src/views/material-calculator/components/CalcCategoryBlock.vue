@@ -28,7 +28,7 @@
           <tr>
             <th>供应商</th>
             <th>物料名称</th>
-            <th>规格/色号</th>
+            <th class="is-center">规格/色号</th>
             <th class="is-num">总采购量</th>
             <th>单位</th>
           </tr>
@@ -39,7 +39,7 @@
                  → 用 title 保证全文仍可悬浮查看（否则截断等于信息丢失） -->
             <td :title="row.supplier_name || ''">{{ row.supplier_name || '-' }}</td>
             <td :title="row.material_name || ''">{{ row.material_name }}</td>
-            <td :title="row.specification || ''">{{ row.specification || '-' }}</td>
+            <td class="is-center" :title="row.specification || ''">{{ row.specification || '-' }}</td>
             <td class="is-num">{{ quantityOf(categoryKey, row) }}</td>
             <td>{{ unitOf(categoryKey, row) }}</td>
           </tr>
@@ -109,8 +109,8 @@ function unitOf(catKey: string, row: CalcRowVM): string {
    ⇒ 5C = 394.7 − 191.6 = 203.1 ⇒ C = 40.6
    ⇒ 目标盒宽 73.6 / 84.6 / 89.2 / 84.6 / 62.6 ⇒ 百分比 18.7 / 21.4 / 22.6 / 21.4 / 15.9
 
-   「总采购量」列的表头与数据同带 .is-num 并居中（见 app.css），
-   数值不再贴右边界、与表头同轴。对齐方式不改变列盒宽，故上面的百分比仍然成立。
+   「总采购量」列的表头与数据同带 .is-num 并居中、「规格/色号」列同带 .is-center 居中
+   （见 app.css），数值不再贴右边界、与表头同轴。对齐方式不改变列盒宽，故上面的百分比仍然成立。
 
    百分比在 fixed 布局下是硬约束，表宽恒等于容器宽，不会溢出（见 app.css 的 .mc-table）。 */
 .mc-col-supplier {
