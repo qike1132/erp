@@ -8,36 +8,6 @@
       <form @submit.prevent="emit('add-staged')">
         <div class="co-form-row">
           <div class="co-form-group">
-            <label class="co-label" for="co-order-type">订单类型 <span class="co-required" aria-hidden="true">*</span></label>
-            <UiSelect
-              id="co-order-type"
-              label="订单类型"
-              required
-              v-model="form.orderType"
-              placeholder="请选择订单类型"
-              style="width: 100%"
-              :options="orderTypeOptions"
-            />
-          </div>
-          <div v-if="isCustomOrder" class="co-form-group">
-            <label class="co-label" for="co-country">国家</label>
-            <div style="display: flex; gap: 8px; align-items: center;">
-              <UiSelect
-                id="co-country"
-                label="国家"
-                v-model="form.country"
-                placeholder="请选择国家"
-                style="flex: 1"
-                :options="countryOptions"
-              />
-              <UiButton variant="outline" aria-label="新增国家" style="white-space: nowrap; flex-shrink: 0;" @click="openCountryDialog">
-                <FontAwesomeIcon icon="plus" aria-hidden="true" />
-              </UiButton>
-            </div>
-          </div>
-        </div>
-        <div class="co-form-row">
-          <div class="co-form-group">
             <label class="co-label" for="co-date">{{ isOrder ? '订单时间' : '备货时间' }} <span class="co-required" aria-hidden="true">*</span></label>
             <UiDatePicker
               id="co-date"
@@ -196,10 +166,7 @@ const quantityInvalid = computed(() => quantityTouched.value && isQuantityOutOfR
 
 defineProps<{
   isOrder: boolean
-  isCustomOrder: boolean
-  orderTypeOptions: { label: string; value: string }[]
   customerOptions: { label: string; value: string }[]
-  countryOptions: { label: string; value: string }[]
   /** 当前还缺的必填项（面向用户的字段名），用于主动提示 */
   missingFields: string[]
   availableStock: number
@@ -214,7 +181,6 @@ defineProps<{
   selectProduct: (item: ProductSuggestion) => void
   handleDeductPreview: () => void
   openDeductEdit: () => void
-  openCountryDialog: () => void
   handleExcelSelect: (e: Event) => void
   onDrop: (e: DragEvent) => void
   downloadTemplate: () => void

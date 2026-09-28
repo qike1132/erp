@@ -15,7 +15,6 @@
           <div class="co-staged-main">
             <div class="co-staged-info">
               <span :class="['co-type-badge', item.type]">{{ item.type === 'order' ? '订单' : '备货' }}</span>
-              <span v-if="item.orderType === 'custom'" class="co-type-badge custom">定制</span>
               <span class="co-staged-tag"><FontAwesomeIcon icon="user" aria-hidden="true" />{{ item.customer }}</span>
               <span class="co-staged-tag"><FontAwesomeIcon icon="calendar-alt" aria-hidden="true" />{{ item.date }}</span>
               <span class="co-staged-product">
@@ -24,7 +23,6 @@
 
                 <span class="count-badge-subtle">数量: {{ item.quantity }}</span>
                 <span v-if="item.deductQuantity > 0" class="count-badge-subtle">抵扣: {{ item.deductQuantity }}</span>
-                <span v-if="item.country" class="count-badge-subtle"><FontAwesomeIcon icon="globe" aria-hidden="true" /> {{ item.country }}</span>
                 <span v-if="item.note" class="count-badge-subtle">备注: {{ item.note }}</span>
               </span>
             </div>

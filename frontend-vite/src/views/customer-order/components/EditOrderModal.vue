@@ -18,10 +18,6 @@
             <span class="oe-info-value">{{ detailData.customer }}</span>
           </div>
           <div class="oe-info-cell">
-            <span class="oe-info-label">订单类型</span>
-            <span class="oe-info-value">{{ detailData.order_type === 'custom' ? '定制' : '常规' }}</span>
-          </div>
-          <div class="oe-info-cell">
             <span class="oe-info-label">产品</span>
             <span class="oe-info-value oe-info-product">
               <img v-if="detailData.product?.image" loading="lazy" :src="detailData.product.image" class="oe-product-thumb" alt="产品图片" />
@@ -31,10 +27,6 @@
           <div class="oe-info-cell">
             <span class="oe-info-label">69码</span>
             <span class="oe-info-value oe-mono">{{ detailData.product?.barcode || '-' }}</span>
-          </div>
-          <div v-if="detailData.country" class="oe-info-cell">
-            <span class="oe-info-label">国家</span>
-            <span class="oe-info-value">{{ detailData.country }}</span>
           </div>
           <div v-if="detailData.batch_no" class="oe-info-cell">
             <span class="oe-info-label">批次号</span>
@@ -52,8 +44,6 @@
             <tr>
               <th>产品名</th>
               <th>数量</th>
-              <th>类型</th>
-              <th>国家</th>
               <th>抵扣数量</th>
               <th>备注</th>
             </tr>
@@ -65,8 +55,6 @@
                 <span v-if="sku.product_barcode" class="oe-sku-barcode">{{ sku.product_barcode }}</span>
               </td>
               <td><strong>{{ sku.quantity }}</strong></td>
-              <td>{{ sku.order_type === 'custom' ? '定制' : '常规' }}</td>
-              <td>{{ sku.country || '-' }}</td>
               <td>{{ sku.deduct_quantity || 0 }}</td>
               <td class="oe-sku-note">{{ sku.note || '-' }}</td>
             </tr>

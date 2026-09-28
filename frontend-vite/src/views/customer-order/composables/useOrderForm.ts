@@ -1,8 +1,6 @@
-import { ref, reactive, computed, watch } from 'vue'
+import { ref, reactive, computed } from 'vue'
 import { auxApi } from '@/api'
 import { useCatalogStore } from '@/stores/catalog'
-import { useCountryStore } from '@/stores/country'
-import { showToast } from '@/composables/useToast'
 import { isQuantityOutOfRange } from './quantityRange'
 import type { FormState, ProductSuggestion, AvailableStockinItem } from './types'
 
@@ -54,7 +52,6 @@ export function useOrderForm() {
   const today = formatLocalDate(new Date())
   const form = reactive<FormState>({
     type: 'order',
-    orderType: 'normal',
     date: today,
     customer: '',
     productSearch: '',
@@ -63,24 +60,8 @@ export function useOrderForm() {
     deductStock: false,
     deductQuantity: 0,
     note: '',
-    country: '',
   })
   const isOrder = computed(() => form.type === 'order')
-  const isCustomOrder = computed(() => form.orderType === 'custom')
-  const orderTypeOptions = [
-    { value: 'normal', label: '常规订单' },
-    { value: 'custom', label: '定制订单' },
-  ]
-
-  const lastCountry = ref('')
-  watch(() => form.orderType, (newType, oldType) => {
-    if (oldType === 'custom' && newType === 'normal') {
-      lastCountry.value = form.country
-      form.country = ''
-    } else if (oldType === 'normal' && newType === 'custom' && lastCountry.value) {
-      form.country = lastCountry.value
-    }
-  })
   /**
    * 当前还缺哪些必填项（只列**字段名**，用于「请先填写：…」）。
    * 越界属于「已填但值不合法」，由 quantityOutOfRange 单独表达并给出区间文案，
@@ -92,7 +73,6 @@ export function useOrderForm() {
     if (!form.customer) missing.push('客户名称')
     if (!form.productId) missing.push('产品名称')
     if (!(form.quantity > 0)) missing.push(isOrder.value ? '订单数量' : '备货数量')
-    if (isCustomOrder.value && !form.country) missing.push('国家')
     return missing
   })
 
@@ -100,36 +80,6 @@ export function useOrderForm() {
   const quantityOutOfRange = computed(() => isQuantityOutOfRange(form.quantity))
 
   const canAdd = computed(() => missingFields.value.length === 0 && !quantityOutOfRange.value)
-
-  // ===== Country dialog =====
-  const countryDialogVisible = ref(false)
-  const newCountryName = ref('')
-  const countryStore = useCountryStore()
-
-  if (!countryStore.loaded) {
-    countryStore.fetchCountries()
-  }
-
-  function openCountryDialog() {
-    newCountryName.value = ''
-    countryDialogVisible.value = true
-  }
-
-  async function saveCountry() {
-    const trimmed = newCountryName.value.trim()
-    if (!trimmed) {
-      showToast('请输入国家名称', 'warning')
-      return
-    }
-    const ok = await countryStore.addCountry(trimmed)
-    if (ok) {
-      form.country = trimmed
-      countryDialogVisible.value = false
-      showToast('国家保存成功', 'success')
-    } else {
-      showToast('该国家已存在', 'warning')
-    }
-  }
 
   // ===== Deduct stock =====
   const availableStock = ref(0)
@@ -190,8 +140,6 @@ export function useOrderForm() {
     form.productId = 0
     form.quantity = 0
     form.note = ''
-    form.orderType = 'normal'
-    form.country = ''
     form.deductStock = false
     form.deductQuantity = 0
     deductInfoVisible.value = false
@@ -200,20 +148,13 @@ export function useOrderForm() {
   return {
     form,
     isOrder,
-    isCustomOrder,
-    orderTypeOptions,
     canAdd,
     missingFields,
     quantityOutOfRange,
     customerOptions,
-    countryStore,
     searchProducts,
     productSearchFailed,
     selectProduct,
-    countryDialogVisible,
-    newCountryName,
-    openCountryDialog,
-    saveCountry,
     availableStock,
     deductInfoVisible,
     stockError,

@@ -22,10 +22,7 @@
             v-model:is-drag-over="isDragOver"
             v-model:form="form"
             :is-order="isOrder"
-            :is-custom-order="isCustomOrder"
-            :order-type-options="orderTypeOptions"
             :customer-options="customerOptions"
-            :country-options="countryStore.countryOptions"
             :missing-fields="missingFields"
             :available-stock="availableStock"
             :stock-error="stockError"
@@ -37,7 +34,6 @@
             :select-product="selectProduct"
             :handle-deduct-preview="handleDeductPreview"
             :open-deduct-edit="openDeductEdit"
-            :open-country-dialog="openCountryDialog"
             :handle-excel-select="handleExcelSelect"
             :on-drop="onDrop"
             :download-template="downloadTemplate"
@@ -64,10 +60,8 @@
           v-model:per-page="perPage"
           :customer-options="customerOptions"
           v-model:show-filter="showFilter"
-          :filter-order-type-options="filterOrderTypeOptions"
           v-model:filter-customer="filterCustomer"
           :factory-options="factoryOptions"
-          v-model:filter-order-type="filterOrderType"
           :factory-disabled="factoryDisabled"
           v-model:filter-status="filterStatus"
           :status-options="statusOptions"
@@ -116,13 +110,6 @@
       :save-edit-staged="saveEditStaged"
     />
 
-    <!-- 添加国家弹窗 -->
-    <CountryDialog
-      v-model:open="countryDialogVisible"
-      v-model:new-country-name="newCountryName"
-      :save-country="saveCountry"
-    />
-
     <!-- 确认对话框 -->
     <UiConfirmDialog
       :open="confirmDialog.open"
@@ -150,24 +137,16 @@ import StagingArea from './components/StagingArea.vue'
 import OrderRecordQuery from './components/OrderRecordQuery.vue'
 import EditOrderModal from './components/EditOrderModal.vue'
 import EditStagedModal from './components/EditStagedModal.vue'
-import CountryDialog from './components/CountryDialog.vue'
 
 const {
   form,
   isOrder,
-  isCustomOrder,
-  orderTypeOptions,
   missingFields,
   quantityOutOfRange,
   customerOptions,
-  countryStore,
   searchProducts,
   productSearchFailed,
   selectProduct,
-  countryDialogVisible,
-  newCountryName,
-  openCountryDialog,
-  saveCountry,
   availableStock,
   deductInfoVisible,
   stockError,
@@ -182,7 +161,6 @@ const inputPanelRef = ref<InstanceType<typeof OrderInputPanel> | null>(null)
 const {
   showFilter,
   filterCustomer,
-  filterOrderType,
   filterStatus,
   filterFactory,
   filterStart,
@@ -197,7 +175,6 @@ const {
   orderRecords,
   recordType,
   recordTypeOptions,
-  filterOrderTypeOptions,
   factoryOptions,
   factoryDisabled,
   statusOptions,
@@ -257,14 +234,12 @@ function addStaged() {
     // 手工条目只存在于前端：导入时不会被服务端结果替换
     origin: 'manual',
     type: form.type,
-    orderType: form.orderType,
     customer: form.customer,
     productId: form.productId,
     productName: form.productSearch,
     quantity: form.quantity,
     date: form.date,
     note: form.note,
-    country: isCustomOrder.value ? form.country : '',
     deductStock: isOrder.value ? form.deductStock : false,
     deductQuantity: isOrder.value && form.deductStock ? form.deductQuantity : 0,
   })

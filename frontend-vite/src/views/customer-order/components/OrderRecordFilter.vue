@@ -22,10 +22,6 @@
         <label class="co-label" for="co-filter-customer"><FontAwesomeIcon icon="user" aria-hidden="true" /> 客户</label>
         <UiSelect id="co-filter-customer" label="按客户筛选" :model-value="filterCustomer" placeholder="全部" :options="customerOptions" style="width: 100%" @update:model-value="$emit('update:filterCustomer', $event)" />
       </div>
-      <div class="co-filter-field">
-        <label class="co-label" for="co-filter-order-type"><FontAwesomeIcon icon="tag" aria-hidden="true" /> 订单类型</label>
-        <UiSelect id="co-filter-order-type" label="按订单类型筛选" :model-value="filterOrderType" placeholder="全部" :options="filterOrderTypeOptions" style="width: 100%" @update:model-value="$emit('update:filterOrderType', $event)" />
-      </div>
       <div v-if="recordType === 'order'" class="co-filter-field">
         <label class="co-label" for="co-filter-status"><FontAwesomeIcon icon="info-circle" aria-hidden="true" /> 状态</label>
         <UiSelect id="co-filter-status" label="按状态筛选" :model-value="filterStatus" placeholder="全部" :options="statusOptions" style="width: 100%" @update:model-value="$emit('update:filterStatus', $event)" />
@@ -63,13 +59,11 @@ defineProps<{
   recordType: 'order' | 'stockin'
   recordTypeOptions: { label: string; value: 'order' | 'stockin' }[]
   customerOptions: { label: string; value: string }[]
-  filterOrderTypeOptions: { label: string; value: string }[]
   factoryOptions: { label: string; value: string }[]
   factoryDisabled: boolean
   statusOptions: { label: string; value: string }[]
   showFilter: boolean
   filterCustomer: string
-  filterOrderType: string
   filterStatus: string
   filterFactory: string
   filterStart: string
@@ -79,7 +73,6 @@ defineProps<{
 defineEmits<{
   'update:showFilter': [value: boolean]
   'update:filterCustomer': [value: string]
-  'update:filterOrderType': [value: string]
   'update:filterStatus': [value: string]
   'update:filterFactory': [value: string]
   'update:filterStart': [value: string]

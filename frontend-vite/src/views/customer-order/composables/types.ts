@@ -33,14 +33,12 @@ export interface StagedItem {
    */
   origin?: 'manual' | 'import'
   type: 'order' | 'stockin'
-  orderType: 'normal' | 'custom'
   customer: string
   productId: number
   productName: string
   quantity: number
   date: string
   note: string
-  country: string
   deductStock: boolean
   deductQuantity: number
 }
@@ -48,7 +46,6 @@ export interface StagedItem {
 /** 录入表单状态 */
 export interface FormState {
   type: 'order' | 'stockin'
-  orderType: 'normal' | 'custom'
   date: string
   customer: string
   productSearch: string
@@ -57,7 +54,6 @@ export interface FormState {
   deductStock: boolean
   deductQuantity: number
   note: string
-  country: string
 }
 
 /**
@@ -83,8 +79,6 @@ export interface OrderRecord {
   deducted?: boolean
   status: string
   note?: string
-  order_type?: string
-  country?: string
   is_locked?: boolean
   locked_by_name?: string
   /** 订单关联的工厂名列表（从 items 聚合，去重排序） */
@@ -94,8 +88,6 @@ export interface OrderRecord {
     product_name: string
     product_barcode?: string
     quantity: number
-    order_type?: string
-    country?: string
     deduct_quantity?: number
     note?: string
   }>

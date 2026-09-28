@@ -22,7 +22,6 @@ function downloadTemplateFile() {
 
 /** 暂存订单条目（/staging-orders 返回的原始结构） */
 interface StagingOrderItem {
-  order_type?: string
   customer: string
   product_id: number
   product_name: string
@@ -31,19 +30,16 @@ interface StagingOrderItem {
   note: string
   deduct_stock: boolean
   deduct_quantity?: number
-  country?: string
 }
 
 /** 暂存备货条目（/staging-stockins 返回的原始结构） */
 interface StagingStockinItem {
-  order_type?: string
   customer: string
   product_id: number
   product_name: string
   quantity: number
   stockin_date: string
   note: string
-  country?: string
 }
 
 /**
@@ -98,7 +94,6 @@ function toStagedOrder(i: StagingOrderItem): StagedItem {
     uid: genUid(),
     origin: 'import',
     type: 'order',
-    orderType: i.order_type === 'custom' ? 'custom' : 'normal',
     customer: i.customer,
     productId: i.product_id,
     productName: i.product_name,
@@ -107,7 +102,6 @@ function toStagedOrder(i: StagingOrderItem): StagedItem {
     note: i.note,
     deductStock: i.deduct_stock,
     deductQuantity: i.deduct_quantity || 0,
-    country: i.country || '',
   }
 }
 
@@ -116,7 +110,6 @@ function toStagedStockin(i: StagingStockinItem): StagedItem {
     uid: genUid(),
     origin: 'import',
     type: 'stockin',
-    orderType: i.order_type === 'custom' ? 'custom' : 'normal',
     customer: i.customer,
     productId: i.product_id,
     productName: i.product_name,
@@ -125,7 +118,6 @@ function toStagedStockin(i: StagingStockinItem): StagedItem {
     note: i.note,
     deductStock: false,
     deductQuantity: 0,
-    country: i.country || '',
   }
 }
 

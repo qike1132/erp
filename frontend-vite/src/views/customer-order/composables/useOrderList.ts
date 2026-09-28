@@ -19,7 +19,6 @@ export function useOrderList() {
 
   const showFilter = ref(false)
   const filterCustomer = ref('')
-  const filterOrderType = ref('')
   const filterStatus = ref('')
   const filterFactory = ref(userFactory.value)
   const filterStart = ref('')
@@ -38,11 +37,6 @@ export function useOrderList() {
   const recordTypeOptions = [
     { value: 'order' as const, label: '订单' },
     { value: 'stockin' as const, label: '备货' },
-  ]
-
-  const filterOrderTypeOptions = [
-    { value: 'regular', label: '常规订单' },
-    { value: 'custom', label: '定制订单' },
   ]
 
   const statusOptions = [
@@ -103,7 +97,6 @@ export function useOrderList() {
   async function fetchOrderRecords(seq: number) {
     const params: Record<string, unknown> = { page: currentPage.value, per_page: perPage.value }
     if (filterCustomer.value) params.customer = filterCustomer.value
-    if (filterOrderType.value) params.order_type = filterOrderType.value
     if (filterStatus.value) params.status = filterStatus.value
     if (filterFactory.value) params.factory = filterFactory.value
     if (filterStart.value) params.start_date = filterStart.value
@@ -121,7 +114,6 @@ export function useOrderList() {
   async function fetchStockins(seq: number) {
     const params: Record<string, unknown> = { page: currentPage.value, per_page: perPage.value }
     if (filterCustomer.value) params.customer = filterCustomer.value
-    if (filterOrderType.value) params.order_type = filterOrderType.value
     if (filterStart.value) params.start_date = filterStart.value
     if (filterEnd.value) params.end_date = filterEnd.value
     const res = await stockApi.stockins(params) as unknown as { data?: StockInRecord[]; items?: StockInRecord[]; total?: number }
@@ -141,7 +133,6 @@ export function useOrderList() {
 
   function resetFilter() {
     filterCustomer.value = ''
-    filterOrderType.value = ''
     filterStatus.value = ''
     // 锁定时保持本厂，否则重置为全部
     filterFactory.value = userFactory.value
@@ -154,7 +145,6 @@ export function useOrderList() {
   return {
     showFilter,
     filterCustomer,
-    filterOrderType,
     filterStatus,
     filterFactory,
     filterStart,
@@ -169,7 +159,6 @@ export function useOrderList() {
     orderRecords,
     recordType,
     recordTypeOptions,
-    filterOrderTypeOptions,
     factoryOptions: FACTORY_OPTIONS,
     factoryDisabled,
     statusOptions,

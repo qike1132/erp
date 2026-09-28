@@ -3,7 +3,6 @@
     <OrderRecordFilter
       v-model:show-filter="showFilter"
       v-model:filter-customer="filterCustomer"
-      v-model:filter-order-type="filterOrderType"
       v-model:filter-status="filterStatus"
       v-model:filter-factory="filterFactory"
       v-model:filter-start="filterStart"
@@ -11,7 +10,6 @@
       :record-type="recordType"
       :record-type-options="recordTypeOptions"
       :customer-options="customerOptions"
-      :filter-order-type-options="filterOrderTypeOptions"
       :factory-options="factoryOptions"
       :factory-disabled="factoryDisabled"
       :status-options="statusOptions"
@@ -49,7 +47,6 @@ const props = defineProps<{
   recordType: 'order' | 'stockin'
   recordTypeOptions: { label: string; value: 'order' | 'stockin' }[]
   customerOptions: { label: string; value: string }[]
-  filterOrderTypeOptions: { label: string; value: string }[]
   factoryOptions: { label: string; value: string }[]
   factoryDisabled: boolean
   statusOptions: { label: string; value: string }[]
@@ -63,7 +60,6 @@ const props = defineProps<{
   perPage: number
   showFilter: boolean
   filterCustomer: string
-  filterOrderType: string
   filterStatus: string
   filterFactory: string
   filterStart: string
@@ -76,7 +72,6 @@ const props = defineProps<{
 const emit = defineEmits<{
   'update:showFilter': [value: boolean]
   'update:filterCustomer': [value: string]
-  'update:filterOrderType': [value: string]
   'update:filterStatus': [value: string]
   'update:filterFactory': [value: string]
   'update:filterStart': [value: string]
@@ -96,10 +91,6 @@ const showFilter = computed({
 const filterCustomer = computed({
   get: () => props.filterCustomer,
   set: (v: string) => emit('update:filterCustomer', v),
-})
-const filterOrderType = computed({
-  get: () => props.filterOrderType,
-  set: (v: string) => emit('update:filterOrderType', v),
 })
 const filterStatus = computed({
   get: () => props.filterStatus,

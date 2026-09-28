@@ -90,8 +90,6 @@ export function useStagedItems() {
       deduct_quantity: i.deductQuantity || 0,
       note: i.note || '',
       order_date: i.date || '',
-      order_type: i.orderType === 'custom' ? 'custom' : 'regular',
-      country: i.country || '',
     }))
   }
 
@@ -102,8 +100,6 @@ export function useStagedItems() {
       quantity: i.quantity,
       note: i.note || '',
       stockin_date: i.date || '',
-      order_type: i.orderType === 'custom' ? 'custom' : 'regular',
-      country: i.country || '',
     }))
   }
 
