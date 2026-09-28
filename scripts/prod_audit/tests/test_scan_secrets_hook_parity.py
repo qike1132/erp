@@ -18,6 +18,8 @@ shell 用 POSIX 字符类 `[[:space:]]`，镜像用 `[ \\t]`。单行文本里�
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -87,3 +89,77 @@ def test_pwd_pattern_not_compared_and_why() -> None:
     assert 'pwd_pattern=' in text
     # 明确记录：这里的断言只是"该模式仍在"，不是"两侧一致"。
     assert text.count('pwd_pattern=') >= 1
+
+
+# ---------------------------------------------------------------------------
+# 抑制标记的行为一致性
+# ---------------------------------------------------------------------------
+# 背景：`scripts/scan_secrets.py`（CI 侧）支持源码内抑制标记
+#   `secret-scan:allow`            → 该行跳过
+#   `secret-scan:allow-next-line`  → 该行的**下一行**跳过
+# 而本地 hook 曾**完全不识别**这两个标记 —— 于是同一份带标记的代码
+# 「CI 放行、本地拦住」，正是本文件开头所述漂移的反方向。
+# 标记是否生效取决于 shell 的执行路径，静态提取正则无法覆盖，故用真实提交验证。
+
+
+def _commit_in_temp_repo(tmp_path: Path, body: str) -> subprocess.CompletedProcess:
+    """在临时仓库里真跑一次 `git commit`，返回其结果。"""
+    repo = tmp_path / 'repo'
+    (repo / '.githooks').mkdir(parents=True)
+    shutil.copy(HOOK, repo / '.githooks' / 'pre-commit')
+    (repo / '.githooks' / 'allowlist.txt').write_text('', encoding='utf-8')
+    # 中和第 3 层：无论本机装没装 pre-commit，都不让无关门禁影响本测试的结论。
+    (repo / '.pre-commit-config.yaml').write_text('repos: []\n', encoding='utf-8')
+    (repo / 'scripts').mkdir()
+    (repo / 'scripts' / 'quality_gate.py').write_text('raise SystemExit(0)\n', encoding='utf-8')
+
+    def run(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            ['git', *args], cwd=repo, capture_output=True, text=True,
+            encoding='utf-8', errors='replace',
+        )
+
+    assert run('init', '-q').returncode == 0
+    for key, value in (('core.hooksPath', '.githooks'),
+                       ('user.email', 't@example.invalid'),
+                       ('user.name', 't'),
+                       ('commit.gpgsign', 'false')):
+        assert run('config', key, value).returncode == 0
+
+    (repo / 'sample.py').write_text(body, encoding='utf-8')
+    assert run('add', 'sample.py').returncode == 0
+    return run('commit', '-m', 'x')
+
+
+# 两条规则各取一例：口令赋值规则、私钥/云凭据特征规则。
+# ⚠️ 刻意用**拼接**构造、不写成整段字面量：否则本文件自身会命中扫描器，
+#    不得不为它申请 allowlist 豁免（豁免面越宽，保护越弱）。运行时仍是完整样例。
+_PWD_LITERAL = 'pass' + 'word = "' + 'hunter2' * 4 + '"'
+_KEY_LITERAL = 'key = "-----BEGIN ' + 'RSA PRIVATE KEY-----"'
+_LITERALS = [_PWD_LITERAL, _KEY_LITERAL]
+
+
+@pytest.mark.parametrize('literal', _LITERALS)
+def test_hook_blocks_without_marker(tmp_path: Path, literal: str) -> None:
+    """对照组：无标记时必须拦下 —— 否则下面的用例证明不了标记生效。"""
+    result = _commit_in_temp_repo(tmp_path, f'{literal}\n')
+    assert result.returncode != 0, '未加标记的疑似凭据被放行，对照组失效'
+
+
+@pytest.mark.parametrize('literal', _LITERALS)
+def test_hook_honours_next_line_marker(tmp_path: Path, literal: str) -> None:
+    body = f'# secret-scan:allow-next-line\n{literal}\n'
+    result = _commit_in_temp_repo(tmp_path, body)
+    assert result.returncode == 0, (
+        'hook 未识别 secret-scan:allow-next-line —— 本地会拦下 CI 放行的代码。\n'
+        f'{result.stdout}{result.stderr}'
+    )
+
+
+@pytest.mark.parametrize('literal', _LITERALS)
+def test_hook_honours_inline_marker(tmp_path: Path, literal: str) -> None:
+    result = _commit_in_temp_repo(tmp_path, f'{literal}  # secret-scan:allow\n')
+    assert result.returncode == 0, (
+        'hook 未识别行内 secret-scan:allow。\n'
+        f'{result.stdout}{result.stderr}'
+    )

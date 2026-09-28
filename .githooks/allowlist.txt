@@ -62,14 +62,10 @@ frontend-vite/src/views/user/components/UserEditDialog.vue
 frontend-vite/src/components/backup/RestoreConfirmDialog.vue
 docs/plans/2026-09-24-backup-restore-direct-workflow.md
 
-# 2026-09-28 复核：登录表单的显隐开关透传。属性名含 password 字样，
-# 但绑定的是从 useLogin() 解构出的**布尔状态**，非凭据；与上方 user 表单
-# 同属第 2 层「右侧是表达式而非字面量」收窄（④）在本地 hook 未覆盖 .vue
-# 所致的误报（CI 侧扫描器已覆盖 .vue，故该文件在 CI 侧另有 next-line 标记）。
-# 核实：`grep -niE "password|secret|token"` 仅命中属性名与变量名两处，
-#       文件内无任何字面凭据。
-# 注：刻意不复述命中片段，避免本文件自身命中第 2 层规则。
-frontend-vite/src/views/login/LoginFormPc.vue
+# 2026-09-28 注：`frontend-vite/src/views/login/LoginFormPc.vue` 曾有本清单条目，
+# 后已移除 —— 该文件已改用源码内的 `secret-scan:allow-next-line` 标记做**逐行**
+# 豁免（本地 hook 自 2026-09-28 起识别该标记，与 CI 侧 scan_secrets.py 一致）。
+# 逐行豁免比整文件路径豁免更精确：文件其余部分仍照常扫描。
 
 # 2026-09-28 复核：密钥扫描器自身及其测试。
 #   1) scripts/scan_secrets.py —— 把抑制标记（allow / allow-next-line）写成

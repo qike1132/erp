@@ -24,6 +24,11 @@
 #   * 路径豁免：加入 `.githooks/allowlist.txt`（一行一个 glob，`#` 注释）
 #   * 内容豁免：同上；本仓库 `scripts/prod_audit/tests/test_self_audit.py`
 #     含**脱敏用测试夹具**私钥串，已预置在 allowlist。
+#   * 源码内抑制标记（第 2 层，与 CI 侧 scripts/scan_secrets.py 一致）：
+#       `# secret-scan:allow`             —— 该行不参与扫描（同行标记）
+#       `# secret-scan:allow-next-line`   —— 该行的**下一行**不参与扫描
+#     用于「属性名/变量名含 password 等字样但并非凭据」的逐处豁免，
+#     比整文件路径豁免更精确。无标记时规则照常生效。
 #
 # 绕过（仅限紧急，事后必须补跑）
 # ---------------------------------------------------------------------------
@@ -164,9 +169,26 @@ for f in $staged; do
     fi
 
     if grep -Iq . "$tmpf" 2>/dev/null; then
+        # 源码内抑制标记（与 CI 侧 scripts/scan_secrets.py 语义一致）：
+        #   secret-scan:allow            → 该行跳过
+        #   secret-scan:allow-next-line  → **下一行**跳过
+        # 两条内容规则（私钥/云凭据、口令赋值）都作用于过滤后的内容。
+        # ⚠️ 必须先判 next-line：`secret-scan:allow` 是它的前缀，顺序反了会让
+        #    inline 规则先命中，next-line 永不生效（CI 侧同理，见 scan_secrets.py）。
+        tmpf_scan=$(mktemp 2>/dev/null) || tmpf_scan="${TMPDIR:-/tmp}/precommit_scan_s.$$"
+        if ! awk '
+            skip_next { skip_next = 0; next }
+            /secret-scan:allow-next-line/ { skip_next = 1; next }
+            /secret-scan:allow/ { next }
+            { print }
+        ' "$tmpf" > "$tmpf_scan" 2>/dev/null; then
+            # awk 异常时退回全量扫描：宁可误报，不可漏报。
+            cp "$tmpf" "$tmpf_scan"
+        fi
+
         # 注意必须用 -e 分隔：模式以 '-' 开头，否则 grep 会把它当选项
         # （实测报 "unknown option -- ---BEGIN ..."，导致扫描静默失效）
-        if grep -Eq -e "$secret_patterns" "$tmpf"; then
+        if grep -Eq -e "$secret_patterns" "$tmpf_scan"; then
             secret_hits="${secret_hits}  ✗ $f  —— 命中私钥/云凭据特征
 "
         else
@@ -184,7 +206,7 @@ for f in $staged; do
             # ⚠️ 必须用 -o 提取**匹配片段**而非整行：第 ④ 层按「右值是否带引号」判定，
             #    若拿整行去判，形如 `access_token=access_token, token_type="bearer"`
             #    的行会因为右侧另有一个带引号字面量而整行放行（实测踩到）。
-            pwd_matches=$(grep -Eio -e "$pwd_pattern" "$tmpf" | \
+            pwd_matches=$(grep -Eio -e "$pwd_pattern" "$tmpf_scan" | \
                 grep -Eiv -e '(<[^>]+>|YOUR_|CHANGE_?ME|changeme|placeholder|example|xxxx|dummy|fake|testkey|your[-_])' | \
                 grep -Eiv -e '[:=][[:space:]]*[A-Za-z0-9_.]*([\(\[]|[[:space:]]+(or|and)[[:space:]]+[A-Za-z0-9_.]*[\(\[]?)')
 
@@ -211,7 +233,7 @@ for f in $staged; do
             fi
         fi
     fi
-    rm -f "$tmpf"
+    rm -f "$tmpf" "$tmpf_scan"
 done
 IFS=$old_ifs
 
