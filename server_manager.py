@@ -1618,12 +1618,7 @@ class ServerManagerApp:
                 # Restart 判定为崩溃、5 秒后自动重启 ——「紧急停止变成重启」的根因。
                 _, managed_pids = self._stop_managed_services()
                 # 强制停止所有进程，不管状态
-                for proc, name in [(self._frontend_process, '前端'), (self._process, '后端')]:
-                    if proc and proc.poll() is None:
-                        self._msg_queue.put(('log', {'text': f'正在终止{name}进程 (PID: {proc.pid})...'}))
-                        self._kill_process_tree(proc.pid)
-                self._frontend_process = None
-                self._process = None
+                self._terminate_dev_processes()
 
                 self._stop_redis()
                 self._kill_residual_async()
@@ -1805,13 +1800,7 @@ class ServerManagerApp:
                     time.sleep(1)
             if not frontend_ready:
                 self._msg_queue.put(('log', {'text': '前端启动失败或健康检查未通过', 'level': 'ERROR'}))
-                for proc, name in [(self._frontend_process, '前端'), (self._process, '后端')]:
-                    if proc and proc.poll() is None:
-                        self._msg_queue.put(('log', {'text': f'正在终止未就绪的{name}进程 (PID: {proc.pid})...'}))
-                        self._kill_process_tree(proc.pid)
-                        with contextlib.suppress(Exception):
-                            proc.wait(timeout=3)
-                self._process, self._frontend_process = None, None
+                self._terminate_dev_processes('未就绪的')
                 self._msg_queue.put(('dual_failed', {'label': label, 'reason': '前端未就绪'}))
                 return
             self._startup_current_step, self._startup_progress = self._startup_steps[4], 5
@@ -1876,21 +1865,7 @@ class ServerManagerApp:
         self._startup_progress, self._startup_steps, self._startup_current_step = 0, ['停止生产模式', '检查Redis服务', '启动后端服务', '启动前端服务', '完成'], ''
         self._msg_queue.put(('ui_update', {}))
         label = '开发模式'
-        for proc, name in [(self._frontend_process, '前端'), (self._process, '后端')]:
-            if proc and proc.poll() is None:
-                self._msg_queue.put(('log', {'text': f"重启：终止{name}进程树 (PID: {proc.pid})..."}))
-                if _IS_WINDOWS:
-                    for cpid in self._collect_process_tree(proc.pid):
-                        with contextlib.suppress(Exception):
-                            _taskkill(cpid)
-                    _taskkill(proc.pid)
-                else:
-                    proc.terminate()
-                    try:
-                        proc.wait(timeout=5)
-                    except Exception:
-                        proc.kill()
-        self._frontend_process, self._process = None, None
+        self._terminate_dev_processes('（重启）')
         self._stop_redis()
         self._kill_port_sync(_API_PORT)
         self._kill_port_sync(_WEB_PORT)
@@ -2001,6 +1976,31 @@ class ServerManagerApp:
                         os.kill(pid, signal.SIGTERM)
         except Exception:
             pass
+
+    def _terminate_dev_processes(self, reason='', *, wait=True):
+        """终止管理器自启的开发前端/后端进程树并清空句柄；返回是否有进程被终止。
+
+        收敛前这里散着 4 份变体（stop_all / 启动失败回退 / 重启 / 切生产前）：
+        有的单杀、有的先手工收子树、有的等 3s、有的等 5s、有的不等 —— 终止语义
+        已经漂移，调优一处不会传播到其余三处（2026-09-28 评审）。
+
+        ``_kill_process_tree`` 在 Windows 走 `taskkill /T`，本就会连树一起杀，
+        故重启路径原先「先逐个杀子进程再杀父」的写法是冗余的。
+        """
+        terminated = False
+        for proc, name in ((self._frontend_process, '前端'), (self._process, '后端')):
+            if not (proc and proc.poll() is None):
+                continue
+            self._msg_queue.put(('log', {'text': f'正在终止{reason}{name}进程树 (PID: {proc.pid})...'}))
+            self._kill_process_tree(proc.pid)
+            if wait:
+                with contextlib.suppress(Exception):
+                    proc.wait(timeout=5)
+            self._msg_queue.put(('log', {'text': f'{reason}{name}进程已终止 (PID: {proc.pid})'}))
+            terminated = True
+        self._frontend_process = None
+        self._process = None
+        return terminated
 
     def on_closing(self):
         if self._tray_icon:
@@ -2367,20 +2367,7 @@ class ServerManagerApp:
 
         与 _stop_dual_mode_async 的区别：不调用 _stop_redis()，保留共享基础设施。
         """
-        stopped_any = False
-        for proc, name in [(self._frontend_process, '前端'), (self._process, '后端')]:
-            if proc and proc.poll() is None:
-                self._msg_queue.put(('log', {'text': f'正在终止开发{name}进程树 (PID: {proc.pid})...'}))
-                self._kill_process_tree(proc.pid)
-                try:
-                    proc.wait(timeout=5)
-                except Exception:
-                    with contextlib.suppress(Exception):
-                        proc.kill()
-                self._msg_queue.put(('log', {'text': f'开发{name}进程已终止 (PID: {proc.pid})'}))
-                stopped_any = True
-        self._process = None
-        self._frontend_process = None
+        stopped_any = self._terminate_dev_processes('开发')
         self._mode = 'none'
         self._current_mode_key = ""
         self._msg_queue.put(('ui_update', {}))
