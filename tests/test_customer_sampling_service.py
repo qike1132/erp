@@ -40,6 +40,7 @@ from fastapi_app.services.customer_sampling_service import (
     _compute_diff,
     _next_version,
     _normalize_value,
+    copy_part_version,
     create_part,
     create_project,
     delete_part,
@@ -50,10 +51,12 @@ from fastapi_app.services.customer_sampling_service import (
     get_version_detail,
     list_change_logs,
     list_parts,
+    list_roles,
     list_versions,
     update_part,
     update_project,
     update_project_status,
+    update_role,
 )
 
 # ============================================================
@@ -1147,6 +1150,44 @@ class TestServiceIntegration:
         view = await get_parts_by_version(cs_db, r['id'])
         assert any(p['part_name'] == '身体' and p['version_no'] == 'T2' for p in view['items'])
         assert 'T2' in view['versions']
+
+    async def test_print_final_only_keeps_parts_missing_in_final_version(self, cs_db):
+        """打印取数（final_only）：最终版本缺行的部位不得从打样单上消失
+
+        回归：角色 current_version=T2，但只有部分部位「复制版本」出 T2 行时，
+        final_only 原按「version_no == final_version」整表过滤，未复制版本的
+        部位（仍只有 T1 行）被整条丢弃 —— 打印预览的部位名称与页面录入不一致。
+        正确行为：每个部位名称输出一行，有最终版本行取最终版本，否则取该部位
+        最新有数据的版本。
+        """
+        r = await create_project(cs_db, product_name='打印取数回归')
+        await cs_db.flush()
+        role = (await list_roles(cs_db, r['id']))['items'][0]
+
+        names = ['主料', '花结', '肤色', '皇冠', '领巾']
+        for name in names:
+            await create_part(cs_db, r['id'], part_name=name, role_id=role['id'])
+        await cs_db.flush()
+
+        # 用户仅对两个部位「复制版本」得到 T2 行（新版本布料待录入），并把最终版本设为 T2
+        parts = (await list_parts(cs_db, r['id'], role_id=role['id']))['items']
+        for name in ('主料', '花结'):
+            part = next(p for p in parts if p['part_name'] == name)
+            await copy_part_version(cs_db, part['id'])
+        await update_role(cs_db, role['id'], current_version='T2', version=role['version'])
+        await cs_db.flush()
+
+        view = await get_parts_by_version(cs_db, r['id'], role_id=role['id'], final_only=True)
+
+        by_name = {p['part_name']: p['version_no'] for p in view['items']}
+        # 五个录入的部位名称一个都不能少，且每个只输出一行
+        assert sorted(by_name) == sorted(names)
+        # 有最终版本行的取最终版本，没有的取该部位最新有数据的版本
+        assert by_name['主料'] == 'T2'
+        assert by_name['花结'] == 'T2'
+        assert by_name['肤色'] == 'T1'
+        assert by_name['皇冠'] == 'T1'
+        assert by_name['领巾'] == 'T1'
 
     async def test_version_list_ordered(self, cs_db):
         """版本列表按 version_no 升序"""
