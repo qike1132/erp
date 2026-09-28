@@ -18,12 +18,11 @@ export function useStockOutActions(
 
     submitting.value = true
     try {
-      const uniqueKeys: Record<string, { product_id: string; customer: string; order_type: string; country: string; stockouts: StagedStockout[] }> = {}
+      const uniqueKeys: Record<string, { product_id: string; customer: string; stockouts: StagedStockout[] }> = {}
       const withCustomer = staged.value.filter(stockout => stockout.customer)
       withCustomer.forEach(stockout => {
-        const ot = stockout.order_type || 'regular'
-        const key = `${stockout.product_id}-${stockout.customer}-${ot}`
-        if (!uniqueKeys[key]) uniqueKeys[key] = { product_id: stockout.product_id, customer: stockout.customer, order_type: ot, country: stockout.country || '', stockouts: [] }
+        const key = `${stockout.product_id}-${stockout.customer}`
+        if (!uniqueKeys[key]) uniqueKeys[key] = { product_id: stockout.product_id, customer: stockout.customer, stockouts: [] }
         uniqueKeys[key].stockouts.push(stockout)
       })
 
@@ -32,17 +31,14 @@ export function useStockOutActions(
       const precheckTasks = Object.keys(uniqueKeys).map(async (key) => {
         const group = uniqueKeys[key]
         if (!group) return
-        const { product_id, customer, order_type, country, stockouts } = group
+        const { product_id, customer, stockouts } = group
         try {
-          const ot = order_type !== 'regular' ? order_type : undefined
-          const co = order_type === 'custom' && country ? country : undefined
-          const data = await stockApi.availableShipment(Number(product_id), customer, ot, co)
+          const data = await stockApi.availableShipment(Number(product_id), customer)
           const shipment = data.data
           if (!shipment) return
           const totalQty = stockouts.reduce((sum: number, stockout: StagedStockout) => sum + stockout.quantity, 0)
           if (totalQty > (shipment.available_quantity ?? 0)) {
-            const typeLabel = order_type === 'custom' ? `定制${country ? `(${country})` : ''}` : '常规'
-            overLimitGroups.push(`客户: ${customer} 产品ID: ${product_id} [${typeLabel}] 可出货${shipment.available_quantity ?? 0}`)
+            overLimitGroups.push(`客户: ${customer} 产品ID: ${product_id} 可出货${shipment.available_quantity ?? 0}`)
           }
         } catch (err) {
           console.warn(`出货量预检失败: product_id=${product_id}, customer=${customer}`, err)
@@ -63,8 +59,6 @@ export function useStockOutActions(
         quantity: stockout.quantity,
         stockout_date: stockout.date,
         note: stockout.note,
-        order_type: stockout.order_type || 'regular',
-        country: stockout.order_type === 'custom' ? (stockout.country || '') : undefined,
       }))
 
       const result = await stockApi.batchSubmitStockouts(stockoutsForApi) as ApiResponse & { results?: Array<{ success: boolean; error?: string }> }

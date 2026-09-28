@@ -18,14 +18,6 @@
         <input v-model.number="form.quantity" type="number" class="form-input" min="1" step="1" name="quantity" autocomplete="off" aria-label="出货数量" />
       </div>
       <div class="form-field">
-        <label class="form-label">订单类型</label>
-        <UiSelect v-model="form.orderType" :options="orderTypeOptions" />
-      </div>
-      <div v-if="form.orderType === 'custom'" class="form-field">
-        <label class="form-label">国家 <span style="color: var(--color-danger-500)">*</span></label>
-        <UiSelect v-model="form.country" placeholder="请选择国家" :options="countryOptions" />
-      </div>
-      <div class="form-field">
         <label class="form-label">备注</label>
         <textarea v-model="form.note" class="form-input" rows="2" aria-label="备注" />
       </div>
@@ -50,14 +42,10 @@ interface EditStagedForm {
   productName: string
   quantity: number
   note: string
-  orderType: string
-  country: string
 }
 
 defineProps<{
   customerOptions: { value: string; label: string }[]
-  countryOptions: { value: string; label: string }[]
-  orderTypeOptions: { value: string; label: string }[]
 }>()
 
 const openModel = defineModel<boolean>('open', { default: false })

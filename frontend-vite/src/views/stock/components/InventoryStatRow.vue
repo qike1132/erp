@@ -1,19 +1,15 @@
 <template>
   <div class="sk-stat-row">
     <div class="sk-stat-card sk-stat-primary">
-      <div class="sk-stat-value">{{ regular }}</div>
-      <div class="sk-stat-label">常规订单</div>
-    </div>
-    <div class="sk-stat-card sk-stat-warning">
-      <div class="sk-stat-value">{{ custom }}</div>
-      <div class="sk-stat-label">定制订单</div>
+      <div class="sk-stat-value">{{ orders }}</div>
+      <div class="sk-stat-label">订单数量</div>
     </div>
     <div class="sk-stat-card sk-stat-success">
       <div class="sk-stat-value">{{ stockin }}</div>
       <div class="sk-stat-label">备货数量</div>
     </div>
     <div class="sk-stat-card sk-stat-info">
-      <div class="sk-stat-value">{{ regular + custom + stockin }}</div>
+      <div class="sk-stat-value">{{ orders + stockin }}</div>
       <div class="sk-stat-label">总订单</div>
     </div>
     <div class="sk-stat-card sk-stat-stock">
@@ -25,8 +21,7 @@
 
 <script setup lang="ts">
 defineProps<{
-  regular: number;
-  custom: number;
+  orders: number;
   stockin: number;
   available: number;
 }>();

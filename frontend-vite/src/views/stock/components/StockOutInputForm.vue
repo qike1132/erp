@@ -7,17 +7,6 @@
     <form @submit.prevent>
       <div class="form-grid">
         <div class="form-field">
-          <label class="form-label">订单类型 <span style="color: var(--color-danger-500)">*</span></label>
-          <UiSelect v-model="form.orderType" placeholder="请选择订单类型" :options="orderTypeOptions" />
-        </div>
-        <div v-if="form.orderType === 'custom'" class="form-field">
-          <label class="form-label">国家 <span style="color: var(--color-danger-500)">*</span></label>
-          <UiSelect v-model="form.country" placeholder="请选择国家" :options="countryOptions" />
-        </div>
-      </div>
-
-      <div class="form-grid">
-        <div class="form-field">
           <label class="form-label">出货时间</label>
           <UiDatePicker v-model="form.date" style="width: 100%" />
         </div>
@@ -49,9 +38,6 @@
           <FontAwesomeIcon icon="info-circle" style="margin-right: 4px" aria-hidden="true" />
           订单量: {{ shipmentInfo.order_quantity }} | 已出货: {{ shipmentInfo.shipped_quantity }} | 可出货:
           <strong style="color: var(--color-primary-500)">{{ shipmentInfo.available_quantity }}</strong>
-          <template v-if="shipmentInfo.regular_available != null || shipmentInfo.custom_available != null">
-            <span class="shipment-detail">（常规: {{ shipmentInfo.regular_available ?? 0 }} | 定制: {{ shipmentInfo.custom_available ?? 0 }}）</span>
-          </template>
         </small>
       </div>
 
@@ -94,14 +80,10 @@ interface StockOutForm {
   productId: string
   quantity: number
   note: string
-  orderType: string
-  country: string
 }
 
 defineProps<{
   customerOptions: { value: string; label: string }[]
-  countryOptions: { value: string; label: string }[]
-  orderTypeOptions: { value: string; label: string }[]
   shipmentInfo: ShipmentInfo | null
   canAdd: boolean
   stagedCount: number

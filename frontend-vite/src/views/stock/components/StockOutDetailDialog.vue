@@ -26,14 +26,6 @@
           <span class="so-detail-label">抵扣备货</span>
           <span class="so-detail-value">{{ (data.deduct_quantity ?? 0) > 0 ? `抵扣: ${data.deduct_quantity}` : '否' }}</span>
         </div>
-        <div class="so-detail-cell">
-          <span class="so-detail-label">订单类型</span>
-          <span class="so-detail-value">{{ data.order_type === 'custom' ? '定制' : '常规' }}</span>
-        </div>
-        <div v-if="data.country" class="so-detail-cell">
-          <span class="so-detail-label">国家</span>
-          <span class="so-detail-value">{{ data.country }}</span>
-        </div>
       </div>
       <div v-if="data.note" class="so-detail-note">
         <span class="so-detail-label">备注</span>

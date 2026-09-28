@@ -8,8 +8,6 @@
           <StockOutInputForm
             v-model:form="form"
             :customer-options="customerOptions"
-            :country-options="countryStore.countryOptions"
-            :order-type-options="orderTypeOptions"
             :shipment-info="shipmentInfo"
             :can-add="canAdd"
             :staged-count="staged.length"
@@ -56,12 +54,8 @@
       v-model:open="editStagedOpen"
       v-model:form="editStagedForm"
       :customer-options="customerOptions"
-      :country-options="countryStore.countryOptions"
-      :order-type-options="orderTypeOptions"
       @save="saveEditStaged"
     />
-
-    <StockWarningDialog v-model:open="stockWarningOpen" :data="stockWarningData" />
 
     <UiConfirmDialog
       :open="confirmDialog.open"
@@ -79,9 +73,7 @@ import { ref, reactive, computed, watch } from 'vue'
 import { useQueryClient } from '@tanstack/vue-query'
 import { stockApi } from '@/api'
 import { useCatalogStore } from '@/stores/catalog'
-import { useCountryStore } from '@/stores/country'
 import type { ShipmentInfo, StagedStockout, Product } from '@/types'
-import { useStockWarning } from './composables/useStockWarning'
 import { useStockOutActions } from './composables/useStockOutActions'
 import UiButton from '@/components/ui/UiButton.vue'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
@@ -94,20 +86,11 @@ import StockOutInputForm from './components/StockOutInputForm.vue'
 import StockOutStagingList from './components/StockOutStagingList.vue'
 import StockOutRecords from './components/StockOutRecords.vue'
 import StockOutEditStagedDialog from './components/StockOutEditStagedDialog.vue'
-import StockWarningDialog from './components/StockWarningDialog.vue'
 
 const props = defineProps<{ activeTab: 'input' | 'records' }>()
 
-const countryStore = useCountryStore()
-if (!countryStore.loaded) {
-  countryStore.fetchCountries()
-}
-
 const queryClient = useQueryClient()
 const confirmDialog = useConfirmDialog()
-
-// === 库存不足弹窗（逻辑抽离至 useStockWarning composable） ===
-const { stockWarningOpen, stockWarningData, checkCountryStock } = useStockWarning()
 
 // === 客户列表（目录 store 统一缓存，TTL 内跨视图复用） ===
 const catalogStore = useCatalogStore()
@@ -143,9 +126,7 @@ async function fetchShipmentInfo() {
     return
   }
   try {
-    const orderType = form.orderType || undefined
-    const country = form.orderType === 'custom' && form.country ? form.country : undefined
-    const data = await stockApi.availableShipment(Number(form.productId), form.customer, orderType, country)
+    const data = await stockApi.availableShipment(Number(form.productId), form.customer)
     shipmentInfo.value = data.data ?? null
   } catch {
     shipmentInfo.value = null
@@ -154,29 +135,15 @@ async function fetchShipmentInfo() {
 
 // === 表单 ===
 const today = toISODate()
-const form = reactive({ customer: '', date: today, search: '', productId: '', quantity: 0, note: '', orderType: 'regular', country: '' })
-
-const orderTypeOptions = [
-  { value: 'regular', label: '常规订单' },
-  { value: 'custom', label: '定制订单' },
-]
+const form = reactive({ customer: '', date: today, search: '', productId: '', quantity: 0, note: '' })
 
 const canAdd = computed(() => {
   if (!form.customer || !form.productId || form.quantity < 1 || !form.date) return false
-  if (form.orderType === 'custom' && !form.country.trim()) return false
   return true
 })
 
 watch(() => form.customer, () => {
   if (form.productId) fetchShipmentInfo()
-})
-
-watch(() => form.orderType, () => {
-  if (form.productId && form.customer) fetchShipmentInfo()
-})
-
-watch(() => form.country, () => {
-  if (form.orderType === 'custom' && form.productId && form.customer) fetchShipmentInfo()
 })
 
 // === 暂存列表 ===
@@ -207,12 +174,6 @@ async function addStaged() {
     }
   }
 
-  // 定制订单：校验该国家该SKU的库存是否充足
-  if (form.orderType === 'custom' && form.country && form.productId) {
-    const stockOk = await checkCountryStock(form.search, form.productId, form.country, form.quantity)
-    if (!stockOk) return
-  }
-
   staged.value.push({
     id: Date.now(),
     product_id: form.productId,
@@ -221,22 +182,18 @@ async function addStaged() {
     date: form.date,
     quantity: form.quantity,
     note: form.note,
-    order_type: form.orderType,
-    country: form.orderType === 'custom' ? form.country : '',
   })
   form.search = ''
   form.productId = ''
   form.quantity = 0
   form.note = ''
-  form.orderType = 'regular'
-  form.country = ''
   shipmentInfo.value = null
 }
 
 // === 编辑暂存 ===
 const editStagedOpen = ref(false)
 const editStagedIdx = ref(-1)
-const editStagedForm = reactive({ customer: '', date: '', productName: '', quantity: 1, note: '', orderType: 'regular', country: '' })
+const editStagedForm = reactive({ customer: '', date: '', productName: '', quantity: 1, note: '' })
 
 function openEditStaged(idx: number) {
   editStagedIdx.value = idx
@@ -247,8 +204,6 @@ function openEditStaged(idx: number) {
   editStagedForm.productName = item.product_name || ''
   editStagedForm.quantity = item.quantity || 1
   editStagedForm.note = item.note || ''
-  editStagedForm.orderType = item.order_type || 'regular'
-  editStagedForm.country = item.country || ''
   editStagedOpen.value = true
 }
 
@@ -260,8 +215,6 @@ function saveEditStaged() {
   item.date = editStagedForm.date
   item.quantity = editStagedForm.quantity
   item.note = editStagedForm.note
-  item.order_type = editStagedForm.orderType
-  item.country = editStagedForm.orderType === 'custom' ? editStagedForm.country : ''
   editStagedOpen.value = false
 }
 

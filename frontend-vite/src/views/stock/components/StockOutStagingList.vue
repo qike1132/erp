@@ -25,7 +25,6 @@
             </div>
             <div class="so-staged-badges">
               <span class="badge-tag badge-danger">数量: {{ item.quantity }}</span>
-              <span v-if="item.order_type === 'custom'" class="badge-tag badge-warning">定制{{ item.country ? `·${item.country}` : '' }}</span>
               <span v-if="item.note" class="badge-tag badge-secondary">备注: {{ item.note }}</span>
             </div>
           </div>

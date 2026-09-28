@@ -12,10 +12,6 @@
         <label class="so-label"><FontAwesomeIcon icon="user" aria-hidden="true" /> 客户</label>
         <UiSelect v-model="filterCustomer" placeholder="全部" :options="customerOptions" style="width: 100%" />
       </div>
-      <div class="so-filter-field">
-        <label class="so-label"><FontAwesomeIcon icon="tag" aria-hidden="true" /> 订单类型</label>
-        <UiSelect v-model="filterOrderType" placeholder="全部" :options="filterOrderTypeOptions" style="width: 100%" />
-      </div>
       <div class="so-filter-field" style="grid-column: span 2">
         <label class="so-label"><FontAwesomeIcon icon="calendar-alt" aria-hidden="true" /> 日期范围</label>
         <UiDateRangePicker v-model="filterDateRange" style="width: 100%" />
@@ -98,8 +94,6 @@ interface StockoutRecord {
   quantity?: number
   deduct_quantity?: number
   note?: string
-  order_type?: string
-  country?: string
 }
 
 defineProps<{
@@ -108,7 +102,6 @@ defineProps<{
 
 const showFilter = ref(false)
 const filterCustomer = ref('')
-const filterOrderType = ref('')
 const filterStart = ref('')
 const filterEnd = ref('')
 const filterDateRange = computed<[string, string] | null>({
@@ -131,11 +124,6 @@ const isLoading = ref(false)
 const isFetching = ref(false)
 const stockoutRecords = ref<StockoutRecord[]>([])
 
-const filterOrderTypeOptions = [
-  { value: 'regular', label: '常规订单' },
-  { value: 'custom', label: '定制订单' },
-]
-
 const stockoutColumns: TableColumn[] = [
   { field: 'stockout_date', header: '出货时间', align: 'center' },
   { field: 'customer', header: '客户', align: 'center' },
@@ -157,7 +145,6 @@ async function fetchStockouts() {
   try {
     const params: Record<string, unknown> = { page: currentPage.value, per_page: perPage.value }
     if (filterCustomer.value) params.customer = filterCustomer.value
-    if (filterOrderType.value) params.order_type = filterOrderType.value
     if (filterStart.value) params.start_date = filterStart.value
     if (filterEnd.value) params.end_date = filterEnd.value
     const res = await stockApi.stockouts(params)
@@ -175,7 +162,6 @@ async function fetchStockouts() {
 
 function resetFilter() {
   filterCustomer.value = ''
-  filterOrderType.value = ''
   filterStart.value = ''
   filterEnd.value = ''
   currentPage.value = 1

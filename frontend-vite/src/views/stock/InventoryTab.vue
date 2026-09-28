@@ -15,8 +15,7 @@
       </div>
       <InventoryStatRow
         v-if="inventory.length"
-        :regular="totalRegularQty"
-        :custom="totalCustomQty"
+        :orders="totalOrderQty"
         :stockin="totalStockinQty"
         :available="totalAvailableStock"
       />
@@ -59,24 +58,12 @@
             <strong>{{ (row as InventoryItem).product_name }}</strong>
           </span>
         </template>
-        <template #column-body-custom_details="{ row }">
-          <div v-if="(row as InventoryItem)._custom_details?.length" class="sk-custom-orders">
-            <template v-for="d in (row as InventoryItem)._custom_details" :key="d.country">
-              <span class="sk-custom-country">{{ d.country }}：</span><span>{{ d.qty }}</span>
-            </template>
-          </div>
-        </template>
         <template #column-body-total_stock="{ row }">
           <strong :class="((row as InventoryItem).total_stock ?? 0) < 0 ? 'sk-text-negative' : 'sk-text-positive'">{{ (row as InventoryItem).total_stock ?? 0 }}</strong>
         </template>
         <template #column-body-available_stock="{ row }">
           <div class="sk-available-cell">
             <strong :class="((row as InventoryItem).available_stock ?? 0) < 0 ? 'sk-text-negative' : 'sk-text-positive'">{{ (row as InventoryItem).available_stock ?? 0 }}</strong>
-            <div v-if="(row as InventoryItem)._country_available?.length" class="sk-country-share">
-              <template v-for="d in (row as InventoryItem)._country_available" :key="`${d.country}-${d.qty}`">
-                <span class="sk-country-share-label">{{ d.country }}：</span><span>{{ d.qty }}</span>
-              </template>
-            </div>
           </div>
         </template>
       </UiDataTable>
@@ -96,7 +83,7 @@ import { useExport } from '@/composables/useExport'
 import InventoryStatRow from './components/InventoryStatRow.vue'
 import InventoryCustomerBar from './components/InventoryCustomerBar.vue'
 
-const filters = reactive({ customer: '', product: '', country: '' })
+const filters = reactive({ customer: '', product: '' })
 const debouncedProduct = useDebouncedRef(computed(() => filters.product), 300)
 const page = ref(1)
 const perPage = ref(15)
@@ -108,12 +95,11 @@ const {
   isFetching,
   refetch,
 } = useQuery({
-  queryKey: ['inventory', () => filters.customer, debouncedProduct, () => filters.country, () => page.value, () => perPage.value],
+  queryKey: ['inventory', () => filters.customer, debouncedProduct, () => page.value, () => perPage.value],
   queryFn: () =>
     stockApi.inventory({
       customer: filters.customer || undefined,
       product: debouncedProduct.value || undefined,
-      country: filters.country || undefined,
       page: page.value,
       per_page: perPage.value,
     }),
@@ -124,28 +110,13 @@ const {
 
 const inventory = computed(() => {
   const raw = invData.value?.data ?? []
-  return raw.map((item) => {
-    const _rowKey = `${item.customer}-${item.product_name}`
-    if (item._custom_details) return { ...item, _rowKey }
-    const co = item.country_orders ?? {}
-    const details: { country: string; qty: number }[] = []
-    for (const [k, v] of Object.entries(co)) {
-      if (k !== '常规' && v) details.push({ country: k, qty: Number(v) })
-    }
-    const abc = item.available_stock_by_country ?? {}
-    const country_available: { country: string; qty: number }[] = []
-    for (const [k, v] of Object.entries(abc)) {
-      if (v) country_available.push({ country: k, qty: Number(v) })
-    }
-    return { ...item, _rowKey, _custom_details: details, _country_available: country_available }
-  })
+  return raw.map((item) => ({ ...item, _rowKey: `${item.customer}-${item.product_name}` }))
 })
 
 const inventoryColumns: TableColumn[] = [
   { field: 'customer', header: '客户', align: 'center' },
   { field: 'product_name', header: '产品名称', align: 'left' },
   { field: 'order_quantity', header: '订单数量', align: 'center' },
-  { field: 'custom_details', header: '定制订单', align: 'center' },
   { field: 'stockin_quantity', header: '备货数量', align: 'center' },
   { field: 'total_stock', header: '总订单', align: 'center' },
   { field: 'available_stock', header: '实时可用库存', align: 'center' },
@@ -153,13 +124,6 @@ const inventoryColumns: TableColumn[] = [
 const allCustomers = computed(() => (invData.value?.all_customers ?? []) as string[])
 
 const totalOrderQty = computed(() => invData.value?.total_order_quantity ?? 0)
-const totalCustomQty = computed(() => {
-  return inventory.value.reduce((s, i) => {
-    const details = i._custom_details ?? []
-    return s + details.reduce((ss, d) => ss + d.qty, 0)
-  }, 0)
-})
-const totalRegularQty = computed(() => Math.max(0, totalOrderQty.value - totalCustomQty.value))
 const totalStockinQty = computed(() => invData.value?.total_stockin_quantity ?? 0)
 const totalAvailableStock = computed(() => invData.value?.total_available_stock ?? 0)
 
@@ -172,7 +136,6 @@ function handleSearch() {
 function handleReset() {
   filters.customer = ''
   filters.product = ''
-  filters.country = ''
   refetch()
 }
 function onPageChange(event: { page: number; rows: number }) {
@@ -185,7 +148,7 @@ function handleExport() {
   runExport(() => stockApi.exportInventory({ customer: filters.customer, product: filters.product }))
 }
 
-watch(() => [filters.customer, filters.country, debouncedProduct.value], () => {
+watch(() => [filters.customer, debouncedProduct.value], () => {
   page.value = 1
 })
 
