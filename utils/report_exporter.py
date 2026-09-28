@@ -166,16 +166,14 @@ class ReportExporter:
         ws = wb.active
         ws.title = '库存汇总'
 
-        # 动态构建表头：客户、产品名称、订单数量、[国家列...]、备货数量、总库存
-        all_countries = stats.get('all_countries', [])
-        headers = ['客户', '产品名称', '订单数量', *all_countries, '备货数量', '总库存']
+        headers = ['客户', '产品名称', '订单数量', '备货数量', '总库存']
 
-        self._write_inventory_sheet(ws, headers, inventory_data, all_countries)
+        self._write_inventory_sheet(ws, headers, inventory_data)
 
         return self._save_workbook(wb)
 
-    def _write_inventory_sheet(self, ws, headers, inventory_data, all_countries):
-        """写入库存汇总工作表（含动态国家列）"""
+    def _write_inventory_sheet(self, ws, headers, inventory_data):
+        """写入库存汇总工作表"""
         for col_idx, header in enumerate(headers, 1):
             cell = ws.cell(row=1, column=col_idx, value=header)
             cell.font = self.header_font
@@ -184,12 +182,11 @@ class ReportExporter:
             cell.border = self.thin_border
 
         for row_idx, item in enumerate(inventory_data, 2):
-            row_data = [item.get('customer', ''), item.get('product_name', ''), item.get('order_quantity', 0)]
-            # 国家细分列
-            country_orders = item.get('country_orders', {})
-            for country in all_countries:
-                row_data.append(country_orders.get(country, ''))
-            row_data.extend([item.get('stockin_quantity', 0), item.get('total_stock', 0)])
+            row_data = [
+                item.get('customer', ''), item.get('product_name', ''),
+                item.get('order_quantity', 0),
+                item.get('stockin_quantity', 0), item.get('total_stock', 0),
+            ]
 
             for col_idx, value in enumerate(row_data, 1):
                 cell = ws.cell(row=row_idx, column=col_idx, value=_sanitize_excel_value(value))
@@ -207,8 +204,6 @@ class ReportExporter:
                 ws.column_dimensions[col_letter].width = 75
             elif headers[col_idx - 1] in ('备货数量', '总库存', '订单数量'):
                 ws.column_dimensions[col_letter].width = 12.5
-            elif headers[col_idx - 1] in all_countries:
-                ws.column_dimensions[col_letter].width = 10
             else:
                 ws.column_dimensions[col_letter].width = 18
 

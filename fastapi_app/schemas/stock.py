@@ -98,7 +98,6 @@ class InventoryResponse(BaseModel):
     total_stockin_quantity: int = 0
     total_stock: int = 0
     total_available_stock: int = 0
-    all_countries: list[str] = []
     all_customers: list[str] = []
     total_items: int = 0
     page: int = 1

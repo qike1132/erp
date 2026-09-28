@@ -44,7 +44,6 @@ async def list_stockins(
     page: int = Query(1, ge=1, description='页码'),
     per_page: int = Query(50, ge=1, le=500, description='每页数量'),
     customer: str | None = Query(None, description='客户'),
-    order_type: str | None = Query(None, description='订单类型'),
     start_date: str | None = Query(None, description='开始日期'),
     end_date: str | None = Query(None, description='结束日期'),
     db: AsyncSession = Depends(get_async_read_db),
@@ -56,7 +55,6 @@ async def list_stockins(
         page: 页码，从 1 开始。
         per_page: 每页数量，1-500。
         customer: 客户名筛选关键字。
-        order_type: 订单类型筛选（regular/custom）。
         start_date: 开始日期（YYYY-MM-DD）。
         end_date: 结束日期（YYYY-MM-DD）。
         db: 异步数据库会话（只读副本）。
@@ -67,7 +65,7 @@ async def list_stockins(
     """
     result = await stock_service.get_stockins(
         db, page=page, per_page=per_page, customer=customer,
-        order_type=order_type, start_date=start_date, end_date=end_date,
+        start_date=start_date, end_date=end_date,
     )
     return StockListResponse(
         data=result['items'], total=result['total'],
@@ -165,7 +163,6 @@ async def list_stockouts(
     page: int = Query(1, ge=1, description='页码'),
     per_page: int = Query(50, ge=1, le=500, description='每页数量'),
     customer: str | None = Query(None, description='客户'),
-    order_type: str | None = Query(None, pattern='^(regular|custom)$', description='订单类型'),
     start_date: str | None = Query(None, description='开始日期'),
     end_date: str | None = Query(None, description='结束日期'),
     db: AsyncSession = Depends(get_async_read_db),
@@ -177,7 +174,6 @@ async def list_stockouts(
         page: 页码，从 1 开始。
         per_page: 每页数量，1-500。
         customer: 客户名筛选关键字。
-        order_type: 订单类型筛选（regular/custom）。
         start_date: 开始日期（YYYY-MM-DD）。
         end_date: 结束日期（YYYY-MM-DD）。
         db: 异步数据库会话（只读副本）。
@@ -188,7 +184,7 @@ async def list_stockouts(
     """
     result = await stock_service.get_stockouts(
         db, page=page, per_page=per_page, customer=customer,
-        order_type=order_type, start_date=start_date, end_date=end_date,
+        start_date=start_date, end_date=end_date,
     )
     return StockListResponse(
         data=result['items'], total=result['total'],
@@ -205,7 +201,7 @@ async def create_stockout(
     """添加出库记录。
 
     Args:
-        data: 出库创建参数（产品、数量、客户、日期、订单类型、国家等）。
+        data: 出库创建参数（产品、数量、客户、日期等）。
         db: 异步数据库会话（读写主库）。
         _user: 当前登录用户（仅需通过权限校验）。
 
@@ -216,7 +212,7 @@ async def create_stockout(
         await stock_service.create_stockout(
             db, product_id=data.product_id, quantity=data.quantity,
             customer=data.customer, stockout_date_str=data.stockout_date,
-            note=data.note or '', order_type=data.order_type, country=data.country,
+            note=data.note or '',
         )
     return StockActionResponse(success=True, message='出库添加成功！')
 
@@ -287,7 +283,6 @@ async def inventory(
     product: str = Query('', description='产品名称筛选'),
     page: int = Query(1, ge=1, description='页码'),
     per_page: int = Query(50, ge=1, le=200, description='每页数量'),
-    country: str = Query('', description='国家筛选'),
     db: AsyncSession = Depends(get_async_read_db),
     _user: User = Depends(require_permission('stockin_manage')),
 ) -> InventoryResponse:
@@ -298,7 +293,6 @@ async def inventory(
         product: 产品名称筛选关键字。
         page: 页码，从 1 开始。
         per_page: 每页数量，1-200。
-        country: 国家筛选。
         db: 异步数据库会话（只读副本）。
         _user: 当前登录用户（仅需通过权限校验）。
 
@@ -307,7 +301,7 @@ async def inventory(
     """
     result = await stock_service.get_inventory_paginated(
         db, search_customer=customer, search_product=product,
-        country=country, page=page, per_page=per_page,
+        page=page, per_page=per_page,
     )
     return InventoryResponse(
         data=result['inventory_data'],
@@ -315,7 +309,6 @@ async def inventory(
         total_stockin_quantity=result['total_stockin_qty'],
         total_stock=result['total_stock'],
         total_available_stock=result['total_available_stock'],
-        all_countries=result['all_countries'],
         all_customers=result['all_customers'],
         total_items=result['total_items'],
         page=result['page'],
@@ -339,7 +332,6 @@ def _build_inventory_excel(inventory_data: list, result: dict) -> tuple[bytes, s
         'total_order_quantity': result['total_order_qty'],
         'total_stockin_quantity': result['total_stockin_qty'],
         'total_stock': result['total_stock'],
-        'all_countries': result['all_countries'],
     }
     exporter = ReportExporter()
     excel_data = exporter.export_inventory_data(inventory_data, stats)
@@ -403,10 +395,8 @@ async def export_inventory(
 
 class StockStatsData(BaseModel):
     """库存统计数据模型"""
-    order_quantity: int = 0          # 订单数量（常规+定制）
-    order_regular_quantity: int = 0  # 常规订单数量
-    order_custom_quantity: int = 0   # 定制订单数量
-    stockin_quantity: int = 0        # 备货数量
+    order_quantity: int = 0   # 订单数量
+    stockin_quantity: int = 0  # 备货数量
 
 
 class StockStatsResponse(BaseModel):
@@ -427,7 +417,7 @@ async def get_stock_stats(
     user_id: int = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_async_read_db),
 ) -> StockStatsResponse:
-    """库存统计数据：订单数量（常规+定制）与备货数量。
+    """库存统计数据：订单数量与备货数量。
 
     与 /stock 页面 inventory 数据口径一致。60s 缓存降低 DB 压力。
 
