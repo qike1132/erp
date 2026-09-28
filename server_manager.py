@@ -1424,10 +1424,10 @@ class ServerManagerApp:
                 try:
                     # 按行读取（readline 迭代器）：读到 '\n' 即返回，不会像 read(4096) 那样
                     # 阻塞凑块导致 uvicorn 启动日志延迟显示；'\n' 是 ASCII 字节，UTF-8 中文
-                    # 不会跨行被切断，_decode_line 的多编码回退已足够处理乱码。
+                    # 不会跨行被切断，_decode_output 的多编码回退(含 UTF-16)已足够处理乱码。
                     batch = []
                     for raw_line in proc.stdout:
-                        line = self._decode_line(raw_line) if isinstance(raw_line, bytes) else str(raw_line).strip()
+                        line = self._decode_output(raw_line, strip=True) if isinstance(raw_line, bytes) else str(raw_line).strip()
                         if line:
                             batch.append(line)
                             if len(batch) >= 10:
@@ -1455,23 +1455,6 @@ class ServerManagerApp:
             except Exception:
                 continue
         return ('Microsoft YaHei UI', 9)
-
-    @staticmethod
-    def _decode_line(raw_line):
-        if not raw_line:
-            return ''
-        preferred = locale.getpreferredencoding(False) or ''
-        candidates = ['utf-8', 'utf-8-sig', 'gb18030', 'cp936'] + ([preferred] if preferred else [])
-        tried = set()
-        for enc in candidates:
-            enc_norm = enc.lower()
-            if enc_norm not in tried:
-                tried.add(enc_norm)
-                try:
-                    return raw_line.decode(enc, errors='strict').strip()
-                except Exception:
-                    continue
-        return raw_line.decode('utf-8', errors='replace').strip()
 
     def _on_started(self, mode_label, mode_key='debug'):
         if not self._process or self._process.poll() is not None:
@@ -1845,7 +1828,7 @@ class ServerManagerApp:
                 line = proc.stdout.readline()
                 if not line:
                     break
-                text = self._decode_line(line)  # GBK/UTF-8 级联解码，修复中文 Windows 前端输出乱码
+                text = self._decode_output(line, strip=True)  # 统一解码(含 UTF-16)，修复中文 Windows 前端输出乱码
                 if text:
                     level = 'ERROR' if any(k in text.lower() for k in ['error', 'exception', 'failed']) else 'INFO'
                     batch.append((f'[WEB] {text}', level))
@@ -2119,7 +2102,7 @@ class ServerManagerApp:
         return None
 
     @staticmethod
-    def _decode_output(raw):
+    def _decode_output(raw, *, strip=False):
         """把子进程的原始字节流解码为文本（Windows 控制台程序编码并不统一）。
 
         · nssm 走宽字符 API，输出是 **UTF-16LE**：按 utf-8 解会得到
@@ -2130,18 +2113,24 @@ class ServerManagerApp:
 
         因此先按 BOM / NUL 密度判 UTF-16，再回落到多编码严格试探；
         任何一步都不抛异常——解码失败只降级为 replace，绝不因此吞掉真实返回码。
+
+        ``strip=True`` 供逐行读取用（去行尾换行）。原先这是另一份实现 _decode_line，
+        只差「没有 UTF-16 分支」——逐行读 nssm 这类宽字符输出时会退化成乱码。
         """
+        def _fin(text: str) -> str:
+            return text.strip() if strip else text
+
         if not raw:
             return ''
         if raw[:2] in (b'\xff\xfe', b'\xfe\xff'):
             try:
-                return raw.decode('utf-16', errors='replace').lstrip('\ufeff')
+                return _fin(raw.decode('utf-16', errors='replace').lstrip('\ufeff'))
             except Exception:
                 pass
         elif raw.count(b'\x00') * 4 > len(raw):
             # UTF-16LE 的 ASCII 段每个字符后跟一个 \x00，NUL 占比远高于任何 8bit 编码
             try:
-                return raw.decode('utf-16-le', errors='replace')
+                return _fin(raw.decode('utf-16-le', errors='replace'))
             except Exception:
                 pass
         preferred = locale.getpreferredencoding(False) or ''
@@ -2149,10 +2138,10 @@ class ServerManagerApp:
             if not enc:
                 continue
             try:
-                return raw.decode(enc, errors='strict')
+                return _fin(raw.decode(enc, errors='strict'))
             except Exception:
                 continue
-        return raw.decode('utf-8', errors='replace')
+        return _fin(raw.decode('utf-8', errors='replace'))
 
     def _run_capture(self, args, timeout=20):
         try:
