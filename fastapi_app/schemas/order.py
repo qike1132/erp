@@ -4,7 +4,7 @@
 用于订单 CRUD 及审批流程的请求/响应模型。
 """
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 
 
 class OrderCreate(BaseModel):
@@ -12,14 +12,6 @@ class OrderCreate(BaseModel):
     quantity: int = Field(..., gt=0, le=9999999, description="订单数量")
     customer: str = Field(..., min_length=1, max_length=100, description="客户名称")
     note: str | None = Field(None, max_length=500, description="备注")
-    order_type: str = Field("regular", pattern="^(regular|custom)$", description="订单类型")
-    country: str | None = Field(None, max_length=100, description="国家名称（定制订单必填）")
-
-    @model_validator(mode='after')
-    def validate_custom_order(self):
-        if self.order_type == 'custom' and not self.country:
-            raise ValueError('定制订单必须填写国家名称')
-        return self
 
 
 class OrderUpdate(BaseModel):
@@ -27,14 +19,6 @@ class OrderUpdate(BaseModel):
     quantity: int | None = Field(None, gt=0, le=9999999, description="订单数量")
     customer: str | None = Field(None, min_length=1, max_length=100, description="客户名称")
     note: str | None = Field(None, max_length=500, description="备注")
-    order_type: str | None = Field(None, pattern="^(regular|custom)$", description="订单类型")
-    country: str | None = Field(None, max_length=100, description="国家名称")
-
-    @model_validator(mode='after')
-    def validate_custom_order(self):
-        if self.order_type == 'custom' and not self.country:
-            raise ValueError('定制订单必须填写国家名称')
-        return self
 
 
 class OrderItemSchema(BaseModel):
@@ -45,8 +29,6 @@ class OrderItemSchema(BaseModel):
     product_name: str | None = None
     product_barcode: str | None = None
     quantity: int
-    order_type: str = "regular"
-    country: str | None = None
     deduct_stock: bool = False
     deduct_quantity: int = 0
     note: str | None = None
@@ -56,17 +38,9 @@ class OrderItemCreate(BaseModel):
     """订单明细创建 schema（用于批量提交内部组装）"""
     product_id: int = Field(..., gt=0, description="产品ID")
     quantity: int = Field(..., gt=0, le=9999999, description="订单数量")
-    order_type: str = Field("regular", pattern="^(regular|custom)$", description="订单类型")
-    country: str | None = Field(None, max_length=100, description="国家名称（定制订单必填）")
     deduct_stock: bool = False
     deduct_quantity: int = 0
     note: str | None = Field(None, max_length=500, description="备注")
-
-    @model_validator(mode='after')
-    def validate_custom_order(self):
-        if self.order_type == 'custom' and not self.country:
-            raise ValueError('定制订单必须填写国家名称')
-        return self
 
 
 class OrderDetailResponse(BaseModel):
@@ -80,8 +54,6 @@ class OrderDetailResponse(BaseModel):
     deduct_quantity: int = 0
     status: str
     note: str = ""
-    order_type: str = "regular"
-    country: str = ""
     is_locked: bool | None = None
     locked_by_name: str | None = None
     items: list[OrderItemSchema] = []
