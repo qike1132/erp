@@ -501,12 +501,6 @@ async def import_stockouts_from_data(db: AsyncSession, data_list: list, *, deps:
         customer = row_data.get('客户名称') or row_data.get('客户')
         stockout_date_val = row_data.get('时间') or row_data.get('出货时间')
         note = row_data.get('备注') or ''
-        country_val = row_data.get('国家') or row_data.get('国家名称')
-        if not country_val or (isinstance(country_val, float) and country_val != country_val):
-            country_parsed = ''
-        else:
-            country_parsed = str(country_val).strip()
-        order_type_parsed = 'custom' if country_parsed else 'regular'
 
         if not product_identifier or not quantity:
             return False
@@ -540,7 +534,6 @@ async def import_stockouts_from_data(db: AsyncSession, data_list: list, *, deps:
 
         shipment_info = await deps.calculate_available_shipment_quantity(
             db, product.id, customer,
-            order_type=order_type_parsed, country=country_parsed or None
         )
         if shipment_info['available_quantity'] <= 0:
             return False

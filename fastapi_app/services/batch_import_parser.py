@@ -260,17 +260,3 @@ async def _read_excel_sheets(
         if not success:
             return None, f'数据解析失败: {err}'
     return data_list, None
-
-
-def _parse_country_value(country_val) -> str:
-    """解析国家字段，处理 NaN 值（Excel 空单元格可能为 float NaN）。
-
-    Args:
-        country_val: 原始国家字段值。
-
-    Returns:
-        str: 清理后的国家名称字符串，空值返回空字符串。
-    """
-    if not country_val or (isinstance(country_val, float) and country_val != country_val):
-        return ''
-    return str(country_val).strip()

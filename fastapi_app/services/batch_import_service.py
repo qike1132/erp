@@ -546,9 +546,6 @@ async def import_stockouts_service(db: AsyncSession, file: ExcelUpload) -> Batch
                     customer = row_data.get('客户名称') or row_data.get('客户')
                     stockout_date_val = row_data.get('时间') or row_data.get('出货时间')
                     note = row_data.get('备注')
-                    country_val = row_data.get('国家') or row_data.get('国家名称')
-                    country_parsed = _parse_country_value(country_val)
-                    order_type_parsed = 'custom' if country_parsed else 'regular'
                     if not product_identifier or not quantity:
                         skipped += 1
                         continue
@@ -580,7 +577,7 @@ async def import_stockouts_service(db: AsyncSession, file: ExcelUpload) -> Batch
                         continue
                     # 校验可出货量（基于订单支持）
                     shipment_info = await calculate_available_shipment_quantity(
-                        db, product.id, customer, order_type=order_type_parsed, country=country_parsed or None,
+                        db, product.id, customer,
                     )
                     if shipment_info['available_quantity'] <= 0:
                         errors.append(f'客户{customer}没有可用的订单支持出货')
@@ -749,7 +746,6 @@ from fastapi_app.services.batch_import_parser import (  # noqa: F401
     _build_batch_result,
     _find_target_sheet,
     _identify_sheet_type,
-    _parse_country_value,
     _parse_import_row,
     _read_excel_sheets,
     _save_uploaded_file,
