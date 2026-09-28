@@ -32,7 +32,9 @@ def test_backup_badge_widget_exists() -> None:
 
 
 def test_backup_badge_is_rendered() -> None:
-    assert "_detail(self.hosting_backup_badge" in TEXT
+    # D 步把渲染函数内的局部闭包 ``_detail`` 方法化为 ``self._set_badge``
+    # (函数长度门禁拆分),调用点随之改名,断言跟随。
+    assert "_set_badge(self.hosting_backup_badge" in TEXT
     assert "data.get('backup')" in TEXT
 
 
@@ -56,26 +58,51 @@ def test_collect_does_not_fetch_with_plain_urlopen() -> None:
 
 
 def test_every_early_return_updates_backup_badge() -> None:
-    """回归锁:凡 _apply_hosting_data 里的提前 return,之前必须更新备份徽章。
+    """回归锁:调度器里每个提前 return 必须经由「放弃型」助手,且该助手确实置灰备份徽章。
 
     备份取值来自每轮采集,不经状态文件;任何提前 return 漏掉它,都会让旧值滞留
     ——2026-09-28 用户实测到的假健康(服务全停仍显示绿色「正常(8.5h)」)就是这么来的。
-    该缺陷在同函数里出现过四次(collect_error / 未运行 / 启动窗口 / 状态不可信),
+    该缺陷在拆分前的单函数里出现过四次(collect_error / 未运行 / 启动窗口 / 状态不可信),
     故此处扫全部分支,而不是逐条列举。
 
-    ★ 修正(T7):旧版用 ``TEXT[TEXT.index(apply):TEXT.index(collect)]`` —— ``apply`` 在
-    ``collect`` **之后**,区间恒为空、``misses`` 恒为空,本条长期是**空转锁**。T7 改为
-    对目标模块 ``hosting_view.py`` 按 AST 取**函数体**,并加防空转断言,语义只紧不松。
+    ★ 重锚(D 步,函数长度门禁):拆分前 ``_apply_hosting_data`` 是一个 155 行的单函数,
+    本锁扫它**函数体内**每个 ``return`` 前 20 行是否出现 ``hosting_backup_badge``。D 步按
+    「放弃理由」把它拆成「调度器 + 放弃型助手」后,备份徽章的置灰搬进了助手体内,调度器里
+    只剩下 ``self._apply_xxx(data); return`` —— 旧形式(扫调度器体内文本)必然失效,故重锚。
+    新形式语义**只紧不松**:要求调度器里每个 ``return`` 之前**确实调用**了一个放弃型助手
+    (``_apply_collect_error`` / ``_apply_services_stopped`` / ``_apply_status_untrusted``),
+    且该助手**函数体**内含有 ``hosting_backup_badge`` 置灰语句。将来若有人加一条「直接
+    return、不经助手」的提前出口,或让某个助手丢掉置灰,本条仍会红。
+
+    ★ 更早的修正(T7):旧版用 ``TEXT[TEXT.index(apply):TEXT.index(collect)]`` —— ``apply``
+    在 ``collect`` **之后**,区间恒为空、``misses`` 恒为空,本条长期是**空转锁**。T7 改为
+    对目标模块 ``hosting_view.py`` 按 AST 取**函数体**,并加防空转断言。
     """
-    body = _func_src(HOSTING_VIEW, "_apply_hosting_data")
-    lines = body.splitlines()
-    # 防空转:切片必须真的落在该函数体上,且确实取到了提前 return(否则本锁名存实亡)
+    # 4 个「放弃理由」分支拆出的三个提前 return 助手(collect_error 分支已是第一个 return)。
+    abandonment_helpers = (
+        "_apply_collect_error",
+        "_apply_services_stopped",
+        "_apply_status_untrusted",
+    )
+    # 每个放弃型助手自身必须真的置灰备份徽章,否则「经过助手」也只是形式。
+    for helper in abandonment_helpers:
+        body = _func_src(HOSTING_VIEW, helper)
+        assert "hosting_backup_badge" in body, (
+            f"放弃型助手 {helper}() 体内未置灰备份徽章 → 该分支会滞留旧值成假信号"
+        )
+
+    dispatcher = _func_src(HOSTING_VIEW, "_apply_hosting_data")
+    lines = dispatcher.splitlines()
+    # 防空转:切片必须真的落在调度器函数体上,且确实取到了提前 return(否则本锁名存实亡)
     assert lines and lines[0].strip().startswith("def _apply_hosting_data("), "AST 切片未取到 _apply_hosting_data 函数体"
-    assert any(line.strip() == "return" for line in lines), "函数体内未取到任何提前 return,本条会空转"
+    assert any(line.strip() == "return" for line in lines), "调度器函数体内未取到任何提前 return,本条会空转"
     misses = []
     for i, line in enumerate(lines):
         if line.strip() == "return":
             window = "\n".join(lines[max(0, i - 20):i])
-            if "hosting_backup_badge" not in window:
+            if not any(f"self.{helper}(" in window for helper in abandonment_helpers):
                 misses.append(i)
-    assert not misses, f"_apply_hosting_data 有 {len(misses)} 处提前 return 未重置备份徽章 → 旧值滞留成假信号"
+    assert not misses, (
+        f"_apply_hosting_data 有 {len(misses)} 处提前 return 未经过放弃型助手 "
+        "(备份徽章可能滞留旧值 → 旧值滞留成假信号)"
+    )

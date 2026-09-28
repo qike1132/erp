@@ -134,12 +134,13 @@ def test_file_size_gate_package_file_within_limit() -> None:
 
 
 def test_function_length_gate_scans_repo_root() -> None:
-    """函数长度门禁须把仓库根并入默认扫描目录,且根目录只取**顶层** ``*.py``。
+    """函数长度门禁须把仓库根与 ``server_manager`` 包并入默认扫描目录,根目录只取顶层 ``*.py``。
 
-    ⚠ ``server_manager`` 包**刻意不**并入默认扫描目录:包内
-    ``_apply_hosting_data() = 192 行``(T7 起位于 ``server_manager/hosting_view.py``)
-    会让 quality_gate(pre-commit 与 CI 都跑)立刻变红;函数级拆分属 D 的范畴。
-    (故此处的"不包含"是被裁定的,不是遗漏。)
+    历史(T6 → D):D 步之前 ``server_manager`` 包**刻意不**并入扫描 —— 包内
+    ``_apply_hosting_data()``(T7 起位于 ``server_manager/hosting_view.py``,实测 155 行,
+    非早期估计的 192 行)一进扫描就超阈值,会让 quality_gate(pre-commit 与 CI 都跑)变红。
+    D 步已按「放弃理由」把它拆成「调度器 + 4 个助手」,包内现已无超长函数,故本断言
+    **由「不在」反转为「在」**。
     """
     text = (ROOT / "scripts" / "check_function_length.py").read_text(encoding="utf-8")
     assert "PROJECT_ROOT" in text and "DEFAULT_SCAN_DIRS" in text
@@ -148,9 +149,23 @@ def test_function_length_gate_scans_repo_root() -> None:
     # ★ 修正(#11):此前对**整文件**断言 ``"server_manager" not in text`` —— 将来任何
     #   注释/字符串里出现该串都会误红。改为只锚定 ``DEFAULT_SCAN_DIRS`` 的赋值段。
     scan_dirs_src = _assigned_src(text, "DEFAULT_SCAN_DIRS")
-    assert "server_manager" not in scan_dirs_src, (
-        "server_manager 不应进 DEFAULT_SCAN_DIRS(包内 192 行函数会让 quality_gate 变红)"
+    assert "server_manager" in scan_dirs_src, (
+        "server_manager 未进 DEFAULT_SCAN_DIRS(包内函数已拆平,应纳入函数长度门禁)"
     )
+
+
+def test_function_length_gate_reports_no_violation_in_server_manager() -> None:
+    """行为锁:真跑门禁扫 ``server_manager``,退出码必须为 0(包内确实无超长函数)。
+
+    比文本断言有牙齿:它不认「DEFAULT_SCAN_DIRS 里写了 server_manager」,而是确认门禁
+    真去扫了、且扫出零违规 —— 若包内函数又涨回阈值以上、或扫描被静默跳过/解析报错,
+    本条即红。
+    """
+    proc = _run(["scripts/check_function_length.py", "server_manager"])
+    assert proc.returncode == 0, (
+        f"server_manager 包内仍有超长函数(或门禁异常):\n{proc.stdout}\n{proc.stderr}"
+    )
+    assert "[PASS]" in proc.stdout, f"未报 PASS:\n{proc.stdout}\n{proc.stderr}"
 
 
 # ---------------------------------------------------------------------------

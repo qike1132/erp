@@ -11,6 +11,7 @@
 退出码:
     0: 未发现超长函数
     1: 发现超长函数
+    2: 有文件无法解析为 Python AST（门禁失败，"解析失败 ≠ 无违规"）
 
 任务来源: .codeartsdoer/specs/code_quality_opt/tasks.md 1.2
 """
@@ -26,8 +27,13 @@ from pathlib import Path
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 
 PROJECT_ROOT = Path(__file__).parent.parent
-# 默认扫描 fastapi_app(后端源码) + 仓库根顶层 .py(桌面壳入口等,此前逃过门禁)。
-DEFAULT_SCAN_DIRS = [PROJECT_ROOT / "fastapi_app", PROJECT_ROOT]
+# 默认扫描 fastapi_app(后端源码) + server_manager(桌面壳包,此前整包逃过门禁)
+# + 仓库根顶层 .py(桌面壳入口等)。
+DEFAULT_SCAN_DIRS = [
+    PROJECT_ROOT / "fastapi_app",
+    PROJECT_ROOT / "server_manager",
+    PROJECT_ROOT,
+]
 EXCLUDE_DIRS = {"__pycache__", "tests", "migrations"}
 
 
@@ -88,7 +94,9 @@ def scan_file(path: Path, max_length: int) -> tuple[list[Violation], str | None]
     "无违规"（假绿），而这类文件恰恰最需要被拦住。
     """
     try:
-        source = path.read_text(encoding="utf-8")
+        # utf-8-sig 容忍 BOM：仓库根曾有几个带 U+FEFF 的探针脚本，用 utf-8 读会让
+        # ast.parse 抛「invalid non-printable character U+FEFF」→ 整个文件被跳过。
+        source = path.read_text(encoding="utf-8-sig")
         tree = ast.parse(source, filename=str(path))
     except (SyntaxError, OSError) as exc:
         return [], str(exc)
@@ -148,11 +156,20 @@ def main() -> int:
         all_violations.extend(violations)
 
     if parse_errors:
+        # 解析失败必须**响亮失败**：一个连 AST 都读不了的文件被报成「无违规」正是本仓库
+        # 反复出现的「假绿」类缺陷。但注意 quality_gate.py 用 ``[FAIL]…数字 处/个`` 从本
+        # 脚本输出里抠违规计数，并把「小于等于基线」当作未新增 —— 故这里的失败标记
+        # **绝不能**是「[FAIL] + 数字 + 处/个」的形式（会被误当成「违规变少=改善」）。
+        # 这里既不打印 [PASS]，也不打印 [FAIL]计数行，直接以独立退出码 2 结束：
+        # quality_gate 解析不到计数即保守判失败（hard_failure），不会被误读成改善。
         print(
-            f"[WARN] {len(parse_errors)} 个文件解析失败（已跳过，不计入违规）:", file=sys.stderr
+            f"[PARSE-ERROR] {len(parse_errors)} 个文件无法解析为 Python AST，门禁失败"
+            "（解析失败 ≠ 无违规）:",
+            file=sys.stderr,
         )
         for rel, err in parse_errors[:10]:
             print(f"  {rel}: {err}", file=sys.stderr)
+        return 2
 
     if not all_violations:
         print(f"[PASS] 未发现超过 {args.max_length} 行的函数")
