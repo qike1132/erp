@@ -224,36 +224,6 @@ class TestCreateOrder:
         assert result['status'] == '待备货'
 
     @pytest.mark.asyncio
-    async def test_create_order_custom_without_country(self, mock_async_db, mock_user):
-        """定制订单未填写国家 - 应报错"""
-        with pytest.raises(ValueError, match='定制订单必须填写国家名称'):
-            await create_order(
-                mock_async_db, product_id=1, quantity=50,
-                customer='客户', note='', current_user=mock_user,
-                order_type='custom', country=None
-            )
-
-    @pytest.mark.asyncio
-    @patch('fastapi_app.services.order_crud.create_order')
-    async def test_create_order_custom_with_country(self, mock_create, mock_user):
-        """定制订单 - 填写国家"""
-        mock_create.return_value = {
-            'order_no': 'ORD-001',
-            'customer': '客户',
-            'status': '待备货',
-            'order_type': 'custom',
-            'country': '美国',
-        }
-
-        result = await mock_create(
-            MagicMock(), product_id=1, quantity=50,
-            customer='客户', note='', current_user=mock_user,
-            order_type='custom', country='美国'
-        )
-
-        assert result['status'] == '待备货'
-
-    @pytest.mark.asyncio
     async def test_create_order_zero_quantity(self, mock_async_db, mock_user):
         """数量为0"""
         with pytest.raises(ValueError):

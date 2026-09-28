@@ -109,13 +109,10 @@ def _validate_one_item(order_data: dict, customer: str, product_map: dict, resul
             product.name, product_id,
         )
 
-    order_type = order_data.get('order_type', 'regular')
     return {
         'product_id': product_id,
         'quantity': quantity,
         'product': product,
-        'order_type': order_type,
-        'country': order_data.get('country') if order_type == 'custom' else None,
         'deduct_stock': bool(order_data.get('deduct_stock')),
         'deduct_quantity': int(order_data.get('deduct_quantity', 0) or 0),
         'note': order_data.get('note', ''),
@@ -145,8 +142,6 @@ async def _create_order_header(db: AsyncSession, customer: str, validated_items:
         order_date=datetime.now(UTC).replace(tzinfo=None),  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
         status=ORDER_STATUS_PENDING_STOCK,
         note='',  # 主订单级 note 留空，SKU 级 note 在 OrderItem
-        order_type=first_item['order_type'],
-        country=first_item['country'] if first_item['order_type'] == 'custom' else None,
     )
     db.add(order)
     await db.flush()
@@ -166,8 +161,6 @@ async def _create_order_items(
             product_name=product.name,
             product_barcode=getattr(product, 'barcode', None),
             quantity=it['quantity'],
-            order_type=it['order_type'],
-            country=it['country'],
             deduct_stock=it['deduct_stock'],
             deduct_quantity=it['deduct_quantity'],
             note=it['note'],
@@ -245,8 +238,6 @@ def _build_success_result(order: Order, customer: str, created_items: list) -> d
                 'product_name': oi.product_name,
                 'product_barcode': oi.product_barcode,
                 'quantity': oi.quantity,
-                'order_type': oi.order_type,
-                'country': oi.country,
                 'deduct_stock': oi.deduct_stock,
                 'deduct_quantity': oi.deduct_quantity,
                 'note': oi.note,

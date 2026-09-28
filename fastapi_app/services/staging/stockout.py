@@ -31,13 +31,6 @@ def _build_stockout_entity(
     stockout_date = parse_date_value(fields.get('stockout_date')) or datetime.now(UTC).replace(tzinfo=None)
     customer = str(fields.get('customer', '')).strip()
 
-    country_val = fields.get('country', '')
-    if not country_val or (isinstance(country_val, float) and country_val != country_val):
-        country_parsed = ''
-    else:
-        country_parsed = str(country_val).strip()
-    order_type_parsed = 'custom' if country_parsed else 'regular'
-
     stock_check_passed = False
     stock_check_message = ''
     if is_validated:
@@ -53,8 +46,6 @@ def _build_stockout_entity(
         product_id=product_id,
         quantity=qty,
         note=str(fields.get('note', '') or '').strip(),
-        order_type=order_type_parsed,
-        country=country_parsed,
         is_validated=is_validated,
         validation_error=validation_error,
         stock_check_passed=stock_check_passed,
@@ -142,9 +133,7 @@ async def confirm_staging_stockouts(
                     raise ValueError(f'出货{staging.customer}-{staging.product_name}确认失败: 库存不足')
 
                 shipment_info = await calculate_available_shipment_quantity(
-                    db, staging.product_id, staging.customer,
-                    order_type=staging.order_type or 'regular',
-                    country=staging.country or None
+                    db, staging.product_id, staging.customer
                 )
                 if shipment_info['available_quantity'] <= 0:
                     raise ValueError(f'出货{staging.customer}-{staging.product_name}确认失败: 没有可用的订单支持出货')
@@ -250,7 +239,6 @@ async def import_staging_stockouts_from_excel(
             'quantity': '出货数量',
             'stockout_date': '时间',
             'note': '备注',
-            'country': '国家',
         },
         required_fields=['product_name', 'quantity'],
         extra_row_validations=_validate_stockin_customer,

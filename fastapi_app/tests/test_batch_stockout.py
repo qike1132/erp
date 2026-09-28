@@ -39,14 +39,12 @@ def _make_shipment_info(available_quantity=50, order_quantity=100, shipped_quant
     }
 
 
-def _make_stockout_data(product_id=1, customer="客户A", quantity=10, order_type='regular', country='', note=''):
+def _make_stockout_data(product_id=1, customer="客户A", quantity=10, note=''):
     """构造单条出库请求数据"""
     return {
         'product_id': product_id,
         'customer': customer,
         'quantity': quantity,
-        'order_type': order_type,
-        'country': country,
         'note': note,
         'id': 'test-1',
     }
@@ -139,24 +137,6 @@ class TestBatchCreateStockoutsNormal:
         assert product.current_stock == 50
         # 2 次 StockOut add + 1 次 InventoryLog add = 3
         assert mock_db.add.call_count == 3
-
-    async def test_custom_order_with_country(self, mock_db):
-        """定制订单出库成功（带国家）"""
-        product = _make_product(current_stock=100)
-        shipment_info = _make_shipment_info(available_quantity=30, orders=[
-            {'order_id': 10, 'available': 30, 'quantity': 30}
-        ])
-
-        with patch('fastapi_app.services.stock_service.get_product_for_update', new_callable=AsyncMock, return_value=product), \
-             patch('fastapi_app.services.stock_service.calculate_available_shipment_quantity', new_callable=AsyncMock, return_value=shipment_info), \
-             patch('fastapi_app.services.stock_service.generate_stockout_number', new_callable=AsyncMock, return_value='SO-C-001'):
-
-            data = _make_stockout_data(quantity=15, order_type='custom', country='日本')
-            result = await stock_service.batch_create_stockouts(mock_db, [data])
-
-        assert result['results'][0]['success'] is True
-        assert product.current_stock == 85
-
 
 # ==================== 库存不足 ====================
 
@@ -253,13 +233,6 @@ class TestBatchCreateStockoutsValidation:
         result = await stock_service.batch_create_stockouts(mock_db, [data])
         assert result['results'][0]['success'] is False
         assert '出货必须选择客户' in result['results'][0]['error']
-
-    async def test_custom_order_without_country(self, mock_db):
-        """定制订单未填写国家"""
-        data = _make_stockout_data(order_type='custom', country='')
-        result = await stock_service.batch_create_stockouts(mock_db, [data])
-        assert result['results'][0]['success'] is False
-        assert '定制订单必须填写国家名称' in result['results'][0]['error']
 
     async def test_zero_quantity(self, mock_db):
         """出货数量为0"""

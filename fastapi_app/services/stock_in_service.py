@@ -27,12 +27,12 @@ logger = logging.getLogger(__name__)
 MAX_STOCK_QUANTITY = MAX_QUANTITY  # 库存数量上限，超过此值拒绝操作（值统一由 business_rules 管理）
 
 
-async def create_stockin_core(db: AsyncSession, product_id: int, quantity: int, customer: str, stockin_date: datetime, note: str, order_type: str = 'regular', country: str | None = None) -> StockIn:
+async def create_stockin_core(db: AsyncSession, product_id: int, quantity: int, customer: str, stockin_date: datetime, note: str) -> StockIn:
     if quantity <= 0:
         raise ValueError('入库数量必须大于 0')
     if quantity > MAX_STOCK_QUANTITY:
         raise ValueError(f'入库数量不能超过 {MAX_STOCK_QUANTITY}')
-    stockin = StockIn(stockin_no=await stock_service.generate_stockin_number(db), product_id=product_id, quantity=quantity, customer=customer, stockin_date=stockin_date, note=note, order_type=order_type, country=country)
+    stockin = StockIn(stockin_no=await stock_service.generate_stockin_number(db), product_id=product_id, quantity=quantity, customer=customer, stockin_date=stockin_date, note=note)
     db.add(stockin)
     product = await stock_service.get_product_for_update(db, product_id)
     product.current_stock += quantity
@@ -41,7 +41,7 @@ async def create_stockin_core(db: AsyncSession, product_id: int, quantity: int, 
     return stockin  # 日志条目由调用方的 flush/commit 写入
 
 
-async def update_stockin_core(db: AsyncSession, stockin: StockIn, quantity: int, customer: str, stockin_date: datetime, note: str, order_type: str = 'regular', country: str | None = None) -> StockIn:
+async def update_stockin_core(db: AsyncSession, stockin: StockIn, quantity: int, customer: str, stockin_date: datetime, note: str) -> StockIn:
     result = await db.execute(select(StockIn).where(StockIn.id == stockin.id).with_for_update())
     stockin = result.scalar_one_or_none()
     if not stockin:
@@ -51,8 +51,6 @@ async def update_stockin_core(db: AsyncSession, stockin: StockIn, quantity: int,
     stockin.customer = customer
     stockin.stockin_date = stockin_date
     stockin.note = note
-    stockin.order_type = order_type
-    stockin.country = country
     if quantity != old_quantity:
         product = await stock_service.get_product_for_update(db, stockin.product_id)
         product.current_stock += quantity - old_quantity
@@ -149,13 +147,11 @@ async def batch_create_stockins(db: AsyncSession, stockins_data: list) -> dict:
             customer = str(item.get('customer', '')).strip()
             quantity = int(item.get('quantity', 0))
             note = item.get('note', '')
-            order_type = item.get('order_type', 'regular') or 'regular'
-            country = item.get('country') or None
             stockin_date_str = item.get('stockin_date') or ''
             stockin_date = _parse_date_preserve_time(stockin_date_str) if stockin_date_str else datetime.now(UTC).replace(tzinfo=None)  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
             try:
                 async with db.begin_nested():
-                    stockin = await stock_service.create_stockin_core(db, product_id, quantity, customer, stockin_date, note, order_type, country)
+                    stockin = await stock_service.create_stockin_core(db, product_id, quantity, customer, stockin_date, note)
                 results[orig_idx] = {'success': True, 'stockin_no': stockin.stockin_no, 'id': stockin.id}
             except ValueError as e:
                 results[orig_idx] = {'success': False, 'error': str(e), 'id': item.get('id', '未知')}

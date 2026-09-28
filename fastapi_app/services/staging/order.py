@@ -145,8 +145,6 @@ async def confirm_staging_orders(
                         quantity=staging.quantity,
                         note=staging.note,
                         status=ORDER_STATUS_PENDING_STOCK,
-                        order_type=staging.order_type or 'regular',
-                        country=staging.country if staging.order_type == 'custom' else None,
                     )
                     db.add(order)
                     await db.flush()

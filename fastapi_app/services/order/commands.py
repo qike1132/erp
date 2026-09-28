@@ -86,8 +86,7 @@ from fastapi_app.services.order.approval_flow import (
 
 
 async def create_order(db: AsyncSession, product_id: int, quantity: int,
-                       customer: str, note: str, current_user: User,
-                       order_type: str = 'regular', country: str | None = None) -> dict:
+                       customer: str, note: str, current_user: User) -> dict:
     """
     创建订单
 
@@ -96,11 +95,7 @@ async def create_order(db: AsyncSession, product_id: int, quantity: int,
     - 数量 > 0 且 <= 9999999
     - 客户名称不能为空
     - 创建订单记录及库存日志（不影响物理库存）
-    - 定制订单必须填写国家名称
     """
-    if order_type == 'custom' and not country:
-        raise ValueError('定制订单必须填写国家名称')
-
     validate_quantity_range(quantity, "订单数量")
 
     product = await get_product_for_update(db, product_id)
@@ -116,8 +111,6 @@ async def create_order(db: AsyncSession, product_id: int, quantity: int,
             quantity=quantity,
             note=note,
             status=ORDER_STATUS_PENDING_STOCK,
-            order_type=order_type,
-            country=country if order_type == 'custom' else None,
         )
         db.add(order)
         await db.flush()
@@ -130,8 +123,6 @@ async def create_order(db: AsyncSession, product_id: int, quantity: int,
             product_name=product.name,
             product_barcode=getattr(product, 'barcode', None),
             quantity=quantity,
-            order_type=order_type,
-            country=country if order_type == 'custom' else None,
             note=note,
         )
         db.add(order_item)
@@ -176,8 +167,7 @@ async def create_order(db: AsyncSession, product_id: int, quantity: int,
     return order.to_dict()
 
 async def update_order(db: AsyncSession, order_id: int, quantity: int,
-                       customer: str, note: str, current_user: User,
-                       order_type: str | None = None, country: str | None = None) -> dict:
+                       customer: str, note: str, current_user: User) -> dict:
     result = await db.execute(select(Order).where(Order.id == order_id).with_for_update())
     order = result.scalar_one_or_none()
     if not order or order.is_deleted:
@@ -187,8 +177,7 @@ async def update_order(db: AsyncSession, order_id: int, quantity: int,
 
     if current_user.is_super:
         return await _update_order_directly(
-            db, order, order_id, quantity, customer, note,
-            current_user, order_type, country
+            db, order, order_id, quantity, customer, note, current_user
         )
     else:
         return await _submit_edit_approval(
@@ -198,8 +187,7 @@ async def update_order(db: AsyncSession, order_id: int, quantity: int,
 async def _update_order_directly(
     db: AsyncSession, order: Order, order_id: int,
     quantity: int, customer: str, note: str,
-    current_user: User, order_type: str | None,
-    country: str | None,
+    current_user: User,
 ) -> dict:
     validate_quantity_range(quantity, "订单数量")
     validate_not_empty(customer, "客户名称")
@@ -209,10 +197,6 @@ async def _update_order_directly(
     order.customer = customer
     order.quantity = quantity
     order.note = note
-    if order_type is not None:
-        order.order_type = order_type
-    if country is not None:
-        order.country = country if order_type != 'regular' else None
 
     if quantity != old_quantity:
         # TODO(multi-sku-order): order.product_id 在多 SKU 下为首 item 兼容值，库存调整需按 OrderItem 维度；待后续 spec 改造。

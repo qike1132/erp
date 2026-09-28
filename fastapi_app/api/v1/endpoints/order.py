@@ -46,7 +46,6 @@ async def list_orders(
     customer: str | None = Query(None, description="客户名筛选"),
     product_id: int | None = Query(None, description="产品ID筛选"),
     status: str | None = Query(None, description="状态筛选"),
-    order_type: str | None = Query(None, description="订单类型筛选：regular/custom"),
     start_date: str | None = Query(None, description="开始日期筛选(YYYY-MM-DD)"),
     end_date: str | None = Query(None, description="结束日期筛选(YYYY-MM-DD)"),
     factory: str | None = Query(None, description="工厂筛选：东莞/湖北"),
@@ -66,7 +65,6 @@ async def list_orders(
         customer: 客户名筛选关键字。
         product_id: 产品 ID 筛选。
         status: 订单状态筛选。
-        order_type: 订单类型筛选（regular=常规/custom=定制）。
         start_date: 开始日期（YYYY-MM-DD）。
         end_date: 结束日期（YYYY-MM-DD）。
         factory: 工厂筛选（东莞/湖北）。受权限隔离约束。
@@ -83,7 +81,7 @@ async def list_orders(
     try:
         result = await order_service.get_orders(db, page=page, per_page=per_page,
                                                 customer=customer, product_id=product_id,
-                                                status=status, order_type=order_type,
+                                                status=status,
                                                 start_date=start_date, end_date=end_date,
                                                 factory=factory)
     except AppError:
@@ -230,7 +228,6 @@ async def create_order(
         await order_service.create_order(
             db, product_id=data.product_id, quantity=data.quantity,
             customer=data.customer, note=data.note or '', current_user=user,
-            order_type=data.order_type, country=data.country
         )
     # 事务提交后再失效缓存，避免并发请求用旧数据回填缓存
     await cache_mgr.invalidate_dashboard()
@@ -266,18 +263,15 @@ async def edit_order(
         raise HTTPException(status_code=404, detail="订单不存在")
 
     # 未传入的字段沿用原值，实现部分更新
-    # TODO(multi-sku-order): 读取 order.quantity/order_type/country 在多 SKU 下为首 item 兼容值，待后续 spec 改造为按 OrderItem 维度。
+    # TODO(multi-sku-order): 读取 order.quantity 在多 SKU 下为首 item 兼容值，待后续 spec 改造为按 OrderItem 维度。
     quantity = data.quantity if data.quantity is not None else order.quantity
     customer = data.customer if data.customer is not None else order.customer
     note = data.note if data.note is not None else (order.note or '')
-    order_type = data.order_type if data.order_type is not None else order.order_type
-    country = data.country if data.country is not None else order.country
 
     async with db_transaction(db):
         result = await order_service.update_order(
             db, order_id=order_id, quantity=quantity,
-            customer=customer, note=note, current_user=user,
-            order_type=order_type, country=country
+            customer=customer, note=note, current_user=user
         )
     await cache_mgr.invalidate_dashboard()
     return OrderActionResponse(success=result['success'], message=result['message'])

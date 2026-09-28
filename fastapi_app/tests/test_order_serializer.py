@@ -48,8 +48,6 @@ class TestOrderSerializer:
         order.quantity = 50
         order.status = "待备货"
         order.note = "测试备注"
-        order.order_type = "regular"
-        order.country = None
         order.is_locked = False
         order.locked_by = mock_user
         order.batch_no = "BATCH-001"
@@ -69,8 +67,6 @@ class TestOrderSerializer:
         order.quantity = 10
         order.status = None
         order.note = None
-        order.order_type = "custom"
-        order.country = "中国"
         order.is_locked = True
         order.locked_by = None
         order.batch_no = None
@@ -88,8 +84,6 @@ class TestOrderSerializer:
         assert result["quantity"] == 50
         assert result["status"] == "待备货"
         assert result["note"] == "测试备注"
-        assert result["order_type"] == "regular"
-        assert result["country"] == ""
         assert result["is_locked"] is False
         assert result["deduct_quantity"] == 0
 
@@ -151,7 +145,6 @@ class TestOrderSerializer:
         )
 
         assert result["order_date"] == ""
-        assert result["country"] == "中国"
         assert result["product"] is None
         assert result["locked_by_name"] is None
         assert result["note"] == ""
@@ -230,8 +223,6 @@ class TestOrderSerializer:
             OrderField.QUANTITY,
             OrderField.STATUS,
             OrderField.NOTE,
-            OrderField.ORDER_TYPE,
-            OrderField.COUNTRY,
             OrderField.IS_LOCKED,
             OrderField.BATCH_NO,
             OrderField.BATCH_COMPLETED_AT,

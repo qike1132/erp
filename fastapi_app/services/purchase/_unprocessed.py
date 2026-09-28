@@ -59,8 +59,6 @@ def _build_unprocessed_order_record(order) -> dict:
             'product_name': item.product_name,
             'product_barcode': item.product_barcode,
             'quantity': item.quantity,
-            'order_type': item.order_type,
-            'country': item.country or '',
             'deduct_quantity': item.deduct_quantity or 0,
             'note': item.note or '',
         }
@@ -92,8 +90,6 @@ def _build_unprocessed_stockin_record(stockin) -> dict:
         'product_name': None,  # 由调用方批量查询 Product 后填充
         'product_barcode': None,
         'quantity': stockin.quantity,
-        'order_type': stockin.order_type,
-        'country': stockin.country or '',
         'deduct_quantity': 0,
         'note': stockin.note or '',
     }]

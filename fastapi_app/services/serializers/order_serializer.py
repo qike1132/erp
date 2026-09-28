@@ -31,8 +31,6 @@ class OrderField(Enum):
     DEDUCT_QUANTITY = "deduct_quantity"
     STATUS = "status"
     NOTE = "note"
-    ORDER_TYPE = "order_type"
-    COUNTRY = "country"
     IS_LOCKED = "is_locked"
     LOCKED_BY_NAME = "locked_by_name"
     BATCH_NO = "batch_no"
@@ -88,8 +86,6 @@ class OrderSerializer:
             OrderField.DEDUCT_QUANTITY,
             OrderField.STATUS,
             OrderField.NOTE,
-            OrderField.ORDER_TYPE,
-            OrderField.COUNTRY,
             OrderField.IS_LOCKED,
             OrderField.LOCKED_BY_NAME,
             OrderField.ITEMS,
@@ -129,8 +125,6 @@ class OrderSerializer:
             OrderField.DEDUCT_QUANTITY,
             OrderField.STATUS,
             OrderField.NOTE,
-            OrderField.ORDER_TYPE,
-            OrderField.COUNTRY,
             OrderField.IS_LOCKED,
             OrderField.LOCKED_BY_NAME,
             OrderField.BATCH_NO,
@@ -152,8 +146,7 @@ class OrderSerializer:
         OrderField.QUANTITY: "quantity",
         OrderField.STATUS: "status",
         OrderField.NOTE: "note",
-        OrderField.ORDER_TYPE: "order_type",
-        OrderField.COUNTRY: "country",
+        OrderField.STATUS: "status",
         OrderField.IS_LOCKED: "is_locked",
         OrderField.BATCH_NO: "batch_no",
         OrderField.BATCH_COMPLETED_AT: "batch_completed_at",
@@ -218,8 +211,6 @@ class OrderSerializer:
                     "product_name": item.product_name,
                     "product_barcode": item.product_barcode,
                     "quantity": item.quantity,
-                    "order_type": item.order_type,
-                    "country": item.country,
                     "deduct_stock": item.deduct_stock,
                     "deduct_quantity": item.deduct_quantity,
                     "note": item.note,

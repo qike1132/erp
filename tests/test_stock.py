@@ -118,28 +118,6 @@ class TestCreateStockIn:
                 customer='客户', stockin_date=datetime.now(UTC), note=''
             )
 
-    @pytest.mark.asyncio
-    @patch('fastapi_app.services.stock_service.generate_stockin_number')
-    @patch('fastapi_app.services.stock_service.get_product_for_update')
-    @patch('fastapi_app.services.stock_service.log_inventory_change')
-    async def test_create_stockin_custom_order(self, mock_log, mock_get_product,
-                                                 mock_gen_no, mock_async_db):
-        """定制订单入库"""
-        mock_gen_no.return_value = 'SI-2024-CUSTOM'
-        product = MagicMock()
-        product.id = 1
-        product.current_stock = 0
-        mock_get_product.return_value = product
-
-        result = await create_stockin_core(
-            mock_async_db, product_id=1, quantity=100,
-            customer='海外客户', stockin_date=datetime.now(UTC),
-            note='定制入库', order_type='custom', country='美国'
-        )
-
-        assert result.order_type == 'custom'
-        assert result.country == '美国'
-
 
 class TestUpdateStockIn:
     """入库编辑"""
@@ -354,23 +332,6 @@ class TestCreateStockOut:
                     mock_async_db, product_id=1, quantity=50,
                     customer='客户', stockout_date=datetime.now(UTC), note=''
                 )
-
-    @pytest.mark.asyncio
-    @patch('fastapi_app.services.stock_service.get_product_for_update')
-    async def test_create_stockout_custom_no_country(self, mock_get_product,
-                                                       mock_async_db):
-        """定制出库未填国家"""
-        product = MagicMock()
-        product.id = 1
-        product.current_stock = 200
-        mock_get_product.return_value = product
-
-        with pytest.raises(ValueError, match='定制订单必须填写国家名称'):
-            await create_stockout_core(
-                mock_async_db, product_id=1, quantity=10,
-                customer='客户', stockout_date=datetime.now(UTC),
-                note='', order_type='custom', country=None
-            )
 
 
 class TestUpdateStockOut:

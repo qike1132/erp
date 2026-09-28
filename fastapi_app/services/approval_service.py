@@ -4,8 +4,8 @@
 审批操作通过行级锁（with_for_update）保证并发安全，
 并通过状态机（can_transition）校验状态流转合法性。
 
-TODO(multi-sku-order): 本模块多处读写 order.product_id/order.quantity/order.order_type/
-order.country（审批同意/拒绝/撤销等逻辑）。多 SKU 模型下这些为首 item 兼容值，
+TODO(multi-sku-order): 本模块多处读写 order.product_id/order.quantity
+（审批同意/拒绝/撤销等逻辑）。多 SKU 模型下这些为首 item 兼容值，
 完整改造涉及业务语义变更，风险高，待后续 spec 改造为遍历 order.items。
 当前依赖 Task 3 设置的兼容值。
 """

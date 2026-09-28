@@ -246,8 +246,6 @@ async def _build_po_source_sku_map(db: AsyncSession, orders) -> dict[int, list[d
             'product_name': item.product_name or '',
             'barcode': barcode or item.product_barcode or '',
             'quantity': float(item.quantity or 0),
-            'order_type': item.order_type or 'regular',
-            'country': item.country or '',
         })
         covered_source_ids.add(item.order_id)
 
@@ -264,8 +262,6 @@ async def _build_po_source_sku_map(db: AsyncSession, orders) -> dict[int, list[d
                 'product_name': row.name or '',
                 'barcode': row.barcode or '',
                 'quantity': float(row.quantity or 0),
-                'order_type': 'regular',
-                'country': '',
             })
             covered_source_ids.add(row.id)
 
@@ -281,8 +277,6 @@ async def _build_po_source_sku_map(db: AsyncSession, orders) -> dict[int, list[d
                     'product_name': row.name or '',
                     'barcode': row.barcode or '',
                     'quantity': float(row.quantity or 0),
-                    'order_type': 'stockin',
-                    'country': '',
                 })
 
     # 3) 按采购订单分组，保持 source_order_ids 顺序，并合并重复 SKU

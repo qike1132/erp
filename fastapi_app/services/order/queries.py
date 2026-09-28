@@ -99,7 +99,7 @@ def _parse_date_condition(date_str: str | None, is_end: bool = False):
         raise BusinessError(f"{'结束' if is_end else '开始'}日期格式错误，应为 YYYY-MM-DD") from None
 
 def _build_order_filters(customer: str | None, product_id: int | None,
-                         status: str | None, order_type: str | None,
+                         status: str | None,
                          start_date: str | None, end_date: str | None) -> list:
     """构建订单筛选条件列表（共用，避免 DRY 违反）。"""
     conditions = []
@@ -109,8 +109,6 @@ def _build_order_filters(customer: str | None, product_id: int | None,
         conditions.append(Order.product_id == product_id)
     if status:
         conditions.append(Order.status == status)
-    if order_type:
-        conditions.append(Order.order_type == order_type)
     start_cond = _parse_date_condition(start_date)
     if start_cond is not None:
         conditions.append(start_cond)
@@ -194,11 +192,11 @@ def _serialize_orders(orders: list, deduct_map: dict, factory_map: dict | None =
     key_prefix="orders:list",
     ttl=60,
     local_ttl=15,
-    key_builder=lambda *args, **kwargs: f"p{kwargs.get('page', 1)}:pp{kwargs.get('per_page', 50)}:c{kwargs.get('customer', '')}:pid{kwargs.get('product_id', '')}:s{kwargs.get('status', '')}:ot{kwargs.get('order_type', '')}:sd{kwargs.get('start_date', '')}:ed{kwargs.get('end_date', '')}:f{kwargs.get('factory', '')}",
+    key_builder=lambda *args, **kwargs: f"p{kwargs.get('page', 1)}:pp{kwargs.get('per_page', 50)}:c{kwargs.get('customer', '')}:pid{kwargs.get('product_id', '')}:s{kwargs.get('status', '')}:sd{kwargs.get('start_date', '')}:ed{kwargs.get('end_date', '')}:f{kwargs.get('factory', '')}",
 )
 async def get_orders(db: AsyncSession, page: int = 1, per_page: int = 50,
                      customer: str | None = None, product_id: int | None = None,
-                     status: str | None = None, order_type: str | None = None,
+                     status: str | None = None,
                      start_date: str | None = None, end_date: str | None = None,
                      factory: str | None = None) -> dict:
     """获取订单列表（含关联数据，支持分页和筛选）
@@ -217,7 +215,7 @@ async def get_orders(db: AsyncSession, page: int = 1, per_page: int = 50,
     count_query = select(func.count(Order.id)).where(Order.is_deleted.isnot(True))
 
     # 筛选条件（共用，避免 DRY 违反）
-    conditions = _build_order_filters(customer, product_id, status, order_type, start_date, end_date)
+    conditions = _build_order_filters(customer, product_id, status, start_date, end_date)
     # 工厂筛选：订单包含至少一个属于该工厂的 SKU（加入 conditions 以便深翻页游标子查询同步过滤）
     if factory:
         conditions.append(Order.items.any(OrderItem.product.has(Product.factory == factory)))

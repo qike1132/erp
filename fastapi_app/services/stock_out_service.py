@@ -32,13 +32,11 @@ from fastapi_app.shared_models import Product, StockOut
 logger = logging.getLogger(__name__)
 
 
-async def create_stockout_core(db: AsyncSession, product_id: int, quantity: int, customer: str, stockout_date: datetime, note: str, order_type: str='regular', country: str | None=None) -> list[StockOut]:
+async def create_stockout_core(db: AsyncSession, product_id: int, quantity: int, customer: str, stockout_date: datetime, note: str) -> list[StockOut]:
     product = await stock_service.get_product_for_update(db, product_id)
     if product.current_stock < quantity:
         raise ValueError('库存不足！')
-    if order_type == 'custom' and (not country):
-        raise ValueError('定制订单必须填写国家名称！')
-    shipment_info = await stock_service.calculate_available_shipment_quantity(db, product_id, customer, order_type=order_type, country=country)
+    shipment_info = await stock_service.calculate_available_shipment_quantity(db, product_id, customer)
     if shipment_info['available_quantity'] <= 0:
         raise ValueError('该客户没有可用的订单支持出货！请先创建订单。')
     if quantity > shipment_info['available_quantity']:
@@ -105,10 +103,10 @@ async def delete_stockout_core(db: AsyncSession, stockout: StockOut) -> None:
     await db.flush()
 
 
-async def create_stockout(db: AsyncSession, product_id: int, quantity: int, customer: str, stockout_date_str: str, note: str, order_type: str='regular', country: str | None=None) -> dict:
+async def create_stockout(db: AsyncSession, product_id: int, quantity: int, customer: str, stockout_date_str: str, note: str) -> dict:
     """创建出库记录"""
     stockout_date = _parse_date_preserve_time(stockout_date_str)
-    created_stockouts = await stock_service.create_stockout_core(db, product_id, quantity, customer, stockout_date, note, order_type, country)
+    created_stockouts = await stock_service.create_stockout_core(db, product_id, quantity, customer, stockout_date, note)
     shipment_completed_orders = await _recalc_shipment_order_statuses(db, created_stockouts)
 
     await db.flush()
@@ -225,16 +223,11 @@ def _validate_stockout_batch(stockouts_data: list) -> tuple[list, dict]:
         product_id = item.get('product_id')
         customer = str(item.get('customer', '')).strip()
         quantity = item.get('quantity', 0)
-        order_type = item.get('order_type', 'regular') or 'regular'
-        country = item.get('country', '') or ''
         if not all([product_id, quantity]):
             errors_map[idx] = '缺少必填字段'
             continue
         if not customer:
             errors_map[idx] = '出货必须选择客户'
-            continue
-        if order_type == 'custom' and (not country):
-            errors_map[idx] = '定制订单必须填写国家名称'
             continue
         if int(quantity) <= 0:
             errors_map[idx] = '出货数量必须大于0'
@@ -276,8 +269,6 @@ async def _process_single_stockout(db: AsyncSession, item: dict) -> dict:
     product_id = item.get('product_id')
     customer = str(item.get('customer', '')).strip()
     quantity = int(item.get('quantity', 0))
-    order_type = item.get('order_type', 'regular') or 'regular'
-    country = item.get('country', '') or None
     note = item.get('note', '')
     stockout_date_str = item.get('stockout_date') or ''
     item_id = item.get('id', '未知')
@@ -286,7 +277,7 @@ async def _process_single_stockout(db: AsyncSession, item: dict) -> dict:
         if product.current_stock < quantity:
             return {'success': False, 'error': f'库存不足，当前库存: {product.current_stock}', 'id': item_id}
 
-        shipment_info = await stock_service.calculate_available_shipment_quantity(db, product_id, customer, order_type=order_type, country=country)
+        shipment_info = await stock_service.calculate_available_shipment_quantity(db, product_id, customer)
         if shipment_info['available_quantity'] <= 0:
             return {'success': False, 'error': '该客户没有可用的订单支持出货！请先创建订单。', 'id': item_id}
         if quantity > shipment_info['available_quantity']:

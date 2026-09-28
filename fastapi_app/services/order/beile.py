@@ -565,8 +565,6 @@ def _build_beile_order_record(
             'product_barcode': item.product_barcode,
             'product_image': item.product.image or '' if item.product else '',
             'quantity': item.quantity,
-            'order_type': item.order_type,
-            'country': item.country or '',
             'deduct_quantity': item.deduct_quantity or 0,
             'note': item.note or '',
         }
@@ -621,8 +619,6 @@ def _build_beile_stockin_record(
         'product_barcode': product_barcode,
         'product_image': product_image,
         'quantity': stockin.quantity,
-        'order_type': stockin.order_type,
-        'country': stockin.country or '',
         'deduct_quantity': 0,
         'note': stockin.note or '',
     }]
