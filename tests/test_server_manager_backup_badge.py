@@ -3,8 +3,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-SRC = Path(__file__).resolve().parent.parent / "server_manager.py"
-TEXT = SRC.read_text(encoding="utf-8")
+# 2026-09-28 包化:实现已拆到 server_manager/ 包,本文件按"整包拼接"取文本,
+# 这样 task 2-6 继续把代码拆去 service_ops/windows_ops/... 时无需再改本文件。
+PKG = Path(__file__).resolve().parent.parent / "server_manager"
+TEXT = "\n".join(p.read_text(encoding="utf-8") for p in sorted(PKG.glob("*.py")))
 
 
 def test_backup_badge_widget_exists() -> None:
