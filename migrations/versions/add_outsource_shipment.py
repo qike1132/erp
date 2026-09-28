@@ -10,14 +10,22 @@ Create Date: 2026-09-19
 import sqlalchemy as sa
 from alembic import op
 
+from migrations._legacy_base_guard import (
+    base_schema_absent,
+    create_index_if_columns_exist,
+)
+
 # revision identifiers, used by Alembic.
 revision = 'add_outsource_shipment'
 down_revision = 'pg_standalone_047_purchase_order_sku'
 branch_labels = None
 depends_on = None
 
-
 def upgrade():
+    # 空库守卫：pg_standalone_001 尚未建出基础 schema 时整条增量迁移空转。
+    # 判据要求 product / customer 同时缺失，遗留库与已建库一律照常执行。
+    if base_schema_absent():
+        return
     # 发货单：一键发货生成的单据，同时是推送给贝乐用户端的「待收货订单」
     op.create_table(
         'outsource_shipment',
@@ -35,9 +43,9 @@ def upgrade():
         sa.Column('update_time', sa.DateTime(timezone=True), server_default=sa.func.now(), onupdate=sa.func.now(), comment='更新时间'),
         sa.UniqueConstraint('shipment_no', name='uq_outsource_shipment_no'),
     )
-    op.create_index('ix_outsource_shipment_order', 'outsource_shipment', ['order_id'])
-    op.create_index('ix_outsource_shipment_status', 'outsource_shipment', ['status'])
-    op.create_index('ix_outsource_shipment_status_create', 'outsource_shipment', ['status', 'create_time'])
+    create_index_if_columns_exist('ix_outsource_shipment_order', 'outsource_shipment', ['order_id'])
+    create_index_if_columns_exist('ix_outsource_shipment_status', 'outsource_shipment', ['status'])
+    create_index_if_columns_exist('ix_outsource_shipment_status_create', 'outsource_shipment', ['status', 'create_time'])
 
     # 发货单明细：每道被发货的工序一行（SKU + 工序 + 数量）
     op.create_table(
@@ -52,10 +60,13 @@ def upgrade():
         sa.Column('received_quantity', sa.Integer(), server_default='0', nullable=False, comment='收货数量'),
         sa.Column('create_time', sa.DateTime(timezone=True), server_default=sa.func.now(), comment='创建时间'),
     )
-    op.create_index('ix_outsource_shipment_item_shipment', 'outsource_shipment_item', ['shipment_id'])
-    op.create_index('ix_outsource_shipment_item_process', 'outsource_shipment_item', ['process_id'])
-
+    create_index_if_columns_exist('ix_outsource_shipment_item_shipment', 'outsource_shipment_item', ['shipment_id'])
+    create_index_if_columns_exist('ix_outsource_shipment_item_process', 'outsource_shipment_item', ['process_id'])
 
 def downgrade():
+    # 空库守卫：pg_standalone_001 尚未建出基础 schema 时整条增量迁移空转。
+    # 判据要求 product / customer 同时缺失，遗留库与已建库一律照常执行。
+    if base_schema_absent():
+        return
     op.drop_table('outsource_shipment_item')
     op.drop_table('outsource_shipment')

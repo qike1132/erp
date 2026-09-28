@@ -14,37 +14,37 @@ Create Date: 2026-08-07
 
 打样编号格式: YS-YYYYMMDD-XXXX
 """
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects import postgresql
 
+from migrations._legacy_base_guard import create_index_if_columns_exist
 
 revision = 'pg_standalone_017_pattern_room_v2'
 down_revision = 'pg_standalone_016_dashboard_daily_stats_mv'
 branch_labels = None
 depends_on = None
 
-
 def upgrade():
     # ---- 删除旧表 ----
-    op.drop_index('idx_prcl_created_at', table_name='pattern_room_change_log')
-    op.drop_index('idx_prcl_type', table_name='pattern_room_change_log')
-    op.drop_index('idx_prcl_bom_time', table_name='pattern_room_change_log')
+    op.drop_index('idx_prcl_created_at', table_name='pattern_room_change_log', if_exists=True)
+    op.drop_index('idx_prcl_type', table_name='pattern_room_change_log', if_exists=True)
+    op.drop_index('idx_prcl_bom_time', table_name='pattern_room_change_log', if_exists=True)
     op.drop_table('pattern_room_change_log')
 
-    op.drop_index('idx_prbiv_version', table_name='pattern_room_bom_item_version')
-    op.drop_index('idx_prbiv_bom_item_version', table_name='pattern_room_bom_item_version')
+    op.drop_index('idx_prbiv_version', table_name='pattern_room_bom_item_version', if_exists=True)
+    op.drop_index('idx_prbiv_bom_item_version', table_name='pattern_room_bom_item_version', if_exists=True)
     op.drop_table('pattern_room_bom_item_version')
 
-    op.drop_index('idx_prbi_supplier', table_name='pattern_room_bom_item')
-    op.drop_index('idx_prbi_category', table_name='pattern_room_bom_item')
-    op.drop_index('idx_prbi_bom_parent', table_name='pattern_room_bom_item')
+    op.drop_index('idx_prbi_supplier', table_name='pattern_room_bom_item', if_exists=True)
+    op.drop_index('idx_prbi_category', table_name='pattern_room_bom_item', if_exists=True)
+    op.drop_index('idx_prbi_bom_parent', table_name='pattern_room_bom_item', if_exists=True)
     op.drop_table('pattern_room_bom_item')
 
-    op.drop_index('idx_prb_product_name', table_name='pattern_room_bom')
-    op.drop_index('idx_prb_created_at', table_name='pattern_room_bom')
-    op.drop_index('idx_prb_status_version', table_name='pattern_room_bom')
-    op.drop_index('idx_prb_customer', table_name='pattern_room_bom')
+    op.drop_index('idx_prb_product_name', table_name='pattern_room_bom', if_exists=True)
+    op.drop_index('idx_prb_created_at', table_name='pattern_room_bom', if_exists=True)
+    op.drop_index('idx_prb_status_version', table_name='pattern_room_bom', if_exists=True)
+    op.drop_index('idx_prb_customer', table_name='pattern_room_bom', if_exists=True)
     op.drop_table('pattern_room_bom')
 
     # ---- 1. 打样主表 ----
@@ -65,9 +65,9 @@ def upgrade():
         sa.Column('version', sa.Integer(), nullable=False, server_default='0', comment='乐观锁'),
         sa.UniqueConstraint('sample_no', name='uq_prs_sample_no'),
     )
-    op.create_index('idx_prs_customer', 'pattern_room_sample', ['customer_id'])
-    op.create_index('idx_prs_created_at', 'pattern_room_sample', [sa.text('created_at DESC')])
-    op.create_index('idx_prs_status', 'pattern_room_sample', ['status'])
+    create_index_if_columns_exist('idx_prs_customer', 'pattern_room_sample', ['customer_id'])
+    create_index_if_columns_exist('idx_prs_created_at', 'pattern_room_sample', [sa.text('created_at DESC')])
+    create_index_if_columns_exist('idx_prs_status', 'pattern_room_sample', ['status'])
 
     # ---- 2. 打样部位表 ----
     op.create_table(
@@ -80,7 +80,7 @@ def upgrade():
         sa.Column('created_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.text('now()')),
         sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.text('now()')),
     )
-    op.create_index('idx_prsp_sample_sort', 'pattern_room_sample_part', ['sample_id', 'sort_order'])
+    create_index_if_columns_exist('idx_prsp_sample_sort', 'pattern_room_sample_part', ['sample_id', 'sort_order'])
 
     # ---- 3. 部位布料版本表 ----
     op.create_table(
@@ -96,8 +96,8 @@ def upgrade():
         sa.Column('remark', sa.Text(), comment='备注'),
         sa.UniqueConstraint('sample_part_id', 'version', name='uq_prpf_part_version'),
     )
-    op.create_index('idx_prpf_part_version', 'pattern_room_part_fabric', ['sample_part_id', 'version'])
-    op.create_index('idx_prpf_version', 'pattern_room_part_fabric', ['version'])
+    create_index_if_columns_exist('idx_prpf_part_version', 'pattern_room_part_fabric', ['sample_part_id', 'version'])
+    create_index_if_columns_exist('idx_prpf_version', 'pattern_room_part_fabric', ['version'])
 
     # ---- 4. 变更日志表 ----
     op.create_table(
@@ -113,26 +113,25 @@ def upgrade():
         sa.Column('operator_name', sa.String(100), comment='操作人姓名'),
         sa.Column('created_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.text('now()')),
     )
-    op.create_index('idx_prcl2_sample_time', 'pattern_room_change_log_v2', ['sample_id', sa.text('created_at DESC')])
-    op.create_index('idx_prcl2_type', 'pattern_room_change_log_v2', ['change_type'])
-
+    create_index_if_columns_exist('idx_prcl2_sample_time', 'pattern_room_change_log_v2', ['sample_id', sa.text('created_at DESC')])
+    create_index_if_columns_exist('idx_prcl2_type', 'pattern_room_change_log_v2', ['change_type'])
 
 def downgrade():
     # ---- 删除新表 ----
-    op.drop_index('idx_prcl2_type', table_name='pattern_room_change_log_v2')
-    op.drop_index('idx_prcl2_sample_time', table_name='pattern_room_change_log_v2')
+    op.drop_index('idx_prcl2_type', table_name='pattern_room_change_log_v2', if_exists=True)
+    op.drop_index('idx_prcl2_sample_time', table_name='pattern_room_change_log_v2', if_exists=True)
     op.drop_table('pattern_room_change_log_v2')
 
-    op.drop_index('idx_prpf_version', table_name='pattern_room_part_fabric')
-    op.drop_index('idx_prpf_part_version', table_name='pattern_room_part_fabric')
+    op.drop_index('idx_prpf_version', table_name='pattern_room_part_fabric', if_exists=True)
+    op.drop_index('idx_prpf_part_version', table_name='pattern_room_part_fabric', if_exists=True)
     op.drop_table('pattern_room_part_fabric')
 
-    op.drop_index('idx_prsp_sample_sort', table_name='pattern_room_sample_part')
+    op.drop_index('idx_prsp_sample_sort', table_name='pattern_room_sample_part', if_exists=True)
     op.drop_table('pattern_room_sample_part')
 
-    op.drop_index('idx_prs_status', table_name='pattern_room_sample')
-    op.drop_index('idx_prs_created_at', table_name='pattern_room_sample')
-    op.drop_index('idx_prs_customer', table_name='pattern_room_sample')
+    op.drop_index('idx_prs_status', table_name='pattern_room_sample', if_exists=True)
+    op.drop_index('idx_prs_created_at', table_name='pattern_room_sample', if_exists=True)
+    op.drop_index('idx_prs_customer', table_name='pattern_room_sample', if_exists=True)
     op.drop_table('pattern_room_sample')
 
     # ---- 重建旧表（省略，通常不需要在 downgrade 中重建） ----

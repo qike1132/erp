@@ -14,9 +14,8 @@ Revision ID: pg_standalone_033_changelog_project_id_nullable
 Revises: pg_standalone_032_add_completed_at
 Create Date: 2026-08-13
 """
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = 'pg_standalone_033_changelog_project_id_nullable'

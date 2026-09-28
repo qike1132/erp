@@ -12,7 +12,6 @@ Create Date: 2026-09-24
 """
 from alembic import op
 
-
 # revision identifiers, used by Alembic.
 revision = 'pg_standalone_051_fix_is_default_flag'
 down_revision = 'pg_standalone_050_cleanup_default_role'

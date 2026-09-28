@@ -7,14 +7,22 @@ Create Date: 2026-04-14
 import sqlalchemy as sa
 from alembic import op
 
+from migrations._legacy_base_guard import (
+    base_schema_absent,
+    create_index_if_columns_exist,
+)
+
 # revision identifiers, used by Alembic.
 revision = 'add_production_plan'
 down_revision = 'add_supplier_purchase_order'
 branch_labels = None
 depends_on = None
 
-
 def upgrade():
+    # 空库守卫：pg_standalone_001 尚未建出基础 schema 时整条增量迁移空转。
+    # 判据要求 product / customer 同时缺失，遗留库与已建库一律照常执行。
+    if base_schema_absent():
+        return
     # 排产计划主表
     op.create_table(
         'production_plan',
@@ -32,10 +40,10 @@ def upgrade():
     )
 
     # 创建索引
-    op.create_index('idx_pp_barcode', 'production_plan', ['barcode'])
-    op.create_index('idx_pp_customer_name', 'production_plan', ['customer_name'])
-    op.create_index('idx_pp_plan_date', 'production_plan', ['plan_date'])
-    op.create_index('idx_pp_plan_month', 'production_plan', ['plan_date', 'customer_name'])
+    create_index_if_columns_exist('idx_pp_barcode', 'production_plan', ['barcode'])
+    create_index_if_columns_exist('idx_pp_customer_name', 'production_plan', ['customer_name'])
+    create_index_if_columns_exist('idx_pp_plan_date', 'production_plan', ['plan_date'])
+    create_index_if_columns_exist('idx_pp_plan_month', 'production_plan', ['plan_date', 'customer_name'])
 
     # 排产计划操作日志表
     op.create_table(
@@ -49,7 +57,10 @@ def upgrade():
         sa.Column('operate_time', sa.DateTime(), server_default=sa.func.now(), comment='操作时间'),
     )
 
-
 def downgrade():
+    # 空库守卫：pg_standalone_001 尚未建出基础 schema 时整条增量迁移空转。
+    # 判据要求 product / customer 同时缺失，遗留库与已建库一律照常执行。
+    if base_schema_absent():
+        return
     op.drop_table('production_plan_log')
     op.drop_table('production_plan')

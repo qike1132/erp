@@ -7,13 +7,21 @@ Create Date: 2026-05-10
 import sqlalchemy as sa
 from alembic import op
 
+from migrations._legacy_base_guard import (
+    base_schema_absent,
+    create_index_if_columns_exist,
+)
+
 revision = 'add_backup_record'
 down_revision = 'pg_standalone_011'
 branch_labels = None
 depends_on = None
 
-
 def upgrade():
+    # 空库守卫：pg_standalone_001 尚未建出基础 schema 时整条增量迁移空转。
+    # 判据要求 product / customer 同时缺失，遗留库与已建库一律照常执行。
+    if base_schema_absent():
+        return
     op.create_table(
         'backup_record',
         sa.Column('id', sa.Integer(), primary_key=True, autoincrement=True),
@@ -34,11 +42,14 @@ def upgrade():
         sa.Column('created_at', sa.DateTime(), server_default=sa.func.now(), comment='创建时间'),
         sa.Column('updated_at', sa.DateTime(), server_default=sa.func.now(), comment='更新时间'),
     )
-    op.create_index('idx_backup_record_type', 'backup_record', ['type'])
-    op.create_index('idx_backup_record_status', 'backup_record', ['status'])
-    op.create_index('idx_backup_record_created_at', 'backup_record', ['created_at'])
-    op.create_index('idx_backup_record_trigger_type', 'backup_record', ['trigger_type'])
-
+    create_index_if_columns_exist('idx_backup_record_type', 'backup_record', ['type'])
+    create_index_if_columns_exist('idx_backup_record_status', 'backup_record', ['status'])
+    create_index_if_columns_exist('idx_backup_record_created_at', 'backup_record', ['created_at'])
+    create_index_if_columns_exist('idx_backup_record_trigger_type', 'backup_record', ['trigger_type'])
 
 def downgrade():
+    # 空库守卫：pg_standalone_001 尚未建出基础 schema 时整条增量迁移空转。
+    # 判据要求 product / customer 同时缺失，遗留库与已建库一律照常执行。
+    if base_schema_absent():
+        return
     op.drop_table('backup_record')

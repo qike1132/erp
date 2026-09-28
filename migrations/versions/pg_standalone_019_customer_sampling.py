@@ -15,10 +15,11 @@ Create Date: 2026-08-08
 
 本迁移仅创建新表与索引，不删除旧 pattern_room 表（遵循"旧代码清理最后"原则，留待 T14）。
 """
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects import postgresql
 
+from migrations._legacy_base_guard import create_index_if_columns_exist
 
 # 合并当前 3 个 head 为单一线性历史
 revision = 'pg_standalone_019_customer_sampling'
@@ -29,7 +30,6 @@ down_revision = (
 )
 branch_labels = None
 depends_on = None
-
 
 def upgrade():
     # 确保 pg_trgm 扩展存在（用于产品名 ILIKE 模糊搜索 GIN 索引）
@@ -52,15 +52,15 @@ def upgrade():
         sa.Column('version', sa.Integer(), nullable=False, server_default='0', comment='乐观锁版本号'),
         sa.UniqueConstraint('sequence_no', name='uq_csp_sequence_no'),
     )
-    op.create_index('idx_csp_customer', 'customer_sampling_project', ['customer_id'])
-    op.create_index('idx_csp_sequence_no', 'customer_sampling_project', ['sequence_no'])
+    create_index_if_columns_exist('idx_csp_customer', 'customer_sampling_project', ['customer_id'])
+    create_index_if_columns_exist('idx_csp_sequence_no', 'customer_sampling_project', ['sequence_no'])
     # GIN trigram 索引：使 ILIKE '%keyword%' 走索引
-    op.create_index(
+    create_index_if_columns_exist(
         'idx_csp_product_name_trgm', 'customer_sampling_project', ['product_name'],
         postgresql_using='gin', postgresql_ops={'product_name': 'gin_trgm_ops'},
     )
-    op.create_index('idx_csp_updated_at_desc', 'customer_sampling_project', [sa.text('updated_at DESC')])
-    op.create_index('idx_csp_created_at', 'customer_sampling_project', ['created_at'])
+    create_index_if_columns_exist('idx_csp_updated_at_desc', 'customer_sampling_project', [sa.text('updated_at DESC')])
+    create_index_if_columns_exist('idx_csp_created_at', 'customer_sampling_project', ['created_at'])
 
     # 2. 部位表
     op.create_table(
@@ -87,7 +87,7 @@ def upgrade():
         sa.CheckConstraint('unit_price IS NULL OR unit_price >= 0', name='ck_csp_part_unit_price_nonneg'),
         sa.CheckConstraint('delivery_days IS NULL OR delivery_days >= 0', name='ck_csp_part_delivery_days_nonneg'),
     )
-    op.create_index('idx_csp_part_sort', 'customer_sampling_part', ['project_id', 'sort_order'])
+    create_index_if_columns_exist('idx_csp_part_sort', 'customer_sampling_part', ['project_id', 'sort_order'])
 
     # 3. 版本快照表（不可变）
     op.create_table(
@@ -103,7 +103,11 @@ def upgrade():
         # 同项目版本号唯一
         sa.UniqueConstraint('project_id', 'version_no', name='uq_csfv_project_version'),
     )
-    op.create_index('idx_csfv_created_at', 'customer_sampling_fabric_version', [sa.text('created_at DESC')])
+    # 与 ORM 声明保持一致：customer_sampling.py 的
+    # Index('idx_csfv_created_at', 'created_at')（普通列索引，非 DESC 表达式）。
+    # 之前写成 sa.text('created_at DESC') 会与 ORM 元数据产生 drift，
+    # 导致 alembic check 失败（B-tree 可反向扫描，功能上无损失）。
+    create_index_if_columns_exist('idx_csfv_created_at', 'customer_sampling_fabric_version', ['created_at'])
 
     # 4. 变更日志表
     op.create_table(
@@ -119,28 +123,27 @@ def upgrade():
         sa.Column('operator_name', sa.String(100), comment='操作人姓名(冗余)'),
         sa.Column('created_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.text('now()'), comment='操作时间'),
     )
-    op.create_index('idx_cscl_project_time', 'customer_sampling_change_log', ['project_id', sa.text('created_at DESC')])
-    op.create_index('idx_cscl_action', 'customer_sampling_change_log', ['action'])
-
+    create_index_if_columns_exist('idx_cscl_project_time', 'customer_sampling_change_log', ['project_id', sa.text('created_at DESC')])
+    create_index_if_columns_exist('idx_cscl_action', 'customer_sampling_change_log', ['action'])
 
 def downgrade():
     # 4. 变更日志表
-    op.drop_index('idx_cscl_action', table_name='customer_sampling_change_log')
-    op.drop_index('idx_cscl_project_time', table_name='customer_sampling_change_log')
+    op.drop_index('idx_cscl_action', table_name='customer_sampling_change_log', if_exists=True)
+    op.drop_index('idx_cscl_project_time', table_name='customer_sampling_change_log', if_exists=True)
     op.drop_table('customer_sampling_change_log')
 
     # 3. 版本快照表
-    op.drop_index('idx_csfv_created_at', table_name='customer_sampling_fabric_version')
+    op.drop_index('idx_csfv_created_at', table_name='customer_sampling_fabric_version', if_exists=True)
     op.drop_table('customer_sampling_fabric_version')
 
     # 2. 部位表
-    op.drop_index('idx_csp_part_sort', table_name='customer_sampling_part')
+    op.drop_index('idx_csp_part_sort', table_name='customer_sampling_part', if_exists=True)
     op.drop_table('customer_sampling_part')
 
     # 1. 打样项目主表
-    op.drop_index('idx_csp_created_at', table_name='customer_sampling_project')
-    op.drop_index('idx_csp_updated_at_desc', table_name='customer_sampling_project')
-    op.drop_index('idx_csp_product_name_trgm', table_name='customer_sampling_project')
-    op.drop_index('idx_csp_sequence_no', table_name='customer_sampling_project')
-    op.drop_index('idx_csp_customer', table_name='customer_sampling_project')
+    op.drop_index('idx_csp_created_at', table_name='customer_sampling_project', if_exists=True)
+    op.drop_index('idx_csp_updated_at_desc', table_name='customer_sampling_project', if_exists=True)
+    op.drop_index('idx_csp_product_name_trgm', table_name='customer_sampling_project', if_exists=True)
+    op.drop_index('idx_csp_sequence_no', table_name='customer_sampling_project', if_exists=True)
+    op.drop_index('idx_csp_customer', table_name='customer_sampling_project', if_exists=True)
     op.drop_table('customer_sampling_project')

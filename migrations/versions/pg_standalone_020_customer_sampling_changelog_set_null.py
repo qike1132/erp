@@ -20,9 +20,8 @@ Create Date: 2026-08-08
 - PostgreSQL 中 CREATE TABLE 自动生成的外键约束名为 <table>_<column>_fkey，
   即 customer_sampling_change_log_project_id_fkey（由 019 迁移创建）。
 """
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = 'pg_standalone_020_cs_changelog_set_null'

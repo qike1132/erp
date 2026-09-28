@@ -33,8 +33,10 @@ confirm_staging 创建多个相同 (customer_id, plan_month) 的主单。
             op.execute("CREATE UNIQUE INDEX CONCURRENTLY ...")
     并在执行前确认无长事务持锁。
 """
-from alembic import op
 import logging
+
+import sqlalchemy as sa
+from alembic import op
 
 logger = logging.getLogger('alembic.migration')
 
@@ -49,11 +51,13 @@ def upgrade():
     # 先检测历史重复
     conn = op.get_bind()
     dup_check = conn.execute(
-        "SELECT customer_id, plan_month, COUNT(*) AS cnt "
-        "FROM purchase_plans "
-        "WHERE customer_id IS NOT NULL AND plan_month IS NOT NULL "
-        "GROUP BY customer_id, plan_month "
-        "HAVING COUNT(*) > 1"
+        sa.text(
+            "SELECT customer_id, plan_month, COUNT(*) AS cnt "
+            "FROM purchase_plans "
+            "WHERE customer_id IS NOT NULL AND plan_month IS NOT NULL "
+            "GROUP BY customer_id, plan_month "
+            "HAVING COUNT(*) > 1"
+        )
     ).fetchall()
 
     if dup_check:

@@ -10,25 +10,33 @@ PostgreSQL does not support ALTER CONSTRAINT, so we drop and recreate.
 
 from alembic import op
 
+from migrations._legacy_base_guard import base_schema_absent
+
 revision = 'pg_standalone_008'
 down_revision = 'pg_standalone_007'
 branch_labels = None
 depends_on = None
 
-
 def upgrade():
+    # 空库守卫：pg_standalone_001 尚未建出基础 schema 时整条增量迁移空转。
+    # 判据要求 product / customer 同时缺失，遗留库与已建库一律照常执行。
+    if base_schema_absent():
+        return
     op.execute(
-        "ALTER TABLE \"order\" DROP CONSTRAINT order_status_check"
+        "ALTER TABLE \"order\" DROP CONSTRAINT IF EXISTS order_status_check"
     )
     op.execute(
         "ALTER TABLE \"order\" ADD CONSTRAINT order_status_check "
         "CHECK (\"status\" IN ('待备货', '部分备货', '已备货', '待出货', '已出货', '已取消', '批次已完成'))"
     )
 
-
 def downgrade():
+    # 空库守卫：pg_standalone_001 尚未建出基础 schema 时整条增量迁移空转。
+    # 判据要求 product / customer 同时缺失，遗留库与已建库一律照常执行。
+    if base_schema_absent():
+        return
     op.execute(
-        "ALTER TABLE \"order\" DROP CONSTRAINT order_status_check"
+        "ALTER TABLE \"order\" DROP CONSTRAINT IF EXISTS order_status_check"
     )
     op.execute(
         "ALTER TABLE \"order\" ADD CONSTRAINT order_status_check "

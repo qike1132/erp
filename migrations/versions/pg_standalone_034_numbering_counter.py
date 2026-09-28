@@ -8,8 +8,8 @@ Revision ID: pg_standalone_034_numbering_counter
 Revises: pg_standalone_017_product_aggregate_mv
 Create Date: 2026-08-22
 """
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = 'pg_standalone_034_numbering_counter'

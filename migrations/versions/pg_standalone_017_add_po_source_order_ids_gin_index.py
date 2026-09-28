@@ -10,7 +10,6 @@ NOT EXISTS + JSONB @> 子查询。source_order_ids 是 Text 类型存储 JSON �
 """
 from alembic import op
 
-
 revision = 'pg_standalone_017_add_po_source_order_ids_gin_index'
 down_revision = 'pg_standalone_016_dashboard_daily_stats_mv'
 branch_labels = None

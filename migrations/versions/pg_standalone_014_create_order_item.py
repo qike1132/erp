@@ -9,14 +9,15 @@ upgrade() 内从 "order" 表回填历史数据（每个订单一条 item），JO
 获取冗余 name/barcode。Order 表的 SKU 字段在本 migration 中保留，删列在
 后续 Task 5 完成。
 """
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
+
+from migrations._legacy_base_guard import create_index_if_columns_exist
 
 revision = 'pg_standalone_014_create_order_item'
 down_revision = 'rebuild_po_dedup_index'
 branch_labels = None
 depends_on = None
-
 
 def upgrade():
     """创建 order_item 表并从 order 表回填历史数据。"""
@@ -36,9 +37,9 @@ def upgrade():
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()')),
         sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()')),
     )
-    op.create_index('ix_order_item_order_id', 'order_item', ['order_id'])
-    op.create_index('ix_order_item_product_id', 'order_item', ['product_id'])
-    op.create_index('ix_order_item_order_product', 'order_item', ['order_id', 'product_id'])
+    create_index_if_columns_exist('ix_order_item_order_id', 'order_item', ['order_id'])
+    create_index_if_columns_exist('ix_order_item_product_id', 'order_item', ['product_id'])
+    create_index_if_columns_exist('ix_order_item_order_product', 'order_item', ['order_id', 'product_id'])
 
     # 数据回填：从 "order" 表复制 SKU 字段，JOIN product 获取冗余 name/barcode
     op.execute("""
@@ -58,9 +59,8 @@ def upgrade():
         LEFT JOIN product p ON o.product_id = p.id
     """)
 
-
 def downgrade():
-    op.drop_index('ix_order_item_order_product', table_name='order_item')
-    op.drop_index('ix_order_item_product_id', table_name='order_item')
-    op.drop_index('ix_order_item_order_id', table_name='order_item')
+    op.drop_index('ix_order_item_order_product', table_name='order_item', if_exists=True)
+    op.drop_index('ix_order_item_product_id', table_name='order_item', if_exists=True)
+    op.drop_index('ix_order_item_order_id', table_name='order_item', if_exists=True)
     op.drop_table('order_item')

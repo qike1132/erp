@@ -37,6 +37,8 @@ Create Date: 2026-06-18
 from alembic import op
 from sqlalchemy import text
 
+from migrations._legacy_base_guard import base_schema_absent
+
 revision = 'add_po_dedup_unique_index'
 down_revision = 'merge_resolve_all_heads'
 branch_labels = None
@@ -44,6 +46,10 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # 空库守卫：pg_standalone_001 尚未建出基础 schema 时整条增量迁移空转。
+    # 判据要求 product / customer 同时缺失，遗留库与已建库一律照常执行。
+    if base_schema_absent():
+        return
     op.execute(text(
         """
         CREATE UNIQUE INDEX IF NOT EXISTS uq_po_pending_dedup
@@ -54,4 +60,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # 空库守卫：pg_standalone_001 尚未建出基础 schema 时整条增量迁移空转。
+    # 判据要求 product / customer 同时缺失，遗留库与已建库一律照常执行。
+    if base_schema_absent():
+        return
     op.execute(text("DROP INDEX IF EXISTS uq_po_pending_dedup"))

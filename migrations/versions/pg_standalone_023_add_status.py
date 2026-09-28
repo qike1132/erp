@@ -10,8 +10,8 @@ Create Date: 2026-08-09
 - 保留 is_archived 列（后续迁移 024 删除）
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision = 'pg_standalone_023_add_status'
 down_revision = 'pg_standalone_022_add_is_archived'

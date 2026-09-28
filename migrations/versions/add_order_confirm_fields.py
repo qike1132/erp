@@ -21,14 +21,22 @@ Create Date: 2026-08-12
 import sqlalchemy as sa
 from alembic import op
 
+from migrations._legacy_base_guard import (
+    base_schema_absent,
+    create_index_if_columns_exist,
+)
+
 # revision identifiers, used by Alembic.
 revision = 'add_order_confirm_fields'
 down_revision = ('add_outsource_module', 'pg_standalone_027_drop_pattern_room')
 branch_labels = None
 depends_on = None
 
-
 def upgrade():
+    # 空库守卫：pg_standalone_001 尚未建出基础 schema 时整条增量迁移空转。
+    # 判据要求 product / customer 同时缺失，遗留库与已建库一律照常执行。
+    if base_schema_absent():
+        return
     op.add_column(
         'order',
         sa.Column('confirmed_at', sa.DateTime(), nullable=True, comment='订单确认时间（湖北订单确认流程）'),
@@ -37,15 +45,18 @@ def upgrade():
         'order',
         sa.Column('confirmed_by_id', sa.Integer(), sa.ForeignKey('user.id'), nullable=True, comment='订单确认人ID'),
     )
-    op.create_index('ix_order_confirmed_at', 'order', ['confirmed_at'])
+    create_index_if_columns_exist('ix_order_confirmed_at', 'order', ['confirmed_at'])
 
     # 存量订单回填：视为已确认，避免历史订单全部落入「未确认订单」待办
     op.execute(
         'UPDATE "order" SET confirmed_at = order_date WHERE confirmed_at IS NULL'
     )
 
-
 def downgrade():
-    op.drop_index('ix_order_confirmed_at', table_name='order')
+    # 空库守卫：pg_standalone_001 尚未建出基础 schema 时整条增量迁移空转。
+    # 判据要求 product / customer 同时缺失，遗留库与已建库一律照常执行。
+    if base_schema_absent():
+        return
+    op.drop_index('ix_order_confirmed_at', table_name='order', if_exists=True)
     op.drop_column('order', 'confirmed_by_id')
     op.drop_column('order', 'confirmed_at')

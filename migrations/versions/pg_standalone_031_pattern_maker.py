@@ -14,15 +14,16 @@ Revision ID: pg_standalone_031_pattern_maker
 Revises: pg_standalone_030
 Create Date: 2026-08-13
 """
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
+
+from migrations._legacy_base_guard import create_index_if_columns_exist
 
 # revision identifiers, used by Alembic.
 revision = 'pg_standalone_031_pattern_maker'
 down_revision = 'pg_standalone_030'
 branch_labels = None
 depends_on = None
-
 
 def upgrade():
     bind = op.get_bind()
@@ -36,7 +37,7 @@ def upgrade():
         sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.text('now()'), comment='更新时间'),
         sa.UniqueConstraint('name', name='uq_pattern_maker_name'),
     )
-    op.create_index(
+    create_index_if_columns_exist(
         'idx_pattern_maker_name_trgm', 'pattern_maker', ['name'],
         postgresql_using='gin', postgresql_ops={'name': 'gin_trgm_ops'},
     )
@@ -64,7 +65,7 @@ def upgrade():
 
     # ---- 5. 删除旧列与其外键/索引 ----
     op.drop_constraint('customer_sampling_project_customer_id_fkey', 'customer_sampling_project', type_='foreignkey')
-    op.drop_index('idx_csp_customer', table_name='customer_sampling_project')
+    op.drop_index('idx_csp_customer', table_name='customer_sampling_project', if_exists=True)
     op.drop_column('customer_sampling_project', 'customer_id')
     op.drop_column('customer_sampling_project', 'customer_name')
 
@@ -74,8 +75,7 @@ def upgrade():
         'customer_sampling_project', 'pattern_maker',
         ['pattern_maker_id'], ['id'], ondelete='SET NULL',
     )
-    op.create_index('idx_csp_pattern_maker', 'customer_sampling_project', ['pattern_maker_id'])
-
+    create_index_if_columns_exist('idx_csp_pattern_maker', 'customer_sampling_project', ['pattern_maker_id'])
 
 def downgrade():
     # ---- 恢复旧列 ----
@@ -92,17 +92,17 @@ def downgrade():
         "WHERE p.pattern_maker_id = pm.id"
     ))
 
-    op.drop_index('idx_csp_pattern_maker', table_name='customer_sampling_project')
+    op.drop_index('idx_csp_pattern_maker', table_name='customer_sampling_project', if_exists=True)
     op.drop_constraint('customer_sampling_project_pattern_maker_id_fkey', 'customer_sampling_project', type_='foreignkey')
     op.drop_column('customer_sampling_project', 'pattern_maker_id')
     op.drop_column('customer_sampling_project', 'pattern_maker_name')
 
-    op.create_index('idx_csp_customer', 'customer_sampling_project', ['customer_id'])
+    create_index_if_columns_exist('idx_csp_customer', 'customer_sampling_project', ['customer_id'])
     op.create_foreign_key(
         'customer_sampling_project_customer_id_fkey',
         'customer_sampling_project', 'customer',
         ['customer_id'], ['id'], ondelete='SET NULL',
     )
 
-    op.drop_index('idx_pattern_maker_name_trgm', table_name='pattern_maker')
+    op.drop_index('idx_pattern_maker_name_trgm', table_name='pattern_maker', if_exists=True)
     op.drop_table('pattern_maker')

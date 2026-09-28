@@ -12,14 +12,22 @@ Create Date: 2026-04-23
 """
 from alembic import op
 
+from migrations._legacy_base_guard import base_schema_absent
+
 # revision identifiers, used by Alembic.
 revision = 'pg_standalone_004'
 down_revision = '659467a97350'
 branch_labels = None
-depends_on = None
-
+# 本迁移及其后继（005..010）假定 pg_standalone_001 已建出基础 schema，
+# 但它们的 down_revision 挂在 MySQL 时代的 659467a97350 上。用 depends_on
+# 显式声明依赖，保证空库重放时 001 先执行（否则 product_fabric 等表还不存在）。
+depends_on = ('pg_standalone_001',)
 
 def upgrade() -> None:
+    # 空库守卫：pg_standalone_001 尚未建出基础 schema 时整条增量迁移空转。
+    # 判据要求 product / customer 同时缺失，遗留库与已建库一律照常执行。
+    if base_schema_absent():
+        return
     # 1. 启用 pg_trgm 扩展（PostgreSQL 自带，无需安装）
     op.execute('CREATE EXTENSION IF NOT EXISTS pg_trgm')
 
@@ -49,8 +57,11 @@ def upgrade() -> None:
         "ON customer USING gin (phone gin_trgm_ops)"
     )
 
-
 def downgrade() -> None:
+    # 空库守卫：pg_standalone_001 尚未建出基础 schema 时整条增量迁移空转。
+    # 判据要求 product / customer 同时缺失，遗留库与已建库一律照常执行。
+    if base_schema_absent():
+        return
     op.execute('DROP INDEX IF EXISTS idx_customer_phone_trgm')
     op.execute('DROP INDEX IF EXISTS idx_customer_contact_trgm')
     op.execute('DROP INDEX IF EXISTS idx_customer_name_trgm')

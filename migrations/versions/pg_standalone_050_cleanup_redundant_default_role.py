@@ -26,7 +26,6 @@ downgrade 为空实现：这是一次性数据清理，回滚不会（也不应�
 """
 from alembic import op
 
-
 # revision identifiers, used by Alembic.
 revision = 'pg_standalone_050_cleanup_default_role'
 down_revision = 'pg_standalone_049_stockin_soft_delete'

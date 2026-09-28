@@ -39,6 +39,8 @@ endpoint 层捕获后调用 ``fetch_existing_pending_for_composite_ids`` 回查�
 from alembic import op
 from sqlalchemy import text
 
+from migrations._legacy_base_guard import base_schema_absent
+
 revision = 'rebuild_po_dedup_use_supplier_name'
 down_revision = ('add_file_records_table', 'add_user_factory_and_notification')
 branch_labels = None
@@ -46,6 +48,10 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # 空库守卫：pg_standalone_001 尚未建出基础 schema 时整条增量迁移空转。
+    # 判据要求 product / customer 同时缺失，遗留库与已建库一律照常执行。
+    if base_schema_absent():
+        return
     op.execute(text("DROP INDEX IF EXISTS uq_po_pending_dedup"))
     op.execute(text(
         """
@@ -57,6 +63,10 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # 空库守卫：pg_standalone_001 尚未建出基础 schema 时整条增量迁移空转。
+    # 判据要求 product / customer 同时缺失，遗留库与已建库一律照常执行。
+    if base_schema_absent():
+        return
     op.execute(text("DROP INDEX IF EXISTS uq_po_pending_dedup"))
     op.execute(text(
         """

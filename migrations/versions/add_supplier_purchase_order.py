@@ -5,16 +5,28 @@ Revises: 9b7b1ead6c4a
 Create Date: 2026-04-06
 
 """
+import logging
+
 import sqlalchemy as sa
 from alembic import op
+
+from migrations._legacy_base_guard import (
+    base_schema_absent,
+    create_index_if_columns_exist,
+)
+
+logger = logging.getLogger('alembic.migration')
 
 revision = 'add_supplier_purchase_order'
 down_revision = 'add_product_version'
 branch_labels = None
 depends_on = None
 
-
 def upgrade():
+    # 空库守卫：pg_standalone_001 尚未建出基础 schema 时整条增量迁移空转。
+    # 判据要求 product / customer 同时缺失，遗留库与已建库一律照常执行。
+    if base_schema_absent():
+        return
     op.create_table('supplier',
         sa.Column('id', sa.Integer(), nullable=False),
         sa.Column('name', sa.String(length=100), nullable=False),
@@ -27,7 +39,7 @@ def upgrade():
         sa.PrimaryKeyConstraint('id'),
         sa.UniqueConstraint('name')
     )
-    op.create_index('idx_supplier_name', 'supplier', ['name'], unique=True)
+    create_index_if_columns_exist('idx_supplier_name', 'supplier', ['name'], unique=True)
 
     op.create_table('purchase_order',
         sa.Column('id', sa.Integer(), nullable=False),
@@ -45,7 +57,7 @@ def upgrade():
         sa.PrimaryKeyConstraint('id'),
         sa.UniqueConstraint('order_no')
     )
-    op.create_index('idx_purchase_order_no', 'purchase_order', ['order_no'], unique=True)
+    create_index_if_columns_exist('idx_purchase_order_no', 'purchase_order', ['order_no'], unique=True)
 
     op.create_table('purchase_order_item',
         sa.Column('id', sa.Integer(), nullable=False),
@@ -114,8 +126,8 @@ def upgrade():
         op.add_column('product_material', sa.Column('remark', sa.Text(), nullable=True))
         op.add_column('product_material', sa.Column('update_time', sa.DateTime(), nullable=True))
         op.create_foreign_key('fk_product_material_supplier', 'product_material', 'supplier', ['supplier_id'], ['id'])
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning('迁移降级步骤被跳过: %s', exc)
 
     try:
         op.add_column('product_accessory', sa.Column('material_code', sa.String(length=50), nullable=True))
@@ -128,11 +140,14 @@ def upgrade():
         op.add_column('product_accessory', sa.Column('remark', sa.Text(), nullable=True))
         op.add_column('product_accessory', sa.Column('update_time', sa.DateTime(), nullable=True))
         op.create_foreign_key('fk_product_accessory_supplier', 'product_accessory', 'supplier', ['supplier_id'], ['id'])
-    except Exception:
-        pass
-
+    except Exception as exc:
+        logger.warning('迁移降级步骤被跳过: %s', exc)
 
 def downgrade():
+    # 空库守卫：pg_standalone_001 尚未建出基础 schema 时整条增量迁移空转。
+    # 判据要求 product / customer 同时缺失，遗留库与已建库一律照常执行。
+    if base_schema_absent():
+        return
     op.drop_table('purchase_order_item')
     op.drop_table('purchase_order')
     op.drop_table('product_packaging')
@@ -148,8 +163,8 @@ def downgrade():
         op.drop_column('product_material', 'specification')
         op.drop_column('product_material', 'material_code')
         op.drop_column('product_material', 'update_time')
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning('迁移降级步骤被跳过: %s', exc)
 
     try:
         op.drop_column('product_accessory', 'remark')
@@ -161,5 +176,5 @@ def downgrade():
         op.drop_column('product_accessory', 'specification')
         op.drop_column('product_accessory', 'material_code')
         op.drop_column('product_accessory', 'update_time')
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning('迁移降级步骤被跳过: %s', exc)

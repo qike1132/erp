@@ -5,7 +5,8 @@ Revises: pg_standalone_009
 Create Date: 2026-05-10
 """
 from alembic import op
-import sqlalchemy as sa
+
+from migrations._legacy_base_guard import execute_if_columns_exist
 
 revision = "pg_standalone_010"
 down_revision = "pg_standalone_009"
@@ -34,17 +35,21 @@ def upgrade() -> None:
         op.execute("DROP INDEX CONCURRENTLY IF EXISTS idx_customer_name")
 
         # --- Add recommended composite indexes ---
-        op.execute(
-            "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_stockout_order_stockin_qty "
-            "ON stock_out (order_id, stockin_id) INCLUDE (quantity, returned_quantity)"
+        # returned_quantity 由分支迁移 add_stock_return 才加入，空库重放按拓扑序
+        # 可能先跑到这里；缺失则跳过，由 054 依 ORM 元数据兜底重建。
+        execute_if_columns_exist(
+            'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_stockout_order_stockin_qty '
+            'ON stock_out (order_id, stockin_id) INCLUDE (quantity, returned_quantity)',
+            ('stock_out', 'returned_quantity'),
         )
         op.execute(
             "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_stockout_deduction "
             "ON stock_out (product_id, stockout_date DESC) WHERE stockin_id IS NOT NULL"
         )
-        op.execute(
+        execute_if_columns_exist(
             'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_order_batch_completed '
-            'ON "order" (batch_completed_at DESC) WHERE batch_completed_at IS NOT NULL'
+            'ON "order" (batch_completed_at DESC) WHERE batch_completed_at IS NOT NULL',
+            ('order', 'batch_completed_at'),
         )
         op.execute(
             "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_po_status_date_covering "
