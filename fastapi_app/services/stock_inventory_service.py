@@ -58,17 +58,15 @@ _O_NOT_DELETED = ' AND o.is_deleted IS NOT TRUE'
     key_prefix='stockins:list',
     ttl=30,
     local_ttl=10,
-    key_builder=lambda *args, **kwargs: f"pg:{kwargs.get('page',1)}:pp:{kwargs.get('per_page',50)}:c:{kwargs.get('customer','') or ''}:ot:{kwargs.get('order_type','') or ''}:sd:{kwargs.get('start_date','') or ''}:ed:{kwargs.get('end_date','') or ''}",
+    key_builder=lambda *args, **kwargs: f"pg:{kwargs.get('page',1)}:pp:{kwargs.get('per_page',50)}:c:{kwargs.get('customer','') or ''}:sd:{kwargs.get('start_date','') or ''}:ed:{kwargs.get('end_date','') or ''}",
 )
 async def get_stockins(db: AsyncSession, page: int=1, per_page: int=50,
-                       customer: str | None = None, order_type: str | None = None,
+                       customer: str | None = None,
                        start_date: str | None = None, end_date: str | None = None) -> dict:
     """获取入库列表（含关联数据，支持分页和筛选）- SQL子查询优化版"""
     conditions = []
     if customer:
         conditions.append(StockIn.customer.like(f'%{escape_like(customer)}%'))
-    if order_type:
-        conditions.append(StockIn.order_type == order_type)
     if start_date:
         try:
             from datetime import datetime
@@ -124,8 +122,6 @@ async def get_stockins(db: AsyncSession, page: int=1, per_page: int=50,
             'customer': stock_in.customer,
             'product': {'id': stock_in.product.id, 'name': stock_in.product.name, 'barcode': stock_in.product.barcode or '', 'image': stock_in.product.image or ''} if stock_in.product else None,
             'quantity': stock_in.quantity,
-            'order_type': stock_in.order_type or 'regular',
-            'country': stock_in.country or '',
             'deducted': deducted,
             'note': stock_in.note or '',
         })
@@ -136,31 +132,20 @@ async def get_stockins(db: AsyncSession, page: int=1, per_page: int=50,
     key_prefix='stockouts:list',
     ttl=30,
     local_ttl=10,
-    key_builder=lambda *args, **kwargs: f"pg:{kwargs.get('page',1)}:pp:{kwargs.get('per_page',50)}:c:{kwargs.get('customer','') or ''}:ot:{kwargs.get('order_type','') or ''}:sd:{kwargs.get('start_date','') or ''}:ed:{kwargs.get('end_date','') or ''}",
+    key_builder=lambda *args, **kwargs: f"pg:{kwargs.get('page',1)}:pp:{kwargs.get('per_page',50)}:c:{kwargs.get('customer','') or ''}:sd:{kwargs.get('start_date','') or ''}:ed:{kwargs.get('end_date','') or ''}",
 )
 async def get_stockouts(db: AsyncSession, page: int=1, per_page: int=50,
-                        customer: str | None = None, order_type: str | None = None,
+                        customer: str | None = None,
                         start_date: str | None = None, end_date: str | None = None) -> dict:
     """获取出库列表（仅独立出库，非抵扣，支持分页和筛选）
 
-    筛选维度：customer（模糊匹配）、order_type（需 JOIN Order，regular 含无订单记录）、
-    start_date/end_date（按 stockout_date 过滤）。
+    筛选维度：customer（模糊匹配）、start_date/end_date（按 stockout_date 过滤）。
     """
-    from fastapi_app.shared_models import Order, OrderItem
+    from fastapi_app.shared_models import Order
 
     conditions = [StockOut.stockin_id.is_(None)]
-    needs_order_join = False
     if customer:
         conditions.append(StockOut.customer.like(f'%{escape_like(customer)}%'))
-    if order_type:
-        needs_order_join = True
-        # 多 SKU：出库类型按匹配明细（order_id+product_id）判定，无匹配明细回退订单级兼容字段；
-        # regular 包含无关联订单的出库（前端展示时默认为 regular）
-        item_type = func.coalesce(OrderItem.order_type, Order.order_type)
-        if order_type == 'regular':
-            conditions.append(or_(StockOut.order_id.is_(None), item_type == 'regular'))
-        else:
-            conditions.append(item_type == order_type)
     if start_date:
         try:
             sd = datetime.strptime(start_date, '%Y-%m-%d').replace(tzinfo=UTC)
@@ -175,17 +160,7 @@ async def get_stockouts(db: AsyncSession, page: int=1, per_page: int=50,
             pass  # defensive: 可选 ValueError 静默处理,不影响主流程
 
     # 先用子查询过滤 + 分页取 ID，再按 ID 批量加载关联数据，避免 joinedload 与过滤 JOIN 冲突
-    id_query = select(StockOut.id)
-    if needs_order_join:
-        if order_type == 'regular':
-            id_query = id_query.outerjoin(Order, StockOut.order_id == Order.id)
-        else:
-            id_query = id_query.join(Order, StockOut.order_id == Order.id)
-        id_query = id_query.outerjoin(
-            OrderItem,
-            (OrderItem.order_id == StockOut.order_id) & (OrderItem.product_id == StockOut.product_id),
-        )
-    id_query = id_query.where(*conditions)
+    id_query = select(StockOut.id).where(*conditions)
 
     total = (await db.execute(select(func.count()).select_from(id_query.subquery()))).scalar() or 0
 
@@ -208,23 +183,6 @@ async def get_stockouts(db: AsyncSession, page: int=1, per_page: int=50,
     stockouts = result.scalars().unique().all()
     data = []
     for stock_out in stockouts:
-        # 多 SKU：类型/国家取与出库产品匹配的订单明细，无匹配明细回退订单级兼容字段
-        matched = None
-        if stock_out.order is not None:
-            matched = next(
-                (oi for oi in stock_out.order.items if oi.product_id == stock_out.product_id),
-                None,
-            )
-        item_type_val = (
-            (matched.order_type if matched else None)
-            or (stock_out.order.order_type if stock_out.order else None)
-            or 'regular'
-        )
-        country_val = (
-            (matched.country if matched else None)
-            or (stock_out.order.country if stock_out.order else None)
-            or ''
-        )
         item = {
             'id': stock_out.id,
             'stockout_no': stock_out.stockout_no,
@@ -238,8 +196,6 @@ async def get_stockouts(db: AsyncSession, page: int=1, per_page: int=50,
             'quantity': stock_out.quantity,
             'returned_quantity': stock_out.returned_quantity,
             'note': stock_out.note or '',
-            'order_type': item_type_val,
-            'country': country_val,
         }
         data.append(item)
     return {'items': data, 'total': total, 'page': page, 'per_page': per_page}
@@ -287,58 +243,44 @@ async def get_inventory(db: AsyncSession, search_customer: str='', search_produc
     """
     product_ids = await _resolve_products(db, search_product)
     if product_ids is not None and not product_ids:
-        return {'inventory_data': [], 'total_order_qty': 0, 'total_stockin_qty': 0, 'total_stock': 0, 'all_countries': []}
+        return {'inventory_data': [], 'total_order_qty': 0, 'total_stockin_qty': 0, 'total_stock': 0}
     rows = await _fetch_inventory(db, product_ids, search_customer)
     if not rows:
-        return {'inventory_data': [], 'total_order_qty': 0, 'total_stockin_qty': 0, 'total_stock': 0, 'all_countries': []}
-    all_countries = set()
+        return {'inventory_data': [], 'total_order_qty': 0, 'total_stockin_qty': 0, 'total_stock': 0}
     total_stockin_qty = 0
     total_order_qty = 0
     total_stock = 0
     inventory_data = []
     for row in rows:
-        customer = row['customer']
-        pname = row.get('product_name', '')
-        pbarcode = row.get('product_barcode') or ''
         si_qty = int(row.get('stockin_qty') or 0)
         so_dir = int(row.get('direct_stockout_qty') or 0)
-        so_reg = int(row.get('regular_stockout_qty') or 0)
-        so_cus = int(row.get('custom_stockout_qty') or 0)
-        o_reg = int(row.get('regular_order_qty') or 0)
-        o_cus = int(row.get('custom_order_qty') or 0)
+        so_order = int(row.get('order_stockout_qty') or 0)
+        o_qty = int(row.get('order_qty') or 0)
         has_si = bool(row.get('has_stockin'))
         has_o = bool(row.get('has_order'))
-        so_total = so_dir + so_reg + so_cus
-        remaining_reg = max(0, o_reg - so_dir - so_reg)
-        remaining_cus = max(0, o_cus - so_cus)
-        total_qty = si_qty + remaining_reg + remaining_cus
-        has_positive = total_qty > 0
-        country_data = {}
-        raw = row.get('country_data') or ''
-        if raw:
-            for item in raw.split('|'):
-                if ':' in item:
-                    country, qty_str = item.split(':', 1)
-                    try:
-                        qty = int(qty_str)
-                    except (ValueError, TypeError):
-                        qty = 0
-                        logger.warning('数量转换失败: %s', qty_str)
-                    country_data[country] = qty
-                    if country != '常规':
-                        all_countries.add(country)
-        if (has_si or has_o) and has_positive:
-            inventory_data.append({'customer': customer, 'product_name': pname, 'product_barcode': pbarcode, 'order_quantity': remaining_reg if remaining_reg > 0 else '', 'country_orders': country_data, 'stockin_quantity': si_qty if si_qty > 0 else '', 'stockout_quantity': so_total if so_total > 0 else '', 'total_stock': total_qty if total_qty > 0 else ''})
+        so_total = so_dir + so_order
+        remaining = max(0, o_qty - so_dir - so_order)
+        total_qty = si_qty + remaining
+        if (has_si or has_o) and total_qty > 0:
+            inventory_data.append({
+                'customer': row['customer'],
+                'product_name': row.get('product_name', ''),
+                'product_barcode': row.get('product_barcode') or '',
+                'order_quantity': remaining if remaining > 0 else '',
+                'stockin_quantity': si_qty if si_qty > 0 else '',
+                'stockout_quantity': so_total if so_total > 0 else '',
+                'total_stock': total_qty if total_qty > 0 else '',
+            })
             total_stockin_qty += si_qty
-            total_order_qty += remaining_reg + remaining_cus
+            total_order_qty += remaining
             total_stock += total_qty
-    return {'inventory_data': inventory_data, 'total_order_qty': total_order_qty, 'total_stockin_qty': total_stockin_qty, 'total_stock': total_stock, 'all_countries': sorted(all_countries)}
+    return {'inventory_data': inventory_data, 'total_order_qty': total_order_qty, 'total_stockin_qty': total_stockin_qty, 'total_stock': total_stock}
 
 
 @cache_result(key_prefix="inventory:paginated", ttl=120, local_ttl=60,
-             key_builder=lambda **kwargs: f"{kwargs.get('search_customer','')}-{kwargs.get('search_product','')}-{kwargs.get('country','')}-{kwargs.get('page',1)}-{kwargs.get('per_page',50)}")
+             key_builder=lambda **kwargs: f"{kwargs.get('search_customer','')}-{kwargs.get('search_product','')}-{kwargs.get('page',1)}-{kwargs.get('per_page',50)}")
 async def get_inventory_paginated(db: AsyncSession, search_customer: str = '', search_product: str = '',
-                                  country: str = '', page: int = 1, per_page: int = 50) -> dict:
+                                  page: int = 1, per_page: int = 50) -> dict:
     """
     库存分页查询 - SQL CTE 优化版
     将4次聚合查询合并为单次 CTE 查询，在数据库层面完成合并、过滤和分页，
@@ -350,12 +292,10 @@ async def get_inventory_paginated(db: AsyncSession, search_customer: str = '', s
         return _empty_inventory_response(page, per_page)
 
     params, clauses, pids_param = _build_inventory_filter_params(search_product, search_customer, product_ids)
-    cte_sql = _build_inventory_cte_sql(clauses, country)
+    cte_sql = _build_inventory_cte_sql(clauses)
 
     params['limit'] = per_page
     params['offset'] = (page - 1) * per_page
-    if country:
-        params['country'] = country
 
     # 设置 work_mem 提升大查询性能（避免磁盘溢出）
     await db.execute(text("SET LOCAL work_mem = '64MB'"))
@@ -368,7 +308,7 @@ async def get_inventory_paginated(db: AsyncSession, search_customer: str = '', s
     if not rows:
         return _empty_inventory_response(page, per_page, all_customers=all_customers)
 
-    inventory_data, total_items, sum_stockin, sum_order, sum_stock, all_countries, total_available_stock = \
+    inventory_data, total_items, sum_stockin, sum_order, sum_stock, total_available_stock = \
         _format_inventory_rows(rows)
 
     return {
@@ -377,7 +317,6 @@ async def get_inventory_paginated(db: AsyncSession, search_customer: str = '', s
         'total_stockin_qty': sum_stockin,
         'total_stock': sum_stock,
         'total_available_stock': total_available_stock,
-        'all_countries': all_countries,
         'all_customers': all_customers,
         'total_items': total_items,
         'page': page,
@@ -428,12 +367,11 @@ def _build_inventory_filter_params(search_product: str, search_customer: str,
     return params, clauses, pids_param
 
 
-def _build_inventory_cte_sql(clauses: dict, country: str) -> TextClause:
+def _build_inventory_cte_sql(clauses: dict) -> TextClause:
     """构建库存CTE查询SQL。
 
     Returns:
-        TextClause: 已编译好的 CTE 查询。``country`` 参数由调用方追加到
-        绑定参数字典中，本函数不返回它。
+        TextClause: 已编译好的 CTE 查询。
 
     注：原注解为 ``-> tuple``、docstring 写「(cte_sql, country)」，
     与实际返回（单个 TextClause，调用方也按单值接收）不符，已一并修正。
@@ -459,12 +397,8 @@ WITH stockin_agg AS (
 stockout_agg AS (
     SELECT so.product_id, so.customer,
         SUM(CASE WHEN so.order_id IS NULL THEN so.quantity - so.returned_quantity ELSE 0 END) AS direct_stockout_qty,
-        SUM(CASE WHEN so.order_id IS NOT NULL AND (COALESCE(oi.order_type, o.order_type) IS NULL OR COALESCE(oi.order_type, o.order_type) = 'regular')
-            THEN so.quantity - so.returned_quantity ELSE 0 END) AS regular_stockout_qty,
-        SUM(CASE WHEN COALESCE(oi.order_type, o.order_type) = 'custom' THEN so.quantity - so.returned_quantity ELSE 0 END) AS custom_stockout_qty
+        SUM(CASE WHEN so.order_id IS NOT NULL THEN so.quantity - so.returned_quantity ELSE 0 END) AS order_stockout_qty
     FROM stock_out so
-    LEFT JOIN "order" o ON so.order_id = o.id
-    LEFT JOIN order_item oi ON oi.order_id = so.order_id AND oi.product_id = so.product_id
     WHERE so.stockin_id IS NULL{c['so_pid']}{c['so_cust']}
     GROUP BY so.product_id, so.customer
 ),
@@ -472,35 +406,12 @@ order_agg AS (
     -- 多 SKU：按 OrderItem 维度聚合；无明细订单（批量导入兼容路径）回退订单级字段
     SELECT COALESCE(oi.product_id, o.product_id) AS product_id,
         o.customer,
-        SUM(CASE WHEN COALESCE(oi.order_type, o.order_type) IS NULL OR COALESCE(oi.order_type, o.order_type) = 'regular'
-            THEN COALESCE(oi.quantity, o.quantity) ELSE 0 END) AS regular_order_qty,
-        SUM(CASE WHEN COALESCE(oi.order_type, o.order_type) = 'custom'
-            THEN COALESCE(oi.quantity, o.quantity) ELSE 0 END) AS custom_order_qty,
+        SUM(COALESCE(oi.quantity, o.quantity)) AS order_qty,
         1 AS has_order
     FROM "order" o
     LEFT JOIN order_item oi ON oi.order_id = o.id
     WHERE 1=1{c['oi_or_o_pid']}{c['o_cust']}{c['o_not_deleted']}
     GROUP BY COALESCE(oi.product_id, o.product_id), o.customer
-),
-country_agg AS (
-    -- 多 SKU：国家归属明细优先，无明细回退订单级兼容字段
-    SELECT COALESCE(oi.product_id, o.product_id) AS product_id,
-        o.customer,
-        COALESCE(oi.country, o.country, '常规') AS country, SUM(COALESCE(oi.quantity, o.quantity)) AS qty
-    FROM "order" o
-    LEFT JOIN order_item oi ON oi.order_id = o.id
-    WHERE COALESCE(oi.order_type, o.order_type) = 'custom'{c['oi_or_o_pid']}{c['o_cust']}{c['o_not_deleted']}
-    GROUP BY COALESCE(oi.product_id, o.product_id), o.customer, COALESCE(oi.country, o.country, '常规')
-),
-country_stockout_agg AS (
-    SELECT so.product_id, o.customer,
-        COALESCE(oi.country, o.country, '常规') AS country,
-        SUM(so.quantity - so.returned_quantity) AS shipped_qty
-    FROM stock_out so
-    JOIN "order" o ON so.order_id = o.id
-    LEFT JOIN order_item oi ON oi.order_id = so.order_id AND oi.product_id = so.product_id
-    WHERE so.stockin_id IS NULL AND COALESCE(oi.order_type, o.order_type) = 'custom'{c['so_pid']}{c['so_cust']}
-    GROUP BY so.product_id, o.customer, COALESCE(oi.country, o.country, '常规')
 ),
 production_agg AS (
     SELECT product_id, SUM(quantity) AS production_qty
@@ -521,10 +432,8 @@ merged AS (
         COALESCE(si.stockin_qty, 0) AS stockin_qty,
         CASE WHEN si.product_id IS NOT NULL THEN true ELSE false END AS has_stockin,
         COALESCE(so.direct_stockout_qty, 0) AS direct_stockout_qty,
-        COALESCE(so.regular_stockout_qty, 0) AS regular_stockout_qty,
-        COALESCE(so.custom_stockout_qty, 0) AS custom_stockout_qty,
-        COALESCE(od.regular_order_qty, 0) AS regular_order_qty,
-        COALESCE(od.custom_order_qty, 0) AS custom_order_qty,
+        COALESCE(so.order_stockout_qty, 0) AS order_stockout_qty,
+        COALESCE(od.order_qty, 0) AS order_qty,
         CASE WHEN od.product_id IS NOT NULL THEN true ELSE false END AS has_order
     FROM stockin_agg si
     FULL OUTER JOIN stockout_agg so ON si.product_id = so.product_id AND si.customer = so.customer
@@ -534,10 +443,8 @@ merged AS (
 ),
 inventory_calc AS (
     SELECT m.*,
-        GREATEST(0, m.regular_order_qty - m.direct_stockout_qty - m.regular_stockout_qty) AS remaining_reg,
-        GREATEST(0, m.custom_order_qty - m.custom_stockout_qty) AS remaining_cus,
-        m.stockin_qty + GREATEST(0, m.regular_order_qty - m.direct_stockout_qty - m.regular_stockout_qty)
-            + GREATEST(0, m.custom_order_qty - m.custom_stockout_qty) AS total_qty
+        GREATEST(0, m.order_qty - m.direct_stockout_qty - m.order_stockout_qty) AS remaining,
+        m.stockin_qty + GREATEST(0, m.order_qty - m.direct_stockout_qty - m.order_stockout_qty) AS total_qty
     FROM merged m
 ),
 filtered AS (
@@ -550,25 +457,14 @@ filtered AS (
     LEFT JOIN production_agg pa ON pa.product_id = ic.product_id
     LEFT JOIN product_stockout_total pst ON pst.product_id = ic.product_id
     WHERE (ic.has_stockin OR ic.has_order) AND ic.total_qty > 0
-    {"AND EXISTS (SELECT 1 FROM country_agg ca WHERE ca.product_id = ic.product_id AND ca.customer = ic.customer AND ca.country = :country)" if country else ""}
-),
-all_countries_cte AS (
-    SELECT STRING_AGG(DISTINCT ca.country, '|') AS countries
-    FROM country_agg ca WHERE ca.country != '常规'
 )
 SELECT f.product_id, f.customer, f.product_name, f.product_barcode,
-    f.stockin_qty, f.direct_stockout_qty, f.regular_stockout_qty, f.custom_stockout_qty,
-    f.regular_order_qty, f.custom_order_qty, f.remaining_reg, f.remaining_cus, f.total_qty,
+    f.stockin_qty, f.direct_stockout_qty, f.order_stockout_qty,
+    f.order_qty, f.remaining, f.total_qty,
     f.production_qty, f.available_stock,
-    (SELECT STRING_AGG((ca.country || ':' || GREATEST(0, ca.qty - COALESCE(csa.shipped_qty, 0)))::text, '|')
-     FROM country_agg ca
-     LEFT JOIN country_stockout_agg csa
-       ON csa.product_id = ca.product_id AND csa.customer = ca.customer AND csa.country = ca.country
-     WHERE ca.product_id = f.product_id AND ca.customer = f.customer) AS country_data,
-    (SELECT countries FROM all_countries_cte) AS all_countries_str,
     COUNT(*) OVER() AS total_count,
     SUM(f.stockin_qty) OVER() AS sum_stockin,
-    SUM(f.remaining_reg + f.remaining_cus) OVER() AS sum_order,
+    SUM(f.remaining) OVER() AS sum_order,
     SUM(f.total_qty) OVER() AS sum_stock
 FROM filtered f
 ORDER BY f.customer, f.product_name
@@ -577,26 +473,24 @@ LIMIT :limit OFFSET :offset
     return cte_sql
 
 
-def _format_inventory_rows(rows) -> tuple[list, int, int, int, int, list[str], int]:
+def _format_inventory_rows(rows) -> tuple[list, int, int, int, int, int]:
     """格式化库存查询结果行。
 
     Returns:
-        (inventory_data, total_items, sum_stockin, sum_order, sum_stock, all_countries, total_available_stock)
+        (inventory_data, total_items, sum_stockin, sum_order, sum_stock, total_available_stock)
     """
     first = rows[0]
     total_items = first.total_count
     sum_stockin = int(first.sum_stockin)
     sum_order = int(first.sum_order)
     sum_stock = int(first.sum_stock)
-    all_countries = sorted(first.all_countries_str.split('|')) if first.all_countries_str else []
 
     inventory_data = []
     seen_products: set[int] = set()
     total_available_stock = 0
     for row in rows:
-        country_data = _parse_country_data(row.country_data or '')
-        so_total = int(row.direct_stockout_qty) + int(row.regular_stockout_qty) + int(row.custom_stockout_qty)
-        remaining_reg = int(row.remaining_reg)
+        so_total = int(row.direct_stockout_qty) + int(row.order_stockout_qty)
+        remaining = int(row.remaining)
 
         production_qty = int(row.production_qty)
         available_stock = int(row.available_stock)
@@ -609,8 +503,7 @@ def _format_inventory_rows(rows) -> tuple[list, int, int, int, int, list[str], i
             'customer': row.customer,
             'product_name': row.product_name,
             'product_barcode': row.product_barcode or '',
-            'order_quantity': remaining_reg if remaining_reg > 0 else '',
-            'country_orders': country_data,
+            'order_quantity': remaining if remaining > 0 else '',
             'stockin_quantity': int(row.stockin_qty) if int(row.stockin_qty) > 0 else '',
             'stockout_quantity': so_total if so_total > 0 else '',
             'total_stock': int(row.total_qty) if int(row.total_qty) > 0 else '',
@@ -618,10 +511,10 @@ def _format_inventory_rows(rows) -> tuple[list, int, int, int, int, list[str], i
             'available_stock': available_stock if available_stock != 0 else '',
         })
 
-    return inventory_data, total_items, sum_stockin, sum_order, sum_stock, all_countries, total_available_stock
+    return inventory_data, total_items, sum_stockin, sum_order, sum_stock, total_available_stock
 
 
-def _empty_inventory_response(page: int = 1, per_page: int = 50, all_countries: list | None = None, all_customers: list | None = None) -> dict:
+def _empty_inventory_response(page: int = 1, per_page: int = 50, all_customers: list | None = None) -> dict:
     """构造空库存响应"""
     return {
         'inventory_data': [],
@@ -629,48 +522,11 @@ def _empty_inventory_response(page: int = 1, per_page: int = 50, all_countries: 
         'total_stockin_qty': 0,
         'total_stock': 0,
         'total_available_stock': 0,
-        'all_countries': all_countries or [],
         'all_customers': all_customers or [],
         'total_items': 0,
         'page': page,
         'per_page': per_page,
     }
-
-
-def _parse_country_data(raw: str) -> dict:
-    """解析 country_data 字符串为字典"""
-    country_data: dict[str, int] = {}
-    if not raw:
-        return country_data
-    for item in raw.split('|'):
-        if ':' in item:
-            country, qty = item.split(':', 1)
-            country_data[country] = int(qty)
-    return country_data
-
-
-async def _get_all_countries(db: AsyncSession, pids: tuple | None, search_customer: str = '') -> list[str]:
-    """获取所有定制国家列表"""
-    cust_clause = _CUST_CLAUSE if search_customer else ''
-    pid_clause = _OI_OR_O_PID if pids else ''
-    params: dict = {}
-    if pids:
-        params['pids'] = pids
-    if search_customer:
-        params['sc'] = search_customer
-    # 安全说明：pid_clause/cust_clause 均为模块级常量（_OI_OR_O_PID/_CUST_CLAUSE），
-    # 不含用户输入；筛选值通过 :pids/:sc 绑定参数传递。
-    # 多 SKU：国家取订单明细维度，无明细订单回退订单级兼容字段
-    sql = text(f"""
-        SELECT DISTINCT COALESCE(oi.country, o.country, '常规') AS country
-        FROM "order" o
-        LEFT JOIN order_item oi ON oi.order_id = o.id
-        WHERE COALESCE(oi.order_type, o.order_type) = 'custom'{pid_clause}{cust_clause}
-          AND o.is_deleted IS NOT TRUE
-          AND COALESCE(oi.country, o.country) IS NOT NULL AND COALESCE(oi.country, o.country) != '常规'
-    """)  # nosec B608 - pid_clause/cust_clause 为模块级常量，值通过绑定参数传递
-    result = await db.execute(sql, params)
-    return sorted(row[0] for row in result.all())
 
 
 @cache_result(key_prefix="customers:all", ttl=120, local_ttl=60,
@@ -734,45 +590,29 @@ def _build_inventory_query_clauses(pids: list[int] | None, cust: str) -> tuple[d
     return params, si_pid, so_pid, o_pid, oi_or_o_pid, si_cust, so_cust, o_cust
 
 
-def _build_country_data_dict(country_rows: list[dict]) -> dict:
-    """将国家聚合行转为 (product_id, customer) -> 'country:qty|...' 映射"""
-    cdict = {}
-    for row in country_rows:
-        key = (row['product_id'], row['customer'])
-        entry = f"{row['country']}:{row['qty']}"
-        cdict[key] = (cdict.get(key, '') + '|' + entry).lstrip('|')
-    return cdict
-
-
 def _merge_inventory_rows(stockin_rows: list[dict], stockout_rows: list[dict],
-                          order_rows: list[dict], country_rows: list[dict],
+                          order_rows: list[dict],
                           pnames: dict) -> list[dict]:
-    """合并四张聚合查询结果为统一库存记录列表"""
+    """合并三张聚合查询结果为统一库存记录列表"""
     merged = {}
     for row in stockin_rows:
         key = (row['product_id'], row['customer'])
         merged[key] = dict(row)
-        for fld in ('direct_stockout_qty', 'regular_stockout_qty', 'custom_stockout_qty', 'regular_order_qty', 'custom_order_qty'):
+        for fld in ('direct_stockout_qty', 'order_stockout_qty', 'order_qty'):
             merged[key].setdefault(fld, 0)
         merged[key].setdefault('has_order', 0)
-        merged[key].setdefault('country_data', '')
     for row in stockout_rows:
         key = (row['product_id'], row['customer'])
         if key not in merged:
-            merged[key] = {'stockin_qty': 0, 'has_stockin': 0, 'regular_order_qty': 0, 'custom_order_qty': 0, 'has_order': 0, 'country_data': ''}
+            merged[key] = {'stockin_qty': 0, 'has_stockin': 0, 'order_qty': 0, 'has_order': 0}
         merged[key]['direct_stockout_qty'] = row['direct_stockout_qty']
-        merged[key]['regular_stockout_qty'] = row['regular_stockout_qty']
-        merged[key]['custom_stockout_qty'] = row['custom_stockout_qty']
+        merged[key]['order_stockout_qty'] = row['order_stockout_qty']
     for row in order_rows:
         key = (row['product_id'], row['customer'])
         if key not in merged:
-            merged[key] = {'stockin_qty': 0, 'has_stockin': 0, 'direct_stockout_qty': 0, 'regular_stockout_qty': 0, 'custom_stockout_qty': 0, 'country_data': ''}
-        merged[key]['regular_order_qty'] = row['regular_order_qty']
-        merged[key]['custom_order_qty'] = row['custom_order_qty']
+            merged[key] = {'stockin_qty': 0, 'has_stockin': 0, 'direct_stockout_qty': 0, 'order_stockout_qty': 0}
+        merged[key]['order_qty'] = row['order_qty']
         merged[key]['has_order'] = row['has_order']
-    cdict = _build_country_data_dict(country_rows)
-    for key in merged:
-        merged[key]['country_data'] = cdict.get(key, '')
     result = []
     for key, data in merged.items():
         product_id = key[0]
@@ -790,19 +630,17 @@ async def _fetch_inventory(db: AsyncSession, pids: list[int] | None, cust: str='
     # 筛选值通过 :pids/:sc 绑定参数传递。
     stockin_sql = text(f'SELECT si.product_id, si.customer, SUM(si.quantity - COALESCE(sub.consumed, 0)) AS stockin_qty, 1 AS has_stockin FROM stock_in si LEFT JOIN (  SELECT stockin_id, SUM(quantity - returned_quantity) AS consumed   FROM stock_out WHERE stockin_id IS NOT NULL{si_pid}   GROUP BY stockin_id) sub ON sub.stockin_id = si.id WHERE 1=1{si_pid}{si_cust} GROUP BY si.product_id, si.customer')  # nosec B608 — 条件片段为模块级常量，值通过绑定参数传递
     # 多 SKU：订单维度聚合改按 OrderItem；无明细订单回退订单级兼容字段（COALESCE）
-    stockout_sql = text(f'SELECT so.product_id, so.customer, SUM(CASE WHEN so.order_id IS NULL THEN so.quantity - so.returned_quantity ELSE 0 END) AS direct_stockout_qty, SUM(CASE WHEN so.order_id IS NOT NULL AND (COALESCE(oi.order_type, o.order_type) IS NULL OR COALESCE(oi.order_type, o.order_type) = \'regular\') THEN so.quantity - so.returned_quantity ELSE 0 END) AS regular_stockout_qty, SUM(CASE WHEN COALESCE(oi.order_type, o.order_type) = \'custom\' THEN so.quantity - so.returned_quantity ELSE 0 END) AS custom_stockout_qty FROM stock_out so LEFT JOIN "order" o ON so.order_id = o.id LEFT JOIN order_item oi ON oi.order_id = so.order_id AND oi.product_id = so.product_id WHERE so.stockin_id IS NULL{so_pid}{so_cust} GROUP BY so.product_id, so.customer')  # nosec B608 — 条件片段为模块级常量，值通过绑定参数传递
-    order_sql = text(f'SELECT COALESCE(oi.product_id, o.product_id) AS product_id, o.customer, SUM(CASE WHEN COALESCE(oi.order_type, o.order_type) IS NULL OR COALESCE(oi.order_type, o.order_type) = \'regular\' THEN COALESCE(oi.quantity, o.quantity) ELSE 0 END) AS regular_order_qty, SUM(CASE WHEN COALESCE(oi.order_type, o.order_type) = \'custom\' THEN COALESCE(oi.quantity, o.quantity) ELSE 0 END) AS custom_order_qty, 1 AS has_order FROM "order" o LEFT JOIN order_item oi ON oi.order_id = o.id WHERE 1=1{oi_or_o_pid}{o_cust}{_O_NOT_DELETED} GROUP BY COALESCE(oi.product_id, o.product_id), o.customer')  # nosec B608 — 条件片段为模块级常量，值通过绑定参数传递
-    country_sql = text(f'SELECT COALESCE(oi.product_id, o.product_id) AS product_id, o.customer, COALESCE(oi.country, o.country, \'常规\') AS country, SUM(COALESCE(oi.quantity, o.quantity)) AS qty FROM "order" o LEFT JOIN order_item oi ON oi.order_id = o.id WHERE COALESCE(oi.order_type, o.order_type) = \'custom\'{oi_or_o_pid}{o_cust}{_O_NOT_DELETED} GROUP BY COALESCE(oi.product_id, o.product_id), o.customer, COALESCE(oi.country, o.country, \'常规\')')  # nosec B608 — 条件片段为模块级常量，值通过绑定参数传递
+    stockout_sql = text(f'SELECT so.product_id, so.customer, SUM(CASE WHEN so.order_id IS NULL THEN so.quantity - so.returned_quantity ELSE 0 END) AS direct_stockout_qty, SUM(CASE WHEN so.order_id IS NOT NULL THEN so.quantity - so.returned_quantity ELSE 0 END) AS order_stockout_qty FROM stock_out so WHERE so.stockin_id IS NULL{so_pid}{so_cust} GROUP BY so.product_id, so.customer')  # nosec B608 — 条件片段为模块级常量，值通过绑定参数传递
+    order_sql = text(f'SELECT COALESCE(oi.product_id, o.product_id) AS product_id, o.customer, SUM(COALESCE(oi.quantity, o.quantity)) AS order_qty, 1 AS has_order FROM "order" o LEFT JOIN order_item oi ON oi.order_id = o.id WHERE 1=1{oi_or_o_pid}{o_cust}{_O_NOT_DELETED} GROUP BY COALESCE(oi.product_id, o.product_id), o.customer')  # nosec B608 — 条件片段为模块级常量，值通过绑定参数传递
     stockin_rows = await _run_sql(db, stockin_sql, params)
     stockout_rows = await _run_sql(db, stockout_sql, params)
     order_rows = await _run_sql(db, order_sql, params)
-    country_rows = await _run_sql(db, country_sql, params)
     # 收集实际出现的产品ID再查询名称，避免全量加载
     all_pids = set()
     for row in (*stockin_rows, *stockout_rows, *order_rows):
         all_pids.add(row['product_id'])
     pnames = await _get_prod_names(db, list(all_pids)) if all_pids else {}
-    return _merge_inventory_rows(stockin_rows, stockout_rows, order_rows, country_rows, pnames)
+    return _merge_inventory_rows(stockin_rows, stockout_rows, order_rows, pnames)
 
 
 async def _run_sql(db: AsyncSession, sql, params: dict) -> list[dict]:
@@ -817,12 +655,11 @@ async def _get_prod_names(db: AsyncSession, pids: list[int]) -> dict:
 
 
 async def get_stock_overview_stats(db: AsyncSession) -> dict:
-    """库存统计聚合（自 stock.py 端点下沉）：订单数量（常规+定制）与备货数量
+    """库存统计聚合（自 stock.py 端点下沉）：订单数量与备货数量。
 
-    多 SKU：按 OrderItem 维度分类统计；无明细订单（批量导入兼容路径）回退
+    多 SKU：按 OrderItem 维度统计；无明细订单（批量导入兼容路径）回退
     订单级字段（COALESCE），单 SKU 订单行为与旧实现一致。
     """
-    item_type = func.coalesce(OrderItem.order_type, Order.order_type)
     item_qty = func.coalesce(OrderItem.quantity, Order.quantity)
     base = (
         select(func.coalesce(func.sum(item_qty), 0))
@@ -830,17 +667,13 @@ async def get_stock_overview_stats(db: AsyncSession) -> dict:
         .outerjoin(OrderItem, OrderItem.order_id == Order.id)
         .where(Order.is_deleted.isnot(True))
     )
-    order_regular = int((await db.execute(base.where(item_type == 'regular'))).scalar() or 0)
-
-    order_custom = int((await db.execute(base.where(item_type == 'custom'))).scalar() or 0)
+    order_quantity = int((await db.execute(base)).scalar() or 0)
 
     stockin_quantity = int((await db.execute(
         select(func.coalesce(func.sum(StockIn.quantity), 0))
     )).scalar() or 0)
 
     return {
-        'order_quantity': order_regular + order_custom,
-        'order_regular_quantity': order_regular,
-        'order_custom_quantity': order_custom,
+        'order_quantity': order_quantity,
         'stockin_quantity': stockin_quantity,
     }

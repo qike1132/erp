@@ -547,7 +547,7 @@ async def _delete_order_directly(
 
     await db.flush()
     try:
-        # 删除后订单不再计入库存视图（order_agg/country_agg 过滤 is_deleted），
+        # 删除后订单不再计入库存视图（order_agg 过滤 is_deleted），
         # 必须一并失效 INVENTORY 域，否则 /stock 在 TTL 内仍显示已删订单的数量。
         await cache_mgr.invalidate(
             InvalidationStrategy.DOMAIN,
