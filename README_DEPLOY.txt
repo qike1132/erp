@@ -10,13 +10,16 @@ ERP 系统 - 部署说明
 ==============
 
     nginx :3000  ──反代 /api /ws /static──▶  uvicorn :5002  (FastAPI)
+     (erp-web 独立服务)                        (prod_runner 只守护后端)
                                                   │
                                                   ├─ PostgreSQL 18
                                                   └─ Redis (缓存 + ARQ broker)
 
 - 对用户暴露的入口是 **nginx 的 3000 端口**（前端静态资源 + API 反代）；
 - 后端 FastAPI 监听 **5002**，且生产绑定 `127.0.0.1`（不直接对外）；
-- 三个 Windows 服务由 NSSM 托管：`erp-prod`、`erp-arq`、`erp-redis`；
+- 五个 Windows 服务由 NSSM 托管：`erp-prod`（uvicorn）、`erp-web`（nginx）、
+  `erp-arq`、`erp-redis`、`erp-redis-broker`；
+- 前后端**启停解耦**：重启 `erp-prod` 不影响前端静态服务；
 - 后端进程入口是 `python -m fastapi_app.core.prod_runner`，**不是 exe 单体**。
 
 日常启停 / 切换运行模式

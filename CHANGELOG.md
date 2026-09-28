@@ -1,5 +1,17 @@
 # 变更日志 (Changelog)
 
+## [2026-09-28] 生产编排重构：erp-web 单一职责（拆 nginx 出 prod_runner）
+
+### 🏗️ 五服务拓扑（消除监督器混管）
+- **问题**：`prod_runner` 同时托管 nginx（无状态静态）与 uvicorn（有状态 API），生命周期不同却被绑在一个进程树里。历史事故：nginx spawn 方式不当阻塞监督器主循环 → NSSM 反复重启监督器 → nginx 周期性 kill/重建 → **全站连接每 ~35 秒被切断一次**。
+- **改动**：新增 NSSM 服务 `erp-web` 直管 `nginx.exe`（AppExit=Restart，无依赖）；`prod_runner` 删除 `_FrontendNginx`/`_find_nginx`/vite preview 回退等约 260 行，瘦身为只守护 uvicorn；保留对 `:3000/nginx-health` 的**只读探针**（写 `frontend_ok` 字段，失败只报告绝不重启）。前后端启停解耦：重启 erp-prod 不再影响前端静态服务。
+- **迁移**：`scripts/migrate_erp_web.ps1`（幂等，`-DryRun` 可预览命令序列；回滚步骤见脚本头注释，**必须含 `nssm set erp-web Start SERVICE_DISABLED` 防回滚后开机双 nginx**）。
+- **GUI**：`server_manager.py` 七处服务元组扩为三元组（含 `_managed_service_pids` P0-4 闸门——dev 模式切换仍能抢到 :3000）；安装流注册 erp-web；前端徽章仿 ARQ `external` 范式改读服务状态 + 探针交叉验证。
+- **nginx 日志轮转归属**：`_rotate_file_copytruncate` 下沉 `utils/log_rotation.py`；nginx access/error 日志轮转挂入 ARQ cron（每日 04:30，阈值 100MB；ARQ 停摆仅意味着暂不轮转，优雅降级）。
+- **顺带**（同维护窗口生效）：nginx `worker_processes auto(12)→2`、`.env` `UVICORN_WORKERS 8→4`（6 物理核机器去过订阅）。
+- **文档**：`docs/runbooks/service-lifecycle.md` 拓扑重写为五服务、新增 5.2b/5.2c 故障条目；删除被护栏拦死的死脚本 `restart_prod.ps1`。
+- 设计与计划：`docs/superpowers/specs/2026-09-28-erp-web-single-responsibility-design.md`。
+
 ## [2026-09-18] 文件规模门禁阈值上调与单点化
 
 ### 🧱 `file_size_gate` 阈值 1200 → 1600，且不再三处硬编码

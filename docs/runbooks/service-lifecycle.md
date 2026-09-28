@@ -34,27 +34,29 @@
 
 ```
 services.exe
- └─ nssm.exe (erp-prod, 1272)      ← NSSM 服务宿主
-     ├─ prod_runner.py             ← 自研监督器，编排下列子进程
-     │   └─ uvicorn master (:5002)
-     │       └─ N × uvicorn worker          ← 本机实测 8 个
-     └─ nginx.exe (:3000, root=frontend-vite/dist)   ← 1 master + N worker
-
-services.exe
- └─ nssm.exe (erp-arq, 4328)       ← ARQ worker 独立服务
-     └─ python.exe (arq worker)    ← 定时备份/异步任务
-
-services.exe
- └─ nssm.exe (erp-redis, 4220) → redis-server.exe      (:6379, 缓存)
- └─ nssm.exe (erp-redis-broker, 4180) → redis-server.exe (:6380, **ARQ broker**)
+ ├─ nssm.exe (erp-redis, 4220) → redis-server.exe (:6379, 缓存)
+ ├─ nssm.exe (erp-redis-broker, 4180) → redis-server.exe (:6380, **ARQ broker**)
+ ├─ nssm.exe (erp-arq, 4328)
+ │   └─ python.exe (arq worker)    ← 定时备份/异步任务 + nginx 日志轮转 cron
+ ├─ nssm.exe (erp-web)            ← nginx.exe (:3000, root=frontend-vite/dist)
+ │   └─ nginx.exe (master + N worker, 独立进程树)
+ └─ nssm.exe (erp-prod)
+     └─ prod_runner.py            ← 自研监督器，只守护下列后端子进程
+         └─ uvicorn master (:5002)
+             └─ N × uvicorn worker
 ```
 
 | 服务 | 作用 | 启动方式 |
 |---|---|---|
-| `erp-prod` | uvicorn `:5002` + nginx `:3000` | `Auto` + `AppExit=Restart` + `DependOnService=erp-redis` |
-| `erp-arq` | ARQ worker（**定时备份的唯一调度者**） | `Auto` |
+| `erp-prod` | uvicorn `:5002`（prod_runner 只守护后端） | `Auto` + `AppExit=Restart` + `DependOnService=erp-redis` |
+| `erp-web` | nginx `:3000`（静态 + 反代，与后端启停解耦） | `Auto` + `AppExit=Restart`，无依赖 |
+| `erp-arq` | ARQ worker（**定时备份的唯一调度者** + nginx 日志轮转 cron 04:30） | `Auto` |
 | `erp-redis` | 缓存 / Pub-Sub / 维护模式 | `Auto` |
 | `erp-redis-broker` | **ARQ 队列 broker**（哨兵键在这里） | `Auto` |
+
+**前后端解耦（2026-09-28 重构）**：`prod_runner` 不再托管 nginx；它对 `:3000/nginx-health`
+只做**只读探针**（结果写 `frontend_ok` 字段），探测失败只报告、绝不重启。重启
+`erp-prod` 不影响前端静态服务；`erp-web` 挂了 `nssm restart erp-web` 即可，不影响 API。
 
 **镜像/工具路径**：`nssm` 在 `C:\nssm\nssm.exe`（**不在 PATH**）。
 
@@ -196,13 +198,35 @@ NSSM 按「每个元素设一个环境变量」（在**第一个 `=`** 处切分
 > ⚠️ `erp-redis` / `erp-redis-broker` 的 `AppParameters` **明文带 `--requirepass <口令>`**，
 > 本机任意用户可经注册表/Win32_Process 读到 ⇒ **任何产物/工单中引用该配置时必须脱敏**。
 
-### 5.2 「重启后 8 个 worker 变成孤儿，新 master 绑不上 `:5002`」
+### 5.2 「重启后 worker 变成孤儿，新 master 绑不上 `:5002`」
 
 `prod_runner` 的 `_Managed.poll()` 发现 master 退出时只 `_mark_crashed()`，**不调用 `kill_tree()`**。
 ⇒ 若手工杀掉 master 而**没杀树**，worker 会孤儿占住 `:5002`，新 master 绑不上 → 崩溃循环。
 
 **处置**：重启必须**整树**（`taskkill /F /T /PID <master>`）。这也是必须用 GUI/管理员而不是
 手工 `taskkill` 单个进程的原因。
+
+> 注（2026-09-28 重构后）：`erp-web` 的 nginx 由 NSSM Job Object 托管，
+> `nssm stop/start erp-web` 会干净杀/起整棵 nginx 树；只有**绕过 NSSM 手工杀**
+> nginx master 才会产生孤儿 worker。
+
+### 5.2b 「erp-web 挂了但 erp-prod 全绿」
+
+**这是解耦后的正常现象**：`erp-prod` 的健康只看后端。前端静态服务恢复：
+`nssm restart erp-web`（需管理员），API 与备份不受影响。
+GUI 前端徽章读的是 `erp-web` 服务状态 + `frontend_ok` 探针交叉验证。
+
+### 5.2c 「回滚到旧结构后重启机器出现双 nginx」
+
+回滚步骤必须先禁用 erp-web 自启，否则旧 `prod_runner` 拉起的 nginx 会与
+自启的 erp-web 互斗 `:3000`：
+
+```powershell
+nssm stop erp-web
+nssm set erp-web Start SERVICE_DISABLED   # 关键:防开机自启双跑
+git revert <重构系列提交>
+nssm restart erp-prod                      # 旧 prod_runner 重新拉起 nginx
+```
 
 ### 5.3 「改了 `UVICORN_WORKERS` 没效果」
 
