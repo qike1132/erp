@@ -32,8 +32,9 @@ from pathlib import Path
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8")
 
-# 扫描范围：后端源码 + 测试 + 脚本 + 工具（不含迁移与构建产物）+ 仓库根顶层 .py
-SCAN_DIRS = ("fastapi_app", "tests", "utils", "scripts")
+# 扫描范围：后端源码 + 测试 + 脚本 + 工具（不含迁移与构建产物）
+#            + 仓库根顶层 .py + 桌面壳包 server_manager/（全仓最大 .py 的所在）
+SCAN_DIRS = ("fastapi_app", "tests", "utils", "scripts", "server_manager")
 EXCLUDE_DIRS = {"__pycache__", ".archive", "migrations"}
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
