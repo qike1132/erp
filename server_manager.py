@@ -948,13 +948,10 @@ class ServerManagerApp:
         nssm = self._find_nssm()
         cmd = [nssm, 'start', name] if nssm else ['sc', 'start', name]
         self._run_capture(cmd, timeout=20)
-        deadline = time.monotonic() + 20
-        while time.monotonic() < deadline:
-            self._gate.checkpoint()
-            state = self._redis_service_state(name)
-            if 'RUNNING' in state.upper():
-                return True
-            time.sleep(0.5)
+        state = self._wait_service(name, 'RUNNING', 20, interval=0.5,
+                                   state_fn=self._redis_service_state)
+        if 'RUNNING' in state.upper():
+            return True
         self._msg_queue.put(('log', {'text': f'{name} 服务未在 20s 内进入 RUNNING（当前: {state or "未知"}）', 'level': 'WARNING'}))
         return False
 
@@ -2216,6 +2213,31 @@ class ServerManagerApp:
                     return int(parts[1].strip())
         return None
 
+    def _wait_service(self, name, target, timeout, *, checkpoint=True, interval=1.0, state_fn=None):
+        """轮询服务状态直到包含 ``target``(大写比对)；返回最后一次读到的状态。
+
+        收敛前这里有 4 份手写副本(_start_redis_via_service / _wait_service_stopped /
+        _stop_managed_services 内联 / _wait_service_running)，超时与措辞各不相同，
+        调优一处不会传播到其余三处。
+
+        ``checkpoint=False`` 供紧急停止用：stop_all 已先 cancel() 置位，任何
+        checkpoint 都会抛 _ActionCancelled 把「停服务」半路打断 —— 服务没停成，
+        端口清理又会误杀受管进程触发 NSSM 重启。
+
+        ``state_fn`` 供 Redis 用(它读 _redis_service_state 的宽松契约)。
+        """
+        fn = state_fn or self._svc_state
+        deadline = time.monotonic() + timeout
+        state = fn(name)
+        while time.monotonic() < deadline:
+            if checkpoint:
+                self._gate.checkpoint()
+            state = fn(name)
+            if target in state.upper():
+                return state
+            time.sleep(interval)
+        return state
+
     def _wait_service_stopped(self, name, timeout=45):
         """发出 nssm stop 后轮询服务状态直到 STOPPED；超时返回 False。
 
@@ -2224,14 +2246,7 @@ class ServerManagerApp:
         判定为崩溃而自动重启，与目标模式抢占端口。因此必须等待确认 STOPPED。
         """
         self._run_capture([self._find_nssm(), 'stop', name], timeout=15)
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            self._gate.checkpoint()      # 取消时立即中止等待，不再空等 45s
-            state = self._svc_state(name)
-            if 'STOPPED' in state:
-                return True
-            time.sleep(1)
-        return False
+        return 'STOPPED' in self._wait_service(name, 'STOPPED', timeout)
 
     def _managed_service_pids(self):
         """NSSM 受管进程集合（服务根 PID + 整棵子树）。
@@ -2271,13 +2286,10 @@ class ServerManagerApp:
                 self._run_capture([nssm, 'stop', name], timeout=30)
             else:
                 self._run_capture(['sc', 'stop', name], timeout=30)
-            deadline = time.monotonic() + 45
-            while time.monotonic() < deadline:
-                if 'STOPPED' in self._svc_state(name):
-                    stopped += 1
-                    self._msg_queue.put(('log', {'text': f'{name} 已停止'}))
-                    break
-                time.sleep(1)
+            st = self._wait_service(name, 'STOPPED', 45, checkpoint=False)
+            if 'STOPPED' in st:
+                stopped += 1
+                self._msg_queue.put(('log', {'text': f'{name} 已停止'}))
             else:
                 self._msg_queue.put(('log', {'text': f'{name} 在 45s 内未确认 STOPPED，将在端口清理时排除其受管进程以避免误杀触发重启', 'level': 'WARNING'}))
         return stopped, managed
@@ -3058,16 +3070,11 @@ class ServerManagerApp:
         NSSM start/restart 立即返回，服务要经 START_PENDING 才到 RUNNING——
         不轮询就报「已执行」等于什么都没说。超时仍未 RUNNING 如实告警并指路日志文件。
         """
-        deadline = time.monotonic() + timeout
-        state = self._svc_state(name)
-        while time.monotonic() < deadline:
-            self._gate.checkpoint()
-            state = self._svc_state(name)
-            if 'RUNNING' in state.upper():
-                pid = self._svc_pid(name)
-                self._msg_queue.put(('log', {'text': f'{name} 启动成功 (state={state}, PID: {pid if pid is not None else "?"})'}))
-                return True, state, pid
-            time.sleep(1)
+        state = self._wait_service(name, 'RUNNING', timeout)
+        if 'RUNNING' in state.upper():
+            pid = self._svc_pid(name)
+            self._msg_queue.put(('log', {'text': f'{name} 启动成功 (state={state}, PID: {pid if pid is not None else "?"})'}))
+            return True, state, pid
         self._msg_queue.put(('log', {'text': f'{name} 在 {timeout}s 内未进入 RUNNING（当前: {state}），请查看 logs\\{name}.log', 'level': 'WARNING'}))
         return False, state, None
 
