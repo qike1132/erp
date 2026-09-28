@@ -1362,61 +1362,6 @@ class ServerManagerApp:
             pass
         return list(pids)
 
-    def _start_server(self, script_name, mode_label, mode_key='debug'):
-        if self._mode != 'none':
-            self.log_message(f"已有服务在运行或启动中，请先停止后再启动", 'WARNING')
-            return
-        if not _PYTHON_EXE:
-            self.log_message("无法启动: 未找到 Python 解释器，请安装 Python 并确保在 PATH 中", 'ERROR')
-            messagebox.showerror("启动失败", "未找到可用的 Python 解释器！\n\n请安装 Python 3.12+ 并确保 python 在 PATH 中，\n或在项目目录下创建虚拟环境 (.venv313)")
-            return
-        script = str(_PROJECT_DIR / script_name)
-        if not Path(script).is_file():
-            self.log_message(f"启动脚本不存在: {script}", 'ERROR')
-            messagebox.showerror("错误", f"启动脚本不存在:\n{script}")
-            return
-        self._gate.start(f'启动{mode_label}', self._start_debug_flow, script, mode_label, mode_key)
-
-    def _start_debug_flow(self, script, mode_label, mode_key):
-        # 状态变更也放进 worker：入口侧不再存在「已取锁、还没起线程」的中间态，
-        # 也就没有那个从审计中实测出来的“异常即永久持锁”窗口。
-        self._mode = 'starting'
-        self._current_mode_key = mode_key
-        self._msg_queue.put(('log', {'text': f"正在启动{mode_label}..."}))
-        self._msg_queue.put(('status', {'text': f"正在启动{mode_label}..."}))
-        self._msg_queue.put(('ui_update', {}))
-        self._start_thread(script, mode_label, mode_key)
-
-    def _start_thread(self, script, mode_label, mode_key):
-        try:
-            self._gate.checkpoint()
-            self._msg_queue.put(('log', {'text': '正在清理端口...'}))
-            self._kill_port_sync(_API_PORT)
-
-            env = os.environ.copy()
-            env.update({'PYTHONUNBUFFERED': '1', 'PYTHONIOENCODING': 'utf-8', 'PYTHONUTF8': '1', 'PYTHONPATH': str(_PROJECT_DIR)})
-            self._gate.checkpoint()      # 取消已请求时绝不产生新进程
-            self._process = subprocess.Popen([_PYTHON_EXE, script], cwd=str(_PROJECT_DIR), env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, creationflags=subprocess.CREATE_NO_WINDOW if _IS_WINDOWS else 0, text=False)
-            self._msg_queue.put(('log', {'text': f"进程已启动 (PID: {self._process.pid})"}))
-            threading.Thread(target=self._read_stdout, args=(self._process,), daemon=True).start()
-            time.sleep(2)
-            self._gate.checkpoint()
-            if self._process.poll() is None:
-                self._msg_queue.put(('started', {'label': mode_label, 'mode_key': mode_key}))
-            else:
-                self._process = None
-                self._mode = 'none'
-                self._current_mode_key = ""
-                self._msg_queue.put(('ui_update', {}))
-                self._msg_queue.put(('log', {'text': f"{mode_label}进程启动后立即退出", 'level': 'ERROR'}))
-                self._msg_queue.put(('status', {'text': f"{mode_label}启动失败"}))
-        except Exception as e:
-            self._process = None
-            self._mode = 'none'
-            self._current_mode_key = ""
-            self._msg_queue.put(('ui_update', {}))
-            self._msg_queue.put(('log', {'text': f"启动异常: {str(e)}", 'level': 'ERROR'}))
-            self._msg_queue.put(('status', {'text': f"{mode_label}启动失败"}))
 
     def _read_stdout(self, proc):
         try:
@@ -1456,17 +1401,6 @@ class ServerManagerApp:
                 continue
         return ('Microsoft YaHei UI', 9)
 
-    def _on_started(self, mode_label, mode_key='debug'):
-        if not self._process or self._process.poll() is not None:
-            self.log_message(f"{mode_label}启动后进程已退出", 'ERROR')
-            self._mode, self._process = 'none', None
-            self._current_mode_key = ""
-            self._update_all_ui()
-            return
-        self._mode = mode_key
-        self._update_all_ui()
-        self.status_bar_label.config(text=f"{mode_label}运行中")
-        self.log_message(f"{mode_label}启动成功 — http://localhost:5002")
 
     def _poll_queue(self):
         try:
@@ -1489,8 +1423,6 @@ class ServerManagerApp:
                 elif msg_type == 'log_batch':
                     for line in data['lines']:
                         self.log_message(line, data.get('level', 'INFO'))
-                elif msg_type == 'started':
-                    self._on_started(data['label'], data.get('mode_key', 'debug'))
                 elif msg_type == 'dual_started':
                     self._on_dual_started(data['label'])
                 elif msg_type == 'dual_failed':
@@ -1574,26 +1506,14 @@ class ServerManagerApp:
             self._msg_queue.put(('log', {'text': f'{owner}超过 {payload.get("seconds")}s 未结束，看门狗已强制释放动作闸门', 'level': 'ERROR'}))
             self._msg_queue.put(('op_aborted', {}))
 
-    def start_debug(self):
-        self._start_server('run.py', '调试模式', mode_key='debug')
 
     def start_dual_dev(self):
         self._start_dual_server('开发模式（前后端）')
 
-    def stop_debug(self):
-        self._stop_mode('debug', '调试模式')
 
     def stop_dual_dev(self):
         self._stop_dual_mode_async('开发模式')
 
-    def _stop_mode(self, mode, label):
-        if self._mode == mode:
-            self._stop_process()
-            self._mode = 'none'
-            self._update_all_ui()
-            self.log_message(f"{label}已停止")
-        else:
-            self.log_message(f"{label}未运行")
 
     def stop_all(self):
         # 紧急停止：不经闸门（它的职责就是打断正在进行的动作），但要先协作式取消：
@@ -1658,37 +1578,10 @@ class ServerManagerApp:
                 self._msg_queue.put(('log', {'text': f"清理残留进程出错: {e}", 'level': 'WARNING'}))
         threading.Thread(target=_kill_worker, daemon=True).start()
 
-    def restart_debug(self):
-        self._gate.start('重启调试模式', self._restart_thread)
 
     def restart_dual_dev(self):
         self._gate.start('重启开发模式', self._restart_dual_thread)
 
-    def _restart_thread(self):
-        self._mode = 'restarting'
-        self._msg_queue.put(('ui_update', {}))
-        proc = self._process
-        self._process = None
-        if proc and proc.poll() is None:
-            self._msg_queue.put(('log', {'text': f"重启：终止进程树 (PID: {proc.pid})..."}))
-            if _IS_WINDOWS:
-                for cpid in self._collect_process_tree(proc.pid):
-                    with contextlib.suppress(Exception):
-                        _taskkill(cpid)
-                _taskkill(proc.pid)
-                with contextlib.suppress(Exception):
-                    proc.wait(timeout=3)
-            else:
-                proc.terminate()
-                try:
-                    proc.wait(timeout=5)
-                except Exception:
-                    proc.kill()
-        self._kill_port_sync(_API_PORT)
-        time.sleep(0.5)
-        self._gate.checkpoint()
-        self._mode = 'restarting'
-        self._start_thread(str(_PROJECT_DIR / 'run.py'), '调试模式', mode_key='debug')
 
     def _start_dual_server(self, label):
         # 互斥守卫：开发模式正在启动/重启中则不操作
@@ -2491,21 +2384,19 @@ class ServerManagerApp:
     def _collect_hosting_data(self):
         """纯数据收集（后台线程执行）——不触碰任何 UI 组件"""
         data = {
-            'nssm': self._find_nssm(),
             'api_state': self._svc_state(_SVC_API),
             'arq_state': self._svc_state(_SVC_ARQ),
         }
         data['api_running'] = 'RUNNING' in data['api_state'].upper() if data['api_state'] else False
         data['api_unknown'] = data['api_state'] == '未知'
-        data['arq_unknown'] = data['arq_state'] == '未知'
         data['redis_ok'] = self._is_redis_running()
         # broker 独立探测：它不在 prod_runner 的就绪判据里（ARQ 是独立服务），
         # 必须单独采集，否则「ARQ 已死」和「一切正常」在界面上长得一模一样。
         data['broker_ok'] = self._is_broker_running()
-        data['redis_svc_state'] = self._redis_service_state(_SVC_REDIS_CACHE)
-        data['broker_svc_state'] = self._redis_service_state(_SVC_REDIS_BROKER)
+        # 注：曾采集 nssm / arq_unknown / redis_svc_state / broker_svc_state / status_file
+        # 五个键但**无任何读取方**(2026-09-28 评审实测)，其中后两项每 5 秒白跑一次
+        # `sc query`，已删。
         status_file = _PROJECT_DIR / 'logs' / 'prod_runner.json'
-        data['status_file'] = status_file
         data['status'], data['read_err'], data['mtime'], data['stale'], data['mtime_str'] = {}, None, 0, False, '—'
         if not data['api_running']:
             return data
