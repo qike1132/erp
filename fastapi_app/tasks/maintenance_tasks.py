@@ -2,16 +2,35 @@
 
 职责：
 - 刷新仪表盘物化视图
+- nginx 日志轮转（prod_runner 不再托管 nginx 后的轮转归属）
 - 其他低频率维护型任务
 """
 import asyncio
 import logging
+from pathlib import Path
 
 from sqlalchemy import text
 
 from fastapi_app.core.database import get_async_db_context
+from utils.log_rotation import rotate_file_copytruncate
 
 logger = logging.getLogger(__name__)
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+LOGS_DIR = PROJECT_ROOT / "logs"
+NGINX_LOGS = ("nginx-access.log", "nginx-error.log")
+NGINX_LOG_ROTATE_BYTES = 100 * 1024 * 1024  # 100MB,当前增速数月 8MB,一年不满盘
+
+
+async def rotate_nginx_logs_task(ctx) -> dict:
+    """ARQ 任务：检查 nginx 日志,超阈值 copytruncate 轮转。
+
+    ARQ 停摆仅意味着暂不轮转(优雅降级),不产生告警。纯文件操作,
+    async 仅为满足 ARQ cron() 对协程函数的要求。
+    """
+    for name in NGINX_LOGS:
+        rotate_file_copytruncate(LOGS_DIR / name, NGINX_LOG_ROTATE_BYTES)
+    return {"success": True, "message": "nginx 日志轮转检查完成"}
 
 
 async def _refresh_single_mv(db, mv_name: str) -> None:
