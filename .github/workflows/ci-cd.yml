@@ -150,6 +150,13 @@ jobs:
         python -m pip install --upgrade pip
         pip install ruff mypy
     
+    # 密钥扫描（CI 侧第二道防线）：`.githooks/pre-commit` 只在本地跑、且可被
+    # `git commit --no-verify` 绕过 —— 该文件头部已把「CI 侧必须另有一道独立扫描」
+    # 列为审计行动项。本步骤扫**全部受版本控制的文件**（hook 只看暂存），
+    # 因此能发现历史上已入库的可疑文件。置于最前，确保密钥问题优先可见。
+    - name: Run secret scan (whole tree)
+      run: python scripts/scan_secrets.py --verbose
+
     # 统一代码质量门禁（基线棘轮）：存量违规不阻断，新增即拦截。
     # 置于 ruff 之前，确保即使 ruff 步骤因存量告警失败，本步骤的结果仍然可见。
     - name: Run code quality gate (baseline ratchet)

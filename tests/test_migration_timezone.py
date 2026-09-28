@@ -14,6 +14,13 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
+import pytest
+import sqlalchemy as sa
+from alembic.operations import Operations
+from alembic.runtime.migration import MigrationContext
+
+import migrations._legacy_base_guard as guard
+
 MIGRATION_PATH = (
     Path(__file__).resolve().parent.parent
     / "migrations"
@@ -32,6 +39,42 @@ def _load_migration_module():
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
+
+
+@pytest.fixture
+def migration_mod(monkeypatch):
+    """加载迁移模块，并让守卫看到一个「目标表与列都存在」的 Alembic 上下文。
+
+    迁移的 ``_convert`` 用 ``migrations._legacy_base_guard.table_columns()`` 判断
+    「表/列是否存在」。该函数读的是**守卫模块内**的 ``op``；而直接调用 ``upgrade()``
+    时 Alembic 的 ops 代理尚未建立，于是抛
+    ``NameError: ... the proxy object has not yet been established``。
+
+    这里用一个建好全部 ``_COLUMNS`` 表/列的 sqlite 内存库构造真实的 ``Operations``，
+    使守卫按「列存在」放行，从而可以断言迁移产出的 DDL。
+    """
+    mod = _load_migration_module()
+
+    tables: dict[str, list[str]] = {}
+    for table, column in mod._COLUMNS:
+        tables.setdefault(table, []).append(column)
+
+    # 注意：`sqlite://` 默认走 SingletonThreadPool，下面 connect() 拿到的与建表时
+    # 用的是同一个连接，内存表因此对 sa_inspect 可见；若改成文件库或连接池，
+    # 守卫会看不到表 → table_columns() 返回 None → 断言数归零。
+    engine = sa.create_engine("sqlite://")
+    with engine.begin() as conn:
+        for table, columns in tables.items():
+            cols_ddl = ", ".join(f'"{c}" TEXT' for c in columns)
+            conn.exec_driver_sql(f'CREATE TABLE "{table}" ({cols_ddl})')
+
+    connection = engine.connect()
+    try:
+        monkeypatch.setattr(guard, "op", Operations(MigrationContext.configure(connection)))
+        yield mod
+    finally:
+        connection.close()
+        engine.dispose()
 
 
 class _CaptureOps:
@@ -60,8 +103,8 @@ class TestMigrationTimezoneSanity:
         assert "purchase_order" in tables, "purchase_order table should be migrated"
         assert "modification_log" in tables, "audit/modification_log table should be migrated"
 
-    def test_upgrade_generates_at_time_zone_utc_for_every_column(self):
-        mod = _load_migration_module()
+    def test_upgrade_generates_at_time_zone_utc_for_every_column(self, migration_mod):
+        mod = migration_mod
         capture = _CaptureOps()
         # Temporarily swap the alembic op with our capture:
         original_op = getattr(mod, "op", None)
@@ -75,7 +118,7 @@ class TestMigrationTimezoneSanity:
         assert len(capture.executed) == len(mod._COLUMNS), (
             f"Expected 1 ALTER per column ({len(mod._COLUMNS)}), got {len(capture.executed)}"
         )
-        for (table, column), sql in zip(mod._COLUMNS, capture.executed, strict=False):
+        for (table, column), sql in zip(mod._COLUMNS, capture.executed, strict=True):
             assert sql.count("ALTER TABLE") == 1, f"Bad DDL shape for {table}.{column}: {sql}"
             assert "ALTER COLUMN" in sql, f"Missing ALTER COLUMN for {table}.{column}: {sql}"
             assert "TIMESTAMP WITH TIME ZONE" in sql, f"Wrong target type for {table}.{column}: {sql}"
@@ -91,9 +134,9 @@ class TestMigrationTimezoneSanity:
             assert f'"{table}"' in sql, f"Table identifier not quoted in: {sql}"
             assert f'"{column}"' in sql, f"Column identifier not quoted in: {sql}"
 
-    def test_downgrade_also_uses_at_time_zone_utc(self):
+    def test_downgrade_also_uses_at_time_zone_utc(self, migration_mod):
         """Going back down must also preserve value semantics (UTC → naive UTC)."""
-        mod = _load_migration_module()
+        mod = migration_mod
         capture = _CaptureOps()
         original_op = getattr(mod, "op", None)
         mod.op = capture
@@ -119,9 +162,9 @@ class TestMigrationTimezoneSanity:
         assert mod._q("simple") == '"simple"'
         assert mod._q('weird"name') == '"weird""name"', "Embedded quote should be doubled per SQL standard"
 
-    def test_sample_order_columns_upgrade_sql_matches_expected_pattern(self):
+    def test_sample_order_columns_upgrade_sql_matches_expected_pattern(self, migration_mod):
         """Exact-content check for a representative known-good ALTER."""
-        mod = _load_migration_module()
+        mod = migration_mod
         capture = _CaptureOps()
         original_op = getattr(mod, "op", None)
         mod.op = capture

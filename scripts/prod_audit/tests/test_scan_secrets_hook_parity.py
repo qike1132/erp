@@ -1,0 +1,89 @@
+"""`.githooks/pre-commit` ↔ `scripts/_selftest_hook.py` 规则一致性守卫。
+
+存在理由
+--------
+规则链是：`.githooks/pre-commit`（**真源**，shell，手写）
+      → `scripts/_selftest_hook.py`（**手工镜像**）
+      → `scripts/scan_secrets.py`（import 镜像，不复制正则）。
+
+import 只消除了「第三份副本」，**并不能**保证镜像与真源同步 ——
+而两者一旦漂移，本地 hook 与 CI 扫描就会用不同的规则判断同一份代码，
+出现「本地拦住、CI 放行」或反之。本文件把这条同步关系变成可执行断言。
+
+实测已存在的已知差异
+--------------------
+shell 用 POSIX 字符类 `[[:space:]]`，镜像用 `[ \\t]`。单行文本里二者仅
+`\\v/\\f/\\r` 上不同（`\\n` 不可能出现在单行内），故按**等价**归一化后再比对。
+"""
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+import pytest
+
+from scripts._selftest_hook import SECRET_PATTERN
+
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+HOOK = PROJECT_ROOT / '.githooks' / 'pre-commit'
+
+# shell 里 `secret_patterns='...'` 是单引号字面量，内部无嵌套引号，可安全提取。
+_SECRET_PATTERNS_RE = re.compile(r"secret_patterns='([^']*)'")
+
+# 已知等价差异：POSIX 字符类 → Python 等价写法
+_NORMALIZE = ((r'[[:space:]]', r'[ \t]'),)
+
+
+def _normalize(pattern: str) -> str:
+    for posix, py in _NORMALIZE:
+        pattern = pattern.replace(posix, py)
+    return pattern
+
+
+def _shell_secret_patterns() -> str:
+    m = _SECRET_PATTERNS_RE.search(HOOK.read_text(encoding='utf-8'))
+    assert m, f'未能从 {HOOK} 提取 secret_patterns（hook 结构可能已变）'
+    return m.group(1)
+
+
+def test_shell_secret_patterns_present() -> None:
+    """同名测试确保提取本身没有静默失效。"""
+    assert 'BEGIN' in _shell_secret_patterns()
+
+
+def test_mirror_matches_shell_secret_patterns() -> None:
+    """镜像里的 SECRET_PATTERN 必须与 shell 的真源逐字一致（归一化后）。"""
+    shell = _normalize(_shell_secret_patterns())
+    mirror = _normalize(SECRET_PATTERN.pattern)
+
+    assert mirror == shell, (
+        'scripts/_selftest_hook.py 的 SECRET_PATTERN 与 .githooks/pre-commit 的\n'
+        'secret_patterns 已漂移 —— 本地 hook 与 CI 扫描会用不同规则判断同一份代码。\n'
+        f'shell : {shell}\n'
+        f'mirror: {mirror}'
+    )
+
+
+@pytest.mark.parametrize('token', ['AKIA', 'gh[pousr]_', 'sk-', 'BEGIN', 'xox'])
+def test_both_sides_still_cover_known_credential_families(token: str) -> None:
+    """防止「两侧一起被改松」：关键凭据家族必须在两侧都仍被覆盖。
+
+    注意用模式里的**原文**（如 `gh[pousr]_` 是字符类，不是字面量 `ghp_`）。
+    """
+    assert token in _shell_secret_patterns()
+    assert token in SECRET_PATTERN.pattern
+
+
+def test_pwd_pattern_not_compared_and_why() -> None:
+    """`pwd_pattern` 刻意**不**做字面比对。
+
+    shell 里它含引号拼接技巧（`["'"'"']`）来产出正则 `["']`，
+    字面提取需要完整的 shell 引用语义；用正则粗提取会得到被截断的片段，
+    从而产生一个「看起来在守卫、实际在自欺」的测试。
+    该模式的行为一致性改由 scripts/_selftest_hook.py 的 CASES 用例表覆盖
+    （那批用例正是从真实拦截事件里来的）。
+    """
+    text = HOOK.read_text(encoding='utf-8')
+    assert 'pwd_pattern=' in text
+    # 明确记录：这里的断言只是"该模式仍在"，不是"两侧一致"。
+    assert text.count('pwd_pattern=') >= 1

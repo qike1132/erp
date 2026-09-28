@@ -44,8 +44,11 @@ deliverables/engineering-assurance/_member-cody.md
 
 # 2026-09-24 复核：用户管理表单的字段透传（Vue reactive 字段 → 提交载荷），
 # 命中片段右侧均为**变量引用**，不含任何字面凭据。
-# 第 2 层「右侧是表达式而非字面量」的收窄（④）目前只对 .py 生效，
-# .vue 会落进误报，故按文件豁免（待 ④ 扩展到 .vue/.ts 后可移除本组）。
+# 第 2 层「右侧是表达式而非字面量」的收窄（④）在本 hook 里**只对 .py 生效**，
+# 故 .vue 会落进误报，按文件豁免。
+# 注：CI 侧 scripts/scan_secrets.py 已把 ④ 扩展到 .ts/.js/.vue，因此这些文件
+#     能通过 CI 扫描；本组条目是给**本地 hook** 用的，待 ④ 也移植进 hook 后
+#     方可移除。
 # 注：刻意不复述命中片段，避免本文件自身命中第 2 层规则。
 frontend-vite/src/views/user/components/UserCreateForm.vue
 frontend-vite/src/views/user/components/UserEditDialog.vue
@@ -53,7 +56,28 @@ frontend-vite/src/views/user/components/UserEditDialog.vue
 # 2026-09-24 复核：备份还原弹窗与其配套 HOTL 计划文档。
 # 两处命中片段的右值均为**变量引用/属性读取**，不含任何字面凭据；
 # 与上方 user 表单同属第 2 层「右侧是表达式而非字面量」收窄（④）
-# 尚未覆盖 .vue/.md 所致的误报（④ 目前仅对 .py 生效）。
+# 在本 hook 中尚未覆盖 .vue/.md 所致的误报（④ 仅对 .py 生效；
+# CI 侧扫描器已覆盖 .ts/.js/.vue，但 .md 仍按后缀豁免）。
 # 注：刻意不复述命中片段，避免本文件自身命中第 2 层规则。
 frontend-vite/src/components/backup/RestoreConfirmDialog.vue
 docs/plans/2026-09-24-backup-restore-direct-workflow.md
+
+# 2026-09-28 复核：登录表单的显隐开关透传。属性名含 password 字样，
+# 但绑定的是从 useLogin() 解构出的**布尔状态**，非凭据；与上方 user 表单
+# 同属第 2 层「右侧是表达式而非字面量」收窄（④）在本地 hook 未覆盖 .vue
+# 所致的误报（CI 侧扫描器已覆盖 .vue，故该文件在 CI 侧另有 next-line 标记）。
+# 核实：`grep -niE "password|secret|token"` 仅命中属性名与变量名两处，
+#       文件内无任何字面凭据。
+# 注：刻意不复述命中片段，避免本文件自身命中第 2 层规则。
+frontend-vite/src/views/login/LoginFormPc.vue
+
+# 2026-09-28 复核：密钥扫描器自身及其测试。
+#   1) scripts/scan_secrets.py —— 把抑制标记（allow / allow-next-line）写成
+#      字符串常量，属第 2 层口令规则的自指场景（同上方 .githooks/pre-commit）。
+#   2) scripts/prod_audit/tests/test_scan_secrets.py —— 断言用例内使用 PEM
+#      私钥头格式串与云厂商**公开文档示例**密钥，用于验证扫描器确实能命中；
+#      与上方 test_self_audit.py 同类，非真实凭据。
+# 核实：逐条比对命中处均为字面样例/常量定义，无真实凭据值。
+# 注：刻意不复述任何字面，避免本文件自身命中第 2 层规则。
+scripts/scan_secrets.py
+scripts/prod_audit/tests/test_scan_secrets.py
