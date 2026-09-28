@@ -52,8 +52,6 @@ interface StockoutRecord {
   quantity?: number
   deduct_quantity?: number
   note?: string
-  order_type?: string
-  country?: string
 }
 
 defineProps<{

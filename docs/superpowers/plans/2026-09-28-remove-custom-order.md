@@ -256,7 +256,18 @@ command git commit -m "refactor(stock): 可出货量计算移除订单类型与�
 - Modify: `fastapi_app/services/order/commands.py`
 - Modify: `fastapi_app/services/staging/stockout.py`
 - Modify: `fastapi_app/services/approval_service.py`
-- Test: `tests/test_order.py`、`tests/test_stock.py`、`fastapi_app/tests/test_batch_stockout.py`
+- Modify: `fastapi_app/api/v1/endpoints/order.py`
+- Modify: `fastapi_app/services/order/queries.py`
+- Modify: `fastapi_app/services/order/beile.py`
+- Modify: `fastapi_app/services/order_batch_create.py`
+- Modify: `fastapi_app/services/staging/order.py`
+- Modify: `fastapi_app/services/serializers/order_serializer.py`
+- Modify: `fastapi_app/services/stock_in_service.py`
+- Modify: `fastapi_app/services/purchase/_list.py`
+- Modify: `fastapi_app/services/purchase/_unprocessed.py`
+- Test: `tests/test_order.py`、`tests/test_stock.py`、`fastapi_app/tests/test_batch_stockout.py`、`fastapi_app/tests/test_order_serializer.py`、`fastapi_app/tests/test_order_batch_create.py`、`fastapi_app/tests/test_purchase_center.py`
+
+> 范围修正（见 ledger Task 3 Ruling）：`order_type` 实测出现在 33 个后端文件，语义分三类。代表「定制/常规 + 国家」的一律清理（含 purchase / beile / serializer / stock_in / staging/order / order/queries）；纯标签类（`notification_service.py` 的 `'贝乐订单'`、`outsource/_shipments.py` 的 `'发货单'`、`stock_out.py` 的索引名）**不动**。
 
 **Interfaces:**
 - Consumes: Task 2 的 `calculate_available_shipment_quantity(db, product_id, customer)`
@@ -304,7 +315,7 @@ Expected: FAIL，列出仍含该文案的文件（预期含 `stock_out_service.p
 - 删除 L102 附近的 `raise ValueError('定制订单必须填写国家名称')`
 - 删除对 `order_type` / `country` 的赋值与使用
 
-`fastapi_app/services/staging/stockout.py`：删除 `order_type` / `country` 的处理与存储。
+`fastapi_app/services/staging/stockout.py`：删除 `order_type` / `country` 的处理与存储，**并**把 L144 的 `calculate_available_shipment_quantity(...)` 调用（现传 `order_type=` / `country=`）改为三参形式 `(db, product_id, customer)`。
 
 `fastapi_app/services/approval_service.py`：删除文件头 TODO 中提及 `order.order_type`/`order.country` 的段落，以及函数体中对这两个属性的读写。
 
@@ -754,9 +765,10 @@ def test_stock_endpoint_has_no_order_type_param(fn):
     assert 'country' not in params
 
 
-def test_stock_stats_source_has_no_custom_quantity():
-    src = inspect.getsource(stock_ep._fetch_stock_stats)
-    assert 'order_custom_quantity' not in src
+def test_stock_stats_model_has_no_custom_fields():
+    fields = set(stock_ep.StockStatsData.model_fields)
+    assert 'order_custom_quantity' not in fields
+    assert 'order_regular_quantity' not in fields
 ```
 
 - [ ] **Step 2: 运行确认失败**
@@ -773,7 +785,7 @@ Expected: FAIL
 - `list_stockins`（L43）：删除 `order_type: str | None = Query(None, description='订单类型')`（L47）、向 service 的 `order_type=order_type` 透传（L70），以及 docstring 中 `order_type: 订单类型筛选（regular/custom）。`（L59）
 - `list_stockouts`（L164）：删除 `order_type` 查询参数（L168）、透传（L191）、docstring（L180）
 - `create_stockout`（L200）：删除 `order_type=data.order_type, country=data.country,`（L219）
-- `order_custom_quantity: int = 0   # 定制订单数量`（L408）：删除该键，并删除其数据来源——`fastapi_app/services/stock_inventory_service.py:get_stock_overview_stats` 已去掉对应返回值
+- `StockStatsData`（L404-409）：删除 `order_regular_quantity`（L407）与 `order_custom_quantity`（L408）两个字段；L406 注释 `# 订单数量（常规+定制）` 改为 `# 订单数量`；`get_stock_stats` docstring（L430）改为「订单数量与备货数量」。数据来源 `get_stock_overview_stats` 已在 Task 6 收敛为 `{order_quantity, stockin_quantity}`，`StockStatsData(**data)` 方能解包
 - 删除 `order_type` / `country` 在请求体处理中的其余引用
 
 `utils/report_exporter.py`：删除 L189-191 的 `country_orders` 读取与追加列逻辑。
@@ -1050,6 +1062,8 @@ command git commit -m "refactor(web): 前端共享类型与 API 移除定制订�
 - Modify: `frontend-vite/src/views/customer-order/components/OrderInputPanel.vue`
 - Modify: `frontend-vite/src/views/customer-order/components/EditOrderModal.vue`
 - Modify: `frontend-vite/src/views/customer-order/CustomerOrderView.vue`
+- Modify: `frontend-vite/src/views/customer-order/components/StagingArea.vue`
+- Modify: `frontend-vite/src/views/customer-order/composables/useStagedItems.ts`
 
 **Interfaces:**
 - Consumes: Task 10 的类型
@@ -1126,6 +1140,8 @@ command git commit -m "refactor(web): customer-order 视图移除定制订单与
 - Modify: `frontend-vite/src/views/stock/InventoryTab.vue`
 - Modify: `frontend-vite/src/views/stock/components/InventoryStatRow.vue`
 - Delete: `frontend-vite/src/views/stock/components/StockWarningDialog.vue`
+- Modify: `frontend-vite/src/views/stock/components/StockOutStagingList.vue`
+- Modify: `frontend-vite/src/views/stock/composables/useStockOutActions.ts`
 
 **Interfaces:**
 - Consumes: Task 10 的类型、Task 6 的库存响应
@@ -1177,6 +1193,9 @@ command git commit -m "refactor(web): stock 视图移除订单类型、国家与
 - Delete: `frontend-vite/src/stores/country.ts`
 - Delete: `frontend-vite/src/api/country.ts`
 - Modify: `frontend-vite/src/api/index.ts`
+- Modify: `frontend-vite/src/views/purchase/components/ActiveOrdersPanel.vue`
+- Modify: `frontend-vite/src/views/purchase/components/PendingOrdersPanel.vue`
+- Modify: `frontend-vite/src/views/notifications/composables/useNotificationCenterPage.ts`
 
 **Interfaces:**
 - Consumes: Task 11、Task 12 已移除全部消费者

@@ -1,5 +1,16 @@
 # 变更日志 (Changelog)
 
+## [2026-09-28] 移除「定制订单」与「国家」功能
+
+### 🗑️ 订单类型收敛为单一常规订单
+- **范围**：`/customer-order` 不再有订单类型与国家录入；`/stock` 不再有定制订单列、国家筛选与按国家校验库存；`/aux/countries` 国家管理接口整体删除。
+- **数据层**：迁移 `pg_standalone_055` 删除 `order`/`order_item`/`stock_in`/`staging_order`/`staging_stock_out` 五张表的 `order_type`、`country` 列、定制订单专用部分索引 `idx_order_custom_type` 与国家主数据表 `country`。执行前实测**无任何 custom 数据**，不丢业务数据。
+- **行为变化**：新建订单/备货一律常规；可出货量回到「客户+产品」维度；库存页「总订单 = 订单余量 + 备货量」；Excel 批量导入若仍带「国家」列则**静默忽略**。
+- **实现**：后端 33 个文件（schema/service/endpoint/ORM/批量导入/序列化/湖北列表/purchase 读取路径）+ 前端 40 余个文件（customer-order、stock、共享类型与 API、purchase 面板「定制」标签），并删除 `Country` 模型、`stores/country.ts`、`api/country.ts`、`CountryDialog.vue`、`StockWarningDialog.vue`。
+- **验证**：后端全量 pytest；前端 `vue-tsc` 0 错误 + vitest 655 通过；迁移 `upgrade` → `downgrade` → `upgrade` 演练通过。
+- 设计与计划：`docs/superpowers/specs/2026-09-28-remove-custom-order-design.md`、`docs/superpowers/plans/2026-09-28-remove-custom-order.md`。
+- **部署注意**：迁移生效后必须重启 `erp-prod` 服务——旧进程仍读写已删列，订单/出库路径会 500。
+
 ## [2026-09-28] 生产编排重构：erp-web 单一职责（拆 nginx 出 prod_runner）
 
 ### 🏗️ 五服务拓扑（消除监督器混管）
