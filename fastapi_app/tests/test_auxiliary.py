@@ -118,6 +118,22 @@ class TestAuxiliaryEndpoints:
         assert data['order_quantity'] == 0
 
     @pytest.mark.asyncio
+    async def test_countries_endpoint_removed(self, client):
+        """国家管理接口随定制订单一并移除。"""
+        response = await client.get("/api/v1/aux/countries")
+        assert response.status_code == 404
+
+    def test_available_shipment_has_no_order_type_param(self):
+        """接口不再声明 order_type/country 查询参数。"""
+        import inspect
+
+        from fastapi_app.api.v1.endpoints.auxiliary import available_shipment
+
+        params = set(inspect.signature(available_shipment).parameters)
+        assert 'order_type' not in params
+        assert 'country' not in params
+
+    @pytest.mark.asyncio
     async def test_delete_stockout_api(self, client, mock_db):
         with patch('fastapi_app.services.stock_service.delete_stockout', new_callable=AsyncMock):
             response = await client.delete("/api/v1/aux/stockout/1")

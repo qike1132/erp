@@ -5,8 +5,6 @@
 - count_inventory_logs / get_inventory_logs_page
 - get_available_stockins / get_stockin_by_id
 - get_supplier_by_id / supplier_has_bom_or_orders / delete_supplier
-- list_countries_ordered / get_country_by_name / get_country_by_id
-- create_country / delete_country
 - get_system_stats
 
 注：产品搜索已统一委托 ProductSearchService（批次 2-4），相关测试见其自身用例。
@@ -15,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from fastapi_app.core.exceptions import BusinessError, ConflictError, NotFoundError
+from fastapi_app.core.exceptions import BusinessError, NotFoundError
 from fastapi_app.services import auxiliary_service
 
 
@@ -202,67 +200,6 @@ class TestDeleteSupplier:
 
 
 # ============================================================================
-# create_country
-# ============================================================================
-class TestCreateCountry:
-    @pytest.mark.asyncio
-    async def test_raises_400_when_name_empty(self):
-        """国家名称为空时应抛 400"""
-        db = AsyncMock()
-        with pytest.raises(BusinessError) as exc_info:
-            await auxiliary_service.create_country(db, "")
-        assert exc_info.value.status_code == 400
-
-    @pytest.mark.asyncio
-    async def test_raises_409_when_already_exists(self):
-        """国家已存在时应抛 409"""
-        db = AsyncMock()
-        existing = MagicMock()
-        with patch.object(auxiliary_service, 'get_country_by_name', new=AsyncMock(return_value=existing)):
-            with pytest.raises(ConflictError) as exc_info:
-                await auxiliary_service.create_country(db, "中国")
-        assert exc_info.value.status_code == 409
-
-    @pytest.mark.asyncio
-    async def test_creates_new_country(self):
-        """应创建新国家并返回"""
-        db = AsyncMock()
-        db.add = MagicMock()
-        db.flush = AsyncMock()
-        db.refresh = AsyncMock()
-
-        with patch.object(auxiliary_service, 'get_country_by_name', new=AsyncMock(return_value=None)):
-            await auxiliary_service.create_country(db, "新国家")
-        assert db.add.called
-        assert db.flush.await_count == 1
-        assert db.refresh.await_count == 1
-
-
-# ============================================================================
-# delete_country
-# ============================================================================
-class TestDeleteCountry:
-    @pytest.mark.asyncio
-    async def test_raises_404_when_not_found(self):
-        """国家不存在时应抛 404"""
-        db = AsyncMock()
-        with patch.object(auxiliary_service, 'get_country_by_id', new=AsyncMock(return_value=None)):
-            with pytest.raises(NotFoundError) as exc_info:
-                await auxiliary_service.delete_country(db, 999)
-        assert exc_info.value.status_code == 404
-
-    @pytest.mark.asyncio
-    async def test_deletes_existing_country(self):
-        """应删除已存在的国家"""
-        db = AsyncMock()
-        db.delete = AsyncMock()
-        country = MagicMock()
-        with patch.object(auxiliary_service, 'get_country_by_id', new=AsyncMock(return_value=country)):
-            await auxiliary_service.delete_country(db, 1)
-        assert db.delete.await_count == 1
-
-
-# ============================================================================
 # get_system_stats
 # ============================================================================
 class TestGetSystemStats:
@@ -288,20 +225,3 @@ class TestGetSystemStats:
         with patch.dict('sys.modules', {'utils.performance_monitor': None}):
             result = await auxiliary_service.get_system_stats()
         assert result == {'cache': {}, 'performance': {}}
-
-
-# ============================================================================
-# list_countries_ordered
-# ============================================================================
-class TestListCountriesOrdered:
-    @pytest.mark.asyncio
-    async def test_returns_countries_list(self):
-        """应返回按名称排序的国家列表"""
-        c1, c2 = MagicMock(), MagicMock()
-        result_mock = MagicMock()
-        result_mock.scalars.return_value.all.return_value = [c1, c2]
-        db = AsyncMock()
-        db.execute = AsyncMock(return_value=result_mock)
-
-        result = await auxiliary_service.list_countries_ordered(db)
-        assert result == [c1, c2]

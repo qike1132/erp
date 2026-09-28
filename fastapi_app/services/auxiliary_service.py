@@ -19,7 +19,7 @@ from fastapi_app.core.cache_invalidation import InvalidationStrategy, cache_mgr
 from fastapi_app.core.domain_events import DomainEvent, DomainEventType
 from fastapi_app.core.domain_events import publish as publish_domain_event
 from fastapi_app.core.exception_handler import safe_publish_event
-from fastapi_app.core.exceptions import BusinessError, ConflictError, NotFoundError, db_transaction
+from fastapi_app.core.exceptions import BusinessError, NotFoundError, db_transaction
 from fastapi_app.services.notification_service import StockEvent, publish_stock_event
 from fastapi_app.shared_models import (
     InventoryLog,
@@ -31,7 +31,6 @@ from fastapi_app.shared_models import (
     StockIn,
     Supplier,
 )
-from fastapi_app.shared_models.country import Country
 
 logger = logging.getLogger(__name__)
 
@@ -222,26 +221,7 @@ async def supplier_has_bom_or_orders(db: AsyncSession, supplier_id: int) -> bool
     return bool(has_bom or has_orders)
 
 
-async def list_countries_ordered(db: AsyncSession) -> list[Country]:
-    """按名称排序列出全部国家"""
-    result = await db.execute(select(Country).order_by(Country.name))
-    return list(result.scalars().all())
-
-
-async def get_country_by_name(db: AsyncSession, name: str) -> Country | None:
-    """按名称精确查找国家"""
-    result = await db.execute(select(Country).where(Country.name == name))
-    return result.scalar_one_or_none()
-
-
-async def get_country_by_id(db: AsyncSession, country_id: int) -> Country | None:
-    """按 ID 查找国家"""
-    result = await db.execute(select(Country).where(Country.id == country_id))
-    return result.scalar_one_or_none()
-
-
 # ==================== 写操作（自 auxiliary.py 端点下沉） ====================
-
 async def delete_supplier(db: AsyncSession, supplier_id: int) -> None:
     """删除供应商（含 BOM/采购订单关联检查）。
 
@@ -262,47 +242,6 @@ async def delete_supplier(db: AsyncSession, supplier_id: int) -> None:
 
     await db.delete(supplier)
     await db.flush()  # flush-only：提交由请求级 get_async_db 统一负责
-
-
-async def create_country(db: AsyncSession, name: str) -> Country:
-    """创建国家。
-
-    Args:
-        db: 异步数据库会话。
-        name: 国家名称（已 strip）。
-
-    Returns:
-        Country: 创建后的国家对象（含 ID）。
-
-    Raises:
-        BusinessError: 400 名称为空。
-        ConflictError: 409 国家已存在。
-    """
-    if not name:
-        raise BusinessError("国家名称不能为空")
-    if await get_country_by_name(db, name):
-        raise ConflictError("该国家已存在")
-    country = Country(name=name)
-    db.add(country)
-    await db.flush()
-    await db.refresh(country)
-    return country
-
-
-async def delete_country(db: AsyncSession, country_id: int) -> None:
-    """删除国家。
-
-    Args:
-        db: 异步数据库会话。
-        country_id: 国家 ID。
-
-    Raises:
-        NotFoundError: 404 国家不存在。
-    """
-    country = await get_country_by_id(db, country_id)
-    if not country:
-        raise NotFoundError("国家不存在")
-    await db.delete(country)
 
 
 async def get_system_stats() -> dict:

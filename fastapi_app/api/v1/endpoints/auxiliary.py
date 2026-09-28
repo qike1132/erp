@@ -2,7 +2,7 @@
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.database import get_async_db, get_async_read_db
@@ -16,7 +16,6 @@ from fastapi_app.services.auxiliary_service import (
     get_inventory_logs_page,
     get_product_by_id,
     get_stockin_by_id,
-    list_countries_ordered,
 )
 from fastapi_app.shared_models import User
 
@@ -79,8 +78,6 @@ class AvailableShipmentResponse(BaseModel):
     order_quantity: int = 0
     shipped_quantity: int = 0
     available_quantity: int = 0
-    regular_available: int = 0
-    custom_available: int = 0
 
 class AuxActionResponse(BaseModel):
     success: bool
@@ -274,30 +271,20 @@ async def stockin_info(
 async def available_shipment(
     product_id: int | None = Query(None),
     customer: str = Query('', max_length=100),
-    order_type: str | None = Query(None, max_length=20),
-    country: str | None = Query(None, max_length=100),
     user: User = Depends(require_permission("stock_view")),
     db: AsyncSession = Depends(get_async_read_db),
 ):
-    """获取可出货量（按客户+产品维度，支持按订单类型隔离）
-
-    复用 batch_service 的完整实现，消除内联重复逻辑。
-    order_type 参数用于逻辑隔离：指定后仅计算该类型的订单可出货量。
-    """
+    """获取可出货量（按客户+产品维度）。"""
     if not product_id or not customer.strip():
-        return {'order_quantity': 0, 'shipped_quantity': 0, 'available_quantity': 0, 'regular_available': 0, 'custom_available': 0}
+        return {'order_quantity': 0, 'shipped_quantity': 0, 'available_quantity': 0}
 
     from fastapi_app.services.batch_service import calculate_available_shipment_quantity
-    shipment_info = await calculate_available_shipment_quantity(
-        db, product_id, customer, order_type=order_type, country=country
-    )
+    shipment_info = await calculate_available_shipment_quantity(db, product_id, customer)
 
     return {
         'order_quantity': shipment_info['order_quantity'],
         'shipped_quantity': shipment_info['shipped_quantity'],
         'available_quantity': shipment_info['available_quantity'],
-        'regular_available': shipment_info.get('regular_available', 0),
-        'custom_available': shipment_info.get('custom_available', 0),
     }
 
 
@@ -363,23 +350,13 @@ class BatchOrderItem(BaseModel):
     deduct_stock: bool | None = None
     deduct_quantity: int | None = None
     note: str = ""
-    order_type: str = Field("regular", pattern="^(regular|custom)$")
-    country: str | None = None
     order_date: str | None = None
-
-    @model_validator(mode='after')
-    def validate_custom_order(self):
-        if self.order_type == 'custom' and not self.country:
-            raise ValueError('定制订单必须填写国家名称')
-        return self
 
 class BatchStockInItem(BaseModel):
     product_id: int = Field(..., gt=0)
     customer: str
     quantity: int = Field(..., gt=0, le=9999999)
     note: str = ""
-    order_type: str = Field("regular", pattern="^(regular|custom)$")
-    country: str | None = None
     stockin_date: str | None = None
 
 class BatchStockOutItem(BaseModel):
@@ -387,8 +364,6 @@ class BatchStockOutItem(BaseModel):
     customer: str
     quantity: int = Field(..., gt=0, le=9999999)
     note: str = ""
-    order_type: str = Field("regular", pattern="^(regular|custom)$")
-    country: str | None = None
     stockout_date: str | None = None
 
 class BatchOrderRequest(BaseModel):
@@ -448,38 +423,3 @@ async def system_stats(
 
 
 # ==================== 国家管理 API ====================
-
-class CountryResponse(BaseModel):
-    id: int
-    name: str
-
-class CountryCreateRequest(BaseModel):
-    name: str = Field(..., min_length=1, max_length=100)
-
-@router.get("/countries", response_model=list[CountryResponse])
-async def list_countries(
-    user: User = Depends(require_permission("order_manage")),
-    db: AsyncSession = Depends(get_async_read_db),
-):
-    countries = await list_countries_ordered(db)
-    return [{'id': c.id, 'name': c.name} for c in countries]
-
-@router.post("/countries", response_model=CountryResponse)
-async def create_country(
-    data: CountryCreateRequest,
-    user: User = Depends(require_permission("order_manage")),
-    db: AsyncSession = Depends(get_async_db),
-):
-    from fastapi_app.services.auxiliary_service import create_country as create_country_service
-    country = await create_country_service(db, data.name.strip())
-    return {'id': country.id, 'name': country.name}
-
-@router.delete("/countries/{country_id}")
-async def delete_country(
-    country_id: int,
-    user: User = Depends(require_permission("order_manage")),
-    db: AsyncSession = Depends(get_async_db),
-):
-    from fastapi_app.services.auxiliary_service import delete_country as delete_country_service
-    await delete_country_service(db, country_id)
-    return success_response(message='国家删除成功')
