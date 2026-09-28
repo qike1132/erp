@@ -4,13 +4,28 @@
 """
 from __future__ import annotations
 
+import ast
 import re
 from pathlib import Path
 
-# 2026-09-28 包化:实现已拆到 server_manager/ 包,本文件按"整包拼接"取文本,
-# 这样 task 2-6 继续把代码拆去 service_ops/windows_ops/... 时无需再改本文件。
+# 2026-09-28 包化:实现已拆到 server_manager/ 包,本文件按"整包拼接"取文本。
+# ★ 修正(T4):此前假设"代码搬到别的模块后本文件无需改"——已实测证伪。凡用
+#   ``TEXT.index(锚点)`` 切片的断言,在实现搬家后会命中同名的**瘦转发体**
+#   (app.py 按 sorted(glob) 排在前面),断言虽仍绿但锁的是空壳。故凡锚点函数
+#   已迁出的断言,改用 ``_func_src(模块, 函数名)`` 按 AST 精确定位目标模块内的
+#   函数体,不依赖任何模块顺序/转发块摆放。非锚点切片断言一字未动。
 PKG = Path(__file__).resolve().parent.parent / "server_manager"
 TEXT = "\n".join(p.read_text(encoding="utf-8") for p in sorted(PKG.glob("*.py")))
+
+
+def _func_src(rel_path: str, name: str) -> str:
+    """按 AST 取指定模块内某函数/方法的源码段(含缩进),不依赖 TEXT.index 顺序。"""
+    src = (PKG / rel_path).read_text(encoding="utf-8")
+    lines = src.splitlines()
+    for node in ast.walk(ast.parse(src)):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
+            return "\n".join(lines[node.lineno - 1 : node.end_lineno])
+    raise AssertionError(f"{rel_path} 内未找到 {name}")
 
 
 # ── 受管服务全集 ───────────────────────────────────────────────────────────
@@ -24,9 +39,9 @@ def test_svc_all_constant_covers_five_services() -> None:
 
 
 def test_stop_paths_use_svc_all() -> None:
-    """停止/重启/受管 PID 排除三条路径都必须按 _SVC_ALL 迭代。"""
-    for fn in ("_managed_service_pids", "_stop_managed_services", "_service_cmd_sync"):
-        body = TEXT[TEXT.index(f"def {fn}") :][:1400]
+    """停止/重启/受管 PID 排除三条路径都必须按 _SVC_ALL 迭代(T4 起实现已迁 service_ops)。"""
+    for fn in ("managed_service_pids", "stop_managed_services", "service_cmd_sync"):
+        body = _func_src("service_ops.py", fn)
         assert "for name in _SVC_ALL" in body, f"{fn} 未按 _SVC_ALL 迭代"
 
 
@@ -38,8 +53,8 @@ def test_start_path_keeps_dedicated_redis_helpers() -> None:
 
 
 def test_ensure_production_stopped_does_not_stop_redis() -> None:
-    """切开发模式前的「停生产」不得停 Redis——开发模式同样依赖它。"""
-    body = TEXT[TEXT.index("def _ensure_production_stopped") :][:1200]
+    """切开发模式前的「停生产」不得停 Redis——开发模式同样依赖它(T4 起实现已迁 service_ops)。"""
+    body = _func_src("service_ops.py", "ensure_production_stopped")
     assert "for name in _SVC_ALL" not in body
 
 
@@ -57,16 +72,23 @@ def test_substring_port_killer_is_gone() -> None:
 
 
 def test_stop_redis_never_kills_by_port() -> None:
-    """_stop_redis 不得再按端口盲杀——那会 taskkill 掉 NSSM 受管的 erp-redis。"""
-    body = TEXT[TEXT.index("def _stop_redis") :][:1200]
+    """_stop_redis 不得再按端口盲杀——那会 taskkill 掉 NSSM 受管的 erp-redis。
+
+    T3 已把实现迁入 redis_ops.py(改名 stop_redis),故按 AST 锁目标模块函数体。
+    """
+    body = _func_src("redis_ops.py", "stop_redis")
     assert "_kill_port_process" not in body
 
 
 # ── 环境变量写入 ───────────────────────────────────────────────────────────
 def test_env_extra_written_as_multiple_argv_elements() -> None:
     """AppEnvironmentExtra 必须逐元素传参:NSSM 只按第一个 '=' 切分单个元素,
-    拼成一串会让 6 个变量里只剩 1 个(且值畸变),而界面仍报「已注册」。"""
-    body = TEXT[TEXT.index("def _nssm_install") : TEXT.index("def _apply_depends")]
+    拼成一串会让 6 个变量里只剩 1 个(且值畸变),而界面仍报「已注册」。
+
+    T4 起 _nssm_install/_apply_depends 已迁 service_ops(改名去下划线),故按 AST
+    锁目标模块函数体;调用点 _install_services_flow 仍在 app,锚点不变。
+    """
+    body = _func_src("service_ops.py", "nssm_install")
     assert "AppEnvironmentExtra" in body
     # 值以列表传入、写入时按元素展开
     assert "isinstance(val, list)" in body, "未按列表值逐元素展开"

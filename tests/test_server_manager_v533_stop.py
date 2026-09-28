@@ -65,50 +65,50 @@ class TestFindPortPidsExclude:
 
 
 class TestStopManagedServices:
-    """_stop_managed_services 正常停服务、返回受管 PID 集合。"""
+    """_stop_managed_services 正常停服务、返回受管 PID 集合(T4 包化后实现已迁 ServiceOps)。"""
 
-    def _app_with_state(self, monkeypatch, states):
-        app = _make_app()
-        app._msg_queue = type('Q', (), {'put': lambda self, m: None})()
-        app._find_nssm = lambda: None
-        app._svc_state = lambda name: states[name]
-        app._run_capture = lambda args, timeout=20: (0, '')
-        return app
+    def _ops_with_state(self, monkeypatch, states):
+        ops = object.__new__(sm.ServiceOps)
+        ops._msg_queue = type('Q', (), {'put': lambda self, m: None})()
+        ops.find_nssm = lambda: None
+        ops.svc_state = lambda name: states[name]
+        ops.run_capture = lambda args, timeout=20: (0, '')
+        return ops
 
     def test_returns_managed_pids(self, monkeypatch):
-        app = self._app_with_state(monkeypatch, {'erp-prod': '1 STOPPED', 'erp-arq': '1 STOPPED', 'erp-web': '1 STOPPED',
+        ops = self._ops_with_state(monkeypatch, {'erp-prod': '1 STOPPED', 'erp-arq': '1 STOPPED', 'erp-web': '1 STOPPED',
                                                       'erp-redis': '1 STOPPED', 'erp-redis-broker': '1 STOPPED'})
-        app._managed_service_pids = lambda: {12345, 67890}
-        _stopped, managed = app._stop_managed_services()
+        ops.managed_service_pids = lambda: {12345, 67890}
+        _stopped, managed = ops.stop_managed_services()
         assert managed == {12345, 67890}
 
     def test_stops_running_service(self, monkeypatch):
         # erp-prod 运行中 → 应发 stop 并计数；erp-arq 未安装/停止 → 跳过；erp-web 未安装 → 跳过
         states = {'erp-prod': '4 RUNNING', 'erp-arq': '未安装', 'erp-web': '未安装',
                   'erp-redis': '未安装', 'erp-redis-broker': '未安装'}
-        app = self._app_with_state(monkeypatch, states)
-        app._managed_service_pids = lambda: {12345}
+        ops = self._ops_with_state(monkeypatch, states)
+        ops.managed_service_pids = lambda: {12345}
         # 模拟：第一次查询 RUNNING，随后 STOPPED
         seq = {'erp-prod': iter(['4 RUNNING', '1 STOPPED']), 'erp-arq': iter(['未安装']),
                'erp-web': iter(['未安装']), 'erp-redis': iter(['未安装']),
                'erp-redis-broker': iter(['未安装'])}
-        app._svc_state = lambda name: next(seq[name])
+        ops.svc_state = lambda name: next(seq[name])
         stop_calls = []
-        app._run_capture = lambda args, timeout=20: stop_calls.append(args[1]) or (0, '')
-        stopped, managed = app._stop_managed_services()
+        ops.run_capture = lambda args, timeout=20: stop_calls.append(args[1]) or (0, '')
+        stopped, managed = ops.stop_managed_services()
         assert 'stop' in stop_calls  # 确实发起了 sc stop
         assert stopped == 1
         assert managed == {12345}
 
     def test_does_not_checkpoint(self):
-        """_stop_managed_services 不得调用 _gate.checkpoint（否则紧急停止会半路抛取消）。"""
-        app = _make_app()
-        app._msg_queue = type('Q', (), {'put': lambda self, m: None})()
-        app._find_nssm = lambda: None
-        app._managed_service_pids = lambda: set()
-        app._svc_state = lambda name: '未安装'
-        app._run_capture = lambda args, timeout=20: (0, '')
+        """_stop_managed_services 不得调用 checkpoint（否则紧急停止会半路抛取消）。"""
+        ops = object.__new__(sm.ServiceOps)
+        ops._msg_queue = type('Q', (), {'put': lambda self, m: None})()
+        ops.find_nssm = lambda: None
+        ops.managed_service_pids = lambda: set()
+        ops.svc_state = lambda name: '未安装'
+        ops.run_capture = lambda args, timeout=20: (0, '')
         # 无 _gate 属性时也能跑完，证明不依赖 checkpoint
-        stopped, managed = app._stop_managed_services()
+        stopped, managed = ops.stop_managed_services()
         assert stopped == 0
         assert managed == set()

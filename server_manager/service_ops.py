@@ -1,0 +1,444 @@
+"""server_manager 包的 NSSM/sc 服务操作层(T4 包化第 4 步)。
+
+从 app.py 迁出。本模块【只能】依赖标准库、``server_manager.constants`` 与
+``server_manager.windows_ops`` —— 不得依赖任何 UI 工具包,也不得反向引用本包的
+app 模块(那会循环导入)。
+
+★ 能力注入: ``msg_queue`` / ``gate`` / ``project_dir`` / ``log_message`` 以及
+  可选的 nssm 定位覆盖钩子 ``nssm_finder`` 一律由构造参数注入;本模块【不】持有
+  任何 app 状态(托管状态如 ``_prod_start_ts`` 留在 app,由 app 的动作入口维护)。
+★ 进程/端口原语复用 ``windows_ops``(T2 已抽出的纯函数),不复制实现。
+"""
+import locale
+import shutil
+import subprocess
+import time
+
+from server_manager import windows_ops
+from server_manager.constants import (
+    _IS_WINDOWS,
+    _NSSM_CANDIDATES,
+    _SVC_ALL,
+    _SVC_API,
+    _SVC_ARQ,
+    _SVC_WEB,
+)
+
+
+class ServiceOps:
+    """生产模式(Windows 服务 + NSSM)的查询、启停、安装与卸载。
+
+    与 app 的关系: ``ServerManagerApp`` 持有实例 ``self.svc``,并保留同名
+    瘦转发(``_svc_state`` / ``_nssm_install`` 等),使既有调用点不必改写。
+    """
+
+    def __init__(self, msg_queue, gate, project_dir, log_message, nssm_finder=None):
+        """``msg_queue`` / ``gate`` / ``project_dir`` / ``log_message`` 由 app 注入。
+
+        ``nssm_finder`` 是可选的 nssm 定位覆盖钩子:默认 ``None`` 时用本模块内置的
+        搜索(``shutil.which`` + ``_NSSM_CANDIDATES``),仅依赖 constants、不依赖 app。
+        """
+        self._msg_queue = msg_queue
+        self._gate = gate
+        self._project_dir = project_dir
+        self._log_message = log_message
+        self._nssm_finder = nssm_finder
+
+    def find_nssm(self):
+        if self._nssm_finder:
+            return self._nssm_finder()
+        found = shutil.which('nssm')
+        if found:
+            return found
+        for cand in _NSSM_CANDIDATES:
+            if cand.is_file():
+                return str(cand)
+        return None
+
+    @staticmethod
+    def decode_output(raw, *, strip=False):
+        """把子进程的原始字节流解码为文本（Windows 控制台程序编码并不统一）。
+
+        · nssm 走宽字符 API，输出是 **UTF-16LE**：按 utf-8 解会得到
+          "E r r o r   c r e a t i n g   s e r v i c e !" 这种隔字带空格的乱码，
+          中文错误文本更是整段变成 U+FFFD。2026-09-16 实测：nssm 明明回了
+          「指定的服务已存在。」，界面/日志里却只剩不可读字符，故障定位被直接堵死。
+        · sc.exe 走 OEM 代码页（中文系统 cp936/GBK），偶尔夹杂 UTF-8。
+
+        因此先按 BOM / NUL 密度判 UTF-16，再回落到多编码严格试探；
+        任何一步都不抛异常——解码失败只降级为 replace，绝不因此吞掉真实返回码。
+
+        ``strip=True`` 供逐行读取用（去行尾换行）。原先这是另一份实现 _decode_line，
+        只差「没有 UTF-16 分支」——逐行读 nssm 这类宽字符输出时会退化成乱码。
+        """
+        def _fin(text: str) -> str:
+            return text.strip() if strip else text
+
+        if not raw:
+            return ''
+        if raw[:2] in (b'\xff\xfe', b'\xfe\xff'):
+            try:
+                return _fin(raw.decode('utf-16', errors='replace').lstrip('\ufeff'))
+            except Exception:
+                pass
+        elif raw.count(b'\x00') * 4 > len(raw):
+            # UTF-16LE 的 ASCII 段每个字符后跟一个 \x00，NUL 占比远高于任何 8bit 编码
+            try:
+                return _fin(raw.decode('utf-16-le', errors='replace'))
+            except Exception:
+                pass
+        preferred = locale.getpreferredencoding(False) or ''
+        for enc in ('utf-8', 'gb18030', 'cp936', preferred):
+            if not enc:
+                continue
+            try:
+                return _fin(raw.decode(enc, errors='strict'))
+            except Exception:
+                continue
+        return _fin(raw.decode('utf-8', errors='replace'))
+
+    def run_capture(self, args, timeout=20):
+        try:
+            result = subprocess.run(args, creationflags=subprocess.CREATE_NO_WINDOW if _IS_WINDOWS else 0,
+                                    capture_output=True, timeout=timeout)
+            return (result.returncode,
+                    self.decode_output(result.stdout or b'') + self.decode_output(result.stderr or b''))
+        except Exception as e:
+            return -1, str(e)
+
+    def svc_state(self, name):
+        """返回三态：'未安装' | '未知' | STATE 文本（如 '4 RUNNING' / '1 STOPPED'）。
+
+        ★ 三态语义（勿回退）：只有 rc==1060（ERROR_SERVICE_DOES_NOT_EXIST）或输出
+        明确含 1060 且【没有】STATE 行才判「未安装」；其它任何查询失败（5=拒绝访问、
+        超时、被安全软件拦截、解码异常）一律判「未知」——绝不把「查不出来」当「不存在」，
+        否则 _ensure_production_stopped 会静默跳过仍在运行的生产服务，开发模式随即
+        抢占 5002/3000 与生产互杀。
+        """
+        code, out = self.run_capture(['sc', 'query', name], timeout=5)
+        if code == 1060 or ('1060' in out and 'STATE' not in out):
+            return '未安装'
+        if code != 0 or 'SERVICE_NAME' not in out:
+            return '未知'
+        for line in out.splitlines():
+            if 'STATE' in line:
+                parts = line.split(':', 1)
+                if len(parts) > 1:
+                    return ' '.join(parts[1].split())[:28]
+        return '未知'
+
+    def svc_pid(self, name):
+        """查询 Windows 服务当前进程 PID（sc queryex），未运行返回 None"""
+        code, out = self.run_capture(['sc', 'queryex', name], timeout=5)
+        if code != 0:
+            return None
+        for line in out.splitlines():
+            stripped = line.strip()
+            if stripped.startswith('PID'):
+                parts = stripped.split(':', 1)
+                if len(parts) > 1 and parts[1].strip().isdigit():
+                    return int(parts[1].strip())
+        return None
+
+    def wait_service(self, name, target, timeout, *, checkpoint=True, interval=1.0, state_fn=None):
+        """轮询服务状态直到包含 ``target``(大写比对)；返回最后一次读到的状态。
+
+        收敛前这里有 4 份手写副本(_start_redis_via_service / _wait_service_stopped /
+        _stop_managed_services 内联 / _wait_service_running)，超时与措辞各不相同，
+        调优一处不会传播到其余三处。
+
+        ``checkpoint=False`` 供紧急停止用：stop_all 已先 cancel() 置位，任何
+        checkpoint 都会抛 _ActionCancelled 把「停服务」半路打断 —— 服务没停成，
+        端口清理又会误杀受管进程触发 NSSM 重启。
+
+        ``state_fn`` 供 Redis 用(它读 _redis_service_state 的宽松契约)。
+        """
+        fn = state_fn or self.svc_state
+        deadline = time.monotonic() + timeout
+        state = fn(name)
+        while True:
+            if target in state.upper():
+                return state
+            if time.monotonic() >= deadline:
+                return state
+            if checkpoint:
+                self._gate.checkpoint()
+            time.sleep(interval)
+            state = fn(name)
+
+    def wait_service_stopped(self, name, timeout=45):
+        """发出 nssm stop 后轮询服务状态直到 STOPPED；超时返回 False。
+
+        NSSM stop 立即返回，服务进入 STOP_PENDING，优雅关闭需数秒。
+        若在 STOP_PENDING 期间强杀被管进程，会被 AppExit Default Restart
+        判定为崩溃而自动重启，与目标模式抢占端口。因此必须等待确认 STOPPED。
+        """
+        self.run_capture([self.find_nssm(), 'stop', name], timeout=15)
+        return 'STOPPED' in self.wait_service(name, 'STOPPED', timeout)
+
+    def managed_service_pids(self):
+        """NSSM 受管进程集合（服务根 PID + 整棵子树）。
+
+        ★ P0-4 的核心闸门：受管进程**绝不能被直接 kill** —— NSSM 的
+        AppExit=Default Restart + AppRestartDelay=5000 会在 5 秒后把它拉起来，
+        杀掉→复活→再杀就是「杀不死」死循环。受管进程只能经 `nssm stop` 停止。
+        """
+        managed = set()
+        for name in _SVC_ALL:
+            pid = self.svc_pid(name)
+            if pid:
+                managed.add(pid)
+                managed.update(windows_ops.collect_process_tree(pid))
+        return managed
+
+    def stop_managed_services(self):
+        """正常停止 NSSM 受管服务（erp-prod / erp-arq / erp-web），返回受管 PID 集合供端口清理兜底。
+
+        ★ 与 _service_cmd_sync('stop') 的关键区别：本方法【不带 checkpoint】——
+        紧急停止 stop_all 已先 cancel() 置位取消标志，任何 checkpoint 都会抛
+        _ActionCancelled 把「停服务」半路打断，于是服务根本没停、端口清理又误杀
+        受管进程触发 NSSM 5 秒自动重启 —— 这正是「紧急停止变成重启」的根因。
+
+        返回 (成功停止的服务数, 受管 PID 集合)。受管 PID 无论 stop 成败都要返回，
+        供后续 _kill_port_sync 排除，避免 stop 超时失败时端口清理误杀受管进程。
+        """
+        nssm = self.find_nssm()
+        managed = self.managed_service_pids()
+        stopped = 0
+        for name in _SVC_ALL:
+            state = self.svc_state(name)
+            if '未安装' in state or 'STOPPED' in state:
+                continue
+            self._msg_queue.put(('log', {'text': f'正在停止生产服务 {name}...'}))
+            if nssm:
+                self.run_capture([nssm, 'stop', name], timeout=30)
+            else:
+                self.run_capture(['sc', 'stop', name], timeout=30)
+            st = self.wait_service(name, 'STOPPED', 45, checkpoint=False)
+            if 'STOPPED' in st:
+                stopped += 1
+                self._msg_queue.put(('log', {'text': f'{name} 已停止'}))
+            else:
+                self._msg_queue.put(('log', {'text': f'{name} 在 45s 内未确认 STOPPED，将在端口清理时排除其受管进程以避免误杀触发重启', 'level': 'WARNING'}))
+        return stopped, managed
+
+    def ensure_production_stopped(self):
+        """切换前停止生产模式：停 NSSM 服务 + 清游离的 prod_runner 进程树。
+
+        ★ 返回契约固定为 3 元组 (ok, fail_reason, stopped_any)。
+          P0-1：原实现在超时分支返回 2 元组，而调用方按 3 元组解包
+                → ValueError → 「开发模式 100% 无法启动」。
+          P0-2：原实现在 `except Exception: pass` 之后落到 `return True, None, ...`
+                → 任何异常都被静默转成「成功」，调用方继续启动 → 双进程抢端口。
+                现改为：失败必须带真实原因返回，不存在静默成功路径。
+        """
+        stopped_any = False
+        nssm = self.find_nssm()
+        if nssm:
+            for name in (_SVC_API, _SVC_ARQ, _SVC_WEB):
+                state = self.svc_state(name)
+                if 'STOPPED' in state or '未安装' in state:
+                    continue
+                self._msg_queue.put(('log', {'text': f'正在停止生产服务 {name}...'}))
+                if not self.wait_service_stopped(name):
+                    return False, f'{name} 停止超时（STOP_PENDING 未确认），已中止切换', stopped_any
+                stopped_any = True
+        # 清理游离的 prod_runner（不受 NSSM 控制）；受管进程跳过，交给 nssm stop（P0-4）
+        self._gate.checkpoint()
+        try:
+            managed = self.managed_service_pids()
+            for pid in windows_ops.find_loose_prod_runner_pids(exclude=managed):
+                windows_ops.kill_process_tree(pid)
+                self._msg_queue.put(('log', {'text': f'已清理游离 prod_runner 进程 (PID: {pid})'}))
+                stopped_any = True
+            if managed:
+                self._msg_queue.put(('log', {'text': f'已跳过 {len(managed)} 个 NSSM 受管进程（须经服务停止命令处理）'}))
+        except Exception as e:
+            # 失败如实返回：不允许「扫不到 / 扫描报错」等同于「没有残留」
+            self._msg_queue.put(('log', {'text': f'残留 prod_runner 扫描失败: {e}', 'level': 'WARNING'}))
+            return False, f'残留进程扫描失败: {e}', stopped_any
+        return True, None, stopped_any
+
+    def svc_installed(self, name):
+        """服务是否已注册到 SCM（供安装幂等判定使用）。
+
+        与 `_svc_state` 的分工：这里只回答「在不在」，且**不把「查不出来」当成未安装**
+        —— `sc query` 失败时返回 False，随后的 `nssm install` 会用自己的错误码报出
+        真实原因（拒绝访问 / 找不到文件…），而不是被静默跳过。
+        """
+        code, out = self.run_capture(['sc', 'query', name], timeout=5)
+        return code == 0 and 'SERVICE_NAME' in out
+
+    @staticmethod
+    def _looks_like_exists_error(out):
+        """识别 nssm 的「服务已存在」失败（Windows 1073 ERROR_SERVICE_EXISTS）。
+
+        兜底用：`sc query` 可能因权限/策略/瞬时故障查不到（此时 `_svc_installed`
+        只能返回 False），此时只能靠 install 自己的错误文本判断，
+        否则一个「重复注册」会被当成真失败，把整轮安装判死。
+        """
+        text = (out or '').lower()
+        return any(marker in text for marker in ('已存在', 'already exists', '1073'))
+
+    def nssm_install(self, nssm, name, app, params, env_extra, depends=None):
+        # Step 1: 创建服务（仅注册应用路径，不传参数，避免 NSSM 弹 GUI）
+        #   已存在时**不能再 install**：CreateService 会以 1073「指定的服务已存在。」
+        #   失败，整轮安装被判定为失败（2026-09-16 实测：erp-prod/erp-arq 早已注册，
+        #   点『安装服务』必然报「注册失败」，且乱码后连原因都读不出来）。
+        #   改为「跳过创建 + 覆盖配置」——「安装服务」可反复点击且结果幂等。
+        existed = self.svc_installed(name)
+        if existed:
+            self._log_message(f'{name} 服务已存在，跳过创建，改为更新配置')
+        else:
+            code, out = self.run_capture([nssm, 'install', name, app], timeout=30)
+            if code != 0:
+                if self._looks_like_exists_error(out):
+                    # 预判失败但服务其实在 → 同样按「已存在」处理，绝不因重复注册判死
+                    existed = True
+                    self._log_message(f'{name} 服务已存在（install 返回 1073），改为更新配置', 'WARNING')
+                else:
+                    self._log_message(f'{name} 注册失败: {out}', 'ERROR')
+                    return False
+        if existed and 'RUNNING' in self.svc_state(name):
+            self._log_message(f'{name} 正在运行，配置变更将在下次启动生效（可点『重启』立即生效）', 'WARNING')
+        # Step 2: 设置启动参数（NSSM AppParameters 接受空格分隔的完整命令行）
+        if params:
+            self.run_capture([nssm, 'set', name, 'AppParameters', ' '.join(params)], timeout=15)
+        # Step 3: 设置其他属性
+        #   Application 也一并写入：服务已存在时，这一步会把可执行文件路径纠正为当前值
+        #   （换过 Python / 虚拟环境后，重新点『安装服务』即可修复指向）。
+        settings = [
+            ('Application', app),
+            ('AppDirectory', str(self._project_dir)),
+            ('AppStdout', str(self._project_dir / 'logs' / f'{name}.log')),
+            ('AppStderr', str(self._project_dir / 'logs' / f'{name}.log')),
+            ('AppRotateFiles', '1'),
+            ('AppRotateBytes', '10485760'),
+            ('AppExit', 'Default Restart'),
+            ('AppRestartDelay', '5000'),
+            ('Start', 'SERVICE_AUTO_START'),
+            ('AppEnvironmentExtra', env_extra),
+            ('AppNoConsole', '1'),
+        ]
+        for key, val in settings:
+            # 列表值逐元素展开传参(仅 AppEnvironmentExtra)：NSSM 把该参数按每个 argv
+            # 元素设一个环境变量、在第一个 '=' 处切分 —— 拼成一整串会让 6 个变量里
+            # 只剩 1 个(且值畸变成整串)，其余静默丢失，而界面照报「已注册」
+            # (2026-09-28 评审确认，本机注册表实测只有 1 个元素)。
+            args = [nssm, 'set', name, key] + (list(val) if isinstance(val, list) else [val])
+            if isinstance(val, list) and not val:
+                continue  # 空列表：该服务无需额外环境变量(如 erp-web)
+            code, out = self.run_capture(args, timeout=15)
+            if code != 0:
+                # 旧实现丢弃了全部返回码：某项没写进去也照样报「已注册」，无从判断。
+                self._log_message(f'{name} 设置 {key} 失败: {out.strip() or f"退出码 {code}"}', 'WARNING')
+        # Step 4: 依赖关系（开机由 SCM 串行保证启动顺序）
+        #   只写已注册的依赖服务：依赖一个不存在的服务会让 SCM 直接拒绝启动本服务
+        #   （错误 1068「依存服务或组无法启动」），比没有依赖更糟。
+        self.apply_depends(name, depends)
+        self._log_message(f'{name} {"已存在，配置已更新" if existed else "已注册为 Windows 服务"}（开机自启 + 崩溃自动重启）')
+        return True
+
+    def apply_depends(self, name, depends):
+        """设置服务的 SCM 依赖关系（DependOnService）。"""
+        if not depends:
+            return
+        missing = [d for d in depends if not self.svc_installed(d)]
+        if missing:
+            self._log_message(
+                f'{name} 跳过依赖设置：{", ".join(missing)} 服务不存在，'
+                f'请先安装 Redis 服务（依赖不存在的服务会导致本服务无法启动）', 'WARNING')
+            return
+        nssm = self.find_nssm()
+        if not nssm:
+            return
+        code, out = self.run_capture([nssm, 'set', name, 'DependOnService', ' '.join(depends)], timeout=15)
+        if code != 0:
+            # 旧版 NSSM 无该参数，回退直接写注册表（SCM 实际读取的位置）
+            self._set_depends_registry(name, depends, out)
+        else:
+            self._log_message(f'{name} 依赖已设置: {", ".join(depends)}')
+
+    def _set_depends_registry(self, name, depends, reason=''):
+        """回退路径：直接写 HKLM\\SYSTEM\\...\\Services\\<name>\\DependOnService (REG_MULTI_SZ)。"""
+        if not _IS_WINDOWS:
+            return
+        try:
+            import winreg
+            key = winreg.OpenKey(
+                winreg.HKEY_LOCAL_MACHINE,
+                rf'SYSTEM\CurrentControlSet\Services\{name}', 0, winreg.KEY_SET_VALUE)
+            with key:
+                winreg.SetValueEx(key, 'DependOnService', 0, winreg.REG_MULTI_SZ, list(depends))
+            self._log_message(f'{name} 依赖已写入注册表: {", ".join(depends)}')
+        except OSError as e:
+            self._log_message(f'{name} 设置依赖失败（nssm: {reason.strip() or "非零退出"}）: {e}', 'WARNING')
+
+    def service_cmd_sync(self, verb):
+        """停止/重启生产服务：逐服务执行 + 轮询确认终态。
+
+        NSSM 的 stop/restart 都是立即返回——不等终态就报「已执行」等于什么都没说
+        （2026-09-16 用户实测：stop 打印完 5 秒后服务仍在 RUNNING）。
+        """
+        nssm = self.find_nssm()
+        for name in _SVC_ALL:
+            self._gate.checkpoint()
+            if verb == 'stop':
+                self._msg_queue.put(('log', {'text': f'正在停止生产服务 {name}...'}))
+                if self.wait_service_stopped(name, timeout=45):
+                    self._msg_queue.put(('log', {'text': f'{name} 已停止 (state={self.svc_state(name)})'}))
+                else:
+                    self._msg_queue.put(('log', {'text': f'{name} 在 45s 内未确认 STOPPED（当前: {self.svc_state(name)}），请到服务管理器检查', 'level': 'WARNING'}))
+            elif verb == 'restart':
+                self._msg_queue.put(('log', {'text': f'正在重启生产服务 {name}...'}))
+                if nssm:
+                    self.run_capture([nssm, 'restart', name], timeout=30)
+                else:
+                    # sc 无 restart：先停后起，终态以轮询为准
+                    self.run_capture(['sc', 'stop', name], timeout=30)
+                    self.run_capture(['sc', 'start', name], timeout=30)
+                self.wait_service_running(name, timeout=25)
+        self._msg_queue.put(('hosting_refresh', {}))
+
+    def wait_service_running(self, name, timeout=25):
+        """轮询直到服务 RUNNING；返回 (ok, state, pid)，成功/超时都写日志。
+
+        NSSM start/restart 立即返回，服务要经 START_PENDING 才到 RUNNING——
+        不轮询就报「已执行」等于什么都没说。超时仍未 RUNNING 如实告警并指路日志文件。
+        """
+        state = self.wait_service(name, 'RUNNING', timeout)
+        if 'RUNNING' in state.upper():
+            pid = self.svc_pid(name)
+            self._msg_queue.put(('log', {'text': f'{name} 启动成功 (state={state}, PID: {pid if pid is not None else "?"})'}))
+            return True, state, pid
+        self._msg_queue.put(('log', {'text': f'{name} 在 {timeout}s 内未进入 RUNNING（当前: {state}），请查看 logs\\{name}.log', 'level': 'WARNING'}))
+        return False, state, None
+
+    def start_one_service(self, name, timeout=25):
+        """发出启动命令并轮询确认 RUNNING；返回 (ok, state, pid)。"""
+        nssm = self.find_nssm()
+        self._msg_queue.put(('log', {'text': f'正在启动生产服务 {name}...'}))
+        if nssm:
+            code, out = self.run_capture([nssm, 'start', name], timeout=20)
+        else:
+            code, out = self.run_capture(['sc', 'start', name], timeout=20)
+        if code != 0:
+            out_l = (out or '').lower()
+            if '1056' in out or 'already' in out_l:
+                self._msg_queue.put(('log', {'text': f'{name} 已在运行中，跳过 start'}))
+            elif '1053' not in out:
+                # 1053/超时类错误不代表失败（服务可能仍在启动中），以轮询结果为准
+                self._msg_queue.put(('log', {'text': f'{name} start 返回非零 (code={code}): {(out or "").strip()[:160]}', 'level': 'WARNING'}))
+        return self.wait_service_running(name, timeout=timeout)
+
+    def uninstall_services_flow(self, nssm):
+        for name in (_SVC_API, _SVC_ARQ, _SVC_WEB):
+            self._gate.checkpoint()
+            self.run_capture([nssm, 'stop', name], timeout=30)
+            self._gate.checkpoint()
+            code, out = self.run_capture([nssm, 'remove', name, 'confirm'], timeout=30)
+            if code == 0:
+                self._msg_queue.put(('log', {'text': f'{name} 已卸载'}))
+            else:
+                self._msg_queue.put(('log', {'text': f'{name} 卸载失败: {out}', 'level': 'WARNING'}))
+        self._msg_queue.put(('hosting_refresh', {}))

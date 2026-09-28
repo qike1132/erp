@@ -14,16 +14,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import server_manager.app as sm  # (模块级代码无 Tk root, 导入安全;2026-09-28 包化)
 
 
-def _make_app():
-    """绕过 Tk 构造(__init__ 会触碰 self.root)，仅取 _svc_state 的无状态逻辑。"""
-    return object.__new__(sm.ServerManagerApp)
+def _make_ops():
+    """绕过 Tk 构造;三态判定逻辑已迁 ServiceOps(T4 包化),直接取该层。"""
+    return object.__new__(sm.ServiceOps)
 
 
 def _svc_state_for(code, out):
-    app = _make_app()
-    # _svc_state 只依赖 self._run_capture，直接以实例属性覆盖（实例属性优先于类方法）
-    app._run_capture = lambda args, timeout=20: (code, out)
-    return app._svc_state('erp-prod')
+    ops = _make_ops()
+    # svc_state 只依赖 self.run_capture，直接以实例属性覆盖（实例属性优先于类方法）
+    ops.run_capture = lambda args, timeout=20: (code, out)
+    return ops.svc_state('erp-prod')
 
 
 class TestSvcStateTristate:

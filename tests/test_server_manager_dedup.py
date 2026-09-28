@@ -41,17 +41,21 @@ def test_single_service_poll_primitive() -> None:
 
 
 def test_wait_service_callers() -> None:
-    # app 侧三个调用点(T4 前仍在 app)
-    for fn in ("_wait_service_stopped", "_stop_managed_services", "_wait_service_running"):
-        assert "_wait_service(" in _func_src("app.py", fn), f"{fn} 未复用 _wait_service"
-    # redis 启停层已搬入 redis_ops(T3):按模块内语义锁复用注入的 wait_service
+    # 服务层三个调用点(T4 起迁 service_ops),按 AST 锁目标模块内语义
+    for fn in ("wait_service_stopped", "stop_managed_services", "wait_service_running"):
+        assert "wait_service(" in _func_src("service_ops.py", fn), f"{fn} 未复用 wait_service"
+    # redis 启停层在 redis_ops(T3):按模块内语义锁复用注入的 wait_service
     assert "_wait_service(" in _func_src("redis_ops.py", "start_redis_via_service"), \
         "start_redis_via_service 未复用注入的 _wait_service"
 
 
 def test_emergency_stop_poll_skips_checkpoint() -> None:
-    """紧急停止的轮询必须不 checkpoint,否则 cancel 已置位时会半路抛出。"""
-    body = TEXT[TEXT.index("def _stop_managed_services") :][:1600]
+    """紧急停止的轮询必须不 checkpoint,否则 cancel 已置位时会半路抛出。
+
+    T4 起实现已迁 service_ops,按 AST 锁目标模块内函数体(勿用 TEXT.index 切片,
+    否则命中的是 app 的同名瘦转发体)。
+    """
+    body = _func_src("service_ops.py", "stop_managed_services")
     assert "checkpoint=False" in body, "紧急停止轮询必须显式关闭 checkpoint"
 
 
