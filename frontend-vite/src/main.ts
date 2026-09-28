@@ -9,6 +9,8 @@ import App from './App.vue'
 import router from './router'
 import { isMobileDevice } from './composables/useDevice'
 import { devLog } from './utils/devLog'
+import { initSentry } from './utils/sentry'
+import { markSentryReady, reportError } from './utils/errorReporter'
 
 // 静默 Chrome 扩展导致的 runtime.lastError 噪音
 // 根因：Manifest V3 扩展的 content script 向已休眠的 background service worker
@@ -44,17 +46,9 @@ if (import.meta.env.DEV) {
   }
 }
 
-let sentryErrorCount = 0
-const MAX_SENTRY_REPORTS = 10
-
 app.config.errorHandler = (err, _instance, info) => {
   console.error('[Vue Error]', info, err)
-  if (sentryErrorCount < MAX_SENTRY_REPORTS) {
-    sentryErrorCount++
-    try {
-      import('@sentry/vue').then(({ captureException }) => captureException(err as Error, { extra: { info } })).catch(() => {})
-    } catch { /* noop */ }
-  }
+  reportError(err, { info })
   if (!document.getElementById('app-error-fallback')) {
     const el = document.createElement('div')
     el.id = 'app-error-fallback'
@@ -67,6 +61,9 @@ app.config.errorHandler = (err, _instance, info) => {
 }
 
 window.addEventListener('unhandledrejection', (event) => {
+  // 仅开发期可见（生产构建会 drop 掉 console）。
+  // 上报交给 Sentry 的 GlobalHandlers 集成 —— 它同时覆盖 window.onerror，
+  // 因此这里不再自行 reportError，否则同一拒绝会落库两遍。
   console.error('[Unhandled Rejection]', event.reason)
 })
 
@@ -99,6 +96,13 @@ if (queryPersister) {
     console.warn('[QueryCache] 持久化缓存恢复失败，已自动丢弃旧缓存')
   })
 }
+
+// 生产错误遥测：尽早初始化，缩小「挂载期间出错无人知晓」的窗口。
+// 未配置 VITE_SENTRY_DSN 时不会初始化，reportError 退化为 no-op
+// （等价于修复前行为，但不会再让人误以为"有监控"）。
+initSentry(app)
+  .then((ok) => markSentryReady(ok))
+  .catch(() => { /* 遥测初始化失败不得影响启动 */ })
 
 // 尽快挂载应用，不阻塞在 PrimeVue / 图标 / Token 缓存等异步初始化上
 app.mount('#app')
