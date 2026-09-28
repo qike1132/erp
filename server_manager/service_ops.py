@@ -4,9 +4,9 @@
 ``server_manager.windows_ops`` —— 不得依赖任何 UI 工具包,也不得反向引用本包的
 app 模块(那会循环导入)。
 
-★ 能力注入: ``msg_queue`` / ``gate`` / ``project_dir`` / ``log_message`` 以及
-  可选的 nssm 定位覆盖钩子 ``nssm_finder`` 一律由构造参数注入;本模块【不】持有
-  任何 app 状态(托管状态如 ``_prod_start_ts`` 留在 app,由 app 的动作入口维护)。
+★ 能力注入: ``msg_queue`` / ``gate`` / ``project_dir`` / ``log_message`` 一律由构造
+  参数注入;本模块【不】持有任何 app 状态(托管状态如 ``_prod_start_ts`` 留在 app,
+  由 app 的动作入口维护)。nssm 搜索由 ``find_nssm`` 自行完成,无外部注入。
 ★ 进程/端口原语复用 ``windows_ops``(T2 已抽出的纯函数),不复制实现。
 """
 import locale
@@ -32,21 +32,14 @@ class ServiceOps:
     瘦转发(``_svc_state`` / ``_nssm_install`` 等),使既有调用点不必改写。
     """
 
-    def __init__(self, msg_queue, gate, project_dir, log_message, nssm_finder=None):
-        """``msg_queue`` / ``gate`` / ``project_dir`` / ``log_message`` 由 app 注入。
-
-        ``nssm_finder`` 是可选的 nssm 定位覆盖钩子:默认 ``None`` 时用本模块内置的
-        搜索(``shutil.which`` + ``_NSSM_CANDIDATES``),仅依赖 constants、不依赖 app。
-        """
+    def __init__(self, msg_queue, gate, project_dir, log_message):
+        """``msg_queue`` / ``gate`` / ``project_dir`` / ``log_message`` 由 app 注入。"""
         self._msg_queue = msg_queue
         self._gate = gate
         self._project_dir = project_dir
         self._log_message = log_message
-        self._nssm_finder = nssm_finder
 
     def find_nssm(self):
-        if self._nssm_finder:
-            return self._nssm_finder()
         found = shutil.which('nssm')
         if found:
             return found

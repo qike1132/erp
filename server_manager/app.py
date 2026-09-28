@@ -214,8 +214,8 @@ class ServerManagerApp:
         # 闸门事件回调只往消息队列投递，绝不直接操作 Tk（回调在 worker 线程执行）。
         self._gate = ActionGate(on_event=self._on_gate_event)
         # 服务操作层(T4 包化)：NSSM/sc 查询、启停、安装、卸载。msg_queue/gate/
-        # project_dir/log_message 一律注入;本模块不 import app,也不持有 app 状态。
-        # nssm_finder 不传(默认 None → 用 ServiceOps 内置搜索,避免自引用递归)。
+        # project_dir/log_message 一律注入;本模块不 import app,也不持有 app 状态
+        # (nssm 搜索由 ServiceOps.find_nssm 自行完成,无外部注入)。
         self.svc = ServiceOps(self._msg_queue, self._gate, _PROJECT_DIR, self.log_message)
         # Redis 探活/启停层(T3 包化)：RedisOps 自持 redis_process；服务层能力
         # (wait_service/svc_state/find_nssm/run_capture,T4 起归 service_ops)
@@ -1131,9 +1131,6 @@ class ServerManagerApp:
     def _decode_output(raw, *, strip=False):
         return ServiceOps.decode_output(raw, strip=strip)
 
-    def _run_capture(self, args, timeout=20):
-        return self.svc.run_capture(args, timeout)
-
     def _svc_state(self, name):
         return self.svc.svc_state(name)
 
@@ -1143,9 +1140,6 @@ class ServerManagerApp:
     def _wait_service(self, name, target, timeout, *, checkpoint=True, interval=1.0, state_fn=None):
         return self.svc.wait_service(name, target, timeout,
                                      checkpoint=checkpoint, interval=interval, state_fn=state_fn)
-
-    def _wait_service_stopped(self, name, timeout=45):
-        return self.svc.wait_service_stopped(name, timeout)
 
     def _managed_service_pids(self):
         return self.svc.managed_service_pids()
@@ -1528,14 +1522,8 @@ class ServerManagerApp:
             self._hosting_refresh_requested = False
             self._after_ids['hosting'] = self.root.after(delay, self._refresh_hosting_status)
 
-    def _svc_installed(self, name):
-        return self.svc.svc_installed(name)
-
     def _nssm_install(self, nssm, name, app, params, env_extra, depends=None):
         return self.svc.nssm_install(nssm, name, app, params, env_extra, depends)
-
-    def _apply_depends(self, name, depends):
-        return self.svc.apply_depends(name, depends)
 
     def _install_services(self):
         if self._mode not in ('none',):
@@ -1596,7 +1584,14 @@ class ServerManagerApp:
         return self.svc.service_cmd_sync(verb)
 
     def _service_cmd(self, verb):
-        self._gate.start(f'服务{verb}', self._service_cmd_sync, verb)
+        # 重启会换掉 prod_runner 进程：旧快照在它写下第一份新快照前必然陈旧，
+        # 与「启动服务」共用同一条宽限判据（否则重启后也会弹「可能已退出」）。
+        # ★ _prod_start_ts 是 app 的托管状态(与 _start_services_flow 共用),ServiceOps 不得触碰。
+        # ★ 必须等闸门【放行之后】才记时:gate.start 会拒绝(已有动作在飞),若提前刷新时间戳,
+        #   随后 HOSTING_START_GRACE_SEC(60s) 内陈旧的状态文件会被误显示为「启动中」,
+        #   而不是按真实情况告警。
+        if self._gate.start(f'服务{verb}', self._service_cmd_sync, verb) and verb == 'restart':
+            self._prod_start_ts = time.time()
 
     def _start_services(self):
         # 互斥守卫：开发模式正在启动/重启中则拒绝（防 TOCTOU 双后端抢 5002）
@@ -1690,9 +1685,6 @@ class ServerManagerApp:
         except OSError:
             return []
 
-    def _wait_service_running(self, name, timeout=25):
-        return self.svc.wait_service_running(name, timeout)
-
     def _start_one_service(self, name, timeout=25):
         return self.svc.start_one_service(name, timeout)
 
@@ -1700,11 +1692,6 @@ class ServerManagerApp:
         self._service_cmd('stop')
 
     def _restart_services(self):
-        # 重启会换掉 prod_runner 进程：旧快照在它写下第一份新快照前必然陈旧，
-        # 与「启动服务」共用同一条宽限判据（否则重启后也会弹「可能已退出」）。
-        # ★ _prod_start_ts 是 app 的托管状态(与 _start_services_flow 共用),
-        #   ServiceOps 不得触碰——故记时点写在这里,不随 service_cmd_sync 迁走。
-        self._prod_start_ts = time.time()
         self._service_cmd('restart')
 
     def _uninstall_services(self):
