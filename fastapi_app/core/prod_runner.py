@@ -4,16 +4,16 @@ ERP 生产模式监督器 (Windows 原生)。
 统一生产入口：`start.py --prod` 最终调用本模块。
 职责：
   1. 拉起并守护多 worker Uvicorn（默认 UVICORN_WORKERS=4，可 .env / 环境变量覆盖）
-  2. 拉起并守护 ARQ worker（fastapi_app.core.arq_app.WorkerSettings，含内建 cron）
-  3. 前端托管：优先 Nginx（config/nginx-windows.conf），缺失时回退 vite preview
-  4. Redis：仅检查连通（生产建议将 Redis 注册为独立 Windows 服务）
-  5. 子进程崩溃自动重启（指数退避 2s→30s，防崩溃风暴）；
+  2. 前端由独立 NSSM 服务 erp-web 托管 nginx——本模块只做只读探针（/nginx-health），
+     结果写入状态文件 frontend_ok 字段，探测失败只报告、绝不重启
+  3. Redis：仅检查连通（生产建议将 Redis 注册为独立 Windows 服务）
+  4. 子进程崩溃自动重启（指数退避 2s→30s，防崩溃风暴）；
      对后端按 /api/health 做健康判定，主进程存活但 worker 崩溃循环时强制重启整棵进程树
-  6. 状态落盘 logs/prod_runner.json，供 server_manager GUI 展示
-  7. 子进程 stdout/stderr 落盘 logs/<name>.out.log，便于排障
-  8. 日志轮转：子进程 .out.log 与 Nginx access/error 日志超过阈值
-     （默认 50MB，PROD_LOG_ROTATE_MB 可调）时 copytruncate 轮转，保留一代 .1 副本，
-     防止长期运行后磁盘被日志占满
+  5. 状态落盘 logs/prod_runner.json，供 server_manager GUI 展示
+  6. 子进程 stdout/stderr 落盘 logs/<name>.out.log，便于排障
+  7. 子进程 .out.log 日志轮转：超过阈值（默认 50MB，PROD_LOG_ROTATE_MB 可调）时
+     copytruncate 轮转，保留一代 .1 副本，防止长期运行后磁盘被日志占满
+     （轮转函数下沉于 utils/log_rotation.py；nginx 日志轮转由 ARQ cron 负责）
 
 用法:
   python -m fastapi_app.core.prod_runner --check       # 环境自检（不拉起进程）
@@ -26,7 +26,6 @@ import contextlib
 import io
 import json
 import os
-import shutil
 import socket
 import subprocess  # nosec B404
 import sys
@@ -39,22 +38,12 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 LOGS_DIR = PROJECT_ROOT / "logs"
 STATUS_FILE = LOGS_DIR / "prod_runner.json"
-FRONTEND_DIR = PROJECT_ROOT / "frontend-vite"
-DIST_DIR = FRONTEND_DIR / "dist"
-NGINX_CONF = PROJECT_ROOT / "config" / "nginx-windows.conf"
-
-# 常见 nginx for Windows 安装位置（PATH 之外）
-_NGINX_CANDIDATES = [
-    Path(r"C:\nginx\nginx.exe"),
-    Path(r"C:\Program Files\nginx\nginx.exe"),
-    Path(r"C:\tools\nginx\nginx.exe"),
-]
 
 _PY = sys.executable
 _CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
 # 日志轮转：检查间隔与阈值。NSSM 只轮转监督器自身的 stdout（logs/erp-*.log），
-# 子进程 .out.log 与 Nginx access/error 日志由本模块负责轮转。
+# 子进程 .out.log 由本模块负责轮转（nginx 日志轮转由 ARQ cron 负责）。
 LOG_ROTATE_CHECK_INTERVAL = 60.0
 
 
@@ -83,16 +72,6 @@ def _default_workers() -> int:
     if configured > 0:
         return configured
     return max(1, min(4, os.cpu_count() or 1))
-
-
-def _find_nginx() -> Path | None:
-    found = shutil.which("nginx")
-    if found:
-        return Path(found)
-    for cand in _NGINX_CANDIDATES:
-        if cand.is_file():
-            return cand
-    return None
 
 
 def _is_redis_up(port: int) -> bool:
@@ -189,26 +168,7 @@ def _should_restart(consecutive_failures: int, fail_window_s: float, proc_alive:
     )
 
 
-def _rotate_file_copytruncate(path: Path, max_bytes: int) -> bool:
-    """日志超阈值时 copytruncate 轮转，保留一代 .1 副本，返回是否执行了轮转。
-
-    Windows 下日志文件被子进程（或 nginx）以共享读写 + 追加方式长期占用，
-    无法 rename，只能先复制再原地截断；截断瞬间与追加写之间的少量行丢失
-    对运维日志可接受。追加语义保证持有方后续写入落在新的文件尾。
-    """
-    try:
-        if not path.is_file() or path.stat().st_size < max_bytes:
-            return False
-        rotated = path.with_name(path.name + ".1")
-        with open(path, "rb") as src, open(rotated, "wb") as dst:
-            shutil.copyfileobj(src, dst, length=1024 * 1024)
-        with open(path, "r+b") as f:
-            f.truncate(0)
-        print(f"[prod_runner] 日志 {path.name} 超过 {max_bytes // (1024 * 1024)}MB，已轮转到 {rotated.name}")
-        return True
-    except OSError as e:
-        print(f"[prod_runner] 日志 {path.name} 轮转失败（下一轮重试）: {e}")
-        return False
+from utils.log_rotation import rotate_file_copytruncate
 
 
 def _cmd_uvicorn(api_port: int, workers: int) -> list[str]:
@@ -231,11 +191,6 @@ def _cmd_arq() -> list[str]:
     return [_PY, "-m", "arq", "fastapi_app.core.arq_app.WorkerSettings"]
 
 
-def _cmd_vite_preview(web_port: int) -> list[str]:
-    npx = "npx.cmd" if os.name == "nt" else "npx"
-    return [npx, "vite", "preview", "--port", str(web_port), "--host", "0.0.0.0"]  # nosec B104
-
-
 # ---------------------------------------------------------------------------
 # 环境自检（不拉起进程）
 # ---------------------------------------------------------------------------
@@ -254,18 +209,14 @@ def check(api_port: int, workers: int) -> int:
     else:
         print(f"  WARN: Redis 未运行 (127.0.0.1:{redis_port})，生产建议注册为 Windows 服务")
 
-    if DIST_DIR.is_dir():
-        print(f"  OK: 前端构建产物存在 {DIST_DIR}")
+    dist_dir = PROJECT_ROOT / "frontend-vite" / "dist"
+    if dist_dir.is_dir():
+        print(f"  OK: 前端构建产物存在 {dist_dir}")
     else:
-        print(f"  WARN: 前端构建产物缺失 {DIST_DIR}，请先执行 npm run build")
+        print(f"  WARN: 前端构建产物缺失 {dist_dir}，请先执行 npm run build")
         ok = False
 
-    nginx = _find_nginx()
-    if nginx:
-        print(f"  OK: 检测到 Nginx {nginx}")
-    else:
-        print("  INFO: 未检测到 Nginx，前端将回退 vite preview")
-
+    print("  INFO: 前端由独立 NSSM 服务 erp-web 托管(本模块只做只读探针)")
     print(f"  INFO: worker 数 = {workers} (UVICORN_WORKERS)")
     print(f"  INFO: API 端口 = {api_port}")
     return 0 if ok else 1
@@ -441,213 +392,6 @@ class _Managed:
         _rotate_file_copytruncate(LOGS_DIR / f"{self.name}.out.log", max_bytes)
 
 
-class _FrontendNginx:
-    """Nginx 前端托管：nginx 为独立守护进程，按端口存活情况重启。"""
-
-    def __init__(self, nginx: Path, web_port: int):
-        self.nginx = nginx
-        self.web_port = web_port
-        self.delay = 5.0
-        self.next_start = 0.0
-        self.status = "stopped"
-        # Popen 句柄：用于取真实 pid、关闭 spawn 日志句柄。此前 spawn 返回值被丢弃，
-        # 早期失败除 nginx-error.log 外完全无痕，也无法观测 pid（D3/D4 根因）。
-        self.proc: subprocess.Popen | None = None
-        self._spawn_logf: io.BufferedWriter | None = None
-
-    @property
-    def pid(self) -> int | None:
-        """nginx 进程真实 pid；未派生或已退出时返回 None（不谎报）。"""
-        if self.proc is not None and self.proc.poll() is None:
-            return self.proc.pid
-        return None
-
-    def _close_spawn_log(self) -> None:
-        """关闭并释放 spawn 日志句柄，避免重启路径反复 _ensure_started 时句柄泄漏。"""
-        if self._spawn_logf:
-            with contextlib.suppress(OSError):
-                self._spawn_logf.close()
-        self._spawn_logf = None
-
-    def _spawn(self) -> None:
-        """派生 nginx master 并保存句柄；stdout/stderr 落盘 nginx-spawn.out.log。
-
-        Windows 上 nginx.exe 本身就是 master 进程，启动后不会退出返回，绝不能用
-        subprocess.run（会阻塞到 timeout 抛 TimeoutExpired，拖垮 prod_runner 主流程，
-        导致 NSSM 反复重启监督器、nginx 被周期性 kill/重建，全站连接每 ~35 秒被切断
-        一次，前端所有请求 502 重试）。改用 Popen 派生后立即返回，再由上层探测就绪。
-        """
-        self._close_spawn_log()  # 关闭上一轮遗留句柄（重启路径中会反复调用）
-        try:
-            self._spawn_logf = open(  # noqa: SIM115 需保持打开作为子进程 stdout
-                LOGS_DIR / "nginx-spawn.out.log", "ab"
-            )
-            self.proc = subprocess.Popen(  # nosec B603
-                [str(self.nginx), "-p", str(PROJECT_ROOT), "-c", str(NGINX_CONF),
-                 "-e", str(LOGS_DIR / "nginx-error.log")],
-                cwd=str(PROJECT_ROOT), creationflags=_CREATE_NO_WINDOW,
-                stdout=self._spawn_logf, stderr=subprocess.STDOUT,
-            )
-        except (OSError, subprocess.SubprocessError) as e:
-            self.proc = None
-            self._close_spawn_log()
-            print(f"[prod_runner] ERROR: 派生 nginx 进程失败: {e}")
-
-    def _dump_error_log_tail(self, max_lines: int = 20) -> None:
-        """打印 nginx-error.log 尾部——nginx 启动失败时唯一能自我说明的通道。
-
-        典型真相：[emerg] bind() to 0.0.0.0:3000 failed (10013: ...)。
-        文件可能不存在（nginx 从未真正起过），必须做异常保护。
-        """
-        err_path = LOGS_DIR / "nginx-error.log"
-        try:
-            if not err_path.is_file():
-                print(f"[prod_runner]   （无 {err_path.name}，nginx 可能未真正启动）")
-                return
-            lines = err_path.read_text(encoding="utf-8", errors="replace").splitlines()
-            tail = lines[-max_lines:]
-            if not tail:
-                print(f"[prod_runner]   （{err_path.name} 为空）")
-                return
-            print(f"[prod_runner]   --- {err_path.name} 尾部 {len(tail)} 行 ---")
-            for line in tail:
-                print(f"[prod_runner]   {line}")
-        except OSError as e:
-            print(f"[prod_runner]   读取 {err_path.name} 失败: {e}")
-
-    def _kill_all(self) -> None:
-        """彻底停止本项目所有 nginx 进程（仅 Windows 逻辑）。
-
-        Windows 下 `nginx -s stop` 只停最新 master，且杀 master 不会连带结束
-        worker，会在重启循环中泄漏孤儿进程（worker 的父进程已消失仍存活），
-        导致端口与连接混乱、进程数爆炸。因此先优雅停 master，再【定向】强制
-        结束本项目 nginx.exe（含孤儿 worker），确保干净重启。
-        """
-        subprocess.run(  # nosec B603
-            [str(self.nginx), "-s", "stop"],
-            creationflags=_CREATE_NO_WINDOW,
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15,
-        )
-        if os.name == "nt":
-            self._taskkill_project_nginx()
-        # 进程已清理，同步释放句柄与句柄引用，避免重启路径中句柄泄漏 / 取到死进程
-        self.proc = None
-        self._close_spawn_log()
-
-    def _taskkill_project_nginx(self) -> None:
-        """定向结束本项目 nginx（替代历史 `taskkill /IM nginx.exe` 的全机误杀）。
-
-        历史缺陷：`taskkill /F /T /IM nginx.exe` 按镜像名匹配，会杀掉全机
-        所有 nginx（含与本项目无关的站点）。现改为两级定向：
-        1) 读取本项目 nginx 的 pid 文件，按 PID 杀整棵进程树（master + worker）；
-        2) 枚举 nginx.exe 进程，仅当可执行文件路径等于本项目 nginx（self.nginx）
-           才按 PID 补杀——覆盖父进程已消失、pid 文件不可得的孤儿 worker；
-        其他路径的 nginx（非本项目部署）一律不动。
-        """
-        killed: set[int] = set()
-
-        def _kill_tree(pid: int) -> None:
-            if pid in killed:
-                return
-            subprocess.run(  # nosec B603 B607
-                ["taskkill", "/F", "/T", "/PID", str(pid)],
-                creationflags=_CREATE_NO_WINDOW,
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15,
-            )
-            killed.add(pid)
-
-        # 1) pid 文件定向（候选：项目 logs/ 与 nginx 前缀 logs/）
-        nginx_dir = os.path.dirname(str(self.nginx))
-        candidates = [LOGS_DIR / "nginx.pid", Path(nginx_dir).parent / "logs" / "nginx.pid"]
-        for pid_file in candidates:
-            try:
-                if pid_file.is_file():
-                    master_pid = int(pid_file.read_text(encoding="ascii", errors="replace").strip())
-                    if master_pid > 0:
-                        _kill_tree(master_pid)
-                        break
-            except (OSError, ValueError):
-                continue  # pid 文件缺失/损坏时落入第 2 级兜底
-
-        # 2) 路径精确匹配的孤儿 worker 补杀（psutil 为既有依赖）
-        try:
-            import psutil
-        except ImportError:
-            print("[prod_runner] psutil 不可用，跳过孤儿 nginx 扫描")
-            return
-        own_exe = os.path.normcase(os.path.normpath(str(self.nginx)))
-        for proc in psutil.process_iter(["pid", "name", "exe"]):
-            try:
-                if (proc.info["name"] or "").lower() != "nginx.exe":
-                    continue
-                exe = os.path.normcase(os.path.normpath(proc.info["exe"] or ""))
-                if exe == own_exe:
-                    _kill_tree(proc.info["pid"])
-            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-                continue
-
-    def _ensure_started(self) -> None:
-        # 启动前先彻底清理历史遗留的 nginx 进程（含孤儿 worker）。
-        # 否则端口 3000 被旧 master 占用，新 master 无法绑定。
-        self._kill_all()
-        LOGS_DIR.mkdir(exist_ok=True)
-        self._spawn()
-        # 轮询 /nginx-health 确认就绪：该探测校验响应体含 '"service":"nginx"'，
-        # 因此 :3000 上是 Vite dev server 的 SPA fallback（200 + index.html）时判否。
-        started = False
-        for _ in range(10):
-            if self.alive():
-                started = True
-                break
-            time.sleep(0.5)
-        if started:
-            self.status = "running"
-            self.delay = 5.0
-            print(f"[prod_runner] 前端 Nginx 已启动 (port {self.web_port}, PID {self.pid})")
-            return
-        # 探测全败：必须如实置 crashed + 退避，绝不能无条件置 running 假成功。
-        self.status = "crashed"
-        self.next_start = time.monotonic() + self.delay
-        self.delay = min(self.delay * 2, 30.0)
-        print(f"[prod_runner] ERROR: 前端 Nginx 启动失败（{int(self.delay)}s 后重试），"
-              f"port={self.web_port}, pid={self.pid}")
-        self._dump_error_log_tail()
-
-    def alive(self) -> bool:
-        # expect_substr 确保是 nginx 自身的 /nginx-health 返回，而非同端口其它服务。
-        return _http_ok(
-            f"http://127.0.0.1:{self.web_port}/nginx-health",
-            timeout=1.5,
-            expect_substr='"service":"nginx"',
-        )
-
-    def poll(self) -> None:
-        if self.alive():
-            self.status = "running"
-            return
-        if self.status != "crashed":
-            self.status = "crashed"
-            self.next_start = time.monotonic() + self.delay
-            self.delay = min(self.delay * 2, 30.0)
-            print(f"[prod_runner] 前端 Nginx 不可达，{int(self.delay)}s 后重启")
-
-    def maybe_restart(self) -> None:
-        if self.status == "crashed" and self.next_start <= time.monotonic():
-            self._ensure_started()  # _ensure_started 内部已先 _kill_all()
-
-    def stop(self) -> None:
-        self._kill_all()
-
-    def rotate_logs_if_needed(self, max_bytes: int) -> None:
-        """Nginx access/error 日志轮转。
-
-        nginx 以共享读写 + 原子追加方式持有日志句柄，外部截断后其后续
-        写入仍落在新的文件尾，无需发送 -s reopen 信号。
-        """
-        for name in ("nginx-access.log", "nginx-error.log"):
-            _rotate_file_copytruncate(LOGS_DIR / name, max_bytes)
-
-
 class Supervisor:
     def __init__(self, workers: int, api_port: int, web_port: int, with_arq: bool = True):
         self.workers = workers
@@ -664,18 +408,8 @@ class Supervisor:
             workers=workers,
         )
         self.arq = _Managed("ARQ worker", _cmd_arq(), PROJECT_ROOT) if with_arq else None
-
-        nginx = _find_nginx()
-        self.nginx = _FrontendNginx(nginx, web_port) if nginx else None
-        self.vite: _Managed | None = None
-        if nginx:
-            self.frontend_type = "nginx"
-        else:
-            self.frontend_type = "vite"
-            self.vite = _Managed(
-                "前端(vite preview)", _cmd_vite_preview(web_port), FRONTEND_DIR,
-                health_url=f"http://127.0.0.1:{web_port}/",
-            )
+        # 前端由独立 NSSM 服务 erp-web 托管,本监督器只观察不管理
+        self.frontend_type = "erp-web"
 
     # -- 启动序列 -----------------------------------------------------------
     def start_all(self) -> None:
@@ -686,25 +420,28 @@ class Supervisor:
         self.backend.start()
         if self.arq:
             self.arq.start()
-        if self.nginx:
-            self.nginx._ensure_started()
-        elif self.vite:
-            self.vite.start()
+
+    # -- 前端只读探针 -------------------------------------------------------
+    def _frontend_probe_ok(self) -> bool:
+        """只读探测 erp-web(nginx)是否在服务 :3000。失败仅报告,绝不重启。
+
+        expect_substr 区分「nginx 真在服务」与「同端口其它服务(如 vite dev
+        server 的 SPA fallback)返回 200」。
+        """
+        return _http_ok(
+            f"http://127.0.0.1:{self.web_port}/nginx-health",
+            timeout=1.5,
+            expect_substr='"service":"nginx"',
+        )
 
     # -- 状态落盘 -----------------------------------------------------------
     def _frontend_state(self) -> tuple[int | None, str, bool]:
-        """现探前端真实存活状态，避免落盘被污染的 self.nginx.status（谎报根因）。
+        """erp-web 由独立 NSSM 服务托管,此处只观察不管理。
 
-        返回 (pid, status, ok)。nginx 分支以 HTTP 探针现探结果为准；vite 分支以
-        Popen 句柄存活为准。任何情况下都不以可能滞后的 self.nginx.status 充当"存活"。
+        pid 恒为 None(进程不在本监督器树内);status 恒为 "external"
+        (GUI 据此改读 erp-web 服务状态);ok 由只读探针现探。
         """
-        if self.nginx:
-            ok = self.nginx.alive()
-            return self.nginx.pid, ("running" if ok else "crashed"), ok
-        if self.vite:
-            pid = self.vite.proc.pid if self.vite.proc else None
-            return pid, self.vite.status, self.vite.alive()
-        return None, "stopped", False
+        return None, "external", self._frontend_probe_ok()
 
     def write_status(self) -> None:
         redis_status = "ok" if _is_redis_up(self.redis_port) else "down"
@@ -757,17 +494,9 @@ class Supervisor:
                 self.backend.poll()
                 if self.arq:
                     self.arq.poll()
-                if self.vite:
-                    self.vite.poll()
-                if self.nginx:
-                    self.nginx.poll()
                 self.backend.maybe_restart()
                 if self.arq:
                     self.arq.maybe_restart()
-                if self.vite:
-                    self.vite.maybe_restart()
-                if self.nginx:
-                    self.nginx.maybe_restart()
                 if not self.ready and self.backend.status == "ready":
                     print("[prod_runner] 后端就绪 (/api/health 200)")
                 self._rotate_logs_if_due()
@@ -778,26 +507,25 @@ class Supervisor:
 
     # -- 日志轮转 -----------------------------------------------------------
     def _rotate_logs_if_due(self) -> None:
-        """按 LOG_ROTATE_CHECK_INTERVAL 节流，检查并轮转子进程与 Nginx 日志。"""
+        """按 LOG_ROTATE_CHECK_INTERVAL 节流，检查并轮转子进程日志。
+
+        nginx 日志(nginx-access/error.log)由 ARQ cron 任务轮转,不再归本模块。
+        """
         if time.monotonic() - self._last_log_check < LOG_ROTATE_CHECK_INTERVAL:
             return
         self._last_log_check = time.monotonic()
         max_bytes = _log_rotate_bytes()
-        for svc in (self.backend, self.arq, self.vite):
+        for svc in (self.backend, self.arq):
             if svc:
                 svc.rotate_log_if_needed(max_bytes)
-        if self.nginx:
-            self.nginx.rotate_logs_if_needed(max_bytes)
 
     # -- 优雅关闭 -----------------------------------------------------------
     def shutdown(self) -> None:
         print("[prod_runner] 正在关闭...")
-        if self.nginx:
-            self.nginx.stop()
-        for svc in (self.arq, self.vite, self.backend):
+        for svc in (self.arq, self.backend):
             if svc:
                 svc.kill_tree()
-        print("[prod_runner] 已停止")
+        print("[prod_runner] 已停止(前端 erp-web 为独立服务,不在此处理)")
 
 
 def _install_signal_handlers(sup: Supervisor) -> None:

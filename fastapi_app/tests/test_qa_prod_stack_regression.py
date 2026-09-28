@@ -4,8 +4,8 @@
 而非复述其结论。
 
 安全约定（生产机兼开发机，禁止触碰在线服务）：
-  * 绝不真实调用 _FrontendNginx._ensure_started / maybe_restart / start —— 其内部
-    第一步 _kill_all() 会 `taskkill /F /T /IM nginx.exe`，会杀掉在线生产 nginx。
+  * nginx 已由独立 NSSM 服务 erp-web 托管,本文件不再测试 prod_runner 的前端管理
+    (该职责已删除);对在线服务的访问仅限只读 GET 健康端点。
     本文件对所有会触发进程操作的路径（_kill_all / kill_tree / Popen / start）
     一律打桩。
   * 对在线服务的访问仅限只读 GET 健康端点（/nginx-health、/api/health）。
@@ -330,156 +330,30 @@ class TestD1ProbeFalsification:
         """既有调用方形态（不传 expect_substr）对后端 /api/health 必须仍为真。"""
         assert prod_runner._http_ok("http://127.0.0.1:5002/api/health") is True
 
-    def test_frontend_alive_false_on_spa_fallback(self, spa_fallback_port, monkeypatch) -> None:
-        """_FrontendNginx.alive() 走带子串校验的探针 → 对 SPA fallback 判否。"""
-        fe = prod_runner._FrontendNginx(Path("nginx.exe"), spa_fallback_port)
-        assert fe.alive() is False
 
 
 # ===========================================================================
-# D2 —— _ensure_started 探测全败不得假成功（打桩，禁真实 taskkill）
-# ===========================================================================
-def _prep_frontend(monkeypatch, tmp_path, http_ok: bool) -> prod_runner._FrontendNginx:
-    logs = tmp_path / "logs"
-    logs.mkdir(exist_ok=True)
-    monkeypatch.setattr(prod_runner, "LOGS_DIR", logs)
-    monkeypatch.setattr(prod_runner, "time", _Clock())
-    monkeypatch.setattr(prod_runner, "_http_ok", lambda *a, **k: http_ok)
-    monkeypatch.setattr(prod_runner.subprocess, "Popen", lambda *a, **k: _AliveProc())
-    fe = prod_runner._FrontendNginx(Path("nginx.exe"), 3000)
-    monkeypatch.setattr(fe, "_kill_all", lambda: None)  # 严禁真实 taskkill nginx.exe
-    return fe
-
-
-class TestD2EnsureStarted:
-    def test_all_probes_fail_marks_crashed_not_running(self, monkeypatch, tmp_path) -> None:
-        fe = _prep_frontend(monkeypatch, tmp_path, http_ok=False)
-        try:
-            fe._ensure_started()
-        finally:
-            fe._close_spawn_log()
-        assert fe.status == "crashed", "探测全败仍置 running（假成功未修复）"
-        assert fe.next_start > 0
-        assert fe.delay == 10.0  # 5.0 → min(10.0, 30.0)
-
-    def test_probe_ok_marks_running(self, monkeypatch, tmp_path) -> None:
-        fe = _prep_frontend(monkeypatch, tmp_path, http_ok=True)
-        try:
-            fe._ensure_started()
-        finally:
-            fe._close_spawn_log()
-        assert fe.status == "running"
-        assert fe.delay == 5.0
-
-    def test_failure_dumps_error_log_tail(self, monkeypatch, tmp_path, capsys) -> None:
-        fe = _prep_frontend(monkeypatch, tmp_path, http_ok=False)
-        (prod_runner.LOGS_DIR / "nginx-error.log").write_text(
-            "nginx: [emerg] bind() to 0.0.0.0:3000 failed (10013)\n", encoding="utf-8"
-        )
-        try:
-            fe._ensure_started()
-        finally:
-            fe._close_spawn_log()
-        out = capsys.readouterr().out
-        assert "nginx-error.log 尾部" in out
-        assert "bind() to 0.0.0.0:3000 failed" in out
-
-
 # ===========================================================================
 # D3 —— write_status 不谎报前端状态，且 ready 语义不变
 # ===========================================================================
-def _build_supervisor(monkeypatch, tmp_path, http_ok: bool, has_nginx: bool = True):
-    monkeypatch.setattr(
-        prod_runner, "_find_nginx",
-        (lambda: Path("nginx.exe")) if has_nginx else (lambda: None),
-    )
+def _build_supervisor(monkeypatch, tmp_path, http_ok: bool):
     monkeypatch.setattr(prod_runner, "_is_redis_up", lambda *_: False)
-    monkeypatch.setattr(prod_runner, "_http_ok", lambda *a, **k: http_ok)
     monkeypatch.setattr(prod_runner, "STATUS_FILE", tmp_path / "prod_runner.json")
-    return prod_runner.Supervisor(workers=4, api_port=5002, web_port=3000, with_arq=False)
+    sup = prod_runner.Supervisor(workers=4, api_port=5002, web_port=3000, with_arq=False)
+    monkeypatch.setattr(sup, "_frontend_probe_ok", lambda: http_ok)
+    return sup
 
 
 class TestD3WriteStatus:
-    def test_no_false_running_when_nginx_down(self, monkeypatch, tmp_path) -> None:
-        sup = _build_supervisor(monkeypatch, tmp_path, http_ok=False)
-        sup.nginx.status = "running"  # 注入被污染的陈旧状态，验证落盘不被蒙蔽
-        sup.write_status()
-        data = json.loads(prod_runner.STATUS_FILE.read_text(encoding="utf-8"))
-        fe = data["services"]["frontend"]
-        assert fe["type"] == "nginx"
-        assert fe["status"] != "running"
-        assert fe["pid"] is None
-        assert data["frontend_ok"] is False
-
-    def test_reports_ok_and_pid_when_nginx_alive(self, monkeypatch, tmp_path) -> None:
-        sup = _build_supervisor(monkeypatch, tmp_path, http_ok=True)
-        sup.nginx.proc = _AliveProc(pid=7777)
-        sup.write_status()
-        data = json.loads(prod_runner.STATUS_FILE.read_text(encoding="utf-8"))
-        fe = data["services"]["frontend"]
-        assert fe["status"] == "running"
-        assert fe["pid"] == 7777
-        assert data["frontend_ok"] is True
-
     def test_ready_semantics_unchanged_backend_only(self, monkeypatch, tmp_path) -> None:
         """ready 语义必须仍只看后端；前端新增 frontend_ok 不得渗入 ready。"""
         sup = _build_supervisor(monkeypatch, tmp_path, http_ok=False)
         sup.backend.status = "ready"
-        sup.nginx.status = "crashed"
         sup.write_status()
         data = json.loads(prod_runner.STATUS_FILE.read_text(encoding="utf-8"))
         assert data["ready"] is True, "ready 前端缺失时被错误置否（语义被改）"
         assert data["frontend_ok"] is False
 
-    def test_frontend_ok_field_present_in_vite_fallback(self, monkeypatch, tmp_path) -> None:
-        sup = _build_supervisor(monkeypatch, tmp_path, http_ok=False, has_nginx=False)
-        sup.write_status()
-        data = json.loads(prod_runner.STATUS_FILE.read_text(encoding="utf-8"))
-        assert data["frontend_type"] == "vite"
-        assert "frontend_ok" in data
-        assert data["frontend_ok"] is False
-
-
-# ===========================================================================
-# D4 —— _spawn 保存句柄 + spawn 日志留痕（不触发 _kill_all）
-# ===========================================================================
-class TestD4Spawn:
-    def test_spawn_saves_handle_and_writes_log(self, monkeypatch, tmp_path) -> None:
-        logs = tmp_path / "logs"
-        logs.mkdir()
-
-        class _FakePopen:
-            def __init__(self, *a, **k):
-                self.pid = 12345
-
-            def poll(self):
-                return None
-
-        monkeypatch.setattr(prod_runner, "LOGS_DIR", logs)
-        monkeypatch.setattr(prod_runner.subprocess, "Popen", _FakePopen)
-        fe = prod_runner._FrontendNginx(Path("nginx.exe"), 3000)
-        fe._spawn()
-        try:
-            assert fe.proc is not None
-            assert fe.pid == 12345
-            assert fe._spawn_logf is not None
-            assert (logs / "nginx-spawn.out.log").is_file()
-        finally:
-            fe._close_spawn_log()
-
-    def test_spawn_failure_is_logged_not_silent(self, monkeypatch, tmp_path, capsys) -> None:
-        logs = tmp_path / "logs"
-        logs.mkdir()
-
-        def _boom(*a, **k):
-            raise OSError("boom")
-
-        monkeypatch.setattr(prod_runner, "LOGS_DIR", logs)
-        monkeypatch.setattr(prod_runner.subprocess, "Popen", _boom)
-        fe = prod_runner._FrontendNginx(Path("nginx.exe"), 3000)
-        fe._spawn()
-        assert fe.proc is None
-        assert "派生 nginx 进程失败" in capsys.readouterr().out
 
 
 # ===========================================================================
@@ -546,7 +420,7 @@ class TestD5Gzip:
 # ===========================================================================
 # D6 —— PWA 两个 vite 配置文件：API 条目 NetworkOnly 且二者等价
 # ===========================================================================
-_FRONTEND = prod_runner.FRONTEND_DIR
+_FRONTEND = Path(__file__).resolve().parent.parent.parent / "frontend-vite"
 _PAIR_RE = re.compile(r"urlPattern:\s*(\S+),\s*handler:\s*'([A-Za-z]+)'")
 
 
