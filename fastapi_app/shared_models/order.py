@@ -78,8 +78,6 @@ class Order(Base):
     status: Mapped[str | None] = mapped_column(String(20), default=None, nullable=True, index=True, comment='订单状态')
     note: Mapped[str | None] = mapped_column(Text, comment='备注')
     batch_no: Mapped[str | None] = mapped_column(String(100), comment='批次号')
-    order_type: Mapped[str] = mapped_column(String(20), default='regular', nullable=False, comment='订单类型：regular=常规订单, custom=定制订单')
-    country: Mapped[str | None] = mapped_column(String(100), comment='国家名称（仅定制订单使用）')
     is_locked: Mapped[bool | None] = mapped_column(Boolean, default=False, comment='是否被审批锁定')
     locked_by_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('user.id', ondelete='SET NULL'), comment='锁定人ID')
     lock_time: Mapped[datetime | None] = mapped_column(DateTime, comment='锁定时间')
@@ -146,8 +144,6 @@ class Order(Base):
             'quantity': self.quantity,
             'status': self.status,
             'note': self.note,
-            'order_type': self.order_type,
-            'country': self.country or '',
             'is_locked': self.is_locked,
             'is_deleted': self.is_deleted,
             'created_at': self.order_date.isoformat() if self.order_date else None,

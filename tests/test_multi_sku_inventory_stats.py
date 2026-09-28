@@ -56,6 +56,20 @@ async def db(test_engine):
             await transaction.rollback()
 
 
+@pytest_asyncio.fixture
+async def committed_stats(test_engine):
+    """在独立会话上读取全局统计——不含本测试未提交的数据。
+
+    get_stock_overview_stats 是全局聚合（无客户/产品过滤），全量跑套件时
+    其它用例已提交的订单会污染断言，故用增量比较。
+    """
+    factory = async_sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False,
+    )
+    async with factory() as session:
+        return await get_stock_overview_stats(session)
+
+
 @pytest.fixture
 async def products_ab(db):
     products = [
@@ -115,17 +129,18 @@ async def deleted_order(db, products_ab):
     return order
 
 
-async def test_overview_stats_item_dimension(db, products_ab, mixed_order):
+async def test_overview_stats_item_dimension(db, products_ab, mixed_order, committed_stats):
     """混合 SKU 订单：订单数量按明细累加（旧实现会得出 5/0 的分类）"""
     stats = await get_stock_overview_stats(db)
-    assert stats['order_quantity'] == 5
-    assert stats['stockin_quantity'] == 0
+    assert stats['order_quantity'] - committed_stats['order_quantity'] == 5
+    assert stats['stockin_quantity'] - committed_stats['stockin_quantity'] == 0
 
 
-async def test_overview_stats_legacy_fallback(db, products_ab, mixed_order, legacy_order):
+async def test_overview_stats_legacy_fallback(
+        db, products_ab, mixed_order, legacy_order, committed_stats):
     """无明细订单回退订单级字段：5(明细) + 5(兼容) = 10"""
     stats = await get_stock_overview_stats(db)
-    assert stats['order_quantity'] == 10
+    assert stats['order_quantity'] - committed_stats['order_quantity'] == 10
 
 
 async def test_fetch_inventory_per_sku(db, products_ab, mixed_order, legacy_order):

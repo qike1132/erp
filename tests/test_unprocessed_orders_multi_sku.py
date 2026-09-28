@@ -21,8 +21,6 @@ def _make_order_item(
     product_name: str | None,
     product_barcode: str | None,
     quantity: int,
-    order_type: str = 'regular',
-    country: str | None = None,
     deduct_quantity: int = 0,
     note: str | None = None,
 ) -> SimpleNamespace:
@@ -32,8 +30,6 @@ def _make_order_item(
         product_name=product_name,
         product_barcode=product_barcode,
         quantity=quantity,
-        order_type=order_type,
-        country=country,
         deduct_quantity=deduct_quantity,
         note=note,
     )
@@ -98,7 +94,7 @@ class TestBuildUnprocessedOrderRecordMultiSku:
             customer='客户B',
             items=[
                 _make_order_item(11, 101, '产品A', '69000101', 10),
-                _make_order_item(12, 102, '产品B', '69000102', 20, order_type='custom', country='美国'),
+                _make_order_item(12, 102, '产品B', '69000102', 20),
                 _make_order_item(13, 103, '产品C', '69000103', 15, deduct_quantity=5, note='加急'),
             ],
         )
@@ -118,11 +114,8 @@ class TestBuildUnprocessedOrderRecordMultiSku:
         assert item_by_pid[101]['product_name'] == '产品A'
         assert item_by_pid[101]['product_barcode'] == '69000101'
         assert item_by_pid[101]['quantity'] == 10
-        assert item_by_pid[101]['order_type'] == 'regular'
 
         assert item_by_pid[102]['product_name'] == '产品B'
-        assert item_by_pid[102]['order_type'] == 'custom'
-        assert item_by_pid[102]['country'] == '美国'
 
         assert item_by_pid[103]['quantity'] == 15
         assert item_by_pid[103]['deduct_quantity'] == 5
@@ -192,8 +185,6 @@ class TestBuildUnprocessedStockinRecord:
             product_id=200,
             quantity=100,
             stockin_date=datetime(2026, 7, 20, 9, 0, tzinfo=UTC),
-            order_type='regular',
-            country=None,
             note='备货备注',
         )
 
@@ -206,7 +197,6 @@ class TestBuildUnprocessedStockinRecord:
         assert len(record['items']) == 1
         assert record['items'][0]['product_id'] == 200
         assert record['items'][0]['quantity'] == 100
-        assert record['items'][0]['order_type'] == 'regular'
         assert record['items'][0]['note'] == '备货备注'
         # product_name is None at build time; enriched by caller via Product query
         assert record['items'][0]['product_name'] is None

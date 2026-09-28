@@ -30,8 +30,6 @@ class StagingStockOut(Base):
     product_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('product.id'), comment='产品ID（确认后填充）')
     quantity: Mapped[int] = mapped_column(Integer, nullable=False, comment='出货数量')
     note: Mapped[str | None] = mapped_column(Text, comment='备注')
-    order_type: Mapped[str | None] = mapped_column(String(20), default='regular', comment='订单类型：regular=常规订单, custom=定制订单')
-    country: Mapped[str | None] = mapped_column(String(100), comment='国家名称（仅定制订单使用）')
     status: Mapped[str | None] = mapped_column(String(20), default='pending', comment='状态：pending=待审核, approved=已确认, rejected=已拒绝')
     is_validated: Mapped[bool | None] = mapped_column(Boolean, default=False, comment='是否已验证产品存在')
     validation_error: Mapped[str | None] = mapped_column(String(500), comment='验证错误信息')
@@ -63,8 +61,6 @@ class StagingStockOut(Base):
             'product_id': self.product_id,
             'quantity': self.quantity,
             'note': self.note or '',
-            'order_type': self.order_type or 'regular',
-            'country': self.country or '',
             'status': self.status,
             'is_validated': self.is_validated,
             'validation_error': self.validation_error or '',

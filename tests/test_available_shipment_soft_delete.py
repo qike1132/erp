@@ -40,13 +40,13 @@ async def test_soft_deleted_order_excluded_from_available_shipment(db):
 
     order = Order(
         order_no='SAS-O-001', customer=CUSTOMER, order_date=datetime.now(UTC),
-        product_id=product.id, quantity=100, order_type='regular', status='待备货',
+        product_id=product.id, quantity=100, status='待备货',
     )
     db.add(order)
     await db.flush()
 
     before = await calculate_available_shipment_quantity(
-        db, product.id, CUSTOMER, order_type='regular',
+        db, product.id, CUSTOMER,
     )
     assert before['available_quantity'] == 100
     assert [o['order_no'] for o in before['orders']] == ['SAS-O-001']
@@ -55,7 +55,7 @@ async def test_soft_deleted_order_excluded_from_available_shipment(db):
     await db.flush()
 
     after = await calculate_available_shipment_quantity(
-        db, product.id, CUSTOMER, order_type='regular',
+        db, product.id, CUSTOMER,
     )
     assert after['available_quantity'] == 0, '软删除订单仍被计入可出货量'
     assert after['order_quantity'] == 0

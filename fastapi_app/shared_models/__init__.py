@@ -28,7 +28,6 @@ from fastapi_app.shared_models.case import Case
 from fastapi_app.shared_models.case_inventory_log import CaseInventoryLog
 from fastapi_app.shared_models.case_stock_in import CaseStockIn
 from fastapi_app.shared_models.case_stock_out import CaseStockOut
-from fastapi_app.shared_models.country import Country
 from fastapi_app.shared_models.craft_work import CraftWork
 from fastapi_app.shared_models.customer import Customer
 from fastapi_app.shared_models.customer_access_log import CustomerAccessLog
@@ -109,7 +108,6 @@ __all__ = [
     'CaseInventoryLog',
     'CaseStockIn',
     'CaseStockOut',
-    'Country',
     'CraftWork',
     'Customer',
     'CustomerAccessLog',

@@ -33,10 +33,6 @@ class OrderItem(Base):
     product_name: Mapped[str | None] = mapped_column(String(200), nullable=True, comment='冗余产品名称，便于历史查询')
     product_barcode: Mapped[str | None] = mapped_column(String(100), nullable=True, comment='冗余产品条码')
     quantity: Mapped[int] = mapped_column(Integer, nullable=False, comment='订单数量')
-    order_type: Mapped[str] = mapped_column(
-        String(20), default='regular', nullable=False, comment='订单类型：regular=常规订单, custom=定制订单'
-    )
-    country: Mapped[str | None] = mapped_column(String(100), nullable=True, comment='国家名称（仅定制订单使用）')
     deduct_stock: Mapped[bool] = mapped_column(Boolean, default=False, comment='是否扣减库存')
     deduct_quantity: Mapped[int] = mapped_column(Integer, default=0, comment='扣减库存数量')
     note: Mapped[str | None] = mapped_column(Text, nullable=True, comment='备注')

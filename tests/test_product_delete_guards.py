@@ -62,11 +62,11 @@ async def test_soft_deleted_order_blocks_product_delete(db):
 
     order = Order(
         order_no='PDEL-O-001', customer='PDEL客户', order_date=datetime.now(UTC),
-        product_id=product.id, quantity=1, order_type='regular', status='待备货',
+        product_id=product.id, quantity=1, status='待备货',
     )
     db.add(order)
     await db.flush()
-    db.add(OrderItem(order_id=order.id, product_id=product.id, quantity=1, order_type='regular'))
+    db.add(OrderItem(order_id=order.id, product_id=product.id, quantity=1))
     await db.flush()
 
     order.is_deleted = True

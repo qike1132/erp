@@ -29,8 +29,6 @@ class StockIn(Base):
     customer: Mapped[str] = mapped_column(String(100), nullable=False, index=True, comment='客户名称')
     product_id: Mapped[int] = mapped_column(Integer, ForeignKey('product.id', ondelete='RESTRICT'), nullable=False, index=True, comment='产品ID')
     quantity: Mapped[int] = mapped_column(Integer, nullable=False, comment='备货数量')
-    order_type: Mapped[str] = mapped_column(String(20), default='regular', nullable=False, comment='订单类型：regular=常规订单, custom=定制订单')
-    country: Mapped[str | None] = mapped_column(String(100), comment='国家名称（仅定制订单使用）')
     note: Mapped[str | None] = mapped_column(Text, comment='备注')
     # 湖北备货确认流程：confirmed_at IS NULL 视为「未确认备货」（与订单确认流程对齐）
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime, comment='备货确认时间（湖北备货确认流程）')
