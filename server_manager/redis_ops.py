@@ -6,7 +6,8 @@
 ★ 状态自持: ``redis_process`` 归本类所有(原 app 的 ``self._redis_process``)。
 ★ 能力注入: 项目路径(``project_dir``)与服务层能力(``wait_service`` /
   ``svc_state`` / ``find_nssm`` / ``run_capture``)以及 app 的 ``read_stdout``
-  一律由构造参数注入 —— 这些在 Task 4 前仍归 app/service_ops,本模块只消费。
+  一律由构造参数注入 —— 这些能力现归 ``service_ops``(Task 4 起)与 app 的
+  ``read_stdout``,本模块只消费、不拥有。
 """
 import socket
 import subprocess

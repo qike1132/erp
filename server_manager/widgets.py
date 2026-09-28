@@ -5,19 +5,6 @@
 import math
 import tkinter as tk
 
-_font_cache = {}
-
-def _font_exists(name):
-    if name in _font_cache:
-        return _font_cache[name]
-    try:
-        import tkinter.font as tkfont
-        root = tk._default_root or tk.Tk()
-        result = name in tkfont.families(root)
-    except Exception:
-        result = False
-    _font_cache[name] = result
-    return result
 
 def _shift_color(hex_c, amount):
     """颜色偏移 - 模块级公共函数"""

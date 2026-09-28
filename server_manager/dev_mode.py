@@ -6,8 +6,9 @@ app 模块(那会循环导入)。
 
 ★ 状态自持: 开发模式的 7 个状态(``mode`` / ``process`` / ``frontend_process`` /
   ``current_mode_key`` / ``startup_progress`` / ``startup_steps`` /
-  ``startup_current_step``)归本类所有(原 app 的 ``self._mode`` 等)。app 侧为这
-  7 个名字提供**读写双向**属性桥,使既有 ~50 处读写点不必改写。
+  ``startup_current_step``)归本类所有(原 app 的 ``self._mode`` 等)。app 侧为其中
+  6 个名字(``startup_steps`` 除外,它仅本模块内部使用)提供**读写双向**属性桥,
+  使既有 ~50 处读写点不必改写。
 ★ 兄弟 ops 直接注入**实例**: ``svc``(ServiceOps,供 ensure_production_stopped /
   managed_service_pids)与 ``redis``(RedisOps,供 start_redis / stop_redis)——
   不为兄弟对象再包一层回调。
@@ -32,8 +33,8 @@ from server_manager.constants import _API_PORT, _IS_WINDOWS, _WEB_PORT
 class DevModeOps:
     """开发模式(前后端双进程)的启动、停止、重启与状态自持。
 
-    与 app 的关系: ``ServerManagerApp`` 持有实例 ``self.dev``,为 7 个状态名提供
-    属性桥,并保留同名瘦转发(``_terminate_dev_processes`` 等),使既有调用点与
+    与 app 的关系: ``ServerManagerApp`` 持有实例 ``self.dev``,为其中的 6 个状态名
+    提供属性桥,并保留同名瘦转发(``_terminate_dev_processes`` 等),使既有调用点与
     静态断言不必改写。
     """
 

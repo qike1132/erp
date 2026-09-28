@@ -31,13 +31,18 @@ def _func_src(rel_path: str, name: str) -> str:
 
 # ── b1 轮询原语 ────────────────────────────────────────────────────────────
 def test_single_service_poll_primitive() -> None:
-    """服务状态轮询只应有一处 deadline 循环(_wait_service),其余为调用方。
+    """服务状态轮询只应有一处 deadline 循环(service_ops.wait_service),其余为调用方。
 
     其余 deadline 循环仅允许闸门的 wait_idle(语义不同,不合并)。
+    ★ 修正(M-3):此前断言 ``"def _wait_service(" in TEXT`` —— 该串在整包**只**由
+      app 内的同名瘦转发体满足,即断言被它自己要保护的对象满足(循环)。转发已删除,
+      改为按 AST 锚定真实现 ``service_ops.py::wait_service``,锁其轮询与 state_fn 机制。
     """
-    assert "def _wait_service(" in TEXT, "缺少统一的 _wait_service"
+    body = _func_src("service_ops.py", "wait_service")
+    assert "deadline = time.monotonic()" in body, "wait_service 缺少统一 deadline 轮询"
+    assert "state_fn" in body, "wait_service 未保留 state_fn 注入(Redis 宽松契约)"
     n = TEXT.count("deadline = time.monotonic()")
-    assert n <= 2, f"仍存在 {n} 处手写 deadline 轮询(应 ≤2:wait_idle + _wait_service)"
+    assert n <= 2, f"仍存在 {n} 处手写 deadline 轮询(应 ≤2:wait_idle + wait_service)"
 
 
 def test_wait_service_callers() -> None:

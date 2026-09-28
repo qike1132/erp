@@ -17,12 +17,9 @@ ERP 服务器管理器 GUI v5.5
 """
 
 import hashlib
-import json
 import logging
-import math
 import os
 import queue
-import re
 import shutil
 import subprocess
 import sys
@@ -31,26 +28,29 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-
-from server_manager.action_gate import ActionGate, _ActionCancelled, _EMERGENCY_JOIN_SEC
-from server_manager.constants import (
-    _API_PORT, _IS_WINDOWS, _PROD_STATUS_FILE,
-    _REDIS_BROKER_PORT, _REDIS_PORT,
-    _SVC_API, _SVC_ARQ, _SVC_DEPENDS, _SVC_REDIS_BROKER,
-    _SVC_WEB, _VERSION, _WEB_PORT, _WINDOW_TITLE,
-)
-from server_manager.widgets import RoundedButton, StatusBadge, _lerp_color
 from server_manager import windows_ops
-from server_manager.windows_ops import (
-    is_prod_runner_cmdline as _is_prod_runner_cmdline,
-    taskkill as _taskkill,
-    taskkill_many as _taskkill_many,
+from server_manager.action_gate import _EMERGENCY_JOIN_SEC, ActionGate
+from server_manager.constants import (
+    _API_PORT,
+    _IS_WINDOWS,
+    _REDIS_PORT,
+    _SVC_API,
+    _SVC_ARQ,
+    _SVC_DEPENDS,
+    _SVC_REDIS_BROKER,
+    _SVC_WEB,
+    _VERSION,
+    _WEB_PORT,
+    _WINDOW_TITLE,
 )
-from server_manager.redis_ops import RedisOps
-from server_manager.service_ops import ServiceOps
 from server_manager.dev_mode import DevModeOps
 from server_manager.hosting_view import HostingViewMixin
-
+from server_manager.redis_ops import RedisOps
+from server_manager.service_ops import ServiceOps
+from server_manager.widgets import RoundedButton, StatusBadge, _lerp_color
+from server_manager.windows_ops import (
+    taskkill as _taskkill,
+)
 
 if _IS_WINDOWS:
     import io
@@ -726,12 +726,13 @@ class ServerManagerApp(HostingViewMixin):
     def restart_dual_dev(self):
         self._gate.start('重启开发模式', self._restart_dual_thread)
 
-    # ── 开发模式状态属性桥(T5 包化:7 个状态已迁 DevModeOps 自持) ──────────────
+    # ── 开发模式状态属性桥(T5 包化:DevModeOps 自持 7 个状态、此处桥接其中 6 个) ──
     # 读写都经此桥,使 app 内 ~50 处 self._mode / self._process / self._frontend_process /
     # self._current_mode_key / self._startup_* 的读写点不必改写。UI 判定与崩溃检测
     # (check_server_status / _update_all_ui / _apply_hosting_data / _update_mode_badge)
     # 全靠这些状态:缺 read 或 write 一侧都会让某处读到错值或写入 AttributeError,
-    # 表现为「界面误判进程崩溃 / 误报启动中」——故 7 个属性一律 @property + @setter。
+    # 表现为「界面误判进程崩溃 / 误报启动中」——故这 6 个属性一律 @property + @setter。
+    # (``startup_steps`` 由 DevModeOps 内部使用,app 侧无读写点,其桥已随 T6 一并删除。)
     @property
     def _mode(self):
         return self.dev.mode
@@ -1004,19 +1005,11 @@ class ServerManagerApp(HostingViewMixin):
     def _find_nssm(self):
         return self.svc.find_nssm()
 
-    @staticmethod
-    def _decode_output(raw, *, strip=False):
-        return ServiceOps.decode_output(raw, strip=strip)
-
     def _svc_state(self, name):
         return self.svc.svc_state(name)
 
     def _svc_pid(self, name):
         return self.svc.svc_pid(name)
-
-    def _wait_service(self, name, target, timeout, *, checkpoint=True, interval=1.0, state_fn=None):
-        return self.svc.wait_service(name, target, timeout,
-                                     checkpoint=checkpoint, interval=interval, state_fn=state_fn)
 
     def _managed_service_pids(self):
         return self.svc.managed_service_pids()

@@ -22,7 +22,12 @@ import time
 from datetime import datetime
 
 from server_manager.constants import (
-    _API_PORT, _HTTP_DIRECT, _REDIS_BROKER_PORT, _SVC_API, _SVC_ARQ, _SVC_WEB,
+    _API_PORT,
+    _HTTP_DIRECT,
+    _REDIS_BROKER_PORT,
+    _SVC_API,
+    _SVC_ARQ,
+    _SVC_WEB,
 )
 
 

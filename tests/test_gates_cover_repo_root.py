@@ -14,17 +14,31 @@
 """
 from __future__ import annotations
 
+import ast
 import json
 import os
 import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
 ROOT = Path(__file__).resolve().parent.parent
 APP_PY = ROOT / "server_manager" / "app.py"
 PYPROJECT = ROOT / "pyproject.toml"
+
+
+def _assigned_src(src: str, name: str) -> str:
+    """取模块源码中名为 ``name`` 的**赋值语句**源码段(按 AST,支持多行定义)。
+
+    用于把断言锚定到某条赋值本身,而非整文件文本 —— 见 #11:整文件文本锁会被
+    无关的注释/字符串里的同名字串误伤。
+    """
+    lines = src.splitlines()
+    for node in ast.walk(ast.parse(src)):
+        if isinstance(node, ast.Assign):
+            for tgt in node.targets:
+                if isinstance(tgt, ast.Name) and tgt.id == name:
+                    return "\n".join(lines[node.lineno - 1 : node.end_lineno])
+    raise AssertionError(f"未找到赋值语句 {name}")
 
 
 def _run(args: list[str]) -> subprocess.CompletedProcess[str]:
@@ -131,21 +145,43 @@ def test_function_length_gate_scans_repo_root() -> None:
     assert "PROJECT_ROOT" in text and "DEFAULT_SCAN_DIRS" in text
     # 根目录若用 rglob 会递归进 frontend-vite/node_modules,必须限定顶层。
     assert 'd.glob("*.py")' in text, "根目录扫描未限定为顶层 *.py"
-    assert "server_manager" not in text, (
+    # ★ 修正(#11):此前对**整文件**断言 ``"server_manager" not in text`` —— 将来任何
+    #   注释/字符串里出现该串都会误红。改为只锚定 ``DEFAULT_SCAN_DIRS`` 的赋值段。
+    scan_dirs_src = _assigned_src(text, "DEFAULT_SCAN_DIRS")
+    assert "server_manager" not in scan_dirs_src, (
         "server_manager 不应进 DEFAULT_SCAN_DIRS(包内 192 行函数会让 quality_gate 变红)"
     )
 
 
 # ---------------------------------------------------------------------------
-# CI 待补(T6 硬约束):``.github/workflows/ci-cd.yml`` 正被并发会话持有(未提交),
-# ``git add <该文件>`` 会把他人的改动一起提交(本计划已发生过一次准事故)。
-# 故本任务**跳过 CI 那一行** —— 该文件当前仍是 ``python scripts/file_size_gate.py``
-# (git-diff 模式在 CI 干净检出里恒为空,等于空转),待控制器补 ``--all`` 后,
-# 删除下面的 skip 让本条真正生效。见 task-6-report.md『CI 待补』条目。
+# CI：规模门禁须对比 **PR 基线**取变更文件。
+# 历史：T6 时 ci-cd.yml 由并发会话持有(未提交),本任务跳过该行;控制器于本波
+# 采「--base origin/<base_ref>」对比基线(而非 --all —— 后者会把存量
+# tests/test_outsource.py 判红,违背脚本"存量超限不阻断"的设计原则)。
 # ---------------------------------------------------------------------------
-@pytest.mark.skip(
-    reason="DEFERRED(T6): ci-cd.yml 由并发会话持有,--all 一行待控制器补;补后删本 skip。"
-)
-def test_ci_uses_all_mode() -> None:
+def test_ci_uses_baseline_diff_mode() -> None:
     text = (ROOT / ".github" / "workflows" / "ci-cd.yml").read_text(encoding="utf-8")
-    assert "file_size_gate.py --all" in text, "CI 仍在用会空转的 git-diff 模式"
+    assert "file_size_gate.py --base origin/${{ github.base_ref }}" in text, (
+        "CI 文件规模门禁未对比 PR 基线(干净检出里会空转)"
+    )
+    assert "file_size_gate.py --all" not in text, (
+        "CI 不应退回 --all(存量违规会误红,违背脚本设计原则)"
+    )
+
+
+# ---------------------------------------------------------------------------
+# server_manager 包内未使用导入(F401)的防漂移锁
+# ---------------------------------------------------------------------------
+def test_server_manager_package_has_no_unused_imports() -> None:
+    """``server_manager/`` 包内 ruff F401 计数必须为 0。
+
+    该目录**不在** CI 的 ruff 扫描范围(CI 只扫 ``fastapi_app tests
+    fastapi_app/tests utils``)—— 本测试是唯一兜底,直接防住"每步从 app.py 摘掉
+    某个 import 的最后一个使用者、却无人清理该 import"这一类漂移(包化过程中
+    已实测发生:8 个死导入)。走子进程调用,避免 ruff 的 stdout 包装影响 pytest。
+    """
+    proc = _run(["-m", "ruff", "check", "server_manager/",
+                 "--select", "F401", "--output-format", "concise"])
+    assert proc.returncode == 0 and "F401" not in proc.stdout, (
+        f"server_manager/ 存在未使用导入(F401):\n{proc.stdout}\n{proc.stderr}"
+    )
