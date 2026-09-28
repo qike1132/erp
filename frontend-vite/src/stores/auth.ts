@@ -6,6 +6,7 @@ import { useCatalogStore } from './catalog'
 import { usePatternRoomStore } from './patternRoom'
 import { queryClient, queryPersister } from '@/utils/queryClient'
 import { clearNotificationMemoryCache } from '@/composables/notificationMemoryCache'
+import { purgeApiCaches } from '@/utils/swCache'
 
 /**
  * 用户信息会话快照：登录成功后写入 sessionStorage（仅当前标签页，关闭即失效），
@@ -237,6 +238,9 @@ export const useAuthStore = defineStore('auth', () => {
       sessionStorage.removeItem(USER_SNAPSHOT_KEY)
     } catch { /* 静默 */ }
     clearUserCaches()
+    // 纵深防御：清掉 Service Worker 的 api-* 运行时缓存（残留旧 SW 或将来再启用
+    // API 缓存时，防止共用终端上后一位用户读到前一位用户的响应）。不阻塞登出。
+    void purgeApiCaches()
   }
 
   return { user, navSections, filteredNavSections, loaded, isLoggedIn, setUserInfo, init, fetchUser, fetchNavSections, loadNavSections, hasPermission, hasAnyPermission, logout }

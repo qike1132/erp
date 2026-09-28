@@ -6,6 +6,7 @@
 2. Cookie-based JWT（浏览器Web端）— 登录后设置 httpOnly cookie
 """
 import logging
+import uuid
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile
@@ -14,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.config import settings
 from fastapi_app.core.database import get_async_db
-from fastapi_app.core.deps import create_access_token, get_current_user_id
+from fastapi_app.core.deps import create_access_token, create_refresh_token, get_current_user_id
 from fastapi_app.core.limiter import limiter, memory_limiter
 from fastapi_app.core.response import success_response
 
@@ -161,13 +162,15 @@ async def _check_login_rate_limit(key: str) -> None:
     _login_rate_limit_key = f"login_attempt:{key}"
     _login_burst_key = f"login_burst:{key}"
     try:
-        from fastapi_app.core.redis_wrapper import get_client
+        from fastapi_app.core.redis_wrapper import get_client, note_command_failure, note_command_success
+
         _redis = get_client()
         if _redis:
             _pipe = _redis.pipeline()
             _pipe.incr(_login_burst_key)
             _pipe.incr(_login_rate_limit_key)
             _burst, _attempts = await _pipe.execute()
+            note_command_success()
             if _burst == 1:
                 await _redis.expire(_login_burst_key, LOGIN_BURST_WINDOW)
             if _burst > LOGIN_BURST_LIMIT:
@@ -180,7 +183,9 @@ async def _check_login_rate_limit(key: str) -> None:
                 raise HTTPException(status_code=429, detail="登录尝试过多，请5分钟后重试", headers={"Retry-After": str(LOGIN_ATTEMPT_WINDOW)})
     except HTTPException:
         raise
-    except Exception:  # defensive: Redis限流不可用时降级到进程内存滑动窗口限流
+    except Exception as e:  # defensive: Redis限流不可用时降级到进程内存滑动窗口限流
+        # 告知缓存管理器：连接类错误会降级并对后续请求短路（裸客户端路径不经过包装方法）
+        note_command_failure(e)
         if not memory_limiter.hit(f"login_burst:{key}", LOGIN_BURST_WINDOW, LOGIN_BURST_LIMIT):
             logger.warning("[Login] 登录尝试过快（内存限流），1分钟内超过%d次: IP=%s", LOGIN_BURST_LIMIT, key)
             raise HTTPException(status_code=429, detail="登录尝试过于频繁，请1分钟后重试", headers={"Retry-After": str(LOGIN_BURST_WINDOW)}) from None
@@ -328,6 +333,42 @@ class RefreshRequest(BaseModel):
     refresh_token: str | None = None
 
 
+# refresh token 轮换（P1-3）
+# ---------------------------
+# 此前 /auth/refresh 只签发新的 access token，被窃的 refresh token 可用满
+# REFRESH_TOKEN_EXPIRE_DAYS（7 天）。轮换后它在下一次正常刷新时即失效。
+#
+# grace 窗口:前端 401 单飞是**每个标签页各自**的（api/request.ts），ERP 用户常开多页,
+# 同一 refresh token 被并发使用是常态。窗口内用旧 token 重放时，用**同一个新 jti**
+# 重新签发,使各页拿到等价凭据,而不是被后到者踢成 401。
+# 只存 jti(不是 token):jti 不能用于认证,落 Redis 无额外暴露。
+REFRESH_ROTATION_GRACE_SECONDS = 30.0
+_REFRESH_ROTATION_KEY = 'refresh_rot:{}'  # 旧 jti -> 新 jti
+
+
+async def _remember_rotation(old_jti: str | None, new_jti: str) -> None:
+    """记下「旧 jti → 新 jti」，供 grace 窗口内的并发重放使用。"""
+    if REFRESH_ROTATION_GRACE_SECONDS <= 0 or not old_jti:
+        return
+    from fastapi_app.core.redis_wrapper import safe_set
+    # 至少 1 秒：配置成 (0,1) 会被 int() 截断成 0，SETEX 0 会抛 ResponseError，
+    # 而它被 safe_set 吞掉 → grace 静默失效（配置被无声忽略）。
+    ttl = max(1, int(REFRESH_ROTATION_GRACE_SECONDS))
+    await safe_set(
+        _REFRESH_ROTATION_KEY.format(old_jti), new_jti,
+        timeout=ttl, context='refresh 轮换',
+    )
+
+
+async def _rotation_grace_jti(old_jti: str | None) -> str | None:
+    """grace 窗口内返回该旧 token 对应的新 jti；窗口外（或 Redis 不可用）返回 None。"""
+    if REFRESH_ROTATION_GRACE_SECONDS <= 0 or not old_jti:
+        return None
+    from fastapi_app.core.redis_wrapper import safe_get
+    value = await safe_get(_REFRESH_ROTATION_KEY.format(old_jti), context='refresh 轮换')
+    return value if isinstance(value, str) and value else None
+
+
 @router.post("/refresh")
 async def api_refresh_token(
     request: Request,
@@ -359,12 +400,26 @@ async def api_refresh_token(
         raise HTTPException(status_code=401, detail="刷新令牌无效或已过期") from None
 
     jti = payload.get("jti")
-    if await is_token_revoked(jti):
-        raise HTTPException(status_code=401, detail="刷新令牌已失效")
-
     user_id = payload.get("sub")
     if not user_id:
         raise HTTPException(status_code=401, detail="刷新令牌无效")
+
+    # 并发重放（多标签页各自单飞）→ grace 窗口内用同一个新 jti 重新签发，
+    # 各标签页拿到等价凭据，而不是被后到者踢成 401。窗口外一律 401。
+    grace_jti = None
+    if await is_token_revoked(jti):
+        grace_jti = await _rotation_grace_jti(jti)
+        # ⚠️ 必须**复查新 jti 是否已被吊销**：它可能在这 30 秒内被吊销（最典型的是
+        # 用户已登出）。漏掉这一句，持有旧 refresh token 的人就能在登出后再换到
+        # 一枚仍然有效的 access token —— 登出后最长 ACCESS_TOKEN_EXPIRE_MINUTES
+        # 的未授权访问窗口（安全复审 2026-09-28 指出）。
+        if grace_jti is None or await is_token_revoked(grace_jti):
+            raise HTTPException(status_code=401, detail="刷新令牌已失效")
+        # grace 命中即记录：这既是"多标签页并发"的正常信号，也可能是攻击者
+        # 在窗口内抢用旧 token —— 两种情况都需要可见，便于事后判读。
+        logger.warning(
+            "[Refresh] grace 窗口内重放旧 refresh token: user_id=%s old_jti=%s", user_id, jti,
+        )
 
     from fastapi_app.services import user_service
 
@@ -379,6 +434,16 @@ async def api_refresh_token(
         expires_delta=timedelta(seconds=token_max_age),
     )
 
+    if grace_jti is not None:
+        new_refresh_token = create_refresh_token(token_data, jti=grace_jti)
+    else:
+        # 轮换：签发新 refresh token，吊销旧的，并记下映射供 grace 窗口内重放
+        new_jti = uuid.uuid4().hex
+        new_refresh_token = create_refresh_token(token_data, jti=new_jti)
+        await _remember_rotation(jti, new_jti)
+        from fastapi_app.core.deps import revoke_token
+        await revoke_token(jti, payload.get("exp"))
+
     _is_https = request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
     _samesite = "none" if _is_https else "lax"
     _secure = _is_https
@@ -391,8 +456,25 @@ async def api_refresh_token(
         secure=_secure,
         path="/",
     )
+    response.set_cookie(
+        key="refresh_token",
+        value=new_refresh_token,
+        max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 3600,
+        httponly=True,
+        samesite=_samesite,
+        secure=_secure,
+        path="/",
+    )
 
-    logger.info("[Refresh] 令牌刷新成功: user_id=%s", user_id)
+    logger.info("[Refresh] 令牌刷新成功（refresh 已轮换）: user_id=%s", user_id)
+    if data and data.refresh_token:
+        # 请求体传 refresh token 的客户端（移动端/API）读不到 httpOnly cookie，
+        # 必须把轮换后的新 token 回传 —— 否则它仍持旧 token，grace 窗口过后必然 401。
+        return success_response(
+            access_token=access_token, refresh_token=new_refresh_token,
+            # token_type 是 OAuth2 令牌类型标识（RFC 6749），非口令 —— S106 误报
+            token_type="bearer",  # noqa: S106
+        )
     # token_type 是 OAuth2 令牌类型标识（RFC 6749），非口令 —— S106 误报
     return success_response(access_token=access_token, token_type="bearer")  # noqa: S106
 

@@ -59,15 +59,23 @@ def create_access_token(data: dict, expires_delta=None) -> str:
     return jwt.encode(to_encode, _get_signing_key(), algorithm=settings.ALGORITHM)
 
 
-def create_refresh_token(data: dict) -> str:
+def create_refresh_token(data: dict, *, jti: str | None = None, expires_delta=None) -> str:
     """生成刷新令牌（有效期较长，仅用于获取新的 access token）
 
     刷新令牌不包含权限信息，仅包含用户标识。
+
+    :param jti: 指定 jti。用于**轮换的幂等重放**：grace 窗口内并发使用同一个
+        旧 refresh token 时（多标签页各自单飞），用同一个 jti 重新签发，
+        使各标签页拿到等价凭据而不是被后到者踢成 401。
+        默认 None = 随机生成，行为与改动前一致。
+    :param expires_delta: 覆盖有效期，默认 ``REFRESH_TOKEN_EXPIRE_DAYS``。
     """
     to_encode = data.copy()
-    expire = datetime.now(UTC) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+    expire = datetime.now(UTC) + (
+        expires_delta or timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+    )
     to_encode['exp'] = expire
-    to_encode['jti'] = uuid.uuid4().hex
+    to_encode['jti'] = jti or uuid.uuid4().hex
     to_encode['type'] = 'refresh'
     return jwt.encode(to_encode, _get_signing_key(), algorithm=settings.ALGORITHM)
 

@@ -37,7 +37,7 @@ from fastapi_app.api.v1.endpoints.stock import router as stock_router
 from fastapi_app.api.v1.endpoints.supplier import router as supplier_router
 from fastapi_app.api.v1.endpoints.tasks import router as tasks_router
 from fastapi_app.api.v1.endpoints.user import router as user_router
-from fastapi_app.core.deps import get_current_user_id
+from fastapi_app.core.deps import get_current_user_id, get_current_user_id_strict
 
 api_router = APIRouter()
 
@@ -126,6 +126,10 @@ api_router.include_router(
     user_router,
     prefix="/users",
     tags=["用户管理"],
+    # 刻意保持 fail-open：strict 变体在「Redis 启动即不可用且本地撤销缓存未命中」时
+    # 会**永久** 401（redis_cache.init_app 失败后不重试，只能重启进程回正）。
+    # 本仓库有过开机顺序事故史，不值得用「管理员被锁在用户/权限页之外」换那点收益。
+    # 待 Redis 客户端具备自愈/重连后，再考虑改回 get_current_user_id_strict。
     dependencies=[Depends(get_current_user_id)],
 )
 
@@ -253,6 +257,10 @@ api_router.include_router(
     permission_router,
     prefix="/permissions",
     tags=["权限管理"],
+    # 刻意保持 fail-open：strict 变体在「Redis 启动即不可用且本地撤销缓存未命中」时
+    # 会**永久** 401（redis_cache.init_app 失败后不重试，只能重启进程回正）。
+    # 本仓库有过开机顺序事故史，不值得用「管理员被锁在用户/权限页之外」换那点收益。
+    # 待 Redis 客户端具备自愈/重连后，再考虑改回 get_current_user_id_strict。
     dependencies=[Depends(get_current_user_id)],
 )
 
@@ -261,7 +269,7 @@ api_router.include_router(
     backup_router,
     prefix="/backup",
     tags=["数据备份"],
-    dependencies=[Depends(get_current_user_id)],
+    dependencies=[Depends(get_current_user_id_strict)],
 )
 
 # 性能监控路由 - 前缀 /api/v1/monitoring

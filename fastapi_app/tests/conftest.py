@@ -131,9 +131,17 @@ async def override_deps(mock_db, mock_current_user):
     app.dependency_overrides[get_async_read_db] = override_get_async_read_db
     app.dependency_overrides[get_sync_db] = override_get_sync_db
 
-    from fastapi_app.core.deps import _get_user_with_permissions, get_current_user_id
+    from fastapi_app.core.deps import (
+        _get_user_with_permissions,
+        get_current_user_id,
+        get_current_user_id_strict,
+    )
     app.dependency_overrides[_get_user_with_permissions] = override_get_user_with_permissions
     app.dependency_overrides[get_current_user_id] = override_get_current_user_id
+    # `/backup` 用的是 fail-closed 的 strict 变体（见 api/v1/router.py，2026-09-28
+    # 审计修复）。此处必须一并覆盖 —— 否则覆盖落空，测试会真的走鉴权并 401。
+    # 注意 `/users`、`/permissions` **刻意**仍是 fail-open，故不走 strict。
+    app.dependency_overrides[get_current_user_id_strict] = override_get_current_user_id
 
     # 避免 /api/health 等端点触发真实 DB/Redis 连接：
     # verify_db_connectivity / _get_async_redis_client 不走 FastAPI 依赖注入，

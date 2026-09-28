@@ -45,6 +45,19 @@ class _LRUSet:
 _LOCAL_REVOKED_JTIS = _LRUSet(maxsize=1000)
 
 
+def _note_redis_failure(exc: Exception) -> None:
+    """把裸客户端命令的失败告知缓存管理器（自愈/退避）。
+
+    裸客户端路径不经过 `RedisCacheManager` 的包装方法，因此**不会**自动触发
+    降级与退避 —— 而 `is_token_revoked(fail_closed=True)` 正是那条 fail-closed
+    路径：若不告知，Redis 持续不可用时每个请求都会真连一次（最多 5s）并各打日志。
+    告知后连接类错误会让客户端降级、并对后续所有调用方短路直到退避窗口过期。
+    """
+    # 走 redis_wrapper 的钩子，不直接依赖 utils.redis_cache（见该模块的同名函数说明）
+    from fastapi_app.core.redis_wrapper import note_command_failure
+    note_command_failure(exc)
+
+
 async def revoke_token(jti: str, exp: int) -> None:
     """将 token 的 jti 加入 Redis 黑名单，TTL 设为 token 剩余有效期
 
@@ -57,11 +70,14 @@ async def revoke_token(jti: str, exp: int) -> None:
     # 始终写入本地 LRU 缓存（无论 Redis 是否可用），作为后续 Redis 故障时的降级依据
     _LOCAL_REVOKED_JTIS.add(jti)
     try:
-        from fastapi_app.core.redis_wrapper import get_client
+        from fastapi_app.core.redis_wrapper import get_client, note_command_success
+
         redis = get_client()
         if redis:
             await redis.set(f"token_blacklist:{jti}", "1", ex=remaining)
-    except Exception:  # defensive: Redis 故障时本地 LRU 缓存已写入，继续服务
+            note_command_success()
+    except Exception as e:  # defensive: Redis 故障时本地 LRU 缓存已写入，继续服务
+        _note_redis_failure(e)
         logger.debug("token 黑名单写入失败", exc_info=True)
 
 
@@ -96,10 +112,13 @@ async def is_token_revoked(jti: str | None, *, fail_closed: bool = False) -> boo
     if not jti:
         return False
     try:
-        from fastapi_app.core.redis_wrapper import get_client
+        from fastapi_app.core.redis_wrapper import get_client, note_command_success
+
         redis = get_client()
         if redis:
-            return bool(await redis.exists(f"token_blacklist:{jti}"))
+            revoked = bool(await redis.exists(f"token_blacklist:{jti}"))
+            note_command_success()
+            return revoked
         # Redis 客户端未初始化，降级到本地 LRU 缓存
         if _LOCAL_REVOKED_JTIS.contains(jti):
             return True
@@ -109,8 +128,9 @@ async def is_token_revoked(jti: str | None, *, fail_closed: bool = False) -> boo
         return False
     except HTTPException:
         raise
-    except Exception:  # defensive: Redis 不可用时降级到本地 LRU 缓存
-        # Redis 故障时降级到本地 LRU 缓存
+    except Exception as e:  # defensive: Redis 不可用时降级到本地 LRU 缓存
+        # 告知缓存管理器（连接类错误会降级并短路后续请求，见 _note_redis_failure）
+        _note_redis_failure(e)
         if _LOCAL_REVOKED_JTIS.contains(jti):
             return True
         if fail_closed:

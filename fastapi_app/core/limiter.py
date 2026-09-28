@@ -4,11 +4,14 @@ main.py 导入 api_router → endpoints → main.py 会形成循环导入，
 因此将 limiter 单例抽离到本模块。endpoints 直接从此处导入 limiter 即可。
 
 main.py 导入后可按需覆盖 limiter.key_func（例如使用基于 user_id 的限流键）。
+线上 key_func 已按 **user_id** 限流、未登录才退回 IP，故内网多用户共享出口 IP
+不会互相拖累。
 
-内网环境宽松配置：
-- 全局限流关闭（enabled=False），避免内网正常操作被误拦截
-- 各端点装饰器（@limiter.limit）同步失效
-- Redis 不可用时自动回退到进程内存限流（此时多 worker 间不再共享计数）
+开关（2026-09-28 上线前审计修复）：
+- 默认**开启**。此前 `enabled=False` 把**所有** `@limiter.limit(...)` 装饰器都变成
+  空操作 —— auth / report / stock / daily_production 上写好的限流全部静默失效。
+- 排障时可设 `RATE_LIMIT_ENABLED=false` 临时关闭（例如定位误拦时）。
+- Redis 不可用时自动回退到进程内存限流（此时多 worker 间不再共享计数）。
 """
 import os
 import threading
@@ -18,12 +21,37 @@ import warnings
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
+
+def limiter_enabled_from_env() -> bool:
+    """限流开关：默认开启；仅显式的假值（false/0）才关闭。
+
+    空值与无法识别的取值一律按**开启**处理 —— 限流失效是安全问题，
+    不该因为环境变量写错而静默关闭。
+    """
+    return os.getenv('RATE_LIMIT_ENABLED', 'true').strip().lower() not in ('false', '0')
+
+
+def limiter_default_limits_from_env() -> list[str]:
+    """全局默认限流：**默认空**，即「只对显式标注 @limiter.limit 的端点限流」。
+
+    为什么不直接启用原值 `60/minute`：该值写下来后限流长期被 `enabled=False` 架空，
+    **从未在真实流量下验证过**。按用户计 60 次/分钟，正常用户快速浏览（每页多次
+    API 调用）就可能触顶 —— 上线日给用户弹 429 比不限流更糟。实测：开启该全局值后，
+    单次后端测试会话就产生了 172 次 429。
+
+    需要时用环境变量显式开启，观察无误拦后再逐步收紧：
+        RATE_LIMIT_DEFAULT=300/minute
+    """
+    raw = os.getenv('RATE_LIMIT_DEFAULT', '').strip()
+    return [raw] if raw else []
+
+
 with warnings.catch_warnings():
     warnings.filterwarnings("ignore", message="Config file .* not found")
     limiter = Limiter(
         key_func=get_remote_address,
-        default_limits=["60/minute"],
-        enabled=False,  # 内网环境关闭全局限流
+        default_limits=limiter_default_limits_from_env(),
+        enabled=limiter_enabled_from_env(),
         config_filename=os.devnull,
         storage_uri=os.getenv("REDIS_CACHE_URL") or "memory://",
         in_memory_fallback_enabled=True,
