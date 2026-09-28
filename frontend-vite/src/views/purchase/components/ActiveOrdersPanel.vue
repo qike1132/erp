@@ -74,8 +74,6 @@
                       class="pc-sku-line"
                     >
                       <span class="pc-sku-name">{{ item.product_name || '-' }}</span>
-                      <span v-if="item.order_type === 'custom'" class="pc-sku-tag pc-sku-tag--custom">定制</span>
-                      <span v-if="item.country" class="pc-sku-tag">{{ item.country }}</span>
                     </div>
                   </template>
                   <span v-else>{{ o.product_name || '-' }}</span>

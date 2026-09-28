@@ -47,7 +47,6 @@ export { auxApi } from './auxiliary'
 export { backupApi } from './backup'
 export { caseApi } from './case'
 export { orderBatchApi } from './orderBatch'
-export { countryApi } from './country'
 export { patternRoomApi } from './patternRoom'
 export { patternMakerApi } from './patternMaker'
 
