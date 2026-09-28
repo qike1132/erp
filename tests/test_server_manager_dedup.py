@@ -81,8 +81,12 @@ def test_single_decoder_with_utf16_option() -> None:
 
 # ── b4 开发进程终止 ────────────────────────────────────────────────────────
 def test_single_dev_terminate_primitive() -> None:
-    assert "def _terminate_dev_processes(" in TEXT, "缺少统一的开发进程终止"
-    n = TEXT.count("for proc, name in [(self._frontend_process, '前端'), (self._process, '后端')]")
+    """T5 起实现已迁 dev_mode(改名 terminate_dev_processes):app 内只剩同名瘦转发,
+    故按 AST 锁目标模块的**函数体**——沿用 ``TEXT.index``/``"def _terminate_…" in TEXT``
+    只会命中 app 的空壳转发(绿而空壳)。语义不变:终止循环全包只应有一处。"""
+    body = _func_src("dev_mode.py", "terminate_dev_processes")
+    assert "kill_process_tree" in body, "统一的开发进程终止未复用 kill_process_tree"
+    n = TEXT.count("for proc, name in ((self.frontend_process, '前端'), (self.process, '后端'))")
     assert n <= 1, f"仍有 {n} 处复制的终止循环"
 
 

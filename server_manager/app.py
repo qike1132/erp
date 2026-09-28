@@ -28,7 +28,6 @@ import subprocess
 import sys
 import threading
 import time
-import urllib.request
 from datetime import datetime
 from pathlib import Path
 
@@ -49,6 +48,7 @@ from server_manager.windows_ops import (
 )
 from server_manager.redis_ops import RedisOps
 from server_manager.service_ops import ServiceOps
+from server_manager.dev_mode import DevModeOps
 
 
 if _IS_WINDOWS:
@@ -198,11 +198,11 @@ class ServerManagerApp:
         self.root.resizable(True, True)
         self.root.withdraw()
         # 注：redis_process 已归 RedisOps 自持(见下方 self.redis)，此处不再赋值。
-        self._mode, self._process, self._frontend_process = 'none', None, None
+        # 注：开发模式状态(mode/process/frontend_process/current_mode_key/startup_*)
+        # 已归 DevModeOps 自持(见下方 self.dev)，一律经属性桥读写，此处不再赋值。
         self._log_buffer, self._flush_pending = [], False
         self._msg_queue = queue.Queue()
         self._server_cards = []
-        self._startup_progress, self._startup_steps, self._startup_current_step, self._current_mode_key = 0, [], "", ""
         self._prod_running = False
         self._prod_unknown = False      # 生产服务状态「未知」(sc query 失败) —— 仅供展示层，勿与 _prod_running 混用
         self._hosting_collecting, self._hosting_refresh_requested = False, False
@@ -224,6 +224,13 @@ class ServerManagerApp:
                               wait_service=self.svc.wait_service, svc_state=self.svc.svc_state,
                               find_nssm=self.svc.find_nssm, run_capture=self.svc.run_capture,
                               read_stdout=self._read_stdout)
+        # 开发模式层(T5 包化)：双进程(uvicorn + vite)的启停/重启 + 状态自持。
+        # svc/redis 直接注入实例(兄弟 ops，不再包回调)；python_exe/frontend_dir 取
+        # app 模块级值，release_ports 注入 app 的端口清理(它同时被不搬的生产路径
+        # _start_services_flow 调用，故实现保留在 app)。
+        self.dev = DevModeOps(self._msg_queue, self._gate, _PROJECT_DIR, self.svc, self.redis,
+                              python_exe=_PYTHON_EXE, frontend_dir=_FRONTEND_DIR,
+                              release_ports=self._release_ports)
         self._action_buttons = []
         self.setup_logging()
         self._build_ui()
@@ -536,26 +543,7 @@ class ServerManagerApp:
 
 
     def _read_stdout(self, proc):
-        try:
-            if proc.stdout:
-                try:
-                    # 按行读取（readline 迭代器）：读到 '\n' 即返回，不会像 read(4096) 那样
-                    # 阻塞凑块导致 uvicorn 启动日志延迟显示；'\n' 是 ASCII 字节，UTF-8 中文
-                    # 不会跨行被切断，_decode_output 的多编码回退(含 UTF-16)已足够处理乱码。
-                    batch = []
-                    for raw_line in proc.stdout:
-                        line = self._decode_output(raw_line, strip=True) if isinstance(raw_line, bytes) else str(raw_line).strip()
-                        if line:
-                            batch.append(line)
-                            if len(batch) >= 10:
-                                self._msg_queue.put(('log_batch', {'lines': batch[:], 'level': 'INFO'}))
-                                batch.clear()
-                    if batch:
-                        self._msg_queue.put(('log_batch', {'lines': batch, 'level': 'INFO'}))
-                finally:
-                    proc.stdout.close()
-        except Exception as e:
-            self._msg_queue.put(('log', {'text': f"读取日志异常: {str(e)}", 'level': 'ERROR'}))
+        return self.dev.read_stdout(proc)
 
     @staticmethod
     def _pick_log_font():
@@ -731,6 +719,72 @@ class ServerManagerApp:
     def restart_dual_dev(self):
         self._gate.start('重启开发模式', self._restart_dual_thread)
 
+    # ── 开发模式状态属性桥(T5 包化:7 个状态已迁 DevModeOps 自持) ──────────────
+    # 读写都经此桥,使 app 内 ~50 处 self._mode / self._process / self._frontend_process /
+    # self._current_mode_key / self._startup_* 的读写点不必改写。UI 判定与崩溃检测
+    # (check_server_status / _update_all_ui / _apply_hosting_data / _update_mode_badge)
+    # 全靠这些状态:缺 read 或 write 一侧都会让某处读到错值或写入 AttributeError,
+    # 表现为「界面误判进程崩溃 / 误报启动中」——故 7 个属性一律 @property + @setter。
+    @property
+    def _mode(self):
+        return self.dev.mode
+
+    @_mode.setter
+    def _mode(self, value):
+        self.dev.mode = value
+
+    @property
+    def _process(self):
+        return self.dev.process
+
+    @_process.setter
+    def _process(self, value):
+        self.dev.process = value
+
+    @property
+    def _frontend_process(self):
+        return self.dev.frontend_process
+
+    @_frontend_process.setter
+    def _frontend_process(self, value):
+        self.dev.frontend_process = value
+
+    @property
+    def _current_mode_key(self):
+        return self.dev.current_mode_key
+
+    @_current_mode_key.setter
+    def _current_mode_key(self, value):
+        self.dev.current_mode_key = value
+
+    @property
+    def _startup_progress(self):
+        return self.dev.startup_progress
+
+    @_startup_progress.setter
+    def _startup_progress(self, value):
+        self.dev.startup_progress = value
+
+    @property
+    def _startup_steps(self):
+        return self.dev.startup_steps
+
+    @_startup_steps.setter
+    def _startup_steps(self, value):
+        self.dev.startup_steps = value
+
+    @property
+    def _startup_current_step(self):
+        return self.dev.startup_current_step
+
+    @_startup_current_step.setter
+    def _startup_current_step(self, value):
+        self.dev.startup_current_step = value
+
+    # ── 开发模式层转发(T5 包化:实现已迁 server_manager/dev_mode.py) ──────────
+    # 保留同名瘦转发,既有调用点与静态断言不必改写。
+    # 注:UI 胶水 _start_dual_server / _on_dual_started / _on_dual_failed 刻意留在
+    # app(碰 messagebox / status_bar_label / _update_all_ui,不得进无 Tk 的 ops 模块)。
 
     def _start_dual_server(self, label):
         # 互斥守卫：开发模式正在启动/重启中则不操作
@@ -753,167 +807,25 @@ class ServerManagerApp:
         self._gate.start(f'启动{label}', self._start_dual_flow, label)
 
     def _start_dual_flow(self, label):
-        self._mode = 'starting'
-        self._current_mode_key = 'dual_dev'
-        self._startup_progress, self._startup_steps, self._startup_current_step = 0, ['停止生产模式', '检查Redis服务', '启动后端服务', '启动前端服务', '完成'], ''
-        self._msg_queue.put(('log', {'text': f"正在启动{label}..."}))
-        self._msg_queue.put(('status', {'text': f"正在启动{label}..."}))
-        self._msg_queue.put(('ui_update', {}))
-        self._start_dual_worker(label)
+        return self.dev.start_dual_flow(label)
 
     def _start_dual_worker(self, label):
-        """后台执行互斥切换（停生产 + 清端口），随后复用现有启动流程"""
-        try:
-            self._gate.checkpoint()
-            self._msg_queue.put(('startup_progress', {'step': self._startup_steps[0], 'progress': 1, 'total': len(self._startup_steps)}))
-            ok, reason, stopped_any = self._ensure_production_stopped()
-            if not ok:
-                self._msg_queue.put(('log', {'text': f"切换失败: {reason}", 'level': 'ERROR'}))
-                self._msg_queue.put(('dual_failed', {'label': label, 'reason': reason}))
-                return
-            if stopped_any:
-                self._msg_queue.put(('log', {'text': '已自动停止生产模式', 'level': 'INFO'}))
-            self._release_ports()
-            self._start_dual_thread(label)
-        except Exception as e:
-            # 后台线程无 try/except 会静默终止，导致启动流程卡在 'starting' 且无任何日志；
-            # 这里兜底记录并重置状态，让用户能看到失败原因。
-            self._msg_queue.put(('log', {'text': f"启动流程异常: {str(e)}", 'level': 'ERROR'}))
-            self._msg_queue.put(('dual_failed', {'label': label, 'reason': str(e)}))
+        return self.dev.start_dual_worker(label)
 
     def _start_dual_thread(self, label):
-        try:
-            creationflags = subprocess.CREATE_NO_WINDOW if _IS_WINDOWS else 0
-            self._gate.checkpoint()
-
-            self._msg_queue.put(('log', {'text': '正在清理端口...'}))
-            self._kill_port_sync(_API_PORT)
-            self._kill_port_sync(_WEB_PORT)
-
-            self._startup_current_step, self._startup_progress = self._startup_steps[1], 2
-            self._msg_queue.put(('startup_progress', {'step': self._startup_current_step, 'progress': self._startup_progress, 'total': len(self._startup_steps)}))
-            self._gate.checkpoint()
-            if not self._start_redis():
-                self._msg_queue.put(('log', {'text': '警告: Redis 未启动，部分功能可能不可用', 'level': 'WARNING'}))
-            self._startup_current_step, self._startup_progress = self._startup_steps[2], 3
-            self._msg_queue.put(('startup_progress', {'step': self._startup_current_step, 'progress': self._startup_progress, 'total': len(self._startup_steps)}))
-            env = os.environ.copy()
-            env.update({'PYTHONUNBUFFERED': '1', 'PYTHONIOENCODING': 'utf-8', 'PYTHONUTF8': '1', 'PYTHONPATH': str(_PROJECT_DIR)})
-            self._gate.checkpoint()
-            backend_cmd = [_PYTHON_EXE, '-u', '-m', 'uvicorn', 'fastapi_app.main:app', '--host', '0.0.0.0', '--port', str(_API_PORT), '--log-level', 'info', '--reload', '--reload-dir', 'fastapi_app']
-            self._process = subprocess.Popen(backend_cmd, cwd=str(_PROJECT_DIR), env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, creationflags=creationflags, text=False)
-            self._msg_queue.put(('log', {'text': f"后端进程已启动 (PID: {self._process.pid})"}))
-            threading.Thread(target=self._read_stdout, args=(self._process,), daemon=True).start()
-            backend_ready = False
-            for _ in range(30):
-                self._gate.checkpoint()
-                try:
-                    urllib.request.urlopen(f'http://127.0.0.1:{_API_PORT}/api/health', timeout=2)
-                    backend_ready = True
-                    break
-                except Exception:
-                    time.sleep(1)
-            if not backend_ready:
-                self._msg_queue.put(('log', {'text': '后端启动失败或健康检查未通过', 'level': 'ERROR'}))
-                if self._process and self._process.poll() is None:
-                    self._msg_queue.put(('log', {'text': f'正在终止未就绪的后端进程 (PID: {self._process.pid})...'}))
-                    self._kill_process_tree(self._process.pid)
-                    with contextlib.suppress(Exception):
-                        self._process.wait(timeout=3)
-                self._process = None
-                self._msg_queue.put(('dual_failed', {'label': label, 'reason': '后端未就绪'}))
-                return
-            self._startup_current_step, self._startup_progress = self._startup_steps[3], 4
-            self._msg_queue.put(('startup_progress', {'step': self._startup_current_step, 'progress': self._startup_progress, 'total': len(self._startup_steps)}))
-            npm_cmd = 'npm.cmd' if _IS_WINDOWS else 'npm'
-            # 启动 Vite dev server
-            self._gate.checkpoint()
-            self._frontend_process = subprocess.Popen([npm_cmd, 'run', 'dev', '--', '--port', str(_WEB_PORT)], cwd=str(_FRONTEND_DIR), env={**os.environ, 'BACKEND_INTERNAL_URL': f'http://127.0.0.1:{_API_PORT}'}, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, creationflags=creationflags, text=False)
-            self._msg_queue.put(('log', {'text': f"前端进程已启动 (PID: {self._frontend_process.pid})"}))
-            threading.Thread(target=self._read_frontend_stdout, args=(self._frontend_process,), daemon=True).start()
-            frontend_ready = False
-            for _ in range(60):
-                self._gate.checkpoint()
-                try:
-                    urllib.request.urlopen(f'http://127.0.0.1:{_WEB_PORT}/', timeout=2)
-                    frontend_ready = True
-                    break
-                except Exception:
-                    time.sleep(1)
-            if not frontend_ready:
-                self._msg_queue.put(('log', {'text': '前端启动失败或健康检查未通过', 'level': 'ERROR'}))
-                self._terminate_dev_processes('未就绪的')
-                self._msg_queue.put(('dual_failed', {'label': label, 'reason': '前端未就绪'}))
-                return
-            self._startup_current_step, self._startup_progress = self._startup_steps[4], 5
-            self._msg_queue.put(('startup_progress', {'step': self._startup_current_step, 'progress': self._startup_progress, 'total': len(self._startup_steps)}))
-            self._msg_queue.put(('dual_started', {'label': label}))
-        except Exception as e:
-            self._process, self._frontend_process = None, None
-            self._msg_queue.put(('dual_failed', {'label': label, 'reason': f'异常: {str(e)}'}))
+        return self.dev.start_dual_thread(label)
 
     def _read_frontend_stdout(self, proc):
-        batch = []
-        while True:
-            try:
-                line = proc.stdout.readline()
-                if not line:
-                    break
-                text = self._decode_output(line, strip=True)  # 统一解码(含 UTF-16)，修复中文 Windows 前端输出乱码
-                if text:
-                    level = 'ERROR' if any(k in text.lower() for k in ['error', 'exception', 'failed']) else 'INFO'
-                    batch.append((f'[WEB] {text}', level))
-                    if len(batch) >= 10:
-                        for t, l in batch:
-                            self._msg_queue.put(('log', {'text': t, 'level': l}))
-                        batch.clear()
-            except Exception:
-                break
-        if batch:
-            for t, l in batch:
-                self._msg_queue.put(('log', {'text': t, 'level': l}))
+        return self.dev.read_frontend_stdout(proc)
 
     def _stop_dual_mode_async(self, label):
-        self._gate.start(f'停止{label}', self._stop_dual_flow, label)
+        return self.dev.stop_dual_mode_async(label)
 
     def _stop_dual_flow(self, label):
-        self._msg_queue.put(('log', {'text': f"正在停止{label}..."}))
-        frontend_proc, backend_proc = self._frontend_process, self._process
-        self._frontend_process, self._process = None, None
-        for proc, name in [(frontend_proc, '前端'), (backend_proc, '后端')]:
-            if proc and proc.poll() is None:
-                self._msg_queue.put(('log', {'text': f'正在终止{name}进程树 (PID: {proc.pid})...'}))
-                if _IS_WINDOWS:
-                    with contextlib.suppress(Exception):
-                        _taskkill(proc.pid)
-                else:
-                    try:
-                        proc.terminate()
-                        proc.wait(timeout=5)
-                    except Exception:
-                        with contextlib.suppress(Exception):
-                            proc.kill()
-                self._msg_queue.put(('log', {'text': f'{name}进程已终止 (PID: {proc.pid})'}))
-        self._stop_redis()
-        self._kill_port_sync(_API_PORT)
-        self._kill_port_sync(_WEB_PORT)
-        self._mode = 'none'
-        self._current_mode_key = ""
-        self._msg_queue.put(('ui_update', {}))
-        self._msg_queue.put(('log', {'text': f"{label}已停止，端口已释放"}))
+        return self.dev.stop_dual_flow(label)
 
     def _restart_dual_thread(self):
-        self._mode, self._current_mode_key = 'restarting', 'dual_dev'
-        self._startup_progress, self._startup_steps, self._startup_current_step = 0, ['停止生产模式', '检查Redis服务', '启动后端服务', '启动前端服务', '完成'], ''
-        self._msg_queue.put(('ui_update', {}))
-        label = '开发模式'
-        self._terminate_dev_processes('（重启）')
-        self._stop_redis()
-        self._kill_port_sync(_API_PORT)
-        self._kill_port_sync(_WEB_PORT)
-        time.sleep(0.5)
-        self._gate.checkpoint()
-        self._start_dual_thread(label)
+        return self.dev.restart_dual_thread()
 
     def _on_dual_started(self, label):
         backend_alive = self._process and self._process.poll() is None
@@ -1007,29 +919,7 @@ class ServerManagerApp:
         return windows_ops.kill_process_tree(pid)
 
     def _terminate_dev_processes(self, reason='', *, wait=True):
-        """终止管理器自启的开发前端/后端进程树并清空句柄；返回是否有进程被终止。
-
-        收敛前这里散着 4 份变体（stop_all / 启动失败回退 / 重启 / 切生产前）：
-        有的单杀、有的先手工收子树、有的等 3s、有的等 5s、有的不等 —— 终止语义
-        已经漂移，调优一处不会传播到其余三处（2026-09-28 评审）。
-
-        ``_kill_process_tree`` 在 Windows 走 `taskkill /T`，本就会连树一起杀，
-        故重启路径原先「先逐个杀子进程再杀父」的写法是冗余的。
-        """
-        terminated = False
-        for proc, name in ((self._frontend_process, '前端'), (self._process, '后端')):
-            if not (proc and proc.poll() is None):
-                continue
-            self._msg_queue.put(('log', {'text': f'正在终止{reason}{name}进程树 (PID: {proc.pid})...'}))
-            self._kill_process_tree(proc.pid)
-            if wait:
-                with contextlib.suppress(Exception):
-                    proc.wait(timeout=5)
-            self._msg_queue.put(('log', {'text': f'{reason}{name}进程已终止 (PID: {proc.pid})'}))
-            terminated = True
-        self._frontend_process = None
-        self._process = None
-        return terminated
+        return self.dev.terminate_dev_processes(reason, wait=wait)
 
     def on_closing(self):
         if self._tray_icon:
@@ -1157,18 +1047,7 @@ class ServerManagerApp:
         return self.svc.ensure_production_stopped()
 
     def _ensure_development_stopped(self):
-        """切换前停止开发模式：只停开发子进程，不动 Redis，重置 GUI 状态。
-
-        与 _stop_dual_mode_async 的区别：不调用 _stop_redis()，保留共享基础设施。
-        """
-        stopped_any = self._terminate_dev_processes('开发')
-        self._mode = 'none'
-        self._current_mode_key = ""
-        self._msg_queue.put(('ui_update', {}))
-        self._msg_queue.put(('hosting_refresh', {}))
-        if stopped_any:
-            self._msg_queue.put(('log', {'text': '开发模式已停止'}))
-        return stopped_any
+        return self.dev.ensure_development_stopped()
 
     def _release_ports(self):
         """清理 5002 与 3000 端口占用（复用 _kill_port_sync，其内部对多 PID 有 3 轮重试）。
