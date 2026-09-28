@@ -99,6 +99,18 @@ class ProductHasRelatedStockOutsError(ProductDeleteError):
         )
 
 
+class ProductHasRelatedRecordsError(ProductDeleteError):
+    """产品仍被计数未覆盖的表引用（采购计划明细、外发工序预设等）。
+
+    只能由删除时的外键违例暴露，用于把 IntegrityError 转成可读的业务拒绝。
+    """
+    def __init__(self, product_name: str):
+        super().__init__(
+            message=f"产品「{product_name}」仍被历史单据引用，无法删除",
+            error_code="HAS_RELATED_RECORDS"
+        )
+
+
 @cache_result(key_prefix="products:all", ttl=60, local_ttl=15,
               key_builder=lambda **kwargs: f"limit{kwargs.get('limit', 5000)}")
 async def get_products(db: AsyncSession, limit: int = 5000) -> list[dict]:
@@ -326,12 +338,12 @@ async def delete_product(db: AsyncSession, product_id: int) -> None:
         raise ProductNotFoundError(product_id)
 
     # 单次往返完成 3 类关联计数（多 SKU 订单需同时检查 Order.product_id 与 OrderItem.product_id）
+    # 软删除订单同样计入：其 order_item 行仍在，漏计会让删除走到外键违例（500）。
     order_subq = select(func.count(Order.id)).where(
         or_(
             Order.product_id == product_id,
             Order.id.in_(select(OrderItem.order_id).where(OrderItem.product_id == product_id))
-        ),
-        Order.is_deleted.isnot(True)
+        )
     ).scalar_subquery()
     stockin_subq = select(func.count(StockIn.id)).where(StockIn.product_id == product_id).scalar_subquery()
     stockout_subq = select(func.count(StockOut.id)).where(StockOut.product_id == product_id).scalar_subquery()
@@ -355,8 +367,15 @@ async def delete_product(db: AsyncSession, product_id: int) -> None:
         delete(InventoryLog).where(InventoryLog.product_id == product_id)
     )
 
-    await db.delete(product)
-    await db.flush()
+    product_name = product.name
+    try:
+        await db.delete(product)
+        await db.flush()
+    except IntegrityError as e:
+        # 计数未覆盖的表（采购计划明细、外发工序预设等）在此以 FK 违例暴露，
+        # 统一转成业务错误，避免端点返回 500。
+        logger.warning('删除产品被外键阻塞：product_id=%s err=%s', product_id, e.orig)
+        raise ProductHasRelatedRecordsError(product_name) from e
     await cache_mgr.invalidate(InvalidationStrategy.DOMAIN, CacheDomain.ORDER_AND_INVENTORY | CacheDomain.PRODUCT | CacheDomain.STOCKIN)
     _schedule_post_commit(db, _invalidate_product_list_cache)
     logger.info(f'产品删除成功：{product.name}')

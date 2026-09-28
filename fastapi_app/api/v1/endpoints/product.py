@@ -28,6 +28,7 @@ from fastapi_app.services import product_service
 from fastapi_app.services.product_service import (
     ProductDeleteError,
     ProductHasRelatedOrdersError,
+    ProductHasRelatedRecordsError,
     ProductHasRelatedStockInsError,
     ProductHasRelatedStockOutsError,
     ProductNotFoundError,
@@ -155,6 +156,8 @@ async def delete_product(product_id: int, db: AsyncSession=Depends(get_async_db)
     except ProductHasRelatedStockInsError as e:
         raise HTTPException(status_code=400, detail=e.message) from e
     except ProductHasRelatedStockOutsError as e:
+        raise HTTPException(status_code=400, detail=e.message) from e
+    except ProductHasRelatedRecordsError as e:
         raise HTTPException(status_code=400, detail=e.message) from e
     except ProductDeleteError as e:
         raise HTTPException(status_code=400, detail=settings.sanitize_business_error(e)) from e

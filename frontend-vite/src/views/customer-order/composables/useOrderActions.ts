@@ -14,6 +14,7 @@ import { useStagedItems, genUid } from './useStagedItems'
 import { useStagedEdit } from './useStagedEdit'
 import { useOrderImport } from './useOrderImport'
 import { useOrderDetailEdit } from './useOrderDetailEdit'
+import { useOrderDelete } from './useOrderDelete'
 
 export function useOrderActions(
   _form: Reactive<FormState>,
@@ -24,12 +25,14 @@ export function useOrderActions(
   const stagedEdit = useStagedEdit(staged.stagedItems)
   const orderImport = useOrderImport(staged.stagedItems, isOrder)
   const detailEdit = useOrderDetailEdit(fetchOrders)
+  const orderDelete = useOrderDelete(fetchOrders, staged.confirmDialog)
 
   return {
     ...staged,
     ...stagedEdit,
     ...orderImport,
     ...detailEdit,
+    ...orderDelete,
     genUid,
   }
 }

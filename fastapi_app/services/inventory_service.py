@@ -47,7 +47,12 @@ async def calculate_available_shipment_quantity(
     # 历史兼容：'normal' 在数据库中与 'regular' 等价
     order_type = normalize_order_type(order_type)
 
-    where_clause = [Order.product_id == product_id, Order.customer == customer]
+    where_clause = [
+        Order.product_id == product_id,
+        Order.customer == customer,
+        # 软删除订单不得计入可出货量，否则删除订单后仍能按已删订单的数量出货/抵扣
+        Order.is_deleted.isnot(True),
+    ]
     if order_type:
         if order_type == 'regular':
             where_clause.append(Order.order_type.in_(REGULAR_ORDER_TYPE_ALIASES))

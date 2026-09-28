@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from fastapi_app.core.business_rules import MAX_QUANTITY
-from fastapi_app.core.cache_invalidation import cache_mgr
+from fastapi_app.core.cache_invalidation import cache_mgr, schedule_post_commit_invalidation
 from fastapi_app.core.exception_handler import safe_publish_event
 from fastapi_app.services.notification_service import StockEvent
 from fastapi_app.services.stock_common import _parse_date_preserve_time
@@ -79,6 +79,7 @@ async def create_stockin(db: AsyncSession, product_id: int, quantity: int, custo
     stockin = await stock_service.create_stockin_core(db, product_id, quantity, customer, stockin_date, note)
     await db.flush()
     await cache_mgr.invalidate_stock_and_order()
+    schedule_post_commit_invalidation(db, cache_mgr.invalidate_stock_and_order)
     product = await db.get(Product, product_id)
     if product is not None:
         await safe_publish_event(stock_service.publish_stock_event, StockEvent.STOCK_CHANGED, {'product_id': product_id, 'product_name': product.name, 'change_type': '入库', 'quantity': quantity, 'current_stock': product.current_stock}, context="入库事件发布")
@@ -100,6 +101,7 @@ async def update_stockin(db: AsyncSession, stockin_id: int, quantity: int, custo
     await update_stockin_core(db, stockin_obj, quantity, customer, stockin_date, note)
     await db.flush()
     await cache_mgr.invalidate_stock_and_order()
+    schedule_post_commit_invalidation(db, cache_mgr.invalidate_stock_and_order)
     product = await db.get(Product, stockin_obj.product_id)
     if product is not None:
         await safe_publish_event(stock_service.publish_stock_event, StockEvent.STOCK_CHANGED, {'product_id': stockin_obj.product_id, 'product_name': product.name, 'change_type': '入库编辑', 'quantity': quantity, 'current_stock': product.current_stock}, context="入库编辑事件发布")
@@ -116,6 +118,7 @@ async def delete_stockin(db: AsyncSession, stockin_id: int) -> None:
     await stock_service.delete_stockin_core(db, stockin_obj)
     await db.flush()
     await cache_mgr.invalidate_stock_and_order()
+    schedule_post_commit_invalidation(db, cache_mgr.invalidate_stock_and_order)
     product = await db.get(Product, stockin_obj.product_id)
     if product is not None:
         await safe_publish_event(stock_service.publish_stock_event, StockEvent.STOCK_CHANGED, {'product_id': stockin_obj.product_id, 'product_name': product.name, 'change_type': '入库删除', 'quantity': -stockin_obj.quantity, 'current_stock': product.current_stock}, context="入库删除事件发布")

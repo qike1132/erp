@@ -21,6 +21,8 @@ export type {
   MaterialOrderInput,
   ProductListResponse as PurchaseProductListResponse,
   SearchSuggestionResponse as PurchaseSearchSuggestionResponse,
+  CompletedOrderExportRow,
+  CompletedOrderExportResponse,
 } from './purchase'
 export { customerApi } from './customer'
 export { supplierApi } from './supplier'

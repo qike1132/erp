@@ -4,17 +4,26 @@
 
 本目录包含ERP系统的数据库管理工具，支持数据库备份、验证、恢复等功能。
 
+> **生产环境的备份与恢复不走这里。** 应用内「备份中心」由 `fastapi_app/services/backup/`
+> 实现（`pg_dump` + 分片加密 + 增量），设计说明见 `docs/backup-restore/备份与恢复模块设计方案.md`。
+> 本目录脚本仅用于人工排障、只读副本搭建与切换演练。
+
 ## 文件说明
 
 | 文件 | 说明 |
 |------|------|
-| `db_manager.py` | 主数据库管理脚本（Python） |
-| `db_backup.bat` | Windows快速备份脚本 |
+| `db_manager.py` | 手动备份/恢复/校验脚本（PostgreSQL 优先，保留 MySQL 兼容分支） |
+| `db_backup.bat` | Windows 手动备份入口，内部调用 `db_manager.py backup --type manual` |
+| `restore_db.py` | 由 `pg_dump` 产物恢复本地库（`psql` 驱动） |
+| `failover_drill.sh` | 主备切换演练 |
+| `setup_read_replica.sh` | 只读副本搭建 |
+| `setup_replication.sql` | 流复制初始化 SQL |
+| `pg_stat_statements_setup.sql` | 慢查询统计扩展启用 |
 | `README.md` | 本使用说明 |
 
 ## 功能特性
 
-- ✅ 支持 MySQL 数据库
+- ✅ 支持 PostgreSQL（生产使用）；MySQL 分支仅为历史兼容
 - ✅ 自动压缩备份文件（gzip格式）
 - ✅ 备份文件完整性验证
 - ✅ SHA-256校验和生成
@@ -104,7 +113,7 @@ backups/
 
 ## 备份文件命名规则
 
-**MySQL备份**：
+**PostgreSQL 备份**：
 ```
 erp_system_backup_YYYYMMDD_HHmmss.sql
 erp_system_backup_YYYYMMDD_HHmmss.sql.gz (压缩后)
@@ -148,12 +157,12 @@ python scripts\database\db_manager.py backup --type daily
 - 确保虚拟环境在 `venv/` 或 `.venv/` 目录
 - 或者手动激活虚拟环境后运行
 
-### 问题：MySQL备份失败
+### 问题：备份失败（找不到 pg_dump / psql）
 
 **解决方案**：
-- 确保MySQL已安装并在PATH中
-- 检查 `.env` 文件中的数据库配置
-- 确认数据库用户有足够权限
+- 确认 PostgreSQL 客户端工具 `pg_dump` / `psql` 已安装且已在 PATH 中
+- 检查 `.env` 中的 `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` / `DB_NAME`
+- 确认数据库用户有 `CONNECT` 权限及目标表的读取权限
 
 ### 问题：备份文件损坏
 
@@ -172,4 +181,6 @@ python scripts\database\db_manager.py backup --type daily
 ## 更多信息
 
 详细的备份与恢复方案请参考：
-[数据库备份与恢复指南](../../docs/DATABASE_BACKUP_RECOVERY_GUIDE.md)
+
+- [备份与恢复模块设计方案](../../docs/backup-restore/备份与恢复模块设计方案.md)
+- [备份相关架构决策记录](../../docs/adr/2026-08-23-backup-adrs.md)

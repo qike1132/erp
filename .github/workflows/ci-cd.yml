@@ -31,6 +31,10 @@ jobs:
       DB_PASSWORD: erp_test_pass
       DB_NAME: erp_test
       DB_PORT: "5432"
+      # 显式给出测试库 URL，绕开 tests/conftest.py 的「{DB_NAME}_test」派生：
+      # 派生会把 DB_NAME=erp_test 拼成 erp_test_test，而本 job 的 postgres 只创建了
+      # erp_test（POSTGRES_DB），派生库不存在 → tests/ 整棵树的 fixtures 报错。
+      TEST_DATABASE_URL: postgresql+asyncpg://erp_test:erp_test_pass@localhost:5432/erp_test
       SECRET_KEY: "ci-test-secret-key-with-sufficient-length-for-validation-checks"
       COVERAGE_MIN: "40"
 
@@ -187,6 +191,10 @@ jobs:
 
     - name: Run frontend lint
       run: npm run lint
+
+    # 此前 CI 从不执行前端单测，行为回归只有类型检查兜底（revert 修复也不会红）。
+    - name: Run frontend unit tests
+      run: npm run test
 
     - name: Run frontend build
       run: npm run build

@@ -178,7 +178,11 @@ function focusProductInput() {
   productRef.value?.focusInput?.()
 }
 
-defineExpose({ focusProductInput })
+function resetQuantityValidation() {
+  quantityTouched.value = false
+}
+
+defineExpose({ focusProductInput, resetQuantityValidation })
 
 /**
  * 数量是否已被用户编辑过。

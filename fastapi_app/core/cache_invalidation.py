@@ -10,6 +10,7 @@
 所有方法在 Redis 不可用时静默降级，不影响核心业务流程。
 """
 import logging
+from collections.abc import Awaitable, Callable
 from enum import Enum
 from typing import Any
 
@@ -129,3 +130,16 @@ class CacheInvalidationManager:
 
 # 全局单例
 cache_mgr = CacheInvalidationManager()
+
+
+def schedule_post_commit_invalidation(session: Any, callback: Callable[[], Awaitable[Any]]) -> None:
+    """注册「事务提交成功后」执行的缓存失效回调。
+
+    解决「提交前失效」的竞态：并发请求可能在本次提交前读到旧数据并回写缓存，
+    提交后不再失效，脏数据将留存至 TTL 到期。
+
+    回调由 db_transaction 在成功 commit 后执行，事务回滚则不执行；因此调用处仍需
+    保留原有的提交前失效作为广覆盖 —— 不经 db_transaction 提交的调用方（ARQ 任务、
+    直连会话的脚本）不会执行本回调，只挂回调会导致这些入口彻底失去失效。
+    """
+    session.info.setdefault('post_commit_callbacks', []).append(callback)

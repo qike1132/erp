@@ -1,50 +1,5 @@
 <template>
   <div class="coq-panel">
-    <!-- 搜索 + 查询 + 导出 -->
-    <div class="coq-bar">
-      <div class="coq-fields">
-        <input
-          v-model="draft.order_no"
-          class="coq-input"
-          type="text"
-          placeholder="订单号"
-          autocomplete="off"
-          @keyup.enter="emit('search')"
-        />
-        <input
-          v-model="draft.customer_name"
-          class="coq-input"
-          type="text"
-          placeholder="客户名称"
-          autocomplete="off"
-          @keyup.enter="emit('search')"
-        />
-        <input
-          v-model="draft.product_name"
-          class="coq-input"
-          type="text"
-          placeholder="产品名称"
-          autocomplete="off"
-          @keyup.enter="emit('search')"
-        />
-        <UiDatePicker v-model="draft.start_date" placeholder="完成日期从" />
-        <span class="coq-sep">~</span>
-        <UiDatePicker v-model="draft.end_date" placeholder="完成日期到" />
-      </div>
-
-      <div class="coq-actions">
-        <button class="coq-btn coq-btn-primary" :class="{ 'coq-dirty': isDirty }" @click="emit('search')">
-          查询
-        </button>
-        <button class="coq-btn" :disabled="!hasFilter && !isDirty" @click="emit('reset')">重置</button>
-        <button class="coq-btn" :disabled="exporting" @click="emit('export')">
-          <span v-if="exporting" class="coq-spin" aria-hidden="true" />
-          {{ exporting ? '导出中…' : '导出' }}
-        </button>
-        <span class="coq-total">共 {{ total }} 条</span>
-      </div>
-    </div>
-
     <!-- 已生效条件（可单个移除） -->
     <div v-if="activePills.length" class="coq-pills">
       <span class="coq-pill-label">当前条件</span>
@@ -87,7 +42,6 @@
                 <th class="coq-th coq-w-customer">客户</th>
                 <th class="coq-th coq-w-product">产品名称</th>
                 <th class="coq-th coq-th-num coq-w-num">数量</th>
-                <th class="coq-th coq-w-status">状态</th>
                 <th class="coq-th coq-w-op">操作</th>
               </tr>
             </thead>
@@ -110,12 +64,7 @@
                   {{ sku.product_name || '—' }}
                 </td>
                 <td class="coq-td coq-td-num">{{ formatNumber(sku.quantity) }}</td>
-                <td v-if="idx === 0" class="coq-td" :rowspan="row.skuCount">
-                  <span :class="['coq-badge', getStatusClass(row.o.status)]">
-                    {{ getStatusLabel(row.o.status) }}
-                  </span>
-                </td>
-                <td v-if="idx === 0" class="coq-td" :rowspan="row.skuCount">
+                <td v-if="idx === 0" class="coq-td coq-w-op" :rowspan="row.skuCount">
                   <button class="coq-op" @click.stop="emit('viewDetail', row.o.id)">查看</button>
                 </td>
               </tr>
@@ -140,7 +89,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import UiPagination from '@/components/ui/UiPagination.vue'
-import UiDatePicker from '@/components/ui/UiDatePicker.vue'
 import type { PurchaseOrder } from '@/types'
 import { formatDateTime, formatNumber } from '@/utils/format'
 import type { CompletedOrderFilters } from '../composables/useCompletedOrders'
@@ -153,21 +101,15 @@ const props = defineProps<{
   total: number
   currentPage: number
   totalPages: number
-  /** 草稿与已提交条件是否有差异 */
-  isDirty: boolean
   /** 是否处于筛选状态 */
   hasFilter: boolean
-  /** 导出进行中 */
-  exporting: boolean
+  /** 已提交生效的筛选条件（胶囊据此渲染；草稿不参与，否则未点「查询」也会出现条件） */
+  filters: CompletedOrderFilters
 }>()
 
-/** 筛选表单草稿（v-model:draft，父组件持有状态，子组件负责编辑） */
-const draft = defineModel<CompletedOrderFilters>('draft', { required: true })
-
+/** 筛选表单草稿由父组件持有，输入框也在父组件；本组件不再持有 draft */
 const emit = defineEmits<{
-  search: []
   reset: []
-  export: []
   'remove-filter': [key: keyof CompletedOrderFilters]
   viewDetail: [id: number]
   'update:currentPage': [page: number]
@@ -182,27 +124,12 @@ const FILTER_LABELS: Record<keyof CompletedOrderFilters, string> = {
   end_date: '截止日期',
 }
 
-/** 已生效条件胶囊：从草稿推导，与页面上看到的输入框保持一致 */
+/** 已生效条件胶囊：从已提交条件推导，与导出使用的条件同源 */
 const activePills = computed(() =>
   (Object.keys(FILTER_LABELS) as (keyof CompletedOrderFilters)[])
-    .filter((key) => !!draft.value[key])
-    .map((key) => ({ key, label: `${FILTER_LABELS[key]}：${draft.value[key]}` })),
+    .filter((key) => !!props.filters[key])
+    .map((key) => ({ key, label: `${FILTER_LABELS[key]}：${props.filters[key]}` })),
 )
-
-const statusMap: Record<string, { label: string; cls: string }> = {
-  completed: { label: '已完成', cls: 'coq-badge-success' },
-  pending: { label: '待处理', cls: 'coq-badge-primary' },
-  partial: { label: '部分', cls: 'coq-badge-warning' },
-  cancelled: { label: '已取消', cls: 'coq-badge-danger' },
-}
-
-function getStatusClass(status: string): string {
-  return statusMap[status]?.cls || 'coq-badge-muted'
-}
-
-function getStatusLabel(status: string): string {
-  return statusMap[status]?.label || status || '—'
-}
 
 function getSkuRows(o: PurchaseOrder): { product_name: string; quantity: number }[] {
   if (o.sku_items && o.sku_items.length > 0) {
@@ -234,73 +161,6 @@ const flatRows = computed(() =>
   font-family: var(--font-sans);
   color: var(--coq-text);
   background: #fff;
-}
-
-/* === 搜索 + 查询 + 导出 === */
-.coq-bar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 14px 24px;
-  border-bottom: 1px solid var(--coq-border);
-  flex-wrap: wrap;
-}
-
-.coq-fields {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex: 1;
-  min-width: 0;
-  flex-wrap: wrap;
-}
-
-.coq-input {
-  height: 32px;
-  padding: 0 10px;
-  border: 1px solid var(--coq-border);
-  border-radius: 7px;
-  font-size: 13px;
-  font-family: inherit;
-  color: var(--coq-text);
-  background: #fff;
-  outline: none;
-  min-width: 130px;
-  flex: 1 1 130px;
-  max-width: 190px;
-  box-sizing: border-box;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
-}
-
-.coq-input:focus {
-  border-color: var(--coq-blue);
-  box-shadow: 0 0 0 3px rgba(91, 141, 239, 0.14);
-}
-
-.coq-input::placeholder {
-  color: var(--coq-text-muted);
-}
-
-.coq-sep {
-  color: var(--coq-text-muted);
-  font-size: 12px;
-  flex-shrink: 0;
-}
-
-.coq-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
-.coq-total {
-  font-size: 12px;
-  color: var(--coq-text-secondary);
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  padding-left: 4px;
 }
 
 /* === 已生效条件 === */
@@ -366,17 +226,21 @@ const flatRows = computed(() =>
 .coq-btn {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 6px 14px;
+  gap: 6px;
+  height: 34px;
+  padding: 0 14px;
   border: 1px solid var(--coq-border);
-  border-radius: 8px;
+  border-radius: 9px;
   font-size: 12px;
   font-weight: 600;
   font-family: inherit;
   color: var(--coq-text-secondary);
   background: #fff;
   cursor: pointer;
-  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    color 0.15s ease,
+    background 0.15s ease;
   white-space: nowrap;
 }
 
@@ -392,34 +256,16 @@ const flatRows = computed(() =>
 
 .coq-btn-primary {
   color: #fff;
-  background: var(--coq-navy);
-  border-color: var(--coq-navy);
+  background: linear-gradient(135deg, var(--color-primary-500, #5b8def), var(--color-primary-600, #3a6bd6));
+  border-color: transparent;
+  box-shadow: 0 2px 6px rgba(58, 107, 214, 0.28);
 }
 
 .coq-btn-primary:hover:not(:disabled) {
-  background: var(--color-primary-800, #234996);
-  border-color: var(--color-primary-800, #234996);
+  background: linear-gradient(135deg, var(--color-primary-600, #3a6bd6), var(--color-primary-700, #2d5ab8));
+  border-color: transparent;
+  box-shadow: 0 4px 12px rgba(58, 107, 214, 0.34);
   color: #fff;
-}
-
-/* 有未提交改动时高亮"查询"，提示"改了还没查" */
-.coq-btn-primary.coq-dirty {
-  box-shadow: 0 0 0 3px rgba(91, 141, 239, 0.25);
-}
-
-.coq-spin {
-  width: 11px;
-  height: 11px;
-  border: 2px solid rgba(71, 85, 105, 0.3);
-  border-top-color: var(--coq-text-secondary);
-  border-radius: 50%;
-  animation: coq-spin 0.6s linear infinite;
-}
-
-@keyframes coq-spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 /* === 表格 === */
@@ -429,9 +275,20 @@ const flatRows = computed(() =>
 
 .coq-table {
   width: 100%;
+  /* 窄屏改为横向滚动，避免把「数量/操作」压扁 */
+  min-width: 940px;
+  /* 固定表格布局：列宽严格按下方比例分配，
+     否则「产品名称」会独占剩余宽度，右侧两列被挤在一起 */
+  table-layout: fixed;
   border-collapse: collapse;
   font-size: 13px;
   font-variant-numeric: tabular-nums;
+}
+
+/* 表格单元格统一 border-box，保证百分比列宽不会因内边距溢出 */
+.coq-table th,
+.coq-table td {
+  box-sizing: border-box;
 }
 
 .coq-table thead th {
@@ -449,12 +306,35 @@ const flatRows = computed(() =>
   z-index: 1;
 }
 
-.coq-w-date { width: 140px; min-width: 140px; white-space: nowrap; }
-.coq-w-customer { width: 18%; min-width: 140px; }
-.coq-w-product { width: auto; min-width: 200px; }
-.coq-w-num { width: 100px; min-width: 100px; white-space: nowrap; }
-.coq-w-status { width: 96px; min-width: 96px; white-space: nowrap; text-align: center; }
-.coq-w-op { width: 76px; min-width: 76px; white-space: nowrap; text-align: center; }
+/*
+ * 列宽比例：前四列按内容取够用的宽度，把「数量」尽量往左收；
+ * 剩余宽度全部留给最后一列「操作」，空白堆在表格最右端而不是中段。
+ */
+.coq-w-date {
+  width: 16%;
+  white-space: nowrap;
+}
+.coq-w-customer {
+  width: 14%;
+}
+.coq-w-product {
+  width: 20%;
+}
+.coq-w-num {
+  width: 10%;
+  white-space: nowrap;
+}
+.coq-w-op {
+  width: 40%;
+  white-space: nowrap;
+  text-align: left;
+}
+
+/* 操作列内容整体右移 200px（14px 默认内边距 + 200px），只挪这一列 */
+.coq-table th.coq-w-op,
+.coq-table td.coq-w-op {
+  padding-left: 214px;
+}
 
 .coq-th-num {
   text-align: right !important;
@@ -498,17 +378,17 @@ const flatRows = computed(() =>
 .coq-td-muted {
   color: var(--coq-text-secondary);
   font-size: 12px;
+  white-space: nowrap;
 }
 
 .coq-td-product {
-  max-width: 360px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   text-align: left;
 }
 
-/* 行操作按钮：hover / 键盘聚焦时显现 */
+/* 行操作按钮：常驻显示 */
 .coq-op {
   padding: 3px 10px;
   border: 1px solid var(--coq-border);
@@ -518,13 +398,9 @@ const flatRows = computed(() =>
   font-family: inherit;
   color: var(--coq-text-secondary);
   cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.15s ease, border-color 0.15s ease, color 0.15s ease;
-}
-
-.coq-po-group:hover .coq-op,
-.coq-po-group:focus-within .coq-op {
-  opacity: 1;
+  transition:
+    border-color 0.15s ease,
+    color 0.15s ease;
 }
 
 .coq-op:hover {
@@ -532,21 +408,6 @@ const flatRows = computed(() =>
   color: var(--coq-navy);
   background: var(--color-primary-50, #eff5ff);
 }
-
-.coq-badge {
-  display: inline-block;
-  padding: 5px 12px;
-  border-radius: 16px;
-  font-size: 12px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.coq-badge-success { background: var(--color-success-50, #e8f9ef); color: var(--color-success-600, #1e9e55); }
-.coq-badge-warning { background: var(--color-warning-50, #fff3e6); color: var(--color-warning-600, #e88e2e); }
-.coq-badge-primary { background: var(--color-primary-50, #eff5ff); color: var(--color-primary-700, #2d5ab8); }
-.coq-badge-danger { background: var(--color-danger-50, #fde8e8); color: var(--color-danger-600, #d44042); }
-.coq-badge-muted { background: var(--coq-border-light); color: var(--coq-text-secondary); }
 
 .coq-pagination {
   border-top: 1px solid var(--coq-border-light);
@@ -562,8 +423,12 @@ const flatRows = computed(() =>
 }
 
 @keyframes coq-shimmer {
-  0% { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
 }
 
 .coq-empty {
@@ -607,37 +472,18 @@ const flatRows = computed(() =>
 }
 
 @keyframes coq-progress {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(400%); }
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(400%);
+  }
 }
 
 /* === 响应式 === */
 @media (max-width: 900px) {
-  .coq-bar {
-    padding: 12px 14px;
-  }
   .coq-pills {
     padding: 10px 14px;
-  }
-  .coq-input {
-    max-width: none;
-  }
-  .coq-actions {
-    width: 100%;
-  }
-}
-
-@media (max-width: 560px) {
-  .coq-actions {
-    flex-wrap: wrap;
-  }
-  .coq-actions .coq-btn {
-    flex: 1;
-    justify-content: center;
-  }
-  .coq-total {
-    width: 100%;
-    padding-left: 0;
   }
 }
 </style>

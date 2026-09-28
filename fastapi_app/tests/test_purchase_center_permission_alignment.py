@@ -88,3 +88,25 @@ async def test_purchase_center_manage_cannot_read_material_registrations(client)
     with patch('fastapi_app.api.v1.endpoints.material_registration.mr_service.get_registrations', AsyncMock(return_value=_REGISTRATIONS)):
         resp = await client.get('/api/v1/material-registrations/registrations')
     assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_material_calculator_cannot_save_bom(client):
+    """写路径不放宽：仅持「物料计算器」码的用户不能改写产品 BOM。
+
+    「物料计算器」是只读计算页的导航权限，读接口放行不等于写接口放行。
+    service 被 patch，确保权限未收紧时不会真的写到数据库。
+    """
+    _use_user_with(['material_calculator'])
+    with patch('fastapi_app.services.purchase_center_service.save_product_bom', AsyncMock(return_value='ok')):
+        resp = await client.post('/api/v1/purchase-center/product/1/bom', json={})
+    assert resp.status_code == 403, resp.text
+
+
+@pytest.mark.asyncio
+async def test_material_calculator_cannot_copy_bom(client):
+    """写路径不放宽：仅持「物料计算器」码的用户不能把 BOM 复制覆盖到目标产品。"""
+    _use_user_with(['material_calculator'])
+    with patch('fastapi_app.services.purchase_center_service.copy_bom_to_product', AsyncMock(return_value={'message': 'ok'})):
+        resp = await client.post('/api/v1/purchase-center/products/1/copy-bom', json={'source_product_id': 2})
+    assert resp.status_code == 403, resp.text

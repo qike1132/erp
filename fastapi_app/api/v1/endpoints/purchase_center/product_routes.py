@@ -19,7 +19,7 @@ from fastapi_app.core.cache import CacheDomain
 from fastapi_app.core.cache_invalidation import InvalidationStrategy, cache_mgr
 from fastapi_app.core.database import get_async_db as get_db
 from fastapi_app.core.database import get_async_read_db as get_read_db
-from fastapi_app.core.deps import require_any_permission
+from fastapi_app.core.deps import require_any_permission, require_permission
 from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.core.logger import logger
 from fastapi_app.core.response import success_response
@@ -207,7 +207,7 @@ async def api_save_product_bom(
     product_id: int,
     data: BomSaveRequest,
     db: AsyncSession = Depends(get_db),
-    _current_user=Depends(require_any_permission('product_manage', 'material_calculator')),
+    _current_user=Depends(require_permission('product_manage')),  # 写路径不放宽：只读的「物料计算器」不得改写 BOM
 ) -> dict[str, Any]:
     """保存产品 BOM 数据。
 
@@ -259,7 +259,7 @@ async def api_copy_bom_to_product(
     target_product_id: int,
     data: BomCopyRequest,
     db: AsyncSession = Depends(get_db),
-    _current_user=Depends(require_any_permission('product_manage', 'material_calculator')),
+    _current_user=Depends(require_permission('product_manage')),  # 写路径不放宽：只读的「物料计算器」不得改写 BOM
 ) -> dict[str, Any]:
     """将源产品 BOM 复制到目标产品。
 

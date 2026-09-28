@@ -110,6 +110,32 @@ export const bomApi = {
     }),
 }
 
+/**
+ * 下单查询导出明细行（对应后端 `export_completed_orders` 返回的 rows 元素）。
+ *
+ * 后端按「订单 × 采购明细」展开，故同一订单可能对应多行。
+ */
+export interface CompletedOrderExportRow {
+  order_no: string
+  completed_at?: string
+  customer_name?: string | null
+  supplier_name?: string | null
+  material_name?: string | null
+  material_code?: string
+  specification?: string
+  unit?: string
+  quantity?: number
+  unit_price?: number
+  amount?: number
+}
+
+/** 下单查询导出响应体：后端返回明细行，由前端拼成 .xls */
+export interface CompletedOrderExportResponse {
+  success: boolean
+  rows?: CompletedOrderExportRow[]
+  message?: string
+}
+
 export const purchaseApi = {
   orders: (params?: QueryParams) => get<{ orders: PurchaseOrder[]; total: number; pages: number; current_page: number }>('/purchase-center/orders', params),
   unprocessedOrders: (params?: { page?: number; per_page?: number }) => get<{ orders: UnprocessedOrder[]; total: number; pages: number; current_page: number }>('/purchase-center/unprocessed-orders', params),
@@ -133,7 +159,7 @@ export const purchaseApi = {
   oneClickGenerate: (data: { composite_ids: string[] }) => post<{ success: boolean; message?: string; created_count?: number; orders?: { id: number; order_no: string }[]; idempotent?: boolean }>('/purchase-center/orders/one-click-generate', data),
   orderDetail: (id: number) => get<{ success: boolean; order?: PurchaseOrder; message?: string }>(`/purchase-center/orders/${id}`),
   completed: (params?: QueryParams) => get<{ orders: PurchaseOrder[]; total: number; pages: number; total_pages?: number }>('/purchase-center/orders/completed', params),
-  exportCompleted: (params?: QueryParams) => post<ExportResponse>('/purchase-center/orders/completed/export', params),
+  exportCompleted: (params?: QueryParams) => post<CompletedOrderExportResponse>('/purchase-center/orders/completed/export', params),
   // 后端返回的是三个时段的计数（dict[str, int]），不是可配置的区间定义数组
   quickFilters: () => get<{ success?: boolean; quick_filters?: Record<string, number> }>('/purchase-center/orders/completed/quick-filters'),
   suggestions: (field: string, q: string) => get<string[]>('/purchase-center/orders/completed/suggestions', { field, q }),

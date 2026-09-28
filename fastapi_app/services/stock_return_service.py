@@ -14,7 +14,7 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi_app.core.cache_invalidation import cache_mgr
+from fastapi_app.core.cache_invalidation import cache_mgr, schedule_post_commit_invalidation
 from fastapi_app.core.domain_events import DomainEvent, DomainEventType
 from fastapi_app.core.domain_events import publish_with_retry as publish_domain_event
 from fastapi_app.core.exception_handler import safe_publish_event
@@ -125,6 +125,7 @@ async def create_stockreturn(db: AsyncSession, stockout_id: int, quantity: int,
     stockreturn = await create_stockreturn_core(db, stockout_id, quantity, return_date, reason, note)
     await db.flush()
     await cache_mgr.invalidate_stock_and_order()
+    schedule_post_commit_invalidation(db, cache_mgr.invalidate_stock_and_order)
     product = await db.get(Product, stockreturn.product_id)
     if product is not None:
         await safe_publish_event(stock_service.publish_stock_event, StockEvent.STOCK_CHANGED, {'product_id': stockreturn.product_id, 'product_name': product.name, 'change_type': '退货', 'quantity': quantity, 'current_stock': product.current_stock}, context="退货事件发布")
@@ -165,6 +166,7 @@ async def delete_stockreturn(db: AsyncSession, stockreturn_id: int) -> None:
     await delete_stockreturn_core(db, stockreturn_obj)
     await db.flush()
     await cache_mgr.invalidate_stock_and_order()
+    schedule_post_commit_invalidation(db, cache_mgr.invalidate_stock_and_order)
     product = await db.get(Product, product_id)
     if product is not None:
         await safe_publish_event(stock_service.publish_stock_event, StockEvent.STOCK_CHANGED, {'product_id': product_id, 'product_name': product.name, 'change_type': '退货删除', 'quantity': -deleted_quantity, 'current_stock': product.current_stock}, context="退货删除事件发布")

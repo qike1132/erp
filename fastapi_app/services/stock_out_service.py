@@ -17,7 +17,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi_app.core.cache_invalidation import cache_mgr
+from fastapi_app.core.cache_invalidation import cache_mgr, schedule_post_commit_invalidation
 from fastapi_app.core.domain_events import DomainEvent, DomainEventType
 from fastapi_app.core.domain_events import publish_with_retry as publish_domain_event
 from fastapi_app.core.exception_handler import safe_publish_event
@@ -113,6 +113,7 @@ async def create_stockout(db: AsyncSession, product_id: int, quantity: int, cust
 
     await db.flush()
     await cache_mgr.invalidate_stock_and_order()
+    schedule_post_commit_invalidation(db, cache_mgr.invalidate_stock_and_order)
     product = await db.get(Product, product_id)
     if product is not None:
         await safe_publish_event(stock_service.publish_stock_event, StockEvent.STOCK_CHANGED, {'product_id': product_id, 'product_name': product.name, 'change_type': '出库', 'quantity': quantity, 'current_stock': product.current_stock}, context="出库事件发布")
@@ -157,6 +158,7 @@ async def update_stockout(db: AsyncSession, stockout_id: int, new_quantity: int,
     await update_stockout_core(db, stockout_obj, new_quantity, customer, stockout_date, note)
     await db.flush()
     await cache_mgr.invalidate_stock_and_order()
+    schedule_post_commit_invalidation(db, cache_mgr.invalidate_stock_and_order)
     product = await db.get(Product, stockout_obj.product_id)
     if product is not None:
         await safe_publish_event(stock_service.publish_stock_event, StockEvent.STOCK_CHANGED, {'product_id': stockout_obj.product_id, 'product_name': product.name, 'change_type': '出库编辑', 'quantity': new_quantity, 'current_stock': product.current_stock}, context="出库编辑事件发布")
@@ -192,6 +194,7 @@ async def delete_stockout(db: AsyncSession, stockout_id: int) -> None:
     await stock_service.delete_stockout_core(db, stockout_obj)
     await db.flush()
     await cache_mgr.invalidate_stock_and_order()
+    schedule_post_commit_invalidation(db, cache_mgr.invalidate_stock_and_order)
     product = await db.get(Product, stockout_obj.product_id)
     if product is not None:
         await safe_publish_event(stock_service.publish_stock_event, StockEvent.STOCK_CHANGED, {'product_id': stockout_obj.product_id, 'product_name': product.name, 'change_type': '出库删除', 'quantity': -deleted_quantity, 'current_stock': product.current_stock}, context="出库删除事件发布")
