@@ -27,7 +27,7 @@
             :class="['pc-tab-btn', { active: activeTab === 'history' }]"
             @click="switchTab('history')"
           >
-            下单查询
+            记录查询
           </button>
         </div>
 
@@ -62,7 +62,7 @@
           <span class="count-badge">{{ purchaseOrders.total }} 个订单</span>
         </div>
 
-        <!-- 下单查询 TAB 的筛选区（与 TAB 同一行、右上角） -->
+        <!-- 记录查询 TAB 的筛选区（与 TAB 同一行、右上角） -->
         <div v-else class="pc-header-actions pc-header-filters">
           <CompletedOrdersFilterInputs v-model:draft="completed.draft" @search="completed.search" />
           <button
@@ -127,7 +127,7 @@
           @retry="purchaseOrders.retry"
         />
 
-        <!-- 下单查询面板 -->
+        <!-- 记录查询面板 -->
         <CompletedOrdersPanel
           v-else
           :filters="completed.filters"
@@ -339,7 +339,7 @@ const {
   padding: 0;
 }
 
-/* === 下单查询 TAB 筛选区（与 TAB 同行，右上角） === */
+/* === 记录查询 TAB 筛选区（与 TAB 同行，右上角） === */
 .pc-header-filters {
   gap: 10px;
   /* 收窄时允许内部换行，避免把 TAB 挤走 */

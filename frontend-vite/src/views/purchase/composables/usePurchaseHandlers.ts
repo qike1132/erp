@@ -46,7 +46,7 @@ export function usePurchaseHandlers() {
     } else if (tab === 'active') {
       purchaseOrders.load()
     } else if (tab === 'history') {
-      // 下单查询按当前筛选条件重新拉取最新数据
+      // 记录查询按当前筛选条件重新拉取最新数据
       completed.refresh()
     }
   }

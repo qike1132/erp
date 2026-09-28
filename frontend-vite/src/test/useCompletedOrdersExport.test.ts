@@ -1,5 +1,5 @@
 /**
- * 下单查询导出回归测试。
+ * 记录查询导出回归测试。
  *
  * 历史缺陷：后端 `/orders/completed/export` 返回的是 rows 明细行，
  * 前端却仍按旧的 html 契约取值，导致点击“导出”必定抛「导出失败」。
@@ -112,7 +112,7 @@ describe('useCompletedOrders 导出', () => {
 
     expect(mocks.exportCompleted).toHaveBeenCalledTimes(1)
     expect(clickSpy).toHaveBeenCalledTimes(1)
-    expect(capturedFilename).toBe('下单查询汇总.xls')
+    expect(capturedFilename).toBe('记录查询汇总.xls')
     const html = String(capturedParts?.[0])
     // 表头与数据齐全
     expect(html).toContain('<th>订单号</th>')

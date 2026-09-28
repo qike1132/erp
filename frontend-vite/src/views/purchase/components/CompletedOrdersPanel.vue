@@ -117,11 +117,7 @@ const emit = defineEmits<{
 }>()
 
 const FILTER_LABELS: Record<keyof CompletedOrderFilters, string> = {
-  order_no: '订单号',
-  customer_name: '客户',
   product_name: '产品',
-  start_date: '起始日期',
-  end_date: '截止日期',
 }
 
 /** 已生效条件胶囊：从已提交条件推导，与导出使用的条件同源 */

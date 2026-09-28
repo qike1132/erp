@@ -230,7 +230,7 @@ export function usePurchaseActions(deps: PurchaseActionDeps) {
   }
 
   // 导出：复用统一 useExport，自动处理"正在导出/成功/失败"提示与并发防重
-  const { exporting, runExport } = useExport({ success: '已导出 下单查询汇总.xls' })
+  const { exporting, runExport } = useExport({ success: '已导出 记录查询汇总.xls' })
 
   function handleExport() {
     runExport(() => completed.exportOrders())

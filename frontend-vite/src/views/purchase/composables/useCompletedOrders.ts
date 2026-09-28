@@ -14,14 +14,10 @@ export const COMPLETED_ORDERS_QUERY_KEY = 'completed-orders-list'
 const PER_PAGE = 20
 
 export interface CompletedOrderFilters {
-  order_no: string
-  customer_name: string
   product_name: string
-  start_date: string
-  end_date: string
 }
 
-const FILTER_KEYS = ['order_no', 'customer_name', 'product_name', 'start_date', 'end_date'] as const
+const FILTER_KEYS = ['product_name'] as const
 
 /** 把筛选条件拼成接口参数（查询与导出共用，避免两处重复） */
 function buildParams(filters: CompletedOrderFilters, page?: number): Record<string, string | number> {
@@ -77,7 +73,7 @@ function buildExportTable(rows: CompletedOrderExportRow[]): string {
 }
 
 /**
- * useCompletedOrders — 下单查询数据层
+ * useCompletedOrders — 记录查询数据层
  *
  * 只做三件事：搜索/查询（filters + page → 列表）、导出、重置。
  * 查询为显式提交（点"查询"或回车），不做输入即请求，避免每键一次请求。
@@ -88,11 +84,7 @@ export function useCompletedOrders() {
 
   /** 已提交的筛选条件（真正参与请求） */
   const filters = reactive<CompletedOrderFilters>({
-    order_no: '',
-    customer_name: '',
     product_name: '',
-    start_date: '',
-    end_date: '',
   })
 
   /** 表单草稿：用户编辑中，点"查询"才写入 filters */
@@ -157,11 +149,6 @@ export function useCompletedOrders() {
 
   /** 查询：把草稿提交为生效条件并回到第 1 页（queryKey 变化自动请求） */
   function search() {
-    // 日期区间校验：起始晚于截止时阻断，避免返回空结果让用户困惑
-    if (draft.start_date && draft.end_date && draft.start_date > draft.end_date) {
-      showToast('开始日期不能晚于结束日期', 'warning')
-      return
-    }
     for (const key of FILTER_KEYS) filters[key] = draft[key]
     page.value = 1
     // 条件与页码都未变时 queryKey 不变，Vue Query 因 staleTime(30s) 不会重新请求；
@@ -194,7 +181,7 @@ export function useCompletedOrders() {
     if (!res.success) throw new Error(res.message || '导出失败')
     const rows = res.rows ?? []
     if (rows.length === 0) throw new Error('没有符合条件的数据可导出')
-    downloadXls(buildExportTable(rows), '下单查询汇总.xls')
+    downloadXls(buildExportTable(rows), '记录查询汇总.xls')
   }
 
   return reactive({

@@ -139,6 +139,54 @@ describe('PrintDialog 产品图片完整性', () => {
   })
 })
 
+describe('PrintDialog 排版（图片居表头右上 · 部位表通栏）', () => {
+  it('产品图片在表头右上角，与元信息并排', () => {
+    mountSheet([makeRole(1, '默认')], [makePart(1, '主料')])
+
+    const head = document.querySelector('.pd-head')!
+    expect(head.querySelector('.pd-image-box')).not.toBeNull()
+    expect(head.querySelectorAll('.pd-meta-item')).toHaveLength(3)
+  })
+
+  it('部位表全部通栏，不被图片挤到下方或挤窄', () => {
+    mountSheet(
+      [makeRole(1, '默认'), makeRole(2, '黄蛋'), makeRole(3, '粉蛋')],
+      [makePart(2, '主料'), makePart(3, '主料')],
+    )
+
+    const tables = document.querySelector('.pd-tables')!
+    // 图片不属于表格区：一旦移进来，width:100% 的表会被撑不下而整张推到图片下方
+    expect(tables.querySelector('.pd-image-box')).toBeNull()
+    expect(tables.querySelectorAll('.pd-role-section')).toHaveLength(3)
+  })
+
+  it('有部位的角色显示部位数量，无部位的角色不显示数量', () => {
+    mountSheet(
+      [makeRole(1, '默认'), makeRole(2, '黄蛋')],
+      [makePart(2, '主料'), makePart(2, '肤色')],
+    )
+
+    const counts = [...document.querySelectorAll('.pd-role-count')].map(
+      (el) => el.textContent?.trim() ?? '',
+    )
+    expect(counts).toEqual(['2 个部位'])
+  })
+
+  it('表头不再渲染「打样单」标题', () => {
+    mountSheet([makeRole(1, '默认')], [makePart(1, '主料')])
+
+    expect(document.querySelector('.pd-head-title')).toBeNull()
+    expect(document.querySelector('.pd-print-sheet')!.textContent).not.toContain('打 样 单')
+  })
+
+  it('产品图片保持足够边长（打印后仍能看清款式）', () => {
+    const imageBoxRule = printDialogSource.match(/\.pd-image-box \{[\s\S]*?\}/)?.[0] ?? ''
+    const width = Number(imageBoxRule.match(/width:\s*(\d+)px/)?.[1] ?? 0)
+
+    expect(width).toBeGreaterThanOrEqual(180)
+  })
+})
+
 // ==================== usePatternRoomPrint 取数 ====================
 
 describe('usePatternRoomPrint 取数（最终版本无数据时回退）', () => {

@@ -3,7 +3,6 @@
   <Teleport to="body">
     <div class="pd-print-sheet">
       <div class="pd-head">
-        <div class="pd-head-title">打 样 单</div>
         <div class="pd-head-meta">
           <div class="pd-meta-item">
             <span class="pd-meta-label">产品名称</span>
@@ -18,49 +17,52 @@
             <span class="pd-meta-value">{{ project?.pattern_maker_name || '-' }}</span>
           </div>
         </div>
-      </div>
 
-      <div class="pd-body">
-        <!-- 产品图片 -->
-        <div class="pd-image-col">
-          <div class="pd-image-box">
-            <img
-              v-if="project?.product_image_url"
-              :src="project.product_image_url"
-              alt="产品图片"
-              class="pd-image"
-            />
-            <div v-else class="pd-image-placeholder">
-              <FontAwesomeIcon icon="tshirt" aria-hidden="true" />
-              <span>暂无图片</span>
-            </div>
+        <!-- 产品图片：表头右上角，与元信息顶部对齐 -->
+        <div class="pd-image-box">
+          <img
+            v-if="project?.product_image_url"
+            :src="project.product_image_url"
+            alt="产品图片"
+            class="pd-image"
+          />
+          <div v-else class="pd-image-placeholder">
+            <FontAwesomeIcon icon="tshirt" aria-hidden="true" />
+            <span>暂无图片</span>
           </div>
         </div>
+      </div>
 
-        <!-- 部位明细表格（按角色分组） -->
-        <div class="pd-table-col">
-          <div v-for="group in groupedParts" :key="group.roleId ?? 'none'" class="pd-role-section">
-            <div class="pd-role-title">{{ group.roleName }}</div>
-            <table class="pd-table">
-              <thead>
-                <tr>
-                  <th class="pd-th-part">部位名称</th>
-                  <th>版本</th>
-                  <th v-for="field in PART_EDIT_FIELDS" :key="field.key">{{ field.label }}</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="(part, idx) in group.items" :key="part.id ?? `${group.roleId}-${idx}`">
-                  <td>{{ part.part_name || '-' }}</td>
-                  <td>{{ part.version_no || '-' }}</td>
-                  <td v-for="field in PART_EDIT_FIELDS" :key="field.key">{{ part[field.key] || '-' }}</td>
-                </tr>
-                <tr v-if="group.items.length === 0">
-                  <td :colspan="2 + PART_EDIT_FIELDS.length" class="pd-empty">暂无部位数据</td>
-                </tr>
-              </tbody>
-            </table>
+      <div class="pd-rule" />
+
+      <!-- 部位明细表格（按角色分组，通栏占满纸张宽度） -->
+      <div class="pd-tables">
+        <div v-for="group in groupedParts" :key="group.roleId ?? 'none'" class="pd-role-section">
+          <div class="pd-role-head">
+            <span class="pd-role-title">{{ group.roleName }}</span>
+            <span v-if="group.items.length" class="pd-role-count">
+              {{ group.items.length }} 个部位
+            </span>
           </div>
+          <table class="pd-table">
+            <thead>
+              <tr>
+                <th class="pd-th-part">部位名称</th>
+                <th>版本</th>
+                <th v-for="field in PART_EDIT_FIELDS" :key="field.key">{{ field.label }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(part, idx) in group.items" :key="part.id ?? `${group.roleId}-${idx}`">
+                <td class="pd-td-part">{{ part.part_name || '-' }}</td>
+                <td>{{ part.version_no || '-' }}</td>
+                <td v-for="field in PART_EDIT_FIELDS" :key="field.key">{{ part[field.key] || '-' }}</td>
+              </tr>
+              <tr v-if="group.items.length === 0">
+                <td :colspan="2 + PART_EDIT_FIELDS.length" class="pd-empty">暂无部位数据</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -143,65 +145,63 @@ defineExpose({ updatePrintTime })
   display: none;
 }
 
-/* ============ 打样单纸张 ============ */
+/* ============ 表头：左元信息，右上产品图片 ============ */
+/* 顶部对齐：图片贴住内容顶端，元信息也不再垂直居中而上下各留一大段空白 */
 .pd-head {
-  border-bottom: 2px solid #1a1a2e;
-  padding-bottom: 12px;
-  margin-bottom: 16px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 28px;
 }
 
-.pd-head-title {
-  font-size: 22px;
-  font-weight: 700;
-  text-align: center;
-  color: #1a1a2e;
-  letter-spacing: 8px;
-  margin-bottom: 12px;
-}
-
+/* wrap：产品名称可能很长，换行而不是横向撑破纸张 */
 .pd-head-meta {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  gap: 12px;
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 44px;
 }
 
+/* 标签在上、值在下：值比标签醒目，编号/色号一类数字列竖向对齐 */
 .pd-meta-item {
   display: flex;
-  align-items: baseline;
-  gap: 6px;
-  font-size: 13px;
+  flex-direction: column;
+  gap: 3px;
 }
 
 .pd-meta-label {
-  color: #6b7280;
-  flex-shrink: 0;
+  font-size: 11px;
+  color: #75808e;
+  letter-spacing: 0.08em;
 }
 
 .pd-meta-value {
-  color: #1a1a2e;
-  font-weight: 600;
+  font-size: 15px;
+  font-weight: 700;
+  color: #16202e;
+  font-variant-numeric: tabular-nums;
 }
 
-.pd-body {
-  display: flex;
-  gap: 20px;
+/* 表头分割线：深墨 + 品牌橙拼接 */
+.pd-rule {
+  height: 3px;
+  margin: 14px 0 18px;
+  background: linear-gradient(to right, #16202e 0 92px, #ff9f43 92px 100%);
 }
 
 /* 产品图片 */
-.pd-image-col {
-  flex-shrink: 0;
-}
-
 .pd-image-box {
-  width: 220px;
-  height: 220px;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
+  width: 180px;
+  height: 180px;
+  flex-shrink: 0;
+  border: 1px solid #d5dbe3;
+  border-radius: 4px;
   overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #f8fafc;
+  background: #f6f8fa;
   page-break-inside: avoid;
 }
 
@@ -218,59 +218,71 @@ defineExpose({ updatePrintTime })
   flex-direction: column;
   align-items: center;
   gap: 8px;
-  color: #94a3b8;
-  font-size: 13px;
+  color: #9aa4b1;
+  font-size: 12px;
 }
 
-.pd-image-placeholder i {
-  font-size: 40px;
-  opacity: 0.5;
+.pd-image-placeholder svg {
+  width: 44px;
+  height: 44px;
+  opacity: 0.45;
 }
 
-/* 部位明细表格 */
-.pd-table-col {
-  flex: 1;
-  min-width: 0;
-}
-
+/* ============ 部位明细表格 ============ */
 /* 角色分组 */
 .pd-role-section {
-  margin-bottom: 16px;
+  margin-bottom: 22px;
   page-break-inside: avoid;
 }
 
+.pd-role-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding-left: 11px;
+  border-left: 3px solid #ff9f43;
+  margin-bottom: 7px;
+}
+
 .pd-role-title {
-  font-size: 14px;
+  font-size: 14.5px;
   font-weight: 700;
-  color: #1a1a2e;
-  padding: 6px 10px;
-  background: #f1f5f9;
-  border-left: 4px solid #ff9f43;
-  border-radius: 4px;
-  margin-bottom: 6px;
+  color: #16202e;
+  letter-spacing: 0.04em;
+}
+
+.pd-role-count {
+  font-size: 11px;
+  color: #75808e;
 }
 
 .pd-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
+  font-variant-numeric: tabular-nums;
 }
 
 .pd-table th,
 .pd-table td {
-  padding: 8px 10px;
-  border: 1px solid #d9dce3;
+  padding: 9px 12px;
+  border-bottom: 1px solid #eceff3;
   text-align: center;
-  color: #1a1a2e;
+  color: #16202e;
   white-space: nowrap;
 }
 
 .pd-table th {
-  background: #f8fafc;
-  font-weight: 600;
+  font-size: 12px;
+  font-weight: 700;
+  color: #44515f;
+  background: #f6f8fa;
+  border-top: 1px solid #d5dbe3;
+  border-bottom: 1px solid #d5dbe3;
 }
 
-.pd-th-part {
+.pd-th-part,
+.pd-td-part {
   text-align: left;
 }
 
@@ -279,15 +291,15 @@ defineExpose({ updatePrintTime })
 }
 
 .pd-empty {
-  color: #94a3b8;
+  color: #75808e;
 }
 
 .pd-foot {
   margin-top: 20px;
   padding-top: 12px;
-  border-top: 1px dashed #d9dce3;
+  border-top: 1px dashed #d5dbe3;
   font-size: 12px;
-  color: #6b7280;
+  color: #75808e;
   display: flex;
   justify-content: flex-end;
 }

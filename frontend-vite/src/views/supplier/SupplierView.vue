@@ -5,11 +5,17 @@
         <button class="sp-action-btn sp-action-btn-primary" aria-label="添加供应商" @click="formOpen = true">
           <FontAwesomeIcon icon="plus" aria-hidden="true" /> 添加供应商
         </button>
-      </div>
 
-      <div class="sp-toolbar">
-        <div class="sp-search-wrapper">
-          <UiSearchInput v-model="searchTerm" placeholder="搜索供应商名称..." @update:model-value="onSearchInput" @clear="clearSearch" /></div>
+        <div class="page-toolbar-right">
+          <div class="sp-search-wrapper">
+            <UiSearchInput
+              v-model="searchTerm"
+              placeholder="搜索供应商名称..."
+              @update:model-value="onSearchInput"
+              @clear="clearSearch"
+            />
+          </div>
+        </div>
       </div>
 
       <SupplierTable
@@ -137,13 +143,9 @@ const {
   transform: translateY(-1px);
 }
 
-.sp-toolbar {
-  padding: 12px 24px;
-  border-bottom: 1px solid var(--color-border-light, #e2e8f0);
-  flex-shrink: 0;
-}
-
+/* 固定宽度：UiSearchInput 根节点是 w-full，放在「宽度由内容决定」的
+   .page-toolbar-right 里会形成百分比循环，宽度不确定。显式给宽即可 */
 .sp-search-wrapper {
-  position: relative;
+  width: 320px;
 }
 </style>

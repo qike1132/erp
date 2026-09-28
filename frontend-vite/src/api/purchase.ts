@@ -111,7 +111,7 @@ export const bomApi = {
 }
 
 /**
- * 下单查询导出明细行（对应后端 `export_completed_orders` 返回的 rows 元素）。
+ * 记录查询导出明细行（对应后端 `export_completed_orders` 返回的 rows 元素）。
  *
  * 后端按「订单 × 采购明细」展开，故同一订单可能对应多行。
  */
@@ -129,7 +129,7 @@ export interface CompletedOrderExportRow {
   amount?: number
 }
 
-/** 下单查询导出响应体：后端返回明细行，由前端拼成 .xls */
+/** 记录查询导出响应体：后端返回明细行，由前端拼成 .xls */
 export interface CompletedOrderExportResponse {
   success: boolean
   rows?: CompletedOrderExportRow[]
