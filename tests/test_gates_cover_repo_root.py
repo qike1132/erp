@@ -160,13 +160,36 @@ def test_function_length_gate_scans_repo_root() -> None:
 # tests/test_outsource.py 判红,违背脚本"存量超限不阻断"的设计原则)。
 # ---------------------------------------------------------------------------
 def test_ci_uses_baseline_diff_mode() -> None:
+    """CI 的规模门禁在 PR 事件上必须对比基线;push 回落的 ``--all`` **不得**带 ``--fail``。
+
+    历史:干净检出里 git-diff(工作树 vs HEAD) 恒空 ⇒ 空转。改对比 PR 基线后,
+    仓库根与 ``server_manager/`` 随变更集进入扫描范围(T6 的目标)。push 事件没有
+    ``base_ref``,传 ``--base`` 只会得到解析不了的 ref,故改走 ``--all`` 全量报告;
+    带 ``--fail`` 会把**存量** ``tests/test_outsource.py`` 判红、违背脚本
+    「存量超限不阻断」的设计原则。
+    """
     text = (ROOT / ".github" / "workflows" / "ci-cd.yml").read_text(encoding="utf-8")
-    assert "file_size_gate.py --base origin/${{ github.base_ref }}" in text, (
+    assert 'file_size_gate.py --base "origin/${{ github.base_ref }}"' in text, (
         "CI 文件规模门禁未对比 PR 基线(干净检出里会空转)"
     )
-    assert "file_size_gate.py --all" not in text, (
-        "CI 不应退回 --all(存量违规会误红,违背脚本设计原则)"
+    assert "file_size_gate.py --all --fail" not in text, (
+        "CI 的 --all 不得带 --fail(会把存量违规判红,违背脚本设计原则)"
     )
+
+
+def test_file_size_gate_fails_loudly_on_unresolvable_base() -> None:
+    """基线 ref 解析不了时必须**失败**(退出码非 0),不得静默跳过。
+
+    I-1「CI 门禁半交付」的核心防线:此前「ref 解析不了」与「变更集为空」都落到
+    「无扫描文件…跳过」+ 退出码 0 ⇒ CI 少了 ``fetch-depth: 0``、基线分支名不符、
+    分支改名,都会让门禁悄悄退化成空转却报绿。本测试**真跑一次子进程**断言退出码,
+    不是文本锁 —— 若把脚本里的响亮失败改回跳过,它必红。
+    """
+    proc = _run(["scripts/file_size_gate.py", "--base", "origin/no-such-ref-xyz"])
+    assert proc.returncode != 0, (
+        f"基线 ref 解析不了却退出 0(门禁空转):\n{proc.stdout}\n{proc.stderr}"
+    )
+    assert "无法解析" in proc.stderr, f"未给出明确错误信息:\n{proc.stderr}"
 
 
 # ---------------------------------------------------------------------------

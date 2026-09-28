@@ -174,10 +174,18 @@ jobs:
 
     - name: Run file size gate (block new god-classes)
       # 阈值取自 pyproject.toml [tool.code-quality] max_file_size，此处不再硬编码。
-      # 对比 PR 基线取变更文件：CI 干净检出里工作树 == HEAD，原先的 git-diff 模式
-      # 恒为空(空转)。仓库根与 server_manager/ 随变更集进入扫描范围(T6 的目标)。
-      # push 事件无 GITHUB_BASE_REF → base 为空 → 脚本回落「无扫描文件」并跳过。
-      run: python scripts/file_size_gate.py --base origin/${{ github.base_ref }}
+      # PR 事件：对比 PR 基线取变更文件（CI 干净检出里工作树 == HEAD，原先的 git-diff 模式
+      #   恒为空 = 空转）。仓库根与 server_manager/ 随变更集进入扫描范围(T6 的目标)。
+      #   基线 ref 解析不了时脚本会**失败**而非静默跳过 —— 这正是 fetch-depth: 0 的意义所在。
+      # push 事件：无 GITHUB_BASE_REF，传 --base 只会得到一个解析不了的 ref，故改走 --all
+      #   全量报告（不阻断，仅让超限文件在日志里可见）。
+      run: |
+        if [ -n "${{ github.base_ref }}" ]; then
+          python scripts/file_size_gate.py --base "origin/${{ github.base_ref }}"
+        else
+          echo "[file-size-gate] 非 PR 事件(无 base_ref)：改走全量报告，不阻断"
+          python scripts/file_size_gate.py --all
+        fi
 
   frontend:
     runs-on: ubuntu-latest

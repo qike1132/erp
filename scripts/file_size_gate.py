@@ -6,8 +6,12 @@
   使门禁可立即在 CI 启用而不会让历史遗留问题卡住流水线。
 - CI 里须用 ``--base origin/<base_branch>`` 对比 **PR 基线**：CI 是干净检出，
   ``git diff HEAD``（工作树 vs HEAD）恒为空 ⇒ 门禁空转。对比基线才能取到变更集，
-  仓库根与 ``server_manager/`` 也随之进入扫描范围。push 事件无 base_ref 时脚本
-  回落「无扫描文件」并跳过，不阻断。
+  仓库根与 ``server_manager/`` 也随之进入扫描范围。
+- **显式指定的 ``--base <ref>`` 解析不了时一律失败（退出码 1），不回落跳过**：
+  静默跳过正是本门禁历史上"半交付"的成因 —— CI 少了 ``fetch-depth: 0``、基线与
+  远端分支名不符、分支改名，都会让它悄悄退化成空转却报绿（2026-09-28 实测确认）。
+  push 事件本就没有 ``base_ref``，由 CI 那侧改走 ``--all`` 报告路径（见 ci-cd.yml），
+  不再传 ``--base``；「无变更文件」的正常跳过只保留给解析得通的基线。
 - 新增/修改的文件超过阈值即失败（退出码 1）。阈值单一来源是
   `pyproject.toml` 的 `[tool.code-quality] max_file_size`；解析不到才回落到
   本脚本的 DEFAULT_THRESHOLD。此前该值在 pyproject / 本脚本 / CI workflow
@@ -111,6 +115,22 @@ def _git_changed_py_files(base: str = "HEAD") -> list[Path]:
     return [Path(p) for p in dict.fromkeys(tracked + staged + untracked) if p.endswith(".py")]
 
 
+def _ref_resolves(ref: str) -> bool:
+    """``ref`` 能否解析为一个 commit。
+
+    用于把「基线 ref 不存在」（配置/检出问题，必须响亮失败）与「基线存在但变更集
+    为空」（正常，跳过）区分开 —— 此前两者都落到「无扫描文件…跳过」+ 退出码 0，
+    使门禁可被静默废掉而 CI 仍报绿。
+    """
+    try:
+        return subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", ref + "^{commit}"],
+            capture_output=True, timeout=15, check=False,
+        ).returncode == 0
+    except (subprocess.SubprocessError, OSError):
+        return False
+
+
 def _all_py_files() -> list[Path]:
     files: list[Path] = []
     for d in SCAN_DIRS:
@@ -145,6 +165,14 @@ def main() -> int:
     threshold = args.threshold if args.threshold is not None else _threshold_from_pyproject()
     args.threshold = threshold
 
+    # 显式给了基线却解析不了 ⇒ 响亮失败，绝不空转。默认 HEAD（工作树 vs HEAD）与
+    # --all 不受影响：前者是本地/pre-commit 用法，后者是报告用法。
+    if not args.all and args.base != "HEAD" and not _ref_resolves(args.base):
+        print(f"[file-size-gate] 基线 ref 无法解析：{args.base!r}", file=sys.stderr)
+        print("[file-size-gate] 门禁拒绝空转：CI 缺 fetch-depth: 0、基线分支名不符或"
+              "分支已改名都会走到这里。", file=sys.stderr)
+        return 1
+
     files = _all_py_files() if args.all else _git_changed_py_files(args.base)
     if not files:
         mode = "all" if args.all else f"git-diff(base={args.base})"
@@ -166,9 +194,13 @@ def main() -> int:
 
     for f, n in sorted(over, key=lambda x: -x[1]):
         print(f"[file-size-gate] ⚠ {f}: {n} 行（阈值 {args.threshold}）")
-    print(f"[file-size-gate] 失败：{len(over)} 个文件超过 {args.threshold} 行"
-          f"{'（--fail）' if args.all else '，请拆分后合入'}")
-    return 1 if (args.all and args.fail) or not args.all else 0
+    # 措辞必须与真实退出码一致：--all 不加 --fail 时只报告、退出 0，此前却打印
+    # 「失败…（--fail）」——门禁自己说谎，与本文件要消灭的"假绿"同类。
+    failing = (not args.all) or args.fail
+    print(f"[file-size-gate] {'失败' if failing else '仅报告(未加 --fail)'}："
+          f"{len(over)} 个文件超过 {args.threshold} 行"
+          f"{'，请拆分后合入' if failing else ''}")
+    return 1 if failing else 0
 
 
 if __name__ == "__main__":
