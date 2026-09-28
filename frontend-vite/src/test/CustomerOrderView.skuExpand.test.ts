@@ -6,7 +6,6 @@ const mocks = vi.hoisted(() => ({
   orderListMock: vi.fn(),
   orderDetailMock: vi.fn(),
   customerActiveNamesMock: vi.fn(),
-  countryListMock: vi.fn(),
   getRequestMock: vi.fn(),
   postRequestMock: vi.fn(),
 }))
@@ -35,11 +34,6 @@ vi.mock('@/api', () => ({
   customerApi: {
     activeNames: mocks.customerActiveNamesMock,
   },
-  countryApi: {
-    list: mocks.countryListMock,
-    create: vi.fn(),
-    delete: vi.fn(),
-  },
 }))
 
 vi.mock('@/api/request', () => ({
@@ -67,17 +61,6 @@ vi.mock('@/composables/useConfirmDialog', () => ({
     onConfirm: vi.fn(),
     onCancel: vi.fn(),
     confirm: vi.fn(async () => true),
-  }),
-}))
-
-vi.mock('@/stores/country', () => ({
-  useCountryStore: () => ({
-    countries: [],
-    countryOptions: [],
-    loaded: true,
-    fetchCountries: vi.fn(),
-    addCountry: vi.fn(async () => true),
-    removeCountry: vi.fn(async () => true),
   }),
 }))
 
@@ -128,11 +111,9 @@ describe('CustomerOrderView SKU expand behavior (SubTask 7.4)', () => {
     mocks.orderListMock.mockReset()
     mocks.orderDetailMock.mockReset()
     mocks.customerActiveNamesMock.mockReset()
-    mocks.countryListMock.mockReset()
     mocks.getRequestMock.mockReset()
     mocks.postRequestMock.mockReset()
     mocks.customerActiveNamesMock.mockResolvedValue({ names: [] })
-    mocks.countryListMock.mockResolvedValue([])
     mocks.getRequestMock.mockResolvedValue({})
   })
 
@@ -230,15 +211,12 @@ describe('CustomerOrderView SKU expand behavior (SubTask 7.4)', () => {
       quantity: 10,
       deduct_quantity: 0,
       status: '待备货',
-      order_type: 'regular',
       items: [
         {
           id: 1,
           product_name: 'SKU1',
           product_barcode: 'B001',
           quantity: 5,
-          order_type: 'regular',
-          country: '',
           deduct_quantity: 0,
           note: '',
         },
@@ -247,8 +225,6 @@ describe('CustomerOrderView SKU expand behavior (SubTask 7.4)', () => {
           product_name: 'SKU2',
           product_barcode: 'B002',
           quantity: 5,
-          order_type: 'regular',
-          country: '',
           deduct_quantity: 0,
           note: '',
         },
@@ -309,7 +285,6 @@ describe('CustomerOrderView SKU expand behavior (SubTask 7.4)', () => {
       quantity: 10,
       deduct_quantity: 0,
       status: '待备货',
-      order_type: 'regular',
       items: [{ id: 1, product_name: 'SKU1', quantity: 10 }],
     })
 
@@ -360,7 +335,6 @@ describe('CustomerOrderView SKU expand behavior (SubTask 7.4)', () => {
       quantity: 7,
       deduct_quantity: 0,
       status: '待备货',
-      order_type: 'regular',
       items: [],
     })
 

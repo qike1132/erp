@@ -50,7 +50,6 @@ function item(uid: string, type: 'order' | 'stockin'): StagedItem {
     uid,
     origin: 'manual',
     type,
-    orderType: 'normal',
     customer: '审计客户',
     productId: 101,
     productName: '审计产品',
@@ -59,7 +58,6 @@ function item(uid: string, type: 'order' | 'stockin'): StagedItem {
     note: '',
     deductStock: false,
     deductQuantity: 0,
-    country: '',
   }
 }
 

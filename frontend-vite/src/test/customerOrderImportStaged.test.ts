@@ -59,8 +59,6 @@ function apiRow(id: number, product: string, qty: number) {
     deduct_stock: false,
     deduct_quantity: 0,
     note: '',
-    order_type: 'regular',
-    country: '',
     status: 'pending',
   }
 }
@@ -142,9 +140,9 @@ describe('useOrderImport — 导入后回读暂存列表', () => {
       errors: [],
     })
     const { stagedItems, api } = setup([
-      { uid: 'a', origin: 'manual', type: 'order', orderType: 'normal', customer: 'C',
+      { uid: 'a', origin: 'manual', type: 'order', customer: 'C',
         productId: 1, productName: '手工条目', quantity: 1, date: '', note: '',
-        country: '', deductStock: false, deductQuantity: 0 },
+        deductStock: false, deductQuantity: 0 },
     ])
     // 失败路径同样要回读：后端在「没找到 Sheet」等失败分支里可能**已经清空**了会话暂存区，
     // 不能假定服务端状态未变（本地"上次导入的条目"必须跟着消失）。
@@ -164,9 +162,9 @@ describe('useOrderImport — 导入后回读暂存列表', () => {
     })
 
     const manual: StagedItem = {
-      uid: 'm1', origin: 'manual', type: 'order', orderType: 'normal', customer: '手工客户',
+      uid: 'm1', origin: 'manual', type: 'order', customer: '手工客户',
       productId: 999, productName: '手工条目', quantity: 3, date: '', note: '',
-      country: '', deductStock: false, deductQuantity: 0,
+      deductStock: false, deductQuantity: 0,
     }
     const { stagedItems, api } = setup([manual])
 

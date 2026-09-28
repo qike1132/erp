@@ -6,14 +6,12 @@ import type { FormState } from '@/views/customer-order/composables/types'
 const form = reactive({
   id: 0,
   type: 'order',
-  orderType: 'normal',
   date: '2026-09-28',
   customer: 'test-customer',
   productId: 1,
   productSearch: 'test-product',
   quantity: 5,
   note: '',
-  country: '',
   deductStock: false,
   deductQuantity: 0,
 } as FormState)
@@ -28,10 +26,7 @@ function mountPanel(): VueWrapper<InstanceType<typeof OrderInputPanel>> {
     props: {
       form,
       isOrder: true,
-      isCustomOrder: false,
-      orderTypeOptions: [],
       customerOptions: [],
-      countryOptions: [],
       missingFields: [],
       availableStock: 0,
       deductInfoVisible: false,
@@ -44,7 +39,6 @@ function mountPanel(): VueWrapper<InstanceType<typeof OrderInputPanel>> {
       selectProduct: vi.fn(),
       handleDeductPreview: vi.fn(),
       openDeductEdit: vi.fn(),
-      openCountryDialog: vi.fn(),
       handleExcelSelect: vi.fn(),
       onDrop: vi.fn(),
       downloadTemplate: vi.fn(),
