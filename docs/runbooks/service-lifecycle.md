@@ -180,6 +180,11 @@ python scripts/diag/runtime_mode_probe.py
 
 **先查 NSSM 的 `AppEnvironmentExtra`，别去查日志框架。**
 
+> ✅ **2026-09-28 已修**：`server_manager.py` 的 `_nssm_install` 改为**逐元素**写入
+> （列表展开成多个 argv 元素），新装/重装的服务不再有单元素问题。
+> ⚠️ **存量服务需要重跑一次 GUI「安装服务」**才会更新为多元素 —— 在那之前，
+> 本节描述的故障形态在本机仍然成立（读注册表可确认元素个数）。
+
 机制：`AppEnvironmentExtra` 必须是「**一变量一元素**」。实测 `erp-prod`/`erp-arq` 的类型是
 `REG_MULTI_SZ(7)`，但只解出 **1 个元素** —— 整串被塞进一个元素：
 
@@ -194,7 +199,7 @@ NSSM 按「每个元素设一个环境变量」（在**第一个 `=`** 处切分
 |---|---|
 | `PYTHONUNBUFFERED` | `prod_runner` 自身 stdout 块缓冲 → `logs/erp-prod.log` **可能 0 字节**、行序错乱 |
 | `PYTHONUTF8` | `logs/erp-arq.log` 中文乱码 |
-| `UVICORN_WORKERS` | 见 §5.3（注意：**worker 数其实来自 `.env`，不受此影响**） |
+| `UVICORN_WORKERS` | 修复前：worker 数实际来自 `.env`（见 §5.3）；修复后两侧都注入，NSSM 侧优先 |
 
 **读法（无需提权）**：Python `ctypes` + `advapi32.RegOpenKeyExW/RegEnumValueW` 读
 `HKLM\SYSTEM\CurrentControlSet\Services\<svc>\Parameters`；`type=7` 的原始字节按
@@ -236,14 +241,25 @@ nssm restart erp-prod                      # 旧 prod_runner 重新拉起 nginx
 
 ### 5.3 「改了 `UVICORN_WORKERS` 没效果」
 
-`UVICORN_WORKERS` 有**两个声明源，只有 `.env` 生效**：
+> ⚠️ **2026-09-28 起结论反转**：`_nssm_install` 修好单元素 bug 后，NSSM 侧的环境变量
+> 会**真正注入**；而 `prod_runner._load_dotenv()` 用的是 `override=False`
+> —— **操作系统环境变量优先**。因此**重装过服务之后**，NSSM 侧（即 GUI 的 Worker
+> 下拉框）**优先于 `.env`**。以下旧结论只在「服务仍是修复前注册的」时成立。
 
-- **生效源**：仓库根 `.env`（由 `prod_runner.py:66-69` 的 `_load_dotenv()` 加载）
-- **死配置**：NSSM `AppEnvironmentExtra` 里的同名变量（因 §5.1 的单元素 bug 从未注入）
+`UVICORN_WORKERS` 有**两个声明源**：
 
-⇒ **改 NSSM 侧不会有任何效果**。`.env` 里那句「必须与 NSSM `AppEnvironmentExtra` 保持一致」
-**是无法被强制的**（NSSM 永不应用），别照做。
-另：代码在无环境变量时回退 `max(1, min(4, cpu_count))` —— **上限 4**。
+- **`.env`**（仓库根，由 `prod_runner.py` 的 `_load_dotenv()` 加载，`override=False`）
+- **NSSM `AppEnvironmentExtra`**（GUI「安装服务」按 Worker 下拉框写入）
+
+**修复前的行为**：NSSM 侧因 §5.1 的单元素 bug 从未注入 ⇒ 只有 `.env` 生效，
+改下拉框不会有任何效果。
+
+**修复后的行为（需重装服务）**：两侧都会注入，`override=False` 让 **NSSM 侧胜出**
+⇒ 下拉框真正生效，`.env` 的同名项被覆盖。
+
+⇒ **改之前先用 §4 的探针确认实际 worker 数**（`runtime_mode_probe.py` 会报
+`prod (multi worker …)` 与 worker 数），不要凭 `.env` 内容推断。
+另：代码在两侧都没有该变量时回退 `max(1, min(4, cpu_count))` —— **上限 4**。
 
 ### 5.4 「`logs/prod_runner.json` 说 production，但我不确定」
 

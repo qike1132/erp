@@ -71,6 +71,12 @@ _SVC_DEPENDS = {
     _SVC_API: [_SVC_REDIS_CACHE],
     _SVC_ARQ: [_SVC_REDIS_BROKER],
 }
+# 受管服务全集：停止 / 重启 / 受管 PID 排除都按它迭代。
+#   ★ 含两个 Redis 实例：用户决策「停止 = 连 Redis 一起停」；且受管 PID 排除集
+#     必须完整，否则端口清理会误杀正在服务的受管进程（NSSM 5 秒后又拉起）。
+#   ★ 启动流程【不】用它：Redis 由 _start_redis / _ensure_redis_broker 先起。
+#   ★ 切开发模式的「停生产」也不用它：开发模式同样依赖 Redis。
+_SVC_ALL = (_SVC_API, _SVC_ARQ, _SVC_WEB, _SVC_REDIS_CACHE, _SVC_REDIS_BROKER)
 # ARQ broker 端口（与 config/redis-broker.conf 的 port 一致）
 _REDIS_BROKER_PORT = 6380
 _NSSM_CANDIDATES = [
@@ -282,48 +288,6 @@ def _is_prod_runner_cmdline(cmdline):
             return True
     return False
 
-
-def _kill_port_process(port, msg_queue=None):
-    """终止占用指定端口的进程"""
-    try:
-        result = subprocess.run(['netstat', '-ano'], creationflags=subprocess.CREATE_NO_WINDOW, capture_output=True, text=True, timeout=5)
-        for line in result.stdout.split('\n'):
-            if f':{port}' in line and 'LISTENING' in line:
-                parts = line.split()
-                if len(parts) >= 5 and parts[-1].isdigit():
-                    _taskkill(int(parts[-1]))
-                    if msg_queue:
-                        msg_queue.put(('log', {'text': f"已终止端口{port}占用进程 (PID: {parts[-1]})"}))
-                    return True
-    except Exception:
-        pass
-    return False
-
-def _get_port_occupier(port):
-    """获取占用指定端口的进程信息列表 [(pid, name), ...]"""
-    occupiers = []
-    try:
-        result = subprocess.run(['netstat', '-ano'], creationflags=subprocess.CREATE_NO_WINDOW, capture_output=True, text=True, timeout=5)
-        pids = set()
-        for line in result.stdout.split('\n'):
-            if f':{port}' in line and ('LISTENING' in line or 'ESTABLISHED' in line):
-                parts = line.split()
-                if len(parts) >= 5 and parts[-1].isdigit():
-                    pids.add(parts[-1])
-        for pid in pids:
-            try:
-                tasklist = subprocess.run(['tasklist', '/FI', f'PID eq {pid}', '/FO', 'CSV', '/NH'], creationflags=subprocess.CREATE_NO_WINDOW, capture_output=True, text=True, timeout=5)
-                lines = [l.strip() for l in tasklist.stdout.split('\n') if l.strip()]
-                if lines:
-                    parts = lines[0].split('","')
-                    if len(parts) >= 2:
-                        name = parts[0].strip('"')
-                        occupiers.append((pid, name))
-            except Exception:
-                occupiers.append((pid, '未知进程'))
-    except Exception:
-        pass
-    return occupiers
 
 # ===================== 动作闸门（P0-3 重构：单一持有者 / 自动释放 / 可协作取消） =====================
 # 为什么要有这个类（2026-09-16 审计实测出的两个缺陷）：
@@ -1110,8 +1074,13 @@ class ServerManagerApp:
                     stopped = True
                 except Exception:
                     pass
+        # 不再按端口盲杀：受管的两个 Redis 实例已随 _SVC_ALL 经 nssm stop 停止；
+        # 这里盲杀只会 taskkill 掉受管进程，5 秒后被 AppExit=Default Restart 拉起，
+        # 界面却显示「已停止」(2026-09-28 评审确认)。残留时如实告警，不做静默处理。
         if self._is_redis_running():
-            _kill_port_process(_REDIS_PORT, self._msg_queue)
+            self._msg_queue.put(('log', {
+                'text': f'Redis({_REDIS_PORT}) 仍在运行 —— 已跳过盲杀；受管实例请经服务停止',
+                'level': 'WARNING'}))
         if stopped:
             self._msg_queue.put(('log', {'text': "Redis 已停止"}))
         self._redis_process = None
@@ -2272,7 +2241,7 @@ class ServerManagerApp:
         杀掉→复活→再杀就是「杀不死」死循环。受管进程只能经 `nssm stop` 停止。
         """
         managed = set()
-        for name in (_SVC_API, _SVC_ARQ, _SVC_WEB):
+        for name in _SVC_ALL:
             pid = self._svc_pid(name)
             if pid:
                 managed.add(pid)
@@ -2293,7 +2262,7 @@ class ServerManagerApp:
         nssm = self._find_nssm()
         managed = self._managed_service_pids()
         stopped = 0
-        for name in (_SVC_API, _SVC_ARQ, _SVC_WEB):
+        for name in _SVC_ALL:
             state = self._svc_state(name)
             if '未安装' in state or 'STOPPED' in state:
                 continue
@@ -2435,9 +2404,16 @@ class ServerManagerApp:
         return stopped_any
 
     def _release_ports(self):
-        """清理 5002 与 3000 端口占用（复用 _kill_port_sync，其内部对多 PID 有 3 轮重试）。"""
-        self._kill_port_sync(_API_PORT)
-        self._kill_port_sync(_WEB_PORT)
+        """清理 5002 与 3000 端口占用（复用 _kill_port_sync，其内部对多 PID 有 3 轮重试）。
+
+        ★ 必须排除受管 PID：生产已在运行时点「启动服务」若做无差别清理，
+        会 taskkill 掉 erp-prod 的 uvicorn 与 erp-web 的 nginx —— 全站 3000 立即
+        502、在途请求全丢，随后 NSSM 5 秒拉起并与本流程的 nssm start 竞态
+        （2026-09-28 评审确认；stop_all 的同类调用本就带 exclude，此处曾漏）。
+        """
+        managed = self._managed_service_pids()
+        self._kill_port_sync(_API_PORT, exclude=managed)
+        self._kill_port_sync(_WEB_PORT, exclude=managed)
 
     def _build_prod_card(self, parent, row, col):
         """生产模式卡片（与开发卡并排）— Windows 服务 (NSSM) 托管"""
@@ -2843,7 +2819,14 @@ class ServerManagerApp:
             ('AppNoConsole', '1'),
         ]
         for key, val in settings:
-            code, out = self._run_capture([nssm, 'set', name, key, val], timeout=15)
+            # 列表值逐元素展开传参(仅 AppEnvironmentExtra)：NSSM 把该参数按每个 argv
+            # 元素设一个环境变量、在第一个 '=' 处切分 —— 拼成一整串会让 6 个变量里
+            # 只剩 1 个(且值畸变成整串)，其余静默丢失，而界面照报「已注册」
+            # (2026-09-28 评审确认，本机注册表实测只有 1 个元素)。
+            args = [nssm, 'set', name, key] + (list(val) if isinstance(val, list) else [val])
+            if isinstance(val, list) and not val:
+                continue  # 空列表：该服务无需额外环境变量(如 erp-web)
+            code, out = self._run_capture(args, timeout=15)
             if code != 0:
                 # 旧实现丢弃了全部返回码：某项没写进去也照样报「已注册」，无从判断。
                 self.log_message(f'{name} 设置 {key} 失败: {out.strip() or f"退出码 {code}"}', 'WARNING')
@@ -2906,8 +2889,16 @@ class ServerManagerApp:
         self._gate.start('安装生产服务', self._install_services_flow, nssm, workers)
 
     def _install_services_flow(self, nssm, workers):
-        env_extra = ('APP_ENV=production FASTAPI_DEBUG=false PYTHONPATH=' + str(_PROJECT_DIR) +
-                     ' PYTHONUTF8=1 PYTHONUNBUFFERED=1 UVICORN_WORKERS=' + workers)
+        # 逐项列表(不是空格拼接的整串)：_nssm_install 会把它作为多个 argv 元素传给
+        # `nssm set ... AppEnvironmentExtra`，NSSM 才会逐项注入；拼成一串只有第一项生效。
+        env_extra = [
+            'APP_ENV=production',
+            'FASTAPI_DEBUG=false',
+            f'PYTHONPATH={_PROJECT_DIR}',
+            'PYTHONUTF8=1',
+            'PYTHONUNBUFFERED=1',
+            f'UVICORN_WORKERS={workers}',
+        ]
         self._msg_queue.put(('log', {'text': f'正在安装生产服务 (worker={workers})...'}))
         # erp-prod 监督器 --no-arq：ARQ 由独立 erp-arq 服务托管，避免双跑定时任务
         self._gate.checkpoint()
@@ -2926,7 +2917,7 @@ class ServerManagerApp:
                                      ['-p', str(_PROJECT_DIR),
                                       '-c', str(_PROJECT_DIR / 'config' / 'nginx-windows.conf'),
                                       '-e', str(_PROJECT_DIR / 'logs' / 'nginx-error.log')],
-                                     '', depends=None)
+                                     [], depends=None)
         else:
             ok3 = False
             self._msg_queue.put(('log', {'text': f'未找到 {_nginx_exe}，{_SVC_WEB} 未安装（前端仍可由旧方式托管）', 'level': 'WARNING'}))
@@ -2947,7 +2938,7 @@ class ServerManagerApp:
             # 重启同样会换掉 prod_runner 进程：旧快照在它写下第一份新快照前必然陈旧，
             # 与「启动服务」共用同一条宽限判据（否则重启后也会弹「可能已退出」）。
             self._prod_start_ts = time.time()
-        for name in (_SVC_API, _SVC_ARQ, _SVC_WEB):
+        for name in _SVC_ALL:
             self._gate.checkpoint()
             if verb == 'stop':
                 self._msg_queue.put(('log', {'text': f'正在停止生产服务 {name}...'}))

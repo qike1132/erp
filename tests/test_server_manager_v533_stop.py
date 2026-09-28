@@ -76,18 +76,22 @@ class TestStopManagedServices:
         return app
 
     def test_returns_managed_pids(self, monkeypatch):
-        app = self._app_with_state(monkeypatch, {'erp-prod': '1 STOPPED', 'erp-arq': '1 STOPPED', 'erp-web': '1 STOPPED'})
+        app = self._app_with_state(monkeypatch, {'erp-prod': '1 STOPPED', 'erp-arq': '1 STOPPED', 'erp-web': '1 STOPPED',
+                                                      'erp-redis': '1 STOPPED', 'erp-redis-broker': '1 STOPPED'})
         app._managed_service_pids = lambda: {12345, 67890}
         _stopped, managed = app._stop_managed_services()
         assert managed == {12345, 67890}
 
     def test_stops_running_service(self, monkeypatch):
         # erp-prod 运行中 → 应发 stop 并计数；erp-arq 未安装/停止 → 跳过；erp-web 未安装 → 跳过
-        states = {'erp-prod': '4 RUNNING', 'erp-arq': '未安装', 'erp-web': '未安装'}
+        states = {'erp-prod': '4 RUNNING', 'erp-arq': '未安装', 'erp-web': '未安装',
+                  'erp-redis': '未安装', 'erp-redis-broker': '未安装'}
         app = self._app_with_state(monkeypatch, states)
         app._managed_service_pids = lambda: {12345}
         # 模拟：第一次查询 RUNNING，随后 STOPPED
-        seq = {'erp-prod': iter(['4 RUNNING', '1 STOPPED']), 'erp-arq': iter(['未安装']), 'erp-web': iter(['未安装'])}
+        seq = {'erp-prod': iter(['4 RUNNING', '1 STOPPED']), 'erp-arq': iter(['未安装']),
+               'erp-web': iter(['未安装']), 'erp-redis': iter(['未安装']),
+               'erp-redis-broker': iter(['未安装'])}
         app._svc_state = lambda name: next(seq[name])
         stop_calls = []
         app._run_capture = lambda args, timeout=20: stop_calls.append(args[1]) or (0, '')

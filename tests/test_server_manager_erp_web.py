@@ -12,9 +12,20 @@ def test_svc_web_constant() -> None:
     assert "_SVC_WEB = 'erp-web'" in TEXT
 
 
-def test_five_tuples_extended() -> None:
-    # 关键迭代/安装/停止/卸载/日志回灌点都出现三元组
-    assert TEXT.count("(_SVC_API, _SVC_ARQ, _SVC_WEB)") >= 5, TEXT.count("(_SVC_API, _SVC_ARQ, _SVC_WEB)")
+def test_stop_paths_cover_erp_web() -> None:
+    """停止路径必须覆盖 erp-web。
+
+    2026-09-28 A 止血后,停止/重启/受管PID排除三条路径统一按 `_SVC_ALL` 迭代
+    (该常量含 erp-web 与两个 Redis 服务),故不再数三元组字面量,改为直接断言机制。
+    """
+    assert "_SVC_WEB = 'erp-web'" in TEXT
+    import re
+
+    m = re.search(r"^_SVC_ALL = \((.+)\)$", TEXT, re.M)
+    assert m and "_SVC_WEB" in m.group(1)
+    for fn in ("_managed_service_pids", "_stop_managed_services", "_service_cmd_sync"):
+        body = TEXT[TEXT.index(f"def {fn}") :][:1400]
+        assert "for name in _SVC_ALL" in body, f"{fn} 未按 _SVC_ALL 迭代"
 
 
 def test_install_flow_has_erp_web() -> None:
