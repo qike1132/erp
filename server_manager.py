@@ -57,6 +57,9 @@ _REDIS_CONF_PATHS = [Path(r'C:\Redis\redis.windows.conf'), Path(r'C:\Redis\redis
 # 生产模式：Windows 服务 (NSSM) 名称与 NSSM 常见安装位置
 _SVC_API = 'erp-prod'
 _SVC_ARQ = 'erp-arq'
+# nginx 静态服务:prod_runner 已不再托管前端,由独立 NSSM 服务 erp-web 直管 nginx.exe。
+# 无依赖(反代上游未起只 502,静态照常服务);与 erp-prod 启停解耦。
+_SVC_WEB = 'erp-web'
 # Redis 服务：缓存 6379 与 ARQ broker 6380 各一个实例。
 #   ★ erp-arq 必须依赖 _SVC_REDIS_BROKER：没有 DependOnService 时，开机由 SCM
 #     并行启动，erp-arq 会抢在 broker 之前连 6380 → 超时退出 → NSSM 5s 后重拉，
@@ -2265,7 +2268,7 @@ class ServerManagerApp:
         杀掉→复活→再杀就是「杀不死」死循环。受管进程只能经 `nssm stop` 停止。
         """
         managed = set()
-        for name in (_SVC_API, _SVC_ARQ):
+        for name in (_SVC_API, _SVC_ARQ, _SVC_WEB):
             pid = self._svc_pid(name)
             if pid:
                 managed.add(pid)
@@ -2286,7 +2289,7 @@ class ServerManagerApp:
         nssm = self._find_nssm()
         managed = self._managed_service_pids()
         stopped = 0
-        for name in (_SVC_API, _SVC_ARQ):
+        for name in (_SVC_API, _SVC_ARQ, _SVC_WEB):
             state = self._svc_state(name)
             if '未安装' in state or 'STOPPED' in state:
                 continue
@@ -2376,7 +2379,7 @@ class ServerManagerApp:
         stopped_any = False
         nssm = self._find_nssm()
         if nssm:
-            for name in (_SVC_API, _SVC_ARQ):
+            for name in (_SVC_API, _SVC_ARQ, _SVC_WEB):
                 state = self._svc_state(name)
                 if 'STOPPED' in state or '未安装' in state:
                     continue
@@ -2692,8 +2695,23 @@ class ServerManagerApp:
                     _detail(self.hosting_arq_badge, 'running', 'ARQ 运行中')
             else:
                 _svc_detail(self.hosting_arq_badge, 'ARQ', arq, running=('running', 'ready'))
-            _svc_detail(self.hosting_frontend_badge, '前端', svcs.get('frontend'),
-                        running=('running', 'ready'))
+            # 前端:erp-web 为独立 NSSM 服务,status=external 时以服务状态为准,
+            # prod_runner 的 frontend_ok 探针作交叉验证(探针区分 SPA fallback)。
+            fe = svcs.get('frontend') or {}
+            if fe.get('status') == 'external':
+                web_state = self._svc_state(_SVC_WEB)
+                if 'RUNNING' in web_state:
+                    if status.get('frontend_ok'):
+                        _detail(self.hosting_frontend_badge, 'running', '前端 运行中')
+                    else:
+                        _detail(self.hosting_frontend_badge, 'deploying', '前端 服务在跑但探针未过')
+                elif 'STOPPED' in web_state:
+                    _detail(self.hosting_frontend_badge, 'stopped', '前端 已停止')
+                else:
+                    _detail(self.hosting_frontend_badge, 'stopped', f'前端 {web_state}')
+            else:
+                _svc_detail(self.hosting_frontend_badge, '前端', svcs.get('frontend'),
+                            running=('running', 'ready'))
             redis_ok = data['redis_ok']
             broker_ok = data.get('broker_ok', False)
             if redis_ok and broker_ok:
@@ -2858,8 +2876,20 @@ class ServerManagerApp:
         ok2 = self._nssm_install(nssm, _SVC_ARQ, _PYTHON_EXE,
                                  ['-m', 'arq', 'fastapi_app.core.arq_app.WorkerSettings'],
                                  env_extra, depends=_SVC_DEPENDS.get(_SVC_ARQ))
-        if ok1 and ok2:
-            self._msg_queue.put(('log', {'text': '生产服务安装完成：erp-prod + erp-arq（开机自启、按依赖顺序启动）'}))
+        self._gate.checkpoint()
+        # erp-web:nginx 静态服务,无 Python/env,无依赖(反代上游未起只 502)
+        _nginx_exe = r'C:\nginx\nginx.exe'
+        if Path(_nginx_exe).is_file():
+            ok3 = self._nssm_install(nssm, _SVC_WEB, _nginx_exe,
+                                     ['-p', str(_PROJECT_DIR),
+                                      '-c', str(_PROJECT_DIR / 'config' / 'nginx-windows.conf'),
+                                      '-e', str(_PROJECT_DIR / 'logs' / 'nginx-error.log')],
+                                     '', depends=None)
+        else:
+            ok3 = False
+            self._msg_queue.put(('log', {'text': f'未找到 {_nginx_exe}，{_SVC_WEB} 未安装（前端仍可由旧方式托管）', 'level': 'WARNING'}))
+        if ok1 and ok2 and ok3:
+            self._msg_queue.put(('log', {'text': '生产服务安装完成：erp-prod + erp-arq + erp-web（开机自启、按依赖顺序启动）'}))
         else:
             self._msg_queue.put(('log', {'text': '生产服务安装未完全成功，请查看上方日志', 'level': 'WARNING'}))
         self._msg_queue.put(('hosting_refresh', {}))
@@ -2875,7 +2905,7 @@ class ServerManagerApp:
             # 重启同样会换掉 prod_runner 进程：旧快照在它写下第一份新快照前必然陈旧，
             # 与「启动服务」共用同一条宽限判据（否则重启后也会弹「可能已退出」）。
             self._prod_start_ts = time.time()
-        for name in (_SVC_API, _SVC_ARQ):
+        for name in (_SVC_API, _SVC_ARQ, _SVC_WEB):
             self._gate.checkpoint()
             if verb == 'stop':
                 self._msg_queue.put(('log', {'text': f'正在停止生产服务 {name}...'}))
@@ -2927,7 +2957,7 @@ class ServerManagerApp:
         # 之后新增的字节」——直接取文件尾会把上几次运行的旧输出（旧 PID、旧崩溃栈）
         # 当现状展示（2026-09-16 实机启动踩过）。
         offsets = {name: self._log_size(_PROJECT_DIR / 'logs' / f'{name}.log')
-                   for name in (_SVC_API, _SVC_ARQ)}
+                   for name in (_SVC_API, _SVC_ARQ, _SVC_WEB)}
         ok_api, api_state, api_pid = self._start_one_service(_SVC_API)
         if not broker_ok:
             # broker 未就绪时 erp-arq 起不来；仍尝试一次（让日志自己说话），
@@ -2936,10 +2966,14 @@ class ServerManagerApp:
         ok_arq, arq_state, arq_pid = self._start_one_service(_SVC_ARQ)
         if ok_arq and not broker_ok:
             ok_arq = False
+        # erp-web(nginx):与后端解耦,独立启动;失败只降级前端,不判整体失败
+        ok_web, web_state, web_pid = self._start_one_service(_SVC_WEB)
+        if not ok_web:
+            self._msg_queue.put(('log', {'text': f'{_SVC_WEB} 启动未确认(当前: {web_state})，前端静态服务可能不可用', 'level': 'WARNING'}))
         # 服务 stdout/stderr 由 NSSM 重定向到 logs\{name}.log —— 回灌本次新增输出，
         # 对齐开发模式里 Redis/uvicorn 的实时输出。
         self._gate.checkpoint()
-        for name in (_SVC_API, _SVC_ARQ):
+        for name in (_SVC_API, _SVC_ARQ, _SVC_WEB):
             fresh = self._read_log_lines(_PROJECT_DIR / 'logs' / f'{name}.log',
                                          start_offset=offsets[name], lines=30)
             if fresh:
@@ -3035,7 +3069,7 @@ class ServerManagerApp:
         self._gate.start('卸载生产服务', self._uninstall_services_flow, nssm)
 
     def _uninstall_services_flow(self, nssm):
-        for name in (_SVC_API, _SVC_ARQ):
+        for name in (_SVC_API, _SVC_ARQ, _SVC_WEB):
             self._gate.checkpoint()
             self._run_capture([nssm, 'stop', name], timeout=30)
             self._gate.checkpoint()
