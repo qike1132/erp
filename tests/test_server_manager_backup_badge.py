@@ -69,10 +69,17 @@ def test_every_early_return_updates_backup_badge() -> None:
     本锁扫它**函数体内**每个 ``return`` 前 20 行是否出现 ``hosting_backup_badge``。D 步按
     「放弃理由」把它拆成「调度器 + 放弃型助手」后,备份徽章的置灰搬进了助手体内,调度器里
     只剩下 ``self._apply_xxx(data); return`` —— 旧形式(扫调度器体内文本)必然失效,故重锚。
-    新形式语义**只紧不松**:要求调度器里每个 ``return`` 之前**确实调用**了一个放弃型助手
+    新形式要求调度器里每个 ``return`` 之前**紧邻调用**了一个放弃型助手
     (``_apply_collect_error`` / ``_apply_services_stopped`` / ``_apply_status_untrusted``),
-    且该助手**函数体**内含有 ``hosting_backup_badge`` 置灰语句。将来若有人加一条「直接
-    return、不经助手」的提前出口,或让某个助手丢掉置灰,本条仍会红。
+    且该助手**函数体**内含有 ``hosting_backup_badge`` 置灰语句。
+
+    ★ 窗口从 20 行收窄到 3 行(D 步评审证伪):初版沿用了拆分前的 20 行窗口,而调度器总共
+    才 ~35 行 —— 于是在调度器**尾部**插入一条裸 ``return`` 时,它前面 20 行里必然含有前面
+    几个 ``self._apply_xxx(...)`` 调用,``any(...)`` 恒真 ⇒ 该裸 return **不会被发现**
+    (评审实测:注入后本条仍 PASSED)。也就是说初版**没有**兑现"加了绕过置灰的出口仍会红"
+    的承诺。收窄到 3 行后,裸 return 会红(其紧邻上文是 ``_apply_running_status`` 之类,
+    不在放弃型助手里),而「调用与 return 之间夹一两行」仍被容忍 —— 语义这才真的只紧不松。
+    验证方式见同目录报告:注入裸 return → 本条红;还原 → 绿。
 
     ★ 更早的修正(T7):旧版用 ``TEXT[TEXT.index(apply):TEXT.index(collect)]`` —— ``apply``
     在 ``collect`` **之后**,区间恒为空、``misses`` 恒为空,本条长期是**空转锁**。T7 改为
@@ -95,14 +102,17 @@ def test_every_early_return_updates_backup_badge() -> None:
     lines = dispatcher.splitlines()
     # 防空转:切片必须真的落在调度器函数体上,且确实取到了提前 return(否则本锁名存实亡)
     assert lines and lines[0].strip().startswith("def _apply_hosting_data("), "AST 切片未取到 _apply_hosting_data 函数体"
-    assert any(line.strip() == "return" for line in lines), "调度器函数体内未取到任何提前 return,本条会空转"
+    early_returns = [i for i, line in enumerate(lines) if line.strip() == "return"]
+    assert early_returns, "调度器函数体内未取到任何提前 return,本条会空转"
+    # 窗口只容忍「调用与 return 之间夹一两行」;不能再宽 —— 调度器整体才 ~35 行,
+    # 宽窗口会让尾部任意裸 return 都落在前面某个助手调用的 20 行内(评审已证伪)。
+    WINDOW = 3
     misses = []
-    for i, line in enumerate(lines):
-        if line.strip() == "return":
-            window = "\n".join(lines[max(0, i - 20):i])
-            if not any(f"self.{helper}(" in window for helper in abandonment_helpers):
-                misses.append(i)
+    for i in early_returns:
+        window = "\n".join(lines[max(0, i - WINDOW):i])
+        if not any(f"self.{helper}(" in window for helper in abandonment_helpers):
+            misses.append(i)
     assert not misses, (
-        f"_apply_hosting_data 有 {len(misses)} 处提前 return 未经过放弃型助手 "
+        f"_apply_hosting_data 有 {len(misses)} 处提前 return 未经放弃型助手 "
         "(备份徽章可能滞留旧值 → 旧值滞留成假信号)"
     )
