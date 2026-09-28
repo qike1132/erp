@@ -3,6 +3,18 @@
 > 日期:2026-09-28 · 重构提交范围 `1e937df7..HEAD`
 > 设计:`docs/superpowers/specs/2026-09-28-erp-web-single-responsibility-design.md`
 
+## ⚠️ 零、立即阅读:合并→迁移窗口的禁令(最终评审 I4)
+
+**从本代码进入 main 到 `migrate_erp_web.ps1` 执行完成之前,禁止重启 `erp-prod`、禁止重启机器。**
+
+原因:内存里跑的还是旧 prod_runner(带 nginx 托管)。此窗口内 erp-prod 的**任何**重启
+(进程崩溃 + NSSM 拉起 / GUI 停止或重启按钮 / 机器重启)都会让新版瘦身监督器上线——
+它不再拉起 nginx,而 erp-web 尚未注册,**:3000 从此无人服务**。GUI「启动服务」对未
+安装的 erp-web 只会告警(只 start 不 install),救不回来。
+
+若已发生:立即以管理员执行 `.\scripts\migrate_erp_web.ps1`(注册并拉起 erp-web),
+或在 GUI 点「安装服务」注册 erp-web 后再启动。
+
 ## 一、迁移执行(管理员 PowerShell,一次维护窗口)
 
 ```powershell

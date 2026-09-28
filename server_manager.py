@@ -2276,7 +2276,7 @@ class ServerManagerApp:
         return managed
 
     def _stop_managed_services(self):
-        """正常停止 NSSM 受管服务（erp-prod / erp-arq），返回受管 PID 集合供端口清理兜底。
+        """正常停止 NSSM 受管服务（erp-prod / erp-arq / erp-web），返回受管 PID 集合供端口清理兜底。
 
         ★ 与 _service_cmd_sync('stop') 的关键区别：本方法【不带 checkpoint】——
         紧急停止 stop_all 已先 cancel() 置位取消标志，任何 checkpoint 都会抛

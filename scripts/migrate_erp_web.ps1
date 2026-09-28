@@ -40,7 +40,8 @@ if ($DryRun) {
     } else {
         Write-Host "nssm install erp-web $NginxExe"
     }
-    Write-Host "nssm set erp-web Application $NginxExe"
+    # 已存在时的实际路径还会显式 set Application(纠正换 Python/nginx 后的指向);
+    # DryRun 下两条择一打印即可,不打重复。
     Write-Host "nssm set erp-web AppParameters $NginxArgs"
     Write-Host "nssm set erp-web AppDirectory $Root"
     Write-Host "nssm set erp-web AppExit Default Restart"
@@ -71,6 +72,9 @@ Invoke-Step "configure erp-web" {
     & $Nssm set erp-web Start SERVICE_AUTO_START
     & $Nssm set erp-web AppStdout "$Root\logs\erp-web.log"
     & $Nssm set erp-web AppStderr "$Root\logs\erp-web.log"
+    & $Nssm set erp-web AppRotateFiles 1
+    & $Nssm set erp-web AppRotateBytes 10485760
+    & $Nssm set erp-web AppNoConsole 1
 }
 
 # 2) 停旧树(NSSM Job Object 干净杀掉 prod_runner → uvicorn + nginx 整树)
@@ -95,12 +99,17 @@ Invoke-Step "start erp-prod (slimmed supervisor, uvicorn only)" {
     & $Nssm start erp-prod
 }
 Invoke-Step "verify backend /api/health" {
+    $script:BackendHealthy = $false
     $deadline = (Get-Date).AddSeconds(45)
     while ((Get-Date) -lt $deadline) {
         try {
             $r = Invoke-WebRequest -Uri "http://127.0.0.1:5002/api/health" -UseBasicParsing -TimeoutSec 3
-            if ($r.StatusCode -eq 200) { break }
-        } catch { Start-Sleep -Seconds 2 }
+            if ($r.StatusCode -eq 200) { $script:BackendHealthy = $true; break }
+        } catch { }
+        Start-Sleep -Seconds 2
+    }
+    if (-not $script:BackendHealthy) {
+        throw "后端 /api/health 在 45s 内未恢复 200。系统处于半迁移态(erp-web 已起,erp-prod 异常)——可重跑本脚本(幂等),或按头部注释回滚。"
     }
 }
 

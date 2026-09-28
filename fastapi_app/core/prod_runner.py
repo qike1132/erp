@@ -35,6 +35,8 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
+from utils.log_rotation import rotate_file_copytruncate
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 LOGS_DIR = PROJECT_ROOT / "logs"
 STATUS_FILE = LOGS_DIR / "prod_runner.json"
@@ -166,9 +168,6 @@ def _should_restart(consecutive_failures: int, fail_window_s: float, proc_alive:
         and fail_window_s >= _RESTART_MIN_WINDOW_S
         and not proc_alive
     )
-
-
-from utils.log_rotation import rotate_file_copytruncate
 
 
 def _cmd_uvicorn(api_port: int, workers: int) -> list[str]:
@@ -389,7 +388,7 @@ class _Managed:
 
     def rotate_log_if_needed(self, max_bytes: int) -> None:
         """子进程 stdout 日志轮转（服务停止期间同样清理历史大文件）。"""
-        _rotate_file_copytruncate(LOGS_DIR / f"{self.name}.out.log", max_bytes)
+        rotate_file_copytruncate(LOGS_DIR / f"{self.name}.out.log", max_bytes)
 
 
 class Supervisor:

@@ -4,7 +4,9 @@
 """
 from __future__ import annotations
 
+import contextlib
 import json
+from pathlib import Path
 
 from fastapi_app.core import prod_runner
 
@@ -49,12 +51,11 @@ def test_status_file_frontend_probe_down(monkeypatch, tmp_path) -> None:
 
 
 def test_run_loop_never_calls_frontend_restart(monkeypatch, tmp_path) -> None:
-    """主循环一轮:探针失败时,后端/ARQ 不被重启(排空 supervisor 状态字典证据)。"""
+    """真跑 run() 主循环两轮:探针失败时循环继续、状态落盘、后端不被杀/不被重启。"""
     sup = prod_runner.Supervisor(4, 5002, 3000, with_arq=False)
     monkeypatch.setattr(prod_runner, "STATUS_FILE", tmp_path / "prod_runner.json")
     monkeypatch.setattr(prod_runner, "_is_redis_up", lambda p: True)
     monkeypatch.setattr(sup, "_frontend_probe_ok", lambda: False)
-    backend_poll_calls: list[int] = []
 
     class _FakeProc:
         pid = 4321
@@ -64,16 +65,33 @@ def test_run_loop_never_calls_frontend_restart(monkeypatch, tmp_path) -> None:
             return None
 
     sup.backend.proc = _FakeProc()
-    sup.backend.poll = lambda: backend_poll_calls.append(1)  # type: ignore[method-assign]
-    sup.backend.maybe_restart = lambda: backend_poll_calls.append(2)  # type: ignore[method-assign]
-    monkeypatch.setattr(prod_runner.Supervisor, "write_status", lambda self: None)
+    sup.backend.start = None  # type: ignore[assignment]  # 若被调用 → TypeError 即测试失败
+    sup.backend.kill_tree = None  # type: ignore[method-assign]  # 同上
     monkeypatch.setattr(sup, "_rotate_logs_if_due", lambda: None)
-    # 单轮执行 run 循环体的等价物:直接调用各 poll/maybe_restart(与 run() 循环体同构)
-    sup.backend.poll()
-    sup.backend.maybe_restart()
-    # 无 frontend 相关重启可发生:成员已删,此处断言后端未被标记重启
-    assert sup.backend.status in ("running", "ready", "stopped")
-    assert not hasattr(sup, "nginx") and not hasattr(sup, "vite")
+
+    # run() 先 start_all 会真拉进程——桩掉 backend.start,只验证循环体
+    monkeypatch.setattr(sup, "start_all", lambda: None)
+    # sleep 计数器:第 3 次抛异常跳出 while True(真跑两轮)
+    state = {"n": 0}
+
+    class _StopLoopError(Exception):
+        pass
+
+    def _fake_sleep(_s: float) -> None:
+        state["n"] += 1
+        if state["n"] >= 3:
+            raise _StopLoopError
+
+    monkeypatch.setattr(prod_runner.time, "sleep", _fake_sleep)
+    with contextlib.suppress(_StopLoopError):
+        sup.run()
+    # 循环真跑了 ≥2 轮(write_status 每轮调用,STATUS_FILE 已落盘)
+    assert state["n"] >= 3
+    data = json.loads((tmp_path / "prod_runner.json").read_text(encoding="utf-8"))
+    assert data["frontend_ok"] is False
+    assert data["services"]["frontend"]["status"] == "external"
+    # 后端 FakeProc 存活:poll() 恒 None → 未被标记崩溃,更未被 kill/start
+    assert sup.backend.proc is not None and sup.backend.proc.poll() is None
 
 
 def test_rotate_logs_only_for_backend_and_arq() -> None:
@@ -81,9 +99,37 @@ def test_rotate_logs_only_for_backend_and_arq() -> None:
     import inspect
 
     src = inspect.getsource(prod_runner.Supervisor._rotate_logs_if_due)
-    code_lines = [l for l in src.splitlines()
-                  if l.strip() and not l.strip().startswith(("#", '"""')) and "nginx" not in l.split("#")[0][:0]]
-    # 断言代码部分(去 docstring)不含 nginx 管理调用
-    body = "\n".join(l for l in src.splitlines())
-    assert "self.nginx" not in body
-    assert "rotate_logs_if_needed" not in body  # _FrontendNginx 的方法,应无引用
+    assert "self.nginx" not in src
+    assert "rotate_logs_if_needed" not in src  # _FrontendNginx 的方法,应无引用
+
+
+def test_managed_rotate_log_actually_rotates(monkeypatch, tmp_path) -> None:
+    """行为级:_Managed.rotate_log_if_needed 直调不抛且超阈值文件被轮转。
+
+    回归锁(最终评审 C1):旧版调用点写的是已删除的 _rotate_file_copytruncate,
+    而 slim 测试此前只有文本断言——该 NameError 每次轮转检查都炸且被主循环吞掉。
+    """
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    monkeypatch.setattr(prod_runner, "LOGS_DIR", logs)
+    big = logs / "backend.out.log"
+    big.write_bytes(b"x" * 2048)
+    m = prod_runner._Managed("backend", ["cmd"], Path("."))
+    m.rotate_log_if_needed(1024)
+    assert big.read_bytes() == b""
+    assert (logs / "backend.out.log.1").exists()
+
+
+def test_supervisor_rotate_logs_due_rotates_backend_log(monkeypatch, tmp_path) -> None:
+    """行为级:Supervisor._rotate_logs_if_due 直调,backend.out.log 超阈值被轮转。"""
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    monkeypatch.setattr(prod_runner, "LOGS_DIR", logs)
+    monkeypatch.setattr(prod_runner, "_log_rotate_bytes", lambda: 1024)  # 隔离真实 .env 的 50MB
+    big = logs / "后端(uvicorn).out.log"  # _Managed 的 name 即 Supervisor 里的中文名
+    big.write_bytes(b"y" * 2048)
+    sup = prod_runner.Supervisor(4, 5002, 3000, with_arq=False)
+    monkeypatch.setattr(sup, "_last_log_check", 0.0)
+    sup._rotate_logs_if_due()
+    assert big.read_bytes() == b""
+    assert (logs / "后端(uvicorn).out.log.1").exists()
