@@ -9,9 +9,11 @@ ROOT = Path(__file__).resolve().parent.parent
 DM = ROOT / "server_manager" / "dev_mode.py"
 APP = ROOT / "server_manager" / "app.py"
 
-# dev_mode 自持的 7 个状态:app 侧一律经**读写双向**属性桥访问(缺哪一侧都会坏事)。
+# dev_mode 自持、且 app 侧仍有读写点的状态:一律经**读写双向**属性桥访问
+# (缺哪一侧都会坏事)。`_startup_steps` 原在此列,但 app 侧 0 引用,T6 已随
+# 4 个零引用委托一并裁剪(只留 app 真有读写点的 6 个)。
 BRIDGES = ("_mode", "_process", "_frontend_process", "_current_mode_key",
-           "_startup_progress", "_startup_steps", "_startup_current_step")
+           "_startup_progress", "_startup_current_step")
 
 # 「按 (proc, name) 逐对终止」的循环 —— 迁后新拼写(旧名 self._frontend_process
 # 在 dev_mode 里不存在,按旧拼写计数恒为 0,是空转锁;见 test_single_terminate_primitive)。
@@ -81,11 +83,11 @@ def test_single_terminate_primitive() -> None:
 
 
 def test_app_bridges_state() -> None:
-    """app 侧必须以**读写双向**属性桥暴露 dev_mode 自持的 7 个状态。
+    """app 侧必须以**读写双向**属性桥暴露 dev_mode 自持的 6 个状态。
 
     只查 getter 等于只锁一半:缺 setter 时每次写入都会 AttributeError(或被迫绕过桥),
     而 UI 崩溃检测(check_server_status / _update_all_ui)正是靠这些状态的读写点工作。
-    故对 7 个名字**逐个**断言 getter(@property)与 setter(@<name>.setter)都在,
+    故对 6 个名字**逐个**断言 getter(@property)与 setter(@<name>.setter)都在,
     且二者确实路由到 dev_mode 的同名状态(self.dev.<attr>)。
     """
     bridges = _app_bridge_src()

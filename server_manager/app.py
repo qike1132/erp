@@ -766,14 +766,6 @@ class ServerManagerApp:
         self.dev.startup_progress = value
 
     @property
-    def _startup_steps(self):
-        return self.dev.startup_steps
-
-    @_startup_steps.setter
-    def _startup_steps(self, value):
-        self.dev.startup_steps = value
-
-    @property
     def _startup_current_step(self):
         return self.dev.startup_current_step
 
@@ -809,20 +801,8 @@ class ServerManagerApp:
     def _start_dual_flow(self, label):
         return self.dev.start_dual_flow(label)
 
-    def _start_dual_worker(self, label):
-        return self.dev.start_dual_worker(label)
-
-    def _start_dual_thread(self, label):
-        return self.dev.start_dual_thread(label)
-
-    def _read_frontend_stdout(self, proc):
-        return self.dev.read_frontend_stdout(proc)
-
     def _stop_dual_mode_async(self, label):
         return self.dev.stop_dual_mode_async(label)
-
-    def _stop_dual_flow(self, label):
-        return self.dev.stop_dual_flow(label)
 
     def _restart_dual_thread(self):
         return self.dev.restart_dual_thread()

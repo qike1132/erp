@@ -26,7 +26,8 @@ from pathlib import Path
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 
 PROJECT_ROOT = Path(__file__).parent.parent
-DEFAULT_SCAN_DIRS = [PROJECT_ROOT / "fastapi_app"]
+# 默认扫描 fastapi_app(后端源码) + 仓库根顶层 .py(桌面壳入口等,此前逃过门禁)。
+DEFAULT_SCAN_DIRS = [PROJECT_ROOT / "fastapi_app", PROJECT_ROOT]
 EXCLUDE_DIRS = {"__pycache__", "tests", "migrations"}
 
 
@@ -108,7 +109,13 @@ def collect_py_files(scan_dirs: list[Path]) -> list[Path]:
             if d.suffix == ".py" and not any(part in EXCLUDE_DIRS for part in d.parts):
                 files.append(d)
             continue
-        for p in d.rglob("*.py"):
+        # 仓库根只取**顶层** *.py：否则 rglob 会递归进 frontend-vite/node_modules
+        # 等非 Python 目录，把门禁拖慢到不可用。
+        if d.resolve() == PROJECT_ROOT.resolve():
+            candidates = d.glob("*.py")
+        else:
+            candidates = d.rglob("*.py")
+        for p in candidates:
             if any(part in EXCLUDE_DIRS for part in p.parts):
                 continue
             files.append(p)

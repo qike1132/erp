@@ -32,7 +32,7 @@ from pathlib import Path
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8")
 
-# 扫描范围：后端源码 + 测试 + 脚本 + 工具（不含迁移与构建产物）
+# 扫描范围：后端源码 + 测试 + 脚本 + 工具（不含迁移与构建产物）+ 仓库根顶层 .py
 SCAN_DIRS = ("fastapi_app", "tests", "utils", "scripts")
 EXCLUDE_DIRS = {"__pycache__", ".archive", "migrations"}
 
@@ -110,6 +110,12 @@ def _all_py_files() -> list[Path]:
             if any(part in EXCLUDE_DIRS for part in p.parts):
                 continue
             files.append(p)
+    # 顶层 .py(仓库根):此前遗漏,导致拆包前全仓最大的 server_manager.py 逃过门禁。
+    # 只取顶层,不递归 —— 否则会扫进 frontend-vite/node_modules 等非 Python 目录。
+    for p in PROJECT_ROOT.glob("*.py"):
+        if any(part in EXCLUDE_DIRS for part in p.parts):
+            continue
+        files.append(p)
     return files
 
 

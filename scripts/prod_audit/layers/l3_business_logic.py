@@ -4,7 +4,13 @@
 全局异常处理器存在性校验。
 
 约束: 复用上一轮 P1-4 宽泛 except 收敛基线,
-``server_manager.py`` 39 处保留附说明(白名单豁免)。
+桌面壳(根 ``server_manager.py`` 薄壳 + ``server_manager/`` 包内各模块)的宽泛
+except 保留附说明,按**包前缀**豁免。
+
+注: 本层的宽泛 except 扫描范围是 ``fastapi_app/**``(见 ``_scan_broad_except``),
+桌面壳不在其中 —— 该白名单在**当前**扫描范围下不会命中任何被扫文件。保留它
+并按包前缀修正语义,是为了(a)消除 basename 撞名的误豁免陷阱,(b)若将来把桌面壳
+纳入扫描范围,豁免仍然正确。(T6 收尾,2026-09-28;premise 更正见 task-6-report。)
 
 任务来源: ``.codeartsdoer/specs/prod_code_review/tasks.md`` 第 4 节。
 """
@@ -33,8 +39,25 @@ PROJECT_ROOT: Path = Path(__file__).resolve().parents[3]
 FASTAPI_APP_DIR: Path = PROJECT_ROOT / "fastapi_app"
 SERVICES_DIR: Path = FASTAPI_APP_DIR / "services"
 
-# 白名单: 桌面壳入口模块(39 处宽泛 except 已逐一审查)
-_BROAD_EXCEPT_WHITELIST: frozenset[str] = frozenset({"server_manager.py"})
+# 白名单: 桌面壳入口模块(39 处宽泛 except 已逐一审查)。
+# 包化后宽泛 except 的主体已散在 ``server_manager/`` 包内的 app.py / widgets.py /
+# action_gate.py(仓库根的 ``server_manager.py`` 只剩薄壳),故按**包前缀**豁免整个
+# 桌面壳,而不是按 basename —— basename 匹配既漏掉包内模块,又会与同名文件
+# (如将来某个 ``app.py``)撞名而误豁免。
+_BROAD_EXCEPT_WHITELIST_FILES: frozenset[str] = frozenset({"server_manager.py"})
+_BROAD_EXCEPT_WHITELIST_PACKAGES: frozenset[str] = frozenset({"server_manager"})
+
+
+def _is_broad_except_whitelisted(py_file: Path) -> bool:
+    """桌面壳模块豁免:根薄壳 ``server_manager.py`` 与 ``server_manager/`` 包内各模块。"""
+    if py_file.name in _BROAD_EXCEPT_WHITELIST_FILES:
+        return True
+    try:
+        rel = py_file.resolve().relative_to(PROJECT_ROOT)
+    except (OSError, ValueError):
+        return False
+    return bool(rel.parts) and rel.parts[0] in _BROAD_EXCEPT_WHITELIST_PACKAGES
+
 
 # 全局异常处理器应注册的文件
 _GLOBAL_HANDLER_FILES: tuple[Path, ...] = (
@@ -147,7 +170,7 @@ class L3BusinessLogic(LayerBase):
         for py_file in FASTAPI_APP_DIR.rglob("*.py"):
             if "__pycache__" in py_file.parts or "tests" in py_file.parts:
                 continue
-            if py_file.name in _BROAD_EXCEPT_WHITELIST:
+            if _is_broad_except_whitelisted(py_file):
                 continue
             try:
                 source = py_file.read_text(encoding="utf-8")
