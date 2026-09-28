@@ -4,6 +4,10 @@
 设计原则：
 - 默认只检查 **git 变更文件**（modified/added 的 .py），存量超限文件不阻断，
   使门禁可立即在 CI 启用而不会让历史遗留问题卡住流水线。
+- CI 里须用 ``--base origin/<base_branch>`` 对比 **PR 基线**：CI 是干净检出，
+  ``git diff HEAD``（工作树 vs HEAD）恒为空 ⇒ 门禁空转。对比基线才能取到变更集，
+  仓库根与 ``server_manager/`` 也随之进入扫描范围。push 事件无 base_ref 时脚本
+  回落「无扫描文件」并跳过，不阻断。
 - 新增/修改的文件超过阈值即失败（退出码 1）。阈值单一来源是
   `pyproject.toml` 的 `[tool.code-quality] max_file_size`；解析不到才回落到
   本脚本的 DEFAULT_THRESHOLD。此前该值在 pyproject / 本脚本 / CI workflow
@@ -12,6 +16,7 @@
 
 用法：
     python scripts/file_size_gate.py                # git 变更文件，阈值取 pyproject
+    python scripts/file_size_gate.py --base origin/main   # 对比基线 ref 取变更(CI 用)
     python scripts/file_size_gate.py --threshold 1000   # 显式覆盖（临时排查用）
     python scripts/file_size_gate.py --all          # 全量扫描（只报告不失败，除非 --fail）
     python scripts/file_size_gate.py --fail --all   # 全量扫描且超限即失败
@@ -66,8 +71,15 @@ def _threshold_from_pyproject() -> int:
     return DEFAULT_THRESHOLD
 
 
-def _git_changed_py_files() -> list[Path]:
-    """返回 git 追踪的变更 .py 文件（staged + unstaged + untracked）。
+def _git_changed_py_files(base: str = "HEAD") -> list[Path]:
+    """返回 git 变更的 .py 文件。
+
+    ``base == "HEAD"``（默认）：比较**工作树 vs HEAD** —— staged + unstaged +
+      untracked，供本地与 pre-commit 用。
+    ``base != "HEAD"``：比较**基线 ref vs HEAD** ——
+      ``git diff --diff-filter=AM <base>...HEAD``（三点语法取 merge-base，即「相对
+      基线新增/修改」的文件），供 CI 用。CI 是干净检出，工作树 == HEAD，原逻辑
+      恒为空（空转）；对比 PR 基线（``origin/<base_branch>``）才能取到真正的变更集。
 
     编码必须是 utf-8 而非平台默认：本仓 `core.quotePath=false`，git 直接输出
     UTF-8 原始字节；中文 Windows 的默认编码是 cp936，用 GBK 解码会抛
@@ -77,27 +89,25 @@ def _git_changed_py_files() -> list[Path]:
     只要有中文名的未跟踪文件（如 deliverables/ 下的报告），本门禁必然失败。
     errors="replace" 兜底：极端情况下宁可让文件名略有损，也不要让门禁崩掉。
     """
-    try:
-        # 已跟踪文件的改动
-        tracked = subprocess.run(
-            ["git", "diff", "--name-only", "--diff-filter=AM", "HEAD"],
-            capture_output=True, text=True, encoding="utf-8", errors="replace",
-            check=False, timeout=15,
-        ).stdout.splitlines()
-        # 暂存区的改动（含未提交新文件）
-        staged = subprocess.run(
-            ["git", "diff", "--cached", "--name-only", "--diff-filter=AM"],
-            capture_output=True, text=True, encoding="utf-8", errors="replace",
-            check=False, timeout=15,
-        ).stdout.splitlines()
-        # 未跟踪的新文件
-        untracked = subprocess.run(
-            ["git", "ls-files", "--others", "--exclude-standard"],
-            capture_output=True, text=True, encoding="utf-8", errors="replace",
-            check=False, timeout=15,
-        ).stdout.splitlines()
-    except (subprocess.SubprocessError, OSError):
-        return []
+    def _run_git(args: list[str]) -> list[str]:
+        try:
+            return subprocess.run(
+                ["git", *args], capture_output=True, text=True, encoding="utf-8",
+                errors="replace", check=False, timeout=15,
+            ).stdout.splitlines()
+        except (subprocess.SubprocessError, OSError):
+            return []
+
+    if base != "HEAD":
+        changed = _run_git(["diff", "--name-only", "--diff-filter=AM", f"{base}...HEAD"])
+        return [Path(p) for p in dict.fromkeys(changed) if p.endswith(".py")]
+
+    # 已跟踪文件的改动
+    tracked = _run_git(["diff", "--name-only", "--diff-filter=AM", "HEAD"])
+    # 暂存区的改动（含未提交新文件）
+    staged = _run_git(["diff", "--cached", "--name-only", "--diff-filter=AM"])
+    # 未跟踪的新文件
+    untracked = _run_git(["ls-files", "--others", "--exclude-standard"])
     return [Path(p) for p in dict.fromkeys(tracked + staged + untracked) if p.endswith(".py")]
 
 
@@ -125,6 +135,9 @@ def main() -> int:
     parser.add_argument("--threshold", type=int, default=None,
                         help="行数阈值（默认取 pyproject.toml 的 max_file_size）")
     parser.add_argument("--all", action="store_true", help="全量扫描（默认 git 变更文件）")
+    parser.add_argument("--base", default="HEAD", metavar="REF",
+                        help="对比的 git 基线 ref；默认 HEAD（工作树 vs HEAD）。"
+                             "CI 传 origin/<base_branch> 以取 PR 变更集")
     parser.add_argument("--fail", action="store_true",
                         help="全量模式下超限即失败（默认仅报告）")
     args = parser.parse_args()
@@ -132,9 +145,10 @@ def main() -> int:
     threshold = args.threshold if args.threshold is not None else _threshold_from_pyproject()
     args.threshold = threshold
 
-    files = _all_py_files() if args.all else _git_changed_py_files()
+    files = _all_py_files() if args.all else _git_changed_py_files(args.base)
     if not files:
-        print(f"[file-size-gate] 无扫描文件（{'all' if args.all else 'git-changed'} 模式），跳过")
+        mode = "all" if args.all else f"git-diff(base={args.base})"
+        print(f"[file-size-gate] 无扫描文件（{mode} 模式），跳过")
         return 0
 
     over: list[tuple[Path, int]] = []

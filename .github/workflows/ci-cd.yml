@@ -136,9 +136,13 @@ jobs:
     
   lint:
     runs-on: ubuntu-latest
-    
+
     steps:
     - uses: actions/checkout@v4
+      with:
+        # fetch-depth: 0：file_size_gate 需对比 PR 基线（origin/<base_ref>...HEAD）。
+        # 默认浅检出(depth 1)取不到基线 ref → 门禁回落「无扫描文件」空转。
+        fetch-depth: 0
     
     - name: Set up Python
       uses: actions/setup-python@v5
@@ -169,8 +173,11 @@ jobs:
       run: python -m mypy --config-file mypy.ini
 
     - name: Run file size gate (block new god-classes)
-      # 阈值取自 pyproject.toml [tool.code-quality] max_file_size，此处不再硬编码
-      run: python scripts/file_size_gate.py
+      # 阈值取自 pyproject.toml [tool.code-quality] max_file_size，此处不再硬编码。
+      # 对比 PR 基线取变更文件：CI 干净检出里工作树 == HEAD，原先的 git-diff 模式
+      # 恒为空(空转)。仓库根与 server_manager/ 随变更集进入扫描范围(T6 的目标)。
+      # push 事件无 GITHUB_BASE_REF → base 为空 → 脚本回落「无扫描文件」并跳过。
+      run: python scripts/file_size_gate.py --base origin/${{ github.base_ref }}
 
   frontend:
     runs-on: ubuntu-latest
