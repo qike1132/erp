@@ -146,6 +146,10 @@ _FRONTEND_DIR = _PROJECT_DIR / "frontend-vite"
 _API_PORT = 5002
 _WEB_PORT = 3000
 
+# 本机探针必须绕开系统代理：prod_runner 曾因代理转发 127.0.0.1 探测导致间歇失败、
+# 进而误判后端崩溃并重启（见 prod_runner 内 _OPENER_DIRECT 注释）。
+_HTTP_DIRECT = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
 def _get_python_executable():
     if not getattr(sys, 'frozen', False):
         return sys.executable
@@ -2459,6 +2463,9 @@ class ServerManagerApp:
         self.hosting_redis_badge.grid(row=1, column=1, sticky='w', padx=(6, 12), pady=2)
         self.hosting_ready_badge = StatusBadge(grid, state='stopped', text='就绪', size='sm', palette=self._PALETTE, canvas_bg=self._PALETTE['bg_input'])
         self.hosting_ready_badge.grid(row=2, column=0, sticky='w', padx=(12, 6), pady=(2, 8))
+        # 备份徽章：读 /api/health 的 backup 块（产物新鲜度 25h + ARQ 在线）
+        self.hosting_backup_badge = StatusBadge(grid, state='stopped', text='备份', size='sm', palette=self._PALETTE, canvas_bg=self._PALETTE['bg_input'])
+        self.hosting_backup_badge.grid(row=3, column=0, sticky='w', padx=(12, 6), pady=(0, 8))
         # Worker 数（安装服务时生效）
         wk = tk.Frame(grid, bg=self._PALETTE['bg_input'])
         wk.grid(row=2, column=1, sticky='e', padx=(6, 12), pady=(2, 8))
@@ -2570,6 +2577,17 @@ class ServerManagerApp:
             data['arq_svc_pid'] = self._svc_pid(_SVC_ARQ)
         else:
             data['arq_svc_pid'] = None
+        # 备份可观测性：/api/health 的 backup 块（产物新鲜度 + ARQ 在线）。
+        # 本机、10s 缓存、开销小；失败即空 dict，徽章显示「未上报」而非误报正常。
+        data['backup'] = {}
+        try:
+            with _HTTP_DIRECT.open(f'http://127.0.0.1:{_API_PORT}/api/health', timeout=3) as resp:
+                payload = json.loads(resp.read().decode('utf-8'))
+            blk = payload.get('backup')
+            if isinstance(blk, dict):
+                data['backup'] = blk
+        except Exception:
+            pass
         return data
 
     def _apply_hosting_data(self, data):
@@ -2712,6 +2730,20 @@ class ServerManagerApp:
             else:
                 _svc_detail(self.hosting_frontend_badge, '前端', svcs.get('frontend'),
                             running=('running', 'ready'))
+            # 备份：采集阶段已从 /api/health 取到 backup 块（见 _collect_hosting_data）
+            bk = data.get('backup') or {}
+            if not bk:
+                _detail(self.hosting_backup_badge, 'stopped', '备份 未上报')
+            elif not bk.get('arq_ok', False):
+                _detail(self.hosting_backup_badge, 'error', '备份 ARQ 掉线')
+            elif bk.get('ok'):
+                age = bk.get('age_hours')
+                _detail(self.hosting_backup_badge, 'running',
+                        f'备份 正常({age}h)' if age is not None else '备份 正常')
+            else:
+                age = bk.get('age_hours')
+                _detail(self.hosting_backup_badge, 'error',
+                        f'备份 陈旧({age}h)' if age is not None else '备份 无产物')
             redis_ok = data['redis_ok']
             broker_ok = data.get('broker_ok', False)
             if redis_ok and broker_ok:

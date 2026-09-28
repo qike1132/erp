@@ -8,6 +8,7 @@ ARQ 是原生 async 任务队列，与 FastAPI async 架构一致，
 - 定时任务：cron_jobs（内置于 worker，无需独立 beat 进程）
 """
 import asyncio
+import contextlib
 import logging
 import os
 from typing import ClassVar
@@ -232,3 +233,27 @@ async def check_worker_health() -> tuple[bool, str]:
     except Exception as e:  # broad-except: 健康探测自身不得抛出，任何异常都须转成"不健康"返回值
         logger.warning('ARQ Worker 健康检测失败: %s', e)
         return False, f'ARQ Worker 健康检测失败: {type(e).__name__}'
+
+
+async def probe_worker_health_isolated(timeout: float = 1.0) -> bool:
+    """健康端点专用：用**短命连接池**判定 ARQ worker 是否在线，绝不触碰全局池。
+
+    为什么必须隔离：``get_arq_pool()`` 的池在首次调用时创建，并**绑定当时的事件循环**
+    后被长期缓存。``/api/health`` 被高频调用、也可能在不同事件循环下被调用（测试、
+    多 loop 场景），复用绑定在已关闭 loop 上的连接会抛
+    ``Event loop is closed`` / ``'NoneType' object has no attribute 'send'``，
+    污染整条健康探测链路。探测只是一次 GET，短命连接的代价由 /api/health 的
+    10s 缓存兜住。
+    """
+    pool = None
+    try:
+        pool = await create_pool(redis_settings)
+        value = await asyncio.wait_for(pool.get(_health_check_key(pool)), timeout=timeout)
+        return bool(value)
+    except Exception as e:  # broad-except: 探测自身不得抛出，任何异常一律按"不在线"处理
+        logger.debug('ARQ 隔离探针失败(按不在线处理): %s', e)
+        return False
+    finally:
+        if pool is not None:
+            with contextlib.suppress(Exception):
+                await pool.aclose()

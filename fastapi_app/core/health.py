@@ -51,6 +51,31 @@ async def _get_optional_user(
         return None
 
 
+async def _backup_signal() -> dict:
+    """备份可观测性:产物新鲜度(权威) + ARQ 在线。
+
+    ARQ 探测走**隔离短命连接**(1s 上限):既不碰绑定事件循环的全局池
+    (会让 /api/health 在不同 loop 下复用已关闭连接),也不会因 broker 故障
+    把响应拖过 prod_runner 的 5s 探测窗而引发误判重启。
+    ``ok`` 是给消费方(服务器管理器徽章)的单一判据:新鲜且 ARQ 在线。
+    """
+    from fastapi_app.services.backup.freshness import backup_freshness
+
+    fresh = backup_freshness()  # 绝不抛
+    arq_ok = False
+    try:
+        from fastapi_app.core.arq_app import probe_worker_health_isolated
+
+        arq_ok = await probe_worker_health_isolated(timeout=1.0)
+    except Exception as exc:  # defensive: 健康端点不得因探测异常而失败
+        logger.warning("ARQ 健康探测异常: %s", exc)
+    return {
+        "ok": bool(fresh["ok"]) and arq_ok,
+        "age_hours": fresh["age_hours"],
+        "arq_ok": arq_ok,
+    }
+
+
 def register_health_routes(app: FastAPI) -> None:
     """注册健康检查和监控路由"""
 
@@ -110,6 +135,7 @@ def register_health_routes(app: FastAPI) -> None:
             "database": {"status": "ok"} if overall_healthy else {"status": "error"},
             "redis": {"status": "ok"} if redis_ok else {"status": "warning"},
         }
+        health_data["backup"] = await _backup_signal()
         if not overall_healthy:
             health_data["status"] = "unhealthy"
         _set_cached_health(public_data=dict(health_data), internal_data=internal_checks)
