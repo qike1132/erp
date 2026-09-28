@@ -250,6 +250,12 @@ config/redis.production.conf
 # 库存仿真运行输出（journal 为按时间戳落盘的运行记录，非源码）
 scripts/stock_sim/journal/
 
+# 排障脚本的运行输出（AST 转储、pytest 重定向输出等）：本机调试产物，非源码。
+# 根目录同名产物已由上方 `/*.out` 规则覆盖，此处补齐 scripts/ 子目录。
+# 注：scripts/pytest_tx.out（run_pytest_tx.py）与 scripts/debug_ast.out（debug_ast.py）
+#     虽为被跟踪脚本的产物，但内容随本机运行环境变化，不入库。
+scripts/*.out
+
 # 历史构建产物目录（dist-old 等）
 /frontend-vite/dist-old/
 /frontend-vite/dist-old-swap/
