@@ -143,6 +143,14 @@ export default defineConfig(({ mode }) => {
       host: '0.0.0.0',
       port: 3000,
       allowedHosts: true,
+      // 构建交换目录必须排除出 watcher（vite 的 ignored 是追加语义，不动默认项）：
+      // dev server 只忽略 build.outDir（默认 dist），而 build:atomic 的 --outDir dist-new 是
+      // CLI 参数、dev server 解析不到 → chokidar 持有 dist-new 句柄，swap-dist.mjs 的 rename
+      // 必抛 EPERM；回滚副本 dist-old 同样落在 watch 树里被锁，回滚一并失败、dist 直接消失
+      // （2026-09-28 实际踩到）。改暂存目录名时务必同步加一行；顺带消掉交换触发的重载噪声。
+      watch: {
+        ignored: ['**/dist-new/**', '**/dist-old/**', '**/dist-old-swap/**', '**/dist_prev_*/**'],
+      },
       headers: {
         'Content-Security-Policy': [
           "default-src 'self'",
