@@ -63,8 +63,6 @@ export interface OrderSKU {
   product_name: string | null
   product_barcode: string | null
   quantity: number
-  order_type: string
-  country: string | null
   deduct_stock: boolean
   deduct_quantity: number
   note: string | null
@@ -99,8 +97,6 @@ export interface OrderItem {
   order_date: string
   note: string
   status: string
-  order_type?: string
-  country?: string
   is_locked?: boolean
   locked_by_name?: string
   /** 主订单下的 SKU 明细列表（多 SKU 聚合时 >1） */
@@ -133,8 +129,6 @@ export interface StockOutRecord {
   stockout_date: string
   status: string
   note?: string
-  order_type?: string
-  country?: string
 }
 
 export interface InventoryItem {
@@ -150,20 +144,11 @@ export interface InventoryItem {
   stockin_qty?: number
   has_stockin?: number
   direct_stockout_qty?: number
-  regular_stockout_qty?: number
-  custom_stockout_qty?: number
-  regular_order_qty?: number
-  custom_order_qty?: number
   has_order?: number
-  country_data?: string
   order_quantity?: number
   stockin_quantity?: number
   total_stock?: number
   available_stock?: number
-  country_orders?: Record<string, number>
-  available_stock_by_country?: Record<string, number>
-  _custom_details?: { country: string; qty: number }[]
-  _country_available?: { country: string; qty: number }[]
 }
 
 /** 后端 /stock/inventory 响应结构（InventoryResponse schema） */
@@ -174,7 +159,6 @@ export interface InventoryResponse {
   total_stockin_quantity: number
   total_stock: number
   total_available_stock: number
-  all_countries: string[]
   all_customers: string[]
   total_items: number
   page: number
@@ -232,8 +216,6 @@ export interface PurchaseOrderSkuItem {
   product_name: string
   barcode: string
   quantity: number
-  order_type?: string
-  country?: string
 }
 
 export interface PurchaseOrder {
@@ -269,8 +251,6 @@ export interface UnprocessedOrderItem {
   product_name: string
   product_barcode?: string | null
   quantity: number
-  order_type?: string
-  country?: string
   deduct_quantity?: number
   note?: string
   has_bom?: boolean
@@ -480,8 +460,6 @@ export interface StagingRow {
   product_barcode: string
   quantity: number
   note: string
-  order_type: string
-  country: string
   status: string
   is_validated: boolean
   validation_error: string
@@ -560,8 +538,6 @@ export interface ShipmentInfo {
   order_quantity: number
   shipped_quantity: number
   available_quantity: number
-  regular_available?: number
-  custom_available?: number
 }
 
 export interface StagedStockout {
@@ -572,8 +548,6 @@ export interface StagedStockout {
   date: string
   quantity: number
   note?: string
-  order_type?: string
-  country?: string
 }
 
 export interface StockoutRecordGroup {

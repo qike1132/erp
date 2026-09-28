@@ -20,8 +20,6 @@ export interface RegSkuItem {
   product_name: string
   barcode: string
   quantity: number
-  order_type?: string
-  country?: string
 }
 
 /** 来料登记记录（对齐后端 RegistrationListResponse.registrations） */

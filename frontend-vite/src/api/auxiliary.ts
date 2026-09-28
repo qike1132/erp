@@ -46,7 +46,5 @@ export const auxApi = {
   availableShipment: (params: {
     product_id: number
     customer: string
-    order_type?: string
-    country?: string
   }) => get<ApiResponse<unknown>>('/aux/available-shipment', params),
 }

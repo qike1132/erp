@@ -31,8 +31,8 @@ export const stockApi = {
   deleteStockin: (id: number) => del(`/stock/in/delete/${id}`),
   deleteStockout: (id: number) => del(`/stock/out/delete/${id}`),
   searchProducts: (q: string) => get<{ products?: Product }>('/aux/product-search', { q }),
-  availableShipment: (productId: number, customer: string, orderType?: string, country?: string) =>
-    get<ApiResponse<ShipmentInfo>>('/aux/available-shipment', { product_id: productId, customer, ...(orderType ? { order_type: orderType } : {}), ...(country ? { country } : {}) }),
+  availableShipment: (productId: number, customer: string) =>
+    get<ApiResponse<ShipmentInfo>>('/aux/available-shipment', { product_id: productId, customer }),
   /**
    * 暂存备货（后端 `staging_stockin.py`）。可用端点：
    * `GET ''`、`POST /import`、`POST /confirm`、`PUT /{id}`、`DELETE /clear`、`DELETE /{id}`。
