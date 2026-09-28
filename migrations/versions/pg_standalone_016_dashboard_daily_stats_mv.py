@@ -13,7 +13,6 @@ Create Date: 2026-07-20
 """
 from alembic import op
 
-
 revision = 'pg_standalone_016_dashboard_daily_stats_mv'
 down_revision = 'pg_standalone_015_pattern_room'
 branch_labels = None

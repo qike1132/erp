@@ -1,9 +1,11 @@
 import { ref, reactive, computed, watch, onScopeDispose } from 'vue'
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/vue-query'
-import { purchaseApi } from '@/api'
+import { purchaseApi, type CompletedOrderExportRow } from '@/api'
 import { showToast } from '@/composables/useToast'
 import { getErrorMessage } from '@/types/errors'
 import type { PurchaseOrder } from '@/types'
+import { escapeHtml } from '@/utils/print'
+import { downloadXls } from '@/utils/xls'
 
 /** Vue Query 缓存 key */
 export const COMPLETED_ORDERS_QUERY_KEY = 'completed-orders-list'
@@ -35,6 +37,45 @@ function buildParams(filters: CompletedOrderFilters, page?: number): Record<stri
   return params
 }
 
+/** 导出列定义：数组顺序即表头顺序，key 对应后端导出行的字段 */
+const EXPORT_COLUMNS: readonly { header: string; key: keyof CompletedOrderExportRow }[] = [
+  { header: '完成日期', key: 'completed_at' },
+  { header: '订单号', key: 'order_no' },
+  { header: '客户', key: 'customer_name' },
+  { header: '供应商', key: 'supplier_name' },
+  { header: '材料名称', key: 'material_name' },
+  { header: '材料编码', key: 'material_code' },
+  { header: '规格型号', key: 'specification' },
+  { header: '数量', key: 'quantity' },
+  { header: '单位', key: 'unit' },
+  { header: '单价', key: 'unit_price' },
+  { header: '金额', key: 'amount' },
+]
+
+/**
+ * 单元格取值。
+ * 数字保留数值形态（Excel 可直接求和/排序），并收敛浮点尾差；空值输出空串。
+ */
+function toCellText(value: unknown): string {
+  if (value === null || value === undefined || value === '') return ''
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? String(Number(value.toFixed(3))) : ''
+  }
+  return String(value)
+}
+
+/** 把导出明细拼成 downloadXls 所需的 <table> HTML（单元格逐一转义） */
+function buildExportTable(rows: CompletedOrderExportRow[]): string {
+  const head = EXPORT_COLUMNS.map((col) => '<th>' + escapeHtml(col.header) + '</th>').join('')
+  const body = rows
+    .map((row) => {
+      const cells = EXPORT_COLUMNS.map((col) => '<td>' + escapeHtml(toCellText(row[col.key])) + '</td>').join('')
+      return '<tr>' + cells + '</tr>'
+    })
+    .join('')
+  return '<table><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table>'
+}
+
 /**
  * useCompletedOrders — 下单查询数据层
  *
@@ -63,8 +104,19 @@ export function useCompletedOrders() {
   /** 是否处于筛选状态（用于空状态文案与重置按钮可用性） */
   const hasFilter = computed(() => FILTER_KEYS.some((k) => !!filters[k]))
 
+  /**
+   * 查询 key：已提交条件 + 页码。
+   * 必须用 computed 逐项读取，否则 {...filters} 在 setup 时就固化成快照，
+   * 点「查询」改了条件也不会重新请求。
+   */
+  const queryKey = computed(() => [
+    COMPLETED_ORDERS_QUERY_KEY,
+    page.value,
+    ...FILTER_KEYS.map((key) => filters[key]),
+  ])
+
   const { data, isLoading, isFetching, isError } = useQuery({
-    queryKey: [COMPLETED_ORDERS_QUERY_KEY, page, { ...filters }],
+    queryKey,
     queryFn: async () => {
       try {
         return await purchaseApi.completed(buildParams(filters, page.value))
@@ -133,19 +185,13 @@ export function useCompletedOrders() {
     await refresh()
   }
 
-  /** 导出：按当前生效条件导出，成功后触发浏览器下载 */
+  /** 导出：按当前生效条件拉取明细行，前端拼成 .xls 表格后触发下载 */
   async function exportOrders(): Promise<void> {
     const res = await purchaseApi.exportCompleted(buildParams(filters))
-    if (!res.success || !res.html) throw new Error(res.message || '导出失败')
-    const blob = new Blob(['\uFEFF' + res.html], { type: 'application/vnd.ms-excel;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = '下单查询汇总.xls'
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-    URL.revokeObjectURL(url)
+    if (!res.success) throw new Error(res.message || '导出失败')
+    const rows = res.rows ?? []
+    if (rows.length === 0) throw new Error('没有符合条件的数据可导出')
+    downloadXls(buildExportTable(rows), '下单查询汇总.xls')
   }
 
   return reactive({

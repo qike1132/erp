@@ -12,16 +12,16 @@ Create Date: 2026-07-18
 
 BOM 编号格式: BF-YYYYMMDD-XXXX（4 位序号，连字符分隔），由 services/numbering.py 生成。
 """
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects import postgresql
 
+from migrations._legacy_base_guard import create_index_if_columns_exist
 
 revision = 'pg_standalone_015_pattern_room'
 down_revision = 'pg_standalone_014_create_order_item'
 branch_labels = None
 depends_on = None
-
 
 def upgrade():
     # 1. 打样 BOM 主表
@@ -41,10 +41,10 @@ def upgrade():
         sa.Column('version', sa.Integer(), nullable=False, server_default='0', comment='乐观锁版本号'),
         sa.UniqueConstraint('bom_no', name='uq_pattern_room_bom_no'),
     )
-    op.create_index('idx_prb_customer', 'pattern_room_bom', ['customer_id'])
-    op.create_index('idx_prb_status_version', 'pattern_room_bom', ['status', 'current_version'])
-    op.create_index('idx_prb_created_at', 'pattern_room_bom', [sa.text('created_at DESC')])
-    op.create_index('idx_prb_product_name', 'pattern_room_bom', ['product_name'])
+    create_index_if_columns_exist('idx_prb_customer', 'pattern_room_bom', ['customer_id'])
+    create_index_if_columns_exist('idx_prb_status_version', 'pattern_room_bom', ['status', 'current_version'])
+    create_index_if_columns_exist('idx_prb_created_at', 'pattern_room_bom', [sa.text('created_at DESC')])
+    create_index_if_columns_exist('idx_prb_product_name', 'pattern_room_bom', ['product_name'])
 
     # 2. BOM 节点表（多级树，自引用 parent_id）
     op.create_table(
@@ -65,9 +65,9 @@ def upgrade():
         sa.Column('created_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.text('now()')),
         sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.text('now()')),
     )
-    op.create_index('idx_prbi_bom_parent', 'pattern_room_bom_item', ['bom_id', 'parent_id', 'sort_order'])
-    op.create_index('idx_prbi_category', 'pattern_room_bom_item', ['category'])
-    op.create_index('idx_prbi_supplier', 'pattern_room_bom_item', ['current_supplier_id'])
+    create_index_if_columns_exist('idx_prbi_bom_parent', 'pattern_room_bom_item', ['bom_id', 'parent_id', 'sort_order'])
+    create_index_if_columns_exist('idx_prbi_category', 'pattern_room_bom_item', ['category'])
+    create_index_if_columns_exist('idx_prbi_supplier', 'pattern_room_bom_item', ['current_supplier_id'])
 
     # 3. 物料版本快照表
     op.create_table(
@@ -86,8 +86,8 @@ def upgrade():
         sa.Column('snapshot_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.text('now()'), comment='快照时间'),
         sa.UniqueConstraint('bom_item_id', 'version', name='uq_prbiv_item_version'),
     )
-    op.create_index('idx_prbiv_bom_item_version', 'pattern_room_bom_item_version', ['bom_item_id', 'version'])
-    op.create_index('idx_prbiv_version', 'pattern_room_bom_item_version', ['version'])
+    create_index_if_columns_exist('idx_prbiv_bom_item_version', 'pattern_room_bom_item_version', ['bom_item_id', 'version'])
+    create_index_if_columns_exist('idx_prbiv_version', 'pattern_room_bom_item_version', ['version'])
 
     # 4. 变更日志表
     op.create_table(
@@ -104,28 +104,27 @@ def upgrade():
         sa.Column('operator_name', sa.String(100), comment='操作人姓名(冗余)'),
         sa.Column('created_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.text('now()')),
     )
-    op.create_index('idx_prcl_bom_time', 'pattern_room_change_log', ['bom_id', sa.text('created_at DESC')])
-    op.create_index('idx_prcl_type', 'pattern_room_change_log', ['change_type'])
-    op.create_index('idx_prcl_created_at', 'pattern_room_change_log', [sa.text('created_at DESC')])
-
+    create_index_if_columns_exist('idx_prcl_bom_time', 'pattern_room_change_log', ['bom_id', sa.text('created_at DESC')])
+    create_index_if_columns_exist('idx_prcl_type', 'pattern_room_change_log', ['change_type'])
+    create_index_if_columns_exist('idx_prcl_created_at', 'pattern_room_change_log', [sa.text('created_at DESC')])
 
 def downgrade():
-    op.drop_index('idx_prcl_created_at', table_name='pattern_room_change_log')
-    op.drop_index('idx_prcl_type', table_name='pattern_room_change_log')
-    op.drop_index('idx_prcl_bom_time', table_name='pattern_room_change_log')
+    op.drop_index('idx_prcl_created_at', table_name='pattern_room_change_log', if_exists=True)
+    op.drop_index('idx_prcl_type', table_name='pattern_room_change_log', if_exists=True)
+    op.drop_index('idx_prcl_bom_time', table_name='pattern_room_change_log', if_exists=True)
     op.drop_table('pattern_room_change_log')
 
-    op.drop_index('idx_prbiv_version', table_name='pattern_room_bom_item_version')
-    op.drop_index('idx_prbiv_bom_item_version', table_name='pattern_room_bom_item_version')
+    op.drop_index('idx_prbiv_version', table_name='pattern_room_bom_item_version', if_exists=True)
+    op.drop_index('idx_prbiv_bom_item_version', table_name='pattern_room_bom_item_version', if_exists=True)
     op.drop_table('pattern_room_bom_item_version')
 
-    op.drop_index('idx_prbi_supplier', table_name='pattern_room_bom_item')
-    op.drop_index('idx_prbi_category', table_name='pattern_room_bom_item')
-    op.drop_index('idx_prbi_bom_parent', table_name='pattern_room_bom_item')
+    op.drop_index('idx_prbi_supplier', table_name='pattern_room_bom_item', if_exists=True)
+    op.drop_index('idx_prbi_category', table_name='pattern_room_bom_item', if_exists=True)
+    op.drop_index('idx_prbi_bom_parent', table_name='pattern_room_bom_item', if_exists=True)
     op.drop_table('pattern_room_bom_item')
 
-    op.drop_index('idx_prb_product_name', table_name='pattern_room_bom')
-    op.drop_index('idx_prb_created_at', table_name='pattern_room_bom')
-    op.drop_index('idx_prb_status_version', table_name='pattern_room_bom')
-    op.drop_index('idx_prb_customer', table_name='pattern_room_bom')
+    op.drop_index('idx_prb_product_name', table_name='pattern_room_bom', if_exists=True)
+    op.drop_index('idx_prb_created_at', table_name='pattern_room_bom', if_exists=True)
+    op.drop_index('idx_prb_status_version', table_name='pattern_room_bom', if_exists=True)
+    op.drop_index('idx_prb_customer', table_name='pattern_room_bom', if_exists=True)
     op.drop_table('pattern_room_bom')

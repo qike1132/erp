@@ -22,9 +22,32 @@
  *
  * 职责：作为库存管理的容器组件，承载 InventoryTab 子组件，
  * 提供导出按钮并根据子组件数据动态控制按钮显隐。
+ * 另订阅订单/库存 WebSocket 事件：订单创建、修改、删除（含其他端/其他标签页操作）
+ * 后自动失效库存派生查询缓存，无需手动点刷新。
  */
 import { ref, computed } from 'vue'
+import { useQueryClient } from '@tanstack/vue-query'
+import { useWebSocket } from '@/composables/useWebSocket'
+import { invalidateStockDataQueries } from '@/utils/queryKeys'
 import InventoryTab from './InventoryTab.vue'
+
+const queryClient = useQueryClient()
+
+/** 会改变库存视图的服务端事件（与后端 StockEvent 常量同名） */
+const STOCK_REFRESH_EVENTS = new Set([
+  'stock_changed',
+  'order_created',
+  'order_updated',
+  'order_deleted',
+])
+
+useWebSocket({
+  isActive: ref(true),
+  onMessage: (data) => {
+    if (!STOCK_REFRESH_EVENTS.has(String(data.type))) return
+    invalidateStockDataQueries(queryClient)
+  },
+})
 
 /** InventoryTab 子组件实例引用 */
 const tabRef = ref<InstanceType<typeof InventoryTab> | null>(null)

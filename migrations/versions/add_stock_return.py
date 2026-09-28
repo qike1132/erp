@@ -7,13 +7,21 @@ Create Date: 2026-05-05
 import sqlalchemy as sa
 from alembic import op
 
+from migrations._legacy_base_guard import (
+    base_schema_absent,
+    create_index_if_columns_exist,
+)
+
 revision = 'add_stock_return'
 down_revision = 'add_app_version'
 branch_labels = None
 depends_on = None
 
-
 def upgrade():
+    # 空库守卫：pg_standalone_001 尚未建出基础 schema 时整条增量迁移空转。
+    # 判据要求 product / customer 同时缺失，遗留库与已建库一律照常执行。
+    if base_schema_absent():
+        return
     # 1. stock_out 表新增 returned_quantity 列
     op.add_column(
         'stock_out',
@@ -36,14 +44,17 @@ def upgrade():
     )
 
     # 3. 创建索引
-    op.create_index('idx_stockreturn_stockout', 'stock_return', ['stockout_id'])
-    op.create_index('idx_stockreturn_product_date', 'stock_return', ['product_id', 'return_date'])
-    op.create_index('idx_stockreturn_customer_date', 'stock_return', ['customer', 'return_date'])
-
+    create_index_if_columns_exist('idx_stockreturn_stockout', 'stock_return', ['stockout_id'])
+    create_index_if_columns_exist('idx_stockreturn_product_date', 'stock_return', ['product_id', 'return_date'])
+    create_index_if_columns_exist('idx_stockreturn_customer_date', 'stock_return', ['customer', 'return_date'])
 
 def downgrade():
-    op.drop_index('idx_stockreturn_customer_date', table_name='stock_return')
-    op.drop_index('idx_stockreturn_product_date', table_name='stock_return')
-    op.drop_index('idx_stockreturn_stockout', table_name='stock_return')
+    # 空库守卫：pg_standalone_001 尚未建出基础 schema 时整条增量迁移空转。
+    # 判据要求 product / customer 同时缺失，遗留库与已建库一律照常执行。
+    if base_schema_absent():
+        return
+    op.drop_index('idx_stockreturn_customer_date', table_name='stock_return', if_exists=True)
+    op.drop_index('idx_stockreturn_product_date', table_name='stock_return', if_exists=True)
+    op.drop_index('idx_stockreturn_stockout', table_name='stock_return', if_exists=True)
     op.drop_table('stock_return')
     op.drop_column('stock_out', 'returned_quantity')

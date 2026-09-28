@@ -5,8 +5,8 @@ Revises: pg_standalone_023_add_status
 Create Date: 2026-08-09
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision = 'pg_standalone_024_drop_is_archived'
 down_revision = 'pg_standalone_023_add_status'

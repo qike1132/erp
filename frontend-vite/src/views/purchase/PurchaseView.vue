@@ -61,6 +61,36 @@
           </button>
           <span class="count-badge">{{ purchaseOrders.total }} 个订单</span>
         </div>
+
+        <!-- 下单查询 TAB 的筛选区（与 TAB 同一行、右上角） -->
+        <div v-else class="pc-header-actions pc-header-filters">
+          <label class="pc-filter-input-wrap">
+            <FontAwesomeIcon icon="box" class="pc-filter-input-icon" aria-hidden="true" />
+            <input
+              v-model="completed.draft.product_name"
+              class="pc-filter-input"
+              type="text"
+              placeholder="产品名称"
+              autocomplete="off"
+              @keyup.enter="completed.search"
+            />
+          </label>
+          <button
+            class="pc-btn pc-btn-primary"
+            :class="{ 'pc-btn-dirty': completed.isDirty }"
+            @click="completed.search"
+          >
+            查询
+          </button>
+          <button class="pc-btn" :disabled="!completed.hasFilter && !completed.isDirty" @click="completed.reset">
+            重置
+          </button>
+          <button class="pc-btn" :disabled="exporting" @click="handleExport">
+            <UiLoadingIcon :loading="exporting" icon="download" />
+            {{ exporting ? '导出中…' : '导出' }}
+          </button>
+          <span class="count-badge">共 {{ completed.total }} 条</span>
+        </div>
       </div>
 
       <div class="page-card-body">
@@ -118,12 +148,8 @@
           :total="completed.total"
           :current-page="completed.page"
           :total-pages="completed.totalPages"
-          :is-dirty="completed.isDirty"
           :has-filter="completed.hasFilter"
-          :exporting="exporting"
-          @search="completed.search"
           @reset="completed.reset"
-          @export="handleExport"
           @remove-filter="handleRemoveCompletedFilter"
           @view-detail="handleViewDetail"
           @update:current-page="handleCompletedPageChange"
@@ -320,5 +346,77 @@ const {
 
 .pc-tab-content {
   padding: 0;
+}
+
+/* === 下单查询 TAB 筛选区（与 TAB 同行，右上角） === */
+.pc-header-filters {
+  gap: 10px;
+  /* 收窄时允许内部换行，避免把 TAB 挤走 */
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.pc-filter-input-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: 220px;
+}
+
+.pc-filter-input-icon {
+  position: absolute;
+  left: 11px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  pointer-events: none;
+  transition: color 0.15s ease;
+}
+
+.pc-filter-input {
+  width: 100%;
+  height: 34px;
+  padding: 0 12px 0 30px;
+  border: 1px solid var(--color-border-light, #e2e8f0);
+  border-radius: 9px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--color-text);
+  background: #fff;
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.pc-filter-input:focus {
+  border-color: var(--color-primary-500, #5b8def);
+  box-shadow: 0 0 0 3px rgba(91, 141, 239, 0.14);
+}
+
+.pc-filter-input-wrap:focus-within .pc-filter-input-icon {
+  color: var(--color-primary-500, #5b8def);
+}
+
+.pc-filter-input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.pc-btn-primary {
+  color: #fff;
+  background: linear-gradient(135deg, var(--color-primary-500, #5b8def), var(--color-primary-600, #3a6bd6));
+  border-color: transparent;
+  box-shadow: 0 2px 6px rgba(58, 107, 214, 0.28);
+}
+
+.pc-btn-primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, var(--color-primary-600, #3a6bd6), var(--color-primary-700, #2d5ab8));
+  border-color: transparent;
+  box-shadow: 0 4px 12px rgba(58, 107, 214, 0.34);
+  color: #fff;
+}
+
+/* 有未提交改动时高亮「查询」，提示「改了还没查」 */
+.pc-btn-dirty {
+  box-shadow: 0 0 0 3px rgba(91, 141, 239, 0.25);
 }
 </style>

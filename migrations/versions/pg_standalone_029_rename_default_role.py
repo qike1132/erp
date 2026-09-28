@@ -10,7 +10,6 @@ Create Date: 2026-08-12
 """
 from alembic import op
 
-
 # revision identifiers, used by Alembic.
 revision = 'pg_standalone_029_rename_default_role'
 down_revision = 'pg_standalone_028_cs_role'

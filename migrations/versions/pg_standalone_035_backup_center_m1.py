@@ -9,9 +9,11 @@ Revision ID: pg_standalone_035_backup_center_m1
 Revises: pg_standalone_034_numbering_counter
 Create Date: 2026-08-22
 """
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects.postgresql import JSONB
+
+from migrations._legacy_base_guard import create_index_if_columns_exist
 
 # revision identifiers, used by Alembic.
 revision = 'pg_standalone_035_backup_center_m1'
@@ -19,13 +21,12 @@ down_revision = 'pg_standalone_034_numbering_counter'
 branch_labels = None
 depends_on = None
 
-
 def upgrade() -> None:
     # ---- backup_record 演进加列 ----
     op.add_column('backup_record', sa.Column('manifest_summary', JSONB(), nullable=True, comment='manifest 摘要(行数/SHA-256 指纹/schema 快照)'))
     op.add_column('backup_record', sa.Column('schedule_id', sa.Integer(), nullable=True, comment='关联 backup_schedule 任务ID(手动触发为 NULL)'))
     op.add_column('backup_record', sa.Column('encrypted', sa.Boolean(), nullable=True, server_default=sa.false(), comment='备份文件是否加密'))
-    op.create_index('idx_backup_record_schedule_id', 'backup_record', ['schedule_id'], unique=False)
+    create_index_if_columns_exist('idx_backup_record_schedule_id', 'backup_record', ['schedule_id'], unique=False)
 
     # ---- backup_schedule 新表 ----
     op.create_table(
@@ -40,7 +41,7 @@ def upgrade() -> None:
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), comment='创建时间'),
         sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), comment='更新时间'),
     )
-    op.create_index('idx_backup_schedule_enabled', 'backup_schedule', ['enabled'], unique=False)
+    create_index_if_columns_exist('idx_backup_schedule_enabled', 'backup_schedule', ['enabled'], unique=False)
 
     # ---- backup_settings 新表(单行) ----
     op.create_table(
@@ -61,11 +62,10 @@ def upgrade() -> None:
         "ON CONFLICT (id) DO NOTHING"
     )
 
-
 def downgrade() -> None:
     op.drop_table('backup_settings')
     op.drop_table('backup_schedule')
-    op.drop_index('idx_backup_record_schedule_id', table_name='backup_record')
+    op.drop_index('idx_backup_record_schedule_id', table_name='backup_record', if_exists=True)
     op.drop_column('backup_record', 'encrypted')
     op.drop_column('backup_record', 'schedule_id')
     op.drop_column('backup_record', 'manifest_summary')

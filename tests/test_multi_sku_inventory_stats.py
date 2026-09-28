@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from fastapi_app.services.stock_inventory_service import (
     _fetch_inventory,
+    get_inventory_paginated,
     get_stock_overview_stats,
     get_stockouts,
 )
@@ -102,6 +103,20 @@ async def legacy_order(db, products_ab):
     return order
 
 
+@pytest.fixture
+async def deleted_order(db, products_ab):
+    """软删除订单：删除只置 is_deleted=TRUE，行仍留在 order 表中。"""
+    order = Order(
+        order_no='MSKU-DEL-001', customer=CUSTOMER, order_date=datetime.now(UTC),
+        product_id=products_ab[0].id, quantity=10000, order_type='regular', status='待备货',
+    )
+    db.add(order)
+    await db.flush()
+    order.is_deleted = True
+    await db.flush()
+    return order
+
+
 async def test_overview_stats_item_dimension(db, products_ab, mixed_order):
     """混合 SKU 订单：常规/定制数量按明细分类（旧实现会得出 5/0）"""
     stats = await get_stock_overview_stats(db)
@@ -146,3 +161,30 @@ async def test_stockouts_type_from_matched_item(db, products_ab, mixed_order):
     row = result['items'][0]
     assert row['order_type'] == 'custom'
     assert row['country'] == '法国'
+
+
+async def test_deleted_order_excluded_from_inventory_legacy(
+        db, products_ab, mixed_order, deleted_order):
+    """软删除订单不计入库存聚合（回归：删除订单后 /stock 仍显示其数量）。
+
+    旧实现的订单/国家聚合 SQL 只有 WHERE 1=1，没有 is_deleted 过滤，
+    已删订单（10000 件）会永久留在库存视图里。
+    """
+    rows = await _fetch_inventory(db, None, cust=CUSTOMER)
+    by_barcode = {r['product_barcode']: r for r in rows}
+    assert by_barcode['MSKU-A']['regular_order_qty'] == 3
+    assert by_barcode['MSKU-B']['custom_order_qty'] == 2
+
+
+async def test_deleted_order_excluded_from_inventory_paginated(
+        db, products_ab, mixed_order, deleted_order):
+    """/stock 实际走的 CTE 分页查询同样必须排除软删除订单。
+
+    直接调用被 @cache_result 包装的实现体（__wrapped__），避免测试污染真实 Redis 缓存。
+    """
+    result = await get_inventory_paginated.__wrapped__(
+        db, search_customer=CUSTOMER, page=1, per_page=50)
+    by_name = {r['product_name']: r for r in result['inventory_data']}
+    assert by_name['多SKU产品A']['order_quantity'] == 3
+    assert by_name['多SKU产品B']['order_quantity'] == ''
+    assert result['total_order_qty'] == 5

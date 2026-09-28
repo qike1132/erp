@@ -216,6 +216,8 @@ export interface PurchaseOrderItem {
   category?: string
   specification?: string
   quantity: number
+  /** 逐行损耗率快照（千分之几）；缺失时回退订单级 spare_rate（后端 get_purchase_order 下发） */
+  loss_rate?: number | null
   unit?: string
   unit_price?: number
   total_price?: number
@@ -254,6 +256,8 @@ export interface PurchaseOrder {
   sku_items?: PurchaseOrderSkuItem[]
   product_name?: string
   quantity?: number
+  /** 订单级损耗率快照（千分之几）；后端 get_purchase_order 下发，物料清单的数量回退口径 */
+  spare_rate?: number | null
   completed_at?: string
   supplier_id?: number
   customer?: string

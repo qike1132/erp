@@ -11,14 +11,22 @@ Create Date: 2026-08-11
 import sqlalchemy as sa
 from alembic import op
 
+from migrations._legacy_base_guard import (
+    base_schema_absent,
+    create_index_if_columns_exist,
+)
+
 # revision identifiers, used by Alembic.
 revision = 'add_outsource_module'
 down_revision = ('partition_order_by_year', 'pg_standalone_025_add_cs_indexes')
 branch_labels = None
 depends_on = None
 
-
 def upgrade():
+    # 空库守卫：pg_standalone_001 尚未建出基础 schema 时整条增量迁移空转。
+    # 判据要求 product / customer 同时缺失，遗留库与已建库一律照常执行。
+    if base_schema_absent():
+        return
     # SKU 外发工序预设：按产品固定配置外发工序类型（电绣/转印/配件等）
     op.create_table(
         'outsource_process_type',
@@ -33,8 +41,8 @@ def upgrade():
         sa.Column('update_time', sa.DateTime(timezone=True), server_default=sa.func.now(), onupdate=sa.func.now(), comment='更新时间'),
         sa.UniqueConstraint('product_id', 'process_type', name='uq_outsource_pt_product_process'),
     )
-    op.create_index('ix_outsource_pt_product', 'outsource_process_type', ['product_id'])
-    op.create_index('ix_outsource_pt_product_sort', 'outsource_process_type', ['product_id', 'sort_order'])
+    create_index_if_columns_exist('ix_outsource_pt_product', 'outsource_process_type', ['product_id'])
+    create_index_if_columns_exist('ix_outsource_pt_product_sort', 'outsource_process_type', ['product_id', 'sort_order'])
 
     # 订单外发工序实例：订单下每个 SKU 需经历的外发工序，含计划/实际完成时间与状态
     op.create_table(
@@ -56,13 +64,16 @@ def upgrade():
         sa.Column('create_time', sa.DateTime(timezone=True), server_default=sa.func.now(), comment='创建时间'),
         sa.Column('update_time', sa.DateTime(timezone=True), server_default=sa.func.now(), onupdate=sa.func.now(), comment='更新时间'),
     )
-    op.create_index('ix_oosp_order', 'order_outsource_process', ['order_id'])
-    op.create_index('ix_oosp_order_sort', 'order_outsource_process', ['order_id', 'sort_order'])
-    op.create_index('ix_oosp_item', 'order_outsource_process', ['order_item_id'])
-    op.create_index('ix_oosp_product', 'order_outsource_process', ['product_id'])
-    op.create_index('ix_oosp_status_date', 'order_outsource_process', ['status', 'create_time'])
-
+    create_index_if_columns_exist('ix_oosp_order', 'order_outsource_process', ['order_id'])
+    create_index_if_columns_exist('ix_oosp_order_sort', 'order_outsource_process', ['order_id', 'sort_order'])
+    create_index_if_columns_exist('ix_oosp_item', 'order_outsource_process', ['order_item_id'])
+    create_index_if_columns_exist('ix_oosp_product', 'order_outsource_process', ['product_id'])
+    create_index_if_columns_exist('ix_oosp_status_date', 'order_outsource_process', ['status', 'create_time'])
 
 def downgrade():
+    # 空库守卫：pg_standalone_001 尚未建出基础 schema 时整条增量迁移空转。
+    # 判据要求 product / customer 同时缺失，遗留库与已建库一律照常执行。
+    if base_schema_absent():
+        return
     op.drop_table('order_outsource_process')
     op.drop_table('outsource_process_type')

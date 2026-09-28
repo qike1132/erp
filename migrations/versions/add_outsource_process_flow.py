@@ -10,14 +10,22 @@ Create Date: 2026-08-20
 import sqlalchemy as sa
 from alembic import op
 
+from migrations._legacy_base_guard import (
+    base_schema_absent,
+    create_index_if_columns_exist,
+)
+
 # revision identifiers, used by Alembic.
 revision = 'add_outsource_process_flow'
 down_revision = 'add_outsource_ship_receive'
 branch_labels = None
 depends_on = None
 
-
 def upgrade():
+    # 空库守卫：pg_standalone_001 尚未建出基础 schema 时整条增量迁移空转。
+    # 判据要求 product / customer 同时缺失，遗留库与已建库一律照常执行。
+    if base_schema_absent():
+        return
     op.create_table(
         'order_outsource_process_flow',
         sa.Column('id', sa.Integer(), primary_key=True),
@@ -28,8 +36,8 @@ def upgrade():
         sa.Column('create_time', sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=True, comment='操作时间'),
         sa.Index('ix_oospf_process_time', 'process_id', 'create_time'),
     )
-    op.create_index('ix_order_outsource_process_flow_process_id', 'order_outsource_process_flow', ['process_id'])
-    op.create_index('ix_order_outsource_process_flow_create_time', 'order_outsource_process_flow', ['create_time'])
+    create_index_if_columns_exist('ix_order_outsource_process_flow_process_id', 'order_outsource_process_flow', ['process_id'])
+    create_index_if_columns_exist('ix_order_outsource_process_flow_create_time', 'order_outsource_process_flow', ['create_time'])
 
     # 存量回填：已发货（含已收货）工序补一条 ship 流水；已收货工序再补一条 receive 流水
     op.execute(sa.text(
@@ -49,6 +57,9 @@ def upgrade():
         """
     ))
 
-
 def downgrade():
+    # 空库守卫：pg_standalone_001 尚未建出基础 schema 时整条增量迁移空转。
+    # 判据要求 product / customer 同时缺失，遗留库与已建库一律照常执行。
+    if base_schema_absent():
+        return
     op.drop_table('order_outsource_process_flow')

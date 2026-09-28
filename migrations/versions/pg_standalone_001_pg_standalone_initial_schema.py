@@ -12,6 +12,10 @@ For NEW PostgreSQL deployments:
 
 For EXISTING PostgreSQL deployments (migrated from MySQL):
     alembic stamp 659467a97350
+
+NOTE (2026-09-12 · P0-05): 原实现把每条 DDL 拆成多行 op.execute()，
+alembic 会逐条下发，导致 'CREATE TABLE x (' 单独执行即语法错误、新库无法建立。
+现由 tools/rebuild_migration.py 合并为完整语句，逐条下发。
 """
 from alembic import op
 
@@ -19,1225 +23,1197 @@ from alembic import op
 revision = 'pg_standalone_001'
 down_revision = None
 branch_labels = ('pg_standalone',)
-depends_on = None
+# 基础 schema 必须排在遗留增量链（add_product_price -> ... -> 659467a97350）之后：
+# 那些遗留迁移带有「基础 schema 缺失则整条空转」的守卫，只有排在 001 之前，
+# 空库重放时才会被正确跳过；若落在 001 之后，其目标对象已存在，会直接报错。
+depends_on = ('659467a97350',)
+
+# 完整 DDL 语句（每条均以 ; 结尾且可独立执行）
+_UPGRADE_STATEMENTS: tuple[str, ...] = (
+    """CREATE TABLE product (
+	id SERIAL NOT NULL,
+	name VARCHAR(100) NOT NULL,
+	barcode VARCHAR(50),
+	price NUMERIC(10, 2) DEFAULT '0',
+	image VARCHAR(200),
+	initial_stock INTEGER NOT NULL,
+	current_stock INTEGER NOT NULL,
+	version INTEGER DEFAULT '0' NOT NULL,
+	create_time TIMESTAMP WITHOUT TIME ZONE,
+	PRIMARY KEY (id)
+);""",
+    """CREATE INDEX ix_product_barcode ON product (barcode);""",
+    """CREATE INDEX idx_product_name_barcode ON product (name, barcode);""",
+    """CREATE INDEX ix_product_create_time ON product (create_time);""",
+    """CREATE UNIQUE INDEX ix_product_name ON product (name);""",
+    """COMMENT ON COLUMN product.name IS '产品名称';""",
+    """COMMENT ON COLUMN product.barcode IS '69码/商品条码';""",
+    """COMMENT ON COLUMN product.price IS '产品价格';""",
+    """COMMENT ON COLUMN product.image IS '产品图片路径';""",
+    """COMMENT ON COLUMN product.initial_stock IS '初始库存';""",
+    """COMMENT ON COLUMN product.current_stock IS '当前库存';""",
+    """COMMENT ON COLUMN product.version IS '乐观锁版本号';""",
+    """COMMENT ON COLUMN product.create_time IS '创建时间';""",
+    """CREATE TABLE "user" (
+	id SERIAL NOT NULL,
+	username VARCHAR(50) NOT NULL,
+	phone VARCHAR(20),
+	password VARCHAR(200) NOT NULL,
+	is_super BOOLEAN NOT NULL,
+	status BOOLEAN NOT NULL,
+	create_time TIMESTAMP WITHOUT TIME ZONE,
+	update_time TIMESTAMP WITHOUT TIME ZONE,
+	PRIMARY KEY (id),
+	UNIQUE (username)
+);""",
+    """COMMENT ON COLUMN "user".username IS '用户名';""",
+    """COMMENT ON COLUMN "user".phone IS '手机号';""",
+    """COMMENT ON COLUMN "user".password IS '密码';""",
+    """COMMENT ON COLUMN "user".is_super IS '是否超级用户';""",
+    """COMMENT ON COLUMN "user".status IS '是否启用';""",
+    """COMMENT ON COLUMN "user".create_time IS '创建时间';""",
+    """COMMENT ON COLUMN "user".update_time IS '更新时间';""",
+    """CREATE TABLE permission (
+	id SERIAL NOT NULL,
+	name VARCHAR(50) NOT NULL,
+	code VARCHAR(50) NOT NULL,
+	parent_id INTEGER,
+	icon VARCHAR(50),
+	url VARCHAR(200),
+	section VARCHAR(50),
+	section_name VARCHAR(50),
+	sort_order INTEGER NOT NULL,
+	is_nav BOOLEAN NOT NULL,
+	PRIMARY KEY (id),
+	UNIQUE (code),
+	FOREIGN KEY(parent_id) REFERENCES permission (id)
+);""",
+    """COMMENT ON COLUMN permission.name IS '权限名称';""",
+    """COMMENT ON COLUMN permission.code IS '权限标识';""",
+    """COMMENT ON COLUMN permission.parent_id IS '父权限ID';""",
+    """COMMENT ON COLUMN permission.icon IS '导航图标';""",
+    """COMMENT ON COLUMN permission.url IS '导航链接';""",
+    """COMMENT ON COLUMN permission.section IS '所属板块';""",
+    """COMMENT ON COLUMN permission.section_name IS '板块显示名';""",
+    """COMMENT ON COLUMN permission.sort_order IS '排序';""",
+    """COMMENT ON COLUMN permission.is_nav IS '是否显示在导航栏';""",
+    """CREATE TABLE customer (
+	id SERIAL NOT NULL,
+	customer_code VARCHAR(50),
+	name VARCHAR(100) NOT NULL,
+	contact VARCHAR(50),
+	phone VARCHAR(20),
+	address VARCHAR(200),
+	note TEXT,
+	icon_url VARCHAR(200),
+	status BOOLEAN NOT NULL,
+	create_time TIMESTAMP WITHOUT TIME ZONE,
+	update_time TIMESTAMP WITHOUT TIME ZONE,
+	PRIMARY KEY (id)
+);""",
+    """CREATE UNIQUE INDEX ix_customer_name ON customer (name);""",
+    """CREATE UNIQUE INDEX ix_customer_customer_code ON customer (customer_code);""",
+    """COMMENT ON COLUMN customer.customer_code IS '客户编码';""",
+    """COMMENT ON COLUMN customer.name IS '客户名称';""",
+    """COMMENT ON COLUMN customer.contact IS '联系人';""",
+    """COMMENT ON COLUMN customer.phone IS '联系电话';""",
+    """COMMENT ON COLUMN customer.address IS '地址';""",
+    """COMMENT ON COLUMN customer.note IS '备注';""",
+    """COMMENT ON COLUMN customer.icon_url IS '客户图标URL';""",
+    """COMMENT ON COLUMN customer.status IS '是否启用';""",
+    """COMMENT ON COLUMN customer.create_time IS '创建时间';""",
+    """COMMENT ON COLUMN customer.update_time IS '更新时间';""",
+    """CREATE TABLE order_sync_record (
+	id SERIAL NOT NULL,
+	source_order_id INTEGER NOT NULL,
+	order_no VARCHAR(20) NOT NULL,
+	sync_type VARCHAR(20) NOT NULL,
+	sync_status VARCHAR(20) NOT NULL,
+	sync_time TIMESTAMP WITHOUT TIME ZONE,
+	retry_count INTEGER NOT NULL,
+	max_retries INTEGER NOT NULL,
+	next_retry_time TIMESTAMP WITHOUT TIME ZONE,
+	error_message TEXT,
+	sync_data TEXT,
+	operator_id INTEGER,
+	operator_name VARCHAR(100),
+	PRIMARY KEY (id)
+);""",
+    """CREATE INDEX idx_sync_order ON order_sync_record (source_order_id);""",
+    """CREATE INDEX ix_order_sync_record_sync_time ON order_sync_record (sync_time);""",
+    """CREATE INDEX ix_order_sync_record_source_order_id ON order_sync_record (source_order_id);""",
+    """CREATE INDEX ix_order_sync_record_sync_status ON order_sync_record (sync_status);""",
+    """CREATE INDEX idx_sync_status_time ON order_sync_record (sync_status, sync_time);""",
+    """COMMENT ON COLUMN order_sync_record.source_order_id IS '来源订单ID';""",
+    """COMMENT ON COLUMN order_sync_record.order_no IS '订单编号';""",
+    """COMMENT ON COLUMN order_sync_record.sync_type IS '同步类型';""",
+    """COMMENT ON COLUMN order_sync_record.sync_status IS '同步状态';""",
+    """COMMENT ON COLUMN order_sync_record.sync_time IS '同步时间';""",
+    """COMMENT ON COLUMN order_sync_record.retry_count IS '重试次数';""",
+    """COMMENT ON COLUMN order_sync_record.max_retries IS '最大重试次数';""",
+    """COMMENT ON COLUMN order_sync_record.next_retry_time IS '下次重试时间';""",
+    """COMMENT ON COLUMN order_sync_record.error_message IS '错误信息';""",
+    """COMMENT ON COLUMN order_sync_record.sync_data IS '同步数据JSON';""",
+    """COMMENT ON COLUMN order_sync_record.operator_id IS '操作人ID';""",
+    """COMMENT ON COLUMN order_sync_record.operator_name IS '操作人姓名';""",
+    """CREATE TABLE sync_retry_queue (
+	id SERIAL NOT NULL,
+	source_order_id INTEGER NOT NULL,
+	order_no VARCHAR(20) NOT NULL,
+	sync_type VARCHAR(20) NOT NULL,
+	sync_data TEXT NOT NULL,
+	retry_count INTEGER NOT NULL,
+	max_retries INTEGER NOT NULL,
+	status VARCHAR(20) NOT NULL,
+	next_retry_time TIMESTAMP WITHOUT TIME ZONE,
+	last_retry_time TIMESTAMP WITHOUT TIME ZONE,
+	last_error TEXT,
+	created_at TIMESTAMP WITHOUT TIME ZONE,
+	updated_at TIMESTAMP WITHOUT TIME ZONE,
+	priority INTEGER NOT NULL,
+	PRIMARY KEY (id)
+);""",
+    """CREATE INDEX ix_sync_retry_queue_next_retry_time ON sync_retry_queue (next_retry_time);""",
+    """CREATE INDEX ix_sync_retry_queue_source_order_id ON sync_retry_queue (source_order_id);""",
+    """CREATE INDEX idx_retry_status_time ON sync_retry_queue (status, next_retry_time);""",
+    """CREATE INDEX ix_sync_retry_queue_status ON sync_retry_queue (status);""",
+    """CREATE INDEX idx_retry_priority ON sync_retry_queue (priority, next_retry_time);""",
+    """COMMENT ON COLUMN sync_retry_queue.source_order_id IS '来源订单ID';""",
+    """COMMENT ON COLUMN sync_retry_queue.order_no IS '订单编号';""",
+    """COMMENT ON COLUMN sync_retry_queue.sync_type IS '同步类型';""",
+    """COMMENT ON COLUMN sync_retry_queue.sync_data IS '同步数据JSON';""",
+    """COMMENT ON COLUMN sync_retry_queue.retry_count IS '已重试次数';""",
+    """COMMENT ON COLUMN sync_retry_queue.max_retries IS '最大重试次数';""",
+    """COMMENT ON COLUMN sync_retry_queue.status IS '状态';""",
+    """COMMENT ON COLUMN sync_retry_queue.next_retry_time IS '下次重试时间';""",
+    """COMMENT ON COLUMN sync_retry_queue.last_retry_time IS '上次重试时间';""",
+    """COMMENT ON COLUMN sync_retry_queue.last_error IS '最后错误信息';""",
+    """COMMENT ON COLUMN sync_retry_queue.created_at IS '创建时间';""",
+    """COMMENT ON COLUMN sync_retry_queue.updated_at IS '更新时间';""",
+    """COMMENT ON COLUMN sync_retry_queue.priority IS '优先级';""",
+    """CREATE TABLE supplier (
+	id SERIAL NOT NULL,
+	name VARCHAR(100) NOT NULL,
+	contact_person VARCHAR(50),
+	phone VARCHAR(20),
+	address VARCHAR(200),
+	bank_name VARCHAR(100),
+	bank_account VARCHAR(50),
+	remark TEXT,
+	status BOOLEAN,
+	created_at TIMESTAMP WITHOUT TIME ZONE,
+	updated_at TIMESTAMP WITHOUT TIME ZONE,
+	PRIMARY KEY (id)
+);""",
+    """CREATE INDEX idx_supplier_name ON supplier (name);""",
+    """CREATE UNIQUE INDEX ix_supplier_name ON supplier (name);""",
+    """COMMENT ON COLUMN supplier.name IS '供应商名称';""",
+    """COMMENT ON COLUMN supplier.contact_person IS '联系人';""",
+    """COMMENT ON COLUMN supplier.phone IS '联系电话';""",
+    """COMMENT ON COLUMN supplier.address IS '地址';""",
+    """COMMENT ON COLUMN supplier.bank_name IS '开户银行';""",
+    """COMMENT ON COLUMN supplier.bank_account IS '银行账号';""",
+    """COMMENT ON COLUMN supplier.remark IS '备注';""",
+    """COMMENT ON COLUMN supplier.status IS '状态';""",
+    """COMMENT ON COLUMN supplier.created_at IS '创建时间';""",
+    """COMMENT ON COLUMN supplier.updated_at IS '更新时间';""",
+    """CREATE TABLE production_plan (
+	id SERIAL NOT NULL,
+	customer_name VARCHAR(100) NOT NULL,
+	product_name VARCHAR(100) NOT NULL,
+	barcode VARCHAR(50) NOT NULL,
+	quantity INTEGER NOT NULL,
+	plan_date DATE NOT NULL,
+	status VARCHAR(20) NOT NULL,
+	shipped_qty INTEGER NOT NULL,
+	remark TEXT,
+	upload_batch VARCHAR(64),
+	create_time TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+	update_time TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+	created_by VARCHAR(50),
+	PRIMARY KEY (id)
+);""",
+    """CREATE INDEX idx_pp_plan_month ON production_plan (plan_date, customer_name);""",
+    """CREATE INDEX idx_pp_barcode ON production_plan (barcode);""",
+    """CREATE INDEX ix_production_plan_barcode ON production_plan (barcode);""",
+    """CREATE INDEX idx_pp_customer_name ON production_plan (customer_name);""",
+    """CREATE INDEX idx_pp_plan_date ON production_plan (plan_date);""",
+    """CREATE INDEX ix_production_plan_customer_name ON production_plan (customer_name);""",
+    """COMMENT ON COLUMN production_plan.customer_name IS '客户名称';""",
+    """COMMENT ON COLUMN production_plan.product_name IS '客户产品名称';""",
+    """COMMENT ON COLUMN production_plan.barcode IS '69码';""",
+    """COMMENT ON COLUMN production_plan.quantity IS '排产计划数量';""",
+    """COMMENT ON COLUMN production_plan.plan_date IS '计划日期';""",
+    """COMMENT ON COLUMN production_plan.status IS '状态: pending/confirmed/completed';""",
+    """COMMENT ON COLUMN production_plan.shipped_qty IS '已出货数量';""",
+    """COMMENT ON COLUMN production_plan.remark IS '备注';""",
+    """COMMENT ON COLUMN production_plan.upload_batch IS '上传批次ID';""",
+    """COMMENT ON COLUMN production_plan.create_time IS '创建时间';""",
+    """COMMENT ON COLUMN production_plan.update_time IS '更新时间';""",
+    """COMMENT ON COLUMN production_plan.created_by IS '创建人';""",
+    """CREATE TABLE production_plan_log (
+	id SERIAL NOT NULL,
+	plan_id INTEGER NOT NULL,
+	action VARCHAR(20) NOT NULL,
+	old_value TEXT,
+	new_value TEXT,
+	operator VARCHAR(50) NOT NULL,
+	operate_time TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+	PRIMARY KEY (id)
+);""",
+    """CREATE INDEX ix_production_plan_log_plan_id ON production_plan_log (plan_id);""",
+    """COMMENT ON COLUMN production_plan_log.plan_id IS '排产计划ID';""",
+    """COMMENT ON COLUMN production_plan_log.action IS '操作类型: create/update/delete';""",
+    """COMMENT ON COLUMN production_plan_log.old_value IS '变更前数据(JSON)';""",
+    """COMMENT ON COLUMN production_plan_log.new_value IS '变更后数据(JSON)';""",
+    """COMMENT ON COLUMN production_plan_log.operator IS '操作人';""",
+    """COMMENT ON COLUMN production_plan_log.operate_time IS '操作时间';""",
+    """CREATE TABLE staging_purchase_plan (
+	id SERIAL NOT NULL,
+	session_id VARCHAR(64) NOT NULL,
+	customer_name VARCHAR(100) NOT NULL,
+	product_name VARCHAR(100) NOT NULL,
+	barcode VARCHAR(50) NOT NULL,
+	quantity INTEGER NOT NULL,
+	plan_date DATE NOT NULL,
+	plan_month VARCHAR(7),
+	remark TEXT,
+	is_validated BOOLEAN NOT NULL,
+	validation_error VARCHAR(500),
+	upload_batch_id VARCHAR(64),
+	created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+	PRIMARY KEY (id)
+);""",
+    """CREATE INDEX idx_spp_session ON staging_purchase_plan (session_id);""",
+    """CREATE INDEX ix_staging_purchase_plan_session_id ON staging_purchase_plan (session_id);""",
+    """CREATE INDEX idx_spp_batch ON staging_purchase_plan (upload_batch_id);""",
+    """CREATE INDEX ix_staging_purchase_plan_upload_batch_id ON staging_purchase_plan (upload_batch_id);""",
+    """COMMENT ON COLUMN staging_purchase_plan.session_id IS '会话ID';""",
+    """COMMENT ON COLUMN staging_purchase_plan.customer_name IS '客户名称';""",
+    """COMMENT ON COLUMN staging_purchase_plan.product_name IS '产品名称';""",
+    """COMMENT ON COLUMN staging_purchase_plan.barcode IS '69码';""",
+    """COMMENT ON COLUMN staging_purchase_plan.quantity IS '计划数量';""",
+    """COMMENT ON COLUMN staging_purchase_plan.plan_date IS '计划日期';""",
+    """COMMENT ON COLUMN staging_purchase_plan.plan_month IS '计划月份 YYYY-MM';""",
+    """COMMENT ON COLUMN staging_purchase_plan.remark IS '备注';""",
+    """COMMENT ON COLUMN staging_purchase_plan.is_validated IS '是否已验证';""",
+    """COMMENT ON COLUMN staging_purchase_plan.validation_error IS '验证错误信息';""",
+    """COMMENT ON COLUMN staging_purchase_plan.upload_batch_id IS '上传批次ID';""",
+    """COMMENT ON COLUMN staging_purchase_plan.created_at IS '创建时间';""",
+    """CREATE TABLE shipment_records (
+	id SERIAL NOT NULL,
+	shipment_no VARCHAR(64) NOT NULL,
+	customer_id INTEGER NOT NULL,
+	customer_name VARCHAR(100) NOT NULL,
+	product_id INTEGER NOT NULL,
+	product_name VARCHAR(100) NOT NULL,
+	quantity INTEGER NOT NULL,
+	shipment_date DATE NOT NULL,
+	source_type VARCHAR(20) NOT NULL,
+	source_id INTEGER,
+	synced_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+	created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+	PRIMARY KEY (id),
+	UNIQUE (shipment_no)
+);""",
+    """CREATE INDEX idx_sr_shipment_date ON shipment_records (shipment_date);""",
+    """CREATE INDEX idx_sr_customer_product_date ON shipment_records (customer_id, product_id, shipment_date);""",
+    """COMMENT ON COLUMN shipment_records.shipment_no IS '原始出货单号';""",
+    """COMMENT ON COLUMN shipment_records.customer_id IS '客户ID';""",
+    """COMMENT ON COLUMN shipment_records.customer_name IS '客户名称';""",
+    """COMMENT ON COLUMN shipment_records.product_id IS '产品ID';""",
+    """COMMENT ON COLUMN shipment_records.product_name IS '产品名称';""",
+    """COMMENT ON COLUMN shipment_records.quantity IS '出货数量';""",
+    """COMMENT ON COLUMN shipment_records.shipment_date IS '出货日期';""",
+    """COMMENT ON COLUMN shipment_records.source_type IS '来源类型';""",
+    """COMMENT ON COLUMN shipment_records.source_id IS '来源记录ID';""",
+    """COMMENT ON COLUMN shipment_records.synced_at IS '同步时间';""",
+    """COMMENT ON COLUMN shipment_records.created_at IS '创建时间';""",
+    """CREATE TABLE craft_work (
+	id SERIAL NOT NULL,
+	worker_name VARCHAR(50) NOT NULL,
+	quantity INTEGER NOT NULL,
+	work_date DATE NOT NULL,
+	remark VARCHAR(500),
+	create_time TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+	created_by VARCHAR(50),
+	PRIMARY KEY (id)
+);""",
+    """CREATE INDEX idx_craft_work_worker_date ON craft_work (worker_name, work_date);""",
+    """CREATE INDEX idx_craft_work_date ON craft_work (work_date);""",
+    """COMMENT ON COLUMN craft_work.worker_name IS '工人姓名';""",
+    """COMMENT ON COLUMN craft_work.quantity IS '生产数量';""",
+    """COMMENT ON COLUMN craft_work.work_date IS '生产日期';""",
+    """COMMENT ON COLUMN craft_work.remark IS '备注';""",
+    """COMMENT ON COLUMN craft_work.create_time IS '创建时间';""",
+    """COMMENT ON COLUMN craft_work.created_by IS '创建人';""",
+    """CREATE TABLE packaging_record (
+	id SERIAL NOT NULL,
+	customer VARCHAR(100) NOT NULL,
+	product_name VARCHAR(100) NOT NULL,
+	barcode VARCHAR(50) NOT NULL,
+	quantity INTEGER NOT NULL,
+	pack_date DATE NOT NULL,
+	remark TEXT,
+	upload_batch VARCHAR(64),
+	create_time TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+	created_by VARCHAR(50),
+	PRIMARY KEY (id)
+);""",
+    """CREATE INDEX idx_packaging_date ON packaging_record (pack_date);""",
+    """CREATE INDEX idx_packaging_customer_date ON packaging_record (customer, pack_date);""",
+    """CREATE INDEX idx_packaging_barcode ON packaging_record (barcode);""",
+    """COMMENT ON COLUMN packaging_record.customer IS '客户';""",
+    """COMMENT ON COLUMN packaging_record.product_name IS '产品名称';""",
+    """COMMENT ON COLUMN packaging_record.barcode IS '69码';""",
+    """COMMENT ON COLUMN packaging_record.quantity IS '数量';""",
+    """COMMENT ON COLUMN packaging_record.pack_date IS '包装日期';""",
+    """COMMENT ON COLUMN packaging_record.remark IS '备注';""",
+    """COMMENT ON COLUMN packaging_record.upload_batch IS '上传批次ID';""",
+    """COMMENT ON COLUMN packaging_record.create_time IS '创建时间';""",
+    """COMMENT ON COLUMN packaging_record.created_by IS '创建人';""",
+    """CREATE TABLE "order" (
+	id SERIAL NOT NULL,
+	order_no VARCHAR(20) NOT NULL,
+	customer VARCHAR(100) NOT NULL,
+	order_date TIMESTAMP WITHOUT TIME ZONE,
+	product_id INTEGER NOT NULL,
+	quantity INTEGER NOT NULL,
+	status VARCHAR(20),
+	note TEXT,
+	batch_no VARCHAR(100),
+	order_type VARCHAR(20) NOT NULL,
+	country VARCHAR(100),
+	is_locked BOOLEAN,
+	locked_by_id INTEGER,
+	lock_time TIMESTAMP WITHOUT TIME ZONE,
+	is_deleted BOOLEAN,
+	deleted_at TIMESTAMP WITHOUT TIME ZONE,
+	deleted_by_id INTEGER,
+	delete_reason VARCHAR(500),
+	PRIMARY KEY (id),
+	UNIQUE (order_no),
+	FOREIGN KEY(product_id) REFERENCES product (id),
+	FOREIGN KEY(locked_by_id) REFERENCES "user" (id),
+	FOREIGN KEY(deleted_by_id) REFERENCES "user" (id)
+);""",
+    """CREATE INDEX idx_order_product_status ON "order" (product_id, status);""",
+    """CREATE INDEX idx_order_customer_status ON "order" (customer, status);""",
+    """CREATE INDEX idx_order_locked ON "order" (is_locked);""",
+    """CREATE INDEX ix_order_product_id ON "order" (product_id);""",
+    """CREATE INDEX idx_order_status_date ON "order" (status, order_date);""",
+    """CREATE INDEX ix_order_customer ON "order" (customer);""",
+    """CREATE INDEX idx_order_customer_product ON "order" (customer, product_id);""",
+    """CREATE INDEX ix_order_status ON "order" (status);""",
+    """CREATE INDEX ix_order_is_deleted ON "order" (is_deleted);""",
+    """CREATE INDEX idx_order_type ON "order" (order_type);""",
+    """CREATE INDEX ix_order_order_date ON "order" (order_date);""",
+    """COMMENT ON COLUMN "order".order_no IS '订单编号';""",
+    """COMMENT ON COLUMN "order".customer IS '客户名称';""",
+    """COMMENT ON COLUMN "order".order_date IS '下单时间';""",
+    """COMMENT ON COLUMN "order".product_id IS '产品ID';""",
+    """COMMENT ON COLUMN "order".quantity IS '订单数量';""",
+    """COMMENT ON COLUMN "order".status IS '订单状态';""",
+    """COMMENT ON COLUMN "order".note IS '备注';""",
+    """COMMENT ON COLUMN "order".batch_no IS '批次号';""",
+    """COMMENT ON COLUMN "order".order_type IS '订单类型：regular=常规订单, custom=定制订单';""",
+    """COMMENT ON COLUMN "order".country IS '国家名称（仅定制订单使用）';""",
+    """COMMENT ON COLUMN "order".is_locked IS '是否被审批锁定';""",
+    """COMMENT ON COLUMN "order".locked_by_id IS '锁定人ID';""",
+    """COMMENT ON COLUMN "order".lock_time IS '锁定时间';""",
+    """COMMENT ON COLUMN "order".is_deleted IS '是否已删除';""",
+    """COMMENT ON COLUMN "order".deleted_at IS '删除时间';""",
+    """COMMENT ON COLUMN "order".deleted_by_id IS '删除人ID';""",
+    """COMMENT ON COLUMN "order".delete_reason IS '删除原因';""",
+    """CREATE TABLE stock_in (
+	id SERIAL NOT NULL,
+	stockin_no VARCHAR(20) NOT NULL,
+	stockin_date TIMESTAMP WITHOUT TIME ZONE,
+	customer VARCHAR(100) NOT NULL,
+	product_id INTEGER NOT NULL,
+	quantity INTEGER NOT NULL,
+	note TEXT,
+	PRIMARY KEY (id),
+	UNIQUE (stockin_no),
+	FOREIGN KEY(product_id) REFERENCES product (id)
+);""",
+    """CREATE INDEX idx_stockin_customer_product ON stock_in (customer, product_id);""",
+    """CREATE INDEX ix_stock_in_product_id ON stock_in (product_id);""",
+    """CREATE INDEX idx_stockin_customer_date ON stock_in (customer, stockin_date);""",
+    """CREATE INDEX idx_stockin_product_date ON stock_in (product_id, stockin_date);""",
+    """CREATE INDEX ix_stock_in_stockin_date ON stock_in (stockin_date);""",
+    """CREATE INDEX idx_stockin_customer_product_date ON stock_in (customer, product_id, stockin_date);""",
+    """CREATE INDEX ix_stock_in_customer ON stock_in (customer);""",
+    """COMMENT ON COLUMN stock_in.stockin_no IS '备货编号';""",
+    """COMMENT ON COLUMN stock_in.stockin_date IS '备货时间';""",
+    """COMMENT ON COLUMN stock_in.customer IS '客户名称';""",
+    """COMMENT ON COLUMN stock_in.product_id IS '产品ID';""",
+    """COMMENT ON COLUMN stock_in.quantity IS '备货数量';""",
+    """COMMENT ON COLUMN stock_in.note IS '备注';""",
+    """CREATE TABLE inventory_log (
+	id SERIAL NOT NULL,
+	product_id INTEGER NOT NULL,
+	change_type VARCHAR(20) NOT NULL,
+	change_quantity INTEGER NOT NULL,
+	change_date TIMESTAMP WITHOUT TIME ZONE,
+	related_id VARCHAR(50),
+	note TEXT,
+	customer VARCHAR(100),
+	PRIMARY KEY (id),
+	FOREIGN KEY(product_id) REFERENCES product (id) ON DELETE CASCADE
+);""",
+    """CREATE INDEX ix_inventory_log_customer ON inventory_log (customer);""",
+    """CREATE INDEX ix_inventory_log_product_id ON inventory_log (product_id);""",
+    """CREATE INDEX ix_inventory_log_change_date ON inventory_log (change_date);""",
+    """CREATE INDEX idx_inventory_log_product_date ON inventory_log (product_id, change_date DESC);""",
+    """CREATE INDEX ix_inventory_log_change_type ON inventory_log (change_type);""",
+    """COMMENT ON COLUMN inventory_log.product_id IS '产品ID';""",
+    """COMMENT ON COLUMN inventory_log.change_type IS '变化类型';""",
+    """COMMENT ON COLUMN inventory_log.change_quantity IS '变化数量';""",
+    """COMMENT ON COLUMN inventory_log.change_date IS '变化时间';""",
+    """COMMENT ON COLUMN inventory_log.related_id IS '关联单据编号';""",
+    """COMMENT ON COLUMN inventory_log.note IS '备注';""",
+    """COMMENT ON COLUMN inventory_log.customer IS '客户名称';""",
+    """CREATE TABLE user_permission (
+	user_id INTEGER NOT NULL,
+	permission_id INTEGER NOT NULL,
+	PRIMARY KEY (user_id, permission_id),
+	FOREIGN KEY(user_id) REFERENCES "user" (id),
+	FOREIGN KEY(permission_id) REFERENCES permission (id)
+);""",
+    """CREATE TABLE purchase_order (
+	id SERIAL NOT NULL,
+	order_no VARCHAR(30) NOT NULL,
+	supplier_id INTEGER,
+	supplier_name VARCHAR(100),
+	supplier_contact_person VARCHAR(50),
+	supplier_phone VARCHAR(20),
+	supplier_address VARCHAR(200),
+	customer_id INTEGER,
+	customer_name VARCHAR(100),
+	customer_code VARCHAR(50),
+	order_date DATE,
+	status VARCHAR(20),
+	remark TEXT,
+	source_order_id INTEGER,
+	source_order_ids TEXT,
+	product_name VARCHAR(200),
+	product_quantity NUMERIC(12, 2),
+	create_time TIMESTAMP WITHOUT TIME ZONE,
+	update_time TIMESTAMP WITHOUT TIME ZONE,
+	created_by INTEGER,
+	completed_at TIMESTAMP WITHOUT TIME ZONE,
+	completed_by VARCHAR(50),
+	PRIMARY KEY (id),
+	FOREIGN KEY(supplier_id) REFERENCES supplier (id),
+	FOREIGN KEY(customer_id) REFERENCES customer (id),
+	FOREIGN KEY(created_by) REFERENCES "user" (id)
+);""",
+    """CREATE INDEX idx_purchase_order_date ON purchase_order (order_date);""",
+    """CREATE INDEX idx_purchase_order_supplier ON purchase_order (supplier_id);""",
+    """CREATE INDEX idx_purchase_order_customer ON purchase_order (customer_id);""",
+    """CREATE INDEX idx_purchase_order_status ON purchase_order (status);""",
+    """CREATE UNIQUE INDEX ix_purchase_order_order_no ON purchase_order (order_no);""",
+    """COMMENT ON COLUMN purchase_order.order_no IS '订单编号';""",
+    """COMMENT ON COLUMN purchase_order.supplier_id IS '供应商ID';""",
+    """COMMENT ON COLUMN purchase_order.supplier_name IS '供应商名称(冗余)';""",
+    """COMMENT ON COLUMN purchase_order.supplier_contact_person IS '供应商联系人(冗余)';""",
+    """COMMENT ON COLUMN purchase_order.supplier_phone IS '供应商电话(冗余)';""",
+    """COMMENT ON COLUMN purchase_order.supplier_address IS '供应商地址(冗余)';""",
+    """COMMENT ON COLUMN purchase_order.customer_id IS '客户ID';""",
+    """COMMENT ON COLUMN purchase_order.customer_name IS '客户名称(冗余)';""",
+    """COMMENT ON COLUMN purchase_order.customer_code IS '客户编码';""",
+    """COMMENT ON COLUMN purchase_order.order_date IS '下单日期';""",
+    """COMMENT ON COLUMN purchase_order.status IS '状态';""",
+    """COMMENT ON COLUMN purchase_order.remark IS '备注';""",
+    """COMMENT ON COLUMN purchase_order.source_order_id IS '关联的原始订单ID(单)';""",
+    """COMMENT ON COLUMN purchase_order.source_order_ids IS '关联的原始订单IDs(JSON数组)';""",
+    """COMMENT ON COLUMN purchase_order.product_name IS '产品名称';""",
+    """COMMENT ON COLUMN purchase_order.product_quantity IS '订单数量';""",
+    """COMMENT ON COLUMN purchase_order.create_time IS '创建时间';""",
+    """COMMENT ON COLUMN purchase_order.update_time IS '更新时间';""",
+    """COMMENT ON COLUMN purchase_order.created_by IS '创建人';""",
+    """COMMENT ON COLUMN purchase_order.completed_at IS '完成时间';""",
+    """COMMENT ON COLUMN purchase_order.completed_by IS '完成人';""",
+    """CREATE TABLE staging_order (
+	id SERIAL NOT NULL,
+	session_id VARCHAR(64) NOT NULL,
+	customer VARCHAR(100) NOT NULL,
+	order_date TIMESTAMP WITHOUT TIME ZONE,
+	product_name VARCHAR(200) NOT NULL,
+	product_barcode VARCHAR(50),
+	product_id INTEGER,
+	quantity INTEGER NOT NULL,
+	deduct_stock BOOLEAN,
+	deduct_quantity INTEGER,
+	note TEXT,
+	order_type VARCHAR(20) NOT NULL,
+	country VARCHAR(100),
+	status VARCHAR(20),
+	is_validated BOOLEAN,
+	validation_error VARCHAR(500),
+	created_at TIMESTAMP WITHOUT TIME ZONE,
+	updated_at TIMESTAMP WITHOUT TIME ZONE,
+	import_batch_id VARCHAR(64),
+	PRIMARY KEY (id),
+	FOREIGN KEY(product_id) REFERENCES product (id)
+);""",
+    """CREATE INDEX idx_staging_status ON staging_order (status);""",
+    """CREATE INDEX idx_staging_session ON staging_order (session_id);""",
+    """CREATE INDEX idx_staging_created ON staging_order (created_at);""",
+    """CREATE INDEX ix_staging_order_session_id ON staging_order (session_id);""",
+    """CREATE INDEX ix_staging_order_import_batch_id ON staging_order (import_batch_id);""",
+    """CREATE INDEX ix_staging_order_customer ON staging_order (customer);""",
+    """COMMENT ON COLUMN staging_order.session_id IS '会话ID，用于标识同一批导入';""",
+    """COMMENT ON COLUMN staging_order.customer IS '客户名称';""",
+    """COMMENT ON COLUMN staging_order.order_date IS '下单时间';""",
+    """COMMENT ON COLUMN staging_order.product_name IS '产品名称（冗余存储）';""",
+    """COMMENT ON COLUMN staging_order.product_barcode IS '产品69码（冗余存储）';""",
+    """COMMENT ON COLUMN staging_order.product_id IS '产品ID（确认后填充）';""",
+    """COMMENT ON COLUMN staging_order.quantity IS '订单数量';""",
+    """COMMENT ON COLUMN staging_order.deduct_stock IS '是否抵扣备货';""",
+    """COMMENT ON COLUMN staging_order.deduct_quantity IS '抵扣备货数量';""",
+    """COMMENT ON COLUMN staging_order.note IS '备注';""",
+    """COMMENT ON COLUMN staging_order.order_type IS '订单类型：regular=常规订单, custom=定制订单';""",
+    """COMMENT ON COLUMN staging_order.country IS '国家名称（仅定制订单使用）';""",
+    """COMMENT ON COLUMN staging_order.status IS '状态：pending=待审核, approved=已确认, rejected=已拒绝';""",
+    """COMMENT ON COLUMN staging_order.is_validated IS '是否已验证产品存在';""",
+    """COMMENT ON COLUMN staging_order.validation_error IS '验证错误信息';""",
+    """COMMENT ON COLUMN staging_order.created_at IS '创建时间';""",
+    """COMMENT ON COLUMN staging_order.updated_at IS '更新时间';""",
+    """COMMENT ON COLUMN staging_order.import_batch_id IS '导入批次ID';""",
+    """CREATE TABLE staging_stock_in (
+	id SERIAL NOT NULL,
+	session_id VARCHAR(64) NOT NULL,
+	customer VARCHAR(100) NOT NULL,
+	stockin_date TIMESTAMP WITHOUT TIME ZONE,
+	product_name VARCHAR(200) NOT NULL,
+	product_barcode VARCHAR(50),
+	product_id INTEGER,
+	quantity INTEGER NOT NULL,
+	note TEXT,
+	status VARCHAR(20),
+	is_validated BOOLEAN,
+	validation_error VARCHAR(500),
+	created_at TIMESTAMP WITHOUT TIME ZONE,
+	updated_at TIMESTAMP WITHOUT TIME ZONE,
+	PRIMARY KEY (id),
+	FOREIGN KEY(product_id) REFERENCES product (id)
+);""",
+    """CREATE INDEX idx_staging_stockin_session ON staging_stock_in (session_id);""",
+    """CREATE INDEX idx_staging_stockin_status ON staging_stock_in (status);""",
+    """CREATE INDEX ix_staging_stock_in_session_id ON staging_stock_in (session_id);""",
+    """CREATE INDEX idx_staging_stockin_created ON staging_stock_in (created_at);""",
+    """CREATE INDEX ix_staging_stock_in_customer ON staging_stock_in (customer);""",
+    """COMMENT ON COLUMN staging_stock_in.session_id IS '会话ID，用于标识同一批导入';""",
+    """COMMENT ON COLUMN staging_stock_in.customer IS '客户名称';""",
+    """COMMENT ON COLUMN staging_stock_in.stockin_date IS '备货时间';""",
+    """COMMENT ON COLUMN staging_stock_in.product_name IS '产品名称（冗余存储）';""",
+    """COMMENT ON COLUMN staging_stock_in.product_barcode IS '产品69码（冗余存储）';""",
+    """COMMENT ON COLUMN staging_stock_in.product_id IS '产品ID（确认后填充）';""",
+    """COMMENT ON COLUMN staging_stock_in.quantity IS '备货数量';""",
+    """COMMENT ON COLUMN staging_stock_in.note IS '备注';""",
+    """COMMENT ON COLUMN staging_stock_in.status IS '状态：pending=待审核, approved=已确认, rejected=已拒绝';""",
+    """COMMENT ON COLUMN staging_stock_in.is_validated IS '是否已验证产品存在';""",
+    """COMMENT ON COLUMN staging_stock_in.validation_error IS '验证错误信息';""",
+    """COMMENT ON COLUMN staging_stock_in.created_at IS '创建时间';""",
+    """COMMENT ON COLUMN staging_stock_in.updated_at IS '更新时间';""",
+    """CREATE TABLE staging_stock_out (
+	id SERIAL NOT NULL,
+	session_id VARCHAR(64) NOT NULL,
+	customer VARCHAR(100),
+	stockout_date TIMESTAMP WITHOUT TIME ZONE,
+	product_name VARCHAR(200) NOT NULL,
+	product_barcode VARCHAR(50),
+	product_id INTEGER,
+	quantity INTEGER NOT NULL,
+	note TEXT,
+	order_type VARCHAR(20),
+	country VARCHAR(100),
+	status VARCHAR(20),
+	is_validated BOOLEAN,
+	validation_error VARCHAR(500),
+	stock_check_passed BOOLEAN,
+	stock_check_message VARCHAR(500),
+	created_at TIMESTAMP WITHOUT TIME ZONE,
+	updated_at TIMESTAMP WITHOUT TIME ZONE,
+	PRIMARY KEY (id),
+	FOREIGN KEY(product_id) REFERENCES product (id)
+);""",
+    """CREATE INDEX idx_staging_stockout_created ON staging_stock_out (created_at);""",
+    """CREATE INDEX ix_staging_stock_out_customer ON staging_stock_out (customer);""",
+    """CREATE INDEX idx_staging_stockout_session ON staging_stock_out (session_id);""",
+    """CREATE INDEX ix_staging_stock_out_session_id ON staging_stock_out (session_id);""",
+    """CREATE INDEX idx_staging_stockout_status ON staging_stock_out (status);""",
+    """COMMENT ON COLUMN staging_stock_out.session_id IS '会话ID，用于标识同一批导入';""",
+    """COMMENT ON COLUMN staging_stock_out.customer IS '客户名称';""",
+    """COMMENT ON COLUMN staging_stock_out.stockout_date IS '出货时间';""",
+    """COMMENT ON COLUMN staging_stock_out.product_name IS '产品名称（冗余存储）';""",
+    """COMMENT ON COLUMN staging_stock_out.product_barcode IS '产品69码（冗余存储）';""",
+    """COMMENT ON COLUMN staging_stock_out.product_id IS '产品ID（确认后填充）';""",
+    """COMMENT ON COLUMN staging_stock_out.quantity IS '出货数量';""",
+    """COMMENT ON COLUMN staging_stock_out.note IS '备注';""",
+    """COMMENT ON COLUMN staging_stock_out.order_type IS '订单类型：regular=常规订单, custom=定制订单';""",
+    """COMMENT ON COLUMN staging_stock_out.country IS '国家名称（仅定制订单使用）';""",
+    """COMMENT ON COLUMN staging_stock_out.status IS '状态：pending=待审核, approved=已确认, rejected=已拒绝';""",
+    """COMMENT ON COLUMN staging_stock_out.is_validated IS '是否已验证产品存在';""",
+    """COMMENT ON COLUMN staging_stock_out.validation_error IS '验证错误信息';""",
+    """COMMENT ON COLUMN staging_stock_out.stock_check_passed IS '库存检查是否通过';""",
+    """COMMENT ON COLUMN staging_stock_out.stock_check_message IS '库存检查信息';""",
+    """COMMENT ON COLUMN staging_stock_out.created_at IS '创建时间';""",
+    """COMMENT ON COLUMN staging_stock_out.updated_at IS '更新时间';""",
+    """CREATE TABLE order_sync_config (
+	id SERIAL NOT NULL,
+	config_key VARCHAR(100) NOT NULL,
+	config_value TEXT,
+	description VARCHAR(255),
+	updated_at TIMESTAMP WITHOUT TIME ZONE,
+	updated_by_id INTEGER,
+	PRIMARY KEY (id),
+	UNIQUE (config_key),
+	FOREIGN KEY(updated_by_id) REFERENCES "user" (id)
+);""",
+    """COMMENT ON COLUMN order_sync_config.config_key IS '配置键';""",
+    """COMMENT ON COLUMN order_sync_config.config_value IS '配置值';""",
+    """COMMENT ON COLUMN order_sync_config.description IS '配置描述';""",
+    """COMMENT ON COLUMN order_sync_config.updated_at IS '更新时间';""",
+    """COMMENT ON COLUMN order_sync_config.updated_by_id IS '更新人ID';""",
+    """CREATE TABLE "case" (
+	id SERIAL NOT NULL,
+	product_id INTEGER,
+	name VARCHAR(100) NOT NULL,
+	barcode VARCHAR(50),
+	image VARCHAR(200),
+	initial_stock INTEGER NOT NULL,
+	current_stock INTEGER NOT NULL,
+	version INTEGER DEFAULT '0' NOT NULL,
+	create_time TIMESTAMP WITHOUT TIME ZONE,
+	PRIMARY KEY (id),
+	FOREIGN KEY(product_id) REFERENCES product (id)
+);""",
+    """CREATE INDEX idx_case_product ON "case" (product_id);""",
+    """CREATE INDEX ix_case_name ON "case" (name);""",
+    """CREATE INDEX ix_case_create_time ON "case" (create_time);""",
+    """CREATE INDEX idx_case_barcode ON "case" (barcode);""",
+    """CREATE INDEX ix_case_product_id ON "case" (product_id);""",
+    """CREATE INDEX ix_case_barcode ON "case" (barcode);""",
+    """CREATE TABLE product_fabric (
+	id SERIAL NOT NULL,
+	product_id INTEGER NOT NULL,
+	material_code VARCHAR(50),
+	fabric_name VARCHAR(100) NOT NULL,
+	specification VARCHAR(100),
+	quantity NUMERIC(10, 4) NOT NULL,
+	supplier_id INTEGER,
+	supplier_name VARCHAR(100),
+	unit VARCHAR(20),
+	remark TEXT,
+	create_time TIMESTAMP WITHOUT TIME ZONE,
+	update_time TIMESTAMP WITHOUT TIME ZONE,
+	PRIMARY KEY (id),
+	FOREIGN KEY(product_id) REFERENCES product (id),
+	FOREIGN KEY(supplier_id) REFERENCES supplier (id)
+);""",
+    """CREATE INDEX idx_product_fabric_product ON product_fabric (product_id);""",
+    """COMMENT ON COLUMN product_fabric.product_id IS '关联产品ID';""",
+    """COMMENT ON COLUMN product_fabric.material_code IS '物料编码';""",
+    """COMMENT ON COLUMN product_fabric.fabric_name IS '布料名称';""",
+    """COMMENT ON COLUMN product_fabric.specification IS '规格型号';""",
+    """COMMENT ON COLUMN product_fabric.quantity IS '布料码数/数量(单SKU标准用量)';""",
+    """COMMENT ON COLUMN product_fabric.supplier_id IS '默认供应商ID';""",
+    """COMMENT ON COLUMN product_fabric.supplier_name IS '供应商名称(冗余)';""",
+    """COMMENT ON COLUMN product_fabric.unit IS '单位';""",
+    """COMMENT ON COLUMN product_fabric.remark IS '备注';""",
+    """COMMENT ON COLUMN product_fabric.create_time IS '创建时间';""",
+    """COMMENT ON COLUMN product_fabric.update_time IS '更新时间';""",
+    """CREATE TABLE product_material (
+	id SERIAL NOT NULL,
+	product_id INTEGER NOT NULL,
+	material_code VARCHAR(50),
+	cotton_usage NUMERIC(10, 4),
+	specification VARCHAR(100),
+	supplier_id INTEGER,
+	supplier_name VARCHAR(100),
+	unit VARCHAR(20),
+	remark TEXT,
+	create_time TIMESTAMP WITHOUT TIME ZONE,
+	update_time TIMESTAMP WITHOUT TIME ZONE,
+	PRIMARY KEY (id),
+	UNIQUE (product_id),
+	FOREIGN KEY(product_id) REFERENCES product (id),
+	FOREIGN KEY(supplier_id) REFERENCES supplier (id)
+);""",
+    """CREATE INDEX idx_product_material_product ON product_material (product_id);""",
+    """COMMENT ON COLUMN product_material.product_id IS '关联产品ID';""",
+    """COMMENT ON COLUMN product_material.material_code IS '物料编码';""",
+    """COMMENT ON COLUMN product_material.cotton_usage IS '棉花用量（克）- 单SKU标准用量';""",
+    """COMMENT ON COLUMN product_material.specification IS '规格型号';""",
+    """COMMENT ON COLUMN product_material.supplier_id IS '默认供应商ID';""",
+    """COMMENT ON COLUMN product_material.supplier_name IS '供应商名称(冗余)';""",
+    """COMMENT ON COLUMN product_material.unit IS '单位';""",
+    """COMMENT ON COLUMN product_material.remark IS '备注';""",
+    """COMMENT ON COLUMN product_material.create_time IS '创建时间';""",
+    """COMMENT ON COLUMN product_material.update_time IS '更新时间';""",
+    """CREATE TABLE product_accessory (
+	id SERIAL NOT NULL,
+	product_id INTEGER NOT NULL,
+	material_code VARCHAR(50),
+	accessory_name VARCHAR(100) NOT NULL,
+	specification VARCHAR(100),
+	quantity NUMERIC(10, 4) NOT NULL,
+	supplier_id INTEGER,
+	supplier_name VARCHAR(100),
+	unit VARCHAR(20),
+	material_category VARCHAR(20),
+	remark TEXT,
+	create_time TIMESTAMP WITHOUT TIME ZONE,
+	update_time TIMESTAMP WITHOUT TIME ZONE,
+	PRIMARY KEY (id),
+	FOREIGN KEY(product_id) REFERENCES product (id),
+	FOREIGN KEY(supplier_id) REFERENCES supplier (id)
+);""",
+    """CREATE INDEX idx_product_accessory_product ON product_accessory (product_id);""",
+    """COMMENT ON COLUMN product_accessory.product_id IS '关联产品ID';""",
+    """COMMENT ON COLUMN product_accessory.material_code IS '物料编码';""",
+    """COMMENT ON COLUMN product_accessory.accessory_name IS '配件名称';""",
+    """COMMENT ON COLUMN product_accessory.specification IS '规格型号';""",
+    """COMMENT ON COLUMN product_accessory.quantity IS '数量(单SKU标准用量)';""",
+    """COMMENT ON COLUMN product_accessory.supplier_id IS '默认供应商ID';""",
+    """COMMENT ON COLUMN product_accessory.supplier_name IS '供应商名称(冗余)';""",
+    """COMMENT ON COLUMN product_accessory.unit IS '单位';""",
+    """COMMENT ON COLUMN product_accessory.material_category IS '物料分类: accessory/packaging';""",
+    """COMMENT ON COLUMN product_accessory.remark IS '备注';""",
+    """COMMENT ON COLUMN product_accessory.create_time IS '创建时间';""",
+    """COMMENT ON COLUMN product_accessory.update_time IS '更新时间';""",
+    """CREATE TABLE product_packaging (
+	id SERIAL NOT NULL,
+	product_id INTEGER NOT NULL,
+	material_code VARCHAR(50),
+	packaging_name VARCHAR(100) NOT NULL,
+	specification VARCHAR(100),
+	quantity NUMERIC(10, 4) NOT NULL,
+	supplier_id INTEGER,
+	supplier_name VARCHAR(100),
+	unit VARCHAR(20),
+	remark TEXT,
+	create_time TIMESTAMP WITHOUT TIME ZONE,
+	update_time TIMESTAMP WITHOUT TIME ZONE,
+	PRIMARY KEY (id),
+	FOREIGN KEY(product_id) REFERENCES product (id),
+	FOREIGN KEY(supplier_id) REFERENCES supplier (id)
+);""",
+    """CREATE INDEX idx_product_packaging_product ON product_packaging (product_id);""",
+    """COMMENT ON COLUMN product_packaging.product_id IS '关联产品ID';""",
+    """COMMENT ON COLUMN product_packaging.material_code IS '物料编码';""",
+    """COMMENT ON COLUMN product_packaging.packaging_name IS '包装材料名称';""",
+    """COMMENT ON COLUMN product_packaging.specification IS '规格型号';""",
+    """COMMENT ON COLUMN product_packaging.quantity IS '数量(单SKU标准用量)';""",
+    """COMMENT ON COLUMN product_packaging.supplier_id IS '默认供应商ID';""",
+    """COMMENT ON COLUMN product_packaging.supplier_name IS '供应商名称(冗余)';""",
+    """COMMENT ON COLUMN product_packaging.unit IS '单位';""",
+    """COMMENT ON COLUMN product_packaging.remark IS '备注';""",
+    """COMMENT ON COLUMN product_packaging.create_time IS '创建时间';""",
+    """COMMENT ON COLUMN product_packaging.update_time IS '更新时间';""",
+    """CREATE TABLE modification_log (
+	id SERIAL NOT NULL,
+	target_type VARCHAR(50) NOT NULL,
+	target_id INTEGER NOT NULL,
+	field_name VARCHAR(100) NOT NULL,
+	old_value TEXT,
+	new_value TEXT,
+	modifier_id INTEGER,
+	modifier_name VARCHAR(100),
+	modify_time TIMESTAMP WITHOUT TIME ZONE,
+	modify_reason TEXT,
+	PRIMARY KEY (id),
+	FOREIGN KEY(modifier_id) REFERENCES "user" (id)
+);""",
+    """CREATE INDEX ix_modification_log_target_type ON modification_log (target_type);""",
+    """CREATE INDEX idx_mod_target ON modification_log (target_type, target_id);""",
+    """CREATE INDEX ix_modification_log_target_id ON modification_log (target_id);""",
+    """CREATE INDEX idx_mod_time ON modification_log (modify_time);""",
+    """CREATE INDEX ix_modification_log_modify_time ON modification_log (modify_time);""",
+    """COMMENT ON COLUMN modification_log.target_type IS '目标类型: purchase_order/purchase_order_item/material';""",
+    """COMMENT ON COLUMN modification_log.target_id IS '目标ID';""",
+    """COMMENT ON COLUMN modification_log.field_name IS '字段名称';""",
+    """COMMENT ON COLUMN modification_log.old_value IS '修改前值';""",
+    """COMMENT ON COLUMN modification_log.new_value IS '修改后值';""",
+    """COMMENT ON COLUMN modification_log.modifier_id IS '修改人ID';""",
+    """COMMENT ON COLUMN modification_log.modifier_name IS '修改人姓名';""",
+    """COMMENT ON COLUMN modification_log.modify_time IS '修改时间';""",
+    """COMMENT ON COLUMN modification_log.modify_reason IS '修改原因';""",
+    """CREATE TABLE saved_query (
+	id SERIAL NOT NULL,
+	name VARCHAR(100) NOT NULL,
+	query_type VARCHAR(50) NOT NULL,
+	conditions TEXT NOT NULL,
+	creator_id INTEGER,
+	creator_name VARCHAR(100),
+	create_time TIMESTAMP WITHOUT TIME ZONE,
+	use_count INTEGER,
+	last_use_time TIMESTAMP WITHOUT TIME ZONE,
+	PRIMARY KEY (id),
+	FOREIGN KEY(creator_id) REFERENCES "user" (id)
+);""",
+    """CREATE INDEX idx_saved_query_type ON saved_query (query_type);""",
+    """CREATE INDEX idx_saved_query_creator ON saved_query (creator_id);""",
+    """CREATE INDEX ix_saved_query_query_type ON saved_query (query_type);""",
+    """COMMENT ON COLUMN saved_query.name IS '查询名称';""",
+    """COMMENT ON COLUMN saved_query.query_type IS '查询类型: purchase_order/material';""",
+    """COMMENT ON COLUMN saved_query.conditions IS '查询条件JSON';""",
+    """COMMENT ON COLUMN saved_query.creator_id IS '创建人ID';""",
+    """COMMENT ON COLUMN saved_query.creator_name IS '创建人姓名';""",
+    """COMMENT ON COLUMN saved_query.create_time IS '创建时间';""",
+    """COMMENT ON COLUMN saved_query.use_count IS '使用次数';""",
+    """COMMENT ON COLUMN saved_query.last_use_time IS '最后使用时间';""",
+    """CREATE TABLE order_status_log (
+	id SERIAL NOT NULL,
+	target_type VARCHAR(50) NOT NULL,
+	target_id INTEGER NOT NULL,
+	order_no VARCHAR(20),
+	from_status VARCHAR(50),
+	to_status VARCHAR(50) NOT NULL,
+	action VARCHAR(50) NOT NULL,
+	action_label VARCHAR(100),
+	operator_id INTEGER,
+	operator_name VARCHAR(100),
+	action_time TIMESTAMP WITHOUT TIME ZONE,
+	action_result VARCHAR(20),
+	remark TEXT,
+	related_data TEXT,
+	PRIMARY KEY (id),
+	FOREIGN KEY(operator_id) REFERENCES "user" (id)
+);""",
+    """CREATE INDEX idx_status_target ON order_status_log (target_type, target_id);""",
+    """CREATE INDEX ix_order_status_log_target_type ON order_status_log (target_type);""",
+    """CREATE INDEX idx_status_time ON order_status_log (action_time);""",
+    """CREATE INDEX ix_order_status_log_action_time ON order_status_log (action_time);""",
+    """CREATE INDEX ix_order_status_log_target_id ON order_status_log (target_id);""",
+    """CREATE INDEX idx_status_order ON order_status_log (order_no);""",
+    """COMMENT ON COLUMN order_status_log.target_type IS '目标类型: unprocessed_order/purchase_order';""",
+    """COMMENT ON COLUMN order_status_log.target_id IS '目标ID';""",
+    """COMMENT ON COLUMN order_status_log.order_no IS '订单编号';""",
+    """COMMENT ON COLUMN order_status_log.from_status IS '变更前状态';""",
+    """COMMENT ON COLUMN order_status_log.to_status IS '变更后状态';""",
+    """COMMENT ON COLUMN order_status_log.action IS '操作类型: start_process/complete/ignore/reopen';""",
+    """COMMENT ON COLUMN order_status_log.action_label IS '操作标签(中文)';""",
+    """COMMENT ON COLUMN order_status_log.operator_id IS '操作人ID';""",
+    """COMMENT ON COLUMN order_status_log.operator_name IS '操作人姓名';""",
+    """COMMENT ON COLUMN order_status_log.action_time IS '操作时间';""",
+    """COMMENT ON COLUMN order_status_log.action_result IS '操作结果: success/failed';""",
+    """COMMENT ON COLUMN order_status_log.remark IS '备注说明';""",
+    """COMMENT ON COLUMN order_status_log.related_data IS '关联数据JSON';""",
+    """CREATE TABLE customer_access_log (
+	id SERIAL NOT NULL,
+	customer_id INTEGER,
+	customer_name VARCHAR(100) NOT NULL,
+	module VARCHAR(50) NOT NULL,
+	action VARCHAR(50) NOT NULL,
+	related_id INTEGER,
+	related_no VARCHAR(50),
+	quantity INTEGER NOT NULL,
+	status VARCHAR(20) NOT NULL,
+	error_message TEXT,
+	user_id INTEGER,
+	access_time TIMESTAMP WITHOUT TIME ZONE,
+	ip_address VARCHAR(50),
+	PRIMARY KEY (id),
+	FOREIGN KEY(customer_id) REFERENCES customer (id),
+	FOREIGN KEY(user_id) REFERENCES "user" (id)
+);""",
+    """CREATE INDEX idx_customer_access_name_time ON customer_access_log (customer_name, access_time);""",
+    """CREATE INDEX idx_customer_access_module_time ON customer_access_log (module, access_time);""",
+    """COMMENT ON COLUMN customer_access_log.customer_id IS '客户ID';""",
+    """COMMENT ON COLUMN customer_access_log.customer_name IS '客户名称';""",
+    """COMMENT ON COLUMN customer_access_log.module IS '模块名称';""",
+    """COMMENT ON COLUMN customer_access_log.action IS '操作类型';""",
+    """COMMENT ON COLUMN customer_access_log.related_id IS '关联记录ID';""",
+    """COMMENT ON COLUMN customer_access_log.related_no IS '关联单号';""",
+    """COMMENT ON COLUMN customer_access_log.quantity IS '数量';""",
+    """COMMENT ON COLUMN customer_access_log.status IS '状态';""",
+    """COMMENT ON COLUMN customer_access_log.error_message IS '错误信息';""",
+    """COMMENT ON COLUMN customer_access_log.user_id IS '操作用户ID';""",
+    """COMMENT ON COLUMN customer_access_log.access_time IS '接入时间';""",
+    """COMMENT ON COLUMN customer_access_log.ip_address IS 'IP地址';""",
+    """CREATE TABLE purchase_plans (
+	id SERIAL NOT NULL,
+	plan_no VARCHAR(32) NOT NULL,
+	plan_month VARCHAR(7) NOT NULL,
+	customer_id INTEGER NOT NULL,
+	customer_name VARCHAR(100) NOT NULL,
+	status VARCHAR(20) NOT NULL,
+	remark TEXT,
+	upload_batch VARCHAR(64),
+	created_by VARCHAR(50),
+	create_time TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+	update_time TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+	PRIMARY KEY (id),
+	UNIQUE (plan_no),
+	FOREIGN KEY(customer_id) REFERENCES customer (id)
+);""",
+    """CREATE INDEX idx_ppl_status ON purchase_plans (status);""",
+    """CREATE INDEX idx_ppl_upload_batch ON purchase_plans (upload_batch);""",
+    """CREATE INDEX idx_ppl_plan_month ON purchase_plans (plan_month);""",
+    """CREATE INDEX idx_ppl_customer_id ON purchase_plans (customer_id);""",
+    """COMMENT ON COLUMN purchase_plans.plan_no IS '计划编号 PP-YYYYMMDD-NNNN';""",
+    """COMMENT ON COLUMN purchase_plans.plan_month IS '计划月份 YYYY-MM';""",
+    """COMMENT ON COLUMN purchase_plans.customer_id IS '客户ID';""",
+    """COMMENT ON COLUMN purchase_plans.customer_name IS '客户名称(冗余)';""",
+    """COMMENT ON COLUMN purchase_plans.status IS '状态: pending/confirmed/completed/cancelled';""",
+    """COMMENT ON COLUMN purchase_plans.remark IS '备注';""",
+    """COMMENT ON COLUMN purchase_plans.upload_batch IS '上传批次ID';""",
+    """COMMENT ON COLUMN purchase_plans.created_by IS '创建人';""",
+    """COMMENT ON COLUMN purchase_plans.create_time IS '创建时间';""",
+    """COMMENT ON COLUMN purchase_plans.update_time IS '更新时间';""",
+    """CREATE TABLE stock_out (
+	id SERIAL NOT NULL,
+	stockout_no VARCHAR(20) NOT NULL,
+	stockout_date TIMESTAMP WITHOUT TIME ZONE,
+	product_id INTEGER NOT NULL,
+	quantity INTEGER NOT NULL,
+	customer VARCHAR(100),
+	order_id INTEGER,
+	stockin_id INTEGER,
+	note TEXT,
+	PRIMARY KEY (id),
+	UNIQUE (stockout_no),
+	FOREIGN KEY(product_id) REFERENCES product (id),
+	FOREIGN KEY(order_id) REFERENCES "order" (id) ON DELETE CASCADE,
+	FOREIGN KEY(stockin_id) REFERENCES stock_in (id) ON DELETE SET NULL
+);""",
+    """CREATE INDEX idx_stockout_customer_date ON stock_out (customer, stockout_date);""",
+    """CREATE INDEX idx_stockout_stockin ON stock_out (stockin_id);""",
+    """CREATE INDEX idx_stockout_product_customer_type ON stock_out (product_id, customer, stockin_id);""",
+    """CREATE INDEX idx_stockout_order ON stock_out (order_id);""",
+    """CREATE INDEX idx_stockout_order_type ON stock_out (order_id, stockin_id);""",
+    """CREATE INDEX idx_stockout_product_date ON stock_out (product_id, stockout_date);""",
+    """COMMENT ON COLUMN stock_out.stockout_no IS '出货编号';""",
+    """COMMENT ON COLUMN stock_out.stockout_date IS '出货时间';""",
+    """COMMENT ON COLUMN stock_out.product_id IS '产品ID';""",
+    """COMMENT ON COLUMN stock_out.quantity IS '出货数量';""",
+    """COMMENT ON COLUMN stock_out.customer IS '客户名称';""",
+    """COMMENT ON COLUMN stock_out.order_id IS '关联订单ID';""",
+    """COMMENT ON COLUMN stock_out.stockin_id IS '关联备货ID';""",
+    """COMMENT ON COLUMN stock_out.note IS '备注';""",
+    """CREATE TABLE purchase_order_item (
+	id SERIAL NOT NULL,
+	order_id INTEGER NOT NULL,
+	product_name VARCHAR(200),
+	barcode VARCHAR(50),
+	customer_name VARCHAR(100),
+	material_code VARCHAR(50),
+	material_name VARCHAR(100) NOT NULL,
+	specification VARCHAR(100),
+	unit VARCHAR(20),
+	quantity NUMERIC(12, 2) NOT NULL,
+	unit_usage NUMERIC(10, 4),
+	unit_price NUMERIC(12, 2),
+	total_price NUMERIC(12, 2),
+	material_category VARCHAR(20),
+	remark TEXT,
+	supplier_name VARCHAR(100),
+	create_time TIMESTAMP WITHOUT TIME ZONE,
+	PRIMARY KEY (id),
+	FOREIGN KEY(order_id) REFERENCES purchase_order (id)
+);""",
+    """CREATE INDEX idx_purchase_order_item_material ON purchase_order_item (material_name);""",
+    """CREATE INDEX idx_purchase_order_item_order ON purchase_order_item (order_id);""",
+    """COMMENT ON COLUMN purchase_order_item.order_id IS '采购订单ID';""",
+    """COMMENT ON COLUMN purchase_order_item.product_name IS '产品名称';""",
+    """COMMENT ON COLUMN purchase_order_item.barcode IS '产品条码';""",
+    """COMMENT ON COLUMN purchase_order_item.customer_name IS '客户名称';""",
+    """COMMENT ON COLUMN purchase_order_item.material_code IS '物料编码';""",
+    """COMMENT ON COLUMN purchase_order_item.material_name IS '物料名称';""",
+    """COMMENT ON COLUMN purchase_order_item.specification IS '规格型号';""",
+    """COMMENT ON COLUMN purchase_order_item.unit IS '计量单位';""",
+    """COMMENT ON COLUMN purchase_order_item.quantity IS '采购数量';""",
+    """COMMENT ON COLUMN purchase_order_item.unit_usage IS '单SKU标准用量';""",
+    """COMMENT ON COLUMN purchase_order_item.unit_price IS '单价';""",
+    """COMMENT ON COLUMN purchase_order_item.total_price IS '总价';""",
+    """COMMENT ON COLUMN purchase_order_item.material_category IS '物料分类';""",
+    """COMMENT ON COLUMN purchase_order_item.remark IS '备注';""",
+    """COMMENT ON COLUMN purchase_order_item.supplier_name IS '供应商名称(明细级)';""",
+    """COMMENT ON COLUMN purchase_order_item.create_time IS '创建时间';""",
+    """CREATE TABLE approval_request (
+	id SERIAL NOT NULL,
+	order_id INTEGER NOT NULL,
+	requester_id INTEGER NOT NULL,
+	operation_type VARCHAR(20) NOT NULL,
+	operation_data TEXT,
+	status VARCHAR(20) NOT NULL,
+	request_time TIMESTAMP WITHOUT TIME ZONE,
+	approver_id INTEGER,
+	approval_time TIMESTAMP WITHOUT TIME ZONE,
+	rejection_reason TEXT,
+	lock_time TIMESTAMP WITHOUT TIME ZONE,
+	PRIMARY KEY (id),
+	FOREIGN KEY(order_id) REFERENCES "order" (id),
+	FOREIGN KEY(requester_id) REFERENCES "user" (id),
+	FOREIGN KEY(approver_id) REFERENCES "user" (id)
+);""",
+    """CREATE INDEX ix_approval_request_request_time ON approval_request (request_time);""",
+    """CREATE INDEX idx_approval_request_requester ON approval_request (requester_id);""",
+    """CREATE INDEX idx_approval_request_order ON approval_request (order_id);""",
+    """CREATE INDEX ix_approval_request_status ON approval_request (status);""",
+    """CREATE INDEX idx_approval_status_time ON approval_request (status, request_time);""",
+    """COMMENT ON COLUMN approval_request.order_id IS '关联订单ID';""",
+    """COMMENT ON COLUMN approval_request.requester_id IS '申请人ID';""",
+    """COMMENT ON COLUMN approval_request.operation_type IS '操作类型：edit/delete';""",
+    """COMMENT ON COLUMN approval_request.operation_data IS '操作数据JSON';""",
+    """COMMENT ON COLUMN approval_request.status IS '状态：pending/approved/rejected/cancelled';""",
+    """COMMENT ON COLUMN approval_request.request_time IS '申请时间';""",
+    """COMMENT ON COLUMN approval_request.approver_id IS '审批人ID';""",
+    """COMMENT ON COLUMN approval_request.approval_time IS '审批时间';""",
+    """COMMENT ON COLUMN approval_request.rejection_reason IS '拒绝原因';""",
+    """COMMENT ON COLUMN approval_request.lock_time IS '锁定时间';""",
+    """CREATE TABLE case_stock_in (
+	id SERIAL NOT NULL,
+	stockin_no VARCHAR(20) NOT NULL,
+	stockin_date TIMESTAMP WITHOUT TIME ZONE,
+	customer VARCHAR(100) NOT NULL,
+	case_id INTEGER NOT NULL,
+	quantity INTEGER NOT NULL,
+	note TEXT,
+	PRIMARY KEY (id),
+	UNIQUE (stockin_no),
+	FOREIGN KEY(case_id) REFERENCES "case" (id)
+);""",
+    """CREATE INDEX idx_case_stockin_customer_date ON case_stock_in (customer, stockin_date);""",
+    """CREATE INDEX ix_case_stock_in_case_id ON case_stock_in (case_id);""",
+    """CREATE INDEX ix_case_stock_in_stockin_date ON case_stock_in (stockin_date);""",
+    """CREATE INDEX idx_case_stockin_case_date ON case_stock_in (case_id, stockin_date);""",
+    """CREATE INDEX ix_case_stock_in_customer ON case_stock_in (customer);""",
+    """CREATE INDEX idx_case_stockin_customer_case ON case_stock_in (customer, case_id);""",
+    """CREATE TABLE case_stock_out (
+	id SERIAL NOT NULL,
+	stockout_no VARCHAR(20) NOT NULL,
+	stockout_date TIMESTAMP WITHOUT TIME ZONE,
+	case_id INTEGER NOT NULL,
+	quantity INTEGER NOT NULL,
+	customer VARCHAR(100),
+	note TEXT,
+	PRIMARY KEY (id),
+	UNIQUE (stockout_no),
+	FOREIGN KEY(case_id) REFERENCES "case" (id)
+);""",
+    """CREATE INDEX ix_case_stock_out_customer ON case_stock_out (customer);""",
+    """CREATE INDEX ix_case_stock_out_case_id ON case_stock_out (case_id);""",
+    """CREATE INDEX idx_case_stockout_case_date ON case_stock_out (case_id, stockout_date);""",
+    """CREATE INDEX idx_case_stockout_customer_date ON case_stock_out (customer, stockout_date);""",
+    """CREATE INDEX ix_case_stock_out_stockout_date ON case_stock_out (stockout_date);""",
+    """CREATE TABLE case_inventory_log (
+	id SERIAL NOT NULL,
+	case_id INTEGER NOT NULL,
+	change_type VARCHAR(20) NOT NULL,
+	change_quantity INTEGER NOT NULL,
+	change_date TIMESTAMP WITHOUT TIME ZONE,
+	related_id VARCHAR(50),
+	note TEXT,
+	customer VARCHAR(100),
+	PRIMARY KEY (id),
+	FOREIGN KEY(case_id) REFERENCES "case" (id) ON DELETE CASCADE
+);""",
+    """CREATE INDEX ix_case_inventory_log_customer ON case_inventory_log (customer);""",
+    """CREATE INDEX ix_case_inventory_log_case_id ON case_inventory_log (case_id);""",
+    """CREATE INDEX idx_case_inventory_log_case_date ON case_inventory_log (case_id, change_date DESC);""",
+    """CREATE INDEX ix_case_inventory_log_change_date ON case_inventory_log (change_date);""",
+    """CREATE INDEX ix_case_inventory_log_change_type ON case_inventory_log (change_type);""",
+    """CREATE TABLE material_registration (
+	id SERIAL NOT NULL,
+	purchase_order_id INTEGER NOT NULL,
+	purchase_order_no VARCHAR(30) NOT NULL,
+	supplier_id INTEGER,
+	supplier_name VARCHAR(100),
+	registration_date DATE NOT NULL,
+	remark TEXT,
+	status VARCHAR(20) NOT NULL,
+	create_time TIMESTAMP WITHOUT TIME ZONE,
+	update_time TIMESTAMP WITHOUT TIME ZONE,
+	created_by INTEGER,
+	PRIMARY KEY (id),
+	FOREIGN KEY(purchase_order_id) REFERENCES purchase_order (id),
+	FOREIGN KEY(supplier_id) REFERENCES supplier (id),
+	FOREIGN KEY(created_by) REFERENCES "user" (id)
+);""",
+    """CREATE TABLE purchase_plan_details (
+	id SERIAL NOT NULL,
+	plan_id INTEGER NOT NULL,
+	product_id INTEGER NOT NULL,
+	product_name VARCHAR(100) NOT NULL,
+	barcode VARCHAR(50) NOT NULL,
+	plan_date DATE NOT NULL,
+	quantity INTEGER NOT NULL,
+	shipped_qty INTEGER NOT NULL,
+	remark TEXT,
+	PRIMARY KEY (id),
+	FOREIGN KEY(plan_id) REFERENCES purchase_plans (id) ON DELETE CASCADE,
+	FOREIGN KEY(product_id) REFERENCES product (id)
+);""",
+    """CREATE INDEX idx_ppd_plan_date_only ON purchase_plan_details (plan_date);""",
+    """CREATE INDEX idx_ppd_product_id ON purchase_plan_details (product_id);""",
+    """CREATE INDEX idx_ppd_plan_date ON purchase_plan_details (plan_id, plan_date);""",
+    """COMMENT ON COLUMN purchase_plan_details.plan_id IS '关联主单ID';""",
+    """COMMENT ON COLUMN purchase_plan_details.product_id IS '产品ID';""",
+    """COMMENT ON COLUMN purchase_plan_details.product_name IS '产品名称(冗余)';""",
+    """COMMENT ON COLUMN purchase_plan_details.barcode IS '69码';""",
+    """COMMENT ON COLUMN purchase_plan_details.plan_date IS '计划日期';""",
+    """COMMENT ON COLUMN purchase_plan_details.quantity IS '计划数量';""",
+    """COMMENT ON COLUMN purchase_plan_details.shipped_qty IS '已出货数量(缓存)';""",
+    """COMMENT ON COLUMN purchase_plan_details.remark IS '备注';""",
+    """CREATE TABLE approval_log (
+	id SERIAL NOT NULL,
+	approval_request_id INTEGER NOT NULL,
+	action VARCHAR(50) NOT NULL,
+	actor_id INTEGER,
+	actor_name VARCHAR(50),
+	action_time TIMESTAMP WITHOUT TIME ZONE,
+	details TEXT,
+	PRIMARY KEY (id),
+	FOREIGN KEY(approval_request_id) REFERENCES approval_request (id),
+	FOREIGN KEY(actor_id) REFERENCES "user" (id)
+);""",
+    """CREATE INDEX idx_approval_log_request ON approval_log (approval_request_id);""",
+    """CREATE INDEX ix_approval_log_action_time ON approval_log (action_time);""",
+    """COMMENT ON COLUMN approval_log.approval_request_id IS '审批请求ID';""",
+    """COMMENT ON COLUMN approval_log.action IS '操作动作';""",
+    """COMMENT ON COLUMN approval_log.actor_id IS '操作人ID';""",
+    """COMMENT ON COLUMN approval_log.actor_name IS '操作人名称';""",
+    """COMMENT ON COLUMN approval_log.action_time IS '操作时间';""",
+    """COMMENT ON COLUMN approval_log.details IS '操作详情JSON';""",
+    """CREATE TABLE material_registration_item (
+	id SERIAL NOT NULL,
+	registration_id INTEGER NOT NULL,
+	order_item_id INTEGER,
+	material_code VARCHAR(50),
+	material_name VARCHAR(100) NOT NULL,
+	specification VARCHAR(100),
+	unit VARCHAR(20),
+	ordered_quantity NUMERIC(12, 2) NOT NULL,
+	received_quantity NUMERIC(12, 2) NOT NULL,
+	material_category VARCHAR(20),
+	remark TEXT,
+	create_time TIMESTAMP WITHOUT TIME ZONE,
+	PRIMARY KEY (id),
+	FOREIGN KEY(registration_id) REFERENCES material_registration (id),
+	FOREIGN KEY(order_item_id) REFERENCES purchase_order_item (id)
+);""",
+    """CREATE INDEX idx_material_reg_item_name ON material_registration_item (material_name);""",
+    """CREATE INDEX idx_material_reg_item_registration ON material_registration_item (registration_id);""",
+)
+
+_DOWNGRADE_STATEMENTS: tuple[str, ...] = (
+    """DROP SCHEMA public CASCADE;""",
+    """CREATE SCHEMA public;""",
+)
 
 
 def upgrade():
-    # Create all tables from ORM models (PG-compatible types only)
-    op.execute('CREATE TABLE product (')
-    op.execute('	id SERIAL NOT NULL,')
-    op.execute('	name VARCHAR(100) NOT NULL,')
-    op.execute('	barcode VARCHAR(50),')
-    op.execute('	price NUMERIC(10, 2) DEFAULT \'0\',')
-    op.execute('	image VARCHAR(200),')
-    op.execute('	initial_stock INTEGER NOT NULL,')
-    op.execute('	current_stock INTEGER NOT NULL,')
-    op.execute('	version INTEGER DEFAULT \'0\' NOT NULL,')
-    op.execute('	create_time TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	PRIMARY KEY (id)')
-    op.execute(')')
-    op.execute(';')
-    op.execute('CREATE INDEX ix_product_barcode ON product (barcode);')
-    op.execute('CREATE INDEX idx_product_name_barcode ON product (name, barcode);')
-    op.execute('CREATE INDEX ix_product_create_time ON product (create_time);')
-    op.execute('CREATE UNIQUE INDEX ix_product_name ON product (name);')
-    op.execute('COMMENT ON COLUMN product.name IS \'产品名称\';')
-    op.execute('COMMENT ON COLUMN product.barcode IS \'69码/商品条码\';')
-    op.execute('COMMENT ON COLUMN product.price IS \'产品价格\';')
-    op.execute('COMMENT ON COLUMN product.image IS \'产品图片路径\';')
-    op.execute('COMMENT ON COLUMN product.initial_stock IS \'初始库存\';')
-    op.execute('COMMENT ON COLUMN product.current_stock IS \'当前库存\';')
-    op.execute('COMMENT ON COLUMN product.version IS \'乐观锁版本号\';')
-    op.execute('COMMENT ON COLUMN product.create_time IS \'创建时间\';')
-    op.execute('CREATE TABLE "user" (')
-    op.execute('	id SERIAL NOT NULL,')
-    op.execute('	username VARCHAR(50) NOT NULL,')
-    op.execute('	phone VARCHAR(20),')
-    op.execute('	password VARCHAR(200) NOT NULL,')
-    op.execute('	is_super BOOLEAN NOT NULL,')
-    op.execute('	status BOOLEAN NOT NULL,')
-    op.execute('	create_time TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	update_time TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	PRIMARY KEY (id),')
-    op.execute('	UNIQUE (username)')
-    op.execute(')')
-    op.execute(';')
-    op.execute('COMMENT ON COLUMN "user".username IS \'用户名\';')
-    op.execute('COMMENT ON COLUMN "user".phone IS \'手机号\';')
-    op.execute('COMMENT ON COLUMN "user".password IS \'密码\';')
-    op.execute('COMMENT ON COLUMN "user".is_super IS \'是否超级用户\';')
-    op.execute('COMMENT ON COLUMN "user".status IS \'是否启用\';')
-    op.execute('COMMENT ON COLUMN "user".create_time IS \'创建时间\';')
-    op.execute('COMMENT ON COLUMN "user".update_time IS \'更新时间\';')
-    op.execute('CREATE TABLE permission (')
-    op.execute('	id SERIAL NOT NULL,')
-    op.execute('	name VARCHAR(50) NOT NULL,')
-    op.execute('	code VARCHAR(50) NOT NULL,')
-    op.execute('	parent_id INTEGER,')
-    op.execute('	icon VARCHAR(50),')
-    op.execute('	url VARCHAR(200),')
-    op.execute('	section VARCHAR(50),')
-    op.execute('	section_name VARCHAR(50),')
-    op.execute('	sort_order INTEGER NOT NULL,')
-    op.execute('	is_nav BOOLEAN NOT NULL,')
-    op.execute('	PRIMARY KEY (id),')
-    op.execute('	UNIQUE (code),')
-    op.execute('	FOREIGN KEY(parent_id) REFERENCES permission (id)')
-    op.execute(')')
-    op.execute(';')
-    op.execute('COMMENT ON COLUMN permission.name IS \'权限名称\';')
-    op.execute('COMMENT ON COLUMN permission.code IS \'权限标识\';')
-    op.execute('COMMENT ON COLUMN permission.parent_id IS \'父权限ID\';')
-    op.execute('COMMENT ON COLUMN permission.icon IS \'导航图标\';')
-    op.execute('COMMENT ON COLUMN permission.url IS \'导航链接\';')
-    op.execute('COMMENT ON COLUMN permission.section IS \'所属板块\';')
-    op.execute('COMMENT ON COLUMN permission.section_name IS \'板块显示名\';')
-    op.execute('COMMENT ON COLUMN permission.sort_order IS \'排序\';')
-    op.execute('COMMENT ON COLUMN permission.is_nav IS \'是否显示在导航栏\';')
-    op.execute('CREATE TABLE customer (')
-    op.execute('	id SERIAL NOT NULL,')
-    op.execute('	customer_code VARCHAR(50),')
-    op.execute('	name VARCHAR(100) NOT NULL,')
-    op.execute('	contact VARCHAR(50),')
-    op.execute('	phone VARCHAR(20),')
-    op.execute('	address VARCHAR(200),')
-    op.execute('	note TEXT,')
-    op.execute('	icon_url VARCHAR(200),')
-    op.execute('	status BOOLEAN NOT NULL,')
-    op.execute('	create_time TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	update_time TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	PRIMARY KEY (id)')
-    op.execute(')')
-    op.execute(';')
-    op.execute('CREATE UNIQUE INDEX ix_customer_name ON customer (name);')
-    op.execute('CREATE UNIQUE INDEX ix_customer_customer_code ON customer (customer_code);')
-    op.execute('COMMENT ON COLUMN customer.customer_code IS \'客户编码\';')
-    op.execute('COMMENT ON COLUMN customer.name IS \'客户名称\';')
-    op.execute('COMMENT ON COLUMN customer.contact IS \'联系人\';')
-    op.execute('COMMENT ON COLUMN customer.phone IS \'联系电话\';')
-    op.execute('COMMENT ON COLUMN customer.address IS \'地址\';')
-    op.execute('COMMENT ON COLUMN customer.note IS \'备注\';')
-    op.execute('COMMENT ON COLUMN customer.icon_url IS \'客户图标URL\';')
-    op.execute('COMMENT ON COLUMN customer.status IS \'是否启用\';')
-    op.execute('COMMENT ON COLUMN customer.create_time IS \'创建时间\';')
-    op.execute('COMMENT ON COLUMN customer.update_time IS \'更新时间\';')
-    op.execute('CREATE TABLE order_sync_record (')
-    op.execute('	id SERIAL NOT NULL,')
-    op.execute('	source_order_id INTEGER NOT NULL,')
-    op.execute('	order_no VARCHAR(20) NOT NULL,')
-    op.execute('	sync_type VARCHAR(20) NOT NULL,')
-    op.execute('	sync_status VARCHAR(20) NOT NULL,')
-    op.execute('	sync_time TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	retry_count INTEGER NOT NULL,')
-    op.execute('	max_retries INTEGER NOT NULL,')
-    op.execute('	next_retry_time TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	error_message TEXT,')
-    op.execute('	sync_data TEXT,')
-    op.execute('	operator_id INTEGER,')
-    op.execute('	operator_name VARCHAR(100),')
-    op.execute('	PRIMARY KEY (id)')
-    op.execute(')')
-    op.execute(';')
-    op.execute('CREATE INDEX idx_sync_order ON order_sync_record (source_order_id);')
-    op.execute('CREATE INDEX ix_order_sync_record_sync_time ON order_sync_record (sync_time);')
-    op.execute('CREATE INDEX ix_order_sync_record_source_order_id ON order_sync_record (source_order_id);')
-    op.execute('CREATE INDEX ix_order_sync_record_sync_status ON order_sync_record (sync_status);')
-    op.execute('CREATE INDEX idx_sync_status_time ON order_sync_record (sync_status, sync_time);')
-    op.execute('COMMENT ON COLUMN order_sync_record.source_order_id IS \'来源订单ID\';')
-    op.execute('COMMENT ON COLUMN order_sync_record.order_no IS \'订单编号\';')
-    op.execute('COMMENT ON COLUMN order_sync_record.sync_type IS \'同步类型\';')
-    op.execute('COMMENT ON COLUMN order_sync_record.sync_status IS \'同步状态\';')
-    op.execute('COMMENT ON COLUMN order_sync_record.sync_time IS \'同步时间\';')
-    op.execute('COMMENT ON COLUMN order_sync_record.retry_count IS \'重试次数\';')
-    op.execute('COMMENT ON COLUMN order_sync_record.max_retries IS \'最大重试次数\';')
-    op.execute('COMMENT ON COLUMN order_sync_record.next_retry_time IS \'下次重试时间\';')
-    op.execute('COMMENT ON COLUMN order_sync_record.error_message IS \'错误信息\';')
-    op.execute('COMMENT ON COLUMN order_sync_record.sync_data IS \'同步数据JSON\';')
-    op.execute('COMMENT ON COLUMN order_sync_record.operator_id IS \'操作人ID\';')
-    op.execute('COMMENT ON COLUMN order_sync_record.operator_name IS \'操作人姓名\';')
-    op.execute('CREATE TABLE sync_retry_queue (')
-    op.execute('	id SERIAL NOT NULL,')
-    op.execute('	source_order_id INTEGER NOT NULL,')
-    op.execute('	order_no VARCHAR(20) NOT NULL,')
-    op.execute('	sync_type VARCHAR(20) NOT NULL,')
-    op.execute('	sync_data TEXT NOT NULL,')
-    op.execute('	retry_count INTEGER NOT NULL,')
-    op.execute('	max_retries INTEGER NOT NULL,')
-    op.execute('	status VARCHAR(20) NOT NULL,')
-    op.execute('	next_retry_time TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	last_retry_time TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	last_error TEXT,')
-    op.execute('	created_at TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	updated_at TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	priority INTEGER NOT NULL,')
-    op.execute('	PRIMARY KEY (id)')
-    op.execute(')')
-    op.execute(';')
-    op.execute('CREATE INDEX ix_sync_retry_queue_next_retry_time ON sync_retry_queue (next_retry_time);')
-    op.execute('CREATE INDEX ix_sync_retry_queue_source_order_id ON sync_retry_queue (source_order_id);')
-    op.execute('CREATE INDEX idx_retry_status_time ON sync_retry_queue (status, next_retry_time);')
-    op.execute('CREATE INDEX ix_sync_retry_queue_status ON sync_retry_queue (status);')
-    op.execute('CREATE INDEX idx_retry_priority ON sync_retry_queue (priority, next_retry_time);')
-    op.execute('COMMENT ON COLUMN sync_retry_queue.source_order_id IS \'来源订单ID\';')
-    op.execute('COMMENT ON COLUMN sync_retry_queue.order_no IS \'订单编号\';')
-    op.execute('COMMENT ON COLUMN sync_retry_queue.sync_type IS \'同步类型\';')
-    op.execute('COMMENT ON COLUMN sync_retry_queue.sync_data IS \'同步数据JSON\';')
-    op.execute('COMMENT ON COLUMN sync_retry_queue.retry_count IS \'已重试次数\';')
-    op.execute('COMMENT ON COLUMN sync_retry_queue.max_retries IS \'最大重试次数\';')
-    op.execute('COMMENT ON COLUMN sync_retry_queue.status IS \'状态\';')
-    op.execute('COMMENT ON COLUMN sync_retry_queue.next_retry_time IS \'下次重试时间\';')
-    op.execute('COMMENT ON COLUMN sync_retry_queue.last_retry_time IS \'上次重试时间\';')
-    op.execute('COMMENT ON COLUMN sync_retry_queue.last_error IS \'最后错误信息\';')
-    op.execute('COMMENT ON COLUMN sync_retry_queue.created_at IS \'创建时间\';')
-    op.execute('COMMENT ON COLUMN sync_retry_queue.updated_at IS \'更新时间\';')
-    op.execute('COMMENT ON COLUMN sync_retry_queue.priority IS \'优先级\';')
-    op.execute('CREATE TABLE supplier (')
-    op.execute('	id SERIAL NOT NULL,')
-    op.execute('	name VARCHAR(100) NOT NULL,')
-    op.execute('	contact_person VARCHAR(50),')
-    op.execute('	phone VARCHAR(20),')
-    op.execute('	address VARCHAR(200),')
-    op.execute('	bank_name VARCHAR(100),')
-    op.execute('	bank_account VARCHAR(50),')
-    op.execute('	remark TEXT,')
-    op.execute('	status BOOLEAN,')
-    op.execute('	created_at TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	updated_at TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	PRIMARY KEY (id)')
-    op.execute(')')
-    op.execute(';')
-    op.execute('CREATE INDEX idx_supplier_name ON supplier (name);')
-    op.execute('CREATE UNIQUE INDEX ix_supplier_name ON supplier (name);')
-    op.execute('COMMENT ON COLUMN supplier.name IS \'供应商名称\';')
-    op.execute('COMMENT ON COLUMN supplier.contact_person IS \'联系人\';')
-    op.execute('COMMENT ON COLUMN supplier.phone IS \'联系电话\';')
-    op.execute('COMMENT ON COLUMN supplier.address IS \'地址\';')
-    op.execute('COMMENT ON COLUMN supplier.bank_name IS \'开户银行\';')
-    op.execute('COMMENT ON COLUMN supplier.bank_account IS \'银行账号\';')
-    op.execute('COMMENT ON COLUMN supplier.remark IS \'备注\';')
-    op.execute('COMMENT ON COLUMN supplier.status IS \'状态\';')
-    op.execute('COMMENT ON COLUMN supplier.created_at IS \'创建时间\';')
-    op.execute('COMMENT ON COLUMN supplier.updated_at IS \'更新时间\';')
-    op.execute('CREATE TABLE production_plan (')
-    op.execute('	id SERIAL NOT NULL,')
-    op.execute('	customer_name VARCHAR(100) NOT NULL,')
-    op.execute('	product_name VARCHAR(100) NOT NULL,')
-    op.execute('	barcode VARCHAR(50) NOT NULL,')
-    op.execute('	quantity INTEGER NOT NULL,')
-    op.execute('	plan_date DATE NOT NULL,')
-    op.execute('	status VARCHAR(20) NOT NULL,')
-    op.execute('	shipped_qty INTEGER NOT NULL,')
-    op.execute('	remark TEXT,')
-    op.execute('	upload_batch VARCHAR(64),')
-    op.execute('	create_time TIMESTAMP WITHOUT TIME ZONE NOT NULL,')
-    op.execute('	update_time TIMESTAMP WITHOUT TIME ZONE NOT NULL,')
-    op.execute('	created_by VARCHAR(50),')
-    op.execute('	PRIMARY KEY (id)')
-    op.execute(')')
-    op.execute(';')
-    op.execute('CREATE INDEX idx_pp_plan_month ON production_plan (plan_date, customer_name);')
-    op.execute('CREATE INDEX idx_pp_barcode ON production_plan (barcode);')
-    op.execute('CREATE INDEX ix_production_plan_barcode ON production_plan (barcode);')
-    op.execute('CREATE INDEX idx_pp_customer_name ON production_plan (customer_name);')
-    op.execute('CREATE INDEX idx_pp_plan_date ON production_plan (plan_date);')
-    op.execute('CREATE INDEX ix_production_plan_customer_name ON production_plan (customer_name);')
-    op.execute('COMMENT ON COLUMN production_plan.customer_name IS \'客户名称\';')
-    op.execute('COMMENT ON COLUMN production_plan.product_name IS \'客户产品名称\';')
-    op.execute('COMMENT ON COLUMN production_plan.barcode IS \'69码\';')
-    op.execute('COMMENT ON COLUMN production_plan.quantity IS \'排产计划数量\';')
-    op.execute('COMMENT ON COLUMN production_plan.plan_date IS \'计划日期\';')
-    op.execute('COMMENT ON COLUMN production_plan.status IS \'状态: pending/confirmed/completed\';')
-    op.execute('COMMENT ON COLUMN production_plan.shipped_qty IS \'已出货数量\';')
-    op.execute('COMMENT ON COLUMN production_plan.remark IS \'备注\';')
-    op.execute('COMMENT ON COLUMN production_plan.upload_batch IS \'上传批次ID\';')
-    op.execute('COMMENT ON COLUMN production_plan.create_time IS \'创建时间\';')
-    op.execute('COMMENT ON COLUMN production_plan.update_time IS \'更新时间\';')
-    op.execute('COMMENT ON COLUMN production_plan.created_by IS \'创建人\';')
-    op.execute('CREATE TABLE production_plan_log (')
-    op.execute('	id SERIAL NOT NULL,')
-    op.execute('	plan_id INTEGER NOT NULL,')
-    op.execute('	action VARCHAR(20) NOT NULL,')
-    op.execute('	old_value TEXT,')
-    op.execute('	new_value TEXT,')
-    op.execute('	operator VARCHAR(50) NOT NULL,')
-    op.execute('	operate_time TIMESTAMP WITHOUT TIME ZONE NOT NULL,')
-    op.execute('	PRIMARY KEY (id)')
-    op.execute(')')
-    op.execute(';')
-    op.execute('CREATE INDEX ix_production_plan_log_plan_id ON production_plan_log (plan_id);')
-    op.execute('COMMENT ON COLUMN production_plan_log.plan_id IS \'排产计划ID\';')
-    op.execute('COMMENT ON COLUMN production_plan_log.action IS \'操作类型: create/update/delete\';')
-    op.execute('COMMENT ON COLUMN production_plan_log.old_value IS \'变更前数据(JSON)\';')
-    op.execute('COMMENT ON COLUMN production_plan_log.new_value IS \'变更后数据(JSON)\';')
-    op.execute('COMMENT ON COLUMN production_plan_log.operator IS \'操作人\';')
-    op.execute('COMMENT ON COLUMN production_plan_log.operate_time IS \'操作时间\';')
-    op.execute('CREATE TABLE staging_purchase_plan (')
-    op.execute('	id SERIAL NOT NULL,')
-    op.execute('	session_id VARCHAR(64) NOT NULL,')
-    op.execute('	customer_name VARCHAR(100) NOT NULL,')
-    op.execute('	product_name VARCHAR(100) NOT NULL,')
-    op.execute('	barcode VARCHAR(50) NOT NULL,')
-    op.execute('	quantity INTEGER NOT NULL,')
-    op.execute('	plan_date DATE NOT NULL,')
-    op.execute('	plan_month VARCHAR(7),')
-    op.execute('	remark TEXT,')
-    op.execute('	is_validated BOOLEAN NOT NULL,')
-    op.execute('	validation_error VARCHAR(500),')
-    op.execute('	upload_batch_id VARCHAR(64),')
-    op.execute('	created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,')
-    op.execute('	PRIMARY KEY (id)')
-    op.execute(')')
-    op.execute(';')
-    op.execute('CREATE INDEX idx_spp_session ON staging_purchase_plan (session_id);')
-    op.execute('CREATE INDEX ix_staging_purchase_plan_session_id ON staging_purchase_plan (session_id);')
-    op.execute('CREATE INDEX idx_spp_batch ON staging_purchase_plan (upload_batch_id);')
-    op.execute('CREATE INDEX ix_staging_purchase_plan_upload_batch_id ON staging_purchase_plan (upload_batch_id);')
-    op.execute('COMMENT ON COLUMN staging_purchase_plan.session_id IS \'会话ID\';')
-    op.execute('COMMENT ON COLUMN staging_purchase_plan.customer_name IS \'客户名称\';')
-    op.execute('COMMENT ON COLUMN staging_purchase_plan.product_name IS \'产品名称\';')
-    op.execute('COMMENT ON COLUMN staging_purchase_plan.barcode IS \'69码\';')
-    op.execute('COMMENT ON COLUMN staging_purchase_plan.quantity IS \'计划数量\';')
-    op.execute('COMMENT ON COLUMN staging_purchase_plan.plan_date IS \'计划日期\';')
-    op.execute('COMMENT ON COLUMN staging_purchase_plan.plan_month IS \'计划月份 YYYY-MM\';')
-    op.execute('COMMENT ON COLUMN staging_purchase_plan.remark IS \'备注\';')
-    op.execute('COMMENT ON COLUMN staging_purchase_plan.is_validated IS \'是否已验证\';')
-    op.execute('COMMENT ON COLUMN staging_purchase_plan.validation_error IS \'验证错误信息\';')
-    op.execute('COMMENT ON COLUMN staging_purchase_plan.upload_batch_id IS \'上传批次ID\';')
-    op.execute('COMMENT ON COLUMN staging_purchase_plan.created_at IS \'创建时间\';')
-    op.execute('CREATE TABLE shipment_records (')
-    op.execute('	id SERIAL NOT NULL,')
-    op.execute('	shipment_no VARCHAR(64) NOT NULL,')
-    op.execute('	customer_id INTEGER NOT NULL,')
-    op.execute('	customer_name VARCHAR(100) NOT NULL,')
-    op.execute('	product_id INTEGER NOT NULL,')
-    op.execute('	product_name VARCHAR(100) NOT NULL,')
-    op.execute('	quantity INTEGER NOT NULL,')
-    op.execute('	shipment_date DATE NOT NULL,')
-    op.execute('	source_type VARCHAR(20) NOT NULL,')
-    op.execute('	source_id INTEGER,')
-    op.execute('	synced_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,')
-    op.execute('	created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,')
-    op.execute('	PRIMARY KEY (id),')
-    op.execute('	UNIQUE (shipment_no)')
-    op.execute(')')
-    op.execute(';')
-    op.execute('CREATE INDEX idx_sr_shipment_date ON shipment_records (shipment_date);')
-    op.execute('CREATE INDEX idx_sr_customer_product_date ON shipment_records (customer_id, product_id, shipment_date);')
-    op.execute('COMMENT ON COLUMN shipment_records.shipment_no IS \'原始出货单号\';')
-    op.execute('COMMENT ON COLUMN shipment_records.customer_id IS \'客户ID\';')
-    op.execute('COMMENT ON COLUMN shipment_records.customer_name IS \'客户名称\';')
-    op.execute('COMMENT ON COLUMN shipment_records.product_id IS \'产品ID\';')
-    op.execute('COMMENT ON COLUMN shipment_records.product_name IS \'产品名称\';')
-    op.execute('COMMENT ON COLUMN shipment_records.quantity IS \'出货数量\';')
-    op.execute('COMMENT ON COLUMN shipment_records.shipment_date IS \'出货日期\';')
-    op.execute('COMMENT ON COLUMN shipment_records.source_type IS \'来源类型\';')
-    op.execute('COMMENT ON COLUMN shipment_records.source_id IS \'来源记录ID\';')
-    op.execute('COMMENT ON COLUMN shipment_records.synced_at IS \'同步时间\';')
-    op.execute('COMMENT ON COLUMN shipment_records.created_at IS \'创建时间\';')
-    op.execute('CREATE TABLE craft_work (')
-    op.execute('	id SERIAL NOT NULL,')
-    op.execute('	worker_name VARCHAR(50) NOT NULL,')
-    op.execute('	quantity INTEGER NOT NULL,')
-    op.execute('	work_date DATE NOT NULL,')
-    op.execute('	remark VARCHAR(500),')
-    op.execute('	create_time TIMESTAMP WITHOUT TIME ZONE NOT NULL,')
-    op.execute('	created_by VARCHAR(50),')
-    op.execute('	PRIMARY KEY (id)')
-    op.execute(')')
-    op.execute(';')
-    op.execute('CREATE INDEX idx_craft_work_worker_date ON craft_work (worker_name, work_date);')
-    op.execute('CREATE INDEX idx_craft_work_date ON craft_work (work_date);')
-    op.execute('COMMENT ON COLUMN craft_work.worker_name IS \'工人姓名\';')
-    op.execute('COMMENT ON COLUMN craft_work.quantity IS \'生产数量\';')
-    op.execute('COMMENT ON COLUMN craft_work.work_date IS \'生产日期\';')
-    op.execute('COMMENT ON COLUMN craft_work.remark IS \'备注\';')
-    op.execute('COMMENT ON COLUMN craft_work.create_time IS \'创建时间\';')
-    op.execute('COMMENT ON COLUMN craft_work.created_by IS \'创建人\';')
-    op.execute('CREATE TABLE packaging_record (')
-    op.execute('	id SERIAL NOT NULL,')
-    op.execute('	customer VARCHAR(100) NOT NULL,')
-    op.execute('	product_name VARCHAR(100) NOT NULL,')
-    op.execute('	barcode VARCHAR(50) NOT NULL,')
-    op.execute('	quantity INTEGER NOT NULL,')
-    op.execute('	pack_date DATE NOT NULL,')
-    op.execute('	remark TEXT,')
-    op.execute('	upload_batch VARCHAR(64),')
-    op.execute('	create_time TIMESTAMP WITHOUT TIME ZONE NOT NULL,')
-    op.execute('	created_by VARCHAR(50),')
-    op.execute('	PRIMARY KEY (id)')
-    op.execute(')')
-    op.execute(';')
-    op.execute('CREATE INDEX idx_packaging_date ON packaging_record (pack_date);')
-    op.execute('CREATE INDEX idx_packaging_customer_date ON packaging_record (customer, pack_date);')
-    op.execute('CREATE INDEX idx_packaging_barcode ON packaging_record (barcode);')
-    op.execute('COMMENT ON COLUMN packaging_record.customer IS \'客户\';')
-    op.execute('COMMENT ON COLUMN packaging_record.product_name IS \'产品名称\';')
-    op.execute('COMMENT ON COLUMN packaging_record.barcode IS \'69码\';')
-    op.execute('COMMENT ON COLUMN packaging_record.quantity IS \'数量\';')
-    op.execute('COMMENT ON COLUMN packaging_record.pack_date IS \'包装日期\';')
-    op.execute('COMMENT ON COLUMN packaging_record.remark IS \'备注\';')
-    op.execute('COMMENT ON COLUMN packaging_record.upload_batch IS \'上传批次ID\';')
-    op.execute('COMMENT ON COLUMN packaging_record.create_time IS \'创建时间\';')
-    op.execute('COMMENT ON COLUMN packaging_record.created_by IS \'创建人\';')
-    op.execute('CREATE TABLE "order" (')
-    op.execute('	id SERIAL NOT NULL,')
-    op.execute('	order_no VARCHAR(20) NOT NULL,')
-    op.execute('	customer VARCHAR(100) NOT NULL,')
-    op.execute('	order_date TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	product_id INTEGER NOT NULL,')
-    op.execute('	quantity INTEGER NOT NULL,')
-    op.execute('	status VARCHAR(20),')
-    op.execute('	note TEXT,')
-    op.execute('	batch_no VARCHAR(100),')
-    op.execute('	order_type VARCHAR(20) NOT NULL,')
-    op.execute('	country VARCHAR(100),')
-    op.execute('	is_locked BOOLEAN,')
-    op.execute('	locked_by_id INTEGER,')
-    op.execute('	lock_time TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	is_deleted BOOLEAN,')
-    op.execute('	deleted_at TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	deleted_by_id INTEGER,')
-    op.execute('	delete_reason VARCHAR(500),')
-    op.execute('	PRIMARY KEY (id),')
-    op.execute('	UNIQUE (order_no),')
-    op.execute('	FOREIGN KEY(product_id) REFERENCES product (id),')
-    op.execute('	FOREIGN KEY(locked_by_id) REFERENCES "user" (id),')
-    op.execute('	FOREIGN KEY(deleted_by_id) REFERENCES "user" (id)')
-    op.execute(')')
-    op.execute(';')
-    op.execute('CREATE INDEX idx_order_product_status ON "order" (product_id, status);')
-    op.execute('CREATE INDEX idx_order_customer_status ON "order" (customer, status);')
-    op.execute('CREATE INDEX idx_order_locked ON "order" (is_locked);')
-    op.execute('CREATE INDEX ix_order_product_id ON "order" (product_id);')
-    op.execute('CREATE INDEX idx_order_status_date ON "order" (status, order_date);')
-    op.execute('CREATE INDEX ix_order_customer ON "order" (customer);')
-    op.execute('CREATE INDEX idx_order_customer_product ON "order" (customer, product_id);')
-    op.execute('CREATE INDEX ix_order_status ON "order" (status);')
-    op.execute('CREATE INDEX ix_order_is_deleted ON "order" (is_deleted);')
-    op.execute('CREATE INDEX idx_order_type ON "order" (order_type);')
-    op.execute('CREATE INDEX ix_order_order_date ON "order" (order_date);')
-    op.execute('COMMENT ON COLUMN "order".order_no IS \'订单编号\';')
-    op.execute('COMMENT ON COLUMN "order".customer IS \'客户名称\';')
-    op.execute('COMMENT ON COLUMN "order".order_date IS \'下单时间\';')
-    op.execute('COMMENT ON COLUMN "order".product_id IS \'产品ID\';')
-    op.execute('COMMENT ON COLUMN "order".quantity IS \'订单数量\';')
-    op.execute('COMMENT ON COLUMN "order".status IS \'订单状态\';')
-    op.execute('COMMENT ON COLUMN "order".note IS \'备注\';')
-    op.execute('COMMENT ON COLUMN "order".batch_no IS \'批次号\';')
-    op.execute('COMMENT ON COLUMN "order".order_type IS \'订单类型：regular=常规订单, custom=定制订单\';')
-    op.execute('COMMENT ON COLUMN "order".country IS \'国家名称（仅定制订单使用）\';')
-    op.execute('COMMENT ON COLUMN "order".is_locked IS \'是否被审批锁定\';')
-    op.execute('COMMENT ON COLUMN "order".locked_by_id IS \'锁定人ID\';')
-    op.execute('COMMENT ON COLUMN "order".lock_time IS \'锁定时间\';')
-    op.execute('COMMENT ON COLUMN "order".is_deleted IS \'是否已删除\';')
-    op.execute('COMMENT ON COLUMN "order".deleted_at IS \'删除时间\';')
-    op.execute('COMMENT ON COLUMN "order".deleted_by_id IS \'删除人ID\';')
-    op.execute('COMMENT ON COLUMN "order".delete_reason IS \'删除原因\';')
-    op.execute('CREATE TABLE stock_in (')
-    op.execute('	id SERIAL NOT NULL,')
-    op.execute('	stockin_no VARCHAR(20) NOT NULL,')
-    op.execute('	stockin_date TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	customer VARCHAR(100) NOT NULL,')
-    op.execute('	product_id INTEGER NOT NULL,')
-    op.execute('	quantity INTEGER NOT NULL,')
-    op.execute('	note TEXT,')
-    op.execute('	PRIMARY KEY (id),')
-    op.execute('	UNIQUE (stockin_no),')
-    op.execute('	FOREIGN KEY(product_id) REFERENCES product (id)')
-    op.execute(')')
-    op.execute(';')
-    op.execute('CREATE INDEX idx_stockin_customer_product ON stock_in (customer, product_id);')
-    op.execute('CREATE INDEX ix_stock_in_product_id ON stock_in (product_id);')
-    op.execute('CREATE INDEX idx_stockin_customer_date ON stock_in (customer, stockin_date);')
-    op.execute('CREATE INDEX idx_stockin_product_date ON stock_in (product_id, stockin_date);')
-    op.execute('CREATE INDEX ix_stock_in_stockin_date ON stock_in (stockin_date);')
-    op.execute('CREATE INDEX idx_stockin_customer_product_date ON stock_in (customer, product_id, stockin_date);')
-    op.execute('CREATE INDEX ix_stock_in_customer ON stock_in (customer);')
-    op.execute('COMMENT ON COLUMN stock_in.stockin_no IS \'备货编号\';')
-    op.execute('COMMENT ON COLUMN stock_in.stockin_date IS \'备货时间\';')
-    op.execute('COMMENT ON COLUMN stock_in.customer IS \'客户名称\';')
-    op.execute('COMMENT ON COLUMN stock_in.product_id IS \'产品ID\';')
-    op.execute('COMMENT ON COLUMN stock_in.quantity IS \'备货数量\';')
-    op.execute('COMMENT ON COLUMN stock_in.note IS \'备注\';')
-    op.execute('CREATE TABLE inventory_log (')
-    op.execute('	id SERIAL NOT NULL,')
-    op.execute('	product_id INTEGER NOT NULL,')
-    op.execute('	change_type VARCHAR(20) NOT NULL,')
-    op.execute('	change_quantity INTEGER NOT NULL,')
-    op.execute('	change_date TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	related_id VARCHAR(50),')
-    op.execute('	note TEXT,')
-    op.execute('	customer VARCHAR(100),')
-    op.execute('	PRIMARY KEY (id),')
-    op.execute('	FOREIGN KEY(product_id) REFERENCES product (id) ON DELETE CASCADE')
-    op.execute(')')
-    op.execute(';')
-    op.execute('CREATE INDEX ix_inventory_log_customer ON inventory_log (customer);')
-    op.execute('CREATE INDEX ix_inventory_log_product_id ON inventory_log (product_id);')
-    op.execute('CREATE INDEX ix_inventory_log_change_date ON inventory_log (change_date);')
-    op.execute('CREATE INDEX idx_inventory_log_product_date ON inventory_log (product_id, change_date DESC);')
-    op.execute('CREATE INDEX ix_inventory_log_change_type ON inventory_log (change_type);')
-    op.execute('COMMENT ON COLUMN inventory_log.product_id IS \'产品ID\';')
-    op.execute('COMMENT ON COLUMN inventory_log.change_type IS \'变化类型\';')
-    op.execute('COMMENT ON COLUMN inventory_log.change_quantity IS \'变化数量\';')
-    op.execute('COMMENT ON COLUMN inventory_log.change_date IS \'变化时间\';')
-    op.execute('COMMENT ON COLUMN inventory_log.related_id IS \'关联单据编号\';')
-    op.execute('COMMENT ON COLUMN inventory_log.note IS \'备注\';')
-    op.execute('COMMENT ON COLUMN inventory_log.customer IS \'客户名称\';')
-    op.execute('CREATE TABLE user_permission (')
-    op.execute('	user_id INTEGER NOT NULL,')
-    op.execute('	permission_id INTEGER NOT NULL,')
-    op.execute('	PRIMARY KEY (user_id, permission_id),')
-    op.execute('	FOREIGN KEY(user_id) REFERENCES "user" (id),')
-    op.execute('	FOREIGN KEY(permission_id) REFERENCES permission (id)')
-    op.execute(')')
-    op.execute(';')
-    op.execute('CREATE TABLE purchase_order (')
-    op.execute('	id SERIAL NOT NULL,')
-    op.execute('	order_no VARCHAR(30) NOT NULL,')
-    op.execute('	supplier_id INTEGER,')
-    op.execute('	supplier_name VARCHAR(100),')
-    op.execute('	supplier_contact_person VARCHAR(50),')
-    op.execute('	supplier_phone VARCHAR(20),')
-    op.execute('	supplier_address VARCHAR(200),')
-    op.execute('	customer_id INTEGER,')
-    op.execute('	customer_name VARCHAR(100),')
-    op.execute('	customer_code VARCHAR(50),')
-    op.execute('	order_date DATE,')
-    op.execute('	status VARCHAR(20),')
-    op.execute('	remark TEXT,')
-    op.execute('	source_order_id INTEGER,')
-    op.execute('	source_order_ids TEXT,')
-    op.execute('	product_name VARCHAR(200),')
-    op.execute('	product_quantity NUMERIC(12, 2),')
-    op.execute('	create_time TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	update_time TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	created_by INTEGER,')
-    op.execute('	completed_at TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	completed_by VARCHAR(50),')
-    op.execute('	PRIMARY KEY (id),')
-    op.execute('	FOREIGN KEY(supplier_id) REFERENCES supplier (id),')
-    op.execute('	FOREIGN KEY(customer_id) REFERENCES customer (id),')
-    op.execute('	FOREIGN KEY(created_by) REFERENCES "user" (id)')
-    op.execute(')')
-    op.execute(';')
-    op.execute('CREATE INDEX idx_purchase_order_date ON purchase_order (order_date);')
-    op.execute('CREATE INDEX idx_purchase_order_supplier ON purchase_order (supplier_id);')
-    op.execute('CREATE INDEX idx_purchase_order_customer ON purchase_order (customer_id);')
-    op.execute('CREATE INDEX idx_purchase_order_status ON purchase_order (status);')
-    op.execute('CREATE UNIQUE INDEX ix_purchase_order_order_no ON purchase_order (order_no);')
-    op.execute('COMMENT ON COLUMN purchase_order.order_no IS \'订单编号\';')
-    op.execute('COMMENT ON COLUMN purchase_order.supplier_id IS \'供应商ID\';')
-    op.execute('COMMENT ON COLUMN purchase_order.supplier_name IS \'供应商名称(冗余)\';')
-    op.execute('COMMENT ON COLUMN purchase_order.supplier_contact_person IS \'供应商联系人(冗余)\';')
-    op.execute('COMMENT ON COLUMN purchase_order.supplier_phone IS \'供应商电话(冗余)\';')
-    op.execute('COMMENT ON COLUMN purchase_order.supplier_address IS \'供应商地址(冗余)\';')
-    op.execute('COMMENT ON COLUMN purchase_order.customer_id IS \'客户ID\';')
-    op.execute('COMMENT ON COLUMN purchase_order.customer_name IS \'客户名称(冗余)\';')
-    op.execute('COMMENT ON COLUMN purchase_order.customer_code IS \'客户编码\';')
-    op.execute('COMMENT ON COLUMN purchase_order.order_date IS \'下单日期\';')
-    op.execute('COMMENT ON COLUMN purchase_order.status IS \'状态\';')
-    op.execute('COMMENT ON COLUMN purchase_order.remark IS \'备注\';')
-    op.execute('COMMENT ON COLUMN purchase_order.source_order_id IS \'关联的原始订单ID(单)\';')
-    op.execute('COMMENT ON COLUMN purchase_order.source_order_ids IS \'关联的原始订单IDs(JSON数组)\';')
-    op.execute('COMMENT ON COLUMN purchase_order.product_name IS \'产品名称\';')
-    op.execute('COMMENT ON COLUMN purchase_order.product_quantity IS \'订单数量\';')
-    op.execute('COMMENT ON COLUMN purchase_order.create_time IS \'创建时间\';')
-    op.execute('COMMENT ON COLUMN purchase_order.update_time IS \'更新时间\';')
-    op.execute('COMMENT ON COLUMN purchase_order.created_by IS \'创建人\';')
-    op.execute('COMMENT ON COLUMN purchase_order.completed_at IS \'完成时间\';')
-    op.execute('COMMENT ON COLUMN purchase_order.completed_by IS \'完成人\';')
-    op.execute('CREATE TABLE staging_order (')
-    op.execute('	id SERIAL NOT NULL,')
-    op.execute('	session_id VARCHAR(64) NOT NULL,')
-    op.execute('	customer VARCHAR(100) NOT NULL,')
-    op.execute('	order_date TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	product_name VARCHAR(200) NOT NULL,')
-    op.execute('	product_barcode VARCHAR(50),')
-    op.execute('	product_id INTEGER,')
-    op.execute('	quantity INTEGER NOT NULL,')
-    op.execute('	deduct_stock BOOLEAN,')
-    op.execute('	deduct_quantity INTEGER,')
-    op.execute('	note TEXT,')
-    op.execute('	order_type VARCHAR(20) NOT NULL,')
-    op.execute('	country VARCHAR(100),')
-    op.execute('	status VARCHAR(20),')
-    op.execute('	is_validated BOOLEAN,')
-    op.execute('	validation_error VARCHAR(500),')
-    op.execute('	created_at TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	updated_at TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	import_batch_id VARCHAR(64),')
-    op.execute('	PRIMARY KEY (id),')
-    op.execute('	FOREIGN KEY(product_id) REFERENCES product (id)')
-    op.execute(')')
-    op.execute(';')
-    op.execute('CREATE INDEX idx_staging_status ON staging_order (status);')
-    op.execute('CREATE INDEX idx_staging_session ON staging_order (session_id);')
-    op.execute('CREATE INDEX idx_staging_created ON staging_order (created_at);')
-    op.execute('CREATE INDEX ix_staging_order_session_id ON staging_order (session_id);')
-    op.execute('CREATE INDEX ix_staging_order_import_batch_id ON staging_order (import_batch_id);')
-    op.execute('CREATE INDEX ix_staging_order_customer ON staging_order (customer);')
-    op.execute('COMMENT ON COLUMN staging_order.session_id IS \'会话ID，用于标识同一批导入\';')
-    op.execute('COMMENT ON COLUMN staging_order.customer IS \'客户名称\';')
-    op.execute('COMMENT ON COLUMN staging_order.order_date IS \'下单时间\';')
-    op.execute('COMMENT ON COLUMN staging_order.product_name IS \'产品名称（冗余存储）\';')
-    op.execute('COMMENT ON COLUMN staging_order.product_barcode IS \'产品69码（冗余存储）\';')
-    op.execute('COMMENT ON COLUMN staging_order.product_id IS \'产品ID（确认后填充）\';')
-    op.execute('COMMENT ON COLUMN staging_order.quantity IS \'订单数量\';')
-    op.execute('COMMENT ON COLUMN staging_order.deduct_stock IS \'是否抵扣备货\';')
-    op.execute('COMMENT ON COLUMN staging_order.deduct_quantity IS \'抵扣备货数量\';')
-    op.execute('COMMENT ON COLUMN staging_order.note IS \'备注\';')
-    op.execute('COMMENT ON COLUMN staging_order.order_type IS \'订单类型：regular=常规订单, custom=定制订单\';')
-    op.execute('COMMENT ON COLUMN staging_order.country IS \'国家名称（仅定制订单使用）\';')
-    op.execute('COMMENT ON COLUMN staging_order.status IS \'状态：pending=待审核, approved=已确认, rejected=已拒绝\';')
-    op.execute('COMMENT ON COLUMN staging_order.is_validated IS \'是否已验证产品存在\';')
-    op.execute('COMMENT ON COLUMN staging_order.validation_error IS \'验证错误信息\';')
-    op.execute('COMMENT ON COLUMN staging_order.created_at IS \'创建时间\';')
-    op.execute('COMMENT ON COLUMN staging_order.updated_at IS \'更新时间\';')
-    op.execute('COMMENT ON COLUMN staging_order.import_batch_id IS \'导入批次ID\';')
-    op.execute('CREATE TABLE staging_stock_in (')
-    op.execute('	id SERIAL NOT NULL,')
-    op.execute('	session_id VARCHAR(64) NOT NULL,')
-    op.execute('	customer VARCHAR(100) NOT NULL,')
-    op.execute('	stockin_date TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	product_name VARCHAR(200) NOT NULL,')
-    op.execute('	product_barcode VARCHAR(50),')
-    op.execute('	product_id INTEGER,')
-    op.execute('	quantity INTEGER NOT NULL,')
-    op.execute('	note TEXT,')
-    op.execute('	status VARCHAR(20),')
-    op.execute('	is_validated BOOLEAN,')
-    op.execute('	validation_error VARCHAR(500),')
-    op.execute('	created_at TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	updated_at TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	PRIMARY KEY (id),')
-    op.execute('	FOREIGN KEY(product_id) REFERENCES product (id)')
-    op.execute(')')
-    op.execute(';')
-    op.execute('CREATE INDEX idx_staging_stockin_session ON staging_stock_in (session_id);')
-    op.execute('CREATE INDEX idx_staging_stockin_status ON staging_stock_in (status);')
-    op.execute('CREATE INDEX ix_staging_stock_in_session_id ON staging_stock_in (session_id);')
-    op.execute('CREATE INDEX idx_staging_stockin_created ON staging_stock_in (created_at);')
-    op.execute('CREATE INDEX ix_staging_stock_in_customer ON staging_stock_in (customer);')
-    op.execute('COMMENT ON COLUMN staging_stock_in.session_id IS \'会话ID，用于标识同一批导入\';')
-    op.execute('COMMENT ON COLUMN staging_stock_in.customer IS \'客户名称\';')
-    op.execute('COMMENT ON COLUMN staging_stock_in.stockin_date IS \'备货时间\';')
-    op.execute('COMMENT ON COLUMN staging_stock_in.product_name IS \'产品名称（冗余存储）\';')
-    op.execute('COMMENT ON COLUMN staging_stock_in.product_barcode IS \'产品69码（冗余存储）\';')
-    op.execute('COMMENT ON COLUMN staging_stock_in.product_id IS \'产品ID（确认后填充）\';')
-    op.execute('COMMENT ON COLUMN staging_stock_in.quantity IS \'备货数量\';')
-    op.execute('COMMENT ON COLUMN staging_stock_in.note IS \'备注\';')
-    op.execute('COMMENT ON COLUMN staging_stock_in.status IS \'状态：pending=待审核, approved=已确认, rejected=已拒绝\';')
-    op.execute('COMMENT ON COLUMN staging_stock_in.is_validated IS \'是否已验证产品存在\';')
-    op.execute('COMMENT ON COLUMN staging_stock_in.validation_error IS \'验证错误信息\';')
-    op.execute('COMMENT ON COLUMN staging_stock_in.created_at IS \'创建时间\';')
-    op.execute('COMMENT ON COLUMN staging_stock_in.updated_at IS \'更新时间\';')
-    op.execute('CREATE TABLE staging_stock_out (')
-    op.execute('	id SERIAL NOT NULL,')
-    op.execute('	session_id VARCHAR(64) NOT NULL,')
-    op.execute('	customer VARCHAR(100),')
-    op.execute('	stockout_date TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	product_name VARCHAR(200) NOT NULL,')
-    op.execute('	product_barcode VARCHAR(50),')
-    op.execute('	product_id INTEGER,')
-    op.execute('	quantity INTEGER NOT NULL,')
-    op.execute('	note TEXT,')
-    op.execute('	order_type VARCHAR(20),')
-    op.execute('	country VARCHAR(100),')
-    op.execute('	status VARCHAR(20),')
-    op.execute('	is_validated BOOLEAN,')
-    op.execute('	validation_error VARCHAR(500),')
-    op.execute('	stock_check_passed BOOLEAN,')
-    op.execute('	stock_check_message VARCHAR(500),')
-    op.execute('	created_at TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	updated_at TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	PRIMARY KEY (id),')
-    op.execute('	FOREIGN KEY(product_id) REFERENCES product (id)')
-    op.execute(')')
-    op.execute(';')
-    op.execute('CREATE INDEX idx_staging_stockout_created ON staging_stock_out (created_at);')
-    op.execute('CREATE INDEX ix_staging_stock_out_customer ON staging_stock_out (customer);')
-    op.execute('CREATE INDEX idx_staging_stockout_session ON staging_stock_out (session_id);')
-    op.execute('CREATE INDEX ix_staging_stock_out_session_id ON staging_stock_out (session_id);')
-    op.execute('CREATE INDEX idx_staging_stockout_status ON staging_stock_out (status);')
-    op.execute('COMMENT ON COLUMN staging_stock_out.session_id IS \'会话ID，用于标识同一批导入\';')
-    op.execute('COMMENT ON COLUMN staging_stock_out.customer IS \'客户名称\';')
-    op.execute('COMMENT ON COLUMN staging_stock_out.stockout_date IS \'出货时间\';')
-    op.execute('COMMENT ON COLUMN staging_stock_out.product_name IS \'产品名称（冗余存储）\';')
-    op.execute('COMMENT ON COLUMN staging_stock_out.product_barcode IS \'产品69码（冗余存储）\';')
-    op.execute('COMMENT ON COLUMN staging_stock_out.product_id IS \'产品ID（确认后填充）\';')
-    op.execute('COMMENT ON COLUMN staging_stock_out.quantity IS \'出货数量\';')
-    op.execute('COMMENT ON COLUMN staging_stock_out.note IS \'备注\';')
-    op.execute('COMMENT ON COLUMN staging_stock_out.order_type IS \'订单类型：regular=常规订单, custom=定制订单\';')
-    op.execute('COMMENT ON COLUMN staging_stock_out.country IS \'国家名称（仅定制订单使用）\';')
-    op.execute('COMMENT ON COLUMN staging_stock_out.status IS \'状态：pending=待审核, approved=已确认, rejected=已拒绝\';')
-    op.execute('COMMENT ON COLUMN staging_stock_out.is_validated IS \'是否已验证产品存在\';')
-    op.execute('COMMENT ON COLUMN staging_stock_out.validation_error IS \'验证错误信息\';')
-    op.execute('COMMENT ON COLUMN staging_stock_out.stock_check_passed IS \'库存检查是否通过\';')
-    op.execute('COMMENT ON COLUMN staging_stock_out.stock_check_message IS \'库存检查信息\';')
-    op.execute('COMMENT ON COLUMN staging_stock_out.created_at IS \'创建时间\';')
-    op.execute('COMMENT ON COLUMN staging_stock_out.updated_at IS \'更新时间\';')
-    op.execute('CREATE TABLE order_sync_config (')
-    op.execute('	id SERIAL NOT NULL,')
-    op.execute('	config_key VARCHAR(100) NOT NULL,')
-    op.execute('	config_value TEXT,')
-    op.execute('	description VARCHAR(255),')
-    op.execute('	updated_at TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	updated_by_id INTEGER,')
-    op.execute('	PRIMARY KEY (id),')
-    op.execute('	UNIQUE (config_key),')
-    op.execute('	FOREIGN KEY(updated_by_id) REFERENCES "user" (id)')
-    op.execute(')')
-    op.execute(';')
-    op.execute('COMMENT ON COLUMN order_sync_config.config_key IS \'配置键\';')
-    op.execute('COMMENT ON COLUMN order_sync_config.config_value IS \'配置值\';')
-    op.execute('COMMENT ON COLUMN order_sync_config.description IS \'配置描述\';')
-    op.execute('COMMENT ON COLUMN order_sync_config.updated_at IS \'更新时间\';')
-    op.execute('COMMENT ON COLUMN order_sync_config.updated_by_id IS \'更新人ID\';')
-    op.execute('CREATE TABLE "case" (')
-    op.execute('	id SERIAL NOT NULL,')
-    op.execute('	product_id INTEGER,')
-    op.execute('	name VARCHAR(100) NOT NULL,')
-    op.execute('	barcode VARCHAR(50),')
-    op.execute('	image VARCHAR(200),')
-    op.execute('	initial_stock INTEGER NOT NULL,')
-    op.execute('	current_stock INTEGER NOT NULL,')
-    op.execute('	version INTEGER DEFAULT \'0\' NOT NULL,')
-    op.execute('	create_time TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	PRIMARY KEY (id),')
-    op.execute('	FOREIGN KEY(product_id) REFERENCES product (id)')
-    op.execute(')')
-    op.execute(';')
-    op.execute('CREATE INDEX idx_case_product ON "case" (product_id);')
-    op.execute('CREATE INDEX ix_case_name ON "case" (name);')
-    op.execute('CREATE INDEX ix_case_create_time ON "case" (create_time);')
-    op.execute('CREATE INDEX idx_case_barcode ON "case" (barcode);')
-    op.execute('CREATE INDEX ix_case_product_id ON "case" (product_id);')
-    op.execute('CREATE INDEX ix_case_barcode ON "case" (barcode);')
-    op.execute('CREATE TABLE product_fabric (')
-    op.execute('	id SERIAL NOT NULL,')
-    op.execute('	product_id INTEGER NOT NULL,')
-    op.execute('	material_code VARCHAR(50),')
-    op.execute('	fabric_name VARCHAR(100) NOT NULL,')
-    op.execute('	specification VARCHAR(100),')
-    op.execute('	quantity NUMERIC(10, 4) NOT NULL,')
-    op.execute('	supplier_id INTEGER,')
-    op.execute('	supplier_name VARCHAR(100),')
-    op.execute('	unit VARCHAR(20),')
-    op.execute('	remark TEXT,')
-    op.execute('	create_time TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	update_time TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	PRIMARY KEY (id),')
-    op.execute('	FOREIGN KEY(product_id) REFERENCES product (id),')
-    op.execute('	FOREIGN KEY(supplier_id) REFERENCES supplier (id)')
-    op.execute(')')
-    op.execute(';')
-    op.execute('CREATE INDEX idx_product_fabric_product ON product_fabric (product_id);')
-    op.execute('COMMENT ON COLUMN product_fabric.product_id IS \'关联产品ID\';')
-    op.execute('COMMENT ON COLUMN product_fabric.material_code IS \'物料编码\';')
-    op.execute('COMMENT ON COLUMN product_fabric.fabric_name IS \'布料名称\';')
-    op.execute('COMMENT ON COLUMN product_fabric.specification IS \'规格型号\';')
-    op.execute('COMMENT ON COLUMN product_fabric.quantity IS \'布料码数/数量(单SKU标准用量)\';')
-    op.execute('COMMENT ON COLUMN product_fabric.supplier_id IS \'默认供应商ID\';')
-    op.execute('COMMENT ON COLUMN product_fabric.supplier_name IS \'供应商名称(冗余)\';')
-    op.execute('COMMENT ON COLUMN product_fabric.unit IS \'单位\';')
-    op.execute('COMMENT ON COLUMN product_fabric.remark IS \'备注\';')
-    op.execute('COMMENT ON COLUMN product_fabric.create_time IS \'创建时间\';')
-    op.execute('COMMENT ON COLUMN product_fabric.update_time IS \'更新时间\';')
-    op.execute('CREATE TABLE product_material (')
-    op.execute('	id SERIAL NOT NULL,')
-    op.execute('	product_id INTEGER NOT NULL,')
-    op.execute('	material_code VARCHAR(50),')
-    op.execute('	cotton_usage NUMERIC(10, 4),')
-    op.execute('	specification VARCHAR(100),')
-    op.execute('	supplier_id INTEGER,')
-    op.execute('	supplier_name VARCHAR(100),')
-    op.execute('	unit VARCHAR(20),')
-    op.execute('	remark TEXT,')
-    op.execute('	create_time TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	update_time TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	PRIMARY KEY (id),')
-    op.execute('	UNIQUE (product_id),')
-    op.execute('	FOREIGN KEY(product_id) REFERENCES product (id),')
-    op.execute('	FOREIGN KEY(supplier_id) REFERENCES supplier (id)')
-    op.execute(')')
-    op.execute(';')
-    op.execute('CREATE INDEX idx_product_material_product ON product_material (product_id);')
-    op.execute('COMMENT ON COLUMN product_material.product_id IS \'关联产品ID\';')
-    op.execute('COMMENT ON COLUMN product_material.material_code IS \'物料编码\';')
-    op.execute('COMMENT ON COLUMN product_material.cotton_usage IS \'棉花用量（克）- 单SKU标准用量\';')
-    op.execute('COMMENT ON COLUMN product_material.specification IS \'规格型号\';')
-    op.execute('COMMENT ON COLUMN product_material.supplier_id IS \'默认供应商ID\';')
-    op.execute('COMMENT ON COLUMN product_material.supplier_name IS \'供应商名称(冗余)\';')
-    op.execute('COMMENT ON COLUMN product_material.unit IS \'单位\';')
-    op.execute('COMMENT ON COLUMN product_material.remark IS \'备注\';')
-    op.execute('COMMENT ON COLUMN product_material.create_time IS \'创建时间\';')
-    op.execute('COMMENT ON COLUMN product_material.update_time IS \'更新时间\';')
-    op.execute('CREATE TABLE product_accessory (')
-    op.execute('	id SERIAL NOT NULL,')
-    op.execute('	product_id INTEGER NOT NULL,')
-    op.execute('	material_code VARCHAR(50),')
-    op.execute('	accessory_name VARCHAR(100) NOT NULL,')
-    op.execute('	specification VARCHAR(100),')
-    op.execute('	quantity NUMERIC(10, 4) NOT NULL,')
-    op.execute('	supplier_id INTEGER,')
-    op.execute('	supplier_name VARCHAR(100),')
-    op.execute('	unit VARCHAR(20),')
-    op.execute('	material_category VARCHAR(20),')
-    op.execute('	remark TEXT,')
-    op.execute('	create_time TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	update_time TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	PRIMARY KEY (id),')
-    op.execute('	FOREIGN KEY(product_id) REFERENCES product (id),')
-    op.execute('	FOREIGN KEY(supplier_id) REFERENCES supplier (id)')
-    op.execute(')')
-    op.execute(';')
-    op.execute('CREATE INDEX idx_product_accessory_product ON product_accessory (product_id);')
-    op.execute('COMMENT ON COLUMN product_accessory.product_id IS \'关联产品ID\';')
-    op.execute('COMMENT ON COLUMN product_accessory.material_code IS \'物料编码\';')
-    op.execute('COMMENT ON COLUMN product_accessory.accessory_name IS \'配件名称\';')
-    op.execute('COMMENT ON COLUMN product_accessory.specification IS \'规格型号\';')
-    op.execute('COMMENT ON COLUMN product_accessory.quantity IS \'数量(单SKU标准用量)\';')
-    op.execute('COMMENT ON COLUMN product_accessory.supplier_id IS \'默认供应商ID\';')
-    op.execute('COMMENT ON COLUMN product_accessory.supplier_name IS \'供应商名称(冗余)\';')
-    op.execute('COMMENT ON COLUMN product_accessory.unit IS \'单位\';')
-    op.execute('COMMENT ON COLUMN product_accessory.material_category IS \'物料分类: accessory/packaging\';')
-    op.execute('COMMENT ON COLUMN product_accessory.remark IS \'备注\';')
-    op.execute('COMMENT ON COLUMN product_accessory.create_time IS \'创建时间\';')
-    op.execute('COMMENT ON COLUMN product_accessory.update_time IS \'更新时间\';')
-    op.execute('CREATE TABLE product_packaging (')
-    op.execute('	id SERIAL NOT NULL,')
-    op.execute('	product_id INTEGER NOT NULL,')
-    op.execute('	material_code VARCHAR(50),')
-    op.execute('	packaging_name VARCHAR(100) NOT NULL,')
-    op.execute('	specification VARCHAR(100),')
-    op.execute('	quantity NUMERIC(10, 4) NOT NULL,')
-    op.execute('	supplier_id INTEGER,')
-    op.execute('	supplier_name VARCHAR(100),')
-    op.execute('	unit VARCHAR(20),')
-    op.execute('	remark TEXT,')
-    op.execute('	create_time TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	update_time TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	PRIMARY KEY (id),')
-    op.execute('	FOREIGN KEY(product_id) REFERENCES product (id),')
-    op.execute('	FOREIGN KEY(supplier_id) REFERENCES supplier (id)')
-    op.execute(')')
-    op.execute(';')
-    op.execute('CREATE INDEX idx_product_packaging_product ON product_packaging (product_id);')
-    op.execute('COMMENT ON COLUMN product_packaging.product_id IS \'关联产品ID\';')
-    op.execute('COMMENT ON COLUMN product_packaging.material_code IS \'物料编码\';')
-    op.execute('COMMENT ON COLUMN product_packaging.packaging_name IS \'包装材料名称\';')
-    op.execute('COMMENT ON COLUMN product_packaging.specification IS \'规格型号\';')
-    op.execute('COMMENT ON COLUMN product_packaging.quantity IS \'数量(单SKU标准用量)\';')
-    op.execute('COMMENT ON COLUMN product_packaging.supplier_id IS \'默认供应商ID\';')
-    op.execute('COMMENT ON COLUMN product_packaging.supplier_name IS \'供应商名称(冗余)\';')
-    op.execute('COMMENT ON COLUMN product_packaging.unit IS \'单位\';')
-    op.execute('COMMENT ON COLUMN product_packaging.remark IS \'备注\';')
-    op.execute('COMMENT ON COLUMN product_packaging.create_time IS \'创建时间\';')
-    op.execute('COMMENT ON COLUMN product_packaging.update_time IS \'更新时间\';')
-    op.execute('CREATE TABLE modification_log (')
-    op.execute('	id SERIAL NOT NULL,')
-    op.execute('	target_type VARCHAR(50) NOT NULL,')
-    op.execute('	target_id INTEGER NOT NULL,')
-    op.execute('	field_name VARCHAR(100) NOT NULL,')
-    op.execute('	old_value TEXT,')
-    op.execute('	new_value TEXT,')
-    op.execute('	modifier_id INTEGER,')
-    op.execute('	modifier_name VARCHAR(100),')
-    op.execute('	modify_time TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	modify_reason TEXT,')
-    op.execute('	PRIMARY KEY (id),')
-    op.execute('	FOREIGN KEY(modifier_id) REFERENCES "user" (id)')
-    op.execute(')')
-    op.execute(';')
-    op.execute('CREATE INDEX ix_modification_log_target_type ON modification_log (target_type);')
-    op.execute('CREATE INDEX idx_mod_target ON modification_log (target_type, target_id);')
-    op.execute('CREATE INDEX ix_modification_log_target_id ON modification_log (target_id);')
-    op.execute('CREATE INDEX idx_mod_time ON modification_log (modify_time);')
-    op.execute('CREATE INDEX ix_modification_log_modify_time ON modification_log (modify_time);')
-    op.execute('COMMENT ON COLUMN modification_log.target_type IS \'目标类型: purchase_order/purchase_order_item/material\';')
-    op.execute('COMMENT ON COLUMN modification_log.target_id IS \'目标ID\';')
-    op.execute('COMMENT ON COLUMN modification_log.field_name IS \'字段名称\';')
-    op.execute('COMMENT ON COLUMN modification_log.old_value IS \'修改前值\';')
-    op.execute('COMMENT ON COLUMN modification_log.new_value IS \'修改后值\';')
-    op.execute('COMMENT ON COLUMN modification_log.modifier_id IS \'修改人ID\';')
-    op.execute('COMMENT ON COLUMN modification_log.modifier_name IS \'修改人姓名\';')
-    op.execute('COMMENT ON COLUMN modification_log.modify_time IS \'修改时间\';')
-    op.execute('COMMENT ON COLUMN modification_log.modify_reason IS \'修改原因\';')
-    op.execute('CREATE TABLE saved_query (')
-    op.execute('	id SERIAL NOT NULL,')
-    op.execute('	name VARCHAR(100) NOT NULL,')
-    op.execute('	query_type VARCHAR(50) NOT NULL,')
-    op.execute('	conditions TEXT NOT NULL,')
-    op.execute('	creator_id INTEGER,')
-    op.execute('	creator_name VARCHAR(100),')
-    op.execute('	create_time TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	use_count INTEGER,')
-    op.execute('	last_use_time TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	PRIMARY KEY (id),')
-    op.execute('	FOREIGN KEY(creator_id) REFERENCES "user" (id)')
-    op.execute(')')
-    op.execute(';')
-    op.execute('CREATE INDEX idx_saved_query_type ON saved_query (query_type);')
-    op.execute('CREATE INDEX idx_saved_query_creator ON saved_query (creator_id);')
-    op.execute('CREATE INDEX ix_saved_query_query_type ON saved_query (query_type);')
-    op.execute('COMMENT ON COLUMN saved_query.name IS \'查询名称\';')
-    op.execute('COMMENT ON COLUMN saved_query.query_type IS \'查询类型: purchase_order/material\';')
-    op.execute('COMMENT ON COLUMN saved_query.conditions IS \'查询条件JSON\';')
-    op.execute('COMMENT ON COLUMN saved_query.creator_id IS \'创建人ID\';')
-    op.execute('COMMENT ON COLUMN saved_query.creator_name IS \'创建人姓名\';')
-    op.execute('COMMENT ON COLUMN saved_query.create_time IS \'创建时间\';')
-    op.execute('COMMENT ON COLUMN saved_query.use_count IS \'使用次数\';')
-    op.execute('COMMENT ON COLUMN saved_query.last_use_time IS \'最后使用时间\';')
-    op.execute('CREATE TABLE order_status_log (')
-    op.execute('	id SERIAL NOT NULL,')
-    op.execute('	target_type VARCHAR(50) NOT NULL,')
-    op.execute('	target_id INTEGER NOT NULL,')
-    op.execute('	order_no VARCHAR(20),')
-    op.execute('	from_status VARCHAR(50),')
-    op.execute('	to_status VARCHAR(50) NOT NULL,')
-    op.execute('	action VARCHAR(50) NOT NULL,')
-    op.execute('	action_label VARCHAR(100),')
-    op.execute('	operator_id INTEGER,')
-    op.execute('	operator_name VARCHAR(100),')
-    op.execute('	action_time TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	action_result VARCHAR(20),')
-    op.execute('	remark TEXT,')
-    op.execute('	related_data TEXT,')
-    op.execute('	PRIMARY KEY (id),')
-    op.execute('	FOREIGN KEY(operator_id) REFERENCES "user" (id)')
-    op.execute(')')
-    op.execute(';')
-    op.execute('CREATE INDEX idx_status_target ON order_status_log (target_type, target_id);')
-    op.execute('CREATE INDEX ix_order_status_log_target_type ON order_status_log (target_type);')
-    op.execute('CREATE INDEX idx_status_time ON order_status_log (action_time);')
-    op.execute('CREATE INDEX ix_order_status_log_action_time ON order_status_log (action_time);')
-    op.execute('CREATE INDEX ix_order_status_log_target_id ON order_status_log (target_id);')
-    op.execute('CREATE INDEX idx_status_order ON order_status_log (order_no);')
-    op.execute('COMMENT ON COLUMN order_status_log.target_type IS \'目标类型: unprocessed_order/purchase_order\';')
-    op.execute('COMMENT ON COLUMN order_status_log.target_id IS \'目标ID\';')
-    op.execute('COMMENT ON COLUMN order_status_log.order_no IS \'订单编号\';')
-    op.execute('COMMENT ON COLUMN order_status_log.from_status IS \'变更前状态\';')
-    op.execute('COMMENT ON COLUMN order_status_log.to_status IS \'变更后状态\';')
-    op.execute('COMMENT ON COLUMN order_status_log.action IS \'操作类型: start_process/complete/ignore/reopen\';')
-    op.execute('COMMENT ON COLUMN order_status_log.action_label IS \'操作标签(中文)\';')
-    op.execute('COMMENT ON COLUMN order_status_log.operator_id IS \'操作人ID\';')
-    op.execute('COMMENT ON COLUMN order_status_log.operator_name IS \'操作人姓名\';')
-    op.execute('COMMENT ON COLUMN order_status_log.action_time IS \'操作时间\';')
-    op.execute('COMMENT ON COLUMN order_status_log.action_result IS \'操作结果: success/failed\';')
-    op.execute('COMMENT ON COLUMN order_status_log.remark IS \'备注说明\';')
-    op.execute('COMMENT ON COLUMN order_status_log.related_data IS \'关联数据JSON\';')
-    op.execute('CREATE TABLE customer_access_log (')
-    op.execute('	id SERIAL NOT NULL,')
-    op.execute('	customer_id INTEGER,')
-    op.execute('	customer_name VARCHAR(100) NOT NULL,')
-    op.execute('	module VARCHAR(50) NOT NULL,')
-    op.execute('	action VARCHAR(50) NOT NULL,')
-    op.execute('	related_id INTEGER,')
-    op.execute('	related_no VARCHAR(50),')
-    op.execute('	quantity INTEGER NOT NULL,')
-    op.execute('	status VARCHAR(20) NOT NULL,')
-    op.execute('	error_message TEXT,')
-    op.execute('	user_id INTEGER,')
-    op.execute('	access_time TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	ip_address VARCHAR(50),')
-    op.execute('	PRIMARY KEY (id),')
-    op.execute('	FOREIGN KEY(customer_id) REFERENCES customer (id),')
-    op.execute('	FOREIGN KEY(user_id) REFERENCES "user" (id)')
-    op.execute(')')
-    op.execute(';')
-    op.execute('CREATE INDEX idx_customer_access_name_time ON customer_access_log (customer_name, access_time);')
-    op.execute('CREATE INDEX idx_customer_access_module_time ON customer_access_log (module, access_time);')
-    op.execute('COMMENT ON COLUMN customer_access_log.customer_id IS \'客户ID\';')
-    op.execute('COMMENT ON COLUMN customer_access_log.customer_name IS \'客户名称\';')
-    op.execute('COMMENT ON COLUMN customer_access_log.module IS \'模块名称\';')
-    op.execute('COMMENT ON COLUMN customer_access_log.action IS \'操作类型\';')
-    op.execute('COMMENT ON COLUMN customer_access_log.related_id IS \'关联记录ID\';')
-    op.execute('COMMENT ON COLUMN customer_access_log.related_no IS \'关联单号\';')
-    op.execute('COMMENT ON COLUMN customer_access_log.quantity IS \'数量\';')
-    op.execute('COMMENT ON COLUMN customer_access_log.status IS \'状态\';')
-    op.execute('COMMENT ON COLUMN customer_access_log.error_message IS \'错误信息\';')
-    op.execute('COMMENT ON COLUMN customer_access_log.user_id IS \'操作用户ID\';')
-    op.execute('COMMENT ON COLUMN customer_access_log.access_time IS \'接入时间\';')
-    op.execute('COMMENT ON COLUMN customer_access_log.ip_address IS \'IP地址\';')
-    op.execute('CREATE TABLE purchase_plans (')
-    op.execute('	id SERIAL NOT NULL,')
-    op.execute('	plan_no VARCHAR(32) NOT NULL,')
-    op.execute('	plan_month VARCHAR(7) NOT NULL,')
-    op.execute('	customer_id INTEGER NOT NULL,')
-    op.execute('	customer_name VARCHAR(100) NOT NULL,')
-    op.execute('	status VARCHAR(20) NOT NULL,')
-    op.execute('	remark TEXT,')
-    op.execute('	upload_batch VARCHAR(64),')
-    op.execute('	created_by VARCHAR(50),')
-    op.execute('	create_time TIMESTAMP WITHOUT TIME ZONE NOT NULL,')
-    op.execute('	update_time TIMESTAMP WITHOUT TIME ZONE NOT NULL,')
-    op.execute('	PRIMARY KEY (id),')
-    op.execute('	UNIQUE (plan_no),')
-    op.execute('	FOREIGN KEY(customer_id) REFERENCES customer (id)')
-    op.execute(')')
-    op.execute(';')
-    op.execute('CREATE INDEX idx_ppl_status ON purchase_plans (status);')
-    op.execute('CREATE INDEX idx_ppl_upload_batch ON purchase_plans (upload_batch);')
-    op.execute('CREATE INDEX idx_ppl_plan_month ON purchase_plans (plan_month);')
-    op.execute('CREATE INDEX idx_ppl_customer_id ON purchase_plans (customer_id);')
-    op.execute('COMMENT ON COLUMN purchase_plans.plan_no IS \'计划编号 PP-YYYYMMDD-NNNN\';')
-    op.execute('COMMENT ON COLUMN purchase_plans.plan_month IS \'计划月份 YYYY-MM\';')
-    op.execute('COMMENT ON COLUMN purchase_plans.customer_id IS \'客户ID\';')
-    op.execute('COMMENT ON COLUMN purchase_plans.customer_name IS \'客户名称(冗余)\';')
-    op.execute('COMMENT ON COLUMN purchase_plans.status IS \'状态: pending/confirmed/completed/cancelled\';')
-    op.execute('COMMENT ON COLUMN purchase_plans.remark IS \'备注\';')
-    op.execute('COMMENT ON COLUMN purchase_plans.upload_batch IS \'上传批次ID\';')
-    op.execute('COMMENT ON COLUMN purchase_plans.created_by IS \'创建人\';')
-    op.execute('COMMENT ON COLUMN purchase_plans.create_time IS \'创建时间\';')
-    op.execute('COMMENT ON COLUMN purchase_plans.update_time IS \'更新时间\';')
-    op.execute('CREATE TABLE stock_out (')
-    op.execute('	id SERIAL NOT NULL,')
-    op.execute('	stockout_no VARCHAR(20) NOT NULL,')
-    op.execute('	stockout_date TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	product_id INTEGER NOT NULL,')
-    op.execute('	quantity INTEGER NOT NULL,')
-    op.execute('	customer VARCHAR(100),')
-    op.execute('	order_id INTEGER,')
-    op.execute('	stockin_id INTEGER,')
-    op.execute('	note TEXT,')
-    op.execute('	PRIMARY KEY (id),')
-    op.execute('	UNIQUE (stockout_no),')
-    op.execute('	FOREIGN KEY(product_id) REFERENCES product (id),')
-    op.execute('	FOREIGN KEY(order_id) REFERENCES "order" (id) ON DELETE CASCADE,')
-    op.execute('	FOREIGN KEY(stockin_id) REFERENCES stock_in (id) ON DELETE SET NULL')
-    op.execute(')')
-    op.execute(';')
-    op.execute('CREATE INDEX idx_stockout_customer_date ON stock_out (customer, stockout_date);')
-    op.execute('CREATE INDEX idx_stockout_stockin ON stock_out (stockin_id);')
-    op.execute('CREATE INDEX idx_stockout_product_customer_type ON stock_out (product_id, customer, stockin_id);')
-    op.execute('CREATE INDEX idx_stockout_order ON stock_out (order_id);')
-    op.execute('CREATE INDEX idx_stockout_order_type ON stock_out (order_id, stockin_id);')
-    op.execute('CREATE INDEX idx_stockout_product_date ON stock_out (product_id, stockout_date);')
-    op.execute('COMMENT ON COLUMN stock_out.stockout_no IS \'出货编号\';')
-    op.execute('COMMENT ON COLUMN stock_out.stockout_date IS \'出货时间\';')
-    op.execute('COMMENT ON COLUMN stock_out.product_id IS \'产品ID\';')
-    op.execute('COMMENT ON COLUMN stock_out.quantity IS \'出货数量\';')
-    op.execute('COMMENT ON COLUMN stock_out.customer IS \'客户名称\';')
-    op.execute('COMMENT ON COLUMN stock_out.order_id IS \'关联订单ID\';')
-    op.execute('COMMENT ON COLUMN stock_out.stockin_id IS \'关联备货ID\';')
-    op.execute('COMMENT ON COLUMN stock_out.note IS \'备注\';')
-    op.execute('CREATE TABLE purchase_order_item (')
-    op.execute('	id SERIAL NOT NULL,')
-    op.execute('	order_id INTEGER NOT NULL,')
-    op.execute('	product_name VARCHAR(200),')
-    op.execute('	barcode VARCHAR(50),')
-    op.execute('	customer_name VARCHAR(100),')
-    op.execute('	material_code VARCHAR(50),')
-    op.execute('	material_name VARCHAR(100) NOT NULL,')
-    op.execute('	specification VARCHAR(100),')
-    op.execute('	unit VARCHAR(20),')
-    op.execute('	quantity NUMERIC(12, 2) NOT NULL,')
-    op.execute('	unit_usage NUMERIC(10, 4),')
-    op.execute('	unit_price NUMERIC(12, 2),')
-    op.execute('	total_price NUMERIC(12, 2),')
-    op.execute('	material_category VARCHAR(20),')
-    op.execute('	remark TEXT,')
-    op.execute('	supplier_name VARCHAR(100),')
-    op.execute('	create_time TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	PRIMARY KEY (id),')
-    op.execute('	FOREIGN KEY(order_id) REFERENCES purchase_order (id)')
-    op.execute(')')
-    op.execute(';')
-    op.execute('CREATE INDEX idx_purchase_order_item_material ON purchase_order_item (material_name);')
-    op.execute('CREATE INDEX idx_purchase_order_item_order ON purchase_order_item (order_id);')
-    op.execute('COMMENT ON COLUMN purchase_order_item.order_id IS \'采购订单ID\';')
-    op.execute('COMMENT ON COLUMN purchase_order_item.product_name IS \'产品名称\';')
-    op.execute('COMMENT ON COLUMN purchase_order_item.barcode IS \'产品条码\';')
-    op.execute('COMMENT ON COLUMN purchase_order_item.customer_name IS \'客户名称\';')
-    op.execute('COMMENT ON COLUMN purchase_order_item.material_code IS \'物料编码\';')
-    op.execute('COMMENT ON COLUMN purchase_order_item.material_name IS \'物料名称\';')
-    op.execute('COMMENT ON COLUMN purchase_order_item.specification IS \'规格型号\';')
-    op.execute('COMMENT ON COLUMN purchase_order_item.unit IS \'计量单位\';')
-    op.execute('COMMENT ON COLUMN purchase_order_item.quantity IS \'采购数量\';')
-    op.execute('COMMENT ON COLUMN purchase_order_item.unit_usage IS \'单SKU标准用量\';')
-    op.execute('COMMENT ON COLUMN purchase_order_item.unit_price IS \'单价\';')
-    op.execute('COMMENT ON COLUMN purchase_order_item.total_price IS \'总价\';')
-    op.execute('COMMENT ON COLUMN purchase_order_item.material_category IS \'物料分类\';')
-    op.execute('COMMENT ON COLUMN purchase_order_item.remark IS \'备注\';')
-    op.execute('COMMENT ON COLUMN purchase_order_item.supplier_name IS \'供应商名称(明细级)\';')
-    op.execute('COMMENT ON COLUMN purchase_order_item.create_time IS \'创建时间\';')
-    op.execute('CREATE TABLE approval_request (')
-    op.execute('	id SERIAL NOT NULL,')
-    op.execute('	order_id INTEGER NOT NULL,')
-    op.execute('	requester_id INTEGER NOT NULL,')
-    op.execute('	operation_type VARCHAR(20) NOT NULL,')
-    op.execute('	operation_data TEXT,')
-    op.execute('	status VARCHAR(20) NOT NULL,')
-    op.execute('	request_time TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	approver_id INTEGER,')
-    op.execute('	approval_time TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	rejection_reason TEXT,')
-    op.execute('	lock_time TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	PRIMARY KEY (id),')
-    op.execute('	FOREIGN KEY(order_id) REFERENCES "order" (id),')
-    op.execute('	FOREIGN KEY(requester_id) REFERENCES "user" (id),')
-    op.execute('	FOREIGN KEY(approver_id) REFERENCES "user" (id)')
-    op.execute(')')
-    op.execute(';')
-    op.execute('CREATE INDEX ix_approval_request_request_time ON approval_request (request_time);')
-    op.execute('CREATE INDEX idx_approval_request_requester ON approval_request (requester_id);')
-    op.execute('CREATE INDEX idx_approval_request_order ON approval_request (order_id);')
-    op.execute('CREATE INDEX ix_approval_request_status ON approval_request (status);')
-    op.execute('CREATE INDEX idx_approval_status_time ON approval_request (status, request_time);')
-    op.execute('COMMENT ON COLUMN approval_request.order_id IS \'关联订单ID\';')
-    op.execute('COMMENT ON COLUMN approval_request.requester_id IS \'申请人ID\';')
-    op.execute('COMMENT ON COLUMN approval_request.operation_type IS \'操作类型：edit/delete\';')
-    op.execute('COMMENT ON COLUMN approval_request.operation_data IS \'操作数据JSON\';')
-    op.execute('COMMENT ON COLUMN approval_request.status IS \'状态：pending/approved/rejected/cancelled\';')
-    op.execute('COMMENT ON COLUMN approval_request.request_time IS \'申请时间\';')
-    op.execute('COMMENT ON COLUMN approval_request.approver_id IS \'审批人ID\';')
-    op.execute('COMMENT ON COLUMN approval_request.approval_time IS \'审批时间\';')
-    op.execute('COMMENT ON COLUMN approval_request.rejection_reason IS \'拒绝原因\';')
-    op.execute('COMMENT ON COLUMN approval_request.lock_time IS \'锁定时间\';')
-    op.execute('CREATE TABLE case_stock_in (')
-    op.execute('	id SERIAL NOT NULL,')
-    op.execute('	stockin_no VARCHAR(20) NOT NULL,')
-    op.execute('	stockin_date TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	customer VARCHAR(100) NOT NULL,')
-    op.execute('	case_id INTEGER NOT NULL,')
-    op.execute('	quantity INTEGER NOT NULL,')
-    op.execute('	note TEXT,')
-    op.execute('	PRIMARY KEY (id),')
-    op.execute('	UNIQUE (stockin_no),')
-    op.execute('	FOREIGN KEY(case_id) REFERENCES "case" (id)')
-    op.execute(')')
-    op.execute(';')
-    op.execute('CREATE INDEX idx_case_stockin_customer_date ON case_stock_in (customer, stockin_date);')
-    op.execute('CREATE INDEX ix_case_stock_in_case_id ON case_stock_in (case_id);')
-    op.execute('CREATE INDEX ix_case_stock_in_stockin_date ON case_stock_in (stockin_date);')
-    op.execute('CREATE INDEX idx_case_stockin_case_date ON case_stock_in (case_id, stockin_date);')
-    op.execute('CREATE INDEX ix_case_stock_in_customer ON case_stock_in (customer);')
-    op.execute('CREATE INDEX idx_case_stockin_customer_case ON case_stock_in (customer, case_id);')
-    op.execute('CREATE TABLE case_stock_out (')
-    op.execute('	id SERIAL NOT NULL,')
-    op.execute('	stockout_no VARCHAR(20) NOT NULL,')
-    op.execute('	stockout_date TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	case_id INTEGER NOT NULL,')
-    op.execute('	quantity INTEGER NOT NULL,')
-    op.execute('	customer VARCHAR(100),')
-    op.execute('	note TEXT,')
-    op.execute('	PRIMARY KEY (id),')
-    op.execute('	UNIQUE (stockout_no),')
-    op.execute('	FOREIGN KEY(case_id) REFERENCES "case" (id)')
-    op.execute(')')
-    op.execute(';')
-    op.execute('CREATE INDEX ix_case_stock_out_customer ON case_stock_out (customer);')
-    op.execute('CREATE INDEX ix_case_stock_out_case_id ON case_stock_out (case_id);')
-    op.execute('CREATE INDEX idx_case_stockout_case_date ON case_stock_out (case_id, stockout_date);')
-    op.execute('CREATE INDEX idx_case_stockout_customer_date ON case_stock_out (customer, stockout_date);')
-    op.execute('CREATE INDEX ix_case_stock_out_stockout_date ON case_stock_out (stockout_date);')
-    op.execute('CREATE TABLE case_inventory_log (')
-    op.execute('	id SERIAL NOT NULL,')
-    op.execute('	case_id INTEGER NOT NULL,')
-    op.execute('	change_type VARCHAR(20) NOT NULL,')
-    op.execute('	change_quantity INTEGER NOT NULL,')
-    op.execute('	change_date TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	related_id VARCHAR(50),')
-    op.execute('	note TEXT,')
-    op.execute('	customer VARCHAR(100),')
-    op.execute('	PRIMARY KEY (id),')
-    op.execute('	FOREIGN KEY(case_id) REFERENCES "case" (id) ON DELETE CASCADE')
-    op.execute(')')
-    op.execute(';')
-    op.execute('CREATE INDEX ix_case_inventory_log_customer ON case_inventory_log (customer);')
-    op.execute('CREATE INDEX ix_case_inventory_log_case_id ON case_inventory_log (case_id);')
-    op.execute('CREATE INDEX idx_case_inventory_log_case_date ON case_inventory_log (case_id, change_date DESC);')
-    op.execute('CREATE INDEX ix_case_inventory_log_change_date ON case_inventory_log (change_date);')
-    op.execute('CREATE INDEX ix_case_inventory_log_change_type ON case_inventory_log (change_type);')
-    op.execute('CREATE TABLE material_registration (')
-    op.execute('	id SERIAL NOT NULL,')
-    op.execute('	purchase_order_id INTEGER NOT NULL,')
-    op.execute('	purchase_order_no VARCHAR(30) NOT NULL,')
-    op.execute('	supplier_id INTEGER,')
-    op.execute('	supplier_name VARCHAR(100),')
-    op.execute('	registration_date DATE NOT NULL,')
-    op.execute('	remark TEXT,')
-    op.execute('	status VARCHAR(20) NOT NULL,')
-    op.execute('	create_time TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	update_time TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	created_by INTEGER,')
-    op.execute('	PRIMARY KEY (id),')
-    op.execute('	FOREIGN KEY(purchase_order_id) REFERENCES purchase_order (id),')
-    op.execute('	FOREIGN KEY(supplier_id) REFERENCES supplier (id),')
-    op.execute('	FOREIGN KEY(created_by) REFERENCES "user" (id)')
-    op.execute(')')
-    op.execute(';')
-    op.execute('CREATE TABLE purchase_plan_details (')
-    op.execute('	id SERIAL NOT NULL,')
-    op.execute('	plan_id INTEGER NOT NULL,')
-    op.execute('	product_id INTEGER NOT NULL,')
-    op.execute('	product_name VARCHAR(100) NOT NULL,')
-    op.execute('	barcode VARCHAR(50) NOT NULL,')
-    op.execute('	plan_date DATE NOT NULL,')
-    op.execute('	quantity INTEGER NOT NULL,')
-    op.execute('	shipped_qty INTEGER NOT NULL,')
-    op.execute('	remark TEXT,')
-    op.execute('	PRIMARY KEY (id),')
-    op.execute('	FOREIGN KEY(plan_id) REFERENCES purchase_plans (id) ON DELETE CASCADE,')
-    op.execute('	FOREIGN KEY(product_id) REFERENCES product (id)')
-    op.execute(')')
-    op.execute(';')
-    op.execute('CREATE INDEX idx_ppd_plan_date_only ON purchase_plan_details (plan_date);')
-    op.execute('CREATE INDEX idx_ppd_product_id ON purchase_plan_details (product_id);')
-    op.execute('CREATE INDEX idx_ppd_plan_date ON purchase_plan_details (plan_id, plan_date);')
-    op.execute('COMMENT ON COLUMN purchase_plan_details.plan_id IS \'关联主单ID\';')
-    op.execute('COMMENT ON COLUMN purchase_plan_details.product_id IS \'产品ID\';')
-    op.execute('COMMENT ON COLUMN purchase_plan_details.product_name IS \'产品名称(冗余)\';')
-    op.execute('COMMENT ON COLUMN purchase_plan_details.barcode IS \'69码\';')
-    op.execute('COMMENT ON COLUMN purchase_plan_details.plan_date IS \'计划日期\';')
-    op.execute('COMMENT ON COLUMN purchase_plan_details.quantity IS \'计划数量\';')
-    op.execute('COMMENT ON COLUMN purchase_plan_details.shipped_qty IS \'已出货数量(缓存)\';')
-    op.execute('COMMENT ON COLUMN purchase_plan_details.remark IS \'备注\';')
-    op.execute('CREATE TABLE approval_log (')
-    op.execute('	id SERIAL NOT NULL,')
-    op.execute('	approval_request_id INTEGER NOT NULL,')
-    op.execute('	action VARCHAR(50) NOT NULL,')
-    op.execute('	actor_id INTEGER,')
-    op.execute('	actor_name VARCHAR(50),')
-    op.execute('	action_time TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	details TEXT,')
-    op.execute('	PRIMARY KEY (id),')
-    op.execute('	FOREIGN KEY(approval_request_id) REFERENCES approval_request (id),')
-    op.execute('	FOREIGN KEY(actor_id) REFERENCES "user" (id)')
-    op.execute(')')
-    op.execute(';')
-    op.execute('CREATE INDEX idx_approval_log_request ON approval_log (approval_request_id);')
-    op.execute('CREATE INDEX ix_approval_log_action_time ON approval_log (action_time);')
-    op.execute('COMMENT ON COLUMN approval_log.approval_request_id IS \'审批请求ID\';')
-    op.execute('COMMENT ON COLUMN approval_log.action IS \'操作动作\';')
-    op.execute('COMMENT ON COLUMN approval_log.actor_id IS \'操作人ID\';')
-    op.execute('COMMENT ON COLUMN approval_log.actor_name IS \'操作人名称\';')
-    op.execute('COMMENT ON COLUMN approval_log.action_time IS \'操作时间\';')
-    op.execute('COMMENT ON COLUMN approval_log.details IS \'操作详情JSON\';')
-    op.execute('CREATE TABLE material_registration_item (')
-    op.execute('	id SERIAL NOT NULL,')
-    op.execute('	registration_id INTEGER NOT NULL,')
-    op.execute('	order_item_id INTEGER,')
-    op.execute('	material_code VARCHAR(50),')
-    op.execute('	material_name VARCHAR(100) NOT NULL,')
-    op.execute('	specification VARCHAR(100),')
-    op.execute('	unit VARCHAR(20),')
-    op.execute('	ordered_quantity NUMERIC(12, 2) NOT NULL,')
-    op.execute('	received_quantity NUMERIC(12, 2) NOT NULL,')
-    op.execute('	material_category VARCHAR(20),')
-    op.execute('	remark TEXT,')
-    op.execute('	create_time TIMESTAMP WITHOUT TIME ZONE,')
-    op.execute('	PRIMARY KEY (id),')
-    op.execute('	FOREIGN KEY(registration_id) REFERENCES material_registration (id),')
-    op.execute('	FOREIGN KEY(order_item_id) REFERENCES purchase_order_item (id)')
-    op.execute(')')
-    op.execute(';')
-    op.execute('CREATE INDEX idx_material_reg_item_name ON material_registration_item (material_name);')
-    op.execute('CREATE INDEX idx_material_reg_item_registration ON material_registration_item (registration_id);')
+    # 逐条下发完整 DDL（此前每条语句被拆成多行导致语法错误）
+    for _stmt in _UPGRADE_STATEMENTS:
+        op.execute(_stmt)
 
 
 def downgrade():
     # Drop all tables
-    op.execute('DROP SCHEMA public CASCADE')
-    op.execute('CREATE SCHEMA public')
+    for _stmt in _DOWNGRADE_STATEMENTS:
+        op.execute(_stmt)

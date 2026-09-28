@@ -8,8 +8,8 @@ Create Date: 2026-08-09
 - customer_sampling_project.is_archived  归档标记（默认 false，表示打样中）
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision = 'pg_standalone_022_add_is_archived'
 down_revision = 'pg_standalone_021_remove_part_name_unique'

@@ -104,7 +104,15 @@ async def get_purchase_order(db: AsyncSession, order_id: int) -> dict:
         'order_date': order.order_date.strftime('%Y-%m-%d') if order.order_date else '',
         'note': order.remark or '',
         'create_time': order.create_time.strftime('%Y-%m-%d %H:%M') if order.create_time else '',
-        'items': [_serialize_po_item(item) for item in items],
+        # 订单级损耗率快照（千分之几）：物料清单「数量」列在逐行 loss_rate 缺失时回退到它，
+        # 与「汇总下单 → 工厂内部采购订单汇总」的展示口径完全同源。
+        'spare_rate': float(order.spare_rate) if order.spare_rate is not None else None,
+        'items': [
+            # 逐行损耗率快照随明细一并下发，供前端派生「最终采购数量」；
+            # 复用 _serialize_po_item 保持字段集不变，仅追加 loss_rate（不污染其它调用方）。
+            {**_serialize_po_item(item), 'loss_rate': float(item.loss_rate) if item.loss_rate is not None else None}
+            for item in items
+        ],
         'sku_items': po_sku_map.get(order.id, []),
     }
 

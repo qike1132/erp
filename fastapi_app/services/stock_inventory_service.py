@@ -48,6 +48,11 @@ _PROD_PID = ' AND product_id = ANY(:pids)'
 _OI_PID = ' AND oi.product_id = ANY(:pids)'
 _OI_OR_O_PID = ' AND (oi.product_id = ANY(:pids) OR (oi.id IS NULL AND o.product_id = ANY(:pids)))'
 
+# 软删除订单不得计入库存/国家聚合：删除订单只置 is_deleted=TRUE，不物理删除行；
+# 缺此过滤会让已删订单的数量永久留在 /stock 视图（与 _get_all_customers、
+# get_stock_overview_stats 的口径保持一致）。
+_O_NOT_DELETED = ' AND o.is_deleted IS NOT TRUE'
+
 
 @cache_result(
     key_prefix='stockins:list',
@@ -418,6 +423,7 @@ def _build_inventory_filter_params(search_product: str, search_customer: str,
         'si_pid': si_pid, 'so_pid': so_pid, 'o_pid': o_pid,
         'oi_or_o_pid': oi_or_o_pid,
         'sub_pid': sub_pid, 'prod_pid': prod_pid, 'pso_pid': pso_pid,
+        'o_not_deleted': _O_NOT_DELETED,
     }
     return params, clauses, pids_param
 
@@ -473,7 +479,7 @@ order_agg AS (
         1 AS has_order
     FROM "order" o
     LEFT JOIN order_item oi ON oi.order_id = o.id
-    WHERE 1=1{c['oi_or_o_pid']}{c['o_cust']}
+    WHERE 1=1{c['oi_or_o_pid']}{c['o_cust']}{c['o_not_deleted']}
     GROUP BY COALESCE(oi.product_id, o.product_id), o.customer
 ),
 country_agg AS (
@@ -483,7 +489,7 @@ country_agg AS (
         COALESCE(oi.country, o.country, '常规') AS country, SUM(COALESCE(oi.quantity, o.quantity)) AS qty
     FROM "order" o
     LEFT JOIN order_item oi ON oi.order_id = o.id
-    WHERE COALESCE(oi.order_type, o.order_type) = 'custom'{c['oi_or_o_pid']}{c['o_cust']}
+    WHERE COALESCE(oi.order_type, o.order_type) = 'custom'{c['oi_or_o_pid']}{c['o_cust']}{c['o_not_deleted']}
     GROUP BY COALESCE(oi.product_id, o.product_id), o.customer, COALESCE(oi.country, o.country, '常规')
 ),
 country_stockout_agg AS (
@@ -660,6 +666,7 @@ async def _get_all_countries(db: AsyncSession, pids: tuple | None, search_custom
         FROM "order" o
         LEFT JOIN order_item oi ON oi.order_id = o.id
         WHERE COALESCE(oi.order_type, o.order_type) = 'custom'{pid_clause}{cust_clause}
+          AND o.is_deleted IS NOT TRUE
           AND COALESCE(oi.country, o.country) IS NOT NULL AND COALESCE(oi.country, o.country) != '常规'
     """)  # nosec B608 - pid_clause/cust_clause 为模块级常量，值通过绑定参数传递
     result = await db.execute(sql, params)
@@ -784,8 +791,8 @@ async def _fetch_inventory(db: AsyncSession, pids: list[int] | None, cust: str='
     stockin_sql = text(f'SELECT si.product_id, si.customer, SUM(si.quantity - COALESCE(sub.consumed, 0)) AS stockin_qty, 1 AS has_stockin FROM stock_in si LEFT JOIN (  SELECT stockin_id, SUM(quantity - returned_quantity) AS consumed   FROM stock_out WHERE stockin_id IS NOT NULL{si_pid}   GROUP BY stockin_id) sub ON sub.stockin_id = si.id WHERE 1=1{si_pid}{si_cust} GROUP BY si.product_id, si.customer')  # nosec B608 — 条件片段为模块级常量，值通过绑定参数传递
     # 多 SKU：订单维度聚合改按 OrderItem；无明细订单回退订单级兼容字段（COALESCE）
     stockout_sql = text(f'SELECT so.product_id, so.customer, SUM(CASE WHEN so.order_id IS NULL THEN so.quantity - so.returned_quantity ELSE 0 END) AS direct_stockout_qty, SUM(CASE WHEN so.order_id IS NOT NULL AND (COALESCE(oi.order_type, o.order_type) IS NULL OR COALESCE(oi.order_type, o.order_type) = \'regular\') THEN so.quantity - so.returned_quantity ELSE 0 END) AS regular_stockout_qty, SUM(CASE WHEN COALESCE(oi.order_type, o.order_type) = \'custom\' THEN so.quantity - so.returned_quantity ELSE 0 END) AS custom_stockout_qty FROM stock_out so LEFT JOIN "order" o ON so.order_id = o.id LEFT JOIN order_item oi ON oi.order_id = so.order_id AND oi.product_id = so.product_id WHERE so.stockin_id IS NULL{so_pid}{so_cust} GROUP BY so.product_id, so.customer')  # nosec B608 — 条件片段为模块级常量，值通过绑定参数传递
-    order_sql = text(f'SELECT COALESCE(oi.product_id, o.product_id) AS product_id, o.customer, SUM(CASE WHEN COALESCE(oi.order_type, o.order_type) IS NULL OR COALESCE(oi.order_type, o.order_type) = \'regular\' THEN COALESCE(oi.quantity, o.quantity) ELSE 0 END) AS regular_order_qty, SUM(CASE WHEN COALESCE(oi.order_type, o.order_type) = \'custom\' THEN COALESCE(oi.quantity, o.quantity) ELSE 0 END) AS custom_order_qty, 1 AS has_order FROM "order" o LEFT JOIN order_item oi ON oi.order_id = o.id WHERE 1=1{oi_or_o_pid}{o_cust} GROUP BY COALESCE(oi.product_id, o.product_id), o.customer')  # nosec B608 — 条件片段为模块级常量，值通过绑定参数传递
-    country_sql = text(f'SELECT COALESCE(oi.product_id, o.product_id) AS product_id, o.customer, COALESCE(oi.country, o.country, \'常规\') AS country, SUM(COALESCE(oi.quantity, o.quantity)) AS qty FROM "order" o LEFT JOIN order_item oi ON oi.order_id = o.id WHERE COALESCE(oi.order_type, o.order_type) = \'custom\'{oi_or_o_pid}{o_cust} GROUP BY COALESCE(oi.product_id, o.product_id), o.customer, COALESCE(oi.country, o.country, \'常规\')')  # nosec B608 — 条件片段为模块级常量，值通过绑定参数传递
+    order_sql = text(f'SELECT COALESCE(oi.product_id, o.product_id) AS product_id, o.customer, SUM(CASE WHEN COALESCE(oi.order_type, o.order_type) IS NULL OR COALESCE(oi.order_type, o.order_type) = \'regular\' THEN COALESCE(oi.quantity, o.quantity) ELSE 0 END) AS regular_order_qty, SUM(CASE WHEN COALESCE(oi.order_type, o.order_type) = \'custom\' THEN COALESCE(oi.quantity, o.quantity) ELSE 0 END) AS custom_order_qty, 1 AS has_order FROM "order" o LEFT JOIN order_item oi ON oi.order_id = o.id WHERE 1=1{oi_or_o_pid}{o_cust}{_O_NOT_DELETED} GROUP BY COALESCE(oi.product_id, o.product_id), o.customer')  # nosec B608 — 条件片段为模块级常量，值通过绑定参数传递
+    country_sql = text(f'SELECT COALESCE(oi.product_id, o.product_id) AS product_id, o.customer, COALESCE(oi.country, o.country, \'常规\') AS country, SUM(COALESCE(oi.quantity, o.quantity)) AS qty FROM "order" o LEFT JOIN order_item oi ON oi.order_id = o.id WHERE COALESCE(oi.order_type, o.order_type) = \'custom\'{oi_or_o_pid}{o_cust}{_O_NOT_DELETED} GROUP BY COALESCE(oi.product_id, o.product_id), o.customer, COALESCE(oi.country, o.country, \'常规\')')  # nosec B608 — 条件片段为模块级常量，值通过绑定参数传递
     stockin_rows = await _run_sql(db, stockin_sql, params)
     stockout_rows = await _run_sql(db, stockout_sql, params)
     order_rows = await _run_sql(db, order_sql, params)

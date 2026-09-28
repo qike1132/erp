@@ -145,8 +145,11 @@ async def create_order(db: AsyncSession, product_id: int, quantity: int,
     from fastapi_app.services.outsource_service import auto_generate_for_order
     await auto_generate_for_order(db, order)
 
+    # 新订单数量计入库存视图（order_agg）与商品首屏 current_stock，
+    # 因此必须一并失效 INVENTORY 域，否则下单后 /stock 在 TTL 内仍是旧数据。
     await cache_mgr.invalidate(
-        InvalidationStrategy.DOMAIN, CacheDomain.ORDER | CacheDomain.REPORT)
+        InvalidationStrategy.DOMAIN,
+        CacheDomain.ORDER_AND_INVENTORY | CacheDomain.REPORT)
     # dashboard 缓存失效已移至 endpoint 层（事务提交后），此处不再重复
     logger.info(f'订单添加成功：{order_no}，客户：{customer}，产品：{product.name}，数量：{quantity}')
 
@@ -550,8 +553,11 @@ async def _delete_order_directly(
 
     await db.flush()
     try:
+        # 删除后订单不再计入库存视图（order_agg/country_agg 过滤 is_deleted），
+        # 必须一并失效 INVENTORY 域，否则 /stock 在 TTL 内仍显示已删订单的数量。
         await cache_mgr.invalidate(
-            InvalidationStrategy.DOMAIN, CacheDomain.ORDER | CacheDomain.REPORT)
+            InvalidationStrategy.DOMAIN,
+            CacheDomain.ORDER_AND_INVENTORY | CacheDomain.REPORT)
         # dashboard 缓存失效已移至 endpoint 层（事务提交后）
     except INFRA_EXCEPTIONS as e:
         logger.warning('缓存清除失败: %s', e)

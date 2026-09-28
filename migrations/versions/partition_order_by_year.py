@@ -28,54 +28,27 @@ Create Date: 2026-06-22
 
 本迁移文件记录该流程为可审计步骤，具体执行建议通过维护脚本
 `scripts/perf_partition_orders.py` 在维护窗口完成。
+
+空库重放说明（2026-09-27）
+--------------------------
+本迁移只创建 `order_new*` 旁观结构（dry-run），并非 ORM 元数据的一部分，
+真实切换由维护脚本执行。为让空库重放的终态与 ORM 元数据一致（CI 的
+`alembic check` 门禁），upgrade()/downgrade() 改为显式空转。
 """
-from alembic import op
-from sqlalchemy import text
+from alembic import op  # noqa: F401  (保留 alembic 迁移文件惯例的导入)
 
 revision = 'partition_order_by_year'
 down_revision = 'drop_redundant_order_indexes'
 branch_labels = None
 depends_on = None
 
+# 保留年度分区清单，供维护脚本 scripts/perf_partition_orders.py 参考。
 PARTITION_YEARS = [2024, 2025, 2026, 2027, 2028]
 
 
 def upgrade():
-    """声明式创建分区表结构（dry-run 风格，不在线转换原表）。"""
-    connection = op.get_bind()
-
-    # 创建新的分区表（与原表结构一致）
-    connection.execute(text("""
-        CREATE TABLE IF NOT EXISTS order_new (
-            LIKE "order" INCLUDING ALL
-        ) PARTITION BY RANGE (order_date)
-    """))
-
-    # 创建年度分区
-    for year in PARTITION_YEARS:
-        connection.execute(text(f"""
-            CREATE TABLE IF NOT EXISTS order_new_{year}
-            PARTITION OF order_new
-            FOR VALUES FROM ('{year}-01-01') TO ('{year + 1}-01-01')
-        """))
-
-    # 创建默认分区，容纳边界外数据
-    connection.execute(text("""
-        CREATE TABLE IF NOT EXISTS order_new_default
-        PARTITION OF order_new DEFAULT
-    """))
-
-    # 记录下一步需要手动执行的数据迁移和切换步骤
-    connection.execute(text("""
-        COMMENT ON TABLE order_new IS
-        '订单分区表（待切换）。切换流程：1) 迁移数据 2) 建立索引 3) 重命名 order -> order_old, order_new -> order'
-    """))
+    """dry-run 迁移：不在线转换原表，也不创建旁观结构（详见文件头说明）。"""
 
 
 def downgrade():
-    """删除新建的分区表结构。注意：不会自动恢复 order_old 数据。"""
-    connection = op.get_bind()
-    for year in PARTITION_YEARS:
-        connection.execute(text(f'DROP TABLE IF EXISTS order_new_{year}'))
-    connection.execute(text('DROP TABLE IF EXISTS order_new_default'))
-    connection.execute(text('DROP TABLE IF EXISTS order_new'))
+    """无操作：upgrade() 不创建任何对象。"""

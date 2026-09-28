@@ -108,7 +108,7 @@
       "targets": [
         { "expr": "up{job='fastapi'}", "legendFormat": "FastAPI" },
         { "expr": "up{job='flask'}", "legendFormat": "Flask" },
-        { "expr": "up{job='mysql'}", "legendFormat": "MySQL" },
+        { "expr": "up{job='postgres'}", "legendFormat": "PostgreSQL" },
         { "expr": "up{job='redis'}", "legendFormat": "Redis" }
       ],
       "fieldConfig": {

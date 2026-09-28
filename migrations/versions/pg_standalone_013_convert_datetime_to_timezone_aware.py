@@ -10,7 +10,8 @@ use datetime.now(timezone.utc) as default/onupdate are changed to
 DateTime(timezone=True), which maps to TIMESTAMP WITH TIME ZONE.
 """
 from alembic import op
-import sqlalchemy as sa
+
+from migrations._legacy_base_guard import table_columns
 
 revision = 'pg_standalone_013'
 down_revision = 'pg_standalone_012'
@@ -115,6 +116,26 @@ def _q(identifier: str) -> str:
     return '"' + identifier.replace('"', '""') + '"'
 
 
+def _convert(target_type: str, pairs) -> None:
+    """批量改列类型；表或列不存在则跳过（空库重放时部分对象尚未建出）。
+
+    真实库上所有列都存在，行为与改动前完全一致。
+    """
+    cache: dict[str, set | None] = {}
+    for table, column in pairs:
+        if table not in cache:
+            cache[table] = table_columns(table)
+        present = cache[table]
+        if present is None or column not in present:
+            continue
+        op.execute(
+            f'ALTER TABLE {_q(table)} '
+            f'ALTER COLUMN {_q(column)} '
+            f'TYPE {target_type} '
+            f"USING {_q(column)} AT TIME ZONE 'UTC'"
+        )
+
+
 def upgrade() -> None:
     """Upgrade TIMESTAMP WITHOUT TIME ZONE → TIMESTAMP WITH TIME ZONE.
 
@@ -126,21 +147,9 @@ def upgrade() -> None:
     by +/- N hours — a silent data-corruption event affecting audit logs,
     modification histories, inventory timing, and financial reports.
     """
-    for table, column in _COLUMNS:
-        op.execute(
-            f'ALTER TABLE {_q(table)} '
-            f'ALTER COLUMN {_q(column)} '
-            f'TYPE TIMESTAMP WITH TIME ZONE '
-            f"USING {_q(column)} AT TIME ZONE 'UTC'"
-        )
+    _convert('TIMESTAMP WITH TIME ZONE', _COLUMNS)
 
 
 def downgrade() -> None:
     """Inverse: timestamptz → timestamp using UTC to preserve values."""
-    for table, column in reversed(_COLUMNS):
-        op.execute(
-            f'ALTER TABLE {_q(table)} '
-            f'ALTER COLUMN {_q(column)} '
-            f'TYPE TIMESTAMP WITHOUT TIME ZONE '
-            f"USING {_q(column)} AT TIME ZONE 'UTC'"
-        )
+    _convert('TIMESTAMP WITHOUT TIME ZONE', reversed(_COLUMNS))

@@ -137,11 +137,13 @@
 
 <script setup lang="ts">
 import { ref, watch, nextTick, computed } from 'vue'
+import { useQueryClient } from '@tanstack/vue-query'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import { showToast } from '@/composables/useToast'
 import { orderApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import { getErrorMessage } from '@/types/errors'
+import { invalidateStockDataQueries } from '@/utils/queryKeys'
 import { QUANTITY_RANGE_MESSAGE } from './composables/quantityRange'
 import { useOrderForm } from './composables/useOrderForm'
 import { useOrderList } from './composables/useOrderList'
@@ -240,6 +242,7 @@ const {
 } = useOrderActions(form, isOrder, fetchOrders)
 
 const authStore = useAuthStore()
+const queryClient = useQueryClient()
 const canDelete = computed(() => authStore.hasPermission('order_manage'))
 
 async function handleDeleteOrder(record: OrderRecord) {
@@ -253,6 +256,9 @@ async function handleDeleteOrder(record: OrderRecord) {
   try {
     const res = await orderApi.delete(record.id) as { message?: string }
     showToast(res?.message || '订单删除成功', 'success')
+    // 删除订单会同时改变库存视图（order_agg/country_agg 过滤 is_deleted）：
+    // 必须失效派生查询缓存，否则 /stock 在 staleTime 内仍展示删除前的库存数据。
+    invalidateStockDataQueries(queryClient)
     fetchOrders()
   } catch (e: unknown) {
     showToast(getErrorMessage(e, '删除订单失败'), 'error')
@@ -288,6 +294,7 @@ function addStaged() {
     deductQuantity: isOrder.value && form.deductStock ? form.deductQuantity : 0,
   })
   resetFormAfterAdd()
+  inputPanelRef.value?.resetQuantityValidation()
   // 连续录入：焦点交回产品输入框，用户不必从页首重新 Tab 16 个框架层停点
   void nextTick(() => {
     inputPanelRef.value?.focusProductInput()

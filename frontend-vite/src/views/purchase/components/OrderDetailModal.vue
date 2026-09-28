@@ -23,7 +23,7 @@
               <tr v-for="(item, idx) in order.items || []" :key="idx">
                 <td class="odm-td-name">{{ item.material_name || '—' }}</td>
                 <td class="odm-td-muted">{{ item.specification || '—' }}</td>
-                <td class="odm-td-num">{{ formatNumber(item.quantity) }}</td>
+                <td class="odm-td-num">{{ formatNumber(displayQty(item)) }}</td>
                 <td class="odm-td-muted">{{ item.unit || '—' }}</td>
                 <td class="odm-td-muted">{{ scopeOf(item) }}</td>
               </tr>
@@ -46,13 +46,36 @@
 
 <script setup lang="ts">
 import UiDialog from '@/components/ui/UiDialog.vue'
-import type { PurchaseOrder } from '@/types'
+import type { PurchaseOrder, PurchaseOrderItem } from '@/types'
 import { formatNumber } from '@/utils/format'
+import { factoryQtyDisplayValue } from '../composables/useSummaryModal'
 
-defineProps<{
+const props = defineProps<{
   open: boolean
   order: PurchaseOrder | null
 }>()
+
+/**
+ * 物料清单「数量」列的展示值：与「汇总下单 → 工厂内部采购订单汇总」的数量列**同源**。
+ *
+ * 口径 = 原始落库数量按该行损耗率（千分之几）加放后向上取整，
+ * 即最终确认的采购数量；用户自定义调整损耗率后，这里立刻反映同一数值。
+ *
+ * 损耗率回退链（与 useSummaryModal 的逐行播种口径一致）：
+ * 逐行 loss_rate → 订单级 spare_rate → 0（旧数据零回归，等于原始落库数量）。
+ * 只做展示派生，**不写回任何数据**。
+ */
+function displayQty(item: PurchaseOrderItem): number {
+  const baseQty = parseFloat(String(item.quantity)) || 0
+  const itemRate = item.loss_rate
+  const orderRate = props.order?.spare_rate
+  const rate = typeof itemRate === 'number' && Number.isFinite(itemRate)
+    ? itemRate
+    : typeof orderRate === 'number' && Number.isFinite(orderRate)
+      ? orderRate
+      : 0
+  return factoryQtyDisplayValue(baseQty, rate, false)
+}
 
 defineEmits<{ close: [] }>()
 
@@ -140,8 +163,12 @@ function scopeOf(item: { remark?: string | null }): string {
   z-index: 1;
 }
 
-.odm-th-num {
-  text-align: right;
+/* 数量列：表头与数据统一居中。
+   注意 `.odm-table thead th`（0,2,1）的 text-align:left 特异性高于 `.odm-th-num`（0,1,0），
+   故这里显式提权，否则表头仍会左对齐、与数据列错位。 */
+.odm-table thead th.odm-th-num,
+.odm-table tbody td.odm-td-num {
+  text-align: center;
 }
 
 .odm-table tbody td {
@@ -183,7 +210,6 @@ function scopeOf(item: { remark?: string | null }): string {
 }
 
 .odm-td-num {
-  text-align: right;
   font-weight: 600;
   color: var(--color-primary-700, #2d5ab8);
   white-space: nowrap;

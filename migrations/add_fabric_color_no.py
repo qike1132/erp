@@ -1,9 +1,12 @@
 """Add fabric_color_no column to customer_sampling_part table."""
-import os, sys
+import os
+import sys
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from fastapi_app.core.config import Settings
 from sqlalchemy import create_engine, text
+
+from fastapi_app.core.config import Settings
 
 settings = Settings()
 engine = create_engine(settings.DATABASE_URL)

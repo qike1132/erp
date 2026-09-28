@@ -17,7 +17,7 @@ export const plushCutePT: PrimeVuePTOptions = {
   // AutoComplete
   // ============================================================
   autocomplete: {
-    root: 'relative',
+    root: 'relative w-full',
     input: ({ props }) => ({
       class: [
         'w-full',
@@ -49,7 +49,7 @@ export const plushCutePT: PrimeVuePTOptions = {
     }),
     optionGroup: 'px-3 py-1.5 text-[11px] font-semibold text-text-muted uppercase tracking-wider',
     emptyMessage: 'px-3 py-6 text-center text-sm text-text-muted',
-    loader: 'mr-2 animate-spin',
+    loader: 'absolute top-1/2 right-4 -translate-y-1/2 animate-spin',
     dropdown: {
       class: [
         'border-0 bg-transparent',
