@@ -32,8 +32,6 @@
     "orders[].product_name:str",
     "orders[].quantity:float",
     "orders[].sku_items[].barcode:str",
-    "orders[].sku_items[].country:str",
-    "orders[].sku_items[].order_type:str",
     "orders[].sku_items[].product_name:str",
     "orders[].sku_items[].quantity:float",
     "orders[].source_order_no:str",

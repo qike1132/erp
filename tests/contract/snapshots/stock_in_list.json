@@ -10,12 +10,10 @@
   "auth": true,
   "http_status": 200,
   "shape": [
-    "data[].country:str",
     "data[].customer:str",
     "data[].deducted:int",
     "data[].id:int",
     "data[].note:str",
-    "data[].order_type:str",
     "data[].product.barcode:str",
     "data[].product.id:int",
     "data[].product.image:str",

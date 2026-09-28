@@ -146,7 +146,6 @@ class OrderSerializer:
         OrderField.QUANTITY: "quantity",
         OrderField.STATUS: "status",
         OrderField.NOTE: "note",
-        OrderField.STATUS: "status",
         OrderField.IS_LOCKED: "is_locked",
         OrderField.BATCH_NO: "batch_no",
         OrderField.BATCH_COMPLETED_AT: "batch_completed_at",

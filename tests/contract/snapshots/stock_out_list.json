@@ -11,11 +11,9 @@
   "http_status": 200,
   "shape": [
     "data[].barcode:str",
-    "data[].country:str",
     "data[].customer:str",
     "data[].id:int",
     "data[].note:str",
-    "data[].order_type:str",
     "data[].product.barcode:str",
     "data[].product.id:int",
     "data[].product.image:str",

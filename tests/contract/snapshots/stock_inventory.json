@@ -10,10 +10,8 @@
   "auth": true,
   "http_status": 200,
   "shape": [
-    "all_countries[]:str",
     "all_customers[]:str",
     "data[].available_stock:str",
-    "data[].country_orders:object{}",
     "data[].customer:str",
     "data[].order_quantity:int",
     "data[].product_barcode:str",
