@@ -2687,6 +2687,9 @@ class ServerManagerApp:
                                          (self.hosting_arq_badge, 'ARQ')):
                         _detail(badge, 'deploying', f'{label} 启动中')
                     _detail(self.hosting_ready_badge, 'deploying', '就绪 启动中')
+                    # 启动窗口内备份状态无从得知(尚未采到新快照),置「状态未知」,
+                    # 否则徽章会滞留上一轮的绿/红(同 f31457eb 修的假信号类)。
+                    _detail(self.hosting_backup_badge, 'stopped', '备份 状态未知')
                     return
                 reason = (f"已 {int(time.time() - data['mtime'])}s 未更新，最后 {mtime_str}"
                           if stale else (read_err or '状态文件不可用'))
@@ -2698,6 +2701,8 @@ class ServerManagerApp:
                                      (self.hosting_arq_badge, 'ARQ')):
                     _detail(badge, 'stopped', f'{label} 状态未知')
                 _detail(self.hosting_ready_badge, 'stopped', f'就绪 无数据({mtime_str})')
+                # 状态文件不可信 ⇒ 备份真相也无从得知,不得滞留上一轮的绿/红。
+                _detail(self.hosting_backup_badge, 'stopped', '备份 状态未知')
                 return
             self._hosting_last_warn = ''
 

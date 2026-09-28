@@ -35,20 +35,20 @@ def test_collect_does_not_fetch_with_plain_urlopen() -> None:
     assert "urllib.request.urlopen(" not in seg
 
 
-def test_backup_badge_updated_in_service_stopped_branch() -> None:
-    """回归锁(2026-09-28 用户实测):服务全停时备份徽章必须一起更新。
+def test_every_early_return_updates_backup_badge() -> None:
+    """回归锁:凡 _apply_hosting_data 里的提前 return,之前必须更新备份徽章。
 
-    旧实现:未运行分支只更新后端/ARQ/前端/就绪/Redis,漏了备份 →
-    徽章保留上一次的绿色「正常(8h)」,在 ARQ 已停(备份不会跑)时显示假健康。
+    备份取值来自每轮采集,不经状态文件;任何提前 return 漏掉它,都会让旧值滞留
+    ——2026-09-28 用户实测到的假健康(服务全停仍显示绿色「正常(8.5h)」)就是这么来的。
+    该缺陷在同函数里出现过四次(collect_error / 未运行 / 启动窗口 / 状态不可信),
+    故此处扫全部分支,而不是逐条列举。
     """
-    start = TEXT.index("if not data['api_running']:")
-    end = TEXT.index("read_err = data['read_err']")
-    branch = TEXT[start:end]
-    assert "hosting_backup_badge" in branch, "服务未运行分支漏更新备份徽章 → 旧值滞留成假信号"
-
-
-def test_backup_badge_not_left_stale_on_collect_error() -> None:
-    """采集失败提前 return 前也必须先把备份徽章置为未知,避免旧值滞留。"""
-    start = TEXT.index("if data.get('collect_error'):")
-    seg = TEXT[start:start + 600]
-    assert "hosting_backup_badge" in seg, "采集失败分支未重置备份徽章"
+    body = TEXT[TEXT.index("def _apply_hosting_data"):TEXT.index("def _collect_hosting_data")]
+    lines = body.splitlines()
+    misses = []
+    for i, line in enumerate(lines):
+        if line.strip() == "return":
+            window = "\n".join(lines[max(0, i - 20):i])
+            if "hosting_backup_badge" not in window:
+                misses.append(i)
+    assert not misses, f"_apply_hosting_data 有 {len(misses)} 处提前 return 未重置备份徽章 → 旧值滞留成假信号"
