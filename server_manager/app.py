@@ -255,16 +255,7 @@ class ServerManagerApp:
                 self.log_message(err, 'ERROR')
 
     # ── Redis 探活/启停转发(T3 包化:实现已迁 server_manager/redis_ops.py) ──────
-    # 保留同名瘦转发,既有调用点与静态断言不必改写。redis_process 由 RedisOps 自持,
-    # app 内经属性桥 _redis_process 读写(计划明令保留转发/桥接层)。
-
-    @property
-    def _redis_process(self):
-        return self.redis.redis_process
-
-    @_redis_process.setter
-    def _redis_process(self, value):
-        self.redis.redis_process = value
+    # 保留同名瘦转发,既有调用点与静态断言不必改写。
 
     def _get_env_value(self, key: str) -> str:
         return self.redis.get_env_value(key)
