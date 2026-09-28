@@ -67,7 +67,8 @@ export function usePatternRoomPrint(options: UsePatternRoomPrintOptions) {
     const allRoles = roles.value
     printRoles.value = allRoles
     // 后端不支持不传 role_id 返回全部角色，需逐个角色加载（并行请求，避免多角色串行等待）。
-    // finalOnly=true：打印只用各角色最终版本行，避免拉取全部历史版本快照
+    // finalOnly=true：每个部位名称只返回一行（有最终版本行取最终版本，否则取该部位最新
+    // 有数据的版本）——打样单不会漏掉尚未复制到最终版本的部位，也避免拉取全部历史版本快照
     try {
       const results = await Promise.all(
         allRoles.map((role) => patternRoomApi.getPartsByVersion(projectId, role.id, true)),
@@ -77,8 +78,7 @@ export function usePatternRoomPrint(options: UsePatternRoomPrintOptions) {
         const role = allRoles[idx]!
         let items = results[idx]!.items ?? []
         if (items.length === 0) {
-          // 最终版本无数据（current_version 指向空版本/已不存在的版本）：回退取该角色
-          // 全部版本中「最新且有数据」的版本，否则该角色会被整段漏打
+          // 兜底：角色一个部位都没有时（finalOnly 已保证「有部位就有行」，此处防后端异常）
           const full = await patternRoomApi.getPartsByVersion(projectId, role.id)
           items = pickNewestVersionRows(full.items ?? [], full.versions ?? [])
         }

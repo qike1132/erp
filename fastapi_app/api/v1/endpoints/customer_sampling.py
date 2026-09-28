@@ -410,7 +410,11 @@ async def api_list_change_logs(
 async def api_get_parts_by_version(
     project_id: int,
     role_id: int | None = Query(None, description='角色ID筛选（未传时默认指向默认角色）'),
-    final_only: bool = Query(False, description='仅返回该角色最终版本行（打印场景，避免拉取全部历史版本）'),
+    final_only: bool = Query(
+        False,
+        description='打印场景：逐部位名称只返回一行（最终版本行优先，否则取最新有数据的版本），'
+        '且不加载历史版本快照',
+    ),
     db: AsyncSession = Depends(get_read_db),
 ) -> dict[str, Any]:
     """获取指定角色所有版本的部位布料数据（跨版本二维表数据源）"""
