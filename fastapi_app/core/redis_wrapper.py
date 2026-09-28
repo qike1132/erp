@@ -4,6 +4,7 @@ Redis 缓存操作统一包装器
 封装 utils.redis_cache 的常用操作，统一异常处理和日志格式。
 所有方法在 Redis 不可用时静默降级，不影响核心业务流程。
 """
+import contextlib
 import logging
 from typing import Any
 
@@ -100,10 +101,31 @@ def get_client():
     """
     try:
         from utils.redis_cache import redis_cache
-        client = getattr(redis_cache, 'redis_client', None)
-        return client
+        # 走 ensure_client() 而非直接读 redis_client：客户端缺失时它会惰性重建（自愈）。
+        # 否则「Redis 启动即不可用」会让本进程**永久**拿不到客户端（撤销黑名单、
+        # 限流等裸客户端路径全部退化为内存降级）。见 RedisCacheManager 类 docstring。
+        return redis_cache.ensure_client()
     except (ImportError, OSError, RuntimeError):
         return None
+
+
+def note_command_success() -> None:
+    """告知缓存管理器一条 Redis 命令成功（复位自愈/退避窗口）。
+
+    「端点/服务不得直接 import utils.redis_cache」是本项目的既有约定
+    （守卫见 tests/test_p3_redis_wrapper.py）。需要上报成败时请用本模块的
+    `note_command_success` / `note_command_failure`，不要绕过边界。
+    """
+    with contextlib.suppress(Exception):
+        from utils.redis_cache import redis_cache
+        redis_cache.note_command_success()
+
+
+def note_command_failure(exc: Exception) -> None:
+    """告知缓存管理器一条 Redis 命令失败（连接类错误会 arm 退避窗口）。"""
+    with contextlib.suppress(Exception):
+        from utils.redis_cache import redis_cache
+        redis_cache.note_command_failure(exc)
 
 
 async def safe_lpush(key: str, *values: Any, context: str = "") -> int:

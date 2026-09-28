@@ -18,11 +18,56 @@ import redis.asyncio as aioredis
 
 logger = logging.getLogger(__name__)
 
+#: Redis 客户端的公共构造参数（两条构造分支共用，避免两处漂移）。
+#: 放模块级而非类属性：可变对象作类属性会被 RUF012 判为风险默认值。
+_CLIENT_OPTS: dict[str, Any] = {
+    'decode_responses': True,
+    'socket_connect_timeout': 5,
+    'socket_timeout': 5,
+    'retry_on_timeout': True,
+    'max_connections': 100,
+}
+
 
 class RedisCacheManager:
-    """异步 Redis 缓存管理器"""
+    """异步 Redis 缓存管理器
+
+    客户端自愈（2026-09-28）
+    ------------------------
+    `init_app()` 在 `ping()` 失败时会把 `redis_client` 置 None，此前**永不重试** ——
+    于是「Redis 启动即不可用」会让整个进程生命周期都只用内存降级（缓存、撤销黑名单、
+    限流全受影响）；与 fail-closed 鉴权叠加时更表现为**永久 401**，只能重启进程。
+
+    `redis.asyncio.Redis` 的连接池自带重连，所以只要能拿到客户端对象，Redis 恢复后
+    命令就会自动成功 —— 根因只是"对象被丢成 None 后再没重建"。`ensure_client()`
+    负责惰性重建（构造是惰性的、不建连，连通性交给首条命令验证），并用指数退避
+    避免长时间故障期间每个请求都重建一次连接池。
+
+    裸客户端契约（重要）
+    --------------------
+    `note_command_success()` / `note_command_failure()` 只在**走本类包装方法**时
+    自动触发。经 `core/redis_wrapper.get_client()` 直连的调用不经过包装方法，
+    需调用方**自行**告知，否则不进入降级/退避（故障期间会每个请求真连一次）：
+
+    - 已接通：`core/auth/blacklist.py`（撤销黑名单 —— fail-closed 路由的路径）、
+      `api/v1/endpoints/auth.py`（登录限流）、`core/maintenance.py`（维护模式闸门，
+      2026-09-28 后续从另一个孤立客户端迁入）。
+    - 未接通 · 走 get_client()：`dead_letter`、`domain_events`（后者每次失败后
+      `sleep 5s` 自带节流），以及 `redis_wrapper` 中直接用裸客户端的那些 `safe_*`。
+      影响有限：任一路径 armed 退避后，`ensure_client()` 会对**所有**调用方返回
+      None，未接通的路径也会被同一窗口顺带短路。
+    - 未接通 · 且**结构上不在本机制内**：`backup_progress` 用的是
+      `core/redis_client.get_async_redis_client()` —— **另一个**客户端，既不自愈
+      也不退避（`get_client()` 对它只是几乎走不到的兜底）。补 `note_*` 只会替
+      get_client() 的消费者 arm 窗口，约束不了它自己的重试，故不改。
+    """
 
     FALLBACK_MAX_SIZE = 1000
+
+    #: 自愈重连的退避：初始 1s，每次重建后翻倍，封顶 60s。
+    #: 封顶不能太大，否则 Redis 恢复后仍要等很久才再尝试一次。
+    RETRY_INITIAL_DELAY = 1.0
+    RETRY_MAX_DELAY = 60.0
 
     def __init__(self):
         self.redis_client: aioredis.Redis | None = None
@@ -35,8 +80,18 @@ class RedisCacheManager:
         # 若将来确需按实例隔离，必须同时改 init_app 的默认值与调用方传参，否则仍是空转。
         self.key_prefix = 'erp:'
         self._fallback_cache: dict[str, Any] = {}
+        # 降级缓存每条的**过期时刻**（time.time() 基准）。必须逐条记，
+        # 不能用全局 default_timeout —— 否则 set(timeout=30) 在降级路径下会
+        # 按 300 秒过期（安全复审 2026-09-28 指出的真实缺陷）。
         self._fallback_timestamps: dict[str, float] = {}
         self._lock = asyncio.Lock()
+        # --- 自愈重连状态（见类 docstring）---
+        #: init_app 时记住的连接参数；为 None 表示从未初始化过，不可凭空重建。
+        self._connect_kwargs: dict[str, Any] | None = None
+        #: 下次允许重建的时间点（time.monotonic）。
+        self._next_retry_at: float = 0.0
+        #: 当前退避时长，重建一次翻倍。
+        self._retry_delay: float = self.RETRY_INITIAL_DELAY
 
     async def init_app(self, app=None, redis_url: str | None = None, redis_host: str = 'localhost',
                        redis_port: int = 6379, redis_db: int = 0, redis_password: str | None = None,
@@ -50,16 +105,18 @@ class RedisCacheManager:
             default_timeout = app.config.get('CACHE_DEFAULT_TIMEOUT', 300)
             key_prefix = app.config.get('CACHE_KEY_PREFIX', 'erp:')
 
+        # 记住连接参数：init 失败后 ensure_client() 靠它惰性重建 —— 自愈的前提。
+        if redis_url:
+            self._connect_kwargs = {'url': redis_url}
+        else:
+            self._connect_kwargs = {
+                'host': redis_host, 'port': redis_port,
+                'db': redis_db, 'password': redis_password,
+            }
+
         if redis_url:
             try:
-                self.redis_client = aioredis.from_url(
-                    redis_url,
-                    decode_responses=True,
-                    socket_connect_timeout=5,
-                    socket_timeout=5,
-                    retry_on_timeout=True,
-                    max_connections=100
-                )
+                self.redis_client = aioredis.from_url(redis_url, **_CLIENT_OPTS)
                 await self.redis_client.ping()
                 # 日志脱敏：REDIS_URL 可能内嵌口令（redis://:pwd@host），不得明文入日志
                 from urllib.parse import urlsplit, urlunsplit
@@ -68,30 +125,117 @@ class RedisCacheManager:
                 if _parts.port:
                     _safe_netloc += f':{_parts.port}'
                 logger.info("Redis 异步连接成功: %s", urlunsplit((_parts.scheme, _safe_netloc, _parts.path, '', '')))
-            except (redis.ConnectionError, Exception) as e:
+            except Exception as e:  # defensive: 连接失败不得阻断启动，降级到内存缓存
                 logger.warning("Redis 异步连接失败，将使用内存缓存: %s", e)
                 self.redis_client = None
         else:
             try:
-                self.redis_client = aioredis.Redis(
-                    host=redis_host,
-                    port=redis_port,
-                    db=redis_db,
-                    password=redis_password,
-                    decode_responses=True,
-                    socket_connect_timeout=5,
-                    socket_timeout=5,
-                    retry_on_timeout=True,
-                    max_connections=100
-                )
+                self.redis_client = self._build_client()
                 await self.redis_client.ping()
                 logger.info("Redis 异步连接成功: %s:%s", redis_host, redis_port)
-            except (redis.ConnectionError, Exception) as e:
+            except Exception as e:  # defensive: 连接失败不得阻断启动，降级到内存缓存
                 logger.warning("Redis 异步连接失败，将使用内存缓存: %s", e)
                 self.redis_client = None
 
         self.default_timeout = default_timeout
         self.key_prefix = key_prefix
+
+        if self.redis_client is not None:
+            # 连上了 → 复位退避，避免上次故障的残余延迟拖慢后续重建
+            self._retry_delay = self.RETRY_INITIAL_DELAY
+            self._next_retry_at = 0.0
+
+    def _build_client(self) -> aioredis.Redis | None:
+        """按记住的参数构造客户端。构造是**惰性**的：不建连、不 ping。"""
+        kwargs = self._connect_kwargs
+        if not kwargs:
+            return None
+        if 'url' in kwargs:
+            return aioredis.from_url(kwargs['url'], **_CLIENT_OPTS)
+        return aioredis.Redis(
+            host=kwargs['host'], port=kwargs['port'], db=kwargs['db'],
+            password=kwargs['password'], **_CLIENT_OPTS,
+        )
+
+    def ensure_client(self) -> aioredis.Redis | None:
+        """客户端缺失时惰性重建（自愈）；已有则原样返回。
+
+        **同步且无 await** —— 在 asyncio 单线程下即是原子的，无需加锁。
+        返回 None 表示当前不可用，调用方照旧走既有降级路径。
+
+        注意不需要"重建后 ping 成功才算数"：redis-py 的连接池自带重连，
+        对象一旦拿到，Redis 恢复后的命令就会自动成功。
+
+        退避与 `note_command_failure()` 是一对：后者在命令遇连接类错误时把客户端
+        降回 None 并按同一个退避窗口排下一次重试 —— 两者合起来才构成
+        「检测到不可用 → 退避 → 到期再试」的完整循环，也让持续故障期间的
+        重试频率与日志量有界。
+        """
+        if self.redis_client is not None:
+            return self.redis_client
+        if self._connect_kwargs is None:
+            return None  # 从未初始化过，不可凭空重建
+
+        now = time.monotonic()
+        if now < self._next_retry_at:
+            return None  # 退避窗口内：避免长时间故障时每个请求都重建连接池
+
+        try:
+            client = self._build_client()
+        except Exception as e:  # defensive: 连接参数异常不得让每个请求都抛
+            logger.warning("Redis 客户端重建失败（将等待下个退避窗口）: %s", e)
+            self._next_retry_at = now + self._retry_delay
+            self._retry_delay = min(self._retry_delay * 2, self.RETRY_MAX_DELAY)
+            return None
+        if client is None:
+            return None
+
+        self.redis_client = client
+        self._next_retry_at = now + self._retry_delay
+        self._retry_delay = min(self._retry_delay * 2, self.RETRY_MAX_DELAY)
+        logger.info("Redis 客户端已惰性重建（连通性由首条命令验证）")
+        return client
+
+    def note_command_success(self) -> None:
+        """命令成功 → 复位退避。
+
+        为什么必须有它：退避只在 `init_app` 成功时复位。若失败期间退避涨到上限
+        （60s）后 Redis 恢复，退避仍停在 60s —— 于是**之后一次偶发抖动**就要等
+        60s 才再尝试，而这段时间里 fail-closed 路由（如 `/backup`）会因
+        `get_client()` 为 None + 本地缓存未命中而对**合法用户**返回 401。
+        改动前，一次抖动只损失大约一个请求。
+
+        复位成本极低：正常运行时该分支只做一次比较。
+        """
+        if self._retry_delay == self.RETRY_INITIAL_DELAY and self._next_retry_at == 0.0:
+            return
+        self._retry_delay = self.RETRY_INITIAL_DELAY
+        self._next_retry_at = 0.0
+
+    def note_command_failure(self, exc: Exception) -> None:
+        """命令失败且属**连接类**错误时降级并进入退避。
+
+        为什么需要它：惰性重建只保证"拿到客户端对象"，而对象一旦被赋给
+        `redis_client` 就不会再回到 None —— 于是 Redis 持续不可用期间，
+        **每个**缓存读/黑名单查询都会真的去连一次（最多 `socket_connect_timeout`
+        秒）并各自打一条 warning。旧实现在这种情形下是 `redis_client is None`
+        直接短路：零 I/O、零日志。本方法把那个短路行为恢复回来，同时让退避
+        真正承担"重试节奏"的职责。
+
+        只对连接/超时类错误降级：协议类错误（如 WRONGTYPE）不是连通性问题，
+        不该把客户端丢掉。
+        """
+        if not isinstance(exc, (redis.exceptions.ConnectionError, redis.exceptions.TimeoutError)):
+            return
+        if self.redis_client is None:
+            return  # 已经降级过，避免重复刷新退避窗口
+        self.redis_client = None
+        self._next_retry_at = time.monotonic() + self._retry_delay
+        logger.warning(
+            "Redis 连接不可用，已降级到内存缓存（%.0fs 后重试）: %s",
+            self._retry_delay, exc,
+        )
+        self._retry_delay = min(self._retry_delay * 2, self.RETRY_MAX_DELAY)
 
     def _make_key(self, key: str) -> str:
         """把业务 key 转换为带前缀的物理 key。
@@ -123,8 +267,8 @@ class RedisCacheManager:
             return
 
         now = time.time()
-        expired_keys = [k for k, ts in self._fallback_timestamps.items()
-                        if now - ts > self.default_timeout]
+        expired_keys = [k for k, expires_at in self._fallback_timestamps.items()
+                        if now > expires_at]
         for k in expired_keys:
             self._fallback_cache.pop(k, None)
             del self._fallback_timestamps[k]
@@ -139,17 +283,20 @@ class RedisCacheManager:
     async def get(self, key: str) -> Any | None:
         full_key = self._make_key(key)
 
-        if self.redis_client:
+        client = self.ensure_client()
+        if client:
             try:
-                value = await self.redis_client.get(full_key)
+                value = await client.get(full_key)
+                self.note_command_success()
                 if value:
                     return json.loads(value)
             except Exception as e:
                 logger.warning("Redis async get error: %s", e)
+                self.note_command_failure(e)
 
         async with self._lock:
-            ts = self._fallback_timestamps.get(full_key)
-            if ts is not None and time.time() - ts > self.default_timeout:
+            expires_at = self._fallback_timestamps.get(full_key)
+            if expires_at is not None and time.time() > expires_at:
                 self._fallback_cache.pop(full_key, None)
                 del self._fallback_timestamps[full_key]
                 return None
@@ -159,27 +306,34 @@ class RedisCacheManager:
         full_key = self._make_key(key)
         timeout = timeout or self.default_timeout
 
-        if self.redis_client:
+        client = self.ensure_client()
+        if client:
             try:
                 serialized = json.dumps(value, ensure_ascii=False)
-                return await self.redis_client.setex(full_key, timeout, serialized)
+                ok = await client.setex(full_key, timeout, serialized)
+                self.note_command_success()
+                return ok
             except Exception as e:
                 logger.warning("Redis async set error: %s", e)
+                self.note_command_failure(e)
 
         async with self._lock:
             self._fallback_cache[full_key] = value
-            self._fallback_timestamps[full_key] = time.time()
+            self._fallback_timestamps[full_key] = time.time() + timeout
             self._cleanup_fallback()
         return True
 
     async def delete(self, key: str) -> bool:
         full_key = self._make_key(key)
 
-        if self.redis_client:
+        client = self.ensure_client()
+        if client:
             try:
-                await self.redis_client.unlink(full_key)
+                await client.unlink(full_key)
+                self.note_command_success()
             except Exception as e:
                 logger.warning("Redis async unlink error: %s", e)
+                self.note_command_failure(e)
 
         async with self._lock:
             self._fallback_cache.pop(full_key, None)
@@ -190,24 +344,27 @@ class RedisCacheManager:
         full_pattern = self._make_key(pattern)
         deleted_count = 0
 
-        if self.redis_client:
+        client = self.ensure_client()
+        if client:
             try:
                 cursor = 0
                 max_iterations = 1000
                 iterations = 0
                 while True:
-                    cursor, keys = await self.redis_client.scan(
+                    cursor, keys = await client.scan(
                         cursor=cursor, match=full_pattern, count=100
                     )
                     if keys:
-                        deleted_count += await self.redis_client.unlink(*keys)
+                        deleted_count += await client.unlink(*keys)
                     iterations += 1
                     if cursor == 0 or iterations >= max_iterations:
                         break
+                self.note_command_success()
                 if iterations >= max_iterations:
                     logger.warning("delete_pattern 达到迭代上限 %d，模式: %s", max_iterations, full_pattern)
             except Exception as e:
                 logger.warning("Redis async delete_pattern error: %s", e)
+                self.note_command_failure(e)
 
         async with self._lock:
             prefix = full_pattern.replace('*', '')
@@ -222,15 +379,19 @@ class RedisCacheManager:
     async def exists(self, key: str) -> bool:
         full_key = self._make_key(key)
 
-        if self.redis_client:
+        client = self.ensure_client()
+        if client:
             try:
-                return bool(await self.redis_client.exists(full_key))
+                found = bool(await client.exists(full_key))
+                self.note_command_success()
+                return found
             except Exception as e:
                 logger.warning("Redis async exists error: %s", e)
+                self.note_command_failure(e)
 
         async with self._lock:
-            ts = self._fallback_timestamps.get(full_key)
-            if ts is not None and time.time() - ts > self.default_timeout:
+            expires_at = self._fallback_timestamps.get(full_key)
+            if expires_at is not None and time.time() > expires_at:
                 self._fallback_cache.pop(full_key, None)
                 del self._fallback_timestamps[full_key]
                 return False
@@ -239,17 +400,21 @@ class RedisCacheManager:
     async def incr(self, key: str) -> int:
         full_key = self._make_key(key)
 
-        if self.redis_client:
+        client = self.ensure_client()
+        if client:
             try:
-                return await self.redis_client.incr(full_key)
+                value = await client.incr(full_key)
+                self.note_command_success()
+                return value
             except Exception as e:
                 logger.warning("Redis async incr error: %s", e)
+                self.note_command_failure(e)
 
         async with self._lock:
             current = self._fallback_cache.get(full_key, 0)
             new_value = current + 1
             self._fallback_cache[full_key] = new_value
-            self._fallback_timestamps[full_key] = time.time()
+            self._fallback_timestamps[full_key] = time.time() + self.default_timeout
             return new_value
 
     async def get_stats(self) -> dict:
@@ -282,6 +447,12 @@ class RedisCacheManager:
             except Exception as e:
                 logger.warning("Redis async close error: %s", e)
             self.redis_client = None
+
+        # 关停后不得再惰性重建：迟到的在飞请求会造出一个永不 aclose 的连接池，
+        # 并在正在关闭的 event loop 上打错误日志。
+        # ⚠️ 必须在 if **之外**：客户端本就为 None（例如 init 失败过）时同样要清掉
+        #    连接参数，否则 close() 之后仍会被重建。
+        self._connect_kwargs = None
 
 
 redis_cache = RedisCacheManager()

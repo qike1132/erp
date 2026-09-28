@@ -43,7 +43,9 @@ _ALLOWED_BARE_CLIENT_CALLS: dict[str, str] = {
     'fastapi_app/core/domain_events.py':
         'pub/sub 订阅，wrapper 未封装 pubsub；channel 名不是缓存 key',
     'fastapi_app/core/maintenance.py':
-        'key 自带 erp: 前缀（erp:maintenance_mode），两套路径恰好解析一致',
+        '维护标志 key 自带 erp: 前缀（erp:maintenance_mode），与 redis_cache 的 '
+        '前缀契约一致；2026-09-28 起统一走自愈客户端（此前用另一个孤立客户端，'
+        '失败时每写请求一条无节流告警）',
     'fastapi_app/api/v1/endpoints/dead_letter.py':
         '读取 arq:dead_letter 死信队列，读写两侧均走 safe_* wrapper',
 }

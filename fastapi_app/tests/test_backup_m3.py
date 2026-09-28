@@ -139,17 +139,20 @@ class TestRestoreSlotMutex:
 # ===========================================================================
 
 class TestMaintenance:
+    # 客户端来源已改为 core/redis_wrapper.get_client()（自愈客户端，
+    # 见 core/maintenance.py 模块 docstring），故 mock 目标从 bp._get_redis
+    # 改为 maintenance._get_client；bf._get_redis 的 mock 仍用于还原锁那组测试。
     @pytest.mark.asyncio
     async def test_enter_sets_flag(self, monkeypatch):
         client = AsyncMock()
-        monkeypatch.setattr(bp, '_get_redis', AsyncMock(return_value=client))
+        monkeypatch.setattr(maintenance, '_get_client', AsyncMock(return_value=client))
         assert await maintenance.enter_maintenance() is True
         client.set.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_exit_deletes_flag(self, monkeypatch):
         client = AsyncMock()
-        monkeypatch.setattr(bp, '_get_redis', AsyncMock(return_value=client))
+        monkeypatch.setattr(maintenance, '_get_client', AsyncMock(return_value=client))
         await maintenance.exit_maintenance()
         client.delete.assert_awaited_once()
 
@@ -157,7 +160,7 @@ class TestMaintenance:
     async def test_is_on(self, monkeypatch):
         client = AsyncMock()
         client.get.return_value = b'1'
-        monkeypatch.setattr(bp, '_get_redis', AsyncMock(return_value=client))
+        monkeypatch.setattr(maintenance, '_get_client', AsyncMock(return_value=client))
         assert await maintenance.is_maintenance_mode() is True
 
     @pytest.mark.asyncio
@@ -165,7 +168,7 @@ class TestMaintenance:
         from starlette.requests import Request
         client = AsyncMock()
         client.get.return_value = b'1'
-        monkeypatch.setattr(bp, '_get_redis', AsyncMock(return_value=client))
+        monkeypatch.setattr(maintenance, '_get_client', AsyncMock(return_value=client))
 
         async def call_next(req):
             return MagicMock(status_code=200)
@@ -179,7 +182,7 @@ class TestMaintenance:
         from starlette.requests import Request
         client = AsyncMock()
         client.get.return_value = b'1'
-        monkeypatch.setattr(bp, '_get_redis', AsyncMock(return_value=client))
+        monkeypatch.setattr(maintenance, '_get_client', AsyncMock(return_value=client))
 
         async def call_next(req):
             return MagicMock(status_code=200)
