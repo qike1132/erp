@@ -371,16 +371,21 @@ class OneClickButtonGroup:
 
 def _load_rounded_button():
     """延迟导入宿主的 RoundedButton（避免模块级循环依赖）。"""
-    from server_manager import RoundedButton
+    from server_manager.widgets import RoundedButton
 
     return RoundedButton
 
 
 def _palette_color(token: str) -> str:
-    """延迟获取宿主 TOKENS 颜色（隔离对宿主模块的模块级依赖）。"""
-    from server_manager import TOKENS
+    """延迟获取宿主调色板颜色（隔离对宿主模块的模块级依赖）。
 
-    return TOKENS.c(token)
+    原文引用 ``from server_manager import TOKENS``,但 ``TOKENS`` 从未存在过
+    (包化前后全仓皆无此名)。真实调色板是 ``ServerManagerApp._PALETTE``
+    (见 server_manager/app.py),按其原意直取该字典。
+    """
+    from server_manager.app import ServerManagerApp
+
+    return ServerManagerApp._PALETTE[token]
 
 
 # ======================================================================
@@ -421,7 +426,8 @@ def _palette_color(token: str) -> str:
                 subprocess.run(['nssm', 'stop', name], executable=nssm, **_cap(15))
             else:
                 subprocess.run(['sc', 'stop', name], **_cap(15))
-            if not app._wait_service_stopped(name, timeout=45):
+            # 实现已迁 ServiceOps（T4 包化）：经 app.svc 访问，方法名去掉前导下划线
+            if not app.svc.wait_service_stopped(name, timeout=45):
                 raise RuntimeError(f'{name} 停止超时，已中止重启')
         app._release_ports()
         for name in (_SVC_API, _SVC_ARQ):
@@ -430,7 +436,7 @@ def _palette_color(token: str) -> str:
                 subprocess.run(['nssm', 'start', name], executable=nssm, **_cap(30))
             else:
                 subprocess.run(['sc', 'start', name], **_cap(30))
-        if not app._wait_service_running(_SVC_API):
+        if not app.svc.wait_service_running(_SVC_API):
             raise RuntimeError('重启后未达 RUNNING，健康检查失败')
 
     prod_spec = ModeActionSpec(
