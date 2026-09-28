@@ -891,18 +891,15 @@ class ServerManagerApp:
         redis_conf = next((str(p) for p in _REDIS_CONF_PATHS if p.is_file()), None)
         return redis_exe, redis_conf
 
-    def _is_redis_running(self):
-        """检测 Redis 是否真正可用：TCP 连通 + 认证通过
+    def _redis_ping(self, port, password):
+        """RESP PING 判活：+PONG(免密)或 AUTH 后 +PONG 才算可用。
 
         仅做端口探测会误报（Redis 服务 Paused/停止或密码不匹配时，端口探测仍可能
-        短暂通过）。这里通过 RESP 协议发送 PING：
-        - 返回 +PONG ：无需密码，正常运行
-        - 返回 -NOAUTH：需密码，先 AUTH（用 .env 的 REDIS_PASSWORD）再 PING
-        - 其余情况：不可用
+        短暂通过）。缓存(6379)与 broker(6380)两份实现原本逐字相同、只差端口，
+        收敛到此处。
         """
-        password = self._get_env_value('REDIS_PASSWORD')
         try:
-            with socket.create_connection(('127.0.0.1', _REDIS_PORT), timeout=1) as sock:
+            with socket.create_connection(('127.0.0.1', port), timeout=1) as sock:
                 sock.sendall(b'*1\r\n$4\r\nPING\r\n')
                 resp = sock.recv(64)
                 if resp.startswith(b'+PONG'):
@@ -923,15 +920,20 @@ class ServerManagerApp:
         except Exception:
             return False
 
+    def _is_redis_running(self):
+        """检测 Redis(6379) 是否真正可用：TCP 连通 + 认证通过。"""
+        return self._redis_ping(_REDIS_PORT, self._get_env_value('REDIS_PASSWORD'))
+
     def _redis_service_state(self, name):
-        """查询 Redis 相关 Windows 服务的状态文本（空字符串=服务不存在）。"""
-        code, out = self._run_capture(['sc', 'query', name], timeout=5)
-        if code != 0:
-            return ''
-        for line in (out or '').splitlines():
-            if 'STATE' in line.upper():
-                return line.strip()
-        return 'EXISTS'
+        """Redis 服务的状态文本；空字符串 = 服务不存在。
+
+        复用 _svc_state 以继承其三态语义（未安装 / 未知 / STATE 文本）——旧实现是
+        宽松版：任何 `sc` 失败都返回空串，把「查不出来」与「服务不存在」混同，
+        于是查询超时会被当成「未安装」并给出误导性指引。
+        仍保留「空串=不存在」这一对外契约（调用方据此返回 None 表示未安装）。
+        """
+        state = self._svc_state(name)
+        return '' if '未安装' in state else state
 
     def _start_redis_via_service(self, name):
         """优先通过 Windows 服务启动 Redis（返回 True/False/None=服务不存在）。
@@ -1011,25 +1013,7 @@ class ServerManagerApp:
 
     def _is_broker_running(self):
         """ARQ broker(6380) 是否真的可用：TCP 连通 + AUTH/PING（与缓存实例同款校验）。"""
-        password = self._get_env_value('REDIS_PASSWORD')
-        try:
-            with socket.create_connection(('127.0.0.1', _REDIS_BROKER_PORT), timeout=1) as sock:
-                sock.sendall(b'*1\r\n$4\r\nPING\r\n')
-                resp = sock.recv(64)
-                if resp.startswith(b'+PONG'):
-                    return True
-                if resp.startswith(b'-NOAUTH'):
-                    if not password:
-                        return False
-                    auth_cmd = (f'*2\r\n$4\r\nAUTH\r\n${len(password)}\r\n{password}\r\n').encode()
-                    sock.sendall(auth_cmd)
-                    if not sock.recv(64).startswith(b'+OK'):
-                        return False
-                    sock.sendall(b'*1\r\n$4\r\nPING\r\n')
-                    return sock.recv(64).startswith(b'+PONG')
-            return False
-        except Exception:
-            return False
+        return self._redis_ping(_REDIS_BROKER_PORT, self._get_env_value('REDIS_PASSWORD'))
 
     def _ensure_redis_broker(self):
         """确保 ARQ broker(6380) 就绪——生产启动前调用，返回是否就绪。
@@ -2229,14 +2213,15 @@ class ServerManagerApp:
         fn = state_fn or self._svc_state
         deadline = time.monotonic() + timeout
         state = fn(name)
-        while time.monotonic() < deadline:
-            if checkpoint:
-                self._gate.checkpoint()
-            state = fn(name)
+        while True:
             if target in state.upper():
                 return state
+            if time.monotonic() >= deadline:
+                return state
+            if checkpoint:
+                self._gate.checkpoint()
             time.sleep(interval)
-        return state
+            state = fn(name)
 
     def _wait_service_stopped(self, name, timeout=45):
         """发出 nssm stop 后轮询服务状态直到 STOPPED；超时返回 False。
