@@ -15,6 +15,7 @@ ERP 服务器管理器 GUI v5.5
   - 状态强制重置：遇到状态卡顿时，支持强制重置并重新启动
   - 高端暗色 UI — Linear/Vercel 风格配色 + 微交互动画
 """
+import contextlib
 import hashlib
 import json
 import locale
@@ -2580,14 +2581,12 @@ class ServerManagerApp:
         # 备份可观测性：/api/health 的 backup 块（产物新鲜度 + ARQ 在线）。
         # 本机、10s 缓存、开销小；失败即空 dict，徽章显示「未上报」而非误报正常。
         data['backup'] = {}
-        try:
+        with contextlib.suppress(Exception):
             with _HTTP_DIRECT.open(f'http://127.0.0.1:{_API_PORT}/api/health', timeout=3) as resp:
                 payload = json.loads(resp.read().decode('utf-8'))
             blk = payload.get('backup')
             if isinstance(blk, dict):
                 data['backup'] = blk
-        except Exception:
-            pass
         return data
 
     def _apply_hosting_data(self, data):
@@ -2598,6 +2597,9 @@ class ServerManagerApp:
             # 绝不能落成「已停止」——否则查不出来会被误当成生产已停、诱导误判。
             self._prod_unknown = data.get('api_unknown', False)
             if data.get('collect_error'):
+                # 必须先重置备份徽章:它不在状态文件里,靠每轮采集刷新——
+                # 采集失败提前 return 会让旧值滞留,把上一次的绿色显示成现状。
+                self.hosting_backup_badge.set_state('stopped', '备份 状态未知')
                 self._warn_once('collect-error',
                                 f"状态收集失败（{data.get('error', '未知原因')}），界面本轮不更新")
                 return
@@ -2616,12 +2618,16 @@ class ServerManagerApp:
                     _detail(self.hosting_arq_badge, 'stopped', 'ARQ 状态未知')
                     _detail(self.hosting_frontend_badge, 'stopped', '前端 状态未知')
                     _detail(self.hosting_ready_badge, 'stopped', '就绪 状态未知')
+                    _detail(self.hosting_backup_badge, 'stopped', '备份 状态未知')
                 else:
                     self.hosting_svc_badge.set_state('stopped', '服务停止')
                     _detail(self.hosting_backend_badge, 'stopped', '后端 已停止')
                     _detail(self.hosting_arq_badge, 'stopped', 'ARQ 未运行')
                     _detail(self.hosting_frontend_badge, 'stopped', '前端 已停止')
                     _detail(self.hosting_ready_badge, 'stopped', '就绪 —')
+                    # 服务全停时 ARQ 也停了 ⇒ 备份不会执行。此处必须一同置灰,
+                    # 否则徽章保留上一次的绿色「正常(Nh)」= 假健康(2026-09-28 用户实测发现)。
+                    _detail(self.hosting_backup_badge, 'stopped', '备份 已停止')
                 redis_ok = data['redis_ok']
                 broker_ok = data.get('broker_ok', False)
                 # 缓存与 broker 分开显示：broker 决定 ARQ（cron/备份/报表）能否工作，
