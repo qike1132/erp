@@ -31,6 +31,14 @@ DEPARTMENT_LABELS = {
 }
 
 
+class InvalidDateRangeError(ValueError):
+    """日期区间非法（如结束日期早于开始日期）。
+
+    继承 ValueError，使既有「ValueError → 400」的映射继续生效；
+    /export 端点需要把它与「行数超限的 ValueError」区分开（后者映 413）。
+    """
+
+
 async def _build_product_price_fallback(
     db: AsyncSession,
     records: Iterable[DailyProductionRecord],
@@ -653,7 +661,7 @@ async def export_records(
     range_start = parse_date_with_fallback(start_date) if start_date else None
     range_end = parse_date_with_fallback(end_date) if end_date else None
     if range_start and range_end and range_end < range_start:
-        raise ValueError('结束日期不能早于开始日期')
+        raise InvalidDateRangeError('结束日期不能早于开始日期')
     if range_start:
         conditions.append(DailyProductionRecord.production_date >= range_start)
     if range_end:

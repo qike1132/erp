@@ -121,6 +121,25 @@ class TestRecordsAndExportScope:
         assert response.status_code == 200
         assert called_kwargs['departments'] == {'packaging'}
 
+    async def test_export_reversed_range_returns_400_not_413(self, client):
+        # /export 的 ValueError→413 分支是为「行数上界保护」而设；
+        # 反向区间是参数错误，必须与超限区分开、返回 400
+        from fastapi_app.services.daily_production_service import InvalidDateRangeError
+
+        _scope_override({'filling'})
+        with patch(
+            'fastapi_app.api.v1.endpoints.daily_production.daily_production_service'
+        ) as mock_svc:
+            mock_svc.export_records = AsyncMock(
+                side_effect=InvalidDateRangeError('结束日期不能早于开始日期')
+            )
+            response = await client.get(
+                '/api/v1/daily-production/export',
+                params={'start_date': '2026-09-30', 'end_date': '2026-09-01'},
+            )
+
+        assert response.status_code == 400
+
     async def test_missing_scope_dependency_still_403_for_no_permission_user(self, client, mock_current_user):
         # 走真实依赖（不覆盖），has_permission 全 False → 403
         app.dependency_overrides.pop(resolve_production_view_scope, None)

@@ -32,6 +32,7 @@ from fastapi_app.schemas.daily_production import (
     TrendResponse,
 )
 from fastapi_app.services import daily_production_service
+from fastapi_app.services.daily_production_service import InvalidDateRangeError
 from fastapi_app.shared_models import User
 
 router = APIRouter()
@@ -309,6 +310,8 @@ async def export_records(
             media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.xlsx',
             headers={'Content-Disposition': 'attachment; filename=production_report.xlsx'},
         )
+    except InvalidDateRangeError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except ValueError as e:
         # 服务层行数上界保护：超限时引导用户缩小筛选范围（批次 2）
         raise HTTPException(status_code=413, detail=str(e)) from e
