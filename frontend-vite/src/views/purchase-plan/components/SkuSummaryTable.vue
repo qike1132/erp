@@ -144,9 +144,12 @@ function progCls(pct: number): string {
   background: var(--color-primary-50);
 }
 
-/* 数字列右对齐：左对齐时位数不同的数量无法纵向比大小 */
-.th-num,
-.td-num {
+/* 数字列右对齐：左对齐时位数不同的数量无法纵向比大小。
+   必须带 .sp-sku-table 前缀：否则 `.th-num`（0,2,0）会被上方
+   `.sp-sku-table th { text-align: left }`（0,2,1）覆盖，
+   导致数字列表头左对齐、与右对齐的数字内容错位。 */
+.sp-sku-table .th-num,
+.sp-sku-table .td-num {
   text-align: right;
 }
 
