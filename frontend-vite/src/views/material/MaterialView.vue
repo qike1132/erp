@@ -10,20 +10,30 @@
           <button :class="['mr-tab-btn', { active: activeTab === 'history' }]" aria-label="历史查询" @click="switchToHistory">
             历史查询
           </button>
-          <button v-if="canManage && activeTab === 'progress'" class="mr-btn mr-btn-ghost" title="导出来料进度数据" aria-label="导出" @click="exportData"><FontAwesomeIcon icon="file-export" /> 导出</button>
           <button v-if="canManage && activeTab === 'history'" class="mr-btn mr-btn-ghost" title="导出历史数据" aria-label="导出" @click="exportHistory"><FontAwesomeIcon icon="file-export" /> 导出</button>
         </div>
       </div>
 
-      <!-- ========== 来料进度（子组件化，模板与列定义原样搬移） ========== -->
+      <!-- 来料进度单行工具条：搜索 · KPI 四格 · 导出（与 /stock 同构） -->
+      <MaterialToolbar
+        v-if="activeTab === 'progress'"
+        v-model:search="searchKeyword"
+        :stats="stats"
+        :has-data="progressOrderRows.length > 0"
+        :can-export="canManage"
+        @export="exportData"
+      />
+
+      <!-- ========== 来料进度（方案A改版：同单合并·默认展开·分段堆叠条） ========== -->
       <ProgressTab
         v-if="activeTab === 'progress'"
+        :filtered-rows="filteredOrderRows"
         :progress-order-rows="progressOrderRows"
-        :progress-rows="progressRows"
         :p-is-loading="pIsLoading"
         :p-is-fetching="pIsFetching"
         :p-per-page="pPerPage"
         :p-pages="pPages"
+        :show-search-empty="showSearchEmpty"
         @page="onProgressPageChange"
         @view-supplier="viewSupplierDetail"
       />
@@ -89,6 +99,7 @@ import { useMaterialRegistrations } from './composables/useMaterialRegistrations
 import { mapSupplierDetail, updateSupplierDialogLocally, updateDetailDialogLocally } from './composables/useSupplierDetailTransform'
 import ProgressTab from './components/ProgressTab.vue'
 import HistoryTab from './components/HistoryTab.vue'
+import MaterialToolbar from './components/MaterialToolbar.vue'
 const MaterialDetailDialog = defineAsyncComponent(() => import('./components/MaterialDetailDialog.vue'))
 const SupplierDialog = defineAsyncComponent(() => import('./components/SupplierDialog.vue'))
 const ReceiveDialog = defineAsyncComponent(() => import('./components/ReceiveDialog.vue'))
@@ -103,7 +114,8 @@ const activeTab = ref('progress')
 // 数据加载 / SWR 缓存 / 后台刷新 / 页内 toast（原文件逻辑抽至 composable，行为不变）
 const {
   toastMsg, toastType, toastIcon, toast,
-  pPage, pPerPage, pPages, pIsLoading, pIsFetching, progressRows, progressCount, progressOrderRows,
+  pPage, pPerPage, pPages, pIsLoading, pIsFetching, progressRows, progressCount,
+  progressOrderRows, filteredOrderRows, showSearchEmpty, searchKeyword, stats,
   hPerPage, hPages, hIsLoading, hIsFetching, hRegistrations,
   loadProgress, ensureProgressLoaded, ensureHistoryLoaded,
   onProgressPageChange, onHistoryPageChange,

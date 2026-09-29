@@ -13,8 +13,9 @@
     </div>
 
     <template v-else>
-      <!-- 作用域条：≥2 个作用域 → 左侧分段控件切换；单作用域 → 纯文本名。
-           右侧常驻当前作用域的产品名与数量，切换时同步更新。 -->
+      <!-- 作用域条：汇总 TAB + 各产品 TAB → 左侧分段控件切换；
+           仅 1 个作用域 → 纯文本名（无 TAB，行为与旧版一致）。
+           右侧常驻当前视图的产品/数量信息，切换时同步更新。 -->
       <div class="mc-scope-bar">
         <div v-if="scopeTabs.length > 1" class="mc-seg" role="tablist" aria-label="切换作用域">
           <button
@@ -33,13 +34,22 @@
         <span v-else-if="activeGroup" class="mc-scope-name">{{ groupName(activeGroup) }}</span>
 
         <span class="mc-scope-meta">
-          <span v-if="activeGroup?.product_name" class="mc-scope-product">{{ activeGroup.product_name }}</span>
-          <span v-if="activeGroup" class="mc-scope-qty">数量 <b>{{ activeGroup.quantity }}</b></span>
+          <!-- 汇总视图：产品数 + 订单合计；产品视图：该产品名 + 数量 -->
+          <template v-if="isSummary">
+            <span v-if="summary.productCount > 0" class="mc-scope-product">
+              {{ summary.productCount }} 个产品
+            </span>
+            <span class="mc-scope-qty">合计 <b>{{ summary.totalQuantity }}</b> 件</span>
+          </template>
+          <template v-else-if="activeGroup">
+            <span v-if="activeGroup.product_name" class="mc-scope-product">{{ activeGroup.product_name }}</span>
+            <span class="mc-scope-qty">数量 <b>{{ activeGroup.quantity }}</b></span>
+          </template>
         </span>
       </div>
 
       <div class="mc-result-content">
-        <!-- 分块卡 / 扁平回退共用同一份 section 视图模型（0 项分类不进入数组） -->
+        <!-- 分块卡 / 汇总 / 扁平回退共用同一份 section 视图模型（0 项分类不进入数组） -->
         <CalcCategoryBlock
           v-for="section in sections"
           :key="section.key"
@@ -47,6 +57,7 @@
           :label="section.label"
           :icon="section.icon"
           :rows="section.rows"
+          :show-sku-count="isSummary"
           :collapsed="sectionCollapsed(section.key)"
           @toggle="toggleSection(section.key)"
         />
@@ -62,8 +73,10 @@
  * 物料用量计算结果列。
  *
  * 渲染契约：
- * - 分块模式（`calcGroups` 非空）：顶部作用域条切换，**同一时刻只渲染 1 个作用域**的用量表；
- *   默认 BOM 恒首块 → 初始选中它。窄列里纵向堆叠多张卡会把每张表压到只剩表头，故改为切换。
+ * - 分块模式（`calcGroups` 非空）：**「汇总」TAB 恒居首位且默认选中**——相同
+ *   「供应商 + 物料名称 + 规格/色号」的行合并求和（见 utils/calcSummary.ts）；
+ *   后续 TAB 为「按产品查看」的原始分块（多角色 BOM 能力保留），同一时刻只渲染
+ *   1 个视图。默认 BOM 恒首块 → 单产品场景无 TAB、行为与旧版一致。
  * - 扁平回退（A-5，旧后端 / `calcGroups` 缺失）：行为与旧版一致，走同一份 section 视图模型。
  * - 复合 row-key（A-9）：`__rk` 由「分类 + 名称 + 规格 + 供应商 + 单位」拼成，
  *   保证「同分类同名但规格/供应商/单位不同」的行全部渲染、不丢行。
@@ -75,6 +88,7 @@ import { reactive, ref, computed, watch } from 'vue'
 import type { MaterialCalcRow, MaterialCalcScopeGroup } from '@/api'
 import { CALC_CATEGORY_LIST } from '@/composables/useMaterialCalculator'
 import { scopeKeyOf, scopeNameOf } from '@/utils/roleMatrix'
+import { deriveCalcSummary, type SummaryRow } from '@/utils/calcSummary'
 import CalcCategoryBlock from './CalcCategoryBlock.vue'
 
 const props = defineProps<{
@@ -104,11 +118,27 @@ const hasGroups = computed(() => (props.calcGroups?.length ?? 0) > 0)
 const isEmpty = computed(() => !hasGroups.value && !props.hasResults)
 
 // ============================================================
-// 作用域切换
+// 作用域切换（「汇总」恒首 + 各产品分块）
 // ============================================================
-const scopeTabs = computed<MaterialCalcScopeGroup[]>(() => props.calcGroups ?? [])
-const scopeKeys = computed(() => scopeTabs.value.map((g) => scopeKeyOf(g)))
+/** 汇总视图的唯一作用域键（不与 scopeKeyOf 的 `p|…|r|…` 形态冲突）。 */
+const SUMMARY_SCOPE_KEY = '__summary__'
+
+/** 是否多产品（多作用域）→ 需要「汇总」TAB。 */
+const hasMultipleScopes = computed(() => (props.calcGroups?.length ?? 0) > 1)
+
+/** 汇总结果（groups 非空时派生；单产品场景不会用到但派生无副作用）。 */
+const summary = computed(() => deriveCalcSummary(props.calcGroups))
+
+/** TAB 列表：多作用域时「汇总」恒居首，其后为各产品分块；单作用域为空数组（无 TAB）。 */
+const scopeTabs = computed<(MaterialCalcScopeGroup | null)[]>(() => {
+  if (!hasMultipleScopes.value) return []
+  return [null, ...(props.calcGroups ?? [])]
+})
+const scopeKeys = computed(() => scopeTabs.value.map((g) => groupKey(g)))
 const activeScopeKey = ref('')
+
+/** 当前是否在汇总视图。 */
+const isSummary = computed(() => activeScopeKey.value === SUMMARY_SCOPE_KEY)
 
 // 结果重算后旧作用域可能消失（取消选品 / 换角色）→ 回落到首块，避免空渲染
 watch(
@@ -119,32 +149,34 @@ watch(
   { immediate: true },
 )
 
-const activeGroup = computed<MaterialCalcScopeGroup | null>(
-  () => scopeTabs.value.find((g) => scopeKeyOf(g) === activeScopeKey.value) ?? null,
+const activeGroup = computed<MaterialCalcScopeGroup | null>(() =>
+  (scopeTabs.value.find((g) => g != null && scopeKeyOf(g) === activeScopeKey.value) as MaterialCalcScopeGroup | undefined)
+    ?? (hasMultipleScopes.value ? null : (props.calcGroups?.[0] ?? null)),
 )
 
 /**
- * 分段控件标签：用「能唯一区分各作用域」的最短维度。
- * 真实数据常见「多个产品 × 各自默认 BOM」——此时 `role_name` 全是「默认BOM」，
- * 直接展示角色名会得到两个同名标签，用户无法判断在切什么。降级次序：
- *   角色名互不相同 → 用角色名；否则产品名互不相同 → 用产品名；再否则两者拼接。
+ * 分段控件标签：首个 TAB 固定「汇总」，其余沿用「能唯一区分各作用域」的
+ * 最短维度（见 scopeTabLabels 原 docstring——多产品 × 默认 BOM 时角色名同名，
+ * 降级到产品名；都不唯一则两者拼接）。
  */
 const scopeTabLabels = computed<string[]>(() => {
   const list = scopeTabs.value
   if (!list.length) return []
-  const roleNames = list.map((g) => groupName(g))
-  const productNames = list.map((g) => (g.product_name ?? '').trim())
+  const rest = list.slice(1) as MaterialCalcScopeGroup[]
+  const roleNames = rest.map((g) => groupName(g))
+  const productNames = rest.map((g) => (g.product_name ?? '').trim())
   const allUnique = (arr: string[]) => {
     const nonEmpty = arr.filter(Boolean)
     return nonEmpty.length === arr.length && new Set(nonEmpty).size === arr.length
   }
   const useRole = allUnique(roleNames)
   const useProduct = !useRole && allUnique(productNames)
-  return list.map((_g, i) => {
+  const restLabels = rest.map((g, i) => {
     if (useRole) return roleNames[i] ?? ''
     if (useProduct) return productNames[i] ?? ''
     return [productNames[i] ?? '', roleNames[i] ?? ''].filter(Boolean).join(' · ')
   })
+  return ['汇总', ...restLabels]
 })
 
 /** 当前折叠/展开状态所属的作用域前缀（扁平回退固定为 `flat`）。 */
@@ -153,9 +185,10 @@ const scopePrefix = computed(() => activeScopeKey.value || 'flat')
 // ============================================================
 // 视图模型
 // ============================================================
-/** 作用域唯一键（`p|<pid>|r|<rid|default>`）。接受 null 以兼容模板中 `v-else-if` 的收窄失效。 */
+/** 作用域唯一键：汇总视图 → `__summary__`；产品分块 → `p|<pid>|r|<rid|default>`。 */
 function groupKey(group: MaterialCalcScopeGroup | null): string {
-  return group ? scopeKeyOf(group) : ''
+  if (!group) return SUMMARY_SCOPE_KEY
+  return scopeKeyOf(group)
 }
 
 /** 作用域展示名（默认 BOM → 默认BOM；角色名缺失 → 角色#<id>）。 */
@@ -190,7 +223,12 @@ function toVM(rows: MaterialCalcRow[] | undefined, prefix: string, category: str
   return (rows ?? []).map((row) => ({ ...row, __rk: rowKeyOf(prefix, category, row) }))
 }
 
-/** 分类区块列表：分块来源取当前作用域，扁平来源取 `calcResults`；0 项分类剔除。 */
+/** 汇总行的 row-key：合并键天然唯一（分类+名称+规格+供应商+单位），`__summary__` 前缀防撞。 */
+function summaryToVM(rows: SummaryRow[], category: string): CalcRowVM[] {
+  return rows.map((row) => ({ ...row, __rk: rowKeyOf(SUMMARY_SCOPE_KEY, category, row) }))
+}
+
+/** 分类区块列表：汇总视图取合并行，分块取当前作用域，扁平取 `calcResults`；0 项分类剔除。 */
 const sections = computed<ResultSection[]>(() => {
   const group = activeGroup.value
   return categoryList
@@ -198,9 +236,11 @@ const sections = computed<ResultSection[]>(() => {
       key: cat.key as string,
       label: cat.label,
       icon: cat.icon,
-      rows: group
-        ? toVM(groupCat(group, cat.key), scopeKeyOf(group), cat.key)
-        : toVM(props.calcResults?.[cat.key], 'flat', cat.key),
+      rows: isSummary.value
+        ? summaryToVM(summary.value.rows[cat.key as keyof typeof summary.value.rows] ?? [], cat.key)
+        : group
+          ? toVM(groupCat(group, cat.key), scopeKeyOf(group), cat.key)
+          : toVM(props.calcResults?.[cat.key], 'flat', cat.key),
     }))
     .filter((section) => section.rows.length > 0)
 })

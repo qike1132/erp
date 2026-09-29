@@ -31,9 +31,38 @@
         </div>
       </MList>
 
-      <!-- 分块结果（默认 BOM 恒首块） -->
+      <!-- 分块结果：首张「汇总」卡（多 SKU 时）+ 各产品作用域卡（默认 BOM 恒首） -->
       <div v-if="hasGroups" class="m-results">
         <h3 class="m-results-title">计算结果</h3>
+
+        <!-- 汇总卡：相同供应商·物料·规格跨产品合并求和（方案 A 移动端） -->
+        <div v-if="calcGroups.length > 1" class="m-scope-card m-summary-card">
+          <div class="m-scope-head">
+            <span class="m-scope-badge is-summary">汇总</span>
+            <span class="m-scope-name">{{ summary.productCount }} 个产品</span>
+            <span class="m-scope-qty">合计 {{ summary.totalQuantity }} 件</span>
+          </div>
+          <div v-for="cat in categoryList" :key="cat.key" class="m-result-group">
+            <div class="m-result-cat" @click="toggle(`summary::${cat.key}`)">
+              <span>{{ cat.label }} ({{ summaryCat(cat.key).length }})</span>
+              <svg :style="{ transform: isCollapsed(`summary::${cat.key}`) ? '' : 'rotate(90deg)' }" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="9 18 15 12 9 6" /></svg>
+            </div>
+            <template v-if="!isCollapsed(`summary::${cat.key}`)">
+              <div
+                v-for="row in summaryCat(cat.key)"
+                :key="`summary::${cat.key}::${rowKeyOf('summary', cat.key, row)}`"
+                class="m-result-row"
+              >
+                <div class="m-result-name">
+                  {{ row.material_name || row.name }}<span v-if="row.sku_count > 1" class="m-sku-badge">{{ row.sku_count }} 个SKU</span>
+                </div>
+                <div class="m-result-meta">{{ row.supplier_name }} · {{ row.specification || '—' }}</div>
+                <div class="m-result-qty">{{ row.total_quantity }} {{ row.unit }}</div>
+              </div>
+            </template>
+          </div>
+        </div>
+
         <div v-for="(group, gi) in calcGroups" :key="scopeKeyOf(group)" class="m-scope-card">
           <div class="m-scope-head">
             <span class="m-scope-badge" :class="group.role_id == null ? 'is-default' : 'is-role'">
@@ -134,6 +163,7 @@ import {
   clampQuantity,
 } from '@/composables/useMaterialCalculator'
 import { scopeKeyOf, scopeNameOf, type MatrixRow } from '@/utils/roleMatrix'
+import { deriveCalcSummary, type SummaryRow } from '@/utils/calcSummary'
 import MobileNavBar from '@/mobile/layouts/components/MobileNavBar.vue'
 import MSearchBar from '@/mobile/components/MSearchBar.vue'
 import MList from '@/mobile/components/MList.vue'
@@ -164,6 +194,15 @@ const collapsed = reactive<Record<string, boolean>>({})
 const categoryList = CALC_CATEGORY_LIST
 const hasGroups = computed(() => calcGroups.value.length > 0)
 const hasFlat = computed(() => Object.values(calcResults.value).some((arr) => arr.length > 0))
+
+/** 全产品汇总（方案 A 移动端）：相同供应商·物料·规格合并求和，仅多 SKU 时展示。 */
+const summary = computed(() => deriveCalcSummary(calcGroups.value))
+
+/** 汇总卡里某分类的行（安全索引）。 */
+function summaryCat(category: string): SummaryRow[] {
+  const rows = summary.value.rows as Record<string, SummaryRow[] | undefined>
+  return rows[category] ?? []
+}
 
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 watch(searchQuery, (q) => {
@@ -251,6 +290,13 @@ function cellText(row: MatrixRow, scopeKey: string): string {
 .m-scope-badge { min-width: 30px; text-align: center; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; color: #fff; }
 .m-scope-badge.is-default { background: var(--m-text-secondary); }
 .m-scope-badge.is-role { background: var(--m-accent); }
+/* 汇总卡徽标：与作用域徽标区分（灰底主色字，跨产品合并的标识） */
+.m-scope-badge.is-summary { background: var(--m-text-secondary); }
+.m-sku-badge {
+  display: inline-block; margin-left: 5px; padding: 1px 6px; border-radius: 999px;
+  background: rgba(91, 141, 239, 0.12); color: #2d5ab8;
+  font-size: 10px; font-weight: 700; vertical-align: 1px;
+}
 .m-scope-name { font-size: 14px; font-weight: 700; color: var(--m-text-primary); }
 .m-scope-qty { margin-left: auto; font-size: 12px; font-weight: 600; color: var(--m-accent); }
 

@@ -29,6 +29,7 @@ export interface Registration {
   supplier_name: string
   supplier_names?: string[]
   po_create_time?: string
+  registration_date?: string
   customer_name: string
   product_name: string
   product_quantity: number
@@ -39,6 +40,24 @@ export interface Registration {
   total_ordered: number | string
   total_received: number | string
   update_time?: string
+}
+
+/** 后端 stats/overview 响应（对齐 StatsOverviewResponse.overview） */
+export interface MaterialStatsOverview {
+  total?: number
+  pending?: number
+  partial?: number
+  completed?: number
+  total_ordered?: number
+  total_received?: number
+  total_remaining?: number
+  overall_progress?: number
+  recent_registrations?: number
+}
+
+/** 后端 stats/distribution 响应（对齐 StatsDistributionResponse.distribution） */
+export interface MaterialStatsDistribution {
+  distribution?: Array<{ status: string; count: number }>
 }
 
 /** 后端供应商聚合接口响应（snake_case，对齐 SupplierDetailResponse schema） */
@@ -65,9 +84,9 @@ export interface SupplierDetailApiResponse {
 }
 
 export const materialApi = {
-  overview: () => get<Record<string, unknown>>('/material-registrations/stats/overview'),
+  overview: () => get<MaterialStatsOverview>('/material-registrations/stats/overview'),
   trend: (days: number) => get<Record<string, unknown>>('/material-registrations/stats/trend', { days }),
-  distribution: () => get<Record<string, unknown>>('/material-registrations/stats/distribution'),
+  distribution: () => get<MaterialStatsDistribution>('/material-registrations/stats/distribution'),
   registrations: (params?: QueryParams) => get<{ registrations: Registration[]; pages?: number; total_pages?: number; total?: number }>('/material-registrations/registrations', params),
   registrationDetail: (id: number) => get<{ registration?: Registration }>(`/material-registrations/registrations/${id}`),
   supplierDetail: (orderNo: string) => get<SupplierDetailApiResponse>('/material-registrations/supplier-detail', { order_no: orderNo }),
