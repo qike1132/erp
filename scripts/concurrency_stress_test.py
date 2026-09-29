@@ -25,7 +25,7 @@ sys.path.insert(0, ROOT)
 from sqlalchemy import delete
 
 from fastapi_app.core.database import get_async_db_context
-from fastapi_app.core.number_generator import AsyncNumberGenerator
+from fastapi_app.services.numbering import generate_number_async
 from fastapi_app.shared.stock_concurrency import update_stock_with_optimistic_lock
 from fastapi_app.shared_models import Order, Product, StockOut
 
@@ -58,17 +58,14 @@ async def verify_product_stock(product_id: int, expected: int) -> tuple[int, int
 
 
 async def _generate_and_insert_once(
-    generator: AsyncNumberGenerator,
     prefix: str,
     model_name: str,
     product_id: int,
 ) -> tuple[str, int]:
     """在独立事务内生成编号并写入对应表，确保编号不重复。"""
-    model_cls, date_field, number_field = MODEL_CONFIG[model_name]
+    model_cls, _date_field, number_field = MODEL_CONFIG[model_name]
     async with get_async_db_context() as db:
-        number = await generator.generate(
-            prefix, model_cls, date_field, number_field, db
-        )
+        number = await generate_number_async(prefix, model_cls, number_field, db)
         if model_name == "order":
             record = Order(
                 order_no=number,
@@ -111,7 +108,6 @@ async def worker(
     result_queue: multiprocessing.Queue,
 ) -> None:
     """单个工作进程：循环执行编号生成与库存扣减。"""
-    generator = AsyncNumberGenerator()
     numbers: list[str] = []
     created_ids: list[tuple[str, int]] = []
     number_success = 0
@@ -124,7 +120,7 @@ async def worker(
         if not args.stock_only:
             try:
                 number, record_id = await _generate_and_insert_once(
-                    generator, args.number_prefix, args.number_model, args.product_id
+                    args.number_prefix, args.number_model, args.product_id
                 )
                 numbers.append(number)
                 created_ids.append((args.number_model, record_id))
