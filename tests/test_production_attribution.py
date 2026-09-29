@@ -18,7 +18,28 @@ import pytest
 from fastapi_app.services import fifo_allocation as fifo
 from fastapi_app.services import purchase_plan_shipment as pps
 from fastapi_app.services.fifo_allocation import allocate_fifo
-from fastapi_app.shared_models import DailyProductionRecord
+from fastapi_app.shared_models import DailyProductionRecord, StockOut
+
+
+def _dispatch_execute(details_rows, prod_rows):
+    """按语句类型分派 mock 的 db.execute 返回，使断言不依赖「查询先后顺序」。
+
+    生产量分配里会有三类 execute：SET LOCAL / RESET 超时、取计划明细、聚合生产量。
+    若用 side_effect 列表，一旦实现新增或调整查询顺序，测试就会以「mock 错位」
+    的假失败告终；按语句内容分派则对顺序免疫。
+    """
+    async def _ex(stmt, *args, **kwargs):
+        sql = str(stmt)
+        if 'daily_production_record' in sql:
+            res = MagicMock()
+            res.all.return_value = prod_rows
+            return res
+        if 'purchase_plan_details' in sql:
+            res = MagicMock()
+            res.scalars.return_value.all.return_value = details_rows
+            return res
+        return MagicMock()  # SET LOCAL / RESET statement_timeout
+    return _ex
 
 
 def _make_detail(detail_id: int, quantity: int, plan_date=None, product_id: int = 1, plan_id: int = 1):
@@ -148,11 +169,9 @@ class TestGetProducedFifoMap:
         """窗口内完全没有生产记录 → 每行分配 0（前端显示全部待生产），且不抛异常"""
         d1 = _make_detail(1, 100, plan_date=date(2026, 9, 8), product_id=7)
         db = AsyncMock()
-        # AsyncMock().return_value 的子属性同样是异步的，`.all()` 会返回协程而不是
-        # 配置的列表；必须显式给一个**同步**结果对象，才拿得到「查询命中 0 行」这个场景。
-        res = MagicMock()
-        res.all.return_value = []
-        db.execute.return_value = res
+        # 生产量分配会做两类查询（取该月该产品明细、聚合生产量），按语句分派 mock 才不依赖
+        # 查询顺序；生产量命中 0 行即「窗口内没有生产记录」这个场景。
+        db.execute.side_effect = _dispatch_execute([d1], [])
 
         with patch.object(fifo, 'safe_get', AsyncMock(return_value=None)), \
              patch.object(fifo, 'safe_set', AsyncMock()):
@@ -166,9 +185,7 @@ class TestGetProducedFifoMap:
         early = _make_detail(1, 100, plan_date=date(2026, 9, 5), product_id=7, plan_id=1)
         late = _make_detail(2, 100, plan_date=date(2026, 9, 20), product_id=7, plan_id=2)
         db = AsyncMock()
-        res = MagicMock()
-        res.all.return_value = [_make_prod_row(7, 150)]
-        db.execute.return_value = res
+        db.execute.side_effect = _dispatch_execute([early, late], [_make_prod_row(7, 150)])
 
         with patch.object(fifo, 'safe_get', AsyncMock(return_value=None)), \
              patch.object(fifo, 'safe_set', AsyncMock()):
@@ -240,3 +257,107 @@ class TestProducedFifoMapSafe:
             result, degraded = await pps._get_produced_fifo_map_safe(db, [_make_detail(1, 10, product_id=7)])
         assert result == {1: 42}
         assert degraded is False
+
+
+class TestProducedAllocationScope:
+    """摊派范围必须与调用方传进来的子集无关（评审 I2）。
+
+    get_day_details 只传当天的明细；若就着这个子集摊派，当天的行会独吞
+    整个窗口的产量，同一个计划行在月历上与在弹窗里会给出不同的数字。
+    """
+
+    @pytest.mark.asyncio
+    async def test_subset_view_gets_date_ordered_share(self):
+        earlier = _make_detail(1, 100, plan_date=date(2026, 9, 5), product_id=7, plan_id=1)
+        today = _make_detail(2, 100, plan_date=date(2026, 9, 20), product_id=7, plan_id=2)
+        db = AsyncMock()
+        db.execute.side_effect = _dispatch_execute([earlier, today], [_make_prod_row(7, 150)])
+        set_mock = AsyncMock()
+
+        with patch.object(fifo, 'safe_get', AsyncMock(return_value=None)), \
+             patch.object(fifo, 'safe_set', set_mock):
+            # 只传当天那一条明细
+            result = await fifo._get_produced_fifo_map(db, [today], plan_month='2026-09')
+
+        # 150 先填满更早的 9/05，剩下 50 才轮到 9/20 —— 不是让 9/20 独吞 150 或被钳成 100
+        assert result == {2: 50}
+
+    @pytest.mark.asyncio
+    async def test_cache_stores_month_wide_map(self):
+        """缓存按「月份级存全体」——否则别的子集视图命中后拿到的是残缺映射"""
+        earlier = _make_detail(1, 100, plan_date=date(2026, 9, 5), product_id=7, plan_id=1)
+        today = _make_detail(2, 100, plan_date=date(2026, 9, 20), product_id=7, plan_id=2)
+        db = AsyncMock()
+        db.execute.side_effect = _dispatch_execute([earlier, today], [_make_prod_row(7, 150)])
+        set_mock = AsyncMock()
+
+        with patch.object(fifo, 'safe_get', AsyncMock(return_value=None)), \
+             patch.object(fifo, 'safe_set', set_mock):
+            await fifo._get_produced_fifo_map(db, [today], plan_month='2026-09')
+
+        cached = set_mock.call_args[0][1]
+        assert cached == {'1': 100, '2': 50}
+
+
+class TestProductionAggregateCacheInvalidation:
+    """生产记录写入必须同时清「聚合响应缓存」（评审 I1）。
+
+    页面读的是聚合缓存（pp:agg TTL 120s / 本地 30s），而聚合里的 produced_* 来自
+    生产量。只清分配缓存的话，录入生产记录后刷新页面最长两分钟看不到变化 ——
+    计划的人工验收步骤（录入→刷新应变）会因此假失败。
+    """
+
+    def test_production_record_write_marks_produced_dirty(self):
+        record = MagicMock(spec=DailyProductionRecord)
+        session = MagicMock()
+        session.info = {}
+        session.new = [record]
+        session.dirty = []
+        session.deleted = []
+        fifo._fifo_before_commit(session)
+        assert session.info.get('fifo_dirty') is True
+        assert session.info.get('produced_dirty') is True
+
+    def test_stockout_write_does_not_mark_produced_dirty(self):
+        """纯出货写入不置生产标记 —— 那条路径的 pp 失效由 shipment recalc 负责"""
+        record = MagicMock(spec=StockOut)
+        session = MagicMock()
+        session.info = {}
+        session.new = [record]
+        session.dirty = []
+        session.deleted = []
+        fifo._fifo_before_commit(session)
+        assert session.info.get('fifo_dirty') is True
+        assert session.info.get('produced_dirty') is None
+
+    @pytest.mark.asyncio
+    async def test_produced_dirty_clears_plan_aggregate_caches(self):
+        patterns: list[str] = []
+
+        async def _inv(_strategy, pats):
+            patterns.extend(pats)
+
+        mgr = MagicMock()
+        mgr.invalidate = AsyncMock(side_effect=_inv)
+        with patch.object(fifo, 'cache_mgr', mgr), \
+             patch.object(fifo, 'invalidate_local_cache') as local:
+            await fifo._invalidate_fifo_caches_safe(produced_dirty=True)
+        local_pats = [c.args[0] for c in local.call_args_list]
+
+        assert any(p.startswith('pp:') for p in patterns), patterns
+        assert any(p.startswith('pp:') for p in local_pats), local_pats
+
+    @pytest.mark.asyncio
+    async def test_not_produced_dirty_leaves_plan_aggregate_caches_alone(self):
+        patterns: list[str] = []
+
+        async def _inv(_strategy, pats):
+            patterns.extend(pats)
+
+        mgr = MagicMock()
+        mgr.invalidate = AsyncMock(side_effect=_inv)
+        with patch.object(fifo, 'cache_mgr', mgr), \
+             patch.object(fifo, 'invalidate_local_cache'):
+            await fifo._invalidate_fifo_caches_safe(produced_dirty=False)
+
+        assert not any(p.startswith('pp:') for p in patterns), patterns

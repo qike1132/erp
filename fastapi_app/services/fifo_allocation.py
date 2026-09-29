@@ -82,30 +82,42 @@ async def _invalidate_production_fifo_cache(plan_month: str) -> None:
 
 
 def _fifo_before_commit(session) -> None:
-    # 一个标记覆盖两种来源：会话里只要动过出货记录或生产记录，提交后就清两个前缀。
+    # 一个标记覆盖两种来源：会话里只要动过出货记录或生产记录，提交后就清两个分配前缀。
     # 分开标记会让「同一事务既改出货又改生产」需要两处判断，收益不抵复杂度；
     # 生产记录写入频率远低于出货，多清一次的代价可忽略。
+    # 另记 produced_dirty：生产量还进了聚合响应缓存（pp:*），那条链路的失效
+    # 不像出货那样有 shipment recalc 兜着，得由这里补（见 _invalidate_fifo_caches_safe）。
     if session.info.get('fifo_dirty'):
         return
     for obj in list(session.new) + list(session.dirty) + list(session.deleted):
-        if isinstance(obj, (StockOut, DailyProductionRecord)):
+        if isinstance(obj, DailyProductionRecord):
+            session.info['produced_dirty'] = True
             session.info['fifo_dirty'] = True
-            return
+        elif isinstance(obj, StockOut):
+            session.info['fifo_dirty'] = True
 
 
 def _fifo_after_commit(session) -> None:
     if not session.info.get('fifo_dirty'):
         return
     session.info['fifo_dirty'] = False
-    asyncio.get_running_loop().create_task(_invalidate_fifo_caches_safe())
+    produced_dirty = session.info.pop('produced_dirty', False)
+    asyncio.get_running_loop().create_task(_invalidate_fifo_caches_safe(produced_dirty))
 
 
-async def _invalidate_fifo_caches_safe() -> None:
+async def _invalidate_fifo_caches_safe(produced_dirty: bool = False) -> None:
     try:
         await cache_mgr.invalidate(InvalidationStrategy.PATTERN, ['plan_fifo:*'])
         await cache_mgr.invalidate(InvalidationStrategy.PATTERN, [f'{PRODUCTION_FIFO_CACHE_PREFIX}:*'])
         invalidate_local_cache('plan_fifo:*')
         invalidate_local_cache(f'{PRODUCTION_FIFO_CACHE_PREFIX}:*')
+        if produced_dirty:
+            # 生产量进了聚合响应（rows / sku_summary / customers 的 produced_*），
+            # 只清分配缓存不够：页面读的是 pp:* 聚合，TTL 120s（本地 30s）内会一直显示旧值，
+            # 「录入生产记录 → 刷新页面应变」的人工验收会因此假失败。
+            # 出货写入不在这里清 pp:* —— 那条链路已由 shipment recalc 调 _invalidate_plan_caches。
+            await cache_mgr.invalidate(InvalidationStrategy.PATTERN, ['pp:*'])
+            invalidate_local_cache('pp:*')
     except Exception:  # defensive: 缓存失效失败不阻断业务，靠 TTL 兜底
         logger.warning("分配缓存全量失效失败（等待 TTL 过期兜底）", exc_info=True)
 
@@ -451,6 +463,29 @@ def allocate_fifo(
     return allocated
 
 
+async def _month_details_for_products(db: AsyncSession, plan_month: str, product_ids: list) -> list:
+    """取「该月内这些产品」的全部计划明细，按 (plan_date, id) 排序 —— FIFO 摊派的作用域。
+
+    与出货版把作用域放宽到「相关主单的全部明细」同理：子集视图（某天 / 某客户）
+    必须落在同一份摊派结果上，否则同一行在不同视图里数字不一致。
+    """
+    result = await db.execute(
+        select(PurchasePlanDetail)
+        .options(load_only(
+            PurchasePlanDetail.id, PurchasePlanDetail.plan_id,
+            PurchasePlanDetail.product_name, PurchasePlanDetail.product_id,
+            PurchasePlanDetail.plan_date, PurchasePlanDetail.quantity,
+        ))
+        .join(PurchasePlan, PurchasePlanDetail.plan_id == PurchasePlan.id)
+        .where(
+            PurchasePlan.plan_month == plan_month,
+            PurchasePlanDetail.product_id.in_(product_ids),
+        )
+        .order_by(PurchasePlanDetail.plan_date, PurchasePlanDetail.id)
+    )
+    return list(result.scalars().all())
+
+
 async def _get_produced_fifo_map(db: AsyncSession, plan_details: list, plan_month: str = '') -> dict[int, int]:
     """把窗口内的生产量摊到计划明细上。
 
@@ -478,7 +513,8 @@ async def _get_produced_fifo_map(db: AsyncSession, plan_details: list, plan_mont
                 cached = None
             else:
                 if {d.id for d in plan_details}.issubset(cached_int_keys):
-                    return {int(k): v for k, v in cached.items()}
+                    full = {int(k): v for k, v in cached.items()}
+                    return {d.id: full.get(d.id, 0) for d in plan_details}
 
     try:
         async with asyncio.timeout(10):
@@ -509,9 +545,17 @@ async def _get_produced_fifo_map(db: AsyncSession, plan_details: list, plan_mont
             # 别名取 quantity，让纯聚合函数在「原始行」与「分组行」两种输入上通用
             produced_by_key = aggregate_produced_by_product(result.all())
 
+            # 摊派必须落在「该月该产品的全部明细」上，而不是调用方传进来的子集 ——
+            # get_day_details 只传当天、带 customer_id 的调用只传该客户；若就着子集摊派，
+            # 被传进来的行会独吞整个窗口的产量，同一个计划行在月历与弹窗里给出不同数字。
+            # 出货路径同理（它把 all_details 放宽到相关主单的全部明细）。
+            scope_details = (
+                await _month_details_for_products(db, plan_month, product_ids)
+                if plan_month else plan_details
+            )
             allocated = allocate_fifo(
-                plan_details,
-                group_details_by_product(plan_details),
+                scope_details,
+                group_details_by_product(scope_details),
                 produced_by_key,
             )
     except TimeoutError:
@@ -525,8 +569,10 @@ async def _get_produced_fifo_map(db: AsyncSession, plan_details: list, plan_mont
         logger.exception('生产量分配查询异常: %s', e)
         raise RuntimeError('FIFO_ALLOCATION_UNAVAILABLE') from e
 
+    # 缓存按「月份级存全体」：allocated 覆盖该月该产品的所有明细行，
+    # 于是任何子集视图（某天 / 某客户）命中缓存后都能取到自己那几行的正确值。
     if cache_key:
         await safe_set(cache_key, {str(k): v for k, v in allocated.items()},
                        timeout=FIFO_CACHE_TTL, context='生产量分配缓存')
 
-    return allocated
+    return {d.id: allocated.get(d.id, 0) for d in plan_details}
