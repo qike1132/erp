@@ -210,46 +210,6 @@ async def get_shipment_records_by_date(db: AsyncSession, target_date: str) -> li
         })
     return out
 
-async def _build_fifo_shipped_map_from_rows(
-    db: AsyncSession,
-    rows: list,
-    plan_month: str = '',
-) -> tuple[dict[int, int], bool, dict[int, str]]:
-    """从 SQL 查询结果行构建 FIFO 出货映射
-
-    提取自 get_monthly_calendar / get_monthly_aggregated / get_day_details 的公共逻辑，
-    消除三处 ~20 行代码重复。
-
-    Args:
-        rows: SQL 查询结果行（必须包含 detail_id, plan_id, customer_name 字段）
-        plan_month: 计划月份，用于缓存键
-
-    Returns:
-        (detail_shipped_map, fifo_degraded, customer_name_map)
-    """
-    if not rows:
-        return {}, False, {}
-    detail_ids = list({row.detail_id for row in rows})
-    detail_result = await db.execute(
-        select(PurchasePlanDetail)
-        .options(load_only(
-            PurchasePlanDetail.id, PurchasePlanDetail.plan_id,
-            PurchasePlanDetail.product_name, PurchasePlanDetail.product_id,
-            PurchasePlanDetail.plan_date, PurchasePlanDetail.quantity,
-        ))
-        .where(PurchasePlanDetail.id.in_(detail_ids))
-        .order_by(PurchasePlanDetail.plan_date, PurchasePlanDetail.id)
-    )
-    all_details = detail_result.scalars().all()
-    customer_name_map: dict[int, str] = {}
-    for row in rows:
-        if row.plan_id not in customer_name_map:
-            customer_name_map[row.plan_id] = row.customer_name
-    shipped_fifo_map, fifo_degraded = await _get_shipped_fifo_map_safe(db, all_details, customer_name_map, plan_month=plan_month)
-    detail_shipped_map = {d.id: shipped_fifo_map.get(d.id, 0) for d in all_details}
-    return detail_shipped_map, fifo_degraded, customer_name_map
-
-
 async def _build_fifo_produced_map_from_rows(
     db: AsyncSession,
     rows: list,
@@ -288,7 +248,9 @@ async def _build_fifo_produced_map_from_rows(
     key_prefix="pp:monthly",
     ttl=120,
     local_ttl=30,
-    key_builder=lambda **kwargs: f"v2:y{kwargs.get('year', 0)}:m{kwargs.get('month', 0)}:c{kwargs.get('customer_id', 0)}",
+    # v3: 进度口径由「已出货」改为「已生产」。不换版本会在 TTL 内读到旧口径结果，
+    # 表现为「改完还是旧数」这类假故障（设计稿 §5）。
+    key_builder=lambda **kwargs: f"v3:y{kwargs.get('year', 0)}:m{kwargs.get('month', 0)}:c{kwargs.get('customer_id', 0)}",
 )
 async def get_monthly_calendar(db: AsyncSession, year: int, month: int, customer_id: int=0) -> dict:
     """
@@ -297,7 +259,7 @@ async def get_monthly_calendar(db: AsyncSession, year: int, month: int, customer
     优化项：
     - 移除 _get_inventory_map 调用（前端 PurchasePlanView 不使用 inventory_qty / stock_status）
     - 精简返回字段，减少 JSON 序列化体积
-    - shipped_qty 使用 FIFO 实时分配（与其他端点一致，不再依赖过时的 shipped_qty 缓存字段）
+    - produced_qty 使用 FIFO 实时分配（数据源为每日生产记录，与 /purchase-plan 各端点一致）
 
     返回:
       plans_by_date: {"2026-04-01": [{...}, ...], ...}
@@ -323,7 +285,7 @@ async def get_monthly_calendar(db: AsyncSession, year: int, month: int, customer
     result = await db.execute(sql, params)
     rows = result.all()
 
-    detail_shipped_map, fifo_degraded, _customer_name_map = await _build_fifo_shipped_map_from_rows(db, rows, plan_month)
+    detail_produced_map, fifo_degraded = await _build_fifo_produced_map_from_rows(db, rows, plan_month)
 
     plans_by_date: dict[str, list[dict]] = {}
     customer_set: dict[int, dict] = {}
@@ -332,7 +294,7 @@ async def get_monthly_calendar(db: AsyncSession, year: int, month: int, customer
 
     for row in rows:
         date_str = row.plan_date.isoformat() if row.plan_date else ''
-        shp_qty = detail_shipped_map.get(row.detail_id, 0)
+        prod_qty = detail_produced_map.get(row.detail_id, 0)
         if date_str in plans_by_date:
             plans_by_date[date_str].append({
                 'detail_id': row.detail_id,
@@ -341,8 +303,8 @@ async def get_monthly_calendar(db: AsyncSession, year: int, month: int, customer
                 'product_name': row.product_name,
                 'barcode': row.barcode,
                 'quantity': row.quantity,
-                'shipped_qty': shp_qty,
-                'remaining_qty': row.quantity - shp_qty,
+                'produced_qty': prod_qty,
+                'remaining_qty': row.quantity - prod_qty,
                 'plan_date': date_str,
             })
         if row.customer_id not in customer_set:
@@ -373,7 +335,8 @@ async def _enrich_customer_icon_urls(db: AsyncSession, customers: list[dict]) ->
     key_prefix="pp:summary",
     ttl=1800,
     local_ttl=5,
-    key_builder=lambda **kwargs: f"v2:y{kwargs.get('year', 0)}:m{kwargs.get('month', 0)}",
+    # v3: 与其余进度缓存同步升版本（本端点仍走出货口径，其前端无调用方，见设计稿 §5）。
+    key_builder=lambda **kwargs: f"v3:y{kwargs.get('year', 0)}:m{kwargs.get('month', 0)}",
 )
 async def get_customer_summary(db: AsyncSession, year: int, month: int) -> dict:
     """客户维度汇总统计，单次 eager loading 查询"""
@@ -430,7 +393,8 @@ def _py_weekday_to_js(py_wd: int) -> str:
     key_prefix="pp:agg",
     ttl=120,
     local_ttl=30,
-    key_builder=lambda **kwargs: f"v1:y{kwargs.get('year', 0)}:m{kwargs.get('month', 0)}:c{kwargs.get('customer_id', 0)}",
+    # v2: 进度口径由「已出货」改为「已生产」（设计稿 §5）。
+    key_builder=lambda **kwargs: f"v2:y{kwargs.get('year', 0)}:m{kwargs.get('month', 0)}:c{kwargs.get('customer_id', 0)}",
 )
 async def get_monthly_aggregated(db: AsyncSession, year: int, month: int, customer_id: int=0) -> dict:
     """月度聚合数据：在后端完成 rows + sku_summary + sku_date_index + customers 聚合，
@@ -442,6 +406,9 @@ async def get_monthly_aggregated(db: AsyncSession, year: int, month: int, custom
       sku_date_index: {customer|product: [{date,day,weekday,qty,customer,status}]}
       customers: 客户汇总列表（合并原 customer-summary 逻辑）
       customer_totals: 客户汇总总量
+
+    rows / sku_summary / customers 的进度字段为 produced_qty / _producedPct，
+    数据源为每日生产记录（三部门相加，窗口见 production_window）。
     """
     plan_month = f'{year}-{month:02d}'
     days_in_month = calendar.monthrange(year, month)[1]
@@ -462,7 +429,7 @@ async def get_monthly_aggregated(db: AsyncSession, year: int, month: int, custom
     result = await db.execute(sql, params)
     rows = result.all()
 
-    detail_shipped_map, fifo_degraded, _customer_name_map = await _build_fifo_shipped_map_from_rows(db, rows, plan_month)
+    detail_produced_map, fifo_degraded = await _build_fifo_produced_map_from_rows(db, rows, plan_month)
 
     inventory_map = await _get_inventory_map(db)
 
@@ -475,10 +442,10 @@ async def get_monthly_aggregated(db: AsyncSession, year: int, month: int, custom
     for row in rows:
         dt = row.plan_date
         date_str = dt.isoformat() if dt else ''
-        shp_qty = detail_shipped_map.get(row.detail_id, 0)
+        prod_qty = detail_produced_map.get(row.detail_id, 0)
         qty = row.quantity
-        remain = qty - shp_qty
-        status = 'completed' if shp_qty >= qty else ('partial' if shp_qty > 0 else 'pending')
+        remain = qty - prod_qty
+        status = 'completed' if prod_qty >= qty else ('partial' if prod_qty > 0 else 'pending')
         customer_name = row.customer_name or '未知客户'
         product_name = row.product_name or '—'
         py_wd = dt.weekday() if dt else 0
@@ -489,15 +456,15 @@ async def get_monthly_aggregated(db: AsyncSession, year: int, month: int, custom
                 'date': date_str, 'day_num': dt.day if dt else 0,
                 'weekday': _py_weekday_to_js(py_wd),
                 '_cust_set': set(), 'plan_count': 0, 'total_qty': 0,
-                'shipped_qty': 0, 'shipped_count': 0, 'pending_count': 0,
+                'produced_qty': 0, 'produced_count': 0, 'pending_count': 0,
             }
         d = by_date[date_str]
         d['_cust_set'].add(customer_name)
         d['plan_count'] += 1
         d['total_qty'] += qty
-        d['shipped_qty'] += shp_qty
+        d['produced_qty'] += prod_qty
         if status == 'completed':
-            d['shipped_count'] += 1
+            d['produced_count'] += 1
         else:
             d['pending_count'] += 1
 
@@ -505,10 +472,10 @@ async def get_monthly_aggregated(db: AsyncSession, year: int, month: int, custom
         sku_key = f'{customer_name}|{product_name}'
         if sku_key not in by_key:
             by_key[sku_key] = {'barcode': row.barcode or '—', 'product_name': product_name,
-                               'plan_qty': 0, 'shipped_qty': 0, 'remain_qty': 0, 'customer_name': customer_name}
+                               'plan_qty': 0, 'produced_qty': 0, 'remain_qty': 0, 'customer_name': customer_name}
         sk = by_key[sku_key]
         sk['plan_qty'] += qty
-        sk['shipped_qty'] += shp_qty
+        sk['produced_qty'] += prod_qty
         sk['remain_qty'] += remain
 
         # SKU 日期索引
@@ -526,11 +493,11 @@ async def get_monthly_aggregated(db: AsyncSession, year: int, month: int, custom
         product_key = (row.customer_id, product_name)
         if product_key not in product_summary:
             product_summary[product_key] = {'customer_id': row.customer_id, 'customer_name': customer_name,
-                                            'plan_qty': 0, 'inventory_qty': inv_qty, 'shipped_qty': 0,
+                                            'plan_qty': 0, 'inventory_qty': inv_qty, 'produced_qty': 0,
                                             'remaining_qty': 0, 'warning': False}
         ps = product_summary[product_key]
         ps['plan_qty'] += qty
-        ps['shipped_qty'] += shp_qty
+        ps['produced_qty'] += prod_qty
         ps['remaining_qty'] += remain
         # 预警按累计口径：该客户该产品当月计划总量超过该产品总库存即告警，
         # 单行比较会漏掉"多条明细各自不超、累计超库存"的场景
@@ -543,9 +510,9 @@ async def get_monthly_aggregated(db: AsyncSession, year: int, month: int, custom
         rows_list.append({
             'date': date_str, '_dayNum': d['day_num'], '_weekday': d['weekday'],
             'customerCount': len(d['_cust_set']), 'planCount': d['plan_count'],
-            'totalQty': d['total_qty'], '_shippedCount': d['shipped_count'],
+            'totalQty': d['total_qty'], '_producedCount': d['produced_count'],
             '_pendingCount': d['pending_count'],
-            '_shippedPct': round_qty(d['shipped_qty'] / d['total_qty'] * 100, precision_digits=1) if d['total_qty'] > 0 else 0,
+            '_producedPct': round_qty(d['produced_qty'] / d['total_qty'] * 100, precision_digits=1) if d['total_qty'] > 0 else 0,
             'customerNames': sorted(d['_cust_set']),
             '_fullDate': f'{month}月{d["day_num"]}日', '_isPeak': False,
         })
@@ -559,9 +526,9 @@ async def get_monthly_aggregated(db: AsyncSession, year: int, month: int, custom
     for sk in by_key.values():
         sku_summary.append({
             'barcode': sk['barcode'], 'product_name': sk['product_name'],
-            'plan_qty': sk['plan_qty'], 'shipped_qty': sk['shipped_qty'],
+            'plan_qty': sk['plan_qty'], 'produced_qty': sk['produced_qty'],
             'remain_qty': sk['remain_qty'], 'customer_name': sk['customer_name'],
-            '_pct': round_qty(sk['shipped_qty'] / sk['plan_qty'] * 100, precision_digits=1) if sk['plan_qty'] > 0 else 0,
+            '_pct': round_qty(sk['produced_qty'] / sk['plan_qty'] * 100, precision_digits=1) if sk['plan_qty'] > 0 else 0,
             '_odd': False,
         })
     sku_summary.sort(key=lambda s: (s['customer_name'], s['barcode']))
@@ -577,12 +544,12 @@ async def get_monthly_aggregated(db: AsyncSession, year: int, month: int, custom
         cid = ps['customer_id']
         if cid not in summary:
             summary[cid] = {'customer_id': cid, 'customer_name': ps['customer_name'],
-                            'plan_qty': 0, 'inventory_qty': 0, 'shipped_qty': 0,
+                            'plan_qty': 0, 'inventory_qty': 0, 'produced_qty': 0,
                             'remaining_qty': 0, 'warning_count': 0}
         s = summary[cid]
         s['plan_qty'] += ps['plan_qty']
         s['inventory_qty'] += ps['inventory_qty']
-        s['shipped_qty'] += ps['shipped_qty']
+        s['produced_qty'] += ps['produced_qty']
         s['remaining_qty'] += ps['remaining_qty']
         if ps['warning']:
             s['warning_count'] += 1
@@ -590,7 +557,7 @@ async def get_monthly_aggregated(db: AsyncSession, year: int, month: int, custom
     customer_totals = {
         'total_plan_qty': sum(s['plan_qty'] for s in customers),
         'total_inventory_qty': sum(s['inventory_qty'] for s in customers),
-        'total_shipped_qty': sum(s['shipped_qty'] for s in customers),
+        'total_produced_qty': sum(s['produced_qty'] for s in customers),
         'total_remaining_qty': sum(s['remaining_qty'] for s in customers),
         'warning_count': sum(s['warning_count'] for s in customers),
     }
@@ -606,7 +573,8 @@ async def get_monthly_aggregated(db: AsyncSession, year: int, month: int, custom
     key_prefix="pp:day",
     ttl=120,
     local_ttl=30,
-    key_builder=lambda **kwargs: f"v1:y{kwargs.get('year', 0)}:m{kwargs.get('month', 0)}:d{kwargs.get('day', 0)}:c{kwargs.get('customer_id', 0)}",
+    # v2: 进度口径由「已出货」改为「已生产」（设计稿 §5）。
+    key_builder=lambda **kwargs: f"v2:y{kwargs.get('year', 0)}:m{kwargs.get('month', 0)}:d{kwargs.get('day', 0)}:c{kwargs.get('customer_id', 0)}",
 )
 async def get_day_details(db: AsyncSession, year: int, month: int, day: int, customer_id: int=0) -> dict:
     """指定日期的明细列表（按需加载，供日期详情弹窗使用，避免全量传输）"""
@@ -630,20 +598,20 @@ async def get_day_details(db: AsyncSession, year: int, month: int, day: int, cus
     result = await db.execute(sql, params)
     rows = result.all()
 
-    detail_shipped_map, fifo_degraded, _customer_name_map = await _build_fifo_shipped_map_from_rows(db, rows, plan_month)
+    detail_produced_map, fifo_degraded = await _build_fifo_produced_map_from_rows(db, rows, plan_month)
 
     plans = []
     by_customer: dict[str, list] = {}
     total_qty = 0
-    shipped_qty = 0
+    produced_qty = 0
     for row in rows:
-        shp = detail_shipped_map.get(row.detail_id, 0)
+        prod = detail_produced_map.get(row.detail_id, 0)
         qty = row.quantity
         plan = {
             'detail_id': row.detail_id, 'plan_id': row.plan_id,
             'customer_name': row.customer_name, 'product_name': row.product_name,
-            'barcode': row.barcode, 'quantity': qty, 'shipped_qty': shp,
-            'remaining_qty': qty - shp, 'plan_date': date_str,
+            'barcode': row.barcode, 'quantity': qty, 'produced_qty': prod,
+            'remaining_qty': qty - prod, 'plan_date': date_str,
         }
         plans.append(plan)
         cn = row.customer_name or '未知'
@@ -651,12 +619,12 @@ async def get_day_details(db: AsyncSession, year: int, month: int, day: int, cus
             by_customer[cn] = []
         by_customer[cn].append(plan)
         total_qty += qty
-        shipped_qty += shp
+        produced_qty += prod
 
     return {
         'date': date_str, 'weekday': _py_weekday_to_js(target_date.weekday()),
         'plans': plans, 'by_customer': by_customer,
-        'shipped_pct': round_qty(shipped_qty / total_qty * 100, precision_digits=1) if total_qty > 0 else 0,
+        'produced_pct': round_qty(produced_qty / total_qty * 100, precision_digits=1) if total_qty > 0 else 0,
         'fifo_degraded': fifo_degraded,
     }
 

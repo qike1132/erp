@@ -192,7 +192,8 @@ class MonthlyCalendarResponse(BaseModel):
     days_in_month: int
     plans_by_date: dict[str, list] = {}
     customers: list[dict] = []
-    # FIFO 出货量统计降级标记（服务异常时为 True，前端可提示数据可能不完整）
+    # FIFO 分配降级标记（服务异常时为 True，前端可提示数据可能不完整）。
+    # 本响应自 2026-09-29 起改为生产量分配（见设计稿 §7），不再是出货口径。
     fifo_degraded: bool = False
 
 
@@ -210,12 +211,12 @@ class MonthlyAggregatedResponse(BaseModel):
 
 
 class DayDetailsResponse(BaseModel):
-    """指定日期明细响应（6.9：按需加载当日明细）"""
+    """指定日期明细响应（6.9：按需加载当日明细；produced_pct 为按每日生产记录计算的生产达标率）"""
     date: str
     weekday: str = ''
     plans: list[dict] = []
     by_customer: dict[str, list] = {}
-    shipped_pct: float = 0.0
+    produced_pct: float = 0.0
     fifo_degraded: bool = False
 
 
