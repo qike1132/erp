@@ -4,9 +4,14 @@
 同款，不依赖 root conftest 的 session 级 test_engine（避免 ScopeMismatch），
 并 monkeypatch _AsyncSessionLocal 指向测试库引擎，全程不触碰生产库。
 
-日期口径：compute_audit 按 business_date_str()（北京今天）过滤当日编号段。
-测试把该函数钉死为固定日期，数据与过滤同源——任何墙钟日期运行都成立，
-不会在北京日历跨日后塌成 data_max=0。
+日期口径：compute_audit 按 business_date_str()（北京今天）过滤当日编号段。测试
+把该函数钉死为一个**其他用例与生产路径都不会产生的远期日期段** `_TODAY`，于是
+date-scoped 扫描（data_max / counter）只命中本文件自己插入的行——这些断言因此
+不受共享测试库中其他用例残留数据的影响。
+
+违规计数则**按表全局**统计（10 个编号列扫全表），而 erp_system_test 由整个测试
+会话共享，其他用例可能留下不合规编号行。故所有涉及 violations 的断言都不假设
+"库内零违规"，而是核对**报告与独立直查结果双向一致**（逐实体复核，多报/漏报都抓）。
 """
 import os
 from datetime import UTC, datetime
@@ -14,14 +19,20 @@ from urllib.parse import urlparse, urlunparse
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from fastapi_app.services.numbering_reconcile import NUMBERED_ENTITIES
 from fastapi_app.shared_models import Base, NumberingAudit, NumberingCounter, Order
 from fastapi_app.tasks import numbering_audit_task as audit_task_module
 from fastapi_app.tasks.numbering_audit_task import compute_audit
 
-# 巡检"今天"：测试数据与 compute_audit 的当日过滤共用此常量（经 monkeypatch 注入）。
-_TODAY = '20260929'
+# 本文件专用的编号日期段：远期日期，其他用例/生产路径都不会产生该段的行，
+# 从而把 date-scoped 扫描（data_max / counter）隔离到本文件的造数。
+_TODAY = '29991231'
+
+# 合规编号模式：与生产巡检同一口径，但在本文件内独立书写，用于直查复核。
+_NUMBER_PATTERN = r'^[A-Z]+-[0-9]{8}-[0-9]+$'
 
 
 def _test_db_url() -> str:
@@ -41,7 +52,7 @@ def _test_db_url() -> str:
 
 @pytest.fixture(autouse=True)
 def _pin_business_date(monkeypatch):
-    """把 compute_audit 的"今天"钉死，移除墙钟依赖（跨北京午夜也不漂）。"""
+    """把 compute_audit 的"今天"钉死为 _TODAY（远期唯一段），隔离共享测试库污染。"""
     monkeypatch.setattr(audit_task_module, 'business_date_str', lambda: _TODAY)
 
 
@@ -63,9 +74,24 @@ async def db(monkeypatch):
     await engine.dispose()
 
 
+async def _direct_violation_count(db, table: str, column: str) -> int:
+    """独立直查：该表该列不合规编号行数（不复用生产模块的同名 SQL 文本）。"""
+    result = await db.execute(
+        text(f'SELECT COUNT(*) FROM "{table}" WHERE "{column}" !~ :pat'),
+        {'pat': _NUMBER_PATTERN},
+    )
+    return int(result.scalar() or 0)
+
+
+def _violation_entry(report: dict, table: str, column: str) -> dict | None:
+    """报告里 (table, column) 的违规条目，无则 None。"""
+    return next((v for v in report['violations']
+                 if v['table'] == table and v['column'] == column), None)
+
+
 @pytest.mark.asyncio
 async def test_behind_reported(db):
-    # 数据 max=7 > 水位 3 → behind
+    # 数据 max=7 > 水位 3 → behind（日期段唯一，data_max 必为本文件的行）
     db.add_all([
         Order(order_no=f'PO-{_TODAY}-0007', customer='c', quantity=1,
               order_date=datetime.now(UTC)),
@@ -74,6 +100,8 @@ async def test_behind_reported(db):
     await db.flush()
     report = await compute_audit(db)
     po = next(r for r in report['prefixes'] if r['prefix'] == 'PO')
+    assert po['data_max'] == 7
+    assert po['counter'] == 3
     assert po['counter_behind'] is True
 
 
@@ -88,16 +116,27 @@ async def test_ahead_is_not_reported(db):
     await db.flush()
     report = await compute_audit(db)
     po = next(r for r in report['prefixes'] if r['prefix'] == 'PO')
+    assert po['data_max'] == 1
+    assert po['counter'] == 45
     assert po['counter_behind'] is False
 
 
 @pytest.mark.asyncio
 async def test_format_violation_reported(db):
+    """不合规行被计入，且计数与独立直查精确一致。
+
+    计数按表全局：库内可能还有别的用例残留的不合规行，故不假设"只有本行"，
+    只断言报告值 == 直查值，且直查值 ≥ 本用例插入的 1 行。
+    """
     db.add(Order(order_no='PO-PENDING-42', customer='c', quantity=1,
                  order_date=datetime.now(UTC)))
     await db.flush()
     report = await compute_audit(db)
-    assert any(v['table'] == 'order' for v in report['violations'])
+    direct = await _direct_violation_count(db, 'order', 'order_no')
+    entry = _violation_entry(report, 'order', 'order_no')
+    assert entry is not None, 'order 表存在不合规行，报告却遗漏'
+    assert entry['count'] == direct
+    assert direct >= 1
 
 
 @pytest.mark.asyncio
@@ -108,22 +147,29 @@ async def test_missing_counter_row_is_not_behind(db):
     await db.flush()
     report = await compute_audit(db)
     po = next(r for r in report['prefixes'] if r['prefix'] == 'PO')
+    assert po['data_max'] == 9
+    assert po['counter'] is None
     assert po['counter_behind'] is False
 
 
 @pytest.mark.asyncio
-async def test_clean_data_has_no_violations(db):
-    """合规编号：无格式违规、无 behind。"""
-    db.add_all([
-        Order(order_no=f'PO-{_TODAY}-0003', customer='c', quantity=1,
-              order_date=datetime.now(UTC)),
-        NumberingCounter(prefix='PO', number_date=_TODAY, last_seq=3),
-    ])
-    await db.flush()
+async def test_violation_report_matches_direct_query(db):
+    """报告与库内事实双向一致，不依赖库内是否只有本用例的数据。
+
+    对 10 个编号实体逐一独立直查：直查 > 0 的表必须出现在报告且计数相等
+    （无漏报 / 无错值），直查 = 0 的不该出现（无多报），报告也不得含实体外条目。
+    """
     report = await compute_audit(db)
-    assert report['violations'] == []
-    po = next(r for r in report['prefixes'] if r['prefix'] == 'PO')
-    assert po['counter_behind'] is False
+    reported = {(v['table'], v['column']): v['count'] for v in report['violations']}
+    entity_cols = {(table, column) for _prefix, table, column in NUMBERED_ENTITIES}
+    assert set(reported) <= entity_cols, f'报告含非实体条目: {set(reported) - entity_cols}'
+    for _prefix, table, column in NUMBERED_ENTITIES:
+        direct = await _direct_violation_count(db, table, column)
+        if direct > 0:
+            assert (table, column) in reported, f'{table}.{column} 有 {direct} 行不合规，报告遗漏'
+            assert reported[(table, column)] == direct, f'{table}.{column} 计数不符'
+        else:
+            assert (table, column) not in reported, f'{table}.{column} 无不合规行，报告多报'
 
 
 def test_numbering_audit_model_shape():
