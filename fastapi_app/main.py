@@ -150,7 +150,9 @@ async def lifespan(application: FastAPI):
         if result['raised'] or result['inserted']:
             logger.info('编号水位对账: 抬升 %d 行, 补插 %d 行', result['raised'], result['inserted'])
     except Exception as e:  # defensive: 对账失败不得阻断应用启动
-        logger.warning('编号水位启动对账失败（不影响启动）: %s', e)
+        # 记 ERROR（而非 warning）：失败即意味着同键碰撞窗口仍然敞开，必须可见。
+        # 仍不 raise —— 对账失败是"降级"，不该让应用起不来。
+        logger.error('编号水位启动对账失败（不影响启动）: %s', e, exc_info=True)
 
     await db_health_checker.start()
 

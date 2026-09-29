@@ -87,3 +87,23 @@ async def test_parse_failure_short_circuits(monkeypatch, tmp_path):
     result = await bt._run_batch_import_async(str(tmp_path / 'f.xlsx'), 'job', '订单', build)
     assert result == {'success': False, 'error': 'Excel 文件为空', 'imported_count': 0, 'task_id': 'job'}
     build.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_parse_rows_async_returns_error_result_not_exception(tmp_path):
+    """畸形文件必须得到 (False, [], msg)，而不是抛出。
+
+    回归锁：``parse_excel_file_async`` 只捕获 ``(ValueError, TypeError, OSError)``，
+    真实解析器（fastexcel）对非 zip 文件抛 ``CalamineError`` —— 直接是 ``Exception``
+    子类、不在该元组内。若不在此包装层兜底，异常会逃逸到
+    ``_run_batch_import_async`` 的窄 except 之外 → ``delete_file`` 保持 True → 用户
+    上传的 Excel 被删除，ARQ 重试时文件已不存在。此用例走真实解析路径（非打桩）。
+    """
+    junk = tmp_path / 'not_really.xlsx'
+    junk.write_bytes(b'this is definitely not a zip/xlsx payload')
+
+    success, rows, message = await bt._parse_rows_async(str(junk))
+
+    assert success is False
+    assert rows == []
+    assert message  # 非空错误消息，而非异常外逸

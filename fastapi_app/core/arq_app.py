@@ -141,6 +141,35 @@ cron_jobs = [
 class WorkerSettings:
     """ARQ Worker 配置（`arq fastapi_app.core.arq_app.WorkerSettings`）。"""
 
+    async def on_startup(ctx) -> None:  # noqa: N805 - ARQ 约定为类内静态钩子（无 self）
+        """Worker 启动时的编号水位对账（与 FastAPI lifespan 同款，spec §5）。
+
+        ARQ worker 是**独立进程**（NSSM 服务 erp-arq），不受 FastAPI lifespan 约束。
+        若此处不对账，部署窗口内 worker 会抢在 web 进程对账提交前处理已入队的批量
+        导入任务：``allocate_sequence`` 返回 ``seed_last+1``，与历史路径产生、从未
+        经过 ``numbering_counter`` 的数据行重号 → ``IntegrityError``（不在 batch_tasks
+        捕获的 ``(ValueError, TypeError, OSError)`` 元组内）→ 任务失败；配合
+        ``max_tries=3`` 还可能被丢弃。
+
+        对账是 advisory-locked（``number_lock_key('NUMBERING_RECONCILE', 'startup')``
+        经 ``acquire_advisory_lock_async``）且幂等（GREATEST 只升不降，``raised`` 只计
+        真实抬升），故 web/worker 双进程执行安全 —— 不新增锁。失败**不阻断**启动
+        （刻意与 lifespan 一致），但记 ERROR 以便失败可见、不静默留窗。
+        """
+        try:
+            from fastapi_app.core.database import require_async_session_local
+            from fastapi_app.services.numbering_reconcile import reconcile_numbering_counters
+            async with require_async_session_local()() as recon_db:
+                result = await reconcile_numbering_counters(recon_db)
+                await recon_db.commit()  # reconcile 不自行提交；事务边界归调用方
+            if result['raised'] or result['inserted']:
+                logger.info(
+                    '编号水位对账(worker): 抬升 %d 行, 补插 %d 行',
+                    result['raised'], result['inserted'],
+                )
+        except Exception as e:  # defensive: 对账失败不得阻断 worker 启动
+            logger.error('编号水位启动对账失败（不影响启动）: %s', e, exc_info=True)
+
     functions: ClassVar[list] = [
         batch_import_orders_task,
         batch_import_stockins_task,

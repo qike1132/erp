@@ -43,10 +43,24 @@ def _is_allowed_upload_path(file_path: str) -> bool:
 
 
 async def _parse_rows_async(file_path: str) -> tuple[bool, list, str]:
-    """解析 Excel（阻塞解析仍在 executor 里跑，不阻塞 worker 事件循环）。"""
+    """解析 Excel（阻塞解析仍在 executor 里跑，不阻塞 worker 事件循环）。
+
+    这里刻意**兜底捕获宽异常**（``Exception``），以保留解析层原有的"畸形文件返回
+    错误结果、而非抛出"契约：``parse_excel_file_async`` 内部只捕获
+    ``(ValueError, TypeError, OSError)``，而 polars / zipfile 对畸形 xlsx 会抛
+    ``zipfile.BadZipFile`` 等**不在该元组内**的异常。若任其逃逸，
+    ``_run_batch_import_async`` 的窄 ``except (ValueError, TypeError, OSError)``
+    捕获不到 → ``delete_file`` 保持 True → **用户上传的文件被删除**，且 ARQ 重试
+    时文件已不存在。旧解析器（``utils/batch_upload_utils.parse_excel_file``）捕获裸
+    ``Exception`` 并返回 ``(False, [], msg)``，此处逐字还原该语义。
+    （``batch_import_parser`` 自身的窄捕获契约保持不变。）
+    """
     from fastapi_app.services.batch_import_parser import parse_excel_file_async
 
-    return await parse_excel_file_async(file_path)
+    try:
+        return await parse_excel_file_async(file_path)
+    except Exception as e:  # broad-except: 还原旧解析器契约——畸形文件返回错误结果而非抛出
+        return False, [], str(e)
 
 
 async def _open_import_session():

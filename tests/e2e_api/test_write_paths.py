@@ -97,11 +97,12 @@ def _cleanup(product_ids: list[int], order_ids: list[int]) -> None:
     # 纵深防御（独立于 conftest 的收集期指纹守卫）：即便守卫被绕过，也绝不让这里的
     # 裸 SQL DELETE 落到生产库。刻意放在 ``with suppress(Exception)`` **之外** ——
     # 放进 suppress 里会被静默吞掉，守卫就等于不存在。
-    from tests.e2e_api.conftest import real_database_url
+    # 消息里用 ``_mask_dsn`` 隐去口令：异常文本可能进日志/CI 输出，绝不能带生产密码。
+    from tests.e2e_api.conftest import _mask_dsn, real_database_url
 
     dsn = real_database_url()
     if '/erp_system' in dsn and 'erp_system_test' not in dsn:
-        raise RuntimeError(f"E2E 清理拒绝连接生产库: {dsn}")
+        raise RuntimeError(f"E2E 清理拒绝连接生产库: {_mask_dsn(dsn)}")
 
     with suppress(Exception):
         engine = _sync_engine()

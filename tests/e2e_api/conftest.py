@@ -160,13 +160,39 @@ def _production_fingerprint_hit(
 # 守卫本身将没有任何回归保护（CI/默认环境无后端，整目录 skip）。故按文件名白名单豁免。
 _GUARD_TEST_FILE = "test_guard.py"
 
+# 本 conftest 自身所在目录 —— 用于把 skip 标记限定在本目录的条目上（见下方说明）。
+_E2E_DIR = Path(__file__).resolve().parent
+
+
+def _item_path(item: pytest.Item) -> Path | None:
+    """取 item 的源文件路径；``item.path``（现代 pytest）优先，回退 ``item.fspath``。"""
+    path = getattr(item, "path", None)
+    if path is None:
+        fspath = getattr(item, "fspath", None)
+        path = fspath if fspath is not None else None
+    if path is None:
+        return None
+    try:
+        return Path(path).resolve()
+    except OSError:  # 路径无法解析（异常字符/权限）时退回未解析形式
+        return Path(path)
+
 
 def _skip_e2e_items(items: list[pytest.Item], reason: str) -> None:
-    """给本目录的 E2E 用例打 skip 标记；豁免守卫自测（见 ``_GUARD_TEST_FILE``）。"""
+    """给**本目录**的 E2E 用例打 skip 标记；豁免守卫自测（见 ``_GUARD_TEST_FILE``）。
+
+    必须按路径过滤：``pytest_collection_modifyitems`` 在子目录 conftest 里被调用时，
+    ``items`` 是**整个 pytest 会话**的条目列表，而非本目录的。若不加过滤，一次
+    裸 ``pytest``（pytest.ini ``testpaths = tests fastapi_app/tests``）在未设
+    ``E2E_API_BASE_URL`` 时会把**全仓每个用例**都打上 skip —— 包括本分支新增的
+    numbering 测试，表现为"全绿"的假象。故只对路径确实位于本目录下的条目打标记。
+    """
     skip = pytest.mark.skip(reason=reason)
     for item in items:
-        path = getattr(item, "path", None)
-        if path is not None and getattr(path, "name", "") == _GUARD_TEST_FILE:
+        path = _item_path(item)
+        if path is None or _E2E_DIR not in path.parents:
+            continue
+        if path.name == _GUARD_TEST_FILE:
             continue
         item.add_marker(skip)
 
