@@ -72,7 +72,7 @@ async def update_plan(db: AsyncSession, plan_id: int, *, created_by: str='', **k
                 plan.plan_date = normalize_plan_date(kwargs[field])
             else:
                 setattr(plan, field, kwargs[field])
-    plan.update_time = datetime.now(UTC).replace(tzinfo=None)
+    plan.update_time = datetime.now(UTC)  # aware UTC：production_plan.update_time 列为 timestamptz
     await db.flush()
     await db.refresh(plan)
     await _log_action(db, plan.id, 'update', old_data, plan.to_dict(), created_by)

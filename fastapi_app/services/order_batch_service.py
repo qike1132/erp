@@ -86,7 +86,7 @@ async def set_whitelist(db: AsyncSession, customers: list[str], user_id: int):
     if config:
         config.config_value = value
         config.updated_by_id = user_id
-        config.updated_at = datetime.now(UTC).replace(tzinfo=None)
+        config.updated_at = datetime.now(UTC)  # aware UTC：updated_at 列为 timestamptz
     else:
         db.add(OrderSyncConfig(config_key="order_batch_whitelist", config_value=value, description="订单批次号白名单客户"))
 

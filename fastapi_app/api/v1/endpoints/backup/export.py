@@ -82,7 +82,7 @@ async def _audit_export_download(
             'user_agent': request.headers.get('user-agent', '')[:500],
             'request_id': getattr(request.state, 'request_id', None),
             'status_code': 200,
-            'created_at': datetime.now(UTC).replace(tzinfo=None),
+            'created_at': datetime.now(UTC),  # aware UTC：audit_log.created_at 列为 timestamptz
         }
         await _buffer_audit_entry(entry)
     except Exception as e:  # defensive: 审计失败不能阻断下载
