@@ -19,4 +19,18 @@ export const ocrApi = {
   upload: (sessionId: string, formData: FormData) =>
     upload(`/ocr-import/upload?session_id=${encodeURIComponent(sessionId)}`, formData),
   progress: (taskId: string) => get<{ progress: number; status: string }>(`/ocr-import/progress/${taskId}`),
+  /**
+   * 订单图片识别预览（`POST /ocr-import/order/preview`）——**不写库**。
+   *
+   * 返回的条目由前端弹窗人工确认后再进暂存区，因此这里没有对应的写接口。
+   * `customer` 是表单当前已选客户：图上没有客户信息时由后端用它兜底。
+   * 与 `upload` 同样的契约点：参数必须真的拼进 URL，否则后端收不到。
+   */
+  previewOrder: (formData: FormData, customer = '') =>
+    upload<Record<string, unknown>>(
+      `/ocr-import/order/preview${customer ? `?customer=${encodeURIComponent(customer)}` : ''}`,
+      formData,
+      undefined,
+      PREVIEW_TIMEOUT,
+    ),
 }

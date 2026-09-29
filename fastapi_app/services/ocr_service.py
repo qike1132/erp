@@ -29,6 +29,13 @@ from fastapi_app.services.ocr._html_tables import (  # noqa: F401
 from fastapi_app.services.ocr._import import (  # noqa: F401
     import_staging_stockouts_from_file,
 )
+from fastapi_app.services.ocr._order_parsers import (  # noqa: F401
+    UNITS,
+    parse_order_document,
+)
+from fastapi_app.services.ocr._order_preview import (  # noqa: F401
+    preview_order_items,
+)
 from fastapi_app.services.ocr._progress import (  # noqa: F401
     _cleanup_progress_store,
     _progress_lock,

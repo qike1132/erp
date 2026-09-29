@@ -130,6 +130,7 @@ const loaders: Record<string, Loader> = {
   'note-sticky': () => import('@fortawesome/free-solid-svg-icons/faNoteSticky').then((m) => m.faNoteSticky),
   'paper-plane': () => import('@fortawesome/free-solid-svg-icons/faPaperPlane').then((m) => m.faPaperPlane),
   'paperclip': () => import('@fortawesome/free-solid-svg-icons/faPaperclip').then((m) => m.faPaperclip),
+  'paste': () => import('@fortawesome/free-solid-svg-icons/faPaste').then((m) => m.faPaste),
   'pen': () => import('@fortawesome/free-solid-svg-icons/faPen').then((m) => m.faPen),
   'pen-clip': () => import('@fortawesome/free-solid-svg-icons/faPenClip').then((m) => m.faPenClip),
   'pen-to-square': () => import('@fortawesome/free-solid-svg-icons/faPenToSquare').then((m) => m.faPenToSquare),

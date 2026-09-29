@@ -12,10 +12,14 @@ from sqlalchemy.exc import DisconnectionError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.config import settings
-from fastapi_app.core.database import get_async_db
+from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_permission
 from fastapi_app.core.exceptions import db_transaction
-from fastapi_app.schemas.ocr_import import OcrPdfImportResult, OcrPdfPreviewResult
+from fastapi_app.schemas.ocr_import import (
+    OcrOrderPreviewResult,
+    OcrPdfImportResult,
+    OcrPdfPreviewResult,
+)
 from fastapi_app.services import ocr_service as svc
 from fastapi_app.services.ocr_service import IMAGE_EXTENSIONS
 from fastapi_app.shared_models import User
@@ -133,3 +137,50 @@ async def preview_shipping_doc(file: UploadFile=File(..., description='PDF 或�
     except (OperationalError, DisconnectionError) as e:
         logger.error(f'OCR 预览失败: {e!s}', exc_info=True)
         raise HTTPException(status_code=500, detail=f'识别失败: {settings.sanitize_error(e)}') from e
+
+
+@router.post('/order/preview', response_model=OcrOrderPreviewResult, summary='订单图片识别预览（不写暂存区）')
+async def preview_order_doc(
+    file: UploadFile = File(..., description='订单图片或 PDF（支持粘贴上传的截图）'),
+    customer: str = Query('', description='表单当前选中的客户名，图上没有客户信息时兜底'),
+    db: AsyncSession = Depends(get_async_read_db),
+    current_user: User = Depends(require_permission('batch_import')),
+):
+    """识别订单图片（聊天截图 / 表格 / 拍照），返回待人工确认的条目。
+
+    **不写库**：结果由前端在预览弹窗里人工核对、修正后，再作为暂存条目进入批量提交流程。
+    因此这里不做任何写入，也不改暂存区。
+    """
+    filename = file.filename or 'unknown'
+    ext = os.path.splitext(filename.lower())[1]
+    if ext not in SUPPORTED_EXTENSIONS:
+        raise HTTPException(status_code=400, detail='不支持的文件格式，请上传图片或 PDF')
+    content = await file.read()
+    if len(content) == 0:
+        raise HTTPException(status_code=400, detail='文件为空')
+    if len(content) > MAX_OCR_FILE_SIZE:
+        raise HTTPException(status_code=400, detail='文件超过 10MB 限制')
+    try:
+        items, raw_text, warnings = await svc.preview_order_items(db, content, filename, customer)
+    except (OperationalError, DisconnectionError) as e:
+        logger.error(f'OCR 订单识别失败: {e!s}', exc_info=True)
+        raise HTTPException(status_code=500, detail=f'识别失败: {settings.sanitize_error(e)}') from e
+    if not items:
+        return OcrOrderPreviewResult(
+            success=False,
+            message='没有识别到可导入的条目',
+            filename=filename,
+            item_count=0,
+            items=[],
+            raw_text=raw_text,
+            warnings=warnings,
+        )
+    return OcrOrderPreviewResult(
+        success=True,
+        message=f'识别到 {len(items)} 项，请核对后导入',
+        filename=filename,
+        item_count=len(items),
+        items=items,
+        raw_text=raw_text,
+        warnings=warnings,
+    )

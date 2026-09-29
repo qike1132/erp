@@ -11,9 +11,9 @@
             <label class="co-label" for="co-date">{{ isOrder ? '订单时间' : '备货时间' }} <span class="co-required" aria-hidden="true">*</span></label>
             <UiDatePicker
               id="co-date"
+              v-model="form.date"
               :label="isOrder ? '订单时间' : '备货时间'"
               required
-              v-model="form.date"
               style="width: 100%"
             />
           </div>
@@ -21,9 +21,9 @@
             <label class="co-label" for="co-customer">客户名称 <span class="co-required" aria-hidden="true">*</span></label>
             <UiSelect
               id="co-customer"
+              v-model="form.customer"
               label="客户名称"
               required
-              v-model="form.customer"
               placeholder="请选择客户"
               style="width: 100%"
               :options="customerOptions"
@@ -108,6 +108,19 @@
           @update:is-drag-over="(v) => emit('update:isDragOver', v)"
         />
 
+        <!-- 粘贴图片识别（热区 + 确认弹窗整体封装在子组件里）。
+             仅订单模式显示：本链路产出的一律是订单条目（type='order'），
+             在备货模式下给入口会造出与用户预期不符的记录类型。 -->
+        <OrderOcrPaste
+          v-if="isOrder"
+          :add-items="addStagedItems"
+          :default-customer="form.customer"
+          :default-date="form.date"
+          :search-products="searchProducts"
+          :download-template="downloadTemplate"
+          @go-manual="focusProductInput"
+        />
+
         <UiButton variant="primary" style="margin-top: 15px" @click="emit('add-staged')">
           <FontAwesomeIcon icon="plus-circle" aria-hidden="true" />{{ isOrder ? '新增订单' : '新增备货' }}
         </UiButton>
@@ -129,7 +142,8 @@ import UiAutocomplete from '@/components/ui/UiAutocomplete.vue'
 import OrderTypeSwitch from './OrderTypeSwitch.vue'
 import OrderDeductControl from './OrderDeductControl.vue'
 import OrderExcelImport from './OrderExcelImport.vue'
-import type { FormState, ProductSuggestion } from '../composables/types'
+import OrderOcrPaste from './OrderOcrPaste.vue'
+import type { FormState, ProductSuggestion, StagedItem } from '../composables/types'
 import {
   QUANTITY_MAX,
   QUANTITY_MIN,
@@ -185,6 +199,8 @@ defineProps<{
   onDrop: (e: DragEvent) => void
   downloadTemplate: () => void
   handleImport: () => void
+  /** 把粘贴识别确认后的条目并入暂存区（由父级提供，直接操作 stagedItems） */
+  addStagedItems: (items: StagedItem[]) => void
 }>()
 
 const emit = defineEmits<{

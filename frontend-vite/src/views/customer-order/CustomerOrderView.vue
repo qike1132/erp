@@ -38,6 +38,7 @@
             :on-drop="onDrop"
             :download-template="downloadTemplate"
             :handle-import="handleImport"
+            :add-staged-items="addStagedItems"
             @add-staged="addStaged"
           />
 
@@ -55,21 +56,21 @@
       <!-- TAB: 记录查询 -->
       <div v-show="activeTab === 'records'" class="co-tab-content">
         <OrderRecordQuery
-          :record-type="recordType"
-          :record-type-options="recordTypeOptions"
           v-model:per-page="perPage"
-          :customer-options="customerOptions"
           v-model:show-filter="showFilter"
           v-model:filter-customer="filterCustomer"
+          v-model:filter-status="filterStatus"
+          v-model:filter-factory="filterFactory"
+          v-model:filter-start="filterStart"
+          v-model:filter-end="filterEnd"
+          :record-type="recordType"
+          :record-type-options="recordTypeOptions"
+          :customer-options="customerOptions"
           :factory-options="factoryOptions"
           :factory-disabled="factoryDisabled"
-          v-model:filter-status="filterStatus"
           :status-options="statusOptions"
-          v-model:filter-factory="filterFactory"
           :order-records="orderRecords"
-          v-model:filter-start="filterStart"
           :is-loading-records="isLoadingRecords"
-          v-model:filter-end="filterEnd"
           :is-fetching-records="isFetchingRecords"
           :error-message="errorMessage"
           :current-page="currentPage"
@@ -89,16 +90,15 @@
     </div>
 
     <!-- 订单详情弹窗 -->
-    <EditOrderModal
-      v-model:open="detailOpen"
-      v-model:edit-form="editForm"
-      :detail-data="detailData"
-      :available-stockin="availableStockin"
-      :saving="saving"
-      :deduct-retry-pending="deductRetryPending"
-      :get-status-class="getStatusClass"
-      :save-edit-order="saveEditOrder"
-      :retry-deduct-update="retryDeductUpdate"
+    <EditOrderModal v-model:open="detailOpen"
+                    v-model:edit-form="editForm"
+                    :detail-data="detailData"
+                    :available-stockin="availableStockin"
+                    :saving="saving"
+                    :deduct-retry-pending="deductRetryPending"
+                    :get-status-class="getStatusClass"
+                    :save-edit-order="saveEditOrder"
+                    :retry-deduct-update="retryDeductUpdate"
     />
 
     <!-- 编辑暂存弹窗 -->
@@ -131,6 +131,7 @@ import { QUANTITY_RANGE_MESSAGE } from './composables/quantityRange'
 import { useOrderForm } from './composables/useOrderForm'
 import { useOrderList } from './composables/useOrderList'
 import { useOrderActions } from './composables/useOrderActions'
+import type { StagedItem } from './composables/types'
 
 import OrderInputPanel from './components/OrderInputPanel.vue'
 import StagingArea from './components/StagingArea.vue'
@@ -216,6 +217,16 @@ const {
 
 const authStore = useAuthStore()
 const canDelete = computed(() => authStore.hasPermission('order_manage'))
+
+/**
+ * 粘贴图片识别确认后的条目并入暂存区。
+ *
+ * 它们是纯前端条目（origin: 'ocr'），与手工新增同理：不受 Excel 导入
+ * 「用服务端结果替换 import 条目」的影响，提交走同一条批量提交流程。
+ */
+function addStagedItems(items: StagedItem[]) {
+  stagedItems.value.push(...items)
+}
 
 function addStaged() {
   // 主操作始终可点：缺项时把「缺什么」说出来，而不是把按钮变灰后沉默。
