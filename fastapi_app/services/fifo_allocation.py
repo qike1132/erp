@@ -16,6 +16,7 @@ import asyncio
 import contextlib
 import logging
 from datetime import date, datetime
+from typing import Hashable
 
 from sqlalchemy import and_, event, select, text
 from sqlalchemy.exc import SQLAlchemyError
@@ -36,6 +37,12 @@ logger = logging.getLogger(__name__)
 
 FIFO_CACHE_PREFIX = 'plan_fifo'
 FIFO_CACHE_TTL = 1800
+
+# 生产量取数窗口的回看月数。
+# 与出货的 SHIPMENT_RECORD_LOOKBACK_MONTHS = 12 不同，**不要顺手对齐成 12**：
+# 出货量天然被该客户的实际发货量约束，而生产量是产品级的、可远超某个月的计划量，
+# 12 个月无上界会让当月计划被历史累计产量全部填满、页面处处 100%。详见设计稿 §7。
+PRODUCTION_RECORD_LOOKBACK_MONTHS = 1
 
 
 async def _invalidate_fifo_cache(plan_month: str) -> None:
@@ -335,29 +342,80 @@ def _aggregate_shipped_by_key(stockout_rows: list, product_ids: list, pid_to_nam
     return shipped_by_key
 
 
+def aggregate_produced_by_product(rows: list) -> dict[int, int]:
+    """生产记录行 → {product_id: 累计生产量}。
+
+    - 按 product_id 聚合，不按 department 过滤：三部门（充棉/手工/包装）相加，
+      与 daily_production_service 的月度汇总口径一致。
+    - product_id 为空的行丢弃：daily_production_record.product_id 可空，
+      空值无法与计划明细关联，沿用 stock_inventory_service 的
+      `WHERE product_id IS NOT NULL` 惯例。
+    - quantity 为 NULL 按 0 计：避免 None 参与加法抛 TypeError。
+    """
+    out: dict[int, int] = {}
+    for row in rows:
+        if not row.product_id:
+            continue
+        out[row.product_id] = out.get(row.product_id, 0) + int(row.quantity or 0)
+    return out
+
+
+def production_window(plan_month: str, now: datetime) -> tuple[date, date]:
+    """生产量取数窗口 [计划月首 − 1 个月, 现在]（定案：设计稿 §7 乙）。
+
+    - 下界回看 1 个月：计划日落在月初时，生产往往在上月末完成（先产后出）。
+    - 上界取「现在」而非「计划月末」：本页是跟踪工具，历史月份的完成率应随后续
+      生产继续上升；取月末会把数字冻结在过去。
+    用月序换算而非 timedelta(days=30)：后者在 2 月与大月之间会漂移出月份。
+    """
+    year, month = map(int, plan_month.split('-'))
+    m = month - PRODUCTION_RECORD_LOOKBACK_MONTHS
+    y = year
+    while m < 1:
+        m += 12
+        y -= 1
+    return date(y, m, 1), now.date()
+
+
+def group_details_by_product(all_details: list) -> dict[int, list]:
+    """计划明细按 product_id 分组，保持传入顺序。
+
+    调用方负责先按 (plan_date, id) 排序 —— allocate_fifo 的摊派顺序即传入顺序，
+    这里重排会让同 plan_date 的分配结果不可复现。
+    product_id 为空的明细无法关联生产记录，丢弃。
+    """
+    out: dict[int, list] = {}
+    for d in all_details:
+        if not d.product_id:
+            continue
+        out.setdefault(d.product_id, []).append(d)
+    return out
+
+
 def allocate_fifo(
     plan_details: list,
-    details_by_key: dict[tuple[str, str], list],
-    shipped_by_key: dict[tuple[str, str], int],
+    details_by_key: dict[Hashable, list],
+    total_by_key: dict[Hashable, int],
 ) -> dict[int, int]:
     """A1: FIFO 分配纯函数（核心算法，可独立单元测试）
 
-    对每个 (customer, product) 对：
-        1. 取该 key 的所有计划明细（已按 plan_date ASC 排序）
-        2. 取该 key 的累计出货净量
-        3. 用累计分配法：出货总量按顺序依次填满最早的计划
+    对每个键：
+        1. 取该键的所有计划明细（已按 plan_date ASC 排序）
+        2. 取该键的累计量（出货净量，或生产量 —— 由调用方决定语义）
+        3. 用累计分配法：累计量按顺序依次填满最早的计划
 
     Args:
         plan_details: 当前查询涉及的计划明细列表（用于补零）
-        details_by_key: {(customer, product): [PurchasePlanDetail, ...]} 已分组+排序
-        shipped_by_key: {(customer, product): total_shipped_qty} 累计出货净量
+        details_by_key: {键: [PurchasePlanDetail, ...]} 已分组+排序。
+            出货路径的键是 (customer_name, product_name)，生产路径的键是 product_id。
+        total_by_key: {键: 累计量}
 
     Returns:
-        {plan_detail_id: allocated_shipped_qty}
+        {plan_detail_id: allocated_qty}
     """
     allocated: dict[int, int] = {}
     for key, details in details_by_key.items():
-        total_shipped = shipped_by_key.get(key, 0)
+        total_shipped = total_by_key.get(key, 0)
         remaining = total_shipped
         for d in details:
             if remaining <= 0:
