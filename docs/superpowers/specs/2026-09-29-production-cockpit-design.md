@@ -177,27 +177,45 @@ production_summary_manage_packaging      （新增，包装部可写）
 
 ### 5.3 后端解析规则
 
-在 `core/deps.py` 新增一个解析器（供生产模块各接口复用）：
+分两层：**纯函数**放 `fastapi_app/core/production_scope.py`（可脱离数据库测试），**FastAPI 依赖**放 `core/deps.py`。
+
+权限码命名与部门映射收敛为单一事实来源（种子脚本与运行时解析器共用，禁止各写一份字符串）：
 
 ```python
-def resolve_production_dept_scope(user: User) -> set[str] | None:
-    """返回用户可见的部门集合；None 表示全部部门（持有聚合码）。"""
+# fastapi_app/core/production_scope.py
+PRODUCTION_DEPARTMENTS = ('filling', 'handcraft', 'packaging')
+AGGREGATE_VIEW_CODE = 'production_summary_view'
+AGGREGATE_MANAGE_CODE = 'production_summary_manage'
+
+def view_code(department: str) -> str: ...    # production_summary_view_filling
+def manage_code(department: str) -> str: ...  # production_summary_manage_filling
+def dept_permission_rows() -> list[tuple[str, str]]: ...   # 种子脚本用，共 6 行
+
+def production_scope_of(user: User, *, write: bool = False) -> set[str] | None:
+    """返回部门范围；None = 全部部门，set = 仅这些部门，空集 = 无权限。"""
+
+def narrow_departments(requested: str, scope: set[str] | None) -> set[str] | None:
+    """把请求的单个 department 与范围取交集；范围外的取值一律忽略（不报 403）。"""
 ```
 
-规则：
-
-1. 持有 `production_summary_view` → 返回 `None`（全部部门）。
-2. 否则取用户持有的 `production_summary_view_*` 对应的部门集合。
-3. 集合为空 → 403 `权限不足`。
-
-写操作用对称的一个解析器：
+依赖层（端点通过 `Depends` 拿到的**是范围而不是 User**，测试因此可以直接注入一个已知范围）：
 
 ```python
-def resolve_production_write_scope(user: User) -> set[str] | None:
-    """返回用户可写的部门集合；None 表示全部部门（持有聚合 manage 码）。"""
+# fastapi_app/core/deps.py
+async def resolve_production_view_scope(user=Depends(_get_user_with_permissions)) -> set[str] | None
+async def resolve_production_write_scope(user=Depends(_get_user_with_permissions)) -> set[str] | None
+async def get_current_user_with_permissions(user=Depends(_get_user_with_permissions)) -> User
 ```
 
-规则与读一致（`production_summary_manage` → `None`；否则取 `production_summary_manage_*` 对应部门集合；空集 → 403）。更新/删除时必须校验**记录原部门**的归属（防止越权改别的部门的数据），而不仅是新值。
+**规则**：
+
+1. 持有 `production_summary_view`（可见）/ `production_summary_manage`（可写）→ 返回 `None`（全部部门）。
+2. 否则取用户持有的部门码对应集合。
+3. 集合为空 → 403 `权限不足`。**空集绝不允许退化为"不过滤"**（fail-open 是本设计最危险的失效方向）。
+
+**`manage` 蕴含同部门 `view` 必须显式实现**：`User.has_permission`（`shared_models/user.py:44-77`）自带的 `xxx_manage → xxx_view` 继承规则要求权限码**以 `_manage` 结尾且 `parent_id is None`**，而 `production_summary_manage_filling` 两条都不满足 —— 因此解析器必须自己把部门级 manage 码也算作可见。
+
+更新/删除时必须同时校验**记录原部门**与**目标部门**都在可写范围内（既不能改别部门的数据，也不能把自己的数据搬到无权写入的部门）。
 
 ### 5.4 导航可见性
 
@@ -248,9 +266,23 @@ def resolve_production_write_scope(user: User) -> set[str] | None:
 - 无数据的日期**返回 0 而不是缺行**，让图表 x 轴连续。
 - 索引：现有 `idx_dpr_dept_date (department, production_date)` 与 `idx_dpr_date` 已覆盖该查询，无需新索引。
 
-### 6.3 `/records` 增加 `created_by` 筛选
+### 6.3 `/records` 扩展筛选（日期区间 / 录单人 / 排序）
 
-明细抽屉需要"按录单人筛"。加一个可选 `created_by: str = ''` 参数，`create_time` 已有 `created_by` 列（`daily_production_record.created_by`，String(50)）。默认倒序按 `production_date DESC, id DESC`。
+**规格漏洞修正（2026-09-29，读实现时发现）**：抽屉需要「本周 / 自定义」这种**可跨月**的日期范围，而现有 `GET /records` 只接受 `year`+`month`（**均必填**）+ 可选 `production_date` 单日 —— 跨月区间无解。因此 `year` / `month` 改为可选，并新增区间参数：
+
+| 参数 | 变化 | 说明 |
+|---|---|---|
+| `year` / `month` | 由必填改为**可选**（`int \| None = None`） | 保留向后兼容；与区间参数二选一 |
+| `start_date` / `end_date` | **新增**（`YYYY-MM-DD`，可选） | 提供时优先生效；未提供时回落到 `year`/`month` |
+| 校验 | **新增** | `year`/`month` 与区间**都未提供** → 400（否则会全表扫描） |
+| `created_by` | **新增**（可选，`str = ''`） | 按录单人筛选（`daily_production_record.created_by`，String(50)）；为空则不限 |
+| `sort` | **新增**（`'desc' \| 'asc'`，默认 `'desc'`） | 新界面要"最新在前"；现有服务默认是 `production_date, department, id` 升序 |
+
+**排序语义**：`desc` = `production_date DESC, id DESC`（同一日内按录入顺序倒序，避免同日期内顺序随机）。
+
+**部门参数**：若调用方（前端）传了 `department` 但该部门不在用户可见范围内，**忽略该参数**（按范围收窄），不报 403 —— 避免前端状态残留导致整页报错（§6.1）。
+
+`department` 与 `created_by` 均沿用点记法：均省略时返回范围内的全部记录。
 
 ### 6.4 月报字段一致性修正
 
@@ -327,7 +359,7 @@ def resolve_production_write_scope(user: User) -> set[str] | None:
 - `test_daily_production_trend.py`：跨月区间、无数据日期补 0、超 92 天拒绝。
 - `test_daily_production_dept_scope.py`：三种用户（仅充棉 / 三部门 / 全部门聚合）对 `records`、`daily-summary`、`monthly-summary`、`trend`、`export` 的可见数据正确；越权部门参数被忽略而非 403。
 - `test_daily_production_write_scope.py`：跨部门录入 403；改/删他部门记录 403；改记录时把部门改到范围外 403。
-- `test_daily_production_delete.py`：单条删除的部门越权拒绝；删除前审计日志包含记录快照与操作人；删除不存在的 id 返回 404/400 而非 500。
+- `test_daily_production_delete_audit.py`：单条删除的部门越权拒绝；删除前审计日志包含记录快照与操作人；删除不存在的 id 返回 404/400 而非 500。
 - `test_daily_production_records_filter.py`：`created_by` 筛选、分页边界（`per_page` 200 上限）。
 - `test_daily_production_monthly_fields.py`：断言 `monthly_total_quantity` 与 `daily_data` 合计一致（锁死 D-2 类字段漂移）。
 
