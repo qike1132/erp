@@ -278,7 +278,9 @@ prometheus_client 的进程内全局（`core/metrics.py`），`/metrics` 由 Fas
   （照抄该文件既有的「环境缺失则整目录跳过」约定）。
 - **生产指纹拦截**（fail-fast，不设绕过开关）：**扩展既有的** `pytest_collection_modifyitems`
   （该 hook 已存在于 `conftest.py:150-161` 做后端探活 skip，新增同名函数会静默覆盖探活逻辑——
-  必须在既有函数体内追加，不能另起一个）。校验目标——
+  必须在既有函数体内追加，不能另起一个）。且指纹检查必须排在**探活判断之前**：否则后端不可达时
+  先走到 skip 分支、指纹检查永远不触发，「生产库在跑但后端探活失败」的场景下守卫失效。
+  校验目标——
   ① `BASE_URL` 的端口为 5002（启发式兜底，主承重是下一条），或 ② `real_database_url()` 指向的
   库名为 `erp_system`，命中任一即 `pytest.exit(..., returncode=2)`。注意 `pytest.exit` 终止的是
   **整个 pytest 会话**而非单目录（全量跑 `pytest tests/` 时连无关目录一起杀）——这是有意为之的
@@ -318,23 +320,30 @@ prometheus_client 的进程内全局（`core/metrics.py`），`/metrics` 由 Fas
   FROM (
       SELECT prefix, number_date, MAX(x.seq) AS mx
       FROM (
-          SELECT 'PO' prefix, substring(order_no from 4 for 8) number_date,
-                 cast(substring(order_no from 13) as bigint) seq
+          SELECT 'PO' prefix, split_part(order_no, '-', 2) number_date,
+                 cast(split_part(order_no, '-', 3) as bigint) seq
           FROM "order"
           WHERE order_no ~ '^[A-Z]+-[0-9]{8}-[0-9]+$'
-          UNION ALL SELECT 'CG', substring(order_no from 4 for 8),
-                 cast(substring(order_no from 13) as bigint)
+          UNION ALL SELECT 'CG', split_part(order_no, '-', 2),
+                 cast(split_part(order_no, '-', 3) as bigint)
           FROM purchase_order WHERE order_no ~ '^[A-Z]+-[0-9]{8}-[0-9]+$'
-          -- BH/SO/CSO/CSI/CS/FH/SR/PP 同构，实施时按 §4.5 前缀表补全
+          -- BH/SO/CSO/CSI/CS/FH/SR/PP 同构补全
       ) x
       GROUP BY prefix, number_date
   ) sub
   WHERE nc.prefix = sub.prefix AND nc.number_date = sub.number_date;
   ```
 
+  **必须用 `split_part` 而非 `substring(from 4 for 8)`**（复核发现的偏移缺陷）：位置 4/13 只对
+  两位前缀（PO/CG/BH/SO/CS/SR/PP/FH）成立，**CSO/CSI 是三位前缀**，其编号从第 3 个字符起就是
+  日期段——按位置截取会得到错位片段、静默漏对账这两类。`split_part` 按分隔段取，不受前缀长度
+  影响，与 §4.4 的取法一致。WHERE 正则同样守卫 cast 不遇垃圾行。
+
   对账方向**只升不降**（GREATEST），与「跳号合法」语义一致；同时把数据里存在、计数表缺行的
   `(prefix, date)` 补插进去。实施形态首选**应用启动时的一次性 idempotent 对账函数**
-  （跑在 FastAPI 启动钩子里，避免手工 SQL 漏执行）。
+  （跑在 FastAPI 启动钩子里，避免手工 SQL 漏执行）。**并发防护（复核补充）**：4 个 Uvicorn
+  worker 会并发各跑一次启动对账——GREATEST 语义下结果安全，但需 `pg_advisory_lock`
+  （复用 §4.3 的 `core/pg_locks.py`）或 `ON CONFLICT DO NOTHING` 写法防并发交错报错。
 - 日期段口径切换后，北京日期的计数器键与历史 UTC 键可能并存（例如 09-30 北京键首用时，
   09-29 的 UTC 键仍在表里）。这是无害的——键不同即水位独立，且新键的 seed 由 §4.4 的 `read_daily_max`
   从**编号自身日期段**读得，与旧键无关。
@@ -395,7 +404,8 @@ prometheus_client 的进程内全局（`core/metrics.py`），`/metrics` 由 Fas
 2. §4.6 E2E 隔离（P0，独立可验证）
 3. §4.7 删死代码（`order_purchase_sync`）
 4. §4.4 `read_daily_max` 修正（数值排序 + 编号日期段过滤 + 正则守卫）+ 边界测试
-   —— 此步仅换种子算法，调用方仍在传 UTC 日期，行为等价，可独立部署
+   —— 此步仅换种子算法，`date_str` 参数暂由调用点以 `datetime.now(UTC).strftime('%Y%m%d')`
+   （既有 UTC 口径）临时传入，行为等价，可独立部署；第 6 步统一替换为 `business_date_str()`
 5. §4.2 批量导入改异步（取号改走 `services/numbering`，**日期仍是 UTC 口径**）+ 删
    `shared/stock_crud_service.py` + 重写压测脚本 + 解析器收口 —— 此步消灭双路径，全系统只剩
    `numbering_counter` 一个水位源，但日期口径尚未切换，无键碰撞
