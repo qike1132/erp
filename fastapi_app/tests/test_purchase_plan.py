@@ -394,10 +394,10 @@ class TestPurchasePlanEndpoints:
                 }
             ],
             'sku_summary': [
-                {'product_id': 1, 'product_name': '测试产品A', 'barcode': '6901234567890', 'total_qty': 200, 'shipped_qty': 50}
+                {'product_id': 1, 'product_name': '测试产品A', 'barcode': '6901234567890', 'total_qty': 200, 'produced_qty': 50}
             ],
             'sku_date_index': {'1': ['2026-04-15']},
-            'customers': [{'customer_id': 1, 'customer_name': '测试客户', 'plan_qty': 200, 'shipped_qty': 50, 'remaining_qty': 150}],
+            'customers': [{'customer_id': 1, 'customer_name': '测试客户', 'plan_qty': 200, 'produced_qty': 50, 'remaining_qty': 150}],
             'customer_totals': {'1': 200},
             'fifo_degraded': False,
         }
@@ -461,13 +461,13 @@ class TestPurchasePlanEndpoints:
                     'customer_id': 1,
                     'customer_name': '测试客户',
                     'quantity': 100,
-                    'shipped_qty': 20,
+                    'produced_qty': 20,
                     'remaining_qty': 80,
                     'remark': '',
                 }
             ],
             'by_customer': {'测试客户': [{'detail_id': 1, 'product_name': '测试产品A', 'quantity': 100}]},
-            'shipped_pct': 20.0,
+            'produced_pct': 20.0,
             'fifo_degraded': False,
         }
         with patch('fastapi_app.api.v1.endpoints.purchase_plan.purchase_plan_service') as mock_svc:
@@ -482,7 +482,7 @@ class TestPurchasePlanEndpoints:
         assert len(data['plans']) == 1
         assert data['plans'][0]['product_name'] == '测试产品A'
         assert len(data['by_customer']) == 1
-        assert data['shipped_pct'] == 20.0
+        assert data['produced_pct'] == 20.0
 
     @pytest.mark.asyncio
     async def test_day_details_with_customer_filter(self, client, mock_db):
@@ -491,7 +491,7 @@ class TestPurchasePlanEndpoints:
             'weekday': '周三',
             'plans': [],
             'by_customer': {},
-            'shipped_pct': 0.0,
+            'produced_pct': 0.0,
             'fifo_degraded': False,
         }
         with patch('fastapi_app.api.v1.endpoints.purchase_plan.purchase_plan_service') as mock_svc:
