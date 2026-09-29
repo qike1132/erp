@@ -76,11 +76,13 @@ export function useReportConfig(activeTab: Ref<TabType>) {
   }
 
   const reportColumns = computed<TableColumn[]>(() => [
-    { field: 'date', header: currentCfg.value.dateLabel, align: 'center' },
-    { field: 'customer', header: '客户', align: 'center' },
-    { field: 'product_name', header: '产品名称', align: 'left' },
-    { field: 'quantity', header: currentCfg.value.countLabel, align: 'center' },
-    { field: 'note', header: activeTab.value === 'deduction' ? '订单备注' : '备注', align: 'left' },
+    // 列宽按比例分配（配合表格的 table-layout: fixed 才是硬约束）；
+    // 不约束时产品名与备注会把余量吃光，日期/数量被挤成窄条
+    { field: 'date', header: currentCfg.value.dateLabel, align: 'center', width: '16%' },
+    { field: 'customer', header: '客户', align: 'center', width: '14%' },
+    { field: 'product_name', header: '产品名称', align: 'left', width: '28%' },
+    { field: 'quantity', header: currentCfg.value.countLabel, align: 'center', width: '16%', sortable: true },
+    { field: 'note', header: activeTab.value === 'deduction' ? '订单备注' : '备注', align: 'left', width: '26%' },
   ])
 
   return { currentCfg, currentTabEndpoint, reportColumns }

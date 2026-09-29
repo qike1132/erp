@@ -1,34 +1,45 @@
 <template>
   <div class="rp-filter-bar">
-    <div class="rp-filter-field">
-      <label class="rp-filter-label">客户名称</label>
-      <UiSelect v-model="filters.customer" placeholder="全部客户" style="width: 160px" :options="customerOptions" />
+    <UiSelect
+      v-model="filters.customer"
+      placeholder="全部客户"
+      style="width: 180px; flex-shrink: 0"
+      :options="customerOptions"
+    />
+
+    <div class="rp-field">
+      <UiInput
+        v-model="filters.product"
+        placeholder="产品名称或 SKU"
+        @keyup.enter="emit('search')"
+      />
     </div>
-    <div class="rp-filter-field">
-      <label class="rp-filter-label">产品名称/SKU</label>
-      <input v-model="filters.product" class="rp-filter-input" placeholder="输入产品名称或SKU" aria-label="输入产品名称或SKU" />
-    </div>
-    <div class="rp-filter-field">
-      <label class="rp-filter-label">开始日期</label>
-      <UiDatePicker v-model="filters.startDate" style="width: 160px" />
-    </div>
-    <div class="rp-filter-field">
-      <label class="rp-filter-label">结束日期</label>
-      <UiDatePicker v-model="filters.endDate" style="width: 160px" />
-    </div>
-    <div class="rp-filter-actions">
-      <button class="rp-action-btn rp-action-primary" aria-label="查询" @click="emit('search')">查询</button>
-      <button class="rp-action-btn rp-action-outline" aria-label="重置" @click="emit('reset')">重置</button>
-      <button v-if="searched" class="rp-action-btn rp-action-success" aria-label="导出" @click="emit('export')">
-        <FontAwesomeIcon icon="download" style="margin-right: 4px" aria-hidden="true" />导出
-      </button>
-    </div>
+
+    <UiButton variant="primary" aria-label="查询" @click="emit('search')">查询</UiButton>
+    <UiButton variant="outline" aria-label="重置" @click="emit('reset')">重置</UiButton>
+    <UiButton
+      v-if="searched"
+      variant="success"
+      class="rp-export"
+      aria-label="导出"
+      @click="emit('export')"
+    >
+      <FontAwesomeIcon icon="download" aria-hidden="true" />导出 Excel
+    </UiButton>
   </div>
 </template>
 
 <script setup lang="ts">
+/**
+ * ReportFilterBar.vue — 报表筛选与动作（嵌在单行工具条里）
+ *
+ * 控件一律用系统组件（UiSelect / UiInput / UiButton），不再自绘样式 ——
+ * 自绘的输入框与系统下拉在高度、边框、底色上都不一致（2026-09-29 反馈）。
+ * 日期区间筛选已按反馈移除；若之后要按日期过滤，系统里有现成的 UiDateRangePicker。
+ */
 import UiSelect from '@/components/ui/UiSelect.vue'
-import UiDatePicker from '@/components/ui/UiDatePicker.vue'
+import UiInput from '@/components/ui/UiInput.vue'
+import UiButton from '@/components/ui/UiButton.vue'
 
 defineProps<{
   customerOptions: { value: string; label: string }[]
@@ -36,7 +47,7 @@ defineProps<{
 }>()
 
 // 显式双向绑定：父组件 v-model:filters 传入，筛选条件就地编辑
-const filters = defineModel<{ customer: string; product: string; startDate: string; endDate: string }>('filters', { required: true })
+const filters = defineModel<{ customer: string; product: string }>('filters', { required: true })
 
 const emit = defineEmits<{
   'search': []
@@ -48,60 +59,31 @@ const emit = defineEmits<{
 <style scoped>
 .rp-filter-bar {
   display: flex;
-  gap: 12px;
-  padding: 12px 24px;
-  border-bottom: 1px solid var(--color-border-light, #f1f5f9);
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
   flex-wrap: wrap;
-  align-items: flex-end;
 }
-.rp-filter-field {
+
+/* UiInput 自身是 w-full（表单里占满一行的写法），放进工具条需给定宽度 */
+.rp-field {
+  width: 220px;
   flex-shrink: 0;
 }
-.rp-filter-label {
-  display: block;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--color-text-secondary);
-  margin-bottom: 4px;
+
+/* 系统里 UiSelect(44px/白底/15px 字) 与 UiInput(42px/浅灰底/14px 字) 本身就有差异，
+   同排并列时看得出参差。浅灰底这套是系统内三处输入控件（UiInput / UiSearchInput /
+   PrimeVue inputtext）的共同口径，故把下拉对齐到输入框一侧。仅本页作用域内生效。 */
+.rp-filter-bar :deep(.ui-select-input) {
+  min-height: 42px;
+  padding: 0.625rem 2.5rem 0.625rem 1rem;
+  font-size: 0.875rem;
+  background: #f8fafc;
 }
-.rp-filter-input {
-  width: 180px;
-  padding: 8px 12px;
-  border: 2px solid var(--color-border-light, #e2e8f0);
-  border-radius: 9px;
-  font-size: 13px;
-  outline: none;
-  transition: border-color 0.3s ease, box-shadow 0.3s ease;
-  font-family: inherit;
-  color: var(--color-text);
-  background: white;
+
+/* 导出靠最右：视图级动作与筛选动作分开 */
+.rp-export {
+  margin-left: auto;
 }
-.rp-filter-input:focus-visible { outline: 2px solid var(--color-primary-500); outline-offset: 2px; }
-.rp-filter-input:focus {
-  border-color: var(--color-primary-400);
-  box-shadow: 0 0 0 4px rgba(0, 148, 191, 0.1);
-}
-.rp-filter-actions {
-  display: flex;
-  gap: 8px;
-  align-items: flex-end;
-}
-.rp-action-btn {
-  padding: 7px 14px;
-  border: 2px solid var(--color-border-light, #e2e8f0);
-  border-radius: 9px;
-  background: white;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.3s ease, border-color 0.3s ease, transform 0.3s ease;
-  color: var(--color-text-secondary);
-  display: flex;
-  align-items: center;
-}
-.rp-action-primary { color: var(--color-primary-600); }
-.rp-action-primary:hover { background: var(--color-primary-50); border-color: var(--color-primary-300); transform: translateY(-1px); }
-.rp-action-outline { }
-.rp-action-success { color: var(--color-success-600); border-color: var(--color-success-200); }
-.rp-action-success:hover { background: var(--color-success-50); border-color: var(--color-success-300); transform: translateY(-1px); }
 </style>

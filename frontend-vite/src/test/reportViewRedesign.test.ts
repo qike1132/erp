@@ -1,0 +1,230 @@
+/**
+ * /report 报表流水页改版的结构断言（与 /stock 对齐的方案 A）。
+ *
+ * 本机开不了浏览器预览，排版靠人眼实测；「单行工具条 / 表格无内盒 /
+ * 列宽按比例 / 空值留白 / 数量列格式化」这些是结构事实，在此固化。
+ *
+ * 挂载按生产配置（unstyled + PT）—— 默认模式渲染出的 p-* 类名生产里不存在。
+ */
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { nextTick, type Component } from 'vue'
+import { mount, type VueWrapper } from '@vue/test-utils'
+import PrimeVue from 'primevue/config'
+import { plushCutePT } from '@/styles/primevue-pt'
+
+const mocks = vi.hoisted(() => ({
+  orderLogsMock: vi.fn(),
+  queryData: null as unknown as { value: unknown },
+}))
+
+vi.mock('@/api', () => ({
+  reportApi: {
+    orderLogs: mocks.orderLogsMock,
+    stockinLogs: vi.fn(),
+    stockoutLogs: vi.fn(),
+    deductionLogs: vi.fn(),
+  },
+}))
+
+vi.mock('@/stores/catalog', () => ({
+  useCatalogStore: () => ({
+    activeCustomerNames: [
+      { id: 1, name: 'MINISO国际' },
+      { id: 2, name: 'TOP TOY' },
+    ],
+    ensureActiveCustomerNames: vi.fn().mockResolvedValue(undefined),
+  }),
+}))
+
+vi.mock('@tanstack/vue-query', async () => {
+  const { ref } = await import('vue')
+  const dataRef = ref<unknown>(null)
+  mocks.queryData = dataRef as { value: unknown }
+  return {
+    useQuery: () => ({
+      data: dataRef,
+      isLoading: ref(false),
+      isFetching: ref(false),
+      refetch: vi.fn(),
+    }),
+    keepPreviousData: {},
+  }
+})
+
+import ReportView from '@/views/report/ReportView.vue'
+import ReportTabGroup from '@/views/report/components/ReportTabGroup.vue'
+import ReportFilterBar from '@/views/report/components/ReportFilterBar.vue'
+import UiDataTable from '@/components/ui/UiDataTable.vue'
+
+const LOGS = [
+  { id: 1, order_date: '2026-09-29 14:32', customer: 'MINISO国际', product_name: '鲨鱼毛绒公仔-60cm', quantity: 15000, note: '客户临时补单' },
+  { id: 2, order_date: '2026-09-29 11:08', customer: 'TOP TOY', product_name: '鲨鱼毛绒公仔-60cm', quantity: 10000, note: '' },
+  { id: 3, order_date: '2026-09-28 16:45', customer: '网易严选', product_name: '咸鱼按摩捶-海盐蓝', quantity: 5000, note: '' },
+]
+
+const RESPONSE = { logs: LOGS, pagination: { total: 1284, pages: 86 } }
+
+function mountView() {
+  mocks.queryData.value = RESPONSE
+  return mount(ReportView, {
+    global: { plugins: [[PrimeVue, { unstyled: true, pt: plushCutePT }]] },
+  })
+}
+
+function mountTabs(over: Record<string, unknown> = {}) {
+  return mount(ReportTabGroup, { props: { modelValue: 'order', ...over } })
+}
+
+function mountFilterBar(over: Record<string, unknown> = {}) {
+  return mount(ReportFilterBar, {
+    props: {
+      filters: { customer: '', product: '' },
+      customerOptions: [{ value: 'MINISO国际', label: 'MINISO国际' }],
+      searched: true,
+      ...over,
+    },
+    global: { plugins: [[PrimeVue, { unstyled: true, pt: plushCutePT }]] },
+  })
+}
+
+/**
+ * 触发 UiDataTable 的排序事件。UiDataTable 是泛型 SFC，直接传入会让 findComponent
+ * 的重载解析失败，故先擦成 Component 再收窄到「可 $emit」的形态。
+ */
+async function emitSort(w: VueWrapper, field: string, order: number) {
+  const table = w.findComponent(UiDataTable as unknown as Component) as unknown as {
+    vm: { $emit: (event: string, payload: unknown) => void }
+  }
+  table.vm.$emit('sort', { field, order })
+  await nextTick()
+}
+
+beforeEach(() => {
+  vi.clearAllMocks()
+})
+
+describe('ReportTabGroup —— 维度 tab', () => {
+  it('四个维度 tab 都在', () => {
+    expect(mountTabs().text()).toContain('订单流水')
+    expect(mountTabs().text()).toContain('备货流水')
+    expect(mountTabs().text()).toContain('出货流水')
+    expect(mountTabs().text()).toContain('备货抵扣')
+  })
+
+  it('用系统的 UiTabs / UiTabTrigger，不自己写一套 tab 样式', () => {
+    const w = mountTabs()
+
+    expect(w.find('.ui-tab-group').exists()).toBe(true)
+    expect(w.findAll('.ui-tab-btn')).toHaveLength(4)
+  })
+
+  it('当前 tab 为选中态，切换后跟着变', () => {
+    expect(mountTabs().findAll('.ui-tab-btn')[0]?.classes()).toContain('active')
+    expect(mountTabs({ modelValue: 'stockout' }).findAll('.ui-tab-btn')[2]?.classes()).toContain('active')
+  })
+
+  it('点击上抛 change', async () => {
+    const w = mountTabs()
+
+    // reka-ui 的 tab 触发器在 mousedown.left 上激活（不是 click），见 TabsTrigger.vue
+    await w.findAll('.ui-tab-btn')[1]?.trigger('mousedown')
+
+    expect(w.emitted('change')?.[0]).toEqual(['stockin'])
+  })
+})
+
+describe('ReportFilterBar —— 系统控件与动作', () => {
+  it('客户下拉与产品输入都用系统组件，查询/重置/导出 都在', () => {
+    const w = mountFilterBar()
+
+    expect(w.findComponent({ name: 'UiSelect' }).exists()).toBe(true)
+    expect(w.findComponent({ name: 'UiInput' }).exists()).toBe(true)
+    expect(w.find('[aria-label="查询"]').exists()).toBe(true)
+    expect(w.find('[aria-label="重置"]').exists()).toBe(true)
+    expect(w.find('[aria-label="导出"]').exists()).toBe(true)
+  })
+
+  it('日期区间筛选已移除（按反馈删除），连带不留空的日期控件', () => {
+    const w = mountFilterBar()
+
+    expect(w.findAllComponents({ name: 'UiDatePicker' })).toHaveLength(0)
+  })
+
+  it('字段名交给 placeholder，不再占一行常驻 label', () => {
+    expect(mountFilterBar().findAll('label')).toHaveLength(0)
+  })
+
+  it('产品名输入写回 model（受控）', async () => {
+    const w = mountFilterBar()
+
+    await w.find('input[aria-label="产品名称或 SKU"]').setValue('鲨鱼')
+
+    expect((w.props('filters') as { product: string }).product).toBe('鲨鱼')
+  })
+
+  it('查询 / 重置 / 导出 各自上抛', async () => {
+    const w = mountFilterBar()
+
+    await w.find('[aria-label="查询"]').trigger('click')
+    await w.find('[aria-label="重置"]').trigger('click')
+    await w.find('[aria-label="导出"]').trigger('click')
+
+    expect(w.emitted('search')).toHaveLength(1)
+    expect(w.emitted('reset')).toHaveLength(1)
+    expect(w.emitted('export')).toHaveLength(1)
+  })
+})
+
+describe('ReportView —— 单行工具条', () => {
+  it('工具条里有页面标题', () => {
+    expect(mountView().find('.rp-toolbar h1').text()).toBe('报表流水')
+  })
+
+  it('tab 组、筛选、导出在同一行（同一工具条容器内）', () => {
+    const w = mountView()
+
+    expect(w.find('.rp-toolbar .rp-tab-group').exists()).toBe(true)
+    expect(w.find('.rp-toolbar .rp-filter-bar').exists()).toBe(true)
+    expect(w.find('.rp-toolbar [aria-label="导出"]').exists()).toBe(true)
+  })
+
+  it('不再有原来那个空着的卡片头（tab 原先独占一行）', () => {
+    expect(mountView().find('.page-card-header').exists()).toBe(false)
+  })
+})
+
+describe('ReportView —— 表格与数字格式', () => {
+  it('五列按比例分配宽度（否则产品名/备注会吃掉全部余量）', () => {
+    const headers = mountView().findAll('th')
+    const styles = headers.map((th) => th.attributes('style') ?? '')
+
+    expect(styles[0]).toContain('16%')
+    expect(styles[1]).toContain('14%')
+    expect(styles[2]).toContain('28%')
+    expect(styles[3]).toContain('16%')
+    expect(styles[4]).toContain('26%')
+  })
+
+  it('数量走千分位并加粗', () => {
+    const cells = mountView().findAll('tbody tr')[0]!.findAll('td')
+
+    expect(cells[3]?.text()).toContain('15,000')
+    expect(cells[3]?.find('.rp-qty').exists()).toBe(true)
+  })
+
+  it('空值留白，不显示「-」占位符', () => {
+    const cells = mountView().findAll('tbody tr')[1]!.findAll('td')
+
+    expect(cells[4]?.text()).toBe('')
+  })
+
+  it('数量列可排序（当前页客户端重排）', async () => {
+    const w = mountView()
+
+    await emitSort(w, 'quantity', 1)
+    expect(w.findAll('tbody tr')[0]?.text()).toContain('5,000')
+
+    await emitSort(w, 'quantity', -1)
+    expect(w.findAll('tbody tr')[0]?.text()).toContain('15,000')
+  })
+})
