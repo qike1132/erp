@@ -18,6 +18,7 @@ from fastapi_app.api.v1.endpoints.dead_letter import router as dead_letter_route
 from fastapi_app.api.v1.endpoints.material_registration import router as material_reg_router
 from fastapi_app.api.v1.endpoints.monitoring import router as monitoring_router
 from fastapi_app.api.v1.endpoints.notification import router as notification_router
+from fastapi_app.api.v1.endpoints.numbering_audit import router as numbering_audit_router
 from fastapi_app.api.v1.endpoints.ocr_import import router as ocr_import_router
 from fastapi_app.api.v1.endpoints.order import router as order_router
 from fastapi_app.api.v1.endpoints.order_batch import router as order_batch_router
@@ -310,5 +311,13 @@ api_router.include_router(
     notification_router,
     prefix="/notifications",
     tags=["notifications"],
+    dependencies=[Depends(get_current_user_id)],
+)
+
+# 编号巡检只读路由 - 前缀 /api/v1/numbering-audit
+api_router.include_router(
+    numbering_audit_router,
+    prefix="/numbering-audit",
+    tags=["编号巡检"],
     dependencies=[Depends(get_current_user_id)],
 )

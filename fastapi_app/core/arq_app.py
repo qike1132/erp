@@ -68,6 +68,7 @@ from fastapi_app.tasks.maintenance_tasks import (
     refresh_dashboard_mv_task,
     rotate_nginx_logs_task,
 )
+from fastapi_app.tasks.numbering_audit_task import numbering_audit_task
 from fastapi_app.tasks.plan_tasks import (
     batch_import_plans_task,
     sync_shipment_records_task,
@@ -120,6 +121,15 @@ cron_schedules = [
         'schedule': '4:30',
         'timeout': 120,
     },
+    {
+        # 编号不变量巡检：counter_behind（数据号 > 水位）与格式违规落库，
+        # 供只读端点拉取。正向跳号是正常语义，不报警。10 分钟一次，幂等低开销。
+        'name': 'numbering_audit',
+        'func': numbering_audit_task,
+        'cron': {'minute': set(range(0, 60, 10))},
+        'schedule': 'every 10m',
+        'timeout': 60,
+    },
 ]
 
 cron_jobs = [
@@ -150,6 +160,7 @@ class WorkerSettings:
         batch_import_plans_task,
         refresh_dashboard_mv_task,
         ensure_readonly_grants_task,
+        numbering_audit_task,
     ]
     cron_jobs = cron_jobs
     redis_settings = redis_settings

@@ -45,6 +45,7 @@ from fastapi_app.shared_models.file_record import FileRecord
 from fastapi_app.shared_models.inventory_log import InventoryLog
 from fastapi_app.shared_models.material_registration import MaterialRegistration, MaterialRegistrationItem
 from fastapi_app.shared_models.notification import Notification
+from fastapi_app.shared_models.numbering_audit import NumberingAudit
 from fastapi_app.shared_models.numbering_counter import NumberingCounter
 from fastapi_app.shared_models.order import Order
 from fastapi_app.shared_models.order_batch_audit import OrderBatchAuditLog
@@ -123,6 +124,7 @@ __all__ = [
     'MaterialRegistrationItem',
     'ModificationLog',
     'Notification',
+    'NumberingAudit',
     'NumberingCounter',
     'Order',
     'OrderBatchAuditLog',
