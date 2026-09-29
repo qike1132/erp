@@ -18,13 +18,13 @@ from .._constants import (
     BACKUP_FORMAT_VERSION,
     BACKUP_LOCK_ID,
     BACKUP_OPERATION_TIMEOUT,
-    CONFIG_DIR,
     MEILI_HOST,
     MEILI_MASTER_KEY,
     PRE_RESTORE_DIR,
     REDIS_DUMP,
     UPLOADS_DIR,
     _backup_in_progress,
+    config_files_to_package,
 )
 from ..crypto import get_backup_encryption_password, sha256_file
 from ..dump import run_pg_dump
@@ -340,15 +340,11 @@ async def _do_create_full_backup(
 
             config_files_added = []
             config_files_excluded = []
-            config_files_to_check = [
-                ('jwt/private.pem', 'jwt/private.pem'),
-                ('jwt/public.pem', 'jwt/public.pem'),
-                ('redis.production.conf', 'redis.production.conf'),
-                ('nginx.conf', 'nginx.conf'),
-                ('.env.production', '.env.production'),
-            ]
-            for file_name, relative_path in config_files_to_check:
-                file_path = CONFIG_DIR / file_name
+            # 清单唯一来源：_constants.config_files_to_package()（H-3，2026-09-29）。
+            # 现役 JWT 密钥按 settings 推导（随轮换自动跟进）+ 运行时 .env（归档为
+            # root/.env）；**退役**的 private.pem/public.pem 不再随包分发 —— 它们是
+            # 已泄漏的历史密钥，随包走等于继续扩散。
+            for file_path, relative_path in config_files_to_package():
                 if file_path.is_file():
                     if should_exclude_file(file_path, relative_path, include_sensitive_config):
                         config_files_excluded.append(relative_path)

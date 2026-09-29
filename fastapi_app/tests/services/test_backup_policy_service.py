@@ -19,9 +19,14 @@ class TestBackupPolicyService:
 
     @pytest.fixture
     def policy_service(self):
-        """创建策略服务实例"""
-        service = BackupPolicyService()
-        # 模拟环境变量
+        """创建策略服务实例。
+
+        ⚠️ patch.dict 必须**覆盖测试体**：此前写成 `with patch.dict(...): return service`，
+        上下文在 fixture 返回时即退出，测试体里 `_load_policy_config()` 读到的是本机
+        `.env` 的真值（`BACKUP_ENCRYPTION_ENABLED=true`），于是
+        `test_load_policy_config` 在本机必红、CI（无 .env）为绿 —— 假回归信号。
+        改为 yield，让钉住的环境变量活到测试结束。
+        """
         with patch.dict(os.environ, {
             'BACKUP_FULL_CRON': '0 2 * * *',
             'BACKUP_INCREMENTAL_CRON': '0 */1 * * *',
@@ -39,8 +44,9 @@ class TestBackupPolicyService:
             'BACKUP_NOTIFY_FAILURE': 'true',
             'BACKUP_NOTIFY_WARNING': 'true',
         }):
+            service = BackupPolicyService()
             service.__init__()
-            return service
+            yield service
 
     @pytest.fixture
     def temp_policy_file(self):

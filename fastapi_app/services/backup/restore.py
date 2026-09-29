@@ -286,11 +286,46 @@ async def _restore_components_only(
     return results
 
 
+async def _enter_restore_maintenance() -> None:
+    """还原开始时开启维护模式（H-1，2026-09-29）。
+
+    与还原锁**同生命周期**：锁在 → 闸门在。fail-open —— 开不上只告警，
+    因为"能否还原"已由还原锁的 fail-closed 兜住，维护模式是纵深防御，
+    不该反向阻断还原本身（否则 Redis 抖动会让灾备完全走不通）。
+    """
+    try:
+        from fastapi_app.core.maintenance import enter_maintenance
+        if not await enter_maintenance():
+            logger.warning('未能开启维护模式：本次还原期间业务写入不会被拒绝')
+    except Exception as e:  # broad-except: 维护模式失败不阻断还原
+        logger.warning(f'开启维护模式异常: {e}')
+
+
+async def _exit_restore_maintenance() -> None:
+    """还原结束（且确实由本持有者释放了锁）时关闭维护模式。"""
+    try:
+        from fastapi_app.core.maintenance import exit_maintenance
+        await exit_maintenance()
+    except Exception as e:  # broad-except: 维护模式失败不阻断还原收尾
+        logger.warning(f'关闭维护模式异常: {e}')
+
+
+async def _renew_restore_maintenance() -> None:
+    """还原长任务续期时同步续维护模式 TTL（否则超过 TTL 闸门中途失效）。"""
+    try:
+        from fastapi_app.core.maintenance import renew_maintenance
+        await renew_maintenance()
+    except Exception as e:  # broad-except: 续期失败由 TTL 兜底
+        logger.warning(f'续期维护模式异常: {e}')
+
+
 async def acquire_restore_lock(task_id: str) -> bool:
     """尝试获取恢复锁（Redis 分布式锁，支持多 worker）
 
     fail-closed（M3）:Redis 不可用时返回 False，拒绝还原执行——高危域不允许在
     无法确认锁的情况下放行，避免两个还原在 4 worker 间并发覆盖数据。
+
+    取锁成功即开启维护模式（H-1）：同步与异步路径都走本函数，故这是唯一的接线点。
     """
     try:
         from fastapi_app.core.backup_progress import _get_redis
@@ -302,7 +337,10 @@ async def acquire_restore_lock(task_id: str) -> bool:
             _RESTORE_LOCK_KEY, task_id,
             nx=True, ex=_RESTORE_LOCK_TTL
         )
-        return result is not None
+        if result is None:
+            return False
+        await _enter_restore_maintenance()
+        return True
     except Exception as e:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断
         logger.warning(f'获取恢复锁失败: {e}（fail-closed，拒绝还原）')
         return False
@@ -322,6 +360,9 @@ async def release_restore_lock(task_id: str | None = None):
 
     task_id 为 None 时保持旧语义（无条件删除，向后兼容旧调用方）；
     传入 task_id 时经 Lua 比对 value，避免后启动的任务误删前者仍持有的锁。
+
+    H-1：**只有确实由本持有者释放**（Lua 返回 1，或旧语义的无条件删除）才关闭
+    维护模式 —— 锁已易主说明另一次还原在跑，替它关闸门等于放业务写入进来。
     """
     try:
         from fastapi_app.core.backup_progress import _get_redis
@@ -329,8 +370,11 @@ async def release_restore_lock(task_id: str | None = None):
         if client is not None:
             if task_id is None:
                 await client.delete(_RESTORE_LOCK_KEY)
+                await _exit_restore_maintenance()
             else:
-                await client.eval(_RELEASE_LOCK_LUA, 1, _RESTORE_LOCK_KEY, task_id)
+                released = await client.eval(_RELEASE_LOCK_LUA, 1, _RESTORE_LOCK_KEY, task_id)
+                if released:
+                    await _exit_restore_maintenance()
     except Exception as e:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断
         logger.warning(f'释放恢复锁失败: {e}')
 
@@ -355,6 +399,9 @@ async def renew_restore_lock(task_id: str) -> bool:
             """,
             1, _RESTORE_LOCK_KEY, task_id, str(_RESTORE_LOCK_TTL),
         )
+        if result:
+            # H-1：维护模式与锁同步续期，否则长还原超过维护 TTL 后闸门中途失效
+            await _renew_restore_maintenance()
         return bool(result)
     except Exception as e:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断
         logger.warning(f'续期恢复锁失败: {e}')

@@ -74,19 +74,8 @@
       </div>
     </div>
     <script type="module" src="/src/main.ts"></script>
-    <script>
-      // 启动遮罩兜底：Vue 挂载成功后 #app-loading 会被替换。
-      // 若主 JS 加载失败/挂载报错导致 8s 后仍存在，则改为失败提示并提供重试，杜绝"永久加载中"。
-      setTimeout(function () {
-        var el = document.getElementById('app-loading')
-        if (el && document.getElementById('app')) {
-          el.innerHTML =
-            '<div class="app-loading-fail">' +
-            '<p class="app-fail-text">页面加载失败，请检查网络后重试</p>' +
-            '<button type="button" onclick="location.reload()">重新加载</button>' +
-            '</div>'
-        }
-      }, 8000)
-    </script>
+    <!-- 启动遮罩兜底：外置为 /app-loading-fallback.js（public/ 会被原样拷进 dist），
+         SPA 入口 CSP 的 script-src 已收紧为 'self'，内联脚本会被浏览器拦掉。 -->
+    <script src="/app-loading-fallback.js" defer></script>
   </body>
 </html>

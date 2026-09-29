@@ -25,11 +25,15 @@
 **因此本改动带来的是**：与缓存层统一为一个受生命周期管理的客户端、失败进入退避、
 日志有界。**它不是一次生产故障修复。**
 
-**已知缺口（未修，需产品决策）**：`enter_maintenance()` / `exit_maintenance()`
-**在生产代码里没有任何调用方** —— 还原流程用的是 `acquire_restore_lock`，
-并不开启维护模式。因此「还原期间禁止写入」这个保证**目前并不存在**：
-标志从未被置上，闸门自然不生效。要落实它，需要把这两个函数接进还原流程
-（并确保结束时一定清除，TTL 30 分钟只是兜底）。
+**接线状态（2026-09-29 已修，H-1）**：`enter_maintenance()` / `exit_maintenance()`
+此前在生产代码里没有任何调用方 —— 「还原期间禁止写入」只是文案。现已在
+`services/backup/restore.py` 的还原锁三处接好：
+
+* 取锁成功 → `enter_maintenance()`（fail-open：开不上只告警，能否还原由锁 fail-closed 决定）；
+* **由持锁者**释放 → `exit_maintenance()`（非持锁者不得关，否则替并发中的还原开了门）；
+* 锁续期成功 → `renew_maintenance()`（否则长还原超过 TTL 后闸门中途失效）。
+
+同步路径与异步任务路径共用这三个函数，故单点接线即全覆盖。TTL 30 分钟仍作崩溃兜底。
 """
 from __future__ import annotations
 
@@ -43,6 +47,10 @@ from starlette.responses import JSONResponse
 logger = logging.getLogger(__name__)
 
 _MAINTENANCE_KEY = 'erp:maintenance_mode'
+
+# 维护模式 TTL（兜底自动解除，防崩溃遗留）。2026-09-29（H-1）起由
+# `renew_maintenance()` 随还原锁一起续期，长还原不会再中途失效。
+_MAINTENANCE_TTL_SECONDS = 30 * 60
 
 # 备份域前缀：还原/备份相关写请求放行（其余业务写请求在维护期被拒绝）
 _BACKUP_PATH_PREFIXES = ('/api/v1/backup/',)
@@ -120,12 +128,33 @@ async def enter_maintenance() -> bool:
         if client is None:
             logger.warning('Redis 不可用，无法开启维护模式')
             return False
-        await client.set(_MAINTENANCE_KEY, '1', ex=30 * 60)
+        await client.set(_MAINTENANCE_KEY, '1', ex=_MAINTENANCE_TTL_SECONDS)
         _report_success()
         return True
     except Exception as e:  # broad-except: 维护开关失败不抛出
         _notify_failure(e)
         logger.warning(f'开启维护模式失败: {e}')
+        return False
+
+
+async def renew_maintenance() -> bool:
+    """续期维护模式 TTL（H-1：还原长任务与还原锁同步续期）。
+
+    没有它的话，还原超过 `_MAINTENANCE_TTL_SECONDS` 后闸门会中途失效 ——
+    长还原正是最需要"禁止写入"的时候。仅当标志仍在时才续期，返回是否续期成功。
+    """
+    try:
+        client = await _get_client()
+        if client is None:
+            return False
+        if not await client.get(_MAINTENANCE_KEY):
+            return False
+        await client.expire(_MAINTENANCE_KEY, _MAINTENANCE_TTL_SECONDS)
+        _report_success()
+        return True
+    except Exception as e:  # broad-except: 续期失败不抛出，由 TTL 兜底
+        _notify_failure(e)
+        logger.warning(f'续期维护模式失败: {e}')
         return False
 
 

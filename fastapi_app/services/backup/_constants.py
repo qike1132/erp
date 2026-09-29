@@ -6,8 +6,11 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # 常量
@@ -56,9 +59,57 @@ BACKUP_ENCRYPTION_CHUNKED = os.environ.get('BACKUP_ENCRYPTION_CHUNKED', 'true').
 BACKUP_CHUNK_SIZE = int(os.environ.get('BACKUP_CHUNK_SIZE', '104857600'))  # 默认 100MB
 BACKUP_MAX_CHUNKS = int(os.environ.get('BACKUP_MAX_CHUNKS', '100'))  # 最大分片数
 
-# REV-09: 配置文件白名单 — 敏感文件恢复需二次确认
-_SENSITIVE_CONFIG_FILES = {'.env.production', 'jwt/private.pem', 'jwt/public.pem'}
+# 运行时环境文件（生产由 prod_runner / config.py 的 load_dotenv 真正加载的就是它，
+# **不是** .env.production）
+RUNTIME_ENV_FILE = PROJECT_ROOT / '.env'
 
+
+def active_jwt_key_relative_paths() -> list[str]:
+    """现役 JWT 密钥相对 config/ 的路径（按 settings 推导，**随轮换自动跟进**）。
+
+    H-3（2026-09-29）：此前打包清单硬编码 `jwt/private.pem` + `jwt/public.pem`，
+    那是 2026-08-22 轮换前的旧名 —— 备份里装的是退役（且已在 git 历史泄漏）的密钥，
+    现役 v2 密钥从不进包。灾难恢复时 ES256 模式找不到 `JWT_PRIVATE_KEY_PATH` 指向的
+    文件会直接 RuntimeError，改用包里的旧钥则等于把泄漏钥重新启用。
+    密钥落在 config/ 之外时无法进 `config/` 命名空间，记警告并跳过（不静默）。
+    """
+    from fastapi_app.core.config import settings
+
+    rel_paths: list[str] = []
+    for raw in (settings.JWT_PRIVATE_KEY_PATH, settings.JWT_PUBLIC_KEY_PATH):
+        if not raw:
+            continue
+        try:
+            rel_paths.append(Path(raw).resolve().relative_to(CONFIG_DIR.resolve()).as_posix())
+        except ValueError:
+            logger.warning(f'JWT 密钥不在配置目录内，无法随备份分发: {raw}')
+    return rel_paths
+
+
+def config_files_to_package() -> list[tuple[Path, str]]:
+    """要打进备份的配置文件：(源文件绝对路径, 归档内相对路径)。
+
+    `config/` 命名空间由 restore_config 还原回 config/；`root/` 命名空间还原回项目根
+    （运行时 .env 在那儿）。
+    """
+    entries: list[tuple[Path, str]] = [
+        (CONFIG_DIR / rel, rel) for rel in active_jwt_key_relative_paths()
+    ]
+    entries += [
+        (CONFIG_DIR / 'redis.production.conf', 'redis.production.conf'),
+        (CONFIG_DIR / 'nginx.conf', 'nginx.conf'),
+        (CONFIG_DIR / '.env.production', '.env.production'),
+        (RUNTIME_ENV_FILE, 'root/.env'),
+    ]
+    return entries
+
+
+# REV-09: 配置文件白名单 — 敏感文件恢复需二次确认
+# 2026-09-29（H-3）：补入运行时 .env 与**现役**密钥；历史名（private.pem /
+# public.pem / .env.production）**保留** —— 旧备份包里装着这些退役件，
+# 还原闸门必须照样拦得住。
+_SENSITIVE_CONFIG_FILES = {'.env.production', '.env', 'jwt/private.pem', 'jwt/public.pem'}
+_SENSITIVE_CONFIG_FILES.update(active_jwt_key_relative_paths())
 # 从环境变量读取排除文件列表
 BACKUP_EXCLUDE_FILES = os.environ.get('BACKUP_EXCLUDE_FILES', '')
 if BACKUP_EXCLUDE_FILES:

@@ -327,3 +327,9 @@ _firefox_profile_*/
 /deliverables/**/_*.out
 /deliverables/**/_*.txt
 /deliverables/**/*.BEFORE-*
+
+# === 2026-09-29 运维件独立存放目录（M-3/§5.1#5）===
+# credentials/：备份加密口令、监控 bearer token、.env 历史副本 —— 含现役凭据，
+#   绝不可入库；audit_scratch/：历次审查的一次性脚本与产出。
+# 目录整体忽略：即便日后新增文件类型也不会漏网。
+/_ops/

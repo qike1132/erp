@@ -36,6 +36,43 @@ logger = logging.getLogger(__name__)
 
 MAX_REQUEST_BODY_SIZE = 10 * 1024 * 1024
 
+# H-2（2026-09-29）：路径级请求体上限。全局 10MB 会把业务侧**已经声明支持**的更大
+# 上传一并挡死（备份 500MB、Excel 导入 50MB），上线后首次整库还原/大导入即 413。
+# 放宽只为让请求抵达端点，体积的真正校验仍由端点内的常量负责：
+#   * 备份  -> services/backup/_constants.py::MAX_BACKUP_FILE_SIZE
+#   * 导入  -> api/v1/endpoints/tasks.py::MAX_IMPORT_FILE_SIZE
+# core 层不能 import services/backup（会与 backup 域形成循环依赖），故此处用常量 +
+# 环境变量覆盖；tests/test_request_body_limit_paths.py 的 parity 用例锁住
+# 「中间件上限 >= 业务声明上限」，防止两处漂移。
+# ⚠️ 边缘 nginx 也要同步放行，见部署文件 config/nginx-windows.conf（**不是** config/nginx.conf）。
+_BACKUP_UPLOAD_BODY_LIMIT = int(os.environ.get('MAX_BACKUP_UPLOAD_BYTES', str(512 * 1024 * 1024)))
+_IMPORT_UPLOAD_BODY_LIMIT = int(os.environ.get('MAX_IMPORT_UPLOAD_BYTES', str(64 * 1024 * 1024)))
+
+_PATH_BODY_LIMITS: tuple[tuple[str, int], ...] = (
+    ('/api/v1/backup/', _BACKUP_UPLOAD_BODY_LIMIT),
+    ('/api/v1/tasks/import-', _IMPORT_UPLOAD_BODY_LIMIT),
+)
+
+
+def max_body_size_for_path(path: str) -> int:
+    """返回该请求路径允许的最大请求体字节数。
+
+    只有业务侧已声明上限的路径放宽，其余路径维持全局 10MB。
+    """
+    for prefix, limit in _PATH_BODY_LIMITS:
+        if path.startswith(prefix):
+            return limit
+    return MAX_REQUEST_BODY_SIZE
+
+
+def _body_too_large_response(limit: int) -> Response:
+    mb = limit // 1024 // 1024
+    return Response(
+        content=f'{{"detail":"请求体过大，最大允许{mb}MB"}}',
+        status_code=413,
+        media_type="application/json",
+    )
+
 # Prometheus endpoint 归一化：纯数字 ID / UUID / 长 hex token 统一折叠为 {id}，
 # 防止订单号等非数字动态路径段造成指标 label 基数爆炸
 _PATH_ID_SEGMENT_RE = re.compile(
@@ -356,15 +393,12 @@ def _setup_body_size_limit(app: FastAPI) -> None:
     @app.middleware("http")
     async def limit_request_body_size(request: Request, call_next):
         if request.method in ("POST", "PUT", "PATCH"):
+            limit = max_body_size_for_path(request.url.path)
             content_length = request.headers.get("content-length")
             if content_length:
                 try:
-                    if int(content_length) > MAX_REQUEST_BODY_SIZE:
-                        return Response(
-                            content='{"detail":"请求体过大，最大允许10MB"}',
-                            status_code=413,
-                            media_type="application/json",
-                        )
+                    if int(content_length) > limit:
+                        return _body_too_large_response(limit)
                 except ValueError:
                     return Response(
                         content='{"detail":"无效的Content-Length"}',
@@ -375,12 +409,8 @@ def _setup_body_size_limit(app: FastAPI) -> None:
                 body = b""
                 async for chunk in request.stream():
                     body += chunk
-                    if len(body) > MAX_REQUEST_BODY_SIZE:
-                        return Response(
-                            content='{"detail":"请求体过大，最大允许10MB"}',
-                            status_code=413,
-                            media_type="application/json",
-                        )
+                    if len(body) > limit:
+                        return _body_too_large_response(limit)
                 request._body = body
         response = await call_next(request)
         response.headers["X-API-Version"] = "v1"

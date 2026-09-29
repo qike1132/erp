@@ -3,12 +3,14 @@ from __future__ import annotations
 
 import logging
 import zipfile
+from pathlib import Path
 
 from ._constants import (
     _EXCLUDE_FILES,
     _SENSITIVE_AND_EXCLUDED_FILES,
     _SENSITIVE_CONFIG_FILES,
     CONFIG_DIR,
+    PROJECT_ROOT,
     UPLOADS_DIR,
 )
 
@@ -83,15 +85,29 @@ def restore_filestore(zf: zipfile.ZipFile) -> dict:  # log-context: internal hel
     return {'status': 'ok' if not errors else 'partial', 'restored': restored, 'errors': errors}
 
 
+def _restore_roots() -> tuple[tuple[str, Path], ...]:
+    """归档命名空间 → 还原目标根（调用时求值，便于测试重定向）。
+
+    `config/` 落回 CONFIG_DIR；`root/` 落回 PROJECT_ROOT —— 运行时 `.env` 归档为
+    `root/.env`（H-3，2026-09-29），它不属于 config/ 目录。
+    """
+    return (('config/', CONFIG_DIR), ('root/', PROJECT_ROOT))
+
+
 def restore_config(zf: zipfile.ZipFile, confirm_sensitive: bool = False) -> dict:  # log-context: internal helper 无请求上下文
-    """恢复配置文件到 config/ 目录（REV-09: 敏感文件白名单校验）"""
+    """恢复配置文件（REV-09: 敏感文件白名单校验 + 命名空间隔离）"""
     restored = []
     errors = []
     skipped_sensitive = []
+    roots = _restore_roots()
     for name in zf.namelist():
-        if not name.startswith('config/') or name.endswith('/'):
+        if name.endswith('/'):
             continue
-        rel_path = name[len('config/'):]
+        matched = next(((pfx, root) for pfx, root in roots if name.startswith(pfx)), None)
+        if matched is None:
+            continue
+        prefix, root = matched
+        rel_path = name[len(prefix):]
         if '..' in rel_path or rel_path.startswith('/') or rel_path.startswith('\\'):
             errors.append(f'{rel_path}: 路径不安全，已跳过')
             continue
@@ -100,9 +116,9 @@ def restore_config(zf: zipfile.ZipFile, confirm_sensitive: bool = False) -> dict
             skipped_sensitive.append(rel_path)
             logger.warning(f"跳过敏感文件恢复（需要确认）: {rel_path}")
             continue
-        target = CONFIG_DIR / rel_path
+        target = root / rel_path
         try:
-            target.resolve().relative_to(CONFIG_DIR.resolve())
+            target.resolve().relative_to(root.resolve())
         except ValueError:
             errors.append(f'{rel_path}: 路径越界，已跳过')
             continue
