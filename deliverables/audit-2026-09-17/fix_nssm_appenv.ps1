@@ -10,7 +10,10 @@
 #    后果：PYTHONUNBUFFERED 未生效 → erp-prod.log 行序错乱/启动日志滞后；
 #          PYTHONUTF8 未生效 → erp-arq.log 中文乱码。
 #
-#  本脚本把它改写为「一变量一元素」（语义等价，只是让它们真正生效）。
+#  本脚本把它改写为「一变量一元素」，让原先失效的变量真正生效。
+#  ⚠️ 注意：这**不是**逐字等价改写 —— UVICORN_WORKERS 被有意从当前注册表值 4 改为 8
+#     （2026-09-29 决定，把 erp-prod 的 uvicorn worker 由 4 提到 8；erp-arq 无此参数，
+#     一并写入仅为两服务配置一致）。其余 5 项与原串逐字相同。
 #
 #  用法（必须管理员 PowerShell）：
 #    .\fix_nssm_appenv.ps1 -DryRun      # 只读预览，不改任何东西（非管理员也可跑）
@@ -36,8 +39,10 @@ $ErrorActionPreference = 'Stop'
 $NssmPath = 'C:\nssm\nssm.exe'
 $ParamsRoot = 'HKLM:\SYSTEM\CurrentControlSet\Services\{0}\Parameters'
 
-# 期望的「一变量一元素」形态。内容与原单串完全一致，只是拆成 6 个元素。
-# （UVICORN_WORKERS 对 erp-arq 无意义，但保留以保持与原配置逐字一致，减少变量。）
+# 期望的「一变量一元素」形态。
+# ⚠️ 与原单串**并非逐字一致**：原值为 UVICORN_WORKERS=4，此处写 8 —— 2026-09-29 有意
+#    把它提到 8（见文件头说明）。其余 5 项与原串逐字相同。
+# （UVICORN_WORKERS 对 erp-arq 无意义，但保留以保持两服务配置一致。）
 $Expected = @(
     'APP_ENV=production',
     'FASTAPI_DEBUG=false',
