@@ -185,3 +185,33 @@ def test_app_worker_default_no_longer_reads_own_env_only():
     src = (Path(__file__).resolve().parent.parent / 'server_manager' / 'app.py').read_text(encoding='utf-8')
     assert 'get_env_extra_key' in src, '下拉框未读 NSSM 真值 → 会重现「显示 4、实际 8」'
     assert _SVC_API in src and _SVC_ARQ in src
+
+
+def _func_src(name: str) -> str:
+    """取 app.py 中某方法的源码段（按 AST，不依赖行号/顺序）。"""
+    import ast
+
+    src = (Path(__file__).resolve().parent.parent / 'server_manager' / 'app.py').read_text(encoding='utf-8')
+    lines = src.splitlines()
+    for node in ast.walk(ast.parse(src)):
+        if isinstance(node, ast.FunctionDef) and node.name == name:
+            return '\n'.join(lines[node.lineno - 1:node.end_lineno])
+    raise AssertionError(f'app.py 内未找到 {name}')
+
+
+def test_apply_flow_body_touches_no_tk():
+    """闸门 worker 跑在**后台线程**（ActionGate.start → threading.Thread），
+    tkinter 弹窗与控件只能在主线程 —— 流程体内不得出现任何 Tk 调用。
+
+    否则会重演：worker 线程里弹 askyesno → GUI 卡死/崩溃。
+    """
+    body = _func_src('_apply_workers_flow')
+    for forbidden in ('messagebox', 'tk.', 'ttk.', 'self.root'):
+        assert forbidden not in body, f'worker 流程体内不得出现 {forbidden}（非主线程）'
+    # 汇报只能走消息队列
+    assert "_msg_queue.put" in body
+
+
+def test_confirm_dialog_lives_in_main_thread_handler():
+    """弹窗必须留在主线程的动作入口（_apply_workers），而不是被搬进 worker 流程。"""
+    assert 'askyesno' in _func_src('_apply_workers')

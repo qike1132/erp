@@ -1162,33 +1162,35 @@ class ServerManagerApp(HostingViewMixin):
         return str(int(os.getenv('UVICORN_WORKERS', '4')))
 
     def _apply_workers(self):
+        """主线程：读现状 + 弹窗确认 + 交给闸门。（tkinter 不许跨线程，弹窗必须在这里）"""
         nssm = self._find_nssm()
         if not nssm:
             messagebox.showerror('缺少 NSSM', '未找到 NSSM，无法修改服务配置。')
             return
-        self._gate.start('应用 Worker 数', self._apply_workers_flow, nssm,
-                         (self.hosting_workers_var.get() or '').strip())
-
-    def _apply_workers_flow(self, nssm, target):
-        """写 NSSM 的 UVICORN_WORKERS 并只重启 erp-prod。
-
-        uvicorn 的 worker 数是启动时一次性 spawn 的进程数，运行中无法增减 ——
-        所以「生效」必然包含一次重启，先讲清代价再动手。
-        """
+        target = (self.hosting_workers_var.get() or '').strip()
+        if not target:
+            return
         current = self.svc.get_env_extra_key(nssm, _SVC_API, 'UVICORN_WORKERS')
         if current == target:
-            self._msg_queue.put(('log', {'text': f'Worker 已是 {target}，无需变更'}))
+            self.log_message(f'Worker 已是 {target}，无需变更')
             return
-
-        # 服务在跑才需要重启确认；已停止时只写配置，下次启动自然生效
-        if 'RUNNING' in self._svc_state(_SVC_API) and not messagebox.askyesno(
+        # 服务在跑才需要重启；已停止时只写配置，下次启动自然生效，不必吓人一跳
+        needs_restart = 'RUNNING' in self._svc_state(_SVC_API)
+        if needs_restart and not messagebox.askyesno(
             '确认重启 erp-prod',
             f'Worker {current or "（未设置）"} → {target}\n\n'
             f'worker 数改动必须重启 {_SVC_API} 才生效，期间 :5002 会中断数秒。继续？',
         ):
-            self._msg_queue.put(('log', {'text': '已取消 Worker 变更'}))
+            self.log_message('已取消 Worker 变更')
             return
+        self._gate.start('应用 Worker 数', self._apply_workers_flow, nssm, target, needs_restart)
 
+    def _apply_workers_flow(self, nssm, target, needs_restart):
+        """后台线程：只写配置 + 重启 + 经消息队列汇报，绝不可触碰 Tk。
+
+        uvicorn 的 worker 数是启动时一次性 spawn 的进程数，运行中无法增减 ——
+        所以「生效」必然包含一次重启（是否重启由主线程确认后以 needs_restart 传入）。
+        """
         # 两个服务都写（_SVC_UVICORN_WORKERS）：erp-arq 不读该变量，但保持两者
         # AppEnvironmentExtra 一致，免得日后「安装生产服务」用其中一个的值覆盖出分歧。
         for name in _SVC_UVICORN_WORKERS:
@@ -1197,8 +1199,7 @@ class ServerManagerApp(HostingViewMixin):
             self._msg_queue.put(('log', {'text': msg, 'level': 'INFO' if ok else 'ERROR'}))
             if not ok:
                 return
-
-        if 'RUNNING' in self._svc_state(_SVC_API):
+        if needs_restart:
             self._gate.checkpoint()
             self._msg_queue.put(('log', {'text': f'重启 {_SVC_API} 使 Worker={target} 生效...'}))
             self.svc.restart_one_service(_SVC_API)
