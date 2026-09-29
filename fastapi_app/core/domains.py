@@ -56,7 +56,7 @@ DOMAIN_SERVICE_MAP = {
     Domain.PRODUCT: ['product_service', 'product_search_service'],
     Domain.CUSTOMER: ['customer_service', 'customer_search_service'],
     Domain.INVENTORY: ['stock_service'],
-    Domain.ORDER: ['order_service', 'order_batch_service', 'order_purchase_sync'],
+    Domain.ORDER: ['order_service', 'order_batch_service'],
     Domain.PURCHASE: ['purchase_order_service', 'purchase_plan_service', 'purchase_center_service',
                       'purchase_bom_copy_service', 'purchase_customer_service', 'purchase_history_service',
                       'purchase_product_service', 'purchase_supplier_service'],
