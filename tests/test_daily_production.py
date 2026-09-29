@@ -102,7 +102,7 @@ class TestGetRecords:
         mock_async_db.execute = AsyncMock(side_effect=[empty_result, count_result])
 
         result = await get_records(
-            mock_async_db, year=2024, month=6, department='filling'
+            mock_async_db, year=2024, month=6, departments={'filling'}
         )
 
         assert result['total'] == 0
