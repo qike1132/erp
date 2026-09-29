@@ -8,6 +8,7 @@
 - 分组级校验失败隔离
 - _SavepointRollbackSignalError 触发 savepoint 回滚并继续下一组
 """
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -15,6 +16,7 @@ import pytest
 from fastapi_app.services.order_batch_create import (
     batch_create_orders,
 )
+from fastapi_app.shared_models import Order
 
 
 def _make_product(pid, name=None, barcode=None):
@@ -208,3 +210,47 @@ class TestBatchCreateOrdersAggregation:
         # 第二组继续执行并成功
         assert result["results"][1]["success"] is True
         assert result["created_count"] == 1
+
+
+class TestUserSelectedOrderDate:
+    """回归：下单页选择的自定义日期必须落库，不能被 now() 覆盖。"""
+
+    def _added_order(self, db) -> Order:
+        return next(
+            call.args[0] for call in db.add.call_args_list
+            if isinstance(call.args[0], Order)
+        )
+
+    @pytest.mark.asyncio
+    async def test_custom_order_date_is_written_to_order(self):
+        products = [_make_product(1)]
+        db = _make_db(products)
+        order_data = _make_order_data(1, customer="客户A", quantity=5)
+        order_data["order_date"] = "2026-09-25"
+        with patch("fastapi_app.services.numbering.generate_order_number",
+                   new_callable=AsyncMock, return_value="PO-TEST-0001"), \
+             patch("fastapi_app.services.order_batch_create.process_order_deduction",
+                   new_callable=AsyncMock):
+            result = await batch_create_orders(db, [order_data])
+
+        assert result["created_count"] == 1
+        order = self._added_order(db)
+        assert order.order_date == datetime(2026, 9, 25, tzinfo=UTC)
+
+    @pytest.mark.asyncio
+    async def test_missing_order_date_falls_back_to_now(self):
+        products = [_make_product(1)]
+        db = _make_db(products)
+        order_data = _make_order_data(1, customer="客户A", quantity=5)
+        order_data["order_date"] = ""
+        with patch("fastapi_app.services.numbering.generate_order_number",
+                   new_callable=AsyncMock, return_value="PO-TEST-0001"), \
+             patch("fastapi_app.services.order_batch_create.process_order_deduction",
+                   new_callable=AsyncMock):
+            result = await batch_create_orders(db, [order_data])
+
+        assert result["created_count"] == 1
+        order = self._added_order(db)
+        assert order.order_date is not None
+        assert order.order_date.tzinfo is not None
+

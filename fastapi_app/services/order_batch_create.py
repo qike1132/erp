@@ -39,6 +39,21 @@ class _SavepointRollbackSignalError(Exception):
     """批量处理单项业务校验失败，用于触发 savepoint 回滚但不作为真实错误"""
 
 
+def _resolve_order_date(raw) -> datetime:
+    """把用户选择的下单日期（YYYY-MM-DD）解析为 aware UTC 当日零点。
+
+    未提供（空值）时回退当前时刻。order_date 列为 timestamptz，必须写 aware 值，
+    否则 asyncpg 会按 Asia/Shanghai 解释导致时刻偏移 8 小时。
+    """
+    if not raw:
+        return datetime.now(UTC)
+    try:
+        parsed = datetime.strptime(str(raw).strip(), '%Y-%m-%d')
+    except (ValueError, TypeError):
+        raise ValueError(f'订单时间格式错误，请使用 YYYY-MM-DD 格式：{raw}') from None
+    return datetime(parsed.year, parsed.month, parsed.day, tzinfo=UTC)
+
+
 def _collect_product_ids(orders_data: list) -> list[int]:
     """收集所有 product_id（去重排序），供一次性加锁查询，避免循环内查询。"""
     product_ids = []
@@ -116,6 +131,7 @@ def _validate_one_item(order_data: dict, customer: str, product_map: dict, resul
         'deduct_stock': bool(order_data.get('deduct_stock')),
         'deduct_quantity': int(order_data.get('deduct_quantity', 0) or 0),
         'note': order_data.get('note', ''),
+        'order_date': order_data.get('order_date') or '',
     }
 
 
@@ -139,7 +155,7 @@ async def _create_order_header(db: AsyncSession, customer: str, validated_items:
         product_id=first_item['product_id'],  # NOT NULL 兼容，新代码应读 order.items
         customer=customer,
         quantity=total_quantity,  # 兼容旧代码读取 order.quantity
-        order_date=datetime.now(UTC),  # aware UTC：order_date 列为 timestamptz（pg_standalone_013），naive 值会被按本地时区解释致早 8h
+        order_date=_resolve_order_date(first_item.get('order_date')),  # 用户选择的下单日期；未选时回退当前时刻。aware UTC：order_date 列为 timestamptz（pg_standalone_013），naive 值会被按本地时区解释致早 8h
         status=ORDER_STATUS_PENDING_STOCK,
         note='',  # 主订单级 note 留空，SKU 级 note 在 OrderItem
     )
