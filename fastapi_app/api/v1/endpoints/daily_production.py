@@ -39,43 +39,63 @@ router = APIRouter()
 
 @router.get('/records', response_model=ProductionRecordListResponse)
 async def list_records(
-    year: int = Query(..., description='年份'),
-    month: int = Query(..., ge=1, le=12, description='月份'),
+    year: int | None = Query(None, description='年份；未提供区间时必填'),
+    month: int | None = Query(None, ge=1, le=12, description='月份；未提供区间时必填'),
+    start_date: str = Query('', description='区间起始日 (YYYY-MM-DD)，与 end_date 成对'),
+    end_date: str = Query('', description='区间结束日 (YYYY-MM-DD)，闭区间'),
     department: str = Query('', description='部门筛选 (filling/handcraft/packaging)'),
     production_date: str = Query('', description='指定日期筛选 (YYYY-MM-DD)'),
+    created_by: str = Query('', description='录单人筛选；留空为不限'),
+    sort: str = Query('desc', description="排序：desc（最新在前，默认）或 asc"),
     page: int = Query(1, ge=1, description='页码'),
     per_page: int = Query(50, ge=1, le=200, description='每页数量'),
+    scope: set[str] | None = Depends(resolve_production_view_scope),
     db: AsyncSession = Depends(get_async_read_db),
-    _user: User = Depends(require_permission('production_summary_view')),
 ) -> ProductionRecordListResponse:
-    """获取生产记录列表（支持按年月、部门、日期筛选和分页）。
+    """获取生产记录列表（支持按自然月或日期区间、部门、录单人筛选与分页）。
 
     Args:
-        year: 年份。
-        month: 月份，1-12。
-        department: 部门筛选（filling=充棉部/handcraft=手工部/packaging=包装部）。
-        production_date: 指定日期筛选（YYYY-MM-DD）。
-        page: 页码，从 1 开始。
+        year: 年份；与 month 搭配。提供区间时忽略。
+        month: 月份，1-12。提供区间时忽略。
+        start_date: 区间起始日；与 end_date 必须成对。
+        end_date: 区间结束日（闭区间）。
+        department: 部门筛选；超出用户可见范围时忽略该参数。
+        production_date: 指定日期筛选，叠加在日期条件之上。
+        created_by: 录单人筛选；空白表示不限。
+        sort: 排序方向，'desc' 或 'asc'。
+        page: 页码。
         per_page: 每页数量，1-200。
+        scope: 用户可见部门范围（None 表示全部）。
         db: 异步数据库会话（只读副本）。
-        _user: 当前登录用户（仅需通过权限校验）。
 
     Returns:
-        ProductionRecordListResponse: 包含生产记录列表、分页信息和统计数据的响应。
+        ProductionRecordListResponse: 记录列表 + 分页信息 + 当前筛选下的统计。
 
     Raises:
-        HTTPException: 数据库连接异常时抛出 500。
+        HTTPException: 400（日期条件或 sort 非法）、500（数据库异常）。
     """
     try:
+        conditions_scope = narrow_departments(department, scope)
         result = await daily_production_service.get_records(
-            db, year=year, month=month, department=department, production_date=production_date,
-            page=page, per_page=per_page,
+            db,
+            year=year,
+            month=month,
+            departments=conditions_scope,
+            start_date=start_date,
+            end_date=end_date,
+            created_by=created_by,
+            sort=sort,
+            page=page,
+            per_page=per_page,
+            production_date=production_date,
         )
         return ProductionRecordListResponse(
             data=result['data'], total=result['total'],
             page=result['page'], per_page=result['per_page'],
             pages=result['pages'], stats=result.get('stats'),
         )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except (OperationalError, DisconnectionError) as e:
         raise HTTPException(status_code=500, detail=f'获取数据失败: {settings.sanitize_error(e)}') from e
 

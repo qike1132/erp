@@ -72,38 +72,78 @@ def validate_record_data(
 
 # ==================== CRUD ====================
 
-async def get_records(
-    db: AsyncSession,
+def _build_record_conditions(
     *,
-    year: int,
-    month: int,
-    department: str = '',
+    year: int | None,
+    month: int | None,
+    start_date: str,
+    end_date: str,
+    departments: set[str] | None,
+    created_by: str,
     production_date: str = '',
-    page: int = 1,
-    per_page: int = 50,
-) -> dict:
-    """获取指定月份的生产记录（分页）"""
-    month_start = date(year, month, 1)
-    if month == 12:
-        month_end = date(year + 1, 1, 1)
+) -> list:
+    """构造生产记录查询条件（纯函数，便于单测覆盖组合边界）。
+
+    Args:
+        year: 年份；与 month 一起使用。
+        month: 月份。
+        start_date: 区间起始日 (YYYY-MM-DD)；与 end_date 必须成对，且优先于 year/month。
+        end_date: 区间结束日 (YYYY-MM-DD)，闭区间。
+        departments: 部门集合；None 表示不限。
+        created_by: 录单人；空白视为不限。
+        production_date: 指定单日，叠加在日期条件之上。
+
+    Returns:
+        SQLAlchemy 条件列表。
+
+    Raises:
+        ValueError: 未提供任何日期条件、区间只给一半、或区间反向。
+    """
+    if start_date or end_date:
+        if not (start_date and end_date):
+            raise ValueError('start_date 与 end_date 必须同时提供')
+        range_start = parse_date_with_fallback(start_date)
+        range_end = parse_date_with_fallback(end_date)
+        if range_end < range_start:
+            raise ValueError('结束日期不能早于开始日期')
+        conditions: list = [
+            DailyProductionRecord.production_date >= range_start,
+            DailyProductionRecord.production_date <= range_end,
+        ]
     else:
-        month_end = date(year, month + 1, 1)
-    conditions = [
-        DailyProductionRecord.production_date >= month_start,
-        DailyProductionRecord.production_date < month_end,
-    ]
-    if department:
-        conditions.append(DailyProductionRecord.department == department)
+        if year is None or month is None:
+            raise ValueError('必须提供 year/month，或同时提供 start_date/end_date')
+        month_start = date(year, month, 1)
+        month_end = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
+        conditions = [
+            DailyProductionRecord.production_date >= month_start,
+            DailyProductionRecord.production_date < month_end,
+        ]
+
+    if departments is not None:
+        conditions.append(DailyProductionRecord.department.in_(sorted(departments)))
+
+    if created_by and created_by.strip():
+        conditions.append(DailyProductionRecord.created_by == created_by.strip())
+
     if production_date:
-        conditions.append(DailyProductionRecord.production_date == parse_date_with_fallback(production_date))
+        conditions.append(
+            DailyProductionRecord.production_date == parse_date_with_fallback(production_date)
+        )
 
-    per_page = max(1, min(per_page, 200))
-    offset = (page - 1) * per_page
+    return conditions
 
-    # Single query: paginated data + total count via window function + stats via cross join
-    from sqlalchemy import true
 
-    stats_cte = (
+def _build_stats_cte(conditions: list):
+    """构造「单行聚合」统计 CTE，避免与明细行交叉连接放大统计值。
+
+    Args:
+        conditions: 与明细查询完全相同的过滤条件。
+
+    Returns:
+        stats 子查询的 CTE（total_count/total_qty/total_val/total_sku）。
+    """
+    return (
         select(
             func.count(DailyProductionRecord.id).label('total_count'),
             func.coalesce(func.sum(DailyProductionRecord.quantity), 0).label('total_qty'),
@@ -114,7 +154,69 @@ async def get_records(
         .cte('stats')
     )
 
+
+def _record_order_by(sort: str) -> tuple:
+    """明细行排序键；desc 时同一天内按 id 倒序，避免同日期内顺序随机。"""
+    if sort == 'asc':
+        return (
+            DailyProductionRecord.production_date,
+            DailyProductionRecord.department,
+            DailyProductionRecord.id,
+        )
+    return (
+        DailyProductionRecord.production_date.desc(),
+        DailyProductionRecord.id.desc(),
+    )
+
+
+async def get_records(
+    db: AsyncSession,
+    *,
+    year: int | None = None,
+    month: int | None = None,
+    departments: set[str] | None = None,
+    start_date: str = '',
+    end_date: str = '',
+    created_by: str = '',
+    sort: str = 'desc',
+    page: int = 1,
+    per_page: int = 50,
+    production_date: str = '',
+) -> dict:
+    """获取生产记录列表（分页 + 统计）。
+
+    Args:
+        db: 只读会话。
+        year / month: 按自然月筛选；提供区间时被忽略。
+        departments: 可见部门集合；None 表示全部部门。
+        start_date / end_date: 区间筛选（闭区间，可跨月），必须成对。
+        created_by: 录单人筛选，空白视为不限。
+        sort: 'desc'（默认，最新在前）或 'asc'。
+        page: 页码，从 1 开始。
+        per_page: 每页数量，服务端收敛到 1..200。
+        production_date: 指定单日，叠加在日期条件之上。
+
+    Returns:
+        {'data', 'total', 'page', 'per_page', 'pages', 'stats'}
+
+    Raises:
+        ValueError: 日期条件非法或 sort 取值非法。
+    """
+    if sort not in ('asc', 'desc'):
+        raise ValueError("sort 只能是 'asc' 或 'desc'")
+
+    conditions = _build_record_conditions(
+        year=year, month=month, start_date=start_date, end_date=end_date,
+        departments=departments, created_by=created_by, production_date=production_date,
+    )
+
+    per_page = max(1, min(per_page, 200))
+    offset = (page - 1) * per_page
+
+    from sqlalchemy import true
     from sqlalchemy.sql.expression import Join
+
+    stats_cte = _build_stats_cte(conditions)
     cross_from = Join(DailyProductionRecord.__table__, stats_cte, true())
 
     result = await db.execute(
@@ -127,7 +229,7 @@ async def get_records(
         )
         .select_from(cross_from)
         .where(*conditions)
-        .order_by(DailyProductionRecord.production_date, DailyProductionRecord.department, DailyProductionRecord.id)
+        .order_by(*_record_order_by(sort))
         .offset(offset)
         .limit(per_page)
     )
