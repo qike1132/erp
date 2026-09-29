@@ -11,10 +11,13 @@
 逐步的 RED→GREEN 证据链就断了。
 """
 from datetime import date, datetime
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from fastapi_app.services import fifo_allocation as fifo
 from fastapi_app.services.fifo_allocation import allocate_fifo
+from fastapi_app.shared_models import DailyProductionRecord
 
 
 def _make_detail(detail_id: int, quantity: int, plan_date=None, product_id: int = 1, plan_id: int = 1):
@@ -134,3 +137,82 @@ class TestProductionWindow:
         start, end = fifo.production_window('2026-03', datetime(2026, 9, 29, 23, 59))
         assert end == date(2026, 9, 29)
         assert start == date(2026, 2, 1)
+
+
+class TestGetProducedFifoMap:
+    """_get_produced_fifo_map 的查询与缓存行为（DB 与 Redis 均 mock）"""
+
+    @pytest.mark.asyncio
+    async def test_no_production_records_yields_zero_allocation(self):
+        """窗口内完全没有生产记录 → 每行分配 0（前端显示全部待生产），且不抛异常"""
+        d1 = _make_detail(1, 100, plan_date=date(2026, 9, 8), product_id=7)
+        db = AsyncMock()
+        # AsyncMock().return_value 的子属性同样是异步的，`.all()` 会返回协程而不是
+        # 配置的列表；必须显式给一个**同步**结果对象，才拿得到「查询命中 0 行」这个场景。
+        res = MagicMock()
+        res.all.return_value = []
+        db.execute.return_value = res
+
+        with patch.object(fifo, 'safe_get', AsyncMock(return_value=None)), \
+             patch.object(fifo, 'safe_set', AsyncMock()):
+            result = await fifo._get_produced_fifo_map(db, [d1], plan_month='2026-09')
+
+        assert result == {1: 0}
+
+    @pytest.mark.asyncio
+    async def test_allocates_by_product_in_plan_date_order(self):
+        """生产量按 plan_date 先后摊到该产品的计划行上（跨客户也不分组）"""
+        early = _make_detail(1, 100, plan_date=date(2026, 9, 5), product_id=7, plan_id=1)
+        late = _make_detail(2, 100, plan_date=date(2026, 9, 20), product_id=7, plan_id=2)
+        db = AsyncMock()
+        res = MagicMock()
+        res.all.return_value = [_make_prod_row(7, 150)]
+        db.execute.return_value = res
+
+        with patch.object(fifo, 'safe_get', AsyncMock(return_value=None)), \
+             patch.object(fifo, 'safe_set', AsyncMock()):
+            result = await fifo._get_produced_fifo_map(db, [early, late], plan_month='2026-09')
+
+        assert result == {1: 100, 2: 50}
+
+    @pytest.mark.asyncio
+    async def test_empty_details_short_circuits(self):
+        db = AsyncMock()
+        with patch.object(fifo, 'safe_get', AsyncMock(return_value=None)), \
+             patch.object(fifo, 'safe_set', AsyncMock()):
+            assert await fifo._get_produced_fifo_map(db, [], plan_month='2026-09') == {}
+        db.execute.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_cache_hit_skips_query(self):
+        """缓存覆盖了全部需查询的明细 id 时直接返回，不再打 DB"""
+        d1 = _make_detail(1, 100, plan_date=date(2026, 9, 8), product_id=7)
+        db = AsyncMock()
+        with patch.object(fifo, 'safe_get', AsyncMock(return_value={'1': 42})), \
+             patch.object(fifo, 'safe_set', AsyncMock()):
+            result = await fifo._get_produced_fifo_map(db, [d1], plan_month='2026-09')
+        assert result == {1: 42}
+        db.execute.assert_not_called()
+
+
+class TestProductionCacheInvalidation:
+    def test_production_record_write_marks_session_dirty(self):
+        """DailyProductionRecord 的增删改必须置脏标记，否则会话提交后不清缓存"""
+        record = MagicMock(spec=DailyProductionRecord)
+        session = MagicMock()
+        session.info = {}
+        session.new = [record]
+        session.dirty = []
+        session.deleted = []
+        fifo._fifo_before_commit(session)
+        assert session.info.get('fifo_dirty') is True
+
+    def test_unrelated_write_does_not_mark_dirty(self):
+        """无关模型的写入不应触发清缓存（避免每次都白清）"""
+        session = MagicMock()
+        session.info = {}
+        session.new = [object()]
+        session.dirty = []
+        session.deleted = []
+        fifo._fifo_before_commit(session)
+        assert session.info.get('fifo_dirty') is None

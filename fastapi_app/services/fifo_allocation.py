@@ -18,7 +18,7 @@ import logging
 from datetime import date, datetime
 from typing import Hashable
 
-from sqlalchemy import and_, event, select, text
+from sqlalchemy import and_, event, func, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session, load_only
@@ -27,6 +27,7 @@ from fastapi_app.core.cache import invalidate_local_cache
 from fastapi_app.core.cache_invalidation import InvalidationStrategy, cache_mgr
 from fastapi_app.core.redis_wrapper import safe_get, safe_set
 from fastapi_app.shared_models import (
+    DailyProductionRecord,
     Product,
     PurchasePlan,
     PurchasePlanDetail,
@@ -44,6 +45,11 @@ FIFO_CACHE_TTL = 1800
 # 12 个月无上界会让当月计划被历史累计产量全部填满、页面处处 100%。详见设计稿 §7。
 PRODUCTION_RECORD_LOOKBACK_MONTHS = 1
 
+# 生产量分配的 Redis 缓存前缀。与出货的 plan_fifo 分开：
+# 两者数据源不同、失效触发也不同（出货看 StockOut，生产看 DailyProductionRecord），
+# 共用一个前缀会让任一侧的失效把另一侧的缓存也清掉，也会让脏数据的诊断无从分辨。
+PRODUCTION_FIFO_CACHE_PREFIX = 'plan_prod_fifo'
+
 
 async def _invalidate_fifo_cache(plan_month: str) -> None:
     """清除指定月份的 FIFO 缓存
@@ -55,12 +61,19 @@ async def _invalidate_fifo_cache(plan_month: str) -> None:
     await cache_mgr.invalidate(InvalidationStrategy.KEYS, [cache_key])
 
 
-# ==================== StockOut 写入 → FIFO 缓存失效（集中钩子，M2 修复） ====================
-# 出货/退货/出货修改/出货删除/批量导入都会改变 FIFO 的"累计出货净量"，但写路径分散在
-# 多个服务中，逐点挂钩易漏。改为 SQLAlchemy 会话事件集中钩子：任何事务提交前检测到
-# StockOut 变更，提交后即清除全部 plan_fifo:* 缓存。
+async def _invalidate_production_fifo_cache(plan_month: str) -> None:
+    """清除指定月份的生产量分配缓存（与出货缓存分开，键前缀不同）"""
+    await cache_mgr.invalidate(InvalidationStrategy.KEYS, [f'{PRODUCTION_FIFO_CACHE_PREFIX}:{plan_month}'])
+
+
+# ==================== 出货/生产记录写入 → 分配缓存失效（集中钩子，M2 修复） ====================
+# 出货/退货/出货修改/出货删除/批量导入都会改变 FIFO 的"累计出货净量"，生产记录的增删改
+# 会改变生产量，但写路径分散在多个服务中，逐点挂钩易漏。改为 SQLAlchemy 会话事件集中
+# 钩子：任何事务提交前检测到 StockOut 变更，提交后即清除全部 plan_fifo:* 缓存；
+# 检测到 StockOut 或 DailyProductionRecord 变更，则两个前缀一起清。
 # after_commit 时数据已落库，此后任何缓存重建读到的都是已提交数据（无回填旧值窗口）；
-# 若失效失败仅告警，由 TTL（FIFO_CACHE_TTL）兜底。
+# 若失效失败仅告警，由 TTL（FIFO_CACHE_TTL）兜底。_fifo_after_commit 无需改动 ——
+# 它只消费 `fifo_dirty` 这一个标记，来源多寡与它无关。
 #
 # 注意：此处不能用模块级全局布尔标记（曾为 `_pending_fifo_invalidation`）。并发事务会
 # 共享同一全局标志：T1 提交置 True → T2 的 before_commit 见 True 提前返回 → T1 清 False
@@ -69,10 +82,13 @@ async def _invalidate_fifo_cache(plan_month: str) -> None:
 
 
 def _fifo_before_commit(session) -> None:
+    # 一个标记覆盖两种来源：会话里只要动过出货记录或生产记录，提交后就清两个前缀。
+    # 分开标记会让「同一事务既改出货又改生产」需要两处判断，收益不抵复杂度；
+    # 生产记录写入频率远低于出货，多清一次的代价可忽略。
     if session.info.get('fifo_dirty'):
         return
     for obj in list(session.new) + list(session.dirty) + list(session.deleted):
-        if isinstance(obj, StockOut):
+        if isinstance(obj, (StockOut, DailyProductionRecord)):
             session.info['fifo_dirty'] = True
             return
 
@@ -87,9 +103,11 @@ def _fifo_after_commit(session) -> None:
 async def _invalidate_fifo_caches_safe() -> None:
     try:
         await cache_mgr.invalidate(InvalidationStrategy.PATTERN, ['plan_fifo:*'])
+        await cache_mgr.invalidate(InvalidationStrategy.PATTERN, [f'{PRODUCTION_FIFO_CACHE_PREFIX}:*'])
         invalidate_local_cache('plan_fifo:*')
+        invalidate_local_cache(f'{PRODUCTION_FIFO_CACHE_PREFIX}:*')
     except Exception:  # defensive: 缓存失效失败不阻断业务，靠 TTL 兜底
-        logger.warning("FIFO 缓存全量失效失败（等待 TTL 过期兜底）", exc_info=True)
+        logger.warning("分配缓存全量失效失败（等待 TTL 过期兜底）", exc_info=True)
 
 
 event.listen(Session, "before_commit", _fifo_before_commit)
@@ -429,5 +447,86 @@ def allocate_fifo(
     for d in plan_details:
         if d.id not in allocated:
             allocated[d.id] = 0
+
+    return allocated
+
+
+async def _get_produced_fifo_map(db: AsyncSession, plan_details: list, plan_month: str = '') -> dict[int, int]:
+    """把窗口内的生产量摊到计划明细上。
+
+    与出货版的差别只有两点：
+      1. 分组键是 product_id（生产记录没有客户字段），不是 (customer, product_name)
+      2. 累计量来自 daily_production_record，窗口见 production_window
+
+    契约与出货版一致：查询超时/异常抛 RuntimeError('FIFO_ALLOCATION_UNAVAILABLE')，
+    由 _get_produced_fifo_map_safe 捕获后标记降级，而不是返回全 0 让业务误读成「没生产」。
+
+    返回: {plan_detail_id: allocated_produced_qty}
+    """
+    if not plan_details:
+        return {}
+
+    cache_key = f'{PRODUCTION_FIFO_CACHE_PREFIX}:{plan_month}' if plan_month else ''
+    if cache_key:
+        cached = await safe_get(cache_key, context='生产量分配缓存')
+        if cached is not None:
+            try:
+                cached_int_keys = {int(k) for k in cached}
+            except (ValueError, TypeError):
+                # 缓存脏数据视为未命中并清除，不让其演变为 500（同出货版 L2 修复）
+                await _invalidate_production_fifo_cache(plan_month)
+                cached = None
+            else:
+                if {d.id for d in plan_details}.issubset(cached_int_keys):
+                    return {int(k): v for k, v in cached.items()}
+
+    try:
+        async with asyncio.timeout(10):
+            product_ids = sorted({d.product_id for d in plan_details if d.product_id})
+            if not product_ids:
+                # 全是历史脏数据（product_id 为空）→ 无从关联生产记录
+                return {}
+
+            start, end = production_window(plan_month, datetime.now())
+
+            with contextlib.suppress(SQLAlchemyError, OSError):
+                await db.execute(text("SET LOCAL statement_timeout = '8s'"))
+
+            result = await db.execute(
+                select(
+                    DailyProductionRecord.product_id,
+                    func.sum(DailyProductionRecord.quantity).label('quantity'),
+                )
+                .where(
+                    and_(
+                        DailyProductionRecord.product_id.in_(product_ids),
+                        DailyProductionRecord.production_date >= start,
+                        DailyProductionRecord.production_date <= end,
+                    )
+                )
+                .group_by(DailyProductionRecord.product_id)
+            )
+            # 别名取 quantity，让纯聚合函数在「原始行」与「分组行」两种输入上通用
+            produced_by_key = aggregate_produced_by_product(result.all())
+
+            allocated = allocate_fifo(
+                plan_details,
+                group_details_by_product(plan_details),
+                produced_by_key,
+            )
+    except TimeoutError:
+        with contextlib.suppress(SQLAlchemyError, OSError):
+            await db.execute(text("RESET statement_timeout"))
+        logger.exception('生产量分配查询超时 plan_month=%s', plan_month)
+        raise RuntimeError('FIFO_ALLOCATION_UNAVAILABLE') from None
+    except Exception as e:  # defensive: 同出货版，异常时抛明确异常交由调用方降级
+        with contextlib.suppress(SQLAlchemyError, OSError):
+            await db.execute(text("RESET statement_timeout"))
+        logger.exception('生产量分配查询异常: %s', e)
+        raise RuntimeError('FIFO_ALLOCATION_UNAVAILABLE') from e
+
+    if cache_key:
+        await safe_set(cache_key, {str(k): v for k, v in allocated.items()},
+                       timeout=FIFO_CACHE_TTL, context='生产量分配缓存')
 
     return allocated
