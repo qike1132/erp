@@ -14,7 +14,6 @@ import logging
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.cache import invalidate_local_cache
@@ -64,36 +63,21 @@ async def _generate_plan_no() -> str:
     """
     生成计划编号：PP-YYYYMMDD-NNNN
 
-    通过 numbering_counter 表原子 upsert 分配序号（见 services.numbering.
+    序号经 numbering_counter 表原子 upsert 分配（见 services.numbering.
     allocate_sequence）：计数独立短事务提交，多 worker 下无重号，业务回滚
-    仅产生跳号。plan_no 唯一约束与调用方 _persist_plan_with_retry 的重试
-    保留作为二道防线。
-
-    N2 修复：移除未使用的 db 参数。
+    仅产生跳号。种子由 read_daily_max 按编号日期段数值读取（spec §4.4 收口），
+    与日期列的时区口径解耦；plan_no 唯一约束与调用方 _persist_plan_with_retry
+    的重试保留作为二道防线。
     """
-    from contextlib import suppress
-
     from fastapi_app.core.database import require_async_session_local
-    from fastapi_app.services.numbering import allocate_sequence
+    from fastapi_app.services.numbering import allocate_sequence, read_daily_max
 
-    today_str = datetime.now(UTC).strftime('%Y%m%d')
-    prefix = f'PP-{today_str}-'
-    # 种子：当日已落库最大编号（无锁读，保证首次分配与历史连续）
+    today_str = datetime.now(UTC).strftime('%Y%m%d')  # Task 6 统一换 business_date_str()
     session_factory = require_async_session_local()
     async with session_factory() as seed_session:
-        result = await seed_session.execute(
-            select(PurchasePlan.plan_no)
-            .where(PurchasePlan.plan_no.like(f'{prefix}%'))
-            .order_by(PurchasePlan.plan_no.desc())
-            .limit(1)
-        )
-        max_no = result.scalar()
-    seed = 0
-    if max_no:
-        with suppress(ValueError, IndexError):
-            seed = int(max_no.split('-')[-1])
+        seed = await read_daily_max(seed_session, PurchasePlan, 'plan_no', today_str)
     next_seq = await allocate_sequence('PP', today_str, seed=seed)
-    return f'{prefix}{next_seq:04d}'
+    return f'PP-{today_str}-{next_seq:04d}'
 
 
 async def _log_action(db: AsyncSession, plan_id: int, action: str, old_value: dict | None, new_value: dict | None, operator: str) -> None:

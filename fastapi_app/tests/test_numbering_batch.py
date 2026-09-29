@@ -28,7 +28,7 @@ def stubbed_numbering(monkeypatch):
         calls.append((prefix, date_str, count, seed))
         return state['start']
 
-    async def fake_daily_max(db, model, date_field, number_field):
+    async def fake_daily_max(db, model, number_field, date_str):
         return state['seed']
 
     monkeypatch.setattr(nb, 'allocate_sequence_range', fake_range)
@@ -39,11 +39,10 @@ def stubbed_numbering(monkeypatch):
 async def _batch(
     count: int,
     prefix: str = 'PO',
-    date_field: str = 'order_date',
     number_field: str = 'order_no',
 ) -> list[str]:
     return await nb.generate_number_batch(
-        prefix, None, date_field, number_field, _STUB_SESSION, count
+        prefix, None, number_field, _STUB_SESSION, count
     )
 
 
@@ -56,7 +55,7 @@ async def test_returns_contiguous_numbers(stubbed_numbering):
 
 @pytest.mark.asyncio
 async def test_number_format_is_prefix_date_seq(stubbed_numbering):
-    numbers = await _batch(2, prefix='BH', date_field='stockin_date', number_field='stockin_no')
+    numbers = await _batch(2, prefix='BH', number_field='stockin_no')
     for raw in numbers:
         prefix, date_str, seq = raw.split('-')
         assert prefix == 'BH'

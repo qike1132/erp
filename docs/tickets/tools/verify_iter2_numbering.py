@@ -96,7 +96,7 @@ async def verify_numbering_logic() -> None:
         calls.append((prefix, date_str, count, seed))
         return 900 + 1                       # 起始序号固定为 901
 
-    async def fake_daily_max(db, model, date_field, number_field):
+    async def fake_daily_max(db, model, number_field, date_str):
         return 900                           # 种子；此处不依赖真实会话
 
     original = nb.allocate_sequence_range
@@ -104,7 +104,7 @@ async def verify_numbering_logic() -> None:
     nb.allocate_sequence_range = fake_range
     nb.read_daily_max = fake_daily_max
     try:
-        numbers = await nb.generate_number_batch('PO', None, 'order_date', 'order_no', None, 4)
+        numbers = await nb.generate_number_batch('PO', None, 'order_no', None, 4)
         check('返回 4 个编号', len(numbers) == 4, str(numbers))
         check('起始序号来自 allocate_sequence_range', numbers[0].endswith('-0901'), numbers[0])
         check('批内连续', [n[-4:] for n in numbers] == ['0901', '0902', '0903', '0904'])
@@ -113,15 +113,15 @@ async def verify_numbering_logic() -> None:
         check('透传 prefix 给取号层', calls and calls[0][0] == 'PO')
 
         calls.clear()
-        empty = await nb.generate_number_batch('PO', None, 'order_date', 'order_no', None, 0)
+        empty = await nb.generate_number_batch('PO', None, 'order_no', None, 0)
         check('count=0 返回空列表且不打库', empty == [] and not calls, f'calls={calls}')
 
-        negative = await nb.generate_number_batch('PO', None, 'order_date', 'order_no', None, -3)
+        negative = await nb.generate_number_batch('PO', None, 'order_no', None, -3)
         check('count<0 返回空列表且不打库', negative == [] and not calls)
 
         # 超过 9999 时不截断（zfill 只补齐）
         nb.allocate_sequence_range = lambda *a, **k: _raise_return(9997)
-        big = await nb.generate_number_batch('PO', None, 'order_date', 'order_no', None, 4)
+        big = await nb.generate_number_batch('PO', None, 'order_no', None, 4)
         check('序号超 9999 不截断（仍唯一）', big == [
             f'PO-{big[0].split("-")[1]}-9997', f'PO-{big[0].split("-")[1]}-9998',
             f'PO-{big[0].split("-")[1]}-9999', f'PO-{big[0].split("-")[1]}-10000',

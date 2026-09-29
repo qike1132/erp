@@ -9,9 +9,8 @@ INSERT ... ON CONFLICT DO UPDATE ... RETURNING 原子递增。计数独立短事
 SQL 为常量文本，所有值经 :prefix/:number_date/:last_seq 绑定参数传递。
 """
 import logging
-from datetime import UTC, datetime
 
-from sqlalchemy import func, select, text
+from sqlalchemy import BigInteger, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -102,23 +101,17 @@ async def allocate_sequence_range(prefix: str, date_str: str, count: int, seed: 
     return end_seq - count + 1
 
 
-async def read_daily_max(db: AsyncSession, model, date_field: str, number_field: str) -> int:
-    """读取调用方会话中当日已存在的最大编号序号（无锁读，仅作连续性种子）。
+async def read_daily_max(db: AsyncSession, model, number_field: str, date_str: str) -> int:
+    """当日已落库的最大序号（按数值排序，无锁读，仅作连续性种子）。
+
+    以编号自身的日期段过滤（split_part 第 2 段），与日期列的时区口径无关；
+    正则守卫保证进入 cast 的序号段必为数字（脏行不抛 invalid input syntax）。
 
     使用调用方会话：同一业务事务内连续生成编号时能看到未提交行，批内连续。
     """
-    today = datetime.now(UTC).replace(tzinfo=None)
+    col = getattr(model, number_field)
+    seq = func.cast(func.split_part(col, '-', 3), BigInteger)
     result = await db.execute(
-        select(getattr(model, number_field))
-        .where(func.date(getattr(model, date_field)) == today.date())
-        .order_by(getattr(model, number_field).desc())
-        .limit(1)
+        select(func.max(seq)).where(col.op('~')(f'^[A-Z]+-{date_str}-[0-9]+$'))
     )
-    last_number = result.scalar()
-    if not last_number:
-        return 0
-    tail = str(last_number).rsplit('-', 1)[-1]
-    try:
-        return int(tail)
-    except ValueError:
-        return 0
+    return int(result.scalar() or 0)

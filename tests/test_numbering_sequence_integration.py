@@ -93,7 +93,7 @@ async def test_generate_number_async_batch_unique_and_continuous(db_and_factory)
 
     date_str = datetime.now(UTC).strftime('%Y%m%d')
     numbers = [
-        await generate_number_async(prefix, Order, 'order_date', 'order_no', db)
+        await generate_number_async(prefix, Order, 'order_no', db)
         for _ in range(5)
     ]
     suffixes = [int(n.rsplit('-', 1)[1]) for n in numbers]

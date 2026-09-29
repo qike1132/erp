@@ -70,7 +70,7 @@ class AsyncNumberGenerator:
 _async_number_generator = AsyncNumberGenerator()
 
 
-async def generate_number_async(prefix: str, model, date_field: str, number_field: str, db: AsyncSession) -> str:
+async def generate_number_async(prefix: str, model, number_field: str, db: AsyncSession) -> str:
     """
     异步编号生成器（跨进程安全）
 
@@ -83,7 +83,6 @@ async def generate_number_async(prefix: str, model, date_field: str, number_fiel
     Args:
         prefix: 编号前缀 (如 'PO', 'BH', 'SO')
         model: 数据模型类
-        date_field: 日期字段名称
         number_field: 编号字段名称
         db: 异步数据库会话（用于种子读取，可见本事务内未提交编号）
 
@@ -95,20 +94,19 @@ async def generate_number_async(prefix: str, model, date_field: str, number_fiel
     async with _async_number_generator._lock:
         _async_number_generator._cleanup_old_entries()
 
-        db_max = await read_daily_max(db, model, date_field, number_field)
+        db_max = await read_daily_max(db, model, number_field, date_str)
         current_seq = await allocate_sequence(prefix, date_str, seed=db_max)
         return '-'.join((prefix, date_str, str(current_seq).zfill(4)))
 
 
 async def generate_order_number(db: AsyncSession) -> str:
     """生成订单编号 PO-YYYYMMDD-XXXX"""
-    return await generate_number_async('PO', Order, 'order_date', 'order_no', db)
+    return await generate_number_async('PO', Order, 'order_no', db)
 
 
 async def generate_number_batch(
     prefix: str,
     model,
-    date_field: str,
     number_field: str,
     db: AsyncSession,
     count: int,
@@ -124,7 +122,6 @@ async def generate_number_batch(
     Args:
         prefix: 编号前缀，如 ``'PO'``。
         model: 目标模型类（用于读取当日最大编号作连续性种子）。
-        date_field: 日期字段名。
         number_field: 编号字段名。
         db: 调用方会话（种子读取要能看到本事务内未提交的编号，保证批内连续）。
         count: 需要几个号。
@@ -143,7 +140,7 @@ async def generate_number_batch(
 
     async with _async_number_generator._lock:
         _async_number_generator._cleanup_old_entries()
-        db_max = await read_daily_max(db, model, date_field, number_field)
+        db_max = await read_daily_max(db, model, number_field, date_str)
         start = await allocate_sequence_range(prefix, date_str, count=count, seed=db_max)
 
     return ['-'.join((prefix, date_str, str(start + i).zfill(4))) for i in range(count)]
@@ -151,29 +148,29 @@ async def generate_number_batch(
 
 async def generate_stockin_number(db: AsyncSession) -> str:
     """生成备货编号 BH-YYYYMMDD-XXXX"""
-    return await generate_number_async('BH', StockIn, 'stockin_date', 'stockin_no', db)
+    return await generate_number_async('BH', StockIn, 'stockin_no', db)
 
 
 async def generate_stockout_number(db: AsyncSession) -> str:
     """生成出货编号 SO-YYYYMMDD-XXXX"""
-    return await generate_number_async('SO', StockOut, 'stockout_date', 'stockout_no', db)
+    return await generate_number_async('SO', StockOut, 'stockout_no', db)
 
 
 async def generate_case_stockout_number(db: AsyncSession) -> str:
     """生成皮套出库编号 CSO-YYYYMMDD-XXXX"""
     from fastapi_app.shared_models import CaseStockOut
-    return await generate_number_async('CSO', CaseStockOut, 'stockout_date', 'stockout_no', db)
+    return await generate_number_async('CSO', CaseStockOut, 'stockout_no', db)
 
 
 async def generate_case_stockin_number(db: AsyncSession) -> str:
     """生成皮套入库编号 CSI-YYYYMMDD-XXXX"""
     from fastapi_app.shared_models import CaseStockIn
-    return await generate_number_async('CSI', CaseStockIn, 'stockin_date', 'stockin_no', db)
+    return await generate_number_async('CSI', CaseStockIn, 'stockin_no', db)
 
 
 async def generate_purchase_order_number(db: AsyncSession) -> str:
     """生成采购订单编号 CG-YYYYMMDD-XXXX"""
-    return await generate_number_async('CG', PurchaseOrder, 'create_time', 'order_no', db)
+    return await generate_number_async('CG', PurchaseOrder, 'order_no', db)
 
 
 async def generate_customer_sampling_number(db: AsyncSession) -> str:
@@ -187,7 +184,7 @@ async def generate_customer_sampling_number(db: AsyncSession) -> str:
     唯一性由 DB 唯一索引 + numbering 服务的 advisory lock + FOR UPDATE 跨进程保证。
     """
     from fastapi_app.shared_models import CustomerSamplingProject
-    return await generate_number_async('CS', CustomerSamplingProject, 'created_at', 'sequence_no', db)
+    return await generate_number_async('CS', CustomerSamplingProject, 'sequence_no', db)
 
 
 async def generate_shipment_number(db: AsyncSession) -> str:
@@ -197,4 +194,4 @@ async def generate_shipment_number(db: AsyncSession) -> str:
     唯一性由 numbering 服务的 advisory lock + 计数表原子递增跨进程保证。
     """
     from fastapi_app.shared_models import OutsourceShipment
-    return await generate_number_async('FH', OutsourceShipment, 'create_time', 'shipment_no', db)
+    return await generate_number_async('FH', OutsourceShipment, 'shipment_no', db)
