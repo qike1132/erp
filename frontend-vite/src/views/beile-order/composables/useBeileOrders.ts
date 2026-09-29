@@ -214,8 +214,8 @@ export function buildSummaryTbody(items: BeileOrderRow[], keyword: string): stri
   for (const item of items) {
     const type = item.record_type === 'stockin' ? '备货' : '订单'
     const factory = (item.factories || ['湖北']).join(', ')
-    // 订单级列（订单类型 / 下单时间 / 客户名称 / 工厂）：整单 rowspan
-    const orderCells = [type, item.order_date || '', item.customer || '', factory]
+    // 订单级列（订单类型 / 订单号 / 下单时间 / 客户名称 / 工厂）：整单 rowspan
+    const orderCells = [type, item.order_no || '-', item.order_date || '', item.customer || '', factory]
     const openedText = summaryOpenedLabel(item)
     const note = item.note || ''
 
@@ -494,11 +494,11 @@ export function useBeileOrders() {
   /** 汇总表列头（含产品明细）：订单数量后依次为「生产数量」「小义开单」（页面 = 导出 XLS = 打印预览同源，AC-12）。
    *  「备品数量」独立列已删除（用户裁决 2026-09-18）：spare_quantity 仅作为生产数量的计算输入，不再单独展示 */
   const SUMMARY_HEADERS = [
-    '订单类型', '下单时间', '客户名称', '工厂', '产品名称', '订单数量', '生产数量', '小义开单', '备注',
+    '订单类型', '订单号', '下单时间', '客户名称', '工厂', '产品名称', '订单数量', '生产数量', '小义开单', '备注',
   ]
 
   /** 汇总表各列宽度（px），用于导出 XLS 列宽分配（列数与 SUMMARY_HEADERS 一致） */
-  const SUMMARY_COL_WIDTHS = [90, 120, 130, 80, 220, 90, 90, 90, 180]
+  const SUMMARY_COL_WIDTHS = [90, 160, 120, 130, 80, 220, 90, 90, 90, 180]
 
   // 汇总表 tbody 的构建（含逐 SKU 粒度）已提到模块作用域：`buildSummaryTbody(items, keyword)`，
   // 以便被导出/打印复用，并可被单测直接导入验证（页面 = 导出 = 打印 单一真源，AC-12）。

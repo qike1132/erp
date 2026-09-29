@@ -11,10 +11,15 @@
       <UiCheckbox :checked="selected" :aria-label="`选择订单 ${item.order_no || item.id}`" @update:checked="$emit('toggleSelect', item)" />
     </div>
 
-    <!-- 订单类型：订单/备货徽章（原订单号列删除，改展示类型） -->
+    <!-- 订单类型：订单/备货徽章 -->
     <div class="bo-td bo-td-center" style="width: 90px;">
       <span v-if="item.record_type === 'stockin'" class="bo-type-badge bo-type-badge--stockin">备货</span>
       <span v-else class="bo-type-badge bo-type-badge--order">订单</span>
+    </div>
+
+    <!-- 订单号：紧随类型列之后（2026-09-29 恢复；类型列保留） -->
+    <div class="bo-td bo-td-center bo-td-nowrap bo-td-order-no" style="width: 160px;">
+      <span class="bo-order-no" :title="item.order_no || ''">{{ item.order_no || '-' }}</span>
     </div>
 
     <div class="bo-td bo-td-center bo-td-nowrap" style="width: 150px;">
@@ -311,6 +316,13 @@ function handleConfirm(item: BeileOrderRowType) {
 .bo-type-badge--stockin {
   background: var(--color-primary-50, #eff5ff);
   color: var(--color-primary-600, #3a6bd6);
+}
+/* 订单号：等宽字体便于逐位比对（单号是给人念/抄的） */
+.bo-order-no {
+  font-family: Consolas, ui-monospace, monospace;
+  font-size: 12px;
+  color: var(--color-text);
+  letter-spacing: 0.2px;
 }
 .bo-open-badge {
   display: inline-flex;

@@ -16,6 +16,7 @@
             <thead>
               <tr>
                 <th class="oso-th-center" style="width: 90px;">订单类型</th>
+                <th class="oso-th-center" style="width: 160px;">订单号</th>
                 <th class="oso-th-center" style="white-space:nowrap; width: 170px;">下单时间</th>
                 <th class="oso-th-center" style="width: 160px;">客户名称</th>
                 <th class="oso-th-center" style="width: 360px;">产品名称</th>
@@ -36,6 +37,9 @@
                 <td class="oso-td-center oso-td-nowrap" style="width: 90px;">
                   <span v-if="item.record_type === 'stockin'" class="oso-type-badge oso-type-badge--stockin">备货</span>
                   <span v-else class="oso-type-badge oso-type-badge--order">订单</span>
+                </td>
+                <td class="oso-td-center oso-td-nowrap" style="width: 160px;">
+                  <span class="oso-order-no" :title="item.order_no || ''">{{ item.order_no || '-' }}</span>
                 </td>
                 <td class="oso-td-center oso-td-nowrap" style="width: 170px;">
                   <span class="oso-order-date" :title="item.order_date || ''">{{ item.order_date || '-' }}</span>
@@ -273,6 +277,8 @@ function statusClass(label: string): string {
 }
 .oso-type-badge--order { background: var(--color-success-50, #e8f9ef); color: var(--color-success-600, #1e9e55); }
 .oso-type-badge--stockin { background: var(--color-primary-50, #eff6ff); color: var(--color-primary-600, #2563eb); }
+/* 订单号：等宽字体便于逐位比对（单号是给人念/抄的） */
+.oso-order-no { font-family: Consolas, ui-monospace, monospace; font-size: 12px; letter-spacing: 0.2px; }
 .oso-proc-badge {
   display: inline-flex;
   align-items: center;

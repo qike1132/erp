@@ -24,6 +24,7 @@
                   <UiCheckbox :checked="isAllSelected" @update:checked="toggleSelectAll" />
                 </div>
                 <div class="bo-th bo-th-center" style="width: 90px;">订单类型</div>
+                <div class="bo-th bo-th-center" style="width: 160px;">订单号</div>
                 <div class="bo-th bo-th-center" style="width: 150px;">下单时间</div>
                 <div class="bo-th bo-th-center" style="width: 170px;">客户名称</div>
                 <div class="bo-th bo-th-center" style="width: 100px;">工厂</div>

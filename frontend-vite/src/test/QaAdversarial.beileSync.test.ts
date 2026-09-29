@@ -302,7 +302,7 @@ describe('G. 导出/打印同源（AC-12）：表头列数 == 数据行逻辑列
     mocks.queryData.value = makeListResponse()
   })
 
-  it('单 SKU：表头 9 列 == 数据行 9 个 td；订单数量列 = purchase_order_qty；生产数量列 = 订单数量+备品数量（无备品列）；小义开单列 = 已开单', async () => {
+  it('单 SKU：表头 10 列 == 数据行 10 个 td；订单数量列 = purchase_order_qty；生产数量列 = 订单数量+备品数量（无备品列）；小义开单列 = 已开单', async () => {
     const wrapper = await mountTab()
     await wrapper.find('.bo-toolbar-btn--export').trigger('click')
     await flushPromises()
@@ -310,7 +310,7 @@ describe('G. 导出/打印同源（AC-12）：表头列数 == 数据行逻辑列
     const [html] = mocks.downloadXlsMock.mock.calls[0]!
     const doc = new DOMParser().parseFromString(html, 'text/html')
     const nCols = doc.querySelectorAll('thead th').length
-    expect(nCols).toBe(9)
+    expect(nCols).toBe(10)
     // 备品数量独立列已删除：导出表头不得再出现
     expect(Array.from(doc.querySelectorAll('thead th')).map((th) => th.textContent).join('|')).not.toContain('备品数量')
 
@@ -319,9 +319,10 @@ describe('G. 导出/打印同源（AC-12）：表头列数 == 数据行逻辑列
     expect(widths.every((w) => w === nCols)).toBe(true)
 
     const cells = Array.from(dataRows[0]!.querySelectorAll('td')).map((td) => td.textContent || '')
-    expect(cells[5]).toBe('8')        // 订单数量 = purchase_order_qty（新口径）
-    expect(cells[6]).toBe('10')       // 生产数量 = 订单数量 + 备品数量 = 8 + 2
-    expect(cells[7]).toBe('已开单')    // 小义开单 = 已开单（is_ordered=true）
+    expect(cells[1]).toBe('PO-101')   // 订单号（2026-09-29 恢复，紧随订单类型）
+    expect(cells[6]).toBe('8')        // 订单数量 = purchase_order_qty（新口径）
+    expect(cells[7]).toBe('10')       // 生产数量 = 订单数量 + 备品数量 = 8 + 2
+    expect(cells[8]).toBe('已开单')    // 小义开单 = 已开单（is_ordered=true）
   })
 
   it('多 SKU + 未下单：逐 SKU 输出订单数量（各 SKU 自身）+ 追加订单级「合计」行；生产数量为「—」、小义开单为「未开单」', async () => {
@@ -347,23 +348,24 @@ describe('G. 导出/打印同源（AC-12）：表头列数 == 数据行逻辑列
     const [html] = mocks.downloadXlsMock.mock.calls[0]!
     const doc = new DOMParser().parseFromString(html, 'text/html')
     const nCols = doc.querySelectorAll('thead th').length
-    expect(nCols).toBe(9)
+    expect(nCols).toBe(10)
 
     const rows = Array.from(doc.querySelectorAll('tbody tr'))
-    // FIX-3：逐 SKU 2 行 + 订单级「合计」1 行 = 3 行；每行逻辑列数 == 表头 9 列（rowspan 网格自洽）
+    // FIX-3：逐 SKU 2 行 + 订单级「合计」1 行 = 3 行；每行逻辑列数 == 表头 10 列（rowspan 网格自洽）
     expect(rows.length).toBe(3)
     const widths = logicalWidths(rows, nCols)
     expect(widths.every((w) => w === nCols)).toBe(true)
 
-    // 首行（SKU 产品B）：订单级 4 列 + 产品/订单数量/生产数量/小义开单 + 备注 = 9 td
+    // 首行（SKU 产品B）：订单级 5 列 + 产品/订单数量/生产数量/小义开单 + 备注 = 10 td
     const firstCells = Array.from(rows[0]!.querySelectorAll('td'))
-    expect(firstCells.length).toBe(9)
-    expect(firstCells[4]!.textContent).toBe('产品B')
-    expect(firstCells[5]!.textContent).toBe('10')   // 逐 SKU 订单数量（该 SKU 自身，不再整段订单合计）
-    expect(firstCells[6]!.textContent).toBe('—')    // 未下单生产数量 → 「—」
-    expect(firstCells[7]!.textContent).toBe('未开单')
+    expect(firstCells.length).toBe(10)
+    expect(firstCells[1]!.textContent).toBe('PO-102')  // 订单号（订单级，rowspan 覆盖整单）
+    expect(firstCells[5]!.textContent).toBe('产品B')
+    expect(firstCells[6]!.textContent).toBe('10')   // 逐 SKU 订单数量（该 SKU 自身，不再整段订单合计）
+    expect(firstCells[7]!.textContent).toBe('—')    // 未下单生产数量 → 「—」
+    expect(firstCells[8]!.textContent).toBe('未开单')
     // 订单级「小义开单」列 rowspan=3（跨 2 SKU 行 + 合计行）
-    expect(firstCells[7]!.getAttribute('rowspan')).toBe('3')
+    expect(firstCells[8]!.getAttribute('rowspan')).toBe('3')
 
     // 第 2 行（SKU 产品B2）：仅 产品名称/订单数量/生产数量/备注 = 4 td（订单级列由 rowspan 覆盖）
     const secondCells = Array.from(rows[1]!.querySelectorAll('td'))
