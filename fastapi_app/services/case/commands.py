@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi_app.core.number_generator import _acquire_advisory_lock_async, _number_lock_key
+from fastapi_app.core.pg_locks import acquire_advisory_lock_async, number_lock_key
 from fastapi_app.core.validators import validate_quantity_range
 from fastapi_app.services.case._common import _parse_date
 from fastapi_app.shared_models import Case, CaseInventoryLog, CaseStockIn, CaseStockOut, Product
@@ -53,7 +53,7 @@ async def _get_or_create_case_for_product(db: AsyncSession, product_id: int) -> 
     Raises:
         ValueError: 产品不存在时抛出。
     """
-    await _acquire_advisory_lock_async(db, _number_lock_key('CASE_PRODUCT', str(product_id)))
+    await acquire_advisory_lock_async(db, number_lock_key('CASE_PRODUCT', str(product_id)))
     result = await db.execute(
         select(Case).where(Case.product_id == product_id).with_for_update()
     )
