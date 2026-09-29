@@ -89,7 +89,7 @@ function mountToolbar(over: Record<string, unknown> = {}) {
 
 function mountCustomerBar(over: Record<string, unknown> = {}) {
   return mount(InventoryCustomerBar, {
-    props: { customers: ['滨发服饰', '贝乐教育'], selected: '', loading: false, total: 43, ...over },
+    props: { customers: ['滨发服饰', '贝乐教育'], selected: '', loading: false, ...over },
   })
 }
 
@@ -227,10 +227,6 @@ describe('InventoryCustomerBar —— 客户独立成行', () => {
 
     expect(w.emitted('select')?.[0]).toEqual(['滨发服饰'])
   })
-
-  it('右侧显示当前筛选条数', () => {
-    expect(mountCustomerBar().text()).toContain('43')
-  })
 })
 
 describe('InventoryTab —— 5 列表格与数字格式', () => {
@@ -248,11 +244,25 @@ describe('InventoryTab —— 5 列表格与数字格式', () => {
     expect(mountTab().text()).toContain('1,200')
   })
 
-  it('空值显示为「—」而不是空白（后端把 0 序列化成空串）', () => {
+  it('空值留白，不显示「—」之类的占位符', () => {
     const cells = mountTab().findAll('tbody tr')[1]?.findAll('td')
 
     // 第 2 行「儿童保温杯」备货数量为 0（后端序列化成 ''），落在第 4 列
-    expect(cells?.[3]?.text()).toContain('—')
+    expect(cells?.[3]?.text()).toBe('')
+  })
+
+  it('三个数值列的表头与数据都居中显示', () => {
+    const w = mountTab()
+
+    const headers = w.findAll('th')
+    for (const i of [2, 3, 4]) {
+      expect(headers[i]?.attributes('style')).toContain('center')
+    }
+
+    const cells = w.findAll('tbody tr')[0]!.findAll('td')
+    for (const i of [2, 3, 4]) {
+      expect(cells[i]?.attributes('style')).toContain('center')
+    }
   })
 
   it('总订单列取 total_stock 口径', () => {
@@ -326,6 +336,12 @@ describe('InventoryTab —— 5 列表格与数字格式', () => {
 
     await emitSort(w, 'total_stock', 0)
     expect(w.findAll('tbody tr')[0]?.text()).toContain('滨发服饰')
+  })
+
+  it('不再显示「当前筛选 N 条」（条数在分页器里已有，重复且占位）', () => {
+    // 在集成层断言：真实数据里 total_items = 43，若那行字还在就必然渲染出来。
+    // 组件级断言会假绿 —— 不传 total 时 v-if 自然为假，测不出功能是否真被删掉。
+    expect(mountTab().text()).not.toContain('当前筛选')
   })
 
   it('导出按钮在有数据时出现，点击调导出接口', async () => {

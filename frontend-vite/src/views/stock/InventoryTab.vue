@@ -14,7 +14,6 @@
       :customers="allCustomers"
       :selected="filters.customer"
       :loading="isFetching"
-      :total="totalItems"
       @select="selectCustomer"
     />
 
@@ -64,6 +63,7 @@
  * 布局：一行工具条（标题·搜索·三格汇总·导出）→ 客户筛选行 → 5 列表格。
  * 列口径（与后端 CTE 一一对应）：
  *   订单数量 = 未发完的订单余量 · 备货数量 = 已入库未消耗 · 总订单 = 备货 + 订单余量
+ * 三个数量列居中显示；有值走千分位，0 与空值留白（不做「—」之类的占位符）。
  * 排序为当前页客户端排序（服务端分页不变；要跨页排序需后端加 order_by 参数）。
  */
 import { reactive, computed, watch, ref } from 'vue'
@@ -103,10 +103,10 @@ const {
   placeholderData: keepPreviousData,
 })
 
-/** 数量展示：0 与空值统一为「—」（后端把 0 序列化成空串），其余走千分位 */
+/** 数量展示：有值走千分位，0 与空值留白（后端把 0 序列化成空串，不做占位符） */
 function fmtQty(v: unknown): string {
   const n = Number(v)
-  return Number.isFinite(n) && n !== 0 ? formatNumber(n) : '—'
+  return Number.isFinite(n) && n !== 0 ? formatNumber(n) : ''
 }
 
 /** 排序取值：非数值列当作 0，避免 NaN 让排序整体失效 */
@@ -131,9 +131,9 @@ const inventoryColumns: TableColumn[] = [
   // 百分比配合 table-layout: fixed（见样式）才是硬约束，五列按 15/35/16.67×3 铺满。
   { field: 'customer', header: '客户', align: 'left', width: '15%' },
   { field: 'product_name', header: '产品名称', align: 'left', width: '35%' },
-  { field: 'order_quantity', header: '订单数量', align: 'right', sortable: true, width: '16.67%' },
-  { field: 'stockin_quantity', header: '备货数量', align: 'right', sortable: true, width: '16.67%' },
-  { field: 'total_stock', header: '总订单', align: 'right', sortable: true, width: '16.67%' },
+  { field: 'order_quantity', header: '订单数量', align: 'center', sortable: true, width: '16.67%' },
+  { field: 'stockin_quantity', header: '备货数量', align: 'center', sortable: true, width: '16.67%' },
+  { field: 'total_stock', header: '总订单', align: 'center', sortable: true, width: '16.67%' },
 ]
 
 const allCustomers = computed(() => (invData.value?.all_customers ?? []) as string[])

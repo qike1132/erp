@@ -19,7 +19,6 @@
         @click="$emit('select', c)"
       >{{ c }}</button>
     </div>
-    <span v-if="total > 0" class="sk-count-note">当前筛选 {{ total }} 条</span>
     <Transition name="sk-bar-fade">
       <span v-if="loading" class="sk-customer-loading">
         <FontAwesomeIcon icon="circle-notch" spin aria-hidden="true" />
@@ -34,13 +33,11 @@
  *
  * 客户 chips 与搜索框分属两行：chips 数量随客户数增长，挤在搜索旁边会把
  * 汇总数字与导出按钮压变形，独立成行后可横向滚动而不影响其它元素。
- * 右侧「当前筛选 N 条」来自服务端 total_items（与分页总数同源）。
  */
 defineProps<{
   customers: string[]
   selected: string
   loading: boolean
-  total: number
 }>()
 
 defineEmits<{ select: [name: string] }>()
@@ -112,11 +109,6 @@ defineEmits<{ select: [name: string] }>()
   border-color: var(--color-primary-600);
   color: white;
 }
-.sk-count-note {
-  flex-shrink: 0;
-  font-size: 12px;
-  color: var(--color-text-muted);
-}
 .sk-customer-loading {
   display: flex;
   align-items: center;
@@ -133,6 +125,5 @@ defineEmits<{ select: [name: string] }>()
 @media (max-width: 900px) {
   .sk-customer-row { padding: 7px 12px; gap: 8px; }
   .sk-customer-label { display: none; }
-  .sk-count-note { display: none; }
 }
 </style>
