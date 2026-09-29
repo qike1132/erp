@@ -1,33 +1,33 @@
 <template>
   <div class="sp-toolbar">
-    <div class="sp-nav">
-      <button class="sp-nav-btn" aria-label="上一页" @click="emit('prev-month')"><FontAwesomeIcon icon="chevron-left" aria-hidden="true" /></button>
-      <span class="sp-nav-label">{{ y }}年{{ String(m).padStart(2, '0') }}月</span>
-      <button class="sp-nav-btn" aria-label="下一页" @click="emit('next-month')"><FontAwesomeIcon icon="chevron-right" aria-hidden="true" /></button>
-    </div>
     <div class="sp-search">
-      <UiSearchInput v-model="kw" :placeholder="viewTab === 'daily' ? '搜索日期、客户...' : '搜索产品、SKU、客户...'" @clear="kw = ''" />
+      <UiSearchInput
+        v-model="kw"
+        :placeholder="viewTab === 'daily' ? '搜索日期、客户...' : '搜索产品、SKU、客户...'"
+        @clear="kw = ''"
+      />
     </div>
     <button class="sp-action-btn" aria-label="导出" @click="emit('export')">导出</button>
-    <button class="sp-action-btn sp-action-btn-primary" aria-label="新建" @click="emit('create')"><FontAwesomeIcon icon="plus" aria-hidden="true" />新建</button>
+    <button class="sp-action-btn sp-action-btn-primary" aria-label="新建" @click="emit('create')">
+      <FontAwesomeIcon icon="plus" aria-hidden="true" />新建计划
+    </button>
   </div>
 </template>
 
 <script setup lang="ts">
+// 页面右上角的操作区。
+// 月份导航已移到第二行（它作用于整页，属于「看的是哪个月」而非「做一件事」），
+// 「新建」加「计划」二字并独占主按钮，与导出拉开主次。
 import UiSearchInput from '@/components/ui/UiSearchInput.vue'
 
 defineProps<{
   viewTab: 'daily' | 'summary'
-  y: number
-  m: number
 }>()
 
 const emit = defineEmits<{
   'update:globalKw': [v: string]
-  'prev-month': []
-  'next-month': []
-  'export': []
-  'create': []
+  export: []
+  create: []
 }>()
 
 const kw = defineModel<string>('globalKw', { default: '' })
@@ -44,48 +44,10 @@ const kw = defineModel<string>('globalKw', { default: '' })
   min-width: 0;
 }
 
-.sp-nav {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-shrink: 0;
-}
-
 .sp-search {
-  width: 260px;
+  width: 240px;
   flex-shrink: 1;
   min-width: 160px;
-}
-
-.sp-nav-btn {
-  width: 34px;
-  height: 34px;
-  border-radius: var(--radius-input, 12px);
-  border: 1px solid var(--color-border-light, #e2e8f0);
-  background: white;
-  cursor: pointer;
-  color: var(--color-text-secondary);
-  font-size: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: border-color 0.3s ease, color 0.3s ease, background 0.3s ease;
-  flex-shrink: 0;
-}
-
-.sp-nav-btn:hover {
-  border-color: var(--color-primary-300);
-  color: var(--color-primary-500);
-  background: var(--color-primary-50);
-}
-
-.sp-nav-label {
-  font-weight: 700;
-  font-size: 14px;
-  color: var(--color-heading);
-  min-width: 90px;
-  text-align: center;
-  user-select: none;
 }
 
 .sp-action-btn {

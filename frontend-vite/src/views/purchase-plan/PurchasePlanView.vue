@@ -2,62 +2,55 @@
   <div class="sp-container">
     <div class="page-card page-card-main">
       <div class="page-card-header">
-        <div class="sp-tab-group" role="tablist">
-          <button
-            role="tab"
-            :aria-selected="viewTab === 'daily'"
-            :class="['sp-tab', { 'sp-tab-active': viewTab === 'daily' }]"
-            @click="viewTab = 'daily'"
-          >排产日历</button>
-          <button
-            role="tab"
-            :aria-selected="viewTab === 'summary'"
-            :class="['sp-tab', { 'sp-tab-active': viewTab === 'summary' }]"
-            @click="viewTab = 'summary'"
-          >月度汇总</button>
-        </div>
+        <!-- 外层必须是纵向容器：.page-card-header 是 flex-wrap:nowrap 的横向 flex，
+             两行直接放进去会被并排摆开。 -->
+        <div class="sp-head">
+          <div class="sp-head-row1">
+            <div class="sp-tab-group" role="tablist">
+              <button
+                role="tab"
+                :aria-selected="viewTab === 'daily'"
+                :class="['sp-tab', { 'sp-tab-active': viewTab === 'daily' }]"
+                @click="viewTab = 'daily'"
+              >排产日历</button>
+              <button
+                role="tab"
+                :aria-selected="viewTab === 'summary'"
+                :class="['sp-tab', { 'sp-tab-active': viewTab === 'summary' }]"
+                @click="viewTab = 'summary'"
+              >月度汇总</button>
+            </div>
 
-        <PurchasePlanToolbar
-          v-model:global-kw="globalKw"
-          :view-tab="viewTab"
-          :y="y"
-          :m="m"
-          @prev-month="prevMonth"
-          @next-month="nextMonth"
-          @export="viewTab === 'daily' ? exportCSV() : exportSkuCSV()"
-          @create="showCreate = true"
-        />
-      </div>
+            <PurchasePlanToolbar
+              v-model:global-kw="globalKw"
+              :view-tab="viewTab"
+              @export="viewTab === 'daily' ? exportCSV() : exportSkuCSV()"
+              @create="showCreate = true"
+            />
+          </div>
 
-      <div class="sp-kpi-strip-wrap">
-        <div class="sp-kpi-strip">
-          <div class="sp-kpi">
-            <span class="sp-kpi-l">本月计划</span>
-            <span class="sp-kpi-v num">{{ sKpi.allQty }}</span>
-            <span class="sp-kpi-s num">{{ allQtyNum }}件</span>
-          </div>
-          <div class="sp-kpi">
-            <span class="sp-kpi-l">本月已出</span>
-            <span class="sp-kpi-v num" :class="allShippedNum > 0 ? '' : 'sp-kpi-v-r'">{{ sKpi.allShipped }}</span>
-          </div>
-          <div class="sp-kpi">
-            <span class="sp-kpi-l">剩余</span>
-            <span class="sp-kpi-v num sp-kpi-v-a">{{ sKpi.allRemain }}</span>
-          </div>
-          <div class="sp-kpi sp-kpi-rate">
-            <span class="sp-kpi-l">完成率</span>
-            <span class="sp-kpi-v num" :class="sKpi.pct <= 0 ? 'sp-kpi-v-r' : ''">{{ sKpi.pct }}%</span>
-            <div class="sp-meter"><i :class="kpiMeterCls" :style="{ width: sKpi.pct + '%' }" /></div>
-          </div>
-          <div class="sp-kpi">
-            <span class="sp-kpi-l" :class="risks.delayedCount > 0 ? 'sp-kpi-l-r' : ''">▲ 已延期</span>
-            <span class="sp-kpi-v num" :class="risks.delayedCount > 0 ? 'sp-kpi-v-r' : ''">{{ risks.delayedCount }}</span>
-            <span v-if="risks.delayedCount > 0" class="sp-kpi-s num">{{ risks.delayedQty }}件 · 最多{{ risks.maxDays }}天</span>
-          </div>
-          <div class="sp-kpi">
-            <span class="sp-kpi-l" :class="risks.expiringCount > 0 ? 'sp-kpi-l-a' : ''">⧗ 临期≤3天</span>
-            <span class="sp-kpi-v num" :class="risks.expiringCount > 0 ? 'sp-kpi-v-a' : ''">{{ risks.expiringCount }}</span>
-            <span v-if="risks.expiringCount > 0" class="sp-kpi-s num">{{ risks.expiringQty }}件</span>
+          <!-- 第二行：月份上下文 + 该月汇总。
+               切月作用于整页（KPI 与两个 Tab 都跟着变），所以与 KPI 同行，
+               而不是挤在右上角与「新建」抢位置。 -->
+          <div class="sp-head-row2">
+            <PurchasePlanMonthNav
+              :y="y"
+              :m="m"
+              @prev="prevMonth"
+              @next="nextMonth"
+              @reset="resetMonth"
+            />
+            <PurchasePlanKpiStrip
+              :plan-qty="planQtyNum"
+              :shipped-qty="shippedQtyNum"
+              :remain-qty="remainQtyNum"
+              :pct="sKpi.pct"
+              :plan-days="rows.length"
+              :risk-days="riskDays"
+              :risk-overdue="risks.delayedCount"
+              :risk-expiring="risks.expiringCount"
+              :risk-qty="riskQty"
+            />
           </div>
         </div>
       </div>
@@ -72,9 +65,9 @@
         :is-fetching="isFetching"
         :rows="rows"
         :filtered="filtered"
-        :customers="allCustomers"
         :sku-date-index="skuDateIndex"
         @refetch="refetch()"
+        @open-full="openFullDay"
       />
 
       <PurchasePlanMonthlySummary
@@ -95,13 +88,12 @@
         @open-sku-detail="openSkuDetail"
         @refetch="refetch"
       />
-    </div>
 
-    <PlanDetailDialog v-model:open="planDialogOpen" :detail="selDetail" :y="y" :m="m" />
-    <SkuDetailDialog v-model:open="skuDetailOpen" :barcode="skuDetailBarcode" :name="skuDetailName" :date-detail="skuDateDetail" />
+      <PlanDetailDialog v-model:open="planDialogOpen" :detail="selDetail" :y="y" :m="m" />
+      <SkuDetailDialog v-model:open="skuDetailOpen" :barcode="skuDetailBarcode" :name="skuDetailName" :date-detail="skuDateDetail" />
+    </div>
   </div>
 
-  <PlanDetailDrawer v-model:visible="drwOpen" :plan-id="drwId" @edited="onEdited" />
   <CreateShipmentPlanDialog v-model:open="showCreate" @created="onCreated" @imported="onImported" />
 </template>
 
@@ -115,12 +107,13 @@ import { downloadCsv, buildCsvRow } from '@/utils/csv';
 import PurchasePlanMonthlySummary from './components/PurchasePlanMonthlySummary.vue';
 import PurchasePlanDailyTab from './components/PurchasePlanDailyTab.vue';
 import PurchasePlanToolbar from './components/PurchasePlanToolbar.vue';
+import PurchasePlanMonthNav from './components/PurchasePlanMonthNav.vue';
+import PurchasePlanKpiStrip from './components/PurchasePlanKpiStrip.vue';
 import { usePurchasePlanData } from './composables/usePurchasePlanData';
 import { useSkuSummary } from './composables/useSkuSummary';
 import type { CustSumItem } from './components/types';
 
-// 弹窗/抽屉组件懒加载，减少首屏 chunk 体积（仅在用户交互时才加载）
-const PlanDetailDrawer = defineAsyncComponent(() => import('./components/PlanDetailDrawer.vue'));
+// 弹窗组件懒加载，减少首屏 chunk 体积（仅在用户交互时才加载）
 const CreateShipmentPlanDialog = defineAsyncComponent(() => import('./components/CreateShipmentPlanDialog.vue'));
 const PlanDetailDialog = defineAsyncComponent(() => import('./components/PlanDetailDialog.vue'));
 const SkuDetailDialog = defineAsyncComponent(() => import('./components/SkuDetailDialog.vue'));
@@ -137,16 +130,19 @@ const _flushDebounced = useDebounceFn((v: string) => { debouncedKw.value = v; },
 watch(globalKw, (v) => _flushDebounced(v));
 const sel = ref('');
 const showCreate = ref(false);
-const drwOpen = ref(false);
-const drwId = ref(0);
 const viewTab = ref<'daily' | 'summary'>('daily');
 const custFilter = ref('');
 
-const planDialogOpen = computed({
-  get: () => !!sel.value,
-  set: (v: boolean) => { if (!v) sel.value = ''; },
-});
+// 当日明细的呈现从「选中即弹窗」改为「右栏内联，点按钮才开弹窗」：
+// sel 仍然只是「选中了哪一天」，弹窗开关与它解耦，右栏才有稳定的展示位。
+const planDialogOpen = ref(false);
 
+function openFullDay() {
+  if (sel.value) planDialogOpen.value = true;
+}
+
+// sel 被清空（切月 / 切 Tab / 清搜索）时同步关掉弹窗，避免它挂着一个已失效的日期
+watch(sel, (v) => { if (!v) planDialogOpen.value = false; });
 watch(globalKw, () => { if (viewTab.value === 'daily') sel.value = ''; });
 watch([y, m], () => { sel.value = ''; globalKw.value = ''; debouncedKw.value = ''; });
 watch(viewTab, () => { globalKw.value = ''; debouncedKw.value = ''; });
@@ -179,18 +175,13 @@ const sKpi = computed(() => {
   };
 });
 
-const allShippedNum = computed(() => Number(sKpi.value.allShipped || 0));
-const allQtyNum = computed(() => Number(sKpi.value.allQty || 0));
-const kpiMeterCls = computed(() => {
-  const p = sKpi.value.pct;
-  if (p <= 0) return 'sp-meter-r';
-  if (p < 100) return 'sp-meter-a';
-  return 'sp-meter-g';
-});
+const planQtyNum = computed(() => Number(sKpi.value.allQty || 0));
+const shippedQtyNum = computed(() => Number(sKpi.value.allShipped || 0));
+const remainQtyNum = computed(() => Number(sKpi.value.allRemain || 0));
 
 const {
   skuSortField, skuSortDir, skuPage, skuTotalPages, paginatedSkuList, sortedSkuList,
-  skuDateDetail, skuDetailOpen, skuDetailBarcode, skuDetailName, skuDetailCustomer,
+  skuDateDetail, skuDetailOpen, skuDetailBarcode, skuDetailName,
   openSkuDetail, toggleSkuSort,
 } = useSkuSummary({ skuSummary, skuDateIndex, custFilter, globalKw: debouncedKw, viewTab });
 
@@ -207,7 +198,8 @@ const selDetail = computed(() => {
   return rows.value.find(r => r.date === sel.value) ?? null;
 });
 
-// 延期 / 临期风险汇总，用于顶栏 KPI 阈值条展示
+// 延期 / 临期风险汇总。原先在顶栏拆成「已延期」「临期≤3天」两格，与右栏风险清单
+// 报的是同一件事 —— 现合并为一格「风险 N 天」，明细交给右栏清单与月历格子上的标记。
 const risks = computed(() => {
   const now = new Date(); now.setHours(0, 0, 0, 0);
   const MS = 86400000;
@@ -221,6 +213,9 @@ const risks = computed(() => {
   return r;
 });
 
+const riskDays = computed(() => risks.value.delayedCount + risks.value.expiringCount);
+const riskQty = computed(() => risks.value.delayedQty + risks.value.expiringQty);
+
 function exportSkuCSV() {
   const list = sortedSkuList.value;
   if (!list.length) { showToast('无数据', 'error'); return; }
@@ -233,7 +228,11 @@ function exportSkuCSV() {
 
 function prevMonth() { m.value = m.value === 1 ? 12 : m.value - 1; if (m.value === 12) y.value--; }
 function nextMonth() { m.value = m.value === 12 ? 1 : m.value + 1; if (m.value === 1) y.value++; }
-function onEdited() { qc.invalidateQueries({ queryKey: ['pp-agg'] }); qc.invalidateQueries({ queryKey: ['pp-day'] }); }
+function resetMonth() {
+  const now = new Date();
+  y.value = now.getFullYear();
+  m.value = now.getMonth() + 1;
+}
 function onCreated() { showCreate.value = false; qc.invalidateQueries({ queryKey: ['pp-agg'] }); qc.invalidateQueries({ queryKey: ['pp-day'] }); }
 
 /**
@@ -276,12 +275,44 @@ function exportCSV() {
 
 <style scoped lang="scss">
 @use './purchase-plan-common.scss' as *;
+
 .sp-container {
   height: 100%;
   padding: 0;
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
+}
+
+/* 头部两行：第一行「看哪个 Tab + 做什么」，第二行「看哪个月 + 这个月怎么样」。
+   原先全部挤在一行，切月/搜索/导出/新建没有主次。 */
+.sp-head {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+}
+
+.sp-head-row1 {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.sp-head-row2 {
+  display: flex;
+  align-items: stretch;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 900px) {
+  .sp-head-row2 {
+    flex-direction: column;
+    align-items: stretch;
+  }
 }
 
 .sp-tab-group {
@@ -291,8 +322,9 @@ function exportCSV() {
   border-radius: 12px;
   background: white;
   border: 1px solid var(--color-border-light, #e2e8f0);
-  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.06);
   width: fit-content;
+  flex-shrink: 0;
 }
 
 .sp-tab {
@@ -306,92 +338,20 @@ function exportCSV() {
   cursor: pointer;
   transition: background 0.3s ease, color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
   font-family: inherit;
+  white-space: nowrap;
 }
 
 .sp-tab:hover {
   background: var(--color-primary-50);
   color: var(--color-primary-600);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
   transform: translateY(-1px);
 }
 
 .sp-tab-active {
   background: linear-gradient(135deg, var(--color-primary-50), var(--color-primary-100));
   color: var(--color-primary-700);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 2px 8px rgba(91, 141, 239, 0.2);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08), 0 2px 8px rgba(91, 141, 239, 0.2);
   transform: translateY(-1px);
 }
-
-/* KPI 阈值条（v5）：计划/已出/剩余/完成率/延期/临期 */
-.sp-kpi-strip-wrap {
-  padding: 12px 24px 4px;
-  flex-shrink: 0;
-}
-
-.sp-kpi-strip {
-  display: flex;
-  align-items: stretch;
-  /* 允许换行：窄屏下 6 段并排会把「临期≤3天」挤出可视区，
-     而 overflow:hidden 会静默吞掉它 —— 用户看不到该指标却不报错。 */
-  flex-wrap: wrap;
-  /* 分隔线用 1px 间隙透出底色实现：换行后横向/纵向分隔线都自然成立，
-     且不会在外边缘留下多余边框（逐项 border 无法判断某行是否为末行）。 */
-  gap: 1px;
-  background: var(--color-border-light, #e2e8f0);
-  border: 1px solid var(--color-border-light, #e2e8f0);
-  border-radius: 14px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
-  overflow: hidden;
-}
-
-.sp-kpi {
-  flex: 1 1 110px;
-  min-width: 0;
-  padding: 11px 14px;
-  background: white;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.sp-kpi-rate { flex: 1.4 1 150px; }
-.sp-kpi-l {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--color-text-muted, #5a6b8c);
-  white-space: nowrap;
-}
-.sp-kpi-l-r { color: var(--color-danger-600); }
-.sp-kpi-l-a { color: var(--color-warning-600); }
-.sp-kpi-v {
-  font-size: 22px;
-  font-weight: 800;
-  color: var(--color-heading);
-  line-height: 1;
-  margin-top: 3px;
-}
-.sp-kpi-v-r { color: var(--color-danger-600); }
-.sp-kpi-v-a { color: var(--color-warning-600); }
-.sp-kpi-s {
-  font-size: 11px;
-  color: var(--color-text-muted, #8c96ad);
-  white-space: nowrap;
-  margin-top: 3px;
-  text-align: left;
-}
-.sp-meter {
-  height: 6px;
-  border-radius: 3px;
-  background: #edf0f6;
-  overflow: hidden;
-  margin-top: 8px;
-  max-width: 220px;
-}
-.sp-meter > i {
-  display: block;
-  height: 100%;
-  border-radius: 3px;
-}
-.sp-meter-r { background: var(--color-danger-500, #e04042); }
-.sp-meter-a { background: var(--color-warning-500, #f59e0b); }
-.sp-meter-g { background: var(--color-success-500, #2a9a5b); }
 </style>

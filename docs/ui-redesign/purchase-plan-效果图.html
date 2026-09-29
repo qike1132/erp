@@ -1,0 +1,847 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>/purchase-plan UI 效果图对比</title>
+<style>
+/* ====== 全局令牌（抄自 frontend-vite/src/styles/app.css，勿改） ====== */
+:root{
+  --primary-50:#eff5ff; --primary-100:#d6e4ff; --primary-200:#b8ccff; --primary-300:#8babf5;
+  --primary-400:#6d95f0; --primary-500:#5b8def; --primary-600:#3a6bd6; --primary-700:#2d5ab8;
+  --success-50:#e8f9ef; --success-100:#d0f3df; --success-200:#a6e8c0; --success-500:#28c76f; --success-600:#1e9e55; --success-700:#2e7d32;
+  --warning-50:#fff3e6; --warning-100:#ffe6cc; --warning-200:#ffd199; --warning-500:#ff9f43; --warning-600:#e88e2e; --warning-700:#c47820;
+  --danger-50:#fde8e8;  --danger-100:#fbd0d0; --danger-200:#f7a5a5; --danger-500:#ea5455; --danger-600:#d44042; --danger-700:#b33335;
+  --surface:#f4f6fc; --surface-card:#fff; --border:#e4e7ed; --border-light:#f0f2f5;
+  --text:#1a1a2e; --text-secondary:#475569; --text-muted:#64748b; --heading:#1a1a2e;
+  --slate-50:#f8fafc; --slate-100:#f1f5f9; --slate-200:#e2e8f0; --slate-300:#cbd5e1; --slate-400:#94a3b8;
+  --radius-sm:10px; --radius-md:14px; --radius-lg:24px; --radius-input:12px;
+  --shadow-sm:0 2px 8px rgba(176,224,230,.15);
+  --shadow-card:0 1px 3px rgba(0,0,0,.04), 0 4px 12px rgba(0,0,0,.06);
+  --shadow-md:0 4px 16px rgba(176,224,230,.22);
+  --gradient-primary:linear-gradient(135deg,#5b8def 0%,#3a6bd6 100%);
+  --font:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hiragino Sans GB','Microsoft YaHei',Roboto,sans-serif;
+}
+*{box-sizing:border-box}
+body{margin:0;background:#e8ecf4;font-family:var(--font);color:var(--text);overflow-x:auto}
+.num{font-variant-numeric:tabular-nums;font-feature-settings:'tnum'}
+
+/* ====== 顶部版本切换器 ====== */
+.switcher{position:fixed;top:0;left:0;right:0;z-index:99;display:flex;align-items:center;gap:8px;
+  padding:10px 20px;background:#fff;border-bottom:1px solid var(--border);box-shadow:var(--shadow-card)}
+.switcher b{font-size:13px;letter-spacing:-.01em;margin-right:8px}
+.switcher button{padding:6px 14px;border:1.5px solid var(--border);border-radius:var(--radius-input);background:#fff;
+  font:600 12px var(--font);color:var(--text-secondary);cursor:pointer;transition:.2s}
+.switcher button:hover{border-color:var(--primary-300);color:var(--primary-600);background:var(--primary-50)}
+.switcher button.on{background:var(--gradient-primary);border-color:transparent;color:#fff;box-shadow:0 2px 8px rgba(91,141,239,.35)}
+.switcher .hint{margin-left:auto;font-size:11px;color:var(--text-muted)}
+.stage{padding:64px 24px 60px}
+.view{display:none}
+.view.on{display:block}
+
+/* ====== 视窗模拟（1920 屏下的主内容区） ====== */
+.frame{width:1440px;background:linear-gradient(135deg,var(--surface) 0%,var(--border-light) 100%);
+  border-radius:var(--radius-md);padding:0;margin:0 auto}
+.page-card{background:#fff;border-radius:18px;border:1px solid var(--border-light);box-shadow:var(--shadow-card);
+  display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.stage-note{width:1440px;margin:0 auto 10px;font-size:12px;color:var(--text-muted)}
+.stage-note b{color:var(--text-secondary)}
+
+/* ====== 页面头（两行式，方案通用） ====== */
+.head{padding:14px 24px 12px;border-bottom:1px solid var(--border-light)}
+.head-row1{display:flex;align-items:center;gap:12px}
+.head-row2{display:flex;align-items:flex-start;gap:16px;margin-top:12px}
+.tabs{display:inline-flex;gap:4px;padding:4px;border-radius:var(--radius-input);background:#fff;
+  border:1px solid var(--border-light);box-shadow:var(--shadow-card)}
+.tab{padding:8px 14px;border:none;border-radius:9px;background:transparent;font:800 13px var(--font);
+  color:var(--heading);cursor:pointer;transition:.3s}
+.tab.active{background:linear-gradient(135deg,var(--primary-50),var(--primary-100));color:var(--primary-700);
+  box-shadow:var(--shadow-card),0 2px 8px rgba(91,141,239,.2)}
+.head-actions{margin-left:auto;display:flex;align-items:center;gap:8px}
+.search{display:flex;align-items:center;gap:6px;width:240px;height:34px;padding:0 12px;border-radius:var(--radius-input);
+  border:1.5px solid var(--border-light);background:#fff;color:var(--text-muted);font-size:12px}
+.monthnav{display:inline-flex;align-items:center;gap:6px;padding:3px;border-radius:var(--radius-input);
+  border:1.5px solid var(--border-light);background:#fff}
+.monthnav .nav{width:30px;height:28px;display:grid;place-items:center;border:none;background:transparent;cursor:pointer;
+  border-radius:9px;color:var(--text-secondary);font-size:13px}
+.monthnav .nav:hover{background:var(--primary-50);color:var(--primary-600)}
+.monthnav .lbl{font:700 14px var(--font);color:var(--heading);min-width:96px;text-align:center}
+.monthnav .today{padding:4px 10px;border:none;border-radius:9px;background:var(--primary-50);color:var(--primary-600);
+  font:700 11px var(--font);cursor:pointer}
+.btn{padding:7px 14px;border-radius:9px;border:2px solid var(--border-light);background:#fff;
+  font:600 12px var(--font);color:var(--primary-600);cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+.btn:hover{background:var(--primary-50);border-color:var(--primary-300)}
+.btn-primary{background:var(--gradient-primary);border-color:transparent;color:#fff}
+.btn-primary:hover{opacity:.95;box-shadow:0 4px 12px rgba(91,141,239,.25)}
+
+/* ====== KPI ====== */
+.kpi{display:flex;align-items:stretch;gap:1px;background:var(--border-light);border:1px solid var(--border-light);
+  border-radius:var(--radius-md);box-shadow:var(--shadow-card);overflow:hidden;flex:1}
+.kpi-cell{flex:1 1 0;min-width:0;padding:10px 14px;background:#fff;display:flex;flex-direction:column;gap:2px}
+.kpi-cell .l{font:600 11px var(--font);color:var(--text-muted);white-space:nowrap}
+.kpi-cell .v{font:800 21px/1 var(--font);color:var(--heading);margin-top:3px}
+.kpi-cell .s{font:500 11px var(--font);color:var(--text-muted);margin-top:3px;white-space:nowrap}
+.kpi-cell.warn .l,.kpi-cell.warn .v{color:var(--warning-600)}
+.kpi-cell.risk .l,.kpi-cell.risk .v{color:var(--danger-600)}
+.meter{height:6px;border-radius:3px;background:var(--slate-100);overflow:hidden;margin-top:8px;max-width:200px}
+.meter>i{display:block;height:100%;border-radius:3px;background:var(--warning-500)}
+.meter.g>i{background:var(--success-500)} .meter.r>i{background:var(--danger-500)}
+
+/* ====== 面板通用 ====== */
+.body{padding:18px 24px 22px;flex:1;min-height:0}
+.panel{background:#fff;border:1px solid var(--border-light);border-radius:var(--radius-md);box-shadow:var(--shadow-card);overflow:hidden}
+.panel+.panel{margin-top:0}
+.panel-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 18px;
+  border-bottom:1px solid var(--border-light);font:800 13px var(--font);color:var(--heading)}
+.panel-head .xs{font:500 11px var(--font);color:var(--text-muted)}
+
+/* ====== 月历网格 ====== */
+.dow{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px;padding:12px 18px 8px}
+.dow span{font:600 11px var(--font);color:var(--text-muted);text-align:center}
+.dow span.we{color:var(--slate-400)}
+.cal{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px;padding:0 18px 16px}
+.cell{position:relative;min-height:88px;border:1px solid var(--border-light);border-radius:var(--radius-sm);
+  background:#fff;padding:8px 9px 8px 11px;display:flex;flex-direction:column;gap:5px;cursor:pointer;
+  transition:box-shadow .2s,border-color .2s}
+.cell:hover{border-color:var(--primary-300);box-shadow:var(--shadow-sm)}
+.cell::before{content:'';position:absolute;left:0;top:9px;bottom:9px;width:3px;border-radius:0 3px 3px 0;background:transparent}
+.cell.c-danger::before{background:var(--danger-500)}
+.cell.c-warn::before{background:var(--warning-500)}
+.cell.c-done::before{background:var(--success-500)}
+.cell.c-danger{background:var(--danger-50);border-color:var(--danger-200)}
+.cell.c-warn{background:var(--warning-50);border-color:var(--warning-200)}
+.cell.c-done{background:var(--success-50);border-color:var(--success-200)}
+.cell.empty{background:var(--slate-50);border-style:solid;border-color:var(--slate-100);cursor:default}
+.cell.empty:hover{border-color:var(--slate-100);box-shadow:none}
+.cell.sel{outline:2px solid var(--primary-500);outline-offset:1px}
+.cell-top{display:flex;align-items:center;gap:5px}
+.dayno{font:800 13px var(--font);color:var(--heading);line-height:1}
+.dayno .wd{font:600 10px var(--font);color:var(--text-muted);margin-left:3px}
+.cell.empty .dayno,.cell.empty .dayno .wd{color:var(--slate-300)}
+.cell.today .dayno{background:var(--gradient-primary);color:#fff;border-radius:7px;padding:2px 6px}
+.cell.today .dayno .wd{color:rgba(255,255,255,.85)}
+.pill{margin-left:auto;font:700 10px/1 var(--font);padding:3px 6px;border-radius:6px;white-space:nowrap}
+.pill-r{background:var(--danger-100);color:var(--danger-700)}
+.pill-a{background:var(--warning-100);color:var(--warning-700)}
+.pill-g{background:var(--success-100);color:var(--success-700)}
+.cell-qty{font:800 16px/1 var(--font);color:var(--heading);margin-top:auto}
+.cell-qty small{font:600 9px var(--font);color:var(--text-muted);margin-left:1px}
+.cell.c-empty-qty{color:var(--slate-300)}
+.cell-meta{display:flex;gap:5px;font:500 10px var(--font);color:var(--text-muted);white-space:nowrap;overflow:hidden}
+.cell-meta i{width:3px;height:3px;border-radius:50%;background:currentColor;opacity:.5;align-self:center}
+.cell-bar{height:4px;border-radius:2px;background:rgba(0,0,0,.06);overflow:hidden}
+.cell-bar>i{display:block;height:100%;border-radius:2px;background:var(--warning-500)}
+
+/* ====== 右栏 ====== */
+.split{display:grid;grid-template-columns:minmax(0,1fr) 336px;gap:16px;align-items:start}
+.split.wide{grid-template-columns:minmax(0,1fr) 300px}
+.rail{display:flex;flex-direction:column;gap:14px}
+.rail-switch{display:flex;gap:4px;padding:4px;border-radius:var(--radius-input);background:var(--slate-50);
+  border:1px solid var(--border-light)}
+.rail-switch span{flex:1;text-align:center;padding:6px 8px;border-radius:9px;font:700 11px var(--font);color:var(--text-muted)}
+.rail-switch span.on{background:#fff;color:var(--primary-700);box-shadow:var(--shadow-card)}
+.risk-row{display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--border-light);cursor:pointer}
+.risk-row:last-child{border-bottom:none}
+.risk-row:hover{background:var(--primary-50)}
+.risk-row .d{font:800 12px var(--font);color:var(--heading)}
+.risk-row .c{font:500 11px var(--font);color:var(--text-secondary);margin-top:2px}
+.risk-row .tag{margin-left:auto;font:700 10px var(--font);padding:2px 7px;border-radius:6px;white-space:nowrap}
+.risk-row .tag.r{background:var(--danger-100);color:var(--danger-700)}
+.risk-row .tag.a{background:var(--warning-100);color:var(--warning-700)}
+.risk-row .tag.right{margin-left:auto}
+.risk-row .q{font:700 11px var(--font);color:var(--text-muted);margin-left:auto}
+.dist{padding:12px 16px 14px}
+.dist-row{display:flex;align-items:center;gap:9px;margin-top:9px}
+.dist-row:first-child{margin-top:0}
+.dist-row .nm{width:74px;font:500 11px var(--font);color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dist-row .tk{flex:1;height:7px;background:var(--slate-100);border-radius:4px;overflow:hidden}
+.dist-row .tk>i{display:block;height:100%;border-radius:4px;background:var(--slate-300)}
+.dist-row .tk>i.top{background:var(--primary-500)}
+.dist-row .pc{width:36px;text-align:right;font:600 11px var(--font);color:var(--text-muted)}
+
+/* ====== 当日明细（右栏内联 / 下方整宽） ====== */
+.detail-head{padding:12px 16px;border-bottom:1px solid var(--border-light)}
+.detail-head .t{font:800 14px var(--font);color:var(--heading)}
+.detail-head .m{font:500 11px var(--font);color:var(--text-muted);margin-top:4px;display:flex;gap:8px;flex-wrap:wrap}
+.detail-head .m b{font-weight:800;color:var(--text-secondary)}
+.grp{padding:10px 16px 12px;border-bottom:1px solid var(--border-light)}
+.grp:last-child{border-bottom:none}
+.grp-top{display:flex;align-items:baseline;gap:8px;margin-bottom:6px}
+.grp-top .nm{flex:1;min-width:0;font:800 12px var(--font);color:var(--primary-700);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.grp-top .q{font:800 12px var(--font);color:var(--text-secondary)}
+.pl{list-style:none;margin:0;padding:0}
+.pl li{display:flex;align-items:baseline;gap:6px;padding:2px 0;font-size:11.5px}
+.pl .pn{flex:0 1 auto;min-width:0;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pl .pd{flex:1 1 auto;min-width:8px;border-bottom:1px dotted var(--border);align-self:center}
+.pl .pq{flex-shrink:0;font-weight:700;color:var(--heading)}
+.pl .ps{flex-shrink:0;font:600 10px var(--font);color:var(--success-600);width:38px;text-align:right}
+.pl .ps.wait{color:var(--warning-600)}
+
+/* ====== 表格（月度汇总 / 明细） ====== */
+.tbl{width:100%;border-collapse:collapse}
+.tbl th{padding:10px 14px;background:var(--slate-50);font:600 11px var(--font);letter-spacing:.04em;text-transform:uppercase;
+  color:var(--text-secondary);border-bottom:2px solid var(--border-light);text-align:left;white-space:nowrap}
+.tbl td{padding:9px 14px;font-size:12.5px;color:var(--text);border-bottom:1px solid var(--border-light)}
+.tbl tbody tr:hover td{background:var(--primary-50)}
+.tbl .r{text-align:right}
+.tbl .cust{font-weight:600}
+.tbl .prod{font-weight:600}
+.tbl .mono{font-family:'SF Mono','Fira Code',Consolas,monospace;font-size:12px;color:var(--text-muted);letter-spacing:.03em}
+.tbl .ok{color:var(--success-600);font-weight:700}
+.tbl .wt{color:var(--warning-600);font-weight:700}
+.tbl .dg{color:var(--danger-600);font-weight:700}
+.prog{display:flex;align-items:center;gap:8px}
+.prog .m{flex:1;max-width:110px;height:6px;border-radius:3px;background:var(--slate-100);overflow:hidden}
+.prog .m>i{display:block;height:100%;border-radius:3px}
+.prog .v{font:700 11px var(--font);color:var(--text-muted);min-width:34px}
+.th-sortable{cursor:pointer}
+.th-sortable .k{color:var(--primary-500);margin-left:3px}
+
+/* ====== 客户 chips ====== */
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+.chip{padding:5px 11px;border:1.5px solid var(--border-light);border-radius:16px;background:#fff;
+  font:500 12px var(--font);color:var(--text-secondary);white-space:nowrap;cursor:pointer}
+.chip:hover{border-color:var(--primary-300);color:var(--primary-600);background:var(--primary-50)}
+.chip.on{background:var(--gradient-primary);border-color:transparent;color:#fff}
+.chip .n{font-weight:700;opacity:.7;margin-left:4px}
+
+/* ====== 现状：卡片列表 ====== */
+.day-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(340px,100%),1fr));gap:14px}
+.card{position:relative;border:1px solid var(--border-light);border-radius:var(--radius-md);padding:13px 15px 13px 19px;
+  background:#fff;display:flex;flex-direction:column;gap:10px}
+.card::before{content:'';position:absolute;left:0;top:10px;bottom:10px;width:3px;border-radius:0 3px 3px 0;background:var(--border)}
+.card.danger::before{background:var(--danger-500)} .card.danger{border-color:var(--danger-200)}
+.card.warn::before{background:var(--warning-500)} .card.warn{border-color:var(--warning-200)}
+.card.done::before{background:var(--success-500)} .card.done{border-color:var(--success-200)}
+.card-top{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.card-top .dt{font:700 14px var(--font);color:var(--heading)}
+.card-top .ttl{margin-left:auto;font:800 19px/1 var(--font);color:var(--heading)}
+.card-top .ttl small{font:600 10px var(--font);color:var(--text-muted)}
+.card-meta{display:flex;gap:6px;align-items:center;font:500 11px var(--font);color:var(--text-muted);margin-top:-4px}
+.card-meta i{width:3px;height:3px;border-radius:50%;background:currentColor;opacity:.5}
+.card-groups{display:flex;flex-direction:column;gap:9px;border-top:1px solid var(--border-light);padding-top:10px}
+.more{font:600 11px var(--font);color:var(--primary-600)}
+.legend{display:flex;gap:18px;padding:0 18px 14px;font:500 11px var(--font);color:var(--text-muted)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:3px;height:12px;border-radius:2px}
+.legend .r{background:var(--danger-500)} .legend .a{background:var(--warning-500)} .legend .g{background:var(--success-500)}
+.inline-legend{display:flex;gap:12px;font:500 11px var(--font);color:var(--text-muted);align-items:center}
+.inline-legend span{display:inline-flex;align-items:center;gap:5px}
+.inline-legend i{width:3px;height:11px;border-radius:2px}
+
+/* ====== 方案 C：时间轴列表 ====== */
+.tl{max-height:560px;overflow-y:auto}
+.tl-row{display:flex;align-items:center;gap:10px;padding:9px 14px;border-bottom:1px solid var(--border-light);cursor:pointer}
+.tl-row:last-child{border-bottom:none}
+.tl-row:hover{background:var(--primary-50)}
+.tl-row.on{background:var(--primary-50);box-shadow:inset 3px 0 0 var(--primary-500)}
+.tl-row .dt{width:60px;font:800 12px var(--font);color:var(--heading);white-space:nowrap}
+.tl-row .dt em{font:600 10px var(--font);color:var(--text-muted);font-style:normal;margin-left:2px}
+.tl-row .bar{width:52px;height:6px;border-radius:3px;background:var(--slate-100);overflow:hidden;flex-shrink:0}
+.tl-row .bar>i{display:block;height:100%;border-radius:3px}
+.tl-row .q{width:64px;text-align:right;font:700 12px var(--font);color:var(--heading)}
+.tl-row .meta{font:500 10px var(--font);color:var(--text-muted);white-space:nowrap}
+.tl-row.danger{background:var(--danger-50)}
+.tl-row.warn{background:var(--warning-50)}
+.tl-row.done .bar>i{background:var(--success-500)}
+.tl-row.danger .bar>i{background:var(--danger-500)}
+.tl-row.warn .bar>i{background:var(--warning-500)}
+.tl-empty{opacity:.55}
+.riskbar{display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:var(--radius-sm);
+  background:var(--danger-50);border:1px solid var(--danger-200);font:600 11px var(--font);color:var(--danger-700);margin-bottom:14px}
+.riskbar .sep{color:var(--danger-200)}
+.note{font:500 11.5px var(--font);color:var(--text-muted);background:var(--slate-50);border:1px dashed var(--slate-200);
+  border-radius:var(--radius-sm);padding:10px 14px;margin-top:14px}
+.note b{color:var(--text-secondary)}
+h2.sec{width:1440px;margin:22px auto 8px;font:800 14px var(--font);color:var(--heading)}
+h2.sec small{font:500 11px var(--font);color:var(--text-muted);margin-left:8px}
+</style>
+</head>
+<body>
+
+<div class="switcher">
+  <b>/purchase-plan · UI 效果图</b>
+  <button data-v="now" class="on">现状</button>
+  <button data-v="a">方案 A · 月历+详情栏</button>
+  <button data-v="b">方案 B · 宽月历</button>
+  <button data-v="c">方案 C · 时间轴</button>
+  <button data-v="sum">月度汇总 Tab</button>
+  <span class="hint">示意宽度 1440px（1920 屏下的主内容区）· 数据取自 scripts/create_purchase_plan_multi_per_day.py 的真实客户/产品名</span>
+</div>
+
+<div class="stage">
+
+<!-- ============================================================ 现状 -->
+<section id="now" class="view on">
+  <div class="stage-note">当前线上形态：<b>6 格 KPI 条 + 「有计划的日期」卡片列表 + 344px 右栏</b>，底部另有一条大图例</div>
+  <div class="frame">
+    <div class="page-card">
+      <div class="head" style="display:flex;align-items:center;gap:12px">
+        <div class="tabs"><button class="tab active">排产日历</button><button class="tab">月度汇总</button></div>
+        <div class="head-actions">
+          <button class="btn">‹</button><span style="font:700 14px var(--font);min-width:96px;text-align:center">2026年09月</span><button class="btn">›</button>
+          <div class="search">搜索日期、客户…</div>
+          <button class="btn">导出</button>
+          <button class="btn btn-primary">＋ 新建</button>
+        </div>
+      </div>
+
+      <div style="padding:12px 24px 4px"><div class="kpi">
+        <div class="kpi-cell"><span class="l">本月计划</span><span class="v num">22,815</span><span class="s num">22,815件</span></div>
+        <div class="kpi-cell"><span class="l">本月已出</span><span class="v num">14,065</span></div>
+        <div class="kpi-cell"><span class="l">剩余</span><span class="v num" style="color:var(--warning-600)">8,750</span></div>
+        <div class="kpi-cell" style="flex:1.4 1 0"><span class="l">完成率</span><span class="v num">61.6%</span>
+          <div class="meter" style="max-width:220px"><i style="width:61.6%"></i></div></div>
+        <div class="kpi-cell risk"><span class="l">▲ 已延期</span><span class="v num">4</span><span class="s num">6,200件 · 最多20天</span></div>
+        <div class="kpi-cell warn"><span class="l">⧗ 临期≤3天</span><span class="v num">2</span><span class="s num">2,550件</span></div>
+      </div></div>
+
+      <div class="body">
+        <div class="split">
+          <div class="panel">
+            <div class="panel-head"><span>9 月排产日历</span><span class="xs">红=延期 · 琥珀=临期 · 绿=已完成</span></div>
+            <div style="padding:16px 18px">
+              <div class="day-grid">
+                <div class="card danger">
+                  <div class="card-top"><span class="dt">09-08 周二</span><span class="pill pill-r">延期 20天</span><span class="ttl num">5,000<small>件</small></span></div>
+                  <div class="card-meta"><span>3 家客户</span><i></i><span>5 个产品</span></div>
+                  <div class="card-groups">
+                    <div><div class="grp-top"><span class="nm">MINISO国际</span><span class="q num">4,000</span></div>
+                      <ul class="pl"><li><span class="pn">企鹅</span><span class="pd"></span><span class="pq num">2,000</span></li>
+                        <li><span class="pn">企鹅企鹅企鹅</span><span class="pd"></span><span class="pq num">1,500</span></li>
+                        <li><span class="pn">变形金刚</span><span class="pd"></span><span class="pq num">500</span></li></ul></div>
+                    <div><div class="grp-top"><span class="nm">TOP TOY</span><span class="q num">400</span></div>
+                      <ul class="pl"><li><span class="pn">10寸仓鼠毛绒公仔(粉色)</span><span class="pd"></span><span class="pq num">400</span></li></ul></div>
+                    <div class="more">还有 1 家客户 / 1 个产品，点击查看全部</div>
+                  </div>
+                </div>
+                <div class="card warn">
+                  <div class="card-top"><span class="dt">09-15 周二</span><span class="pill pill-r">延期 13天</span><span class="ttl num">4,200<small>件</small></span></div>
+                  <div class="card-meta"><span>2 家客户</span><i></i><span>2 个产品</span></div>
+                  <div class="card-groups">
+                    <div><div class="grp-top"><span class="nm">MINISO国际</span><span class="q num">3,000</span></div>
+                      <ul class="pl"><li><span class="pn">企鹅</span><span class="pd"></span><span class="pq num">3,000</span></li></ul></div>
+                    <div><div class="grp-top"><span class="nm">网易严选</span><span class="q num">1,200</span></div>
+                      <ul class="pl"><li><span class="pn">变形金刚</span><span class="pd"></span><span class="pq num">1,200</span></li></ul></div>
+                  </div>
+                </div>
+                <div class="card done">
+                  <div class="card-top"><span class="dt">09-02 周三</span><span class="pill pill-g">✓ 完成</span><span class="ttl num">2,666<small>件</small></span></div>
+                  <div class="card-meta"><span>2 家客户</span><i></i><span>3 个产品</span></div>
+                  <div class="card-groups">
+                    <div><div class="grp-top"><span class="nm">MINISO国际</span><span class="q num">2,000</span></div>
+                      <ul class="pl"><li><span class="pn">企鹅</span><span class="pd"></span><span class="pq num">1,200</span></li>
+                        <li><span class="pn">变形金刚</span><span class="pd"></span><span class="pq num">800</span></li></ul></div>
+                    <div><div class="grp-top"><span class="nm">网易严选</span><span class="q num">666</span></div>
+                      <ul class="pl"><li><span class="pn">10寸企鹅公仔(粉色)</span><span class="pd"></span><span class="pq num">666</span></li></ul></div>
+                  </div>
+                </div>
+                <div class="card danger">
+                  <div class="card-top"><span class="dt">09-21 周一</span><span class="pill pill-r">延期 7天</span><span class="ttl num">1,100<small>件</small></span></div>
+                  <div class="card-meta"><span>1 家客户</span><i></i><span>1 个产品</span></div>
+                  <div class="card-groups">
+                    <div><div class="grp-top"><span class="nm">MINISO国内</span><span class="q num">1,100</span></div>
+                      <ul class="pl"><li><span class="pn">企鹅</span><span class="pd"></span><span class="pq num">1,100</span></li></ul></div>
+                  </div>
+                </div>
+                <div class="card danger">
+                  <div class="card-top"><span class="dt">09-25 周五</span><span class="pill pill-r">延期 3天</span><span class="ttl num">700<small>件</small></span></div>
+                  <div class="card-meta"><span>1 家客户</span><i></i><span>1 个产品</span></div>
+                  <div class="card-groups">
+                    <div><div class="grp-top"><span class="nm">奥飞</span><span class="q num">700</span></div>
+                      <ul class="pl"><li><span class="pn">企鹅企鹅企鹅</span><span class="pd"></span><span class="pq num">700</span></li></ul></div>
+                  </div>
+                </div>
+                <div class="card warn">
+                  <div class="card-top"><span class="dt">09-29 周二</span><span class="pill pill-a">临期 1天</span><span class="ttl num">2,200<small>件</small></span></div>
+                  <div class="card-meta"><span>2 家客户</span><i></i><span>2 个产品</span></div>
+                  <div class="card-groups">
+                    <div><div class="grp-top"><span class="nm">MINISO国际</span><span class="q num">1,800</span></div>
+                      <ul class="pl"><li><span class="pn">企鹅</span><span class="pd"></span><span class="pq num">1,800</span></li></ul></div>
+                    <div><div class="grp-top"><span class="nm">TOP TOY</span><span class="q num">400</span></div>
+                      <ul class="pl"><li><span class="pn">变形金刚</span><span class="pd"></span><span class="pq num">400</span></li></ul></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="legend"><span><i class="r"></i>延期</span><span><i class="a"></i>临期≤3天</span><span><i class="g"></i>已完成</span></div>
+          </div>
+
+          <div class="rail">
+            <div class="panel">
+              <div class="panel-head">风险预警</div>
+              <div class="risk-row"><div><div class="d">09/08 · 5,000件</div><div class="c">MINISO国际</div></div><span class="tag r">延期 20天</span></div>
+              <div class="risk-row"><div><div class="d">09/15 · 4,200件</div><div class="c">MINISO国际</div></div><span class="tag r">延期 13天</span></div>
+              <div class="risk-row"><div><div class="d">09/21 · 1,100件</div><div class="c">MINISO国内</div></div><span class="tag r">延期 7天</span></div>
+              <div class="risk-row"><div><div class="d">09/25 · 700件</div><div class="c">奥飞</div></div><span class="tag r">延期 3天</span></div>
+              <div class="risk-row"><div><div class="d">09/29 · 2,200件</div><div class="c">MINISO国际</div></div><span class="tag a">临期 1天</span></div>
+              <div class="risk-row"><div><div class="d">09/30 · 350件</div><div class="c">网易严选</div></div><span class="tag a">临期 2天</span></div>
+            </div>
+            <div class="panel">
+              <div class="panel-head">客户出货分布</div>
+              <div class="dist">
+                <div class="dist-row"><span class="nm">MINISO国际</span><div class="tk"><i class="top" style="width:100%"></i></div><span class="pc num">100%</span></div>
+                <div class="dist-row"><span class="nm">网易严选</span><div class="tk"><i style="width:27%"></i></div><span class="pc num">27%</span></div>
+                <div class="dist-row"><span class="nm">奥飞</span><div class="tk"><i style="width:23%"></i></div><span class="pc num">23%</span></div>
+                <div class="dist-row"><span class="nm">TOP TOY</span><div class="tk"><i style="width:20%"></i></div><span class="pc num">20%</span></div>
+                <div class="dist-row"><span class="nm">MINISO国内</span><div class="tk"><i style="width:15%"></i></div><span class="pc num">15%</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="note"><b>现状的问题（逐条对应）</b>：① 只渲染「有计划的日期」，整月一屏看不全，也没有今天/周末参照；② 「已延期 / 临期≤3天」在 KPI 条、右栏风险预警、卡片状态标签、底部图例里出现了 <b>4 次</b>；③ 卡片最多显示 4 行产品，09-08 的 5 个产品被截成「还有 1 家客户 / 1 个产品」；④ 切月、搜索、导出、新建挤在右上一条，没有主次。</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ 方案 A -->
+<section id="a" class="view">
+  <div class="stage-note">方案 A：<b>真月历网格（整月一屏）+ 右侧栏「风险清单 ⇄ 当日明细」双态</b>。点某天 → 右栏就地展开该日完整明细（不截断），原「当日明细弹窗」退役；「客户出货分布」移入月度汇总 Tab</div>
+  <div class="frame">
+    <div class="page-card">
+      <div class="head">
+        <div class="head-row1">
+          <div class="tabs"><button class="tab active">排产日历</button><button class="tab">月度汇总</button></div>
+          <div class="head-actions">
+            <div class="search">搜索日期、客户…</div>
+            <button class="btn">导出</button>
+            <button class="btn btn-primary">＋ 新建计划</button>
+          </div>
+        </div>
+        <div class="head-row2">
+          <div class="monthnav"><button class="nav">‹</button><span class="lbl">2026年09月</span><button class="nav">›</button><button class="today">回到本月</button></div>
+          <div class="kpi" style="max-width:none">
+            <div class="kpi-cell"><span class="l">本月计划</span><span class="v num">22,815</span><span class="s num">件 · 11 个排产日</span></div>
+            <div class="kpi-cell"><span class="l">本月已出</span><span class="v num">14,065</span><span class="s num">件</span></div>
+            <div class="kpi-cell"><span class="l">完成率</span><span class="v num">61.6%</span><div class="meter"><i style="width:61.6%"></i></div></div>
+            <div class="kpi-cell risk"><span class="l">风险</span><span class="v num">6 天</span><span class="s num">逾期 4 · 临期 2 · 8,750件</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="body">
+        <div class="split wide">
+          <div class="panel">
+            <div class="panel-head">
+              <span>2026年09月 · 排产日历</span>
+              <span class="inline-legend"><span><i class="r"></i>逾期</span><span><i class="a"></i>临期≤3天</span><span><i class="g"></i>已完成</span></span>
+            </div>
+            <div class="dow"><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span class="we">六</span><span class="we">日</span></div>
+            <div class="cal">
+              <div class="cell empty"><span class="dayno">31</span></div>
+              <div class="cell"><div class="cell-top"><span class="dayno">01<span class="wd">周二</span></span></div><span class="cell-qty c-empty-qty">—</span></div>
+              <div class="cell c-done"><div class="cell-top"><span class="dayno">02<span class="wd">周三</span></span><span class="pill pill-g">✓</span></div>
+                <span class="cell-qty num">2,666<small>件</small></span><span class="cell-meta"><span>2客户</span><i></i><span>3产品</span></span><div class="cell-bar"><i style="width:100%;background:var(--success-500)"></i></div></div>
+              <div class="cell"><div class="cell-top"><span class="dayno">03<span class="wd">周四</span></span></div><span class="cell-qty c-empty-qty">—</span></div>
+              <div class="cell c-done"><div class="cell-top"><span class="dayno">04<span class="wd">周五</span></span><span class="pill pill-g">✓</span></div>
+                <span class="cell-qty num">900<small>件</small></span><span class="cell-meta"><span>1客户</span><i></i><span>1产品</span></span><div class="cell-bar"><i style="width:100%;background:var(--success-500)"></i></div></div>
+              <div class="cell"><div class="cell-top"><span class="dayno">05<span class="wd">周六</span></span></div><span class="cell-qty c-empty-qty">—</span></div>
+              <div class="cell"><div class="cell-top"><span class="dayno">06<span class="wd">周日</span></span></div><span class="cell-qty c-empty-qty">—</span></div>
+
+              <div class="cell"><div class="cell-top"><span class="dayno">07<span class="wd">周一</span></span></div><span class="cell-qty c-empty-qty">—</span></div>
+              <div class="cell c-danger sel"><div class="cell-top"><span class="dayno">08<span class="wd">周二</span></span><span class="pill pill-r">延期20天</span></div>
+                <span class="cell-qty num">5,000<small>件</small></span><span class="cell-meta"><span>3客户</span><i></i><span>5产品</span></span><div class="cell-bar"><i style="width:64%;background:var(--danger-500)"></i></div></div>
+              <div class="cell"><div class="cell-top"><span class="dayno">09<span class="wd">周三</span></span></div><span class="cell-qty c-empty-qty">—</span></div>
+              <div class="cell c-done"><div class="cell-top"><span class="dayno">10<span class="wd">周四</span></span><span class="pill pill-g">✓</span></div>
+                <span class="cell-qty num">1,999<small>件</small></span><span class="cell-meta"><span>2客户</span><i></i><span>3产品</span></span><div class="cell-bar"><i style="width:100%;background:var(--success-500)"></i></div></div>
+              <div class="cell"><div class="cell-top"><span class="dayno">11<span class="wd">周五</span></span></div><span class="cell-qty c-empty-qty">—</span></div>
+              <div class="cell"><div class="cell-top"><span class="dayno">12<span class="wd">周六</span></span></div><span class="cell-qty c-empty-qty">—</span></div>
+              <div class="cell"><div class="cell-top"><span class="dayno">13<span class="wd">周日</span></span></div><span class="cell-qty c-empty-qty">—</span></div>
+
+              <div class="cell"><div class="cell-top"><span class="dayno">14<span class="wd">周一</span></span></div><span class="cell-qty c-empty-qty">—</span></div>
+              <div class="cell c-danger"><div class="cell-top"><span class="dayno">15<span class="wd">周二</span></span><span class="pill pill-r">延期13天</span></div>
+                <span class="cell-qty num">4,200<small>件</small></span><span class="cell-meta"><span>2客户</span><i></i><span>2产品</span></span><div class="cell-bar"><i style="width:29%;background:var(--danger-500)"></i></div></div>
+              <div class="cell"><div class="cell-top"><span class="dayno">16<span class="wd">周三</span></span></div><span class="cell-qty c-empty-qty">—</span></div>
+              <div class="cell"><div class="cell-top"><span class="dayno">17<span class="wd">周四</span></span></div><span class="cell-qty c-empty-qty">—</span></div>
+              <div class="cell c-done"><div class="cell-top"><span class="dayno">18<span class="wd">周五</span></span><span class="pill pill-g">✓</span></div>
+                <span class="cell-qty num">1,600<small>件</small></span><span class="cell-meta"><span>2客户</span><i></i><span>3产品</span></span><div class="cell-bar"><i style="width:100%;background:var(--success-500)"></i></div></div>
+              <div class="cell"><div class="cell-top"><span class="dayno">19<span class="wd">周六</span></span></div><span class="cell-qty c-empty-qty">—</span></div>
+              <div class="cell"><div class="cell-top"><span class="dayno">20<span class="wd">周日</span></span></div><span class="cell-qty c-empty-qty">—</span></div>
+
+              <div class="cell c-danger"><div class="cell-top"><span class="dayno">21<span class="wd">周一</span></span><span class="pill pill-r">延期7天</span></div>
+                <span class="cell-qty num">1,100<small>件</small></span><span class="cell-meta"><span>1客户</span><i></i><span>1产品</span></span><div class="cell-bar"><i style="width:36%;background:var(--danger-500)"></i></div></div>
+              <div class="cell"><div class="cell-top"><span class="dayno">22<span class="wd">周二</span></span></div><span class="cell-qty c-empty-qty">—</span></div>
+              <div class="cell c-done"><div class="cell-top"><span class="dayno">23<span class="wd">周三</span></span><span class="pill pill-g">✓</span></div>
+                <span class="cell-qty num">2,100<small>件</small></span><span class="cell-meta"><span>2客户</span><i></i><span>2产品</span></span><div class="cell-bar"><i style="width:100%;background:var(--success-500)"></i></div></div>
+              <div class="cell"><div class="cell-top"><span class="dayno">24<span class="wd">周四</span></span></div><span class="cell-qty c-empty-qty">—</span></div>
+              <div class="cell c-danger"><div class="cell-top"><span class="dayno">25<span class="wd">周五</span></span><span class="pill pill-r">延期3天</span></div>
+                <span class="cell-qty num">700<small>件</small></span><span class="cell-meta"><span>1客户</span><i></i><span>1产品</span></span><div class="cell-bar"><i style="width:0%;background:var(--danger-500)"></i></div></div>
+              <div class="cell"><div class="cell-top"><span class="dayno">26<span class="wd">周六</span></span></div><span class="cell-qty c-empty-qty">—</span></div>
+              <div class="cell"><div class="cell-top"><span class="dayno">27<span class="wd">周日</span></span></div><span class="cell-qty c-empty-qty">—</span></div>
+
+              <div class="cell today"><div class="cell-top"><span class="dayno">28<span class="wd">周一</span></span></div><span class="cell-qty c-empty-qty">—</span><span class="cell-meta"><span style="color:var(--primary-600);font-weight:700">今天</span></span></div>
+              <div class="cell c-warn"><div class="cell-top"><span class="dayno">29<span class="wd">周二</span></span><span class="pill pill-a">临期1天</span></div>
+                <span class="cell-qty num">2,200<small>件</small></span><span class="cell-meta"><span>2客户</span><i></i><span>2产品</span></span><div class="cell-bar"><i style="width:0%"></i></div></div>
+              <div class="cell c-warn"><div class="cell-top"><span class="dayno">30<span class="wd">周三</span></span><span class="pill pill-a">临期2天</span></div>
+                <span class="cell-qty num">350<small>件</small></span><span class="cell-meta"><span>1客户</span><i></i><span>1产品</span></span><div class="cell-bar"><i style="width:0%"></i></div></div>
+              <div class="cell empty"><span class="dayno">01</span></div>
+              <div class="cell empty"><span class="dayno">02</span></div>
+              <div class="cell empty"><span class="dayno">03</span></div>
+              <div class="cell empty"><span class="dayno">04</span></div>
+            </div>
+          </div>
+
+          <div class="rail">
+            <div class="panel">
+              <div class="rail-switch"><span>风险清单</span><span class="on">当日明细</span></div>
+              <div class="detail-head">
+                <div class="t">09月08日 周二</div>
+                <div class="m"><span>合计 <b class="num">5,000</b> 件</span><span>·</span><span><b>3</b> 家客户</span><span>·</span><span><b>5</b> 个产品</span></div>
+              </div>
+              <div class="grp">
+                <div class="grp-top"><span class="nm">MINISO国际</span><span class="q num">4,000</span></div>
+                <ul class="pl">
+                  <li><span class="pn">企鹅</span><span class="pd"></span><span class="pq num">2,000</span><span class="ps wait">待出</span></li>
+                  <li><span class="pn">企鹅企鹅企鹅</span><span class="pd"></span><span class="pq num">1,500</span><span class="ps wait">待出</span></li>
+                  <li><span class="pn">变形金刚</span><span class="pd"></span><span class="pq num">500</span><span class="ps">已出</span></li>
+                </ul>
+              </div>
+              <div class="grp">
+                <div class="grp-top"><span class="nm">TOP TOY</span><span class="q num">400</span></div>
+                <ul class="pl"><li><span class="pn">10寸仓鼠毛绒公仔(粉色)</span><span class="pd"></span><span class="pq num">400</span><span class="ps wait">待出</span></li></ul>
+              </div>
+              <div class="grp">
+                <div class="grp-top"><span class="nm">网易严选</span><span class="q num">600</span></div>
+                <ul class="pl"><li><span class="pn">妹妹二代</span><span class="pd"></span><span class="pq num">600</span><span class="ps wait">待出</span></li></ul>
+              </div>
+              <div style="padding:10px 16px;border-top:1px solid var(--border-light)">
+                <button class="btn" style="width:100%;justify-content:center">查看该日完整计划（含条码/状态）</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="note" style="margin-top:16px"><b>未选中任何一天时</b>，右栏就是这个「风险清单」（原样保留，仅去掉与 KPI 重复的计数）：6 条逾期/临期条目，点击即跳到那天并切换成当日明细。<br>
+        <b>与现状的差别</b>：① 整月 + 今天 + 周末一次看全（空格子本身也是信息）；② 风险信息只剩「格子上的标记」+「右栏清单」两处，KPI 条从 6 格压到 4 格，底部大图例收进面板标题栏；③ 当日明细在右栏完整滚动展示，不再截断；④ 切月紧挨标题、新建独占主按钮、导出降为次级。</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ 方案 B -->
+<section id="b" class="view">
+  <div class="stage-note">方案 B：<b>月历占满整宽（格子更宽，能多放一行摘要）+ 下方「风险清单 / 客户出货分布」两面板</b>。点某天仍打开原来的当日明细弹窗 —— 改动最小，不碰任何交互</div>
+  <div class="frame">
+    <div class="page-card">
+      <div class="head">
+        <div class="head-row1">
+          <div class="tabs"><button class="tab active">排产日历</button><button class="tab">月度汇总</button></div>
+          <div class="head-actions">
+            <div class="search">搜索日期、客户…</div>
+            <button class="btn">导出</button>
+            <button class="btn btn-primary">＋ 新建计划</button>
+          </div>
+        </div>
+        <div class="head-row2">
+          <div class="monthnav"><button class="nav">‹</button><span class="lbl">2026年09月</span><button class="nav">›</button><button class="today">回到本月</button></div>
+          <div class="kpi">
+            <div class="kpi-cell"><span class="l">本月计划</span><span class="v num">22,815</span><span class="s num">件 · 11 个排产日</span></div>
+            <div class="kpi-cell"><span class="l">本月已出</span><span class="v num">14,065</span><span class="s num">件</span></div>
+            <div class="kpi-cell"><span class="l">完成率</span><span class="v num">61.6%</span><div class="meter"><i style="width:61.6%"></i></div></div>
+            <div class="kpi-cell risk"><span class="l">风险</span><span class="v num">6 天</span><span class="s num">逾期 4 · 临期 2 · 8,750件</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="body">
+        <div class="panel">
+          <div class="panel-head">
+            <span>2026年09月 · 排产日历</span>
+            <span class="inline-legend"><span><i class="r"></i>逾期</span><span><i class="a"></i>临期≤3天</span><span><i class="g"></i>已完成</span><span style="margin-left:4px">· 点击某天查看当日明细</span></span>
+          </div>
+          <div class="dow"><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span class="we">六</span><span class="we">日</span></div>
+          <div class="cal">
+            <div class="cell empty"><span class="dayno">31</span></div>
+            <div class="cell"><div class="cell-top"><span class="dayno">01<span class="wd">周二</span></span></div><span class="cell-qty c-empty-qty">—</span></div>
+            <div class="cell c-done"><div class="cell-top"><span class="dayno">02<span class="wd">周三</span></span><span class="pill pill-g">✓ 完成</span></div>
+              <span class="cell-qty num">2,666<small>件</small></span><span class="cell-meta"><span>2客户 · 3产品</span></span>
+              <span class="cell-meta" style="color:var(--text-secondary)"><span>企鹅 1,200 · 变形金刚 800</span></span>
+              <div class="cell-bar"><i style="width:100%;background:var(--success-500)"></i></div></div>
+            <div class="cell"><div class="cell-top"><span class="dayno">03<span class="wd">周四</span></span></div><span class="cell-qty c-empty-qty">—</span></div>
+            <div class="cell c-done"><div class="cell-top"><span class="dayno">04<span class="wd">周五</span></span><span class="pill pill-g">✓ 完成</span></div>
+              <span class="cell-qty num">900<small>件</small></span><span class="cell-meta"><span>1客户 · 1产品</span></span>
+              <span class="cell-meta" style="color:var(--text-secondary)"><span>妹妹二代 900</span></span>
+              <div class="cell-bar"><i style="width:100%;background:var(--success-500)"></i></div></div>
+            <div class="cell"><div class="cell-top"><span class="dayno">05<span class="wd">周六</span></span></div><span class="cell-qty c-empty-qty">—</span></div>
+            <div class="cell"><div class="cell-top"><span class="dayno">06<span class="wd">周日</span></span></div><span class="cell-qty c-empty-qty">—</span></div>
+
+            <div class="cell"><div class="cell-top"><span class="dayno">07<span class="wd">周一</span></span></div><span class="cell-qty c-empty-qty">—</span></div>
+            <div class="cell c-danger sel"><div class="cell-top"><span class="dayno">08<span class="wd">周二</span></span><span class="pill pill-r">延期 20天</span></div>
+              <span class="cell-qty num">5,000<small>件</small></span><span class="cell-meta"><span>3客户 · 5产品</span></span>
+              <span class="cell-meta" style="color:var(--text-secondary)"><span>MINISO国际 4,000 · TOP TOY 400…</span></span>
+              <div class="cell-bar"><i style="width:64%;background:var(--danger-500)"></i></div></div>
+            <div class="cell"><div class="cell-top"><span class="dayno">09<span class="wd">周三</span></span></div><span class="cell-qty c-empty-qty">—</span></div>
+            <div class="cell c-done"><div class="cell-top"><span class="dayno">10<span class="wd">周四</span></span><span class="pill pill-g">✓ 完成</span></div>
+              <span class="cell-qty num">1,999<small>件</small></span><span class="cell-meta"><span>2客户 · 3产品</span></span>
+              <span class="cell-meta" style="color:var(--text-secondary)"><span>Nommi糯米儿 999 · 企鹅 700</span></span>
+              <div class="cell-bar"><i style="width:100%;background:var(--success-500)"></i></div></div>
+            <div class="cell"><div class="cell-top"><span class="dayno">11<span class="wd">周五</span></span></div><span class="cell-qty c-empty-qty">—</span></div>
+            <div class="cell"><div class="cell-top"><span class="dayno">12<span class="wd">周六</span></span></div><span class="cell-qty c-empty-qty">—</span></div>
+            <div class="cell"><div class="cell-top"><span class="dayno">13<span class="wd">周日</span></span></div><span class="cell-qty c-empty-qty">—</span></div>
+
+            <div class="cell"><div class="cell-top"><span class="dayno">14<span class="wd">周一</span></span></div><span class="cell-qty c-empty-qty">—</span></div>
+            <div class="cell c-danger"><div class="cell-top"><span class="dayno">15<span class="wd">周二</span></span><span class="pill pill-r">延期 13天</span></div>
+              <span class="cell-qty num">4,200<small>件</small></span><span class="cell-meta"><span>2客户 · 2产品</span></span>
+              <span class="cell-meta" style="color:var(--text-secondary)"><span>企鹅 3,000 · 变形金刚 1,200</span></span>
+              <div class="cell-bar"><i style="width:29%;background:var(--danger-500)"></i></div></div>
+            <div class="cell"><div class="cell-top"><span class="dayno">16<span class="wd">周三</span></span></div><span class="cell-qty c-empty-qty">—</span></div>
+            <div class="cell"><div class="cell-top"><span class="dayno">17<span class="wd">周四</span></span></div><span class="cell-qty c-empty-qty">—</span></div>
+            <div class="cell c-done"><div class="cell-top"><span class="dayno">18<span class="wd">周五</span></span><span class="pill pill-g">✓ 完成</span></div>
+              <span class="cell-qty num">1,600<small>件</small></span><span class="cell-meta"><span>2客户 · 3产品</span></span>
+              <span class="cell-meta" style="color:var(--text-secondary)"><span>Nommi糯米儿 600 · 妹妹二代 300…</span></span>
+              <div class="cell-bar"><i style="width:100%;background:var(--success-500)"></i></div></div>
+            <div class="cell"><div class="cell-top"><span class="dayno">19<span class="wd">周六</span></span></div><span class="cell-qty c-empty-qty">—</span></div>
+            <div class="cell"><div class="cell-top"><span class="dayno">20<span class="wd">周日</span></span></div><span class="cell-qty c-empty-qty">—</span></div>
+
+            <div class="cell c-danger"><div class="cell-top"><span class="dayno">21<span class="wd">周一</span></span><span class="pill pill-r">延期 7天</span></div>
+              <span class="cell-qty num">1,100<small>件</small></span><span class="cell-meta"><span>1客户 · 1产品</span></span>
+              <span class="cell-meta" style="color:var(--text-secondary)"><span>企鹅 1,100</span></span>
+              <div class="cell-bar"><i style="width:36%;background:var(--danger-500)"></i></div></div>
+            <div class="cell"><div class="cell-top"><span class="dayno">22<span class="wd">周二</span></span></div><span class="cell-qty c-empty-qty">—</span></div>
+            <div class="cell c-done"><div class="cell-top"><span class="dayno">23<span class="wd">周三</span></span><span class="pill pill-g">✓ 完成</span></div>
+              <span class="cell-qty num">2,100<small>件</small></span><span class="cell-meta"><span>2客户 · 2产品</span></span>
+              <span class="cell-meta" style="color:var(--text-secondary)"><span>企鹅 1,600 · 妹妹二代 500</span></span>
+              <div class="cell-bar"><i style="width:100%;background:var(--success-500)"></i></div></div>
+            <div class="cell"><div class="cell-top"><span class="dayno">24<span class="wd">周四</span></span></div><span class="cell-qty c-empty-qty">—</span></div>
+            <div class="cell c-danger"><div class="cell-top"><span class="dayno">25<span class="wd">周五</span></span><span class="pill pill-r">延期 3天</span></div>
+              <span class="cell-qty num">700<small>件</small></span><span class="cell-meta"><span>1客户 · 1产品</span></span>
+              <span class="cell-meta" style="color:var(--text-secondary)"><span>企鹅企鹅企鹅 700</span></span>
+              <div class="cell-bar"><i style="width:0%;background:var(--danger-500)"></i></div></div>
+            <div class="cell"><div class="cell-top"><span class="dayno">26<span class="wd">周六</span></span></div><span class="cell-qty c-empty-qty">—</span></div>
+            <div class="cell"><div class="cell-top"><span class="dayno">27<span class="wd">周日</span></span></div><span class="cell-qty c-empty-qty">—</span></div>
+
+            <div class="cell today"><div class="cell-top"><span class="dayno">28<span class="wd">周一</span></span></div><span class="cell-qty c-empty-qty">—</span><span class="cell-meta"><span style="color:var(--primary-600);font-weight:700">今天 · 无排产</span></span></div>
+            <div class="cell c-warn"><div class="cell-top"><span class="dayno">29<span class="wd">周二</span></span><span class="pill pill-a">临期 1天</span></div>
+              <span class="cell-qty num">2,200<small>件</small></span><span class="cell-meta"><span>2客户 · 2产品</span></span>
+              <span class="cell-meta" style="color:var(--text-secondary)"><span>企鹅 1,800 · 变形金刚 400</span></span>
+              <div class="cell-bar"><i style="width:0%"></i></div></div>
+            <div class="cell c-warn"><div class="cell-top"><span class="dayno">30<span class="wd">周三</span></span><span class="pill pill-a">临期 2天</span></div>
+              <span class="cell-qty num">350<small>件</small></span><span class="cell-meta"><span>1客户 · 1产品</span></span>
+              <span class="cell-meta" style="color:var(--text-secondary)"><span>10寸仓鼠毛绒公仔(粉色) 350</span></span>
+              <div class="cell-bar"><i style="width:0%"></i></div></div>
+            <div class="cell empty"><span class="dayno">01</span></div>
+            <div class="cell empty"><span class="dayno">02</span></div>
+            <div class="cell empty"><span class="dayno">03</span></div>
+            <div class="cell empty"><span class="dayno">04</span></div>
+          </div>
+        </div>
+
+        <div class="split" style="grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);margin-top:16px">
+          <div class="panel">
+            <div class="panel-head"><span>风险预警</span><span class="xs">逾期 4 天 · 临期 2 天</span></div>
+            <div class="risk-row"><div><div class="d">09/08 · 5,000件</div><div class="c">MINISO国际</div></div><span class="tag r">延期 20天</span></div>
+            <div class="risk-row"><div><div class="d">09/15 · 4,200件</div><div class="c">MINISO国际</div></div><span class="tag r">延期 13天</span></div>
+            <div class="risk-row"><div><div class="d">09/21 · 1,100件</div><div class="c">MINISO国内</div></div><span class="tag r">延期 7天</span></div>
+            <div class="risk-row"><div><div class="d">09/25 · 700件</div><div class="c">奥飞</div></div><span class="tag r">延期 3天</span></div>
+            <div class="risk-row"><div><div class="d">09/29 · 2,200件</div><div class="c">MINISO国际</div></div><span class="tag a">临期 1天</span></div>
+            <div class="risk-row"><div><div class="d">09/30 · 350件</div><div class="c">网易严选</div></div><span class="tag a">临期 2天</span></div>
+          </div>
+          <div class="panel">
+            <div class="panel-head">客户出货分布</div>
+            <div class="dist">
+              <div class="dist-row"><span class="nm">MINISO国际</span><div class="tk"><i class="top" style="width:100%"></i></div><span class="pc num">100%</span></div>
+              <div class="dist-row"><span class="nm">网易严选</span><div class="tk"><i style="width:27%"></i></div><span class="pc num">27%</span></div>
+              <div class="dist-row"><span class="nm">奥飞</span><div class="tk"><i style="width:23%"></i></div><span class="pc num">23%</span></div>
+              <div class="dist-row"><span class="nm">TOP TOY</span><div class="tk"><i style="width:20%"></i></div><span class="pc num">20%</span></div>
+              <div class="dist-row"><span class="nm">MINISO国内</span><div class="tk"><i style="width:15%"></i></div><span class="pc num">15%</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="note" style="margin-top:16px"><b>为什么把两个面板挪到月历下方</b>：现在右栏 344px 是固定占位，月历只能拿到 ~1000px（7 列时每格 136px）；把面板下移后月历拿满整宽（每格 ~190px），格子里才放得下「客户数 · 产品数」和一行产品摘要。<br>
+        <b>代价</b>：风险清单与出货分布被推到首屏之下，扫视时需要往下滚一点。若不接受，就用方案 A。</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ 方案 C -->
+<section id="c" class="view">
+  <div class="stage-note">方案 C：<b>左侧「排产日时间轴」单列列表（一屏半月，滚动即全月）+ 右侧整宽当日明细表</b>。不是月历形状，但扫读密度最高，明细能用到真正的表格列</div>
+  <div class="frame">
+    <div class="page-card">
+      <div class="head">
+        <div class="head-row1">
+          <div class="tabs"><button class="tab active">排产日历</button><button class="tab">月度汇总</button></div>
+          <div class="head-actions">
+            <div class="search">搜索日期、客户…</div>
+            <button class="btn">导出</button>
+            <button class="btn btn-primary">＋ 新建计划</button>
+          </div>
+        </div>
+        <div class="head-row2">
+          <div class="monthnav"><button class="nav">‹</button><span class="lbl">2026年09月</span><button class="nav">›</button><button class="today">回到本月</button></div>
+          <div class="kpi">
+            <div class="kpi-cell"><span class="l">本月计划</span><span class="v num">22,815</span><span class="s num">件 · 11 个排产日</span></div>
+            <div class="kpi-cell"><span class="l">本月已出</span><span class="v num">14,065</span><span class="s num">件</span></div>
+            <div class="kpi-cell"><span class="l">完成率</span><span class="v num">61.6%</span><div class="meter"><i style="width:61.6%"></i></div></div>
+            <div class="kpi-cell risk"><span class="l">风险</span><span class="v num">6 天</span><span class="s num">逾期 4 · 临期 2 · 8,750件</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="body">
+        <div class="riskbar">▲ 逾期 4 天（09/08、09/15、09/21、09/25）<span class="sep">|</span>⧗ 临期 2 天（09/29、09/30）<span class="sep">|</span>合计 8,750 件待出 — 点任一条跳转到该日</div>
+        <div class="split wide" style="grid-template-columns:minmax(0,1fr) 360px">
+          <div class="panel">
+            <div class="panel-head"><span>09月08日 周二 · 当日明细</span><span class="xs">合计 5,000 件 · 3 家客户 · 5 个产品</span></div>
+            <table class="tbl">
+              <thead><tr><th>客户</th><th>产品</th><th>条码</th><th class="r">计划</th><th class="r">已出</th><th class="r">待出</th><th>进度</th></tr></thead>
+              <tbody>
+                <tr><td class="cust">MINISO国际</td><td class="prod">企鹅</td><td class="mono">6941377414684</td><td class="r num">2,000</td><td class="r num dg">0</td><td class="r num wt">2,000</td>
+                  <td><div class="prog"><div class="m"><i style="width:0%;background:var(--danger-500)"></i></div><span class="v num">0%</span></div></td></tr>
+                <tr><td class="cust">MINISO国际</td><td class="prod">企鹅企鹅企鹅</td><td class="mono">6978946330581</td><td class="r num">1,500</td><td class="r num dg">0</td><td class="r num wt">1,500</td>
+                  <td><div class="prog"><div class="m"><i style="width:0%;background:var(--danger-500)"></i></div><span class="v num">0%</span></div></td></tr>
+                <tr><td class="cust">MINISO国际</td><td class="prod">变形金刚</td><td class="mono">—</td><td class="r num">500</td><td class="r num ok">500</td><td class="r num">0</td>
+                  <td><div class="prog"><div class="m"><i style="width:100%;background:var(--success-500)"></i></div><span class="v num">100%</span></div></td></tr>
+                <tr><td class="cust">TOP TOY</td><td class="prod">10寸仓鼠毛绒公仔(粉色)</td><td class="mono">—</td><td class="r num">400</td><td class="r num dg">0</td><td class="r num wt">400</td>
+                  <td><div class="prog"><div class="m"><i style="width:0%;background:var(--danger-500)"></i></div><span class="v num">0%</span></div></td></tr>
+                <tr><td class="cust">网易严选</td><td class="prod">妹妹二代</td><td class="mono">6978946330580</td><td class="r num">600</td><td class="r num dg">0</td><td class="r num wt">600</td>
+                  <td><div class="prog"><div class="m"><i style="width:0%;background:var(--danger-500)"></i></div><span class="v num">0%</span></div></td></tr>
+                <tr style="background:var(--slate-50)"><td class="cust">合计</td><td></td><td></td><td class="r num" style="font-weight:800">5,000</td><td class="r num" style="font-weight:800">500</td><td class="r num" style="font-weight:800">4,500</td>
+                  <td><div class="prog"><div class="m"><i style="width:10%;background:var(--danger-500)"></i></div><span class="v num">10%</span></div></td></tr>
+              </tbody>
+            </table>
+            <div style="padding:10px 14px;border-top:1px solid var(--border-light);display:flex;gap:8px">
+              <button class="btn">编辑该日计划</button><button class="btn btn-primary">新建该日出货</button>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head"><span>排产日</span><span class="xs">11 天 · 一屏可看全</span></div>
+            <div class="tl">
+              <div class="tl-row done"><span class="dt">09/02<em>周三</em></span><div class="bar"><i style="width:100%"></i></div><span class="q num">2,666</span><span class="meta">2客户3产品</span><span class="tag" style="margin-left:auto;font:700 10px var(--font);padding:2px 6px;border-radius:6px;background:var(--success-100);color:var(--success-700);white-space:nowrap">✓ 完成</span></div>
+              <div class="tl-row done"><span class="dt">09/04<em>周五</em></span><div class="bar"><i style="width:100%"></i></div><span class="q num">900</span><span class="meta">1客户1产品</span><span class="tag" style="margin-left:auto;font:700 10px var(--font);padding:2px 6px;border-radius:6px;background:var(--success-100);color:var(--success-700);white-space:nowrap">✓ 完成</span></div>
+              <div class="tl-row danger on"><span class="dt">09/08<em>周二</em></span><div class="bar"><i style="width:64%"></i></div><span class="q num">5,000</span><span class="meta">3客户5产品</span><span class="tag" style="margin-left:auto;font:700 10px var(--font);padding:2px 6px;border-radius:6px;background:var(--danger-100);color:var(--danger-700);white-space:nowrap">延期 20天</span></div>
+              <div class="tl-row done"><span class="dt">09/10<em>周四</em></span><div class="bar"><i style="width:100%"></i></div><span class="q num">1,999</span><span class="meta">2客户3产品</span><span class="tag" style="margin-left:auto;font:700 10px var(--font);padding:2px 6px;border-radius:6px;background:var(--success-100);color:var(--success-700);white-space:nowrap">✓ 完成</span></div>
+              <div class="tl-row danger"><span class="dt">09/15<em>周二</em></span><div class="bar"><i style="width:29%"></i></div><span class="q num">4,200</span><span class="meta">2客户2产品</span><span class="tag" style="margin-left:auto;font:700 10px var(--font);padding:2px 6px;border-radius:6px;background:var(--danger-100);color:var(--danger-700);white-space:nowrap">延期 13天</span></div>
+              <div class="tl-row done"><span class="dt">09/18<em>周五</em></span><div class="bar"><i style="width:100%"></i></div><span class="q num">1,600</span><span class="meta">2客户3产品</span><span class="tag" style="margin-left:auto;font:700 10px var(--font);padding:2px 6px;border-radius:6px;background:var(--success-100);color:var(--success-700);white-space:nowrap">✓ 完成</span></div>
+              <div class="tl-row danger"><span class="dt">09/21<em>周一</em></span><div class="bar"><i style="width:36%"></i></div><span class="q num">1,100</span><span class="meta">1客户1产品</span><span class="tag" style="margin-left:auto;font:700 10px var(--font);padding:2px 6px;border-radius:6px;background:var(--danger-100);color:var(--danger-700);white-space:nowrap">延期 7天</span></div>
+              <div class="tl-row done"><span class="dt">09/23<em>周三</em></span><div class="bar"><i style="width:100%"></i></div><span class="q num">2,100</span><span class="meta">2客户2产品</span><span class="tag" style="margin-left:auto;font:700 10px var(--font);padding:2px 6px;border-radius:6px;background:var(--success-100);color:var(--success-700);white-space:nowrap">✓ 完成</span></div>
+              <div class="tl-row danger"><span class="dt">09/25<em>周五</em></span><div class="bar"><i style="width:0%"></i></div><span class="q num">700</span><span class="meta">1客户1产品</span><span class="tag" style="margin-left:auto;font:700 10px var(--font);padding:2px 6px;border-radius:6px;background:var(--danger-100);color:var(--danger-700);white-space:nowrap">延期 3天</span></div>
+              <div class="tl-row tl-empty"><span class="dt">09/28<em>周一</em></span><div class="bar"></div><span class="q num" style="color:var(--text-muted)">今天</span><span class="meta">无排产</span></div>
+              <div class="tl-row warn"><span class="dt">09/29<em>周二</em></span><div class="bar"><i style="width:0%"></i></div><span class="q num">2,200</span><span class="meta">2客户2产品</span><span class="tag" style="margin-left:auto;font:700 10px var(--font);padding:2px 6px;border-radius:6px;background:var(--warning-100);color:var(--warning-700);white-space:nowrap">临期 1天</span></div>
+              <div class="tl-row warn"><span class="dt">09/30<em>周三</em></span><div class="bar"><i style="width:0%"></i></div><span class="q num">350</span><span class="meta">1客户1产品</span><span class="tag" style="margin-left:auto;font:700 10px var(--font);padding:2px 6px;border-radius:6px;background:var(--warning-100);color:var(--warning-700);white-space:nowrap">临期 2天</span></div>
+            </div>
+            <div class="riskbar" style="margin:12px;border-radius:var(--radius-sm)">
+              <span style="font:600 11px var(--font)">客户出货分布：MINISO国际 100% · 网易严选 27% · 奥飞 23% · TOP TOY 20% · MINISO国内 15%</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="note" style="margin-top:16px"><b>取舍</b>：一屏 12 行、滚动即看完整个月，且没有「卡片截断」这回事（明细在右侧用真正的表格列展示，含条码、已出、待出、进度）。<br>
+        <b>代价</b>：失去日历形状 —— 看不出「这一周哪几天挤在一起」、周末也没有视觉分界；对「排产」这种按日期铺开的活儿，月历的空间感通常比列表更直观。这也是我不首推它的原因。</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ 月度汇总 -->
+<section id="sum" class="view">
+  <div class="stage-note">「月度汇总」Tab 的配套整理：<b>客户 chips 带上计划量、加客户搜索、吸收「客户出货分布」</b>；表格只做密度与层级打磨，排序/分页逻辑一行不动</div>
+  <div class="frame">
+    <div class="page-card">
+      <div class="head">
+        <div class="head-row1">
+          <div class="tabs"><button class="tab">排产日历</button><button class="tab active">月度汇总</button></div>
+          <div class="head-actions">
+            <div class="search">搜索产品、SKU、客户…</div>
+            <button class="btn">导出 SKU 统计</button>
+            <button class="btn btn-primary">＋ 新建计划</button>
+          </div>
+        </div>
+        <div class="head-row2">
+          <div class="monthnav"><button class="nav">‹</button><span class="lbl">2026年09月</span><button class="nav">›</button><button class="today">回到本月</button></div>
+          <div class="kpi">
+            <div class="kpi-cell"><span class="l">本月计划</span><span class="v num">22,815</span><span class="s num">件 · 5 家客户</span></div>
+            <div class="kpi-cell"><span class="l">本月已出</span><span class="v num">14,065</span><span class="s num">件</span></div>
+            <div class="kpi-cell"><span class="l">完成率</span><span class="v num">61.6%</span><div class="meter"><i style="width:61.6%"></i></div></div>
+            <div class="kpi-cell risk"><span class="l">风险</span><span class="v num">6 天</span><span class="s num">逾期 4 · 临期 2 · 8,750件</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="body">
+        <div class="split" style="grid-template-columns:minmax(0,1fr) 300px">
+          <div class="panel">
+            <div class="panel-head"><span>SKU 月度统计</span><span class="xs">共 24 条 · 每页 30 条</span></div>
+            <div style="padding:12px 16px 0">
+              <div class="chips">
+                <span class="chip on">全部<span class="n num">22,815</span></span>
+                <span class="chip">MINISO国际<span class="n num">12,400</span></span>
+                <span class="chip">网易严选<span class="n num">3,316</span></span>
+                <span class="chip">奥飞<span class="n num">2,799</span></span>
+                <span class="chip">TOP TOY<span class="n num">2,500</span></span>
+                <span class="chip">MINISO国内<span class="n num">1,800</span></span>
+              </div>
+            </div>
+            <table class="tbl">
+              <thead><tr>
+                <th>客户名称</th><th>产品名称</th><th>商品条码</th>
+                <th class="r th-sortable">计划数量<span class="k">▼</span></th><th class="r th-sortable">已出货</th><th class="r th-sortable">待出货</th><th>进度</th>
+              </tr></thead>
+              <tbody>
+                <tr><td class="cust">MINISO国际</td><td class="prod">企鹅</td><td class="mono">6941377414684</td><td class="r num">6,000</td><td class="r num ok">3,400</td><td class="r num wt">2,600</td>
+                  <td><div class="prog"><div class="m"><i style="width:57%;background:var(--warning-500)"></i></div><span class="v num">57%</span></div></td></tr>
+                <tr><td class="cust">MINISO国际</td><td class="prod">企鹅企鹅企鹅</td><td class="mono">6978946330581</td><td class="r num">1,500</td><td class="r num dg">0</td><td class="r num wt">1,500</td>
+                  <td><div class="prog"><div class="m"><i style="width:0%;background:var(--danger-500)"></i></div><span class="v num">0%</span></div></td></tr>
+                <tr><td class="cust">MINISO国际</td><td class="prod">变形金刚</td><td class="mono">—</td><td class="r num">3,100</td><td class="r num ok">3,100</td><td class="r num">0</td>
+                  <td><div class="prog"><div class="m"><i style="width:100%;background:var(--success-500)"></i></div><span class="v num">100%</span></div></td></tr>
+                <tr><td class="cust">网易严选</td><td class="prod">Nommi糯米儿-宝藏收藏家系列毛绒盲盒</td><td class="mono">6978946330588</td><td class="r num">999</td><td class="r num ok">999</td><td class="r num">0</td>
+                  <td><div class="prog"><div class="m"><i style="width:100%;background:var(--success-500)"></i></div><span class="v num">100%</span></div></td></tr>
+                <tr><td class="cust">网易严选</td><td class="prod">妹妹二代</td><td class="mono">6978946330580</td><td class="r num">1,100</td><td class="r num ok">1,100</td><td class="r num">0</td>
+                  <td><div class="prog"><div class="m"><i style="width:100%;background:var(--success-500)"></i></div><span class="v num">100%</span></div></td></tr>
+                <tr><td class="cust">奥飞</td><td class="prod">10寸仓鼠毛绒公仔(粉色)</td><td class="mono">—</td><td class="r num">400</td><td class="r num dg">0</td><td class="r num wt">400</td>
+                  <td><div class="prog"><div class="m"><i style="width:0%;background:var(--danger-500)"></i></div><span class="v num">0%</span></div></td></tr>
+              </tbody>
+            </table>
+            <div style="padding:12px 16px;border-top:1px solid var(--border-light);display:flex;justify-content:flex-end;gap:6px">
+              <button class="btn" style="padding:5px 10px">‹</button>
+              <button class="btn btn-primary" style="padding:5px 12px">1</button>
+              <button class="btn" style="padding:5px 12px">2</button>
+              <button class="btn" style="padding:5px 10px">›</button>
+            </div>
+          </div>
+
+          <div class="rail">
+            <div class="panel">
+              <div class="panel-head"><span>客户出货分布</span><span class="xs">本月计划量</span></div>
+              <div class="dist">
+                <div class="dist-row"><span class="nm">MINISO国际</span><div class="tk"><i class="top" style="width:100%"></i></div><span class="pc num">100%</span></div>
+                <div class="dist-row"><span class="nm">网易严选</span><div class="tk"><i style="width:27%"></i></div><span class="pc num">27%</span></div>
+                <div class="dist-row"><span class="nm">奥飞</span><div class="tk"><i style="width:23%"></i></div><span class="pc num">23%</span></div>
+                <div class="dist-row"><span class="nm">TOP TOY</span><div class="tk"><i style="width:20%"></i></div><span class="pc num">20%</span></div>
+                <div class="dist-row"><span class="nm">MINISO国内</span><div class="tk"><i style="width:15%"></i></div><span class="pc num">15%</span></div>
+              </div>
+            </div>
+            <div class="panel">
+              <div class="panel-head">风险预警</div>
+              <div class="risk-row"><div><div class="d">09/08 · 5,000件</div><div class="c">MINISO国际</div></div><span class="tag r">延期 20天</span></div>
+              <div class="risk-row"><div><div class="d">09/15 · 4,200件</div><div class="c">MINISO国际</div></div><span class="tag r">延期 13天</span></div>
+              <div class="risk-row"><div><div class="d">09/21 · 1,100件</div><div class="c">MINISO国内</div></div><span class="tag r">延期 7天</span></div>
+              <div class="risk-row"><div><div class="d">09/25 · 700件</div><div class="c">奥飞</div></div><span class="tag r">延期 3天</span></div>
+              <div class="risk-row"><div><div class="d">09/29 · 2,200件</div><div class="c">MINISO国际</div></div><span class="tag a">临期 1天</span></div>
+              <div class="risk-row"><div><div class="d">09/30 · 350件</div><div class="c">网易严选</div></div><span class="tag a">临期 2天</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="note" style="margin-top:16px"><b>改动点</b>：① 客户 chips 带上计划量（现在只有名字，选完还得自己算）；② 客户多时 chips 一行放不下 —— 改为可横滚 + 客户搜索，或收进左栏列表；③ 数字列改成右对齐 + 千分位（现在是左对齐、无千分位，几十万位的数字很难比大小）；④ 「已出货」列 0 值点红、有值点绿（现在只对 0 判红，非 0 一律绿，看不出「出了一点点」）；⑤ 排序/分页/筛选逻辑<b>完全不动</b>。</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+</div>
+
+<script>
+const btns = document.querySelectorAll('.switcher button');
+const views = document.querySelectorAll('.view');
+function show(v){
+  views.forEach(s => s.classList.toggle('on', s.id === v));
+  btns.forEach(b => b.classList.toggle('on', b.dataset.v === v));
+}
+btns.forEach(b => b.addEventListener('click', () => show(b.dataset.v)));
+</script>
+</body>
+</html>
