@@ -269,7 +269,7 @@ async def ship_order_process(db: AsyncSession, process_id: int, shipped_quantity
 
     p.shipped_quantity = shipped_now + shipped_quantity
     if p.actual_start_time is None:
-        p.actual_start_time = datetime.now(UTC).replace(tzinfo=None)  # naive UTC
+        p.actual_start_time = datetime.now(UTC)  # aware UTC：actual_start_time 列为 timestamptz
     p.status = _derive_status(p)
     db.add(OrderOutsourceProcessFlow(
         process_id=p.id, action='ship', quantity=shipped_quantity,
@@ -299,7 +299,7 @@ async def receive_order_process(db: AsyncSession, process_id: int, username: str
 
     p.received_quantity = received_now + qty
     if p.actual_end_time is None:
-        p.actual_end_time = datetime.now(UTC).replace(tzinfo=None)  # naive UTC
+        p.actual_end_time = datetime.now(UTC)  # aware UTC：actual_end_time 列为 timestamptz
     p.status = _derive_status(p)
     db.add(OrderOutsourceProcessFlow(
         process_id=p.id, action='receive', quantity=qty,

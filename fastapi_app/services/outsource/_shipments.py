@@ -181,7 +181,7 @@ async def create_shipment(
 
     order = await _load_order_or_raise(db, order_id)
     shipment_no = await generate_shipment_number(db)
-    now = datetime.now(UTC).replace(tzinfo=None)  # naive UTC: DB 列类型 TIMESTAMP WITHOUT TIME ZONE
+    now = datetime.now(UTC)  # aware UTC：shipped_at 等列为 timestamptz，naive 值会被按本地时区解释致早 8h
 
     shipment = OutsourceShipment(
         shipment_no=shipment_no,
@@ -315,7 +315,7 @@ async def receive_shipment(db: AsyncSession, shipment_id: int, username: str | N
         item.received_quantity = item.shipped_quantity
 
     shipment.status = SHIPMENT_STATUS_RECEIVED
-    shipment.received_at = datetime.now(UTC).replace(tzinfo=None)  # naive UTC
+    shipment.received_at = datetime.now(UTC)  # aware UTC：received_at 列为 timestamptz
     shipment.received_by = username
     await db.flush()
 
@@ -356,7 +356,7 @@ async def create_merged_shipment(
         raise ValueError('发货明细不能为空')
 
     shipment_no = await generate_shipment_number(db)
-    now = datetime.now(UTC).replace(tzinfo=None)  # naive UTC
+    now = datetime.now(UTC)  # aware UTC：shipped_at 列为 timestamptz
 
     shipment = OutsourceShipment(
         shipment_no=shipment_no,
