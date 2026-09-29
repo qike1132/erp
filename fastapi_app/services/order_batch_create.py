@@ -139,7 +139,7 @@ async def _create_order_header(db: AsyncSession, customer: str, validated_items:
         product_id=first_item['product_id'],  # NOT NULL 兼容，新代码应读 order.items
         customer=customer,
         quantity=total_quantity,  # 兼容旧代码读取 order.quantity
-        order_date=datetime.now(UTC).replace(tzinfo=None),  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
+        order_date=datetime.now(UTC),  # aware UTC：order_date 列为 timestamptz（pg_standalone_013），naive 值会被按本地时区解释致早 8h
         status=ORDER_STATUS_PENDING_STOCK,
         note='',  # 主订单级 note 留空，SKU 级 note 在 OrderItem
     )
@@ -173,7 +173,7 @@ async def _create_order_items(
             product_id=it['product_id'],
             change_type='订单创建',
             change_quantity=it['quantity'],
-            change_date=datetime.now(UTC).replace(tzinfo=None),  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
+            change_date=datetime.now(UTC),  # aware UTC：change_date 列为 timestamptz
             customer=customer,
             related_id=str(order.id),
             note=f'批量创建订单 {order.order_no} - SKU {product.name}',

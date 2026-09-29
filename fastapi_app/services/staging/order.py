@@ -140,7 +140,7 @@ async def confirm_staging_orders(
                     order = Order(
                         order_no=order_no,
                         customer=staging.customer,
-                        order_date=staging.order_date or datetime.now(UTC).replace(tzinfo=None),
+                        order_date=staging.order_date or datetime.now(UTC),  # aware UTC：order_date 列为 timestamptz，naive 值会被按本地时区解释致早 8h
                         product_id=staging.product_id,
                         quantity=staging.quantity,
                         note=staging.note,

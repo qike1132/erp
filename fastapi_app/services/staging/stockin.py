@@ -25,7 +25,7 @@ def _build_stockin_entity(
     fields: dict, session_id: str, product_id: int | None, qty: int,
     is_validated: bool, validation_error: str, product_name: str,
 ) -> StagingStockIn:
-    stockin_date = parse_date_value(fields.get('stockin_date')) or datetime.now(UTC).replace(tzinfo=None)
+    stockin_date = parse_date_value(fields.get('stockin_date')) or datetime.now(UTC)  # aware UTC：staging_stock_in.stockin_date 列为 timestamptz
     return StagingStockIn(
         session_id=session_id,
         customer=str(fields.get('customer', '')).strip(),
@@ -51,7 +51,7 @@ async def _validate_stockin_customer(row_data: dict, idx: int) -> list[str]:
 
 def _stockin_extra_updates(entity, data: dict, _db: AsyncSession) -> None:
     if 'stockin_date' in data:
-        entity.stockin_date = parse_date_value(data['stockin_date']) or datetime.now(UTC).replace(tzinfo=None)
+        entity.stockin_date = parse_date_value(data['stockin_date']) or datetime.now(UTC)  # aware UTC：列已迁移为 timestamptz
     if 'note' in data:
         entity.note = data['note']
 
@@ -120,7 +120,7 @@ async def confirm_staging_stockins(
 
                 stockin = StockIn(
                     stockin_no=stockin_no,
-                    stockin_date=staging.stockin_date or datetime.now(UTC).replace(tzinfo=None),
+                    stockin_date=staging.stockin_date or datetime.now(UTC),  # aware UTC：stockin_date 列为 timestamptz
                     customer=staging.customer,
                     product_id=staging.product_id,
                     quantity=staging.quantity,

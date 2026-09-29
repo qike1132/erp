@@ -28,7 +28,7 @@ def _build_stockout_entity(
     fields: dict, session_id: str, product_id: int | None, qty: int,
     is_validated: bool, validation_error: str, product_name: str,
 ) -> StagingStockOut:
-    stockout_date = parse_date_value(fields.get('stockout_date')) or datetime.now(UTC).replace(tzinfo=None)
+    stockout_date = parse_date_value(fields.get('stockout_date')) or datetime.now(UTC)  # aware UTC：staging_stock_out.stockout_date 列为 timestamptz
     customer = str(fields.get('customer', '')).strip()
 
     stock_check_passed = False
@@ -58,7 +58,7 @@ def _stockout_extra_updates(entity, data: dict, _db: AsyncSession) -> None:
         # extra_updates runs after quantity is set; perform stock check here
         pass
     if 'stockout_date' in data:
-        entity.stockout_date = parse_date_value(data['stockout_date']) or datetime.now(UTC).replace(tzinfo=None)
+        entity.stockout_date = parse_date_value(data['stockout_date']) or datetime.now(UTC)  # aware UTC：列已迁移为 timestamptz
     if 'note' in data:
         entity.note = data['note']
 
@@ -154,7 +154,7 @@ async def confirm_staging_stockouts(
                         stockout_no = await generate_stockout_number(db)
                         stockout = StockOut(
                             stockout_no=stockout_no,
-                            stockout_date=staging.stockout_date or datetime.now(UTC).replace(tzinfo=None),
+                            stockout_date=staging.stockout_date or datetime.now(UTC),  # aware UTC：stock_out.stockout_date 列为 timestamptz
                             product_id=staging.product_id,
                             quantity=ship_qty,
                             customer=staging.customer,

@@ -148,7 +148,7 @@ async def batch_create_stockins(db: AsyncSession, stockins_data: list) -> dict:
             quantity = int(item.get('quantity', 0))
             note = item.get('note', '')
             stockin_date_str = item.get('stockin_date') or ''
-            stockin_date = _parse_date_preserve_time(stockin_date_str) if stockin_date_str else datetime.now(UTC).replace(tzinfo=None)  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
+            stockin_date = _parse_date_preserve_time(stockin_date_str) if stockin_date_str else datetime.now(UTC)  # aware UTC：stockin_date 列为 timestamptz，naive 值会被按本地时区解释致早 8h
             try:
                 async with db.begin_nested():
                     stockin = await stock_service.create_stockin_core(db, product_id, quantity, customer, stockin_date, note)

@@ -15,7 +15,7 @@ import asyncio
 import logging
 import os
 from collections.abc import Callable
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -414,7 +414,7 @@ async def import_case_stockins_service(db: AsyncSession, file: ExcelUpload) -> B
                         errors.append(case_err)
                         skipped += 1
                         continue
-                    stockin_date = parse_date_value(stockin_date_val) or datetime.now()
+                    stockin_date = parse_date_value(stockin_date_val) or datetime.now(UTC)  # aware UTC：stockin_date 列为 timestamptz
                     stockin_no = await generate_case_stockin_number(db)
                     stockin = CaseStockIn(
                         stockin_no=stockin_no, stockin_date=stockin_date, case_id=case.id,
@@ -485,7 +485,7 @@ async def import_stockins_service(db: AsyncSession, file: ExcelUpload) -> BatchI
                         skipped += 1
                         continue
                     customer, product_id, qty = parsed
-                    stockin_date = parse_date_value(stockin_date_val) or datetime.now()
+                    stockin_date = parse_date_value(stockin_date_val) or datetime.now(UTC)  # aware UTC：stockin_date 列为 timestamptz
                     stockin_no = await generate_stockin_number(db)
                     stockin = StockIn(
                         stockin_no=stockin_no, stockin_date=stockin_date, customer=customer,

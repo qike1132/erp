@@ -106,7 +106,7 @@ async def create_order(db: AsyncSession, product_id: int, quantity: int,
         order = Order(
             order_no=order_no,
             customer=customer,
-            order_date=datetime.now(UTC).replace(tzinfo=None),  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
+            order_date=datetime.now(UTC),  # aware UTC：order_date 列为 timestamptz，naive 值会被按本地时区解释致早 8h
             product_id=product_id,
             quantity=quantity,
             note=note,
