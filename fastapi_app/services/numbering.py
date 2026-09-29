@@ -3,36 +3,23 @@
 
 从 batch_service.py 提取的编号生成逻辑，消除 order_service ↔ batch_service 的循环依赖。
 
-本模块与 fastapi_app.core.number_generator 的区别：
-- 本模块：仅异步；使用 UTC 时间；使用独立短事务执行 FOR UPDATE 查询后立即提交，
-  避免调用方长事务持有行锁。适用于批量操作等长事务场景。
-- core/number_generator：提供同步 + 异步双实现；使用本地时间；使用调用方会话执行
-  FOR UPDATE，锁随调用方事务提交才释放。适用于短事务场景。
+本模块是全系统统一的编号生成内核：日期段采用**北京口径**（business_date_str），
+序号由 numbering_counter 表原子递增分配（见 numbering_sequence），是全系统唯一
+水位源。单号（generate_number_async）与批量（generate_number_batch）共用同一张
+表、同一套冲突语义与同一把进程内锁，混用也不重号。
 
-两者未合并的原因：datetime 时区与 FOR UPDATE 事务边界行为不同，直接 re-export 会
-改变运行时行为（跨午夜编号切换时机、锁持有时长）。如需统一，须先对齐时区与事务策略。
-
-所有编号生成函数均通过 AsyncNumberGenerator 单例管理内存计数器，
-结合数据库 FOR UPDATE 行锁确保跨进程安全。
+所有取号以当日已落库最大编号为种子（read_daily_max，按编号自身日期段过滤），
+计数独立短事务提交——业务事务回滚仅产生跳号、不回收序号。
 """
 import asyncio
 import logging
-from datetime import UTC, datetime
-from typing import ClassVar
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-# 向后兼容：re-export core 的同步实现（本模块无同步版本，直接复用 core 的实现是安全的）
-from fastapi_app.core.number_generator import (
-    _acquire_advisory_lock_async,  # noqa: F401 - 兼容 re-export，旧调用方可能经本模块引用
-    _number_lock_key,  # noqa: F401 - 同上
-    generate_number_sync,  # noqa: F401
-)
-
-# 这三个名字同时作为对旧调用方的兼容 re-export（模块内均已使用，故无需 noqa）
 from fastapi_app.services.numbering_sequence import (
     allocate_sequence,
     allocate_sequence_range,
+    business_date_str,
     read_daily_max,
 )
 from fastapi_app.shared_models import Order, PurchaseOrder, StockIn, StockOut
@@ -42,32 +29,8 @@ logger = logging.getLogger(__name__)
 
 # ==================== 编号生成 ====================
 
-class AsyncNumberGenerator:
-    """异步编号生成器，在批量操作中维护序号计数器"""
-    _instance = None
-    _counters: ClassVar[dict] = {}
-    _lock = asyncio.Lock()
-    _last_cleanup_date = None
-
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
-
-    @classmethod
-    def _cleanup_old_entries(cls):
-        """清理非当日的计数器条目，防止内存泄漏"""
-        today_str = datetime.now(UTC).replace(tzinfo=None).strftime('%Y%m%d')
-        # 防御性清理：条目过多时强制清理（即使日期相同）
-        if cls._last_cleanup_date == today_str and len(cls._counters) < 500:
-            return
-        expired_keys = [k for k in cls._counters if not k.endswith(today_str)]
-        for k in expired_keys:
-            cls._counters.pop(k, None)
-        cls._last_cleanup_date = today_str
-
-
-_async_number_generator = AsyncNumberGenerator()
+# 进程内串行化取号，降低计数表争用；跨进程唯一性由 numbering_counter 原子递增保证。
+_allocate_lock = asyncio.Lock()
 
 
 async def generate_number_async(prefix: str, model, number_field: str, db: AsyncSession) -> str:
@@ -87,13 +50,11 @@ async def generate_number_async(prefix: str, model, number_field: str, db: Async
         db: 异步数据库会话（用于种子读取，可见本事务内未提交编号）
 
     Returns:
-        str: 生成的编号,格式: PREFIX-YYYYMMDD-XXXX
+        str: 生成的编号,格式: PREFIX-YYYYMMDD-XXXX（YYYYMMDD 为北京口径）
     """
-    date_str = datetime.now(UTC).strftime('%Y%m%d')
+    date_str = business_date_str()
 
-    async with _async_number_generator._lock:
-        _async_number_generator._cleanup_old_entries()
-
+    async with _allocate_lock:
         db_max = await read_daily_max(db, model, number_field, date_str)
         current_seq = await allocate_sequence(prefix, date_str, seed=db_max)
         return '-'.join((prefix, date_str, str(current_seq).zfill(4)))
@@ -136,10 +97,9 @@ async def generate_number_batch(
     if count <= 0:
         return []
 
-    date_str = datetime.now(UTC).strftime('%Y%m%d')
+    date_str = business_date_str()
 
-    async with _async_number_generator._lock:
-        _async_number_generator._cleanup_old_entries()
+    async with _allocate_lock:
         db_max = await read_daily_max(db, model, number_field, date_str)
         start = await allocate_sequence_range(prefix, date_str, count=count, seed=db_max)
 
@@ -178,7 +138,7 @@ async def generate_customer_sampling_number(db: AsyncSession) -> str:
 
     格式约定（design.md 2.3.4）：
     - CS：Customer Sampling 前缀
-    - YYYYMMDD：UTC 日期
+    - YYYYMMDD：北京口径日期（business_date_str）
     - XXXX：当日序号，zfill(4)，从 0001 开始
 
     唯一性由 DB 唯一索引 + numbering 服务的 advisory lock + FOR UPDATE 跨进程保证。

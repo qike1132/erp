@@ -13,9 +13,8 @@
 `from fastapi_app.services.stock_service import X` 保持不变，可直接使用。
 
 库存 CRUD 的异步实现位于 stock_*_service 子模块（本文件下方各 import）；
-编号生成统一至 core/number_generator.py（同步/异步双实现）。
-原 shared/stock_crud_service.py 的同步 CRUD 双轨已消除（死代码移除），
-该模块仅保留同步编号便捷别名供 ARQ 同步任务使用。
+编号生成统一至 services/numbering（北京口径 + numbering_counter 单一水位源，仅异步）。
+原 shared/stock_crud_service.py 的同步 CRUD 双轨已消除（死代码移除）。
 """
 import logging
 

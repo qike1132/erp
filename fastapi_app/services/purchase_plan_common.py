@@ -12,7 +12,6 @@
 import json
 import logging
 from collections.abc import Awaitable, Callable
-from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -71,8 +70,9 @@ async def _generate_plan_no() -> str:
     """
     from fastapi_app.core.database import require_async_session_local
     from fastapi_app.services.numbering import allocate_sequence, read_daily_max
+    from fastapi_app.services.numbering_sequence import business_date_str
 
-    today_str = datetime.now(UTC).strftime('%Y%m%d')  # Task 6 统一换 business_date_str()
+    today_str = business_date_str()  # 编号日期段北京口径（spec §4.1 统一）
     session_factory = require_async_session_local()
     async with session_factory() as seed_session:
         seed = await read_daily_max(seed_session, PurchasePlan, 'plan_no', today_str)

@@ -9,11 +9,22 @@ INSERT ... ON CONFLICT DO UPDATE ... RETURNING 原子递增。计数独立短事
 SQL 为常量文本，所有值经 :prefix/:number_date/:last_seq 绑定参数传递。
 """
 import logging
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import BigInteger, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
+
+# 编号日期段的业务口径时区。Windows 无系统 tz 库，ZoneInfo('Asia/Shanghai')
+# 依赖 requirements/base.txt 的 tzdata 包。
+_BUSINESS_TZ = ZoneInfo('Asia/Shanghai')
+
+
+def business_date_str() -> str:
+    """业务口径（北京时间）的 YYYYMMDD —— 编号日期段的唯一来源（spec §4.1）。"""
+    return datetime.now(_BUSINESS_TZ).strftime('%Y%m%d')
 
 # 常量 SQL：表名/列名为字面量，全部值经绑定参数传递（无用户输入拼接）
 _ALLOCATE_SQL = text(

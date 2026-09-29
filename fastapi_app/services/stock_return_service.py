@@ -18,8 +18,8 @@ from fastapi_app.core.cache_invalidation import cache_mgr, schedule_post_commit_
 from fastapi_app.core.domain_events import DomainEvent, DomainEventType
 from fastapi_app.core.domain_events import publish_with_retry as publish_domain_event
 from fastapi_app.core.exception_handler import safe_publish_event
-from fastapi_app.core.number_generator import generate_number_async
 from fastapi_app.services.notification_service import StockEvent
+from fastapi_app.services.numbering import generate_number_async
 from fastapi_app.services.stock_common import _parse_date_preserve_time
 from fastapi_app.services.stock_event_service import recalc_order_status_after_return
 from fastapi_app.shared_models import Product, StockOut, StockReturn
@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 async def generate_stockreturn_number(db: AsyncSession) -> str:
     """生成退货编号 SR-YYYYMMDD-XXXX"""
-    return await generate_number_async('SR', StockReturn, 'return_date', 'return_no', db)
+    return await generate_number_async('SR', StockReturn, 'return_no', db)
 
 
 async def create_stockreturn_core(db: AsyncSession, stockout_id: int, quantity: int,

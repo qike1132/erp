@@ -139,6 +139,19 @@ async def lifespan(application: FastAPI):
     logger.info(f"{settings.APP_NAME} v{settings.APP_VERSION} 启动中...")
 
     await _setup_database()
+
+    # 编号水位对账（spec 2026-09-29 §5）：GREATEST 只升不降，幂等，失败不阻断启动
+    try:
+        from fastapi_app.core.database import require_async_session_local
+        from fastapi_app.services.numbering_reconcile import reconcile_numbering_counters
+        async with require_async_session_local()() as recon_db:
+            result = await reconcile_numbering_counters(recon_db)
+            await recon_db.commit()  # reconcile 不自行提交；事务边界归调用方
+        if result['raised'] or result['inserted']:
+            logger.info('编号水位对账: 抬升 %d 行, 补插 %d 行', result['raised'], result['inserted'])
+    except Exception as e:  # defensive: 对账失败不得阻断应用启动
+        logger.warning('编号水位启动对账失败（不影响启动）: %s', e)
+
     await db_health_checker.start()
 
     from fastapi_app.core.telemetry import setup_telemetry

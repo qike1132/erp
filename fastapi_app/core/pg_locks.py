@@ -1,6 +1,6 @@
 """PostgreSQL advisory lock 工具（编号与业务锁共用）。
 
-自 core/number_generator.py 迁出：该模块删除后，CASE 创建锁等业务用途
+随编号生成内核统一独立成模块：旧编号生成器删除后，CASE 创建锁等业务用途
 仍需要同一把事务级 advisory lock。md5 取键方案保持不变，lock key 与
 迁移前逐位一致，无运行时行为变更。
 """

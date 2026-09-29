@@ -34,6 +34,8 @@ argon2-cffi==25.1.0
 
 # ----- 环境配置 -----
 python-dotenv==1.2.2
+# Windows 无系统 tz 库，ZoneInfo('Asia/Shanghai') 依赖此包（编号北京口径）
+tzdata>=2025.1
 # PyYAML：scripts/prod_audit/config_loader.py 直接 import yaml
 # （审核工具读 audit_config.yaml / rules_registry.yaml；CI 的 prod_audit 测试步骤依赖它）。
 # 虽然 uvicorn[standard] 会传递带入 pyyaml>=5.1，但「直接导入」应显式声明，
