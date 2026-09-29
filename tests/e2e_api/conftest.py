@@ -29,14 +29,14 @@
 **最高价值的失效模式**：接口挂了 / 鉴权坏了 / 分页筛选不生效 /
 跨模块数据不一致 —— 这些占线上故障的绝大多数，且 API 层测试稳定得多。
 
-运行条件
---------
-需要一个**真实运行的后端**（不是 ASGITransport 进程内 app）：
+运行条件（2026-09-29 起）
+------------------------
+必须显式设置两个环境变量，否则整目录 skip 或 fail-fast：
 
-    python scripts/restart_backend.py          # 或任何方式起 5002
-    pytest tests/e2e_api -v
+- ``E2E_API_BASE_URL``：指向专用临时后端（禁止 5002 —— 生产）
+- ``ERP_E2E_REAL_DATABASE_URL``：测试库 DSN（禁止 ``erp_system`` —— 生产库）
 
-目标地址取 ``E2E_API_BASE_URL`` 环境变量，默认 ``http://127.0.0.1:5002``。
+生产指纹命中时 ``pytest.exit(returncode=2)`` 终止整个会话，无绕过开关。
 后端不可达时**整目录跳过**（跳过是正确行为，不是失败）—— 与
 ``tests/contract`` 的既有约定一致。
 
@@ -69,7 +69,11 @@ import httpx
 
 from fastapi_app.core.config import settings
 
-BASE_URL = os.environ.get("E2E_API_BASE_URL", "http://127.0.0.1:5002").rstrip("/")
+# 必须显式指定目标后端；未设置时 BASE_URL 为 None，收集钩子整目录 skip。
+# 绝不给默认值 127.0.0.1:5002 —— 那是生产后端（nginx upstream）。
+BASE_URL: str | None = os.environ.get("E2E_API_BASE_URL")
+if BASE_URL:
+    BASE_URL = BASE_URL.rstrip("/")
 
 # 真实库 URL —— 必须在**收集期**固化，不能等到用例运行期再读 settings。
 #
@@ -126,6 +130,82 @@ def pytest_configure(config: pytest.Config) -> None:
 
 
 # ============================================================
+# 生产指纹守卫 —— 命中即拒绝运行（fail-fast，无绕过开关）
+# ============================================================
+def _production_fingerprint_hit(
+    base_url: str | None = None,
+    db_url: str | None = None,
+) -> tuple[bool, str]:
+    """目标命中生产指纹 → (True, 原因)。无绕过开关（fail-fast 是刻意的）。"""
+    from urllib.parse import urlparse
+
+    url = base_url if base_url is not None else BASE_URL
+    dsn = db_url if db_url is not None else os.environ.get(_REAL_DB_ENV_KEY, "")
+
+    if url:
+        try:
+            if urlparse(url).port == 5002:
+                return True, f"E2E_API_BASE_URL 端口指向生产后端: {url}"
+        except ValueError:
+            pass
+    try:
+        if urlparse(dsn).path.lstrip('/') == 'erp_system':
+            return True, "ERP_E2E_REAL_DATABASE_URL 指向生产库 erp_system"
+    except ValueError:
+        pass
+    return False, ""
+
+
+# 守卫自测文件：纯单测（不触网、不触库）。必须始终运行 —— 若被目录级 skip 连带跳过，
+# 守卫本身将没有任何回归保护（CI/默认环境无后端，整目录 skip）。故按文件名白名单豁免。
+_GUARD_TEST_FILE = "test_guard.py"
+
+
+def _skip_e2e_items(items: list[pytest.Item], reason: str) -> None:
+    """给本目录的 E2E 用例打 skip 标记；豁免守卫自测（见 ``_GUARD_TEST_FILE``）。"""
+    skip = pytest.mark.skip(reason=reason)
+    for item in items:
+        path = getattr(item, "path", None)
+        if path is not None and getattr(path, "name", "") == _GUARD_TEST_FILE:
+            continue
+        item.add_marker(skip)
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """未设置目标 → 整目录 skip；指纹命中 → 终止整个 pytest 会话；后端不可达 → 整目录 skip。
+
+    顺序：**先判定「未设置 BASE_URL」**，再判定指纹。原因：``_REAL_DB_ENV_KEY`` 在收集期
+    （本文件 ``setdefault``）已被固化为本机生产 DSN，若先判定指纹，则「默认环境」（未设任何
+    E2E 变量）下的**任何** pytest 会话——包括 ``pytest tests/`` 全量与无关目录——都会
+    ``pytest.exit(returncode=2)`` 直接中止。默认环境并没有 E2E 目标，整目录 skip 才是正确
+    语义（对齐 spec §4.6「未设置 → 整目录 skip」）。
+
+    指纹检查仍排在**探活**判断之前：否则「生产库在跑但后端探活失败」时先走 skip 分支、
+    指纹守卫被短路。``pytest.exit`` 终止的是整个会话而非单目录 —— 有意为之的 fail-fast。
+    """
+    if not BASE_URL:
+        _skip_e2e_items(items, "未设置 E2E_API_BASE_URL，跳过 API 层 E2E")
+        return
+    hit, reason = _production_fingerprint_hit()
+    if hit:
+        pytest.exit(
+            f"拒绝运行 E2E：{reason}。E2E 不得指向生产。请同时设置 "
+            "E2E_API_BASE_URL（非 5002 的临时后端）与 "
+            "ERP_E2E_REAL_DATABASE_URL（测试库 DSN）。",
+            returncode=2,
+        )
+    if _ALIVE:
+        return
+    _skip_e2e_items(
+        items,
+        (
+            f"API 层 E2E 需要真实后端（{BASE_URL}），当前不可达：{_ALIVE_REASON}。"
+            "请先启动专用后端并设置 E2E_API_BASE_URL"
+        ),
+    )
+
+
+# ============================================================
 # 后端可达性 —— 决定整个目录是"跑"还是"跳过"
 # ============================================================
 def _backend_alive() -> tuple[bool, str]:
@@ -134,6 +214,8 @@ def _backend_alive() -> tuple[bool, str]:
     ``trust_env=False`` 是关键：本机存在 HTTP_PROXY，会把 127.0.0.1
     也代理走 → 502。契约工具踩过同一个坑，这里保持一致。
     """
+    if not BASE_URL:
+        return False, "E2E_API_BASE_URL 未设置"
     try:
         with httpx.Client(base_url=BASE_URL, timeout=5.0, trust_env=False) as client:
             resp = client.get("/api/health")
@@ -145,20 +227,6 @@ def _backend_alive() -> tuple[bool, str]:
 
 
 _ALIVE, _ALIVE_REASON = _backend_alive()
-
-
-def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
-    """后端不可达时跳过本目录所有用例，并说明原因与恢复方式。"""
-    if _ALIVE:
-        return
-    skip = pytest.mark.skip(
-        reason=(
-            f"API 层 E2E 需要真实后端（{BASE_URL}），当前不可达：{_ALIVE_REASON}。"
-            "请先启动后端：python scripts/restart_backend.py"
-        )
-    )
-    for item in items:
-        item.add_marker(skip)
 
 
 # ============================================================

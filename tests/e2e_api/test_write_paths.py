@@ -27,7 +27,9 @@
     python scripts/restart_backend.py
     pytest tests/e2e_api/test_write_paths.py -v
 
-目标地址取 ``E2E_API_BASE_URL``，默认 ``http://127.0.0.1:5002``。
+目标地址取 ``E2E_API_BASE_URL``（**无默认值**，2026-09-29 起）—— 必须指向专用临时后端
+且同时设 ``ERP_E2E_REAL_DATABASE_URL`` 指向测试库；未设置或命中生产指纹时由 ``conftest.py``
+整目录跳过 / fail-fast（见该文件 docstring 的运行条件）。
 后端不可达时由 ``conftest.py`` 整目录跳过 —— 跳过是正确行为，不是失败。
 
 鉴权与 CSRF
@@ -91,6 +93,15 @@ def _cleanup(product_ids: list[int], order_ids: list[int]) -> None:
     if not product_ids and not order_ids:
         return
     from sqlalchemy import text
+
+    # 纵深防御（独立于 conftest 的收集期指纹守卫）：即便守卫被绕过，也绝不让这里的
+    # 裸 SQL DELETE 落到生产库。刻意放在 ``with suppress(Exception)`` **之外** ——
+    # 放进 suppress 里会被静默吞掉，守卫就等于不存在。
+    from tests.e2e_api.conftest import real_database_url
+
+    dsn = real_database_url()
+    if '/erp_system' in dsn and 'erp_system_test' not in dsn:
+        raise RuntimeError(f"E2E 清理拒绝连接生产库: {dsn}")
 
     with suppress(Exception):
         engine = _sync_engine()
