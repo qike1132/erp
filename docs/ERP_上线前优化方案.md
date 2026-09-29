@@ -543,3 +543,98 @@ async function logout() {
 | P1-3 | `fastapi_app/api/v1/endpoints/auth.py` | 344–397 | refresh 轮换 |
 | P1-4 | `frontend-vite/src/stores/auth.ts` | 230–240 | 登出清 SW 缓存 |
 | P1-11 | `scripts/file_size_gate.py` | 36 | `SCAN_DIRS` 补根目录 |
+
+---
+
+## 附录 C · 执行记录与再评估（2026-09-28 起）
+
+实施过程中若干条经**实测**后被修正或缩减。按本文档"所有结论均需基于实际分析"的原则，一并记录：
+
+### 已完成并独立复审
+
+| 项 | 结果 | 复审结论 |
+|---|---|---|
+| P0-1 | beile 收口 + 恢复 558 行被删测试 | vue-tsc 22→0；前端全绿 |
+| P0-2 | vite 回退 4 处被误删的修复 | 守卫 5 绿 |
+| P0-3 | PowerShell 解码 + Alembic ops 上下文 | 11 passed |
+| P0-4 | Sentry 初始化（含**复审抓出的 `attachProps` PII 外送**） | 16 测试，mutation 验证 |
+| P0-5 | 全仓密钥扫描 + CI + 行级抑制 | 55 单测；2300+ 文件干净 |
+| P1-1 | 限流开关（装饰器本就存在，只是被 `enabled=False` 架空） | 0 处非预期 429 |
+| P1-2 | `/backup` 接 fail-closed 鉴权（**收窄**，见下） | mutation 验证有牙齿 |
+| P1-4 | 登出清 SW 的 api-* 缓存 | 3 单测 |
+| P2-7 | 删死代码 **12 文件 / 3165 行** | 复审 Ready；漏掉的兄弟文件已补删 |
+| — | `redis_cache` 客户端自愈（P 前置） | 4 轮复审各抓一个真 bug |
+| P1-3 | refresh 轮换 + 幂等重放 grace 窗口 | 复审抓出**登出后 60 分钟未授权访问**真 bug，已修 |
+
+### 经实测后**缩减或跳过**的项（重要，勿据原文重提）
+
+**P2-3 分页单点化 —— 跳过。** 原文判断为 "39 处/26 文件，可修 off-by-one/limit bug"。实测推翻：
+
+* 端点层**已强制** `page >= 1` / `per_page >= 1`（`Query(1, ge=1)`），**无 bug 可修**；
+* 原文"8 处 `page` 无下界"是 **grep 假阳性**——那 8 处是 Pydantic 响应模型字段与内部函数签名，不是查询参数；
+* 给 `per_page` 加**上限**会破坏真实用法：前端请求 `per_page: 1000`/`500`，`tests/test_report.py:158` 期望 `5000`。
+
+结论：**纯外观性去重、零行为收益**，26 文件改动的风险与收益不成比例。若将来有人重提，请先反驳以上三点。
+
+**P1-2 收窄到 `/backup`。** 原方案对 `/users`、`/permissions`、`/backup` 三个前缀都接 strict。复审指出
+`redis_cache.init_app()` 失败后**永不重试**，故「Redis 启动即不可用」会让 strict 路由**永久 401**；
+而本仓库有过开机顺序事故史。故只保留 `/backup`（其还原路径本就对 Redis fail-closed，不引入新锁死），
+`/users`、`/permissions` 保留 fail-open 并在代码里注明理由。**前置条件（客户端自愈）现已完成**，
+三前缀统一 strict 可作为后续独立项（建议先上线观察自愈）。
+
+**P1-1 的全局默认值改为"不设"。** 原码 `default_limits=["60/minute"]` 从未在真实流量下验证（限流长期被关闭），
+实测单次测试会话即 172 次 429。故默认不设，只让作者本就写好的端点级 `@limiter.limit` 生效，
+留 `RATE_LIMIT_DEFAULT` 供观察后显式开启。
+
+### 仍未做 / 需产品决策
+
+* **P0-6 卸载确认框** —— `server_manager.py` 长期被并发会话占用，未动。
+* **`enter_maintenance()`/`exit_maintenance()` 无生产调用方** —— 还原流程用的是 `acquire_restore_lock`，
+  「还原期间禁止写入」这一保证**目前不存在**。接线是产品决策（长时间禁写是大事），已在
+  `core/maintenance.py` docstring 写明。
+* **`maintenance` 中间件每写请求一次 Redis 往返** —— 已改为自愈客户端 + 日志节流；
+  但若要做得更彻底需合并到还原锁的判断里，属后续。
+* **P1-5 备份/还原测试** —— 代码层可补；**「真还原演练」必须在隔离机由人执行**，是本项目最有价值的未做项。
+* **P2 其余 9 项**（拆超长函数、错误处理统一、状态语义统一、三套可观测性栈收敛等）—— 量级 90+ 人日。
+
+---
+
+## 附录 D · P1-5 备份域实测发现（2026-09-28，直连生产库）
+
+> 方法：直连 `localhost:5432/erp_system` 查询 `backup_schedule` / `backup_record`。
+> **本节推翻了审查报告与优化方案原文中"每周 disaster_recovery_test 执行真实还原"的说法。**
+
+### 发现 1（最高优先级）：**三种保护性排期在生产库中不存在**
+
+代码支持 5 种排期任务，且迁移 `036`/`037` **本已播种全部 5 种**；但线上 `backup_schedule` **只有 2 行**：
+
+| 任务类型 | 代码支持 | 线上 | 后果 |
+|---|---|---|---|
+| `full` | ✅ | ✅ `0 2 * * *` | 正常 |
+| `incremental` | ✅ | ✅ `0 2 * * *`（名字/cron 与播种值不同 → 被界面改过） | 正常 |
+| `integrity_check` | ✅ | ❌ | **备份从不校验** |
+| `cleanup` | ✅ | ❌ | **备份从不清理 → 磁盘终将写满** |
+| `disaster_recovery_test` | ✅ | ❌ | **可恢复性从未被证明**（`backup_record` 中 `recovery_test` 记录 **0 条**） |
+
+排期表有完整 CRUD（`POST/PUT/DELETE /api/v1/backup/schedule`），所以行是被**界面删/改**掉的；
+存活两行的 `created_at` 为 2026-09-16/17。**迁移播种是一次性的，之后被改动没有任何守卫。**
+
+**建议**：
+1. **立即**经界面（或 SQL）补回 `integrity_check` / `cleanup` / `disaster_recovery_test` 三条排期；
+2. `cleanup` 缺失意味着**磁盘会持续增长**——上线前请确认磁盘余量；
+3. 加一道守卫（健康检查或启动自检）：期望的排期类型缺失时告警，避免再次静默消失。
+
+### 发现 2：`backup_schedule.last_status` 滞留 `running`
+
+两条排期的 `last_run_at` 均为 2026-09-28 02:00，`last_status` 至今（20 小时后）仍是 `running`，
+而 `backup_record` 显示 02:00:09 已 `success`。即**排期行的状态回写失效或滞后**，会让运维误判"任务卡住"。
+
+### 发现 3（正面）：备份本身是好的
+
+`backup_record`：`full` 28 条成功、`incremental` 15 条成功，无失败记录。
+
+### 本次补的代码级测试
+
+`fastapi_app/tests/test_backup_verify_core.py`（21 条）覆盖 `services/backup/verify/core.py` 的
+**动态表名注入防线**（`quote_table` 接受/拒绝边界、`query_table_rows` 在构造 SQL 前拒绝危险表名、
+`since` 走绑定参数、行值序列化）。该模块覆盖率 16% → 25%（仅本文件；合并既有备份测试更高）。
