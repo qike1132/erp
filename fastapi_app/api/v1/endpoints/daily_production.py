@@ -199,21 +199,31 @@ async def update_record(
 @router.delete('/records/{record_id}', response_model=ProductionRecordActionResponse)
 async def delete_record(
     record_id: int,
+    scope: set[str] | None = Depends(resolve_production_write_scope),
+    user: User = Depends(get_current_user_with_permissions),
     db: AsyncSession = Depends(get_async_db),
-    _user: User = Depends(require_permission('production_summary_manage')),
 ) -> ProductionRecordActionResponse:
-    """删除生产记录。
+    """删除生产记录（不可恢复）。
 
     Args:
         record_id: 生产记录 ID。
+        scope: 用户可写部门范围（None 表示全部）。
+        user: 当前登录用户，作为操作人写入审计日志。
         db: 异步数据库会话（读写主库）。
-        _user: 当前登录用户（仅需通过权限校验）。
 
     Returns:
         ProductionRecordActionResponse: 包含成功标志和提示消息的响应。
+
+    Raises:
+        HTTPException: 404（记录不存在）、403（部门越权）。
     """
+    operator = user.username if hasattr(user, 'username') else ''
     async with db_transaction(db):
-        await daily_production_service.delete_record(db, record_id)
+        record = await daily_production_service.get_record(db, record_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail='记录不存在')
+        _assert_department_writable(record.department, scope)
+        await daily_production_service.delete_record(db, record_id, operator=operator)
     return ProductionRecordActionResponse(success=True, message='生产记录删除成功')
 
 

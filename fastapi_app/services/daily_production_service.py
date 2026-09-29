@@ -357,16 +357,35 @@ async def update_record(
     return record
 
 
-async def delete_record(db: AsyncSession, record_id: int) -> None:
-    """删除生产记录"""
+async def delete_record(db: AsyncSession, record_id: int, *, operator: str = '') -> None:
+    """删除生产记录（物理删除）。
+
+    注意：本表没有软删除列，删除不可恢复；审计日志是事后唯一的追溯手段，
+    因此**必须在 delete 之前**把完整快照写进日志。
+
+    Args:
+        db: 读写会话。
+        record_id: 记录 ID。
+        operator: 本次操作人用户名。
+
+    Raises:
+        ValueError: 记录不存在。
+    """
     result = await db.execute(
         select(DailyProductionRecord).where(DailyProductionRecord.id == record_id)
     )
     record = result.scalar_one_or_none()
     if not record:
         raise ValueError('记录不存在')
+
+    logger.info(
+        f'生产记录删除: id={record.id} department={record.department} '
+        f'product_name={record.product_name} barcode={record.barcode} '
+        f'quantity={record.quantity} unit_price={record.unit_price} '
+        f'production_date={record.production_date} record_created_by={record.created_by} '
+        f'operator={operator}'
+    )
     await db.delete(record)
-    logger.info(f'生产记录删除: {record_id}')
 
 
 # ==================== 每日汇总 ====================
