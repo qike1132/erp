@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from fastapi_app.services import fifo_allocation as fifo
+from fastapi_app.services import purchase_plan_shipment as pps
 from fastapi_app.services.fifo_allocation import allocate_fifo
 from fastapi_app.shared_models import DailyProductionRecord
 
@@ -216,3 +217,26 @@ class TestProductionCacheInvalidation:
         session.deleted = []
         fifo._fifo_before_commit(session)
         assert session.info.get('fifo_dirty') is None
+
+
+class TestProducedFifoMapSafe:
+    @pytest.mark.asyncio
+    async def test_query_failure_degrades_with_flag(self):
+        """查询不可用时返回空映射 + degraded=True，不得返回全 0 冒充「没生产」"""
+        db = AsyncMock()
+        # 注意 patch 的目标是**消费方** purchase_plan_shipment 里的名字：
+        # 该模块用 `from ... import _get_produced_fifo_map` 绑定了自己的引用，
+        # patch 源模块 fifo_allocation 上的同名属性对它无效（经典 patch 打错地方）。
+        with patch.object(pps, '_get_produced_fifo_map',
+                          AsyncMock(side_effect=RuntimeError('FIFO_ALLOCATION_UNAVAILABLE'))):
+            result, degraded = await pps._get_produced_fifo_map_safe(db, [_make_detail(1, 10, product_id=7)])
+        assert result == {}
+        assert degraded is True
+
+    @pytest.mark.asyncio
+    async def test_success_passes_through(self):
+        db = AsyncMock()
+        with patch.object(pps, '_get_produced_fifo_map', AsyncMock(return_value={1: 42})):
+            result, degraded = await pps._get_produced_fifo_map_safe(db, [_make_detail(1, 10, product_id=7)])
+        assert result == {1: 42}
+        assert degraded is False

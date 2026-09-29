@@ -19,7 +19,7 @@ from fastapi_app.core.cache import cache_result
 from fastapi_app.core.float_utils import round_qty
 from fastapi_app.services.plan_utils import calc_shipment_status
 from fastapi_app.services.purchase_plan_inventory import _get_inventory_map
-from fastapi_app.services.purchase_plan_shipment import _get_shipped_fifo_map_safe
+from fastapi_app.services.purchase_plan_shipment import _get_produced_fifo_map_safe, _get_shipped_fifo_map_safe
 from fastapi_app.shared_models import (
     Customer,
     Product,
@@ -248,6 +248,40 @@ async def _build_fifo_shipped_map_from_rows(
     shipped_fifo_map, fifo_degraded = await _get_shipped_fifo_map_safe(db, all_details, customer_name_map, plan_month=plan_month)
     detail_shipped_map = {d.id: shipped_fifo_map.get(d.id, 0) for d in all_details}
     return detail_shipped_map, fifo_degraded, customer_name_map
+
+
+async def _build_fifo_produced_map_from_rows(
+    db: AsyncSession,
+    rows: list,
+    plan_month: str = '',
+) -> tuple[dict[int, int], bool]:
+    """从 SQL 查询结果行构建 FIFO 生产量映射。
+
+    与出货版的差别：不需要 customer_name_map（生产记录无客户，分组键是 product_id），
+    因此少一次 PurchasePlan 客户名查询。
+
+    Args:
+        rows: SQL 查询结果行（必须包含 detail_id 字段）
+
+    Returns:
+        (detail_produced_map, degraded)
+    """
+    if not rows:
+        return {}, False
+    detail_ids = list({row.detail_id for row in rows})
+    detail_result = await db.execute(
+        select(PurchasePlanDetail)
+        .options(load_only(
+            PurchasePlanDetail.id, PurchasePlanDetail.plan_id,
+            PurchasePlanDetail.product_name, PurchasePlanDetail.product_id,
+            PurchasePlanDetail.plan_date, PurchasePlanDetail.quantity,
+        ))
+        .where(PurchasePlanDetail.id.in_(detail_ids))
+        .order_by(PurchasePlanDetail.plan_date, PurchasePlanDetail.id)
+    )
+    all_details = detail_result.scalars().all()
+    produced_map, degraded = await _get_produced_fifo_map_safe(db, all_details, plan_month=plan_month)
+    return {d.id: produced_map.get(d.id, 0) for d in all_details}, degraded
 
 
 @cache_result(

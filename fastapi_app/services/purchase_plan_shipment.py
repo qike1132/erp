@@ -11,7 +11,7 @@
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi_app.services.fifo_allocation import _get_shipped_fifo_map
+from fastapi_app.services.fifo_allocation import _get_produced_fifo_map, _get_shipped_fifo_map
 from fastapi_app.services.purchase_plan_common import (
     _invalidate_plan_caches,
     _log_action,
@@ -34,6 +34,21 @@ async def _get_shipped_fifo_map_safe(
     """
     try:
         return await _get_shipped_fifo_map(db, details, customer_name_map, plan_month), False
+    except RuntimeError:
+        return {}, True
+
+
+async def _get_produced_fifo_map_safe(
+    db: AsyncSession, details: list, plan_month: str = '',
+) -> tuple[dict[int, int], bool]:
+    """生产量分配的读路径包装。契约与 _get_shipped_fifo_map_safe 完全一致：
+
+    查询不可用时返回空映射（不预填 0 值，调用方 .get(id, 0) 兜底）+ degraded=True，
+    由响应显式告知前端数据不可信 —— 返回全 0 会被业务误读成「这个月一件都没生产」。
+    生产记录只读，本包装不服务任何写路径。
+    """
+    try:
+        return await _get_produced_fifo_map(db, details, plan_month), False
     except RuntimeError:
         return {}, True
 
