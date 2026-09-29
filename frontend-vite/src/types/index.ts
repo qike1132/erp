@@ -145,10 +145,12 @@ export interface InventoryItem {
   has_stockin?: number
   direct_stockout_qty?: number
   has_order?: number
-  order_quantity?: number
-  stockin_quantity?: number
-  total_stock?: number
-  available_stock?: number
+  // 以下派生量后端把 0 值序列化成空串（见 stock_inventory_service._format_inventory_rows），
+  // 故类型含 ''；展示层需按「空/0 → —」处理，不能直接当数字用
+  order_quantity?: number | ''
+  stockin_quantity?: number | ''
+  total_stock?: number | ''
+  available_stock?: number | ''
 }
 
 /** 后端 /stock/inventory 响应结构（InventoryResponse schema） */

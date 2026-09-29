@@ -1,30 +1,20 @@
 <template>
   <div class="sk-inventory">
-    <div class="sk-filter-bar">
-      <div class="sk-filter-field">
-        <label class="sk-filter-label">产品名称/69码</label>
-        <input v-model="filters.product" class="sk-filter-input" placeholder="输入产品名称或69码" aria-label="输入产品名称或69码" @keyup.enter="handleSearch()" />
-      </div>
-      <div class="sk-filter-actions">
-        <button class="sk-action-btn sk-action-primary" aria-label="查询" @click="handleSearch()">
-          <FontAwesomeIcon icon="search" style="margin-right: 4px" aria-hidden="true" />查询
-        </button>
-        <button class="sk-action-btn" aria-label="刷新" @click="handleReset()">
-          <FontAwesomeIcon icon="redo" aria-hidden="true" />
-        </button>
-      </div>
-      <InventoryStatRow
-        v-if="inventory.length"
-        :orders="totalOrderQty"
-        :stockin="totalStockinQty"
-        :available="totalAvailableStock"
-      />
-    </div>
+    <InventoryToolbar
+      :search="filters.product"
+      :orders="totalOrderQty"
+      :stockin="totalStockinQty"
+      :has-data="inventory.length > 0"
+      @update:search="filters.product = $event"
+      @search="refetch()"
+      @export="handleExport"
+    />
 
     <InventoryCustomerBar
       :customers="allCustomers"
       :selected="filters.customer"
       :loading="isFetching"
+      :total="totalItems"
       @select="selectCustomer"
     />
 
@@ -38,6 +28,7 @@
         :rows="perPage"
         :total-records="totalItems"
         row-key="_rowKey"
+        @sort="onSort"
         @page="onPageChange"
       >
         <template #empty>
@@ -46,25 +37,20 @@
             <span>暂无库存数据</span>
           </div>
         </template>
-        <template #column-body-customer="{ row }">
-          <span class="sk-customer-cell">
-            <FontAwesomeIcon icon="building" aria-hidden="true" />
-            {{ (row as InventoryItem).customer }}
-          </span>
-        </template>
         <template #column-body-product_name="{ row }">
           <span class="sk-product-cell">
             <FontAwesomeIcon icon="cube" aria-hidden="true" />
             <strong>{{ (row as InventoryItem).product_name }}</strong>
           </span>
         </template>
-        <template #column-body-total_stock="{ row }">
-          <strong :class="((row as InventoryItem).total_stock ?? 0) < 0 ? 'sk-text-negative' : 'sk-text-positive'">{{ (row as InventoryItem).total_stock ?? 0 }}</strong>
+        <template #column-body-order_quantity="{ row }">
+          <span class="sk-num">{{ fmtQty((row as InventoryItem).order_quantity) }}</span>
         </template>
-        <template #column-body-available_stock="{ row }">
-          <div class="sk-available-cell">
-            <strong :class="((row as InventoryItem).available_stock ?? 0) < 0 ? 'sk-text-negative' : 'sk-text-positive'">{{ (row as InventoryItem).available_stock ?? 0 }}</strong>
-          </div>
+        <template #column-body-stockin_quantity="{ row }">
+          <span class="sk-num">{{ fmtQty((row as InventoryItem).stockin_quantity) }}</span>
+        </template>
+        <template #column-body-total_stock="{ row }">
+          <span class="sk-num sk-num-strong">{{ fmtQty((row as InventoryItem).total_stock) }}</span>
         </template>
       </UiDataTable>
     </div>
@@ -72,6 +58,14 @@
 </template>
 
 <script setup lang="ts">
+/**
+ * InventoryTab.vue — 库存明细（方案 B v5）
+ *
+ * 布局：一行工具条（标题·搜索·三格汇总·导出）→ 客户筛选行 → 5 列表格。
+ * 列口径（与后端 CTE 一一对应）：
+ *   订单数量 = 未发完的订单余量 · 备货数量 = 已入库未消耗 · 总订单 = 备货 + 订单余量
+ * 排序为当前页客户端排序（服务端分页不变；要跨页排序需后端加 order_by 参数）。
+ */
 import { reactive, computed, watch, ref } from 'vue'
 import { useQuery, keepPreviousData } from '@tanstack/vue-query'
 import { stockApi } from '@/api'
@@ -80,14 +74,15 @@ import UiDataTable from '@/components/ui/UiDataTable.vue'
 import type { TableColumn } from '@/components/ui/UiDataTable.vue'
 import { useDebouncedRef } from '@/composables/useDebouncedRef'
 import { useExport } from '@/composables/useExport'
-import InventoryStatRow from './components/InventoryStatRow.vue'
+import { formatNumber } from '@/utils/format'
+import InventoryToolbar from './components/InventoryToolbar.vue'
 import InventoryCustomerBar from './components/InventoryCustomerBar.vue'
 
 const filters = reactive({ customer: '', product: '' })
 const debouncedProduct = useDebouncedRef(computed(() => filters.product), 300)
 const page = ref(1)
 const perPage = ref(15)
-const totalItems = computed(() => invData.value?.total_items ?? 0)
+const sort = ref<{ field: string; order: number } | null>(null)
 
 const {
   data: invData,
@@ -108,40 +103,58 @@ const {
   placeholderData: keepPreviousData,
 })
 
+/** 数量展示：0 与空值统一为「—」（后端把 0 序列化成空串），其余走千分位 */
+function fmtQty(v: unknown): string {
+  const n = Number(v)
+  return Number.isFinite(n) && n !== 0 ? formatNumber(n) : '—'
+}
+
+/** 排序取值：非数值列当作 0，避免 NaN 让排序整体失效 */
+function sortValue(row: InventoryItem, field: string): number {
+  const n = Number((row as unknown as Record<string, unknown>)[field])
+  return Number.isFinite(n) ? n : 0
+}
+
 const inventory = computed(() => {
-  const raw = invData.value?.data ?? []
-  return raw.map((item) => ({ ...item, _rowKey: `${item.customer}-${item.product_name}` }))
+  const rows = (invData.value?.data ?? []).map((item) => ({
+    ...item,
+    _rowKey: `${item.customer}-${item.product_name}`,
+  }))
+  const s = sort.value
+  if (!s) return rows
+  return [...rows].sort((a, b) => (sortValue(a, s.field) - sortValue(b, s.field)) * s.order)
 })
 
 const inventoryColumns: TableColumn[] = [
-  { field: 'customer', header: '客户', align: 'center' },
-  { field: 'product_name', header: '产品名称', align: 'left' },
-  { field: 'order_quantity', header: '订单数量', align: 'center' },
-  { field: 'stockin_quantity', header: '备货数量', align: 'center' },
-  { field: 'total_stock', header: '总订单', align: 'center' },
-  { field: 'available_stock', header: '实时可用库存', align: 'center' },
+  // 按比例分配而非定宽：定宽数值列（如各 140px）会把全部余量留给产品名列，
+  // 宽屏上产品名列能独吞上千像素，三个数值列被推到最右、中间留一大片空档。
+  // 百分比配合 table-layout: fixed（见样式）才是硬约束，五列按 15/35/16.67×3 铺满。
+  { field: 'customer', header: '客户', align: 'left', width: '15%' },
+  { field: 'product_name', header: '产品名称', align: 'left', width: '35%' },
+  { field: 'order_quantity', header: '订单数量', align: 'right', sortable: true, width: '16.67%' },
+  { field: 'stockin_quantity', header: '备货数量', align: 'right', sortable: true, width: '16.67%' },
+  { field: 'total_stock', header: '总订单', align: 'right', sortable: true, width: '16.67%' },
 ]
-const allCustomers = computed(() => (invData.value?.all_customers ?? []) as string[])
 
+const allCustomers = computed(() => (invData.value?.all_customers ?? []) as string[])
+const totalItems = computed(() => invData.value?.total_items ?? 0)
 const totalOrderQty = computed(() => invData.value?.total_order_quantity ?? 0)
 const totalStockinQty = computed(() => invData.value?.total_stockin_quantity ?? 0)
-const totalAvailableStock = computed(() => invData.value?.total_available_stock ?? 0)
 
 function selectCustomer(c: string) {
   filters.customer = c
 }
-function handleSearch() {
-  refetch()
-}
-function handleReset() {
-  filters.customer = ''
-  filters.product = ''
-  refetch()
-}
+
 function onPageChange(event: { page: number; rows: number }) {
   page.value = event.page + 1
   perPage.value = event.rows
 }
+
+/** PrimeVue 排序事件：order 为 1 升序 / -1 降序 / 0 取消 */
+function onSort(event: { field: string; order: number }) {
+  sort.value = event.order ? { field: event.field, order: event.order } : null
+}
+
 const { runExport } = useExport({ start: false, success: false })
 
 function handleExport() {
@@ -151,129 +164,98 @@ function handleExport() {
 watch(() => [filters.customer, debouncedProduct.value], () => {
   page.value = 1
 })
-
-defineExpose({ inventory, filteredInventory: inventory, handleExport })
 </script>
 
 <style scoped>
 .sk-inventory {
   display: flex;
   flex-direction: column;
+  flex: 1;
   min-height: 0;
 }
-.sk-filter-bar {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  padding: 12px 24px;
-  border-bottom: 1px solid var(--color-border-light, #f1f5f9);
-}
-.sk-filter-field { flex-shrink: 0; }
-.sk-filter-label {
-  display: block;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--color-text-secondary);
-  margin-bottom: 4px;
-}
-.sk-filter-input {
-  width: 240px;
-  padding: 8px 12px;
-  border: 2px solid var(--color-border-light, #e2e8f0);
-  border-radius: 9px;
-  font-size: 13px;
-  outline: none;
-  transition: border-color 0.3s ease, box-shadow 0.3s ease;
-  font-family: inherit;
-  color: var(--color-text);
-  background: white;
-}
-.sk-filter-input:focus-visible { outline: 2px solid var(--color-primary-500); outline-offset: 2px; }
-.sk-filter-input:focus {
-  border-color: var(--color-primary-400);
-  box-shadow: 0 0 0 4px rgba(0, 148, 191, 0.1);
-}
-.sk-filter-actions {
-  display: flex;
-  gap: 8px;
-  align-items: flex-end;
-}
-.sk-action-btn {
-  padding: 7px 14px;
-  border: 2px solid var(--color-border-light, #e2e8f0);
-  border-radius: 9px;
-  background: white;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.3s ease, border-color 0.3s ease, transform 0.3s ease;
-  color: var(--color-text-secondary);
-  display: inline-flex;
-  align-items: center;
-}
-.sk-action-primary { color: var(--color-primary-600); }
-.sk-action-primary:hover { background: var(--color-primary-50); border-color: var(--color-primary-300); transform: translateY(-1px); }
 .sk-card-main {
   flex: 1;
   display: flex;
   flex-direction: column;
   min-height: 0;
+  overflow-y: auto;
+}
+/* 百分比列宽必须配 fixed 布局才是硬约束：auto 布局把百分比当建议值，
+   余量仍会全塞给内容最长的那列（产品名列独吞、数值列被推最右）。 */
+.sk-card-main :deep(table) { table-layout: fixed; }
+
+/* fixed 布局下单元格内容不会自动收窄，统一单行 + 省略号，避免长产品名/长客户名撑破列宽 */
+.sk-card-main :deep([data-pc-section='bodycell']) {
   overflow: hidden;
-}
-.sk-customer-cell {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-weight: 600;
+  text-overflow: ellipsis;
   white-space: nowrap;
-}
-.sk-customer-cell i {
-  color: var(--color-primary-500);
-  font-size: 12px;
 }
 .sk-product-cell {
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
 }
-.sk-product-cell i {
-  color: var(--color-text-secondary);
-  font-size: 12px;
+.sk-product-cell svg {
+  width: 13px;
+  height: 13px;
+  color: var(--color-text-muted);
+  flex-shrink: 0;
 }
-.sk-custom-orders {
-  display: inline-grid;
-  grid-template-columns: auto auto;
-  text-align: left;
-  line-height: 1.6;
-  font-size: 12px;
+.sk-product-cell strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.sk-custom-country {
-  text-align: right;
-  justify-self: end;
-  color: var(--color-text-secondary);
+.sk-num { font-weight: 500; }
+.sk-num-strong { font-weight: 700; }
+
+/* UiDataTable 的容器自带圆角与边框（共享组件，13 个视图共用）。
+   本页的稿是表格与卡片齐平、没有内层盒子，故在此抵消，不动共享组件。 */
+.sk-card-main :deep(.ui-data-table-wrapper) {
+  border: 0;
+  border-radius: 0;
 }
-.sk-available-cell {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+
+/* 行分隔线与 hover 由全局 PT 的 bodyRow 段提供（2026-09-29 修正段名后全站生效）。
+   这里只补 PT 表达不了的一条：末行去线 —— 紧邻的分页器自带 border-top，
+   两条 1px 会叠成一道粗线。 */
+.sk-card-main :deep([data-pc-section='bodyrow']:last-child) {
+  border-bottom: 0;
+}
+
+/* PrimeVue 表头排序图标：生产是 unstyled + PT 模式，图标不带任何 class
+   （`p-datatable-sort-icon` 只在未装插件时的默认模式下出现，生产里命不中），
+   故用两模式都稳定输出的 data-pc-section 钩子。默认 14px 裸 svg 在表头里又大又飘。 */
+.sk-card-main :deep([data-pc-section='columnheadercontent']) {
+  display: inline-flex;
   align-items: center;
 }
-.sk-country-share {
-  display: inline-grid;
-  grid-template-columns: auto auto;
-  text-align: left;
-  line-height: 1.4;
-  font-size: 12px;
-  color: var(--color-text-secondary);
+.sk-card-main :deep([data-pc-section='sort']) {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 4px;
 }
-.sk-country-share-label {
-  text-align: right;
-  justify-self: end;
-  margin-right: 4px;
+.sk-card-main :deep([data-pc-section='sorticon']) {
+  width: 10px;
+  height: 10px;
+  color: #cbd5e1;
+  transition: color 0.15s ease;
 }
-.sk-text-negative { color: var(--color-danger-500); }
-.sk-text-positive { color: var(--color-success-500); }
+.sk-card-main :deep(th[data-p-sortable-column='true']) { cursor: pointer; }
+.sk-card-main :deep(th[data-p-sortable-column='true']:hover [data-pc-section='sorticon']) {
+  color: var(--color-primary-500);
+}
+/* 已参与排序的列：图标点亮 + 列名加重，一眼看出当前按哪列排 */
+.sk-card-main :deep(th[aria-sort='ascending'] [data-pc-section='sorticon']),
+.sk-card-main :deep(th[aria-sort='descending'] [data-pc-section='sorticon']) {
+  color: var(--color-primary-600);
+}
+.sk-card-main :deep(th[aria-sort='ascending'] [data-pc-section='columntitle']),
+.sk-card-main :deep(th[aria-sort='descending'] [data-pc-section='columntitle']) {
+  color: var(--color-primary-700);
+}
 .sk-empty {
   display: flex;
   flex-direction: column;
@@ -282,7 +264,11 @@ defineExpose({ inventory, filteredInventory: inventory, handleExport })
   padding: 40px 20px;
   color: var(--color-text-muted);
 }
-.sk-empty i { font-size: 28px; opacity: 0.5; }
+.sk-empty svg {
+  width: 28px;
+  height: 28px;
+  opacity: 0.5;
+}
 .sk-empty span { font-size: 14px; }
 
 .sk-fetching-bar {
