@@ -10,9 +10,9 @@ import {
 // 若实现直接用 now 比对，当天会被算成已过期的负差。
 const TODAY = startOfToday(new Date('2026-09-28T15:30:00'))
 
-const row = (date: string, shippedPct: number, pendingCount: number) => ({
+const row = (date: string, producedPct: number, pendingCount: number) => ({
   date,
-  _shippedPct: shippedPct,
+  _producedPct: producedPct,
   _pendingCount: pendingCount,
 })
 

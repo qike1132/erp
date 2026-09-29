@@ -42,7 +42,7 @@
             />
             <PurchasePlanKpiStrip
               :plan-qty="planQtyNum"
-              :shipped-qty="shippedQtyNum"
+              :produced-qty="producedQtyNum"
               :remain-qty="remainQtyNum"
               :pct="sKpi.pct"
               :plan-days="rows.length"
@@ -160,23 +160,23 @@ const summaryCustomers = computed<CustSumItem[]>(() => {
 
 const sKpi = computed(() => {
   const cs = summaryCustomers.value;
-  let planQty = 0, shipQty = 0, remainQty = 0;
+  let planQty = 0, prodQty = 0, remainQty = 0;
   for (const c of cs) {
     planQty += Number(c.plan_qty || 0);
-    shipQty += Number(c.shipped_qty || 0);
+    prodQty += Number(c.produced_qty || 0);
     remainQty += Number(c.remaining_qty || 0);
   }
-  const pct = planQty > 0 ? Math.floor(shipQty / planQty * 1000) / 10 : 0;
+  const pct = planQty > 0 ? Math.floor(prodQty / planQty * 1000) / 10 : 0;
   return {
     allQty: String(planQty),
-    allShipped: String(shipQty),
+    allProduced: String(prodQty),
     allRemain: String(remainQty),
     pct,
   };
 });
 
 const planQtyNum = computed(() => Number(sKpi.value.allQty || 0));
-const shippedQtyNum = computed(() => Number(sKpi.value.allShipped || 0));
+const producedQtyNum = computed(() => Number(sKpi.value.allProduced || 0));
 const remainQtyNum = computed(() => Number(sKpi.value.allRemain || 0));
 
 const {
@@ -205,7 +205,7 @@ const risks = computed(() => {
   const MS = 86400000;
   const r = { delayedCount: 0, delayedQty: 0, maxDays: 0, expiringCount: 0, expiringQty: 0 };
   for (const row of rows.value) {
-    if (row._shippedPct === 100 || row._pendingCount <= 0) continue;
+    if (row._producedPct === 100 || row._pendingCount <= 0) continue;
     const diff = Math.round((new Date(row.date + 'T00:00:00').getTime() - now.getTime()) / MS);
     if (diff < 0) { r.delayedCount++; r.delayedQty += row.totalQty; r.maxDays = Math.max(r.maxDays, -diff); }
     else if (diff <= 3) { r.expiringCount++; r.expiringQty += row.totalQty; }
@@ -219,9 +219,9 @@ const riskQty = computed(() => risks.value.delayedQty + risks.value.expiringQty)
 function exportSkuCSV() {
   const list = sortedSkuList.value;
   if (!list.length) { showToast('无数据', 'error'); return; }
-  const h = buildCsvRow(['客户名称', '产品名称', '商品条码', '计划数量', '已出货', '待出货', '进度']);
+  const h = buildCsvRow(['客户名称', '产品名称', '商品条码', '计划数量', '已生产', '待生产', '进度']);
   const ls = [h];
-  for (const s of list) ls.push(buildCsvRow([s.customer_name, s.product_name, s.barcode, s.plan_qty, s.shipped_qty, s.remain_qty, s._pct + '%']));
+  for (const s of list) ls.push(buildCsvRow([s.customer_name, s.product_name, s.barcode, s.plan_qty, s.produced_qty, s.remain_qty, s._pct + '%']));
   downloadCsv(ls, `SKU月度统计_${y.value}年${m.value}月.csv`);
   showToast('导出成功', 'success');
 }

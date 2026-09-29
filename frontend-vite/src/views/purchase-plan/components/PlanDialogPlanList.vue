@@ -4,8 +4,8 @@
       <span class="sp-plan-list-header-name">产品</span>
       <div class="sp-plan-list-header-qtys">
         <span>计划</span>
-        <span>已出</span>
-        <span>待出</span>
+        <span>已生产</span>
+        <span>待生产</span>
       </div>
     </div>
     <div v-if="items" class="sp-modal-main-list">
@@ -24,7 +24,7 @@
             <div class="sp-plan-middle">
               <div class="sp-plan-qtys">
                 <span class="sp-plan-qty-value">{{ p.quantity }}</span>
-                <span class="sp-plan-qty-value sp-qty-green">{{ p.shipped_qty }}</span>
+                <span class="sp-plan-qty-value sp-qty-green">{{ p.produced_qty }}</span>
                 <span class="sp-plan-qty-value" :class="p.remaining_qty > 0 ? 'sp-qty-orange' : ''">{{ p.remaining_qty }}</span>
               </div>
             </div>

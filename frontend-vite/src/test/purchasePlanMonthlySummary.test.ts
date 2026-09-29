@@ -8,17 +8,17 @@ import PurchasePlanMonthlySummary from '@/views/purchase-plan/components/Purchas
 import type { CustSumItem, SkuRow } from '@/views/purchase-plan/components/types'
 
 function cust(name: string, plan: number, shipped: number, remain: number, id = 1): CustSumItem {
-  return { customer_id: id, customer_name: name, plan_qty: plan, inventory_qty: 0, shipped_qty: shipped, remaining_qty: remain, warning_count: 0 }
+  return { customer_id: id, customer_name: name, plan_qty: plan, inventory_qty: 0, produced_qty: shipped, remaining_qty: remain, warning_count: 0 }
 }
 
 function sku(over: Partial<SkuRow> = {}): SkuRow {
   const plan = over.plan_qty ?? 100
-  const shipped = over.shipped_qty ?? 0
+  const shipped = over.produced_qty ?? 0
   return {
     barcode: '6978946330588',
     product_name: '企鹅',
     plan_qty: plan,
-    shipped_qty: shipped,
+    produced_qty: shipped,
     remain_qty: plan - shipped,
     customer_name: 'MINISO国际',
     _pct: plan > 0 ? Math.round(shipped / plan * 100) : 0,
@@ -32,9 +32,9 @@ const CUSTOMERS = [
   cust('网易严选', 3316, 3316, 0, 2),
 ]
 const SKUS = [
-  sku({ plan_qty: 6000, shipped_qty: 3400 }),
-  sku({ product_name: '企鹅企鹅企鹅', plan_qty: 1500, shipped_qty: 1500 }),
-  sku({ product_name: '变形金刚', plan_qty: 2000, shipped_qty: 0 }),
+  sku({ plan_qty: 6000, produced_qty: 3400 }),
+  sku({ product_name: '企鹅企鹅企鹅', plan_qty: 1500, produced_qty: 1500 }),
+  sku({ product_name: '变形金刚', plan_qty: 2000, produced_qty: 0 }),
 ]
 
 function mountSummary(over: Record<string, unknown> = {}): VueWrapper {
@@ -96,7 +96,7 @@ describe('PurchasePlanMonthlySummary 表格与面板', () => {
     const w = mountSummary()
     expect(w.findAll('.sp-sku-table tbody tr')).toHaveLength(3)
     expect(w.find('.sp-sku-table thead').text()).toContain('计划数量')
-    expect(w.find('.sp-sku-table thead').text()).toContain('待出货')
+    expect(w.find('.sp-sku-table thead').text()).toContain('待生产')
     expect(w.find('.sp-sku-table thead').text()).toContain('进度')
   })
 
@@ -104,7 +104,7 @@ describe('PurchasePlanMonthlySummary 表格与面板', () => {
     expect(mountSummary().find('.sp-sku-table tbody').text()).toContain('6,000')
   })
 
-  it('已出货配色分级：0 红 / 出满 绿 / 部分 琥珀', () => {
+  it('已生产配色分级：0 红 / 产满 绿 / 部分 琥珀', () => {
     const w = mountSummary()
     const rows = w.findAll('.sp-sku-table tbody tr')
     expect(rows[0]?.findAll('.td-num')[1]?.classes()).toContain('td-part')

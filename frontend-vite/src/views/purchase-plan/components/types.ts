@@ -5,10 +5,9 @@ export interface Plan {
   product_name: string;
   barcode: string;
   quantity: number;
-  shipped_qty: number;
+  produced_qty: number;
   remaining_qty: number;
   plan_date: string;
-  shipment_status: string;
 }
 
 export interface Row {
@@ -19,9 +18,9 @@ export interface Row {
   planCount: number;
   totalQty: number;
   _isPeak: boolean;
-  _shippedCount: number;
+  _producedCount: number;
   _pendingCount: number;
-  _shippedPct: number;
+  _producedPct: number;
   customerNames: string[];
   plans?: Plan[];
   _byCustomer?: Record<string, Plan[]>;
@@ -33,7 +32,7 @@ export interface CustSumItem {
   customer_name: string;
   plan_qty: number;
   inventory_qty: number;
-  shipped_qty: number;
+  produced_qty: number;
   remaining_qty: number;
   warning_count: number;
 }
@@ -42,7 +41,7 @@ export interface SkuRow {
   barcode: string;
   product_name: string;
   plan_qty: number;
-  shipped_qty: number;
+  produced_qty: number;
   remain_qty: number;
   customer_name: string;
   _pct: number;

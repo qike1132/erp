@@ -18,8 +18,8 @@
           </div>
           <div class="sp-customer-summary">
             <span class="sp-customer-summary-item"><b>{{ entry.plans.reduce((s: number, p: Plan) => s + Number(p.quantity || 0), 0) }}</b> 计划</span>
-            <span class="sp-customer-summary-item sp-customer-summary-shipped"><b>{{ entry.plans.reduce((s: number, p: Plan) => s + Number(p.shipped_qty || 0), 0) }}</b> 已出</span>
-            <span class="sp-customer-summary-item sp-customer-summary-pending"><b>{{ entry.plans.reduce((s: number, p: Plan) => s + Number(p.remaining_qty || 0), 0) }}</b> 待出</span>
+            <span class="sp-customer-summary-item sp-customer-summary-shipped"><b>{{ entry.plans.reduce((s: number, p: Plan) => s + Number(p.produced_qty || 0), 0) }}</b> 已生产</span>
+            <span class="sp-customer-summary-item sp-customer-summary-pending"><b>{{ entry.plans.reduce((s: number, p: Plan) => s + Number(p.remaining_qty || 0), 0) }}</b> 待生产</span>
           </div>
         </div>
       </template>

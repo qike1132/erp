@@ -51,11 +51,11 @@ const emit = defineEmits<{
   'open-full': []
 }>()
 
-const PENDING = { cls: 'st-wait', lbl: '待出' }
+const PENDING = { cls: 'st-wait', lbl: '待生产' }
 
 const STATUS: Record<string, { cls: string; lbl: string }> = {
-  completed: { cls: 'st-ok', lbl: '已出' },
-  partial: { cls: 'st-part', lbl: '部分' },
+  completed: { cls: 'st-ok', lbl: '已生产' },
+  partial: { cls: 'st-part', lbl: '部分生产' },
   pending: PENDING,
 }
 

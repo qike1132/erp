@@ -31,13 +31,13 @@ export function todayIso(now: Date = new Date()): string {
 
 /**
  * 单日状态标记。判定顺序即优先级：
- * 已全部出货 → 完成；无待出条数 → 不标记；过期 → 延期；当天 → 今日出货；≤3 天 → 临期。
+ * 已全部生产 → 完成；无待完成条数 → 不标记；过期 → 延期；当天 → 今日；≤3 天 → 临期。
  */
 export function dayMarkFor(
-  row: Pick<Row, 'date' | '_shippedPct' | '_pendingCount'>,
+  row: Pick<Row, 'date' | '_producedPct' | '_pendingCount'>,
   todayMs: number,
 ): DayMark {
-  if (row._shippedPct === 100) return { cls: 'st-g', lbl: '✓ 完成' }
+  if (row._producedPct === 100) return { cls: 'st-g', lbl: '✓ 完成' }
   if (row._pendingCount <= 0) return null
   const diff = daysFromToday(row.date, todayMs)
   if (diff < 0) return { cls: 'st-r', lbl: '延期 ' + Math.abs(diff) + '天' }

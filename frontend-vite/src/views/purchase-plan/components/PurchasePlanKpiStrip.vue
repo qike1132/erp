@@ -7,9 +7,9 @@
     </div>
 
     <div class="sp-kpi">
-      <span class="sp-kpi-l">本月已出</span>
-      <span class="sp-kpi-v num">{{ fmt(shippedQty) }}</span>
-      <span class="sp-kpi-s num">件 · 待出 {{ fmt(remainQty) }}</span>
+      <span class="sp-kpi-l">本月已生产</span>
+      <span class="sp-kpi-v num">{{ fmt(producedQty) }}</span>
+      <span class="sp-kpi-s num">件 · 待生产 {{ fmt(remainQty) }}</span>
     </div>
 
     <div class="sp-kpi sp-kpi-rate">
@@ -35,7 +35,7 @@ import { computed } from 'vue'
 
 const props = defineProps<{
   planQty: number
-  shippedQty: number
+  producedQty: number
   remainQty: number
   pct: number
   planDays: number

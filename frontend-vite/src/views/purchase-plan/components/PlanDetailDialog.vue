@@ -12,8 +12,8 @@
           </div>
           <div v-if="modalTab === 'plans'" class="sp-modal-header-progress">
             <div class="sp-modal-progress-bar">
-              <div class="sp-modal-progress-fill" :style="{ width: shippedPct + '%' }" />
-              <span class="sp-modal-progress-text">{{ shippedPct }}%</span>
+              <div class="sp-modal-progress-fill" :style="{ width: producedPct + '%' }" />
+              <span class="sp-modal-progress-text">{{ producedPct }}%</span>
             </div>
           </div>
           <div class="sp-modal-header-actions">
@@ -83,7 +83,7 @@ const { data: dayData, isLoading: dayLoading } = useQuery({
 
 const dayPlans = computed<Plan[]>(() => (dayData.value?.plans ?? []) as unknown as Plan[]);
 const dayByCustomer = computed<Record<string, Plan[]>>(() => (dayData.value?.by_customer ?? {}) as unknown as Record<string, Plan[]>);
-const shippedPct = computed(() => (dayData.value?.shipped_pct as number) ?? props.detail?._shippedPct ?? 0);
+const producedPct = computed(() => (dayData.value?.produced_pct as number) ?? props.detail?._producedPct ?? 0);
 
 watch(() => props.detail, () => {
   modalSelCust.value = '';
@@ -105,20 +105,20 @@ const modalSelGroup = computed(() => {
   return dayByCustomer.value[modalSelCust.value] ?? null;
 });
 
-function getShipmentStatus(quantity: number, shippedQty: number): string {
-  if (shippedQty >= quantity) return 'completed';
-  if (shippedQty > 0) return 'partial';
+function getProductionStatus(quantity: number, producedQty: number): string {
+  if (producedQty >= quantity) return 'completed';
+  if (producedQty > 0) return 'partial';
   return 'pending';
 }
 
 function exportDayCSV() {
   const plans = dayPlans.value;
   if (!plans.length) { showToast('无数据', 'error'); return; }
-  const h = '客户,产品,条码,数量,已出,待出,状态';
+  const h = '客户,产品,条码,数量,已生产,待生产,状态';
   const ls = [h];
   for (const p of plans) {
-    const st = getShipmentStatus(p.quantity, p.shipped_qty);
-    ls.push([p.customer_name, p.product_name, p.barcode, p.quantity, p.shipped_qty, p.remaining_qty, st === 'completed' ? '已出货' : st === 'partial' ? '部分出货' : '待出货'].join(','));
+    const st = getProductionStatus(p.quantity, p.produced_qty);
+    ls.push([p.customer_name, p.product_name, p.barcode, p.quantity, p.produced_qty, p.remaining_qty, st === 'completed' ? '已生产' : st === 'partial' ? '部分生产' : '待生产'].join(','));
   }
   downloadCsv(ls, `出货计划_${props.detail?.date ?? ''}_详情.csv`);
   showToast('导出成功', 'success');

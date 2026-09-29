@@ -159,7 +159,7 @@ const selTitle = computed(() => {
 const riskItems = computed<RiskItem[]>(() => {
   const list: RiskItem[] = []
   for (const r of props.rows) {
-    if (r._shippedPct === 100 || r._pendingCount <= 0) continue
+    if (r._producedPct === 100 || r._pendingCount <= 0) continue
     const diff = daysFromToday(r.date, TODAY_MS)
     if (diff < 0) {
       list.push({ date: r.date, qty: r.totalQty, cust: r.customerNames[0] ?? '', kind: 'overdue', lbl: '延期 ' + Math.abs(diff) + '天' })

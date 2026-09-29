@@ -10,7 +10,7 @@ import PurchasePlanMonthNav from '@/views/purchase-plan/components/PurchasePlanM
 
 const KPI = {
   planQty: 22815,
-  shippedQty: 14065,
+  producedQty: 14065,
   remainQty: 8750,
   pct: 61.6,
   planDays: 11,

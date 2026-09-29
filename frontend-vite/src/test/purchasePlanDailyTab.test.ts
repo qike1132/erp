@@ -21,9 +21,9 @@ function row(date: string, over: Partial<Row> = {}): Row {
     planCount: 1,
     totalQty: 0,
     _isPeak: false,
-    _shippedCount: 0,
+    _producedCount: 0,
     _pendingCount: 0,
-    _shippedPct: 0,
+    _producedPct: 0,
     customerNames: [],
     _fullDate: date,
     ...over,
@@ -36,12 +36,12 @@ function item(date: string, qty: number, customer: string, status: string): SkuD
 
 // 2026-09 的排产日：02 已完成 / 08 逾期（5 产品 3 客户）/ 29 临期
 const ROWS: Row[] = [
-  row('2026-09-02', { totalQty: 2666, customerCount: 2, planCount: 3, _shippedPct: 100, _shippedCount: 3, customerNames: ['MINISO国际'] }),
+  row('2026-09-02', { totalQty: 2666, customerCount: 2, planCount: 3, _producedPct: 100, _producedCount: 3, customerNames: ['MINISO国际'] }),
   row('2026-09-08', {
-    totalQty: 5000, customerCount: 3, planCount: 5, _shippedPct: 64, _pendingCount: 2,
+    totalQty: 5000, customerCount: 3, planCount: 5, _producedPct: 64, _pendingCount: 2,
     customerNames: ['MINISO国际', 'TOP TOY', '网易严选'],
   }),
-  row('2026-09-29', { totalQty: 2200, customerCount: 2, planCount: 2, _shippedPct: 0, _pendingCount: 2, customerNames: ['MINISO国际'] }),
+  row('2026-09-29', { totalQty: 2200, customerCount: 2, planCount: 2, _producedPct: 0, _pendingCount: 2, customerNames: ['MINISO国际'] }),
 ]
 
 // 09-08 的 5 个产品分属 3 家客户 —— 旧的卡片版按「4 行产品预算」会把第 5 个折叠掉
@@ -170,8 +170,8 @@ describe('右栏双态：风险清单 ⇄ 当日明细', () => {
   it('产品行带该客户该产品当日的出货状态', () => {
     const w = mountTab({ sel: '2026-09-08' })
     const texts = w.findAll('.sp-prod-row').map(r => r.text())
-    expect(texts.some(t => t.includes('变形金刚') && t.includes('已出'))).toBe(true)
-    expect(texts.some(t => t.includes('企鹅企鹅企鹅') && t.includes('待出'))).toBe(true)
+    expect(texts.some(t => t.includes('变形金刚') && t.includes('已生产'))).toBe(true)
+    expect(texts.some(t => t.includes('企鹅企鹅企鹅') && t.includes('待生产'))).toBe(true)
   })
 
   it('点「查看当日完整计划」上抛 open-full（弹窗由页面打开）', async () => {

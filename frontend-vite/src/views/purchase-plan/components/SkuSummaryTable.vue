@@ -32,7 +32,7 @@
           <td class="td-prod"><span class="sp-prod">{{ s.product_name }}</span></td>
           <td class="td-code"><span class="sp-code">{{ s.barcode }}</span></td>
           <td class="td-num num">{{ fmt(s.plan_qty) }}</td>
-          <td class="td-num num" :class="shippedCls(s)">{{ fmt(s.shipped_qty) }}</td>
+          <td class="td-num num" :class="producedCls(s)">{{ fmt(s.produced_qty) }}</td>
           <td class="td-num num" :class="s.remain_qty > 0 ? 'td-remain' : ''">{{ fmt(s.remain_qty) }}</td>
           <td class="td-prog">
             <div class="sp-prog">
@@ -78,18 +78,18 @@ const emit = defineEmits<{
 /** 可排序的三个数字列；字段名与 useSkuSummary 的 fieldMap 对齐 */
 const SORT_COLS = [
   { key: 'plan', label: '计划数量' },
-  { key: 'shipped', label: '已出货' },
-  { key: 'remain', label: '待出货' },
+  { key: 'produced', label: '已生产' },
+  { key: 'remain', label: '待生产' },
 ] as const
 
 function fmt(n: number): string {
   return Number(n || 0).toLocaleString('zh-CN')
 }
 
-/** 一件未出点红、出完点绿、出了部分点琥珀 —— 只判「是否为 0」会把「出了一点点」也显示成完成 */
-function shippedCls(s: SkuRow): string {
-  if (Number(s.shipped_qty || 0) <= 0) return 'td-zero'
-  if (Number(s.shipped_qty || 0) >= Number(s.plan_qty || 0)) return 'td-done'
+/** 一件未生产点红、产完点绿、产了部分点琥珀 —— 只判「是否为 0」会把「只产了一点点」也显示成完成 */
+function producedCls(s: SkuRow): string {
+  if (Number(s.produced_qty || 0) <= 0) return 'td-zero'
+  if (Number(s.produced_qty || 0) >= Number(s.plan_qty || 0)) return 'td-done'
   return 'td-part'
 }
 

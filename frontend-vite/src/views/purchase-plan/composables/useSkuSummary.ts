@@ -31,7 +31,7 @@ export function useSkuSummary(opts: {
         s.customer_name.toLowerCase().includes(k)
       );
     }
-    const fieldMap: Record<string, keyof SkuRow> = { customer: 'customer_name', barcode: 'barcode', plan: 'plan_qty', shipped: 'shipped_qty', remain: 'remain_qty' };
+    const fieldMap: Record<string, keyof SkuRow> = { customer: 'customer_name', barcode: 'barcode', plan: 'plan_qty', produced: 'produced_qty', remain: 'remain_qty' };
     const sf = fieldMap[skuSortField.value] ?? 'plan_qty';
     const sd = skuSortDir.value === 'asc' ? 1 : -1;
     // compute total plan_qty per customer

@@ -30,7 +30,7 @@
           <span>{{ c.row.planCount }}产品</span>
         </span>
         <span class="sp-bar">
-          <i :class="barCls(c.row._shippedPct)" :style="{ width: c.row._shippedPct + '%' }" />
+          <i :class="barCls(c.row._producedPct)" :style="{ width: c.row._producedPct + '%' }" />
         </span>
       </template>
       <span v-else-if="c.isToday" class="sp-today-hint">今天 · 无排产</span>
