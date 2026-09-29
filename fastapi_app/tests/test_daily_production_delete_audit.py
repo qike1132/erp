@@ -101,4 +101,5 @@ class TestDeleteEndpointScope:
             mock_svc.get_record = AsyncMock(return_value=None)
             mock_svc.delete_record = AsyncMock(return_value=None)
             response = await client.delete('/api/v1/daily-production/records/999')
+            mock_svc.delete_record.assert_not_awaited()
         assert response.status_code == 404
