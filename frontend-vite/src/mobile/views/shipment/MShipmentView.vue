@@ -38,11 +38,11 @@
               <span class="m-summary-val">{{ fmtQty(dateTotal) }}</span>
             </div>
             <div class="m-summary-item">
-              <span class="m-summary-label">已出货</span>
-              <span class="m-summary-val m-summary-done">{{ fmtQty(dateShipped) }}</span>
+              <span class="m-summary-label">已生产</span>
+              <span class="m-summary-val m-summary-done">{{ fmtQty(dateProduced) }}</span>
             </div>
             <div class="m-summary-item">
-              <span class="m-summary-label">剩余</span>
+              <span class="m-summary-label">待生产</span>
               <span class="m-summary-val m-summary-remain">{{ fmtQty(dateRemain) }}</span>
             </div>
           </div>
@@ -63,14 +63,14 @@
             :subtitle="`${p.product_name || '—'} (${p.barcode || '—'})`"
           >
             <template #icon>
-              <div :class="['m-item-dot', dotClass(p.shipment_status)]" />
+              <div :class="['m-item-dot', dotClass(statusOf(p))]" />
             </template>
             <template #value>
               <div class="m-item-right">
                 <span class="m-item-qty">{{ p.quantity }}件</span>
-                <span class="m-item-sub">已出{{ p.shipped_qty }} | 剩{{ p.remaining_qty }}</span>
-                <span :class="['m-item-status', statusClass(p.shipment_status)]">
-                  {{ statusLabel(p.shipment_status) }}
+                <span class="m-item-sub">已生产{{ p.produced_qty }} | 待生产{{ p.remaining_qty }}</span>
+                <span :class="['m-item-status', statusClass(statusOf(p))]">
+                  {{ statusLabel(statusOf(p)) }}
                 </span>
               </div>
             </template>
@@ -136,9 +136,9 @@ const selectedPlans = computed<Plan[]>(() => {
 
 /** 当前日期的汇总数据 */
 const dateTotal = computed(() => selectedPlans.value.reduce((s, p) => s + Number(p.quantity || 0), 0))
-const dateShipped = computed(() => selectedPlans.value.reduce((s, p) => s + Number(p.shipped_qty || 0), 0))
-const dateRemain = computed(() => dateTotal.value - dateShipped.value)
-const datePct = computed(() => dateTotal.value > 0 ? Math.floor(dateShipped.value / dateTotal.value * 1000) / 10 : 0)
+const dateProduced = computed(() => selectedPlans.value.reduce((s, p) => s + Number(p.produced_qty || 0), 0))
+const dateRemain = computed(() => dateTotal.value - dateProduced.value)
+const datePct = computed(() => dateTotal.value > 0 ? Math.floor(dateProduced.value / dateTotal.value * 1000) / 10 : 0)
 
 function fmtQty(n: number) { return String(n) }
 
@@ -155,8 +155,20 @@ function statusClass(status: string) {
 }
 
 function statusLabel(status: string) {
-  const map: Record<string, string> = { shipped: '已出货', completed: '已出货', partial: '部分出货', pending: '待出货' }
-  return map[status] || '待出货'
+  const map: Record<string, string> = { shipped: '已生产', completed: '已生产', partial: '部分生产', pending: '待生产' }
+  return map[status] || '待生产'
+}
+
+/** 该明细当日是否已生产达标。
+    /plans/monthly 的 plans_by_date[] 不返回 shipment_status，原先直接读 p.shipment_status
+    恒为 undefined、状态圆点与文案一直是「待出货」。改为就地由数量推导，规则同后端
+    getShipmentStatus：产满为 completed、产了一部分为 partial、未产为 pending。 */
+function statusOf(p: Plan): string {
+  const qty = Number(p.quantity || 0)
+  const produced = Number(p.produced_qty || 0)
+  if (qty > 0 && produced >= qty) return 'completed'
+  if (produced > 0) return 'partial'
+  return 'pending'
 }
 
 /** 自动滚动到选中日期 */
