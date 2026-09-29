@@ -16,9 +16,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.config import settings
 from fastapi_app.core.database import get_async_db, get_async_read_db
-from fastapi_app.core.deps import require_permission
+from fastapi_app.core.deps import require_permission, resolve_production_view_scope
 from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.core.limiter import limiter
+from fastapi_app.core.production_scope import narrow_departments
 from fastapi_app.core.response import success_response
 from fastapi_app.schemas.daily_production import (
     DailySummaryResponse,
@@ -28,6 +29,7 @@ from fastapi_app.schemas.daily_production import (
     ProductionRecordCreate,
     ProductionRecordListResponse,
     ProductionRecordUpdate,
+    TrendResponse,
 )
 from fastapi_app.services import daily_production_service
 from fastapi_app.shared_models import User
@@ -209,6 +211,43 @@ async def monthly_summary(
         return MonthlySummaryResponse(**result)
     except (OperationalError, DisconnectionError) as e:
         raise HTTPException(status_code=500, detail=f'获取汇总失败: {settings.sanitize_error(e)}') from e
+
+
+@router.get('/trend', response_model=TrendResponse)
+async def trend(
+    start_date: str = Query(..., description='起始日期 (YYYY-MM-DD)'),
+    end_date: str = Query(..., description='结束日期 (YYYY-MM-DD)'),
+    department: str = Query('', description='部门筛选 (filling/handcraft/packaging)'),
+    scope: set[str] | None = Depends(resolve_production_view_scope),
+    db: AsyncSession = Depends(get_async_read_db),
+) -> TrendResponse:
+    """获取按日按部门的生产数量趋势（可跨月，最长 92 天）。
+
+    Args:
+        start_date: 起始日期。
+        end_date: 结束日期（闭区间）。
+        department: 部门筛选；超出用户可见范围时忽略该参数。
+        scope: 用户可见部门范围（None 表示全部）。
+        db: 异步数据库会话（只读副本）。
+
+    Returns:
+        TrendResponse: 含 departments 与逐日补零后的 days。
+
+    Raises:
+        HTTPException: 400（区间非法）、500（数据库异常）。
+    """
+    try:
+        result = await daily_production_service.get_trend(
+            db,
+            start_date=start_date,
+            end_date=end_date,
+            departments=narrow_departments(department, scope),
+        )
+        return TrendResponse(**result)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except (OperationalError, DisconnectionError) as e:
+        raise HTTPException(status_code=500, detail=f'获取趋势失败: {settings.sanitize_error(e)}') from e
 
 
 @router.get('/export')

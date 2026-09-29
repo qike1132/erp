@@ -99,6 +99,21 @@ class MonthlySummaryResponse(BaseModel):
     monthly_total_value: float = 0
 
 
+# ==================== 趋势 ====================
+
+class TrendResponse(BaseModel):
+    """按日按部门的数量趋势响应
+
+    departments 只列出调用方可见的部门；days 中不可见部门的键固定为 0
+    （保持响应结构稳定，前端按 departments 决定画哪几条序列）。
+    """
+    success: bool = True
+    start_date: str = ''
+    end_date: str = ''
+    departments: list[str] = []
+    days: list[dict] = []
+
+
 class ProductInfoResponse(BaseModel):
     success: bool = True
     data: dict = {}

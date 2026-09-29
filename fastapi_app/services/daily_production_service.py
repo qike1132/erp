@@ -7,7 +7,7 @@ import calendar
 import io
 import logging
 from collections.abc import Iterable
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 import openpyxl
@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.business_rules import MAX_QUANTITY
 from fastapi_app.core.float_utils import round_money
+from fastapi_app.core.production_scope import PRODUCTION_DEPARTMENTS
 from fastapi_app.core.validators import validate_not_empty
 from fastapi_app.shared_models import DailyProductionRecord, Product
 from fastapi_app.utils import calc_total_pages, parse_date_with_fallback
@@ -408,6 +409,89 @@ async def get_monthly_summary_for_auto(
 ) -> dict:
     """月度自动汇总（用于定时任务），与 get_monthly_summary 相同逻辑但独立入口便于扩展"""
     return await get_monthly_summary(db, year, month)
+
+
+# ==================== 趋势 ====================
+
+MAX_TREND_DAYS = 92
+
+
+async def get_trend(
+    db: AsyncSession,
+    *,
+    start_date: str,
+    end_date: str,
+    departments: set[str] | None = None,
+) -> dict:
+    """按日按部门的生产数量趋势（可跨月）。
+
+    Args:
+        db: 只读会话。
+        start_date: 起始日期 (YYYY-MM-DD)。
+        end_date: 结束日期 (YYYY-MM-DD)，闭区间。
+        departments: 可见部门集合；None 表示全部部门。
+
+    Returns:
+        {'start_date', 'end_date', 'departments', 'days'}；
+        days 中每一天都含三个部门键与 total，无数据的日期补 0（让前端 x 轴连续）。
+
+    Raises:
+        ValueError: 区间反向或超过 MAX_TREND_DAYS 天。
+    """
+    start = parse_date_with_fallback(start_date)
+    end = parse_date_with_fallback(end_date)
+    if end < start:
+        raise ValueError('结束日期不能早于开始日期')
+
+    span = (end - start).days + 1
+    if span > MAX_TREND_DAYS:
+        raise ValueError(f'查询区间不能超过 {MAX_TREND_DAYS} 天')
+
+    dept_keys = (
+        list(PRODUCTION_DEPARTMENTS) if departments is None
+        else [d for d in PRODUCTION_DEPARTMENTS if d in departments]
+    )
+
+    rows: list = []
+    if dept_keys:
+        result = await db.execute(
+            select(
+                DailyProductionRecord.production_date,
+                DailyProductionRecord.department,
+                func.coalesce(func.sum(DailyProductionRecord.quantity), 0).label('qty'),
+            )
+            .where(and_(
+                DailyProductionRecord.production_date >= start,
+                DailyProductionRecord.production_date <= end,
+                DailyProductionRecord.department.in_(dept_keys),
+            ))
+            .group_by(DailyProductionRecord.production_date, DailyProductionRecord.department)
+        )
+        rows = list(result.all())
+
+    by_day: dict[str, dict[str, int]] = {}
+    for prod_date, department, qty in rows:
+        by_day.setdefault(prod_date.isoformat(), {})[department] = int(qty)
+
+    days = []
+    for offset in range(span):
+        key = (start + timedelta(days=offset)).isoformat()
+        item: dict = {'date': key}
+        total = 0
+        day_values = by_day.get(key, {})
+        for dept in PRODUCTION_DEPARTMENTS:
+            value = day_values.get(dept, 0) if dept in dept_keys else 0
+            item[dept] = value
+            total += value
+        item['total'] = total
+        days.append(item)
+
+    return {
+        'start_date': start_date,
+        'end_date': end_date,
+        'departments': dept_keys,
+        'days': days,
+    }
 
 
 # ==================== 导出 ====================
