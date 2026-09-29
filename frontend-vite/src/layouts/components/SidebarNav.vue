@@ -108,16 +108,23 @@ const filteredSections = computed(() => {
     .filter((s) => s.items.length > 0)
 })
 
-const openSection = ref<string | null>(null)
+const openSections = ref<Set<string>>(new Set())
 const isSearching = computed(() => searchQuery.value.trim().length > 0)
 
 function toggleSection(title: string) {
-  openSection.value = openSection.value === title ? null : title
+  const next = new Set(openSections.value)
+  if (next.has(title)) {
+    next.delete(title)
+  } else {
+    next.add(title)
+  }
+  // 整体替换而非原地 mutate，确保依赖 openSections.value 的渲染可靠更新
+  openSections.value = next
 }
 
 function sectionIsOpen(title: string) {
   if (isSearching.value) return true
-  return openSection.value === title
+  return openSections.value.has(title)
 }
 
 watch(
@@ -126,7 +133,12 @@ watch(
     if (isSearching.value) return
     for (const s of authStore.filteredNavSections) {
       if (s.items.some((i) => isActive(i.path))) {
-        openSection.value = s.title
+        // 多开模式：只补开当前分组，不关闭用户已手动展开的其它分组
+        if (!openSections.value.has(s.title)) {
+          const next = new Set(openSections.value)
+          next.add(s.title)
+          openSections.value = next
+        }
         return
       }
     }
