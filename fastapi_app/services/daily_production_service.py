@@ -265,6 +265,17 @@ async def get_records(
     }
 
 
+async def get_record(db: AsyncSession, record_id: int) -> DailyProductionRecord | None:
+    """按 id 取单条生产记录（不存在返回 None，不抛异常）。
+
+    供端点做写权限校验与删除前快照使用。
+    """
+    result = await db.execute(
+        select(DailyProductionRecord).where(DailyProductionRecord.id == record_id)
+    )
+    return result.scalar_one_or_none()
+
+
 async def create_record(
     db: AsyncSession,
     *,

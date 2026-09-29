@@ -16,7 +16,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.config import settings
 from fastapi_app.core.database import get_async_db, get_async_read_db
-from fastapi_app.core.deps import require_permission, resolve_production_view_scope
+from fastapi_app.core.deps import (
+    get_current_user_with_permissions,
+    require_permission,
+    resolve_production_view_scope,
+    resolve_production_write_scope,
+)
 from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.core.limiter import limiter
 from fastapi_app.core.production_scope import narrow_departments
@@ -36,6 +41,19 @@ from fastapi_app.services.daily_production_service import InvalidDateRangeError
 from fastapi_app.shared_models import User
 
 router = APIRouter()
+
+
+def _assert_department_writable(department: str, scope: set[str] | None) -> None:
+    """校验部门是否在用户可写范围内。
+
+    Raises:
+        HTTPException: 403 —— scope 非 None 且部门不在其中。
+    """
+    if scope is not None and department not in scope:
+        raise HTTPException(
+            status_code=403,
+            detail=f'无权操作该部门（{department}）的生产数据',
+        )
 
 
 @router.get('/records', response_model=ProductionRecordListResponse)
@@ -104,19 +122,25 @@ async def list_records(
 @router.post('/records', response_model=ProductionRecordActionResponse)
 async def create_record(
     data: ProductionRecordCreate,
+    scope: set[str] | None = Depends(resolve_production_write_scope),
+    user: User = Depends(get_current_user_with_permissions),
     db: AsyncSession = Depends(get_async_db),
-    user: User = Depends(require_permission('production_summary_manage')),
 ) -> ProductionRecordActionResponse:
     """创建生产记录。
 
     Args:
         data: 生产记录创建参数（部门、产品、条码、单价、数量、日期等）。
-        db: 异步数据库会话（读写主库）。
+        scope: 用户可写部门范围（None 表示全部）。
         user: 当前登录用户，作为记录创建人。
+        db: 异步数据库会话（读写主库）。
 
     Returns:
         ProductionRecordActionResponse: 包含成功标志和提示消息的响应。
+
+    Raises:
+        HTTPException: 403（部门越权）。
     """
+    _assert_department_writable(data.department, scope)
     async with db_transaction(db):
         await daily_production_service.create_record(
             db,
@@ -137,21 +161,34 @@ async def create_record(
 async def update_record(
     record_id: int,
     data: ProductionRecordUpdate,
+    scope: set[str] | None = Depends(resolve_production_write_scope),
+    user: User = Depends(get_current_user_with_permissions),
     db: AsyncSession = Depends(get_async_db),
-    user: User = Depends(require_permission('production_summary_manage')),
 ) -> ProductionRecordActionResponse:
     """更新生产记录。
 
     Args:
         record_id: 生产记录 ID。
         data: 生产记录更新参数（仅包含需要修改的字段）。
-        db: 异步数据库会话（读写主库）。
+        scope: 用户可写部门范围（None 表示全部）。
         user: 当前登录用户，作为操作人。
+        db: 异步数据库会话（读写主库）。
 
     Returns:
         ProductionRecordActionResponse: 包含成功标志和提示消息的响应。
+
+    Raises:
+        HTTPException: 404（记录不存在）、403（原部门或目标部门越权）。
     """
     async with db_transaction(db):
+        record = await daily_production_service.get_record(db, record_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail='记录不存在')
+        # 原部门与目标部门都必须可写：既不能改别部门的数据，
+        # 也不能把自己的数据「搬」到无权写入的部门
+        _assert_department_writable(record.department, scope)
+        if data.department is not None:
+            _assert_department_writable(data.department, scope)
         update_data = data.model_dump(exclude_unset=True)
         await daily_production_service.update_record(
             db, record_id, created_by=user.username if hasattr(user, 'username') else '', **update_data
