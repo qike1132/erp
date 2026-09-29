@@ -38,6 +38,11 @@ _SVC_DEPENDS = {
 #   ★ 启动流程【不】用它：Redis 由 _start_redis / _ensure_redis_broker 先起。
 #   ★ 切开发模式的「停生产」也不用它：开发模式同样依赖 Redis。
 _SVC_ALL = (_SVC_API, _SVC_ARQ, _SVC_WEB, _SVC_REDIS_CACHE, _SVC_REDIS_BROKER)
+# 会写入 UVICORN_WORKERS 的服务：erp-prod 是唯一消费方；erp-arq 不读它，一并写入
+#   只为保持两者 AppEnvironmentExtra 一致（免得「安装生产服务」拿其中一个的值覆盖出分歧）。
+#   ★ 刻意不含 _SVC_WEB：erp-web 是 nginx，Python 环境变量对它无意义 ——
+#     安装流程给它的 env 列表本就是空的。别为「统一」把它并进来。
+_SVC_UVICORN_WORKERS = (_SVC_API, _SVC_ARQ)
 # ARQ broker 端口（与 config/redis-broker.conf 的 port 一致）
 _REDIS_BROKER_PORT = 6380
 _NSSM_CANDIDATES = [

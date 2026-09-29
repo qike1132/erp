@@ -159,6 +159,10 @@ class HostingViewMixin:
 
     def _apply_services_stopped(self, data):
         """服务未运行分支：以 sc query 为权威，不读状态文件。出口唯一。"""
+        # 服务未运行 → 无生效值可言，清掉以免留下上一轮的「生效 N」
+        label = getattr(self, 'hosting_workers_effective', None)
+        if label is not None:
+            label.configure(text='', fg=self._PALETTE['text_dim'])
         # ★ 查询失败(未知) ≠ 已停止：sc query 报「未知」时服务可能仍在运行，
         # 不得显示「服务停止」，须显式标「状态未知」并保留原状。
         api_unknown = data.get('api_unknown', False)
@@ -241,6 +245,16 @@ class HostingViewMixin:
     def _apply_running_status(self, data):
         """状态文件可信：按 prod_runner 快照渲染 backend/arq/frontend/backup/redis/ready。"""
         status = data['status']
+        # Worker 生效值（prod_runner 快照里的 workers）：与 NSSM 已配置值不一致，
+        # 说明配置改了但还没重启，如实标注「待重启」，别让人以为已经生效。
+        workers = status.get('workers')
+        label = getattr(self, 'hosting_workers_effective', None)
+        if label is not None and workers:
+            pending = str(workers) != (self.hosting_workers_var.get() or '').strip()
+            label.configure(
+                text=f'生效 {workers}' + ('（待重启）' if pending else ''),
+                fg=self._PALETTE['warning'] if pending else self._PALETTE['text_dim'],
+            )
         svcs = status.get('services', {})
         self._apply_svc_detail(self.hosting_backend_badge, '后端', svcs.get('backend'),
                                running=('ready',), starting=('running',))

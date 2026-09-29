@@ -332,6 +332,66 @@ class ServiceOps:
         self._log_message(f'{name} {"已存在，配置已更新" if existed else "已注册为 Windows 服务"}（开机自启 + 崩溃自动重启）')
         return True
 
+    # ---------- AppEnvironmentExtra 单键读写（Worker 数等「改完重启即生效」的配置）----------
+    # 与 nssm_install 的区别：后者整包覆盖 AppEnvironmentExtra（安装流程用），
+    # 这里只替换一个键、其余元素逐项原样保留 —— 免得为了改 worker 数把
+    # APP_ENV/PYTHONUTF8 等一并重写。
+
+    def _read_env_extra(self, nssm, name) -> list[str] | None:
+        """读 AppEnvironmentExtra 的元素列表；None 表示读取失败（与「空列表」区分）。"""
+        code, out = self.run_capture([nssm, 'get', name, 'AppEnvironmentExtra'])
+        if code != 0:
+            return None
+        # nssm get 对 MULTI_SZ 逐元素一行输出；空白行是终止空元素，剔除。
+        return [line.strip() for line in out.splitlines() if line.strip()]
+
+    def get_env_extra_key(self, nssm, name, key) -> str | None:
+        """读某个键的**已配置**值。界面用它显示真值，避免「显示 4、实际 8」的静默降级。"""
+        elements = self._read_env_extra(nssm, name)
+        if elements is None:
+            return None
+        prefix = f'{key}='
+        for element in elements:
+            if element.upper().startswith(prefix.upper()):
+                return element[len(prefix):]
+        return None
+
+    def set_env_extra_key(self, nssm, name, key, value) -> tuple[bool, str]:
+        """只替换一个键并回读校验。
+
+        ★ 必须逐项作为独立 argv 传给 ``nssm set``：拼成一整串时 NSSM 只在第一个
+          ``=`` 处切分，6 个变量只有第一项生效（2026-09-28 评审确认的既有缺陷）。
+        """
+        value = str(value).strip()
+        if not value:
+            return False, f'{key} 不能为空'
+        elements = self._read_env_extra(nssm, name)
+        if elements is None:
+            return False, f'读取 {name} 的 AppEnvironmentExtra 失败（server_manager 是否以管理员身份运行？）'
+
+        prefix = f'{key}='
+        new_element = f'{key}={value}'
+        updated: list[str] = []
+        replaced = False
+        for element in elements:
+            if not replaced and element.upper().startswith(prefix.upper()):
+                updated.append(new_element)
+                replaced = True
+            else:
+                updated.append(element)
+        if not replaced:  # 该键原本不存在 → 追加，而不是丢弃其余
+            updated.append(new_element)
+
+        code, out = self.run_capture([nssm, 'set', name, 'AppEnvironmentExtra'] + updated)
+        if code != 0:
+            return False, f'写入 {name} 失败：{out.strip() or f"退出码 {code}"}'
+
+        after = self._read_env_extra(nssm, name)
+        if after != updated:
+            got = '读取失败' if after is None else f'{len(after)} 项'
+            return False, f'写后校验不一致：期望 {len(updated)} 项，回读 {got}'
+        return True, f'{name} 已写入 {new_element}（重启该服务后生效）'
+
     def apply_depends(self, name, depends):
         """设置服务的 SCM 依赖关系（DependOnService）。"""
         if not depends:
@@ -423,6 +483,22 @@ class ServiceOps:
                 # 1053/超时类错误不代表失败（服务可能仍在启动中），以轮询结果为准
                 self._msg_queue.put(('log', {'text': f'{name} start 返回非零 (code={code}): {(out or "").strip()[:160]}', 'level': 'WARNING'}))
         return self.wait_service_running(name, timeout=timeout)
+
+    def restart_one_service(self, name, timeout=30):
+        """只重启一个服务。
+
+        与 ``service_cmd_sync('restart')`` 的区别：后者遍历 ``_SVC_ALL``（含 erp-arq、
+        前端与两个 Redis）。改 worker 数只需重启 erp-prod —— 不该顺带掐掉 ARQ 的在途
+        任务与 Redis。
+        """
+        nssm = self.find_nssm()
+        if nssm:
+            self.run_capture([nssm, 'restart', name], timeout=timeout)
+        else:
+            # sc 无 restart：先停后起，终态以轮询为准
+            self.run_capture(['sc', 'stop', name], timeout=timeout)
+            self.run_capture(['sc', 'start', name], timeout=timeout)
+        return self.wait_service_running(name, timeout=25)
 
     def uninstall_services_flow(self, nssm):
         for name in (_SVC_API, _SVC_ARQ, _SVC_WEB):

@@ -38,6 +38,7 @@ from server_manager.constants import (
     _SVC_ARQ,
     _SVC_DEPENDS,
     _SVC_REDIS_BROKER,
+    _SVC_UVICORN_WORKERS,
     _SVC_WEB,
     _VERSION,
     _WEB_PORT,
@@ -1068,12 +1069,20 @@ class ServerManagerApp(HostingViewMixin):
         # 备份徽章：读 /api/health 的 backup 块（产物新鲜度 25h + ARQ 在线）
         self.hosting_backup_badge = StatusBadge(grid, state='stopped', text='备份', size='sm', palette=self._PALETTE, canvas_bg=self._PALETTE['bg_input'])
         self.hosting_backup_badge.grid(row=3, column=0, sticky='w', padx=(12, 6), pady=(0, 8))
-        # Worker 数（安装服务时生效）
+        # Worker 数：初始值读 NSSM 里**已配置**的值，不是本进程环境变量 ——
+        # 后者会显示 4 而生产实际跑 8，点「安装服务」就把 8 静默降回 4（2026-09-29 实测）。
+        # 「应用」= 写入 NSSM + 只重启 erp-prod（uvicorn worker 数是启动时固定的）。
+        # 旁边「生效 N」来自 prod_runner 快照；与已配置值不一致时标「待重启」。
         wk = tk.Frame(grid, bg=self._PALETTE['bg_input'])
         wk.grid(row=2, column=1, sticky='e', padx=(6, 12), pady=(2, 8))
         tk.Label(wk, text='Worker', font=('Microsoft YaHei UI', 9), fg=self._PALETTE['text_dim'], bg=self._PALETTE['bg_input']).pack(side=tk.LEFT, padx=(0, 4))
-        self.hosting_workers_var = tk.StringVar(value=str(int(os.getenv('UVICORN_WORKERS', '4'))))
+        self.hosting_workers_var = tk.StringVar(value=self._configured_workers())
         ttk.Combobox(wk, textvariable=self.hosting_workers_var, values=('2', '4', '6', '8'), width=4, state='readonly', font=('Microsoft YaHei UI', 9)).pack(side=tk.LEFT)
+        workers_apply_btn = RoundedButton(wk, text='应用', variant='subtle', tone='accent', padx=10, pady=2, radius=8, command=self._apply_workers, canvas_bg=self._PALETTE['bg_input'])
+        self._action_buttons.append(workers_apply_btn)   # 变更类按钮，与其它变更按钮一同置灰
+        workers_apply_btn.pack(side=tk.LEFT, padx=(4, 0))
+        self.hosting_workers_effective = tk.Label(wk, text='', font=('Microsoft YaHei UI', 8), fg=self._PALETTE['text_dim'], bg=self._PALETTE['bg_input'])
+        self.hosting_workers_effective.pack(side=tk.LEFT, padx=(6, 0))
         # 主操作行：启动(实心蓝) 停止(描边红) 重启(描边蓝) 刷新(描边蓝)  — 统一 36px / pady=6 / radius=10
         btns = tk.Frame(body, bg=self._PALETTE['bg_card'])
         btns.pack(fill=tk.X, pady=(13, 0))
@@ -1133,6 +1142,67 @@ class ServerManagerApp(HostingViewMixin):
 
     def _nssm_install(self, nssm, name, app, params, env_extra, depends=None):
         return self.svc.nssm_install(nssm, name, app, params, env_extra, depends)
+
+    # ---------- Worker 数：读真值 / 应用并只重启 erp-prod ----------
+
+    def _configured_workers(self) -> str:
+        """NSSM 里 erp-prod 已配置的 worker 数；读不到时退回本进程环境变量（默认 4）。
+
+        必须读 NSSM 真值：``os.getenv`` 取的是 server_manager 自身环境，与生产
+        实际生效值无关 —— 旧实现因此显示 4 而生产跑 8，点「安装服务」就把它降回 4。
+        """
+        try:
+            nssm = self._find_nssm()
+            if nssm:
+                value = self.svc.get_env_extra_key(nssm, _SVC_API, 'UVICORN_WORKERS')
+                if value and value.isdigit():
+                    return value
+        except Exception:  # defensive: 读 NSSM 失败不得阻断界面构建
+            self.log_message('读取 NSSM 中的 Worker 数失败，退回本机环境变量', 'WARNING')
+        return str(int(os.getenv('UVICORN_WORKERS', '4')))
+
+    def _apply_workers(self):
+        nssm = self._find_nssm()
+        if not nssm:
+            messagebox.showerror('缺少 NSSM', '未找到 NSSM，无法修改服务配置。')
+            return
+        self._gate.start('应用 Worker 数', self._apply_workers_flow, nssm,
+                         (self.hosting_workers_var.get() or '').strip())
+
+    def _apply_workers_flow(self, nssm, target):
+        """写 NSSM 的 UVICORN_WORKERS 并只重启 erp-prod。
+
+        uvicorn 的 worker 数是启动时一次性 spawn 的进程数，运行中无法增减 ——
+        所以「生效」必然包含一次重启，先讲清代价再动手。
+        """
+        current = self.svc.get_env_extra_key(nssm, _SVC_API, 'UVICORN_WORKERS')
+        if current == target:
+            self._msg_queue.put(('log', {'text': f'Worker 已是 {target}，无需变更'}))
+            return
+
+        # 服务在跑才需要重启确认；已停止时只写配置，下次启动自然生效
+        if 'RUNNING' in self._svc_state(_SVC_API) and not messagebox.askyesno(
+            '确认重启 erp-prod',
+            f'Worker {current or "（未设置）"} → {target}\n\n'
+            f'worker 数改动必须重启 {_SVC_API} 才生效，期间 :5002 会中断数秒。继续？',
+        ):
+            self._msg_queue.put(('log', {'text': '已取消 Worker 变更'}))
+            return
+
+        # 两个服务都写（_SVC_UVICORN_WORKERS）：erp-arq 不读该变量，但保持两者
+        # AppEnvironmentExtra 一致，免得日后「安装生产服务」用其中一个的值覆盖出分歧。
+        for name in _SVC_UVICORN_WORKERS:
+            self._gate.checkpoint()
+            ok, msg = self.svc.set_env_extra_key(nssm, name, 'UVICORN_WORKERS', target)
+            self._msg_queue.put(('log', {'text': msg, 'level': 'INFO' if ok else 'ERROR'}))
+            if not ok:
+                return
+
+        if 'RUNNING' in self._svc_state(_SVC_API):
+            self._gate.checkpoint()
+            self._msg_queue.put(('log', {'text': f'重启 {_SVC_API} 使 Worker={target} 生效...'}))
+            self.svc.restart_one_service(_SVC_API)
+        self._msg_queue.put(('hosting_refresh', {}))
 
     def _install_services(self):
         if self._mode not in ('none',):
