@@ -182,15 +182,15 @@ async def delete_record(
 @router.get('/daily-summary', response_model=DailySummaryResponse)
 async def daily_summary(
     date: str = Query(..., description='日期 (YYYY-MM-DD)'),
+    scope: set[str] | None = Depends(resolve_production_view_scope),
     db: AsyncSession = Depends(get_async_read_db),
-    _user: User = Depends(require_permission('production_summary_view')),
 ) -> DailySummaryResponse:
     """获取当日生产汇总。
 
     Args:
         date: 查询日期（YYYY-MM-DD）。
+        scope: 用户可见部门范围（None 表示全部）。
         db: 异步数据库会话（只读副本）。
-        _user: 当前登录用户（仅需通过权限校验）。
 
     Returns:
         DailySummaryResponse: 包含当日汇总数据的响应。
@@ -199,7 +199,7 @@ async def daily_summary(
         HTTPException: 日期格式错误时抛出 400。
     """
     try:
-        result = await daily_production_service.get_daily_summary(db, date)
+        result = await daily_production_service.get_daily_summary(db, date, departments=scope)
         return DailySummaryResponse(**result)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -209,16 +209,16 @@ async def daily_summary(
 async def monthly_summary(
     year: int = Query(..., description='年份'),
     month: int = Query(..., ge=1, le=12, description='月份'),
+    scope: set[str] | None = Depends(resolve_production_view_scope),
     db: AsyncSession = Depends(get_async_read_db),
-    _user: User = Depends(require_permission('production_summary_view')),
 ) -> MonthlySummaryResponse:
     """获取月度生产汇总。
 
     Args:
         year: 年份。
         month: 月份，1-12。
+        scope: 用户可见部门范围（None 表示全部）。
         db: 异步数据库会话（只读副本）。
-        _user: 当前登录用户（仅需通过权限校验）。
 
     Returns:
         MonthlySummaryResponse: 包含月度汇总数据的响应。
@@ -227,7 +227,9 @@ async def monthly_summary(
         HTTPException: 数据库连接异常时抛出 500。
     """
     try:
-        result = await daily_production_service.get_monthly_summary(db, year, month)
+        result = await daily_production_service.get_monthly_summary(
+            db, year, month, departments=scope,
+        )
         return MonthlySummaryResponse(**result)
     except (OperationalError, DisconnectionError) as e:
         raise HTTPException(status_code=500, detail=f'获取汇总失败: {settings.sanitize_error(e)}') from e
@@ -277,17 +279,17 @@ async def export_records(
     start_date: str = Query('', description='起始日期 (YYYY-MM-DD)'),
     end_date: str = Query('', description='结束日期 (YYYY-MM-DD)'),
     department: str = Query('', description='部门筛选 (filling/handcraft/packaging)'),
+    scope: set[str] | None = Depends(resolve_production_view_scope),
     db: AsyncSession = Depends(get_async_read_db),
-    _user: User = Depends(require_permission('production_summary_view')),
 ) -> Response:
     """导出生产报表为 Excel。
 
     Args:
         start_date: 起始日期（YYYY-MM-DD）。
         end_date: 结束日期（YYYY-MM-DD）。
-        department: 部门筛选（filling/handcraft/packaging）。
+        department: 部门筛选；超出用户可见范围时忽略该参数。
+        scope: 用户可见部门范围（None 表示全部）。
         db: 异步数据库会话（只读副本）。
-        _user: 当前登录用户（仅需通过权限校验）。
 
     Returns:
         Response: Excel 文件流响应。
@@ -297,7 +299,10 @@ async def export_records(
     """
     try:
         content = await daily_production_service.export_records(
-            db, start_date=start_date, end_date=end_date, department=department
+            db,
+            start_date=start_date,
+            end_date=end_date,
+            departments=narrow_departments(department, scope),
         )
         return Response(
             content=content,

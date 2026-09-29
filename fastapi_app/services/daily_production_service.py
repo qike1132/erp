@@ -352,12 +352,29 @@ async def delete_record(db: AsyncSession, record_id: int) -> None:
 
 # ==================== 每日汇总 ====================
 
-async def get_daily_summary(db: AsyncSession, target_date: str) -> dict:
-    """获取指定日期的各部门汇总"""
+async def get_daily_summary(
+    db: AsyncSession,
+    target_date: str,
+    departments: set[str] | None = None,
+) -> dict:
+    """获取指定日期的各部门汇总
+
+    Args:
+        db: 只读会话。
+        target_date: 目标日期 (YYYY-MM-DD)。
+        departments: 可见部门集合；None 表示全部部门。范围外部门不出现在结果里。
+    """
     d = parse_date_with_fallback(target_date)
+    dept_keys = (
+        list(PRODUCTION_DEPARTMENTS) if departments is None
+        else [k for k in PRODUCTION_DEPARTMENTS if k in departments]
+    )
     result = await db.execute(
         select(DailyProductionRecord)
-        .where(DailyProductionRecord.production_date == d)
+        .where(
+            DailyProductionRecord.production_date == d,
+            DailyProductionRecord.department.in_(dept_keys),
+        )
         .order_by(DailyProductionRecord.department, DailyProductionRecord.id)
     )
     records = list(result.scalars().all())
@@ -386,7 +403,7 @@ async def get_daily_summary(db: AsyncSession, target_date: str) -> dict:
     overall_value = Decimal('0')
     overall_skus = set()
 
-    for dept_key in ('filling', 'handcraft', 'packaging'):
+    for dept_key in dept_keys:
         d_info = dept_data.get(dept_key, {'quantity': 0, 'value': Decimal('0'), 'skus': set()})
         overall_quantity += d_info['quantity']
         overall_value += d_info['value']
@@ -410,11 +427,29 @@ async def get_daily_summary(db: AsyncSession, target_date: str) -> dict:
 
 # ==================== 月度汇总 ====================
 
-async def get_monthly_summary(db: AsyncSession, year: int, month: int) -> dict:
-    """获取月度汇总数据"""
+async def get_monthly_summary(
+    db: AsyncSession,
+    year: int,
+    month: int,
+    departments: set[str] | None = None,
+) -> dict:
+    """获取月度汇总数据
+
+    Args:
+        db: 只读会话。
+        year: 年份。
+        month: 月份。
+        departments: 可见部门集合；None 表示全部部门。
+            注：daily_data 的每日条目仍保留三个部门键（范围外固定为 0），
+            因此每日 total 自动只含范围内部门；monthly_departments 只列范围内部门。
+    """
     start = date(year, month, 1)
     end = date(year, month, calendar.monthrange(year, month)[1])
     days_in_month = calendar.monthrange(year, month)[1]
+    dept_keys = (
+        list(PRODUCTION_DEPARTMENTS) if departments is None
+        else [k for k in PRODUCTION_DEPARTMENTS if k in departments]
+    )
 
     # 优先使用记录单价；当记录单价为 0 时回退到产品当前单价
     effective_unit_price = func.coalesce(
@@ -436,6 +471,7 @@ async def get_monthly_summary(db: AsyncSession, year: int, month: int) -> dict:
         .where(and_(
             DailyProductionRecord.production_date >= start,
             DailyProductionRecord.production_date <= end,
+            DailyProductionRecord.department.in_(dept_keys),
         ))
         .group_by(DailyProductionRecord.production_date, DailyProductionRecord.department)
         .order_by(DailyProductionRecord.production_date, DailyProductionRecord.department)
@@ -482,7 +518,7 @@ async def get_monthly_summary(db: AsyncSession, year: int, month: int) -> dict:
 
     # 月度部门汇总
     monthly_depts = []
-    for dept_key in ('filling', 'handcraft', 'packaging'):
+    for dept_key in dept_keys:
         dept_total_qty = sum(d[dept_key]['quantity'] for d in daily_data)
         dept_total_val = round_money(sum(d[dept_key]['value'] for d in daily_data))
         dept_total_sku = sum(d[dept_key]['sku_count'] for d in daily_data)
@@ -603,16 +639,27 @@ async def export_records(
     *,
     start_date: str = '',
     end_date: str = '',
-    department: str = '',
+    departments: set[str] | None = None,
 ) -> bytes:
-    """导出生产记录为 Excel（企业标准格式）"""
+    """导出生产记录为 Excel（企业标准格式）
+
+    Args:
+        db: 只读会话。
+        start_date: 区间起始日 (YYYY-MM-DD)。
+        end_date: 区间结束日 (YYYY-MM-DD)，闭区间。
+        departments: 可见部门集合；None 表示全部部门。
+    """
     conditions = []
-    if start_date:
-        conditions.append(DailyProductionRecord.production_date >= parse_date_with_fallback(start_date))
-    if end_date:
-        conditions.append(DailyProductionRecord.production_date <= parse_date_with_fallback(end_date))
-    if department:
-        conditions.append(DailyProductionRecord.department == department)
+    range_start = parse_date_with_fallback(start_date) if start_date else None
+    range_end = parse_date_with_fallback(end_date) if end_date else None
+    if range_start and range_end and range_end < range_start:
+        raise ValueError('结束日期不能早于开始日期')
+    if range_start:
+        conditions.append(DailyProductionRecord.production_date >= range_start)
+    if range_end:
+        conditions.append(DailyProductionRecord.production_date <= range_end)
+    if departments is not None:
+        conditions.append(DailyProductionRecord.department.in_(sorted(departments)))
 
     query = select(DailyProductionRecord).order_by(
         DailyProductionRecord.production_date,
@@ -698,7 +745,8 @@ async def export_records(
         ws.append(['暂无数据', '', '', '', '', '', '', '', '', ''])
 
     # 汇总行
-    ws.append(['全部门合计', '', '', '', '', total_qty, round_money(total_val), '', '', ''])
+    summary_label = '全部门合计' if departments is None else '合计'
+    ws.append([summary_label, '', '', '', '', total_qty, round_money(total_val), '', '', ''])
     for cell in ws[ws.max_row]:
         cell.fill = summary_fill
         cell.font = summary_font
