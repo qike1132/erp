@@ -155,7 +155,7 @@ async function doUpload() {
       return
     }
 
-    // 2) 校验客户/产品是否存在、库存是否充足
+    // 2) 校验客户/产品是否存在、是否还有订单余量（订单已发完/不存在则不可添加）
     const val = await planApi.stagingValidate()
     checkErrors.value = val?.errors ?? []
     const failCount = parseErrors.value.length + (val?.error_count ?? checkErrors.value.length)

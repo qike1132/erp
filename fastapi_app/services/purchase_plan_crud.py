@@ -27,9 +27,9 @@ from fastapi_app.services.purchase_plan_common import (
 )
 from fastapi_app.services.purchase_plan_crud_ops import (
     PlanExistsError,
-    _format_insufficient_error,
     _persist_plan_with_retry,
     _validate_details_cross_month,
+    _validate_order_remaining,
     _validate_plan_month,
     _validate_products_exist,
     add_details,
@@ -42,13 +42,13 @@ from fastapi_app.services.purchase_plan_crud_ops import (
 from fastapi_app.services.purchase_plan_inventory import (
     INVENTORY_CACHE_PREFIX,
     INVENTORY_CACHE_TTL,
-    _aggregate_barcode_demand,
-    _aggregate_name_demand,
-    _check_inventory_realtime,
-    _collect_insufficient,
-    _fetch_barcode_stock,
-    _fetch_name_stock,
     _get_inventory_map,
+)
+from fastapi_app.services.purchase_plan_order_quota import (
+    check_order_remaining,
+    collect_without_order,
+    format_without_order_error,
+    get_order_remaining_map,
 )
 from fastapi_app.services.purchase_plan_queries import (
     SHIPMENT_RECORD_LOOKBACK_MONTHS,

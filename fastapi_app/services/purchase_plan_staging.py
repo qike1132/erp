@@ -24,7 +24,10 @@ from fastapi_app.services.purchase_plan_common import (
     _schedule_post_commit,
     logger,
 )
-from fastapi_app.services.purchase_plan_inventory import _check_inventory_realtime
+from fastapi_app.services.purchase_plan_order_quota import (
+    check_order_remaining,
+    format_without_order_error,
+)
 from fastapi_app.shared_models import (
     Product,
     PurchasePlan,
@@ -163,13 +166,15 @@ async def validate_staging(db: AsyncSession, session_id: str) -> dict:
             valid_count += 1
     records_to_check = [r for r in records if r.is_validated]
     if records_to_check:
-        insufficient = await _check_inventory_realtime(db, [{'barcode': '', 'product_name': r.product_name, 'quantity': r.quantity} for r in records_to_check])
-        insufficient_map = {it['product_name']: it for it in insufficient if it.get('product_name')}
+        # 2026-09 修订：准入条件由「库存充足」改为「订单余量 > 0」——
+        # 暂存记录自带客户名，故按 (客户, 产品) 校验（原先的库存校验只按产品，
+        # 跨客户聚合，与本页的客户维度计划语义不符）。
+        no_order = await check_order_remaining(db, [{'customer_name': r.customer_name or '', 'product_name': r.product_name or ''} for r in records_to_check])
+        no_order_set = {(it['customer_name'], it['product_name']) for it in no_order}
         for r in records_to_check:
-            if r.product_name in insufficient_map:
-                it = insufficient_map[r.product_name]
+            if (r.customer_name or '', r.product_name or '') in no_order_set:
                 r.is_validated = 0
-                r.validation_error = f"库存不足：当前库存 {it['current_stock']}，库存不足 {it['total_quantity'] - it['current_stock']}"
+                r.validation_error = f"客户 '{r.customer_name}' 的产品 '{r.product_name}' 没有订单余量（订单已发完或不存在），无法添加计划"
                 valid_count -= 1
                 error_count += 1
     await db.flush()
@@ -296,10 +301,10 @@ async def confirm_staging(db: AsyncSession, session_id: str, batch_id: str='', c
     valid_records = [r for r in records if r.is_validated]
     if not valid_records:
         raise ValueError('所有数据验证未通过，无法保存')
-    insufficient = await _check_inventory_realtime(db, [{'barcode': '', 'product_name': r.product_name, 'quantity': r.quantity} for r in valid_records], with_for_update=True)
-    if insufficient:
-        errors = '; '.join(f"产品 {it['product_name']} 当前库存 {it['current_stock']} 库存不足 {it['total_quantity'] - it['current_stock']}" for it in insufficient)
-        raise ValueError(f'库存不足，无法确认：{errors}')
+    # 2026-09 修订：确认前不再校验库存，改为校验订单余量（与 validate_staging 同口径）
+    no_order = await check_order_remaining(db, [{'customer_name': r.customer_name or '', 'product_name': r.product_name or ''} for r in valid_records])
+    if no_order:
+        raise ValueError(f'以下客户/产品没有订单余量，无法确认：{format_without_order_error(no_order)}')
     groups = _group_staging_records(valid_records)
     all_customers = await customer_service.get_active_customer_names(db)
     customer_id_map = {c['name']: c['id'] for c in all_customers}

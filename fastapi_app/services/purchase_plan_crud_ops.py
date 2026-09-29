@@ -3,7 +3,7 @@
 
 职责：采购计划主单的创建、更新、删除、明细增删改，以及相关的
     数据校验（_validate_plan_month / _validate_details_cross_month /
-    _validate_products_exist）、库存不足提示格式化（_format_insufficient_error）、
+     _validate_products_exist / _validate_order_remaining）、
     主单持久化（含编号冲突重试 _persist_plan_with_retry）。
 
 从 purchase_plan_crud.py 拆分而来，保持函数签名不变。
@@ -22,7 +22,10 @@ from fastapi_app.services.purchase_plan_common import (
     _schedule_post_commit,
     logger,
 )
-from fastapi_app.services.purchase_plan_inventory import _check_inventory_realtime
+from fastapi_app.services.purchase_plan_order_quota import (
+    check_order_remaining,
+    format_without_order_error,
+)
 from fastapi_app.shared_models import (
     Customer,
     Product,
@@ -71,14 +74,26 @@ async def _validate_products_exist(db: AsyncSession, details: list[dict]) -> Non
                 raise ValueError(f"产品 '{pname}' 未找到对应记录")
 
 
-def _format_insufficient_error(insufficient: list[dict]) -> str:
-    """格式化库存不足错误信息"""
-    parts = []
-    for it in insufficient:
-        prefix = f"{it['barcode']}(" if it['barcode'] else ''
-        suffix = ')' if it['barcode'] else ''
-        parts.append(f"产品 {prefix}{it['product_name']}{suffix} 计划数量 {it['total_quantity']}，当前库存 {it['current_stock']}，不足 {it['total_quantity'] - it['current_stock']}")
-    return '; '.join(parts)
+async def _validate_order_remaining(db: AsyncSession, customer_name: str, details: list[dict], action: str) -> None:
+    """准入校验：明细必须对应「订单余量 > 0」的客户+产品
+
+    取代原库存校验（2026-09 用户裁决）：库存是备货进度，不是「能不能排产」
+    的准入条件；只要该客户该产品还有未发完的订单数量就允许添加计划。
+    明细只带产品名，客户名由主单维度传入。
+
+    Args:
+        db: 异步数据库会话。
+        customer_name: 计划所属客户名。
+        details: 明细列表，需含 product_name 键。
+        action: 错误文案中的动作词，如「无法创建出货计划」。
+
+    Raises:
+        ValueError: 存在无订单余量的明细时，文案列出全部客户/产品组合。
+    """
+    items = [{'customer_name': customer_name, 'product_name': d.get('product_name', '')} for d in details]
+    missing = await check_order_remaining(db, items)
+    if missing:
+        raise ValueError(f'以下客户/产品没有订单余量，{action}：{format_without_order_error(missing)}')
 
 
 async def _persist_plan_with_retry(db: AsyncSession, *, customer_id: int, customer_name: str, plan_month: str, remark: str, upload_batch: str, created_by: str) -> PurchasePlan:
@@ -127,9 +142,7 @@ async def create_plan(db: AsyncSession, *, customer_id: int, customer_name: str,
     target_year, target_month = _validate_plan_month(plan_month)
     _validate_details_cross_month(details, target_year, target_month, plan_month)
     await _validate_products_exist(db, details)
-    insufficient = await _check_inventory_realtime(db, [{'barcode': d.get('barcode', ''), 'product_name': d.get('product_name', ''), 'quantity': d['quantity']} for d in details], with_for_update=True)
-    if insufficient:
-        raise ValueError(f'库存不足，无法创建出货计划：{_format_insufficient_error(insufficient)}')
+    await _validate_order_remaining(db, customer_name, details, '无法创建出货计划')
     plan = await _persist_plan_with_retry(db, customer_id=customer_id, customer_name=customer_name, plan_month=plan_month, remark=remark, upload_batch=upload_batch, created_by=created_by)
     for d in details:
         plan_date_val = normalize_plan_date(d['plan_date'])
@@ -189,24 +202,21 @@ async def delete_plan(db: AsyncSession, plan_id: int, *, operator: str='') -> No
 async def update_detail(db: AsyncSession, detail_id: int, *, created_by: str='', **kwargs) -> dict:
     """更新单条明细
 
-    B3 修复：当 quantity 增加时，重新校验库存防止超额计划。
+    2026-09 修订：数量增加不再校验库存，改为校验「订单余量 > 0」
+    （与 create_plan / add_details 同一准入口径）。
     """
     result = await db.execute(select(PurchasePlanDetail).where(PurchasePlanDetail.id == detail_id))
     detail = result.scalar_one_or_none()
     if not detail:
         raise ValueError('明细记录不存在')
-    # 获取 plan_month 用于缓存清除
-    plan_result = await db.execute(select(PurchasePlan.plan_month).where(PurchasePlan.id == detail.plan_id))
+    # 获取 plan_month（用于缓存清除）与 customer_name（用于订单余量校验）
+    plan_result = await db.execute(select(PurchasePlan.plan_month, PurchasePlan.customer_name).where(PurchasePlan.id == detail.plan_id))
     plan_month_row = plan_result.first()
 
-    # B3: 数量增加时校验库存（按增量需求）
+    # 数量增加时仍需准入校验：该客户+该产品必须有订单余量
     new_quantity = kwargs.get('quantity')
-    if new_quantity is not None and new_quantity > detail.quantity:
-        increment = new_quantity - detail.quantity
-        check_items = [{'barcode': detail.barcode, 'product_name': detail.product_name, 'quantity': increment}]
-        insufficient = await _check_inventory_realtime(db, check_items, with_for_update=True)
-        if insufficient:
-            raise ValueError(f'库存不足，无法增加数量：{_format_insufficient_error(insufficient)}')
+    if new_quantity is not None and new_quantity > detail.quantity and plan_month_row:
+        await _validate_order_remaining(db, plan_month_row[1], [{'product_name': detail.product_name}], '无法增加数量')
 
     for field in ('quantity', 'plan_date', 'remark'):
         if field in kwargs and kwargs[field] is not None:
@@ -244,7 +254,8 @@ async def delete_detail(db: AsyncSession, detail_id: int) -> None:
 async def add_details(db: AsyncSession, plan_id: int, details: list[dict]) -> dict:
     """向主单追加明细
 
-    B3 修复：追加明细前必须校验库存，与 create_plan 行为一致。
+    2026-09 修订：不再校验库存，改为校验「订单余量 > 0」，
+    与 create_plan 行为一致。
     """
     result = await db.execute(select(PurchasePlan).where(PurchasePlan.id == plan_id))
     plan = result.scalar_one_or_none()
@@ -252,11 +263,8 @@ async def add_details(db: AsyncSession, plan_id: int, details: list[dict]) -> di
         raise ValueError('采购计划不存在')
     ym_parts = plan.plan_month.split('-')
     target_year, target_month = (int(ym_parts[0]), int(ym_parts[1]))
-    # B3: 校验产品存在 + 库存（与 create_plan 一致）
     await _validate_products_exist(db, details)
-    insufficient = await _check_inventory_realtime(db, [{'barcode': d.get('barcode', ''), 'product_name': d.get('product_name', ''), 'quantity': d['quantity']} for d in details], with_for_update=True)
-    if insufficient:
-        raise ValueError(f'库存不足，无法追加明细：{_format_insufficient_error(insufficient)}')
+    await _validate_order_remaining(db, plan.customer_name, details, '无法追加明细')
     added = 0
     for d in details:
         plan_date_val = normalize_plan_date(d['plan_date'])
