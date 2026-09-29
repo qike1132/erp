@@ -333,3 +333,47 @@ def require_superuser(permission_name: str = 'user_manage'):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='仅超级用户可访问')
         return current_user
     return superuser_checker
+
+
+async def get_current_user_with_permissions(
+    user: User = Depends(_get_user_with_permissions),
+) -> User:
+    """公开别名。
+
+    `_get_user_with_permissions` 是本模块私有依赖；端点需要「当前用户 + 已加载权限」
+    时通过本别名依赖，避免跨模块导入私有名字。FastAPI 会缓存依赖，与
+    `resolve_production_*_scope` 同时使用时不会重复查库。
+    """
+    return user
+
+
+async def resolve_production_view_scope(
+    user: User = Depends(_get_user_with_permissions),
+) -> set[str] | None:
+    """生产报表可见部门范围。
+
+    Returns:
+        None 表示全部部门；否则为可见部门集合。
+
+    Raises:
+        HTTPException: 403 —— 用户在生产报表上没有任何可见部门。
+            空集绝不允许退化为「不过滤」，否则未授权用户会看到全部数据。
+    """
+    from fastapi_app.core.production_scope import production_scope_of
+
+    scope = production_scope_of(user, write=False)
+    if scope is not None and not scope:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='权限不足')
+    return scope
+
+
+async def resolve_production_write_scope(
+    user: User = Depends(_get_user_with_permissions),
+) -> set[str] | None:
+    """生产报表可写部门范围（语义同上，但只认 manage 码）。"""
+    from fastapi_app.core.production_scope import production_scope_of
+
+    scope = production_scope_of(user, write=True)
+    if scope is not None and not scope:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='权限不足')
+    return scope
