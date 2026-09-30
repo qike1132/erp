@@ -10,6 +10,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 import pytest_asyncio
 
+from fastapi_app.api.v1.endpoints.purchase_center.role_routes import get_role_service
+from fastapi_app.main import app
 from fastapi_app.services.product import role_service
 
 
@@ -139,16 +141,13 @@ class _FakeRoleService:
 
 @pytest.fixture
 def role_override():
-    from fastapi_app.core import container
-    created = []
-
+    """用 FastAPI dependency_overrides 注入角色服务替身（原 core.container 已删除）。"""
     def _install(fake):
-        container.override('role_service', fake)
-        created.append(fake)
+        app.dependency_overrides[get_role_service] = lambda: fake
         return fake
 
     yield _install
-    container.reset('role_service')
+    app.dependency_overrides.pop(get_role_service, None)
 
 
 class TestRoleEndpoints:

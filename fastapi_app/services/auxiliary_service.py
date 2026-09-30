@@ -155,7 +155,7 @@ async def orchestrate_batch_stockouts(db: AsyncSession, stockouts_data: list[dic
 
 
 # ==================== 查询函数（自 auxiliary.py 端点下沉，纯查询搬移） ====================
-# 产品搜索已统一委托 core.container 的 ProductSearchService（2026-08-22 批次 2-4）
+# 产品搜索已统一委托 ProductSearchService 模块级单例（2026-08-22 批次 2-4；S8 起不再经 core.container）
 
 
 async def get_product_by_id(db: AsyncSession, product_id: int) -> Product | None:

@@ -396,11 +396,11 @@ async def search_products(db: AsyncSession, query: str, *, search_service=None) 
 
     Args:
         search_service: 可注入的搜索服务实例（测试时可替换），
-            默认 None 时从容器解析模块级单例。
+            默认 None 时使用模块级单例 product_search_service。
     """
     if search_service is None:
-        from fastapi_app.core.container import get_product_search_service
-        search_service = get_product_search_service()
+        from fastapi_app.services.product_search_service import product_search_service
+        search_service = product_search_service
     return await search_service.search_async_with_cache(db, query, limit=20)
 
 

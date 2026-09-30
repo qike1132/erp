@@ -57,11 +57,11 @@ async def search_customers(db: AsyncSession, query_str: str, *, search_service=N
 
     Args:
         search_service: 可注入的搜索服务实例（测试时可替换），
-            默认 None 时从容器解析模块级单例。
+            默认 None 时使用模块级单例 customer_search_service。
     """
     if search_service is None:
-        from fastapi_app.core.container import get_customer_search_service
-        search_service = get_customer_search_service()
+        from fastapi_app.services.customer_search_service import customer_search_service
+        search_service = customer_search_service
 
     results = await search_service.search_active_customers(db, query_str, limit=20)
 

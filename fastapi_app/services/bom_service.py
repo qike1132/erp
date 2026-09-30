@@ -975,8 +975,8 @@ async def preview_bom(db: AsyncSession, source_product_id: int) -> dict:
 
 async def search_for_bom_copy(db: AsyncSession, keyword: str, *, search_service=None) -> list:
     if search_service is None:
-        from fastapi_app.core.container import get_product_search_service
-        search_service = get_product_search_service()
+        from fastapi_app.services.product_search_service import product_search_service
+        search_service = product_search_service
 
     if not keyword:
         return []

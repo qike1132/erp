@@ -150,9 +150,8 @@ async def product_search(
     """产品搜索（支持名称、条码）——统一委托 ProductSearchService（与产品清单共用实现与缓存）"""
     if not q.strip():
         return []
-    from fastapi_app.core.container import get_product_search_service
-    svc = get_product_search_service()
-    return await svc.search_async_with_cache(db, q.strip(), limit=50)
+    from fastapi_app.services.product_search_service import product_search_service
+    return await product_search_service.search_async_with_cache(db, q.strip(), limit=50)
 
 
 @router.get("/product-available-stock", response_model=ProductAvailableStockResponse)

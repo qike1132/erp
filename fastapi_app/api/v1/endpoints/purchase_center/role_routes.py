@@ -19,7 +19,6 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi_app.core.container import get_role_service
 from fastapi_app.core.database import get_async_db as get_db
 from fastapi_app.core.database import get_async_read_db as get_read_db
 from fastapi_app.core.deps import require_permission
@@ -32,6 +31,7 @@ from fastapi_app.schemas.purchase_center import (
     RoleListResponse,
     RoleRename,
 )
+from fastapi_app.services.product import role_service
 from fastapi_app.services.product.role_service import (
     RoleNameConflictError,
     RoleNotFoundError,
@@ -39,6 +39,14 @@ from fastapi_app.services.product.role_service import (
 )
 
 router = APIRouter()
+
+
+def get_role_service():
+    """返回全局角色服务模块（模块级函数集合）。
+
+    作为 FastAPI 依赖暴露，测试可用 app.dependency_overrides 注入替身。
+    """
+    return role_service
 
 
 def _map_not_found(exc: Exception) -> HTTPException:
@@ -69,9 +77,10 @@ _ROLE_ERROR_MAP = {
 async def api_list_roles(
     db: AsyncSession = Depends(get_read_db),
     _current_user=Depends(require_permission('product_manage')),
+    svc=Depends(get_role_service),
 ) -> dict[str, Any]:
     """列出全部全局角色（跨产品复用字典）。"""
-    roles = await get_role_service().list_roles(db)
+    roles = await svc.list_roles(db)
     return success_response(roles=roles)
 
 
@@ -80,10 +89,11 @@ async def api_create_role(
     data: RoleCreate,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(require_permission('product_manage')),
+    svc=Depends(get_role_service),
 ) -> dict[str, Any]:
     """新建全局角色；名称冲突返回 400。"""
     async with db_transaction(db, error_map=_ROLE_ERROR_MAP):
-        role = await get_role_service().create_role(db, data.name, current_user.username)
+        role = await svc.create_role(db, data.name, current_user.username)
     return success_response(role=role)
 
 
@@ -93,10 +103,11 @@ async def api_rename_role(
     data: RoleRename,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(require_permission('product_manage')),
+    svc=Depends(get_role_service),
 ) -> dict[str, Any]:
     """重命名全局角色；改名同步镜像列、不改物料归属（按 id）；冲突 400 / 不存在 404。"""
     async with db_transaction(db, error_map=_ROLE_ERROR_MAP):
-        role = await get_role_service().rename_role(db, role_id, data.name, current_user.username)
+        role = await svc.rename_role(db, role_id, data.name, current_user.username)
     return success_response(role=role)
 
 
@@ -105,8 +116,9 @@ async def api_delete_role(
     role_id: int,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(require_permission('product_manage')),
+    svc=Depends(get_role_service),
 ) -> dict[str, Any]:
     """删除全局角色；被任意产品引用时返回 409 且文案含引用数。"""
     async with db_transaction(db, error_map=_ROLE_ERROR_MAP):
-        message = await get_role_service().delete_role(db, role_id, current_user.username)
+        message = await svc.delete_role(db, role_id, current_user.username)
     return success_response(message=message)
