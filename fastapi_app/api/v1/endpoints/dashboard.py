@@ -12,7 +12,8 @@ from sqlalchemy.exc import DisconnectionError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.database import get_async_read_db
-from fastapi_app.core.deps import get_current_user_id
+from fastapi_app.core.deps import get_current_user_id, get_current_user_with_permissions
+from fastapi_app.core.production_scope import production_scope_of
 from fastapi_app.services.dashboard_service import (
     Activity,
     CustomerOutDetailResponse,
@@ -31,6 +32,7 @@ from fastapi_app.services.dashboard_service import (
     fetch_nav_sections,
     fetch_system_status,
 )
+from fastapi_app.shared_models import User
 
 logger = logging.getLogger(__name__)
 
@@ -95,10 +97,14 @@ async def get_system_status(
 async def get_mobile_dashboard(
     query_date: str | None = None,
     user_id: int = Depends(get_current_user_id),
+    current_user: User = Depends(get_current_user_with_permissions),
     db: AsyncSession = Depends(get_async_read_db),
 ):
     """移动端数据看板（一次聚合所有板块数据）"""
-    data = await fetch_mobile_dashboard(query_date, db)
+    # 生产卡片按当前用户的部门范围收窄。用非抛错的 production_scope_of：
+    # 无生产权限的用户得到空集（生产卡片为空），而不是 403 拖垮整个看板。
+    scope = production_scope_of(current_user, write=False)
+    data = await fetch_mobile_dashboard(query_date, db, departments=scope)
     return MobileDashboardResponse(**data)
 
 

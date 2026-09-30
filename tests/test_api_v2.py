@@ -9,13 +9,14 @@ from fastapi.testclient import TestClient
 from fastapi_app.api.v2.endpoints import dashboard as dashboard_endpoint
 from fastapi_app.api.v2.router import router as v2_router
 from fastapi_app.core.database import get_async_read_db
-from fastapi_app.core.deps import get_current_user_id
+from fastapi_app.core.deps import get_current_user_id, get_current_user_with_permissions
 from fastapi_app.services.dashboard_service import (
     Activity,
     CustomerOutDetailResponse,
     NavSection,
     TodoItem,
 )
+from fastapi_app.shared_models import User
 
 
 @pytest.fixture
@@ -26,10 +27,19 @@ def client(monkeypatch):
     async def _fake_user():
         return 1
 
+    async def _fake_current_user():
+        # 移动看板端点现在依赖 get_current_user_with_permissions 解析部门范围；
+        # 该测试用独立 FastAPI 实例，需一并覆盖，否则会走真实鉴权/DB。
+        user = User(username="t_user", password="x")
+        user.is_super = True
+        user.permissions = []
+        return user
+
     async def _fake_db():
         return None
 
     app.dependency_overrides[get_current_user_id] = _fake_user
+    app.dependency_overrides[get_current_user_with_permissions] = _fake_current_user
     app.dependency_overrides[get_async_read_db] = _fake_db
 
     async def _fake_fetch(_db):
@@ -61,9 +71,10 @@ def client(monkeypatch):
             data=SystemStatus(is_running=True, last_sync_time="2026-06-22", data_status="up_to_date"),
         )
 
-    async def _fake_mobile_dashboard(_query_date, _db):
+    async def _fake_mobile_dashboard(_query_date, _db, departments=None):
         # 端点已改为 await fetch_mobile_dashboard(...)（服务实现为 async），
-        # 服务返回 dict，由端点构造成 MobileDashboardResponse
+        # 服务返回 dict，由端点构造成 MobileDashboardResponse；
+        # departments 为端点新增的部门范围参数（None 表示全部）。
         return {
             "success": True,
             "data": {

@@ -38,7 +38,11 @@ logger = logging.getLogger(__name__)
 
 @cache_result(key_prefix="dashboard:mobile", ttl=30, local_ttl=30,
               key_builder=lambda **kwargs: f"d{kwargs.get('query_date', '')}")  # sql-safe: escape_like/绑定参数/常量片段
-async def fetch_mobile_dashboard(query_date: str | None, db: AsyncSession) -> dict:
+async def fetch_mobile_dashboard(
+    query_date: str | None,
+    db: AsyncSession,
+    departments: set[str] | None = None,
+) -> dict:
     """移动端数据看板（一次聚合所有板块数据）
 
     优化：合并 StockOut 当日/当月/总出库为 SUM FILTER（3→1）、shipping 复用 stock 当日值（1→0）、
@@ -50,6 +54,9 @@ async def fetch_mobile_dashboard(query_date: str | None, db: AsyncSession) -> di
 
     返回 dict（model_dump）以兼容 cache_result 的 JSON 序列化。
     endpoint 层负责重新构造 MobileDashboardResponse。
+
+    departments 为 None 时行为与改动前完全一致（生产卡片不加部门条件）；
+    否则生产卡片只聚合给定部门，空集按"无可见部门"处理（in_([]) 恒假，fail-closed）。
     """
     if query_date:
         try:
@@ -113,7 +120,7 @@ async def fetch_mobile_dashboard(query_date: str | None, db: AsyncSession) -> di
 
     try:
         # 2. 生产数据：指定日期各部门生产汇总（从DailyProductionRecord读取实际部门数据）
-        dpr_result = await db.execute(
+        dpr_stmt = (
             select(
                 DailyProductionRecord.department,
                 func.coalesce(func.sum(DailyProductionRecord.quantity), 0),
@@ -124,6 +131,11 @@ async def fetch_mobile_dashboard(query_date: str | None, db: AsyncSession) -> di
             .where(extract('day', DailyProductionRecord.production_date) == today.day)
             .group_by(DailyProductionRecord.department)
         )
+        if departments is not None:
+            dpr_stmt = dpr_stmt.where(
+                DailyProductionRecord.department.in_(sorted(departments))
+            )
+        dpr_result = await db.execute(dpr_stmt)
         dept_map: dict[str, dict] = {}
         total_val = 0.0
 
@@ -139,7 +151,9 @@ async def fetch_mobile_dashboard(query_date: str | None, db: AsyncSession) -> di
         production_data.total_value = round_money(total_val)
 
         if not dept_map:
-            any_result = await db.execute(
+            # 当月兜底：当日无行时退到当月汇总。必须同样收窄到可见部门，
+            # 否则单部门用户会从这里看到其他部门的月内数据。
+            any_stmt = (
                 select(
                     DailyProductionRecord.department,
                     func.coalesce(func.sum(DailyProductionRecord.quantity), 0),
@@ -150,6 +164,11 @@ async def fetch_mobile_dashboard(query_date: str | None, db: AsyncSession) -> di
                 .group_by(DailyProductionRecord.department)
                 .limit(3)
             )
+            if departments is not None:
+                any_stmt = any_stmt.where(
+                    DailyProductionRecord.department.in_(sorted(departments))
+                )
+            any_result = await db.execute(any_stmt)
             for row in any_result.all():
                 dept_code = row[0] or 'other'
                 dept = dept_name_map.get(dept_code, dept_code)

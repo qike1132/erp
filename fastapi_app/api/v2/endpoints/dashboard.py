@@ -9,7 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import Response
 
 from fastapi_app.core.database import get_async_read_db
-from fastapi_app.core.deps import get_current_user_id
+from fastapi_app.core.deps import get_current_user_id, get_current_user_with_permissions
+from fastapi_app.core.production_scope import production_scope_of
 from fastapi_app.services.dashboard_service import (
     Activity,
     CustomerOutDetailResponse,
@@ -28,6 +29,7 @@ from fastapi_app.services.dashboard_service import (
     fetch_nav_sections,
     fetch_system_status,
 )
+from fastapi_app.shared_models import User
 
 from ..versioning import _version_headers
 
@@ -95,10 +97,14 @@ async def get_mobile_dashboard_v2(
     response: Response,
     query_date: str | None = None,
     user_id: int = Depends(get_current_user_id),
+    current_user: User = Depends(get_current_user_with_permissions),
     db: AsyncSession = Depends(get_async_read_db),
 ):
     """v2 移动端数据看板"""
-    data = await fetch_mobile_dashboard(query_date, db)
+    # 同 v1：生产卡片按当前用户的部门范围收窄，非抛错的 production_scope_of 保证
+    # 无生产权限时返回空卡片而非 403。
+    scope = production_scope_of(current_user, write=False)
+    data = await fetch_mobile_dashboard(query_date, db, departments=scope)
     _set_version_headers(response)
     return MobileDashboardResponse(**data)
 
