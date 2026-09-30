@@ -8,7 +8,7 @@ import { useQueryClient } from '@tanstack/vue-query'
 import { orderApi } from '@/api'
 import { showToast } from '@/composables/useToast'
 import { getErrorMessage } from '@/types/errors'
-import { invalidateStockDataQueries } from '@/utils/queryKeys'
+import { invalidateOrderDerivedQueries } from '@/utils/queryKeys'
 import type { OrderRecord } from './types'
 
 type ConfirmDialogApi = {
@@ -34,7 +34,7 @@ export function useOrderDelete(
       showToast(res?.message || '订单删除成功', 'success')
       // 删除订单会同时改变库存视图（order_agg/country_agg 过滤 is_deleted）：
       // 必须失效派生查询缓存，否则 /stock 在 staleTime 内仍展示删除前的库存数据。
-      invalidateStockDataQueries(queryClient)
+      invalidateOrderDerivedQueries(queryClient)
       fetchOrders()
     } catch (e: unknown) {
       showToast(getErrorMessage(e, '删除订单失败'), 'error')

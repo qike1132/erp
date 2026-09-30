@@ -128,6 +128,7 @@ import { ref } from 'vue'
 import UiPagination from '@/components/ui/UiPagination.vue'
 import UiSpinner from '@/components/ui/UiSpinner.vue'
 import OutsourceProcessDialog from '@/views/outsource/components/OutsourceProcessDialog.vue'
+import { useWebSocket } from '@/composables/useWebSocket'
 import { useOutsourceOrders } from '@/views/outsource/composables/useOutsourceOrders'
 import type { OutsourceOrderRow } from '@/views/outsource/composables/useOutsourceOrders'
 
@@ -152,6 +153,19 @@ const {
   totalQuantity,
   goPage,
 } = useOutsourceOrders(props)
+
+// 实时刷新：客户订单写入（删除/改数量/新建）由后端广播 WebSocket 事件，
+// 收到即重新拉取当前列表。与采购页（usePurchaseHandlers）同款通道；
+// 此前本页无任何实时通道，跨标签页操作只能等 30s staleTime 过期。
+useWebSocket({
+  isActive: ref(true),
+  onMessage: (data) => {
+    const t = String(data.type)
+    if (t === 'order_created' || t === 'order_updated' || t === 'order_deleted') {
+      refetch()
+    }
+  },
+})
 
 // ==================== 工序管理弹窗（子组件） ====================
 const detailOpen = ref(false)

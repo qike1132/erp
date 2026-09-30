@@ -80,10 +80,11 @@
  * - 提示：顶部仅保留「未确认」汇总横幅；「未下单」汇总横幅已按业务反馈移除
  *   （行内「未开单」徽章与确认按钮禁用态/门控提示保持不变）。
  */
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import BeileOrderTab from '@/views/beile-order/BeileOrderTab.vue'
 import HubeiSearchBar from '@/views/hubei/HubeiSearchBar.vue'
 import { provideBeileOrders } from '@/views/beile-order/composables/useBeileOrders'
+import { useWebSocket } from '@/composables/useWebSocket'
 
 const {
   filters,
@@ -100,7 +101,21 @@ const {
   exporting,
   handleExport,
   handlePrint,
+  refetch: refetchBeileOrders,
 } = provideBeileOrders()
+
+// 实时刷新：客户订单写入（删除/改数量/新建）由后端广播 WebSocket 事件，
+// 收到即重新拉取当前列表。与采购页（usePurchaseHandlers）同款通道；
+// 此前本页无任何实时通道，跨标签页操作只能等 30s staleTime 过期。
+useWebSocket({
+  isActive: ref(true),
+  onMessage: (data) => {
+    const t = String(data.type)
+    if (t === 'order_created' || t === 'order_updated' || t === 'order_deleted') {
+      refetchBeileOrders()
+    }
+  },
+})
 
 /** 筛选栏 v-model：双向绑定到 composable 的 filters（reactive） */
 const filterOrderNo = computed({

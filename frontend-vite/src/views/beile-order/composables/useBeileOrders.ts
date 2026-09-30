@@ -300,10 +300,17 @@ export function useBeileOrders() {
         page: page.value,
         per_page: perPage.value,
       }),
-    staleTime: 30_000,
+    // 「每次显示都取数」：本查询会被 persistQueryClient 存进 sessionStorage，恢复的
+    // 快照自带 dataUpdatedAt；若沿用 staleTime，刷新/切回本页时快照被判「新鲜」→ 不重取
+    // → 显示客户订单删除前的旧列表（实测延迟 30s）。
+    //   staleTime: 0            —— 任何时刻都视为过期，显示即允许重取
+    //   refetchOnMount: 'always'—— 挂载（刷新/路由进入）必定重取
+    //   refetchOnWindowFocus    —— 切回本标签页必定重取（WS 可能正好断线，不能只靠推送）
+    // keepPreviousData 保证仍先渲染缓存（秒开），校正结果随即覆盖。
+    staleTime: 0,
     gcTime: 60_000,
-    // 不再使用 refetchInterval 定时刷新（会在用户交互时打断渲染）；
-    // 依赖 vue-query 默认的 refetchOnWindowFocus + staleTime，仅在页面重新可见且数据过期时刷新。
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
     placeholderData: keepPreviousData,
   })
 

@@ -20,7 +20,7 @@
 import { ref } from 'vue'
 import { useQueryClient } from '@tanstack/vue-query'
 import { useWebSocket } from '@/composables/useWebSocket'
-import { invalidateStockDataQueries } from '@/utils/queryKeys'
+import { invalidateOrderDerivedQueries } from '@/utils/queryKeys'
 import InventoryTab from './InventoryTab.vue'
 
 const queryClient = useQueryClient()
@@ -37,7 +37,7 @@ useWebSocket({
   isActive: ref(true),
   onMessage: (data) => {
     if (!STOCK_REFRESH_EVENTS.has(String(data.type))) return
-    invalidateStockDataQueries(queryClient)
+    invalidateOrderDerivedQueries(queryClient)
   },
 })
 </script>

@@ -10,7 +10,7 @@ import { usePurchaseOrders } from './usePurchaseOrders'
 import { useCompletedOrders, type CompletedOrderFilters } from './useCompletedOrders'
 import { useSummaryModal } from './useSummaryModal'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
-import { invalidateStockDataQueries } from '@/utils/queryKeys'
+import { invalidateOrderDerivedQueries } from '@/utils/queryKeys'
 
 /**
  * usePurchaseActions — 采购页面业务动作（审核/完成/汇总/筛选/导出）
@@ -67,7 +67,7 @@ export function usePurchaseActions(deps: PurchaseActionDeps) {
         purchaseOrders.load()
         // 一键审核会把客户订单状态由「待备货」改为「已备货」，报表订单流水按 status 分组，
         // 需一并失效派生查询，否则 /report 继续展示审核前的状态
-        invalidateStockDataQueries(queryClient)
+        invalidateOrderDerivedQueries(queryClient)
       } else showToast(res.message || '审核失败', 'error')
     } catch (err: unknown) {
       showToast('审核失败: ' + getErrorMessage(err, ''), 'error')
@@ -96,7 +96,7 @@ export function usePurchaseActions(deps: PurchaseActionDeps) {
         unprocessed.load()
         purchaseOrders.load()
         // 同上：审核改变了客户订单状态，报表订单流水需一并失效
-        invalidateStockDataQueries(queryClient)
+        invalidateOrderDerivedQueries(queryClient)
       } else showToast(res.message || '审核失败', 'error')
     } catch (err: unknown) {
       showToast('审核失败: ' + getErrorMessage(err, ''), 'error')

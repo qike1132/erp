@@ -44,8 +44,12 @@ export function useUnprocessedOrders(options?: { refetchInterval?: () => number 
         throw err
       }
     },
-    staleTime: 30_000,
+    // 每次显示都取数：持久化快照 + staleTime 会让刷新/切回本页时沿用旧列表
+    // （已删除的客户订单仍留在「待审核」约 30s）。
+    staleTime: 0,
     gcTime: 60_000,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
     placeholderData: keepPreviousData,
     retry: false,
     refetchInterval: options?.refetchInterval,

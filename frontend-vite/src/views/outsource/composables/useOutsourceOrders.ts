@@ -56,8 +56,12 @@ export function useOutsourceOrders(props: { productFilter: string; customerFilte
         page: page.value,
         per_page: perPage.value,
       }),
-    staleTime: 30_000,
+    // 每次显示都取数（同 useBeileOrders）：持久化快照 + staleTime 会让刷新/切回本页
+    // 时沿用旧列表，客户订单删除后本页延迟约 30s 才更新。
+    staleTime: 0,
     gcTime: 60_000,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
     placeholderData: keepPreviousData,
   })
 

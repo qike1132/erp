@@ -23,8 +23,12 @@ export function usePurchaseOrders(options?: { refetchInterval?: () => number | f
         throw err
       }
     },
-    staleTime: 30_000,
+    // 每次显示都取数：持久化快照 + staleTime 会让刷新/切回本页时沿用旧列表
+    // （客户订单删除后采购列表延迟约 30s 才更新）。
+    staleTime: 0,
     gcTime: 60_000,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
     placeholderData: keepPreviousData,
     retry: false,
     refetchInterval: options?.refetchInterval,
