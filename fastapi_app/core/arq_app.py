@@ -65,8 +65,8 @@ from fastapi_app.tasks.batch_tasks import (
 )
 from fastapi_app.tasks.maintenance_tasks import (
     ensure_readonly_grants_task,
+    maintain_logs_task,
     refresh_dashboard_mv_task,
-    rotate_nginx_logs_task,
 )
 from fastapi_app.tasks.numbering_audit_task import numbering_audit_task
 from fastapi_app.tasks.plan_tasks import (
@@ -113,10 +113,10 @@ cron_schedules = [
         'schedule': 'every 10m',
     },
     {
-        # nginx 日志轮转：prod_runner 不再托管 nginx 后的轮转归属。
-        # ARQ 停摆仅意味着暂不轮转(优雅降级),阈值 100MB。
-        'name': 'nginx-log-rotation',
-        'func': rotate_nginx_logs_task,
+        # 日志维护：按共享策略（config/log_policy.json）轮转超限日志 + 保留清理。
+        # 与桌面壳、prod_runner 读同一份策略、调同一套实现；这里是每日兜底。
+        'name': 'log-maintenance',
+        'func': maintain_logs_task,
         'cron': {'hour': 4, 'minute': 30},
         'schedule': '4:30',
         'timeout': 120,

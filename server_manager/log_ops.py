@@ -19,13 +19,19 @@
   21 个文件，其中 ``erp.log``/``error.log``/``fastapi_*`` 各已 9–15MB)。
   按「最后写入时间」删是对所有写入方都成立的不变量，不需要知道各自的命名规则。
 
-■ 为什么需要 ``rotate_oversized_logs``(用户诉求:「给管理器自己的日志与无人轮转的 nginx 日志加轮转兜底，不再依赖外部定时任务」)
-  现状是「谁写的谁轮转，但有两个没人管」：NSSM 服务日志有 ``AppRotateBytes=10MB``；
-  后端 ``fastapi_*.log`` 有自己的 handler；而 **nginx 的 access/error 日志靠 ARQ 的
-  每日 04:30 cron 轮转**（ARQ 一挂就没人转），**管理器自己的 ``server_manager_*.log``
-  则从来没有轮转**（只靠保留期删旧文件）。本模块提供一道与外部任务无关的兜底：
-  管理器自己把超过阈值的现行日志就地切成「一代 .1 副本 + 清零的现行文件」。
-  阈值取 50MB（= NSSM 自身上限的 5 倍），天然不会和 NSSM 抢同一个文件。
+■ 轮转/保留/巡检三件事的**机制**已在 ``utils/log_rotation.py``（与后端 ARQ cron、
+  prod_runner 共用同一份实现与同一份策略文件 ``config/log_policy.json``）：
+  · 轮转：给无人管的日志止血（NSSM 只转自己的、nginx 靠 ARQ、管理器自己的从不轮转）；
+  · 保留：按最后写入时间 + 目录体积上限删旧文件；
+  · 巡检：两次采样算字节/天，回答「谁在疯长」（本模块独有，见下）。
+  本模块只保留「界面侧运维」与巡检，并把上面那些名字重新导出给 ``log_view`` ——
+  不这么做的话，管理器与后端就会各有一份阈值、各写一遍 copytruncate（2026-09-30 前
+  的真实状态：同一个机器上「多大该轮转」有三个答案）。
+
+■ 为什么必须用显式 path 读策略
+  ``utils/log_rotation.default_policy_path()`` 基于 ``__file__`` 推算，而打包后的 exe
+  里 ``__file__`` 指向解包临时目录 —— 会算出不存在的路径并静默回落默认值。
+  故管理器一律显式传 ``path``（见 ``log_view`` 用 ``_PROJECT_DIR`` 拼路径）。
 
 ■ 为什么需要 ``inspect_log_health``(用户诉求:「列出谁在疯长，异常增长时告警」)
   保留清理只回答「过期了没」，它**不解释增长**:同为 100MB，一个安静攒了 14 天的
@@ -37,8 +43,6 @@ from __future__ import annotations
 
 import contextlib
 import json
-import os
-import shutil
 import threading
 import time
 from dataclasses import dataclass, field
@@ -47,26 +51,72 @@ from pathlib import Path
 from server_manager.constants import _SVC_API, _SVC_ARQ, _SVC_WEB
 from server_manager.service_ops import ServiceOps
 
+# 轮转 / 保留 / 策略的**唯一实现**在 utils/log_rotation.py（与后端 ARQ cron、prod_runner
+# 共用）。这里全部重新导出：log_view 与测试仍从本模块取名字，机制却只有一份。
+# （utils 包已改为惰性导出，故这条 import 不会把 openpyxl/polars 拉进打包 exe。）
+from utils.log_rotation import (
+    DEFAULT_LOG_POLICY,
+    LOG_MIN_AGE_SECONDS,
+    LogPolicy,
+    LogPruneReport,
+    LogRotationReport,
+    human_bytes,
+    iter_log_files,
+    load_log_policy,
+    policy_from_fields,
+    prune_log_files,
+    rotate_file_copytruncate,
+    rotate_oversized_logs,
+    safe_mtime,
+    save_log_policy,
+)
+
+# 本模块对 UI 层（log_view）与测试的公开面：既含自有的回灌/巡检，也含从
+# utils.log_rotation **重新导出**的机制名。列进 __all__ 是为了让「这里只是中转、
+# 不是各自实现」在静态检查层面也成立（否则 ruff F401 会把中转当成漏用的 import）。
+__all__ = [
+    'DEFAULT_LOG_POLICY',
+    'LOG_ALERT_BYTES_PER_DAY',
+    'LOG_HEALTH_STATE_NAME',
+    'LOG_KEEP_DAYS',
+    'LOG_MAX_TOTAL_BYTES',
+    'LOG_MIN_AGE_SECONDS',
+    'LOG_ROTATE_BYTES',
+    'PROD_LOG_SERVICES',
+    'LogFileStat',
+    'LogHealthReport',
+    'LogPolicy',
+    'LogPruneReport',
+    'LogRotationReport',
+    'ProdLogTailer',
+    'human_bytes',
+    'inspect_log_health',
+    'iter_log_files',
+    'load_log_policy',
+    'policy_from_fields',
+    'prune_log_files',
+    'rotate_file_copytruncate',
+    'rotate_oversized_logs',
+    'safe_mtime',
+    'save_log_policy',
+]
+
 # 生产模式受跟踪的服务日志:与 NSSM 安装时写入的 AppStdout/AppStderr 同名(见 service_ops.nssm_install)
 PROD_LOG_SERVICES = (_SVC_API, _SVC_ARQ, _SVC_WEB)
 
-# 保留策略默认值(与后端 core/logger.py 的 fastapi_*.log「保留 14 天」对齐)。
-LOG_KEEP_DAYS = 14
-LOG_MAX_TOTAL_BYTES = 512 * 1024 * 1024
-# 兜底护栏:正在被写入的日志(1 小时内有写入)即使顶着体积上限也绝不删 ——
-# Windows 上对被占用的文件删不掉(会如实记为 skipped)，而这里干脆不尝试，
-# 免得「刚起来的生产日志被自己的清理任务删掉」这种荒谬故障。
-LOG_MIN_AGE_SECONDS = 3600
+# 策略默认值的**唯一来源**是 utils.LogPolicy（config/log_policy.json 可覆盖）。
+# 这三个名字保留作兼容别名：老调用点/文档写的是常量，而真相已经变成「策略对象」。
+LOG_KEEP_DAYS = DEFAULT_LOG_POLICY.keep_days
+LOG_MAX_TOTAL_BYTES = DEFAULT_LOG_POLICY.max_total_bytes
+# 轮转阈值必须**高于** NSSM 的 AppRotateBytes(10MB)，否则会去动 NSSM 自己正在轮转的
+# 服务日志（两边抢同一个文件）—— 该不变量在 utils.LogPolicy 的默认值里，且有测试锁住。
+LOG_ROTATE_BYTES = DEFAULT_LOG_POLICY.rotate_bytes
 
 # 巡检:单文件日增超过此值即视为「疯长」(现场安静运行时全目录约 1MB/h 级，
 # 崩溃循环/DEBUG 泄漏会直接把它打穿，故 1GB/天 既不会误报也足够早报警)。
 LOG_ALERT_BYTES_PER_DAY = 1024 * 1024 * 1024
 # 巡检状态快照文件名:刻意**不含** '.log' —— 它自己不能被当成日志清理掉或统计进去。
 LOG_HEALTH_STATE_NAME = 'log_health_state.json'
-
-# 轮转兜底阈值:必须**高于** NSSM 的 AppRotateBytes(10MB)，否则会去动 NSSM 自己
-# 正在轮转的服务日志（两边抢同一个文件）。50MB 仍远低于任何“大到打不开”的体量。
-LOG_ROTATE_BYTES = 50 * 1024 * 1024
 
 
 def _classify(text: str) -> str:
@@ -276,184 +326,14 @@ class ProdLogTailer:
         return kept, len(pending) - len(kept)
 
 
-@dataclass
-class LogPruneReport:
-    """一轮日志清理的结果(供界面日志与测试断言)。
-
-    可变的：清理是**边删边记账**（每删一个就累积 freed_bytes / deleted），
-    frozen 会让记账点不得不改写成「先攒局部变量再构造」，反而多一层状态。
-    """
-
-    deleted: list[Path] = field(default_factory=list)
-    skipped: list[Path] = field(default_factory=list)
-    kept: int = 0
-    freed_bytes: int = 0
-    keep_days: int = LOG_KEEP_DAYS
-
-    def summary(self) -> str:
-        """人话总结:必须同时说清「删了什么」和「跳过了什么」。"""
-        if self.deleted:
-            head = (f'日志清理完成：删除 {len(self.deleted)} 个文件'
-                    f'（{self.freed_bytes / 1048576:.1f}MB），保留 {self.kept} 个（{self.keep_days} 天内/体积上限内）')
-        else:
-            head = f'日志清理完成：无过期文件，保留 {self.kept} 个（{self.keep_days} 天内/体积上限内）'
-        if self.skipped:
-            head += (f'；{len(self.skipped)} 个文件被占用跳过（{"、".join(p.name for p in self.skipped[:3])}）'
-                     f'，下一轮重试')
-        return head
-
-
-def _iter_log_files(log_dir: Path) -> list[Path]:
-    """候选日志文件(按最后写入时间升序)。
-
-    只扫 ``*.log*`` 顶层文件:``prod_runner.json`` / ``nginx.pid`` / ``watchdog_state.json``
-    这些状态文件不在范围内 —— 它们不是日志，删了会打断监督器与 nginx 的就绪判定。
-    """
-    files = [p for p in log_dir.glob('*.log*') if p.is_file()]
-    return sorted(files, key=lambda p: _safe_mtime(p))
-
-
-def _safe_mtime(path: Path) -> float:
-    try:
-        return path.stat().st_mtime
-    except OSError:
-        return 0.0
-
-
-def prune_log_files(log_dir, *, keep_days=LOG_KEEP_DAYS, max_total_bytes=LOG_MAX_TOTAL_BYTES,
-                    min_age_seconds=LOG_MIN_AGE_SECONDS, now=None, remove=os.remove) -> LogPruneReport:
-    """按「最后写入时间」+「目录总体积上限」清理日志文件。
-
-    两道闸门，先按时间再按体积:时间闸门表达「留多久」，体积闸门兜住「写得太快」
-    (例如崩溃循环每秒刷栈，14 天的量也足以撑爆磁盘)。两轮都按最旧的先删，
-    且**都**跳过 ``min_age_seconds`` 内有写入的文件(正在写的那一个)。
-
-    ``remove`` 可注入(测试用):删除失败(文件被占用/权限不足)只记为 skipped
-    并让本轮继续 —— 一个删不掉的日志绝不能让整轮清理失败。
-    """
-    log_dir = Path(log_dir)
-    report = LogPruneReport(keep_days=keep_days)
-    if not log_dir.is_dir():
-        return report
-    now = time.time() if now is None else now
-    cutoff = now - keep_days * 86400
-    fresh_cutoff = now - min_age_seconds
-    candidates = _iter_log_files(log_dir)
-    survivors: list[Path] = []
-    for path in candidates:
-        mtime = _safe_mtime(path)
-        if mtime >= cutoff or mtime >= fresh_cutoff:
-            survivors.append(path)                  # 保留期内 / 正在写(体积闸门同样不动它)
-            continue
-        _try_remove(path, report, remove)
-    total = sum(path.stat().st_size for path in survivors if path.is_file())
-    while total > max_total_bytes and survivors:
-        oldest = survivors[0]
-        if _safe_mtime(oldest) >= fresh_cutoff:
-            break                                   # 剩下的全是正在写的 → 体积上限这一轮只能放弃
-        survivors.pop(0)                            # 先摘出去再删:删失败也不重复尝试
-        total -= oldest.stat().st_size if oldest.is_file() else 0
-        _try_remove(oldest, report, remove)
-    report.kept = len(survivors)
-    return report
-
-
-def _try_remove(path: Path, report: LogPruneReport, remove) -> None:
-    """删除一个文件并记账；失败只记 skipped(不抛、不中断本轮)。"""
-    size = path.stat().st_size if path.is_file() else 0
-    try:
-        remove(path)
-    except OSError:
-        report.skipped.append(path)
-        return
-    report.deleted.append(path)
-    report.freed_bytes += size
-
-
-# ── 轮转兜底（copytruncate） ─────────────────────────────────────────────────
-
-def rotate_file_by_copytruncate(path: Path, max_bytes: int) -> bool:
-    """把超阈值日志就地轮转为「一代 .1 副本 + 清零的现行文件」，返回是否轮转。
-
-    Windows 不允许 rename/delete 被进程持有的文件（nginx 与 NSSM 都长期打开着
-    日志），所以只能先复制副本、再把现行文件截断为 0；持有方按**追加**语义继续写，
-    自然落在新文件尾。截断与下次追加之间的极小窗口可能丢几行—— 对运维日志可接受
-    而「不轮转导致日志涨到 1GB 打不开」不可接受。
-
-    ★ 为什么不复用 ``utils.log_rotation.rotate_file_copytruncate``（与本函数逐字等价）：
-      ``utils/__init__.py`` 会连带导入 ``batch_upload_utils``，而后者**硬要求
-      polars + openpyxl**（缺失直接 raise）；``server_manager.spec`` 又明确 exclude 了
-      openpyxl/sqlalchemy 等重依赖 —— 管理器一旦在顶层 import utils，打包后的 exe
-      会在启动期 ImportError。轮转兜底宁可自带这份等价实现，也不能在打包环境里没有。
-    """
-    try:
-        if not path.is_file() or path.stat().st_size < max_bytes:
-            return False
-        rotated = path.with_name(path.name + '.1')
-        with open(path, 'rb') as src, open(rotated, 'wb') as dst:
-            shutil.copyfileobj(src, dst, length=1024 * 1024)
-        with open(path, 'r+b') as handle:
-            handle.truncate(0)
-        return True
-    except OSError:
-        return False
-
-
-@dataclass
-class LogRotationReport:
-    """一轮轮转兜底的结果(供面板日志与测试断言)。"""
-
-    rotated: list[tuple[Path, int]] = field(default_factory=list)   # (文件, 轮转前大小)
-    skipped: list[Path] = field(default_factory=list)               # 被占用/失败，下轮重试
-    max_bytes: int = LOG_ROTATE_BYTES
-
-    def summary(self) -> str:
-        """人话总结：轮转了谁、多大、跳过了谁。"""
-        head = f'日志轮转兜底（阈值 {_human_bytes(self.max_bytes)}）'
-        if self.rotated:
-            detail = '、'.join(f'{p.name} {_human_bytes(size)}→.1' for p, size in self.rotated)
-            head += f'：已轮转 {len(self.rotated)} 个（{detail}）'
-        else:
-            head += '：无超限日志'
-        if self.skipped:
-            head += f'；{len(self.skipped)} 个文件被占用未能轮转（{"、".join(p.name for p in self.skipped[:3])}），下一轮重试'
-        return head
-
-
-def rotate_oversized_logs(log_dir, *, max_bytes=LOG_ROTATE_BYTES, rotate=rotate_file_by_copytruncate) -> LogRotationReport:
-    """把日志目录里所有超过阈值的**现行**日志做一次 copytruncate 轮转。
-
-    只扫 ``*.log``（不含 ``*.log.1`` / ``*.log.<时间戳>`` 这些轮转副本）—— 副本已经是
-    备份，再被轮转就会出现 ``.1.1`` 这种链，数量会指数长。
-    """
-    report = LogRotationReport(max_bytes=max_bytes)
-    log_dir = Path(log_dir)
-    if not log_dir.is_dir():
-        return report
-    for path in sorted(log_dir.glob('*.log')):
-        if not path.is_file():
-            continue
-        try:
-            size = path.stat().st_size
-        except OSError:
-            continue
-        if size < max_bytes:
-            continue
-        if rotate(path, max_bytes):
-            report.rotated.append((path, size))
-        else:
-            report.skipped.append(path)
-    return report
-
+# 注：轮转（copytruncate）、保留清理、以及两者的报告类型，**机制与策略都已统一到**
+# utils/log_rotation.py（与后端 ARQ cron、prod_runner 共用同一实现与同一份策略文件
+# config/log_policy.json）。本模块只把那些名字重新导出给 UI 层（见文件头 import），
+# 不再自带实现 —— 否则同一台机器上「多大该轮转」会有多个答案：2026-09-30 之前正是
+# 三个（prod_runner 50MB/只转自己的 .out.log、ARQ cron 100MB/只转 nginx、管理器
+# 50MB/转全部 *.log 并清理），改一个必漏两个。
 
 # ── 日志健康巡检（增长源识别 + 异常增长告警） ──────────────────────────────────
-
-def _human_bytes(value: float) -> str:
-    """人类可读体积(MB 起，超过 1GB 转 GB)。"""
-    if value >= 1024 ** 3:
-        return f'{value / 1024 ** 3:.1f}GB'
-    return f'{value / 1048576:.1f}MB'
-
 
 @dataclass
 class LogFileStat:
@@ -470,7 +350,7 @@ class LogFileStat:
 
     @property
     def growth_text(self) -> str:
-        return '—' if self.growth_bytes_per_day is None else f'{_human_bytes(self.growth_bytes_per_day)}/天'
+        return '—' if self.growth_bytes_per_day is None else f'{human_bytes(self.growth_bytes_per_day)}/天'
 
 
 @dataclass
@@ -506,7 +386,7 @@ class LogHealthReport:
     def summary(self) -> str:
         """面板上一行字讲清:总量多大、谁在长、长得有多快。"""
         head = (f"日志巡检 {time.strftime('%H:%M:%S', time.localtime(self.sampled_at))} · "
-                f'合计 {_human_bytes(self.total_bytes)} / {len(self.files)} 个文件')
+                f'合计 {human_bytes(self.total_bytes)} / {len(self.files)} 个文件')
         hot = self.hottest()
         if self.first_sample:
             return head + ' · 增长率需两次采样（下一轮巡检出结果）'
@@ -519,12 +399,12 @@ class LogHealthReport:
         """异常增长的告警文本(空列表 = 健康)。"""
         if self.first_sample:
             return []                                # 首轮没有基线，断言增长就是瞎报
-        msgs = [f'日志异常增长：{f.name} 约 {f.growth_text}（现存 {_human_bytes(f.size)}）——'
+        msgs = [f'日志异常增长：{f.name} 约 {f.growth_text}（现存 {human_bytes(f.size)}）——'
                 f'可能是崩溃循环刷栈或 DEBUG 级别泄漏，建议查看 logs\\{f.name}'
                 for f in self.warn_files()]
         if self.over_cap:
-            msgs.append(f'日志目录 {_human_bytes(self.total_bytes)} 已超保留上限 '
-                        f'{_human_bytes(self.max_total_bytes)}（正在写入的文件不能被回收）：'
+            msgs.append(f'日志目录 {human_bytes(self.total_bytes)} 已超保留上限 '
+                        f'{human_bytes(self.max_total_bytes)}（正在写入的文件不能被回收）：'
                         f'请排查上面的增长源，或调小保留期')
         return msgs
 
@@ -562,8 +442,8 @@ def inspect_log_health(log_dir, *, max_total_bytes=LOG_MAX_TOTAL_BYTES,
     state_path = Path(state_path) if state_path else log_dir / LOG_HEALTH_STATE_NAME
     previous = _load_health_state(state_path)
     report.first_sample = not previous
-    for path in _iter_log_files(log_dir):
-        mtime = _safe_mtime(path)
+    for path in iter_log_files(log_dir):
+        mtime = safe_mtime(path)
         try:
             size = path.stat().st_size
         except OSError:

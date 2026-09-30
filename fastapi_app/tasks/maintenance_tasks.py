@@ -2,7 +2,7 @@
 
 职责：
 - 刷新仪表盘物化视图
-- nginx 日志轮转（prod_runner 不再托管 nginx 后的轮转归属）
+- 日志维护：按共享策略轮转 + 保留清理（与桌面壳/prod_runner 同一套实现与策略）
 - 其他低频率维护型任务
 """
 import asyncio
@@ -12,25 +12,31 @@ from pathlib import Path
 from sqlalchemy import text
 
 from fastapi_app.core.database import get_async_db_context
-from utils.log_rotation import rotate_file_copytruncate
+from utils.log_rotation import load_log_policy, prune_log_files, rotate_oversized_logs
 
 logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 LOGS_DIR = PROJECT_ROOT / "logs"
-NGINX_LOGS = ("nginx-access.log", "nginx-error.log")
-NGINX_LOG_ROTATE_BYTES = 100 * 1024 * 1024  # 100MB,当前增速数月 8MB,一年不满盘
+# 策略文件的显式路径：与桌面壳/prod_runner 共用同一份（config/log_policy.json）。
+LOG_POLICY_PATH = PROJECT_ROOT / "config" / "log_policy.json"
 
 
-async def rotate_nginx_logs_task(ctx) -> dict:
-    """ARQ 任务：检查 nginx 日志,超阈值 copytruncate 轮转。
+async def maintain_logs_task(ctx) -> dict:
+    """ARQ 定时任务：按共享策略轮转超限日志并清理过期日志。
 
-    ARQ 停摆仅意味着暂不轮转(优雅降级),不产生告警。纯文件操作,
-    async 仅为满足 ARQ cron() 对协程函数的要求。
+    此前这里是「只转 nginx 两个文件、固定 100MB、不做保留清理」的独立一套，
+    于是同一台机器上「多大该轮转」有三个答案，且 nginx 的轮转责任全押在这个
+    每日 cron 上（ARQ 停摆就没人管）。现在读同一份 ``config/log_policy.json``、
+    调同一套 ``utils.log_rotation`` —— 它只是三处调度（桌面壳 / prod_runner /
+    本任务）里的兜底之一，行为完全一致。
+    纯文件操作,async 仅为满足 ARQ cron() 对协程函数的要求。
     """
-    for name in NGINX_LOGS:
-        rotate_file_copytruncate(LOGS_DIR / name, NGINX_LOG_ROTATE_BYTES)
-    return {"success": True, "message": "nginx 日志轮转检查完成"}
+    policy = load_log_policy(LOG_POLICY_PATH)
+    rotation = rotate_oversized_logs(LOGS_DIR, max_bytes=policy.rotate_bytes)
+    prune = prune_log_files(LOGS_DIR, keep_days=policy.keep_days,
+                            max_total_bytes=policy.max_total_bytes)
+    return {"success": True, "message": f"{rotation.summary()}；{prune.summary()}"}
 
 
 async def _refresh_single_mv(db, mv_name: str) -> None:

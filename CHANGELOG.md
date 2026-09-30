@@ -28,6 +28,17 @@
 - **频率**：轮转+清理从每 24h 改为**每 6h**——兜底的意义就是「外部任务靠不住时自己止血」，巡检负责发告警、这里负责止血。
 - **刻意不复用 `utils.log_rotation`**：`utils/__init__.py` 会连带导入 `batch_upload_utils`，后者**硬要求 polars + openpyxl**，而 `server_manager.spec` 明确 exclude 了 openpyxl/sqlalchemy —— 管理器一旦 import utils，打包后的 exe 会启动期 `ImportError`。故自带一份等价实现并在注释里写明来龙去脉。
 
+### 🔗 统一：后端与桌面壳共用同一套日志轮转/保留策略
+- **问题**：同一条日志管线上曾有**三个**各自为政的策略 —— `prod_runner` 只管自己的 `.out.log`（50MB，`PROD_LOG_ROTATE_MB` 可调）、ARQ cron 只管 nginx 两文件（固定 **100MB**、且不做保留清理）、桌面壳管全部 `*.log`（50MB + 保留 14 天 / 512MB）。「多大该轮转」在一台机器上有三个答案，改一个必漏两个；nginx 的轮转责任还全押在 ARQ 每日 cron 上（ARQ 停摆就没人管）。
+- **改法**：策略与实现统一到 `utils/log_rotation.py`，策略落 `config/log_policy.json`（默认 **50MB / 14 天 / 512MB**）。三方都 `load_log_policy()` 读同一份文件、都调 `rotate_oversized_logs` / `prune_log_files` —— `prod_runner` 每 60s 的维护轮次与 ARQ 的每日 cron 现在都做「轮转 + 保留清理」，行为完全一致；`PROD_LOG_ROTATE_MB` / `NGINX_LOG_ROTATE_BYTES` 两个独立阈值来源已删除。
+- **为什么现在能共享了**：`utils/__init__.py` 改为**惰性导出**（PEP 562）—— 此前它 eager 导入 `batch_upload_utils`（硬要求 polars + openpyxl）与 `logger`（sqlalchemy），桌面壳（PyInstaller 明确 exclude 这些）一 `import utils` 就在启动期 `ImportError`，这正是「管理器只能自带一份实现」的根因。实测全仓没有 `from utils import <名字>` 的用法，故 `__getattr__` 惰性解析后旧契约不变。守卫测试：`tests/test_utils_lazy_import.py`（子进程校验不拉起重依赖 + 旧名字仍可取）。
+- **验证**：`fastapi_app/tests/test_log_policy_unification.py` 锁住三方共享（含 `PROD_LOG_ROTATE_MB`/`NGINX_LOG_ROTATE_BYTES` 不得复活）、`tests/test_log_policy.py` 覆盖缺失/损坏/坏值夹取/表单越界报错。
+
+### 🆕 功能：日志策略界面可配并持久化
+- 日志面板新增「设置」入口，可在界面上改**轮转阈值 / 保留天数 / 体积上限**，保存后写入共享的 `config/log_policy.json` —— 改完**立刻对后端生效**，无需重启任何服务。
+- 边界取值：轮转 1–4096MB、保留 1–3650 天、上限 16–65536MB。**界面越界报错、不静默夹取**（界面不能替用户改写意图）；文件侧则夹取，给手改坏值兜底（如 `rotate_mb: 0` 会被夹到 1）。
+- 桌面壳一律用项目目录拼策略路径：打包后 `__file__` 指向 PyInstaller 解包临时目录，`default_policy_path()` 会算出不存在的路径并静默回落默认值（表现：改了设置却像没生效）。
+
 ### 🏗️ 顺带：日志视图层抽出（`LogViewMixin`）
 - 上述改动若堆在 `app.py` 会把该文件顶到 1676 行，`tests/test_gates_cover_repo_root.py` 的永久锁（app.py ≤ 1600 行，规模门禁阈值）判红。故按 hosting_view 的同一套切法把日志面板与日志运维整体抽到 `server_manager/log_view.py`，`app.py` 降到 **1520 行**（该锁由「已红」转绿）。
 - **验证**：新增 `tests/test_server_manager_log_ops.py`（15 例：历史不回灌/增量实时/半行缓冲/两种轮转判据/超量不丢/ERROR 着色/接入幂等/状态文件不受清理/体积上限/被占用跳过）；server_manager 相关测试 74 例全绿；`quality_gate.py` 无新增违规（宽泛 except 9→5）；`mypy` 无错误。

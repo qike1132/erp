@@ -27,13 +27,13 @@ from datetime import datetime
 from tkinter import ttk
 
 from server_manager.log_ops import (
-    LOG_KEEP_DAYS,
-    LOG_MAX_TOTAL_BYTES,
-    LOG_ROTATE_BYTES,
     ProdLogTailer,
     inspect_log_health,
+    load_log_policy,
+    policy_from_fields,
     prune_log_files,
     rotate_oversized_logs,
+    save_log_policy,
 )
 
 
@@ -43,8 +43,9 @@ class LogViewMixin:
     # 界面缓冲上限(与磁盘文件的保留策略无关)：超过 MAX 就裁到 KEEP，
     # 否则 Tk Text 越写越慢，整个界面会跟着卡。
     MAX_LOG_LINES, LOG_KEEP_LINES, LOG_CLEANUP_MS, LOG_FLUSH_MS = 500, 300, 120000, 500
-    # 日志**文件**维护（轮转兜底 + 过期清理）：保留期/体积上限/轮转阈值都在 log_ops
-    # (14 天 / 512MB / 50MB)，这里只决定「多久跑一轮」与「启动后多久首跑」(避开启动那几秒的 IO 高峰)。
+    # 日志**文件**维护（轮转兜底 + 过期清理）：保留期/体积上限/轮转阈值由共享策略文件
+    # config/log_policy.json 决定（默认 50MB / 14 天 / 512MB，可在面板「设置」里改），
+    # 这里只决定「多久跑一轮」与「启动后多久首跑」(避开启动那几秒的 IO 高峰)。
     # 取 6 小时而非一天：轮转兜底的意义就是「外部任务靠不住时自己止血」，无人轮转的
     # nginx access 日志按小时涨，一天才发现就已经很大了（巡检负责发告警，这里负责止血）。
     LOG_FILE_CLEANUP_FIRST_MS, LOG_FILE_CLEANUP_MS = 20000, 6 * 60 * 60 * 1000
@@ -87,7 +88,79 @@ class LogViewMixin:
         else:
             self.prod_logs.stop()
 
-    # ── 面板 ────────────────────────────────────────────────────────────────
+    # ── 共享日志策略（config/log_policy.json） ──────────────────────────────
+    def _log_policy_path(self):
+        """策略文件路径：必须显式给出。
+
+        ``utils.log_rotation.default_policy_path()`` 基于 ``__file__`` 推算，而打包后
+        ``__file__`` 指向 PyInstaller 解包临时目录 —— 会算出不存在的路径并静默回落
+        默认值（表现：面板改了设置却像没生效）。桌面壳一律用项目目录拼。
+        """
+        return self._PROJECT_DIR / 'config' / 'log_policy.json'
+
+    def _log_policy(self):
+        """当前生效策略（缺失/损坏时回落默认 50MB / 14 天 / 512MB）。"""
+        return load_log_policy(self._log_policy_path())
+
+    def _log_policy_text(self) -> str:
+        return f'自动轮转+清理：{self._log_policy().summary()}'
+
+    def _refresh_log_policy_label(self):
+        """设置保存后刷新面板上的策略提示（控件可能尚未构建，故容错）。"""
+        label = getattr(self, 'log_policy_label', None)
+        if label is not None:
+            label.configure(text=self._log_policy_text())
+
+    def open_log_policy_dialog(self):
+        """打开「日志轮转与保留策略」对话框（三格：轮转阈值 / 保留天数 / 体积上限）。
+
+        策略是三方共用的一份文件（桌面壳 / prod_runner / ARQ），所以这里改了就立刻
+        对后端生效，无需重启任何服务；越界**报错不静默夹取**（界面不能替用户改写意图，
+        而文件侧的夹取是给手改坏值兜底的）。
+        """
+        policy = self._log_policy()
+        dlg = tk.Toplevel(self.root)
+        dlg.title('日志轮转与保留策略')
+        dlg.configure(bg=self._PALETTE['bg_card'])
+        dlg.transient(self.root)
+        dlg.resizable(False, False)
+        tk.Label(dlg, text=self._log_policy_text(), font=('Microsoft YaHei UI', 9),
+                 fg=self._PALETTE['text_primary'], bg=self._PALETTE['bg_card']).grid(
+            row=0, column=0, columnspan=2, padx=16, pady=(12, 4), sticky='w')
+        entries = []
+        for i, (label, value) in enumerate([('轮转阈值 (MB)', policy.rotate_mb),
+                                            ('保留天数', policy.keep_days),
+                                            ('体积上限 (MB)', policy.max_total_mb)]):
+            tk.Label(dlg, text=label, font=('Microsoft YaHei UI', 9),
+                     fg=self._PALETTE['text_secondary'], bg=self._PALETTE['bg_card']).grid(
+                row=i + 1, column=0, padx=(16, 8), pady=4, sticky='e')
+            entry = tk.Entry(dlg, width=12, font=('Microsoft YaHei UI', 9))
+            entry.insert(0, str(value))
+            entry.grid(row=i + 1, column=1, padx=(0, 16), pady=4, sticky='w')
+            entries.append(entry)
+        error = tk.Label(dlg, text='', font=('Microsoft YaHei UI', 8),
+                         fg=self._PALETTE['log_error'], bg=self._PALETTE['bg_card'])
+        error.grid(row=4, column=0, columnspan=2, padx=16, sticky='w')
+
+        def on_save():
+            new_policy, message = policy_from_fields(
+                entries[0].get(), entries[1].get(), entries[2].get())
+            if new_policy is None:
+                error.configure(text=message or '输入无效')
+                return
+            if not save_log_policy(new_policy, self._log_policy_path()):
+                error.configure(text='保存失败：无法写入 config/log_policy.json（权限/占用）')
+                return
+            self._refresh_log_policy_label()
+            self.log_message(f'日志策略已更新：{new_policy.summary()}')
+            dlg.destroy()
+
+        btns = tk.Frame(dlg, bg=self._PALETTE['bg_card'])
+        btns.grid(row=5, column=0, columnspan=2, padx=16, pady=(4, 14), sticky='e')
+        self._pill(btns, '取消', dlg.destroy)
+        self._pill(btns, '保存', on_save)
+
+    # ── 面板 ────────────────────────────────────────────────────────────────────────
     def _build_log_section(self, parent):
         log_card = tk.Frame(parent, bg=self._PALETTE['bg_card'], highlightbackground=self._PALETTE['border_card'], highlightthickness=1)
         log_card.grid(row=1, column=0, columnspan=2, sticky='nsew', pady=(10, 0))
@@ -99,10 +172,11 @@ class LogViewMixin:
         tk.Label(log_hdr, text='实时输出', font=('Microsoft YaHei UI', 8), fg=self._PALETTE['text_dim'], bg=self._PALETTE['bg_card']).pack(side=tk.LEFT, padx=(8, 0))
         # 把「磁盘上的日志也会被定时清理」写在界面上：否则用户看到「清空」只清了显示，
         # 会以为文件没人管 —— 这正是「不然日志越来越多」这条诉求的来路。
-        tk.Label(log_hdr, text=f'自动轮转+清理：保留 {LOG_KEEP_DAYS} 天', font=('Microsoft YaHei UI', 8), fg=self._PALETTE['text_dim'], bg=self._PALETTE['bg_card']).pack(side=tk.LEFT, padx=(8, 0))
+        self.log_policy_label = tk.Label(log_hdr, text=self._log_policy_text(), font=('Microsoft YaHei UI', 8), fg=self._PALETTE['text_dim'], bg=self._PALETTE['bg_card'])
+        self.log_policy_label.pack(side=tk.LEFT, padx=(8, 0))
         log_btns = tk.Frame(log_hdr, bg=self._PALETTE['bg_card'])
         log_btns.pack(side=tk.RIGHT)
-        for txt, cmd in [('导出', self.export_log), ('清空', self.clear_log), ('清理旧日志', self.cleanup_log_files)]:
+        for txt, cmd in [('导出', self.export_log), ('清空', self.clear_log), ('清理旧日志', self.cleanup_log_files), ('设置', self.open_log_policy_dialog)]:
             self._pill(log_btns, txt, cmd)
         # 巡检行：一行讲清「总共多少 / 谁在长 / 长得多快」，右侧可手动补一轮。
         # 放在标题行下一行而非塞进标题行 —— 增长源名字长，挤在一行会互相顶掉。
@@ -160,7 +234,9 @@ class LogViewMixin:
         """
         def worker():
             try:
-                report = inspect_log_health(self._PROJECT_DIR / 'logs', max_total_bytes=LOG_MAX_TOTAL_BYTES)
+                report = inspect_log_health(
+                    self._PROJECT_DIR / 'logs',
+                    max_total_bytes=self._log_policy().max_total_bytes)
                 self._msg_queue.put(('log_health', {'report': report}))
             except Exception as e:  # defensive: 巡检失败只报告，不影响面板与其它功能
                 self._msg_queue.put(('log', {'text': f'日志巡检异常: {e}', 'level': 'WARNING'}))
@@ -285,8 +361,10 @@ class LogViewMixin:
         def worker():
             try:
                 logs = self._PROJECT_DIR / 'logs'
-                rotation = rotate_oversized_logs(logs, max_bytes=LOG_ROTATE_BYTES)
-                report = prune_log_files(logs, keep_days=LOG_KEEP_DAYS, max_total_bytes=LOG_MAX_TOTAL_BYTES)
+                policy = self._log_policy()   # 每轮现读：设置改了下一轮就生效，不必重启管理器
+                rotation = rotate_oversized_logs(logs, max_bytes=policy.rotate_bytes)
+                report = prune_log_files(logs, keep_days=policy.keep_days,
+                                         max_total_bytes=policy.max_total_bytes)
                 level = 'WARNING' if (rotation.skipped or report.skipped) else 'INFO'
                 self._msg_queue.put(('log', {'text': rotation.summary(), 'level': level}))
                 self._msg_queue.put(('log', {'text': report.summary(), 'level': level}))

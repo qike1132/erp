@@ -11,9 +11,10 @@ ERP 生产模式监督器 (Windows 原生)。
      对后端按 /api/health 做健康判定，主进程存活但 worker 崩溃循环时强制重启整棵进程树
   5. 状态落盘 logs/prod_runner.json，供 server_manager GUI 展示
   6. 子进程 stdout/stderr 落盘 logs/<name>.out.log，便于排障
-  7. 子进程 .out.log 日志轮转：超过阈值（默认 50MB，PROD_LOG_ROTATE_MB 可调）时
-     copytruncate 轮转，保留一代 .1 副本，防止长期运行后磁盘被日志占满
-     （轮转函数下沉于 utils/log_rotation.py；nginx 日志轮转由 ARQ cron 负责）
+  7. 日志维护：按共享策略（config/log_policy.json，默认轮转 50MB / 保留 14 天 /
+     目录上限 512MB）copytruncate 轮转超限日志并清理过期日志，防止长期运行后磁盘被
+     日志占满。策略与实现统一在 utils/log_rotation.py，与桌面壳、ARQ 定时任务**同一份**
+     （历史上本模块用 PROD_LOG_ROTATE_MB、ARQ 用 100MB、桌面壳用 50MB，各有一套）
 
 用法:
   python -m fastapi_app.core.prod_runner --check       # 环境自检（不拉起进程）
@@ -35,17 +36,20 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
-from utils.log_rotation import rotate_file_copytruncate
+from utils.log_rotation import load_log_policy, prune_log_files, rotate_oversized_logs
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 LOGS_DIR = PROJECT_ROOT / "logs"
 STATUS_FILE = LOGS_DIR / "prod_runner.json"
+# 轮转/保留策略的**唯一**来源，与桌面壳、ARQ 定时任务共用同一份文件。
+LOG_POLICY_PATH = PROJECT_ROOT / "config" / "log_policy.json"
 
 _PY = sys.executable
 _CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
-# 日志轮转：检查间隔与阈值。NSSM 只轮转监督器自身的 stdout（logs/erp-*.log），
-# 子进程 .out.log 由本模块负责轮转（nginx 日志轮转由 ARQ cron 负责）。
+# 日志维护：检查间隔。阈值/保留期不在这里常量化 —— 统一由 LOG_POLICY_PATH 决定，
+# 避免又出现「同一个机器上多大该轮转有三个答案」（历史上 prod_runner 50MB、
+# ARQ 100MB、桌面壳 50MB）。
 LOG_ROTATE_CHECK_INTERVAL = 60.0
 
 
@@ -84,11 +88,6 @@ def _init_log_streams() -> None:
     print(f"[prod_runner] cwd={PROJECT_ROOT} UVICORN_WORKERS={os.getenv('UVICORN_WORKERS', '(unset)')}")
     with contextlib.suppress(Exception):
         sys.stdout.flush()
-
-
-def _log_rotate_bytes() -> int:
-    """轮转阈值（字节），默认 50MB，PROD_LOG_ROTATE_MB 覆盖，下限 5MB。"""
-    return max(5, _get_int_env("PROD_LOG_ROTATE_MB", 50)) * 1024 * 1024
 
 
 def _load_dotenv() -> None:
@@ -485,11 +484,6 @@ class _Managed:
         if self.status == "crashed" and self.next_start <= time.monotonic():
             self.start()
 
-    def rotate_log_if_needed(self, max_bytes: int) -> None:
-        """子进程 stdout 日志轮转（服务停止期间同样清理历史大文件）。"""
-        rotate_file_copytruncate(LOGS_DIR / f"{self.name}.out.log", max_bytes)
-
-
 class Supervisor:
     def __init__(self, workers: int, api_port: int, web_port: int, with_arq: bool = True):
         self.workers = workers
@@ -618,17 +612,19 @@ class Supervisor:
 
     # -- 日志轮转 -----------------------------------------------------------
     def _rotate_logs_if_due(self) -> None:
-        """按 LOG_ROTATE_CHECK_INTERVAL 节流，检查并轮转子进程日志。
+        """按 LOG_ROTATE_CHECK_INTERVAL 节流，做一轮日志维护（轮转 + 保留清理）。
 
-        nginx 日志(nginx-access/error.log)由 ARQ cron 任务轮转,不再归本模块。
+        规格统一读 ``config/log_policy.json``（``utils.log_rotation`` 的同一份策略），
+        与桌面壳、ARQ 定时任务完全一致 —— 不再各带一套阈值，也不再只轮转自己的
+        ``.out.log``（nginx 日志的轮转不过是「谁碰巧管到」的历史遗留）。
         """
         if time.monotonic() - self._last_log_check < LOG_ROTATE_CHECK_INTERVAL:
             return
         self._last_log_check = time.monotonic()
-        max_bytes = _log_rotate_bytes()
-        for svc in (self.backend, self.arq):
-            if svc:
-                svc.rotate_log_if_needed(max_bytes)
+        policy = load_log_policy(LOG_POLICY_PATH)
+        rotate_oversized_logs(LOGS_DIR, max_bytes=policy.rotate_bytes)
+        prune_log_files(LOGS_DIR, keep_days=policy.keep_days,
+                        max_total_bytes=policy.max_total_bytes)
 
     # -- 优雅关闭 -----------------------------------------------------------
     def shutdown(self) -> None:

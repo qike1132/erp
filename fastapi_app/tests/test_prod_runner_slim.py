@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import contextlib
 import json
-from pathlib import Path
 
 from fastapi_app.core import prod_runner
 
@@ -103,29 +102,19 @@ def test_rotate_logs_only_for_backend_and_arq() -> None:
     assert "rotate_logs_if_needed" not in src  # _FrontendNginx 的方法,应无引用
 
 
-def test_managed_rotate_log_actually_rotates(monkeypatch, tmp_path) -> None:
-    """行为级:_Managed.rotate_log_if_needed 直调不抛且超阈值文件被轮转。
+def test_supervisor_rotate_logs_due_uses_shared_policy(monkeypatch, tmp_path) -> None:
+    """行为级：_rotate_logs_if_due 读共享策略（config/log_policy.json）并轮转超限日志。
 
-    回归锁(最终评审 C1):旧版调用点写的是已删除的 _rotate_file_copytruncate,
-    而 slim 测试此前只有文本断言——该 NameError 每次轮转检查都炸且被主循环吞掉。
+    这里把策略文件路径指向临时配置，等价于验证「阈值来自共享策略而非本模块常量」。
     """
+    from utils.log_rotation import LogPolicy
+
     logs = tmp_path / "logs"
     logs.mkdir()
     monkeypatch.setattr(prod_runner, "LOGS_DIR", logs)
-    big = logs / "backend.out.log"
-    big.write_bytes(b"x" * 2048)
-    m = prod_runner._Managed("backend", ["cmd"], Path("."))
-    m.rotate_log_if_needed(1024)
-    assert big.read_bytes() == b""
-    assert (logs / "backend.out.log.1").exists()
-
-
-def test_supervisor_rotate_logs_due_rotates_backend_log(monkeypatch, tmp_path) -> None:
-    """行为级:Supervisor._rotate_logs_if_due 直调,backend.out.log 超阈值被轮转。"""
-    logs = tmp_path / "logs"
-    logs.mkdir()
-    monkeypatch.setattr(prod_runner, "LOGS_DIR", logs)
-    monkeypatch.setattr(prod_runner, "_log_rotate_bytes", lambda: 1024)  # 隔离真实 .env 的 50MB
+    # 直接桩接策略读取：策略文件以 MB 为粒度持久化，而这里要用 1KB 阈值才便宜。
+    monkeypatch.setattr(prod_runner, "load_log_policy",
+                        lambda path=None: LogPolicy(rotate_bytes=1024))
     big = logs / "后端(uvicorn).out.log"  # _Managed 的 name 即 Supervisor 里的中文名
     big.write_bytes(b"y" * 2048)
     sup = prod_runner.Supervisor(4, 5002, 3000, with_arq=False)

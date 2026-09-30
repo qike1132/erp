@@ -35,7 +35,7 @@ from server_manager.log_ops import (
     ProdLogTailer,
     inspect_log_health,
     prune_log_files,
-    rotate_file_by_copytruncate,
+    rotate_file_copytruncate,
     rotate_oversized_logs,
 )
 from server_manager.log_view import LogViewMixin
@@ -260,6 +260,18 @@ class TestAppWiring:
         assert 'rotate_oversized_logs' in text, '维护一轮没有接上轮转兜底'
         assert '_log_file_cleanup_tick' in text and 'cleanup_log_files' in text
 
+    def test_policy_is_ui_configurable_and_shared(self):
+        """策略不是代码常量：面板可改、落 config/log_policy.json，维护轮次每轮现读。"""
+        panel = (PKG / 'log_view.py').read_text(encoding='utf-8')
+        assert 'open_log_policy_dialog' in panel
+        assert '设置' in panel, '面板没有策略设置入口'
+        assert 'save_log_policy(' in panel and 'policy_from_fields(' in panel, \
+            '设置对话框未接上「校验 + 持久化」'
+        assert "'config'" in panel and 'log_policy.json' in panel, \
+            '桌面壳必须显式拼策略路径（打包后 __file__ 指向解包临时目录）'
+        cleanup = _func_src('log_view.py', 'cleanup_log_files')
+        assert 'self._log_policy()' in cleanup, '维护轮次没有现读策略（改了设置要重启才生效）'
+
     def test_health_check_is_scheduled_and_dispatch_is_wired(self):
         init = _func_src('app.py', '__init__')
         assert '_schedule_log_health()' in init, '启动时未挂上日志巡检'
@@ -356,10 +368,10 @@ class TestRotationFallback:
         assert '被占用未能轮转' in report.summary()
 
     def test_copytruncate_tolerates_missing_and_locked_files(self, tmp_path):
-        assert rotate_file_by_copytruncate(tmp_path / 'nope.log', 1) is False
+        assert rotate_file_copytruncate(tmp_path / 'nope.log', 1) is False
         small = tmp_path / 'small.log'
         small.write_bytes(b'x')
-        assert rotate_file_by_copytruncate(small, 1024) is False
+        assert rotate_file_copytruncate(small, 1024) is False
 
 
 class TestLogHealth:
