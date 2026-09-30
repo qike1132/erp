@@ -46,6 +46,7 @@
         :loss-rate-mixed="lossRateMixed"
         :fabric-loss-rates="fabricLossRates"
         :fabric-loss-rate-mixed="fabricLossRateMixed"
+        :group-spare-rates="groupSpareRates"
         @close="$emit('close')"
         @toggle-edit-mode="$emit('toggleEditMode', $event)"
         @save-edits="$emit('saveEdits')"
@@ -109,6 +110,8 @@ defineProps<{
   fabricLossRates?: number[][][]
   /** 每个布料行内各明细损耗率是否不一致（由 useSummaryModal 提供） */
   fabricLossRateMixed?: boolean[][][]
+  /** 每个分组的订单级损耗率（「备品数量」列唯一口径，由 useSummaryModal 提供） */
+  groupSpareRates?: number[]
 }>()
 
 const emit = defineEmits<{

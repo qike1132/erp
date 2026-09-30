@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>汇总下单 · 「备品数量」列 · 对比稿 · 2026-09-30</title>
+<style>
+  :root{
+    --bg:#f5f5f7; --card:#fff; --surface:#f2f2f7; --line:#d8dce2;
+    --t1:#1d1d1f; --t2:#48484d; --t3:#8e8e93;
+    --accent:#007aff; --accent-tint:#e8f1ff; --ok:#34c759; --ok-tint:#e6f9ec;
+    --warn:#ff9500; --warn-tint:#fff4e0; --danger:#ff3b30; --danger-tint:#ffeceb;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:26px 22px 56px;background:var(--bg);color:var(--t1);
+       font:13px/1.5 "Microsoft YaHei UI","Segoe UI",system-ui,sans-serif}
+  h1{font-size:19px;margin:0 0 6px}
+  .meta{color:var(--t2);font-size:12px;margin-bottom:18px}
+  .meta code{background:#e9e9ee;padding:1px 5px;border-radius:4px}
+  .note{background:var(--warn-tint);border-left:3px solid var(--warn);
+        padding:10px 14px;border-radius:6px;margin:0 0 12px;font-size:12.5px;color:#7a4a00}
+  .note.danger{background:var(--danger-tint);border-left-color:var(--danger);color:#8a1a12}
+  h2{font-size:15px;margin:28px 0 4px;padding-top:8px;border-top:2px solid #e3e3e8}
+  h2 .tag{font-size:11px;font-weight:700;color:#fff;background:var(--accent);
+          padding:2px 7px;border-radius:999px;vertical-align:2px;margin-left:8px}
+  h2 .tag.alt{background:var(--t3)}
+  h2 .tag.warn{background:var(--warn)}
+  .sub{color:var(--t2);font-size:12px;margin:0 0 12px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-bottom:16px}
+  .card-hd{background:var(--surface);padding:8px 14px;font-size:12px;font-weight:700;color:var(--t2);
+           border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}
+  .card-hd .pill{font-weight:400;color:var(--t3)}
+  .scroll{overflow-x:auto}
+  .new{position:relative;background:#fffdf5;box-shadow:inset 0 0 0 1px #f0c878}
+  .new::after{content:"新增";position:absolute;top:-8px;left:50%;transform:translateX(-50%);
+              font-size:9px;font-weight:700;color:#7a4a00;background:var(--warn-tint);
+              border:1px solid #f0c878;border-radius:999px;padding:0 6px;line-height:13px;white-space:nowrap}
+  table{border-collapse:collapse;width:100%;font-size:12.5px}
+  th{background:var(--surface);color:var(--t2);font-weight:700;font-size:12px;
+     padding:8px 10px;border-bottom:1px solid var(--line);border-right:1px solid var(--line);white-space:nowrap;text-align:left}
+  td{padding:8px 10px;border-bottom:1px solid var(--line);border-right:1px solid var(--line);white-space:nowrap;background:var(--card)}
+  th.r,td.r{text-align:right}
+  th.c,td.c{text-align:center}
+  .sku{line-height:1.45}
+  .sku.total{font-weight:700}
+  .dim{color:var(--t3)}
+  .b{font-weight:700}
+  .badge{display:inline-flex;align-items:center;padding:1px 7px;font-size:10px;font-weight:700;border-radius:4px}
+  .badge.a{background:var(--ok-tint);color:#1d7a3a}
+  .badge.b{background:var(--danger-tint);color:#8a1a12}
+  .kpi{display:flex;gap:12px;flex-wrap:wrap;margin:0 0 14px}
+  .kpi>div{flex:1 1 200px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+  .kpi .k{font-size:11.5px;color:var(--t3);margin-bottom:4px}
+  .kpi .v{font-size:20px;font-weight:700;letter-spacing:.3px}
+  .kpi .v.ok{color:#1d7a3a}
+  .kpi .v.bad{color:#c22}
+  .foot{color:var(--t2);font-size:12px;margin-top:24px;line-height:1.8}
+  .foot b{color:var(--t1)}
+  .ask{background:var(--accent-tint);border-left:3px solid var(--accent);padding:10px 14px;border-radius:6px;margin:10px 0 0;font-size:12.5px;color:#0a3d78}
+</style>
+</head>
+<body>
+
+<h1>汇总下单 · 「备品数量」列对比稿</h1>
+<div class="meta">
+  页面：<code>/purchase</code> → 汇总下单弹窗 → <b>工厂内部订单</b>页签 &nbsp;·&nbsp;
+  需求：在<b>「订单数量」右边</b>增加一列「备品数量」 &nbsp;·&nbsp; 2026-09-30
+</div>
+
+<div class="note danger">
+  <b>前置条件（否则这一列会与 /beile-order 对不上）</b>：生产进程当前仍在跑「备品按部位率重算」的代码
+  （止血提交 <code>594a3b97</code> 已提交但<b>尚未部署</b>，PID 11452 早于提交时间）。本列显示的是
+  <b>将要落库的备品</b>，请先重启 <code>erp-prod</code> 再对照验收。
+</div>
+
+<h2>一、口径必须先定<span class="tag warn">唯一的分歧点</span></h2>
+<p class="sub">用你那张真单的数（客户订单 <code>PO-20260930-0011</code> / 采购单 <code>CG-20260930-0002</code>）：订单数量 10000，顶部「统一损耗率」15‰，明细行率最大 450‰（蓝色超柔）。</p>
+
+<div class="kpi">
+  <div>
+    <div class="k">口径 A · 备品 = ceil(订单数量 × 订单级率‰)</div>
+    <div class="v ok">150</div>
+    <div class="dim">= ceil(10000 × 15‰)｜与回滚后的落库行为一致</div>
+  </div>
+  <div>
+    <div class="k">口径 B · 备品 = ceil(订单数量 × 部位率 max‰)</div>
+    <div class="v bad">4500</div>
+    <div class="dim">= ceil(10000 × 450‰)｜已被真实数据证伪（30 倍虚高）</div>
+  </div>
+</div>
+
+<div class="ask">
+  <b>我的建议：口径 A。</b>理由：①它是当前线上（回滚后）的实际落库口径，列与库一致；
+  ②口径 B 的率是<b>材料损耗量级</b>（实测 400–1000‰，即 40%–100%），拿它当备品率必然虚高；
+  ③「按部位差异化备品」若要做，正确形态是<b>另拆一个备品率输入</b>，而不是复用材料损耗率（见文末）。
+</div>
+
+<h2>二、方案 A（推荐）<span class="tag">10 列</span></h2>
+<p class="sub">「备品数量」插在「订单数量」右侧，成为第 4 列。率取该分组的订单级率（未单独设时回退顶部「统一损耗率」）。</p>
+
+<div class="card">
+  <div class="card-hd"><span>工厂内部采购订单汇总 · 单 SKU</span><span class="pill">率 15‰</span></div>
+  <div class="scroll">
+  <table>
+    <thead><tr>
+      <th>客户</th><th>产品名称</th><th class="r">订单数量</th>
+      <th class="r new">备品数量</th>
+      <th>供应商</th><th>布料名称</th><th>规格型号</th><th class="r">损耗率</th><th class="r">数量</th><th>单位</th>
+    </tr></thead>
+    <tbody>
+      <tr><td rowspan="3" class="b">MINISO国际</td><td rowspan="3">鲨鱼</td>
+          <td rowspan="3" class="r b">10,000</td>
+          <td rowspan="3" class="r b new">150</td>
+          <td rowspan="2">超柔供应商</td><td>蓝色超柔</td><td>223</td><td class="r">450</td><td class="r">1,291</td><td>码</td></tr>
+      <tr><td>漂白超柔</td><td>2</td><td class="r">30</td><td class="r">948</td><td>码</td></tr>
+      <tr><td>吉绒供应商</td><td>3mm漂白吉绒</td><td>C001</td><td class="r">400</td><td class="r">126</td><td>码</td></tr>
+    </tbody>
+  </table>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-hd"><span>工厂内部采购订单汇总 · 多 SKU（逐 SKU 对齐 + 合计子行）</span><span class="pill">率 15‰</span></div>
+  <div class="scroll">
+  <table>
+    <thead><tr>
+      <th>客户</th><th>产品名称</th><th class="r">订单数量</th>
+      <th class="r new">备品数量</th>
+      <th>供应商</th><th>布料名称</th><th>规格型号</th><th class="r">损耗率</th><th class="r">数量</th><th>单位</th>
+    </tr></thead>
+    <tbody>
+      <tr>
+        <td rowspan="2" class="b">MINISO国际</td>
+        <td><div class="sku">鲨鱼·大号</div><div class="sku">鲨鱼·小号</div><div class="sku total">合计</div></td>
+        <td class="r"><div class="sku">6,000</div><div class="sku">4,000</div><div class="sku total">10,000</div></td>
+        <td class="r new"><div class="sku">90</div><div class="sku">60</div><div class="sku total">150</div></td>
+        <td>超柔供应商</td><td>蓝色超柔</td><td>223</td><td class="r">450</td><td class="r">1,291</td><td>码</td>
+      </tr>
+      <tr><td colspan="6" class="dim">（同一分组其余布料行，与现状一致）</td></tr>
+    </tbody>
+  </table>
+  </div>
+</div>
+
+<p class="sub"><b>逐 SKU 的取整口径</b>：每个 SKU 各自 <code>ceil(该SKU数量 × 率‰)</code> 后<b>再求和</b>（上例 90+60=150），
+与后端 <code>resync_po_sku_spare</code> 和 /beile-order 的逐 SKU 口径一致——避免「先求和再取整」造成两页数字对不上。</p>
+
+<h2>三、方案 B（不推荐，仅供对照）<span class="tag alt">10 列</span></h2>
+<p class="sub">同一张表，仅把口径换成「部位率 max」。数字与 /beile-order 当前的 14500 吻合（也就是你要修掉的那个）。</p>
+
+<div class="card">
+  <div class="card-hd"><span>工厂内部采购订单汇总 · 部位率 max 口径</span><span class="pill">max(450,400,30) = 450‰</span></div>
+  <div class="scroll">
+  <table>
+    <thead><tr>
+      <th>客户</th><th>产品名称</th><th class="r">订单数量</th>
+      <th class="r new">备品数量</th>
+      <th>供应商</th><th>布料名称</th><th>规格型号</th><th class="r">损耗率</th><th class="r">数量</th><th>单位</th>
+    </tr></thead>
+    <tbody>
+      <tr><td rowspan="1" class="b">MINISO国际</td><td>鲨鱼</td>
+          <td class="r b">10,000</td>
+          <td class="r b new" style="color:#c22">4,500</td>
+          <td>超柔供应商</td><td>蓝色超柔</td><td>223</td><td class="r">450</td><td class="r">1,291</td><td>码</td></tr>
+    </tbody>
+  </table>
+  </div>
+</div>
+
+<h2>四、还要你定的三件事</h2>
+<div class="foot">
+  <p><b>① 打印 / 导出是否同步加这一列？</b>　弹窗表格、打印预览、Excel 导出共用一份列定义（<code>buildFactoryHtml</code>，目前 9 列，含「损耗率」列但无备品列）。
+  只改屏幕会出现「屏幕上有、打印没有」。<b>建议三个一起加</b>（A4 纵向将变 10 列，我会顺带压一下列宽并打印抽查一次）。</p>
+  <p><b>② 要不要合计？</b>　分组内已有「合计」子行（逐 SKU 求和）。表尾是否再加一条总备品合计？<b>建议先不加</b>，等你看过实际使用再定。</p>
+  <p><b>③ 率未设时显示什么？</b>　率 = 0 ⇒ 备品确实是 <code>0</code>（确定值，不是「无法派生」）。<b>建议显示 <code>0</code></b>；仅在数据不可得时才显示 <code>—</code>（与「订单数量」列既有约定一致）。</p>
+</div>
+
+<div class="note" style="margin-top:18px">
+  <b>关于「按部位差异化备品」</b>：这次回滚<u>不是</u>否定你的需求，而是暴露了实现形态错了——材料损耗率（40%–100%）与备品率（0.5%–3%）
+  差了 1-2 个数量级，共用一个输入必然错。正确形态是每行<b>两个输入</b>（材料损耗率 → 布料数量加放；备品率 → 备品/生产数量）。
+  本次改动的模块与 24 条测试已保留，可直接作为该方案的基础设施。
+</div>
+
+</body>
+</html>

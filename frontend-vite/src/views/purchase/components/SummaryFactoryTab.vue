@@ -70,9 +70,10 @@
           <th class="w-[9%]">客户</th>
           <th class="w-[15%]">产品名称</th>
           <th class="w-[7%]">订单数量</th>
+          <th class="w-[7%]">备品数量</th>
           <th class="w-[10%]">供应商</th>
-          <th class="w-[20%]">布料名称</th>
-          <th class="w-[14%]">规格型号</th>
+          <th class="w-[16%]">布料名称</th>
+          <th class="w-[12%]">规格型号</th>
           <th class="w-[6%]">损耗率</th>
           <th class="w-[8%]">数量</th>
           <th class="w-[6%]">单位</th>
@@ -96,6 +97,15 @@
               :key="`q-${li}`"
               :class="['sm-sku-line', { 'sm-sku-line--total': line.isTotal }]"
             >{{ formatQty(line.qty) }}</div>
+          </td>
+          <!-- 备品数量：口径 A（只用分组订单级率），逐 SKU 与「订单数量」同源分行；
+               **逐布料行（自定义）损耗率不影响本列** —— 那是材料损耗量级。 -->
+          <td v-if="row.isFirstFabricRow" :rowspan="row.groupFabricCount">
+            <div
+              v-for="(line, li) in groupSkuLines[row.gi]"
+              :key="`sp-${li}`"
+              :class="['sm-sku-line', { 'sm-sku-line--total': line.isTotal }]"
+            >{{ formatQty(line.spare) }}</div>
           </td>
           <td v-if="row.isFirstSupplier" :rowspan="row.supplierFabricCount">{{ row.supplier.supplier_name }}</td>
           <td>{{ row.fabric.fabric_name }}</td>
@@ -171,9 +181,12 @@
 /**
  * SummaryFactoryTab.vue — 汇总下单弹窗「工厂内部订单」页签。
  *
- * 损耗率粒度：
- * - 顶部「统一损耗率」为批量快捷入口（同时驱动供应商页放大与订单级损耗率落库）；
- * - 表格内「损耗率」列为**每一行布料**的差异化损耗率，逐行修改并自动落库。
+ * 损耗率粒度（**两种率语义不同，不可互换**）：
+ * - 顶部「统一损耗率」→ **订单级率**：批量快捷入口，同时驱动供应商页放大、
+ *   订单级损耗率落库，以及**「备品数量」列**（备品 = ceil(订单数量 × 订单级率‰)）；
+ * - 表格内「损耗率」列 → **逐布料行的材料损耗率**：只驱动该行「数量」列的加放
+ *   （实测 400-1000‰，即 40%-100%），**不影响备品** —— 两者差 1-2 个数量级，
+ *   混用会虚高（2026-09-30 生产实证：单张单备品 150 → 4500）。
  */
 import { computed } from 'vue'
 import { fmtQty as formatQty } from '@/utils/formatQty'
@@ -193,6 +206,8 @@ const props = defineProps<{
   fabricLossRates?: number[][][]
   /** 每个布料行内各明细损耗率是否不一致，形状 [gi][si][fi] */
   fabricLossRateMixed?: boolean[][][]
+  /** 每个分组的订单级损耗率（「备品数量」列的唯一口径），形状 [gi]；缺省回退 lossRate */
+  groupSpareRates?: number[]
 }>()
 
 const emit = defineEmits<{
@@ -254,10 +269,19 @@ function editFabricQty(fabric: FabricItem, gi: number, si: number, fi: number): 
 }
 
 /**
- * 每个汇总分组的逐 SKU 展示行（按 gi 索引，供「产品名称 / 订单数量」两列共用）。
+ * 该分组的订单级率（「备品数量」列的唯一口径）：分组值优先，缺省回退顶部「统一损耗率」。
+ * 注意：**不读 `fabricLossRates`** —— 逐布料行的材料损耗率不得影响备品（见文件头说明）。
+ */
+function spareRateForGroup(gi: number): number {
+  const v = props.groupSpareRates?.[gi]
+  return typeof v === 'number' && Number.isFinite(v) ? v : props.lossRate
+}
+
+/**
+ * 每个汇总分组的逐 SKU 展示行（按 gi 索引，供「产品名称 / 订单数量 / 备品数量」三列共用）。
  */
 const groupSkuLines = computed<SkuDisplayLine[][]>(() =>
-  (props.factoryData?.groups || []).map((g) => buildSkuDisplayLines(g)),
+  (props.factoryData?.groups || []).map((g, gi) => buildSkuDisplayLines(g, spareRateForGroup(gi))),
 )
 
 // 预计算 flatFactoryRows，避免模板内每行调用 isFirstFabricRow/getGroupFabricCount

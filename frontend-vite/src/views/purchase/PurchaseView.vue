@@ -172,6 +172,7 @@
       :loss-rate-mixed="summary.lossRateMixed"
       :fabric-loss-rates="summary.fabricLossRates"
       :fabric-loss-rate-mixed="summary.fabricLossRateMixed"
+      :group-spare-rates="summary.groupSpareRates"
       :order-count="purchaseOrders.selectedIds.length"
       :supplier-groups="summary.supplierGroups"
       @close="summary.close"

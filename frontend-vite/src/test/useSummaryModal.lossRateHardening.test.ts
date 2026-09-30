@@ -194,7 +194,7 @@ describe('A. 损耗率放大改为纯展示派生（不再就地改写数据）'
       global: { stubs: { UiDialog: { template: '<div><slot name="title" /><slot /></div>' } } },
     })
     const firstDataRow = wrapper.findAll('tbody tr')[0]!
-    expect(firstDataRow.findAll('td')[7]!.text()).toBe('101')
+    expect(firstDataRow.findAll('td')[8]!.text()).toBe('101')
     wrapper.unmount()
   })
 
@@ -203,7 +203,7 @@ describe('A. 损耗率放大改为纯展示派生（不再就地改写数据）'
     const cellOf = (html: string) => {
       const doc = new DOMParser().parseFromString(`<table>${html}</table>`, 'text/html')
       const cells = [...doc.querySelectorAll('tbody tr td')]
-      return cells[7]!.textContent // 第 8 列 = 数量
+      return cells[8]!.textContent // 第 9 列 = 数量（第 4 列已新增备品数量）
     }
 
     // 10 × 1.005 = 10.05 → 向上取整为 11
@@ -266,7 +266,7 @@ describe('A. 损耗率放大改为纯展示派生（不再就地改写数据）'
 
     // 非编辑态：工厂「数量」列与供应商页「数量」逐字一致（22）
     const before = mountModal()
-    const factoryCell = before.findAll('tbody tr')[0]!.findAll('td')[7]!.text()
+    const factoryCell = before.findAll('tbody tr')[0]!.findAll('td')[8]!.text()
     expect(factoryCell).toBe('22')
     await before.findAll('.sm-tab-btn')[1]!.trigger('click')
     expect(supplierRowQty(before)).toBe(factoryCell)

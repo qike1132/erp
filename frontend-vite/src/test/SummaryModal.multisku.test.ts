@@ -101,7 +101,7 @@ function firstRowCells(wrapper: ReturnType<typeof mountModal>) {
 
 describe('buildSkuDisplayLines（逐 SKU 展示行唯一来源）', () => {
   it('C1/C2 多 SKU：4 个 SKU 各一行 + 「合计」子行，合计取订单级真值', () => {
-    const lines = buildSkuDisplayLines(multiSkuGroup())
+    const lines = buildSkuDisplayLines(multiSkuGroup(), 10)
 
     expect(lines.map((l) => l.name)).toEqual([
       '妹妹二代',
@@ -114,15 +114,17 @@ describe('buildSkuDisplayLines（逐 SKU 展示行唯一来源）', () => {
     expect(lines[4]!.qty).toBe(3996444)
     expect(lines.slice(0, 4).every((l) => l.isTotal === false)).toBe(true)
     expect(lines[4]!.isTotal).toBe(true)
-    // 备品已改为逐布料行计算，SKU 行只承载名称/数量
-    expect(lines.every((l) => !('spare' in l))).toBe(true)
+    // 备品（口径 A：只用订单级率 10‰）：逐 SKU ceil(999111×1%) = 9992
+    expect(lines.slice(0, 4).map((l) => l.spare)).toEqual([9992, 9992, 9992, 9992])
+    // 合计备品 = 逐 SKU 取整后求和（39968），**不是** ceil(合计数量 × 率) = 39965
+    expect(lines[4]!.spare).toBe(39968)
   })
 
   it('C4 单 SKU 只一行（不产生「合计」子行），与改动前逐字一致', () => {
-    const lines = buildSkuDisplayLines(singleSkuGroup())
+    const lines = buildSkuDisplayLines(singleSkuGroup(), 10)
 
     expect(lines).toHaveLength(1)
-    expect(lines[0]).toEqual({ name: '变形金刚', qty: 969461, isTotal: false })
+    expect(lines[0]).toEqual({ name: '变形金刚', qty: 969461, spare: 9695, isTotal: false })
   })
 
   it('C4 旧后端不返回 skus 时降级为订单级单行（零回归）', () => {
@@ -133,11 +135,12 @@ describe('buildSkuDisplayLines（逐 SKU 展示行唯一来源）', () => {
       suppliers: [],
     }
 
-    const lines = buildSkuDisplayLines(legacy)
+    const lines = buildSkuDisplayLines(legacy, 10)
 
     expect(lines).toHaveLength(1)
     expect(lines[0]!.name).toBe('妹妹二代、企鹅的订单')
     expect(lines[0]!.qty).toBe(20000)
+    expect(lines[0]!.spare).toBe(200)
   })
 })
 
