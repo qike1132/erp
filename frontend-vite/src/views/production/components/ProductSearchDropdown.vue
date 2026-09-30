@@ -53,7 +53,7 @@ const emit = defineEmits<{
   right: 0;
   margin-top: 6px;
   background: white;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--color-border);
   border-radius: 12px;
   box-shadow: 0 12px 40px rgba(15, 23, 42, 0.15);
   max-height: 260px;
@@ -64,7 +64,7 @@ const emit = defineEmits<{
 .pr-entry-dropdown-state {
   padding: 16px;
   font-size: 13px;
-  color: #64748b;
+  color: var(--color-text-muted);
   text-align: center;
   display: flex;
   align-items: center;
@@ -75,7 +75,7 @@ const emit = defineEmits<{
   font-size: 14px;
 }
 .pr-entry-dropdown-error {
-  color: #dc2626;
+  color: var(--color-danger-600);
 }
 .pr-entry-dropdown-item {
   display: flex;
@@ -94,14 +94,14 @@ const emit = defineEmits<{
 }
 .pr-entry-dropdown-item:hover,
 .pr-entry-dropdown-item.active {
-  background: #eff6ff;
+  background: var(--color-primary-50);
 }
 .pr-entry-dropdown-icon {
   width: 32px;
   height: 32px;
   border-radius: 8px;
-  background: #f1f5f9;
-  color: #64748b;
+  background: var(--color-border-light);
+  color: var(--color-text-muted);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -109,8 +109,8 @@ const emit = defineEmits<{
   flex-shrink: 0;
 }
 .pr-entry-dropdown-item.active .pr-entry-dropdown-icon {
-  background: #dbeafe;
-  color: #1e40af;
+  background: var(--color-primary-100);
+  color: var(--color-primary-700);
 }
 .pr-entry-dropdown-content {
   flex: 1;
@@ -122,7 +122,7 @@ const emit = defineEmits<{
 .pr-entry-dropdown-name {
   font-size: 13px;
   font-weight: 700;
-  color: #1e293b;
+  color: var(--color-text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -132,7 +132,7 @@ const emit = defineEmits<{
   align-items: center;
   gap: 8px;
   font-size: 11px;
-  color: #64748b;
+  color: var(--color-text-muted);
 }
 .pr-entry-dropdown-barcode {
   display: inline-flex;
@@ -143,7 +143,7 @@ const emit = defineEmits<{
   font-size: 10px;
 }
 .pr-entry-dropdown-enter {
-  color: #1e40af;
+  color: var(--color-primary-700);
   font-size: 12px;
 }
 </style>

@@ -59,7 +59,7 @@ const emit = defineEmits<{
 <style scoped>
 .pr-entry-sidebar {
   padding: 22px 20px;
-  background: #f8fafc;
+  background: var(--color-surface);
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -67,7 +67,7 @@ const emit = defineEmits<{
 }
 .pr-entry-side-card {
   background: white;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--color-border);
   border-radius: 12px;
   overflow: hidden;
   display: flex;
@@ -78,11 +78,11 @@ const emit = defineEmits<{
   align-items: center;
   justify-content: space-between;
   padding: 12px 14px;
-  background: #f8fafc;
-  border-bottom: 1px solid #f1f5f9;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border-light);
   font-size: 12px;
   font-weight: 700;
-  color: #475569;
+  color: var(--color-text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -92,13 +92,13 @@ const emit = defineEmits<{
   gap: 6px;
 }
 .pr-entry-side-head i {
-  color: #1e40af;
+  color: var(--color-primary-700);
   font-size: 11px;
 }
 .pr-entry-side-clear {
   border: none;
   background: transparent;
-  color: #94a3b8;
+  color: var(--color-text-muted);
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
@@ -109,7 +109,7 @@ const emit = defineEmits<{
   transition: color 0.15s ease;
 }
 .pr-entry-side-clear:hover {
-  color: #dc2626;
+  color: var(--color-danger-600);
 }
 .pr-entry-recent-list {
   display: flex;
@@ -132,19 +132,19 @@ const emit = defineEmits<{
   transition: all 0.15s ease;
 }
 .pr-entry-recent-item:hover {
-  background: #eff6ff;
+  background: var(--color-primary-50);
   transform: translateX(2px);
 }
 .pr-entry-recent-bullet {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #cbd5e1;
+  background: var(--color-border);
   flex-shrink: 0;
   transition: background 0.15s ease, transform 0.15s ease;
 }
 .pr-entry-recent-item:hover .pr-entry-recent-bullet {
-  background: #3b82f6;
+  background: var(--color-primary-500);
   transform: scale(1.4);
 }
 .pr-entry-recent-content {
@@ -157,23 +157,23 @@ const emit = defineEmits<{
 .pr-entry-recent-name {
   font-size: 13px;
   font-weight: 600;
-  color: #1e293b;
+  color: var(--color-text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .pr-entry-recent-barcode {
   font-size: 11px;
-  color: #64748b;
+  color: var(--color-text-muted);
   font-family: 'SF Mono', 'Consolas', monospace;
 }
 .pr-entry-recent-arrow {
   font-size: 10px;
-  color: #cbd5e1;
+  color: var(--color-border);
   transition: all 0.15s ease;
 }
 .pr-entry-recent-item:hover .pr-entry-recent-arrow {
-  color: #1e40af;
+  color: var(--color-primary-700);
   transform: translateX(2px);
 }
 .pr-entry-empty-small {
@@ -183,7 +183,7 @@ const emit = defineEmits<{
   justify-content: center;
   gap: 4px;
   padding: 24px 12px;
-  color: #94a3b8;
+  color: var(--color-text-muted);
   text-align: center;
 }
 .pr-entry-empty-small i {
@@ -196,7 +196,7 @@ const emit = defineEmits<{
 }
 .pr-entry-empty-small small {
   font-size: 11px;
-  color: #cbd5e1;
+  color: var(--color-border);
 }
 .pr-entry-shortcuts {
   padding: 10px 14px 12px;
@@ -209,7 +209,7 @@ const emit = defineEmits<{
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: #475569;
+  color: var(--color-text-secondary);
 }
 .pr-entry-shortcut span {
   margin-left: auto;
@@ -219,13 +219,13 @@ const emit = defineEmits<{
   display: inline-block;
   min-width: 22px;
   padding: 2px 6px;
-  background: #f1f5f9;
-  border: 1px solid #e2e8f0;
+  background: var(--color-border-light);
+  border: 1px solid var(--color-border);
   border-bottom-width: 2px;
   border-radius: 5px;
   font-size: 10px;
   font-weight: 700;
-  color: #475569;
+  color: var(--color-text-secondary);
   font-family: 'SF Mono', 'Consolas', monospace;
   text-align: center;
 }
