@@ -16,7 +16,8 @@
 - **接口只增字段**：`groups[].suppliers[].fabrics[]`（落库真值 + `item_ids`）与 `groups[].skus[].product_name/product_barcode/order_qty` 的**形状与数值逐字不变**（老前端不受影响）。
 - **零新增数据库查询**：BOM 已在汇总接口加载（`purchase_order_query.py:344-351`），按 SKU 展开必须是纯内存计算。
 - **绝不抛错**：SKU 名解析不出、BOM 缺失、字段缺失一律降级（该 SKU `materials: []`），不得让汇总接口 500。
-- **单 SKU 零回归**：单 SKU 单（`skus` ≤ 1 或缺失、或 `materials` 缺失）的屏幕、打印、导出输出与改动前**逐字一致**。
+- **零回归的真实边界是「无 `materials`」路径**：仅当该组**拿不到任何按 SKU 的 `materials`**（旧后端 / 未配 BOM / SKU 名解析不出 ⇒ 全组 `materials` 皆空）时，前端才回退「订单级单块」，其屏幕、打印、导出输出与改动前**逐字一致**。
+  **注意：单 SKU 单不在此保证内** —— 只要后端返回了 `materials`，**单 SKU** 同样走按 SKU 路径（渲染一个块、数量取该 SKU 的 BOM 推算值），与改动前**不同**。原表述「单 SKU 单（`skus` ≤ 1 或缺失、或 `materials` 缺失）…逐字一致」不成立，已按实现更正（见 Task 6 更正后的 spec §3.3/§5）。
 - 前端硬门禁：**单 SFC ≤ 400 行**、单文件 ≤ 1600 行（`pyproject.toml` 的 `[tool.code-quality]`）；`ruff.toml` 对测试文件不豁免 F401。
 - 后端测试：`pytest.ini` 的 `asyncio_mode = auto`（async 测试**不加** `@pytest.mark.asyncio`）、`filterwarnings = error`（sqlite 写入**禁用** `Decimal`）。
 - 测试/工具：`python -m pytest`；前端 `npx vitest run`、`npm run type-check`、`npm run lint`、`npm run check:api`、`npm run check:routes`。

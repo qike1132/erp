@@ -198,20 +198,43 @@ export function useFactoryTableRows(props: FactoryTabProps, emit: EmitFn<Factory
     return c ? rateForFabric(item.gi, c.si, c.fi) : 0
   }
 
-  /** 该行的基准数量：回退模式取落库布料数量；按 SKU 模式取后端给的基准量。 */
+  /** 该行的基准数量：回退模式取落库布料数量；按 SKU 模式取后端给的基准量（**推算值**）。 */
   function rowBaseQty(item: RowItem): number {
     return item.legacy
       ? parseFloat(String(item.legacy.fabric.quantity)) || 0
       : item.row.baseQuantity
   }
 
-  /** 编辑态数量输入框值（精确加放值，保存时由 updateFactoryQty 反推真值）。 */
-  function editRowQty(item: RowItem): number {
+  /**
+   * 编辑态数量输入框的**预载基准**（落库真值，**不是**该 SKU 的推算值）。
+   *
+   * 编辑态与展示态**刻意不同源**，这不是遗漏：
+   * - 编辑态预载 = **落库真值**（`suppliers[si].fabrics[fi].quantity`）—— 同一物料在所有
+   *   SKU 块里是采购明细中的**同一行**、同一份状态；保存时 `updateFactoryQty` 把输入值
+   *   反推（unmagnify）后写回这**一行共享明细**。若预载改用该 SKU 的推算值，则
+   *   「输入框显示的是推算值、写入的却是共享真值」⇒ 静默写错：共享布推算 20/40、真值 60，
+   *   编辑框显示 21/41，用户把 A 的 21 改成 25，落库真值变成 24.75（25 反推后），
+   *   B 的 40 份物料凭空消失，而行内展示仍来自推算值 ⇒ 用户无法自查。
+   * - 非编辑态展示 = 该 SKU 的**推算值**（BOM 单件用量 × 该 SKU 数量）—— 这是本特性的
+   *   核心价值，必须保留（见 `displayRowQty`，它仍用 `rowBaseQty`）。
+   *
+   * 副作用（符合 spec §4.3）：同一物料跨 SKU 的编辑框因此显示**同一份真值**，改一处
+   * 所有块同步 —— 与损耗率联动的体验同构，写入语义 = 「等价于编辑该订单级行」。
+   */
+  function editBaseQty(item: RowItem): number {
     const c = rowCoord(item)
-    return c ? factoryQtyDisplayValue(rowBaseQty(item), rateForFabric(item.gi, c.si, c.fi), true) : rowBaseQty(item)
+    const fabric = c ? item.group.suppliers?.[c.si]?.fabrics?.[c.fi] : undefined
+    if (!fabric) return rowBaseQty(item)   // 只读行（无坐标）/ 坐标越界：无可写目标，退回既有基准
+    return parseFloat(String(fabric.quantity)) || 0
   }
 
-  /** 非编辑态数量展示值（加放后向上取整）。 */
+  /** 编辑态数量输入框值（落库真值加放，保存时由 updateFactoryQty 反推真值）。 */
+  function editRowQty(item: RowItem): number {
+    const c = rowCoord(item)
+    return c ? factoryQtyDisplayValue(editBaseQty(item), rateForFabric(item.gi, c.si, c.fi), true) : editBaseQty(item)
+  }
+
+  /** 非编辑态数量展示值（**该 SKU 的推算值**加放后向上取整）。 */
   function displayRowQty(item: RowItem): number {
     const c = rowCoord(item)
     return c ? factoryQtyDisplayValue(rowBaseQty(item), rateForFabric(item.gi, c.si, c.fi), false) : rowBaseQty(item)

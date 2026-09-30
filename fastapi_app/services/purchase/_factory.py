@@ -7,6 +7,7 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi_app.core.float_utils import round_qty
 from fastapi_app.services.purchase._common import _parse_source_order_ids
 from fastapi_app.services.purchase._list import _is_filling_category
 from fastapi_app.services.purchase_order_sku import merge_sku_lines
@@ -141,6 +142,13 @@ def _sku_material_rows(bom_rows: list, sku_qty: float, supplier_fallback: str) -
     不查库，也**不抛错**（`bom_rows` 为空时返回 `[]`）。前提：`bom_rows` 由
     `_fetch_bom_data` 产出，其 `material_name/specification/unit/quantity` 键恒存在；
     本函数不做键存在性防御（与既有 `_accumulate_factory_bom` 同一约定）。
+
+    **舍入口径必须与生成路径一致**：生成时 `purchase_order_generate._material_row` 逐
+    (SKU, 角色, BOM 行) 执行 `round_qty(usage × qty)`（HALF-UP 2 位）。此处用**同一个**
+    `round_qty` 逐行舍入，使「未编辑单的 Σ 按 SKU 推算 == Σ 落库真值」成为构造性事实。
+    若此处不舍入，半厘边界会分叉：`usage=0.1235`、每 SKU 10 件 → 落库 `round_qty(1.235)=1.24`
+    累计 2.48，而推算 1.235×2=2.47，差 0.01 > 容差 0.005 ⇒ 从未手改过的单也误弹
+    「含手工调整」横幅（前端差异对照块的假告警）。
     """
     buckets: dict[tuple, dict] = {}
     for bom in bom_rows or []:
@@ -148,7 +156,7 @@ def _sku_material_rows(bom_rows: list, sku_qty: float, supplier_fallback: str) -
             continue
         sup = bom.get('supplier_name') or supplier_fallback
         key = (sup, bom['material_name'], bom['specification'], bom['unit'])
-        amount = float(bom.get('quantity') or 0) * float(sku_qty or 0)
+        amount = round_qty(float(bom.get('quantity') or 0) * float(sku_qty or 0))
         if key in buckets:
             buckets[key]['quantity'] += amount
         else:
@@ -166,38 +174,62 @@ def _sku_material_rows(bom_rows: list, sku_qty: float, supplier_fallback: str) -
     )
 
 
-def _accumulate_factory_sku_qtys(group: dict, sku_lines: list, po, name_to_pid: dict) -> None:
-    """按 SKU 名累加 order_qty（并记下首个可解析的 pid 与供应商兜底）。
+def _accumulate_factory_sku_materials(
+    group: dict, sku_lines: list, po, bom_data: dict, name_to_pid: dict,
+) -> None:
+    """**逐采购单**累加「按 SKU 的物料明细」，供应商兜底取**本单**的 `po.supplier_name`。
 
-    同一分组可能汇聚多张采购单（同客户 + 同拼接产品名），此时显示口径是「合并后的数量」
-    （见 ``merge_sku_lines``）；materials 必须与它同源，否则同一行自相矛盾、且前端的
-    数量差异对照块会把「没差异」误报成差异。故此处**只累加**，推算留到全部单汇总后。
+    为什么必须逐单累加（而不是只看首单 / 末单）：
+
+    1. **必须覆盖组内每一张单**：同一分组可能汇聚多张采购单（同客户 + 同拼接产品名），
+       显示口径是「各单合并后的数量」（见 ``merge_sku_lines``）。物料若只看首单/末单，
+       会与显示的数量自相矛盾，并让前端的数量差异对照块把「没差异」误报成差异。
+    2. **供应商归属必须与 fabrics 同源**：``_accumulate_factory_bom`` 的兜底是**本单**的
+       `po.supplier_name`。若这里改用「分组级首个 PO 的供应商」做兜底，则当分组汇聚了
+       多张不同供应商的采购单、而 BOM 行**没有** supplier_name 时，fabrics 会按各单供应商
+       拆成两行，materials 却全落在首个 PO 名下 ⇒ 键漂移 ⇒ 前端该行 `coord=null` 退化成
+       只读，且对照块误报「只在落库侧」。故这里**同样取本单供应商**。
+    3. **键与累加方式**：SKU 名作外层桶键；物料以
+       `(supplier, material_name, specification, unit)` 为内层键 **``+=`` 累加** ——
+       多张单共用同一 SKU 名时数量相加（与既有语义一致）。逐单 `round_qty` 后相加，正好
+       复现生成路径「逐单、逐 SKU 舍入后再汇总」的落库真值。绝不改回「按 SKU 名整体赋值」
+       ——那会丢掉多单累加（Task-1 曾犯的缺陷）。
     """
     for sku in sku_lines:
         sku_name = _norm_sku_name(sku.get('product_name'))
         sku_pid = name_to_pid.get(sku_name)
-        if sku_pid is not None and sku_name not in group['_sku_pid_by_name']:
-            group['_sku_pid_by_name'][sku_name] = sku_pid
-        group['_sku_qty_by_name'][sku_name] = (
-            group['_sku_qty_by_name'].get(sku_name, 0.0) + float(sku.get('order_qty') or 0)
-        )
-        if not group['_sku_supplier_fallback']:
-            group['_sku_supplier_fallback'] = po.supplier_name or '未指定供应商'
+        if sku_pid is None:
+            continue
+        sku_qty = float(sku.get('order_qty') or 0)
+        supplier_fallback = po.supplier_name or '未指定供应商'
+        bucket = group['_sku_materials'].setdefault(sku_name, {})
+        for row in _sku_material_rows(bom_data.get(sku_pid) or [], sku_qty, supplier_fallback):
+            key = (
+                row['supplier_name'], row['material_name'],
+                row['specification'], row['unit'],
+            )
+            if key in bucket:
+                bucket[key]['quantity'] += row['quantity']
+            else:
+                bucket[key] = row
 
 
-def _finalize_factory_sku_materials(group_map: dict, bom_data: dict) -> None:
-    """全部采购单累加完毕后，按「合并后的 SKU 数量」一次性推算物料（纯内存，零新增查询）。
+def _finalize_factory_sku_materials(group_map: dict) -> None:
+    """把逐单累加的物料桶定稿为**稳定排序**的列表（与 ``_sku_material_rows`` 同序）。
+
+    累加期 ``_sku_materials`` 是 ``{sku_name: {(sup, mat, spec, unit): row}}``（跨单 ``+=``）；
+    此处转成 ``{sku_name: [row, ...]}``，排序键与 ``_sku_material_rows`` 一致
+    （供应商 → 物料名 → 规格 → 单位），保证块内顺序稳定、且与既有 fabrics 同序。
 
     解析不出产品（无 pid）的 SKU 留空数组 —— 前端据此回退订单级单块，绝不编造。
     """
     for group in group_map.values():
-        fallback = group['_sku_supplier_fallback'] or '未指定供应商'
         group['_sku_materials'] = {
-            name: (
-                _sku_material_rows(bom_data.get(group['_sku_pid_by_name'][name]) or [], qty, fallback)
-                if group['_sku_pid_by_name'].get(name) else []
+            name: sorted(
+                buckets.values(),
+                key=lambda r: (r['supplier_name'], r['material_name'], r['specification'], r['unit']),
             )
-            for name, qty in group['_sku_qty_by_name'].items()
+            for name, buckets in group['_sku_materials'].items()
         }
 
 
@@ -230,9 +262,7 @@ def _build_factory_group_map(orders, bom_data, items_map, items_by_order, cust_o
                 'order_quantity': order_qty,
                 '_supplier_map': {},
                 '_sku_lines': [],
-                '_sku_qty_by_name': {},
-                '_sku_pid_by_name': {},
-                '_sku_supplier_fallback': '',
+                '_sku_materials': {},
                 '_order_ids': [],
             }
         group = group_map[key]
@@ -248,10 +278,10 @@ def _build_factory_group_map(orders, bom_data, items_map, items_by_order, cust_o
                 'product_name': prod, 'product_barcode': '', 'order_qty': order_qty,
             })
 
-        # 按 SKU 名累加 order_qty（细节见 _accumulate_factory_sku_qtys）：
-        # 同一分组可能汇聚多张采购单，materials 必须与显示用的合并数量同源。
+        # 逐单累加「按 SKU 的物料明细」（细节见 _accumulate_factory_sku_materials）：
+        # 供应商兜底取**本单**的 po.supplier_name，与 fabrics 同源同键。
         name_to_pid = {name: pid for pid, name in (prod_name_map or {}).items()}
-        _accumulate_factory_sku_qtys(group, sku_lines, po, name_to_pid)
+        _accumulate_factory_sku_materials(group, sku_lines, po, bom_data, name_to_pid)
 
         if po_pids_map is None:
             pids = [pid] if pid else []
@@ -283,8 +313,8 @@ def _build_factory_group_map(orders, bom_data, items_map, items_by_order, cust_o
             # BOM 完全不可用（所选 SKU 均未配 BOM）时的既有回退
             _accumulate_factory_po_items(group, po, items_by_order)
 
-    # 全部采购单累加完毕后，按「合并后的 SKU 数量」一次性推算物料（细节见 helper）
-    _finalize_factory_sku_materials(group_map, bom_data)
+    # 全部采购单累加完毕后，定稿为稳定排序的列表（细节见 helper）
+    _finalize_factory_sku_materials(group_map)
     return group_map
 
 def _serialize_factory_groups(group_map: dict[tuple, dict]) -> list:

@@ -19,6 +19,10 @@
     C3  跨 SKU 重复的同一物料**只能计一次**（数量取自跨 SKU 合并后的采购单明细，
         重复累加会使数量翻倍）；
     C4  单 SKU 采购单行为与修复前逐字一致（零回归）。
+
+按 SKU 展开（口径 A）追加锁定：
+    C15 按 SKU 推算与**生成路径同口径**舍入（`round_qty`）⇒ 未编辑单的 Σ 推算 == Σ 落库；
+    C16 多单同组、供应商不同时，materials 的键集合与 fabrics **完全相等**（不只是子集）。
 """
 import pytest_asyncio
 from sqlalchemy import event
@@ -404,3 +408,119 @@ async def test_c14_multi_po_same_group_uses_summed_quantity(db):
         for name, qty in mats.items():
             summed[name] = round(summed.get(name, 0.0) + qty, 2)
     assert summed == _fabrics(group)
+
+
+async def test_c15_per_sku_projection_rounds_like_generate(db):
+    """C15：按 SKU 推算必须与**生成路径同口径**舍入（`round_qty(usage × qty)`，HALF-UP 2 位）。
+
+    生成时逐 (SKU, 角色, BOM 行) 执行 `round_qty`（`purchase_order_generate._material_row`）；
+    若按 SKU 推算不舍入，半厘边界会分叉：usage=0.1235、每 SKU 10 件 →
+    落库 `round_qty(1.235)=1.24` 累计 2.48，而推算 1.235×2=2.47，差 0.01 > 前端容差 0.005
+    ⇒ **从未手改过**的单也会误弹「含手工调整」横幅（对照块假告警）。
+
+    既有 fixture 的用量都是 0.2 × 整数（可精确表示），结构上抓不到这个缺陷 —— 故此处
+    刻意用 4 位小数用量把判别位做出来。
+    """
+    session, _ = db
+    session.add(Product(id=101, name='产品A'))
+    session.add(Product(id=102, name='产品B'))
+    # 4 位小数用量，恰好落在半厘边界
+    session.add(ProductFabric(id=1, product_id=101, fabric_name='半厘布', specification='S1',
+                              unit='米', quantity=0.1235, supplier_name='供应商甲'))
+    session.add(ProductFabric(id=2, product_id=102, fabric_name='半厘布', specification='S1',
+                              unit='米', quantity=0.1235, supplier_name='供应商甲'))
+    session.add(Order(id=9001, order_no='SO-9001', customer='客户甲',
+                      product_id=101, quantity=20, status='待备货'))
+    session.add(OrderItem(id=1, order_id=9001, product_id=101, product_name='产品A', quantity=10))
+    session.add(OrderItem(id=2, order_id=9001, product_id=102, product_name='产品B', quantity=10))
+    session.add(PurchaseOrder(
+        id=8001, order_no='PO-8001', customer_name='客户甲',
+        product_name='产品A、产品B', product_quantity=20,
+        supplier_name='供应商甲', source_order_ids='[9001]',
+    ))
+    # 生成路径的真值：round_qty(0.1235 × 10) + round_qty(0.1235 × 10) = 1.24 + 1.24
+    session.add(PurchaseOrderItem(id=1, order_id=8001, material_name='半厘布', specification='S1',
+                                  unit='米', quantity=2.48, supplier_name='供应商甲'))
+    session.add_all([
+        PurchaseOrderSku(id=1, po_id=8001, product_name='产品A', product_barcode='bA',
+                         order_qty=10, source_order_id=9001, source_record_type='order'),
+        PurchaseOrderSku(id=2, po_id=8001, product_name='产品B', product_barcode='bB',
+                         order_qty=10, source_order_id=9001, source_record_type='order'),
+    ])
+    await session.commit()
+
+    group = (await get_factory_order_summary(session, [8001]))['groups'][0]
+    per_sku = _sku_materials(group)
+
+    # 逐 SKU 已按 round_qty 舍入（而非裸浮点 1.2350000000000001）
+    assert per_sku['产品A']['半厘布'] == 1.24
+    assert per_sku['产品B']['半厘布'] == 1.24
+    # Σ 推算 == Σ 落库 —— 「未编辑单不误报差异」是构造性事实，不靠前端容差兜底
+    summed = round(sum(mats.get('半厘布', 0.0) for mats in per_sku.values()), 2)
+    assert summed == _fabrics(group)['半厘布'] == 2.48
+
+
+async def test_c16_multi_po_different_supplier_keys_align(db):
+    """C16：同组两张采购单、供应商不同、BOM 行**无** supplier_name 时，
+    materials 的键集合必须与 fabrics **完全相等**（不只是子集）。
+
+    根因：`_accumulate_factory_bom` 的兜底是**本单**的 `po.supplier_name`，故 fabrics 会按
+    各单供应商拆成两行；若按 SKU 的物料用「分组级首个 PO 的供应商」兜底，则两张单的物料
+    全落在首个供应商名下 ⇒ 键漂移 ⇒ 前端该行 `coord=null` 退化成只读、对照块误报
+    「只在落库侧」。既有 C9 只断言子集关系，抓不到这个缺陷。
+    """
+    session, _ = db
+    session.add(Product(id=101, name='产品A'))
+    # BOM 行**不写** supplier_name（NULL）→ 走 po.supplier_name 兜底（_fetch_bom_data 归一为 ''）
+    session.add(ProductFabric(id=1, product_id=101, fabric_name='共用布', specification='S1',
+                              unit='米', quantity=0.2, supplier_name=None))
+    session.add(Order(id=9001, order_no='SO-9001', customer='客户甲',
+                      product_id=101, quantity=10, status='待备货'))
+    session.add(Order(id=9002, order_no='SO-9002', customer='客户甲',
+                      product_id=101, quantity=20, status='待备货'))
+    session.add(OrderItem(id=1, order_id=9001, product_id=101, product_name='产品A', quantity=10))
+    session.add(OrderItem(id=2, order_id=9002, product_id=101, product_name='产品A', quantity=20))
+    # 同客户 + 同产品名 ⇒ 落进同一分组；但两张单的供应商不同
+    session.add_all([
+        PurchaseOrder(id=8001, order_no='PO-8001', customer_name='客户甲',
+                      product_name='产品A', product_quantity=10,
+                      supplier_name='供应商甲', source_order_ids='[9001]'),
+        PurchaseOrder(id=8002, order_no='PO-8002', customer_name='客户甲',
+                      product_name='产品A', product_quantity=20,
+                      supplier_name='供应商乙', source_order_ids='[9002]'),
+        PurchaseOrderItem(id=1, order_id=8001, material_name='共用布', specification='S1', unit='米',
+                          quantity=2.0, supplier_name='供应商甲'),
+        PurchaseOrderItem(id=2, order_id=8002, material_name='共用布', specification='S1', unit='米',
+                          quantity=4.0, supplier_name='供应商乙'),
+        PurchaseOrderSku(id=1, po_id=8001, product_name='产品A', product_barcode='bA',
+                         order_qty=10, source_order_id=9001, source_record_type='order'),
+        PurchaseOrderSku(id=2, po_id=8002, product_name='产品A', product_barcode='bA',
+                         order_qty=20, source_order_id=9002, source_record_type='order'),
+    ])
+    await session.commit()
+
+    group = (await get_factory_order_summary(session, [8001, 8002]))['groups'][0]
+
+    per_sku_keys = {
+        (m['supplier_name'], m['material_name'], m['specification'], m['unit'])
+        for s in group['skus'] for m in (s.get('materials') or [])
+    }
+    fabric_keys = {
+        (f.get('supplier_name') or s['supplier_name'], f['fabric_name'], f['specification'], f['unit'])
+        for s in group['suppliers'] for f in s['fabrics']
+    }
+    # 必须**相等**（不是子集）：两张单各自的供应商都要在 materials 侧出现
+    assert per_sku_keys == fabric_keys, '按 SKU 物料的键与 fabrics 漂移（供应商兜底不同源）'
+    assert {(m['supplier_name'], m['material_name'])
+            for s in group['skus'] for m in (s.get('materials') or [])} == {
+        ('供应商甲', '共用布'), ('供应商乙', '共用布'),
+    }
+    # 同名 SKU 跨单**累加**（+= 语义不得丢）：2.0 + 4.0 = 6.0
+    summed = round(sum(m['quantity'] for s in group['skus'] for m in (s.get('materials') or [])), 2)
+    assert summed == 6.0
+    # 落库侧同样按供应商各存一行（`_fabrics` 按物料名聚合，会同名覆盖，故此处逐供应商断言）
+    by_sup = {
+        s['supplier_name']: {f['fabric_name']: float(f['quantity']) for f in s['fabrics']}
+        for s in group['suppliers']
+    }
+    assert by_sup == {'供应商甲': {'共用布': 2.0}, '供应商乙': {'共用布': 4.0}}

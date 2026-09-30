@@ -5,6 +5,7 @@
  *   E2b 打印对照块结构：数据行恰好 10 列（标签 colspan=4 + 供应商 + 后 5 格）、
  *       损耗率取该落库行**快照率**、数量为按该率加放派生值；无差异时不出现「实际下单」
  *   E3 无 materials → 输出与改动前逐字一致（零回归）
+ *   E4 无落库坐标的行（BOM 生成后新增）→ 打印与屏幕同源：率 '—'、数量取基准量（不加放）
  */
 import { describe, it, expect } from 'vitest'
 import { buildFactoryHtml } from '@/views/purchase/composables/useSummaryModal'
@@ -109,13 +110,15 @@ describe('E2b 打印对照块结构（与屏幕同源）', () => {
     // 每行（按 SKU 块 / 横幅 / 对照块数据行）有效列数都必须恰好 10，无一错位
     expect(rowWidths(rows)).toEqual(rows.map(() => 10))
 
-    // 横幅：单格跨 10 列，点名物料与两个数值
+    // 横幅：单格跨 10 列，点名物料与两个数值（文案与数字格式须与屏幕逐字一致：
+    // 屏幕是「…与上方按 BOM 推算**的明细**不一致」，数字走 formatQty ⇒ '60.0' / '65.0'）
     const banner = rows.find((tr) => (tr.textContent || '').includes('不一致'))!
     expect(banner).toBeDefined()
     expect(banner.querySelector('td')!.getAttribute('colspan')).toBe('10')
+    expect(banner.textContent).toContain('与上方按 BOM 推算的明细不一致')
     expect(banner.textContent).toContain('共享布')
-    expect(banner.textContent).toContain('60')
-    expect(banner.textContent).toContain('65')
+    expect(banner.textContent).toContain('60.0')
+    expect(banner.textContent).toContain('65.0')
 
     // 数据行首行：标签 colspan=4（跨本块全部行）+ 供应商(rowspan) + 后 5 格 = 7 格 / 有效 10 列
     const dataRow = rows.find((tr) => tr.querySelector('td[colspan="4"]'))!
@@ -126,7 +129,7 @@ describe('E2b 打印对照块结构（与屏幕同源）', () => {
     expect(cells[0]!.getAttribute('rowspan')).toBe('1')   // 本组仅 1 条落库行
     expect(cells[1]!.textContent).toBe('供应商甲')
     // 后 5 格列序与主表一致；损耗率=快照率 500（不是传入的实时率 200）、数量=ceil(65×1.5)=98
-    expect(cells.slice(2).map((td) => td.textContent)).toEqual(['共享布', 'S1', '500', '98', '米'])
+    expect(cells.slice(2).map((td) => td.textContent)).toEqual(['共享布', 'S1', '500.0', '98', '米'])
   })
 
   it('无差异时不出现「实际下单」', () => {
@@ -144,5 +147,24 @@ describe('E3 无 materials → 零回归', () => {
     expect(rows[0]).toContain('产品A')
     expect(rows[0]).toContain('共享布')
     expect(rows[0]).not.toContain('实际下单')
+  })
+})
+
+describe('E4 无落库坐标行：打印必须与屏幕同源', () => {
+  it('BOM 生成后新增的物料 → 率渲染 —、数量取基准量（与屏幕一致，不加放）', () => {
+    const g = perSkuGroup()
+    // 给产品B 增加一条落库明细里没有的物料 ⇒ coord = null（只读行）
+    g.skus![1]!.materials!.push({
+      supplier_name: '供应商甲', material_name: '新加布', specification: 'S9', unit: '米', quantity: 5,
+    })
+    const rows = tbodyRows(buildFactoryHtml(dataOf(g), 10))
+
+    const newRow = rows.find((tr) => (tr.textContent || '').includes('新加布'))!
+    expect(newRow).toBeDefined()
+    const cells = Array.from(newRow.querySelectorAll('td'))
+    // 该行非块首行（供应商格已被 rowspan 覆盖）⇒ 恰好后 5 格。
+    // 无坐标行**不加放**：率 '—'、数量 = 基准量 5。
+    // （曾误为回退 lossRate 10 并 ceil(5 × 1.01) = 6 → 屏幕「— / 5」而打印「10 / 6」。）
+    expect(cells.map((td) => td.textContent)).toEqual(['新加布', 'S9', '—', '5', '米'])
   })
 })

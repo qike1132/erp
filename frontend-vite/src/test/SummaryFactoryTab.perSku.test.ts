@@ -6,7 +6,9 @@
  *   P2 左侧三列（产品名称/订单数量/备品数量）按 SKU 各一行；
  *   P3 **同物料跨 SKU 联动**：同一物料在两块里的损耗率输入显示同值（同一坐标）；
  *   P4 落库明细里没有的物料 → 该行**只读**（无输入框）；
- *   P5 数据不足（旧后端 / 无 materials）→ 回退现状形态（逐 SKU 名堆叠 + 订单级物料）。
+ *   P5 数据不足（旧后端 / 无 materials）→ 回退现状形态（逐 SKU 名堆叠 + 订单级物料）；
+ *   P9 编辑态数量输入**预载落库真值**（同物料两块同值、且 ≠ 该块推算展示值），
+ *      非编辑态仍显示本 SKU 推算值（特性不得丢失）。
  */
 import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
@@ -188,6 +190,37 @@ describe('P7 「各明细率不一致」提示与聚焦样式不得因改造丢�
     })
     expect(bodyRows(wrapper)[0]!.text()).toContain('不一致')
     expect(bodyRows(wrapper)[2]!.text()).toContain('不一致')
+  })
+})
+
+describe('P9 编辑态预载落库真值（共享行），非编辑态仍显示本 SKU 推算值', () => {
+  it('编辑态：两块「共享布」数量输入同值（= 落库真值 60 加放 5‰ → 60.3）', () => {
+    const rows = bodyRows(mountTab(group(), { editMode: true }))
+    // 编辑态：率列是只读文本，每行唯一的 number 输入即「数量」
+    const qtyA = rows[0]!.find('input[type="number"]')   // A 块 · 共享布
+    const qtyB = rows[2]!.find('input[type="number"]')   // B 块 · 共享布
+    // 同一物料 = 采购明细中的同一行 ⇒ 两块预载**同一份落库真值**（60 × 1.005 = 60.3）。
+    // 这是修复点：曾预载各 SKU 的推算值（21 / 41），而保存却写回共享真值 ⇒ 静默写错。
+    expect((qtyA.element as HTMLInputElement).value).toBe('60.3')
+    expect((qtyB.element as HTMLInputElement).value).toBe('60.3')
+  })
+
+  it('编辑态预载值 ≠ 非编辑态该块的推算展示值（证明来源已改、且展示未被污染）', () => {
+    const editRows = bodyRows(mountTab(group(), { editMode: true }))
+    const viewRows = bodyRows(mountTab(group()))
+    const editA = (editRows[0]!.find('input[type="number"]').element as HTMLInputElement).value
+    const editB = (editRows[2]!.find('input[type="number"]').element as HTMLInputElement).value
+    // 非编辑态数量列为纯文本：A 块 ceil(20 × 1.005) = 21；B 块 ceil(40 × 1.005) = 41
+    expect(viewRows[0]!.findAll('td')[8]!.text()).toBe('21')
+    expect(viewRows[2]!.findAll('td')[7]!.text()).toBe('41')
+    expect(editA).not.toBe('21')
+    expect(editB).not.toBe('41')
+  })
+
+  it('非编辑态：两块「共享布」仍各显示本 SKU 的推算值（21 / 41），特性不得丢失', () => {
+    const rows = bodyRows(mountTab(group()))
+    expect(rows[0]!.findAll('td')[8]!.text()).toBe('21')   // A 块：BOM 推算 20 加放取整
+    expect(rows[2]!.findAll('td')[7]!.text()).toBe('41')   // B 块：BOM 推算 40 加放取整
   })
 })
 

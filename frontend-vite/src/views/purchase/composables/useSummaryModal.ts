@@ -166,16 +166,22 @@ function buildPerSkuGroupHtml(
         tableHtml += '</tr>'
         return
       }
-      const rowRate = row.coord
-        ? (fabricRates?.[gi]?.[row.coord.si]?.[row.coord.fi] ?? lossRate)
-        : lossRate
       if (row.isFirstSupplierRow) {
         tableHtml += `<td rowspan="${row.supplierRowSpan}" style="font-weight:bold;">${escapeHtml(row.supplierName)}</td>`
       }
       tableHtml += `<td>${escapeHtml(row.materialName)}</td>`
       tableHtml += `<td>${escapeHtml(row.specification)}</td>`
-      tableHtml += `<td>${escapeHtml(String(rowRate))}</td>`
-      tableHtml += `<td>${ceilMagnifiedByLossRate(row.baseQuantity, rowRate)}</td>`
+      if (row.coord) {
+        const rowRate = fabricRates?.[gi]?.[row.coord.si]?.[row.coord.fi] ?? lossRate
+        tableHtml += `<td>${escapeHtml(String(rowRate))}</td>`
+        tableHtml += `<td>${ceilMagnifiedByLossRate(row.baseQuantity, rowRate)}</td>`
+      } else {
+        // 无落库坐标（BOM 生成后新增的物料）：**必须与屏幕同源** —— 屏幕
+        // `SummaryFactoryTab.vue` 对无坐标行渲染率 '—'、数量取基准量（不加放）。
+        // 曾在此回退 lossRate 并加放，导致同一张单屏幕「— / 20」而打印「10 / 21」。
+        tableHtml += '<td>—</td>'
+        tableHtml += `<td>${row.baseQuantity}</td>`
+      }
       tableHtml += `<td>${escapeHtml(row.unit)}</td>`
       tableHtml += '</tr>'
     })
@@ -202,9 +208,9 @@ function buildDiffBlockHtml(
   if (diffs.length === 0) return ''
 
   const detail = diffs
-    .map((d) => `${d.materialName}（推算 ${d.perSku} / 实际 ${d.stored}）`)
+    .map((d) => `${d.materialName}（推算 ${fmtQty(d.perSku)} / 实际 ${fmtQty(d.stored)}）`)
     .join('、')
-  let tableHtml = `<tr><td colspan="10" style="background:#fffaf0;color:#7a4a00;">⚠ 本条「实际下单」含手工调整，与上方按 BOM 推算不一致：${escapeHtml(detail)}</td></tr>`
+  let tableHtml = `<tr><td colspan="10" style="background:#fffaf0;color:#7a4a00;">⚠ 本条「实际下单」含手工调整，与上方按 BOM 推算的明细不一致：${escapeHtml(detail)}</td></tr>`
 
   const storedRows = buildStoredRows(group, () => spareRate)
   storedRows.forEach((r, i) => {
@@ -217,7 +223,7 @@ function buildDiffBlockHtml(
     }
     tableHtml += `<td style="background:#fffaf0;">${escapeHtml(r.fabricName)}</td>`
     tableHtml += `<td style="background:#fffaf0;">${escapeHtml(r.specification)}</td>`
-    tableHtml += `<td style="background:#fffaf0;">${escapeHtml(String(r.rate))}</td>`
+    tableHtml += `<td style="background:#fffaf0;">${escapeHtml(fmtQty(r.rate))}</td>`
     tableHtml += `<td style="background:#fffaf0;">${r.displayQuantity}</td>`
     tableHtml += `<td style="background:#fffaf0;">${escapeHtml(r.unit)}</td>`
     tableHtml += '</tr>'
