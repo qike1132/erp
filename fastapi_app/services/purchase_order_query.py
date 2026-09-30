@@ -23,10 +23,13 @@ from fastapi_app.shared_models.purchase_order import PurchaseOrderStatus
 from fastapi_app.utils import calc_total_pages
 
 
+# local_ttl=0：禁用 L1，仅走 L2（同 orders:beile:list）。生产多 worker 且
+# CACHE_L1_BROADCAST_ENABLED 关闭时 L1 无法跨 worker 失效，客户订单删除/改数量后
+# 其余 worker 会在 60s 内继续返回旧采购订单列表，表现为「采购页不实时更新」。
 @cache_result(
     key_prefix='orders',
     ttl=120,
-    local_ttl=60,
+    local_ttl=0,
     key_builder=lambda *args, **kwargs: f"p{kwargs.get('page', 1)}:pp{kwargs.get('per_page', 20)}:s{kwargs.get('status', '')}:k{kwargs.get('keyword', '')}:df{kwargs.get('date_from', '')}:dt{kwargs.get('date_to', '')}:si{kwargs.get('supplier_id', '')}:sb{kwargs.get('sort_by', 'create_time')}:so{kwargs.get('sort_order', 'desc')}",
 )
 async def get_purchase_orders(db: AsyncSession, *, page: int = 1, per_page: int = 20,
@@ -472,10 +475,13 @@ async def export_completed_orders(
     return rows
 
 
+# local_ttl=0：禁用 L1，仅走 L2（同 orders:beile:list）。客户订单删除后「待审核订单」
+# 由 ORDER_DELETED 订阅清理 pending 采购单，若 L1 未跨 worker 失效，其余 worker
+# 会在 10s 内继续返回已删订单，表现为「采购-待审核页不实时更新」。
 @cache_result(
     key_prefix='orders:unprocessed',
     ttl=30,
-    local_ttl=10,
+    local_ttl=0,
     key_builder=lambda *args, **kwargs: f"p{kwargs.get('page', 1)}:pp{kwargs.get('per_page', 20)}",
 )
 async def get_unprocessed_orders(

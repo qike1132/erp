@@ -188,10 +188,14 @@ def _serialize_orders(orders: list, deduct_map: dict, factory_map: dict | None =
         for order in orders
     ]
 
+# local_ttl=0：禁用 L1，仅走 L2。生产为多 worker 且 CACHE_L1_BROADCAST_ENABLED 关闭，
+# L1 无法跨 worker 失效 —— 订单写入后 invalidate_cache("orders:*") 只删 L2，
+# 其余 worker 的 L1 仍会在 TTL 内返回删除/改数量前的旧列表（客户订单页自身也受影响）。
+# 与 orders:beile:list 同一处理；代价仅每次请求一次本地 Redis GET。
 @cache_result(
     key_prefix="orders:list",
     ttl=60,
-    local_ttl=15,
+    local_ttl=0,
     key_builder=lambda *args, **kwargs: f"p{kwargs.get('page', 1)}:pp{kwargs.get('per_page', 50)}:c{kwargs.get('customer', '')}:pid{kwargs.get('product_id', '')}:s{kwargs.get('status', '')}:sd{kwargs.get('start_date', '')}:ed{kwargs.get('end_date', '')}:f{kwargs.get('factory', '')}",
 )
 async def get_orders(db: AsyncSession, page: int = 1, per_page: int = 50,
