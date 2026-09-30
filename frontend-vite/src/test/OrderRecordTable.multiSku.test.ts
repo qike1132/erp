@@ -2,7 +2,8 @@
  * 记录列表的多 SKU 分行显示（每个 SKU 占一行）。
  *
  * 需求：多 SKU 订单的「产品名称」与「数量」各自落在自己的列、自己那一行；
- * 订单级字段（时间/编号/客户）跨该订单的 SKU 行合并成一个格；多 SKU 时末尾补一行合计。
+ * 订单级字段（时间/编号/客户）跨该订单的 SKU 行合并成一个格。**不产出合计行**
+ * （2026-10-01 用户要求删除），故订单总量不在列表里显示。
  *
  * 同时锁住两件容易被改坏的事：
  * ① 相邻订单即使时间/客户完全相同，也**不会**被并成一个大格；
@@ -45,7 +46,7 @@ const SIBLING_ORDER = {
   ],
 }
 
-/** 单 SKU 订单：不产生合计行 */
+/** 单 SKU 订单 */
 const SINGLE_SKU_ORDER = {
   ...MULTI_SKU_ORDER,
   id: 68916,
@@ -128,21 +129,20 @@ describe('记录列表 · 多 SKU 分行显示', () => {
       '《蛋仔派对》市集拾趣系列 毛绒公仔挂件盲盒',
       '鲨鱼',
       '《蛋仔派对》团子木鱼毛绒挂件盲盒-黄蛋 陈列样',
-      '合计',
     ])
-    expect(tailColumnTexts(wrapper, '数量')).toEqual(['10000', '10000', '10000', '30000'])
+    expect(tailColumnTexts(wrapper, '数量')).toEqual(['10000', '10000', '10000'])
   })
 
-  it('订单级三列跨该订单的 SKU 行合并，且合并格一直盖到合计行（rowspan=4）', () => {
+  it('订单级三列跨该订单的 SKU 行合并（rowspan=3，不含合计行）', () => {
     const wrapper = mountTable([MULTI_SKU_ORDER])
     const leads = groupLeadRows(wrapper)
     expect(leads.length, '应有 1 个组首行').toBe(1)
 
     const cells = leads[0]!.findAll('td')
-    // 前三格是合并格；合并数 = 该订单的 SKU 行数 + 1 行合计
-    expect(cells[0]!.attributes('rowspan')).toBe('4')
-    expect(cells[1]!.attributes('rowspan')).toBe('4')
-    expect(cells[2]!.attributes('rowspan')).toBe('4')
+    // 前三格是合并格；合并数 = 该订单的 SKU 行数
+    expect(cells[0]!.attributes('rowspan')).toBe('3')
+    expect(cells[1]!.attributes('rowspan')).toBe('3')
+    expect(cells[2]!.attributes('rowspan')).toBe('3')
     // 产品名称与数量不合并（每个 SKU 各一格）
     expect(cells[3]!.attributes('rowspan')).toBeUndefined()
     expect(cells[4]!.attributes('rowspan')).toBeUndefined()
@@ -157,17 +157,17 @@ describe('记录列表 · 多 SKU 分行显示', () => {
     // 这是「按值合并」的真实风险：PO-20260930-0011/0012/0013 的日期都是 2026-09-30 00:00
     const wrapper = mountTable([MULTI_SKU_ORDER, SIBLING_ORDER])
 
-    expect(wrapper.findAll('tbody tr').length, '4 行 + 3 行').toBe(7)
+    expect(wrapper.findAll('tbody tr').length, '3 行 + 2 行').toBe(5)
 
-    // 两笔订单各有一个组首行；第一笔的合并数必须只是它自己的 4 行，不能把下一笔算进来
+    // 两笔订单各有一个组首行；第一笔的合并数必须只是它自己的 3 行，不能把下一笔算进来
     const leads = groupLeadRows(wrapper)
     expect(leads.length, '两笔订单应各有一个组首行（说明没有并成一个大格）').toBe(2)
-    expect(leads[0]!.findAll('td')[0]!.attributes('rowspan')).toBe('4')
+    expect(leads[0]!.findAll('td')[0]!.attributes('rowspan')).toBe('3')
     expect(mergedCellText(leads[0]!, '编号')).toContain('PO-20260930-0013')
     expect(mergedCellText(leads[1]!, '编号')).toContain('PO-20260930-0012')
   })
 
-  it('单 SKU 订单只 1 行，不产生合计行', () => {
+  it('单 SKU 订单只 1 行', () => {
     const wrapper = mountTable([SINGLE_SKU_ORDER])
 
     expect(wrapper.findAll('tbody tr').length).toBe(1)
@@ -199,7 +199,7 @@ describe('记录列表 · 多 SKU 分行显示', () => {
   it('每个 SKU 行都有查看与删除按钮（可按任意一行操作该订单）', () => {
     const wrapper = mountTable([MULTI_SKU_ORDER])
 
-    // 3 个 SKU 行各有入口；合计行没有
+    // 每个 SKU 行各有一个入口
     expect(wrapper.findAll('.co-btn-info').length).toBe(3)
     expect(wrapper.findAll('.co-btn-danger').length).toBe(3)
   })

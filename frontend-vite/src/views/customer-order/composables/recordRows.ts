@@ -1,10 +1,10 @@
 import type { OrderRecord } from './types'
 
-/** 摊平后的表格行（一行一个 SKU；多 SKU 订单末尾追加一行合计） */
+/** 摊平后的表格行（一行一个 SKU） */
 export interface RecordRow {
   /** 全局唯一行键（订单与备货 id 会撞号，故含来源与 SKU 序号） */
   _rowKey: string
-  /** 分组键：同订单恒等（供跨行合并）；合计行另取一值，避免被并进合并格 */
+  /** 分组键：同订单恒等（供「时间/编号/客户」三列做跨行合并） */
   _g: string
   /**
    * 三个订单级列的**分组字段**（值都等于 `_g`）。
@@ -18,8 +18,6 @@ export interface RecordRow {
   _g_date: string
   _g_no: string
   _g_cust: string
-  /** 是否为合计行 */
-  _isSum: boolean
   /** 原始订单/备货行，供操作列与详情使用 */
   _source: OrderRecord
   order_date: string
@@ -30,20 +28,20 @@ export interface RecordRow {
   quantity: number
 }
 
-/** 合计行的行内标签（落在产品名称列） */
-export const SUM_ROW_LABEL = '合计'
-
 /**
- * 把「一行一订单」的记录摊平成「一行一 SKU」（多 SKU 订单末尾追加一行合计）。
+ * 把「一行一订单」的记录摊平成「一行一 SKU」。
  *
  * 为什么要摊平：一张订单可含多个 SKU，而列表一行只能有一个数量格。原先把 SKU 名与数量一起
  * 堆在产品名称格里，数量就落在了产品名称列的中间，与「数量」列毫不相干。摊平后每个 SKU 的
  * 数量都落在数量列，订单级字段（时间/编号/客户）由组件做跨行合并。
  *
+ * **不产出合计行**（2026-10-01 用户要求删除）：合计行左侧三个格被合并格盖住、只在右侧显示
+ * 「合计 30000」，读起来是多余的一行。代价是订单总量不再出现在列表里 —— 各 SKU 数量仍在，
+ * 总量可在详情弹窗查看。
+ *
  * 分组键 `_g` 必须是**按订单唯一**的值，不能拿时间或客户代替：生产数据里
  * PO-20260930-0011/0012/0013 的时间都是 `2026-09-30 00:00`、客户也大量重复，
  * 用它们做分组键会让相邻不同订单的单元格被误并成一个大格。
- * 合计行的 `_g` 另取一值，这样它自己成一组，不会被并进 SKU 行的合并格里。
  */
 export function flattenRecordRows(records: OrderRecord[]): RecordRow[] {
   const rows: RecordRow[] = []
@@ -69,7 +67,6 @@ export function flattenRecordRows(records: OrderRecord[]): RecordRow[] {
         ...groupFields(group),
         _rowKey: `${group}#0`,
         _g: group,
-        _isSum: false,
         product_name: rec.product?.name || '-',
         quantity: rec.quantity ?? 0,
       })
@@ -82,27 +79,10 @@ export function flattenRecordRows(records: OrderRecord[]): RecordRow[] {
         ...groupFields(group),
         _rowKey: `${group}#${idx}`,
         _g: group,
-        _isSum: false,
         product_name: item.product_name || '-',
         quantity: item.quantity ?? 0,
       })
     })
-
-    // 只在多 SKU 时补合计行：单 SKU 订单那一行本身就是总量
-    if (items.length > 1) {
-      rows.push({
-        ...base,
-        // 合计行与 SKU 行**共用分组键**：这样「时间/编号/客户」的合并格会一直盖到合计行，
-        // 视觉上合计属于这一单（合计行不再重复渲染那三格的显示值，插槽按 _isSum 跳过）。
-        ...groupFields(group),
-        // 行键仍要唯一，故单独加后缀
-        _rowKey: `${group}#sum`,
-        _g: group,
-        _isSum: true,
-        product_name: SUM_ROW_LABEL,
-        quantity: rec.quantity ?? 0,
-      })
-    }
   }
 
   return rows

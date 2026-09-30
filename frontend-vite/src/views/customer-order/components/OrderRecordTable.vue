@@ -33,37 +33,33 @@
         </div>
       </template>
 
-      <!-- 时间 / 编号 / 客户：订单级字段，同一订单内跨 SKU 行合并成一个格（合计行除外） -->
+      <!-- 时间 / 编号 / 客户：订单级字段，同一订单内跨 SKU 行合并成一个格 -->
       <template #column-body-_g_date="{ row }">
-        <span v-if="!row._isSum" class="co-cell-muted">{{ row.order_date }}</span>
+        <span class="co-cell-muted">{{ row.order_date }}</span>
       </template>
       <template #column-body-_g_no="{ row }">
-        <template v-if="!row._isSum">
-          <span :class="['co-type-badge', row.record_type === 'stockin' ? 'stockin' : 'order']">
-            {{ row.record_type === 'stockin' ? '备货' : '订单' }}
-          </span>
-          <span class="co-cell-muted" style="margin-left: 4px;">{{ row.order_no }}</span>
-        </template>
+        <span :class="['co-type-badge', row.record_type === 'stockin' ? 'stockin' : 'order']">
+          {{ row.record_type === 'stockin' ? '备货' : '订单' }}
+        </span>
+        <span class="co-cell-muted" style="margin-left: 4px;">{{ row.order_no }}</span>
       </template>
       <template #column-body-_g_cust="{ row }">
-        <span v-if="!row._isSum" class="co-cell-main">{{ row.customer }}</span>
+        <span class="co-cell-main">{{ row.customer }}</span>
       </template>
 
-      <!-- 产品名称：一行一个 SKU；合计行显示标签 -->
+      <!-- 产品名称：一行一个 SKU -->
       <template #column-body-product_name="{ row }">
-        <span v-if="row._isSum" class="co-sum-label">{{ SUM_ROW_LABEL }}</span>
-        <span v-else class="co-cell-main">{{ row.product_name }}</span>
+        <span class="co-cell-main">{{ row.product_name }}</span>
       </template>
 
       <!-- 数量：每个 SKU 自己的数量落在这里（不再是订单总量堆在产品名称格里） -->
       <template #column-body-quantity="{ row }">
-        <span :class="row._isSum ? 'co-sum-total' : 'co-row-qty'">{{ row.quantity }}</span>
+        <span class="co-row-qty">{{ row.quantity }}</span>
       </template>
 
       <template #column-body-actions="{ row }">
-        <!-- 备货行不给详情入口：后端不存在备货详情端点，而 openDetail 一律按订单 id 查。
-             合计行没有可操作的东西，留空。 -->
-        <div v-if="!row._isSum && row.record_type === 'order'" class="co-action-group">
+        <!-- 备货行不给详情入口：后端不存在备货详情端点，而 openDetail 一律按订单 id 查 -->
+        <div v-if="row.record_type === 'order'" class="co-action-group">
           <button
             class="co-btn-icon co-btn-info"
             :aria-label="`查看 ${row.order_no} 的详情`"
@@ -80,7 +76,7 @@
             <FontAwesomeIcon icon="trash-alt" aria-hidden="true" />
           </button>
         </div>
-        <span v-else-if="!row._isSum" class="co-cell-muted" aria-hidden="true">—</span>
+        <span v-else class="co-cell-muted" aria-hidden="true">—</span>
       </template>
     </UiDataTable>
   </div>
@@ -91,7 +87,7 @@ import { computed } from 'vue'
 import UiDataTable from '@/components/ui/UiDataTable.vue'
 import UiButton from '@/components/ui/UiButton.vue'
 import type { TableColumn } from '@/components/ui/UiDataTable.vue'
-import { flattenRecordRows, SUM_ROW_LABEL } from '../composables/recordRows'
+import { flattenRecordRows } from '../composables/recordRows'
 import type { OrderRecord } from '../composables/types'
 
 const props = defineProps<{
@@ -115,7 +111,7 @@ const emit = defineEmits<{
 }>()
 
 /**
- * 表格行 = 摊平后的「一行一 SKU」（多 SKU 订单末尾追加合计行）。
+ * 表格行 = 摊平后的「一行一 SKU」。
  * 摊平的动机：一行只能有一个数量格，而一张订单可含多个 SKU —— 原先把 SKU 名与数量一起
  * 堆在产品名称格里，数量就落在了产品名称列的中间，与「数量」列毫不相干。
  */
@@ -233,20 +229,6 @@ function onPageChange(event: { page: number; rows: number }) {
 /* 每个 SKU 自己的数量：等宽数字，便于上下比对 */
 .co-row-qty {
   font-weight: 500;
-  color: var(--color-text);
-  font-variant-numeric: tabular-nums;
-}
-/* 合计行的「合计」标签右对齐，紧邻数量列，读起来是「合计 30000」 */
-.co-sum-label {
-  display: block;
-  text-align: right;
-  color: var(--color-text-muted);
-  font-size: 12px;
-  font-weight: 600;
-}
-/* 合计行的总量：比各 SKU 数量更重，便于对上客户下的总量 */
-.co-sum-total {
-  font-weight: 700;
   color: var(--color-text);
   font-variant-numeric: tabular-nums;
 }

@@ -4,11 +4,12 @@
  * 背景：一张订单可含多个 SKU，而 `GET /orders/records` 一行一个订单（items[] 里挂 SKU）。
  * 要把「每个 SKU 的产品名称与数量各自落在产品名称列/数量列」，必须摊平成一行一 SKU。
  *
- * 摊平后每条订单产出 N 行 SKU + （多 SKU 时）1 行合计：
+ * 摊平后每条订单产出 N 行（N = SKU 数），**不产出合计行**（2026-10-01 用户要求删除：
+ * 合计行左侧三个格被合并格盖住、只在右侧显示「合计 30000」，读起来是多余的一行）。
+ * 代价是订单总量不再出现在列表里 —— 各 SKU 数量仍在，总量可在详情弹窗查看。
+ *
  * - 订单级字段（时间/编号/客户）在每行都带上真值，供组件渲染；
- * - `_g` 是同订单恒等的**分组键**，供表格做跨行合并；合计行的 `_g` 另取一值（自己成组），
- *   这样合并不会把合计行也并进去；
- * - `_rowKey` 全局唯一（PrimeVue 的 row-key 要求），故含 SKU 序号。
+ * - `_g` 是同订单恒等的**分组键**，供表格做跨行合并。
  */
 import { describe, expect, it } from 'vitest'
 import { flattenRecordRows } from '@/views/customer-order/composables/recordRows'
@@ -58,26 +59,22 @@ const STOCKIN = {
 } as unknown as OrderRecord
 
 describe('摊平记录行（多 SKU 分行）', () => {
-  it('3 个 SKU 的订单摊成 3 行 SKU + 1 行合计，每行数量取该 SKU 自己的数量', () => {
+  it('3 个 SKU 的订单摊成 3 行，每行数量取该 SKU 自己的数量（不产出合计行）', () => {
     const rows = flattenRecordRows([ORDER_3SKU])
 
-    expect(rows.length).toBe(4)
-    expect(rows.slice(0, 3).map((r) => r.product_name)).toEqual([
+    expect(rows.length).toBe(3)
+    expect(rows.map((r) => r.product_name)).toEqual([
       '《蛋仔派对》市集拾趣系列 毛绒公仔挂件盲盒',
       '鲨鱼',
       '《蛋仔派对》团子木鱼毛绒挂件盲盒-黄蛋 陈列样',
     ])
-    expect(rows.slice(0, 3).map((r) => r.quantity)).toEqual([10000, 10000, 10000])
-    expect(rows.slice(0, 3).map((r) => r._isSum)).toEqual([false, false, false])
-    // 合计行落在数量列上，值等于订单总量
-    expect(rows[3]!._isSum).toBe(true)
-    expect(rows[3]!.quantity).toBe(30000)
+    expect(rows.map((r) => r.quantity)).toEqual([10000, 10000, 10000])
   })
 
   it('同一订单的 SKU 行共享同一个分组键（跨行合并的前提）', () => {
     const rows = flattenRecordRows([ORDER_3SKU])
 
-    const skuKeys = rows.slice(0, 3).map((r) => r._g)
+    const skuKeys = rows.map((r) => r._g)
     expect(new Set(skuKeys).size, '同一订单的 SKU 行分组键应一致').toBe(1)
     expect(skuKeys[0], '分组键应含来源与 id，不能只用时间/客户这类会跨订单重复的值')
       .toBe(`order#${ORDER_3SKU.id}`)
@@ -96,8 +93,8 @@ describe('摊平记录行（多 SKU 分行）', () => {
   it('订单级字段在每一行都带上真值（时间/编号/客户），供各行渲染', () => {
     const rows = flattenRecordRows([ORDER_3SKU])
 
-    expect(rows.length, '先锁行数，避免空数组让下面的循环真空通过').toBe(4)
-    for (const r of rows.slice(0, 3)) {
+    expect(rows.length, '先锁行数，避免空数组让下面的循环真空通过').toBe(3)
+    for (const r of rows) {
       expect(r.order_date).toBe('2026-09-30 00:00')
       expect(r.order_no).toBe('PO-20260930-0013')
       expect(r.customer).toBe('MINISO国际')
@@ -105,16 +102,29 @@ describe('摊平记录行（多 SKU 分行）', () => {
     }
   })
 
-  it('单 SKU 订单只摊 1 行，且不产生合计行（那一行本身就是总量）', () => {
+  it('三个订单级分组字段都与 _g 一致（三列各自拿它做跨行合并）', () => {
+    // 组件把「时间/编号/客户」三列的 field 分别指到这三个字段上
+    // （三列不能共用一个 field：UiDataTable 的插槽名是 column-body-${field}，同名就分不开了）
+    const rows = flattenRecordRows([ORDER_3SKU])
+
+    expect(rows.length).toBe(3)
+    const key = rows[0]!._g
+    for (const r of rows) {
+      expect(r._g_date).toBe(key)
+      expect(r._g_no).toBe(key)
+      expect(r._g_cust).toBe(key)
+    }
+  })
+
+  it('单 SKU 订单只摊 1 行', () => {
     const rows = flattenRecordRows([ORDER_1SKU])
 
     expect(rows.length).toBe(1)
     expect(rows[0]!.product_name).toBe('测试')
     expect(rows[0]!.quantity).toBe(10000)
-    expect(rows[0]!._isSum).toBe(false)
   })
 
-  it('备货行同样只摊 1 行，且不带操作入口所需的订单删除语义', () => {
+  it('备货行同样只摊 1 行，且记录类型仍是 stockin', () => {
     const rows = flattenRecordRows([STOCKIN])
 
     expect(rows.length).toBe(1)
@@ -148,33 +158,6 @@ describe('摊平记录行（多 SKU 分行）', () => {
     expect(rows.length).toBe(1)
     expect(rows[0]!.product_name).toBe('回退产品名')
     expect(rows[0]!.quantity).toBe(10000)
-  })
-
-  it('合计行与 SKU 行共用分组键 —— 合并格必须一直盖到合计行', () => {
-    // 组件把「时间/编号/客户」三列的 field 分别指到这三个字段上做跨行合并
-    // （三列不能共用一个 field：UiDataTable 的插槽名是 column-body-${field}，同名就分不开了）。
-    //
-    // 合计行**共用**分组键是刻意的：这样它的上面三格被 SKU 行的跨行格盖住，
-    // 合并数 = SKU 数 + 1，视觉上「合计」落在这张订单的块里（与已确认的对比稿一致）。
-    // 若让合计行自成分组，合并格会停在合计行上方，合计行左侧出现三个空白格。
-    const rows = flattenRecordRows([ORDER_3SKU])
-
-    expect(rows.length).toBe(4)
-    const skuKey = rows[0]!._g
-    for (const r of rows.slice(0, 3)) {
-      expect(r._g_date).toBe(skuKey)
-      expect(r._g_no).toBe(skuKey)
-      expect(r._g_cust).toBe(skuKey)
-    }
-
-    const sum = rows[3]!
-    expect(sum._isSum).toBe(true)
-    expect(sum._g, '合计行必须与 SKU 行同组，否则合并格盖不到它').toBe(skuKey)
-    for (const field of ['_g_date', '_g_no', '_g_cust'] as const) {
-      expect(sum[field], `${field} 必须与 SKU 行同值，否则合并格盖不到合计行`).toBe(skuKey)
-    }
-    // 行键仍要唯一：合计行不能与任何 SKU 行撞键
-    expect(sum._rowKey).not.toBe(rows[0]!._rowKey)
   })
 
   it('空列表摊平为空', () => {

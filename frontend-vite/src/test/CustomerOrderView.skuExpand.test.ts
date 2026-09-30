@@ -151,14 +151,13 @@ describe('CustomerOrderView SKU expand behavior (SubTask 7.4)', () => {
     await flushPromises()
     await switchToRecordsTab(wrapper)
 
-    // 多 SKU 订单：每个 SKU 各占一行（产品名称与数量分别落在自己的列）。
-    // 3 个 SKU → 3 行 + 1 行合计。
-    expect(wrapper.findAll('tbody tr').length).toBe(4)
+    // 多 SKU 订单：每个 SKU 各占一行（产品名称与数量分别落在自己的列）。3 个 SKU → 3 行。
+    expect(wrapper.findAll('tbody tr').length).toBe(3)
     const names = wrapper.findAll('tbody tr').map((tr) => {
       const tds = tr.findAll('td')
       return tds[tds.length - 3]?.text().trim()
     })
-    expect(names).toEqual(['SKU1', 'SKU2', 'SKU3', '合计'])
+    expect(names).toEqual(['SKU1', 'SKU2', 'SKU3'])
   })
 
   it('order list row renders exactly one row for a single-SKU order', async () => {

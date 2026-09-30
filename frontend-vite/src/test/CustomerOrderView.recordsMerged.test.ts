@@ -232,9 +232,9 @@ describe('CustomerOrderView 记录列表合并 + 搜索栏（F2）', () => {
     await flushPromises()
     await switchToRecordsTab(wrapper)
 
-    // 合并不改行数以外的语义：订单 2 个 SKU → 2 行 + 1 行合计；备货 1 行
+    // 每个 SKU 各占一行：订单 2 个 SKU → 2 行；备货 1 行
     const rows = wrapper.findAll('tbody tr')
-    expect(rows.length).toBe(4)
+    expect(rows.length).toBe(3)
 
     // 备货行无详情入口：后端不存在备货详情端点，openDetail 只按订单 id 查（必然 404）
     expect(rows.map((tr) => ({
@@ -243,7 +243,6 @@ describe('CustomerOrderView 记录列表合并 + 搜索栏（F2）', () => {
     }))).toEqual([
       { view: 1, del: 1 }, // 订单的 SKU 1
       { view: 1, del: 1 }, // 订单的 SKU 2
-      { view: 0, del: 0 }, // 合计行
       { view: 0, del: 0 }, // 备货行
     ])
   })
