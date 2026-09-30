@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>订单号列 对比稿 · 贝乐订单 / 外发 · 2026-09-29</title>
+<style>
+  :root{
+    --bg:#f5f5f7; --card:#fff; --surface:#f2f2f7; --line:#d8dce2;
+    --t1:#1d1d1f; --t2:#48484d; --t3:#8e8e93;
+    --accent:#007aff; --accent-tint:#e8f1ff;
+    --ok:#34c759; --ok-tint:#e6f9ec;
+    --warn:#ff9500; --warn-tint:#fff4e0;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:28px 24px 60px;background:var(--bg);color:var(--t1);
+       font:13px/1.5 "Microsoft YaHei UI","Segoe UI",system-ui,sans-serif}
+  h1{font-size:19px;margin:0 0 6px}
+  .meta{color:var(--t2);font-size:12px;margin-bottom:22px}
+  .meta code{background:#e9e9ee;padding:1px 5px;border-radius:4px}
+  .note{background:var(--warn-tint);border-left:3px solid var(--warn);
+        padding:10px 14px;border-radius:6px;margin:0 0 22px;font-size:12.5px;color:#7a4a00}
+  h2{font-size:15px;margin:30px 0 4px;padding-top:8px;border-top:2px solid #e3e3e8}
+  h2 .tag{font-size:11px;font-weight:700;color:#fff;background:var(--accent);
+          padding:2px 7px;border-radius:999px;vertical-align:2px;margin-left:8px}
+  h2 .tag.alt{background:var(--t3)}
+  .sub{color:var(--t2);font-size:12px;margin:0 0 14px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;
+        overflow:hidden;margin-bottom:18px}
+  .card-hd{background:var(--surface);padding:8px 14px;font-size:12px;font-weight:700;color:var(--t2);
+           border-bottom:1px solid var(--line)}
+  .scroll{overflow-x:auto}
+
+  /* 新增列的可视标记 */
+  .new{position:relative;background:#fffdf5;box-shadow:inset 0 0 0 1px #f0c878}
+  .new::after{content:"新增";position:absolute;top:-8px;left:50%;transform:translateX(-50%);
+              font-size:9px;font-weight:700;color:#7a4a00;background:var(--warn-tint);
+              border:1px solid #f0c878;border-radius:999px;padding:0 6px;line-height:13px;white-space:nowrap}
+
+  /* ---- 贝乐页：div 网格（与 BeileOrderRow.vue 同构） ---- */
+  .bo{display:flex;font-size:13px;min-width:1660px}
+  .bo.cell,.bo-th,.bo-td{padding:10px 14px;border-right:1px solid var(--line);
+        display:flex;align-items:center;overflow:hidden}
+  .bo-th{background:var(--surface);color:var(--t2);font-weight:700;font-size:12px;
+         justify-content:center;white-space:nowrap}
+  .bo-td{justify-content:center;white-space:nowrap;background:var(--card)}
+  .bo-td.left,.bo-th.left{justify-content:flex-start}
+  .bo-row{border-bottom:1px solid var(--line)}
+  .bo-no{font-family:Consolas,ui-monospace,monospace;font-size:12px;color:var(--t1);letter-spacing:.2px}
+  .bo-type{display:inline-flex;align-items:center;justify-content:center;padding:2px 8px;
+           font-size:11px;font-weight:700;border-radius:5px;line-height:1.5}
+  .bo-type.order{background:var(--accent-tint);color:#0158b0}
+  .bo-type.stockin{background:var(--ok-tint);color:#1d7a3a}
+  .dim{color:var(--t3)}
+
+  /* ---- 外发页：真表格（与 OutsourceOrderTab.vue 同构） ---- */
+  table.oso{border-collapse:collapse;font-size:13px;min-width:1620px}
+  .oso th{background:var(--surface);color:var(--t2);font-weight:700;font-size:12px;
+          padding:10px 12px;border-bottom:1px solid var(--line);border-right:1px solid var(--line);
+          text-align:center;white-space:nowrap}
+  .oso td{padding:10px 12px;border-bottom:1px solid var(--line);border-right:1px solid var(--line);
+          text-align:center;white-space:nowrap;background:var(--card)}
+  .oso td.left{text-align:left}
+  .oso-type{display:inline-flex;align-items:center;justify-content:center;padding:1px 6px;
+            font-size:10px;font-weight:700;border-radius:4px;line-height:1.5}
+  .oso-type.order{background:var(--accent-tint);color:#0158b0}
+  .oso-type.stockin{background:var(--ok-tint);color:#1d7a3a}
+  .bar{height:6px;background:#e6e6ec;border-radius:99px;overflow:hidden;display:inline-block;width:74px;vertical-align:middle}
+  .bar>i{display:block;height:100%;background:var(--accent)}
+  .foot{color:var(--t2);font-size:12px;margin-top:26px;line-height:1.7}
+  .foot b{color:var(--t1)}
+</style>
+</head>
+<body>
+
+<h1>订单号列 · 对比稿</h1>
+<div class="meta">
+  页面：<code>/beile-order</code>（贝乐订单）与 <code>/outsource</code>（外发）&nbsp;·&nbsp;
+  目标：让两页在<b>保留「订单类型」列</b>的前提下显示订单号 &nbsp;·&nbsp; 2026-09-29
+</div>
+
+<div class="note">
+  <b>背景</b>：后端两个接口一直正常返回 <code>order_no</code>（实测 4/4 条，形如 <code>PO-20260929-0008</code>），
+  不是接口问题。贝乐页的订单号列是 8 天前多 SKU 改版时被<b>刻意换成「订单类型」徽章</b>的；外发页则从一开始就没这一列。
+  下面是两个排版变体，黄底虚线框即新增列。
+</div>
+
+<h2>变体 A：订单号在最前（推荐）<span class="tag">推荐</span></h2>
+<p class="sub">把订单号放回它原来的位置（首列），「订单类型」紧随其后。信息层级最自然：先认单号，再看类型。</p>
+
+<div class="card">
+  <div class="card-hd">贝乐订单 · /beile-order</div>
+  <div class="scroll">
+    <div class="bo bo-th">
+      <div style="width:40px" class="bo-th"></div>
+      <div style="width:160px" class="bo-th new">订单号</div>
+      <div style="width:90px"  class="bo-th">订单类型</div>
+      <div style="width:150px" class="bo-th">下单时间</div>
+      <div style="width:170px" class="bo-th">客户名称</div>
+      <div style="width:100px" class="bo-th">工厂</div>
+      <div style="width:180px" class="bo-th">产品名称</div>
+      <div style="width:90px"  class="bo-th">SKU</div>
+      <div style="width:110px" class="bo-th">订单数量</div>
+      <div style="width:110px" class="bo-th">生产数量</div>
+      <div style="width:110px" class="bo-th">小义开单</div>
+      <div style="width:160px" class="bo-th left">备注</div>
+    </div>
+    <div class="bo bo-row">
+      <div style="width:40px" class="bo-td"></div>
+      <div style="width:160px" class="bo-td new"><span class="bo-no">PO-20260929-0008</span></div>
+      <div style="width:90px"  class="bo-td"><span class="bo-type order">订单</span></div>
+      <div style="width:150px" class="bo-td dim">2026-09-29</div>
+      <div style="width:170px" class="bo-td">MINISO国内</div>
+      <div style="width:100px" class="bo-td">湖北</div>
+      <div style="width:180px" class="bo-td">毛绒玩具-小熊 30cm</div>
+      <div style="width:90px"  class="bo-td">2 项</div>
+      <div style="width:110px" class="bo-td"><b>10000</b></div>
+      <div style="width:110px" class="bo-td">10200</div>
+      <div style="width:110px" class="bo-td"><span class="bo-type stockin">已开单</span></div>
+      <div style="width:160px" class="bo-td left dim">—</div>
+    </div>
+    <div class="bo bo-row">
+      <div style="width:40px" class="bo-td"></div>
+      <div style="width:160px" class="bo-td new"><span class="bo-no">BH-20260929-0001</span></div>
+      <div style="width:90px"  class="bo-td"><span class="bo-type stockin">备货</span></div>
+      <div style="width:150px" class="bo-td dim">2026-09-28</div>
+      <div style="width:170px" class="bo-td">客户A</div>
+      <div style="width:100px" class="bo-td">湖北</div>
+      <div style="width:180px" class="bo-td">毛绒玩具-兔子 25cm</div>
+      <div style="width:90px"  class="bo-td">1 项</div>
+      <div style="width:110px" class="bo-td">500</div>
+      <div style="width:110px" class="bo-td dim">—</div>
+      <div style="width:110px" class="bo-td dim">—</div>
+      <div style="width:160px" class="bo-td left dim">加急</div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-hd">外发 · /outsource</div>
+  <div class="scroll">
+    <table class="oso">
+      <thead><tr>
+        <th style="width:160px" class="new">订单号</th>
+        <th style="width:90px">订单类型</th>
+        <th style="width:170px">下单时间</th>
+        <th style="width:160px">客户名称</th>
+        <th style="width:360px">产品名称</th>
+        <th style="width:78px">工厂</th>
+        <th style="width:90px">数量</th>
+        <th style="width:170px">外发进度</th>
+        <th style="width:130px">外发工序</th>
+        <th class="left">备注</th>
+      </tr></thead>
+      <tbody>
+        <tr>
+          <td class="new"><span class="bo-no">PO-20260929-0008</span></td>
+          <td><span class="oso-type order">订单</span></td>
+          <td class="dim">2026-09-29</td>
+          <td>MINISO国内</td>
+          <td>毛绒玩具-小熊 30cm</td>
+          <td>湖北</td>
+          <td><b>10000</b></td>
+          <td><span class="bar"><i style="width:60%"></i></span> <span class="oso-type order">3/5</span></td>
+          <td>电绣</td>
+          <td class="left dim">—</td>
+        </tr>
+        <tr>
+          <td class="new"><span class="bo-no">PO-20260927-0021</span></td>
+          <td><span class="oso-type order">订单</span></td>
+          <td class="dim">2026-09-27</td>
+          <td>客户B</td>
+          <td>毛绒玩具-兔子 25cm</td>
+          <td>湖北</td>
+          <td>800</td>
+          <td><span class="bar"><i style="width:100%"></i></span> <span class="oso-type stockin">完成</span></td>
+          <td>车缝</td>
+          <td class="left dim">已结</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<h2>变体 B：订单号跟在类型之后<span class="tag alt">备选</span></h2>
+<p class="sub">保持「订单类型」在首列不动，订单号插在第二列。改动更小（类型列位置不变），但扫读时先看到类型、后看到单号。</p>
+
+<div class="card">
+  <div class="card-hd">贝乐订单 · /beile-order</div>
+  <div class="scroll">
+    <div class="bo bo-th">
+      <div style="width:40px" class="bo-th"></div>
+      <div style="width:90px"  class="bo-th">订单类型</div>
+      <div style="width:160px" class="bo-th new">订单号</div>
+      <div style="width:150px" class="bo-th">下单时间</div>
+      <div style="width:170px" class="bo-th">客户名称</div>
+      <div style="width:100px" class="bo-th">工厂</div>
+      <div style="width:180px" class="bo-th">产品名称</div>
+      <div style="width:90px"  class="bo-th">SKU</div>
+      <div style="width:110px" class="bo-th">订单数量</div>
+      <div style="width:110px" class="bo-th">生产数量</div>
+      <div style="width:110px" class="bo-th">小义开单</div>
+      <div style="width:160px" class="bo-th left">备注</div>
+    </div>
+    <div class="bo bo-row">
+      <div style="width:40px" class="bo-td"></div>
+      <div style="width:90px"  class="bo-td"><span class="bo-type order">订单</span></div>
+      <div style="width:160px" class="bo-td new"><span class="bo-no">PO-20260929-0008</span></div>
+      <div style="width:150px" class="bo-td dim">2026-09-29</div>
+      <div style="width:170px" class="bo-td">MINISO国内</div>
+      <div style="width:100px" class="bo-td">湖北</div>
+      <div style="width:180px" class="bo-td">毛绒玩具-小熊 30cm</div>
+      <div style="width:90px"  class="bo-td">2 项</div>
+      <div style="width:110px" class="bo-td"><b>10000</b></div>
+      <div style="width:110px" class="bo-td">10200</div>
+      <div style="width:110px" class="bo-td"><span class="bo-type stockin">已开单</span></div>
+      <div style="width:160px" class="bo-td left dim">—</div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-hd">外发 · /outsource</div>
+  <div class="scroll">
+    <table class="oso">
+      <thead><tr>
+        <th style="width:90px">订单类型</th>
+        <th style="width:160px" class="new">订单号</th>
+        <th style="width:170px">下单时间</th>
+        <th style="width:160px">客户名称</th>
+        <th style="width:360px">产品名称</th>
+        <th style="width:78px">工厂</th>
+        <th style="width:90px">数量</th>
+        <th style="width:170px">外发进度</th>
+        <th style="width:130px">外发工序</th>
+        <th class="left">备注</th>
+      </tr></thead>
+      <tbody>
+        <tr>
+          <td><span class="oso-type order">订单</span></td>
+          <td class="new"><span class="bo-no">PO-20260929-0008</span></td>
+          <td class="dim">2026-09-29</td>
+          <td>MINISO国内</td>
+          <td>毛绒玩具-小熊 30cm</td>
+          <td>湖北</td>
+          <td><b>10000</b></td>
+          <td><span class="bar"><i style="width:60%"></i></span> <span class="oso-type order">3/5</span></td>
+          <td>电绣</td>
+          <td class="left dim">—</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="foot">
+  <b>两个变体之外还有一处需要你定的（若需要）</b><br>
+  贝乐页目前有「导出」功能，其导出列清单里同样没有订单号（<code>useBeileOrders.ts</code>）。若希望导出/打印也带单号，我会一并加上——请一并说一声。<br><br>
+  <b>实现约束（已核实）</b><br>
+  · <code>BeileOrderRow.vue</code> 现 <b>379 / 400 行</b>，加一列会超硬门禁 ⇒ 需要先做一次小拆分（把「订单类型」徽章的样式抽到独立样式文件或子组件）。这一步我会计入方案，不额外增加你的风险。<br>
+  · <code>OutsourceOrderTab.vue</code> 现 352 行，余量足够，可直接加。<br>
+  · 两页表宽均已是横向滚动（贝乐约 1560px、外发约 1460px），加 160px 后仍走滚动，不会挤压现有列。
+</div>
+
+</body>
+</html>

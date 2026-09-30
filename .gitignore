@@ -339,3 +339,14 @@ _firefox_profile_*/
 #   （HTML 效果图、浏览器交互事件、server-info），属过程件。
 #   设计规格本身走 docs/superpowers/specs/ 入库，不在此目录内。
 /.superpowers/
+
+# === 2026-09-30 工作区卫生：运维快照与工具缓存不入库 ===
+# deliverables/**/nssm_env_backup/：NSSM AppEnvironmentExtra 的服务环境快照。
+#   当前两份（erp-prod / erp-arq）只含 APP_ENV 一个变量，但环境快照属运维件、
+#   不属交付物；且一旦补配环境变量就会含凭据。按目录整体忽略，避免日后漏网。
+/deliverables/**/nssm_env_backup/
+# .reasonix/：本机 agent 工具的附件与技能缓存（含粘贴的截图 PNG），非项目资产。
+/.reasonix/
+# /start：根目录误产生的空壳文件（内容仅一行 erp-web），非脚本、无任何引用。
+# 只锚定仓库根，避免误伤日后任何名为 start 的子目录。
+/start
