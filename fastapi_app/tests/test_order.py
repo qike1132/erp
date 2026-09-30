@@ -88,7 +88,7 @@ class TestOrderService:
                     # 缓存失效与事件发布（Redis/WS）同为副作用，单测中隔离，避免污染事件循环
                     with patch('fastapi_app.services.order.commands.cache_mgr') as mock_cache_mgr, \
                          patch('fastapi_app.services.order.commands._safe_invalidate_purchase_cache', new_callable=AsyncMock), \
-                         patch('fastapi_app.services.order.commands._safe_publish_event', new_callable=AsyncMock):
+                         patch('fastapi_app.services.order._common._safe_publish_event', new_callable=AsyncMock):
                         mock_cache_mgr.invalidate = AsyncMock()
                         result = await order_service.create_order(
                             mock_db, product_id=1, quantity=10,
@@ -251,7 +251,7 @@ class TestOrderEndpoints:
                     # 缓存失效与事件发布（Redis/WS）同为副作用，单测中隔离，避免污染事件循环
                     with patch('fastapi_app.services.order.commands.cache_mgr') as mock_cache_mgr, \
                          patch('fastapi_app.services.order.commands._safe_invalidate_purchase_cache', new_callable=AsyncMock), \
-                         patch('fastapi_app.services.order.commands._safe_publish_event', new_callable=AsyncMock):
+                         patch('fastapi_app.services.order._common._safe_publish_event', new_callable=AsyncMock):
                         mock_cache_mgr.invalidate = AsyncMock()
                         response = await client.post("/api/v1/orders/create", json={
                             "product_id": 1, "quantity": 10, "customer": "测试客户"
@@ -291,7 +291,7 @@ class TestOrderEndpoints:
         mock_db.commit = AsyncMock()
 
         with patch('fastapi_app.services.order.commands.get_product_for_update', new_callable=AsyncMock, return_value=product), \
-             patch('fastapi_app.services.order.commands._safe_publish_event', new_callable=AsyncMock):
+             patch('fastapi_app.services.order._common._safe_publish_event', new_callable=AsyncMock):
             response = await client.put("/api/v1/orders/edit/1", json={
                 "quantity": 20, "customer": "新客户"
             })

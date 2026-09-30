@@ -214,12 +214,25 @@ async def db_transaction(
         raise HTTPException(status_code=500, detail="数据库操作失败") from e
     else:
         if commit:
-            callbacks = db.info.pop('post_commit_callbacks', [])
-            for callback in callbacks:
-                try:
-                    await callback()
-                except Exception as e:  # broad-except: 异常处理框架内部兜底
-                    logger.error("post-commit 回调执行失败: %s", e, exc_info=True)
+            await run_post_commit_callbacks(db)
+
+
+async def run_post_commit_callbacks(session: Any) -> None:
+    """执行并清空 session 上注册的 post-commit 回调（须在 commit 成功后调用）。
+
+    db_transaction 在 commit 成功后自动调用本函数。不经 db_transaction 的入口
+    （如订单删除端点用请求级 get_async_db 事务并自行 commit）**必须**在提交后
+    显式调用，否则注册的回调会被静默丢弃——缓存失效、实时事件广播这类
+    「提交后才允许对外可见」的动作就会彻底不执行。
+
+    回调失败只记录日志，不影响主流程（与 db_transaction 内行为一致）。
+    """
+    callbacks = session.info.pop('post_commit_callbacks', [])
+    for callback in callbacks:
+        try:
+            await callback()
+        except Exception as e:  # broad-except: 回调失败不得影响主流程
+            logger.error("post-commit 回调执行失败: %s", e, exc_info=True)
 
 
 # error_map 的值：固定 (状态码, 响应文本) 或根据异常实例构造 HTTPException 的工厂

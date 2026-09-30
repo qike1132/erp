@@ -395,7 +395,7 @@ class TestDeleteOrder:
     @patch('fastapi_app.services.order.commands.cache_mgr')
     @patch('fastapi_app.services.order.commands._check_order_lock')
     @patch('fastapi_app.services.order.commands._delete_order_directly')
-    @patch('fastapi_app.services.order.commands._safe_publish_event')
+    @patch('fastapi_app.services.order._common._safe_publish_event')
     async def test_delete_order_super_admin(self, mock_publish, mock_direct,
                                               mock_check_lock, mock_cache,
                                               mock_async_db):

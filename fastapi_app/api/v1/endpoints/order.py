@@ -20,7 +20,7 @@ from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_permission
 from fastapi_app.core.domain_events import DomainEvent, DomainEventType
 from fastapi_app.core.domain_events import publish as publish_domain_event
-from fastapi_app.core.exceptions import AppError, NotFoundError, db_transaction
+from fastapi_app.core.exceptions import AppError, NotFoundError, db_transaction, run_post_commit_callbacks
 from fastapi_app.core.response import success_response
 from fastapi_app.schemas.order import (
     ApprovalCancelResponse,
@@ -302,6 +302,12 @@ async def delete_order(
     """
     try:
         result = await order_service.delete_order(db, order_id, user)
+        # 端点内显式提交，让 200 响应与「已落库」一致：
+        # FastAPI 0.106+ 语义下依赖收尾（get_async_db 的 commit）在**响应发送之后**执行，
+        # 若等它提交，客户端收到「删除成功」立刻重取列表时仍能读到该订单，并以前端那次
+        # 读取的时间戳作为 dataUpdatedAt 缓存下来（staleTime 内不再回取），
+        # 表现为「删除后关联页面延迟约 30 秒才更新」。
+        await db.commit()
     except IntegrityError as e:
         logger.warning("删除订单完整性约束冲突: %s", e)
         raise HTTPException(status_code=409, detail='订单存在关联数据，无法删除') from e
@@ -315,7 +321,11 @@ async def delete_order(
     except SQLAlchemyError as e:
         logger.error("删除订单数据库异常: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail='数据库操作失败，删除已回滚') from e
-    # 提交/回滚统一交给 get_async_db 请求级事务，端点只做异常翻译
+
+    # 提交后才执行「提交后」动作：缓存失效 + ORDER_DELETED 实时广播。
+    # 本端点用请求级事务并自行 commit，不经 db_transaction，故须显式执行回调列表，
+    # 否则这些回调会被静默丢弃（实时事件不广播 = 关联页面只能等前端 staleTime 过期）。
+    await run_post_commit_callbacks(db)
 
     await cache_mgr.invalidate_dashboard()
     # 领域事件：ORDER_DELETED 在事务提交后发布（订阅者使用独立 session，需可见已提交变更）

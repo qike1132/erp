@@ -2,7 +2,6 @@
 
 自 order_crud.py 拆分（批次1-3），函数原文零改动。"""
 # ruff: noqa: F401 - 拆分过渡期沿用完整导入块，待按模块收敛未用导入
-import asyncio
 import json
 import logging
 import os
@@ -30,10 +29,8 @@ from fastapi_app.services.notification_service import (
 )
 from fastapi_app.services.order._common import (
     PermissionDeniedError,
-    _log_background_task_exception,
-    _pending_tasks,
     _safe_invalidate_purchase_cache,
-    _safe_publish_event,
+    schedule_post_commit_event,
 )
 from fastapi_app.services.order_utils import (
     _batch_deduct_quantities,
@@ -155,8 +152,10 @@ async def create_order(db: AsyncSession, product_id: int, quantity: int,
 
     await _safe_invalidate_purchase_cache()
 
-    # 发布订单创建事件，通知前端实时刷新
-    await _safe_publish_event(StockEvent.ORDER_CREATED, {
+    # 发布订单创建事件，通知前端实时刷新。
+    # 必须等提交后再发：客户端收到 order_created 会立刻重取列表，先于提交发出会
+    # 读到尚未提交的数据（新订单不在列表里）并缓存该结果，staleTime 内不再回取。
+    schedule_post_commit_event(db, StockEvent.ORDER_CREATED, {
             'order_id': order.id,
             'order_no': order_no,
             'customer': customer,
@@ -235,7 +234,9 @@ async def _update_order_directly(
 
     logger.info(f'订单编辑成功：{order.order_no}，操作人：{current_user.username}')
 
-    await _safe_publish_event(StockEvent.ORDER_UPDATED, {
+    # 提交后再广播：客户端收到 order_updated 会立刻重取列表，先于提交发出会读到
+    # 改数量前的旧数据并缓存该结果，staleTime 内不再回取（表现为页面延迟约 30s）。
+    schedule_post_commit_event(db, StockEvent.ORDER_UPDATED, {
         'order_id': order_id,
         'order_no': order.order_no,
         'customer': customer,
@@ -487,20 +488,6 @@ async def _purge_order_related_rows(
     await db.execute(delete(OrderItem).where(OrderItem.order_id == order.id))
 
 
-def _schedule_order_deleted_event(order_id: int, order_no: str) -> None:
-    """StockEvent.ORDER_DELETED：仅 WebSocket 通知（不查询数据库，可在提交前调度）。
-
-    领域事件 ORDER_DELETED 由 endpoint 层在事务提交后直接发布（order.py）。
-    """
-    task = asyncio.create_task(_safe_publish_event(StockEvent.ORDER_DELETED, {
-        'order_id': order_id,
-        'order_no': order_no,
-    }))
-    _pending_tasks.add(task)
-    task.add_done_callback(_log_background_task_exception)
-    task.add_done_callback(_pending_tasks.discard)
-
-
 async def _delete_order_directly(
     db: AsyncSession, order: Order, order_id: int, current_user: User,
 ) -> dict:
@@ -560,7 +547,11 @@ async def _delete_order_directly(
 
     await _safe_invalidate_purchase_cache()
 
-    _schedule_order_deleted_event(order_id, deleted_order_no)
+    # 提交后再广播（见端点说明）：先发事件会让客户端重取到删除前的旧数据并缓存
+    schedule_post_commit_event(db, StockEvent.ORDER_DELETED, {
+        'order_id': order_id,
+        'order_no': deleted_order_no,
+    })
 
     logger.info(
         '订单删除成功：%s，操作人：%s，抵扣回滚：%s，级联流程清理：%s，备份：%s',
