@@ -392,6 +392,7 @@ async def get_current_user_with_permissions(user=Depends(_get_user_with_permissi
 | R4 | 数据薄 → 趋势图/较上月大量空态 | 空态显式设计（§7.4）；对比类指标在分母为 0 时显示 `—` |
 | R5 | 删除旧面板（`ProductionDailyPanel` / `ProductionMonthlyPanel`）可能带走某些人常用但未言明的视图 | §4.3 待确认项；若需保留，在抽屉内加"按日汇总"视图而非恢复 Tab |
 | R6 | 移动端路由与 PC 共用 `/production` 路径，按设备分流；新增明细页需确认分流逻辑与返回栈 | 实现时先验证 `router/index.ts` 的移动端分流与 `MobileNavBar` 返回行为 |
+| R7 | `daily_production_record` 无软删除列，删除不可恢复 | 本期以「删除前审计快照 + 二次确认 + 不做批量删除」控制风险（§6.5 / D12）；软删除（`is_deleted` + 全部读路径过滤）列入后续 |
 
 ### 9.2 未决项（需评审确认）
 
