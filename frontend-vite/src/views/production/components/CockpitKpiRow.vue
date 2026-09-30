@@ -4,7 +4,7 @@
       <UiStatCard accent="blue">
         <template #label>今日产量</template>
         <template #default>
-          {{ formatNumber(today.overall_quantity) }}<small class="ml-1 text-xs font-semibold text-text-muted">件</small>
+          {{ formatNumber(today.overall_quantity) }}<UnitPiece />
         </template>
         <template #extra>
           <span :class="deltaClass(quantityDelta.tone)">较昨日 {{ quantityDelta.text }}</span>
@@ -22,7 +22,7 @@
       <UiStatCard accent="amber">
         <template #label>本月累计</template>
         <template #default>
-          {{ formatNumber(monthly.monthly_total_quantity) }}<small class="ml-1 text-xs font-semibold text-text-muted">件</small>
+          {{ formatNumber(monthly.monthly_total_quantity) }}<UnitPiece />
         </template>
         <template #extra>{{ productionDays }} 个生产日</template>
       </UiStatCard>
@@ -30,7 +30,7 @@
       <UiStatCard accent="ocean">
         <template #label>日均产量</template>
         <template #default>
-          {{ formatNumber(Math.round(average)) }}<small class="ml-1 text-xs font-semibold text-text-muted">件</small>
+          {{ formatNumber(Math.round(average)) }}<UnitPiece />
         </template>
         <template #extra>
           <span :class="deltaClass(averageDelta.tone)">较上月 {{ averageDelta.text }}</span>
@@ -43,7 +43,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, h } from 'vue'
 
 import UiSkeleton from '@/components/ui/UiSkeleton.vue'
 import UiStatCard from '@/components/ui/UiStatCard.vue'
@@ -83,5 +83,10 @@ function deltaClass(tone: 'up' | 'down' | 'flat'): string {
   if (tone === 'up') return 'text-success-600'
   if (tone === 'down') return 'text-danger-600'
   return 'text-text-muted'
+}
+
+/** 三张产量卡的单位后缀「件」—— 同一处定义，避免三份相同的 class 串散落模板 */
+function UnitPiece() {
+  return h('small', { class: 'ml-1 text-xs font-semibold text-text-muted' }, '件')
 }
 </script>

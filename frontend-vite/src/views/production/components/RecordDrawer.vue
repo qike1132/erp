@@ -18,7 +18,7 @@
       data-test="drawer-summary"
       class="flex flex-wrap items-center gap-3 border-b border-border-light px-4 py-2 text-xs font-semibold text-text-secondary"
     >
-      <span>共 {{ total }} 条</span>
+      <!-- 总条数不在这一行重复：表格底部的 UiPagination 已带「共 N 条」 -->
       <span>合计产量 {{ formatNumber(summaryQuantity) }} 件</span>
       <span>合计产值 {{ formatCurrency(summaryValue) }}</span>
       <span v-if="summarySku !== null">涉及 {{ summarySku }} 个品种</span>

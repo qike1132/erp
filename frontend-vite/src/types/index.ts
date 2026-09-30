@@ -378,6 +378,9 @@ export interface ProductionCraft {
   month?: number
 }
 
+/** 生产三车间（后端 PRODUCTION_DEPARTMENTS 的键） */
+export type ProductionDepartment = 'filling' | 'handcraft' | 'packaging'
+
 export interface DailyProductionRecord {
   id: number
   department: string
@@ -407,7 +410,9 @@ export interface ProductionRecordListResponse {
   page: number
   per_page: number
   pages: number
-  stats: ProductionRecordStats | null
+  /** 后端 get_records 始终构造 stats（无记录时是全 0），不会返回 null；
+   *  pydantic 模型上的 `| None` 只是序列化缺省。前端按非空消费。 */
+  stats: ProductionRecordStats
 }
 
 /** 明细抽屉的查询参数。year/month 与 start_date/end_date 二选一，区间优先。 */
@@ -416,9 +421,15 @@ export interface RecordsQuery {
   month?: number
   start_date?: string
   end_date?: string
+  /**
+   * 部门筛选。刻意保持 string 而非收窄成 ProductionDepartment：
+   * 抽屉的部门下拉选项直接来自接口响应的 DepartmentSummary.department（string），
+   * 选中后回填到这个字段 —— 收窄就得在那个边界加 cast，或把响应模型改错。
+   * 非法值由后端按 scope 过滤，前端不做这层类型约束。
+   */
   department?: string
   created_by?: string
-  /** 产品名或 69 码关键词（Task 7 给后端加的筛选参数） */
+  /** 产品名或 69 码关键词；发送前 trim，空串省略键（后端把空串当"等于空"） */
   keyword?: string
   sort?: 'asc' | 'desc'
   page?: number

@@ -261,8 +261,22 @@ const aliasToCanonical: Record<string, string> = {
 
 const pending = new Map<string, Promise<IconDefinition>>()
 
+/** 全部懒加载条目；测试从这里推导清单，新增条目即自动被覆盖。 */
+export const iconLoaders = loaders
+
+/**
+ * 归一化图标名 → 清单/别名表使用的裸名。
+ *
+ * 调用方手里常是 FA5 风格的 `'fas fa-inbox'` / `'fa-inbox'`，而 loaders 与
+ * aliasToCanonical 只收裸名（'inbox' / 'times'）—— 不剥前缀时查表必落空，
+ * loadIcon 返回 null，图标渲染为空白。剥掉样式前缀后再查别名，
+ * 裸名行为不变（aliasToCanonical[n] ?? n）。
+ */
 export function canonicalIconName(name: string): string {
-  return aliasToCanonical[name] ?? name
+  let n = name.trim()
+  n = n.replace(/^fa[a-z]?\s+/, '')
+  if (n.startsWith('fa-')) n = n.slice(3)
+  return aliasToCanonical[n] ?? n
 }
 
 function exportIdFor(canonical: string): string {
@@ -317,4 +331,22 @@ export function loadIcon(name: string): Promise<IconDefinition | null> {
     pending.set(canonical, p)
   }
   return p
+}
+
+/** 测试专用：清空 library 注册与 pending 缓存，恢复「从未加载过」的初始态。
+
+ * library.add 除了写 library.definitions，还会经 defineIcons 写进全局
+ * namespace.styles（window.__FONTAWESOME__），后者 findIconDefinition 也会查到，
+ * 只 reset library 清不干净 —— 故两处都要清，缺一处都会让后续用例看到
+ * 「已注册」的假象（如「渲染前不输出节点」用例）。
+ */
+export function resetIconLoaderForTest(): void {
+  library.reset()
+  pending.clear()
+  const ns = (globalThis as Record<string, unknown>)['___FONT_AWESOME___'] as
+    | { styles?: Record<string, unknown> }
+    | undefined
+  if (ns?.styles) {
+    for (const key of Object.keys(ns.styles)) delete ns.styles[key]
+  }
 }

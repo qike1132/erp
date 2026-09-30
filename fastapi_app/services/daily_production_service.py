@@ -12,8 +12,9 @@ from decimal import Decimal
 
 import openpyxl
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, or_, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.expression import Join
 
 from fastapi_app.core.business_rules import MAX_QUANTITY
 from fastapi_app.core.float_utils import round_money
@@ -154,6 +155,20 @@ def _build_record_conditions(
     return conditions
 
 
+def _effective_unit_price_expr():
+    """记录单价优先；为 0 时回退到产品当前单价（与行内展示同口径）。
+
+    与 get_monthly_summary 同一惯用法：明细行的 production_value 在
+    unit_price=0 时按 Product.price 回退（见 to_dict / _build_product_price_fallback），
+    统计 CTE 若直接 sum(记录单价×数量)，页脚合计会**低于**列内各行之和。
+    """
+    return func.coalesce(
+        func.nullif(DailyProductionRecord.unit_price, 0),
+        Product.price,
+        0,
+    )
+
+
 def _build_stats_cte(conditions: list):
     """构造「单行聚合」统计 CTE，避免与明细行交叉连接放大统计值。
 
@@ -167,9 +182,10 @@ def _build_stats_cte(conditions: list):
         select(
             func.count(DailyProductionRecord.id).label('total_count'),
             func.coalesce(func.sum(DailyProductionRecord.quantity), 0).label('total_qty'),
-            func.coalesce(func.sum(DailyProductionRecord.unit_price * DailyProductionRecord.quantity), 0).label('total_val'),
+            func.coalesce(func.sum(_effective_unit_price_expr() * DailyProductionRecord.quantity), 0).label('total_val'),
             func.count(func.distinct(DailyProductionRecord.product_name)).label('total_sku'),
         )
+        .outerjoin(Product, DailyProductionRecord.product_id == Product.id)
         .where(*conditions)
         .cte('stats')
     )
@@ -187,6 +203,43 @@ def _record_order_by(sort: str) -> tuple:
         DailyProductionRecord.production_date.desc(),
         DailyProductionRecord.id.desc(),
     )
+
+
+async def _fetch_records_page(
+    db: AsyncSession,
+    conditions: list,
+    stats_cte,
+    sort: str,
+    offset: int,
+    per_page: int,
+) -> list[DailyProductionRecord]:
+    """取一页明细行。明细与单行统计 CTE 交叉连接（行 × 统计单行 = 行本身）。"""
+    cross_from = Join(DailyProductionRecord.__table__, stats_cte, true())
+    result = await db.execute(
+        select(
+            DailyProductionRecord,
+            stats_cte.c.total_count,
+            stats_cte.c.total_qty,
+            stats_cte.c.total_val,
+            stats_cte.c.total_sku,
+        )
+        .select_from(cross_from)
+        .where(*conditions)
+        .order_by(*_record_order_by(sort))
+        .offset(offset)
+        .limit(per_page)
+    )
+    return [r[0] for r in result.all()]
+
+
+async def _fetch_records_stats(db: AsyncSession, stats_cte) -> tuple:
+    """stats 从 stats_cte 单独取一次，保证与页码无关（越界页 rows 为空时不误报 0）。"""
+    stats_row = (await db.execute(
+        select(stats_cte.c.total_qty, stats_cte.c.total_val, stats_cte.c.total_sku)
+    )).first()
+    if not stats_row:
+        return 0, 0, 0
+    return stats_row[0], stats_row[1], stats_row[2]
 
 
 async def get_records(
@@ -233,40 +286,10 @@ async def get_records(
     )
 
     per_page = max(1, min(per_page, 200))
-    offset = (page - 1) * per_page
-
-    from sqlalchemy import true
-    from sqlalchemy.sql.expression import Join
-
     stats_cte = _build_stats_cte(conditions)
-    cross_from = Join(DailyProductionRecord.__table__, stats_cte, true())
-
-    result = await db.execute(
-        select(
-            DailyProductionRecord,
-            stats_cte.c.total_count,
-            stats_cte.c.total_qty,
-            stats_cte.c.total_val,
-            stats_cte.c.total_sku,
-        )
-        .select_from(cross_from)
-        .where(*conditions)
-        .order_by(*_record_order_by(sort))
-        .offset(offset)
-        .limit(per_page)
-    )
-    rows = result.all()
-    records = [r[0] for r in rows]
-    # total 用独立 COUNT 查询获取：请求页越界时 rows 为空，此前从 rows[0] 取值会误报 0
-    total = int((await db.execute(select(func.count(DailyProductionRecord.id)).where(*conditions))).scalar() or 0)
-    # stats 从 stats_cte 单独取一次，保证与页码无关
-    # （越界页 rows 为空时，此前从 rows[0] 取值会误报 0）
-    stats_row = (await db.execute(
-        select(stats_cte.c.total_qty, stats_cte.c.total_val, stats_cte.c.total_sku)
-    )).first()
-    total_qty = stats_row[0] if stats_row else 0
-    total_val = stats_row[1] if stats_row else 0
-    total_sku = stats_row[2] if stats_row else 0
+    records = await _fetch_records_page(db, conditions, stats_cte, sort, (page - 1) * per_page, per_page)
+    total = await _count_records(db, conditions)
+    total_qty, total_val, total_sku = await _fetch_records_stats(db, stats_cte)
 
     price_fallback = await _build_product_price_fallback(db, records)
 
@@ -282,6 +305,12 @@ async def get_records(
             'total_sku': int(total_sku),
         },
     }
+
+
+async def _count_records(db: AsyncSession, conditions: list) -> int:
+    """total 用独立 COUNT 查询获取：请求页越界时 rows 为空，此前从 rows[0] 取值会误报 0。"""
+    result = await db.execute(select(func.count(DailyProductionRecord.id)).where(*conditions))
+    return int(result.scalar() or 0)
 
 
 async def get_record(db: AsyncSession, record_id: int) -> DailyProductionRecord | None:
@@ -509,11 +538,7 @@ async def get_monthly_summary(
     )
 
     # 优先使用记录单价；当记录单价为 0 时回退到产品当前单价
-    effective_unit_price = func.coalesce(
-        func.nullif(DailyProductionRecord.unit_price, 0),
-        Product.price,
-        0,
-    )
+    effective_unit_price = _effective_unit_price_expr()
 
     # 按日+部门聚合
     result = await db.execute(

@@ -9,14 +9,14 @@
     </header>
 
     <div class="page-card-body">
-      <UiSkeleton v-if="loading" data-test="rank-skeleton" variant="text" :rows="3" />
+      <UiSkeleton v-if="loading" data-test="rank-skeleton" variant="text" />
 
       <UiEmpty v-else-if="!ranked.length" data-test="rank-empty" icon="fas fa-ranking-star" text="本月暂无产量" />
 
       <ol v-else class="flex flex-col gap-3">
         <li v-for="(row, index) in ranked" :key="row.department" data-test="rank-row" class="flex items-center gap-2.5">
           <span class="w-4 shrink-0 text-xs font-bold text-text-muted">{{ index + 1 }}</span>
-          <span class="w-14 shrink-0 text-xs font-bold text-heading">{{ label(row.department) }}</span>
+          <span class="w-14 shrink-0 text-xs font-bold text-heading">{{ row.department_label || label(row.department) }}</span>
           <span
             data-test="rank-bar"
             class="h-2 rounded-full"

@@ -9,7 +9,9 @@ function dept(department: string, label: string, qty: number, value: number): De
 }
 
 const three = [
-  dept('filling', '充棉部', 1240, 8680),
+  // label 故意取与 DEPT_LABELS 注册名不同的值：组件若错误地用注册表名而非
+  // 后端返回的 department_label 渲染，此用例会红 —— 否则断言恒真。
+  dept('filling', '充棉一组', 1240, 8680),
   dept('handcraft', '手工部', 860, 12040),
   dept('packaging', '包装部', 2150, 6450),
 ]
@@ -19,7 +21,9 @@ describe('DeptDrillCards', () => {
     const wrapper = mount(DeptDrillCards, { props: { departments: three, loading: false } })
 
     expect(wrapper.findAll('[data-test="dept-card"]')).toHaveLength(3)
-    expect(wrapper.text()).toContain('充棉部')
+    // 钉住标签来源：卡片显示后端返回的 department_label（「充棉一组」），
+    // 而不是前端注册表里的 DEPT_LABELS['filling']（「充棉部」）。
+    expect(wrapper.text()).toContain('充棉一组')
     expect(wrapper.text()).toContain('1,240')
   })
 

@@ -1,6 +1,6 @@
 <template>
   <div>
-    <UiSkeleton v-if="loading" data-test="dept-skeleton" variant="card" :rows="1" />
+    <UiSkeleton v-if="loading" data-test="dept-skeleton" variant="card" />
 
     <UiEmpty v-else-if="!departments.length" data-test="dept-empty" icon="fas fa-industry" text="暂无可查看的部门" />
 
@@ -15,7 +15,9 @@
         @click="emit('drill', row.department)"
       >
         <span class="min-w-0 flex-1">
-          <span class="block text-xs font-bold text-heading">{{ label(row.department) }}</span>
+          <!-- 标签优先用后端返回的 department_label（部门名后端说了算），
+               注册表只作兜底 —— 与移动端 MProductionView 同一口径 -->
+          <span class="block text-xs font-bold text-heading">{{ row.department_label || label(row.department) }}</span>
           <span class="block text-lg font-extrabold tabular-nums text-heading">
             {{ formatNumber(row.total_quantity) }}
             <small class="text-[11px] font-semibold text-text-muted">件</small>

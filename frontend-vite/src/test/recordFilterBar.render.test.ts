@@ -26,9 +26,10 @@ const stubs = {
   UiSearchInput: {
     name: 'UiSearchInput',
     props: ['modelValue', 'placeholder'],
-    emits: ['update:modelValue', 'search', 'blur'],
+    emits: ['update:modelValue', 'search', 'blur', 'clear'],
     template:
-      '<input class="si" :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" @blur="$emit(\'blur\')" @keydown.enter="$emit(\'search\', modelValue)" />',
+      '<input class="si" :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" @blur="$emit(\'blur\')" @keydown.enter="$emit(\'search\', modelValue)" />'
+      + '<button class="si-clear" aria-label="清空" @click="$emit(\'clear\')" />',
   },
 }
 
@@ -74,6 +75,27 @@ describe('RecordFilterBar', () => {
     const wrapper = mountBar({ keyword: '白兔' })
 
     await wrapper.find('input.si').trigger('blur')
+
+    expect(wrapper.emitted('update:filters')).toBeUndefined()
+  })
+
+  it('输入框未聚焦时点 × 清空，同时清掉筛选里的关键词并回到第 1 页', async () => {
+    // 场景：输入「白兔」→ 点别处（筛选已提交）→ 回头点 ×。
+    // 此时不会触发 blur，若 × 只清输入框不清筛选，列表仍按旧关键词过滤。
+    const wrapper = mountBar({ keyword: '白兔', page: 3 })
+    expect(wrapper.find('input.si').element).not.toBe(document.activeElement)
+
+    await wrapper.find('.si-clear').trigger('click')
+
+    const emitted = wrapper.emitted('update:filters')
+    expect(emitted).toHaveLength(1)
+    expect(emitted![0]![0]).toMatchObject({ keyword: '', page: 1 })
+  })
+
+  it('筛选里本就没有关键词时点 × 不发出多余的筛选更新', async () => {
+    const wrapper = mountBar()
+
+    await wrapper.find('.si-clear').trigger('click')
 
     expect(wrapper.emitted('update:filters')).toBeUndefined()
   })

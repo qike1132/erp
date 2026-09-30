@@ -50,7 +50,9 @@ class DailyProductionRecord(Base):
         # 两位小数金额在 float 下可精确表示，此处转换不引入误差。
         up = float(self.unit_price or 0)
         if up == 0 and price_fallback and self.product_id and self.product_id in price_fallback:
-            up = price_fallback[self.product_id]
+            # 回退价是 Numeric 列读出的 Decimal，round_money 只吃 float，
+            # 不转的话 0 价记录一进 fallback 分支就 TypeError。
+            up = float(price_fallback[self.product_id])
         return {
             'id': self.id,
             'department': self.department,

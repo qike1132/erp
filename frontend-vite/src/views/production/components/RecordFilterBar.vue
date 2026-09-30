@@ -35,6 +35,7 @@
       @update:model-value="(v: string) => (keywordDraft = v)"
       @search="onSearch"
       @blur="commitKeyword"
+      @clear="onClear"
     />
 
     <!-- 录单人下拉：从当前页记录里去重（后端没有独立的录单人字典接口）。
@@ -66,14 +67,21 @@ import UiDateRangePicker from '@/components/ui/UiDateRangePicker.vue'
 import UiSearchInput from '@/components/ui/UiSearchInput.vue'
 import UiSelect from '@/components/ui/UiSelect.vue'
 import { DEPT_LABELS } from '../composables/trendChartOption'
-import type { RecordFilters } from '../composables/recordFilters'
+import type { RangePreset, RecordFilters } from '../composables/recordFilters'
 
-const PRESETS = [
-  { label: '今日', value: 'today' },
-  { label: '本周', value: 'week' },
-  { label: '本月', value: 'month' },
-  { label: '自定义', value: 'custom' },
-] as const
+/** 各预设的中文名。键必须穷举 RangePreset —— 新增预设而忘了配中文名时，
+ *  下面的 satisfies 会让 type-check 直接红，而不是渲染出空按钮。 */
+const PRESET_LABELS = {
+  today: '今日',
+  week: '本周',
+  month: '本月',
+  custom: '自定义',
+} as const satisfies Record<RangePreset, string>
+
+/** 渲染顺序也在这里定死：从左到右时间粒度递增，自定义永远在最后 */
+const PRESETS: ReadonlyArray<{ label: string; value: RangePreset }> = (
+  Object.keys(PRESET_LABELS) as RangePreset[]
+).map((value) => ({ label: PRESET_LABELS[value], value }))
 
 const props = defineProps<{
   filters: RecordFilters
@@ -129,6 +137,17 @@ function commitKeyword() {
 function onSearch() {
   commitKeyword()
   emit('search')
+}
+
+/**
+ * 点 × 清空：输入框不聚焦时（先点过别处、再回头点 ×）不会触发 blur，
+ * 若不在此处提交，框已空而筛选还挂着旧关键词 —— 列表看着"清不掉"。
+ * 草稿与筛选一并清零，载荷与 commitKeyword 同构（page:1）。
+ */
+function onClear() {
+  keywordDraft.value = ''
+  if (props.filters.keyword === '') return
+  emit('update:filters', { ...props.filters, keyword: '', page: 1 })
 }
 
 const customRange = computed<[string, string] | null>(() =>

@@ -11,11 +11,11 @@ import { ref, reactive, computed, watch, nextTick, onUnmounted, type WritableCom
 import { useQueryClient } from '@tanstack/vue-query'
 import { dailyProductionApi, productApi } from '@/api'
 import { showToast } from '@/composables/useToast'
-import type { Product } from '@/types'
+import type { Product, ProductionDepartment } from '@/types'
 
 /** 生产部门选项 */
 export interface DepartmentOption {
-  value: string
+  value: ProductionDepartment
   label: string
   icon: string
 }

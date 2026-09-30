@@ -26,10 +26,7 @@ describe('buildRecordsQuery', () => {
     // Review Focus #5：本周可能跨月
     const q = buildRecordsQuery(filters({ preset: 'week' }), WED)
 
-    expect(q.start_date).toBe('2026-09-28')
-    expect(q.end_date).toBe('2026-09-30')
-    expect(q).not.toHaveProperty('year')
-    expect(q).not.toHaveProperty('month')
+    expect(q).toEqual({ start_date: '2026-09-28', end_date: '2026-09-30', page: 1, per_page: 50, sort: 'desc' })
   })
 
   it('自定义：区间原样透传，不带 year/month', () => {
@@ -55,7 +52,7 @@ describe('buildRecordsQuery', () => {
       WED,
     )
 
-    expect(q).not.toHaveProperty('start_date')
+    expect(q).toEqual({ year: 2026, month: 9, page: 1, per_page: 50, sort: 'desc' })
   })
 
   it('空部门不传 department 键', () => {

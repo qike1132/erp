@@ -33,6 +33,9 @@ describe('buildTrendOption', () => {
     expect(bars).toHaveLength(1)
     expect(bars[0]!.name).toBe('充棉部')
     expect(bars[0]!.data).toEqual([7])
+    // 系列总数也要钉住：1 条柱 + 1 条合计折线。只数 bars 的话，
+    // 若实现误给不可见部门也画了折线，测试不会红。
+    expect(series).toHaveLength(2)
   })
 
   it('x 轴用日期后两位，逐日连续', () => {
