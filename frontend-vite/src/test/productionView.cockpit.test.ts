@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { mount, flushPromises } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
 
@@ -25,6 +25,8 @@ vi.mock('@/api/production', () => ({
 vi.mock('@/composables/useToast', () => ({ showToast: vi.fn() }))
 
 import ProductionView from '@/views/production/ProductionView.vue'
+import { dailyProductionApi } from '@/api/production'
+import type { RecordFilters } from '@/views/production/composables/recordFilters'
 
 /**
  * 本测试只验**编排**：四个区块是否就位、下钻是否真的驱动抽屉。
@@ -44,7 +46,8 @@ function mountView() {
         DeptRankPanel: { template: '<div data-test="cockpit-rank" />' },
         DeptDrillCards: { template: '<div data-test="cockpit-dept-cards" />' },
         RecordDrawer: { template: '<div data-test="record-drawer" />' },
-        RecordEditDialog: { template: '<div />' },
+        // 编辑弹窗的 stub 带 name：保存失效用例要能对它 emit('saved')。
+        RecordEditDialog: { name: 'RecordEditDialog', template: '<div />' },
         // 录入弹窗的 stub 带 name 与 open prop：快捷键用例要能读到它是否被打开。
         ProductionEntryDialog: { name: 'ProductionEntryDialog', props: ['open', 'selectedDate'], template: '<div />' },
         teleport: true,
@@ -94,5 +97,36 @@ describe('ProductionView（驾驶舱编排）', () => {
     await nextTick()
 
     expect(wrapper.findComponent({ name: 'ProductionEntryDialog' }).props('open')).toBe(true)
+  })
+
+  it('保存成功后失效记录查询并重新拉取（否则抽屉里那一行一直是旧值）', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    const recordsMock = dailyProductionApi.records as unknown as { mock: { calls: unknown[] } }
+    const before = recordsMock.mock.calls.length
+    // 初始挂载就该取过一次（否则下面的断言是空的）
+    expect(before).toBeGreaterThan(0)
+
+    wrapper.findComponent({ name: 'RecordEditDialog' }).vm.$emit('saved')
+
+    // invalidateQueries 会异步重取活跃查询
+    await vi.waitFor(() => {
+      expect(recordsMock.mock.calls.length).toBeGreaterThan(before)
+    })
+  })
+
+  it('工具栏「明细」入口打开的是无筛选抽屉（清除上次下钻的残留筛选）', async () => {
+    const wrapper = mountView()
+    const vm = wrapper.vm as unknown as { openRecordsFor: (d: string) => void; recordsFilters: RecordFilters }
+
+    // 制造残留筛选：先按部门下钻一次
+    vm.openRecordsFor('filling')
+    expect(vm.recordsFilters.department).toBe('filling')
+
+    await wrapper.find('[data-test="open-records"]').trigger('click')
+
+    expect(vm.recordsFilters.department).toBe('')
+    expect(vm.recordsFilters.page).toBe(1)
   })
 })

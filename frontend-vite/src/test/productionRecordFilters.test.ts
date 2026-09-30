@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { buildRecordsQuery, defaultRecordFilters } from '@/views/production/composables/recordFilters'
+import { buildRecordsQuery, buildExportRange, defaultRecordFilters } from '@/views/production/composables/recordFilters'
 
 // 固定"今天"为周三，便于断言"本周"
 const WED = new Date(2026, 8, 30) // 2026-09-30
@@ -100,5 +100,61 @@ describe('buildRecordsQuery', () => {
 
     expect(q.page).toBe(3)
     expect(q.per_page).toBe(100)
+  })
+})
+
+describe('buildExportRange', () => {
+  // 导出接口只吃 start_date/end_date（没有 year/month），所以每个预设都要折算成闭区间。
+  it('今日：区间收成同一天', () => {
+    expect(buildExportRange(filters({ preset: 'today' }), WED)).toEqual({
+      start_date: '2026-09-30',
+      end_date: '2026-09-30',
+    })
+  })
+
+  it('本周：从本周一到今天', () => {
+    expect(buildExportRange(filters({ preset: 'week' }), WED)).toEqual({
+      start_date: '2026-09-28',
+      end_date: '2026-09-30',
+    })
+  })
+
+  it('本月：首日到末日（30 天月）', () => {
+    expect(buildExportRange(filters({ preset: 'month' }), WED)).toEqual({
+      start_date: '2026-09-01',
+      end_date: '2026-09-30',
+    })
+  })
+
+  it('本月：二月（非闰年）末日照实算到 28', () => {
+    expect(buildExportRange(filters({ preset: 'month' }), new Date(2026, 1, 15))).toEqual({
+      start_date: '2026-02-01',
+      end_date: '2026-02-28',
+    })
+  })
+
+  it('本月：闰年二月末日照实算到 29', () => {
+    expect(buildExportRange(filters({ preset: 'month' }), new Date(2024, 1, 10))).toEqual({
+      start_date: '2024-02-01',
+      end_date: '2024-02-29',
+    })
+  })
+
+  it('自定义：两端原样透传', () => {
+    expect(
+      buildExportRange(filters({ preset: 'custom', customStart: '2026-08-25', customEnd: '2026-09-02' }), WED),
+    ).toEqual({ start_date: '2026-08-25', end_date: '2026-09-02' })
+  })
+
+  it('自定义区间只填一半时回退到本月（与列表查询同规则）', () => {
+    expect(
+      buildExportRange(filters({ preset: 'custom', customStart: '2026-08-25', customEnd: '' }), WED),
+    ).toEqual({ start_date: '2026-09-01', end_date: '2026-09-30' })
+  })
+
+  it('自定义区间反向时回退到本月', () => {
+    expect(
+      buildExportRange(filters({ preset: 'custom', customStart: '2026-09-10', customEnd: '2026-09-01' }), WED),
+    ).toEqual({ start_date: '2026-09-01', end_date: '2026-09-30' })
   })
 })

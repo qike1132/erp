@@ -6,7 +6,7 @@
       @next-day="goNextDay"
       @today="goToday"
       @open-entry="entryOpen = true"
-      @open-records="openRecordsFor('')"
+      @open-records="openRecordsUnfiltered"
       @export="handleExport"
     />
 
@@ -38,11 +38,12 @@
       :records="recordsQuery.data.value?.data ?? []"
       :total="recordsQuery.data.value?.total ?? 0"
       :stats="recordsQuery.data.value?.stats ?? null"
-      :loading="recordsQuery.isFetching.value"
+      :loading="recordsQuery.isPending.value"
       :departments="visibleDepartments"
       :created-by-options="createdByOptions"
       @update:filters="recordsFilters = $event"
       @search="onRecordsSearch"
+      @export="handleDrawerExport"
       @edit="openEdit"
       @confirm-delete="onConfirmDelete"
     />
@@ -76,7 +77,7 @@ import RecordEditDialog from './components/RecordEditDialog.vue'
 import ProductionEntryDialog from './components/ProductionEntryDialog.vue'
 import { useProductionTrend } from './composables/useProductionTrend'
 import { useProductionRecords } from './composables/useProductionRecords'
-import { defaultRecordFilters, type RecordFilters } from './composables/recordFilters'
+import { defaultRecordFilters, buildExportRange, type RecordFilters } from './composables/recordFilters'
 import { toLocalDate } from './composables/productionDate'
 
 const TREND_DAYS = ref(30)
@@ -156,7 +157,7 @@ const { trendQuery } = useProductionTrend(TREND_DAYS)
 const trendData = computed(() => trendQuery.data.value ?? null)
 const trendLoading = computed(() => trendQuery.isFetching.value)
 
-const { recordsQuery, removeRecord } = useProductionRecords(recordsFilters)
+const { recordsQuery, removeRecord, invalidateAll } = useProductionRecords(recordsFilters)
 
 /** 可见部门：优先用今日汇总返回的（它已按权限收窄），否则回落到趋势返回的 */
 const visibleDepartments = computed(() => {
@@ -179,6 +180,16 @@ function openRecordsFor(department: string) {
   recordsOpen.value = true
 }
 
+/**
+ * 工具栏的「明细」入口：按规格 §4.2 应打开**无筛选**的明细。
+ * 此前复用了 openRecordsFor('')，它只清 department —— 若上一次下钻留下的
+ * 录单人/关键词/页码还在，入口打开的就是一份带残留筛选的列表。
+ */
+function openRecordsUnfiltered() {
+  recordsFilters.value = defaultRecordFilters()
+  recordsOpen.value = true
+}
+
 function onRecordsSearch() {
   recordsFilters.value = { ...recordsFilters.value, page: 1 }
 }
@@ -189,6 +200,9 @@ function openEdit(record: DailyProductionRecord) {
 }
 
 function onRecordSaved() {
+  // 编辑成功后必须让记录/汇总/趋势查询失效重取 —— 查询有 30s staleTime 且
+  // 关掉了 refetchOnWindowFocus，不失效的话抽屉里那一行会一直显示旧值。
+  invalidateAll()
   showToast('保存成功', 'success')
 }
 
@@ -217,6 +231,32 @@ async function handleExport() {
     exportStatus.type = 'error'
     exportStatus.message = '导出失败，请稍后重试'
   }
+  clearTimeout(exportTimer)
+  exportTimer = setTimeout(() => {
+    exportStatus.show = false
+  }, 3000)
+}
+
+/**
+ * 抽屉内的导出：与当前筛选语义一致（规格 §1.2 缺陷 3 / §6.6）——
+ * 日期区间随预设折算，部门随筛选带上；工具栏那个仍是单日导出（它只有一个选中日期）。
+ */
+async function handleDrawerExport() {
+  exportStatus.show = true
+  exportStatus.type = 'info'
+  exportStatus.message = '正在导出报表…'
+  try {
+    await dailyProductionApi.export({
+      ...buildExportRange(recordsFilters.value),
+      department: recordsFilters.value.department || undefined,
+    })
+    exportStatus.type = 'success'
+    exportStatus.message = '导出成功'
+  } catch {
+    exportStatus.type = 'error'
+    exportStatus.message = '导出失败，请稍后重试'
+  }
+  clearTimeout(exportTimer)
   exportTimer = setTimeout(() => {
     exportStatus.show = false
   }, 3000)

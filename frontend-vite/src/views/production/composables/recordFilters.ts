@@ -70,3 +70,27 @@ export function buildRecordsQuery(filters: RecordFilters, today: Date = new Date
 
   return query
 }
+
+/**
+ * 导出用的日期区间：把当前筛选的区间预设折算成一对闭区间端点。
+ *
+ * 与 `buildRecordsQuery` 的差别：导出接口只接受 start_date/end_date（没有 year/month），
+ * 所以「本月」必须折算成该月首日…末日；自定义区间填了一半/填反时同样回退到本月，
+ * 与列表查询的回退规则保持一致 —— 否则"看到的是本月、导出的是别的区间"。
+ */
+export function buildExportRange(filters: RecordFilters, today: Date = new Date()): { start_date: string; end_date: string } {
+  if (filters.preset === 'custom' && filters.customStart && filters.customEnd && !isReversed(filters.customStart, filters.customEnd)) {
+    return { start_date: filters.customStart, end_date: filters.customEnd }
+  }
+  if (filters.preset === 'week') {
+    return { start_date: toLocalDate(mondayOf(today)), end_date: toLocalDate(today) }
+  }
+  if (filters.preset === 'today') {
+    const day = toLocalDate(today)
+    return { start_date: day, end_date: day }
+  }
+  // 'month'，以及自定义区间填了一半/填反时的回退
+  const first = new Date(today.getFullYear(), today.getMonth(), 1)
+  const last = new Date(today.getFullYear(), today.getMonth() + 1, 0)
+  return { start_date: toLocalDate(first), end_date: toLocalDate(last) }
+}

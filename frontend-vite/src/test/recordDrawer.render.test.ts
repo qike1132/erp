@@ -116,9 +116,14 @@ describe('RecordDrawer', () => {
     await wrapper.find('[data-test="record-delete"]').trigger('click')
     await nextTick()
 
-    expect(confirmBtn()).not.toBeNull()
-    expect(document.body.textContent).toContain('白兔公仔 40cm')
-    expect(document.body.textContent).toContain('620')
+    const confirm = confirmBtn()
+    expect(confirm).not.toBeNull()
+    // 必须限定在确认框内断言：挂载时 attachTo body，抽屉表格里本来就有产品名与 620，
+    // 若查整个 body，这两条断言无论确认框内容如何都会通过（等于没测）。
+    const dialog = confirm!.closest('[role="dialog"]')
+    expect(dialog).not.toBeNull()
+    expect(dialog!.textContent).toContain('白兔公仔 40cm')
+    expect(dialog!.textContent).toContain('620')
   })
 
   it('取消删除时不 emit confirm-delete', async () => {

@@ -5,6 +5,8 @@
     :description="sub || text"
     max-width-class="max-w-[420px]"
     :close-on-overlay-click="closeOnOverlayClick"
+    :overlay-z-class="overlayZClass"
+    :content-z-class="contentZClass"
     @update:open="onOpenUpdate"
   >
     <div class="p-8">
@@ -38,10 +40,20 @@ const props = withDefaults(
     type?: 'danger' | 'warning'
     /** 点击遮罩/空白处是否关闭弹窗（默认 true） */
     closeOnOverlayClick?: boolean
+    /**
+     * 嵌套于另一模态（如抽屉）之上时的 z 层级类名。
+     * 不传则沿用 UiDialog 的默认层级（overlay 30 / modal 40）—— 既有调用方行为不变；
+     * 需要在抽屉之上显示时传 'z-[var(--z-overlay-nested)]' / 'z-[var(--z-modal-nested)]'。
+     */
+    overlayZClass?: string
+    contentZClass?: string
   }>(),
   {
     type: 'danger',
     closeOnOverlayClick: true,
+    // 显式声明为 undefined：转发给 UiDialog 后由其自身默认值兜底（不改变既有层级）。
+    overlayZClass: undefined,
+    contentZClass: undefined,
   },
 )
 

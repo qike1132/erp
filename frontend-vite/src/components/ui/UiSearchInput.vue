@@ -35,6 +35,8 @@ const emit = defineEmits<{
   'update:modelValue': [value: string]
   search: [query: string]
   clear: []
+  /** 失焦时触发（用于把草稿关键词提交给上游，避免逐字触发请求） */
+  blur: []
 }>()
 
 function onInput(e: Event) {
@@ -68,6 +70,7 @@ function onClear() {
       class="w-full py-2.5 pl-4 pr-10 text-sm bg-slate-50 border-2 border-ocean-light rounded-[var(--radius-input)] transition-colors duration-200 focus:border-primary focus:shadow-[0_0_0_0.2rem_rgba(135,206,235,0.25)] focus:outline-none placeholder:text-text-muted disabled:opacity-50 disabled:cursor-not-allowed"
       @input="onInput"
       @keydown="onKeydown"
+      @blur="emit('blur')"
     />
     <button
       v-if="modelValue"

@@ -1,7 +1,7 @@
 <template>
   <UiDialog :open="open" title="编辑生产记录" @update:open="emit('update:open', $event)">
     <div v-if="record" class="flex flex-col gap-4">
-      <div class="rounded-lg bg-surface-sunken px-3 py-2 text-xs text-text-secondary">
+      <div class="rounded-lg bg-surface px-3 py-2 text-xs text-text-secondary">
         {{ record.product_name }} · {{ record.barcode || '无 69 码' }} · 原录单人 {{ record.created_by || '—' }}
       </div>
 
@@ -98,6 +98,11 @@ async function submit() {
     error.value = '生产数量必须大于 0'
     return
   }
+  // 数字输入框被清空时 v-model.number 会留下空串；若直接提交，后端会以晦涩的 422 拒绝。
+  if (isBlank(form.unit_price)) {
+    error.value = '单价不能为空'
+    return
+  }
   const diff = changedFields()
   if (!Object.keys(diff).length) {
     emit('update:open', false)
@@ -111,10 +116,16 @@ async function submit() {
     emit('saved')
     emit('update:open', false)
   } catch (e: unknown) {
-    const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-    error.value = detail ?? '保存失败'
+    // FastAPI 校验失败时 detail 是数组，直接当字符串用会把原始 JSON 摊给用户看。
+    const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+    error.value = typeof detail === 'string' ? detail : '保存失败'
   } finally {
     saving.value = false
   }
+}
+
+/** 数字输入被清空时是空串（v-model.number 无法解析），也覆盖 null/undefined/NaN */
+function isBlank(v: unknown): boolean {
+  return v === '' || v === null || v === undefined || (typeof v === 'number' && Number.isNaN(v))
 }
 </script>

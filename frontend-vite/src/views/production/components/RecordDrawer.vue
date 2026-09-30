@@ -11,6 +11,7 @@
       :created-by-options="createdByOptions"
       @update:filters="emit('update:filters', $event)"
       @search="emit('search')"
+      @export="emit('export')"
     />
 
     <div
@@ -44,7 +45,7 @@
         @page="onPage"
       >
         <template #column-body-department="{ row }">
-          <span class="rounded bg-surface-sunken px-1.5 py-0.5 text-[11px] font-bold">
+          <span class="rounded bg-surface px-1.5 py-0.5 text-[11px] font-bold">
             {{ deptLabel(row.department) }}
           </span>
         </template>
@@ -64,12 +65,16 @@
 
     <!-- 删除二次确认：后端是物理删除且不可恢复，必须写明「删的是哪一条」。
          复用共享的 UiConfirmDialog —— 它自带焦点陷阱、Escape 关闭与滚动锁，
-         这是全站最危险的操作，不能自建一个更弱的模态。 -->
+         这是全站最危险的操作，不能自建一个更弱的模态。
+         抽屉本身是 z-[var(--z-modal)]（40），若确认框沿用同一层级，谁盖谁取决于传送顺序；
+         故显式抬到嵌套层级（overlay 60 / modal 70），保证确认框永远在抽屉之上。 -->
     <UiConfirmDialog
       :open="!!pendingDelete"
       type="danger"
       text="确认删除这条生产记录？"
       :sub="deleteSummary"
+      overlay-z-class="z-[var(--z-overlay-nested)]"
+      content-z-class="z-[var(--z-modal-nested)]"
       @confirm="confirmDelete"
       @cancel="pendingDelete = null"
     />
@@ -121,6 +126,7 @@ const emit = defineEmits<{
   'update:open': [value: boolean]
   'update:filters': [value: RecordFilters]
   search: []
+  export: []
   edit: [record: DailyProductionRecord]
   'confirm-delete': [id: number]
 }>()
