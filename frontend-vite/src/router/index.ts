@@ -3,10 +3,11 @@
  * 根据设备类型（PC/移动端）自动加载对应路由集
  * 所有路由懒加载，确保每种设备只加载自己需要的代码
  */
-import { createRouter, createWebHistory, type RouteRecordRaw, type RouteLocationNormalized } from 'vue-router'
+import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { isMobileDevice } from '@/composables/useDevice'
 import { devLog } from '@/utils/devLog'
+import { resolveNavAccess } from './navAccess'
 
 // ==================== PC 端路由====================
 const pcRoutes: RouteRecordRaw[] = [
@@ -22,7 +23,7 @@ const pcRoutes: RouteRecordRaw[] = [
     meta: { requiresAuth: true },
     children: [
       { path: '', redirect: '/dashboard' },
-      { path: 'dashboard', name: 'Dashboard', component: () => import('@/views/dashboard/DashboardView.vue'), meta: { hideHeader: true } },
+      { path: 'dashboard', name: 'Dashboard', component: () => import('@/views/dashboard/DashboardView.vue'), meta: { hideHeader: true, navExempt: true } },
       { path: 'order', redirect: '/customer-order' },
       { path: 'order/:id', redirect: '/customer-order' },
       { path: 'product', name: 'Product', component: () => import('@/views/product/ProductListView.vue'), meta: { hideHeader: true } },
@@ -67,7 +68,7 @@ const pcRoutes: RouteRecordRaw[] = [
       { path: 'ocr-import', name: 'OcrImport', component: () => import('@/views/ocr-import/OcrImportView.vue') },
       { path: 'backup', name: 'Backup', component: () => import('@/views/backup/BackupView.vue'), meta: { hideHeader: true } },
       { path: 'pattern-room', name: 'PatternRoom', component: () => import('@/views/pattern-room/PatternRoomView.vue'), meta: { hideHeader: true } },
-      { path: 'notifications', name: 'Notifications', component: () => import('@/views/notifications/NotificationCenterView.vue'), meta: { hideHeader: true } },
+      { path: 'notifications', name: 'Notifications', component: () => import('@/views/notifications/NotificationCenterView.vue'), meta: { hideHeader: true, navExempt: true } },
     ],
   },
   { path: '/:pathMatch(.*)*', redirect: '/dashboard' },
@@ -88,19 +89,21 @@ const mobileRoutes: RouteRecordRaw[] = [
     meta: { requiresAuth: true },
     children: [
       { path: '', redirect: '/dashboard' },
-      { path: 'dashboard', name: 'MDashboard', component: () => import('@/mobile/views/dashboard/DashboardMobile.vue') },
+      { path: 'dashboard', name: 'MDashboard', component: () => import('@/mobile/views/dashboard/DashboardMobile.vue'), meta: { navExempt: true } },
       { path: 'product', name: 'MProduct', component: () => import('@/mobile/views/product/MProductView.vue') },
       { path: 'stock', name: 'MStock', component: () => import('@/mobile/views/stock/MStockView.vue') },
-      { path: 'shipment', name: 'MShipment', component: () => import('@/mobile/views/shipment/MShipmentView.vue') },
+      // 移动端 tab（出货 / 来料登记 / 我的）：入口由 MobileLayout 客户端定义，不在后端导航数据里，
+      // 因此显式声明 navExempt，避免非超管用户被守卫重定向回 /dashboard
+      { path: 'shipment', name: 'MShipment', component: () => import('@/mobile/views/shipment/MShipmentView.vue'), meta: { navExempt: true } },
       { path: 'customer-order', name: 'MOrders', component: () => import('@/mobile/views/customer-order/MCustomerOrderView.vue') },
-      { path: 'profile', name: 'MProfile', component: () => import('@/mobile/views/profile/MProfileView.vue') },
+      { path: 'profile', name: 'MProfile', component: () => import('@/mobile/views/profile/MProfileView.vue'), meta: { navExempt: true } },
       { path: 'purchase', name: 'MPurchase', component: () => import('@/mobile/views/purchase/MPurchaseView.vue') },
       { path: 'material-calculator', name: 'MMaterialCalculator', component: () => import('@/mobile/views/material-calculator/MMaterialCalculatorView.vue') },
-      { path: 'incoming', name: 'MIncoming', component: () => import('@/mobile/views/incoming/MIncomingView.vue') },
+      { path: 'incoming', name: 'MIncoming', component: () => import('@/mobile/views/incoming/MIncomingView.vue'), meta: { navExempt: true } },
       { path: 'production', name: 'MProduction', component: () => import('@/mobile/views/production/MProductionView.vue') },
       { path: 'batch', name: 'MBatch', component: () => import('@/mobile/views/batch/MBatchView.vue') },
       { path: 'case', name: 'MCase', component: () => import('@/mobile/views/case/MCaseView.vue') },
-      { path: 'notifications', name: 'MNotifications', component: () => import('@/views/notifications/NotificationCenterView.vue') },
+      { path: 'notifications', name: 'MNotifications', component: () => import('@/views/notifications/NotificationCenterView.vue'), meta: { navExempt: true } },
     ],
   },
   { path: '/:pathMatch(.*)*', redirect: '/' },
@@ -158,48 +161,8 @@ router.afterEach(() => {
 })
 
 // ==================== 路由守卫：认证 + 权限检查====================
-router.beforeEach(async (to: RouteLocationNormalized, _from: RouteLocationNormalized) => {
-  const authStore = useAuthStore()
-
-  if (to.meta.requiresAuth === false) {
-    return true
-  }
-
-  if (!authStore.loaded) {
-    try {
-      // init() 内部已并行加载 fetchUser + fetchNavSections，无需重复调用
-      await authStore.init()
-    } catch (error) {
-      console.error('[Router] 用户初始化失败', error)
-      return `/login?redirect=${encodeURIComponent(to.fullPath)}`
-    }
-  }
-
-  if (!authStore.isLoggedIn) {
-    return `/login?redirect=${encodeURIComponent(to.fullPath)}`
-  }
-
-  // 权限检查：非超级用户只能访问 filteredNavSections 中可见的路径
-  // fail-closed：navSections 未加载时阻止导航，避免权限绕过
-  if (authStore.user && !authStore.user.is_super) {
-    if (authStore.navSections.length === 0) {
-      // navSections 尚未加载：await 在途请求（init 已后台触发）而非直接 return false，
-      // 否则登录后 router.push 在导航数据返回前即被取消，UI 永久卡在"登录中"。
-      try {
-        await authStore.loadNavSections()
-      } catch (error) {
-        console.error('[Router] 导航数据加载失败，阻止导航:', error)
-        return false
-      }
-    }
-    const targetPath = '/' + to.path.split('/').filter(Boolean)[0]
-    const allowedPaths = authStore.filteredNavSections.flatMap((s) => s.items.map((i) => i.path))
-    if (targetPath !== '/dashboard' && targetPath !== '/notifications' && targetPath !== '/' && !allowedPaths.includes(targetPath)) {
-      return '/dashboard'
-    }
-  }
-
-  return true
-})
+// 判定逻辑见 src/router/navAccess.ts（纯函数，可单测）；此处只负责取 store 并委托。
+// 无权限语义的入口（/dashboard、移动端 tab 等）由路由表 meta.navExempt 显式声明。
+router.beforeEach((to) => resolveNavAccess(to, useAuthStore()))
 
 export default router
