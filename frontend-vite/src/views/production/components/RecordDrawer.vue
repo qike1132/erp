@@ -63,38 +63,23 @@
     </div>
 
     <!-- 删除二次确认：后端是物理删除且不可恢复，必须写明「删的是哪一条」。
-         UiConfirmDialog 经 reka-ui DialogPortal 传送内容到 body，且不暴露逐实例的
-         测试锚点与自定义按钮，无法满足「确认文本含产品名/数量」的可测性要求，
-         故此处内联一个语义等价的确认层。 -->
-    <div
-      v-if="pendingDelete"
-      data-test="delete-confirm"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="record-delete-title"
-      class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-black/40 p-4"
-    >
-      <div class="w-full max-w-[420px] rounded-2xl bg-surface-card p-6 shadow-lg">
-        <div class="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-danger-50 text-xl text-danger-500">
-          <FontAwesomeIcon icon="trash-alt" aria-hidden="true" />
-        </div>
-        <p id="record-delete-title" class="m-0 text-center text-base font-semibold text-heading">
-          确认删除这条生产记录？
-        </p>
-        <p class="mb-0 mt-2 text-center text-sm text-text-secondary">{{ deleteSummary }}</p>
-        <div class="mt-5 flex justify-end gap-2">
-          <UiButton variant="outline" data-test="delete-cancel" @click="pendingDelete = null">取消</UiButton>
-          <UiButton variant="danger" data-test="delete-confirm-btn" @click="confirmDelete">确认删除</UiButton>
-        </div>
-      </div>
-    </div>
+         复用共享的 UiConfirmDialog —— 它自带焦点陷阱、Escape 关闭与滚动锁，
+         这是全站最危险的操作，不能自建一个更弱的模态。 -->
+    <UiConfirmDialog
+      :open="!!pendingDelete"
+      type="danger"
+      text="确认删除这条生产记录？"
+      :sub="deleteSummary"
+      @confirm="confirmDelete"
+      @cancel="pendingDelete = null"
+    />
   </UiDrawer>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 
-import UiButton from '@/components/ui/UiButton.vue'
+import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import UiDataTable from '@/components/ui/UiDataTable.vue'
 import type { TableColumn } from '@/components/ui/UiDataTable.vue'
 import UiDrawer from '@/components/ui/UiDrawer.vue'
@@ -141,6 +126,19 @@ const emit = defineEmits<{
 }>()
 
 const pendingDelete = ref<DailyProductionRecord | null>(null)
+
+/**
+ * 抽屉可被 Escape / 点遮罩关闭（UiDrawer 的 close-on-escape / dismissable），
+ * 而本组件由父级无条件渲染、关闭后并不卸载。若不清空 pendingDelete，
+ * 重开抽屉会对一条已失去上下文的记录弹出删除确认 —— 对不可恢复的物理删除
+ * 来说这是不可接受的，故抽屉一关就丢弃待删除状态。
+ */
+watch(
+  () => props.open,
+  (open) => {
+    if (!open) pendingDelete.value = null
+  },
+)
 
 /** stats 为 null（当前筛选无记录）时一律显示 0 —— 绝不显示 NaN 或空白 */
 const summaryQuantity = computed(() => props.stats?.total_quantity ?? 0)

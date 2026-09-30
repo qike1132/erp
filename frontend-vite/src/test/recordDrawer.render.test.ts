@@ -7,12 +7,17 @@
  *
  * 挂载按生产配置（unstyled + PT）—— 默认模式的 p-* 类名生产里不存在，
  * 且 UiDataTable 内部的 PrimeVue DataTable 需要插件才能渲染出 <tr>。
+ *
+ * 删除确认复用共享的 UiConfirmDialog，其内容经 reka-ui DialogPortal **传送**到
+ * document.body，wrapper.find() 搜不到，故对确认框的断言一律走 document。
  */
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
+import { nextTick } from 'vue'
 import { mount } from '@vue/test-utils'
 import PrimeVue from 'primevue/config'
 
 import RecordDrawer from '@/views/production/components/RecordDrawer.vue'
+import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import { defaultRecordFilters, type RecordFilters } from '@/views/production/composables/recordFilters'
 import { plushCutePT } from '@/styles/primevue-pt'
 import type { DailyProductionRecord, ProductionRecordStats } from '@/types'
@@ -56,12 +61,26 @@ function mountDrawer(overrides: Partial<DrawerProps> = {}) {
 
   return mount(RecordDrawer, {
     props,
+    // 确认框传送进 document.body，挂到 body 上便于清理与查询
+    attachTo: document.body,
     global: {
       plugins: [[PrimeVue, { unstyled: true, pt: plushCutePT }]],
       stubs: { UiDrawer: { template: '<div><slot /><slot name="footer" /></div>' } },
     },
   })
 }
+
+/** UiConfirmDialog 的确认/取消按钮：靠 aria-label 前缀定位（取消，<问句> / 确认，<问句>） */
+function confirmBtn(): HTMLButtonElement | null {
+  return document.querySelector<HTMLButtonElement>('button[aria-label^="确认，"]')
+}
+function cancelBtn(): HTMLButtonElement | null {
+  return document.querySelector<HTMLButtonElement>('button[aria-label^="取消，"]')
+}
+
+afterEach(() => {
+  document.body.innerHTML = ''
+})
 
 describe('RecordDrawer', () => {
   it('渲染表格行与产品名', () => {
@@ -95,16 +114,20 @@ describe('RecordDrawer', () => {
     const wrapper = mountDrawer()
 
     await wrapper.find('[data-test="record-delete"]').trigger('click')
+    await nextTick()
 
-    expect(wrapper.find('[data-test="delete-confirm"]').text()).toContain('白兔公仔 40cm')
-    expect(wrapper.find('[data-test="delete-confirm"]').text()).toContain('620')
+    expect(confirmBtn()).not.toBeNull()
+    expect(document.body.textContent).toContain('白兔公仔 40cm')
+    expect(document.body.textContent).toContain('620')
   })
 
   it('取消删除时不 emit confirm-delete', async () => {
     const wrapper = mountDrawer()
 
     await wrapper.find('[data-test="record-delete"]').trigger('click')
-    await wrapper.find('[data-test="delete-cancel"]').trigger('click')
+    await nextTick()
+    cancelBtn()!.click()
+    await nextTick()
 
     expect(wrapper.emitted('confirm-delete')).toBeUndefined()
   })
@@ -113,7 +136,9 @@ describe('RecordDrawer', () => {
     const wrapper = mountDrawer()
 
     await wrapper.find('[data-test="record-delete"]').trigger('click')
-    await wrapper.find('[data-test="delete-confirm-btn"]').trigger('click')
+    await nextTick()
+    confirmBtn()!.click()
+    await nextTick()
 
     expect(wrapper.emitted('confirm-delete')).toEqual([[7]])
   })
@@ -144,5 +169,26 @@ describe('RecordDrawer', () => {
     const payload = emitted![0]![0] as RecordFilters
     expect(payload.page).toBe(2)
     expect(payload.perPage).toBe(50)
+  })
+
+  it('抽屉关闭时清空待删除状态，重开不会残留确认框', async () => {
+    // 抽屉可被 Esc / 遮罩关闭且不卸载；不可恢复的物理删除绝不能残留确认。
+    // 断言 UiConfirmDialog 的 open（reka-ui 的 Presence 会在退场动画期间保留 DOM，
+    // 故不看 DOM 存在性，看「是否被告知打开」这个稳定信号）。
+    const wrapper = mountDrawer()
+
+    await wrapper.find('[data-test="record-delete"]').trigger('click')
+    await nextTick()
+    const dialog = wrapper.findComponent(UiConfirmDialog)
+    expect(dialog.props('open')).toBe(true)
+    expect(dialog.props('sub')).toContain('白兔公仔 40cm')
+
+    await wrapper.setProps({ open: false })
+    await nextTick()
+    expect(wrapper.findComponent(UiConfirmDialog).props('open')).toBe(false)
+
+    await wrapper.setProps({ open: true })
+    await nextTick()
+    expect(wrapper.findComponent(UiConfirmDialog).props('open')).toBe(false)
   })
 })
