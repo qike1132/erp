@@ -51,13 +51,14 @@ describe('DeptRankPanel', () => {
   it('进度条宽度按"相对第一名的比例"给出，第一名占满', () => {
     const wrapper = mount(DeptRankPanel, {
       props: {
-        departments: [dept('filling', '充棉部', 50), dept('packaging', '包装部', 200)],
+        departments: [dept('filling', '充棉部', 100), dept('packaging', '包装部', 300)],
         loading: false,
       },
     })
 
+    // 100 / 300 不整除，未取整的实现会输出 width: 33.33333333333333%，下面的断言会失败
     const bars = wrapper.findAll('[data-test="rank-bar"]')
     expect(bars[0]!.attributes('style')).toContain('width: 100%')
-    expect(bars[1]!.attributes('style')).toContain('width: 25%')
+    expect(bars[1]!.attributes('style')).toContain('width: 33%')
   })
 })
