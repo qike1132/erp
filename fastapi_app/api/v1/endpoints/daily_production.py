@@ -139,14 +139,14 @@ async def create_record(
         db: 异步数据库会话（读写主库）。
 
     Returns:
-        ProductionRecordActionResponse: 包含成功标志和提示消息的响应。
+        ProductionRecordActionResponse: 成功标志、提示消息与新记录的 id。
 
     Raises:
         HTTPException: 403（部门越权）。
     """
     _assert_department_writable(data.department, scope)
     async with db_transaction(db):
-        await daily_production_service.create_record(
+        record = await daily_production_service.create_record(
             db,
             department=data.department,
             product_id=data.product_id,
@@ -158,7 +158,7 @@ async def create_record(
             remark=data.remark or '',
             created_by=user.username if hasattr(user, 'username') else '',
         )
-    return ProductionRecordActionResponse(success=True, message='生产记录创建成功')
+    return ProductionRecordActionResponse(success=True, message='生产记录创建成功', id=record.id)
 
 
 @router.put('/records/{record_id}', response_model=ProductionRecordActionResponse)

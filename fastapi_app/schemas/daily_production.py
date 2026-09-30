@@ -60,9 +60,14 @@ class ProductionRecordListResponse(BaseModel):
 
 
 class ProductionRecordActionResponse(BaseModel):
-    """生产记录操作响应"""
+    """生产记录操作响应
+
+    ``id`` 仅在创建时回填（前端「撤销」需要精确定位刚建的那一条，物理删除不容猜）；
+    更新/删除沿用同一模型，保持缺省 None 不变。
+    """
     success: bool
     message: str
+    id: int | None = None
 
 
 # ==================== 每日汇总 ====================
