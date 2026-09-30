@@ -555,3 +555,95 @@ async def test_query_count_is_bounded(db_recording):
         f'{len(reads_three_skus)}），疑似 N+1'
     )
     assert len(reads_one_sku) <= 10, f'重算读查询数异常偏多（{len(reads_one_sku)} 条）'
+
+
+from fastapi_app.services.purchase_order_crud import save_factory_summary_edits
+
+
+async def _seed_save_fixture(db: AsyncSession, po_id: int = 7200) -> dict:
+    """保存路径用的采购单：两部位行 + 一条 SKU 快照，全部未配率。"""
+    await _seed_product_two_fabrics(db)
+    await _seed_po(
+        db, po_id, product_quantity=1000, spare_rate=None,
+        item_rates={_H_TIAO: None, _H_SU: None},
+        skus=[{'product_name': _XIAOTU, 'order_qty': 1000}],
+    )
+    items = (await db.execute(
+        select(PurchaseOrderItem).where(PurchaseOrderItem.order_id == po_id)
+        .order_by(PurchaseOrderItem.id)
+    )).scalars().all()
+    return {'po_id': po_id, 'head_item_id': items[0].id, 'body_item_id': items[1].id}
+
+
+async def test_row_rate_save_recomputes_spare(db):
+    """【核心缺陷】只保存行率（spare_rate=None）也必须重算备品。
+
+    旧行为：行率落库后备品一动不动，仍是上次的值（此处为 0）。
+    新行为：备品 = ceil(1000 × 30/1000) = 30。
+    """
+    session = db
+    fx = await _seed_save_fixture(session)
+
+    await save_factory_summary_edits(
+        session, [{'item_ids': [fx['head_item_id']], 'loss_rate': 30}], 'tester',
+    )
+
+    spare, sku_rows = await _po_spare(session, fx['po_id'])
+    assert float(spare) == 30
+    assert sku_rows == [(30, 30)]
+
+
+async def test_row_rate_save_lower_rate_recomputes_down(db):
+    """行率改小后备品必须跟着降：30 → 5 时备品 30 → 5。"""
+    session = db
+    fx = await _seed_save_fixture(session)
+    await save_factory_summary_edits(
+        session, [{'item_ids': [fx['head_item_id']], 'loss_rate': 30}], 'tester',
+    )
+    assert float((await _po_spare(session, fx['po_id']))[0]) == 30
+
+    await save_factory_summary_edits(
+        session, [{'item_ids': [fx['head_item_id']], 'loss_rate': 5}], 'tester',
+    )
+
+    spare, _ = await _po_spare(session, fx['po_id'])
+    assert float(spare) == 5
+
+
+async def test_top_rate_save_still_writes_and_recomputes(db):
+    """顶层统一率路径（edits=[] + spare_rate）仍写率，且备品按部位率算。"""
+    session = db
+    fx = await _seed_save_fixture(session)
+
+    res = await save_factory_summary_edits(session, [], 'tester', 30, [fx['po_id']])
+
+    assert res['spare_updated_count'] == 1
+    order = await session.get(PurchaseOrder, fx['po_id'])
+    assert float(order.spare_rate) == 30
+    assert float(order.spare_quantity) == 30
+
+
+async def test_save_keeps_response_shape(db):
+    """契约护栏：返回键必须仍是 updated_count + spare_updated_count。"""
+    session = db
+    fx = await _seed_save_fixture(session)
+
+    res = await save_factory_summary_edits(
+        session, [{'item_ids': [fx['head_item_id']], 'loss_rate': 30}], 'tester',
+    )
+
+    assert set(res.keys()) == {'updated_count', 'spare_updated_count'}
+
+
+async def test_save_zero_rate_preserved(db):
+    """通过保存路径写入 0 → 备品 0 且率写回 0（0 不是缺失）。"""
+    session = db
+    fx = await _seed_save_fixture(session)
+
+    await save_factory_summary_edits(
+        session, [{'item_ids': [fx['head_item_id']], 'loss_rate': 0}], 'tester',
+    )
+
+    spare, sku_rows = await _po_spare(session, fx['po_id'])
+    assert float(spare) == 0
+    assert sku_rows[0][1] == 0

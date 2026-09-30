@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi_app.core.float_utils import round_qty
 from fastapi_app.services.numbering import generate_purchase_order_number
 from fastapi_app.services.purchase_order_sku import resync_po_sku_spare
+from fastapi_app.services.purchase_order_spare import recompute_po_spare_from_item_rates
 from fastapi_app.services.purchase_utils import calc_spare_quantity, normalize_spare_rate
 from fastapi_app.shared_models import (
     MaterialRegistration,
@@ -302,8 +303,10 @@ async def _write_spare_rate_to_orders(
         _apply_spare_rate(order, spare_rate)
         applied_ids.append(order.id)
         written += 1
-    # 逐 SKU 快照的备品按新率同步重算（保持逐 SKU 行与主表备品口径一致）
-    await resync_po_sku_spare(db, applied_ids, spare_rate)
+    # 逐 SKU 备品由「部位率 max」重算（备品来源见 purchase_order_spare）。
+    # 注意：_apply_spare_rate 刚写入的 spare_quantity 是订单级口径的临时值，
+    # 由本次重算覆盖为逐 SKU 求和——重算是备品的最终写者。
+    await recompute_po_spare_from_item_rates(db, applied_ids)
     return written
 
 
@@ -471,6 +474,13 @@ async def save_factory_summary_edits(
 
     # 编辑应用完毕后，再批量覆盖写所涉采购单的损耗率 / 备品（一次查询，无 N+1）
     spare_written = await _write_spare_rate_to_orders(db, involved_po_ids, spare_rate)
+
+    # 【缺陷修复】行率（edits[].loss_rate）可能刚被改写：无论本次是否携带顶层
+    # spare_rate，都要按「部位率 max」重算所涉采购单的备品。此前只在顶层
+    # spare_rate 非 None 时才写备品，行率改动完全不触发重算 → /beile-order 的
+    # 生产数量在多部位异损耗场景下失真。
+    if involved_po_ids:
+        await recompute_po_spare_from_item_rates(db, involved_po_ids)
 
     await db.flush()
     return {'updated_count': updated, 'spare_updated_count': spare_written}
