@@ -60,9 +60,15 @@ def test_ensure_production_stopped_does_not_stop_redis() -> None:
 
 # ── 端口判据 ───────────────────────────────────────────────────────────────
 def test_managed_pid_set_excluded_from_port_cleanup() -> None:
-    """_release_ports 必须传受管 PID 排除集,否则「启动服务」会强杀在跑的生产进程。"""
-    body = TEXT[TEXT.index("def _release_ports") :][:600]
-    assert "exclude=" in body and "_managed_service_pids()" in body
+    """_release_ports 必须传受管 PID 排除集,否则「启动服务」会强杀在跑的生产进程。
+
+    2026-09-30 起 exclude= 改为关键字传参并附带 managed_pids_fn 兜底（受管集合
+    不可知时 fail-safe 放弃清理），断言随之更新。
+    """
+    body = TEXT[TEXT.index("def _release_ports") :][:900]
+    assert "exclude=managed" in body and "_managed_service_pids()" in body
+    # 受管集合不可知时必须放弃清理而不是按空集照杀 —— fail-safe 闸门
+    assert "managed_unknown" in body
 
 
 def test_substring_port_killer_is_gone() -> None:

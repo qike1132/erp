@@ -118,26 +118,63 @@ def find_port_pids(port, exclude=None):
     return list(pids)
 
 
-def kill_port_sync(port, exclude=None):
+def kill_port_sync(port, exclude=None, managed_pids_fn=None):
     """释放端口占用 —— 纯清扫原语，★ 永不 checkpoint。
 
     紧急停止的职责就是「取消 + 清扫」：它先 cancel() 再清扫，若本方法带
     checkpoint，清扫本身会立刻被自己的取消信号打断（实测：端口一个都没释放）。
     取消策略属于 worker 的步骤边界，不属于清扫原语 —— 想提前退出就在调用前 checkpoint。
 
-    ★ exclude：跳过这些 PID（NSSM 受管服务进程）。受管进程绝不能被 kill ——
-    NSSM AppExit=Default Restart 会在 5 秒后把被强杀的进程拉起，形成「紧急停止
-    变成重启」。紧急停止路径先经 nssm stop 正常停受管服务，此处再用 stop 前采集
-    的受管 PID 兜底，防止 stop 超时失败时端口清理误杀受管进程触发自动重启。
+    ★ 受管进程豁免：NSSM 托管的 erp-prod / erp-arq 进程**绝不能直接 kill**。
+    原因：NSSM 配了 AppExit=Default Restart + AppRestartDelay=5000，杀掉后 5 秒即被
+    重新拉起 —— 杀→复活→再杀是「杀不死」死循环，且会把生产后端反复打断。
+    受管进程只能经 `nssm stop` 停止。
+      · ``exclude``：调用方**已采集**的受管 PID（nssm stop 之前采样，stop 超时失败时兜底）。
+      · ``managed_pids_fn``：受管 PID 的**提供者**，由本函数自行调用；其返回 ``None``
+        表示「受管集合不可知」（探测通道不可用），此时 fail-safe 放弃清理。
+
+    ★ 返回值（五态，**位标志**而非「两布尔按优先级」）：
+      - 'clean'                本轮本来就没有占用者，无事可做
+      - 'killed'               只终止了非受管占用者
+      - 'all_exempted'         占用者全是受管进程（受豁免，一个都没杀）
+      - 'killed_and_exempted'  既杀了非受管，又剩下了受管（两件事**都**发生了）
+      - 'managed_unknown'      受管集合**不可知** → fail-safe 放弃清理
+
+    为什么必须用位标志：若写成「先判 killed 再判 all_exempted」，遇到「第一轮杀了
+    非受管、第二轮只剩受管」时只会返回 'killed'，把「仍有受管进程占着端口」这个
+    事实吞掉，调用方就会误以为端口已干净（真值表场景 C3 实测）。
     """
+    flags = 0                                   # 1=killed, 2=all_exempted，可叠加
+    exempt = {int(p) for p in (exclude or ()) if str(p).strip().isdigit()}
+    if managed_pids_fn is not None:
+        managed = managed_pids_fn()
+        if managed is None:
+            # ★ 显式判 None，严禁 `or ()` / `or set()` 折叠 —— 折叠会把「不可知」
+            # 静默转成「确认为空」，进而把受管进程当普通占用者杀掉（fail-open 误杀）。
+            return 'managed_unknown'
+        exempt |= {int(p) for p in managed if str(p).strip().isdigit()}
     for _ in range(3):
-        pids = find_port_pids(port, exclude=exclude)
-        if not pids:
-            return
+        # 不传 exclude 给 find_port_pids：这里要做集合差，才能区分
+        # 「没占用者」与「占用者全是受管」这两种截然不同的结果。
+        port_pids = {int(p) for p in find_port_pids(port) if str(p).strip().isdigit()}
+        if not port_pids:
+            break
+        to_kill = port_pids - exempt
+        if not to_kill:
+            flags |= 2                          # 本轮占用者全为受管
+            break
         # 批量终止：端口被海量进程占用时（如数百 nginx worker），
         # 逐个 taskkill 会耗时数十秒，批量可秒级完成。
-        taskkill_many(pids)
+        taskkill_many(sorted(to_kill))
+        flags |= 1
         time.sleep(0.5)
+    if flags == 3:
+        return 'killed_and_exempted'
+    if flags == 1:
+        return 'killed'
+    if flags == 2:
+        return 'all_exempted'
+    return 'clean'
 
 
 def kill_process_tree(pid):
@@ -221,6 +258,9 @@ def kill_residual_async(msg_queue, project_dir, managed_pids_fn):
 
     stop_all 是「紧急重置」，但不能以误杀 NSSM 受管进程为代价 —— 原实现按
     进程名把 python / node 全杀，杀掉 erp-prod 后 NSSM 5 秒拉起 → 死循环。
+
+    ``managed_pids_fn()`` 返回 ``None`` 表示「受管集合不可知」（探测通道不可用）：
+    此时**放弃清理并告警**（fail-safe），绝不按空集排除后照杀。
     """
     def _kill_worker():
         if not _IS_WINDOWS:
@@ -228,6 +268,19 @@ def kill_residual_async(msg_queue, project_dir, managed_pids_fn):
         try:
             msg_queue.put(('log', {'text': "正在扫描残留进程..."}))
             managed = managed_pids_fn()
+            # ★ P0-2（最严重的一条）：`managed is None` 表示「受管集合不可知」，
+            # 绝不能交给 `find_project_residual_pids(exclude=...)` —— 该方法首行是
+            # `exclude = set(exclude or ())`，会把 None 静默折叠成空集，
+            # 于是**所有**本项目进程（含 erp-prod / erp-arq）都被判为「残留」，
+            # 紧接着 taskkill 会真的把它们杀掉 → NSSM 5 秒拉起 → 死循环。
+            # 正确处置：fail-safe —— 告警并放弃本轮清理（宁可不清，不可误杀）。
+            if managed is None:
+                msg_queue.put(('log', {
+                    'text': '无法确认 NSSM 受管进程集合（服务查询失败），'
+                            '为避免误杀生产进程，已跳过残留清理。请稍后重试。',
+                    'level': 'WARNING',
+                }))
+                return
             if managed:
                 msg_queue.put(('log', {'text': f'已识别 {len(managed)} 个 NSSM 受管进程，不在清理范围内'}))
             pids = find_project_residual_pids(project_dir, exclude=managed)

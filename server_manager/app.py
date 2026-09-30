@@ -543,8 +543,8 @@ class ServerManagerApp(HostingViewMixin):
     def _collect_process_tree(self, root_pid):
         return windows_ops.collect_process_tree(root_pid)
 
-    def _kill_port_sync(self, port, exclude=None):
-        return windows_ops.kill_port_sync(port, exclude)
+    def _kill_port_sync(self, port, exclude=None, managed_pids_fn=None):
+        return windows_ops.kill_port_sync(port, exclude, managed_pids_fn)
 
     def _find_port_pids(self, port, exclude=None):
         return windows_ops.find_port_pids(port, exclude)
@@ -704,17 +704,54 @@ class ServerManagerApp(HostingViewMixin):
                 # ★ 先正常停止 NSSM 受管服务（不带 checkpoint，因 cancel 已置位）。
                 # 否则端口清理会强杀 erp-prod 监听 5002 的进程，被 AppExit=Default
                 # Restart 判定为崩溃、5 秒后自动重启 ——「紧急停止变成重启」的根因。
-                _, managed_pids = self._stop_managed_services()
+                _, managed_pids, srvc_failed = self._stop_managed_services()
                 # 强制停止所有进程，不管状态
                 self._terminate_dev_processes()
 
                 self._stop_redis()
                 self._kill_residual_async()
-                # 端口清理时排除受管 PID：即使 nssm stop 超时失败，也绝不误杀受管进程触发自动重启
-                self._kill_port_sync(_API_PORT, exclude=managed_pids)
-                self._kill_port_sync(_WEB_PORT, exclude=managed_pids)
-                self._kill_port_sync(_REDIS_PORT, exclude=managed_pids)
-                self._msg_queue.put(('log', {'text': "已清理所有残留进程和端口"}))
+                # 端口清理时排除受管 PID：即使 nssm stop 超时失败，也绝不误杀受管进程触发自动重启。
+                # ★ 同时传 managed_pids_fn：受管集合「不可知」（sc 通道故障）时由
+                #   kill_port_sync 自行探测并 fail-safe 返回 'managed_unknown'，
+                #   绝不按空集排除后照杀（那正是「紧急停止变成重启」的 fail-open 路径）。
+                # ★ 每个端口的返回值都必须消费：'managed_unknown' = 已放弃清理、端口仍被占用，
+                #   必须告警而不是假装清干净了。
+                unresolved = []          # 未能确认清理干净的端口
+                for port in (_API_PORT, _WEB_PORT, _REDIS_PORT):
+                    try:
+                        state = self._kill_port_sync(port, exclude=managed_pids,
+                                                     managed_pids_fn=self._managed_service_pids)
+                    except Exception as e:
+                        self._msg_queue.put(('log', {'text': f'端口 {port} 清理异常: {e}', 'level': 'WARNING'}))
+                        unresolved.append(port)
+                        continue
+                    if state == 'managed_unknown':
+                        self._msg_queue.put(('log', {
+                            'text': f'端口 {port} 未能清理：无法确认 NSSM 受管进程集合'
+                                    f'（服务查询失败），已放弃清理以免误杀生产服务。',
+                            'level': 'WARNING',
+                        }))
+                        unresolved.append(port)
+                    elif state == 'all_exempted' and srvc_failed:
+                        # 端口仍被受管进程占用。若 nssm stop 全部确认成功，该占用会随服务
+                        # 退出而消失（属正常过渡）；仅在服务停止也失败时才算真正未落地。
+                        unresolved.append(port)
+                # ★ 汇总语必须与上面的告警**一致**：原实现在三个端口循环后**无条件**输出
+                #   「已清理所有残留进程和端口」，于是当 managed_unknown（端口实际仍被占用）时，
+                #   汇总语与紧邻的 WARNING 互相矛盾 —— 日志说「未能清理」，总结说「已清理」。
+                if unresolved:
+                    self._msg_queue.put(('log', {
+                        'text': f'部分端口未能清理（{"、".join(str(p) for p in unresolved)}），'
+                                f'详见上方告警。请稍后重试，或用「停止服务」后再启动。',
+                        'level': 'WARNING',
+                    }))
+                elif srvc_failed:
+                    self._msg_queue.put(('log', {
+                        'text': f'端口已清理，但服务停止未全部成功（{"、".join(srvc_failed)}），详见上方告警。',
+                        'level': 'WARNING',
+                    }))
+                else:
+                    self._msg_queue.put(('log', {'text': "已清理所有残留进程和端口"}))
                 self._msg_queue.put(('ui_update', {}))
             except Exception as e:
                 self._msg_queue.put(('log', {'text': f"停止过程出错: {str(e)}", 'level': 'ERROR'}))
@@ -1037,10 +1074,26 @@ class ServerManagerApp(HostingViewMixin):
         会 taskkill 掉 erp-prod 的 uvicorn 与 erp-web 的 nginx —— 全站 3000 立即
         502、在途请求全丢，随后 NSSM 5 秒拉起并与本流程的 nssm start 竞态
         （2026-09-28 评审确认；stop_all 的同类调用本就带 exclude，此处曾漏）。
+
+        ★ 必须消费 `_kill_port_sync` 的返回值：'managed_unknown' 意味着
+        「受管集合不可知、已 fail-safe 放弃清理」，此时端口**仍被占用**。
+        若不判返回值，调用方就会在「端口没清干净」的前提下继续启动新进程
+        → 新进程绑不上端口 → 起不来又查不出原因（静默失败）。
         """
         managed = self._managed_service_pids()
-        self._kill_port_sync(_API_PORT, exclude=managed)
-        self._kill_port_sync(_WEB_PORT, exclude=managed)
+        for port in (_API_PORT, _WEB_PORT):
+            try:
+                state = self._kill_port_sync(port, exclude=managed,
+                                             managed_pids_fn=self._managed_service_pids)
+            except Exception as e:
+                self.log_message(f'端口 {port} 清理异常: {e}', 'WARNING')
+                continue
+            if state == 'managed_unknown':
+                self.log_message(
+                    f'端口 {port} 未能清理：无法确认 NSSM 受管进程集合（服务查询失败），'
+                    f'已放弃清理以免误杀生产服务。请稍后重试，或用「停止服务」后再启动。',
+                    'WARNING',
+                )
 
     def _build_prod_card(self, parent, row, col):
         """生产模式卡片（与开发卡并排）— Windows 服务 (NSSM) 托管"""
@@ -1221,6 +1274,62 @@ class ServerManagerApp(HostingViewMixin):
         workers = self.hosting_workers_var.get().strip() or '4'
         self._gate.start('安装生产服务', self._install_services_flow, nssm, workers)
 
+    def _verify_installed_service_paths(self):
+        """安装后回读注册表，校验服务实际加载的模块与当前源码同源（P0-6）。
+
+        ★ 为什么必须有：2026-09-16 的部署漂移事故 —— 源码已修，线上服务却跑旧版
+        约 10 小时无人发现，因为「安装成功」只证明命令返回 0，不证明**下次启动**
+        会加载哪份代码。
+
+        ⚠️ **必须读 `Parameters\\Application`，不能读顶层 `ImagePath`**：
+        `ImagePath` 永远是 `C:\\nssm\\nssm.exe`（NSSM 自己是宿主进程），真正被拉起的
+        解释器存在 `<service>\\Parameters\\Application`。实测（本机真实注册表）
+        只看 `ImagePath` 会对 erp-prod / erp-arq **双双误报**「解释器不一致」，
+        把一个正确配置报成故障 —— 校验器自己成了噪声源。
+        """
+        if not _IS_WINDOWS:
+            return
+        if not _PYTHON_EXE:
+            self.log_message('未定位到可用的 Python 解释器，跳过安装后指向校验', 'WARNING')
+            return
+        try:
+            import winreg
+        except ImportError:
+            self.log_message('无法校验服务指向（winreg 不可用），请手工核对服务参数', 'WARNING')
+            return
+        expected_app = str(_PYTHON_EXE)
+        expected_dir = str(_PROJECT_DIR)
+        for name in (_SVC_API, _SVC_ARQ):
+            actual_app, actual_params, actual_dir = None, None, None
+            try:
+                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                                    rf'SYSTEM\CurrentControlSet\Services\{name}', 0, winreg.KEY_READ) as key:
+                    with winreg.OpenKey(key, 'Parameters', 0, winreg.KEY_READ) as pk:
+                        with contextlib.suppress(OSError):
+                            actual_app = winreg.QueryValueEx(pk, 'Application')[0]
+                        with contextlib.suppress(OSError):
+                            actual_params = winreg.QueryValueEx(pk, 'AppParameters')[0]
+                        with contextlib.suppress(OSError):
+                            actual_dir = winreg.QueryValueEx(pk, 'AppDirectory')[0]
+            except OSError as e:
+                self.log_message(f'{name} 指向校验失败（读注册表出错）: {e}', 'WARNING')
+                continue
+            problems = []
+            if not actual_app:
+                problems.append(r'Parameters\Application 缺失（服务未正确配置）')
+            elif expected_app.lower() not in str(actual_app).lower():
+                problems.append(f'解释器={actual_app} 期望含 {expected_app}')
+            if actual_dir and str(actual_dir).lower() != expected_dir.lower():
+                problems.append(f'工作目录={actual_dir} 期望 {expected_dir}')
+            if problems:
+                self.log_message(
+                    f'{name} 安装后校验不一致，服务可能加载非当前源码：' + '；'.join(problems),
+                    'WARNING')
+            else:
+                self.log_message(
+                    f'{name} 指向校验通过（app={Path(actual_app).name if actual_app else "?"}，'
+                    f'params={(actual_params or "")[:80]}）')
+
     def _install_services_flow(self, nssm, workers):
         # 逐项列表(不是空格拼接的整串)：_nssm_install 会把它作为多个 argv 元素传给
         # `nssm set ... AppEnvironmentExtra`，NSSM 才会逐项注入；拼成一串只有第一项生效。
@@ -1258,6 +1367,9 @@ class ServerManagerApp(HostingViewMixin):
             self._msg_queue.put(('log', {'text': '生产服务安装完成：erp-prod + erp-arq + erp-web（开机自启、按依赖顺序启动）'}))
         else:
             self._msg_queue.put(('log', {'text': '生产服务安装未完全成功，请查看上方日志', 'level': 'WARNING'}))
+        # ★ 安装成功 ≠ 下次启动会加载当前这份源码。回读注册表核实指向（P0-6）；
+        #   不一致只报 WARNING（安装动作本身已完成，问题是「生效目标」可能不是你以为的那份）。
+        self._verify_installed_service_paths()
         self._msg_queue.put(('hosting_refresh', {}))
 
     def _service_cmd_sync(self, verb):

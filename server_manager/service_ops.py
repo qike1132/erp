@@ -120,20 +120,33 @@ class ServiceOps:
                     return ' '.join(parts[1].split())[:28]
         return '未知'
 
-    def svc_pid(self, name):
-        """查询 Windows 服务当前进程 PID（sc queryex），未运行返回 None"""
+    def svc_pid_ex(self, name):
+        """`svc_pid` 的可判失败版本：返回 ``(pid, ok)``。
+
+        ``ok=False`` 表示**探测通道不可用**（sc 非零退出 / 被安全策略拦 / 超时），
+        与「通道正常但服务未运行（pid=None, ok=True）」严格区分 —— 前者是
+        「不可知」（用于受管集合的 sentinel None），后者是「确认为空」。
+        混淆两者会让调用方把「查不出来」当成「没有受管进程」→ 误杀 erp-prod。
+
+        ⚠️ 既有 ``svc_pid`` 保持「拿不到就 None」的旧语义不变（其消费者不关心通道健康）。
+        """
         code, out = self.run_capture(['sc', 'queryex', name], timeout=5)
         if code != 0:
-            return None
+            return None, False
         for line in out.splitlines():
             stripped = line.strip()
             if stripped.startswith('PID'):
                 parts = stripped.split(':', 1)
                 if len(parts) > 1 and parts[1].strip().isdigit():
-                    return int(parts[1].strip())
-        return None
+                    return int(parts[1].strip()), True
+        return None, True
 
-    def wait_service(self, name, target, timeout, *, checkpoint=True, interval=1.0, state_fn=None):
+    def svc_pid(self, name):
+        """查询 Windows 服务当前进程 PID（sc queryex），未运行返回 None"""
+        return self.svc_pid_ex(name)[0]
+
+    def wait_service(self, name, target, timeout, *, checkpoint=True, interval=1.0, state_fn=None,
+                     abort_on_unknown=False):
         """轮询服务状态直到包含 ``target``(大写比对)；返回最后一次读到的状态。
 
         收敛前这里有 4 份手写副本(_start_redis_via_service / _wait_service_stopped /
@@ -145,12 +158,20 @@ class ServiceOps:
         端口清理又会误杀受管进程触发 NSSM 重启。
 
         ``state_fn`` 供 Redis 用(它读 _redis_service_state 的宽松契约)。
+
+        ``abort_on_unknown`` 供**停止路径**用：状态为 '未知'（探测通道不可用）时立即
+        返回，不再空转完整个超时 —— 通道已经查不出来，继续轮询注定没有结果，而
+        45s 全浪费掉。默认 False，等待「RUNNING」的正向路径（Redis 启动）不受影响。
         """
         fn = state_fn or self.svc_state
         deadline = time.monotonic() + timeout
         state = fn(name)
         while True:
             if target in state.upper():
+                return state
+            if abort_on_unknown and state == '未知':
+                # 通道不可用：状态**不可知**，既不等于 STOPPED 也不等于还在跑。
+                # 立刻返回让调用方按『未能确认』处理并如实汇报，而非空转超时。
                 return state
             if time.monotonic() >= deadline:
                 return state
@@ -165,9 +186,12 @@ class ServiceOps:
         NSSM stop 立即返回，服务进入 STOP_PENDING，优雅关闭需数秒。
         若在 STOP_PENDING 期间强杀被管进程，会被 AppExit Default Restart
         判定为崩溃而自动重启，与目标模式抢占端口。因此必须等待确认 STOPPED。
+
+        ★ '未知'（探测通道不可用）时立刻返回 False，让调用方按『未能确认』
+        如实汇报 —— 不能把「查不出来」洗成「已停止」。
         """
         self.run_capture([self.find_nssm(), 'stop', name], timeout=15)
-        return 'STOPPED' in self.wait_service(name, 'STOPPED', timeout)
+        return 'STOPPED' in self.wait_service(name, 'STOPPED', timeout, abort_on_unknown=True)
 
     def managed_service_pids(self):
         """NSSM 受管进程集合（服务根 PID + 整棵子树）。
@@ -175,10 +199,22 @@ class ServiceOps:
         ★ P0-4 的核心闸门：受管进程**绝不能被直接 kill** —— NSSM 的
         AppExit=Default Restart + AppRestartDelay=5000 会在 5 秒后把它拉起来，
         杀掉→复活→再杀就是「杀不死」死循环。受管进程只能经 `nssm stop` 停止。
+
+        ★ sentinel 语义（fail-safe）：本方法有**两种**返回类型，调用方必须区分，
+        **严禁用 `or set()` / `or ()` 之类做静默归一**：
+          - 返回 `set()`（可空）= 「**已知**受管集合」；空 set 表示**确认**当前无受管进程。
+          - 返回 `None`（sentinel）= 「受管集合**不可知**」——探测通道（sc queryex）
+            不可用，此时**不能**假定「没有受管进程」（那 = fail-open → 全杀 → 误杀
+            erp-prod → NSSM 5 秒拉起 → 死循环）。
+        调用方正确处置：`None` → 告警 + **放弃清理**（fail-safe），绝不进入任何
+        「按该集合排除后再 kill」的路径。
         """
         managed = set()
         for name in _SVC_ALL:
-            pid = self.svc_pid(name)
+            pid, ok = self.svc_pid_ex(name)
+            if not ok:
+                # 探测通道整体不可用（sc 被拦 / queryex 非零退出）：不可知 → sentinel
+                return None
             if pid:
                 managed.add(pid)
                 managed.update(windows_ops.collect_process_tree(pid))
@@ -194,10 +230,24 @@ class ServiceOps:
 
         返回 (成功停止的服务数, 受管 PID 集合)。受管 PID 无论 stop 成败都要返回，
         供后续 _kill_port_sync 排除，避免 stop 超时失败时端口清理误杀受管进程。
+
+        ★ 返回 (成功停止的服务数, 受管 PID 集合, 未能确认停止的服务名列表)。
+        第二个元素可能是 `None`（受管集合不可知，见 `managed_service_pids`）——
+        调用方**必须**显式判 None 并放弃「按集合排除后清理端口」的路径，
+        绝不能把它当空集用（`exclude=None` 会被折叠成空集 → 误杀受管进程）。
+        第三个元素供调用方生成**如实的**汇总语 —— 统计「端口清了但服务没停全」
+        这类「部分成功」必须说出来，否则汇总语会与上方的 WARNING 自相矛盾。
         """
         nssm = self.find_nssm()
         managed = self.managed_service_pids()
+        if managed is None:
+            self._msg_queue.put(('log', {
+                'text': '无法确认 NSSM 受管进程集合（服务查询失败）：'
+                        '后续端口清理将不再按集合排除，改为自行探测并 fail-safe。',
+                'level': 'WARNING',
+            }))
         stopped = 0
+        failed = []
         for name in _SVC_ALL:
             state = self.svc_state(name)
             if '未安装' in state or 'STOPPED' in state:
@@ -207,13 +257,14 @@ class ServiceOps:
                 self.run_capture([nssm, 'stop', name], timeout=30)
             else:
                 self.run_capture(['sc', 'stop', name], timeout=30)
-            st = self.wait_service(name, 'STOPPED', 45, checkpoint=False)
+            st = self.wait_service(name, 'STOPPED', 45, checkpoint=False, abort_on_unknown=True)
             if 'STOPPED' in st:
                 stopped += 1
                 self._msg_queue.put(('log', {'text': f'{name} 已停止'}))
             else:
+                failed.append(name)
                 self._msg_queue.put(('log', {'text': f'{name} 在 45s 内未确认 STOPPED，将在端口清理时排除其受管进程以避免误杀触发重启', 'level': 'WARNING'}))
-        return stopped, managed
+        return stopped, managed, failed
 
     def ensure_production_stopped(self):
         """切换前停止生产模式：停 NSSM 服务 + 清游离的 prod_runner 进程树。
@@ -226,21 +277,54 @@ class ServiceOps:
                 现改为：失败必须带真实原因返回，不存在静默成功路径。
         """
         stopped_any = False
+        # ★ uncertain 标志：本次是否出现「无法确认是否已停止」的服务。
+        #   为什么不能 `continue` 了事：continue 之后会落到函数结尾的
+        #   `return True, None, ...` —— 对外宣告「生产已停止」，而日志里明明写着
+        #   「无法验证是否已停止」。这正是本方案要消灭的**假成功**。
+        #   正确姿态：尽量去停（不能因为查不到就不停），但最终**如实降级**为 False。
+        uncertain = []
         nssm = self.find_nssm()
         if nssm:
             for name in (_SVC_API, _SVC_ARQ, _SVC_WEB):
                 state = self.svc_state(name)
                 if 'STOPPED' in state or '未安装' in state:
                     continue
+                unknowable = state == '未知'
+                if unknowable:
+                    # 通道不可用 ≠ 未安装。不能像 '未安装' 那样跳过（那会在
+                    # 「服务其实在跑」时宣告切换成功），也不能当场判失败
+                    # （那会把「查不到」定性成「停不掉」而根本不去尝试停）。
+                    self._msg_queue.put(('log', {
+                        'text': f'服务 {name} 状态查询失败（sc 不可用），仍尝试停止并等待确认',
+                        'level': 'WARNING',
+                    }))
                 self._msg_queue.put(('log', {'text': f'正在停止生产服务 {name}...'}))
                 if not self.wait_service_stopped(name):
+                    if unknowable or self.svc_state(name) == '未知':
+                        # 停是确实尝试过了，但结果**无法验证** → 如实记账，绝不当成功
+                        uncertain.append(name)
+                        self._msg_queue.put(('log', {
+                            'text': f'{name} 状态查询失败且未能确认 STOPPED，无法验证是否已停止',
+                            'level': 'WARNING',
+                        }))
+                        continue
                     return False, f'{name} 停止超时（STOP_PENDING 未确认），已中止切换', stopped_any
                 stopped_any = True
         # 清理游离的 prod_runner（不受 NSSM 控制）；受管进程跳过，交给 nssm stop（P0-4）
         self._gate.checkpoint()
         try:
             managed = self.managed_service_pids()
-            for pid in windows_ops.find_loose_prod_runner_pids(exclude=managed):
+            # ★ sentinel：None = 受管集合不可知。此时不能进入「排除后再杀」的路径
+            # （exclude 会被 `or ()` 折叠成空集 → 误杀受管进程）。fail-safe：跳过清理并告警。
+            if managed is None:
+                self._msg_queue.put(('log', {
+                    'text': '无法确认 NSSM 受管进程集合（服务查询失败），已跳过残留 prod_runner 清理以免误杀',
+                    'level': 'WARNING',
+                }))
+                loose = []
+            else:
+                loose = windows_ops.find_loose_prod_runner_pids(exclude=managed)
+            for pid in loose:
                 windows_ops.kill_process_tree(pid)
                 self._msg_queue.put(('log', {'text': f'已清理游离 prod_runner 进程 (PID: {pid})'}))
                 stopped_any = True
@@ -250,6 +334,14 @@ class ServiceOps:
             # 失败如实返回：不允许「扫不到 / 扫描报错」等同于「没有残留」
             self._msg_queue.put(('log', {'text': f'残留 prod_runner 扫描失败: {e}', 'level': 'WARNING'}))
             return False, f'残留进程扫描失败: {e}', stopped_any
+        if uncertain:
+            # ★ 如实降级：有服务「无法确认是否已停止」时，**不能**返回成功。
+            #   调用方（切换生产→开发）会据此中止，避免在「生产可能还在跑」的
+            #   前提下启动开发模式 → 双进程抢 5002 端口。
+            return (False,
+                    f'未能确认 {"、".join(uncertain)} 是否已停止（sc 查询失败），'
+                    f'已中止切换以免与生产进程抢占端口',
+                    stopped_any)
         return True, None, stopped_any
 
     def svc_installed(self, name):

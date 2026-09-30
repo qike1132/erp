@@ -49,6 +49,43 @@ _CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 LOG_ROTATE_CHECK_INTERVAL = 60.0
 
 
+def _source_fingerprint() -> str:
+    """本模块源码的 sha256（前 12 位）+ mtime —— 版本指纹。
+
+    ★ 为什么必须有：2026-09-16 那次「崩溃重启饥饿」事故里，源码早已修好，但线上
+    NSSM 服务跑的是**旧版** prod_runner，无人察觉地漂移了约 10 小时。原因就是日志里
+    没有任何「我是哪一版」的标记，运维无法用日志判断「跑的是不是刚提交的代码」。
+    加上指纹后，只需比对日志首行与 git 中的文件即可判定部署漂移。
+    """
+    try:
+        import hashlib
+        p = Path(__file__).resolve()
+        digest = hashlib.sha256(p.read_bytes()).hexdigest()[:12]
+        mtime = datetime.fromtimestamp(p.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+        return f"{digest} mtime={mtime}"
+    except OSError:
+        return "unavailable"
+
+
+def _init_log_streams() -> None:
+    """统一 stdout/stderr 编码为 UTF-8 并置行缓冲，随后打印版本指纹横幅。
+
+    ★ 编码：NSSM 用 `PYTHONUTF8=1` 拉起时 stdout 是 UTF-8，但早期版本的服务 env
+    没有这项，于是同一份 `erp-prod.log` 里混着 GBK 与 UTF-8 两种字节（实测 85% / 15%）。
+    显式 reconfigure 让**当前**进程的输出编码确定化，新写入的段不再产生新的混编。
+    `reconfigure` 缺失（如 stdout 被替换成非 TextIOWrapper）时静默降级，不影响启动。
+    """
+    for stream in (sys.stdout, sys.stderr):
+        with contextlib.suppress(Exception):
+            stream.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
+    started = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[prod_runner] ==== 启动 ==== fingerprint={_source_fingerprint()} "
+          f"pid={os.getpid()} python={sys.version.split()[0]} started={started}")
+    print(f"[prod_runner] cwd={PROJECT_ROOT} UVICORN_WORKERS={os.getenv('UVICORN_WORKERS', '(unset)')}")
+    with contextlib.suppress(Exception):
+        sys.stdout.flush()
+
+
 def _log_rotate_bytes() -> int:
     """轮转阈值（字节），默认 50MB，PROD_LOG_ROTATE_MB 覆盖，下限 5MB。"""
     return max(5, _get_int_env("PROD_LOG_ROTATE_MB", 50)) * 1024 * 1024
@@ -69,8 +106,36 @@ def _get_int_env(name: str, default: int) -> int:
         return default
 
 
+def _get_int_env_from_env_file(name: str, default: int) -> int:
+    """从 .env 文件读取整型配置（不污染 os.environ，仅用于自检/落盘展示）。"""
+    try:
+        for line in (PROJECT_ROOT / ".env").read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, val = line.partition("=")
+            if key.strip() == name:
+                return int(val.strip().strip('"').strip("'"))
+    except (OSError, ValueError):
+        pass
+    return default
+
+
 def _default_workers() -> int:
+    """worker 数（单一可信来源：环境变量 UVICORN_WORKERS）。
+
+    优先级：进程环境变量 > .env 的 UVICORN_WORKERS > min(4, cpu_count)。
+
+    为什么必须先显式读 .env：NSSM 服务的 `AppEnvironmentExtra` 与 .env 能给出
+    两个互相矛盾的值（2026-09-16 实测：服务参数写 8、.env 里没有该项），
+    而 uvicorn 子进程与 database.py 的连接池都按自己的读法取值 → 同一次启动
+    里「监督器以为 4、实际跑 8、连接池按 4 分摊」，三方对不上。
+    `_load_dotenv(override=False)` 让已存在的进程变量优先，这里再补一次显式读取，
+    保证「日志里打印的数」与「真正传给 --workers 的数」永远是同一个。
+    """
     configured = _get_int_env("UVICORN_WORKERS", 0)
+    if configured <= 0:
+        configured = _get_int_env_from_env_file("UVICORN_WORKERS", 0)
     if configured > 0:
         return configured
     return max(1, min(4, os.cpu_count() or 1))
@@ -83,6 +148,27 @@ def _is_redis_up(port: int) -> bool:
             return sock.connect_ex(("127.0.0.1", port)) == 0
     except OSError:
         return False
+
+
+def _broker_port() -> int:
+    """ARQ broker 端口。
+
+    取自 REDIS_BROKER_URL（.env 里独立实例，默认 6380）；未配置该 URL 时
+    ARQ 会回退到通用 REDIS_HOST/REDIS_PORT（见 arq_app._build_redis_settings），
+    此处同步回退，避免健康检查查错端口。
+    """
+    broker_url = os.getenv("REDIS_BROKER_URL", "") or ""
+    if not broker_url:
+        return _get_int_env("REDIS_PORT", 6379)
+    try:
+        # redis://[:password@]host:port/db —— 不引入 urllib 解析差异，直接切
+        tail = broker_url.split("://", 1)[-1]
+        host_port = tail.rsplit("@", 1)[-1].split("/", 1)[0]
+        if ":" in host_port:
+            return int(host_port.rsplit(":", 1)[-1])
+    except (ValueError, IndexError):
+        pass
+    return _get_int_env("REDIS_PORT", 6379)
 
 
 # 健康探针必须直连本机，绝不走系统代理。
@@ -204,9 +290,21 @@ def check(api_port: int, workers: int) -> int:
 
     redis_port = _get_int_env("REDIS_PORT", 6379)
     if _is_redis_up(redis_port):
-        print(f"  OK: Redis 连通 (127.0.0.1:{redis_port})")
+        print(f"  OK: Redis 缓存连通 (127.0.0.1:{redis_port})")
     else:
-        print(f"  WARN: Redis 未运行 (127.0.0.1:{redis_port})，生产建议注册为 Windows 服务")
+        print(f"  WARN: Redis 缓存未运行 (127.0.0.1:{redis_port})，生产建议注册为 Windows 服务")
+
+    broker_port = _broker_port()
+    if broker_port == redis_port:
+        # broker 与缓存共用实例：上面那条已覆盖，避免同一条信息报两次
+        pass
+    elif _is_redis_up(broker_port):
+        print(f"  OK: Redis broker 连通 (127.0.0.1:{broker_port}，erp-arq 依赖)")
+    else:
+        print(f"  ERROR: Redis broker 未运行 (127.0.0.1:{broker_port})，"
+              f"erp-arq 将无法启动（cron/备份/报表全部不执行）；"
+              f"请先启动 erp-redis-broker 服务")
+        ok = False
 
     dist_dir = PROJECT_ROOT / "frontend-vite" / "dist"
     if dist_dir.is_dir():
@@ -216,7 +314,8 @@ def check(api_port: int, workers: int) -> int:
         ok = False
 
     print("  INFO: 前端由独立 NSSM 服务 erp-web 托管(本模块只做只读探针)")
-    print(f"  INFO: worker 数 = {workers} (UVICORN_WORKERS)")
+    print(f"  INFO: worker 数 = {workers}（来源: UVICORN_WORKERS 环境变量/.env，"
+          f"cpu_count={os.cpu_count()}）")
     print(f"  INFO: API 端口 = {api_port}")
     return 0 if ok else 1
 
@@ -398,6 +497,7 @@ class Supervisor:
         self.web_port = web_port
         self.with_arq = with_arq
         self.redis_port = _get_int_env("REDIS_PORT", 6379)
+        self.broker_port = _broker_port()
         self.ready = False
         self._last_log_check = 0.0
 
@@ -416,6 +516,12 @@ class Supervisor:
         print(f"[prod_runner] 启动生产模式 (workers={self.workers}, "
               f"api={self.api_port}, web={self.web_port}, frontend={self.frontend_type}"
               f"{', arq=独立服务' if not self.with_arq else ''})")
+        if self.broker_port != self.redis_port and not _is_redis_up(self.broker_port):
+            # 独立 broker 未就绪时早告警：prod_runner 自身不依赖它（ARQ 是独立服务），
+            # 但 GUI 的「就绪」徽章不能因此变绿——否则 2026-09-16 那类
+            # 「界面显示一切正常、cron 其实全没跑」的静默失效会重演。
+            print(f"[prod_runner] 警告: ARQ broker 不可达 (127.0.0.1:{self.broker_port})，"
+                  f"erp-arq 服务将无法运行（cron/备份/报表不执行）")
         self.backend.start()
         if self.arq:
             self.arq.start()
@@ -444,6 +550,11 @@ class Supervisor:
 
     def write_status(self) -> None:
         redis_status = "ok" if _is_redis_up(self.redis_port) else "down"
+        # broker 与缓存同实例时不重复探测（回退配置下两者是同一个端口）
+        if self.broker_port == self.redis_port:
+            broker_status = redis_status
+        else:
+            broker_status = "ok" if _is_redis_up(self.broker_port) else "down"
         self.ready = self.backend.status == "ready"  # 语义保持不变（GUI 可能已依赖）
         frontend_pid, frontend_status, frontend_ok = self._frontend_state()
         data = {
@@ -473,7 +584,8 @@ class Supervisor:
                     "pid": frontend_pid,
                     "status": frontend_status,
                 },
-                "redis": {"status": redis_status},
+                "redis": {"status": redis_status, "port": self.redis_port},
+                "broker": {"status": broker_status, "port": self.broker_port},
             },
         }
         try:
@@ -557,6 +669,9 @@ def _install_signal_handlers(sup: Supervisor) -> None:
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     _load_dotenv()
+    # ★ 最早时机打印版本指纹 + 固定输出编码（P0-6）：必须在任何业务日志之前，
+    #   且要在 --check 分支之前 —— 自检输出也需要带指纹。
+    _init_log_streams()
 
     api_port = _get_int_env("API_PORT", 5002)
     web_port = _get_int_env("WEB_PORT", 3000)

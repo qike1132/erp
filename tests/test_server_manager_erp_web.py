@@ -52,6 +52,19 @@ def test_frontend_external_rendering() -> None:
 
 
 def test_no_leftover_two_tuple_in_flows() -> None:
+    """启停/状态类服务循环必须三元组(含 _SVC_WEB),防止漏掉前端服务。
+
+    只盯「发出服务命令」的循环(_service_cmd_sync / _start_one_service 等);
+    _verify_installed_service_paths 只校验 Python 服务(erp-web 是 nginx,无
+    Parameters\\Application 可读),二元组是**有意**的,不在此列。
+    """
     flows = re.findall(r"for name in \(([^)]+)\):", TEXT)
-    two = [f for f in flows if "_SVC_API" in f and "_SVC_WEB" not in f]
+    two = [f for f in flows
+           if "_SVC_API" in f and "_SVC_WEB" not in f and "_verify_installed" not in f]
+    # 定位排除:校验循环位于 _verify_installed_service_paths 函数体内,按函数体剔除
+    if "def _verify_installed_service_paths" in TEXT:
+        vstart = TEXT.index("def _verify_installed_service_paths")
+        vend = TEXT.index("def ", vstart + 10)
+        vbody = TEXT[vstart:vend]
+        two = [f for f in two if f not in vbody]
     assert not two, f"残留二元组: {two}"

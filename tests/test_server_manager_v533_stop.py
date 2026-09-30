@@ -79,8 +79,9 @@ class TestStopManagedServices:
         ops = self._ops_with_state(monkeypatch, {'erp-prod': '1 STOPPED', 'erp-arq': '1 STOPPED', 'erp-web': '1 STOPPED',
                                                       'erp-redis': '1 STOPPED', 'erp-redis-broker': '1 STOPPED'})
         ops.managed_service_pids = lambda: {12345, 67890}
-        _stopped, managed = ops.stop_managed_services()
+        _stopped, managed, _failed = ops.stop_managed_services()
         assert managed == {12345, 67890}
+        assert _failed == []
 
     def test_stops_running_service(self, monkeypatch):
         # erp-prod 运行中 → 应发 stop 并计数；erp-arq 未安装/停止 → 跳过；erp-web 未安装 → 跳过
@@ -95,10 +96,11 @@ class TestStopManagedServices:
         ops.svc_state = lambda name: next(seq[name])
         stop_calls = []
         ops.run_capture = lambda args, timeout=20: stop_calls.append(args[1]) or (0, '')
-        stopped, managed = ops.stop_managed_services()
+        stopped, managed, failed = ops.stop_managed_services()
         assert 'stop' in stop_calls  # 确实发起了 sc stop
         assert stopped == 1
         assert managed == {12345}
+        assert failed == []
 
     def test_does_not_checkpoint(self):
         """_stop_managed_services 不得调用 checkpoint（否则紧急停止会半路抛取消）。"""
@@ -109,6 +111,7 @@ class TestStopManagedServices:
         ops.svc_state = lambda name: '未安装'
         ops.run_capture = lambda args, timeout=20: (0, '')
         # 无 _gate 属性时也能跑完，证明不依赖 checkpoint
-        stopped, managed = ops.stop_managed_services()
+        stopped, managed, failed = ops.stop_managed_services()
         assert stopped == 0
         assert managed == set()
+        assert failed == []
