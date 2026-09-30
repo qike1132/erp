@@ -127,9 +127,14 @@ async def _resolve_products(db: AsyncSession, skus) -> tuple[dict, dict, dict]:
     return by_barcode, by_name, name_by_pid
 
 
+def _match_part_items(items, keys) -> list:
+    """明细行中「物料键命中该 SKU BOM 键集合」的子集（无键时为空列表）。"""
+    return [it for it in items if _item_key(it) in keys] if keys else []
+
+
 def _effective_rate(matched_items, keys, order_rate: float | None) -> float:
     """部位生效率 = max(匹配行的率)；无匹配则回退订单级率。"""
-    matched = [it for it in matched_items if _item_key(it) in keys] if keys else []
+    matched = _match_part_items(matched_items, keys)
     if not matched:
         return normalize_spare_rate(order_rate) or 0.0
     candidates = [
@@ -180,23 +185,32 @@ async def recompute_po_spare_from_item_rates(db: AsyncSession, po_ids) -> int:
     by_barcode, by_name, name_by_pid = await _resolve_products(db, all_skus)
     keys_by_pid = await _load_bom_item_keys(db, name_by_pid)
 
+    degraded: list[str] = []
     for order in orders:
         skus = skus_by_po.get(order.id) or []
         if not skus:
-            # 无逐 SKU 快照：保持既有订单级口径（零回归）
+            # 无逐 SKU 快照：保持既有订单级口径（零回归；L2 不属降级噪声源，不打告警）
             order.spare_quantity = calc_spare_quantity(order.product_quantity, order.spare_rate)
             continue
+        items = items_by_po.get(order.id) or []
         total = 0
         for sku in skus:
             pid = by_barcode.get(sku.product_barcode or '') or by_name.get(
                 (sku.product_name or '').strip()
             )
             part_keys = keys_by_pid.get(pid) if pid is not None else None
-            rate = _effective_rate(
-                items_by_po.get(order.id) or [], part_keys, order.spare_rate,
-            )
+            if part_keys and not _match_part_items(items, part_keys):
+                # 产品可解析但 BOM 匹配为空（L3b）：本 SKU 降级为订单级率，留痕
+                degraded.append(sku.product_name or sku.product_barcode or '未知SKU')
+            rate = _effective_rate(items, part_keys, order.spare_rate)
             sku.spare_rate = rate
             sku.spare_qty = calc_spare_quantity(sku.order_qty, rate)
             total += int(sku.spare_qty or 0)
         order.spare_quantity = total
+    if degraded:
+        # 汇总一次（非逐 SKU）：保存路径会去抖重入，逐条会变噪声
+        logger.warning(
+            '备品重算：%d 个 SKU 的 BOM 匹配为空，已降级为该单订单级率（BOM 可能已改名/删行）：%s',
+            len(degraded), '、'.join(dict.fromkeys(degraded)),
+        )
     return len(orders)

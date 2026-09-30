@@ -4,6 +4,8 @@
 核心不变量：备品 = Σ_SKU ceil(SKU订单数量 × max(该SKU各部位行损耗率)‰)。
 降级不变量：任何数据不可得时回退既有订单级口径，绝不抛错、绝不清零。
 """
+import logging
+
 import pytest_asyncio
 from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
@@ -29,6 +31,9 @@ from fastapi_app.shared_models import (
 )
 
 _XIAOTU = '兔子公仔'
+
+# 本模块 logger 名（降级告警断言用）
+_SPARE_LOGGER = 'fastapi_app.services.purchase_order_spare'
 
 # 全部用例共用的建表清单：Task 4 的完成路径会写 MaterialRegistration /
 # MaterialRegistrationItem / ModificationLog，故一并建出（对 Task 1-3 无害）。
@@ -338,7 +343,8 @@ async def test_zero_or_null_sku_qty_contributes_zero(db):
     await recompute_po_spare_from_item_rates(session, [7008])
 
     spare, sku_rows = await _po_spare(session, 7008)
-    assert [int(r[0] or 0) for r in sku_rows] == [0, 0, 30]
+    # 严格数值比较：None 不被 `or 0` 掩成 0（float(None) 会抛错 → 立即可见）
+    assert [float(r[0]) for r in sku_rows] == [0.0, 0.0, 30.0]
     assert float(spare) == 30
 
 
@@ -372,6 +378,47 @@ async def test_bom_changed_no_match_degrades_to_order_rate(db):
 
     spare, _ = await _po_spare(session, 7010)
     assert float(spare) == 15
+
+
+async def test_bom_match_empty_logs_warning_naming_sku(db, caplog):
+    """L3b 降级必须留痕：产品可解析但 BOM 匹配为空 → 汇总告警一次并点名该 SKU。"""
+    session = db
+    await _seed_product_two_fabrics(session)  # BOM 里没有「已停产布料」
+    await _seed_po(
+        session, 7120, product_quantity=1000, spare_rate=15,
+        item_rates={('已停产布料', 'X', '米'): 30},
+        skus=[{'product_name': _XIAOTU, 'order_qty': 1000}],
+    )
+
+    with caplog.at_level(logging.WARNING, logger=_SPARE_LOGGER):
+        await recompute_po_spare_from_item_rates(session, [7120])
+
+    warns = [
+        r for r in caplog.records
+        if r.levelno == logging.WARNING and r.name == _SPARE_LOGGER
+    ]
+    assert len(warns) == 1, '降级告警应每次调用汇总一次，不得逐 SKU 重复'
+    message = warns[0].getMessage()
+    assert _XIAOTU in message, '告警须点名降级的 SKU'
+    assert 'BOM' in message, '告警须说明降级原因'
+
+
+async def test_no_sku_rows_logs_no_degradation_warning(db, caplog):
+    """L2（该单无逐 SKU 快照）是合法旧单，不属降级噪声源 → 不得打降级告警。"""
+    session = db
+    await _seed_product_two_fabrics(session)
+    await _seed_po(
+        session, 7121, product_quantity=1000, spare_rate=5,
+        item_rates={_H_TIAO: 30}, skus=[],
+    )
+
+    with caplog.at_level(logging.WARNING, logger=_SPARE_LOGGER):
+        await recompute_po_spare_from_item_rates(session, [7121])
+
+    assert [
+        r for r in caplog.records
+        if r.levelno == logging.WARNING and r.name == _SPARE_LOGGER
+    ] == []
 
 
 async def test_no_sku_rows_falls_back_to_order_level(db):
