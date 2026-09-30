@@ -20,26 +20,25 @@
       <div v-if="filteredStock.length" class="m-stock-list">
         <MCard
           v-for="item in filteredStock"
-          :key="item.id"
+          :key="item.product_id"
           clickable
           padded
           class="m-stock-card"
         >
           <div class="m-stock-main">
             <div class="m-stock-info">
-              <span class="m-stock-name">{{ item.material_name || item.product_name }}</span>
-              <span class="m-stock-code">{{ item.material_code || item.product_code }}</span>
+              <span class="m-stock-name">{{ item.product_name }}</span>
+              <span class="m-stock-code">{{ codeOf(item) || '—' }}</span>
             </div>
             <div class="m-stock-qty">
               <span :class="['m-stock-qty-val', getQtyClass(item)]">
-                {{ formatQty(item.quantity) }}
+                {{ formatQty(item.current_stock) }}
               </span>
-              <span class="m-stock-qty-unit">{{ item.unit || '个' }}</span>
+              <span class="m-stock-qty-unit">个</span>
             </div>
           </div>
-          <div v-if="item.warehouse_name" class="m-stock-meta">
-            <span class="m-stock-warehouse">{{ item.warehouse_name }}</span>
-            <MBadge v-if="isLowStock(item)" variant="warning" dot>低库存</MBadge>
+          <div v-if="isOutOfStock(item)" class="m-stock-meta">
+            <MBadge variant="warning" dot>零库存</MBadge>
           </div>
         </MCard>
       </div>
@@ -52,6 +51,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { stockApi } from '@/api'
+import { MOBILE_LIST_PAGE_SIZE } from '@/mobile/constants'
+import type { InventoryItem } from '@/types'
 import MCard from '@/mobile/components/MCard.vue'
 import MSearchBar from '@/mobile/components/MSearchBar.vue'
 import MFilterChips from '@/mobile/components/MFilterChips.vue'
@@ -59,19 +60,7 @@ import MBadge from '@/mobile/components/MBadge.vue'
 import MSkeleton from '@/mobile/components/MSkeleton.vue'
 import MEmpty from '@/mobile/components/MEmpty.vue'
 
-interface StockItem {
-  id: number
-  product_code?: string
-  product_name?: string
-  material_code?: string
-  material_name?: string
-  quantity: number
-  unit?: string
-  warehouse_name?: string
-  safety_stock?: number
-}
-
-const stockItems = ref<StockItem[]>([])
+const stockItems = ref<InventoryItem[]>([])
 const loading = ref(true)
 const searchQuery = ref('')
 const selectedTab = ref('all')
@@ -79,24 +68,22 @@ const selectedTab = ref('all')
 const tabOptions = [
   { value: 'all', label: '全部' },
   { value: 'active', label: '在库' },
-  { value: 'low', label: '低库存' },
+  { value: 'zero', label: '零库存' },
 ]
 
 const filteredStock = computed(() => {
   let items = stockItems.value
 
-  if (selectedTab.value === 'low') {
-    items = items.filter((i) => isLowStock(i))
+  if (selectedTab.value === 'zero') {
+    items = items.filter((i) => isOutOfStock(i))
   } else if (selectedTab.value === 'active') {
-    items = items.filter((i) => (i.quantity ?? 0) > (i.safety_stock ?? 0))
+    items = items.filter((i) => (i.current_stock ?? 0) > 0)
   }
 
   if (searchQuery.value) {
     const q = searchQuery.value.toLowerCase()
     items = items.filter(
-      (i) =>
-        (i.material_name ?? i.product_name ?? '').toLowerCase().includes(q) ||
-        (i.material_code ?? i.product_code ?? '').toLowerCase().includes(q),
+      (i) => (i.product_name ?? '').toLowerCase().includes(q) || codeOf(i).toLowerCase().includes(q),
     )
   }
 
@@ -108,27 +95,27 @@ function formatQty(val: number | null | undefined): string {
   return Number(val).toLocaleString('zh-CN')
 }
 
-function isLowStock(item: StockItem): boolean {
-  return (item.quantity ?? 0) <= (item.safety_stock ?? 0)
+/** 库存接口无安全库存字段（后端不提供），故只判定「零库存」而非「低库存」。 */
+function isOutOfStock(item: InventoryItem): boolean {
+  return (item.current_stock ?? 0) <= 0
 }
 
-function getQtyClass(item: StockItem): string {
-  if (isLowStock(item)) return 'low'
-  if ((item.quantity ?? 0) > 1000) return 'high'
+/** 编码优先取 barcode，缺失时回退 product_barcode。 */
+function codeOf(item: InventoryItem): string {
+  return item.barcode || item.product_barcode || ''
+}
+
+function getQtyClass(item: InventoryItem): string {
+  if (isOutOfStock(item)) return 'low'
+  if ((item.current_stock ?? 0) > 1000) return 'high'
   return ''
 }
 
 async function loadStock() {
   loading.value = true
   try {
-    const res = await stockApi.inventory({ page: 1, per_page: 200 })
-    stockItems.value = (res.data ?? []).map((it) => ({
-      id: it.product_id,
-      product_name: it.product_name,
-      product_code: it.barcode ?? it.product_barcode ?? '',
-      quantity: it.current_stock,
-      safety_stock: 0,
-    }))
+    const res = await stockApi.inventory({ page: 1, per_page: MOBILE_LIST_PAGE_SIZE })
+    stockItems.value = res.data ?? []
   } catch (e) {
     console.error('[MStockView] load failed:', e)
     stockItems.value = []
@@ -224,8 +211,4 @@ onMounted(loadStock)
   border-top: var(--m-border-subtle);
 }
 
-.m-stock-warehouse {
-  font-size: var(--m-font-label-sm);
-  color: var(--m-text-secondary);
-}
 </style>

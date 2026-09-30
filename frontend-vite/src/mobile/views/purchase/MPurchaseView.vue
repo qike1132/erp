@@ -36,7 +36,7 @@
             v-for="order in unprocessed.orders"
             :key="order.id"
             :title="`#${order.id} ${order.product_name || ''}`"
-            :subtitle="`${order.quantity || 0}件 · ${order.customer_name || ''}`"
+            :subtitle="`${order.quantity || 0}件 · ${order.customer || ''}`"
           >
             <template #icon>
               <div class="m-icon-bg" style="background:var(--m-accent-amber)">
@@ -75,18 +75,20 @@
     <MBottomSheet v-model:visible="detailVisible" :title="detailOrder ? `订单 #${detailOrder.id}` : ''">
       <div v-if="detailOrder" class="m-detail-body">
         <div class="m-detail-row"><span class="m-detail-label">产品</span><span>{{ detailOrder.product_name || '—' }}</span></div>
-        <div class="m-detail-row"><span class="m-detail-label">供应商</span><span>{{ detailOrder.supplier_name || '—' }}</span></div>
+        <div class="m-detail-row"><span class="m-detail-label">供应商</span><span>{{ detailSupplier }}</span></div>
         <div class="m-detail-row"><span class="m-detail-label">数量</span><span>{{ detailOrder.quantity || 0 }}</span></div>
         <div class="m-detail-row"><span class="m-detail-label">状态</span><span :style="{ color: statusColor(detailOrder.status) }">{{ statusLabel(detailOrder.status) }}</span></div>
-        <div class="m-detail-row"><span class="m-detail-label">创建时间</span><span>{{ detailOrder.created_at || '—' }}</span></div>
+        <div class="m-detail-row"><span class="m-detail-label">创建时间</span><span>{{ detailTime }}</span></div>
       </div>
     </MBottomSheet>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { purchaseApi } from '@/api'
+import { MOBILE_PAGE_SIZE } from '@/mobile/constants'
+import type { PurchaseOrder, UnprocessedOrder } from '@/types'
 import MobileNavBar from '@/mobile/layouts/components/MobileNavBar.vue'
 import MFilterChips from '@/mobile/components/MFilterChips.vue'
 import MSearchBar from '@/mobile/components/MSearchBar.vue'
@@ -106,51 +108,58 @@ const tabChips = [
 const keyword = ref('')
 const completedKeyword = ref('')
 
-interface PurchaseOrderItem {
-  id: number
-  product_name?: string
-  supplier_name?: string
-  customer_name?: string
-  quantity?: number
-  status?: string
-  created_at?: string
-}
-interface PurchaseOrderList {
-  orders?: PurchaseOrderItem[]
-  total?: number
-}
+// 列表响应类型由 API 层签名推导，移动端不再自行声明后端 DTO（S12）
+type PurchaseOrderList = Awaited<ReturnType<typeof purchaseApi.orders>>
+type UnprocessedOrderList = Awaited<ReturnType<typeof purchaseApi.unprocessedOrders>>
+// completed 接口的响应体没有 current_page（多一个 total_pages），单独取签名
+type CompletedOrderList = Awaited<ReturnType<typeof purchaseApi.completed>>
 
 const orders = ref<PurchaseOrderList | null>(null)
 const ordersLoading = ref(false)
-const unprocessed = ref<PurchaseOrderList | null>(null)
+const unprocessed = ref<UnprocessedOrderList | null>(null)
 const unprocessedLoading = ref(false)
-const completedOrders = ref<PurchaseOrderList | null>(null)
+const completedOrders = ref<CompletedOrderList | null>(null)
 const completedLoading = ref(false)
 const detailVisible = ref(false)
-const detailOrder = ref<PurchaseOrderItem | null>(null)
+const detailOrder = ref<PurchaseOrder | UnprocessedOrder | null>(null)
+
+/** 待审核订单（UnprocessedOrder）没有供应商字段，详情页显示占位符。 */
+const detailSupplier = computed(() =>
+  detailOrder.value && 'supplier_name' in detailOrder.value ? detailOrder.value.supplier_name || '—' : '—',
+)
+
+/** 采购单用 create_time，待审核订单用 order_date（DTO 字段名不同，统一在此收敛）。 */
+const detailTime = computed(() => {
+  const order = detailOrder.value
+  if (!order) return '—'
+  if ('create_time' in order && order.create_time) return order.create_time
+  return order.order_date || '—'
+})
 
 async function refetchOrders() {
   ordersLoading.value = true
-  try { orders.value = await purchaseApi.orders({ page: 1, per_page: 50 }) } finally { ordersLoading.value = false }
+  try { orders.value = await purchaseApi.orders({ page: 1, per_page: MOBILE_PAGE_SIZE }) } finally { ordersLoading.value = false }
 }
 
 async function loadUnprocessed() {
   unprocessedLoading.value = true
-  try { unprocessed.value = await purchaseApi.unprocessedOrders({ page: 1, per_page: 50 }) } finally { unprocessedLoading.value = false }
+  try { unprocessed.value = await purchaseApi.unprocessedOrders({ page: 1, per_page: MOBILE_PAGE_SIZE }) } finally { unprocessedLoading.value = false }
 }
 
 async function loadCompleted() {
   completedLoading.value = true
-  try { completedOrders.value = await purchaseApi.completed({ page: 1, per_page: 50 }) } finally { completedLoading.value = false }
+  try { completedOrders.value = await purchaseApi.completed({ page: 1, per_page: MOBILE_PAGE_SIZE }) } finally { completedLoading.value = false }
 }
 
-function showOrderDetail(order: PurchaseOrderItem) {
+function showOrderDetail(order: PurchaseOrder | UnprocessedOrder) {
   detailOrder.value = order
   detailVisible.value = true
 }
 
 async function handleOneClick() {
-  const ids = (unprocessed.value?.orders || []).map((o: PurchaseOrderItem) => `order:${o.id}`)
+  // 直接用后端下发的 composite_id（形如 'order:5' / 'stockin:3'），
+  // 不能按 id 现拼：备货来源的行前缀是 stockin 而非 order
+  const ids = (unprocessed.value?.orders ?? []).map((o) => o.composite_id)
   if (!ids.length) return
   try {
     await purchaseApi.oneClickGenerate({ composite_ids: ids })

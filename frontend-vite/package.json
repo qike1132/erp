@@ -16,6 +16,7 @@
     "check:routes": "node scripts/check-route-alignment.mjs",
     "check:api": "node scripts/check-api-alignment.mjs",
     "check:api:pc": "node scripts/check-pc-api-bypass.mjs",
+    "check:dto": "node scripts/check-mobile-dto.mjs",
     "preview": "vite preview",
     "type-check": "vue-tsc --noEmit",
     "lint": "eslint src/ --ext .ts,.vue",

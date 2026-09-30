@@ -11,7 +11,7 @@
       </div>
 
       <div v-if="loading" class="m-center"><MSpinner size="lg" /></div>
-      <template v-else-if="summary">
+      <template v-else-if="hasSummary">
         <div class="m-kpi-row">
           <MStatCard :value="totalQuantity ?? 0" label="总产量" icon-bg="rgba(0,113,227,0.1)" />
           <MStatCard :value="fmtMoney(totalValue ?? 0)" label="总产值" icon-bg="rgba(48,209,88,0.1)" />
@@ -31,6 +31,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
 import { dailyProductionApi } from '@/api'
+import type { DailySummary, MonthlySummary } from '@/types'
 import MobileNavBar from '@/mobile/layouts/components/MobileNavBar.vue'
 import MFilterChips from '@/mobile/components/MFilterChips.vue'
 import MStatCard from '@/mobile/components/MStatCard.vue'
@@ -43,18 +44,15 @@ const viewChips = [{ label: '日报', value: 'daily' }, { label: '月报', value
 const selectedDate = ref(new Date().toISOString().slice(0, 10))
 const monthlyYear = ref(new Date().getFullYear())
 const monthlyMonth = ref(new Date().getMonth() + 1)
-interface ProductionSummary {
-  departments?: Array<{ department: string; department_label?: string; total_quantity?: number }>
-  monthly_departments?: Array<{ department: string; department_label?: string; total_quantity?: number }>
-  monthly_total_quantity?: number
-  overall_quantity?: number
-  monthly_total_value?: number
-  overall_value?: number
-  [key: string]: unknown
-}
-
-const summary = ref<ProductionSummary | null>(null)
+// 日报/月报响应直接复用 @/types 的 DTO（S12；原先本地 ProductionSummary 带索引签名，
+// 把「日报无 monthly_* 字段、月报无 overall_* 字段」的类型缺口掩盖掉了）
+const dailySummary = ref<DailySummary | null>(null)
+const monthlySummary = ref<MonthlySummary | null>(null)
 const loading = ref(false)
+
+const hasSummary = computed(() =>
+  viewTab.value === 'monthly' ? !!monthlySummary.value : !!dailySummary.value,
+)
 
 const DEPARTMENT_LABELS: Record<string, string> = {
   filling: '充棉部',
@@ -63,29 +61,30 @@ const DEPARTMENT_LABELS: Record<string, string> = {
 }
 
 const departments = computed(() => {
-  // 日报：summary.departments = [{ department, department_label, total_quantity, ... }]
-  // 月报：summary.monthly_departments = [{ department, ... }]
+  // 日报：DailySummary.departments；月报：MonthlySummary.monthly_departments
   const list = viewTab.value === 'monthly'
-    ? (summary.value?.monthly_departments || [])
-    : (summary.value?.departments || [])
-  return list.map((d: { department: string; department_label?: string; total_quantity?: number }) => {
+    ? (monthlySummary.value?.monthly_departments ?? [])
+    : (dailySummary.value?.departments ?? [])
+  return list.map((d) => {
     const key = d.department
     return {
       key,
       name: d.department_label || DEPARTMENT_LABELS[key] || key,
-      quantity: d.total_quantity ?? 0,
+      quantity: d.total_quantity,
     }
   })
 })
 
-const totalQuantity = computed(() => {
-  if (viewTab.value === 'monthly') return summary.value?.monthly_total_quantity ?? 0
-  return summary.value?.overall_quantity ?? 0
-})
-const totalValue = computed(() => {
-  if (viewTab.value === 'monthly') return summary.value?.monthly_total_value ?? 0
-  return summary.value?.overall_value ?? 0
-})
+const totalQuantity = computed(() =>
+  viewTab.value === 'monthly'
+    ? (monthlySummary.value?.monthly_total_quantity ?? 0)
+    : (dailySummary.value?.overall_quantity ?? 0),
+)
+const totalValue = computed(() =>
+  viewTab.value === 'monthly'
+    ? (monthlySummary.value?.monthly_total_value ?? 0)
+    : (dailySummary.value?.overall_value ?? 0),
+)
 
 function fmtMoney(v: number) {
   if (v >= 10000) return (v / 10000).toFixed(1) + '万'
@@ -111,11 +110,11 @@ function nextDate() {
 
 async function loadDaily() {
   loading.value = true
-  try { summary.value = await dailyProductionApi.dailySummary(selectedDate.value) as unknown as ProductionSummary } finally { loading.value = false }
+  try { dailySummary.value = await dailyProductionApi.dailySummary(selectedDate.value) } finally { loading.value = false }
 }
 async function loadMonthly() {
   loading.value = true
-  try { summary.value = await dailyProductionApi.monthlySummary({ year: monthlyYear.value, month: monthlyMonth.value }) as unknown as ProductionSummary } finally { loading.value = false }
+  try { monthlySummary.value = await dailyProductionApi.monthlySummary({ year: monthlyYear.value, month: monthlyMonth.value }) } finally { loading.value = false }
 }
 
 watch(viewTab, (v) => { if (v === 'daily') loadDaily(); else loadMonthly() })

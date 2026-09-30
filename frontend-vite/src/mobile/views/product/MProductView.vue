@@ -20,12 +20,12 @@
         >
           <div class="m-product-info">
             <div class="m-product-header">
-              <span class="m-product-code">{{ product.product_code }}</span>
-              <MBadge v-if="product.status === 'active'" variant="success" dot>在产</MBadge>
+              <span class="m-product-code">{{ product.barcode || '—' }}</span>
+              <MBadge v-if="product.status !== false" variant="success" dot>在产</MBadge>
               <MBadge v-else variant="neutral" dot>停产</MBadge>
             </div>
-            <span class="m-product-name">{{ product.product_name }}</span>
-            <span v-if="product.spec" class="m-product-spec">{{ product.spec }}</span>
+            <span class="m-product-name">{{ product.name }}</span>
+            <span v-if="product.specification" class="m-product-spec">{{ product.specification }}</span>
           </div>
           <div class="m-product-arrow">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
@@ -43,19 +43,13 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { productApi } from '@/api'
+import { MOBILE_LIST_PAGE_SIZE } from '@/mobile/constants'
+import type { Product } from '@/types'
 import MCard from '@/mobile/components/MCard.vue'
 import MSearchBar from '@/mobile/components/MSearchBar.vue'
 import MBadge from '@/mobile/components/MBadge.vue'
 import MSkeleton from '@/mobile/components/MSkeleton.vue'
 import MEmpty from '@/mobile/components/MEmpty.vue'
-
-interface Product {
-  id: number
-  product_code: string
-  product_name: string
-  spec?: string
-  status?: string
-}
 
 const products = ref<Product[]>([])
 const loading = ref(true)
@@ -66,9 +60,9 @@ const filteredProducts = computed(() => {
   const q = searchQuery.value.toLowerCase()
   return products.value.filter(
     (p) =>
-      p.product_code?.toLowerCase().includes(q) ||
-      p.product_name?.toLowerCase().includes(q) ||
-      p.spec?.toLowerCase().includes(q),
+      (p.barcode ?? '').toLowerCase().includes(q) ||
+      p.name.toLowerCase().includes(q) ||
+      (p.specification ?? '').toLowerCase().includes(q),
   )
 })
 
@@ -79,14 +73,8 @@ function handleSearch(val: string) {
 async function loadProducts() {
   loading.value = true
   try {
-    const res = await productApi.list({ page: 1, per_page: 200 })
-    products.value = (res.items ?? []).map((p) => ({
-      id: p.id,
-      product_code: p.barcode ?? '',
-      product_name: p.name,
-      spec: p.specification,
-      status: p.status === false ? '' : 'active',
-    }))
+    const res = await productApi.list({ page: 1, per_page: MOBILE_LIST_PAGE_SIZE })
+    products.value = res.items ?? []
   } catch (e) {
     console.error('[MProductView] load failed:', e)
     products.value = []
