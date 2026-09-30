@@ -209,6 +209,13 @@ export function useFactoryTableRows(props: FactoryTabProps, emit: EmitFn<Factory
       : ''
   }
 
+  /** 该行行率是否「各明细不一致」（落库快照 loss_rate_mixed）；只读/占位行恒 false。 */
+  function isRowRateMixed(item: RowItem): boolean {
+    const c = rowCoord(item)
+    if (!c) return false
+    return props.fabricLossRateMixed?.[item.gi]?.[c.si]?.[c.fi] === true
+  }
+
   /** 率输入：按坐标提交（沿用既有 emit，不新增契约）。 */
   function onRowRateInput(item: RowItem, e: Event): void {
     const c = rowCoord(item)
@@ -230,10 +237,10 @@ export function useFactoryTableRows(props: FactoryTabProps, emit: EmitFn<Factory
     isGroupFirstRow,
     rowCoord,
     rowRate,
-    rowBaseQty,
     editRowQty,
     displayRowQty,
     sharedMaterialTitle,
+    isRowRateMixed,
     onRowRateInput,
     onRowQtyChange,
   }

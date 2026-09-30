@@ -115,12 +115,13 @@
                 <template v-if="rowCoord(item)">
                   <input
                     v-if="!editMode"
-                    type="number" class="w-14 text-right py-1 px-1 text-[13px] border border-border rounded"
+                    type="number" class="w-14 text-right py-1 px-1 text-[13px] border border-border rounded focus:outline-none focus-visible:outline-2 focus-visible:outline-primary-500 focus-visible:outline-offset-2 focus:border-primary-500"
                     :value="rowRate(item)" min="0" max="1000" step="any"
                     :title="sharedMaterialTitle(item)"
                     @input="onRowRateInput(item, $event)"
                   />
                   <template v-else>{{ formatQty(rowRate(item)) }}</template>
+                  <span v-if="isRowRateMixed(item)" class="text-[10px] text-text-muted whitespace-nowrap">不一致</span>
                 </template>
                 <span v-else class="text-text-muted" title="该物料不在采购明细中（BOM 生成后新增），无法在此修改">—</span>
               </td>
@@ -128,7 +129,7 @@
               <td>
                 <input
                   v-if="rowCoord(item) && editMode"
-                  type="number" class="w-20 text-right py-1 px-1.5 text-[13px] inline-block border border-border rounded"
+                  type="number" class="w-20 text-right py-1 px-1.5 text-[13px] inline-block border border-border rounded focus:outline-none focus-visible:outline-2 focus-visible:outline-primary-500 focus-visible:outline-offset-2 focus:border-primary-500"
                   :value="editRowQty(item)" min="0"
                   :title="sharedMaterialTitle(item)"
                   @change="onRowQtyChange(item, $event)"
@@ -204,7 +205,7 @@ function onLossRateInput(e: Event) {
 // 行模型与率/数量读写胶水（2026-09-30 抽到 useFactoryTableRows.ts，以守住单 .vue ≤ 400 行门禁）
 const {
   flatRows, groupRowCounts, isGroupFirstRow, rowCoord, rowRate,
-  editRowQty, displayRowQty, sharedMaterialTitle, onRowRateInput, onRowQtyChange,
+  editRowQty, displayRowQty, sharedMaterialTitle, isRowRateMixed, onRowRateInput, onRowQtyChange,
 } = useFactoryTableRows(props, emit)
 </script>
 

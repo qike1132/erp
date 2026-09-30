@@ -78,6 +78,7 @@ describe('P1/P2 按 SKU 分块', () => {
   it('P2 产品名称 / 订单数量 / 备品数量 各块一行，值为该 SKU 自己的', () => {
     const rows = bodyRows(mountTab(group()))
     // 首块（A）是整组第一行 → 客户单元格在这里（rowspan = 整组行数，spec §「客户列跨整组合并」）
+    expect(rows[0]!.findAll('td')[0]!.text()).toBe('客户甲')
     expect(rows[0]!.findAll('td')[1]!.text()).toBe('产品A')
     expect(rows[0]!.findAll('td')[2]!.text()).toBe('100.0')
     expect(rows[0]!.findAll('td')[3]!.text()).toBe('1.0')
@@ -142,5 +143,37 @@ describe('P6 编辑态提示（跨 SKU 共用同一行明细）', () => {
 
     expect(rows[0]!.find('input[type="number"]').attributes('title')).toContain('共用')
     expect(rows[1]!.find('input[type="number"]').attributes('title') || '').not.toContain('共用')
+  })
+})
+
+describe('P7 「各明细率不一致」提示与聚焦样式不得因改造丢失', () => {
+  it('回退路径（无 materials）：mixed 为 true 的行渲染「不一致」，率输入保留聚焦类', () => {
+    const g = group()
+    g.skus = [{ product_name: '产品A', product_barcode: 'bA', order_qty: 100 }]
+    const wrapper = mount(SummaryFactoryTab, {
+      props: {
+        factoryData: dataOf(g), editMode: false, lossRate: 10, orderCount: 1,
+        groupSpareRates: [10],
+        fabricLossRateMixed: [[[true, false]]],
+      },
+      global: { stubs },
+    })
+    const row = bodyRows(wrapper)[0]!
+    expect(row.text()).toContain('不一致')
+    expect(row.find('input[type="number"]').classes().join(' ')).toContain('focus-visible:outline-2')
+  })
+
+  it('per-SKU 路径：该物料落库行为 mixed 时，同物料在各块都显示「不一致」', () => {
+    const wrapper = mount(SummaryFactoryTab, {
+      props: {
+        factoryData: dataOf(group()), editMode: false, lossRate: 10, orderCount: 1,
+        groupSpareRates: [10],
+        // 共享布 = (供应商甲, fi=0)；两块都指向同一坐标，故两块都应显示提示
+        fabricLossRateMixed: [[[true, false, false]]],
+      },
+      global: { stubs },
+    })
+    expect(bodyRows(wrapper)[0]!.text()).toContain('不一致')
+    expect(bodyRows(wrapper)[2]!.text()).toContain('不一致')
   })
 })
