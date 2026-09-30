@@ -192,7 +192,7 @@ describe('P7 「各明细率不一致」提示与聚焦样式不得因改造丢�
 })
 
 describe('P8 数量差异对照块接线（仅差异时渲染）', () => {
-  it('有差异（落库「共享布」65 vs 推算 20+40=60）→ 组末尾出现对照块并点名该物料', () => {
+  it('有差异（落库「共享布」65 vs 推算 20+40=60）→ 组末尾出现对照块并点名该物料；数据行与主表 10 列对齐', () => {
     const g = group()
     const shared = g.suppliers[0]!.fabrics[0]!
     expect(shared.fabric_name).toBe('共享布')
@@ -203,11 +203,28 @@ describe('P8 数量差异对照块接线（仅差异时渲染）', () => {
     expect(w.text()).toContain('共享布')
     // 不一致的那一行有描红标记，且只有一行（A专有布/新加布均一致或只在 BOM 侧）
     expect(w.findAll('tbody [data-diff="true"]')).toHaveLength(1)
+
+    // 数据行：该组 3 条落库物料（同一供应商段）→ 3 行
+    const diffRows = w.findAll('tbody tr.sm-diff-row')
+    expect(diffRows).toHaveLength(3)
+    // 首行 = 标签(colspan=4，跨全部对照行) + 供应商(1) + 后 5 格 = 10 列，与主表表头逐列对齐
+    const first = diffRows[0]!.findAll('td')
+    expect(first).toHaveLength(7)
+    expect(first[0]!.attributes('colspan')).toBe('4')
+    expect(first[0]!.attributes('rowspan')).toBe('3')
+    expect(first[1]!.text()).toBe('供应商甲')
+    expect(first[1]!.attributes('rowspan')).toBe('3')
+    // 标签 4 列 + 供应商 1 列 + 后 5 列 = 10 列（回归时会拦住列错位）
+    expect(Number(first[0]!.attributes('colspan')) + 1 + (first.length - 2)).toBe(10)
+    // 其余行由 rowspan 覆盖 → 只剩后 5 格；非差异行不带 data-diff
+    expect(diffRows[1]!.findAll('td')).toHaveLength(5)
+    expect(diffRows[1]!.attributes('data-diff')).toBeUndefined()
   })
 
   it('无差异（默认 fixture：共享布 60、A专有布 20、B专有布 40 全对得上）→ 组末尾不渲染对照块', () => {
     const w = mountTab(group())
     expect(w.text()).not.toContain('实际下单')
     expect(w.findAll('tbody [data-diff="true"]')).toHaveLength(0)
+    expect(w.findAll('tbody tr.sm-diff-row')).toHaveLength(0)
   })
 })

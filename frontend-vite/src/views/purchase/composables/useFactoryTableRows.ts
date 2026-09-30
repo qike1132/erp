@@ -15,7 +15,7 @@
  */
 import { computed } from 'vue'
 import type { EmitFn } from 'vue'
-import { factoryQtyDisplayValue, buildSkuDisplayLines } from './useSummaryModal'
+import { factoryQtyDisplayValue, buildSkuDisplayLines, ceilMagnifiedByLossRate } from './useSummaryModal'
 import { buildPerSkuRows, materialKeyOf, computeQuantityDiff } from './perSkuRows'
 import type { PerSkuRow } from './perSkuRows'
 import type { FactorySummaryData, FactoryGroup, FabricItem, SkuDisplayLine } from './useSummaryModal'
@@ -50,6 +50,28 @@ export type FactoryTabEmit = {
   fabricLossRateInput: [gi: number, si: number, fi: number, rate: number]
   exportFactory: []
   printFactory: []
+}
+
+/**
+ * 对照块的一行（列序与**主表**一致的后 5 格：布料名称 | 规格型号 | 损耗率 | 数量 | 单位）。
+ *
+ * 率与数量在此**与主表同源**算好：率取该落库行的快照率（缺省回退该组订单级率），
+ * 数量为按该率加放后向上取整（`ceilMagnifiedByLossRate`）——组件因此保持"纯展示"，
+ * 不会出现同一张表里两个「数量」口径不一致。供应商/段信息供组件渲染 `rowspan`。
+ */
+export interface DiffStoredRow {
+  supplierName: string
+  fabricName: string
+  specification: string
+  unit: string
+  /** 该落库行的损耗率（快照率优先，缺省回退该组订单级率） */
+  rate: number
+  /** 「数量」列展示值（与主表同源：按 rate 加放后向上取整） */
+  displayQuantity: number
+  /** 该行是否为本供应商段首行（供应商格只在此行渲染，其余行由 rowspan 覆盖） */
+  isSupplierFirst: boolean
+  /** 本供应商段行数（供应商格的 rowspan） */
+  supplierSpan: number
 }
 
 type RowItem = {
@@ -143,9 +165,30 @@ export function useFactoryTableRows(props: FactoryTabProps, emit: EmitFn<Factory
     return map
   })
 
-  /** 该组的全部落库物料（压平供应商维度，供对照块列出） */
-  function storedFabricsOf(group: FactoryGroup): FabricItem[] {
-    return (group.suppliers || []).flatMap((s) => s.fabrics || [])
+  /**
+   * 该组落库真值（压平供应商维度，供对照块列出），率/数量已按主表口径算好。
+   * 供应商段首行标记 + 段行数供组件渲染 rowspan；否则组件需自行分组。
+   */
+  function storedRowsOf(group: FactoryGroup, gi: number): DiffStoredRow[] {
+    const groupRate = spareRateForGroup(gi)
+    const out: DiffStoredRow[] = []
+    ;(group.suppliers || []).forEach((supplier) => {
+      const fabrics = supplier.fabrics || []
+      fabrics.forEach((f, fi) => {
+        const rate = f.loss_rate ?? groupRate
+        out.push({
+          supplierName: supplier.supplier_name,
+          fabricName: f.fabric_name,
+          specification: f.specification || '',
+          unit: f.unit || '',
+          rate,
+          displayQuantity: ceilMagnifiedByLossRate(parseFloat(String(f.quantity)) || 0, rate),
+          isSupplierFirst: fi === 0,
+          supplierSpan: fabrics.length,
+        })
+      })
+    })
+    return out
   }
 
   /** 是否该组最后一行（对照块挂在组末尾） */
@@ -254,7 +297,7 @@ export function useFactoryTableRows(props: FactoryTabProps, emit: EmitFn<Factory
   return {
     flatRows,
     rowDiffMap,
-    storedFabricsOf,
+    storedRowsOf,
     isLastRowOfGroup,
     groupRowCounts,
     isGroupFirstRow,

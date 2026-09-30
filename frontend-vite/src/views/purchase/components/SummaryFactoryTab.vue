@@ -147,7 +147,7 @@
           <SummaryDiffBlock
             v-if="rowDiffMap[item.gi] && rowDiffMap[item.gi]!.length > 0 && isLastRowOfGroup(item.gi, ri)"
             :diffs="rowDiffMap[item.gi]!"
-            :stored-fabrics="storedFabricsOf(item.group)"
+            :stored-rows="storedRowsOf(item.group, item.gi)"
           />
         </template>
       </tbody>
@@ -214,7 +214,7 @@ function onLossRateInput(e: Event) {
 
 // 行模型与率/数量读写胶水（2026-09-30 抽到 useFactoryTableRows.ts，以守住单 .vue ≤ 400 行门禁）
 const {
-  flatRows, rowDiffMap, storedFabricsOf, isLastRowOfGroup, groupRowCounts, isGroupFirstRow, rowCoord, rowRate,
+  flatRows, rowDiffMap, storedRowsOf, isLastRowOfGroup, groupRowCounts, isGroupFirstRow, rowCoord, rowRate,
   editRowQty, displayRowQty, sharedMaterialTitle, isRowRateMixed, onRowRateInput, onRowQtyChange,
 } = useFactoryTableRows(props, emit)
 </script>
