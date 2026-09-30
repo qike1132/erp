@@ -80,12 +80,14 @@ class TestGetRecords:
     @pytest.mark.asyncio
     async def test_get_records_empty(self, mock_async_db):
         """空记录"""
-        # 现实现两次 execute：主查询（rows）+ 独立 COUNT（total）
+        # 现实现三次 execute：主查询（rows）+ 独立 COUNT（total）+ stats CTE（统计）
         empty_result = MagicMock()
         empty_result.all.return_value = []
         count_result = MagicMock()
         count_result.scalar.return_value = 0
-        mock_async_db.execute = AsyncMock(side_effect=[empty_result, count_result])
+        stats_result = MagicMock()
+        stats_result.first.return_value = None
+        mock_async_db.execute = AsyncMock(side_effect=[empty_result, count_result, stats_result])
 
         result = await get_records(mock_async_db, year=2024, month=6)
 
@@ -99,7 +101,9 @@ class TestGetRecords:
         empty_result.all.return_value = []
         count_result = MagicMock()
         count_result.scalar.return_value = 0
-        mock_async_db.execute = AsyncMock(side_effect=[empty_result, count_result])
+        stats_result = MagicMock()
+        stats_result.first.return_value = None
+        mock_async_db.execute = AsyncMock(side_effect=[empty_result, count_result, stats_result])
 
         result = await get_records(
             mock_async_db, year=2024, month=6, departments={'filling'}
@@ -114,7 +118,9 @@ class TestGetRecords:
         empty_result.all.return_value = []
         count_result = MagicMock()
         count_result.scalar.return_value = 0
-        mock_async_db.execute = AsyncMock(side_effect=[empty_result, count_result])
+        stats_result = MagicMock()
+        stats_result.first.return_value = None
+        mock_async_db.execute = AsyncMock(side_effect=[empty_result, count_result, stats_result])
 
         result = await get_records(
             mock_async_db, year=2024, month=6, production_date='2024-06-15'
@@ -129,7 +135,9 @@ class TestGetRecords:
         empty_result.all.return_value = []
         count_result = MagicMock()
         count_result.scalar.return_value = 0
-        mock_async_db.execute = AsyncMock(side_effect=[empty_result, count_result])
+        stats_result = MagicMock()
+        stats_result.first.return_value = None
+        mock_async_db.execute = AsyncMock(side_effect=[empty_result, count_result, stats_result])
 
         result = await get_records(
             mock_async_db, year=2024, month=6, page=2, per_page=20
@@ -137,9 +145,53 @@ class TestGetRecords:
 
         assert result['total'] == 0
 
+    @pytest.mark.asyncio
+    async def test_stats_are_page_independent_on_out_of_range_page(self, mock_async_db):
+        """越界页 rows 为空，stats 仍须来自 stats_cte（此前从 rows[0] 取值会误报 0）"""
+        empty_result = MagicMock()
+        empty_result.all.return_value = []
+        count_result = MagicMock()
+        count_result.scalar.return_value = 128
+        stats_result = MagicMock()
+        stats_result.first.return_value = (4200, 27170, 17)
+        # 空页时 _build_product_price_fallback 提前返回，故恰好三次 execute
+        mock_async_db.execute = AsyncMock(side_effect=[empty_result, count_result, stats_result])
+
+        result = await get_records(
+            mock_async_db, year=2024, month=6, page=99, per_page=50
+        )
+
+        assert result['data'] == []
+        assert result['total'] == 128
+        assert result['stats']['total_quantity'] == 4200
+        assert result['stats']['total_sku'] == 17
+
 
 class TestCreateRecord:
     """创建生产记录"""
+
+    @pytest.mark.asyncio
+    async def test_create_record_strips_created_by(self, mock_async_db):
+        """录单人名两侧空白须在写入前去掉（与筛选侧的 strip 对齐）"""
+        mock_async_db.execute = AsyncMock()
+        mock_async_db.flush = AsyncMock()
+        mock_async_db.refresh = AsyncMock()
+
+        await create_record(
+            mock_async_db,
+            department='filling',
+            product_name='产品A',
+            quantity=100,
+            production_date_str='2024-06-15',
+            unit_price=50.0,
+            product_id=None,
+            barcode='',
+            remark='',
+            created_by='  张三  ',
+        )
+
+        record = mock_async_db.add.call_args.args[0]
+        assert record.created_by == '张三'
 
     @pytest.mark.asyncio
     async def test_create_record_success(self, mock_async_db):

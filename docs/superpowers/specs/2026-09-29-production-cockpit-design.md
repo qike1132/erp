@@ -231,7 +231,7 @@ AGGREGATE_VIEW_CODE: [
 
 **部门 manage 码也必须列入**：只持 `production_summary_manage_filling` 的录单员是合法的页面用户，必须能看到入口；若改用「顺手补一个聚合 `production_summary_view` 码」让入口出现，`production_scope_of(user, write=False)` 会返回 `None`，反而把该用户放大到**全部三个部门**可见 —— 正是本设计最危险的 fail-open 失效模式。
 
-（`nav_context.py:127-132` 会自动把自身 code 并入，无需重复。）
+（`nav_context.py:45-59` 会自动把自身 code 并入，无需重复。）
 
 ### 5.5 权限种子与配置
 

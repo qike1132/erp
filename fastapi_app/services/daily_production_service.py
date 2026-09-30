@@ -245,9 +245,14 @@ async def get_records(
     records = [r[0] for r in rows]
     # total 用独立 COUNT 查询获取：请求页越界时 rows 为空，此前从 rows[0] 取值会误报 0
     total = int((await db.execute(select(func.count(DailyProductionRecord.id)).where(*conditions))).scalar() or 0)
-    total_qty = rows[0][2] if rows else 0
-    total_val = rows[0][3] if rows else 0
-    total_sku = rows[0][4] if rows else 0
+    # stats 从 stats_cte 单独取一次，保证与页码无关
+    # （越界页 rows 为空时，此前从 rows[0] 取值会误报 0）
+    stats_row = (await db.execute(
+        select(stats_cte.c.total_qty, stats_cte.c.total_val, stats_cte.c.total_sku)
+    )).first()
+    total_qty = stats_row[0] if stats_row else 0
+    total_val = stats_row[1] if stats_row else 0
+    total_sku = stats_row[2] if stats_row else 0
 
     price_fallback = await _build_product_price_fallback(db, records)
 
@@ -306,7 +311,7 @@ async def create_record(
         quantity=quantity,
         production_date=prod_date,
         remark=remark.strip() if remark else None,
-        created_by=created_by,
+        created_by=(created_by or '').strip(),
     )
     db.add(record)
     await db.flush()

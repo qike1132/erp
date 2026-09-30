@@ -107,15 +107,17 @@ async def list_records(
             per_page=per_page,
             production_date=production_date,
         )
-        return ProductionRecordListResponse(
-            data=result['data'], total=result['total'],
-            page=result['page'], per_page=result['per_page'],
-            pages=result['pages'], stats=result.get('stats'),
-        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except (OperationalError, DisconnectionError) as e:
         raise HTTPException(status_code=500, detail=f'获取数据失败: {settings.sanitize_error(e)}') from e
+    # 响应构造放在 try 之外：pydantic.ValidationError 也是 ValueError，
+    # 若留在 try 内，真正的序列化 bug 会被误报为 400 而非 500
+    return ProductionRecordListResponse(
+        data=result['data'], total=result['total'],
+        page=result['page'], per_page=result['per_page'],
+        pages=result['pages'], stats=result.get('stats'),
+    )
 
 
 @router.post('/records', response_model=ProductionRecordActionResponse)

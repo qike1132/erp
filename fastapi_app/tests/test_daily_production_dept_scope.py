@@ -107,6 +107,21 @@ class TestRecordsAndExportScope:
         assert response.status_code == 200
         assert called_kwargs['departments'] == {'Filling'}
 
+    async def test_service_value_error_still_returns_400(self, client):
+        # 端点把 try 收窄为只包住 service 调用后，
+        # 服务层抛出的 ValueError 仍须映射为 400（而非漏成 500）
+        _scope_override(None)
+        with patch(
+            'fastapi_app.api.v1.endpoints.daily_production.daily_production_service'
+        ) as mock_svc:
+            mock_svc.get_records = AsyncMock(side_effect=ValueError('必须提供 year/month'))
+            response = await client.get(
+                '/api/v1/daily-production/records',
+                params={'year': 2026, 'month': 9},
+            )
+
+        assert response.status_code == 400
+
     async def test_export_receives_narrowed_departments(self, client):
         _scope_override({'packaging'})
         with patch(
