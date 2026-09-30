@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.database import get_async_db, get_async_read_db
-from fastapi_app.core.deps import require_permission
+from fastapi_app.core.deps import require_any_permission, require_permission
 from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.core.response import success_response
 from fastapi_app.schemas.order import OrderItemSchema
@@ -144,7 +144,11 @@ async def clear_cache(
 @router.get("/product-search", response_model=list[ProductSearchItem])
 async def product_search(
     q: str = Query('', max_length=100, description="搜索关键词"),
-    user: User = Depends(require_permission("product_view")),
+    # 产品自动补全被三个页面共用：客户订单(order_manage)、出库管理(stockout_manage)、
+    # 出货计划(production_plan_view)。原先只认 product_view（该码不在权限表里，只由
+    # product_manage 经 manage→view 继承得来），按导航勾选的用户一律 403。
+    user: User = Depends(require_any_permission(
+        "product_view", "order_manage", "stockout_manage", "production_plan_view")),
     db: AsyncSession = Depends(get_async_read_db),
 ):
     """产品搜索（支持名称、条码）——统一委托 ProductSearchService（与产品清单共用实现与缓存）"""

@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.cache import cache_result
 from fastapi_app.core.database import get_async_db, get_async_read_db
-from fastapi_app.core.deps import get_current_user_id, require_permission
+from fastapi_app.core.deps import get_current_user_id, require_any_permission, require_permission
 from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.core.limiter import limiter
 from fastapi_app.schemas.stock import (
@@ -284,7 +284,10 @@ async def inventory(
     page: int = Query(1, ge=1, description='页码'),
     per_page: int = Query(50, ge=1, le=200, description='每页数量'),
     db: AsyncSession = Depends(get_async_read_db),
-    _user: User = Depends(require_permission('stockin_manage')),
+    # 库存汇总同时服务「订单列表」(stock_view) 与「备货管理(全部)」(stockin_manage)。
+    # stockin_manage 的 is_nav=False，导航里指向本页的只有 stock_view；
+    # 只认 stockin_manage 会让按导航勾选权限的用户 403。
+    _user: User = Depends(require_any_permission('stockin_manage', 'stock_view')),
 ) -> InventoryResponse:
     """库存查看（SQL CTE 分页优化版，过滤和分页在数据库层面完成）。
 
@@ -346,7 +349,8 @@ async def export_inventory(
     customer: str = Query('', description='客户名称筛选'),
     product: str = Query('', description='产品名称筛选'),
     db: AsyncSession = Depends(get_async_read_db),
-    _user: User = Depends(require_permission('stockin_manage')),
+    # 与 /inventory 同口径：导出的是同一份库存汇总，由「订单列表」页的工具条触发。
+    _user: User = Depends(require_any_permission('stockin_manage', 'stock_view')),
 ) -> StreamingResponse:
     """导出库存数据为 Excel 文件。
 

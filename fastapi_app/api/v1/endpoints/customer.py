@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.cache_keys import CACHE_KEY_PREFIX, CacheNamespace, build_cache_key
 from fastapi_app.core.database import get_async_db, get_async_read_db
-from fastapi_app.core.deps import require_permission
+from fastapi_app.core.deps import get_current_user_id, require_permission
 from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.core.redis_wrapper import safe_delete, safe_delete_pattern, safe_get, safe_set
 from fastapi_app.schemas.customer import (
@@ -196,13 +196,18 @@ async def search_customers(
 
 @router.get('/active-names', response_model=list[CustomerActiveNameItem])
 async def active_names(
-    _current_user: User = Depends(require_permission('customer_manage')),
+    user_id: int = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_async_read_db),
 ) -> list[CustomerActiveNameItem]:
     """获取所有启用客户名称列表（用于下拉选择）。
 
+    只要求已登录：这是客户下拉的全局字典（仅返回启用客户的 id/name），被订单录入、
+    出库、报表筛选、出货计划、批次查询、皮套管理等 10+ 个页面共用。原先要求
+    ``customer_manage``，导致管理员按各页面导航勾选权限后下拉一律 403。
+    鉴权仍由 ``customer_router`` 的 router 级 ``get_current_user_id`` 兜底。
+
     Args:
-        _current_user: 当前登录用户（权限校验依赖）。
+        user_id: 当前用户 ID（仅要求已登录）。
         db: 异步数据库会话（只读副本）。
 
     Returns:
