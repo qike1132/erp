@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="zh-CN" style="color-scheme: light">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>客户订单页 · 粘贴图片 OCR 识别 — 对比稿</title>
+<style>
+  :root {
+    --primary-50:#eff5ff; --primary-100:#d6e4ff; --primary-200:#b8ccff;
+    --primary-400:#6d95f0; --primary-500:#5b8def; --primary-600:#3a6bd6; --primary-700:#2d5ab8;
+    --success-50:#e8f9ef; --success-200:#a6e8c0; --success-400:#3dc97a; --success-500:#28c76f; --success-600:#1e9e55; --success-700:#2e7d32;
+    --warning-50:#fff3e6; --warning-200:#ffd199; --warning-400:#ffa53d; --warning-500:#ff9f43; --warning-700:#c47820;
+    --danger-50:#fde8e8; --danger-200:#f7a5a5; --danger-400:#ed5657; --danger-500:#ea5455; --danger-600:#d44042; --danger-700:#b33335;
+    --ocean:#b0e0e6; --ocean-light:#d4f1f4; --ocean-deep:#87ceeb; --ocean-text:#02669e;
+    --surface:#f4f6fc; --surface-card:#ffffff;
+    --slate-50:#f8fafc; --slate-100:#f1f5f9; --slate-200:#e2e8f0; --slate-300:#cbd5e1;
+    --slate-400:#94a3b8; --slate-500:#475569; --slate-600:#334155; --slate-700:#1e293b;
+    --border:#e4e7ed; --border-light:#f0f2f5;
+    --text:#1a1a2e; --text-secondary:#475569; --text-muted:#64748b;
+    --radius-sm:10px; --radius-input:12px; --radius-card:18px; --radius-modal:20px; --radius-button:14px;
+    --shadow-sm:0 2px 8px rgba(176,224,230,.15);
+    --shadow-md:0 4px 16px rgba(176,224,230,.22);
+    --shadow-lg:0 8px 32px rgba(135,206,235,.28);
+    --font:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hiragino Sans GB','Microsoft YaHei',Roboto,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:var(--font);background:linear-gradient(135deg,var(--surface) 0%,var(--border-light) 100%);
+       min-height:100vh;padding:28px 24px 72px;color:var(--text);font-size:13px;line-height:1.5}
+
+  .stage{max-width:1120px;margin:0 auto}
+  .stage + .stage{margin-top:44px}
+  .stage-note{font-size:13px;color:var(--text-muted);margin:0 0 14px;display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+  .stage-note .tag{font-size:11.5px;font-weight:700;color:#fff;background:var(--primary-600);padding:2px 9px;border-radius:999px;flex-shrink:0}
+  .stage-note .tag.alt{background:var(--slate-500)}
+  .stage-note .tag.pick{background:var(--success-600)}
+  .stage-note strong{color:var(--text);font-weight:700}
+
+  h2.sec{font-size:16px;font-weight:700;margin:34px 0 6px;display:flex;align-items:center;gap:8px}
+  h2.sec:first-child{margin-top:0}
+  p.sec-sub{color:var(--text-muted);margin:0 0 16px;font-size:12.5px}
+
+  /* ============ 真实窄栏容器（录入面板宽度） ============ */
+  .col{width:392px;background:white;border:1px solid var(--border);border-radius:var(--radius-card);
+       box-shadow:var(--shadow-sm);overflow:hidden}
+  .col-title{display:flex;align-items:center;justify-content:space-between;padding:12px 20px;
+             font-size:14px;font-weight:700;border-bottom:1px solid var(--border)}
+  .col-title svg{color:var(--primary-500);vertical-align:-2px;margin-right:6px}
+  .col-body{padding:16px 20px}
+  .field{margin-bottom:14px}
+  .label{display:block;font-size:13px;font-weight:500;color:var(--text-secondary);margin-bottom:4px}
+  .req{color:var(--danger-500)}
+  .fake-input{border:1px solid var(--slate-300);border-radius:var(--radius-input);padding:8px 12px;
+              font-size:14px;color:var(--slate-400);background:white}
+  .fake-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .sec-label{font-size:12px;font-weight:600;color:var(--text-secondary);padding:8px 0 4px}
+  .sec-label svg{color:var(--text-muted);vertical-align:-2px;margin-right:5px}
+
+  /* 现有 Excel 投放区（原样，作为对照） */
+  .excel-zone{display:flex;justify-content:space-between;align-items:center;gap:8px;
+              padding:8px 12px;border:2px solid var(--border-light);border-radius:var(--radius-input);min-height:40px}
+  .excel-zone .txt{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-muted)}
+  .inline-btns{display:flex;gap:6px;flex-shrink:0}
+  .inline-btn{padding:3px 8px;border:1px solid var(--border-light);border-radius:6px;font-size:11px;
+              font-weight:600;background:white;color:var(--text-secondary);font-family:inherit;cursor:pointer}
+  .inline-btn.ok{border-color:var(--success-400);color:var(--success-600)}
+
+  /* ============ 方案 A：独立粘贴热区 ============ */
+  .paste-zone{margin-top:8px;border:2px dashed var(--ocean-deep);border-radius:var(--radius-input);
+              background:linear-gradient(180deg,var(--ocean-light) 0%,#fff 100%);
+              padding:11px 12px;display:flex;align-items:center;gap:10px;cursor:pointer;
+              transition:border-color .18s,background .18s,box-shadow .18s}
+  .paste-zone:hover{border-color:var(--primary-500);box-shadow:var(--shadow-sm)}
+  .paste-zone .ic{width:30px;height:30px;border-radius:9px;background:var(--ocean-deep);
+                  display:flex;align-items:center;justify-content:center;flex-shrink:0;color:#fff}
+  .paste-zone .t1{font-size:13px;font-weight:600;color:var(--ocean-text);display:flex;align-items:center;gap:6px}
+  .paste-zone .t2{font-size:11.5px;color:var(--text-muted);margin-top:1px}
+  kbd{font-family:inherit;font-size:11px;font-weight:700;background:white;border:1px solid var(--slate-300);
+      border-bottom-width:2px;border-radius:5px;padding:1px 5px;color:var(--slate-600)}
+  .paste-zone .go{margin-left:auto;font-size:11.5px;font-weight:700;color:var(--primary-600);flex-shrink:0}
+
+  /* ============ 方案 B：并入批量导入（分段） ============ */
+  .seg{display:inline-flex;border:1px solid var(--border);border-radius:9px;overflow:hidden;margin-bottom:6px}
+  .seg button{font-family:inherit;font-size:12px;font-weight:600;padding:5px 12px;border:0;cursor:pointer;
+              background:white;color:var(--text-secondary)}
+  .seg button.on{background:var(--primary-600);color:#fff}
+  .seg-zone{display:flex;align-items:center;gap:8px;padding:8px 12px;border:2px dashed var(--ocean-deep);
+            border-radius:var(--radius-input);background:var(--ocean-light);min-height:40px}
+
+  /* ============ 方案 C：标题栏按钮 ============ */
+  .zone-head{display:flex;align-items:center;justify-content:space-between}
+  .ghost-btn{display:inline-flex;align-items:center;gap:5px;font-family:inherit;font-size:11.5px;font-weight:600;
+             padding:3px 9px;border:1px solid var(--primary-200);background:var(--primary-50);
+             color:var(--primary-700);border-radius:7px;cursor:pointer}
+
+  /* ============ 弹窗 ============ */
+  .overlay{background:rgba(26,26,46,.34);border-radius:var(--radius-card);padding:26px;display:flex;
+           justify-content:center;align-items:flex-start}
+  .modal{width:100%;max-width:880px;background:white;border-radius:var(--radius-modal);
+         box-shadow:var(--shadow-lg);overflow:hidden}
+  .modal-head{padding:16px 22px;border-bottom:1px solid var(--border-light);display:flex;align-items:flex-start;gap:10px}
+  .modal-head h3{font-size:15.5px;font-weight:700}
+  .modal-head .sub{font-size:12.5px;color:var(--text-muted);margin-top:2px}
+  .modal-head .x{margin-left:auto;color:var(--slate-400);font-size:18px;line-height:1;cursor:pointer}
+
+  .sum{display:flex;gap:0;padding:11px 22px;background:var(--slate-50);border-bottom:1px solid var(--border-light)}
+  .sum div{font-size:12px;color:var(--text-secondary);padding:0 14px}
+  .sum div+div{border-left:1px solid var(--border)}
+  .sum b{font-weight:700;font-size:13.5px}
+  .sum .ok b{color:var(--success-600)}
+  .sum .mid b{color:var(--warning-700)}
+  .sum .bad b{color:var(--danger-600)}
+
+  .modal-body{padding:0 22px}
+  table.rt{width:100%;border-collapse:collapse;font-size:12.5px}
+  table.rt th{text-align:left;font-weight:600;color:var(--text-secondary);padding:9px 8px;
+              border-bottom:1px solid var(--border);font-size:12px;white-space:nowrap}
+  table.rt td{padding:8px;border-bottom:1px solid var(--border-light);vertical-align:top}
+  table.rt tr:last-child td{border-bottom:0}
+  .matched{display:flex;align-items:center;gap:6px}
+  .matched .nm{font-weight:600}
+  .pill{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:700;
+        padding:1px 7px;border-radius:999px;white-space:nowrap}
+  .pill.ok{background:var(--success-50);color:var(--success-700)}
+  .pill.mid{background:var(--warning-50);color:var(--warning-700)}
+  .pill.bad{background:var(--danger-50);color:var(--danger-700)}
+  .from-orig{font-size:11px;color:var(--text-muted);margin-top:3px}
+  .from-orig s{color:var(--slate-400)}
+  .pick{border:1.5px solid var(--danger-400);border-radius:9px;padding:6px 9px;font-size:12.5px;
+        color:var(--danger-600);background:var(--danger-50);display:flex;align-items:center;gap:6px}
+  .pick-hint{font-size:11px;color:var(--danger-600);margin-top:3px}
+  .qty{width:74px;border:1px solid var(--slate-300);border-radius:9px;padding:6px 9px;font-size:13px;
+       font-family:inherit;text-align:right;background:white}
+  .qty.na{border-color:var(--danger-400);background:var(--danger-50);color:var(--danger-600)}
+  .unit{font-size:11.5px;color:var(--text-muted);margin-left:4px}
+  .del{color:var(--slate-400);cursor:pointer;font-size:13px;background:none;border:0;font-family:inherit}
+  .cust-chip{display:inline-flex;align-items:center;gap:5px;font-size:12px}
+  .cust-chip .src{font-size:10.5px;color:var(--ocean-text);background:var(--ocean-light);
+                  padding:1px 6px;border-radius:999px;font-weight:600;white-space:nowrap}
+
+  .rawbar{padding:10px 22px;border-top:1px solid var(--border-light);background:var(--slate-50);
+          font-size:12px;color:var(--text-secondary);display:flex;align-items:center;gap:7px;cursor:pointer}
+  .modal-foot{padding:14px 22px;border-top:1px solid var(--border-light);display:flex;align-items:center;gap:10px}
+  .btn{font-family:inherit;font-size:13px;font-weight:600;padding:8px 16px;border-radius:var(--radius-button);
+       border:1px solid transparent;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+  .btn.primary{background:var(--primary-600);color:#fff}
+  .btn.primary:hover{background:var(--primary-700)}
+  .btn.ghost{background:white;color:var(--text-secondary);border-color:var(--border)}
+  .btn.link{background:none;color:var(--text-muted);padding:8px 4px}
+  .foot-note{font-size:11.5px;color:var(--text-muted);margin-left:auto}
+
+  /* ============ 指引态 ============ */
+  .guide{padding:30px 22px 26px;text-align:center}
+  .guide .big{width:52px;height:52px;border-radius:15px;background:var(--warning-50);color:var(--warning-700);
+              display:flex;align-items:center;justify-content:center;margin:0 auto 12px}
+  .guide h4{font-size:15px;font-weight:700;margin-bottom:5px}
+  .guide .why{font-size:12.5px;color:var(--text-muted);max-width:430px;margin:0 auto 20px}
+  .exits{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;text-align:left}
+  .exit{border:1px solid var(--border);border-radius:var(--radius-input);padding:13px;background:white;
+        display:flex;flex-direction:column;gap:6px}
+  .exit .t{font-size:13px;font-weight:700}
+  .exit .d{font-size:11.5px;color:var(--text-muted);flex:1}
+  .exit .btn{font-size:12px;padding:6px 11px;align-self:flex-start}
+
+  .note-box{background:var(--slate-50);border:1px solid var(--border);border-left:3px solid var(--ocean-deep);
+            border-radius:var(--radius-sm);padding:10px 13px;font-size:12px;color:var(--text-secondary);margin-top:14px}
+
+  .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--text-secondary);margin:14px 0 0}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .swatch{width:11px;height:11px;border-radius:3px;display:inline-block}
+</style>
+</head>
+<body>
+<div class="stage">
+
+  <h2 class="sec">粘贴热区 — 三个方案对比</h2>
+  <p class="sec-sub">左侧是客户订单页真实的录入栏宽度（392px）。热区必须在这个窄栏里放得下、看得见、点得到。</p>
+
+  <div style="display:grid;grid-template-columns:392px 1fr;gap:26px;align-items:start">
+
+    <!-- 方案 A -->
+    <div>
+      <div class="stage-note"><span class="tag pick">推荐</span><strong>方案 A · 独立粘贴热区</strong></div>
+      <div class="col">
+        <div class="col-title"><span><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M11.5 1a.5.5 0 0 1 .5.5V2h1a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1h1v-.5a.5.5 0 0 1 1 0V2h5v-.5a.5.5 0 0 1 .5-.5zM4 3v1h8V3H4z"/></svg>订单信息录入</span></div>
+        <div class="col-body">
+          <div class="field"><label class="label">客户名称 <span class="req">*</span></label><div class="fake-input">华东商贸有限公司</div></div>
+          <div class="field"><label class="label">产品名称 <span class="req">*</span></label><div class="fake-input">输入产品名称搜索</div></div>
+          <div class="fake-row"><div class="field"><label class="label">订单数量 <span class="req">*</span></label><div class="fake-input">0</div></div></div>
+
+          <div class="sec-label"><svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M9.5 2H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V5.5L9.5 2z"/></svg>批量导入</div>
+          <div class="excel-zone">
+            <span class="txt"><svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M2 2h12v12H2V2zm2 2v8h8V4H4z"/></svg>拖拽 Excel 到此处</span>
+            <span class="inline-btns"><button class="inline-btn">模板</button><button class="inline-btn ok">导入</button></span>
+          </div>
+
+          <div class="paste-zone">
+            <span class="ic"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1.5A3.5 3.5 0 0 0 4.5 5v.5H3A1.5 1.5 0 0 0 1.5 7v6A1.5 1.5 0 0 0 3 14.5h10A1.5 1.5 0 0 0 14.5 13V7A1.5 1.5 0 0 0 13 5.5h-1.5V5A3.5 3.5 0 0 0 8 1.5zm2 4V5a2 2 0 1 0-4 0v.5h4z"/></svg></span>
+            <span>
+              <span class="t1">粘贴截图识别 <kbd>Ctrl</kbd><kbd>V</kbd></span>
+              <span class="t2">聊天截图、表格、拍照均可</span>
+            </span>
+            <span class="go">或点此选图</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 方案 B / C -->
+    <div>
+      <div class="stage-note"><span class="tag alt">备选</span><strong>方案 B · 并入批量导入（分段切换）</strong></div>
+      <div class="col" style="width:100%">
+        <div class="col-body">
+          <div class="sec-label">批量导入</div>
+          <div class="seg"><button class="on">Excel 文件</button><button>图片粘贴</button></div>
+          <div class="seg-zone" style="border-style:solid;border-width:1px;border-color:var(--border);background:white">
+            <span class="txt" style="font-size:13px;color:var(--text-muted)">切到「图片粘贴」后，此处提示 Ctrl+V</span>
+          </div>
+          <div class="note-box"><strong>取舍：</strong>省一行高度，但「粘贴」被藏进第二个分段——用户得先点一次才知道有这功能，违反「直接 Ctrl+V」的直觉。窄栏里两个动作挤在一起也更易误触。</div>
+        </div>
+      </div>
+
+      <div class="stage-note" style="margin-top:22px"><span class="tag alt">备选</span><strong>方案 C · 标题栏小按钮</strong></div>
+      <div class="col" style="width:100%">
+        <div class="col-body">
+          <div class="zone-head">
+            <div class="sec-label" style="padding:0">批量导入</div>
+            <button class="ghost-btn"><svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1.5A3.5 3.5 0 0 0 4.5 5v.5H3A1.5 1.5 0 0 0 1.5 7v6A1.5 1.5 0 0 0 3 14.5h10A1.5 1.5 0 0 0 14.5 13V7A1.5 1.5 0 0 0 13 5.5h-1.5V5A3.5 3.5 0 0 0 8 1.5z"/></svg>粘贴图片</button>
+          </div>
+          <div class="excel-zone" style="margin-top:6px">
+            <span class="txt">拖拽 Excel 到此处</span>
+            <span class="inline-btns"><button class="inline-btn">模板</button><button class="inline-btn ok">导入</button></span>
+          </div>
+          <div class="note-box"><strong>取舍：</strong>最省空间，但把「粘贴」降级成一个普通按钮，等于承认粘贴不是主路径；且点击后还要再弹一次提示，多一步。</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== 预览弹窗 ==================== -->
+<div class="stage">
+  <h2 class="sec">OCR 结果预览弹窗</h2>
+  <p class="sec-sub">识别结果先在这里过一遍人工眼睛。三种匹配态并存：已匹配 / 模糊匹配（要给置信度）/ 未匹配（必须手选）。</p>
+
+  <div class="stage-note">
+    <span class="tag">匹配态</span>
+    <span class="legend">
+      <span><i class="swatch" style="background:var(--success-500)"></i>已精确匹配</span>
+      <span><i class="swatch" style="background:var(--warning-500)"></i>模糊匹配，需扫一眼</span>
+      <span><i class="swatch" style="background:var(--danger-500)"></i>未匹配，必须手选</span>
+    </span>
+  </div>
+
+  <div class="overlay">
+    <div class="modal">
+      <div class="modal-head">
+        <div>
+          <h3>确认识别结果</h3>
+          <div class="sub">来自「张老板」的截图 · 识别到 4 项，请核对后再导入</div>
+        </div>
+        <span class="x">&times;</span>
+      </div>
+
+      <div class="sum">
+        <div class="ok">已匹配 <b>2</b></div>
+        <div class="mid">需确认 <b>1</b></div>
+        <div class="bad">未匹配 <b>1</b></div>
+        <div>合计数量 <b>115</b></div>
+      </div>
+
+      <div class="modal-body">
+        <table class="rt">
+          <thead>
+            <tr><th style="width:150px">客户</th><th>产品</th><th style="width:110px">数量</th><th style="width:120px">备注</th><th style="width:30px"></th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="cust-chip">华东商贸<span class="src">取自表单</span></span></td>
+              <td><span class="matched"><span class="nm">儿童保温杯 500ml</span><span class="pill ok">✓ 精确</span></span></td>
+              <td><input class="qty" value="50" /><span class="unit">箱</span></td>
+              <td><span style="color:var(--text-muted)">—</span></td>
+              <td><button class="del">&times;</button></td>
+            </tr>
+            <tr>
+              <td><span class="cust-chip">华东商贸<span class="src">取自表单</span></span></td>
+              <td>
+                <span class="matched"><span class="nm">卡通雨伞 8骨</span><span class="pill mid">82%</span></span>
+                <div class="from-orig">原图识别：<s>卡通雨伞 8 骨</s> → 已对上库内产品</div>
+              </td>
+              <td><input class="qty" value="30" /><span class="unit">把</span></td>
+              <td><span style="color:var(--text-muted)">—</span></td>
+              <td><button class="del">&times;</button></td>
+            </tr>
+            <tr>
+              <td><span class="cust-chip">华东商贸<span class="src">取自表单</span></span></td>
+              <td><span class="matched"><span class="nm">不锈钢饭盒 三层</span><span class="pill ok">✓ 精确</span></span></td>
+              <td><input class="qty" value="20" /><span class="unit">个</span></td>
+              <td><span style="color:var(--text-muted)">—</span></td>
+              <td><button class="del">&times;</button></td>
+            </tr>
+            <tr>
+              <td><span class="cust-chip">华东商贸<span class="src">取自表单</span></span></td>
+              <td>
+                <div class="pick">🔍 点击搜索产品…</div>
+                <div class="pick-hint">原图识别「儿童水壶600ml」在库内无匹配，请手动选择</div>
+              </td>
+              <td><input class="qty" value="15" /><span class="unit">箱</span></td>
+              <td><span style="color:var(--text-muted)">—</span></td>
+              <td><button class="del">&times;</button></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="rawbar">
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M5.5 3.5 2 8l3.5 4.5.8-.6L3.4 8l2.9-3.9-.8-.6zm5 0-.8.6L12.6 8l-2.9 3.9.8.6L14 8l-3.5-4.5z"/></svg>
+        查看识别原文（用于判断是识别错了还是解析错了）
+      </div>
+
+      <div class="modal-foot">
+        <button class="btn primary">导入暂存区（4 项）</button>
+        <button class="btn ghost">取消</button>
+        <span class="foot-note">未匹配的产品可先删掉这一行，之后手工补录</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== 指引态 ==================== -->
+<div class="stage">
+  <h2 class="sec">识别失败指引态</h2>
+  <p class="sec-sub">识别到 0 条时不能只丢一句「失败」。给三条明确出路，每条都要能一键走通。</p>
+
+  <div class="overlay">
+    <div class="modal" style="max-width:760px">
+      <div class="modal-head">
+        <div><h3>没有识别到可导入的条目</h3></div>
+        <span class="x">&times;</span>
+      </div>
+
+      <div class="guide">
+        <div class="big"><svg width="26" height="26" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1.5 1 14h14L8 1.5zm0 4a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 8 5.5zm0 6.5a.9.9 0 1 1 0-1.8.9.9 0 0 1 0 1.8z"/></svg></div>
+        <h4>这张图没读出货品和数量</h4>
+        <p class="why">常见原因：图片太糊或有遮挡、文字被截断、或者内容本身不是订货信息。下面三种方式都能继续。</p>
+
+        <div class="exits">
+          <div class="exit">
+            <span class="t">换一张更清晰的</span>
+            <span class="d">正对拍摄、光线均匀、别裁掉文字，聊天截图尽量完整。</span>
+            <button class="btn primary">重新粘贴</button>
+          </div>
+          <div class="exit">
+            <span class="t">改用 Excel 导入</span>
+            <span class="d">大批量或格式规整时更稳。下载模板填好再拖进来。</span>
+            <button class="btn ghost">下载模板</button>
+          </div>
+          <div class="exit">
+            <span class="t">手工录入这一条</span>
+            <span class="d">只有一两条的话，直接填比折腾图片快。</span>
+            <button class="btn ghost">去录入</button>
+          </div>
+        </div>
+
+        <div class="note-box" style="text-align:left">
+          <strong>识别原文：</strong>张老板（华东商贸）/ 王姐，这周要补一批货 / 好的，明细发我 / 儿童保温杯500ml50箱 / 卡通雨伞8骨30把 …
+          <div style="margin-top:6px;color:var(--text-muted)">文字认出来了，但没解析出「产品+数量」结构 —— 这时值得把原文贴给开发。</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="zh-CN" style="color-scheme: light">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>物料计算器 · 结果汇总改版 — 对比稿</title>
+<style>
+  :root {
+    --primary-50: #eff5ff; --primary-500: #5b8def; --primary-700: #2d5ab8;
+    --success-700: #2e7d32; --warning-800: #a06218; --warning-50: #fdf6ec;
+    --surface-card: #ffffff; --border: #e4e7ed; --border-light: #f0f2f5;
+    --text: #1a1a2e; --text-secondary: #475569; --text-muted: #64748b;
+    --slate-50: #f8fafc; --slate-100: #f1f5f9;
+    --merge-bg: #eff5ff;
+    --dup-bg: #fdf6ec;
+    --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: var(--font);
+    background: linear-gradient(135deg, var(--slate-50) 0%, var(--border-light) 100%);
+    min-height: 100vh; padding: 28px 24px 64px; color: var(--text);
+  }
+  .stage { max-width: 1160px; margin: 0 auto; }
+
+  .intro { margin-bottom: 6px; }
+  .intro h1 { font-size: 18px; font-weight: 700; }
+  .intro p { font-size: 13px; color: var(--text-muted); line-height: 1.7; margin-top: 6px; max-width: 860px; }
+
+  .option-tag { display: flex; align-items: baseline; gap: 12px; margin: 34px 0 14px; }
+  .option-tag .tag {
+    font-size: 12px; font-weight: 700; color: white; background: var(--primary-700);
+    padding: 3px 10px; border-radius: 999px; flex-shrink: 0;
+  }
+  .option-tag .tag.gray { background: var(--text-muted); }
+  .option-tag .desc { font-size: 13px; color: var(--text-secondary); line-height: 1.6; }
+
+  /* ===== 结果列面板（复刻真实 .mc-col） ===== */
+  .panel {
+    background: var(--surface-card); border: 1px solid var(--border);
+    border-radius: 10px; overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+  .panel-col { width: 532px; }
+  .panel-pair { display: flex; gap: 24px; align-items: flex-start; }
+
+  .tab-float {
+    font-size: 11px; font-weight: 700; color: var(--text-muted);
+    letter-spacing: .05em; margin: 0 0 6px 4px;
+  }
+
+  .mc-col-title {
+    display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 12px;
+    font-size: 13px; font-weight: 600; color: var(--text);
+    border-bottom: 1px solid var(--border-light); flex-shrink: 0;
+  }
+  .mc-col-title svg { width: 14px; height: 14px; color: var(--primary-500); flex-shrink: 0; }
+  .mc-col-tail { margin-left: auto; font-size: 12px; font-weight: 500; color: var(--text-muted); white-space: nowrap; }
+  .mc-col-tail b { color: var(--primary-700); font-weight: 600; }
+
+  .mc-scope-bar {
+    display: flex; align-items: center; gap: 8px; min-height: 40px;
+    padding: 8px 12px; border-bottom: 1px solid var(--border-light); flex-shrink: 0;
+  }
+  .mc-seg {
+    display: inline-flex; align-items: center; gap: 2px; height: 30px; padding: 2px;
+    background: var(--slate-100); border: 1px solid var(--border); border-radius: 6px;
+    min-width: 0; overflow: hidden;
+  }
+  .mc-seg > button {
+    display: inline-flex; align-items: center; height: 100%; padding: 0 10px;
+    border: 0; border-radius: 4px; background: transparent; color: var(--text-secondary);
+    font-family: inherit; font-size: 12px; font-weight: 500; white-space: nowrap;
+    cursor: pointer; max-width: 190px; overflow: hidden; text-overflow: ellipsis;
+  }
+  .mc-seg > button.active { background: #fff; color: var(--primary-700); font-weight: 600; box-shadow: 0 1px 2px rgba(16,24,40,.07); }
+
+  .mc-scope-meta { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+  .mc-scope-product { font-size: 10px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 130px; }
+  .mc-scope-qty { font-size: 10px; color: var(--text-muted); white-space: nowrap; }
+  .mc-scope-qty b { color: var(--primary-700); font-weight: 600; }
+  .mc-scope-plain { font-size: 12px; font-weight: 600; color: var(--text); white-space: nowrap; }
+  .mc-scope-plain .mc-scope-qty { font-size: 10px; font-weight: 500; }
+
+  .mc-result-content { padding: 4px 12px 12px; }
+
+  .mc-category-block { border-bottom: 1px solid var(--border-light); }
+  .mc-category-block:last-child { border-bottom: 0; }
+  .mc-cat-filling { --mc-cat: var(--primary-700); }
+  .mc-cat-fabric { --mc-cat: var(--success-700); }
+  .mc-cat-accessory { --mc-cat: var(--warning-800); }
+
+  .mc-category-header { display: flex; align-items: center; gap: 8px; width: 100%; height: 32px; padding: 0 4px; background: transparent; }
+  .mc-cat-icon { width: 12px; height: 12px; flex-shrink: 0; color: var(--mc-cat, var(--text-muted)); }
+  .mc-cat-label { font-size: 11px; font-weight: 600; }
+  .mc-cat-count { font-size: 10px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .mc-cat-toggle { margin-left: auto; width: 11px; height: 11px; color: var(--text-muted); }
+
+  .mc-table-wrap { padding-bottom: 8px; }
+  table.mc-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 12px; line-height: 1.35; }
+  .mc-table thead th {
+    padding: 5px 8px; text-align: left; font-size: 11px; font-weight: 600;
+    color: var(--text-muted); background: var(--slate-50);
+    border-bottom: 1px solid var(--border-light); white-space: nowrap; overflow: hidden;
+  }
+  .mc-table tbody td {
+    padding: 6px 8px; border-bottom: 1px solid var(--border-light); color: var(--text);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .mc-table tbody tr:last-child td { border-bottom: 0; }
+  .mc-table th.is-num, .mc-table td.is-num { text-align: center; font-variant-numeric: tabular-nums; }
+  .mc-table td.is-num { font-weight: 500; }
+  .mc-table th.is-center, .mc-table td.is-center { text-align: center; }
+  .col-supplier { width: 18.7%; } .col-name { width: 21.4%; } .col-spec { width: 22.6%; }
+  .col-qty { width: 21.4%; } .col-unit { width: 15.9%; }
+
+  /* 演示标注：分散重复行（现状琥珀底） / 跨SKU合并行（方案蓝底+来源徽标） */
+  tr.dup td { background: var(--dup-bg); }
+  tr.merged td { background: var(--merge-bg); }
+  .src-chip {
+    display: inline-block; margin-left: 5px; padding: 0 5px; border-radius: 999px;
+    background: #dbe7fd; color: var(--primary-700); font-size: 9.5px; font-weight: 700;
+    line-height: 15px; vertical-align: 1px;
+  }
+
+  .callout {
+    display: flex; align-items: flex-start; gap: 9px; margin-top: 12px;
+    padding: 10px 14px; border: 1px dashed var(--border); border-radius: 8px;
+    background: rgba(255,255,255,.7); font-size: 12.5px; color: var(--text-secondary); line-height: 1.7;
+  }
+  .callout svg { flex-shrink: 0; margin-top: 3px; color: var(--warning-800); }
+
+  .legend { display: flex; gap: 22px; flex-wrap: wrap; margin: 12px 0 0; font-size: 12px; color: var(--text-secondary); }
+  .legend span { display: inline-flex; align-items: center; gap: 7px; }
+  .sw { width: 14px; height: 14px; border-radius: 3px; border: 1px solid var(--border); display: inline-block; }
+  .sw.dup { background: var(--dup-bg); }
+  .sw.merged { background: var(--merge-bg); }
+
+  .footnotes { margin-top: 40px; padding-top: 18px; border-top: 1px solid var(--border); }
+  .footnotes h2 { font-size: 14px; font-weight: 700; margin-bottom: 10px; }
+  .footnotes li { font-size: 12.5px; color: var(--text-secondary); line-height: 1.9; margin-left: 18px; }
+</style>
+</head>
+<body>
+<div class="stage">
+  <div class="intro">
+    <h1>物料计算器 · 物料用量计算结果 —— 多 SKU 汇总显示</h1>
+    <p>
+      场景：订单录入 2 个 SKU——「招财猫盲盒毛绒挂件(混4款)」× 500、「泰迪熊毛绒玩具(25cm)」× 300。
+      两者共用 PP棉（7D）、短毛绒（110g/m²·米白）、蘑菇钉眼（20mm·黑）等物料。
+      示例数据与真实列宽 / 分类色 / 表格样式一致；<span style="color:var(--warning-800)">琥珀底</span>与<span style="color:var(--primary-700)">蓝底</span>为演示标注，实际不会显示底色。
+    </p>
+  </div>
+
+  <!-- ============ 现状 ============ -->
+  <div class="option-tag">
+    <span class="tag gray">现状</span>
+    <span class="desc">按「产品 × 作用域」分 TAB——同一供应商·物料·规格分散在两个 TAB，需来回切换人工核对。</span>
+  </div>
+  <div class="panel-pair">
+    <div class="panel panel-col">
+      <div class="tab-float">TAB 1（当前选中）</div>
+      <div class="mc-col-title">
+        <svg viewBox="0 0 512 512" fill="currentColor"><path d="M304 240a16 16 0 1 0-16-16 16 16 0 0 0 16 16zm-112-32a16 16 0 1 0 16 16 16 16 0 0 0-16-16zm247 87.91c-2.53-25.3-13-47.47-29.51-65.22C422.5 198 426.7 164 415.6 150.6c-13.9-16.6-61.5-16.8-89.6 4.4a162.8 162.8 0 0 0-39.9-4.9c-13.7 0-27.2 1.7-40 4.9-28.2-21.3-75.9-21-89.7-4.4-11.1 13.4-6.9 47.4 6.1 79.9-16.5 17.8-27 40-29.5 65.3-1.3 13.2-.6 25.9 2 37.6C126 359.4 164.4 416 248 416c34.1 0 60.1-9.5 78.3-23.6 7.9 1.9 16.2 3 24.7 3 68.5 0 115.1-45.8 118.3-111.9.7-8.2.5-16.4-.3-24.6zM256 32C132.3 32 32 134.9 32 261.7c0 101.4 65.8 187.5 157.1 217.6l43-89.1c-83.5-8.9-121.1-65.4-121.1-119.9 0-10 1.2-19.6 3.5-28.7C114 254.6 110 238.4 110 224c0-13.6 3.5-26.4 9.7-37.5C135.3 137.4 191.5 96 256 96s120.7 41.4 136.3 90.5c6.2 11.1 9.7 23.9 9.7 37.5 0 14.4-4 30.6-11.5 47.6 2.3 9.1 3.5 18.7 3.5 28.7 0 54.5-37.6 111-121.1 119.9l43 89.1C453.8 449.2 512 363.1 512 261.7 512 134.9 379.7 32 256 32z"/></svg>
+        物料用量计算结果
+        <span class="mc-col-tail">合计 <b>5</b> 项</span>
+      </div>
+      <div class="mc-scope-bar">
+        <div class="mc-seg">
+          <button class="active">招财猫盲盒毛绒挂件(混4款)</button>
+          <button>泰迪熊毛绒玩具(25cm)</button>
+        </div>
+        <span class="mc-scope-meta"><span class="mc-scope-qty">数量 <b>500</b></span></span>
+      </div>
+      <div class="mc-result-content">
+        <div class="mc-category-block mc-cat-filling">
+          <div class="mc-category-header">
+            <svg class="mc-cat-icon" viewBox="0 0 640 512" fill="currentColor"><path d="M0 336c0 79.5 64.5 144 144 144l368 0c70.7 0 128-57.3 128-128c0-61.9-44-113.6-102.4-125.4c4.1-10.7 6.4-22.4 6.4-34.6c0-53-43-96-96-96c-19.7 0-38.1 6-53.3 16.2C367 64.2 315.3 32 256 32C167.6 32 96 103.6 96 192l0 7.1C41.3 205.7 0 258.3 0 336z"/></svg>
+            <span class="mc-cat-label">填充类</span><span class="mc-cat-count">1</span>
+            <svg class="mc-cat-toggle" viewBox="0 0 512 512" fill="currentColor"><path d="M233.4 406.6c12.5 12.5 32.8 12.5 45.3 0l192-192c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L256 338.7 86.6 169.4c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3l192 192z"/></svg>
+          </div>
+          <div class="mc-table-wrap">
+            <table class="mc-table">
+              <colgroup><col class="col-supplier"><col class="col-name"><col class="col-spec"><col class="col-qty"><col class="col-unit"></colgroup>
+              <thead><tr><th>供应商</th><th>物料名称</th><th class="is-center">规格/色号</th><th class="is-num">总采购量</th><th>单位</th></tr></thead>
+              <tbody>
+                <tr class="dup"><td>东莞恒泰填充材料</td><td>PP棉</td><td class="is-center" title="7D三维卷曲">7D三维卷曲</td><td class="is-num">40</td><td>kg</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="mc-category-block mc-cat-fabric">
+          <div class="mc-category-header">
+            <svg class="mc-cat-icon" viewBox="0 0 512 512" fill="currentColor"><path d="M64 0C28.7 0 0 28.7 0 64l0 96c0 8.1 4.9 15.5 12.4 18.6c25.5 10.4 43.6 35.5 43.6 64.4s-18.1 54-43.6 64.4C4.9 311.5 0 318.9 0 327l0 121C0 483.3 28.7 512 64 512l384 0c35.3 0 64-28.7 64-64l0-121c0-8.1-4.9-15.5-12.4-18.6c-25.5-10.4-43.6-35.5-43.6-64.4s18.1-54 43.6-64.4c7.5-3.1 12.4-10.5 12.4-18.6l0-96c0-35.3-28.7-64-64-64L64 0z"/></svg>
+            <span class="mc-cat-label">面料类</span><span class="mc-cat-count">2</span>
+            <svg class="mc-cat-toggle" viewBox="0 0 512 512" fill="currentColor"><path d="M233.4 406.6c12.5 12.5 32.8 12.5 45.3 0l192-192c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L256 338.7 86.6 169.4c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3l192 192z"/></svg>
+          </div>
+          <div class="mc-table-wrap">
+            <table class="mc-table">
+              <colgroup><col class="col-supplier"><col class="col-name"><col class="col-spec"><col class="col-qty"><col class="col-unit"></colgroup>
+              <thead><tr><th>供应商</th><th>物料名称</th><th class="is-center">规格/色号</th><th class="is-num">总采购量</th><th>单位</th></tr></thead>
+              <tbody>
+                <tr class="dup"><td>苏州锦华纺织</td><td>短毛绒</td><td class="is-center" title="110g/m²·米白">110g/m²·米白</td><td class="is-num">125</td><td>米</td></tr>
+                <tr><td>苏州锦华纺织</td><td>水晶超柔</td><td class="is-center" title="180g/m²·正红">180g/m²·正红</td><td class="is-num">60</td><td>米</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="mc-category-block mc-cat-accessory">
+          <div class="mc-category-header">
+            <svg class="mc-cat-icon" viewBox="0 0 640 512" fill="currentColor"><path d="M192.4 256c14.3 0 25.9-11.6 25.9-25.9l0-44.7c0-14.3-11.6-25.9-25.9-25.9c-7.7 0-14.6 3.3-19.4 8.6c-2.1-3.9-4.5-7.6-7.4-11c-10.3-12.4-24.9-20.5-41.1-22.6C121.4 133.7 118.3 133 115 133c-26.5 0-48 21.5-48 48c0 5.3.9 10.5 2.6 15.4C69.4 197 69 197.6 68.6 198.3C57.4 211.6 48 227 48 245.5c0 29.6 20.7 54.4 48.4 61.4c3.4.9 6.9 1.4 10.6 1.4c8.5 0 16.5-2.1 23.6-5.8c4.9 8.7 13.9 14.5 24.3 14.5c14.3 0 25.9-11.6 25.9-25.9l0-9.1c3.4 1.4 7.1 2.2 11 2.2z"/></svg>
+            <span class="mc-cat-label">辅料类</span><span class="mc-cat-count">2</span>
+            <svg class="mc-cat-toggle" viewBox="0 0 512 512" fill="currentColor"><path d="M233.4 406.6c12.5 12.5 32.8 12.5 45.3 0l192-192c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L256 338.7 86.6 169.4c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3l192 192z"/></svg>
+          </div>
+          <div class="mc-table-wrap">
+            <table class="mc-table">
+              <colgroup><col class="col-supplier"><col class="col-name"><col class="col-spec"><col class="col-qty"><col class="col-unit"></colgroup>
+              <thead><tr><th>供应商</th><th>物料名称</th><th class="is-center">规格/色号</th><th class="is-num">总采购量</th><th>单位</th></tr></thead>
+              <tbody>
+                <tr class="dup"><td>义乌宏发辅料行</td><td>蘑菇钉眼</td><td class="is-center" title="20mm·黑">20mm·黑</td><td class="is-num">500</td><td>个</td></tr>
+                <tr><td>义乌宏发辅料行</td><td>挂绳</td><td class="is-center" title="涤纶10cm·金色">涤纶10cm·金色</td><td class="is-num">500</td><td>条</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel panel-col">
+      <div class="tab-float">TAB 2（需手动切换）</div>
+      <div class="mc-col-title">
+        <svg viewBox="0 0 512 512" fill="currentColor"><path d="M304 240a16 16 0 1 0-16-16 16 16 0 0 0 16 16zm-112-32a16 16 0 1 0 16 16 16 16 0 0 0-16-16zm247 87.91c-2.53-25.3-13-47.47-29.51-65.22C422.5 198 426.7 164 415.6 150.6c-13.9-16.6-61.5-16.8-89.6 4.4a162.8 162.8 0 0 0-39.9-4.9c-13.7 0-27.2 1.7-40 4.9-28.2-21.3-75.9-21-89.7-4.4-11.1 13.4-6.9 47.4 6.1 79.9-16.5 17.8-27 40-29.5 65.3-1.3 13.2-.6 25.9 2 37.6C126 359.4 164.4 416 248 416c34.1 0 60.1-9.5 78.3-23.6 7.9 1.9 16.2 3 24.7 3 68.5 0 115.1-45.8 118.3-111.9.7-8.2.5-16.4-.3-24.6zM256 32C132.3 32 32 134.9 32 261.7c0 101.4 65.8 187.5 157.1 217.6l43-89.1c-83.5-8.9-121.1-65.4-121.1-119.9 0-10 1.2-19.6 3.5-28.7C114 254.6 110 238.4 110 224c0-13.6 3.5-26.4 9.7-37.5C135.3 137.4 191.5 96 256 96s120.7 41.4 136.3 90.5c6.2 11.1 9.7 23.9 9.7 37.5 0 14.4-4 30.6-11.5 47.6 2.3 9.1 3.5 18.7 3.5 28.7 0 54.5-37.6 111-121.1 119.9l43 89.1C453.8 449.2 512 363.1 512 261.7 512 134.9 379.7 32 256 32z"/></svg>
+        物料用量计算结果
+        <span class="mc-col-tail">合计 <b>5</b> 项</span>
+      </div>
+      <div class="mc-scope-bar">
+        <div class="mc-seg">
+          <button>招财猫盲盒毛绒挂件(混4款)</button>
+          <button class="active">泰迪熊毛绒玩具(25cm)</button>
+        </div>
+        <span class="mc-scope-meta"><span class="mc-scope-qty">数量 <b>300</b></span></span>
+      </div>
+      <div class="mc-result-content">
+        <div class="mc-category-block mc-cat-filling">
+          <div class="mc-category-header">
+            <svg class="mc-cat-icon" viewBox="0 0 640 512" fill="currentColor"><path d="M0 336c0 79.5 64.5 144 144 144l368 0c70.7 0 128-57.3 128-128c0-61.9-44-113.6-102.4-125.4c4.1-10.7 6.4-22.4 6.4-34.6c0-53-43-96-96-96c-19.7 0-38.1 6-53.3 16.2C367 64.2 315.3 32 256 32C167.6 32 96 103.6 96 192l0 7.1C41.3 205.7 0 258.3 0 336z"/></svg>
+            <span class="mc-cat-label">填充类</span><span class="mc-cat-count">1</span>
+            <svg class="mc-cat-toggle" viewBox="0 0 512 512" fill="currentColor"><path d="M233.4 406.6c12.5 12.5 32.8 12.5 45.3 0l192-192c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L256 338.7 86.6 169.4c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3l192 192z"/></svg>
+          </div>
+          <div class="mc-table-wrap">
+            <table class="mc-table">
+              <colgroup><col class="col-supplier"><col class="col-name"><col class="col-spec"><col class="col-qty"><col class="col-unit"></colgroup>
+              <thead><tr><th>供应商</th><th>物料名称</th><th class="is-center">规格/色号</th><th class="is-num">总采购量</th><th>单位</th></tr></thead>
+              <tbody>
+                <tr class="dup"><td>东莞恒泰填充材料</td><td>PP棉</td><td class="is-center" title="7D三维卷曲">7D三维卷曲</td><td class="is-num">30</td><td>kg</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="mc-category-block mc-cat-fabric">
+          <div class="mc-category-header">
+            <svg class="mc-cat-icon" viewBox="0 0 512 512" fill="currentColor"><path d="M64 0C28.7 0 0 28.7 0 64l0 96c0 8.1 4.9 15.5 12.4 18.6c25.5 10.4 43.6 35.5 43.6 64.4s-18.1 54-43.6 64.4C4.9 311.5 0 318.9 0 327l0 121C0 483.3 28.7 512 64 512l384 0c35.3 0 64-28.7 64-64l0-121c0-8.1-4.9-15.5-12.4-18.6c-25.5-10.4-43.6-35.5-43.6-64.4s18.1-54 43.6-64.4c7.5-3.1 12.4-10.5 12.4-18.6l0-96c0-35.3-28.7-64-64-64L64 0z"/></svg>
+            <span class="mc-cat-label">面料类</span><span class="mc-cat-count">2</span>
+            <svg class="mc-cat-toggle" viewBox="0 0 512 512" fill="currentColor"><path d="M233.4 406.6c12.5 12.5 32.8 12.5 45.3 0l192-192c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L256 338.7 86.6 169.4c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3l192 192z"/></svg>
+          </div>
+          <div class="mc-table-wrap">
+            <table class="mc-table">
+              <colgroup><col class="col-supplier"><col class="col-name"><col class="col-spec"><col class="col-qty"><col class="col-unit"></colgroup>
+              <thead><tr><th>供应商</th><th>物料名称</th><th class="is-center">规格/色号</th><th class="is-num">总采购量</th><th>单位</th></tr></thead>
+              <tbody>
+                <tr class="dup"><td>苏州锦华纺织</td><td>短毛绒</td><td class="is-center" title="110g/m²·米白">110g/m²·米白</td><td class="is-num">105</td><td>米</td></tr>
+                <tr><td>南通凯瑞织造</td><td>长毛绒</td><td class="is-center" title="220g/m²·棕">220g/m²·棕</td><td class="is-num">90</td><td>米</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="mc-category-block mc-cat-accessory">
+          <div class="mc-category-header">
+            <svg class="mc-cat-icon" viewBox="0 0 640 512" fill="currentColor"><path d="M192.4 256c14.3 0 25.9-11.6 25.9-25.9l0-44.7c0-14.3-11.6-25.9-25.9-25.9c-7.7 0-14.6 3.3-19.4 8.6c-2.1-3.9-4.5-7.6-7.4-11c-10.3-12.4-24.9-20.5-41.1-22.6C121.4 133.7 118.3 133 115 133c-26.5 0-48 21.5-48 48c0 5.3.9 10.5 2.6 15.4C69.4 197 69 197.6 68.6 198.3C57.4 211.6 48 227 48 245.5c0 29.6 20.7 54.4 48.4 61.4c3.4.9 6.9 1.4 10.6 1.4c8.5 0 16.5-2.1 23.6-5.8c4.9 8.7 13.9 14.5 24.3 14.5c14.3 0 25.9-11.6 25.9-25.9l0-9.1c3.4 1.4 7.1 2.2 11 2.2z"/></svg>
+            <span class="mc-cat-label">辅料类</span><span class="mc-cat-count">2</span>
+            <svg class="mc-cat-toggle" viewBox="0 0 512 512" fill="currentColor"><path d="M233.4 406.6c12.5 12.5 32.8 12.5 45.3 0l192-192c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L256 338.7 86.6 169.4c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3l192 192z"/></svg>
+          </div>
+          <div class="mc-table-wrap">
+            <table class="mc-table">
+              <colgroup><col class="col-supplier"><col class="col-name"><col class="col-spec"><col class="col-qty"><col class="col-unit"></colgroup>
+              <thead><tr><th>供应商</th><th>物料名称</th><th class="is-center">规格/色号</th><th class="is-num">总采购量</th><th>单位</th></tr></thead>
+              <tbody>
+                <tr class="dup"><td>义乌宏发辅料行</td><td>蘑菇钉眼</td><td class="is-center" title="20mm·黑">20mm·黑</td><td class="is-num">300</td><td>个</td></tr>
+                <tr><td>义乌宏发辅料行</td><td>关节扣</td><td class="is-center" title="尼龙20mm">尼龙20mm</td><td class="is-num">600</td><td>个</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="legend">
+    <span><span class="sw dup"></span>两个 TAB 里重复的同一「供应商·物料·规格」，需人工心算合并</span>
+  </div>
+
+  <!-- ============ 方案 A ============ -->
+  <div class="option-tag">
+    <span class="tag">方案 A（推荐）</span>
+    <span class="desc">新增「汇总」TAB 恒居首位且默认选中——相同供应商·物料名称·规格/色号的行合并求和；按产品查看降级为次级 TAB，多角色 BOM 能力保留。</span>
+  </div>
+  <div class="panel panel-col">
+    <div class="mc-col-title">
+      <svg viewBox="0 0 512 512" fill="currentColor"><path d="M304 240a16 16 0 1 0-16-16 16 16 0 0 0 16 16zm-112-32a16 16 0 1 0 16 16 16 16 0 0 0-16-16zm247 87.91c-2.53-25.3-13-47.47-29.51-65.22C422.5 198 426.7 164 415.6 150.6c-13.9-16.6-61.5-16.8-89.6 4.4a162.8 162.8 0 0 0-39.9-4.9c-13.7 0-27.2 1.7-40 4.9-28.2-21.3-75.9-21-89.7-4.4-11.1 13.4-6.9 47.4 6.1 79.9-16.5 17.8-27 40-29.5 65.3-1.3 13.2-.6 25.9 2 37.6C126 359.4 164.4 416 248 416c34.1 0 60.1-9.5 78.3-23.6 7.9 1.9 16.2 3 24.7 3 68.5 0 115.1-45.8 118.3-111.9.7-8.2.5-16.4-.3-24.6zM256 32C132.3 32 32 134.9 32 261.7c0 101.4 65.8 187.5 157.1 217.6l43-89.1c-83.5-8.9-121.1-65.4-121.1-119.9 0-10 1.2-19.6 3.5-28.7C114 254.6 110 238.4 110 224c0-13.6 3.5-26.4 9.7-37.5C135.3 137.4 191.5 96 256 96s120.7 41.4 136.3 90.5c6.2 11.1 9.7 23.9 9.7 37.5 0 14.4-4 30.6-11.5 47.6 2.3 9.1 3.5 18.7 3.5 28.7 0 54.5-37.6 111-121.1 119.9l43 89.1C453.8 449.2 512 363.1 512 261.7 512 134.9 379.7 32 256 32z"/></svg>
+      物料用量计算结果
+      <span class="mc-col-tail">合计 <b>7</b> 项</span>
+    </div>
+    <div class="mc-scope-bar">
+      <div class="mc-seg">
+        <button class="active">汇总</button>
+        <button>招财猫盲盒毛绒挂件(混4款)</button>
+        <button>泰迪熊毛绒玩具(25cm)</button>
+      </div>
+      <span class="mc-scope-meta"><span class="mc-scope-qty">2 个产品 · 合计 <b>800</b> 件</span></span>
+    </div>
+    <div class="mc-result-content">
+      <div class="mc-category-block mc-cat-filling">
+        <div class="mc-category-header">
+          <svg class="mc-cat-icon" viewBox="0 0 640 512" fill="currentColor"><path d="M0 336c0 79.5 64.5 144 144 144l368 0c70.7 0 128-57.3 128-128c0-61.9-44-113.6-102.4-125.4c4.1-10.7 6.4-22.4 6.4-34.6c0-53-43-96-96-96c-19.7 0-38.1 6-53.3 16.2C367 64.2 315.3 32 256 32C167.6 32 96 103.6 96 192l0 7.1C41.3 205.7 0 258.3 0 336z"/></svg>
+          <span class="mc-cat-label">填充类</span><span class="mc-cat-count">1</span>
+          <svg class="mc-cat-toggle" viewBox="0 0 512 512" fill="currentColor"><path d="M233.4 406.6c12.5 12.5 32.8 12.5 45.3 0l192-192c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L256 338.7 86.6 169.4c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3l192 192z"/></svg>
+        </div>
+        <div class="mc-table-wrap">
+          <table class="mc-table">
+            <colgroup><col class="col-supplier"><col class="col-name"><col class="col-spec"><col class="col-qty"><col class="col-unit"></colgroup>
+            <thead><tr><th>供应商</th><th>物料名称</th><th class="is-center">规格/色号</th><th class="is-num">总采购量</th><th>单位</th></tr></thead>
+            <tbody>
+              <tr class="merged"><td>东莞恒泰填充材料</td><td>PP棉<span class="src-chip">2 个SKU</span></td><td class="is-center" title="7D三维卷曲">7D三维卷曲</td><td class="is-num">70</td><td>kg</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="mc-category-block mc-cat-fabric">
+        <div class="mc-category-header">
+          <svg class="mc-cat-icon" viewBox="0 0 512 512" fill="currentColor"><path d="M64 0C28.7 0 0 28.7 0 64l0 96c0 8.1 4.9 15.5 12.4 18.6c25.5 10.4 43.6 35.5 43.6 64.4s-18.1 54-43.6 64.4C4.9 311.5 0 318.9 0 327l0 121C0 483.3 28.7 512 64 512l384 0c35.3 0 64-28.7 64-64l0-121c0-8.1-4.9-15.5-12.4-18.6c-25.5-10.4-43.6-35.5-43.6-64.4s18.1-54 43.6-64.4c7.5-3.1 12.4-10.5 12.4-18.6l0-96c0-35.3-28.7-64-64-64L64 0z"/></svg>
+          <span class="mc-cat-label">面料类</span><span class="mc-cat-count">3</span>
+          <svg class="mc-cat-toggle" viewBox="0 0 512 512" fill="currentColor"><path d="M233.4 406.6c12.5 12.5 32.8 12.5 45.3 0l192-192c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L256 338.7 86.6 169.4c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3l192 192z"/></svg>
+        </div>
+        <div class="mc-table-wrap">
+          <table class="mc-table">
+            <colgroup><col class="col-supplier"><col class="col-name"><col class="col-spec"><col class="col-qty"><col class="col-unit"></colgroup>
+            <thead><tr><th>供应商</th><th>物料名称</th><th class="is-center">规格/色号</th><th class="is-num">总采购量</th><th>单位</th></tr></thead>
+            <tbody>
+              <tr class="merged"><td>苏州锦华纺织</td><td>短毛绒<span class="src-chip">2 个SKU</span></td><td class="is-center" title="110g/m²·米白">110g/m²·米白</td><td class="is-num">230</td><td>米</td></tr>
+              <tr><td>苏州锦华纺织</td><td>水晶超柔</td><td class="is-center" title="180g/m²·正红">180g/m²·正红</td><td class="is-num">60</td><td>米</td></tr>
+              <tr><td>南通凯瑞织造</td><td>长毛绒</td><td class="is-center" title="220g/m²·棕">220g/m²·棕</td><td class="is-num">90</td><td>米</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="mc-category-block mc-cat-accessory">
+        <div class="mc-category-header">
+          <svg class="mc-cat-icon" viewBox="0 0 640 512" fill="currentColor"><path d="M192.4 256c14.3 0 25.9-11.6 25.9-25.9l0-44.7c0-14.3-11.6-25.9-25.9-25.9c-7.7 0-14.6 3.3-19.4 8.6c-2.1-3.9-4.5-7.6-7.4-11c-10.3-12.4-24.9-20.5-41.1-22.6C121.4 133.7 118.3 133 115 133c-26.5 0-48 21.5-48 48c0 5.3.9 10.5 2.6 15.4C69.4 197 69 197.6 68.6 198.3C57.4 211.6 48 227 48 245.5c0 29.6 20.7 54.4 48.4 61.4c3.4.9 6.9 1.4 10.6 1.4c8.5 0 16.5-2.1 23.6-5.8c4.9 8.7 13.9 14.5 24.3 14.5c14.3 0 25.9-11.6 25.9-25.9l0-9.1c3.4 1.4 7.1 2.2 11 2.2z"/></svg>
+          <span class="mc-cat-label">辅料类</span><span class="mc-cat-count">3</span>
+          <svg class="mc-cat-toggle" viewBox="0 0 512 512" fill="currentColor"><path d="M233.4 406.6c12.5 12.5 32.8 12.5 45.3 0l192-192c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L256 338.7 86.6 169.4c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3l192 192z"/></svg>
+        </div>
+        <div class="mc-table-wrap">
+          <table class="mc-table">
+            <colgroup><col class="col-supplier"><col class="col-name"><col class="col-spec"><col class="col-qty"><col class="col-unit"></colgroup>
+            <thead><tr><th>供应商</th><th>物料名称</th><th class="is-center">规格/色号</th><th class="is-num">总采购量</th><th>单位</th></tr></thead>
+            <tbody>
+              <tr class="merged"><td>义乌宏发辅料行</td><td>蘑菇钉眼<span class="src-chip">2 个SKU</span></td><td class="is-center" title="20mm·黑">20mm·黑</td><td class="is-num">800</td><td>个</td></tr>
+              <tr><td>义乌宏发辅料行</td><td>挂绳</td><td class="is-center" title="涤纶10cm·金色">涤纶10cm·金色</td><td class="is-num">500</td><td>条</td></tr>
+              <tr><td>义乌宏发辅料行</td><td>关节扣</td><td class="is-center" title="尼龙20mm">尼龙20mm</td><td class="is-num">600</td><td>个</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="legend">
+    <span><span class="sw merged"></span>跨 SKU 合并行（示意的蓝底不会上线，上线仅保留「N 个SKU」小徽标）</span>
+  </div>
+  <div class="callout">
+    <svg width="15" height="15" viewBox="0 0 512 512" fill="currentColor"><path d="M256 32c14.2 0 27.3 7.5 34.5 19.8l216.6 371.4C514.2 435.4 502.9 456 484.3 456L27.7 456C9.1 456-2.2 435.4 6.9 423.2L221.5 51.8C228.7 39.5 241.8 32 256 32zm0 128c-13.3 0-24 10.7-24 24l0 88c0 13.3 10.7 24 24 24s24-10.7 24-24l0-88c0-13.3-10.7-24-24-24zm32 208a32 32 0 1 0-64 0 32 32 0 1 0 64 0z"/></svg>
+    <span>两个 TAB 的「40 + 30」kg、「125 + 105」米、「500 + 300」个在汇总里自动相加；单 SKU 场景（只有 1 个作用域）没有 TAB，行为不变。</span>
+  </div>
+
+  <!-- ============ 方案 B ============ -->
+  <div class="option-tag">
+    <span class="tag">方案 B</span>
+    <span class="desc">彻底去掉 TAB——只显示一张汇总表。界面最简，但「按产品查看用量」只能去下方的跨角色对比矩阵（默认折叠）里找。</span>
+  </div>
+  <div class="panel panel-col">
+    <div class="mc-col-title">
+      <svg viewBox="0 0 512 512" fill="currentColor"><path d="M304 240a16 16 0 1 0-16-16 16 16 0 0 0 16 16zm-112-32a16 16 0 1 0 16 16 16 16 0 0 0-16-16zm247 87.91c-2.53-25.3-13-47.47-29.51-65.22C422.5 198 426.7 164 415.6 150.6c-13.9-16.6-61.5-16.8-89.6 4.4a162.8 162.8 0 0 0-39.9-4.9c-13.7 0-27.2 1.7-40 4.9-28.2-21.3-75.9-21-89.7-4.4-11.1 13.4-6.9 47.4 6.1 79.9-16.5 17.8-27 40-29.5 65.3-1.3 13.2-.6 25.9 2 37.6C126 359.4 164.4 416 248 416c34.1 0 60.1-9.5 78.3-23.6 7.9 1.9 16.2 3 24.7 3 68.5 0 115.1-45.8 118.3-111.9.7-8.2.5-16.4-.3-24.6zM256 32C132.3 32 32 134.9 32 261.7c0 101.4 65.8 187.5 157.1 217.6l43-89.1c-83.5-8.9-121.1-65.4-121.1-119.9 0-10 1.2-19.6 3.5-28.7C114 254.6 110 238.4 110 224c0-13.6 3.5-26.4 9.7-37.5C135.3 137.4 191.5 96 256 96s120.7 41.4 136.3 90.5c6.2 11.1 9.7 23.9 9.7 37.5 0 14.4-4 30.6-11.5 47.6 2.3 9.1 3.5 18.7 3.5 28.7 0 54.5-37.6 111-121.1 119.9l43 89.1C453.8 449.2 512 363.1 512 261.7 512 134.9 379.7 32 256 32z"/></svg>
+      物料用量计算结果
+      <span class="mc-col-tail">合计 <b>7</b> 项</span>
+    </div>
+    <div class="mc-scope-bar">
+      <span class="mc-scope-plain">全部产品汇总<span class="mc-scope-qty"> · 2 个产品 · 合计 <b>800</b> 件</span></span>
+    </div>
+    <div class="mc-result-content">
+      <div class="mc-category-block mc-cat-filling">
+        <div class="mc-category-header">
+          <svg class="mc-cat-icon" viewBox="0 0 640 512" fill="currentColor"><path d="M0 336c0 79.5 64.5 144 144 144l368 0c70.7 0 128-57.3 128-128c0-61.9-44-113.6-102.4-125.4c4.1-10.7 6.4-22.4 6.4-34.6c0-53-43-96-96-96c-19.7 0-38.1 6-53.3 16.2C367 64.2 315.3 32 256 32C167.6 32 96 103.6 96 192l0 7.1C41.3 205.7 0 258.3 0 336z"/></svg>
+          <span class="mc-cat-label">填充类</span><span class="mc-cat-count">1</span>
+          <svg class="mc-cat-toggle" viewBox="0 0 512 512" fill="currentColor"><path d="M233.4 406.6c12.5 12.5 32.8 12.5 45.3 0l192-192c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L256 338.7 86.6 169.4c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3l192 192z"/></svg>
+        </div>
+        <div class="mc-table-wrap">
+          <table class="mc-table">
+            <colgroup><col class="col-supplier"><col class="col-name"><col class="col-spec"><col class="col-qty"><col class="col-unit"></colgroup>
+            <thead><tr><th>供应商</th><th>物料名称</th><th class="is-center">规格/色号</th><th class="is-num">总采购量</th><th>单位</th></tr></thead>
+            <tbody>
+              <tr class="merged"><td>东莞恒泰填充材料</td><td>PP棉<span class="src-chip">2 个SKU</span></td><td class="is-center" title="7D三维卷曲">7D三维卷曲</td><td class="is-num">70</td><td>kg</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="mc-category-block mc-cat-fabric">
+        <div class="mc-category-header">
+          <svg class="mc-cat-icon" viewBox="0 0 512 512" fill="currentColor"><path d="M64 0C28.7 0 0 28.7 0 64l0 96c0 8.1 4.9 15.5 12.4 18.6c25.5 10.4 43.6 35.5 43.6 64.4s-18.1 54-43.6 64.4C4.9 311.5 0 318.9 0 327l0 121C0 483.3 28.7 512 64 512l384 0c35.3 0 64-28.7 64-64l0-121c0-8.1-4.9-15.5-12.4-18.6c-25.5-10.4-43.6-35.5-43.6-64.4s18.1-54 43.6-64.4c7.5-3.1 12.4-10.5 12.4-18.6l0-96c0-35.3-28.7-64-64-64L64 0z"/></svg>
+          <span class="mc-cat-label">面料类</span><span class="mc-cat-count">3</span>
+          <svg class="mc-cat-toggle" viewBox="0 0 512 512" fill="currentColor"><path d="M233.4 406.6c12.5 12.5 32.8 12.5 45.3 0l192-192c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L256 338.7 86.6 169.4c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3l192 192z"/></svg>
+        </div>
+        <div class="mc-table-wrap">
+          <table class="mc-table">
+            <colgroup><col class="col-supplier"><col class="col-name"><col class="col-spec"><col class="col-qty"><col class="col-unit"></colgroup>
+            <thead><tr><th>供应商</th><th>物料名称</th><th class="is-center">规格/色号</th><th class="is-num">总采购量</th><th>单位</th></tr></thead>
+            <tbody>
+              <tr class="merged"><td>苏州锦华纺织</td><td>短毛绒<span class="src-chip">2 个SKU</span></td><td class="is-center" title="110g/m²·米白">110g/m²·米白</td><td class="is-num">230</td><td>米</td></tr>
+              <tr><td>苏州锦华纺织</td><td>水晶超柔</td><td class="is-center" title="180g/m²·正红">180g/m²·正红</td><td class="is-num">60</td><td>米</td></tr>
+              <tr><td>南通凯瑞织造</td><td>长毛绒</td><td class="is-center" title="220g/m²·棕">220g/m²·棕</td><td class="is-num">90</td><td>米</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="mc-category-block mc-cat-accessory">
+        <div class="mc-category-header">
+          <svg class="mc-cat-icon" viewBox="0 0 640 512" fill="currentColor"><path d="M192.4 256c14.3 0 25.9-11.6 25.9-25.9l0-44.7c0-14.3-11.6-25.9-25.9-25.9c-7.7 0-14.6 3.3-19.4 8.6c-2.1-3.9-4.5-7.6-7.4-11c-10.3-12.4-24.9-20.5-41.1-22.6C121.4 133.7 118.3 133 115 133c-26.5 0-48 21.5-48 48c0 5.3.9 10.5 2.6 15.4C69.4 197 69 197.6 68.6 198.3C57.4 211.6 48 227 48 245.5c0 29.6 20.7 54.4 48.4 61.4c3.4.9 6.9 1.4 10.6 1.4c8.5 0 16.5-2.1 23.6-5.8c4.9 8.7 13.9 14.5 24.3 14.5c14.3 0 25.9-11.6 25.9-25.9l0-9.1c3.4 1.4 7.1 2.2 11 2.2z"/></svg>
+          <span class="mc-cat-label">辅料类</span><span class="mc-cat-count">3</span>
+          <svg class="mc-cat-toggle" viewBox="0 0 512 512" fill="currentColor"><path d="M233.4 406.6c12.5 12.5 32.8 12.5 45.3 0l192-192c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L256 338.7 86.6 169.4c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3l192 192z"/></svg>
+        </div>
+        <div class="mc-table-wrap">
+          <table class="mc-table">
+            <colgroup><col class="col-supplier"><col class="col-name"><col class="col-spec"><col class="col-qty"><col class="col-unit"></colgroup>
+            <thead><tr><th>供应商</th><th>物料名称</th><th class="is-center">规格/色号</th><th class="is-num">总采购量</th><th>单位</th></tr></thead>
+            <tbody>
+              <tr class="merged"><td>义乌宏发辅料行</td><td>蘑菇钉眼<span class="src-chip">2 个SKU</span></td><td class="is-center" title="20mm·黑">20mm·黑</td><td class="is-num">800</td><td>个</td></tr>
+              <tr><td>义乌宏发辅料行</td><td>挂绳</td><td class="is-center" title="涤纶10cm·金色">涤纶10cm·金色</td><td class="is-num">500</td><td>条</td></tr>
+              <tr><td>义乌宏发辅料行</td><td>关节扣</td><td class="is-center" title="尼龙20mm">尼龙20mm</td><td class="is-num">600</td><td>个</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 说明 ============ -->
+  <div class="footnotes">
+    <h2>两案共用的合并口径（与现有「跨角色对比矩阵」一致）</h2>
+    <ul>
+      <li>合并键 = <b>分类 + 供应商 + 物料名称 + 规格/色号</b>，四者完全一致才合并，数量直接相加；任一不同则分行。</li>
+      <li>同一合并键若不同 SKU 用了<b>不同单位</b>（如米/码）→ 不相加，按单位拆成两行各自显示，避免跨单位求和出错。</li>
+      <li>填充类「克→kg」自动换算在合并后进行（40000g + 30000g = 70kg）。</li>
+      <li>移动端同步：移动端没有 TAB（是卡片堆叠），同样在顶部加一张「汇总」卡片。</li>
+    </ul>
+  </div>
+</div>
+</body>
+</html>

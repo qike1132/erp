@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="zh-CN" style="color-scheme: light">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>/material 来料进度重构 — 现状 vs 方案A vs 方案B</title>
+<style>
+  :root {
+    /* ---- ERP 系统既有 ramp（效果图沿用系统 CSS 变量语义，实现时映射回 var(--color-*)） ---- */
+    --primary-600: #3a6bd6;      /* 进行中 fill：进度 <100% 的部分到达 */
+    --primary-700: #2d5ab8;
+    --primary-100: #dce8fb;      /* meter 未填充轨道：同族浅一档（dataviz meter 规范） */
+    --success-600: #1e9e55;      /* 已完成 fill（通过校验的绿） */
+    --warn-600:   #9a6a00;       /* 未动 fill：压暗的琥珀（CVD 校验后定档） */
+    --danger-600: #d03b3b;       /* 逾期 fill（仅 status 语义） */
+    --surface: #ffffff;
+    --bg: #f4f6fc;
+    --border: #e4e7ed; --border-light: #f0f2f5;
+    --text: #1a1a2e; --text-2: #475569; --text-muted: #64748b;
+    --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: var(--font); background: linear-gradient(135deg, #f4f6fc 0%, #f0f2f5 100%); min-height: 100vh; padding: 28px 24px 80px; color: var(--text); }
+
+  .stage { max-width: 1180px; margin: 0 auto; }
+
+  .sec { margin-bottom: 54px; }
+  .sec-head { display: flex; align-items: baseline; gap: 12px; margin: 0 0 6px 2px; flex-wrap: wrap; }
+  .sec-title { font-size: 19px; font-weight: 700; }
+  .sec-sub { font-size: 12.5px; color: var(--text-muted); }
+  .sec-tag { font-size: 11px; font-weight: 700; color: white; padding: 2px 10px; border-radius: 999px; flex-shrink: 0; }
+  .tag-now { background: #94a3b8; }
+  .tag-a { background: var(--primary-600); }
+  .tag-b { background: var(--success-600); }
+
+  .sec-notes { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 0 0 14px 2px; }
+  .sec-notes span { font-size: 12px; color: var(--text-2); }
+  .sec-notes b.fix { color: var(--success-600); }
+  .sec-notes b.bad { color: var(--danger-600); }
+
+  .page-card { background: white; border-radius: 18px; border: 1px solid var(--border); box-shadow: 0 1px 3px rgba(0,0,0,.04), 0 4px 12px rgba(0,0,0,.06); overflow: hidden; }
+
+  /* =====================================================
+     现状还原（病灶标注版）
+     ===================================================== */
+  .now-tabs { display: inline-flex; gap: 4px; padding: 4px; border-radius: 12px; background: white; border: 1px solid var(--border-light); margin: 14px 20px 0; }
+  .now-tab { padding: 8px 14px; border-radius: 9px; font-size: 13px; font-weight: 600; color: var(--text-2); }
+  .now-tab.active { background: linear-gradient(135deg, #eff5ff, #dce8fb); color: var(--primary-700); }
+  .now-badge-n { display: inline-block; margin-left: 5px; font-size: 11px; background: #ef4444; color: white; padding: 0 6px; border-radius: 999px; }
+
+  .now-tbl { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 10px; }
+  .now-tbl th { padding: 10px 14px; font-size: 11.5px; font-weight: 600; color: var(--text-2); background: #f8fafc; border-bottom: 1.5px solid var(--border); text-align: center; white-space: nowrap; }
+  .now-tbl td { padding: 12px 14px; border-bottom: 1px solid var(--border-light); vertical-align: top; }
+  .now-tbl td.c { text-align: center; }
+  .now-supplier-group { border: 1px solid var(--border-light); border-radius: 6px; background: #f8fafc; overflow: hidden; min-width: 380px; }
+  .now-supplier-label { display: flex; align-items: center; gap: 6px; padding: 4px 10px; background: #eff5ff; border-bottom: 1px solid var(--border-light); font-size: 12px; font-weight: 600; color: var(--primary-700); }
+  .now-count { margin-left: auto; font-size: 11px; font-weight: 500; color: #94a3b8; }
+  .now-arrow { margin-left: 4px; font-size: 10px; color: #94a3b8; }
+  .now-item-row { display: flex; align-items: center; gap: 12px; padding: 4px 8px; font-size: 12px; }
+  .now-item-name { width: 130px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+  .now-item-qty { color: var(--text-2); width: 90px; }
+  .now-item-rcv { color: var(--success-600); width: 100px; }
+  .now-bar { flex: 1; height: 10px; background: #E5E7EB; border-radius: 8px; min-width: 60px; }
+  .now-fill-warn { height: 100%; background: #FF9F43; border-radius: 5px; }
+  .now-fill-succ { height: 100%; background: #28C76F; border-radius: 5px; }
+  .now-pct { width: 40px; text-align: right; color: var(--text-muted); }
+  .now-total-bar { width: 160px; height: 10px; background: #E5E7EB; border-radius: 8px; overflow: hidden; display: inline-block; vertical-align: middle; margin-right: 8px; }
+
+  .callout { position: relative; }
+  .callout::after { content: attr(data-note); position: absolute; right: 8px; top: 6px; z-index: 5; display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 700; color: white; background: var(--danger-600); border-radius: 999px; padding: 2px 8px; white-space: nowrap; box-shadow: 0 2px 6px rgba(208,59,59,.35); }
+
+  /* =====================================================
+     方案 A / B 共用：工具条 + 统计行
+     ===================================================== */
+  .tb { display: flex; align-items: center; gap: 14px; padding: 10px 20px; border-bottom: 1px solid var(--border-light); min-height: 62px; flex-wrap: wrap; }
+  .tb-title { display: flex; align-items: center; gap: 9px; flex-shrink: 0; }
+  .tb-title svg { color: var(--primary-600); }
+  .tb-title h1 { font-size: 16px; font-weight: 700; white-space: nowrap; }
+  .tb-search { position: relative; }
+  .tb-search svg { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--text-muted); pointer-events: none; }
+  .tb-search input { width: 210px; padding: 7px 12px 7px 30px; font-size: 12.5px; font-family: inherit; border: 1.5px solid var(--border); border-radius: 9px; color: var(--text); outline: none; }
+  .tb-search input::placeholder { color: var(--text-muted); }
+
+  .kpi { display: flex; align-items: center; margin-left: auto; flex-shrink: 0; }
+  .kpi-item { display: flex; flex-direction: column; gap: 1px; padding: 0 16px; cursor: default; }
+  .kpi-item + .kpi-item { border-left: 1px solid var(--border-light); }
+  .kpi-top { display: flex; align-items: center; gap: 5px; }
+  .kpi-dot { width: 6px; height: 6px; border-radius: 2px; flex-shrink: 0; }
+  .kpi-label { font-size: 11px; color: var(--text-2); font-weight: 500; white-space: nowrap; }
+  .kpi-value { font-size: 17px; font-weight: 700; line-height: 1.2; white-space: nowrap; }
+  .btn-export { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; font-size: 12.5px; font-weight: 600; font-family: inherit; color: var(--success-600); background: white; border: 1.5px solid #a6e8c0; border-radius: 9px; cursor: pointer; white-space: nowrap; }
+
+  /* ---- 供应商 chips 行 ---- */
+  .chips-row { display: flex; align-items: center; gap: 10px; padding: 9px 20px; border-bottom: 1px solid var(--border-light); background: linear-gradient(to bottom, var(--bg), white); flex-wrap: nowrap; overflow-x: auto; }
+  .chips-label { display: flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 600; color: var(--text-2); white-space: nowrap; flex-shrink: 0; }
+  .chips-label svg { color: var(--primary-600); }
+  .chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 14px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; border: 1.5px solid var(--border); background: white; color: var(--text-2); cursor: pointer; flex-shrink: 0; font-family: inherit; }
+  .chip .chip-pct { font-size: 11px; font-weight: 700; color: var(--text-muted); }
+  .chip.active { background: var(--primary-600); color: white; border-color: var(--primary-600); }
+  .chip.active .chip-pct { color: rgba(255,255,255,.8); }
+  .chip-mini { display: inline-block; width: 34px; height: 5px; border-radius: 3px; background: var(--primary-100); vertical-align: middle; overflow: hidden; }
+  .chip-mini i { display: block; height: 100%; border-radius: 3px; }
+  .count-note { font-size: 12px; color: var(--text-muted); flex-shrink: 0; margin-left: auto; }
+
+  /* ---- meter（dataviz 规范：4px 数据端圆角、基线端方角、同族轨道） ---- */
+  .meter { position: relative; height: 12px; background: var(--primary-100); border-radius: 0 4px 4px 0; overflow: hidden; }
+  .meter.fill-ongoing { background: var(--primary-600); }
+  .meter.fill-done { background: var(--success-600); }
+  .meter.fill-zero { background: var(--warn-600); }
+  .meter.fill-overdue { background: var(--danger-600); }
+  .meter-txt { position: absolute; inset: 0; display: flex; align-items: center; justify-content: space-between; padding: 0 8px; font-size: 10px; font-weight: 700; color: var(--primary-700); }
+  .meter.fill-done .meter-txt, .meter.fill-zero .meter-txt, .meter.fill-overdue .meter-txt { color: white; }
+  .meter-sm { height: 8px; }
+
+  /* =====================================================
+     方案 A：表格（默认展开物料明细）
+     ===================================================== */
+  .tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .tbl th { padding: 10px 16px; text-align: center; white-space: nowrap; font-size: 11.5px; font-weight: 600; color: var(--text-2); background: #f8fafc; border-bottom: 1.5px solid var(--border); letter-spacing: .3px; }
+  .tbl td { padding: 12px 16px; border-bottom: 1px solid var(--border-light); vertical-align: middle; }
+  .tbl td.c { text-align: center; }
+  .tbl .num { font-variant-numeric: tabular-nums; }
+  .order-no { font-weight: 600; color: var(--primary-600); font-size: 12.5px; }
+  .cus { font-size: 12.5px; color: var(--text-2); }
+  .sku-line { font-size: 12.5px; padding: 2px 0; }
+  .sku-line + .sku-line { border-top: 1px dashed var(--border); }
+
+  .sup-wrap { display: flex; flex-direction: column; gap: 8px; min-width: 420px; }
+  .sup { border: 1px solid var(--border-light); border-radius: 10px; background: #fafbfe; overflow: hidden; }
+  .sup-head { display: flex; align-items: center; gap: 8px; padding: 6px 12px; font-size: 12px; font-weight: 600; color: var(--text); background: #f4f7fd; border-bottom: 1px solid var(--border-light); }
+  .sup-head svg { color: var(--primary-600); flex-shrink: 0; }
+  .sup-head .mini { width: 64px; height: 5px; border-radius: 3px; background: var(--primary-100); overflow: hidden; flex-shrink: 0; }
+  .sup-head .mini i { display: block; height: 100%; }
+  .sup-head .pct { font-size: 11px; font-weight: 700; color: var(--text-2); }
+  .sup-body { padding: 6px 12px 8px; display: flex; flex-direction: column; gap: 5px; }
+  .mat-row { display: grid; grid-template-columns: minmax(130px, 1.2fr) 52px minmax(120px, 1fr) 38px; align-items: center; gap: 10px; padding: 3px 4px; border-radius: 6px; font-size: 12px; }
+  .mat-row:hover { background: #f4f7fd; }
+  .mat-name { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mat-qty { text-align: right; color: var(--text-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .mat-qty b { color: var(--success-600); }
+  .mat-pct { text-align: right; font-size: 11px; font-weight: 700; color: var(--text-2); font-variant-numeric: tabular-nums; }
+
+  .status-pill { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
+  .st-part { background: #fef3c7; color: #92400e; }
+  .st-zero { background: #fdeef7; color: #9a4a00; }
+  .st-done { background: #e8f9ef; color: #1e7a43; }
+  .st-over { background: #fee2e2; color: #b91c1c; }
+
+  .btn-eye { width: 30px; height: 30px; border-radius: 8px; border: none; background: #eff5ff; color: var(--primary-600); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+
+  /* 方案A 总进度列：分段堆叠 meter（各供应商分段，2px 表面缝隙） */
+  .stack { display: flex; gap: 2px; width: 170px; height: 12px; align-items: stretch; }
+  .stack .seg { border-radius: 0 4px 4px 0; position: relative; }
+  .stack .seg:first-child { border-radius: 4px 0 0 4px; }
+  .stack-note { font-size: 10.5px; color: var(--text-muted); margin-top: 3px; white-space: nowrap; }
+
+  /* =====================================================
+     方案 B：订单卡片
+     ===================================================== */
+  .cards { padding: 14px 20px 20px; display: flex; flex-direction: column; gap: 12px; }
+  .ord-card { border: 1px solid var(--border-light); border-radius: 14px; background: white; overflow: hidden; }
+  .ord-head { display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: #f8fafc; border-bottom: 1px solid var(--border-light); flex-wrap: wrap; }
+  .ord-head .order-no { font-size: 13px; }
+  .ord-head .sep { color: #cbd5e1; }
+  .ord-head .cus { font-size: 12px; }
+  .ord-head .status-pill { margin-left: auto; }
+  .ord-body { display: grid; grid-template-columns: minmax(0, 1fr) 200px; gap: 16px; padding: 12px 16px; align-items: start; }
+  .sup-list { display: flex; flex-direction: column; gap: 8px; }
+  .sup-b { border: 1px solid var(--border-light); border-radius: 10px; background: #fafbfe; overflow: hidden; }
+  .sup-b-head { display: flex; align-items: center; gap: 8px; padding: 6px 12px; font-size: 12.5px; font-weight: 600; border-bottom: 1px solid var(--border-light); background: #f4f7fd; }
+  .sup-b-head svg { color: var(--primary-600); flex-shrink: 0; }
+  .sup-b-head .mini { flex: 1; max-width: 90px; height: 5px; border-radius: 3px; background: var(--primary-100); overflow: hidden; }
+  .sup-b-head .mini i { display: block; height: 100%; }
+  .sup-b-body { padding: 6px 12px 9px; display: flex; flex-direction: column; gap: 6px; }
+  .mat-b-row { display: grid; grid-template-columns: minmax(120px, 1.1fr) minmax(140px, 1fr) 40px; gap: 10px; align-items: center; font-size: 12.5px; padding: 2px 2px; }
+  .mat-b-name { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mat-b-qty { font-size: 11.5px; color: var(--text-2); white-space: nowrap; }
+  .mat-b-qty b { color: var(--success-600); }
+
+  .ord-side { display: flex; flex-direction: column; gap: 10px; }
+  .side-meter-label { font-size: 10.5px; font-weight: 600; color: var(--text-2); display: flex; justify-content: space-between; margin-bottom: 3px; }
+  .btn-recv { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; font-size: 12px; font-weight: 700; color: white; background: var(--success-600); border: none; border-radius: 8px; cursor: pointer; font-family: inherit; }
+  .btn-view { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; font-size: 12px; font-weight: 600; color: var(--primary-600); background: white; border: 1.5px solid #b9d1f5; border-radius: 8px; cursor: pointer; font-family: inherit; }
+
+  /* 图例说明（方案AB 都有：>=2 状态色必须带文字图例） */
+  .legend-row { display: flex; align-items: center; gap: 16px; padding: 8px 20px; border-bottom: 1px solid var(--border-light); background: #fafbfe; flex-wrap: wrap; }
+  .lg { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--text-2); }
+  .lg .sw { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
+  .lg-note { font-size: 11px; color: var(--text-muted); margin-left: auto; }
+
+  .expand-all { font-size: 11.5px; color: var(--primary-600); background: none; border: none; cursor: pointer; font-family: inherit; font-weight: 600; padding: 4px 8px; }
+
+  /* 底部对比总结 */
+  .verdict { max-width: 1180px; margin: 0 auto; background: white; border: 1px solid var(--border); border-radius: 18px; padding: 22px 26px; }
+  .verdict h3 { font-size: 15px; margin-bottom: 10px; }
+  .verdict table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .verdict th, .verdict td { padding: 7px 12px; text-align: left; border-bottom: 1px solid var(--border-light); }
+  .verdict th { font-size: 11px; color: var(--text-2); background: #f8fafc; }
+  .verdict .r { color: var(--text-muted); }
+
+  .foot { text-align: center; font-size: 11.5px; color: var(--text-muted); margin-top: 26px; }
+</style>
+</head>
+<body>
+<div class="stage">
+
+  <!-- ================================================================
+       第 1 节：现状还原（病灶标注）
+       ================================================================ -->
+  <div class="sec" id="now">
+    <div class="sec-head">
+      <span class="sec-tag tag-now">现状还原</span>
+      <span class="sec-title">/material 来料进度 — 按当前代码 1:1 复刻（含病灶标注）</span>
+    </div>
+    <div class="sec-notes">
+      <span><b class="bad">①</b> 供应商分组默认折叠 → 全部进度要两次点击才能看到</span>
+      <span><b class="bad">②</b> "总进度"只是一个 0-100 数字条，看不出哪个供应商拖后腿</span>
+      <span><b class="bad">③</b> 未开始=部分=逾期 全是橙色，<b class="bad">红绿盲视角下橙/绿几乎同色</b>（校验 ΔE 5.4）</span>
+      <span><b class="bad">④</b> 页面没有任何汇总（多少单、多少料、多少逾期），后端 stats 接口前端从未调用</span>
+      <span><b class="bad">⑤</b> 表格无搜索/筛选，多供应商订单横向拥挤</span>
+    </div>
+    <div class="page-card">
+      <div class="now-tabs">
+        <span class="now-tab active">来料进度 <span class="now-badge-n">6</span></span>
+        <span class="now-tab">历史查询</span>
+      </div>
+      <table class="now-tbl">
+        <thead><tr>
+          <th style="width:110px">订单时间</th><th style="width:100px">客户</th>
+          <th>产品名称</th><th style="width:80px">订单数量</th>
+          <th style="text-align:left">物料进度（按供应商分组）</th>
+          <th style="width:170px">总进度</th><th style="width:60px">操作</th>
+        </tr></thead>
+        <tbody>
+          <tr>
+            <td class="c" style="color:var(--text-2);font-size:12.5px">09-24</td>
+            <td class="c">华联超市</td>
+            <td>苹果气泡水 330ml</td>
+            <td class="c">5000</td>
+            <td>
+              <div class="now-supplier-group callout" data-note="① 折叠看不到">
+                <div class="now-supplier-label">🚚 广东佳宝食品 <span class="now-count">3 项</span><span class="now-arrow">▶</span></div>
+              </div>
+              <div class="now-supplier-group" style="margin-top:8px">
+                <div class="now-supplier-label">🚚 三水华源包装 <span class="now-count">2 项</span><span class="now-arrow">▶</span></div>
+              </div>
+            </td>
+            <td class="c callout" data-note="② 看不出瓶颈">
+              <span class="now-total-bar"><span class="now-fill-warn" style="display:block;width:62%;height:100%"></span></span>62%
+            </td>
+            <td class="c"><span style="font-size:14px;cursor:pointer">👁</span></td>
+          </tr>
+          <tr>
+            <td class="c" style="color:var(--text-2);font-size:12.5px">09-27</td>
+            <td class="c">永辉物流</td>
+            <td class="sku-line">电解质水 荔枝味</td><div class="sku-line" style="border-top:1px dashed var(--border)">电解质水 柠檬味</div>
+            <td class="c">2000 / 3000</td>
+            <td>
+              <div class="now-supplier-group">
+                <div class="now-supplier-label">🚚 广州一品鲜 <span class="now-count">4 项</span><span class="now-arrow">▼</span></div>
+                <div class="now-item-row"><span class="now-item-name">浓缩荔枝汁</span><span class="now-item-qty">数量:<b>800kg</b></span><span class="now-item-rcv">已到货:<b>800kg</b></span><span class="now-bar"><span class="now-fill-succ" style="display:block;width:100%"></span></span><span class="now-pct">100%</span></div>
+                <div class="now-item-row callout" data-note="③ 全是橙"><span class="now-item-name">柠檬香精</span><span class="now-item-qty">数量:<b>200kg</b></span><span class="now-item-rcv">已到货:<b>0kg</b></span><span class="now-bar"><span class="now-fill-warn" style="display:block;width:0%"></span></span><span class="now-pct">0%</span></div>
+              </div>
+            </td>
+            <td class="c"><span class="now-total-bar"><span class="now-fill-warn" style="display:block;width:38%;height:100%"></span></span>38%</td>
+            <td class="c"><span style="font-size:14px;cursor:pointer">👁</span></td>
+          </tr>
+        </tbody>
+      </table>
+      <div style="padding:14px 20px;color:var(--text-muted);font-size:12px">
+        （后端已有 GET /stats/overview：总单数 / pending / partial / completed / 总量进度 / 近7天 —— 本页面完全没用；POST 一行都不用改）
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================
+       第 2 节：方案 A — 保留表格形态，进度列信息升级
+       ================================================================ -->
+  <div class="sec" id="planA">
+    <div class="sec-head">
+      <span class="sec-tag tag-a">方案 A</span>
+      <span class="sec-title">表格升级版 — 沿用现有表结构，四处外科手术</span>
+      <span class="sec-sub">改动小、和 /stock 一致；适合先落地</span>
+    </div>
+    <div class="sec-notes">
+      <span><b class="fix">✓</b> 病灶①：供应商分组<b>默认展开</b>（+全部展开/收起开关）</span>
+      <span><b class="fix">✓</b> 病灶②：总进度列改为<b>按供应商分段堆叠</b>，一眼看出拖后腿的供应商</span>
+      <span><b class="fix">✓</b> 病灶③：状态四色经 CVD 校验（ΔE≥8 / 对比度≥3:1），未动用琥珀棕</span>
+      <span><b class="fix">✓</b> 病灶④：工具条内嵌统计（进行中订单数 / 进行中物料 / 逾期物料 / 总到货率），数据源为既有 stats 接口</span>
+      <span><b class="fix">✓</b> 病灶⑤：搜索框（订单号/客户/物料，后端已有 order_no / customer_name 参数）</span>
+    </div>
+    <div class="page-card">
+      <!-- 工具条：标题·搜索·统计·导出（同 /stock 单行工具条模式） -->
+      <div class="tb">
+        <div class="tb-title">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+          <h1>来料进度</h1>
+        </div>
+        <div class="tb-search">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input placeholder="搜订单号 / 客户 / 物料" />
+        </div>
+        <div class="kpi">
+          <div class="kpi-item"><div class="kpi-top"><span class="kpi-dot" style="background:var(--primary-600)"></span><span class="kpi-label">进行中订单</span></div><span class="kpi-value">6</span></div>
+          <div class="kpi-item"><div class="kpi-top"><span class="kpi-dot" style="background:var(--warn-600)"></span><span class="kpi-label">未动物料</span></div><span class="kpi-value">9</span></div>
+          <div class="kpi-item"><div class="kpi-top"><span class="kpi-dot" style="background:var(--danger-600)"></span><span class="kpi-label">逾期物料</span></div><span class="kpi-value">2</span></div>
+          <div class="kpi-item"><div class="kpi-top"><span class="kpi-dot" style="background:var(--success-600)"></span><span class="kpi-label">总到货率</span></div><span class="kpi-value">54%</span></div>
+        </div>
+        <button class="btn-export">⬇ 导出 Excel</button>
+      </div>
+
+      <!-- 图例行：四状态色全部带文字 -->
+      <div class="legend-row">
+        <span class="lg"><span class="sw" style="background:var(--primary-600)"></span>进行中</span>
+        <span class="lg"><span class="sw" style="background:var(--warn-600)"></span>未开始</span>
+        <span class="lg"><span class="sw" style="background:var(--success-600)"></span>已完成</span>
+        <span class="lg"><span class="sw" style="background:var(--danger-600)"></span>逾期（超30天未收齐）</span>
+        <span class="lg-note">状态除颜色外同时以文字标注，不依赖颜色单独传达</span>
+      </div>
+
+      <div class="tbl-wrap" style="overflow-x:auto">
+      <table class="tbl">
+        <thead><tr>
+          <th style="width:130px">订单号/时间</th><th style="width:90px">客户</th>
+          <th style="min-width:150px">产品</th>
+          <th style="min-width:430px;text-align:left">物料进度（按供应商分段）</th>
+          <th style="width:190px">总进度（按供应商分段）</th>
+          <th style="width:70px">操作</th>
+        </tr></thead>
+        <tbody>
+          <!-- 订单 1：62%，一个供应商拖后腿一眼可见 -->
+          <tr>
+            <td class="c"><div class="order-no">PO-240924-018</div><div style="font-size:11px;color:var(--text-muted)">09-24 · 5天前</div></td>
+            <td class="c cus">华联超市</td>
+            <td class="c"><div class="sku-line">苹果气泡水 330ml</div></td>
+            <td>
+              <div class="sup-wrap">
+                <div class="sup">
+                  <div class="sup-head">🚚 广东佳宝食品 <span class="mini"><i style="width:100%;background:var(--success-600)"></i></span><span class="pct">100%</span><span style="margin-left:auto;font-size:11px;color:var(--text-muted)">3 项</span></div>
+                  <div class="sup-body">
+                    <div class="mat-row"><span class="mat-name" title="浓缩苹果汁">浓缩苹果汁</span><span class="mat-qty">2,000 / <b>2,000</b> kg</span><span><span class="meter meter-sm fill-done" style="width:100%"></span></span><span class="mat-pct" style="color:var(--success-600)">100%</span></div>
+                    <div class="mat-row"><span class="mat-name">苹果香精</span><span class="mat-qty">300 / <b>300</b> kg</span><span><span class="meter meter-sm fill-done" style="width:100%"></span></span><span class="mat-pct" style="color:var(--success-600)">100%</span></div>
+                  </div>
+                </div>
+                <div class="sup">
+                  <div class="sup-head">🚚 三水华源包装 <span class="mini"><i style="width:27%;background:var(--primary-600)"></i></span><span class="pct">27%</span><span style="margin-left:auto;font-size:11px;color:var(--text-muted)">2 项</span></div>
+                  <div class="sup-body">
+                    <div class="mat-row"><span class="mat-name">330ml 罐体</span><span class="mat-qty">5,000 / <b>5,000</b> 只</span><span><span class="meter meter-sm fill-done" style="width:100%"></span></span><span class="mat-pct" style="color:var(--success-600)">100%</span></div>
+                    <div class="mat-row"><span class="mat-name">易拉盖</span><span class="mat-qty">1,500 / <b>5,000</b> 只</span><span><span class="meter meter-sm fill-ongoing" style="width:30%"></span></span><span class="mat-pct">30%</span></div>
+                  </div>
+                </div>
+              </div>
+            </td>
+            <td class="c">
+              <div class="stack">
+                <div class="seg" style="width:38%;background:var(--success-600)" title="佳宝 100%"></div><div style="width:2px;flex-shrink:0"></div><div class="seg" style="width:24%;background:var(--primary-600)" title="华源 27%"></div>
+              </div>
+              <div class="stack-note">62% · 2 家供应商</div>
+            </td>
+            <td class="c"><button class="btn-eye">👁</button></td>
+          </tr>
+          <!-- 订单 2：含逾期 -->
+          <tr>
+            <td class="c"><div class="order-no">PO-240812-006</div><div style="font-size:11px;color:var(--text-muted)">08-12 · 48天前</div></td>
+            <td class="c cus">永辉物流</td>
+            <td class="c"><div class="sku-line">电解质水 荔枝味</div><div class="sku-line">电解质水 柠檬味</div></td>
+            <td>
+              <div class="sup-wrap">
+                <div class="sup">
+                  <div class="sup-head">🚚 广州一品鲜 <span class="mini"><i style="width:38%;background:var(--primary-600)"></i></span><span class="pct">38%</span><span style="margin-left:auto;font-size:11px;color:var(--text-muted)">4 项</span></div>
+                  <div class="sup-body">
+                    <div class="mat-row"><span class="mat-name">浓缩荔枝汁</span><span class="mat-qty">800 / <b>800</b> kg</span><span><span class="meter meter-sm fill-done" style="width:100%"></span></span><span class="mat-pct" style="color:var(--success-600)">100%</span></div>
+                    <div class="mat-row"><span class="mat-name">柠檬香精 <span class="status-pill st-over" style="margin-left:4px">逾期</span></span><span class="mat-qty">0 / <b>200</b> kg</span><span><span class="meter meter-sm fill-overdue" style="width:100%"></span></span><span class="mat-pct" style="color:var(--danger-600)">0%</span></div>
+                  </div>
+                </div>
+              </div>
+            </td>
+            <td class="c">
+              <div class="stack"><div class="seg" style="width:38%;background:var(--primary-600)"></div></div>
+              <div class="stack-note">38% · <b style="color:var(--danger-600)">1 项逾期</b></div>
+            </td>
+            <td class="c"><button class="btn-eye">👁</button></td>
+          </tr>
+          <!-- 订单 3：未动 -->
+          <tr>
+            <td class="c"><div class="order-no">PO-240927-021</div><div style="font-size:11px;color:var(--text-muted)">09-27 · 2天前</div></td>
+            <td class="c cus">天虹商场</td>
+            <td class="c"><div class="sku-line">苏打水 原味</div></td>
+            <td>
+              <div class="sup-wrap">
+                <div class="sup">
+                  <div class="sup-head">🚚 中山绿源饮料 <span class="mini"><i style="width:0%;background:var(--warn-600)"></i></span><span class="pct">0%</span><span style="margin-left:auto;font-size:11px;color:var(--text-muted)">2 项</span></div>
+                  <div class="sup-body">
+                    <div class="mat-row"><span class="mat-name">食用碳酸氢钠</span><span class="mat-qty">0 / <b>500</b> kg</span><span><span class="meter meter-sm fill-zero" style="width:100%"></span></span><span class="mat-pct" style="color:var(--warn-600)">0%</span></div>
+                    <div class="mat-row"><span class="mat-name">PET 瓶坯 500ml</span><span class="mat-qty">0 / <b>40,000</b> 只</span><span><span class="meter meter-sm fill-zero" style="width:100%"></span></span><span class="mat-pct" style="color:var(--warn-600)">0%</span></div>
+                  </div>
+                </div>
+              </div>
+            </td>
+            <td class="c">
+              <div class="stack"><div class="seg" style="width:100%;background:var(--warn-600)" title="全部未动"></div></div>
+              <div class="stack-note">0% · 未开始</div>
+            </td>
+            <td class="c"><button class="btn-eye">👁</button></td>
+          </tr>
+        </tbody>
+      </table>
+      </div>
+      <div class="legend-row" style="border-bottom:none;border-top:1px solid var(--border-light)">
+        <span class="lg-note">分段堆叠条说明：每段 = 一家供应商的到货贡献，段间 2px 白缝；hover 显示供应商名与其完成率（实现为 title/tooltip）</span>
+        <button class="expand-all" style="margin-left:auto">⇕ 全部展开 / 收起</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================
+       第 3 节：方案 B — 订单卡片流
+       ================================================================ -->
+  <div class="sec" id="planB">
+    <div class="sec-head">
+      <span class="sec-tag tag-b">方案 B</span>
+      <span class="sec-title">订单卡片流 — 每张订单一张卡，进度结构全部摊开</span>
+      <span class="sec-sub">信息密度最低、直观度最高；与表格版工具条/图例相同</span>
+    </div>
+    <div class="sec-notes">
+      <span><b class="fix">✓</b> 无折叠状态：物料明细直接可见</span>
+      <span><b class="fix">✓</b> 供应商块内嵌小进度条 + 百分比</span>
+      <span><b class="fix">✓</b> 卡片右上角大号总进度 meter + 「登记收货」直达</span>
+      <span>代价：单屏订单数从 ~4 行降到 ~2.5 卡；供应商多时卡片更长</span>
+    </div>
+    <div class="page-card">
+      <div class="tb">
+        <div class="tb-title">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+          <h1>来料进度</h1>
+        </div>
+        <div class="tb-search">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input placeholder="搜订单号 / 客户 / 物料" />
+        </div>
+        <div class="kpi">
+          <div class="kpi-item"><div class="kpi-top"><span class="kpi-dot" style="background:var(--primary-600)"></span><span class="kpi-label">进行中订单</span></div><span class="kpi-value">6</span></div>
+          <div class="kpi-item"><div class="kpi-top"><span class="kpi-dot" style="background:var(--warn-600)"></span><span class="kpi-label">未动物料</span></div><span class="kpi-value">9</span></div>
+          <div class="kpi-item"><div class="kpi-top"><span class="kpi-dot" style="background:var(--danger-600)"></span><span class="kpi-label">逾期物料</span></div><span class="kpi-value">2</span></div>
+          <div class="kpi-item"><div class="kpi-top"><span class="kpi-dot" style="background:var(--success-600)"></span><span class="kpi-label">总到货率</span></div><span class="kpi-value">54%</span></div>
+        </div>
+        <button class="btn-export">⬇ 导出 Excel</button>
+      </div>
+
+      <div class="legend-row">
+        <span class="lg"><span class="sw" style="background:var(--primary-600)"></span>进行中</span>
+        <span class="lg"><span class="sw" style="background:var(--warn-600)"></span>未开始</span>
+        <span class="lg"><span class="sw" style="background:var(--success-600)"></span>已完成</span>
+        <span class="lg"><span class="sw" style="background:var(--danger-600)"></span>逾期</span>
+        <span class="lg-note">与方案 A 同一图例；状态永远伴随文字标签</span>
+      </div>
+
+      <div class="cards">
+        <!-- 卡 1 -->
+        <div class="ord-card">
+          <div class="ord-head">
+            <span class="order-no">PO-240924-018</span><span class="sep">·</span>
+            <span class="cus">华联超市 · 苹果气泡水 330ml ×5,000</span>
+            <span class="status-pill st-part">62% · 部分到货</span>
+          </div>
+          <div class="ord-body">
+            <div class="sup-list">
+              <div class="sup-b">
+                <div class="sup-b-head">🚚 广东佳宝食品 <span class="mini"><i style="width:100%;background:var(--success-600)"></i></span><span class="pct" style="font-size:11px;font-weight:700;color:var(--success-600)">100%</span><span style="font-size:11px;color:var(--text-muted)">3 项</span></div>
+                <div class="sup-b-body">
+                  <div class="mat-b-row"><span class="mat-b-name">浓缩苹果汁</span><span class="mat-b-qty">2,000 / <b>2,000</b> kg</span><span class="meter meter-sm fill-done" style="width:100%"></span></div>
+                  <div class="mat-b-row"><span class="mat-b-name">苹果香精</span><span class="mat-b-qty">300 / <b>300</b> kg</span><span class="meter meter-sm fill-done" style="width:100%"></span></div>
+                </div>
+              </div>
+              <div class="sup-b">
+                <div class="sup-b-head">🚚 三水华源包装 <span class="mini"><i style="width:27%;background:var(--primary-600)"></i></span><span class="pct" style="font-size:11px;font-weight:700;color:var(--primary-700)">27%</span><span style="font-size:11px;color:var(--text-muted)">2 项</span></div>
+                <div class="sup-b-body">
+                  <div class="mat-b-row"><span class="mat-b-name">330ml 罐体</span><span class="mat-b-qty">5,000 / <b>5,000</b> 只</span><span class="meter meter-sm fill-done" style="width:100%"></span></div>
+                  <div class="mat-b-row"><span class="mat-b-name">易拉盖</span><span class="mat-b-qty">1,500 / <b>5,000</b> 只</span><span class="meter meter-sm fill-ongoing" style="width:30%"></span></div>
+                </div>
+              </div>
+            </div>
+            <div class="ord-side">
+              <div>
+                <div class="side-meter-label"><span>总进度</span><span style="font-weight:700;color:var(--text)">62%</span></div>
+                <div class="meter fill-ongoing" style="width:100%"><div style="height:100%;background:var(--primary-600);border-radius:0 4px 4px 0;width:62%"></div></div>
+                <div style="font-size:10.5px;color:var(--text-muted);margin-top:4px">剩余 3,700 / 8,300 件</div>
+      </div>
+              <button class="btn-recv">📦 登记收货</button>
+              <button class="btn-view">👁 供应商详情</button>
+            </div>
+          </div>
+        </div>
+        <!-- 卡 2 -->
+        <div class="ord-card">
+          <div class="ord-head">
+            <span class="order-no">PO-240812-006</span><span class="sep">·</span>
+            <span class="cus">永辉物流 · 电解质水 ×2,000/3,000</span>
+            <span class="status-pill st-over">逾期 · 48 天</span>
+          </div>
+          <div class="ord-body">
+            <div class="sup-list">
+              <div class="sup-b">
+                <div class="sup-b-head">🚚 广州一品鲜 <span class="mini"><i style="width:38%;background:var(--primary-600)"></i></span><span class="pct" style="font-size:11px;font-weight:700;color:var(--primary-700)">38%</span><span style="font-size:11px;color:var(--text-muted)">4 项</span></div>
+                <div class="sup-b-body">
+                  <div class="mat-b-row"><span class="mat-b-name">浓缩荔枝汁</span><span class="mat-b-qty">800 / <b>800</b> kg</span><span class="meter meter-sm fill-done" style="width:100%"></span></div>
+                  <div class="mat-b-row"><span class="mat-b-name" style="color:var(--danger-600)">柠檬香精 <span class="status-pill st-over" style="margin-left:4px">逾期</span></span><span class="mat-b-qty">0 / <b>200</b> kg</span><span class="meter meter-sm fill-overdue" style="width:100%"></span></div>
+                </div>
+              </div>
+            </div>
+            <div class="ord-side">
+              <div>
+                <div class="side-meter-label"><span>总进度</span><span style="font-weight:700;color:var(--text)">38%</span></div>
+                <div class="meter fill-overdue" style="width:100%"><div style="height:100%;background:var(--danger-600);border-radius:0 4px 4px 0;width:38%"></div></div>
+                <div style="font-size:10.5px;color:var(--text-muted);margin-top:4px">2 项逾期 · 剩余 1,620 件</div>
+              </div>
+              <button class="btn-recv">📦 登记收货</button>
+              <button class="btn-view">👁 供应商详情</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 底部对比总结 -->
+  <div class="verdict">
+    <h3>两案对比（供拍板）</h3>
+    <table>
+      <thead><tr><th style="width:150px">维度</th><th>方案 A：表格升级</th><th>方案 B：订单卡片流</th></tr></thead>
+      <tbody>
+        <tr><td>改动范围</td><td>4 个文件外科手术（ProgressTab + composables + 工具条），复用全部现有 dialog</td><td>新写 OrderCard 系列组件（~5 个文件），逻辑同 A 复用 composable</td></tr>
+        <tr><td>信息密度</td><td>高（一屏 ~4 单）</td><td>低（一屏 ~2.5 单），细节全摊开</td></tr>
+        <tr><td>"找瓶颈供应商"</td><td>总进度分段条 + 展开的分组，<b>好</b></td><td>卡片头部直接列每家供应商小条，<b>最好</b></td></tr>
+        <tr><td>与系统一致性</td><td>与 /stock 已上线版式完全同构（工具条+表格），风险最低</td><td>全新版式，需要更多实测</td></tr>
+        <tr><td>后端改动</td><td class="r" colspan="2">均为 0 —— 分组/合并/统计全用既有接口（registrations + stats/overview），颜色映射纯前端</td></tr>
+        <tr><td>建议</td><td colspan="2"><b>推荐 A 先落地</b>（低风险、解决全部 5 个病灶）；B 的"订单卡片"可作为后续观察 A 后仍觉不够直观时的升级方向。</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="foot">mockups/material-redesign-2026-09-29.html · 数据为演示假数据 · 色板已过 dataviz 六项校验（CVD ΔE 7.3 ≥6 底线+次级编码、常规视觉 ΔE 17.5 ≥15、对比度全部 ≥3:1）</div>
+</div>
+</body>
+</html>
