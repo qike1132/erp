@@ -2240,6 +2240,8 @@ function onPage(event: { page: number; rows: number }) {
 
 **注意**：`UiConfirmDialog` 目前没有 `data-test` 透传到根元素的保证 —— 若测试拿不到 `[data-test="delete-confirm"]`，改为在测试里断言 `wrapper.text()` 包含产品名与数量，或在 `RecordDrawer` 里用一个自有的 `<div data-test="delete-confirm">` 包住它。**不要**为了测试去改 `UiConfirmDialog`（那是共享组件，改动面过大）。
 
+**另一个可能踩到的坑**：`UiDataTable` 内部是 PrimeVue `DataTable`。若 jsdom 下 `[data-test="record-row"]` 找不到（PrimeVue 组件有时需要插件才能渲染），先试着给 `mount` 的 `global.plugins` 加 PrimeVue 插件，而不是把 `UiDataTable` stub 掉 —— stub 掉就等于不测表格了。仓库里 `src/test/backupRecordTablePaging.test.ts` 是同类表格测试的可用范例，照它的挂载方式写。
+
 - [ ] **Step 6: 跑测试确认通过**
 
 Run: `cd frontend-vite && npx vitest run src/test/recordDrawer.render.test.ts`
@@ -3012,7 +3014,19 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
 
 - [ ] **Step 1: 起服务并在浏览器里核对**
 
-Run: `cd frontend-vite && npm run dev`
+**先确认端口**：本机 `:3000` 可能正被**生产前端**（nginx 托管 dist）占用，而 `npm run dev` 默认也想用 3000。**不要**为了跑 dev 去停生产服务。先探测：
+
+```bash
+command curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:3000/ || echo "3000 未响应"
+```
+
+若 3000 已在服务，改用别的端口起 dev：
+
+```bash
+cd frontend-vite && npm run dev -- --port 5199
+```
+
+（用 5199 打开核对，不要动 3000 上正在跑的东西。）
 
 按规格 §8.3 逐条核对（**这是本计划唯一能验证"功能正确"而不是"代码正确"的步骤**）：
 
