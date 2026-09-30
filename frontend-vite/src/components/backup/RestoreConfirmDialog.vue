@@ -45,7 +45,7 @@
             <li>未备份的新增数据将丢失</li>
           </ul>
 
-          <div v-if="plan?.encrypted" class="rw-pw-row">
+          <div v-if="passwordRequired" class="rw-pw-row">
             <label class="rw-pw-label" for="rw-decrypt-pw">解密密码</label>
             <input
               id="rw-decrypt-pw"
@@ -54,6 +54,7 @@
               type="password"
               placeholder="该备份已加密，请输入解密密码"
               autocomplete="new-password"
+              @blur="onPasswordBlur"
             />
           </div>
 
@@ -130,7 +131,7 @@ const props = defineProps<{
   planLoading: boolean
   task: BackupTaskState | null
   result: BackupTaskState | null
-  onPlan: (filename: string) => void
+  onPlan: (filename: string, password?: string) => void
   onExecute: (filename: string, opts: RestoreExecuteOptions) => Promise<boolean>
 }>()
 
@@ -152,12 +153,17 @@ const options = computed<ServerBackupSummary[]>(() => {
   return props.serverBackups
 })
 
+/** 需要解密密码：以预览结果为准，并以文件名兜底 —— 预览失败时 `plan.encrypted`
+ *  可能拿不到，而加密包没有密码根本无法还原，输入框绝不能因此不出现。 */
+const passwordRequired = computed(() => !!props.plan?.encrypted || /\.enc$/i.test(selected.value))
+
 const canExecute = computed(() =>
   confirmText.value === CONFIRM_TEXT &&
   !!selected.value &&
   !props.planLoading &&
-  !!props.plan?.success &&
-  (!props.plan?.encrypted || !!decryptPassword.value),
+  // 加密包：密码给了就放行 —— 无密码时预览必然失败，若死等 plan.success 则永远点不动
+  (!!props.plan?.success || (passwordRequired.value && !!decryptPassword.value)) &&
+  (!passwordRequired.value || !!decryptPassword.value),
 )
 
 const pct = computed(() => Math.round(props.task?.progress ?? 0))
@@ -201,6 +207,14 @@ function onSelectChange(e: Event) {
   confirmText.value = ''
   decryptPassword.value = ''
   props.onPlan(value)
+}
+
+/** 密码填完后重跑一次预览：拿到真实差异表，而不是一直显示「预览失败」 */
+function onPasswordBlur() {
+  if (!passwordRequired.value || !selected.value) return
+  if (props.plan?.success) return
+  const pw = decryptPassword.value
+  if (pw) props.onPlan(selected.value, pw)
 }
 
 async function doExecute() {

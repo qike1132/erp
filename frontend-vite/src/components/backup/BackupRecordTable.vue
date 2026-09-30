@@ -17,7 +17,7 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="r in paged" :key="r.id ?? r.filename">
+          <tr v-for="r in filtered" :key="r.id ?? r.filename">
             <td class="mono">{{ r.filename }}</td>
             <td><span class="brt-badge" :class="r.type === 'incremental' ? 'brt-badge-warning' : 'brt-badge-neutral'">{{ typeLabel(r.type) }}</span></td>
             <td class="mono">{{ r.size != null ? fmtSize(r.size) : '—' }}</td>
@@ -81,6 +81,10 @@ const keyword = ref('')
 
 const pageCount = computed(() => Math.max(1, Math.ceil(props.total / props.pageSize)))
 
+/** 本地筛选只作用于**当前页**：`/backup/records` 只接受 page/page_size，
+ *  筛选没有服务端入口，跨页筛选需要后端支持后再上移。
+ *  分页由父组件服务端完成（rows 已是第 page 页），此处**不能再切一次** ——
+ *  再切会把第 2 页及以后整页切空（rows 只有 page_size 条，start 却已 ≥ page_size）。 */
 const filtered = computed(() => {
   const kw = keyword.value.trim().toLowerCase()
   return props.rows.filter((r) => {
@@ -89,11 +93,6 @@ const filtered = computed(() => {
     if (kw && !r.filename.toLowerCase().includes(kw)) return false
     return true
   })
-})
-
-const paged = computed(() => {
-  const start = (props.page - 1) * props.pageSize
-  return filtered.value.slice(start, start + props.pageSize)
 })
 
 function typeLabel(t?: string) {

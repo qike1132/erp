@@ -31,6 +31,7 @@ VALID_TASK_TYPES = tuple(TASK_TYPE_TO_FUNC)
 
 # cron 5 段取值范围:分 时 日 月 周
 _FIELD_RANGES = ((0, 59), (0, 23), (1, 31), (1, 12), (0, 7))
+_DOW_FIELD_INDEX = 4
 
 
 # ---------------------------------------------------------------------------
@@ -42,7 +43,7 @@ def parse_cron(cron_expr: str) -> tuple[set[int] | None, ...] | None:
     if len(parts) != 5:
         return None
     fields: list[set[int] | None] = []
-    for part, (lo, hi) in zip(parts, _FIELD_RANGES, strict=False):
+    for idx, (part, (lo, hi)) in enumerate(zip(parts, _FIELD_RANGES, strict=False)):
         if part == '*':
             fields.append(None)
             continue
@@ -68,6 +69,12 @@ def parse_cron(cron_expr: str) -> tuple[set[int] | None, ...] | None:
                 return None
         if not vals:
             return None
+        # 周字段归一：标准 cron 里 0 与 7 都代表周日，而匹配侧用 isoweekday
+        # (1=周一..7=周日)。不归一的话 `0 3 * * 0` 能通过校验却**永不命中** ——
+        # 调度看起来配好了，实际一次都不会跑。归一放在解析处，匹配/回溯一次覆盖。
+        if idx == _DOW_FIELD_INDEX and 0 in vals:
+            vals.discard(0)
+            vals.add(7)
         fields.append(vals)
     return tuple(fields)
 

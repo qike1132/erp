@@ -2471,14 +2471,19 @@ EOF
 **Files:**
 - 无代码改动（如回归暴露问题，回到对应任务修复）
 
-- [ ] **Step 1: 跑全部相关测试**
+- [ ] **Step 1: 跑全部相关测试（两个 testpaths 都要覆盖）**
 
-Run: `command python -m pytest fastapi_app/tests/ -q --no-header -k "production or scope or nav"`
+> `pytest.ini` 的 `testpaths = tests fastapi_app/tests` —— 仓库根 `tests/` 下也有生产相关测试
+> （`test_daily_production.py`、`test_production_attribution.py`、`test_production_plan_service.py`）。
+> 本计划此前每个任务的回归命令只点名 `fastapi_app/tests/...`，导致根目录的 `test_daily_production.py`
+> 在 Task 5 改了 `get_records` 参数名后静默失败、直到 Task 6 才被发现。两个目录都要跑。
+
+Run: `command python -m pytest tests/test_daily_production.py tests/test_production_attribution.py tests/test_production_plan_service.py fastapi_app/tests/ -q --no-header -k "production or scope or daily"`
 Expected: PASS
 
 - [ ] **Step 2: 跑更宽的回归（确认没碰坏别的模块）**
 
-Run: `command python -m pytest fastapi_app/tests/ -q --no-header`
+Run: `command python -m pytest tests/ fastapi_app/tests/ -q --no-header`
 Expected: 与改动前**完全相同的**通过 / 失败集合。
 
 > 本机存在与本次改动无关的既有失败（环境差异所致）。判定方法：对每个失败先确认它是否触及 `daily_production` / `production_scope` / `nav_context`；若否，再到改动前的基线提交上跑同一个测试，确认它本来就失败。**既有失败不要修**，也不要在本次改动里"顺手"改掉 —— 只需在 PR 描述里点名列出（含测试名与失败原因一句话）。

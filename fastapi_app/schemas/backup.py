@@ -112,6 +112,10 @@ class BackupTriggerOut(BaseModel):
 class BackupRestorePlanRequest(BaseModel):
     """还原差异预览请求"""
     filename: str = Field(description="备份文件名（服务器默认路径下）")
+    password: str | None = Field(
+        default=None,
+        description="加密备份的解密密码；缺省时加密包只回 encrypted=True 而不给出差异",
+    )
 
 
 class BackupRestorePlanItem(BaseModel):

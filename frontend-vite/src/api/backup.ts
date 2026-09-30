@@ -106,7 +106,7 @@ export const backupApi = {
     const q = new URLSearchParams({ confirm: 'true' })
     if (opts?.confirmSensitive) q.set('confirm_sensitive', 'true')
     // H3：密码经 JSON body 传递，不再进 URL（避免进入访问日志/浏览器历史）
-    const body = opts?.password ? { password: opts.password } : undefined
+    const body = opts?.password ? { password: opts.password } : undefined  // secret-scan:allow 右值为属性读取，非字面凭据
     return post(`/backup/restore-by-name/${encodeURIComponent(filename)}?${q.toString()}`, body)
   },
   downloadByName: (filename: string) => download(`/backup/download/${encodeURIComponent(filename)}`, filename),
@@ -126,7 +126,7 @@ export const backupApi = {
     const q = new URLSearchParams({ confirm: 'true' })
     if (opts?.confirmSensitive) q.set('confirm_sensitive', 'true')
     // H3：密码经 JSON body 传递，不再进 URL（避免进入访问日志/浏览器历史）
-    const body = opts?.password ? { password: opts.password } : undefined
+    const body = opts?.password ? { password: opts.password } : undefined  // secret-scan:allow 右值为属性读取，非字面凭据
     return post<{ success: boolean; task_id?: string }>(`/backup/async-restore-by-name/${encodeURIComponent(filename)}?${q.toString()}`, body)
   },
   getProgress: (taskId: string) => get(`/backup/progress/${taskId}`),
@@ -150,7 +150,8 @@ export const backupApi = {
   saveSettings: (body: { backup_dir?: string; retention_days?: number; max_count?: number; encryption_mode?: string }) =>
     post<BackupSettings>('/backup/settings', body),
   validatePath: (path: string) => post<BackupPathValidate>('/backup/settings/validate-path', { path }),
-  restorePlan: (filename: string) => post<BackupRestorePlan>('/backup/restore/plan', { filename }),
+  restorePlan: (filename: string, password?: string) =>
+    post<BackupRestorePlan>('/backup/restore/plan', password ? { filename, password } : { filename }),
   // --- 分片导出（P0-3：先取 bundle_id，再逐片下载，各片与整包 checksum 一致） ---
   getExportInfo: (remark: string, encrypt: boolean) =>
     get<BackupChunkInfoDto>(`/backup/export-info?remark=${encodeURIComponent(remark)}&encrypt=${encrypt ? 'true' : 'false'}`),

@@ -10,11 +10,14 @@
 """
 import asyncio
 import gzip
+import io
 import json
 import logging
 import os
+import zlib
 from datetime import datetime
 from pathlib import Path
+from uuid import uuid4
 
 from fastapi import APIRouter, Body, Depends, File, Header, HTTPException, Query, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -60,18 +63,24 @@ async def _redis_unavailable() -> bool:
         return True
 
 
-async def _acquire_sync_restore_lock(purpose: str) -> None:
-    """同步还原路径统一获取 Redis 还原锁（P0-5 锁统一）。
+async def _acquire_sync_restore_lock(purpose: str) -> str:
+    """同步还原路径统一获取 Redis 还原锁（P0-5 锁统一），返回本次持锁的 owner token。
 
     - 与异步任务路径共用同一把锁（erp:restore_lock），消除旧实现"同步走 PG
       advisory、异步走 Redis，可各持一种锁并发还原"的窗口；
     - fail-closed：Redis 不可用时 503 拒绝还原。
+
+    token **每次请求唯一**（purpose 仅作可读前缀）：释放走 Lua 比对 value，
+    若沿用固定字符串，则锁过期后新请求取到的 value 与旧请求相同，旧请求迟到的
+    `finally` 会误删新请求的锁。调用方必须把返回值原样交给 `release_restore_lock`。
     """
-    if not await backup_service.acquire_restore_lock(purpose):
+    owner = f'{purpose}:{uuid4().hex}'
+    if not await backup_service.acquire_restore_lock(owner):
         if await _redis_unavailable():
             logger.error('Redis 不可用，拒绝执行恢复操作（fail-closed）')
             raise HTTPException(status_code=503, detail='恢复锁服务暂时不可用，请稍后重试')
         raise HTTPException(status_code=409, detail='另一个恢复操作正在执行中，请稍后重试')
+    return owner
 
 
 async def fail_progress_quietly(task_id: str) -> None:
@@ -109,9 +118,46 @@ async def _read_backup_file(file: UploadFile) -> tuple[bytes, bool, str]:
     if not is_zip and not is_json and not is_gz:
         raise HTTPException(status_code=400, detail='无法识别的备份文件格式')
     if is_gz:
-        content = await asyncio.to_thread(gzip.decompress, content)
+        try:
+            content = await asyncio.to_thread(
+                _decompress_gzip_bounded, content, backup_service.MAX_BACKUP_FILE_SIZE,
+            )
+        except (OSError, EOFError, ValueError, zlib.error) as e:
+            # BadGzipFile 是 OSError 子类；截断的 gz 抛 EOFError；坏块抛 zlib.error
+            raise HTTPException(status_code=400, detail=f'gzip 备份文件无法解压: {e}') from e
         is_json = True
     return content, is_zip, filename
+
+
+async def _pre_restore_info_or_fail(
+    db: AsyncSession, allowed: bool, *, skip_restore_check: bool = False,
+) -> dict:
+    """落一份还原前安全备份，并过闸门；不成功且未显式放行时抛 428。
+
+    三个还原端点（同步 /import、同步 /restore-by-name、异步任务）共用，
+    避免各自复制 try/except 与闸门调用 —— 漏掉一处就是一条无回滚点的还原路径。
+    """
+    try:
+        info = await backup_service.create_pre_restore_backup(db, skip_restore_check=skip_restore_check)
+    except (BackupError, OSError):
+        info = {'success': False, 'error': '创建安全备份失败'}
+    _require_pre_restore_backup(info, allowed)
+    return info
+
+
+def _decompress_gzip_bounded(content: bytes, limit: int) -> bytes:
+    """有上限地解压 gzip，超限即拒绝 —— 防「压缩炸弹」。
+
+    `gzip.decompress` 会一次性解出全部内容：500MB 的上传上限**拦不住**炸弹
+    （gzip 压缩比可达 ~1000:1，即 500MB 密文能解出 500GB，直接 OOM 打挂进程）。
+    `GzipFile.read(n)` 最多只取 n 字节，因此这里读 limit+1 字节即可判定是否超限，
+    多余的一个字节专门用来区分「正好等于上限」与「超过上限」。
+    """
+    with gzip.GzipFile(fileobj=io.BytesIO(content)) as gz:
+        data = gz.read(limit + 1)
+    if len(data) > limit:
+        raise ValueError(f'解压后超过大小限制({limit // 1024 // 1024}MB)，疑似压缩炸弹')
+    return data
 
 
 def _restore_error_to_http(exc: Exception) -> HTTPException:
@@ -125,6 +171,29 @@ def _restore_error_to_http(exc: Exception) -> HTTPException:
     return HTTPException(status_code=500, detail=str(exc) or '备份恢复失败')
 
 
+def _require_pre_restore_backup(pre_info: dict, allowed: bool) -> None:
+    """安全备份失败时**默认拒绝**破坏性还原；显式开关可放行。
+
+    `create_pre_restore_backup` 的注释写着「不阻塞恢复」，但那使运维在**不知情**的
+    状态下覆盖整库：失败只写进 `pre_restore_info`，此前**没有任何界面读取它**
+    （向导只渲染 result.error/status）—— 于是"有回滚点"是错觉。
+
+    这里不做价值判断，只把静默风险变成**知情选择**：
+    默认 fail-closed 拒绝（与还原锁同一取向），确认无回滚点也要继续时，
+    调用方显式传 `allow_missing_pre_restore_backup=true`。
+    """
+    if pre_info.get('success') is True or allowed:
+        return
+    raise HTTPException(
+        status_code=428,
+        detail=(
+            f"未能创建还原前安全备份（{pre_info.get('error') or '未知原因'}）。"
+            '本次还原会覆盖整库且**没有回滚点**；磁盘满时还原本身也很可能中途失败。'
+            '确认要在无安全备份的情况下继续，请传 allow_missing_pre_restore_backup=true。'
+        ),
+    )
+
+
 # ---------------------------------------------------------------------------
 # POST /import
 # ---------------------------------------------------------------------------
@@ -133,6 +202,9 @@ async def import_backup(
     file: UploadFile = File(...),
     confirm: bool = False,
     confirm_sensitive: bool = Query(False, description='确认同时还原敏感配置文件（.env.production / jwt 密钥），默认跳过'),
+    allow_missing_pre_restore_backup: bool = Query(
+        False, description='安全备份失败时仍继续还原（无回滚点，慎用）',
+    ),
     x_backup_password: str | None = Header(None, alias='X-Backup-Password'),
     user: User = Depends(require_backup_permission('import_backup')),
     db: AsyncSession = Depends(get_async_db),
@@ -147,13 +219,10 @@ async def import_backup(
     content, is_zip, _ = await _read_backup_file(file)
     decrypt_password = _get_encryption_password(None, x_backup_password)
 
-    try:
-        pre_restore_info = await backup_service.create_pre_restore_backup(db)
-    except (BackupError, OSError):
-        pre_restore_info = {'success': False, 'error': '创建安全备份失败'}
+    pre_restore_info = await _pre_restore_info_or_fail(db, allow_missing_pre_restore_backup)
 
     # P0-5: 同步路径统一 Redis 还原锁（fail-closed），与异步任务共用
-    await _acquire_sync_restore_lock('sync_import')
+    lock_owner = await _acquire_sync_restore_lock('sync_import')
     try:
         if is_zip:
             # zip 路径的提交点在策略层（strategies.py `await db.commit()`，已按
@@ -202,7 +271,7 @@ async def import_backup(
             'restored_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         }
     finally:
-        await backup_service.release_restore_lock()
+        await backup_service.release_restore_lock(lock_owner)
 
 
 # ---------------------------------------------------------------------------
@@ -213,7 +282,10 @@ async def restore_server_backup(
     filename: str,
     confirm: bool = Query(False),
     confirm_sensitive: bool = Query(False, description='确认同时还原敏感配置文件（.env.production / jwt 密钥），默认跳过'),
-    password: str | None = Body(None, description='加密备份解密密码（H3：经 body 传递，避免进入访问日志/浏览器历史；为空时依次使用请求头/环境变量）'),
+    allow_missing_pre_restore_backup: bool = Query(
+        False, description='安全备份失败时仍继续还原（无回滚点，慎用）',
+    ),
+    password: str | None = Body(None, embed=True, description='加密备份解密密码（H3：经 body 传递，避免进入访问日志/浏览器历史；为空时依次使用请求头/环境变量）'),
     x_backup_password: str | None = Header(None, alias='X-Backup-Password'),
     user: User = Depends(require_backup_permission('restore_server_backup')),
     db: AsyncSession = Depends(get_async_db),
@@ -242,14 +314,14 @@ async def restore_server_backup(
         raise HTTPException(status_code=400, detail=f'读取备份文件失败: {e}') from e
 
     decrypt_password = _get_encryption_password(password, x_backup_password)
+
+    # P0-5: 两条路径都要先落安全备份（旧实现仅 zip 分支有，JSON 分支连回滚点都没有）
+    pre_restore_info = await _pre_restore_info_or_fail(db, allow_missing_pre_restore_backup)
+
     is_zip = safe_name.endswith('.zip') or safe_name.endswith('.zip.enc') or content[:4] == b'PK\x03\x04'
     if is_zip:
-        # P0-5: 补齐还原前安全备份 + Redis 还原锁（旧实现此路径两者皆无）
-        try:
-            pre_restore_info = await backup_service.create_pre_restore_backup(db)
-        except (BackupError, OSError):
-            pre_restore_info = {'success': False, 'error': '创建安全备份失败'}
-        await _acquire_sync_restore_lock('sync_restore_by_name')
+        # P0-5: Redis 还原锁（旧实现此路径没有）
+        zip_lock_owner = await _acquire_sync_restore_lock('sync_restore_by_name')
         try:
             # 同 /import 的 zip 分支：提交点在策略层，此处只统一异常→HTTP 的映射
             try:
@@ -261,7 +333,7 @@ async def restore_server_backup(
             except BackupError as e:
                 raise HTTPException(status_code=500, detail=str(e)) from e
         finally:
-            await backup_service.release_restore_lock()
+            await backup_service.release_restore_lock(zip_lock_owner)
         result['pre_restore_backup'] = pre_restore_info
         total_rows = sum(td.get('rows', 0) for td in result.get('_manifest_tables', {}).values())
         result.pop('_manifest_tables', None)
@@ -279,7 +351,7 @@ async def restore_server_backup(
     if 'tables' not in backup_data:
         raise HTTPException(status_code=400, detail='JSON 备份文件缺少 tables 字段')
 
-    await _acquire_sync_restore_lock('sync_restore_by_name_json')
+    json_lock_owner = await _acquire_sync_restore_lock('sync_restore_by_name_json')
     try:
         # 同 /import：提交点归 db_transaction，异常回滚由它统一负责
         async with db_transaction(db, error_map={
@@ -288,12 +360,12 @@ async def restore_server_backup(
         }):
             result = await backup_service.restore_legacy_json(backup_data, db)
     finally:
-        await backup_service.release_restore_lock()
+        await backup_service.release_restore_lock(json_lock_owner)
     verification_ok = result.get('verification', {}).get('overall_pass', True)
     return {
         'success': verification_ok, 'format': 'json', 'filename': safe_name,
         'total_inserted': result['total_inserted'], 'results': result['results'],
-        'errors': result['errors'],
+        'errors': result['errors'], 'pre_restore_backup': pre_restore_info,
         'restored_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
     }
 
@@ -335,7 +407,7 @@ async def restore_incremental_backup(
     # B2 修复：增量还原接入统一 Redis 还原锁，与全量还原互斥
     # （此前仅持 PG advisory lock，与全量 psql 还原的 Redis 锁互不感知，
     #   可并发执行：增量 upsert 连接会被全量还原的 pg_terminate_backend 杀死）
-    await _acquire_sync_restore_lock(f'incremental_{safe_name}')
+    incr_lock_owner = await _acquire_sync_restore_lock(f'incremental_{safe_name}')
     try:
         result = await backup_service.restore_incremental(db, content, safe_name)
     except BackupLockError as e:
@@ -343,7 +415,7 @@ async def restore_incremental_backup(
     except RestoreError as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
     finally:
-        await backup_service.release_restore_lock(f'incremental_{safe_name}')
+        await backup_service.release_restore_lock(incr_lock_owner)
     return result
 
 
@@ -371,6 +443,9 @@ async def async_import_backup(
     file: UploadFile = File(...),
     confirm: bool = False,
     confirm_sensitive: bool = Query(False, description='确认同时还原敏感配置文件，默认跳过'),
+    allow_missing_pre_restore_backup: bool = Query(
+        False, description='安全备份失败时仍继续还原（无回滚点，慎用）',
+    ),
     x_backup_password: str | None = Header(None, alias='X-Backup-Password'),
     user: User = Depends(require_backup_permission('async_import_backup')),
 ):
@@ -403,6 +478,7 @@ async def async_import_backup(
     task = asyncio.create_task(_run_async_file_restore(
         task_id, content, is_zip, filename,
         confirm_sensitive=confirm_sensitive, decrypt_password=decrypt_password,
+        allow_missing_pre_restore_backup=allow_missing_pre_restore_backup,
     ))
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
@@ -417,7 +493,10 @@ async def async_restore_server_backup(
     filename: str,
     confirm: bool = Query(False),
     confirm_sensitive: bool = Query(False, description='确认同时还原敏感配置文件，默认跳过'),
-    password: str | None = Body(None, description='加密备份解密密码（H3：经 body 传递，避免进入访问日志/浏览器历史；为空时依次使用请求头/环境变量）'),
+    allow_missing_pre_restore_backup: bool = Query(
+        False, description='安全备份失败时仍继续还原（无回滚点，慎用）',
+    ),
+    password: str | None = Body(None, embed=True, description='加密备份解密密码（H3：经 body 传递，避免进入访问日志/浏览器历史；为空时依次使用请求头/环境变量）'),
     x_backup_password: str | None = Header(None, alias='X-Backup-Password'),
     user: User = Depends(require_backup_permission('async_restore_server_backup')),
 ):
@@ -462,6 +541,7 @@ async def async_restore_server_backup(
     task = asyncio.create_task(_run_async_file_restore(
         task_id, content, is_zip, safe_name,
         confirm_sensitive=confirm_sensitive, decrypt_password=decrypt_password,
+        allow_missing_pre_restore_backup=allow_missing_pre_restore_backup,
     ))
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
@@ -471,16 +551,36 @@ async def async_restore_server_backup(
 # ---------------------------------------------------------------------------
 # 异步恢复后台任务
 # ---------------------------------------------------------------------------
+async def _report_restore_outcome(task_id: str, result: dict) -> None:
+    """按库状态与校验结果上报异步恢复任务的终态。"""
+    from fastapi_app.core.backup_progress import complete_progress, fail_progress
+
+    if result.get('database', {}).get('status', '') == 'error':
+        database = result.get('database', {})
+        error_msg = database.get('error') or database.get('message') or '数据库恢复失败'
+        await fail_progress(task_id, f'数据库恢复失败: {error_msg}')
+        return
+
+    verification = result.get('verification', {})
+    if not verification.get('overall_pass', True):
+        l1_summary = verification.get('l1_row_count', {}).get('summary', '')
+        l2_summary = verification.get('l2_fingerprint', {}).get('summary', '')
+        verify_err = f'数据验证未通过: {l1_summary}'
+        if l2_summary:
+            verify_err += f'; {l2_summary}'
+        await fail_progress(task_id, verify_err)
+        return
+
+    await complete_progress(task_id, result)
+
+
 async def _run_async_file_restore(
     task_id: str, content: bytes, is_zip: bool, filename: str,
     *, confirm_sensitive: bool = False, decrypt_password: str | None = None,
+    allow_missing_pre_restore_backup: bool = False,
 ):
     """异步恢复后台执行"""
-    from fastapi_app.core.backup_progress import (
-        complete_progress,
-        fail_progress,
-        update_progress,
-    )
+    from fastapi_app.core.backup_progress import fail_progress, update_progress
     from fastapi_app.core.database import get_async_db_context
 
     # B1 修复：锁续期 watchdog——还原超 TTL(3600s) 时锁会被 Redis 回收，
@@ -499,9 +599,12 @@ async def _run_async_file_restore(
         async with get_async_db_context() as db:
             try:
                 await update_progress(task_id, 'pre_backup', 0.0, '创建安全备份')
-                # 异步路径已持有还原锁，须跳过还原互斥检查，否则安全备份必然失败
-                pre_result = await backup_service.create_pre_restore_backup(db, skip_restore_check=True)
-                pre_restore_info = pre_result
+                # 异步路径已持有还原锁，须跳过还原互斥检查，否则安全备份必然失败。
+                # 闸门失败时本处无法向已返回的客户端抛 HTTP，由下面 `except HTTPException`
+                # 转 fail_progress —— 与同步端点同一道闸，只是出口不同。
+                pre_restore_info = await _pre_restore_info_or_fail(
+                    db, allow_missing_pre_restore_backup, skip_restore_check=True,
+                )
                 await update_progress(task_id, 'pre_backup', 1.0, '安全备份完成')
 
                 if is_zip:
@@ -535,23 +638,7 @@ async def _run_async_file_restore(
                     result['total_inserted'] = total_rows
                     result.pop('_manifest_tables', None)
 
-                db_status = result.get('database', {}).get('status', '')
-                verification_ok = result.get('verification', {}).get('overall_pass', True)
-                restore_failed = db_status == 'error'
-                verification_failed = not verification_ok
-
-                if restore_failed:
-                    error_msg = result.get('database', {}).get('error') or result.get('database', {}).get('message') or '数据库恢复失败'
-                    await fail_progress(task_id, f'数据库恢复失败: {error_msg}')
-                elif verification_failed:
-                    l1_summary = result.get('verification', {}).get('l1_row_count', {}).get('summary', '')
-                    l2_summary = result.get('verification', {}).get('l2_fingerprint', {}).get('summary', '')
-                    verify_err = f'数据验证未通过: {l1_summary}'
-                    if l2_summary:
-                        verify_err += f'; {l2_summary}'
-                    await fail_progress(task_id, verify_err)
-                else:
-                    await complete_progress(task_id, result)
+                await _report_restore_outcome(task_id, result)
 
             except HTTPException as e:
                 await fail_progress(task_id, e.detail)
@@ -581,9 +668,21 @@ async def restore_plan(
     权限:backup_read。仅做只读探测，不触发任何写/还原。
     """
     try:
-        manifest = restore_plan_service.read_manifest_from_backup(payload.filename)
+        manifest = restore_plan_service.read_manifest_from_backup(
+            payload.filename, password=payload.password,
+        )
+    except restore_plan_service.EncryptedBackupError as e:
+        # 加密包缺密码**不是**失败终局：仍回 encrypted=True，前端才会渲染密码框并放行
+        return BackupRestorePlanOut(
+            success=False, filename=payload.filename, encrypted=True, error=str(e),
+        )
     except (FileNotFoundError, ValueError) as e:
-        return BackupRestorePlanOut(success=False, filename=payload.filename, error=str(e))
+        # 加密包即使解密失败（密码错）也要回 encrypted=True，否则前端的密码输入框会
+        # 随预览失败一起消失，用户连重试的入口都没有
+        return BackupRestorePlanOut(
+            success=False, filename=payload.filename,
+            encrypted=payload.filename.endswith('.enc'), error=str(e),
+        )
     try:
         plan = await restore_plan_service.build_restore_plan(db, manifest)
     except Exception as e:  # broad-except: 预览失败返回 message，不中断请求

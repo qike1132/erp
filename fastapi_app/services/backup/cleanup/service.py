@@ -448,6 +448,37 @@ class BackupCleanupService:
         except Exception as e:  # defensive: recovery test failure should not abort cleanup
             logger.error(f"备份文件测试失败: {e}")
 
+    def _enforce_keep_floor(self,
+                            backup_files: list[dict[str, Any]],
+                            files_to_delete: set[str]) -> set[str]:
+        """兜底：任何情况下至少留一个可还原的备份。
+
+        清理是唯一会**删备份**的路径，而"删光了"意味着系统从此没有回滚点 ——
+        `restore_from_zip` 无从下手，事故时才发现已无路可退。触发场景都真实存在：
+        所有文件都健康测试失败被移出 keep、retention/max_count 配成极端值、
+        或磁盘压力大到把 keep 集也吃干净。
+
+        只在**会删光**时介入，从删除集里救回最新且未被判定损坏的一个（列表按
+        mtime 倒序，首个非 corrupted 即最新可还原者）。
+        """
+        if any(f['name'] not in files_to_delete for f in backup_files):
+            return files_to_delete
+
+        candidates = [f for f in backup_files if f.get('health_status') != 'corrupted']
+        if not candidates:
+            # 全被判定损坏：仍然留一个 —— 损坏≠不可人工抢救，且"全删"更不可逆
+            candidates = list(backup_files)
+        if not candidates:
+            return files_to_delete
+
+        survivor = candidates[0]['name']
+        files_to_delete.discard(survivor)
+        logger.warning(
+            '本次清理会删光全部 %d 个备份（无回滚点），已强制保留 %s',
+            len(backup_files), survivor,
+        )
+        return files_to_delete
+
     async def _mark_files_to_delete(self,
                                   backup_files: list[dict[str, Any]],
                                   files_to_keep: set[str],
@@ -483,7 +514,7 @@ class BackupCleanupService:
                     files_to_keep.remove(file_info['name'])
                     space_freed_gb += file_size_gb
 
-            return files_to_delete
+            return self._enforce_keep_floor(backup_files, files_to_delete)
 
         except Exception as e:  # defensive: deletion marking failure should not abort cleanup
             logger.error(f"标记删除文件失败: {e}")

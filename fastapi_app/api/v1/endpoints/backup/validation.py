@@ -402,6 +402,14 @@ async def validate_backup_file(
 
     try:
         # 读取文件（阻塞 IO 移入线程池，避免卡住事件循环）
+        # 大小上限：还原链路一直有这个检查，校验链路此前没有 —— 一个超大的
+        # （或损坏后膨胀的）备份文件会被整体读进内存，直接打挂工作进程
+        stat_size = await asyncio.to_thread(lambda: filepath.stat().st_size)
+        if stat_size > backup_service.MAX_BACKUP_FILE_SIZE:
+            raise HTTPException(
+                status_code=400,
+                detail=f'备份文件超过大小限制({backup_service.MAX_BACKUP_FILE_SIZE // 1024 // 1024}MB)，无法校验',
+            )
         content = await asyncio.to_thread(filepath.read_bytes)
         file_size = len(content)
 
@@ -469,14 +477,26 @@ async def validate_backup_file(
                         issues.append('ZIP文件缺少manifest.json')
                         valid = False
 
-                    # 检查文件完整性
+                    # 检查文件完整性。**分块读并有总量上限**：原来的 f.read() 会把成员
+                    # 一次性解进内存，500MB 的压缩炸弹能解出几百 GB，校验接口就成了 OOM
+                    # 入口。分块读对正常备份与原先等价（照样读全文），超限才中断。
+                    remaining = backup_service.MAX_BACKUP_FILE_SIZE
                     for zip_info in zip_file.infolist():
                         try:
                             with zip_file.open(zip_info.filename) as f:
-                                f.read()  # 尝试读取文件
+                                while True:
+                                    chunk = f.read(1024 * 1024)
+                                    if not chunk:
+                                        break
+                                    remaining -= len(chunk)
+                                    if remaining < 0:
+                                        raise ValueError(
+                                            '解压后总体积超过大小限制，疑似压缩炸弹'
+                                        )
                         except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
                             issues.append(f'文件 {zip_info.filename} 损坏: {e!s}')
                             valid = False
+                            break
 
             # 尝试解析为JSON文件
             elif filename.endswith('.json') or filename.endswith('.json.enc'):
@@ -549,6 +569,9 @@ async def validate_backup_file(
 
         return result
 
+    except HTTPException:
+        # 大小上限等前置校验的 400 必须原样上抛：下面的兜底会把它吞成 500
+        raise
     except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
         logger.exception('验证备份文件失败')
         raise HTTPException(status_code=500, detail='验证备份文件失败，请查看服务器日志') from e

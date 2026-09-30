@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import io
 import json
 import logging
 import zipfile
@@ -19,17 +20,50 @@ from fastapi_app.services.backup.verify.core import quote_table
 logger = logging.getLogger(__name__)
 
 
-def read_manifest_from_backup(filename: str, base_dir: Path | None = None) -> dict:
+class EncryptedBackupError(ValueError):
+    """备份已加密且本次未带（或带错）密码。
+
+    单独成类是为了让调用方能把它与「文件缺失/损坏」区分开：加密备份缺密码**不是**
+    失败终局，前端据此仍要渲染密码输入框并允许提交 —— 否则加密备份在界面上无路可走。
+    """
+
+
+def _manifest_from_zip_bytes(data: bytes, filename: str) -> dict:
+    try:
+        with zipfile.ZipFile(io.BytesIO(data), 'r') as zf:
+            if 'manifest.json' not in zf.namelist():
+                raise ValueError(f'备份 {filename} 缺少 manifest.json')
+            return json.loads(zf.read('manifest.json'))
+    except (zipfile.BadZipFile, OSError, ValueError) as e:
+        if isinstance(e, ValueError):
+            raise
+        raise ValueError(f'备份文件 {filename} 读取失败: {e}') from e
+
+
+def read_manifest_from_backup(
+    filename: str, base_dir: Path | None = None, *, password: str | None = None,
+) -> dict:
     """读取指定备份文件的 manifest.json。
 
-    加密备份无法在无密码下读取，抛 ValueError 提示需先解密；文件名须为备份目录内合法文件。
+    加密备份（`.enc`）无密码时抛 `EncryptedBackupError`；给了密码则先解密再读，
+    这样向导第 2 步的差异预览对加密备份同样可用。文件名须为备份目录内合法文件。
     """
     base = base_dir or BACKUP_DIR
     path = base / Path(filename).name  # 防路径穿越:仅取 basename
     if not path.is_file():
         raise FileNotFoundError(f'备份文件不存在: {filename}')
     if path.suffix.endswith('.enc'):
-        raise ValueError('该备份已加密，需提供密码后预览')
+        if not password:
+            raise EncryptedBackupError('该备份已加密，请输入解密密码后预览')
+        from fastapi_app.core.backup_encryption import decrypt_backup_auto
+
+        try:
+            # 用 auto 而非 decrypt_backup：它同时认 chunked-v1 / meta 前缀 / 旧裸信封，
+            # 与还原链路的读取口径一致，避免「能还原却预览不了」的口径分叉
+            decrypted = decrypt_backup_auto(path.read_bytes(), password)[0]
+        except Exception as e:  # broad-except: 解密实现抛错类型不定，统一转成可展示的 ValueError
+            raise ValueError(f'解密失败，请确认密码是否正确: {e}') from e
+        return _manifest_from_zip_bytes(decrypted, filename)
     try:
         with zipfile.ZipFile(path, 'r') as zf:
             if 'manifest.json' not in zf.namelist():

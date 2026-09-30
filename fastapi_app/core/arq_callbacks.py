@@ -10,8 +10,24 @@ import time
 from datetime import datetime
 
 from fastapi_app.core.logger import logger
+from fastapi_app.core.schedule_status import (
+    STATUS_FAILED,
+    STATUS_SUCCESS,
+    mark_schedule_finished,
+)
 
 DLQ_KEY = 'arq:dead_letter'
+
+
+async def _mark_schedule_outcome(ctx, status: str) -> None:
+    """调度任务的终态回写；非调度任务（job id 无前缀）直接跳过。
+
+    状态回写是**附带**动作：失败只告警，绝不能影响任务收尾或失败告警链路。
+    """
+    try:
+        await mark_schedule_finished(ctx.get('job_id'), status)
+    except Exception as e:  # broad-except: 回写失败不得影响回调主职责
+        logger.warning('调度状态回写异常: %s', e)
 
 
 async def on_job_started(ctx):
@@ -24,7 +40,11 @@ async def on_job_started(ctx):
 
 
 async def on_job_end(ctx):
-    """任务结束回调 - 记录耗时指标"""
+    """任务结束回调 - 回写调度终态 + 记录耗时指标"""
+    # 调度任务的 last_status 只有这里能落成终态：轮询器入队时写 'running'，
+    # 不写回就永远是 'running'，界面上的"上次执行结果"恒为"执行中"。
+    await _mark_schedule_outcome(ctx, STATUS_SUCCESS)
+
     start = ctx.get('_start_time')
     if start is None:
         return
@@ -76,6 +96,8 @@ async def on_job_failed(ctx, exc):
 
     await _push_to_dead_letter(dead_letter_entry)
     _emit_failure_metric(func_name)
+    # 调度任务重试耗尽 ⇒ 终态 failed
+    await _mark_schedule_outcome(ctx, STATUS_FAILED)
     logger.critical(
         'ALERT: ARQ任务失败需人工介入 func=%s id=%s exc=%s',
         func_name, job_id, exc,

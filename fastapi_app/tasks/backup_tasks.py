@@ -272,6 +272,7 @@ async def scheduler_poller(ctx):
     try:
         from fastapi_app.core.arq_app import get_arq_pool
         from fastapi_app.core.database import get_async_db_context
+        from fastapi_app.core.schedule_status import schedule_job_id
         from fastapi_app.services.backup import schedule_service
 
         now = datetime.now()
@@ -285,7 +286,13 @@ async def scheduler_poller(ctx):
                 if not func_name:
                     logger.warning('调度任务 id=%s 类型 %s 无映射任务函数，跳过', sch.id, sch.task_type)
                     continue
-                await pool.enqueue_job(func_name)
+                # 带上可解析的 job id：任务结束/失败的 ARQ 回调据此把 last_status 落成
+                # 终态（否则它会永远停在 'running'）；同时借 ARQ 的同名 job 去重拿到原子
+                # 版本的「本小时窗口只跑一次」。
+                job = await pool.enqueue_job(func_name, _job_id=schedule_job_id(sch.id, now))
+                if job is None:
+                    logger.info('调度任务已在本小时窗口入队，跳过重复入队 schedule_id=%s', sch.id)
+                    continue
                 # last_run_at 写入 aware UTC：避免 naive 本地时间写 timestamptz 列读回后时区错位
                 sch.last_run_at = datetime.now(UTC)
                 sch.last_status = 'running'

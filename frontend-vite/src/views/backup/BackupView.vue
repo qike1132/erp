@@ -236,13 +236,19 @@ async function saveSchedule(data: { name: string; task_type: string; cron_expr: 
   try {
     await backupApi.createSchedule(data)
     await loadSchedules()
+  } catch (e) {
+    // 没有 catch 时后端的 400（cron 非法等）会变成未处理的 promise rejection：
+    // 界面既不报错也不关闭，运维只看到"点了没反应"，无从修正输入
+    toast.error(errText(e, '保存定时任务失败'))
   } finally { saving.value = false }
 }
 async function deleteSchedule(id: number) {
   try {
     await backupApi.deleteSchedule(id)
     await loadSchedules()
-  } catch { /* ignore */ }
+  } catch (e) {
+    toast.error(errText(e, '删除定时任务失败'))
+  }
 }
 async function triggerScheduleNow() {
   const first = schedules.value.find((s) => s.enabled)
@@ -267,6 +273,9 @@ async function savePath(path: string) {
     // 空字符串表示恢复默认系统路径(后端据此重置 backup_dir)
     await backupApi.saveSettings({ backup_dir: path })
     await loadSettings()
+  } catch (e) {
+    // 同 saveSchedule：无 catch 会把 400（路径非法/不可写）吞成"点了没反应"
+    toast.error(errText(e, '保存备份路径失败'))
   } finally { saving.value = false }
 }
 
@@ -315,12 +324,12 @@ function openWizard() {
 }
 /** 预览请求序号：快速切换备份点时只接受最后一次的响应，避免展示错配的影响范围 */
 let planSeq = 0
-async function previewPlan(filename: string) {
+async function previewPlan(filename: string, password?: string) {
   const seq = ++planSeq
   planLoading.value = true
   plan.value = null
   try {
-    const res = await backupApi.restorePlan(filename)
+    const res = await backupApi.restorePlan(filename, password)
     if (seq === planSeq) plan.value = res
   } catch {
     if (seq === planSeq) plan.value = { success: false, filename, error: '预览失败' }
