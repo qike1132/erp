@@ -2,6 +2,12 @@ import { ref, computed, reactive, toRaw } from 'vue'
 import { purchaseApi } from '@/api'
 import { escapeHtml, printHtml } from '@/utils/print'
 import { fmtQty } from '@/utils/formatQty'
+import { calcSpareQuantity, summaryMaterialKey } from './perSkuRows'
+
+// 这两个纯函数已移入 perSkuRows.ts —— 本模块要用它的 buildPerSkuRows，
+// 若此处再定义它们就构成互相 import（Vite/vitest 下会拿到 undefined 绑定）。
+// 重导出仅为兼容既有导入路径，行为逐字不变。
+export { calcSpareQuantity, summaryMaterialKey } from './perSkuRows'
 
 // structuredClone 无法克隆 Vue 响应式 Proxy（报 "could not be cloned"）。
 // 先 toRaw 取回原始纯对象，再做结构化深克隆；传入纯对象时 toRaw 原样返回，同样安全。
@@ -25,26 +31,6 @@ function orderTimeLabel(orderTime: string): string {
 export function getGroupOrderQty(group: FactoryGroup): number {
   const v = parseFloat(String(group.product_quantity || group.order_quantity || 0))
   return Number.isNaN(v) ? 0 : v
-}
-
-/**
- * 备品数量（口径 A：**只用订单级损耗率**）。
- *
- * `备品 = ceil(订单数量 × 订单级率‰)`，与后端 `calc_spare_quantity` 同口径；
- * 屏幕「备品数量」列、打印预览、Excel 导出共用这一处来源。
- *
- * **自定义（逐布料行）损耗率不参与本计算**（2026-09-30 用户裁决）：
- * 逐行率装的是**材料损耗**（实测 400-1000‰，即 40%-100%），备品率是 0.5%-3%
- * 量级，两者差 1-2 个数量级。曾把逐行率当备品率用，生产实证单张单虚高 30 倍
- * （备品 150 → 4500、生产数量 14500），故明确分离：行率只驱动「数量」列加放。
- *
- * 防御口径：非法/非有限/<= 0 → `0`（率未设时备品确实是 0，是确定值而非缺失）。
- */
-export function calcSpareQuantity(orderQty: number, rate: number): number {
-  const q = Number.isFinite(orderQty) ? orderQty : 0
-  const r = Number.isFinite(rate) ? rate : 0
-  if (q <= 0 || r <= 0) return 0
-  return Math.ceil((q * r) / 1000)
 }
 
 /**
@@ -84,22 +70,6 @@ export function ceilMagnifiedByLossRate(qty: number, lossRate: number): number {
  */
 export function factoryQtyDisplayValue(baseQty: number, lossRate: number, editing: boolean): number {
   return editing ? magnifyByLossRate(baseQty, lossRate) : ceilMagnifiedByLossRate(baseQty, lossRate)
-}
-
-/**
- * 汇总物料键：`供应商 + 物料名 + 规格 + 单位`。
- *
- * 后端工厂汇总（fabric）与供应商汇总（material）同源，均按
- * (供应商, 物料, 规格, 单位) 聚合，故两侧可用同一键一一对应。
- * 用 `\u0000` 分隔，避免字段值本身含分隔符时发生键碰撞。
- */
-export function summaryMaterialKey(
-  supplierName: string | null | undefined,
-  materialName: string | null | undefined,
-  specification: string | null | undefined,
-  unit: string | null | undefined,
-): string {
-  return [supplierName || '未指定供应商', materialName || '', specification || '', unit || ''].join('\u0000')
 }
 
 /**
@@ -276,6 +246,11 @@ export interface SkuLine {
   product_name: string
   product_barcode?: string
   order_qty: number
+  /**
+   * 该 SKU 自己的物料明细（后端按 SKU 展开的**基准量** = BOM 单件用量 × 该 SKU 数量）。
+   * 缺省/为空表示后端未提供（旧后端、无 BOM、SKU 名解析不出）→ 前端回退订单级单块。
+   */
+  materials?: { supplier_name: string; material_name: string; specification: string; unit: string; quantity: number }[]
 }
 
 /** 逐 SKU 展示行：屏幕表格 / 打印预览 / Excel 导出共用同一形状 */
