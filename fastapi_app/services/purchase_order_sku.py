@@ -212,8 +212,7 @@ async def fetch_po_sku_map(db: AsyncSession, po_ids) -> dict[int, list[dict]]:
 
 
 async def resync_po_sku_spare(db: AsyncSession, po_ids, spare_rate: float | None) -> int:
-    """损耗率变更后按新率重算逐 SKU 备品（**已被 purchase_order_spare 的部位率重算取代**，
-    保留以供直接调用方与既有测试使用）。
+    """损耗率变更后，按新率重算所涉**采购单**的逐 SKU 备品（保持逐 SKU 行与主表同步）。
 
     主表 ``spare_quantity`` 由 ``_apply_spare_rate`` 按订单级 ``product_quantity``
     重算；逐 SKU 行必须同步重算，否则读路径的逐 SKU 生产数量会与主表口径不一致。
