@@ -367,6 +367,13 @@ _firefox_profile_*/
 /.graphflow-cache/
 /graphflow-out/
 
+# /team/：team 多智能体技能的运行痕迹（ROSTER.json/STATE.json/RUN.log.md/TASKS.json
+#   等 run 中间态；目录名即当时的提示词，STATE.json 内含成员 UUID 与 goal 原文）。
+#   2026-10-01 确认：35 个此类文件被 85d21bdf「chore: checkpoint before switching
+#   to main」（空提交体）连同同批真实改动一起卷入库。同日从索引整体移除并在此忽略；
+#   磁盘文件保留，不删用户数据。
+/team/
+
 # dsh-web-dump-config.txt：dsh CLI `--dump-config` 的 profile 配置转储（约 200KB）。
 #   2026-09-30 扫描确认不含任何明文凭据（私钥/云凭据/口令赋值共 9 类模式全清），
 #   但仍属本机运维快照而非项目资产，且可用一条命令随时重新生成。
