@@ -51,7 +51,7 @@ DB_HOST=localhost             DB_PORT=5432                 DB_NAME=erp_system
 DB_USER=erp_app               UVICORN_WORKERS=4            ALLOWED_HOSTS 含 192.168.0.95
 BACKUP_ENCRYPTION_ENABLED=true   BACKUP_ENCRYPTION_ALGORITHM=AES256
 BACKUP_ENCRYPTION_KEY_PATH=（空）  BACKUP_DIR=backups/server
-备份文件：*.enc = 9 个，*.enc.meta = 9 个，*.zip（明文）= 47 个
+备份产物：*.enc（加密）+ 同名 *.enc.meta —— 由每日/增量定时任务持续累积（2026-09-30 10:05 实测又新增 2 个）；另有 *.zip（明文）= 47 个
 backups/.backup_encryption.key = 不存在
 PostgreSQL 服务：postgresql-x64-18 = Running，postgresql-replica = Running（存在副本！）
 ```
@@ -139,12 +139,12 @@ git rm --cached config/pgbouncer/userlist.txt
 - `BACKUP_ENCRYPTION_KEY_PATH` 为**空**、`backups/.backup_encryption.key` **不存在**、`.env` 里也没有 `BACKUP_ENCRYPTION_KEY`。
 - ⇒ 密钥来源里**只有 `BACKUP_ENCRYPTION_PASSWORD` 一项**（`crypto.py:60-66` 的优先级链在 password 命中后即返回）。
 
-**影响面很小，这很重要**：真正加密的产物只有 **9 个 `.enc`**（+ 9 个 `.enc.meta`）。其余 47 个 `.zip` 是明文备份，**不受轮换影响**。你已确认历史加密备份可以弃置。
+**影响面可量化，但它是"移动靶"**：加密产物只有 `*.enc`（+ 同名 `.enc.meta`），而**每日/增量定时任务正在持续产出新的加密备份**（2026-09-30 10:05 实测：一次 `auto_daily_backup` 产出 4,482,348B、一次 `auto_incremental_backup` 产出 182,755B，均为 `.zip.enc`）。其余 47 个 `.zip` 是明文备份，**不受轮换影响**。你已确认历史加密备份可以弃置。
 
 **步骤：**
 
 ```powershell
-# ① 记录当前 9 个加密备份（已在 §1.1 存过 CSV），确认它们确实可以弃置
+# ① 记录【轮换时刻之前】的全部加密备份（已在 §1.1 存过 CSV），确认它们确实可以弃置
 Get-ChildItem backups -Recurse -File -Filter *.enc | Select-Object FullName,Length,LastWriteTime
 ```
 
@@ -162,7 +162,7 @@ Get-ChildItem backups -Recurse -File -Include *.enc,*.enc.meta | Move-Item -Dest
 ```
 
 ```powershell
-# ④ 重启 API 进程让新环境变量生效（当前 API 由手工启动的 python 进程提供，见 §4 遗留问题）
+# ④ 重启 API 让新环境变量生效（生产由 NSSM 服务 erp-prod 托管，故用 nssm restart erp-prod）
 # ⑤ 触发一次加密备份，并立即做一次还原验证 —— 这是唯一能证明新口令可用的方式
 python -m pytest fastapi_app/tests/test_backup_encrypted_restore_path.py -q
 ```
@@ -177,7 +177,7 @@ python -m pytest fastapi_app/tests/test_backup_encrypted_restore_path.py -q
 
 - [ ] S1：新口令能登录 `postgres`，旧口令已失败；`.env:46` 已同步
 - [ ] S2：三个角色口令互不相同；`userlist.txt` 已 `git rm --cached`；`.gitignore` 已覆盖
-- [ ] S3：`.env` 已换；9 个旧 `.enc` 已移出 `backups/`；新的加密备份能创建**且能还原**
+- [ ] S3：`.env` 已换；**轮换时刻之前**的全部 `.enc`/`.enc.meta` 已移出 `backups/`；新的加密备份能创建**且能还原**
 - [ ] `_ops/credentials/` 里对应的明文文件已更新或销毁
 - [ ] §1.1 的三个快照文件已按 §3.4 销毁
 - [ ] §4 的遗留问题已阅读
@@ -207,10 +207,15 @@ Remove-Item "$env:TEMP\.env.before-rotation-20260930","$env:TEMP\userlist.txt.be
 
 ## 4. 本手册写作时发现的遗留问题（与轮换无关，但请知情）
 
-1. **生产不是跑在预期的服务拓扑上**：`erp-web`（nginx）、`erp-prod`（`python -m fastapi_app.core.prod_runner --no-arq`）、`erp-arq`（ARQ worker）三个 NSSM 服务**全部 Stopped**；实际服务由手工启动的 `node.exe`（占 3000）与 `python.exe`（占 5002）提供，nginx 进程数为 0。后果：**ARQ worker 未运行** ⇒ 定时备份、清理、`arq_callbacks` 等后台任务不会执行；且手工进程**不受 NSSM 的自动重启保护**。
-2. **API 绑定在 `0.0.0.0:5002`**，而文档写的是"uvicorn 仅绑回环、由 nginx:3000 反代"。本机内网地址 `192.168.0.95` ⇒ 同网段任意主机可**绕过 nginx 直接访问 API**。
+1. **【已修正】生产拓扑已核实为正常服役**。本手册初稿依据 09:47 的探测写了"三个 NSSM 服务全部 Stopped、由手工 node/python 进程顶替"——该判定**在当时成立**，但已被 10:05 起启动的生产模式取代，故在此更正：`erp-web` / `erp-prod` / `erp-arq` / `erp-redis` / `erp-redis-broker` 五个服务均 **Running / Automatic**；`logs/prod_runner.json` 报 `ready: true, frontend_ok: true`；nginx 3 个进程监听 `:3000`，`/nginx-health` 返回 `{"status":"ok","service":"nginx"}`；ARQ worker 正常执行定时任务（见第 5 条）。注意 `prod_runner.json` 里 `arq.status = "external"` 是**设计如此** —— `erp-prod` 以 `--no-arq` 启动，ARQ 由独立的 `erp-arq` 服务托管，而非监督器子进程。
+2. **【已修正】API 当前不裸露**：09:47 探测时 5002 曾绑在 `0.0.0.0`；当前实测为 **`127.0.0.1:5002`**，符合 `prod_runner.py:178` 的"仅绑回环"设计，局域网无法绕过 nginx 直连后端。
 3. **`BACKUP_ENCRYPTION_ENABLED=true` 而 `BACKUP_ENCRYPTION_KEY_PATH` 为空**：当前靠 `BACKUP_ENCRYPTION_PASSWORD` 单点支撑；若该变量将来被清空，按 `crypto.py:57-66` 会**降级为不加密备份**（`BACKUP_ENCRYPTION_FALLBACK_TO_GENERATED` 默认已是 false，不会退化成随机密钥）。
 4. **`.env` 与 `.env.example` 双向漂移**：`.env` 有而 example 无 —— `PG_SUPER_PASSWORD`、`BACKUP_ENCRYPTION_PASSWORD`、`FLASK_ENV`、`FLASK_DEBUG`、`PGBOUNCER` 之外的多数 `BACKUP_*`；example 有而 `.env` 无 —— `PGBOUNCER_ENABLED`、`PGBouncer_HOST`、`PGBouncer_PORT`、`REDIS_URL`、`S3_*`、`STORAGE_TYPE`、`PROD_LOG_ROTATE_MB`、`SLOW_QUERY_*`。
+5. **生产日志里发现的真实缺陷**（2026-09-30 10:05 的 `logs/erp-arq.log`，即"生产模式已正常服役"之后的新证据，与轮换无关但值得单独修）：
+   - **增量备份静默跳过一张表**：`增量备份表 approval_log 失败: asyncpg.exceptions.DataError: invalid input for query argument $1: datetime.datetime(...) (expected str, got datetime.datetime)`，对应 SQL `SELECT * FROM "approval_log" WHERE "updated_at" >= $1`。异常被捕获后**备份仍报 success（`table_count: 32`）**，即增量备份链里长期缺 `approval_log` 的数据且无人告警。建议单独排查该表 `updated_at` 的列类型与参数绑定方式。
+   - **`获取 PG 版本失败: [WinError 2] 系统找不到指定的文件`**：服务运行环境找不到 `pg_dump`/`psql`（PATH 缺失），数据库快照与版本探测因此降级。建议在 NSSM 服务环境或 `.env` 里显式给出 PostgreSQL `bin` 路径。
+   - 旁证：`MeiliSearch 索引导出失败（可忽略）: All connection attempts failed`（日志自称可忽略）、`CPU使用率过高: 82.4% > 80.0%阈值`（备份窗口内的阈值告警）。
+   - **运行时漂移**：`logs/prod_runner.json` 报 `workers: 8`，而 `.env` 写的是 `UVICORN_WORKERS=4` —— `load_dotenv(override=False)` 使**真实环境变量优先**，说明 `erp-prod` 服务环境里另设了 `UVICORN_WORKERS=8`，`.env` 的 4 在生产中不生效。
 
 ---
 
