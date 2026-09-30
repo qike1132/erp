@@ -348,7 +348,8 @@ command git commit -m "feat(purchase): 汇总接口按 SKU 展开物料明细（
 - Test: `frontend-vite/src/test/perSkuRows.test.ts`
 
 **Interfaces:**
-- Consumes: `summaryMaterialKey(supplier, material, spec, unit)`、`calcSpareQuantity(qty, rate)`、`getGroupOrderQty(group)`（均在 `useSummaryModal.ts` 导出）
+- Consumes: **仅类型**（`FactoryGroup` / `FabricItem`，用 `import type`）——**不得**从 `useSummaryModal.ts` 引入任何**值**，否则与它对本模块 `buildPerSkuRows` 的依赖构成**循环导入**（Vite/vitest 下会得到 `undefined` 绑定）
+- **本任务同时搬迁两个纯函数**：把 `calcSpareQuantity` 与 `summaryMaterialKey` 从 `useSummaryModal.ts` **移入** `perSkuRows.ts`（它们本就是无依赖的纯函数），并在 `useSummaryModal.ts` 里用 `export { calcSpareQuantity, summaryMaterialKey } from './perSkuRows'` **反向重导出** —— 依赖方向从此单向（`useSummaryModal` → `perSkuRows`），且既有测试从 `useSummaryModal` 导入这两个函数的写法**不受影响**
 - Produces（后续 Task 3/5 依赖，签名冻结）:
   ```ts
   export interface SkuMaterial { supplier_name: string; material_name: string; specification: string; unit: string; quantity: number }
@@ -533,6 +534,25 @@ Run: `command npx vitest run src/test/perSkuRows.test.ts`
 Expected: FAIL —— `Failed to resolve import '@/views/purchase/composables/perSkuRows'`
 
 - [ ] **Step 3: 实现**
+
+**3a. 先把两个纯函数搬进 `perSkuRows.ts`（消解循环导入）**
+
+把 `useSummaryModal.ts` 里 `calcSpareQuantity` 与 `summaryMaterialKey` 两个函数的**定义**（连同 docstring）整段**移入** `perSkuRows.ts`；并在 `useSummaryModal.ts` 的 import 区之后加一行**重导出**，保住既有导入路径：
+
+```ts
+// 这两个纯函数已移入 perSkuRows.ts —— 本模块要用它的 buildPerSkuRows，
+// 若此处再定义它们就构成互相 import（Vite/vitest 下会拿到 undefined 绑定）。
+// 重导出仅为兼容既有导入路径，行为逐字不变。
+export { calcSpareQuantity, summaryMaterialKey } from './perSkuRows'
+```
+
+同时 `useSummaryModal.ts` 内部要用到它们的地方（`buildSkuDisplayLines`、`supplierGroups`、`printFactory`/`exportFactory` 等）改从 `./perSkuRows` 引入：
+
+```ts
+import { calcSpareQuantity, summaryMaterialKey } from './perSkuRows'
+```
+
+**3b. 再给 `SkuLine` 加上可选 `materials`**
 
 先给 `useSummaryModal.ts` 的 `SkuLine` 加上可选 `materials`：
 
@@ -1058,16 +1078,11 @@ function rowRate(r: { row: PerSkuRow; legacy: { si: number; fi: number } | null;
               <td>{{ item.row.unit || '' }}</td>
             </template>
           </tr>
-
-          <!-- 组末尾：数量差异对照块（仅差异时渲染；模板见 Task 4） -->
-          <SummaryDiffBlock
-            v-if="(rowDiffMap[item.gi]?.length || 0) > 0 && isLastRowOfGroup(item.gi, ri)"
-            :diffs="rowDiffMap[item.gi]!"
-            :stored-fabrics="storedFabricsOf(item.group)"
-          />
         </template>
       </tbody>
 ```
+
+> **本任务不包含差异对照块**：`<SummaryDiffBlock>` 及其三个胶水函数（`rowDiffMap` / `storedFabricsOf` / `isLastRowOfGroup`）由 **Task 4** 创建并接线——若在这里引用，T3 提交时该组件尚不存在，渲染会报「Failed to resolve component」且用例会挂。
 
 **3e. 模板用到的其余胶水函数**（补进 script，与 3b、3d 一起，全部是薄封装）。先定义一次行项类型再复用：
 
@@ -1331,7 +1346,14 @@ function isDiff(fabric: FabricItem): boolean {
 </style>
 ```
 
-在 `SummaryFactoryTab.vue` 的 `tbody` 内、每组行之后插入：
+在 `SummaryFactoryTab.vue` 中接线（三处）：**① script 顶部 import 该组件**：
+
+```ts
+import SummaryDiffBlock from './SummaryDiffBlock.vue'
+import { computeQuantityDiff } from '../composables/perSkuRows'
+```
+
+**② 在 `tbody` 内、每组的行之后插入对照块**：
 
 ```html
         <SummaryDiffBlock
@@ -1483,7 +1505,13 @@ Expected: FAIL —— E1 目前只有 1 行（订单级单块）；E2 无「实�
 
 - [ ] **Step 3: 实现**
 
-在 `buildFactoryHtml` 内，`data.groups?.forEach((group, gi) => {` 之后、现有订单级分支之前插入按 SKU 分支：
+在 `buildFactoryHtml` 内、`data.groups?.forEach((group, gi) => {` 之后、现有订单级分支之前插入按 SKU 分支。**先在本文件顶部补两处导入**：
+
+```ts
+import { buildPerSkuRows, computeQuantityDiff } from './perSkuRows'
+import type { PerSkuRow } from './perSkuRows'
+```
+（`FACTORY_TABLE_HEAD` / `buildFactoryHtml` 等既有导出与签名**保持不变**。）
 
 ```ts
     const perSkuRows = buildPerSkuRows(group, spareRate)
