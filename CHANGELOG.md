@@ -32,6 +32,7 @@
 - **问题**：同一条日志管线上曾有**三个**各自为政的策略 —— `prod_runner` 只管自己的 `.out.log`（50MB，`PROD_LOG_ROTATE_MB` 可调）、ARQ cron 只管 nginx 两文件（固定 **100MB**、且不做保留清理）、桌面壳管全部 `*.log`（50MB + 保留 14 天 / 512MB）。「多大该轮转」在一台机器上有三个答案，改一个必漏两个；nginx 的轮转责任还全押在 ARQ 每日 cron 上（ARQ 停摆就没人管）。
 - **改法**：策略与实现统一到 `utils/log_rotation.py`，策略落 `config/log_policy.json`（默认 **50MB / 14 天 / 512MB**）。三方都 `load_log_policy()` 读同一份文件、都调 `rotate_oversized_logs` / `prune_log_files` —— `prod_runner` 每 60s 的维护轮次与 ARQ 的每日 cron 现在都做「轮转 + 保留清理」，行为完全一致；`PROD_LOG_ROTATE_MB` / `NGINX_LOG_ROTATE_BYTES` 两个独立阈值来源已删除。
 - **为什么现在能共享了**：`utils/__init__.py` 改为**惰性导出**（PEP 562）—— 此前它 eager 导入 `batch_upload_utils`（硬要求 polars + openpyxl）与 `logger`（sqlalchemy），桌面壳（PyInstaller 明确 exclude 这些）一 `import utils` 就在启动期 `ImportError`，这正是「管理器只能自带一份实现」的根因。实测全仓没有 `from utils import <名字>` 的用法，故 `__getattr__` 惰性解析后旧契约不变。守卫测试：`tests/test_utils_lazy_import.py`（子进程校验不拉起重依赖 + 旧名字仍可取）。
+- **运维入口**：`docs/runbooks/service-lifecycle.md` §5.6（谁在管、怎么改、怎么验证；含 handler `backupCount` 与共享清理的分层说明 —— 实际保留期以策略文件为准）
 - **验证**：`fastapi_app/tests/test_log_policy_unification.py` 锁住三方共享（含 `PROD_LOG_ROTATE_MB`/`NGINX_LOG_ROTATE_BYTES` 不得复活）、`tests/test_log_policy.py` 覆盖缺失/损坏/坏值夹取/表单越界报错。
 
 ### 🆕 功能：日志策略界面可配并持久化

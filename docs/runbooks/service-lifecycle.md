@@ -277,6 +277,40 @@ nssm restart erp-prod                      # 旧 prod_runner 重新拉起 nginx
 
 ---
 
+### 5.6 日志策略与清理（谁在管、怎么改、怎么验证）
+
+**唯一权威是 `config/log_policy.json`**（轮转阈值 / 保留天数 / 目录体积上限）。
+三个执行方读同一份文件、调 `utils.log_rotation` 的同一套实现 —— 任何一处都不该再出现独立阈值
+（`PROD_LOG_ROTATE_MB` / `NGINX_LOG_ROTATE_BYTES` 已删除，测试锁死不得复活）：
+
+| 执行方 | 频率 | 动作 |
+|---|---|---|
+| 桌面壳管理器 | 启动 +20s 首跑，此后每 6h | 轮转 + 保留清理 |
+| `erp-prod`（prod_runner） | 每 60s | 轮转 + 保留清理 —— **nginx 日志的实际轮转者**（不再单押 ARQ） |
+| `erp-arq`（`maintain_logs_task`） | 每日 04:30 | 轮转 + 保留清理（兜底） |
+
+**怎么改**：管理器日志面板「设置」（保存立即对三方生效，无需重启任何服务）；或直接手改 JSON
+（越界值按边界夹取：轮转 1–4096MB、保留 1–3650 天、上限 16–65536MB）。阈值必须**高于** NSSM
+自身的 `AppRotateBytes=10MB` —— 调到 10MB 以下会去抢 NSSM 正在轮转的 `erp-*.log`。
+
+**「读」侧的分层（不要误判为不一致）**：后端 handler 仍各带微轮转（`fastapi_*.log` 按天×14、
+`erp.log`/`error.log` 10MB×10 副本、`access.log` 按天×3），但它们的 `backupCount` 只是
+**两轮共享清理之间的次级约束** —— 实际保留期由策略文件的 `keep_days` 决定（`prune_log_files`
+按最后写入时间清全部 `logs/*.log*`，prod_runner 每 60s 一轮）。因此「handler 写 14 天、
+文件 7 天就没了」是设计使然；要改保留期改策略文件，**不要**去改 handler。
+
+```powershell
+# 桌面壳侧动作记录（轮转/清理/巡检摘要都在这）
+Select-String -Path logs\server_manager_*.log -Pattern '日志轮转兜底|日志清理完成'
+# prod_runner 侧（每分钟轮）的轮转记录
+Select-String -Path logs\erp-prod.log -Pattern '\[log_rotation\]'
+# 最近轮转出的 .1 副本
+Get-ChildItem logs\*.log.1 | Sort-Object LastWriteTime -Descending | Select-Object -First 5 Name,Length,LastWriteTime
+```
+
+被占用删不掉的文件按 skipped 记在摘要里、下一轮重试；**连续多轮** skipped 才需要排查
+（通常是清理与写入方对同一文件的竞争窗口，或文件句柄被第三方进程长期持有）。
+
 ## 6. 备份与恢复（数据保护）
 
 - **调度唯一来源**：`backup_schedule` 表。`scheduler_poller` 每 5 分钟扫表，**会补跑错过的窗口**
@@ -312,6 +346,7 @@ nssm restart erp-prod                      # 旧 prod_runner 重新拉起 nginx
 | 运行模式 + ARQ 判活探针 | `python scripts/diag/runtime_mode_probe.py` |
 | 生产巡检（只读） | `deliverables/gstack/perf-selfcheck.ps1`（**必须带 UTF-8 BOM**） |
 | 生产预检（非破坏性） | `python -m fastapi_app.core.prod_runner --check` |
+| 日志策略（轮转/保留/上限） | `config/log_policy.json`（三方共用；管理器日志面板「设置」可改，改完即生效） |
 | 数据库迁移 | `python -m alembic -c migrations/alembic.ini upgrade head`（**在仓库根执行，无需 `cd`、无需 `PYTHONPATH`**；`script_location=%(here)s` 已与 CWD 解耦） |
 | 迁移版本查询（只读） | `python -m alembic -c migrations/alembic.ini heads` / `history` |
 | 环境变量修复 | `deliverables/audit-2026-09-17/fix_nssm_appenv.ps1`（**需管理员**） |
