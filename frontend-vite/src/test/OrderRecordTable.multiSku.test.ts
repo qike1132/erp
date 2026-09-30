@@ -82,13 +82,39 @@ describe('记录列表产品列 · 多 SKU 堆叠展示（方案 B）', () => {
     expect(lines.map((l) => l.find('.co-sku-qty').text())).toEqual(['10000', '10000', '10000'])
   })
 
-  it('3 个 SKU 的订单行：数量列仍显示订单总数量，SKU 数量徽章仍为 3', () => {
+  it('列结构：时间 / 编号 / 客户 / 产品名称 / 数量 / 操作 —— 工厂与 SKU 数量两列已删', () => {
+    const wrapper = mountTable([MULTI_SKU_ORDER])
+
+    const headers = wrapper.findAll('thead th').map((th) => th.text().trim())
+    expect(headers).toEqual(['时间', '编号', '客户', '产品名称', '数量', '操作'])
+    // 工厂列删除：订单级聚合值「东莞, 湖北」对不上任何一个 SKU（真实数据里鲨鱼是湖北的），
+    // 而逐 SKU 的工厂需要后端在 items[] 里补 factory 字段，当前不下发 —— 故整列撤掉而非显示聚合值。
+    expect(headers).not.toContain('工厂')
+    expect(headers).not.toContain('SKU 数量')
+    // 聚合的工厂值不再出现在任何单元格里
+    expect(wrapper.text()).not.toContain('东莞, 湖北')
+  })
+
+  it('产品名称列居中（表头与单元格同一对齐），不再是左对齐', () => {
+    const wrapper = mountTable([MULTI_SKU_ORDER])
+
+    const headers = wrapper.findAll('thead th')
+    const productIdx = headers.findIndex((th) => th.text().trim() === '产品名称')
+    expect(productIdx, '产品名称表头应存在').toBeGreaterThan(-1)
+    expect(headers[productIdx]!.attributes('style')).toContain('text-align: center')
+
+    // 承重的是表体单元格：多 SKU 的块是 inline-flex，靠单元格的 text-align:center 才居中
+    const cells = wrapper.findAll('tbody tr')[0]!.findAll('td')
+    expect(cells[productIdx]!.attributes('style')).toContain('text-align: center')
+  })
+
+  it('3 个 SKU 的订单行：数量列仍显示订单总数量', () => {
     const wrapper = mountTable([MULTI_SKU_ORDER])
 
     const cells = wrapper.findAll('tbody td').map((td) => td.text())
     expect(cells).toContain('30000')
-    // 徽章列（SKU 数量）在合并前后都保留，与堆叠展示并存
-    expect(wrapper.find('.co-badge-tag').text()).toBe('3')
+    // SKU 数量徽章随该列一起删除（多 SKU 行里 SKU 条数可直接数出来）
+    expect(wrapper.find('.co-badge-tag').exists()).toBe(false)
   })
 
   it('单 SKU 行：产品列只显示产品名，不渲染堆叠列表', () => {

@@ -124,7 +124,7 @@ describe('CustomerOrderView SKU expand behavior (SubTask 7.4)', () => {
     vi.useRealTimers()
   })
 
-  it('order list row shows multi-SKU count badge when items.length === 3', async () => {
+  it('order list row stacks all 3 SKUs when items.length === 3', async () => {
     mocks.recordsMock.mockResolvedValue({
       data: [
         {
@@ -151,13 +151,15 @@ describe('CustomerOrderView SKU expand behavior (SubTask 7.4)', () => {
     await flushPromises()
     await switchToRecordsTab(wrapper)
 
-    // SKU 数量 column renders a success badge (count > 1) — see CustomerOrderView.vue:354-358
-    const successBadge = wrapper.find('.co-badge-tag.co-badge-success')
-    expect(successBadge.exists(), 'multi-SKU success badge should be rendered').toBe(true)
-    expect(successBadge.text()).toBe('3')
+    // 多 SKU 订单行：产品名称列把 3 个 SKU 逐行堆叠出来。
+    // （原断言查的是「SKU 数量」列的绿色徽章文本 3；该列 2026-09-30 已删 —— 全部 SKU 都列在产品名称列里，
+    //   条数可直接数出来，徽章是冗余的。）
+    const lines = wrapper.findAll('.co-sku-line')
+    expect(lines.length, 'multi-SKU order row should stack 3 SKU lines').toBe(3)
+    expect(lines.map((l) => l.find('.co-sku-name').text())).toEqual(['SKU1', 'SKU2', 'SKU3'])
   })
 
-  it('order list row shows muted badge "1" for single-SKU order', async () => {
+  it('order list row shows the single product name for a single-SKU order', async () => {
     mocks.recordsMock.mockResolvedValue({
       data: [
         {
@@ -180,13 +182,17 @@ describe('CustomerOrderView SKU expand behavior (SubTask 7.4)', () => {
     await flushPromises()
     await switchToRecordsTab(wrapper)
 
-    // Single SKU → muted badge with text "1" (NOT multi-SKU success badge)
-    const mutedBadge = wrapper.find('.co-badge-tag.co-badge-muted')
-    expect(mutedBadge.exists(), 'single-SKU muted badge should be rendered').toBe(true)
-    expect(mutedBadge.text()).toBe('1')
-
-    // No multi-SKU success badge should be present (deduct_quantity is 0)
-    expect(wrapper.find('.co-badge-tag.co-badge-success').exists()).toBe(false)
+    // 单 SKU → 不堆叠，直接显示该产品名（与多 SKU 行同一列，只是只有一行）。
+    // 按表头定位产品名称列：`.co-cell-main` 同时用在客户列上，直接找会选到客户单元格。
+    expect(wrapper.findAll('.co-sku-line').length).toBe(0)
+    const headers = wrapper.findAll('thead th').map((th) => th.text().trim())
+    const productIdx = headers.indexOf('产品名称')
+    expect(productIdx, '产品名称列应存在').toBeGreaterThan(-1)
+    const productCells = wrapper.findAll('tbody tr').map((tr) => tr.findAll('td')[productIdx]!.text())
+    expect(productCells.length).toBe(1)
+    // 单 SKU 行保留「产品名 + 条码副行」的既定渲染
+    expect(productCells[0]).toContain('产品A')
+    expect(productCells[0]).toContain('69001')
   })
 
   it('detail dialog shows SKU details table when detailData.items.length > 1', async () => {

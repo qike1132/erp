@@ -42,14 +42,6 @@
       <template #column-body-customer="{ row }">
         <span class="co-cell-main">{{ (row as OrderRecord).customer }}</span>
       </template>
-      <template #column-body-factories="{ row }">
-        <span class="co-cell-muted">{{ (row as OrderRecord).factories?.join(', ') || '-' }}</span>
-      </template>
-      <template #column-body-sku_count="{ row }">
-        <span class="co-badge-tag" :class="((row as OrderRecord).items?.length || 1) > 1 ? 'co-badge-success' : 'co-badge-muted'">
-          {{ (row as OrderRecord).items?.length || 1 }}
-        </span>
-      </template>
       <template #column-body-product="{ row }">
         <!-- 多 SKU：把该订单的全部 SKU 名与各自数量堆叠出来，列表里可直接核对（不必点进详情） -->
         <div v-if="hasMultipleSkus(row as OrderRecord)" class="co-sku-stack">
@@ -119,15 +111,13 @@ const emit = defineEmits<{
   retry: []
 }>()
 
-/** 列固定（订单/备货合并后结构一致）：时间 / 编号 / 客户 / 工厂 / SKU / 产品 / 数量 / 操作 */
+/** 列固定（订单/备货合并后结构一致）：时间 / 编号 / 客户 / 产品名称 / 数量 / 操作 */
 const orderColumns = computed<TableColumn[]>(() => [
   { field: 'order_date', header: '时间', align: 'center' },
   { field: 'order_no', header: '编号', align: 'center' },
   { field: 'customer', header: '客户', align: 'center' },
-  { field: 'factories', header: '工厂', align: 'center' },
-  { field: 'sku_count', header: 'SKU 数量', align: 'center' },
-  // 产品列左对齐：多 SKU 时逐行堆叠，居中会让长短不齐的 SKU 名互相错开、难以扫读
-  { field: 'product', header: '产品', align: 'left' },
+  // 多 SKU 的块在单元格内缩到内容宽并整体居中（见 .co-sku-stack），故本列与其它列一样居中
+  { field: 'product', header: '产品名称', align: 'center' },
   { field: 'quantity', header: '数量', align: 'center' },
   { field: 'actions', header: '操作', align: 'left' },
 ])
@@ -228,14 +218,19 @@ function onPageChange(event: { page: number; rows: number }) {
   font-size: 12px;
 }
 
-/* 产品列・多 SKU 堆叠：每行一个 SKU（名字 + 各自数量），数量右对齐便于与「数量」列的总数对账。
+/* 产品名称列・多 SKU 堆叠：每行一个 SKU（名字 + 各自数量）。
    左侧 2px 导引线 + 缩进把整块标成「挂在同一张订单下」的子块；SKU 之间用 1px 细线分隔
    （线色与全表行线同为 --color-border，看着是一套网格），末条不画线以免与行线叠成双线。
-   2026-09-30 修订：原实现只有 3px 行距、无任何分隔，表变高后三条 SKU 飘在空白里。 */
+   2026-09-30 修订一：原实现只有 3px 行距、无任何分隔，表变高后三条 SKU 飘在空白里。
+   2026-09-30 修订二：改 inline-flex 让整块缩到内容宽，再由单元格的 text-align:center 把它
+   居中（块左/右留白相等）——之前整块拉满整列时，短名字与它的数量之间会空出一千多像素。
+   块内仍 text-align:left + 数量右对齐，故各 SKU 数量之间互相成一条竖线可比大小；
+   max-width 兜底，防止超长 SKU 名把块撑出单元格。 */
 .co-sku-stack {
-  display: flex;
+  display: inline-flex;
   flex-direction: column;
   text-align: left;
+  max-width: 100%;
   padding-left: 10px;
   border-left: 2px solid var(--color-border-light);
 }
@@ -259,22 +254,6 @@ function onPageChange(event: { page: number; rows: number }) {
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-}
-
-.co-badge-tag {
-  display: inline-block;
-  padding: 2px 8px;
-  border-radius: 6px;
-  font-size: 11px;
-  font-weight: 600;
-}
-.co-badge-success {
-  background: var(--color-success-100);
-  color: var(--color-success-600);
-}
-.co-badge-muted {
-  background: var(--color-surface, #f1f5f9);
-  color: var(--color-text-muted);
 }
 
 /* 操作列：左对齐固定起点，让「查看」按钮在单/双按钮行都钉在同一横坐标（居中会左右跳） */
