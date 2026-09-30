@@ -11,6 +11,11 @@ from typing import Any
 
 from sqlalchemy.exc import DisconnectionError, OperationalError
 
+from fastapi_app.core.production_scope import AGGREGATE_VIEW_CODE, PRODUCTION_DEPARTMENTS, view_code
+
+# 生产报表的部门级只读码，由 production_scope 派生（权限码字符串单一来源）
+PRODUCTION_DEPT_VIEW_CODES: list[str] = [view_code(d) for d in PRODUCTION_DEPARTMENTS]
+
 logger = logging.getLogger(__name__)
 
 # 每个导航项仅根据自身权限码显示，不再做跨模块映射
@@ -18,7 +23,27 @@ logger = logging.getLogger(__name__)
 # 湖北订单与湖北外发为两个独立路由页面，各按自身权限显示
 SPECIAL_PERMISSION_MAP = {
     'outsource_manage': ['outsource_manage', 'outsource_view'],
+    # 生产报表按部门拆权限后，只有部门码的用户也要能看到导航入口；
+    # 任持其一即可见（前端侧栏按 permission_codes 做「任一命中」判断）。
+    'production_summary_view': [AGGREGATE_VIEW_CODE, *PRODUCTION_DEPT_VIEW_CODES],
 }
+
+
+def nav_permission_codes(code: str) -> list[str]:
+    """展开某导航项允许的权限码集合（任一命中即显示该入口）。
+
+    Args:
+        code: 导航项自身的权限码。
+
+    Returns:
+        权限码列表，**必然包含 code 自身**（这样被单独分配了具体权限、
+        而没有父级权限的用户也能看到对应导航项）。
+    """
+    mapped = SPECIAL_PERMISSION_MAP.get(code, [code])
+    codes = mapped if isinstance(mapped, list) else [mapped]
+    if code not in codes:
+        codes = [code, *codes]
+    return codes
 
 # 已下线的导航项：不再显示独立导航入口，但权限保留（用户仍可访问页面与接口）
 HIDDEN_NAV_CODES = {'order_batch_manage'}
@@ -124,12 +149,7 @@ async def get_nav_sections_async() -> dict:
             if item.code in HIDDEN_NAV_CODES or item.url == 'order_batch.index':
                 continue
 
-            perm_codes = SPECIAL_PERMISSION_MAP.get(item.code, [item.code])
-            if not isinstance(perm_codes, list):
-                perm_codes = [perm_codes]
-            # 确保自身 code 也包含在内，这样分配了具体权限（如 supplier_manage）的用户也能看到对应导航项
-            if item.code not in perm_codes:
-                perm_codes = [item.code, *perm_codes]
+            perm_codes = nav_permission_codes(item.code)
 
             mapped_url = PERMISSION_URL_MAP.get(item.url)  # type: ignore[arg-type]
             if mapped_url is None:
