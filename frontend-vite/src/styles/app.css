@@ -85,10 +85,12 @@
   --color-surface-card: #ffffff;
   --color-border: #e4e7ed;
   --color-border-light: #f0f2f5;
+  --color-border-strong: #cbd5e1;
   --color-text: #1a1a2e;
   --color-text-secondary: #475569;
   --color-text-tertiary: #595959;
   --color-text-muted: #64748b;
+  --color-text-placeholder: #94a3b8;
   --color-text-inverse: #ffffff;
 
   /* Heading - deep navy for page titles */

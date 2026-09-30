@@ -98,7 +98,7 @@ const emit = defineEmits<{
 .pr-entry-side-clear {
   border: none;
   background: transparent;
-  color: var(--color-text-muted);
+  color: var(--color-text-placeholder);
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
@@ -139,7 +139,7 @@ const emit = defineEmits<{
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--color-border);
+  background: var(--color-border-strong);
   flex-shrink: 0;
   transition: background 0.15s ease, transform 0.15s ease;
 }
@@ -169,7 +169,7 @@ const emit = defineEmits<{
 }
 .pr-entry-recent-arrow {
   font-size: 10px;
-  color: var(--color-border);
+  color: var(--color-border-strong);
   transition: all 0.15s ease;
 }
 .pr-entry-recent-item:hover .pr-entry-recent-arrow {
@@ -183,7 +183,7 @@ const emit = defineEmits<{
   justify-content: center;
   gap: 4px;
   padding: 24px 12px;
-  color: var(--color-text-muted);
+  color: var(--color-text-placeholder);
   text-align: center;
 }
 .pr-entry-empty-small i {
@@ -196,7 +196,7 @@ const emit = defineEmits<{
 }
 .pr-entry-empty-small small {
   font-size: 11px;
-  color: var(--color-border);
+  color: var(--color-border-strong);
 }
 .pr-entry-shortcuts {
   padding: 10px 14px 12px;
