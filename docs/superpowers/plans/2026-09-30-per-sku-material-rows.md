@@ -869,9 +869,9 @@ describe('P1/P2 按 SKU 分块', () => {
     expect(rows[0]!.findAll('td')[1]!.text()).toBe('产品A')
     expect(rows[0]!.findAll('td')[2]!.text()).toBe('100.0')
     expect(rows[0]!.findAll('td')[3]!.text()).toBe('1.0')
-    expect(rows[2]!.findAll('td')[1]!.text()).toBe('产品B')
-    expect(rows[2]!.findAll('td')[2]!.text()).toBe('200.0')
-    expect(rows[2]!.findAll('td')[3]!.text()).toBe('2.0')
+    expect(rows[2]!.findAll('td')[0]!.text()).toBe('产品B')
+    expect(rows[2]!.findAll('td')[1]!.text()).toBe('200.0')
+    expect(rows[2]!.findAll('td')[2]!.text()).toBe('2.0')
   })
 })
 

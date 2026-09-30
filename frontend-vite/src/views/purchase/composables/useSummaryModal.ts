@@ -584,7 +584,7 @@ export function useSummaryModal() {
   /**
    * 取第 gi/si/fi 个布料行当前损耗率。
    * 逐行率缺失/非法时回退「统一损耗率」，与工厂表「数量」列口径一致
-   * （SummaryFactoryTab.rateForFabric 同样回退 lossRate），保证展示与保存反推同源。
+   * （useFactoryTableRows.rateForFabric 同样回退 lossRate），保证展示与保存反推同源。
    */
   function rateForFabric(gi: number, si: number, fi: number): number {
     const v = fabricLossRates.value?.[gi]?.[si]?.[fi]
