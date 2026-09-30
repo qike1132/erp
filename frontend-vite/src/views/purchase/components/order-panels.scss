@@ -141,6 +141,13 @@
   flex-shrink: 0;
 }
 
+/* 订单号（2026-09-30 新增列）：等宽字体便于逐位比对 */
+.pc-order-no {
+  font-family: Consolas, ui-monospace, monospace;
+  font-size: 12px;
+  letter-spacing: 0.2px;
+}
+
 /* === Multi-SKU display === */
 .pc-row-multi-sku td {
   vertical-align: top;

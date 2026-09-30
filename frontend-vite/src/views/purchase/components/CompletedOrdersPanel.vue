@@ -39,6 +39,7 @@
             <thead>
               <tr>
                 <th class="coq-th coq-w-date">完成时间</th>
+                <th class="coq-th coq-w-no">订单号</th>
                 <th class="coq-th coq-w-customer">客户</th>
                 <th class="coq-th coq-w-product">产品名称</th>
                 <th class="coq-th coq-th-num coq-w-num">数量</th>
@@ -56,6 +57,10 @@
               <tr v-for="(sku, idx) in row.skus" :key="row.o.id + '-' + idx" class="coq-row">
                 <td v-if="idx === 0" class="coq-td coq-td-muted" :rowspan="row.skuCount">
                   {{ formatDateTime(row.o.completed_at) }}
+                </td>
+                <!-- 订单号（采购订单 CG…）：订单级事实，整单 rowspan（2026-09-30 新增列） -->
+                <td v-if="idx === 0" class="coq-td coq-w-no" :rowspan="row.skuCount">
+                  {{ row.o.order_no || '—' }}
                 </td>
                 <td v-if="idx === 0" class="coq-td" :rowspan="row.skuCount">
                   {{ row.o.customer_name || '—' }}
@@ -303,21 +308,26 @@ const flatRows = computed(() =>
 }
 
 /*
- * 列宽比例：前四列按内容取够用的宽度，把「数量」尽量往左收；
- * 剩余宽度全部留给最后一列「操作」，空白堆在表格最右端而不是中段。
+ * 列宽比例：内容列按「够用」取宽，把「数量」尽量往左收；
+ * 剩余宽度全部留给最后一列「操作」（该列有 padding-left: 214px，不能削），
+ * 空白堆在表格最右端而不是中段。5 列 → 6 列（2026-09-30 加订单号）后重新配平，合计仍为 100%。
  */
 .coq-w-date {
-  width: 16%;
+  width: 13%;
+  white-space: nowrap;
+}
+.coq-w-no {
+  width: 14%;
   white-space: nowrap;
 }
 .coq-w-customer {
-  width: 14%;
+  width: 11%;
 }
 .coq-w-product {
-  width: 20%;
+  width: 14%;
 }
 .coq-w-num {
-  width: 10%;
+  width: 8%;
   white-space: nowrap;
 }
 .coq-w-op {

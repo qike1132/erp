@@ -35,6 +35,7 @@
                   </div>
                 </th>
                 <th style="width:1%;white-space:nowrap;text-align:left">下单时间</th>
+                <th style="width:1%;white-space:nowrap;text-align:left">订单号</th>
                 <th class="pc-customer-th" style="text-align:left">客户名称</th>
                 <th style="text-align:left">条码</th>
                 <th style="text-align:left">产品名称</th>
@@ -61,6 +62,8 @@
                     <span class="pc-order-date">{{ formatDate(o.create_time || o.order_date) }}</span>
                   </div>
                 </td>
+                <!-- 订单号（客户订单 PO…）：2026-09-30 新增列 -->
+                <td class="pc-td-nowrap"><span class="pc-order-no">{{ o.order_no || '-' }}</span></td>
                 <td class="pc-td-truncate pc-customer-cell" style="max-width:120px">{{ o.customer || '-' }}</td>
                 <td class="pc-barcode-cell">
                   <template v-if="o.items && o.items.length > 0">
