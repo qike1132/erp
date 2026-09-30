@@ -56,12 +56,11 @@ def switch_environment(env_type):
         print(f"   APP_ENV: {env_type}")
         print(f"   APP_DEBUG: {'1' if env_type == 'development' else '0'}")
 
-        # 启动建议
+        # 启动建议（AGENTS.md §3：本机唯一生产启动入口是 `python start.py`，
+        # 手工起 uvicorn/vite dev 会与生产抢端口，故不再给出裸 uvicorn 命令）。
+        # run.py 已于 2026-09-30 归档至 .archive/cleanup-20260929/。
         print("\n启动命令:")
-        if env_type == 'development':
-            print("   python run.py")
-        else:
-            print("   uvicorn fastapi_app.main:app --host 0.0.0.0 --port 5002")
+        print("   python start.py")
 
         return True
 
