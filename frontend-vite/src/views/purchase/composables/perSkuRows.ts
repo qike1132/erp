@@ -13,8 +13,11 @@
  * （`import type`，编译期擦除）；绝不引入它的任何**值** —— 因为 `useSummaryModal.ts`
  * 反过来要用本模块的 `buildPerSkuRows`，若本模块再 import 它的值就构成循环导入
  * （Vite/vitest 下会拿到 `undefined` 绑定）。`calcSpareQuantity` / `summaryMaterialKey`
- * 两个无依赖纯函数因此**从 useSummaryModal.ts 移入本模块**，由后者反向重导出，
+ * 以及展示派生的 `magnifyByLossRate` / `ceilMagnifiedByLossRate` 等无依赖纯函数
+ * 因此**从 useSummaryModal.ts 移入本模块**，由后者反向重导出，
  * 以保住既有测试「从 useSummaryModal 导入」的写法。
+ * （`buildStoredRows` 需要按率加放取整，而它必须是叶子纯函数 —— 故这两个函数
+ * 必须住在这里，不能反过来从 useSummaryModal.ts 取。）
  */
 import type { FactoryGroup } from './useSummaryModal'
 
@@ -60,6 +63,32 @@ export function summaryMaterialKey(
   unit: string | null | undefined,
 ): string {
   return [supplierName || '未指定供应商', materialName || '', specification || '', unit || ''].join('\u0000')
+}
+
+/**
+ * 损耗加放纯函数：按损耗率（千分之几）放大数量，四舍五入到 2 位小数。
+ *
+ * 语义 = `qty × (1 + lossRate / 1000)`。屏幕「数量」列、工厂/供应商合计、
+ * 打印预览、Excel 导出共用这一处来源。
+ *
+ * 本函数**只做展示派生**，绝不写回 factoryData / supplierData ——
+ * 原始数量才是落库唯一真值，放大值永远只是预览。
+ *
+ * 防御口径：非法输入（NaN / Infinity / 非数字）按 0 处理；
+ * `lossRate = 0` 时同样执行「两位小数四舍五入」，保证与既有输出逐字一致、零回归。
+ */
+export function magnifyByLossRate(qty: number, lossRate: number): number {
+  const v = Number.isFinite(qty) ? qty : 0
+  const r = Number.isFinite(lossRate) ? lossRate : 0
+  return Math.round((v + v * (r / 1000)) * 100) / 100
+}
+
+/**
+ * 损耗加放后的「数量」展示值（向上取整）：屏幕表格、打印预览、Excel 导出共用。
+ * 只在展示层取整，原始数量仍是落库唯一真值，保存反推仍使用精确的 magnifyByLossRate。
+ */
+export function ceilMagnifiedByLossRate(qty: number, lossRate: number): number {
+  return Math.ceil(magnifyByLossRate(qty, lossRate))
 }
 
 export interface PerSkuRow {
@@ -242,4 +271,59 @@ export function computeQuantityDiff(
     }
   })
   return diffs
+}
+
+/**
+ * 对照块的一行（列序与**主表**一致的后 5 格：布料名称 | 规格型号 | 损耗率 | 数量 | 单位）。
+ *
+ * 率与数量在此**与主表同源**算好：率取该落库行的快照率（缺省回退该组订单级率），
+ * 数量为按该率加放后向上取整（`ceilMagnifiedByLossRate`）——组件 / 打印因此保持
+ * 「纯展示」，不会出现同一张表里两个「数量」口径不一致。供应商/段信息供渲染 `rowspan`。
+ *
+ * 屏幕（`useFactoryTableRows.storedRowsOf`）与打印/导出（`buildFactoryHtml`）
+ * **共用本函数产出**，故两边的对照块结构天然一致（打印件不会对差异保持沉默）。
+ */
+export interface StoredRow {
+  supplierName: string
+  /** 该行是否为本供应商段首行（供应商格只在此行渲染，其余行由 rowspan 覆盖） */
+  isSupplierFirst: boolean
+  /** 本供应商段行数（供应商格的 rowspan） */
+  supplierSpan: number
+  fabricName: string
+  specification: string
+  unit: string
+  /** 该落库行的损耗率（快照率优先，缺省回退 `rateOf`） */
+  rate: number
+  /** 「数量」列展示值（与主表同源：按 rate 加放后向上取整） */
+  displayQuantity: number
+}
+
+/**
+ * 该组落库物料行（按供应商分段），率与数量按主表同源口径算好：
+ * `rate = f.loss_rate ?? rateOf(si, fi)`；数量 = `ceil(该率加放)`。
+ *
+ * 形参是纯回退函数（不依赖任何 composable 状态）：屏幕传「该组订单级率」、
+ * 打印传同一个率 —— 两侧因此得到逐字一致的行。
+ */
+export function buildStoredRows(
+  group: FactoryGroup, rateOf: (si: number, fi: number) => number,
+): StoredRow[] {
+  const out: StoredRow[] = []
+  ;(group.suppliers || []).forEach((supplier, si) => {
+    const fabrics = supplier.fabrics || []
+    fabrics.forEach((f, fi) => {
+      const rate = f.loss_rate ?? rateOf(si, fi)
+      out.push({
+        supplierName: supplier.supplier_name,
+        isSupplierFirst: fi === 0,
+        supplierSpan: fabrics.length,
+        fabricName: f.fabric_name,
+        specification: f.specification || '',
+        unit: f.unit || '',
+        rate,
+        displayQuantity: ceilMagnifiedByLossRate(parseFloat(String(f.quantity)) || 0, rate),
+      })
+    })
+  })
+  return out
 }

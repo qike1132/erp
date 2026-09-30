@@ -15,9 +15,9 @@
  */
 import { computed } from 'vue'
 import type { EmitFn } from 'vue'
-import { factoryQtyDisplayValue, buildSkuDisplayLines, ceilMagnifiedByLossRate } from './useSummaryModal'
-import { buildPerSkuRows, materialKeyOf, computeQuantityDiff } from './perSkuRows'
-import type { PerSkuRow } from './perSkuRows'
+import { factoryQtyDisplayValue, buildSkuDisplayLines } from './useSummaryModal'
+import { buildPerSkuRows, materialKeyOf, computeQuantityDiff, buildStoredRows } from './perSkuRows'
+import type { PerSkuRow, StoredRow } from './perSkuRows'
 import type { FactorySummaryData, FactoryGroup, FabricItem, SkuDisplayLine } from './useSummaryModal'
 
 /** 组件 props（自 `SummaryFactoryTab.vue` 的 `defineProps` 逐字抽出，组件与本模块两处共用）。 */
@@ -55,24 +55,13 @@ export type FactoryTabEmit = {
 /**
  * 对照块的一行（列序与**主表**一致的后 5 格：布料名称 | 规格型号 | 损耗率 | 数量 | 单位）。
  *
- * 率与数量在此**与主表同源**算好：率取该落库行的快照率（缺省回退该组订单级率），
- * 数量为按该率加放后向上取整（`ceilMagnifiedByLossRate`）——组件因此保持"纯展示"，
- * 不会出现同一张表里两个「数量」口径不一致。供应商/段信息供组件渲染 `rowspan`。
+ * 率与数量由 `perSkuRows.buildStoredRows` **与主表同源**算好：率取该落库行的快照率
+ * （缺省回退该组订单级率），数量为按该率加放后向上取整（`ceilMagnifiedByLossRate`）
+ * —— 组件因此保持"纯展示"，不会出现同一张表里两个「数量」口径不一致。
+ *
+ * 与 `perSkuRows.StoredRow` 同形；保留本名以兼容既有导入（`SummaryDiffBlock.vue`）。
  */
-export interface DiffStoredRow {
-  supplierName: string
-  fabricName: string
-  specification: string
-  unit: string
-  /** 该落库行的损耗率（快照率优先，缺省回退该组订单级率） */
-  rate: number
-  /** 「数量」列展示值（与主表同源：按 rate 加放后向上取整） */
-  displayQuantity: number
-  /** 该行是否为本供应商段首行（供应商格只在此行渲染，其余行由 rowspan 覆盖） */
-  isSupplierFirst: boolean
-  /** 本供应商段行数（供应商格的 rowspan） */
-  supplierSpan: number
-}
+export type DiffStoredRow = StoredRow
 
 type RowItem = {
   gi: number
@@ -167,28 +156,12 @@ export function useFactoryTableRows(props: FactoryTabProps, emit: EmitFn<Factory
 
   /**
    * 该组落库真值（压平供应商维度，供对照块列出），率/数量已按主表口径算好。
-   * 供应商段首行标记 + 段行数供组件渲染 rowspan；否则组件需自行分组。
+   *
+   * 内部**委托** `perSkuRows.buildStoredRows`（叶子纯函数）—— 打印/导出走同一个
+   * 函数产出同样的行，屏幕与打印的对照块因此天然同构。
    */
-  function storedRowsOf(group: FactoryGroup, gi: number): DiffStoredRow[] {
-    const groupRate = spareRateForGroup(gi)
-    const out: DiffStoredRow[] = []
-    ;(group.suppliers || []).forEach((supplier) => {
-      const fabrics = supplier.fabrics || []
-      fabrics.forEach((f, fi) => {
-        const rate = f.loss_rate ?? groupRate
-        out.push({
-          supplierName: supplier.supplier_name,
-          fabricName: f.fabric_name,
-          specification: f.specification || '',
-          unit: f.unit || '',
-          rate,
-          displayQuantity: ceilMagnifiedByLossRate(parseFloat(String(f.quantity)) || 0, rate),
-          isSupplierFirst: fi === 0,
-          supplierSpan: fabrics.length,
-        })
-      })
-    })
-    return out
+  function storedRowsOf(group: FactoryGroup, gi: number): StoredRow[] {
+    return buildStoredRows(group, () => spareRateForGroup(gi))
   }
 
   /** 是否该组最后一行（对照块挂在组末尾） */

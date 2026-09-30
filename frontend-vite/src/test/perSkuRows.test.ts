@@ -9,7 +9,7 @@
  *   R5 无 materials（旧后端 / 无 BOM）→ 返回 []，调用方据此回退现状。
  */
 import { describe, it, expect } from 'vitest'
-import { buildPerSkuRows, computeQuantityDiff, materialKeyOf } from '@/views/purchase/composables/perSkuRows'
+import { buildPerSkuRows, computeQuantityDiff, materialKeyOf, buildStoredRows } from '@/views/purchase/composables/perSkuRows'
 import type { FactoryGroup } from '@/views/purchase/composables/useSummaryModal'
 
 /** 2 SKU × 同供应商；共享布跨 SKU 各算各的；另有一条「只出现在 BOM、落库里没有」的新物料 */
@@ -151,5 +151,47 @@ describe('computeQuantityDiff', () => {
     expect(computeQuantityDiff(group, buildPerSkuRows(group, 10))).toEqual([
       { materialName: '手工加料', perSku: 0, stored: 12 },
     ])
+  })
+})
+
+describe('buildStoredRows（屏幕与打印共用的落库行模型）', () => {
+  /** 2 供应商：甲 2 条（首条带快照率）、乙 1 条；用于校验分段、快照优先、加放派生。 */
+  function multiSupplierGroup(): FactoryGroup {
+    return {
+      customer_name: '客户甲', product_name: '产品A', product_quantity: 100,
+      suppliers: [
+        { supplier_name: '供应商甲', fabrics: [
+          { fabric_name: '布甲A', specification: 'S1', unit: '米', quantity: 50, loss_rate: 500 },
+          { fabric_name: '布甲B', specification: 'S2', unit: '米', quantity: 20 },
+        ] },
+        { supplier_name: '供应商乙', fabrics: [
+          { fabric_name: '布乙A', specification: 'S3', unit: '卷', quantity: 10 },
+        ] },
+      ],
+    }
+  }
+
+  it('R8 按供应商分段：段首标记与段跨度正确', () => {
+    const rows = buildStoredRows(multiSupplierGroup(), () => 10)
+
+    expect(rows.map((r) => r.supplierName)).toEqual(['供应商甲', '供应商甲', '供应商乙'])
+    expect(rows.map((r) => r.isSupplierFirst)).toEqual([true, false, true])
+    expect(rows.map((r) => r.supplierSpan)).toEqual([2, 2, 1])
+    expect(rows.map((r) => r.specification)).toEqual(['S1', 'S2', 'S3'])
+    expect(rows.map((r) => r.unit)).toEqual(['米', '米', '卷'])
+  })
+
+  it('R9 率取该行快照率（f.loss_rate）优先，缺省才回退 rateOf(si, fi)', () => {
+    const rows = buildStoredRows(multiSupplierGroup(), (si, fi) => 100 * (si + 1) + fi)
+
+    // 甲A 有快照 500 → 用 500（无视 rateOf）；甲B 无快照 → 101；乙A 无快照 → 200
+    expect(rows.map((r) => r.rate)).toEqual([500, 101, 200])
+  })
+
+  it('R10 数量是「按该率加放后向上取整」的派生值（与主表同源）', () => {
+    const rows = buildStoredRows(multiSupplierGroup(), () => 10)
+
+    // 50 @500‰ → ceil(75)=75；20 @10‰ → ceil(20.2)=21；10 @10‰ → ceil(10.1)=11
+    expect(rows.map((r) => r.displayQuantity)).toEqual([75, 21, 11])
   })
 })

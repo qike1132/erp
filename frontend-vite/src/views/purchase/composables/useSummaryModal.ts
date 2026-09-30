@@ -2,12 +2,13 @@ import { ref, computed, reactive, toRaw } from 'vue'
 import { purchaseApi } from '@/api'
 import { escapeHtml, printHtml } from '@/utils/print'
 import { fmtQty } from '@/utils/formatQty'
-import { calcSpareQuantity, summaryMaterialKey } from './perSkuRows'
+import { calcSpareQuantity, summaryMaterialKey, magnifyByLossRate, ceilMagnifiedByLossRate, buildPerSkuRows, computeQuantityDiff, buildStoredRows } from './perSkuRows'
+import type { PerSkuRow } from './perSkuRows'
 
-// 这两个纯函数已移入 perSkuRows.ts —— 本模块要用它的 buildPerSkuRows，
+// 这些纯函数已移入 perSkuRows.ts —— 本模块要用它的 buildPerSkuRows，
 // 若此处再定义它们就构成互相 import（Vite/vitest 下会拿到 undefined 绑定）。
 // 重导出仅为兼容既有导入路径，行为逐字不变。
-export { calcSpareQuantity, summaryMaterialKey } from './perSkuRows'
+export { calcSpareQuantity, summaryMaterialKey, magnifyByLossRate, ceilMagnifiedByLossRate } from './perSkuRows'
 
 // structuredClone 无法克隆 Vue 响应式 Proxy（报 "could not be cloned"）。
 // 先 toRaw 取回原始纯对象，再做结构化深克隆；传入纯对象时 toRaw 原样返回，同样安全。
@@ -33,31 +34,9 @@ export function getGroupOrderQty(group: FactoryGroup): number {
   return Number.isNaN(v) ? 0 : v
 }
 
-/**
- * 损耗加放纯函数：按损耗率（千分之几）放大数量，四舍五入到 2 位小数。
- *
- * 语义 = `qty × (1 + lossRate / 1000)`。屏幕「数量」列、工厂/供应商合计、
- * 打印预览、Excel 导出共用这一处来源。
- *
- * 本函数**只做展示派生**，绝不写回 factoryData / supplierData ——
- * 原始数量才是落库唯一真值，放大值永远只是预览。
- *
- * 防御口径：非法输入（NaN / Infinity / 非数字）按 0 处理；
- * `lossRate = 0` 时同样执行「两位小数四舍五入」，保证与既有输出逐字一致、零回归。
- */
-export function magnifyByLossRate(qty: number, lossRate: number): number {
-  const v = Number.isFinite(qty) ? qty : 0
-  const r = Number.isFinite(lossRate) ? lossRate : 0
-  return Math.round((v + v * (r / 1000)) * 100) / 100
-}
-
-/**
- * 损耗加放后的「数量」展示值（向上取整）：屏幕表格、打印预览、Excel 导出共用。
- * 只在展示层取整，原始数量仍是落库唯一真值，保存反推仍使用精确的 magnifyByLossRate。
- */
-export function ceilMagnifiedByLossRate(qty: number, lossRate: number): number {
-  return Math.ceil(magnifyByLossRate(qty, lossRate))
-}
+// `magnifyByLossRate` / `ceilMagnifiedByLossRate` 已移入 `perSkuRows.ts`
+// （`buildStoredRows` 需要它们做加放取整，而那个模块必须是叶子纯函数）；
+// 由文件顶部的 re-export 保持既有导入路径可用，行为逐字不变。
 
 /**
  * 工厂页签「数量」列的展示值（**工厂表 / 供应商表 / 打印 / 导出共用的唯一入口**）。
@@ -146,6 +125,106 @@ export const FACTORY_TABLE_HEAD =
   '<tr><th>客户</th><th>产品名称</th><th>订单数量</th><th>备品数量</th><th>供应商</th>' +
   '<th>布料名称</th><th>规格型号</th><th>损耗率</th><th>数量</th><th>单位</th></tr>'
 
+/**
+ * 「按 SKU 展开」的组渲染：每 SKU 一块物料行，组末附差异对照块。
+ *
+ * 左侧三列（产品名称 / 订单数量 / 备品数量）按 SKU 块合并（rowspan = 该块行数），
+ * 客户列跨**整组**（只在组首行渲染一次）—— 与屏幕 `SummaryFactoryTab.vue` 同构。
+ * 返回空串表示数据不足（旧后端 / 无 BOM），调用方回退订单级单块（零回归）。
+ */
+function buildPerSkuGroupHtml(
+  group: FactoryGroup, gi: number, spareRate: number, lossRate: number, fabricRates?: number[][][],
+): string {
+  const perSkuRows = buildPerSkuRows(group, spareRate)
+  if (perSkuRows.length === 0) return ''
+
+  let tableHtml = ''
+  let cursor = 0
+  let blockNo = 0
+  while (cursor < perSkuRows.length) {
+    const skuIdx = perSkuRows[cursor]!.skuIdx
+    const block: PerSkuRow[] = []
+    while (cursor < perSkuRows.length && perSkuRows[cursor]!.skuIdx === skuIdx) {
+      block.push(perSkuRows[cursor]!)
+      cursor++
+    }
+    block.forEach((row, i) => {
+      tableHtml += '<tr>'
+      if (i === 0) {
+        // 客户列：整组只出现一次（rowspan = 该组全部行数）；误写成「每块都渲染」会与表头错位。
+        if (blockNo === 0) {
+          tableHtml += `<td rowspan="${perSkuRows.length}" style="font-weight:bold;">${escapeHtml(group.customer_name)}</td>`
+        }
+        const line = row.cellLines[0]
+        tableHtml += `<td rowspan="${block.length}">${escapeHtml(line?.name || '')}</td>`
+        tableHtml += `<td rowspan="${block.length}">${escapeHtml(fmtQty(line?.qty ?? 0))}</td>`
+        tableHtml += `<td rowspan="${block.length}">${escapeHtml(fmtQty(line?.spare ?? 0))}</td>`
+      }
+      if (row.noBom) {
+        // 占位行：供应商 + 之后 5 列 = 6 列（左侧三列已在上方补齐）
+        tableHtml += '<td colspan="6" style="color:#8e8e93;">无 BOM 明细</td>'
+        tableHtml += '</tr>'
+        return
+      }
+      const rowRate = row.coord
+        ? (fabricRates?.[gi]?.[row.coord.si]?.[row.coord.fi] ?? lossRate)
+        : lossRate
+      if (row.isFirstSupplierRow) {
+        tableHtml += `<td rowspan="${row.supplierRowSpan}" style="font-weight:bold;">${escapeHtml(row.supplierName)}</td>`
+      }
+      tableHtml += `<td>${escapeHtml(row.materialName)}</td>`
+      tableHtml += `<td>${escapeHtml(row.specification)}</td>`
+      tableHtml += `<td>${escapeHtml(String(rowRate))}</td>`
+      tableHtml += `<td>${ceilMagnifiedByLossRate(row.baseQuantity, rowRate)}</td>`
+      tableHtml += `<td>${escapeHtml(row.unit)}</td>`
+      tableHtml += '</tr>'
+    })
+    blockNo++
+  }
+
+  // 差异对照块：与屏幕同源（打印件不能对差异保持沉默）。
+  tableHtml += buildDiffBlockHtml(group, perSkuRows, spareRate)
+  return tableHtml
+}
+
+/**
+ * 差异对照块（打印/导出版，结构镜像屏幕 `SummaryDiffBlock.vue`）。
+ *
+ * 列数必须仍是 **10**：标签跨「客户/产品名称/订单数量/备品数量」4 列（`colspan=4`，
+ * 跨本块全部行）+ 供应商（段内 rowspan）+ 布料名称/规格型号/损耗率/数量/单位 5 格。
+ * 行数据来自 `buildStoredRows` —— 与屏幕**同一个纯函数**，故两边天然同构：
+ * 损耗率取该落库行快照率、数量为按该率加放派生值。无差异时返回空串（不渲染）。
+ */
+function buildDiffBlockHtml(
+  group: FactoryGroup, perSkuRows: PerSkuRow[], spareRate: number,
+): string {
+  const diffs = computeQuantityDiff(group, perSkuRows)
+  if (diffs.length === 0) return ''
+
+  const detail = diffs
+    .map((d) => `${d.materialName}（推算 ${d.perSku} / 实际 ${d.stored}）`)
+    .join('、')
+  let tableHtml = `<tr><td colspan="10" style="background:#fffaf0;color:#7a4a00;">⚠ 本条「实际下单」含手工调整，与上方按 BOM 推算不一致：${escapeHtml(detail)}</td></tr>`
+
+  const storedRows = buildStoredRows(group, () => spareRate)
+  storedRows.forEach((r, i) => {
+    tableHtml += '<tr>'
+    if (i === 0) {
+      tableHtml += `<td colspan="4" rowspan="${storedRows.length}" style="font-weight:bold;background:#fffaf0;color:#7a4a00;">实际下单（含手工调整）</td>`
+    }
+    if (r.isSupplierFirst) {
+      tableHtml += `<td rowspan="${r.supplierSpan}" style="background:#fffaf0;">${escapeHtml(r.supplierName)}</td>`
+    }
+    tableHtml += `<td style="background:#fffaf0;">${escapeHtml(r.fabricName)}</td>`
+    tableHtml += `<td style="background:#fffaf0;">${escapeHtml(r.specification)}</td>`
+    tableHtml += `<td style="background:#fffaf0;">${escapeHtml(String(r.rate))}</td>`
+    tableHtml += `<td style="background:#fffaf0;">${r.displayQuantity}</td>`
+    tableHtml += `<td style="background:#fffaf0;">${escapeHtml(r.unit)}</td>`
+    tableHtml += '</tr>'
+  })
+  return tableHtml
+}
+
 export function buildFactoryHtml(
   data: FactorySummaryData, lossRate: number, fabricRates?: number[][][], groupRates?: number[],
 ): string {
@@ -155,6 +234,14 @@ export function buildFactoryHtml(
     // 备品口径（A）：只用该分组的订单级率；分组未提供时回退传入的统一率
     const groupRate = groupRates?.[gi]
     const spareRate = typeof groupRate === 'number' && Number.isFinite(groupRate) ? groupRate : lossRate
+
+    // 优先「按 SKU 展开」：每 SKU 一块物料 + 组末差异对照块；数据不足则回退订单级单块。
+    const perSkuHtml = buildPerSkuGroupHtml(group, gi, spareRate, lossRate, fabricRates)
+    if (perSkuHtml !== '') {
+      tableHtml += perSkuHtml
+      return
+    }
+
     let globalFabricIdx = 0
     suppliers.forEach((supplier, si: number) => {
       const fabricCount = supplier.fabrics?.length || 0
