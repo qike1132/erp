@@ -105,8 +105,14 @@ class HostingViewMixin:
             # 绝不能落成「已停止」——否则查不出来会被误当成生产已停、诱导误判。
             self._prod_unknown = data.get('api_unknown', False)
             if data.get('collect_error'):
+                # 采集失败时 data 里没有 api_running（默认 False）——这是「不知道」，
+                # 不是「生产停了」。绝不能拿它去关日志管线（会在 sc 瞬时失败时
+                # 白白断掉实时输出）。
                 self._apply_collect_error(data)
                 return
+            # 生产日志实时管线的唯一开关点：跟随权威状态(sc query)自动接入/收工。
+            # 放在这里而不是启动流程里，才能覆盖「管理器启动时生产早就在跑」的场景。
+            self._sync_prod_log_tailer(self._prod_running)
             # 服务未运行：以 sc query 为权威，不读状态文件，避免残留旧数据
             if not data['api_running']:
                 self._apply_services_stopped(data)

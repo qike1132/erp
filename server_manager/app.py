@@ -1,5 +1,5 @@
 """
-ERP 服务器管理器 GUI（版本号唯一真源见 server_manager.constants 的 _VERSION，当前 v5.33）
+ERP 服务器管理器 GUI（版本号唯一真源见 server_manager.constants 的 _VERSION，当前 v5.34）
 功能:
   - 一键启动前后端：同时启动 FastAPI 后端 + Vue/Vite 前端 + Redis服务
   - 一键重启：停止所有进程和端口，然后重新启动服务
@@ -46,6 +46,7 @@ from server_manager.constants import (
 )
 from server_manager.dev_mode import DevModeOps
 from server_manager.hosting_view import HostingViewMixin
+from server_manager.log_view import LogViewMixin
 from server_manager.redis_ops import RedisOps
 from server_manager.service_ops import ServiceOps
 from server_manager.widgets import RoundedButton, StatusBadge, _lerp_color
@@ -166,7 +167,7 @@ def _create_tray_icon_image():
     except Exception:
         return None
 
-class ServerManagerApp(HostingViewMixin):
+class ServerManagerApp(HostingViewMixin, LogViewMixin):
     """ERP 服务器管理器 — 开发/生产模式"""
 
     # Apple/iOS 风格设计令牌：浅色分组卡片 + 系统色板 + 克制留白
@@ -180,7 +181,8 @@ class ServerManagerApp(HostingViewMixin):
         'warning': '#ff9500', 'warning_tint': '#fff4e0', 'info': '#30b0c7',
         'log_fg': '#1d1d1f', 'log_info': '#007aff', 'log_error': '#ff3b30', 'log_warn': '#ff9500', 'log_success': '#34c759',
     }
-    MAX_LOG_LINES, LOG_KEEP_LINES, LOG_CLEANUP_MS, LOG_FLUSH_MS = 500, 300, 120000, 500
+    # 运行日志面板相关的常量(缓冲上限/刷新与裁剪周期/生产日志回灌/文件清理周期)
+    # 归 LogViewMixin(T8 抽出,见 server_manager/log_view.py)；本类经继承可见。
     # 生产模式状态刷新：prod_runner 每 3s 续写 logs/prod_runner.json，超过 HOSTING_STALE_SEC
     # 未更新即视为不可信（旧快照不得当现状展示）；收集线程超过 HOSTING_COLLECT_TIMEOUT_SEC
     # 未回报即认定刷新链卡死并重启（否则界面会永久停止更新）。
@@ -208,7 +210,7 @@ class ServerManagerApp(HostingViewMixin):
         # 注：redis_process 已归 RedisOps 自持(见下方 self.redis)，此处不再赋值。
         # 注：开发模式状态(mode/process/frontend_process/current_mode_key/startup_*)
         # 已归 DevModeOps 自持(见下方 self.dev)，一律经属性桥读写，此处不再赋值。
-        self._log_buffer, self._flush_pending = [], False
+        self._init_log_view()
         self._msg_queue = queue.Queue()
         self._server_cards = []
         self._prod_running = False
@@ -252,6 +254,8 @@ class ServerManagerApp(HostingViewMixin):
         self.check_server_status()
         self._refresh_hosting_status()
         self._schedule_log_cleanup()
+        self._schedule_log_file_cleanup()
+        self._schedule_log_health()
         self._schedule_log_flush()
         self._poll_queue()
         self._tray_icon = None
@@ -387,6 +391,9 @@ class ServerManagerApp(HostingViewMixin):
         if self._mode != 'none':
             self._stop_process()
             self._mode = 'none'
+        # 退出前收掉日志轮询线程：它是守护线程，但显式停能保证 join 后再销毁 Tk，
+        # 不会出现「窗口没了、线程还在往已关闭的队列投消息」。
+        self.prod_logs.stop()
         self._kill_tray()
         for aid in self._after_ids.values():
             with contextlib.suppress(Exception):
@@ -430,71 +437,9 @@ class ServerManagerApp(HostingViewMixin):
                 console_handler.setFormatter(fmt)
                 self.logger.addHandler(console_handler)
 
-    def log_message(self, message, level='INFO'):
-        timestamp = datetime.now().strftime('%H:%M:%S')
-        self._log_buffer.append((f"[{timestamp}] {level}: {message}\n", level))
-        fn = getattr(self.logger, level.lower(), None) or self.logger.warning
-        if fn:
-            fn(message)
-        if not self._flush_pending:
-            self._flush_pending = True
-            try:
-                self.root.after_idle(self._do_flush)
-            except RuntimeError:
-                self._flush_pending = False
-
-    def _do_flush(self):
-        self._flush_pending = False
-        self._flush_log_buffer()
-
-    def _flush_log_buffer(self):
-        if not self._log_buffer:
-            return
-        buf = self._log_buffer[:]
-        self._log_buffer.clear()
-        self.log_text.config(state=tk.NORMAL)
-        for entry, level in buf:
-            self.log_text.insert(tk.END, entry, level)
-        self.log_text.see(tk.END)
-        self.log_text.config(state=tk.DISABLED)
-
-    def _schedule_log_flush(self):
-        if self._log_buffer:
-            self._flush_log_buffer()
-        self._after_ids['flush'] = self.root.after(self.LOG_FLUSH_MS, self._schedule_log_flush)
-
-    def clear_log(self):
-        self.log_text.config(state=tk.NORMAL)
-        self.log_text.delete('1.0', tk.END)
-        self.log_text.config(state=tk.DISABLED)
-        self.log_message("日志已清空")
-
-    def export_log(self):
-        from tkinter import filedialog
-        log_dir = _PROJECT_DIR / 'logs'
-        log_dir.mkdir(exist_ok=True)
-        filename = filedialog.asksaveasfilename(initialdir=log_dir, initialfile=f"server_log_{datetime.now():%Y%m%d_%H%M%S}.txt", defaultextension=".txt", filetypes=[("文本文件", "*.txt"), ("所有文件", "*.*")])
-        if filename:
-            try:
-                with open(filename, 'w', encoding='utf-8') as f:
-                    f.write(self.log_text.get('1.0', tk.END))
-                self.log_message(f"日志已导出到: {filename}")
-            except Exception as e:
-                self.log_message(f"导出日志失败: {str(e)}", 'ERROR')
-
-    def _schedule_log_cleanup(self):
-        self._perform_log_cleanup()
-        self._after_ids['cleanup'] = self.root.after(self.LOG_CLEANUP_MS, self._schedule_log_cleanup)
-
-    def _perform_log_cleanup(self):
-        try:
-            total = int(self.log_text.index('end-1c').split('.')[0])
-            if total > self.MAX_LOG_LINES:
-                self.log_text.config(state=tk.NORMAL)
-                self.log_text.delete('1.0', f'{total - self.LOG_KEEP_LINES}.0')
-                self.log_text.config(state=tk.DISABLED)
-        except (tk.TclError, ValueError):
-            pass
+    # 注：日志面板与日志运维(log_message / _build_log_section / 文件定时清理 /
+    # 生产日志实时回灌)已整体抽到 LogViewMixin(T8，见 server_manager/log_view.py)，
+    # 本类经继承使用；此处不再保留瘦转发。
 
     def _stop_process(self):
         """停止当前调试模式进程（经动作闸门串行；可被紧急停止取消）"""
@@ -602,6 +547,9 @@ class ServerManagerApp(HostingViewMixin):
                 elif msg_type == 'startup_progress':
                     self.status_bar_label.config(text=f"启动中: {data.get('step', '')} ({data.get('progress', 0)}/{data.get('total', 4)})")
                     self._startup_current_step, self._startup_progress = data.get('step', ''), data.get('progress', 0)
+                elif msg_type == 'log_health':
+                    # 巡检线程只投递结果，面板渲染与告警归口主线程（同 hosting_apply 的范式）
+                    self._apply_log_health(data['report'])
                 elif msg_type == 'hosting_refresh':
                     # 生产模式状态立即刷新（取消已排定的一轮，避免刷新链叠加）
                     try:
@@ -705,6 +653,8 @@ class ServerManagerApp(HostingViewMixin):
                 # 否则端口清理会强杀 erp-prod 监听 5002 的进程，被 AppExit=Default
                 # Restart 判定为崩溃、5 秒后自动重启 ——「紧急停止变成重启」的根因。
                 _, managed_pids, srvc_failed = self._stop_managed_services()
+                # 服务已停：实时回灌线程随之收工（否则旧日志会继续往面板里刷）
+                self.prod_logs.stop()
                 # 强制停止所有进程，不管状态
                 self._terminate_dev_processes()
 
@@ -1438,6 +1388,10 @@ class ServerManagerApp(HostingViewMixin):
                 self._msg_queue.put(('log_batch', {'lines': [f'[{name}] {ln}' for ln in fresh], 'level': 'INFO'}))
             else:
                 self._msg_queue.put(('log', {'text': f'[{name}] 本次启动暂无新日志（历史见 logs 下的 {name}.log）'}))
+        # ★ 上面的回灌只是「本次启动到此刻」的一次性快照；此后必须由 ProdLogTailer
+        #   持续跟踪这三个日志文件的增量，否则界面在启动窗口之后再无输出 ——
+        #   用户实测的「生产模式打开后运行日志不是实时输出」就是这段断层。
+        self.prod_logs.ensure_started()
         if ok_api and ok_arq:
             self._msg_queue.put(('log', {'text': f'生产模式启动完成 → {_SVC_API}: {api_state} (PID: {api_pid}), '
                                          f'{_SVC_ARQ}: {arq_state} (PID: {arq_pid})'}))
@@ -1503,41 +1457,6 @@ class ServerManagerApp(HostingViewMixin):
             os.startfile(str(log_dir))
         except Exception as e:
             self.log_message(f'打开日志目录失败: {e}', 'ERROR')
-
-    def _build_log_section(self, parent):
-        log_card = tk.Frame(parent, bg=self._PALETTE['bg_card'], highlightbackground=self._PALETTE['border_card'], highlightthickness=1)
-        log_card.grid(row=1, column=0, columnspan=2, sticky='nsew', pady=(10, 0))
-        log_card.columnconfigure(0, weight=1)
-        log_card.rowconfigure(1, weight=1)
-        log_hdr = tk.Frame(log_card, bg=self._PALETTE['bg_card'])
-        log_hdr.grid(row=0, column=0, sticky='ew', padx=20, pady=(12, 0))
-        tk.Label(log_hdr, text='运行日志', font=('Microsoft YaHei UI', 11, 'bold'), fg=self._PALETTE['text_primary'], bg=self._PALETTE['bg_card']).pack(side=tk.LEFT)
-        tk.Label(log_hdr, text='实时输出', font=('Microsoft YaHei UI', 8), fg=self._PALETTE['text_dim'], bg=self._PALETTE['bg_card']).pack(side=tk.LEFT, padx=(8, 0))
-        log_btns = tk.Frame(log_hdr, bg=self._PALETTE['bg_card'])
-        log_btns.pack(side=tk.RIGHT)
-        for txt, cmd in [('导出', self.export_log), ('清空', self.clear_log)]:
-            pill = tk.Frame(log_btns, bg=self._PALETTE['bg_card'], cursor='hand2', highlightbackground=self._PALETTE['border'], highlightthickness=1)
-            pill.pack(side=tk.RIGHT, padx=(4, 0))
-            tk.Label(pill, text=txt, font=('Microsoft YaHei UI', 8), fg=self._PALETTE['text_secondary'], bg=self._PALETTE['bg_card'], padx=12, pady=3, cursor='hand2').pack()
-            for w in (pill, pill.winfo_children()[0]):
-                w.bind('<Button-1>', lambda e, c=cmd: c())
-                w.bind('<Enter>', lambda e, p=pill: p.config(bg=self._PALETTE['bg_input']))
-                w.bind('<Leave>', lambda e, p=pill: p.config(bg=self._PALETTE['bg_card']))
-                w.bind('<Enter>', lambda e, l=pill.winfo_children()[0]: l.config(bg=self._PALETTE['bg_input']), add='+')
-                w.bind('<Leave>', lambda e, l=pill.winfo_children()[0]: l.config(bg=self._PALETTE['bg_card']), add='+')
-        log_body = tk.Frame(log_card, bg=self._PALETTE['bg_input'], highlightbackground=self._PALETTE['border'], highlightthickness=1)
-        log_body.grid(row=1, column=0, sticky='nsew', padx=14, pady=(8, 14))
-        log_body.columnconfigure(0, weight=1)
-        log_body.rowconfigure(0, weight=1)
-        log_font = self._pick_log_font()
-        self.log_text = tk.Text(log_body, bg=self._PALETTE['bg_log'], fg=self._PALETTE['log_fg'], insertbackground=self._PALETTE['log_fg'], selectbackground=self._PALETTE['bg_input'], font=log_font, wrap=tk.WORD, state=tk.DISABLED, relief=tk.FLAT, padx=14, pady=10, cursor='arrow')
-        self.log_text.grid(row=0, column=0, sticky='nsew')
-        self.log_text.tag_configure('INFO', foreground=self._PALETTE['log_info'])
-        self.log_text.tag_configure('ERROR', foreground=self._PALETTE['log_error'])
-        self.log_text.tag_configure('WARNING', foreground=self._PALETTE['log_warn'])
-        sb = ttk.Scrollbar(log_body, command=self.log_text.yview)
-        sb.grid(row=0, column=1, sticky='ns')
-        self.log_text.config(yscrollcommand=sb.set)
 
     def _build_status_bar(self):
         bar = tk.Frame(self.root, bg=self._PALETTE['bg_surface'], highlightbackground=self._PALETTE['border'], highlightthickness=1)
