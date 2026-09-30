@@ -47,7 +47,10 @@ async def list_stockins(
     start_date: str | None = Query(None, description='开始日期'),
     end_date: str | None = Query(None, description='结束日期'),
     db: AsyncSession = Depends(get_async_read_db),
-    _user: User = Depends(require_permission('stockin_manage')),
+    # 备货写路径（/in/list|create|edit|delete）与 /aux/batch-submit-stockins、
+    # /aux/stockin/{id} 同口径：备货是「客户订单」页录入流程的一环，
+    # 只认 stockin_manage 会让勾了「客户订单」的人在该页提交备货时 403。
+    _user: User = Depends(require_any_permission('stockin_manage', 'order_manage')),
 ) -> StockListResponse:
     """获取入库列表（支持分页和筛选）。
 
@@ -77,7 +80,7 @@ async def list_stockins(
 async def create_stockin(
     data: StockInCreate,
     db: AsyncSession = Depends(get_async_db),
-    _user: User = Depends(require_permission('stockin_manage')),
+    _user: User = Depends(require_any_permission('stockin_manage', 'order_manage')),
 ) -> StockActionResponse:
     """添加入库记录。
 
@@ -103,7 +106,7 @@ async def edit_stockin(
     stockin_id: int,
     data: StockInUpdate,
     db: AsyncSession = Depends(get_async_db),
-    _user: User = Depends(require_permission('stockin_manage')),
+    _user: User = Depends(require_any_permission('stockin_manage', 'order_manage')),
 ) -> StockActionResponse:
     """编辑入库记录。
 
@@ -141,7 +144,7 @@ async def edit_stockin(
 async def delete_stockin(
     stockin_id: int,
     db: AsyncSession = Depends(get_async_db),
-    _user: User = Depends(require_permission('stockin_manage')),
+    _user: User = Depends(require_any_permission('stockin_manage', 'order_manage')),
 ) -> StockActionResponse:
     """删除入库记录。
 

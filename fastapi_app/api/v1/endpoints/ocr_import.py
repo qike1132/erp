@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.config import settings
 from fastapi_app.core.database import get_async_db, get_async_read_db
-from fastapi_app.core.deps import require_permission
+from fastapi_app.core.deps import require_any_permission
 from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.schemas.ocr_import import (
     OcrOrderPreviewResult,
@@ -33,7 +33,7 @@ router = APIRouter()
 SUPPORTED_EXTENSIONS = {'.pdf'} | IMAGE_EXTENSIONS
 
 @router.post('/create-task', summary='创建 OCR 识别任务（获取进度追踪ID）')
-async def create_ocr_task(current_user: User=Depends(require_permission('batch_import'))):
+async def create_ocr_task(current_user: User=Depends(require_any_permission('batch_import', 'stockout_manage'))):
     """
     创建 OCR 识别任务，返回 task_id。
 
@@ -44,7 +44,7 @@ async def create_ocr_task(current_user: User=Depends(require_permission('batch_i
     return {'task_id': task_id}
 
 @router.post('/upload', response_model=OcrPdfImportResult, summary='批量上传出货单识别导入')
-async def upload_shipping_docs(files: list[UploadFile]=File(..., description='一个或多个 PDF/图片文件'), session_id: str=Query(..., description='会话ID'), task_id: str=Query('', description='进度追踪ID（由 /create-task 返回）'), db: AsyncSession=Depends(get_async_db), current_user: User=Depends(require_permission('batch_import'))):
+async def upload_shipping_docs(files: list[UploadFile]=File(..., description='一个或多个 PDF/图片文件'), session_id: str=Query(..., description='会话ID'), task_id: str=Query('', description='进度追踪ID（由 /create-task 返回）'), db: AsyncSession=Depends(get_async_db), current_user: User=Depends(require_any_permission('batch_import', 'stockout_manage'))):
     """
     批量上传出货单（PDF/图片），通过离线 OCR 识别后导入暂存区。
 
@@ -88,7 +88,7 @@ async def upload_shipping_docs(files: list[UploadFile]=File(..., description='�
     return OcrPdfImportResult(success=total_imported > 0 or len(file_results) == 0, message=overall_message, total_imported=total_imported, file_count=len(file_results), file_results=file_results, errors=all_errors[:20], task_id=task_id)
 
 @router.get('/progress/{task_id}', summary='查询 OCR 识别进度')
-async def get_ocr_progress(task_id: str, current_user: User=Depends(require_permission('batch_import'))):
+async def get_ocr_progress(task_id: str, current_user: User=Depends(require_any_permission('batch_import', 'stockout_manage'))):
     """
     查询 OCR 识别任务的进度。
 
@@ -98,7 +98,7 @@ async def get_ocr_progress(task_id: str, current_user: User=Depends(require_perm
     return progress
 
 @router.post('/preview', response_model=OcrPdfPreviewResult, summary='预览 OCR 识别结果（不写入暂存区）')
-async def preview_shipping_doc(file: UploadFile=File(..., description='PDF 或图片文件'), current_user: User=Depends(require_permission('batch_import'))):
+async def preview_shipping_doc(file: UploadFile=File(..., description='PDF 或图片文件'), current_user: User=Depends(require_any_permission('batch_import', 'stockout_manage'))):
     """
     预览单个文件的 OCR 识别结果，不写入暂存区。
 
@@ -144,7 +144,8 @@ async def preview_order_doc(
     file: UploadFile = File(..., description='订单图片或 PDF（支持粘贴上传的截图）'),
     customer: str = Query('', description='表单当前选中的客户名，图上没有客户信息时兜底'),
     db: AsyncSession = Depends(get_async_read_db),
-    current_user: User = Depends(require_permission('batch_import')),
+    # 订单图片识别由「客户订单」页触发（useOrderOcr.ts），与出货单链路不同码。
+    current_user: User = Depends(require_any_permission('batch_import', 'order_manage')),
 ):
     """识别订单图片（聊天截图 / 表格 / 拍照），返回待人工确认的条目。
 

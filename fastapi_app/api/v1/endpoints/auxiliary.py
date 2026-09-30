@@ -280,7 +280,7 @@ async def delete_stockout_api(
 @router.delete("/stockin/{id}", response_model=AuxActionResponse)
 async def delete_stockin_api(
     id: int,
-    user: User = Depends(require_permission("stockin_manage")),
+    user: User = Depends(require_any_permission("stockin_manage", "order_manage")),
     db: AsyncSession = Depends(get_async_db),
 ):
     """删除入库记录（API方式）"""
@@ -365,7 +365,7 @@ async def batch_submit_orders(
 @router.post("/batch-submit-stockins", response_model=BatchStockinResponse)
 async def batch_submit_stockins(
     data: BatchStockInRequest,
-    user: User = Depends(require_permission("stockin_manage")),
+    user: User = Depends(require_any_permission("stockin_manage", "order_manage")),
     db: AsyncSession = Depends(get_async_db),
 ):
     """批量提交入库"""

@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, File, Response, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.database import get_async_db
-from fastapi_app.core.deps import require_permission
+from fastapi_app.core.deps import require_any_permission, require_permission
 from fastapi_app.schemas.batch import BatchImportResult, ComprehensiveImportResult
 from fastapi_app.services.batch_import_service import (
     import_case_stockins_service,
@@ -31,7 +31,9 @@ router = APIRouter()
 
 @router.get('/download-template', summary='下载统一导入模板')
 async def download_template(
-    current_user: User = Depends(require_permission('batch_import')),
+    # 统一导入模板被「客户订单」「出库管理」「出货计划」三个页面共用（各自页面工具栏）。
+    current_user: User = Depends(require_any_permission(
+        'batch_import', 'order_manage', 'stockout_manage', 'production_plan_view')),
 ) -> Response:
     """下载统一导入模板 - 直接读取静态文件。
 

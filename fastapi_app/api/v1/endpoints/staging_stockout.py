@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, File, Query, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.database import get_async_db, get_async_read_db
-from fastapi_app.core.deps import require_permission
+from fastapi_app.core.deps import require_any_permission
 from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.schemas.staging import (
     StagingListResponse,
@@ -50,7 +50,7 @@ def _build_scoped_session(user_id: int, session_id: str) -> str:
 async def get_staging_stockouts(
     session_id: str = Query(..., description='会话ID'),
     db: AsyncSession = Depends(get_async_read_db),
-    current_user: User = Depends(require_permission('batch_import')),
+    current_user: User = Depends(require_any_permission('batch_import', 'stockout_manage')),
 ) -> StagingListResponse:
     """获取指定会话的暂存出货列表。
 
@@ -72,7 +72,7 @@ async def import_staging_stockouts(
     file: UploadFile = File(...),
     session_id: str = Query(..., description='会话ID'),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(require_permission('batch_import')),
+    current_user: User = Depends(require_any_permission('batch_import', 'stockout_manage')),
 ) -> StagingStockOutImportResult:
     """批量导入出货到暂存区。
 
@@ -116,7 +116,7 @@ async def update_staging_stockout(
     stockout_id: int,
     data: StagingStockOutUpdate,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(require_permission('batch_import')),
+    current_user: User = Depends(require_any_permission('batch_import', 'stockout_manage')),
 ) -> StagingResponse:
     """更新暂存出货记录。
 
@@ -138,7 +138,7 @@ async def update_staging_stockout(
 async def clear_staging_stockouts(
     session_id: str = Query(..., description='会话ID'),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(require_permission('batch_import')),
+    current_user: User = Depends(require_any_permission('batch_import', 'stockout_manage')),
 ) -> StagingResponse:
     """清空当前会话的暂存出货。
 
@@ -160,7 +160,7 @@ async def clear_staging_stockouts(
 async def delete_staging_stockout(
     stockout_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(require_permission('batch_import')),
+    current_user: User = Depends(require_any_permission('batch_import', 'stockout_manage')),
 ) -> StagingResponse:
     """删除单条暂存出货记录。
 
@@ -181,7 +181,7 @@ async def delete_staging_stockout(
 async def confirm_staging_stockouts(
     session_id: str = Query(..., description='会话ID'),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(require_permission('batch_import')),
+    current_user: User = Depends(require_any_permission('batch_import', 'stockout_manage')),
 ) -> StagingStockOutConfirmResult:
     """确认暂存出货 - 转移到正式出货表。
 
