@@ -138,21 +138,6 @@ class TestMobileDashboardEndpointScope:
         assert mock_fetch.await_args.kwargs['departments'] == set()
         assert resp.json()['data']['production'] == {'total_value': 0.0, 'departments': []}
 
-    async def test_v2_scoped_user_receives_only_that_department(self, client):
-        _override_user(_user([view_code('handcraft')]))
-        payload = _dashboard_payload([
-            {'name': '手工部', 'daily_output': 5, 'output_value': 35.0},
-        ])
-        mock_fetch = AsyncMock(return_value=payload)
-        with patch('fastapi_app.api.v2.endpoints.dashboard.fetch_mobile_dashboard', mock_fetch):
-            resp = await client.get('/api/v2/dashboard/mobile')
-
-        assert resp.status_code == 200
-        assert mock_fetch.await_args.kwargs['departments'] == {'handcraft'}
-        depts = resp.json()['data']['production']['departments']
-        assert [d['name'] for d in depts] == ['手工部']
-
-
 # ---------------------------------------------------------------------------
 # 缓存键：不同范围不得共用同一条缓存（否则先到者把结果串给其他用户）
 # ---------------------------------------------------------------------------

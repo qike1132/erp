@@ -26,7 +26,6 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 # 3. 项目内部
 from fastapi_app.api.v1.router import api_router
-from fastapi_app.api.v2.router import router as api_v2_router
 from fastapi_app.api.ws import register_websocket
 from fastapi_app.core.config import settings
 from fastapi_app.core.database import async_engine, dispose_async_engines
@@ -392,7 +391,6 @@ register_health_routes(app)
 register_websocket(app)
 
 app.include_router(api_router, prefix=settings.API_PREFIX)
-app.include_router(api_v2_router, prefix="/api")
 
 _static_dir = pathlib.Path(__file__).resolve().parent.parent / "static"
 

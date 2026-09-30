@@ -1,6 +1,8 @@
-"""辅助API接口 - 补充产品搜索、库存查询、健康检查等"""
-import time
+"""辅助API接口 - 补充产品搜索、库存查询等
 
+健康检查探针统一由 fastapi_app/core/health.py 在 app 层注册
+(/api/health、/api/health/live、/api/health/ready)，本模块不再重复提供。
+"""
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,10 +21,6 @@ from fastapi_app.services.auxiliary_service import (
 )
 from fastapi_app.shared_models import User
 
-
-class HealthCheckResponse(BaseModel):
-    status: str
-    timestamp: float
 
 class CacheClearResponse(BaseModel):
     success: bool
@@ -121,33 +119,6 @@ class SystemStatsResponse(BaseModel):
     performance: dict = {}
 
 router = APIRouter()
-
-
-@router.get("/health", response_model=HealthCheckResponse)
-async def health_check():
-    """应用健康检查（公开端点，仅返回基本状态）"""
-    return {
-        "status": "ok",
-        "timestamp": time.time(),
-    }
-
-
-@router.get("/ready", response_model=HealthCheckResponse)
-async def readiness_check():
-    """K8s readiness probe alias"""
-    return await health_check()
-
-
-@router.get("/healthz", response_model=HealthCheckResponse)
-async def healthz_check():
-    """K8s healthz probe alias"""
-    return await health_check()
-
-
-@router.get("/readyz", response_model=HealthCheckResponse)
-async def readyz_check():
-    """K8s readyz probe alias"""
-    return await health_check()
 
 
 @router.get("/cache/stats", response_model=dict)

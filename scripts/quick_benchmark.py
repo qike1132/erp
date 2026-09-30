@@ -13,7 +13,7 @@ import psutil
 BASE_URL = "http://127.0.0.1:5002"
 TEST_DURATION = 20
 CONCURRENT_USERS = 100
-TARGET_ENDPOINT = "/api/v1/aux/health"
+TARGET_ENDPOINT = "/api/health/live"
 
 async def single_user(user_id: int, duration: float, results: list):
     async with httpx.AsyncClient(timeout=10.0) as client:

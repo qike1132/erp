@@ -88,8 +88,9 @@ _CRITICAL_BUSINESS_KEYWORDS: frozenset[str] = frozenset(
     {"login", "logout", "create_order", "cancel_order", "deduct_stock", "backup", "restore"}
 )
 
-# 健康检查端点路径
-_HEALTH_ENDPOINT_PATHS: tuple[str, ...] = ("/health", "/ready", "/healthz", "/readyz")
+# 健康检查端点路径（S7：与 core/health.py 的真实探针契约一致；
+# 原先的 /healthz、/readyz 是 aux 模块里的 K8s 别名，已随重复端点删除）
+_HEALTH_ENDPOINT_PATHS: tuple[str, ...] = ("/health", "/health/live", "/health/ready")
 
 # 监控指标须覆盖的关键维度
 _REQUIRED_METRIC_DIMENSIONS: frozenset[str] = frozenset(
@@ -260,7 +261,7 @@ class L8Observability(LayerBase):
     async def _check_monitoring(
         self, builder: IssueBuilder
     ) -> tuple[list[AuditIssue], str]:
-        """验证健康检查端点存在(/health, /ready)。"""
+        """验证健康检查端点存在(/health, /health/live, /health/ready)。"""
         issues: list[AuditIssue] = []
         raw_parts: list[str] = []
 
@@ -270,6 +271,8 @@ class L8Observability(LayerBase):
         extra_files = [
             FASTAPI_APP_DIR / "main.py",
             ENDPOINTS_V1_DIR / "monitoring.py",
+            # S7：真实探针注册在 app 层（core/health.py），不在此目录内
+            FASTAPI_APP_DIR / "core" / "health.py",
         ]
 
         route_re = re.compile(
@@ -307,7 +310,7 @@ class L8Observability(LayerBase):
                     file="fastapi_app/",
                     line=1,
                     description=f"未发现健康检查端点(期望: {_HEALTH_ENDPOINT_PATHS})",
-                    suggestion="添加 /health 与 /ready 健康检查端点",
+                    suggestion="添加 /health、/health/live 与 /health/ready 健康检查端点",
                     rule_id="L8-HEALTH-ENDPOINT-001",
                     owner=DEFAULT_OWNER,
                     due_date=DEFAULT_DUE_DATE,
@@ -321,7 +324,7 @@ class L8Observability(LayerBase):
                     file="fastapi_app/",
                     line=1,
                     description=f"部分健康检查端点缺失: {sorted(missing)}",
-                    suggestion="补齐 /health 与 /ready 端点",
+                    suggestion="补齐 /health、/health/live 与 /health/ready 端点",
                     rule_id="L8-HEALTH-ENDPOINT-001",
                     owner=DEFAULT_OWNER,
                     due_date=DEFAULT_DUE_DATE,

@@ -13,9 +13,10 @@ class TestHealthEndpoints:
 
     @pytest.mark.asyncio
     async def test_health(self, client):
-        r = await client.get("/api/v1/aux/health")
+        # S7：aux 的重复健康端点已删除，探活统一走 app 层真实探针
+        r = await client.get("/api/health/live")
         assert r.status_code == 200
-        assert r.json()["status"] == "ok"
+        assert r.json()["status"] == "alive"
 
     @pytest.mark.asyncio
     async def test_metrics(self, client):
@@ -70,7 +71,7 @@ class TestOpenAPI:
         schema = r.json()
         assert "paths" in schema
         # 关键端点必须存在
-        assert any("/aux/health" in p for p in schema["paths"])
+        assert any("/api/health" in p for p in schema["paths"])
 
     @pytest.mark.asyncio
     async def test_docs_accessible(self, client):

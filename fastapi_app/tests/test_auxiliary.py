@@ -6,11 +6,11 @@ import pytest
 
 class TestAuxiliaryEndpoints:
     @pytest.mark.asyncio
-    async def test_health_check(self, client):
-        response = await client.get("/api/v1/aux/health")
+    async def test_liveness_probe(self, client):
+        """真实探针在 app 层注册（/api/health/live）；aux 的重复健康端点已删除（S7）。"""
+        response = await client.get("/api/health/live")
         assert response.status_code == 200
-        data = response.json()
-        assert data['status'] == 'ok'
+        assert response.json()['status'] == 'alive'
 
     @pytest.mark.asyncio
     async def test_product_search_empty(self, client, mock_db):
