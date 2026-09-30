@@ -350,3 +350,32 @@ _firefox_profile_*/
 # /start：根目录误产生的空壳文件（内容仅一行 erp-web），非脚本、无任何引用。
 # 只锚定仓库根，避免误伤日后任何名为 start 的子目录。
 /start
+
+# === 2026-09-30 补齐 AI 编码工具痕迹的忽略规则（本机 agent 产物，非项目资产）===
+# 本文件此前已忽略 .trae/.qoder/.workbuddy/.reasonix/.superpowers/.codebuddy/
+# .freebuff/.lean-ctx/.resultverify/.codeartsdoer 等，但下列对象仍天天出现在
+# `git status` 中，随时可能被一次 `git add -A` 顺手卷入库：
+#   .agent/ —— 既有规则忽略了 /.agents/ 与 /agents/，唯独漏了单数 .agent/。
+#   .claude/ —— 既有规则只覆盖 /.claude.json 与 claude_cli_analysis.json。
+#   .cursor/、.graphflow/、.graphflow-cache/ —— 各工具的本地规则与缓存。
+#   graphflow-out/ —— GraphFlow 产出物（实测约 38MB）。
+# 一律按目录整体忽略：日后目录内新增任何文件类型都不会漏网。
+/.agent/
+/.claude/
+/.cursor/
+/.graphflow/
+/.graphflow-cache/
+/graphflow-out/
+
+# dsh-web-dump-config.txt：dsh CLI `--dump-config` 的 profile 配置转储（约 200KB）。
+#   2026-09-30 扫描确认不含任何明文凭据（私钥/云凭据/口令赋值共 9 类模式全清），
+#   但仍属本机运维快照而非项目资产，且可用一条命令随时重新生成。
+#   注意：既有 /_*.txt 规则只覆盖**下划线开头**的文件名，此文件无下划线，故须单列。
+/dsh-web-dump-config.txt
+
+# _*.mjs：既有 /_*.py、/_*.sh、/_*.txt、/_*.json 规则漏了 .mjs 后缀，
+#   导致 _scan_asar.mjs、_asar_*.mjs 这类一次性排查脚本长驻工作区。
+/_*.mjs
+
+# 注：AGENTS.md / GEMINI.md / .windsurfrules / .github/copilot-instructions.md
+#     刻意**不**在此忽略 —— 它们是 AI 契约文件，待改写为项目版后正式入库。
