@@ -141,4 +141,15 @@ describe('computeQuantityDiff', () => {
       { materialName: '共享布', perSku: 60, stored: 65 },
     ])
   })
+
+  it('R7 只在采购明细、不在任何 SKU BOM 中的物料 → 也是差异（Σ推算=0 vs 落库>0）', () => {
+    const group = twoSkuGroup()
+    group.suppliers![0]!.fabrics.push({
+      fabric_name: '手工加料', specification: 'S8', unit: '米', quantity: 12, item_ids: [8],
+    })
+
+    expect(computeQuantityDiff(group, buildPerSkuRows(group, 10))).toEqual([
+      { materialName: '手工加料', perSku: 0, stored: 12 },
+    ])
+  })
 })

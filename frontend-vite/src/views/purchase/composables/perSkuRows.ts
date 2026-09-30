@@ -195,7 +195,15 @@ export function buildPerSkuRows(group: FactoryGroup, groupRate: number): PerSkuR
 }
 
 /**
- * 数量差异：各 SKU 推算之和 vs 落库真值（按物料键）。
+ * 数量差异：**逐键**比较「各 SKU 基准量之和」与「落库真值」（按物料键）。
+ *
+ * 两个方向都算差异（spec §2.3「逐键比较」）：
+ *   - 两侧都有的键：`|Σ推算 − 落库| > 0.005` 才算差异；
+ *   - 只在落库侧的键（手工加进采购明细的物料、或 BOM 生成后被删除的物料）：
+ *     `Σ推算 = 0`，落库 > 0 即为差异 —— 否则用户在按 SKU 视图里看不到
+ *     「采购明细里有、BOM 里没有」这件事实；
+ *   - 只在 BOM 侧的新增物料（落库没有）**不算差异**（那是新增物料，不是数量不符）。
+ *
  * 容差 0.005 —— 数量落库为 2 位小数，避免浮点尾差误报。返回空数组表示无差异。
  */
 export function computeQuantityDiff(
@@ -203,8 +211,10 @@ export function computeQuantityDiff(
 ): { materialName: string; perSku: number; stored: number }[] {
   if (rows.length === 0) return []
   const stored = buildStoredIndex(group)
+  const nameOfStoredKey = (key: string) => key.split('\u0000')[1] || ''
   const summed = new Map<string, number>()
   rows.forEach((r) => {
+    if (r.noBom) return   // 占位行不对应任何物料，不参与比对
     const key = materialKeyOf({
       supplier_name: r.supplierName, material_name: r.materialName,
       specification: r.specification, unit: r.unit,
@@ -213,12 +223,22 @@ export function computeQuantityDiff(
   })
 
   const diffs: { materialName: string; perSku: number; stored: number }[] = []
+  // 1) 遍历按 SKU 侧的键：既覆盖「两侧都有」的键，也覆盖「只在 BOM 侧」的新增物料
+  //    （落库没有 → 不是差异，跳过）。
   summed.forEach((perSku, key) => {
     const hit = stored.get(key)
     if (!hit) return                       // 只出现在 BOM、落库里没有 → 不是「差异」，是新增物料
     const perSkuRounded = Math.round(perSku * 100) / 100
     if (Math.abs(perSkuRounded - hit.storedQuantity) > 0.005) {
-      diffs.push({ materialName: key.split('\u0000')[1] || '', perSku: perSkuRounded, stored: hit.storedQuantity })
+      diffs.push({ materialName: nameOfStoredKey(key), perSku: perSkuRounded, stored: hit.storedQuantity })
+    }
+  })
+  // 2) 只在落库侧的键：Σ 推算 = 0 ⇒ 按 spec「逐键比较」的口径同样是差异
+  //    （例如手工加进采购明细的物料、或 BOM 生成后被删掉的物料）。
+  stored.forEach((hit, key) => {
+    if (summed.has(key)) return
+    if (Math.abs(hit.storedQuantity) > 0.005) {
+      diffs.push({ materialName: nameOfStoredKey(key), perSku: 0, stored: hit.storedQuantity })
     }
   })
   return diffs
