@@ -9,7 +9,7 @@ import zipfile
 from datetime import datetime
 
 from sqlalchemy import text
-from sqlalchemy.exc import DataError, SQLAlchemyError
+from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .._constants import (
@@ -82,18 +82,24 @@ async def query_table_rows(tname: str, db: AsyncSession, since: str | None = Non
     ts_col = await find_timestamp_column(tname, db) if since else None
     qtname = quote_table(tname)  # REV-08
     if ts_col:
-        # 列可能是 timestamptz（需 datetime）也可能是 varchar（需 string），先尝试字符串
+        # 时间戳列可能是 timestamptz（须绑 datetime）也可能是 varchar/text（须绑 str）。
+        # 先试 datetime（覆盖绝大多数表），失败再回退字符串。
         since_dt = since
         if isinstance(since_dt, str):
             with contextlib.suppress(TypeError, ValueError):
                 since_dt = datetime.strptime(since_dt, '%Y-%m-%d %H:%M:%S')
-        # 优先尝试 datetime（timestamptz 列需要）；失败时回退到字符串
         try:
             result = await db.execute(
                 text(f'SELECT * FROM {qtname} WHERE "{ts_col}" >= :since'),  # nosec B608 — qtname 经 quote_table 白名单校验; select-all: backup/restore 需要全表动态导出
                 {'since': since_dt},
             )
-        except DataError:
+        except DBAPIError:
+            # 必须捕 DBAPIError，不能捕 sqlalchemy.exc.DataError：asyncpg 实际抛出的是
+            # sqlalchemy.dialects.postgresql.asyncpg.Error（它的父类是 DBAPIError），
+            # 而 DataError 永远匹配不到它 —— 原先只捕 DataError 使本回退成为**死代码**，
+            # 于是 approval_request / approval_log（updated_at 为 varchar）在每一次增量
+            # 备份中被静默跳过（2026-09-30 修复；证据见 logs/erp-arq.log 的
+            # "增量备份表 approval_log 失败: ... (expected str, got datetime)"）。
             # 事务已失败，必须先 rollback 才能在新事务中重试
             with contextlib.suppress(SQLAlchemyError):
                 await db.rollback()  # manual-tx: try/except 内显式事务控制

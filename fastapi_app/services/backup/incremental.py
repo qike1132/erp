@@ -52,6 +52,7 @@ async def create_incremental_backup(
     from fastapi_app.shared_models import Base
     incremental_tables = {}
     total_rows = 0
+    failed_tables: list[str] = []
     effective_since = since or await find_last_backup_timestamp() or ''
     for table in Base.metadata.sorted_tables:
         tname = str(table.name)
@@ -62,10 +63,17 @@ async def create_incremental_backup(
                 incremental_tables[tname] = {'columns': columns, 'rows': serialized_rows, 'count': len(serialized_rows)}
                 total_rows += len(serialized_rows)
         except (SQLAlchemyError, ValueError, OSError) as e:
-            logger.warning(f'增量备份表 {tname} 失败: {e}')
+            # 这里吞掉异常会让备份「成功」但静默缺表 —— 2026-09-30 之前
+            # approval_request / approval_log 正是这样长期漏备的。故记 ERROR 并登记表名，
+            # 让调用方与 manifest 都能看到"哪些表没进备份"。
+            logger.error(f'增量备份表 {tname} 失败: {e}')
+            failed_tables.append(tname)
 
     if not incremental_tables:
-        return {'success': True, 'filename': None, 'message': '无变更数据需要备份', 'total_rows': 0}
+        return {
+            'success': True, 'filename': None, 'message': '无变更数据需要备份',
+            'total_rows': 0, 'failed_tables': failed_tables,
+        }
 
     with tempfile.TemporaryDirectory(prefix='erp_inc_') as tmpdir:
         tmpdir_path = Path(tmpdir)
@@ -77,6 +85,7 @@ async def create_incremental_backup(
             'exported_by': user.username if hasattr(user, 'username') else str(user.id),
             'remark': remark, 'base_timestamp': effective_since,
             'table_count': len(incremental_tables), 'total_rows': total_rows,
+            'failed_tables': failed_tables,
             'tables': incremental_tables,
         }
         json_path.write_bytes(json.dumps(backup_data, ensure_ascii=False, indent=2).encode('utf-8'))
@@ -89,6 +98,7 @@ async def create_incremental_backup(
                 'exported_by': backup_data['exported_by'],
                 'remark': remark, 'base_timestamp': effective_since,
                 'table_count': len(incremental_tables), 'total_rows': total_rows,
+                'failed_tables': failed_tables,
                 'includes': {},
                 'checksums': {'database/dump.json': sha256_file(json_path)},  # REV-14
             }
@@ -134,7 +144,7 @@ async def create_incremental_backup(
         'format': 'incremental', 'table_count': len(incremental_tables),
         'total_rows': total_rows, 'exported_at': backup_data['exported_at'],
         'base_timestamp': effective_since, 'remark': remark,
-        'encrypted': encrypted,
+        'encrypted': encrypted, 'failed_tables': failed_tables,
     }
 
 
