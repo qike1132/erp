@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>哪个 SKU 在哪个厂 · 对比稿 · 2026-09-30</title>
+<style>
+  :root{
+    --bg:#f5f5f7; --card:#fff; --surface:#f4f6fc;
+    --t1:#1d1d1f; --t2:#48484d; --t3:#8e8e93;
+    --accent:#007aff; --accent-tint:#e8f1ff; --ok:#34c759; --ok-tint:#e6f9ec;
+    --warn:#ff9500; --warn-tint:#fff4e0; --danger:#ff3b30; --danger-tint:#ffeceb;
+    --color-border:#e4e7ed; --color-border-light:#f0f2f5;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:26px 22px 60px;background:var(--bg);color:var(--t1);
+       font:13px/1.5 "Microsoft YaHei UI","Segoe UI",system-ui,sans-serif}
+  h1{font-size:19px;margin:0 0 6px}
+  .meta{color:var(--t2);font-size:12px;margin-bottom:16px}
+  .meta code,.sub code,.foot code,.note code{background:#e9e9ee;padding:1px 5px;border-radius:4px}
+  .note{background:var(--warn-tint);border-left:3px solid var(--warn);
+        padding:10px 14px;border-radius:6px;margin:0 0 18px;font-size:12.5px;color:#7a4a00}
+  .blocker{background:#fff;border:1px solid var(--color-border);border-left:3px solid var(--danger);
+        border-radius:8px;padding:11px 15px;margin:0 0 20px;font-size:12.5px;line-height:1.8}
+  .blocker b{color:var(--danger)}
+  h2{font-size:15px;margin:32px 0 4px;padding-top:10px;border-top:2px solid #e3e3e8}
+  h2 .tag{font-size:11px;font-weight:700;color:#fff;background:var(--accent);
+          padding:2px 7px;border-radius:999px;vertical-align:2px;margin-left:8px}
+  h2 .tag.alt{background:var(--t3)}
+  h2 .tag.rec{background:var(--ok)}
+  .sub{color:var(--t2);font-size:12px;margin:0 0 12px}
+  .sub b{color:var(--t1)}
+  .card{background:var(--card);border:1px solid var(--color-border);border-radius:10px;overflow:hidden;margin-bottom:12px}
+  table.dt{border-collapse:collapse;width:100%;font-size:13px;table-layout:fixed}
+  table.dt th{background:var(--surface);color:var(--t2);font-weight:700;font-size:12px;
+     padding:10px 12px;border-bottom:2px solid var(--color-border);white-space:nowrap;text-align:center}
+  table.dt td{padding:8px 12px;border-bottom:1px solid var(--color-border);color:var(--t1);
+     text-align:center;vertical-align:middle;background:#fff}
+  col.c-time{width:120px} col.c-no{width:180px} col.c-cust{width:100px}
+  col.c-fac{width:92px} col.c-prod{width:auto} col.c-qty{width:74px} col.c-act{width:92px}
+  .no{font-family:Consolas,ui-monospace,monospace;font-size:12px}
+  .dim{color:var(--t3)}
+  .strong{font-weight:700}
+  .badge{display:inline-flex;align-items:center;padding:1px 7px;font-size:10px;font-weight:700;border-radius:4px}
+  .badge.order{background:var(--accent-tint);color:#0158b0}
+  .badge.stockin{background:var(--ok-tint);color:#1d7a3a}
+  .act{width:32px;height:26px;border:none;border-radius:8px;background:var(--accent-tint);
+       color:#0158b0;font-size:12px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
+  .act.del{background:var(--danger-tint);color:#c0201a}
+  /* SKU 块（产品名称列，选项 A 的居中缩排） */
+  .stack{display:inline-flex;flex-direction:column;text-align:left;
+         padding-left:10px;border-left:2px solid var(--color-border-light)}
+  .stack .line{display:flex;align-items:baseline;justify-content:space-between;gap:12px;
+               padding:3px 0;border-bottom:1px solid var(--color-border)}
+  .stack .line:last-child{border-bottom:none}
+  .stack .line .nm{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .stack .line .q{color:var(--t3);font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap}
+  /* 工厂列的两种形态 */
+  .facstack{display:inline-flex;flex-direction:column;text-align:center}
+  .facstack .fline{padding:3px 0;border-bottom:1px solid var(--color-border);white-space:nowrap}
+  .facstack .fline:last-child{border-bottom:none}
+  td.prod{text-align:center}
+  /* 选项 C 的序号 */
+  .idx{color:var(--t3);font-size:11px;font-variant-numeric:tabular-nums;
+       width:14px;flex:0 0 14px;text-align:right;display:inline-block}
+  .facstack .fline .idx{width:auto;flex:none;margin-right:4px}
+  /* 选项 B：厂名并入 SKU 行 */
+  .bline{display:flex;align-items:baseline;gap:8px;padding:3px 0;
+         border-bottom:1px solid var(--color-border);text-align:left}
+  .bline:last-child{border-bottom:none}
+  .bline .nm{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .bline .facchip{flex:0 0 auto;font-size:11px;padding:0 6px;border-radius:4px;
+                  background:var(--surface);color:var(--t2);font-weight:600}
+  .bline .q{margin-left:auto;color:var(--t3);font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .k{display:inline-block;padding:0 5px;border-radius:4px;font-size:11px;font-weight:700}
+  .k.yes{background:var(--ok-tint);color:#1d7a3a}
+  .k.no{background:var(--danger-tint);color:#c0201a}
+  .foot{color:var(--t2);font-size:12.5px;margin-top:26px;line-height:1.9}
+  .foot b{color:var(--t1)}
+  table.cmp{border-collapse:collapse;font-size:12.5px;margin-bottom:14px}
+  table.cmp th,table.cmp td{padding:6px 12px;border:1px solid var(--color-border)}
+  table.cmp th{background:var(--surface);text-align:left}
+  table.cmp td{text-align:center}
+</style>
+</head>
+<body>
+
+<h1>哪个 SKU 在哪个厂 · 对比稿</h1>
+<div class="meta">
+  页面：<code>/customer-order</code> → 记录查询 &nbsp;·&nbsp; 2026-09-30 &nbsp;·&nbsp; 未改代码 &nbsp;·&nbsp;
+  用生产库真实数据（PO-20260930-0013 的 3 个 SKU）&nbsp;·&nbsp; 已按你选的<b>选项 A</b>（产品名称列居中 + 块缩排）
+</div>
+
+<div class="note">
+  <b>你指出的问题成立，而且比"看不出来"更严重：现有数据里这条信息是<b>被聚合掉的</b>。</b><br>
+  工厂列显示的是订单级聚合值 <code>factories: ['东莞','湖北']</code>。这笔订单的三个 SKU 实际是：
+  <b>盲盒→东莞</b>、<b>鲨鱼→湖北</b>、<b>团子木鱼→东莞</b>。合成"东莞, 湖北"之后，
+  「鲨鱼是湖北的」这条信息就没了 —— 不是没显示，是<b>已经不在下发的数据里</b>。
+</div>
+
+<div class="blocker">
+  <b>所以下面三个方案都需要先加一小段后端改动</b>：<code>items[]</code> 目前只有
+  <code>id / product_id / product_name / product_barcode / product_image / quantity / deduct_quantity / note</code>，
+  <b>没有 <code>factory</code></b>，前端拿不到"这个 SKU 是哪个厂"。<br>
+  改法：<code>fastapi_app/services/order/unified.py</code> 的 <code>_build_order_record()</code> 与
+  <code>_build_stockin_record()</code> 各给 item 加一个 <code>'factory': item.product.factory</code>。<br>
+  <b>不会引入新查询</b>：<code>_fetch_orders()</code> 已经用 <code>selectinload(Order.items).joinedload(OrderItem.product)</code>
+  把 items→product 预加载了，<code>item.product.factory</code> 是白拿的，没有 N+1 风险。
+</div>
+
+<!-- ============ 现状 ============ -->
+<h2>现状 <span class="tag alt">Before</span></h2>
+<p class="sub">工厂列一个值「东莞, 湖北」横跨整行，对不上任何一个 SKU。</p>
+<div class="card">
+  <table class="dt">
+    <colgroup><col class="c-time"><col class="c-no"><col class="c-cust"><col class="c-fac"><col class="c-prod"><col class="c-qty"><col class="c-act"></colgroup>
+    <thead><tr><th>时间</th><th>编号</th><th>客户</th><th>工厂</th><th>产品名称</th><th>数量</th><th>操作</th></tr></thead>
+    <tbody>
+      <tr>
+        <td class="dim no">2026-09-30 00:00</td><td><span class="badge order">订单</span> <span class="dim no">PO-20260930-0013</span></td>
+        <td>MINISO国际</td><td>东莞, 湖北</td>
+        <td class="prod"><div class="stack">
+          <div class="line"><span class="nm">《蛋仔派对》市集拾趣系列 毛绒公仔挂件盲盒</span><span class="q">10000</span></div>
+          <div class="line"><span class="nm">鲨鱼</span><span class="q">10000</span></div>
+          <div class="line"><span class="nm">《蛋仔派对》团子木鱼毛绒挂件盲盒-黄蛋 陈列样</span><span class="q">10000</span></div>
+        </div></td>
+        <td class="strong">30000</td><td><button class="act">👁</button> <button class="act del">🗑</button></td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ============ 选项 A ============ -->
+<h2>选项 A · 工厂列按 SKU 逐行堆叠 <span class="tag rec">推荐</span></h2>
+<p class="sub">工厂列也用同样的逐行结构（同样的行高与分隔线），<b>与产品名称列的 SKU 行一一对齐</b>。
+  厂名排成一列，扫一眼就能看出"哪几个是湖北"。单 SKU 行保持一个值不变。</p>
+<div class="card">
+  <table class="dt">
+    <colgroup><col class="c-time"><col class="c-no"><col class="c-cust"><col class="c-fac"><col class="c-prod"><col class="c-qty"><col class="c-act"></colgroup>
+    <thead><tr><th>时间</th><th>编号</th><th>客户</th><th>工厂</th><th>产品名称</th><th>数量</th><th>操作</th></tr></thead>
+    <tbody>
+      <tr>
+        <td class="dim no">2026-09-30 00:00</td><td><span class="badge order">订单</span> <span class="dim no">PO-20260930-0013</span></td>
+        <td>MINISO国际</td>
+        <td><div class="facstack"><span class="fline">东莞</span><span class="fline">湖北</span><span class="fline">东莞</span></div></td>
+        <td class="prod"><div class="stack">
+          <div class="line"><span class="nm">《蛋仔派对》市集拾趣系列 毛绒公仔挂件盲盒</span><span class="q">10000</span></div>
+          <div class="line"><span class="nm">鲨鱼</span><span class="q">10000</span></div>
+          <div class="line"><span class="nm">《蛋仔派对》团子木鱼毛绒挂件盲盒-黄蛋 陈列样</span><span class="q">10000</span></div>
+        </div></td>
+        <td class="strong">30000</td><td><button class="act">👁</button> <button class="act del">🗑</button></td>
+      </tr>
+      <tr>
+        <td class="dim no">2026-09-29 07:38</td><td><span class="badge order">订单</span> <span class="dim no">PO-20260929-0014</span></td>
+        <td>网易</td><td>东莞</td>
+        <td class="prod">《蛋仔派对》市集拾趣系列 毛绒公仔挂件盲盒</td>
+        <td class="strong">30000</td><td><button class="act">👁</button> <button class="act del">🗑</button></td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ============ 选项 B ============ -->
+<h2>选项 B · 删掉工厂列，厂名并进每个 SKU 行 <span class="tag alt">备选</span></h2>
+<p class="sub">少一列。厂名作为小标签跟在 SKU 名后面。
+  <b>代价</b>：厂名位置随名字长短浮动，<span class="k no">不再排成一列</span>，
+  想快速扫出"哪几个是湖北"要一行行读；而且名字长时会被挤到很靠右，和数量混在一起。</p>
+<div class="card">
+  <table class="dt">
+    <colgroup><col class="c-time"><col class="c-no"><col class="c-cust"><col class="c-prod"><col class="c-qty"><col class="c-act"></colgroup>
+    <thead><tr><th>时间</th><th>编号</th><th>客户</th><th>产品名称</th><th>数量</th><th>操作</th></tr></thead>
+    <tbody>
+      <tr>
+        <td class="dim no">2026-09-30 00:00</td><td><span class="badge order">订单</span> <span class="dim no">PO-20260930-0013</span></td>
+        <td>MINISO国际</td>
+        <td><div style="padding-left:10px;border-left:2px solid var(--color-border-light)">
+          <div class="bline"><span class="nm">《蛋仔派对》市集拾趣系列 毛绒公仔挂件盲盒</span><span class="facchip">东莞</span><span class="q">10000</span></div>
+          <div class="bline"><span class="nm">鲨鱼</span><span class="facchip">湖北</span><span class="q">10000</span></div>
+          <div class="bline"><span class="nm">《蛋仔派对》团子木鱼毛绒挂件盲盒-黄蛋 陈列样</span><span class="facchip">东莞</span><span class="q">10000</span></div>
+        </div></td>
+        <td class="strong">30000</td><td><button class="act">👁</button> <button class="act del">🗑</button></td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ============ 选项 C ============ -->
+<h2>选项 C · 工厂列逐行堆叠 + SKU 序号 <span class="tag alt">备选</span></h2>
+<p class="sub">在 A 的基础上，两列各给每个 SKU 一个序号 <code>1/2/3</code>。
+  好处：名字被截断（…省略号）时仍能靠序号把工厂与产品对上；也方便电话里说"第 2 个 SKU 是湖北的"。
+  代价：两列都多一个数字。</p>
+<div class="card">
+  <table class="dt">
+    <colgroup><col class="c-time"><col class="c-no"><col class="c-cust"><col class="c-fac"><col class="c-prod"><col class="c-qty"><col class="c-act"></colgroup>
+    <thead><tr><th>时间</th><th>编号</th><th>客户</th><th>工厂</th><th>产品名称</th><th>数量</th><th>操作</th></tr></thead>
+    <tbody>
+      <tr>
+        <td class="dim no">2026-09-30 00:00</td><td><span class="badge order">订单</span> <span class="dim no">PO-20260930-0013</span></td>
+        <td>MINISO国际</td>
+        <td><div class="facstack"><span class="fline"><span class="idx">1</span>东莞</span><span class="fline"><span class="idx">2</span>湖北</span><span class="fline"><span class="idx">3</span>东莞</span></div></td>
+        <td class="prod"><div class="stack">
+          <div class="line"><span class="nm"><span class="idx">1</span>《蛋仔派对》市集拾趣系列 毛绒公仔挂件盲盒</span><span class="q">10000</span></div>
+          <div class="line"><span class="nm"><span class="idx">2</span>鲨鱼</span><span class="q">10000</span></div>
+          <div class="line"><span class="nm"><span class="idx">3</span>《蛋仔派对》团子木鱼毛绒挂件盲盒-黄蛋 陈列样</span><span class="q">10000</span></div>
+        </div></td>
+        <td class="strong">30000</td><td><button class="act">👁</button> <button class="act del">🗑</button></td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="foot">
+  <table class="cmp">
+    <thead><tr><th>对比项</th><th>A · 工厂列逐行堆叠</th><th>B · 厂名并入 SKU 行</th><th>C · A + 序号</th></tr></thead>
+    <tbody>
+      <tr><td>能不能看出哪个 SKU 在哪厂</td><td><span class="k yes">能</span></td><td><span class="k yes">能</span></td><td><span class="k yes">能</span></td></tr>
+      <tr><td>厂名排成一列便于扫读</td><td><span class="k yes">是</span></td><td><span class="k no">否</span></td><td><span class="k yes">是</span></td></tr>
+      <tr><td>列数</td><td>7（不变）</td><td>6（少一列）</td><td>7（不变）</td></tr>
+      <tr><td>名字被截断时仍能对上</td><td><span class="k no">较难</span></td><td>—</td><td><span class="k yes">能</span></td></tr>
+      <tr><td>与产品名称列的行严格对齐</td><td><span class="k yes">是</span>（行高/分隔线同构）</td><td>同一行内，天然对齐</td><td><span class="k yes">是</span></td></tr>
+    </tbody>
+  </table>
+  <b>我倾向 A</b>：它直接回答你的问题且不牺牲扫读 —— 厂名在一列里，一眼能圈出全部湖北的 SKU。
+  C 的序号在"名字被截断"时有真实价值，但你们的产品名现在最长也就到"…黄蛋 陈列样"这种，截断还不常见，可以先不上。<br><br>
+  <b>三个方案共同的改动面：</b><br>
+  · 后端 <code>unified.py</code>：<code>_build_order_record</code> / <code>_build_stockin_record</code> 的 item 各加 <code>factory</code>（约 2 行）<br>
+  · 前端类型 <code>api/order.ts</code> 的 <code>UnifiedRecord.items</code> 加 <code>factory?: string | null</code><br>
+  · <code>OrderRecordTable.vue</code>：工厂列渲染（A/C 逐行堆叠、B 并入产品行）<br>
+  · 顺带：<code>factories</code> 聚合字段在多 SKU 行下就不再需要了（单 SKU 行仍可用），可以先留着不动<br><br>
+  <b>测试：</b>后端加"items 里每个 SKU 带上自己的 factory"用例（真实 SQLite）；前端加"多 SKU 行的工厂列渲染 3 条且与 SKU 顺序一致"用例。
+</div>
+
+</body>
+</html>

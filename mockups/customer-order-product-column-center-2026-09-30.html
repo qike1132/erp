@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>产品名称列居中 · 多SKU块怎么办 · 对比稿 · 2026-09-30</title>
+<style>
+  :root{
+    --bg:#f5f5f7; --card:#fff; --surface:#f4f6fc;
+    --t1:#1d1d1f; --t2:#48484d; --t3:#8e8e93;
+    --accent:#007aff; --accent-tint:#e8f1ff; --ok:#34c759; --ok-tint:#e6f9ec;
+    --warn:#ff9500; --warn-tint:#fff4e0; --danger:#ff3b30; --danger-tint:#ffeceb;
+    --color-border:#e4e7ed; --color-border-light:#f0f2f5;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:26px 22px 60px;background:var(--bg);color:var(--t1);
+       font:13px/1.5 "Microsoft YaHei UI","Segoe UI",system-ui,sans-serif}
+  h1{font-size:19px;margin:0 0 6px}
+  .meta{color:var(--t2);font-size:12px;margin-bottom:16px}
+  .meta code,.sub code,.foot code,.note code{background:#e9e9ee;padding:1px 5px;border-radius:4px}
+  .note{background:var(--warn-tint);border-left:3px solid var(--warn);
+        padding:10px 14px;border-radius:6px;margin:0 0 20px;font-size:12.5px;color:#7a4a00}
+  h2{font-size:15px;margin:32px 0 4px;padding-top:10px;border-top:2px solid #e3e3e8}
+  h2 .tag{font-size:11px;font-weight:700;color:#fff;background:var(--accent);
+          padding:2px 7px;border-radius:999px;vertical-align:2px;margin-left:8px}
+  h2 .tag.alt{background:var(--t3)}
+  h2 .tag.rec{background:var(--ok)}
+  .sub{color:var(--t2);font-size:12px;margin:0 0 12px}
+  .sub b{color:var(--t1)}
+  .card{background:var(--card);border:1px solid var(--color-border);border-radius:10px;overflow:hidden;margin-bottom:12px}
+  table.dt{border-collapse:collapse;width:100%;font-size:13px;table-layout:fixed}
+  table.dt th{background:var(--surface);color:var(--t2);font-weight:700;font-size:12px;
+     padding:10px 12px;border-bottom:2px solid var(--color-border);white-space:nowrap;text-align:center}
+  table.dt td{padding:10px 12px;border-bottom:1px solid var(--color-border);color:var(--t1);
+     text-align:center;vertical-align:middle;background:#fff}
+  col.c-time{width:128px} col.c-no{width:186px} col.c-cust{width:104px} col.c-fac{width:96px}
+  col.c-prod{width:auto} col.c-qty{width:78px} col.c-act{width:96px}
+  .no{font-family:Consolas,ui-monospace,monospace;font-size:12px}
+  .dim{color:var(--t3)}
+  .strong{font-weight:700}
+  .badge{display:inline-flex;align-items:center;padding:1px 7px;font-size:10px;font-weight:700;border-radius:4px}
+  .badge.order{background:var(--accent-tint);color:#0158b0}
+  .badge.stockin{background:var(--ok-tint);color:#1d7a3a}
+  .act{width:34px;height:28px;border:none;border-radius:8px;background:var(--accent-tint);
+       color:#0158b0;font-size:12px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
+  .act.del{background:var(--danger-tint);color:#c0201a}
+  /* SKU 块 —— 三种形态（现状 / A / B） */
+  .stack{display:flex;flex-direction:column;text-align:left;
+         padding-left:10px;border-left:2px solid var(--color-border-light)}
+  .stack .line{display:flex;align-items:baseline;justify-content:space-between;gap:12px;
+               padding:3px 0;border-bottom:1px solid var(--color-border)}
+  .stack .line:last-child{border-bottom:none}
+  .stack .line .nm{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .stack .line .q{color:var(--t3);font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap}
+  /* 现状：列左对齐 */
+  .v-cur td.prod{text-align:left}
+  /* A：整块居中 + 缩到内容宽 */
+  .v-a td.prod{text-align:center}
+  .v-a .stack{display:inline-flex;text-align:left}
+  /* B：居中 + 整块拉满列宽 */
+  .v-b td.prod{text-align:center}
+  .v-b .stack{width:100%}
+  .swatch{display:inline-flex;align-items:center;gap:6px;font-family:Consolas,monospace;font-size:11px;color:var(--t2)}
+  .sw{width:26px;height:10px;border-radius:2px;display:inline-block;border:1px solid #d8dce2}
+  .mark{position:relative}
+  .mark::after{content:"← 这块居中了吗";position:absolute;left:50%;transform:translateX(140px);
+               font-size:10px;color:var(--danger);white-space:nowrap;top:50%;margin-top:-7px}
+  .foot{color:var(--t2);font-size:12.5px;margin-top:26px;line-height:1.9}
+  .foot b{color:var(--t1)}
+  .k{display:inline-block;padding:0 5px;border-radius:4px;font-size:11px;font-weight:700}
+  .k.yes{background:var(--ok-tint);color:#1d7a3a}
+  .k.no{background:var(--danger-tint);color:#c0201a}
+</style>
+</head>
+<body>
+
+<h1>产品名称列居中 · 多 SKU 块怎么办</h1>
+<div class="meta">
+  页面：<code>/customer-order</code> → 记录查询 &nbsp;·&nbsp; 2026-09-30 &nbsp;·&nbsp; 未改代码 &nbsp;·&nbsp;
+  三张表都已经是：列名改「<b>产品名称</b>」、<b>SKU 数量列已删</b>、行线 <code>#e4e7ed</code>
+</div>
+
+<div class="note">
+  <b>冲突点</b>：你说「产品名称没居中对齐」，但上一轮你选的<b>走法 ①</b>是「每个 SKU 的数量右对齐到列尾」——
+  目的是让三个 SKU 的数量对齐成一条竖线，并与右边「数量」列的总数（30000）上下对账。
+  列一旦居中，这条对账关系就要重新安排，所以多 SKU 那一块有两条路。<b>单 SKU 行两种情况都是居中，没差别。</b>
+</div>
+
+<!-- ============ 现状 ============ -->
+<h2>现状 <span class="tag alt">Before</span></h2>
+<p class="sub">产品列是<b>左对齐</b>（我上一轮为多 SKU 堆叠刻意设的），所以它是全表唯一不居中的列 —— 你看到的就是这个。</p>
+<div class="card">
+  <table class="dt v-cur">
+    <colgroup><col class="c-time"><col class="c-no"><col class="c-cust"><col class="c-fac"><col style="width:86px"><col class="c-prod"><col class="c-qty"><col class="c-act"></colgroup>
+    <thead><tr><th>时间</th><th>编号</th><th>客户</th><th>工厂</th><th>SKU 数量</th><th>产品</th><th>数量</th><th>操作</th></tr></thead>
+    <tbody>
+      <tr>
+        <td class="dim no">2026-09-30 00:00</td><td><span class="badge order">订单</span> <span class="dim no">PO-20260930-0013</span></td>
+        <td>MINISO国际</td><td class="dim">东莞, 湖北</td>
+        <td><span class="badge order" style="background:var(--ok-tint);color:#1d7a3a">3</span></td>
+        <td class="prod"><div class="stack">
+          <div class="line"><span class="nm">《蛋仔派对》市集拾趣系列 毛绒公仔挂件盲盒</span><span class="q">10000</span></div>
+          <div class="line"><span class="nm">鲨鱼</span><span class="q">10000</span></div>
+          <div class="line"><span class="nm">《蛋仔派对》团子木鱼毛绒挂件盲盒-黄蛋 陈列样</span><span class="q">10000</span></div>
+        </div></td>
+        <td class="strong">30000</td><td><button class="act">👁</button> <button class="act del">🗑</button></td>
+      </tr>
+      <tr>
+        <td class="dim no">2026-09-29 07:38</td><td><span class="badge order">订单</span> <span class="dim no">PO-20260929-0014</span></td>
+        <td>网易</td><td class="dim">东莞</td><td><span class="badge order" style="background:#f1f3f7;color:#8e8e93">1</span></td>
+        <td class="prod">《蛋仔派对》市集拾趣系列 毛绒公仔挂件盲盒</td>
+        <td class="strong">30000</td><td><button class="act">👁</button> <button class="act del">🗑</button></td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ============ 选项 A ============ -->
+<h2>选项 A · 整块居中，块缩到内容宽 <span class="tag rec">我倾向这个</span></h2>
+<p class="sub">单元格居中；多 SKU 的块用 <code>inline-flex</code> 缩到「最宽 SKU 名」的宽度再整体居中。
+  <b>没有空档，看着最像"一个居中的块"</b>；块内数量仍互相右对齐成一条竖线。
+  代价：数量的右边界不再落在「数量」列下方，<span class="k no">丢了</span>与总数 30000 的上下对账。</p>
+<div class="card">
+  <table class="dt v-a">
+    <colgroup><col class="c-time"><col class="c-no"><col class="c-cust"><col class="c-fac"><col class="c-prod"><col class="c-qty"><col class="c-act"></colgroup>
+    <thead><tr><th>时间</th><th>编号</th><th>客户</th><th>工厂</th><th>产品名称</th><th>数量</th><th>操作</th></tr></thead>
+    <tbody>
+      <tr>
+        <td class="dim no">2026-09-30 00:00</td><td><span class="badge order">订单</span> <span class="dim no">PO-20260930-0013</span></td>
+        <td>MINISO国际</td><td class="dim">东莞, 湖北</td>
+        <td class="prod"><div class="stack">
+          <div class="line"><span class="nm">《蛋仔派对》市集拾趣系列 毛绒公仔挂件盲盒</span><span class="q">10000</span></div>
+          <div class="line"><span class="nm">鲨鱼</span><span class="q">10000</span></div>
+          <div class="line"><span class="nm">《蛋仔派对》团子木鱼毛绒挂件盲盒-黄蛋 陈列样</span><span class="q">10000</span></div>
+        </div></td>
+        <td class="strong">30000</td><td><button class="act">👁</button> <button class="act del">🗑</button></td>
+      </tr>
+      <tr>
+        <td class="dim no">2026-09-29 07:38</td><td><span class="badge order">订单</span> <span class="dim no">PO-20260929-0014</span></td>
+        <td>网易</td><td class="dim">东莞</td>
+        <td class="prod">《蛋仔派对》市集拾趣系列 毛绒公仔挂件盲盒</td>
+        <td class="strong">30000</td><td><button class="act">👁</button> <button class="act del">🗑</button></td>
+      </tr>
+      <tr>
+        <td class="dim no">2026-09-24 07:22</td><td><span class="badge order">订单</span> <span class="dim no">PO-20260924-0005</span></td>
+        <td>网易</td><td class="dim">东莞</td>
+        <td class="prod">咸鱼按摩捶</td>
+        <td class="strong">5000</td><td><button class="act">👁</button> <button class="act del">🗑</button></td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ============ 选项 B ============ -->
+<h2>选项 B · 居中，但多 SKU 块拉满列宽 <span class="tag alt">保住走法①</span></h2>
+<p class="sub">单 SKU 名字居中；多 SKU 的块仍拉满整列，所以名字靠列左、数量靠列右。
+  <b>数量仍与「数量」列上下对齐</b>，<span class="k yes">保住</span>走法① 的对账能力。
+  代价：块中间那段空档回到像现在这样 —— 而这正是你前几天说「太空白」的地方。</p>
+<div class="card">
+  <table class="dt v-b">
+    <colgroup><col class="c-time"><col class="c-no"><col class="c-cust"><col class="c-fac"><col class="c-prod"><col class="c-qty"><col class="c-act"></colgroup>
+    <thead><tr><th>时间</th><th>编号</th><th>客户</th><th>工厂</th><th>产品名称</th><th>数量</th><th>操作</th></tr></thead>
+    <tbody>
+      <tr>
+        <td class="dim no">2026-09-30 00:00</td><td><span class="badge order">订单</span> <span class="dim no">PO-20260930-0013</span></td>
+        <td>MINISO国际</td><td class="dim">东莞, 湖北</td>
+        <td class="prod"><div class="stack">
+          <div class="line"><span class="nm">《蛋仔派对》市集拾趣系列 毛绒公仔挂件盲盒</span><span class="q">10000</span></div>
+          <div class="line"><span class="nm">鲨鱼</span><span class="q">10000</span></div>
+          <div class="line"><span class="nm">《蛋仔派对》团子木鱼毛绒挂件盲盒-黄蛋 陈列样</span><span class="q">10000</span></div>
+        </div></td>
+        <td class="strong">30000</td><td><button class="act">👁</button> <button class="act del">🗑</button></td>
+      </tr>
+      <tr>
+        <td class="dim no">2026-09-29 07:38</td><td><span class="badge order">订单</span> <span class="dim no">PO-20260929-0014</span></td>
+        <td>网易</td><td class="dim">东莞</td>
+        <td class="prod">《蛋仔派对》市集拾趣系列 毛绒公仔挂件盲盒</td>
+        <td class="strong">30000</td><td><button class="act">👁</button> <button class="act del">🗑</button></td>
+      </tr>
+      <tr>
+        <td class="dim no">2026-09-24 07:22</td><td><span class="badge order">订单</span> <span class="dim no">PO-20260924-0005</span></td>
+        <td>网易</td><td class="dim">东莞</td>
+        <td class="prod">咸鱼按摩捶</td>
+        <td class="strong">5000</td><td><button class="act">👁</button> <button class="act del">🗑</button></td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="foot">
+  <table style="border-collapse:collapse;font-size:12.5px;margin-bottom:14px">
+    <thead><tr style="background:var(--surface)">
+      <th style="padding:6px 12px;border:1px solid var(--color-border);text-align:left">对比项</th>
+      <th style="padding:6px 12px;border:1px solid var(--color-border)">选项 A</th>
+      <th style="padding:6px 12px;border:1px solid var(--color-border)">选项 B</th>
+    </tr></thead>
+    <tbody>
+      <tr><td style="padding:6px 12px;border:1px solid var(--color-border)">单 SKU 名字居中</td><td style="padding:6px 12px;border:1px solid var(--color-border);text-align:center"><span class="k yes">是</span></td><td style="padding:6px 12px;border:1px solid var(--color-border);text-align:center"><span class="k yes">是</span></td></tr>
+      <tr><td style="padding:6px 12px;border:1px solid var(--color-border)">多 SKU 块看着居中</td><td style="padding:6px 12px;border:1px solid var(--color-border);text-align:center"><span class="k yes">是</span></td><td style="padding:6px 12px;border:1px solid var(--color-border);text-align:center"><span class="k no">否</span>（靠列左）</td></tr>
+      <tr><td style="padding:6px 12px;border:1px solid var(--color-border)">各 SKU 数量互相对齐</td><td style="padding:6px 12px;border:1px solid var(--color-border);text-align:center"><span class="k yes">是</span></td><td style="padding:6px 12px;border:1px solid var(--color-border);text-align:center"><span class="k yes">是</span></td></tr>
+      <tr><td style="padding:6px 12px;border:1px solid var(--color-border)">与「数量」列总数上下对账</td><td style="padding:6px 12px;border:1px solid var(--color-border);text-align:center"><span class="k no">丢了</span></td><td style="padding:6px 12px;border:1px solid var(--color-border);text-align:center"><span class="k yes">保住</span></td></tr>
+      <tr><td style="padding:6px 12px;border:1px solid var(--color-border)">块中间大空档</td><td style="padding:6px 12px;border:1px solid var(--color-border);text-align:center"><span class="k yes">没有</span></td><td style="padding:6px 12px;border:1px solid var(--color-border);text-align:center"><span class="k no">仍在</span></td></tr>
+    </tbody>
+  </table>
+  <b>我倾向 A</b>：你连着两轮都在解决"这块太空"（先加分隔线、再问我空档），而 B 正好把空档留着；
+  对账能力可以从「数量」列的总数和每行 SKU 数量自己加一遍来补，而空白占了整列就补不回来。<br><br>
+  <b>改动面（A / B 都只动 <code>OrderRecordTable.vue</code>）：</b>列名 <code>'产品'→'产品名称'</code>、
+  删 <code>sku_count</code> 列及其 slot、产品列 <code>align: 'center'</code>；
+  A 另外把 <code>.co-sku-stack</code> 改 <code>display:inline-flex</code>，B 保持 <code>width:100%</code>。<br>
+  <b>测试：</b>删列会打破现有断言（「SKU 数量徽章的文本是 3」那条），需同步改成"产品名称列渲染出 3 条 SKU 行"；
+  居中是纯样式，无需新断言。<br>
+  <b>顺带：</b>SKU 数量列删掉后，多 SKU 与单 SKU 行在视觉上只剩「产品名称列里有几行字」这一个区别了 ——
+  如果以后想让人一眼看出"这单有几个 SKU"，可以考虑给多 SKU 行的产品名称列加一个很轻的计数（比如块首一个小圆标 <code>3</code>）。你没提，我先不动。
+</div>
+
+</body>
+</html>
