@@ -58,7 +58,7 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
-        pip install bandit pip-audit ruff
+        pip install bandit pip-audit
     
     - name: Verify Alembic migrations
       run: |
@@ -70,6 +70,16 @@ jobs:
       #   其中两条静态守卫（快照存在性、不得夹带原始响应体）在本 job 真的会跑；
       #   "与真实后端比对"那条因 CI 无常驻后端而自动 skip。
       #   本地要跑完整契约比对：CONTRACT_BASE_URL=http://127.0.0.1:5002 pytest tests/contract -v
+      # 2026-09-29 收口：已移除 `-m "not flask_legacy"`。该标记原先把 9 个测试文件整批反选，
+      #   连 skip 记录都不出现在日志里（掩盖，而非挂起）。现状：
+      #     · 5 个文件（test_{api,order,product,customer}_routes、performance/test_performance）
+      #       改为带具体 reason 的 `pytest.mark.skip` —— 其被测目标根 `app/`（Flask 应用）
+      #       已在 Flask→FastAPI 迁移中删除，reason 里写明跟踪项；
+      #     · 4 个文件（test_{order,product,approval}_management、test_models_coverage）
+      #       摘除标记，恢复被 pytest 正常收集。
+      #   注意：requirements/*.txt 内**没有任何 Flask 条目**，故上述 4 个文件在 CI 里仍会
+      #   自行 skip（只有装了残留 Flask 的本地开发机才真正执行）。收口后这些 skip 计数
+      #   在 CI 日志与 junit xml 中真实可见，是有效信号而不是被 marker 反选隐藏。
       run: |
         pytest \
           tests fastapi_app/tests \
@@ -77,7 +87,6 @@ jobs:
           --ignore=tests/e2e \
           --ignore=tests/stress \
           --ignore=tests/performance \
-          -m "not flask_legacy" \
           --cov=fastapi_app \
           --cov=utils \
           --cov-report=xml \
@@ -97,13 +106,11 @@ jobs:
       # 把 scripts 计入会污染该指标。
       run: pytest scripts/prod_audit/tests -q
     
-    - name: Upload coverage reports
-      uses: codecov/codecov-action@v5
-      with:
-        file: ./coverage.xml
-        flags: unittests
-        name: codecov-umbrella
-    
+    # 2026-09-30：已删除 codecov 上传步骤。仓库内无 codecov.yml，且原步骤未设
+    #   fail_ci_if_error: true —— 既无配置、又永远不可能让 CI 变红，属形同虚设的
+    #   门面步骤（唯一的实际效果是把覆盖率推给一个未配置的外部服务）。
+    #   coverage.xml 仍由下方 artifact 归档，覆盖率门槛由后面的
+    #   "Check coverage threshold" 步骤就地判定，信号没有丢失。
     - name: Upload test report
       uses: actions/upload-artifact@v4
       with:
@@ -208,15 +215,26 @@ jobs:
     - name: Install frontend dependencies
       run: npm ci
 
-    - name: Install Playwright browser
-      run: npx playwright install --with-deps chromium
-
+    # 原为 `npx playwright install --with-deps chromium`（:211-212）—— 已删除。
+    # 全仓库无 playwright.config.*、无 e2e/ 目录、无 test:e2e 脚本，src/ 下也没有任何
+    # `@playwright/test` import（playwright 仅出现在 package.json 与 lock 里），
+    # 该步骤下载的浏览器无人使用，纯耗时。仓库真实的 e2e 在 Python 侧
+    # （tests/e2e、tests/e2e_api），且 tests/e2e 正是上面 pytest 步骤的 --ignore 目标。
+    # 若将来落地 Playwright e2e，需同时补 playwright.config.ts + spec + test:e2e 脚本，
+    # 再恢复本步骤（见 ITER-4 决策项 D-2）。
     - name: Run frontend lint
       run: npm run lint
 
     # 此前 CI 从不执行前端单测，行为回归只有类型检查兜底（revert 修复也不会红）。
+    # 2026-09-29：加 `--reporter=junit --outputFile.junit=test-results.xml`，
+    # 让单测结果成为可下载的 CI 产物（原先下游 artifact 步骤上传的 Playwright
+    # playwright-report/ 与 test-results/ 两个目录从来不存在 —— 见下方说明）。
+    # 注意：这里**直接调 vitest 而不是 `npm run test --`** —— 实测 npm 会把
+    # `--outputFile.junit=...` 当成它自己的 cli config 吞掉
+    # （打印 "npm warn Unknown cli config \"--outputFile.junit\"" 且不产出报告），
+    # 故必须绕开 npm 的参数解析。`test` 脚本本身就是 `vitest run`，二者等价。
     - name: Run frontend unit tests
-      run: npm run test
+      run: npx vitest run --reporter=default --reporter=junit --outputFile.junit=test-results.xml
 
     - name: Run frontend build
       run: npm run build
@@ -230,15 +248,19 @@ jobs:
         npm run check:api:pc
         npm run check:routes
 
+    # 上传上面单测步骤产出的 junit 报告（真实存在；`if: always()` 保证测试失败时也能取到）。
+    # 原先上传的 frontend-vite/playwright-report/ 与 frontend-vite/test-results/ 两个路径
+    # 永不存在：vitest.config.ts 未配置 junit reporter，且 CI 以 `vitest run` 不带 --coverage
+    # 运行（`reporter` 只配在 coverage 段内），故 upload-artifact 的
+    # if-no-files-found 默认 warn 会让它静默空转。
     - name: Upload frontend test artifacts
       if: always()
       uses: actions/upload-artifact@v4
       with:
         name: frontend-test-artifacts
-        path: |
-          frontend-vite/playwright-report/
-          frontend-vite/test-results/
-  
+        if-no-files-found: error
+        path: frontend-vite/test-results.xml
+
   build:
     needs: [test, lint, frontend]
     runs-on: ubuntu-latest

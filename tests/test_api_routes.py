@@ -2,14 +2,22 @@
 API路由测试 - 全面覆盖所有API端点
 测试范围：健康检查、产品搜索、库存查询、批量操作等
 
-标记: flask_legacy — 迁移中，需重写为 FastAPI + httpx.AsyncClient
+状态: 被测目标已删除，全部用例显式 skip（原 `flask_legacy` 标记已摘除）。
 """
 import json
 from datetime import datetime
 
 import pytest
 
-pytestmark = [pytest.mark.flask_legacy]
+# 被测目标已不存在：根目录 Flask 应用 `app`（`from app import db` / `from app.models import ...`）
+# 在 Flask→FastAPI 迁移中被整体删除（最后出现于 commit c3aa5831），这些用例无法通过。
+# 原先的 `flask_legacy` 标记配合 CI 的 `-m "not flask_legacy"` 会把本文件整体反选，
+# 连 skip 记录都不可见 —— 那是掩盖而非挂起。现改为显式 skip，CI 如实报告条数与原因。
+# 跟踪项：按 FastAPI 路由 + httpx.AsyncClient 重写（参考 tests/e2e_api/ 的既有实现）。
+pytestmark = pytest.mark.skip(
+    reason="被测目标缺失：根 app/（Flask 应用）已删除，from app import db 必然失败；"
+           "需按 FastAPI + httpx.AsyncClient 重写（参考 tests/e2e_api/）"
+)
 
 try:
     from app import db

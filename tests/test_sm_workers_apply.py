@@ -134,7 +134,7 @@ def test_set_env_extra_key_verifies_after_write():
 def test_set_env_extra_key_fails_when_read_fails():
     fake = _FakeNssm({_SVC_API: CURRENT})
     fake.get_rc = 5
-    ok, msg = _svc(fake).set_env_extra_key(NSSM, _SVC_API, 'UVICORN_WORKERS', '4')
+    ok, _msg = _svc(fake).set_env_extra_key(NSSM, _SVC_API, 'UVICORN_WORKERS', '4')
     assert not ok
     assert not [c for c in fake.calls if len(c) > 1 and c[1] == 'set'], '读失败不得盲写'
 
@@ -142,13 +142,13 @@ def test_set_env_extra_key_fails_when_read_fails():
 def test_set_env_extra_key_fails_when_set_fails():
     fake = _FakeNssm({_SVC_API: CURRENT})
     fake.set_rc = 5
-    ok, msg = _svc(fake).set_env_extra_key(NSSM, _SVC_API, 'UVICORN_WORKERS', '4')
+    ok, _msg = _svc(fake).set_env_extra_key(NSSM, _SVC_API, 'UVICORN_WORKERS', '4')
     assert not ok
 
 
 def test_set_env_extra_key_rejects_empty_value():
     fake = _FakeNssm({_SVC_API: CURRENT})
-    ok, msg = _svc(fake).set_env_extra_key(NSSM, _SVC_API, 'UVICORN_WORKERS', '')
+    ok, _msg = _svc(fake).set_env_extra_key(NSSM, _SVC_API, 'UVICORN_WORKERS', '')
     assert not ok
     assert not [c for c in fake.calls if len(c) > 1 and c[1] == 'set'], '空值不得写入'
 

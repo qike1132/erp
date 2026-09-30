@@ -2,16 +2,20 @@
 数据模型覆盖率测试 - 提高数据模型测试覆盖率
 测试范围：用户模型、订单模型、库存模型的所有方法
 
-标记: flask_legacy — 迁移中，需重写为 SQLAlchemy 2.0 异步模式
+状态: 已摘除 flask_legacy 标记（CI 恢复收集本文件），但见下方警示。
 """
 import os
 import sys
 import unittest
 from datetime import datetime
 
-import pytest
-
-pytestmark = pytest.mark.flask_legacy
+# 已摘除 `flask_legacy` 标记：CI 不再用 `-m "not flask_legacy"` 把本文件整批反选。
+# ⚠️ 必须如实说明：本文件除 `from fastapi_app.core.security import hash_password,
+#    verify_password`（真实代码）外不 import 任何生产业务代码 —— 被测模型由文件内部
+#    自建（Flask + Flask-SQLAlchemy + 内存 sqlite），故其通过只能证明本文件自洽，
+#    不能证明 ERP 行为正确。另因 requirements/*.txt 无任何 Flask 条目，
+#    CI 环境里本文件实际全部 skip，只有开发机残留 Flask 时才会真正执行。
+#    跟踪项：把模型换成 fastapi_app.models 的真实模型 + SQLAlchemy 2.0 async 会话。
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

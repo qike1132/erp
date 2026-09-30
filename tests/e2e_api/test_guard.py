@@ -1,6 +1,5 @@
 """E2E 生产指纹守卫：指向生产库/生产端口必须拒绝运行（fail-fast）。"""
-import os
-from unittest import mock
+from typing import ClassVar
 
 import pytest
 
@@ -36,7 +35,8 @@ def test_fingerprint_checked_before_backend_alive(monkeypatch):
     monkeypatch.setenv('ERP_E2E_REAL_DATABASE_URL', 'postgresql://u:p@localhost/erp_system')
 
     class _Item:
-        own_markers = []
+        # ClassVar：这是 pytest item 的契约——类级可变列表（RUF012 要求显式声明）
+        own_markers: ClassVar[list] = []
 
         def add_marker(self, m):
             self.own_markers.append(m)

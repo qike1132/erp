@@ -104,10 +104,12 @@ def pytest_configure(config):
         "markers",
         "integration: 需要数据库的集成测试（标记后自动获得 async_db_session 等 fixtures）"
     )
-    config.addinivalue_line(
-        "markers",
-        "flask_legacy: Flask 遗留测试（迁移期间跳过）"
-    )
+    # 2026-09-30：`flask_legacy` 标记已退役（全仓 0 处使用），故不再注册。
+    #   该标记原先配合 CI 的 `-m "not flask_legacy"` 把 9 个测试文件整批反选，
+    #   属「掩盖而非挂起」：连 skip 记录都不出现在日志里。现 9 个文件已分别
+    #   改为带 reason 的显式 skip 或恢复正常收集，CI 侧也已移除反选参数。
+    #   注：`--strict-markers` 只校验测试上实际应用的标记，不再注册它不影响
+    #   任何现存调用；`pytest -m "not flask_legacy"` 也仍然可用（只是恒真）。
 
 
 # ============================================================

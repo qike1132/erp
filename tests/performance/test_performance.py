@@ -3,7 +3,7 @@ ERP系统性能测试框架
 使用Python标准库进行性能测试
 包含响应时间测量、内存监控、性能报告生成功能
 
-标记: flask_legacy — 迁移中，需重写为 FastAPI + httpx.async 模式
+状态: 被测目标已删除，全部用例显式 skip（原 `flask_legacy` 标记已摘除）。
 """
 import cProfile
 import io
@@ -23,7 +23,16 @@ from typing import Any
 
 import pytest
 
-pytestmark = pytest.mark.flask_legacy
+# 被测目标已不存在：根目录 Flask 应用 `app`（`from app import create_app, db` /
+# `from app.models import ...`）在 Flask→FastAPI 迁移中被整体删除
+# （最后出现于 commit c3aa5831），这些用例无法通过。
+# 原先的 `flask_legacy` 标记 + CI 的 `-m "not flask_legacy"` 会把本文件整体反选；
+# 且 tests/performance 本身也在 CI 的 --ignore 列表内，属双重不可见。
+# 跟踪项：按 FastAPI + httpx.AsyncClient 重写（参考 tests/e2e_api/）。
+pytestmark = pytest.mark.skip(
+    reason="被测目标缺失：根 app/（Flask 应用）已删除，from app import create_app 必然失败；"
+           "需按 FastAPI + httpx.AsyncClient 重写（参考 tests/e2e_api/）"
+)
 
 from fastapi_app.core.security import hash_password
 

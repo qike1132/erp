@@ -2,7 +2,7 @@
 审批管理模块功能测试
 测试范围：审批流程创建、审批任务提交、审批状态跟踪、审批权限管理、审批记录查询
 
-标记: flask_legacy — 迁移中，需重写为 FastAPI + httpx.AsyncClient
+状态: 已摘除 flask_legacy 标记（CI 恢复收集本文件），但见下方警示。
 """
 import json
 import os
@@ -10,9 +10,12 @@ import sys
 import unittest
 from datetime import datetime
 
-import pytest
-
-pytestmark = pytest.mark.flask_legacy
+# 已摘除 `flask_legacy` 标记：CI 不再用 `-m "not flask_legacy"` 把本文件整批反选。
+# ⚠️ 必须如实说明：本文件**不 import 任何生产业务代码** —— 被测模型由文件内部自建
+#    （Flask + Flask-SQLAlchemy + 内存 sqlite），所以用例通过只证明本文件自洽，
+#    无法捕获 ERP 行为回归。另因 requirements/*.txt 无任何 Flask 条目，
+#    CI 环境里本文件实际全部 skip，只有开发机残留 Flask 时才会真正执行。
+#    跟踪项：按 FastAPI + httpx.AsyncClient 重写并改测真实模型（参考 tests/e2e_api/）。
 
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -214,7 +217,7 @@ class ApprovalManagementTestCase(unittest.TestCase):
         # 创建管理员用户
         admin = cls.User(
             username='admin',
-            password='test_password',
+            password='test_password',  # secret-scan:allow 测试夹具，非真实口令
             is_super=True,
             status=True
         )
@@ -222,7 +225,7 @@ class ApprovalManagementTestCase(unittest.TestCase):
         # 创建普通用户
         normal_user = cls.User(
             username='normal_user',
-            password='test_password',
+            password='test_password',  # secret-scan:allow 测试夹具，非真实口令
             is_super=False,
             status=True
         )
@@ -231,7 +234,7 @@ class ApprovalManagementTestCase(unittest.TestCase):
         # 创建另一个普通用户
         other_user = cls.User(
             username='other_user',
-            password='test_password',
+            password='test_password',  # secret-scan:allow 测试夹具，非真实口令
             is_super=False,
             status=True
         )

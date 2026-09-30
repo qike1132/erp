@@ -15,8 +15,8 @@ FIFO 分配算法
 import asyncio
 import contextlib
 import logging
+from collections.abc import Hashable
 from datetime import date, datetime
-from typing import Hashable
 
 from sqlalchemy import and_, event, func, select, text
 from sqlalchemy.exc import SQLAlchemyError
