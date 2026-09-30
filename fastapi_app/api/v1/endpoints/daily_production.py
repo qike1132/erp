@@ -64,6 +64,7 @@ async def list_records(
     department: str = Query('', description='部门筛选 (filling/handcraft/packaging)'),
     production_date: str = Query('', description='指定日期筛选 (YYYY-MM-DD)'),
     created_by: str = Query('', description='录单人筛选；留空为不限'),
+    keyword: str = Query('', description='产品名或 69 码关键词；留空为不限'),
     sort: str = Query('desc', description="排序：desc（最新在前，默认）或 asc"),
     page: int = Query(1, ge=1, description='页码'),
     per_page: int = Query(50, ge=1, le=200, description='每页数量'),
@@ -80,6 +81,7 @@ async def list_records(
         department: 部门筛选；超出用户可见范围时忽略该参数。
         production_date: 指定日期筛选，叠加在日期条件之上。
         created_by: 录单人筛选；空白表示不限。
+        keyword: 产品名或 69 码关键词；空白表示不限。
         sort: 排序方向，'desc' 或 'asc'。
         page: 页码。
         per_page: 每页数量，1-200。
@@ -106,6 +108,7 @@ async def list_records(
             page=page,
             per_page=per_page,
             production_date=production_date,
+            keyword=keyword,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e

@@ -12,12 +12,13 @@ from decimal import Decimal
 
 import openpyxl
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.business_rules import MAX_QUANTITY
 from fastapi_app.core.float_utils import round_money
 from fastapi_app.core.production_scope import PRODUCTION_DEPARTMENTS
+from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.core.validators import validate_not_empty
 from fastapi_app.shared_models import DailyProductionRecord, Product
 from fastapi_app.utils import calc_total_pages, parse_date_with_fallback
@@ -89,6 +90,7 @@ def _build_record_conditions(
     departments: set[str] | None,
     created_by: str,
     production_date: str = '',
+    keyword: str = '',
 ) -> list:
     """构造生产记录查询条件（纯函数，便于单测覆盖组合边界）。
 
@@ -100,6 +102,7 @@ def _build_record_conditions(
         departments: 部门集合；None 表示不限。
         created_by: 录单人；空白视为不限。
         production_date: 指定单日，叠加在日期条件之上。
+        keyword: 产品名或 69 码关键词；空白视为不限，LIKE 通配符按字面量转义。
 
     Returns:
         SQLAlchemy 条件列表。
@@ -137,6 +140,15 @@ def _build_record_conditions(
     if production_date:
         conditions.append(
             DailyProductionRecord.production_date == parse_date_with_fallback(production_date)
+        )
+
+    if keyword and keyword.strip():
+        pattern = f'%{escape_like(keyword.strip())}%'
+        conditions.append(
+            or_(
+                DailyProductionRecord.product_name.like(pattern, escape='\\'),
+                DailyProductionRecord.barcode == keyword.strip(),
+            )
         )
 
     return conditions
@@ -190,6 +202,7 @@ async def get_records(
     page: int = 1,
     per_page: int = 50,
     production_date: str = '',
+    keyword: str = '',
 ) -> dict:
     """获取生产记录列表（分页 + 统计）。
 
@@ -203,6 +216,7 @@ async def get_records(
         page: 页码，从 1 开始。
         per_page: 每页数量，服务端收敛到 1..200。
         production_date: 指定单日，叠加在日期条件之上。
+        keyword: 产品名或 69 码关键词；空白视为不限，LIKE 通配符按字面量转义。
 
     Returns:
         {'data', 'total', 'page', 'per_page', 'pages', 'stats'}
@@ -215,7 +229,7 @@ async def get_records(
 
     conditions = _build_record_conditions(
         year=year, month=month, start_date=start_date, end_date=end_date,
-        departments=departments, created_by=created_by, production_date=production_date,
+        departments=departments, created_by=created_by, production_date=production_date, keyword=keyword,
     )
 
     per_page = max(1, min(per_page, 200))

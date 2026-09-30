@@ -93,3 +93,38 @@ class TestRecordConditions:
                 year=None, month=None, start_date='2026-09-10', end_date='2026-09-01',
                 departments=None, created_by='',
             )
+
+    def test_blank_keyword_is_not_applied(self):
+        conditions = _build_record_conditions(
+            year=2026, month=9, start_date='', end_date='',
+            departments=None, created_by='', keyword='',
+        )
+        assert 'product_name' not in _texts(conditions)
+
+    def test_whitespace_keyword_is_not_applied(self):
+        conditions = _build_record_conditions(
+            year=2026, month=9, start_date='', end_date='',
+            departments=None, created_by='', keyword='   ',
+        )
+        assert 'product_name' not in _texts(conditions)
+
+    def test_keyword_matches_product_name_or_barcode(self):
+        conditions = _build_record_conditions(
+            year=2026, month=9, start_date='', end_date='',
+            departments=None, created_by='', keyword='白兔',
+        )
+        rendered = _texts(conditions)
+        assert 'product_name' in rendered
+        assert 'barcode' in rendered
+        assert len(conditions) == 3
+
+    def test_keyword_like_wildcards_are_escaped(self):
+        conditions = _build_record_conditions(
+            year=2026, month=9, start_date='', end_date='',
+            departments=None, created_by='', keyword='50%',
+        )
+        # 注意：str(条件) 只渲染绑定占位符（如 :product_name_1），字面量不在其中，
+        # 故直接取 LIKE 子句的绑定参数值断言。必须是转义后的字面量，而不是裸的 %
+        # 通配 —— 否则 '50%' 会被当成「以 50 开头」，静默返回错误结果。
+        like_clause = next(c for c in conditions[2].clauses if 'LIKE' in str(c))
+        assert like_clause.right.value == '%50\\%%'
