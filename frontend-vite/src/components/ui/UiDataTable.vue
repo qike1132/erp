@@ -281,65 +281,65 @@ watch(
 
     <!-- ============ 普通模式（默认，行为不变）============ -->
     <template v-else>
-    <!-- 表格 -->
-    <DataTable
-      :value="data"
-      :loading="loading"
-      :paginator="false"
-      :selection-mode="selection != null ? 'multiple' : undefined"
-      :selection="selection"
-      :data-key="rowKey"
-      :striped-rows="striped"
-      :row-hover="true"
-      :scrollable="false"
-      :responsive="true"
-      :pt="{
-        emptyMessage: 'py-12 text-center text-sm text-text-muted',
-        loadingOverlay: 'absolute inset-0 bg-white/70 flex items-center justify-center z-10',
-      }"
-      @update:selection="onRowSelect"
-      @sort="onSort"
-    >
-      <!-- 动态列 -->
-      <Column
-        v-for="col in columns"
-        :key="col.field"
-        :field="col.field"
-        :header="col.header"
-        :sortable="col.sortable ?? false"
-        :style="{
-          width: col.width,
-          textAlign: col.align ?? 'center',
-          position: col.fixed ? 'sticky' : undefined,
-          [col.fixed ?? '']: col.fixed ? 0 : undefined,
-          zIndex: col.fixed ? 1 : undefined,
+      <!-- 表格 -->
+      <DataTable
+        :value="data"
+        :loading="loading"
+        :paginator="false"
+        :selection-mode="selection != null ? 'multiple' : undefined"
+        :selection="selection"
+        :data-key="rowKey"
+        :striped-rows="striped"
+        :row-hover="true"
+        :scrollable="false"
+        :responsive="true"
+        :pt="{
+          emptyMessage: 'py-12 text-center text-sm text-text-muted',
+          loadingOverlay: 'absolute inset-0 bg-white/70 flex items-center justify-center z-10',
         }"
+        @update:selection="onRowSelect"
+        @sort="onSort"
       >
-        <!-- 自定义列模板 -->
-        <template v-if="$slots[`column-body-${col.field}`]" #body="slotProps">
-          <slot
-            :name="`column-body-${col.field}`"
-            :row="slotProps.data"
-            :column="col"
-            :index="slotProps.index"
-          />
-        </template>
-        <!-- 默认：直接取值 + 单位后缀 -->
-        <template v-else #body="slotProps">
-          {{ slotProps.data[col.field] }}{{ col.unit ?? '' }}
-        </template>
-      </Column>
+        <!-- 动态列 -->
+        <Column
+          v-for="col in columns"
+          :key="col.field"
+          :field="col.field"
+          :header="col.header"
+          :sortable="col.sortable ?? false"
+          :style="{
+            width: col.width,
+            textAlign: col.align ?? 'center',
+            position: col.fixed ? 'sticky' : undefined,
+            [col.fixed ?? '']: col.fixed ? 0 : undefined,
+            zIndex: col.fixed ? 1 : undefined,
+          }"
+        >
+          <!-- 自定义列模板 -->
+          <template v-if="$slots[`column-body-${col.field}`]" #body="slotProps">
+            <slot
+              :name="`column-body-${col.field}`"
+              :row="slotProps.data"
+              :column="col"
+              :index="slotProps.index"
+            />
+          </template>
+          <!-- 默认：直接取值 + 单位后缀 -->
+          <template v-else #body="slotProps">
+            {{ slotProps.data[col.field] }}{{ col.unit ?? '' }}
+          </template>
+        </Column>
 
-      <!-- 空态 -->
-      <template v-if="$slots.empty" #empty>
-        <slot name="empty" />
-      </template>
+        <!-- 空态 -->
+        <template v-if="$slots.empty" #empty>
+          <slot name="empty" />
+        </template>
 
-      <!-- 加载态 -->
-      <template v-if="$slots.loading" #loading>
-        <slot name="loading" />
-      </template>
-    </DataTable>
+        <!-- 加载态 -->
+        <template v-if="$slots.loading" #loading>
+          <slot name="loading" />
+        </template>
+      </DataTable>
     </template>
 
     <!-- 统一分页器：与 outsource/beile-order 等视图共享 UiPagination 样式 -->
