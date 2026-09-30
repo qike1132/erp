@@ -142,6 +142,7 @@ class TestConfigSecurityValidation:
                 del os.environ['APP_ENV']
 
     def test_secret_key_default_empty_raises(self):
+        import os
         import subprocess  # nosec B404
         import sys
 
@@ -151,7 +152,10 @@ class TestConfigSecurityValidation:
         # 而 `text=True` 在中文 Windows 上按 locale（GBK）解码 → 读取线程抛
         # UnicodeDecodeError → `stdout` 变成 None → 断言报
         # "argument of type 'NoneType' is not iterable"，看不出真实原因。
-        # 子进程侧同步设 PYTHONIOENCODING，保证它真的输出 UTF-8。
+        # ⚠️ 关键：PYTHONIOENCODING 必须由【父进程】注入。子进程脚本里再赋值已经晚于
+        #    解释器启动（stdout 编码在启动时就已确定），对子进程自身输出无效 → 中文报错
+        #    仍按 GBK 写出 → 父进程按 utf-8 解码失败 → stdout 变成 None。
+        #    （2026-09-30 本机实测：不注入 env 稳定失败，注入 env= 后稳定通过。）
         test_script = '''
 import os
 import sys
@@ -166,8 +170,10 @@ except RuntimeError as e:
     print(f"ERROR_RAISED:{str(e)}")
 '''
 
+        child_env = {**os.environ, 'PYTHONIOENCODING': 'utf-8', 'PYTHONUTF8': '1'}
         result = subprocess.run([sys.executable, '-c', test_script],  # nosec B603
-                              capture_output=True, text=True, encoding='utf-8', cwd='.')
+                              capture_output=True, text=True, encoding='utf-8', cwd='.',
+                              env=child_env)
         assert "ERROR_RAISED" in result.stdout
         assert "必须通过环境变量" in result.stdout
 
