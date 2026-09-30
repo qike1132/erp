@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>汇总下单 · 按 SKU 展开物料明细 · 对比稿 · 2026-09-30</title>
+<style>
+  :root{
+    --bg:#f5f5f7; --card:#fff; --surface:#f2f2f7; --line:#e4e7ed;
+    --t1:#1d1d1f; --t2:#48484d; --t3:#8e8e93;
+    --accent:#007aff; --accent-tint:#e8f1ff; --warn:#ff9500; --warn-tint:#fff4e0;
+    --danger:#ff3b30; --danger-tint:#ffeceb; --ok:#34c759; --ok-tint:#e6f9ec;
+    --sku:#f7f9fc;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:26px 22px 56px;background:var(--bg);color:var(--t1);
+       font:13px/1.5 "Microsoft YaHei UI","Segoe UI",system-ui,sans-serif}
+  h1{font-size:19px;margin:0 0 6px}
+  .meta{color:var(--t2);font-size:12px;margin-bottom:16px}
+  .meta code{background:#e9e9ee;padding:1px 5px;border-radius:4px}
+  .note{background:var(--warn-tint);border-left:3px solid var(--warn);
+        padding:10px 14px;border-radius:6px;margin:0 0 14px;font-size:12.5px;color:#7a4a00}
+  .note.ok{background:var(--ok-tint);border-left-color:var(--ok);color:#1d6b39}
+  h2{font-size:15px;margin:26px 0 4px;padding-top:8px;border-top:2px solid #e3e3e8}
+  h2 .tag{font-size:11px;font-weight:700;color:#fff;background:var(--accent);
+          padding:2px 7px;border-radius:999px;vertical-align:2px;margin-left:8px}
+  h2 .tag.cur{background:var(--t3)}
+  h2 .tag.diff{background:var(--warn)}
+  .sub{color:var(--t2);font-size:12px;margin:0 0 10px}
+  .card{background:var(--card);border:1px solid #d8dce2;border-radius:10px;overflow:hidden;margin-bottom:14px}
+  .card-hd{background:var(--surface);padding:8px 14px;font-size:12px;font-weight:700;color:var(--t2);
+           border-bottom:1px solid #d8dce2;display:flex;justify-content:space-between;align-items:center}
+  .card-hd .pill{font-weight:400;color:var(--t3)}
+  .scroll{overflow-x:auto}
+  table{border-collapse:collapse;width:100%;font-size:12.5px}
+  th{background:var(--surface);color:var(--t2);font-weight:700;font-size:12px;
+     padding:7px 9px;border-bottom:1px solid var(--line);border-right:1px solid var(--line);white-space:nowrap;text-align:left}
+  td{padding:7px 9px;border-bottom:1px solid var(--line);border-right:1px solid var(--line);white-space:nowrap;background:var(--card);vertical-align:top}
+  th.r,td.r{text-align:right}
+  th.c,td.c{text-align:center}
+  .b{font-weight:700}
+  td.skuhead{background:var(--sku)}
+  .rate{display:inline-block;min-width:34px;text-align:right;border:1px solid var(--line);
+        border-radius:5px;padding:1px 5px;background:#fff;color:var(--t2);font-size:12px}
+  tr.cmp td{background:#fffaf0}
+  tr.cmp td.warn{color:#8a1a12;font-weight:700}
+  .banner{background:var(--warn-tint);color:#7a4a00;font-size:11.5px;padding:5px 10px;border-bottom:1px solid #f0c878}
+  .foot{color:var(--t2);font-size:12px;margin-top:22px;line-height:1.85}
+  .foot b{color:var(--t1)}
+  .ask{background:var(--accent-tint);border-left:3px solid var(--accent);padding:10px 14px;border-radius:6px;margin:12px 0 0;font-size:12.5px;color:#0a3d78}
+</style>
+</head>
+<body>
+
+<h1>汇总下单 · 按 SKU 展开物料明细 · 对比稿</h1>
+<div class="meta">
+  页面：<code>/purchase</code> → 汇总下单 → <b>工厂内部订单</b> &nbsp;·&nbsp;
+  口径 A：每 SKU 每物料 = <code>BOM 单件用量 × 该 SKU 数量</code>（数量列再按该物料的损耗率加放）&nbsp;·&nbsp; 2026-09-30
+</div>
+
+<div class="note">
+  <b>演示数据取自你截图那一单</b>（MINISO国际 / 测试 10000 + 鲨鱼 10000 / 合计 20000）。
+  两 SKU 的 BOM 相同，故示例中每个 SKU 各占一半 → 各 SKU 行相加恰好等于落库合计（<b>无差异</b>，对照块不出现）。
+</div>
+
+<h2>现状<span class="tag cur">物料跨 SKU 合并</span></h2>
+<p class="sub">物料只出现一次（订单级合并值），SKU 名堆在左侧一格 —— 看不出「哪个 SKU 要多少料」。</p>
+<div class="card">
+  <div class="card-hd"><span>工厂内部采购订单汇总</span><span class="pill">现状</span></div>
+  <div class="scroll">
+  <table>
+    <thead><tr><th>客户</th><th>产品名称</th><th class="r">订单数量</th><th>供应商</th><th>布料名称</th><th>规格型号</th><th class="c">损耗率</th><th class="r">数量</th><th>单位</th></tr></thead>
+    <tbody>
+      <tr><td rowspan="6" class="b">MINISO国际</td>
+          <td rowspan="6"><div>测试</div><div>鲨鱼</div><div class="b">合计</div></td>
+          <td rowspan="6" class="r"><div>10000.0</div><div>10000.0</div><div class="b">20000.0</div></td>
+          <td>仓库</td><td>漂白边伦</td><td>仓库</td><td class="c"><span class="rate">0</span></td><td class="r">100</td><td>码</td></tr>
+      <tr><td>旭日</td><td>3mm漂白吉绒</td><td>C001</td><td class="c"><span class="rate">0</span></td><td class="r">180</td><td>码</td></tr>
+      <tr><td>木棒</td><td>木棒按摩锤</td><td>1条</td><td class="c"><span class="rate">0</span></td><td class="r">20000</td><td>个</td></tr>
+      <tr><td rowspan="3">美利达</td><td>漂白超柔</td><td>2</td><td class="c"><span class="rate">0</span></td><td class="r">1840</td><td>码</td></tr>
+      <tr><td>绿色超柔</td><td>234</td><td class="c"><span class="rate">0</span></td><td class="r">100</td><td>码</td></tr>
+      <tr><td>蓝色超柔</td><td>223</td><td class="c"><span class="rate">0</span></td><td class="r">1780</td><td>码</td></tr>
+    </tbody>
+  </table>
+  </div>
+</div>
+
+<h2>方案 1（推荐）<span class="tag">按 SKU 一块，块内物料独立</span></h2>
+<p class="sub">
+  每个 SKU 拥有一整块物料行（供应商在块内照旧合并）；「产品名称 / 订单数量 / 备品数量」用 rowspan 覆盖<b>该 SKU 自己的那些行</b>；
+  「客户」跨整组合并。<b>无数量差异时不显示对照块</b>（下表即无差异）。
+</p>
+<div class="card">
+  <div class="card-hd"><span>工厂内部采购订单汇总</span><span class="pill">每 SKU 独立 · 无差异</span></div>
+  <div class="scroll">
+  <table>
+    <thead><tr><th>客户</th><th>产品名称</th><th class="r">订单数量</th><th class="r">备品数量</th><th>供应商</th><th>布料名称</th><th>规格型号</th><th class="c">损耗率</th><th class="r">数量</th><th>单位</th></tr></thead>
+    <tbody>
+      <!-- SKU 1: 测试 -->
+      <tr><td rowspan="12" class="b">MINISO国际</td>
+          <td rowspan="6" class="skuhead">测试</td><td rowspan="6" class="r skuhead">10000.0</td><td rowspan="6" class="r skuhead">100.0</td>
+          <td>仓库</td><td>漂白边伦</td><td>仓库</td><td class="c"><span class="rate">0</span></td><td class="r">50</td><td>码</td></tr>
+      <tr><td>旭日</td><td>3mm漂白吉绒</td><td>C001</td><td class="c"><span class="rate">0</span></td><td class="r">90</td><td>码</td></tr>
+      <tr><td>木棒</td><td>木棒按摩锤</td><td>1条</td><td class="c"><span class="rate">0</span></td><td class="r">10000</td><td>个</td></tr>
+      <tr><td rowspan="3">美利达</td><td>漂白超柔</td><td>2</td><td class="c"><span class="rate">0</span></td><td class="r">920</td><td>码</td></tr>
+      <tr><td>绿色超柔</td><td>234</td><td class="c"><span class="rate">0</span></td><td class="r">50</td><td>码</td></tr>
+      <tr><td>蓝色超柔</td><td>223</td><td class="c"><span class="rate">0</span></td><td class="r">890</td><td>码</td></tr>
+      <!-- SKU 2: 鲨鱼 -->
+      <tr>
+          <td rowspan="6" class="skuhead">鲨鱼</td><td rowspan="6" class="r skuhead">10000.0</td><td rowspan="6" class="r skuhead">100.0</td>
+          <td>仓库</td><td>漂白边伦</td><td>仓库</td><td class="c"><span class="rate">0</span></td><td class="r">50</td><td>码</td></tr>
+      <tr><td>旭日</td><td>3mm漂白吉绒</td><td>C001</td><td class="c"><span class="rate">0</span></td><td class="r">90</td><td>码</td></tr>
+      <tr><td>木棒</td><td>木棒按摩锤</td><td>1条</td><td class="c"><span class="rate">0</span></td><td class="r">10000</td><td>个</td></tr>
+      <tr><td rowspan="3">美利达</td><td>漂白超柔</td><td>2</td><td class="c"><span class="rate">0</span></td><td class="r">920</td><td>码</td></tr>
+      <tr><td>绿色超柔</td><td>234</td><td class="c"><span class="rate">0</span></td><td class="r">50</td><td>码</td></tr>
+      <tr><td>蓝色超柔</td><td>223</td><td class="c"><span class="rate">0</span></td><td class="r">890</td><td>码</td></tr>
+    </tbody>
+  </table>
+  </div>
+</div>
+
+<div class="note ok">
+  <b>读法</b>：「测试」要 50 码漂白边伦、「鲨鱼」也要 50 码 —— 各 SKU 一眼看清自己那份。
+  两块的物料行是<b>同一批落库明细行</b>（同一物料仍是库里的一行），只是展示拆到 SKU；
+  同一物料的「损耗率」在各 SKU 块里显示<b>同一个值</b>，改任一处、该物料其余块同步变（你选的联动口径）。
+</div>
+
+<h2>方案 1 · 遇到数量差异时<span class="tag diff">手改过才出现</span></h2>
+<p class="sub">
+  若某张单用过「自定义编辑」改过数量，则该物料在库里的真值 ≠ 各 SKU 由 BOM 推得之和 ——
+  此时在整组末尾追加一条<b>浅色对照行</b>「实际下单（含手工调整）」，并对不上的物料<b>描红</b>。无差异时这块完全不出现。
+</p>
+<div class="card">
+  <div class="card-hd"><span>工厂内部采购订单汇总</span><span class="pill">示例：漂白超柔被手改为 1900（BOM 推算为 1840）</span></div>
+  <div class="banner">⚠ 本条「实际下单」含手工调整，与上方按 BOM 推算的明细不一致（漂白超柔 1900 ≠ 1840）</div>
+  <div class="scroll">
+  <table>
+    <thead><tr><th>客户</th><th>产品名称</th><th class="r">订单数量</th><th class="r">备品数量</th><th>供应商</th><th>布料名称</th><th>规格型号</th><th class="c">损耗率</th><th class="r">数量</th><th>单位</th></tr></thead>
+    <tbody>
+      <tr><td rowspan="8" class="b">MINISO国际</td>
+          <td class="skuhead">测试</td><td class="r skuhead">10000.0</td><td class="r skuhead">100.0</td>
+          <td>美利达</td><td>漂白超柔</td><td>2</td><td class="c"><span class="rate">0</span></td><td class="r">920</td><td>码</td></tr>
+      <tr><td class="skuhead">鲨鱼</td><td class="r skuhead">10000.0</td><td class="r skuhead">100.0</td>
+          <td>美利达</td><td>漂白超柔</td><td>2</td><td class="c"><span class="rate">0</span></td><td class="r">920</td><td>码</td></tr>
+      <tr><td class="r" colspan="3" style="background:#fff">（其余物料行略）</td><td>—</td><td>—</td><td>—</td><td class="c">—</td><td class="r">—</td><td>—</td></tr>
+      <tr class="cmp"><td colspan="3" class="b">实际下单（含手工调整）</td><td class="r b">20000.0</td><td>200.0</td>
+          <td>美利达</td><td class="b">漂白超柔</td><td>2</td><td class="c">0</td><td class="r warn">1900</td><td>码</td></tr>
+      <tr class="cmp"><td colspan="3"></td><td class="r"></td><td></td><td>美利达</td><td>绿色超柔</td><td>234</td><td class="c">0</td><td class="r">100</td><td>码</td></tr>
+      <tr class="cmp"><td colspan="3"></td><td class="r"></td><td></td><td>美利达</td><td>蓝色超柔</td><td>223</td><td class="c">0</td><td class="r">1780</td><td>码</td></tr>
+      <tr class="cmp"><td colspan="3"></td><td class="r"></td><td></td><td>仓库</td><td>漂白边伦</td><td>仓库</td><td class="c">0</td><td class="r">100</td><td>码</td></tr>
+      <tr class="cmp"><td colspan="3"></td><td class="r"></td><td></td><td>旭日</td><td>3mm漂白吉绒</td><td>C001</td><td class="c">0</td><td class="r">180</td><td>码</td></tr>
+    </tbody>
+  </table>
+  </div>
+</div>
+
+<h2>四、要你确认的几件事</h2>
+<div class="foot">
+  <p><b>① 供应商列在每块内照旧合并</b>（同一供应商的多种布料只写一次）——上表即此形态。若你想每行都写全供应商名，说一声。</p>
+  <p><b>② 「客户」跨整组合并</b>（一组只有一个客户，重复写没信息量）。</p>
+  <p><b>③ 打印 / Excel 导出同步</b>：同一结构（10 列、每 SKU 一块）。注意 A4 纵向会变高——一份 2 SKU × 6 物料的单就是 12 行；如果你常打印多 SKU 单，我可以顺带评估横向或缩字号。</p>
+  <p><b>④ 供应商页签（供应商采购订单）不动</b>：它是按供应商汇总的采购口径，与「按 SKU 看料」是两件事。若你也要拆，另开一轮。</p>
+  <p><b>⑤ 后端要给新数据</b>：汇总接口需要新增「按 SKU 展开的物料行」字段（每 SKU 每物料 = 单件用量 × 该 SKU 数量），现有 `suppliers/fabrics` 保持不动供「实际下单」对照用。**落库结构、迁移、结算全都不动。**</p>
+</div>
+
+<div class="ask">
+  <b>为什么不能纯前端做</b>：前端拿不到「每个 SKU 的 BOM 单件用量」——汇总接口现在只回订单级合并后的物料。所以这次要动后端汇总接口（只增字段，不改既有字段语义）。
+</div>
+
+</body>
+</html>
