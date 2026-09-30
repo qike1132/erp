@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 // so we keep mutable mocks inside vi.hoisted() and reference them by name.
 const mocks = vi.hoisted(() => ({
   orderListMock: vi.fn(),
+  recordsMock: vi.fn(),
   orderDetailMock: vi.fn(),
   customerActiveNamesMock: vi.fn(),
   getRequestMock: vi.fn(),
@@ -13,6 +14,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/api', () => ({
   orderApi: {
     list: mocks.orderListMock,
+    records: mocks.recordsMock,
     detail: mocks.orderDetailMock,
     create: vi.fn(),
     update: vi.fn(),
@@ -109,6 +111,7 @@ describe('CustomerOrderView SKU expand behavior (SubTask 7.4)', () => {
     // useOrderForm 内使用 useCatalogStore()，需提供活跃 Pinia 实例
     setActivePinia(createPinia())
     mocks.orderListMock.mockReset()
+    mocks.recordsMock.mockReset()
     mocks.orderDetailMock.mockReset()
     mocks.customerActiveNamesMock.mockReset()
     mocks.getRequestMock.mockReset()
@@ -122,10 +125,12 @@ describe('CustomerOrderView SKU expand behavior (SubTask 7.4)', () => {
   })
 
   it('order list row shows multi-SKU count badge when items.length === 3', async () => {
-    mocks.orderListMock.mockResolvedValue({
+    mocks.recordsMock.mockResolvedValue({
       data: [
         {
           id: 1,
+          // 记录列表行必带 record_type（后端 /orders/records 统一契约）；操作列按它决定是否有详情入口
+          record_type: 'order',
           order_no: 'ORD-001',
           customer: '客户A',
           order_date: '2024-01-01',
@@ -153,10 +158,12 @@ describe('CustomerOrderView SKU expand behavior (SubTask 7.4)', () => {
   })
 
   it('order list row shows muted badge "1" for single-SKU order', async () => {
-    mocks.orderListMock.mockResolvedValue({
+    mocks.recordsMock.mockResolvedValue({
       data: [
         {
           id: 1,
+          // 记录列表行必带 record_type（后端 /orders/records 统一契约）；操作列按它决定是否有详情入口
+          record_type: 'order',
           order_no: 'ORD-001',
           customer: '客户A',
           order_date: '2024-01-01',
@@ -183,10 +190,12 @@ describe('CustomerOrderView SKU expand behavior (SubTask 7.4)', () => {
   })
 
   it('detail dialog shows SKU details table when detailData.items.length > 1', async () => {
-    mocks.orderListMock.mockResolvedValue({
+    mocks.recordsMock.mockResolvedValue({
       data: [
         {
           id: 1,
+          // 记录列表行必带 record_type（后端 /orders/records 统一契约）；操作列按它决定是否有详情入口
+          record_type: 'order',
           order_no: 'ORD-001',
           customer: '客户A',
           order_date: '2024-01-01',
@@ -260,10 +269,12 @@ describe('CustomerOrderView SKU expand behavior (SubTask 7.4)', () => {
   })
 
   it('detail dialog hides SKU details table when detailData.items.length === 1', async () => {
-    mocks.orderListMock.mockResolvedValue({
+    mocks.recordsMock.mockResolvedValue({
       data: [
         {
           id: 1,
+          // 记录列表行必带 record_type（后端 /orders/records 统一契约）；操作列按它决定是否有详情入口
+          record_type: 'order',
           order_no: 'ORD-001',
           customer: '客户A',
           order_date: '2024-01-01',
@@ -310,10 +321,11 @@ describe('CustomerOrderView SKU expand behavior (SubTask 7.4)', () => {
   })
 
   it('detail dialog hides SKU details table when detailData.items is empty', async () => {
-    mocks.orderListMock.mockResolvedValue({
+    mocks.recordsMock.mockResolvedValue({
       data: [
         {
           id: 2,
+          record_type: 'order',
           order_no: 'ORD-002',
           customer: '客户B',
           order_date: '2024-02-02',

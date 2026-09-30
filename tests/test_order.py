@@ -570,6 +570,139 @@ class TestBeileSoftDeleteFilter:
         await engine.dispose()
 
 
+class TestUnifiedRecordsKeyword:
+    """订单+备货合并查询的 keyword OR 搜索（/customer-order 记录列表搜索框）
+
+    用真实 SQLite 执行 unified 子查询：keyword 需同时 OR 匹配
+    单号（订单号/备货号）、客户、产品名、条码 —— 任意命中即返回该行。
+    """
+
+    @staticmethod
+    async def _session(tmp_path):
+        """真实 SQLite 库（只建 union 涉及的表及其外键依赖，避开 JSONB 等 PG 专属列）"""
+        from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+        from fastapi_app.shared_models import Base
+
+        needed = {'order', 'order_item', 'stock_in', 'product', 'user'}
+        tables = [t for t in Base.metadata.sorted_tables if t.name in needed]
+        engine = create_async_engine(f'sqlite+aiosqlite:///{tmp_path / "unified.db"}')
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all, tables=tables)
+        sf = async_sessionmaker(engine, expire_on_commit=False)
+        yield sf, engine
+
+    @pytest.mark.asyncio
+    async def test_keyword_matches_order_no_customer_product_barcode(self, tmp_path):
+        """keyword 分别命中：订单号 / 客户名 / SKU 产品名 / SKU 条码 → 各返回对应订单行"""
+        agen = self._session(tmp_path)
+        sf, engine = await agen.__anext__()
+
+        from sqlalchemy import select as sa_select
+
+        from fastapi_app.services.order.unified import _build_unified_query
+        from fastapi_app.shared_models import Order, OrderItem, Product
+
+        async with sf() as db:
+            p = Product(name='断桥铝窗框', barcode='6901234500116', factory='东莞')
+            db.add(p)
+            await db.flush()
+
+            async def add_order(order_no, customer):
+                o = Order(order_no=order_no, customer=customer, product_id=p.id, quantity=10)
+                db.add(o)
+                await db.flush()
+                db.add(OrderItem(order_id=o.id, product_id=p.id,
+                                 product_name=p.name, product_barcode=p.barcode, quantity=10))
+                await db.flush()
+                return o
+
+            await add_order('DD-KW-NO', '无关客户甲')
+            await add_order('DD-OTHER', '宏远建材')
+            await add_order('DD-THIRD', '无关客户乙')
+            await db.flush()
+
+            for kw, expect_no in [('DD-KW-NO', 'DD-KW-NO'), ('宏远', 'DD-OTHER'), ('断桥铝', 'DD-KW-NO')]:
+                subq = _build_unified_query(
+                    record_type='all', keyword=kw,
+                )
+                rows = (await db.execute(sa_select(subq))).all()
+                got = {r.order_no for r in rows if r.record_type == 'order'}
+                assert expect_no in got, f'keyword={kw!r} 应命中 {expect_no}，实际 {got}'
+
+            # 条码命中：三条订单共享同一 SKU 条码，应全部返回
+            subq = _build_unified_query(record_type='all', keyword='6901234500116')
+            rows = (await db.execute(sa_select(subq))).all()
+            got = {r.order_no for r in rows if r.record_type == 'order'}
+            assert got == {'DD-KW-NO', 'DD-OTHER', 'DD-THIRD'}, f'条码 keyword 应命中全部订单，实际 {got}'
+
+        await engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_keyword_matches_stockin_no_customer_product(self, tmp_path):
+        """keyword 命中备货侧：备货号 / 客户名 / 产品名 / 条码 → 返回备货行"""
+        agen = self._session(tmp_path)
+        sf, engine = await agen.__anext__()
+
+        from sqlalchemy import select as sa_select
+
+        from fastapi_app.services.order.unified import _build_unified_query
+        from fastapi_app.shared_models import Product, StockIn
+
+        async with sf() as db:
+            p1 = Product(name='不锈钢合页', barcode='6901234500031', factory='东莞')
+            p2 = Product(name='铝合金把手', barcode='6901234500049', factory='东莞')
+            db.add_all([p1, p2])
+            await db.flush()
+
+            db.add(StockIn(stockin_no='BH-KW-001', customer='宏远建材', product_id=p1.id,
+                           quantity=50, confirmed_at=None))
+            db.add(StockIn(stockin_no='BH-OTHER', customer='无关客户', product_id=p2.id,
+                           quantity=30, confirmed_at=None))
+            await db.flush()
+
+            # 备货号 / 客户名 / 产品名 / 条码 各自命中同一行
+            for kw in ('BH-KW-001', '宏远', '不锈钢', '6901234500031'):
+                subq = _build_unified_query(record_type='all', keyword=kw)
+                rows = (await db.execute(sa_select(subq))).all()
+                got = {r.order_no for r in rows if r.record_type == 'stockin'}
+                assert got == {'BH-KW-001'}, f'keyword={kw!r} 应只命中 BH-KW-001，实际 {got}'
+
+        await engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_keyword_none_returns_all(self, tmp_path):
+        """keyword=None（搜索框为空）不做任何过滤，与既有行为一致"""
+        agen = self._session(tmp_path)
+        sf, engine = await agen.__anext__()
+
+        from sqlalchemy import select as sa_select
+
+        from fastapi_app.services.order.unified import _build_unified_query
+        from fastapi_app.shared_models import Order, OrderItem, Product, StockIn
+
+        async with sf() as db:
+            p = Product(name='全部测试品', barcode='6909999999999', factory='东莞')
+            db.add(p)
+            await db.flush()
+
+            o = Order(order_no='DD-ALL', customer='客户丙', product_id=p.id, quantity=5)
+            db.add(o)
+            await db.flush()
+            db.add(OrderItem(order_id=o.id, product_id=p.id,
+                             product_name=p.name, product_barcode=p.barcode, quantity=5))
+            db.add(StockIn(stockin_no='BH-ALL', customer='客户丙', product_id=p.id,
+                           quantity=7, confirmed_at=None))
+            await db.flush()
+
+            subq = _build_unified_query(record_type='all', keyword=None)
+            rows = (await db.execute(sa_select(subq))).all()
+            types = {r.record_type for r in rows}
+            assert types == {'order', 'stockin'}, f'无 keyword 应返回订单+备货，实际 {types}'
+
+        await engine.dispose()
+
+
 class TestUpdateDeductQuantity:
     """订单抵扣管理"""
 

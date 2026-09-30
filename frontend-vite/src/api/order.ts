@@ -22,8 +22,67 @@ export interface ConfirmOrderResponse {
   message: string
 }
 
+/** GET /orders/records 查询参数（B1 契约，与后端 list_unified_records 对齐） */
+export interface OrderRecordsQuery {
+  /** 页码（后端 ge=1） */
+  page?: number
+  /** 每页数量（后端 ge=1, le=500） */
+  per_page?: number
+  /** 记录类型：all=全部 / order=订单 / stockin=备货（后端默认 all） */
+  record_type?: 'all' | 'order' | 'stockin'
+  /** 产品名称或条码模糊 */
+  product?: string
+  /** 单号或编号模糊 */
+  order_no?: string
+  customer?: string
+  status?: string
+  factory?: string
+  start_date?: string
+  end_date?: string
+  [key: string]: unknown
+}
+
+/**
+ * 统一记录行（订单+备货合并，GET /orders/records，B1 契约）。
+ * 备货行的 order_no 来自 stockin_no、order_date 来自 stockin_date、status 为 null。
+ */
+export interface UnifiedRecord {
+  id: number
+  record_type: 'order' | 'stockin'
+  order_no: string
+  customer: string
+  order_date: string
+  /** 备货行为 null */
+  status: string | null
+  product: { id: number; name: string; barcode: string; image: string } | null
+  quantity: number
+  /** 备货行为 0（后端已聚合，前端无需再按 i.deducted 补算） */
+  deduct_quantity: number
+  factories: string[]
+  items?: Array<{
+    id: number
+    product_id?: number | null
+    product_name?: string | null
+    product_barcode?: string | null
+    product_image?: string
+    quantity: number
+    deduct_quantity?: number
+    note?: string
+  }>
+}
+
+/** GET /orders/records 响应（B1 契约） */
+export interface OrderRecordsResponse {
+  success: boolean
+  data: UnifiedRecord[]
+  total: number
+  page: number
+  per_page: number
+}
+
 export const orderApi = {
   list: (params?: QueryParams) => get<OrderListApiResponse>('/orders/list', params),
+  records: (params?: OrderRecordsQuery) => get<OrderRecordsResponse>('/orders/records', params),
   beileList: (params?: QueryParams) => get<OrderListApiResponse>('/orders/beile-list', params),
   detail: (id: number) => get<OrderItem>(`/orders/${id}`),
   create: (data: Partial<OrderItem>) => post<OrderItem>('/orders/create', data),

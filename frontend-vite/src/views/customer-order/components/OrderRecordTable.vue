@@ -27,7 +27,7 @@
       <template #empty>
         <div class="co-state-placeholder co-state-empty">
           <div class="co-empty-illustration"><FontAwesomeIcon icon="clipboard-list" aria-hidden="true" /></div>
-          <p class="co-state-text">暂无{{ recordType === 'stockin' ? '备货' : '订单' }}记录</p>
+          <p class="co-state-text">暂无记录</p>
         </div>
       </template>
       <template #column-body-order_date="{ row }">
@@ -51,19 +51,25 @@
         </span>
       </template>
       <template #column-body-product="{ row }">
-        <span class="co-cell-main">{{ (row as OrderRecord).product?.name || '-' }}</span>
-        <span v-if="(row as OrderRecord).product?.barcode" class="co-cell-muted" style="display: block; font-size: 11px;">{{ (row as OrderRecord).product?.barcode }}</span>
+        <!-- 多 SKU：把该订单的全部 SKU 名与各自数量堆叠出来，列表里可直接核对（不必点进详情） -->
+        <div v-if="hasMultipleSkus(row as OrderRecord)" class="co-sku-stack">
+          <div v-for="(sku, idx) in (row as OrderRecord).items" :key="sku.id ?? idx" class="co-sku-line">
+            <span class="co-sku-name">{{ sku.product_name || '-' }}</span>
+            <span class="co-sku-qty">{{ sku.quantity }}</span>
+          </div>
+        </div>
+        <template v-else>
+          <span class="co-cell-main">{{ (row as OrderRecord).product?.name || '-' }}</span>
+          <span v-if="(row as OrderRecord).product?.barcode" class="co-cell-muted" style="display: block; font-size: 11px;">{{ (row as OrderRecord).product?.barcode }}</span>
+        </template>
       </template>
       <template #column-body-quantity="{ row }">
         <strong>{{ (row as OrderRecord).quantity }}</strong>
       </template>
-      <template #column-body-deduct="{ row }">
-        <span v-if="((row as OrderRecord).deduct_quantity ?? 0) > 0" class="co-badge-tag co-badge-success">
-          {{ recordType === 'stockin' ? '已抵扣' : '抵扣' }}: {{ (row as OrderRecord).deduct_quantity }}
-        </span>
-      </template>
       <template #column-body-actions="{ row }">
-        <div class="co-action-group">
+        <!-- 备货行不给详情入口：后端不存在备货详情端点，而 openDetail 一律按订单 id 查
+             （备货行 id 来自 StockIn 表，与订单 id 是两套序列，查订单表必然查无此单） -->
+        <div v-if="(row as OrderRecord).record_type === 'order'" class="co-action-group">
           <button
             class="co-btn-icon co-btn-info"
             :aria-label="`查看 ${(row as OrderRecord).order_no || ''} 的详情`"
@@ -80,6 +86,7 @@
             <FontAwesomeIcon icon="trash-alt" aria-hidden="true" />
           </button>
         </div>
+        <span v-else class="co-cell-muted" aria-hidden="true">—</span>
       </template>
     </UiDataTable>
   </div>
@@ -93,7 +100,6 @@ import type { TableColumn } from '@/components/ui/UiDataTable.vue'
 import type { OrderRecord } from '../composables/types'
 
 const props = defineProps<{
-  recordType: 'order' | 'stockin'
   orderRecords: OrderRecord[]
   isLoadingRecords: boolean
   isFetchingRecords: boolean
@@ -113,25 +119,23 @@ const emit = defineEmits<{
   retry: []
 }>()
 
-const orderColumns = computed<TableColumn[]>(() => {
-  const isOrder = props.recordType === 'order'
-  const cols: TableColumn[] = [
-    { field: 'order_date', header: isOrder ? '订单时间' : '备货时间', align: 'center' },
-    { field: 'order_no', header: '编号', align: 'center' },
-    { field: 'customer', header: '客户', align: 'center' },
-  ]
-  if (isOrder) {
-    cols.push({ field: 'factories', header: '工厂', align: 'center' })
-    cols.push({ field: 'sku_count', header: 'SKU 数量', align: 'center' })
-  }
-  cols.push({ field: 'product', header: '产品', align: 'center' })
-  cols.push({ field: 'quantity', header: '数量', align: 'center' })
-  cols.push({ field: 'deduct', header: isOrder ? '抵扣备货' : '已抵扣', align: 'center' })
-  if (isOrder) {
-    cols.push({ field: 'actions', header: '操作', align: 'center' })
-  }
-  return cols
-})
+/** 列固定（订单/备货合并后结构一致）：时间 / 编号 / 客户 / 工厂 / SKU / 产品 / 数量 / 操作 */
+const orderColumns = computed<TableColumn[]>(() => [
+  { field: 'order_date', header: '时间', align: 'center' },
+  { field: 'order_no', header: '编号', align: 'center' },
+  { field: 'customer', header: '客户', align: 'center' },
+  { field: 'factories', header: '工厂', align: 'center' },
+  { field: 'sku_count', header: 'SKU 数量', align: 'center' },
+  // 产品列左对齐：多 SKU 时逐行堆叠，居中会让长短不齐的 SKU 名互相错开、难以扫读
+  { field: 'product', header: '产品', align: 'left' },
+  { field: 'quantity', header: '数量', align: 'center' },
+  { field: 'actions', header: '操作', align: 'left' },
+])
+
+/** 多 SKU 行（一张订单可含多个 SKU；备货恒 1 个）——决定产品列是否堆叠展示 */
+function hasMultipleSkus(row: OrderRecord): boolean {
+  return (row.items?.length ?? 0) > 1
+}
 
 function onPageChange(event: { page: number; rows: number }) {
   if (event.rows !== props.perPage) {
@@ -151,7 +155,6 @@ function onPageChange(event: { page: number; rows: number }) {
   padding: 0;
   min-height: 0;
 }
-
 .co-type-badge {
   font-size: 11px;
   padding: 2px 8px;
@@ -225,6 +228,39 @@ function onPageChange(event: { page: number; rows: number }) {
   font-size: 12px;
 }
 
+/* 产品列・多 SKU 堆叠：每行一个 SKU（名字 + 各自数量），数量右对齐便于与「数量」列的总数对账。
+   左侧 2px 导引线 + 缩进把整块标成「挂在同一张订单下」的子块；SKU 之间用 1px 细线分隔
+   （线色与全表行线同为 --color-border，看着是一套网格），末条不画线以免与行线叠成双线。
+   2026-09-30 修订：原实现只有 3px 行距、无任何分隔，表变高后三条 SKU 飘在空白里。 */
+.co-sku-stack {
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+  padding-left: 10px;
+  border-left: 2px solid var(--color-border-light);
+}
+.co-sku-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--color-border);
+}
+.co-sku-line:last-child {
+  border-bottom: none;
+}
+.co-sku-name {
+  font-weight: 500;
+  color: var(--color-text);
+}
+.co-sku-qty {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .co-badge-tag {
   display: inline-block;
   padding: 2px 8px;
@@ -241,10 +277,12 @@ function onPageChange(event: { page: number; rows: number }) {
   color: var(--color-text-muted);
 }
 
+/* 操作列：左对齐固定起点，让「查看」按钮在单/双按钮行都钉在同一横坐标（居中会左右跳） */
 .co-action-group {
   display: flex;
   gap: 4px;
-  justify-content: center;
+  justify-content: flex-start;
+  padding-left: 8px;
 }
 .co-btn-icon {
   width: 36px;
@@ -272,6 +310,5 @@ function onPageChange(event: { page: number; rows: number }) {
 }
 .co-btn-danger:hover {
   background: var(--color-danger-100);
-  transform: translateY(-1px);
 }
 </style>

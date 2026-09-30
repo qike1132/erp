@@ -8,6 +8,7 @@
 - 协调缓存失效与领域事件发布
 """
 import logging
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -32,8 +33,10 @@ from fastapi_app.schemas.order import (
     OrderUpdate,
 )
 from fastapi_app.services import order_batch_service, order_crud, order_service
+from fastapi_app.services.order.unified import get_unified_records
 from fastapi_app.services.order_service import PermissionDeniedError
 from fastapi_app.shared_models import Order, User
+from fastapi_app.shared_models.order import VALID_ORDER_STATUSES
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -178,6 +181,57 @@ async def my_approvals(
     """
     approvals = await order_service.get_my_approvals(db, user)
     return ApprovalListResponse(data=approvals, total=len(approvals))
+
+
+@router.get("/records", response_model=OrderListResponse)
+async def list_unified_records(
+    page: int = Query(1, ge=1, description="页码"),
+    per_page: int = Query(50, ge=1, le=500, description="每页数量"),
+    record_type: Literal['all', 'order', 'stockin'] = Query(
+        'all', description="记录类型：all=全部 / order=订单 / stockin=备货"),
+    product: str | None = Query(None, description="产品关键字（匹配名称或条码）"),
+    order_no: str | None = Query(None, description="单号关键字"),
+    customer: str | None = Query(None, description="客户名筛选"),
+    status: str | None = Query(None, description="订单状态筛选"),
+    factory: str | None = Query(None, description="工厂筛选：东莞/湖北"),
+    start_date: str | None = Query(None, description="开始日期筛选(YYYY-MM-DD)"),
+    end_date: str | None = Query(None, description="结束日期筛选(YYYY-MM-DD)"),
+    keyword: str | None = Query(None, description="搜索框 OR 关键字：单号/客户/产品名/条码"),
+    db: AsyncSession = Depends(get_async_read_db),
+    user: User = Depends(require_permission("order_manage")),
+) -> OrderListResponse:
+    """获取订单+备货合并记录列表（只读，支持分页和多维度筛选）。
+
+    订单与备货统一按 sort_date DESC NULLS LAST, record_type, source_id 稳定排序，
+    通过 record_type 字段区分（order=订单 / stockin=备货）。
+    工厂权限隔离：非超管且绑定工厂时强制按本厂过滤，前端传参被忽略。
+    状态筛选仅对订单行生效；record_type 非法值由 FastAPI 以 422 拒绝。
+    """
+    # 状态白名单校验：非法状态直接 400，避免静默返回空列表
+    if status and status not in VALID_ORDER_STATUSES:
+        valid = "、".join(sorted(VALID_ORDER_STATUSES))
+        raise HTTPException(status_code=400, detail=f"无效的订单状态：{status}，合法值：{valid}")
+
+    # 权限隔离：绑定工厂的非超管用户强制按本厂过滤，忽略前端传参
+    if user.factory and not user.is_super:
+        factory = user.factory
+
+    try:
+        result = await get_unified_records(
+            db, page=page, per_page=per_page, record_type=record_type,
+            product_kw=product, order_no_kw=order_no, customer=customer,
+            status=status, factory=factory,
+            start_date=start_date, end_date=end_date,
+            keyword=keyword,
+        )
+    except AppError:
+        raise  # 业务异常（如非法日期 400）交由全局 handler，不被吞为 500
+    except (SQLAlchemyError, OSError) as e:
+        logger.exception("[OrderRecords] 获取合并记录失败: %s", e)
+        raise HTTPException(status_code=500, detail=f"获取合并记录失败: {str(e)[:200]}") from e
+
+    return OrderListResponse(data=result['items'], total=result['total'],
+                             page=result['page'], per_page=result['per_page'])
 
 
 @router.get("/{order_id}", response_model=OrderDetailResponse)

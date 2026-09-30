@@ -1,86 +1,55 @@
 <template>
   <div class="co-records-header">
-    <div class="co-records-title-group">
-      <span class="co-records-title"><FontAwesomeIcon icon="list-alt" aria-hidden="true" /> 记录列表</span>
-      <span class="co-record-type-switch">
+    <span class="co-records-title"><FontAwesomeIcon icon="list-alt" aria-hidden="true" /> 记录列表</span>
+    <div class="co-search-tool">
+      <span class="co-search">
+        <FontAwesomeIcon icon="magnifying-glass" class="co-search-icon" aria-hidden="true" />
+        <input
+          v-model="keyword"
+          class="co-record-search"
+          type="text"
+          placeholder="搜索 单号 / 客户 / 产品名 / 条码"
+          aria-label="搜索记录"
+          @keydown.enter="$emit('search')"
+        />
         <button
-          v-for="opt in recordTypeOptions"
-          :key="opt.value"
-          :class="['co-type-btn', recordType === opt.value && 'active']"
-          @click="$emit('change-record-type', opt.value)"
-        >{{ opt.label }}</button>
+          v-if="keyword"
+          class="co-search-clear"
+          type="button"
+          aria-label="清空搜索"
+          @click="$emit('clear')"
+        >
+          <FontAwesomeIcon icon="xmark" aria-hidden="true" />
+        </button>
       </span>
-    </div>
-    <UiButton variant="outline" size="sm" @click="$emit('update:showFilter', !showFilter)">
-      <FontAwesomeIcon icon="filter" style="margin-right: 4px" aria-hidden="true" />筛选
-    </UiButton>
-  </div>
-
-  <div v-if="showFilter" class="co-filter-panel">
-    <div class="co-filter-row">
-      <div class="co-filter-field">
-        <label class="co-label" for="co-filter-customer"><FontAwesomeIcon icon="user" aria-hidden="true" /> 客户</label>
-        <UiSelect id="co-filter-customer" label="按客户筛选" :model-value="filterCustomer" placeholder="全部" :options="customerOptions" style="width: 100%" @update:model-value="$emit('update:filterCustomer', $event)" />
-      </div>
-      <div v-if="recordType === 'order'" class="co-filter-field">
-        <label class="co-label" for="co-filter-status"><FontAwesomeIcon icon="info-circle" aria-hidden="true" /> 状态</label>
-        <UiSelect id="co-filter-status" label="按状态筛选" :model-value="filterStatus" placeholder="全部" :options="statusOptions" style="width: 100%" @update:model-value="$emit('update:filterStatus', $event)" />
-      </div>
-      <div v-if="recordType === 'order'" class="co-filter-field">
-        <label class="co-label" for="co-filter-factory"><FontAwesomeIcon icon="industry" aria-hidden="true" /> 工厂</label>
-        <UiSelect id="co-filter-factory" label="按工厂筛选" :model-value="filterFactory" placeholder="全部" :options="factoryOptions" :disabled="factoryDisabled" style="width: 100%" @update:model-value="$emit('update:filterFactory', $event)" />
-      </div>
-      <div class="co-filter-field">
-        <label class="co-label" for="co-filter-start"><FontAwesomeIcon icon="calendar-alt" aria-hidden="true" /> 开始日期</label>
-        <UiDatePicker id="co-filter-start" label="开始日期" :model-value="filterStart" style="width: 100%" @update:model-value="$emit('update:filterStart', $event)" />
-      </div>
-      <div class="co-filter-field">
-        <label class="co-label" for="co-filter-end"><FontAwesomeIcon icon="calendar-alt" aria-hidden="true" /> 结束日期</label>
-        <UiDatePicker id="co-filter-end" label="结束日期" :model-value="filterEnd" style="width: 100%" @update:model-value="$emit('update:filterEnd', $event)" />
-      </div>
-      <div class="co-filter-field co-filter-action">
-        <UiButton variant="primary" size="sm" @click="$emit('search')">
-          <FontAwesomeIcon icon="search" style="margin-right: 4px" aria-hidden="true" />查询
-        </UiButton>
-        <UiButton variant="outline" size="sm" @click="$emit('reset')">
-          <FontAwesomeIcon icon="undo" style="margin-right: 4px" aria-hidden="true" />重置
-        </UiButton>
-      </div>
+      <UiButton variant="primary" size="sm" @click="$emit('search')">
+        <FontAwesomeIcon icon="search" style="margin-right: 4px" aria-hidden="true" />查询
+      </UiButton>
+      <span v-if="!isLoading" class="co-search-count">共 <b>{{ totalRecords }}</b> 条</span>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import UiSelect from '@/components/ui/UiSelect.vue'
-import UiDatePicker from '@/components/ui/UiDatePicker.vue'
+import { computed } from 'vue'
 import UiButton from '@/components/ui/UiButton.vue'
 
-defineProps<{
-  recordType: 'order' | 'stockin'
-  recordTypeOptions: { label: string; value: 'order' | 'stockin' }[]
-  customerOptions: { label: string; value: string }[]
-  factoryOptions: { label: string; value: string }[]
-  factoryDisabled: boolean
-  statusOptions: { label: string; value: string }[]
-  showFilter: boolean
-  filterCustomer: string
-  filterStatus: string
-  filterFactory: string
-  filterStart: string
-  filterEnd: string
+const props = defineProps<{
+  keyword: string
+  totalRecords: number
+  isLoading: boolean
 }>()
 
-defineEmits<{
-  'update:showFilter': [value: boolean]
-  'update:filterCustomer': [value: string]
-  'update:filterStatus': [value: string]
-  'update:filterFactory': [value: string]
-  'update:filterStart': [value: string]
-  'update:filterEnd': [value: string]
-  'change-record-type': [value: 'order' | 'stockin']
+const emit = defineEmits<{
+  'update:keyword': [value: string]
   search: []
-  reset: []
+  clear: []
 }>()
+
+const keyword = computed({
+  get: () => props.keyword,
+  set: (v: string) => emit('update:keyword', v),
+})
 </script>
 
 <style scoped>
@@ -88,14 +57,11 @@ defineEmits<{
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
   padding: 12px 20px;
   border-bottom: 1px solid var(--color-border, #cbd5e1);
   flex-shrink: 0;
-}
-.co-records-title-group {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+  flex-wrap: wrap;
 }
 .co-records-title {
   font-size: 14px;
@@ -106,60 +72,74 @@ defineEmits<{
   gap: 8px;
 }
 .co-records-title i { color: var(--color-primary-500); }
-.co-record-type-switch {
-  display: inline-flex;
-  border: 1px solid var(--color-border, #cbd5e1);
-  border-radius: 6px;
-  overflow: hidden;
-}
-.co-record-type-switch .co-type-btn {
-  padding: 4px 14px;
-  font-size: 12px;
-  font-weight: 600;
-  border: none;
-  background: var(--color-bg, #fff);
-  color: var(--color-text-secondary, #64748b);
-  cursor: pointer;
-  transition: all 0.15s;
-}
-.co-record-type-switch .co-type-btn.active {
-  background: var(--color-primary-500, #3b82f6);
-  color: #fff;
-}
-.co-filter-panel {
-  padding: 12px 20px;
-  border-bottom: 1px solid var(--color-border, #cbd5e1);
-  background: var(--color-surface, #f8fafc);
-}
-.co-filter-row {
+
+.co-search-tool {
   display: flex;
+  align-items: center;
+  gap: 10px;
   flex-wrap: wrap;
-  gap: 12px;
-  align-items: flex-end;
 }
-.co-filter-field {
-  min-width: 140px;
+.co-search {
+  position: relative;
   flex: 1;
+  min-width: 220px;
+  max-width: 420px;
 }
-.co-filter-field .co-label {
-  font-size: 12px;
-  margin-bottom: 4px;
-}
-.co-filter-action {
-  display: flex;
-  gap: 8px;
-  flex: 0 0 auto;
-  min-width: auto;
-}
-.co-label {
-  display: block;
+.co-record-search {
+  width: 100%;
+  height: 36px;
+  border: 1px solid var(--color-border, #cbd5e1);
+  border-radius: 9px;
+  background: var(--color-bg, #fff);
+  padding: 0 32px 0 32px;
   font-size: 13px;
-  font-weight: 500;
-  margin-bottom: 4px;
-  color: var(--color-text-secondary);
+  color: var(--color-text);
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  font-family: inherit;
 }
-@media (max-width: 768px) {
-  .co-filter-row { flex-direction: column; }
-  .co-filter-field { min-width: 100%; }
+.co-record-search::placeholder { color: var(--color-text-muted); }
+.co-record-search:focus {
+  border-color: var(--color-primary-500);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.13);
+}
+.co-search-icon {
+  position: absolute;
+  left: 11px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--color-text-muted);
+  font-size: 13px;
+  pointer-events: none;
+}
+.co-search-clear {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 17px;
+  height: 17px;
+  border: none;
+  border-radius: 50%;
+  background: var(--color-surface, #f1f5f9);
+  color: var(--color-text-muted);
+  font-size: 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  line-height: 1;
+}
+.co-search-clear:hover { background: var(--color-border-light); color: var(--color-text-secondary); }
+.co-search-count {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+.co-search-count b { color: var(--color-text); }
+@media (max-width: 640px) {
+  .co-search { min-width: 100%; max-width: none; }
+  .co-records-header { padding: 10px 12px; }
 }
 </style>

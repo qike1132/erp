@@ -79,7 +79,8 @@ export interface OrderRecord {
   deduct_quantity?: number
   deduct_stock?: boolean
   deducted?: boolean
-  status: string
+  /** 备货行为 null（后端 /orders/records 统一记录契约） */
+  status: string | null
   note?: string
   is_locked?: boolean
   locked_by_name?: string

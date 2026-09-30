@@ -57,18 +57,7 @@
       <div v-show="activeTab === 'records'" class="co-tab-content">
         <OrderRecordQuery
           v-model:per-page="perPage"
-          v-model:show-filter="showFilter"
-          v-model:filter-customer="filterCustomer"
-          v-model:filter-status="filterStatus"
-          v-model:filter-factory="filterFactory"
-          v-model:filter-start="filterStart"
-          v-model:filter-end="filterEnd"
-          :record-type="recordType"
-          :record-type-options="recordTypeOptions"
-          :customer-options="customerOptions"
-          :factory-options="factoryOptions"
-          :factory-disabled="factoryDisabled"
-          :status-options="statusOptions"
+          v-model:keyword="keyword"
           :order-records="orderRecords"
           :is-loading-records="isLoadingRecords"
           :is-fetching-records="isFetchingRecords"
@@ -78,8 +67,8 @@
           :total-records="totalRecords"
           :can-delete="canDelete"
           :fetch-orders="fetchOrders"
-          :reset-filter="resetFilter"
-          @change-record-type="handleChangeRecordType"
+          :search="search"
+          :clear-keyword="clearKeyword"
           @view-detail="openDetail"
           @delete-record="handleDeleteOrder"
           @change-page="handleChangePage"
@@ -160,12 +149,7 @@ const {
 const inputPanelRef = ref<InstanceType<typeof OrderInputPanel> | null>(null)
 
 const {
-  showFilter,
-  filterCustomer,
-  filterStatus,
-  filterFactory,
-  filterStart,
-  filterEnd,
+  keyword,
   currentPage,
   perPage,
   totalPages,
@@ -174,14 +158,10 @@ const {
   errorMessage,
   totalRecords,
   orderRecords,
-  recordType,
-  recordTypeOptions,
-  factoryOptions,
-  factoryDisabled,
-  statusOptions,
   getStatusClass,
   fetchOrders,
-  resetFilter,
+  search,
+  clearKeyword,
 } = useOrderList()
 
 const {
@@ -261,13 +241,6 @@ function addStaged() {
     inputPanelRef.value?.focusProductInput()
     showToast(`已添加 1 条，暂存区共 ${stagedItems.value.length} 条`, 'success')
   })
-}
-
-/** 记录类型切换：重置分页并重新查询 */
-function handleChangeRecordType(value: 'order' | 'stockin') {
-  recordType.value = value
-  currentPage.value = 1
-  fetchOrders()
 }
 
 /** 分页变化：仅更新页码（子组件已触发 fetchOrders） */
