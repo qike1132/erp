@@ -113,15 +113,17 @@
               <!-- 损耗率：有落库坐标才可编辑；无坐标 → 只读并说明原因 -->
               <td>
                 <template v-if="rowCoord(item)">
-                  <input
-                    v-if="!editMode"
-                    type="number" class="w-14 text-right py-1 px-1 text-[13px] border border-border rounded focus:outline-none focus-visible:outline-2 focus-visible:outline-primary-500 focus-visible:outline-offset-2 focus:border-primary-500"
-                    :value="rowRate(item)" min="0" max="1000" step="any"
-                    :title="sharedMaterialTitle(item)"
-                    @input="onRowRateInput(item, $event)"
-                  />
+                  <!-- 非编辑态：率输入框 +「不一致」提示同处一支（与改造前逐字一致；提示仅非编辑态显示） -->
+                  <template v-if="!editMode">
+                    <input
+                      type="number" class="w-14 text-right py-1 px-1 text-[13px] border border-border rounded focus:outline-none focus-visible:outline-2 focus-visible:outline-primary-500 focus-visible:outline-offset-2 focus:border-primary-500"
+                      :value="rowRate(item)" min="0" max="1000" step="any"
+                      :title="sharedMaterialTitle(item)"
+                      @input="onRowRateInput(item, $event)"
+                    />
+                    <span v-if="isRowRateMixed(item)" class="text-[10px] text-text-muted whitespace-nowrap">不一致</span>
+                  </template>
                   <template v-else>{{ formatQty(rowRate(item)) }}</template>
-                  <span v-if="isRowRateMixed(item)" class="text-[10px] text-text-muted whitespace-nowrap">不一致</span>
                 </template>
                 <span v-else class="text-text-muted" title="该物料不在采购明细中（BOM 生成后新增），无法在此修改">—</span>
               </td>

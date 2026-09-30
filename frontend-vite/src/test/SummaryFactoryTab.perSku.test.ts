@@ -147,20 +147,33 @@ describe('P6 编辑态提示（跨 SKU 共用同一行明细）', () => {
 })
 
 describe('P7 「各明细率不一致」提示与聚焦样式不得因改造丢失', () => {
-  it('回退路径（无 materials）：mixed 为 true 的行渲染「不一致」，率输入保留聚焦类', () => {
+  it('回退路径（无 materials）：非编辑态渲染「不一致」+ 率输入聚焦类；编辑态不渲染', () => {
     const g = group()
     g.skus = [{ product_name: '产品A', product_barcode: 'bA', order_qty: 100 }]
-    const wrapper = mount(SummaryFactoryTab, {
-      props: {
-        factoryData: dataOf(g), editMode: false, lossRate: 10, orderCount: 1,
-        groupSpareRates: [10],
-        fabricLossRateMixed: [[[true, false]]],
-      },
+    const baseProps = {
+      factoryData: dataOf(g), lossRate: 10, orderCount: 1,
+      groupSpareRates: [10],
+      fabricLossRateMixed: [[[true, false]]],
+    }
+
+    // 非编辑态：率列是输入框，提示紧随其后（与改造前逐字一致）
+    const view = mount(SummaryFactoryTab, {
+      props: { ...baseProps, editMode: false },
       global: { stubs },
     })
-    const row = bodyRows(wrapper)[0]!
-    expect(row.text()).toContain('不一致')
-    expect(row.find('input[type="number"]').classes().join(' ')).toContain('focus-visible:outline-2')
+    const viewRow = bodyRows(view)[0]!
+    expect(viewRow.text()).toContain('不一致')
+    expect(viewRow.find('input[type="number"]').classes().join(' ')).toContain('focus-visible:outline-2')
+
+    // 编辑态：率列只是只读文本 ⇒ 提示不得出现（改造前 span 在 !editMode 分支内）
+    const edit = mount(SummaryFactoryTab, {
+      props: { ...baseProps, editMode: true },
+      global: { stubs },
+    })
+    const editRow = bodyRows(edit)[0]!
+    expect(editRow.text()).not.toContain('不一致')
+    // 编辑态下数量列才是输入框，聚焦类应落在它身上
+    expect(editRow.find('input[type="number"]').classes().join(' ')).toContain('focus-visible:outline-2')
   })
 
   it('per-SKU 路径：该物料落库行为 mixed 时，同物料在各块都显示「不一致」', () => {
