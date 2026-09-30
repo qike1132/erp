@@ -350,6 +350,57 @@ async def test_c12_per_sku_materials_add_no_db_queries(db):
     group = (await get_factory_order_summary(session, [po_id]))['groups'][0]
 
     reads = [s for s in statements if s.lstrip().lower().startswith('select')]
-    assert group['skus'][0].get('materials') is not None
-    # BOM/产品/明细/快照 ≈ 8 条定点读；给到 14 条上限，超了说明有人在循环里查库
-    assert len(reads) <= 14, f'汇总读查询数异常偏多（{len(reads)} 条），疑似在按 SKU 展开时查库'
+    assert group['skus'][0]['materials']
+    # 基线 10 条定点读（BOM/产品/明细/快照）；若按 SKU 展开引入「逐 SKU」或「逐物料行」
+    # 的查询，会立即超过 10，本护栏才会真正报警。
+    assert len(reads) <= 10, f'汇总读查询数异常偏多（{len(reads)} 条），疑似在按 SKU 展开时查库'
+
+
+async def test_c14_multi_po_same_group_uses_summed_quantity(db):
+    """C14：同一分组汇聚两张采购单、且两张单有同名 SKU 时，materials 必须按**合并后**的数量
+    推算（而不是只反映最后一张单）——否则会与显示用的 order_qty 自相矛盾，
+    并让前端的数量差异对照块把「没差异」误报成差异。"""
+    session, _ = db
+    po_id = await _seed_single_or_multi(session, multi=True)      # 单 8001：A=100, B=200
+    session.add_all([
+        # 第二张单的来源订单必须自带 OrderItem（否则 fetch_po_sku_pids_map 会回退查
+        # stock_in 兼容表，而本 fixture 未注册该表）
+        Order(id=9002, order_no='SO-9002', customer='客户甲',
+              product_id=101, quantity=100, status='待备货'),
+        OrderItem(id=3, order_id=9002, product_id=101, product_name='产品A', quantity=50),
+        OrderItem(id=4, order_id=9002, product_id=102, product_name='产品B', quantity=50),
+        PurchaseOrderSku(id=1, po_id=po_id, product_name='产品A', product_barcode='bA',
+                         order_qty=100, source_order_id=9001, source_record_type='order'),
+        PurchaseOrderSku(id=2, po_id=po_id, product_name='产品B', product_barcode='bB',
+                         order_qty=200, source_order_id=9001, source_record_type='order'),
+        # 第二张采购单：同客户 + 同拼接产品名 ⇒ 落进同一分组；各 SKU 再要 50 件
+        PurchaseOrder(id=8002, order_no='PO-8002', customer_name='客户甲',
+                      product_name='产品A、产品B', product_quantity=100,
+                      supplier_name='供应商甲', source_order_ids='[9002]'),
+        PurchaseOrderSku(id=3, po_id=8002, product_name='产品A', product_barcode='bA',
+                         order_qty=50, source_order_id=9002, source_record_type='order'),
+        PurchaseOrderSku(id=4, po_id=8002, product_name='产品B', product_barcode='bB',
+                         order_qty=50, source_order_id=9002, source_record_type='order'),
+        # 单 8002 的明细：0.2 × (50+50)=20 / 0.2×50=10 / 0.2×50=10
+        PurchaseOrderItem(id=11, order_id=8002, material_name=SHARED, specification='S1', unit='米',
+                          quantity=20, supplier_name='供应商甲'),
+        PurchaseOrderItem(id=12, order_id=8002, material_name=ONLY_A, specification='S2', unit='米',
+                          quantity=10, supplier_name='供应商甲'),
+        PurchaseOrderItem(id=13, order_id=8002, material_name=ONLY_B, specification='S3', unit='米',
+                          quantity=10, supplier_name='供应商甲'),
+    ])
+    await session.commit()
+
+    group = (await get_factory_order_summary(session, [po_id, 8002]))['groups'][0]
+    per_sku = _sku_materials(group)
+
+    # 合并后 A 合计 150 件、B 合计 250 件 ⇒ 0.2 单件用量：
+    # 旧（有缺陷）行为只按最后一张单算，会得到 A=10 / B=10，本断言必须能区分
+    assert per_sku['产品A'] == {SHARED: 30.0, ONLY_A: 30.0}
+    assert per_sku['产品B'] == {SHARED: 50.0, ONLY_B: 50.0}
+    # 各 SKU 推算之和 == 落库真值（两张单的明细之和）⇒ 前端不应显示差异块
+    summed: dict[str, float] = {}
+    for mats in per_sku.values():
+        for name, qty in mats.items():
+            summed[name] = round(summed.get(name, 0.0) + qty, 2)
+    assert summed == _fabrics(group)

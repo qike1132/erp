@@ -138,7 +138,9 @@ def _sku_material_rows(bom_rows: list, sku_qty: float, supplier_fallback: str) -
     - **不同 SKU 之间不合并、不去重** —— 那是采购合计的口径（见
       `_build_factory_group_map` 的 `seen_materials`），本函数只服务「某一个 SKU 要多少料」。
 
-    不查库、不抛错；`bom_rows` 为空时返回 `[]`。
+    不查库，也**不抛错**（`bom_rows` 为空时返回 `[]`）。前提：`bom_rows` 由
+    `_fetch_bom_data` 产出，其 `material_name/specification/unit/quantity` 键恒存在；
+    本函数不做键存在性防御（与既有 `_accumulate_factory_bom` 同一约定）。
     """
     buckets: dict[tuple, dict] = {}
     for bom in bom_rows or []:
@@ -162,6 +164,41 @@ def _sku_material_rows(bom_rows: list, sku_qty: float, supplier_fallback: str) -
         buckets.values(),
         key=lambda r: (r['supplier_name'], r['material_name'], r['specification'], r['unit']),
     )
+
+
+def _accumulate_factory_sku_qtys(group: dict, sku_lines: list, po, name_to_pid: dict) -> None:
+    """按 SKU 名累加 order_qty（并记下首个可解析的 pid 与供应商兜底）。
+
+    同一分组可能汇聚多张采购单（同客户 + 同拼接产品名），此时显示口径是「合并后的数量」
+    （见 ``merge_sku_lines``）；materials 必须与它同源，否则同一行自相矛盾、且前端的
+    数量差异对照块会把「没差异」误报成差异。故此处**只累加**，推算留到全部单汇总后。
+    """
+    for sku in sku_lines:
+        sku_name = _norm_sku_name(sku.get('product_name'))
+        sku_pid = name_to_pid.get(sku_name)
+        if sku_pid is not None and sku_name not in group['_sku_pid_by_name']:
+            group['_sku_pid_by_name'][sku_name] = sku_pid
+        group['_sku_qty_by_name'][sku_name] = (
+            group['_sku_qty_by_name'].get(sku_name, 0.0) + float(sku.get('order_qty') or 0)
+        )
+        if not group['_sku_supplier_fallback']:
+            group['_sku_supplier_fallback'] = po.supplier_name or '未指定供应商'
+
+
+def _finalize_factory_sku_materials(group_map: dict, bom_data: dict) -> None:
+    """全部采购单累加完毕后，按「合并后的 SKU 数量」一次性推算物料（纯内存，零新增查询）。
+
+    解析不出产品（无 pid）的 SKU 留空数组 —— 前端据此回退订单级单块，绝不编造。
+    """
+    for group in group_map.values():
+        fallback = group['_sku_supplier_fallback'] or '未指定供应商'
+        group['_sku_materials'] = {
+            name: (
+                _sku_material_rows(bom_data.get(group['_sku_pid_by_name'][name]) or [], qty, fallback)
+                if group['_sku_pid_by_name'].get(name) else []
+            )
+            for name, qty in group['_sku_qty_by_name'].items()
+        }
 
 
 def _build_factory_group_map(orders, bom_data, items_map, items_by_order, cust_order_map,
@@ -193,7 +230,9 @@ def _build_factory_group_map(orders, bom_data, items_map, items_by_order, cust_o
                 'order_quantity': order_qty,
                 '_supplier_map': {},
                 '_sku_lines': [],
-                '_sku_materials': {},
+                '_sku_qty_by_name': {},
+                '_sku_pid_by_name': {},
+                '_sku_supplier_fallback': '',
                 '_order_ids': [],
             }
         group = group_map[key]
@@ -209,19 +248,10 @@ def _build_factory_group_map(orders, bom_data, items_map, items_by_order, cust_o
                 'product_name': prod, 'product_barcode': '', 'order_qty': order_qty,
             })
 
-        # 按 SKU 展开的物料（口径 A）：纯内存，BOM 已随请求加载，零新增查询。
-        # 键用 SKU 名（Product.name 全局唯一）；解析不出产品的 SKU 留空 →
-        # 前端据此回退订单级单块，绝不编造。
+        # 按 SKU 名累加 order_qty（细节见 _accumulate_factory_sku_qtys）：
+        # 同一分组可能汇聚多张采购单，materials 必须与显示用的合并数量同源。
         name_to_pid = {name: pid for pid, name in (prod_name_map or {}).items()}
-        for sku in sku_lines:
-            sku_pid = name_to_pid.get(_norm_sku_name(sku.get('product_name')))
-            group['_sku_materials'][_norm_sku_name(sku.get('product_name'))] = (
-                _sku_material_rows(
-                    bom_data.get(sku_pid) or [], float(sku.get('order_qty') or 0),
-                    po.supplier_name or '未指定供应商',
-                )
-                if sku_pid else []
-            )
+        _accumulate_factory_sku_qtys(group, sku_lines, po, name_to_pid)
 
         if po_pids_map is None:
             pids = [pid] if pid else []
@@ -252,6 +282,9 @@ def _build_factory_group_map(orders, bom_data, items_map, items_by_order, cust_o
         if not has_bom:
             # BOM 完全不可用（所选 SKU 均未配 BOM）时的既有回退
             _accumulate_factory_po_items(group, po, items_by_order)
+
+    # 全部采购单累加完毕后，按「合并后的 SKU 数量」一次性推算物料（细节见 helper）
+    _finalize_factory_sku_materials(group_map, bom_data)
     return group_map
 
 def _serialize_factory_groups(group_map: dict[tuple, dict]) -> list:
