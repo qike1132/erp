@@ -31,9 +31,16 @@ function mountTable(selection?: typeof ROWS | null) {
 describe('PrimeVue DataTable 行样式', () => {
   it('行分隔线随 bodyRow（tr 本体）生效，而不是写在死键 row 上', () => {
     const tr = mountTable().find('tbody tr')
+    // 按 class token 精确比对：`border-border` 是 `border-border-light` 的子串，
+    // 用 toContain 直接搜字符串会让旧值也通过（假绿），故先切分。
+    const classes = (tr.attributes('class') ?? '').split(/\s+/)
 
-    expect(tr.attributes('class')).toContain('border-b')
-    expect(tr.attributes('class')).toContain('border-border-light')
+    expect(classes).toContain('border-b')
+    // 2026-09-30：行线从 border-border-light(#f0f2f5) 换成 border-border(#e4e7ed)。
+    // 原色对白底对比度仅 1.122:1，行与行之间看不出分界；换成与表头下边线/表格外框同色后为 1.239:1，
+    // 全表网格线统一成一个色调（用户以对比稿选定）。断言跟到新色名，防止日后被悄悄改回浅色。
+    expect(classes).toContain('border-border')
+    expect(classes).not.toContain('border-border-light')
   })
 
   it('行 hover 同样落在 tr 上', () => {

@@ -103,9 +103,12 @@ export const plushCutePT: PrimeVuePTOptions = {
     // 行样式必须挂在 `bodyRow`（`<tr>` 本体）。原先写在 `row` 上 —— 那一段指的是
     // Row 辅助组件（展开行/分组行），对本项目的表格行不生效，行分隔线与 hover
     // 一直是死的（全站 19 个用 UiDataTable 的视图都没有分隔线，2026-09-29 定位）。
+    // 行线色 2026-09-30 从 border-border-light(#f0f2f5) 改为 border-border(#e4e7ed)：
+    // 前者对白底对比度仅 1.122:1，行与行之间看不出分界（多 SKU 行变高后更明显）；
+    // 后者与表头下边线、表格外框同色（1.239:1），全表网格线统一成一个色调。
     bodyRow: ({ context }: { context: { selected: boolean } }) => ({
       class: [
-        'border-b border-border-light transition-colors duration-150',
+        'border-b border-border transition-colors duration-150',
         context.selected ? 'bg-primary-50' : 'hover:bg-slate-50',
       ],
     }),
