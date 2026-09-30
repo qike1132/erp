@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi_app.core.deps import resolve_production_view_scope
 from fastapi_app.main import app
+from fastapi_app.services import daily_production_service
 
 
 def _scope_override(scope):
@@ -149,3 +150,51 @@ class TestRecordsAndExportScope:
             '/api/v1/daily-production/daily-summary', params={'date': '2026-09-29'},
         )
         assert response.status_code == 403
+
+
+class TestSqlDepartmentFilterCoverage:
+    """Item 3：三个读函数 SQL 里的 department.in_ 过滤必须真实存在。
+
+    端点测试 mock 了整个 service，service 测试又 mock 了 DB，于是该过滤
+    条件此前没有任何测试执行过 —— 从任一个读函数里删掉它，测试仍会全绿。
+    这里捕获交给 session 的真实 statement，断言过滤确实出现在 SQL 文本里。
+    """
+
+    async def test_daily_summary_sql_filters_departments(self):
+        db = AsyncMock()
+        result = MagicMock()
+        result.scalars.return_value.all.return_value = []
+        db.execute = AsyncMock(return_value=result)
+
+        await daily_production_service.get_daily_summary(
+            db, '2026-09-29', departments={'filling'},
+        )
+
+        stmt = db.execute.await_args.args[0]
+        assert 'department IN' in str(stmt)
+
+    async def test_monthly_summary_sql_filters_departments(self):
+        db = AsyncMock()
+        result = MagicMock()
+        result.all.return_value = []
+        db.execute = AsyncMock(return_value=result)
+
+        await daily_production_service.get_monthly_summary(
+            db, 2026, 9, departments={'filling'},
+        )
+
+        stmt = db.execute.await_args.args[0]
+        assert 'department IN' in str(stmt)
+
+    async def test_trend_sql_filters_departments(self):
+        db = AsyncMock()
+        result = MagicMock()
+        result.all.return_value = []
+        db.execute = AsyncMock(return_value=result)
+
+        await daily_production_service.get_trend(
+            db, start_date='2026-09-01', end_date='2026-09-29', departments={'filling'},
+        )
+
+        stmt = db.execute.await_args.args[0]
+        assert 'department IN' in str(stmt)

@@ -11,10 +11,18 @@ from typing import Any
 
 from sqlalchemy.exc import DisconnectionError, OperationalError
 
-from fastapi_app.core.production_scope import AGGREGATE_VIEW_CODE, PRODUCTION_DEPARTMENTS, view_code
+from fastapi_app.core.production_scope import (
+    AGGREGATE_VIEW_CODE,
+    PRODUCTION_DEPARTMENTS,
+    manage_code,
+    view_code,
+)
 
 # 生产报表的部门级只读码，由 production_scope 派生（权限码字符串单一来源）
 PRODUCTION_DEPT_VIEW_CODES: list[str] = [view_code(d) for d in PRODUCTION_DEPARTMENTS]
+# 部门级可写码同样计入导航可见性：只持 manage 的录单员是合法页面用户；
+# 且若改用「顺手补一个聚合 view 码」让入口出现，会反把该用户放大到全部门可见（设计 §5.4）。
+PRODUCTION_DEPT_MANAGE_CODES: list[str] = [manage_code(d) for d in PRODUCTION_DEPARTMENTS]
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +33,12 @@ SPECIAL_PERMISSION_MAP = {
     'outsource_manage': ['outsource_manage', 'outsource_view'],
     # 生产报表按部门拆权限后，只有部门码的用户也要能看到导航入口；
     # 任持其一即可见（前端侧栏按 permission_codes 做「任一命中」判断）。
-    'production_summary_view': [AGGREGATE_VIEW_CODE, *PRODUCTION_DEPT_VIEW_CODES],
+    # 键用聚合码常量而非字面量：聚合码重命名时映射不会静默失配。
+    AGGREGATE_VIEW_CODE: [
+        AGGREGATE_VIEW_CODE,
+        *PRODUCTION_DEPT_VIEW_CODES,
+        *PRODUCTION_DEPT_MANAGE_CODES,
+    ],
 }
 
 

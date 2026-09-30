@@ -219,16 +219,17 @@ async def get_current_user_with_permissions(user=Depends(_get_user_with_permissi
 
 ### 5.4 导航可见性
 
-导航项「生产报表」当前只认 `production_summary_view`，会导致只有部门码的用户看不到入口。在 `core/nav_context.py` 的 `SPECIAL_PERMISSION_MAP` 增加：
+导航项「生产报表」当前只认 `production_summary_view`，会导致只有部门码的用户看不到入口。在 `core/nav_context.py` 的 `SPECIAL_PERMISSION_MAP` 增加（键用聚合码常量 `AGGREGATE_VIEW_CODE`，而非字面量，以免聚合码重命名时映射静默失配）：
 
 ```python
-'production_summary_view': [
-    'production_summary_view',
-    'production_summary_view_filling',
-    'production_summary_view_handcraft',
-    'production_summary_view_packaging',
+AGGREGATE_VIEW_CODE: [
+    AGGREGATE_VIEW_CODE,
+    *PRODUCTION_DEPT_VIEW_CODES,
+    *PRODUCTION_DEPT_MANAGE_CODES,
 ],
 ```
+
+**部门 manage 码也必须列入**：只持 `production_summary_manage_filling` 的录单员是合法的页面用户，必须能看到入口；若改用「顺手补一个聚合 `production_summary_view` 码」让入口出现，`production_scope_of(user, write=False)` 会返回 `None`，反而把该用户放大到**全部三个部门**可见 —— 正是本设计最危险的 fail-open 失效模式。
 
 （`nav_context.py:127-132` 会自动把自身 code 并入，无需重复。）
 
@@ -393,6 +394,7 @@ async def get_current_user_with_permissions(user=Depends(_get_user_with_permissi
 | R5 | 删除旧面板（`ProductionDailyPanel` / `ProductionMonthlyPanel`）可能带走某些人常用但未言明的视图 | §4.3 待确认项；若需保留，在抽屉内加"按日汇总"视图而非恢复 Tab |
 | R6 | 移动端路由与 PC 共用 `/production` 路径，按设备分流；新增明细页需确认分流逻辑与返回栈 | 实现时先验证 `router/index.ts` 的移动端分流与 `MobileNavBar` 返回行为 |
 | R7 | `daily_production_record` 无软删除列，删除不可恢复 | 本期以「删除前审计快照 + 二次确认 + 不做批量删除」控制风险（§6.5 / D12）；软删除（`is_deleted` + 全部读路径过滤）列入后续 |
+| R8 | 移动端/仪表盘的部门级生产聚合不经过新的范围模型：`services/dashboard/mobile.py` 按部门聚合当日产量/产值，而暴露它的端点（`api/v1/endpoints/dashboard.py`、`api/v2/endpoints/dashboard.py`）只校验登录、无权限依赖。因此持有单部门码的用户仍能从仪表盘看到其他部门的当日汇总。 | 属**既有**行为（改动前对所有登录用户都如此），且不在本计划的端点清单（§6.1）内；本期作为已知债务记录，收窄该路径需另开任务并单独评审 |
 
 ### 9.2 未决项（需评审确认）
 

@@ -18,7 +18,6 @@ from fastapi_app.core.config import settings
 from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import (
     get_current_user_with_permissions,
-    require_permission,
     resolve_production_view_scope,
     resolve_production_write_scope,
 )
@@ -370,14 +369,14 @@ async def export_records(
 async def get_product_info(
     product_id: int,
     db: AsyncSession = Depends(get_async_read_db),
-    _user: User = Depends(require_permission('production_summary_view')),
+    _scope: set[str] | None = Depends(resolve_production_view_scope),
 ) -> ProductInfoResponse:
     """获取产品信息（用于生产记录时从产品清单获取SKU详情）。
 
     Args:
         product_id: 产品 ID。
         db: 异步数据库会话（只读副本）。
-        _user: 当前登录用户（仅需通过权限校验）。
+        _scope: 用户可见部门范围（仅作授权闸门）。
 
     Returns:
         ProductInfoResponse: 包含产品信息的响应。
