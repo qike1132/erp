@@ -151,3 +151,24 @@ class TestMobileDashboardEndpointScope:
         assert mock_fetch.await_args.kwargs['departments'] == {'handcraft'}
         depts = resp.json()['data']['production']['departments']
         assert [d['name'] for d in depts] == ['手工部']
+
+
+# ---------------------------------------------------------------------------
+# 缓存键：不同范围不得共用同一条缓存（否则先到者把结果串给其他用户）
+# ---------------------------------------------------------------------------
+class TestCacheKeyIncludesScope:
+    async def test_different_scopes_do_not_share_cache_entry(self):
+        # 键若不含部门范围，第二次调用会命中第一次的 L1 缓存而不再查库。
+        db_a, _ = _capturing_db()
+        db_b, _ = _capturing_db()
+        await fetch_mobile_dashboard(None, db_a, departments={'filling'})
+        await fetch_mobile_dashboard(None, db_b, departments={'handcraft'})
+
+        assert db_b.execute.await_count > 0, '不同部门范围不得共用缓存条目'
+
+    def test_unscoped_key_stays_byte_identical(self):
+        from fastapi_app.services.dashboard.mobile import _mobile_cache_scope
+
+        assert _mobile_cache_scope(None) == '', '未收窄时缓存键必须与旧键一致'
+        assert _mobile_cache_scope(set()) == ':'
+        assert _mobile_cache_scope({'packaging', 'filling'}) == ':filling,packaging'

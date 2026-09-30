@@ -36,8 +36,21 @@ from fastapi_app.shared_models import (
 logger = logging.getLogger(__name__)
 
 
+def _mobile_cache_scope(departments: set[str] | None) -> str:
+    """缓存键的部门范围片段：未收窄（None）时为空串，保持旧键逐字节不变。
+
+    缓存键在 L1/L2 全局共享（无用户维度）。若键不含部门范围，先到者的结果
+    会在 TTL 内被串给其他范围的用户 —— 恰好制造出本模块要消除的越权读取。
+    """
+    if departments is None:
+        return ''
+    return ':' + ','.join(sorted(departments))
+
+
 @cache_result(key_prefix="dashboard:mobile", ttl=30, local_ttl=30,
-              key_builder=lambda **kwargs: f"d{kwargs.get('query_date', '')}")  # sql-safe: escape_like/绑定参数/常量片段
+              key_builder=lambda **kwargs: (
+                  f"d{kwargs.get('query_date', '')}{_mobile_cache_scope(kwargs.get('departments'))}"
+              ))  # sql-safe: escape_like/绑定参数/常量片段
 async def fetch_mobile_dashboard(
     query_date: str | None,
     db: AsyncSession,
