@@ -63,3 +63,9 @@
 |---|---|
 | `pgbouncer/` | `.env` 未启用 `PGBOUNCER_ENABLED`，本机无 pgbouncer 进程；`pgbouncer.windows.ini` 已按 Windows 路径写好 |
 | `postgres/init-replica.sh`、`init-replication.sh` | 只读副本的**一次性**搭建脚本，非持续运行件 |
+
+## 五、环境变量：单一来源与漂移检查
+
+本目录的 `.env.production` 是**灾备随包分发件**（第二节），运行时**不被加载**；
+运行时唯一被加载的是项目根的 `.env`。改配置、查漂移、灾备恢复顺序见
+[docs/runbooks/env-config.md](../docs/runbooks/env-config.md)（含 S3 新增的生产启动强校验说明）。

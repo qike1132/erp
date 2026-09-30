@@ -1,6 +1,9 @@
 import ipaddress
 import logging
 import os
+import sys
+import tempfile
+from pathlib import Path
 from urllib.parse import quote_plus, urlparse
 
 from dotenv import load_dotenv
@@ -119,6 +122,165 @@ def filter_cors_origins(raw: str, *, is_production: bool) -> list[str]:
         if origin.strip()
         and (not is_production or _is_production_allowed_origin(origin.strip()))
     ]
+
+
+# ---------------------------------------------------------------------------
+# 生产环境备份/监控配置校验（S3，2026-09-30）
+#
+# 背景：本应用**只加载项目根 .env**（见本文件顶部 load_dotenv 与 model_config 的 env_file）。
+# 生产机上 .env 与 .env.production / config/.env.production 长期漂移（缺 90+ 键，含全部
+# BACKUP_*），而备份服务读取这些键的方式又各不相同：
+#   · BACKUP_ENCRYPTION_ENABLED 默认 true   （services/backup/_constants.py:43）
+#   · BACKUP_ENCRYPTION_PASSWORD 默认 ''    （同文件 :44）
+#   ⇒ 两者组合会产出「看着成功、但无人能解开」的备份文件（P0-1 同类事故）。
+# 因此这里对「已启用备份加密却拿不到密钥」直接拒绝启动（fail fast）；
+# 其余缺失项只告警——它们大多有合理默认值
+# （services/backup/orchestration/policy_service.py:43/46/63）。
+# 可用 STRICT_CONFIG_CHECK=false 临时关闭本校验。
+# ---------------------------------------------------------------------------
+
+# 模板占位值前缀（.env.example 里的 <...> / changeme / your-xxx 等）
+_PLACEHOLDER_PREFIXES = ("<", "changeme", "change-me", "your-", "your_", "xxx", "todo", "placeholder")
+
+# 最近一次 Settings() 构造收集到的生产配置告警（供启动后统一打印）
+_production_config_warnings: list[str] = []
+
+
+def _is_strict_config_check_enabled() -> bool:
+    """STRICT_CONFIG_CHECK 开关（默认开启；false/0/no/off 关闭生产配置强校验）。"""
+    raw = os.getenv("STRICT_CONFIG_CHECK", "").strip().lower()
+    return raw not in ("false", "0", "no", "off")
+
+
+def _is_test_process() -> bool:
+    """测试进程判定：用于豁免生产配置强校验。
+
+    本仓库多处测试为了让**其它**生产闸门生效而伪造 APP_ENV=production
+    （tests/test_config.py:36、fastapi_app/tests/test_security_and_batch.py:130/188 等），
+    它们验证的是 SECRET_KEY / ALLOWED_HOSTS 等规则，不应被备份校验拦截；
+    且没有 .env 的 CI 环境本来就拿不到 BACKUP_* 的值。
+    生产进程（prod_runner / uvicorn / ARQ worker）从不导入 pytest，
+    也不会设置 PYTEST_CURRENT_TEST，因此本豁免不会削弱生产保护。
+    """
+    return "pytest" in sys.modules or bool(os.getenv("PYTEST_CURRENT_TEST"))
+
+
+def _looks_like_placeholder(value: str) -> bool:
+    """模板占位值判定（<...> / changeme / your-xxx / 空串等）。"""
+    normalized = value.strip().strip('"').strip("'").lower()
+    if not normalized:
+        return True
+    return normalized.startswith(_PLACEHOLDER_PREFIXES)
+
+
+def _probe_dir_writable(directory: Path) -> bool:
+    """真实写入探测。
+
+    不用 os.access(dir, os.W_OK)：Windows 上它依据目录的只读属性判断，
+    对 ACL 拒绝写入的目录会误报可写（反之也可能误报不可写而拦住启动）。
+    """
+    try:
+        with tempfile.NamedTemporaryFile(
+            dir=directory, prefix=".write_probe_", suffix=".tmp", delete=True
+        ):
+            return True
+    except OSError:
+        return False
+
+
+def _validate_production_backup_config(*, force: bool = False) -> list[str]:
+    """生产环境备份/监控配置校验。
+
+    返回**非致命**告警文案列表；致命项直接抛 RuntimeError（拒绝启动）。
+    只在生产环境由 Settings.__init__ 调用；force=True 供测试绕过测试进程豁免。
+
+    判定分级（刻意为「能安全启动」留余地）：
+      1. 备份加密：生效且拿不到可用密钥 ⇒ **拒绝启动**（会产出不可还原的备份）
+      2. BACKUP_DIR：显式声明且目录已存在但不可写 ⇒ **拒绝启动**（备份必然全败）；
+         目录不存在只告警（records.py 的 ensure_backup_dir 会在首次使用时创建）
+      3. 调度/存储/监控/告警通道缺失 ⇒ 只告警（均有合理默认值或仅影响可观测性）
+    """
+    warnings: list[str] = []
+    if not force and _is_test_process():
+        return warnings
+    if not _is_strict_config_check_enabled():
+        logger.warning("STRICT_CONFIG_CHECK 已关闭，跳过生产备份/监控配置校验")
+        return warnings
+
+    # 1) 备份加密
+    encryption_declared = os.getenv("BACKUP_ENCRYPTION_ENABLED")
+    encryption_enabled = (encryption_declared or "true").strip().lower() == "true"
+    if encryption_declared is None:
+        warnings.append(
+            "未显式声明 BACKUP_ENCRYPTION_ENABLED（代码默认 true）；"
+            "请显式声明，避免默认值变更时静默改变备份行为"
+        )
+    if encryption_enabled:
+        password = os.getenv("BACKUP_ENCRYPTION_PASSWORD", "")
+        master_key = os.getenv("BACKUP_ENCRYPTION_KEY", "")
+        effective = password if password.strip() else master_key
+        if not effective.strip() or _looks_like_placeholder(effective):
+            raise RuntimeError(
+                "生产环境已启用备份加密（BACKUP_ENCRYPTION_ENABLED 生效为 true）"
+                "但未提供可用的 BACKUP_ENCRYPTION_PASSWORD / BACKUP_ENCRYPTION_KEY："
+                "备份将产出无法解密的文件，拒绝启动。"
+                "确需临时跳过校验请设置 STRICT_CONFIG_CHECK=false。"
+            )
+
+    # 2) 备份目录
+    backup_dir = os.getenv("BACKUP_DIR", "").strip()
+    if backup_dir:
+        _dir = Path(backup_dir)
+        if _dir.is_dir():
+            if not _probe_dir_writable(_dir):
+                raise RuntimeError(
+                    f"生产环境 BACKUP_DIR={backup_dir!r} 存在但不可写：备份会全部失败，拒绝启动。"
+                    "请修正目录权限或改用可写路径。"
+                )
+        else:
+            warnings.append(
+                f"BACKUP_DIR={backup_dir!r} 当前不是已存在的目录；"
+                "备份服务首次使用时会自动创建（ensure_backup_dir），请确认路径与磁盘挂载正确"
+            )
+    else:
+        warnings.append(
+            "未设置 BACKUP_DIR，将使用默认值 backups/server（与数据库同盘，无异地副本）"
+        )
+
+    # 3) 备份调度与存储（有合理默认值，缺失只告警）
+    for _key, _default, _label in (
+        ("BACKUP_STORAGE_LOCATION", "BACKUP_DIR", "备份存储位置"),
+        ("BACKUP_FULL_CRON", "0 2 * * *", "全量备份计划"),
+        ("BACKUP_INCREMENTAL_CRON", "0 */1 * * *", "增量备份计划"),
+    ):
+        if not os.getenv(_key, "").strip():
+            warnings.append(f"未显式声明 {_key}（{_label}），将使用默认值 {_default}")
+
+    # 4) 监控与告警通道（缺失只告警）
+    if not os.getenv("METRICS_BEARER_TOKEN", "").strip():
+        warnings.append(
+            "未设置 METRICS_BEARER_TOKEN：/metrics 会返回 503（fail-closed），Prometheus 抓取不可用"
+        )
+    if (
+        os.getenv("BACKUP_ALERT_WEBHOOK_ENABLED", "false").strip().lower() == "true"
+        and not os.getenv("BACKUP_ALERT_WEBHOOK_URL", "").strip()
+    ):
+        warnings.append(
+            "BACKUP_ALERT_WEBHOOK_ENABLED=true 但 BACKUP_ALERT_WEBHOOK_URL 为空：Webhook 告警不会送出"
+        )
+    if (
+        os.getenv("BACKUP_ALERT_EMAIL_ENABLED", "false").strip().lower() == "true"
+        and not os.getenv("BACKUP_ALERT_SMTP_HOST", "").strip()
+    ):
+        warnings.append(
+            "BACKUP_ALERT_EMAIL_ENABLED=true 但 BACKUP_ALERT_SMTP_HOST 为空：邮件告警不会送出"
+        )
+    return warnings
+
+
+def get_production_config_warnings() -> list[str]:
+    """返回最近一次 Settings() 构造收集到的生产配置告警（非生产/未构造时为空）。"""
+    return list(_production_config_warnings)
 
 
 class Settings(BaseSettings):
@@ -243,6 +405,15 @@ class Settings(BaseSettings):
                     "生产环境 CORS_ORIGINS 不得包含 'null' 源（沙箱 iframe 逃逸风险），"
                     "请移除 null 并设置为具体 HTTPS 域名。"
                 )
+            # 备份/监控配置校验（S3）：致命项直接抛错，其余收集为告警
+            # ⚠️ 必须放在上面所有既有闸门之后：tests/test_config.py:31 与
+            #    fastapi_app/tests/test_security_and_batch.py:124/180 依赖
+            #    「长度不足」「禁止」两条报错先触发。
+            _warnings = _validate_production_backup_config()
+            _production_config_warnings.clear()
+            _production_config_warnings.extend(_warnings)
+            for _message in _warnings:
+                logger.warning("生产配置告警：%s", _message)
 
     @property
     def is_production(self) -> bool:

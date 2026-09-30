@@ -52,10 +52,11 @@ class Gate:
     title: str
     script: str
     fix_hint: str
+    extra_args: tuple[str, ...] = ()
 
     def argv(self, thresholds: dict[str, int]) -> list[str]:
         """构造调用命令（阈值来自 pyproject，按门禁类型注入）。"""
-        base = [sys.executable, self.script]
+        base = [sys.executable, self.script, *self.extra_args]
         if self.key == "function_length":
             base += ["--max-length", str(thresholds["max_function_length"])]
         elif self.key == "vue_component_length":
@@ -107,6 +108,14 @@ GATES: tuple[Gate, ...] = (
         "scripts/check_alembic_heads.py",
         "合并分支用 `alembic merge -m \"merge heads\" <rev1> <rev2>`；"
         "新增 root 需评审后上调 EXPECTED_MAX_BASES",
+    ),
+    Gate(
+        "env_drift",
+        "环境变量漂移（代码引用 与 .env.example 模板）",
+        "scripts/ops/check_env_drift.py",
+        "把缺失键补进 .env.example（占位值）或删掉失效键；"
+        "带 .env.production 的全量检查请手动跑 `python scripts/ops/check_env_drift.py`",
+        ("--ci",),
     ),
 )
 
