@@ -647,3 +647,51 @@ async def test_save_zero_rate_preserved(db):
     spare, sku_rows = await _po_spare(session, fx['po_id'])
     assert float(spare) == 0
     assert sku_rows[0][1] == 0
+
+
+from fastapi_app.services.purchase_order_crud import (
+    batch_complete_purchase_orders,
+    complete_purchase_order,
+)
+
+
+async def _seed_completable(db: AsyncSession, po_id: int) -> int:
+    """一张 pending 采购单：部位率已配（头 30、身 10），订单级率空缺。
+
+    产品 BOM（9100）为批量用例中的多张单共用，故仅在缺失时才 seed，
+    否则第二次调用会重复插入同一 product.id 撞主键。
+    """
+    if await db.get(Product, 9100) is None:
+        await _seed_product_two_fabrics(db)
+    await _seed_po(
+        db, po_id, product_quantity=1000, spare_rate=None,
+        item_rates={_H_TIAO: 30, ('素色身布', 'S2', '米'): 10},
+        skus=[{'product_name': _XIAOTU, 'order_qty': 1000}],
+    )
+    return po_id
+
+
+async def test_complete_order_recomputes_spare_by_part_rates(db):
+    """完成单张订单并携带统一率 5：备品仍应按部位率 max（30）算，而非 5。"""
+    session = db
+    po_id = await _seed_completable(session, 7300)
+
+    await complete_purchase_order(session, po_id, 'tester', spare_rate=5)
+
+    spare, sku_rows = await _po_spare(session, po_id)
+    assert float(spare) == 30, '部位率存在时不得被顶层统一率覆盖'
+    assert sku_rows == [(30, 30)]
+
+
+async def test_batch_complete_recomputes_spare_by_part_rates(db):
+    """批量完成路径同样按部位率 max 算备品。"""
+    session = db
+    await _seed_completable(session, 7310)
+    await _seed_completable(session, 7311)
+
+    res = await batch_complete_purchase_orders(session, [7310, 7311], 'tester', spare_rate=5)
+
+    assert res['completed'] == 2
+    for pid in (7310, 7311):
+        spare, _ = await _po_spare(session, pid)
+        assert float(spare) == 30

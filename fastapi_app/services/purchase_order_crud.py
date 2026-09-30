@@ -17,7 +17,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.float_utils import round_qty
 from fastapi_app.services.numbering import generate_purchase_order_number
-from fastapi_app.services.purchase_order_sku import resync_po_sku_spare
 from fastapi_app.services.purchase_order_spare import recompute_po_spare_from_item_rates
 from fastapi_app.services.purchase_utils import calc_spare_quantity, normalize_spare_rate
 from fastapi_app.shared_models import (
@@ -343,11 +342,11 @@ async def complete_purchase_order(
 
     order.status = PurchaseOrderStatus.COMPLETED
     order.completed_at = now
-    # 携带损耗率则覆盖写备品；None 时保留该单已存值（PRD Q1）
+    # 携带损耗率则覆盖写率；None 时保留该单已存值（PRD Q1）
     if spare_rate is not None:
         _apply_spare_rate(order, spare_rate)
-        # 逐 SKU 快照的备品按新率同步重算（保持逐 SKU 行与主表备品口径一致）
-        await resync_po_sku_spare(db, [order.id], spare_rate)
+        # 备品按「部位率 max」重算（顶层率只作 NULL 行的回退基线）
+        await recompute_po_spare_from_item_rates(db, [order.id])
     await db.flush()
     return {'id': order.id, 'order_no': order.order_no, 'status': 'completed'}
 
@@ -405,9 +404,9 @@ async def batch_complete_purchase_orders(
         except (ValueError, TypeError) as e:
             errors.append(f'订单处理失败: {e!s}')
 
-    # 逐 SKU 快照的备品按新率批量同步重算（一次查询，无 N+1）
+    # 逐 SKU 备品按「部位率 max」批量重算（一次查询，无 N+1）
     if resync_ids:
-        await resync_po_sku_spare(db, resync_ids, spare_rate)
+        await recompute_po_spare_from_item_rates(db, resync_ids)
 
     await db.flush()
     return {'completed': completed, 'errors': errors}
