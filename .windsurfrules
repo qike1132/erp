@@ -1,0 +1,7 @@
+# Windsurf 规则 —— 指针
+
+**本项目（滨发协同系统 / binfa-erp）的协作契约在 `AGENTS.md`，请先完整阅读它。**
+本文件不再承载独立规则：历史上它是一份 GraphFlow 工具上手指南，与 ERP 项目无关，已作废。
+
+关键前提（详见 `AGENTS.md`）：这是**内网生产** ERP（FastAPI + PostgreSQL + Redis/ARQ，前端 Vue 3 + Vite 7），
+**当前机器同时是生产主机与运维主机**，没有测试环境。动手前先读 `AGENTS.md` 的红线与质量门禁章节。
