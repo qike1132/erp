@@ -227,16 +227,25 @@ describe('CustomerOrderView 记录列表合并 + 搜索栏（F2）', () => {
     expect((input.element as HTMLInputElement).value).toBe('')
   })
 
-  it('备货行无任何操作按钮，订单行有查看与删除', async () => {
+  it('备货行无任何操作按钮；订单的每个 SKU 行都有查看与删除，合计行没有', async () => {
     const wrapper = mount(CustomerOrderView, { global: { stubs } })
     await flushPromises()
     await switchToRecordsTab(wrapper)
 
+    // 合并不改行数以外的语义：订单 2 个 SKU → 2 行 + 1 行合计；备货 1 行
+    const rows = wrapper.findAll('tbody tr')
+    expect(rows.length).toBe(4)
+
     // 备货行无详情入口：后端不存在备货详情端点，openDetail 只按订单 id 查（必然 404）
-    const viewBtns = wrapper.findAll('.co-btn-info')
-    expect(viewBtns.length).toBe(1) // 只有订单行
-    const delBtns = wrapper.findAll('.co-btn-danger')
-    expect(delBtns.length).toBe(1) // 只有订单行
+    expect(rows.map((tr) => ({
+      view: tr.findAll('.co-btn-info').length,
+      del: tr.findAll('.co-btn-danger').length,
+    }))).toEqual([
+      { view: 1, del: 1 }, // 订单的 SKU 1
+      { view: 1, del: 1 }, // 订单的 SKU 2
+      { view: 0, del: 0 }, // 合计行
+      { view: 0, del: 0 }, // 备货行
+    ])
   })
 
   it('「抵扣」列已删除：表头不含抵扣，订单行不渲染抵扣徽章', async () => {

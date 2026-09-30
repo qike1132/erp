@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>多 SKU 分行显示 · 重新设计 · 2026-10-01</title>
+<style>
+  :root{
+    --bg:#f5f5f7; --card:#fff; --surface:#f4f6fc;
+    --t1:#1d1d1f; --t2:#48484d; --t3:#8e8e93;
+    --accent:#007aff; --accent-tint:#e8f1ff; --ok:#34c759; --ok-tint:#e6f9ec;
+    --warn:#ff9500; --warn-tint:#fff4e0; --danger:#ff3b30; --danger-tint:#ffeceb;
+    --color-border:#e4e7ed; --color-border-light:#f0f2f5;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:26px 22px 60px;background:var(--bg);color:var(--t1);
+       font:13px/1.5 "Microsoft YaHei UI","Segoe UI",system-ui,sans-serif}
+  h1{font-size:19px;margin:0 0 6px}
+  .meta{color:var(--t2);font-size:12px;margin-bottom:16px}
+  .meta code,.sub code,.foot code,.note code,.warnbox code{background:#e9e9ee;padding:1px 5px;border-radius:4px}
+  .note{background:var(--warn-tint);border-left:3px solid var(--warn);
+        padding:10px 14px;border-radius:6px;margin:0 0 16px;font-size:12.5px;color:#7a4a00}
+  .warnbox{background:#fff;border:1px solid var(--color-border);border-left:3px solid var(--danger);
+        border-radius:8px;padding:11px 15px;margin:0 0 20px;font-size:12.5px;line-height:1.8}
+  .warnbox b{color:var(--danger)}
+  h2{font-size:15px;margin:32px 0 4px;padding-top:10px;border-top:2px solid #e3e3e8}
+  h2 .tag{font-size:11px;font-weight:700;color:#fff;background:var(--accent);
+          padding:2px 7px;border-radius:999px;vertical-align:2px;margin-left:8px}
+  h2 .tag.alt{background:var(--t3)}
+  h2 .tag.rec{background:var(--ok)}
+  .sub{color:var(--t2);font-size:12px;margin:0 0 12px}
+  .sub b{color:var(--t1)}
+  .card{background:var(--card);border:1px solid var(--color-border);border-radius:10px;overflow:hidden;margin-bottom:12px}
+  table.dt{border-collapse:collapse;width:100%;font-size:13px;table-layout:fixed}
+  table.dt th{background:var(--surface);color:var(--t2);font-weight:700;font-size:12px;
+     padding:9px 12px;border-bottom:2px solid var(--color-border);white-space:nowrap;text-align:center}
+  table.dt td{padding:7px 12px;color:var(--t1);text-align:center;vertical-align:middle;background:#fff}
+  col.c-time{width:120px} col.c-no{width:186px} col.c-cust{width:104px}
+  col.c-prod{width:auto} col.c-qty{width:78px} col.c-act{width:96px}
+  .no{font-family:Consolas,ui-monospace,monospace;font-size:12px}
+  .dim{color:var(--t3)}
+  .strong{font-weight:700}
+  .badge{display:inline-flex;align-items:center;padding:1px 7px;font-size:10px;font-weight:700;border-radius:4px}
+  .badge.order{background:var(--accent-tint);color:#0158b0}
+  .badge.stockin{background:var(--ok-tint);color:#1d7a3a}
+  .act{width:32px;height:26px;border:none;border-radius:8px;background:var(--accent-tint);
+       color:#0158b0;font-size:12px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
+  .act.del{background:var(--danger-tint);color:#c0201a}
+  /* 行线语义：方案 1/2 —— 同一订单的 SKU 行之间不画线，订单之间画 */
+  tr.last td{border-bottom:1px solid var(--color-border)}
+  tr.mid td{border-bottom:none}
+  /* 合计行 */
+  tr.sum td{border-bottom:1px solid var(--color-border);background:#fbfcfe;font-size:12px;color:var(--t2)}
+  tr.sum .lbl{text-align:right;font-weight:600;padding-right:14px}
+  tr.sum .tot{font-weight:700;color:var(--t1);font-size:13px}
+  /* 方案 1 的合并单元格：用 rowspan 真合并 */
+  td.merged{background:#fff;border-right:1px solid var(--color-border)}
+  /* 方案 3 重复：订单级字段每行都填 */
+  /* 现状的堆叠块（参考用） */
+  .stack{display:inline-flex;flex-direction:column;text-align:left;
+         padding-left:10px;border-left:2px solid var(--color-border-light)}
+  .stack .line{display:flex;align-items:baseline;justify-content:space-between;gap:12px;
+               padding:3px 0;border-bottom:1px solid var(--color-border)}
+  .stack .line:last-child{border-bottom:none}
+  .stack .line .q{color:var(--t3);font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .k{display:inline-block;padding:0 5px;border-radius:4px;font-size:11px;font-weight:700}
+  .k.yes{background:var(--ok-tint);color:#1d7a3a}
+  .k.no{background:var(--danger-tint);color:#c0201a}
+  .foot{color:var(--t2);font-size:12.5px;margin-top:26px;line-height:1.9}
+  .foot b{color:var(--t1)}
+  table.cmp{border-collapse:collapse;font-size:12.5px;margin-bottom:14px;width:100%}
+  table.cmp th,table.cmp td{padding:6px 10px;border:1px solid var(--color-border)}
+  table.cmp th{background:var(--surface);text-align:left}
+  table.cmp td{text-align:center}
+</style>
+</head>
+<body>
+
+<h1>多 SKU 分行显示 · 重新设计</h1>
+<div class="meta">
+  页面：<code>/customer-order</code> → 记录查询 &nbsp;·&nbsp; 2026-10-01 &nbsp;·&nbsp; 未改代码 &nbsp;·&nbsp;
+  用你截图里的真实 9 行数据
+</div>
+
+<div class="note">
+  <b>你要的</b>：多 SKU 订单的<b>产品名称</b>与<b>数量</b>各自独占一行、分别落在「产品名称」列与「数量」列 ——
+  而不是像现在这样把两者一起塞进产品名称格里（数量也就飘在了那一列的中间）。
+  <br>三个方案都做到这一点，差别在<b>订单级字段（时间 / 编号 / 客户 / 操作）怎么处理</b>，以及<b>订单总量放哪</b>。
+</div>
+
+<div class="warnbox">
+  <b>先说一个会误导人的坑：PrimeVue 的「真行合并」不能直接用在这批数据上。</b><br>
+  它 <code>rowGroupMode="rowspan"</code> 的合并判据是<b>按值相等</b>（<code>datatable/BodyRow.vue</code> 的
+  <code>calculateRowGroupSize()</code>：<code>while (currentRowFieldData === nextRowFieldData)</code>）。
+  而你的数据里 <b>PO-20260930-0011 / 0012 / 0013 的时间都是 <code>2026-09-30 00:00</code></b> ——
+  直接对「时间」列分组，会把<b>相邻不同订单</b>的日期并成一个大格，反而错得更厉害。
+  要用真合并，必须给分组列一个<b>按订单唯一的隐藏键</b>（见方案 1 的实现说明）。
+</div>
+
+<!-- ============ 现状 ============ -->
+<h2>现状 <span class="tag alt">Before</span></h2>
+<p class="sub">一行一订单，所有 SKU 名堆在产品名称格里，数量跟着名字一起挤进去 —— 于是数量落在产品名称列的中间，与「数量」列（订单总量 30000）毫不相干。</p>
+<div class="card">
+  <table class="dt">
+    <colgroup><col class="c-time"><col class="c-no"><col class="c-cust"><col class="c-prod"><col class="c-qty"><col class="c-act"></colgroup>
+    <thead><tr><th>时间</th><th>编号</th><th>客户</th><th>产品名称</th><th>数量</th><th>操作</th></tr></thead>
+    <tbody>
+      <tr><td class="dim no">2026-09-30 00:00</td><td><span class="badge order">订单</span> <span class="dim no">PO-20260930-0013</span></td><td>MINISO国际</td>
+        <td><div class="stack">
+          <div class="line"><span>《蛋仔派对》市集拾趣系列 毛绒公仔挂件盲盒</span><span class="q">10000</span></div>
+          <div class="line"><span>鲨鱼</span><span class="q">10000</span></div>
+          <div class="line"><span>《蛋仔派对》团子木鱼毛绒挂件盲盒-黄蛋 陈列样</span><span class="q">10000</span></div>
+        </div></td>
+        <td class="strong">30000</td><td><button class="act">👁</button> <button class="act del">🗑</button></td></tr>
+      <tr><td class="dim no">2026-09-30 00:00</td><td><span class="badge order">订单</span> <span class="dim no">PO-20260930-0014</span></td><td>网易</td>
+        <td>测试</td><td class="strong">10000</td><td><button class="act">👁</button> <button class="act del">🗑</button></td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ============ 方案 1 ============ -->
+<h2>方案 1 · SKU 各占一行 + 订单级字段真合并 + 每单合计行 <span class="tag rec">推荐</span></h2>
+<p class="sub">每个 SKU 一行：产品名称在「产品名称」列、数量在「数量」列。时间/编号/客户/操作属于订单，
+  用 <b>rowspan 跨该订单的 SKU 行合成一个格</b>（读起来就是"这一单下面挂了 3 个 SKU"）。
+  末尾补一行<b>合计</b>，把订单总量 30000 保住 —— 免得只剩 10000/10000/10000 而对不上客户下的总量。</p>
+<div class="card">
+  <table class="dt">
+    <colgroup><col class="c-time"><col class="c-no"><col class="c-cust"><col class="c-prod"><col class="c-qty"><col class="c-act"></colgroup>
+    <thead><tr><th>时间</th><th>编号</th><th>客户</th><th>产品名称</th><th>数量</th><th>操作</th></tr></thead>
+    <tbody>
+      <tr class="mid">
+        <td rowspan="4" class="merged dim no">2026-09-30 00:00</td>
+        <td rowspan="4" class="merged"><span class="badge order">订单</span> <span class="dim no">PO-20260930-0013</span></td>
+        <td rowspan="4" class="merged">MINISO国际</td>
+        <td>《蛋仔派对》市集拾趣系列 毛绒公仔挂件盲盒</td><td>10000</td>
+        <td rowspan="4" class="merged"><button class="act">👁</button> <button class="act del">🗑</button></td>
+      </tr>
+      <tr class="mid"><td>鲨鱼</td><td>10000</td></tr>
+      <tr class="mid"><td>《蛋仔派对》团子木鱼毛绒挂件盲盒-黄蛋 陈列样</td><td>10000</td></tr>
+      <tr class="sum"><td class="lbl">合计</td><td class="tot">30000</td></tr>
+      <tr class="last">
+        <td class="dim no">2026-09-30 00:00</td><td><span class="badge order">订单</span> <span class="dim no">PO-20260930-0014</span></td>
+        <td>网易</td><td>测试</td><td>10000</td><td><button class="act">👁</button> <button class="act del">🗑</button></td>
+      </tr>
+      <tr class="mid">
+        <td rowspan="3" class="merged dim no">2026-09-30 00:00</td>
+        <td rowspan="3" class="merged"><span class="badge order">订单</span> <span class="dim no">PO-20260930-0015</span></td>
+        <td rowspan="3" class="merged">MINISO国际</td>
+        <td>测试</td><td>10000</td>
+        <td rowspan="3" class="merged"><button class="act">👁</button> <button class="act del">🗑</button></td>
+      </tr>
+      <tr class="mid"><td>鲨鱼</td><td>10000</td></tr>
+      <tr class="sum"><td class="lbl">合计</td><td class="tot">20000</td></tr>
+      <tr class="last">
+        <td class="dim no">2026-09-29 07:38</td><td><span class="badge order">订单</span> <span class="dim no">PO-20260929-0014</span></td>
+        <td>网易</td><td>《蛋仔派对》市集拾趣系列 毛绒公仔挂件盲盒</td><td>30000</td><td><button class="act">👁</button> <button class="act del">🗑</button></td>
+      </tr>
+      <tr class="last">
+        <td class="dim no">2026-09-28 17:28</td><td><span class="badge stockin">备货</span> <span class="dim no">BH-20260929-0001</span></td>
+        <td>MINISO国际</td><td>鲨鱼</td><td>10000</td><td class="dim">—</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+<p class="sub">
+  <b>实现说明（这就是那个坑的绕法）</b>：把数据摊平成"一行一 SKU"，并对三个订单级列各给一个
+  <b>按订单唯一的隐藏分组值</b>（例如 <code>order_date + '#' + source_id</code>），把这三个列的
+  <code>field</code> 指向隐藏值、<code>groupRowsBy</code> 指向它们，再用列插槽渲染真正的显示值。
+  这样同一订单内值相同 → 合并；不同订单即使日期文本一样，隐藏值也不同 → 不会被误并。
+  <br>单 SKU 订单不产生合计行（那一行本身就是总量）；备货行同理。
+</p>
+
+<!-- ============ 方案 2 ============ -->
+<h2>方案 2 · SKU 各占一行 + 订单级字段只首行显示（续行留空） <span class="tag alt">备选</span></h2>
+<p class="sub">不合并单元格：订单级字段只在首行显示，续行留空；同一订单的 SKU 行之间<b>不画分隔线</b>
+  （线只画在订单与订单之间），靠"没线"表示"还在同一单里"。改动最小、不碰组件、不需要隐藏键。</p>
+<div class="card">
+  <table class="dt">
+    <colgroup><col class="c-time"><col class="c-no"><col class="c-cust"><col class="c-prod"><col class="c-qty"><col class="c-act"></colgroup>
+    <thead><tr><th>时间</th><th>编号</th><th>客户</th><th>产品名称</th><th>数量</th><th>操作</th></tr></thead>
+    <tbody>
+      <tr class="mid">
+        <td class="dim no">2026-09-30 00:00</td><td><span class="badge order">订单</span> <span class="dim no">PO-20260930-0013</span></td>
+        <td>MINISO国际</td><td>《蛋仔派对》市集拾趣系列 毛绒公仔挂件盲盒</td><td>10000</td>
+        <td><button class="act">👁</button> <button class="act del">🗑</button></td>
+      </tr>
+      <tr class="mid"><td></td><td></td><td></td><td>鲨鱼</td><td>10000</td><td></td></tr>
+      <tr class="mid"><td></td><td></td><td></td><td>《蛋仔派对》团子木鱼毛绒挂件盲盒-黄蛋 陈列样</td><td>10000</td><td></td></tr>
+      <tr class="sum"><td></td><td></td><td class="lbl">合计</td><td class="lbl" style="padding-right:14px">合计</td><td class="tot">30000</td><td></td></tr>
+      <tr class="last">
+        <td class="dim no">2026-09-30 00:00</td><td><span class="badge order">订单</span> <span class="dim no">PO-20260930-0014</span></td>
+        <td>网易</td><td>测试</td><td>10000</td><td><button class="act">👁</button> <button class="act del">🗑</button></td>
+      </tr>
+      <tr class="mid">
+        <td class="dim no">2026-09-30 00:00</td><td><span class="badge order">订单</span> <span class="dim no">PO-20260930-0015</span></td>
+        <td>MINISO国际</td><td>测试</td><td>10000</td><td><button class="act">👁</button> <button class="act del">🗑</button></td>
+      </tr>
+      <tr class="mid"><td></td><td></td><td></td><td>鲨鱼</td><td>10000</td><td></td></tr>
+      <tr class="sum"><td></td><td></td><td></td><td class="lbl">合计</td><td class="tot">20000</td><td></td></tr>
+      <tr class="last">
+        <td class="dim no">2026-09-29 07:38</td><td><span class="badge order">订单</span> <span class="dim no">PO-20260929-0014</span></td>
+        <td>网易</td><td>《蛋仔派对》市集拾趣系列 毛绒公仔挂件盲盒</td><td>30000</td><td><button class="act">👁</button> <button class="act del">🗑</button></td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+<p class="sub">代价：续行单独看不知道属于哪个订单（复制出去会丢上下文），空白格也不好看。但实现最省，且不与那 310/237 个提交之外的任何东西耦合。</p>
+
+<!-- ============ 方案 3 ============ -->
+<h2>方案 3 · SKU 各占一行 + 订单级字段每行重复 <span class="tag alt">备选</span></h2>
+<p class="sub">每行都填满订单级字段，行行自足（可单行复制、可导出、可排序）。代价是同一订单的编号/客户被重复 N 遍，视觉上吵，且手机窄屏下更难扫。</p>
+<div class="card">
+  <table class="dt">
+    <colgroup><col class="c-time"><col class="c-no"><col class="c-cust"><col class="c-prod"><col class="c-qty"><col class="c-act"></colgroup>
+    <thead><tr><th>时间</th><th>编号</th><th>客户</th><th>产品名称</th><th>数量</th><th>操作</th></tr></thead>
+    <tbody>
+      <tr class="last">
+        <td class="dim no">2026-09-30 00:00</td><td><span class="badge order">订单</span> <span class="dim no">PO-20260930-0013</span></td>
+        <td>MINISO国际</td><td>《蛋仔派对》市集拾趣系列 毛绒公仔挂件盲盒</td><td>10000</td>
+        <td><button class="act">👁</button> <button class="act del">🗑</button></td>
+      </tr>
+      <tr class="last">
+        <td class="dim no">2026-09-30 00:00</td><td><span class="badge order">订单</span> <span class="dim no">PO-20260930-0013</span></td>
+        <td>MINISO国际</td><td>鲨鱼</td><td>10000</td>
+        <td><button class="act">👁</button> <button class="act del">🗑</button></td>
+      </tr>
+      <tr class="last">
+        <td class="dim no">2026-09-30 00:00</td><td><span class="badge order">订单</span> <span class="dim no">PO-20260930-0013</span></td>
+        <td>MINISO国际</td><td>《蛋仔派对》团子木鱼毛绒挂件盲盒-黄蛋 陈列样</td><td>10000</td>
+        <td><button class="act">👁</button> <button class="act del">🗑</button></td>
+      </tr>
+      <tr class="sum"><td></td><td></td><td></td><td class="lbl">合计</td><td class="tot">30000</td><td></td></tr>
+      <tr class="last">
+        <td class="dim no">2026-09-30 00:00</td><td><span class="badge order">订单</span> <span class="dim no">PO-20260930-0014</span></td>
+        <td>网易</td><td>测试</td><td>10000</td><td><button class="act">👁</button> <button class="act del">🗑</button></td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="foot">
+  <table class="cmp">
+    <thead><tr><th>对比项</th><th>方案 1 真合并</th><th>方案 2 首行+留空</th><th>方案 3 每行重复</th></tr></thead>
+    <tbody>
+      <tr><td>SKU 名与数量各归其列</td><td><span class="k yes">是</span></td><td><span class="k yes">是</span></td><td><span class="k yes">是</span></td></tr>
+      <tr><td>一眼看出"这几个 SKU 属同一单"</td><td><span class="k yes">最强</span>（跨行合并）</td><td>靠"无线"暗示</td><td>靠重复的编号</td></tr>
+      <tr><td>单行复制/导出是否自足</td><td><span class="k no">否</span></td><td><span class="k no">否</span></td><td><span class="k yes">是</span></td></tr>
+      <tr><td>需要改公共组件吗</td><td><span class="k no">需要</span>（加 rowGroupMode/groupRowsBy/rowGroupFooter 透传，13 个视图共用）</td><td><span class="k yes">不需要</span></td><td><span class="k yes">不需要</span></td></tr>
+      <tr><td>需要隐藏分组键吗</td><td><span class="k no">需要</span>（绕开按值合并的误并）</td><td><span class="k yes">不需要</span></td><td><span class="k yes">不需要</span></td></tr>
+      <tr><td>订单总量是否保住</td><td><span class="k yes">合计行</span></td><td><span class="k yes">合计行</span></td><td><span class="k yes">合计行</span></td></tr>
+    </tbody>
+  </table>
+
+  <b>我倾向方案 1</b>：它的可读性最好，而且"订单级的格合并、SKU 级的格不合并"正是你这次要表达的结构；
+  那两处复杂度（公共组件透传 + 隐藏分组键）都在一处收口，且有测试能钉住。
+  若你更在意"别动公共组件"，方案 2 是风险最低的——它连 <code>UiDataTable</code> 都不用碰。<br><br>
+
+  <b>三个方案共同的两点，需要你一并定：</b><br>
+  ① <b>订单总量放哪</b>：都建议加一行「合计」。若你不想多这一行，替代做法是把总量放在首行的数量列
+  （如 <code>30000</code> 加粗）而各 SKU 数量放后续行 —— 但那样首行的"数量"含义与其他行不一致，容易读错，我不推荐。<br>
+  ② <b>分页语义变了</b>：现在一页 20 条 = 20 个订单；摊平后一页仍是 20 <b>个订单</b>，但显示的<b>行数</b>会变成
+  20~20×N+合计行，一屏高度不再固定。翻页/每页条数仍按订单算（后端 <code>total</code> 是订单数），这部分不用改后端。<br><br>
+
+  <b>不需要后端改动</b>：<code>items[]</code> 已经带每个 SKU 的 <code>product_name</code> 与 <code>quantity</code>，
+  摊平所需的数据都在行内。<br>
+  <b>测试：</b>先写"3 个 SKU 的订单渲染 3 行、每行数量落在数量列、合计行等于三者之和"的失败测试再实现（TDD）。
+</div>
+
+</body>
+</html>

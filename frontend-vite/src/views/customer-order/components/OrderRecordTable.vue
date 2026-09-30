@@ -15,13 +15,15 @@
     </div>
     <UiDataTable
       v-else
-      :data="orderRecords"
+      :data="recordRows"
       :columns="orderColumns"
       :loading="isLoadingRecords && orderRecords.length === 0"
       :paginator="totalPages > 1"
       :rows="perPage"
       :total-records="totalRecords"
-      row-key="id"
+      row-key="_rowKey"
+      row-group-mode="rowspan"
+      :group-rows-by="GROUP_FIELDS"
       @page="onPageChange"
     >
       <template #empty>
@@ -30,55 +32,55 @@
           <p class="co-state-text">暂无记录</p>
         </div>
       </template>
-      <template #column-body-order_date="{ row }">
-        <span class="co-cell-muted">{{ (row as OrderRecord).order_date }}</span>
+
+      <!-- 时间 / 编号 / 客户：订单级字段，同一订单内跨 SKU 行合并成一个格（合计行除外） -->
+      <template #column-body-_g_date="{ row }">
+        <span v-if="!row._isSum" class="co-cell-muted">{{ row.order_date }}</span>
       </template>
-      <template #column-body-order_no="{ row }">
-        <span :class="['co-type-badge', (row as OrderRecord).record_type === 'stockin' ? 'stockin' : 'order']">
-          {{ (row as OrderRecord).record_type === 'stockin' ? '备货' : '订单' }}
-        </span>
-        <span class="co-cell-muted" style="margin-left: 4px;">{{ (row as OrderRecord).order_no }}</span>
-      </template>
-      <template #column-body-customer="{ row }">
-        <span class="co-cell-main">{{ (row as OrderRecord).customer }}</span>
-      </template>
-      <template #column-body-product="{ row }">
-        <!-- 多 SKU：把该订单的全部 SKU 名与各自数量堆叠出来，列表里可直接核对（不必点进详情） -->
-        <div v-if="hasMultipleSkus(row as OrderRecord)" class="co-sku-stack">
-          <div v-for="(sku, idx) in (row as OrderRecord).items" :key="sku.id ?? idx" class="co-sku-line">
-            <span class="co-sku-name">{{ sku.product_name || '-' }}</span>
-            <span class="co-sku-qty">{{ sku.quantity }}</span>
-          </div>
-        </div>
-        <template v-else>
-          <span class="co-cell-main">{{ (row as OrderRecord).product?.name || '-' }}</span>
-          <span v-if="(row as OrderRecord).product?.barcode" class="co-cell-muted" style="display: block; font-size: 11px;">{{ (row as OrderRecord).product?.barcode }}</span>
+      <template #column-body-_g_no="{ row }">
+        <template v-if="!row._isSum">
+          <span :class="['co-type-badge', row.record_type === 'stockin' ? 'stockin' : 'order']">
+            {{ row.record_type === 'stockin' ? '备货' : '订单' }}
+          </span>
+          <span class="co-cell-muted" style="margin-left: 4px;">{{ row.order_no }}</span>
         </template>
       </template>
-      <template #column-body-quantity="{ row }">
-        <strong>{{ (row as OrderRecord).quantity }}</strong>
+      <template #column-body-_g_cust="{ row }">
+        <span v-if="!row._isSum" class="co-cell-main">{{ row.customer }}</span>
       </template>
+
+      <!-- 产品名称：一行一个 SKU；合计行显示标签 -->
+      <template #column-body-product_name="{ row }">
+        <span v-if="row._isSum" class="co-sum-label">{{ SUM_ROW_LABEL }}</span>
+        <span v-else class="co-cell-main">{{ row.product_name }}</span>
+      </template>
+
+      <!-- 数量：每个 SKU 自己的数量落在这里（不再是订单总量堆在产品名称格里） -->
+      <template #column-body-quantity="{ row }">
+        <span :class="row._isSum ? 'co-sum-total' : 'co-row-qty'">{{ row.quantity }}</span>
+      </template>
+
       <template #column-body-actions="{ row }">
-        <!-- 备货行不给详情入口：后端不存在备货详情端点，而 openDetail 一律按订单 id 查
-             （备货行 id 来自 StockIn 表，与订单 id 是两套序列，查订单表必然查无此单） -->
-        <div v-if="(row as OrderRecord).record_type === 'order'" class="co-action-group">
+        <!-- 备货行不给详情入口：后端不存在备货详情端点，而 openDetail 一律按订单 id 查。
+             合计行没有可操作的东西，留空。 -->
+        <div v-if="!row._isSum && row.record_type === 'order'" class="co-action-group">
           <button
             class="co-btn-icon co-btn-info"
-            :aria-label="`查看 ${(row as OrderRecord).order_no || ''} 的详情`"
-            @click="emit('view-detail', row as OrderRecord)"
+            :aria-label="`查看 ${row.order_no} 的详情`"
+            @click="emit('view-detail', row._source)"
           >
             <FontAwesomeIcon icon="eye" aria-hidden="true" />
           </button>
           <button
             v-if="canDelete"
             class="co-btn-icon co-btn-danger"
-            :aria-label="`删除订单 ${(row as OrderRecord).order_no || ''}`"
-            @click="emit('delete-record', row as OrderRecord)"
+            :aria-label="`删除订单 ${row.order_no}`"
+            @click="emit('delete-record', row._source)"
           >
             <FontAwesomeIcon icon="trash-alt" aria-hidden="true" />
           </button>
         </div>
-        <span v-else class="co-cell-muted" aria-hidden="true">—</span>
+        <span v-else-if="!row._isSum" class="co-cell-muted" aria-hidden="true">—</span>
       </template>
     </UiDataTable>
   </div>
@@ -89,6 +91,7 @@ import { computed } from 'vue'
 import UiDataTable from '@/components/ui/UiDataTable.vue'
 import UiButton from '@/components/ui/UiButton.vue'
 import type { TableColumn } from '@/components/ui/UiDataTable.vue'
+import { flattenRecordRows, SUM_ROW_LABEL } from '../composables/recordRows'
 import type { OrderRecord } from '../composables/types'
 
 const props = defineProps<{
@@ -111,21 +114,30 @@ const emit = defineEmits<{
   retry: []
 }>()
 
-/** 列固定（订单/备货合并后结构一致）：时间 / 编号 / 客户 / 产品名称 / 数量 / 操作 */
+/**
+ * 表格行 = 摊平后的「一行一 SKU」（多 SKU 订单末尾追加合计行）。
+ * 摊平的动机：一行只能有一个数量格，而一张订单可含多个 SKU —— 原先把 SKU 名与数量一起
+ * 堆在产品名称格里，数量就落在了产品名称列的中间，与「数量」列毫不相干。
+ */
+const recordRows = computed(() => flattenRecordRows(props.orderRecords))
+
+/** 参与跨行合并的列（field 名；为什么是三列三个名见 recordRows.ts 的说明） */
+const GROUP_FIELDS = ['_g_date', '_g_no', '_g_cust']
+
+/**
+ * 列固定：时间 / 编号 / 客户 / 产品名称 / 数量 / 操作。
+ * 前三列的 field 指向分组字段（同订单恒等）——PrimeVue 的跨行合并是**按列 field 的值**比较的，
+ * 三列各自与分组键比较就得到同一个跨行数；而真正的显示值从行上的 order_date/order_no/customer 取，
+ * 这样既合并、又不会被相邻订单相同的日期或客户误导（生产数据里多笔订单日期都是同一天）。
+ */
 const orderColumns = computed<TableColumn[]>(() => [
-  { field: 'order_date', header: '时间', align: 'center' },
-  { field: 'order_no', header: '编号', align: 'center' },
-  { field: 'customer', header: '客户', align: 'center' },
-  // 多 SKU 的块在单元格内缩到内容宽并整体居中（见 .co-sku-stack），故本列与其它列一样居中
-  { field: 'product', header: '产品名称', align: 'center' },
+  { field: '_g_date', header: '时间', align: 'center' },
+  { field: '_g_no', header: '编号', align: 'center' },
+  { field: '_g_cust', header: '客户', align: 'center' },
+  { field: 'product_name', header: '产品名称', align: 'center' },
   { field: 'quantity', header: '数量', align: 'center' },
   { field: 'actions', header: '操作', align: 'left' },
 ])
-
-/** 多 SKU 行（一张订单可含多个 SKU；备货恒 1 个）——决定产品列是否堆叠展示 */
-function hasMultipleSkus(row: OrderRecord): boolean {
-  return (row.items?.length ?? 0) > 1
-}
 
 function onPageChange(event: { page: number; rows: number }) {
   if (event.rows !== props.perPage) {
@@ -218,42 +230,25 @@ function onPageChange(event: { page: number; rows: number }) {
   font-size: 12px;
 }
 
-/* 产品名称列・多 SKU 堆叠：每行一个 SKU（名字 + 各自数量）。
-   左侧 2px 导引线 + 缩进把整块标成「挂在同一张订单下」的子块；SKU 之间用 1px 细线分隔
-   （线色与全表行线同为 --color-border，看着是一套网格），末条不画线以免与行线叠成双线。
-   2026-09-30 修订一：原实现只有 3px 行距、无任何分隔，表变高后三条 SKU 飘在空白里。
-   2026-09-30 修订二：改 inline-flex 让整块缩到内容宽，再由单元格的 text-align:center 把它
-   居中（块左/右留白相等）——之前整块拉满整列时，短名字与它的数量之间会空出一千多像素。
-   块内仍 text-align:left + 数量右对齐，故各 SKU 数量之间互相成一条竖线可比大小；
-   max-width 兜底，防止超长 SKU 名把块撑出单元格。 */
-.co-sku-stack {
-  display: inline-flex;
-  flex-direction: column;
-  text-align: left;
-  max-width: 100%;
-  padding-left: 10px;
-  border-left: 2px solid var(--color-border-light);
-}
-.co-sku-line {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 3px 0;
-  border-bottom: 1px solid var(--color-border);
-}
-.co-sku-line:last-child {
-  border-bottom: none;
-}
-.co-sku-name {
+/* 每个 SKU 自己的数量：等宽数字，便于上下比对 */
+.co-row-qty {
   font-weight: 500;
   color: var(--color-text);
+  font-variant-numeric: tabular-nums;
 }
-.co-sku-qty {
+/* 合计行的「合计」标签右对齐，紧邻数量列，读起来是「合计 30000」 */
+.co-sum-label {
+  display: block;
+  text-align: right;
   color: var(--color-text-muted);
   font-size: 12px;
+  font-weight: 600;
+}
+/* 合计行的总量：比各 SKU 数量更重，便于对上客户下的总量 */
+.co-sum-total {
+  font-weight: 700;
+  color: var(--color-text);
   font-variant-numeric: tabular-nums;
-  white-space: nowrap;
 }
 
 /* 操作列：左对齐固定起点，让「查看」按钮在单/双按钮行都钉在同一横坐标（居中会左右跳） */

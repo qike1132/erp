@@ -124,7 +124,7 @@ describe('CustomerOrderView SKU expand behavior (SubTask 7.4)', () => {
     vi.useRealTimers()
   })
 
-  it('order list row stacks all 3 SKUs when items.length === 3', async () => {
+  it('order list row renders one row per SKU when items.length === 3', async () => {
     mocks.recordsMock.mockResolvedValue({
       data: [
         {
@@ -151,15 +151,17 @@ describe('CustomerOrderView SKU expand behavior (SubTask 7.4)', () => {
     await flushPromises()
     await switchToRecordsTab(wrapper)
 
-    // 多 SKU 订单行：产品名称列把 3 个 SKU 逐行堆叠出来。
-    // （原断言查的是「SKU 数量」列的绿色徽章文本 3；该列 2026-09-30 已删 —— 全部 SKU 都列在产品名称列里，
-    //   条数可直接数出来，徽章是冗余的。）
-    const lines = wrapper.findAll('.co-sku-line')
-    expect(lines.length, 'multi-SKU order row should stack 3 SKU lines').toBe(3)
-    expect(lines.map((l) => l.find('.co-sku-name').text())).toEqual(['SKU1', 'SKU2', 'SKU3'])
+    // 多 SKU 订单：每个 SKU 各占一行（产品名称与数量分别落在自己的列）。
+    // 3 个 SKU → 3 行 + 1 行合计。
+    expect(wrapper.findAll('tbody tr').length).toBe(4)
+    const names = wrapper.findAll('tbody tr').map((tr) => {
+      const tds = tr.findAll('td')
+      return tds[tds.length - 3]?.text().trim()
+    })
+    expect(names).toEqual(['SKU1', 'SKU2', 'SKU3', '合计'])
   })
 
-  it('order list row shows the single product name for a single-SKU order', async () => {
+  it('order list row renders exactly one row for a single-SKU order', async () => {
     mocks.recordsMock.mockResolvedValue({
       data: [
         {
@@ -182,17 +184,13 @@ describe('CustomerOrderView SKU expand behavior (SubTask 7.4)', () => {
     await flushPromises()
     await switchToRecordsTab(wrapper)
 
-    // 单 SKU → 不堆叠，直接显示该产品名（与多 SKU 行同一列，只是只有一行）。
-    // 按表头定位产品名称列：`.co-cell-main` 同时用在客户列上，直接找会选到客户单元格。
-    expect(wrapper.findAll('.co-sku-line').length).toBe(0)
-    const headers = wrapper.findAll('thead th').map((th) => th.text().trim())
-    const productIdx = headers.indexOf('产品名称')
-    expect(productIdx, '产品名称列应存在').toBeGreaterThan(-1)
-    const productCells = wrapper.findAll('tbody tr').map((tr) => tr.findAll('td')[productIdx]!.text())
-    expect(productCells.length).toBe(1)
-    // 单 SKU 行保留「产品名 + 条码副行」的既定渲染
-    expect(productCells[0]).toContain('产品A')
-    expect(productCells[0]).toContain('69001')
+    // 单 SKU 订单：只 1 行，不产生合计行；显示的是该 SKU 自己的产品名与数量
+    // （产品名称列取 SKU 的 product_name，不再取订单级的 product.name）
+    const rows = wrapper.findAll('tbody tr')
+    expect(rows.length).toBe(1)
+    const tds = rows[0]!.findAll('td')
+    expect(tds[tds.length - 3]!.text().trim()).toBe('SKU1')
+    expect(tds[tds.length - 2]!.text().trim()).toBe('10')
   })
 
   it('detail dialog shows SKU details table when detailData.items.length > 1', async () => {
