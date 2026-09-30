@@ -52,6 +52,9 @@ AUDIT_BUFFER_KEY = 'audit_log_buffer'
 AUDIT_FLUSH_SIZE = 50
 AUDIT_FLUSH_INTERVAL = 5
 
+# 授权拒绝（403）的审计动作名，用于与业务写操作的 CREATE/UPDATE/DELETE 区分
+ACCESS_DENIED_ACTION = 'ACCESS_DENIED'
+
 _audit_session_factory = None
 
 
@@ -97,7 +100,10 @@ class AuditLogMiddleware(BaseHTTPMiddleware):
         request.state.request_id = request_id
 
         if request.method not in WRITE_METHODS:
-            return await call_next(request)
+            response = await call_next(request)
+            # 读方法不走写审计，403 需在此补漏，否则越权尝试不留痕迹
+            await _audit_unattributed_denial(request, response)
+            return response
 
         start_time = time.time()
         response: Response = await call_next(request)
@@ -155,6 +161,97 @@ class AuditLogMiddleware(BaseHTTPMiddleware):
         }
 
         await _buffer_audit_entry(audit_entry)
+
+
+def _resolve_actor(request: Request, user: object | None) -> tuple[int | None, str | None, list[str]]:
+    """解析拒绝事件的当事人：(user_id, username, 持有的权限码)。
+
+    调用方持有 User 对象时直接取字段；兜底路径（中间件发现未被归因的 403）没有
+    User 对象，退化为从请求解析 user_id —— 取法与 AuditLogMiddleware._record_audit 一致。
+    """
+    if user is not None:
+        perms = getattr(user, 'permissions', None) or []
+        held = [p.code for p in perms if getattr(p, 'code', None)]
+        return getattr(user, 'id', None), getattr(user, 'username', None), held
+    try:
+        from fastapi_app.core.deps import _resolve_user_id
+        return _resolve_user_id(request), None, []
+    except Exception:  # defensive: 用户解析失败不影响审计记录
+        return None, None, []
+
+
+async def record_access_denied(
+    request: Request,
+    user: object | None,
+    *,
+    required_permissions: tuple[str, ...],
+    reason: str,
+) -> None:
+    """记录一次授权拒绝（403）审计事件。
+
+    与 AuditLogMiddleware 共用同一套缓冲/落库管线。本函数自带异常兜底，
+    审计失败不影响鉴权结果（调用方仍正常返回 403）。
+
+    为什么不能只靠中间件：AuditLogMiddleware 只审计写方法（POST/PUT/PATCH/DELETE），
+    读端点（GET）的越权尝试不会被捕获，故在权限依赖的拒绝分支显式记录。
+    """
+    try:
+        request_id = getattr(request.state, 'request_id', None) or str(uuid.uuid4())[:8]
+        path = request.scope.get('path', '')
+
+        client_ip = request.client.host if request.client else None
+        if forwarded := request.headers.get('x-forwarded-for'):
+            # 取最后一个 IP（最接近服务器的可信代理追加的），避免客户端伪造
+            client_ip = forwarded.split(',')[-1].strip()
+
+        user_id, username, held_permissions = _resolve_actor(request, user)
+
+        detail_data = {
+            'method': request.method,
+            'path': path,
+            'required_permissions': list(required_permissions),
+            'held_permissions': held_permissions,
+            'reason': reason,
+        }
+
+        entry = {
+            'user_id': user_id,
+            'username': username,
+            'action': ACCESS_DENIED_ACTION,
+            'resource_type': _resolve_resource_type(path),
+            'resource_id': _extract_resource_id(path),
+            'detail': json.dumps(detail_data, ensure_ascii=False),
+            'ip_address': client_ip,
+            'user_agent': request.headers.get('user-agent', '')[:500],
+            'request_id': request_id,
+            'status_code': 403,
+            'created_at': datetime.now(UTC),
+        }
+
+        # 置位去重标记：本次 403 已有语义化审计，中间件兜底不得重复写入
+        request.state.access_denied_audited = True
+        await _buffer_audit_entry(entry)
+    except Exception as e:  # defensive: 审计记录失败不能影响主请求
+        logger.warning('授权拒绝审计记录失败: %s', e)
+
+
+async def _audit_unattributed_denial(request: Request, response: Response) -> None:
+    """读端点 403 的兜底审计。
+
+    权限依赖（core/deps.py）已在拒绝分支写入带「所需/持有权限码」的事件并置位
+    request.state.access_denied_audited；此处只补漏 —— 覆盖不经过依赖工厂的 403
+    （业务层直接抛 HTTPException(403)，或 AppError 体系的 PermissionDeniedError 逃逸）。
+
+    写方法的 403 不在此处理：AuditLogMiddleware.dispatch 的写审计已记录 status_code=403。
+    """
+    if response.status_code != 403:
+        return
+    if getattr(request.state, 'access_denied_audited', False):
+        return
+    await record_access_denied(
+        request, None,
+        required_permissions=(), reason='unattributed_denial',
+    )
 
 
 async def _buffer_audit_entry(entry: dict):

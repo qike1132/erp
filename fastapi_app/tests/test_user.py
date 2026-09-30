@@ -411,3 +411,56 @@ class TestUserEndpoints:
         response = await client.delete("/api/v1/users/delete/2")
         assert response.status_code == 200
         assert "删除" in response.json()["message"]
+
+
+# ==================== 权限缓存失效时机测试 ====================
+
+class TestPermissionCacheInvalidationOrdering:
+    """权限变更后，权限缓存必须在事务提交成功之后才失效。
+
+    背景：原先在 db_transaction 块内（提交前）失效缓存，并发请求可能在提交前读到旧权限
+    并回填缓存，而提交后不再失效，导致该用户最长在缓存 TTL 内持续被判权限不足（403）。
+    回归口径：提交前缓存不得被清空，提交后必须被清空。
+    """
+
+    @pytest.mark.asyncio
+    async def test_update_permissions_invalidates_cache_after_commit(self, client, mock_db):
+        from fastapi_app.core.database import get_async_db
+        from fastapi_app.core.deps import _PERMISSION_CACHE
+        from fastapi_app.main import app
+
+        user_id = 4242
+        await _PERMISSION_CACHE.set(user_id, object())
+
+        # 提交时刻的探针：记录缓存是否仍在、已登记的回调数
+        cache_present_at_commit: list[bool] = []
+        callbacks_at_commit: list[int] = []
+
+        async def _spy_commit() -> None:
+            cache_present_at_commit.append(await _PERMISSION_CACHE.get(user_id) is not None)
+            callbacks_at_commit.append(len(mock_db.info.get('post_commit_callbacks', [])))
+
+        mock_db.commit = AsyncMock(side_effect=_spy_commit)
+
+        async def _override_db():
+            yield mock_db
+
+        app.dependency_overrides[get_async_db] = _override_db
+        try:
+            with patch(
+                'fastapi_app.services.user_service.update_user_permissions',
+                AsyncMock(return_value=MagicMock()),
+            ):
+                response = await client.post(
+                    f'/api/v1/users/permission/{user_id}', json={'permission_ids': []},
+                )
+        finally:
+            app.dependency_overrides.pop(get_async_db, None)
+            await _PERMISSION_CACHE.pop(user_id)
+
+        assert response.status_code == 200, response.text
+        # 提交时刻：缓存仍在（失效未提前），且回调已登记
+        assert cache_present_at_commit == [True], '提交前不得失效权限缓存'
+        assert callbacks_at_commit == [1], '提交时应已登记恰好一个 post-commit 回调'
+        # 提交成功后：缓存已被清除
+        assert await _PERMISSION_CACHE.get(user_id) is None, '提交后必须失效权限缓存'

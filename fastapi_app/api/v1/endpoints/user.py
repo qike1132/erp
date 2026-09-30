@@ -58,6 +58,20 @@ def _build_permission_response(p) -> PermissionResponse:
     )
 
 
+def _schedule_permission_cache_invalidation(db: AsyncSession, user_id: int) -> None:
+    """注册「事务提交成功后再失效权限缓存」的回调。
+
+    权限缓存必须在 commit 之后失效：若在提交前失效，并发请求可能在提交前读到旧权限
+    并回填缓存，而提交后不再失效，该用户将在缓存 TTL 内持续被判为权限不足（403）。
+    约定见 core/exceptions.py::db_transaction 的 post_commit_callbacks。
+    """
+
+    async def _invalidate() -> None:
+        await invalidate_user_permission_cache(user_id)
+
+    db.info.setdefault('post_commit_callbacks', []).append(_invalidate)
+
+
 @router.get('/list', response_model=UserListResponse)
 async def list_users(
     page: int = Query(1, ge=1),
@@ -152,7 +166,7 @@ async def toggle_user_status(
         raise HTTPException(status_code=400, detail='不能禁用自身账户')
     async with db_transaction(db):
         updated_user = await user_service.toggle_user_status(db, user_id)
-        await invalidate_user_permission_cache(user_id)
+        _schedule_permission_cache_invalidation(db, user_id)
     status_text = '启用' if updated_user.status else '禁用'
     return UserActionResponse(message=f'用户已{status_text}')
 
@@ -189,7 +203,7 @@ async def delete_user(
         raise HTTPException(status_code=400, detail='无法删除最后一个超级用户')
     async with db_transaction(db):
         await user_service.delete_user(db, user_id)
-        await invalidate_user_permission_cache(user_id)
+        _schedule_permission_cache_invalidation(db, user_id)
     return UserActionResponse(message='用户已删除')
 
 
@@ -246,5 +260,5 @@ async def update_user_permissions(
     """
     async with db_transaction(db):
         await user_service.update_user_permissions(db, user_id, data.permission_ids)
-        await invalidate_user_permission_cache(user_id)
+        _schedule_permission_cache_invalidation(db, user_id)
     return UserActionResponse(message='权限设置成功')

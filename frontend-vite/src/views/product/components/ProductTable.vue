@@ -190,7 +190,7 @@ function handleImageError(row: Product) {
 .pd-price { font-size: 13px; font-weight: 600; color: var(--color-danger-500); }
 
 /* ===== 操作按钮 ===== */
-.pd-actions { display: flex; gap: 4px; }
+.pd-actions { display: flex; gap: 4px; justify-content: center; }
 .pd-act-btn {
   width: 36px;
   height: 36px;

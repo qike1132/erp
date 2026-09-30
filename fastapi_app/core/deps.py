@@ -18,6 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
+from fastapi_app.core.audit_middleware import record_access_denied
 from fastapi_app.core.auth.blacklist import is_token_revoked, revoke_token
 from fastapi_app.core.auth.token import (
     _decode_jwt_token,
@@ -285,8 +286,12 @@ def require_permission(permission_name: str):
             ...
     """
 
-    async def permission_checker(current_user: User=Depends(_get_user_with_permissions)) -> User:
+    async def permission_checker(request: Request, current_user: User=Depends(_get_user_with_permissions)) -> User:
         if not current_user.has_permission(permission_name):
+            await record_access_denied(
+                request, current_user,
+                required_permissions=(permission_name,), reason='missing_permission',
+            )
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='权限不足')
         return current_user
     return permission_checker
@@ -309,8 +314,12 @@ def require_any_permission(*permission_names: str):
             ...
     """
 
-    async def permission_checker(current_user: User=Depends(_get_user_with_permissions)) -> User:
+    async def permission_checker(request: Request, current_user: User=Depends(_get_user_with_permissions)) -> User:
         if not any(current_user.has_permission(name) for name in permission_names):
+            await record_access_denied(
+                request, current_user,
+                required_permissions=permission_names, reason='missing_any_permission',
+            )
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='权限不足')
         return current_user
     return permission_checker
@@ -328,8 +337,12 @@ def require_superuser(permission_name: str = 'user_manage'):
             ...
     """
 
-    async def superuser_checker(current_user: User=Depends(require_permission(permission_name))) -> User:
+    async def superuser_checker(request: Request, current_user: User=Depends(require_permission(permission_name))) -> User:
         if not current_user.is_super:
+            await record_access_denied(
+                request, current_user,
+                required_permissions=(permission_name,), reason='not_superuser',
+            )
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='仅超级用户可访问')
         return current_user
     return superuser_checker
