@@ -2,7 +2,8 @@
 
 口径见 docs/purchase/备品数量按部位差异化损耗率计算方案.md。
 核心不变量：备品 = Σ_SKU ceil(SKU订单数量 × max(该SKU各部位行损耗率)‰)。
-降级不变量：任何数据不可得时回退既有订单级口径，绝不抛错、绝不清零。
+降级不变量：产品/BOM 无法匹配部位行时回退「该单全部明细 max」并告警；
+SKU 快照表/快照行不可得时回退既有订单级口径。绝不抛错、绝不静默清零。
 """
 import logging
 
@@ -348,8 +349,13 @@ async def test_zero_or_null_sku_qty_contributes_zero(db):
     assert float(spare) == 30
 
 
-async def test_unresolvable_sku_degrades_to_order_rate(db):
-    """SKU 产品名/条码都对不上产品 → 降级为该单订单级率，不抛错。"""
+async def test_unresolvable_sku_degrades_to_items_max(db):
+    """SKU 产品名/条码都对不上产品 → 降级为**该单全部明细的 max**，不抛错。
+
+    口径变更（spec §2.2/§4）：曾一度实现为「回退订单级率」（旧实现跟了 plan 附录，
+    违反 spec）。现按 spec 降级为「该单全部明细 max」——本例明细头布率 30、
+    订单级率 15，故降级结果为 **30（不是 15，更不是 0）**。
+    """
     session = db
     await _seed_product_two_fabrics(session)
     await _seed_po(
@@ -361,11 +367,45 @@ async def test_unresolvable_sku_degrades_to_order_rate(db):
     await recompute_po_spare_from_item_rates(session, [7009])
 
     spare, _ = await _po_spare(session, 7009)
-    assert float(spare) == 15
+    assert float(spare) == 30
 
 
-async def test_bom_changed_no_match_degrades_to_order_rate(db):
-    """产品 BOM 已改名致匹配为空 → 降级为该单订单级率，不抛错。"""
+async def test_unresolvable_sku_null_order_rate_degrades_to_items_max(db, caplog):
+    """【I1 回归】产品无法解析 + 顶层率为 NULL → 降级为该单明细 max，**不得静默写 0**。
+
+    旧实现的报警守卫是 ``if part_keys and not _match_part_items(...)``：产品无法解析时
+    ``part_keys`` 为 None ⇒ 守卫短路 ⇒ **不告警**；且 ``_effective_rate`` 回退
+    ``normalize_spare_rate(None) or 0.0`` ⇒ **静默把 ``sku.spare_qty`` 写成 0**。
+    这正是「用户改用逐部位率、顶层率合法为 NULL」时的目标工作流，故必须按 spec 修。
+    """
+    session = db
+    await _seed_product_two_fabrics(session)
+    await _seed_po(
+        session, 7130, product_quantity=1000, spare_rate=None,
+        item_rates={_H_TIAO: 30},
+        skus=[{'product_name': '查无此产品', 'order_qty': 1000}],
+    )
+
+    with caplog.at_level(logging.WARNING, logger=_SPARE_LOGGER):
+        await recompute_po_spare_from_item_rates(session, [7130])
+
+    spare, sku_rows = await _po_spare(session, 7130)
+    assert float(spare) == 30, '产品无法解析且顶层率为 NULL 时必须降级为明细 max，不得写 0'
+    assert sku_rows == [(30, 30)]
+    warns = [
+        r for r in caplog.records
+        if r.levelno == logging.WARNING and r.name == _SPARE_LOGGER
+    ]
+    assert len(warns) == 1, '降级告警应每次调用汇总一次'
+    assert '查无此产品' in warns[0].getMessage(), '告警须点名降级的 SKU'
+
+
+async def test_bom_changed_no_match_degrades_to_items_max(db):
+    """产品 BOM 已改名致匹配为空 → 降级为**该单全部明细的 max**，不抛错。
+
+    同 ``test_unresolvable_sku_degrades_to_items_max``：按 spec 降级为明细 max
+    （本列明细率 30，故为 **30**，不是订单级率 15）。
+    """
     session = db
     await _seed_product_two_fabrics(session)  # BOM 里没有「已停产布料」
     await _seed_po(
@@ -377,7 +417,7 @@ async def test_bom_changed_no_match_degrades_to_order_rate(db):
     await recompute_po_spare_from_item_rates(session, [7010])
 
     spare, _ = await _po_spare(session, 7010)
-    assert float(spare) == 15
+    assert float(spare) == 30
 
 
 async def test_bom_match_empty_logs_warning_naming_sku(db, caplog):

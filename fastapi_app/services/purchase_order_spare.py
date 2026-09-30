@@ -11,8 +11,8 @@
 
 **降级契约（任何一步不可得都不得抛错）**：
 - SKU 快照表不可用        → 保持既有订单级口径 calc_spare_quantity(product_quantity, spare_rate)
-- 产品/BOM 解析不出/无匹配 → 该 SKU 回退订单级 spare_rate
-- 该单无 SKU 快照行        → 同上按订单级口径
+- 产品/BOM 解析不出/无匹配 → 该 SKU 降级为「该单全部明细的 max」（spec §2.2/§4），记 warning
+- 该单无 SKU 快照行        → 保持既有订单级口径（合法旧单，不属降级噪声源，静默）
 """
 from __future__ import annotations
 
@@ -132,17 +132,48 @@ def _match_part_items(items, keys) -> list:
     return [it for it in items if _item_key(it) in keys] if keys else []
 
 
-def _effective_rate(matched_items, keys, order_rate: float | None) -> float:
-    """部位生效率 = max(匹配行的率)；无匹配则回退订单级率。"""
-    matched = _match_part_items(matched_items, keys)
-    if not matched:
-        return normalize_spare_rate(order_rate) or 0.0
-    candidates = [
-        it.loss_rate if it.loss_rate is not None else order_rate for it in matched
+def _rates_max(rows, order_rate: float | None) -> float:
+    """一组明细行的损耗率最大值。
+
+    行为空 → 0.0；行率为 NULL → 回退 ``order_rate``，仍为 NULL 者不参与 max；
+    ``normalize_spare_rate`` 负责截断 / 负值归零。全无有效率 → 0.0。
+    """
+    norm = [
+        r for r in (
+            normalize_spare_rate(it.loss_rate if it.loss_rate is not None else order_rate)
+            for it in rows
+        ) if r is not None
     ]
-    # normalize_spare_rate(None) → None（视为「无值」，不参与 max）
-    norm = [r for r in (normalize_spare_rate(c) for c in candidates) if r is not None]
     return max(norm) if norm else 0.0
+
+
+def _effective_rate(
+    items, keys, order_rate: float | None,
+) -> tuple[float, str | None]:
+    """该 SKU 的部位生效率；未匹配到部位行时降级为「该单全部明细的 max」。
+
+    口径（spec §2.2/§4）：
+
+    1. ``keys`` 非空且明细中有键命中 → ``max(命中行的率)``；
+    2. 否则（**产品无法解析 / BOM 键为空 / BOM 匹配为空**）→ 降级为**该采购单
+       全部明细**的 max（不是订单级率），两条路径共用同一套「行率为 NULL →
+       ``order_rate`` 兜底」规则；全无有效率 → 0；
+    3. 绝不抛错。
+
+    Args:
+        items: 该采购单的**全部**明细行（降级分支也要用整单明细取 max）。
+        keys: 该 SKU 的 BOM 键集合；产品无法解析时为 falsy。
+        order_rate: 订单级 ``spare_rate``，仅作 NULL 行的回退基线。
+
+    Returns:
+        ``(rate, degraded_reason)``：命中部位行时原因为 ``None``；降级时给出原因
+        （供调用方汇总成**每次调用一条**的 warning）。
+    """
+    matched = _match_part_items(items, keys)
+    if matched:
+        return _rates_max(matched, order_rate), None
+    reason = 'BOM 匹配为空' if keys else '产品无法解析或无 BOM 物料'
+    return _rates_max(items, order_rate), reason
 
 
 async def recompute_po_spare_from_item_rates(db: AsyncSession, po_ids) -> int:
@@ -152,9 +183,10 @@ async def recompute_po_spare_from_item_rates(db: AsyncSession, po_ids) -> int:
     ``purchase_order_sku.spare_qty / spare_rate``。
 
     降级链（任一环节不可得即回退，绝不抛错）：
-    1. SKU 快照表不可用      → 保持既有订单级口径；
-    2. 该单无 SKU 快照行      → 同上；
-    3. 产品/BOM 解析不出或无匹配行 → 该 SKU 回退订单级 ``spare_rate``。
+    1. SKU 快照表不可用            → 保持既有订单级口径；
+    2. 该单无 SKU 快照行            → 同上（合法旧单，静默）；
+    3. 产品/BOM 解析不出 / BOM 匹配为空 → 该 SKU 降级为「该单全部明细的
+       max」（spec §2.2/§4，不是订单级率），汇总一条 warning。
     """
     ids = [i for i in dict.fromkeys(po_ids or []) if i]
     if not ids:
@@ -185,7 +217,7 @@ async def recompute_po_spare_from_item_rates(db: AsyncSession, po_ids) -> int:
     by_barcode, by_name, name_by_pid = await _resolve_products(db, all_skus)
     keys_by_pid = await _load_bom_item_keys(db, name_by_pid)
 
-    degraded: list[str] = []
+    degraded: list[tuple[str, str]] = []
     for order in orders:
         skus = skus_by_po.get(order.id) or []
         if not skus:
@@ -199,18 +231,19 @@ async def recompute_po_spare_from_item_rates(db: AsyncSession, po_ids) -> int:
                 (sku.product_name or '').strip()
             )
             part_keys = keys_by_pid.get(pid) if pid is not None else None
-            if part_keys and not _match_part_items(items, part_keys):
-                # 产品可解析但 BOM 匹配为空（L3b）：本 SKU 降级为订单级率，留痕
-                degraded.append(sku.product_name or sku.product_barcode or '未知SKU')
-            rate = _effective_rate(items, part_keys, order.spare_rate)
+            rate, reason = _effective_rate(items, part_keys, order.spare_rate)
+            if reason is not None:
+                # 产品无法解析 / BOM 匹配为空（L3）：本 SKU 降级为该单明细 max，留痕
+                degraded.append((sku.product_name or sku.product_barcode or '未知SKU', reason))
             sku.spare_rate = rate
             sku.spare_qty = calc_spare_quantity(sku.order_qty, rate)
             total += int(sku.spare_qty or 0)
         order.spare_quantity = total
     if degraded:
         # 汇总一次（非逐 SKU）：保存路径会去抖重入，逐条会变噪声
+        unique = list(dict.fromkeys(degraded))
         logger.warning(
-            '备品重算：%d 个 SKU 的 BOM 匹配为空，已降级为该单订单级率（BOM 可能已改名/删行）：%s',
-            len(degraded), '、'.join(dict.fromkeys(degraded)),
+            '备品重算：%d 个 SKU 未匹配到部位明细行，已降级为该单全部明细 max：%s',
+            len(unique), '、'.join(f'{name}（{reason}）' for name, reason in unique),
         )
     return len(orders)
