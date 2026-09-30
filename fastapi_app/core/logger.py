@@ -62,12 +62,14 @@ def setup_logging():
     ))
     root_logger.addHandler(console_handler)
 
-    # 文件处理器（JSON 格式，按天轮转，保留 3 天）
+    # 文件处理器（JSON 格式，按天轮转，保留 14 天）
+    # 为什么是 14 天（S2 可观测性）：排障与复盘需要覆盖「上周同一时间」的对照窗口；
+    # 原值 3 天使得跨周末的事故（周五发生、周一发现）已经无日志可查。
     log_file = log_dir / f"fastapi_{datetime.now(UTC).strftime('%Y%m%d')}.log"
     file_handler = TimedRotatingFileHandler(
         log_file,
         when="midnight",
-        backupCount=3,
+        backupCount=14,
         encoding="utf-8",
     )
     file_handler.setLevel(logging.INFO)
