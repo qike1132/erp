@@ -30,6 +30,8 @@ vi.mock('@/api', () => ({
 vi.mock('@/composables/useToast', () => ({ showToast: vi.fn() }))
 
 import ProductionEntryDialog from '@/views/production/components/ProductionEntryDialog.vue'
+import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
+import { showToast } from '@/composables/useToast'
 
 const PRODUCTS = [{ id: 1, name: '白兔公仔 40cm', barcode: '6901234', specification: '40cm' }]
 
@@ -52,6 +54,21 @@ function mountDialog() {
     props: { open: true, selectedDate: '2026-09-30' },
     attachTo: document.body,
     global: { plugins: [[VueQueryPlugin, { queryClient }]], stubs },
+  })
+  return wrapper
+}
+
+/**
+ * 不 stub UiConfirmDialog 的挂载。
+ * 撤销确认框的层级问题只有挂真组件才看得见 —— stub 掉之后它是个普通 div，
+ * 有没有 z-class 都一样，这正是当初漏掉这个 bug 的原因。
+ */
+function mountDialogRealConfirm() {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  wrapper = mount(ProductionEntryDialog, {
+    props: { open: true, selectedDate: '2026-09-30' },
+    attachTo: document.body,
+    global: { plugins: [[VueQueryPlugin, { queryClient }]] },
   })
   return wrapper
 }
@@ -110,6 +127,8 @@ beforeEach(() => {
 afterEach(() => {
   wrapper?.unmount()
   wrapper = null
+  // 真 UiConfirmDialog 经 reka-ui 传送进 body，卸载后再清一次，避免串到下一个用例
+  document.body.innerHTML = ''
 })
 
 describe('ProductionEntryDialog 快捷行布局', () => {
@@ -280,6 +299,51 @@ describe('ProductionEntryDialog 护栏', () => {
 
     expect(deleteMock).toHaveBeenCalledWith(42)
     expect(w.find('[data-test="qe-just"]').exists()).toBe(false)
+  })
+
+  it('撤销确认框被抬到嵌套层级——沿用默认层级会被录入弹窗盖住，点不到', async () => {
+    // 挂**真** UiConfirmDialog：stub 掉它之后它只是个普通 div，有没有 z-class 都一样，
+    // 这个 bug 就是这么漏过去的。jsdom 验不了绘制，但能钉住「类名确实传下去了」。
+    const w = mountDialogRealConfirm()
+    await selectFirstProduct(w)
+    await w.find('[data-test="qe-quantity"]').setValue('620')
+    await w.find('[data-test="qe-submit"]').trigger('click')
+    await flushPromises()
+
+    await w.find('[data-test="qe-undo"]').trigger('click')
+    await nextTick()
+
+    const confirm = w.findComponent(UiConfirmDialog)
+    expect(confirm.props('open')).toBe(true)
+    // 遮罩与弹窗卡都是 var(--z-modal)=40，确认框必须抬到 60/70 才在它们之上
+    expect(confirm.props('overlayZClass')).toBe('z-[var(--z-overlay-nested)]')
+    expect(confirm.props('contentZClass')).toBe('z-[var(--z-modal-nested)]')
+  })
+
+  it('撤销失败时透出后端的 detail（物理删除失败的原因必须可见）', async () => {
+    const w = mountDialog()
+    await selectFirstProduct(w)
+    await w.find('[data-test="qe-quantity"]').setValue('620')
+    await w.find('[data-test="qe-submit"]').trigger('click')
+    await flushPromises()
+
+    deleteMock.mockRejectedValueOnce({ response: { data: { detail: '记录已被他人删除' } } })
+    await w.find('[data-test="qe-undo"]').trigger('click')
+    await w.find('[data-test="undo-confirm-yes"]').trigger('click')
+    await flushPromises()
+
+    expect(showToast).toHaveBeenCalledWith('记录已被他人删除', 'error')
+  })
+
+  it('点部门菜单以外的地方会收起菜单', async () => {
+    const w = mountDialog()
+    await w.find('[data-test="qe-dept"]').trigger('click')
+    expect(w.find('.pr-qe-dept-menu').exists()).toBe(true)
+
+    document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await nextTick()
+
+    expect(w.find('.pr-qe-dept-menu').exists()).toBe(false)
   })
 
   it('部门默认取上次使用的部门，切换后写回 localStorage', async () => {

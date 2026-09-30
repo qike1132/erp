@@ -263,8 +263,10 @@ async function handleDrawerExport() {
 }
 
 // ===== 键盘快捷键：Ctrl+N 打开录入、Ctrl+Enter 提交、Esc 关闭录入弹窗 =====
-// 弹窗内部仍印着这三个快捷键的提示，故编排层必须真的接线（它 defineExpose 了
-// handleSubmit / closeEntryDrawer）。原来的 Ctrl+1/Ctrl+2 是给已删除的双 Tab 用的，不再需要。
+// Ctrl+N 只在这一层处理。Ctrl+Enter / Esc 弹窗内部也接了（挂在模态根节点，
+// 焦点在弹窗内时由它接管 —— Esc 还要先收浮层，且收浮层时会 stopPropagation 拦住这里）；
+// 这一层是「焦点不在弹窗内」时的兜底，故它 defineExpose 了 handleSubmit / closeEntryDrawer。
+// 原来的 Ctrl+1/Ctrl+2 是给已删除的双 Tab 用的，不再需要。
 function handleKeydown(event: KeyboardEvent) {
   if (event.ctrlKey && (event.key === 'n' || event.key === 'N')) {
     event.preventDefault()

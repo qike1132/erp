@@ -71,20 +71,6 @@ function loadLastDept(): string {
   }
 }
 
-function toLocalDate(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
-
-function todayLocal(): string {
-  return toLocalDate(new Date())
-}
-
-function prevDay(d: string): string {
-  const dt = new Date(d + 'T00:00:00')
-  dt.setDate(dt.getDate() - 1)
-  return toLocalDate(dt)
-}
-
 /** 'YYYY-MM-DD' → { year, month }（records 接口要求年/月或区间二选一） */
 function monthParts(dateStr: string): { year: number; month: number } {
   const d = new Date(dateStr + 'T00:00:00')
@@ -102,6 +88,7 @@ export function useProductionEntry(
   const isSubmitting = ref(false)
   const detailOpen = ref(false)
   const deptMenuOpen = ref(false)
+  const deptMenuRef = ref<HTMLElement>()
 
   const recentProducts = ref<Product[]>(loadRecent())
 
@@ -232,7 +219,11 @@ export function useProductionEntry(
     if (searchActiveIndex.value >= searchResults.value.length) searchActiveIndex.value = 0
   }
   function confirmSearchSelection() {
-    const product = searchActiveIndex.value >= 0 ? searchResults.value[searchActiveIndex.value] : undefined
+    if (!searchResults.value.length) return
+    // 没按过 ↑↓ 时回落到第一条：否则「输入产品名 → ⏎」这个最自然的动作是静默无反应
+    //（`.prevent` 吞掉了按键，下拉还开着），而这正是设计里写明的那一行。
+    const idx = searchActiveIndex.value >= 0 ? searchActiveIndex.value : 0
+    const product = searchResults.value[idx]
     if (product) void selectProduct(product)
   }
   async function selectProduct(product: Product) {
@@ -443,12 +434,20 @@ export function useProductionEntry(
       invalidateSummaries()
       void refreshTodayCount()
       void checkDuplicate()
-    } catch {
-      showToast('撤销失败', 'error')
+    } catch (error: unknown) {
+      // 与 confirmSubmit 同一口径：物理删除失败时，后端给的原因必须让用户看见
+      const detail = (error as { response?: { data?: { detail?: string } } } | null)?.response?.data?.detail
+      showToast(detail ?? '撤销失败', 'error')
     }
   }
 
-  /** 弹窗内的键盘流（挂在模态根节点，靠冒泡覆盖所有子输入框） */
+  /**
+   * 弹窗内的键盘流（挂在模态根节点，靠冒泡覆盖所有子输入框）。
+   *
+   * Esc 分层：先收最上面那层浮层（部门菜单 → 产品下拉），都没有才关弹窗。
+   * 收起浮层时 stopPropagation —— 编排层还挂着一个 window 级 Esc 兜底
+   * （焦点不在弹窗内时用），不放行的话它会越过分层把关掉整个弹窗。
+   */
   function onModalKeydown(event: KeyboardEvent) {
     if (event.altKey && !event.ctrlKey && !event.metaKey) {
       const idx = ALT_DEPT_KEYS.indexOf(event.key as (typeof ALT_DEPT_KEYS)[number])
@@ -464,9 +463,31 @@ export function useProductionEntry(
       return
     }
     if (event.key === 'Escape') {
+      if (deptMenuOpen.value) {
+        deptMenuOpen.value = false
+        event.stopPropagation()
+        return
+      }
+      if (showDropdown.value) {
+        showDropdown.value = false
+        searchActiveIndex.value = -1
+        event.stopPropagation()
+        return
+      }
       closeEntryDrawer()
     }
   }
+
+  /** 点部门菜单以外的任何地方都收起菜单（只在菜单打开期间挂 document 监听） */
+  function onDocumentClick(event: MouseEvent) {
+    const target = event.target as Node | null
+    if (target && deptMenuRef.value?.contains(target)) return
+    deptMenuOpen.value = false
+  }
+  watch(deptMenuOpen, (open) => {
+    if (open) document.addEventListener('click', onDocumentClick)
+    else document.removeEventListener('click', onDocumentClick)
+  })
 
   watch(formDept, (value) => {
     try {
@@ -491,6 +512,7 @@ export function useProductionEntry(
   onUnmounted(() => {
     if (searchTimer) clearTimeout(searchTimer)
     _timers.forEach(clearTimeout)
+    document.removeEventListener('click', onDocumentClick)
   })
 
   return {
@@ -501,6 +523,7 @@ export function useProductionEntry(
     isSubmitting,
     detailOpen,
     deptMenuOpen,
+    deptMenuRef,
     recentProducts,
     clearRecent,
     form,
@@ -535,9 +558,6 @@ export function useProductionEntry(
     requestUndo,
     confirmUndo,
     pickDept,
-    pickDeptByIndex,
     onModalKeydown,
-    todayLocal,
-    prevDay,
   }
 }

@@ -16,7 +16,7 @@
         <div class="pr-qe-body">
           <!-- 快捷行：部门 · 产品 · 数量 · 录入（鼠标只需点一次） -->
           <div class="pr-qe-row">
-            <div class="pr-qe-dept">
+            <div ref="deptMenuRef" class="pr-qe-dept">
               <button
                 type="button"
                 data-test="qe-dept"
@@ -172,11 +172,17 @@
           </div>
         </div>
 
+        <!-- 撤销确认：物理删除不可恢复，必须写明「删的是哪一条」。
+             确认框被传送出遮罩的层叠上下文，遮罩与弹窗卡都是 z-[var(--z-modal)]（40），
+             若确认框沿用默认层级（30/40），谁盖谁取决于传送顺序 —— 实测会渲染在弹窗之下、
+             点不到，撤销护栏等于不存在。故显式抬到嵌套层级（overlay 60 / modal 70）。 -->
         <UiConfirmDialog
           :open="undoConfirmOpen"
           type="danger"
           :text="undoText"
           sub="物理删除，不可恢复"
+          overlay-z-class="z-[var(--z-overlay-nested)]"
+          content-z-class="z-[var(--z-modal-nested)]"
           @confirm="confirmUndo"
           @cancel="undoConfirmOpen = false"
         />
@@ -219,6 +225,7 @@ const {
   isSubmitting,
   detailOpen,
   deptMenuOpen,
+  deptMenuRef,
   recentProducts,
   clearRecent,
   form,
@@ -260,7 +267,10 @@ defineExpose({ handleSubmit, closeEntryDrawer })
 </script>
 
 <style scoped>
-.pr-qe-overlay { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.45); backdrop-filter: blur(6px); z-index: 100; display: flex; align-items: center; justify-content: center; padding: 24px; box-sizing: border-box; }
+/* 遮罩必须留在 token 尺度上（--z-modal = 40）：撤销确认框是嵌套层级 60/70，
+   而它是被传送出本层叠上下文的，两者在根上下文里直接比大小。
+   这里写魔法数 100 会把 30/40 的确认框压到弹窗下面，点不到。 */
+.pr-qe-overlay { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.45); backdrop-filter: blur(6px); z-index: var(--z-modal); display: flex; align-items: center; justify-content: center; padding: 24px; box-sizing: border-box; }
 .pr-qe-modal { width: 760px; max-width: 100%; max-height: 100%; background: white; border-radius: 18px; display: flex; flex-direction: column; box-shadow: 0 24px 60px rgba(15, 23, 42, 0.22), 0 4px 12px rgba(15, 23, 42, 0.08); overflow: hidden; }
 .pr-qe-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 22px; background: linear-gradient(135deg, var(--color-primary-700) 0%, var(--color-primary-500) 100%); color: white; flex-shrink: 0; }
 .pr-qe-head-left { display: flex; align-items: center; gap: 12px; min-width: 0; }

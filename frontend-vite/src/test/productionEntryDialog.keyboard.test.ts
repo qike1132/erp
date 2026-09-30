@@ -155,6 +155,18 @@ describe('ProductionEntryDialog 键盘流', () => {
     expect(document.activeElement).toBe(w.find('[data-test="qe-quantity"]').element)
   })
 
+  it('搜索框没按过 ↑↓ 时直接 ⏎ 也能选中第一条（不能是静默无反应）', async () => {
+    const w = mountDialog()
+    await typeSearch(w, '白兔')
+    const input = w.find('[data-test="qe-search"]')
+    // 刻意不按 ↓：这是最自然的动作 —— 输入产品名，回车
+    await input.trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+
+    expect((w.find('[data-test="qe-search"]').element as HTMLInputElement).value).toBe('白兔公仔 40cm')
+    expect(document.activeElement).toBe(w.find('[data-test="qe-quantity"]').element)
+  })
+
   it('数量输入 ↑/↓ 让数量 ∓1', async () => {
     const w = mountDialog()
     await selectFirstProduct(w)
@@ -212,11 +224,36 @@ describe('ProductionEntryDialog 键盘流', () => {
     expect(createMock).toHaveBeenCalledTimes(1)
   })
 
-  it('Esc 关闭弹窗', async () => {
+  it('下拉已收起时 Esc 关闭弹窗', async () => {
     const w = mountDialog()
+    expect(w.find('.pr-entry-dropdown').exists()).toBe(false)
 
     await w.find('.pr-qe-modal').trigger('keydown', { key: 'Escape' })
 
     expect(w.emitted('update:open')).toEqual([[false]])
+  })
+
+  it('Esc 分层：产品下拉打开时只收下拉，不关弹窗', async () => {
+    const w = mountDialog()
+    await typeSearch(w, '白兔')
+    expect(w.find('.pr-entry-dropdown').exists()).toBe(true)
+
+    await w.find('.pr-qe-modal').trigger('keydown', { key: 'Escape' })
+    await nextTick()
+
+    expect(w.find('.pr-entry-dropdown').exists()).toBe(false)
+    expect(w.emitted('update:open')).toBeUndefined()
+  })
+
+  it('Esc 分层：部门菜单打开时只收菜单，不关弹窗', async () => {
+    const w = mountDialog()
+    await w.find('[data-test="qe-dept"]').trigger('click')
+    expect(w.find('.pr-qe-dept-menu').exists()).toBe(true)
+
+    await w.find('.pr-qe-modal').trigger('keydown', { key: 'Escape' })
+    await nextTick()
+
+    expect(w.find('.pr-qe-dept-menu').exists()).toBe(false)
+    expect(w.emitted('update:open')).toBeUndefined()
   })
 })
