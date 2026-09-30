@@ -49,7 +49,7 @@
 
     <RecordEditDialog v-model:open="editOpen" :record="editingRecord" @saved="onRecordSaved" />
 
-    <ProductionEntryDialog v-model:open="entryOpen" v-model:selected-date="selectedDate" />
+    <ProductionEntryDialog ref="entryDialogRef" v-model:open="entryOpen" v-model:selected-date="selectedDate" />
 
     <Transition name="pr-toast">
       <div v-if="exportStatus.show" :class="['pr-export-toast', exportStatus.type]">
@@ -60,7 +60,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onUnmounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 
 import { dailyProductionApi } from '@/api/production'
@@ -87,6 +87,7 @@ const editOpen = ref(false)
 const editingRecord = ref<DailyProductionRecord | null>(null)
 const recordsOpen = ref(false)
 const recordsFilters = ref<RecordFilters>(defaultRecordFilters())
+const entryDialogRef = ref<InstanceType<typeof ProductionEntryDialog>>()
 
 function goPrevDay() {
   const d = new Date(`${selectedDate.value}T00:00:00`)
@@ -221,7 +222,29 @@ async function handleExport() {
   }, 3000)
 }
 
-onUnmounted(() => clearTimeout(exportTimer))
+// ===== 键盘快捷键：Ctrl+N 打开录入、Ctrl+Enter 提交、Esc 关闭录入弹窗 =====
+// 弹窗内部仍印着这三个快捷键的提示，故编排层必须真的接线（它 defineExpose 了
+// handleSubmit / closeEntryDrawer）。原来的 Ctrl+1/Ctrl+2 是给已删除的双 Tab 用的，不再需要。
+function handleKeydown(event: KeyboardEvent) {
+  if (event.ctrlKey && (event.key === 'n' || event.key === 'N')) {
+    event.preventDefault()
+    if (!entryOpen.value) entryOpen.value = true
+  }
+  if (event.ctrlKey && event.key === 'Enter' && entryOpen.value) {
+    event.preventDefault()
+    entryDialogRef.value?.handleSubmit()
+  }
+  if (event.key === 'Escape' && entryOpen.value) {
+    entryDialogRef.value?.closeEntryDrawer()
+  }
+}
+
+onMounted(() => window.addEventListener('keydown', handleKeydown))
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleKeydown)
+  clearTimeout(exportTimer)
+})
 
 defineExpose({ openRecordsFor, recordsOpen, recordsFilters })
 </script>
@@ -238,8 +261,8 @@ defineExpose({ openRecordsFor, recordsOpen, recordsFilters })
   font-weight: 600;
 }
 .pr-export-toast.info { background: var(--color-primary-50); color: var(--color-primary-700); }
-.pr-export-toast.success { background: #f0fdf4; color: #15803d; }
-.pr-export-toast.error { background: #fef2f2; color: #dc2626; }
+.pr-export-toast.success { background: var(--color-success-50); color: var(--color-success-700); }
+.pr-export-toast.error { background: var(--color-danger-50); color: var(--color-danger-700); }
 .pr-toast-enter-active, .pr-toast-leave-active { transition: opacity 0.3s ease; }
 .pr-toast-enter-from, .pr-toast-leave-to { opacity: 0; }
 </style>

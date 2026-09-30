@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
+import { nextTick } from 'vue'
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
 
 vi.mock('@/api/production', () => ({
@@ -44,7 +45,8 @@ function mountView() {
         DeptDrillCards: { template: '<div data-test="cockpit-dept-cards" />' },
         RecordDrawer: { template: '<div data-test="record-drawer" />' },
         RecordEditDialog: { template: '<div />' },
-        ProductionEntryDialog: { template: '<div />' },
+        // 录入弹窗的 stub 带 name 与 open prop：快捷键用例要能读到它是否被打开。
+        ProductionEntryDialog: { name: 'ProductionEntryDialog', props: ['open', 'selectedDate'], template: '<div />' },
         teleport: true,
       },
     },
@@ -82,5 +84,15 @@ describe('ProductionView（驾驶舱编排）', () => {
 
     expect((wrapper.vm as unknown as { recordsOpen: boolean }).recordsOpen).toBe(true)
     expect((wrapper.vm as unknown as { recordsFilters: { department: string } }).recordsFilters.department).toBe('filling')
+  })
+
+  it('Ctrl+N 打开录入弹窗', async () => {
+    const wrapper = mountView()
+    expect((wrapper.vm as unknown as { entryOpen?: boolean }).entryOpen ?? false).toBe(false)
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'n', ctrlKey: true }))
+    await nextTick()
+
+    expect(wrapper.findComponent({ name: 'ProductionEntryDialog' }).props('open')).toBe(true)
   })
 })
