@@ -379,3 +379,12 @@ _firefox_profile_*/
 
 # 注：AGENTS.md / GEMINI.md / .windsurfrules / .github/copilot-instructions.md
 #     刻意**不**在此忽略 —— 它们是 AI 契约文件，待改写为项目版后正式入库。
+
+# === 2026-09-30 凭据文件不得入库 ===
+# config/pgbouncer/userlist.txt：存放 erp_app/erp_admin/erp_monitor 三个数据库账号的
+#   认证口令（当前 auth_type=scram-sha-256，该模式下 userlist 存明文即可）。
+#   该文件此前**既被 git 跟踪、又没有任何 ignore 规则**（git check-ignore 返回 exit 1），
+#   三个账号还共用同一个 26 字符口令 —— 属实质凭据泄露，已于同日轮换。
+#   保留同名 .example 模板（不含口令）继续入库。
+#   注意：本规则只匹配该确切路径，不会误伤 userlist.txt.example。
+/config/pgbouncer/userlist.txt

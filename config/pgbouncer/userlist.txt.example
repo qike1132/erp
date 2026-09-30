@@ -1,18 +1,34 @@
-;; PgBouncer 用户认证文件模板（scram-sha-256）
-;; 格式: "username" "password_hash"
+;; PgBouncer 用户认证文件模板（可入库；真实文件 userlist.txt 已被 .gitignore 忽略）
 ;;
-;; 生成 SCRAM-SHA-256 密码哈希:
-;;   psql> \password <password>        (在 psql 中设置后从 pg_shadow 复制)
-;;   或: python -c "import psycopg; ..." (使用 psycopg3 的 scram 加密)
-;;   或: pg_password_hash <password>  (若工具可用)
+;; 用法：复制本文件为 userlist.txt 后填入真实口令
+;;     cp config/pgbouncer/userlist.txt.example config/pgbouncer/userlist.txt
 ;;
-;; 部署步骤:
-;;   1. 复制本文件为 userlist.txt:  cp userlist.txt.example userlist.txt
-;;   2. 填入实际密码哈希值
-;;   3. 重启 pgbouncer 服务
+;; 推荐用生成器写入，避免手写出错：
+;;     python scripts/pgbouncer_gen_userlist.py `
+;;         --password <erp_app 的口令，即 .env 的 DB_PASSWORD> `
+;;         --admin-pass <erp_admin 自己的口令> `
+;;         --monitor-pass <erp_monitor 自己的口令>
 ;;
-;; ⚠️ 生产环境必须替换为实际 SCRAM-SHA-256 哈希值，不得留空！
-;; ⚠️ 推荐通过环境变量在容器启动时生成，避免硬编码凭证。
-"erp" ""
-"erp_admin" ""
+;; 格式取决于 pgbouncer.ini 的 auth_type（本项目 pgbouncer.ini 与
+;; pgbouncer.windows.ini 均设 auth_type = scram-sha-256）：
+;;   · scram-sha-256 → userlist 直接存【明文口令】即可。PgBouncer 需要明文才能完成
+;;     SCRAM 交换，scripts/pgbouncer_gen_userlist.py 的默认行为正是写明文（见该脚本 :7、:49）。
+;;   · md5 → 用 --md5 生成哈希，格式为：
+;;       "md5" + md5(password + username)     共 35 字符（"md5" 3 字符 + 32 位十六进制）
+;;     ⚠️ 常见错误：值以 "md5" 开头但总长不是 35 字符 —— 那不是合法哈希，认证必然失败。
+;;        （2026-09-30 审核时，仓库里入库的那份就是 "md5"+26 字符，即格式本身已损坏。）
+;;
+;; ⚠️ 三个账号必须使用【互不相同】的口令，并按最小权限授予数据库权限：
+;;     erp_app      应用连接用户（= .env 的 DB_USER / DB_PASSWORD）
+;;     erp_admin    管理/诊断用户（SHOW STATS 等）
+;;     erp_monitor  监控用户（stats_users）
+;;   注意：scripts/pgbouncer_gen_userlist.py:40-41 在【未传】--admin-pass / --monitor-pass
+;;   时，会把这两个账号的口令回退成 erp_app 的口令 —— 那正是"三账号共用同一口令"的成因。
+;;   请务必显式传全三个参数。
+;;
+;; ⚠️ 真实 userlist.txt 含明文口令：部署后请确保文件权限仅限 PgBouncer 运行账号可读，
+;;   并且【永远不要提交】——它已被根 .gitignore 的 /config/pgbouncer/userlist.txt 覆盖。
+
+"erp_app"     ""
+"erp_admin"   ""
 "erp_monitor" ""
