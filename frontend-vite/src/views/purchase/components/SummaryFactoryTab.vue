@@ -142,6 +142,13 @@
               <td>{{ item.row.unit || '' }}</td>
             </template>
           </tr>
+
+          <!-- 数量差异对照块：仅该组最后一行、且该组存在「推算 vs 落库」差异时渲染（无差异不占高度） -->
+          <SummaryDiffBlock
+            v-if="rowDiffMap[item.gi] && rowDiffMap[item.gi]!.length > 0 && isLastRowOfGroup(item.gi, ri)"
+            :diffs="rowDiffMap[item.gi]!"
+            :stored-fabrics="storedFabricsOf(item.group)"
+          />
         </template>
       </tbody>
     </table>
@@ -187,6 +194,7 @@
 import { fmtQty as formatQty } from '@/utils/formatQty'
 import { useFactoryTableRows } from '../composables/useFactoryTableRows'
 import type { FactoryTabEmit, FactoryTabProps } from '../composables/useFactoryTableRows'
+import SummaryDiffBlock from './SummaryDiffBlock.vue'
 
 const props = defineProps<FactoryTabProps>()
 
@@ -206,7 +214,7 @@ function onLossRateInput(e: Event) {
 
 // 行模型与率/数量读写胶水（2026-09-30 抽到 useFactoryTableRows.ts，以守住单 .vue ≤ 400 行门禁）
 const {
-  flatRows, groupRowCounts, isGroupFirstRow, rowCoord, rowRate,
+  flatRows, rowDiffMap, storedFabricsOf, isLastRowOfGroup, groupRowCounts, isGroupFirstRow, rowCoord, rowRate,
   editRowQty, displayRowQty, sharedMaterialTitle, isRowRateMixed, onRowRateInput, onRowQtyChange,
 } = useFactoryTableRows(props, emit)
 </script>

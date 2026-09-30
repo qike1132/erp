@@ -16,7 +16,7 @@
 import { computed } from 'vue'
 import type { EmitFn } from 'vue'
 import { factoryQtyDisplayValue, buildSkuDisplayLines } from './useSummaryModal'
-import { buildPerSkuRows, materialKeyOf } from './perSkuRows'
+import { buildPerSkuRows, materialKeyOf, computeQuantityDiff } from './perSkuRows'
 import type { PerSkuRow } from './perSkuRows'
 import type { FactorySummaryData, FactoryGroup, FabricItem, SkuDisplayLine } from './useSummaryModal'
 
@@ -133,6 +133,26 @@ export function useFactoryTableRows(props: FactoryTabProps, emit: EmitFn<Factory
     return out
   })
 
+  /** 每组的差异列表（按 SKU 模式下才有；回退模式恒为空 ⇒ 不渲染对照块）。 */
+  const rowDiffMap = computed<Record<number, { materialName: string; perSku: number; stored: number }[]>>(() => {
+    const map: Record<number, { materialName: string; perSku: number; stored: number }[]> = {}
+    ;(props.factoryData?.groups || []).forEach((group, gi) => {
+      const rows = buildPerSkuRows(group, spareRateForGroup(gi))
+      map[gi] = rows.length > 0 ? computeQuantityDiff(group, rows) : []
+    })
+    return map
+  })
+
+  /** 该组的全部落库物料（压平供应商维度，供对照块列出） */
+  function storedFabricsOf(group: FactoryGroup): FabricItem[] {
+    return (group.suppliers || []).flatMap((s) => s.fabrics || [])
+  }
+
+  /** 是否该组最后一行（对照块挂在组末尾） */
+  function isLastRowOfGroup(gi: number, ri: number): boolean {
+    return ri === flatRows.value.length - 1 || flatRows.value[ri + 1]!.gi !== gi
+  }
+
   /** 该行的落库坐标：按 SKU 模式下取 row.coord；回退模式取 legacy 坐标。 */
   function rowCoord(r: RowItem): { si: number; fi: number } | null {
     return r.legacy ? { si: r.legacy.si, fi: r.legacy.fi } : r.row.coord
@@ -233,6 +253,9 @@ export function useFactoryTableRows(props: FactoryTabProps, emit: EmitFn<Factory
 
   return {
     flatRows,
+    rowDiffMap,
+    storedFabricsOf,
+    isLastRowOfGroup,
     groupRowCounts,
     isGroupFirstRow,
     rowCoord,

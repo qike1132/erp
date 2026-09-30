@@ -190,3 +190,24 @@ describe('P7 「各明细率不一致」提示与聚焦样式不得因改造丢�
     expect(bodyRows(wrapper)[2]!.text()).toContain('不一致')
   })
 })
+
+describe('P8 数量差异对照块接线（仅差异时渲染）', () => {
+  it('有差异（落库「共享布」65 vs 推算 20+40=60）→ 组末尾出现对照块并点名该物料', () => {
+    const g = group()
+    const shared = g.suppliers[0]!.fabrics[0]!
+    expect(shared.fabric_name).toBe('共享布')
+    shared.quantity = 65 // 落库真值手改为与各 SKU 推算之和不同
+
+    const w = mountTab(g)
+    expect(w.text()).toContain('实际下单')
+    expect(w.text()).toContain('共享布')
+    // 不一致的那一行有描红标记，且只有一行（A专有布/新加布均一致或只在 BOM 侧）
+    expect(w.findAll('tbody [data-diff="true"]')).toHaveLength(1)
+  })
+
+  it('无差异（默认 fixture：共享布 60、A专有布 20、B专有布 40 全对得上）→ 组末尾不渲染对照块', () => {
+    const w = mountTab(group())
+    expect(w.text()).not.toContain('实际下单')
+    expect(w.findAll('tbody [data-diff="true"]')).toHaveLength(0)
+  })
+})
