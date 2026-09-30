@@ -26,6 +26,7 @@ from fastapi_app.core.state_machine import (
 )
 from fastapi_app.core.validators import validate_not_empty, validate_quantity_range
 from fastapi_app.services.approval_log_service import create_approval_log as _create_approval_log
+from fastapi_app.services.order_utils import sync_single_item_quantity
 from fastapi_app.shared.stock_concurrency import get_product_for_update
 from fastapi_app.shared_models import (
     ApprovalLog,
@@ -340,6 +341,8 @@ async def _handle_edit_approval(db: AsyncSession, approval: ApprovalRequest, ord
 
     order.customer = new_customer
     order.quantity = new_quantity
+    # 明细数量必须跟随（列表页显示的是 order_item.quantity），与直改路径同源问题
+    await sync_single_item_quantity(db, order.id, new_quantity)
     order.note = operation_data.get('note', order.note)
     order.is_locked = False
     order.locked_by_id = None

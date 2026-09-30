@@ -35,6 +35,7 @@ from fastapi_app.services.order._common import (
 from fastapi_app.services.order_utils import (
     _batch_deduct_quantities,
     compute_order_status_from_db,
+    sync_single_item_quantity,
 )
 from fastapi_app.services.serializers.order_serializer import (
     OrderSerializer,
@@ -196,6 +197,11 @@ async def _update_order_directly(
     order.customer = customer
     order.quantity = quantity
     order.note = note
+
+    # 明细数量必须跟随订单数量：列表页（贝莱/外包/采购）显示的是 order_item.quantity
+    # （_build_beile_order_record 里 record['quantity'] = first_item.quantity），
+    # 只改主表会让这些页面永远停在旧数量——实测改 10000→8888 后主表已变、明细仍 10000。
+    await sync_single_item_quantity(db, order_id, quantity)
 
     if quantity != old_quantity:
         # TODO(multi-sku-order): order.product_id 在多 SKU 下为首 item 兼容值，库存调整需按 OrderItem 维度；待后续 spec 改造。
