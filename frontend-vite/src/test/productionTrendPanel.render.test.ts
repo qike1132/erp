@@ -50,4 +50,18 @@ describe('ProductionTrendPanel', () => {
     expect(wrapper.text()).toContain('2026-09-01')
     expect(wrapper.text()).toContain('2026-09-30')
   })
+
+  it('后台刷新期间图表容器不被销毁（trend 引用不变）', async () => {
+    const days = [{ date: '2026-09-01', filling: 5, handcraft: 0, packaging: 0, total: 5 }]
+    const t = trend(days)
+    const wrapper = mount(ProductionTrendPanel, { props: { trend: t, loading: false } })
+    expect(wrapper.find('[data-test="trend-chart"]').exists()).toBe(true)
+
+    await wrapper.setProps({ loading: true })
+    expect(wrapper.find('[data-test="trend-chart"]').exists()).toBe(true)
+
+    await wrapper.setProps({ loading: false, trend: t })
+    expect(wrapper.find('[data-test="trend-chart"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="trend-skeleton"]').exists()).toBe(false)
+  })
 })

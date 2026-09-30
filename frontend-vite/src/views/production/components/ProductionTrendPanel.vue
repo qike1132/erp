@@ -11,7 +11,7 @@
     </header>
 
     <div class="page-card-body">
-      <UiSkeleton v-if="loading" data-test="trend-skeleton" variant="card" />
+      <UiSkeleton v-if="loading && !trend" data-test="trend-skeleton" variant="card" />
 
       <UiEmpty
         v-else-if="!hasData"
@@ -44,14 +44,23 @@ const props = defineProps<{
 
 const chartEl = ref<HTMLElement | null>(null)
 let chart: EChartsType | null = null
+let chartBoundEl: HTMLElement | null = null
 
 const hasData = computed(() => !!props.trend?.days.some((d) => d.total > 0))
 
 async function render() {
   if (!hasData.value || !chartEl.value) return
   const echarts = await ensureEcharts()
-  if (!chartEl.value) return
-  if (!chart || chart.isDisposed()) chart = echarts.init(chartEl.value)
+  const el = chartEl.value
+  if (!el) return
+  if (chart && (chart.isDisposed() || chartBoundEl !== el)) {
+    chart.dispose()
+    chart = null
+  }
+  if (!chart) {
+    chart = echarts.init(el)
+    chartBoundEl = el
+  }
   chart.setOption(buildTrendOption(props.trend!.days, props.trend!.departments), true)
   chart.resize()
 }
@@ -59,6 +68,7 @@ async function render() {
 function dispose() {
   chart?.dispose()
   chart = null
+  chartBoundEl = null
 }
 
 function onResize() {
