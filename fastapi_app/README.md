@@ -66,20 +66,27 @@ python start.py --prod         # 生产模式
 python start.py --backend-only # 仅后端
 ```
 
-或直接：
+或直接（**仅限开发机**）：
 
 ```bash
-uvicorn fastapi_app.main:app --host 0.0.0.0 --port 5002 --reload
+# 生产禁止绑 0.0.0.0：会绕过 nginx，并把 /metrics 暴露给同网段（AGENTS.md §5.3）。
+# 生产的 uvicorn 只绑 127.0.0.1:5002，对外统一由 nginx :3000 反代。
+uvicorn fastapi_app.main:app --host 127.0.0.1 --port 5002 --reload
 ```
 
-### 4. 访问文档
+### 4. 访问文档与健康检查
 
-开发环境（`APP_ENV != production`）：
+交互式文档**仅开发环境**（`APP_ENV != production`）可用：
 - Swagger UI: `http://localhost:5002/api/docs`
 - ReDoc: `http://localhost:5002/api/redoc`
-- 健康检查: `GET /api/health`
+- OpenAPI JSON: `http://localhost:5002/api/openapi.json`
 
-> 生产环境自动关闭文档端点，防止暴露 API 结构。
+健康检查**开发与生产都可用**（生产经 nginx `:3000` 反代：`http://<主机>:3000/api/health`）：
+- `GET /api/health`（公开，无需登录；不健康时返回 503）
+- 细分探针：`/api/health/live`、`/api/health/ready`、`/api/health/startup`、`/api/health/db`、`/api/health/arq`（部分需鉴权，见 `fastapi_app/core/health.py`）
+
+> 生产环境自动关闭文档端点：`DOCS_URL` / `REDOC_URL` / `OPENAPI_URL` 在 `fastapi_app/core/config.py:135-137` 被置为 `None`，防止暴露 API 结构。
+> 健康检查不受该开关影响 —— `fastapi_app/main.py:391` 的 `register_health_routes(app)` 是无条件注册的。
 
 ## API 约定
 

@@ -46,7 +46,11 @@ Nginx :3000 ── /api、/ws、/static 反代 ──▶ FastAPI :5002
    python start.py --dev
    ```
 
-   开发入口通常为 `http://localhost:5173`，后端 API 为 `http://localhost:5002/api/v1`。非生产环境可访问 `http://localhost:5002/api/docs`。
+   开发入口为 `http://localhost:3000`，后端 API 为 `http://localhost:5002/api/v1`。非生产环境可访问 `http://localhost:5002/api/docs`。
+
+   > 端口口径：`python start.py --dev` 会把 `--port 3000` 追加给 `npm run dev`（`start.py:111`），
+   > 覆盖 `package.json` 里 dev 脚本的 `--port 5173`；`vite.config.ts:144` 的 `server.port` 同样是 3000。
+   > 只有绕开 `start.py` 直接裸跑 `npm run dev` 时才会落在 5173。
 
 ## 常用命令
 
@@ -80,7 +84,7 @@ npm run check:routes
 
 - Nginx 对外提供 `:3000`，并反代 `/api`、`/ws`、`/static`。
 - FastAPI 生产默认绑定 `127.0.0.1:5002`。
-- `erp-prod`、`erp-arq`、Redis 等服务由 NSSM 托管。
+- 五个 Windows 服务由 NSSM 托管：`erp-web`（nginx 静态）、`erp-prod`（uvicorn API）、`erp-arq`（ARQ worker）、`erp-redis`（缓存 6379）、`erp-redis-broker`（broker 6380）。真源为 `server_manager/constants.py:40` 的 `_SVC_ALL`，与 `README_DEPLOY.txt:20-21` 口径一致。
 - 服务启停必须使用 `server_manager.py` 提供的管理器，具体见 `docs/runbooks/service-lifecycle.md`。
 
 ## 文档导航

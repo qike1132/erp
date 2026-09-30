@@ -25,7 +25,8 @@ ERP 系统 - 部署说明
 日常启停 / 切换运行模式
 ==========================
 
-**必须用管理员权限的「ERP服务器管理器」GUI**（`server_manager.py`，v5.40）。
+**必须用管理员权限的「ERP服务器管理器」GUI**（`server_manager.py`；版本号唯一真源是
+   `server_manager/constants.py` 的 `_VERSION`，当前 **v5.33**）。
 
 ⛔ 非提权 shell 下没有任何 CLI 路径能重启 `erp-prod`（`nssm` / `sc` / `Stop-Service` /
    `taskkill` 全部因 ACL 拒绝访问）。这是 Windows ACL 边界，不是沙箱限制。
