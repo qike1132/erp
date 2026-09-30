@@ -210,3 +210,146 @@ async def test_c7_skus_single_line_for_single_sku(db):
     assert len(group['skus']) == 1
     assert group['skus'][0]['product_name'] == '产品A'
     assert float(group['skus'][0]['order_qty']) == 100
+
+
+# ===== skus[].materials[]：按 SKU 展开的物料明细（口径 A：单件用量 × 该 SKU 数量）=====
+
+def _sku_materials(group) -> dict[str, dict[str, float]]:
+    """{SKU 名: {物料名: 基准量}}，便于逐 SKU 断言。"""
+    return {
+        s['product_name']: {m['material_name']: float(m['quantity']) for m in s.get('materials') or []}
+        for s in group['skus']
+    }
+
+
+async def test_c8_per_sku_materials_split_by_sku(db):
+    """C8：每个 SKU 拿到**自己**那份物料（含跨 SKU 共享的物料，各算各的）。"""
+    session, _ = db
+    po_id = await _seed_single_or_multi(session, multi=True)
+    session.add_all([
+        PurchaseOrderSku(id=1, po_id=po_id, product_name='产品A', product_barcode='bA',
+                         order_qty=100, source_order_id=9001, source_record_type='order'),
+        PurchaseOrderSku(id=2, po_id=po_id, product_name='产品B', product_barcode='bB',
+                         order_qty=200, source_order_id=9001, source_record_type='order'),
+    ])
+    await session.commit()
+
+    group = (await get_factory_order_summary(session, [po_id]))['groups'][0]
+    per_sku = _sku_materials(group)
+
+    # 单件用量均为 0.2：A 用 100 件 → SHARED 20 / ONLY_A 20；B 用 200 件 → SHARED 40 / ONLY_B 40
+    assert per_sku['产品A'] == {SHARED: 20.0, ONLY_A: 20.0}
+    assert per_sku['产品B'] == {SHARED: 40.0, ONLY_B: 40.0}
+    # 共享物料**两边都出现**（不合并、不去重——那是采购合计的口径）
+    assert SHARED in per_sku['产品A'] and SHARED in per_sku['产品B']
+
+
+async def test_c9_per_sku_material_keys_match_fabrics(db):
+    """C9：新字段的**键**必须与既有 fabrics 的键逐字一致 —— 否则差异对照块会全行误报。"""
+    session, _ = db
+    po_id = await _seed_single_or_multi(session, multi=True)
+    session.add_all([
+        PurchaseOrderSku(id=1, po_id=po_id, product_name='产品A', product_barcode='bA',
+                         order_qty=100, source_order_id=9001, source_record_type='order'),
+        PurchaseOrderSku(id=2, po_id=po_id, product_name='产品B', product_barcode='bB',
+                         order_qty=200, source_order_id=9001, source_record_type='order'),
+    ])
+    await session.commit()
+
+    group = (await get_factory_order_summary(session, [po_id]))['groups'][0]
+
+    per_sku_keys = {
+        (m['supplier_name'], m['material_name'], m['specification'], m['unit'])
+        for s in group['skus'] for m in (s.get('materials') or [])
+    }
+    fabric_keys = {
+        (f.get('supplier_name') or s['supplier_name'], f['fabric_name'], f['specification'], f['unit'])
+        for s in group['suppliers'] for f in s['fabrics']
+    }
+    assert per_sku_keys <= fabric_keys, '新字段出现了 fabrics 里没有的键（命名口径漂移）'
+
+
+async def test_c10_per_sku_sum_equals_stored_when_consistent(db):
+    """C10：各 SKU 推算之和 == 落库真值（本 fixture 是自洽的）→ 前端不该显示差异块。"""
+    session, _ = db
+    po_id = await _seed_single_or_multi(session, multi=True)
+    session.add_all([
+        PurchaseOrderSku(id=1, po_id=po_id, product_name='产品A', product_barcode='bA',
+                         order_qty=100, source_order_id=9001, source_record_type='order'),
+        PurchaseOrderSku(id=2, po_id=po_id, product_name='产品B', product_barcode='bB',
+                         order_qty=200, source_order_id=9001, source_record_type='order'),
+    ])
+    await session.commit()
+
+    group = (await get_factory_order_summary(session, [po_id]))['groups'][0]
+    summed: dict[str, float] = {}
+    for mats in _sku_materials(group).values():
+        for name, qty in mats.items():
+            summed[name] = summed.get(name, 0.0) + qty
+
+    assert summed == _fabrics(group)
+
+
+async def test_c13_unresolvable_sku_name_yields_empty_materials(db):
+    """C13：SKU 名解析不出产品（旧数据拼接名 / 名字不一致）→ 该 SKU 的 materials 为空，
+    且**不抛错**（前端据此回退订单级单块，绝不编造数字）。"""
+    session, _ = db
+    po_id = await _seed_single_or_multi(session, multi=True)
+    session.add(PurchaseOrderSku(
+        id=7, po_id=po_id, product_name='查无此产品', product_barcode='',
+        order_qty=100, source_order_id=9001, source_record_type='order',
+    ))
+    await session.commit()
+
+    group = (await get_factory_order_summary(session, [po_id]))['groups'][0]
+
+    target = next(s for s in group['skus'] if s['product_name'] == '查无此产品')
+    assert target['materials'] == []
+
+
+async def test_c11_stored_truth_unchanged_when_item_hand_edited(db):
+    """C11：明细被手工改过时，**既有字段**仍是真值（对照块的依据），按 SKU 字段照旧按 BOM 算。"""
+    session, _ = db
+    po_id = await _seed_single_or_multi(session, multi=True)
+    session.add_all([
+        PurchaseOrderSku(id=1, po_id=po_id, product_name='产品A', product_barcode='bA',
+                         order_qty=100, source_order_id=9001, source_record_type='order'),
+        PurchaseOrderSku(id=2, po_id=po_id, product_name='产品B', product_barcode='bB',
+                         order_qty=200, source_order_id=9001, source_record_type='order'),
+        # 手工把 ONLY_A 从 20 改成 25
+        PurchaseOrderItem(id=99, order_id=po_id, material_name=ONLY_A, specification='S2', unit='米',
+                          quantity=25, supplier_name='供应商甲'),
+    ])
+    await session.commit()
+    # 覆盖原 ONLY_A 行，避免同键两行被累加
+    from sqlalchemy import update as _update
+    await session.execute(
+        _update(PurchaseOrderItem).where(PurchaseOrderItem.id == 2).values(quantity=0)
+    )
+    await session.commit()
+
+    group = (await get_factory_order_summary(session, [po_id]))['groups'][0]
+
+    assert _fabrics(group)[ONLY_A] == 25.0, '落库真值必须原样反映手工修改'
+    assert _sku_materials(group)['产品A'][ONLY_A] == 20.0, '按 SKU 字段仍按 BOM 推算'
+
+
+async def test_c12_per_sku_materials_add_no_db_queries(db):
+    """C12：新增 materials 不得引入任何额外 DB 往返（BOM 已随请求加载）。"""
+    session, statements = db
+    po_id = await _seed_single_or_multi(session, multi=True)
+    session.add_all([
+        PurchaseOrderSku(id=1, po_id=po_id, product_name='产品A', product_barcode='bA',
+                         order_qty=100, source_order_id=9001, source_record_type='order'),
+        PurchaseOrderSku(id=2, po_id=po_id, product_name='产品B', product_barcode='bB',
+                         order_qty=200, source_order_id=9001, source_record_type='order'),
+    ])
+    await session.commit()
+
+    statements.clear()
+    group = (await get_factory_order_summary(session, [po_id]))['groups'][0]
+
+    reads = [s for s in statements if s.lstrip().lower().startswith('select')]
+    assert group['skus'][0].get('materials') is not None
+    # BOM/产品/明细/快照 ≈ 8 条定点读；给到 14 条上限，超了说明有人在循环里查库
+    assert len(reads) <= 14, f'汇总读查询数异常偏多（{len(reads)} 条），疑似在按 SKU 展开时查库'

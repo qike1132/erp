@@ -121,6 +121,49 @@ def _accumulate_factory_po_items(group, po, items_by_order):
                 'item_ids': [item.id] if item.id else [],
             }
 
+def _norm_sku_name(value) -> str:
+    """SKU 名归一：仅 strip。**不** casefold —— 产品名要逐字匹配 `Product.name`（全局唯一）。"""
+    return str(value or '').strip()
+
+
+def _sku_material_rows(bom_rows: list, sku_qty: float, supplier_fallback: str) -> list[dict]:
+    """把某个 SKU 的 BOM 行展开为「该 SKU 自己的物料行」（口径 A）。
+
+    `quantity` = ``单件用量 × 该 SKU 数量``（**基准量**，不含损耗加放 —— 加放由前端按该
+    物料的行损耗率实时做，故这里必须给基准值）。
+
+    口径要点：
+    - 过滤填充类（与工厂汇总既有展示口径一致）；
+    - **同一 SKU 内多作用域（角色）重复行累加** —— 与生成路径一致；
+    - **不同 SKU 之间不合并、不去重** —— 那是采购合计的口径（见
+      `_build_factory_group_map` 的 `seen_materials`），本函数只服务「某一个 SKU 要多少料」。
+
+    不查库、不抛错；`bom_rows` 为空时返回 `[]`。
+    """
+    buckets: dict[tuple, dict] = {}
+    for bom in bom_rows or []:
+        if _is_filling_category(bom.get('category')):
+            continue
+        sup = bom.get('supplier_name') or supplier_fallback
+        key = (sup, bom['material_name'], bom['specification'], bom['unit'])
+        amount = float(bom.get('quantity') or 0) * float(sku_qty or 0)
+        if key in buckets:
+            buckets[key]['quantity'] += amount
+        else:
+            buckets[key] = {
+                'supplier_name': sup,
+                'material_name': bom['material_name'],
+                'specification': bom['specification'],
+                'unit': bom['unit'],
+                'quantity': amount,
+            }
+    # 稳定顺序：与既有 fabrics 的排序口径一致（供应商 → 物料名 → 规格 → 单位）
+    return sorted(
+        buckets.values(),
+        key=lambda r: (r['supplier_name'], r['material_name'], r['specification'], r['unit']),
+    )
+
+
 def _build_factory_group_map(orders, bom_data, items_map, items_by_order, cust_order_map,
                              prod_name_map, po_pids_map=None, po_sku_map=None) -> dict[tuple, dict]:
     """构建 (客户, 产品名) → 汇总分组。
@@ -150,6 +193,7 @@ def _build_factory_group_map(orders, bom_data, items_map, items_by_order, cust_o
                 'order_quantity': order_qty,
                 '_supplier_map': {},
                 '_sku_lines': [],
+                '_sku_materials': {},
                 '_order_ids': [],
             }
         group = group_map[key]
@@ -164,6 +208,20 @@ def _build_factory_group_map(orders, bom_data, items_map, items_by_order, cust_o
             group['_sku_lines'].append({
                 'product_name': prod, 'product_barcode': '', 'order_qty': order_qty,
             })
+
+        # 按 SKU 展开的物料（口径 A）：纯内存，BOM 已随请求加载，零新增查询。
+        # 键用 SKU 名（Product.name 全局唯一）；解析不出产品的 SKU 留空 →
+        # 前端据此回退订单级单块，绝不编造。
+        name_to_pid = {name: pid for pid, name in (prod_name_map or {}).items()}
+        for sku in sku_lines:
+            sku_pid = name_to_pid.get(_norm_sku_name(sku.get('product_name')))
+            group['_sku_materials'][_norm_sku_name(sku.get('product_name'))] = (
+                _sku_material_rows(
+                    bom_data.get(sku_pid) or [], float(sku.get('order_qty') or 0),
+                    po.supplier_name or '未指定供应商',
+                )
+                if sku_pid else []
+            )
 
         if po_pids_map is None:
             pids = [pid] if pid else []
@@ -212,9 +270,19 @@ def _serialize_factory_groups(group_map: dict[tuple, dict]) -> list:
             'order_quantity': group['order_quantity'],
             'order_ids': list(group.get('_order_ids') or []),
             'suppliers': suppliers,
-            # 逐 SKU 展示明细（前端逐 SKU 分行 + 合计子行）。
-            # 注意：逐 SKU 只有**订单数量**是权威的；物料数量在采购单侧是跨 SKU 合并值，
-            # 无法拆分到 SKU，故物料仍按订单级展示（与 /beile-order 已确立的口径一致）。
-            'skus': merge_sku_lines(group.get('_sku_lines') or []),
+            # 注意：既有 `suppliers/fabrics` 仍是**跨 SKU 合并的落库真值**（含手工编辑），
+            # 前端用它做「实际下单」差异对照与编辑态定位；`skus[].materials` 才是按 SKU
+            # 推算的展示口径（BOM 单件用量 × 该 SKU 数量）。
+            # 逐 SKU 展示明细（前端逐 SKU 分行 + 合计子行）。新增 `materials`：
+            # 该 SKU 自己的物料基准量（口径 A）；解析不出 / 无 BOM 时为空数组，前端回退。
+            'skus': [
+                {
+                    **line,
+                    'materials': (group.get('_sku_materials') or {}).get(
+                        _norm_sku_name(line.get('product_name'))
+                    ) or [],
+                }
+                for line in merge_sku_lines(group.get('_sku_lines') or [])
+            ],
         })
     return groups
