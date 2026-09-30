@@ -532,28 +532,46 @@ def _empty_inventory_response(page: int = 1, per_page: int = 50, all_customers: 
 @cache_result(key_prefix="customers:all", ttl=120, local_ttl=60,
               key_builder=lambda **kwargs: f"pids{hashlib.sha256(str(kwargs.get('pids', '')).encode()).hexdigest()[:16] if kwargs.get('pids') else 'all'}")
 async def _get_all_customers(db: AsyncSession, pids: tuple | None) -> list[str]:
-    """获取客户快捷切换栏客户列表：成员 = 所有“有订单数量”的客户，按最近订单活动排序。
+    """获取客户快捷切换栏客户列表：成员 = 库存表格里可能出现的客户，按最近活动排序。
 
-    成员规则（产品要求）：只放有订单数量的客户，因此以 order 表为准（排除已删除订单、
-    数量<=0 的行）；不再并入 stock_in/stock_out 三表 UNION，避免把“仅有备货/出库、
-    无订单”的客户也放进切换栏。
+    成员规则（2026-09-30 修正）：必须与库存表格行的来源口径一致。表格行来自
+    stock_in ⟗ stock_out ⟗ order 三表合并，凡「只有备货、没有有效订单」的客户
+    （线上实例：MINISO国际，只有备货 10000 件、10 条订单已全部软删除）同样成行；
+    切换栏若只看 order 表就会漏掉它们，表现为「表格里看得见、chips 里筛不了」。
+    因此成员 = 出现在 stock_in 或「未软删 order」里的客户。
+
+    stock_out 不入成员：出库行不产生 has_stockin/has_order，只有当同一 客户+产品
+    另有备货或订单时才随其成行；「只有出库」的客户既不显示也无法被筛，
+    并入只会多出点了就空的 chip。
 
     排序口径：
-    1) last_activity：MAX(order_date)，最近下单的客户置顶（刚在用的客户排前面）；
-    2) order_cnt：COUNT(*)，最近下单时间相同则下单多的靠前；
+    1) last_activity：MAX(order_date / stockin_date)，最近有下单或备货的客户置顶；
+    2) activity_cnt：两表命中行数之和，时间相同则记录多的靠前；
     3) customer：名称升序，保证结果稳定。
 
     背景：切换栏是单行横向滚动条（nowrap + 隐藏滚动条），排在末尾的客户会被裁出首屏，
     需滚动才可见；旧版按 Unicode 码点排序无法把常用客户置顶。
     """
-    # pid_clause 为常量 SQL 片段（ANY(:pids)），不拼接用户输入，安全
+    # pid_clause 为常量 SQL 片段（ANY(:pids)），备货/订单两个来源共用，
+    # 不拼接用户输入，安全
     pid_clause = ' AND product_id = ANY(:pids)' if pids else ''
     sql = text(f"""
-        SELECT customer, MAX(order_date) AS last_activity, COUNT(*) AS order_cnt
-        FROM "order"
-        WHERE customer IS NOT NULL AND is_deleted IS NOT TRUE AND quantity > 0{pid_clause}
+        WITH activity AS (
+            SELECT customer, MAX(order_date) AS last_activity, COUNT(*) AS activity_cnt
+            FROM "order"
+            WHERE customer IS NOT NULL AND is_deleted IS NOT TRUE AND quantity > 0{pid_clause}
+            GROUP BY customer
+            UNION ALL
+            SELECT customer, MAX(stockin_date) AS last_activity, COUNT(*) AS activity_cnt
+            FROM stock_in
+            WHERE customer IS NOT NULL{pid_clause}
+            GROUP BY customer
+        )
+        SELECT customer, MAX(last_activity) AS last_activity,
+               SUM(activity_cnt) AS activity_cnt
+        FROM activity
         GROUP BY customer
-        ORDER BY last_activity DESC NULLS LAST, order_cnt DESC, customer ASC
+        ORDER BY last_activity DESC NULLS LAST, activity_cnt DESC, customer ASC
     """)
     if pids:
         result = await db.execute(sql, {'pids': pids})

@@ -1,5 +1,5 @@
 {
-  "rotate_mb": 50,
-  "keep_days": 14,
-  "max_total_mb": 512
+  "rotate_mb": 80,
+  "keep_days": 7,
+  "max_total_mb": 300
 }

@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>汇总下单 · SKU 行分隔 · 对比稿 · 2026-09-30</title>
+<style>
+  :root{
+    --bg:#f5f5f7; --card:#fff; --surface:#f2f2f7; --line:#e4e7ed;
+    --t1:#1d1d1f; --t2:#48484d; --t3:#8e8e93;
+    --accent:#007aff; --warn:#ff9500; --warn-tint:#fff4e0; --danger:#ff3b30; --danger-tint:#ffeceb;
+    --ok:#34c759; --ok-tint:#e6f9ec;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:26px 22px 56px;background:var(--bg);color:var(--t1);
+       font:13px/1.5 "Microsoft YaHei UI","Segoe UI",system-ui,sans-serif}
+  h1{font-size:19px;margin:0 0 6px}
+  .meta{color:var(--t2);font-size:12px;margin-bottom:16px}
+  .meta code{background:#e9e9ee;padding:1px 5px;border-radius:4px}
+  .note{background:var(--danger-tint);border-left:3px solid var(--danger);
+        padding:10px 14px;border-radius:6px;margin:0 0 14px;font-size:12.5px;color:#8a1a12}
+  .note.warn{background:var(--warn-tint);border-left-color:var(--warn);color:#7a4a00}
+  h2{font-size:15px;margin:26px 0 4px;padding-top:8px;border-top:2px solid #e3e3e8}
+  h2 .tag{font-size:11px;font-weight:700;color:#fff;background:var(--accent);
+          padding:2px 7px;border-radius:999px;vertical-align:2px;margin-left:8px}
+  h2 .tag.alt{background:var(--t3)}
+  h2 .tag.cur{background:var(--danger)}
+  .sub{color:var(--t2);font-size:12px;margin:0 0 10px}
+  .card{background:var(--card);border:1px solid #d8dce2;border-radius:10px;overflow:hidden;margin-bottom:14px}
+  .card-hd{background:var(--surface);padding:8px 14px;font-size:12px;font-weight:700;color:var(--t2);
+           border-bottom:1px solid #d8dce2;display:flex;justify-content:space-between;align-items:center}
+  .card-hd .pill{font-weight:400;color:var(--t3)}
+  table{border-collapse:collapse;width:100%;font-size:13px}
+  th{background:var(--surface);color:var(--t2);font-weight:700;font-size:12px;
+     padding:9px 12px;border-bottom:1px solid var(--line);border-right:1px solid var(--line);white-space:nowrap;text-align:left}
+  td{padding:9px 12px;border-bottom:1px solid var(--line);border-right:1px solid var(--line);background:var(--card);vertical-align:top}
+  .r{text-align:right}
+  /* 真实尺寸的 SKU 行：与 SummaryFactoryTab.vue 现状逐字一致 */
+  .sku{line-height:1.5;white-space:normal;word-break:break-word}
+  .sku.total{font-weight:bold}
+  /* 现状：border-top:1px dashed #f0f2f5（几乎看不见） */
+  .v-now .sku + .sku{margin-top:2px;padding-top:2px;border-top:1px dashed #f0f2f5}
+  /* A：虚线加深到全站行线色 #e4e7ed */
+  .v-a .sku + .sku{margin-top:2px;padding-top:2px;border-top:1px dashed #e4e7ed}
+  /* B：实线 #e4e7ed（与表格行线同型） */
+  .v-b .sku + .sku{margin-top:2px;padding-top:2px;border-top:1px solid #e4e7ed}
+  /* C：不画线，靠行距 + 每行前导圆点区分 */
+  .v-c .sku + .sku{margin-top:5px}
+  .v-c .sku::before{content:"·";color:#b9bec7;margin-right:5px}
+  .v-c .sku.total::before{content:"";margin-right:0}
+  .foot{color:var(--t2);font-size:12px;margin-top:22px;line-height:1.8}
+  .foot b{color:var(--t1)}
+  .ask{background:#e8f1ff;border-left:3px solid var(--accent);padding:10px 14px;border-radius:6px;margin:12px 0 0;font-size:12.5px;color:#0a3d78}
+  .zoom{margin:10px 0 0;padding:10px 12px;background:#fffdf5;border:1px dashed #f0c878;border-radius:8px;font-size:12px;color:#7a4a00}
+</style>
+</head>
+<body>
+
+<h1>汇总下单 · 多 SKU 行的「分行」观感对比稿</h1>
+<div class="meta">
+  页面：<code>/purchase</code> → 汇总下单弹窗 → 工厂内部订单 &nbsp;·&nbsp;
+  触发：多 SKU 订单（截图那单：MINISO国际 / 测试 10000 + 鲨鱼 10000 / 合计 20000）
+</div>
+
+<div class="note">
+  <b>根因（已核实）</b>：SKU 行之间的分隔线用的是 <code>--color-border-light = #f0f2f5</code>
+  —— 白底上一条 1px 虚线<b>几乎完全看不见</b>（见 <code>SummaryFactoryTab.vue:337</code>）。
+  你们今天刚把<b>表格行线</b>加深到 <code>#e4e7ed</code>（提交 <code>5f235d24</code>），
+  但<b>单元格内的 SKU 行分隔线不在那个 DataTable 的 PT 里，漏掉了</b>。
+</div>
+
+<h2>现状<span class="tag cur">就是这一条看不见</span></h2>
+<p class="sub">分隔线 <code>1px dashed #f0f2f5</code>：三行糊成一团，读起来像一个多行文本块，而不是「3 个 SKU 各一行」。</p>
+<div class="card v-now">
+  <div class="card-hd"><span>工厂内部采购订单汇总</span><span class="pill">现状</span></div>
+  <table>
+    <thead><tr><th style="width:12%">客户</th><th style="width:22%">产品名称</th><th style="width:12%" class="r">订单数量</th><th style="width:14%">供应商</th><th style="width:20%">布料名称</th><th style="width:12%">规格型号</th><th style="width:8%" class="r">数量</th></tr></thead>
+    <tbody>
+      <tr>
+        <td rowspan="2" style="font-weight:bold">MINISO国际</td>
+        <td><div class="sku">测试</div><div class="sku">鲨鱼</div><div class="sku total">合计</div></td>
+        <td class="r"><div class="sku">10000.0</div><div class="sku">10000.0</div><div class="sku total">20000.0</div></td>
+        <td rowspan="2">美利达</td><td>漂白超柔</td><td>2</td><td class="r">1840</td>
+      </tr>
+      <tr><td>蓝色超柔</td><td>223</td><td class="r">1780</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<h2>方案 A（推荐）<span class="tag">虚线加深到 #e4e7ed</span></h2>
+<p class="sub">只改一个颜色常量：与你们今天刚统一的行线同色，保持「虚线＝同一格内的子行、实线＝表格行边界」的既有语义。</p>
+<div class="card v-a">
+  <div class="card-hd"><span>工厂内部采购订单汇总</span><span class="pill">1px dashed #e4e7ed</span></div>
+  <table>
+    <thead><tr><th style="width:12%">客户</th><th style="width:22%">产品名称</th><th style="width:12%" class="r">订单数量</th><th style="width:14%">供应商</th><th style="width:20%">布料名称</th><th style="width:12%">规格型号</th><th style="width:8%" class="r">数量</th></tr></thead>
+    <tbody>
+      <tr>
+        <td rowspan="2" style="font-weight:bold">MINISO国际</td>
+        <td><div class="sku">测试</div><div class="sku">鲨鱼</div><div class="sku total">合计</div></td>
+        <td class="r"><div class="sku">10000.0</div><div class="sku">10000.0</div><div class="sku total">20000.0</div></td>
+        <td rowspan="2">美利达</td><td>漂白超柔</td><td>2</td><td class="r">1840</td>
+      </tr>
+      <tr><td>蓝色超柔</td><td>223</td><td class="r">1780</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<h2>方案 B<span class="tag alt">实线 #e4e7ed</span></h2>
+<p class="sub">更明确，但与表格行边界同型，容易让人误以为「这也是一行」。</p>
+<div class="card v-b">
+  <div class="card-hd"><span>工厂内部采购订单汇总</span><span class="pill">1px solid #e4e7ed</span></div>
+  <table>
+    <thead><tr><th style="width:12%">客户</th><th style="width:22%">产品名称</th><th style="width:12%" class="r">订单数量</th><th style="width:14%">供应商</th><th style="width:20%">布料名称</th><th style="width:12%">规格型号</th><th style="width:8%" class="r">数量</th></tr></thead>
+    <tbody>
+      <tr>
+        <td rowspan="2" style="font-weight:bold">MINISO国际</td>
+        <td><div class="sku">测试</div><div class="sku">鲨鱼</div><div class="sku total">合计</div></td>
+        <td class="r"><div class="sku">10000.0</div><div class="sku">10000.0</div><div class="sku total">20000.0</div></td>
+        <td rowspan="2">美利达</td><td>漂白超柔</td><td>2</td><td class="r">1840</td>
+      </tr>
+      <tr><td>蓝色超柔</td><td>223</td><td class="r">1780</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<h2>方案 C<span class="tag alt">不画线，行距 + 前导圆点</span></h2>
+<p class="sub">最轻，不改任何线条；但「合计」行与上两行的层次靠加粗承担，弱一些。</p>
+<div class="card v-c">
+  <div class="card-hd"><span>工厂内部采购订单汇总</span><span class="pill">gap 5px + ·</span></div>
+  <table>
+    <thead><tr><th style="width:12%">客户</th><th style="width:22%">产品名称</th><th style="width:12%" class="r">订单数量</th><th style="width:14%">供应商</th><th style="width:20%">布料名称</th><th style="width:12%">规格型号</th><th style="width:8%" class="r">数量</th></tr></thead>
+    <tbody>
+      <tr>
+        <td rowspan="2" style="font-weight:bold">MINISO国际</td>
+        <td><div class="sku">测试</div><div class="sku">鲨鱼</div><div class="sku total">合计</div></td>
+        <td class="r"><div class="sku">10000.0</div><div class="sku">10000.0</div><div class="sku total">20000.0</div></td>
+        <td rowspan="2">美利达</td><td>漂白超柔</td><td>2</td><td class="r">1840</td>
+      </tr>
+      <tr><td>蓝色超柔</td><td>223</td><td class="r">1780</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="zoom">
+  <b>判断提示</b>：下面这条是按真实尺寸画的 1px 线，分别用两个颜色，你把屏幕亮度调到平时工作的水平看一眼——
+  上面那条（现状 #f0f2f5）是不是基本消失、下面那条（#e4e7ed）能不能看见：<br><br>
+  <span style="display:inline-block;width:220px;border-top:1px dashed #f0f2f5;height:0"></span> 现状 #f0f2f5<br><br>
+  <span style="display:inline-block;width:220px;border-top:1px dashed #e4e7ed;height:0"></span> 方案 A #e4e7ed
+</div>
+
+<div class="ask">
+  <b>我推荐 A。</b>理由：①它只改一个常量，与你们今天刚统一的全站行线色一致；
+  ②保留「虚线＝同一格内子行」的语义，实线（B）会与表格行边界混淆；③同一处修复
+  <b>一次性覆盖三列</b>（产品名称 / 订单数量 / 新的备品数量），因为它们共用
+  <code>.sm-sku-line</code> 类。
+</div>
+
+<div class="note warn" style="margin-top:16px">
+  <b>注意</b>：本页展示的是 <code>:3000</code>（生产 nginx）当前的样子——它还没有「备品数量」列。
+  备品列已实现并提交（<code>01ec0092</code>），在开发态 <code>127.0.0.1:5173</code> 已可看到；
+  等这处分隔线定了，我一起做进生产构建。
+</div>
+
+</body>
+</html>

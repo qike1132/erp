@@ -1,0 +1,21 @@
+{
+  "runId": "完整的审核一下我这个项目-060103",
+  "phase": "clarify",
+  "status": "running",
+  "mode": "one-shot",
+  "deliverable": "code+artifacts",
+  "coverage": [],
+  "members": [
+    "64f7c603-e44e-46fa-82f7-371236e951ba:researcher"
+  ],
+  "goal": "完整的审核一下我这个项目",
+  "goalKey": "gr2ej2f",
+  "tier": "standard",
+  "updatedAt": "2026-09-30T06:02:26.245Z",
+  "_provenance": {
+    "writer": "session-636f3e9f-8ee8-4716-8edb-7b0bbfe3509a||lead",
+    "at": "2026-09-30T06:02:26.246Z"
+  },
+  "revision": 5,
+  "ownerSession": "session-636f3e9f-8ee8-4716-8edb-7b0bbfe3509a"
+}

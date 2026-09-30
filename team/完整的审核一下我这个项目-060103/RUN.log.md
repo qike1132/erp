@@ -1,0 +1,44 @@
+# 运行日志（RUN.log）
+
+- [14:01:03] run:started — 目标="完整的审核一下我这个项目" | 模式=one-shot | 交付=code+artifacts | 档位=标准档（standard） | 编制=pm,architect,researcher,ui,backend,frontend,dba,sec,reviewer,qa,devops,docs
+
+<!-- 编排者：每完成一个阶段/角色/决策/卡点，按 references/LOGGING.md 的事件约定追加一行；deliver 时写 RETRO.md，并把可复用经验追加到 team/LEARNINGS.md -->
+- [14:01:03] policy:frozen — 身份策略（技术开发者 / profile=developer；方案确认门保留）（14:01:03）
+- [14:01:25] decision:标准档 — 用户在浮层拍板（2026-09-30T06:01:25.525Z）
+- [14:01:25] tier:selected — 用户选定「标准档」（standard）· 上限：角色 ≤6 / 验收项 ≤30 / 派工 ≤40 · 已按档定班底：pm, architect, backend, frontend, reviewer, qa（2026-09-30T06:01:25.525Z）
+- [14:02:18] phase:research — 进入调研阶段（lead 已派工，不空等）
+- [14:02:18] role:researcher — 派工：现状调研 + 生成 team/REPOWIKI.md（reasoning=high · 基线）
+- [14:02:18] ask:clarify — Q1 变更权限（只读审计 / 修 P0·P1 不提交 / 修复并推送）
+- [14:02:18] ask:clarify — Q2 生产环境触碰边界（静态+只读 / 跑质量门禁命令 / 允许重启服务）
+- [14:02:18] ask:clarify — Q3 审核重点（安全与数据一致性 / 核心业务链路 / 全维度平均）
+- [14:02:18] ask:clarify — Q4 交付形态（总报告+分角色+backlog / 仅问题清单 / 追加管理层摘要）
+- [14:02:18] ask:clarify — Q5 深度预算（标准全量 / 快速摸底 P0·P1 / 深度含修复验证）
+- [14:03:51] decision:user — 澄清 5 问已答：Q1=只读审计（不动业务代码）· Q2=允许跑质量门禁命令 · Q3=全维度平均覆盖 · Q4=总报告+分角色报告+可执行 backlog · Q5=深度（含修复后验证）
+- [14:03:51] error:spec-conflict — Q1（只读）与 Q5（含修复后验证）互相冲突，lead 已升级用户裁定（未获裁定前按 Q1 冻结）
+- [14:03:51] role:pm — 派工：审核 Ultra Spec + TASKS.json 任务 DAG + 任务看板 + DECISIONS（reasoning=high · 基线）
+- [14:03:51] role:architect — 派工：审核方法论 PLAN + AUTHORITY 单源化表（reasoning=high · 基线）
+- [14:09:35] error:architect — 架构师实例异常中断（failed before it finished，无收尾消息，未落盘）→ 已重派
+- [14:09:35] decision:lead — Q1/Q5 冲突按 Q1（只读）冻结，裁定提交方案确认门，不再单独阻塞等待
+- [14:09:35] phase:design — 进入设计阶段：pm 出 SPEC.md/TASKS.json，architect 出 PLAN.md/AUTHORITY.md
+- [14:11:32] artifact:T02 — pm 交付 SPEC.md(444 行)/TASKS.json(20 任务 T01-T20)/任务看板.md/DECISIONS.md，verdict=pass
+- [14:11:32] review:researcher — researcher 复核发现 SPEC §6.3 白名单仅 8 条（RESEARCH §5 有 12 条），缺 W9-W14 会击穿 A20/A08 ⇒ 已派 pm 补全（规格门禁前必修）
+- [14:11:32] finding:whitelist-gap — 高概率误报源：user/permission fail-open、/monitoring 无认证、pyproject 无 [project]、ruff 两处豁免、max_file_size=1600、mypy.ini 注释过期
+- [14:11:32] role:researcher — 追加只读交付：REPOWIKI.md 新增 §9 各维度审计起始索引（加速 T07-T14）
+- [14:14:51] artifact:T01 — REPOWIKI.md §9 各维度审计起始索引已落盘（576 行 / 46,125 B，12/12 维度，约 100 条锚点）
+- [14:14:51] artifact:T03+T04 — architect 交付 PLAN.md(41,920 B)/AUTHORITY.md(8,673 B)，verdict=pass（方法论 12 条 / finding schema 13 字段 / 防伪影 18+2 条 / AUTHORITY 14 行）
+- [14:14:51] error:pm — pm 修订实例异常中断一次（SPEC.md 未改动）→ 已重派并追加第二批修订
+- [14:14:51] finding:spec-gaps — architect 报 4 项跨角色偏差：G1 缺依赖与供应链维度 / G2 维度名不一致 / G3 P1-P3 判定规则不足 / G4 REVIEW.md 缺撤销率定义 ⇒ G1-G3 派 pm、G4 派 reviewer
+- [14:18:07] artifact:T02-rev — pm 两批修订全部落盘：§6.3 白名单 W9-W14（共 14 条）、§6.4 过期注释处置、§5.1 四档各 2 条规则、D13 依赖与供应链 + T21、T01=completed；SPEC.md 43,270 B / TASKS.json 44,843 B / 任务看板.md 6,487 B
+- [14:18:07] phase:spec-review — 派工 reviewer 执行 T05 规格评审门禁（R-A…R-J 十项核对）+ 落成 REVIEW.md 撤销率定义式
+- [14:25:09] gate:T05 — reviewer 交付 REVIEW.md（28,873 B），verdict=**needs_revision**（round 1），10 条 finding：F-RVW01 PLAN 冻结 schema 与 A05/A22 字段集互斥 / F-RVW02 §9.1 前置①按字面不成立（tests/conftest.py @181 DROP SCHEMA public CASCADE + @185 create_all，@96 TEST_DATABASE_URL 由环境变量直接采信、@91 纯字符串替换不校验） / F-RVW03 §6.3 漏收 4 条上游条目且「12 行」实测为 9+13=22 / F-RVW04 PLAN §4 去重计数与 F-09 锚点错 / F-RVW05 AUTHORITY 8 个 SPEC 行号 7 个错 / F-RVW06 A03 正则与 PLAN §3 三槽渲染互斥 / F-RVW07 A09 与 A10 对未实跑口径冲突 / F-RVW08 W14 证据路径不存在 / F-RVW09 PLAN G3 前提为假 / F-RVW10 看板状态机缺 blocked-by-user-decision 且状态表落后
+- [14:25:09] verify:T05-findings — lead 按 §7.31 逐条复核（ast/grep/glob 只读）：F-RVW02/04/05/07/08/09/10 复核为真（REPOWIKI §7.4 实 9 行 @234-242、RESEARCH §5.2 实 13 行 @195-207；SPEC 标题实为 155/226/234/355/52/243/74/437；test_recovery_service.py 全仓 0 命中）⇒ 撤销率 0/10，复核通过
+- [14:25:09] adjudicate:F-RVW01 — lead 裁定 finding schema 由 PLAN.md §3.1 单源持有（AUTHORITY 已定 finding 契约 → PLAN → architect），architect 补 owner+status（13→15 字段），pm 只把 A05 改为引用 PLAN §3.1
+- [14:25:09] dispatch:T02-rev3 — 派 pm 修 F-RVW02/03/06/07/08/10（SPEC §9.1+A03+A05+A09+A10+§6.3 W15-W18+W14 路径 / TASKS T14 acceptance / 看板状态机）
+- [14:25:09] dispatch:T03T04-rev2 — 派 architect 修 F-RVW01/04/05/09（PLAN §3.1 15 字段 + §4 计数锚点 + R7 / AUTHORITY 7 个 SPEC 行号 + 撤销率行 + G3 撤销）
+- [14:31:10] error:agent-failed — pm(e0e29e6d) 与 architect(58f64316) 在收到 14:25:09 修复派工后均 failed before it finished、未留收尾消息；实测 SPEC.md 仍 14:17:47 / PLAN.md 仍 14:13:49 / AUTHORITY.md 仍 14:13:59 ⇒ 两批修复均未落盘
+- [14:31:10] verify:not-landed — lead 只读实测：SPEC §6.3 的 | W<n> | 数据行 = 14（非 18）、A09 @132 原文未改、A03 @126 未含三槽渲染、§9.1 @350 仍只点名 2 个 conftest；PLAN @224/@228 仍写「字段数 = 13」；AUTHORITY @59/@62/@66 仍为 151/341/423
+- [14:31:10] verify:W14-path — lead 实测 fastapi_app/services/backup/orchestration/recovery_test_service.py 存在且 1354 行；fastapi_app/tests/test_recovery_service.py Test-Path=False ⇒ F-RVW08 为真，W14 引用的文件名不存在
+- [14:31:10] dispatch:T02-rev3-retry — 重派 pm 新实例（原实例已死）修 F-RVW02/03/06/07/08/10
+- [14:31:10] dispatch:T03T04-rev2-retry — 重派 architect 新实例（原实例已死）修 F-RVW01/04/05/09
+- [14:34:20] decision:user — 用户裁定 Q1/Q5 冲突取 **A：纯只读审计，撤销 T20**（不改任何业务代码/配置，只出总报告 + 分角色报告 + 可执行整改 backlog）；A21 基线取 **A：以审核开始快照为基线，只判「无本轮归因变更」**，生产工作树在审核窗口内被外部修改这一事实由 T11 在 AUDIT-OPS.md 独立记录
+- [14:34:20] dispatch:T02-rev3-addendum — 追加要求 pm：T20 改 status=cancelled（理由=用户裁定 A），任务看板.md 状态机需含 cancelled 并刷新状态表

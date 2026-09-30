@@ -1,0 +1,33 @@
+{
+  "runId": "技术方案评审团-吧http-063959",
+  "phase": "plan-approval",
+  "status": "running",
+  "mode": "one-shot",
+  "deliverable": "code+artifacts",
+  "coverage": [],
+  "members": [
+    "d6ae423a-fa79-4634-9331-ffd93567aa66:researcher",
+    "28bf4cac-ab80-48ce-9c7a-6c3c8ce716d7:pm",
+    "ac0396ee-dd39-42b3-ac92-8526689161be:architect",
+    "fbfc21b2-c441-4500-ae16-453fa25e4a85:reviewer",
+    "b1325cf9-71b3-4125-9ca2-e2600ae88ff3:sec"
+  ],
+  "goal": "技术方案评审团 吧http://192.168.0.95:3000/customer-order的记录查询 订单 备货 的数据合并在一起、然后吧现在的筛选代码删除 重新写一个 可以筛选 订单和备货 搜产品名称",
+  "goalKey": "g6r1jvr",
+  "tier": "strict",
+  "decisions": {
+    "mergeShape": "单一列表+类型列",
+    "filterScope": "全保留+新增（保留客户/状态/工厂/日期区间，新增类型/产品名称/单号）",
+    "productSearch": "模糊包含，名称或条码",
+    "typeFilter": "三态 全部/订单/备货，默认全部",
+    "permission": "仅 order_manage，备货行只读",
+    "stockinStatusCell": "显示 —"
+  },
+  "updatedAt": "2026-09-30T07:19:03.906Z",
+  "_provenance": {
+    "writer": "session-580d9897-d8c2-4d1f-9f49-9fce116b8b77||lead",
+    "at": "2026-09-30T07:19:03.906Z"
+  },
+  "revision": 8,
+  "ownerSession": "session-580d9897-d8c2-4d1f-9f49-9fce116b8b77"
+}

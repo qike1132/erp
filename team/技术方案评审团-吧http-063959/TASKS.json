@@ -1,0 +1,116 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "B1",
+      "kind": "work",
+      "owner": "backend",
+      "subject": "新增订单+备货合并查询 service 与 /orders/records 端点",
+      "description": "新增 fastapi_app/services/order/unified.py，落只读合并查询函数 get_unified_records(db, *, page, per_page, record_type, product_kw, order_no_kw, customer, status, factory, start_date, end_date)。泛化 beile.py 的 UNION ALL + ilike 思路：去掉湖北硬编码、去掉 confirm_status、去掉采购单/确认注入；订单侧产品关键字走 Order.items.any(or_(OrderItem.product_name.ilike, OrderItem.product_barcode.ilike))，备货侧走 StockIn.product.has(or_(Product.name.ilike, Product.barcode.ilike))；order_no 关键字订单侧 Order.order_no.ilike、备货侧 StockIn.stockin_no.ilike；status/factory 仅订单侧（factory 非空时备货侧也按 Product.factory 过滤以满足工厂隔离）；两侧恒 is_deleted.isnot(True)；排序 sort_date DESC NULLS LAST, record_type, source_id；窗口 func.count().over() 分页，per_page<=500。在 fastapi_app/api/v1/endpoints/order.py 新增 GET /records（必须声明在 GET /{order_id} 之前），权限 require_permission('order_manage')，工厂隔离沿用 list_orders @78-79。响应复用 OrderListResponse（data 为 UnifiedRecord 列表，字段见 PLAN.md 接口契约）。复用 escape_like、_batch_deduct_quantities、_batch_item_factories 与 StockOut 抵扣聚合子查询，不复制。不改 /orders/list、/stock/in/list、beile.py 既有行为。",
+      "acceptance": [
+        "GET /orders/records 存在且声明在 GET /{order_id} 之前，权限 order_manage",
+        "Query 参数齐备：page(ge=1)/per_page(ge=1,le=500)/record_type(all|order|stockin,默认all)/product/order_no/customer/status/factory/start_date/end_date",
+        "record_type 用 Literal['all','order','stockin'] 强校验（非法 422）；status 用 VALID_ORDER_STATUSES 白名单校验（非法 422 或文档化空结果）",
+        "product 关键字服务端过滤且分页前生效（订单侧 OrderItem.product_name/product_barcode ilike，备货侧 Product.name/barcode ilike，escape_like 转义）",
+        "order_no 关键字模糊匹配 Order.order_no 或 StockIn.stockin_no",
+        "status/factory 仅订单侧生效；factory 非空时备货侧按 Product.factory 过滤（隔离）",
+        "两侧恒 is_deleted.isnot(True)（备货侧 StockIn.is_deleted.isnot(True)，禁止照抄 get_stockins 的无过滤）；start/end 走 _parse_date_condition（非法抛 BusinessError→400，禁止复制 get_stockins 的 except ValueError:pass 静默忽略）；排序 sort_date desc nullslast +(record_type,source_id)；total=订单命中+备货命中",
+        "响应含 success/data/total/page/per_page，data 行含 record_type/order_no/customer/order_date/status/product/quantity/deduct_quantity/factories/items；product 字段手工构造 {id,name,barcode,image}，禁止整体序列化 Product 或调 to_dict()（防 price 泄露）",
+        "不改 /orders/list、/stock/in/list、beile.py 既有行为"
+      ],
+      "inScope": [
+        "fastapi_app/services/order/unified.py",
+        "fastapi_app/api/v1/endpoints/order.py",
+        "fastapi_app/schemas/order.py"
+      ],
+      "outOfScope": [
+        "fastapi_app/services/order/beile.py",
+        "fastapi_app/services/order/queries.py",
+        "fastapi_app/services/stock_inventory_service.py",
+        "fastapi_app/api/v1/endpoints/stock.py",
+        "migrations/versions/",
+        "frontend-vite/"
+      ],
+      "verify": [
+        "cd D:/erp_system && python -m ruff check fastapi_app/services/order/unified.py fastapi_app/api/v1/endpoints/order.py",
+        "cd D:/erp_system && python -m mypy fastapi_app/services/order/unified.py",
+        "cd D:/erp_system && python -m pytest -q"
+      ],
+      "contract": "合并端点 GET /orders/records，权限 order_manage；筛选字段 类型/产品名称/单号编号/客户/状态(仅订单)/工厂(仅订单)/开始日期/结束日期；软删排除、sort_date倒序+(record_type,source_id)兜底、per_page<=500；不改 /orders/list、/stock/in/list、beile.py；工厂隔离非超管绑定工厂强制本厂且备货侧也过滤。",
+      "dependsOn": []
+    },
+    {
+      "id": "F1",
+      "kind": "work",
+      "owner": "frontend",
+      "subject": "前端 api 层新增 orderApi.records + useOrderList 单端点重构",
+      "description": "frontend-vite/src/api/order.ts 新增 orderApi.records(params) = get('/orders/records', { params })，与后端 B1 契约对齐。重构 useOrderList.ts：新增 filterType('all'|'order'|'stockin',默认all)/filterTypeOptions/filterProduct/filterNo 状态，保留 filterCustomer/filterStatus/filterFactory/filterStart/filterEnd；fetchOrders 改为单次调用 orderApi.records 拼参数（record_type=filterType、product=filterProduct、order_no=filterNo、customer/status/factory/start_date/end_date/page/per_page），删除按 recordType 二态分支的 fetchOrderRecords/fetchStockins；响应直接写入 orderRecords，record_type 由后端返回，备货 deduct_quantity 后端已给（不再前端 map i.deducted）。resetFilter 清 filterType='all'、filterProduct、filterNo 并回第1页。为保持 F1 独立可编译，暂保留 recordType/recordTypeOptions 导出并标记 @deprecated，由 F2 删除。OrderRecord 类型已含 record_type，必要时微调 types.ts 承载合并行。",
+      "acceptance": [
+        "orderApi.records 指向 GET /orders/records 且参数与 B1 契约一致",
+        "useOrderList 新增 filterType/filterTypeOptions/filterProduct/filterNo，保留 filterCustomer/filterStatus/filterFactory/filterStart/filterEnd",
+        "fetchOrders 单次调用 orderApi.records，删除 recordType 二态分支的 fetchOrderRecords/fetchStockins",
+        "响应映射：record_type 由后端返回，备货 deduct_quantity 后端已给；types.ts OrderRecord.status 改为 string|null（备货 status=null），order_date 归一化兼容备货 stockin_date",
+        "resetFilter 清 filterType='all'、filterProduct、filterNo 并回第1页",
+        "recordType/recordTypeOptions 暂保留标记 @deprecated 以保 F1 阶段可编译，由 F2 在移除组件引用后于 useOrderList.ts 中删除（useOrderList.ts 已列入 F2 inScope），type-check/lint 通过"
+      ],
+      "inScope": [
+        "frontend-vite/src/api/order.ts",
+        "frontend-vite/src/views/customer-order/composables/useOrderList.ts",
+        "frontend-vite/src/views/customer-order/composables/types.ts"
+      ],
+      "outOfScope": [
+        "frontend-vite/src/views/customer-order/components/",
+        "frontend-vite/src/views/customer-order/CustomerOrderView.vue",
+        "frontend-vite/vite.config.js",
+        "fastapi_app/"
+      ],
+      "verify": [
+        "cd D:/erp_system/frontend-vite && npm run type-check",
+        "cd D:/erp_system/frontend-vite && npm run lint",
+        "cd D:/erp_system/frontend-vite && npm run check:api",
+        "cd D:/erp_system/frontend-vite && npm run check:routes"
+      ],
+      "contract": "前端按 B1 冻结契约对接 GET /orders/records；筛选字段 类型(三态)+产品名称+单号编号+客户+状态+工厂+日期；recordType 互斥切换由 F2 废除。",
+      "dependsOn": [
+        "B1"
+      ]
+    },
+    {
+      "id": "F2",
+      "kind": "work",
+      "owner": "frontend",
+      "subject": "筛选组件重写 + 管道透传 + 表格合并态",
+      "description": "OrderRecordFilter.vue：删除 co-record-type-switch 互斥切换，新增类型(全部/订单/备货，默认全部)、产品名称(文本)、单号/编号(文本)，保留客户/状态(仅订单)/工厂(仅订单)/开始/结束日期；状态与工厂下拉仅在 filterType 为 all 或 order 时显示（仅订单语义）。OrderRecordQuery.vue 与 CustomerOrderView.vue：管道透传 filterType/filterProduct/filterNo，删除 recordType 相关绑定与 handleChangeRecordType。OrderRecordTable.vue 合并态：类型徽章按行 record_type；状态列按行（订单 7 态、备货显示「—」）；工厂/SKU 列仅 record_type==='order' 行显示；操作列删除按钮仅 record_type==='order' 且 canDelete（备货行只读）；空态改为「暂无记录」。",
+      "acceptance": [
+        "OrderRecordFilter.vue 移除互斥切换，新增类型/产品名称/单号编号，保留客户/状态/工厂/日期",
+        "状态、工厂下拉仅在 filterType 为 all 或 order 时显示",
+        "OrderRecordQuery.vue + CustomerOrderView.vue 透传 filterType/filterProduct/filterNo，移除 recordType 绑定",
+        "表格按行 record_type 渲染：类型徽章、状态列、工厂/SKU 列仅订单行",
+        "删除按钮仅 record_type==='order' 且 canDelete；备货行不可删/不可编辑",
+        "空态文案改为「暂无记录」",
+        "type-check / lint / vitest 全绿"
+      ],
+      "inScope": [
+        "frontend-vite/src/views/customer-order/components/OrderRecordFilter.vue",
+        "frontend-vite/src/views/customer-order/components/OrderRecordQuery.vue",
+        "frontend-vite/src/views/customer-order/components/OrderRecordTable.vue",
+        "frontend-vite/src/views/customer-order/CustomerOrderView.vue",
+        "frontend-vite/src/views/customer-order/composables/useOrderList.ts"
+      ],
+      "outOfScope": [
+        "frontend-vite/src/api/order.ts",
+        "frontend-vite/vite.config.js",
+        "fastapi_app/"
+      ],
+      "verify": [
+        "cd D:/erp_system/frontend-vite && npm run type-check",
+        "cd D:/erp_system/frontend-vite && npm run lint",
+        "cd D:/erp_system/frontend-vite && npm test"
+      ],
+      "contract": "废除 recordType 互斥切换；类型(全部/订单/备货)+产品名称+单号编号+保留客户/状态(仅订单)/工厂(仅订单)/日期；备货行只读（删除按钮仅订单行）。",
+      "dependsOn": [
+        "F1"
+      ]
+    }
+  ]
+}
