@@ -29,7 +29,8 @@ class BackupRecord(Base):
     total_rows: Mapped[int | None] = mapped_column(BigInteger, comment='总行数')
     operator: Mapped[str | None] = mapped_column(String(100), comment='操作者用户名')
     remark: Mapped[str | None] = mapped_column(Text, comment='备注')
-    status: Mapped[str] = mapped_column(String(20), nullable=False, default='running', comment='状态: success/failed/running')
+    # S4: partial=有缺失/失败表（内容不完整但可用）；unknown=文件存在但完整性未经校验
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default='running', comment='状态: success/failed/running/partial/unknown')
     error_message: Mapped[str | None] = mapped_column(Text, comment='错误信息')
     duration_seconds: Mapped[float | None] = mapped_column(comment='耗时(秒)')
     ip_address: Mapped[str | None] = mapped_column(String(45), comment='操作者IP地址')

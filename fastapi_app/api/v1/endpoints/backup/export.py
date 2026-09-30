@@ -311,13 +311,16 @@ async def save_backup_to_server(
     backup_service.write_backup_meta_file(filepath, manifest, record_type='full')
 
     # 写入 BackupRecord
+    # S4：状态由产物自述推导（缺表/覆盖度不足 → partial），不再默认成功
+    export_status, export_detail = backup_service.evaluate_backup_completeness(manifest)
     await backup_service.write_backup_record(
         db, record_type='full', trigger_type='manual',
         filename=filename, size=len(file_bytes),
         table_count=manifest.get('table_count', 0),
         total_rows=manifest.get('total_rows', 0),
         operator=user.username if hasattr(user, 'username') else str(user.id),
-        remark=remark,
+        remark=backup_service.compose_remark(remark, export_detail),
+        status=export_status,
         encrypted=manifest.get('encrypted', False),
     )
 
@@ -328,7 +331,9 @@ async def save_backup_to_server(
         'total_rows': manifest.get('total_rows', 0),
         'exported_at': manifest.get('exported_at'),
         'exported_by': manifest.get('exported_by'),
-        'includes': manifest.get('includes', {}), 'remark': remark})
+        'includes': manifest.get('includes', {}), 'remark': remark,
+        'backup_status': export_status,
+        'failed_tables': manifest.get('failed_tables') or []})
 
 
 # ---------------------------------------------------------------------------

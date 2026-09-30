@@ -1,6 +1,7 @@
 """增量备份/WAL。"""
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import tempfile
@@ -66,6 +67,11 @@ async def create_incremental_backup(
             # 这里吞掉异常会让备份「成功」但静默缺表 —— 2026-09-30 之前
             # approval_request / approval_log 正是这样长期漏备的。故记 ERROR 并登记表名，
             # 让调用方与 manifest 都能看到"哪些表没进备份"。
+            # S4：失败后必须回滚。PostgreSQL 的事务一旦出错就进入 aborted 状态，
+            # 不 rollback 的话后面每一张表都会抛 InFailedSQLTransactionError，
+            # 一张表出问题会连锁成「整份增量备份全空」（实测见 _qa_tmp/s4_cascade_probe.py）。
+            with contextlib.suppress(SQLAlchemyError):
+                await db.rollback()  # manual-tx: 单表失败后恢复事务，避免连锁失败
             logger.error(f'增量备份表 {tname} 失败: {e}')
             failed_tables.append(tname)
 

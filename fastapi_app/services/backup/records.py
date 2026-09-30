@@ -76,6 +76,10 @@ def write_backup_meta_file(filepath, manifest: dict, *, record_type: str = 'full
             'format_version': manifest.get('version'),
             'table_count': manifest.get('table_count'),
             'total_rows': manifest.get('total_rows'),
+            # S4：完整性自述随 sidecar 落盘。加密备份读不到 manifest，
+            # 列表/补录/判状态只能靠这里，缺了它加密备份永远判 success。
+            'failed_tables': manifest.get('failed_tables') or [],
+            'coverage': manifest.get('coverage'),
             'exported_by': manifest.get('exported_by'),
             'remark': manifest.get('remark', ''),
             'checksum': sha256_file(fp),
@@ -99,6 +103,93 @@ def _read_backup_meta(f: Path) -> dict | None:  # log-context: internal helper �
         return None
 
 
+# ---------------------------------------------------------------------------
+# 备份完整性判据（S4）
+#
+# 背景：历史上 backup_record.status 只反映「进程有没有抛异常」——
+# 增量备份里某张表查询失败被吞掉、全量备份的 table_count 只是「数到的表数」，
+# 于是缺表的备份照样记 success，事后无法区分「完整」与「当时没人报错」。
+# 这里把「产物自述的覆盖情况」收敛成单一判据，所有写记录的地方都必须用它。
+# ---------------------------------------------------------------------------
+STATUS_SUCCESS = 'success'
+STATUS_PARTIAL = 'partial'
+STATUS_UNKNOWN = 'unknown'
+STATUS_RUNNING = 'running'
+STATUS_FAILED = 'failed'
+
+# remark 里最多列出多少张问题表，避免异常时 remark 被表名刷爆
+_MAX_REPORTED_TABLES = 10
+
+
+def _collect_problem_tables(info: dict | None) -> list[str]:
+    """收集产物自述的「缺失/失败」表名，去重并保持出现顺序。"""
+    if not isinstance(info, dict):
+        return []
+    problems: list[str] = []
+
+    def _extend(value) -> None:
+        if not value:
+            return
+        if isinstance(value, str):
+            items: list = [value]
+        elif isinstance(value, dict):
+            items = list(value.keys())
+        elif isinstance(value, (list, tuple, set, frozenset)):
+            items = list(value)
+        else:
+            return
+        for item in items:
+            name = str(item).strip()
+            if name and name not in problems:
+                problems.append(name)
+
+    for key in ('failed_tables', 'missing_tables', 'error_tables'):
+        _extend(info.get(key))
+    coverage = info.get('coverage')
+    if isinstance(coverage, dict):
+        for key in ('failed_tables', 'missing_tables', 'count_failed_tables'):
+            _extend(coverage.get(key))
+    # 行级/批次级错误（如 json_backup 的 batch_errors）的键就是表名
+    batch_errors = info.get('batch_errors')
+    if isinstance(batch_errors, dict):
+        _extend(list(batch_errors.keys()))
+    return problems
+
+
+def evaluate_backup_completeness(info: dict | None) -> tuple[str, str]:
+    """由备份产物描述推导 (status, 问题说明) 二元组。
+
+    - 产物自述有缺失/失败表，或 coverage.complete 为 False → ('partial', 说明)
+    - 其余情况 → ('success', '')
+
+    本函数只做「产物自述」判定：没有自述信息的旧产物仍判 success，无法凭空
+    推断内容完整性（那类情况见 sync_backup_records 的 unknown 分支）。
+    """
+    problems = _collect_problem_tables(info)
+    incomplete = bool(problems)
+    coverage = info.get('coverage') if isinstance(info, dict) else None
+    if isinstance(coverage, dict) and coverage.get('complete') is False:
+        incomplete = True
+    if not incomplete:
+        return STATUS_SUCCESS, ''
+    if problems:
+        shown = problems[:_MAX_REPORTED_TABLES]
+        detail = f'缺失/失败表: {", ".join(shown)}'
+        if len(problems) > len(shown):
+            detail += f' 等 {len(problems)} 张'
+    else:
+        detail = '覆盖度自检未通过（详见 manifest.coverage）'
+    return STATUS_PARTIAL, detail
+
+
+def compose_remark(base: str | None, detail: str) -> str:
+    """把问题说明追加到 remark 上（空说明则原样返回）。"""
+    text_base = (base or '').strip()
+    if not detail:
+        return text_base
+    return f'{text_base}；{detail}' if text_base else detail
+
+
 async def write_backup_record(
     db: AsyncSession,
     *,
@@ -110,7 +201,8 @@ async def write_backup_record(
     total_rows: int | None = None,
     operator: str | None = None,
     remark: str | None = None,
-    status: str = 'success',
+    # status 必填（S4）：默认 'success' 会让「忘了传」与「真的完整」无法区分
+    status: str,
     error_message: str | None = None,
     duration_seconds: float | None = None,
     ip_address: str | None = None,
@@ -120,7 +212,12 @@ async def write_backup_record(
     schedule_id: int | None = None,
     encrypted: bool | None = None,
 ) -> None:
-    """写入备份操作记录到 BackupRecord 表"""
+    """写入备份操作记录到 BackupRecord 表。
+
+    status 为必填（S4）：不允许「不传就成功」。取值见 STATUS_* 常量，
+    由 evaluate_backup_completeness() 从备份产物（manifest / .meta /
+    incremental 返回值）推导；失败路径显式传 STATUS_FAILED。
+    """
     try:
         from fastapi_app.shared_models.backup_record import BackupRecord
         record = BackupRecord(
@@ -201,6 +298,9 @@ def list_backup_files() -> list[dict]:  # log-context: internal helper 无请求
                                 'includes': manifest.get('includes', {}),
                                 'base_timestamp': manifest.get('base_timestamp', ''),
                                 'encrypted': manifest.get('encrypted', False),
+                                # S4：完整性自述透传，供 sync 补录时判定真实状态
+                                'failed_tables': manifest.get('failed_tables') or [],
+                                'coverage': manifest.get('coverage'),
                             })
                 except (OSError, zipfile.BadZipFile, ValueError) as e:
                     logger.warning(f'读取 ZIP 备份 {f.name} 失败: {e}')
@@ -216,6 +316,8 @@ def list_backup_files() -> list[dict]:  # log-context: internal helper 无请求
                         'remark': meta.get('remark', ''),
                         'table_count': meta.get('table_count', 0),
                         'total_rows': meta.get('total_rows', 0),
+                        'failed_tables': meta.get('failed_tables') or [],
+                        'coverage': meta.get('coverage'),
                     })
             elif f.name.endswith('.json'):
                 try:
@@ -227,6 +329,8 @@ def list_backup_files() -> list[dict]:  # log-context: internal helper 无请求
                         'remark': data.get('remark', ''),
                         'table_count': len(data.get('tables', {})),
                         'total_rows': sum(t.get('count', len(t.get('rows', []))) for t in data.get('tables', {}).values()),
+                        'failed_tables': data.get('failed_tables') or [],
+                        'coverage': data.get('coverage'),
                     })
                 except (OSError, json.JSONDecodeError, ValueError) as e:
                     logger.warning(f'读取 JSON 备份 {f.name} 失败: {e}')
@@ -571,7 +675,8 @@ async def sync_backup_records() -> dict:
 
     - 补录：文件存在但 DB 无记录 → 根据 manifest/.meta 补写 BackupRecord
     - 清理孤立：DB 有记录但文件不存在 → 删除记录
-    - 修正僵尸：status='running' 但文件已存在且进程已结束 → 更新为 'success'
+    - 修正僵尸：status='running' 但文件已存在且进程已结束 → 更新为 'unknown'
+      （文件存在不等于内容完整；S4 起不再把中断的备份洗成 success）
 
     幂等保证：多次运行结果一致（已存在的记录跳过，已删除的孤立不再出现，
     已修正的僵尸状态不再为 running）。
@@ -631,6 +736,9 @@ async def sync_backup_records() -> dict:
                     created_at = _parse_exported_at(fs_entry.get('exported_at'))
                     if created_at is None:
                         created_at = _parse_timestamp_from_filename(fname)
+                    # S4：不再无条件记 success。产物自述缺失表/覆盖度不足 → partial，
+                    # 并把缺失表名写进 remark，避免「文件在就算成功」。
+                    sync_status, sync_detail = evaluate_backup_completeness(fs_entry)
                     record = BackupRecord(
                         type=record_type,
                         trigger_type=trigger_type,
@@ -639,8 +747,8 @@ async def sync_backup_records() -> dict:
                         table_count=fs_entry.get('table_count'),
                         total_rows=fs_entry.get('total_rows'),
                         operator=fs_entry.get('exported_by') or 'system_sync',
-                        remark=fs_entry.get('remark', ''),
-                        status='success',
+                        remark=compose_remark(fs_entry.get('remark', ''), sync_detail),
+                        status=sync_status,
                         encrypted=fs_entry.get('encrypted', False),
                         created_at=created_at,
                     )
@@ -665,12 +773,17 @@ async def sync_backup_records() -> dict:
                         with contextlib.suppress(Exception):  # defensive: rollback 失败不阻塞后续同步
                             await db.rollback()
 
-            # 2c. 修正僵尸：status='running' 且对应文件存在 → 更新为 'success'
-            #     （进程已结束，文件已落盘，running 状态为历史中断残留）
+            # 2c. 修正僵尸：status='running' 且对应文件存在 → 更新为 'unknown'
+            #     文件存在只证明「进程写下过这个文件」，不证明内容完整（可能半截）。
+            #     旧实现直接判 success，等于把「中断的备份」洗成「成功」，
+            #     故改记 unknown 并在 remark 标注推断来源，待人工/校验流程确认。
             for r in rows:
                 if r.status == 'running' and r.filename and r.filename in fs_filenames:
                     try:
-                        r.status = 'success'
+                        r.status = STATUS_UNKNOWN
+                        r.remark = compose_remark(
+                            r.remark, '文件存在但内容完整性未经校验（启动同步推断）'
+                        )
                         await db.flush()
                         await db.commit()  # 每条修正成功后立即提交，避免后续失败回滚已成功记录
                         result['zombie_fixed'] += 1

@@ -108,24 +108,32 @@ async def manual_full_backup_task(
             backup_service.write_backup_meta_file(filepath, manifest, record_type='full')
 
             # 写入 BackupRecord
+            # S4：状态由产物自述推导（缺表/覆盖度不足 → partial），不再默认成功
+            full_status, full_detail = backup_service.evaluate_backup_completeness(manifest)
             await backup_service.write_backup_record(
                 db, record_type='full', trigger_type='manual',
                 filename=filename, size=len(zip_bytes),
                 table_count=manifest.get('table_count'),
                 total_rows=manifest.get('total_rows'),
-                operator=operator, remark=remark or '手动全量备份',
+                operator=operator,
+                remark=backup_service.compose_remark(remark or '手动全量备份', full_detail),
+                status=full_status,
                 encrypted=manifest.get('encrypted', False),
                 manifest_summary={
                     'checksums': manifest.get('checksums'),
                     'schema_snapshot': manifest.get('schema_snapshot'),
+                    'coverage': manifest.get('coverage'),
                 },
             )
 
         result = {
-            'status': 'ok', 'type': 'full', 'filename': filename,
+            'status': 'ok' if full_status == backup_service.STATUS_SUCCESS else 'partial',
+            'backup_status': full_status,
+            'type': 'full', 'filename': filename,
             'size': len(zip_bytes),
             'table_count': manifest.get('table_count'),
             'total_rows': manifest.get('total_rows'),
+            'failed_tables': manifest.get('failed_tables') or [],
         }
         await complete_progress(task_id, result=result)
         logger.info(f'手动全量备份完成: {filename}')
@@ -185,24 +193,37 @@ async def manual_incremental_backup_task(ctx, *, task_id: str | None = None, rem
                 encrypt=False,  # 手动增量不隐式加密(fail-safe,避免随机密钥)
             )
 
+            # S4：增量缺表信号由 create_incremental_backup 的 failed_tables 承载，
+            # 过去该信号被丢弃，导致「静默漏表」的备份照样记 success。
+            inc_status, inc_detail = backup_service.STATUS_SUCCESS, ''
             if result.get('filename'):
                 await update_progress(task_id, 'write_file', 0.9, f'写入 {result["filename"]}')
+                inc_status, inc_detail = backup_service.evaluate_backup_completeness(result)
                 await backup_service.write_backup_record(
                     db, record_type='incremental', trigger_type='manual',
                     filename=result['filename'], size=result.get('size'),
                     table_count=result.get('table_count'),
                     total_rows=result.get('total_rows'),
-                    operator=operator, remark=remark or '手动增量备份',
+                    operator=operator,
+                    remark=backup_service.compose_remark(remark or '手动增量备份', inc_detail),
+                    status=inc_status,
                     encrypted=result.get('encrypted', False),
                     manifest_summary={
                         'base_timestamp': result.get('base_timestamp'),
                         'checksums': result.get('checksums'),
+                        'failed_tables': result.get('failed_tables') or [],
                     },
                 )
             else:
                 logger.info('手动增量备份: 无变更数据')
 
-        result_out = {'status': 'ok', 'type': 'incremental', 'result': result}
+        result_out = {
+            'status': 'ok' if inc_status == backup_service.STATUS_SUCCESS else 'partial',
+            'backup_status': inc_status,
+            'type': 'incremental',
+            'result': result,
+            'failed_tables': result.get('failed_tables') or [],
+        }
         await complete_progress(task_id, result=result_out)
         logger.info(f'手动增量备份完成: {result}')
         return result_out
@@ -633,31 +654,49 @@ async def _do_auto_backup(backup_type: str) -> dict:
             backup_service.write_backup_meta_file(filepath, manifest, record_type='full')
 
             # 写入 BackupRecord
+            # S4：状态由产物自述推导，不再无条件 'success'
+            auto_status, auto_detail = backup_service.evaluate_backup_completeness(manifest)
             await backup_service.write_backup_record(
                 db, record_type='full', trigger_type='auto',
                 filename=filename, size=len(zip_bytes),
                 table_count=manifest.get('table_count'),
                 total_rows=manifest.get('total_rows'),
-                operator='system_auto', remark='每日自动全量备份',
+                operator='system_auto',
+                remark=backup_service.compose_remark('每日自动全量备份', auto_detail),
+                status=auto_status,
                 encrypted=manifest.get('encrypted', False),
             )
             return {
-                'status': 'ok', 'type': 'daily', 'filename': filename,
+                'status': 'ok' if auto_status == backup_service.STATUS_SUCCESS else 'partial',
+                'backup_status': auto_status,
+                'type': 'daily', 'filename': filename,
                 'size': len(zip_bytes),
                 'table_count': manifest.get('table_count'),
                 'total_rows': manifest.get('total_rows'),
+                'failed_tables': manifest.get('failed_tables') or [],
             }
         else:
             result = await backup_service.create_incremental_backup(db, dummy_user, '自动增量备份')
+            # S4：增量缺表（failed_tables）必须落到记录状态上
+            inc_status, inc_detail = backup_service.STATUS_SUCCESS, ''
             if result.get('filename'):
+                inc_status, inc_detail = backup_service.evaluate_backup_completeness(result)
                 await backup_service.write_backup_record(
                     db, record_type='incremental', trigger_type='auto',
                     filename=result['filename'], size=result.get('size'),
                     table_count=result.get('table_count'),
                     total_rows=result.get('total_rows'),
-                    operator='system_auto', remark='自动增量备份',
+                    operator='system_auto',
+                    remark=backup_service.compose_remark('自动增量备份', inc_detail),
+                    status=inc_status,
                 )
-            return {'status': 'ok', 'type': 'incremental', 'result': result}
+            return {
+                'status': 'ok' if inc_status == backup_service.STATUS_SUCCESS else 'partial',
+                'backup_status': inc_status,
+                'type': 'incremental',
+                'result': result,
+                'failed_tables': result.get('failed_tables') or [],
+            }
 
 
 async def _do_integrity_check() -> dict:

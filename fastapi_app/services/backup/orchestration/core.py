@@ -15,6 +15,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .._constants import (
+    _CHECKSUM_EXCLUDE_TABLES,
     BACKUP_FORMAT_VERSION,
     BACKUP_LOCK_ID,
     BACKUP_OPERATION_TIMEOUT,
@@ -236,6 +237,38 @@ async def _do_create_full_backup(
             count_results.append(await _count_table(n))
         table_stats = dict(count_results)
 
+        # S4 覆盖度自检：table_count 只是「数到的表数」，本身不校验库与产物的差异，
+        # 因此「缺表」过去无法从记录里看出来。这里区分两类缺口：
+        # - count_failed_tables：表在库中、但 COUNT(*) 失败（savepoint 已回滚）→
+        #   既没证实内容也没证实行数，属于真实缺口，参与 complete。
+        # - unbacked_tables：库中存在、本次产物不会包含的表。pg_dump 路径会整库导出，
+        #   只有 JSON 降级路径（只遍历模型表）才会真的漏。这类表是已知的范围限制
+        #   （如 app_version / product_image_orphan_backup 等非业务表），只记录并告警，
+        #   不参与 complete——否则每天自动全量都判 partial，健康检查与合规报告会被
+        #   永久噪声淹没，反而掩盖真正的缺口。
+        count_failed_tables = sorted(
+            n for n, rows in table_stats.items() if rows < 0 and n in existing_tables
+        )
+        unbacked_tables: list[str] = []
+        if not pg_dump_available and not partial:
+            unbacked_tables = sorted(
+                existing_tables - set(table_stats) - _CHECKSUM_EXCLUDE_TABLES
+            )
+            if unbacked_tables:
+                logger.warning(
+                    'JSON 降级备份未覆盖 %d 张非模型表（pg_dump 不可用）: %s',
+                    len(unbacked_tables),
+                    ', '.join(unbacked_tables[:10]),
+                )
+        coverage = {
+            'db_table_count': len(existing_tables),
+            'scope_table_count': len(table_names),
+            'backup_table_count': len(table_stats),
+            'count_failed_tables': count_failed_tables,
+            'unbacked_tables': unbacked_tables,
+            'complete': not count_failed_tables,
+        }
+
         checksums = {}
         db_dump_name = 'database/dump.sql.gz' if pg_dump_available else 'database/dump.json'
         db_dump_file = dump_path if pg_dump_available else tmpdir_path / 'database' / 'dump.json'
@@ -290,6 +323,10 @@ async def _do_create_full_backup(
             'exported_by': user.username if hasattr(user, 'username') else str(user.id),
             'remark': remark,
             'table_count': len(table_stats),
+            # S4：完整性自述。failed_tables 供 evaluate_backup_completeness 判 partial，
+            # coverage 供人工/巡检核对「库里有几张、产物里几张、差在哪」。
+            'failed_tables': count_failed_tables,
+            'coverage': coverage,
             'total_rows': sum(v for v in table_stats.values() if v >= 0),
             'dump_size': dump_info.get('dump_size', 0),
             'dump_duration_seconds': dump_info.get('duration_seconds', 0),

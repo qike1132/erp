@@ -295,6 +295,14 @@ __all__ = [  # noqa: RUF022
     "write_backup_meta_file",
     "write_backup_record",
     "sync_backup_records",
+    # S4 备份完整性判据（状态不许默认成功）
+    "STATUS_FAILED",
+    "STATUS_PARTIAL",
+    "STATUS_RUNNING",
+    "STATUS_SUCCESS",
+    "STATUS_UNKNOWN",
+    "compose_remark",
+    "evaluate_backup_completeness",
     # P1-2 表级备份范围校验
     "resolve_backup_table_scope",
 ]

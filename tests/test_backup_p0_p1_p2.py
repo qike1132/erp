@@ -328,7 +328,11 @@ class TestSyncBackupRecords:
 
     @pytest.mark.asyncio
     async def test_fix_zombie_running_status(self):
-        """场景3: 修正僵尸 — status='running' 且文件存在 → status='success'"""
+        """场景3: 修正僵尸 — status='running' 且文件存在 → status='unknown'
+
+        S4 起不再把「文件存在」当作「内容完整」：中断的备份同样会留下文件，
+        旧实现把它洗成 success，导致缺表的备份在审计里显示为成功。
+        """
         from fastapi_app.services.backup import records as records_mod
 
         fs_files = [
@@ -350,8 +354,9 @@ class TestSyncBackupRecords:
         assert result['orphaned'] == 0
         assert result['zombie_fixed'] == 1
         assert result['errors'] == []
-        # 僵尸记录状态被修正为 success
-        assert zombie.status == 'success'
+        # S4：状态修正为 unknown（文件存在但内容完整性未经校验），不是 success
+        assert zombie.status == 'unknown'
+        assert '内容完整性未经校验' in zombie.remark
 
     @pytest.mark.asyncio
     async def test_idempotent_second_call_no_change(self):
@@ -572,6 +577,7 @@ class TestWriteBackupRecordAlert:
              patch('asyncio.get_running_loop', return_value=mock_loop):
             await write_backup_record(
                 db=db, record_type='full', filename='erp_backup_test.zip',
+                status='success',
             )
 
         # 计数=1，不触发告警
@@ -598,6 +604,7 @@ class TestWriteBackupRecordAlert:
             for _ in range(3):
                 await write_backup_record(
                     db=db, record_type='full', filename='erp_backup_test.zip',
+                    status='success',
                 )
 
         # 计数=3
@@ -639,6 +646,7 @@ class TestWriteBackupRecordAlert:
                 # 不应抛异常
                 await write_backup_record(
                     db=db, record_type='full', filename='erp_backup_test.zip',
+                    status='success',
                 )
 
         # 主流程未被中断，计数仍累加
@@ -663,6 +671,7 @@ class TestWriteBackupRecordAlert:
             for _ in range(6):
                 await write_backup_record(
                     db=db, record_type='full', filename='erp_backup_test.zip',
+                    status='success',
                 )
 
         assert records_mod._record_write_fail_count == 6
@@ -690,6 +699,7 @@ class TestWriteBackupRecordAlert:
              patch('asyncio.get_running_loop', return_value=mock_loop):
             await write_backup_record(
                 db=db, record_type='full', filename='erp_backup_test.zip',
+                status='success',
             )
 
         assert records_mod._record_write_fail_count == 0
