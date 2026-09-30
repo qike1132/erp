@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>多 SKU 块内分割线 · 对比稿 · 2026-09-30</title>
+<style>
+  :root{
+    --bg:#f5f5f7; --card:#fff; --surface:#f4f6fc;
+    --t1:#1d1d1f; --t2:#48484d; --t3:#8e8e93;
+    --accent:#007aff; --accent-tint:#e8f1ff; --ok:#34c759; --ok-tint:#e6f9ec;
+    --warn:#ff9500; --warn-tint:#fff4e0; --danger:#ff3b30; --danger-tint:#ffeceb;
+    --color-border:#e4e7ed; --color-border-light:#f0f2f5;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:26px 22px 60px;background:var(--bg);color:var(--t1);
+       font:13px/1.5 "Microsoft YaHei UI","Segoe UI",system-ui,sans-serif}
+  h1{font-size:19px;margin:0 0 6px}
+  .meta{color:var(--t2);font-size:12px;margin-bottom:18px}
+  .meta code,.sub code,.foot code,.note code{background:#e9e9ee;padding:1px 5px;border-radius:4px}
+  .note{background:var(--warn-tint);border-left:3px solid var(--warn);
+        padding:10px 14px;border-radius:6px;margin:0 0 20px;font-size:12.5px;color:#7a4a00}
+  h2{font-size:15px;margin:34px 0 4px;padding-top:10px;border-top:2px solid #e3e3e8}
+  h2 .tag{font-size:11px;font-weight:700;color:#fff;background:var(--accent);
+          padding:2px 7px;border-radius:999px;vertical-align:2px;margin-left:8px}
+  h2 .tag.alt{background:var(--t3)}
+  h2 .tag.rec{background:var(--ok)}
+  .sub{color:var(--t2);font-size:12px;margin:0 0 12px}
+  .sub b{color:var(--t1)}
+  /* 表：行线统一用已选定的 #e4e7ed */
+  .card{background:var(--card);border:1px solid var(--color-border);border-radius:10px;overflow:hidden;margin-bottom:12px}
+  table.dt{border-collapse:collapse;width:100%;font-size:13px;table-layout:fixed}
+  table.dt th{background:var(--surface);color:var(--t2);font-weight:700;font-size:12px;
+     padding:10px 12px;border-bottom:2px solid var(--color-border);white-space:nowrap;text-align:center;
+     overflow:hidden;text-overflow:ellipsis}
+  table.dt td{padding:10px 12px;border-bottom:1px solid var(--color-border);color:var(--t1);
+     text-align:center;vertical-align:middle;background:#fff;overflow:hidden}
+  col.c-time{width:130px} col.c-no{width:190px} col.c-cust{width:110px} col.c-fac{width:100px}
+  col.c-sku{width:80px} col.c-prod{width:auto} col.c-qty{width:80px} col.c-act{width:100px}
+  .no{font-family:Consolas,ui-monospace,monospace;font-size:12px}
+  .dim{color:var(--t3)}
+  .strong{font-weight:700}
+  .badge{display:inline-flex;align-items:center;padding:1px 7px;font-size:10px;font-weight:700;border-radius:4px}
+  .badge.order{background:var(--accent-tint);color:#0158b0}
+  .badge.sku{background:var(--ok-tint);color:#1d7a3a}
+  .badge.sku.one{background:#f1f3f7;color:var(--t3)}
+  .act{width:34px;height:28px;border:none;border-radius:8px;background:var(--accent-tint);
+       color:#0158b0;font-size:12px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
+  .act.del{background:var(--danger-tint);color:#c0201a}
+  /* ---- SKU 块（各方案差异都在这里）---- */
+  .stack{display:flex;flex-direction:column;text-align:left}
+  .stack .line{display:flex;justify-content:space-between;gap:12px;align-items:baseline}
+  .stack .line .nm{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .stack .line .q{color:var(--t3);font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .stack .ln{display:flex;gap:6px;align-items:baseline}
+  /* 现状：无任何分隔，行距大 */
+  .s-cur .line{padding:5px 0}
+  /* A：SKU 之间细线，间距收紧 */
+  .s-a .line{padding:3px 0;border-bottom:1px solid var(--color-border)}
+  .s-a .line:last-child{border-bottom:none}
+  /* B：细线 + 左侧竖向导引线（缩进），表示同属一张订单 */
+  .s-b{padding-left:10px;border-left:2px solid var(--color-border-light)}
+  .s-b .line{padding:3px 0;border-bottom:1px solid var(--color-border)}
+  .s-b .line:last-child{border-bottom:none}
+  /* C：细线 + 偶数行淡底 */
+  .s-c .line{padding:3px 6px;margin:0 -6px;border-bottom:1px solid var(--color-border)}
+  .s-c .line:last-child{border-bottom:none}
+  .s-c .line:nth-child(even){background:#fafbfd}
+  /* D：细线 + 序号 */
+  .s-d .line{padding:3px 0;border-bottom:1px solid var(--color-border)}
+  .s-d .line:last-child{border-bottom:none}
+  .s-d .idx{color:var(--t3);font-size:11px;font-variant-numeric:tabular-nums;
+           width:16px;flex:0 0 16px;text-align:right}
+  /* 放大条 */
+  .zoom{margin:0 0 12px;border:1px solid var(--color-border);border-radius:10px;overflow:hidden;background:#fff}
+  .zoom-hd{background:var(--surface);padding:6px 12px;font-size:11.5px;font-weight:700;color:var(--t2)}
+  .zoom-body{padding:10px 16px;font-size:13px}
+  .zoom-body .stack .line{font-size:13px}
+  .zscale{transform:scale(1.18);transform-origin:left center}
+  .foot{color:var(--t2);font-size:12.5px;margin-top:26px;line-height:1.9}
+  .foot b{color:var(--t1)}
+  .qmark{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;
+         border-radius:50%;background:var(--warn-tint);color:#7a4a00;font-size:11px;font-weight:700}
+</style>
+</head>
+<body>
+
+<h1>多 SKU 块内分割线 · 对比稿</h1>
+<div class="meta">
+  页面：<code>/customer-order</code> → 记录查询 &nbsp;·&nbsp; 2026-09-30 &nbsp;·&nbsp; 未改代码 &nbsp;·&nbsp;
+  行线已按你选的<b>方案 A</b>（<code>#e4e7ed</code>）铺底 &nbsp;·&nbsp; 样例：PO-20260930-0013 / MINISO国际 / 3 个 SKU
+</div>
+
+<div class="note">
+  <b>你说的"太空白"是两件事叠在一起：</b><br>
+  ① <b>3 条 SKU 之间没有任何分隔</b>，6px 行距 + 无分隔 = 三行字飘在空白里（表变高以后尤其明显）。<br>
+  ② <b>SKU 名与它自己的数量之间横跨整个产品列</b>——名字在左、数量右对齐到列尾，中间是一大片空档。
+  空档宽度恒等于 <code>产品列宽 − 名字宽 − 数量宽</code>，所以<b>列越宽空得越多</b>：
+  本稿在 1099px 宽的产品列里，「鲨鱼」那条实测空档 <b>1026px</b>（数量被推到一屏之外，读起来像两列无关的数据）。<br>
+  下面 Part 1 解决 ①，Part 2 解决 ②。两者独立，可以各选一个组合起来。
+</div>
+
+<!-- ================= Part 1 ================= -->
+<h2>Part 1 · SKU 之间的分隔 <span class="tag alt">4 选 1</span></h2>
+<p class="sub">四种都保留"数量右对齐到列尾"（Part 2 再谈这个）。差异只在<b>用什么手段把三条 SKU 分开</b>。</p>
+
+<!-- 现状 -->
+<h2 style="border-top:none;padding-top:0;margin-top:18px">现状 <span class="tag alt">Before</span></h2>
+<div class="zoom">
+  <div class="zoom-hd">放大：三条 SKU 之间空无一物，只有行距把它们勉强分开</div>
+  <div class="zoom-body zscale">
+    <div class="stack s-cur">
+      <div class="line"><span class="nm">《蛋仔派对》市集拾趣系列 毛绒公仔挂件盲盒</span><span class="q">10000</span></div>
+      <div class="line"><span class="nm">鲨鱼</span><span class="q">10000</span></div>
+      <div class="line"><span class="nm">《蛋仔派对》团子木鱼毛绒挂件盲盒-黄蛋 陈列样</span><span class="q">10000</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- A -->
+<h2>方案 A · SKU 之间加细线 <span class="tag rec">推荐</span></h2>
+<p class="sub">每条 SKU 底部一条 1px <code>#e4e7ed</code>（<b>与全表行线同色</b>，所以看起来是一套网格），最后一条不画。
+  行距从 6px 收到 6px（靠线分组，不再靠间距）。改动最小、与刚选定的行线风格一致。</p>
+<div class="zoom">
+  <div class="zoom-hd">放大</div>
+  <div class="zoom-body zscale">
+    <div class="stack s-a">
+      <div class="line"><span class="nm">《蛋仔派对》市集拾趣系列 毛绒公仔挂件盲盒</span><span class="q">10000</span></div>
+      <div class="line"><span class="nm">鲨鱼</span><span class="q">10000</span></div>
+      <div class="line"><span class="nm">《蛋仔派对》团子木鱼毛绒挂件盲盒-黄蛋 陈列样</span><span class="q">10000</span></div>
+    </div>
+  </div>
+</div>
+<div class="card">
+  <table class="dt">
+    <colgroup><col class="c-time"><col class="c-no"><col class="c-cust"><col class="c-fac"><col class="c-sku"><col class="c-prod"><col class="c-qty"><col class="c-act"></colgroup>
+    <thead><tr><th>时间</th><th>编号</th><th>客户</th><th>工厂</th><th>SKU 数量</th><th>产品</th><th>数量</th><th>操作</th></tr></thead>
+    <tbody>
+      <tr><td class="dim no">2026-09-30 00:00</td><td><span class="badge order">订单</span> <span class="dim no">PO-20260930-0011</span></td><td>MINISO国际</td><td class="dim">湖北</td><td><span class="badge sku one">1</span></td><td style="text-align:left">鲨鱼</td><td class="strong">10000</td><td style="text-align:left"><button class="act">👁</button> <button class="act del">🗑</button></td></tr>
+      <tr><td class="dim no">2026-09-30 00:00</td><td><span class="badge order">订单</span> <span class="dim no">PO-20260930-0013</span></td><td>MINISO国际</td><td class="dim">东莞, 湖北</td><td><span class="badge sku">3</span></td>
+        <td><div class="stack s-a">
+          <div class="line"><span class="nm">《蛋仔派对》市集拾趣系列 毛绒公仔挂件盲盒</span><span class="q">10000</span></div>
+          <div class="line"><span class="nm">鲨鱼</span><span class="q">10000</span></div>
+          <div class="line"><span class="nm">《蛋仔派对》团子木鱼毛绒挂件盲盒-黄蛋 陈列样</span><span class="q">10000</span></div>
+        </div></td>
+        <td class="strong">30000</td><td style="text-align:left"><button class="act">👁</button> <button class="act del">🗑</button></td></tr>
+      <tr><td class="dim no">2026-09-29 07:38</td><td><span class="badge order">订单</span> <span class="dim no">PO-20260929-0014</span></td><td>网易</td><td class="dim">东莞</td><td><span class="badge sku one">1</span></td><td style="text-align:left">《蛋仔派对》市集拾趣系列 毛绒公仔挂件盲盒</td><td class="strong">30000</td><td style="text-align:left"><button class="act">👁</button> <button class="act del">🗑</button></td></tr>
+      <tr><td class="dim no">2026-09-28 17:28</td><td><span class="badge order" style="background:var(--ok-tint);color:#1d7a3a">备货</span> <span class="dim no">BH-20260929-0001</span></td><td>MINISO国际</td><td class="dim">湖北</td><td><span class="badge sku one">1</span></td><td style="text-align:left">鲨鱼</td><td class="strong">10000</td><td class="dim" style="text-align:left">—</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- B -->
+<h2>方案 B · 细线 + 左侧竖向导引线 <span class="tag alt">备选</span></h2>
+<p class="sub">横线之外，左侧再加一条 2px 竖线（浅一档 <code>#f0f2f5</code>）把整块"框"起来，向右缩进 10px。
+  多一层"这些都挂在同一张订单下"的从属暗示，视觉上最像一个整体的子块。</p>
+<div class="zoom">
+  <div class="zoom-hd">放大</div>
+  <div class="zoom-body zscale">
+    <div class="stack s-b">
+      <div class="line"><span class="nm">《蛋仔派对》市集拾趣系列 毛绒公仔挂件盲盒</span><span class="q">10000</span></div>
+      <div class="line"><span class="nm">鲨鱼</span><span class="q">10000</span></div>
+      <div class="line"><span class="nm">《蛋仔派对》团子木鱼毛绒挂件盲盒-黄蛋 陈列样</span><span class="q">10000</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- C -->
+<h2>方案 C · 细线 + 隔行淡底 <span class="tag alt">备选</span></h2>
+<p class="sub">横线之外，偶数条 SKU 加极淡底 <code>#fafbfd</code>。分块感最强，
+  但等于在行线之上又叠一套斑马纹——这也是全站斑马纹从来失效的那个手段，容易和主表行线打架。</p>
+<div class="zoom">
+  <div class="zoom-hd">放大</div>
+  <div class="zoom-body zscale">
+    <div class="stack s-c">
+      <div class="line"><span class="nm">《蛋仔派对》市集拾趣系列 毛绒公仔挂件盲盒</span><span class="q">10000</span></div>
+      <div class="line"><span class="nm">鲨鱼</span><span class="q">10000</span></div>
+      <div class="line"><span class="nm">《蛋仔派对》团子木鱼毛绒挂件盲盒-黄蛋 陈列样</span><span class="q">10000</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- D -->
+<h2>方案 D · 细线 + 序号 <span class="tag alt">备选</span></h2>
+<p class="sub">每条 SKU 前面加 <code>1 / 2 / 3</code> 序号（浅灰、等宽数字）。好处是<b>对上"SKU 数量 3"那个徽章</b>——
+  一眼能数出"3 条都在"，也能在电话里跟人对"第 2 个 SKU"。代价是多一列信息。</p>
+<div class="zoom">
+  <div class="zoom-hd">放大</div>
+  <div class="zoom-body zscale">
+    <div class="stack s-d">
+      <div class="line"><span class="ln"><span class="idx">1</span><span class="nm">《蛋仔派对》市集拾趣系列 毛绒公仔挂件盲盒</span></span><span class="q">10000</span></div>
+      <div class="line"><span class="ln"><span class="idx">2</span><span class="nm">鲨鱼</span></span><span class="q">10000</span></div>
+      <div class="line"><span class="ln"><span class="idx">3</span><span class="nm">《蛋仔派对》团子木鱼毛绒挂件盲盒-黄蛋 陈列样</span></span><span class="q">10000</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= Part 2 ================= -->
+<h2>Part 2 · 名字与数量之间的空档 <span class="tag alt">选做</span></h2>
+<p class="sub">这是"太空白"的另一半来源：数量右对齐到列尾，短名字（"鲨鱼"）后面就空出一大片。
+  两种走法，跟 Part 1 的分隔方案叠加即可。</p>
+
+<h2 style="border-top:none;padding-top:0;margin-top:18px">走法 ① 保持数量右对齐到列尾 <span class="tag alt">现状</span></h2>
+<p class="sub">好处：三个 SKU 的数量<b>上下对齐成一条竖线</b>，能一眼比大小、也能跟右边「数量 30000」对账。空档是代价。</p>
+<div class="zoom">
+  <div class="zoom-hd">放大（配合 Part 1 方案 A 的细线）</div>
+  <div class="zoom-body zscale">
+    <div class="stack s-a">
+      <div class="line"><span class="nm">《蛋仔派对》市集拾趣系列 毛绒公仔挂件盲盒</span><span class="q">10000</span></div>
+      <div class="line"><span class="nm">鲨鱼</span><span class="q">10000</span></div>
+      <div class="line"><span class="nm">《蛋仔派对》团子木鱼毛绒挂件盲盒-黄蛋 陈列样</span><span class="q">10000</span></div>
+    </div>
+  </div>
+</div>
+
+<h2>走法 ② 数量紧贴名字 <span class="tag alt">备选</span></h2>
+<p class="sub">数量跟在名字后面（<code>名字 × 10000</code> 的形式），不再拉满整列。空档消失、行变紧凑，
+  但三个数量<b>不再对齐</b>，横向比大小要靠读数字。</p>
+<div class="zoom">
+  <div class="zoom-hd">放大</div>
+  <div class="zoom-body zscale">
+    <div class="stack s-a">
+      <div class="line" style="justify-content:flex-start"><span class="nm" style="flex:0 1 auto">《蛋仔派对》市集拾趣系列 毛绒公仔挂件盲盒</span><span class="q" style="margin-left:8px">× 10000</span></div>
+      <div class="line" style="justify-content:flex-start"><span class="nm" style="flex:0 1 auto">鲨鱼</span><span class="q" style="margin-left:8px">× 10000</span></div>
+      <div class="line" style="justify-content:flex-start"><span class="nm" style="flex:0 1 auto">《蛋仔派对》团子木鱼毛绒挂件盲盒-黄蛋 陈列样</span><span class="q" style="margin-left:8px">× 10000</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="foot">
+  <b>改动面（Part 1 各方案都只在 <code>OrderRecordTable.vue</code> 一处）：</b><br>
+  · 方案 A：<code>.co-sku-line</code> 加 <code>border-bottom: 1px solid var(--color-border)</code>，<code>:last-child</code> 去掉<br>
+  · 方案 B：A + <code>.co-sku-stack</code> 加 <code>padding-left + border-left</code><br>
+  · 方案 C：A + <code>.co-sku-line:nth-child(even){background:#fafbfd}</code><br>
+  · 方案 D：A + 每条前面加序号 <code>&lt;span class="co-sku-idx"&gt;</code>（模板要动一处）<br>
+  · Part 2 走法 ②：把 <code>.co-sku-line</code> 的 <code>justify-content</code> 从 <code>space-between</code> 改成
+  <code>flex-start</code>，数量前加 <code>×</code><br>
+  <b>不改的：</b>列结构、排序、分页、搜索、备货行、全表行线（已定 <code>#e4e7ed</code>）。<br>
+  <b>测试：</b>现有测试断的是"渲染 3 条 <code>.co-sku-line</code>、名字与数量逐条对上"，分隔线与缩进属于纯样式，
+  不需要新增断言；但 <b>Part 2 走法 ② 会改数量文案（多了 <code>×</code>）</b>，那条断言要同步改。<br>
+  <b>顺带提一句：</b><span class="qmark">?</span> 产品列宽 700px 是因为它 <code>width: auto</code> 吃掉了所有剩余宽度。
+  如果 SKU 名普遍较短，也可以给产品列设一个上限、把富余宽度让给其它列——这是第三件事，你没提，我先不动。
+</div>
+
+</body>
+</html>

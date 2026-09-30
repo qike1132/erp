@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>记录列表 行分隔线对比稿 · 2026-09-30</title>
+<style>
+  :root{
+    --bg:#f5f5f7; --card:#fff; --surface:#f4f6fc;
+    --t1:#1d1d1f; --t2:#48484d; --t3:#8e8e93;
+    --accent:#007aff; --accent-tint:#e8f1ff; --ok:#34c759; --ok-tint:#e6f9ec;
+    --warn:#ff9500; --warn-tint:#fff4e0; --danger:#ff3b30; --danger-tint:#ffeceb;
+    /* 项目现有 token */
+    --color-border:#e4e7ed; --color-border-light:#f0f2f5;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:26px 22px 60px;background:var(--bg);color:var(--t1);
+       font:13px/1.5 "Microsoft YaHei UI","Segoe UI",system-ui,sans-serif}
+  h1{font-size:19px;margin:0 0 6px}
+  .meta{color:var(--t2);font-size:12px;margin-bottom:18px}
+  .meta code{background:#e9e9ee;padding:1px 5px;border-radius:4px}
+  .note{background:var(--warn-tint);border-left:3px solid var(--warn);
+        padding:10px 14px;border-radius:6px;margin:0 0 20px;font-size:12.5px;color:#7a4a00}
+  h2{font-size:15px;margin:34px 0 4px;padding-top:10px;border-top:2px solid #e3e3e8}
+  h2 .tag{font-size:11px;font-weight:700;color:#fff;background:var(--accent);
+          padding:2px 7px;border-radius:999px;vertical-align:2px;margin-left:8px}
+  h2 .tag.alt{background:var(--t3)}
+  h2 .tag.rec{background:var(--ok)}
+  .sub{color:var(--t2);font-size:12px;margin:0 0 12px}
+  .sub b{color:var(--t1)}
+  .sub code{background:#e9e9ee;padding:1px 5px;border-radius:4px}
+  .card{background:var(--card);border:1px solid var(--color-border);border-radius:10px;overflow:hidden;margin-bottom:12px}
+  table.dt{border-collapse:collapse;width:100%;font-size:13px}
+  table.dt th{background:var(--surface);color:var(--t2);font-weight:700;font-size:12px;
+     padding:10px 12px;border-bottom:2px solid var(--color-border);white-space:nowrap;text-align:center}
+  table.dt td{padding:10px 12px;white-space:nowrap;text-align:center;color:var(--t1);background:#fff}
+  td.l{text-align:left}
+  table.dt td:last-child{text-align:left}
+  .no{font-family:Consolas,ui-monospace,monospace;font-size:12px}
+  .dim{color:var(--t3)}
+  .strong{font-weight:700}
+  .badge{display:inline-flex;align-items:center;padding:1px 7px;font-size:10px;font-weight:700;border-radius:4px}
+  .badge.order{background:var(--accent-tint);color:#0158b0}
+  .badge.stockin{background:var(--ok-tint);color:#1d7a3a}
+  .badge.sku{background:var(--ok-tint);color:#1d7a3a}
+  .badge.sku.one{background:#f1f3f7;color:var(--t3)}
+  .act{width:34px;height:28px;border:none;border-radius:8px;background:var(--accent-tint);
+       color:#0158b0;font-size:12px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
+  .act.del{background:var(--danger-tint);color:#c0201a}
+  .stack{display:flex;flex-direction:column;gap:3px;text-align:left}
+  .stack .line{display:flex;justify-content:space-between;gap:12px}
+  .stack .line .q{color:var(--t3);font-size:12px;font-variant-numeric:tabular-nums}
+  /* 各方案的行线 / 斑马纹 —— 用真实 token 值 */
+  .v-cur td{border-bottom:1px solid var(--color-border-light)}          /* #f0f2f5 */
+  .v-a   td{border-bottom:1px solid var(--color-border)}                 /* #e4e7ed */
+  .v-b   td{border-bottom:1px solid var(--color-border)}
+  .v-b   tbody tr:nth-child(even) td{background:#fafbfd}                 /* 修好的斑马纹 */
+  .v-c   td{border-bottom:1px solid #d7dbe3}                              /* 再深一档 */
+  .v-c   tbody tr:nth-child(even) td{background:#f7f9fc}
+  /* 放大条：把 3 行按 4 倍纵向放大，让 1px 的差别真的看得见 */
+  .zoom{margin:0 0 12px;border:1px solid var(--color-border);border-radius:10px;overflow:hidden;background:#fff}
+  .zoom-hd{background:var(--surface);padding:6px 12px;font-size:11.5px;font-weight:700;color:var(--t2)}
+  .zoom-body{padding:8px 14px}
+  .zrow{height:44px;display:flex;align-items:center;gap:14px;font-size:12px;color:var(--t2)}
+  .zrow span{font-variant-numeric:tabular-nums}
+  .z-cur .zrow{border-bottom:1px solid var(--color-border-light)}
+  .z-a   .zrow{border-bottom:1px solid var(--color-border)}
+  .z-b   .zrow{border-bottom:1px solid var(--color-border)}
+  .z-b   .zrow:nth-child(even){background:#fafbfd}
+  .z-c   .zrow{border-bottom:1px solid #d7dbe3}
+  .z-c   .zrow:nth-child(even){background:#f7f9fc}
+  .foot{color:var(--t2);font-size:12.5px;margin-top:26px;line-height:1.9}
+  .foot b{color:var(--t1)}
+  .foot code{background:#e9e9ee;padding:1px 5px;border-radius:4px}
+  .swatch{display:inline-flex;align-items:center;gap:6px;font-family:Consolas,monospace;font-size:11px;color:var(--t2)}
+  .sw{width:26px;height:10px;border-radius:2px;display:inline-block;border:1px solid #d8dce2}
+</style>
+</head>
+<body>
+
+<h1>记录列表 行分隔线 · 对比稿</h1>
+<div class="meta">
+  页面：<code>/customer-order</code> → 记录查询 &nbsp;·&nbsp; 2026-09-30 &nbsp;·&nbsp; 未改代码 &nbsp;·&nbsp;
+  数据用你截图里的真实 9 行
+</div>
+
+<div class="note">
+  <b>为什么"分割线不明显"——两个实证：</b><br>
+  ① 行线用的是 <code>border-border-light</code> = <span class="swatch"><span class="sw" style="background:#f0f2f5"></span>#f0f2f5</span>，
+  在白底上对比度实测 <b>1.122 : 1</b>（下表四个方案的值都是在渲染出的页面上量出来的，非估算）。<br>
+  ② 斑马纹用的是 <code>bg-surface-hover</code>，而 <code>--color-surface-hover</code> <b>这个 token 全仓没有定义</b> ——
+  类名不产出任何样式，<b>斑马纹从上线起就是死的</b>（影响全部 13 个用 UiDataTable 的视图）。<br>
+  所以整张表只剩表头下面那条 2px <span class="swatch"><span class="sw" style="background:#e4e7ed"></span>#e4e7ed</span> 可见，
+  行与行之间没有任何分界；多 SKU 行变高以后更明显。
+</div>
+
+<!-- ============ 现状 ============ -->
+<h2>现状 <span class="tag alt">Before</span></h2>
+<p class="sub">行线 #f0f2f5 + 斑马纹失效 → 行与行之间是断开的空白。下表就是当前真实效果。</p>
+<div class="zoom z-cur">
+  <div class="zoom-hd">纵向放大 4 倍（只想让 1px 的差别真的看得见）</div>
+  <div class="zoom-body">
+    <div class="zrow"><span>PO-20260930-0011</span><span>鲨鱼</span><span class="strong">10000</span></div>
+    <div class="zrow"><span>PO-20260930-0012</span><span>鲨鱼</span><span class="strong">5000</span></div>
+    <div class="zrow"><span>PO-20260930-0013</span><span>3 个 SKU</span><span class="strong">30000</span></div>
+  </div>
+</div>
+<div class="card">
+  <table class="dt v-cur">
+    <thead><tr><th>时间</th><th>编号</th><th>客户</th><th>工厂</th><th>SKU 数量</th><th>产品</th><th>数量</th><th>操作</th></tr></thead>
+    <tbody>
+      <tr><td class="dim no">2026-09-30 00:00</td><td><span class="badge order">订单</span> <span class="dim no">PO-20260930-0011</span></td><td>MINISO国际</td><td class="dim">湖北</td><td><span class="badge sku one">1</span></td><td class="l">鲨鱼</td><td class="strong">10000</td><td><button class="act">👁</button> <button class="act del">🗑</button></td></tr>
+      <tr><td class="dim no">2026-09-30 00:00</td><td><span class="badge order">订单</span> <span class="dim no">PO-20260930-0012</span></td><td>MINISO国内</td><td class="dim">湖北</td><td><span class="badge sku one">1</span></td><td class="l">鲨鱼</td><td class="strong">5000</td><td><button class="act">👁</button> <button class="act del">🗑</button></td></tr>
+      <tr><td class="dim no">2026-09-30 00:00</td><td><span class="badge order">订单</span> <span class="dim no">PO-20260930-0013</span></td><td>MINISO国际</td><td class="dim">东莞, 湖北</td><td><span class="badge sku">3</span></td><td class="l"><span class="stack"><span class="line"><span>《蛋仔派对》市集拾趣系列 毛绒公仔挂件盲盒</span><span class="q">10000</span></span><span class="line"><span>鲨鱼</span><span class="q">10000</span></span><span class="line"><span>《蛋仔派对》团子木鱼毛绒挂件盲盒-黄蛋 陈列样</span><span class="q">10000</span></span></span></td><td class="strong">30000</td><td><button class="act">👁</button> <button class="act del">🗑</button></td></tr>
+      <tr><td class="dim no">2026-09-29 07:38</td><td><span class="badge order">订单</span> <span class="dim no">PO-20260929-0014</span></td><td>网易</td><td class="dim">东莞</td><td><span class="badge sku one">1</span></td><td class="l">《蛋仔派对》市集拾趣系列 毛绒公仔挂件盲盒</td><td class="strong">30000</td><td><button class="act">👁</button> <button class="act del">🗑</button></td></tr>
+      <tr><td class="dim no">2026-09-28 17:28</td><td><span class="badge stockin">备货</span> <span class="dim no">BH-20260929-0001</span></td><td>MINISO国际</td><td class="dim">湖北</td><td><span class="badge sku one">1</span></td><td class="l">鲨鱼</td><td class="strong">10000</td><td class="dim">—</td></tr>
+      <tr><td class="dim no">2026-09-24 07:22</td><td><span class="badge order">订单</span> <span class="dim no">PO-20260924-0005</span></td><td>网易</td><td class="dim">东莞</td><td><span class="badge sku one">1</span></td><td class="l">咸鱼按摩捶</td><td class="strong">5000</td><td><button class="act">👁</button> <button class="act del">🗑</button></td></tr>
+      <tr><td class="dim no">2026-09-17 00:00</td><td><span class="badge order">订单</span> <span class="dim no">PO-20260929-0016</span></td><td>网易</td><td class="dim">东莞</td><td><span class="badge sku one">1</span></td><td class="l">《蛋仔派对》团子木鱼毛绒挂件盲盒</td><td class="strong">46200</td><td><button class="act">👁</button> <button class="act del">🗑</button></td></tr>
+      <tr><td class="dim no">2026-09-17 00:00</td><td><span class="badge order">订单</span> <span class="dim no">PO-20260929-0017</span></td><td>网易</td><td class="dim">东莞</td><td><span class="badge sku one">1</span></td><td class="l">《蛋仔派对》团子木鱼毛绒挂件盲盒-黄蛋 陈列样</td><td class="strong">3000</td><td><button class="act">👁</button> <button class="act del">🗑</button></td></tr>
+      <tr><td class="dim no">2026-08-08 00:00</td><td><span class="badge order">订单</span> <span class="dim no">PO-20260929-0015</span></td><td>网易</td><td class="dim">东莞</td><td><span class="badge sku one">1</span></td><td class="l">《蛋仔派对》团子木鱼毛绒挂件盲盒</td><td class="strong">30000</td><td><button class="act">👁</button> <button class="act del">🗑</button></td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ============ 方案 A ============ -->
+<h2>方案 A · 行线加深到 #e4e7ed <span class="tag rec">推荐</span></h2>
+<p class="sub">只把行线从 <code>#f0f2f5</code> 换成 <code>#e4e7ed</code> —— 也就是<b>和表头下边线、表格外框同一个颜色</b>。
+  全表所有网格线统一成一个色调，最规整、改动最小（PT 里一行），且不引入斑马纹这类第二套视觉。</p>
+<div class="zoom z-a">
+  <div class="zoom-hd">纵向放大 4 倍</div>
+  <div class="zoom-body">
+    <div class="zrow"><span>PO-20260930-0011</span><span>鲨鱼</span><span class="strong">10000</span></div>
+    <div class="zrow"><span>PO-20260930-0012</span><span>鲨鱼</span><span class="strong">5000</span></div>
+    <div class="zrow"><span>PO-20260930-0013</span><span>3 个 SKU</span><span class="strong">30000</span></div>
+  </div>
+</div>
+<div class="card">
+  <table class="dt v-a">
+    <thead><tr><th>时间</th><th>编号</th><th>客户</th><th>工厂</th><th>SKU 数量</th><th>产品</th><th>数量</th><th>操作</th></tr></thead>
+    <tbody>
+      <tr><td class="dim no">2026-09-30 00:00</td><td><span class="badge order">订单</span> <span class="dim no">PO-20260930-0011</span></td><td>MINISO国际</td><td class="dim">湖北</td><td><span class="badge sku one">1</span></td><td class="l">鲨鱼</td><td class="strong">10000</td><td><button class="act">👁</button> <button class="act del">🗑</button></td></tr>
+      <tr><td class="dim no">2026-09-30 00:00</td><td><span class="badge order">订单</span> <span class="dim no">PO-20260930-0012</span></td><td>MINISO国内</td><td class="dim">湖北</td><td><span class="badge sku one">1</span></td><td class="l">鲨鱼</td><td class="strong">5000</td><td><button class="act">👁</button> <button class="act del">🗑</button></td></tr>
+      <tr><td class="dim no">2026-09-30 00:00</td><td><span class="badge order">订单</span> <span class="dim no">PO-20260930-0013</span></td><td>MINISO国际</td><td class="dim">东莞, 湖北</td><td><span class="badge sku">3</span></td><td class="l"><span class="stack"><span class="line"><span>《蛋仔派对》市集拾趣系列 毛绒公仔挂件盲盒</span><span class="q">10000</span></span><span class="line"><span>鲨鱼</span><span class="q">10000</span></span><span class="line"><span>《蛋仔派对》团子木鱼毛绒挂件盲盒-黄蛋 陈列样</span><span class="q">10000</span></span></span></td><td class="strong">30000</td><td><button class="act">👁</button> <button class="act del">🗑</button></td></tr>
+      <tr><td class="dim no">2026-09-29 07:38</td><td><span class="badge order">订单</span> <span class="dim no">PO-20260929-0014</span></td><td>网易</td><td class="dim">东莞</td><td><span class="badge sku one">1</span></td><td class="l">《蛋仔派对》市集拾趣系列 毛绒公仔挂件盲盒</td><td class="strong">30000</td><td><button class="act">👁</button> <button class="act del">🗑</button></td></tr>
+      <tr><td class="dim no">2026-09-28 17:28</td><td><span class="badge stockin">备货</span> <span class="dim no">BH-20260929-0001</span></td><td>MINISO国际</td><td class="dim">湖北</td><td><span class="badge sku one">1</span></td><td class="l">鲨鱼</td><td class="strong">10000</td><td class="dim">—</td></tr>
+      <tr><td class="dim no">2026-09-24 07:22</td><td><span class="badge order">订单</span> <span class="dim no">PO-20260924-0005</span></td><td>网易</td><td class="dim">东莞</td><td><span class="badge sku one">1</span></td><td class="l">咸鱼按摩捶</td><td class="strong">5000</td><td><button class="act">👁</button> <button class="act del">🗑</button></td></tr>
+      <tr><td class="dim no">2026-09-17 00:00</td><td><span class="badge order">订单</span> <span class="dim no">PO-20260929-0016</span></td><td>网易</td><td class="dim">东莞</td><td><span class="badge sku one">1</span></td><td class="l">《蛋仔派对》团子木鱼毛绒挂件盲盒</td><td class="strong">46200</td><td><button class="act">👁</button> <button class="act del">🗑</button></td></tr>
+      <tr><td class="dim no">2026-09-17 00:00</td><td><span class="badge order">订单</span> <span class="dim no">PO-20260929-0017</span></td><td>网易</td><td class="dim">东莞</td><td><span class="badge sku one">1</span></td><td class="l">《蛋仔派对》团子木鱼毛绒挂件盲盒-黄蛋 陈列样</td><td class="strong">3000</td><td><button class="act">👁</button> <button class="act del">🗑</button></td></tr>
+      <tr><td class="dim no">2026-08-08 00:00</td><td><span class="badge order">订单</span> <span class="dim no">PO-20260929-0015</span></td><td>网易</td><td class="dim">东莞</td><td><span class="badge sku one">1</span></td><td class="l">《蛋仔派对》团子木鱼毛绒挂件盲盒</td><td class="strong">30000</td><td><button class="act">👁</button> <button class="act del">🗑</button></td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ============ 方案 B ============ -->
+<h2>方案 B · 行线加深 + 把死掉的斑马纹修好 <span class="tag alt">备选</span></h2>
+<p class="sub">在 A 的基础上，顺手定义缺失的 <code>--color-surface-hover</code>（这里是 <code>#fafbfd</code>），
+  让 <code>striped</code> 真正生效。横向扫读更省力，但斑马纹 + 行线是两套视觉手段，有人会觉得"格子感"太重。</p>
+<div class="zoom z-b">
+  <div class="zoom-hd">纵向放大 4 倍</div>
+  <div class="zoom-body">
+    <div class="zrow"><span>PO-20260930-0011</span><span>鲨鱼</span><span class="strong">10000</span></div>
+    <div class="zrow"><span>PO-20260930-0012</span><span>鲨鱼</span><span class="strong">5000</span></div>
+    <div class="zrow"><span>PO-20260930-0013</span><span>3 个 SKU</span><span class="strong">30000</span></div>
+  </div>
+</div>
+<div class="card">
+  <table class="dt v-b">
+    <thead><tr><th>时间</th><th>编号</th><th>客户</th><th>工厂</th><th>SKU 数量</th><th>产品</th><th>数量</th><th>操作</th></tr></thead>
+    <tbody>
+      <tr><td class="dim no">2026-09-30 00:00</td><td><span class="badge order">订单</span> <span class="dim no">PO-20260930-0011</span></td><td>MINISO国际</td><td class="dim">湖北</td><td><span class="badge sku one">1</span></td><td class="l">鲨鱼</td><td class="strong">10000</td><td><button class="act">👁</button> <button class="act del">🗑</button></td></tr>
+      <tr><td class="dim no">2026-09-30 00:00</td><td><span class="badge order">订单</span> <span class="dim no">PO-20260930-0012</span></td><td>MINISO国内</td><td class="dim">湖北</td><td><span class="badge sku one">1</span></td><td class="l">鲨鱼</td><td class="strong">5000</td><td><button class="act">👁</button> <button class="act del">🗑</button></td></tr>
+      <tr><td class="dim no">2026-09-30 00:00</td><td><span class="badge order">订单</span> <span class="dim no">PO-20260930-0013</span></td><td>MINISO国际</td><td class="dim">东莞, 湖北</td><td><span class="badge sku">3</span></td><td class="l"><span class="stack"><span class="line"><span>《蛋仔派对》市集拾趣系列 毛绒公仔挂件盲盒</span><span class="q">10000</span></span><span class="line"><span>鲨鱼</span><span class="q">10000</span></span><span class="line"><span>《蛋仔派对》团子木鱼毛绒挂件盲盒-黄蛋 陈列样</span><span class="q">10000</span></span></span></td><td class="strong">30000</td><td><button class="act">👁</button> <button class="act del">🗑</button></td></tr>
+      <tr><td class="dim no">2026-09-29 07:38</td><td><span class="badge order">订单</span> <span class="dim no">PO-20260929-0014</span></td><td>网易</td><td class="dim">东莞</td><td><span class="badge sku one">1</span></td><td class="l">《蛋仔派对》市集拾趣系列 毛绒公仔挂件盲盒</td><td class="strong">30000</td><td><button class="act">👁</button> <button class="act del">🗑</button></td></tr>
+      <tr><td class="dim no">2026-09-28 17:28</td><td><span class="badge stockin">备货</span> <span class="dim no">BH-20260929-0001</span></td><td>MINISO国际</td><td class="dim">湖北</td><td><span class="badge sku one">1</span></td><td class="l">鲨鱼</td><td class="strong">10000</td><td class="dim">—</td></tr>
+      <tr><td class="dim no">2026-09-24 07:22</td><td><span class="badge order">订单</span> <span class="dim no">PO-20260924-0005</span></td><td>网易</td><td class="dim">东莞</td><td><span class="badge sku one">1</span></td><td class="l">咸鱼按摩捶</td><td class="strong">5000</td><td><button class="act">👁</button> <button class="act del">🗑</button></td></tr>
+      <tr><td class="dim no">2026-09-17 00:00</td><td><span class="badge order">订单</span> <span class="dim no">PO-20260929-0016</span></td><td>网易</td><td class="dim">东莞</td><td><span class="badge sku one">1</span></td><td class="l">《蛋仔派对》团子木鱼毛绒挂件盲盒</td><td class="strong">46200</td><td><button class="act">👁</button> <button class="act del">🗑</button></td></tr>
+      <tr><td class="dim no">2026-09-17 00:00</td><td><span class="badge order">订单</span> <span class="dim no">PO-20260929-0017</span></td><td>网易</td><td class="dim">东莞</td><td><span class="badge sku one">1</span></td><td class="l">《蛋仔派对》团子木鱼毛绒挂件盲盒-黄蛋 陈列样</td><td class="strong">3000</td><td><button class="act">👁</button> <button class="act del">🗑</button></td></tr>
+      <tr><td class="dim no">2026-08-08 00:00</td><td><span class="badge order">订单</span> <span class="dim no">PO-20260929-0015</span></td><td>网易</td><td class="dim">东莞</td><td><span class="badge sku one">1</span></td><td class="l">《蛋仔派对》团子木鱼毛绒挂件盲盒</td><td class="strong">30000</td><td><button class="act">👁</button> <button class="act del">🗑</button></td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ============ 方案 C ============ -->
+<h2>方案 C · 行线再深一档 + 明显斑马纹 <span class="tag alt">备选</span></h2>
+<p class="sub">行线 <code>#d7dbe3</code>、斑马纹 <code>#f7f9fc</code>。分界最清楚，代价是表格"格子感"最重，
+  且与表头下边线/外框（<code>#e4e7ed</code>）不同色，需要同时改外框才不显突兀——改动面反而最大。</p>
+<div class="zoom z-c">
+  <div class="zoom-hd">纵向放大 4 倍</div>
+  <div class="zoom-body">
+    <div class="zrow"><span>PO-20260930-0011</span><span>鲨鱼</span><span class="strong">10000</span></div>
+    <div class="zrow"><span>PO-20260930-0012</span><span>鲨鱼</span><span class="strong">5000</span></div>
+    <div class="zrow"><span>PO-20260930-0013</span><span>3 个 SKU</span><span class="strong">30000</span></div>
+  </div>
+</div>
+
+<div class="foot">
+  <b>改动面（A / B 都一样，PT 里各一行）：</b><br>
+  <code>frontend-vite/src/styles/primevue-pt.ts</code> 的 <code>datatable.bodyRow</code>：
+  把 <code>border-border-light</code> 换成 <code>border-border</code>；
+  <b>B 另外</b>在 <code>app.css</code> 的 <code>@theme</code> 里补上缺失的 <code>--color-surface-hover</code>。<br>
+  <b>影响范围：全站 13 个用 UiDataTable 的视图</b>（不只是本页）—— 行线是共用 PT，改一处全站变。
+  这一点要先确认你能接受，否则就只能在本页写 scoped 覆盖，那样本页会和其它页长得不一样。<br>
+  <b>回归：</b>已有测试 <code>frontend-vite/src/test/primevueDataTableRow.test.ts</code> 断言了行上带
+  <code>border-b</code> 与 <code>border-border-light</code> —— 选 A/B 需同步更新该断言（属于有意的样式变更，不是回归）。<br>
+  <b>顺带发现（与本次无关，可另开任务）：</b><code>--color-surface-hover</code> 未定义使
+  <code>striped</code> 在全站失效，选 A 的话这个缺口仍在（只是不靠斑马纹区分行）。
+</div>
+
+</body>
+</html>

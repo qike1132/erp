@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>订单管理 · 记录列表合并 + 搜索栏重写 · 对比稿 · 2026-09-30</title>
+<style>
+  :root{
+    --bg:#f5f5f7; --card:#fff; --surface:#f2f2f7; --line:#d8dce2;
+    --t1:#1d1d1f; --t2:#48484d; --t3:#8e8e93;
+    --accent:#007aff; --accent-tint:#e8f1ff; --ok:#34c759; --ok-tint:#e6f9ec;
+    --warn:#ff9500; --warn-tint:#fff4e0; --danger:#ff3b30; --danger-tint:#ffeceb;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:26px 22px 60px;background:var(--bg);color:var(--t1);
+       font:13px/1.5 "Microsoft YaHei UI","Segoe UI",system-ui,sans-serif}
+  h1{font-size:19px;margin:0 0 6px}
+  .meta{color:var(--t2);font-size:12px;margin-bottom:18px}
+  .meta code{background:#e9e9ee;padding:1px 5px;border-radius:4px}
+  .note{background:var(--warn-tint);border-left:3px solid var(--warn);
+        padding:10px 14px;border-radius:6px;margin:0 0 20px;font-size:12.5px;color:#7a4a00}
+  h2{font-size:15px;margin:30px 0 4px;padding-top:10px;border-top:2px solid #e3e3e8}
+  h2 .tag{font-size:11px;font-weight:700;color:#fff;background:var(--accent);
+          padding:2px 7px;border-radius:999px;vertical-align:2px;margin-left:8px}
+  h2 .tag.alt{background:var(--t3)}
+  h2 .tag.rec{background:var(--ok)}
+  .sub{color:var(--t2);font-size:12px;margin:0 0 12px}
+  .sub b{color:var(--t1)}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-bottom:14px}
+  .card-hd{background:var(--surface);padding:8px 14px;font-size:12px;font-weight:700;color:var(--t2);
+           border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:12px}
+  .card-hd .pill{font-weight:400;color:var(--t3)}
+  table{border-collapse:collapse;width:100%;font-size:13px}
+  th{background:var(--surface);color:var(--t2);font-weight:700;font-size:12px;
+     padding:9px 10px;border-bottom:1px solid var(--line);border-right:1px solid var(--line);
+     white-space:nowrap;text-align:center}
+  td{padding:9px 10px;border-bottom:1px solid var(--line);border-right:1px solid var(--line);
+     white-space:nowrap;background:var(--card);text-align:center;color:var(--t1)}
+  .no{font-family:Consolas,ui-monospace,monospace;font-size:12px;letter-spacing:.2px}
+  .dim{color:var(--t3)}
+  .strong{font-weight:700}
+  .badge{display:inline-flex;align-items:center;padding:1px 7px;font-size:10px;font-weight:700;border-radius:4px}
+  .badge.order{background:var(--accent-tint);color:#0158b0}
+  .badge.stockin{background:var(--ok-tint);color:#1d7a3a}
+  .badge.qty{background:var(--surface);color:var(--t2)}
+  .badge.ded{background:var(--ok-tint);color:#1d7a3a}
+  .act{width:36px;height:30px;border:none;border-radius:8px;background:var(--accent-tint);
+       color:#0158b0;font-size:13px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
+  .act.del{background:var(--danger-tint);color:#c0201a}
+
+  /* 操作列：左对齐，让「查看」按钮在任何行数下都钉在同一横坐标（居中会让单按钮行左右跳） */
+  th:last-child, td:last-child{text-align:left}
+  th:last-child{color:var(--t2)}
+  td:last-child{padding-left:14px}
+  .acts{display:inline-flex;gap:6px}
+  td:last-child>.act+*{margin-left:6px}
+
+  /* 记录列表头部（现状） */
+  .hd-row{display:flex;align-items:center;justify-content:space-between;padding:11px 16px;border-bottom:1px solid var(--line);gap:14px}
+  .hd-title{font-size:14px;font-weight:700;display:flex;align-items:center;gap:8px}
+  .hd-title .ico{color:var(--accent)}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+  .seg>span{padding:4px 14px;font-size:12px;font-weight:600;background:#fff;color:var(--t2)}
+  .seg>span.on{background:var(--accent);color:#fff}
+  .btn{display:inline-flex;align-items:center;gap:5px;padding:6px 13px;border-radius:8px;font-size:12px;
+       font-weight:600;border:1px solid var(--line);background:#fff;color:var(--t2);cursor:pointer;white-space:nowrap}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .filter-panel{padding:13px 16px;border-bottom:1px solid var(--line);background:#fafbfc}
+  .filter-row{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end}
+  .field{min-width:150px;flex:1}
+  .field .lb{display:block;font-size:12px;font-weight:500;color:var(--t2);margin-bottom:4px}
+  .ctl{width:100%;height:32px;border:1px solid var(--line);border-radius:8px;background:#fff;
+       padding:0 10px;font-size:12.5px;color:var(--t3);display:flex;align-items:center;justify-content:space-between}
+  .ctl .ph{color:var(--t3)}
+  .kill{background:var(--danger-tint);box-shadow:inset 0 0 0 1px #f3b6b2;border-radius:8px;position:relative}
+  .kill-x{position:absolute;top:-7px;right:-7px;width:16px;height:16px;border-radius:50%;
+          background:var(--danger);color:#fff;font-size:11px;font-weight:700;line-height:16px;text-align:center}
+
+  /* 新搜索栏 */
+  .tool{padding:12px 16px;border-bottom:1px solid var(--line);background:#fff;
+        display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .search{position:relative;flex:1;min-width:220px;max-width:460px}
+  .search input{width:100%;height:36px;border:1px solid var(--line);border-radius:9px;background:#fff;
+                padding:0 34px 0 34px;font-size:13px;color:var(--t1);outline:none;
+                font-family:inherit}
+  .search input::placeholder{color:var(--t3)}
+  .search .mag{position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--t3);font-size:13px}
+  .search .clr{position:absolute;right:10px;top:50%;transform:translateY(-50%);color:var(--t3);
+               font-size:14px;cursor:pointer;background:var(--surface);border-radius:50%;
+               width:17px;height:17px;line-height:17px;text-align:center}
+  .search.focus input{border-color:var(--accent);box-shadow:0 0 0 3px rgba(0,122,255,.13)}
+  .kv{font-size:12px;color:var(--t3);white-space:nowrap}
+  .kv b{color:var(--t1)}
+  .foot{color:var(--t2);font-size:12.5px;margin-top:26px;line-height:1.85}
+  .foot b{color:var(--t1)}
+  .foot code{background:#e9e9ee;padding:1px 5px;border-radius:4px}
+  .ask{background:#fff;border:1px solid var(--line);border-left:3px solid var(--danger);
+       border-radius:8px;padding:12px 16px;margin-top:20px;font-size:12.5px;line-height:1.8}
+  .ask b{color:var(--danger)}
+  .ask ol{margin:8px 0 0;padding-left:22px}
+</style>
+</head>
+<body>
+
+<h1>订单管理 · 记录列表合并 + 搜索栏重写</h1>
+<div class="meta">
+  页面：<code>/customer-order</code> → <b>记录查询</b> 页签 &nbsp;·&nbsp; 2026-09-30 &nbsp;·&nbsp; 对比稿（未改代码）
+</div>
+
+<div class="note">
+  <b>这次要做的三件事</b>：① 订单 / 备货 两个页签的数据合并到一张表 &nbsp;→&nbsp;
+  ② 删掉现在的筛选栏（客户 · 状态 · 工厂 · 开始日期 · 结束日期 · 查询 · 重置）&nbsp;→&nbsp;
+  ③ 重写「搜索框 + 查询」按钮。<br>
+  后端 <code>GET /orders/records</code> 统一端点已就绪（订单+备货 UNION ALL，按 <code>record_type</code> 区分并已下发类型徽章所需字段），
+  前端 <code>useOrderList.ts</code> 也已切到该端点 —— 缺的只是组件层（下面「现状」部分）。
+</div>
+
+<!-- ============ 现状 ============ -->
+<h2>现状 <span class="tag alt">Before</span></h2>
+<p class="sub">两个页签二选一，筛选栏藏在一个「筛选」按钮后面，需要点两次才能查到东西。</p>
+
+<div class="card">
+  <div class="card-hd"><span>记录查询 · 页签：订单（切到「备货」则整表换一批数据）</span><span class="pill">当前实现</span></div>
+  <div class="hd-row">
+    <span class="hd-title"><span class="ico">▤</span> 记录列表
+      <span class="seg"><span class="on">订单</span><span>备货</span></span>
+    </span>
+    <span class="btn">⚙ 筛选</span>
+  </div>
+  <div class="filter-panel">
+    <div class="filter-row">
+      <div class="field"><span class="lb">👤 客户</span><span class="ctl"><span class="ph">全部</span><span>▾</span></span></div>
+      <div class="field"><span class="lb">ⓘ 状态</span><span class="ctl"><span class="ph">全部</span><span>▾</span></span></div>
+      <div class="field"><span class="lb">🏭 工厂</span><span class="ctl"><span class="ph">全部</span><span>▾</span></span></div>
+      <div class="field"><span class="lb">📅 开始日期</span><span class="ctl"><span class="ph">年 -月-日</span></span></div>
+      <div class="field"><span class="lb">📅 结束日期</span><span class="ctl"><span class="ph">年 -月-日</span></span></div>
+      <div class="field" style="flex:0 0 auto;min-width:auto;display:flex;gap:8px">
+        <span class="btn primary">🔍 查询</span><span class="btn">↺ 重置</span>
+      </div>
+    </div>
+  </div>
+  <table>
+    <thead><tr>
+      <th>订单时间</th><th>编号</th><th>客户</th><th>工厂</th><th>SKU 数量</th><th>产品</th><th>数量</th><th>抵扣备货</th><th>操作</th>
+    </tr></thead>
+    <tbody>
+      <tr><td class="dim no">2026-09-30 09:12</td><td><span class="badge order">订单</span> <span class="dim no">DD2026093001</span></td><td>深圳市宏远建材</td><td class="dim">东莞</td><td><span class="badge qty">3</span></td><td>铝合金窗框 80 系列</td><td class="strong">120</td><td><span class="badge ded">抵扣: 40</span></td><td><button class="act">👁</button> <button class="act del">🗑</button></td></tr>
+      <tr><td class="dim no">2026-09-30 08:47</td><td><span class="badge order">订单</span> <span class="dim no">DD2026092944</span></td><td>东莞市建兴五金</td><td class="dim">湖北</td><td><span class="badge qty">1</span></td><td>不锈钢合页 4 寸</td><td class="strong">300</td><td class="dim">—</td><td><button class="act">👁</button> <button class="act del">🗑</button></td></tr>
+      <tr><td class="dim no">2026-09-29 17:03</td><td><span class="badge order">订单</span> <span class="dim no">DD2026092931</span></td><td>广州远洋装饰</td><td class="dim">东莞</td><td><span class="badge qty">2</span></td><td>断桥铝门框 60 系列</td><td class="strong">86</td><td class="dim">—</td><td><button class="act">👁</button> <button class="act del">🗑</button></td></tr>
+    </tbody>
+  </table>
+</div>
+<p class="sub">↑ 这一屏<b>看不到任何备货记录</b>；要看备货必须点「备货」页签，此时「状态」「工厂」两个筛选框会消失，表格里「工厂」「SKU 数量」「操作」三列也一起消失 —— 同一批业务数据在不同页签下的形状不一致。</p>
+
+<!-- ============ 方案 A ============ -->
+<h2>方案 A · 搜索框 + 查询 <span class="tag rec">推荐</span></h2>
+<p class="sub">一个输入框搜 <b>单号 / 客户 / 产品名 / 条码</b>，回车或点「查询」触发；右侧实时显示命中条数。
+  最少的控件，最少的点击 —— 查东西从「点筛选 → 填 2~5 个框 → 点查询」变成「打字 → 回车」。</p>
+
+<div class="card">
+  <div class="card-hd"><span>记录列表 · 订单 + 备货 合并</span><span class="pill">共 128 条 · 第 1 / 7 页</span></div>
+  <div class="tool">
+    <span class="search"><span class="mag">🔍</span><input value="" placeholder="搜索 单号 / 客户 / 产品名 / 条码" readonly><span class="clr">✕</span></span>
+    <span class="btn primary">查询</span>
+    <span class="kv">共 <b>128</b> 条</span>
+  </div>
+  <table>
+    <thead><tr>
+      <th>时间</th><th>编号</th><th>客户</th><th>工厂</th><th>SKU 数量</th><th>产品</th><th>数量</th><th>抵扣</th><th>操作</th>
+    </tr></thead>
+    <tbody>
+      <tr><td class="dim no">2026-09-30 09:12</td><td><span class="badge order">订单</span> <span class="dim no">DD2026093001</span></td><td>深圳市宏远建材</td><td class="dim">东莞</td><td><span class="badge qty">3</span></td><td>铝合金窗框 80 系列<br><span class="dim no" style="font-size:11px">6901234567890</span></td><td class="strong">120</td><td><span class="badge ded">抵扣: 40</span></td><td><button class="act">👁</button> <button class="act del">🗑</button></td></tr>
+      <tr><td class="dim no">2026-09-30 09:05</td><td><span class="badge stockin">备货</span> <span class="dim no">BH2026093007</span></td><td>东莞市建兴五金</td><td class="dim">东莞</td><td><span class="badge qty">1</span></td><td>不锈钢合页 4 寸<br><span class="dim no" style="font-size:11px">6901234500031</span></td><td class="strong">500</td><td class="dim">—</td><td><button class="act">👁</button></td></tr>
+      <tr><td class="dim no">2026-09-30 08:47</td><td><span class="badge order">订单</span> <span class="dim no">DD2026092944</span></td><td>东莞市建兴五金</td><td class="dim">湖北</td><td><span class="badge qty">1</span></td><td>不锈钢合页 4 寸<br><span class="dim no" style="font-size:11px">6901234500031</span></td><td class="strong">300</td><td class="dim">—</td><td><button class="act">👁</button> <button class="act del">🗑</button></td></tr>
+      <tr><td class="dim no">2026-09-30 08:30</td><td><span class="badge stockin">备货</span> <span class="dim no">BH2026093006</span></td><td>广州远洋装饰</td><td class="dim">湖北</td><td><span class="badge qty">1</span></td><td>断桥铝门框 60 系列<br><span class="dim no" style="font-size:11px">6901234500116</span></td><td class="strong">200</td><td class="dim">—</td><td><button class="act">👁</button></td></tr>
+      <tr><td class="dim no">2026-09-29 17:03</td><td><span class="badge order">订单</span> <span class="dim no">DD2026092931</span></td><td>广州远洋装饰</td><td class="dim">东莞</td><td><span class="badge qty">2</span></td><td>断桥铝门框 60 系列<br><span class="dim no" style="font-size:11px">6901234500116</span></td><td class="strong">86</td><td class="dim">—</td><td><button class="act">👁</button> <button class="act del">🗑</button></td></tr>
+    </tbody>
+  </table>
+</div>
+<p class="sub">
+  订单行与备货行按 <b>时间倒序混排</b>（同一时刻订单在前）；<b>编号列的类型徽章</b>区分两类记录，
+  「操作」列备货行只有「查看」、订单行才有「删除」。列结构与订单页签保持一致，不做增减。
+</p>
+
+<div class="card">
+  <div class="card-hd"><span>操作列对齐修正（按你的要求）</span><span class="pill">方案 A</span></div>
+  <table>
+    <thead><tr>
+      <th style="width:52%">对齐前 ✗ —— 单元格居中，单按钮行往中间飘，眼睛图标每行都在跳</th>
+      <th>对齐后 ✓ —— 单元格左对齐，眼睛钉死在同一横坐标</th>
+    </tr></thead>
+    <tbody>
+      <tr>
+        <td style="padding:0;border-right:1px solid var(--line)">
+          <table><tbody>
+            <tr><td style="text-align:center;border-right:none"><button class="act">👁</button> <button class="act del">🗑</button></td></tr>
+            <tr><td style="text-align:center;border-right:none;border-bottom:none"><button class="act">👁</button></td></tr>
+            <tr><td style="text-align:center;border-right:none;border-bottom:none"><button class="act">👁</button> <button class="act del">🗑</button></td></tr>
+          </tbody></table>
+        </td>
+        <td style="padding:0">
+          <table><tbody>
+            <tr><td style="text-align:left;padding-left:14px;border-right:none"><button class="act">👁</button> <button class="act del">🗑</button></td></tr>
+            <tr><td style="text-align:left;padding-left:14px;border-right:none;border-bottom:none"><button class="act">👁</button></td></tr>
+            <tr><td style="text-align:left;padding-left:14px;border-right:none;border-bottom:none"><button class="act">👁</button> <button class="act del">🗑</button></td></tr>
+          </tbody></table>
+        </td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+<p class="sub">
+  <b>做法</b>：操作列 <code>text-align</code> 由 <code>center</code> 改为 <code>left</code>，列头同步左对齐
+  （现在真实代码里 <code>.co-action-group</code> 是 <code>justify-content:center</code>，所以单按钮的备货行会飘）。
+  没有采用的另一种做法是「备货行也放一个置灰不可点的删除按钮占位」—— 眼睛位置是稳了，但会让人以为能点，
+  反而制造歧义，所以不用。
+</p>
+
+<!-- ============ 方案 B ============ -->
+<h2>方案 B · 搜索框 + 类型下拉 + 查询 <span class="tag alt">备选</span></h2>
+<p class="sub">保留「只看订单 / 只看备货」的能力，但不再是会切换整表的页签，而是一个不影响布局的下拉。适合"合并是默认，
+  偶尔要单独看一类"的用法。代价：多一个控件、多一次下拉操作。</p>
+
+<div class="card">
+  <div class="card-hd"><span>记录列表</span><span class="pill">共 128 条 · 第 1 / 7 页</span></div>
+  <div class="tool">
+    <span class="search"><span class="mag">🔍</span><input value="" placeholder="搜索 单号 / 客户 / 产品名 / 条码" readonly><span class="clr">✕</span></span>
+    <span class="ctl" style="width:104px;height:36px"><span>全部</span><span>▾</span></span>
+    <span class="btn primary">查询</span>
+  </div>
+  <table>
+    <thead><tr>
+      <th>时间</th><th>编号</th><th>客户</th><th>工厂</th><th>SKU 数量</th><th>产品</th><th>数量</th><th>抵扣</th><th>操作</th>
+    </tr></thead>
+    <tbody>
+      <tr><td class="dim no">2026-09-30 09:12</td><td><span class="badge order">订单</span> <span class="dim no">DD2026093001</span></td><td>深圳市宏远建材</td><td class="dim">东莞</td><td><span class="badge qty">3</span></td><td>铝合金窗框 80 系列</td><td class="strong">120</td><td><span class="badge ded">抵扣: 40</span></td><td><button class="act">👁</button> <button class="act del">🗑</button></td></tr>
+      <tr><td class="dim no">2026-09-30 09:05</td><td><span class="badge stockin">备货</span> <span class="dim no">BH2026093007</span></td><td>东莞市建兴五金</td><td class="dim">东莞</td><td><span class="badge qty">1</span></td><td>不锈钢合页 4 寸</td><td class="strong">500</td><td class="dim">—</td><td><button class="act">👁</button></td></tr>
+      <tr><td class="dim no">2026-09-30 08:47</td><td><span class="badge order">订单</span> <span class="dim no">DD2026092944</span></td><td>东莞市建兴五金</td><td class="dim">湖北</td><td><span class="badge qty">1</span></td><td>不锈钢合页 4 寸</td><td class="strong">300</td><td class="dim">—</td><td><button class="act">👁</button> <button class="act del">🗑</button></td></tr>
+      <tr><td class="dim no">2026-09-30 08:30</td><td><span class="badge stockin">备货</span> <span class="dim no">BH2026093006</span></td><td>广州远洋装饰</td><td class="dim">湖北</td><td><span class="badge qty">1</span></td><td>断桥铝门框 60 系列</td><td class="strong">200</td><td class="dim">—</td><td><button class="act">👁</button></td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ============ 方案 C ============ -->
+<h2>方案 C · 搜索框 + 查询 + 重置 <span class="tag alt">备选</span></h2>
+<p class="sub">在 A 的基础上加回一个「重置」。清空搜索时点一下比手动删字快，
+  但搜索框右侧已有 <b>✕</b> 一键清空 —— 功能重叠。若你更习惯右边有个明确的按钮，选这个。</p>
+
+<div class="card">
+  <div class="card-hd"><span>记录列表</span><span class="pill">共 128 条 · 第 1 / 7 页</span></div>
+  <div class="tool">
+    <span class="search focus"><span class="mag">🔍</span><input value="宏远" readonly><span class="clr">✕</span></span>
+    <span class="btn primary">查询</span>
+    <span class="btn">↺ 重置</span>
+    <span class="kv">命中 <b>6</b> 条</span>
+  </div>
+  <table>
+    <thead><tr>
+      <th>时间</th><th>编号</th><th>客户</th><th>工厂</th><th>SKU 数量</th><th>产品</th><th>数量</th><th>抵扣</th><th>操作</th>
+    </tr></thead>
+    <tbody>
+      <tr><td class="dim no">2026-09-30 09:12</td><td><span class="badge order">订单</span> <span class="dim no">DD2026093001</span></td><td>深圳市<b>宏远</b>建材</td><td class="dim">东莞</td><td><span class="badge qty">3</span></td><td>铝合金窗框 80 系列</td><td class="strong">120</td><td><span class="badge ded">抵扣: 40</span></td><td><button class="act">👁</button> <button class="act del">🗑</button></td></tr>
+      <tr><td class="dim no">2026-09-28 14:20</td><td><span class="badge stockin">备货</span> <span class="dim no">BH2026092803</span></td><td>深圳市<b>宏远</b>建材</td><td class="dim">东莞</td><td><span class="badge qty">1</span></td><td>铝合金窗框 80 系列</td><td class="strong">60</td><td class="dim">—</td><td><button class="act">👁</button></td></tr>
+      <tr><td class="dim no">2026-09-27 10:41</td><td><span class="badge order">订单</span> <span class="dim no">DD2026092718</span></td><td>深圳市<b>宏远</b>建材</td><td class="dim">东莞</td><td><span class="badge qty">2</span></td><td>铝合金纱窗 90 系列</td><td class="strong">75</td><td class="dim">—</td><td><button class="act">👁</button> <button class="act del">🗑</button></td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="ask">
+  <b>需要你拍板的两点：</b>
+  <ol>
+    <li><b>「抵扣」列对备货行会变空。</b>现状对备货行显示的是 <code>i.deducted</code>（一个布尔值，被当成数量渲染成「已抵扣: 1」）。
+      新的统一端点对备货行固定下发 <code>deduct_quantity: 0</code>，所以合并后<b>每一行备货的「抵扣」格都是「—」</b>。
+      这是把「数字是错的」换成「没有数字」。要不要我顺手把备货行的抵扣量也算出来（备货量 − 已被订单抵扣量）？还是这一列直接去掉？</li>
+    <li><b>备货行没有「删除」按钮。</b>现状备货页签里根本不给删除入口，合并后我按「只有订单行可删」处理 —— 删除按钮出现在订单行、备货行只留「查看」。</li>
+  </ol>
+</div>
+
+<div class="foot">
+  <b>选好之后我会改的代码（4 个文件）：</b><br>
+  · <code>views/customer-order/components/OrderRecordFilter.vue</code> → 重写为搜索栏（删掉页签切换 + 6 个筛选控件）<br>
+  · <code>components/OrderRecordQuery.vue</code> → 摘掉 6 个 v-model 筛选透传<br>
+  · <code>components/OrderRecordTable.vue</code> → 列不再按 <code>recordType</code> 二态分支<br>
+  · <code>CustomerOrderView.vue</code> + <code>composables/useOrderList.ts</code> → 删除废弃的 <code>recordType / recordTypeOptions</code>，
+  新增 <code>keyword</code> 与 <code>fetchOrders()</code> 触发<br>
+  <b>后端 1 处小改：</b><code>services/order/unified.py</code> + <code>endpoints/order.py</code> 增加 <code>keyword</code> 参数
+  （OR 匹配 单号 / 客户 / 产品名 / 条码），约 20 行 <span class="dim">— 方案 A / C 需要，方案 B 也用它做同一个搜索框</span>。<br>
+  <b>不动的：</b>分页、每页条数、Loading / 错误态 / 重试、详情弹窗、删除逻辑、工厂权限隔离（后端仍按登录用户的工厂强制过滤）。
+</div>
+
+</body>
+</html>

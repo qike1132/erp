@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>多 SKU 行内展示 · 对比稿 · 2026-09-30</title>
+<style>
+  :root{
+    --bg:#f5f5f7; --card:#fff; --surface:#f2f2f7; --line:#d8dce2;
+    --t1:#1d1d1f; --t2:#48484d; --t3:#8e8e93;
+    --accent:#007aff; --accent-tint:#e8f1ff; --ok:#34c759; --ok-tint:#e6f9ec;
+    --warn:#ff9500; --warn-tint:#fff4e0; --danger:#ff3b30; --danger-tint:#ffeceb;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:26px 22px 60px;background:var(--bg);color:var(--t1);
+       font:13px/1.5 "Microsoft YaHei UI","Segoe UI",system-ui,sans-serif}
+  h1{font-size:19px;margin:0 0 6px}
+  .meta{color:var(--t2);font-size:12px;margin-bottom:18px}
+  .meta code{background:#e9e9ee;padding:1px 5px;border-radius:4px}
+  .note{background:var(--warn-tint);border-left:3px solid var(--warn);
+        padding:10px 14px;border-radius:6px;margin:0 0 20px;font-size:12.5px;color:#7a4a00}
+  .bug{background:#fff;border:1px solid var(--line);border-left:3px solid var(--danger);
+       border-radius:8px;padding:12px 16px;margin:0 0 22px;font-size:12.5px;line-height:1.8}
+  .bug b{color:var(--danger)}
+  .bug code{background:#f3f3f5;padding:1px 5px;border-radius:4px}
+  h2{font-size:15px;margin:30px 0 4px;padding-top:10px;border-top:2px solid #e3e3e8}
+  h2 .tag{font-size:11px;font-weight:700;color:#fff;background:var(--accent);
+          padding:2px 7px;border-radius:999px;vertical-align:2px;margin-left:8px}
+  h2 .tag.alt{background:var(--t3)}
+  h2 .tag.rec{background:var(--ok)}
+  .sub{color:var(--t2);font-size:12px;margin:0 0 12px}
+  .sub b{color:var(--t1)}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-bottom:14px}
+  .card-hd{background:var(--surface);padding:8px 14px;font-size:12px;font-weight:700;color:var(--t2);
+           border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:12px}
+  .card-hd .pill{font-weight:400;color:var(--t3)}
+  table{border-collapse:collapse;width:100%;font-size:13px}
+  th{background:var(--surface);color:var(--t2);font-weight:700;font-size:12px;
+     padding:9px 10px;border-bottom:1px solid var(--line);border-right:1px solid var(--line);
+     white-space:nowrap;text-align:center}
+  td{padding:9px 10px;border-bottom:1px solid var(--line);border-right:1px solid var(--line);
+     white-space:nowrap;background:var(--card);text-align:center;color:var(--t1)}
+  th:last-child,td:last-child{text-align:left}
+  td:last-child{padding-left:14px}
+  .no{font-family:Consolas,ui-monospace,monospace;font-size:12px;letter-spacing:.2px}
+  .dim{color:var(--t3)}
+  .strong{font-weight:700}
+  .badge{display:inline-flex;align-items:center;padding:1px 7px;font-size:10px;font-weight:700;border-radius:4px}
+  .badge.order{background:var(--accent-tint);color:#0158b0}
+  .badge.stockin{background:var(--ok-tint);color:#1d7a3a}
+  .badge.qty{background:var(--surface);color:var(--t2)}
+  .badge.sku{background:var(--ok-tint);color:#1d7a3a}
+  .badge.sku.one{background:var(--surface);color:var(--t3)}
+  .act{width:36px;height:30px;border:none;border-radius:8px;background:var(--accent-tint);
+       color:#0158b0;font-size:13px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
+  .act.del{background:var(--danger-tint);color:#c0201a}
+  /* 展开列 */
+  .exp{width:36px;padding:0 !important;text-align:center}
+  .caret{border:none;background:transparent;cursor:pointer;color:var(--t2);font-size:12px;
+         width:24px;height:24px;border-radius:5px;line-height:1}
+  .caret:hover{background:var(--surface)}
+  .caret.open{color:var(--accent)}
+  .caret.leaf{visibility:hidden}
+  /* 展开子行 */
+  tr.sub td{background:#fbfbfd;border-bottom:1px dashed #e6e6ea;font-size:12.5px;color:var(--t2)}
+  tr.sub td.tree{color:var(--accent);font-family:Consolas,monospace;font-size:11px}
+  tr.sub .sku-name{color:var(--t1);text-align:left;font-weight:500}
+  .sub-qty{font-weight:600;color:var(--t1)}
+  .subsum td{background:#f6f8fb;font-size:12px;color:var(--t2);font-weight:600}
+  .stack{display:block;text-align:left;line-height:1.65}
+  .stack .line{display:flex;justify-content:space-between;gap:10px}
+  .stack .line .q{color:var(--t3);font-variant-numeric:tabular-nums}
+  .more{color:var(--accent);font-size:11px}
+  .foot{color:var(--t2);font-size:12.5px;margin-top:26px;line-height:1.85}
+  .foot b{color:var(--t1)}
+  .foot code{background:#e9e9ee;padding:1px 5px;border-radius:4px}
+  td.l{text-align:left}
+</style>
+</head>
+<body>
+
+<h1>多 SKU 怎么显示出来 · 对比稿</h1>
+<div class="meta">
+  页面：<code>/customer-order</code> → 记录查询（订单+备货合并列表） &nbsp;·&nbsp; 2026-09-30 &nbsp;·&nbsp; 未改代码<br>
+  样例用生产库真实数据：<b>PO-20260930-0013 · MINISO国际 · 3 个 SKU · 合计 30000</b>（每 SKU 各 10000）
+</div>
+
+<div class="note">
+  <b>问题</b>：一行只显示<b>第一个 SKU 的产品名</b>+订单<b>总数量</b>。PO-20260930-0013 的另外两个 SKU（「鲨鱼」「《蛋仔派对》团子木鱼毛绒挂件盲盒-黄蛋 陈列样」）
+  在列表里完全看不到，只能靠 SKU 数量那个绿徽章「3」知道还有别的。现在唯一能看到全部 SKU 的入口是点眼睛 → 详情弹窗里的「订单明细」表。
+</div>
+
+<div class="bug">
+  <b>另：合并后「备货行」的查看按钮是坏的（我这次改动引入，必须先定）</b><br>
+  旧的备货页签里表格<b>根本没有「操作」列</b>（<code>actions</code> 只在订单模式 push），所以备货行点不到详情。合并后我给每行都加了「查看」，
+  但 <code>openDetail()</code> 不区分记录类型，一律调 <code>GET /orders/{id}</code>。备货行的 <code>id</code> 是 <code>StockIn.id</code>，
+  与订单 id 是两套独立序列：生产库里那笔备货 id=<code>39268</code>，而订单 id 范围是 <code>68819~68915</code>，
+  查 <code>id=39268</code> 的订单 → <b>0 行 → 必然 404 → 弹「获取订单详情失败」</b>，且<b>后端不存在备货详情端点</b>（只有 <code>/stock/in/list</code>）。
+  <br>处置二选一：<b>(a) 备货行先撤掉「查看」按钮</b>（回到旧的"备货行无操作列"行为，止血，最小改动）；
+  <b>(b) 给备货做详情弹窗</b>（要新增 <code>GET /stock/in/{id}</code> 端点 + 前端弹窗，是独立一块活）。
+</div>
+
+<!-- ============ 现状 ============ -->
+<h2>现状 <span class="tag alt">Before</span></h2>
+<p class="sub">产品列只有第一个 SKU 的名字，数量列是三个 SKU 的合计。第二、三个 SKU 不可见。</p>
+<div class="card">
+  <div class="card-hd"><span>记录列表</span><span class="pill">共 8 条 · 第 1 / 1 页</span></div>
+  <table>
+    <thead><tr>
+      <th>时间</th><th>编号</th><th>客户</th><th>工厂</th><th>SKU 数量</th><th>产品</th><th>数量</th><th>操作</th>
+    </tr></thead>
+    <tbody>
+      <tr>
+        <td class="dim no">2026-09-30 00:00</td>
+        <td><span class="badge order">订单</span> <span class="dim no">PO-20260930-0013</span></td>
+        <td>MINISO国际</td><td class="dim">东莞, 湖北</td>
+        <td><span class="badge sku">3</span></td>
+        <td>《蛋仔派对》市集拾趣系列 毛绒公仔挂件盲盒</td>
+        <td class="strong">30000</td>
+        <td><button class="act">👁</button> <button class="act del">🗑</button></td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+<p class="sub">↑ 「3」这个徽章只告诉你有几个 SKU，<b>不告诉你另外两个是什么、各多少</b>。</p>
+
+<!-- ============ 方案 A ============ -->
+<h2>方案 A · 行内展开 <span class="tag rec">推荐</span></h2>
+<p class="sub">最左加一个 36px 的展开列：订单行 SKU &gt; 1 时出现 <b>▸</b>，点一下在其下方插入该订单的 SKU 子表（产品名 / 条码 / 数量）。
+  可同时展开多行，不离开列表就能核对全部 SKU。备货行恒为 1 个 SKU，<b>不显示三角</b>（按规整对齐留空位）。</p>
+
+<div class="card">
+  <div class="card-hd"><span>折叠态 —— 三角表示"这行里还藏着 SKU"</span><span class="pill">默认</span></div>
+  <table>
+    <thead><tr>
+      <th class="exp"></th><th>时间</th><th>编号</th><th>客户</th><th>工厂</th><th>SKU 数量</th><th>产品</th><th>数量</th><th>操作</th>
+    </tr></thead>
+    <tbody>
+      <tr>
+        <td class="exp"><button class="caret">▸</button></td>
+        <td class="dim no">2026-09-30 00:00</td>
+        <td><span class="badge order">订单</span> <span class="dim no">PO-20260930-0013</span></td>
+        <td>MINISO国际</td><td class="dim">东莞, 湖北</td>
+        <td><span class="badge sku">3</span></td>
+        <td>《蛋仔派对》市集拾趣系列 毛绒公仔挂件盲盒 <span class="more">等 3 个 SKU</span></td>
+        <td class="strong">30000</td>
+        <td><button class="act">👁</button> <button class="act del">🗑</button></td>
+      </tr>
+      <tr>
+        <td class="exp"><button class="caret leaf">▸</button></td>
+        <td class="dim no">2026-09-29 20:14</td>
+        <td><span class="badge stockin">备货</span> <span class="dim no">BH-20260929-0001</span></td>
+        <td>MINISO国际</td><td class="dim">东莞</td>
+        <td><span class="badge sku one">1</span></td>
+        <td>《蛋仔派对》市集拾趣系列 毛绒公仔挂件盲盒</td>
+        <td class="strong">20000</td>
+        <td class="dim">—</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <div class="card-hd"><span>展开态 —— 点开就是这笔订单的全部 SKU，数量与总数量对得上</span><span class="pill">点击 ▾ 后</span></div>
+  <table>
+    <thead><tr>
+      <th class="exp"></th><th>时间</th><th>编号</th><th>客户</th><th>工厂</th><th>SKU 数量</th><th>产品</th><th>数量</th><th>操作</th>
+    </tr></thead>
+    <tbody>
+      <tr>
+        <td class="exp"><button class="caret open">▾</button></td>
+        <td class="dim no">2026-09-30 00:00</td>
+        <td><span class="badge order">订单</span> <span class="dim no">PO-20260930-0013</span></td>
+        <td>MINISO国际</td><td class="dim">东莞, 湖北</td>
+        <td><span class="badge sku">3</span></td>
+        <td>《蛋仔派对》市集拾趣系列 毛绒公仔挂件盲盒</td>
+        <td class="strong">30000</td>
+        <td><button class="act">👁</button> <button class="act del">🗑</button></td>
+      </tr>
+      <tr class="sub">
+        <td class="exp tree">├</td>
+        <td colspan="5" class="l dim">SKU 1 / 3</td>
+        <td class="sku-name">《蛋仔派对》市集拾趣系列 毛绒公仔挂件盲盒</td>
+        <td class="sub-qty">10000</td>
+        <td class="dim">—</td>
+      </tr>
+      <tr class="sub">
+        <td class="exp tree">├</td>
+        <td colspan="5" class="l dim">SKU 2 / 3</td>
+        <td class="sku-name">鲨鱼</td>
+        <td class="sub-qty">10000</td>
+        <td class="dim">—</td>
+      </tr>
+      <tr class="sub">
+        <td class="exp tree">└</td>
+        <td colspan="5" class="l dim">SKU 3 / 3</td>
+        <td class="sku-name">《蛋仔派对》团子木鱼毛绒挂件盲盒-黄蛋 陈列样</td>
+        <td class="sub-qty">10000</td>
+        <td class="dim">—</td>
+      </tr>
+      <tr class="subsum">
+        <td class="exp"></td>
+        <td colspan="6" class="l">3 个 SKU 合计</td>
+        <td>30000</td>
+        <td></td>
+      </tr>
+      <tr>
+        <td class="exp"><button class="caret leaf">▸</button></td>
+        <td class="dim no">2026-09-29 20:14</td>
+        <td><span class="badge stockin">备货</span> <span class="dim no">BH-20260929-0001</span></td>
+        <td>MINISO国际</td><td class="dim">东莞</td>
+        <td><span class="badge sku one">1</span></td>
+        <td>《蛋仔派对》市集拾趣系列 毛绒公仔挂件盲盒</td>
+        <td class="strong">20000</td>
+        <td class="dim">—</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+<p class="sub">
+  <b>子行只读</b>（不在这里改数量），要改还是走眼睛 → 详情弹窗，避免出现"表格里能改、弹窗里也能改"两套编辑入口。
+  子行的<b>数量右对齐挂在与总数量同一列</b>，一眼能看出 10000×3=30000；最后给一行合计，多 SKU 时用来对账。
+</p>
+
+<!-- ============ 方案 B ============ -->
+<h2>方案 B · 产品列堆叠显示全部 SKU <span class="tag alt">备选</span></h2>
+<p class="sub">不加交互，把 SKU 名直接堆在产品格里，名字后面跟各自数量。缺点很明显：<b>SKU 多的行会把整行撑得很高</b>，
+  3 个 SKU 已经是 3 行文字，10 个 SKU 的行会占掉大半屏，而且与"数量"列的总数分离、容易读错。</p>
+
+<div class="card">
+  <div class="card-hd"><span>产品列堆叠</span><span class="pill">无交互</span></div>
+  <table>
+    <thead><tr>
+      <th>时间</th><th>编号</th><th>客户</th><th>工厂</th><th>SKU 数量</th><th>产品</th><th>数量</th><th>操作</th>
+    </tr></thead>
+    <tbody>
+      <tr>
+        <td class="dim no">2026-09-30 00:00</td>
+        <td><span class="badge order">订单</span> <span class="dim no">PO-20260930-0013</span></td>
+        <td>MINISO国际</td><td class="dim">东莞, 湖北</td>
+        <td><span class="badge sku">3</span></td>
+        <td class="l">
+          <span class="stack">
+            <span class="line"><span>《蛋仔派对》市集拾趣系列 毛绒公仔挂件盲盒</span><span class="q">10000</span></span>
+            <span class="line"><span>鲨鱼</span><span class="q">10000</span></span>
+            <span class="line"><span>《蛋仔派对》团子木鱼毛绒挂件盲盒-黄蛋 陈列样</span><span class="q">10000</span></span>
+          </span>
+        </td>
+        <td class="strong">30000</td>
+        <td><button class="act">👁</button> <button class="act del">🗑</button></td>
+      </tr>
+      <tr>
+        <td class="dim no">2026-09-29 20:14</td>
+        <td><span class="badge stockin">备货</span> <span class="dim no">BH-20260929-0001</span></td>
+        <td>MINISO国际</td><td class="dim">东莞</td>
+        <td><span class="badge sku one">1</span></td>
+        <td class="l">《蛋仔派对》市集拾趣系列 毛绒公仔挂件盲盒</td>
+        <td class="strong">20000</td>
+        <td class="dim">—</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ============ 方案 C ============ -->
+<h2>方案 C · 保持徽章，产品名/徽章可点开详情 <span class="tag alt">最小改动</span></h2>
+<p class="sub">列表结构完全不动，只把「SKU 数量」徽章和产品名变成可点（点开已有的详情弹窗 SKU 表格）。
+  改动最小，但<b>列表里依然看不到第 2、3 个 SKU 是什么</b>——只是比现在少一步（不用先找眼睛按钮）。如果你觉得
+  "列表就负责扫，SKU 明细本来就该点进去看"，这是最省的路。</p>
+
+<div class="card">
+  <div class="card-hd"><span>徽章 + 产品名可点</span><span class="pill">无新增结构</span></div>
+  <table>
+    <thead><tr>
+      <th>时间</th><th>编号</th><th>客户</th><th>工厂</th><th>SKU 数量</th><th>产品</th><th>数量</th><th>操作</th>
+    </tr></thead>
+    <tbody>
+      <tr>
+        <td class="dim no">2026-09-30 00:00</td>
+        <td><span class="badge order">订单</span> <span class="dim no">PO-20260930-0013</span></td>
+        <td>MINISO国际</td><td class="dim">东莞, 湖北</td>
+        <td><span class="badge sku" style="text-decoration:underline;cursor:pointer">3 ⓘ</span></td>
+        <td><span style="text-decoration:underline dotted;cursor:pointer">《蛋仔派对》市集拾趣系列 毛绒公仔挂件盲盒</span> <span class="more">等 3 个</span></td>
+        <td class="strong">30000</td>
+        <td><button class="act">👁</button> <button class="act del">🗑</button></td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="foot">
+  <b>待你定两件事：</b><br>
+  ① 多 SKU 用 <b>A</b>（行内展开，推荐）还是 <b>B</b> / <b>C</b>？<br>
+  ② 「备货行」的查看按钮：<b>(a)</b> 先撤掉（止血，回到旧的"备货行无操作列"）／<b>(b)</b> 另开任务做备货详情端点+弹窗？<br><br>
+  <b>选 A 的话改动面：</b><code>OrderRecordTable.vue</code> 加展开列与子行插槽 + <code>useOrderList</code> 加一个
+  <code>expandedIds</code>（纯前端状态，不发请求，SKU 明细就用行里已有的 <code>items</code>）；
+  全表列数 +1；<code>UiDataTable</code> 需要支持"某行下方插入自定义行"——若它不便扩展，
+  就在 <code>OrderRecordTable</code> 内自渲染，不动公共组件。<br>
+  <b>测试：</b>先写"3 个 SKU 的订单行出现展开三角、点开后渲染 3 条子行且数量与总数量一致"的失败测试再实现。
+</div>
+
+</body>
+</html>
