@@ -80,73 +80,66 @@
         </tr>
       </thead>
       <tbody>
-        <tr v-for="row in flatFactoryRows" :key="`${row.gi}-${row.si}-${row.fi}`">
-          <td v-if="row.isFirstFabricRow" :rowspan="row.groupFabricCount" class="font-bold">{{ row.group.customer_name }}</td>
-          <!-- 逐 SKU 分行：多 SKU 时每 SKU 一行 + 「合计」子行（合计取订单级真值）；
-               单 SKU 时仅一行，与改动前逐字一致。产品名称 / 订单数量两列同源，见 buildSkuDisplayLines。 -->
-          <td v-if="row.isFirstFabricRow" :rowspan="row.groupFabricCount">
-            <div
-              v-for="(line, li) in groupSkuLines[row.gi]"
-              :key="`n-${li}`"
-              :class="['sm-sku-line', { 'sm-sku-line--total': line.isTotal }]"
-            >{{ line.name }}</div>
-          </td>
-          <td v-if="row.isFirstFabricRow" :rowspan="row.groupFabricCount">
-            <div
-              v-for="(line, li) in groupSkuLines[row.gi]"
-              :key="`q-${li}`"
-              :class="['sm-sku-line', { 'sm-sku-line--total': line.isTotal }]"
-            >{{ formatQty(line.qty) }}</div>
-          </td>
-          <!-- 备品数量：口径 A（只用分组订单级率），逐 SKU 与「订单数量」同源分行；
-               **逐布料行（自定义）损耗率不影响本列** —— 那是材料损耗量级。 -->
-          <td v-if="row.isFirstFabricRow" :rowspan="row.groupFabricCount">
-            <div
-              v-for="(line, li) in groupSkuLines[row.gi]"
-              :key="`sp-${li}`"
-              :class="['sm-sku-line', { 'sm-sku-line--total': line.isTotal }]"
-            >{{ formatQty(line.spare) }}</div>
-          </td>
-          <td v-if="row.isFirstSupplier" :rowspan="row.supplierFabricCount">{{ row.supplier.supplier_name }}</td>
-          <td>{{ row.fabric.fabric_name }}</td>
-          <td>{{ row.fabric.specification || '' }}</td>
-          <td>
-            <template v-if="!editMode">
-              <input
-                type="number"
-                class="w-14 text-right py-1 px-1 text-[13px] border border-border rounded focus:outline-none focus-visible:outline-2 focus-visible:outline-primary-500 focus-visible:outline-offset-2 focus:border-primary-500"
-                :value="rateForFabric(row.gi, row.si, row.fi)"
-                min="0"
-                max="1000"
-                step="any"
-                @input="onFabricLossRateInput(row.gi, row.si, row.fi, $event)"
-              />
-              <span
-                v-if="isFabricRateMixed(row.gi, row.si, row.fi)"
-                class="text-[10px] text-text-muted whitespace-nowrap"
-              >不一致</span>
-            </template>
+        <template v-for="(item, ri) in flatRows" :key="`${item.gi}-${ri}`">
+          <tr>
+            <!-- 客户：该组第一行，rowspan = 该组总行数（两种模式同一算法） -->
+            <td v-if="isGroupFirstRow(item.gi, ri)" :rowspan="groupRowCounts[item.gi]" class="font-bold">
+              {{ item.group.customer_name }}
+            </td>
+
+            <!-- 产品名称 / 订单数量 / 备品数量：该 SKU 块首行，rowspan = 该块行数。
+                 cellLines 在 per-SKU 模式恒 1 行；回退模式为逐 SKU 名堆叠（与改动前逐字一致）。 -->
+            <td v-if="item.row.isFirstSkuRow" :rowspan="item.row.skuRowSpan">
+              <div v-for="(line, li) in item.row.cellLines" :key="`n-${li}`"
+                   :class="['sm-sku-line', { 'sm-sku-line--total': line.isTotal }]">{{ line.name }}</div>
+            </td>
+            <td v-if="item.row.isFirstSkuRow" :rowspan="item.row.skuRowSpan">
+              <div v-for="(line, li) in item.row.cellLines" :key="`q-${li}`"
+                   :class="['sm-sku-line', { 'sm-sku-line--total': line.isTotal }]">{{ formatQty(line.qty) }}</div>
+            </td>
+            <td v-if="item.row.isFirstSkuRow" :rowspan="item.row.skuRowSpan">
+              <div v-for="(line, li) in item.row.cellLines" :key="`sp-${li}`"
+                   :class="['sm-sku-line', { 'sm-sku-line--total': line.isTotal }]">{{ formatQty(line.spare) }}</div>
+            </td>
+
+            <!-- 该 SKU 无 BOM：占位行（保留块结构，不隐藏该 SKU） -->
+            <td v-if="item.row.noBom" colspan="6" class="text-text-muted">无 BOM 明细</td>
+
             <template v-else>
-              {{ formatQty(rateForFabric(row.gi, row.si, row.fi)) }}
+              <!-- 供应商：块内首行 -->
+              <td v-if="item.row.isFirstSupplierRow" :rowspan="item.row.supplierRowSpan">{{ item.row.supplierName }}</td>
+              <td>{{ item.row.materialName }}</td>
+              <td>{{ item.row.specification || '' }}</td>
+              <!-- 损耗率：有落库坐标才可编辑；无坐标 → 只读并说明原因 -->
+              <td>
+                <template v-if="rowCoord(item)">
+                  <input
+                    v-if="!editMode"
+                    type="number" class="w-14 text-right py-1 px-1 text-[13px] border border-border rounded"
+                    :value="rowRate(item)" min="0" max="1000" step="any"
+                    :title="sharedMaterialTitle(item)"
+                    @input="onRowRateInput(item, $event)"
+                  />
+                  <template v-else>{{ formatQty(rowRate(item)) }}</template>
+                </template>
+                <span v-else class="text-text-muted" title="该物料不在采购明细中（BOM 生成后新增），无法在此修改">—</span>
+              </td>
+              <!-- 数量：编辑态可改（同物料跨 SKU 联动，故给出提示）；否则取派生展示值 -->
+              <td>
+                <input
+                  v-if="rowCoord(item) && editMode"
+                  type="number" class="w-20 text-right py-1 px-1.5 text-[13px] inline-block border border-border rounded"
+                  :value="editRowQty(item)" min="0"
+                  :title="sharedMaterialTitle(item)"
+                  @change="onRowQtyChange(item, $event)"
+                  @focus="($event.target as HTMLInputElement).select()"
+                />
+                <template v-else>{{ displayRowQty(item) }}</template>
+              </td>
+              <td>{{ item.row.unit || '' }}</td>
             </template>
-          </td>
-          <td>
-            <template v-if="editMode">
-              <input
-                type="number"
-                class="w-20 text-right py-1 px-1.5 text-[13px] inline-block border border-border rounded focus:outline-none focus-visible:outline-2 focus-visible:outline-primary-500 focus-visible:outline-offset-2 focus:border-primary-500"
-                :value="editFabricQty(row.fabric, row.gi, row.si, row.fi)"
-                min="0"
-                @change="$emit('updateQty', row.gi, row.si, row.fi, ($event.target as HTMLInputElement).value)"
-                @focus="($event.target as HTMLInputElement).select()"
-              />
-            </template>
-            <template v-else>
-              {{ displayFabricQty(row.fabric, row.gi, row.si, row.fi) }}
-            </template>
-          </td>
-          <td>{{ row.fabric.unit || '' }}</td>
-        </tr>
+          </tr>
+        </template>
       </tbody>
     </table>
   </div>
@@ -188,40 +181,13 @@
  *   （实测 400-1000‰，即 40%-100%），**不影响备品** —— 两者差 1-2 个数量级，
  *   混用会虚高（2026-09-30 生产实证：单张单备品 150 → 4500）。
  */
-import { computed } from 'vue'
 import { fmtQty as formatQty } from '@/utils/formatQty'
-import { factoryQtyDisplayValue, buildSkuDisplayLines } from '../composables/useSummaryModal'
-import type { FactorySummaryData, FactoryGroup, SupplierGroup, FabricItem, SkuDisplayLine } from '../composables/useSummaryModal'
+import { useFactoryTableRows } from '../composables/useFactoryTableRows'
+import type { FactoryTabEmit, FactoryTabProps } from '../composables/useFactoryTableRows'
 
-const props = defineProps<{
-  factoryData: FactorySummaryData
-  editMode: boolean
-  lossRate: number
-  orderCount: number
-  /** 损耗率自动落库的可见反馈状态（缺省视为 idle；由 useSummaryModal 提供） */
-  lossRateSaveState?: 'idle' | 'saving' | 'saved' | 'error'
-  /** 各单损耗率不一致（缺省视为 false；由 useSummaryModal 提供）→ 输入框旁提示 */
-  lossRateMixed?: boolean
-  /** 每个布料行当前的损耗率，形状 [gi][si][fi]；缺省回退 lossRate */
-  fabricLossRates?: number[][][]
-  /** 每个布料行内各明细损耗率是否不一致，形状 [gi][si][fi] */
-  fabricLossRateMixed?: boolean[][][]
-  /** 每个分组的订单级损耗率（「备品数量」列的唯一口径），形状 [gi]；缺省回退 lossRate */
-  groupSpareRates?: number[]
-}>()
+const props = defineProps<FactoryTabProps>()
 
-const emit = defineEmits<{
-  close: []
-  toggleEditMode: [enable: boolean]
-  saveEdits: []
-  updateQty: [gi: number | string, si: number | string, fi: number | string, value: string]
-  /** 统一损耗率输入的归一化值（已夹取到 0..1000）。防抖由父组件负责。 */
-  lossRateInput: [rate: number]
-  /** 单个布料行损耗率输入的归一化值（已夹取到 0..1000）。防抖由父组件负责。 */
-  fabricLossRateInput: [gi: number, si: number, fi: number, rate: number]
-  exportFactory: []
-  printFactory: []
-}>()
+const emit = defineEmits<FactoryTabEmit>()
 
 /**
  * 只做归一化，不做防抖：防抖必须留在父组件（SummaryModal）的 setup 作用域。
@@ -235,86 +201,11 @@ function onLossRateInput(e: Event) {
   emit('lossRateInput', Math.min(val, 1000))
 }
 
-function onFabricLossRateInput(gi: number, si: number, fi: number, e: Event) {
-  const val = parseFloat((e.target as HTMLInputElement).value)
-  if (isNaN(val) || val < 0) {
-    emit('fabricLossRateInput', gi, si, fi, 0)
-    return
-  }
-  emit('fabricLossRateInput', gi, si, fi, Math.min(val, 1000))
-}
-
-/** 取第 gi/si/fi 个布料行当前损耗率；未提供时回退统一损耗率。 */
-function rateForFabric(gi: number, si: number, fi: number): number {
-  const v = props.fabricLossRates?.[gi]?.[si]?.[fi]
-  return typeof v === 'number' && Number.isFinite(v) ? v : props.lossRate
-}
-
-function isFabricRateMixed(gi: number, si: number, fi: number): boolean {
-  return props.fabricLossRateMixed?.[gi]?.[si]?.[fi] === true
-}
-
-/**
- * 非编辑态「数量」列展示值：原始数量按该行损耗率加放后向上取整为整数（不写回数据）。
- * 编辑态输入框使用 editFabricQty 加载精确加放值，避免「展示取整」污染落库真值；
- * 用户提交时由 useSummaryModal.updateFactoryQty 按该行损耗率反推原始真值后再落库。
- */
-function displayFabricQty(fabric: FabricItem, gi: number, si: number, fi: number): number {
-  return factoryQtyDisplayValue(parseFloat(String(fabric.quantity)) || 0, rateForFabric(gi, si, fi), false)
-}
-
-/** 编辑态「数量」输入框值：保留损耗加放后的精确派生值，供保存时无损反推。 */
-function editFabricQty(fabric: FabricItem, gi: number, si: number, fi: number): number {
-  return factoryQtyDisplayValue(parseFloat(String(fabric.quantity)) || 0, rateForFabric(gi, si, fi), true)
-}
-
-/**
- * 该分组的订单级率（「备品数量」列的唯一口径）：分组值优先，缺省回退顶部「统一损耗率」。
- * 注意：**不读 `fabricLossRates`** —— 逐布料行的材料损耗率不得影响备品（见文件头说明）。
- */
-function spareRateForGroup(gi: number): number {
-  const v = props.groupSpareRates?.[gi]
-  return typeof v === 'number' && Number.isFinite(v) ? v : props.lossRate
-}
-
-/**
- * 每个汇总分组的逐 SKU 展示行（按 gi 索引，供「产品名称 / 订单数量 / 备品数量」三列共用）。
- */
-const groupSkuLines = computed<SkuDisplayLine[][]>(() =>
-  (props.factoryData?.groups || []).map((g, gi) => buildSkuDisplayLines(g, spareRateForGroup(gi))),
-)
-
-// 预计算 flatFactoryRows，避免模板内每行调用 isFirstFabricRow/getGroupFabricCount
-const flatFactoryRows = computed(() => {
-  const rows: {
-    gi: number; si: number; fi: number
-    group: FactoryGroup
-    supplier: SupplierGroup
-    fabric: FabricItem
-    isFirstFabricRow: boolean
-    groupFabricCount: number
-    isFirstSupplier: boolean
-    supplierFabricCount: number
-  }[] = []
-  const groups = props.factoryData?.groups || []
-  groups.forEach((group, gi) => {
-    const suppliers = group.suppliers || []
-    const groupFabricCount = suppliers.reduce((s, sup) => s + (sup.fabrics?.length || 0), 0)
-    suppliers.forEach((supplier, si) => {
-      const fabrics = supplier.fabrics || []
-      fabrics.forEach((fabric, fi) => {
-        rows.push({
-          gi, si, fi, group, supplier, fabric,
-          isFirstFabricRow: fi === 0 && si === 0,
-          groupFabricCount,
-          isFirstSupplier: fi === 0,
-          supplierFabricCount: fabrics.length,
-        })
-      })
-    })
-  })
-  return rows
-})
+// 行模型与率/数量读写胶水（2026-09-30 抽到 useFactoryTableRows.ts，以守住单 .vue ≤ 400 行门禁）
+const {
+  flatRows, groupRowCounts, isGroupFirstRow, rowCoord, rowRate,
+  editRowQty, displayRowQty, sharedMaterialTitle, onRowRateInput, onRowQtyChange,
+} = useFactoryTableRows(props, emit)
 </script>
 
 <style scoped lang="scss">
