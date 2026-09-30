@@ -111,11 +111,11 @@ function nextDate() {
 
 async function loadDaily() {
   loading.value = true
-  try { summary.value = await dailyProductionApi.dailySummary(selectedDate.value) as ProductionSummary } finally { loading.value = false }
+  try { summary.value = await dailyProductionApi.dailySummary(selectedDate.value) as unknown as ProductionSummary } finally { loading.value = false }
 }
 async function loadMonthly() {
   loading.value = true
-  try { summary.value = await dailyProductionApi.monthlySummary({ year: monthlyYear.value, month: monthlyMonth.value }) as ProductionSummary } finally { loading.value = false }
+  try { summary.value = await dailyProductionApi.monthlySummary({ year: monthlyYear.value, month: monthlyMonth.value }) as unknown as ProductionSummary } finally { loading.value = false }
 }
 
 watch(viewTab, (v) => { if (v === 'daily') loadDaily(); else loadMonthly() })

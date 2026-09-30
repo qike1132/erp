@@ -393,6 +393,56 @@ export interface DailyProductionRecord {
   created_by?: string | null
 }
 
+export interface ProductionRecordStats {
+  total_quantity: number
+  total_value: number
+  total_sku: number
+}
+
+/** GET /daily-production/records 的响应体（`get<T>` 不拆 { data }，data 是顶层字段） */
+export interface ProductionRecordListResponse {
+  success: boolean
+  data: DailyProductionRecord[]
+  total: number
+  page: number
+  per_page: number
+  pages: number
+  stats: ProductionRecordStats | null
+}
+
+/** 明细抽屉的查询参数。year/month 与 start_date/end_date 二选一，区间优先。 */
+export interface RecordsQuery {
+  year?: number
+  month?: number
+  start_date?: string
+  end_date?: string
+  department?: string
+  created_by?: string
+  /** 产品名或 69 码关键词（Task 7 给后端加的筛选参数） */
+  keyword?: string
+  sort?: 'asc' | 'desc'
+  page?: number
+  per_page?: number
+  production_date?: string
+}
+
+export interface TrendDay {
+  date: string
+  filling: number
+  handcraft: number
+  packaging: number
+  total: number
+}
+
+/** GET /daily-production/trend 的响应体。departments 只含当前用户可见部门。 */
+export interface TrendResponse {
+  success: boolean
+  start_date: string
+  end_date: string
+  departments: string[]
+  days: TrendDay[]
+}
+
 export interface DepartmentSummary {
   department: string
   department_label: string
@@ -425,9 +475,6 @@ export interface MonthlySummary {
   monthly_departments: DepartmentSummary[]
   monthly_total_quantity: number
   monthly_total_value: number
-  /** 历史兼容字段：后端实际不返回（月报面板模板仍按可选字段访问，undefined 时由 ?? 0 兜底） */
-  overall_quantity?: number
-  overall_value?: number
 }
 
 export interface MaterialRegistration {

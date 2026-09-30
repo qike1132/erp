@@ -2,8 +2,8 @@
   <div class="pr-main">
     <section class="pr-kpi-section">
       <div v-if="monthlySummary" class="pr-kpi-row">
-        <KpiCard icon="cubes" color-class="pr-kpi-blue" label="月总产量" :value="monthlySummary.overall_quantity ?? 0" unit="件" />
-        <KpiCard icon="yen-sign" color-class="pr-kpi-green" label="月总产值" :value="formatCurrency(monthlySummary.overall_value ?? 0)" />
+        <KpiCard icon="cubes" color-class="pr-kpi-blue" label="月总产量" :value="monthlySummary.monthly_total_quantity ?? 0" unit="件" />
+        <KpiCard icon="yen-sign" color-class="pr-kpi-green" label="月总产值" :value="formatCurrency(monthlySummary.monthly_total_value ?? 0)" />
         <KpiCard icon="calendar-check" color-class="pr-kpi-amber" label="生产天数" :value="monthlySummary.daily_data?.filter((d) => d.total.quantity > 0).length || 0" unit="天" />
       </div>
     </section>
