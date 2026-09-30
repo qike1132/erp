@@ -1,4 +1,4 @@
-﻿"""审核 pipeline 自定义异常。
+"""审核 pipeline 自定义异常。
 
 所有异常在此统一定义,避免 ``orchestrator`` ↔ ``config_loader`` /
 ``evidence_archiver`` 之间的循环导入。``orchestrator`` 模块会重新导出本模块

@@ -5,6 +5,8 @@
     "bare_except": 9,
     "function_length": 52,
     "vue_component_length": 7,
-    "service_commit": 9
+    "service_commit": 9,
+    "bom": 0,
+    "alembic_heads": 0
   }
 }

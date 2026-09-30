@@ -95,6 +95,19 @@ GATES: tuple[Gate, ...] = (
         "改 flush-only，提交交给 get_async_db / db_transaction；"
         "确需独立事务时按 docs/TRANSACTION_BOUNDARY_GUIDE.md 标注 `# manual-tx: <理由>`",
     ),
+    Gate(
+        "bom",
+        "以 UTF-8 BOM 开头的 .py（AST 工具会静默跳过）",
+        "scripts/check_bom.py",
+        "跑 `python scripts/fix_bom.py` 剥离 BOM；编辑器保存为「UTF-8 无 BOM」",
+    ),
+    Gate(
+        "alembic_heads",
+        "Alembic 迁移图形状（单 head / root 数不增）",
+        "scripts/check_alembic_heads.py",
+        "合并分支用 `alembic merge -m \"merge heads\" <rev1> <rev2>`；"
+        "新增 root 需评审后上调 EXPECTED_MAX_BASES",
+    ),
 )
 
 # 每个门禁成功/失败时会打印统一格式的头部，从中取违规计数。

@@ -1,4 +1,4 @@
-﻿"""配置加载器。
+"""配置加载器。
 
 加载并校验 ``audit_config.yaml`` 与 ``rules_registry.yaml``,
 返回强类型 pydantic 模型。
