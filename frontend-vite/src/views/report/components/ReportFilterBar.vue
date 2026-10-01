@@ -15,12 +15,11 @@
       />
     </div>
 
-    <UiButton variant="primary" aria-label="查询" @click="emit('search')">查询</UiButton>
+    <UiButton variant="primary" class="rp-query" aria-label="查询" @click="emit('search')">查询</UiButton>
     <UiButton variant="outline" aria-label="重置" @click="emit('reset')">重置</UiButton>
     <UiButton
       v-if="searched"
       variant="success"
-      class="rp-export"
       aria-label="导出"
       @click="emit('export')"
     >
@@ -82,8 +81,8 @@ const emit = defineEmits<{
   background: #f8fafc;
 }
 
-/* 导出靠最右：视图级动作与筛选动作分开 */
-.rp-export {
+/* 查询/重置/导出靠右成一排：筛选条件在左，动作按钮在右 */
+.rp-query {
   margin-left: auto;
 }
 </style>
