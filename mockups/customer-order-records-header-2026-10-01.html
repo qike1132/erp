@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>客户订单 · 记录查询页头与表格容器 · 对比稿 · 2026-10-01</title>
+<style>
+  :root{
+    --p50:#eff5ff; --p100:#d6e4ff; --p200:#b8ccff; --p500:#5b8def; --p600:#3a6bd6; --p700:#2d5ab8;
+    --s100:#d0f3df; --s600:#1e9e55; --s700:#2e7d32;
+    --d50:#fde8e8; --d100:#fbd0d0; --d600:#d44042;
+    --surface:#f4f6fc; --line:#e4e7ed; --line-light:#f0f2f5; --border-strong:#cbd5e1;
+    --t1:#1a1a2e; --t2:#475569; --t3:#64748b; --t-muted:#94a3b8;
+    --bg:#f5f6fa;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:26px 22px 60px;background:var(--bg);color:var(--t1);
+       font:13px/1.5 "Microsoft YaHei UI","Segoe UI",system-ui,sans-serif}
+  h1{font-size:19px;margin:0 0 6px}
+  .meta{color:var(--t2);font-size:12px;margin-bottom:16px}
+  .meta code{background:#e9ecf3;padding:1px 5px;border-radius:4px}
+  .ask{background:#fff8e6;border-left:3px solid #f0b429;padding:10px 14px;border-radius:6px;
+       margin:0 0 22px;font-size:12.5px;color:#7a5300}
+  .ask b{color:#5c3d00}
+  h2{font-size:15px;margin:30px 0 4px;padding-top:10px;border-top:2px solid #e3e6ee}
+  h2 .tag{font-size:11px;font-weight:700;color:#fff;background:var(--p600);
+          padding:2px 7px;border-radius:999px;vertical-align:2px;margin-left:8px}
+  h2 .tag.alt{background:var(--t3)}
+  .sub{color:var(--t2);font-size:12px;margin:0 0 12px}
+  .frame{background:#fff;border:1px solid var(--line);border-radius:8px;padding:0;margin-bottom:14px;overflow:hidden}
+  .frame-hd{background:var(--surface);padding:7px 14px;font-size:12px;font-weight:700;color:var(--t2);
+            border-bottom:1px solid var(--line);display:flex;justify-content:space-between}
+  .frame-hd .pill{font-weight:400;color:var(--t3)}
+  .pagecard{background:#fff;border:1px solid var(--line-light);border-radius:18px;
+            box-shadow:0 1px 3px rgba(0,0,0,.04),0 4px 12px rgba(0,0,0,.06);overflow:hidden}
+  /* 页头：录入 / 记录查询 TAB */
+  .hd{display:flex;flex-wrap:nowrap;justify-content:space-between;align-items:center;
+      padding:14px 24px;border-bottom:1px solid var(--line-light);background:rgba(255,255,255,.95);gap:12px}
+  .tabbar{display:inline-flex;gap:4px;padding:4px;border-radius:12px;background:#fff;
+          border:1px solid var(--line-light);box-shadow:0 1px 3px rgba(0,0,0,.04)}
+  .tabbtn{display:inline-flex;align-items:center;justify-content:center;padding:8px 14px;min-height:32px;
+          border:0;border-radius:9px;font-size:13px;font-weight:600;color:var(--t2);background:transparent;font-family:inherit}
+  .tabbtn.on{background:var(--p50);color:var(--p700);box-shadow:inset 0 0 0 1px var(--p200)}
+  /* 搜索工具条 */
+  .tool{display:flex;align-items:center;gap:10px}
+  .search{position:relative;width:300px}
+  .search input{width:100%;height:36px;border:1px solid var(--border-strong);border-radius:9px;background:#fff;
+                padding:0 32px;font-size:13px;color:var(--t1);font-family:inherit;outline:none}
+  .search input::placeholder{color:var(--t-muted)}
+  .search .ic{position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--t-muted);font-size:12px}
+  .btn{border:0;border-radius:9px;font-family:inherit;font-weight:600;cursor:default;
+       display:inline-flex;align-items:center;gap:5px}
+  .btn-primary{background:var(--p600);color:#fff;height:34px;padding:0 14px;font-size:13px}
+  .count{font-size:12px;color:var(--t3);white-space:nowrap}
+  .count b{color:var(--t1)}
+  /* 表格 */
+  table{border-collapse:collapse;width:100%;font-size:13px;table-layout:fixed}
+  th{background:var(--surface);color:var(--t2);font-weight:700;font-size:12px;padding:9px 12px;
+     border-bottom:1px solid var(--line);text-align:center;white-space:nowrap}
+  td{padding:9px 12px;border-bottom:1px solid var(--line);white-space:nowrap;text-align:center;
+     color:var(--t1);vertical-align:middle}
+  td.l{text-align:left}
+  .muted{color:var(--t3);font-size:12px}
+  .badge{display:inline-flex;align-items:center;padding:2px 8px;font-size:11px;font-weight:600;border-radius:6px}
+  .badge.order{background:var(--p50);color:var(--p600)}
+  .badge.stockin{background:var(--s100);color:var(--s600)}
+  .acts{display:flex;gap:4px;padding-left:8px}
+  .ico{width:36px;height:36px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;
+       font-size:14px;border:0}
+  .ico-info{background:var(--p50);color:var(--p600)}
+  .ico-danger{background:var(--d50);color:var(--d600)}
+  .ico-warn{background:#fff4e0;color:#b37400}
+  .dash{color:var(--t-muted)}
+  /* 容器圆角对照 */
+  .wrapA{border:1px solid var(--line);border-radius:0;overflow:hidden}
+  .wrapB{border:0;border-radius:0;overflow:hidden}
+  .wrapNow{border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .corner{position:relative}
+  .corner::after{content:"";position:absolute;left:0;bottom:0;width:34px;height:34px;
+                 border-left:3px solid #ea5455;border-bottom:3px solid #ea5455;border-bottom-left-radius:14px}
+  .foot{color:var(--t2);font-size:12.5px;margin-top:26px;line-height:1.9}
+  .foot b{color:var(--t1)}
+  .kbd{background:#e9ecf3;padding:1px 5px;border-radius:4px;font-family:Consolas,monospace;font-size:11.5px}
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media (max-width:1200px){.cols{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<h1>客户订单 · 记录查询：页头 + 表格容器 + 备货行操作</h1>
+<div class="meta">
+  页面 <code>/customer-order</code> → 页签「记录查询」 &nbsp;·&nbsp; 2026-10-01 &nbsp;·&nbsp;
+  涉及组件 <code>OrderRecordFilter.vue</code> / <code>OrderRecordTable.vue</code> / <code>CustomerOrderView.vue</code>
+</div>
+
+<div class="ask">
+  <b>三处待你定：</b>
+  ① 表格容器圆角 —— <b>只去圆角（保留细边框）</b> 还是 <b>连边框一起去掉</b>（与 <code>/stock</code> 库存页现在的做法一致，表格直接铺满卡片）；
+  ② 备货行的操作列 —— <b>编辑 + 删除</b>、<b>只给删除</b>、还是维持现在的「—」；
+  ③ 页头右侧搜索框宽度 300px 是否合适（现在独立一行时最宽 420px）。
+  下面第 1~3 节都是「改后」的样子，第 2、3 节给了并排变体。
+</div>
+
+<!-- ============ 1. 页头 ============ -->
+<h2>1 · 页头：搜索搬到 TAB 同一行的右上角<span class="tag">按你说的改</span></h2>
+<p class="sub">「记录列表」文字与图标删除；搜索框 + 查询 + 共 N 条 移到页头右侧，与「录入 / 记录查询」TAB 同一行。</p>
+
+<div class="frame">
+  <div class="frame-hd"><span>现状（记录列表标题 + 搜索各占一行）</span><span class="pill">改前</span></div>
+  <div style="padding:0">
+    <div class="hd"><div class="tabbar"><button class="tabbtn">录入</button><button class="tabbtn on">记录查询</button></div></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 20px;border-bottom:1px solid var(--border-strong)">
+      <span style="font-size:14px;font-weight:700;display:flex;align-items:center;gap:8px">▤ 记录列表</span>
+      <span class="tool">
+        <span class="search"><span class="ic">⌕</span><input value="" placeholder="搜索 单号 / 客户 / 产品名 / 条码"></span>
+        <span class="btn btn-primary">⌕ 查询</span>
+        <span class="count">共 <b>7</b> 条</span>
+      </span>
+    </div>
+    <div style="padding:10px 20px;color:var(--t-muted);font-size:12px">…（表格从这里开始）</div>
+  </div>
+</div>
+
+<div class="frame">
+  <div class="frame-hd"><span>改后（标题删除，搜索上移到 TAB 行右侧）</span><span class="pill">改后</span></div>
+  <div class="pagecard">
+    <div class="hd">
+      <div class="tabbar"><button class="tabbtn">录入</button><button class="tabbtn on">记录查询</button></div>
+      <span class="tool">
+        <span class="search"><span class="ic">⌕</span><input value="" placeholder="搜索 单号 / 客户 / 产品名 / 条码"></span>
+        <span class="btn btn-primary">⌕ 查询</span>
+        <span class="count">共 <b>7</b> 条</span>
+      </span>
+    </div>
+    <div style="padding:10px 20px;color:var(--t-muted);font-size:12px">…（表格直接接在页头下面，没有中间那一行）</div>
+  </div>
+</div>
+
+<!-- ============ 2. 容器圆角 ============ -->
+<h2>2 · 表格容器圆角<span class="tag alt">两个变体</span></h2>
+<p class="sub">你框的两处（左上 / 左下）是 <code>UiDataTable</code> 自带容器的 12px 圆角（<span class="kbd">.ui-data-table-wrapper.rounded-xl</span>）。
+  外层白色大卡片（18px 圆角）不动。</p>
+
+<div class="cols">
+  <div class="frame">
+    <div class="frame-hd"><span>变体 A：只去圆角，保留 1px 细边框</span><span class="pill">A</span></div>
+    <div class="corner">
+      <div class="wrapA">
+        <table>
+          <thead><tr><th style="width:110px">时间</th><th style="width:150px">编号</th><th>客户</th><th>产品名称</th><th style="width:90px">数量</th><th style="width:110px">操作</th></tr></thead>
+          <tbody>
+            <tr><td class="muted" rowspan="2">2026-09-30 00:00</td><td rowspan="2"><span class="badge order">订单</span> <span class="muted">PO-20260930-0015</span></td><td rowspan="2">MINISO国际</td><td>测试</td><td>10000</td>
+              <td rowspan="2"><div class="acts"><span class="ico ico-info">👁</span><span class="ico ico-danger">🗑</span></div></td></tr>
+            <tr><td>鲨鱼</td><td>10000</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="frame">
+    <div class="frame-hd"><span>变体 B：圆角 + 边框都去掉（同 /stock 库存页）</span><span class="pill">B</span></div>
+    <div class="corner">
+      <div class="wrapB">
+        <table>
+          <thead><tr><th style="width:110px">时间</th><th style="width:150px">编号</th><th>客户</th><th>产品名称</th><th style="width:90px">数量</th><th style="width:110px">操作</th></tr></thead>
+          <tbody>
+            <tr><td class="muted" rowspan="2">2026-09-30 00:00</td><td rowspan="2"><span class="badge order">订单</span> <span class="muted">PO-20260930-0015</span></td><td rowspan="2">MINISO国际</td><td>测试</td><td>10000</td>
+              <td rowspan="2"><div class="acts"><span class="ico ico-info">👁</span><span class="ico ico-danger">🗑</span></div></td></tr>
+            <tr><td>鲨鱼</td><td>10000</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+<p class="sub" style="margin-top:-4px">（红角标示意你框的位置；两列都已经是「无圆角」的直角，只是边框去留不同。）</p>
+
+<!-- ============ 3. 备货行操作 ============ -->
+<h2>3 · 备货行的操作列<span class="tag alt">三个变体</span></h2>
+<p class="sub">现在备货行固定显示「—」：<code>OrderRecordTable.vue</code> 里写死 <span class="kbd">v-if="row.record_type === 'order'"</span>，
+理由是「后端没有备货详情端点，而 openDetail 一律按订单 id 查」。但后端其实有
+<span class="kbd">PUT /stock/in/edit/{id}</span> 与 <span class="kbd">DELETE /stock/in/delete/{id}</span>（权限 <code>stockin_manage</code> 或 <code>order_manage</code>），
+删除还带两道保护：已关联出库的备货拒绝删除、会让库存变负的拒绝删除。</p>
+
+<div class="cols">
+  <div class="frame">
+    <div class="frame-hd"><span>变体 A：编辑 + 删除</span><span class="pill">A</span></div>
+    <div class="wrapA">
+      <table>
+        <thead><tr><th style="width:120px">时间</th><th style="width:180px">编号</th><th>客户</th><th>产品名称</th><th style="width:80px">数量</th><th style="width:120px">操作</th></tr></thead>
+        <tbody>
+          <tr><td class="muted">2026-09-28 17:28</td><td><span class="badge stockin">备货</span> <span class="muted">BH-20260929-0001</span></td><td>MINISO国际</td><td>鲨鱼</td><td>10000</td>
+            <td><div class="acts"><span class="ico ico-warn">✎</span><span class="ico ico-danger">🗑</span></div></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div style="padding:9px 14px;font-size:12px;color:var(--t2);border-top:1px solid var(--line)">
+      编辑弹窗里可改：数量 / 客户 / 备货日期 / 备注（<b>产品不可改</b>，后端 schema 就没有 product_id）。
+      改数量会同步调整该产品的当前库存。
+    </div>
+  </div>
+
+  <div class="frame">
+    <div class="frame-hd"><span>变体 B：只给删除</span><span class="pill">B</span></div>
+    <div class="wrapA">
+      <table>
+        <thead><tr><th style="width:120px">时间</th><th style="width:180px">编号</th><th>客户</th><th>产品名称</th><th style="width:80px">数量</th><th style="width:120px">操作</th></tr></thead>
+        <tbody>
+          <tr><td class="muted">2026-09-28 17:28</td><td><span class="badge stockin">备货</span> <span class="muted">BH-20260929-0001</span></td><td>MINISO国际</td><td>鲨鱼</td><td>10000</td>
+            <td><div class="acts"><span class="ico ico-danger">🗑</span></div></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div style="padding:9px 14px;font-size:12px;color:var(--t2);border-top:1px solid var(--line)">
+      编辑走别的页面（出入库 / 案件页），这一列只补一个删除入口，改动最小。
+    </div>
+  </div>
+</div>
+
+<div class="frame">
+  <div class="frame-hd"><span>变体 C：维持现状（备货行仍是「—」）</span><span class="pill">C</span></div>
+  <div class="wrapA">
+    <table>
+      <thead><tr><th style="width:120px">时间</th><th style="width:180px">编号</th><th>客户</th><th>产品名称</th><th style="width:80px">数量</th><th style="width:120px">操作</th></tr></thead>
+      <tbody>
+        <tr><td class="muted">2026-09-28 17:28</td><td><span class="badge stockin">备货</span> <span class="muted">BH-20260929-0001</span></td><td>MINISO国际</td><td>鲨鱼</td><td>10000</td>
+          <td><span class="dash">—</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div style="padding:9px 14px;font-size:12px;color:var(--t2);border-top:1px solid var(--line)">
+    保持只读：这一页的备货行仅作「查得到」，增删改统一走库存/出入库那边。
+  </div>
+</div>
+
+<div class="foot">
+  <b>改动面（前两处）：</b><br>
+  · <code>CustomerOrderView.vue</code> — 页头里加搜索工具条，向 <code>OrderRecordQuery</code> 传 keyword / totalRecords / search / clear；<br>
+  · <code>OrderRecordFilter.vue</code> — 删掉「记录列表」标题，工具条部分整体上移（组件本身可以就此退休，逻辑并入页头）；<br>
+  · <code>OrderRecordTable.vue</code> — <code>:deep(.ui-data-table-wrapper)</code> 去掉圆角（按变体决定是否去边框）。<br>
+  <b>不动的东西：</b>表格列、跨行合并、分页、搜索/清空逻辑、订单行的查看+删除、外层 18px 白卡片。
+</div>
+
+</body>
+</html>

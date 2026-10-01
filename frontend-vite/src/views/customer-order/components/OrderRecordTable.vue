@@ -58,7 +58,7 @@
       </template>
 
       <template #column-body-actions="{ row }">
-        <!-- 备货行不给详情入口：后端不存在备货详情端点，而 openDetail 一律按订单 id 查 -->
+        <!-- 订单行：查看详情（改单在详情弹窗内）+ 删除 -->
         <div v-if="row.record_type === 'order'" class="co-action-group">
           <button
             class="co-btn-icon co-btn-info"
@@ -68,10 +68,32 @@
             <FontAwesomeIcon icon="eye" aria-hidden="true" />
           </button>
           <button
-            v-if="canDelete"
+            v-if="canManage"
             class="co-btn-icon co-btn-danger"
             :aria-label="`删除订单 ${row.order_no}`"
             @click="emit('delete-record', row._source)"
+          >
+            <FontAwesomeIcon icon="trash-alt" aria-hidden="true" />
+          </button>
+        </div>
+        <!--
+          备货行：编辑 + 删除。
+          没有「查看」：后端不存在备货详情端点，而查看走的是按订单 id 取详情的 openDetail。
+          编辑/删除用 /stock/in/edit/{id} 与 /stock/in/delete/{id}，后端删除自带两道保护
+          （已关联出库的拒绝删、会让库存变负的拒绝删），失败原因由后端消息回显。
+        -->
+        <div v-else-if="canManage" class="co-action-group">
+          <button
+            class="co-btn-icon co-btn-edit"
+            :aria-label="`编辑备货 ${row.order_no}`"
+            @click="emit('edit-stockin', row._source)"
+          >
+            <FontAwesomeIcon icon="pen-to-square" aria-hidden="true" />
+          </button>
+          <button
+            class="co-btn-icon co-btn-danger"
+            :aria-label="`删除备货 ${row.order_no}`"
+            @click="emit('delete-stockin', row._source)"
           >
             <FontAwesomeIcon icon="trash-alt" aria-hidden="true" />
           </button>
@@ -98,13 +120,16 @@ const props = defineProps<{
   totalPages: number
   totalRecords: number
   perPage: number
-  canDelete: boolean
+  /** 是否可增删改：订单与备货的写端点都认 order_manage（备货另认 stockin_manage，见下） */
+  canManage: boolean
   fetchOrders: () => void
 }>()
 
 const emit = defineEmits<{
   'view-detail': [record: OrderRecord]
   'delete-record': [record: OrderRecord]
+  'edit-stockin': [record: OrderRecord]
+  'delete-stockin': [record: OrderRecord]
   'update:perPage': [value: number]
   'change-page': [page: number]
   retry: []
@@ -152,6 +177,13 @@ function onPageChange(event: { page: number; rows: number }) {
   overflow-y: auto;
   padding: 0;
   min-height: 0;
+}
+/* UiDataTable 的容器自带 1px 边框 + 12px 圆角（共享组件，13 个视图共用）。
+   本页的稿是表格直接铺满白色大卡片、没有内层盒子（2026-10-01 用户要求去掉那两处圆角），
+   故在此抵消，不动共享组件——与 /stock 库存页同一做法。 */
+.co-records-body :deep(.ui-data-table-wrapper) {
+  border: 0;
+  border-radius: 0;
 }
 .co-type-badge {
   font-size: 11px;
@@ -258,6 +290,16 @@ function onPageChange(event: { page: number; rows: number }) {
 }
 .co-btn-info:hover {
   background: var(--color-primary-100);
+  transform: translateY(-1px);
+}
+/* 备货行的编辑：暖色，与订单行的「查看」区分（两者不会出现在同一行，但扫读时
+   蓝色=看、暖色=改 的对应关系更稳） */
+.co-btn-edit {
+  background: var(--color-warning-50);
+  color: var(--color-warning-600);
+}
+.co-btn-edit:hover {
+  background: var(--color-warning-100);
   transform: translateY(-1px);
 }
 .co-btn-danger {

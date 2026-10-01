@@ -11,6 +11,16 @@
             记录查询
           </button>
         </div>
+        <!-- 搜索工具条只属于「记录查询」：录入页签下没有可搜的列表。
+             2026-10-01：从原「记录列表」那一行上移到页头右侧，与 TAB 同排。 -->
+        <OrderRecordFilter
+          v-if="activeTab === 'records'"
+          v-model:keyword="keyword"
+          :total-records="totalRecords"
+          :is-loading="isLoadingRecords || isFetchingRecords"
+          @search="search"
+          @clear="clearKeyword"
+        />
       </div>
 
       <!-- TAB: 录入 -->
@@ -57,7 +67,6 @@
       <div v-show="activeTab === 'records'" class="co-tab-content">
         <OrderRecordQuery
           v-model:per-page="perPage"
-          v-model:keyword="keyword"
           :order-records="orderRecords"
           :is-loading-records="isLoadingRecords"
           :is-fetching-records="isFetchingRecords"
@@ -65,12 +74,12 @@
           :current-page="currentPage"
           :total-pages="totalPages"
           :total-records="totalRecords"
-          :can-delete="canDelete"
+          :can-manage="canManage"
           :fetch-orders="fetchOrders"
-          :search="search"
-          :clear-keyword="clearKeyword"
           @view-detail="openDetail"
           @delete-record="handleDeleteOrder"
+          @edit-stockin="openStockinEdit"
+          @delete-stockin="handleDeleteStockin"
           @change-page="handleChangePage"
           @retry="fetchOrders"
         />
@@ -99,6 +108,15 @@
       :save-edit-staged="saveEditStaged"
     />
 
+    <!-- 备货编辑弹窗（记录查询里的备货行） -->
+    <EditStockinModal
+      v-model:open="stockinEditVisible"
+      v-model:form="stockinEditForm"
+      :customer-options="customerOptions"
+      :saving="savingStockin"
+      :save-stockin-edit="saveStockinEdit"
+    />
+
     <!-- 确认对话框 -->
     <UiConfirmDialog
       :open="confirmDialog.open"
@@ -125,8 +143,10 @@ import type { StagedItem } from './composables/types'
 import OrderInputPanel from './components/OrderInputPanel.vue'
 import StagingArea from './components/StagingArea.vue'
 import OrderRecordQuery from './components/OrderRecordQuery.vue'
+import OrderRecordFilter from './components/OrderRecordFilter.vue'
 import EditOrderModal from './components/EditOrderModal.vue'
 import EditStagedModal from './components/EditStagedModal.vue'
+import EditStockinModal from './components/EditStockinModal.vue'
 
 const {
   form,
@@ -193,10 +213,24 @@ const {
   confirmDialog,
   genUid,
   handleDeleteOrder,
+  stockinEditVisible,
+  stockinEditForm,
+  savingStockin,
+  openStockinEdit,
+  saveStockinEdit,
+  handleDeleteStockin,
 } = useOrderActions(form, isOrder, fetchOrders)
 
 const authStore = useAuthStore()
-const canDelete = computed(() => authStore.hasPermission('order_manage'))
+/**
+ * 订单/备货的写权限。
+ *
+ * 订单删除走 orderApi（order_manage）；备货的编辑/删除走后端 /stock/in/*，
+ * 那两个端点的权限是 `stockin_manage` 或 `order_manage`。本页数据源
+ * /orders/records 本身要求 order_manage，所以能打开这一页的人一定满足备货写权限，
+ * 一个布尔量即可覆盖两类行。
+ */
+const canManage = computed(() => authStore.hasPermission('order_manage'))
 
 /**
  * 粘贴图片识别确认后的条目并入暂存区。

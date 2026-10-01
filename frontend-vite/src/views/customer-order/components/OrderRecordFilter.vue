@@ -1,36 +1,43 @@
 <template>
-  <div class="co-records-header">
-    <span class="co-records-title"><FontAwesomeIcon icon="list-alt" aria-hidden="true" /> 记录列表</span>
-    <div class="co-search-tool">
-      <span class="co-search">
-        <FontAwesomeIcon icon="magnifying-glass" class="co-search-icon" aria-hidden="true" />
-        <input
-          v-model="keyword"
-          class="co-record-search"
-          type="text"
-          placeholder="搜索 单号 / 客户 / 产品名 / 条码"
-          aria-label="搜索记录"
-          @keydown.enter="$emit('search')"
-        />
-        <button
-          v-if="keyword"
-          class="co-search-clear"
-          type="button"
-          aria-label="清空搜索"
-          @click="$emit('clear')"
-        >
-          <FontAwesomeIcon icon="xmark" aria-hidden="true" />
-        </button>
-      </span>
-      <UiButton variant="primary" size="sm" @click="$emit('search')">
-        <FontAwesomeIcon icon="search" style="margin-right: 4px" aria-hidden="true" />查询
-      </UiButton>
-      <span v-if="!isLoading" class="co-search-count">共 <b>{{ totalRecords }}</b> 条</span>
-    </div>
+  <div class="co-search-tool">
+    <span class="co-search">
+      <FontAwesomeIcon icon="magnifying-glass" class="co-search-icon" aria-hidden="true" />
+      <input
+        v-model="keyword"
+        class="co-record-search"
+        type="text"
+        placeholder="搜索 单号 / 客户 / 产品名 / 条码"
+        aria-label="搜索记录"
+        @keydown.enter="$emit('search')"
+      />
+      <button
+        v-if="keyword"
+        class="co-search-clear"
+        type="button"
+        aria-label="清空搜索"
+        @click="$emit('clear')"
+      >
+        <FontAwesomeIcon icon="xmark" aria-hidden="true" />
+      </button>
+    </span>
+    <UiButton variant="primary" size="sm" @click="$emit('search')">
+      <FontAwesomeIcon icon="search" style="margin-right: 4px" aria-hidden="true" />查询
+    </UiButton>
+    <span v-if="!isLoading" class="co-search-count">共 <b>{{ totalRecords }}</b> 条</span>
   </div>
 </template>
 
 <script setup lang="ts">
+/**
+ * OrderRecordFilter.vue — 记录查询的搜索工具条（搜索框 · 查询 · 共 N 条）
+ *
+ * 2026-10-01：整条从「记录列表」那一行上移到卡片页头右侧，与「录入 / 记录查询」
+ * 两个 TAB 同排；「记录列表」标题与图标随之删除（用户要求）。
+ * 组件自身只负责工具条，页头的位置与内边距由 CustomerOrderView 提供。
+ *
+ * 类名 co-search-tool / co-record-search / co-search-clear 保持不变：
+ * 它们既是现有用例的选择器，也是「搜索」这一块的稳定锚点。
+ */
 import { computed } from 'vue'
 import UiButton from '@/components/ui/UiButton.vue'
 
@@ -53,26 +60,6 @@ const keyword = computed({
 </script>
 
 <style scoped>
-.co-records-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 20px;
-  border-bottom: 1px solid var(--color-border, #cbd5e1);
-  flex-shrink: 0;
-  flex-wrap: wrap;
-}
-.co-records-title {
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--color-text);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.co-records-title i { color: var(--color-primary-500); }
-
 .co-search-tool {
   display: flex;
   align-items: center;
@@ -140,6 +127,5 @@ const keyword = computed({
 .co-search-count b { color: var(--color-text); }
 @media (max-width: 640px) {
   .co-search { min-width: 100%; max-width: none; }
-  .co-records-header { padding: 10px 12px; }
 }
 </style>

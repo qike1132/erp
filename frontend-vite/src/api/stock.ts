@@ -1,4 +1,4 @@
-import { get, post, del, upload, download } from './request'
+import { get, post, put, del, upload, download } from './request'
 import type {
   Product, StagingListResponse, StagingRow, StagingImportResult, InventoryItem,
   InventoryResponse, StockInRecord, StockOutRecord, ShipmentInfo, ApiResponse, QueryParams,
@@ -20,6 +20,20 @@ export interface BatchSubmitResponse {
 /** 暂存区导入链路超时：Excel 解析 + 写暂存区可能远超全局 15s（同 planApi 的导入约定） */
 const STAGING_IMPORT_TIMEOUT = 120_000
 
+/**
+ * 编辑备货的请求体（对应后端 `schemas/stock.py::StockInUpdate`）。
+ *
+ * 部分更新语义：未提供的字段沿用记录原值。**没有 product_id** ——
+ * 换产品等于换一条备货记录，后端也不接受。
+ */
+export interface StockInUpdatePayload {
+  quantity?: number
+  customer?: string
+  /** `YYYY-MM-DD`；只传日期时后端保留原记录的时间部分 */
+  stockin_date?: string
+  note?: string
+}
+
 export const stockApi = {
   stats: async () => {
     const resp = await get<{ success: boolean; data: { order_quantity: number; order_regular_quantity: number; order_custom_quantity: number; stockin_quantity: number } }>('/stock/stats');
@@ -28,6 +42,8 @@ export const stockApi = {
   stockins: (params?: QueryParams) => get<StockInRecord[]>('/stock/in/list', params),
   stockouts: (params?: QueryParams) => get<{ stockouts?: StockOutRecord[]; items?: StockOutRecord[]; total?: number }>('/stock/out/list', params),
   inventory: (params?: QueryParams) => get<InventoryResponse>('/stock/inventory', params),
+  editStockin: (id: number, data: StockInUpdatePayload) =>
+    put<{ success?: boolean; message?: string }>(`/stock/in/edit/${id}`, data),
   deleteStockin: (id: number) => del(`/stock/in/delete/${id}`),
   deleteStockout: (id: number) => del(`/stock/out/delete/${id}`),
   searchProducts: (q: string) => get<{ products?: Product }>('/aux/product-search', { q }),

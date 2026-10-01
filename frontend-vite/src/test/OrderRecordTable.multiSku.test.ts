@@ -57,7 +57,7 @@ const SINGLE_SKU_ORDER = {
   items: [{ id: 910, product_name: '测试', quantity: 10000 }],
 }
 
-/** 备货行（恒 1 个 SKU，无操作入口） */
+/** 备货行（恒 1 个 SKU；操作列给编辑 + 删除，不给查看） */
 const STOCKIN_ROW = {
   ...MULTI_SKU_ORDER,
   id: 39268,
@@ -68,7 +68,7 @@ const STOCKIN_ROW = {
   items: [{ id: 39268, product_name: '鲨鱼', quantity: 10000 }],
 }
 
-function mountTable(rows: unknown[], canDelete = true) {
+function mountTable(rows: unknown[], canManage = true) {
   return mount(OrderRecordTable, {
     props: {
       orderRecords: rows as never,
@@ -78,7 +78,7 @@ function mountTable(rows: unknown[], canDelete = true) {
       totalPages: 1,
       totalRecords: rows.length,
       perPage: 20,
-      canDelete,
+      canManage,
       fetchOrders: vi.fn(),
     },
     global: { plugins: [[PrimeVue, { unstyled: true, pt: plushCutePT }]] },
@@ -175,13 +175,36 @@ describe('记录列表 · 多 SKU 分行显示', () => {
     expect(tailColumnTexts(wrapper, '数量')).toEqual(['10000'])
   })
 
-  it('备货行的产品名称与数量各归其列，且没有操作入口', () => {
+  it('备货行的产品名称与数量各归其列，操作列给编辑与删除（不给查看）', () => {
     const wrapper = mountTable([STOCKIN_ROW])
 
     expect(tailColumnTexts(wrapper, '产品名称')).toEqual(['鲨鱼'])
     expect(tailColumnTexts(wrapper, '数量')).toEqual(['10000'])
+    // 备货没有详情端点，故无查看入口；编辑/删除走 /stock/in/edit、/stock/in/delete
     expect(wrapper.findAll('.co-btn-info').length).toBe(0)
+    expect(wrapper.findAll('.co-btn-edit').length).toBe(1)
+    expect(wrapper.findAll('.co-btn-danger').length).toBe(1)
+  })
+
+  it('备货行的编辑/删除发出的是原始备货记录（供 /stock/in/{edit,delete}/id 使用）', async () => {
+    const wrapper = mountTable([STOCKIN_ROW])
+
+    await wrapper.findAll('.co-btn-edit')[0]!.trigger('click')
+    await wrapper.findAll('.co-btn-danger')[0]!.trigger('click')
+
+    const editPayload = wrapper.emitted('edit-stockin')![0]![0] as Record<string, unknown>
+    const deletePayload = wrapper.emitted('delete-stockin')![0]![0] as Record<string, unknown>
+    expect(editPayload.id, '必须是备货记录自身的 id（备货与订单 id 会撞号）').toBe(39268)
+    expect(editPayload.record_type).toBe('stockin')
+    expect(deletePayload.id).toBe(39268)
+  })
+
+  it('无写权限时不渲染备货行的编辑/删除，回落为「—」', () => {
+    const wrapper = mountTable([STOCKIN_ROW], false)
+
+    expect(wrapper.findAll('.co-btn-edit').length).toBe(0)
     expect(wrapper.findAll('.co-btn-danger').length).toBe(0)
+    expect(tailColumnTexts(wrapper, '操作')).toEqual(['—'])
   })
 
   it('操作列发出的是原始订单记录（含 items），不是摊平后的行', () => {

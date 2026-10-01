@@ -6,6 +6,7 @@
  *   useStagedEdit（暂存项编辑弹窗/可用备货量）
  *   useOrderImport（Excel 模板/选择/拖拽/导入）
  *   useOrderDetailEdit（详情弹窗/保存/抵扣重试）
+ *   useStockinEdit（记录查询里备货行的编辑/删除，2026-10-01）
  * 本文件保持原签名与返回形状不变，消费方零改动。
  */
 import type { Reactive, ComputedRef } from 'vue'
@@ -15,6 +16,7 @@ import { useStagedEdit } from './useStagedEdit'
 import { useOrderImport } from './useOrderImport'
 import { useOrderDetailEdit } from './useOrderDetailEdit'
 import { useOrderDelete } from './useOrderDelete'
+import { useStockinEdit } from './useStockinEdit'
 
 export function useOrderActions(
   _form: Reactive<FormState>,
@@ -26,6 +28,7 @@ export function useOrderActions(
   const orderImport = useOrderImport(staged.stagedItems, isOrder)
   const detailEdit = useOrderDetailEdit(fetchOrders)
   const orderDelete = useOrderDelete(fetchOrders, staged.confirmDialog)
+  const stockinEdit = useStockinEdit(fetchOrders, staged.confirmDialog)
 
   return {
     ...staged,
@@ -33,6 +36,7 @@ export function useOrderActions(
     ...orderImport,
     ...detailEdit,
     ...orderDelete,
+    ...stockinEdit,
     genUid,
   }
 }
