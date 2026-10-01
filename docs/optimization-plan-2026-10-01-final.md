@@ -353,3 +353,12 @@
 - **遗留（P2）**：
   1. **`R-repo-format`** —— 全仓 ruff format 作为独立议题立项，前置条件：先把 §6.28 列出的 16 个源码文本守卫测试改成抗格式（AST / 归一化），且必须先 `quote-style="double"`、单独一轮提交、独立 style 提交。
   2. **`R-3`**（verifier 发现，与 format 无关）：`docs/TRANSACTION_BOUNDARY_GUIDE.md` §4 有 3 行锚点因 **P1 批次改行**而陈旧 —— `fastapi_app/services/backup/cleanup/service.py` 604→606、`fastapi_app/services/backup/orchestration/policy_service.py` 544→549、`fastapi_app/services/backup/records.py` 791,803,822→804,816,835；其余 6 行与 `scripts/check_service_commit.py --json`（total=12）吻合。已开 **t45**（gatekeeper）在无 format 的当前树上同步。
+
+### 6.29 P2-A 批次启动：mypy 类型化分片（用户 m02271 选定 A；钩子保持现状）
+- **用户裁决（m02271）**：继续用现有团队执行 **P2-A = mypy 类型化分片**；`R-repo-format` 暂缓；**提交钩子不改**。钩子现状复核：`.githooks/pre-commit:260-300` 的降级分支在 `pre-commit` 不在 PATH 时，**只要暂存含 `.py`/`.vue` 仍会调用 `scripts/quality_gate.py`**（`:280-295`，不过则拒提交），真正缺失的只有 `ruff --fix`（`.pre-commit-config.yaml:5-6`）；而「提交时自动改文件」正是 §6.9 事故的机制（一次重写 55 个文件），故维持现状。
+- **census 事实（2026-10-02 实测，captain）**：`mypy.ini` ratchet 名单 144 项；`fastapi_app` 下非测试 `.py` 另有 **226** 个未纳入，其中 **97 个带错、合计 495 处 error**，**129 个本就无错**。证据：`logs/_cap_mypy_residual.out`（原始 mypy 输出）、`logs/_cap_mypy_residual_list.txt`（226 项清单）、`logs/_cap_mypy_shards.json`（分片 + 每文件错误数 + 129 无错清单）。命令：`python -m mypy --config-file mypy.ini <226 个显式路径>`（显式路径覆盖 `files` 名单，已实测：单文件复跑错误数与 census 完全一致）。
+- **分片（按错误数贪心均分，inScope 互斥）**：t46 be-sec = 24 模块/124 错；t47 be-core = 24/124；t48 janitor = 25/124；t49 backup-eng = 24/123。四片并集 = 97 个带错模块，无重叠、无遗漏。
+- **DAG**：t46–t49（implementation，无依赖，已派发）→ **t50**（verification，verifier）→ **t51**（integration，gatekeeper，单写者改 `mypy.ini` 144 → **370** = `fastapi_app` 全部非测试 `.py`）。t50 产出 `docs/p2-mypy-verification-2026-10-01.md`；t51 产出 `docs/p2-mypy-integration-2026-10-01.md`。
+- **每片契约**：objective = 显式路径 mypy 零错误且不改运行时行为；acceptance = V1 mypy exit 0 / 改动 ⊆ inScope / **未新增 `# type: ignore`**（禁止 `Any`/`cast(Any)` 掩盖）/ 语义不变 / `quality_gate.py --only function_length` 与 `--only ruff` exit 0 / 相关 pytest 子集 exit 0；verify = 上述命令全量写入。测试子集由「模块点分路径出现在测试文件中」映射（每片 28–51 个文件），允许剔除间接命中并说明。
+- **纪律（本批）**：① 只改 inScope 内模块，改到共享文件（如 `fastapi_app/shared_models/**`）必须先回报 captain；② 不得放宽任何 mypy 设置、不得新增豁免、不得改 `scripts/gate_baseline.json`；③ **`mypy.ini` 按 locale(cp936) 读取 ⇒ 追加内容必须纯 ASCII**（中文注释会炸）；④ 禁止 git 写操作与 `sandbox_permissions`；⑤ PG 连接容量类失败（`remaining connection slots are reserved for roles with the SUPERUSER attribute`）按 §6.25/§6.27 口径判定，须附服务端证据。
+- **暂缓项**：`R-repo-format`（前置 = 16 个源码文本守卫测试改为抗格式）；P2 其余项见 §6.18。
