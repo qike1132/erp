@@ -7,16 +7,17 @@
  *
  * 备货没有详情端点，所以编辑弹窗的数据直接取自列表行（/orders/records 已下发
  * 数量 / 客户 / 时间 / 备注）。后端删除自带两道保护（已关联出库的拒绝删、
- * 会让库存变负的拒绝删），失败原因由后端消息原样回显。
+ * 会让库存变负的拒绝删；2026-10-01 起编辑数量同样有这两道守卫），
+ * 失败原因由后端消息原样回显。
  *
- * 两个动作成功后都要失效库存派生查询：备货数量参与 /stock 库存聚合，
- * 且后端会同步调整产品的当前库存。
+ * 写路径走 useApiMutation 统一封装（OPT-09 试点）：成功提示 / 领域缓存失效 /
+ * in-flight 状态收敛在一处；失效键集来自 utils/queryKeys，备货数量参与库存
+ * 聚合且后端会同步调整产品当前库存，故整体失效订单派生域。
  */
 import { ref } from 'vue'
-import { useQueryClient } from '@tanstack/vue-query'
+import { useApiMutation } from '@/composables/useApiMutation'
 import { stockApi } from '@/api'
 import { showToast } from '@/composables/useToast'
-import { getErrorMessage } from '@/types/errors'
 import { invalidateOrderDerivedQueries } from '@/utils/queryKeys'
 import type { OrderRecord } from './types'
 
@@ -40,10 +41,8 @@ export function useStockinEdit(
   fetchOrders: () => Promise<void>,
   confirmDialog: ConfirmDialogApi,
 ) {
-  const queryClient = useQueryClient()
   const stockinEditVisible = ref(false)
   const stockinEditForm = ref<StockinEditForm | null>(null)
-  const savingStockin = ref(false)
 
   /** 打开备货编辑弹窗：把列表行摊成表单态 */
   function openStockinEdit(record: OrderRecord) {
@@ -61,6 +60,27 @@ export function useStockinEdit(
     stockinEditVisible.value = true
   }
 
+  const editStockin = useApiMutation(
+    (form: StockinEditForm) =>
+      stockApi.editStockin(form.id, {
+        quantity: form.quantity,
+        customer: form.customer,
+        // 日期清空 = 保留原值：后端对空串会先做格式校验，拿不到"空则保留"分支，
+        // 所以空日期直接不下发该字段
+        ...(form.date ? { stockin_date: form.date } : {}),
+        note: form.note,
+      }),
+    {
+      invalidate: invalidateOrderDerivedQueries,
+      successMsg: '备货修改成功',
+      errorMsg: '备货修改失败',
+      onSuccess: () => {
+        stockinEditVisible.value = false
+        fetchOrders()
+      },
+    },
+  )
+
   async function saveStockinEdit() {
     const form = stockinEditForm.value
     if (!form) return
@@ -69,26 +89,18 @@ export function useStockinEdit(
       showToast('请填写大于 0 的备货数量', 'error')
       return
     }
-    savingStockin.value = true
-    try {
-      await stockApi.editStockin(form.id, {
-        quantity: form.quantity,
-        customer: form.customer,
-        // 日期清空 = 保留原值：后端对空串会先做格式校验，拿不到"空则保留"分支，
-        // 所以空日期直接不下发该字段
-        ...(form.date ? { stockin_date: form.date } : {}),
-        note: form.note,
-      })
-      showToast('备货修改成功', 'success')
-      stockinEditVisible.value = false
-      invalidateOrderDerivedQueries(queryClient)
-      fetchOrders()
-    } catch (e: unknown) {
-      showToast(getErrorMessage(e, '备货修改失败'), 'error')
-    } finally {
-      savingStockin.value = false
-    }
+    await editStockin.run(form)
   }
+
+  const removeStockin = useApiMutation(
+    (id: number) => stockApi.deleteStockin(id),
+    {
+      invalidate: invalidateOrderDerivedQueries,
+      successMsg: '备货删除成功',
+      errorMsg: '删除备货失败',
+      onSuccess: () => fetchOrders(),
+    },
+  )
 
   async function handleDeleteStockin(record: OrderRecord) {
     const stockinNo = record.order_no || record.stockin_no || ''
@@ -98,20 +110,13 @@ export function useStockinEdit(
       'danger',
     )
     if (!ok) return
-    try {
-      await stockApi.deleteStockin(record.id)
-      showToast('备货删除成功', 'success')
-      invalidateOrderDerivedQueries(queryClient)
-      fetchOrders()
-    } catch (e: unknown) {
-      showToast(getErrorMessage(e, '删除备货失败'), 'error')
-    }
+    await removeStockin.run(record.id)
   }
 
   return {
     stockinEditVisible,
     stockinEditForm,
-    savingStockin,
+    savingStockin: editStockin.isSaving,
     openStockinEdit,
     saveStockinEdit,
     handleDeleteStockin,
