@@ -82,6 +82,7 @@ import { outsourceApi } from '@/api'
 import type { OutsourceProcessType } from '@/api/outsource'
 import UiSpinner from '@/components/ui/UiSpinner.vue'
 import OutsourceAddProcessDialog from './OutsourceAddProcessDialog.vue'
+import { useApiMutation } from '@/composables/useApiMutation'
 import { useAuthStore } from '@/stores/auth'
 import { toast } from '@/composables/useToast'
 
@@ -175,15 +176,17 @@ async function refreshAfterAdd() {
   }
 }
 
+const deleteMutation = useApiMutation((id: number) => outsourceApi.deleteProcessType(id), {
+  successMsg: '工序已删除',
+  errorMsg: '删除失败',
+  onSuccess: async () => {
+    await refetch()
+  },
+})
+
 async function handleDelete(pt: OutsourceProcessType) {
   if (!window.confirm(`确认删除「${pt.process_type}」工序？`)) return
-  try {
-    await outsourceApi.deleteProcessType(pt.id)
-    toast.success('工序已删除')
-    refetch()
-  } catch {
-    toast.error('删除失败')
-  }
+  await deleteMutation.run(pt.id)
 }
 </script>
 

@@ -41,11 +41,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { outsourceApi } from '@/api'
 import type { OutsourceProcessType } from '@/api/outsource'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import UiButton from '@/components/ui/UiButton.vue'
+import { useApiMutation } from '@/composables/useApiMutation'
 import { toast } from '@/composables/useToast'
 
 interface ProductCard {
@@ -69,7 +70,6 @@ const emit = defineEmits<{
 
 const open = defineModel<boolean>('open', { default: false })
 const addInput = ref('')
-const saving = ref(false)
 
 const COMMON_PROCESSES = ['电绣', '转印']
 
@@ -78,19 +78,40 @@ function isAdded(tag: string): boolean {
   return props.target.processes.some((p) => p.process_type === tag)
 }
 
+const quickAddMutation = useApiMutation(
+  async ({ tag, productId }: { tag: string; productId: number }) => {
+    const res = await outsourceApi.batchCreateProcessTypes(productId, [tag])
+    return { message: res.message, tag }
+  },
+  {
+    errorMsg: '添加失败',
+    onSuccess: async ({ message, tag }) => {
+      toast.success(message || `已添加「${tag}」`)
+      await refreshAfterAdd()
+    },
+  },
+)
+
+const addMutation = useApiMutation(
+  async ({ names, productId }: { names: string[]; productId: number }) => {
+    const res = await outsourceApi.batchCreateProcessTypes(productId, names)
+    return res.message || '工序已添加'
+  },
+  {
+    errorMsg: '添加失败',
+    onSuccess: async (message) => {
+      toast.success(message)
+      await refreshAfterAdd()
+    },
+  },
+)
+
+// 两个动作共享同一排入队态（快捷添加 / 批量添加按钮互斥禁用）
+const saving = computed(() => quickAddMutation.isSaving.value || addMutation.isSaving.value)
+
 async function quickAdd(tag: string) {
   if (!props.target || isAdded(tag)) return
-  saving.value = true
-  try {
-    const res = await outsourceApi.batchCreateProcessTypes(props.target.product_id, [tag])
-    toast.success(res.message || `已添加「${tag}」`)
-    await refreshAfterAdd()
-  } catch (e) {
-    const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-    toast.error(msg || '添加失败')
-  } finally {
-    saving.value = false
-  }
+  await quickAddMutation.run({ tag, productId: props.target.product_id })
 }
 
 async function handleAdd() {
@@ -103,18 +124,8 @@ async function handleAdd() {
     toast.warning('请输入工序名称')
     return
   }
-  saving.value = true
-  try {
-    const res = await outsourceApi.batchCreateProcessTypes(props.target.product_id, names)
-    toast.success(res.message || '工序已添加')
-    addInput.value = ''
-    await refreshAfterAdd()
-  } catch (e) {
-    const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-    toast.error(msg || '添加失败')
-  } finally {
-    saving.value = false
-  }
+  const message = await addMutation.run({ names, productId: props.target.product_id })
+  if (message !== undefined) addInput.value = ''
 }
 
 async function refreshAfterAdd() {
