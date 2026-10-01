@@ -14,5 +14,9 @@ pytest-mock>=3.14
 pytest-asyncio>=1.0.0
 pytest-sugar==0.9.7
 
+# ----- 测试数据生成 -----
+# tests/qa/data_generator*.py 用它造中文假数据；全局环境恰好装过所以此前没暴露
+Faker==40.15.0
+
 # ----- E2E 测试 -----
 selenium>=4.15.0
