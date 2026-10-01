@@ -120,7 +120,8 @@ async def try_acquire_restore_lock(db: AsyncSession) -> bool:
     return bool(lock_result.scalar())
 
 
-async def release_restore_lock(db: AsyncSession) -> None:
+# 名称刻意区别于 Redis 版 release_restore_lock（services/backup/restore.py）：同名会经 .verify 星号导入遮蔽包级导出
+async def release_advisory_restore_lock(db: AsyncSession) -> None:
     """释放恢复操作 PostgreSQL advisory lock（失败仅记录警告，不抛出）"""
     try:
         await db.execute(
@@ -160,7 +161,8 @@ async def get_backup_type_distribution_since(db: AsyncSession, since) -> dict[st
     ).where(BackupRecord.created_at >= since).group_by(BackupRecord.type)
 
     result_dist = await db.execute(stmt_dist)
-    return {row.type: row.count for row in result_dist}
+    # Row.count 与 tuple.count 同名，静态上被解析为方法；列值须经 RowMapping 取（运行时为同一 int）
+    return {row.type: row._mapping['count'] for row in result_dist}
 
 
 async def get_merged_backup_records(

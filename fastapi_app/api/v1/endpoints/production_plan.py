@@ -170,7 +170,7 @@ async def timeline(
         HTTPException: 数据库连接异常时抛出 500。
     """
     try:
-        return await production_plan_service.get_timeline(db, year, month, customer)
+        return TimelineResponse(**await production_plan_service.get_timeline(db, year, month, customer))
     except (OperationalError, DisconnectionError) as e:
         raise HTTPException(status_code=500, detail=f'获取时间轴数据失败: {settings.sanitize_error(e)}') from e
 
@@ -197,7 +197,7 @@ async def customer_summary(
         HTTPException: 数据库连接异常时抛出 500。
     """
     try:
-        return await production_plan_service.get_customer_summary(db, year, month)
+        return MonthlySummary(**await production_plan_service.get_customer_summary(db, year, month))
     except (OperationalError, DisconnectionError) as e:
         raise HTTPException(status_code=500, detail=f'获取汇总数据失败: {settings.sanitize_error(e)}') from e
 
@@ -243,7 +243,8 @@ async def upload_excel(
     Raises:
         HTTPException: 文件格式不支持或大小超限时抛出 400。
     """
-    if not file.filename.endswith('.xlsx'):
+    filename = file.filename or ''
+    if not filename.endswith('.xlsx'):
         raise HTTPException(status_code=400, detail='仅支持 .xlsx 格式文件，.xls 已不再支持')
     try:
         content = await file.read()
@@ -256,7 +257,7 @@ async def upload_excel(
     session_id, _ = get_user_identity(_user)
     async with db_transaction(db):
         result = await production_plan_service.upload_excel(db, content, session_id)
-    return success_response(**{**result})
+    return UploadExcelResponse(**success_response(**{**result}))
 
 
 @router.get('/staging/list', response_model=StagingListResponse)
@@ -275,7 +276,7 @@ async def staging_list(
     """
     session_id, _ = get_user_identity(_user)
     records = await production_plan_service.get_staging_list(db, session_id)
-    return success_response(data=records, total=len(records))
+    return StagingListResponse(**success_response(data=records, total=len(records)))
 
 
 @router.post('/staging/validate', response_model=StagingValidateResponse)
@@ -294,7 +295,7 @@ async def staging_validate(
     """
     session_id, _ = get_user_identity(_user)
     result = await production_plan_service.validate_staging(db, session_id)
-    return success_response(**{**result})
+    return StagingValidateResponse(**success_response(**{**result}))
 
 
 @router.post('/staging/confirm', response_model=StagingConfirmResponse)
@@ -318,7 +319,7 @@ async def staging_confirm(
         result = await production_plan_service.confirm_staging(
             db, session_id, batch_id=batch_id, created_by=created_by,
         )
-    return success_response(**{**result})
+    return StagingConfirmResponse(**success_response(**{**result}))
 
 
 @router.delete('/staging/clear', response_model=ProductionPlanActionResponse)
@@ -337,4 +338,4 @@ async def staging_clear(
     """
     session_id, _ = get_user_identity(_user)
     await production_plan_service.clear_staging(db, session_id)
-    return success_response(message='暂存区已清空')
+    return ProductionPlanActionResponse(**success_response(message='暂存区已清空'))

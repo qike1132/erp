@@ -6,6 +6,10 @@ OCR 模糊匹配工具
 """
 import logging
 import re
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # pragma: no cover - 仅供类型检查，运行期不导入数据库模型
+    from fastapi_app.shared_models import Customer, Product
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +80,7 @@ def fuzzy_match_product(
     all_products: list,
     product_map: dict,
     min_similarity: float = 0.7,
-) -> tuple[object | None, float]:
+) -> tuple['Product | None', float]:
     """模糊匹配产品
 
     匹配优先级：精确 > 子串包含 > 关键字 > 编辑距离
@@ -129,7 +133,7 @@ def fuzzy_match_customer(
     ocr_name: str,
     all_customers: list,
     min_similarity: float = 0.7,
-) -> tuple[object | None, float]:
+) -> tuple['Customer | None', float]:
     """模糊匹配客户
 
     匹配优先级：精确(含去后缀) > 子串包含 > 关键字 > 编辑距离

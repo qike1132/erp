@@ -9,6 +9,7 @@
 """
 import calendar
 import os
+from collections.abc import Sequence
 from datetime import date, datetime
 
 from sqlalchemy import and_, select, text
@@ -74,7 +75,7 @@ async def get_plan_detail(db: AsyncSession, plan_id: int) -> dict:
     if not plan:
         raise ValueError('采购计划不存在')
     detail_result = await db.execute(select(PurchasePlanDetail).where(PurchasePlanDetail.plan_id == plan_id).order_by(PurchasePlanDetail.plan_date, PurchasePlanDetail.product_name))
-    details = detail_result.scalars().all()
+    details = list(detail_result.scalars().all())
     inventory_map = await _get_inventory_map(db)
     # FIFO 分配出货数量，覆盖缓存的 shipped_qty
     customer_name_map = {plan.id: plan.customer_name}
@@ -100,7 +101,7 @@ async def get_shipment_progress(db: AsyncSession, plan_id: int) -> dict:
     if not plan:
         raise ValueError('采购计划不存在')
     detail_result = await db.execute(select(PurchasePlanDetail).where(PurchasePlanDetail.plan_id == plan_id).order_by(PurchasePlanDetail.plan_date, PurchasePlanDetail.product_name))
-    details = detail_result.scalars().all()
+    details = list(detail_result.scalars().all())
     # FIFO 分配出货数量
     customer_name_map = {plan.id: plan.customer_name}
     shipped_fifo_map, fifo_degraded = await _get_shipped_fifo_map_safe(db, details, customer_name_map)
@@ -212,7 +213,7 @@ async def get_shipment_records_by_date(db: AsyncSession, target_date: str) -> li
 
 async def _build_fifo_produced_map_from_rows(
     db: AsyncSession,
-    rows: list,
+    rows: Sequence,
     plan_month: str = '',
 ) -> tuple[dict[int, int], bool]:
     """从 SQL 查询结果行构建 FIFO 生产量映射。
@@ -239,7 +240,7 @@ async def _build_fifo_produced_map_from_rows(
         .where(PurchasePlanDetail.id.in_(detail_ids))
         .order_by(PurchasePlanDetail.plan_date, PurchasePlanDetail.id)
     )
-    all_details = detail_result.scalars().all()
+    all_details = list(detail_result.scalars().all())
     produced_map, degraded = await _get_produced_fifo_map_safe(db, all_details, plan_month=plan_month)
     return {d.id: produced_map.get(d.id, 0) for d in all_details}, degraded
 
@@ -326,7 +327,8 @@ async def _enrich_customer_icon_urls(db: AsyncSession, customers: list[dict]) ->
     c_result = await db.execute(select(Customer).where(Customer.id.in_(customer_ids)))
     c_map = {c.id: c for c in c_result.scalars().all()}
     for c in customers:
-        c_obj = c_map.get(c.get('id'))
+        cid = c.get('id')
+        c_obj = c_map.get(cid) if cid is not None else None
         if c_obj:
             c['icon_url'] = c_obj.icon_url or ''
     return customers

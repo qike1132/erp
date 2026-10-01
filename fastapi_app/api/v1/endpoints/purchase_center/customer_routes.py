@@ -21,6 +21,7 @@ from fastapi_app.core.deps import require_permission
 from fastapi_app.core.response import success_response
 from fastapi_app.schemas.purchase_center import CustomerStatisticsResponse
 from fastapi_app.services import purchase_center_service as svc
+from fastapi_app.services.purchase_customer_service import get_customers_for_sync
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -88,7 +89,7 @@ async def api_sync_customers(
         HTTPException 500: 数据库操作异常。
     """
     try:
-        customers = await svc.get_customers_for_sync(db, data.customer_ids)
+        customers = await get_customers_for_sync(db, data.customer_ids)
     except (OperationalError, DisconnectionError, SQLAlchemyError) as e:
         logger.exception('同步客户数据失败')
         raise HTTPException(status_code=500, detail='操作失败，请稍后重试') from e

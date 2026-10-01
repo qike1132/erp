@@ -119,7 +119,7 @@ async def retry_dead_letter_task(task_id: str, _user: User = Depends(require_per
                 target_idx = i
                 target_entry = entry
                 break
-        if target_idx is None:
+        if target_idx is None or target_entry is None:
             raise HTTPException(404, f'任务 {task_id} 不在死信队列中')
         task_name = target_entry.get('task_name')
         args = _parse_dead_letter_args(target_entry.get('args', []))

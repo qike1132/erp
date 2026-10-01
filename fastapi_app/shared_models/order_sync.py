@@ -4,6 +4,7 @@
 映射到 'order_sync_record', 'sync_retry_queue', 'order_sync_config' 表。
 """
 from datetime import UTC, datetime, timedelta
+from typing import TypedDict
 
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
@@ -175,7 +176,22 @@ class OrderSyncConfig(Base):
 
 # ==================== 状态流转定义 ====================
 
-ORDER_STATUS_FLOW = {
+class StatusAction(TypedDict, total=False):
+    """状态流转中可选动作的定义（'actions' 表项）。"""
+    to: str
+    label: str
+    require_remark: bool
+
+
+class StatusFlowEntry(TypedDict, total=False):
+    """单个订单状态的定义（ORDER_STATUS_FLOW 的表项）。"""
+    next: list[str]
+    label: str
+    color: str
+    actions: dict[str, StatusAction]
+
+
+ORDER_STATUS_FLOW: dict[str, StatusFlowEntry] = {
     'unprocessed': {
         'next': ['processing'],
         'label': '未处理',
@@ -222,7 +238,7 @@ def validate_status_transition(from_status: str, to_status: str) -> tuple[bool, 
     return True, None
 
 
-def get_action_for_transition(from_status: str, to_status: str) -> tuple[str, dict] | None:
+def get_action_for_transition(from_status: str, to_status: str) -> tuple[str, StatusAction] | None:
     """获取状态转换对应的操作"""
     if from_status not in ORDER_STATUS_FLOW:
         return None

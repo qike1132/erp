@@ -4,7 +4,7 @@
 主从表结构：purchase_plans（主表）+ purchase_plan_details（明细表）
 出货同步表：shipment_records
 """
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from sqlalchemy import Date, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -70,7 +70,7 @@ class PurchasePlanDetail(Base):
     product_id: Mapped[int] = mapped_column(Integer, ForeignKey('product.id'), nullable=False, comment='产品ID')
     product_name: Mapped[str] = mapped_column(String(100), nullable=False, comment='产品名称(冗余)')
     barcode: Mapped[str] = mapped_column(String(50), nullable=False, comment='69码')
-    plan_date: Mapped[datetime] = mapped_column(Date, nullable=False, comment='计划日期')
+    plan_date: Mapped[date] = mapped_column(Date, nullable=False, comment='计划日期')
     quantity: Mapped[int] = mapped_column(Integer, nullable=False, comment='计划数量')
     shipped_qty: Mapped[int] = mapped_column(Integer, default=0, comment='[DEPRECATED] 已出货数量缓存 - 所有读路径已改用 FIFO 实时查询 (fifo_allocation.allocate_fifo)，此列仅 _update_shipped_qty 在 recalc 流程中写入。后续可通过 migration 移除。')
     remark: Mapped[str | None] = mapped_column(Text, nullable=True, comment='备注')
@@ -116,7 +116,7 @@ class ShipmentRecord(Base):
     product_id: Mapped[int] = mapped_column(Integer, nullable=False, comment='产品ID')
     product_name: Mapped[str] = mapped_column(String(100), nullable=False, comment='产品名称')
     quantity: Mapped[int] = mapped_column(Integer, nullable=False, comment='出货数量')
-    shipment_date: Mapped[datetime] = mapped_column(Date, nullable=False, comment='出货日期')
+    shipment_date: Mapped[date] = mapped_column(Date, nullable=False, comment='出货日期')
     source_type: Mapped[str] = mapped_column(String(20), default='stockout', comment='来源类型')
     source_id: Mapped[int | None] = mapped_column(Integer, nullable=True, comment='来源记录ID')
     synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC), comment='同步时间')

@@ -11,11 +11,12 @@ P1-3(2026-08-23)：restore_from_zip 的还原内核切换为 DatabaseRestoreOrch
 from __future__ import annotations
 
 import asyncio
+import functools
 import io
 import json
 import logging
 import zipfile
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,12 +30,21 @@ from .verify import verify_restore
 logger = logging.getLogger(__name__)
 
 
+def _task_value(pair: tuple[str, Any]) -> Any:
+    """返回 (组件名, 已完成结果) 中的结果部分（与原先的 `lambda t=t: t[1]` 等价）。
+
+    同步分支的 pair[1] 是已经算好的结果对象本身，executor 只做一次无参调用把它取回，
+    不能再调用它。
+    """
+    return pair[1]
+
+
 async def restore_non_dependent_components(
     zf: zipfile.ZipFile,
     confirm_sensitive: bool = False,
 ) -> dict:
     """并行恢复非依赖组件（文件存储、配置文件、Redis、MeiliSearch）"""
-    results = {
+    results: dict[str, Any] = {
         'filestore': {},
         'config': {},
         'redis': {},
@@ -60,7 +70,7 @@ async def restore_non_dependent_components(
         logger.info(f"开始并行恢复 {len(tasks)} 个非依赖组件")
         try:
             async_tasks = []
-            sync_tasks = []
+            sync_tasks: list[tuple[str, Any]] = []
 
             for component_name, task in tasks:
                 if asyncio.iscoroutine(task):
@@ -84,7 +94,7 @@ async def restore_non_dependent_components(
             if sync_tasks:
                 loop = asyncio.get_running_loop()
                 sync_results = await asyncio.gather(
-                    *[loop.run_in_executor(None, lambda t=t: t[1]) for t in sync_tasks],
+                    *[loop.run_in_executor(None, functools.partial(_task_value, t)) for t in sync_tasks],
                     return_exceptions=True
                 )
                 for (component_name, _), result in zip(sync_tasks, sync_results, strict=False):
@@ -188,9 +198,16 @@ async def restore_from_zip(
         cache_invalidator=ExistingCacheInvalidatorAdapter(),
         verifier=ExistingRestoreVerifierAdapter(),
     )
+    # 内核（orchestrator._decrypt → decrypt_backup）的解密密码类型面只声明 str：
+    # bytes/bytearray 只是在 backup_encryption 内部被兼容（那里是 `password if isinstance(password, bytearray)
+    # else password.encode('utf-8')`）。此处按 UTF-8 解码后透传，得到的密钥字节与 bytearray 原样传入一致
+    # （str/None 路径逐字节不变）。
+    decrypt_pwd: str | None = (
+        decrypt_password.decode() if isinstance(decrypt_password, (bytes, bytearray)) else decrypt_password
+    )
     outcome = await orchestrator.restore(
         zip_bytes,
-        decrypt_password=decrypt_password,
+        decrypt_password=decrypt_pwd,
         confirm_sensitive=confirm_sensitive,
         reporter=_KernelProgressReporter(task_id) if task_id else None,
     )

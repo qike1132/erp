@@ -8,13 +8,14 @@ import json
 import logging
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from fastapi_app.shared_models import ApprovalLog, ApprovalRequest, User
 
 logger = logging.getLogger(__name__)
 
 
-async def create_approval_log(db: AsyncSession, approval_request: ApprovalRequest, action: str,
+async def create_approval_log(db: AsyncSession | Session, approval_request: ApprovalRequest, action: str,
                               actor: User, details: dict | None = None):
     """创建审批日志记录"""
     log = ApprovalLog(

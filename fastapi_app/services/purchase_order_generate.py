@@ -211,14 +211,14 @@ async def _load_source_records(
         cust_result = await db.execute(
             select(Order).options(selectinload(Order.items)).where(Order.id.in_(order_ids))
         )
-        cust_orders = cust_result.scalars().all()
+        cust_orders = list(cust_result.scalars().all())
 
     stockins: list = []
     if stockin_ids:
         stockin_result = await db.execute(
             select(StockIn).where(StockIn.id.in_(stockin_ids))
         )
-        stockins = stockin_result.scalars().all()
+        stockins = list(stockin_result.scalars().all())
     return cust_orders, stockins
 
 
@@ -251,7 +251,7 @@ async def _load_product_names(db: AsyncSession, product_ids: list[int]) -> dict[
     prod_result = await db.execute(
         select(Product.id, Product.name).where(Product.id.in_(product_ids))
     )
-    return dict(prod_result.all())
+    return {p_id: name for p_id, name in prod_result.all()}
 
 
 async def _load_bom_context(db: AsyncSession, product_ids: list[int]) -> _BomContext:
@@ -509,6 +509,8 @@ async def fetch_existing_pending_for_composite_ids(
     matched: list[dict] = []
     for po in result.scalars().all():
         try:
+            if not po.source_order_ids:
+                continue
             ids = json.loads(po.source_order_ids)
         except (ValueError, TypeError):
             continue

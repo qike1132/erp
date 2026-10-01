@@ -180,7 +180,7 @@ async def _fetch_unprocessed_page(db: AsyncSession, unified, page: int, per_page
         .limit(per_page)
         .offset(offset)
     )
-    return page_result.all()
+    return list(page_result.all())
 
 
 async def _load_unprocessed_sources(db: AsyncSession, rows: list) -> tuple[dict, dict]:

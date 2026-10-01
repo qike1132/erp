@@ -3,7 +3,7 @@
 
 映射到 'production_plan' 表。
 """
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from sqlalchemy import Boolean, Date, DateTime, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
@@ -20,7 +20,7 @@ class ProductionPlan(Base):
     product_name: Mapped[str] = mapped_column(String(100), nullable=False, comment='客户产品名称')
     barcode: Mapped[str] = mapped_column(String(50), nullable=False, index=True, comment='69码')
     quantity: Mapped[int] = mapped_column(Integer, nullable=False, comment='排产计划数量')
-    plan_date: Mapped[datetime] = mapped_column(Date, nullable=False, comment='计划日期')
+    plan_date: Mapped[date] = mapped_column(Date, nullable=False, comment='计划日期')
     status: Mapped[str] = mapped_column(String(20), default='pending', comment='状态: pending/confirmed/completed')
     shipped_qty: Mapped[int] = mapped_column(Integer, default=0, comment='已出货数量')
     remark: Mapped[str | None] = mapped_column(Text, nullable=True, comment='备注')
@@ -86,7 +86,7 @@ class StagingPurchasePlan(Base):
     product_name: Mapped[str] = mapped_column(String(100), nullable=False, comment='产品名称')
     barcode: Mapped[str] = mapped_column(String(50), nullable=False, comment='69码')
     quantity: Mapped[int] = mapped_column(Integer, nullable=False, comment='计划数量')
-    plan_date: Mapped[datetime] = mapped_column(Date, nullable=False, comment='计划日期')
+    plan_date: Mapped[date] = mapped_column(Date, nullable=False, comment='计划日期')
     plan_month: Mapped[str | None] = mapped_column(String(7), nullable=True, comment='计划月份 YYYY-MM')
     remark: Mapped[str | None] = mapped_column(Text, nullable=True, comment='备注')
     is_validated: Mapped[bool] = mapped_column(Boolean, default=False, comment='是否已验证')

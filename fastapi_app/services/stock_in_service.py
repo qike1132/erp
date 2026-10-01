@@ -10,6 +10,7 @@ publish_stock_event / 同模块 *_core 的引用统一通过 `stock_service.<nam
 """
 import logging
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -44,9 +45,10 @@ async def create_stockin_core(db: AsyncSession, product_id: int, quantity: int, 
 
 async def update_stockin_core(db: AsyncSession, stockin: StockIn, quantity: int, customer: str, stockin_date: datetime, note: str) -> StockIn:
     result = await db.execute(select(StockIn).where(StockIn.id == stockin.id).with_for_update())
-    stockin = result.scalar_one_or_none()
-    if not stockin:
+    stockin_row = result.scalar_one_or_none()
+    if not stockin_row:
         raise ValueError('入库记录不存在')
+    stockin = stockin_row
     old_quantity = stockin.quantity
     stockin.quantity = quantity
     stockin.customer = customer
@@ -115,9 +117,9 @@ async def update_stockin(db: AsyncSession, stockin_id: int, quantity: int, custo
     await db.flush()
     await cache_mgr.invalidate_stock_and_order()
     schedule_post_commit_invalidation(db, cache_mgr.invalidate_stock_and_order)
-    product = await db.get(Product, stockin_obj.product_id)
-    if product is not None:
-        await safe_publish_event(stock_service.publish_stock_event, StockEvent.STOCK_CHANGED, {'product_id': stockin_obj.product_id, 'product_name': product.name, 'change_type': '入库编辑', 'quantity': quantity, 'current_stock': product.current_stock}, context="入库编辑事件发布")
+    notify_product = await db.get(Product, stockin_obj.product_id)
+    if notify_product is not None:
+        await safe_publish_event(stock_service.publish_stock_event, StockEvent.STOCK_CHANGED, {'product_id': stockin_obj.product_id, 'product_name': notify_product.name, 'change_type': '入库编辑', 'quantity': quantity, 'current_stock': notify_product.current_stock}, context="入库编辑事件发布")
     logger.info(f'入库编辑成功：{old_stockin_no}，数量变更：{old_quantity} -> {quantity}')
 
 
@@ -153,7 +155,7 @@ async def batch_create_stockins(db: AsyncSession, stockins_data: list) -> dict:
             errors_map[idx] = '入库数量必须大于0'
             continue
         validated.append((idx, item))
-    results = [None] * len(stockins_data)
+    results: list[dict[str, Any] | None] = [None] * len(stockins_data)
     for idx, err in errors_map.items():
         results[idx] = {'success': False, 'error': err, 'id': stockins_data[idx].get('id', '未知')}
     if validated:

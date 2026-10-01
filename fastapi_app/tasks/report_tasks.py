@@ -58,7 +58,8 @@ async def export_report_task(ctx, report_type: str, filters: dict, user_id: int)
                 filename = f'{report_type}_report_{uuid.uuid4().hex[:8]}.xlsx'
                 file_path = os.path.join(tempfile.gettempdir(), filename)
                 with open(file_path, 'wb') as f:
-                    f.write(output_buffer.getvalue())
+                    # 导出器真实返回 bytes（utils/report_exporter._save_workbook 返回 getvalue()），仅 BytesIO 需要 getvalue()
+                    f.write(output_buffer if isinstance(output_buffer, bytes) else output_buffer.getvalue())
                 return {'success': True, 'file_path': file_path, 'filename': filename, 'row_count': len(logs), 'total_count': total_count, 'task_id': job_id}
             finally:
                 session.close()

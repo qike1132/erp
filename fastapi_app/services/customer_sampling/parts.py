@@ -260,13 +260,13 @@ async def batch_create_parts(
     role_id = await _resolve_role_id(db, project_id, role_id)
 
     # 供应商名称批量预取（一次 IN 查询）
-    supplier_ids = {item.get('supplier_id') for item in items if item.get('supplier_id') is not None}
+    supplier_ids: set[int] = {sid for item in items if (sid := item.get('supplier_id')) is not None}
     supplier_name_map: dict[int, str] = {}
     if supplier_ids:
         rows = (await db.execute(
             select(Supplier.id, Supplier.name).where(Supplier.id.in_(supplier_ids))
         )).all()
-        supplier_name_map = dict(rows)
+        supplier_name_map = {row[0]: row[1] for row in rows}
         missing = supplier_ids - set(supplier_name_map)
         if missing:
             raise NotFoundError(f'供应商 {sorted(missing)[0]} 不存在')

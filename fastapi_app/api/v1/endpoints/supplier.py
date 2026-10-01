@@ -6,6 +6,7 @@
 所有写操作（创建/编辑/删除/切换状态）会失效相关缓存。
 """
 import logging
+from typing import Callable
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -121,7 +122,10 @@ async def _run_supplier_write(
         return HTTPException(status_code=500, detail='操作失败，请稍后重试')
 
     # 注册顺序即匹配优先级：IntegrityError 是 SQLAlchemyError 子类，必须在前
-    error_map = {
+    error_map: dict[
+        type[Exception] | tuple[type[Exception], ...],
+        tuple[int, str] | Callable[[Exception], HTTPException],
+    ] = {
         ValueError: _value_error_to_http,
         IntegrityError: _integrity_to_http,
         SQLAlchemyError: _sqlalchemy_to_http,

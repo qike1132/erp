@@ -3,7 +3,8 @@
 """
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
+from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from sqlalchemy import (
@@ -52,7 +53,7 @@ class PurchaseOrder(Base):
     customer_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('customer.id'), comment='客户ID')
     customer_name: Mapped[str | None] = mapped_column(String(100), comment='客户名称(冗余)')
     customer_code: Mapped[str | None] = mapped_column(String(50), comment='客户编码')
-    order_date: Mapped[datetime | None] = mapped_column(Date, comment='下单日期')
+    order_date: Mapped[date | None] = mapped_column(Date, comment='下单日期')
     status: Mapped[str | None] = mapped_column(String(20), default='pending', comment='状态')
     remark: Mapped[str | None] = mapped_column(Text, comment='备注')
     source_order_id: Mapped[int | None] = mapped_column(Integer, index=True, comment='关联的原始订单ID(单)')
@@ -65,7 +66,7 @@ class PurchaseOrder(Base):
     spare_rate: Mapped[float | None] = mapped_column(
         Numeric(8, 2), comment='损耗率快照(千分之几)，用于追溯备品按多少损耗率算出',
     )
-    total_amount: Mapped[float | None] = mapped_column(Numeric(12, 2), default=0, comment='订单总金额')
+    total_amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), default=0, comment='订单总金额')
     create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), comment='创建时间')
     update_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), comment='更新时间')
     created_by: Mapped[int | None] = mapped_column(Integer, ForeignKey('user.id'), comment='创建人')
@@ -171,11 +172,11 @@ class PurchaseOrderItem(Base):
     material_name: Mapped[str] = mapped_column(String(100), nullable=False, comment='物料名称')
     specification: Mapped[str | None] = mapped_column(String(100), comment='规格型号')
     unit: Mapped[str | None] = mapped_column(String(20), comment='计量单位')
-    quantity: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False, default=0, comment='采购数量')
+    quantity: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0, comment='采购数量')
     unit_usage: Mapped[float | None] = mapped_column(Numeric(10, 4), default=0, comment='单SKU标准用量')
-    unit_price: Mapped[float | None] = mapped_column(Numeric(12, 2), default=0, comment='单价')
-    total_price: Mapped[float | None] = mapped_column(Numeric(12, 2), default=0, comment='总价')
-    loss_rate: Mapped[float | None] = mapped_column(Numeric(8, 2), comment='材料损耗率快照(千分之几)，逐布料行配置')
+    unit_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), default=0, comment='单价')
+    total_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), default=0, comment='总价')
+    loss_rate: Mapped[Decimal | None] = mapped_column(Numeric(8, 2), comment='材料损耗率快照(千分之几)，逐布料行配置')
     material_category: Mapped[str | None] = mapped_column(String(20), comment='物料分类')
     remark: Mapped[str | None] = mapped_column(Text, comment='备注')
     supplier_name: Mapped[str | None] = mapped_column(String(100), comment='供应商名称(明细级)')

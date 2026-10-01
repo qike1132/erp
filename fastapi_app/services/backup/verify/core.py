@@ -84,7 +84,7 @@ async def query_table_rows(tname: str, db: AsyncSession, since: str | None = Non
     if ts_col:
         # 时间戳列可能是 timestamptz（须绑 datetime）也可能是 varchar/text（须绑 str）。
         # 先试 datetime（覆盖绝大多数表），失败再回退字符串。
-        since_dt = since
+        since_dt: str | datetime | None = since
         if isinstance(since_dt, str):
             with contextlib.suppress(TypeError, ValueError):
                 since_dt = datetime.strptime(since_dt, '%Y-%m-%d %H:%M:%S')
@@ -253,10 +253,10 @@ async def verify_restore(
         try:
             current_schema = await build_schema_snapshot(db)
             for tname in sorted(set(manifest_schema) | set(current_schema)):
-                expected = {c['column'] for c in manifest_schema.get(tname, [])}
-                actual = {c['column'] for c in current_schema.get(tname, [])}
-                missing = sorted(expected - actual)
-                extra = sorted(actual - expected)
+                expected_cols = {c['column'] for c in manifest_schema.get(tname, [])}
+                actual_cols = {c['column'] for c in current_schema.get(tname, [])}
+                missing = sorted(expected_cols - actual_cols)
+                extra = sorted(actual_cols - expected_cols)
                 l4_results.append({
                     'table': tname, 'pass': (not missing and not extra),
                     'missing_columns': missing, 'extra_columns': extra,

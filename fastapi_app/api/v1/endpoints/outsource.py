@@ -30,6 +30,7 @@ from fastapi_app.schemas.outsource import (
     HubeiProductSearchItem,
     OrderActionResponse,
     OrderProcessFlowListResponse,
+    OrderProcessFlowResponse,
     OrderProcessListResponse,
     OrderProcessReceive,
     OrderProcessReceiveBatch,
@@ -214,7 +215,7 @@ async def list_order_process_flows(
 ) -> OrderProcessFlowListResponse:
     """查询订单外发工序流水（发货/收货记录，台账用）。"""
     items = await outsource_service.list_order_flows(db, order_id)
-    return OrderProcessFlowListResponse(data=items, total=len(items))
+    return OrderProcessFlowListResponse(data=[OrderProcessFlowResponse.model_validate(i) for i in items], total=len(items))
 
 
 @router.post("/orders/{order_id}/processes/generate", response_model=GenerateProcessResponse)
@@ -419,7 +420,7 @@ async def create_shipments_batch(
         )
     return ShipmentBatchResponse(
         success=True,
-        data=results,
+        data=[ShipmentResponse.model_validate(r) for r in results],
         total=len(results),
         message=f'已生成 {len(results)} 张发货单',
     )

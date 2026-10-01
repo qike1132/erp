@@ -10,6 +10,7 @@ import json
 import logging
 import uuid
 from datetime import UTC, date, datetime
+from typing import Any
 
 import openpyxl
 from sqlalchemy import and_, delete, func, select
@@ -178,7 +179,7 @@ async def get_timeline(db: AsyncSession, year: int, month: int, customer: str=''
     except (OperationalError, DisconnectionError, ValueError):
         shipped_map = {}
     days_in_month = calendar.monthrange(year, month)[1]
-    timeline = {}
+    timeline: dict[str, dict[str, Any]] = {}
     customer_set = set()
     for day in range(1, days_in_month + 1):
         d = date(year, month, day)
@@ -285,11 +286,11 @@ async def validate_staging(db: AsyncSession, session_id: str) -> dict:
         elif not record.product_name and record.barcode in product_name_map:
             record.product_name = product_name_map[record.barcode]
         if errors:
-            record.is_validated = 0
+            record.is_validated = False
             record.validation_error = '; '.join(errors)
             error_count += 1
         else:
-            record.is_validated = 1
+            record.is_validated = True
             record.validation_error = None
             valid_count += 1
     await db.flush()

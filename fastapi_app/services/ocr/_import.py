@@ -111,11 +111,11 @@ async def import_staging_stockouts_from_file(db: AsyncSession, file_content: byt
         _prog(message='正在匹配产品和客户...', percent=85)
         await asyncio.sleep(0.05)
         result = await db.execute(select(Product))
-        all_products = result.scalars().all()
+        all_products = list(result.scalars().all())
         product_map = {p.name.lower().strip(): p for p in all_products}
         product_map.update({p.barcode: p for p in all_products if p.barcode})
         result = await db.execute(select(Customer))
-        all_customers = result.scalars().all()
+        all_customers = list(result.scalars().all())
         _prog(message=f'正在写入暂存区（共{len(parsed_items)}项）...', percent=90)
         await asyncio.sleep(0.05)
         imported = 0

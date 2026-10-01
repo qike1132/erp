@@ -74,7 +74,7 @@ async def _fetch_affected_plans_and_details(
     plan_result = await db.execute(
         select(PurchasePlan).where(PurchasePlan.customer_name == customer_name)
     )
-    affected_plans = plan_result.scalars().all()
+    affected_plans = list(plan_result.scalars().all())
     if not affected_plans:
         return [], [], []
 
@@ -85,7 +85,7 @@ async def _fetch_affected_plans_and_details(
         .order_by(PurchasePlanDetail.plan_date, PurchasePlanDetail.id)
         .with_for_update()
     )
-    all_affected_details = detail_result.scalars().all()
+    all_affected_details = list(detail_result.scalars().all())
     related_details = [d for d in all_affected_details if d.product_name == product_name]
     return affected_plans, all_affected_details, related_details
 
@@ -247,7 +247,7 @@ async def recalc_plans_after_stockout_delete(db: AsyncSession, customer_name: st
     plan_result = await db.execute(
         select(PurchasePlan).where(PurchasePlan.customer_name == customer_name)
     )
-    affected_plans = plan_result.scalars().all()
+    affected_plans = list(plan_result.scalars().all())
     if not affected_plans:
         return
 
@@ -259,7 +259,7 @@ async def recalc_plans_after_stockout_delete(db: AsyncSession, customer_name: st
         .order_by(PurchasePlanDetail.plan_date, PurchasePlanDetail.id)
         .with_for_update()
     )
-    all_affected_details = detail_result.scalars().all()
+    all_affected_details = list(detail_result.scalars().all())
 
     related_details = [d for d in all_affected_details if d.product_name == product_name]
     if not related_details:

@@ -302,7 +302,8 @@ async def upload_packaging_excel(
     Raises:
         HTTPException: 文件格式不支持或读取失败时抛出 400。
     """
-    if not file.filename.endswith('.xlsx'):
+    filename = file.filename or ''
+    if not filename.endswith('.xlsx'):
         raise HTTPException(status_code=400, detail='仅支持 .xlsx 格式文件，.xls 已不再支持')
     try:
         content = await file.read()
@@ -313,7 +314,7 @@ async def upload_packaging_excel(
     async with db_transaction(db):
         created_by = user.username if hasattr(user, 'username') else ''
         result = await production_summary_service.upload_packaging_excel(db, content, created_by)
-    return success_response(**{**result})
+    return PackagingUploadResponse(**success_response(**{**result}))
 
 
 @router.get('/packaging/export')

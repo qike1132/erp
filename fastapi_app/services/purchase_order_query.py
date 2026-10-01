@@ -45,7 +45,7 @@ async def get_purchase_orders(db: AsyncSession, *, page: int = 1, per_page: int 
     query = _apply_po_sort(query, sort_by, sort_order, PurchaseOrder.create_time, _PO_SORT_MAP)
 
     total_result = await db.execute(count_query)
-    total = total_result.scalar()
+    total = total_result.scalar() or 0
 
     query = query.offset((page - 1) * per_page).limit(per_page)
     result = await db.execute(query)
@@ -74,7 +74,7 @@ async def get_purchase_orders(db: AsyncSession, *, page: int = 1, per_page: int 
     }
 
 
-async def get_purchase_order(db: AsyncSession, order_id: int) -> dict:
+async def get_purchase_order(db: AsyncSession, order_id: int) -> dict | None:
     order = await db.get(PurchaseOrder, order_id)
     if not order:
         return None
@@ -145,7 +145,7 @@ async def get_completed_purchase_orders(
     query = _apply_po_sort(query, sort_by, sort_order, PurchaseOrder.completed_at, _COMPLETED_SORT_MAP)
 
     total_result = await db.execute(count_query)
-    total = total_result.scalar()
+    total = total_result.scalar() or 0
 
     query = query.offset((page - 1) * per_page).limit(per_page)
     result = await db.execute(query)
@@ -590,20 +590,20 @@ async def get_unprocessed_orders(
     all_records: list[dict] = []
     for r in rows:
         if r.record_type == 'order':
-            o = orders_map.get(r.source_id)
-            if o:
-                all_records.append(_build_unprocessed_order_record(o))
+            order_obj = orders_map.get(r.source_id)
+            if order_obj:
+                all_records.append(_build_unprocessed_order_record(order_obj))
         else:
-            s = stockins_map.get(r.source_id)
-            if s:
-                all_records.append(_build_unprocessed_stockin_record(s))
+            stockin_obj = stockins_map.get(r.source_id)
+            if stockin_obj:
+                all_records.append(_build_unprocessed_stockin_record(stockin_obj))
 
     # ---- 5. 批量查询产品名称（覆盖所有 SKU 的 product_id）----
     product_ids_set: set[int] = set()
-    for r in all_records:
-        if r.get('product_id'):
-            product_ids_set.add(r['product_id'])
-        for item in r.get('items', []):
+    for rec in all_records:
+        if rec.get('product_id'):
+            product_ids_set.add(rec['product_id'])
+        for item in rec.get('items', []):
             if item.get('product_id'):
                 product_ids_set.add(item['product_id'])
     product_ids = list(product_ids_set)

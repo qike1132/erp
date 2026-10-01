@@ -152,19 +152,21 @@ def _apply_order_field_updates(order: PurchaseOrder, data: dict) -> None:
         order.status = data['status']
 
 
-def _apply_item_fields(item: PurchaseOrderItem, item_data: dict, order: PurchaseOrder) -> None:
-    """将 item_data 中的字段写入明细对象。"""
+def _apply_item_fields(item: PurchaseOrderItem, item_data: dict, order: PurchaseOrder) -> Decimal:
+    """将 item_data 中的字段写入明细对象，返回本行总价（运行期恒为 Decimal）。"""
     item.material_name = item_data.get('material_name', '')
     item.material_code = item_data.get('material_code', '')
     item.specification = item_data.get('specification', '')
     item.unit = item_data.get('unit', '')
     item.unit_price = Decimal(str(item_data.get('unit_price', 0)))
     item.quantity = Decimal(str(item_data.get('quantity', 0)))
-    item.total_price = item.unit_price * item.quantity
+    line_total = item.unit_price * item.quantity
+    item.total_price = line_total
     item.material_category = item_data.get('category', '')
     item.remark = item_data.get('remark') or _scope_remark(item_data.get('source_role'))
     item.supplier_name = order.supplier_name
     item.customer_name = order.customer_name
+    return line_total
 
 
 async def _upsert_order_items(
@@ -208,11 +210,11 @@ async def _upsert_order_items(
             # id 无效（已被删除、不存在，或属于其他订单）：跳过，避免跨订单写入
             continue
 
-        _apply_item_fields(item, item_data, order)
+        line_total = _apply_item_fields(item, item_data, order)
 
         if not item_id:
             db.add(item)
-        total_amount += item.total_price
+        total_amount += line_total
 
     to_delete_ids = existing_items - updated_ids
     if to_delete_ids:

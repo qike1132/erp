@@ -6,6 +6,7 @@
 
 import os
 from datetime import datetime
+from typing import Any
 
 import openpyxl
 from openpyxl import Workbook
@@ -102,7 +103,7 @@ def generate_factory_summary_print(orders, order_items_map, source_orders=None):
     source_orders = source_orders or []
     source_order_map = {o.id: o for o in source_orders}
 
-    grouped_data = {}
+    grouped_data: dict[tuple[str, str], dict[str, dict[tuple[str, str, str], dict[str, Any]]]] = {}
     order_count_map = {}
 
     for order in orders:
@@ -150,7 +151,7 @@ def generate_factory_summary_print(orders, order_items_map, source_orders=None):
 
     sorted_groups = {}
     for (customer_name, product_name), supplier_dict in grouped_data.items():
-        suppliers_list = []
+        suppliers_list: list[dict[str, Any]] = []
         for supplier_name, fabric_dict in supplier_dict.items():
             fabrics_list = list(fabric_dict.values())
             for f in fabrics_list:
@@ -167,7 +168,7 @@ th{background:#E6E6E6;font-weight:bold}
     body_parts = ['<div class="header"><h1>东莞市滨发玩具有限公司</h1><h2>工厂内部采购订单汇总</h2></div>']
     body_parts.append('<table><thead><tr><th>客户</th><th>产品名称</th><th>订单数量</th><th>供应商</th><th>布料名称</th><th>规格型号</th><th>数量</th></tr></thead><tbody>')
 
-    grand_total = 0
+    grand_total: float = 0
     for (customer_name, product_name), suppliers in sorted(sorted_groups.items()):
         total_fabric_rows = sum(len(s['fabrics']) for s in suppliers)
         order_info = order_count_map[(customer_name, product_name)]

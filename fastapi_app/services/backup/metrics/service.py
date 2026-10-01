@@ -14,7 +14,7 @@ import json
 import logging
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 import psutil
 from sqlalchemy import select
@@ -25,6 +25,18 @@ from fastapi_app.services.backup._constants import BACKUP_DIR
 from fastapi_app.shared_models.backup_record import BackupRecord
 
 logger = logging.getLogger(__name__)
+
+
+class _DailyStat(TypedDict):
+    """daily_stats 条目形态（纯类型层声明，运行期仍是普通 dict）。"""
+
+    date: str
+    total: int
+    success: int
+    failed: int
+    total_size: int
+    total_duration: float
+    avg_duration: float
 
 
 class BackupMetricsService:
@@ -420,7 +432,7 @@ class BackupMetricsService:
                 records = result.scalars().all()
 
                 # 按天分组
-                daily_stats = {}
+                daily_stats: dict[str, _DailyStat] = {}
                 current_date = start_date.date()
                 while current_date <= end_date.date():
                     date_key = current_date.isoformat()
@@ -514,10 +526,10 @@ class BackupMetricsService:
             }
 
     def _generate_trend_recommendations(self,
-                                      daily_stats: list[dict[str, Any]],
+                                      daily_stats: list[_DailyStat],
                                       success_rates: list[float]) -> list[str]:
         """根据趋势生成建议"""
-        recommendations = []
+        recommendations: list[str] = []
 
         if not daily_stats or not success_rates:
             return recommendations

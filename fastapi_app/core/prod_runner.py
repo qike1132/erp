@@ -80,6 +80,8 @@ def _init_log_streams() -> None:
     `reconfigure` 缺失（如 stdout 被替换成非 TextIOWrapper）时静默降级，不影响启动。
     """
     for stream in (sys.stdout, sys.stderr):
+        if not isinstance(stream, io.TextIOWrapper):
+            continue
         with contextlib.suppress(Exception):
             stream.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
     started = datetime.now().strftime("%Y-%m-%d %H:%M:%S")

@@ -790,7 +790,7 @@ async def get_backup_statistics(
         import shutil
         backup_dir = backup_service.BACKUP_DIR
 
-        storage_usage = {}
+        storage_usage: dict[str, float | int | str] = {}
         if backup_dir.exists():
             try:
                 disk_usage = shutil.disk_usage(backup_dir)
@@ -824,7 +824,7 @@ async def get_backup_statistics(
         if backup_files:
             # 按日期分组
             from collections import defaultdict
-            daily_counts = defaultdict(int)
+            daily_counts: defaultdict[str, int] = defaultdict(int)
 
             for backup in backup_files:
                 mtime = datetime.fromtimestamp(backup.get('mtime', 0))

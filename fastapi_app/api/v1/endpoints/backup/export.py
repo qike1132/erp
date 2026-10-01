@@ -115,7 +115,8 @@ async def _export_backup_to_response(
             logger.error(f'JSON 备份导出失败: {e}')
             raise HTTPException(status_code=500, detail='备份失败，请查看服务器日志') from e
 
-        if effective_encrypt:
+        # _resolve_encryption 约定：encrypted=True 时密码必为真值（密码缺失会降级为 False）
+        if effective_encrypt and encryption_password:
             json_bytes = _encrypt_backup_data(json_bytes, encryption_password)
             filename = f'erp_backup_{timestamp}.json.enc'
             media_type = 'application/octet-stream'
@@ -499,7 +500,10 @@ async def get_backup_info(
         )
         if bundle_id is None:
             # Redis 不可用：文件交给请求结束清理，分片回退逐片生成
-            background_tasks.add_task(lambda p=bundle_dest: p.exists() and os.unlink(p))
+            def _cleanup_bundle(p: Path = bundle_dest) -> None:
+                if p.exists():
+                    os.unlink(p)
+            background_tasks.add_task(_cleanup_bundle)
     except OSError as e:
         logger.warning(f'登记分片 bundle 失败（回退逐片生成）: {e}')
         bundle_id = None
@@ -582,7 +586,10 @@ async def export_backup_chunk(
         logger.error(f'生成备份分片失败: {e}')
         raise HTTPException(status_code=500, detail='生成备份分片失败') from e
 
-    background_tasks.add_task(lambda p=backup_path: p.exists() and os.unlink(p))
+    def _cleanup_backup_path(p: Path = backup_path) -> None:
+        if p.exists():
+            os.unlink(p)
+    background_tasks.add_task(_cleanup_backup_path)
 
     try:
         total_size = os.path.getsize(backup_path)
@@ -642,7 +649,11 @@ async def export_backup_enhanced(
         temp_files.append(str(path))
         return path
 
-    background_tasks.add_task(lambda: [os.unlink(p) for p in temp_files if os.path.exists(p)])
+    def _cleanup_temp_files() -> None:
+        for _p in temp_files:
+            if os.path.exists(_p):
+                os.unlink(_p)
+    background_tasks.add_task(_cleanup_temp_files)
     # H3：GET 端点密码仅走 X-Backup-Password 头/环境变量
     return await _export_backup_to_response(
         request, db, user, remark, format, encrypt, None, x_backup_password, _register_temp_file,

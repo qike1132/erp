@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
+from enum import Enum
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,9 +23,15 @@ from fastapi_app.shared_models import (
 
 logger = logging.getLogger(__name__)
 
+class _UnsetType(Enum):
+    """"未传参"哨兵类型（枚举字面量便于类型收窄）。"""
+
+    TOKEN = 'unset'
+
+
 # 可空字段的"未传参"哨兵：区分「显式传 null = 清空」与「未传 = 不修改」。
 # 仅 update_project 签名内部使用，调用方经 endpoint 的 model_fields_set 判定后传参。
-_UNSET = object()
+_UNSET = _UnsetType.TOKEN
 
 from .common import (
     _ensure_part_name_unique,
@@ -185,9 +192,9 @@ async def update_project(
     project_id: int,
     *,
     product_name: str | None = None,
-    pattern_maker_id: int | object | None = _UNSET,
+    pattern_maker_id: int | None | _UnsetType = _UNSET,
     remark: str | None = None,
-    product_image_file_id: int | object | None = _UNSET,
+    product_image_file_id: int | None | _UnsetType = _UNSET,
     current_version: str | None = None,
     version: int,
     user_id: int | None = None,
@@ -215,7 +222,7 @@ async def update_project(
         raise ConflictError('该打样项目已被他人更新，请刷新后重试')
 
     # 收集字段变更用于审计
-    field_diffs = []
+    field_diffs: list[dict[str, object]] = []
     old_image_file_id = project.product_image_file_id
 
     if product_name is not None and product_name != project.product_name:

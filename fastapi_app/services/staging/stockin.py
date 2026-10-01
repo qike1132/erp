@@ -4,8 +4,9 @@
 """
 import logging
 from datetime import UTC, datetime
+from typing import cast
 
-from sqlalchemy import delete, select
+from sqlalchemy import CursorResult, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.exceptions import NotFoundError
@@ -69,7 +70,8 @@ async def clear_staging_stockins_by_session(db: AsyncSession, session_id: str) -
         delete(StagingStockIn).where(StagingStockIn.session_id == session_id)
     )
     await db.flush()
-    return result.rowcount
+    # DELETE 的 execute 结果为 CursorResult（与 staging/stockout.py 同写法）
+    return cast(CursorResult, result).rowcount
 
 async def clear_staging_stockins(db: AsyncSession, session_id: str):
     await clear_staging_stockins_by_session(db, session_id)
@@ -97,7 +99,7 @@ async def confirm_staging_stockins(
         select(StagingStockIn).where(
             StagingStockIn.session_id == session_id,
             StagingStockIn.status == StagingStatus.PENDING,
-            StagingStockIn.is_validated,
+            StagingStockIn.is_validated.is_(True),
         )
     )
     staging_stockins = result.scalars().all()
@@ -128,7 +130,10 @@ async def confirm_staging_stockins(
                 )
                 db.add(stockin)
 
-                product = await get_product_for_update(db, staging.product_id)
+                product_id = staging.product_id
+                if product_id is None:
+                    raise ValueError(f'备货{staging.customer}-{staging.product_name}产品不存在(ID:{product_id})')
+                product = await get_product_for_update(db, product_id)
                 if not product:
                     raise ValueError(f'备货{staging.customer}-{staging.product_name}产品不存在(ID:{staging.product_id})')
                 product.current_stock += staging.quantity

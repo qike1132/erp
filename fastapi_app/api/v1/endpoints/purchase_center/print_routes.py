@@ -25,6 +25,7 @@ from fastapi_app.core.logger import logger
 from fastapi_app.core.response import success_response
 from fastapi_app.schemas.purchase_center import SupplierSummaryResponse
 from fastapi_app.services import purchase_center_service as svc
+from fastapi_app.shared_models import PurchaseOrderItem
 
 router = APIRouter()
 
@@ -47,7 +48,7 @@ async def api_summary_print(data: SummaryPrintRequest, db: AsyncSession=Depends(
                 ids = all_order_ids
 
         items = await svc.get_purchase_order_items_by_order_ids(db, ids)
-        order_items_map = {}
+        order_items_map: dict[int, list[PurchaseOrderItem]] = {}
         for item in items:
             order_items_map.setdefault(item.order_id, []).append(item)
 

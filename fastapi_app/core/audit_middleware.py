@@ -122,7 +122,7 @@ class AuditLogMiddleware(BaseHTTPMiddleware):
                 return response
 
             start_time = time.time()
-            response: Response = await call_next(request)
+            response = await call_next(request)
             duration_ms = round((time.time() - start_time) * 1000, 2)
 
             try:

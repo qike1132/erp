@@ -41,13 +41,15 @@ async def clear_staging_orders_by_session(session_id: str, db: AsyncSession=Depe
 @router.post('/import', response_model=StagingOrderImportResult, summary='导入订单到暂存区')
 async def import_staging_orders(file: UploadFile=File(...), session_id: str=Query('default', description='会话ID'), db: AsyncSession=Depends(get_async_db), current_user: User=Depends(require_any_permission('batch_import', 'order_manage'))):
     """批量导入订单到暂存区"""
+    # session_id 显式传 None 与省略等价（pydantic 运行时默认即 None，已实测 model_dump 为 session_id=None）；
+    # mypy 把 schema 中 `session_id: str | None = Field(None, ...)` 的位置参数形式视为必填（fastapi_app/schemas/staging.py:49）。
     if not file.filename or not file.filename.endswith('.xlsx'):
-        return StagingOrderImportResult(success=False, message='只支持 .xlsx 格式，.xls 已不再支持')
+        return StagingOrderImportResult(success=False, message='只支持 .xlsx 格式，.xls 已不再支持', session_id=None)
     content = await file.read()
     if len(content) > 10 * 1024 * 1024:
-        return StagingOrderImportResult(success=False, message='文件大小超过10MB限制')
+        return StagingOrderImportResult(success=False, message='文件大小超过10MB限制', session_id=None)
     if content[:4] != b'PK\x03\x04':
-        return StagingOrderImportResult(success=False, message='文件内容不是有效的Excel格式')
+        return StagingOrderImportResult(success=False, message='文件内容不是有效的Excel格式', session_id=None)
     scoped_session = f'u{current_user.id}:{session_id}'
     async with db_transaction(db):
         imported, message, errors = await svc.import_staging_orders_from_excel(db, content, scoped_session)

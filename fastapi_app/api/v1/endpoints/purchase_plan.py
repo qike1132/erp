@@ -13,6 +13,7 @@
 import asyncio
 import logging
 import os
+from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy.exc import DisconnectionError, IntegrityError, OperationalError
@@ -83,7 +84,7 @@ async def list_plans(year: int=Query(..., description='年份'), month: int=Quer
         raise HTTPException(status_code=500, detail=f'获取计划列表失败: {settings.sanitize_error(e)}') from e
 
 @router.get('/detail/{plan_id}', response_model=PurchasePlanDetailResponse)
-async def plan_detail(plan_id: int, db: AsyncSession=Depends(get_async_read_db), _user: User=Depends(require_permission('production_plan_view'))) -> PurchasePlanDetailResponse:
+async def plan_detail(plan_id: int, db: AsyncSession=Depends(get_async_read_db), _user: User=Depends(require_permission('production_plan_view'))) -> dict[str, Any]:
     """获取主单+明细（含库存对比+出货进度）。
 
     Args:
@@ -106,7 +107,7 @@ async def plan_detail(plan_id: int, db: AsyncSession=Depends(get_async_read_db),
         raise HTTPException(status_code=500, detail=f'获取计划详情失败: {settings.sanitize_error(e)}') from e
 
 @router.post('/create', response_model=CreatePlanResponse)
-async def create_plan(data: PurchasePlanCreate, db: AsyncSession=Depends(get_async_db), user: User=Depends(require_permission('production_plan_manage'))) -> CreatePlanResponse:
+async def create_plan(data: PurchasePlanCreate, db: AsyncSession=Depends(get_async_db), user: User=Depends(require_permission('production_plan_manage'))) -> dict[str, Any]:
     """创建采购计划主单+明细。
 
     事务模式：db_transaction + error_map 异常映射（commit/rollback/post-commit
@@ -131,16 +132,16 @@ async def create_plan(data: PurchasePlanCreate, db: AsyncSession=Depends(get_asy
     """
     from fastapi_app.services.purchase_plan_crud import PlanExistsError
 
-    def _plan_exists(e: PlanExistsError) -> HTTPException:
+    def _plan_exists(e: Exception) -> HTTPException:
         # 该客户当月已有计划：冲突不可重试，提示用户编辑现有计划
         logger.warning(f'创建计划被拒：{e}')
         return HTTPException(status_code=409, detail=str(e))
 
-    def _plan_no_conflict(e: IntegrityError) -> HTTPException:
+    def _plan_no_conflict(e: Exception) -> HTTPException:
         logger.error(f'创建计划单号冲突: {e}', exc_info=True)
         return HTTPException(status_code=409, detail='单号已存在，请勿重复提交')
 
-    def _db_failure(e: OperationalError | DisconnectionError) -> HTTPException:
+    def _db_failure(e: Exception) -> HTTPException:
         logger.error(f'创建计划失败: {e}', exc_info=True)
         return HTTPException(status_code=500, detail=f'创建计划失败: {settings.sanitize_error(e)}')
 
@@ -369,7 +370,7 @@ async def day_details(year: int=Query(..., description='年份'), month: int=Que
         raise HTTPException(status_code=500, detail='获取日期明细失败，请稍后重试') from e
 
 @router.get('/inventory-compare', response_model=InventoryCompareResponse)
-async def inventory_compare(year: int=Query(..., description='年份'), month: int=Query(..., ge=1, le=12, description='月份'), customer_id: int=Query(0, description='客户ID筛选'), db: AsyncSession=Depends(get_async_read_db), _user: User=Depends(require_permission('production_plan_view'))) -> InventoryCompareResponse:
+async def inventory_compare(year: int=Query(..., description='年份'), month: int=Query(..., ge=1, le=12, description='月份'), customer_id: int=Query(0, description='客户ID筛选'), db: AsyncSession=Depends(get_async_read_db), _user: User=Depends(require_permission('production_plan_view'))) -> dict[str, Any]:
     """库存对比数据。
 
     Args:
@@ -392,7 +393,7 @@ async def inventory_compare(year: int=Query(..., description='年份'), month: i
         raise HTTPException(status_code=500, detail=f'获取库存对比失败: {settings.sanitize_error(e)}') from e
 
 @router.get('/shipment/progress', response_model=ShipmentProgressResponse)
-async def shipment_progress(plan_id: int=Query(..., description='计划主单ID'), db: AsyncSession=Depends(get_async_read_db), _user: User=Depends(require_permission('production_plan_view'))) -> ShipmentProgressResponse:
+async def shipment_progress(plan_id: int=Query(..., description='计划主单ID'), db: AsyncSession=Depends(get_async_read_db), _user: User=Depends(require_permission('production_plan_view'))) -> dict[str, Any]:
     """出货进度追踪。
 
     Args:
@@ -415,7 +416,7 @@ async def shipment_progress(plan_id: int=Query(..., description='计划主单ID'
         raise HTTPException(status_code=500, detail=f'获取出货进度失败: {settings.sanitize_error(e)}') from e
 
 @router.get('/shipment/records', response_model=ShipmentRecordsResponse)
-async def shipment_records(plan_id: int=Query(..., description='计划主单ID'), db: AsyncSession=Depends(get_async_read_db), _user: User=Depends(require_permission('production_plan_view'))) -> ShipmentRecordsResponse:
+async def shipment_records(plan_id: int=Query(..., description='计划主单ID'), db: AsyncSession=Depends(get_async_read_db), _user: User=Depends(require_permission('production_plan_view'))) -> dict[str, Any]:
     """获取指定计划的出货流水记录。
 
     Args:
@@ -439,7 +440,7 @@ async def shipment_records(plan_id: int=Query(..., description='计划主单ID')
         raise HTTPException(status_code=500, detail=f'获取出货流水失败: {settings.sanitize_error(e)}') from e
 
 @router.get('/shipment/records-by-date', response_model=ShipmentRecordsResponse)
-async def shipment_records_by_date(date: str=Query(..., description='查询日期 YYYY-MM-DD'), db: AsyncSession=Depends(get_async_read_db), _user: User=Depends(require_permission('production_plan_view'))) -> ShipmentRecordsResponse:
+async def shipment_records_by_date(date: str=Query(..., description='查询日期 YYYY-MM-DD'), db: AsyncSession=Depends(get_async_read_db), _user: User=Depends(require_permission('production_plan_view'))) -> dict[str, Any]:
     """S1 批量端点：按日期查询所有相关出货流水记录
 
     替代前端按 plan_id 分块 N+1 请求的模式。
@@ -466,7 +467,7 @@ async def shipment_records_by_date(date: str=Query(..., description='查询日�
         raise HTTPException(status_code=500, detail=f'获取出货流水失败: {settings.sanitize_error(e)}') from e
 
 @router.post('/upload', response_model=PurchasePlanUploadExcelResponse)
-async def upload_excel(file: UploadFile=File(..., description='Excel文件'), db: AsyncSession=Depends(get_async_db), _user: User=Depends(require_permission('production_plan_manage'))) -> PurchasePlanUploadExcelResponse:
+async def upload_excel(file: UploadFile=File(..., description='Excel文件'), db: AsyncSession=Depends(get_async_db), _user: User=Depends(require_permission('production_plan_manage'))) -> dict[str, Any]:
     """上传Excel文件，解析到暂存表。
 
     Args:
@@ -481,7 +482,7 @@ async def upload_excel(file: UploadFile=File(..., description='Excel文件'), db
         HTTPException: 文件格式或大小不合法返回 400。
     """
     # 安全校验：文件类型和大小限制
-    if not file.filename.endswith('.xlsx'):
+    if not file.filename or not file.filename.endswith('.xlsx'):
         raise HTTPException(status_code=400, detail='仅支持 .xlsx 格式文件，.xls 已不再支持')
     content = await file.read()
     if len(content) > MAX_UPLOAD_FILE_SIZE:
@@ -492,7 +493,7 @@ async def upload_excel(file: UploadFile=File(..., description='Excel文件'), db
     return success_response(**{**result})
 
 @router.get('/staging/list', response_model=PurchasePlanStagingListResponse)
-async def staging_list(db: AsyncSession=Depends(get_async_read_db), _user: User=Depends(require_permission('production_plan_manage'))) -> PurchasePlanStagingListResponse:
+async def staging_list(db: AsyncSession=Depends(get_async_read_db), _user: User=Depends(require_permission('production_plan_manage'))) -> dict[str, Any]:
     """获取暂存区预览数据。
 
     Args:
@@ -507,7 +508,7 @@ async def staging_list(db: AsyncSession=Depends(get_async_read_db), _user: User=
     return success_response(data=records, total=len(records))
 
 @router.post('/staging/validate', response_model=PurchasePlanStagingValidateResponse)
-async def staging_validate(db: AsyncSession=Depends(get_async_db), _user: User=Depends(require_permission('production_plan_manage'))) -> PurchasePlanStagingValidateResponse:
+async def staging_validate(db: AsyncSession=Depends(get_async_db), _user: User=Depends(require_permission('production_plan_manage'))) -> dict[str, Any]:
     """触发暂存数据验证。
 
     Args:
@@ -523,7 +524,7 @@ async def staging_validate(db: AsyncSession=Depends(get_async_db), _user: User=D
     return success_response(**{**result})
 
 @router.post('/staging/confirm', response_model=PurchasePlanStagingConfirmResponse)
-async def staging_confirm(data: ConfirmStagingRequest, db: AsyncSession=Depends(get_async_db), user: User=Depends(require_permission('production_plan_manage'))) -> PurchasePlanStagingConfirmResponse:
+async def staging_confirm(data: ConfirmStagingRequest, db: AsyncSession=Depends(get_async_db), user: User=Depends(require_permission('production_plan_manage'))) -> dict[str, Any]:
     """确认暂存数据，批量写入正式表。
 
     事务模式：db_transaction + error_map 异常映射（commit/rollback/post-commit
@@ -542,7 +543,7 @@ async def staging_confirm(data: ConfirmStagingRequest, db: AsyncSession=Depends(
     """
     session_id, created_by = get_user_identity(user)
 
-    def _confirm_no_conflict(e: IntegrityError) -> HTTPException:
+    def _confirm_no_conflict(e: Exception) -> HTTPException:
         logger.error(f'确认计划单号冲突: {e}')
         return HTTPException(status_code=409, detail='单号已存在，请勿重复提交')
 
@@ -551,7 +552,7 @@ async def staging_confirm(data: ConfirmStagingRequest, db: AsyncSession=Depends(
     return success_response(**{**result})
 
 @router.delete('/staging/clear', response_model=PurchasePlanActionResponse)
-async def staging_clear(db: AsyncSession=Depends(get_async_db), _user: User=Depends(require_permission('production_plan_manage'))) -> PurchasePlanActionResponse:
+async def staging_clear(db: AsyncSession=Depends(get_async_db), _user: User=Depends(require_permission('production_plan_manage'))) -> dict[str, Any]:
     """清空暂存区。
 
     Args:

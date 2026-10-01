@@ -4,8 +4,10 @@
 """
 import logging
 from datetime import UTC, datetime
+from typing import cast
 
 from sqlalchemy import delete, func, select
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -90,7 +92,9 @@ async def clear_staging_orders_by_session(db: AsyncSession, session_id: str) -> 
         delete(StagingOrder).where(StagingOrder.session_id == session_id)
     )
     await db.flush()
-    return result.rowcount
+    # P2-A2 类型收窄：Core DML 运行时返回 CursorResult，execute() 只声明基类 Result
+    # （与 fastapi_app/services/staging/stockout.py:82 同型写法；MagicMock/真实驱动行为均不变）
+    return cast(CursorResult, result).rowcount
 
 async def clear_staging_orders(db: AsyncSession, session_id: str):
     await clear_staging_orders_by_session(db, session_id)
@@ -118,7 +122,8 @@ async def confirm_staging_orders(
         select(StagingOrder).where(
             StagingOrder.session_id == session_id,
             StagingOrder.status == StagingStatus.PENDING,
-            StagingOrder.is_validated,
+            # P2-A2 类型收窄：nullable Boolean，WHERE col 与 IS TRUE 结果集完全相同
+            StagingOrder.is_validated.is_(True),
         )
     )
     staging_orders = result.scalars().all()
@@ -149,7 +154,11 @@ async def confirm_staging_orders(
                     db.add(order)
                     await db.flush()
 
-                    product = await get_product_for_update(db, staging.product_id)
+                    # P2-A2 类型收窄：staging.product_id 列可空；None 时抛出的文案与 get_product_for_update 内部逐字一致
+                    staging_product_id = staging.product_id
+                    if staging_product_id is None:
+                        raise ValueError(f'产品ID {staging_product_id} 不存在')
+                    product = await get_product_for_update(db, staging_product_id)
                     if not product:
                         raise ValueError(f'订单{staging.customer}-{staging.product_name}产品不存在(ID:{staging.product_id})')
                     product.current_stock += staging.quantity
@@ -166,7 +175,7 @@ async def confirm_staging_orders(
                     if staging.deduct_stock and staging.deduct_quantity and staging.deduct_quantity > 0:
                         await process_order_deduction(
                             db, order,
-                            staging.product_id,
+                            staging_product_id,
                             staging.quantity,
                             deduct_stock=True,
                             custom_deduct_quantity=staging.deduct_quantity,

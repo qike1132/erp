@@ -38,7 +38,7 @@ def _parse_ocr_table_format(lines: list[str], all_text: str) -> list[dict]:
     """
     items = []
     header_keywords = {'product_name': ['产品名称', '产品', '品名', '商品', '物料'], 'quantity': ['出货数量', '数量', '数', 'qty', 'QTY'], 'customer': ['客户名称', '客户', '收货', '买方'], 'note': ['备注', '说明', '摘要', 'Remark', '备注说明']}
-    line_col_map = {}
+    line_col_map: dict[int, str | list[str]] = {}
     used_cols = set()
     header_end = 0
     for i, line in enumerate(lines):
@@ -66,11 +66,12 @@ def _parse_ocr_table_format(lines: list[str], all_text: str) -> list[dict]:
                 col_positions.sort()
                 for _, col_name in col_positions:
                     if col_name not in used_cols:
-                        line_col_map[i] = line_col_map.get(i, [])
-                        if isinstance(line_col_map[i], str):
-                            line_col_map[i] = [line_col_map[i]]
-                        if col_name not in (line_col_map[i] if isinstance(line_col_map[i], list) else [line_col_map[i]]):
-                            line_col_map[i].append(col_name)
+                        current_cols = line_col_map.get(i, [])
+                        if isinstance(current_cols, str):
+                            current_cols = [current_cols]
+                        if col_name not in current_cols:
+                            current_cols.append(col_name)
+                            line_col_map[i] = current_cols
                             used_cols.add(col_name)
                             header_end = max(header_end, i)
             else:

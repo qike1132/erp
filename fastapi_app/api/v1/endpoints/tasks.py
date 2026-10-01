@@ -152,7 +152,7 @@ async def async_import_orders(
     """异步批量导入订单（提交后台任务）"""
     _validate_import_file(file)
 
-    suffix = os.path.splitext(file.filename)[1]
+    suffix = os.path.splitext(file.filename or '')[1]
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         shutil.copyfileobj(file.file, tmp)
         tmp_path = tmp.name
@@ -177,7 +177,7 @@ async def async_import_stockins(
     """异步批量导入备货（提交后台任务）"""
     _validate_import_file(file)
 
-    suffix = os.path.splitext(file.filename)[1]
+    suffix = os.path.splitext(file.filename or '')[1]
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         shutil.copyfileobj(file.file, tmp)
         tmp_path = tmp.name
@@ -250,13 +250,14 @@ async def download_task_result(
         raise HTTPException(status_code=404, detail="导出文件不存在或已过期")
 
     from fastapi.responses import FileResponse
+    from starlette.background import BackgroundTask
     filename = result.get("filename", "export.xlsx")
 
     return FileResponse(
         path=file_path,
         filename=filename,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        background=lambda: _cleanup_file(file_path),
+        background=BackgroundTask(_cleanup_file, file_path),
     )
 
 

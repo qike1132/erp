@@ -6,6 +6,7 @@
 所有写操作（创建/编辑/删除/切换状态）会失效相关缓存。
 """
 import logging
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.exc import IntegrityError
@@ -107,7 +108,7 @@ async def _set_cached_customer_list(status: str | None, per_page: int, items: li
     )
 
 
-def _customer_in_use_error(_exc: IntegrityError) -> HTTPException:
+def _customer_in_use_error(_exc: Exception) -> HTTPException:
     """客户被引用触发外键约束 —— 属预期业务场景，降级为 INFO 日志并返回 400。
 
     作为 db_transaction 的 error_map 回调使用：rollback 由 db_transaction 统一
@@ -198,7 +199,7 @@ async def search_customers(
 async def active_names(
     user_id: int = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_async_read_db),
-) -> list[CustomerActiveNameItem]:
+) -> list[dict[str, Any]]:
     """获取所有启用客户名称列表（用于下拉选择）。
 
     只要求已登录：这是客户下拉的全局字典（仅返回启用客户的 id/name），被订单录入、

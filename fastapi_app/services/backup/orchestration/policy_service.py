@@ -13,7 +13,7 @@ import json
 import logging
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 from sqlalchemy import delete, select
 from sqlalchemy.exc import SQLAlchemyError
@@ -30,6 +30,13 @@ from fastapi_app.services.backup.records import ensure_backup_dir
 from fastapi_app.shared_models.backup_record import BackupRecord
 
 logger = logging.getLogger(__name__)
+
+
+class _CheckResult(TypedDict):
+    """单项策略检查结果（_perform_policy_checks 内部结构）。"""
+
+    passed: bool
+    message: str
 
 
 class BackupPolicyService:
@@ -432,7 +439,7 @@ class BackupPolicyService:
 
     async def _perform_policy_checks(self, policy: dict[str, Any]) -> dict[str, Any]:
         """执行策略检查"""
-        checks = {
+        checks: dict[str, _CheckResult] = {
             'disk_space': {'passed': True, 'message': ''},
             'backup_location': {'passed': True, 'message': ''},
             'encryption_key': {'passed': True, 'message': ''},
@@ -674,7 +681,7 @@ class BackupPolicyService:
             free_percent = 100 - disk_usage.percent
 
             # 生成合规性报告
-            compliance = {
+            compliance: dict[str, Any] = {
                 'policy_name': policy.get('policy_name'),
                 'check_time': datetime.now().isoformat(),
                 'backup_schedule': {

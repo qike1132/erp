@@ -75,7 +75,7 @@ async def use_saved_query(db: AsyncSession, query_id: int) -> dict | None:
     sq = await db.get(SavedQuery, query_id)
     if not sq:
         return None
-    sq.use_count += 1
+    sq.use_count = (sq.use_count or 0) + 1
     sq.last_use_time = datetime.now(UTC).replace(tzinfo=None)
     return sq.to_dict()
 

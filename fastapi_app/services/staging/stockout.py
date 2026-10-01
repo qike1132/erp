@@ -4,8 +4,10 @@
 """
 import logging
 from datetime import UTC, datetime
+from typing import cast
 
 from sqlalchemy import delete, select
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.exceptions import NotFoundError
@@ -76,7 +78,8 @@ async def clear_staging_stockouts_by_session(db: AsyncSession, session_id: str) 
         delete(StagingStockOut).where(StagingStockOut.session_id == session_id)
     )
     await db.flush()
-    return result.rowcount
+    # Core DML 运行时返回 CursorResult；SQLAlchemy 的 execute() 只声明基类 Result
+    return cast(CursorResult, result).rowcount
 
 async def clear_staging_stockouts(db: AsyncSession, session_id: str):
     await clear_staging_stockouts_by_session(db, session_id)
@@ -104,8 +107,9 @@ async def confirm_staging_stockouts(
         select(StagingStockOut).where(
             StagingStockOut.session_id == session_id,
             StagingStockOut.status == StagingStatus.PENDING,
-            StagingStockOut.is_validated,
-            StagingStockOut.stock_check_passed,
+            # 可空布尔列在 WHERE 里取真值（与裸列写法同义：SQL 三值逻辑下 NULL 同样不入选），仓库既有写法
+            StagingStockOut.is_validated.is_(True),
+            StagingStockOut.stock_check_passed.is_(True),
         )
     )
     staging_stockouts = result.scalars().all()
@@ -125,7 +129,11 @@ async def confirm_staging_stockouts(
                 if not staging.customer:
                     raise ValueError(f'出货{staging.product_name}确认失败: 必须选择客户，需要有订单支持')
 
-                product = await get_product_for_update(db, staging.product_id)
+                product_id = staging.product_id
+                if product_id is None:
+                    # 暂存行允许未匹配产品（product_id 可空）；与原先 get_product_for_update(db, None) 查不到时的报错逐字一致
+                    raise ValueError(f'出货{staging.customer}-{staging.product_name}确认失败: 产品不存在')
+                product = await get_product_for_update(db, product_id)
                 if not product:
                     raise ValueError(f'出货{staging.customer}-{staging.product_name}确认失败: 产品不存在')
 
@@ -136,7 +144,7 @@ async def confirm_staging_stockouts(
                 )
 
                 shipment_info = await calculate_available_shipment_quantity(
-                    db, staging.product_id, staging.customer
+                    db, product_id, staging.customer
                 )
                 if shipment_info['available_quantity'] <= 0:
                     raise ValueError(f'出货{staging.customer}-{staging.product_name}确认失败: 没有可用的订单支持出货')

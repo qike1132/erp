@@ -11,6 +11,7 @@ import asyncio
 import os
 import pathlib
 from contextlib import asynccontextmanager, suppress
+from typing import cast
 
 # 2. 第三方库
 import msgspec
@@ -21,6 +22,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
+from sqlalchemy.pool import QueuePool
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 # 3. 项目内部
@@ -67,7 +69,8 @@ async def _setup_database():
     if not await verify_db_connectivity():
         logger.error("异步数据库连接验证失败")
         raise RuntimeError("异步数据库引擎无法连接数据库")
-    pool = async_engine.pool
+    # 运行时连接池恒为 AsyncAdaptedQueuePool（QueuePool 子类）；engine.execute 的类型声明只给出基类 Pool，故在此收窄
+    pool = cast(QueuePool, async_engine.pool)
     warmup_count = min(5, pool.size())
     from sqlalchemy import text as warmup_text
     for _ in range(warmup_count):

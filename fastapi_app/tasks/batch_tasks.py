@@ -241,6 +241,8 @@ async def batch_import_orders_task(ctx, file_path: str, original_filename: str, 
         product, row_error = await _resolve_row_product(db, row)
         if row_error:
             return row_error
+        # row_error 为 None ⇒ 产品必然存在
+        assert product is not None  # noqa: S101
         order = Order(
             order_no=await generate_order_number(db),
             product_id=product.id, customer=row.get('客户名称', ''),
@@ -274,6 +276,8 @@ async def batch_import_stockins_task(ctx, file_path: str, original_filename: str
         product, row_error = await _resolve_row_product(db, row)
         if row_error:
             return row_error
+        # row_error 为 None ⇒ 产品必然存在
+        assert product is not None  # noqa: S101
         quantity = int(row.get('数量', 0))
         stockin = StockIn(
             stockin_no=await generate_stockin_number(db),

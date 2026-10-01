@@ -11,7 +11,7 @@ import hashlib
 import logging
 from datetime import UTC, datetime
 
-from sqlalchemy import func, or_, select, text
+from sqlalchemy import ColumnElement, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 from sqlalchemy.sql.elements import TextClause
@@ -64,7 +64,7 @@ async def get_stockins(db: AsyncSession, page: int=1, per_page: int=50,
                        customer: str | None = None,
                        start_date: str | None = None, end_date: str | None = None) -> dict:
     """获取入库列表（含关联数据，支持分页和筛选）- SQL子查询优化版"""
-    conditions = []
+    conditions: list[ColumnElement[bool]] = []
     if customer:
         conditions.append(StockIn.customer.like(f'%{escape_like(customer)}%'))
     if start_date:
@@ -143,7 +143,7 @@ async def get_stockouts(db: AsyncSession, page: int=1, per_page: int=50,
     """
     from fastapi_app.shared_models import Order
 
-    conditions = [StockOut.stockin_id.is_(None)]
+    conditions: list[ColumnElement[bool]] = [StockOut.stockin_id.is_(None)]
     if customer:
         conditions.append(StockOut.customer.like(f'%{escape_like(customer)}%'))
     if start_date:

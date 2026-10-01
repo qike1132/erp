@@ -102,7 +102,7 @@ async def get_approval_list(
         select(ApprovalRequest.status, func.count(ApprovalRequest.id))
         .group_by(ApprovalRequest.status)
     )
-    stats_dict = dict(stats_result.all())
+    stats_dict = {status: count for status, count in stats_result.all()}
 
     return {
         'approvals': [a.to_dict() for a in approvals],
@@ -314,7 +314,10 @@ async def _handle_edit_approval(db: AsyncSession, approval: ApprovalRequest, ord
         ValueError: 审批数据解析失败或校验不通过时抛出。
     """
     try:
-        operation_data = json.loads(approval.operation_data)
+        raw_operation_data = approval.operation_data
+        if raw_operation_data is None:
+            raise TypeError('审批数据为空')
+        operation_data = json.loads(raw_operation_data)
     except (json.JSONDecodeError, TypeError) as e:
         raise ValueError(f"审批数据解析失败: {e}") from e
 
@@ -329,7 +332,10 @@ async def _handle_edit_approval(db: AsyncSession, approval: ApprovalRequest, ord
 
     if new_quantity != old_quantity:
         stock_change = new_quantity - old_quantity
-        await get_product_for_update(db, order.product_id)
+        product_id = order.product_id
+        if product_id is None:
+            raise ValueError(f'产品ID {product_id} 不存在')
+        await get_product_for_update(db, product_id)
 
         db.add(InventoryLog(
             product_id=order.product_id,

@@ -9,6 +9,7 @@ import shutil
 import zipfile
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import TypedDict
 
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -35,6 +36,17 @@ _BACKUP_FILE_SUFFIXES = ('.zip', '.json', '.zip.enc')
 # 文件名时间戳格式：'YYYYMMDD_HHMMSS'（见 normalize_backup_ts 与 _extract_timestamp）
 _TS_FILENAME_LEN = 15
 _TS_FILENAME_SEP_INDEX = 8
+
+
+class _BackupRecord(TypedDict):
+    """cleanup_old_backups 内部的备份条目（纯类型层声明，运行期仍是普通 dict）。"""
+
+    path: Path
+    name: str
+    mtime: datetime
+    size: int
+    is_incremental: bool
+    base_timestamp: str | None
 
 
 def _is_backup_file(f: Path) -> bool:  # log-context: internal helper 无请求上下文
@@ -625,10 +637,10 @@ def cleanup_old_backups() -> dict:  # log-context: internal helper 无请求上�
     now = datetime.now()
     cutoff = now - timedelta(days=retention_days_value)
     deleted = []
-    errors = []
+    errors: list[str] = []
 
     # 收集所有备份文件及其元数据
-    backups = []
+    backups: list[_BackupRecord] = []
     for f in BACKUP_DIR.iterdir():
         if not f.is_file():
             continue
@@ -689,11 +701,11 @@ def cleanup_old_backups() -> dict:  # log-context: internal helper 无请求上�
 
     # 检查增量备份的基础全量备份是否还在
     for b in backups:
-        if b['is_incremental'] and b['base_timestamp']:
+        if b['is_incremental'] and (base_timestamp := b['base_timestamp']):
             # 文件名时间戳 'YYYYMMDD_HHMMSS' 与 manifest 'YYYY-MM-DD HH:MM:SS'
             # 格式不一致，直接字符串比较恒为 False，会把所有增量误判为"无基座"而删；
             # 必须先归一化再比较（数据丢失根因）。
-            normalized_base = normalize_backup_ts(b['base_timestamp'])
+            normalized_base = normalize_backup_ts(base_timestamp)
             if not any(normalize_backup_ts(ts) <= normalized_base for ts in full_backup_timestamps):
                 to_delete.add(b['name'])
 

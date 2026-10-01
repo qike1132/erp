@@ -7,7 +7,7 @@ import json
 import logging
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, func, select, tuple_, update
+from sqlalchemy import ColumnElement, delete, func, select, tuple_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 
@@ -102,7 +102,7 @@ def _build_order_filters(customer: str | None, product_id: int | None,
                          status: str | None,
                          start_date: str | None, end_date: str | None) -> list:
     """构建订单筛选条件列表（共用，避免 DRY 违反）。"""
-    conditions = []
+    conditions: list[ColumnElement[bool]] = []
     if customer:
         conditions.append(Order.customer.like(f'%{escape_like(customer)}%'))
     if product_id:
@@ -127,7 +127,7 @@ async def _fetch_orders_page(db: AsyncSession, query, conditions: list,
             .offset(offset)
             .limit(per_page)
         )
-        return result.scalars().unique().all()
+        return list(result.scalars().unique().all())
 
     # 深翻页：用子查询定位游标值，避免 OFFSET 扫描跳过大量行
     logger.debug("深翻页 offset=%d 超过阈值 %d，自动使用keyset分页", offset, OFFSET_THRESHOLD)
@@ -142,7 +142,7 @@ async def _fetch_orders_page(db: AsyncSession, query, conditions: list,
         .order_by(Order.order_date.desc(), Order.id.desc())
         .limit(per_page)
     )
-    orders = result.scalars().unique().all()
+    orders = list(result.scalars().unique().all())
     # fallback: 并发删除可能导致游标偏移，回退到 OFFSET
     if orders:
         return orders
@@ -152,7 +152,7 @@ async def _fetch_orders_page(db: AsyncSession, query, conditions: list,
         .offset(offset)
         .limit(per_page)
     )
-    return result.scalars().unique().all()
+    return list(result.scalars().unique().all())
 
 async def _batch_item_factories(db: AsyncSession, order_ids: list[int]) -> dict[int, list[str]]:
     """批量查询每个订单涉及的 SKU 工厂名（单次 JOIN 聚合）。

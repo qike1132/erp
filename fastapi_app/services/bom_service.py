@@ -34,8 +34,9 @@ BOM 的查询、保存、复制、预览与搜索能力。
 import json
 import logging
 from decimal import Decimal
+from typing import Any
 
-from sqlalchemy import delete, or_, select
+from sqlalchemy import delete, or_, select, true
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstanceState, selectinload
@@ -424,25 +425,29 @@ async def save_bom(db: AsyncSession, product_id: int, data: dict, username: str)
             'fabrics': ('fabric', 'fabric_name'),
             'accessories': ('accessory', 'accessory_name'),
         }
-        for category, model_cls in [('fabrics', ProductFabric), ('accessories', ProductAccessory)]:
+        delete_targets: list[tuple[str, type[ProductFabric] | type[ProductAccessory]]] = [
+            ('fabrics', ProductFabric),
+            ('accessories', ProductAccessory),
+        ]
+        for category, model_cls in delete_targets:
             existing_ids = {item['id'] for item in data.get(category, []) if item.get('id')}
             result = await db.execute(  # batch-loop: 有意逐行处理,非 N+1
                 select(model_cls).where(
                     model_cls.product_id == product_id,
-                    ~model_cls.id.in_(existing_ids) if existing_ids else True,
+                    ~model_cls.id.in_(existing_ids) if existing_ids else true(),
                 )
             )
-            to_delete = result.scalars().all()
+            deleted_rows = result.scalars().all()
             target_type, name_attr = _delete_meta[category]
-            if to_delete:
+            if deleted_rows:
                 # 先采集审计日志所需字段，再单条批量 DELETE 替代逐条 session.delete
                 delete_ids = []
-                for item in to_delete:
-                    delete_ids.append(item.id)
+                for row in deleted_rows:
+                    delete_ids.append(row.id)
                     db.add(ModificationLog(
-                        target_type=target_type, target_id=item.id,
+                        target_type=target_type, target_id=row.id,
                         field_name='deleted',
-                        old_value=getattr(item, name_attr, '') or '',
+                        old_value=getattr(row, name_attr, '') or '',
                         new_value='(已删除)',
                         modifier_name=username,
                     ))
@@ -453,16 +458,16 @@ async def save_bom(db: AsyncSession, product_id: int, data: dict, username: str)
         filling_result = await db.execute(
             select(ProductMaterial).where(
                 ProductMaterial.product_id == product_id,
-                ~ProductMaterial.id.in_(submitted_filling_ids) if submitted_filling_ids else True,
+                ~ProductMaterial.id.in_(submitted_filling_ids) if submitted_filling_ids else true(),
             )
         )
         fillings_to_delete = filling_result.scalars().all()
         if fillings_to_delete:
             filling_delete_ids = []
-            for item in fillings_to_delete:
-                filling_delete_ids.append(item.id)
+            for filling_row in fillings_to_delete:
+                filling_delete_ids.append(filling_row.id)
                 db.add(ModificationLog(
-                    target_type='material', target_id=item.id,
+                    target_type='material', target_id=filling_row.id,
                     field_name='deleted',
                     old_value='填充物', new_value='(已删除)',
                     modifier_name=username,
@@ -920,7 +925,7 @@ async def preview_bom(db: AsyncSession, source_product_id: int) -> dict:
     )
     source_materials = src_mat_result.scalars().all()
 
-    bom_data = {
+    bom_data: dict[str, Any] = {
         'filling': None,
         'fabric': [],
         'accessory': [],

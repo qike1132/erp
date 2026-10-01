@@ -118,7 +118,7 @@ def register_websocket(app: FastAPI) -> None:
         pending_message = None
 
         ticket = websocket.query_params.get("ticket")
-        ticket_user_id = await _consume_ws_ticket(ticket)
+        ticket_user_id = await _consume_ws_ticket(ticket) if ticket else None
         if ticket_user_id is not None:
             user_id = ticket_user_id
 
@@ -175,7 +175,10 @@ def register_websocket(app: FastAPI) -> None:
             await websocket.close(code=4001, reason="未认证")
             return
 
-        async with async_engine.connect() as conn:
+        # 引擎在模块导入时即初始化（fastapi_app/core/database.py:149），此处收窄 Optional 供 mypy 使用
+        engine = async_engine
+        assert engine is not None  # noqa: S101
+        async with engine.connect() as conn:
             try:
                 result = await conn.execute(
                     ws_select(WSUser.id, WSUser.status).where(WSUser.id == user_id)
@@ -225,7 +228,9 @@ def register_websocket(app: FastAPI) -> None:
                 # Periodic user active verification
                 if now - last_verify_time > _WS_VERIFY_INTERVAL:
                     last_verify_time = now
-                    async with async_engine.connect() as conn:
+                    engine = async_engine
+                    assert engine is not None  # noqa: S101
+                    async with engine.connect() as conn:
                         try:
                             result = await conn.execute(
                                 ws_select(WSUser.status).where(WSUser.id == user_id)

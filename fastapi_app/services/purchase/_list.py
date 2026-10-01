@@ -54,26 +54,28 @@ async def _fetch_bom_data(db: AsyncSession, product_ids: list[int], prod_name_ma
     fab_result = await db.execute(
         select(ProductFabric).where(ProductFabric.product_id.in_(product_ids))
     )
-    for row in fab_result.scalars().all():
-        bom_data.setdefault(row.product_id, []).append({
-            'material_name': row.fabric_name or '面料',
-            'specification': row.specification or '',
-            'unit': row.unit or '米',
-            'quantity': float(row.quantity or 0),
-            'supplier_name': row.supplier_name or '',
+    for fabric_row in fab_result.scalars().all():
+        # P2-A2 类型收窄：改用独立循环变量，避免与上方物料循环共用 row 导致类型串味（零行为变化）
+        bom_data.setdefault(fabric_row.product_id, []).append({
+            'material_name': fabric_row.fabric_name or '面料',
+            'specification': fabric_row.specification or '',
+            'unit': fabric_row.unit or '米',
+            'quantity': float(fabric_row.quantity or 0),
+            'supplier_name': fabric_row.supplier_name or '',
             'category': 'fabric',
         })
 
     acc_result = await db.execute(
         select(ProductAccessory).where(ProductAccessory.product_id.in_(product_ids))
     )
-    for row in acc_result.scalars().all():
-        bom_data.setdefault(row.product_id, []).append({
-            'material_name': row.accessory_name or '配件',
-            'specification': row.specification or '',
-            'unit': row.unit or '个',
-            'quantity': float(row.quantity or 0),
-            'supplier_name': row.supplier_name or '',
+    for accessory_row in acc_result.scalars().all():
+        # P2-A2 类型收窄：独立循环变量（零行为变化）
+        bom_data.setdefault(accessory_row.product_id, []).append({
+            'material_name': accessory_row.accessory_name or '配件',
+            'specification': accessory_row.specification or '',
+            'unit': accessory_row.unit or '个',
+            'quantity': float(accessory_row.quantity or 0),
+            'supplier_name': accessory_row.supplier_name or '',
             'category': 'accessory',
         })
 
@@ -181,7 +183,7 @@ async def _build_po_source_fill_and_no_maps(
         prod_result = await db.execute(
             select(Product.id, Product.name).where(Product.id.in_(cust_pids))
         )
-        pid_name_map = dict(prod_result.all())
+        pid_name_map = dict(prod_result.tuples().all())
     source_order_map: dict[int, tuple[str, int]] = {}
     for row in src_rows:
         if row.id in fill_source_ids:
@@ -209,7 +211,7 @@ async def _build_po_source_no_map(db: AsyncSession, orders) -> dict[int, str]:
     no_result = await db.execute(
         select(Order.id, Order.order_no).where(Order.id.in_(all_source_ids))
     )
-    source_order_no_map = dict(no_result.all())
+    source_order_no_map: dict[int, str] = dict(no_result.tuples().all())
     po_source_no_str: dict[int, str] = {}
     for po_id, sids in po_source_ids_map.items():
         nos = [source_order_no_map.get(sid, '') for sid in sids]
@@ -272,11 +274,12 @@ async def _build_po_source_sku_map(db: AsyncSession, orders) -> dict[int, list[d
                 .join(Product, StockIn.product_id == Product.id)
                 .where(StockIn.id.in_(stockin_fallback_ids))
             )
-            for row in stockin_result.all():
-                items_by_source[row.id].append({
-                    'product_name': row.name or '',
-                    'barcode': row.barcode or '',
-                    'quantity': float(row.quantity or 0),
+            for stockin_row in stockin_result.all():
+                # P2-A2 类型收窄：独立循环变量（该 Row 列型与上方循环不同，零行为变化）
+                items_by_source[stockin_row.id].append({
+                    'product_name': stockin_row.name or '',
+                    'barcode': stockin_row.barcode or '',
+                    'quantity': float(stockin_row.quantity or 0),
                 })
 
     # 3) 按采购订单分组，保持 source_order_ids 顺序，并合并重复 SKU
@@ -386,7 +389,7 @@ async def _resolve_po_detail_product_name_qty(
             prod_result = await db.execute(
                 select(Product.id, Product.name).where(Product.id.in_(cust_pids))
             )
-            pid_name_map = dict(prod_result.all())
+            pid_name_map = dict(prod_result.tuples().all())
         names: set[str] = set()
         qty_sum = 0
         for row in cust_rows:

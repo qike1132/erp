@@ -241,7 +241,7 @@ class DisasterRecoveryTestService:
                 return None
 
             # 选择最新的备份文件（含加密包；无密码时由 _get_backup_info 报出需密码）
-            backup_files = []
+            backup_files: list[Path] = []
             for ext in ['.zip', '.enc']:
                 backup_files.extend(BACKUP_DIR.glob(f'*{ext}'))
             # 排除孤儿 .enc.meta（仅元数据，无对应加密包）
@@ -434,7 +434,7 @@ class DisasterRecoveryTestService:
                     manifest = json.load(f)
 
                 # 读取数据（支持 dump.json 和 dump.sql.gz 两种格式）
-                backup_data = {'tables': {}}
+                backup_data: dict[str, Any] = {'tables': {}}
                 data_path_json = temp_path / 'database' / 'dump.json'
                 data_path_sql_gz = temp_path / 'database' / 'dump.sql.gz'
 
@@ -944,7 +944,7 @@ class DisasterRecoveryTestService:
     async def _validate_performance(self, conn) -> dict[str, Any]:
         """验证性能"""
         try:
-            performance_metrics = {}
+            performance_metrics: dict[str, dict[str, Any]] = {}
 
             # 测试查询性能
             test_queries = [

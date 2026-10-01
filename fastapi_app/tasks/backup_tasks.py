@@ -16,6 +16,7 @@ ARQ 任务为原生 async，原先在 Celery 同步 worker 中用 _run_async 包
 import asyncio
 import logging
 from datetime import UTC, datetime
+from typing import Any
 
 from fastapi_app.core.backup_progress import (
     complete_progress,
@@ -738,7 +739,7 @@ async def _do_integrity_check() -> dict:
 
     from fastapi_app.services import backup as backup_service
 
-    results = {
+    results: dict[str, Any] = {
         'checked_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         'total': 0, 'passed': 0, 'failed': 0, 'details': [],
     }

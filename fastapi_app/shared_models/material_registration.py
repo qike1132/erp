@@ -1,7 +1,7 @@
 """来料登记模型"""
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, desc
@@ -23,7 +23,7 @@ class MaterialRegistration(Base):
     purchase_order_no: Mapped[str] = mapped_column(String(30), nullable=False)
     supplier_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('supplier.id'))
     supplier_name: Mapped[str | None] = mapped_column(String(100))
-    registration_date: Mapped[datetime | None] = mapped_column(Date, nullable=False, default=lambda: datetime.now(UTC).date())
+    registration_date: Mapped[date | None] = mapped_column(Date, nullable=False, default=lambda: datetime.now(UTC).date())
     remark: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(20), default='pending')
     create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))

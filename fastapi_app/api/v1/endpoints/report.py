@@ -189,8 +189,10 @@ async def export_report(
     )
 
     filename = f'{report_type}_report.xlsx'
+    # StreamingResponse 会迭代 content，bytes 会被按 int 迭代（AttributeError）；此处统一为 chunk 序列
+    content = [buffer] if isinstance(buffer, bytes) else buffer
     return StreamingResponse(
-        buffer,
+        content,
         media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         headers={'Content-Disposition': f'attachment; filename={filename}'},
     )

@@ -60,5 +60,6 @@ async def calculate_available_shipment_quantity(
         )
         .group_by(StockOut.order_id)
     )
-    shipped_map = dict(shipped_result.all())
+    # order_id 列类型可空，查询已用 .in_(order_ids) 排除 NULL，守卫仅作类型收窄
+    shipped_map = {o_id: total for o_id, total in shipped_result.all() if o_id is not None}
     return build_shipment_summary(orders, shipped_map)

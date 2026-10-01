@@ -172,7 +172,7 @@ def _topo_sort_self_referencing(table, rows: list) -> list:
         return vals[0] if len(vals) == 1 else vals
 
     # 主键 -> 行索引，用于定位子行的父行
-    pk_index = {}
+    pk_index: dict[object, int] = {}
     for i, row in enumerate(rows):
         key = pk_key(row)
         if key is None:
@@ -304,12 +304,13 @@ async def execute_legacy_backup_to_bytes(
     tables / exclude_tables（P1-2）：表级过滤，二选一；默认全表。
     """
     from fastapi_app.shared_models import Base
+    table_payloads: dict[str, dict[str, object]] = {}
     backup_data = {
         'version': '1.0',
         'exported_at': datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S'),
         'exported_by': user.username if hasattr(user, 'username') else str(user.id),
         'remark': remark,
-        'tables': {},
+        'tables': table_payloads,
     }
     # 先查询实际存在的表，避免查询不存在的表导致事务失败
     existing_result = await db.execute(
@@ -327,7 +328,7 @@ async def execute_legacy_backup_to_bytes(
             continue
         if name not in existing_tables:
             logger.warning(f'跳过不存在的表: {name}')
-            backup_data['tables'][name] = {'error': '表不存在', 'count': 0, 'rows': []}
+            table_payloads[name] = {'error': '表不存在', 'count': 0, 'rows': []}
             continue
         try:
             qtname = quote_table(name)
@@ -342,15 +343,15 @@ async def execute_legacy_backup_to_bytes(
                     for col in columns:
                         serialized_row[col] = serialize_value(row[col])
                     serialized_rows.append(serialized_row)
-                backup_data['tables'][name] = {'columns': columns, 'rows': serialized_rows, 'count': len(serialized_rows)}
+                table_payloads[name] = {'columns': columns, 'rows': serialized_rows, 'count': len(serialized_rows)}
                 await nested.commit()  # manual-tx: savepoint 嵌套事务管理
             except (SQLAlchemyError, ValueError, OSError) as e:
                 await nested.rollback()  # manual-tx: savepoint 嵌套事务管理
                 logger.error('备份表 %s 失败: %s', name, e)
-                backup_data['tables'][name] = {'error': str(e), 'count': 0, 'rows': []}
+                table_payloads[name] = {'error': str(e), 'count': 0, 'rows': []}
         except (SQLAlchemyError, ValueError, OSError) as e:
             logger.error('备份表 %s 初始化失败: %s', name, e)
-            backup_data['tables'][name] = {'error': str(e), 'count': 0, 'rows': []}
+            table_payloads[name] = {'error': str(e), 'count': 0, 'rows': []}
     return json.dumps(backup_data, ensure_ascii=False, indent=2).encode('utf-8')
 
 
@@ -511,7 +512,7 @@ async def restore_legacy_json(backup_data: dict, db: AsyncSession, task_id: str 
         except (RuntimeError, OSError, ValueError) as e:
             logger.warning(f'恢复后采购缓存清除失败: {e}')
 
-        verification = {'overall_pass': True}
+        verification: dict[str, object] = {'overall_pass': True}
         try:
             manifest_tables = {
                 tname: {'rows': td.get('count', len(td.get('rows', [])))}
@@ -551,7 +552,7 @@ async def restore_legacy_json(backup_data: dict, db: AsyncSession, task_id: str 
     # F7: 清空失败的表以"合并"而非"回滚"语义恢复——快照之后新增/变更的旧行会残留，
     # 必须进入 errors 让端点报 partial，避免用户误以为已精确回滚到备份点
     for t in delete_failed:
-        result_dict['errors'].append(f'{t}: 清空失败，本表为合并恢复（备份点之后的旧行可能残留）')
+        errors.append(f'{t}: 清空失败，本表为合并恢复（备份点之后的旧行可能残留）')
     if not verification.get('overall_pass', True):
         result_dict['_verification_failed'] = True
     return result_dict

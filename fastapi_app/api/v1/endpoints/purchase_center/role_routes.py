@@ -14,6 +14,7 @@
 ``ValueError`` 一律映射为 400。故必须通过 ``error_map`` 显式声明各异常的目标状态码，
 否则 404/409 会被默认规则吞成 400（覆盖默认规则的唯一正规途径）。
 """
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -66,7 +67,7 @@ def _map_referenced(exc: Exception) -> HTTPException:
 
 
 # 覆盖 db_transaction 的默认「ValueError → 400」规则（按需声明目标状态码）
-_ROLE_ERROR_MAP = {
+_ROLE_ERROR_MAP: Mapping[type[Exception] | tuple[type[Exception], ...], Callable[[Exception], HTTPException]] = {
     RoleNotFoundError: _map_not_found,
     RoleNameConflictError: _map_conflict,
     RoleReferencedError: _map_referenced,

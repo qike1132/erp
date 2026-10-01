@@ -37,7 +37,7 @@ async def _fetch_prod_name_map(db: AsyncSession, product_ids: list[int]) -> dict
     prod_result = await db.execute(
         select(Product.id, Product.name).where(Product.id.in_(product_ids))
     )
-    return dict(prod_result.all())
+    return dict(prod_result.tuples().all())
 
 def _resolve_factory_source_info(po, cust_order_map, cust, order_qty):
     sids = _parse_source_order_ids(po)

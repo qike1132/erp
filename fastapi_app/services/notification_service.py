@@ -10,10 +10,12 @@ import asyncio
 import contextlib
 import json
 import logging
+from collections.abc import Sequence
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Literal, cast
 
-from sqlalchemy import func, select, update
+from sqlalchemy import Row, func, select, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.exception_handler import INFRA_EXCEPTIONS
@@ -305,6 +307,8 @@ async def dispatch_factory_notifications(
     - 异步实现：内部用 await 查询 items/products/users，避免在 async 上下文中触发 lazy load
     """
     # 确定要扫描的 items（用 await 查询，避免 lazy load；changed_items 仅取 product_id/quantity）
+    # 两个分支分别为列表字面量与 Result.all()（静态为 Row 序列），统一为同一序列类型
+    items_data: Sequence[tuple[int, int] | Row[tuple[int, int]]]
     if changed_items is not None:
         items_data = [(it.product_id, it.quantity) for it in changed_items]
     else:
@@ -535,5 +539,6 @@ async def mark_all_notifications_read(db: AsyncSession, user_id: int) -> int:
         .where(Notification.user_id == user_id, Notification.is_read == False)  # noqa: E712
         .values(is_read=True)
     )
-    return result.rowcount or 0
+    # Core DML 运行时返回 CursorResult；SQLAlchemy 的 execute() 只声明基类 Result
+    return cast(CursorResult, result).rowcount or 0
 

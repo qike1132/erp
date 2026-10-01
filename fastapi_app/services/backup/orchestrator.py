@@ -252,6 +252,8 @@ class DatabaseRestoreOrchestrator:
             if manifest_dict is None:
                 raise RestoreError("解密后仍无法读取备份文件")
 
+        # needs_decrypt 为假时 manifest_dict 必然非 None；为真时上面已判空并抛错。
+        assert manifest_dict is not None  # noqa: S101
         return raw_bytes, manifest_dict
 
     def _try_read_manifest(self, data: bytes) -> dict[str, Any] | None:

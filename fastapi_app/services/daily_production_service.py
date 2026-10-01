@@ -9,6 +9,7 @@ import logging
 from collections.abc import Iterable
 from datetime import date, timedelta
 from decimal import Decimal
+from typing import Any
 
 import openpyxl
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -474,7 +475,7 @@ async def get_daily_summary(
             return price_fallback[r.product_id]
         return Decimal('0')
 
-    dept_data = {}
+    dept_data: dict[str, dict[str, Any]] = {}
     for r in records:
         dept = r.department
         if dept not in dept_data:
@@ -484,17 +485,17 @@ async def get_daily_summary(
         if r.product_name:
             dept_data[dept]['skus'].add(r.product_name)
 
-    departments = []
+    department_rows: list[dict[str, Any]] = []
     overall_quantity = 0
     overall_value = Decimal('0')
-    overall_skus = set()
+    overall_skus: set[str] = set()
 
     for dept_key in dept_keys:
         d_info = dept_data.get(dept_key, {'quantity': 0, 'value': Decimal('0'), 'skus': set()})
         overall_quantity += d_info['quantity']
         overall_value += d_info['value']
         overall_skus.update(d_info['skus'])
-        departments.append({
+        department_rows.append({
             'department': dept_key,
             'department_label': DEPARTMENT_LABELS.get(dept_key, dept_key),
             'total_quantity': d_info['quantity'],
@@ -504,7 +505,7 @@ async def get_daily_summary(
 
     return {
         'date': target_date,
-        'departments': departments,
+        'departments': department_rows,
         'overall_quantity': overall_quantity,
         'overall_value': float(round_money(float(overall_value))),
         'overall_sku_count': len(overall_skus),

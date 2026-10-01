@@ -16,6 +16,7 @@ Task 3（多 SKU 订单聚合）：按 customer 分组，同一客户的多个 S
 """
 import logging
 from datetime import UTC, datetime
+from typing import NoReturn
 
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
@@ -107,7 +108,8 @@ def _validate_one_item(order_data: dict, customer: str, product_map: dict, resul
     由调用方所在 savepoint 回滚整组（保持重构前的错误文案与判定顺序）。
     """
 
-    def _fail(message: str) -> None:
+    def _fail(message: str) -> NoReturn:
+        # P2-A2 类型收窄：标明 _fail 恒抛，mypy 据此在调用点收窄 product（运行时零变化）
         results.append({'success': False, 'error': message, 'customer': customer})
         raise _SavepointRollbackSignalError()
 

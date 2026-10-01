@@ -66,6 +66,11 @@ class ApprovalRequest(Base):
     requester: Mapped[User] = relationship('User', foreign_keys=[requester_id], backref='approval_requests_made')
     approver: Mapped[User | None] = relationship('User', foreign_keys=[approver_id], backref='approval_requests_handled')
 
+    # 类型层声明：ApprovalLog.approval_request 的 backref='logs'（见本文件 ApprovalLog 类）。
+    # 仅在类型检查时可见——运行期不产生类属性，也不参与 ORM 映射（2026-10-01 P2-A7）。
+    if TYPE_CHECKING:
+        logs: Mapped[list[ApprovalLog]]
+
     __table_args__ = (
         Index('idx_approval_status_time', 'status', 'request_time'),
         Index('idx_approval_request_order', 'order_id'),

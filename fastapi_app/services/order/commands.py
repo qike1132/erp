@@ -205,7 +205,10 @@ async def _update_order_directly(
 
     if quantity != old_quantity:
         # TODO(multi-sku-order): order.product_id 在多 SKU 下为首 item 兼容值，库存调整需按 OrderItem 维度；待后续 spec 改造。
-        await get_product_for_update(db, order.product_id)
+        product_id = order.product_id
+        if product_id is None:
+            raise ValueError(f'产品ID {product_id} 不存在')
+        await get_product_for_update(db, product_id)
         log = InventoryLog(
             product_id=order.product_id,
             change_type='订单修改',

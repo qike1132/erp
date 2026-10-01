@@ -98,10 +98,15 @@ async def _increase_deduction(
             .where(StockOut.stockin_id.in_(stockin_ids))
             .group_by(StockOut.stockin_id)
         )
-        deducted_map = dict(deducted_rows.all())
+        # P2-A2 类型收窄：IN 过滤已保证 stockin_id 非 NULL，显式过滤 None 只影响类型（结果集不变）
+        deducted_map = {row[0]: row[1] for row in deducted_rows.all() if row[0] is not None}
 
     # 循环外一次性锁定产品（消除重复行锁）
-    product = await get_product_for_update(db, order.product_id)
+    # P2-A2 类型收窄：order.product_id 列可空；None 时抛出的文案与 get_product_for_update 内部逐字一致
+    order_product_id = order.product_id
+    if order_product_id is None:
+        raise ValueError(f'产品ID {order_product_id} 不存在')
+    product = await get_product_for_update(db, order_product_id)
 
     # 预检可用备货总量（P1-8）：不足时在写任何 StockOut/库存之前失败，
     # 失败路径不产生半成品记录（回滚边界由调用方 db_transaction 提供）
@@ -138,7 +143,7 @@ async def _increase_deduction(
 
         # 更新产品库存（统一走乐观锁写入口，WHERE version=旧值；不再直写 current_stock）
         if product and deduct_amount > 0:
-            await update_stock_with_optimistic_lock(db, order.product_id, -deduct_amount)
+            await update_stock_with_optimistic_lock(db, order_product_id, -deduct_amount)
 
         logs.append(InventoryLog(
             product_id=order.product_id,
@@ -175,7 +180,11 @@ async def _decrease_deduction(
     deduction_stockouts = stockouts_result.scalars().all()
 
     # 循环外一次性锁定产品（消除重复行锁）
-    product = await get_product_for_update(db, order.product_id)
+    # P2-A2 类型收窄：order.product_id 列可空；None 时抛出的文案与 get_product_for_update 内部逐字一致
+    order_product_id = order.product_id
+    if order_product_id is None:
+        raise ValueError(f'产品ID {order_product_id} 不存在')
+    product = await get_product_for_update(db, order_product_id)
 
     # 预检现有抵扣总量（P1-8）：请求减少量超过现有抵扣量时在写任何记录之前失败
     effective_total = sum(
@@ -200,7 +209,7 @@ async def _decrease_deduction(
             # 整条删除
             remaining -= effective_qty
             if product:
-                await update_stock_with_optimistic_lock(db, order.product_id, effective_qty)
+                await update_stock_with_optimistic_lock(db, order_product_id, effective_qty)
             logs.append(InventoryLog(
                 product_id=order.product_id,
                 change_type='取消抵扣',
@@ -213,7 +222,7 @@ async def _decrease_deduction(
             # 部分减少
             stockout.quantity -= remaining
             if product:
-                await update_stock_with_optimistic_lock(db, order.product_id, remaining)
+                await update_stock_with_optimistic_lock(db, order_product_id, remaining)
             logs.append(InventoryLog(
                 product_id=order.product_id,
                 change_type='取消抵扣',

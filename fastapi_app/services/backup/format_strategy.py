@@ -16,7 +16,7 @@ import zipfile
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from fastapi_app.services.backup.format_storage import BackupStorage
 from fastapi_app.services.backup.format_types import (
@@ -66,7 +66,7 @@ class ZipBackupArchiveView:
         return self._zf.read(name)
 
     def open(self, name: str) -> zipfile.ZipExtFile:
-        return self._zf.open(name)
+        return cast(zipfile.ZipExtFile, self._zf.open(name))
 
     def extract(self, name: str, dest: Path) -> Path:
         return Path(self._zf.extract(name, dest))
@@ -163,7 +163,7 @@ class DefaultBackupFormatStrategy(BackupFormatStrategy):
             self._build_zip(zip_path, entries, manifest, compression_level)
 
             # 2. 可选加密
-            if do_encrypt:
+            if do_encrypt and password is not None:
                 encrypted_path = tmp_path / "backup.zip.enc"
                 self._encrypt_file(zip_path, encrypted_path, password)
                 source_path = encrypted_path

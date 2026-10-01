@@ -11,6 +11,7 @@ import subprocess
 import threading
 import time
 from pathlib import Path
+from typing import IO, cast
 
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -97,10 +98,13 @@ async def run_pg_dump(output_path: Path, snapshot_id: str | None = None) -> dict
             proc_ = subprocess.Popen(  # 参数为白名单校验后的固定列表
                 pg_dump_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
             )
+            # stdout/stderr 均为 PIPE，管道对象必然存在；mypy 无法从 Popen 构造参数推断
+            stdout_pipe = cast(IO[bytes], proc_.stdout)
+            stderr_pipe = cast(IO[bytes], proc_.stderr)
 
             def _drain_err() -> None:
                 while True:
-                    chunk = proc_.stderr.read(65536)
+                    chunk = stderr_pipe.read(65536)
                     if not chunk:
                         break
                     stderr_chunks.append(chunk)
@@ -112,11 +116,11 @@ async def run_pg_dump(output_path: Path, snapshot_id: str | None = None) -> dict
                     fileobj=raw_f, mode='wb', compresslevel=1,
                 ) as gz_f:
                     while True:
-                        chunk = proc_.stdout.read(1024 * 1024)
+                        chunk = stdout_pipe.read(1024 * 1024)
                         if not chunk:
                             break
                         gz_f.write(chunk)
-                proc_.stdout.close()
+                stdout_pipe.close()
                 proc_.wait()
                 if proc_.returncode != 0:
                     stderr_text = b''.join(stderr_chunks).decode(errors='replace')
@@ -136,7 +140,7 @@ async def run_pg_dump(output_path: Path, snapshot_id: str | None = None) -> dict
                 raise
             finally:
                 t_err.join(timeout=30)
-                proc_.stderr.close()
+                stderr_pipe.close()
 
         await asyncio.to_thread(_stream_dump_to_gzip)
         duration = time.monotonic() - start
@@ -197,7 +201,8 @@ async def restore_database_via_psql(zf, db: AsyncSession, task_id: str | None = 
 
     try:
         counter = _CountingReader(zf.open('database/dump.sql.gz'))
-        gz_stream = gzip.GzipFile(fileobj=counter)
+        # _CountingReader 只需实现 read()（gzip 只调用该方法）；mypy 按完整 IO[bytes] 协议要求
+        gz_stream = gzip.GzipFile(fileobj=cast(IO[bytes], counter))
         first_chunk = gz_stream.read(256 * 1024)
     except (OSError, EOFError, KeyError) as e:
         return {'status': 'error', 'error': f'数据库备份文件读取失败: {e}'}
@@ -360,6 +365,8 @@ async def restore_database_via_psql(zf, db: AsyncSession, task_id: str | None = 
             except OSError as e:
                 result['spawn_error'] = str(e)
                 return
+            # stdin 为 PIPE，管道对象必然存在；mypy 无法从 Popen 构造参数推断
+            stdin_pipe = cast(IO[bytes], proc_.stdin)
             out_chunks: list[bytes] = []
             err_chunks: list[bytes] = []
             t_out = threading.Thread(target=_drain, args=(proc_.stdout, out_chunks), daemon=True)
@@ -368,13 +375,13 @@ async def restore_database_via_psql(zf, db: AsyncSession, task_id: str | None = 
             t_err.start()
             try:
                 try:
-                    proc_.stdin.write(first_chunk)
+                    stdin_pipe.write(first_chunk)
                     state['written'] += len(first_chunk)
                     while True:
                         chunk = gz_stream.read(256 * 1024)
                         if not chunk:
                             break
-                        proc_.stdin.write(chunk)
+                        stdin_pipe.write(chunk)
                         state['written'] += len(chunk)
                 except BrokenPipeError:
                     pass  # psql 提前退出（如 SQL 致命错误），结果由 rc/stderr 判定
@@ -382,7 +389,7 @@ async def restore_database_via_psql(zf, db: AsyncSession, task_id: str | None = 
                     result['stream_error'] = f'解压备份数据流失败: {e}'
                 state['stream_done'] = True
                 with contextlib.suppress(BrokenPipeError):
-                    proc_.stdin.close()
+                    stdin_pipe.close()
                 try:
                     proc_.wait(timeout=600)
                     result['rc'] = proc_.returncode

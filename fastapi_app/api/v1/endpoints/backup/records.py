@@ -13,6 +13,7 @@
 import logging
 from datetime import datetime
 from pathlib import Path
+from types import FunctionType
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
@@ -36,6 +37,11 @@ from fastapi_app.services import backup as backup_service
 from fastapi_app.services.backup import BackupFileError, schedule_service
 from fastapi_app.services.backup.verify import query_service as backup_query_service
 from fastapi_app.shared_models import User
+
+def _iso_or_raw(value: object) -> object:
+    """datetime 转 ISO 字符串，其余原样返回（与内联三元的输出形状一致）。"""
+    return value.isoformat() if isinstance(value, datetime) else value
+
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -164,8 +170,8 @@ async def get_backup_records(
                 'ip_address': r.get('ip_address'),
                 'user_agent': r.get('user_agent'),
                 'parent_record_id': r.get('parent_record_id'),
-                'created_at': r.get('created_at').isoformat() if isinstance(r.get('created_at'), datetime) else r.get('created_at'),
-                'updated_at': r.get('updated_at').isoformat() if isinstance(r.get('updated_at'), datetime) else r.get('updated_at'),
+                'created_at': _iso_or_raw(r.get('created_at')),
+                'updated_at': _iso_or_raw(r.get('updated_at')),
                 'source': r.get('source', 'db'),
                 'encrypted': r.get('encrypted'),
             }
@@ -290,7 +296,10 @@ async def trigger_backup_schedule(
     # 1) 内置 cron_schedules（sync-shipment/级联等）
     schedule = next((s for s in cron_schedules if s['name'] == task_name), None)
     if schedule is not None:
-        func_name = schedule['func'].__name__
+        func = schedule['func']
+        if not isinstance(func, FunctionType):
+            raise HTTPException(status_code=500, detail='定时任务配置无效')
+        func_name = func.__name__
         try:
             pool = await get_arq_pool()
             await pool.enqueue_job(func_name)

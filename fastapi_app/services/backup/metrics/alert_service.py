@@ -311,7 +311,7 @@ class BackupAlertService:
             'error': '#fd7e14',
             'warning': '#ffc107',
             'info': '#17a2b8'
-        }.get(alert_data.get('severity'), '#6c757d')
+        }.get(str(alert_data.get('severity', '')), '#6c757d')
 
         task_name = _e(str(alert_data.get('task_name', '')))
         task_type = _e(str(alert_data.get('task_type', '')))
@@ -498,19 +498,22 @@ class BackupAlertService:
                 failed_records = result.scalars().all()
 
                 # 按任务类型统计
+                by_task_type: dict[str, int] = {}
+                by_severity: dict[str, int] = {}
+                recent_failures: list[dict[str, object]] = []
                 stats = {
                     'total_failures': len(failed_records),
-                    'by_task_type': {},
-                    'by_severity': {},
-                    'recent_failures': []
+                    'by_task_type': by_task_type,
+                    'by_severity': by_severity,
+                    'recent_failures': recent_failures
                 }
 
                 for record in failed_records:
                     # 按任务类型统计
                     task_type = record.type or 'unknown'
-                    if task_type not in stats['by_task_type']:
-                        stats['by_task_type'][task_type] = 0
-                    stats['by_task_type'][task_type] += 1
+                    if task_type not in by_task_type:
+                        by_task_type[task_type] = 0
+                    by_task_type[task_type] += 1
 
                     # 按严重级别统计（从错误信息中提取）
                     error_msg = record.error_message or ''
@@ -520,12 +523,12 @@ class BackupAlertService:
                     elif 'WARNING' in error_msg:
                         severity = 'warning'
 
-                    if severity not in stats['by_severity']:
-                        stats['by_severity'][severity] = 0
-                    stats['by_severity'][severity] += 1
+                    if severity not in by_severity:
+                        by_severity[severity] = 0
+                    by_severity[severity] += 1
 
                     # 最近失败记录
-                    stats['recent_failures'].append({
+                    recent_failures.append({
                         'id': record.id,
                         'type': record.type,
                         'filename': record.filename,

@@ -53,10 +53,10 @@ def parse_cron(cron_expr: str) -> tuple[set[int] | None, ...] | None:
             if not token:
                 return None
             if '-' in token:
-                a, b = token.split('-', 1)
-                if not (a.lstrip('-').isdigit() and b.lstrip('-').isdigit()):
+                a_str, b_str = token.split('-', 1)
+                if not (a_str.lstrip('-').isdigit() and b_str.lstrip('-').isdigit()):
                     return None
-                a, b = int(a), int(b)
+                a, b = int(a_str), int(b_str)
                 if a < lo or b > hi or a > b:
                     return None
                 vals.update(range(a, b + 1))

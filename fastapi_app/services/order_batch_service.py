@@ -8,8 +8,10 @@ import contextlib
 import json
 import logging
 from datetime import UTC, datetime
+from typing import cast
 
 from sqlalchemy import func, literal, or_, select, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
@@ -406,7 +408,8 @@ async def update_batch_no(
                 Order.id.in_(sync_ids),
             ).values(batch_no=batch_no)
             sync_result = await db.execute(sync_stmt)
-            if sync_result.rowcount > 0:
+            # Core DML 运行时返回 CursorResult；SQLAlchemy 的 execute() 只声明基类 Result
+            if cast(CursorResult, sync_result).rowcount > 0:
                 updated_ids = [order_id, *sync_ids]
 
     effective_batch = batch_no or old_batch_no or ''

@@ -20,6 +20,7 @@ import os
 import threading
 import time
 import warnings
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from slowapi import Limiter
@@ -38,7 +39,7 @@ def limiter_enabled_from_env() -> bool:
     return os.getenv('RATE_LIMIT_ENABLED', 'true').strip().lower() not in ('false', '0')
 
 
-def limiter_default_limits_from_env() -> list[str]:
+def limiter_default_limits_from_env() -> list[str | Callable[..., str]]:
     """全局默认限流：**默认空**，即「只对显式标注 @limiter.limit 的端点限流」。
 
     为什么不直接启用原值 `60/minute`：该值写下来后限流长期被 `enabled=False` 架空，

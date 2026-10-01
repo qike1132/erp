@@ -17,8 +17,11 @@ from fastapi_app.core.deps import require_any_permission
 from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.core.validators import magic_signature, matches_upload_magic, require_upload_magic
 from fastapi_app.schemas.ocr_import import (
+    OcrOrderPreviewItem,
     OcrOrderPreviewResult,
     OcrPdfImportResult,
+    OcrPdfPagePreview,
+    OcrPdfParsedItem,
     OcrPdfPreviewResult,
 )
 from fastapi_app.services import ocr_service as svc
@@ -140,7 +143,7 @@ async def preview_shipping_doc(file: UploadFile=File(..., description='PDF 或�
                 parsed_items = []
         if not pages and (not parsed_items):
             return OcrPdfPreviewResult(success=False, message='无法提取文本内容', filename=filename, page_count=0, pages=[], parsed_items=[])
-        return OcrPdfPreviewResult(success=True, message=f'识别完成，共 {len(pages)} 页，识别到 {len(parsed_items)} 个出货项', filename=filename, page_count=len(pages), pages=[{'page': p.get('page', 0), 'text': p.get('text', '')[:500]} for p in pages], parsed_items=parsed_items)
+        return OcrPdfPreviewResult(success=True, message=f'识别完成，共 {len(pages)} 页，识别到 {len(parsed_items)} 个出货项', filename=filename, page_count=len(pages), pages=[OcrPdfPagePreview(page=p.get('page', 0), text=p.get('text', '')[:500]) for p in pages], parsed_items=[OcrPdfParsedItem.model_validate(it) for it in parsed_items])
     except (OperationalError, DisconnectionError) as e:
         logger.error(f'OCR 预览失败: {e!s}', exc_info=True)
         raise HTTPException(status_code=500, detail=f'识别失败: {settings.sanitize_error(e)}') from e
@@ -189,7 +192,7 @@ async def preview_order_doc(
         message=f'识别到 {len(items)} 项，请核对后导入',
         filename=filename,
         item_count=len(items),
-        items=items,
+        items=[OcrOrderPreviewItem.model_validate(it) for it in items],
         raw_text=raw_text,
         warnings=warnings,
     )

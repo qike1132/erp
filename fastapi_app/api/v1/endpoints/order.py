@@ -8,7 +8,7 @@
 - 协调缓存失效与领域事件发布
 """
 import logging
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -239,7 +239,7 @@ async def get_order(
     order_id: int,
     db: AsyncSession = Depends(get_async_read_db),
     _user: User = Depends(require_permission("order_manage")),
-) -> OrderDetailResponse:
+) -> dict[str, Any]:
     """获取单个订单详情。
 
     Args:
@@ -437,7 +437,7 @@ async def update_batch_no(
     batch_no: str = Query("", max_length=100, description="批次号"),
     db: AsyncSession = Depends(get_async_db),
     user: User = Depends(require_permission("order_manage")),
-) -> OrderActionResponse:
+) -> dict[str, Any]:
     """更新订单批次号。
 
     Args:

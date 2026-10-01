@@ -15,6 +15,7 @@ generate_stockout_number / log_inventory_change / publish_stock_event /
 """
 import logging
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -287,6 +288,10 @@ async def _process_single_stockout(db: AsyncSession, item: dict) -> dict:
     stockout_date_str = item.get('stockout_date') or ''
     item_id = item.get('id', '未知')
     try:
+        # P2-A2 类型收窄：_validate_stockout_batch 已过滤缺 product_id 的项；
+        # None 时抛出的文案与 get_product_for_update 内部逐字一致，且同样由下方 except ValueError 捕获
+        if product_id is None:
+            raise ValueError(f'产品ID {product_id} 不存在')
         product = await stock_service.get_product_for_update(db, product_id)
         # 负库存判定统一走统一入口（P1-2b）；拒绝文案与改动前逐字一致
         stock_denied = check_stock_available(
@@ -321,7 +326,7 @@ async def _process_single_stockout(db: AsyncSession, item: dict) -> dict:
 async def batch_create_stockouts(db: AsyncSession, stockouts_data: list) -> dict:
     """批量创建出库记录（自包含，不调用 create_stockout_core，无嵌套事务）"""
     validated, errors_map = _validate_stockout_batch(stockouts_data)
-    results = [None] * len(stockouts_data)
+    results: list[dict[str, Any] | None] = [None] * len(stockouts_data)
     for idx, err in errors_map.items():
         results[idx] = {'success': False, 'error': err, 'id': stockouts_data[idx].get('id', '未知')}
     for orig_idx, item in validated:

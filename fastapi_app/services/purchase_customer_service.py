@@ -34,12 +34,15 @@ async def get_customers(db: AsyncSession, *, page: int = 1, per_page: int = 20,
         'update_time': Customer.update_time,
     }
     sort_col = sort_map.get(sort_by, Customer.name)
+    # 分支内直接产出 order_by 表达式：sort_col 的静态类型是三个 InstrumentedAttribute 的联合，
+    # 先赋值 sort_col = sort_col.desc() 越不过 mypy 的联合窄化。行为与原先逐字等价（只在 desc 分支求值 desc()）。
     if sort_order == 'desc':
-        sort_col = sort_col.desc()
-    query = query.order_by(sort_col)
+        query = query.order_by(sort_col.desc())
+    else:
+        query = query.order_by(sort_col)
 
     total_result = await db.execute(count_query)
-    total = total_result.scalar()
+    total = total_result.scalar() or 0
 
     query = query.offset((page - 1) * per_page).limit(per_page)
     result = await db.execute(query)
@@ -84,12 +87,12 @@ async def batch_get_customers(db: AsyncSession, ids: list) -> list:
 
 async def get_customers_statistics(db: AsyncSession) -> dict:
     total_result = await db.execute(select(func.count(Customer.id)))
-    total = total_result.scalar()
+    total = total_result.scalar() or 0
 
     active_result = await db.execute(
         select(func.count(Customer.id)).where(Customer.status)
     )
-    active = active_result.scalar()
+    active = active_result.scalar() or 0
 
     recently_updated = 0
     if hasattr(Customer, 'update_time'):
@@ -98,7 +101,7 @@ async def get_customers_statistics(db: AsyncSession) -> dict:
                 Customer.update_time >= datetime.now(UTC).replace(tzinfo=None) - timedelta(days=30)
             )
         )
-        recently_updated = recent_result.scalar()
+        recently_updated = recent_result.scalar() or 0
 
     return {
         'total': total,

@@ -7,7 +7,7 @@ import contextlib
 import logging
 import os
 import tempfile
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from sqlalchemy import select
@@ -99,10 +99,10 @@ async def _generic_import_staging_from_excel(
     clear_func: Callable,
     sheet_keyword: str,
     entity_label: str,
-    build_entity: Callable[[dict[str, Any], str, str | None, int | None, int], object],
+    build_entity: Callable[[dict[str, Any], str, int | None, int, bool, str, str], object],
     column_names: dict[str, str],
     required_fields: list[str],
-    extra_row_validations: Callable[[dict[str, Any], int], list[str]] | None = None,
+    extra_row_validations: Callable[[dict[str, Any], int], Awaitable[list[str]]] | None = None,
 ) -> tuple[int, str, list[str]]:
     await clear_func(db, session_id)
 
@@ -131,7 +131,8 @@ async def _generic_import_staging_from_excel(
         for idx, row_data in enumerate(data_list, start=2):
             try:
                 if extra_row_validations:
-                    extra_errs = extra_row_validations(row_data, idx)
+                    # 校验器是 async 的（见 staging/stockin.py 的 _validate_stockin_customer），未 await 会把协程当列表 extend
+                    extra_errs = await extra_row_validations(row_data, idx)
                     if extra_errs:
                         errors.extend(extra_errs)
                         continue
@@ -183,7 +184,7 @@ async def _generic_update_staging_entity(
     db: AsyncSession,
     entity_id: int,
     data: dict,
-    model_class: type,
+    model_class: type[Any],
     entity_label: str,
     extra_updates: Callable[[Any, dict, AsyncSession], None] | None = None,
 ) -> dict:

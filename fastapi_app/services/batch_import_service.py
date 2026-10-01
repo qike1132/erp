@@ -218,12 +218,13 @@ async def import_orders_service(db: AsyncSession, file: ExcelUpload) -> BatchImp
     """
     from fastapi_app.services.batch_service import get_all_products
 
-    if (err := _validate_xlsx_file(file)):
-        return err
+    if (file_err := _validate_xlsx_file(file)):
+        return file_err
     try:
         data_list, err = await _read_excel_sheets(file, ['订单管理'], '没有找到"订单管理"Sheet')
         if err:
             return BatchImportResult(success=False, message=err)
+        assert data_list is not None  # _read_excel_sheets 契约：失败时 data_list 为 None（err 已判空）
         # 构建产品映射，支持按名称（小写）和条码查找
         all_products = await get_all_products(db)
         product_map = {prod.name.lower().strip(): prod for prod in all_products}
@@ -284,21 +285,20 @@ async def import_case_stockouts_service(db: AsyncSession, file: ExcelUpload) -> 
     Args:
         file: 上传的 Excel 文件（.xlsx 格式）。
         db: 异步数据库会话（读写主库）。
-        current_user: 当前登录用户（仅需通过权限校验）。
 
     Returns:
         BatchImportResult: 包含导入结果、消息和条数的响应。
     """
     from fastapi_app.services.batch_service import find_case_locked
 
-    if (err := _validate_xlsx_file(file)):
-        return err
+    if (file_err := _validate_xlsx_file(file)):
+        return file_err
     try:
         data_list, err = await _read_excel_sheets(file, ['皮套出库', '皮套出货'], '没有找到可用的Sheet')
         if err:
             return BatchImportResult(success=False, message=err)
-        imported = 0
-        skipped = 0
+        assert data_list is not None  # _read_excel_sheets 契约：失败时 data_list 为 None（err 已判空）
+        imported = skipped = 0
         errors = []
         for row_data in data_list:
             try:
@@ -329,6 +329,7 @@ async def import_case_stockouts_service(db: AsyncSession, file: ExcelUpload) -> 
                         errors.append(case_err)
                         skipped += 1
                         continue
+                    assert case is not None  # 同上：case_err 已判空，失败时 case 为 None
                     # 统一负库存校验入口（env ALLOW_NEGATIVE_STOCK，缺省拒绝）
                     if reason := check_stock_available(
                         case.current_stock, -qty,
@@ -380,12 +381,13 @@ async def import_case_stockins_service(db: AsyncSession, file: ExcelUpload) -> B
     """
     from fastapi_app.services.batch_service import find_case_locked
 
-    if (err := _validate_xlsx_file(file)):
-        return err
+    if (file_err := _validate_xlsx_file(file)):
+        return file_err
     try:
         data_list, err = await _read_excel_sheets(file, ['皮套入库', '皮套进库'], '没有找到可用的Sheet')
         if err:
             return BatchImportResult(success=False, message=err)
+        assert data_list is not None  # _read_excel_sheets 契约：失败时 data_list 为 None（err 已判空）
         imported = 0
         skipped = 0
         errors = []
@@ -418,6 +420,7 @@ async def import_case_stockins_service(db: AsyncSession, file: ExcelUpload) -> B
                         errors.append(case_err)
                         skipped += 1
                         continue
+                    assert case is not None  # 同上：case_err 已判空，失败时 case 为 None
                     stockin_date = parse_date_value(stockin_date_val) or datetime.now(UTC)  # aware UTC：stockin_date 列为 timestamptz
                     stockin_no = await generate_case_stockin_number(db)
                     stockin = CaseStockIn(
@@ -461,12 +464,13 @@ async def import_stockins_service(db: AsyncSession, file: ExcelUpload) -> BatchI
     """
     from fastapi_app.services.batch_service import get_all_products
 
-    if (err := _validate_xlsx_file(file)):
-        return err
+    if (file_err := _validate_xlsx_file(file)):
+        return file_err
     try:
         data_list, err = await _read_excel_sheets(file, ['备货管理'], '没有找到"备货管理"Sheet')
         if err:
             return BatchImportResult(success=False, message=err)
+        assert data_list is not None  # _read_excel_sheets 契约：失败时 data_list 为 None（err 已判空）
         # 构建产品映射，支持按名称（小写）和条码查找
         all_products = await get_all_products(db)
         product_map = {prod.name.lower().strip(): prod for prod in all_products}
@@ -532,12 +536,13 @@ async def import_stockouts_service(db: AsyncSession, file: ExcelUpload) -> Batch
     """
     from fastapi_app.services.batch_service import get_product_by_identifier
 
-    if (err := _validate_xlsx_file(file)):
-        return err
+    if (file_err := _validate_xlsx_file(file)):
+        return file_err
     try:
         data_list, err = await _read_excel_sheets(file, ['出货管理'], '没有找到"出货管理"Sheet')
         if err:
             return BatchImportResult(success=False, message=err)
+        assert data_list is not None  # _read_excel_sheets 契约：失败时 data_list 为 None（err 已判空）
         imported = 0
         skipped = 0
         errors = []
@@ -633,12 +638,13 @@ async def import_products_service(db: AsyncSession, file: ExcelUpload) -> BatchI
     """
     from fastapi_app.services.batch_service import get_product_by_name_ci
 
-    if (err := _validate_xlsx_file(file)):
-        return err
+    if (file_err := _validate_xlsx_file(file)):
+        return file_err
     try:
         data_list, err = await _read_excel_sheets(file, ['产品管理'], '没有找到"产品管理"Sheet')
         if err:
             return BatchImportResult(success=False, message=err)
+        assert data_list is not None  # _read_excel_sheets 契约：失败时 data_list 为 None（err 已判空）
         imported = 0
         skipped = 0
         errors = []

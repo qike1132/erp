@@ -391,14 +391,14 @@ async def get_parts_by_version(
             continue  # 打印场景：历史版本快照不参与（避免 JSONB 全量读取）
         version_set.add(ver.version_no)
         snapshot: list[dict] = ver.snapshot_data or []
-        for part in snapshot:
-            key = (part.get('part_name', ''), ver.version_no)
+        for snap_part in snapshot:
+            key = (snap_part.get('part_name', ''), ver.version_no)
             if key in seen_keys:
                 continue  # part 表已有此版本数据，跳过快照
-            if part.get('part_name', '') not in live_part_names:
+            if snap_part.get('part_name', '') not in live_part_names:
                 continue  # 部位已从 part 表删除，快照不复活
             seen_keys.add(key)
-            part_copy = {**part, 'version_no': ver.version_no}
+            part_copy = {**snap_part, 'version_no': ver.version_no}
             items.append(part_copy)
 
     version_list = sorted(version_set, key=_version_sort_key)

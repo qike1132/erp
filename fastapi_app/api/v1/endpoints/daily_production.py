@@ -393,6 +393,6 @@ async def get_product_info(
         product = await daily_production_service.get_product_for_production(db, product_id)
         if not product:
             raise HTTPException(status_code=404, detail='产品不存在')
-        return success_response(data=product)
+        return ProductInfoResponse(**success_response(data=product))
     except (OperationalError, DisconnectionError) as e:
         raise HTTPException(status_code=500, detail=f'获取产品信息失败: {settings.sanitize_error(e)}') from e

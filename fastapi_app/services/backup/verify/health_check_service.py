@@ -69,7 +69,7 @@ class BackupHealthCheckService:
         """
         logger.info("开始执行备份健康检查...")
 
-        results = {
+        results: dict[str, Any] = {
             'check_time': datetime.now().isoformat(),
             'overall_status': 'healthy',
             'checks': {},
@@ -193,7 +193,7 @@ class BackupHealthCheckService:
             ensure_backup_dir()
 
             # 查找最新的备份文件
-            backup_files = []
+            backup_files: list[Path] = []
             for ext in ['.zip', '.tar.gz', '.tar']:
                 backup_files.extend(BACKUP_DIR.glob(f'*{ext}'))
 
@@ -243,7 +243,7 @@ class BackupHealthCheckService:
             ensure_backup_dir()
 
             # 查找所有备份文件
-            backup_files = []
+            backup_files: list[Path] = []
             for ext in ['.zip']:  # 目前只检查zip格式
                 backup_files.extend(BACKUP_DIR.glob(f'*{ext}'))
 
@@ -275,7 +275,7 @@ class BackupHealthCheckService:
                 sample_count = max(1, int(len(remaining_files) * sample_rate))
                 files_to_check.extend(random.sample(remaining_files, min(sample_count, len(remaining_files))))  # nosec B311
 
-            results = {
+            results: dict[str, Any] = {
                 'healthy': True,
                 'checked_files': len(files_to_check),
                 'passed_files': 0,
@@ -442,7 +442,7 @@ class BackupHealthCheckService:
 
                 healthy = total_failed == 0 and total_success > 0
 
-                result = {
+                result: dict[str, Any] = {
                     'healthy': healthy,
                     'total_records': total_records,
                     'success_count': total_success,
@@ -471,7 +471,7 @@ class BackupHealthCheckService:
     async def _check_system_resources(self) -> dict[str, Any]:
         """检查系统资源"""
         try:
-            issues = []
+            issues: list[str] = []
 
             # 检查CPU使用率
             cpu_percent = psutil.cpu_percent(interval=1)
@@ -486,7 +486,7 @@ class BackupHealthCheckService:
             disk_io = psutil.disk_io_counters()
             disk_busy = disk_io.busy_time if hasattr(disk_io, 'busy_time') else 0
 
-            result = {
+            result: dict[str, Any] = {
                 'healthy': cpu_healthy and memory_healthy,
                 'cpu_percent': round(cpu_percent, 2),
                 'memory_percent': round(memory_percent, 2),

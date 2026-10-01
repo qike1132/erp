@@ -6,8 +6,9 @@
 """
 import logging
 import os
+from typing import cast
 
-from sqlalchemy import select
+from sqlalchemy import CursorResult, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.exceptions import ConflictError
@@ -204,8 +205,9 @@ async def apply_stock_delta_locked(
     )
     result = await db.execute(stmt)
 
-    # 只有明确的「0 行命中」才判定为未命中；驱动未报告 rowcount 时不误判
-    if result.rowcount == 0:
+    # 只有明确的「0 行命中」才判定为未命中：DML 的 execute 结果即 CursorResult，
+    # rowcount 由驱动给出（首次 UPDATE 的 Result 静态类型不含该属性，故显式收窄）
+    if cast(CursorResult, result).rowcount == 0:
         # 先区分「库存不足」与「并发冲突」：不足时抛精确错误（不重试）
         await _classify_update_miss(db, product.id, old_version, delta)
         raise StockConcurrentError(
@@ -283,7 +285,7 @@ async def update_stock_with_optimistic_lock(
                 )
                 result = await db.execute(stmt)
 
-                if result.rowcount != 1:
+                if cast(CursorResult, result).rowcount != 1:
                     # 先区分「库存不足」与「版本冲突」：扣成负数时抛精确的库存不足
                     # 错误（ValueError 随 savepoint 回滚后上抛，不进入重试）
                     await _classify_update_miss(db, product_id, old_version, delta)

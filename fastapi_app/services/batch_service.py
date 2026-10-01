@@ -59,17 +59,18 @@ async def find_case_locked(db: AsyncSession, identifier: str) -> tuple[Case | No
     result = await db.execute(select(Product).where((Product.name == identifier) | (Product.barcode == identifier)))
     product = result.scalar_one_or_none()
     case = None
+    # P2-A2 类型收窄：Case 查询使用独立 result 变量，避免复用上方 Product 查询的 result 类型
     if product:
-        result = await db.execute(select(Case).where(Case.product_id == product.id))
-        case = result.scalar_one_or_none()
+        case_result = await db.execute(select(Case).where(Case.product_id == product.id))
+        case = case_result.scalar_one_or_none()
     if not case:
-        result = await db.execute(select(Case).where((Case.name == identifier) | (Case.barcode == identifier)))
-        case = result.scalar_one_or_none()
+        case_result = await db.execute(select(Case).where((Case.name == identifier) | (Case.barcode == identifier)))
+        case = case_result.scalar_one_or_none()
     if not case:
         return None, f'皮套 {identifier} 不存在'
     # 行锁确保并发安全
-    result = await db.execute(select(Case).where(Case.id == case.id).with_for_update())
-    case = result.scalar_one_or_none()
+    case_result = await db.execute(select(Case).where(Case.id == case.id).with_for_update())
+    case = case_result.scalar_one_or_none()
     if not case:
         return None, f'皮套 {identifier} 加锁失败'
     return case, None

@@ -4,8 +4,9 @@
 从 purchase_center_service.py 拆分，包含产品查询、BOM 保存和物料计算。
 """
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from decimal import Decimal
+from functools import partial
 
 from sqlalchemy import func, or_, select, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -117,9 +118,11 @@ async def get_products(db: AsyncSession, *, page: int = 1, per_page: int = 50,
         'create_time': Product.create_time,
     }
     sort_col = sort_map.get(sort_by, Product.name)
+    # P2-A2 类型收窄：desc 分支在 order_by 实参上求值，避免把 UnaryExpression 赋回原变量（排序语义不变）
     if sort_order == 'desc':
-        sort_col = sort_col.desc()
-    query = query.order_by(sort_col)
+        query = query.order_by(sort_col.desc())
+    else:
+        query = query.order_by(sort_col)
 
     query = query.offset((page - 1) * per_page).limit(per_page)
     result = await db.execute(query)
@@ -144,7 +147,7 @@ async def get_products(db: AsyncSession, *, page: int = 1, per_page: int = 50,
         }
 
     total_result = await db.execute(count_query)
-    total = total_result.scalar()
+    total = total_result.scalar() or 0
 
     output = []
     for p in products:
@@ -234,12 +237,12 @@ async def get_search_suggestions(db: AsyncSession, keyword: str) -> list:
 
 async def get_products_statistics(db: AsyncSession) -> dict:
     total_result = await db.execute(select(func.count(Product.id)))
-    total = total_result.scalar()
+    total = total_result.scalar() or 0
 
     has_bom_result = await db.execute(
         select(func.count(Product.id)).where(Product.material_rows.any())
     )
-    has_bom = has_bom_result.scalar()
+    has_bom = has_bom_result.scalar() or 0
 
     return {
         'total': total,
@@ -399,7 +402,8 @@ def aggregate_materials_by_scope(
         rows = product.get_all_materials()
         scopes = order_scopes(
             {row.get('role_id') for row in rows} | {None},
-            name_of=lambda rid, _pid=product_id: name_of(_pid, rid),
+            # P2-A2 类型收窄：partial 等价于原绑定默认值的 lambda（order_scopes.name_of 只接收 1 个参数）
+            name_of=partial(name_of, product_id),
         )
         for role_id in scopes:
             scope_totals: dict[tuple, dict] = {}
@@ -424,7 +428,7 @@ def aggregate_materials_by_scope(
     return groups
 
 
-def _collect_role_names(products: list) -> dict[tuple[int, int], str]:
+def _collect_role_names(products: Sequence[Product]) -> dict[tuple[int, int], str]:
     """汇总 ``{(product_id, product_role.id): 显示名}``。
 
     展示名优先取全局角色名（§7#10），缺失回退镜像列 ``role_name``。调用方须已
@@ -455,7 +459,7 @@ async def calculate_material(db: AsyncSession, orders_data: list) -> dict:
     Returns:
         dict: 含 filling/fabric/accessory/packaging/groups 的物料计算结果。
     """
-    empty = {'filling': [], 'fabric': [], 'accessory': [], 'packaging': [], 'groups': []}
+    empty: dict[str, list] = {'filling': [], 'fabric': [], 'accessory': [], 'packaging': [], 'groups': []}
     product_ids = [item.get('product_id') for item in orders_data if item.get('product_id')]
     if not product_ids:
         return empty

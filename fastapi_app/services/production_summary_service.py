@@ -8,6 +8,7 @@ import io
 import logging
 import uuid
 from datetime import date, datetime, timedelta
+from typing import Any
 
 import openpyxl
 from sqlalchemy import and_, func, select
@@ -40,7 +41,7 @@ async def get_craft_works(db: AsyncSession, year: int, month: int, work_date: st
         conditions.append(CraftWork.work_date == parse_date_with_fallback(work_date))
     result = await db.execute(select(CraftWork).where(*conditions).order_by(CraftWork.work_date, CraftWork.id))
     records = list(result.scalars().all())
-    daily_craft = {}
+    daily_craft: dict[str, int] = {}
     for r in records:
         d = r.work_date.isoformat() if r.work_date else ''
         daily_craft[d] = daily_craft.get(d, 0) + r.quantity
@@ -108,7 +109,7 @@ async def export_craft_works(db: AsyncSession, start_date: str='', end_date: str
     ws = wb.active
     ws.title = '手工部生产数据'
     ws.append(['生产日期', '工人姓名', '生产数量', '备注', '创建时间'])
-    daily_total = {}
+    daily_total: dict[str, int] = {}
     for r in records:
         d = r.work_date.isoformat() if r.work_date else ''
         daily_total[d] = daily_total.get(d, 0) + r.quantity
@@ -343,7 +344,7 @@ async def _get_case_stockout_detail(db: AsyncSession, start: date, end: date) ->
     start_dt = datetime(start.year, start.month, start.day)
     end_dt = start_dt + timedelta(days=1)
     result = await db.execute(select(func.date(CaseStockOut.stockout_date).label('d'), CaseStockOut.customer, func.coalesce(Product.name, Case.name).label('product_name'), CaseStockOut.quantity).join(Case, CaseStockOut.case_id == Case.id).outerjoin(Product, Case.product_id == Product.id).where(and_(CaseStockOut.stockout_date >= start_dt, CaseStockOut.stockout_date < end_dt)).order_by(CaseStockOut.stockout_date))
-    data = {}
+    data: dict[str, list[dict[str, Any]]] = {}
     for row in result.all():
         d = str(row.d)
         if d not in data:
@@ -359,7 +360,7 @@ async def _get_craft_work_daily(db: AsyncSession, start: date, end: date) -> dic
 async def _get_packaging_detail(db: AsyncSession, start: date, end: date) -> dict:
     """获取包装部按日+客户+产品明细"""
     result = await db.execute(select(PackagingRecord.pack_date, PackagingRecord.customer, PackagingRecord.product_name, PackagingRecord.quantity).where(and_(PackagingRecord.pack_date >= start, PackagingRecord.pack_date <= end)).order_by(PackagingRecord.pack_date))
-    data = {}
+    data: dict[str, list[dict[str, Any]]] = {}
     for row in result.all():
         d = row.pack_date.isoformat()
         if d not in data:

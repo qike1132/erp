@@ -8,6 +8,7 @@
 import logging
 import uuid
 from datetime import timedelta
+from typing import Literal
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile
 from pydantic import BaseModel, Field
@@ -204,6 +205,7 @@ def _set_login_cookies(  # log-context: internal helper 无请求上下文
     """设置 httpOnly cookie（浏览器 Web 端自动携带），根据 HTTPS/Capacitor 自适应 SameSite/Secure"""
     _is_https = request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
     _is_capacitor = request.headers.get("x-client-type") == "capacitor" or request.headers.get("origin", "").startswith("http://localhost")
+    _samesite: Literal['lax', 'strict', 'none']
     if _is_capacitor and not _is_https:
         _samesite, _secure = "lax", False
     elif _is_https:
@@ -321,13 +323,13 @@ async def api_logout(request: Request):
     import json
 
     from fastapi.responses import Response
-    resp = Response(
+    json_resp = Response(
         content=json.dumps(success_response(message="已登出"), ensure_ascii=False),
         media_type="application/json",
     )
-    resp.delete_cookie(key="access_token", path="/")
-    resp.delete_cookie(key="refresh_token", path="/")
-    return resp
+    json_resp.delete_cookie(key="access_token", path="/")
+    json_resp.delete_cookie(key="refresh_token", path="/")
+    return json_resp
 
 
 class RefreshRequest(BaseModel):
@@ -443,10 +445,12 @@ async def api_refresh_token(
         new_refresh_token = create_refresh_token(token_data, jti=new_jti)
         await _remember_rotation(jti, new_jti)
         from fastapi_app.core.deps import revoke_token
-        await revoke_token(jti, payload.get("exp"))
+        exp = payload.get("exp")
+        if jti and exp:
+            await revoke_token(jti, exp)
 
     _is_https = request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
-    _samesite = "none" if _is_https else "lax"
+    _samesite: Literal['lax', 'strict', 'none'] = "none" if _is_https else "lax"
     _secure = _is_https
     response.set_cookie(
         key="access_token",

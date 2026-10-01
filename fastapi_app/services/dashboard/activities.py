@@ -38,23 +38,23 @@ async def fetch_dashboard_activities(db: AsyncSession) -> list[Activity]:
     try:
         activities = []
 
-        result = await db.execute(select(Order).order_by(Order.order_date.desc()).limit(4))
-        for o in result.scalars().all():
+        order_rows = await db.execute(select(Order).order_by(Order.order_date.desc()).limit(4))
+        for o in order_rows.scalars().all():
             activities.append({"type": "order", "time": str(o.order_date) if o.order_date else "",
                                "status": o.status or "", "title": f"订单 {o.order_no}", "desc": f"订单 {o.order_no}"})
 
-        result = await db.execute(select(StockIn).order_by(StockIn.stockin_date.desc()).limit(3))
-        for s in result.scalars().all():
-            activities.append({"type": "stockin", "time": str(s.stockin_date) if s.stockin_date else "",
-                               "status": "已备货", "title": f"入库 {s.stockin_no}", "desc": f"入库 {s.stockin_no}"})
+        stockin_rows = await db.execute(select(StockIn).order_by(StockIn.stockin_date.desc()).limit(3))
+        for si in stockin_rows.scalars().all():
+            activities.append({"type": "stockin", "time": str(si.stockin_date) if si.stockin_date else "",
+                               "status": "已备货", "title": f"入库 {si.stockin_no}", "desc": f"入库 {si.stockin_no}"})
 
-        result = await db.execute(select(StockOut).order_by(StockOut.stockout_date.desc()).limit(3))
-        for s in result.scalars().all():
-            activities.append({"type": "stockout", "time": str(s.stockout_date) if s.stockout_date else "",
-                               "status": "已出货", "title": f"出库 {s.stockout_no}", "desc": f"出库 {s.stockout_no}"})
+        stockout_rows = await db.execute(select(StockOut).order_by(StockOut.stockout_date.desc()).limit(3))
+        for so in stockout_rows.scalars().all():
+            activities.append({"type": "stockout", "time": str(so.stockout_date) if so.stockout_date else "",
+                               "status": "已出货", "title": f"出库 {so.stockout_no}", "desc": f"出库 {so.stockout_no}"})
 
-        result = await db.execute(select(ApprovalRequest).order_by(ApprovalRequest.request_time.desc()).limit(3))
-        for a in result.scalars().all():
+        approval_rows = await db.execute(select(ApprovalRequest).order_by(ApprovalRequest.request_time.desc()).limit(3))
+        for a in approval_rows.scalars().all():
             activities.append({"type": "approval", "time": str(a.request_time) if a.request_time else "",
                                "status": a.status or "待审批", "title": "审批请求", "desc": "审批请求"})
 

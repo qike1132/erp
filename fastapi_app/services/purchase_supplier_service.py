@@ -123,7 +123,7 @@ async def update_supplier(db: AsyncSession, supplier_id: int, data: dict) -> dic
 
 async def _sync_supplier_info(
     db: AsyncSession, supplier,
-    old_name: str, old_contact: str, old_phone: str, old_address: str,
+    old_name: str, old_contact: str | None, old_phone: str | None, old_address: str | None,
 ):
     """同步供应商信息到关联表（冗余字段）。
 

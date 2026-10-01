@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -121,7 +122,7 @@ async def get_grouped_list(
             latest_map[pmid] = updated_at
 
     # 分组间按组内最新更新时间倒序（datetime 比较；"未分类"分组最后单独追加）
-    all_groups_meta = [
+    all_groups_meta: list[dict[str, Any]] = [
         {'pattern_maker_id': pmid, 'latest': latest_map[pmid], 'project_ids': pid_list}
         for pmid, pid_list in groups_map.items()
         if pmid is not None

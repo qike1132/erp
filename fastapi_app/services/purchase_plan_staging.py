@@ -157,11 +157,12 @@ async def validate_staging(db: AsyncSession, session_id: str) -> dict:
         elif record.product_name not in product_name_set:
             errors_list.append(f"产品 '{record.product_name}' 未找到对应产品")
         if errors_list:
-            record.is_validated = 0
+            # P2-A2 类型收窄：is_validated 为 Boolean 列，False/0 在 PG 与真值判断上等价
+            record.is_validated = False
             record.validation_error = '; '.join(errors_list)
             error_count += 1
         else:
-            record.is_validated = 1
+            record.is_validated = True
             record.validation_error = None
             valid_count += 1
     records_to_check = [r for r in records if r.is_validated]
@@ -173,7 +174,7 @@ async def validate_staging(db: AsyncSession, session_id: str) -> dict:
         no_order_set = {(it['customer_name'], it['product_name']) for it in no_order}
         for r in records_to_check:
             if (r.customer_name or '', r.product_name or '') in no_order_set:
-                r.is_validated = 0
+                r.is_validated = False
                 r.validation_error = f"客户 '{r.customer_name}' 的产品 '{r.product_name}' 没有订单余量（订单已发完或不存在），无法添加计划"
                 valid_count -= 1
                 error_count += 1

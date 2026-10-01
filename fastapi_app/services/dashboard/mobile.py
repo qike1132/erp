@@ -272,7 +272,7 @@ async def fetch_mobile_dashboard(
         logger.warning("移动看板仓储数据加载失败: %s", e)
 
     # 6. 生产计划数据
-    plans_data = {"plans": [], "monthly_summary": None}
+    plans_data: dict[str, object] = {"plans": [], "monthly_summary": None}
     try:
         now = datetime.now()
         year = now.year
@@ -303,18 +303,18 @@ async def fetch_mobile_dashboard(
         item_list = []
         total_plan_qty = 0
         total_shipped_qty = 0
-        for row in rows:
-            qty = int(row.quantity or 0)
-            shipped = int(row.shipped_qty or 0)
+        for ppd_row in rows:
+            qty = int(ppd_row.quantity or 0)
+            shipped = int(ppd_row.shipped_qty or 0)
             total_plan_qty += qty
             total_shipped_qty += shipped
-            plan_date_str = row.plan_date.isoformat() if row.plan_date else ""
-            logger.info(f"  详情: customer={row.customer_name}, product={row.product_name}, qty={qty}, date={plan_date_str}")
+            plan_date_str = ppd_row.plan_date.isoformat() if ppd_row.plan_date else ""
+            logger.info(f"  详情: customer={ppd_row.customer_name}, product={ppd_row.product_name}, qty={qty}, date={plan_date_str}")
             item_list.append({
-                "id": row.id,
-                "customer_name": row.customer_name or "",
-                "product_name": row.product_name or "",
-                "barcode": row.barcode or "",
+                "id": ppd_row.id,
+                "customer_name": ppd_row.customer_name or "",
+                "product_name": ppd_row.product_name or "",
+                "barcode": ppd_row.barcode or "",
                 "quantity": qty,
                 "inventory_qty": 0,
                 "shipped_qty": shipped,
@@ -324,7 +324,7 @@ async def fetch_mobile_dashboard(
                 "shipment_status": "pending" if shipped == 0 else ("completed" if shipped >= qty else "partial"),
                 "plan_date": plan_date_str,
                 "status": "pending",
-                "remark": row.remark or "",
+                "remark": ppd_row.remark or "",
             })
         plans_data["plans"] = item_list
         plans_data["monthly_summary"] = {

@@ -86,10 +86,10 @@ def resolve_backup_table_scope(
         if unknown:
             raise BackupError(f'未知的表名: {", ".join(unknown)}（仅允许 ORM 已定义的表）')
         return set(tables), None
-    unknown = sorted(set(exclude_tables) - known)
+    unknown = sorted(set(exclude_tables or []) - known)
     if unknown:
         raise BackupError(f'未知的表名: {", ".join(unknown)}（仅允许 ORM 已定义的表）')
-    return None, set(exclude_tables)
+    return None, set(exclude_tables or [])
 
 
 def pack_config_files(zf: zipfile.ZipFile, include_sensitive_config: bool) -> tuple[list[str], list[str]]:

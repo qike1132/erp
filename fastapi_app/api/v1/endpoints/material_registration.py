@@ -9,6 +9,7 @@
 - 提供历史记录和搜索联想建议接口
 """
 import logging
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -91,7 +92,7 @@ async def get_registration(
     reg_id: int,
     user: User = Depends(require_any_permission('product_manage', 'material_registration')),
     db: AsyncSession = Depends(get_async_read_db),
-) -> RegistrationDetailResponse:
+) -> dict[str, Any]:
     """获取来料登记详情。
 
     Args:
@@ -157,8 +158,10 @@ async def create_registration(
     try:
         async with db_transaction(db):
             result = await mr_service.create_registration(
+                # data.remark 为 str | None 而服务签名要求 str：None 与 '' 在本模型序列化中等价
+                # （fastapi_app/shared_models/material_registration.py:103 `'remark': self.remark or ''`）。
                 db, data.purchase_order_id, user.id, user.username,
-                data.remark, [item.model_dump() for item in data.items],
+                data.remark or '', [item.model_dump() for item in data.items],
             )
         await cache_mgr.invalidate(InvalidationStrategy.DOMAIN, CacheDomain.MATERIAL)
         try:
@@ -269,7 +272,7 @@ async def available_purchase_orders(
     status: str = Query('pending'),
     user: User = Depends(require_any_permission('product_manage', 'material_registration')),
     db: AsyncSession = Depends(get_async_read_db),
-) -> AvailablePurchaseOrdersResponse:
+) -> dict[str, Any]:
     """获取可用采购订单列表。
 
     Args:
@@ -368,7 +371,7 @@ async def get_purchase_order_items(
     order_id: int,
     user: User = Depends(require_any_permission('product_manage', 'material_registration')),
     db: AsyncSession = Depends(get_async_read_db),
-) -> PurchaseOrderItemsResponse:
+) -> dict[str, Any]:
     """获取采购订单物料明细。
 
     Args:
@@ -434,7 +437,7 @@ async def get_history(
     end_date: str = Query(''),
     user: User = Depends(require_any_permission('product_manage', 'material_registration')),
     db: AsyncSession = Depends(get_async_read_db),
-) -> RegistrationHistoryResponse:
+) -> dict[str, Any]:
     """获取来料登记历史记录（支持分页和多维度筛选）。
 
     Args:
@@ -464,7 +467,7 @@ async def get_suggestions(
     limit: int = Query(10, ge=1, le=50),
     user: User = Depends(require_any_permission('product_manage', 'material_registration')),
     db: AsyncSession = Depends(get_async_read_db),
-) -> SuggestionsResponse:
+) -> dict[str, Any]:
     """获取搜索联想建议。
 
     Args:

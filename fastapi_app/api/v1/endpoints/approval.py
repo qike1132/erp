@@ -176,7 +176,7 @@ async def reject(
         ApprovalActionResponse: 操作结果消息。
     """
     async with db_transaction(db):
-        message = await approval_service.reject_request(db, approval_id, user, data.reason)
+        message = await approval_service.reject_request(db, approval_id, user, data.reason or '')
     await cache_mgr.invalidate(
         InvalidationStrategy.DOMAIN,
         CacheDomain.ORDER_AND_INVENTORY | CacheDomain.REPORT,

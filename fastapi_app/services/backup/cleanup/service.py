@@ -192,7 +192,7 @@ class BackupCleanupService:
         try:
             ensure_backup_dir()
 
-            backup_files = []
+            backup_files: list[dict[str, Any]] = []
             for file_path in BACKUP_DIR.iterdir():
                 if not file_path.is_file():
                     continue
@@ -301,7 +301,8 @@ class BackupCleanupService:
             # 对于每个保留的全量备份，保留其增量备份链
             for full_backup in full_backups:
                 if full_backup['name'] in files_to_keep:
-                    full_timestamp = self._normalize_backup_ts(self._extract_timestamp(full_backup['name']))
+                    _full_ts = self._extract_timestamp(full_backup['name'])
+                    full_timestamp = self._normalize_backup_ts(_full_ts) if _full_ts else None
                     if full_timestamp:
                         # 找到基于此全量备份的增量备份
                         for file_info in backup_files:
@@ -528,7 +529,7 @@ class BackupCleanupService:
     async def _execute_cleanup(self, files_to_delete: set[str]) -> dict[str, Any]:
         """执行清理操作"""
         deleted_files = []
-        errors = []
+        errors: list[str] = []
 
         try:
             for filename in files_to_delete:
@@ -632,7 +633,7 @@ class BackupCleanupService:
             }
 
             # 统计健康状态
-            health_status = {}
+            health_status: dict[str, int] = {}
             for file_info in backup_files:
                 status = file_info.get('health_status', 'unknown')
                 health_status[status] = health_status.get(status, 0) + 1
