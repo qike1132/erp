@@ -4,6 +4,8 @@ __pycache__/
 *$py.class
 *.so
 .Python
+# 生产 venv（OPT-08：erp-prod/erp-arq 将切换到此解释器，绝不入库）
+.venv/
 build/
 develop-eggs/
 dist/
