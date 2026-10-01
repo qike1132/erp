@@ -480,7 +480,7 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
             self._msg_queue.put(('log', {'text': f"进程 (PID: {pid}) 超时，已强制 kill", 'level': 'WARNING'}))
             self._kill_port_sync(_API_PORT)
         except Exception as e:
-            self._msg_queue.put(('log', {'text': f"终止进程异常: {str(e)}", 'level': 'ERROR'}))
+            self._msg_queue.put(('log', {'text': f"终止进程异常: {e!s}", 'level': 'ERROR'}))
             self._kill_port_sync(_API_PORT)
         finally:
             self._msg_queue.put(('ui_update', {}))
@@ -704,7 +704,7 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
                     self._msg_queue.put(('log', {'text': "已清理所有残留进程和端口"}))
                 self._msg_queue.put(('ui_update', {}))
             except Exception as e:
-                self._msg_queue.put(('log', {'text': f"停止过程出错: {str(e)}", 'level': 'ERROR'}))
+                self._msg_queue.put(('log', {'text': f"停止过程出错: {e!s}", 'level': 'ERROR'}))
         threading.Thread(target=_stop_all_worker, daemon=True).start()
 
     def _kill_residual_async(self):
@@ -777,10 +777,10 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
     def _start_dual_server(self, label):
         # 互斥守卫：开发模式正在启动/重启中则不操作
         if self._mode in ('starting', 'restarting'):
-            self.log_message(f"开发模式正在启动/重启中，请稍候", 'WARNING')
+            self.log_message("开发模式正在启动/重启中，请稍候", 'WARNING')
             return
         if self._mode != 'none':
-            self.log_message(f"已有服务在运行，请先停止后再启动", 'WARNING')
+            self.log_message("已有服务在运行，请先停止后再启动", 'WARNING')
             return
         if not _PYTHON_EXE:
             self.log_message("无法启动: 未找到 Python 解释器，请安装 Python 并确保在 PATH 中", 'ERROR')
@@ -1516,7 +1516,7 @@ def main():
         except Exception:
             pass
         with contextlib.suppress(Exception):
-            messagebox.showerror("启动失败", f"服务器管理器启动失败:\n{str(e)}" + (f"\n\n日志: {crash_file}" if crash_file else ""))
+            messagebox.showerror("启动失败", f"服务器管理器启动失败:\n{e!s}" + (f"\n\n日志: {crash_file}" if crash_file else ""))
         sys.exit(1)
 
 

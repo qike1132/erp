@@ -1,6 +1,6 @@
 """批量迁移 fa- CSS class 图标到 FontAwesomeIcon 组件(静态模式,修复引号匹配)"""
-import re
 import pathlib
+import re
 
 ROOT = pathlib.Path(r"D:\erp_system\frontend-vite\src")
 

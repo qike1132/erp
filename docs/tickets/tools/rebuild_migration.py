@@ -107,11 +107,9 @@ def extract_module_tuple(source: str, var_name: str) -> tuple[str, ...]:
     """读取模块级 tuple[str, ...] 常量"""
     tree = ast.parse(source)
     for node in tree.body:
-        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) \
-                and node.target.id == var_name:
-            node = node.value
-        elif isinstance(node, ast.Assign) and any(
-            isinstance(t, ast.Name) and t.id == var_name for t in node.targets):
+        if (isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) \
+                and node.target.id == var_name) or (isinstance(node, ast.Assign) and any(
+            isinstance(t, ast.Name) and t.id == var_name for t in node.targets)):
             node = node.value
         else:
             continue

@@ -18,7 +18,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-
 PROJECT_ROOT = Path(__file__).resolve().parent
 FRONTEND_DIR = PROJECT_ROOT / "frontend-vite"
 
@@ -129,9 +128,9 @@ def main():
         start_production(args)
     else:
         # 完整启动：后端为主，提示前端路径
-        print(f"[ERP] 前端开发服务器请手动启动:")
+        print("[ERP] 前端开发服务器请手动启动:")
         print(f"      cd {FRONTEND_DIR}")
-        print(f"      npm run dev")
+        print("      npm run dev")
         print()
         start_backend(args)
 

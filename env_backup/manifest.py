@@ -56,7 +56,7 @@ class Manifest:
         return json.dumps(asdict(self), ensure_ascii=False, indent=2).encode('utf-8')
 
     @classmethod
-    def from_json_bytes(cls, raw: bytes) -> 'Manifest':
+    def from_json_bytes(cls, raw: bytes) -> Manifest:
         data = json.loads(raw.decode('utf-8'))
         entries = [Entry(**e) for e in data.pop('entries', [])]
         return cls(entries=entries, **data)

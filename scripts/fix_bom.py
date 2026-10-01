@@ -20,7 +20,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 BOM = b"\xef\xbb\xbf"
 
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
-from check_bom import iter_py_files  # noqa: E402
+from check_bom import iter_py_files
 
 
 def main() -> int:

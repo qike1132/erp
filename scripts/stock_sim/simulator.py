@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 库存多年期模拟 —— 序列生成器 + 执行引擎
 
@@ -21,11 +20,15 @@ import logging
 import os
 import random
 import sys
-from datetime import date
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from common import (  # noqa: E402
-    SEED, TIME_SPAN, JournalWriter, SimAPIClient, SimError, daterange,
+from common import (
+    SEED,
+    TIME_SPAN,
+    JournalWriter,
+    SimAPIClient,
+    SimError,
+    daterange,
     is_last_day_of_month,
 )
 
@@ -408,7 +411,7 @@ def rebuild_stockin_ids(run_dir: str) -> list:
     path = os.path.join(run_dir, "ops.jsonl")
     if not os.path.exists(path):
         return out
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:
@@ -518,7 +521,7 @@ def read_checkpoint_count(run_dir: str) -> list:
     from common import CHECKPOINT_FILE
     path = os.path.join(run_dir, CHECKPOINT_FILE)
     if os.path.exists(path):
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             return json.load(f)
     return []
 

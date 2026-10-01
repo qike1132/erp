@@ -38,14 +38,14 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-from sqlalchemy import delete, select  # noqa: E402
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine  # noqa: E402
-from sqlalchemy.orm import selectinload, sessionmaker  # noqa: E402
+from sqlalchemy import delete, select
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.orm import selectinload, sessionmaker
 
-from fastapi_app.core.config import settings  # noqa: E402
-from fastapi_app.services.purchase_order_sku import build_po_sku_rows  # noqa: E402
-from fastapi_app.services.purchase_utils import parse_source_order_ids  # noqa: E402
-from fastapi_app.shared_models import (  # noqa: E402
+from fastapi_app.core.config import settings
+from fastapi_app.services.purchase_order_sku import build_po_sku_rows
+from fastapi_app.services.purchase_utils import parse_source_order_ids
+from fastapi_app.shared_models import (
     Order,
     Product,
     PurchaseOrder,

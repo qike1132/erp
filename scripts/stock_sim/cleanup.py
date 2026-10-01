@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 库存多年期模拟 —— 幂等清理
 
@@ -16,7 +15,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from common import SimAPIClient  # noqa: E402
+from common import SimAPIClient
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("stock_sim.cleanup")
@@ -44,7 +43,7 @@ def load_targets(args) -> tuple[str | None, int | None]:
         run_dir = resolve_journal(args.journal)
         summary_p = os.path.join(run_dir, "summary.json")
         if os.path.exists(summary_p):
-            with open(summary_p, "r", encoding="utf-8") as f:
+            with open(summary_p, encoding="utf-8") as f:
                 summary = json.load(f)
             customer = customer or summary.get("customer")
             product_id = product_id or summary.get("product_id")
@@ -93,7 +92,7 @@ async def cleanup(client: SimAPIClient, customer: str | None,
         if confirm:
             ok = await client.delete_product(product_id)
             if not ok:
-                print(f"警告：产品删除失败，请人工确认（空库则直接删除 product 表行）。")
+                print("警告：产品删除失败，请人工确认（空库则直接删除 product 表行）。")
 
     if removed_out == removed_in == removed_order == 0 and not confirm:
         print("无待清理项（幂等确认）")

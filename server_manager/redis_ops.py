@@ -154,7 +154,7 @@ class RedisOps:
             self._msg_queue.put(('log', {'text': f"{_SVC_REDIS_CACHE} 服务已 RUNNING，但 Redis 未通过 PING 校验", 'level': 'WARNING'}))
             return False
         if via_svc is False:
-            self._msg_queue.put(('log', {'text': f"Redis 服务启动失败，回退为直接拉起进程", 'level': 'WARNING'}))
+            self._msg_queue.put(('log', {'text': "Redis 服务启动失败，回退为直接拉起进程", 'level': 'WARNING'}))
         else:
             self._msg_queue.put(('log', {'text': f"未安装 {_SVC_REDIS_CACHE} 服务，将直接拉起 Redis 进程（不随开机自启）", 'level': 'WARNING'}))
         return self._start_redis_process()
@@ -188,7 +188,7 @@ class RedisOps:
             self._msg_queue.put(('log', {'text': "Redis 启动超时，请检查端口6379是否被占用", 'level': 'WARNING'}))
             return False
         except Exception as e:
-            self._msg_queue.put(('log', {'text': f"Redis 启动失败: {str(e)}", 'level': 'ERROR'}))
+            self._msg_queue.put(('log', {'text': f"Redis 启动失败: {e!s}", 'level': 'ERROR'}))
             return False
 
     def is_broker_running(self):
@@ -218,7 +218,7 @@ class RedisOps:
             if self.is_broker_running():
                 self._msg_queue.put(('log', {'text': f'ARQ broker 已就绪 ({_SVC_REDIS_BROKER})'}))
                 return True
-        self._msg_queue.put(('log', {'text': f'ARQ broker 启动后仍未通过 PING 校验，erp-arq 可能无法工作', 'level': 'ERROR'}))
+        self._msg_queue.put(('log', {'text': 'ARQ broker 启动后仍未通过 PING 校验，erp-arq 可能无法工作', 'level': 'ERROR'}))
         return False
 
     def stop_redis(self):

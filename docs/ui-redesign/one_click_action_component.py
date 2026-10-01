@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 通用『一键重启 / 一键关闭』按钮组件（开发模式 / 生产模式共用）
 ================================================================
@@ -38,8 +37,8 @@ from __future__ import annotations
 
 import threading
 import tkinter as tk
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable, Optional
 
 # ======================================================================
 # 一、ActionLock —— 并发 / 幂等控制（纯逻辑，可独立单测）
@@ -57,7 +56,7 @@ class ActionLock:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._owner: Optional[str] = None
+        self._owner: str | None = None
 
     def acquire(self, who: str) -> bool:
         """尝试占用。成功返回 True；已被他人占用返回 False。"""
@@ -67,14 +66,14 @@ class ActionLock:
             self._owner = who
             return True
 
-    def release(self, who: Optional[str] = None) -> None:
+    def release(self, who: str | None = None) -> None:
         """释放占用。``who`` 匹配才释放，防止误释放他人持有的锁。"""
         with self._lock:
             if who is None or self._owner == who:
                 self._owner = None
 
     @property
-    def owner(self) -> Optional[str]:
+    def owner(self) -> str | None:
         with self._lock:
             return self._owner
 
@@ -157,9 +156,9 @@ class OneClickActionController:
         spec: ModeActionSpec,
         lock: ActionLock,
         *,
-        on_success: Optional[Callable[[str, str], None]] = None,
-        on_failure: Optional[Callable[[str, str], None]] = None,
-        on_busy_change: Optional[Callable[[], None]] = None,
+        on_success: Callable[[str, str], None] | None = None,
+        on_failure: Callable[[str, str], None] | None = None,
+        on_busy_change: Callable[[], None] | None = None,
     ) -> None:
         self.app = app                 # 宿主应用（仅用于访问 toast/alerts/logger）
         self.spec = spec               # 模式差异配置
@@ -167,7 +166,7 @@ class OneClickActionController:
         self._on_success = on_success
         self._on_failure = on_failure
         self._on_busy_change = on_busy_change
-        self._busy_kind: Optional[str] = None   # 当前在途动作: 'restart' | 'stop' | None
+        self._busy_kind: str | None = None   # 当前在途动作: 'restart' | 'stop' | None
 
     # ---------- 只读状态（供 UI 刷新按钮可用性） ----------
 
@@ -184,7 +183,7 @@ class OneClickActionController:
         return self.lock.owner == self.spec.key
 
     @property
-    def busy_kind(self) -> Optional[str]:
+    def busy_kind(self) -> str | None:
         return self._busy_kind
 
     # ---------- 触发入口（UI 调用；含确认则由按钮组负责） ----------
@@ -234,7 +233,7 @@ class OneClickActionController:
             self.app.log_message(f"[{self.spec.key}] {kind} 异常: {exc}", "ERROR")
             self._finish(kind, success=False, message=str(exc))
 
-    def _finish(self, kind: str, success: bool, message: Optional[str]) -> None:
+    def _finish(self, kind: str, success: bool, message: str | None) -> None:
         """收口：释放锁 + 复位在途 + 结果回调 + 刷新 UI。顺序固定保证幂等。"""
         self.lock.release(self.spec.key)
         self._busy_kind = None
@@ -288,8 +287,8 @@ class OneClickButtonGroup:
         *,
         restart_text: str = "重启",
         stop_text: str = "关闭",
-        restart_kw: Optional[dict] = None,
-        stop_kw: Optional[dict] = None,
+        restart_kw: dict | None = None,
+        stop_kw: dict | None = None,
     ) -> None:
         self.controller = controller
         self._restart_text = restart_text

@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 库存多年期模拟 —— 公共模块
 
@@ -265,13 +264,13 @@ class JournalWriter:
 
     def read_checkpoints(self) -> list[dict]:
         if os.path.exists(self.checkpoints_path):
-            with open(self.checkpoints_path, "r", encoding="utf-8") as f:
+            with open(self.checkpoints_path, encoding="utf-8") as f:
                 return json.load(f)
         return []
 
     def read_summary(self) -> dict:
         if os.path.exists(self.summary_path):
-            with open(self.summary_path, "r", encoding="utf-8") as f:
+            with open(self.summary_path, encoding="utf-8") as f:
                 return json.load(f)
         return {}
 

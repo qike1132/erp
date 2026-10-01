@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 库存多年期模拟 —— 三账独立核对（verifier）
 
@@ -21,8 +20,8 @@ import sys
 from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from common import (  # noqa: E402
-    SimAPIClient, SimError, daterange,
+from common import (
+    SimAPIClient,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -54,15 +53,15 @@ def load_journal(run_dir: str):
     ops_p = os.path.join(run_dir, "ops.jsonl")
     if not os.path.exists(summary_p):
         raise SystemExit(f"{run_dir} 缺少 summary.json")
-    with open(summary_p, "r", encoding="utf-8") as f:
+    with open(summary_p, encoding="utf-8") as f:
         summary = json.load(f)
     cps = []
     if os.path.exists(cp_p):
-        with open(cp_p, "r", encoding="utf-8") as f:
+        with open(cp_p, encoding="utf-8") as f:
             cps = json.load(f)
     ops = []
     if os.path.exists(ops_p):
-        with open(ops_p, "r", encoding="utf-8") as f:
+        with open(ops_p, encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if line:

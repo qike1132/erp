@@ -39,9 +39,9 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from sqlalchemy import text  # noqa: E402
+from sqlalchemy import text
 
-from fastapi_app.core.database import get_sync_engine  # noqa: E402
+from fastapi_app.core.database import get_sync_engine
 
 # 物料分类 → 物理表（读取基线行数用）
 _MATERIAL_TABLES = (
@@ -120,7 +120,7 @@ def _count_material_rows_for_roles(conn, role_ids: list[int]) -> dict:
     counts: dict[str, int] = {}
     for category, table in _MATERIAL_TABLES:
         row = conn.execute(
-            text(f'SELECT count(*) FROM {table} WHERE role_id = ANY(:ids)'),  # noqa: S608
+            text(f'SELECT count(*) FROM {table} WHERE role_id = ANY(:ids)'),
             {'ids': role_ids},
         ).first()
         counts[category] = int(row[0]) if row else 0
@@ -146,7 +146,7 @@ def collect_baseline_counts(conn) -> dict:
     """按分类统计三张物料表行数基线（守恒校验用）。"""
     counts = {}
     for category, table in _MATERIAL_TABLES:
-        row = conn.execute(text(f'SELECT count(*) FROM {table}')).first()  # noqa: S608
+        row = conn.execute(text(f'SELECT count(*) FROM {table}')).first()
         counts[category] = int(row[0]) if row else 0
     return counts
 

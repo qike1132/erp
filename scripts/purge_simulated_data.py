@@ -37,11 +37,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from sqlalchemy import create_engine, text  # noqa: E402
-from sqlalchemy.exc import IntegrityError  # noqa: E402
-from sqlalchemy.orm import Session  # noqa: E402
+from sqlalchemy import create_engine, text
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
-from fastapi_app.core.config import settings  # noqa: E402
+from fastapi_app.core.config import settings
 
 # ---------------------------------------------------------------------------
 # 保留表：用户管理 + 客户管理 + 运行配置，脚本绝不触碰

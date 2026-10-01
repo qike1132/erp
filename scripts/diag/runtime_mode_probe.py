@@ -274,7 +274,7 @@ def probe_frontend() -> dict[str, object]:
     return out
 
 
-def ancestor_names(proc: "psutil.Process", limit: int = 8) -> list[str]:
+def ancestor_names(proc: psutil.Process, limit: int = 8) -> list[str]:
     """向上走父链取进程名。**不读 cmdline** —— 因为 NSSM 提权派生进程的 cmdline 读不到，
     但父链与进程名是可读的，因此它是 cmdline 不可用时唯一可靠的替代判据。"""
     names: list[str] = []
@@ -294,7 +294,7 @@ def ancestor_names(proc: "psutil.Process", limit: int = 8) -> list[str]:
     return names
 
 
-def python_child_count(proc: "psutil.Process") -> int:
+def python_child_count(proc: psutil.Process) -> int:
     """直接子进程中 python 解释器的数量。
     prod（uvicorn --workers N）→ master 下挂 N 个 worker；dev 单 worker → 0。"""
     n = 0

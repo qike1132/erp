@@ -86,7 +86,7 @@ class DevModeOps:
         except Exception as e:
             # 后台线程无 try/except 会静默终止，导致启动流程卡在 'starting' 且无任何日志；
             # 这里兜底记录并重置状态，让用户能看到失败原因。
-            self._msg_queue.put(('log', {'text': f"启动流程异常: {str(e)}", 'level': 'ERROR'}))
+            self._msg_queue.put(('log', {'text': f"启动流程异常: {e!s}", 'level': 'ERROR'}))
             self._msg_queue.put(('dual_failed', {'label': label, 'reason': str(e)}))
 
     def start_dual_thread(self, label):
@@ -158,7 +158,7 @@ class DevModeOps:
             self._msg_queue.put(('dual_started', {'label': label}))
         except Exception as e:
             self.process, self.frontend_process = None, None
-            self._msg_queue.put(('dual_failed', {'label': label, 'reason': f'异常: {str(e)}'}))
+            self._msg_queue.put(('dual_failed', {'label': label, 'reason': f'异常: {e!s}'}))
 
     # ── 停止 / 重启 ─────────────────────────────────────────────────────────
     def stop_dual_mode_async(self, label):
@@ -264,7 +264,7 @@ class DevModeOps:
                 finally:
                     proc.stdout.close()
         except Exception as e:
-            self._msg_queue.put(('log', {'text': f"读取日志异常: {str(e)}", 'level': 'ERROR'}))
+            self._msg_queue.put(('log', {'text': f"读取日志异常: {e!s}", 'level': 'ERROR'}))
 
     def read_frontend_stdout(self, proc):
         batch = []
