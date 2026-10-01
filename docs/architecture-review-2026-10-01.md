@@ -62,7 +62,7 @@
 | vendor-vue | 113KB |
 | vendor-reka-ui | 93KB |
 
-**问题**：vendor-primevue 672KB 为全 PC 端共享；入口 index 443KB 偏大（rollup-plugin-visualizer 已装但未见产物分析流程）。
+**问题**：vendor-primevue 672KB 为全 PC 端共享；入口 index 443KB 偏大（rollup-plugin-visualizer 已装但未见产物分析流程）。~~vendor-echarts 557KB 常驻首屏~~ —— **2026-10-01 构建实证修正**：index.html 的 modulepreload 仅含 vue/query/fontawesome/axios 四个 vendor，echarts 不在首屏；它由登录后的 echartsPreload 动态预载，manualChunks 只是给动态 chunk 命名。该"问题"不存在，OPT-15 关闭。
 
 ### 1.3 组件设计与复用
 
@@ -302,7 +302,7 @@ tests/ 99 + fastapi_app/tests/ 136 = 235 个测试文件、3,677 用例。**服�
 10. **config 增加 field_validator**：至少覆盖 CORS 白名单、DB 池、备份加密开关与口令非空联动（防“静默不加密”复发）。
 11. **mypy 覆盖 106 → 全量**：按现有 ratchet 机制分批纳入 services 剩余 74 文件。
 12. **迁移链线性化**：新起 pg_standalone_061 收敛 4 根（或对根迁移补 down_revision 成链），在 drill 库全量 upgrade 验证后再上生产。回滚：迁移不动数据，drill 验证即可。
-13. **vendor-primevue 672KB 拆分**：theme/theming-utils 与组件分离 + visualizer 分析入口 443KB。回滚：构建产物 hash 比对。
+13. **vendor-primevue 672KB 拆分**：~~theme/theming-utils 与组件分离 + visualizer 分析入口 443KB~~（2026-10-01 复核：echarts 部分经构建实证不成立已撤销；primevue 拆分保留为可选优化，收益待 web_vital 数据确认必要性——当前 LCP P75 1.2s 已达标）。回滚：构建产物 hash 比对。
 
 ### P2（季度，基础设施）
 
