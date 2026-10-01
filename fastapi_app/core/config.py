@@ -367,6 +367,25 @@ class Settings(BaseSettings):
                 f"JWT_ALGORITHM 必须为 {_ALLOWED_JWT_ALGORITHMS} 之一，"
                 f"当前值 '{self.ALGORITHM}' 不在允许范围内"
             )
+        # 结构性参数边界（OPT-12，2026-10-01）：这些值写错只会在运行期以诡异方式
+        # 爆炸（REDIS_DB 越界会静默连到别的库；API_PREFIX 少斜杠让全站路由 404），
+        # 启动期直接拦截。与上方手写闸门同风格，不用 pydantic validator 双轨。
+        if not self.API_PREFIX.startswith('/') or self.API_PREFIX.endswith('/'):
+            raise RuntimeError(
+                f"API_PREFIX 必须以 '/' 开头且不以 '/' 结尾（如 /api/v1），"
+                f"当前值 '{self.API_PREFIX}'"
+            )
+        if not (1 <= self.REDIS_PORT <= 65535):
+            raise RuntimeError(f"REDIS_PORT 越界（1-65535）：{self.REDIS_PORT}")
+        if not (0 <= self.REDIS_DB <= 15):
+            raise RuntimeError(
+                f"REDIS_DB 越界（0-15）：{self.REDIS_DB}。写错库号会静默连到别的库"
+                "（测试套件已固定使用 15 号库，生产应为 0）"
+            )
+        if self.ACCESS_TOKEN_EXPIRE_MINUTES <= 0 or self.REFRESH_TOKEN_EXPIRE_DAYS <= 0:
+            raise RuntimeError(
+                "令牌时效必须为正数（ACCESS_TOKEN_EXPIRE_MINUTES / REFRESH_TOKEN_EXPIRE_DAYS）"
+            )
         # 生产环境安全配置强校验：防止运维漏配导致安全控制失效
         _is_production = _is_production_env()
         if not _is_production and not self.ALLOWED_HOSTS:
