@@ -22,7 +22,7 @@
 | 交付规模（提交口径） | **P1 功能提交 `993fd728` = 64 files changed, 7518 insertions(+), 613 deletions(-)**（`M=45 / A=18 / D=1`）；**其后 `100569f8`（外部会话 OPT-19）= 4 files / 127(+) / 110(−)**；**本轮待提交的钩子修复 = 2 files / 9(+) / 3(−)**（§2.1）。已无「style 提交」 |
 | 待用户在场执行 | **1 个有生产风险动作**（迁移 061）+ P0-1/P0-2 运维半 + nginx reload 与后端重启 + PG 连接预算确认（§6） |
 | P2 / P3 / P4 | **未开工**（0 项落地；仅 P2「传输安全」子集的 4 个运维动作由外部会话完成并提交，§7） |
-| 并发外部会话在途产物 | **2 项，captain 已裁定本次提交排除**（`config/nginx-windows.conf` 的 secure_link 启用 + 硬编码 md5 串、`config/tls/ca.crt`）——非 P1 批次产物，见 §5.1 R-1/R-2 与 §8 |
+| 并发外部会话产物 | **2 项，均非 P1 批次产物，均已各自入库、两种都不与本批混**：R-1 = `config/nginx-windows.conf` 由该外部会话自己在 `100569f8`（OPT-19）提交；R-2 = `config/tls/ca.crt` 由 captain 在 `578a2617`（「收录并行会话遗留的 P1 收口配套」）与钩子修复、本台账一并提交。见 §5.1 R-1/R-2 与 §8 第 5 条 |
 
 ---
 
@@ -61,7 +61,7 @@ $ git status --porcelain | Measure-Object  ->  66 项
   46 × " M"（tracked 修改） + 1 × " D"（tracked 删除） + 19 × "??"（未跟踪新增）
 ```
 
-**C. 【当前状态】裁决 B 回退后的工作树（HEAD = `100569f8`，本任务独立复核）**
+**C. 【当前状态】裁决 B 回退后的工作树（本任务复核时 HEAD = `100569f8`；定稿时 HEAD = `578a2617`）**
 
 ```text
 $ git status --porcelain      -> 4 项
@@ -77,6 +77,7 @@ $ git log --oneline -2        ->  100569f8 / 993fd728
 - `scripts/gate_baseline.json` 现值 **`function_length = 51`**（本任务独立读取：另为 `bare_except 5 / vue 7 / service_commit 12 / bom 0 / alembic 0 / env_drift 0 / ruff 60 / pip_audit 0`，与 P0 提交一致；format 期间标定的「例外二」`_comment` 已随回退消失，`_comment` 里现只保留 P0-7 的 `service_commit 9→12` 说明）。
 - ⚠ **口径差 1 项**：本任务实测钩子修复 = **2 个 tracked 文件 / 9 insertions / 3 deletions**（captain 口径写「3 个文件」）；差额 1 不在本任务可见范围内（`config/tls/ca.crt` 为未跟踪且已裁定排除）。
 - 该回退使 **P2 独立项 `R-repo-format`** 生效：全仓格式化**前置条件 = 先把 16 个源码文本守卫测试改成抗格式**（§2.4），届时单独一轮提交。
+- **时点 2（定稿时，HEAD = `578a2617`）**：captain 已把「钩子/配置修复 + 本台账 + `config/tls/ca.crt`」提交为 **`578a2617 chore: 收录并行会话遗留的 P1 收口配套（ruff format 裁决/台账/CA 公钥）`**（**4 files changed, 479 insertions(+), 3 deletions(-)**：`.pre-commit-config.yaml` / `ruff.toml` / `config/tls/ca.crt` / `docs/p1-execution-ledger-2026-10-01.md`）⇒ 上表时点 1 的 4 项 porcelain 已消化为 1 个提交；当前工作树 = ` M docs/p1-execution-ledger-2026-10-01.md`（本任务定稿同步，2/2）+ ` M docs/TRANSACTION_BOUNDARY_GUIDE.md`（t45 的 R-3 锚点同步，5/5）+ ` M docs/optimization-plan-2026-10-01-final.md`（captain 追加 §6.28，16/0）。提交链 = **`993fd728` → `100569f8` → `578a2617`**。
 - **回退后树的最终验收（`logs\_final_p1_acceptance3.log`）= 全绿**：`pytest 3786 passed / 268 skipped / 440.15s`（exit 0）、`quality_gate exit 0 [PASS]`、`mypy exit 0 (144 files)`、`scan_secrets exit 0` ⇒ **本台账定稿（§2.6）**。
 
 口径与漂移说明：
@@ -218,7 +219,7 @@ SCAN_EXIT=0      scan_secrets  ->  [PASS]
 
 ### 2.5 裁决 B（回退 format + 修钩子）后的现状、独立复核与新发现
 
-**captain 执行的动作（我未参与、未执行任何 git 写操作）**：① `git restore --worktree -- .` 把工作树恢复到 HEAD（`100569f8`），1048 个 format 文件全部回退；② 钩子修复（本轮待提交）：`.pre-commit-config.yaml` 的 `ruff-pre-commit rev: v0.11.0 → v0.16.9` 且**删除 `ruff-format` 钩子**（原位置改为说明注释），`ruff.toml` 的 `[format] quote-style "single" → "double"` ⇒ 计划 §6.18 第 6 项「提交钩子冲突」关闭，**后续提交不再需要 `--no-verify`**；③ 全仓格式化登记为 **P2 独立项 `R-repo-format`**（前置 = 先把 §2.4 的 16 个守卫测试改成抗格式）。
+**captain 执行的动作（我未参与、未执行任何 git 写操作）**：① `git restore --worktree -- .` 把工作树恢复到 HEAD（`100569f8`），1048 个 format 文件全部回退；② **钩子修复（已随 `578a2617` 提交）**：`.pre-commit-config.yaml` 的 `ruff-pre-commit rev: v0.11.0 → v0.16.9` 且**删除 `ruff-format` 钩子**（原位置改为说明注释），`ruff.toml` 的 `[format] quote-style "single" → "double"` ⇒ 计划 §6.18 第 6 项「提交钩子冲突」关闭，**后续提交不再需要 `--no-verify`**；③ 全仓格式化登记为 **P2 独立项 `R-repo-format`**（前置 = 先把 §2.4 的 16 个守卫测试改成抗格式）。
 
 **本任务独立复核（只读 + `quality_gate.py`；未碰 git 写操作、未跑全量 pytest）**
 
@@ -325,8 +326,8 @@ SCAN_EXIT=0
 
 | ID | 级别 | 事实 | 建议处置 |
 | --- | --- | --- | --- |
-| **R-1** | **high（提交面）** | `config/nginx-windows.conf` 在 23:10:16 被**外部会话**改成**启用** `secure_link`（`secure_link $arg_st,$arg_s;` + `secure_link_md5 "$secure_link_expires$uri 0829c6a6b01cafc47788ccc04297dd382838bdfc1f77e5ef1a58b1e5d6e32589";`）。该提交前状态（`bc41ae7b`）是「注释态回退 + 防呆护栏」，注释明确写「重新启用前必须先用签名 URL 实测 200 再上」 | **裁定（captain）：本次提交排除。** 属该会话在途工作，介入会与其冲突；且 `bc41ae7b` 复盘结论要求「重新启用前先用签名 URL 实测 200」，非本批所能签核 ⇒ **需外部会话自证**（提供签名 URL 实测 200 / 存量直链不再 403 的证据）后方可入库。另注：md5 串是硬编码密钥材料，与 §6.3 `UPLOAD_URL_SIGNING_SECRET` 口径需一致 |
-| **R-2** | low | `config/tls/ca.crt`（1927 B）为未跟踪的 443 自签 TLS 产物，与 `b5ae3a94`（443 TLS）相关 | **裁定（captain）：本次提交排除**（未跟踪、443 自签产物、属外部会话；入库与否由该会话决定，本批不碰）。若入库需确认不含私钥 |
+| **R-1** | **high（提交面）** | `config/nginx-windows.conf` 在 23:10:16 被**外部会话**改成**启用** `secure_link`（`secure_link $arg_st,$arg_s;` + `secure_link_md5 "$secure_link_expires$uri 0829c6a6b01cafc47788ccc04297dd382838bdfc1f77e5ef1a58b1e5d6e32589";`）。该提交前状态（`bc41ae7b`）是「注释态回退 + 防呆护栏」，注释明确写「重新启用前必须先用签名 URL 实测 200 再上」 | **裁定（captain）：P1 批次提交排除**（该文件未进 `993fd728`）。**后续（结案口径）**：该文件已由外部会话**自己在 `100569f8`（OPT-19，4 files/127+/110−，提交信息含「secure_link 激活并五连测验收」）中提交**，未与本批混 ⇒ 本批不再需要处置；其自证责任随之归该会话。另注：md5 串是硬编码密钥材料，与 §6.3 `UPLOAD_URL_SIGNING_SECRET` 口径需一致 |
+| **R-2** | low | `config/tls/ca.crt`（1927 B）为 443 自签 TLS 产物，与 `b5ae3a94`（443 TLS）相关 | **先裁定「P1 批次排除」；最终由 captain 在 `578a2617`（「收录并行会话遗留的 P1 收口配套」）中收录入库** ⇒ 已闭合（该文件为 CA **公钥**，31 行） |
 | **R-3** | low | `docs/TRANSACTION_BOUNDARY_GUIDE.md` §4 行号锚点 **3 行陈旧**（与 format 无关，P1 批次改行造成）：`cleanup/service.py:604→606`、`policy_service.py:544→549`、`records.py:791/803/822→804/816/835`；12 处命中总数与 `gate_baseline.json` 一致（§2.5 独立复算） | 交 **t44/gatekeeper** 在**无 format 的当前树**上同步（文档 §4 自称「以脚本输出为准」，不影响门禁/验收）；本任务只读不代改 |
 
 ### 5.2 t26 验证的遗留（转载，均为非阻断）
@@ -397,10 +398,10 @@ P2 起步前的前置依赖（本批已就绪）：P1-1 只读对账（先对账
 2. 未跟踪件需 `git add` 明确列名（逐条路径，不用通配）：3 份 `docs/p1-*`、2 个新模块（`fastapi_app/services/inventory_reconcile.py`、`fastapi_app/tasks/inventory_reconcile_task.py`）、11 个新测试、1 个迁移（`migrations/versions/pg_standalone_061_add_product_stock_check.py`）、`scripts/check_openapi_frontend_alignment.py`。**`config/tls/ca.crt` 明确排除**（§5.1 R-2）。
 3. `.env` / `.env.production` / `config/.env.production` **未被 git 跟踪**（含凭据），本次不涉及、不要误加。
 4. **提交钩子冲突 → 已关闭（本轮）**：「钩子/配置修复」提交把 `ruff-pre-commit` 升到 `v0.16.9` 并**删除 `ruff-format` 钩子**、`ruff.toml` 的 `[format] quote-style` 改为 `"double"` ⇒ 后续提交**不再需要** `--no-verify`（§2.5；plan §6.18 第 6 项关闭）。
-5. **R-1/R-2 结案方式**：R-1（`config/nginx-windows.conf` 的 `secure_link` 启用 + 硬编码 md5 串）已由**外部会话自己在 `100569f8`（OPT-19）中提交**（4 files/127+/110−，未与本批混提交）⇒ 本批无需再决定其去留；本任务独立复核确认该提交只含 4 个文件、不含本批任何文件。**R-2**（`config/tls/ca.crt`，未跟踪）**继续排除**。
+5. **R-1/R-2 结案方式**：R-1（`config/nginx-windows.conf` 的 `secure_link` 启用 + 硬编码 md5 串）已由**外部会话自己在 `100569f8`（OPT-19）中提交**（4 files/127+/110−，未与本批混提交）⇒ 本批无需再决定其去留；本任务独立复核确认该提交只含 4 个文件、不含本批任何文件。**R-2**（`config/tls/ca.crt`）最终由 **captain 在 `578a2617` 中收录**（连同钩子修复与本台账）⇒ 两项均已有明确归属，本批无需再处置。
 6. **提交顺序（用户裁决 B = 回退 format + 修钩子）**：
    - ① **P1 功能提交 = `993fd728`，已完成**（64 files / 7518(+) / 613(−)，§2.1-A）；
-   - ② **钩子/配置修复（本轮，待提交）**：`.pre-commit-config.yaml`（`rev v0.11.0 → v0.16.9`、删 `ruff-format` 钩子）+ `ruff.toml`（`quote-style "single" → "double"`）= 本任务实测 **2 files / 9(+) / 3(−)**（§2.1-C）；提交信息建议标注「关闭提交钩子冲突」；
+   - ② **钩子/配置修复 —— 已提交**：`.pre-commit-config.yaml`（`rev v0.11.0 → v0.16.9`、删 `ruff-format` 钩子）+ `ruff.toml`（`quote-style "single" → "double"`）＝本任务实测 **2 files / 9(+) / 3(−)**（§2.1-C），由 captain 随 `578a2617` 一起入库（该提交 4 files / 479(+) / 3(−)，另含本台账与 `config/tls/ca.crt`）；
    - ③ ~~style 提交（全仓 `ruff format`）~~ **已取消**（裁决 B）；全仓格式化登记为 **P2 独立项 `R-repo-format`**（前置 = 先把 §2.4 的 16 个守卫测试改成抗格式）。
 7. 【已废止 · 历史留档】原「§6.9 方案 (b)」驱动的 style 提交计划（裁决 B 已取消；以下全部作废）：
 8. **最终验收（已到手 · 全绿）** = `D:\erp_system\logs\_final_p1_acceptance3.log`（captain 后台作业 `pwsh-1769`；1733631 B；START `2026-10-01T23:41:34` / END `23:49:25`；树 = `100569f8` + 本轮钩子修复）：
@@ -422,7 +423,7 @@ P2 起步前的前置依赖（本批已就绪）：P1-1 只读对账（先对账
 
 ## 9 变更声明（未修改任何实现文件）
 
-- 本任务唯一写入：`docs/p1-execution-ledger-2026-10-01.md`（新建，未跟踪）。所有探针/命令输出落在仓库外 `%TEMP%\t27-integrator\`。
+- 本任务唯一写入：`docs/p1-execution-ledger-2026-10-01.md`（新建）。**该文件已被 captain 随 `578a2617` 收录入库**；**入库版本**（`578a2617` 内的 blob `472818c92a9147ad3f60f7c247ee6012c4cf70bb`）＝ **439 行 / 56546 B**；其后本任务的定稿同步改动（§1/§2 最终 EXIT 替换、R-1/R-2 状态行、时点 2、§2.6，`2/2`）留在工作树，**定稿版 ＝ 440 行 / 58002 B / SHA256 `A91E8E2C2CC425FB6533472647CD06D06CC136E56F3FBA72CC0592DF5B56AD10`**（captain 于结案提交前复核并更正本节数字）。所有探针/命令输出落在仓库外 `%TEMP%\t27-integrator\`。
 - 本任务未执行 `git add/commit/checkout/stash`（**§2.1-C 的 format 回退由 captain 执行**；本任务只做只读复核）；未重启任何服务；未执行 `icacls/sc/schtasks`；未改 `.env` 与任何口令密钥值；未改 `scripts/gate_baseline.json`（单写者 = gatekeeper）；未使用 `sandbox_permissions`；python 一律 `D:\erp_system\.venv\Scripts\python.exe`。
 - §2.4 的复现只跑**窄范围定向命令**（7 个测试文件，串行），其中涉及数据库的 3 例经仓库既有 conftest 对 `erp_system_test` 建 schema；**未启动任何全量 pytest**（遵守 captain 的串行纪律），未改任何迁移或库结构。
 - 与 `docs/p1-verification-2026-10-01.md` 的一致性：§4 逐项结论、§5.2 残留编号（F-03/F-04/F-05/F-07/R-pg）与该台账 §5/§6 逐条对应；本台账不新增也未撤销任何验证结论，仅补充集成视图与 2 条本批之外的新发现（R-1/R-2）。
