@@ -1,10 +1,13 @@
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.11.0
+    rev: v0.16.9
     hooks:
       - id: ruff
         args: [--fix]
-      - id: ruff-format
+      # ruff-format 钩子于 2026-10-01 移除（裁决 B）：本仓约 1000 个 .py 从未格式化，
+      # 且存在一批「源码文本级守卫测试」（断言精确子串/行号/行数）。实测一次全仓 format
+      # 会打断 16 个测试，见 docs/optimization-plan-2026-10-01-final.md §6.28。
+      # 重新启用前必须先按 §6.28 把守卫测试改成抗格式，并单独一轮提交。
 
   # 统一代码质量门禁（基线棘轮）：存量违规不阻断，新增即拦截。
   # 实现见 scripts/quality_gate.py，阈值见 pyproject.toml [tool.code-quality]。

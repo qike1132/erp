@@ -45,7 +45,10 @@ ignore = [
 "fastapi_app/services/backup/__init__.py" = ["I001"]
 
 [format]
-quote-style = "single"
+# 2026-10-01（§6.28 裁决 B）：原为 "single"，与本仓实际风格（双引号）相反。
+# 实测一次 `ruff format` 会把 1033 个文件整体翻成单引号，其中 7 个源码文本级
+# 守卫测试因此失败；改为 "double" 与仓库现状一致，避免误跑 format 时的大面积无意义改写。
+quote-style = "double"
 indent-style = "space"
 skip-magic-trailing-comma = false
 line-ending = "auto"
