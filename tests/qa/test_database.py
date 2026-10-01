@@ -64,7 +64,7 @@ class TestBatchInsert:
         # 加运行级唯一后缀，让本用例只验证批量插入本身，不依赖词表运气。
         run_tag = uuid.uuid4().hex[:6]
         values = [{
-            "name": f"{p['product_name']}·{run_tag}{i:03d}"[:100],
+            "name": f"{p['product_name'][:80]}·{run_tag}{i:03d}",
             "barcode": p["product_code"],
             "price": p["price"],
             "initial_stock": 0,
