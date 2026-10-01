@@ -125,7 +125,14 @@ class TestCustomerService:
 
 class TestCustomerEndpoints:
     @pytest.mark.asyncio
-    async def test_list_customers(self, client, mock_db):
+    async def test_list_customers(self, client, mock_db, monkeypatch):
+        # customers/list 端点内有手工 Redis 缓存（customer.py:_get_cached_customer_list），
+        # 测试与生产共用 Redis：先前运行写入的缓存会绕过下方 mock 直接返回旧 total。
+        # 请求前旁路缓存读取，保证本用例验证的是端点逻辑而非缓存残留状态。
+        import fastapi_app.api.v1.endpoints.customer as customer_ep
+
+        monkeypatch.setattr(customer_ep, "_get_cached_customer_list", AsyncMock(return_value=None))
+
         mock_customer = MagicMock()
         mock_customer.id = 1
         mock_customer.name = "测试客户"
