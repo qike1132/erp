@@ -9,6 +9,10 @@ Task 3（多 SKU 订单聚合）：按 customer 分组，同一客户的多个 S
 
 2026-09-14 重构：`batch_create_orders` 由 219 行拆为 1 个编排函数 + 9 个职责单一函数，
 零行为变化（字段口径、校验顺序、异常分支、savepoint 语义均逐条对齐）。
+
+2026-10-02 P1-5 锁顺序：产品行锁改为「每个 customer 分组只锁本组商品」且 SQL 显式
+`ORDER BY product.id`（IN 列表同样升序），消除并发批量在商品集合重叠时的交叉死锁
+窗口；锁粒度不变（仍为 Product 行级 `FOR UPDATE`）。
 """
 import logging
 from datetime import UTC, datetime
@@ -55,7 +59,7 @@ def _resolve_order_date(raw) -> datetime:
 
 
 def _collect_product_ids(orders_data: list) -> list[int]:
-    """收集所有 product_id（去重排序），供一次性加锁查询，避免循环内查询。"""
+    """收集给定条目引用的 product_id（去重升序），供本组一次性加锁查询，避免循环内逐条查询。"""
     product_ids = []
     for order_data in orders_data:
         try:
@@ -77,11 +81,21 @@ def _group_by_customer(orders_data: list) -> dict[str, list]:
 
 
 async def _lock_products(db: AsyncSession, product_ids: list[int]) -> dict[int, Product]:
-    """一次性加锁查询相关产品，返回 {product_id: Product}。"""
+    """按 id 升序一次性加锁查询本组产品，返回 {product_id: Product}。
+
+    P1-5：显式 ORDER BY Product.id（IN 列表同样升序），使多个并发批量在商品集合重叠
+    时按同一顺序获取 Product 行锁，消除「集合相同、获取顺序不同」的交叉死锁窗口；加锁
+    范围由调用方限制为当前 customer 分组实际引用的商品，不再把整批商品的行锁贯穿整个
+    批量循环。锁粒度不变：仍是 Product 行级 FOR UPDATE（非表锁、非 NOWAIT/SKIP LOCKED）。
+    """
     if not product_ids:
         return {}
+    ordered_ids = sorted(product_ids)
     lock_result = await db.execute(  # batch-loop: 有意逐行处理,非 N+1
-        select(Product).where(Product.id.in_(product_ids)).with_for_update()
+        select(Product)
+        .where(Product.id.in_(ordered_ids))
+        .order_by(Product.id)
+        .with_for_update()
     )
     return {p.id: p for p in lock_result.scalars().all()}
 
@@ -312,19 +326,23 @@ async def batch_create_orders(db: AsyncSession, orders_data: list) -> dict:
     results: list[dict] = []
     created_order_ids: list[int] = []
 
-    # 收集所有 product_ids（保留加锁查询优化，避免 N+1）
-    product_ids = _collect_product_ids(orders_data)
     # 按 customer 分组（dict 保持首次出现顺序）
     grouped = _group_by_customer(orders_data)
 
     product_map: dict[int, Product] = {}
+    # 已在本事务中成功加锁的 product_id（savepoint 语义见下方 locked_ids.update 处）
+    locked_ids: set[int] = set()
 
     for customer, items in grouped.items():
+        locked_here: list[int] = []
         try:
             async with db.begin_nested():
-                # 加锁查询所有相关 Product（仅首次进入时执行）
-                if product_ids and not product_map:
-                    product_map = await _lock_products(db, product_ids)
+                # P1-5：只锁本组商品（升序）。锁集合与本次分组商品集合一致，且不再把
+                # 整批商品的行锁贯穿整个批量循环（缩小并确定化的加锁顺序，消除交叉死锁）
+                missing_ids = [pid for pid in _collect_product_ids(items) if pid not in locked_ids]
+                if missing_ids:
+                    product_map.update(await _lock_products(db, missing_ids))
+                    locked_here = missing_ids
 
                 validated_items = _validate_group_items(items, customer, product_map, results)
                 order = await _create_order_header(db, customer, validated_items)
@@ -334,6 +352,9 @@ async def batch_create_orders(db: AsyncSession, orders_data: list) -> dict:
                 results.append(_build_success_result(order, customer, created_items))
                 created_order_ids.append(order.id)
                 await _dispatch_notifications(db, order, created_items, product_map)
+            # 组内 savepoint 正常退出后才记为「已加锁」：PostgreSQL 的 ROLLBACK TO
+            # SAVEPOINT 会释放该子事务内新获取的行锁，失败组不得污染后续组的加锁判定。
+            locked_ids.update(locked_here)
         except _SavepointRollbackSignalError:
             pass  # 业务校验失败，savepoint 已自动回滚，继续下一组; defensive: 异常静默处理,不影响主流程
         except (ValueError, TypeError, OSError) as e:

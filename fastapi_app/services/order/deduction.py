@@ -40,7 +40,10 @@ from fastapi_app.services.order_utils import (
 from fastapi_app.services.serializers.order_serializer import (
     OrderSerializer,
 )
-from fastapi_app.shared.stock_concurrency import get_product_for_update
+from fastapi_app.shared.stock_concurrency import (
+    get_product_for_update,
+    update_stock_with_optimistic_lock,
+)
 from fastapi_app.shared_models import (
     ApprovalLog,
     ApprovalRequest,
@@ -100,6 +103,15 @@ async def _increase_deduction(
     # 循环外一次性锁定产品（消除重复行锁）
     product = await get_product_for_update(db, order.product_id)
 
+    # 预检可用备货总量（P1-8）：不足时在写任何 StockOut/库存之前失败，
+    # 失败路径不产生半成品记录（回滚边界由调用方 db_transaction 提供）
+    available_total = sum(
+        max(0, stockin.quantity - int(deducted_map.get(stockin.id, 0)))
+        for stockin in stockins
+    )
+    if available_total < diff:
+        raise ValueError(f'可用备货不足，还需{diff - available_total}件无法抵扣')
+
     remaining = diff
     logs: list[InventoryLog] = []
     for stockin in stockins:
@@ -124,9 +136,9 @@ async def _increase_deduction(
         )
         db.add(stockout)
 
-        # 更新产品库存（循环外已锁定，循环内直接修改）
+        # 更新产品库存（统一走乐观锁写入口，WHERE version=旧值；不再直写 current_stock）
         if product and deduct_amount > 0:
-            product.current_stock -= deduct_amount
+            await update_stock_with_optimistic_lock(db, order.product_id, -deduct_amount)
 
         logs.append(InventoryLog(
             product_id=order.product_id,
@@ -165,6 +177,16 @@ async def _decrease_deduction(
     # 循环外一次性锁定产品（消除重复行锁）
     product = await get_product_for_update(db, order.product_id)
 
+    # 预检现有抵扣总量（P1-8）：请求减少量超过现有抵扣量时在写任何记录之前失败
+    effective_total = sum(
+        max(0, stockout.quantity - stockout.returned_quantity)
+        for stockout in deduction_stockouts
+    )
+    if effective_total < reduce_amount:
+        raise ValueError(
+            f'现有抵扣量不足，还需{reduce_amount - effective_total}件无法减少'
+        )
+
     remaining = reduce_amount
     logs: list[InventoryLog] = []
     for stockout in deduction_stockouts:
@@ -178,7 +200,7 @@ async def _decrease_deduction(
             # 整条删除
             remaining -= effective_qty
             if product:
-                product.current_stock += effective_qty
+                await update_stock_with_optimistic_lock(db, order.product_id, effective_qty)
             logs.append(InventoryLog(
                 product_id=order.product_id,
                 change_type='取消抵扣',
@@ -191,7 +213,7 @@ async def _decrease_deduction(
             # 部分减少
             stockout.quantity -= remaining
             if product:
-                product.current_stock += remaining
+                await update_stock_with_optimistic_lock(db, order.product_id, remaining)
             logs.append(InventoryLog(
                 product_id=order.product_id,
                 change_type='取消抵扣',
@@ -204,6 +226,10 @@ async def _decrease_deduction(
     if logs:
         db.add_all(logs)
 
+    if remaining > 0:
+        raise ValueError(f'现有抵扣量不足，还需{remaining}件无法减少')
+
+
 async def update_deduct_quantity(
     db: AsyncSession, order_id: int, new_deduct_quantity: int, current_user: User,
 ) -> dict:
@@ -214,6 +240,11 @@ async def update_deduct_quantity(
     - 如果 new > current：增加抵扣（从可用备货中扣除）
     - 如果 new < current：减少抵扣（删除/减少已有的抵扣出库记录）
     - 如果 new == current：无变化
+
+    完整性（P1-8）：抵扣不足时抛 ValueError（文案含还差多少件），不做静默截断；
+    返回的 deduct_quantity 以 flush 后从 DB 重新聚合的实际生效量为准，任何
+    「未完全生效」路径都不返回 success=True。函数内不 commit/rollback ——
+    失败回滚由调用方（端点 db_transaction）边界保证。
     """
     result = await db.execute(select(Order).where(Order.id == order_id).with_for_update())
     order = result.scalar_one_or_none()
@@ -239,16 +270,25 @@ async def update_deduct_quantity(
     else:  # diff < 0，减少抵扣
         await _decrease_deduction(db, order, order_id, abs(diff))
 
-    # 更新订单状态
+    # 先把本次抵扣变更 flush（不 commit）到会话，再核对实际生效量（P1-8）
+    await db.flush()
+
+    actual_map = await _batch_deduct_quantities(db, [order_id])
+    actual_deduct = actual_map.get(order_id, 0)
+    if actual_deduct != new_deduct_quantity:
+        raise ValueError(
+            f'抵扣数量未能完全生效：请求{new_deduct_quantity}件，实际生效{actual_deduct}件'
+        )
+
+    # 更新订单状态（抵扣量已落地，状态派生与实际一致）
     order.status = await compute_order_status_from_db(db, order)
 
-    await db.flush()
     await cache_mgr.invalidate(
         InvalidationStrategy.DOMAIN,
         CacheDomain.ORDER_AND_INVENTORY | CacheDomain.REPORT,
     )
     await _safe_invalidate_purchase_cache()
 
-    logger.info(f'订单抵扣修改：{order.order_no}，{current_deduct}->{new_deduct_quantity}，操作人：{current_user.username}')
+    logger.info(f'订单抵扣修改：{order.order_no}，{current_deduct}->{actual_deduct}，操作人：{current_user.username}')
 
-    return {'success': True, 'message': '抵扣数量修改成功', 'deduct_quantity': new_deduct_quantity}
+    return {'success': True, 'message': '抵扣数量修改成功', 'deduct_quantity': actual_deduct}

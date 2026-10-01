@@ -40,7 +40,7 @@ from fastapi_app.services.order_utils import (
 from fastapi_app.services.serializers.order_serializer import (
     OrderSerializer,
 )
-from fastapi_app.shared.stock_concurrency import get_product_for_update
+from fastapi_app.shared.stock_concurrency import assert_stock_available, get_product_for_update
 from fastapi_app.shared_models import (
     ApprovalLog,
     ApprovalRequest,
@@ -446,8 +446,11 @@ async def _rollback_order_stock_deduction(
     if rollback_logs:
         db.add_all(rollback_logs)
 
-    if product.current_stock + total_deducted < 0:
-        raise ValueError(f'删除订单将导致库存为负数（产品：{product.name}，当前库存：{product.current_stock}，净变化：{total_deducted:+d}）')
+    # 负库存判定统一走 fastapi_app.shared.stock_concurrency 入口（P1-2b）
+    assert_stock_available(
+        product.current_stock, total_deducted,
+        message=f'删除订单将导致库存为负数（产品：{product.name}，当前库存：{product.current_stock}，净变化：{total_deducted:+d}）',
+    )
     product.current_stock += total_deducted
 
     db.add(InventoryLog(

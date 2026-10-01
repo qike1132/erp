@@ -22,7 +22,7 @@ from fastapi_app.services.numbering import (
     generate_stockout_number,
 )
 from fastapi_app.services.order_deduction_service import process_order_deduction
-from fastapi_app.shared.stock_concurrency import get_product_for_update
+from fastapi_app.shared.stock_concurrency import check_stock_available, get_product_for_update
 from fastapi_app.shared_models import (
     Customer,
     InventoryLog,
@@ -529,7 +529,8 @@ async def import_stockouts_from_data(db: AsyncSession, data_list: list, *, deps:
             logger.warning("出货导入：quantity 解析失败，跳过该行 (product=%s, customer=%s, value=%r)", product_identifier, customer, quantity)
             return False
 
-        if product.current_stock < qty:
+        # 负库存判定统一走统一入口（P1-2b）；策略拒绝时按原行为跳过该行
+        if check_stock_available(product.current_stock, -qty) is not None:
             return False
 
         shipment_info = await deps.calculate_available_shipment_quantity(

@@ -75,7 +75,7 @@ async def bench_stock_list(session: AsyncSession, count: int, iterations: int):
 
 
 async def bench_purchase_orders(session: AsyncSession, count: int, iterations: int):
-    from fastapi_app.services.purchase_order_service import get_purchase_orders
+    from fastapi_app.services.purchase_center_service import get_purchase_orders
 
     print("\n=== 采购订单查询（N+1验证） ===")
 

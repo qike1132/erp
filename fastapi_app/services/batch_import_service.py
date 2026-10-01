@@ -31,7 +31,7 @@ from fastapi_app.services.numbering import (
     generate_stockout_number,
 )
 from fastapi_app.services.order_deduction_service import process_order_deduction
-from fastapi_app.shared.stock_concurrency import get_product_for_update
+from fastapi_app.shared.stock_concurrency import check_stock_available, get_product_for_update
 from fastapi_app.shared_models import (
     CaseInventoryLog,
     CaseStockIn,
@@ -329,8 +329,12 @@ async def import_case_stockouts_service(db: AsyncSession, file: ExcelUpload) -> 
                         errors.append(case_err)
                         skipped += 1
                         continue
-                    if case.current_stock < qty:
-                        errors.append(f'库存不足，当前库存: {case.current_stock}')
+                    # 统一负库存校验入口（env ALLOW_NEGATIVE_STOCK，缺省拒绝）
+                    if reason := check_stock_available(
+                        case.current_stock, -qty,
+                        message=f'库存不足，当前库存: {case.current_stock}',
+                    ):
+                        errors.append(reason)
                         skipped += 1
                         continue
                     stockout_date = parse_date_value(stockout_date_val) or datetime.now()
@@ -571,8 +575,12 @@ async def import_stockouts_service(db: AsyncSession, file: ExcelUpload) -> Batch
                         errors.append('出库数量必须是整数')
                         skipped += 1
                         continue
-                    if product.current_stock < qty:
-                        errors.append(f'库存不足，当前库存: {product.current_stock}')
+                    # 统一负库存校验入口（env ALLOW_NEGATIVE_STOCK，缺省拒绝）
+                    if reason := check_stock_available(
+                        product.current_stock, -qty,
+                        message=f'库存不足，当前库存: {product.current_stock}',
+                    ):
+                        errors.append(reason)
                         skipped += 1
                         continue
                     # 校验可出货量（基于订单支持）

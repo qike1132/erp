@@ -14,7 +14,10 @@ from sqlalchemy.orm import selectinload
 
 from fastapi_app.services.numbering import generate_stockout_number
 from fastapi_app.services.order_utils import compute_order_status_from_db
-from fastapi_app.shared.stock_concurrency import get_product_for_update
+from fastapi_app.shared.stock_concurrency import (
+    get_product_for_update,
+    update_stock_with_optimistic_lock,
+)
 from fastapi_app.shared_models import InventoryLog, Order, Product, StockIn, StockOut
 
 logger = logging.getLogger(__name__)
@@ -113,11 +116,11 @@ async def process_order_deduction(
             'remaining_in_stockin': available - deduct_amount
         })
 
-        # 更新产品库存
+        # 更新产品库存（统一走乐观锁写入口，WHERE version=旧值；不再直写 current_stock）
         if product is None:
             product = await get_product_for_update(db, product_id)
         if product and deduct_amount > 0:
-            product.current_stock -= deduct_amount
+            await update_stock_with_optimistic_lock(db, product_id, -deduct_amount)
 
         # 更新订单状态（派生计算：根据实际备货/出货量推导状态）
         order.status = await compute_order_status_from_db(db, order)

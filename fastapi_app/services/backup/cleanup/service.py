@@ -542,7 +542,9 @@ class BackupCleanupService:
                         # 同时删除伴随文件：.meta（含 .zip.enc.meta）与 .record。
                         # 与 records.cleanup_old_backups 同口径（共用同一 helper），
                         # 避免「删了 .enc，.zip.enc.meta / .record 永久残留」。
-                        _delete_backup_sidecars(filepath)
+                        # t38：errors 聚合器透传给 helper，伴随文件清理失败进清理
+                        # 结果（error_count/success），不再只有 ERROR 日志。
+                        _delete_backup_sidecars(filepath, errors)
 
                     except OSError as e:
                         errors.append(f"{filename}: {e!s}")

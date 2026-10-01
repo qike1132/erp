@@ -32,11 +32,19 @@
 
 ### 2.1 脚本自动豁免的代码形态
 
-`scripts/check_service_commit.py` 识别以下模式并跳过，无需额外说明：
+`scripts/check_service_commit.py` 用 **AST（语法树）** 判定，不做文本匹配、不看注释
+（2026-10-01 P1-10② 从正则升级）。它只认一件事：**在数据库会话基座上调用 `.commit(...)`**——
+基座标识符以 `db` / `session` 结尾（`db`、`self.db`、`storage_db`、`session`、`self.session`…）
+即视为违规。以下形态不报，无需额外说明：
 
-- `await nested.commit()` —— 嵌套事务 / savepoint
-- `await short_session.commit()` / `_session.commit()` —— 独立短会话（如编号生成器）
-- 整行注释（`# await db.commit()`，不含可执行代码）、测试文件
+- `await nested.commit()` —— 嵌套事务 / savepoint（基座以 `nested` 结尾）
+- `await short_session.commit()` / `_session.commit()` / `db_session.commit()` —— 独立短会话
+  （基座以 `short_session` / `_session` 结尾，如编号生成器）
+- 整行注释、docstring 与字符串里的示例文本 —— 语法树里它们不是语句，天然不参与判定
+- 测试文件（`test_*.py`）
+
+带参数的 `await db.commit(force=True)` **算违规**（老正则版要求空括号 `()`，那是个可以绕过的
+缺口，P1-10② 一并闭合）；只写 `db.commit`（方法引用、没有括号）不算调用，不报。
 
 2026-10-01（P0-7 门禁旁路封堵）删掉了两条曾被用来**静默豁免真实违规**的宽规则：
 
@@ -121,11 +129,15 @@ python scripts/quality_gate.py --verbose
 # 机器可读清单（门禁语义解析用；人类输出与退出码不变）
 python scripts/check_service_commit.py --json
 
-# 脚本自检：注释旁路不再豁免 / 行号准确 / 退役规则未复活
+# 脚本自检：正例（该报必须报）+ 反例（不该报必须不报）+ fail-closed + 退役旁路未复活
 python scripts/check_service_commit.py --self-test
 ```
 
 预期：违规数 **≤ 12**（= `scripts/gate_baseline.json` 的 `service_commit`）。
 新增任意一处 `db.commit()`（且非 §2.1 形态）都会让门禁报 `REGRESS` 并退出码 1。
+
+退出码语义（`--json` 字段 `{violations, total, scan_dir}` 与退出码不变）：`0` 无违规 /
+`1` 有违规 / `2` 环境异常。文件**无法解析**（语法错误、读不了）时不会静默放过，而是
+fail-closed：退出码 2，`--json` 给出与「路径不存在」同形状的 `error` 字段。
 
 改造完成后若违规数下降，执行 `python scripts/quality_gate.py --update-baseline` 收紧基线，防止回退。

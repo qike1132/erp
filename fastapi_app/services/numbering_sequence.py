@@ -6,6 +6,12 @@ INSERT ... ON CONFLICT DO UPDATE ... RETURNING 原子递增。计数独立短事
 提交，与业务事务解耦——业务回滚仅产生跳号、不回收序号，消除多 worker
 下"读到最大编号后未等业务提交即放锁"导致的重号窗口。
 
+水位单调（P1-4）：冲突分支取 ``GREATEST(numbering_counter.last_seq, :seed)``
+再递增。当计数行落后于当日已落库最大编号（历史编号、计数行被重建、
+手工导入/清理）时，旧实现 ``last_seq + 1`` 会把序号拉回到历史编号之下
+（唯一约束报错或直接重号），现改为先追平 seed 再递增，任何 counter 与
+seed 组合下都只前进。
+
 SQL 为常量文本，所有值经 :prefix/:number_date/:last_seq 绑定参数传递。
 """
 import logging
@@ -31,7 +37,7 @@ _ALLOCATE_SQL = text(
     'INSERT INTO numbering_counter (prefix, number_date, last_seq) '
     'VALUES (:prefix, :number_date, :last_seq) '
     'ON CONFLICT (prefix, number_date) '
-    'DO UPDATE SET last_seq = numbering_counter.last_seq + 1 '
+    'DO UPDATE SET last_seq = GREATEST(numbering_counter.last_seq, CAST(:seed AS BIGINT)) + 1 '
     'RETURNING numbering_counter.last_seq'
 )  # nosec B608 - 常量 SQL 文本 + 绑定参数
 
@@ -41,7 +47,7 @@ _ALLOCATE_RANGE_SQL = text(
     'INSERT INTO numbering_counter (prefix, number_date, last_seq) '
     'VALUES (:prefix, :number_date, :last_seq) '
     'ON CONFLICT (prefix, number_date) '
-    'DO UPDATE SET last_seq = numbering_counter.last_seq + :count '
+    'DO UPDATE SET last_seq = GREATEST(numbering_counter.last_seq, CAST(:seed AS BIGINT)) + :count '
     'RETURNING numbering_counter.last_seq'
 )  # nosec B608 - 常量 SQL 文本 + 绑定参数
 
@@ -50,7 +56,8 @@ async def allocate_sequence(prefix: str, date_str: str, seed: int = 0) -> int:
     """分配下一个序号（跨进程安全，允许跳号、杜绝重号）。
 
     seed 为当日已落库编号的最大序号，保证计数表首次使用时与历史编号连续；
-    并发首次写入时，冲突分支的原子递增（last_seq + 1）保证唯一性。
+    冲突分支的原子递增为 ``GREATEST(last_seq, seed) + 1``：计数行落后于
+    seed 时先追平再递增，于是任何 counter/seed 组合下都不倒退、不重号。
     """
     from fastapi_app.core.database import require_async_session_local
 
@@ -58,7 +65,12 @@ async def allocate_sequence(prefix: str, date_str: str, seed: int = 0) -> int:
     async with session_factory() as short_session:
         row = await short_session.execute(
             _ALLOCATE_SQL,
-            {'prefix': prefix, 'number_date': date_str, 'last_seq': seed + 1},
+            {
+                'prefix': prefix,
+                'number_date': date_str,
+                'last_seq': seed + 1,
+                'seed': seed,
+            },
         )
         seq = row.scalar_one()
         await short_session.commit()  # manual-tx: 计数表独立短事务（有意与业务事务解耦）
@@ -75,7 +87,8 @@ async def allocate_sequence_range(prefix: str, date_str: str, count: int, seed: 
     语义与单号版一致：
     - 首次使用（表中无该 prefix+date 行）以 ``seed + count`` 落库，
       于是返回 ``seed + 1``，与单号版的 ``seed + 1`` 对齐；
-    - 已有计数时从 ``last_seq + 1`` 起算；
+    - 已有计数时从 ``GREATEST(last_seq, seed) + 1`` 起算：counter 落后于
+      seed（水位被重建/历史编号更大）时先追平 seed 再占用，绝不倒退；
     - 业务事务回滚只产生跳号，不回收序号（既有语义，不变）。
 
     Args:
@@ -105,6 +118,7 @@ async def allocate_sequence_range(prefix: str, date_str: str, count: int, seed: 
                 'number_date': date_str,
                 'last_seq': seed + count,
                 'count': count,
+                'seed': seed,
             },
         )
         end_seq = row.scalar_one()

@@ -20,6 +20,7 @@ from fastapi_app.core.cache_invalidation import cache_mgr, schedule_post_commit_
 from fastapi_app.core.exception_handler import safe_publish_event
 from fastapi_app.services.notification_service import StockEvent
 from fastapi_app.services.stock_common import _parse_date_preserve_time
+from fastapi_app.shared.stock_concurrency import assert_stock_available
 from fastapi_app.shared_models import Product, StockIn
 
 logger = logging.getLogger(__name__)
@@ -63,8 +64,11 @@ async def delete_stockin_core(db: AsyncSession, stockin: StockIn) -> None:
     if stockin.stockin_stockouts:
         raise ValueError('该入库记录已有出库关联，无法删除')
     product = await stock_service.get_product_for_update(db, stockin.product_id)
-    if product.current_stock - stockin.quantity < 0:
-        raise ValueError(f'删除入库记录将导致库存为负数（产品：{product.name}，当前库存：{product.current_stock}，入库数量：{stockin.quantity}）')
+    # 负库存判定统一走统一入口（P1-2b），文案与改动前逐字一致
+    assert_stock_available(
+        product.current_stock, -stockin.quantity,
+        message=f'删除入库记录将导致库存为负数（产品：{product.name}，当前库存：{product.current_stock}，入库数量：{stockin.quantity}）',
+    )
     product.current_stock -= stockin.quantity
     stock_service.log_inventory_change(db, product_id=stockin.product_id, change_type='入库删除', change_quantity=-stockin.quantity, related_id=str(stockin.id), note=f'入库删除ID：{stockin.id}')
     await db.delete(stockin)
@@ -101,8 +105,11 @@ async def update_stockin(db: AsyncSession, stockin_id: int, quantity: int, custo
         if stockin_obj.stockin_stockouts:
             raise ValueError('该入库记录已有出库关联，不能修改数量；可修改客户/日期/备注')
         product = await stock_service.get_product_for_update(db, stockin_obj.product_id)
-        if product.current_stock + (quantity - old_quantity) < 0:
-            raise ValueError(f'修改入库数量将导致库存为负数（产品：{product.name}，当前库存：{product.current_stock}，变更量：{quantity - old_quantity}）')
+        # 负库存判定统一走统一入口（P1-2b），文案与改动前逐字一致
+        assert_stock_available(
+            product.current_stock, quantity - old_quantity,
+            message=f'修改入库数量将导致库存为负数（产品：{product.name}，当前库存：{product.current_stock}，变更量：{quantity - old_quantity}）',
+        )
     old_stockin_no = stockin_obj.stockin_no
     await update_stockin_core(db, stockin_obj, quantity, customer, stockin_date, note)
     await db.flush()

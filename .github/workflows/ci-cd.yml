@@ -94,6 +94,13 @@ jobs:
           --html=test-report.html \
           --junitxml=test-results.xml
 
+    # P1-12 前端契约真校验：把 frontend-vite/src/api/*.ts 里真实调用的端点与后端
+    # fastapi_app.main:app.openapi() 的路径逐条比对（字面量端点断言，模板端点只列出）。
+    # 端点来源不做快照，全部现算，避免快照过期造成的假绿灯。
+    # 放在本 job（而非 lint job）：这里装了 requirements.txt，import fastapi_app 才可行。
+    - name: Check frontend endpoints against backend OpenAPI
+      run: python scripts/check_openapi_frontend_alignment.py --verbose
+
     - name: Run prod_audit self-test suite
       # 与上面的「gated test suite」分开**独立进程**运行，原因有二：
       #   1) 该套件有独立 conftest（scripts/prod_audit/tests/conftest.py），
@@ -263,11 +270,14 @@ jobs:
     # 原为 `npm run test:e2e` —— 该脚本在 package.json 中不存在、也没有
     # playwright.config.* 与 e2e/ 目录，步骤必然失败。改为执行真实存在的跨端
     # 对齐检查；Playwright e2e 落地后恢复（见 ITER-4 决策项 D-2）。
+    # P1-12：跨层对齐四件套。check:dto 此前只写在 package.json 里、CI 从不执行，
+    # 移动端重复声明 DTO（绕过 @/types）就能一路绿灯；这里补上引用。
     - name: Run frontend cross-layer alignment checks
       run: |
         npm run check:api
         npm run check:api:pc
         npm run check:routes
+        npm run check:dto
 
     # 上传上面单测步骤产出的 junit 报告（真实存在；`if: always()` 保证测试失败时也能取到）。
     # 原先上传的 frontend-vite/playwright-report/ 与 frontend-vite/test-results/ 两个路径

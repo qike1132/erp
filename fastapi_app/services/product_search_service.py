@@ -1,15 +1,12 @@
 """
 产品搜索服务
 
-基于 BaseSearchService 的产品搜索实现，统一异步/同步搜索逻辑。
-支持基础搜索（返回产品信息）和 BOM 搜索（返回产品+BOM 信息）。
+基于 BaseSearchService 的产品搜索实现（异步搜索路径）。
+支持基础搜索与结果格式化；BOM 复制专用同步搜索已随 P1-11 同步死路径清理移除。
 """
 import logging
 from collections.abc import Callable
-from decimal import Decimal
 from typing import Any
-
-from sqlalchemy.orm import Session, joinedload
 
 from fastapi_app.services.base_search_service import BaseSearchService
 from fastapi_app.shared_models import Product
@@ -38,45 +35,6 @@ class ProductSearchService(BaseSearchService[Product]):
                 "current_stock": product.current_stock,
             }
         return serialize
-
-    def search_for_bom_copy_sync(self, db: Session, keyword: str) -> list[dict]:
-        """BOM 复制专用搜索（同步版本，包含 BOM 信息）
-
-        保持与原 purchase_bom_copy_service.search_products_for_bom_copy
-        完全相同的返回格式，确保向后兼容。
-        """
-        if not keyword:
-            return []
-
-        from sqlalchemy.orm import selectinload
-
-        from fastapi_app.services.product_service import product_has_bom
-
-        query = self.build_search_query_sync(db, keyword)
-        query = query.options(
-            joinedload(Product.material),
-            selectinload(Product.fabrics),
-            selectinload(Product.accessories),
-        ).limit(20)
-        products = query.all()
-
-        result = []
-        for p in products:
-            has_bom = product_has_bom(p)
-            material_count = (
-                len(p.fabrics) + len(p.accessories)
-                + (1 if p.material and getattr(p.material, "cotton_usage", Decimal("0")) > 0 else 0)
-            )
-            result.append({
-                "id": p.id,
-                "name": p.name,
-                "barcode": p.barcode,
-                "price": float(p.price) if p.price else 0,
-                "has_bom": has_bom,
-                "material_count": material_count,
-            })
-
-        return result
 
 
 product_search_service = ProductSearchService()

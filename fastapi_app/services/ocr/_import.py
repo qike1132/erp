@@ -18,6 +18,7 @@ from fastapi_app.services.ocr._html_tables import (
 )
 from fastapi_app.services.ocr._progress import _update_progress
 from fastapi_app.services.ocr_fuzzy_match import fuzzy_match_customer, fuzzy_match_product
+from fastapi_app.shared.stock_concurrency import check_stock_available
 from fastapi_app.shared_models import Customer, Product, StagingStockOut
 
 logger = logging.getLogger(__name__)
@@ -150,7 +151,8 @@ async def import_staging_stockouts_from_file(db: AsyncSession, file_content: byt
                     product_name = product.name
                     if match_confidence < 1.0:
                         match_info_parts.append(f"产品模糊匹配: OCR='{original_ocr_name}'→'{product_name}'({match_confidence:.0%})")
-                    if product.current_stock < quantity:
+                    # 负库存判定统一走统一入口（P1-2b）；此处只产出暂存行的校验结论
+                    if check_stock_available(product.current_stock, -quantity) is not None:
                         stock_check_message = f'库存不足，当前库存: {product.current_stock}'
                     else:
                         stock_check_passed = True

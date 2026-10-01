@@ -61,6 +61,53 @@ def make_mock_stockout(id_val=1, quantity=50):
     return so
 
 
+def _empty_result():
+    """通用「空结果」替身：与库存写入无关的读（如订单状态重算）返回空集。"""
+    res = MagicMock()
+    res.scalar_one_or_none.return_value = None
+    res.scalars.return_value.all.return_value = []
+    res.rowcount = 0
+    return res
+
+
+def _wire_stock_write(db, row, *, new_stock, pre_results=()):
+    """显式建模 update_stock_with_optimistic_lock 的两步调用序列（P1-3 乐观锁入口）。
+
+    第 1 次 execute = SELECT 当前行（scalar_one_or_none() 返回带 version/current_stock
+    的产品对象，即调用方持有的同一行）；第 2 次 execute = 条件 UPDATE
+    （WHERE id + version [+ current_stock + delta >= 0]，rowcount=1 表示命中一行）。
+    pre_results 用于该两步序列之前已发生的读（如按 id 装载出货记录）。
+
+    refresh 忠实模拟数据库回读：把本次 UPDATE 写入的 current_stock/version 反映到行对象上
+    （实现里对 current_stock 的直写已被统一入口取代，新值只能靠 refresh 拿回）。
+
+    返回 state = {'calls': [...], 'consumed': n}：calls 记录每次 execute 的语句，
+    consumed 记录「两步序列（含 pre_results）」被真实消费的次数，供用例断言序列按预期发生。
+    """
+    select_result = MagicMock()
+    select_result.scalar_one_or_none.return_value = row
+    update_result = MagicMock()
+    update_result.rowcount = 1
+    queue = [*pre_results, select_result, update_result]
+    state = {'calls': [], 'consumed': 0}
+
+    def _next(stmt, *args, **kwargs):
+        state['calls'].append(stmt)
+        if queue:
+            state['consumed'] += 1
+            return queue.pop(0)
+        return _empty_result()
+
+    db.execute = AsyncMock(side_effect=_next)
+
+    async def _refresh(obj):
+        obj.current_stock = new_stock
+        obj.version = row.version + 1
+
+    db.refresh = AsyncMock(side_effect=_refresh)
+    return state
+
+
 class TestCreateStockIn:
     """入库创建"""
 
@@ -260,6 +307,9 @@ class TestCreateStockOut:
 
         mock_async_db.begin_nested = MagicMock(return_value=AsyncMock())
         mock_async_db.flush = AsyncMock()
+        # 显式建模乐观锁入口的两步序列：SELECT 当前行（version=1）+ 条件 UPDATE 命中一行
+        product.version = 1
+        state = _wire_stock_write(mock_async_db, product, new_stock=150)
 
         result = await create_stockout_core(
             mock_async_db, product_id=1, quantity=50,
@@ -268,6 +318,10 @@ class TestCreateStockOut:
         )
 
         assert len(result) > 0
+        # 库存写入只经两步序列（SELECT + UPDATE），无其它未建模的读
+        assert state['consumed'] == 2
+        assert len(state['calls']) == 2
+        assert product.current_stock == 150  # 200 - 50，经 refresh 回读
 
     @pytest.mark.asyncio
     @patch('fastapi_app.services.stock_service.get_product_for_update')
@@ -370,12 +424,19 @@ class TestUpdateStockOut:
 
         stockout = make_mock_stockout(quantity=50)
 
+        # 显式建模乐观锁入口的两步序列：SELECT 当前行（version=1）+ 条件 UPDATE 命中一行
+        product.version = 1
+        state = _wire_stock_write(mock_async_db, product, new_stock=220)
+
         result = await update_stockout_core(
             mock_async_db, stockout, new_quantity=30,
             customer='新客户', stockout_date=datetime.now(UTC), note='修改'
         )
 
         assert result.quantity == 30
+        assert state['consumed'] == 2
+        assert len(state['calls']) == 2
+        assert product.current_stock == 220  # 200 + (50 - 30)
 
     @pytest.mark.asyncio
     async def test_update_stockout_below_returned(self, mock_async_db):
@@ -404,12 +465,19 @@ class TestDeleteStockOut:
         product = MagicMock()
         product.id = 1
         product.current_stock = 100
+        product.version = 1
         mock_get_product.return_value = product
+
+        # 显式建模乐观锁入口的两步序列：SELECT 当前行 + 条件 UPDATE 命中一行
+        state = _wire_stock_write(mock_async_db, product, new_stock=150)
 
         await delete_stockout_core(mock_async_db, stockout)
 
         assert product.current_stock == 150  # 100 + 50
         mock_async_db.delete.assert_called_once_with(stockout)
+        assert state['consumed'] == 2
+        assert len(state['calls']) == 2
+        assert product.version == 2  # 乐观锁 version 递增经 refresh 回读
 
     @pytest.mark.asyncio
     async def test_delete_stockout_deduction_protected(self, mock_async_db):
@@ -454,7 +522,13 @@ class TestCreateStockReturn:
 
         data_result = MagicMock()
         data_result.scalar_one_or_none.return_value = stockout
-        mock_async_db.execute = AsyncMock(return_value=data_result)
+
+        # 显式建模调用序列：按 id 装载出货记录 → 乐观锁入口的两步序列
+        # （SELECT 当前行 version=1 → 条件 UPDATE 命中一行）
+        product.version = 1
+        state = _wire_stock_write(
+            mock_async_db, product, new_stock=130, pre_results=(data_result,)
+        )
 
         result = await create_stockreturn_core(
             mock_async_db, stockout_id=1, quantity=30,
@@ -463,6 +537,10 @@ class TestCreateStockReturn:
 
         assert result is not None
         mock_async_db.add.assert_called_once()
+        assert state['consumed'] == 3  # 装载出货记录 + SELECT + UPDATE
+        # 第 4 次读是订单状态重算（按 id 装载 Order），与库存写入无关
+        assert len(state['calls']) == 4
+        assert product.current_stock == 130  # 100 + 30
 
     @pytest.mark.asyncio
     async def test_create_stockreturn_zero_quantity(self, mock_async_db):

@@ -17,7 +17,7 @@ from fastapi_app.core.redis_wrapper import safe_delete_pattern
 from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.core.validators import validate_not_empty
 from fastapi_app.services.bom_service import has_bom as product_has_bom  # noqa: F401
-from fastapi_app.shared.stock_concurrency import get_product_for_update
+from fastapi_app.shared.stock_concurrency import assert_stock_available, get_product_for_update
 from fastapi_app.shared_models import InventoryLog, Order, OrderItem, Product, StockIn, StockOut
 
 logger = logging.getLogger(__name__)
@@ -262,7 +262,8 @@ async def update_product(db: AsyncSession, product_id: int, name: str | None,
 
     业务规则：
     - 名称唯一性检查（排除自身）
-    - 初始库存变更时调整 current_stock 并记录 InventoryLog
+    - 初始库存变更时调整 current_stock 并记录 InventoryLog；负库存判定收口到统一入口
+      assert_stock_available（策略开关见 ALLOW_NEGATIVE_STOCK），不再内联比较
     """
     product = await get_product_for_update(db, product_id)
     if not product:
@@ -292,9 +293,15 @@ async def update_product(db: AsyncSession, product_id: int, name: str | None,
     if initial_stock is not None and initial_stock != product.initial_stock:
         stock_change = initial_stock - product.initial_stock
         new_current_stock = product.current_stock + stock_change
-        if new_current_stock < 0:
-            raise ValueError(f'初始库存调整将导致当前库存为负数（当前库存：{product.current_stock}，调整量：{stock_change:+d}）')
+        # P1-2b（t26-F-02 修复）：负库存判定收口到统一入口，不再内联比较。
+        # 缺省（策略关闭）时仍抛 ValueError 且文案逐字不变；ALLOW_NEGATIVE_STOCK 为真值时
+        # 与统一入口同样放行，管理员路径不再被无条件硬拒。
+        assert_stock_available(product.current_stock, stock_change,
+                               message=f'初始库存调整将导致当前库存为负数（当前库存：{product.current_stock}，调整量：{stock_change:+d}）')
         product.initial_stock = initial_stock
+        # 写入侧安全性：:267 的 get_product_for_update 已对该行取 FOR UPDATE 行锁，
+        # 判定与写入在同一事务内完成，不存在 TOCTOU 窗口；库侧另有
+        # ck_product_current_stock_nonneg 作为最后一道防线。
         product.current_stock = new_current_stock
 
         log = InventoryLog(

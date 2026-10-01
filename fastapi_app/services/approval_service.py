@@ -27,7 +27,7 @@ from fastapi_app.core.state_machine import (
 from fastapi_app.core.validators import validate_not_empty, validate_quantity_range
 from fastapi_app.services.approval_log_service import create_approval_log as _create_approval_log
 from fastapi_app.services.order_utils import sync_single_item_quantity
-from fastapi_app.shared.stock_concurrency import get_product_for_update
+from fastapi_app.shared.stock_concurrency import assert_stock_available, get_product_for_update
 from fastapi_app.shared_models import (
     ApprovalLog,
     ApprovalRequest,
@@ -391,8 +391,11 @@ async def _handle_delete_approval(db: AsyncSession, approval: ApprovalRequest, o
             ))
 
         net_change = total_deducted
-        if product.current_stock + net_change < 0:
-            raise ValueError(f'删除订单将导致库存为负数（当前库存：{product.current_stock}，净变化：{net_change:+d}）')
+        # 负库存判定统一走 fastapi_app.shared.stock_concurrency 入口（P1-2b）
+        assert_stock_available(
+            product.current_stock, net_change,
+            message=f'删除订单将导致库存为负数（当前库存：{product.current_stock}，净变化：{net_change:+d}）',
+        )
         product.current_stock += net_change
 
     # 批量删除出库记录，避免逐条 ORM delete

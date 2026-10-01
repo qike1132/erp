@@ -1,6 +1,6 @@
 {
   "schema": "erp-nssm-services/1",
-  "description": "滨发 ERP 生产 NSSM 服务定义（灾备件，随加密备份包分发）。",
+  "description": "滨发 ERP 生产 NSSM 服务定义（灾备件，随备份包分发：明文包与加密包均包含，内容不含敏感凭据）。",
   "note": "真实定义在注册表 HKLM\\SYSTEM\\CurrentControlSet\\Services\\<name>；本文件是服务名/可执行文件/参数/依赖的机读快照，用于灾难恢复时按原形态重建 5 个服务。推导依据 server_manager/constants.py 的 _SVC_ALL / _SVC_DEPENDS / _REDIS_BROKER_PORT，安装逻辑 server_manager/app.py:_install_services_flow 与 server_manager/service_ops.py:nssm_install。",
   "install_tool": {
     "name": "nssm",

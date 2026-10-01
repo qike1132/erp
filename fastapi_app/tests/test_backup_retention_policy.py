@@ -15,6 +15,7 @@ import inspect
 import json
 import os
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import pytest
 
@@ -223,7 +224,7 @@ def test_meta_created_at_drives_age_instead_of_mtime(backup_dir, monkeypatch):
 
 
 def test_sidecar_delete_failure_does_not_break_main_delete(backup_dir, monkeypatch):
-    """伴随文件删除失败不得影响主文件已删的事实，只记 warning。"""
+    """伴随文件删除失败不得影响主文件已删的事实；失败记 ERROR 日志并计入 errors（t25 起）。"""
     path = _make_backup(backup_dir, 'erp_backup_20260901_000000.zip', age_days=20)
     sidecars = _write_sidecars(path)
     real_unlink = type(path).unlink
@@ -285,3 +286,70 @@ def test_delete_backup_sidecars_returns_removed_names(tmp_path):
 
     assert sorted(removed) == ['erp_backup_20260901_000000.zip.meta', 'erp_backup_20260901_000000.zip.record']
     assert records._delete_backup_sidecars(path) == []
+
+async def test_execute_cleanup_surfaces_sidecar_delete_failure(tmp_path, monkeypatch):
+    """伴随文件清理失败必须出现在清理结果里（t38），不再只有一条 ERROR 日志。
+
+    cleanup 路径此前丢弃 _delete_backup_sidecars 的返回值 ⇒ 主文件删了、.meta 残留，
+    调用方看到的却是 success=True / error_count=0。现在把 errors 聚合器透传给 helper。
+    主文件删除、DB 记录清理、成功路径的返回结构一律不变。
+    """
+    from fastapi_app.services.backup.cleanup import service as cleanup_service
+
+    target = _make_backup(tmp_path, 'erp_auto_daily_20260901_000000.zip.enc', age_days=20)
+    _write_sidecars(target)
+
+    monkeypatch.setattr(cleanup_service, 'BACKUP_DIR', tmp_path)
+    calls: list[list[str]] = []
+
+    async def _no_db(self, deleted_files):
+        calls.append(list(deleted_files))
+        return len(deleted_files), False
+
+    monkeypatch.setattr(cleanup_service.BackupCleanupService, '_delete_backup_records', _no_db)
+
+    real_unlink = type(target).unlink
+
+    def flaky_unlink(self, *args, **kwargs):
+        if self.name.endswith('.meta'):
+            raise OSError('模拟占用')
+        return real_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(type(target), 'unlink', flaky_unlink)
+    service = object.__new__(cleanup_service.BackupCleanupService)
+
+    result = await service._execute_cleanup({target.name})
+
+    assert result['deleted_count'] == 1, result
+    assert result['success'] is False, result
+    assert result['error_count'] == 1, result
+    assert len(result['errors']) == 1
+    assert '伴随文件清理失败' in result['errors'][0]
+    assert '.meta' in result['errors'][0] and '模拟占用' in result['errors'][0]
+    assert set(result) == {
+        'deleted_count', 'deleted_files', 'deleted_records', 'error_count', 'errors', 'success',
+    }, '成功路径的返回结构未变'
+    assert not target.exists()
+    assert not (tmp_path / 'erp_auto_daily_20260901_000000.zip.enc.record').exists()
+    assert (tmp_path / 'erp_auto_daily_20260901_000000.zip.enc.meta').exists(), '模拟失败件仍在'
+    assert calls == [[target.name]], 'DB 记录清理仍须收到已删文件名'
+
+
+def test_config_readme_scope_matches_nssm_self_description():
+    """(c) config/README.md 的打包口径与 config/nssm-services.json 自述一致（t38）。
+
+    旧口径「打进加密备份包」会让读者以为 nssm-services.json 只随加密包分发，
+    实际明文包也包含它（不在敏感白名单、内容不含凭据）。
+    """
+    repo_root = Path(records.__file__).resolve().parents[3]
+    readme = (repo_root / 'config' / 'README.md').read_text(encoding='utf-8')
+    description = json.loads(
+        (repo_root / 'config' / 'nssm-services.json').read_text(encoding='utf-8')
+    )['description']
+
+    assert '打进**加密备份包**' not in readme, '旧口径（只进加密包）应已消除'
+    assert 'nssm-services.json' in readme, 'README 未点名该文件'
+    assert '明文包与加密包都包含' in readme
+    assert '明文包与加密包均包含' in description
+    for phrase in ('明文包', '加密包', '不含敏感凭据'):
+        assert phrase in readme, phrase

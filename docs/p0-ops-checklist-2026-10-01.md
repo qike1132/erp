@@ -114,3 +114,72 @@ D:\erp_system\.venv\Scripts\python.exe -m pip install pip-audit
 D:\erp_system\.venv\Scripts\python.exe scripts\quality_gate.py --only pip_audit
 ```
 - 纪律：漏洞豁免**只能**加在 `pyproject.toml` 的 `[[tool.code-quality.pip-audit-ignores]]`（每项含 `id` / `expires`（ISO 日期，≤180 天）/ `reason`）；过期或僵尸条目会被门禁判 FAIL，不得用注释或跳过方式消红。
+---
+
+## 6. P1 批次上线步骤（团队代码已落地，需你在运维窗口执行）
+
+### 6-A 迁移 061：给 `product.current_stock` 加非负 CHECK（本批唯一有生产风险的动作）
+
+- 现状（t26-F-03 / t40-F-02 只读实测）：dev 库 `alembic_version` 仍停在 `pg_standalone_060_fix_updated_at_varchar_columns`，`pg_constraint` 中没有 `ck_product_current_stock_nonneg` ⇒ **代码侧守卫已生效，但 DB 兜底未启用**。
+- 迁移文件：`migrations/versions/pg_standalone_061_add_product_stock_check.py`（down_revision = `pg_standalone_060_fix_updated_at_varchar_columns`，`alembic heads` 仍为单 head）。
+- 步骤（按序，勿跳）：
+
+```text
+① 先看存量负值（用你惯用的客户端 psql/pgAdmin 执行这条只读 SQL，预期 neg_rows = 0）：
+   SELECT COUNT(*) FILTER (WHERE current_stock < 0) AS neg_rows,
+          MIN(current_stock) AS min_stock, COUNT(*) AS total FROM product;
+
+② 按现有流程做一次备份（别手搓），确认备份产物可读。
+
+③ 升级（加 -v 才能看到迁移的 INFO 日志；alembic.ini 默认 logger_root = WARN，见 §6.22 的 t40-F-05）：
+   D:\erp_system\.venv\Scripts\python.exe -m alembic upgrade head -v
+
+④ 复核：
+   D:\erp_system\.venv\Scripts\python.exe -m alembic current
+```
+
+- **迁移是自适应的**：`neg_rows = 0` → 约束以 **VALID** 建立；`neg_rows > 0` → 以 **NOT VALID** 建立并在日志里 WARNING 打印条数（写入侧从此仍被拦，存量负值需人工对平后再执行）：
+
+```sql
+ALTER TABLE product VALIDATE CONSTRAINT ck_product_current_stock_nonneg;
+```
+
+- 回滚（downgrade 是 `DROP CONSTRAINT IF EXISTS`，幂等）：
+
+```powershell
+D:\erp_system\.venv\Scripts\python.exe -m alembic downgrade pg_standalone_060_fix_updated_at_varchar_columns
+```
+
+- ⚠️ 若日后确实要允许负库存：**仅把 `ALLOW_NEGATIVE_STOCK=true` 是不够的**，必须先 `ALTER TABLE product DROP CONSTRAINT ck_product_current_stock_nonneg`（见方案 §6.19：策略为真时应用层守卫不再附加，但 DB CHECK 仍会拒绝）。
+
+### 6-B 代码侧已就绪、无需你操作
+
+- **P1-1 库存只读对账**：默认关闭（`.env` 无 `INVENTORY_RECONCILE_ENABLED` ⇒ cron 不注册）。要启用就加 `INVENTORY_RECONCILE_ENABLED=true`（每日 03:30 跑，单条 GROUP BY LEFT JOIN，只读、不 commit、差异清单进日志）。
+- **P1-7 ARQ 幂等键**：Redis 不可用时 fail-open（best-effort，只记 WARNING），无需配置。
+- **P1-2 负库存策略**：`ALLOW_NEGATIVE_STOCK` 缺省 = 拒绝（与改动前行为等价），模板已声明。
+
+### 6-C 提醒
+
+- `alembic upgrade head` 会同时应用他人的后续迁移；当前 `alembic.ini` 自述为「100 revisions, exactly one head (`pg_standalone_061_add_product_stock_check`) and 4 roots」，`scripts/check_alembic_heads.py` 会把关单 head。
+- 提交钩子冲突（方案 §6.9）未裁决前，本仓提交仍需 `--no-verify`；P1 提交时同样按路径显式挑选（工作树里有并发外部会话的未提交产物）。
+
+### 6-D PG 连接预算（R-pg-connection-budget，上线前置）
+
+- 现象：常驻服务（8 worker uvicorn + arq + prod_runner）空闲占用 64–65 条 `erp_app@erp_system` 连接；全量测试套件瞬时叠加最多 33 条测试库连接 ⇒ 客户端后端触达 `max_connections(100) − superuser_reserved_connections(3) = 97`，服务端记录 `致命错误:  remaining connection slots are reserved for roles with the SUPERUSER attribute`，客户端表现为建连期 `ConnectionResetError [WinError 10054]` / asyncpg `ConnectionDoesNotExistError`（方案 §6.25 有完整取证）。
+- 三选一（按侵入性从小到大）：
+
+```sql
+-- ① 一次性回收长空闲连接（不重启、不改配置；应用侧 pool_pre_ping 会在下次取用时自动重建）
+SELECT pg_terminate_backend(pid) FROM pg_stat_activity
+ WHERE datname = 'erp_system' AND state = 'idle' AND backend_start < now() - interval '5 minutes';
+
+-- ② 持久化空闲回收（推荐；reload 即可，不需重启）
+ALTER SYSTEM SET idle_session_timeout = '5min';
+SELECT pg_reload_conf();
+
+-- ③ 抬高上限（需重启 PG，有短暂停机）
+ALTER SYSTEM SET max_connections = 200;
+```
+
+- 说明：应用侧池参数由 `fastapi_app/core/database.py:25-57 _get_pool_config()` 按 `UVICORN_WORKERS` 与 `DB_MAX_CONNECTIONS` 反推（默认 8 worker × (pool_size 10 + max_overflow 3) ≈ 104 容量，故 64–65 条空闲属正常水位）；`pool_pre_ping=True` + `pool_recycle=1800` 使被回收的空闲连接在下一次取用时自动重建（毫秒级）。
+- 注意：测试侧的 `tests/test_numbering_sequence_integration.py:53` 自建引擎用 SQLAlchemy 默认池（5+10=15），**不读** `DB_MAX_CONNECTIONS` ⇒ 给测试进程设该环境变量无法缓解（方案 §6.25 反向验证实验已证伪）。

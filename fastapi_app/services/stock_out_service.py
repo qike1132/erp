@@ -10,6 +10,8 @@ generate_stockout_number / log_inventory_change / publish_stock_event /
 同模块 *_core 的引用统一通过 `stock_service.<name>` 解析，
 以便测试通过 `fastapi_app.services.stock_service.<name>` 打 patch 时能够拦截，
 同时保持对外命名空间一致。底部 import 该模块以避免循环依赖。
+库存写入（product.current_stock）统一走 fastapi_app.shared.stock_concurrency 的
+写入口（update_stock_with_optimistic_lock / apply_stock_delta_locked），不再直写。
 """
 import logging
 from datetime import UTC, datetime
@@ -27,6 +29,12 @@ from fastapi_app.services.stock_event_service import (
     _publish_shipment_completed_events,
     _recalc_shipment_order_statuses,
 )
+from fastapi_app.shared.stock_concurrency import (
+    apply_stock_delta_locked,
+    assert_stock_available,
+    check_stock_available,
+    update_stock_with_optimistic_lock,
+)
 from fastapi_app.shared_models import Product, StockOut
 
 logger = logging.getLogger(__name__)
@@ -34,8 +42,8 @@ logger = logging.getLogger(__name__)
 
 async def create_stockout_core(db: AsyncSession, product_id: int, quantity: int, customer: str, stockout_date: datetime, note: str) -> list[StockOut]:
     product = await stock_service.get_product_for_update(db, product_id)
-    if product.current_stock < quantity:
-        raise ValueError('库存不足！')
+    # 负库存判定统一走统一入口（P1-2b），文案与改动前逐字一致
+    assert_stock_available(product.current_stock, -quantity, message='库存不足！')
     shipment_info = await stock_service.calculate_available_shipment_quantity(db, product_id, customer)
     if shipment_info['available_quantity'] <= 0:
         raise ValueError('该客户没有可用的订单支持出货！请先创建订单。')
@@ -54,8 +62,9 @@ async def create_stockout_core(db: AsyncSession, product_id: int, quantity: int,
             db.add(stockout)
             created_stockouts.append(stockout)
             remaining_qty -= ship_qty
-        product.current_stock -= quantity
-        # 第一次 flush：批量写入所有 StockOut INSERT + Product UPDATE，并填充 stockout.id
+        # 库存扣减统一走乐观锁入口（WHERE version=旧值），不再直写 current_stock
+        await update_stock_with_optimistic_lock(db, product_id, -quantity)
+        # 第一次 flush：批量写入所有 StockOut INSERT 并填充 stockout.id（库存在上一行已 UPDATE）
         # 原 N 次 flush（N=FIFO订单数）合并为 1 次，减少数据库往返
         await db.flush()
         stock_service.log_inventory_change(db, product_id=product_id, change_type='出库', change_quantity=-quantity, related_id=','.join(str(stock_out.id) for stock_out in created_stockouts) if created_stockouts else '', note=f'出库数量：{quantity}')
@@ -73,8 +82,12 @@ async def update_stockout_core(db: AsyncSession, stockout: StockOut, new_quantit
     old_quantity = stockout.quantity
     old_net = old_quantity - stockout.returned_quantity
     product = await stock_service.get_product_for_update(db, stockout.product_id)
-    if product.current_stock + old_net < new_quantity - stockout.returned_quantity:
-        raise ValueError('库存不足！')
+    # 变更后净出货量与原净出货量之差即本次库存变化量（P1-2b 统一入口）
+    assert_stock_available(
+        product.current_stock,
+        (new_quantity - stockout.returned_quantity) - old_net,
+        message='库存不足！',
+    )
     if customer and customer.strip():
         shipment_info = await stock_service.calculate_available_shipment_quantity(db, stockout.product_id, customer)
         available_with_current = shipment_info['available_quantity'] + old_net
@@ -85,7 +98,7 @@ async def update_stockout_core(db: AsyncSession, stockout: StockOut, new_quantit
     stockout.customer = customer
     stockout.note = note
     if new_quantity != old_quantity:
-        product.current_stock -= new_quantity - old_quantity
+        await update_stock_with_optimistic_lock(db, stockout.product_id, -(new_quantity - old_quantity))
         stock_service.log_inventory_change(db, product_id=stockout.product_id, change_type='出库修改', change_quantity=-(new_quantity - old_quantity), related_id=str(stockout.id), note=f'出库修改ID：{stockout.id}')
     await db.flush()
     return stockout
@@ -96,8 +109,9 @@ async def delete_stockout_core(db: AsyncSession, stockout: StockOut) -> None:
         raise ValueError('订单抵扣的出货记录不能直接删除！请通过订单管理进行修改。')
     if stockout.returned_quantity > 0:
         raise ValueError('该出货记录已有退货关联，无法删除！请先删除退货记录。')
-    product = await stock_service.get_product_for_update(db, stockout.product_id)
-    product.current_stock += stockout.quantity
+    # 先取行锁（产品不存在时由 get_product_for_update 抛错），库存写入走统一乐观锁入口
+    await stock_service.get_product_for_update(db, stockout.product_id)
+    await update_stock_with_optimistic_lock(db, stockout.product_id, stockout.quantity)
     stock_service.log_inventory_change(db, product_id=stockout.product_id, change_type='出库删除', change_quantity=stockout.quantity, related_id=str(stockout.id), note=f'出库删除ID：{stockout.id}')
     await db.delete(stockout)
     await db.flush()
@@ -274,8 +288,13 @@ async def _process_single_stockout(db: AsyncSession, item: dict) -> dict:
     item_id = item.get('id', '未知')
     try:
         product = await stock_service.get_product_for_update(db, product_id)
-        if product.current_stock < quantity:
-            return {'success': False, 'error': f'库存不足，当前库存: {product.current_stock}', 'id': item_id}
+        # 负库存判定统一走统一入口（P1-2b）；拒绝文案与改动前逐字一致
+        stock_denied = check_stock_available(
+            product.current_stock, -quantity,
+            message=f'库存不足，当前库存: {product.current_stock}',
+        )
+        if stock_denied is not None:
+            return {'success': False, 'error': stock_denied, 'id': item_id}
 
         shipment_info = await stock_service.calculate_available_shipment_quantity(db, product_id, customer)
         if shipment_info['available_quantity'] <= 0:
@@ -284,7 +303,9 @@ async def _process_single_stockout(db: AsyncSession, item: dict) -> dict:
             return {'success': False, 'error': f"出货数量超过可出货量！订单总量：{shipment_info['order_quantity']}，已出货：{shipment_info['shipped_quantity']}，可出货：{shipment_info['available_quantity']}", 'id': item_id}
 
         created_stockouts = await _create_stockout_records(db, product_id, customer, note, stockout_date_str, quantity, shipment_info['orders'])
-        product.current_stock -= quantity
+        # 上面已 get_product_for_update 持行锁：走统一写入口的持锁单次路径
+        # （不开 savepoint —— 批量路径的既有不变式是“自包含、无嵌套事务”）
+        await apply_stock_delta_locked(db, product, -quantity)
         stock_service.log_inventory_change(db, product_id=product_id, change_type='出库', change_quantity=-quantity, related_id=','.join(str(stockout.id) for stockout in created_stockouts) if created_stockouts else '', note=f'出库数量：{quantity}')
         await db.flush()
 

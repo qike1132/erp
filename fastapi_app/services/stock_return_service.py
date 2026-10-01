@@ -7,6 +7,8 @@
 log_inventory_change / publish_stock_event 的引用统一通过 `stock_service.<name>`
 解析，以便测试通过 `fastapi_app.services.stock_service.<name>` 打 patch 时能够拦截，
 同时保持对外命名空间一致。底部 import 该模块以避免循环依赖。
+库存写入（product.current_stock）统一走 fastapi_app.shared.stock_concurrency 的
+update_stock_with_optimistic_lock，不再直写。
 """
 import logging
 from datetime import datetime
@@ -22,6 +24,7 @@ from fastapi_app.services.notification_service import StockEvent
 from fastapi_app.services.numbering import generate_number_async
 from fastapi_app.services.stock_common import _parse_date_preserve_time
 from fastapi_app.services.stock_event_service import recalc_order_status_after_return
+from fastapi_app.shared.stock_concurrency import assert_stock_available, update_stock_with_optimistic_lock
 from fastapi_app.shared_models import Product, StockOut, StockReturn
 
 logger = logging.getLogger(__name__)
@@ -71,9 +74,10 @@ async def create_stockreturn_core(db: AsyncSession, stockout_id: int, quantity: 
     # 更新出货记录的累计退货量
     stockout.returned_quantity += quantity
 
-    # 恢复库存
-    product = await stock_service.get_product_for_update(db, stockout.product_id)
-    product.current_stock += quantity
+    # 恢复库存（统一走乐观锁写入口，WHERE version=旧值；不直写 current_stock）
+    # 先取行锁（产品不存在时由 get_product_for_update 抛错），写入由乐观锁入口完成
+    await stock_service.get_product_for_update(db, stockout.product_id)
+    await update_stock_with_optimistic_lock(db, stockout.product_id, quantity)
 
     # 写入库存日志
     stock_service.log_inventory_change(db, product_id=stockout.product_id, change_type='退货', change_quantity=quantity, related_id=str(stockreturn.id), note=f'退货ID：{stockreturn.id}，关联出货ID：{stockout_id}', customer=customer)
@@ -101,9 +105,13 @@ async def delete_stockreturn_core(db: AsyncSession, stockreturn: StockReturn) ->
 
     # 扣回库存
     product = await stock_service.get_product_for_update(db, stockreturn.product_id)
-    if product.current_stock < stockreturn.quantity:
-        raise ValueError(f'删除退货将导致库存为负数（当前库存：{product.current_stock}，退货数量：{stockreturn.quantity}）')
-    product.current_stock -= stockreturn.quantity
+    # 负库存判定统一走统一入口（P1-2b），文案与改动前逐字一致
+    assert_stock_available(
+        product.current_stock, -stockreturn.quantity,
+        message=f'删除退货将导致库存为负数（当前库存：{product.current_stock}，退货数量：{stockreturn.quantity}）',
+    )
+    # 扣回库存统一走乐观锁写入口（不直写 current_stock）
+    await update_stock_with_optimistic_lock(db, stockreturn.product_id, -stockreturn.quantity)
 
     # 写入库存日志
     stock_service.log_inventory_change(db, product_id=stockreturn.product_id, change_type='退货删除', change_quantity=-stockreturn.quantity, related_id=str(stockreturn.id), note=f'退货删除ID：{stockreturn.id}，关联出货ID：{stockout.id}', customer=stockreturn.customer)

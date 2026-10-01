@@ -2,8 +2,13 @@
 
 Excel 批量导入耗时操作由 ARQ Worker 执行。行循环使用异步会话
 （numbering_counter 原子取号，spec 2026-09-29 订单号统一 §4.2）。
+
+P1-7：ARQ 的 ``max_tries=3`` 会**重放**失败任务（``ctx["job_try"]`` 递增、``job_id`` 不变），
+故入口按 ``job_id + 行业务主键`` 做重放幂等（见 ``core/arq_app.py`` 的 ``job_idempotency``），
+行循环改为经 ``CommitBatcher`` 每批提交一次。
 """
 import contextlib
+import hashlib
 import os
 import tempfile
 
@@ -13,6 +18,11 @@ from sqlalchemy import select as sa_select
 from fastapi_app.core.logger import logger
 from fastapi_app.shared_models import Product
 from fastapi_app.shared_models.order import ORDER_STATUS_PENDING_STOCK
+
+# 每批提交条数。值保持 P1-7 前的 50：fastapi_app/tests/test_batch_tasks_semantics.py 的
+# test_fifty_row_batch_commit_semantics 用 110 行断言 ``session.commits >= 3`` 锁定了它；
+# 若要改成 core/arq_app.py 的 DEFAULT_COMMIT_BATCH_SIZE(200)，必须同步改该用例。
+BATCH_COMMIT_SIZE = 50
 
 ALLOWED_UPLOAD_DIRS = [
     tempfile.gettempdir(),
@@ -93,21 +103,96 @@ async def _resolve_row_product(db, row: dict) -> tuple[Product | None, str | Non
     return product, None
 
 
-async def _run_batch_import_async(file_path: str, job_id: str, task_label: str, build_row) -> dict:
+def _row_business_key(row: dict, row_no: int) -> str:
+    """行的业务主键（P1-7 幂等集合的成员）：行号 + 行内容哈希。
+
+    行号进键，使「同一文件里两行内容完全相同」也能各自被处理（那是
+    ``services/batch_import_dedup.py`` 的批内去重语义，不在这里）；内容哈希保证同一文件
+    在重放时（重新解析）产出同样的键，且不随列序/无关列变化。
+    """
+    fields = ('产品名称', '产品编号', '客户名称', '数量', '备注')
+    payload = chr(31).join(str(row.get(name, '')) for name in fields)
+    digest = hashlib.sha256(payload.encode('utf-8')).hexdigest()[:32]
+    return f'{row_no}:{digest}'
+
+
+async def _import_rows(db, data_list: list, build_row, task_label: str, *, job_id: str,
+                       batch_size: int, idempotency) -> dict:
+    """行循环：重放幂等跳过 + 每 ``batch_size`` 条提交一次（P1-7）。
+
+    幂等标记只在**提交成功之后**登记（``CommitBatcher`` 的 ``after_commit`` 钩子）：被回滚的
+    批次不会被标成「已处理」——否则重放时那些行就真的丢了，这比重复写更糟。
+    """
+    from fastapi_app.core.arq_app import CommitBatcher
+
+    imported_count = 0
+    last_committed_count = 0
+    skipped_idempotent = 0
+    errors: list[dict] = []
+    pending_marks: list[str] = []
+    already_done = await idempotency.load() if idempotency is not None else set()
+
+    async def _on_batch_committed() -> None:
+        # 提交成功：把「本批处理过的业务主键」登记进幂等集合，并推进已提交计数。
+        nonlocal last_committed_count
+        last_committed_count = imported_count
+        if idempotency is not None and pending_marks:
+            await idempotency.mark(pending_marks)
+        pending_marks.clear()
+
+    batcher = CommitBatcher(db, batch_size=batch_size, after_commit=_on_batch_committed)
+    for i, row in enumerate(data_list, start=2):
+        mark = _row_business_key(row, i) if idempotency is not None else ''
+        if mark and mark in already_done:
+            skipped_idempotent += 1
+            logger.info(f'批量导入{task_label}行{i}已在本 job 提交过，重放跳过')
+            continue
+        try:
+            row_error = await build_row(db, row, i)
+        except (ValueError, TypeError, OSError) as e:
+            await db.rollback()
+            # 保留已提交批次的计数，仅回滚当前未提交批次
+            uncommitted_in_batch = imported_count - last_committed_count
+            imported_count = last_committed_count
+            pending_marks.clear()
+            batcher.reset()
+            errors.append({'row': i, 'error': str(e), 'skipped_uncommitted': uncommitted_in_batch})
+            logger.error(f'批量导入{task_label}行{i}失败: {e}')
+            continue
+        if row_error:
+            errors.append({'row': i, 'error': row_error})
+            continue
+        imported_count += 1
+        if mark:
+            pending_marks.append(mark)
+        await batcher.tick()
+    await batcher.flush()
+    return {
+        'success': True,
+        'imported_count': imported_count,
+        'errors': errors,
+        'skipped_idempotent': skipped_idempotent,
+        'task_id': job_id,
+    }
+
+
+async def _run_batch_import_async(file_path: str, job_id: str, task_label: str, build_row, *,
+                                  batch_size: int = BATCH_COMMIT_SIZE, idempotency=None) -> dict:
     """订单/备货批量导入共享骨架（异步版）。
 
-    语义与同步版逐字一致（50 行一批提交 / 行级失败 continue /
-    ValueError/TypeError/OSError 回滚当前未提交批并计 skipped_uncommitted /
-    抛出时保留文件供重试）。
+    语义与同步版逐字一致（行级失败 continue / ValueError/TypeError/OSError 回滚当前未提交批并计
+    skipped_uncommitted / 抛出时保留文件供重试）；批提交粒度与重放幂等由 ``_import_rows`` 承担。
 
     Args:
         file_path: 已保存的临时文件路径。
         job_id: ARQ 任务 ID。
         task_label: 任务标签（日志用，如 '订单'/'备货'）。
         build_row: 单行处理协程 ``async def(db, row, i) -> str | None``。
+        batch_size: 每批提交条数（默认 ``BATCH_COMMIT_SIZE``）。
+        idempotency: 重放幂等闸门（``core/arq_app.py`` 的 ``JobIdempotency``）；None 不去重。
 
     Returns:
-        dict: {success, imported_count, errors, task_id}
+        dict: {success, imported_count, errors, skipped_idempotent, task_id}
     """
     if not _is_allowed_upload_path(file_path):
         logger.error(f'批量导入{task_label}任务拒绝非法文件路径: {file_path}')
@@ -119,30 +204,8 @@ async def _run_batch_import_async(file_path: str, job_id: str, task_label: str, 
             return {'success': False, 'error': error, 'imported_count': 0, 'task_id': job_id}
         db = await _open_import_session()
         try:
-            imported_count = 0
-            last_committed_count = 0
-            errors = []
-            BATCH_COMMIT_SIZE = 50
-            for i, row in enumerate(data_list, start=2):
-                try:
-                    row_error = await build_row(db, row, i)
-                except (ValueError, TypeError, OSError) as e:
-                    await db.rollback()
-                    # 保留已提交批次的计数，仅回滚当前未提交批次
-                    uncommitted_in_batch = imported_count - last_committed_count
-                    imported_count = last_committed_count
-                    errors.append({'row': i, 'error': str(e), 'skipped_uncommitted': uncommitted_in_batch})
-                    logger.error(f'批量导入{task_label}行{i}失败: {e}')
-                    continue
-                if row_error:
-                    errors.append({'row': i, 'error': row_error})
-                    continue
-                imported_count += 1
-                if imported_count % BATCH_COMMIT_SIZE == 0:
-                    await db.commit()
-                    last_committed_count = imported_count
-            await db.commit()
-            return {'success': True, 'imported_count': imported_count, 'errors': errors, 'task_id': job_id}
+            return await _import_rows(db, data_list, build_row, task_label, job_id=job_id,
+                                      batch_size=batch_size, idempotency=idempotency)
         finally:
             await db.close()
     except (ValueError, TypeError, OSError) as exc:
@@ -193,7 +256,10 @@ async def batch_import_orders_task(ctx, file_path: str, original_filename: str, 
         db.add(log)
         return None
 
-    return await _run_batch_import_async(file_path, job_id, '订单', _orders_row)
+    from fastapi_app.core.arq_app import IDEMPOTENCY_NAMESPACE_BATCH_IMPORT, job_idempotency
+
+    idempotency = job_idempotency(ctx, namespace=IDEMPOTENCY_NAMESPACE_BATCH_IMPORT)
+    return await _run_batch_import_async(file_path, job_id, '订单', _orders_row, idempotency=idempotency)
 
 
 async def batch_import_stockins_task(ctx, file_path: str, original_filename: str, user_id: int):
@@ -224,4 +290,7 @@ async def batch_import_stockins_task(ctx, file_path: str, original_filename: str
         db.add(log)
         return None
 
-    return await _run_batch_import_async(file_path, job_id, '备货', _stockins_row)
+    from fastapi_app.core.arq_app import IDEMPOTENCY_NAMESPACE_BATCH_IMPORT, job_idempotency
+
+    idempotency = job_idempotency(ctx, namespace=IDEMPOTENCY_NAMESPACE_BATCH_IMPORT)
+    return await _run_batch_import_async(file_path, job_id, '备货', _stockins_row, idempotency=idempotency)

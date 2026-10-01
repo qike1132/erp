@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi_app.core.pg_locks import acquire_advisory_lock_async, number_lock_key
 from fastapi_app.core.validators import validate_quantity_range
 from fastapi_app.services.case._common import _parse_date
+from fastapi_app.shared.stock_concurrency import assert_stock_available
 from fastapi_app.shared_models import Case, CaseInventoryLog, CaseStockIn, CaseStockOut, Product
 
 logger = logging.getLogger(__name__)
@@ -188,8 +189,11 @@ async def create_case_stockout(db: AsyncSession, product_id: int, quantity: int,
         stockout_no = await generate_case_stockout_number(db)
     case_obj = await _get_case_by_product_for_update(db, product_id)
 
-    if case_obj.current_stock < quantity:
-        raise ValueError(f"库存不足，当前库存: {case_obj.current_stock}")
+    # 统一负库存校验入口（env ALLOW_NEGATIVE_STOCK，缺省拒绝）
+    assert_stock_available(
+        case_obj.current_stock, -quantity,
+        message=f"库存不足，当前库存: {case_obj.current_stock}",
+    )
 
     stockout = CaseStockOut(stockout_no=stockout_no, case_id=case_obj.id, quantity=quantity,
                             stockout_date=_parse_date(stockout_date, '出库日期'),
@@ -311,8 +315,11 @@ async def delete_case_stockin(db: AsyncSession, stockin_id: int) -> dict:
     case_obj = await _get_case_for_update(db, stockin.case_id)
     # 由于 CaseStockOut 未记录关联的入库 ID，无法精确判断该入库是否被某笔出库引用。
     # 保守策略：确保删除后库存不会变为负数即可；若当前库存不足则禁止删除。
-    if case_obj.current_stock < stockin.quantity:
-        raise ValueError("当前库存不足，删除该入库后库存将为负数")
+    # 统一负库存校验入口（env ALLOW_NEGATIVE_STOCK，缺省拒绝）
+    assert_stock_available(
+        case_obj.current_stock, -stockin.quantity,
+        message="当前库存不足，删除该入库后库存将为负数",
+    )
     case_obj.current_stock -= stockin.quantity
     log = CaseInventoryLog(
         case_id=stockin.case_id, change_type='删除入库',
@@ -345,9 +352,12 @@ async def _adjust_stockout_quantity(db: AsyncSession, stockout: CaseStockOut, ne
     stockout.quantity = new_quantity
 
     case_obj = await _get_case_for_update(db, stockout.case_id)
+    # 统一负库存校验入口（env ALLOW_NEGATIVE_STOCK，缺省拒绝）
+    assert_stock_available(
+        case_obj.current_stock, -quantity_change,
+        message=f"调整后库存不足，当前库存: {case_obj.current_stock - quantity_change}",
+    )
     case_obj.current_stock -= quantity_change
-    if case_obj.current_stock < 0:
-        raise ValueError(f"调整后库存不足，当前库存: {case_obj.current_stock}")
     log = CaseInventoryLog(
         case_id=stockout.case_id, change_type='出库调整',
         change_quantity=-quantity_change, related_id=stockout.stockout_no,

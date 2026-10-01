@@ -125,10 +125,23 @@ class TestOptimisticLockUpdate:
         select_result.scalar_one_or_none.return_value = mock_product
         mock_conflict = MagicMock(rowcount=0)
         mock_success = MagicMock(rowcount=1)
-        db.execute = AsyncMock(side_effect=[select_result, mock_conflict, select_result, mock_success])
+        # UPDATE 影响 0 行后，入口会按 (id, version == old_version) 重读一行以区分
+        # 「库存不足」与「版本冲突」(_classify_update_miss)；此处重读返回 version 已变
+        # （2 != 1）的产品 ⇒ 判定为版本冲突，维持既有 savepoint + 重试路径。
+        classify_result = MagicMock()
+        classify_result.scalar_one_or_none.return_value = MagicMock(
+            id=1, current_stock=100, version=2
+        )
+        db.execute = AsyncMock(side_effect=[
+            select_result, mock_conflict, classify_result, select_result, mock_success,
+        ])
 
         product = await update_stock_with_optimistic_lock(db, 1, delta=5, retries=3)
         assert product is mock_product
+        # 2 轮 savepoint，每轮 SELECT + UPDATE，冲突后各追加 1 次重读：共 5 次 execute
+        assert db.execute.await_count == 5
+        assert classify_result.scalar_one_or_none.call_count == 1
+        assert db.begin_nested.call_count == 2
 
     @pytest.mark.asyncio
     async def test_raises_after_max_retries(self):
@@ -140,10 +153,22 @@ class TestOptimisticLockUpdate:
         select_result = MagicMock()
         select_result.scalar_one_or_none.return_value = mock_product
         mock_conflict = MagicMock(rowcount=0)
-        db.execute = AsyncMock(side_effect=[select_result, mock_conflict, select_result, mock_conflict])
+        # 同 test_retries_on_version_conflict：每次冲突后的重读返回 version 已变的产品
+        classify_result = MagicMock()
+        classify_result.scalar_one_or_none.return_value = MagicMock(
+            id=1, current_stock=100, version=2
+        )
+        db.execute = AsyncMock(side_effect=[
+            select_result, mock_conflict, classify_result,
+            select_result, mock_conflict, classify_result,
+        ])
 
         with pytest.raises(StockConcurrentError, match=r"重试.*次后仍失败"):
             await update_stock_with_optimistic_lock(db, 1, delta=5, retries=2)
+        # retries=2 ⇒ 2 轮 savepoint，各自 SELECT + UPDATE + 冲突后重读：共 6 次 execute
+        assert db.execute.await_count == 6
+        assert classify_result.scalar_one_or_none.call_count == 2
+        assert db.begin_nested.call_count == 2
 
 
 # ============================================================

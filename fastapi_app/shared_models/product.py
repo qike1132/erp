@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, Index, Integer, Numeric, String, desc
+from sqlalchemy import CheckConstraint, DateTime, Index, Integer, Numeric, String, desc
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from fastapi_app.shared_models import Base
@@ -48,6 +48,9 @@ class Product(Base):
         Index('idx_product_barcode_trgm', 'barcode', postgresql_using='gin',
               postgresql_ops={'barcode': 'gin_trgm_ops'}),
         Index('idx_perf_product_name_date', desc('create_time'), 'id'),
+        # 库存非负兜底（P1-6）：DB 级约束，防止绕过应用层校验的写点落负值；
+        # 对应的 Alembic 迁移见 migrations/versions/pg_standalone_061_add_product_stock_check.py
+        CheckConstraint('current_stock >= 0', name='ck_product_current_stock_nonneg'),
     )
 
     # 皮套关联（由 Case 模型 backref 自动创建，此处显式声明以确保类型检查）

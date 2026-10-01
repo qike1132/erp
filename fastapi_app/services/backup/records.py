@@ -565,12 +565,23 @@ def _backup_created_time(f: Path) -> datetime:  # log-context: internal helper �
     return datetime.fromtimestamp(f.stat().st_mtime)
 
 
-def _delete_backup_sidecars(filepath: Path) -> list[str]:
+def _delete_backup_sidecars(filepath: Path, errors: list[str] | None = None) -> list[str]:
     """删除备份文件的伴随文件（.meta 元数据与 .record 记录）。
 
     历史实现只删 .meta（且只在主文件删除成功后顺序执行），导致「删了 .enc 但
     .zip.enc.meta / .record 永久残留」。这里统一两个伴随后缀，且对每个后缀单独
     容错 —— 一个伴随文件删除失败不影响另一个，也不影响主文件已删除的事实。
+
+    F-05（P1-residual）：删除失败不再只是 warning —— 以 ERROR 记日志，并在调用方
+    传入 errors 聚合器时把失败项写进清理结果（cleanup_old_backups() 的 errors），
+    使此前「伴随文件残留只留在日志里」的静默部分失败变成可观测结果。
+    errors 缺省 None 时返回值语义与旧版完全一致（成功删除名列表），既有调用方
+    不传聚合器即维持原行为。
+
+    Args:
+        filepath: 主备份文件路径；伴随文件名为 filepath.name + '.meta' / '.record'。
+        errors: 可选失败聚合列表；传入时以
+            '伴随文件清理失败 <伴随文件名>: <异常>' 追加失败项。
 
     Returns: 成功删除的伴随文件名列表
     """
@@ -582,7 +593,9 @@ def _delete_backup_sidecars(filepath: Path) -> list[str]:
                 sidecar.unlink()
                 removed.append(sidecar.name)
         except OSError as e:
-            logger.warning(f'清理备份伴随文件失败: {sidecar.name}: {e}')
+            logger.error(f'清理备份伴随文件失败: {sidecar.name}: {e}')
+            if errors is not None:
+                errors.append(f'伴随文件清理失败 {sidecar.name}: {e}')
     return removed
 
 
@@ -601,7 +614,7 @@ def cleanup_old_backups() -> dict:  # log-context: internal helper 无请求上�
 
     删除主文件时同步删除 .meta / .record 伴随文件（含 .zip.enc.meta）。
 
-    Returns: dict with deleted_count, kept_count, errors
+    Returns: dict with deleted_count, kept_count, errors（含伴随文件清理失败，F-05）
     """
     # 阈值运行时求值（与 policy_service / cleanup 共用 env 单一真源；monkeypatch.setenv 亦生效）
     retention_days_value, retention_count_value = _retention_thresholds()
@@ -691,7 +704,7 @@ def cleanup_old_backups() -> dict:  # log-context: internal helper 无请求上�
             filepath.unlink()
             deleted.append(name)
             logger.info(f'已清理过期备份: {name}')
-            _delete_backup_sidecars(filepath)
+            _delete_backup_sidecars(filepath, errors)
         except OSError as e:
             errors.append(f'{name}: {e}')
             logger.warning(f'清理备份失败: {name}: {e}')

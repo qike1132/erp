@@ -19,6 +19,7 @@ from arq.constants import default_queue_name, health_check_key_suffix
 
 from fastapi_app.core.arq_callbacks import on_job_end, on_job_failed, on_job_started
 from fastapi_app.core.config import settings
+from fastapi_app.services.inventory_reconcile import is_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,170 @@ def _build_redis_settings() -> RedisSettings:
 
 redis_settings = _build_redis_settings()
 
+
+# ---------------------------------------------------------------------------
+# 任务重放幂等与批提交（P1-7）
+# ---------------------------------------------------------------------------
+# 背景：ARQ 的 ``max_tries=3`` 会**重放**失败任务（``ctx['job_try']`` 递增，``job_id`` 不变）。
+# 重放会重做已经提交的写入：批量导入重复建单/重复加减库存，调度轮询重复入队并重复回写状态。
+# 端点侧的幂等键（``api/v1/endpoints/purchase_center/order_routes.py:113`` 的 ``X-Idempotency-Key``
+# 透传给 ``services/purchase_order_generate.py:374``）靠业务表的唯一约束 ``uq_po_pending_dedup``
+# 兜底；ARQ 任务既没有 HTTP 头，其写入（导入行、调度状态）也没有可用的唯一约束，故这里用
+# **Redis 集合**承担同一角色：每个 job 一个集合，成员是业务主键。
+IDEMPOTENCY_KEY_PREFIX = 'arq:idem'
+IDEMPOTENCY_TTL_SECONDS = 24 * 3600
+IDEMPOTENCY_NAMESPACE_BATCH_IMPORT = 'batch-import'
+IDEMPOTENCY_NAMESPACE_SCHEDULE_POLLER = 'backup-schedule-poller'
+
+# 每批提交的条数（P1-7）：把「循环内逐条 commit」改为每 N 条一批提交。
+# 200 是吞吐与「重放代价」的折中：批越大则重放时要重做的工作越少，但单批失败
+# （行级异常触发的回滚）丢掉的已提交进度也越多。
+DEFAULT_COMMIT_BATCH_SIZE = 200
+
+
+class InMemoryIdempotencyStore:
+    """进程内幂等集合：没有 Redis（单进程/降级）时的兜底。
+
+    只挡得住**同一进程内**的重放（ARQ 重试通常就发生在同一个 worker 进程里），跨进程与
+    跨重启不保证——那种场景请用 :class:`RedisIdempotencyStore`。``ttl`` 在这里无意义
+    （随进程消亡），保留只为与 Redis 版签名一致。
+    """
+
+    def __init__(self) -> None:
+        self._sets: dict[str, set[str]] = {}
+
+    async def load(self, key: str) -> set[str]:
+        return set(self._sets.get(key, ()))
+
+    async def add(self, key: str, members, ttl: int) -> None:
+        self._sets.setdefault(key, set()).update(members)
+
+    def clear(self) -> None:
+        self._sets.clear()
+
+
+_IN_MEMORY_IDEMPOTENCY = InMemoryIdempotencyStore()
+
+
+def in_memory_idempotency_store() -> InMemoryIdempotencyStore:
+    """取进程内兜底存储（单测用：便于断言与跨用例清理）。"""
+    return _IN_MEMORY_IDEMPOTENCY
+
+
+class RedisIdempotencyStore:
+    """Redis 集合幂等存储：``SADD`` 成员 + ``EXPIRE`` 整键。
+
+    读写失败一律**降级放行并记 WARNING**（fail-open）：宁可重放时多写一次，也不能因为
+    broker 抖动把用户的数据静默丢掉（fail-closed 会丢行）。
+    """
+
+    def __init__(self, redis) -> None:
+        self._redis = redis
+
+    async def load(self, key: str) -> set[str]:
+        try:
+            raw = await self._redis.smembers(key)
+        except Exception as e:  # broad-except: 幂等后端故障降级为「本批不去重」，绝不中断任务
+            logger.warning('幂等集合读取失败，本次重放不去重 key=%s: %s', key, e)
+            return set()
+        return {m.decode('utf-8') if isinstance(m, (bytes, bytearray)) else str(m) for m in (raw or ())}
+
+    async def add(self, key: str, members, ttl: int) -> None:
+        items = [str(m) for m in members]
+        if not items:
+            return
+        try:
+            await self._redis.sadd(key, *items)
+            await self._redis.expire(key, ttl)
+        except Exception as e:  # broad-except: 同上，写失败只影响「下次重放」的去重能力
+            logger.warning('幂等集合写入失败，重放可能重复处理 key=%s: %s', key, e)
+
+
+class JobIdempotency:
+    """单个 ARQ job 的重放幂等闸门（键 = ``job_id``，成员 = 业务主键）。
+
+    用法::
+
+        idem = job_idempotency(ctx, namespace=IDEMPOTENCY_NAMESPACE_BATCH_IMPORT)
+        done = await idem.load()          # 本 job 已经**提交成功**的业务主键
+        ...                               # 逐条处理，命中的键跳过
+        await idem.mark(committed_keys)   # 只在提交成功之后登记
+    """
+
+    def __init__(self, store, *, job_id: str, namespace: str, ttl: int = IDEMPOTENCY_TTL_SECONDS) -> None:
+        self._store = store
+        self.job_id = job_id
+        self.namespace = namespace
+        self.ttl = ttl
+
+    @property
+    def key(self) -> str:
+        return f'{IDEMPOTENCY_KEY_PREFIX}:{self.namespace}:{self.job_id}'
+
+    async def load(self) -> set[str]:
+        return await self._store.load(self.key)
+
+    async def mark(self, members) -> None:
+        await self._store.add(self.key, members, self.ttl)
+
+
+def job_idempotency(ctx, *, namespace: str) -> JobIdempotency:
+    """按 ARQ ``ctx`` 构造幂等闸门。
+
+    ``ctx['redis']`` 由 worker 注入（``arq/worker.py:361`` 的 ``self.ctx['redis'] = self.pool``），
+    ``ctx['job_id']`` 在重试之间保持不变（``arq/worker.py:576-582`` 组装 job_ctx），因此
+    (job_id, 业务主键) 正好表达「这个任务已经处理过哪些业务对象」。没有 Redis 时退回进程内存储。
+    """
+    data = ctx if isinstance(ctx, dict) else {}
+    redis = data.get('redis')
+    store = RedisIdempotencyStore(redis) if redis is not None else _IN_MEMORY_IDEMPOTENCY
+    return JobIdempotency(store, job_id=str(data.get('job_id') or 'anonymous'), namespace=namespace)
+
+
+class CommitBatcher:
+    """按批提交（P1-7）：每 ``batch_size`` 条 commit 一次，收尾只提交未落盘的部分。
+
+    语义：``commits == ceil(条数 / batch_size)``（即 ≤ 批次数 + 1），不再逐条 commit。
+    ``after_commit`` 钩子只在**提交成功之后**执行——幂等标记必须与写入同批推进，否则被回滚
+    掉的批次会被误标成「已处理」，重放时就真的丢数据了。
+    """
+
+    def __init__(self, db, *, batch_size: int = DEFAULT_COMMIT_BATCH_SIZE, after_commit=None) -> None:
+        if batch_size < 1:
+            raise ValueError('batch_size 必须 >= 1')
+        self._db = db
+        self.batch_size = batch_size
+        self._after_commit = after_commit
+        self.pending = 0
+        self.commits = 0
+
+    def reset(self) -> None:
+        """丢弃未提交批的计数（回滚之后调用）。"""
+        self.pending = 0
+
+    async def tick(self) -> bool:
+        """登记一条已暂存的写入；满一批则提交并返回 True。"""
+        self.pending += 1
+        if self.pending < self.batch_size:
+            return False
+        await self._commit()
+        return True
+
+    async def flush(self) -> bool:
+        """收尾提交：没有未提交内容时**不提交**（保证 commits == 批次数）。"""
+        if self.pending <= 0:
+            return False
+        await self._commit()
+        return True
+
+    async def _commit(self) -> None:
+        await self._db.commit()
+        self.commits += 1
+        self.pending = 0
+        if self._after_commit is not None:
+            await self._after_commit()
+
+
 # 任务注册：ARQ 通过 functions 列表注册，按函数 __name__ 派发
 from fastapi_app.tasks.backup_tasks import (
     apply_backup_policy_task,
@@ -62,6 +227,10 @@ from fastapi_app.tasks.backup_tasks import (
 from fastapi_app.tasks.batch_tasks import (
     batch_import_orders_task,
     batch_import_stockins_task,
+)
+from fastapi_app.tasks.inventory_reconcile_task import (
+    inventory_reconcile_cron_entry,
+    inventory_reconcile_task,
 )
 from fastapi_app.tasks.maintenance_tasks import (
     ensure_readonly_grants_task,
@@ -143,6 +312,11 @@ cron_schedules = [
     },
 ]
 
+# 库存只读对账（P1-1）：**默认不注册** cron —— 先按需手动触发观察报告口径与聚合
+# 开销；确认后把 INVENTORY_RECONCILE_ENABLED 置真，即每日 03:30 自动对账。
+if is_enabled():
+    cron_schedules.append(inventory_reconcile_cron_entry())
+
 cron_jobs = [
     cron(s['func'], max_tries=3, timeout=s.get('timeout'), **s['cron'])  # type: ignore[arg-type]
     for s in cron_schedules
@@ -201,6 +375,7 @@ class WorkerSettings:
         refresh_dashboard_mv_task,
         ensure_readonly_grants_task,
         numbering_audit_task,
+        inventory_reconcile_task,
     ]
     cron_jobs = cron_jobs
     redis_settings = redis_settings

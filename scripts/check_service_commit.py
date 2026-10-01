@@ -1,46 +1,49 @@
 #!/usr/bin/env python3
-r"""
-Service 层事务提交检测脚本
+r"""Service 层事务提交检测（AST 语法级判定）
 
-扫描 fastapi_app/services/ 下所有 .py 文件，发现并报告 service 层函数中
-直接使用 await db.commit() / await session.commit() 的代码位置。
+扫描 fastapi_app/services/ 下的 .py（跳过 test_*.py），用 ast 解析后判定：
+凡是在 **db / session 结尾的基座**上调用 `.commit(...)`，一律报告。
 
-允许的情况（见 ALLOWED_PATTERNS，逐行匹配后跳过）：
-- 嵌套事务：await nested.commit()
-- 独立短 session：await short_session.commit()
-- 下划线开头的 session：await _session.commit()
-- **整行**注释（形如 ^\s*#，例如被注释掉的旧代码）
-- 测试文件（test_*.py）
+判定完全来自语法树，**不再有正则白名单、也不看注释**：
 
-**行内注释不是豁免**。2026-10-01 删掉了两条静默旁路：
-- r"#.*commit\(" ：只要行内出现 “…commit(” 就整行跳过。实测从未命中过合法场景，
-  却让 `await db.commit()  # 顺手 commit(一下)` 这类写法逃过门禁。
-- r"#\s*independent[-_]transaction" ：与 docs/TRANSACTION_BOUNDARY_GUIDE.md §2.2
-  「脚本**不会**因为该注释而跳过」直接矛盾，曾静默豁免 3 处真实提交。
-例外标记仍然是行尾的 `# manual-tx: <理由>`，但它**只作为评审说明**，不改变判定
-（例外必须持续可见，见 TRANSACTION_BOUNDARY_GUIDE.md §2.2）。
+1. 是不是一次调用：ast.Call + ast.Attribute(attr="commit")。
+   - 只写 `db.commit`（方法引用、没有括号）不算调用，不报（与老版一致）。
+   - 带参数 `await db.commit(force=True)` **算调用，照报**：老正则版要求空括号 `()`，
+     那是一个可以绕过的缺口（P1-10② 一并闭合）。
+2. 基座是谁：取基座表达式的最后一个标识符（db、self.db、storage_db、session、self.session）。
+   以 db / session 结尾即视为数据库会话基座。
+3. 既有安全形态：基座以 nested / short_session / _session 结尾时不报
+   （嵌套事务、独立短会话；db_session 也落在 _session 里）。
+   这些形态过去是 ALLOWED_PATTERNS 的白名单，AST 下不再需要匹配文本。
+
+注释与字符串天然不参与判定：`# await db.commit()`、docstring 里的同名示例都不会报
+（老正则版会把文档/字符串里的 `db.commit()` 文本误报成真实提交）。
+
+保留的语义（老调用方不受影响）：
+- 人类可读输出、退出码、--json 契约与 P0 版逐字一致：
+  {"violations": [{"file", "line", "text"}], "total", "scan_dir"}。
+- 例外标注 `# manual-tx: <理由><BT>> 仍然只是评审说明，不改变判定（例外必须持续可见，
+  见 docs/TRANSACTION_BOUNDARY_GUIDE.md §2.2）。
+- 读不了或解析不了的文件**不会静默放过**（fail-closed）：stderr 打印原因，退出码 2，
+  --json 走与「路径不存在」同形状的 error 字段。
 
 用法：
     python scripts/check_service_commit.py              # 人类可读报告
     python scripts/check_service_commit.py --json       # 机器可读（quality_gate.py 语义解析用）
-    python scripts/check_service_commit.py --self-test  # 自检：制造违规并断言被检出
-
-机器可读契约（--json）：stdout 恰好是一个 JSON 对象
-    {"violations": [{"file": str, "line": int, "text": str}, ...], "total": int}
-再加默认的人类可读输出与退出码保持原样（老调用方不受影响）。
+    python scripts/check_service_commit.py --self-test  # 自检：正例/反例双向断言
 
 退出码：
 - 0：未发现非法 commit（或 --self-test 通过）
 - 1：发现非法 commit（或 --self-test 失败）
-- 2：环境异常（服务层目录缺失）
+- 2：环境异常（服务层目录缺失、文件无法读取或无法解析）
 """
 
 from __future__ import annotations
 
 import argparse
+import ast
 import io
 import json
-import re
 import sys
 import tempfile
 from pathlib import Path
@@ -54,44 +57,84 @@ SERVICES_DIR = PROJECT_ROOT / "fastapi_app" / "services"
 # 失败提示引用的文档（docs/TRANSACTION_BOUNDARY_GUIDE.md 会回引本脚本，改路径要同步）
 DOC_HINT = "docs/TRANSACTION_BOUNDARY_GUIDE.md"
 
-# 允许的 commit 模式（忽略）。
-# ⚠️ 这里**不得**再出现「行内注释即豁免」的宽规则：那是一条静默旁路，会把真实提交
-# 连同注释一起放过（见模块 docstring 与 --self-test 用例 1/2）。
-ALLOWED_PATTERNS = [
-    r"nested\.commit\(",          # 嵌套事务
-    r"short_session\.commit\(",   # 独立短 session
-    r"_session\.commit\(",        # 下划线开头的 session
-    r"^\s*#",                     # 整行注释（整行都是注释，不含可执行代码）
-]
-
-# 可疑的 commit 模式
-SUSPICIOUS_PATTERNS = [
-    r"await\s+db\.commit\(\)",
-    r"await\s+session\.commit\(\)",
-    r"db\.commit\(\)",
-    r"session\.commit\(\)",
-]
+# 基座名后缀（只作用于 AST 里取出的标识符，不接触源码文本）
+DB_LIKE_SUFFIXES = ("db", "session")
+SAFE_SUFFIXES = ("nested", "short_session", "_session")
 
 
-def is_allowed(line: str) -> bool:
-    return any(re.search(pattern, line) for pattern in ALLOWED_PATTERNS)
+class ParseError(RuntimeError):
+    """文件读不了 / 语法错误：门禁无法判定，按 fail-closed 处理。"""
+
+    def __init__(self, path: Path, detail: str) -> None:
+        self.path = path
+        self.detail = detail
+        super().__init__(f"{path}: {detail}")
+
+
+def _is_safe_base(name: str) -> bool:
+    """既有安全形态：嵌套事务 / 独立短会话（含 *_session）。"""
+    return name.endswith(SAFE_SUFFIXES)
+
+
+def _is_db_like_base(name: str) -> bool:
+    """数据库会话基座（db / session 结尾）。"""
+    return name.endswith(DB_LIKE_SUFFIXES)
+
+
+def _base_identifier(node: ast.AST) -> str | None:
+    """取 `<base>.commit(...)` 中 base 的最后一个标识符。
+
+    - db.commit()         -> "db"
+    - self.db.commit()    -> "db"
+    - storage_db.commit() -> "storage_db"
+    - get_db().commit()   -> "get_db"（对调用结果取标识符）
+    其他形态（下标、字面量等）返回 None，视为不匹配。
+    """
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    if isinstance(node, ast.Call):
+        return _base_identifier(node.func)
+    return None
+
+
+def iter_commit_calls(tree: ast.AST) -> list[ast.Call]:
+    """按源码顺序返回所有 `<base>.commit(...)` 调用节点。"""
+    calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "commit"
+    ]
+    calls.sort(key=lambda node: (node.lineno, node.col_offset))
+    return calls
 
 
 def find_suspicious_commits(file_path: Path) -> list[tuple[int, str]]:
-    issues = []
-    try:
-        content = file_path.read_text(encoding="utf-8")
-    except Exception as e:
-        print(f"无法读取文件 {file_path}: {e}")
-        return issues
+    """扫描单个文件，返回 [(行号, 该行源码 strip 后文本), ...]。
 
-    for lineno, line in enumerate(content.splitlines(), start=1):
-        if is_allowed(line):
+    解析失败抛 ParseError（调用方按 fail-closed 处理，不静默跳过）。
+    """
+    try:
+        source = file_path.read_text(encoding="utf-8-sig")
+    except OSError as exc:
+        raise ParseError(file_path, f"读取失败：{exc}") from exc
+    try:
+        tree = ast.parse(source, filename=str(file_path))
+    except SyntaxError as exc:
+        raise ParseError(file_path, f"语法错误：第 {exc.lineno} 行 {exc.msg}") from exc
+
+    lines = source.splitlines()
+    issues: list[tuple[int, str]] = []
+    for node in iter_commit_calls(tree):
+        base = _base_identifier(node.func.value)
+        if base is None or not _is_db_like_base(base) or _is_safe_base(base):
             continue
-        for pattern in SUSPICIOUS_PATTERNS:
-            if re.search(pattern, line):
-                issues.append((lineno, line.strip()))
-                break
+        lineno = node.lineno
+        text = lines[lineno - 1].strip() if 0 < lineno <= len(lines) else ""
+        issues.append((lineno, text))
     return issues
 
 
@@ -111,6 +154,7 @@ def scan_services(targets: list[Path] | None = None) -> list[tuple[str, int, str
 
     targets 缺省为 [fastapi_app/services]；显式传入时用于自检/调试
     （quality_gate.py --probe-dir 会把范围换成临时目录）。
+    任一文件无法解析都会抛出 ParseError，让门禁整体失败而不是漏报。
     """
     findings: list[tuple[str, int, str]] = []
     files: list[Path] = []
@@ -157,112 +201,153 @@ def report_human(findings: list[tuple[str, int, str]]) -> int:
     return 1
 
 
-# ---------------------------------------------------------------------------
-# 自检（--self-test）：故意制造违规形态，断言「该报的报、不该报的不报」。
-#
-# 所有输出行都以 [SELFTEST] 开头，且**不出现** "[FAIL]" 字面量 —— 门禁 runner
-# 历史上用 COUNT_RE = r"\[FAIL\][^\d]*(\d+)\s*(?:处|个)" 从子脚本 stdout 里
-# 抠计数（P0-11 已删掉该正则，改为语义解析 --json），这里保持同样的形状约定：
-# 任何按文本抠数的老工具都不会把自检行误读成「违规数」。
-# ---------------------------------------------------------------------------
-
-_RETIRED_PATTERNS = (
-    r"#\s*independent[-_]transaction",
-    r"#.*commit\(",
-)
+def _probe(tmpdir: Path, name: str, body: str) -> Path:
+    path = tmpdir / name
+    path.write_text(body, encoding="utf-8")
+    return path
 
 
-def _selftest_cases() -> list[tuple[str, bool, str]]:
+def _probe_hits(tmpdir: Path, body: str, name: str = "probe.py") -> list[tuple[int, str]]:
+    """写一个探针文件并返回 AST 判定结果（供自检的正例/反例断言）。"""
+    return find_suspicious_commits(_probe(tmpdir, name, body))
+
+
+def _selftest_basics(tmpdir: Path) -> list[tuple[str, bool, str]]:
     cases: list[tuple[str, bool, str]] = []
 
-    with tempfile.TemporaryDirectory(prefix="csc-selftest-") as tmp:
-        tmpdir = Path(tmp)
+    n = len(_probe_hits(
+        tmpdir,
+        "async def f(db):\n    await db.commit()  # independent-transaction; manual-tx: 旧写法\n",
+        "p_independent.py",
+    ))
+    cases.append(("正例：行内 independent-transaction 不再豁免", n == 1, f"命中 {n} 处"))
 
-        def probe(name: str, body: str) -> Path:
-            path = tmpdir / name
-            path.write_text(body, encoding="utf-8")
-            return path
+    n = len(_probe_hits(
+        tmpdir, "async def f(db):\n    await db.commit()  # 顺手 commit(一下)\n", "p_inline.py"
+    ))
+    cases.append(("正例：行内含 commit( 不再豁免整行", n == 1, f"命中 {n} 处"))
 
-        # 1) 行内 independent-transaction 不再豁免（本次删掉的旁路之一）
-        found = find_suspicious_commits(
-            probe(
-                "probe_independent.py",
-                "async def f(db):\n"
-                "    await db.commit()  # independent-transaction; manual-tx: 旧写法\n",
-            )
-        )
-        cases.append(
-            ("行内 independent-transaction 不再豁免", len(found) == 1, f"命中 {len(found)} 处")
-        )
+    n = len(_probe_hits(
+        tmpdir,
+        "async def f(db):\n    await db.commit()  # manual-tx: 有正经理由也必须继续可见\n",
+        "p_manual.py",
+    ))
+    cases.append(("正例：manual-tx 标注不豁免（例外持续可见）", n == 1, f"命中 {n} 处"))
 
-        # 2) 行内出现 "commit(" 不再让整行豁免（删掉的宽规则）
-        found = find_suspicious_commits(
-            probe(
-                "probe_inline_paren.py",
-                "async def f(db):\n"
-                "    await db.commit()  # 顺手 commit(一下)\n",
-            )
-        )
-        cases.append(("行内含 commit( 不再豁免整行", len(found) == 1, f"命中 {len(found)} 处"))
+    n = len(_probe_hits(
+        tmpdir, "async def f(db):\n    # await db.commit()\n    return 1\n", "p_wholeline.py"
+    ))
+    cases.append(("反例：整行注释不算代码", n == 0, f"命中 {n} 处"))
 
-        # 3) manual-tx 只是评审说明，不改变判定
-        found = find_suspicious_commits(
-            probe(
-                "probe_manual_tx.py",
-                "async def f(db):\n"
-                "    await db.commit()  # manual-tx: 有正经理由也必须继续可见\n",
-            )
-        )
-        cases.append(("manual-tx 标注不豁免（例外持续可见）", len(found) == 1, f"命中 {len(found)} 处"))
-
-        # 4) 整行注释仍然豁免（不含可执行代码）
-        found = find_suspicious_commits(
-            probe(
-                "probe_whole_line.py",
-                "async def f(db):\n    # await db.commit()\n    return 1\n",
-            )
-        )
-        cases.append(("整行注释仍豁免", not found, f"命中 {len(found)} 处"))
-
-        # 5) 嵌套事务 / 独立短 session 仍然豁免
-        found = find_suspicious_commits(
-            probe(
-                "probe_nested.py",
-                "async def f(db, nested, short_session):\n"
-                "    await nested.commit()\n"
-                "    await short_session.commit()\n",
-            )
-        )
-        cases.append(("nested / short_session 仍豁免", not found, f"命中 {len(found)} 处"))
-
-        # 6) 行号必须准确（第 3 行）
-        found = find_suspicious_commits(
-            probe(
-                "probe_lineno.py",
-                "async def f(db):\n    await db.flush()\n    await db.commit()\n",
-            )
-        )
-        lineno_ok = [lineno for lineno, _ in found] == [3]
-        cases.append(("行号准确", lineno_ok, f"行号={[lineno for lineno, _ in found]}"))
-
-    # 7) 退役的旁路模式不得回归
-    retired = [p for p in ALLOWED_PATTERNS if p in _RETIRED_PATTERNS]
-    cases.append(("退役的注释旁路未复活", not retired, f"复活={retired}"))
-
-    # 8) 服务目录存在（否则真实扫描会静默为空 = 假绿）
+    n = len(_probe_hits(
+        tmpdir,
+        "async def f(db, nested, short_session, _session, row_nested, db_session):\n"
+        "    await nested.commit()\n"
+        "    await short_session.commit()\n"
+        "    await _session.commit()\n"
+        "    await row_nested.commit()\n"
+        "    await db_session.commit()\n",
+        "p_safe.py",
+    ))
     cases.append(
-        (
-            "服务层目录存在",
-            SERVICES_DIR.is_dir(),
-            SERVICES_DIR.relative_to(PROJECT_ROOT).as_posix(),
-        )
+        ("反例：nested / short_session / _session / db_session 基座豁免", n == 0, f"命中 {n} 处")
     )
+
+    lines = [ln for ln, _ in _probe_hits(
+        tmpdir, "async def f(db):\n    await db.flush()\n    await db.commit()\n", "p_lineno.py"
+    )]
+    cases.append(("正例：行号准确", lines == [3], f"行号={lines}"))
+
+    n = len(_probe_hits(
+        tmpdir,
+        "async def f(db):\n"
+        '    """老写法示例：await db.commit() 已废弃。"""\n'
+        '    note = "await db.commit()"\n'
+        "    return note\n",
+        "p_text.py",
+    ))
+    cases.append(
+        ("反例：docstring / 字符串里的 db.commit() 文本不算违规", n == 0, f"命中 {n} 处")
+    )
+
+    n = len(_probe_hits(
+        tmpdir, "async def f(db):\n    await db.commit(force=True)\n", "p_args.py"
+    ))
+    cases.append(("正例：db.commit(force=True) 也判定为违规", n == 1, f"命中 {n} 处"))
+
+    n = len(_probe_hits(
+        tmpdir,
+        "async def f(self, storage_db):\n"
+        "    await self.session.commit()\n"
+        "    await storage_db.commit()\n",
+        "p_bases.py",
+    ))
+    cases.append(("正例：self.session / storage_db 基座同样判定", n == 2, f"命中 {n} 处"))
+
+    n = len(_probe_hits(
+        tmpdir,
+        "async def f(db, session, conn):\n"
+        "    await db.flush()\n"
+        "    await db.rollback()\n"
+        "    await session.execute('select 1')\n"
+        "    db.commit\n"
+        "    await conn.commit()\n",
+        "p_negative.py",
+    ))
+    cases.append(
+        ("反例：flush/rollback/execute/方法引用/conn 基座均不报", n == 0, f"命中 {n} 处")
+    )
+
+    broken = _probe(tmpdir, "p_broken.py", "async def f(db:\n    await db.commit()\n")
+    try:
+        find_suspicious_commits(broken)
+        detail = "未抛出 ParseError（漏报了不可解析文件）"
+        ok = False
+    except ParseError as exc:
+        ok = "语法错误" in str(exc)
+        detail = f"ParseError：{exc.detail}"
+    cases.append(("fail-closed：语法错误文件抛 ParseError", ok, detail))
 
     return cases
 
 
+def _selftest_module_guards() -> list[tuple[str, bool, str]]:
+    """模块级守卫：退役旁路不得复活 + 真实树扫描不得静默为空。"""
+    cases: list[tuple[str, bool, str]] = []
+    module = sys.modules[__name__]
+    leftovers = [
+        name for name in ("ALLOWED_PATTERNS", "SUSPICIOUS_PATTERNS") if hasattr(module, name)
+    ]
+    cases.append(("退役旁路未复活（无正则/注释白名单常量）", not leftovers, f"残留={leftovers}"))
+
+    cases.append((
+        "服务层目录存在",
+        SERVICES_DIR.is_dir(),
+        SERVICES_DIR.relative_to(PROJECT_ROOT).as_posix(),
+    ))
+
+    real = scan_services()
+    located = all(
+        (PROJECT_ROOT / file).is_file() and "commit" in text for file, _, text in real
+    )
+    cases.append((
+        "真实服务层扫描非空且命中可回溯",
+        bool(real) and located,
+        f"实扫 {len(real)} 处",
+    ))
+    return cases
+
+
+def _selftest_cases() -> list[tuple[str, bool, str]]:
+    """自检用例：正例（该报必须报）+ 反例（不该报必须不报）+ fail-closed + 模块守卫。"""
+    with tempfile.TemporaryDirectory(prefix="csc-selftest-") as tmp:
+        cases = _selftest_basics(Path(tmp))
+    cases.extend(_selftest_module_guards())
+    return cases
+
+
 def run_self_test() -> int:
-    print("[SELFTEST] check_service_commit.py 自检")
+    print("[SELFTEST] check_service_commit.py 自检（AST 判定）")
     ok = True
     cases = _selftest_cases()
     for name, passed, detail in cases:
@@ -274,8 +359,18 @@ def run_self_test() -> int:
     return 0 if ok else 1
 
 
+def _emit_error(message: str, as_json: bool) -> int:
+    """fail-closed 出口：--json 与「路径不存在」同形状；人类模式同时写 stderr。"""
+    if as_json:
+        print(json.dumps({"violations": [], "total": 0, "error": message}, ensure_ascii=False))
+    else:
+        print(f"[ERROR] {message}")
+    print(f"[ERROR] {message}", file=sys.stderr)
+    return 2
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description="service 层非法 commit() 检测（门禁）")
+    parser = argparse.ArgumentParser(description="service 层非法 commit() 检测（门禁，AST 判定）")
     parser.add_argument(
         "paths",
         nargs="*",
@@ -284,9 +379,7 @@ def main() -> int:
     parser.add_argument(
         "--json", action="store_true", help="机器可读输出（供 quality_gate.py 语义解析）"
     )
-    parser.add_argument(
-        "--self-test", action="store_true", help="自检：制造违规并断言被检出"
-    )
+    parser.add_argument("--self-test", action="store_true", help="自检：正例/反例双向断言")
     args = parser.parse_args()
 
     if args.self_test:
@@ -295,18 +388,13 @@ def main() -> int:
     targets = [Path(p).resolve() for p in args.paths] or [SERVICES_DIR]
     missing = [t for t in targets if not t.exists()]
     if missing:
-        message = f"路径不存在: {[str(t) for t in missing]}"
-        if args.json:
-            print(
-                json.dumps(
-                    {"violations": [], "total": 0, "error": message}, ensure_ascii=False
-                )
-            )
-        else:
-            print(message)
-        return 2
+        return _emit_error(f"路径不存在: {[str(t) for t in missing]}", args.json)
 
-    findings = scan_services(targets)
+    try:
+        findings = scan_services(targets)
+    except ParseError as exc:
+        return _emit_error(f"无法解析文件，门禁 fail-closed：{exc}", args.json)
+
     if args.json:
         report_json(findings, scan_label(targets))
         return 1 if findings else 0

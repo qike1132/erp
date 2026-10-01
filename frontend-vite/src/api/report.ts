@@ -14,5 +14,4 @@ export const reportApi = {
   stockinLogs: (params?: QueryParams) => get<ReportLogResponse>('/reports/stockin-logs', params),
   stockoutLogs: (params?: QueryParams) => get<ReportLogResponse>('/reports/stockout-logs', params),
   deductionLogs: (params?: QueryParams) => get<ReportLogResponse>('/reports/deduction-logs', params),
-  customerNames: () => get<string[]>('/reports/customer-names'),
 }

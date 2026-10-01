@@ -98,7 +98,7 @@ async def update_staging_stockout(db: AsyncSession, stockout_id: int, data: dict
 async def confirm_staging_stockouts(
     db: AsyncSession, session_id: str
 ) -> tuple[int, list[str]]:
-    from fastapi_app.shared.stock_concurrency import get_product_for_update
+    from fastapi_app.shared.stock_concurrency import assert_stock_available, get_product_for_update
 
     result = await db.execute(
         select(StagingStockOut).where(
@@ -129,8 +129,11 @@ async def confirm_staging_stockouts(
                 if not product:
                     raise ValueError(f'出货{staging.customer}-{staging.product_name}确认失败: 产品不存在')
 
-                if product.current_stock < staging.quantity:
-                    raise ValueError(f'出货{staging.customer}-{staging.product_name}确认失败: 库存不足')
+                # 负库存判定统一走统一入口（P1-2b），文案与改动前逐字一致
+                assert_stock_available(
+                    product.current_stock, -staging.quantity,
+                    message=f'出货{staging.customer}-{staging.product_name}确认失败: 库存不足',
+                )
 
                 shipment_info = await calculate_available_shipment_quantity(
                     db, staging.product_id, staging.customer

@@ -19,7 +19,12 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import SQLAlchemyError
 
 from fastapi_app.core.database import get_async_db_context
-from fastapi_app.services.backup._constants import BACKUP_DIR, retention_count, retention_days
+from fastapi_app.services.backup._constants import (
+    BACKUP_DIR,
+    RETENTION_DAYS_DEFAULT,
+    retention_count,
+    retention_days,
+)
 from fastapi_app.services.backup.metrics.alert_service import alert_service
 from fastapi_app.services.backup.records import ensure_backup_dir
 from fastapi_app.shared_models.backup_record import BackupRecord
@@ -586,7 +591,9 @@ class BackupPolicyService:
             # 基于时间保留
             if record.created_at:
                 age_days = (datetime.now(record.created_at.tzinfo) - record.created_at).days
-                return age_days <= retention.get('retention_days', 30)
+                # 兜底默认引用 _constants 单一来源（F-07）：此前硬编码 30，
+                # 与 env 真源 BACKUP_RETENTION_DAYS 的默认值可能各自漂移。
+                return age_days <= retention.get('retention_days', RETENTION_DAYS_DEFAULT)
             return True
 
         elif strategy == 'count':

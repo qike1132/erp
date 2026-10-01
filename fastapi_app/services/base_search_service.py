@@ -2,7 +2,7 @@
 通用搜索服务基类
 
 统一产品搜索、客户搜索等模糊查询逻辑，消除重复代码。
-支持同步/异步双模式、可配置搜索字段、统一 ilike 大小写不敏感匹配、
+支持可配置搜索字段、统一 ilike 大小写不敏感匹配、
 可选 Redis 缓存。
 """
 import hashlib
@@ -14,7 +14,6 @@ from typing import Any, Generic, TypeVar
 
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Query, Session
 from sqlalchemy.sql import Select
 
 from fastapi_app.core.redis_wrapper import safe_delete_pattern, safe_get, safe_set
@@ -78,26 +77,6 @@ class BaseSearchService(Generic[T], ABC):
                     conditions.append(col.op('%')(keyword))
         return conditions
 
-    def build_search_query_sync(
-        self,
-        db: Session,
-        keyword: str,
-        status_filter: Any | None = None,
-    ):
-        """构建搜索查询（同步版本）"""
-        model = self.get_model_class()
-        query: Query = db.query(model)
-
-        if status_filter is not None:
-            query = query.filter(model.status == status_filter)  # type: ignore[attr-defined] # model 为子类 ORM 模型，status 由子类约定
-
-        if keyword:
-            keyword_conds = self._build_keyword_conditions(keyword, self.use_trgm)
-            if keyword_conds:
-                query = query.filter(or_(*keyword_conds))
-
-        return query
-
     def build_search_query_async(
         self,
         db: AsyncSession,
@@ -121,20 +100,6 @@ class BaseSearchService(Generic[T], ABC):
             query = query.where(*conditions)
 
         return query
-
-    def search_sync(
-        self,
-        db: Session,
-        keyword: str,
-        limit: int = 20,
-        status_filter: Any | None = None,
-    ) -> list[dict]:
-        """同步搜索，返回格式化后的 dict 列表"""
-        query = self.build_search_query_sync(db, keyword, status_filter)
-        query = query.limit(limit)
-        results = query.all()
-        formatter = self.get_result_formatter()
-        return [formatter(item) for item in results]
 
     async def search_async(
         self,

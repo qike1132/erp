@@ -12,7 +12,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from fastapi_app.shared_models import Order, Product, StockIn, StockOut
@@ -82,14 +82,14 @@ def _apply_date_filters(query, date_field, start_date, end_date):
     if start_date:
         try:
             start = datetime.strptime(start_date, '%Y-%m-%d')
-            query = query.filter(date_field >= start)
+            query = query.where(date_field >= start)
         except ValueError:
             # 非法日期参数被忽略时留痕，避免静默过滤失败难以排查
             logger.warning('非法日期参数被忽略: start_date=%r', start_date)
     if end_date:
         try:
             end = datetime.strptime(end_date, '%Y-%m-%d') + timedelta(days=1)
-            query = query.filter(date_field < end)
+            query = query.where(date_field < end)
         except ValueError:
             logger.warning('非法日期参数被忽略: end_date=%r', end_date)
     return query
@@ -97,7 +97,7 @@ def _apply_date_filters(query, date_field, start_date, end_date):
 
 def _apply_product_filter(query, product):
     if product:
-        query = query.filter(
+        query = query.where(
             or_(
                 Product.name.like(f'%{escape_like(product)}%'),
                 Product.barcode.like(f'%{escape_like(product)}%')
@@ -107,7 +107,7 @@ def _apply_product_filter(query, product):
 
 
 def _get_order_logs(session, customer, product, status, start_date, end_date):
-    query = session.query(Order).join(Product).options(
+    query = select(Order).join(Product).options(
         selectinload(Order.product),
         # Order.order_stockouts 由 StockOut.order 的 backref 在运行时注入
         # （shared_models/stock_out.py:38），mypy 无法静态感知该属性。
@@ -116,31 +116,32 @@ def _get_order_logs(session, customer, product, status, start_date, end_date):
         selectinload(Order.order_stockouts),  # type: ignore[attr-defined]
     )
     if customer:
-        query = query.filter(Order.customer.like(f'%{escape_like(customer)}%'))
+        query = query.where(Order.customer.like(f'%{escape_like(customer)}%'))
     query = _apply_product_filter(query, product)
     if status:
         valid_statuses = VALID_ORDER_STATUSES
         if status in valid_statuses:
-            query = query.filter(Order.status == status)
+            query = query.where(Order.status == status)
     query = _apply_date_filters(query, Order.order_date, start_date, end_date)
 
-    stats_query = session.query(
+    stats_query = select(
         func.count(Order.id),
         func.coalesce(func.sum(Order.quantity), 0),
         func.count(Order.id).filter(Order.status == ORDER_STATUS_PENDING_STOCK),
         func.count(Order.id).filter(Order.status == ORDER_STATUS_SHIPPED),
     ).join(Product, Order.product_id == Product.id)
     if customer:
-        stats_query = stats_query.filter(Order.customer.like(f'%{escape_like(customer)}%'))
+        stats_query = stats_query.where(Order.customer.like(f'%{escape_like(customer)}%'))
     stats_query = _apply_product_filter(stats_query, product)
     if status and status in VALID_ORDER_STATUSES:
-        stats_query = stats_query.filter(Order.status == status)
+        stats_query = stats_query.where(Order.status == status)
     stats_query = _apply_date_filters(stats_query, Order.order_date, start_date, end_date)
-    total, total_quantity, pending_count, completed_count = stats_query.one()
+    total, total_quantity, pending_count, completed_count = session.execute(stats_query).one()
 
     logger.info(f'订单查询结果数: {total}')
     logs: list[dict[str, Any]] = []
-    for order in query.order_by(Order.order_date.desc()).yield_per(_YIELD_PER_BATCH):
+    stmt = query.order_by(Order.order_date.desc()).execution_options(yield_per=_YIELD_PER_BATCH)
+    for order in session.scalars(stmt):
         if len(logs) >= _MAX_EXPORT_ROWS:
             logger.warning('订单报表导出达到最大行数 %d，已截断', _MAX_EXPORT_ROWS)
             break
@@ -178,29 +179,30 @@ def _get_order_logs(session, customer, product, status, start_date, end_date):
 
 
 def _get_stockin_logs(session, customer, product, start_date, end_date):
-    query = session.query(StockIn).join(Product).options(
+    query = select(StockIn).join(Product).options(
         selectinload(StockIn.product),
         selectinload(StockIn.stockin_stockouts)
     )
     if customer:
-        query = query.filter(StockIn.customer.like(f'%{escape_like(customer)}%'))
+        query = query.where(StockIn.customer.like(f'%{escape_like(customer)}%'))
     query = _apply_product_filter(query, product)
     query = _apply_date_filters(query, StockIn.stockin_date, start_date, end_date)
 
-    stats_query = session.query(
+    stats_query = select(
         func.count(StockIn.id),
         func.coalesce(func.sum(StockIn.quantity), 0),
     ).join(Product, StockIn.product_id == Product.id)
     if customer:
-        stats_query = stats_query.filter(StockIn.customer.like(f'%{escape_like(customer)}%'))
+        stats_query = stats_query.where(StockIn.customer.like(f'%{escape_like(customer)}%'))
     stats_query = _apply_product_filter(stats_query, product)
     stats_query = _apply_date_filters(stats_query, StockIn.stockin_date, start_date, end_date)
-    total, total_quantity = stats_query.one()
+    total, total_quantity = session.execute(stats_query).one()
 
     logger.info(f'备货查询结果数: {total}')
     logs: list[dict[str, Any]] = []
     total_remaining = 0
-    for stockin in query.order_by(StockIn.stockin_date.desc()).yield_per(_YIELD_PER_BATCH):
+    stmt = query.order_by(StockIn.stockin_date.desc()).execution_options(yield_per=_YIELD_PER_BATCH)
+    for stockin in session.scalars(stmt):
         if len(logs) >= _MAX_EXPORT_ROWS:
             logger.warning('备货报表导出达到最大行数 %d，已截断', _MAX_EXPORT_ROWS)
             break
@@ -228,7 +230,7 @@ def _get_stockin_logs(session, customer, product, start_date, end_date):
 
 
 def _get_stockout_logs(session, customer, product, start_date, end_date):
-    query = session.query(StockOut).join(Product).filter(
+    query = select(StockOut).join(Product).where(
         (StockOut.quantity - StockOut.returned_quantity) > 0,
         StockOut.stockin_id.is_(None)
     ).options(
@@ -236,26 +238,27 @@ def _get_stockout_logs(session, customer, product, start_date, end_date):
         selectinload(StockOut.order)
     )
     if customer:
-        query = query.filter(StockOut.customer.like(f'%{escape_like(customer)}%'))
+        query = query.where(StockOut.customer.like(f'%{escape_like(customer)}%'))
     query = _apply_product_filter(query, product)
     query = _apply_date_filters(query, StockOut.stockout_date, start_date, end_date)
 
-    stats_query = session.query(
+    stats_query = select(
         func.count(StockOut.id),
         func.coalesce(func.sum(StockOut.quantity - StockOut.returned_quantity), 0),
-    ).join(Product, StockOut.product_id == Product.id).filter(
+    ).join(Product, StockOut.product_id == Product.id).where(
         (StockOut.quantity - StockOut.returned_quantity) > 0,
         StockOut.stockin_id.is_(None)
     )
     if customer:
-        stats_query = stats_query.filter(StockOut.customer.like(f'%{escape_like(customer)}%'))
+        stats_query = stats_query.where(StockOut.customer.like(f'%{escape_like(customer)}%'))
     stats_query = _apply_product_filter(stats_query, product)
     stats_query = _apply_date_filters(stats_query, StockOut.stockout_date, start_date, end_date)
-    total, total_quantity = stats_query.one()
+    total, total_quantity = session.execute(stats_query).one()
 
     logger.info(f'出货查询结果数: {total}')
     logs: list[dict[str, Any]] = []
-    for so in query.order_by(StockOut.stockout_date.desc()).yield_per(_YIELD_PER_BATCH):
+    stmt = query.order_by(StockOut.stockout_date.desc()).execution_options(yield_per=_YIELD_PER_BATCH)
+    for so in session.scalars(stmt):
         if len(logs) >= _MAX_EXPORT_ROWS:
             logger.warning('出货报表导出达到最大行数 %d，已截断', _MAX_EXPORT_ROWS)
             break
@@ -283,7 +286,7 @@ def _get_stockout_logs(session, customer, product, start_date, end_date):
 
 
 def _get_deduction_logs(session, customer, product, start_date, end_date):
-    query = session.query(StockOut).join(Product).filter(StockOut.stockin_id.isnot(None)).options(
+    query = select(StockOut).join(Product).where(StockOut.stockin_id.isnot(None)).options(
         selectinload(StockOut.product),
         selectinload(StockOut.order)
     )
@@ -292,20 +295,21 @@ def _get_deduction_logs(session, customer, product, start_date, end_date):
     query = _apply_product_filter(query, product)
     query = _apply_date_filters(query, StockOut.stockout_date, start_date, end_date)
 
-    stats_query = session.query(
+    stats_query = select(
         func.count(StockOut.id),
         func.coalesce(func.sum(StockOut.quantity - StockOut.returned_quantity), 0),
         func.count(func.distinct(StockOut.order_id)),
-    ).join(Product, StockOut.product_id == Product.id).filter(StockOut.stockin_id.isnot(None))
+    ).join(Product, StockOut.product_id == Product.id).where(StockOut.stockin_id.isnot(None))
     if customer:
-        stats_query = stats_query.filter(StockOut.customer.like(f'%{escape_like(customer)}%'))
+        stats_query = stats_query.where(StockOut.customer.like(f'%{escape_like(customer)}%'))
     stats_query = _apply_product_filter(stats_query, product)
     stats_query = _apply_date_filters(stats_query, StockOut.stockout_date, start_date, end_date)
-    total, total_quantity, total_orders = stats_query.one()
+    total, total_quantity, total_orders = session.execute(stats_query).one()
 
     logger.info(f'抵扣查询结果数: {total}')
     logs: list[dict[str, Any]] = []
-    for so in query.order_by(StockOut.stockout_date.desc()).yield_per(_YIELD_PER_BATCH):
+    stmt = query.order_by(StockOut.stockout_date.desc()).execution_options(yield_per=_YIELD_PER_BATCH)
+    for so in session.scalars(stmt):
         if len(logs) >= _MAX_EXPORT_ROWS:
             logger.warning('抵扣报表导出达到最大行数 %d，已截断', _MAX_EXPORT_ROWS)
             break

@@ -289,23 +289,50 @@ async def scheduler_poller(ctx):
     每 5 分钟由 ARQ cron 触发；命中「enabled 且 cron 匹配当前分钟且未在本小时窗口
     执行过」的调度，按 task_type 映射到 auto_* 任务函数入队并更新 last_run_at/status。
     幂等：last_run_at 按小时窗口判断；跨进程唯一性由目标任务内部既有 advisory lock 兜底。
+
+    P1-7：本函数也会被 ARQ 重放（max_tries=3），故 (a) 按 ``job_id + (schedule_id, 小时窗口)``
+    的幂等集合跳过「已入队且状态已提交」的调度，(b) 状态回写改为每批提交一次而非逐条
+    commit —— 逐条 commit 时被重放的任务会对同一批调度重复入队并重复回写。
     """
     try:
-        from fastapi_app.core.arq_app import get_arq_pool
+        from fastapi_app.core.arq_app import (
+            DEFAULT_COMMIT_BATCH_SIZE,
+            IDEMPOTENCY_NAMESPACE_SCHEDULE_POLLER,
+            CommitBatcher,
+            get_arq_pool,
+            job_idempotency,
+        )
         from fastapi_app.core.database import get_async_db_context
         from fastapi_app.core.schedule_status import schedule_job_id
         from fastapi_app.services.backup import schedule_service
 
         now = datetime.now()
+        window = now.strftime('%Y%m%d%H')
         async with get_async_db_context() as db:
             due = await schedule_service.due_schedules(db, now)
             if not due:
                 return
             pool = await get_arq_pool()
+            idempotency = job_idempotency(ctx, namespace=IDEMPOTENCY_NAMESPACE_SCHEDULE_POLLER)
+            already_done = await idempotency.load()
+            pending_marks: list[str] = []
+
+            async def _on_batch_committed() -> None:
+                # 提交成功后才登记：否则回滚掉的窗口会被标成「已入队」，重放时不再补入队
+                if pending_marks:
+                    await idempotency.mark(pending_marks)
+                pending_marks.clear()
+
+            batcher = CommitBatcher(db, batch_size=DEFAULT_COMMIT_BATCH_SIZE,
+                                    after_commit=_on_batch_committed)
             for sch in due:
                 func_name = schedule_service.TASK_TYPE_TO_FUNC.get(sch.task_type)
                 if not func_name:
                     logger.warning('调度任务 id=%s 类型 %s 无映射任务函数，跳过', sch.id, sch.task_type)
+                    continue
+                mark = f'{sch.id}:{window}'
+                if mark in already_done:
+                    logger.info('重放：调度 %s 本窗口已入队且状态已提交，跳过', sch.id)
                     continue
                 # 带上可解析的 job id：任务结束/失败的 ARQ 回调据此把 last_status 落成
                 # 终态（否则它会永远停在 'running'）；同时借 ARQ 的同名 job 去重拿到原子
@@ -317,8 +344,12 @@ async def scheduler_poller(ctx):
                 # last_run_at 写入 aware UTC：避免 naive 本地时间写 timestamptz 列读回后时区错位
                 sch.last_run_at = datetime.now(UTC)
                 sch.last_status = 'running'
-                await db.commit()
-                logger.info('调度入队 schedule_id=%s name=%s -> %s', sch.id, sch.name, func_name)
+                pending_marks.append(mark)
+                await batcher.tick()
+            await batcher.flush()
+            if batcher.commits:
+                logger.info('调度入队完成 schedule_ids=%s 提交批数=%s',
+                            [s.id for s in due], batcher.commits)
     except Exception as e:  # defensive: 调度轮询不得中断 worker
         logger.error('调度轮询失败: %s', e)
 

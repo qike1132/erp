@@ -2,7 +2,13 @@
 审计日志中间件
 
 拦截所有写操作（POST/PUT/PATCH/DELETE），自动记录到 audit_log 表。
-通过 Redis 缓冲队列实现异步批量写入，避免增加请求延迟。
+
+写入路径（P1-9：审计写库不落在请求热路径上逐条往返）：
+1. 请求级收集：一个请求产生的全部审计事件（写审计 + 403 拒绝审计）先入
+   request.state.audit_pending_entries，请求结束时一次性投递；
+2. 首选异步：批量投递到 Redis 缓冲队列，由后台任务/关停钩子批量落库；
+3. 降级直写：Redis 不可用时按批直写 —— 整批合并为**单条多行 INSERT**，
+   一次 session.execute + 一次 commit；失败只记日志，绝不影响主请求响应。
 """
 import json
 import time
@@ -55,6 +61,12 @@ AUDIT_FLUSH_INTERVAL = 5
 # 授权拒绝（403）的审计动作名，用于与业务写操作的 CREATE/UPDATE/DELETE 区分
 ACCESS_DENIED_ACTION = 'ACCESS_DENIED'
 
+# audit_log 落库列顺序（批量 INSERT 的单一来源，与 audit_log 表结构一致）
+AUDIT_LOG_COLUMNS = (
+    'user_id', 'username', 'action', 'resource_type', 'resource_id',
+    'detail', 'ip_address', 'user_agent', 'request_id', 'status_code', 'created_at',
+)
+
 _audit_session_factory = None
 
 
@@ -98,23 +110,32 @@ class AuditLogMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         request_id = getattr(request.state, 'request_id', None) or str(uuid.uuid4())[:8]
         request.state.request_id = request_id
-
-        if request.method not in WRITE_METHODS:
-            response = await call_next(request)
-            # 读方法不走写审计，403 需在此补漏，否则越权尝试不留痕迹
-            await _audit_unattributed_denial(request, response)
-            return response
-
-        start_time = time.time()
-        response: Response = await call_next(request)
-        duration_ms = round((time.time() - start_time) * 1000, 2)
+        # P1-9：请求级审计收集桶 —— 本请求内产生的所有审计事件先入桶，
+        # 请求结束时一次性批量投递，直写降级路径的写库次数恒为 1（与事件数无关）。
+        request.state.audit_pending_entries = []
 
         try:
-            await self._record_audit(request, response, request_id, duration_ms)
-        except Exception as e:  # defensive: 审计记录失败不能影响主请求
-            logger.warning('审计日志记录失败: %s', e)
+            if request.method not in WRITE_METHODS:
+                response = await call_next(request)
+                # 读方法不走写审计，403 需在此补漏，否则越权尝试不留痕迹
+                await _audit_unattributed_denial(request, response)
+                return response
 
-        return response
+            start_time = time.time()
+            response: Response = await call_next(request)
+            duration_ms = round((time.time() - start_time) * 1000, 2)
+
+            try:
+                await self._record_audit(request, response, request_id, duration_ms)
+            except Exception as e:  # defensive: 审计记录失败不能影响主请求
+                logger.warning('审计日志记录失败: %s', e)
+
+            return response
+        finally:
+            try:
+                await _flush_request_audit_entries(request)
+            except Exception as e:  # defensive: 审计批量投递失败不能影响主请求响应
+                logger.warning('审计日志批量投递失败: %s', e)
 
     async def _record_audit(self, request: Request, response: Response, request_id: str, duration_ms: float):
         user_id = getattr(request.state, 'user_id', None)
@@ -160,7 +181,7 @@ class AuditLogMiddleware(BaseHTTPMiddleware):
             'created_at': datetime.now(UTC),
         }
 
-        await _buffer_audit_entry(audit_entry)
+        await _submit_audit_entry(request, audit_entry)
 
 
 def _resolve_actor(request: Request, user: object | None) -> tuple[int | None, str | None, list[str]]:
@@ -230,7 +251,7 @@ async def record_access_denied(
 
         # 置位去重标记：本次 403 已有语义化审计，中间件兜底不得重复写入
         request.state.access_denied_audited = True
-        await _buffer_audit_entry(entry)
+        await _submit_audit_entry(request, entry)
     except Exception as e:  # defensive: 审计记录失败不能影响主请求
         logger.warning('授权拒绝审计记录失败: %s', e)
 
@@ -254,18 +275,61 @@ async def _audit_unattributed_denial(request: Request, response: Response) -> No
     )
 
 
-async def _buffer_audit_entry(entry: dict):
+async def _submit_audit_entry(request: Request, entry: dict) -> None:
+    """提交一条审计事件。
+
+    请求级收集桶存在（请求经 AuditLogMiddleware.dispatch）时只入桶，由请求结束时
+    的 _flush_request_audit_entries 统一批量投递；否则立即走单条管线 ——
+    无中间件上下文的直接调用方（如 backup/export.py）语义不变。
+    """
+    pending = getattr(request.state, 'audit_pending_entries', None)
+    if pending is None:
+        await _buffer_audit_entry(entry)
+    else:
+        pending.append(entry)
+
+
+async def _flush_request_audit_entries(request: Request) -> None:
+    """请求结束时一次性投递收集桶内的全部审计事件（P1-9：每请求至多一次直写）。"""
+    pending = getattr(request.state, 'audit_pending_entries', None)
+    if not pending:
+        return
+    request.state.audit_pending_entries = []
+    if len(pending) == 1:
+        # 单条与既有单条管线完全等价（同样只有一次写库）
+        await _buffer_audit_entry(pending[0])
+    else:
+        await _buffer_audit_entries(pending)
+
+
+async def _buffer_audit_entries(entries: list[dict]):
+    """把一批审计事件投递到 Redis 缓冲队列；缓冲不可用时整批一次性直写。"""
+    if not entries:
+        return
     try:
         from fastapi_app.core.redis_wrapper import safe_llen, safe_rpush
-        pushed = await safe_rpush(AUDIT_BUFFER_KEY, json.dumps(entry, ensure_ascii=False), context="审计缓冲")
+        pushed = 0
+        for entry in entries:
+            # default=str：created_at 是 datetime，不兜底会 TypeError —— 原实现因此
+            # 每轮都跌进 except 直写，Redis 缓冲路径实际从未生效（P1-9 顺带修复）
+            pushed += await safe_rpush(
+                AUDIT_BUFFER_KEY,
+                json.dumps(entry, ensure_ascii=False, default=str),
+                context="审计缓冲",
+            )
         if pushed > 0:
             buf_len = await safe_llen(AUDIT_BUFFER_KEY, context="审计缓冲")
             if buf_len >= AUDIT_FLUSH_SIZE:
                 await flush_audit_buffer()
         else:
-            await _write_audit_direct([entry])
-    except Exception:  # defensive: Redis 缓冲失败时降级为直接写入
-        await _write_audit_direct([entry])
+            await _write_audit_direct(entries)
+    except Exception:  # defensive: Redis 缓冲失败时降级为按批直接写入
+        await _write_audit_direct(entries)
+
+
+async def _buffer_audit_entry(entry: dict):
+    """单条投递入口（对外兼容 API：backup/export.py 等直接调用方共用同一管线）"""
+    await _buffer_audit_entries([entry])
 
 
 async def flush_audit_buffer():
@@ -281,6 +345,28 @@ async def flush_audit_buffer():
         logger.warning('审计日志缓冲刷写失败: %s', e)
 
 
+def _build_batch_insert(entries: list[dict]) -> tuple[str, dict]:
+    """构造单条多行 INSERT 及其绑定参数（P1-9：整批一次 execute，不再逐条往返）。
+
+    绑定参数上限 65535（Postgres），本批最多 AUDIT_FLUSH_SIZE(50) 行 / 11 列，
+    远低于上限，无需分片。
+    """
+    rows = []
+    params: dict = {}
+    for index, entry in enumerate(entries):
+        placeholders = []
+        for column in AUDIT_LOG_COLUMNS:
+            key = f'{column}_{index}'
+            params[key] = entry.get(column)
+            placeholders.append(f':{key}')
+        rows.append('(' + ', '.join(placeholders) + ')')
+    sql = (
+        'INSERT INTO audit_log (' + ', '.join(AUDIT_LOG_COLUMNS) + ') VALUES '
+        + ', '.join(rows)
+    )
+    return sql, params
+
+
 async def _write_audit_direct(entries: list[dict]):
     if not entries:
         return
@@ -291,18 +377,24 @@ async def _write_audit_direct(entries: list[dict]):
         if session_factory is None:
             return
 
+        for entry in entries:
+            # 兜底：无论来自 Redis 缓冲（JSON 反序列化丢掉 datetime 类型）还是直接路径，
+            # 都保证 created_at 是 datetime 实例，asyncpg 不接受 timestamp 列的字符串；
+            # 缓冲来的 ISO 字符串优先还原原时间戳，避免审计时间被刷写时刻覆盖
+            created_at = entry.get('created_at')
+            if not isinstance(created_at, datetime):
+                if created_at:
+                    try:
+                        entry['created_at'] = datetime.fromisoformat(str(created_at))
+                        continue
+                    except (TypeError, ValueError):  # defensive: 时间戳不可解析时用当前时间兜底
+                        pass
+                entry['created_at'] = datetime.now(UTC)
+
+        sql, params = _build_batch_insert(entries)
         async with session_factory() as session:
-            for entry in entries:
-                # 兜底：无论来自 Redis 缓冲（JSON 反序列化会丢 datetime 类型）还是直接路径，
-                # 都保证 created_at 是 datetime 实例，asyncpg 不接受 timestamp 列的字符串
-                if not isinstance(entry.get('created_at'), datetime):
-                    entry['created_at'] = datetime.now(UTC)
-                await session.execute(sa_text("""
-                    INSERT INTO audit_log (user_id, username, action, resource_type, resource_id,
-                                          detail, ip_address, user_agent, request_id, status_code, created_at)
-                    VALUES (:user_id, :username, :action, :resource_type, :resource_id,
-                            :detail, :ip_address, :user_agent, :request_id, :status_code, :created_at)
-                """), entry)
+            # 单次 execute 写入整批（原实现循环内逐条 execute，N 条 = N 次往返）
+            await session.execute(sa_text(sql), params)
             await session.commit()
         logger.debug('审计日志写入 %d 条', len(entries))
     except Exception as e:  # defensive: 审计日志写入失败不能影响主请求

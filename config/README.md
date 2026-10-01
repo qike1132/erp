@@ -19,12 +19,21 @@
 
 ## 二、不参与运行，但**必须保留**：灾备随包分发件
 
-`fastapi_app/services/backup/_constants.py:89-104 config_files_to_package()` 会把下面这些
-文件打进**加密备份包**，供灾难恢复时还原：
+`fastapi_app/services/backup/_constants.py:103-134 config_files_to_package()` 会把下面这些
+文件打进备份包，供灾难恢复时还原。分两档（闸门见 `orchestration/core.py:95-118`
+`pack_config_files(..., include_sensitive_config)` 与 `_constants.py:137-155` 敏感白名单）：
+
+**明文包与加密包都包含**（内容不含敏感凭据）：
 
 - `nginx.conf`（归档内 `nginx.conf`）—— 这是 Docker/Linux 形态的 nginx 配置，
   本机运行时不加载它，但它是灾备件；
 - `redis.production.conf`（归档内 `redis.production.conf`）；
+- `nssm-services.json`（归档内 `config/nssm-services.json`）—— NSSM 服务定义快照，
+  明文包与加密包均包含，内容不含敏感凭据。
+
+**仅加密包含**（命中敏感白名单；明文包排除并记入
+`manifest.includes.config_files_excluded`）：
+
 - `.env.production`（归档内 `.env.production`）；
 - 现役 JWT 密钥（按 `settings` 推导，随轮换自动跟进）；
 - 项目根的 `.env`（归档内 `root/.env`）。

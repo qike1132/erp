@@ -20,21 +20,26 @@ from pathlib import Path
 import pytest
 
 _MIGRATIONS_DIR = Path(r"D:\erp_system\migrations\versions")
+# 迁移模块在模块级导入的守卫模块；stub 窗口内会被首次导入，需一并恢复
+_GUARD_MODULE_NAME = "migrations._legacy_base_guard"
 
 
 def _load_migration_module(filename: str):
     """按文件路径加载迁移模块，但不执行 upgrade()/downgrade()。
 
-    迁移脚本顶部 `from alembic import op` 在 alembic 上下文之外会失败，
-    因此在 exec 前向 sys.modules 注入 stub `alembic` 与 `alembic.op`。
-    函数体不会被调用，故 sa/op 调用不会真正执行。加载后恢复 sys.modules
-    原状以避免污染其它测试。
+    迁移脚本顶部的 `from alembic import op`、以及迁移模块级导入的
+    `migrations/_legacy_base_guard.py` 顶部的 `from alembic import context, op`，
+    在 alembic 上下文之外都会失败，因此在 exec 前向 sys.modules 注入最小 stub
+    `alembic`（含 op / context 两个子模块）。函数体不会被调用，故 sa/op 调用不会
+    真正执行。加载后恢复 sys.modules 原状（含 stub 窗口内首次导入的守卫模块），
+    既不污染其它测试，也不依赖其它测试先导入该守卫模块。
     """
     file_path = _MIGRATIONS_DIR / filename
     spec = importlib.util.spec_from_file_location(f"_migration_{file_path.stem}", file_path)
     module = importlib.util.module_from_spec(spec)
 
-    # stub alembic + alembic.op，使 `from alembic import op` 可成功
+    # stub alembic / alembic.op / alembic.context，使 `from alembic import op`（迁移脚本）
+    # 与 `from alembic import context, op`（守卫模块）都可成功；不引入真实 alembic。
     fake_op = types.ModuleType("alembic.op")
     fake_op.create_table = lambda *a, **kw: None
     fake_op.drop_table = lambda *a, **kw: None
@@ -44,22 +49,25 @@ def _load_migration_module(filename: str):
     fake_op.f = types.SimpleNamespace()
     fake_alembic = types.ModuleType("alembic")
     fake_alembic.op = fake_op
+    # 守卫模块所需的 context 子模块（模块级 import 期只需要它存在）
+    fake_alembic.context = types.ModuleType("alembic.context")
 
-    saved_alembic = sys.modules.get("alembic")
-    saved_alembic_op = sys.modules.get("alembic.op")
+    # 守卫模块在 stub 窗口内可能被【首次】导入并缓存：它会把 stub 的 context/op
+    # 绑进自己的模块命名空间，因此也要保存/恢复，避免把 stub 泄漏给后续测试。
+    saved_modules = {
+        name: sys.modules.get(name)
+        for name in ("alembic", "alembic.op", _GUARD_MODULE_NAME)
+    }
     sys.modules["alembic"] = fake_alembic
     sys.modules["alembic.op"] = fake_op
     try:
         spec.loader.exec_module(module)
     finally:
-        if saved_alembic is not None:
-            sys.modules["alembic"] = saved_alembic
-        else:
-            sys.modules.pop("alembic", None)
-        if saved_alembic_op is not None:
-            sys.modules["alembic.op"] = saved_alembic_op
-        else:
-            sys.modules.pop("alembic.op", None)
+        for name, saved_module in saved_modules.items():
+            if saved_module is not None:
+                sys.modules[name] = saved_module
+            else:
+                sys.modules.pop(name, None)
 
     return module
 
