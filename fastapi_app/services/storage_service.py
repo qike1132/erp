@@ -465,12 +465,16 @@ async def delete_upload(record_id: int, db) -> bool:
 
 
 async def get_upload_url(record_id: int, db) -> str | None:
-    """获取文件访问 URL"""
+    """获取文件访问 URL（OPT-19：配置了签名密钥时返回限时签名 URL）"""
+    from fastapi_app.services.signed_urls import sign_upload_url
     from fastapi_app.shared_models.file_record import FileRecord
 
     record = await db.get(FileRecord, record_id)
     if record is None:
         return None
 
-    storage = get_storage()
-    return storage.get_url(record.storage_key)
+    url = get_storage().get_url(record.storage_key)
+    # get_url 返回 "/static/uploads/<key>" 或对象存储完整 URL；签名仅适用于本地相对路径
+    if url.startswith("/static/uploads/"):
+        return sign_upload_url(url.removeprefix("/static/uploads/"))
+    return url
