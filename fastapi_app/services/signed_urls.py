@@ -52,7 +52,11 @@ def sign_upload_url(key: str, ttl_seconds: int = 3600) -> str:
     expired = int(time.time()) + ttl_seconds
     # $uri 为 nginx 解码后的请求路径；签名与校验两侧都用完整路径保持一致。
     uri = quote(url, safe="/")
-    raw = f"{expired}{uri}{secret}".encode()
+    # nginx secure_link_md5 的哈希输入 = 表达式求值后的整串。conf 写
+    # `"$secure_link_expires$uri <secret>"` 时 <secret> 前有一个字面空格
+    # （这是 nginx 官方示例的约定写法，两侧必须严格一致——2026-10-01 实测
+    # 无空格签名 403、带空格 200）。md5 为 secure_link 协议固定哈希。
+    raw = f"{expired}{uri} {secret}".encode()
     sig = base64.urlsafe_b64encode(hashlib.md5(raw).digest()).rstrip(b"=").decode("ascii")  # nosec B324 - nginx secure_link 协议固定哈希
     return f"{url}?st={expired}&s={sig}"
 
@@ -65,6 +69,6 @@ def verify_signature(key: str, expired: int, sig: str, secret: str | None = None
     if expired < int(time.time()):
         return False
     uri = quote(f"/static/uploads/{key}", safe="/")
-    raw = f"{expired}{uri}{secret}".encode()
+    raw = f"{expired}{uri} {secret}".encode()
     expect = base64.urlsafe_b64encode(hashlib.md5(raw).digest()).rstrip(b"=").decode("ascii")  # nosec B324 - 同上
     return sig == expect

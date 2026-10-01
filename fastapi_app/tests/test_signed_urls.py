@@ -66,6 +66,6 @@ def test_nginx_secure_link_md5_alignment(monkeypatch):
     got = url.split("s=")[1]
 
     expect = base64.urlsafe_b64encode(
-        hashlib.md5(f"{expired}{uri}{secret}".encode()).digest()
+        hashlib.md5(f"{expired}{uri} {secret}".encode()).digest()  # secret 前有空格（nginx conf 写法）
     ).rstrip(b"=").decode()
     assert got == expect
