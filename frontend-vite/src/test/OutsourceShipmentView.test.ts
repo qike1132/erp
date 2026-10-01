@@ -1,10 +1,8 @@
 /**
  * OutsourceShipmentView 发货单页面按钮显隐回归
  *
- * 修复前：一键发货 / 确认收货 都按权限点（hasPermission）显示，super 账号拥有全部权限
- * 导致「对所有用户都显示」。
- * 修复后（业务规则，与 scripts/add_outsource_ship_receive_perms.py 的 BEILE_USERNAME='贝乐' 一致）：
- * - 一键发货：仅非贝乐用户可见（贝乐账号只收货不发货）
+ * 业务规则（与 scripts/add_outsource_ship_receive_perms.py 的 BEILE_USERNAME='贝乐' 一致）：
+ * - 批量发货（方案B起位于 OutsourceShipmentStrip 信息条）：仅非贝乐用户可见
  * - 确认收货：仅贝乐用户可见
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -39,11 +37,13 @@ vi.mock('@/api/outsource', () => ({
     shipmentDetail: vi.fn(),
     receiveShipment: vi.fn(),
     shippable: vi.fn(),
+    unshipped: vi.fn(async () => []),
   },
 }))
 
 function shipButton(wrapper: ReturnType<typeof mount>) {
-  return wrapper.find('button.osv-toolbar-btn--ship')
+  // 方案B：批量发货位于页头动作组 OutsourceShipmentActions，主按钮类名 osa-btn--primary
+  return wrapper.find('button.osa-btn--primary')
 }
 function receiveButton(wrapper: ReturnType<typeof mount>) {
   const btns = wrapper.findAll('button')

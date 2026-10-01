@@ -1,43 +1,30 @@
 <template>
   <div class="hu-container">
     <div class="page-card page-card-main">
-      <!-- 卡片头部：Tab 导航 + 待收货提醒 + 一键发货 + 发货单状态筛选 -->
+      <!-- 卡片头部：Tab 导航 + 页头动作组（状态切换/导出打印/批量发货 与 TAB 同行，用户裁决） -->
       <div class="page-card-header">
         <HubeiRouteTabs />
-        <!-- 待收货提醒 -->
-        <div v-if="shippedCount > 0" class="osv-hint">
-          <FontAwesomeIcon icon="exclamation-triangle" aria-hidden="true" />
-          <span>提醒：共有 <strong>{{ shippedCount }}</strong> 张发货单待收货</span>
-        </div>
-        <!-- 批量发货：仅非贝乐用户（外协方/工厂/管理员）可见，贝乐账号只收货不发货 -->
-        <div class="osv-header-actions">
-          <button
-            v-if="canShip && !isBeile"
-            type="button"
-            class="osv-toolbar-btn osv-toolbar-btn--ship"
-            @click="shipOpen = true"
-          >
-            <FontAwesomeIcon icon="truck-fast" aria-hidden="true" /> 批量发货
-          </button>
-        </div>
-        <!-- 发货单状态 TAB（待收货/已完成）参照 beile-order 未确认/已确认；置于最右 -->
-        <div class="osv-confirm-filter">
-          <button
-            type="button"
-            :class="['osv-confirm-filter-btn', { 'is-active': statusFilter === 'shipped' }]"
-            @click="setStatus('shipped')"
-          >待收货</button>
-          <button
-            type="button"
-            :class="['osv-confirm-filter-btn', { 'is-active': statusFilter === 'received' }]"
-            @click="setStatus('received')"
-          >已完成</button>
-        </div>
+        <OutsourceShipmentActions
+          :shipped-count="shippedCount"
+          :received-count="receivedCount"
+          :status-filter="statusFilter"
+          :exporting="exporting"
+          :unshipped-loading="unshippedLoading"
+          :can-ship="canShip && !isBeile"
+          @set-status="setStatus"
+          @export="handleExport"
+          @print="handlePrint"
+          @ship="shipOpen = true"
+        />
       </div>
 
       <!-- 内容区：发货单列表 -->
       <div class="page-card-body">
         <div class="hu-tab-content">
+          <OutsourceShipmentStrip
+            :shipped-count="shippedCount"
+            :unshipped-qty="unshippedQty"
+          />
           <div class="osv-body">
             <div v-if="loading && shipments.length === 0" class="osv-empty">
               <UiSpinner />
@@ -52,6 +39,7 @@
                 <table class="osv-table">
                   <thead>
                     <tr>
+                      <th class="osv-th-center" style="width: 170px;">发货单号</th>
                       <th class="osv-th-center" style="width: 150px;">发货时间</th>
                       <th class="osv-th-center" style="width: 90px;">明细数</th>
                       <th class="osv-th-center" style="width: 90px;">发货总量</th>
@@ -61,6 +49,7 @@
                   </thead>
                   <tbody>
                     <tr v-for="s in shipments" :key="s.id">
+                      <td class="osv-td-center osv-td-nowrap osv-td-mono">{{ s.shipment_no }}</td>
                       <td class="osv-td-center osv-td-nowrap">{{ s.shipped_at || '-' }}</td>
                       <td class="osv-td-center">{{ s.item_count }}</td>
                       <td class="osv-td-center"><strong>{{ (s.total_shipped || 0).toLocaleString() }}</strong></td>
@@ -116,11 +105,13 @@
 /**
  * OutsourceShipmentView.vue — 外发发货单页面（/outsource/shipments）
  *
- * 一键发货工作流：
+ * 发货工作流（方案B + 用户裁决布局，docs/outsource/外发模块TAB重构方案.md）：
+ * - 页头 = Tab 导航 + 动作组（OutsourceShipmentActions：待收货/已完成切换、
+ *   导出/打印未到货、批量发货，与 TAB 同行靠右）
+ * - 信息条（OutsourceShipmentStrip）仅承载概览：待收货张数、未到货件数
  * - 一键发货 → 生成发货单（贝乐用户端「待收货」订单）
- * - 发货单列表（待收货/已完成 TAB，参照 beile-order 未确认/已确认）
  * - 贝乐账号「确认收货」→ 状态「已完成」闭环
- * - 「明细」→ SKU + 工序 + 发货/收货数量
+ * - 「明细」→ SKU + 工序 + 发货/收货数量；「导出/打印未到货」自外发进度页迁入
  */
 import { computed, ref } from 'vue'
 import HubeiRouteTabs from '@/views/hubei/HubeiRouteTabs.vue'
@@ -128,8 +119,11 @@ import UiPagination from '@/components/ui/UiPagination.vue'
 import UiSpinner from '@/components/ui/UiSpinner.vue'
 import OutsourceShipDialog from '@/views/outsource/components/OutsourceShipDialog.vue'
 import OutsourceShipmentDetailDialog from '@/views/outsource/components/OutsourceShipmentDetailDialog.vue'
+import OutsourceShipmentStrip from '@/views/outsource/components/OutsourceShipmentStrip.vue'
+import OutsourceShipmentActions from '@/views/outsource/components/OutsourceShipmentActions.vue'
 import { outsourceApi, type Shipment } from '@/api/outsource'
 import { useAuthStore } from '@/stores/auth'
+import { useOutsourceUnshipped } from '@/views/outsource/composables/useOutsourceUnshipped'
 import { toast } from '@/composables/useToast'
 
 const PAGE_SIZE_OPTIONS = [20, 50, 100, 200]
@@ -153,6 +147,20 @@ const isFetching = ref(false)
 const receivingId = ref<number | null>(null)
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / perPage.value)))
+
+// ===== 未到货导出/打印（方案B：自外发进度页迁入，跨全部订单聚合） =====
+const { exporting, loading: unshippedLoading, handleExport, handlePrint } = useOutsourceUnshipped()
+/** 未到货总件数（订单数量 − 已发数量）；null = 未取得，信息条不渲染该段 */
+const unshippedQty = ref<number | null>(null)
+
+async function loadUnshippedQty() {
+  try {
+    const items = await outsourceApi.unshipped()
+    unshippedQty.value = items.reduce((sum, it) => sum + (it.remaining || 0), 0)
+  } catch {
+    unshippedQty.value = null
+  }
+}
 
 async function load() {
   loading.value = shipments.value.length === 0
@@ -204,10 +212,11 @@ function openDetail(s: Shipment) {
 }
 
 function onShipped() {
-  // 一键发货成功：回到「待收货」并刷新
+  // 一键发货成功：回到「待收货」并刷新（未到货件数同步减少）
   statusFilter.value = 'shipped'
   currentPage.value = 1
   load()
+  loadUnshippedQty()
 }
 
 async function confirmReceive(s: Shipment) {
@@ -233,6 +242,7 @@ function statusClass(status: string): string {
 }
 
 load()
+loadUnshippedQty()
 </script>
 
 <style scoped lang="scss">
@@ -246,103 +256,6 @@ load()
 .page-card-header :deep(.hu-tabs-bar) {
   padding: 0;
   flex-shrink: 0;
-}
-.osv-header-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
-/* ===== 状态筛选 TAB（参照 beile-order） ===== */
-/* 置于头部最右：margin-left:auto 吃掉剩余空间，把本块推到行尾 */
-.osv-confirm-filter {
-  margin-left: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px;
-  border-radius: 12px;
-  background: white;
-  border: 1px solid var(--color-border-light, #e2e8f0);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.06);
-  flex-shrink: 0;
-}
-.osv-confirm-filter-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 6px 14px;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--color-text-secondary, #6b7280);
-  background: #fff;
-  border: 1px solid var(--color-border-light, #e5e7eb);
-  border-radius: 9px;
-  cursor: pointer;
-  font-family: inherit;
-  user-select: none;
-  transition: all 0.15s ease;
-}
-.osv-confirm-filter-btn:hover {
-  border-color: var(--color-primary-300, #93c5fd);
-  color: var(--color-primary-600, #3b82f6);
-  background: var(--color-primary-50, #eff6ff);
-}
-.osv-confirm-filter-btn.is-active {
-  color: #fff;
-  background: linear-gradient(135deg, var(--color-primary-500, #3b82f6), var(--color-primary-600, #2563eb));
-  border-color: var(--color-primary-600, #2563eb);
-  box-shadow: 0 2px 6px rgba(59, 130, 246, 0.25);
-}
-
-/* ===== 待收货提醒 ===== */
-.osv-hint {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 14px;
-  border-radius: 9px;
-  background: var(--color-warning-50);
-  border: 1px solid var(--color-warning-200);
-  color: var(--color-warning-700);
-  font-size: 13px;
-  font-weight: 600;
-  flex-shrink: 0;
-}
-.osv-hint strong { color: var(--color-warning-800); font-size: 15px; }
-
-/* ===== 工具栏按钮 ===== */
-.osv-toolbar-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 14px;
-  font-size: 13px;
-  font-weight: 600;
-  border: 1px solid var(--color-border-light, #e2e8f0);
-  border-radius: 8px;
-  background: #fff;
-  color: var(--color-text-secondary, #475569);
-  cursor: pointer;
-  font-family: inherit;
-  white-space: nowrap;
-  transition: all 0.15s ease;
-}
-.osv-toolbar-btn:hover:not(:disabled) {
-  border-color: var(--color-primary-300, #93c5fd);
-  color: var(--color-primary-600, #2563eb);
-  background: var(--color-primary-50, #eff6ff);
-}
-.osv-toolbar-btn--ship {
-  color: #fff;
-  background: var(--color-primary-600, #2563eb);
-  border-color: var(--color-primary-600, #2563eb);
-}
-.osv-toolbar-btn--ship:hover:not(:disabled) {
-  color: #fff;
-  background: var(--color-primary-700, #1d4ed8);
 }
 
 /* ===== 列表 ===== */
@@ -371,6 +284,7 @@ load()
 .osv-table tbody tr:hover { background: var(--color-primary-50); }
 .osv-td-center { text-align: center !important; }
 .osv-td-nowrap { white-space: nowrap; }
+.osv-td-mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.5px; }
 
 .osv-status-badge { display: inline-block; padding: 2px 9px; border-radius: 7px; font-size: 11.5px; font-weight: 600; white-space: nowrap; }
 .osv-status-shipped { background: var(--color-warning-50); color: var(--color-warning-600); }

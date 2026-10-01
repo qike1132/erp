@@ -6,7 +6,7 @@
     @update:open="onOpenUpdate"
   >
     <template #title>
-      批量发货
+      发货
       <span class="osw-title-sub">从左侧选择订单，右侧核对发货明细</span>
     </template>
 

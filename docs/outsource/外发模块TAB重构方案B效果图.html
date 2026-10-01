@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>外发模块 TAB 重构 · 方案B 交互效果图(保守版)</title>
+<style>
+  :root{
+    --bg:#eef2f7; --card:#ffffff; --border:#e2e8f0; --border2:#d8dce2;
+    --text:#1e293b; --text2:#64748b; --muted:#94a3b8;
+    --primary:#2563eb; --primary-600:#2563eb; --primary-700:#1d4ed8; --primary-50:#eff6ff; --primary-100:#dbeafe; --primary-300:#93c5fd;
+    --warn-bg:#fffbeb; --warn:#b45309; --warn-600:#d97706; --warn-border:#fde68a;
+    --ok-bg:#f0fdf4; --ok:#15803d; --ok-border:#bbf7d0;
+    --danger:#dc2626; --danger-bg:#fef2f2;
+    --shadow:0 1px 3px rgba(0,0,0,.04),0 4px 12px rgba(0,0,0,.06);
+    --radius:18px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Microsoft YaHei','Segoe UI',sans-serif;background:var(--bg);color:var(--text);font-size:14px}
+
+  /* ============ 效果图工具条(非系统 UI) ============ */
+  .mock-topbar{position:sticky;top:0;z-index:50;background:#0f172a;color:#e2e8f0;display:flex;align-items:center;gap:14px;padding:10px 20px;flex-wrap:wrap}
+  .mock-topbar .t{font-weight:700;font-size:14px;letter-spacing:.5px}
+  .mock-topbar .t em{font-style:normal;color:#fbbf24;font-size:12px;margin-left:8px;font-weight:400}
+  .role-switch{display:inline-flex;background:#1e293b;border:1px solid #334155;border-radius:9px;padding:3px;gap:3px;margin-left:auto}
+  .role-switch button{border:none;background:transparent;color:#94a3b8;font:600 12px 'Microsoft YaHei',sans-serif;padding:5px 14px;border-radius:7px;cursor:pointer}
+  .role-switch button.on{background:#2563eb;color:#fff}
+  .mock-topbar .intro-btn{border:1px solid #334155;background:#1e293b;color:#cbd5e1;font:600 12px 'Microsoft YaHei',sans-serif;padding:6px 14px;border-radius:8px;cursor:pointer}
+  .mock-topbar .intro-btn:hover{border-color:#2563eb;color:#fff}
+
+  /* ============ 方案说明 ============ */
+  .intro{display:none;background:#fff;border-bottom:1px solid var(--border);padding:16px 22px}
+  .intro.open{display:block}
+  .intro h3{font-size:14px;margin-bottom:8px}
+  .intro ul{list-style:none;font-size:12.5px;color:var(--text2);line-height:1.9}
+  .intro ul b{color:var(--text)}
+  .tag{display:inline-block;font-size:11px;font-weight:600;border-radius:6px;padding:1px 7px;margin-left:6px;vertical-align:middle}
+  .tag-bad{background:var(--danger-bg);color:var(--danger)}
+  .tag-good{background:var(--ok-bg);color:var(--ok)}
+
+  /* ============ 应用外壳 ============ */
+  .app-shell{display:flex;min-height:calc(100vh - 47px)}
+  .sidebar{width:196px;background:#fff;border-right:1px solid var(--border);padding:14px 10px;flex-shrink:0}
+  .logo{display:flex;align-items:center;gap:8px;font-weight:700;font-size:15px;padding:4px 10px 16px;color:#0f172a}
+  .logo .dot{width:26px;height:26px;border-radius:8px;background:linear-gradient(135deg,#3b82f6,#2563eb);color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px}
+  .nav a{display:flex;align-items:center;gap:9px;padding:9px 12px;border-radius:9px;color:var(--text2);font-size:13px;text-decoration:none;margin-bottom:2px}
+  .nav a svg{width:15px;height:15px;flex-shrink:0}
+  .nav a.active{background:var(--primary-50);color:var(--primary);font-weight:600}
+  .main{flex:1;padding:18px 20px;min-width:0}
+
+  .page-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);display:flex;flex-direction:column;min-height:calc(100vh - 120px);overflow:hidden}
+  .page-card-header{display:flex;align-items:center;gap:12px;padding:14px 16px;flex-wrap:wrap;border-bottom:1px solid #f1f5f9}
+  .page-card-body{flex:1;padding:16px;min-height:0}
+
+  /* TAB 条 */
+  .tabbar{display:inline-flex;gap:4px;padding:4px;border-radius:12px;background:#fff;border:1px solid var(--border);box-shadow:var(--shadow)}
+  .tabbtn{display:inline-flex;align-items:center;gap:7px;padding:7px 16px;font:500 13px 'Microsoft YaHei',sans-serif;color:var(--text2);background:#fff;border:1px solid var(--border);border-radius:9px;cursor:pointer}
+  .tabbtn svg{width:13px;height:13px}
+  .tabbtn:hover{border-color:var(--primary-300);color:var(--primary);background:var(--primary-50)}
+  .tabbtn.on{color:#fff;background:linear-gradient(135deg,#3b82f6,#2563eb);border-color:#2563eb;box-shadow:0 2px 6px rgba(59,130,246,.25)}
+  .header-right{margin-left:auto;display:flex;align-items:center;gap:8px}
+
+  .search{display:flex;align-items:center;gap:8px}
+  .search input{width:250px;padding:7px 12px;border:1px solid var(--border);border-radius:9px;font:13px 'Microsoft YaHei',sans-serif;color:var(--text)}
+  .search input:focus{outline:none;border-color:var(--primary-300);box-shadow:0 0 0 3px rgba(59,130,246,.12)}
+
+  .btn{display:inline-flex;align-items:center;gap:6px;padding:7px 15px;font:600 13px 'Microsoft YaHei',sans-serif;border-radius:9px;border:1px solid var(--border);background:#fff;color:var(--text2);cursor:pointer;white-space:nowrap}
+  .btn svg{width:13px;height:13px}
+  .btn:hover{border-color:var(--primary-300);color:var(--primary);background:var(--primary-50)}
+  .btn-primary{color:#fff;background:var(--primary);border-color:var(--primary)}
+  .btn-primary:hover{color:#fff;background:var(--primary-700);border-color:var(--primary-700)}
+  .btn-sm{padding:5px 12px;font-size:12px;border-radius:8px}
+
+  .new-chip{display:inline-flex;align-items:center;font-size:10.5px;font-weight:700;color:var(--ok);background:var(--ok-bg);border:1px solid var(--ok-border);border-radius:5px;padding:0 5px;margin-left:6px;vertical-align:middle}
+
+  /* ===== 一行信息条(标题 + 待办 + 全部操作,单行收纳) ===== */
+  .slim-strip{display:flex;align-items:center;gap:14px;padding:9px 14px;border:1px solid var(--border);border-radius:10px;background:#f8fafc;margin-bottom:12px;font-size:12.5px;color:var(--text2);flex-wrap:wrap}
+  .slim-strip h4{font-size:13.5px;color:var(--text)}
+  .slim-strip b{color:var(--text);font-size:13.5px}
+  .slim-strip .sep{width:1px;height:16px;background:var(--border2)}
+  .slim-strip .warn-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#f59e0b;margin-right:6px;vertical-align:middle}
+  .slim-strip .ok-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#10b981;margin-right:6px;vertical-align:middle}
+  .slim-strip .pill-filter{box-shadow:none;padding:3px}
+  .slim-strip .strip-right{margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+
+  .ledger-toolbar{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+  .ledger-toolbar h4{font-size:14px}
+  .pill-filter{margin-left:auto;display:inline-flex;gap:4px;padding:4px;border-radius:12px;background:#fff;border:1px solid var(--border);box-shadow:var(--shadow)}
+  .pill{padding:6px 14px;font:500 12.5px 'Microsoft YaHei',sans-serif;color:var(--text2);background:#fff;border:1px solid var(--border);border-radius:9px;cursor:pointer}
+  .pill.on{color:#fff;background:linear-gradient(135deg,#3b82f6,#2563eb);border-color:#2563eb}
+
+  /* 表格 */
+  .tbl-wrap{overflow:auto;border:1px solid var(--border2);border-radius:12px}
+  table{width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed}
+  thead th{background:#f8fafc;padding:10px 12px;font-size:12px;font-weight:600;color:var(--text2);text-align:center;border-right:1px solid var(--border2);border-bottom:2px solid #b8bec6;white-space:nowrap}
+  thead th:last-child{border-right:none}
+  tbody td{padding:10px 12px;border-right:1px solid var(--border2);border-bottom:1px solid var(--border2);text-align:center;vertical-align:middle;color:var(--text)}
+  tbody td:last-child{border-right:none}
+  tbody tr:last-child td{border-bottom:none}
+  tbody tr:hover{background:var(--primary-50)}
+  .td-l{text-align:left!important}
+  .mono{font-family:Consolas,Menlo,monospace;font-size:12.5px}
+  .strong{font-weight:700}
+
+  .badge{display:inline-block;padding:2px 9px;border-radius:7px;font-size:11.5px;font-weight:600;white-space:nowrap}
+  .badge-warn{background:var(--warn-bg);color:var(--warn-600)}
+  .badge-ok{background:var(--ok-bg);color:var(--ok)}
+  .badge-run{background:var(--primary-50);color:var(--primary)}
+  .badge-gray{background:#f1f5f9;color:var(--text2)}
+
+  .type-badge{display:inline-block;padding:1px 8px;border-radius:6px;font-size:11px;font-weight:600}
+  .type-order{background:var(--primary-50);color:var(--primary)}
+  .type-stockin{background:var(--warn-bg);color:var(--warn-600)}
+
+  .progress-cell{display:flex;flex-direction:column;gap:4px;align-items:stretch}
+  .progress-bar{height:7px;background:#e2e8f0;border-radius:4px;overflow:hidden}
+  .progress-fill{height:100%;border-radius:4px}
+  .pf-run{background:#3b82f6}.pf-done{background:#16a34a}.pf-wait{background:#94a3b8}
+  .progress-meta{display:flex;align-items:center;justify-content:center;gap:6px;font-size:11.5px;color:var(--text2)}
+
+  .link-btn{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;font:600 12px 'Microsoft YaHei',sans-serif;border:1px solid var(--border);border-radius:7px;background:#fff;color:var(--text2);cursor:pointer;white-space:nowrap}
+  .link-btn svg{width:12px;height:12px}
+  .link-btn:hover{border-color:var(--primary-300);color:var(--primary);background:var(--primary-50)}
+  .link-btn.recv{color:var(--ok);border-color:var(--ok-border)}
+  .link-btn.recv:hover{background:var(--ok-bg);color:var(--ok)}
+
+  .sku-line{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .note-line{display:block;color:var(--muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+  .proc-chips{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+  .proc-chip{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:14px;font-size:12px;font-weight:600;background:var(--primary-50);color:var(--primary);border:1px solid var(--primary-100)}
+  .proc-chip .seq{font-size:10px;background:var(--primary);color:#fff;border-radius:50%;width:14px;height:14px;display:inline-flex;align-items:center;justify-content:center}
+  .proc-arrow{color:#cbd5e1;font-size:11px}
+
+  /* ============ 弹窗 ============ */
+  .modal{display:none;position:fixed;inset:0;z-index:100;background:rgba(15,23,42,.45);align-items:center;justify-content:center;padding:24px}
+  .modal.open{display:flex}
+  .modal-box{background:#fff;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.25);width:100%;display:flex;flex-direction:column;max-height:92vh;overflow:hidden}
+  .modal-head{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--border)}
+  .modal-head h3{font-size:15px}
+  .modal-head .sub{font-size:12px;color:var(--muted)}
+  .modal-close{margin-left:auto;border:none;background:transparent;font-size:18px;color:var(--muted);cursor:pointer;line-height:1}
+  .modal-body{padding:16px 18px;overflow:auto}
+  .modal-foot{display:flex;align-items:center;gap:10px;padding:12px 18px;border-top:1px solid var(--border);background:#f8fafc}
+
+  .od-head{display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin-bottom:14px}
+  .od-no{font-size:16px;font-weight:700}
+  .od-meta{font-size:12.5px;color:var(--text2)}
+  .od-progress{flex:1;min-width:220px;display:flex;align-items:center;gap:10px}
+  .od-progress .progress-bar{flex:1}
+  .od-progress b{font-size:15px}
+  .proc-group{margin-bottom:14px;border:1px solid var(--border);border-radius:12px;overflow:hidden}
+  .proc-group-head{display:flex;gap:14px;align-items:center;background:#f8fafc;padding:8px 12px;font-size:12.5px;border-bottom:1px solid var(--border)}
+  .proc-group-head .sku{font-weight:700}
+  .proc-group-head .muted{color:var(--muted)}
+  .qty-input{width:88px;padding:5px 8px;border:1px solid var(--primary-300);border-radius:7px;font:12.5px 'Microsoft YaHei',sans-serif;text-align:right;color:var(--text)}
+  .qty-input:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px rgba(59,130,246,.12)}
+
+  /* 批量发货弹窗 */
+  .ship-box{max-width:1180px}
+  .ship-panes{display:grid;grid-template-columns:1fr 1fr;gap:0;min-height:420px}
+  .ship-pane{padding:14px 16px;overflow:auto}
+  .ship-pane + .ship-pane{border-left:1px solid var(--border)}
+  .pane-title{font-size:13px;font-weight:700;margin-bottom:10px;display:flex;align-items:center;gap:6px}
+  .pane-title .cnt{font-size:11px;color:var(--primary);background:var(--primary-50);border-radius:10px;padding:1px 8px}
+  .pick-group{border:1px solid var(--border);border-radius:12px;margin-bottom:10px;overflow:hidden}
+  .pick-group-head{display:flex;align-items:center;gap:8px;background:#f8fafc;padding:8px 12px;font-size:12.5px}
+  .pick-row{display:flex;align-items:center;gap:10px;padding:9px 12px;border-top:1px solid #f1f5f9;font-size:12.5px}
+  .pick-row .pname{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .pick-row .qty{color:var(--warn-600);font-weight:600;white-space:nowrap}
+  .cb{width:16px;height:16px;accent-color:var(--primary);cursor:pointer}
+  .cart-row{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:11px;margin-bottom:8px;font-size:12.5px;background:#fbfdff}
+  .cart-row .pname{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .cart-row input{width:86px;padding:5px 8px;border:1px solid var(--border);border-radius:7px;font:12.5px 'Microsoft YaHei',sans-serif;text-align:right}
+  .cart-row .rm{border:none;background:transparent;color:var(--muted);cursor:pointer;font-size:14px}
+  .cart-row .rm:hover{color:var(--danger)}
+  .sum-bar{display:flex;align-items:center;gap:14px;font-size:13px;color:var(--text2)}
+  .sum-bar b{color:var(--text);font-size:15px}
+  .ship-note{font-size:11.5px;color:var(--muted)}
+
+  /* 角色可见性 */
+  body.role-beile .ship-only{display:none!important}
+  body.role-beile #tab-preset{display:none!important}
+  body.role-beile #page-preset{display:none!important}
+
+  section.page{display:none}
+  section.page.on{display:block}
+  .hr-slot{display:none}
+  .hr-slot.on{display:flex}
+</style>
+</head>
+<body>
+
+<!-- ====== 效果图工具条(非系统 UI) ====== -->
+<div class="mock-topbar">
+  <span class="t">外发模块 TAB 重构 · 方案B 交互效果图<em>保守版 · 无卡片区 · demo 数据</em></span>
+  <div class="role-switch">
+    <button id="role-shipper" class="on" onclick="setRole('shipper')">发货方视角(工厂/管理员)</button>
+    <button id="role-beile" onclick="setRole('beile')">贝乐视角(收货方)</button>
+  </div>
+  <button class="intro-btn" onclick="toggleIntro()">方案说明 ▾</button>
+</div>
+
+<!-- ====== 方案说明 ====== -->
+<div class="intro" id="intro">
+  <ul>
+    <li><b>① TAB 顺序调整</b>:外发进度 / 发货单 / 工序预设,`/outsource` 落地「外发进度」(原第二个 TAB)<span class="tag tag-good">落地页归位</span></li>
+    <li><b>② 「发货」改名「发货单」</b>:诚实反映台账+收货属性<span class="tag tag-good">语义修正</span></li>
+    <li><b>③ 未到货导出/打印</b> 从订单页迁到发货单页,并压缩为<b>一行信息条</b>(回应反馈:不要占空间的大卡片区)<span class="tag tag-good">零占地</span></li>
+    <li><b>④ 发货单台账补「发货单号」列</b><span class="tag tag-good">补列</span></li>
+    <li><b>保留现状(方案B的代价)</b>:订单弹窗内「一键发货/一键收货」与发货单页「批量发货」并存,<b>发货双入口不收敛</b><span class="tag tag-bad">双入口保留</span></li>
+    <li>工作量约半天;四项改动均为方案A子集,后续升级 A 不返工。对比见《外发模块TAB重构方案.md》</li>
+  </ul>
+</div>
+
+<!-- ====== 应用外壳 ====== -->
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="logo"><span class="dot">滨</span>滨发协同系统</div>
+    <nav class="nav">
+      <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>仪表盘</a>
+      <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5h11M9 12h11M9 19h11M4 5h.01M4 12h.01M4 19h.01"/></svg>客户订单</a>
+      <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 8l-9-5-9 5v8l9 5 9-5V8z"/><path d="M3 8l9 5 9-5M12 22V13"/></svg>产品管理</a>
+      <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 8h14l-1 13H6L5 8z"/><path d="M9 8V6a3 3 0 016 0v2"/></svg>库存管理</a>
+      <a href="#" class="active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 8h13v9H1zM14 11h4l4 3v3h-8z"/><circle cx="6" cy="19" r="1.6"/><circle cx="17" cy="19" r="1.6"/></svg>外发协作</a>
+      <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="21" r="1.6"/><circle cx="19" cy="21" r="1.6"/><path d="M2 3h3l2.6 12.4a2 2 0 002 1.6h8.7a2 2 0 002-1.6L22 7H6"/></svg>采购中心</a>
+      <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7l8-4z"/></svg>审批中心</a>
+      <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 01-.1 1.2l2 1.6-2 3.4-2.4-1a7 7 0 01-2 1.2L14 21h-4l-.5-2.6a7 7 0 01-2-1.2l-2.4 1-2-3.4 2-1.6A7 7 0 015 12a7 7 0 01.1-1.2l-2-1.6 2-3.4 2.4 1a7 7 0 012-1.2L10 3h4l.5 2.6a7 7 0 012 1.2l2.4-1 2 3.4-2 1.6c.06.4.1.8.1 1.2z"/></svg>系统管理</a>
+    </nav>
+  </aside>
+
+  <main class="main">
+    <div class="page-card">
+      <div class="page-card-header">
+        <div class="tabbar">
+          <button class="tabbtn on" id="tab-progress" onclick="switchTab('progress')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h10M4 18h7"/><path d="M17 15l3 3 3-3" transform="translate(-2,-1)"/></svg>外发进度</button>
+          <button class="tabbtn" id="tab-ledger" onclick="switchTab('ledger')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 8h13v9H1zM14 11h4l4 3v3h-8z"/><circle cx="6" cy="19" r="1.6"/><circle cx="17" cy="19" r="1.6"/></svg>发货单</button>
+          <button class="tabbtn" id="tab-preset" onclick="switchTab('preset')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09a1.65 1.65 0 00-1-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09a1.65 1.65 0 001.51-1 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33h0a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51h0a1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82v0a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>工序预设</button>
+        </div>
+        <div class="header-right hr-slot on" id="hr-progress">
+          <div class="search">
+            <input type="text" placeholder="搜索产品名称 / 客户名称">
+            <button class="btn btn-sm">查询</button>
+            <button class="btn btn-sm">重置</button>
+          </div>
+        </div>
+        <div class="header-right hr-slot" id="hr-ledger"></div>
+        <div class="header-right hr-slot" id="hr-preset">
+          <div class="search">
+            <input type="text" placeholder="搜索产品名称/条码,选中后为其配置工序">
+          </div>
+        </div>
+      </div>
+
+      <div class="page-card-body">
+
+        <!-- ============ TAB1 外发进度(落地页,内容维持现状) ============ -->
+        <section class="page on" id="page-progress">
+          <div class="tbl-wrap">
+            <table>
+              <colgroup><col style="width:70px"><col style="width:135px"><col style="width:140px"><col style="width:115px"><col style="width:195px"><col style="width:60px"><col style="width:75px"><col style="width:150px"><col style="width:105px"><col></colgroup>
+              <thead><tr>
+                <th>订单类型</th><th>订单号</th><th>下单时间</th><th>客户名称</th><th>产品名称</th><th>工厂</th><th>数量</th><th>外发进度</th><th>工序</th><th>备注</th>
+              </tr></thead>
+              <tbody>
+                <tr>
+                  <td><span class="type-badge type-order">订单</span></td>
+                  <td class="mono">SO-260928-012</td><td>2026-09-28 11:20</td><td class="td-l">武汉童趣商贸</td>
+                  <td class="td-l"><span class="sku-line">儿童短袖套装(藏青)</span></td><td>湖北</td><td class="strong">1,200</td>
+                  <td><div class="progress-cell">
+                    <div class="progress-bar"><div class="progress-fill pf-run" style="width:45%"></div></div>
+                    <div class="progress-meta"><span>45%</span><span class="badge badge-run">进行中</span></div>
+                  </div></td>
+                  <td><button class="link-btn" onclick="openDetailModal()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/></svg>查看工序</button></td>
+                  <td class="td-l"><span class="note-line">客户加急,优先发货</span></td>
+                </tr>
+                <tr>
+                  <td><span class="type-badge type-order">订单</span></td>
+                  <td class="mono">SO-260927-006</td><td>2026-09-27 09:05</td><td class="td-l">孝感衣之家</td>
+                  <td class="td-l"><span class="sku-line">女童连衣裙(粉色)</span></td><td>湖北</td><td class="strong">800</td>
+                  <td><div class="progress-cell">
+                    <div class="progress-bar"><div class="progress-fill pf-done" style="width:100%"></div></div>
+                    <div class="progress-meta"><span>100%</span><span class="badge badge-ok">外发完成</span></div>
+                  </div></td>
+                  <td><button class="link-btn" onclick="openDetailModal()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/></svg>查看工序</button></td>
+                  <td class="td-l"><span class="note-line">—</span></td>
+                </tr>
+                <tr>
+                  <td><span class="type-badge type-stockin">备货</span></td>
+                  <td class="mono">BG-260926-003</td><td>2026-09-26 16:48</td><td class="td-l">—</td>
+                  <td class="td-l"><span class="sku-line">男童冲锋衣(军绿)</span></td><td>湖北</td><td class="strong">600</td>
+                  <td><span style="color:var(--muted);font-size:12px">未配置</span></td>
+                  <td><button class="link-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/></svg>查看工序</button></td>
+                  <td class="td-l"><span class="note-line">先配工序再发货</span></td>
+                </tr>
+                <tr>
+                  <td><span class="type-badge type-order">订单</span></td>
+                  <td class="mono">SO-260925-011</td><td>2026-09-25 14:32</td><td class="td-l">荆州百汇服饰</td>
+                  <td class="td-l"><span class="sku-line">婴儿连体衣(米白)</span></td><td>湖北</td><td class="strong">1,500</td>
+                  <td><div class="progress-cell">
+                    <div class="progress-bar"><div class="progress-fill pf-run" style="width:20%"></div></div>
+                    <div class="progress-meta"><span>20%</span><span class="badge badge-run">进行中</span></div>
+                  </div></td>
+                  <td><button class="link-btn" onclick="openDetailModal()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/></svg>查看工序</button></td>
+                  <td class="td-l"><span class="note-line">分三批发货</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div style="display:flex;justify-content:flex-end;padding:10px 2px 0;font-size:12.5px;color:var(--text2)">每页 50 条 · 共 4 条</div>
+          <p style="margin-top:10px;font-size:12px;color:var(--muted)">方案B:本页即落地页;列表与工序弹窗维持现状(弹窗内可直接发货/收货),「导出/打印未到货」已迁至「发货单」页。</p>
+        </section>
+
+        <!-- ============ TAB2 发货单(一行信息条 + 台账) ============ -->
+        <section class="page" id="page-ledger">
+          <!-- 单行收纳:标题 + 待办信息 + 状态切换/导出打印/批量发货 全部在一行 -->
+          <div class="slim-strip">
+            <h4>发货单台账</h4>
+            <span class="sep"></span>
+            <span><span class="warn-dot"></span>待收货 <b>3</b> 张 · <b>860</b> 件在途</span>
+            <span class="sep"></span>
+            <span><span class="ok-dot"></span>未到货 <b>2,340</b> 件(12 张订单未发完)<span class="new-chip">自订单页迁入</span></span>
+            <span class="strip-right">
+              <div class="pill-filter">
+                <button class="pill on" id="pill-shipped" onclick="filterLedger('shipped')">待收货(3)</button>
+                <button class="pill" id="pill-received" onclick="filterLedger('received')">已完成(2)</button>
+              </div>
+              <button class="btn btn-sm"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>导出未到货</button>
+              <button class="btn btn-sm"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V2h12v7M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2M6 14h12v8H6z"/></svg>打印未到货</button>
+              <button class="btn btn-sm btn-primary ship-only" onclick="openShipModal()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 8h13v9H1zM14 11h4l4 3v3h-8z"/><circle cx="6" cy="19" r="1.6"/><circle cx="17" cy="19" r="1.6"/></svg>批量发货</button>
+            </span>
+          </div>
+
+          <div class="tbl-wrap">
+            <table>
+              <colgroup><col style="width:170px"><col style="width:150px"><col style="width:90px"><col style="width:110px"><col style="width:100px"><col></colgroup>
+              <thead><tr>
+                <th>发货单号 <span class="new-chip">新</span></th><th>发货时间</th><th>明细数</th><th>发货总量</th><th>状态</th><th>操作</th>
+              </tr></thead>
+              <tbody id="ledger-shipped">
+                <tr>
+                  <td class="mono">FHD20260930-004</td><td>2026-09-30 16:42</td><td>4</td><td class="strong">620</td>
+                  <td><span class="badge badge-warn">待收货</span></td>
+                  <td><button class="link-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>明细</button>
+                      <button class="link-btn recv beile-only" style="display:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.1V12a10 10 0 11-5.9-9.1"/><path d="M22 4L12 14l-3-3"/></svg>确认收货</button></td>
+                </tr>
+                <tr>
+                  <td class="mono">FHD20260930-003</td><td>2026-09-30 10:15</td><td>6</td><td class="strong">860</td>
+                  <td><span class="badge badge-warn">待收货</span></td>
+                  <td><button class="link-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>明细</button>
+                      <button class="link-btn recv beile-only" style="display:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.1V12a10 10 0 11-5.9-9.1"/><path d="M22 4L12 14l-3-3"/></svg>确认收货</button></td>
+                </tr>
+                <tr>
+                  <td class="mono">FHD20260929-002</td><td>2026-09-29 15:30</td><td>2</td><td class="strong">240</td>
+                  <td><span class="badge badge-warn">待收货</span></td>
+                  <td><button class="link-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>明细</button>
+                      <button class="link-btn recv beile-only" style="display:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.1V12a10 10 0 11-5.9-9.1"/><path d="M22 4L12 14l-3-3"/></svg>确认收货</button></td>
+                </tr>
+              </tbody>
+              <tbody id="ledger-received" style="display:none">
+                <tr>
+                  <td class="mono">FHD20260928-001</td><td>2026-09-28 09:12</td><td>3</td><td class="strong">540</td>
+                  <td><span class="badge badge-ok">已完成</span></td>
+                  <td><button class="link-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>明细</button></td>
+                </tr>
+                <tr>
+                  <td class="mono">FHD20260927-005</td><td>2026-09-27 14:03</td><td>5</td><td class="strong">980</td>
+                  <td><span class="badge badge-ok">已完成</span></td>
+                  <td><button class="link-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>明细</button></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div style="display:flex;justify-content:flex-end;padding:10px 2px 0;font-size:12.5px;color:var(--text2)">每页 50 条 · 共 5 条</div>
+        </section>
+
+        <!-- ============ TAB3 工序预设(不变) ============ -->
+        <section class="page" id="page-preset">
+          <div class="tbl-wrap">
+            <table>
+              <colgroup><col style="width:220px"><col style="width:140px"><col style="width:80px"><col style="width:90px"><col></colgroup>
+              <thead><tr><th style="text-align:left">产品名称</th><th>产品条码</th><th>工厂</th><th>工序数</th><th style="text-align:left">工序(按顺序)</th></tr></thead>
+              <tbody>
+                <tr>
+                  <td class="td-l">儿童短袖套装(藏青)</td><td class="mono">6971234500017</td><td><span class="type-badge type-order">湖北</span></td><td class="strong">4</td>
+                  <td class="td-l"><div class="proc-chips">
+                    <span class="proc-chip"><span class="seq">1</span>印花</span><span class="proc-arrow">→</span>
+                    <span class="proc-chip"><span class="seq">2</span>绣花</span><span class="proc-arrow">→</span>
+                    <span class="proc-chip"><span class="seq">3</span>水洗</span><span class="proc-arrow">→</span>
+                    <span class="proc-chip"><span class="seq">4</span>整烫</span>
+                    <button class="link-btn" style="margin-left:8px">+ 添加工序</button>
+                  </div></td>
+                </tr>
+                <tr>
+                  <td class="td-l">女童连衣裙(粉色)</td><td class="mono">6971234500024</td><td><span class="type-badge type-order">湖北</span></td><td class="strong">3</td>
+                  <td class="td-l"><div class="proc-chips">
+                    <span class="proc-chip"><span class="seq">1</span>裁剪</span><span class="proc-arrow">→</span>
+                    <span class="proc-chip"><span class="seq">2</span>绣花</span><span class="proc-arrow">→</span>
+                    <span class="proc-chip"><span class="seq">3</span>水洗</span>
+                    <button class="link-btn" style="margin-left:8px">+ 添加工序</button>
+                  </div></td>
+                </tr>
+                <tr>
+                  <td class="td-l">婴儿连体衣(米白)</td><td class="mono">6971234500031</td><td><span class="type-badge type-order">湖北</span></td><td class="strong">2</td>
+                  <td class="td-l"><div class="proc-chips">
+                    <span class="proc-chip"><span class="seq">1</span>水洗</span><span class="proc-arrow">→</span>
+                    <span class="proc-chip"><span class="seq">2</span>包装</span>
+                    <button class="link-btn" style="margin-left:8px">+ 添加工序</button>
+                  </div></td>
+                </tr>
+                <tr>
+                  <td class="td-l">男童冲锋衣(军绿)</td><td class="mono">6971234500048</td><td><span class="type-badge type-order">湖北</span></td><td><span style="color:var(--muted)">未配置</span></td>
+                  <td class="td-l"><button class="link-btn">+ 添加工序</button></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- ====== 弹窗:订单外发工序(维持现状:行内数量输入 + 一键发货/一键收货) ====== -->
+<div class="modal" id="modal-detail" onclick="if(event.target===this)closeModal('modal-detail')">
+  <div class="modal-box" style="max-width:1080px">
+    <div class="modal-head">
+      <h3>订单外发工序</h3><span class="sub">方案B维持现状:数量行内输入,双发货入口保留</span>
+      <button class="modal-close" onclick="closeModal('modal-detail')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="od-head">
+        <div>
+          <div class="od-no">SO-260928-012</div>
+          <div class="od-meta">客户:武汉童趣商贸 · 产品:儿童短袖套装(藏青) × 1,200 件</div>
+        </div>
+        <div class="od-progress">
+          <div class="progress-bar"><div class="progress-fill pf-run" style="width:45%"></div></div>
+          <span><b>45%</b> <span style="font-size:12px;color:var(--text2)">2/4 道完成</span></span>
+          <span class="badge badge-run">进行中</span>
+        </div>
+      </div>
+      <div class="proc-group">
+        <div class="proc-group-head"><span class="sku">儿童短袖套装(藏青)</span><span class="muted">订单数量 1,200 · 共 4 道工序</span></div>
+        <table>
+          <colgroup><col style="width:120px"><col style="width:130px"><col style="width:150px"><col style="width:95px"><col style="width:130px"><col style="width:150px"><col></colgroup>
+          <thead><tr><th>工序</th><th>已发数量</th><th>发货时间</th><th>剩余未发</th><th>收货数量</th><th>湖北收货时间</th><th>状态</th></tr></thead>
+          <tbody>
+            <tr><td><span class="strong">1</span> 印花</td><td class="strong">600</td><td>2026-09-29 10:20</td><td>0</td><td class="strong">600</td><td>2026-09-30 09:05</td><td><span class="badge badge-ok">已收货</span></td></tr>
+            <tr><td><span class="strong">2</span> 绣花</td><td class="strong">600</td><td>2026-09-30 16:42</td><td>0</td><td><input class="qty-input" type="text" value="600" title="本批收货数量"></td><td>—</td><td><span class="badge badge-warn">已发货</span></td></tr>
+            <tr><td><span class="strong">3</span> 水洗</td><td><input class="qty-input" type="text" value="1200" title="本批发货数量"></td><td>—</td><td class="strong">1,200</td><td>—</td><td>—</td><td><span class="badge badge-gray">待发货</span></td></tr>
+            <tr><td><span class="strong">4</span> 整烫</td><td><input class="qty-input" type="text" placeholder="本批发货"></td><td>—</td><td class="strong">1,200</td><td>—</td><td>—</td><td><span class="badge badge-gray">待发货</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p style="font-size:12px;color:var(--muted)">历史发货/收货流水见「台账」页签(此处省略)。</p>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal('modal-detail')">关闭</button>
+      <span style="margin-left:auto;display:flex;gap:10px">
+        <button class="btn btn-success"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.1V12a10 10 0 11-5.9-9.1"/><path d="M22 4L12 14l-3-3"/></svg>一键收货</button>
+        <button class="btn btn-primary ship-only"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 8h13v9H1zM14 11h4l4 3v3h-8z"/><circle cx="6" cy="19" r="1.6"/><circle cx="17" cy="19" r="1.6"/></svg>一键发货</button>
+      </span>
+    </div>
+  </div>
+</div>
+
+<!-- ====== 弹窗:批量发货(维持现状,双栏) ====== -->
+<div class="modal" id="modal-ship" onclick="if(event.target===this)closeModal('modal-ship')">
+  <div class="modal-box ship-box">
+    <div class="modal-head">
+      <h3>批量发货</h3><span class="sub">从左侧选择订单,右侧核对发货明细 · 每订单一张发货单</span>
+      <button class="modal-close" onclick="closeModal('modal-ship')">✕</button>
+    </div>
+    <div class="ship-panes">
+      <div class="ship-pane">
+        <div class="pane-title">待发货订单产品 <span class="cnt">5 单</span></div>
+        <div style="margin-bottom:10px"><input type="text" placeholder="搜索订单号 / 产品名称" style="width:100%;padding:7px 12px;border:1px solid var(--border);border-radius:9px;font:13px 'Microsoft YaHei',sans-serif"></div>
+        <div class="pick-group">
+          <div class="pick-group-head"><input type="checkbox" class="cb" checked><span class="strong">SO-260928-012</span><span style="color:var(--text2)">武汉童趣商贸</span><span style="margin-left:auto;color:var(--warn-600);font-weight:600">可发 600 件</span></div>
+          <label class="pick-row"><input type="checkbox" class="cb" checked><span class="pname">儿童短袖套装(藏青)</span><span class="badge badge-gray">绣花</span><span class="qty">600 件</span></label>
+          <label class="pick-row"><input type="checkbox" class="cb"><span class="pname">儿童短袖套装(藏青)</span><span class="badge badge-gray">水洗</span><span class="qty">1,200 件</span></label>
+        </div>
+        <div class="pick-group">
+          <div class="pick-group-head"><input type="checkbox" class="cb" checked><span class="strong">SO-260925-011</span><span style="color:var(--text2)">荆州百汇服饰</span><span style="margin-left:auto;color:var(--warn-600);font-weight:600">可发 300 件</span></div>
+          <label class="pick-row"><input type="checkbox" class="cb" checked><span class="pname">婴儿连体衣(米白)</span><span class="badge badge-gray">水洗</span><span class="qty">300 件</span></label>
+        </div>
+        <div class="pick-group" style="opacity:.55">
+          <div class="pick-group-head"><input type="checkbox" class="cb"><span class="strong">SO-260927-006</span><span style="color:var(--text2)">孝感衣之家</span><span style="margin-left:auto;color:var(--muted)">无可发货工序</span></div>
+        </div>
+      </div>
+      <div class="ship-pane">
+        <div class="pane-title">发货清单 <span class="cnt">3 行</span></div>
+        <div class="cart-row">
+          <span class="pname">儿童短袖套装(藏青)</span><span class="badge badge-gray">绣花</span>
+          <input type="text" value="600" title="本次发货数量"><span style="color:var(--muted)">/ 剩 600</span>
+          <button class="rm">✕</button>
+        </div>
+        <div class="cart-row">
+          <span class="pname">婴儿连体衣(米白)</span><span class="badge badge-gray">水洗</span>
+          <input type="text" value="300" title="本次发货数量"><span style="color:var(--muted)">/ 剩 300</span>
+          <button class="rm">✕</button>
+        </div>
+        <div class="cart-row">
+          <span class="pname">儿童短袖套装(藏青)</span><span class="badge badge-gray">水洗</span>
+          <input type="text" value="360" title="本次发货数量"><span style="color:var(--muted)">/ 剩 1,200</span>
+          <button class="rm">✕</button>
+        </div>
+        <p style="font-size:11.5px;color:var(--muted);margin-top:6px">同一订单多道工序将并入该订单的同一张发货单;超过剩余数量的行会标红拦截。</p>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <div class="sum-bar">
+        涉及 <b>2</b> 单 · <b>3</b> 道工序 · 共 <b>1,260</b> 件
+        <span class="ship-note">提交后生成发货单并通知贝乐收货账号</span>
+      </div>
+      <span style="margin-left:auto;display:flex;gap:10px">
+        <button class="btn" onclick="closeModal('modal-ship')">取消</button>
+        <button class="btn btn-primary" onclick="closeModal('modal-ship');switchTab('ledger');filterLedger('shipped')">生成发货单(1,260 件)</button>
+      </span>
+    </div>
+  </div>
+</div>
+
+<script>
+  /* TAB 切换 */
+  function switchTab(name){
+    document.querySelectorAll('.tabbtn').forEach(b=>b.classList.remove('on'));
+    document.getElementById('tab-'+name).classList.add('on');
+    document.querySelectorAll('section.page').forEach(p=>p.classList.remove('on'));
+    document.getElementById('page-'+name).classList.add('on');
+    document.querySelectorAll('.hr-slot').forEach(h=>h.classList.remove('on'));
+    document.getElementById('hr-'+name).classList.add('on');
+  }
+  /* 发货单台账 待收货/已完成 */
+  function filterLedger(kind){
+    document.getElementById('pill-shipped').classList.toggle('on',kind==='shipped');
+    document.getElementById('pill-received').classList.toggle('on',kind==='received');
+    document.getElementById('ledger-shipped').style.display = kind==='shipped'?'':'none';
+    document.getElementById('ledger-received').style.display = kind==='received'?'':'none';
+  }
+  /* 角色切换:发货方 / 贝乐(收货方) */
+  function setRole(role){
+    const beile = role==='beile';
+    document.body.classList.toggle('role-beile',beile);
+    document.getElementById('role-beile').classList.toggle('on',beile);
+    document.getElementById('role-shipper').classList.toggle('on',!beile);
+    document.querySelectorAll('.beile-only').forEach(el=>el.style.display=(beile&&el.closest('#ledger-shipped'))?'':'none');
+    if(beile && document.getElementById('page-preset').classList.contains('on')) switchTab('progress');
+  }
+  /* 弹窗 */
+  function openShipModal(){document.getElementById('modal-ship').classList.add('open')}
+  function openDetailModal(){document.getElementById('modal-detail').classList.add('open')}
+  function closeModal(id){document.getElementById(id).classList.remove('open')}
+  document.addEventListener('keydown',e=>{if(e.key==='Escape')document.querySelectorAll('.modal.open').forEach(m=>m.classList.remove('open'))});
+  /* 方案说明 */
+  function toggleIntro(){document.getElementById('intro').classList.toggle('open')}
+</script>
+</body>
+</html>
