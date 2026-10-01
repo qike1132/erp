@@ -66,7 +66,10 @@ class LocalStorageBackend(StorageBackend):
             await asyncio.to_thread(target.unlink)
 
     def get_url(self, key: str) -> str:
-        return f"/static/uploads/{key}"
+        # OPT-19 前端切换：本地下发统一走签名 URL（带过期参数）。
+        # sign_upload_url 对已签名/非本地路径幂等安全，密钥未配置时返回原 URL。
+        from fastapi_app.services.signed_urls import sign_upload_url
+        return sign_upload_url(key)
 
 
 class S3StorageBackend(StorageBackend):

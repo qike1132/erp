@@ -35,15 +35,23 @@ def signing_secret() -> str:
 
 
 def sign_upload_url(key: str, ttl_seconds: int = 3600) -> str:
-    """为 storage key 签发限时访问 URL。
+    """为 storage key 签发限时访问 URL（幂等：已带签名的 URL 原样返回）。
 
     Args:
-        key: storage key（相对 static/uploads/ 的路径，如 "20261001/xxxx.webp"）。
+        key: storage key 或完整路径（"/static/uploads/xxx" 或 "xxx.webp" 均可；
+             含 query 的已签名 URL 原样返回，防止二次签名）。
         ttl_seconds: 链接有效期（默认 1 小时）。
 
     Returns:
         签名 URL（/static/uploads/<key>?st=..&s=..）；密钥未配置时返回原 URL。
     """
+    # 幂等防重签：调用方可能传入已签名的 URL（如同一行数据被多个序列化层处理）
+    if '?' in key:
+        return key
+    # 兼容传完整路径的调用方：剥掉前缀取 storage key
+    prefix = '/static/uploads/'
+    if key.startswith(prefix):
+        key = key[len(prefix):]
     url = f"/static/uploads/{key}"
     secret = signing_secret()
     if not secret:

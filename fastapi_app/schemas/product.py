@@ -82,6 +82,17 @@ class ProductResponse(BaseModel):
     current_stock: int
     create_time: datetime | str | None = None
 
+    @field_validator('image', mode='after')
+    @classmethod
+    def sign_image_url(cls, v: str | None) -> str | None:
+        """出站签发：存量直链转限时签名 URL（OPT-19 前端切换）。
+
+        sign_upload_url 幂等（已带 query 原样返回、密钥未配置返回原 URL），
+        故对序列化层的重复调用安全。
+        """
+        from fastapi_app.services.signed_urls import sign_upload_url
+        return sign_upload_url(v) if v else v
+
     class Config:
         from_attributes = True
 

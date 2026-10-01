@@ -69,3 +69,15 @@ def test_nginx_secure_link_md5_alignment(monkeypatch):
         hashlib.md5(f"{expired}{uri} {secret}".encode()).digest()  # secret 前有空格（nginx conf 写法）
     ).rstrip(b"=").decode()
     assert got == expect
+
+
+def test_sign_idempotent_and_full_path(monkeypatch):
+    """幂等：已签名 URL 原样返回；完整路径自动剥前缀（2026-10-01 前端切换补充）。"""
+    monkeypatch.setenv('UPLOAD_URL_SIGNING_SECRET', 's3cret')
+    signed = signed_urls.sign_upload_url('a/b.webp', ttl_seconds=600)
+    assert signed_urls.sign_upload_url(signed) == signed  # 已带 query 不二次签名
+    # 完整路径与裸 key 结果一致
+    from urllib.parse import parse_qs, urlparse
+    q1 = parse_qs(urlparse(signed_urls.sign_upload_url('/static/uploads/a/b.webp', ttl_seconds=600)).query)
+    q2 = parse_qs(urlparse(signed).query)
+    assert q1['s'] == q2['s']
