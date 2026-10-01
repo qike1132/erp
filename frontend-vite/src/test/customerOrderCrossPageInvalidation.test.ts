@@ -19,6 +19,8 @@ const mocks = vi.hoisted(() => ({
   invalidateQueries: vi.fn(),
   orderDelete: vi.fn(),
   orderUpdate: vi.fn(),
+  stockinEdit: vi.fn(),
+  stockinDelete: vi.fn(),
 }))
 
 vi.mock('@/api', () => ({
@@ -28,6 +30,10 @@ vi.mock('@/api', () => ({
     updateDeduct: vi.fn(),
   },
   auxApi: { availableStockins: vi.fn(async () => []) },
+  stockApi: {
+    editStockin: mocks.stockinEdit,
+    deleteStockin: mocks.stockinDelete,
+  },
 }))
 
 vi.mock('@/composables/useToast', () => ({ showToast: vi.fn() }))
@@ -38,6 +44,7 @@ vi.mock('@tanstack/vue-query', () => ({
 
 import { useOrderDelete } from '@/views/customer-order/composables/useOrderDelete'
 import { useOrderDetailEdit } from '@/views/customer-order/composables/useOrderDetailEdit'
+import { useStockinEdit } from '@/views/customer-order/composables/useStockinEdit'
 
 /** 三个关联页面实际使用的 query key 前缀 */
 const CROSS_PAGE_KEYS = [
@@ -92,5 +99,27 @@ describe('客户订单写入 → 关联页面缓存失效', () => {
 
     expect(mocks.orderUpdate).toHaveBeenCalled()
     expectCrossPageInvalidated('编辑订单数量')
+  })
+
+  it('编辑备货（入库记录）后，关联页面缓存必须一并失效', async () => {
+    const { saveStockinEdit, stockinEditForm } = useStockinEdit(async () => {}, confirmDialog)
+    stockinEditForm.value = {
+      id: 7, stockinNo: 'SI-1', productName: '测试产品', quantity: 3,
+      customer: '测试客户', date: '2026-10-01', note: '',
+    }
+
+    await saveStockinEdit()
+
+    expect(mocks.stockinEdit).toHaveBeenCalledWith(7, expect.objectContaining({ quantity: 3 }))
+    expectCrossPageInvalidated('编辑备货')
+  })
+
+  it('删除备货（入库记录）后，关联页面缓存必须一并失效', async () => {
+    const { handleDeleteStockin } = useStockinEdit(async () => {}, confirmDialog)
+
+    await handleDeleteStockin({ id: 7, order_no: 'SI-1' } as never)
+
+    expect(mocks.stockinDelete).toHaveBeenCalledWith(7)
+    expectCrossPageInvalidated('删除备货')
   })
 })
