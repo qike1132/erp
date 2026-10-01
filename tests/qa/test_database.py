@@ -4,6 +4,7 @@ ERP系统数据库完整性测试 - 使用SQLAlchemy async session验证数据�
 import os
 import sys
 import time
+import uuid
 
 _db_dir = os.path.dirname(os.path.abspath(__file__))
 _project_root = os.path.dirname(os.path.dirname(_db_dir))
@@ -58,13 +59,17 @@ class TestBatchInsert:
     @pytest.mark.asyncio
     async def test_insert_100_products(self, db):
         products = generate_products(100)
+        # product.name 有唯一约束：faker 中文词表有限，100 个随机名同批内即会
+        # 自碰撞（孤立跑也复现），与先跑的数据量测试已提交的行撞名同理。
+        # 加运行级唯一后缀，让本用例只验证批量插入本身，不依赖词表运气。
+        run_tag = uuid.uuid4().hex[:6]
         values = [{
-            "name": p["product_name"],
+            "name": f"{p['product_name']}·{run_tag}{i:03d}"[:100],
             "barcode": p["product_code"],
             "price": p["price"],
             "initial_stock": 0,
             "current_stock": 0,
-        } for p in products]
+        } for i, p in enumerate(products)]
 
         start = time.time()
         await db.execute(
