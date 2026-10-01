@@ -27,13 +27,20 @@ export function useApiMutation<TData = unknown, TVariables = unknown>(
     /** 领域失效函数（utils/queryKeys 的具名函数），可与 invalidateKeys 并用 */
     invalidate?: (client: QueryClient) => void
     successMsg?: string
-    errorMsg?: string
+    /** 失败兜底文案：静态串，或按本次入参动态生成（如 `${target}失败`） */
+    errorMsg?: string | ((vars: TVariables) => string)
     /** 成功后的后续动作：关弹窗、重取列表等。await 完成后才结束 */
     onSuccess?: (result: TData) => void | Promise<void>
   },
 ) {
   const queryClient = useQueryClient()
   const isSaving = ref(false)
+
+  function errorFallback(variables: TVariables): string {
+    const raw = options?.errorMsg
+    const fallback = typeof raw === 'function' ? raw(variables) : raw
+    return fallback || '操作失败'
+  }
 
   async function _execute(variables: TVariables): Promise<TData> {
     isSaving.value = true
@@ -60,7 +67,7 @@ export function useApiMutation<TData = unknown, TVariables = unknown>(
     try {
       return await _execute(variables)
     } catch (err: unknown) {
-      showToast(getErrorMessage(err, options?.errorMsg || '操作失败'), 'error')
+      showToast(getErrorMessage(err, errorFallback(variables)), 'error')
       throw err
     }
   }
@@ -70,7 +77,7 @@ export function useApiMutation<TData = unknown, TVariables = unknown>(
     try {
       return await _execute(variables)
     } catch (err: unknown) {
-      showToast(getErrorMessage(err, options?.errorMsg || '操作失败'), 'error')
+      showToast(getErrorMessage(err, errorFallback(variables)), 'error')
       return undefined
     }
   }

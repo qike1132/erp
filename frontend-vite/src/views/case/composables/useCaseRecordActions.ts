@@ -1,11 +1,11 @@
 import { ref, reactive } from 'vue'
 import type { Ref } from 'vue'
-import { useQueryClient } from '@tanstack/vue-query'
+import type { QueryClient } from '@tanstack/vue-query'
 import { caseApi } from '@/api'
 import type { CaseStockRecord } from '@/api/case'
 import { showToast } from '@/composables/useToast'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
-import { getErrorMessage } from '@/types/errors'
+import { useApiMutation } from '@/composables/useApiMutation'
 import { CASE_QUERY_KEYS } from './useCaseStockWorkbench'
 
 export type StockMode = 'stockin' | 'stockout'
@@ -43,17 +43,15 @@ export function useCaseRecordActions(
   mode: Ref<StockMode>,
   confirmDialog: ReturnType<typeof useConfirmDialog>,
 ) {
-  const queryClient = useQueryClient()
-
-  const invalidateAll = () => {
+  /** CASE_QUERY_KEYS 失效经 useApiMutation 的 invalidate 注入 client */
+  const invalidateAll = (client: QueryClient) => {
     for (const key of CASE_QUERY_KEYS) {
-      queryClient.invalidateQueries({ queryKey: [key] })
+      client.invalidateQueries({ queryKey: [key] })
     }
   }
 
   // ===== 编辑 =====
   const editDialogOpen = ref(false)
-  const saving = ref(false)
   const editForm = reactive<EditFormState>({ id: 0, no: '', customer: '', date: '', productName: '', quantity: 1, note: '' })
 
   async function openEdit(row: CaseStockRecord) {
@@ -80,31 +78,43 @@ export function useCaseRecordActions(
     }
   }
 
-  async function saveEdit() {
-    if (saving.value) return
-    saving.value = true
-    try {
-      const payload = {
-        customer: editForm.customer,
-        quantity: editForm.quantity,
-        note: editForm.note,
-        ...(mode.value === 'stockin' ? { stockin_date: editForm.date } : { stockout_date: editForm.date }),
-      }
-      const res = await (mode.value === 'stockin'
+  const saveEditMutation = useApiMutation(
+    (payload: { customer: string; quantity: number; note: string; stockin_date?: string; stockout_date?: string }) =>
+      mode.value === 'stockin'
         ? caseApi.updateStockin(editForm.id, payload)
-        : caseApi.updateStockout(editForm.id, payload))
-      showToast(res.message || '更新成功', 'success')
-      editDialogOpen.value = false
-      invalidateAll()
-    } catch (err: unknown) {
-      showToast(getErrorMessage(err, '更新失败'), 'error')
-    } finally {
-      saving.value = false
+        : caseApi.updateStockout(editForm.id, payload),
+    {
+      invalidate: invalidateAll,
+      errorMsg: '更新失败',
+      onSuccess: (res) => {
+        showToast(res.message || '更新成功', 'success')
+        editDialogOpen.value = false
+      },
+    },
+  )
+
+  async function saveEdit() {
+    if (saveEditMutation.isSaving.value) return
+    const payload = {
+      customer: editForm.customer,
+      quantity: editForm.quantity,
+      note: editForm.note,
+      ...(mode.value === 'stockin' ? { stockin_date: editForm.date } : { stockout_date: editForm.date }),
     }
+    await saveEditMutation.run(payload)
   }
 
   // ===== 删除 =====
   const deletingId = ref<number | 0>(0)
+
+  const deleteMutation = useApiMutation(
+    (id: number) => (mode.value === 'stockin' ? caseApi.deleteStockin(id) : caseApi.deleteStockout(id)),
+    {
+      invalidate: invalidateAll,
+      successMsg: '删除成功',
+      errorMsg: '删除失败',
+    },
+  )
 
   async function handleDelete(row: CaseStockRecord) {
     const effect = mode.value === 'stockin'
@@ -117,21 +127,14 @@ export function useCaseRecordActions(
     )
     if (!ok) return
     deletingId.value = row.id
-    try {
-      await (mode.value === 'stockin' ? caseApi.deleteStockin(row.id) : caseApi.deleteStockout(row.id))
-      showToast('删除成功', 'success')
-      invalidateAll()
-    } catch (err: unknown) {
-      showToast(getErrorMessage(err, '删除失败'), 'error')
-    } finally {
-      deletingId.value = 0
-    }
+    await deleteMutation.run(row.id)
+    deletingId.value = 0
   }
 
   return {
     editDialogOpen,
     editForm,
-    saving,
+    saving: saveEditMutation.isSaving,
     openEdit,
     saveEdit,
     deletingId,
