@@ -14,11 +14,8 @@
       <CustomerTable
         :customers="customers"
         :is-loading="isLoading"
-        :is-fetching="isFetching"
         :total-items="totalItems"
         :per-page="perPage"
-        :current-page="currentPage"
-        :total-pages="totalPages"
         @add="openForm('add')"
         @edit="(row) => openForm('edit', row)"
         @toggle="handleToggle"

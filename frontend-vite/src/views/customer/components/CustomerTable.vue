@@ -1,79 +1,79 @@
 <template>
   <div class="cu-table-wrap">
-    <div v-if="isLoading && customers.length === 0" class="cu-empty">
-      <UiSpinner />
-    </div>
-    <template v-else-if="customers.length === 0">
-      <div class="cu-empty">
-        <FontAwesomeIcon icon="building" aria-hidden="true" />
-        <span>暂无客户数据</span>
-        <button class="cu-action-btn cu-action-primary" aria-label="立即添加" @click="emit('add')">立即添加</button>
-      </div>
-    </template>
-    <template v-else>
-      <div v-if="isFetching" class="cu-fetching-bar"><div class="cu-fetching-progress" /></div>
-      <table class="cu-table">
-        <thead>
-          <tr>
-            <th style="text-align: left">客户名称</th>
-            <th>联系人</th>
-            <th>联系电话</th>
-            <th style="text-align: left">地址</th>
-            <th>状态</th>
-            <th>创建时间</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="row in customers" :key="row.id">
-            <td style="text-align: left">
-              <div class="cu-customer-cell">
-                <div class="cu-customer-avatar">{{ row.name.charAt(0) }}</div>
-                <div class="cu-customer-info">
-                  <span class="cu-customer-name">{{ row.name }}</span>
-                  <span v-if="row.customer_code" class="cu-customer-code">{{ row.customer_code }}</span>
-                </div>
-              </div>
-            </td>
-            <td><span :class="row.contact ? 'cu-text-body' : 'cu-text-muted'">{{ row.contact || '未填写' }}</span></td>
-            <td><span :class="row.phone ? 'cu-text-body' : 'cu-text-muted'">{{ row.phone || '未填写' }}</span></td>
-            <td style="text-align: left"><span :class="row.address ? 'cu-text-body' : 'cu-text-muted'">{{ row.address || '未填写' }}</span></td>
-            <td>
-              <span :class="['cu-status', row.status ? 'cu-status-on' : 'cu-status-off']">
-                <i class="cu-dot" />{{ row.status ? '启用' : '停用' }}
-              </span>
-            </td>
-            <td><span class="cu-text-muted">{{ formatDate(row.create_time) }}</span></td>
-            <td>
-              <div class="cu-actions">
-                <button class="cu-icon-btn cu-icon-edit" title="编辑" aria-label="编辑" @click="emit('edit', row)"><FontAwesomeIcon icon="pen-to-square" aria-hidden="true" /></button>
-                <button class="cu-icon-btn cu-icon-toggle" title="切换状态" aria-label="切换状态" @click="emit('toggle', row)"><FontAwesomeIcon :icon="row.status ? 'lock' : 'lock-open'" aria-hidden="true" /></button>
-                <button class="cu-icon-btn cu-icon-delete" title="删除" aria-label="删除" @click="emit('delete', row)"><FontAwesomeIcon icon="trash" aria-hidden="true" /></button>
-              </div>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-
-      <UiPagination v-if="totalItems > perPage" :current-page="currentPage" :total-pages="totalPages" :total-items="totalItems" @update:current-page="emit('page', $event)" />
-    </template>
+    <UiDataTable
+      :data="customers"
+      :columns="customerColumns"
+      :loading="isLoading"
+      paginator
+      :rows="perPage"
+      :total-records="totalItems"
+      row-key="id"
+      empty-message="暂无客户数据"
+      @page="onPageChange"
+    >
+      <template #empty>
+        <div class="cu-empty">
+          <FontAwesomeIcon icon="building" aria-hidden="true" />
+          <span>暂无客户数据</span>
+          <button class="cu-action-btn cu-action-primary" aria-label="立即添加" @click="emit('add')">立即添加</button>
+        </div>
+      </template>
+      <template #column-body-name="{ row }">
+        <div class="cu-customer-cell">
+          <div class="cu-customer-avatar">{{ (row as Customer).name.charAt(0) }}</div>
+          <div class="cu-customer-info">
+            <span class="cu-customer-name">{{ (row as Customer).name }}</span>
+            <span v-if="(row as Customer).customer_code" class="cu-customer-code">{{ (row as Customer).customer_code }}</span>
+          </div>
+        </div>
+      </template>
+      <template #column-body-contact="{ row }">
+        <span :class="(row as Customer).contact ? 'cu-text-body' : 'cu-text-muted'">{{ (row as Customer).contact || '未填写' }}</span>
+      </template>
+      <template #column-body-phone="{ row }">
+        <span :class="(row as Customer).phone ? 'cu-text-body' : 'cu-text-muted'">{{ (row as Customer).phone || '未填写' }}</span>
+      </template>
+      <template #column-body-address="{ row }">
+        <span :class="(row as Customer).address ? 'cu-text-body' : 'cu-text-muted'">{{ (row as Customer).address || '未填写' }}</span>
+      </template>
+      <template #column-body-status="{ row }">
+        <span :class="['cu-status', (row as Customer).status ? 'cu-status-on' : 'cu-status-off']">
+          <i class="cu-dot" />{{ (row as Customer).status ? '启用' : '停用' }}
+        </span>
+      </template>
+      <template #column-body-create_time="{ row }">
+        <span class="cu-text-muted">{{ formatDate((row as Customer).create_time) }}</span>
+      </template>
+      <template #column-body-actions="{ row }">
+        <div class="cu-actions">
+          <button class="cu-icon-btn cu-icon-edit" title="编辑" aria-label="编辑" @click="emit('edit', row as Customer)"><FontAwesomeIcon icon="pen-to-square" aria-hidden="true" /></button>
+          <button class="cu-icon-btn cu-icon-toggle" title="切换状态" aria-label="切换状态" @click="emit('toggle', row as Customer)"><FontAwesomeIcon :icon="(row as Customer).status ? 'lock' : 'lock-open'" aria-hidden="true" /></button>
+          <button class="cu-icon-btn cu-icon-delete" title="删除" aria-label="删除" @click="emit('delete', row as Customer)"><FontAwesomeIcon icon="trash" aria-hidden="true" /></button>
+        </div>
+      </template>
+    </UiDataTable>
   </div>
 </template>
 
 <script setup lang="ts">
+/**
+ * CustomerTable.vue — 客户列表（UiDataTable 统一表格）
+ *
+ * OPT-10b：由手写 <table> 迁移到 UiDataTable（与 UserTable 同构），
+ * 保留客户名首字头像、状态圆点、空态「立即添加」等既有视觉。
+ * 分页契约：UiDataTable 的 page 事件是 0 基页码 + rows，此处转换为
+ * 父组件 currentPage = $event（1 基）期望的形式，父组件无需改动。
+ */
+import UiDataTable from '@/components/ui/UiDataTable.vue'
+import type { TableColumn } from '@/components/ui/UiDataTable.vue'
 import type { Customer } from '@/types'
-import UiPagination from '@/components/ui/UiPagination.vue'
-import UiSpinner from '@/components/ui/UiSpinner.vue'
 import { formatDate } from '@/utils/format'
 
 defineProps<{
   customers: Customer[]
   isLoading: boolean
-  isFetching: boolean
   totalItems: number
   perPage: number
-  currentPage: number
-  totalPages: number
 }>()
 
 const emit = defineEmits<{
@@ -83,6 +83,21 @@ const emit = defineEmits<{
   delete: [row: Customer]
   page: [page: number]
 }>()
+
+const customerColumns: TableColumn[] = [
+  { field: 'name', header: '客户名称', align: 'left' },
+  { field: 'contact', header: '联系人', align: 'center' },
+  { field: 'phone', header: '联系电话', align: 'center' },
+  { field: 'address', header: '地址', align: 'left' },
+  { field: 'status', header: '状态', align: 'center' },
+  { field: 'create_time', header: '创建时间', align: 'center' },
+  { field: 'actions', header: '操作', align: 'center' },
+]
+
+/** UiDataTable 分页事件（0 基）→ 父组件 currentPage（1 基） */
+function onPageChange(event: { page: number }) {
+  emit('page', event.page + 1)
+}
 </script>
 
 <style scoped>
@@ -91,46 +106,18 @@ const emit = defineEmits<{
   overflow-y: auto;
   min-height: 0;
 }
-.cu-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-}
-.cu-table thead th {
-  padding: 10px 14px;
-  font-size: 12px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  background: var(--color-surface, #f8fafc);
-  border-bottom: 2px solid var(--color-border-light, #e2e8f0);
-  color: var(--color-text-secondary);
-  text-align: center;
-}
-.cu-table tbody td {
-  padding: 10px 14px;
-  font-size: 13px;
-  border-bottom: 1px solid var(--color-border-light, #f1f5f9);
-  text-align: center;
-  transition: background 0.2s ease;
-  color: var(--color-text);
-}
-.cu-table tbody tr:hover {
-  background: var(--color-primary-50);
-}
 .cu-customer-cell {
   display: flex;
   align-items: center;
   gap: 10px;
 }
 .cu-customer-avatar {
-  width: 36px;
-  height: 36px;
-  border-radius: 9px;
-  background: linear-gradient(135deg, var(--color-primary-100), var(--color-primary-200));
-  color: var(--color-primary-700);
-  font-size: 14px;
-  font-weight: 600;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: var(--color-primary-50);
+  color: var(--color-primary-600);
+  font-weight: 700;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -139,103 +126,94 @@ const emit = defineEmits<{
 .cu-customer-info {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  line-height: 1.3;
 }
 .cu-customer-name {
-  font-size: 14px;
   font-weight: 600;
   color: var(--color-text);
 }
 .cu-customer-code {
   font-size: 11px;
   color: var(--color-text-muted);
-  font-family: 'SF Mono', 'Fira Code', monospace;
-  letter-spacing: 0.02em;
 }
-.cu-text-body { font-size: 13px; color: var(--color-text); }
-.cu-text-muted { font-size: 13px; color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
+.cu-text-body {
+  color: var(--color-text);
+}
+.cu-text-muted {
+  color: var(--color-text-muted);
+}
 .cu-status {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
 }
-.cu-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  display: inline-block;
+.cu-status-on {
+  color: var(--color-success-600, #059669);
 }
-.cu-status-on { color: var(--color-success-600); }
-.cu-status-on .cu-dot { background: var(--color-success-500); box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.15); }
-.cu-status-off { color: var(--color-text-muted); }
-.cu-status-off .cu-dot { background: var(--color-border); }
+.cu-status-off {
+  color: var(--color-text-muted);
+}
+.cu-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
 .cu-actions {
   display: flex;
-  align-items: center;
+  gap: 6px;
   justify-content: center;
-  gap: 4px;
 }
 .cu-icon-btn {
-  width: 30px;
-  height: 30px;
-  border: none;
-  background: transparent;
-  border-radius: 7px;
-  display: flex;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  border: 2px solid transparent;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  color: var(--color-text-muted);
-  transition: background 0.2s ease, color 0.2s ease;
-  font-size: 13px;
+  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
 }
-.cu-icon-btn:hover { background: var(--color-border-light); }
-.cu-icon-edit:hover { color: var(--color-primary-500); background: var(--color-primary-50); }
-.cu-icon-toggle:hover { color: var(--color-warning-500); background: var(--color-warning-50); }
-.cu-icon-delete:hover { color: var(--color-danger-500); background: var(--color-danger-50); }
-.cu-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
-  padding: 40px 20px;
-  color: var(--color-text-muted);
+.cu-icon-edit {
+  background: var(--color-primary-50);
+  color: var(--color-primary-600);
 }
-.cu-empty i { font-size: 28px; opacity: 0.5; }
-.cu-empty span { font-size: 14px; }
-.cu-fetching-bar {
-  height: 2px;
-  background: var(--color-primary-100, #e0f2fe);
-  overflow: hidden;
-  border-radius: 1px;
+.cu-icon-edit:hover {
+  background: var(--color-primary-500);
+  color: white;
+  transform: translateY(-1px);
 }
-.cu-fetching-progress {
-  height: 100%;
-  width: 30%;
-  background: var(--color-primary-500, #3b82f6);
-  border-radius: 1px;
-  animation: cu-progress-slide 1s ease-in-out infinite;
+.cu-icon-toggle {
+  background: var(--color-warning-50, #fef3c7);
+  color: var(--color-warning-700, #b45309);
 }
-@keyframes cu-progress-slide {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(400%); }
+.cu-icon-toggle:hover {
+  background: var(--color-warning-500, #f59e0b);
+  color: white;
+  transform: translateY(-1px);
+}
+.cu-icon-delete {
+  background: var(--color-danger-50);
+  color: var(--color-danger-600);
+}
+.cu-icon-delete:hover {
+  background: var(--color-danger-500);
+  color: white;
+  transform: translateY(-1px);
 }
 .cu-action-btn {
-  border-radius: 9px;
   padding: 7px 14px;
   border: 2px solid var(--color-border-light);
+  border-radius: 9px;
   background: white;
   font-size: 12px;
   font-weight: 600;
-  transition: background 0.3s ease, border-color 0.3s ease, transform 0.3s ease;
   cursor: pointer;
+  transition: background 0.3s ease, border-color 0.3s ease, transform 0.3s ease;
   color: var(--color-text);
-  font-family: inherit;
-}
-.cu-action-btn:hover {
-  transform: translateY(-1px);
 }
 .cu-action-primary {
   color: var(--color-primary-600);
@@ -243,5 +221,19 @@ const emit = defineEmits<{
 .cu-action-primary:hover {
   background: var(--color-primary-50);
   border-color: var(--color-primary-300);
+  transform: translateY(-1px);
+}
+.cu-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 40px 20px;
+  color: var(--color-text-muted, #94a3b8);
+  font-size: 14px;
+}
+.cu-empty i {
+  font-size: 28px;
+  opacity: 0.5;
 }
 </style>

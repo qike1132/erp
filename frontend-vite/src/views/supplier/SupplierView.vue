@@ -21,13 +21,10 @@
       <SupplierTable
         :suppliers="suppliers"
         :is-loading="isLoading"
-        :is-fetching="isFetching"
         :has-search="!!searchTerm"
         :action-id="actionId"
         :total-items="totalItems"
         :per-page="perPage"
-        :current-page="currentPage"
-        :total-pages="totalPages"
         @toggle="handleToggle"
         @edit="openEditDialog"
         @delete="handleDelete"
