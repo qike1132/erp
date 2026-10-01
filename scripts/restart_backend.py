@@ -63,9 +63,11 @@ if __name__ == "__main__":
         print(f"执行: python -m uvicorn fastapi_app.main:app --workers {workers}")
         subprocess.run([
             sys.executable, "-m", "uvicorn", "fastapi_app.main:app",
-            "--host", "0.0.0.0", "--port", str(PORT),
+            # P0-6(c)：仅绑回环，与 prod_runner.py 的生产拓扑一致
+            # （同机 nginx 反代，绑 0.0.0.0 会被局域网绕过网关直连）。
+            "--host", "127.0.0.1", "--port", str(PORT),
             "--workers", workers, "--http", "httptools",
-            "--no-access-log", "--proxy-headers", "--forwarded-allow-ips=*",
+            "--no-access-log", "--proxy-headers", "--forwarded-allow-ips=127.0.0.1",
         ])
     except KeyboardInterrupt:
         print("\n\n后端已停止。")

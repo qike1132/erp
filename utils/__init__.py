@@ -1,6 +1,7 @@
 """工具模块包
 
-提供批量上传相关的工具函数。
+批量上传的旧实现（``batch_upload_utils``）已在 P0-8 死代码清理中删除；本包保留
+PEP 562 惰性导出这一层历史契约。
 
 ★ 惰性导出（PEP 562，2026-09-30）：本包此前在 **import 期** eager 导入
   ``batch_upload_utils``（硬要求 polars + openpyxl，缺任一直接 raise）与 ``logger``
@@ -18,40 +19,24 @@
 
   守卫测试：``tests/test_utils_lazy_import.py``（子进程校验 import utils.log_rotation
   不会把 openpyxl/polars/sqlalchemy 拉进 sys.modules，且旧名字仍可取到）。
+
+  P0-8（2026-10-01）：``utils/batch_upload_utils.py``（501 行，全仓零调用）已删除，
+  故 ``_EXPORTS``/``__all__`` 里与之对应的 10 个名字一并移除；``logger`` 一项保留
+  （``tests/test_logger.py``、``tests/test_utils_lazy_import.py`` 仍是它的消费者）。
 """
 from __future__ import annotations
 
 import importlib
 
-# 名字 → 所在子模块（与原 eager 导入的对外契约逐字一致）
+# 名字 → 所在子模块（与原 eager 导入的对外契约逐字一致；batch_upload_utils 十项随 P0-8 删除）
 _EXPORTS = {
-    'BatchUploadError': 'batch_upload_utils',
-    'batch_save_with_transaction': 'batch_upload_utils',
-    'generate_error_report': 'batch_upload_utils',
-    'parse_excel_file': 'batch_upload_utils',
-    'transactional': 'batch_upload_utils',
-    'validate_batch_data': 'batch_upload_utils',
-    'validate_customer_name': 'batch_upload_utils',
-    'validate_date': 'batch_upload_utils',
-    'validate_product': 'batch_upload_utils',
-    'validate_quantity': 'batch_upload_utils',
     'log_request': 'logger',
     'logger': 'logger',
 }
 
 __all__ = [
-    'BatchUploadError',
-    'batch_save_with_transaction',
-    'generate_error_report',
     'log_request',
     'logger',
-    'parse_excel_file',
-    'transactional',
-    'validate_batch_data',
-    'validate_customer_name',
-    'validate_date',
-    'validate_product',
-    'validate_quantity',
 ]
 
 

@@ -32,7 +32,7 @@ def setup_telemetry(app=None):
         from opentelemetry import trace
         from opentelemetry.sdk.resources import Resource
         from opentelemetry.sdk.trace import TracerProvider
-        from opentelemetry.sdk.trace.export import BatchSpanProcessor
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor, SpanExporter
 
         service_name = os.getenv("OTEL_SERVICE_NAME", "binfa-erp")
         resource = Resource.create({
@@ -50,6 +50,9 @@ def setup_telemetry(app=None):
         # Exporter: OTLP (生产默认) 或 Console
         default_exporter = "otlp" if env == "production" else "console"
         exporter_type = os.getenv("OTEL_EXPORTER_TYPE", default_exporter)
+        # 显式标注：两个分支分别赋 OTLPSpanExporter / ConsoleSpanExporter，
+        # 不标注时 mypy 会按首个赋值推断类型并对第二处赋本报 assignment 错误。
+        exporter: SpanExporter
         if exporter_type == "otlp":
             from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
             exporter = OTLPSpanExporter(

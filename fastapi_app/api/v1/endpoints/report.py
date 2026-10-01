@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.database import get_async_read_db
 from fastapi_app.core.deps import require_permission
-from fastapi_app.core.limiter import limiter
+from fastapi_app.core.limiter import limiter, rate_limit_key
 from fastapi_app.schemas.report import ReportResponse
 from fastapi_app.services import report_service
 from fastapi_app.shared_models import User
@@ -151,7 +151,7 @@ async def deduction_logs(
 
 
 @router.get('/export')
-@limiter.limit("100/minute")  # 内网宽松：导出接口取消严格限流
+@limiter.limit("100/minute", key_func=rate_limit_key)  # 内网宽松：导出接口取消严格限流；P0-6(d) 显式绑键
 async def export_report(
     request: Request,
     report_type: str = Query(..., description='报表类型: order/stockin/stockout/deduction'),

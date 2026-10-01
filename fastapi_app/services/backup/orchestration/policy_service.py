@@ -19,7 +19,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import SQLAlchemyError
 
 from fastapi_app.core.database import get_async_db_context
-from fastapi_app.services.backup._constants import BACKUP_DIR
+from fastapi_app.services.backup._constants import BACKUP_DIR, retention_count, retention_days
 from fastapi_app.services.backup.metrics.alert_service import alert_service
 from fastapi_app.services.backup.records import ensure_backup_dir
 from fastapi_app.shared_models.backup_record import BackupRecord
@@ -45,11 +45,11 @@ class BackupPolicyService:
             # 增量备份频率（cron表达式）
             'incremental_backup_cron': os.environ.get('BACKUP_INCREMENTAL_CRON', '0 */1 * * *'),  # 每小时
 
-            # 保留策略 - 时间（天）
-            'retention_days': int(os.environ.get('BACKUP_RETENTION_DAYS', '30')),
+            # 保留策略 - 时间（天）：env 单一真源 _constants.retention_days()（P0-2）
+            'retention_days': retention_days(),
 
-            # 保留策略 - 数量
-            'retention_count': int(os.environ.get('BACKUP_RETENTION_COUNT', '100')),
+            # 保留策略 - 数量：env 单一真源 _constants.retention_count()（P0-2）
+            'retention_count': retention_count(),
 
             # 加密设置
             'encryption_enabled': os.environ.get('BACKUP_ENCRYPTION_ENABLED', 'false').lower() == 'true',
@@ -541,7 +541,7 @@ class BackupPolicyService:
                 if records_to_delete:
                     delete_ids = [record.id for record in records_to_delete]
                     await db.execute(delete(BackupRecord).where(BackupRecord.id.in_(delete_ids)))
-                    await db.commit()  # independent-transaction; manual-tx: try/except 内显式事务控制
+                    await db.commit()  # manual-tx: 保留策略批量删除须即时提交（备份文件已物理删除，事务回滚无法复原）
 
                 result = {
                     'applied': True,

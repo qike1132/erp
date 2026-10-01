@@ -32,6 +32,14 @@ from fastapi_app.services.backup import (
     sha256_file,
     validate_backup_file,
 )
+from fastapi_app.services.backup._constants import (
+    RETENTION_COUNT_DEFAULT,
+    RETENTION_COUNT_ENV,
+    RETENTION_DAYS_DEFAULT,
+    RETENTION_DAYS_ENV,
+    retention_count,
+    retention_days,
+)
 
 # ---------------------------------------------------------------------------
 # 工具函数测试
@@ -460,9 +468,58 @@ class TestConstants:
     def test_backup_format_version(self):
         assert BACKUP_FORMAT_VERSION == '2.0'
 
-    def test_retention_config(self):
-        assert BACKUP_RETENTION_DAYS == 30
-        assert BACKUP_MAX_COUNT == 50
+    def test_retention_config(self, monkeypatch):
+        """保留策略由 env 单一真源驱动（此前在本模块硬编码 30 天/50 份）。
+
+        旧实现：_constants 硬编码 30/50，而 policy_service / cleanup 服务各自读 env
+        （默认 30/100）⇒ 同一台机器上「策略显示保留 100 份」而「实际按 50 份删」。
+        """
+        monkeypatch.setenv(RETENTION_DAYS_ENV, '17')
+        monkeypatch.setenv(RETENTION_COUNT_ENV, '9')
+        assert retention_days() == 17
+        assert retention_count() == 9
+
+        monkeypatch.delenv(RETENTION_DAYS_ENV, raising=False)
+        monkeypatch.delenv(RETENTION_COUNT_ENV, raising=False)
+        assert retention_days() == RETENTION_DAYS_DEFAULT == 30
+        assert retention_count() == RETENTION_COUNT_DEFAULT == 100
+
+    def test_retention_constants_stay_importable(self, monkeypatch):
+        """模块级常量是启动快照，必须与保留策略单源函数**等值**（P0-2 F-04）。
+
+        修复前这里被放宽成 isinstance(int) + > 0：若有人把模块常量重新硬编码回
+        旧值（份额 50），本测试不再报警。现在固定 env 后 reload 模块，逐个**等值**
+        比对快照、单源函数与缺省口径（30 天 / 100 份，与 policy_service、cleanup 一致）。
+        """
+        import importlib
+
+        from fastapi_app.services.backup import _constants
+
+        original = {key: os.environ.get(key) for key in (RETENTION_DAYS_ENV, RETENTION_COUNT_ENV)}
+        try:
+            # env 覆盖：reload 后的快照 == env 值 == 单源函数返回值
+            monkeypatch.setenv(RETENTION_DAYS_ENV, '11')
+            monkeypatch.setenv(RETENTION_COUNT_ENV, '7')
+            overridden = importlib.reload(_constants)
+            assert overridden.BACKUP_RETENTION_DAYS == overridden.retention_days() == 11
+            assert overridden.BACKUP_MAX_COUNT == overridden.retention_count() == 7
+
+            # env 缺省：reload 后的快照 == 缺省值 == 单源函数返回值
+            monkeypatch.delenv(RETENTION_DAYS_ENV, raising=False)
+            monkeypatch.delenv(RETENTION_COUNT_ENV, raising=False)
+            defaulted = importlib.reload(_constants)
+            assert RETENTION_DAYS_DEFAULT == 30
+            assert RETENTION_COUNT_DEFAULT == 100
+            assert defaulted.BACKUP_RETENTION_DAYS == defaulted.retention_days() == RETENTION_DAYS_DEFAULT
+            assert defaulted.BACKUP_MAX_COUNT == defaulted.retention_count() == RETENTION_COUNT_DEFAULT
+        finally:
+            # 把模块快照还原到测试前的 env 口径，避免 reload 泄漏给同进程后续用例
+            for key, value in original.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+            importlib.reload(_constants)
 
 
 # ---------------------------------------------------------------------------

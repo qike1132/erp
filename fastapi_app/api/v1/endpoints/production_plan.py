@@ -18,6 +18,7 @@ from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import get_user_identity, require_permission
 from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.core.response import success_response
+from fastapi_app.core.validators import require_upload_magic
 from fastapi_app.schemas.production_plan import (
     BarcodeValidationResponse,
     MonthlySummary,
@@ -250,6 +251,8 @@ async def upload_excel(
         raise HTTPException(status_code=400, detail=f'文件读取失败: {settings.sanitize_error(e)}') from e
     if len(content) > MAX_UPLOAD_FILE_SIZE:
         raise HTTPException(status_code=400, detail='文件大小不能超过10MB')
+    # P0-12：扩展名之外再校验文件头（.xls 改名 .xlsx、任意文件改名 .xlsx 都拦在这里）
+    require_upload_magic(content, ('xlsx', 'xlsm'), filename=file.filename or '')
     session_id, _ = get_user_identity(_user)
     async with db_transaction(db):
         result = await production_plan_service.upload_excel(db, content, session_id)

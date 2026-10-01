@@ -19,7 +19,7 @@ from fastapi_app.core.cache import cache_result
 from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import get_current_user_id, require_any_permission, require_permission
 from fastapi_app.core.exceptions import db_transaction
-from fastapi_app.core.limiter import limiter
+from fastapi_app.core.limiter import limiter, rate_limit_key
 from fastapi_app.schemas.stock import (
     InventoryResponse,
     StockActionResponse,
@@ -346,7 +346,7 @@ def _build_inventory_excel(inventory_data: list, result: dict) -> tuple[bytes, s
 
 
 @router.get('/export-inventory')
-@limiter.limit("100/minute")  # 内网宽松：导出接口取消严格限流
+@limiter.limit("100/minute", key_func=rate_limit_key)  # 内网宽松：导出接口取消严格限流；P0-6(d) 显式绑键
 async def export_inventory(
     request: Request,
     customer: str = Query('', description='客户名称筛选'),

@@ -17,6 +17,20 @@ from ._constants import (
 logger = logging.getLogger(__name__)
 
 
+def _path_variants(archive_path: str) -> tuple[str, ...]:
+    """同一份配置的两种写法：归档名（带 config/ 或 root/ 命名空间）与 config 内相对名。
+
+    P0-2：归档名改为清单自带命名空间后，敏感/排除白名单（历史条目都是 config 内
+    相对名，如 '.env'、'jwt/private.pem'）必须两种写法都认，否则闸门会静默失效。
+    """
+    normalized = archive_path.replace('\\', '/')
+    for prefix in ('config/', 'root/'):
+        if normalized.startswith(prefix):
+            stripped = normalized[len(prefix):]
+            return (normalized, stripped) if stripped else (normalized,)
+    return (normalized, f'config/{normalized}')
+
+
 def should_exclude_file(file_path, relative_path: str, include_sensitive: bool = False) -> bool:
     """检查文件是否应该被排除在备份之外
 
@@ -31,13 +45,16 @@ def should_exclude_file(file_path, relative_path: str, include_sensitive: bool =
     Returns:
         True 如果文件应该被排除，否则 False
     """
+    variants = _path_variants(relative_path)
+
     # BACKUP_EXCLUDE_FILES 显式排除项：任何情况下都不打包
-    if relative_path in _EXCLUDE_FILES:
+    if any(v in _EXCLUDE_FILES for v in variants):
         logger.debug(f"排除显式配置项: {relative_path}")
         return True
 
     # 敏感配置文件：仅加密备份打包（明文包排除，防私钥明文泄露）
-    if relative_path in _SENSITIVE_CONFIG_FILES and not include_sensitive:
+    # include_sensitive 由「本次是否加密」决定（见 core.pack_config_files）
+    if any(v in _SENSITIVE_CONFIG_FILES for v in variants) and not include_sensitive:
         logger.info(f"明文备份排除敏感文件: {relative_path}")
         return True
 
@@ -90,8 +107,13 @@ def _restore_roots() -> tuple[tuple[str, Path], ...]:
 
     `config/` 落回 CONFIG_DIR；`root/` 落回 PROJECT_ROOT —— 运行时 `.env` 归档为
     `root/.env`（H-3，2026-09-29），它不属于 config/ 目录。
+
+    旧包兼容（P0-2）：P0-2 之前 core.py 无条件拼 'config/'，运行时 .env 在包内是
+    `config/root/.env`。若按 `config/` 前缀还原，它会写成 CONFIG_DIR/root/.env
+    幽灵目录、真正的项目根 .env 永不还原。故把更长前缀 `config/root/` 排在首位
+    （下面用首个匹配前缀）。
     """
-    return (('config/', CONFIG_DIR), ('root/', PROJECT_ROOT))
+    return (('config/root/', PROJECT_ROOT), ('config/', CONFIG_DIR), ('root/', PROJECT_ROOT))
 
 
 def restore_config(zf: zipfile.ZipFile, confirm_sensitive: bool = False) -> dict:  # log-context: internal helper 无请求上下文

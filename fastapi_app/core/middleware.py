@@ -36,6 +36,31 @@ logger = logging.getLogger(__name__)
 
 MAX_REQUEST_BODY_SIZE = 10 * 1024 * 1024
 
+# ---------------------------------------------------------------------------
+# 安全降级登记（P0-10）
+# 生产环境的安全能力缺失必须可观测、不静默：登记降级原因，由 /api/health 以
+# degraded / security_degraded 字段暴露（保持既有状态码语义，不把整体误判为 503）。
+# 注：原 CSRF/itsdangerous 触发点经逐字节核查不可达（try 内只 import ipaddress /
+# secrets，均为标准库），常量与 except 分支已于 2026-10-01 按裁决删除，见 _setup_csrf。
+# ---------------------------------------------------------------------------
+_DEGRADED_REASONS: list[str] = []
+
+
+def record_degradation(reason: str) -> None:
+    """登记一条安全降级原因（幂等，进程级）。"""
+    if reason not in _DEGRADED_REASONS:
+        _DEGRADED_REASONS.append(reason)
+
+
+def degraded_reasons() -> list[str]:
+    """当前生效的安全降级原因（空列表 = 无降级）。"""
+    return list(_DEGRADED_REASONS)
+
+
+def clear_degradations() -> None:
+    """清空降级登记（仅供测试重置进程级状态）。"""
+    _DEGRADED_REASONS.clear()
+
 # H-2（2026-09-29）：路径级请求体上限。全局 10MB 会把业务侧**已经声明支持**的更大
 # 上传一并挡死（备份 500MB、Excel 导入 50MB），上线后首次整库还原/大导入即 413。
 # 放宽只为让请求抵达端点，体积的真正校验仍由端点内的常量负责：
@@ -117,142 +142,145 @@ def _setup_request_id(app: FastAPI) -> None:
 
 
 def _setup_csrf(app: FastAPI) -> None:
-    try:
-        import ipaddress
-        import secrets
+    # P0-10(a)（2026-10-01 裁决）：此处原有 except ImportError 降级分支经逐字节核查不可达
+    # （try 内只 import ipaddress / secrets，均为标准库；CSRF token 由
+    # secrets.token_urlsafe 生成，本模块从未 import itsdangerous），已删除 try/except 包裹。
+    # 安全降级登记机制（record_degradation / degraded_reasons）本身保留，
+    # /api/health 仍暴露 degraded / security_degraded 标记。
+    import ipaddress
+    import secrets
 
-        def _csrf_secure() -> bool:
-            # 运行时判定，而非 import 时固化：测试进程会先设 APP_ENV=test 再 import
-            # main.py，若此处固化则 monkeypatch APP_ENV=production 后 HTTPS 分支仍
-            # 读不到「生产默认 true」，导致 CSRF cookie 的 Secure 属性回归测试假失败。
-            # 语义：显式 CSRF_COOKIE_SECURE 优先，否则生产默认 true、非生产 false。
-            return os.getenv(
-                "CSRF_COOKIE_SECURE",
-                "true" if settings.is_production else "",
-            ).lower() in ("true", "1", "yes")
+    def _csrf_secure() -> bool:
+        # 运行时判定，而非 import 时固化：测试进程会先设 APP_ENV=test 再 import
+        # main.py，若此处固化则 monkeypatch APP_ENV=production 后 HTTPS 分支仍
+        # 读不到「生产默认 true」，导致 CSRF cookie 的 Secure 属性回归测试假失败。
+        # 语义：显式 CSRF_COOKIE_SECURE 优先，否则生产默认 true、非生产 false。
+        return os.getenv(
+            "CSRF_COOKIE_SECURE",
+            "true" if settings.is_production else "",
+        ).lower() in ("true", "1", "yes")
 
-        # 内网 IP 段：CSRF 攻击几乎不可能来自内网，直接豁免
-        _LAN_NETWORKS = (
-            ipaddress.ip_network("10.0.0.0/8"),
-            ipaddress.ip_network("172.16.0.0/12"),
-            ipaddress.ip_network("192.168.0.0/16"),
+    # 内网 IP 段：CSRF 攻击几乎不可能来自内网，直接豁免
+    _LAN_NETWORKS = (
+        ipaddress.ip_network("10.0.0.0/8"),
+        ipaddress.ip_network("172.16.0.0/12"),
+        ipaddress.ip_network("192.168.0.0/16"),
+    )
+
+    def _is_lan_ip(ip_str: str) -> bool:
+        """判断 IP 是否属于内网段"""
+        try:
+            ip = ipaddress.ip_address(ip_str)
+            return any(ip in net for net in _LAN_NETWORKS)
+        except ValueError:
+            return False
+
+    def _is_allowed_origin(origin: str | None) -> bool:
+        """验证请求Origin是否为允许的源（内网环境放行所有内网 origin）"""
+        if not origin:
+            return False
+        is_production = settings.is_production
+        if is_production:
+            allowed = settings.BACKEND_CORS_ORIGINS
+            return any(origin.rstrip('/') == allowed_origin.rstrip('/') for allowed_origin in allowed)
+        else:
+            dev_origins = {
+                "http://localhost",
+                "http://localhost:3000",
+                "http://localhost:5173",
+                "http://localhost:4173",
+                "http://localhost:8080",
+                "http://127.0.0.1:3000",
+                "http://127.0.0.1:5173",
+                "http://127.0.0.1:8080",
+            }
+            extra = os.getenv('DEV_CORS_ORIGINS', '')
+            if extra:
+                dev_origins.update(o.strip() for o in extra.split(',') if o.strip())
+            return origin.rstrip('/') in {o.rstrip('/') for o in dev_origins}
+
+    @app.middleware("http")
+    async def conditional_csrf_middleware(request: Request, call_next):
+        # CSRF 内网豁免：仅开发环境保留（纯内网直连调试场景）
+        # 生产环境必须经过 Nginx/Ingress 反代，request.client.host 为真实客户端 IP，
+        # 内网豁免会使所有反代请求绕过 CSRF，导致全局失效。生产环境一律执行 CSRF 校验。
+        _is_production = settings.is_production
+
+        if not _is_production:
+            client_ip = request.client.host if request.client else None
+            if client_ip and _is_lan_ip(client_ip):
+                response = await call_next(request)
+                return response
+
+        is_login_endpoint = request.url.path == "/api/v1/auth/login"
+        is_logout_endpoint = request.url.path == "/api/v1/auth/logout"
+        # web vitals 上报使用 sendBeacon，无法携带自定义 header，豁免 CSRF
+        is_vitals_endpoint = request.url.path == "/api/v1/monitoring/vitals"
+        is_exempt_endpoint = is_login_endpoint or is_logout_endpoint or is_vitals_endpoint
+
+        if not is_exempt_endpoint and request.url.path.startswith("/api/") and request.method not in ("GET", "HEAD", "OPTIONS"):
+            auth_header = request.headers.get("authorization", "")
+            _has_bearer = auth_header.startswith("Bearer ")
+            _has_cookie = bool(request.cookies)
+
+            if _has_bearer and not _has_cookie:
+                origin = request.headers.get("origin") or request.headers.get("referer")
+                if not _is_allowed_origin(origin):
+                    logger.warning("CSRF保护：Bearer Token请求Origin验证失败: %s", origin)
+                    return JSONResponse(
+                        status_code=403,
+                        content={"detail": "跨站请求被拒绝"},
+                    )
+            elif not _has_bearer:
+                csrf_cookie = request.cookies.get("fastapi_csrf_token")
+                csrf_header = request.headers.get("X-CSRF-Token")
+                if not csrf_cookie or not csrf_header or not secrets.compare_digest(csrf_cookie, csrf_header):
+                    return JSONResponse(
+                        status_code=403,
+                        content={"detail": "CSRF token 验证失败"},
+                    )
+
+        response = await call_next(request)
+
+        # 仅在请求未携带有效 CSRF cookie 时才生成新 token。此前每次响应（含 GET）
+        # 都轮换 cookie，浏览器多标签/并发请求下旧 cookie 会被新值覆盖，导致
+        # 基于 cookie 的 CSRF 校验偶发 403。复用已有 cookie 可避免该竞态。
+        csrf_token = request.cookies.get("fastapi_csrf_token")
+        if not csrf_token:
+            csrf_token = secrets.token_urlsafe(32)
+        # ⚠️ `Secure` 必须随「实际请求 scheme」判定，不能只看全局 is_production：
+        # 浏览器只对**可信来源**（https / localhost / 127.0.0.1）接受 Secure cookie，
+        # 局域网明文 HTTP（如 http://192.168.0.95:3000）会**直接丢弃**该 cookie
+        # ⇒ 前端 document.cookie 读不到 token ⇒ double-submit 永远失败
+        # ⇒ 该 origin 下所有 POST/PUT/DELETE 一律 403「CSRF token 验证失败」。
+        # 同一套判定见 api/v1/endpoints/auth.py::_set_login_cookies（登录 cookie 早已按
+        # scheme 自适应，所以现象是「能登录、但写不了」）。
+        # 注：CSRF_COOKIE_SECURE 的语义是「https 下是否打 Secure」——置 false 可在 HTTPS
+        # 上主动关闭；但**不具备**「在明文 HTTP 上强制开启」的能力（第 193 行对 _is_https
+        # 硬门控）。这是刻意的：Secure cookie 在非可信来源会被浏览器直接丢弃，
+        # 强制开启只会复现本次「读不到 token ⇒ 写请求全 403」的故障。
+        _is_https = (
+            request.url.scheme == "https"
+            or request.headers.get("x-forwarded-proto", "").split(",")[0].strip().lower() == "https"
         )
+        _csrf_samesite = "lax"
+        _has_bearer_resp = request.headers.get("authorization", "").startswith("Bearer ")
+        _csrf_sec = _csrf_secure() if (_is_https and not _has_bearer_resp) else False
+        response.set_cookie(
+            key="fastapi_csrf_token",
+            value=csrf_token,
+            max_age=86400,
+            httponly=False,
+            samesite=_csrf_samesite,
+            secure=_csrf_sec,
+            path="/",
+        )
+        if _has_bearer_resp:
+            response.headers["X-CSRF-Token"] = csrf_token
 
-        def _is_lan_ip(ip_str: str) -> bool:
-            """判断 IP 是否属于内网段"""
-            try:
-                ip = ipaddress.ip_address(ip_str)
-                return any(ip in net for net in _LAN_NETWORKS)
-            except ValueError:
-                return False
+        return response
 
-        def _is_allowed_origin(origin: str | None) -> bool:
-            """验证请求Origin是否为允许的源（内网环境放行所有内网 origin）"""
-            if not origin:
-                return False
-            is_production = settings.is_production
-            if is_production:
-                allowed = settings.BACKEND_CORS_ORIGINS
-                return any(origin.rstrip('/') == allowed_origin.rstrip('/') for allowed_origin in allowed)
-            else:
-                dev_origins = {
-                    "http://localhost",
-                    "http://localhost:3000",
-                    "http://localhost:5173",
-                    "http://localhost:4173",
-                    "http://localhost:8080",
-                    "http://127.0.0.1:3000",
-                    "http://127.0.0.1:5173",
-                    "http://127.0.0.1:8080",
-                }
-                extra = os.getenv('DEV_CORS_ORIGINS', '')
-                if extra:
-                    dev_origins.update(o.strip() for o in extra.split(',') if o.strip())
-                return origin.rstrip('/') in {o.rstrip('/') for o in dev_origins}
-
-        @app.middleware("http")
-        async def conditional_csrf_middleware(request: Request, call_next):
-            # CSRF 内网豁免：仅开发环境保留（纯内网直连调试场景）
-            # 生产环境必须经过 Nginx/Ingress 反代，request.client.host 为真实客户端 IP，
-            # 内网豁免会使所有反代请求绕过 CSRF，导致全局失效。生产环境一律执行 CSRF 校验。
-            _is_production = settings.is_production
-            if not _is_production:
-                client_ip = request.client.host if request.client else None
-                if client_ip and _is_lan_ip(client_ip):
-                    response = await call_next(request)
-                    return response
-
-            is_login_endpoint = request.url.path == "/api/v1/auth/login"
-            is_logout_endpoint = request.url.path == "/api/v1/auth/logout"
-            # web vitals 上报使用 sendBeacon，无法携带自定义 header，豁免 CSRF
-            is_vitals_endpoint = request.url.path == "/api/v1/monitoring/vitals"
-            is_exempt_endpoint = is_login_endpoint or is_logout_endpoint or is_vitals_endpoint
-
-            if not is_exempt_endpoint and request.url.path.startswith("/api/") and request.method not in ("GET", "HEAD", "OPTIONS"):
-                auth_header = request.headers.get("authorization", "")
-                _has_bearer = auth_header.startswith("Bearer ")
-                _has_cookie = bool(request.cookies)
-
-                if _has_bearer and not _has_cookie:
-                    origin = request.headers.get("origin") or request.headers.get("referer")
-                    if not _is_allowed_origin(origin):
-                        logger.warning("CSRF保护：Bearer Token请求Origin验证失败: %s", origin)
-                        return JSONResponse(
-                            status_code=403,
-                            content={"detail": "跨站请求被拒绝"},
-                        )
-                elif not _has_bearer:
-                    csrf_cookie = request.cookies.get("fastapi_csrf_token")
-                    csrf_header = request.headers.get("X-CSRF-Token")
-                    if not csrf_cookie or not csrf_header or not secrets.compare_digest(csrf_cookie, csrf_header):
-                        return JSONResponse(
-                            status_code=403,
-                            content={"detail": "CSRF token 验证失败"},
-                        )
-
-            response = await call_next(request)
-
-            # 仅在请求未携带有效 CSRF cookie 时才生成新 token。此前每次响应（含 GET）
-            # 都轮换 cookie，浏览器多标签/并发请求下旧 cookie 会被新值覆盖，导致
-            # 基于 cookie 的 CSRF 校验偶发 403。复用已有 cookie 可避免该竞态。
-            csrf_token = request.cookies.get("fastapi_csrf_token")
-            if not csrf_token:
-                csrf_token = secrets.token_urlsafe(32)
-            # ⚠️ `Secure` 必须随「实际请求 scheme」判定，不能只看全局 is_production：
-            # 浏览器只对**可信来源**（https / localhost / 127.0.0.1）接受 Secure cookie，
-            # 局域网明文 HTTP（如 http://192.168.0.95:3000）会**直接丢弃**该 cookie
-            # ⇒ 前端 document.cookie 读不到 token ⇒ double-submit 永远失败
-            # ⇒ 该 origin 下所有 POST/PUT/DELETE 一律 403「CSRF token 验证失败」。
-            # 同一套判定见 api/v1/endpoints/auth.py::_set_login_cookies（登录 cookie 早已按
-            # scheme 自适应，所以现象是「能登录、但写不了」）。
-            # 注：CSRF_COOKIE_SECURE 的语义是「https 下是否打 Secure」——置 false 可在 HTTPS
-            # 上主动关闭；但**不具备**「在明文 HTTP 上强制开启」的能力（第 193 行对 _is_https
-            # 硬门控）。这是刻意的：Secure cookie 在非可信来源会被浏览器直接丢弃，
-            # 强制开启只会复现本次「读不到 token ⇒ 写请求全 403」的故障。
-            _is_https = (
-                request.url.scheme == "https"
-                or request.headers.get("x-forwarded-proto", "").split(",")[0].strip().lower() == "https"
-            )
-            _csrf_samesite = "lax"
-            _has_bearer_resp = request.headers.get("authorization", "").startswith("Bearer ")
-            _csrf_sec = _csrf_secure() if (_is_https and not _has_bearer_resp) else False
-            response.set_cookie(
-                key="fastapi_csrf_token",
-                value=csrf_token,
-                max_age=86400,
-                httponly=False,
-                samesite=_csrf_samesite,
-                secure=_csrf_sec,
-                path="/",
-            )
-            if _has_bearer_resp:
-                response.headers["X-CSRF-Token"] = csrf_token
-
-            return response
-
-        logger.info("CSRF 配置：API 变更请求需验证 CSRF token，Bearer Token 请求验证 Origin")
-    except ImportError:
-        logger.warning("itsdangerous 未安装，CSRF cookie 保护未启用")
+    logger.info("CSRF 配置：API 变更请求需验证 CSRF token，Bearer Token 请求验证 Origin")
 
 
 def _setup_security_headers(app: FastAPI) -> None:
@@ -406,12 +434,16 @@ def _setup_body_size_limit(app: FastAPI) -> None:
                         media_type="application/json",
                     )
             else:
-                body = b""
+                # 无 Content-Length（chunked/流式上传）：累积计数器边读边判，一旦超限立刻
+                # 413 并停止累积；否则 512MB 分块上传会把内存放大到同一量级（P0-12）。
+                received = 0
+                chunks: list[bytes] = []
                 async for chunk in request.stream():
-                    body += chunk
-                    if len(body) > limit:
+                    received += len(chunk)
+                    if received > limit:
                         return _body_too_large_response(limit)
-                request._body = body
+                    chunks.append(chunk)
+                request._body = b"".join(chunks)
         response = await call_next(request)
         response.headers["X-API-Version"] = "v1"
         return response

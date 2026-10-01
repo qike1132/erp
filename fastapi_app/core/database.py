@@ -13,6 +13,7 @@ import os
 
 logger = logging.getLogger(__name__)
 
+from fastapi import Request
 from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.exc import DisconnectionError, OperationalError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
@@ -47,6 +48,9 @@ def _get_pool_config() -> dict:
     return {
         "pool_size": pool_size,
         "pool_timeout": int(os.getenv("DB_POOL_TIMEOUT", "30")),
+        # 连接最长存活秒数：到期回收重建，避免复用被中间设备静默丢弃的坏连接。
+        # 默认 1800 与历史上 .env 的 DB_POOL_RECYCLE 值一致（该键此前从不被读取）。
+        "pool_recycle": int(os.getenv("DB_POOL_RECYCLE", "1800")),
         "max_overflow": max_overflow,
         "pool_pre_ping": True,
         "pool_use_lifo": True,  # LIFO 策略，减少空闲连接
@@ -200,7 +204,29 @@ def SyncSession():  # noqa: N802 - 兼容遗留调用方（utils.audit 等）依
     return _SyncSessionLocal()
 
 
-async def get_async_db():
+# 提交失败计数器的惰性缓存（见 _commit_failure_counter()）
+_COMMIT_FAILURE_COUNTER = None
+
+
+def _commit_failure_counter():
+    """获取「事务提交失败」计数器（惰性初始化，避免 metrics ↔ database 循环导入）。
+
+    名称遵循仓库既有约定（*_total，如 domain_event_publish_failures_total）；
+    注册走 core.metrics 的 _get_or_create_counter，热重载时不会重复注册。
+    prometheus_client 缺失时 core.metrics 返回空实现，此处无需分支。
+    """
+    global _COMMIT_FAILURE_COUNTER
+    if _COMMIT_FAILURE_COUNTER is None:
+        from fastapi_app.core.metrics import _get_or_create_counter
+
+        _COMMIT_FAILURE_COUNTER = _get_or_create_counter(
+            "db_commit_failures_total",
+            "事务提交失败次数（响应已发送但数据未落库，静默丢失风险）",
+        )
+    return _COMMIT_FAILURE_COUNTER
+
+
+async def get_async_db(request: Request = None):  # type: ignore[assignment]
     """异步数据库会话依赖（Unit of Work 模式）
 
     - 请求成功时自动 commit
@@ -224,14 +250,25 @@ async def get_async_db():
                 logger.warning("Session rollback failed (may be broken after psql restore)", exc_info=True)
             raise
         # FastAPI 0.106+ 语义：依赖收尾在响应发送之后执行，commit 失败时客户端已收到
-        # 成功响应。此处显式 ERROR 告警（监控可对关键字段告警），防止静默数据丢失。
+        # 成功响应。此处显式 ERROR 告警 + 指标计数（监控可对关键字段告警），防止静默数据丢失。
         try:
             await session.commit()
         except (RuntimeError, OSError, ValueError, SQLAlchemyError):
+            # request_id 由 request_id_middleware 写入 request.state；db_name 与
+            # config._build_database_uri() 同源（Settings 未声明 DB_NAME 字段，
+            # 写 settings.DB_NAME 会 AttributeError，故直接读环境变量）。
+            request_id = getattr(getattr(request, "state", None), "request_id", None)
+            path = getattr(getattr(request, "url", None), "path", None)
+            db_name = os.getenv("DB_NAME", "erp_system")
+            _commit_failure_counter().inc()
             logger.error(
-                "事务提交失败：响应已发送但数据未落库（静默丢失风险），"
-                "path 相关信息见请求日志",
+                "事务提交失败：响应已发送但数据未落库（静默丢失风险） "
+                "request_id=%s db_name=%s path=%s",
+                request_id,
+                db_name,
+                path,
                 exc_info=True,
+                extra={"request_id": request_id, "db_name": db_name, "path": path},
             )
             try:
                 await session.rollback()

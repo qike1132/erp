@@ -23,3 +23,29 @@ max_vue_component_length = 400
 # 存量文件一旦被改动就阻断提交。1600 仍能拦住新增的上帝类。
 # 本值是唯一来源：file_size_gate.py 与 CI 均从此处读取，不再各自硬编码。
 max_file_size = 1600
+
+# ------------------------------------------------------------
+# pip-audit 豁免清单（P0-11 ④）
+#
+# 每条豁免必须回答三个问题：豁免哪个漏洞（id）、为什么能豁免（reason）、
+# 最迟到什么时候必须处理掉（expires，ISO 日期）。由 scripts/quality_gate.py 的
+# pip_audit 门禁校验，判定规则：
+#   - 缺 id / 缺 reason / expires 非 ISO 日期 / id 重复 → 失败；
+#   - expires 已过期 → 失败；expires 距今超过 pip_audit_max_days → 失败
+#     （不允许用远期日期变相永久豁免）；
+#   - 僵尸条目（当前漏洞库里匹配不到该 id）→ 失败：漏洞已消失/依赖已升级，
+#     豁免必须删掉。该判定需要漏洞库数据，CI 用 --audit-report 传入现场
+#     `pip-audit --format json` 的结果；本地无数据时门禁会如实 WARN 并跳过。
+#   - 门禁同时打印豁免条数与 ≤30 天内即将到期的条目。
+#
+# 当前清单为**空**：本机未安装 pip-audit（且本次改造遵守"不做网络/库侧变更"
+# 纪律），无法枚举现存漏洞，因此不写任何无法验证的条目。机制本身由
+# `python scripts/quality_gate.py --self-test --only pip_audit` 用合成 fixture 证明。
+#
+# 新增条目的写法（示例，勿直接启用）：
+#   [[tool.code-quality.pip-audit-ignores]]
+#   id = "PYSEC-2025-00001"
+#   reason = "上游修复版未发布，已在该服务入口做输入校验（跟踪 INC-1234）"
+#   expires = "2026-12-31"
+# ------------------------------------------------------------
+pip_audit_max_days = 180

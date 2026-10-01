@@ -397,3 +397,18 @@ _firefox_profile_*/
 #   保留同名 .example 模板（不含口令）继续入库。
 #   注意：本规则只匹配该确切路径，不会误伤 userlist.txt.example。
 /config/pgbouncer/userlist.txt
+
+# === 2026-10-01 私钥与凭据副本不得入库（captain 补） ===
+# 背景：config/tls/ 下出现 CA 与服务端**私钥**（ca.key/server.key，未忽略），
+#   且工作区存在 .env.bak-pre-p010（.env 全量副本）。三者 git check-ignore 均为 exit 1，
+#   任何一次 `git add -A` 都会把私钥与生产口令副本写入索引。
+#   server.crt/.csr/.ext 为公开材料，继续允许入库。
+/config/tls/*.key
+/config/tls/*.srl
+# .env 的备份副本（第 30 行的 `.env` 只匹配确切文件名，不覆盖 ".env.bak-*"）
+.env.bak-*
+.env.*.bak*
+# AgentTeams 运行态目录（含任务/邮箱状态，不入库）
+/.agent-teams/
+# 根目录一次性排查脚本的 .ini 变体（与 /_*.py、/_*.sh、/_*.txt、/_*.json、/_*.mjs 同族）
+/_*.ini

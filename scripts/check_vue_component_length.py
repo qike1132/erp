@@ -7,6 +7,7 @@ Vue 组件行数检测脚本
 
 用法:
     python scripts/check_vue_component_length.py [--max-length 400] [路径...]
+    python scripts/check_vue_component_length.py --json [路径...]   # 机器可读（门禁语义解析）
 
 退出码:
     0: 未发现巨型组件
@@ -18,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import io
+import json
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -71,6 +73,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Vue 组件行数检测")
     parser.add_argument("paths", nargs="*", help="待扫描目录")
     parser.add_argument("--max-length", type=int, default=400, help="组件最大行数阈值")
+    parser.add_argument(
+        "--json", action="store_true", help="机器可读输出（供 quality_gate.py 语义解析）"
+    )
     args = parser.parse_args()
 
     scan_dir = Path(args.paths[0]).resolve() if args.paths else DEFAULT_SCAN_DIR
@@ -81,6 +86,11 @@ def main() -> int:
         v = scan_file(f, args.max_length)
         if v is not None:
             violations.append(v)
+
+    if args.json:
+        payload = {"violations": [asdict(v) for v in violations], "total": len(violations)}
+        print(json.dumps(payload, ensure_ascii=False))
+        return 0 if not violations else 1
 
     if not violations:
         print(f"[PASS] 未发现超过 {args.max_length} 行的 Vue 组件")

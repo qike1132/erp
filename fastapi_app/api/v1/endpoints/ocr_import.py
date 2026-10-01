@@ -15,6 +15,7 @@ from fastapi_app.core.config import settings
 from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_any_permission
 from fastapi_app.core.exceptions import db_transaction
+from fastapi_app.core.validators import magic_signature, matches_upload_magic, require_upload_magic
 from fastapi_app.schemas.ocr_import import (
     OcrOrderPreviewResult,
     OcrPdfImportResult,
@@ -75,6 +76,11 @@ async def upload_shipping_docs(files: list[UploadFile]=File(..., description='�
             if len(content) == 0:
                 all_errors.append(f'{filename}: 文件为空，已跳过')
                 continue
+            # P0-12：扩展名通过后再校验文件头（改扩展名的伪 PDF/图片在此拦下，跳过该文件）
+            if not matches_upload_magic(content, ext):
+                all_errors.append(f'{filename}: 文件内容与扩展名不符（签名 {magic_signature(content)}），已跳过')
+                logger.warning('OCR 批量上传魔数校验失败: filename=%s ext=%s %s', filename, ext, magic_signature(content))
+                continue
             valid_files += 1
             if len(files) > 1:
                 svc._update_progress(task_id, message=f'正在处理第 {i + 1}/{len(files)} 个文件: {filename}')
@@ -114,6 +120,7 @@ async def preview_shipping_doc(file: UploadFile=File(..., description='PDF 或�
         raise HTTPException(status_code=400, detail='文件为空')
     if len(content) > MAX_OCR_FILE_SIZE:
         raise HTTPException(status_code=400, detail='文件超过 10MB 限制')
+    require_upload_magic(content, ext, filename=filename)  # P0-12：文件头校验，失败 400
     try:
         table_pages = await asyncio.to_thread(svc.extract_table_structure, content, filename)
         if table_pages:
@@ -161,6 +168,7 @@ async def preview_order_doc(
         raise HTTPException(status_code=400, detail='文件为空')
     if len(content) > MAX_OCR_FILE_SIZE:
         raise HTTPException(status_code=400, detail='文件超过 10MB 限制')
+    require_upload_magic(content, ext, filename=filename)  # P0-12：文件头校验，失败 400
     try:
         items, raw_text, warnings = await svc.preview_order_items(db, content, filename, customer)
     except (OperationalError, DisconnectionError) as e:

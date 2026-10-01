@@ -22,7 +22,7 @@ from fastapi_app.core.deps import (
     resolve_production_write_scope,
 )
 from fastapi_app.core.exceptions import db_transaction
-from fastapi_app.core.limiter import limiter
+from fastapi_app.core.limiter import limiter, rate_limit_key
 from fastapi_app.core.production_scope import narrow_departments
 from fastapi_app.core.response import success_response
 from fastapi_app.schemas.daily_production import (
@@ -325,7 +325,7 @@ async def trend(
 
 
 @router.get('/export')
-@limiter.limit("100/minute")  # 内网宽松：导出接口取消严格限流
+@limiter.limit("100/minute", key_func=rate_limit_key)  # 内网宽松：导出接口取消严格限流；P0-6(d) 显式绑键
 async def export_records(
     request: Request,
     start_date: str = Query('', description='起始日期 (YYYY-MM-DD)'),

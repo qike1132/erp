@@ -219,7 +219,7 @@ class BackupAlertService:
                 if record:
                     record.status = 'failed'
                     record.error_message = f"{alert_data['severity'].upper()}: {alert_data['error']}"
-                    await db.commit()  # independent-transaction; manual-tx: try/except 内显式事务控制
+                    await db.commit()  # manual-tx: 告警落库须独立提交，避免主事务回滚丢失 failed 标记
 
                 # 这里可以添加专门的告警记录表，暂时先记录到备份记录
 

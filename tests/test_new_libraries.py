@@ -14,14 +14,55 @@
 
 from datetime import datetime
 
-import arrow
-import bleach
-import chardet
+import arrow  # requirements/test.txt:31 明确声明并已安装
 import pytest
-from pypinyin import Style, lazy_pinyin, pinyin
-from rapidfuzz import fuzz, process
+
+# 本文件覆盖的 6 个库里只有 arrow / XlsxWriter 装在 .venv；chardet、pypinyin、rapidfuzz、bleach
+# 既不在 requirements 里（base.txt:96-99 注明「代码中未 import」后删除，test.txt 也未加回），
+# 实测 importlib.util.find_spec 全为 None。原先四个硬 import 意味着任何一个缺失都会让
+# 全量 pytest 在【收集阶段】ImportError 中断，其余几千条用例的结论被整体掩盖
+# （t4 报告 collect 3798 items / 1 error）。现统一改为「缺失则只 skip 用到它的用例」：
+# 测试类与断言一字未删，库装回来即自动恢复执行，与 tests/test_api_routes.py 的 HAS_FLASK 习惯一致。
+HAS_CHARDET = HAS_PYPINYIN = HAS_RAPIDFUZZ = HAS_BLEACH = False
+
+try:
+    import chardet
+
+    HAS_CHARDET = True
+except ImportError:
+    chardet = None
+
+try:
+    from pypinyin import Style, lazy_pinyin, pinyin
+
+    HAS_PYPINYIN = True
+except ImportError:
+    Style = lazy_pinyin = pinyin = None
+
+try:
+    from rapidfuzz import fuzz, process
+
+    HAS_RAPIDFUZZ = True
+except ImportError:
+    fuzz = process = None
+
+try:
+    import bleach
+
+    HAS_BLEACH = True
+except ImportError:
+    bleach = None
+
+_OPTIONAL_MISSING = "not installed (removed from requirements/base.txt: app code does not import it)"
+requires_chardet = pytest.mark.skipif(not HAS_CHARDET, reason="chardet " + _OPTIONAL_MISSING)
+requires_pypinyin = pytest.mark.skipif(not HAS_PYPINYIN, reason="pypinyin " + _OPTIONAL_MISSING)
+requires_rapidfuzz = pytest.mark.skipif(not HAS_RAPIDFUZZ, reason="rapidfuzz " + _OPTIONAL_MISSING)
+requires_bleach = pytest.mark.skipif(
+    not HAS_BLEACH, reason="bleach not installed (deprecated 2023, removed from requirements/base.txt)"
+)
 
 
+@requires_chardet
 class TestChardet:
     """chardet库测试"""
 
@@ -56,6 +97,7 @@ class TestChardet:
         assert result['encoding'].lower() in ['utf-8', 'ascii']
 
 
+@requires_pypinyin
 class TestPypinyin:
     """pypinyin库测试"""
 
@@ -171,6 +213,7 @@ class TestArrow:
         assert "ago" in result.lower() or "前" in result
 
 
+@requires_bleach
 class TestBleach:
     """bleach库测试"""
 
@@ -213,6 +256,7 @@ class TestBleach:
         assert "<p>" in result
 
 
+@requires_rapidfuzz
 class TestRapidfuzz:
     """rapidfuzz库测试（替代 fuzzywuzzy）"""
 
@@ -272,6 +316,7 @@ class TestIntegration:
         assert match is not None
         assert len(match.group()) == 11
 
+    @requires_pypinyin
     def test_pinyin_search_integration(self):
         """测试拼音搜索集成"""
         products = [
@@ -297,6 +342,7 @@ class TestIntegration:
         assert start.day == 1
         assert end.day >= 28
 
+    @requires_bleach
     def test_xss_protection_integration(self):
         """测试XSS防护集成"""
         user_input = '<script>alert("xss")</script>这是备注'
@@ -309,6 +355,7 @@ class TestIntegration:
 class TestPerformance:
     """性能测试"""
 
+    @requires_chardet
     def test_chardet_performance(self):
         """测试chardet性能"""
         import time
@@ -322,6 +369,7 @@ class TestPerformance:
 
         assert elapsed < 5.0
 
+    @requires_pypinyin
     def test_pinyin_performance(self):
         """测试拼音转换性能"""
         import time

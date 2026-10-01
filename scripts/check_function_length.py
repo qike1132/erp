@@ -7,6 +7,7 @@
 
 用法:
     python scripts/check_function_length.py [--max-length 80] [路径...]
+    python scripts/check_function_length.py --json [路径...]   # 机器可读（门禁语义解析）
 
 退出码:
     0: 未发现超长函数
@@ -20,6 +21,7 @@ from __future__ import annotations
 import argparse
 import ast
 import io
+import json
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -134,6 +136,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="后端函数行数检测")
     parser.add_argument("paths", nargs="*", help="待扫描目录/文件")
     parser.add_argument("--max-length", type=int, default=80, help="函数最大行数阈值")
+    parser.add_argument(
+        "--json", action="store_true", help="机器可读输出（供 quality_gate.py 语义解析）"
+    )
     args = parser.parse_args()
 
     scan_dirs = [Path(p).resolve() for p in args.paths] or DEFAULT_SCAN_DIRS
@@ -170,6 +175,14 @@ def main() -> int:
         for rel, err in parse_errors[:10]:
             print(f"  {rel}: {err}", file=sys.stderr)
         return 2
+
+    if args.json:
+        payload = {
+            "violations": [asdict(v) for v in all_violations],
+            "total": len(all_violations),
+        }
+        print(json.dumps(payload, ensure_ascii=False))
+        return 0 if not all_violations else 1
 
     if not all_violations:
         print(f"[PASS] 未发现超过 {args.max_length} 行的函数")

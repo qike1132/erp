@@ -18,9 +18,9 @@ import psutil
 from sqlalchemy.exc import SQLAlchemyError
 
 from fastapi_app.core.database import get_async_db_context
-from fastapi_app.services.backup._constants import BACKUP_DIR
+from fastapi_app.services.backup._constants import BACKUP_DIR, retention_count, retention_days
 from fastapi_app.services.backup.metrics.alert_service import alert_service
-from fastapi_app.services.backup.records import normalize_backup_ts
+from fastapi_app.services.backup.records import _delete_backup_sidecars, normalize_backup_ts
 from fastapi_app.services.backup.verify.health_check_service import health_check_service
 from fastapi_app.shared_models.backup_record import BackupRecord
 
@@ -52,15 +52,20 @@ class BackupCleanupService:
         self.cleanup_config = self._load_cleanup_config()
 
     def _load_cleanup_config(self) -> dict[str, Any]:
-        """加载清理配置"""
+        """加载清理配置
+
+        保留策略两项（P0-2）不再自己读环境变量，改调 _constants 的单源函数 ——
+        此前这里、records 的硬编码 50 份、policy_service 各读一份，同一台机器上
+        「清理」按 50 份删而「策略校验」按 100 份算，删除量无法解释。
+        """
         import os
 
         return {
-            # 保留策略 - 时间（天）
-            'retention_days': int(os.environ.get('BACKUP_RETENTION_DAYS', '30')),
+            # 保留策略 - 时间（天）：env 单一真源 BACKUP_RETENTION_DAYS（默认 30）
+            'retention_days': retention_days(),
 
-            # 保留策略 - 数量
-            'retention_count': int(os.environ.get('BACKUP_RETENTION_COUNT', '100')),
+            # 保留策略 - 数量：env 单一真源 BACKUP_RETENTION_COUNT（默认 100）
+            'retention_count': retention_count(),
 
             # 存储空间阈值（百分比）
             'disk_space_threshold': float(os.environ.get('BACKUP_DISK_SPACE_THRESHOLD', '10.0')),
@@ -534,10 +539,10 @@ class BackupCleanupService:
                         deleted_files.append(filename)
                         logger.info(f"删除备份文件: {filename}")
 
-                        # 同时删除对应的记录文件（如果有）
-                        record_file = BACKUP_DIR / f"{filename}.record"
-                        if record_file.exists():
-                            record_file.unlink()
+                        # 同时删除伴随文件：.meta（含 .zip.enc.meta）与 .record。
+                        # 与 records.cleanup_old_backups 同口径（共用同一 helper），
+                        # 避免「删了 .enc，.zip.enc.meta / .record 永久残留」。
+                        _delete_backup_sidecars(filepath)
 
                     except OSError as e:
                         errors.append(f"{filename}: {e!s}")
@@ -596,7 +601,7 @@ class BackupCleanupService:
                 deleted_count = result.rowcount or 0
 
                 if deleted_count > 0:
-                    await db.commit()  # independent-transaction; manual-tx: try/except 内显式事务控制
+                    await db.commit()  # manual-tx: 批量清理须即时提交并释放行锁（异常由本函数兜底，不回滚已删文件）
 
                 return deleted_count, False
 

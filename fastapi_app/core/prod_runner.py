@@ -265,7 +265,9 @@ def _cmd_uvicorn(api_port: int, workers: int) -> list[str]:
         "--workers", str(workers),
         "--http", "httptools",
         "--proxy-headers",
-        "--forwarded-allow-ips=*",
+        # P0-6(b)：只信任回环代理（本机 nginx）。取 "*" 等于无条件信任任何来源的
+        # X-Forwarded-For/Proto —— 攻击者可伪造 XFF 绕过基于 IP 的限流与审计。
+        "--forwarded-allow-ips=127.0.0.1",
         "--no-access-log",
         "--timeout-keep-alive", "5",
     ]

@@ -39,7 +39,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from fastapi_app.core.database import get_async_db_context
 from fastapi_app.core.deps import get_current_user_id
-from fastapi_app.core.limiter import limiter
+from fastapi_app.core.limiter import limiter, rate_limit_key
 from fastapi_app.shared_models import WebVital
 
 logger = logging.getLogger(__name__)
@@ -203,7 +203,7 @@ def _summarize_from_memory() -> dict:
 
 
 @router.post("/vitals", response_model=VitalsReceiveResponse)
-@limiter.limit("30/minute")  # M-1：匿名端点（sendBeacon 带不了鉴权头），靠 IP/用户限流挡存储洪泛
+@limiter.limit("30/minute", key_func=rate_limit_key)  # M-1：匿名端点（sendBeacon 带不了鉴权头），靠 IP/用户限流挡存储洪泛；P0-6(d) 显式绑键
 async def receive_vitals(payload: VitalsPayload, request: Request):
     if len(payload.vitals) > _MAX_BATCH:
         return {"ok": False, "error": "batch too large", "persisted": False}

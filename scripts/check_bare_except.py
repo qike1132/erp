@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import ast
 import io
+import json
 import re
 import sys
 from dataclasses import asdict, dataclass
@@ -170,6 +171,9 @@ def main() -> int:
         default=DEFAULT_WHITELIST,
         help="白名单配置文件",
     )
+    parser.add_argument(
+        "--json", action="store_true", help="机器可读输出（供 quality_gate.py 语义解析）"
+    )
     args = parser.parse_args()
 
     scan_dirs = [Path(p).resolve() for p in args.paths] or DEFAULT_SCAN_DIRS
@@ -201,6 +205,17 @@ def main() -> int:
             print(f"  {rel}: {err}", file=sys.stderr)
 
     real = [v for v in all_violations if not is_whitelisted(v, whitelist)]
+
+    if args.json:
+        payload = {
+            "violations": [
+                {"file": v.file, "line": v.line, "except_type": v.except_type} for v in real
+            ],
+            "parse_errors": len(parse_errors),
+            "total": len(real),
+        }
+        print(json.dumps(payload, ensure_ascii=False))
+        return 0 if not real else 1
 
     if not real:
         print("[PASS] 未发现裸/宽泛 except（白名单与 defensive 标注已豁免）")

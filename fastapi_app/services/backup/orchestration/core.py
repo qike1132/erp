@@ -92,6 +92,49 @@ def resolve_backup_table_scope(
     return None, set(exclude_tables)
 
 
+def pack_config_files(zf: zipfile.ZipFile, include_sensitive_config: bool) -> tuple[list[str], list[str]]:
+    """把配置清单写进备份包，返回 (已打包的归档名, 被排除的归档名)。
+
+    归档名取自 _constants.config_files_to_package()，**自带命名空间**（config/ 或
+    root/）。P0-2 修复：此前这里无条件拼 'config/'，把运行时 .env 打成
+    config/root/.env —— 还原时命中 config/ 前缀，落到 CONFIG_DIR/root/.env 幽灵
+    目录，而项目根的 .env 永远不被还原；该条目名也不在敏感白名单里，明文还原可
+    绕过 confirm_sensitive 闸门。
+
+    include_sensitive_config：本次备份是否加密。True 才打包敏感配置（jwt 私钥、
+    运行时 .env）；明文包一律排除，并记入被排除清单（manifest.includes.config_files_excluded）。
+    """
+    added: list[str] = []
+    excluded: list[str] = []
+    for file_path, archive_path in config_files_to_package():
+        if not file_path.is_file():
+            continue
+        if should_exclude_file(file_path, archive_path, include_sensitive_config):
+            excluded.append(archive_path)
+            logger.info(f"排除配置文件: {archive_path}")
+        else:
+            zf.write(file_path, archive_path)
+            added.append(archive_path)
+    return added, excluded
+
+
+def record_config_includes(
+    manifest: dict,
+    config_files_added: list[str],
+    config_files_excluded: list[str],
+    include_sensitive_config: bool,
+) -> None:
+    """把配置打包结果写进 manifest['includes']（被排除项必须留痕）。
+
+    明文包不带敏感配置（含 root/.env），只在 manifest 里留 config_files_excluded ——
+    这是事后审计「这次备份到底缺了什么」的唯一依据，也是还原前的提示来源。
+    """
+    manifest['includes']['config_files'] = config_files_added
+    if config_files_excluded:
+        manifest['includes']['config_files_excluded'] = config_files_excluded
+    manifest['includes']['sensitive_config_included'] = include_sensitive_config
+
+
 async def create_full_backup(
     db: AsyncSession,
     user,
@@ -375,24 +418,15 @@ async def _do_create_full_backup(
                 if progress_cb:
                     await progress_cb('pack_filestore', 1.0, f'附件 {file_count} 个')
 
-            config_files_added = []
-            config_files_excluded = []
-            # 清单唯一来源：_constants.config_files_to_package()（H-3，2026-09-29）。
+            # 清单唯一来源：_constants.config_files_to_package()（H-3，2026-09-29），
+            # 归档名自带 config/ 或 root/ 命名空间（P0-2）——打包侧不再拼前缀。
             # 现役 JWT 密钥按 settings 推导（随轮换自动跟进）+ 运行时 .env（归档为
             # root/.env）；**退役**的 private.pem/public.pem 不再随包分发 —— 它们是
             # 已泄漏的历史密钥，随包走等于继续扩散。
-            for file_path, relative_path in config_files_to_package():
-                if file_path.is_file():
-                    if should_exclude_file(file_path, relative_path, include_sensitive_config):
-                        config_files_excluded.append(relative_path)
-                        logger.info(f"排除配置文件: {relative_path}")
-                    else:
-                        zf.write(file_path, f'config/{relative_path}')
-                        config_files_added.append(relative_path)
-            manifest['includes']['config_files'] = config_files_added
-            if config_files_excluded:
-                manifest['includes']['config_files_excluded'] = config_files_excluded
-            manifest['includes']['sensitive_config_included'] = include_sensitive_config
+            config_files_added, config_files_excluded = pack_config_files(zf, include_sensitive_config)
+            record_config_includes(
+                manifest, config_files_added, config_files_excluded, include_sensitive_config
+            )
             if progress_cb:
                 await progress_cb('backup_config', 1.0, f'配置 {len(config_files_added)} 个')
 

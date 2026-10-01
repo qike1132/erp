@@ -86,20 +86,50 @@ def active_jwt_key_relative_paths() -> list[str]:
     return rel_paths
 
 
+# 归档命名空间：`config/` 还原回 CONFIG_DIR，`root/` 还原回项目根（运行时 .env）。
+# 清单项**自带**命名空间，打包侧照抄即可、不得再自行拼前缀 —— P0-2 修复：
+# 此前 core.py 无条件拼 'config/'，把运行时 .env 打成 config/root/.env，
+# 还原时命中 config/ 前缀落到 config/root/.env（幽灵目录），真正的项目根 .env
+# 永远不被还原；且那个条目名不在敏感白名单里，明文还原可绕过二次确认闸门。
+CONFIG_NAMESPACE = 'config/'
+ROOT_NAMESPACE = 'root/'
+
+
+def _config_entry(rel_path: str) -> tuple[Path, str]:
+    """config/ 命名空间的一条打包清单项：(源文件绝对路径, 归档内相对路径)。"""
+    return (CONFIG_DIR / rel_path, f'{CONFIG_NAMESPACE}{rel_path}')
+
+
 def config_files_to_package() -> list[tuple[Path, str]]:
     """要打进备份的配置文件：(源文件绝对路径, 归档内相对路径)。
 
-    `config/` 命名空间由 restore_config 还原回 config/；`root/` 命名空间还原回项目根
-    （运行时 .env 在那儿）。
+    归档相对路径**自带命名空间**：`config/*` 由 restore_config 还原回 CONFIG_DIR，
+    `root/*` 还原回项目根（运行时 .env 在那儿）。
     """
     entries: list[tuple[Path, str]] = [
-        (CONFIG_DIR / rel, rel) for rel in active_jwt_key_relative_paths()
+        _config_entry(rel) for rel in active_jwt_key_relative_paths()
     ]
     entries += [
-        (CONFIG_DIR / 'redis.production.conf', 'redis.production.conf'),
-        (CONFIG_DIR / 'nginx.conf', 'nginx.conf'),
-        (CONFIG_DIR / '.env.production', '.env.production'),
-        (RUNTIME_ENV_FILE, 'root/.env'),
+        # --- 灾备件（Linux/Docker 形态，本机运行时不加载） ---
+        _config_entry('redis.production.conf'),
+        _config_entry('nginx.conf'),
+        _config_entry('.env.production'),
+        # --- 本机 Windows 运行时**真正生效**的配置（P0-2 补齐） ---
+        # 此前只打进了 nginx.conf（Docker 形态、本机永不加载），而 NSSM 服务
+        # erp-web 实际加载的 nginx-windows.conf、server 级 include 的
+        # security-headers.conf、NSSM 服务 erp-redis-broker 的 redis-broker.conf
+        # 全都不进包 —— 灾难恢复时按包内配置起服务，起的是另一个形态。
+        # 见 config/README.md「一、运行时真正生效」。
+        _config_entry('nginx-windows.conf'),
+        _config_entry('security-headers.conf'),
+        _config_entry('redis-broker.conf'),
+        # --- NSSM 服务定义（注册表参数的文件态快照） ---
+        # 5 个生产服务（erp-prod / erp-arq / erp-web / erp-redis /
+        # erp-redis-broker）的真实定义在注册表，不在仓库里；只恢复配置
+        # 文件而拿不到服务定义，等于「有配置、无宿主」。该文件由
+        # server_manager/constants.py 的服务名/端口推导，见其 _SVC_ALL。
+        _config_entry('nssm-services.json'),
+        (RUNTIME_ENV_FILE, f'{ROOT_NAMESPACE}.env'),
     ]
     return entries
 
@@ -108,7 +138,11 @@ def config_files_to_package() -> list[tuple[Path, str]]:
 # 2026-09-29（H-3）：补入运行时 .env 与**现役**密钥；历史名（private.pem /
 # public.pem / .env.production）**保留** —— 旧备份包里装着这些退役件，
 # 还原闸门必须照样拦得住。
-_SENSITIVE_CONFIG_FILES = {'.env.production', '.env', 'jwt/private.pem', 'jwt/public.pem'}
+# `root/.env` 是清单里的**归档名**（带命名空间）；`'.env'` / `'.env.production'` 是
+# config 内相对名，保留以兼容手工/旧格式归档与 BACKUP_EXCLUDE_FILES 写法。
+_SENSITIVE_CONFIG_FILES = {
+    '.env.production', '.env', 'root/.env', 'jwt/private.pem', 'jwt/public.pem',
+}
 _SENSITIVE_CONFIG_FILES.update(active_jwt_key_relative_paths())
 # 从环境变量读取排除文件列表
 BACKUP_EXCLUDE_FILES = os.environ.get('BACKUP_EXCLUDE_FILES', '')
@@ -127,6 +161,35 @@ _ts_col_cache: dict[str, str | None] = {}
 _RESTORE_LOCK_KEY = "erp:restore_lock"
 _RESTORE_LOCK_TTL = 3600  # 1 hour
 
-# 备份保留策略（Phase 4.1）
-BACKUP_RETENTION_DAYS = 30
-BACKUP_MAX_COUNT = 50
+# ---------------------------------------------------------------------------
+# 备份保留策略（Phase 4.1；P0-2 单一真源收敛）
+# ---------------------------------------------------------------------------
+# 环境变量的**唯一**读取点。此前这里有两条硬编码（30 天 / 50 份），与
+# orchestration/policy_service.py:49-52、cleanup/service.py:60-63 读 env
+# （30 天 / 100 份）三处并存 —— 同一台机器上「清理」按 50 份删、「策略校验」
+# 按 100 份算，删除量无法解释。现统一由下面两个函数读 env：
+#   BACKUP_RETENTION_DAYS  默认 '30'   过期天数
+#   BACKUP_RETENTION_COUNT 默认 '100'  最多保留份数
+# 函数式（调用时求值）而非模块常量：调用方在**运行时**取值，改 .env 重启即生效，
+# 也让测试可用 monkeypatch.setenv 直接覆盖；模块级常量仅作向后兼容的启动快照
+# （from ._constants import BACKUP_RETENTION_DAYS / BACKUP_MAX_COUNT 的既有调用方不受影响）。
+# 注意：备份文件的「年龄」取自伴随 .meta 的 created_at，而它由
+# services/backup/incremental.py:52 以 datetime.now(UTC) 写入（UTC 口径）。
+RETENTION_DAYS_ENV = 'BACKUP_RETENTION_DAYS'
+RETENTION_COUNT_ENV = 'BACKUP_RETENTION_COUNT'
+RETENTION_DAYS_DEFAULT = 30
+RETENTION_COUNT_DEFAULT = 100
+
+
+def retention_days() -> int:
+    """备份保留天数（env ``BACKUP_RETENTION_DAYS``，缺省 30）。"""
+    return int(os.environ.get(RETENTION_DAYS_ENV, str(RETENTION_DAYS_DEFAULT)))
+
+
+def retention_count() -> int:
+    """备份最多保留份数（env ``BACKUP_RETENTION_COUNT``，缺省 100）。"""
+    return int(os.environ.get(RETENTION_COUNT_ENV, str(RETENTION_COUNT_DEFAULT)))
+
+
+BACKUP_RETENTION_DAYS = retention_days()
+BACKUP_MAX_COUNT = retention_count()

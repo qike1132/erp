@@ -41,7 +41,9 @@ def make_customer(cid: int, name: str) -> MagicMock:
     return c
 
 
-def upload(name: str = 'order.png', content: bytes = b'\x89PNG-fake') -> list:
+# P0-12：上传魔数校验接入后，PNG 内容必须带真实 PNG 签名（\x89PNG\r\n\x1a\n），
+# 否则会在进入本端点逻辑前被 400 拦下（本文件测的是订单预览语义，不是上传校验）。
+def upload(name: str = 'order.png', content: bytes = b'\x89PNG\r\n\x1a\n' + b'fake-image-body') -> list:
     return [('file', (name, BytesIO(content), 'image/png'))]
 
 

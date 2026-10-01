@@ -16,8 +16,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi_app.core.config import settings
 from fastapi_app.core.database import get_async_db
 from fastapi_app.core.deps import create_access_token, create_refresh_token, get_current_user_id
-from fastapi_app.core.limiter import limiter, memory_limiter
+from fastapi_app.core.limiter import limiter, memory_limiter, rate_limit_key
 from fastapi_app.core.response import success_response
+from fastapi_app.core.validators import matches_upload_magic, require_upload_magic
 
 logger = logging.getLogger(__name__)
 
@@ -214,7 +215,7 @@ def _set_login_cookies(  # log-context: internal helper 无请求上下文
 
 
 @router.post("/login", response_model=LoginResponse)
-@limiter.limit("100/minute")  # 内网宽松：登录接口取消严格限流
+@limiter.limit("100/minute", key_func=rate_limit_key)  # 内网宽松：登录接口取消严格限流；P0-6(d) 显式绑键
 async def api_login(
     request: Request,
     response: Response,
@@ -483,23 +484,9 @@ async def api_refresh_token(
 
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
 MAX_UPLOAD_SIZE = 5 * 1024 * 1024  # 5MB
-IMAGE_SIGNATURES = {
-    b'\x89PNG\r\n\x1a\n': 'png',
-    b'\xff\xd8\xff': 'jpg',
-    b'GIF87a': 'gif',
-    b'GIF89a': 'gif',
-    b'RIFF': 'webp',
-}
-
-
 def _validate_image_content(content: bytes, ext: str) -> bool:
-    for sig, sig_ext in IMAGE_SIGNATURES.items():
-        if content[:len(sig)] == sig:
-            if sig_ext == 'jpg' and ext in ('jpg', 'jpeg'):
-                return True
-            if sig_ext == ext:
-                return True
-    return False
+    """图片内容与扩展名是否一致（P0-12 起委托 core.validators 的公共魔数层）。"""
+    return matches_upload_magic(content, ext)
 
 
 @router.post("/upload", response_model=FileUploadResponse)
@@ -523,8 +510,13 @@ async def upload_file(
     if len(content) > MAX_UPLOAD_SIZE:
         raise HTTPException(status_code=400, detail=f"文件大小超过{MAX_UPLOAD_SIZE // 1024 // 1024}MB限制")
 
-    if not _validate_image_content(content, ext):
-        raise HTTPException(status_code=400, detail="文件内容与扩展名不匹配，可能不是有效的图片文件")
+    # P0-12：统一走公共魔数层（失败记录文件签名并返回 400，语义不变）
+    require_upload_magic(
+        content,
+        ext,
+        filename=file.filename,
+        detail="文件内容与扩展名不匹配，可能不是有效的图片文件",
+    )
 
     # 使用对象存储服务保存文件，数据库存储元数据
     from fastapi_app.services.storage_service import save_upload

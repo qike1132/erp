@@ -125,9 +125,15 @@ jobs:
       run: |
         bandit -r fastapi_app/ utils/ -f json -o security-report.json -ii
     
-    - name: Dependency vulnerability scan
+    # 依赖漏洞扫描（P0-11⑨）：豁免清单在 pyproject.toml 的
+    # [[tool.code-quality.pip-audit-ignores]]（每条含 id / expires（单条 ≤180 天）/ reason）。
+    # pip-audit 自身有发现时退出码非 0，故用 `|| true` 只取 JSON 产物，把判定统一交给
+    # quality_gate.py 的 pip_audit 门禁：过期 / 僵尸条目（漏洞已消失）/ 超过有效期上限 /
+    # 缺 reason / 未豁免漏洞 一律 FAIL 并退出码非 0。
+    - name: Dependency vulnerability scan (ignore policy enforced by gate)
       run: |
-        pip-audit --format json > dependency-audit.json
+        pip-audit --format json > dependency-audit.json || true
+        python scripts/quality_gate.py --only pip_audit --audit-report dependency-audit.json --verbose
     
     - name: Upload security reports
       uses: actions/upload-artifact@v4
@@ -172,6 +178,21 @@ jobs:
     # 置于 ruff 之前，确保即使 ruff 步骤因存量告警失败，本步骤的结果仍然可见。
     - name: Run code quality gate (baseline ratchet)
       run: python scripts/quality_gate.py --verbose
+
+    # P0-11⑦ 恒失败自检：在临时目录里人为制造真实违规，断言门禁退出码非 0；
+    # 再移除违规，断言退出码回到 0。全程用 `--only` 隔离在单个门禁上，
+    # 不依赖任何存量基线（否则基线漂移会把「门禁能拦违规」这件事掩盖掉）。
+    - name: Gate self-test (prove bypasses fail, not just pass)
+      run: python scripts/quality_gate.py --self-test
+
+    # P0-11⑧ ruff 区间扩到 scripts/ 与 server_manager/：存量违规按 scripts/gate_baseline.json
+    # 的棘轮计数（只降不升）看住，新增即 FAIL。单独跑一次便于在 CI 日志直接看到新范围计数。
+    - name: Ruff ratchet for scripts/ + server_manager/
+      run: python scripts/quality_gate.py --only ruff --verbose
+
+    # P0-11⑩ 孤儿/死模块检查（janitor 交付；纯 exit-code 语义，无 stdout 解析）。
+    - name: Check orphan modules
+      run: python scripts/check_orphan_modules.py
 
     - name: Run Ruff gate
       run: ruff check fastapi_app tests fastapi_app/tests utils

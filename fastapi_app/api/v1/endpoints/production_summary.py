@@ -18,6 +18,7 @@ from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_permission
 from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.core.response import success_response
+from fastapi_app.core.validators import require_upload_magic
 from fastapi_app.schemas.production_summary import (
     CraftWorkActionResponse,
     CraftWorkCreate,
@@ -307,6 +308,8 @@ async def upload_packaging_excel(
         content = await file.read()
     except (OSError, ValueError) as e:
         raise HTTPException(status_code=400, detail=f'文件读取失败: {e}') from e
+    # P0-12：扩展名之外再校验文件头（改扩展名的伪 xlsx 在此拦下）
+    require_upload_magic(content, ('xlsx', 'xlsm'), filename=file.filename or '')
     async with db_transaction(db):
         created_by = user.username if hasattr(user, 'username') else ''
         result = await production_summary_service.upload_packaging_excel(db, content, created_by)

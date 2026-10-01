@@ -1,0 +1,80 @@
+{
+  "schema": "erp-nssm-services/1",
+  "description": "滨发 ERP 生产 NSSM 服务定义（灾备件，随加密备份包分发）。",
+  "note": "真实定义在注册表 HKLM\\SYSTEM\\CurrentControlSet\\Services\\<name>；本文件是服务名/可执行文件/参数/依赖的机读快照，用于灾难恢复时按原形态重建 5 个服务。推导依据 server_manager/constants.py 的 _SVC_ALL / _SVC_DEPENDS / _REDIS_BROKER_PORT，安装逻辑 server_manager/app.py:_install_services_flow 与 server_manager/service_ops.py:nssm_install。",
+  "install_tool": {
+    "name": "nssm",
+    "candidate_paths": [
+      "C:\\nssm\\nssm.exe",
+      "C:\\Program Files\\nssm\\nssm.exe",
+      "C:\\Program Files (x86)\\nssm\\nssm.exe",
+      "C:\\tools\\nssm\\nssm.exe"
+    ]
+  },
+  "common_settings": {
+    "AppDirectory": "D:\\erp_system",
+    "AppStdout": "D:\\erp_system\\logs\\<service>.log",
+    "AppStderr": "D:\\erp_system\\logs\\<service>.log",
+    "AppRotateFiles": "1",
+    "AppRotateBytes": "10485760",
+    "AppExit": "Default Restart",
+    "AppRestartDelay": "5000",
+    "Start": "SERVICE_AUTO_START",
+    "AppNoConsole": "1"
+  },
+  "python_env_extra": [
+    "APP_ENV=production",
+    "FASTAPI_DEBUG=false",
+    "PYTHONPATH=D:\\erp_system",
+    "PYTHONUTF8=1",
+    "PYTHONUNBUFFERED=1",
+    "UVICORN_WORKERS=<worker 数，与 .env 保持一致>"
+  ],
+  "services": [
+    {
+      "name": "erp-prod",
+      "role": "API 监督器（uvicorn 仅绑 127.0.0.1:5002，由 nginx 反代）",
+      "application": "<项目 .venv 的 python.exe>",
+      "parameters": ["-m", "fastapi_app.core.prod_runner", "--no-arq"],
+      "depends_on": ["erp-redis"]
+    },
+    {
+      "name": "erp-arq",
+      "role": "ARQ worker（后台任务/定时备份，独立进程）",
+      "application": "<项目 .venv 的 python.exe>",
+      "parameters": ["-m", "arq", "fastapi_app.core.arq_app.WorkerSettings"],
+      "depends_on": ["erp-redis-broker"]
+    },
+    {
+      "name": "erp-web",
+      "role": "nginx 静态前端 + 反代 API（监听 :3000）",
+      "application": "C:\\nginx\\nginx.exe",
+      "parameters": [
+        "-p", "D:\\erp_system",
+        "-c", "D:\\erp_system\\config\\nginx-windows.conf",
+        "-e", "D:\\erp_system\\logs\\nginx-error.log"
+      ],
+      "depends_on": []
+    },
+    {
+      "name": "erp-redis",
+      "role": "业务缓存 Redis（:6379）",
+      "application": "C:\\Redis\\redis-server.exe",
+      "parameters": ["C:\\Redis\\redis.windows-service.conf"],
+      "depends_on": []
+    },
+    {
+      "name": "erp-redis-broker",
+      "role": "ARQ broker Redis（:6380）",
+      "application": "C:\\Redis\\redis-server.exe",
+      "parameters": ["D:\\erp_system\\config\\redis-broker.conf"],
+      "depends_on": []
+    }
+  ],
+  "notes": [
+    "erp-prod 与 erp-arq 共用项目 .venv 的 python.exe（NSSM 5 服务均指向 .venv）。",
+    "erp-arq 必须 DependOnService=erp-redis-broker：否则开机 SCM 并行启动时 ARQ 抢在 broker 前连 6380，超时退出→NSSM 5s 重拉→无限重启，备份/定时任务静默停摆（2026-09-16 实测）。",
+    "erp-redis 用的是 C:\\Redis\\redis.windows-service.conf，不是本仓库 config/redis.production.conf（后者是灾备件，见 config/README.md 第一节）。",
+    "erp-web 的 nginx 配置取自 config/nginx-windows.conf，该文件与本文件同包。"
+  ]
+}

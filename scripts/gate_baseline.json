@@ -1,13 +1,15 @@
 {
-  "_comment": "门禁基线（棘轮）。这些是当前存量违规数，不阻断；新增违规会被 scripts/quality_gate.py 拦下。数字只允许下调。",
+  "_comment": "门禁基线（棘轮）。这些是当前存量违规数，不阻断；新增违规会被 scripts/quality_gate.py 拦下。数字只允许下调（P0-7 的 service_commit 9→12 是唯一一次例外：把被注释旁路静默豁免的 3 处显式化，理由见 docs/TRANSACTION_BOUNDARY_GUIDE.md §4）。",
   "counts": {
     "n_plus_one": 0,
     "bare_except": 5,
     "function_length": 51,
     "vue_component_length": 7,
-    "service_commit": 9,
+    "service_commit": 12,
     "bom": 0,
     "alembic_heads": 0,
-    "env_drift": 0
+    "env_drift": 0,
+    "ruff": 61,
+    "pip_audit": 0
   }
 }

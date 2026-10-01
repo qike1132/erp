@@ -119,3 +119,45 @@ def test_deployed_nginx_backup_limit_covers_declared_backup_max_size():
 def test_deployed_nginx_import_limit_covers_declared_import_max_size():
     limits = _location_body_limits(_NGINX_CONF.read_text(encoding='utf-8'))
     assert limits['/api/v1/tasks/import-'] >= MAX_IMPORT_FILE_SIZE
+
+# --------------------------------------------------------------------------
+# 无 Content-Length（chunked / 流式）请求体上限（P0-12）
+# --------------------------------------------------------------------------
+# 此前中间件在无 Content-Length 时**不计数**：请求体直接透传给端点，10MB 全局上限
+# 形同虚设（改协议的客户端即可绕过）。修复为「累积计数器 + 超限立即 413」，且
+# 必须边读边判（不能先攒完再判，否则内存已被打满）。
+async def _chunked_body(megabytes: int, chunk_kib: int = 256):
+    chunk = b'\x00' * (chunk_kib * 1024)
+    for _ in range(megabytes * 1024 // chunk_kib):
+        yield chunk
+
+
+async def test_chunked_body_over_default_limit_is_413(client):
+    """12MB 分块流（无 Content-Length）必须在 10MB 处提前 413。"""
+    resp = await client.post(
+        '/api/v1/orders',
+        content=_chunked_body(12),
+        headers={'content-type': 'application/octet-stream'},
+    )
+    assert resp.status_code == 413, f'流式超限请求未被拦下: {resp.status_code} {resp.text[:200]}'
+
+
+async def test_chunked_body_within_limit_is_not_413(client):
+    """1MB 流式请求不受影响（累积计数不得误伤正常请求）。"""
+    resp = await client.post(
+        '/api/v1/orders',
+        content=_chunked_body(1),
+        headers={'content-type': 'application/octet-stream'},
+    )
+    assert resp.status_code != 413, f'正常体积的流式请求被误判超限: {resp.text[:200]}'
+
+
+async def test_chunked_body_path_limit_still_applies(client):
+    """放宽路径（备份导入 512MB）下 12MB 流不应 413 —— 计数用的是路径级上限。"""
+    resp = await client.post(
+        '/api/v1/backup/import',
+        content=_chunked_body(12),
+        headers={'content-type': 'application/octet-stream'},
+    )
+    assert resp.status_code != 413, f'路径级放宽对流式请求失效: {resp.text[:200]}'
+

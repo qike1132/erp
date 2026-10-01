@@ -3,9 +3,12 @@
 main.py 导入 api_router → endpoints → main.py 会形成循环导入，
 因此将 limiter 单例抽离到本模块。endpoints 直接从此处导入 limiter 即可。
 
-main.py 导入后可按需覆盖 limiter.key_func（例如使用基于 user_id 的限流键）。
-线上 key_func 已按 **user_id** 限流、未登录才退回 IP，故内网多用户共享出口 IP
-不会互相拖累。
+限流键固定为本模块的 `rate_limit_key`（P0-6(d)）：已登录按 **user_id**，未登录才退回 IP，
+故内网多用户共享出口 IP 不会互相拖累。
+
+为什么必须在这里构造时就定死 key_func：slowapi 在**装饰时**就把 key_func 绑进 Limit 对象
+（.venv/Lib/site-packages/slowapi/extension.py:663 `keyfunc = key_func or self._key_func`），
+事后改 `limiter.key_func` 对已装饰路由无效；5 个装饰端点再显式传 `key_func=rate_limit_key` 兜底。
 
 开关（2026-09-28 上线前审计修复）：
 - 默认**开启**。此前 `enabled=False` 把**所有** `@limiter.limit(...)` 装饰器都变成
@@ -17,9 +20,13 @@ import os
 import threading
 import time
 import warnings
+from typing import TYPE_CHECKING
 
 from slowapi import Limiter
 from slowapi.util import get_remote_address
+
+if TYPE_CHECKING:  # 仅用于类型注解，避免运行时多导入
+    from starlette.requests import Request
 
 
 def limiter_enabled_from_env() -> bool:
@@ -46,11 +53,30 @@ def limiter_default_limits_from_env() -> list[str]:
     return [raw] if raw else []
 
 
+def rate_limit_key(request: "Request") -> str:
+    """限流键（P0-6(d)）：已登录用户按 user_id，未登录按客户端 IP。
+
+    延迟导入 _resolve_user_id —— 本模块被 main.py 与各 endpoints 导入，
+    模块级导入 deps 会形成循环导入；该函数纯内存解析 JWT，无 DB 查询。
+    """
+    from fastapi_app.core.deps import _resolve_user_id
+
+    user_id = _resolve_user_id(request)
+    if user_id is not None:
+        return f"user:{user_id}"
+    return get_remote_address(request)
+
+
+# 全局默认限流（未配置 RATE_LIMIT_DEFAULT 时为空列表）。main.py 据此决定是否注册
+# SlowAPIMiddleware —— 该中间件只对未装饰路由生效，default_limits 为空时注册纯属空转（P0-6(e)）。
+default_limits = limiter_default_limits_from_env()
+
+
 with warnings.catch_warnings():
     warnings.filterwarnings("ignore", message="Config file .* not found")
     limiter = Limiter(
-        key_func=get_remote_address,
-        default_limits=limiter_default_limits_from_env(),
+        key_func=rate_limit_key,
+        default_limits=default_limits,
         enabled=limiter_enabled_from_env(),
         config_filename=os.devnull,
         storage_uri=os.getenv("REDIS_CACHE_URL") or "memory://",

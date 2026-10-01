@@ -16,9 +16,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ._constants import (
     _MAX_PRE_RESTORE_BACKUPS,
     BACKUP_DIR,
-    BACKUP_MAX_COUNT,
-    BACKUP_RETENTION_DAYS,
     PRE_RESTORE_DIR,
+    retention_count,
+    retention_days,
 )
 from .crypto import sha256_bytes, sha256_file
 from .exceptions import BackupFileError
@@ -547,6 +547,11 @@ def _backup_created_time(f: Path) -> datetime:  # log-context: internal helper �
 
     优先读取伴随的 ``.meta`` 文件中的 ``created_at``（加密备份的 mtime 可能被刷新，
     导致按文件系统 mtime 判定保留期不准）；无 meta 时回退到文件系统 mtime。
+
+    口径提醒（P0-2 ④ 核结论）：``created_at`` 由 incremental.py:52 以
+    ``datetime.now(UTC)`` 写成，是 **UTC 墙面时刻**，而这里按 naive 本地时间解析。
+    本机 UTC+8 下「年龄」因此被少算 8 小时 —— 方向是更晚删（fail-safe），
+    不是提前删；文件名时间戳与 .meta.created_at 同源同口径，二者一致。
     """
     meta_path = f.parent / (f.name + '.meta')
     if meta_path.exists():
@@ -560,21 +565,52 @@ def _backup_created_time(f: Path) -> datetime:  # log-context: internal helper �
     return datetime.fromtimestamp(f.stat().st_mtime)
 
 
+def _delete_backup_sidecars(filepath: Path) -> list[str]:
+    """删除备份文件的伴随文件（.meta 元数据与 .record 记录）。
+
+    历史实现只删 .meta（且只在主文件删除成功后顺序执行），导致「删了 .enc 但
+    .zip.enc.meta / .record 永久残留」。这里统一两个伴随后缀，且对每个后缀单独
+    容错 —— 一个伴随文件删除失败不影响另一个，也不影响主文件已删除的事实。
+
+    Returns: 成功删除的伴随文件名列表
+    """
+    removed = []
+    for suffix in ('.meta', '.record'):
+        sidecar = filepath.parent / (filepath.name + suffix)
+        try:
+            if sidecar.exists():
+                sidecar.unlink()
+                removed.append(sidecar.name)
+        except OSError as e:
+            logger.warning(f'清理备份伴随文件失败: {sidecar.name}: {e}')
+    return removed
+
+
+def _retention_thresholds() -> tuple[int, int]:
+    """运行时读取保留策略阈值 (days, count) —— env 单一真源，调用时求值。"""
+    return retention_days(), retention_count()
+
+
 def cleanup_old_backups() -> dict:  # log-context: internal helper 无请求上下文
     """清理过期备份文件
 
-    策略：
+    策略（阈值来自 env 单一真源，见 _constants.retention_days / retention_count）：
     1. 删除超过 BACKUP_RETENTION_DAYS 天的备份
-    2. 如果总数超过 BACKUP_MAX_COUNT，删除最旧的
+    2. 如果总数超过 BACKUP_RETENTION_COUNT，删除最旧的
     3. 增量备份依赖其基础全量备份，删除全量备份时级联删除依赖它的增量备份
+
+    删除主文件时同步删除 .meta / .record 伴随文件（含 .zip.enc.meta）。
 
     Returns: dict with deleted_count, kept_count, errors
     """
+    # 阈值运行时求值（与 policy_service / cleanup 共用 env 单一真源；monkeypatch.setenv 亦生效）
+    retention_days_value, retention_count_value = _retention_thresholds()
+
     if not BACKUP_DIR.exists():
         return {'deleted_count': 0, 'kept_count': 0, 'errors': []}
 
     now = datetime.now()
-    cutoff = now - timedelta(days=BACKUP_RETENTION_DAYS)
+    cutoff = now - timedelta(days=retention_days_value)
     deleted = []
     errors = []
 
@@ -618,12 +654,12 @@ def cleanup_old_backups() -> dict:  # log-context: internal helper 无请求上�
             to_delete.add(b['name'])
 
     # 策略2: 超过最大数量的
-    if len(backups) - len(to_delete) > BACKUP_MAX_COUNT:
+    if len(backups) - len(to_delete) > retention_count_value:
         # 从最旧的开始删除
         for b in reversed(backups):
             if b['name'] in to_delete:
                 continue
-            if len(backups) - len(to_delete) <= BACKUP_MAX_COUNT:
+            if len(backups) - len(to_delete) <= retention_count_value:
                 break
             to_delete.add(b['name'])
 
@@ -655,9 +691,7 @@ def cleanup_old_backups() -> dict:  # log-context: internal helper 无请求上�
             filepath.unlink()
             deleted.append(name)
             logger.info(f'已清理过期备份: {name}')
-            meta_path = BACKUP_DIR / (name + '.meta')
-            if meta_path.exists():
-                meta_path.unlink()
+            _delete_backup_sidecars(filepath)
         except OSError as e:
             errors.append(f'{name}: {e}')
             logger.warning(f'清理备份失败: {name}: {e}')

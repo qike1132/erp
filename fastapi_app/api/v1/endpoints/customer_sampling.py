@@ -1,7 +1,8 @@
 """按客户分类打样信息模块 API 路由
 
 前缀: /api/v1/pattern-room（保持路径不变，用户无感切换）
-权限: 所有端点需登录（router 级 dependencies），写操作需 customer_sampling_manage 权限
+权限: 所有端点需登录（router 级 dependencies）；读端点需 customer_sampling_view 或
+customer_sampling_manage（P0-6(a) 按端点加读权限，不整树放开），写端点需 customer_sampling_manage
 
 对应 design.md 2.2.2 的 22 个接口端点。
 """
@@ -14,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.database import get_async_db as get_db
 from fastapi_app.core.database import get_async_read_db as get_read_db
-from fastapi_app.core.deps import require_permission
+from fastapi_app.core.deps import require_any_permission, require_permission
 from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.core.logger import logger
 from fastapi_app.core.response import success_response
@@ -64,6 +65,12 @@ router = APIRouter()
 
 # 按客户分类打样模块权限码（替换旧 pattern_room_manage）
 PERM = 'customer_sampling_manage'
+# P0-6(a)：读端点单独声明读权限码，避免整树只认写权限而把只读角色挡在门外。
+# 该码当前未发放给任何角色（发放范围只有 customer_sampling_manage，见
+# migrations/versions/pg_standalone_042_rename_pattern_room_permission.py 与
+# scripts/add_dev_dept_nav.py 给开发部的发放），故现有角色访问不受影响；
+# 将来新增只读角色时只发 customer_sampling_view 即可读到本模块数据。
+READ_PERM = 'customer_sampling_view'
 
 
 # ==================== 1. 按客户分组聚合查询 ====================
@@ -77,6 +84,7 @@ async def api_get_grouped_list(
     page: int = Query(1, ge=1, description='页码'),
     per_page: int = Query(20, ge=1, le=100, description='每页数量'),
     db: AsyncSession = Depends(get_read_db),
+    _read_perm: User = Depends(require_any_permission(READ_PERM, PERM)),
 ) -> dict[str, Any]:
     """按版师分组聚合查询打样项目列表（分页，status 缺省默认仅返回进行中项目）"""
     return await svc.get_grouped_list(
@@ -96,6 +104,7 @@ async def api_list_projects(
     pattern_maker_id: int | None = Query(None, description='版师ID筛选'),
     status: str | None = Query(None, description='状态筛选(in_progress/completed/cancelled，缺省默认 in_progress；传 all 返回全部)'),
     db: AsyncSession = Depends(get_read_db),
+    _read_perm: User = Depends(require_any_permission(READ_PERM, PERM)),
 ) -> dict[str, Any]:
     """分页查询打样项目列表（status 缺省默认仅返回进行中项目）"""
     return await svc.list_projects(
@@ -111,6 +120,7 @@ async def api_list_projects(
 async def api_get_project_detail(
     project_id: int,
     db: AsyncSession = Depends(get_read_db),
+    _read_perm: User = Depends(require_any_permission(READ_PERM, PERM)),
 ) -> dict[str, Any]:
     """获取打样项目详情（含部位布料 + 版本列表）"""
     return await svc.get_project_detail(db, project_id)
@@ -244,6 +254,7 @@ async def api_list_parts(
     project_id: int,
     role_id: int | None = Query(None, description='角色ID筛选（未传时默认指向默认角色）'),
     db: AsyncSession = Depends(get_read_db),
+    _read_perm: User = Depends(require_any_permission(READ_PERM, PERM)),
 ) -> dict[str, Any]:
     """查询项目下指定角色的部位（按 sort_order 升序，含布料信息）"""
     return await svc.list_parts(db, project_id, role_id=role_id)
@@ -372,6 +383,7 @@ async def api_delete_part(
 async def api_list_versions(
     project_id: int,
     db: AsyncSession = Depends(get_read_db),
+    _read_perm: User = Depends(require_any_permission(READ_PERM, PERM)),
 ) -> dict[str, Any]:
     """查询项目所有版本（按 version_no 升序）"""
     return await svc.list_versions(db, project_id)
@@ -384,6 +396,7 @@ async def api_list_versions(
 async def api_get_version_detail(
     version_id: int,
     db: AsyncSession = Depends(get_read_db),
+    _read_perm: User = Depends(require_any_permission(READ_PERM, PERM)),
 ) -> dict[str, Any]:
     """版本详情（T1 完整快照 / T2+ 变更 diff / 降级完整快照）"""
     return await svc.get_version_detail(db, version_id)
@@ -398,6 +411,7 @@ async def api_list_change_logs(
     page: int = Query(1, ge=1, description='页码'),
     per_page: int = Query(50, ge=1, le=200, description='每页数量'),
     db: AsyncSession = Depends(get_read_db),
+    _read_perm: User = Depends(require_any_permission(READ_PERM, PERM)),
 ) -> dict[str, Any]:
     """查询项目变更日志（按时间倒序分页）"""
     return await svc.list_change_logs(db, project_id, page=page, per_page=per_page)
@@ -416,6 +430,7 @@ async def api_get_parts_by_version(
         '且不加载历史版本快照',
     ),
     db: AsyncSession = Depends(get_read_db),
+    _read_perm: User = Depends(require_any_permission(READ_PERM, PERM)),
 ) -> dict[str, Any]:
     """获取指定角色所有版本的部位布料数据（跨版本二维表数据源）"""
     return await svc.get_parts_by_version(db, project_id, role_id=role_id, final_only=final_only)
@@ -428,6 +443,7 @@ async def api_get_parts_by_version(
 async def api_list_roles(
     project_id: int,
     db: AsyncSession = Depends(get_read_db),
+    _read_perm: User = Depends(require_any_permission(READ_PERM, PERM)),
 ) -> dict[str, Any]:
     """列出项目所有角色（按 sort_order 升序）"""
     return await svc.list_roles(db, project_id)

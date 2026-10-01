@@ -21,7 +21,6 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
-from slowapi.util import get_remote_address
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 # 3. 项目内部
@@ -30,10 +29,9 @@ from fastapi_app.api.ws import register_websocket
 from fastapi_app.core.config import settings
 from fastapi_app.core.database import async_engine, dispose_async_engines
 from fastapi_app.core.db_health import db_health_checker
-from fastapi_app.core.deps import _resolve_user_id
 from fastapi_app.core.exceptions import AppError, current_iso_timestamp, new_request_id
 from fastapi_app.core.health import register_health_routes
-from fastapi_app.core.limiter import limiter
+from fastapi_app.core.limiter import default_limits, limiter
 from fastapi_app.core.logger import logger, setup_logging
 from fastapi_app.core.middleware import setup_middleware
 
@@ -253,22 +251,9 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-def _rate_limit_key(request: Request) -> str:
-    """限流键：已登录用户按 user_id，未登录按 IP。
-
-    从 JWT Bearer 或 Cookie JWT 中提取 sub（用户ID），纯内存操作无 DB 查询。
-    无法解析时降级到客户端 IP，保证登录/公共端点仍有基本防护。
-    """
-    user_id = _resolve_user_id(request)
-    if user_id is not None:
-        return f"user:{user_id}"
-    return get_remote_address(request)
-
-
-# limiter 单例由 fastapi_app.core.limiter 提供（避免循环导入）。
-# 此处覆盖 key_func：已登录用户按 user_id 限流，避免内网多用户共享出口 IP 导致误限流。
-# 装饰器在请求时才调用 key_func，故覆盖后所有端点立即生效。
-limiter.key_func = _rate_limit_key
+# limiter 单例由 fastapi_app.core.limiter 提供（避免循环导入）；限流键 rate_limit_key 在该模块
+# 构造 Limiter 时就已定死（P0-6(d)：slowapi 在装饰时绑定 key_func，事后覆盖 limiter.key_func
+# 对已装饰路由无效，原覆盖写法只是静默地什么都改不到）。
 app.state.limiter = limiter
 
 
@@ -289,7 +274,11 @@ async def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
     )
 
 
-app.add_middleware(SlowAPIMiddleware)
+# P0-6(e)：SlowAPIMiddleware 只对「未装饰」路由生效（slowapi/middleware.py:110-111 对已装饰路由直接放行），
+# 且它依赖 limiter.default_limits —— 未配置 RATE_LIMIT_DEFAULT 时为空，注册后纯粹是每请求一层空转开销。
+# 故只在确实配置了全局默认限流时才注册（当前 .env 无该键 ⇒ 等价于删除；配置后自动生效）。
+if default_limits:
+    app.add_middleware(SlowAPIMiddleware)
 
 # 维护模式（M3）：还原执行期间拒绝非备份域写请求
 from starlette.middleware.base import BaseHTTPMiddleware
