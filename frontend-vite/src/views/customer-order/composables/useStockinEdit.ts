@@ -64,12 +64,19 @@ export function useStockinEdit(
   async function saveStockinEdit() {
     const form = stockinEditForm.value
     if (!form) return
+    // 数量被清空时输入框给 ''（非 number），放行只会换来后端笼统的 422
+    if (!Number.isFinite(form.quantity) || form.quantity < 1) {
+      showToast('请填写大于 0 的备货数量', 'error')
+      return
+    }
     savingStockin.value = true
     try {
       await stockApi.editStockin(form.id, {
         quantity: form.quantity,
         customer: form.customer,
-        stockin_date: form.date,
+        // 日期清空 = 保留原值：后端对空串会先做格式校验，拿不到"空则保留"分支，
+        // 所以空日期直接不下发该字段
+        ...(form.date ? { stockin_date: form.date } : {}),
         note: form.note,
       })
       showToast('备货修改成功', 'success')

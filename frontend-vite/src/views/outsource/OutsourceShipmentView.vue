@@ -162,7 +162,11 @@ async function loadUnshippedQty() {
   }
 }
 
+let loadSeq = 0
+
 async function load() {
+  // 请求序号：快速切换状态/翻页时丢弃过期响应，防止旧结果覆盖新结果
+  const seq = ++loadSeq
   loading.value = shipments.value.length === 0
   isFetching.value = true
   try {
@@ -171,15 +175,18 @@ async function load() {
       page: currentPage.value,
       per_page: perPage.value,
     })
+    if (seq !== loadSeq) return
     shipments.value = res.data
     total.value = res.total
     shippedCount.value = res.shipped_count
     receivedCount.value = res.received_count
   } catch {
-    toast.error('加载发货单列表失败')
+    if (seq === loadSeq) toast.error('加载发货单列表失败')
   } finally {
-    loading.value = false
-    isFetching.value = false
+    if (seq === loadSeq) {
+      loading.value = false
+      isFetching.value = false
+    }
   }
 }
 
