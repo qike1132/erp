@@ -73,6 +73,7 @@ from fastapi_app.tasks.plan_tasks import (
     batch_import_plans_task,
     sync_shipment_records_task,
 )
+from fastapi_app.tasks.replica_lag_task import replica_lag_task
 from fastapi_app.tasks.report_tasks import export_report_task
 
 # ---------------------------------------------------------------------------
@@ -126,6 +127,16 @@ cron_schedules = [
         # 供只读端点拉取。正向跳号是正常语义，不报警。10 分钟一次，幂等低开销。
         'name': 'numbering_audit',
         'func': numbering_audit_task,
+        'cron': {'minute': set(range(0, 60, 10))},
+        'schedule': 'every 10m',
+        'timeout': 60,
+    },
+    {
+        # 只读副本延迟巡检（OPT-16 收编）：同机热备 5433 若断流，读流量会
+        # 无声读到旧数据。每 10 分钟采集 replay lag，超 5 分钟告警；连接失败
+        # 按 ERROR 记录但不抛错（避免 max_tries 耗尽后监控静默失效）。
+        'name': 'replica-lag-check',
+        'func': replica_lag_task,
         'cron': {'minute': set(range(0, 60, 10))},
         'schedule': 'every 10m',
         'timeout': 60,
