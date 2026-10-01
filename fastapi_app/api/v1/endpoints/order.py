@@ -21,7 +21,7 @@ from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_permission
 from fastapi_app.core.domain_events import DomainEvent, DomainEventType
 from fastapi_app.core.domain_events import publish as publish_domain_event
-from fastapi_app.core.exceptions import AppError, NotFoundError, db_transaction, run_post_commit_callbacks
+from fastapi_app.core.exceptions import AppError, NotFoundError, db_transaction
 from fastapi_app.core.response import success_response
 from fastapi_app.schemas.order import (
     ApprovalCancelResponse,
@@ -339,8 +339,10 @@ async def delete_order(
 ) -> OrderActionResponse:
     """删除订单（管理员直接删除，非管理员提交审批）。
 
-    事务模式：手动 commit + catch IntegrityError。
-    原因：db_transaction 会将 IntegrityError 转为 HTTP 500，无法对外层提供 409 关联数据提示。
+    事务模式：db_transaction + error_map（TRANSACTION_BOUNDARY_GUIDE §2.3：
+    端点层无 commit 例外）。提交在响应返回前完成，200 与「已落库」保持一致；
+    IntegrityError→409 经 error_map 映射（端点无需手动 commit/catch），
+    缓存失效与实时广播由 service 注册的 post-commit 回调在提交成功后自动执行。
 
     Args:
         order_id: 订单 ID。
@@ -352,37 +354,37 @@ async def delete_order(
 
     Raises:
         HTTPException: 关联数据冲突返回 409；权限不足返回 403；
-            参数错误返回 400；数据库异常返回 500。
+            参数错误返回 400；订单删除前备份失败或数据库异常返回 500。
     """
-    try:
-        result = await order_service.delete_order(db, order_id, user)
-        # 端点内显式提交，让 200 响应与「已落库」一致：
-        # FastAPI 0.106+ 语义下依赖收尾（get_async_db 的 commit）在**响应发送之后**执行，
-        # 若等它提交，客户端收到「删除成功」立刻重取列表时仍能读到该订单，并以前端那次
-        # 读取的时间戳作为 dataUpdatedAt 缓存下来（staleTime 内不再回取），
-        # 表现为「删除后关联页面延迟约 30 秒才更新」。
-        await db.commit()
-    except IntegrityError as e:
+    def _to_409(e: Exception) -> HTTPException:
         logger.warning("删除订单完整性约束冲突: %s", e)
-        raise HTTPException(status_code=409, detail='订单存在关联数据，无法删除') from e
-    except PermissionDeniedError as e:
-        raise HTTPException(status_code=403, detail=settings.sanitize_business_error(e)) from e
-    except (ValueError, NotFoundError) as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    except OSError as e:
-        logger.error("删除订单备份失败: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail='订单删除前备份失败，操作已回滚，请稍后重试') from e
-    except SQLAlchemyError as e:
-        logger.error("删除订单数据库异常: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail='数据库操作失败，删除已回滚') from e
+        return HTTPException(status_code=409, detail='订单存在关联数据，无法删除')
 
-    # 提交后才执行「提交后」动作：缓存失效 + ORDER_DELETED 实时广播。
-    # 本端点用请求级事务并自行 commit，不经 db_transaction，故须显式执行回调列表，
-    # 否则这些回调会被静默丢弃（实时事件不广播 = 关联页面只能等前端 staleTime 过期）。
-    await run_post_commit_callbacks(db)
+    def _to_403(e: Exception) -> HTTPException:
+        return HTTPException(status_code=403, detail=settings.sanitize_business_error(e))
+
+    def _backup_failed(e: Exception) -> HTTPException:
+        logger.error("删除订单备份失败: %s", e, exc_info=True)
+        return HTTPException(status_code=500, detail='订单删除前备份失败，操作已回滚，请稍后重试')
+
+    def _db_failed(e: Exception) -> HTTPException:
+        logger.error("删除订单数据库异常: %s", e, exc_info=True)
+        return HTTPException(status_code=500, detail='数据库操作失败，删除已回滚')
+
+    async with db_transaction(db, error_map={
+        # 注册顺序即命中顺序：IntegrityError 是 SQLAlchemyError 子类，必须在前
+        IntegrityError: _to_409,
+        PermissionDeniedError: _to_403,
+        # NotFoundError 保持既有行为映射为 400（service 实际抛的是 ValueError）
+        NotFoundError: lambda e: HTTPException(status_code=400, detail=str(e)),
+        OSError: _backup_failed,
+        SQLAlchemyError: _db_failed,
+    }):
+        result = await order_service.delete_order(db, order_id, user)
 
     await cache_mgr.invalidate_dashboard()
-    # 领域事件：ORDER_DELETED 在事务提交后发布（订阅者使用独立 session，需可见已提交变更）
+    # 领域事件：ORDER_DELETED 在事务提交后发布（订阅者使用独立 session，需可见已提交变更）；
+    # 面向前端的实时广播已由 service 的 schedule_post_commit_event 注册并执行。
     if result.get('success'):
         try:
             await publish_domain_event(DomainEvent(
