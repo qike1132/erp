@@ -5,9 +5,10 @@
  * 新增/编辑表单状态、增删改与启用/停用切换（带确认对话框）。
  */
 import { ref, reactive, computed } from 'vue'
-import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/vue-query'
+import { useQuery, keepPreviousData } from '@tanstack/vue-query'
 import { supplierApi } from '@/api'
 import { showToast } from '@/composables/useToast'
+import { useApiMutation } from '@/composables/useApiMutation'
 import { useDebouncedSearch } from '@/composables/useDebouncedSearch'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import type { Supplier } from '@/types'
@@ -22,11 +23,6 @@ export interface SupplierFormData {
   remark: string
 }
 
-function extractErrorMessage(err: unknown, fallback: string): string {
-  const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-  return detail || fallback
-}
-
 function validateSupplierForm(name: string, phone: string): string | null {
   if (!name?.trim()) return '供应商名称不能为空'
   if (phone && !/^[\d\-+\s()]{6,20}$/.test(phone)) return '联系电话格式不正确'
@@ -35,7 +31,6 @@ function validateSupplierForm(name: string, phone: string): string | null {
 
 export function useSupplier() {
   const actionId = ref<number | ''>(0)
-  const queryClient = useQueryClient()
   const confirmDialog = useConfirmDialog()
 
   const searchTerm = ref('')
@@ -75,8 +70,13 @@ export function useSupplier() {
   }
 
   const formOpen = ref(false)
-  const submitting = ref(false)
   const form = reactive<SupplierFormData>({ id: 0, name: '', contact_person: '', phone: '', address: '', remark: '' })
+
+  const addMutation = useApiMutation((data: SupplierFormData) => supplierApi.create(data), {
+    invalidateKeys: ['suppliers-list'],
+    successMsg: '添加成功',
+    errorMsg: '添加失败',
+  })
 
   async function handleAdd() {
     const error = validateSupplierForm(form.name, form.phone)
@@ -84,51 +84,47 @@ export function useSupplier() {
       showToast(error, 'warning')
       return
     }
-    submitting.value = true
-    try {
-      await supplierApi.create(form)
-      showToast('添加成功', 'success')
+    const created = await addMutation.run(form)
+    if (created !== undefined) {
       Object.assign(form, { name: '', contact_person: '', phone: '', address: '', remark: '' })
       formOpen.value = false
-      queryClient.invalidateQueries({ queryKey: ['suppliers-list'] })
-    } catch (err: unknown) {
-      showToast(extractErrorMessage(err, '添加失败'), 'error')
-    } finally {
-      submitting.value = false
     }
   }
+
+  const deleteMutation = useApiMutation((id: number) => supplierApi.delete(id), {
+    invalidateKeys: ['suppliers-list'],
+    successMsg: '删除成功',
+    errorMsg: '删除失败',
+  })
 
   async function handleDelete(row: Supplier) {
     if (!(await confirmDialog.confirm(`确定要删除供应商"${row.name}"吗？如果该供应商已关联BOM或采购订单，将无法删除。`))) return
     actionId.value = row.id
-    try {
-      await supplierApi.delete(row.id)
-      showToast('删除成功', 'success')
-      queryClient.invalidateQueries({ queryKey: ['suppliers-list'] })
-    } catch (err: unknown) {
-      showToast(extractErrorMessage(err, '删除失败'), 'error')
-    } finally {
-      actionId.value = 0
-    }
+    await deleteMutation.run(row.id)
+    actionId.value = 0
   }
+
+  const toggleMutation = useApiMutation(
+    async (row: Supplier) => {
+      await supplierApi.toggleStatus(row.id)
+      return row.status ? '禁用' : '启用'
+    },
+    {
+      invalidateKeys: ['suppliers-list'],
+      errorMsg: (row: Supplier) => `${row.status ? '禁用' : '启用'}失败`,
+      onSuccess: (target) => showToast(`${target}成功`, 'success'),
+    },
+  )
 
   async function handleToggle(row: Supplier) {
     const target = row.status ? '禁用' : '启用'
     if (!(await confirmDialog.confirm(`确定要${target}供应商"${row.name}"吗？`))) return
     actionId.value = row.id
-    try {
-      await supplierApi.toggleStatus(row.id)
-      showToast(`${target}成功`, 'success')
-      queryClient.invalidateQueries({ queryKey: ['suppliers-list'] })
-    } catch (err: unknown) {
-      showToast(extractErrorMessage(err, `${target}失败`), 'error')
-    } finally {
-      actionId.value = 0
-    }
+    await toggleMutation.run(row)
+    actionId.value = 0
   }
 
   const editDialogVisible = ref(false)
-  const editSubmitting = ref(false)
   const editForm = reactive<SupplierFormData>({ id: 0, name: '', contact_person: '', phone: '', address: '', remark: '' })
 
   function openEditDialog(row: Supplier) {
@@ -143,23 +139,25 @@ export function useSupplier() {
     editDialogVisible.value = true
   }
 
+  const editMutation = useApiMutation(
+    (data: SupplierFormData) => supplierApi.update(data.id, data),
+    {
+      invalidateKeys: ['suppliers-list'],
+      successMsg: '保存成功',
+      errorMsg: '保存失败',
+      onSuccess: () => {
+        editDialogVisible.value = false
+      },
+    },
+  )
+
   async function handleEdit() {
     const error = validateSupplierForm(editForm.name, editForm.phone)
     if (error) {
       showToast(error, 'warning')
       return
     }
-    editSubmitting.value = true
-    try {
-      await supplierApi.update(editForm.id, editForm)
-      showToast('保存成功', 'success')
-      editDialogVisible.value = false
-      queryClient.invalidateQueries({ queryKey: ['suppliers-list'] })
-    } catch (err: unknown) {
-      showToast(extractErrorMessage(err, '保存失败'), 'error')
-    } finally {
-      editSubmitting.value = false
-    }
+    await editMutation.run(editForm)
   }
 
   return {
@@ -177,13 +175,13 @@ export function useSupplier() {
     totalPages,
     goPage,
     formOpen,
-    submitting,
+    submitting: addMutation.isSaving,
     form,
     handleAdd,
     handleDelete,
     handleToggle,
     editDialogVisible,
-    editSubmitting,
+    editSubmitting: editMutation.isSaving,
     editForm,
     openEditDialog,
     handleEdit,

@@ -5,11 +5,12 @@
  * 编辑用户弹窗状态与保存、权限分配弹窗的分组/级联选择/保存。
  */
 import { ref, computed } from 'vue'
-import { useQuery, useQueryClient } from '@tanstack/vue-query'
+import { useQuery } from '@tanstack/vue-query'
 import { userApi, permissionApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import type { PermissionItem } from '@/types'
 import { showToast } from '@/composables/useToast'
+import { useApiMutation } from '@/composables/useApiMutation'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 
 /** 用户列表行数据 */
@@ -41,7 +42,6 @@ export function extractErrorMessage(err: unknown, fallback: string): string {
 /** 用户管理：列表 + 行操作 + 编辑弹窗 + 权限弹窗 */
 export function useUserManagement() {
   const actionId = ref<number | ''>(0)
-  const queryClient = useQueryClient()
   const confirmDialog = useConfirmDialog()
   const authStore = useAuthStore()
 
@@ -67,32 +67,30 @@ export function useUserManagement() {
   }
 
   /** 切换用户启用/禁用状态 */
+  const toggleMutation = useApiMutation((id: number) => userApi.toggle(id), {
+    invalidateKeys: ['users-list'],
+    successMsg: '操作成功',
+    errorMsg: '操作失败',
+  })
+
   async function handleToggle(row: UserRow) {
     actionId.value = row.id
-    try {
-      await userApi.toggle(row.id)
-      showToast('操作成功', 'success')
-      queryClient.invalidateQueries({ queryKey: ['users-list'] })
-    } catch (err: unknown) {
-      showToast(extractErrorMessage(err, '操作失败'), 'error')
-    } finally {
-      actionId.value = 0
-    }
+    await toggleMutation.run(row.id)
+    actionId.value = 0
   }
 
   /** 删除用户（带确认弹窗） */
+  const deleteMutation = useApiMutation((id: number) => userApi.delete(id), {
+    invalidateKeys: ['users-list'],
+    successMsg: '删除成功',
+    errorMsg: '删除失败',
+  })
+
   async function handleDelete(row: UserRow) {
     if (!(await confirmDialog.confirm(`确定要删除用户"${row.username}"吗？`))) return
     actionId.value = row.id
-    try {
-      await userApi.delete(row.id)
-      showToast('删除成功', 'success')
-      queryClient.invalidateQueries({ queryKey: ['users-list'] })
-    } catch (err: unknown) {
-      showToast(extractErrorMessage(err, '删除失败'), 'error')
-    } finally {
-      actionId.value = 0
-    }
+    await deleteMutation.run(row.id)
+    actionId.value = 0
   }
 
   // ==================== 编辑用户工厂弹窗 ====================
@@ -114,7 +112,6 @@ export function useUserManagement() {
 
   // ==================== 权限分配弹窗 ====================
   const permDialogVisible = ref(false)
-  const permSubmitting = ref(false)
   const permissionTree = ref<PermissionItem[]>([])
   const permCheckedKeys = ref<number[]>([])
   const permExpandedKeys = ref<Set<number>>(new Set())
@@ -276,21 +273,25 @@ export function useUserManagement() {
       showToast('加载权限数据失败', 'error')
     }
   }
-
   /** 保存用户权限分配 */
+  const savePermMutation = useApiMutation(
+    (target: { userId: number; keys: number[] }) => userApi.savePermission(target.userId, target.keys),
+    {
+      successMsg: '权限保存成功',
+      errorMsg: '保存失败',
+      onSuccess: () => {
+        // 权限变更可能影响导航栏结构，异步刷新以保持同步
+        authStore.fetchNavSections().catch(() => {})
+        permDialogVisible.value = false
+      },
+    },
+  )
+  /** 权限弹窗提交中（映射包装器的 in-flight 态） */
+  const permSubmitting = savePermMutation.isSaving
+
   async function handleSavePermission() {
-    permSubmitting.value = true
-    try {
-      await userApi.savePermission(permTargetUserId.value, permCheckedKeys.value)
-      showToast('权限保存成功', 'success')
-      // 权限变更可能影响导航栏结构，异步刷新以保持同步
-      authStore.fetchNavSections().catch(() => {})
-      permDialogVisible.value = false
-    } catch (err: unknown) {
-      showToast(extractErrorMessage(err, '保存失败'), 'error')
-    } finally {
-      permSubmitting.value = false
-    }
+    // 失败由包装器统一 toast（'保存失败'兜底），返回 undefined 即未成功
+    await savePermMutation.run({ userId: permTargetUserId.value, keys: permCheckedKeys.value })
   }
 
   return {
