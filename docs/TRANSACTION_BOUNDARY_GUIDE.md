@@ -96,12 +96,12 @@ await db.commit()  # manual-tx: <为什么必须现在提交，不提交会怎�
 | 位置 | 理由 |
 |---|---|
 | `services/auth_service.py:63,72` | 密码迁移与登录流程解耦 |
-| `services/backup/cleanup/service.py:604` | 批量清理须即时提交并释放行锁（异常由本函数兜底，不回滚已删文件） |
+| `services/backup/cleanup/service.py:606` | 批量清理须即时提交并释放行锁（异常由本函数兜底，不回滚已删文件） |
 | `services/backup/incremental.py:397` | try/except 内显式事务控制 |
 | `services/backup/metrics/alert_service.py:222` | 告警落库须独立提交，避免主事务回滚丢失 failed 标记 |
-| `services/backup/orchestration/policy_service.py:544` | 保留策略批量删除须即时提交（备份文件已物理删除，事务回滚无法复原） |
+| `services/backup/orchestration/policy_service.py:549` | 保留策略批量删除须即时提交（备份文件已物理删除，事务回滚无法复原） |
 | `services/backup/orchestration/recovery_test_service.py:573` | 与生产 JsonRestoreStrategy 行为一致 |
-| `services/backup/records.py:791,803,822` | 每条补录/删除/修正成功后立即提交，避免后续失败回滚已成功项 |
+| `services/backup/records.py:804,816,835` | 每条补录/删除/修正成功后立即提交，避免后续失败回滚已成功项 |
 | `services/backup/restore.py:267` | 组件还原后提交 |
 | `services/backup/strategies.py:133` | try/except 内显式事务控制 |
 
@@ -111,8 +111,8 @@ await db.commit()  # manual-tx: <为什么必须现在提交，不提交会怎�
 > 说明：备份域占 10 处属合理——dump/restore 不运行在请求上下文里，没有 `get_async_db` 可依赖。
 >
 > **基线上调说明（9 → 12，2026-10-01 P0-7）**：这不是放宽门禁，而是把原本被
-> `# independent-transaction` 宽规则**静默豁免**的 3 处显式化（`cleanup/service.py:604`、
-> `metrics/alert_service.py:222`、`orchestration/policy_service.py:544`）。
+> `# independent-transaction` 宽规则**静默豁免**的 3 处显式化（`cleanup/service.py:606`、
+> `metrics/alert_service.py:222`、`orchestration/policy_service.py:549`）。
 > 棘轮语义"只许下调"在这里是唯一一次例外，理由必须留在评审记录里；此后仍只允许下调。
 
 ---
