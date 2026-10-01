@@ -171,6 +171,73 @@ class TestStockInRoutes:
         data = resp.json()
         assert not data.get("success", True) or "error" in str(data).lower() or "无法" in str(data)
 
+    @pytest.mark.asyncio
+    async def test_stockin_edit_quantity_with_stockouts_rejected(self, async_client, auth_headers, async_db_session, test_customer):
+        """有出库关联的入库不允许改数量（与删除保护对称；2026-10-01 迭代审计补充）。
+
+        独立自建产品/入库/出库，不碰共享 fixture 的状态（后续 delete 用例依赖它）。
+        """
+        import uuid
+
+        from fastapi_app.shared_models.product import Product
+
+        tag = uuid.uuid4().hex[:8]
+        product = Product(name=f"出库关联守卫产品·{tag}", current_stock=100, initial_stock=100)
+        async_db_session.add(product)
+        await async_db_session.flush()
+        stockin = StockIn(
+            stockin_no=f"SI-GUARD1-{tag}", product_id=product.id, customer=test_customer.name,
+            quantity=50, stockin_date=datetime.now(UTC),
+        )
+        async_db_session.add(stockin)
+        await async_db_session.flush()
+        stockout = StockOut(
+            stockout_no=f"SO-GUARD1-{tag}", product_id=product.id, customer=test_customer.name,
+            quantity=10, stockin_id=stockin.id, stockout_date=datetime.now(UTC),
+        )
+        async_db_session.add(stockout)
+        await async_db_session.flush()
+
+        payload = {
+            "customer": test_customer.name,
+            "quantity": 55,  # 50 → 55，仅改数量也应被拒
+            "stockin_date": datetime.now(UTC).strftime("%Y-%m-%d"),
+        }
+        resp = await async_client.put(
+            f"/api/v1/stock/in/edit/{stockin.id}", headers=auth_headers, json=payload
+        )
+        assert resp.status_code == 400
+        assert "出库关联" in resp.text
+
+    @pytest.mark.asyncio
+    async def test_stockin_edit_quantity_negative_stock_rejected(self, async_client, auth_headers, async_db_session, test_customer):
+        """编辑入库导致库存为负被拒（与删除保护对称；2026-10-01 迭代审计补充）"""
+        import uuid
+
+        from fastapi_app.shared_models.product import Product
+
+        tag = uuid.uuid4().hex[:8]
+        product = Product(name=f"负库存守卫产品·{tag}", current_stock=5, initial_stock=5)
+        async_db_session.add(product)
+        await async_db_session.flush()
+        stockin = StockIn(
+            stockin_no=f"SI-GUARD2-{tag}", product_id=product.id, customer=test_customer.name,
+            quantity=50, stockin_date=datetime.now(UTC),
+        )
+        async_db_session.add(stockin)
+        await async_db_session.flush()
+
+        payload = {
+            "customer": test_customer.name,
+            "quantity": 5,  # 50 → 5 减 45，超过当前库存 5
+            "stockin_date": datetime.now(UTC).strftime("%Y-%m-%d"),
+        }
+        resp = await async_client.put(
+            f"/api/v1/stock/in/edit/{stockin.id}", headers=auth_headers, json=payload
+        )
+        assert resp.status_code == 400
+        assert "库存为负" in resp.text
+
 
 # ============================================================
 # 出库路由测试

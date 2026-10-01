@@ -95,6 +95,14 @@ async def update_stockin(db: AsyncSession, stockin_id: int, quantity: int, custo
         raise ValueError('入库记录不存在')
     stockin_date = _parse_date_preserve_time(stockin_date_str, stockin_obj.stockin_date)
     old_quantity = stockin_obj.quantity
+    if quantity != old_quantity:
+        # 与 delete_stockin_core 的两道保护对称：有出库关联的入库不允许改数量
+        # （出库记录引用的入库数量会失真），减量也不得把当前库存打成负数。
+        if stockin_obj.stockin_stockouts:
+            raise ValueError('该入库记录已有出库关联，不能修改数量；可修改客户/日期/备注')
+        product = await stock_service.get_product_for_update(db, stockin_obj.product_id)
+        if product.current_stock + (quantity - old_quantity) < 0:
+            raise ValueError(f'修改入库数量将导致库存为负数（产品：{product.name}，当前库存：{product.current_stock}，变更量：{quantity - old_quantity}）')
     old_stockin_no = stockin_obj.stockin_no
     await update_stockin_core(db, stockin_obj, quantity, customer, stockin_date, note)
     await db.flush()
