@@ -3,6 +3,7 @@
 
 用于产品 CRUD 的请求/响应模型。
 """
+
 from datetime import datetime
 
 from pydantic import BaseModel, Field, field_validator
@@ -22,12 +23,13 @@ def _validate_factory(v: str | None) -> str | None:
 
 class ProductCreate(BaseModel):
     """创建产品请求"""
-    name: str = Field(..., min_length=1, max_length=100, description="产品名称")
-    barcode: str | None = Field(None, max_length=50, description="69码/商品条码")
-    price: float | None = Field(None, ge=0, description="产品价格")
-    image: str | None = Field(None, max_length=200, description="产品图片路径")
-    factory: str | None = Field(None, max_length=50, description="所属工厂")
-    initial_stock: int = Field(0, ge=0, le=100000, description="初始库存")
+
+    name: str = Field(..., min_length=1, max_length=100, description='产品名称')
+    barcode: str | None = Field(None, max_length=50, description='69码/商品条码')
+    price: float | None = Field(None, ge=0, description='产品价格')
+    image: str | None = Field(None, max_length=200, description='产品图片路径')
+    factory: str | None = Field(None, max_length=50, description='所属工厂')
+    initial_stock: int = Field(0, ge=0, le=100000, description='初始库存')
 
     @field_validator('image')
     @classmethod
@@ -47,12 +49,13 @@ class ProductCreate(BaseModel):
 
 class ProductUpdate(BaseModel):
     """更新产品请求"""
-    name: str | None = Field(None, min_length=1, max_length=100, description="产品名称")
-    barcode: str | None = Field(None, max_length=50, description="69码/商品条码")
-    price: float | None = Field(None, ge=0, description="产品价格")
-    image: str | None = Field(None, max_length=200, description="产品图片路径")
-    factory: str | None = Field(None, max_length=50, description="所属工厂")
-    initial_stock: int | None = Field(None, ge=0, le=100000, description="初始库存")
+
+    name: str | None = Field(None, min_length=1, max_length=100, description='产品名称')
+    barcode: str | None = Field(None, max_length=50, description='69码/商品条码')
+    price: float | None = Field(None, ge=0, description='产品价格')
+    image: str | None = Field(None, max_length=200, description='产品图片路径')
+    factory: str | None = Field(None, max_length=50, description='所属工厂')
+    initial_stock: int | None = Field(None, ge=0, le=100000, description='初始库存')
 
     @field_validator('image')
     @classmethod
@@ -72,6 +75,7 @@ class ProductUpdate(BaseModel):
 
 class ProductResponse(BaseModel):
     """产品响应"""
+
     id: int
     name: str
     barcode: str | None = None
@@ -91,6 +95,7 @@ class ProductResponse(BaseModel):
         故对序列化层的重复调用安全。
         """
         from fastapi_app.services.signed_urls import sign_upload_url
+
         return sign_upload_url(v) if v else v
 
     class Config:
@@ -99,6 +104,7 @@ class ProductResponse(BaseModel):
 
 class ProductListResponse(BaseModel):
     """产品列表响应"""
+
     success: bool = True
     items: list[dict]
     total: int = 0
@@ -106,12 +112,14 @@ class ProductListResponse(BaseModel):
 
 class ProductActionResponse(BaseModel):
     """产品操作响应"""
+
     success: bool
     message: str
 
 
 class ProductSearchItem(BaseModel):
     """产品搜索结果项"""
+
     id: int
     name: str
     barcode: str | None = None
@@ -121,6 +129,7 @@ class ProductSearchItem(BaseModel):
 
 class ProductStockInfo(BaseModel):
     """产品库存信息"""
+
     product_id: int
     name: str
     current_stock: int
