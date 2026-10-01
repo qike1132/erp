@@ -65,5 +65,5 @@ async def compute_order_status_from_db(db: AsyncSession, order: Order) -> str:
         select(func.coalesce(func.sum(StockOut.quantity - StockOut.returned_quantity), 0))
         .where(StockOut.order_id == order.id, StockOut.stockin_id.is_(None))
     )
-    shipped_qty = max(0, int(result.scalar()))
+    shipped_qty = max(0, int(result.scalar() or 0))
     return compute_status_from_stockouts(order, deducted_qty, shipped_qty)

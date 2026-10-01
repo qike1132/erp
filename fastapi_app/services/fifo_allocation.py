@@ -15,8 +15,10 @@ FIFO 分配算法
 import asyncio
 import contextlib
 import logging
-from collections.abc import Hashable
+from collections.abc import Mapping, Sequence
+from collections.abc import Set as AbstractSet
 from datetime import date, datetime
+from typing import Any
 
 from sqlalchemy import and_, event, func, select, text
 from sqlalchemy.exc import SQLAlchemyError
@@ -202,7 +204,7 @@ async def _build_fifo_plan_id_to_customer(db: AsyncSession, customer_name_map: d
     return plan_id_to_customer
 
 
-def _group_fifo_details_by_key(all_details: list, plan_id_to_customer: dict, keys_needed: set) -> dict[tuple, list]:
+def _group_fifo_details_by_key(all_details: Sequence, plan_id_to_customer: Mapping, keys_needed: AbstractSet) -> dict[tuple, list]:
     details_by_key: dict[tuple, list] = {}
     for d in all_details:
         cname = plan_id_to_customer.get(d.plan_id, '')
@@ -372,7 +374,7 @@ def _aggregate_shipped_by_key(stockout_rows: list, product_ids: list, pid_to_nam
     return shipped_by_key
 
 
-def aggregate_produced_by_product(rows: list) -> dict[int, int]:
+def aggregate_produced_by_product(rows: Sequence) -> dict[int, int]:
     """生产记录行 → {product_id: 累计生产量}。
 
     - 按 product_id 聚合，不按 department 过滤：三部门（充棉/手工/包装）相加，
@@ -407,7 +409,7 @@ def production_window(plan_month: str, now: datetime) -> tuple[date, date]:
     return date(y, m, 1), now.date()
 
 
-def group_details_by_product(all_details: list) -> dict[int, list]:
+def group_details_by_product(all_details: Sequence) -> dict[int, list]:
     """计划明细按 product_id 分组，保持传入顺序。
 
     调用方负责先按 (plan_date, id) 排序 —— allocate_fifo 的摊派顺序即传入顺序，
@@ -423,9 +425,9 @@ def group_details_by_product(all_details: list) -> dict[int, list]:
 
 
 def allocate_fifo(
-    plan_details: list,
-    details_by_key: dict[Hashable, list],
-    total_by_key: dict[Hashable, int],
+    plan_details: Sequence,
+    details_by_key: Mapping[Any, list],
+    total_by_key: Mapping[Any, int],
 ) -> dict[int, int]:
     """A1: FIFO 分配纯函数（核心算法，可独立单元测试）
 

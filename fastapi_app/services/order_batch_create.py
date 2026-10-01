@@ -115,10 +115,9 @@ def _validate_one_item(order_data: dict, customer: str, product_map: dict, resul
     product = product_map.get(product_id)
     if not product:
         _fail('产品不存在')
-
     # 工厂校验：product.factory 为空时仅记录警告，不阻断订单创建
     # 旧产品可能尚未回填 factory 字段，强制拦截会导致大量订单无法录入
-    if not product.factory:
+    if not product.factory:  # type: ignore[union-attr] # _fail 必抛但 mypy 无法据此收窄
         logger.warning(
             "产品 %s (id=%d) 未配置工厂，订单仍会创建但工厂通知可能无法精准派发",
             product.name, product_id,
@@ -310,8 +309,8 @@ async def batch_create_orders(db: AsyncSession, orders_data: list) -> dict:
     注意：同步至采购中心的操作不在此函数内执行，由调用方在事务提交后统一处理，
     以确保同步线程池中的独立 Session 能读取到已提交的订单数据。
     """
-    results = []
-    created_order_ids = []
+    results: list[dict] = []
+    created_order_ids: list[int] = []
 
     # 收集所有 product_ids（保留加锁查询优化，避免 N+1）
     product_ids = _collect_product_ids(orders_data)

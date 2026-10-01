@@ -14,7 +14,8 @@ from typing import Any, Generic, TypeVar
 
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Query, Session
+from sqlalchemy.sql import Select
 
 from fastapi_app.core.redis_wrapper import safe_delete_pattern, safe_get, safe_set
 from fastapi_app.core.sanitizer import escape_like
@@ -85,10 +86,10 @@ class BaseSearchService(Generic[T], ABC):
     ):
         """构建搜索查询（同步版本）"""
         model = self.get_model_class()
-        query = db.query(model)
+        query: Query = db.query(model)
 
         if status_filter is not None:
-            query = query.filter(model.status == status_filter)
+            query = query.filter(model.status == status_filter)  # type: ignore[attr-defined] # model 为子类 ORM 模型，status 由子类约定
 
         if keyword:
             keyword_conds = self._build_keyword_conditions(keyword, self.use_trgm)
@@ -105,11 +106,11 @@ class BaseSearchService(Generic[T], ABC):
     ):
         """构建搜索查询（异步版本）"""
         model = self.get_model_class()
-        query = select(model)
+        query: Select = select(model)
 
         conditions = []
         if status_filter is not None:
-            conditions.append(model.status == status_filter)
+            conditions.append(model.status == status_filter)  # type: ignore[attr-defined] # 同上
 
         if keyword:
             keyword_conds = self._build_keyword_conditions(keyword, self.use_trgm)

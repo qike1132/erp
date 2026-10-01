@@ -40,7 +40,7 @@ def normalize_plan_date(date_str: str) -> date:
         return date(y, m, d)
 
 def build_inventory_map(inventory_data: list) -> dict:
-    mapping = {}
+    mapping: dict[tuple[str, str], int] = {}
     for item in inventory_data:
         key = (item['customer'], item['product_name'])
         stock = item.get('total_stock', 0) or 0

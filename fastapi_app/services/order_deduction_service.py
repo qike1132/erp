@@ -37,7 +37,7 @@ async def process_order_deduction(
     - 如果单个备货数量不足订单数量，则部分抵扣
     - 按FIFO原则选择最早的可用备货
     """
-    deduction_details = []
+    deduction_details: list[dict] = []
 
     if not deduct_stock:
         return 0, deduction_details
