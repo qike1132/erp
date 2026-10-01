@@ -1,6 +1,7 @@
 """ERP系统冒烟测试 - 覆盖19个业务板块核心功能（路由已修正）"""
 import os
 import sys
+from datetime import datetime
 
 _smoke_dir = os.path.dirname(os.path.abspath(__file__))
 _project_root = os.path.dirname(os.path.dirname(_smoke_dir))
@@ -17,17 +18,21 @@ from fastapi_app.main import app
 if "test" not in settings.ALLOWED_HOSTS:
     settings.ALLOWED_HOSTS.append("test")
 
+# plans/summary/records 三个端点的 year&month 为必填/条件必填（purchase_plan.py:61、
+# production_summary.py、daily_production.py），裸 GET 恒 422；带当前年月保持"冒烟=能通"语义
+_YM = f"year={datetime.now().year}&month={datetime.now().month}"
+
 SMOKE_TESTS = [
     ("采购中心", "GET", "/api/v1/purchase-center/orders", None),
     ("供应商管理", "GET", "/api/v1/suppliers/list", None),
-    ("物料计算器", "GET", "/api/v1/plans/list", None),
+    ("物料计算器", "GET", f"/api/v1/plans/list?{_YM}", None),
     ("来料登记", "GET", "/api/v1/material-registrations/registrations", None),
     ("核心业务", "GET", "/api/v1/dashboard/stats", None),
     ("产品清单", "GET", "/api/v1/products/list", None),
     ("客户订单", "GET", "/api/v1/orders/list", None),
     ("出库管理", "GET", "/api/v1/stock/out/list", None),
-    ("出货计划", "GET", "/api/v1/production-summary/summary", None),
-    ("生产报表", "GET", "/api/v1/daily-production/records", None),
+    ("出货计划", "GET", f"/api/v1/production-summary/summary?{_YM}", None),
+    ("生产报表", "GET", f"/api/v1/daily-production/records?{_YM}", None),
     ("数据查询", "GET", "/api/v1/products/search", None),
     ("订单查询", "GET", "/api/v1/orders/list", None),
     ("报表管理", "GET", "/api/v1/reports/order-logs", None),
@@ -49,11 +54,31 @@ async def client():
 
 @pytest_asyncio.fixture
 async def auth_headers(client):
+    # smoke 自建 admin：测试库每轮会话整库重建，不能依赖其他用例恰好建过号。
+    # 经 app_on_test_db 重定向后的引擎写入测试库，幂等（存在即跳过）。
+    from sqlalchemy import select
+
+    from fastapi_app.core import database as db_mod
+    from fastapi_app.core.security import hash_password
+    from fastapi_app.shared_models.user import User
+
+    await db_mod.ensure_engine_for_current_loop()
+    async with db_mod._AsyncSessionLocal() as session:
+        async with session.begin():
+            exists = await session.scalar(select(User).where(User.username == "admin"))
+            if not exists:
+                session.add(User(
+                    username="admin",
+                    password=hash_password("admin123"),
+                    is_super=True,
+                    status=True,
+                ))
+
     resp = await client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin123"})
-    if resp.status_code == 200:
-        token = resp.json().get("access_token", "")
-        return {"Authorization": f"Bearer {token}"}
-    return {}
+    # 登录失败不允许静默放行：返回空头会让全部用例吃 401 而 401 恰在断言白名单里，
+    # 整个文件"假绿"，接口契约漂移（如 year&month 必填）被发现不了。
+    assert resp.status_code == 200, f"smoke 登录失败 HTTP {resp.status_code}: {resp.text[:200]}"
+    return {"Authorization": f"Bearer {resp.json().get('access_token', '')}"}
 
 
 @pytest.mark.asyncio
