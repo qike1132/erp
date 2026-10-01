@@ -19,6 +19,32 @@ from httpx import ASGITransport, AsyncClient
 # 不会覆盖已存在的环境变量。
 os.environ["APP_ENV"] = "test"
 
+
+# 测试 Redis 隔离（P0.5，2026-10-01）：限流器在 import 期读 REDIS_CACHE_URL，
+# 端点缓存由 lifespan 的 init_app 同源读取；换库号到 15（测试专用），与生产
+# db0 隔离。必须在 import config/main 之前设置（load_dotenv 不覆盖已有变量）。
+# 与 tests/conftest.py 的同名逻辑保持一致；两棵测试树各自独立。
+def _redirect_test_redis() -> None:
+    import re as _re
+
+    env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), ".env")
+    raw = None
+    if os.path.exists(env_path):
+        with open(env_path, encoding="utf-8") as fh:
+            for line in fh:
+                if line.strip().startswith("REDIS_CACHE_URL="):
+                    raw = line.split("=", 1)[1].strip().strip('"').strip("'")
+                    break
+    if not raw:
+        raw = os.getenv("REDIS_CACHE_URL") or os.getenv("REDIS_URL") or "redis://127.0.0.1:6379/0"
+    test_url = _re.sub(r"/\d*$", "/15", raw)
+    os.environ["REDIS_CACHE_URL"] = test_url
+    os.environ["REDIS_URL"] = test_url
+    os.environ["REDIS_DB"] = "15"
+
+
+_redirect_test_redis()
+
 from fastapi_app.core.config import settings
 from fastapi_app.main import app
 

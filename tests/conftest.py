@@ -54,6 +54,38 @@ sys.path.insert(0, _project_root)
 # 不会覆盖已存在的环境变量。
 os.environ["APP_ENV"] = "test"
 
+
+# ============================================================
+# 测试 Redis 隔离（P0.5，2026-10-01）
+# ============================================================
+# 限流器（core/limiter.py:56）在 import 期读取 REDIS_CACHE_URL 作为存储 URI，
+# 端点缓存管理器（utils/redis_cache）由 lifespan 的 init_app 同源读取——
+# 两者都必须在导入 app 之前重定向，否则测试的登录限流计数会写进生产
+# Redis db0（实证：一轮 smoke 写入 LIMITS:.../auth/login... = 19）。
+# 改库号为 15（测试专用）：主机/端口/口令不变，Redis 16 个逻辑库互不可见。
+# 必须在 import config/main 之前设置：load_dotenv(override=False) 不会覆盖
+# 已存在的环境变量。
+def _redirect_test_redis() -> None:
+    import re as _re
+
+    env_path = os.path.join(_project_root, ".env")
+    raw = None
+    if os.path.exists(env_path):
+        with open(env_path, encoding="utf-8") as fh:
+            for line in fh:
+                if line.strip().startswith("REDIS_CACHE_URL="):
+                    raw = line.split("=", 1)[1].strip().strip('"').strip("'")
+                    break
+    if not raw:
+        raw = os.getenv("REDIS_CACHE_URL") or os.getenv("REDIS_URL") or "redis://127.0.0.1:6379/0"
+    test_url = _re.sub(r"/\d*$", "/15", raw)
+    os.environ["REDIS_CACHE_URL"] = test_url
+    os.environ["REDIS_URL"] = test_url
+    os.environ["REDIS_DB"] = "15"
+
+
+_redirect_test_redis()
+
 from sqlalchemy import text
 
 from fastapi_app.core.config import settings
@@ -248,6 +280,24 @@ async def app_on_test_db(test_engine):
         # 旧 loop 引擎清理失败不影响测试
         with contextlib.suppress(Exception):
             await stale.dispose(close=False)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_memory_cache_fallback():
+    """每个用例前后清空 redis_cache 的进程内内存降级缓存。
+
+    测试进程不跑 lifespan → redis_cache 无客户端 → 端点缓存退化为进程级
+    内存 dict；同进程内跨用例残留会让后跑的用例吃到先跑用例写入的缓存
+    （test_list_customers "total 0 != 1" 的事故根因）。逐用例清空，等价于
+    给每个用例一个独立的内存缓存库。私有属性访问仅限测试侧。
+    """
+    from utils.redis_cache import redis_cache
+
+    redis_cache._fallback_cache.clear()
+    redis_cache._fallback_timestamps.clear()
+    yield
+    redis_cache._fallback_cache.clear()
+    redis_cache._fallback_timestamps.clear()
 
 
 @pytest_asyncio.fixture
