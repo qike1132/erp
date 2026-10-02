@@ -19,7 +19,7 @@ from fastapi_app.core.database import get_async_db
 from fastapi_app.core.deps import create_access_token, create_refresh_token, get_current_user_id
 from fastapi_app.core.limiter import limiter, memory_limiter, rate_limit_key
 from fastapi_app.core.response import success_response
-from fastapi_app.core.validators import matches_upload_magic, require_upload_magic
+from fastapi_app.core.validators import require_upload_magic
 
 logger = logging.getLogger(__name__)
 
@@ -488,9 +488,6 @@ async def api_refresh_token(
 
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
 MAX_UPLOAD_SIZE = 5 * 1024 * 1024  # 5MB
-def _validate_image_content(content: bytes, ext: str) -> bool:
-    """图片内容与扩展名是否一致（P0-12 起委托 core.validators 的公共魔数层）。"""
-    return matches_upload_magic(content, ext)
 
 
 @router.post("/upload", response_model=FileUploadResponse)

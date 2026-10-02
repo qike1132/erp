@@ -164,6 +164,32 @@ def tmp_storage(tmp_path, monkeypatch):
     return backend
 
 
+class TestLocalBackendUrlConsistency:
+    """upload 的返回值必须与 get_url 同口径（回归 N-1）。
+
+    本地后端的 upload 曾返回裸路径 '/static/uploads/<key>'，而 get_url 返回签发 URL；
+    S3 后端的 upload 一直是 `return self.get_url(key)`。两者不一致导致上传响应里的 url
+    不带 st/s 参数，nginx secure_link 生效后前端拿它立刻预览会 403。
+    """
+
+    async def test_upload_matches_get_url_when_signing_enabled(self, tmp_path, monkeypatch):
+        monkeypatch.setenv('UPLOAD_URL_SIGNING_SECRET', 's3cret')
+        backend = svc.LocalStorageBackend(base_dir=tmp_path)
+
+        uploaded = await backend.upload('20261002/a.webp', b'x', 'image/webp')
+
+        assert uploaded == backend.get_url('20261002/a.webp')
+        assert 'st=' in uploaded and 's=' in uploaded
+
+    async def test_upload_returns_plain_path_when_signing_disabled(self, tmp_path, monkeypatch):
+        monkeypatch.delenv('UPLOAD_URL_SIGNING_SECRET', raising=False)
+        backend = svc.LocalStorageBackend(base_dir=tmp_path)
+
+        uploaded = await backend.upload('20261002/a.webp', b'x', 'image/webp')
+
+        assert uploaded == '/static/uploads/20261002/a.webp'
+
+
 @pytest.mark.integration
 class TestSaveUploadVariants:
     async def test_generate_thumbnail_flag_creates_all_variants(self, storage_db, tmp_storage):

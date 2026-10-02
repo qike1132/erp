@@ -81,6 +81,23 @@ def test_magic_registry_covers_the_documented_formats():
         assert fmt in MAGIC_SETS, f'MAGIC_SETS 缺少 {fmt}'
 
 
+def test_webp_requires_webp_marker_not_just_riff():
+    """回归 R2L-3：只有 RIFF 头不算 WebP —— RIFF 是 WAV/AVI/WebP 共用的容器头，
+    只比对前 4 字节会让改名为 .webp 的 .wav/.avi 通过魔数层。"""
+    assert matches_upload_magic(b'RIFF' + b'\x00' * 4 + b'WEBP' + b'\x00' * 4, 'webp') is True
+    assert matches_upload_magic(b'RIFF' + b'\x00' * 4 + b'WAVE' + b'\x00' * 4, 'webp') is False
+    assert matches_upload_magic(b'RIFF' + b'\x00' * 20, 'webp') is False
+
+
+def test_pdf_header_may_be_offset_within_first_1k():
+    """回归 L-7：PDF 规范允许 %PDF 出现在文件头 1024 字节内任意位置
+    （部分扫描/生成工具会写前导字节，下游 PyMuPDF 本可正常识别）。"""
+    assert matches_upload_magic(b'%PDF-1.7', 'pdf') is True
+    assert matches_upload_magic(b'\x00' * 200 + b'%PDF-1.7', 'pdf') is True
+    # 超出 1024 字节窗口仍应拒绝
+    assert matches_upload_magic(b'\x00' * 2000 + b'%PDF-1.7', 'pdf') is False
+
+
 @pytest.mark.parametrize('head,ext,_fmt', _POSITIVE)
 def test_real_signatures_pass(head, ext, _fmt):
     assert matches_upload_magic(head, ext) is True, f'{ext} 的真签名被误判'
@@ -193,6 +210,10 @@ _REQUIRE_SITES = {
     'fastapi_app/api/v1/endpoints/auth.py': ('upload_file',),
     'fastapi_app/api/v1/endpoints/ocr_import.py': ('upload_shipping_docs', 'preview_shipping_doc', 'preview_order_doc'),
     'fastapi_app/api/v1/endpoints/backup/validation.py': ('validate_backup',),
+    # 2026-10-02 补齐：这两个端点此前漏接入公共魔数层（purchase_plan 完全没有，
+    # staging_order 用内联 content[:4] 比对且少认两种合法 ZIP 头）
+    'fastapi_app/api/v1/endpoints/purchase_plan.py': ('upload_excel',),
+    'fastapi_app/api/v1/endpoints/staging_order.py': ('import_staging_orders',),
 }
 _MAGIC_CALLS = {'require_upload_magic', 'matches_upload_magic'}
 

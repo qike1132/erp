@@ -331,21 +331,16 @@ async def batch_create_orders(db: AsyncSession, orders_data: list) -> dict:
     # 按 customer 分组（dict 保持首次出现顺序）
     grouped = _group_by_customer(orders_data)
 
-    product_map: dict[int, Product] = {}
-    # 已在本事务中成功加锁的 product_id（savepoint 语义见下方 locked_ids.update 处）
-    locked_ids: set[int] = set()
+    # 一次性按 id 升序锁定本批涉及的全部商品（P1-5 修正）。
+    # 曾改成「逐分组各自加锁」以缩小锁范围，但那会重新打开跨组死锁：分组顺序取决于请求里
+    # customer 的首次出现顺序，T1 按 [A(p1), B(p2)]、T2 按 [B(p2), A(p1)] 处理时双方各持
+    # 一把、互等对方。对分组排序也无法消除这种交叉（分组构成逐请求不同）——只有「单条语句
+    # 按全局升序取锁」才能让所有并发批次的取锁顺序一致。锁粒度不变：Product 行级 FOR UPDATE。
+    product_map: dict[int, Product] = await _lock_products(db, _collect_product_ids(orders_data))
 
     for customer, items in grouped.items():
-        locked_here: list[int] = []
         try:
             async with db.begin_nested():
-                # P1-5：只锁本组商品（升序）。锁集合与本次分组商品集合一致，且不再把
-                # 整批商品的行锁贯穿整个批量循环（缩小并确定化的加锁顺序，消除交叉死锁）
-                missing_ids = [pid for pid in _collect_product_ids(items) if pid not in locked_ids]
-                if missing_ids:
-                    product_map.update(await _lock_products(db, missing_ids))
-                    locked_here = missing_ids
-
                 validated_items = _validate_group_items(items, customer, product_map, results)
                 order = await _create_order_header(db, customer, validated_items)
                 created_items = await _create_order_items(db, order, customer, validated_items)
@@ -354,9 +349,6 @@ async def batch_create_orders(db: AsyncSession, orders_data: list) -> dict:
                 results.append(_build_success_result(order, customer, created_items))
                 created_order_ids.append(order.id)
                 await _dispatch_notifications(db, order, created_items, product_map)
-            # 组内 savepoint 正常退出后才记为「已加锁」：PostgreSQL 的 ROLLBACK TO
-            # SAVEPOINT 会释放该子事务内新获取的行锁，失败组不得污染后续组的加锁判定。
-            locked_ids.update(locked_here)
         except _SavepointRollbackSignalError:
             pass  # 业务校验失败，savepoint 已自动回滚，继续下一组; defensive: 异常静默处理,不影响主流程
         except (ValueError, TypeError, OSError) as e:

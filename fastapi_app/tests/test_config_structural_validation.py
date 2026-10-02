@@ -32,3 +32,21 @@ def test_default_settings_pass_structural_validation():
 def test_bad_structural_values_rejected(kwargs, needle):
     with pytest.raises(RuntimeError, match=needle):
         Settings(**kwargs)
+
+
+def test_allow_negative_stock_true_is_rejected_at_startup(monkeypatch):
+    """回归 N-2：ALLOW_NEGATIVE_STOCK=true 与 DB 约束 ck_product_current_stock_nonneg 互斥。
+
+    该开关只解除应用层两道闸门，扣成负数仍会被 DB 拒绝 —— 结果是从清晰的「库存不足」
+    退化成 500 IntegrityError。故启动期直接拦截，并给出 DROP CONSTRAINT 的指引。
+    """
+    monkeypatch.setenv('ALLOW_NEGATIVE_STOCK', 'true')
+    with pytest.raises(RuntimeError, match='ALLOW_NEGATIVE_STOCK'):
+        Settings()
+
+
+@pytest.mark.parametrize('raw', ['', 'false', '0', 'no', 'off'])
+def test_allow_negative_stock_falsey_values_pass(monkeypatch, raw):
+    """缺省与各类假值一律放行（开关本身合法，只是不能置真）。"""
+    monkeypatch.setenv('ALLOW_NEGATIVE_STOCK', raw)
+    Settings()  # 不抛即通过

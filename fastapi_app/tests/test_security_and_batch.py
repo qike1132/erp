@@ -3,54 +3,47 @@
 """
 import pytest
 
+from fastapi_app.core.validators import matches_upload_magic
+
 # ==================== 文件 MIME 校验 ====================
 
 class TestImageMimeValidation:
-    """图片上传 MIME 魔数校验测试"""
+    """图片上传 MIME 魔数校验测试（P0-12 后统一走 core.validators 公共魔数层）"""
 
     def test_valid_png_signature(self):
-        from fastapi_app.api.v1.endpoints.auth import _validate_image_content
         png_sig = b'\x89PNG\r\n\x1a\n' + b'\x00' * 10
-        assert _validate_image_content(png_sig, 'png') is True
+        assert matches_upload_magic(png_sig, 'png') is True
 
     def test_valid_jpg_signature(self):
-        from fastapi_app.api.v1.endpoints.auth import _validate_image_content
         jpg_sig = b'\xff\xd8\xff' + b'\x00' * 10
-        assert _validate_image_content(jpg_sig, 'jpg') is True
-        assert _validate_image_content(jpg_sig, 'jpeg') is True
+        assert matches_upload_magic(jpg_sig, 'jpg') is True
+        assert matches_upload_magic(jpg_sig, 'jpeg') is True
 
     def test_valid_gif87a_signature(self):
-        from fastapi_app.api.v1.endpoints.auth import _validate_image_content
         gif_sig = b'GIF87a' + b'\x00' * 10
-        assert _validate_image_content(gif_sig, 'gif') is True
+        assert matches_upload_magic(gif_sig, 'gif') is True
 
     def test_valid_gif89a_signature(self):
-        from fastapi_app.api.v1.endpoints.auth import _validate_image_content
         gif_sig = b'GIF89a' + b'\x00' * 10
-        assert _validate_image_content(gif_sig, 'gif') is True
+        assert matches_upload_magic(gif_sig, 'gif') is True
 
     def test_html_disguised_as_png(self):
-        from fastapi_app.api.v1.endpoints.auth import _validate_image_content
         html_data = b'<html><script>alert("xss")</script></html>'
-        assert _validate_image_content(html_data, 'png') is False
+        assert matches_upload_magic(html_data, 'png') is False
 
     def test_js_disguised_as_jpg(self):
-        from fastapi_app.api.v1.endpoints.auth import _validate_image_content
         js_data = b'console.log("malicious");'
-        assert _validate_image_content(js_data, 'jpg') is False
+        assert matches_upload_magic(js_data, 'jpg') is False
 
     def test_empty_content(self):
-        from fastapi_app.api.v1.endpoints.auth import _validate_image_content
-        assert _validate_image_content(b'', 'png') is False
+        assert matches_upload_magic(b'', 'png') is False
 
     def test_gif_sig_rejected_as_png(self):
-        from fastapi_app.api.v1.endpoints.auth import _validate_image_content
         gif_sig = b'GIF89a' + b'\x00' * 10
-        assert _validate_image_content(gif_sig, 'png') is False
+        assert matches_upload_magic(gif_sig, 'png') is False
 
     def test_short_data_rejected(self):
-        from fastapi_app.api.v1.endpoints.auth import _validate_image_content
-        assert _validate_image_content(b'\x89P', 'png') is False
+        assert matches_upload_magic(b'\x89P', 'png') is False
 
 
 # ==================== 批量操作 savepoint ====================

@@ -177,6 +177,43 @@ async def safe_ltrim(key: str, start: int, end: int, context: str = "") -> bool:
         return False
 
 
+# 释放锁：比对 token 后删除，避免误删他人持有的锁（异常时靠 TTL 兜底）
+_RELEASE_LOCK_LUA = (
+    "if redis.call('get', KEYS[1]) == ARGV[1] then "
+    "return redis.call('del', KEYS[1]) else return 0 end"
+)
+
+
+async def safe_acquire_lock(key: str, token: str, ttl: int = 10, context: str = "") -> bool:
+    """尝试获取分布式锁（SET NX EX）。
+
+    拿不到锁（已被他人持有 / Redis 不可用 / 超时）一律返回 False，
+    调用方应当**跳过本轮**而不是继续执行 —— 跳过只是推迟，继续才会破坏临界区。
+
+    本机 Redis 为 5.0，没有 LPOP count / LMPOP，无法用原子弹出替代锁，
+    故「读一批 + 裁掉一批」这类临界区只能靠本锁互斥。
+    """
+    try:
+        client = get_client()
+        if client is None:
+            return False
+        return bool(await client.set(key, token, nx=True, ex=ttl))
+    except INFRA_EXCEPTIONS as e:
+        logger.warning("%s获取锁失败: %s", _ctx(context, key), e)
+        return False
+
+
+async def safe_release_lock(key: str, token: str, context: str = "") -> None:
+    """释放分布式锁（Lua 比对 token，只删自己持有的；失败依赖 TTL 过期兜底）。"""
+    try:
+        client = get_client()
+        if client is None:
+            return
+        await client.eval(_RELEASE_LOCK_LUA, 1, key, token)
+    except INFRA_EXCEPTIONS as e:
+        logger.warning("%s释放锁失败: %s", _ctx(context, key), e)
+
+
 async def safe_llen(key: str, context: str = "") -> int:
     """安全获取 List 长度"""
     try:

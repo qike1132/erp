@@ -83,10 +83,12 @@ async def update_stockout_core(db: AsyncSession, stockout: StockOut, new_quantit
     old_quantity = stockout.quantity
     old_net = old_quantity - stockout.returned_quantity
     product = await stock_service.get_product_for_update(db, stockout.product_id)
-    # 变更后净出货量与原净出货量之差即本次库存变化量（P1-2b 统一入口）
+    # 本次库存变化量：净出货量减少=回补库存（delta 为正），净出货量增加=扣减（delta 为负）。
+    # 必须与下方写入口 `-(new_quantity - old_quantity)` 同号，也与被本入口替换掉的旧判断
+    # `current_stock + old_net < new_quantity - returned` 等价（P1-2b 统一入口）。
     assert_stock_available(
         product.current_stock,
-        (new_quantity - stockout.returned_quantity) - old_net,
+        old_net - (new_quantity - stockout.returned_quantity),
         message='库存不足！',
     )
     if customer and customer.strip():

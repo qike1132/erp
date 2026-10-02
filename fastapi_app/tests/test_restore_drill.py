@@ -173,6 +173,30 @@ def test_open_backup_archive_decrypts_encrypted_package(drill, tmp_path):
         assert temp_path is not None and not temp_path.exists()
 
 
+def test_open_backup_archive_removes_plaintext_temp_when_not_a_zip(drill, tmp_path):
+    """回归 L-8：解密成功但内层不是合法 zip 时，必须删掉明文临时文件。
+
+    该临时文件是**生产库明文 dump**。此前 tmp_path 只在正常返回时才交回调用方，
+    ZipFile() 抛错时 main() 的 finally 拿不到路径，明文便留在系统临时目录。
+    """
+    import tempfile as _tempfile
+
+    from fastapi_app.core.backup_encryption import encrypt_backup_auto
+
+    encrypted_bytes, _meta = encrypt_backup_auto(b'this is not a zip archive', 'drill-pass')
+    enc = tmp_path / 'erp_backup_20260901_020000.zip.enc'
+    enc.write_bytes(encrypted_bytes)
+
+    temp_dir = Path(_tempfile.gettempdir())
+    before = set(temp_dir.glob('dr_drill_*'))
+
+    with pytest.raises(zipfile.BadZipFile):
+        drill.open_backup_archive(enc, 'drill-pass')
+
+    leaked = set(temp_dir.glob('dr_drill_*')) - before
+    assert not leaked, f'解密后的明文临时文件未被清理: {leaked}'
+
+
 def test_open_backup_archive_encrypted_without_passphrase_refuses(drill, monkeypatch, tmp_path):
     """密文 + 无口令 ⇒ 显式报错（绝不把密文当明文交给 psql）。"""
     monkeypatch.delenv(PASSPHRASE_ENV, raising=False)

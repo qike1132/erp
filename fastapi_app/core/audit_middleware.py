@@ -56,6 +56,9 @@ METHOD_ACTION_MAP = {
 
 AUDIT_BUFFER_KEY = 'audit_log_buffer'
 AUDIT_FLUSH_SIZE = 50
+# 刷写互斥锁：LRANGE + LTRIM 不原子，多 worker 并发刷写会丢数据（见 flush_audit_buffer）
+AUDIT_FLUSH_LOCK_KEY = 'audit_log_buffer_flush_lock'
+AUDIT_FLUSH_LOCK_TTL = 30
 AUDIT_FLUSH_INTERVAL = 5
 
 # 授权拒绝（403）的审计动作名，用于与业务写操作的 CREATE/UPDATE/DELETE 区分
@@ -308,15 +311,16 @@ async def _buffer_audit_entries(entries: list[dict]):
         return
     try:
         from fastapi_app.core.redis_wrapper import safe_llen, safe_rpush
-        pushed = 0
-        for entry in entries:
-            # default=str：created_at 是 datetime，不兜底会 TypeError —— 原实现因此
-            # 每轮都跌进 except 直写，Redis 缓冲路径实际从未生效（P1-9 顺带修复）
-            pushed += await safe_rpush(
-                AUDIT_BUFFER_KEY,
-                json.dumps(entry, ensure_ascii=False, default=str),
-                context="审计缓冲",
-            )
+        # 单次多值 RPUSH 在 Redis 侧是**原子**的：不存在「前几条成功、后面失败」的
+        # 半成功窗口，因此不需要按条累加成败。原实现按条 RPUSH 并把返回值（列表长度）
+        # 当成功条数累加，部分失败时 pushed 仍 > 0，会跳过直写兜底而静默丢条目。
+        # default=str：created_at 是 datetime，不兜底会 TypeError —— 原实现因此
+        # 每轮都跌进 except 直写，Redis 缓冲路径实际从未生效（P1-9 顺带修复）
+        pushed = await safe_rpush(
+            AUDIT_BUFFER_KEY,
+            *[json.dumps(entry, ensure_ascii=False, default=str) for entry in entries],
+            context="审计缓冲",
+        )
         if pushed > 0:
             buf_len = await safe_llen(AUDIT_BUFFER_KEY, context="审计缓冲")
             if buf_len >= AUDIT_FLUSH_SIZE:
@@ -333,16 +337,45 @@ async def _buffer_audit_entry(entry: dict):
 
 
 async def flush_audit_buffer():
+    """把缓冲里的审计条目落库。
+
+    并发安全由两处保障：
+
+    1. **分布式锁**：LRANGE + LTRIM 本身不原子。两个刷写者读到同一段时，后执行者
+       会把「从未被读到」的下一段一并裁掉（丢数据），同时把已读段重复写一遍。
+       生产 UVICORN_WORKERS 默认 4，每个 worker 各有一条 5s 刷写循环，另有请求
+       内联（缓冲 >= AUDIT_FLUSH_SIZE）与关停钩子，并发刷写是常态。
+       拿不到锁直接返回，条目留在缓冲里下一轮再刷 —— 跳过只是推迟，抢跑才危险。
+    2. **先写库、后裁剪**：仅在落库成功后裁剪。写入失败时保留缓冲下轮重试；
+       代价是崩溃窗口内可能重复写，而审计可容忍重复、不可容忍丢失。
+    """
+    from fastapi_app.core.redis_wrapper import (
+        safe_acquire_lock,
+        safe_lrange,
+        safe_ltrim,
+        safe_release_lock,
+    )
+
+    token = str(uuid.uuid4())
+    acquired = False
     try:
-        from fastapi_app.core.redis_wrapper import safe_lrange, safe_ltrim
+        acquired = await safe_acquire_lock(
+            AUDIT_FLUSH_LOCK_KEY, token, ttl=AUDIT_FLUSH_LOCK_TTL, context="审计缓冲"
+        )
+        if not acquired:
+            return
         entries_raw = await safe_lrange(AUDIT_BUFFER_KEY, 0, AUDIT_FLUSH_SIZE - 1, context="审计缓冲")
         if not entries_raw:
             return
-        await safe_ltrim(AUDIT_BUFFER_KEY, len(entries_raw), -1, context="审计缓冲")
         entries = [json.loads(e) for e in entries_raw]
-        await _write_audit_direct(entries)
+        if not await _write_audit_direct(entries):
+            return  # 落库失败：不裁剪，条目留在缓冲里下轮重试
+        await safe_ltrim(AUDIT_BUFFER_KEY, len(entries_raw), -1, context="审计缓冲")
     except Exception as e:  # defensive: 缓冲刷写失败记录日志，不中断请求
         logger.warning('审计日志缓冲刷写失败: %s', e)
+    finally:
+        if acquired:
+            await safe_release_lock(AUDIT_FLUSH_LOCK_KEY, token, context="审计缓冲")
 
 
 def _build_batch_insert(entries: list[dict]) -> tuple[str, dict]:
@@ -367,15 +400,20 @@ def _build_batch_insert(entries: list[dict]) -> tuple[str, dict]:
     return sql, params
 
 
-async def _write_audit_direct(entries: list[dict]):
+async def _write_audit_direct(entries: list[dict]) -> bool:
+    """整批直写 audit_log；返回是否落库成功（异常在此吞掉，只记日志）。
+
+    返回值供 flush_audit_buffer 判断能否安全裁剪缓冲：写失败时不能裁剪，
+    否则这批条目既不在缓冲也不在库里。
+    """
     if not entries:
-        return
+        return True
     try:
         from sqlalchemy import text as sa_text
 
         session_factory = _get_audit_session_factory()
         if session_factory is None:
-            return
+            return False
 
         for entry in entries:
             # 兜底：无论来自 Redis 缓冲（JSON 反序列化丢掉 datetime 类型）还是直接路径，
@@ -397,8 +435,10 @@ async def _write_audit_direct(entries: list[dict]):
             await session.execute(sa_text(sql), params)
             await session.commit()
         logger.debug('审计日志写入 %d 条', len(entries))
+        return True
     except Exception as e:  # defensive: 审计日志写入失败不能影响主请求
         logger.warning('审计日志直接写入失败: %s', e)
+        return False
 
 
 async def _audit_flush_loop():

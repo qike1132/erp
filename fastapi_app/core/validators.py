@@ -8,7 +8,7 @@ validate_upload_magic / require_upload_magic，供各上传端点复用 —— �
 上传端点只按扩展名判定，把任意文件改名为 .xlsx/.png 即可穿过校验直达解析器。
 """
 import logging
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any
 
 from fastapi import HTTPException
@@ -70,12 +70,12 @@ MAGIC_SETS: dict[str, tuple[bytes, ...]] = {
     "xls": (b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1",),
     "ole": (b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1",),
     "doc": (b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1",),
-    "pdf": (b"%PDF",),
+    "pdf": (b"%PDF",),  # 常规起点；规范允许头出现在前 1024 字节内，精判见 _SPECIAL_MATCHERS
     "png": (b"\x89PNG\r\n\x1a\n",),
     "jpg": (b"\xff\xd8\xff",),
     "jpeg": (b"\xff\xd8\xff",),
     "gif": (b"GIF87a", b"GIF89a"),
-    "webp": (b"RIFF",),
+    "webp": (b"RIFF",),  # 容器头；真实签名 RIFF????WEBP 由 _SPECIAL_MATCHERS 精判
     "bmp": (b"BM",),
     "tiff": (b"II*\x00", b"MM\x00*"),
     "tif": (b"II*\x00", b"MM\x00*"),
@@ -88,6 +88,18 @@ MAGIC_SETS: dict[str, tuple[bytes, ...]] = {
 TEXT_SETS = frozenset({"csv", "txt", "text"})
 # JSON 只要求首个非空白字符是 { 或 [
 JSON_SETS = frozenset({"json"})
+
+# 无法用「偏移 0 前缀」表达的格式：用谓词精判，匹配时**优先于** MAGIC_SETS 的前缀表。
+# 所有调用方都传入文件全量内容（见 require_upload_magic 的 docstring），故谓词可以安全
+# 地看前若干个字节。MAGIC_SETS 里仍保留同名键，作为「已知格式登记表」。
+_SPECIAL_MATCHERS: dict[str, Callable[[bytes], bool]] = {
+    # WebP 的真实签名是 RIFF????WEBP。RIFF 是 WAV/AVI/WebP 共用的容器头，
+    # 只比对前 4 字节会让改名为 .webp 的 .wav/.avi 通过。
+    "webp": lambda head: head[:4] == b"RIFF" and head[8:12] == b"WEBP",
+    # PDF 规范允许 %PDF 出现在文件头 1024 字节内任意位置（部分扫描/生成工具会写前导字节）；
+    # 下游 PyMuPDF 能正常识别这类文件，只在偏移 0 比对会把它误判为「与扩展名不符」而跳过。
+    "pdf": lambda head: b"%PDF" in head[:1024],
+}
 
 
 def _magic_set_names(allowed_sets: str | Sequence[str]) -> tuple[str, ...]:
@@ -150,6 +162,11 @@ def matches_upload_magic(head_bytes: bytes, allowed_sets: str | Sequence[str]) -
             if _looks_like_json(head_bytes):
                 return True
         else:
+            special = _SPECIAL_MATCHERS.get(name)
+            if special is not None:
+                if special(head_bytes):
+                    return True
+                continue
             for signature in MAGIC_SETS.get(name, ()):
                 if head_bytes[: len(signature)] == signature:
                     return True

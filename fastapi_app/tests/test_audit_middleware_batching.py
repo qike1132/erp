@@ -182,6 +182,8 @@ async def test_flush_buffer_writes_batch_in_single_execute():
 
     with patch.object(am, '_get_audit_session_factory', lambda: factory), \
             patch.object(am, '_write_audit_direct', _REAL_WRITE_AUDIT_DIRECT), \
+            patch('fastapi_app.core.redis_wrapper.safe_acquire_lock', AsyncMock(return_value=True)), \
+            patch('fastapi_app.core.redis_wrapper.safe_release_lock', AsyncMock(return_value=None)), \
             patch('fastapi_app.core.redis_wrapper.safe_lrange', AsyncMock(return_value=raw)), \
             patch('fastapi_app.core.redis_wrapper.safe_ltrim', AsyncMock(return_value=True)):
         await am.flush_audit_buffer()
@@ -194,6 +196,50 @@ async def test_flush_buffer_writes_batch_in_single_execute():
     # JSON 反序列化丢 datetime 类型 → 必须还原成 datetime，且保留原时间戳（不能被刷写时刻覆盖）
     assert isinstance(params['created_at_0'], datetime)
     assert params['created_at_0'] == original_created_at
+
+
+@pytest.mark.asyncio
+async def test_flush_skips_when_lock_not_acquired():
+    """并发保护：抢不到刷写锁时整轮跳过——不读、不写、不裁剪。
+
+    LRANGE + LTRIM 不原子，两个刷写者同时进入会丢数据（后执行的 LTRIM 把从未读到的
+    下一段一并裁掉）。跳过只是推迟到下一轮，抢跑才危险。
+    """
+    record: dict = {'executes': [], 'commits': 0}
+    factory = _RecordingSessionFactory(record)
+    lrange = AsyncMock(return_value=[json.dumps({'user_id': 1})])
+    ltrim = AsyncMock(return_value=True)
+
+    with patch.object(am, '_get_audit_session_factory', lambda: factory), \
+            patch.object(am, '_write_audit_direct', _REAL_WRITE_AUDIT_DIRECT), \
+            patch('fastapi_app.core.redis_wrapper.safe_acquire_lock', AsyncMock(return_value=False)), \
+            patch('fastapi_app.core.redis_wrapper.safe_lrange', lrange), \
+            patch('fastapi_app.core.redis_wrapper.safe_ltrim', ltrim):
+        await am.flush_audit_buffer()
+
+    assert record['executes'] == [], '未持锁不得写库'
+    lrange.assert_not_awaited()
+    ltrim.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_flush_keeps_buffer_when_write_fails():
+    """先写库、后裁剪：落库失败时不得裁剪，否则这批条目既不在缓冲也不在库里。"""
+    record: dict = {'executes': [], 'commits': 0}
+    factory = _RecordingSessionFactory(record, fail=True)
+    raw = [json.dumps({'user_id': 1, 'created_at': datetime(2026, 10, 1, 8, 30, tzinfo=UTC).isoformat()})]
+    ltrim = AsyncMock(return_value=True)
+
+    with patch.object(am, '_get_audit_session_factory', lambda: factory), \
+            patch.object(am, '_write_audit_direct', _REAL_WRITE_AUDIT_DIRECT), \
+            patch('fastapi_app.core.redis_wrapper.safe_acquire_lock', AsyncMock(return_value=True)), \
+            patch('fastapi_app.core.redis_wrapper.safe_release_lock', AsyncMock(return_value=None)), \
+            patch('fastapi_app.core.redis_wrapper.safe_lrange', AsyncMock(return_value=raw)), \
+            patch('fastapi_app.core.redis_wrapper.safe_ltrim', ltrim):
+        await am.flush_audit_buffer()
+
+    assert record['commits'] == 0, '写入失败不应有提交'
+    ltrim.assert_not_awaited()
 
 
 def test_batch_insert_sql_shape():

@@ -87,3 +87,67 @@ def test_sign_idempotent_and_full_path(monkeypatch):
     q1 = parse_qs(urlparse(signed_urls.sign_upload_url('/static/uploads/a/b.webp', ttl_seconds=600)).query)
     q2 = parse_qs(urlparse(signed).query)
     assert q1['s'] == q2['s']
+
+
+_PRODUCT_LIST_ITEM = {
+    'id': 1, 'name': '测试产品', 'barcode': None, 'price': 1.0,
+    'image': '/static/uploads/20261001/a.webp', 'factory': None,
+    'initial_stock': 0, 'current_stock': 0, 'create_time': None,
+}
+
+
+def test_product_list_response_signs_image(monkeypatch):
+    """回归：产品列表项的 image 必须经 ProductListResponse 签发。
+
+    列表项曾是裸 list[dict]，不走 ProductResponse 的 sign_image_url 校验器，
+    于是列表页的 image 不带 st/s 参数 —— nginx secure_link 生效后整页图片 403
+    （详情页走 ProductResponse 有签发，故此前只有列表这一处漏掉）。
+    """
+    monkeypatch.setenv('UPLOAD_URL_SIGNING_SECRET', 's3cret')
+
+    from fastapi_app.schemas.product import ProductListResponse
+
+    resp = ProductListResponse(items=[dict(_PRODUCT_LIST_ITEM)], total=1)
+
+    image = resp.items[0].image
+    assert image is not None
+    assert 'st=' in image and 's=' in image
+    assert image.startswith('/static/uploads/20261001/a.webp?')
+
+
+def test_product_list_response_keeps_plain_url_without_secret():
+    """密钥未配置时列表项 image 原样返回（与签发层的 fail-safe 联动）。"""
+    from fastapi_app.schemas.product import ProductListResponse
+
+    resp = ProductListResponse(items=[dict(_PRODUCT_LIST_ITEM)], total=1)
+
+    assert resp.items[0].image == '/static/uploads/20261001/a.webp'
+
+
+def test_absolute_image_url_is_not_signed(monkeypatch):
+    """外部直链不得被签发改写（回归 N-3）。
+
+    入库侧 sanitize_url 明确放行 http/https 等绝对 URL，而出站签发会把任意
+    非 /static/uploads/ 的值拼成 /static/uploads/<值>，照签会把外链拼成
+    /static/uploads/https://... 而损坏。协议相对（//host/...）同理。
+    """
+    monkeypatch.setenv('UPLOAD_URL_SIGNING_SECRET', 's3cret')
+    from fastapi_app.schemas.product import ProductResponse
+
+    for url in ('https://cdn.example.com/a.png', 'http://x/a.png', '//cdn.x/a.png'):
+        resp = ProductResponse(id=1, name='P', initial_stock=0, current_stock=0, image=url)
+        assert resp.image == url, f'{url} 被签发改写了'
+
+
+def test_local_upload_path_is_signed(monkeypatch):
+    """对照：本地上传路径仍照常签发（确认上面那条不是把签发整个关掉）。"""
+    monkeypatch.setenv('UPLOAD_URL_SIGNING_SECRET', 's3cret')
+    from fastapi_app.schemas.product import ProductResponse
+
+    resp = ProductResponse(
+        id=1, name='P', initial_stock=0, current_stock=0,
+        image='/static/uploads/20261001/a.webp',
+    )
+    assert resp.image is not None
+    assert resp.image.startswith('/static/uploads/20261001/a.webp?')
+    assert 'st=' in resp.image and 's=' in resp.image

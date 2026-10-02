@@ -2,13 +2,15 @@
 
 背景：/static/uploads/ 由 nginx alias 直接托管，知道 URL 即可 GET（免鉴权直出）。
 文件名虽为 uuid4 不可枚举（storage_service.py:165），但被分享的链接永久有效。
-本模块签发带过期时间的 HMAC 链接，nginx 侧 secure_link 校验后放行。
+本模块签发带过期时间的 secure_link_md5 摘要链接，nginx 侧 secure_link 校验后放行。
 
 URL 形态（nginx secure_link_md5 标准协议）：
-    /static/uploads/<key>?st=<到期Unix时间>&s=<base64url(md5(expired + uri + secret))>
+    /static/uploads/<key>?st=<到期Unix时间>&s=<base64url(md5(expired + uri + " " + secret))>
 
 算法（与 nginx `secure_link_md5 "$secure_link_expires$uri <secret>"` 对齐）：
-    md5(f"{expired}{uri}{secret}") 的 base64url（无填充）。
+    md5(f"{expired}{uri} {secret}") 的 base64url（无填充）。
+    注意 secret 前有一个**字面空格**（nginx 官方示例的写法），两侧必须严格一致：
+    2026-10-01 实测无空格签名 403、带空格 200。
     注：MD5 是 nginx secure_link 协议的固定哈希（无法换成 SHA-256）；
     链接有效性由"密钥保密 + 短时效"保证，MD5 碰撞不构成攻击面
     （攻击者无密钥，无法对任意路径伪造摘要）。
@@ -70,9 +72,15 @@ def sign_upload_url(key: str, ttl_seconds: int = 3600) -> str:
 
 
 def verify_signature(key: str, expired: int, sig: str, secret: str | None = None) -> bool:
-    """纯函数校验（供后端测试与对账使用；生产校验在 nginx secure_link 完成）。"""
+    """纯函数校验（供后端测试与对账使用；生产校验在 nginx secure_link 完成）。
+
+    ⚠️ **不得用作鉴权判据**：签名功能未启用（UPLOAD_URL_SIGNING_SECRET 为空）时本函数
+    返回 True —— 那是「签名未启用 ⇒ 不校验」，不是「校验通过」。需要鉴权请走
+    require_permission 之类的依赖，不要把本函数当授权入口。
+    """
     secret = secret or signing_secret()
     if not secret:
+        logger.debug('签名未启用（UPLOAD_URL_SIGNING_SECRET 为空），verify_signature 不做校验')
         return True
     if expired < int(time.time()):
         return False

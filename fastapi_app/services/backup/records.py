@@ -560,10 +560,19 @@ def _backup_created_time(f: Path) -> datetime:  # log-context: internal helper �
     优先读取伴随的 ``.meta`` 文件中的 ``created_at``（加密备份的 mtime 可能被刷新，
     导致按文件系统 mtime 判定保留期不准）；无 meta 时回退到文件系统 mtime。
 
-    口径提醒（P0-2 ④ 核结论）：``created_at`` 由 incremental.py:52 以
-    ``datetime.now(UTC)`` 写成，是 **UTC 墙面时刻**，而这里按 naive 本地时间解析。
-    本机 UTC+8 下「年龄」因此被少算 8 小时 —— 方向是更晚删（fail-safe），
-    不是提前删；文件名时间戳与 .meta.created_at 同源同口径，二者一致。
+    ``created_at`` 的来源是 manifest 的 ``exported_at``（见本模块 :83），两种备份口径不同：
+
+      · **全量** —— ``orchestration/core.py:365`` 的 ``datetime.now()``，**本地 naive**；
+      · **增量** —— ``incremental.py:90`` 的 ``datetime.now(UTC)``，**UTC**。
+        （原注释引用的 ``incremental.py:52`` 是**文件名**时间戳，不是这里的值。）
+
+    本函数按 naive 本地时间解析，于是：
+
+      · 全量包两侧同为本地时间，**无偏差**（旧注释称"全量也差 8 小时"不成立）；
+      · 增量包把 UTC 墙面时刻当本地解析，本机 UTC+8 下算出的「年龄」**多算 8 小时**，
+        即比真实时间**提前约 8 小时**删除 —— 方向是提前删，**不是**旧注释写的
+        「更晚删（fail-safe）」。范围也有限（8 小时 vs 30 天窗口），但方向必须说对。
+    要根治应统一时区：写入一律 UTC，读取也按 UTC 解析后再比。
     """
     meta_path = f.parent / (f.name + '.meta')
     if meta_path.exists():

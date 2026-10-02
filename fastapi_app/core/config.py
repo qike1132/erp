@@ -386,6 +386,18 @@ class Settings(BaseSettings):
             raise RuntimeError(
                 "令牌时效必须为正数（ACCESS_TOKEN_EXPIRE_MINUTES / REFRESH_TOKEN_EXPIRE_DAYS）"
             )
+        # 负库存开关与 DB 兜底约束互斥（P1-2 × P1-6）：该开关只解除【应用层】两道闸门，
+        # ck_product_current_stock_nonneg 仍会拒绝扣成负数，结果是从清晰的「库存不足」
+        # 退化成 500 IntegrityError。要真正启用必须先手工 DROP 该约束（见 .env.example），
+        # 所以在启动期直接拦截，避免带着一个不可能生效的开关上生产。
+        if os.getenv("ALLOW_NEGATIVE_STOCK", "").strip().lower() in {"1", "true", "yes", "on"}:
+            raise RuntimeError(
+                "ALLOW_NEGATIVE_STOCK=true 与数据库约束 ck_product_current_stock_nonneg 互斥："
+                "该开关只解除应用层校验，扣成负数仍会被 DB 拒绝（表现为 500 IntegrityError）。"
+                "要真正启用负库存，须先手工执行 "
+                "ALTER TABLE product DROP CONSTRAINT ck_product_current_stock_nonneg"
+                "（不可逆，先评估存量负库存数据）；否则请保持该开关为 false。"
+            )
         # 生产环境安全配置强校验：防止运维漏配导致安全控制失效
         _is_production = _is_production_env()
         if not _is_production and not self.ALLOWED_HOSTS:

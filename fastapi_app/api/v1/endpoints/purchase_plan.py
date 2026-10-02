@@ -24,6 +24,7 @@ from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import get_user_identity, require_permission
 from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.core.response import success_response
+from fastapi_app.core.validators import require_upload_magic
 from fastapi_app.schemas.purchase_plan import (
     AddDetailsRequest,
     BarcodeValidationResponse,
@@ -487,6 +488,9 @@ async def upload_excel(file: UploadFile=File(..., description='Excel文件'), db
     content = await file.read()
     if len(content) > MAX_UPLOAD_FILE_SIZE:
         raise HTTPException(status_code=400, detail='文件大小不能超过10MB')
+    # P0-12 同类上传端点均已校验文件头，本端点此前漏加：改名成 .xlsx 的非 Excel 文件
+    # 会直接进入解析器（下游多落为 500）。此处补齐，与 production_plan/summary 等口径一致。
+    require_upload_magic(content, ('xlsx', 'xlsm'), filename=file.filename)
     session_id, created_by = get_user_identity(_user)
     async with db_transaction(db):
         result = await purchase_plan_service.upload_excel(db, content, session_id, created_by)

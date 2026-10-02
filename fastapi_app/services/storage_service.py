@@ -59,7 +59,10 @@ class LocalStorageBackend(StorageBackend):
             target.write_bytes(content)
 
         await asyncio.to_thread(_write)
-        return f'/static/uploads/{key}'
+        # 与 S3StorageBackend.upload 一致：返回 get_url(key) 而非裸路径。
+        # get_url 会签发限时 URL；返回裸路径时，上传响应里的 url 不带 st/s 参数，
+        # nginx secure_link 生效后前端拿它预览会 403（S3 分支一直是对的，本地分支漏了）。
+        return self.get_url(key)
 
     async def delete(self, key: str) -> None:
         target = self.base_dir / key

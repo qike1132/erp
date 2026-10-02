@@ -93,10 +93,22 @@ class ProductResponse(BaseModel):
 
         sign_upload_url 幂等（已带 query 原样返回、密钥未配置返回原 URL），
         故对序列化层的重复调用安全。
+
+        外部直链（http/https 等带 scheme，或 // 协议相对）原样返回：它们不是本地上传
+        key，而 sign_upload_url 会把任意非 /static/uploads/ 的值拼成
+        /static/uploads/<值>，直接签会把外链拼成 /static/uploads/https://... 而损坏。
+        入库侧 sanitize_url 明确放行这类绝对 URL，故出站必须与之一致。
         """
+        from urllib.parse import urlparse
+
         from fastapi_app.services.signed_urls import sign_upload_url
 
-        return sign_upload_url(v) if v else v
+        if not v:
+            return v
+        parsed = urlparse(v)
+        if parsed.scheme or parsed.netloc:
+            return v
+        return sign_upload_url(v)
 
     class Config:
         from_attributes = True
@@ -106,7 +118,11 @@ class ProductListResponse(BaseModel):
     """产品列表响应"""
 
     success: bool = True
-    items: list[dict]
+    # 必须是 ProductResponse 而非 list[dict]：只有走模型校验才会触发 sign_image_url
+    # 出站签发。用裸 dict 时列表页的 image 不签发，nginx secure_link 生效后整页图 403
+    # （详情页走 ProductResponse 有签发，故此前只有列表漏掉）。
+    # 缓存存的是 to_dict() 的裸 dict，签发在每次序列化时发生，不会把限时 URL 写进缓存。
+    items: list[ProductResponse]
     total: int = 0
 
 

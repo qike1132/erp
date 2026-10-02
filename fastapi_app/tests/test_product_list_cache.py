@@ -30,6 +30,22 @@ from fastapi_app.services import product_service
 _EXPECTED_KEY = build_cache_key(CacheNamespace.PRODUCT_LIST, 20)
 
 
+def _full_item(id_val: int, name: str) -> dict:
+    """与 Product.to_dict() 字段一致的完整商品 dict（9 字段）。
+
+    ProductListResponse.items 是 list[ProductResponse]，缺必填字段（initial_stock /
+    current_stock）会在端点构造响应时抛 ValidationError，故假数据必须补全。
+    """
+    return {
+        'id': id_val, 'name': name, 'barcode': None, 'price': 0.0,
+        'image': None, 'factory': None, 'initial_stock': 0, 'current_stock': 0,
+        'create_time': None,
+    }
+
+
+_ITEMS = [_full_item(1, 'A')]
+
+
 @pytest.fixture
 def fake_cache(monkeypatch):
     """用进程内 dict 替换端点层的 safe_get/safe_set，规避真实 Redis 依赖。
@@ -81,7 +97,7 @@ class TestListProductsCache:
         async def fake_page(db, page=1, per_page=20, search=''):
             db_calls.append((page, per_page, search))
             return {
-                'items': [{'id': 1, 'name': 'A'}],
+                'items': list(_ITEMS),
                 'total': 1, 'page': page, 'per_page': per_page,
             }
 
@@ -104,10 +120,11 @@ class TestListProductsCache:
     async def test_cached_response_matches_miss_response(self, client, monkeypatch, fake_cache):
         """缓存命中的响应结构必须与未命中完全一致（前端零改动）"""
         _, _ = fake_cache
+        items = [_full_item(1, 'A'), _full_item(2, 'B')]
 
         async def fake_page(db, page=1, per_page=20, search=''):
             return {
-                'items': [{'id': 1, 'name': 'A'}, {'id': 2, 'name': 'B'}],
+                'items': list(items),
                 'total': 2, 'page': page, 'per_page': per_page,
             }
 
@@ -120,7 +137,7 @@ class TestListProductsCache:
         body = hit.json()
         assert body['success'] is True
         assert body['total'] == 2
-        assert body['items'] == [{'id': 1, 'name': 'A'}, {'id': 2, 'name': 'B'}]
+        assert body['items'] == items
 
     async def test_page2_does_not_write_cache(self, client, monkeypatch, fake_cache):
         """page>1：不读也不写缓存"""

@@ -59,6 +59,27 @@ _FULL_ITEM = {
     'create_time': '2026-01-01 00:00:00',
 }
 
+# 签发把 image 变成带 ?st=<到期秒>&s=<摘要> 的限时 URL（OPT-19）。st 取自 time.time()，
+# 跨秒边界就变，会让「命中与未命中逐字节一致」变成偶发失败。冻结签名模块内的时钟，
+# 使这些结构一致性断言可确定；签名本身的正确性由 test_signed_urls.py 覆盖。
+_FROZEN_TS = 1_800_000_000
+
+
+@pytest.fixture
+def frozen_signing(monkeypatch):
+    """冻结 signed_urls 内部时钟（只替换该模块的 time 名，不动全局 time 模块）。"""
+    import types
+
+    from fastapi_app.services import signed_urls
+
+    monkeypatch.setattr(signed_urls, 'time', types.SimpleNamespace(time=lambda: _FROZEN_TS))
+    return signed_urls
+
+
+def _expected_item(signed_urls):
+    """_FULL_ITEM 经出站签发后的期望形态（需在 frozen_signing 生效下调用）。"""
+    return {**_FULL_ITEM, 'image': signed_urls.sign_upload_url(_FULL_ITEM['image'])}
+
 
 @pytest.fixture
 def real_fallback_cache(monkeypatch):
@@ -206,12 +227,13 @@ class TestFallbackDeletePatternPrefix:
 # ② 缓存条件边界（用真实 fallback 缓存驱动端点 helper，不 monkeypatch 缓存层）
 # ---------------------------------------------------------------------------
 class TestCacheConditionBoundaries:
-    async def test_first_page_no_search_writes_and_hits(self, real_fallback_cache):
+    async def test_first_page_no_search_writes_and_hits(self, real_fallback_cache, frozen_signing):
         await product_endpoint._set_cached_product_page(1, 20, '', [_FULL_ITEM], 1)
         hit = await product_endpoint._get_cached_product_page(1, 20, '')
         assert hit is not None
         assert hit.total == 1
-        assert hit.items == [_FULL_ITEM]
+        # 缓存存裸 dict；命中时重建 ProductListResponse，image 经出站签发
+        assert [i.model_dump() for i in hit.items] == [_expected_item(frozen_signing)]
 
     async def test_per_page_buckets_are_isolated(self, real_fallback_cache):
         """per_page 不同必须落到不同键，绝不能串数据（最易出的 bug）"""
@@ -261,7 +283,8 @@ class TestCacheConditionBoundaries:
 # ④ 响应结构一致性（缓存命中 vs 未命中；Pydantic 重建）
 # ---------------------------------------------------------------------------
 class TestResponseStructureConsistency:
-    async def test_cached_and_miss_responses_are_identical(self, client, real_fallback_cache, monkeypatch):
+    async def test_cached_and_miss_responses_are_identical(self, client, real_fallback_cache,
+                                                            monkeypatch, frozen_signing):
         """真实缓存层下：二次请求命中缓存，响应 JSON 与首次（回源）逐字节一致"""
         db_calls = []
 
@@ -280,18 +303,28 @@ class TestResponseStructureConsistency:
         body = hit.json()
         assert body['success'] is True
         assert body['total'] == 1 and isinstance(body['total'], int)
-        assert body['items'] == [_FULL_ITEM], 'items 内每个字段与值都不得变形'
+        # 除 image 经出站签发外，其余字段与值都不得变形
+        expected = _expected_item(frozen_signing)
+        assert body['items'] == [expected]
+        assert {k: v for k, v in body['items'][0].items() if k != 'image'} == \
+            {k: v for k, v in _FULL_ITEM.items() if k != 'image'}
         # 缓存键确实以单前缀写入
         assert any(k.startswith('erp:product:list:') for k in redis_cache._fallback_cache)
 
-    def test_product_list_response_rebuilds_from_cached_dicts(self):
-        """从缓存 dict 重建 ProductListResponse：字段与值零变形，total 保持 int"""
+    def test_product_list_response_rebuilds_from_cached_dicts(self, frozen_signing):
+        """从缓存 dict 重建 ProductListResponse：字段零变形，total 保持 int，image 经签发"""
         cached = {'items': [_FULL_ITEM], 'total': 1}
         resp = ProductListResponse(items=cached['items'], total=cached['total'])
         dumped = resp.model_dump()
-        assert dumped['items'] == cached['items']
+        assert len(dumped['items']) == 1
+        rebuilt = dumped['items'][0]
+        assert {k: v for k, v in rebuilt.items() if k != 'image'} == \
+            {k: v for k, v in _FULL_ITEM.items() if k != 'image'}
+        assert rebuilt['image'] == frozen_signing.sign_upload_url(_FULL_ITEM['image'])
         assert dumped['total'] == 1 and isinstance(dumped['total'], int)
         assert dumped['success'] is True
+        # 缓存里那份原始 dict 不得被改动（签发只发生在序列化期）
+        assert cached['items'][0]['image'] == '/img/a.png'
 
 
 # ---------------------------------------------------------------------------

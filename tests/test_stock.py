@@ -439,6 +439,46 @@ class TestUpdateStockOut:
         assert product.current_stock == 220  # 200 + (50 - 30)
 
     @pytest.mark.asyncio
+    @patch('fastapi_app.services.stock_service.log_inventory_change')
+    @patch('fastapi_app.services.stock_service.calculate_available_shipment_quantity')
+    @patch('fastapi_app.services.stock_service.get_product_for_update')
+    async def test_update_stockout_reduce_beyond_current_stock(self, mock_get_product,
+                                                                mock_calc, mock_log,
+                                                                mock_async_db):
+        """调小出库量、且回补幅度大于当前库存时应当放行（回归 H-1）。
+
+        库存为 0、出库单 100 改为 50：这是回补 50 件库存的合法操作。
+        缺陷版本把 delta 传成 (new - returned) - old_net（= -50），
+        与真实库存变化 -(new - old)（= +50）符号相反，于是误抛「库存不足！」。
+        该场景此前无测试覆盖（test_update_stockout_success 用 200/50/30 大库存恰好绕过）。
+        """
+        product = MagicMock()
+        product.id = 1
+        product.current_stock = 0
+        mock_get_product.return_value = product
+
+        mock_calc.return_value = {
+            'available_quantity': 100,
+            'order_quantity': 200,
+            'shipped_quantity': 100,
+            'orders': []
+        }
+
+        stockout = make_mock_stockout(quantity=100)
+
+        product.version = 1
+        state = _wire_stock_write(mock_async_db, product, new_stock=50)
+
+        result = await update_stockout_core(
+            mock_async_db, stockout, new_quantity=50,
+            customer='客户', stockout_date=datetime.now(UTC), note=''
+        )
+
+        assert result.quantity == 50
+        assert state['consumed'] == 2
+        assert product.current_stock == 50  # 0 + (100 - 50)
+
+    @pytest.mark.asyncio
     async def test_update_stockout_below_returned(self, mock_async_db):
         """出库数量小于已退货数量"""
         stockout = make_mock_stockout(quantity=50)

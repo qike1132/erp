@@ -137,10 +137,19 @@ def open_backup_archive(
     from fastapi_app.core.backup_encryption import decrypt_backup_auto
 
     plaintext, _meta = decrypt_backup_auto(archive.read_bytes(), passphrase)
-    with tempfile.NamedTemporaryFile(prefix='dr_drill_', suffix='.zip', delete=False) as tmp:
-        tmp.write(plaintext)
-        tmp_path = Path(tmp.name)
-    return zipfile.ZipFile(tmp_path), tmp_path
+    # 解密产物是**生产库明文 dump**。写入或打开失败时必须当场删除临时文件：此前
+    # tmp_path 只在正常返回时才交回调用方，一旦 tmp.write 或 ZipFile() 抛错（磁盘满 /
+    # 解密结果不是合法 zip），main() 的 finally 根本拿不到路径，明文便留在系统临时目录。
+    tmp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(prefix='dr_drill_', suffix='.zip', delete=False) as tmp:
+            tmp_path = Path(tmp.name)
+            tmp.write(plaintext)
+        return zipfile.ZipFile(tmp_path), tmp_path
+    except Exception:
+        if tmp_path is not None:
+            tmp_path.unlink(missing_ok=True)
+        raise
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:

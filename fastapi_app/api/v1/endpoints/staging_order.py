@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_any_permission
 from fastapi_app.core.exceptions import db_transaction
+from fastapi_app.core.validators import matches_upload_magic
 from fastapi_app.schemas.staging import (
     StagingClearResponse,
     StagingListResponse,
@@ -48,7 +49,9 @@ async def import_staging_orders(file: UploadFile=File(...), session_id: str=Quer
     content = await file.read()
     if len(content) > 10 * 1024 * 1024:
         return StagingOrderImportResult(success=False, message='文件大小超过10MB限制', session_id=None)
-    if content[:4] != b'PK\x03\x04':
+    # 文件头校验走公共魔数层（此前是内联 content[:4] != b'PK\x03\x04'：
+    # 比 xlsx 组少认两种合法 ZIP 头，且口径与其它上传端点不一致）
+    if not matches_upload_magic(content, ('xlsx', 'xlsm')):
         return StagingOrderImportResult(success=False, message='文件内容不是有效的Excel格式', session_id=None)
     scoped_session = f'u{current_user.id}:{session_id}'
     async with db_transaction(db):

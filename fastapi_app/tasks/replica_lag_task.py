@@ -55,6 +55,11 @@ async def replica_lag_task(ctx: dict) -> dict:
         logger.error("只读副本无法连接（复制可能已断流）: %s", e)
         return {'ok': False, 'error': 'connect-failed'}
 
+    # 连接成功之后的查询同样要兜住：副本回放卡住会触发 8s statement_timeout
+    # （asyncpg 的 QueryCanceledError），链路中断抛 InterfaceError —— asyncpg 异常
+    # 不继承内置 OSError/ConnectionError，此前只包 connect 的写法会让它们逃逸，
+    # ARQ 判定任务失败并按 max_tries 重放，耗尽后 cron 被丢弃、监控静默失效，
+    # 正是 docstring 声称要避免的情形。
     try:
         await conn.execute("SET statement_timeout='8s'")
         in_recovery = await conn.fetchval('SELECT pg_is_in_recovery()')
@@ -63,8 +68,14 @@ async def replica_lag_task(ctx: dict) -> dict:
             logger.warning("ASYNC_DATABASE_REPLICA_URL 指向的不是热备实例，请检查配置")
             return {'ok': False, 'error': 'not-in-recovery'}
         lag = await conn.fetchval('SELECT now() - pg_last_xact_replay_timestamp()')
+    except Exception as e:  # defensive: 见上方说明，这里必须兜住 asyncpg 自己的异常族
+        logger.error("只读副本延迟查询失败（副本可能卡住或链路中断）: %s", e)
+        return {'ok': False, 'error': 'query-failed'}
     finally:
-        await conn.close()
+        try:
+            await conn.close()
+        except Exception as e:  # defensive: 关连接失败不应让任务失败，连接随进程回收
+            logger.debug("只读副本连接关闭失败: %s", e)
 
     if lag is None:
         # 主库从未产生可回放事务（新库）——正常

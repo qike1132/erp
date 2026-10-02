@@ -202,10 +202,17 @@ class TestLockStatementShape:
         assert 'skip locked' not in lock_sql, lock_sql
 
 
-class TestLockScopePerGroup:
-    """锁集合与本次（分组）商品集合一致。"""
+class TestGlobalLockOrder:
+    """整批一次性按 id 升序取锁（P1-5 修正）。
 
-    async def test_lock_scope_limited_to_group_products(self):
+    曾经改成「逐分组各自加锁」以求缩小锁范围，但那会重新打开跨组死锁：分组顺序取决于
+    请求里 customer 的首次出现顺序，T1 按 [A(p1), B(p2)]、T2 按 [B(p2), A(p1)] 处理时
+    双方各持一把、互等对方。对分组排序也消除不了这种交叉（分组构成逐请求不同），
+    只有单条语句按全局升序取锁，才能保证所有并发批次的取锁顺序一致。
+    """
+
+    async def test_single_lock_across_all_customer_groups(self):
+        """多客户分组也只发一条加锁语句，且覆盖全部商品。"""
         products = [_make_product(1), _make_product(2), _make_product(3)]
         db = _make_recording_db(products)
         orders_data = [
@@ -218,28 +225,24 @@ class TestLockScopePerGroup:
 
         assert result['created_count'] == 2
         locks = _lock_sql(db)
-        assert len(locks) == 2, locks
-        assert 'product.id in (1)' in locks[0], locks[0]
-        assert 'product.id in (2, 3)' in locks[1], locks[1]
-        # 修复前是第一组一次性锁整批：in (1, 2, 3)
-        assert not any('product.id in (1, 2, 3)' in sql for sql in locks), locks
+        assert len(locks) == 1, f'必须只有一条加锁语句，实际 {locks}'
+        assert 'product.id in (1, 2, 3)' in locks[0], locks[0]
+        assert 'order by product.id' in locks[0], locks[0]
 
-    async def test_second_group_locks_only_missing_products(self):
+    async def test_lock_order_is_ascending_regardless_of_input_order(self):
+        """乱序输入必须编译成升序 IN 列表——这正是跨批次互斥的根据。"""
         products = [_make_product(1), _make_product(2)]
         db = _make_recording_db(products)
         orders_data = [
-            _make_order_data(1, customer='客户A'),
+            _make_order_data(2, customer='客户A'),
             _make_order_data(1, customer='客户B'),
-            _make_order_data(2, customer='客户B'),
         ]
         with _stubbed_side_effects():
-            result = await batch_create_orders(db, orders_data)
+            await batch_create_orders(db, orders_data)
 
-        assert result['created_count'] == 2
         locks = _lock_sql(db)
-        assert len(locks) == 2, locks
-        assert 'product.id in (1)' in locks[0], locks[0]
-        assert 'product.id in (2)' in locks[1], locks[1]
+        assert len(locks) == 1, locks
+        assert 'product.id in (1, 2)' in locks[0], locks[0]
 
     async def test_repeated_group_products_locked_once(self):
         products = [_make_product(1), _make_product(2)]
@@ -258,11 +261,8 @@ class TestLockScopePerGroup:
         assert len(locks) == 1, locks
         assert 'product.id in (1, 2)' in locks[0], locks[0]
 
-
-class TestRolledBackGroupDoesNotPolluteLockState:
-    """回滚分组释放的行锁不得让后续分组跳过加锁。"""
-
-    async def test_failed_group_does_not_prelock_next_group(self):
+    async def test_failed_group_keeps_upfront_lock(self):
+        """前置加锁不在 savepoint 内：某组回滚不影响已取的锁，也不会对后续组重复加锁。"""
         products = [_make_product(2)]
         db = _make_recording_db(products)
         orders_data = [
@@ -276,10 +276,8 @@ class TestRolledBackGroupDoesNotPolluteLockState:
         assert result['results'][0]['success'] is False
         assert result['results'][1]['success'] is True
         locks = _lock_sql(db)
-        assert len(locks) == 2, locks
-        assert 'product.id in (999)' in locks[0], locks[0]
-        # 第一组的行锁随 savepoint 回滚释放，第二组必须重新加锁
-        assert 'product.id in (2)' in locks[1], locks[1]
+        assert len(locks) == 1, f'加锁只应发生一次（前置），实际 {locks}'
+        assert 'product.id in (2, 999)' in locks[0], locks[0]
 
 
 def _test_db_url() -> str:
