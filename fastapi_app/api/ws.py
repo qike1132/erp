@@ -127,7 +127,10 @@ def register_websocket(app: FastAPI) -> None:
             if cookie_token:
                 try:
                     from fastapi_app.core.deps import _decode_jwt_token, is_token_revoked
-                    payload = _decode_jwt_token(cookie_token)
+                    # expected_type='access'：与 HTTP 侧（deps.py 的三处解码）同口径。
+                    # 不传时 refresh token（寿命按 REFRESH_TOKEN_EXPIRE_DAYS，远长于 access）
+                    # 也能直接认证 WebSocket，扩大了凭据的可用面。
+                    payload = _decode_jwt_token(cookie_token, expected_type='access')
                     jti = payload.get("jti")
                     if jti and await is_token_revoked(jti):
                         logger.warning("WebSocket Cookie认证失败: token已撤销")
@@ -155,7 +158,8 @@ def register_websocket(app: FastAPI) -> None:
                             user_id = ticket_user_id
                         else:
                             from fastapi_app.core.deps import _decode_jwt_token, is_token_revoked
-                            payload = _decode_jwt_token(msg["token"])
+                            # expected_type='access'：同 HTTP 侧，禁止用 refresh token 认证
+                            payload = _decode_jwt_token(msg["token"], expected_type='access')
                             jti = payload.get("jti")
                             if jti and await is_token_revoked(jti):
                                 logger.warning("WebSocket首条消息认证失败: token已撤销")

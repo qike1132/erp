@@ -138,6 +138,9 @@ async def edit_user(
     """
     async with db_transaction(db):
         await user_service.update_user(db, user_id, data.password, data.is_super, data.factory)
+        # 与 toggle / delete / update_user_permissions 同口径。本端点可改 is_super，
+        # 不失效缓存的话，被降级的用户在 _PERMISSION_CACHE（TTL 5s）内仍被判为超管。
+        _schedule_permission_cache_invalidation(db, user_id)
     return UserActionResponse(message='用户编辑成功')
 
 

@@ -404,6 +404,15 @@ class Settings(BaseSettings):
             # 开发环境未配置 ALLOWED_HOSTS 时默认允许所有主机，便于本地调试
             self.ALLOWED_HOSTS = ["*"]
         if _is_production:
+            # FASTAPI_DEBUG 必须为假：为真时 sanitize_error 直接返回 str(error)，
+            # 而它被数十处端点用于拼 HTTPException(detail=...)（purchase_plan /
+            # production_summary / ocr_import / daily_production 等）→ 内部异常、
+            # 路径、SQL 细节会原样返回给客户端。原先生产强校验没有这一条。
+            if self.FASTAPI_DEBUG:
+                raise RuntimeError(
+                    "生产环境禁止 FASTAPI_DEBUG=true：它会让 sanitize_error 原样返回异常文本，"
+                    "数十处端点会把内部细节拼进响应体返回给客户端。请置为 false。"
+                )
             # SECRET_KEY 必须为高强度密钥（长度 >= 32 字符），防止弱密钥被暴力破解后伪造 JWT
             if len(self.SECRET_KEY) < 32:
                 raise RuntimeError(
