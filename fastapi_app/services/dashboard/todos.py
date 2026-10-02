@@ -27,7 +27,12 @@ async def fetch_dashboard_todos(db: AsyncSession) -> dict:
     try:
         todos = []
         pending_orders = (await db.execute(
-            select(Order).where(Order.status == "pending").order_by(Order.order_date.desc()).limit(5)
+            select(Order).where(
+                Order.status == "pending",
+                # 订单删除是**软删**（只置 is_deleted、不改 status）：漏此过滤会让
+                # 经审批删除的订单仍作为「待处理」待办出现。全仓订单查询均带该过滤。
+                Order.is_deleted.isnot(True),
+            ).order_by(Order.order_date.desc()).limit(5)
         )).scalars().all()
         for o in pending_orders:
             todos.append(TodoItem(

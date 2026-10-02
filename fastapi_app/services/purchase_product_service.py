@@ -54,6 +54,21 @@ async def _batch_check_bom_exists(db: AsyncSession, product_ids: list[int]) -> s
     return {row[0] for row in result}
 
 
+def _has_bom_clause():
+    """与 ``bom_service.has_bom`` 同口径的 SQL 判定。
+
+    填充物（cotton_usage>0，与 _products_with_bom 一致）或面料或配件任一存在即视为有 BOM。
+    原先筛选/统计只用 ``Product.material_rows.any()``（仅填充物），而返回的 has_bom 标志
+    用的是权威判定 → **自相矛盾**：只配面料/配件的产品在"有 BOM"筛选下被漏掉、
+    在"无 BOM"下被错误列出（且同时显示 has_bom: true）。
+    """
+    return or_(
+        Product.material_rows.any(ProductMaterial.cotton_usage > 0),
+        Product.fabrics.any(),
+        Product.accessories.any(),
+    )
+
+
 @cache_result(
     key_prefix="purchase:products",
     ttl=60,
@@ -95,11 +110,11 @@ async def get_products(db: AsyncSession, *, page: int = 1, per_page: int = 50,
         )
 
     if has_bom == 'true':
-        query = query.where(Product.material_rows.any())
-        count_query = count_query.where(Product.material_rows.any())
+        query = query.where(_has_bom_clause())
+        count_query = count_query.where(_has_bom_clause())
     elif has_bom == 'false':
-        query = query.where(~Product.material_rows.any())
-        count_query = count_query.where(~Product.material_rows.any())
+        query = query.where(~_has_bom_clause())
+        count_query = count_query.where(~_has_bom_clause())
 
     if category:
         if category == 'filling':
@@ -240,7 +255,7 @@ async def get_products_statistics(db: AsyncSession) -> dict:
     total = total_result.scalar() or 0
 
     has_bom_result = await db.execute(
-        select(func.count(Product.id)).where(Product.material_rows.any())
+        select(func.count(Product.id)).where(_has_bom_clause())
     )
     has_bom = has_bom_result.scalar() or 0
 

@@ -9,7 +9,6 @@
 import asyncio
 import contextlib
 import os
-import tempfile
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.exc import SQLAlchemyError
@@ -72,9 +71,12 @@ async def batch_import_plans_task(ctx, file_path: str, original_filename: str, u
     job_id = ctx['job_id']
 
     def _sync_impl():
-        allowed_dirs = [tempfile.gettempdir(), os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'static', 'uploads')]
-        real_path = os.path.realpath(file_path)
-        if not any(os.path.commonpath([real_path, d]) == d for d in allowed_dirs if os.path.exists(d)):
+        # 复用 batch_tasks 里已修好的版本：候选目录与 file_path 两侧都取 realpath
+        # （Windows 短名 8.3 不一致会误拒合法临时文件），且 commonpath 跨盘符
+        # 抛的 ValueError 有兜底。此处原先是未同步的旧副本，且判断在 try 之外，
+        # ValueError 会逃逸出 _sync_impl 让 ARQ 任务失败重放。
+        from fastapi_app.tasks.batch_tasks import _is_allowed_upload_path
+        if not _is_allowed_upload_path(file_path):
             logger.error(f'批量计划导入任务拒绝非法文件路径: {file_path}')
             return {'success': False, 'error': '非法文件路径', 'imported_count': 0}
         delete_file = True

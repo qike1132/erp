@@ -286,7 +286,14 @@ async def batch_import_stockins_task(ctx, file_path: str, original_filename: str
             note=row.get('备注', ''))
         db.add(stockin)
         await db.flush()
-        product.current_stock += quantity
+        # 必须走统一库存写入口：直写 `product.current_stock += quantity` **不递增 version**，
+        # 与并发走乐观锁的写路径（如 product_service.update_product）交错时会丢失更新
+        # （对方 WHERE version=旧值 命中、覆盖本批数量）。与 stock_in_service 被修的原因相同。
+        # 注意：本目录 fastapi_app/tasks 原先**不在**仓库级残留扫描白名单内
+        # （test_stock_negative_policy_repo_wide.py 的 SERVICE_AND_SHARED_ROOTS），
+        # 故此处直写从未被门禁覆盖 —— 已把 tasks 纳入扫描。
+        from fastapi_app.shared.stock_concurrency import apply_stock_delta_locked
+        await apply_stock_delta_locked(db, product, quantity)
         log = InventoryLog(product_id=product.id, change_type='备货入库',
                            change_quantity=quantity, change_date=datetime.now(UTC),
                            customer=row.get('客户名称', ''), related_id=str(stockin.id),

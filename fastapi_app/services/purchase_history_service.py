@@ -63,16 +63,29 @@ async def save_query(db: AsyncSession, data: dict, user_id: int, username: str) 
     return sq.to_dict()
 
 
-async def delete_saved_query(db: AsyncSession, query_id: int) -> str | None:
-    sq = await db.get(SavedQuery, query_id)
+async def delete_saved_query(db: AsyncSession, query_id: int, user_id: int) -> str | None:
+    """删除本人保存的查询。
+
+    必须限定 creator_id：列表接口按 creator_id 隔离，而原先此处只按主键取记录，
+    任何登录用户都能删除**他人**保存的查询（2026-10-02 P3 审计 IDOR）。
+    """
+    sq = (await db.execute(
+        select(SavedQuery).where(SavedQuery.id == query_id, SavedQuery.creator_id == user_id)
+    )).scalar_one_or_none()
     if not sq:
         return None
     await db.delete(sq)
     return '已删除'
 
 
-async def use_saved_query(db: AsyncSession, query_id: int) -> dict | None:
-    sq = await db.get(SavedQuery, query_id)
+async def use_saved_query(db: AsyncSession, query_id: int, user_id: int) -> dict | None:
+    """读取本人保存的查询并记录使用次数。
+
+    同上：不加 creator_id 会让他人读到别人的查询条件（信息泄露）。
+    """
+    sq = (await db.execute(
+        select(SavedQuery).where(SavedQuery.id == query_id, SavedQuery.creator_id == user_id)
+    )).scalar_one_or_none()
     if not sq:
         return None
     sq.use_count = (sq.use_count or 0) + 1

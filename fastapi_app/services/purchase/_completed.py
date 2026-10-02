@@ -55,9 +55,13 @@ def _apply_completed_filters(
         query = query.where(PurchaseOrder.completed_at >= date_from)
         count_query = count_query.where(PurchaseOrder.completed_at >= date_from)
     if date_to:
-        end_date = f'{date_to} 23:59:59'
-        query = query.where(PurchaseOrder.completed_at <= end_date)
-        count_query = count_query.where(PurchaseOrder.completed_at <= end_date)
+        # 用独立变量：原先赋给 `end_date`（同名参数）→ 末尾 `f'{end_date} 23:59:59'`
+        # 又拼一次得到 '... 23:59:59 23:59:59' 作为绑定参数与 timestamp 比较
+        # → Postgres `invalid input syntax for type timestamp` → 整个列表 500。
+        # 端点 order_routes 把 date_to 作为兼容字段对外暴露，老客户端/直连 API 即命中。
+        date_to_bound = f'{date_to} 23:59:59'
+        query = query.where(PurchaseOrder.completed_at <= date_to_bound)
+        count_query = count_query.where(PurchaseOrder.completed_at <= date_to_bound)
     # 分字段过滤（与前端 useCompletedOrders filters 一一对应）
     for col, val in (
         (PurchaseOrder.order_no, order_no),

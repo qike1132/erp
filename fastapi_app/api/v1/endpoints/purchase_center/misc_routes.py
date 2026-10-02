@@ -39,7 +39,7 @@ async def api_save_query(data: SaveQueryRequest, db: AsyncSession=Depends(get_db
 @router.delete('/saved-queries/{query_id}', response_model=ActionResponse)
 async def api_delete_saved_query(query_id: int, db: AsyncSession=Depends(get_db), _user=Depends(require_permission('product_manage'))):
     async with db_transaction(db):
-        result = await svc.delete_saved_query(db, query_id)
+        result = await svc.delete_saved_query(db, query_id, _user.id)
     if not result:
         raise HTTPException(status_code=404, detail='查询不存在')
     return success_response(message=result)
@@ -47,7 +47,7 @@ async def api_delete_saved_query(query_id: int, db: AsyncSession=Depends(get_db)
 @router.post('/saved-queries/{query_id}/use', response_model=SavedQueryResponse)
 async def api_use_saved_query(query_id: int, db: AsyncSession=Depends(get_db), _user=Depends(require_permission('product_manage'))):
     async with db_transaction(db):
-        result = await svc.use_saved_query(db, query_id)
+        result = await svc.use_saved_query(db, query_id, _user.id)
     if not result:
         raise HTTPException(status_code=404, detail='查询不存在')
     return success_response(query=result)

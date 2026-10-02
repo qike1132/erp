@@ -169,9 +169,15 @@ class ConnectionManager:
         logger.info("WebSocket 连接: user_id=%s, 当前连接数=%s", user_id, len(self.active_connections))
 
     def disconnect(self, websocket, user_id: int):
-        if user_id in self.active_connections:
-            self.active_connections[user_id].remove(websocket)
-            if not self.active_connections[user_id]:
+        # 必须幂等：本方法与端点 ws.py 的 _safe_disconnect 都会移除同一个 socket，
+        # 广播的 `await ws.send_json` 期间客户端断开时二者交错 → 二次 remove 抛 ValueError。
+        # 该 ValueError 不在 INFRA_EXCEPTIONS 内，会**逃出 _listen_loop 的 while True**
+        # 打死监听任务且不重连 —— 此后所有实时通知静默失效直到进程重启（2026-10-02 P3 审计）。
+        conns = self.active_connections.get(user_id)
+        if conns is not None:
+            with contextlib.suppress(ValueError):
+                conns.remove(websocket)
+            if not conns:
                 del self.active_connections[user_id]
         logger.info("WebSocket 断开: user_id=%s, 当前连接数=%s", user_id, len(self.active_connections))
 
@@ -226,15 +232,21 @@ class ConnectionManager:
 
                 async for message in self._pubsub.listen():
                     if message["type"] == "message":
-                        data = message["data"]
-                        if isinstance(data, bytes):
-                            data = data.decode("utf-8")
-                        event = json.loads(data)
-                        if "message" not in event:
-                            event["message"] = EVENT_DISPLAY_MESSAGES.get(
-                                event.get("type", ""), "收到新通知"
-                            )
-                        await self.broadcast_event(event)
+                        # 单条消息的任何异常**不得**打死整个监听任务：broadcast_event
+                        # 里的 ValueError（socket 竞态）等不在 INFRA_EXCEPTIONS 内，
+                        # 会逃出外层 while True 使 _redis_task 结束且不重连。
+                        try:
+                            data = message["data"]
+                            if isinstance(data, bytes):
+                                data = data.decode("utf-8")
+                            event = json.loads(data)
+                            if "message" not in event:
+                                event["message"] = EVENT_DISPLAY_MESSAGES.get(
+                                    event.get("type", ""), "收到新通知"
+                                )
+                            await self.broadcast_event(event)
+                        except Exception as e:  # noqa: BLE001 - 单条消息失败必须隔离，循环续跑
+                            logger.error("处理通知消息失败（已跳过该条）: %s", e, exc_info=True)
 
             except asyncio.CancelledError:
                 logger.info("Redis Pub/Sub 监听任务已取消")

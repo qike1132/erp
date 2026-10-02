@@ -121,7 +121,11 @@ RISKY_WRITES = frozenset({
     "locked_product.current_stock -= qty",
 })
 
-SERVICE_AND_SHARED_ROOTS = ("fastapi_app/services", "fastapi_app/shared")
+# 2026-10-02 P3 审计：把 fastapi_app/tasks 纳入扫描。
+# 原白名单只含 services/shared，导致 tasks/batch_tasks.py 的
+# `product.current_stock += quantity`（不递增 version，与乐观锁写路径并发会丢失更新）
+# 从未被本门禁覆盖。该处已改走 apply_stock_delta_locked，纳入后无新增残留。
+SERVICE_AND_SHARED_ROOTS = ("fastapi_app/services", "fastapi_app/shared", "fastapi_app/tasks")
 
 # t39（janitor）写域：P1-6 原子守卫与 ALLOW_NEGATIVE_STOCK 的互斥由它统一处理，
 # 本文件对它内部的序关系比较不作断言。

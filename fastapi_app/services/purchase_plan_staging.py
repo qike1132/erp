@@ -323,7 +323,11 @@ async def confirm_staging(db: AsyncSession, session_id: str, batch_id: str='', c
         plan = await _get_or_create_plan_for_group(db, customer_id, customer_name, plan_month, batch_id, created_by)
         created_details += _create_details_for_group(db, plan, group_records, name_to_product)
         created_plans.append({'plan_id': plan.id, 'plan_no': plan.plan_no})
-    await db.execute(delete(StagingPurchasePlan).where(*conditions))
+    # 只删**本次真正确认**的行。原先用 *conditions（session_id [+ batch_id]）无条件删除，
+    # 未勾选的行会被一并物理删除 → 部分确认时静默丢数据，与接口契约
+    # 「仅确认选中的ID列表」不符。（无法建单的分组其行不会进 valid_records，予以保留。）
+    confirmed_ids = [r.id for r in valid_records]
+    await db.execute(delete(StagingPurchasePlan).where(StagingPurchasePlan.id.in_(confirmed_ids)))
     await db.flush()
     # 清除所有涉及月份的缓存（confirm_staging 可能跨多月），延迟到事务提交成功后执行
     affected_months = {pm for _, pm in groups if pm}

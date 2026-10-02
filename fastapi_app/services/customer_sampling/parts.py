@@ -149,7 +149,10 @@ async def update_part(
     if part_name is not None and part_name != part.part_name:
         await _ensure_part_name_unique(
             db, part.project_id, part_name,
-            role_id=part.role_id, exclude_id=part_id,
+            # 必须传 version_no：DB 唯一索引是 (role_id, version_no, part_name)，
+            # 默认值 'T1' 会把校验范围写死。漏传时编辑 T2/T3 部位改名 →
+            # 或对 T1 误报 400，或放行后 flush 撞 IntegrityError 被兜成通用 500。
+            role_id=part.role_id, version_no=part.version_no, exclude_id=part_id,
         )
         part.part_name = part_name
 

@@ -38,7 +38,11 @@ async def fetch_dashboard_activities(db: AsyncSession) -> list[Activity]:
     try:
         activities = []
 
-        order_rows = await db.execute(select(Order).order_by(Order.order_date.desc()).limit(4))
+        # 订单是软删（只置 is_deleted、不改 status）：漏此过滤会让已删订单出现在活动流
+        order_rows = await db.execute(
+            select(Order).where(Order.is_deleted.isnot(True))
+            .order_by(Order.order_date.desc()).limit(4)
+        )
         for o in order_rows.scalars().all():
             activities.append({"type": "order", "time": str(o.order_date) if o.order_date else "",
                                "status": o.status or "", "title": f"订单 {o.order_no}", "desc": f"订单 {o.order_no}"})
