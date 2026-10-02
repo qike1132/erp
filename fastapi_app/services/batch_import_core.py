@@ -377,10 +377,14 @@ async def import_orders_from_data(db: AsyncSession, data_list: list, *, deps: Im
         db.add(order)
         await db.flush()
 
-        # 使用悲观锁更新产品库存，防止并发修改
-        locked_product = await deps.get_product_for_update(db, product_id)
-        locked_product.current_stock += qty
-
+        # 订单**不影响物理库存** —— 与另外三条下单路径一致：
+        #   order/commands.py 的 create_order（docstring 明示「不影响物理库存」）、
+        #   order_batch_create.py（0 处 current_stock）、
+        #   batch_import_service.import_orders_service（同样不改）。
+        # 此处原为 `locked_product.current_stock += qty`，疑为把备货模板
+        # （见下方 import_stockins_from_data 的同名行 —— 那里才是对的）复制到订单时漏删，
+        # 会让导入来的订单被系统性计入物理库存、并绕过负库存闸门。
+        # 产品存在性已由 _resolve_row_identity 校验，故此处连行锁也不再需要。
         log = InventoryLog(
             product_id=product_id,
             change_type='订单',

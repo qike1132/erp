@@ -629,3 +629,43 @@ class TestStagingServiceLogic:
         mock_db = AsyncMock()
         await clear_staging_stockins(mock_db, "session-123")
         mock_db.flush.assert_called_once()
+
+
+class TestConfirmStagingStockoutsQuantityGuard:
+    """回归（2026-10-02 P0 审计）：确认出货时数量必须为正。
+
+    缺这道闸门时负数量会被一路放行：
+      `assert_stock_available(stock, -quantity)` 收到的是 -(-N)=+N，恒通过；
+      FIFO 循环 `if remaining_qty <= 0: break` 立即跳出 → 不生成任何 StockOut；
+      但末尾 `current_stock -= quantity` 变成 `-= 负数` → **库存被加**，
+      还写一条 change_type='出库'、change_quantity=正数的假日志。
+    同族的 staging/stockin.py 与 staging/order.py 都有这道闸门，出货路径原先是漏的。
+    """
+
+    @pytest.mark.asyncio
+    async def test_negative_quantity_is_rejected_and_no_stockout_created(self):
+        from fastapi_app.core.state_machine import StagingStatus
+        from fastapi_app.services.staging import stockout as stockout_mod
+
+        staging = MagicMock()
+        staging.quantity = -3
+        staging.customer = '客户A'
+        staging.product_name = '产品X'
+        staging.status = StagingStatus.PENDING
+
+        mock_db = AsyncMock()  # AsyncMock：flush/execute 需可 await
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [staging]
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        nested = MagicMock()
+        nested.__aenter__ = AsyncMock(return_value=None)
+        nested.__aexit__ = AsyncMock(return_value=False)
+        mock_db.begin_nested = MagicMock(return_value=nested)
+
+        confirmed, errors = await stockout_mod.confirm_staging_stockouts(mock_db, 'sess-1')
+
+        assert confirmed == 0
+        assert any('数量无效' in e for e in errors), errors
+        assert staging.status == StagingStatus.REJECTED, '该行应被置为 REJECTED'
+        mock_db.add.assert_not_called()  # 未生成任何 StockOut

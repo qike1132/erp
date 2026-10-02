@@ -21,7 +21,7 @@ from fastapi_app.core.cache_invalidation import cache_mgr, schedule_post_commit_
 from fastapi_app.core.exception_handler import safe_publish_event
 from fastapi_app.services.notification_service import StockEvent
 from fastapi_app.services.stock_common import _parse_date_preserve_time
-from fastapi_app.shared.stock_concurrency import assert_stock_available
+from fastapi_app.shared.stock_concurrency import apply_stock_delta_locked, assert_stock_available
 from fastapi_app.shared_models import Product, StockIn
 
 logger = logging.getLogger(__name__)
@@ -37,7 +37,10 @@ async def create_stockin_core(db: AsyncSession, product_id: int, quantity: int, 
     stockin = StockIn(stockin_no=await stock_service.generate_stockin_number(db), product_id=product_id, quantity=quantity, customer=customer, stockin_date=stockin_date, note=note)
     db.add(stockin)
     product = await stock_service.get_product_for_update(db, product_id)
-    product.current_stock += quantity
+    # 统一写入口：持锁路径也要带 version 守卫并递增 version。
+    # 直接 `product.current_stock += quantity` 不会 bump version（Product 无 version_id_col），
+    # 与走乐观锁的写入口并发时会因 WHERE version=旧值 仍命中而丢失更新。
+    await apply_stock_delta_locked(db, product, quantity)
     await db.flush()  # 单次 flush：同时写入 StockIn INSERT + Product UPDATE，并填充 stockin.id
     stock_service.log_inventory_change(db, product_id=product_id, change_type='入库', change_quantity=quantity, related_id=str(stockin.id), note=f'入库ID：{stockin.id}')
     return stockin  # 日志条目由调用方的 flush/commit 写入
@@ -56,7 +59,7 @@ async def update_stockin_core(db: AsyncSession, stockin: StockIn, quantity: int,
     stockin.note = note
     if quantity != old_quantity:
         product = await stock_service.get_product_for_update(db, stockin.product_id)
-        product.current_stock += quantity - old_quantity
+        await apply_stock_delta_locked(db, product, quantity - old_quantity)
         stock_service.log_inventory_change(db, product_id=stockin.product_id, change_type='入库修改', change_quantity=quantity - old_quantity, related_id=str(stockin.id), note=f'入库修改ID：{stockin.id}')
     await db.flush()
     return stockin
@@ -71,7 +74,9 @@ async def delete_stockin_core(db: AsyncSession, stockin: StockIn) -> None:
         product.current_stock, -stockin.quantity,
         message=f'删除入库记录将导致库存为负数（产品：{product.name}，当前库存：{product.current_stock}，入库数量：{stockin.quantity}）',
     )
-    product.current_stock -= stockin.quantity
+    # 上面的 assert 保留是为了那条逐字固定的自定义文案（有测试锁着）；
+    # 写入口统一走 apply_stock_delta_locked 以带上 version 守卫并递增 version。
+    await apply_stock_delta_locked(db, product, -stockin.quantity)
     stock_service.log_inventory_change(db, product_id=stockin.product_id, change_type='入库删除', change_quantity=-stockin.quantity, related_id=str(stockin.id), note=f'入库删除ID：{stockin.id}')
     await db.delete(stockin)
     await db.flush()

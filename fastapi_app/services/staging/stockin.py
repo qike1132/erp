@@ -93,7 +93,7 @@ async def update_staging_stockin(db: AsyncSession, stockin_id: int, data: dict) 
 async def confirm_staging_stockins(
     db: AsyncSession, session_id: str
 ) -> tuple[int, list[str]]:
-    from fastapi_app.shared.stock_concurrency import get_product_for_update
+    from fastapi_app.shared.stock_concurrency import apply_stock_delta_locked, get_product_for_update
 
     result = await db.execute(
         select(StagingStockIn).where(
@@ -136,7 +136,9 @@ async def confirm_staging_stockins(
                 product = await get_product_for_update(db, product_id)
                 if not product:
                     raise ValueError(f'备货{staging.customer}-{staging.product_name}产品不存在(ID:{staging.product_id})')
-                product.current_stock += staging.quantity
+                # 统一写入口：持锁路径也要带 version 守卫并递增 version，
+                # 否则与走乐观锁的写入口并发时会因 WHERE version=旧值 仍命中而丢失更新。
+                await apply_stock_delta_locked(db, product, staging.quantity)
 
                 log = InventoryLog(
                     product_id=staging.product_id,

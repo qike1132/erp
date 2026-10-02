@@ -89,27 +89,24 @@ DOCUMENTED_WRITES = {
         "product.current_stock += total_deducted",
     ],
     "fastapi_app/services/batch_import_core.py": [
-        # 订单导入：qty 由 _parse_positive_quantity(label=订单) 保证 >0，纯增量
-        "locked_product.current_stock += qty",
         # 备货导入：qty 由 _parse_positive_quantity(label=备货) 保证 >0，纯增量
         "locked_product.current_stock += qty",
         # 出货导入写入侧：同一 _row_handler 内已由 check_stock_available 判定覆盖
         "locked_product.current_stock -= qty",
     ],
+    # ↑ 2026-10-02 P0 审计修复：原本这里还有一条「订单导入」的 `locked_product.current_stock += qty`，
+    #   已删除 —— 订单不该影响物理库存（create_order / order_batch_create /
+    #   import_orders_service 三条下单路径都不改），那一行疑为备货模板复制漏删。
     "fastapi_app/services/ocr/_import.py": [],
-    "fastapi_app/services/staging/stockout.py": [
-        # 记账写入侧：-staging.quantity 的负向由同函数内 assert_stock_available 覆盖
-        "product.current_stock -= staging.quantity",
-    ],
-    "fastapi_app/services/stock_in_service.py": [
-        # create_stockin_core：quantity>0 且 <= MAX_STOCK_QUANTITY，纯增量（不适用）
-        "product.current_stock += quantity",
-        # update_stockin_core 写入侧：唯一调用方是 update_stockin 包装层，
-        # 负向由包装层 assert_stock_available(product.current_stock, quantity - old_quantity) 覆盖
-        "product.current_stock += quantity - old_quantity",
-        # delete_stockin_core：-stockin.quantity 由同函数内 assert_stock_available 覆盖
-        "product.current_stock -= stockin.quantity",
-    ],
+    "fastapi_app/services/staging/stockout.py": [],
+    # ↑ 2026-10-02 P0 审计修复：原有的一处 `product.current_stock -= staging.quantity`
+    #   已改走 apply_stock_delta_locked（带 version 守卫并递增 version）。
+    "fastapi_app/services/stock_in_service.py": [],
+    # ↑ 2026-10-02 P0 审计修复：原有三处直写（create_stockin_core 的 `+= quantity`、
+    #   update_stockin_core 的 `+= quantity - old_quantity`、delete_stockin_core 的
+    #   `-= stockin.quantity`）已全部改走 `apply_stock_delta_locked`。
+    #   原因：直写不递增 `version`（Product 无 version_id_col），与走乐观锁的写入口并发时
+    #   对方会以陈旧快照覆盖本处写入 → 丢失更新。列入台账是「已登记」，改走统一入口是「已消除」。
     "fastapi_app/services/stock_out_service.py": [],
     "fastapi_app/services/stock_return_service.py": [],
 }
@@ -614,7 +611,9 @@ async def test_delete_stockin_core_message_verbatim_then_releases(monkeypatch):
     """站点 6：assert 分支 + 含产品名的长文案逐字保留。"""
     _deny_env(monkeypatch)
     stockin = SimpleNamespace(stockin_stockouts=[], quantity=5, product_id=1, id=7)
-    product = SimpleNamespace(current_stock=3, name="测试产品")
+    # id/version 是 2026-10-02 起必需的：该路径的写入已改走 apply_stock_delta_locked，
+    # 它以 `WHERE id = ? AND version = 旧值` 更新并递增 version（原先直写两者都不需要）。
+    product = SimpleNamespace(current_stock=3, name="测试产品", id=1, version=1)
     db = _FakeSession()
     with patch("fastapi_app.services.stock_service.get_product_for_update",
                new_callable=AsyncMock, return_value=product), patch(

@@ -101,7 +101,11 @@ async def update_staging_stockout(db: AsyncSession, stockout_id: int, data: dict
 async def confirm_staging_stockouts(
     db: AsyncSession, session_id: str
 ) -> tuple[int, list[str]]:
-    from fastapi_app.shared.stock_concurrency import assert_stock_available, get_product_for_update
+    from fastapi_app.shared.stock_concurrency import (
+        apply_stock_delta_locked,
+        assert_stock_available,
+        get_product_for_update,
+    )
 
     result = await db.execute(
         select(StagingStockOut).where(
@@ -126,6 +130,17 @@ async def confirm_staging_stockouts(
     for staging in staging_stockouts:
         try:
             async with db.begin_nested():
+                # 数量必须为正。缺这道校验时负数量会被一路放行：
+                #   `assert_stock_available(stock, -quantity)` 传的是 -(-N)=+N，恒通过；
+                #   FIFO 循环 `if remaining_qty <= 0: break` 立即跳出 → 不生成任何 StockOut；
+                #   末尾 `current_stock -= quantity` 变成 `-= 负数` → **库存被加**，
+                #   还写一条 change_type='出库'、change_quantity=正数的假日志。
+                # 同族的 staging/stockin.py 与 staging/order.py 都有这道闸门，出货路径此前漏了。
+                if staging.quantity <= 0:
+                    errors.append(f'出货{staging.customer}-{staging.product_name}数量无效: {staging.quantity}')
+                    staging.status = staging_machine.transition(staging.status, StagingAction.REJECT)
+                    continue
+
                 if not staging.customer:
                     raise ValueError(f'出货{staging.product_name}确认失败: 必须选择客户，需要有订单支持')
 
@@ -176,7 +191,9 @@ async def confirm_staging_stockouts(
                         affected_order_ids.add(order_detail['order_id'])
                         remaining_qty -= ship_qty
 
-                product.current_stock -= staging.quantity
+                # 统一写入口：带 version 守卫并递增 version（原先直写两者都不做，
+                # 与走乐观锁的写入口并发时会丢失更新）。
+                await apply_stock_delta_locked(db, product, -staging.quantity)
 
                 # 批量查询受影响的订单，避免N+1
                 if affected_order_ids:

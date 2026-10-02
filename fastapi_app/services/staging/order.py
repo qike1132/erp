@@ -116,7 +116,7 @@ async def update_staging_order(db: AsyncSession, order_id: int, data: dict) -> d
 async def confirm_staging_orders(
     db: AsyncSession, session_id: str
 ) -> tuple[int, list[str]]:
-    from fastapi_app.shared.stock_concurrency import get_product_for_update
+    from fastapi_app.shared.stock_concurrency import apply_stock_delta_locked, get_product_for_update
 
     result = await db.execute(
         select(StagingOrder).where(
@@ -161,7 +161,11 @@ async def confirm_staging_orders(
                     product = await get_product_for_update(db, staging_product_id)
                     if not product:
                         raise ValueError(f'订单{staging.customer}-{staging.product_name}产品不存在(ID:{staging.product_id})')
-                    product.current_stock += staging.quantity
+                    # 统一写入口（带 version 守卫并递增 version，原先直写两者都不做）。
+                    # ⚠️ 待业务确认：此处「确认订单暂存即增加物理库存」与 order/commands.py
+                    # 的 create_order（docstring 明确「不影响物理库存」）、order_batch_create
+                    # 三条路径口径相反。本次只统一**怎么写**，**该不该写**另议。
+                    await apply_stock_delta_locked(db, product, staging.quantity)
 
                     log = InventoryLog(
                         product_id=staging.product_id,
