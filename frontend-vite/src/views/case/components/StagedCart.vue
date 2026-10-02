@@ -23,7 +23,7 @@
         <div class="sc-item-main">
           <div class="sc-item-name">
             <FontAwesomeIcon icon="cubes" :style="{ color: accent }" aria-hidden="true" />
-            {{ item.productName }}
+            {{ item.caseName }}
           </div>
           <div class="sc-item-meta">
             <span><FontAwesomeIcon icon="user" aria-hidden="true" /> {{ item.customer }}</span>
@@ -42,7 +42,7 @@
               class="sc-qty-input"
               min="1"
               step="1"
-              :aria-label="`${item.productName} 数量`"
+              :aria-label="`${item.caseName} 数量`"
               @change="emit('quantity-change', item.key, Number(($event.target as HTMLInputElement).value))"
             />
             <button type="button" class="sc-qty-btn" aria-label="增加" @click="emit('quantity-change', item.key, item.quantity + 1)">

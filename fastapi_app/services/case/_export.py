@@ -33,23 +33,24 @@ def movements_to_xlsx(rows: list[dict], title: str = '出入库流水') -> bytes
     return buf.getvalue()
 
 
+def _inventory_row(r: dict, prefix: str = '') -> list:
+    return [
+        prefix + str(_cell(r.get('name'))), _cell(r.get('barcode')), _cell(r.get('unit')),
+        int(r.get('initial_stock') or 0), int(r.get('total_in') or 0),
+        int(r.get('total_out') or 0), int(r.get('current_stock') or 0),
+    ]
+
+
 def inventory_to_xlsx(rows: list[dict], title: str = '库存汇总') -> bytes:
     """库存汇总（主件 + 缩进配件）→ xlsx 字节流。"""
     wb = Workbook()
     ws = wb.active
     ws.title = title[:31]
-    ws.append(['皮套', '条码', '单位', '期初', '结存'])
+    ws.append(['皮套', '条码', '单位', '期初', '入库', '出库', '结存'])
     for r in rows:
-        ws.append([
-            _cell(r.get('name')), _cell(r.get('barcode')), _cell(r.get('unit')),
-            int(r.get('initial_stock') or 0), int(r.get('current_stock') or 0),
-        ])
+        ws.append(_inventory_row(r, ''))
         for child in r.get('children', []):
-            ws.append([
-                '    ' + str(_cell(child.get('name'))), _cell(child.get('barcode')),
-                _cell(child.get('unit')), int(child.get('initial_stock') or 0),
-                int(child.get('current_stock') or 0),
-            ])
+            ws.append(_inventory_row(child, '    '))
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()

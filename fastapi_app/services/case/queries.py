@@ -30,6 +30,24 @@ def _item_search_conditions(search: str) -> list:
     return [or_(Case.name.like(pattern), Case.barcode.like(pattern))]  # sql-safe: escape_like/绑定参数
 
 
+def _attach_totals(item: dict, case_id: int, totals: dict) -> None:
+    """把某 SKU 的累计入库/出库写入序列化字典。"""
+    item['total_in'] = totals.get((case_id, DIRECTION_IN), 0)
+    item['total_out'] = totals.get((case_id, DIRECTION_OUT), 0)
+
+
+async def _totals_by_case(db: AsyncSession, case_ids: list[int]) -> dict:
+    """返回 {(case_id, direction): 累计数量}；无 id 时直接返回空（不发查询）。"""
+    if not case_ids:
+        return {}
+    rows = await db.execute(
+        select(CaseMovement.case_id, CaseMovement.direction, func.sum(CaseMovement.quantity))
+        .where(CaseMovement.case_id.in_(case_ids))
+        .group_by(CaseMovement.case_id, CaseMovement.direction)
+    )
+    return {(int(cid), direction): int(total or 0) for cid, direction, total in rows.all()}
+
+
 async def search_cases(db: AsyncSession, query: str = '') -> list[dict]:
     """皮套 SKU 搜索（录入联想，附库存）。无关键词时返回前 20 条。"""
     q = select(Case)
@@ -101,10 +119,18 @@ async def get_case_inventory(db: AsyncSession, page: int = 1, per_page: int = 50
         for child in child_rows.scalars().all():
             children_by_parent.setdefault(child.parent_id, []).append(child)
 
+    all_ids = parent_ids + [ch.id for chs in children_by_parent.values() for ch in chs]
+    totals = await _totals_by_case(db, all_ids)
+
     inventory = []
     for root in roots:
         node = _serialize_item(root)
-        node['children'] = [_serialize_item(ch) for ch in children_by_parent.get(root.id, [])]
+        _attach_totals(node, root.id, totals)
+        node['children'] = []
+        for child in children_by_parent.get(root.id, []):
+            child_item = _serialize_item(child)
+            _attach_totals(child_item, child.id, totals)
+            node['children'].append(child_item)
         inventory.append(node)
 
     stats = await _compute_inventory_stats(db, conditions)
@@ -207,9 +233,16 @@ async def fetch_inventory_for_export(db: AsyncSession, search: str = '', limit: 
         child_rows = await db.execute(select(Case).where(Case.parent_id.in_(parent_ids)).order_by(Case.id))
         for child in child_rows.scalars().all():
             children_by_parent.setdefault(child.parent_id, []).append(child)
+    all_ids = parent_ids + [ch.id for chs in children_by_parent.values() for ch in chs]
+    totals = await _totals_by_case(db, all_ids)
     out = []
     for root in roots:
         node = _serialize_item(root)
-        node['children'] = [_serialize_item(ch) for ch in children_by_parent.get(root.id, [])]
+        _attach_totals(node, root.id, totals)
+        node['children'] = []
+        for child in children_by_parent.get(root.id, []):
+            child_item = _serialize_item(child)
+            _attach_totals(child_item, child.id, totals)
+            node['children'].append(child_item)
         out.append(node)
     return out

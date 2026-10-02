@@ -13,8 +13,8 @@
     <form class="sec-form" @submit.prevent>
       <div class="sec-row">
         <div class="sec-field">
-          <label class="sec-label">客户名称</label>
-          <UiSelect v-model="form.customer" placeholder="请选择客户" :options="customerOptions" />
+          <label class="sec-label">客户（选填）</label>
+          <UiSelect v-model="form.customer" placeholder="可不选" :options="customerOptions" />
         </div>
         <div class="sec-field">
           <label class="sec-label">{{ mode === 'stockin' ? '入库日期' : '出库日期' }}</label>
@@ -24,21 +24,22 @@
 
       <div class="sec-row" style="grid-template-columns: 2fr 1fr">
         <div class="sec-field">
-          <label class="sec-label">产品名称</label>
+          <label class="sec-label">皮套 / 产品</label>
           <UiAutocomplete
             v-model="form.search"
             :search-fn="searchFn"
-            placeholder="输入产品名称或69码搜索"
+            placeholder="输入皮套名称或69码搜索"
             suppress-after-select
             @select="(p: CaseSearchItem) => emit('select', p)"
           >
             <template #option="{ item }">
               <span class="sec-option-name">{{ item.name }}</span>
+              <span v-if="item.parent_id" class="sec-option-part">配件</span>
               <span v-if="item.barcode" class="sec-option-barcode">{{ item.barcode }}</span>
               <span :class="['sec-option-stock', item.current_stock <= 0 && 'sec-option-stock-zero']">库存 {{ item.current_stock ?? 0 }}</span>
             </template>
           </UiAutocomplete>
-          <small v-if="mode === 'stockout' && form.productId" class="sec-stock-hint">
+          <small v-if="mode === 'stockout' && form.caseId" class="sec-stock-hint">
             当前库存 <strong>{{ availableStock ?? '-' }}</strong>
             <template v-if="stagedQtySelected">（本单已暂存 {{ stagedQtySelected }}）</template>
           </small>
@@ -71,7 +72,7 @@
       </div>
 
       <div class="sec-field">
-        <label class="sec-label">备注</label>
+        <label class="sec-label">备注（选填）</label>
         <textarea v-model="form.note" class="sec-textarea" rows="2" :placeholder="mode === 'stockin' ? '例如：首批入库' : '例如：客户提货'" @keydown.enter.exact.prevent="emit('add')" />
       </div>
 
@@ -106,9 +107,9 @@ const props = defineProps<{
   customerOptions: CustomerOption[]
   canAdd: boolean
   quantityWarning: string
-  /** 出库时选产品的可用库存（已扣本单暂存）；入库为 null */
+  /** 出库时选 SKU 的可用库存（已扣本单暂存）；入库为 null */
   availableStock: number | null
-  /** 选中的产品在本单已暂存的数量（提示用） */
+  /** 选中的 SKU 在本单已暂存的数量（提示用） */
   stagedQtySelected: number
   searchFn: (query: string) => Promise<CaseSearchItem[]>
 }>()
@@ -116,7 +117,7 @@ const props = defineProps<{
 const form = defineModel<CaseStockFormState>('form', { required: true })
 
 const emit = defineEmits<{
-  select: [product: CaseSearchItem]
+  select: [item: CaseSearchItem]
   add: []
 }>()
 
@@ -170,6 +171,7 @@ const accent = computed(() => (props.mode === 'stockin' ? 'var(--color-primary-5
   margin-bottom: 6px;
 }
 .sec-option-name { margin-right: 6px; }
+.sec-option-part { color: var(--color-primary-700); font-size: 11px; margin-right: 6px; }
 .sec-option-barcode { color: var(--color-text-muted); font-size: 11px; margin-right: 6px; }
 .sec-option-stock { color: var(--color-primary-600); font-size: 11px; }
 .sec-option-stock-zero { color: var(--color-danger-500); }

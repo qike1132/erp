@@ -2,8 +2,8 @@
   <div class="srp-section">
     <div class="srp-header">
       <div class="srp-title">
-        <FontAwesomeIcon :icon="kind === 'stockin' ? 'truck-loading' : 'shipping-fast'" :style="{ color: kind === 'stockin' ? 'var(--color-primary-500)' : 'var(--color-danger-500)' }" aria-hidden="true" />
-        {{ kind === 'stockin' ? '入库记录' : '出库记录' }}
+        <FontAwesomeIcon :icon="mode === 'stockin' ? 'truck-loading' : 'shipping-fast'" :style="{ color: mode === 'stockin' ? 'var(--color-primary-500)' : 'var(--color-danger-500)' }" aria-hidden="true" />
+        {{ mode === 'stockin' ? '入库记录' : '出库记录' }}
         <small v-if="total" class="srp-total">共 {{ total }} 条</small>
       </div>
       <div class="srp-actions">
@@ -12,6 +12,9 @@
         </button>
         <button class="srp-btn srp-btn-ghost" aria-label="筛选" @click="showFilter = !showFilter">
           <FontAwesomeIcon icon="filter" style="margin-right: 4px" aria-hidden="true" />筛选
+        </button>
+        <button class="srp-btn srp-btn-ghost" aria-label="导出 Excel" @click="emit('export')">
+          <FontAwesomeIcon icon="file-excel" style="margin-right: 4px" aria-hidden="true" />导出
         </button>
       </div>
     </div>
@@ -51,13 +54,13 @@
       <template #empty>
         <div class="srp-empty">
           <FontAwesomeIcon icon="inbox" aria-hidden="true" />
-          <span>{{ kind === 'stockin' ? '暂无入库记录' : '暂无出库记录' }}</span>
+          <span>{{ mode === 'stockin' ? '暂无入库记录' : '暂无出库记录' }}</span>
         </div>
       </template>
       <template #column-body-case_name="{ row }"><span class="srp-name">{{ row.case_name }}</span></template>
       <template #column-body-case_barcode="{ row }"><small class="srp-barcode">{{ row.case_barcode || '-' }}</small></template>
       <template #column-body-quantity="{ row }">
-        <strong :style="{ color: kind === 'stockout' ? 'var(--color-danger-500)' : 'var(--color-success-600)' }">{{ row.quantity }}</strong>
+        <strong :style="{ color: mode === 'stockout' ? 'var(--color-danger-500)' : 'var(--color-success-600)' }">{{ row.quantity }}</strong>
       </template>
       <template #column-body-note="{ row }"><small class="srp-note" :title="row.note">{{ row.note || '-' }}</small></template>
       <template #column-body-actions="{ row }">
@@ -70,25 +73,27 @@
 
 <script setup lang="ts">
 /**
- * StockRecordsPanel — 入库/出库记录列表（筛选 + 服务端分页 + 行操作入口）。
- * 数据由 useCaseStockRecords(kind) 内部持有；编辑/删除动作上抛给工作台处理。
+ * StockRecordsPanel — 入库/出库流水列表（筛选 + 服务端分页 + 行操作入口 + 导出）。
+ * 数据由 useCaseStockRecords(mode) 内部持有；编辑/删除动作上抛给工作台处理。
  */
 import UiDataTable from '@/components/ui/UiDataTable.vue'
 import UiSelect from '@/components/ui/UiSelect.vue'
 import UiDatePicker from '@/components/ui/UiDatePicker.vue'
 import { useCaseStockRecords } from '../composables/useCaseStockRecords'
-import type { CaseStockRecord, CustomerOption } from '@/api/case'
+import type { CaseMovement, CustomerOption } from '@/api/case'
+import type { StockMode } from '../composables/useCaseStockWorkbench'
 
 const props = defineProps<{
-  kind: 'stockin' | 'stockout'
+  mode: StockMode
   customerOptions: CustomerOption[]
   /** 删除请求进行中的记录 ID（禁用对应删除按钮） */
   actionId?: number
 }>()
 
 const emit = defineEmits<{
-  edit: [row: CaseStockRecord]
-  delete: [row: CaseStockRecord]
+  edit: [row: CaseMovement]
+  delete: [row: CaseMovement]
+  export: []
 }>()
 
 const {
@@ -104,7 +109,7 @@ const {
   onPageChange,
   search,
   resetFilters,
-} = useCaseStockRecords(props.kind)
+} = useCaseStockRecords(props.mode)
 </script>
 
 <style scoped>

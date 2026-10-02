@@ -1,17 +1,18 @@
 /**
  * 皮套管理 API — 与 fastapi_app/api/v1/endpoints/case_endpoint.py 契约一一对应。
- * 所有响应类型以 schemas/case.py 为准。
+ * 主件与配件同为 SKU；出入库统一为一张流水（direction 区分方向）。
  */
 import { get, post, put, del, upload, download } from './request'
 
 // ===== 共享类型 =====
 
-/** 产品搜索候选项（GET /cases/search） */
+/** 皮套 SKU 搜索项（GET /cases/search） */
 export interface CaseSearchItem {
   id: number
   name: string
   barcode: string
   current_stock: number
+  parent_id: number | null
 }
 
 /** 客户下拉选项 */
@@ -20,45 +21,66 @@ export interface CustomerOption {
   label: string
 }
 
-/** 入库/出库记录行（列表响应项） */
-export interface CaseStockRecord {
+/** 皮套 SKU（主件或配件） */
+export interface CaseItem {
   id: number
-  stockin_no?: string
-  stockout_no?: string
-  stockin_date?: string
-  stockout_date?: string
-  customer?: string
-  case_id?: number
-  case_name?: string
-  case_barcode?: string
-  quantity: number
-  note?: string
+  name: string
+  barcode: string
+  image: string
+  unit: string
+  product_id: number | null
+  parent_id: number | null
+  qty_per_set: number
+  initial_stock: number
+  current_stock: number
+  total_in: number
+  total_out: number
 }
 
-export interface CaseStockListResponse {
-  stockins?: CaseStockRecord[]
-  stockouts?: CaseStockRecord[]
-  total?: number
+export interface CaseItemListResponse {
+  items: CaseItem[]
+  total: number
+  page: number
+  per_page: number
+  pages: number
+}
+
+/** 出入库流水 */
+export interface CaseMovement {
+  id: number
+  case_id: number
+  case_name: string
+  case_barcode: string
+  direction: 'in' | 'out'
+  movement_no: string
+  quantity: number
+  customer: string
+  movement_date: string
+  note: string
+  create_time: string
+}
+
+export interface CaseMovementListResponse {
+  movements: CaseMovement[]
+  total: number
   pages: number
   current_page: number
 }
 
-export interface CaseStockDetailResponse {
-  id: number
-  stockin_no?: string
-  stockout_no?: string
-  stockin_date?: string
-  stockout_date?: string
-  customer?: string
-  case_id?: number
-  case_name?: string
+/** 新增/批量出入库请求体 */
+export interface CaseMovementPayload {
+  case_id: number
+  direction: 'in' | 'out'
   quantity: number
+  movement_date?: string
+  customer?: string
   note?: string
 }
 
-export interface CaseActionResponse {
+export interface CaseMovementCreateResponse {
   success: boolean
-  message: string
+  movement_no: string
+  id: number
 }
 
 export interface CaseBatchFailedItem {
@@ -66,54 +88,26 @@ export interface CaseBatchFailedItem {
   error: string
 }
 
-export interface CaseBatchStockInResponse {
+export interface CaseBatchMovementResponse {
   success: boolean
-  message: string
+  results: Record<string, unknown>[]
   failed: CaseBatchFailedItem[]
 }
 
-export interface CaseBatchStockOutResultItem {
-  success: boolean
-  stockout_no?: string
-  id?: number | string | null
-  error?: string
-}
-
-export interface CaseBatchStockOutResponse {
-  success: boolean
-  results: CaseBatchStockOutResultItem[]
-}
-
-/** 暂存提交项（批量入库/出库请求体） */
-export interface CaseBatchStockItemPayload {
-  productId: string | number
-  customer: string
-  quantity: number
-  stockinDate?: string
-  stockoutDate?: string
-  note: string
-}
-
-// ===== 库存汇总 / 流水 =====
-
-export interface CaseInventoryItem {
-  id: number
-  name: string
-  barcode: string
-  initial_stock: number
-  total_in: number
-  total_out: number
-  current_stock: number
+/** 库存分组节点（主件 + 其配件） */
+export interface CaseInventoryNode extends CaseItem {
+  children: CaseItem[]
 }
 
 export interface CaseInventoryStats {
+  total_items: number
   total_stock: number
   total_in: number
   total_out: number
 }
 
-export interface CaseInventorySummaryResponse {
-  inventory: CaseInventoryItem[]
+export interface CaseInventoryResponse {
+  inventory: CaseInventoryNode[]
   total: number
   page: number
   per_page: number
@@ -121,72 +115,77 @@ export interface CaseInventorySummaryResponse {
   stats: CaseInventoryStats | null
 }
 
-export interface CaseInventoryLogItem {
-  id: number
-  change_type: string
-  change_quantity: number
-  change_date: string
-  customer: string
-  related_id: string
-  note: string
-}
-
-export interface CaseInventoryLogsResponse {
+export interface CaseActionResponse {
   success: boolean
-  logs: CaseInventoryLogItem[]
-  pagination: { page: number; pages: number; total: number } | null
+  message: string
 }
 
-// ===== 入库/出库请求参数 =====
-
-// 用 type 而非 interface：get() 的 params 形参是 Record<string, unknown>，
-// 接口缺少隐式索引签名会导致赋值失败。
-export type CaseStockListParams = {
+// ===== 请求参数（用 type 而非 interface：get() 的 params 形参是 Record<string, unknown>）=====
+export type CaseItemListParams = {
   page?: number
   per_page?: number
+  search?: string
+  parent_id?: number
+  roots_only?: boolean
+}
+
+export type CaseMovementListParams = {
+  page?: number
+  per_page?: number
+  case_id?: number
+  direction?: 'in' | 'out'
   customer?: string
   start_date?: string
   end_date?: string
+  quantity_min?: number
+  quantity_max?: number
 }
 
-export interface CaseStockUpdatePayload {
+export type CaseInventoryParams = {
+  page?: number
+  per_page?: number
+  search?: string
+}
+
+export type CaseExportParams = {
+  scope: 'movements' | 'inventory'
+  case_id?: number
+  direction?: 'in' | 'out'
   customer?: string
-  quantity?: number
-  note?: string
-  stockin_date?: string
-  stockout_date?: string
+  start_date?: string
+  end_date?: string
+  search?: string
 }
 
 // ===== API =====
-
 export const caseApi = {
-  /** 产品搜索（名称/69码），返回附当前库存 */
+  /** SKU 搜索（名称/69码），附当前库存 */
   search: (q: string) => get<CaseSearchItem[]>('/cases/search', { q }),
 
-  // --- 入库 ---
-  stockins: (params?: CaseStockListParams) => get<CaseStockListResponse>('/cases/in/list', params),
-  getStockin: (id: number) => get<CaseStockDetailResponse>(`/cases/in/${id}`),
-  updateStockin: (id: number, data: CaseStockUpdatePayload) => put<CaseActionResponse>(`/cases/in/${id}`, data),
-  deleteStockin: (id: number) => del<CaseActionResponse>(`/cases/in/${id}`),
-  batchStockin: (stockins: CaseBatchStockItemPayload[]) =>
-    post<CaseBatchStockInResponse>('/cases/in/batch', { stockins }),
+  // --- SKU 主档 ---
+  items: (params?: CaseItemListParams) => get<CaseItemListResponse>('/cases/items', params),
+  createItem: (data: Record<string, unknown>) => post<{ id: number }>('/cases/items', data),
+  updateItem: (id: number, data: Record<string, unknown>) => put<CaseActionResponse>(`/cases/items/${id}`, data),
+  deleteItem: (id: number) => del<CaseActionResponse>(`/cases/items/${id}`),
 
-  // --- 出库 ---
-  stockouts: (params?: CaseStockListParams) => get<CaseStockListResponse>('/cases/out/list', params),
-  getStockout: (id: number) => get<CaseStockDetailResponse>(`/cases/out/${id}`),
-  updateStockout: (id: number, data: CaseStockUpdatePayload) => put<CaseActionResponse>(`/cases/out/${id}`, data),
-  deleteStockout: (id: number) => del<CaseActionResponse>(`/cases/out/${id}`),
-  batchStockout: (stockouts: CaseBatchStockItemPayload[]) =>
-    post<CaseBatchStockOutResponse>('/cases/out/batch', { stockouts }),
+  // --- 库存汇总（主件分组） ---
+  inventory: (params: CaseInventoryParams) => get<CaseInventoryResponse>('/cases/inventory', params),
+
+  // --- 出入库流水 ---
+  movements: (params?: CaseMovementListParams) => get<CaseMovementListResponse>('/cases/movements', params),
+  getMovement: (id: number) => get<CaseMovement>(`/cases/movements/${id}`),
+  createMovement: (data: CaseMovementPayload) => post<CaseMovementCreateResponse>('/cases/movements', data),
+  batchMovements: (movements: CaseMovementPayload[]) =>
+    post<CaseBatchMovementResponse>('/cases/movements/batch', { movements }),
+  updateMovement: (id: number, data: Record<string, unknown>) => put<CaseActionResponse>(`/cases/movements/${id}`, data),
+  deleteMovement: (id: number) => del<CaseActionResponse>(`/cases/movements/${id}`),
 
   // --- Excel 批量导入（batch 域） ---
   importStockins: (formData: FormData) => upload<{ success: boolean; imported?: number; message?: string }>('/batch/import-case-stockins', formData),
   importStockouts: (formData: FormData) => upload<{ success: boolean; imported?: number; message?: string }>('/batch/import-case-stockouts', formData),
   downloadTemplate: (filename: string) => download('/batch/download-template', filename),
 
-  // --- 库存汇总 / 流水 ---
-  inventorySummary: (params: { page: number; per_page: number; search?: string }) =>
-    get<CaseInventorySummaryResponse>('/cases/inventory-summary', params),
-  inventoryLogs: (caseId: number, params: { page: number; per_page: number; type?: string; start_date?: string; end_date?: string }) =>
-    get<CaseInventoryLogsResponse>(`/cases/inventory-logs/${caseId}`, params),
+  // --- 导出 ---
+  exportXlsx: (params: CaseExportParams) =>
+    download('/cases/export', params.scope === 'inventory' ? '皮套库存汇总.xlsx' : '皮套出入库流水.xlsx', params),
 }

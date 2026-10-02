@@ -51,6 +51,8 @@ class CaseItemOut(BaseModel):
     qty_per_set: int = 1
     initial_stock: int = 0
     current_stock: int = 0
+    total_in: int = 0
+    total_out: int = 0
 
 
 class CaseItemListResponse(BaseModel):

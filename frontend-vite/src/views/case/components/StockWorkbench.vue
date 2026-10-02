@@ -42,11 +42,12 @@
 
     <!-- 记录列表 -->
     <StockRecordsPanel
-      :kind="mode"
+      :mode="mode"
       :customer-options="customerOptions"
       :action-id="deletingId"
       @edit="openEdit"
       @delete="handleDelete"
+      @export="exportRecords"
     />
 
     <!-- 编辑弹窗 -->
@@ -73,9 +74,9 @@
 
 <script setup lang="ts">
 /**
- * StockWorkbench — 皮套入库/出库工作台（每个模式独立实例）。
+ * StockWorkbench — 皮套入库/出库工作台（每个方向独立实例）。
  * 组合：useCaseOptions（客户/产品搜索）+ useCaseStockWorkbench（录入/暂存/提交/导入）
- *      + useCaseRecordActions（记录编辑/删除）。
+ *      + useCaseRecordActions（流水编辑/删除）。
  */
 import StockEntryCard from './StockEntryCard.vue'
 import StagedCart from './StagedCart.vue'
@@ -84,14 +85,15 @@ import StockRecordsPanel from './StockRecordsPanel.vue'
 import EditRecordDialog from './EditRecordDialog.vue'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import { computed, toRef } from 'vue'
+import { caseApi } from '@/api'
 import { useCaseOptions } from '../composables/useCaseOptions'
-import { useCaseStockWorkbench } from '../composables/useCaseStockWorkbench'
+import { directionOf, useCaseStockWorkbench, type StockMode } from '../composables/useCaseStockWorkbench'
 import { useCaseRecordActions } from '../composables/useCaseRecordActions'
-import type { CaseStockRecord } from '@/api/case'
+import type { CaseMovement } from '@/api/case'
 
 const props = defineProps<{
-  /** 工作台模式：入库 / 出库（实例级固定） */
-  mode: 'stockin' | 'stockout'
+  /** 工作台方向：入库 / 出库（实例级固定） */
+  mode: StockMode
 }>()
 
 const { customerOptions, searchCaseProducts } = useCaseOptions()
@@ -121,27 +123,24 @@ const {
   confirmDialog,
 } = useCaseStockWorkbench(props.mode)
 
-/** 当前选中产品在本单已暂存数量（录入卡提示用） */
+/** 当前选中 SKU 在本单已暂存数量（录入卡提示用） */
 const stagedQtySelected = computed(() =>
   staged.value
-    .filter((s) => s.productId === form.productId)
+    .filter((s) => s.caseId === form.caseId)
     .reduce((sum, s) => sum + s.quantity, 0),
 )
 
 const recordActions = useCaseRecordActions(toRef(props, 'mode'), confirmDialog)
-const {
-  editDialogOpen,
-  editForm,
-  saving,
-  saveEdit,
-  deletingId,
-} = recordActions
+const { editDialogOpen, editForm, saving, saveEdit, deletingId } = recordActions
 
-function openEdit(row: CaseStockRecord) {
+function openEdit(row: CaseMovement) {
   void recordActions.openEdit(row)
 }
-function handleDelete(row: CaseStockRecord) {
+function handleDelete(row: CaseMovement) {
   void recordActions.handleDelete(row)
+}
+function exportRecords() {
+  void caseApi.exportXlsx({ scope: 'movements', direction: directionOf(props.mode) })
 }
 </script>
 
