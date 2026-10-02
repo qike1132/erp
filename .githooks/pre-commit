@@ -279,9 +279,16 @@ else
         echo "pre-commit: 暂存内容不含 .py/.vue，跳过代码质量门禁（第 3 层）" >&2
     elif [ -f "scripts/quality_gate.py" ]; then
         py=""
-        # 依次尝试：PATH 上的解释器 → 本机已知解释器绝对路径
-        # （git-bash 的 PATH 常常找不到 Windows Python，故显式兜底）
-        for cand in python python3 py \
+        # 解释器优先级：**项目 venv** → PATH → 本机已知解释器绝对路径
+        # （git-bash 的 PATH 常常找不到 Windows Python，故显式兜底绝对路径）
+        #
+        # 为什么 venv 必须优先：门禁的 pip_audit 项执行的是 `sys.executable -m pip_audit`，
+        # 扫的是**该解释器自己的 site-packages**，而不是项目声明的依赖。用系统 Python 会把
+        # 这台机器上所有项目的依赖混在一起扫（2026-10-01 实测 25 个包 172 条漏洞）→
+        # 直接判 FAIL → 挡掉一切提交；venv 与本项目依赖同源，口径才对。
+        for cand in ".venv/Scripts/python.exe" \
+            "$(pwd)/.venv/Scripts/python.exe" \
+            python python3 py \
             "/c/Users/Administrator/AppData/Local/Programs/Python/Python313/python.exe" \
             "/c/Users/Administrator/.workbuddy/binaries/python/versions/3.13.12/python.exe"; do
             if command -v "$cand" >/dev/null 2>&1 || [ -x "$cand" ]; then py="$cand"; break; fi

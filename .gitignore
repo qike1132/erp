@@ -405,6 +405,11 @@ _firefox_profile_*/
 #   server.crt/.csr/.ext 为公开材料，继续允许入库。
 /config/tls/*.key
 /config/tls/*.srl
+# /static/uploads 的 secure_link 签名密钥：2026-10-02 前它是明文写在
+#   config/nginx-windows.conf 的 secure_link_md5 里的（且已推送远端），
+#   等于把「限时签名」的密钥交给所有能读仓库的人。现改为 nginx `include` 本文件，
+#   真实值只存在于本机与部署环境；仓库里保留 .example 模板。
+/config/uploads-signing.conf
 # .env 的备份副本（第 30 行的 `.env` 只匹配确切文件名，不覆盖 ".env.bak-*"）
 .env.bak-*
 .env.*.bak*

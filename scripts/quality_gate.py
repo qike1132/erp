@@ -61,7 +61,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -507,6 +507,11 @@ def run_gate(
         if count is None:
             return GateOutcome(proc.returncode, None, output,
                                "ruff --output-format json 的输出不是 JSON 数组")
+        # 与 MODE_JSON 分支对齐：ruff 以非 0/1 退出（配置错误等）时不能采信 stdout 的数组，
+        # 否则空数组会被当成 count=0 而判成 TIGHTEN，掩盖真实故障。
+        if proc.returncode not in (0, 1):
+            return GateOutcome(proc.returncode, None, output,
+                               f"ruff 以退出码 {proc.returncode} 结束（环境/配置异常）")
         return GateOutcome(proc.returncode, count, output)
 
     count = _json_count(gate, proc.stdout or "")
@@ -575,8 +580,11 @@ def save_baseline(counts: dict[str, int]) -> None:
         "_comment": (
             "门禁基线（棘轮）。这些是当前存量违规数，不阻断；"
             "新增违规会被 scripts/quality_gate.py 拦下。数字只允许下调"
-            "（P0-7 的 service_commit 9→12 是唯一一次例外：把被注释旁路静默豁免的"
-            "3 处显式化，理由见 docs/TRANSACTION_BOUNDARY_GUIDE.md §4）。"
+            "（P0-7 的 service_commit 9→12 是唯一一次例外，理由见 "
+            "docs/TRANSACTION_BOUNDARY_GUIDE.md §4：2026-10-02 复核确认这 12 处 "
+            "db.commit() 全部是既有代码，其中 3 处的 diff 只改了注释 —— 把旧的 "
+            "'# independent-transaction' 旁路标记换成 '# manual-tx'，commit() 调用"
+            "本身未变；旧正则正是靠那个标记静默豁免它们，改 AST 后才可见）。"
         ),
         "counts": counts,
     }
@@ -849,6 +857,11 @@ def main() -> int:
             continue
         if judgement.count is not None:
             counts_now[gate.key] = judgement.count
+        elif gate.key in baseline:
+            # 计数未知（MODE_EXIT 门禁失败时 count=None 但判为 REGRESS 而非 ERROR，
+            # 不会触发 hard_failure）——沿用旧基线值。否则 --update-baseline 会把
+            # bom / alembic_heads 这类键整条丢掉，等于悄悄取消了它们的棘轮。
+            counts_now[gate.key] = baseline[gate.key]
         if judgement.status == "REGRESS":
             regressions.append((gate, outcome, judgement))
         elif judgement.status == "TIGHTEN":

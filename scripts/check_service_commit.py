@@ -330,9 +330,12 @@ def _selftest_module_guards() -> list[tuple[str, bool, str]]:
     located = all(
         (PROJECT_ROOT / file).is_file() and "commit" in text for file, _, text in real
     )
+    # 断言只验证「判定逻辑正确」，不与仓库存量耦合：此前要求 bool(real) 为真，
+    # 于是团队把违规整改到 0 处时自检反而 FAIL（CI 的 --self-test 变红）——
+    # 恰好在做对了的时候报错。空列表时 all() 为 True，语义正确。
     cases.append((
-        "真实服务层扫描非空且命中可回溯",
-        bool(real) and located,
+        "真实服务层扫描命中可回溯（0 处也通过）",
+        located,
         f"实扫 {len(real)} 处",
     ))
     return cases

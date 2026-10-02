@@ -1,0 +1,11 @@
+# /static/uploads 的 secure_link 签名密钥模板。
+#
+# 用法：把本文件复制为 uploads-signing.conf（已被 .gitignore 忽略），
+# 填入与 .env 的 UPLOAD_URL_SIGNING_SECRET **逐字相同**的密钥。
+#
+# 本文件与 nginx 里的 secure_link_md5 必须严格一致：
+#   - secret 前有一个字面空格（见 signed_urls.py 的公式说明）
+#   2026-10-01 实测无空格签名 403、带空格 200。
+#
+# 生成密钥：openssl rand -hex 32
+secure_link_md5 "$arg_st$uri <在此填入密钥，与 .env 的 UPLOAD_URL_SIGNING_SECRET 逐字相同>";

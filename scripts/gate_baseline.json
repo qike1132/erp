@@ -1,5 +1,5 @@
 {
-  "_comment": "门禁基线（棘轮）。这些是当前存量违规数，不阻断；新增违规会被 scripts/quality_gate.py 拦下。数字只允许下调（P0-7 的 service_commit 9→12 是唯一一次例外：把被注释旁路静默豁免的 3 处显式化，理由见 docs/TRANSACTION_BOUNDARY_GUIDE.md §4）。",
+  "_comment": "门禁基线（棘轮）。这些是当前存量违规数，不阻断；新增违规会被 scripts/quality_gate.py 拦下。数字只允许下调（P0-7 的 service_commit 9→12 是唯一一次例外，理由见 docs/TRANSACTION_BOUNDARY_GUIDE.md §4：2026-10-02 复核确认这 12 处 db.commit() 全部是既有代码，其中 3 处的 diff 只改了注释 —— 把旧的 '# independent-transaction' 旁路标记换成 '# manual-tx'，commit() 调用本身未变；旧正则正是靠那个标记静默豁免它们，改 AST 后才可见）。",
   "counts": {
     "n_plus_one": 0,
     "bare_except": 5,
@@ -9,7 +9,7 @@
     "bom": 0,
     "alembic_heads": 0,
     "env_drift": 0,
-    "ruff": 60,
+    "ruff": 59,
     "pip_audit": 0
   }
 }
