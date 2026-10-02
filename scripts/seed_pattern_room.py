@@ -210,6 +210,9 @@ async def main():
     parser = argparse.ArgumentParser(description="板房打样模块模拟数据生成器")
     parser.add_argument("--count", type=int, default=300, help="生成打样项目条数")
     parser.add_argument("--maker", type=str, default=None, help="指定版师姓名（所有项目归该版师）")
+    parser.add_argument('--allow-prod-write', action='store_true',
+                        help='显式授权写生产库（与 ERP_ALLOW_PROD_WRITE=1 等价）')
+
     args = parser.parse_args()
 
     _init_async_engine()

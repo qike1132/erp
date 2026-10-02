@@ -36,8 +36,11 @@ def signing_secret() -> str:
     return os.getenv("UPLOAD_URL_SIGNING_SECRET", "").strip()
 
 
+_UPLOAD_PREFIX = '/static/uploads/'
+
+
 def strip_upload_signature(url: str) -> str:
-    """剥掉图片/附件引用上的签名 query，得到可长期入库的原始路径。
+    """剥掉**本地上传**引用上的签名 query，得到可长期入库的原始路径。
 
     上传接口返回的是**限时签名** URL（`/static/uploads/x.webp?st=..&s=..`）。
     若把带签名的整串**原样存库**，读时 `sign_upload_url` 会因"已含 ?"而按幂等
@@ -45,8 +48,18 @@ def strip_upload_signature(url: str) -> str:
     返回 **410**，图片/附件永久失效且无法自愈。
     2026-10-02 P4/P5 审计实测据此确认：产品新增/编辑（哪怕只改名）约 1 小时后
     图片 410。落库只存 key/路径，签名一律在出站时现签。
+
+    ⚠️ 只对**本地**上传路径动手：`schemas/product.py` 明确放行外部 http(s) 直链，
+    那些 URL 的 query（如 CDN 的 `?token=…`）是对方签发的，剥掉会让外链失效。
     """
-    return url.split('?', 1)[0] if url else url
+    if not url:
+        return url
+    if url.startswith(_UPLOAD_PREFIX):
+        return url.split('?', 1)[0]
+    # 兼容裸 storage key（无前缀）形态：仅当带的是本系统的签名参数时才剥
+    if not url.startswith(('http://', 'https://', '//')) and '?st=' in url and '&s=' in url:
+        return url.split('?', 1)[0]
+    return url
 
 
 def sign_upload_url(key: str, ttl_seconds: int = 3600) -> str:

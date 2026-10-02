@@ -3,17 +3,19 @@ import io
 
 from openpyxl import Workbook
 
-MAX_EXPORT_ROWS = 20000
+from utils.report_exporter import _sanitize_excel_value
 
 
 def _cell(value) -> object:
-    """防公式注入：以 = + - @ 开头的文本加前导单引号。"""
+    """防公式注入。
+
+    **复用** `utils/report_exporter._sanitize_excel_value` 这一权威实现，不要在仓库里
+    维护第二套口径：原本地实现只判 `= + - @` 且用 `'` 前缀，漏了权威集的 `\\t`/`\\r`，
+    两处行为已发生分歧（2026-10-02 第二轮审计）。
+    """
     if value is None:
         return ''
-    text = str(value)
-    if text[:1] in ('=', '+', '-', '@'):
-        return "'" + text
-    return text
+    return _sanitize_excel_value(str(value))
 
 
 def movements_to_xlsx(rows: list[dict], title: str = '出入库流水') -> bytes:

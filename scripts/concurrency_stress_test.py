@@ -206,6 +206,9 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--number-only", action="store_true", help="仅执行编号生成")
     parser.add_argument("--stock-only", action="store_true", help="仅执行库存扣减")
     parser.add_argument("--skip-cleanup", action="store_true", help="测试结束后不清理写入的数据")
+    parser.add_argument('--allow-prod-write', action='store_true',
+                        help='显式授权写生产库（与 ERP_ALLOW_PROD_WRITE=1 等价）')
+
     args = parser.parse_args()
 
     if args.number_only and args.stock_only:

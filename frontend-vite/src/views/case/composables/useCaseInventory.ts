@@ -27,16 +27,20 @@ export function directionLabel(direction: string): string {
 export function useCaseInventory() {
   // ===== 库存汇总（主件分组） =====
   const invSearch = ref('')
+  // 已提交的关键词（组件层防抖后经 onInvSearchInput 赋值）。queryKey 与请求**必须**用它，
+  // 不能直接用 invSearch —— 那是 v-model 绑定，每敲一键都会变，会导致逐键打接口
+  //（旧版就是这样，重写时把 debouncedInvSearch 丢了，属行为回退）。
+  const debouncedInvSearch = ref('')
   const invPage = ref(1)
   const invPerPage = ref(50)
 
   const { data: invData, isLoading: invIsLoading, isFetching: invIsFetching, refetch: invRefetch } = useQuery({
-    queryKey: ['case-inventory', invPage, invSearch, invPerPage],
+    queryKey: ['case-inventory', invPage, debouncedInvSearch, invPerPage],
     queryFn: () =>
       caseApi.inventory({
         page: invPage.value,
         per_page: invPerPage.value,
-        search: invSearch.value || undefined,
+        search: debouncedInvSearch.value || undefined,
       }),
     staleTime: 30_000,
     placeholderData: keepPreviousData,
@@ -48,6 +52,8 @@ export function useCaseInventory() {
   const invStats = computed<CaseInventoryStats | null>(() => invData.value?.stats ?? null)
 
   function onInvSearchInput() {
+    // 由组件层防抖后调用：回第 1 页并应用关键词
+    debouncedInvSearch.value = invSearch.value
     invPage.value = 1
   }
 

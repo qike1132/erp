@@ -230,6 +230,9 @@ def main():
         help='显示详细日志'
     )
 
+    parser.add_argument('--allow-prod-write', action='store_true',
+                        help='显式授权写生产库（与 ERP_ALLOW_PROD_WRITE=1 等价）')
+
     args = parser.parse_args()
 
     if args.verbose:

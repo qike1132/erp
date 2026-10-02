@@ -360,6 +360,9 @@ def main():
                         default='all', help='指定要清空的模块')
     parser.add_argument('--keep-admin', action='store_true', default=True, help='保留admin用户（默认保留）')
     parser.add_argument('--no-keep-admin', action='store_false', dest='keep_admin', help='清空所有用户（包括admin）')
+    parser.add_argument('--allow-prod-write', action='store_true',
+                        help='显式授权写生产库（与 ERP_ALLOW_PROD_WRITE=1 等价）')
+
     args = parser.parse_args()
 
     if not args.dry_run and not args.execute:

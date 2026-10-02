@@ -33,7 +33,7 @@
             <label class="m-form-label">备注（选填）</label>
             <input v-model="note" type="text" class="m-input" placeholder="可选" aria-label="备注" />
           </div>
-          <button class="m-submit-btn" :disabled="!selected || quantity < 1 || submitting" @click="submit">
+          <button class="m-submit-btn" :disabled="!selected || !Number.isInteger(quantity) || quantity < 1 || submitting" @click="submit">
             {{ submitting ? '提交中…' : direction === 'in' ? '入库' : '出库' }}
           </button>
         </div>
@@ -107,7 +107,9 @@ function selectItem(item: CaseSearchItem) {
 }
 
 async function submit() {
-  if (!selected.value || quantity.value < 1 || submitting.value) return
+  // 必须同时判整数：小数如 1.5 不满足 `<1` 会被放行，随后后端 int 校验 422，
+  // 用户只看到笼统"提交失败"（桌面端 checkedRows 用的是 Number.isInteger，此处对齐）。
+  if (!selected.value || !Number.isInteger(quantity.value) || quantity.value < 1 || submitting.value) return
   submitting.value = true
   try {
     const payload: CaseMovementPayload = {

@@ -75,6 +75,7 @@ def test_guarded_scripts_actually_call_the_guard():
         'test_available_stock.py', 'perf_seed_data.py', 'clear_all_data.py',
         'clear_purchase_center_data.py', 'diagnose_production.py',
         'perf_optimization/generate_test_data.py', 'perf_optimization/benchmark_core_ops.py',
+        'test_ota_flow.py',  # 会触发全设备 OTA（第二轮审计补接）
     ]
     missing = [
         name for name in must_guard

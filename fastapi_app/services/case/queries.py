@@ -59,8 +59,12 @@ async def search_cases(db: AsyncSession, query: str = '') -> list[dict]:
     q = q.order_by(Case.id)
     result = await db.execute(q)
     cases = list(result.scalars().all())
+    # 只读本表字段：**不要**用 c.sync_name/c.sync_barcode —— 它们在 product_id 非空时
+    # 会访问 self.product 关系，async 会话在该处触发 IO 报 MissingGreenlet（→ 500）。
+    # 与 _serializers.py 的修复同口径（f7b6549d 只修了那边，这里漏网；生产 case 表
+    # 已有 product_id 非空的行，无关键词时默认返回前 20 条必含它 → 必然 500）。
     return [{
-        'id': c.id, 'name': c.sync_name, 'barcode': c.sync_barcode or '',
+        'id': c.id, 'name': c.name or '', 'barcode': c.barcode or '',
         'current_stock': c.current_stock or 0, 'parent_id': c.parent_id,
     } for c in cases]
 

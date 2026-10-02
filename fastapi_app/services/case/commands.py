@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi_app.core.exceptions import BusinessError
 from fastapi_app.core.pg_locks import acquire_advisory_lock_async, number_lock_key
 from fastapi_app.core.validators import validate_quantity_range
 from fastapi_app.services.case._common import _parse_date
@@ -70,7 +71,12 @@ async def create_movement(db: AsyncSession, case_id: int, direction: str, quanti
 
 async def update_movement(db: AsyncSession, movement_id: int, update_data: dict) -> dict:
     """更新出入库流水；数量变化时在同一把锁内同步库存。"""
-    movement = await db.get(CaseMovement, movement_id)
+    # 必须**先**锁流水行再读它的 quantity：否则并发编辑同一条流水时，两个事务都用
+    # 陈旧快照算增量、先后施加到同一个 current_stock 上 → 台账与库存漂移。
+    # 锁序为「流水 → case」；create_movement 只锁 case、不锁流水，故不成环。
+    movement = (await db.execute(
+        select(CaseMovement).where(CaseMovement.id == movement_id).with_for_update()
+    )).scalar_one_or_none()
     if not movement:
         raise ValueError("流水记录不存在")
 
@@ -102,7 +108,10 @@ async def update_movement(db: AsyncSession, movement_id: int, update_data: dict)
 
 async def delete_movement(db: AsyncSession, movement_id: int) -> dict:
     """删除出入库流水，并回退其对库存的影响（行级锁内）。"""
-    movement = await db.get(CaseMovement, movement_id)
+    # 同 update_movement：先锁流水行，避免并发删除/编辑时用陈旧快照**双倍回退**库存。
+    movement = (await db.execute(
+        select(CaseMovement).where(CaseMovement.id == movement_id).with_for_update()
+    )).scalar_one_or_none()
     if not movement:
         raise ValueError("流水记录不存在")
 
@@ -145,7 +154,7 @@ async def batch_create_movements(db: AsyncSession, movements_data: list[dict]) -
             async with db.begin_nested():
                 result = await create_movement(db, case_id, direction, quantity, movement_date, customer, note)
             results.append({'index': idx, **result, 'client_id': item.get('id', '')})
-        except (ValueError, TypeError, RuntimeError) as e:
+        except (ValueError, TypeError, RuntimeError, BusinessError) as e:
             logger.warning('批量出入库第 %s 条失败: %s', idx, e)
             failed.append({'index': idx, 'error': str(e)})
 

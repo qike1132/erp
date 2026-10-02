@@ -206,6 +206,9 @@ async def main():
     parser.add_argument("--count", type=int, default=20000, help="生成数据条数")
     parser.add_argument("--model", choices=list(MODELS.keys()), help="目标模型")
     parser.add_argument("--all", action="store_true", help="为所有模型生成数据")
+    parser.add_argument('--allow-prod-write', action='store_true',
+                        help='显式授权写生产库（与 ERP_ALLOW_PROD_WRITE=1 等价）')
+
     args = parser.parse_args()
 
     _init_async_engine()

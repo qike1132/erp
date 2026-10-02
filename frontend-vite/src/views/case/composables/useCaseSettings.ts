@@ -32,15 +32,21 @@ export function useCaseSettings() {
     rows.value = list.map((p) => ({ id: p.id, name: p.name, qtyPerSet: p.qty_per_set }))
   })
 
+  // 请求序号：快速连选产品时丢弃过期响应，否则会把配件挂到**错误的主件**下
+  // （addPart 用 main.value.id 作 parent_id → 写库错误）。
+  let loadSeq = 0
+
   async function load(productId: number, name: string) {
+    const seq = ++loadSeq
     productQuery.value = name
     loading.value = true
     try {
       const tree = await fetchCaseTree(productId)
+      if (seq !== loadSeq) return  // 已被更新的选择作废
       main.value = tree?.main ?? null
       parts.value = tree?.parts ?? []
     } finally {
-      loading.value = false
+      if (seq === loadSeq) loading.value = false
     }
   }
 
@@ -87,7 +93,8 @@ export function useCaseSettings() {
     try {
       await caseApi.updateItem(row.id, { name: row.name.trim(), qty_per_set: row.qtyPerSet })
       showToast('已保存', 'success')
-      invalidate()
+      await reload()  // 必须回读：rows 由 watch(parts) 派生，invalidate() 触及不到它，
+      invalidate()    // 否则 chip 上仍显示旧名称/旧配比，用户以为没保存成功
     } catch (e: unknown) {
       showToast(getErrorMessage(e, '保存失败'), 'error')
     } finally {

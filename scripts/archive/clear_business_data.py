@@ -48,10 +48,9 @@ BUSINESS_TABLES = [
     'craft_work',
     'packaging_record',
 
-    # 皮套管理
-    'case_stock_out',
-    'case_stock_in',
-    'case_inventory_log',
+    # 皮套管理（case_stock_in/out/case_inventory_log 三表已由迁移
+    # pg_standalone_062 删除，统一为 case_movement —— 原样 TRUNCATE 会报表不存在）
+    'case_movement',
     'case',
 
     # 客户相关

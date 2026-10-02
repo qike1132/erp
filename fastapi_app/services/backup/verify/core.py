@@ -5,8 +5,10 @@ import contextlib
 import hashlib
 import json
 import logging
+import re
 import zipfile
 from datetime import datetime
+from pathlib import Path
 
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, SQLAlchemyError
@@ -120,6 +122,32 @@ async def query_table_rows(tname: str, db: AsyncSession, since: str | None = Non
     return serialized_rows
 
 
+_NAME_TS_RE = re.compile(r'(\d{8}_\d{6})')
+
+
+def _read_backup_timestamp(f: Path, name: str) -> str | None:
+    """读单个备份文件的「导出时间」；**只认全量**（partial 不能当增量基线）。
+
+    加密包不解密：同名 `.meta` 已带 `type` 与 `created_at`。
+    """
+    if name.endswith('.enc'):
+        try:
+            meta = json.loads((f.parent / (name + '.meta')).read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            return None
+        return meta.get('created_at') if meta.get('type') == 'full' else None
+    try:
+        with zipfile.ZipFile(f, 'r') as zf:
+            if 'manifest.json' not in zf.namelist():
+                return None
+            mf = json.loads(zf.read('manifest.json'))
+    except (OSError, zipfile.BadZipFile, ValueError):
+        return None
+    # 与 .enc 分支同口径校验 type：原先这里不校验，一个 type='partial' 的手工包
+    # 会被当成"最近一次全量"基准。
+    return mf.get('exported_at') if mf.get('type') == 'full' else None
+
+
 async def find_last_backup_timestamp() -> str | None:
     """查找最近一次**全量**备份的导出时间。
 
@@ -128,36 +156,30 @@ async def find_last_backup_timestamp() -> str | None:
       · `erp_backup_<ts>.zip`        —— 手工全量
       · `erp_auto_daily_<ts>.zip`    —— 自动全量（例行路径）
       · `*.zip.enc`                  —— 加密全量（生产默认加密）
-
-    加密包**不解密**取 manifest：同名 `.meta` 伴随文件已带 `created_at` 与 `type`，
-    而加密包没有 `.zip` 兄弟文件，只按 `.zip` 匹配会漏掉全部生产备份。
     """
     if not BACKUP_DIR.exists():
         return None
-    for f in sorted(BACKUP_DIR.iterdir(), reverse=True):
+
+    candidates: list[tuple[str, str]] = []
+    for f in BACKUP_DIR.iterdir():
         if not f.is_file():
             continue
         name = f.name
         if not (name.startswith(('erp_backup_', 'erp_auto_daily_'))
                 and name.endswith(('.zip', '.zip.enc'))):
             continue
-        if name.endswith('.enc'):
-            meta_path = f.parent / (name + '.meta')
-            try:
-                meta = json.loads(meta_path.read_text(encoding='utf-8'))
-            except (OSError, ValueError):
-                continue
-            if meta.get('type') == 'full' and meta.get('created_at'):
-                return meta['created_at']
+        ts = _read_backup_timestamp(f, name)
+        if not ts:
             continue
-        try:
-            with zipfile.ZipFile(f, 'r') as zf:
-                if 'manifest.json' in zf.namelist():
-                    mf = json.loads(zf.read('manifest.json'))
-                    return mf.get('exported_at')
-        except (OSError, zipfile.BadZipFile, ValueError):
-            continue
-    return None
+        # ⚠️ 排序键取**文件名里的时间戳**，不能按文件名字符串降序取首个：
+        # 'erp_backup_' > 'erp_auto_daily_'（第 5 字符 b > a），会让几个月前的
+        # 手工全量盖过今天的自动全量 —— 这是扩展匹配集时引入的坑。
+        m = _NAME_TS_RE.search(name)
+        candidates.append((m.group(1) if m else '', ts))
+
+    if not candidates:
+        return None
+    return max(candidates, key=lambda kv: kv[0])[1]
 
 
 async def verify_restore(

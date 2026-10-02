@@ -166,6 +166,16 @@ async def test_optimistic_lock_allows_when_env_true(monkeypatch):
 # --------------------------------------------------------------------------
 # 调用点：case/commands.py
 # --------------------------------------------------------------------------
+class _FakeResult:
+    """execute() 的最小返回替身：只支持 scalar_one_or_none()。"""
+
+    def __init__(self, value):
+        self._value = value
+
+    def scalar_one_or_none(self):
+        return self._value
+
+
 class _FakeSession:
     """case/commands.py 调用点所需的最小 AsyncSession 替身。"""
 
@@ -177,6 +187,11 @@ class _FakeSession:
 
     async def get(self, model, pk):
         return self.movement
+
+    async def execute(self, stmt):
+        # update_movement / delete_movement 现在用 `SELECT ... FOR UPDATE` 取流水行
+        # （先锁再读，避免并发编辑同一条流水时用陈旧快照算增量）
+        return _FakeResult(self.movement)
 
     def add(self, obj):
         self.added.append(obj)

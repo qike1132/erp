@@ -65,7 +65,12 @@ def _latest_backup() -> tuple[Path | None, datetime | None]:
     # 必须同时匹配 .zip 与 .zip.enc：生产加密开启时落盘是 `erp_backup_*.zip.enc`，
     # 只 glob '*.zip' 会永远报“未找到备份产物”（与 P2 审计的
     # health_check_service 同源缺陷）。
-    zips = sorted(backup_dir.glob('erp_backup_*.zip*'), key=lambda p: p.stat().st_mtime)
+    # ⚠️ 不能用 `'*.zip*'`：那会连 `.zip.meta` **边车的**一起命中，而边车写完在 zip
+    # 之后、mtime 更新 → 「最新备份」会显示成 365 字节的 sidecar。锚定这两种后缀。
+    zips: list[Path] = []
+    for pat in ('erp_backup_*.zip', 'erp_backup_*.zip.enc'):
+        zips.extend(backup_dir.glob(pat))
+    zips.sort(key=lambda p: p.stat().st_mtime)
     if not zips:
         return None, None
     newest = zips[-1]

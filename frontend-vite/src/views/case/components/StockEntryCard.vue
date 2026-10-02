@@ -129,16 +129,21 @@ const productQuery = ref('')
 const selectedName = ref('')
 const parts = ref<EntryRow[]>([])
 const loadingTree = ref(false)
+// 请求序号：快速连选产品时丢弃过期响应，否则会把 A 的皮套行配到 B 的名下
+// （用户按 B 的意图勾选，实际提交 A 的 caseId → 写错 SKU 的出入库）。
+let treeSeq = 0
 
 const accent = computed(() => (form.value.direction === 'in' ? 'var(--color-primary-500)' : 'var(--color-danger-500)'))
 
 async function onSelectProduct(p: Product) {
+  const seq = ++treeSeq
   selectedName.value = p.name
   productQuery.value = p.name
   parts.value = []
   loadingTree.value = true
   try {
     const tree = await fetchCaseTree(p.id)
+    if (seq !== treeSeq) return  // 已被更新的选择作废
     if (!tree) return
     const rows: EntryRow[] = [
       { caseId: String(tree.main.id), name: tree.main.name || p.name, isPart: false, stock: tree.main.current_stock, checked: true, qty: 1 },
@@ -146,7 +151,7 @@ async function onSelectProduct(p: Product) {
     ]
     parts.value = rows
   } finally {
-    loadingTree.value = false
+    if (seq === treeSeq) loadingTree.value = false
   }
 }
 

@@ -59,19 +59,40 @@ def _open_backup_zip(file_path: Path):
     if not password:
         raise ValueError('备份已加密但未配置 BACKUP_TEST_PASSWORD / BACKUP_ENCRYPTION_PASSWORD，无法校验')
 
-    from fastapi_app.core.backup_encryption import decrypt_backup_auto
-    plaintext, _meta = decrypt_backup_auto(file_path.read_bytes(), password)
+    from fastapi_app.core.backup_encryption import BackupFileError, decrypt_backup_auto
+    try:
+        plaintext, _meta = decrypt_backup_auto(file_path.read_bytes(), password)
+    except BackupFileError as e:
+        # ⚠️ `BackupFileError` **不是** ValueError 子类（core/backup_encryption.py:30），
+        # 而口令错误 / 密文损坏 / 口令轮换后解不开旧包，抛的都是它。不转成 ValueError
+        # 就会穿透调用方的 `except ValueError` → 落到 perform_health_check 的兜底
+        # `except Exception` → **整份健康检查报"执行失败"，其它检查结果全丢**；
+        # 且清理侧看到 success=False 会把该包判成"损坏"、从 keep 列表剔除。
+        # 统一映射为 ValueError = "无法校验"，与本函数的契约一致。
+        raise ValueError(f'无法解密（口令错误或密文损坏）：{e}') from e
+
     # delete=False：文件要活过 with 块供调用方读取，退出时由 finally 清理
     with tempfile.NamedTemporaryFile(
         prefix='hc_decrypt_', suffix='.zip', delete=False
     ) as tmp:
-        tmp.write(plaintext)
+        # 先取路径再写：若 write 抛 OSError（磁盘满），finally 仍能清掉这个临时文件
         tmp_path = Path(tmp.name)
+        tmp.write(plaintext)
     try:
         yield tmp_path
     finally:
         with contextlib.suppress(OSError):
             tmp_path.unlink(missing_ok=True)
+
+
+def _unverifiable_result(filename: str, err: Exception) -> dict[str, Any]:
+    """构造「无法校验」结果（**不是**损坏）。
+
+    清理侧（cleanup/service.py）会对 success=False 判 corrupted 并优先删除，
+    故必须用 `unverifiable` 与之区分：口令错误 / 密文损坏的包不能被当成损坏删掉。
+    """
+    return {'success': False, 'unverifiable': True,
+            'error': f'无法校验（{err!s}）', 'tested_file': filename}
 
 
 def _verify_zip_payload(file_path: Path) -> dict[str, Any] | None:
@@ -776,6 +797,9 @@ class BackupHealthCheckService:
                     logger.info(f"恢复测试成功: {test_file.name}")
                     return result
 
+                except ValueError as e:
+                    # 加密包解不开（口令错/密文损坏）→ **不是**"损坏"（见 _open_backup_zip）
+                    return _unverifiable_result(test_file.name, e)
                 except (zipfile.BadZipFile, OSError, json.JSONDecodeError) as e:
                     return {
                         'success': False,

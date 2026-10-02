@@ -444,6 +444,11 @@ class BackupCleanupService:
                     # 测试通过的文件可以考虑保留
                     if test_result.get('table_count', 0) > 0:
                         files_to_keep.add(file_info['name'])
+                elif test_result.get('unverifiable'):
+                    # 无法校验（拿不到/用错口令、密文损坏）—— 既不算通过也**不算损坏**。
+                    # 判 corrupted 会把它从 keep 剔除、成为优先删除候选，可能删掉有效备份。
+                    file_info['recovery_test_passed'] = False
+                    file_info['health_status'] = 'unknown'
                 else:
                     file_info['recovery_test_passed'] = False
                     file_info['health_status'] = 'corrupted'

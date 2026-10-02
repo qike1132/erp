@@ -223,8 +223,11 @@ export function useCaseStockWorkbench() {
   }
 }
 
-/** 皮套模块全部查询键（提交/导入/WS 刷新统一失效入口） */
-export const CASE_QUERY_KEYS = ['case-inventory', 'case-movements', 'case-items'] as const
+/** 皮套模块全部查询键（提交/导入/WS 刷新统一失效入口）。
+ *  ⚠️ 必须与各处 useQuery 的**首元素**逐一对应：vue-query 的部分匹配要求首元素相等，
+ *  `['case-movements']` 匹配不到 `['case-movements-drawer', ...]` —— 漏掉会让抽屉
+ *  在别处提交后仍显示过期流水。（原先的 `'case-items'` 全仓无对应查询，已移除。） */
+export const CASE_QUERY_KEYS = ['case-inventory', 'case-movements', 'case-movements-drawer'] as const
 
 export function caseQueryKeys() {
   return CASE_QUERY_KEYS

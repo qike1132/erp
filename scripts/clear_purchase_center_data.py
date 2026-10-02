@@ -244,6 +244,9 @@ def main():
                         help='要清空的数据类型: orders(采购订单), products(产品管理), customer_orders(客户订单), all(全部)')
     parser.add_argument('--dry-run', action='store_true', help='预览要删除的数据，不实际删除')
     parser.add_argument('--execute', action='store_true', help='执行清空操作')
+    parser.add_argument('--allow-prod-write', action='store_true',
+                        help='显式授权写生产库（与 ERP_ALLOW_PROD_WRITE=1 等价）')
+
     args = parser.parse_args()
 
     if not args.dry_run and not args.execute:

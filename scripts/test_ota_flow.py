@@ -8,6 +8,8 @@ import psycopg2
 def main() -> None:
     # ⚠️ 本脚本直连**生产库**并会把 app_version 置为 is_active/is_pushed=true，
     # 即向所有安卓客户端触发真实 OTA 推送。仅在明确需要时手动运行。
+    from _prod_write_guard import require_prod_write_consent
+    require_prod_write_consent('向生产库推送 OTA 版本（触发全设备升级）')
     print("=" * 50)
     print("OTA 完整测试流程")
     print("版本 1.0 → 1.1 → 1.2")
