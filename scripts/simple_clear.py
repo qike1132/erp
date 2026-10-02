@@ -136,4 +136,6 @@ def main():
 
 
 if __name__ == '__main__':
+    from _prod_write_guard import require_prod_write_consent
+    require_prod_write_consent('清空全部业务数据（订单/出入库/库存/产品/客户/供应商/用户）')
     main()

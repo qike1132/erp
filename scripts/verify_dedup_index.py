@@ -1,9 +1,16 @@
 """验证 uq_po_pending_dedup 索引是否已成功创建（COALESCE 版本）"""
 import sys
+from pathlib import Path
 
+# 让 `python scripts/verify_dedup_index.py` 能直接跑（原先缺这段，会 ModuleNotFoundError）
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from _prod_write_guard import require_prod_write_consent
 from sqlalchemy import text
 
 from fastapi_app.core.database import get_sync_engine
+
+require_prod_write_consent('向生产库插入/删除测试采购单')
 
 engine = get_sync_engine()
 with engine.connect() as conn:

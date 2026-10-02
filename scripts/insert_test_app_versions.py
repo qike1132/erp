@@ -13,7 +13,16 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
-sys.path.insert(0, str(Path(__file__).parent))
+# 项目根（不是 scripts/ —— 原写 .parent 会让 fastapi_app 导入失败）
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+# 护栏**先于 app 导入**：本脚本引用的 fastapi_app.shared_models.app_version 已不存在
+# （另有 settings.database_url 亦不存在），app 导入必然失败 —— 但"要写生产库"这件事
+# 必须在任何导入失败之前就拦下来。
+from _prod_write_guard import require_prod_write_consent
+
+require_prod_write_consent('向生产库插入测试 app 版本')
+
 from fastapi_app.shared_models.app_version import AppVersion
 
 from fastapi_app.core.config import Settings

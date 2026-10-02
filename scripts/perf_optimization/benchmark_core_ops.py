@@ -198,4 +198,10 @@ async def run():
     with open(path,"w",encoding="utf-8") as f: json.dump(report,f,ensure_ascii=False,indent=2)
     print(f"\n报告: {path}")
 
-if __name__ == "__main__": asyncio.run(run())
+if __name__ == "__main__":
+    # 统一生产写护栏：本基准会**删除真实订单**（取列表最新一条再 /orders/delete/{id}），
+    # 脚本在子目录，需把 scripts/ 加入 sys.path。
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from _prod_write_guard import require_prod_write_consent
+    require_prod_write_consent('对生产 API 跑核心操作基准（含删除真实订单）')
+    asyncio.run(run())

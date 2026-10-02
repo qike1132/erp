@@ -11,7 +11,12 @@
 """
 import asyncio
 import random
+import sys
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
+
+# 让 `python scripts/create_beile_test_data.py` 能直接跑（原先缺这段，会 ModuleNotFoundError）
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -159,4 +164,6 @@ async def create_orders():
 
 
 if __name__ == "__main__":
+    from _prod_write_guard import require_prod_write_consent
+    require_prod_write_consent('向生产库插入贝乐测试数据')
     asyncio.run(create_orders())

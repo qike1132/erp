@@ -305,4 +305,6 @@ async def run_test():
 
 
 if __name__ == '__main__':
+    from _prod_write_guard import require_prod_write_consent
+    require_prod_write_consent('向生产库提交测试数据')
     asyncio.run(run_test())

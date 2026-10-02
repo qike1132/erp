@@ -12,7 +12,12 @@
   - 总数量: 1000
 """
 import asyncio
+import sys
 from datetime import UTC, datetime
+from pathlib import Path
+
+# 让 `python scripts/create_multi_sku_test.py` 能直接跑（原先缺这段，会 ModuleNotFoundError）
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -113,4 +118,6 @@ async def create_multi_sku_order():
 
 
 if __name__ == "__main__":
+    from _prod_write_guard import require_prod_write_consent
+    require_prod_write_consent('向生产库插入多 SKU 测试数据')
     asyncio.run(create_multi_sku_order())

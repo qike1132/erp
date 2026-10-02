@@ -111,4 +111,9 @@ async def main():
     print("  数据生成完成")
     print("="*60)
 
-if __name__ == "__main__": asyncio.run(main())
+if __name__ == "__main__":
+    # 统一生产写护栏（脚本在子目录，需把 scripts/ 加入 sys.path）
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from _prod_write_guard import require_prod_write_consent
+    require_prod_write_consent('向生产库批量生成 2 万+ 条测试数据（订单/入库/出库/采购）')
+    asyncio.run(main())

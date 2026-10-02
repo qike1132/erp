@@ -74,4 +74,6 @@ def main():
 
 
 if __name__ == '__main__':
+    from _prod_write_guard import require_prod_write_consent
+    require_prod_write_consent('向生产库插入测试订单')
     main()

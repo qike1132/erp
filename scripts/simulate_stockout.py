@@ -256,4 +256,6 @@ def main():
 
 
 if __name__ == '__main__':
+    from _prod_write_guard import require_prod_write_consent
+    require_prod_write_consent('对生产库真实出库并扣减库存')
     sys.exit(main())

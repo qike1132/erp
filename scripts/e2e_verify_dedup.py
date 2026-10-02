@@ -1,12 +1,20 @@
 """端到端验证：模拟一键审核流程，确认只生成 1 个采购单（而非 4 个）。"""
 import asyncio
+import sys
+from pathlib import Path
 
+# 让 `python scripts/e2e_verify_dedup.py` 能直接跑（原先缺这段，会 ModuleNotFoundError）
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from _prod_write_guard import require_prod_write_consent
 from sqlalchemy import select
 
 from fastapi_app.core.database import _AsyncSessionLocal
 from fastapi_app.services.purchase_order_generate import generate_purchase_orders_from_customer_orders
 from fastapi_app.shared_models import PurchaseOrder
 from fastapi_app.shared_models.order import Order
+
+require_prod_write_consent('对生产库创建/重建采购单')
 
 
 async def main():

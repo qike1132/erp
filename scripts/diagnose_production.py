@@ -169,6 +169,9 @@ async def create_test_production_data():
 
 if __name__ == '__main__':
     if len(sys.argv) > 1 and sys.argv[1] == '--create-test':
+        # 只有这一支写库（else 是只读诊断，不加护栏）
+        from _prod_write_guard import require_prod_write_consent
+        require_prod_write_consent('向生产库插入测试生产记录（--create-test）')
         asyncio.run(create_test_production_data())
     else:
         asyncio.run(diagnose_production_data())

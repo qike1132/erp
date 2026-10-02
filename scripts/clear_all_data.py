@@ -355,6 +355,14 @@ def main():
         print("使用 --execute 执行清空操作")
         sys.exit(1)
 
+    # 统一生产写护栏：只拦真正执行的路径（--dry-run 不写库，不拦）
+    if args.execute:
+        from _prod_write_guard import require_prod_write_consent
+        require_prod_write_consent(
+            f'清空系统数据（--execute，模块={args.module}）',
+            hint='不可逆；建议先 --dry-run 预览并确认已备份',
+        )
+
     print("="*80)
     print("系统数据清空工具")
     print("="*80)

@@ -4,6 +4,9 @@ from datetime import datetime
 from pathlib import Path
 
 import psycopg2
+from _prod_write_guard import require_prod_write_consent
+
+require_prod_write_consent('向生产库插入/推送 app 版本（会触发全设备 OTA）')
 
 # 数据库配置
 db_config = {
