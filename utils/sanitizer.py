@@ -19,6 +19,23 @@ _TAG_RE = re.compile(r'</?([a-zA-Z][a-zA-Z0-9]*)\b[^>]*?>', re.DOTALL)
 _SELF_CLOSING_RE = re.compile(r'<([a-zA-Z][a-zA-Z0-9]*)\s*/>')
 
 
+def _rebuild_without_attributes(match: re.Match) -> str:
+    """仅保留标签名，剥离全部属性。
+
+    ⚠️ 安全性关键：原实现 `return match.group(0)` 会把白名单标签**连属性一起**放行，
+    于是 `<b onmouseover="alert(1)">`、`<p style="...">` 原样通过 —— 一旦接线即
+    存储型 XSS（这也正是本模块取代 bleach 后丢失的保证）。docstring 声称
+    「所有属性被移除」，此处与之一致。ALLOWED_TAGS 均为无属性的内联标签，剥离安全。
+    """
+    raw = match.group(0)
+    name = match.group(1).lower()
+    if raw.startswith('</'):
+        return f'</{name}>'
+    if raw.rstrip().endswith('/>'):
+        return f'<{name}/>'
+    return f'<{name}>'
+
+
 def _strip_disallowed_tags(text: str, allowed_tags: list[str], strip: bool = True) -> str:
     """移除不在白名单中的 HTML 标签。
 
@@ -35,7 +52,7 @@ def _strip_disallowed_tags(text: str, allowed_tags: list[str], strip: bool = Tru
     def _replace_tag(match: re.Match) -> str:
         tag_name = match.group(1).lower()
         if tag_name in allowed_lower:
-            return match.group(0)  # 保留允许的标签
+            return _rebuild_without_attributes(match)  # 保留标签名、剥离属性
         if strip:
             return ''  # 移除标签，保留内容
         return ''  # 移除标签

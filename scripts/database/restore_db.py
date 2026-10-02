@@ -64,12 +64,15 @@ def drop_and_recreate_db():
     )
 
 
+# ⚠️ 三处 psql 一律 ON_ERROR_STOP=1：该选项为 0 时 **SQL 错误不会让 psql 返回非零退出码**，
+# 于是下方 `if result.returncode != 0` 判不出失败 → 走到 `print('数据库恢复成功!')`。
+# （同仓 db_manager.py 的注释已证实：脚本错误仅在 ON_ERROR_STOP=1 时才置退出码。）
 def restore_from_sql(sql_file):
     print(f'正在从 SQL 文件恢复: {sql_file}')
     with open(sql_file, 'rb') as f:
         result = subprocess.run(
             ['psql', '-h', DB_HOST, '-p', DB_PORT, '-U', DB_USER, '-d', DB_NAME,
-             '-v', 'ON_ERROR_STOP=0'],
+             '-v', 'ON_ERROR_STOP=1'],
             stdin=f, capture_output=True, env=env, timeout=600
         )
     return result
@@ -81,7 +84,7 @@ def restore_from_sql_gz(gz_file):
         sql_data = f.read()
     result = subprocess.run(
         ['psql', '-h', DB_HOST, '-p', DB_PORT, '-U', DB_USER, '-d', DB_NAME,
-         '-v', 'ON_ERROR_STOP=0'],
+         '-v', 'ON_ERROR_STOP=1'],
         input=sql_data, capture_output=True, env=env, timeout=600
     )
     return result
@@ -111,7 +114,7 @@ def restore_from_zip(zip_file):
             print(f"总记录数: {manifest.get('total_rows', '?')}")
     result = subprocess.run(
         ['psql', '-h', DB_HOST, '-p', DB_PORT, '-U', DB_USER, '-d', DB_NAME,
-         '-v', 'ON_ERROR_STOP=0'],
+         '-v', 'ON_ERROR_STOP=1'],
         input=sql_data, capture_output=True, env=env, timeout=600
     )
     return result

@@ -43,8 +43,12 @@ async def _run(remark: str) -> int:
     print(f'[备份] 开始全量备份，备注: {remark}')
     started = datetime.now()
 
-    # ctx 仅需提供 job_try（任务内唯一用到的 ctx 字段）
-    await manual_full_backup_task({'job_try': 1}, remark=remark, encrypt=False)
+    # ctx 仅需提供 job_try（任务内唯一用到的 ctx 字段）。
+    # 不传 encrypt：原写死 `encrypt=False` 会**无条件产出不加密备份**，即便
+    # BACKUP_ENCRYPTION_ENABLED=true 且口令已配 —— 既与本脚本 docstring
+    # “与自动备份完全同构”矛盾，也踩 AGENTS.md 红线 #4（静默降级为不加密）。
+    # 用任务默认（encrypt=True），由服务层按 ENABLED/口令决定。
+    await manual_full_backup_task({'job_try': 1}, remark=remark)
 
     elapsed = (datetime.now() - started).total_seconds()
     print(f'[备份] 完成，耗时 {elapsed:.1f}s')
@@ -58,7 +62,10 @@ def _latest_backup() -> tuple[Path | None, datetime | None]:
         backup_dir = ROOT / backup_dir
     if not backup_dir.exists():
         return None, None
-    zips = sorted(backup_dir.glob('erp_backup_*.zip'), key=lambda p: p.stat().st_mtime)
+    # 必须同时匹配 .zip 与 .zip.enc：生产加密开启时落盘是 `erp_backup_*.zip.enc`，
+    # 只 glob '*.zip' 会永远报“未找到备份产物”（与 P2 审计的
+    # health_check_service 同源缺陷）。
+    zips = sorted(backup_dir.glob('erp_backup_*.zip*'), key=lambda p: p.stat().st_mtime)
     if not zips:
         return None, None
     newest = zips[-1]

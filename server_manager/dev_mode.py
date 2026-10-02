@@ -108,7 +108,10 @@ class DevModeOps:
             env = os.environ.copy()
             env.update({'PYTHONUNBUFFERED': '1', 'PYTHONIOENCODING': 'utf-8', 'PYTHONUTF8': '1', 'PYTHONPATH': str(self._project_dir)})
             self._gate.checkpoint()
-            backend_cmd = [self._python_exe, '-u', '-m', 'uvicorn', 'fastapi_app.main:app', '--host', '0.0.0.0', '--port', str(_API_PORT), '--log-level', 'info', '--reload', '--reload-dir', 'fastapi_app']
+            # 必须绑回环（AGENTS.md 红线 #3）：绑 0.0.0.0 会**绕过 nginx** 并把
+            # /api/docs、/metrics 暴露给同网段（历史观察到的「:5002 绑 0.0.0.0 = GUI 开发栈」即此）。
+            # 前端 vite dev 走同机反代（BACKEND_INTERNAL_URL=http://127.0.0.1:5002），回环已足够。
+            backend_cmd = [self._python_exe, '-u', '-m', 'uvicorn', 'fastapi_app.main:app', '--host', '127.0.0.1', '--port', str(_API_PORT), '--log-level', 'info', '--reload', '--reload-dir', 'fastapi_app']
             self.process = subprocess.Popen(backend_cmd, cwd=str(self._project_dir), env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, creationflags=creationflags, text=False)
             self._msg_queue.put(('log', {'text': f"后端进程已启动 (PID: {self.process.pid})"}))
             threading.Thread(target=self.read_stdout, args=(self.process,), daemon=True).start()

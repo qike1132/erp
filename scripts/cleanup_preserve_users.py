@@ -160,9 +160,12 @@ def clear_logs():
     print('  [3/4] 清理日志文件')
     print('=' * 70)
 
+    # ⚠️ 绝不包含 backups/：本函数会 rglob 后逐个 unlink，而 backups/server 下是
+    # **真实生产备份与 pre_restore 还原点**——正是重置数据前最该保留的东西。
+    # （2026-10-02 P6 审计发现原先含 `project_root / 'backups'`，会在“保留用户清数据”
+    #  时把唯一可回滚的备份一起抹掉。）
     log_dirs = [
         project_root / 'logs',
-        project_root / 'backups',
     ]
 
     total_files = 0
