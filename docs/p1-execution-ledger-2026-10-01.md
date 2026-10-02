@@ -326,7 +326,7 @@ SCAN_EXIT=0
 
 | ID | 级别 | 事实 | 建议处置 |
 | --- | --- | --- | --- |
-| **R-1** | **high（提交面）** | `config/nginx-windows.conf` 在 23:10:16 被**外部会话**改成**启用** `secure_link`（`secure_link $arg_st,$arg_s;` + `secure_link_md5 "$secure_link_expires$uri 0829c6a6b01cafc47788ccc04297dd382838bdfc1f77e5ef1a58b1e5d6e32589";`）。该提交前状态（`bc41ae7b`）是「注释态回退 + 防呆护栏」，注释明确写「重新启用前必须先用签名 URL 实测 200 再上」 | **裁定（captain）：P1 批次提交排除**（该文件未进 `993fd728`）。**后续（结案口径）**：该文件已由外部会话**自己在 `100569f8`（OPT-19，4 files/127+/110−，提交信息含「secure_link 激活并五连测验收」）中提交**，未与本批混 ⇒ 本批不再需要处置；其自证责任随之归该会话。另注：md5 串是硬编码密钥材料，与 §6.3 `UPLOAD_URL_SIGNING_SECRET` 口径需一致 |
+| **R-1** | **high（提交面）** | `config/nginx-windows.conf` 在 23:10:16 被**外部会话**改成**启用** `secure_link`（`secure_link $arg_st,$arg_s;` + `secure_link_md5 "$secure_link_expires$uri <已轮换的密钥，见 config/uploads-signing.conf>";`）。该提交前状态（`bc41ae7b`）是「注释态回退 + 防呆护栏」，注释明确写「重新启用前必须先用签名 URL 实测 200 再上」 | **裁定（captain）：P1 批次提交排除**（该文件未进 `993fd728`）。**后续（结案口径）**：该文件已由外部会话**自己在 `100569f8`（OPT-19，4 files/127+/110−，提交信息含「secure_link 激活并五连测验收」）中提交**，未与本批混 ⇒ 本批不再需要处置；其自证责任随之归该会话。另注：md5 串是硬编码密钥材料，与 §6.3 `UPLOAD_URL_SIGNING_SECRET` 口径需一致 |
 | **R-2** | low | `config/tls/ca.crt`（1927 B）为 443 自签 TLS 产物，与 `b5ae3a94`（443 TLS）相关 | **先裁定「P1 批次排除」；最终由 captain 在 `578a2617`（「收录并行会话遗留的 P1 收口配套」）中收录入库** ⇒ 已闭合（该文件为 CA **公钥**，31 行） |
 | **R-3** | low | `docs/TRANSACTION_BOUNDARY_GUIDE.md` §4 行号锚点 **3 行陈旧**（与 format 无关，P1 批次改行造成）：`cleanup/service.py:604→606`、`policy_service.py:544→549`、`records.py:791/803/822→804/816/835`；12 处命中总数与 `gate_baseline.json` 一致（§2.5 独立复算） | 交 **t44/gatekeeper** 在**无 format 的当前树**上同步（文档 §4 自称「以脚本输出为准」，不影响门禁/验收）；本任务只读不代改 |
 
