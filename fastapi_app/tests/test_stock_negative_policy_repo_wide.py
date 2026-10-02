@@ -654,7 +654,9 @@ async def test_update_stockin_wrapper_delta_guard_then_releases(monkeypatch):
     ):
         with pytest.raises(ValueError) as ei:
             await stock_in_service.update_stockin(
-                _FakeSession(stockin_obj), 7, quantity=2,
+                # 第一个标量是「无锁读 product_id」的结果，第二个才是 WITH FOR UPDATE
+                # 取到的入库行（顺序即 SQL 执行顺序）
+                _FakeSession(stockin_obj.product_id, stockin_obj), 7, quantity=2,
                 customer="客户A", stockin_date_str="2026-10-01", note="",
             )
         assert str(ei.value) == (
@@ -665,7 +667,7 @@ async def test_update_stockin_wrapper_delta_guard_then_releases(monkeypatch):
 
         monkeypatch.setenv("ALLOW_NEGATIVE_STOCK", "true")
         await stock_in_service.update_stockin(
-            _FakeSession(stockin_obj), 7, quantity=2,
+            _FakeSession(stockin_obj.product_id, stockin_obj), 7, quantity=2,
             customer="客户A", stockin_date_str="2026-10-01", note="",
         )
         core.assert_awaited_once()

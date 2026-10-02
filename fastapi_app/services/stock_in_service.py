@@ -99,7 +99,20 @@ async def create_stockin(db: AsyncSession, product_id: int, quantity: int, custo
 
 
 async def update_stockin(db: AsyncSession, stockin_id: int, quantity: int, customer: str, stockin_date_str: str, note: str) -> None:
-    """更新入库记录"""
+    """更新入库记录。
+
+    ⚠️ **锁序必须是 Product → StockIn**：order/deduction 与 order_batch_create 都是先锁
+    Product 再锁 StockIn。本函数原先反过来（先锁 StockIn，改数量时才锁 Product），
+    两条路径命中同一产品/同一条备货时互相等锁 → PG 检出后回滚其一（500/409，无数据损坏）。
+    为按序加锁，先用**无锁读**拿到 product_id（该列 NOT NULL 且不可改）。
+    """
+    product_id = (await db.execute(
+        select(StockIn.product_id).where(StockIn.id == stockin_id)
+    )).scalar_one_or_none()
+    if product_id is None:
+        raise ValueError('入库记录不存在')
+    product = await stock_service.get_product_for_update(db, product_id)
+
     result = await db.execute(select(StockIn).where(StockIn.id == stockin_id).options(selectinload(StockIn.stockin_stockouts)).with_for_update())
     stockin_obj = result.scalar_one_or_none()
     if not stockin_obj:
@@ -111,7 +124,6 @@ async def update_stockin(db: AsyncSession, stockin_id: int, quantity: int, custo
         # （出库记录引用的入库数量会失真），减量也不得把当前库存打成负数。
         if stockin_obj.stockin_stockouts:
             raise ValueError('该入库记录已有出库关联，不能修改数量；可修改客户/日期/备注')
-        product = await stock_service.get_product_for_update(db, stockin_obj.product_id)
         # 负库存判定统一走统一入口（P1-2b），文案与改动前逐字一致
         assert_stock_available(
             product.current_stock, quantity - old_quantity,
@@ -129,7 +141,18 @@ async def update_stockin(db: AsyncSession, stockin_id: int, quantity: int, custo
 
 
 async def delete_stockin(db: AsyncSession, stockin_id: int) -> None:
-    """删除入库记录"""
+    """删除入库记录。
+
+    ⚠️ 锁序同 update_stockin：**Product → StockIn**（`delete_stockin_core` 内部会锁
+    Product，若这里先锁 StockIn 就构成反序）。故先用无锁读拿 product_id 再按序加锁。
+    """
+    product_id = (await db.execute(
+        select(StockIn.product_id).where(StockIn.id == stockin_id)
+    )).scalar_one_or_none()
+    if product_id is None:
+        raise ValueError('入库记录不存在')
+    await stock_service.get_product_for_update(db, product_id)
+
     result = await db.execute(select(StockIn).where(StockIn.id == stockin_id).options(selectinload(StockIn.stockin_stockouts)).with_for_update())
     stockin_obj = result.scalar_one_or_none()
     if not stockin_obj:
