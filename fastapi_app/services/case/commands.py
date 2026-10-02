@@ -9,8 +9,10 @@ from datetime import UTC, datetime
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi_app.core.pg_locks import acquire_advisory_lock_async, number_lock_key
 from fastapi_app.core.validators import validate_quantity_range
 from fastapi_app.services.case._common import _parse_date
+from fastapi_app.services.case._serializers import _serialize_item
 from fastapi_app.services.numbering import generate_case_movement_number
 from fastapi_app.shared.stock_concurrency import assert_stock_available
 from fastapi_app.shared_models import DIRECTION_IN, DIRECTION_OUT, Case, CaseMovement, Product
@@ -174,6 +176,33 @@ async def create_case_item(db: AsyncSession, name: str | None = None, barcode: s
     await db.flush()
     logger.info('皮套 SKU 创建成功 case_id=%s name=%s parent_id=%s', case_obj.id, name, parent_id)
     return {'success': True, 'message': '添加成功', 'id': case_obj.id}
+
+
+async def get_or_create_case_tree_for_product(db: AsyncSession, product_id: int) -> dict:
+    """取（不存在则以产品信息创建）该产品的「皮套主件」，返回 {main, parts}。
+
+    用 advisory lock 串行化同一 product 的创建，避免并发重复建主件
+    （`case.product_id` 无唯一约束）。parts 为主件下挂的配件（parent_id = 主件）。
+    """
+    await acquire_advisory_lock_async(db, number_lock_key('CASE_PRODUCT', str(product_id)))
+    case_obj = (await db.execute(
+        select(Case).where(Case.product_id == product_id).with_for_update()
+    )).scalar_one_or_none()
+    if not case_obj:
+        product = await db.get(Product, product_id)
+        if not product:
+            raise ValueError('产品不存在')
+        case_obj = Case(
+            product_id=product.id, name=product.name, barcode=product.barcode,
+            current_stock=0, initial_stock=0,
+        )
+        db.add(case_obj)
+        await db.flush()
+        logger.info('皮套主件自动创建 case_id=%s product_id=%s', case_obj.id, product_id)
+    parts = list((await db.execute(
+        select(Case).where(Case.parent_id == case_obj.id).order_by(Case.id)
+    )).scalars().all())
+    return {'main': _serialize_item(case_obj), 'parts': [_serialize_item(p) for p in parts]}
 
 
 async def update_case_item(db: AsyncSession, case_id: int, update_data: dict) -> dict:

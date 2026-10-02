@@ -11,7 +11,6 @@ export const MOVEMENT_COLUMNS: TableColumn[] = [
   { field: 'direction', header: '方向', align: 'center' },
   { field: 'movement_no', header: '单号', align: 'center' },
   { field: 'movement_date', header: '日期', align: 'center' },
-  { field: 'customer', header: '客户', align: 'center' },
   { field: 'quantity', header: '数量', align: 'right' },
   { field: 'note', header: '备注', align: 'center' },
 ]

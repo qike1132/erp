@@ -25,6 +25,7 @@ from fastapi_app.services.case.commands import (  # noqa: F401
     create_movement,
     delete_case_item,
     delete_movement,
+    get_or_create_case_tree_for_product,
     update_case_item,
     update_movement,
 )

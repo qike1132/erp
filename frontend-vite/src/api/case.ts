@@ -120,6 +120,12 @@ export interface CaseActionResponse {
   message: string
 }
 
+/** 某产品的皮套树：主件 + 配件 */
+export interface CaseTree {
+  main: CaseItem
+  parts: CaseItem[]
+}
+
 // ===== 请求参数（用 type 而非 interface：get() 的 params 形参是 Record<string, unknown>）=====
 export type CaseItemListParams = {
   page?: number
@@ -170,6 +176,9 @@ export const caseApi = {
 
   // --- 库存汇总（主件分组） ---
   inventory: (params: CaseInventoryParams) => get<CaseInventoryResponse>('/cases/inventory', params),
+
+  /** 取某产品的皮套主件（不存在则自动创建）+ 其配件 */
+  forProduct: (productId: number) => post<CaseTree>('/cases/for-product', { product_id: productId }),
 
   // --- 出入库流水 ---
   movements: (params?: CaseMovementListParams) => get<CaseMovementListResponse>('/cases/movements', params),

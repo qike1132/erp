@@ -1,38 +1,37 @@
 import { ref, reactive, computed } from 'vue'
 import { useQueryClient } from '@tanstack/vue-query'
 import { caseApi } from '@/api'
-import type { CaseMovementPayload, CaseSearchItem } from '@/api/case'
+import type { CaseMovementPayload } from '@/api/case'
 import { showToast } from '@/composables/useToast'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { getErrorMessage } from '@/types/errors'
 import { toISODate } from '@/utils/format'
 
-export type StockMode = 'stockin' | 'stockout'
+export type Direction = 'in' | 'out'
 
-/** 模式 → 后端方向标记 */
-export function directionOf(mode: StockMode): 'in' | 'out' {
-  return mode === 'stockin' ? 'in' : 'out'
-}
-
-/** 暂存单条目 */
+/** 暂存单条目（自带方向） */
 export interface StagedStockItem {
   key: number
   caseId: string
   caseName: string
-  customer: string
+  direction: Direction
   date: string
   quantity: number
   note: string
 }
 
-/** 录入表单状态 */
+/** 表单状态：方向 / 日期 / 备注（产品与数量由录入卡逐行持有） */
 export interface CaseStockFormState {
-  customer: string
+  direction: Direction
   date: string
-  search: string
-  caseId: string
-  quantity: number
   note: string
+}
+
+/** 一次加入暂存单的一行 */
+export interface StagedRowInput {
+  caseId: string
+  caseName: string
+  quantity: number
 }
 
 /** 批量提交结果（含部分失败明细） */
@@ -43,86 +42,44 @@ export interface SubmitFailure {
 }
 
 /**
- * 皮套入库/出库工作台状态：录入表单、暂存单、批量提交与 Excel 导入。
- * 同一页面入库/出库各挂一个实例，互不干扰。
- *
- * 并发口径：暂存时的库存校验基于「搜索结果带出的 current_stock − 本单内同 SKU 已暂存数量」，
- * 后端行级锁校验兜底，本地只做前置提示。
+ * 皮套出入库工作台（入库/出库合一）：暂存单、批量提交与 Excel 导入。
+ * 方向/日期/备注在表头统一选择；产品与其主件/配件清单由录入卡展开并逐行填数量，
+ * 一次性把勾选的行加入暂存单。
  */
-export function useCaseStockWorkbench(mode: StockMode) {
+export function useCaseStockWorkbench() {
   const queryClient = useQueryClient()
   const confirmDialog = useConfirmDialog()
 
-  // ===== 录入表单 =====
-  const today = toISODate()
   const form = reactive<CaseStockFormState>({
-    customer: '',
-    date: today,
-    search: '',
-    caseId: '',
-    quantity: 1,
+    direction: 'in',
+    date: toISODate(),
     note: '',
   })
 
-  /** 选中 SKU 的当前库存（出库用）；入库恒为 null 不展示 */
-  const currentStock = ref<number | null>(null)
-
-  const stagedQtyOf = (caseId: string, exceptKey?: number) =>
-    staged.value
-      .filter((s) => s.caseId === caseId && s.key !== exceptKey)
-      .reduce((sum, s) => sum + s.quantity, 0)
-
-  const availableStock = computed(() =>
-    mode === 'stockin' || currentStock.value === null
-      ? null
-      : currentStock.value - stagedQtyOf(form.caseId),
-  )
-
-  /** 实时行内校验信息；空字符串表示通过 */
-  const quantityWarning = computed(() => {
-    if (mode === 'stockout' && availableStock.value !== null && form.quantity > availableStock.value) {
-      return `库存不足：当前可用 ${availableStock.value}${stagedQtyOf(form.caseId) ? `（已暂存 ${stagedQtyOf(form.caseId)}）` : ''}`
-    }
-    return ''
-  })
-
-  const canAdd = computed(() => {
-    if (!form.caseId || !form.date) return false
-    if (!Number.isInteger(form.quantity) || form.quantity < 1) return false
-    return quantityWarning.value === ''
-  })
-
-  function onProductSelect(item: CaseSearchItem) {
-    form.caseId = String(item.id)
-    form.search = item.name
-    currentStock.value = mode === 'stockout' ? (item.current_stock ?? 0) : null
-    form.quantity = 1
-  }
-
-  // ===== 暂存单 =====
   const staged = ref<StagedStockItem[]>([])
   let stagedSeq = 0
 
   const stagedTotal = computed(() => staged.value.reduce((sum, s) => sum + s.quantity, 0))
 
-  function addStaged() {
-    if (!canAdd.value) {
-      showToast(quantityWarning.value || '请完整填写产品与数量', 'warning')
+  /** 把录入卡勾选的行（同方向/日期/备注）一次性加入暂存单 */
+  function addStagedBatch(rows: StagedRowInput[]) {
+    const valid = rows.filter((r) => r.caseId && Number.isInteger(r.quantity) && r.quantity >= 1)
+    if (!valid.length) {
+      showToast('请至少勾选一项并填写数量', 'warning')
       return
     }
-    staged.value.push({
-      key: ++stagedSeq,
-      caseId: form.caseId,
-      caseName: form.search,
-      customer: form.customer,
-      date: form.date,
-      quantity: form.quantity,
-      note: form.note.trim(),
-    })
-    // 保留客户/日期/备注便于连续录入，仅清空产品与数量
-    form.search = ''
-    form.caseId = ''
-    form.quantity = 1
+    for (const r of valid) {
+      staged.value.push({
+        key: ++stagedSeq,
+        caseId: r.caseId,
+        caseName: r.caseName,
+        direction: form.direction,
+        date: form.date,
+        quantity: r.quantity,
+        note: form.note.trim(),
+      })
+    }
+    showToast(`已加入 ${valid.length} 条到暂存单`, 'success')
   }
 
   async function removeStaged(key: number) {
@@ -147,28 +104,18 @@ export function useCaseStockWorkbench(mode: StockMode) {
     staged.value = []
   }
 
-  // ===== 批量提交 =====
   const submitting = ref(false)
   const lastFailures = ref<SubmitFailure[]>([])
-
-  function resetSelection() {
-    form.search = ''
-    form.caseId = ''
-    form.quantity = 1
-    currentStock.value = null
-  }
 
   async function submitBatch() {
     if (!staged.value.length) return
     submitting.value = true
     lastFailures.value = []
-    const direction = directionOf(mode)
     const items: CaseMovementPayload[] = staged.value.map((s) => ({
       case_id: Number(s.caseId),
-      direction,
+      direction: s.direction,
       quantity: s.quantity,
       movement_date: s.date,
-      customer: s.customer,
       note: s.note,
     }))
     try {
@@ -182,14 +129,13 @@ export function useCaseStockWorkbench(mode: StockMode) {
           error: f.error,
         }))
         staged.value = staged.value.filter((_, i) => failedIdx.has(i))
-        showToast(`${mode === 'stockin' ? '入库' : '出库'}部分失败：成功 ${items.length - failed.length} 条，失败 ${failed.length} 条`, 'error')
+        showToast(`部分失败：成功 ${items.length - failed.length} 条，失败 ${failed.length} 条`, 'error')
       } else {
         staged.value = []
-        resetSelection()
-        showToast(`${mode === 'stockin' ? '入库' : '出库'}成功，共 ${items.length} 条`, 'success')
+        showToast(`提交成功，共 ${items.length} 条`, 'success')
       }
     } catch (err: unknown) {
-      showToast(getErrorMessage(err, mode === 'stockin' ? '入库提交失败' : '出库提交失败'), 'error')
+      showToast(getErrorMessage(err, '提交失败'), 'error')
     } finally {
       submitting.value = false
       for (const key of CASE_QUERY_KEYS) {
@@ -198,7 +144,7 @@ export function useCaseStockWorkbench(mode: StockMode) {
     }
   }
 
-  // ===== Excel 批量导入 =====
+  // ===== Excel 批量导入（按表单当前方向） =====
   const showBatchUpload = ref(false)
   const excelFile = ref<File | null>(null)
   const importing = ref(false)
@@ -221,7 +167,7 @@ export function useCaseStockWorkbench(mode: StockMode) {
   async function downloadTemplate() {
     templateDownloading.value = true
     try {
-      await caseApi.downloadTemplate(mode === 'stockin' ? '皮套入库模板.xlsx' : '皮套出库模板.xlsx')
+      await caseApi.downloadTemplate(form.direction === 'in' ? '皮套入库模板.xlsx' : '皮套出库模板.xlsx')
     } catch {
       showToast('模板下载失败', 'error')
     } finally {
@@ -235,7 +181,7 @@ export function useCaseStockWorkbench(mode: StockMode) {
     try {
       const formData = new FormData()
       formData.append('file', excelFile.value)
-      const res = await (mode === 'stockin' ? caseApi.importStockins(formData) : caseApi.importStockouts(formData))
+      const res = await (form.direction === 'in' ? caseApi.importStockins(formData) : caseApi.importStockouts(formData))
       if (res.success) {
         showToast(`成功导入 ${res.imported ?? 0} 条记录`, 'success')
         excelFile.value = null
@@ -253,16 +199,10 @@ export function useCaseStockWorkbench(mode: StockMode) {
   }
 
   return {
-    mode,
     form,
-    currentStock,
-    availableStock,
-    quantityWarning,
-    canAdd,
-    onProductSelect,
     staged,
     stagedTotal,
-    addStaged,
+    addStagedBatch,
     removeStaged,
     updateStagedQuantity,
     clearStaged,

@@ -64,7 +64,7 @@
           <template v-for="node in inventoryList" :key="node.id">
             <tr :class="['ip-row', 'ip-parent', { 'ip-open': isOpen(node.id) }]" @click="toggle(node.id)">
               <td class="left">
-                <span class="ip-caret"><FontAwesomeIcon icon="caret-right" aria-hidden="true" /></span>
+                <span class="ip-caret"><FontAwesomeIcon icon="chevron-right" aria-hidden="true" /></span>
                 <strong class="ip-name">{{ node.name }}</strong>
                 <span v-if="node.children.length" class="ip-tag">主件 · {{ node.children.length }} 配件</span>
               </td>

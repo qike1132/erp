@@ -1,20 +1,16 @@
 import { ref, reactive } from 'vue'
-import type { Ref } from 'vue'
 import type { QueryClient } from '@tanstack/vue-query'
 import { caseApi } from '@/api'
 import type { CaseMovement } from '@/api/case'
 import { showToast } from '@/composables/useToast'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { useApiMutation } from '@/composables/useApiMutation'
-import { CASE_QUERY_KEYS, directionOf, type StockMode } from './useCaseStockWorkbench'
-
-export type { StockMode }
+import { CASE_QUERY_KEYS } from './useCaseStockWorkbench'
 
 /** 编辑弹窗表单状态 */
 export interface EditFormState {
   id: number
   no: string
-  customer: string
   date: string
   productName: string
   quantity: number
@@ -27,7 +23,6 @@ export interface EditFormState {
  * 删除入库会同步扣减库存、删除出库会同步回补库存，确认文案需明示。
  */
 export function useCaseRecordActions(
-  mode: Ref<StockMode>,
   confirmDialog: ReturnType<typeof useConfirmDialog>,
 ) {
   const invalidateAll = (client: QueryClient) => {
@@ -35,16 +30,14 @@ export function useCaseRecordActions(
       client.invalidateQueries({ queryKey: [key] })
     }
   }
-  const isStockin = () => directionOf(mode.value) === 'in'
 
   // ===== 编辑 =====
   const editDialogOpen = ref(false)
-  const editForm = reactive<EditFormState>({ id: 0, no: '', customer: '', date: '', productName: '', quantity: 1, note: '' })
+  const editForm = reactive<EditFormState>({ id: 0, no: '', date: '', productName: '', quantity: 1, note: '' })
 
   async function openEdit(row: CaseMovement) {
     editForm.id = row.id
     editForm.no = row.movement_no || ''
-    editForm.customer = row.customer || ''
     editForm.date = row.movement_date || ''
     editForm.productName = row.case_name || ''
     editForm.quantity = row.quantity || 1
@@ -55,7 +48,6 @@ export function useCaseRecordActions(
       const detail = (await caseApi.getMovement(row.id)) as CaseMovement
       if (!editDialogOpen.value || editForm.id !== row.id) return
       editForm.no = detail.movement_no || editForm.no
-      editForm.customer = detail.customer || ''
       editForm.date = detail.movement_date || ''
       editForm.productName = detail.case_name || editForm.productName
       editForm.quantity = detail.quantity || 1
@@ -66,7 +58,7 @@ export function useCaseRecordActions(
   }
 
   const saveEditMutation = useApiMutation(
-    (payload: { customer: string; quantity: number; note: string; movement_date: string }) =>
+    (payload: { quantity: number; note: string; movement_date: string }) =>
       caseApi.updateMovement(editForm.id, payload),
     {
       invalidate: invalidateAll,
@@ -81,7 +73,6 @@ export function useCaseRecordActions(
   async function saveEdit() {
     if (saveEditMutation.isSaving.value) return
     await saveEditMutation.run({
-      customer: editForm.customer,
       quantity: editForm.quantity,
       note: editForm.note,
       movement_date: editForm.date,
@@ -101,11 +92,12 @@ export function useCaseRecordActions(
   )
 
   async function handleDelete(row: CaseMovement) {
-    const effect = isStockin()
+    const isIn = row.direction === 'in'
+    const effect = isIn
       ? `库存将同步扣减 ${row.quantity} 件`
       : `库存将同步回补 ${row.quantity} 件`
     const ok = await confirmDialog.confirm(
-      `确定删除这条${isStockin() ? '入库' : '出库'}记录吗？`,
+      `确定删除这条${isIn ? '入库' : '出库'}记录吗？`,
       effect,
       'danger',
     )

@@ -168,3 +168,13 @@ class CaseInventoryResponse(BaseModel):
     per_page: int = 50
     pages: int = 0
     stats: CaseInventoryStats | None = None
+
+
+# ===== 按产品取皮套树（主件 + 配件） =====
+class CaseForProductRequest(BaseModel):
+    product_id: int
+
+
+class CaseTreeResponse(BaseModel):
+    main: CaseItemOut
+    parts: list[CaseItemOut] = []

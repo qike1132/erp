@@ -2,8 +2,8 @@
   <div class="sc-card">
     <div class="sc-header">
       <div class="sc-title">
-        <FontAwesomeIcon icon="layer-group" :style="{ color: accent }" aria-hidden="true" />
-        {{ mode === 'stockin' ? '待入库清单' : '待出库清单' }}
+        <FontAwesomeIcon icon="layer-group" style="color: var(--color-primary-500)" aria-hidden="true" />
+        暂存单
       </div>
       <span class="sc-count">
         {{ staged.length ? `${staged.length} 条 / 共 ${stagedTotal} 件` : '空' }}
@@ -12,21 +12,22 @@
 
     <div class="sc-list">
       <div v-if="!staged.length" class="sc-empty">
-        <FontAwesomeIcon :icon="mode === 'stockin' ? 'box-open' : 'shipping-fast'" aria-hidden="true" />
-        <p>{{ mode === 'stockin' ? '左侧填写信息后点击「加入暂存单」' : '左侧填写信息后点击「加入暂存单」' }}</p>
+        <FontAwesomeIcon icon="box-open" aria-hidden="true" />
+        <p>左侧填写信息后点击「加入暂存单」</p>
       </div>
       <div
         v-for="item in staged"
         :key="item.key"
-        :class="['sc-item', mode === 'stockin' ? 'sc-item-in' : 'sc-item-out']"
+        :class="['sc-item', item.direction === 'in' ? 'sc-item-in' : 'sc-item-out']"
       >
         <div class="sc-item-main">
           <div class="sc-item-name">
-            <FontAwesomeIcon icon="cubes" :style="{ color: accent }" aria-hidden="true" />
+            <span :class="['sc-dir', item.direction === 'in' ? 'sc-dir-in' : 'sc-dir-out']">
+              {{ item.direction === 'in' ? '入库' : '出库' }}
+            </span>
             {{ item.caseName }}
           </div>
           <div class="sc-item-meta">
-            <span><FontAwesomeIcon icon="user" aria-hidden="true" /> {{ item.customer }}</span>
             <span><FontAwesomeIcon icon="calendar-alt" aria-hidden="true" /> {{ item.date }}</span>
             <span v-if="item.note" class="sc-item-note"><FontAwesomeIcon icon="note-sticky" aria-hidden="true" /> {{ item.note }}</span>
           </div>
@@ -73,13 +74,13 @@
         <FontAwesomeIcon icon="times" style="margin-right: 4px" aria-hidden="true" />清空
       </button>
       <button
-        :class="['sc-btn sc-btn-submit', mode === 'stockin' ? 'sc-submit-in' : 'sc-submit-out']"
+        class="sc-btn sc-btn-submit"
         :disabled="!staged.length || submitting"
         aria-label="提交"
         @click="emit('submit')"
       >
         <UiLoadingIcon :loading="submitting" icon="paper-plane" style="margin-right: 6px" />
-        {{ submitting ? '提交中…' : mode === 'stockin' ? '提交入库' : '提交出库' }}
+        {{ submitting ? '提交中…' : `提交（${staged.length} 条）` }}
       </button>
     </div>
   </div>
@@ -87,14 +88,12 @@
 
 <script setup lang="ts">
 /**
- * StagedCart — 暂存单：行内改数量、移除、清空、批量提交与失败明细展示。
+ * StagedCart — 暂存单：入库/出库混存（每条带方向徽标）、行内改数量、移除、清空、批量提交。
  */
-import { computed } from 'vue'
 import UiLoadingIcon from '@/components/ui/UiLoadingIcon.vue'
-import type { StagedStockItem, StockMode, SubmitFailure } from '../composables/useCaseStockWorkbench'
+import type { StagedStockItem, SubmitFailure } from '../composables/useCaseStockWorkbench'
 
-const props = defineProps<{
-  mode: StockMode
+defineProps<{
   staged: StagedStockItem[]
   stagedTotal: number
   submitting: boolean
@@ -107,8 +106,6 @@ const emit = defineEmits<{
   clear: []
   submit: []
 }>()
-
-const accent = computed(() => (props.mode === 'stockin' ? 'var(--color-primary-500)' : 'var(--color-danger-500)'))
 </script>
 
 <style scoped>
@@ -184,6 +181,9 @@ const accent = computed(() => (props.mode === 'stockin' ? 'var(--color-primary-5
   gap: 8px;
   flex-shrink: 0;
 }
+.sc-dir { display: inline-block; padding: 1px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; margin-right: 6px; }
+.sc-dir-in { background: var(--color-success-50); color: var(--color-success-600); }
+.sc-dir-out { background: var(--color-danger-50); color: var(--color-danger-600); }
 
 .sc-qty-editor { display: flex; align-items: stretch; }
 .sc-qty-btn {
@@ -274,8 +274,7 @@ const accent = computed(() => (props.mode === 'stockin' ? 'var(--color-primary-5
 .sc-btn-submit {
   flex: 1;
   color: white;
+  background: linear-gradient(135deg, var(--color-primary-500), var(--color-primary-700));
 }
-.sc-submit-in { background: linear-gradient(135deg, var(--color-primary-500), var(--color-primary-700)); }
-.sc-submit-out { background: linear-gradient(135deg, var(--color-danger-500), var(--color-danger-700)); }
 .sc-btn-submit:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15); }
 </style>

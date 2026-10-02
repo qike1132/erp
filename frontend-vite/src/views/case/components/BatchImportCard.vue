@@ -2,7 +2,7 @@
   <div class="bi-card">
     <div class="bi-header" role="button" tabindex="0" :aria-expanded="open" aria-label="批量导入" @click="open = !open" @keydown.enter.prevent="open = !open">
       <div class="bi-title">
-        <FontAwesomeIcon :icon="mode === 'stockin' ? 'file-import' : 'file-export'" :style="{ color: accent }" aria-hidden="true" />
+        <FontAwesomeIcon :icon="direction === 'in' ? 'file-import' : 'file-export'" :style="{ color: accent }" aria-hidden="true" />
         Excel 批量导入
       </div>
       <FontAwesomeIcon icon="chevron-down" :class="['bi-arrow', { expanded: open }]" aria-hidden="true" />
@@ -31,10 +31,10 @@
 import { computed } from 'vue'
 import UiUpload from '@/components/ui/UiUpload.vue'
 import UiLoadingIcon from '@/components/ui/UiLoadingIcon.vue'
-import type { StockMode } from '../composables/useCaseStockWorkbench'
+import type { Direction } from '../composables/useCaseStockWorkbench'
 
 const props = defineProps<{
-  mode: StockMode
+  direction: Direction
   excelFile: File | null
   importing: boolean
   templateDownloading: boolean
@@ -48,7 +48,7 @@ const emit = defineEmits<{
   import: []
 }>()
 
-const accent = computed(() => (props.mode === 'stockin' ? 'var(--color-primary-500)' : 'var(--color-danger-500)'))
+const accent = computed(() => (props.direction === 'in' ? 'var(--color-primary-500)' : 'var(--color-danger-500)'))
 </script>
 
 <style scoped>

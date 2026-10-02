@@ -37,7 +37,6 @@
           {{ row.direction === 'in' ? '+' : '-' }}{{ row.quantity }}
         </strong>
       </template>
-      <template #column-body-customer="{ row }">{{ row.customer || '-' }}</template>
       <template #column-body-movement_date="{ row }"><small class="ild-date">{{ row.movement_date }}</small></template>
       <template #column-body-note="{ row }"><small>{{ row.note || '-' }}</small></template>
     </UiDataTable>

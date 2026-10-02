@@ -20,6 +20,7 @@ from fastapi_app.schemas.case import (
     BatchCaseMovementRequest,
     CaseActionResponse,
     CaseBatchMovementResponse,
+    CaseForProductRequest,
     CaseInventoryResponse,
     CaseItemCreate,
     CaseItemCreateResponse,
@@ -31,6 +32,7 @@ from fastapi_app.schemas.case import (
     CaseMovementOut,
     CaseMovementUpdate,
     CaseSearchItem,
+    CaseTreeResponse,
 )
 from fastapi_app.services import case_service
 from fastapi_app.services.case._export import inventory_to_xlsx, movements_to_xlsx
@@ -84,6 +86,16 @@ async def create_case_item(data: CaseItemCreate,
             product_id=data.product_id, parent_id=data.parent_id,
             qty_per_set=data.qty_per_set, initial_stock=data.initial_stock,
         )
+    return result
+
+
+@router.post('/for-product', response_model=CaseTreeResponse)
+async def case_for_product(data: CaseForProductRequest,
+                           user: User = Depends(require_permission('case_manage')),
+                           db: AsyncSession = Depends(get_async_db)) -> dict:
+    """取某产品的皮套主件（不存在则以产品信息自动创建），返回主件 + 其配件清单。"""
+    async with db_transaction(db):
+        result = await case_service.get_or_create_case_tree_for_product(db, data.product_id)
     return result
 
 

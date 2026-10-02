@@ -2,8 +2,8 @@
   <div class="srp-section">
     <div class="srp-header">
       <div class="srp-title">
-        <FontAwesomeIcon :icon="mode === 'stockin' ? 'truck-loading' : 'shipping-fast'" :style="{ color: mode === 'stockin' ? 'var(--color-primary-500)' : 'var(--color-danger-500)' }" aria-hidden="true" />
-        {{ mode === 'stockin' ? '入库记录' : '出库记录' }}
+        <FontAwesomeIcon icon="arrows-rotate" style="color: var(--color-primary-500)" aria-hidden="true" />
+        出入库记录
         <small v-if="total" class="srp-total">共 {{ total }} 条</small>
       </div>
       <div class="srp-actions">
@@ -21,8 +21,12 @@
 
     <div v-if="showFilter" class="srp-filter">
       <div class="srp-filter-field">
-        <label class="srp-label">客户</label>
-        <UiSelect v-model="filters.customer" placeholder="全部" :options="customerOptions" style="width: 160px" />
+        <label class="srp-label">方向</label>
+        <div class="srp-seg">
+          <button type="button" :class="{ active: filters.direction === '' }" @click="filters.direction = ''">全部</button>
+          <button type="button" :class="{ active: filters.direction === 'in' }" @click="filters.direction = 'in'">入库</button>
+          <button type="button" :class="{ active: filters.direction === 'out' }" @click="filters.direction = 'out'">出库</button>
+        </div>
       </div>
       <div class="srp-filter-field">
         <label class="srp-label">开始日期</label>
@@ -54,13 +58,20 @@
       <template #empty>
         <div class="srp-empty">
           <FontAwesomeIcon icon="inbox" aria-hidden="true" />
-          <span>{{ mode === 'stockin' ? '暂无入库记录' : '暂无出库记录' }}</span>
+          <span>暂无出入库记录</span>
         </div>
+      </template>
+      <template #column-body-direction="{ row }">
+        <span :class="['srp-dir', row.direction === 'in' ? 'srp-dir-in' : 'srp-dir-out']">
+          {{ row.direction === 'in' ? '入库' : '出库' }}
+        </span>
       </template>
       <template #column-body-case_name="{ row }"><span class="srp-name">{{ row.case_name }}</span></template>
       <template #column-body-case_barcode="{ row }"><small class="srp-barcode">{{ row.case_barcode || '-' }}</small></template>
       <template #column-body-quantity="{ row }">
-        <strong :style="{ color: mode === 'stockout' ? 'var(--color-danger-500)' : 'var(--color-success-600)' }">{{ row.quantity }}</strong>
+        <strong :style="{ color: row.direction === 'out' ? 'var(--color-danger-500)' : 'var(--color-success-600)' }">
+          {{ row.direction === 'in' ? '+' : '-' }}{{ row.quantity }}
+        </strong>
       </template>
       <template #column-body-note="{ row }"><small class="srp-note" :title="row.note">{{ row.note || '-' }}</small></template>
       <template #column-body-actions="{ row }">
@@ -73,19 +84,14 @@
 
 <script setup lang="ts">
 /**
- * StockRecordsPanel — 入库/出库流水列表（筛选 + 服务端分页 + 行操作入口 + 导出）。
- * 数据由 useCaseStockRecords(mode) 内部持有；编辑/删除动作上抛给工作台处理。
+ * StockRecordsPanel — 出入库流水列表（入库出库混排，带方向列/方向筛选 + 服务端分页）。
  */
 import UiDataTable from '@/components/ui/UiDataTable.vue'
-import UiSelect from '@/components/ui/UiSelect.vue'
 import UiDatePicker from '@/components/ui/UiDatePicker.vue'
 import { useCaseStockRecords } from '../composables/useCaseStockRecords'
-import type { CaseMovement, CustomerOption } from '@/api/case'
-import type { StockMode } from '../composables/useCaseStockWorkbench'
+import type { CaseMovement } from '@/api/case'
 
-const props = defineProps<{
-  mode: StockMode
-  customerOptions: CustomerOption[]
+defineProps<{
   /** 删除请求进行中的记录 ID（禁用对应删除按钮） */
   actionId?: number
 }>()
@@ -109,7 +115,7 @@ const {
   onPageChange,
   search,
   resetFilters,
-} = useCaseStockRecords(props.mode)
+} = useCaseStockRecords()
 </script>
 
 <style scoped>
@@ -176,7 +182,33 @@ const {
   color: var(--color-text-secondary);
   margin-bottom: 6px;
 }
+.srp-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 34px;
+  padding: 2px;
+  background: white;
+  border: 1px solid var(--color-border-light, #e2e8f0);
+  border-radius: 9px;
+}
+.srp-seg > button {
+  height: 100%;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.srp-seg > button.active { background: var(--color-primary-50); color: var(--color-primary-700); }
 .srp-filter-actions { display: flex; gap: 8px; padding-bottom: 2px; }
+
+.srp-dir { padding: 2px 10px; border-radius: 16px; font-size: 11px; font-weight: 600; }
+.srp-dir-in { background: var(--color-success-50); color: var(--color-success-600); }
+.srp-dir-out { background: var(--color-danger-50); color: var(--color-danger-600); }
 
 .srp-name { font-weight: 600; color: var(--color-text); }
 .srp-barcode { color: var(--color-text-muted); }

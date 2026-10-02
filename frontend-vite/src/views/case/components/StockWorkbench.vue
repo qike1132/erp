@@ -4,20 +4,11 @@
     <div class="sw-top">
       <StockEntryCard
         v-model:form="form"
-        :mode="mode"
         :staged-count="staged.length"
-        :customer-options="customerOptions"
-        :can-add="canAdd"
-        :quantity-warning="quantityWarning"
-        :available-stock="availableStock"
-        :staged-qty-selected="stagedQtySelected"
-        :search-fn="searchCaseProducts"
-        @select="onProductSelect"
-        @add="addStaged"
+        @add="addStagedBatch"
       />
       <div class="sw-side">
         <StagedCart
-          :mode="mode"
           :staged="staged"
           :staged-total="stagedTotal"
           :submitting="submitting"
@@ -29,7 +20,7 @@
         />
         <BatchImportCard
           v-model:open="showBatchUpload"
-          :mode="mode"
+          :direction="form.direction"
           :excel-file="excelFile"
           :importing="importing"
           :template-downloading="templateDownloading"
@@ -40,10 +31,8 @@
       </div>
     </div>
 
-    <!-- 记录列表 -->
+    <!-- 记录列表（入库出库混排） -->
     <StockRecordsPanel
-      :mode="mode"
-      :customer-options="customerOptions"
       :action-id="deletingId"
       @edit="openEdit"
       @delete="handleDelete"
@@ -54,8 +43,6 @@
     <EditRecordDialog
       v-model:open="editDialogOpen"
       v-model:form="editForm"
-      :mode="mode"
-      :customer-options="customerOptions"
       :saving="saving"
       @save="saveEdit"
     />
@@ -74,9 +61,8 @@
 
 <script setup lang="ts">
 /**
- * StockWorkbench — 皮套入库/出库工作台（每个方向独立实例）。
- * 组合：useCaseOptions（客户/产品搜索）+ useCaseStockWorkbench（录入/暂存/提交/导入）
- *      + useCaseRecordActions（流水编辑/删除）。
+ * StockWorkbench — 皮套出入库工作台（入库/出库合一）。
+ * 录入：选产品 → 展开皮套主件/配件 → 勾选批量加入暂存单。
  */
 import StockEntryCard from './StockEntryCard.vue'
 import StagedCart from './StagedCart.vue'
@@ -84,29 +70,16 @@ import BatchImportCard from './BatchImportCard.vue'
 import StockRecordsPanel from './StockRecordsPanel.vue'
 import EditRecordDialog from './EditRecordDialog.vue'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
-import { computed, toRef } from 'vue'
 import { caseApi } from '@/api'
-import { useCaseOptions } from '../composables/useCaseOptions'
-import { directionOf, useCaseStockWorkbench, type StockMode } from '../composables/useCaseStockWorkbench'
+import { useCaseStockWorkbench } from '../composables/useCaseStockWorkbench'
 import { useCaseRecordActions } from '../composables/useCaseRecordActions'
 import type { CaseMovement } from '@/api/case'
 
-const props = defineProps<{
-  /** 工作台方向：入库 / 出库（实例级固定） */
-  mode: StockMode
-}>()
-
-const { customerOptions, searchCaseProducts } = useCaseOptions()
-
 const {
   form,
-  availableStock,
-  quantityWarning,
-  canAdd,
-  onProductSelect,
   staged,
   stagedTotal,
-  addStaged,
+  addStagedBatch,
   removeStaged,
   updateStagedQuantity,
   clearStaged,
@@ -121,16 +94,9 @@ const {
   downloadTemplate,
   importExcel,
   confirmDialog,
-} = useCaseStockWorkbench(props.mode)
+} = useCaseStockWorkbench()
 
-/** 当前选中 SKU 在本单已暂存数量（录入卡提示用） */
-const stagedQtySelected = computed(() =>
-  staged.value
-    .filter((s) => s.caseId === form.caseId)
-    .reduce((sum, s) => sum + s.quantity, 0),
-)
-
-const recordActions = useCaseRecordActions(toRef(props, 'mode'), confirmDialog)
+const recordActions = useCaseRecordActions(confirmDialog)
 const { editDialogOpen, editForm, saving, saveEdit, deletingId } = recordActions
 
 function openEdit(row: CaseMovement) {
@@ -140,7 +106,7 @@ function handleDelete(row: CaseMovement) {
   void recordActions.handleDelete(row)
 }
 function exportRecords() {
-  void caseApi.exportXlsx({ scope: 'movements', direction: directionOf(props.mode) })
+  void caseApi.exportXlsx({ scope: 'movements' })
 }
 </script>
 

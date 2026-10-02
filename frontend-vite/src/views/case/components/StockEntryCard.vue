@@ -2,85 +2,84 @@
   <div class="sec-card">
     <div class="sec-header">
       <div class="sec-title">
-        <FontAwesomeIcon :icon="mode === 'stockin' ? 'truck-loading' : 'shipping-fast'" :style="{ color: accent }" aria-hidden="true" />
-        {{ mode === 'stockin' ? '入库信息' : '出库信息' }}
+        <FontAwesomeIcon icon="cubes" :style="{ color: accent }" aria-hidden="true" />
+        录入出入库
       </div>
-      <span :class="['sec-badge', mode === 'stockin' ? 'sec-badge-in' : 'sec-badge-out']">
+      <span :class="['sec-badge', form.direction === 'in' ? 'sec-badge-in' : 'sec-badge-out']">
         暂存 {{ stagedCount }} 条
       </span>
     </div>
 
     <form class="sec-form" @submit.prevent>
-      <div class="sec-row">
-        <div class="sec-field">
-          <label class="sec-label">客户（选填）</label>
-          <UiSelect v-model="form.customer" placeholder="可不选" :options="customerOptions" />
+      <div class="sec-field">
+        <label class="sec-label">方向</label>
+        <div class="sec-dir">
+          <button type="button" :class="['sec-dir-btn', { active: form.direction === 'in' }]" @click="form.direction = 'in'">
+            <FontAwesomeIcon icon="truck-loading" aria-hidden="true" />入库
+          </button>
+          <button type="button" :class="['sec-dir-btn', 'sec-dir-out', { active: form.direction === 'out' }]" @click="form.direction = 'out'">
+            <FontAwesomeIcon icon="shipping-fast" aria-hidden="true" />出库
+          </button>
         </div>
-        <div class="sec-field">
-          <label class="sec-label">{{ mode === 'stockin' ? '入库日期' : '出库日期' }}</label>
-          <UiDatePicker v-model="form.date" style="width: 100%" />
-        </div>
-      </div>
-
-      <div class="sec-row" style="grid-template-columns: 2fr 1fr">
-        <div class="sec-field">
-          <label class="sec-label">皮套 / 产品</label>
-          <UiAutocomplete
-            v-model="form.search"
-            :search-fn="searchFn"
-            placeholder="输入皮套名称或69码搜索"
-            suppress-after-select
-            @select="(p: CaseSearchItem) => emit('select', p)"
-          >
-            <template #option="{ item }">
-              <span class="sec-option-name">{{ item.name }}</span>
-              <span v-if="item.parent_id" class="sec-option-part">配件</span>
-              <span v-if="item.barcode" class="sec-option-barcode">{{ item.barcode }}</span>
-              <span :class="['sec-option-stock', item.current_stock <= 0 && 'sec-option-stock-zero']">库存 {{ item.current_stock ?? 0 }}</span>
-            </template>
-          </UiAutocomplete>
-          <small v-if="mode === 'stockout' && form.caseId" class="sec-stock-hint">
-            当前库存 <strong>{{ availableStock ?? '-' }}</strong>
-            <template v-if="stagedQtySelected">（本单已暂存 {{ stagedQtySelected }}）</template>
-          </small>
-        </div>
-        <div class="sec-field">
-          <label class="sec-label">{{ mode === 'stockin' ? '入库数量' : '出库数量' }}</label>
-          <div class="sec-qty-group">
-            <button type="button" class="sec-qty-btn" aria-label="减少数量" :disabled="form.quantity <= 1" @click="form.quantity = Math.max(1, form.quantity - 1)">
-              <FontAwesomeIcon icon="minus" />
-            </button>
-            <input
-              v-model.number="form.quantity"
-              type="number"
-              class="sec-qty-input"
-              min="1"
-              step="1"
-              :aria-label="mode === 'stockin' ? '入库数量' : '出库数量'"
-              @keydown.enter.prevent="emit('add')"
-            />
-            <button type="button" class="sec-qty-btn" aria-label="增加数量" @click="form.quantity = form.quantity + 1">
-              <FontAwesomeIcon icon="plus" />
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div v-if="quantityWarning" class="sec-warning" role="alert">
-        <FontAwesomeIcon icon="exclamation-triangle" aria-hidden="true" />
-        {{ quantityWarning }}
       </div>
 
       <div class="sec-field">
-        <label class="sec-label">备注（选填）</label>
-        <textarea v-model="form.note" class="sec-textarea" rows="2" :placeholder="mode === 'stockin' ? '例如：首批入库' : '例如：客户提货'" @keydown.enter.exact.prevent="emit('add')" />
+        <label class="sec-label">产品</label>
+        <UiAutocomplete
+          v-model="productQuery"
+          :search-fn="searchProducts"
+          placeholder="输入产品名称或69码搜索"
+          suppress-after-select
+          @select="(p: Product) => onSelectProduct(p)"
+        >
+          <template #option="{ item }">
+            <span class="sec-option-name">{{ item.name }}</span>
+            <span v-if="item.barcode" class="sec-option-barcode">{{ item.barcode }}</span>
+          </template>
+        </UiAutocomplete>
+      </div>
+
+      <div v-if="loadingTree" class="sec-parts-loading"><UiLoadingIcon :loading="true" icon="spinner" /> 载入皮套…</div>
+
+      <div v-else-if="parts.length" class="sec-parts">
+        <div class="sec-parts-head">
+          <span><b>{{ selectedName }}</b> · 皮套 {{ parts.length }} 项</span>
+          <span class="sec-parts-hint">勾选要录的项并填数量</span>
+        </div>
+        <div
+          v-for="row in parts"
+          :key="row.caseId"
+          :class="['sec-part-row', { 'sec-part-invalid': isInvalid(row) }]"
+        >
+          <input v-model="row.checked" type="checkbox" class="sec-part-check" :aria-label="`选择 ${row.name}`" />
+          <span class="sec-part-name">{{ row.name }}</span>
+          <span v-if="row.isPart" class="sec-part-tag">配件</span>
+          <span class="sec-part-stock" :class="{ 'sec-part-stock-zero': row.stock <= 0 }">库存 {{ row.stock }}</span>
+          <input v-model.number="row.qty" type="number" min="1" step="1" class="sec-part-qty" :aria-label="`${row.name} 数量`" @keydown.enter.prevent="emitAdd" />
+        </div>
+        <div v-if="outWarning" class="sec-warning" role="alert">
+          <FontAwesomeIcon icon="exclamation-triangle" aria-hidden="true" />{{ outWarning }}
+        </div>
+      </div>
+
+      <div v-else-if="selectedName" class="sec-parts-empty">该产品暂无皮套，提交时会自动建立主件</div>
+
+      <div class="sec-row">
+        <div class="sec-field">
+          <label class="sec-label">日期</label>
+          <UiDatePicker v-model="form.date" style="width: 100%" />
+        </div>
+        <div class="sec-field">
+          <label class="sec-label">备注（选填）</label>
+          <input v-model="form.note" class="sec-text-input" placeholder="例如：批次 / 来源" aria-label="备注" />
+        </div>
       </div>
 
       <button
         type="button"
-        :class="['sec-add-btn', canAdd ? (mode === 'stockin' ? 'sec-add-in' : 'sec-add-out') : 'sec-add-disabled']"
+        :class="['sec-add-btn', canAdd ? (form.direction === 'in' ? 'sec-add-in' : 'sec-add-out') : 'sec-add-disabled']"
         :disabled="!canAdd"
-        @click="emit('add')"
+        @click="emitAdd"
       >
         <FontAwesomeIcon icon="plus-circle" style="margin-right: 4px" aria-hidden="true" />
         加入暂存单
@@ -91,37 +90,88 @@
 
 <script setup lang="ts">
 /**
- * StockEntryCard — 入库/出库录入表单卡。
- * 纯展示 + 表单绑定：状态由 useCaseStockWorkbench 持有，经 defineModel 双向绑定。
+ * StockEntryCard — 出入库录入卡：选产品 → 展开其皮套（主件 + 配件）→ 勾选并填数量 → 批量加入暂存单。
  */
-import { computed } from 'vue'
-import UiSelect from '@/components/ui/UiSelect.vue'
+import { ref, computed } from 'vue'
 import UiDatePicker from '@/components/ui/UiDatePicker.vue'
 import UiAutocomplete from '@/components/ui/UiAutocomplete.vue'
-import type { CaseSearchItem, CustomerOption } from '@/api/case'
-import type { CaseStockFormState, StockMode } from '../composables/useCaseStockWorkbench'
+import UiLoadingIcon from '@/components/ui/UiLoadingIcon.vue'
+import { useCaseOptions } from '../composables/useCaseOptions'
+import type { CaseStockFormState, StagedRowInput } from '../composables/useCaseStockWorkbench'
+import type { Product } from '@/types'
 
-const props = defineProps<{
-  mode: StockMode
+interface EntryRow {
+  caseId: string
+  name: string
+  isPart: boolean
+  stock: number
+  checked: boolean
+  qty: number
+}
+
+defineProps<{
   stagedCount: number
-  customerOptions: CustomerOption[]
-  canAdd: boolean
-  quantityWarning: string
-  /** 出库时选 SKU 的可用库存（已扣本单暂存）；入库为 null */
-  availableStock: number | null
-  /** 选中的 SKU 在本单已暂存的数量（提示用） */
-  stagedQtySelected: number
-  searchFn: (query: string) => Promise<CaseSearchItem[]>
 }>()
 
 const form = defineModel<CaseStockFormState>('form', { required: true })
 
 const emit = defineEmits<{
-  select: [item: CaseSearchItem]
-  add: []
+  add: [rows: StagedRowInput[]]
 }>()
 
-const accent = computed(() => (props.mode === 'stockin' ? 'var(--color-primary-500)' : 'var(--color-danger-500)'))
+const { searchProducts, fetchCaseTree } = useCaseOptions()
+
+const productQuery = ref('')
+const selectedName = ref('')
+const parts = ref<EntryRow[]>([])
+const loadingTree = ref(false)
+
+const accent = computed(() => (form.value.direction === 'in' ? 'var(--color-primary-500)' : 'var(--color-danger-500)'))
+
+async function onSelectProduct(p: Product) {
+  selectedName.value = p.name
+  productQuery.value = p.name
+  parts.value = []
+  loadingTree.value = true
+  try {
+    const tree = await fetchCaseTree(p.id)
+    if (!tree) return
+    const rows: EntryRow[] = [
+      { caseId: String(tree.main.id), name: tree.main.name || p.name, isPart: false, stock: tree.main.current_stock, checked: true, qty: 1 },
+      ...tree.parts.map((pt) => ({ caseId: String(pt.id), name: pt.name, isPart: true, stock: pt.current_stock, checked: true, qty: 1 })),
+    ]
+    parts.value = rows
+  } finally {
+    loadingTree.value = false
+  }
+}
+
+function isInvalid(row: EntryRow): boolean {
+  return form.value.direction === 'out' && row.checked && row.qty > row.stock
+}
+
+const outWarning = computed(() => {
+  const bad = parts.value.filter((r) => isInvalid(r))
+  if (!bad.length) return ''
+  return `出库数量超过库存：${bad.map((r) => r.name).join('、')}（提交时后端会拒绝这些项）`
+})
+
+const checkedRows = computed(() => parts.value.filter((r) => r.checked && Number.isInteger(r.qty) && r.qty >= 1))
+
+const canAdd = computed(() => !!form.value.date && checkedRows.value.length > 0)
+
+function emitAdd() {
+  if (!canAdd.value) return
+  emit(
+    'add',
+    checkedRows.value.map((r) => ({ caseId: r.caseId, caseName: r.name, quantity: r.qty })),
+  )
+  // 加入后清空勾选与数量，便于继续录同一方向
+  for (const r of parts.value) {
+    r.checked = false
+    r.qty = 1
+  }
+}
 </script>
 
 <style scoped>
@@ -170,84 +220,101 @@ const accent = computed(() => (props.mode === 'stockin' ? 'var(--color-primary-5
   color: var(--color-text-secondary);
   margin-bottom: 6px;
 }
-.sec-option-name { margin-right: 6px; }
-.sec-option-part { color: var(--color-primary-700); font-size: 11px; margin-right: 6px; }
-.sec-option-barcode { color: var(--color-text-muted); font-size: 11px; margin-right: 6px; }
-.sec-option-stock { color: var(--color-primary-600); font-size: 11px; }
-.sec-option-stock-zero { color: var(--color-danger-500); }
-.sec-stock-hint {
-  display: block;
-  margin-top: 4px;
-  color: var(--color-text-secondary);
-  font-size: 12px;
-}
-.sec-qty-group {
-  display: flex;
-  align-items: stretch;
-}
-.sec-qty-btn {
-  width: 34px;
-  border: 1px solid var(--color-border-light, #e2e8f0);
-  background: var(--color-surface, #f8fafc);
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.2s ease;
-}
-.sec-qty-btn:first-child { border-radius: 10px 0 0 10px; }
-.sec-qty-btn:last-child { border-radius: 0 10px 10px 0; }
-.sec-qty-btn:hover:not(:disabled) { background: var(--color-primary-50); color: var(--color-primary-600); }
-.sec-qty-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.sec-qty-input {
+.sec-text-input {
   width: 100%;
-  min-width: 0;
-  text-align: center;
-  padding: 8px 4px;
+  height: 40px;
+  padding: 0 12px;
   border: 1px solid var(--color-border-light, #e2e8f0);
-  border-left: none;
-  border-right: none;
+  border-radius: 10px;
   font-size: 14px;
   color: var(--color-text);
   font-family: inherit;
   background: white;
   outline: none;
 }
-.sec-qty-input:focus { background: var(--color-primary-50, #f0f7ff); }
-.sec-qty-input::-webkit-outer-spin-button,
-.sec-qty-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-.sec-qty-input { appearance: textfield; -moz-appearance: textfield; }
+.sec-text-input:focus { border-color: var(--color-primary-400); box-shadow: 0 0 0 3px rgba(91, 141, 239, 0.12); }
+
+.sec-dir { display: inline-flex; gap: 8px; width: 100%; }
+.sec-dir-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 38px;
+  border: 1px solid var(--color-border-light, #e2e8f0);
+  border-radius: 10px;
+  background: white;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.sec-dir-btn:hover { border-color: var(--color-primary-300); color: var(--color-primary-600); }
+.sec-dir-btn.active { border-color: transparent; background: linear-gradient(135deg, var(--color-primary-500), var(--color-primary-700)); color: white; box-shadow: 0 4px 12px rgba(91, 141, 239, 0.3); }
+.sec-dir-btn.sec-dir-out.active { background: linear-gradient(135deg, var(--color-danger-500), var(--color-danger-700)); box-shadow: 0 4px 12px rgba(234, 84, 85, 0.3); }
+
+.sec-option-name { margin-right: 6px; }
+.sec-option-barcode { color: var(--color-text-muted); font-size: 11px; }
+
+.sec-parts {
+  border: 1px solid var(--color-border-light, #e2e8f0);
+  border-radius: 10px;
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+.sec-parts-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--color-surface, #f8fafc);
+  border-bottom: 1px solid var(--color-border-light, #f1f5f9);
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+.sec-parts-hint { color: var(--color-text-muted); }
+.sec-part-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-border-light, #f8fafc);
+}
+.sec-part-row:last-child { border-bottom: none; }
+.sec-part-row.sec-part-invalid { background: var(--color-danger-50); }
+.sec-part-check { width: 16px; height: 16px; flex-shrink: 0; cursor: pointer; }
+.sec-part-name { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; color: var(--color-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sec-part-tag { flex-shrink: 0; font-size: 11px; padding: 1px 7px; border-radius: 10px; background: var(--color-border-light); color: var(--color-text-secondary); }
+.sec-part-stock { flex-shrink: 0; font-size: 12px; color: var(--color-text-muted); }
+.sec-part-stock-zero { color: var(--color-danger-500); }
+.sec-part-qty {
+  width: 64px;
+  flex-shrink: 0;
+  height: 30px;
+  text-align: center;
+  border: 1px solid var(--color-border-light, #e2e8f0);
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--color-text);
+  outline: none;
+}
+.sec-part-qty:focus { border-color: var(--color-primary-400); }
+.sec-parts-loading { padding: 12px; color: var(--color-text-muted); font-size: 13px; display: flex; align-items: center; gap: 6px; }
+.sec-parts-empty { padding: 10px 12px; margin-bottom: 12px; border-radius: 9px; background: var(--color-surface, #f8fafc); color: var(--color-text-muted); font-size: 12px; }
 
 .sec-warning {
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 8px 12px;
-  margin-bottom: 12px;
-  border-radius: 9px;
-  background: var(--color-warning-50, #fff7e6);
-  color: var(--color-warning-600, #d48806);
+  border-top: 1px solid var(--color-danger-100);
+  background: var(--color-danger-50);
+  color: var(--color-danger-700);
   font-size: 12px;
   font-weight: 600;
-}
-.sec-textarea {
-  width: 100%;
-  padding: 8px 12px;
-  border: 2px solid var(--color-border-light, #e2e8f0);
-  border-radius: 10px;
-  font-size: 14px;
-  color: var(--color-text);
-  resize: vertical;
-  font-family: inherit;
-  background: white;
-  outline: none;
-  transition: border-color 0.3s ease, box-shadow 0.3s ease;
-}
-.sec-textarea:focus-visible { outline: 2px solid var(--color-primary-500); outline-offset: 2px; }
-.sec-textarea:focus {
-  border-color: var(--color-primary-400);
-  box-shadow: 0 0 0 4px rgba(0, 148, 191, 0.1);
 }
 
 .sec-add-btn {

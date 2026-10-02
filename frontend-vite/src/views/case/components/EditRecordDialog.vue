@@ -1,5 +1,5 @@
 <template>
-  <UiDialog v-model:open="openModel" :title="mode === 'stockin' ? '编辑入库记录' : '编辑出库记录'" max-width-class="max-w-[480px]">
+  <UiDialog v-model:open="openModel" title="编辑记录" max-width-class="max-w-[480px]">
     <div class="erd-form">
       <div class="erd-field">
         <label class="erd-label">单号</label>
@@ -9,21 +9,12 @@
         <label class="erd-label">产品名称</label>
         <input class="erd-input" :value="form.productName" disabled aria-label="产品名称" />
       </div>
-      <div class="erd-row">
-        <div class="erd-field">
-          <label class="erd-label">客户名称</label>
-          <UiSelect
-            v-model="form.customer"
-            :options="mode === 'stockout' ? [{ value: '', label: '无' }, ...customerOptions] : customerOptions"
-          />
-        </div>
-        <div class="erd-field">
-          <label class="erd-label">{{ mode === 'stockin' ? '入库日期' : '出库日期' }}</label>
-          <UiDatePicker v-model="form.date" style="width: 100%" />
-        </div>
+      <div class="erd-field">
+        <label class="erd-label">日期</label>
+        <UiDatePicker v-model="form.date" style="width: 100%" />
       </div>
       <div class="erd-field">
-        <label class="erd-label">{{ mode === 'stockin' ? '入库数量' : '出库数量' }}</label>
+        <label class="erd-label">数量</label>
         <input
           v-model.number="form.quantity"
           type="number"
@@ -31,10 +22,10 @@
           :class="{ 'erd-input-error': quantityError }"
           min="1"
           step="1"
-          :aria-label="mode === 'stockin' ? '入库数量' : '出库数量'"
+          aria-label="数量"
         />
         <small v-if="quantityError" class="erd-error">{{ quantityError }}</small>
-        <small v-else-if="mode === 'stockout'" class="erd-hint">数量调整会同步影响库存，库存不足时后端将拒绝保存</small>
+        <small v-else class="erd-hint">数量调整会同步影响库存，库存不足时后端将拒绝保存</small>
       </div>
       <div class="erd-field">
         <label class="erd-label">备注</label>
@@ -57,14 +48,10 @@
  */
 import { computed } from 'vue'
 import UiDialog from '@/components/ui/UiDialog.vue'
-import UiSelect from '@/components/ui/UiSelect.vue'
 import UiDatePicker from '@/components/ui/UiDatePicker.vue'
-import type { CustomerOption } from '@/api/case'
-import type { EditFormState, StockMode } from '../composables/useCaseRecordActions'
+import type { EditFormState } from '../composables/useCaseRecordActions'
 
 defineProps<{
-  mode: StockMode
-  customerOptions: CustomerOption[]
   saving: boolean
 }>()
 
