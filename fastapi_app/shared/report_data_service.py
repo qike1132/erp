@@ -115,6 +115,10 @@ def _get_order_logs(session, customer, product, status, start_date, end_date):
         # 模型层循环导入风险，收益不成比例，故此处作用域化忽略。
         selectinload(Order.order_stockouts),  # type: ignore[attr-defined]
     )
+    # 与屏幕口径对齐（report_service.get_order_logs 的 "(o.is_deleted = false OR
+    # o.is_deleted IS NULL)"）：软删订单不进导出，否则导出数字会大于页面显示值。
+    # 该列可空，用 IS NOT TRUE 同时覆盖 false 与 NULL。
+    query = query.where(Order.is_deleted.isnot(True))
     if customer:
         query = query.where(Order.customer.like(f'%{escape_like(customer)}%'))
     query = _apply_product_filter(query, product)
@@ -130,6 +134,8 @@ def _get_order_logs(session, customer, product, status, start_date, end_date):
         func.count(Order.id).filter(Order.status == ORDER_STATUS_PENDING_STOCK),
         func.count(Order.id).filter(Order.status == ORDER_STATUS_SHIPPED),
     ).join(Product, Order.product_id == Product.id)
+    # 与上方明细查询同口径：统计也排除软删订单，两者才对得上。
+    stats_query = stats_query.where(Order.is_deleted.isnot(True))
     if customer:
         stats_query = stats_query.where(Order.customer.like(f'%{escape_like(customer)}%'))
     stats_query = _apply_product_filter(stats_query, product)
@@ -230,9 +236,15 @@ def _get_stockin_logs(session, customer, product, start_date, end_date):
 
 
 def _get_stockout_logs(session, customer, product, start_date, end_date):
-    query = select(StockOut).join(Product).where(
+    # 左连 Order 以便按软删过滤（与屏幕口径对齐：report_service.py 的
+    # "(so.order_id IS NULL OR o2.is_deleted = false OR o2.is_deleted IS NULL)"）——
+    # 挂到已软删订单上的出货不进导出，否则导出数字大于页面。
+    query = select(StockOut).join(Product).outerjoin(
+        Order, StockOut.order_id == Order.id
+    ).where(
         (StockOut.quantity - StockOut.returned_quantity) > 0,
-        StockOut.stockin_id.is_(None)
+        StockOut.stockin_id.is_(None),
+        or_(StockOut.order_id.is_(None), Order.is_deleted.isnot(True)),
     ).options(
         selectinload(StockOut.product),
         selectinload(StockOut.order)
@@ -245,9 +257,12 @@ def _get_stockout_logs(session, customer, product, start_date, end_date):
     stats_query = select(
         func.count(StockOut.id),
         func.coalesce(func.sum(StockOut.quantity - StockOut.returned_quantity), 0),
-    ).join(Product, StockOut.product_id == Product.id).where(
+    ).join(Product, StockOut.product_id == Product.id).outerjoin(
+        Order, StockOut.order_id == Order.id
+    ).where(
         (StockOut.quantity - StockOut.returned_quantity) > 0,
-        StockOut.stockin_id.is_(None)
+        StockOut.stockin_id.is_(None),
+        or_(StockOut.order_id.is_(None), Order.is_deleted.isnot(True)),
     )
     if customer:
         stats_query = stats_query.where(StockOut.customer.like(f'%{escape_like(customer)}%'))
@@ -286,7 +301,13 @@ def _get_stockout_logs(session, customer, product, start_date, end_date):
 
 
 def _get_deduction_logs(session, customer, product, start_date, end_date):
-    query = select(StockOut).join(Product).where(StockOut.stockin_id.isnot(None)).options(
+    # 左连 Order 以便按软删过滤，与出货导出及屏幕口径一致。
+    query = select(StockOut).join(Product).outerjoin(
+        Order, StockOut.order_id == Order.id
+    ).where(
+        StockOut.stockin_id.isnot(None),
+        or_(StockOut.order_id.is_(None), Order.is_deleted.isnot(True)),
+    ).options(
         selectinload(StockOut.product),
         selectinload(StockOut.order)
     )
@@ -299,7 +320,12 @@ def _get_deduction_logs(session, customer, product, start_date, end_date):
         func.count(StockOut.id),
         func.coalesce(func.sum(StockOut.quantity - StockOut.returned_quantity), 0),
         func.count(func.distinct(StockOut.order_id)),
-    ).join(Product, StockOut.product_id == Product.id).where(StockOut.stockin_id.isnot(None))
+    ).join(Product, StockOut.product_id == Product.id).outerjoin(
+        Order, StockOut.order_id == Order.id
+    ).where(
+        StockOut.stockin_id.isnot(None),
+        or_(StockOut.order_id.is_(None), Order.is_deleted.isnot(True)),
+    )
     if customer:
         stats_query = stats_query.where(StockOut.customer.like(f'%{escape_like(customer)}%'))
     stats_query = _apply_product_filter(stats_query, product)

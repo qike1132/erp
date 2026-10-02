@@ -81,6 +81,17 @@ async def _increase_deduction(
     """
     from fastapi_app.services.numbering import generate_stockout_number
 
+    # 取锁顺序必须与批量创建路径一致（**Product → StockIn**），否则并发时死锁：
+    # order_batch_create 先 _lock_products 按全局升序锁 Product、再在
+    # process_order_deduction 锁 StockIn；本函数原先反过来（先 StockIn 后 Product），
+    # 两条路径命中同一产品/同一批备货时会互相等锁 → PostgreSQL 检出后回滚其一
+    # （表现为 500/409，无数据损坏）。先锁 Product 与对方对齐即消除这个环。
+    # P2-A2 类型收窄：order.product_id 列可空；None 时抛出的文案与 get_product_for_update 内部逐字一致
+    order_product_id = order.product_id
+    if order_product_id is None:
+        raise ValueError(f'产品ID {order_product_id} 不存在')
+    product = await get_product_for_update(db, order_product_id)
+
     stockins_result = await db.execute(
         select(StockIn)
         .where(StockIn.product_id == order.product_id, StockIn.customer == order.customer)
@@ -100,13 +111,6 @@ async def _increase_deduction(
         )
         # P2-A2 类型收窄：IN 过滤已保证 stockin_id 非 NULL，显式过滤 None 只影响类型（结果集不变）
         deducted_map = {row[0]: row[1] for row in deducted_rows.all() if row[0] is not None}
-
-    # 循环外一次性锁定产品（消除重复行锁）
-    # P2-A2 类型收窄：order.product_id 列可空；None 时抛出的文案与 get_product_for_update 内部逐字一致
-    order_product_id = order.product_id
-    if order_product_id is None:
-        raise ValueError(f'产品ID {order_product_id} 不存在')
-    product = await get_product_for_update(db, order_product_id)
 
     # 预检可用备货总量（P1-8）：不足时在写任何 StockOut/库存之前失败，
     # 失败路径不产生半成品记录（回滚边界由调用方 db_transaction 提供）

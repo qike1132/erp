@@ -229,6 +229,10 @@ async def import_orders_service(db: AsyncSession, file: ExcelUpload) -> BatchImp
         all_products = await get_all_products(db)
         product_map = {prod.name.lower().strip(): prod for prod in all_products}
         product_map.update({prod.barcode: prod for prod in all_products if prod.barcode})
+        # 客户必须在客户主数据中：customer 是无外键的名字快照，不校验会在库里留下
+        # 永远关联不到客户的孤儿单据（2026-08-10 曾因此产生 19 张孤儿订单）。
+        # core 路径的 _resolve_row_identity 一直有这道校验，下面两个单 Sheet 端点漏了。
+        customer_names = await _pre_load_customer_names(db)
         imported = 0
         skipped = 0
         errors = []
@@ -247,6 +251,11 @@ async def import_orders_service(db: AsyncSession, file: ExcelUpload) -> BatchImp
                         skipped += 1
                         continue
                     customer, product_id, qty = parsed
+                    # 客户主数据校验（与 core 的 _resolve_row_identity 同口径）
+                    if customer not in customer_names:
+                        errors.append(f'客户"{customer}"不存在于客户主数据，请先在客户管理中创建')
+                        skipped += 1
+                        continue
                     order_no = await generate_order_number(db)
                     order = Order(
                         order_no=order_no, customer=customer, order_date=datetime.now(),
@@ -475,6 +484,10 @@ async def import_stockins_service(db: AsyncSession, file: ExcelUpload) -> BatchI
         all_products = await get_all_products(db)
         product_map = {prod.name.lower().strip(): prod for prod in all_products}
         product_map.update({prod.barcode: prod for prod in all_products if prod.barcode})
+        # 客户必须在客户主数据中：customer 是无外键的名字快照，不校验会在库里留下
+        # 永远关联不到客户的孤儿单据（2026-08-10 曾因此产生 19 张孤儿订单）。
+        # core 路径的 _resolve_row_identity 一直有这道校验，下面两个单 Sheet 端点漏了。
+        customer_names = await _pre_load_customer_names(db)
         imported = 0
         skipped = 0
         errors = []
@@ -493,6 +506,11 @@ async def import_stockins_service(db: AsyncSession, file: ExcelUpload) -> BatchI
                         skipped += 1
                         continue
                     customer, product_id, qty = parsed
+                    # 客户主数据校验（与 core 的 _resolve_row_identity 同口径）
+                    if customer not in customer_names:
+                        errors.append(f'客户"{customer}"不存在于客户主数据，请先在客户管理中创建')
+                        skipped += 1
+                        continue
                     stockin_date = parse_date_value(stockin_date_val) or datetime.now(UTC)  # aware UTC：stockin_date 列为 timestamptz
                     stockin_no = await generate_stockin_number(db)
                     stockin = StockIn(
@@ -750,6 +768,7 @@ async def import_comprehensive_service(db: AsyncSession, file: ExcelUpload) -> C
 # （X 为任意原公开/私有函数名）。调用方无需修改导入路径。
 from fastapi_app.services.batch_import_core import (  # noqa: F401
     _import_data_generic,
+    _pre_load_customer_names,
     _pre_load_product_map,
     import_orders_from_data,
     import_products_from_data,

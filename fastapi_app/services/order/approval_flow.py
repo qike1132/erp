@@ -143,7 +143,15 @@ async def _submit_delete_approval(
     return {'success': True, 'message': '已提交删除审批请求，请等待管理员审批！', 'requires_approval': True}
 
 async def cancel_approval(db: AsyncSession, approval_id: int, current_user: User) -> None:
-    approval_request = await db.get(ApprovalRequest, approval_id)
+    # 必须带行锁取审批行：approve_request / reject_request 都经 _get_pending_approval
+    # 用 with_for_update() 锁住该行，唯独取消没有 —— 管理员「同意」与申请人「取消」并发时，
+    # cancel 会在 approve 提交后覆盖状态为 cancelled，而订单编辑已落库、订单已解锁、
+    # InventoryLog 已写入 → 用户以为取消成功，实际改动生效、审批台账与订单数据不一致。
+    # 取锁后重新校验 can_transition，保证与 approve 串行。
+    result = await db.execute(
+        select(ApprovalRequest).where(ApprovalRequest.id == approval_id).with_for_update()
+    )
+    approval_request = result.scalar_one_or_none()
     if not approval_request:
         raise ValueError('审批请求不存在')
 

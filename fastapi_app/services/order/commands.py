@@ -220,6 +220,13 @@ async def _update_order_directly(
 
     await db.flush()
 
+    # order.status 是 (抵扣量, 出货量, 数量) 的派生值（见 shared_models/order.py 的
+    # compute_status_from_stockouts），数量变了就必须重算 —— 否则订单 100→1000 后
+    # 状态仍停在「已备货」而非「部分备货」，状态列与状态筛选一并出错，直到下次
+    # 出库/退货/改抵扣事件才被纠正。本模块此前已导入 compute_order_status_from_db
+    # 却从未调用，即此处的遗漏。
+    order.status = await compute_order_status_from_db(db, order)
+
     # Task 3.2: 派发工厂通知（order_updated）
     # 仅 flush 不 commit，与 _update_order_directly 事务模型一致；
     # 简单实现：传 changed_items=None，让 dispatch 遍历 order.items（内部 await 查询）。

@@ -26,7 +26,7 @@ from fastapi_app.core.state_machine import (
 )
 from fastapi_app.core.validators import validate_not_empty, validate_quantity_range
 from fastapi_app.services.approval_log_service import create_approval_log as _create_approval_log
-from fastapi_app.services.order_utils import sync_single_item_quantity
+from fastapi_app.services.order_utils import compute_order_status_from_db, sync_single_item_quantity
 from fastapi_app.shared.stock_concurrency import assert_stock_available, get_product_for_update
 from fastapi_app.shared_models import (
     ApprovalLog,
@@ -352,6 +352,9 @@ async def _handle_edit_approval(db: AsyncSession, approval: ApprovalRequest, ord
     order.note = operation_data.get('note', order.note)
     order.is_locked = False
     order.locked_by_id = None
+    # 数量变了 → order.status 是 (抵扣量, 出货量, 数量) 的派生值，必须重算。
+    # 与 order/commands.py 的直改路径同源：两处原先都漏了这一步。
+    order.status = await compute_order_status_from_db(db, order)
 
 
 async def _handle_delete_approval(db: AsyncSession, approval: ApprovalRequest, order: Order) -> None:

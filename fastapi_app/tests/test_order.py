@@ -10,6 +10,19 @@ from fastapi_app.services import order_service
 from fastapi_app.services.order_service import PermissionDeniedError
 from fastapi_app.shared_models.approval import ApprovalRequest
 
+
+def _stub_approval_lookup(mock_db, approval):
+    """给 cancel_approval 的审批行查询打桩。
+
+    自 2026-10-02 起它改用 `select(...).with_for_update()` 取行（原先是 db.get），
+    以便与 approve_request / reject_request 用同一把行锁串行，消除
+    「管理员同意」与「申请人取消」并发时的状态覆盖。
+    """
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = approval
+    mock_db.execute = AsyncMock(return_value=result)
+
+
 # ==================== Schema 验证 ====================
 
 class TestOrderSchemas:
@@ -148,7 +161,7 @@ class TestOrderService:
             await order_service.delete_order(mock_db, order_id=999, current_user=user)
 
     async def test_cancel_approval_not_found(self, mock_db):
-        mock_db.get = AsyncMock(return_value=None)
+        _stub_approval_lookup(mock_db, None)
         user = MagicMock()
         with pytest.raises(ValueError, match="不存在"):
             await order_service.cancel_approval(mock_db, 999, user)
@@ -157,7 +170,7 @@ class TestOrderService:
         approval = MagicMock()
         approval.requester_id = 1
         approval.status = ApprovalRequest.STATUS_APPROVED
-        mock_db.get = AsyncMock(return_value=approval)
+        _stub_approval_lookup(mock_db, approval)
         user = MagicMock()
         user.id = 1
         user.is_super = False
@@ -168,7 +181,7 @@ class TestOrderService:
         approval = MagicMock()
         approval.requester_id = 2
         approval.status = ApprovalRequest.STATUS_PENDING
-        mock_db.get = AsyncMock(return_value=approval)
+        _stub_approval_lookup(mock_db, approval)
         user = MagicMock()
         user.id = 1
         user.is_super = False
@@ -190,7 +203,8 @@ class TestOrderService:
         user.username = "test"
         user.is_super = False
 
-        mock_db.get = AsyncMock(side_effect=[approval, order])
+        _stub_approval_lookup(mock_db, approval)
+        mock_db.get = AsyncMock(return_value=order)
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
 
@@ -339,7 +353,8 @@ class TestOrderEndpoints:
         order_obj.is_locked = True
         order_obj.is_deleted = False
 
-        mock_db.get = AsyncMock(side_effect=[approval, order_obj])
+        _stub_approval_lookup(mock_db, approval)
+        mock_db.get = AsyncMock(return_value=order_obj)
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
 

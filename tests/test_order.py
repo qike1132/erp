@@ -420,7 +420,11 @@ class TestCancelApproval:
     @pytest.mark.asyncio
     async def test_cancel_approval_not_found(self, mock_async_db, mock_user):
         """取消不存在的审批"""
-        mock_async_db.get = AsyncMock(return_value=None)
+        # cancel_approval 自 2026-10-02 起用 select(...).with_for_update() 取审批行（原 db.get），
+        # 与 approve/reject 同锁串行；mock 按新调用形状打桩。
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = None
+        mock_async_db.execute = AsyncMock(return_value=result)
 
         with pytest.raises(ValueError, match='审批请求不存在'):
             await cancel_approval(mock_async_db, 999, mock_user)
@@ -434,7 +438,9 @@ class TestCancelApproval:
         approval.id = 1
         approval.status = 'approved'
         approval.requester_id = 1
-        mock_async_db.get = AsyncMock(return_value=approval)
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = approval
+        mock_async_db.execute = AsyncMock(return_value=result)
         mock_can_transition.return_value = False
 
         with pytest.raises(ValueError, match='无法取消'):
