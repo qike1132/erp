@@ -71,9 +71,7 @@ def count_all_data(db: Session) -> dict:
 
     # 数据查询 - 皮套管理
     counts['case'] = db.execute(text('SELECT COUNT(*) FROM "case"')).scalar()
-    counts['case_stock_in'] = db.execute(text("SELECT COUNT(*) FROM case_stock_in")).scalar()
-    counts['case_stock_out'] = db.execute(text("SELECT COUNT(*) FROM case_stock_out")).scalar()
-    counts['case_inventory_log'] = db.execute(text("SELECT COUNT(*) FROM case_inventory_log")).scalar()
+    counts['case_movement'] = db.execute(text("SELECT COUNT(*) FROM case_movement")).scalar()
 
     # 系统管理
     counts['customer'] = db.execute(text("SELECT COUNT(*) FROM customer")).scalar()
@@ -223,24 +221,18 @@ def clear_case_management(db: Session, dry_run: bool = True) -> dict:
     else:
         print("\n[EXECUTE] 开始清空皮套管理数据...")
 
-    results['case_inventory_log'] = db.execute(text("DELETE FROM case_inventory_log")).rowcount
-    results['case_stock_out'] = db.execute(text("DELETE FROM case_stock_out")).rowcount
-    results['case_stock_in'] = db.execute(text("DELETE FROM case_stock_in")).rowcount
+    results['case_movement'] = db.execute(text("DELETE FROM case_movement")).rowcount
     results['case'] = db.execute(text('DELETE FROM "case"')).rowcount
 
     if not dry_run:
         db.commit()
         print("已清空皮套管理数据:")
         print(f"  - 皮套: {results['case']} 条")
-        print(f"  - 皮套入库: {results['case_stock_in']} 条")
-        print(f"  - 皮套出库: {results['case_stock_out']} 条")
-        print(f"  - 皮套库存日志: {results['case_inventory_log']} 条")
+        print(f"  - 皮套流水: {results['case_movement']} 条")
     else:
         print("将清空皮套管理数据:")
         print(f"  - 皮套: {results['case']} 条")
-        print(f"  - 皮套入库: {results['case_stock_in']} 条")
-        print(f"  - 皮套出库: {results['case_stock_out']} 条")
-        print(f"  - 皮套库存日志: {results['case_inventory_log']} 条")
+        print(f"  - 皮套流水: {results['case_movement']} 条")
 
     return results
 

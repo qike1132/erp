@@ -43,12 +43,8 @@ def main():
 
             # 2. 清空皮套管理（先清空，因为皮套引用了产品）
             print("\n2. 清空皮套管理...")
-            conn.execute(text("DELETE FROM case_inventory_log"))
-            print("   - 皮套库存日志: 已清空")
-            conn.execute(text("DELETE FROM case_stock_out"))
-            print("   - 皮套出库: 已清空")
-            conn.execute(text("DELETE FROM case_stock_in"))
-            print("   - 皮套入库: 已清空")
+            conn.execute(text("DELETE FROM case_movement"))
+            print("   - 皮套流水: 已清空")
             conn.execute(text('DELETE FROM "case"'))
             print("   - 皮套: 已清空")
 

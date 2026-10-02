@@ -79,9 +79,7 @@ CLEAR_TABLES = [
     'stock_in',
     'inventory_log',
     # 核心业务 - 皮套管理
-    'case_inventory_log',
-    'case_stock_out',
-    'case_stock_in',
+    'case_movement',
     'case',
     # 核心业务 - 订单附属
     'notification',
