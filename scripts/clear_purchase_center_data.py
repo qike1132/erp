@@ -57,7 +57,7 @@ def count_product_data(db: Session) -> dict:
     counts['product_fabric'] = db.execute(text("SELECT COUNT(*) FROM product_fabric")).scalar()
     counts['product_material'] = db.execute(text("SELECT COUNT(*) FROM product_material")).scalar()
     counts['product_accessory'] = db.execute(text("SELECT COUNT(*) FROM product_accessory")).scalar()
-    counts['product_packaging'] = db.execute(text("SELECT COUNT(*) FROM product_packaging")).scalar()
+    # product_packaging 已由迁移 pg_standalone_054 删除（ORM 模型已移除），不再引用
     return counts
 
 
@@ -73,6 +73,19 @@ def count_customer_order_data(db: Session) -> dict:
     return counts
 
 
+def _affected(db: Session, sql: str, *, dry_run: bool) -> int:
+    """执行 DELETE 并返回影响行数；**dry_run 时改为等价 COUNT，绝不执行删除**。
+
+    修正原实现的缺陷：各 clear_* 函数原先**无条件执行 DELETE**，仅在 `db.commit()`
+    上区分 dry-run —— 于是 `--dry-run` 会真的跑删除语句（靠"不 commit"侥幸不落库），
+    且遇外键冲突就报错，预览根本用不了。
+    """
+    if dry_run:
+        _, _, tail = sql.partition('DELETE FROM ')
+        return int(db.execute(text('SELECT COUNT(*) FROM ' + tail)).scalar() or 0)
+    return db.execute(text(sql)).rowcount
+
+
 def clear_purchase_order_data(db: Session, dry_run: bool = True) -> dict:
     results = {}
 
@@ -81,36 +94,26 @@ def clear_purchase_order_data(db: Session, dry_run: bool = True) -> dict:
     else:
         print("\n[EXECUTE] 开始清空采购订单数据...")
 
-    results['material_registration_item'] = db.execute(text(
-        "DELETE FROM material_registration_item WHERE registration_id IN (SELECT id FROM material_registration)"
-    ))
-    deleted_reg_items = results['material_registration_item'].rowcount
+    results['material_registration_item'] = _affected(db, "DELETE FROM material_registration_item WHERE registration_id IN (SELECT id FROM material_registration)", dry_run=dry_run)
+    deleted_reg_items = results['material_registration_item']
 
-    results['material_registration'] = db.execute(text("DELETE FROM material_registration"))
-    deleted_reg = results['material_registration'].rowcount
+    results['material_registration'] = _affected(db, "DELETE FROM material_registration", dry_run=dry_run)
+    deleted_reg = results['material_registration']
 
-    results['purchase_order_item'] = db.execute(text(
-        "DELETE FROM purchase_order_item WHERE order_id IN (SELECT id FROM purchase_order)"
-    ))
-    deleted_items = results['purchase_order_item'].rowcount
+    results['purchase_order_item'] = _affected(db, "DELETE FROM purchase_order_item WHERE order_id IN (SELECT id FROM purchase_order)", dry_run=dry_run)
+    deleted_items = results['purchase_order_item']
 
-    results['purchase_order'] = db.execute(text("DELETE FROM purchase_order"))
-    deleted_orders = results['purchase_order'].rowcount
+    results['purchase_order'] = _affected(db, "DELETE FROM purchase_order", dry_run=dry_run)
+    deleted_orders = results['purchase_order']
 
-    results['modification_log'] = db.execute(text(
-        "DELETE FROM modification_log WHERE target_type LIKE 'purchase%'"
-    ))
-    deleted_mods = results['modification_log'].rowcount
+    results['modification_log'] = _affected(db, "DELETE FROM modification_log WHERE target_type LIKE 'purchase%'", dry_run=dry_run)
+    deleted_mods = results['modification_log']
 
-    results['saved_query'] = db.execute(text(
-        "DELETE FROM saved_query WHERE query_type LIKE 'purchase%'"
-    ))
-    deleted_queries = results['saved_query'].rowcount
+    results['saved_query'] = _affected(db, "DELETE FROM saved_query WHERE query_type LIKE 'purchase%'", dry_run=dry_run)
+    deleted_queries = results['saved_query']
 
-    results['order_status_log'] = db.execute(text(
-        "DELETE FROM order_status_log WHERE target_type = 'purchase_order'"
-    ))
-    deleted_status = results['order_status_log'].rowcount
+    results['order_status_log'] = _affected(db, "DELETE FROM order_status_log WHERE target_type = 'purchase_order'", dry_run=dry_run)
+    deleted_status = results['order_status_log']
 
     if not dry_run:
         db.commit()
@@ -151,17 +154,15 @@ def clear_product_data(db: Session, dry_run: bool = True) -> dict:
     else:
         print("\n[EXECUTE] 开始清空产品管理数据...")
 
-    results['product_packaging'] = db.execute(text("DELETE FROM product_packaging"))
-    deleted_packaging = results['product_packaging'].rowcount
+    # product_packaging 已删（迁移 pg_standalone_054），不再删除/统计
+    results['product_accessory'] = _affected(db, "DELETE FROM product_accessory", dry_run=dry_run)
+    deleted_accessory = results['product_accessory']
 
-    results['product_accessory'] = db.execute(text("DELETE FROM product_accessory"))
-    deleted_accessory = results['product_accessory'].rowcount
+    results['product_material'] = _affected(db, "DELETE FROM product_material", dry_run=dry_run)
+    deleted_material = results['product_material']
 
-    results['product_material'] = db.execute(text("DELETE FROM product_material"))
-    deleted_material = results['product_material'].rowcount
-
-    results['product_fabric'] = db.execute(text("DELETE FROM product_fabric"))
-    deleted_fabric = results['product_fabric'].rowcount
+    results['product_fabric'] = _affected(db, "DELETE FROM product_fabric", dry_run=dry_run)
+    deleted_fabric = results['product_fabric']
 
     deleted_product = 0
     print("\n  注意: 由于产品被订单表引用，BOM数据已清空，产品主数据保留")
@@ -172,14 +173,12 @@ def clear_product_data(db: Session, dry_run: bool = True) -> dict:
         print(f"  - 面料BOM: {deleted_fabric} 条")
         print(f"  - 填充物BOM: {deleted_material} 条")
         print(f"  - 辅料BOM: {deleted_accessory} 条")
-        print(f"  - 包装BOM: {deleted_packaging} 条")
         print(f"  - 产品: {deleted_product} 条（保留，因被订单引用）")
     else:
         print("将清空数据:")
         print(f"  - 面料BOM: {deleted_fabric} 条")
         print(f"  - 填充物BOM: {deleted_material} 条")
         print(f"  - 辅料BOM: {deleted_accessory} 条")
-        print(f"  - 包装BOM: {deleted_packaging} 条")
         print(f"  - 产品: {deleted_product} 条（将保留，因被订单引用）")
 
     return {
@@ -187,7 +186,6 @@ def clear_product_data(db: Session, dry_run: bool = True) -> dict:
         'fabrics': deleted_fabric,
         'materials': deleted_material,
         'accessories': deleted_accessory,
-        'packagings': deleted_packaging
     }
 
 
@@ -199,26 +197,20 @@ def clear_customer_order_data(db: Session, dry_run: bool = True) -> dict:
     else:
         print("\n[EXECUTE] 开始清空客户订单数据...")
 
-    results['approval'] = db.execute(text(
-        "DELETE FROM approval_request WHERE order_id IN (SELECT id FROM \"order\")"
-    ))
-    deleted_approval = results['approval'].rowcount
+    results['approval'] = _affected(db, "DELETE FROM approval_request WHERE order_id IN (SELECT id FROM \"order\")", dry_run=dry_run)
+    deleted_approval = results['approval']
 
-    results['stock_out'] = db.execute(text(
-        "DELETE FROM stock_out WHERE order_id IN (SELECT id FROM \"order\")"
-    ))
-    deleted_stock_out = results['stock_out'].rowcount
+    results['stock_out'] = _affected(db, "DELETE FROM stock_out WHERE order_id IN (SELECT id FROM \"order\")", dry_run=dry_run)
+    deleted_stock_out = results['stock_out']
 
-    results['order_sync'] = db.execute(text("DELETE FROM order_sync_record"))
-    deleted_sync = results['order_sync'].rowcount
+    results['order_sync'] = _affected(db, "DELETE FROM order_sync_record", dry_run=dry_run)
+    deleted_sync = results['order_sync']
 
-    results['order_status_log'] = db.execute(text(
-        "DELETE FROM order_status_log WHERE target_type = 'unprocessed_order'"
-    ))
-    deleted_status = results['order_status_log'].rowcount
+    results['order_status_log'] = _affected(db, "DELETE FROM order_status_log WHERE target_type = 'unprocessed_order'", dry_run=dry_run)
+    deleted_status = results['order_status_log']
 
-    results['order'] = db.execute(text("DELETE FROM \"order\""))
-    deleted_orders = results['order'].rowcount
+    results['order'] = _affected(db, "DELETE FROM \"order\"", dry_run=dry_run)
+    deleted_orders = results['order']
 
     if not dry_run:
         db.commit()
@@ -293,7 +285,6 @@ def main():
             print(f"  - 面料BOM: {counts['product_fabric']} 条")
             print(f"  - 填充物BOM: {counts['product_material']} 条")
             print(f"  - 辅料BOM: {counts['product_accessory']} 条")
-            print(f"  - 包装BOM: {counts['product_packaging']} 条")
 
         if args.type in ['customer_orders', 'all']:
             print("\n========== 客户订单数据统计 ==========")

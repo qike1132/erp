@@ -80,8 +80,7 @@ def main():
             print("   - 订单状态日志: 已清空")
             conn.execute(text('DELETE FROM "order"'))
             print("   - 客户订单: 已清空")
-            conn.execute(text("DELETE FROM product_packaging"))
-            print("   - 产品包装BOM: 已清空")
+            # product_packaging 已由迁移 pg_standalone_054 删除（ORM 模型已移除），不再引用
             conn.execute(text("DELETE FROM product_accessory"))
             print("   - 产品辅料BOM: 已清空")
             conn.execute(text("DELETE FROM product_material"))

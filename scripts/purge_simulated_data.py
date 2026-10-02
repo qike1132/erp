@@ -5,7 +5,7 @@
   系统管理(版本管理、审计日志、监控指标、备份历史)
 
 保留范围（禁止任何清除）:
-  用户管理: user / user_permission / permission / device_token
+  用户管理: user / user_permission / permission
   客户管理: customer / customer_access_log / country
   运行配置: backup_settings / backup_schedule / order_sync_config / alembic_version
 
@@ -50,7 +50,6 @@ KEEP_TABLES = [
     'user',
     'user_permission',
     'permission',
-    'device_token',
     'customer',
     'customer_access_log',
     'country',
@@ -112,8 +111,7 @@ CLEAR_TABLES = [
     # 采购中心 - 采购计划（引用 product，须在 product 之前删除）
     'purchase_plan_details',
     'purchase_plans',
-    # 核心业务 - 产品与 BOM
-    'product_packaging',
+    # 核心业务 - 产品与 BOM（product_packaging 已删，见迁移 pg_standalone_054）
     'product_accessory',
     'product_fabric',
     'product_material',

@@ -1,8 +1,11 @@
 """
 数据清理脚本 - 保留用户管理数据，清除其他所有数据
 
-保留: user, permission, user_permission, device_token
+保留: user, permission, user_permission
 清除: 所有其他数据库表、Redis缓存、日志文件、临时文件、文件缓存
+
+（`device_token` / `product_packaging` 是 ORM 已删除的历史表，已由迁移
+ pg_standalone_054 删除，本脚本不再引用。）
 """
 import shutil
 import sys
@@ -18,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from fastapi_app.core.config import settings
 
-KEEP_TABLES = {'user', 'permission', 'user_permission', 'device_token'}
+KEEP_TABLES = {'user', 'permission', 'user_permission'}
 
 CLEAR_TABLES_ORDERED = [
     'material_registration_item',
@@ -41,7 +44,7 @@ CLEAR_TABLES_ORDERED = [
     'approval_log',
     'approval_request',
     '"order"',
-    'product_packaging',
+    # product_packaging 已删（迁移 pg_standalone_054）
     'product_accessory',
     'product_material',
     'product_fabric',
