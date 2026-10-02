@@ -130,7 +130,11 @@ async def update_staging_stockout(
         StagingResponse: 包含成功标志和提示消息的响应。
     """
     async with db_transaction(db):
-        await svc.update_staging_stockout(db, stockout_id, data.model_dump(exclude_unset=True))
+        # 会话隔离：与 list/clear/confirm 同口径，禁止按 ID 改到他人的暂存行
+        await svc.update_staging_stockout(
+            db, stockout_id, data.model_dump(exclude_unset=True),
+            session_scope=f'u{current_user.id}:',
+        )
     return StagingResponse(success=True, message='更新成功')
 
 
@@ -173,7 +177,8 @@ async def delete_staging_stockout(
         StagingResponse: 包含成功标志和提示消息的响应。
     """
     async with db_transaction(db):
-        await svc.delete_staging_stockout(db, stockout_id)
+        # 会话隔离：与 list/clear/confirm 同口径，禁止按 ID 删到他人的暂存行
+        await svc.delete_staging_stockout(db, stockout_id, session_scope=f'u{current_user.id}:')
     return StagingResponse(success=True, message='删除成功')
 
 

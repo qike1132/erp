@@ -10,7 +10,7 @@ import asyncio
 import contextlib
 import json
 import logging
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import quote_plus, urlparse, urlunparse
 
 from fastapi_app.core.exception_handler import INFRA_EXCEPTIONS, RUNTIME_INFRA_EXCEPTIONS
 
@@ -116,11 +116,15 @@ async def _listen_loop() -> None:
 
             url = settings.REDIS_URL
             if settings.REDIS_PASSWORD and settings.REDIS_PASSWORD not in url:
-                parsed = urlparse(url)
-                netloc = f":{settings.REDIS_PASSWORD}@{parsed.hostname}"
-                if parsed.port:
-                    netloc += f":{parsed.port}"
-                url = urlunparse(parsed._replace(netloc=netloc))
+                # 必须对密码做 URL 编码（与 core/redis_client.py 同款）：密码含
+                # @ : / ? # % 时直接拼进 netloc 会被 urlparse 误解析（含 / 会截断 host、
+                # 含 # 会把后面当 fragment），本监听器连不上 Redis → 采购/订单等 L1 缓存的
+                # 跨 worker 失效静默退化为"仅本进程"。
+                encoded_password = quote_plus(settings.REDIS_PASSWORD)
+                if url.startswith("rediss://"):
+                    url = url.replace("rediss://", f"rediss://:{encoded_password}@")
+                elif url.startswith("redis://"):
+                    url = url.replace("redis://", f"redis://:{encoded_password}@")
 
             redis_client = aioredis.from_url(url, decode_responses=True)
             pubsub = redis_client.pubsub()

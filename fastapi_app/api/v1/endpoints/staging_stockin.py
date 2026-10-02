@@ -48,7 +48,11 @@ async def import_staging_stockins(file: UploadFile=File(...), session_id: str=Qu
 async def update_staging_stockin(stockin_id: int, data: StagingStockInUpdate, db: AsyncSession=Depends(get_async_db), current_user: User=Depends(require_any_permission('batch_import', 'order_manage', 'stockin_manage'))):
     """更新暂存备货"""
     async with db_transaction(db):
-        await svc.update_staging_stockin(db, stockin_id, data.model_dump(exclude_unset=True))
+        # 会话隔离：与 list/clear/confirm 同口径，禁止按 ID 改到他人的暂存行
+        await svc.update_staging_stockin(
+            db, stockin_id, data.model_dump(exclude_unset=True),
+            session_scope=f'u{current_user.id}:',
+        )
     return StagingResponse(success=True, message='更新成功')
 
 @router.delete('/clear', response_model=StagingResponse, summary='清空暂存备货')
@@ -63,7 +67,8 @@ async def clear_staging_stockins(session_id: str=Query('default', description='�
 async def delete_staging_stockin(stockin_id: int, db: AsyncSession=Depends(get_async_db), current_user: User=Depends(require_any_permission('batch_import', 'order_manage', 'stockin_manage'))):
     """删除暂存备货"""
     async with db_transaction(db):
-        await svc.delete_staging_stockin(db, stockin_id)
+        # 会话隔离：与 list/clear/confirm 同口径，禁止按 ID 删到他人的暂存行
+        await svc.delete_staging_stockin(db, stockin_id, session_scope=f'u{current_user.id}:')
     return StagingResponse(success=True, message='删除成功')
 
 @router.post('/confirm', response_model=StagingStockInConfirmResult, summary='确认暂存备货')

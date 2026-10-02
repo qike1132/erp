@@ -99,18 +99,23 @@ async def clear_staging_orders_by_session(db: AsyncSession, session_id: str) -> 
 async def clear_staging_orders(db: AsyncSession, session_id: str):
     await clear_staging_orders_by_session(db, session_id)
 
-async def delete_staging_order(db: AsyncSession, order_id: int):
-    result = await db.execute(select(StagingOrder).where(StagingOrder.id == order_id))
+async def delete_staging_order(db: AsyncSession, order_id: int, session_scope: str | None = None):
+    conditions = [StagingOrder.id == order_id]
+    if session_scope:
+        conditions.append(StagingOrder.session_id.like(f'{session_scope}%'))
+    result = await db.execute(select(StagingOrder).where(*conditions))
     order = result.scalar_one_or_none()
     if not order:
         raise NotFoundError(f"暂存订单 {order_id} 不存在")
     await db.delete(order)
     await db.flush()
 
-async def update_staging_order(db: AsyncSession, order_id: int, data: dict) -> dict:
+async def update_staging_order(db: AsyncSession, order_id: int, data: dict,
+                               session_scope: str | None = None) -> dict:
     return await _generic_update_staging_entity(
         db, order_id, data, StagingOrder, '暂存订单',
         extra_updates=_order_extra_updates,
+        session_scope=session_scope,
     )
 
 async def confirm_staging_orders(

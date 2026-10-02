@@ -84,18 +84,23 @@ async def clear_staging_stockouts_by_session(db: AsyncSession, session_id: str) 
 async def clear_staging_stockouts(db: AsyncSession, session_id: str):
     await clear_staging_stockouts_by_session(db, session_id)
 
-async def delete_staging_stockout(db: AsyncSession, stockout_id: int):
-    result = await db.execute(select(StagingStockOut).where(StagingStockOut.id == stockout_id))
+async def delete_staging_stockout(db: AsyncSession, stockout_id: int, session_scope: str | None = None):
+    conditions = [StagingStockOut.id == stockout_id]
+    if session_scope:
+        conditions.append(StagingStockOut.session_id.like(f'{session_scope}%'))
+    result = await db.execute(select(StagingStockOut).where(*conditions))
     stockout = result.scalar_one_or_none()
     if not stockout:
         raise NotFoundError(f"暂存出货 {stockout_id} 不存在")
     await db.delete(stockout)
     await db.flush()
 
-async def update_staging_stockout(db: AsyncSession, stockout_id: int, data: dict) -> dict:
+async def update_staging_stockout(db: AsyncSession, stockout_id: int, data: dict,
+                                  session_scope: str | None = None) -> dict:
     return await _generic_update_staging_entity(
         db, stockout_id, data, StagingStockOut, '暂存出货',
         extra_updates=_stockout_extra_updates,
+        session_scope=session_scope,
     )
 
 async def confirm_staging_stockouts(

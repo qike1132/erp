@@ -253,7 +253,10 @@ async def get_order(
     Raises:
         HTTPException: 订单不存在时抛出 404。
     """
-    result = await order_service.get_order_by_id(db, order_id)
+    # 权限隔离：与列表端点（list_orders）同口径 —— 绑定工厂的非超管用户只能看本厂订单。
+    # 隔离下推到 service 的 WHERE，查不到即 404，不暴露"该订单存在但不属于你"。
+    scoped_factory = _user.factory if (_user.factory and not _user.is_super) else None
+    result = await order_service.get_order_by_id(db, order_id, factory=scoped_factory)
     if not result:
         logger.info("订单详情查询失败：order_id=%s 不存在", order_id)
         raise HTTPException(status_code=404, detail="订单不存在")

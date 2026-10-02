@@ -62,7 +62,11 @@ async def import_staging_orders(file: UploadFile=File(...), session_id: str=Quer
 async def update_staging_order(order_id: int, data: StagingOrderUpdate, db: AsyncSession=Depends(get_async_db), current_user: User=Depends(require_any_permission('batch_import', 'order_manage'))):
     """更新暂存订单"""
     async with db_transaction(db):
-        await svc.update_staging_order(db, order_id, data.model_dump(exclude_unset=True))
+        # 会话隔离：与 list/clear/confirm 同口径，禁止按 ID 改到他人的暂存行
+        await svc.update_staging_order(
+            db, order_id, data.model_dump(exclude_unset=True),
+            session_scope=f'u{current_user.id}:',
+        )
     return StagingResponse(success=True, message='更新成功')
 
 @router.delete('/clear', response_model=StagingResponse, summary='清空当前会话的暂存订单')
@@ -77,7 +81,8 @@ async def clear_staging_orders(session_id: str=Query('default', description='会
 async def delete_staging_order(order_id: int, db: AsyncSession=Depends(get_async_db), current_user: User=Depends(require_any_permission('batch_import', 'order_manage'))):
     """删除暂存订单"""
     async with db_transaction(db):
-        await svc.delete_staging_order(db, order_id)
+        # 会话隔离：与 list/clear/confirm 同口径，禁止按 ID 删到他人的暂存行
+        await svc.delete_staging_order(db, order_id, session_scope=f'u{current_user.id}:')
     return StagingResponse(success=True, message='删除成功')
 
 @router.post('/confirm', response_model=StagingOrderConfirmResult, summary='确认暂存订单')

@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.database import get_async_db, get_async_read_db
-from fastapi_app.core.deps import require_permission
+from fastapi_app.core.deps import require_any_permission, require_permission
 from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.schemas.order_batch import (
     BatchAssignRequest,
@@ -71,7 +71,7 @@ async def list_batch_orders(
     customer: str | None = Query(None),
     keyword: str | None = Query(None),
     db: AsyncSession = Depends(get_async_read_db),
-    _current_user: User = Depends(require_permission('order_manage')),
+    _current_user: User = Depends(require_any_permission('batch_manage', 'order_manage')),
 ) -> OrderBatchListResponse:
     """分页查询订单列表（用于批次管理界面）。
 
@@ -99,7 +99,7 @@ async def update_order_batch_no(
     order_id: int,
     data: BatchNoUpdate,
     db: AsyncSession = Depends(get_async_db),
-    user: User = Depends(require_permission('order_manage')),
+    user: User = Depends(require_any_permission('batch_manage', 'order_manage')),
 ) -> BatchNoUpdateResponse:
     """更新单个订单的批次号，可选同步同批次其他订单。
 
@@ -126,7 +126,7 @@ async def update_order_batch_no(
 async def batch_assign_orders(
     data: BatchAssignRequest,
     db: AsyncSession = Depends(get_async_db),
-    user: User = Depends(require_permission('order_manage')),
+    user: User = Depends(require_any_permission('batch_manage', 'order_manage')),
 ) -> BatchAssignResponse:
     """批量给多个订单设置同一个批次号。
 
@@ -149,7 +149,7 @@ async def batch_assign_orders(
 async def complete_batch(
     data: BatchCompleteRequest,
     db: AsyncSession = Depends(get_async_db),
-    user: User = Depends(require_permission('order_manage')),
+    user: User = Depends(require_any_permission('batch_manage', 'order_manage')),
 ) -> BatchCompleteResponse:
     """完成指定批次，将批次内所有订单归档。
 
@@ -180,7 +180,7 @@ async def list_batch_history(
     date_from: str | None = Query(None),
     date_to: str | None = Query(None),
     db: AsyncSession = Depends(get_async_read_db),
-    _current_user: User = Depends(require_permission('order_manage')),
+    _current_user: User = Depends(require_any_permission('batch_manage', 'order_manage')),
 ) -> OrderBatchListResponse:
     """分页查询历史批次记录（已归档的批次）。
 
@@ -206,7 +206,7 @@ async def list_batch_history(
 @router.get('/whitelist', response_model=WhitelistResponse)
 async def get_whitelist(
     db: AsyncSession = Depends(get_async_read_db),
-    _current_user: User = Depends(require_permission('order_manage')),
+    _current_user: User = Depends(require_any_permission('batch_manage', 'order_manage')),
 ) -> WhitelistResponse:
     """获取批次管理客户白名单。
 
@@ -225,7 +225,7 @@ async def get_whitelist(
 async def update_whitelist(
     data: WhitelistResponse,
     db: AsyncSession = Depends(get_async_db),
-    user: User = Depends(require_permission('order_manage')),
+    user: User = Depends(require_any_permission('batch_manage', 'order_manage')),
 ) -> WhitelistResponse:
     """更新批次管理客户白名单（全量覆盖）。
 

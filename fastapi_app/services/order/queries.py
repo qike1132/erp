@@ -62,14 +62,25 @@ logger = logging.getLogger(__name__)
 
 
 
-async def get_order_by_id(db: AsyncSession, order_id: int) -> dict | None:
-    """根据ID获取单个订单详情（含关联数据）"""
+async def get_order_by_id(db: AsyncSession, order_id: int, factory: str | None = None) -> dict | None:
+    """根据ID获取单个订单详情（含关联数据）。
+
+    ``factory`` 非空时按工厂过滤，与列表端点同口径（绑定工厂的非超管用户只能看本厂订单）。
+    用 WHERE 条件过滤而不是"取回后比对"，这样不属于本厂的订单直接查不到，
+    调用方返回 404 也就不会暴露"该订单存在"。
+
+    注（2026-10-02 修）：此前详情端点没有任何工厂隔离，而列表端点有 —— 按 ID 枚举
+    即可读到其它工厂订单的完整详情，绕过列表层的隔离。
+    """
+    conditions = [Order.id == order_id, Order.is_deleted.isnot(True)]
+    if factory:
+        conditions.append(Order.items.any(OrderItem.product.has(Product.factory == factory)))
 
     query = select(Order).options(
         joinedload(Order.product),
         joinedload(Order.locked_by),
         selectinload(Order.items),
-    ).where(Order.id == order_id, Order.is_deleted.isnot(True))
+    ).where(*conditions)
 
     result = await db.execute(query)
     order = result.scalars().unique().first()

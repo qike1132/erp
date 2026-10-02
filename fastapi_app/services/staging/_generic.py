@@ -187,8 +187,19 @@ async def _generic_update_staging_entity(
     model_class: type[Any],
     entity_label: str,
     extra_updates: Callable[[Any, dict, AsyncSession], None] | None = None,
+    session_scope: str | None = None,
 ) -> dict:
-    result = await db.execute(select(model_class).where(model_class.id == entity_id))
+    """通用暂存实体更新。
+
+    ``session_scope`` 非空时（形如 ``u<user_id>:``）要求该行的 ``session_id`` 属于它，
+    否则视同不存在。暂存表的 list/clear/confirm 一直用 ``u<user_id>:<session_id>`` 做隔离，
+    唯独按 ID 的更新/删除没有 —— 而主键是自增整数、可枚举，于是能改删**他人**未确认的暂存行
+    （横向越权）。这里补齐同一口径；用 like 前缀而非等值，因为更新/删除不接收 session_id 参数。
+    """
+    conditions = [model_class.id == entity_id]
+    if session_scope:
+        conditions.append(model_class.session_id.like(f'{session_scope}%'))
+    result = await db.execute(select(model_class).where(*conditions))
     entity = result.scalar_one_or_none()
     if not entity:
         raise NotFoundError(f'{entity_label} {entity_id} 不存在')

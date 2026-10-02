@@ -306,7 +306,10 @@ async def delete_customer_api(
 @router.delete("/supplier/{id}", response_model=AuxActionResponse)
 async def delete_supplier_api(
     id: int,
-    user: User = Depends(require_permission("product_manage")),
+    # 供应商的写操作应认**本模块**的权限码 supplier_manage（supplier.py 的写端点即用它），
+    # 原先误用了 product_manage：授「供应商管理」的用户删不掉，只持 product_manage 的
+    # 反而能越模块删。保留 product_manage 以免未知调用方回归（与 staging_order.py 同款写法）。
+    user: User = Depends(require_any_permission("supplier_manage", "product_manage")),
     db: AsyncSession = Depends(get_async_db),
 ):
     """删除供应商（API方式）"""

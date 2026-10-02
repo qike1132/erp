@@ -77,14 +77,9 @@ def subscribe(event_type: DomainEventType, handler: Callable):
     logger.debug('领域事件订阅: %s -> %s', event_type.value, handler.__name__)
 
 
-async def publish(event: DomainEvent):
-    """发布领域事件
-
-    1. 进程内同步通知所有订阅者
-    2. 异步广播到Redis Pub/Sub（跨Worker进程通信）
-    """
-    handlers = list(_subscribers.get(event.event_type, []))
-    for handler in handlers:
+async def _dispatch_in_process(event: DomainEvent) -> None:
+    """进程内同步通知所有订阅者（单个 handler 失败不影响其它 handler）。"""
+    for handler in list(_subscribers.get(event.event_type, [])):
         try:
             result = handler(event)
             if hasattr(result, '__await__'):
@@ -95,32 +90,64 @@ async def publish(event: DomainEvent):
                 event.event_type.value, handler.__name__, e,
             )
 
+
+async def _broadcast(event: DomainEvent) -> bool:
+    """广播到 Redis Pub/Sub（跨 worker），返回**是否真的发出**。
+
+    不能用 `safe_publish` 的返回值判断成败：它在 Redis 不可用或发布异常时返回 0 且不抛，
+    而 0 同时也可能是"当前无订阅者"，两者无法区分。故这里直接问 `get_client()` ——
+    拿不到客户端即视为未发出，这正是调用方需要重试/落死信的情形。
+    """
     try:
-        from fastapi_app.core.redis_wrapper import safe_publish
-        await safe_publish(
+        from fastapi_app.core.redis_wrapper import get_client
+        client = get_client()
+        if client is None:
+            return False
+        await client.publish(
             'domain_events',
             json.dumps(event.to_dict(), ensure_ascii=False, default=str),
-            context="领域事件广播",
         )
-    except Exception as e:  # defensive: Redis 广播失败不影响进程内事件处理
+        return True
+    except Exception as e:  # defensive: 广播失败不影响进程内事件处理
         logger.debug('领域事件Redis广播失败（可忽略）: %s', e)
+        return False
+
+
+async def publish(event: DomainEvent) -> bool:
+    """发布领域事件
+
+    1. 进程内同步通知所有订阅者
+    2. 广播到 Redis Pub/Sub（跨 Worker 进程通信）
+
+    返回广播是否发出。**本函数不抛异常**（进程内 handler 与广播失败都只记日志），
+    调用方可以忽略返回值；需要「失败重试 + 死信」的调用方请用 publish_with_retry。
+    """
+    await _dispatch_in_process(event)
+    return await _broadcast(event)
 
 
 async def publish_with_retry(event: DomainEvent, max_retries: int = 1, delay: float = 0.5) -> None:
-    """发布领域事件，失败时重试一次。
+    """发布领域事件：进程内 handler 只跑一次，Redis 广播失败时重试。
 
     重试仍失败则升级为 ERROR 日志并记录完整事件载荷，便于人工恢复。
     主操作不受影响（仍不抛出）。
+
+    注（2026-10-02 修）：本函数此前**整段不可达** —— 它调 `publish()` 并靠异常判断成败，
+    而 `publish()` 把广播包在 try/except 里只打 debug 日志、`safe_publish` 自身也吞异常
+    返回 0，`await publish(event)` 永不抛 → 重试循环、ERROR 日志、死信落盘从未执行过
+    （Redis 故障期间事件静默丢失、死信文件恒空）。现改为看 `_broadcast()` 的**返回值**。
     """
+    # 进程内 handler 只跑一次：重试的是广播，不是本进程的订阅者回调
+    await _dispatch_in_process(event)
+
     last_error: Exception | None = None
     for attempt in range(max_retries + 1):
-        try:
-            await publish(event)
+        if await _broadcast(event):
             return
-        except Exception as e:  # defensive: 重试期间捕获所有异常
-            last_error = e
-            if attempt < max_retries:
-                await asyncio.sleep(delay)
+        last_error = RuntimeError('Redis 广播未发出（客户端不可用或发布失败）')
+        if attempt < max_retries:
+            await asyncio.sleep(delay)
+
     # 所有重试均失败：记录 ERROR 级别日志含完整事件，便于人工恢复
     logger.error(
         '领域事件发布失败（已重试 %d 次）: event=%s payload=%s error=%s',

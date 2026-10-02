@@ -76,18 +76,23 @@ async def clear_staging_stockins_by_session(db: AsyncSession, session_id: str) -
 async def clear_staging_stockins(db: AsyncSession, session_id: str):
     await clear_staging_stockins_by_session(db, session_id)
 
-async def delete_staging_stockin(db: AsyncSession, stockin_id: int):
-    result = await db.execute(select(StagingStockIn).where(StagingStockIn.id == stockin_id))
+async def delete_staging_stockin(db: AsyncSession, stockin_id: int, session_scope: str | None = None):
+    conditions = [StagingStockIn.id == stockin_id]
+    if session_scope:
+        conditions.append(StagingStockIn.session_id.like(f'{session_scope}%'))
+    result = await db.execute(select(StagingStockIn).where(*conditions))
     stockin = result.scalar_one_or_none()
     if not stockin:
         raise NotFoundError(f"暂存备货 {stockin_id} 不存在")
     await db.delete(stockin)
     await db.flush()
 
-async def update_staging_stockin(db: AsyncSession, stockin_id: int, data: dict) -> dict:
+async def update_staging_stockin(db: AsyncSession, stockin_id: int, data: dict,
+                                 session_scope: str | None = None) -> dict:
     return await _generic_update_staging_entity(
         db, stockin_id, data, StagingStockIn, '暂存备货',
         extra_updates=_stockin_extra_updates,
+        session_scope=session_scope,
     )
 
 async def confirm_staging_stockins(
