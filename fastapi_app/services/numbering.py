@@ -116,16 +116,25 @@ async def generate_stockout_number(db: AsyncSession) -> str:
     return await generate_number_async('SO', StockOut, 'stockout_no', db)
 
 
+async def generate_case_movement_number(db: AsyncSession, direction: str) -> str:
+    """生成皮套出入库编号（入库 CSI- / 出库 CSO-，格式 YYYYMMDD-XXXX）。
+
+    两个前缀共写 CaseMovement.movement_no（列唯一）；read_daily_max 按日期段
+    过滤、前缀无关，故混用不重号。
+    """
+    from fastapi_app.shared_models import CaseMovement
+    prefix = 'CSI' if direction == 'in' else 'CSO'
+    return await generate_number_async(prefix, CaseMovement, 'movement_no', db)
+
+
 async def generate_case_stockout_number(db: AsyncSession) -> str:
     """生成皮套出库编号 CSO-YYYYMMDD-XXXX"""
-    from fastapi_app.shared_models import CaseStockOut
-    return await generate_number_async('CSO', CaseStockOut, 'stockout_no', db)
+    return await generate_case_movement_number(db, 'out')
 
 
 async def generate_case_stockin_number(db: AsyncSession) -> str:
     """生成皮套入库编号 CSI-YYYYMMDD-XXXX"""
-    from fastapi_app.shared_models import CaseStockIn
-    return await generate_number_async('CSI', CaseStockIn, 'stockin_no', db)
+    return await generate_case_movement_number(db, 'in')
 
 
 async def generate_purchase_order_number(db: AsyncSession) -> str:

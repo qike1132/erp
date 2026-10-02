@@ -25,9 +25,7 @@ from fastapi_app.shared_models.backup_record import BackupRecord
 from fastapi_app.shared_models.backup_schedule import BackupSchedule
 from fastapi_app.shared_models.backup_settings import BackupSettings
 from fastapi_app.shared_models.case import Case
-from fastapi_app.shared_models.case_inventory_log import CaseInventoryLog
-from fastapi_app.shared_models.case_stock_in import CaseStockIn
-from fastapi_app.shared_models.case_stock_out import CaseStockOut
+from fastapi_app.shared_models.case_movement import DIRECTION_IN, DIRECTION_OUT, CaseMovement
 from fastapi_app.shared_models.craft_work import CraftWork
 from fastapi_app.shared_models.customer import Customer
 from fastapi_app.shared_models.customer_access_log import CustomerAccessLog
@@ -95,6 +93,8 @@ from fastapi_app.shared_models.web_vital import WebVital
 __all__ = [
     'CUSTOMER_SAMPLING_ACTIONS',
     'CUSTOMER_SAMPLING_CHANGE_TYPES',
+    'DIRECTION_IN',
+    'DIRECTION_OUT',
     'MATERIAL_CATEGORIES',
     'SHIPMENT_STATUS_RECEIVED',
     'SHIPMENT_STATUS_SHIPPED',
@@ -106,9 +106,7 @@ __all__ = [
     'BackupSettings',
     'Base',
     'Case',
-    'CaseInventoryLog',
-    'CaseStockIn',
-    'CaseStockOut',
+    'CaseMovement',
     'CraftWork',
     'Customer',
     'CustomerAccessLog',

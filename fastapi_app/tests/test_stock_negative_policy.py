@@ -23,7 +23,7 @@ from fastapi_app.shared.stock_concurrency import (
     check_stock_available,
     update_stock_with_optimistic_lock,
 )
-from fastapi_app.shared_models import CaseStockIn, CaseStockOut
+from fastapi_app.shared_models import CaseMovement
 
 REPO = Path(__file__).resolve().parents[2]
 STOCK_CONCURRENCY = REPO / "fastapi_app/shared/stock_concurrency.py"
@@ -169,14 +169,14 @@ async def test_optimistic_lock_allows_when_env_true(monkeypatch):
 class _FakeSession:
     """case/commands.py 调用点所需的最小 AsyncSession 替身。"""
 
-    def __init__(self, stockin=None):
-        self.stockin = stockin
+    def __init__(self, movement=None):
+        self.movement = movement
         self.added = []
         self.deleted = []
         self.flushed = 0
 
     async def get(self, model, pk):
-        return self.stockin
+        return self.movement
 
     def add(self, obj):
         self.added.append(obj)
@@ -201,14 +201,19 @@ async def _patch_case(monkeypatch, case_obj, func_name):
     monkeypatch.setattr(case_commands, func_name, _stub)
 
 
-async def test_create_case_stockout_denies_and_allows(monkeypatch):
-    case_obj = types.SimpleNamespace(id=7, current_stock=5)
+async def test_create_case_movement_denies_and_allows(monkeypatch):
+    case_obj = types.SimpleNamespace(id=7, current_stock=5, version=0)
 
-    await _patch_case(monkeypatch, case_obj, "_get_case_by_product_for_update")
+    await _patch_case(monkeypatch, case_obj, "_get_case_for_update")
+
+    async def _fake_number(db, direction):
+        return "PKOUT-T1"
+
+    monkeypatch.setattr(case_commands, "generate_case_movement_number", _fake_number)
     monkeypatch.delenv("ALLOW_NEGATIVE_STOCK", raising=False)
     db = _FakeSession()
     with pytest.raises(ValueError) as ei:
-        await case_commands.create_case_stockout(db, 1, 8, "2026-10-01", stockout_no="PKOUT-T1")
+        await case_commands.create_movement(db, 7, "out", 8, "2026-10-01")
     assert type(ei.value) is ValueError
     assert str(ei.value) == "库存不足，当前库存: 5"
     assert case_obj.current_stock == 5
@@ -216,53 +221,54 @@ async def test_create_case_stockout_denies_and_allows(monkeypatch):
 
     monkeypatch.setenv("ALLOW_NEGATIVE_STOCK", "true")
     db2 = _FakeSession()
-    result = await case_commands.create_case_stockout(db2, 1, 8, "2026-10-01", stockout_no="PKOUT-T1")
+    result = await case_commands.create_movement(db2, 7, "out", 8, "2026-10-01")
     assert result["success"] is True
     assert case_obj.current_stock == -3
-    assert len(db2.added) == 2  # 出库记录 + 库存流水
+    assert len(db2.added) == 1  # 只写一条流水（不再有单独的 inventory_log）
 
 
-async def test_delete_case_stockin_denies_and_allows(monkeypatch):
-    case_obj = types.SimpleNamespace(id=7, current_stock=5)
-    stockin = CaseStockIn(stockin_no="PKIN-1", case_id=7, quantity=8)
+async def test_delete_case_movement_denies_and_allows(monkeypatch):
+    case_obj = types.SimpleNamespace(id=7, current_stock=5, version=0)
+    movement = CaseMovement(case_id=7, direction="in", movement_no="PKIN-1", quantity=8)
 
     await _patch_case(monkeypatch, case_obj, "_get_case_for_update")
     monkeypatch.delenv("ALLOW_NEGATIVE_STOCK", raising=False)
-    db = _FakeSession(stockin=stockin)
+    db = _FakeSession(movement=movement)
     with pytest.raises(ValueError) as ei:
-        await case_commands.delete_case_stockin(db, 1)
+        await case_commands.delete_movement(db, 1)
     assert type(ei.value) is ValueError
-    assert str(ei.value) == "当前库存不足，删除该入库后库存将为负数"
+    assert str(ei.value) == "删除该记录后库存不足，无法删除"
     assert case_obj.current_stock == 5
     assert db.deleted == []
 
     monkeypatch.setenv("ALLOW_NEGATIVE_STOCK", "true")
-    db2 = _FakeSession(stockin=stockin)
-    assert await case_commands.delete_case_stockin(db2, 1) == {"success": True, "message": "删除成功"}
+    movement2 = CaseMovement(case_id=7, direction="in", movement_no="PKIN-2", quantity=8)
+    db2 = _FakeSession(movement=movement2)
+    assert await case_commands.delete_movement(db2, 1) == {"success": True, "message": "删除成功"}
     assert case_obj.current_stock == -3
     assert len(db2.deleted) == 1
 
 
-async def test_adjust_stockout_quantity_denies_and_allows(monkeypatch):
-    case_obj = types.SimpleNamespace(id=7, current_stock=5)
-    stockout = CaseStockOut(stockout_no="PKOUT-1", case_id=7, quantity=5)
+async def test_update_case_movement_quantity_denies_and_allows(monkeypatch):
+    case_obj = types.SimpleNamespace(id=7, current_stock=5, version=0)
+    movement = CaseMovement(case_id=7, direction="out", movement_no="PKOUT-1", quantity=5)
 
     await _patch_case(monkeypatch, case_obj, "_get_case_for_update")
     monkeypatch.delenv("ALLOW_NEGATIVE_STOCK", raising=False)
-    db = _FakeSession()
+    db = _FakeSession(movement=movement)
     with pytest.raises(ValueError) as ei:
-        await case_commands._adjust_stockout_quantity(db, stockout, 13)
+        await case_commands.update_movement(db, 1, {"quantity": 13})
     assert type(ei.value) is ValueError
     assert str(ei.value) == "调整后库存不足，当前库存: -3"
     assert case_obj.current_stock == 5
     assert db.added == []
 
     monkeypatch.setenv("ALLOW_NEGATIVE_STOCK", "true")
-    db2 = _FakeSession()
-    stockout2 = CaseStockOut(stockout_no="PKOUT-2", case_id=7, quantity=5)
-    await case_commands._adjust_stockout_quantity(db2, stockout2, 13)
+    movement2 = CaseMovement(case_id=7, direction="out", movement_no="PKOUT-2", quantity=5)
+    db2 = _FakeSession(movement=movement2)
+    await case_commands.update_movement(db2, 1, {"quantity": 13})
     assert case_obj.current_stock == -3
-    assert len(db2.added) == 1
+    assert movement2.quantity == 13
 
 
 # --------------------------------------------------------------------------
@@ -297,7 +303,7 @@ def _fake_upload():
 
 
 async def test_import_case_stockouts_denies_and_allows(monkeypatch):
-    case_obj = types.SimpleNamespace(id=7, current_stock=5)
+    case_obj = types.SimpleNamespace(id=7, current_stock=5, version=0)
     _patch_batch(monkeypatch, case_obj)
 
     monkeypatch.delenv("ALLOW_NEGATIVE_STOCK", raising=False)
@@ -318,7 +324,7 @@ async def test_import_case_stockouts_denies_and_allows(monkeypatch):
     assert allowed.imported == 1
     assert allowed.skipped == 0
     assert case_obj.current_stock == -3
-    assert len(db2.added) == 2
+    assert len(db2.added) == 1  # 只写一条流水
 
 
 # --------------------------------------------------------------------------
@@ -415,14 +421,15 @@ def test_only_unified_entry_may_compare_current_stock():
     assert residual == {UNIFIED_ENTRY.relative_to(REPO).as_posix()}, hits
 
 
-def test_equality_guard_is_the_only_remaining_attribute_comparison():
-    """披露：全仓仅剩 case/commands.py:228 的等值守卫（非负库存判定，语义未变）。"""
+def test_no_remaining_equality_guard_on_current_stock():
+    """披露：重写后 case/commands.py 不再有任何 .current_stock 等值比较
+    （旧的「只能删除库存为0的皮套」守卫已随删除逻辑一并移除）。"""
     equality = [
         hit
         for path in TARGETS
         for hit in _inline_stock_comparisons(path, ops=(ast.Eq, ast.NotEq))
     ]
-    assert equality == ["commands.py:228: case_obj.current_stock != 0"]
+    assert equality == []
 
 
 def test_call_sites_use_unified_entry():

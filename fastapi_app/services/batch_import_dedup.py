@@ -5,7 +5,7 @@
 现行导入是「逐行 SAVEPOINT + ``except SQLAlchemyError``」：某行触发唯一约束
 冲突时，``db.begin_nested()`` 只回滚该行，循环继续 —— 也就是说
 **DB 唯一约束实际承担了「跳过重复行」的职责**（见 ``batch_import_core.py:102-115``
-与 ``Order.order_no`` / ``CaseStockIn.stockin_no`` / ``CaseStockOut.stockout_no``
+与 ``Order.order_no`` / ``CaseMovement.movement_no``
 上的 ``unique=True``）。
 
 批量写入（``executemany``）**没有逐行 savepoint**：一条冲突会让整批失败。

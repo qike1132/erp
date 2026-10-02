@@ -22,8 +22,7 @@ from fastapi_app.schemas.dashboard import (
 )
 from fastapi_app.shared_models import (
     Case,
-    CaseStockIn,
-    CaseStockOut,
+    CaseMovement,
     DailyProductionRecord,
     Order,
     OrderItem,
@@ -60,7 +59,7 @@ async def fetch_mobile_dashboard(
 
     优化：合并 StockOut 当日/当月/总出库为 SUM FILTER（3→1）、shipping 复用 stock 当日值（1→0）、
     合并 Order 当日+总金额为 SUM FILTER（3→1）、合并库存数量+金额（2→1）、
-    合并 CaseStockIn/Out 数量+金额（4→2）。总往返从 15~16 次降至 8~9 次。
+    合并皮套入库/出库数量+金额（4→2）。总往返从 15~16 次降至 8~9 次。
 
     注：SQLAlchemy AsyncSession 不支持 asyncio.gather 并发（单连接非线程安全），
     使用 SQL 层 SUM FILTER 合并优于多 session 并发，避免连接池压力。
@@ -242,29 +241,31 @@ async def fetch_mobile_dashboard(
         logger.warning("移动看板订单数据加载失败: %s", e)
 
     try:
-        # 5. 皮套仓储：合并 CaseStockIn 数量+金额（2→1）、CaseStockOut 数量+金额（2→1）
+        # 5. 皮套仓储：合并入库数量+金额（2→1）、出库数量+金额（2→1）
         csi_row = (await db.execute(
             select(
-                func.coalesce(func.sum(CaseStockIn.quantity), 0).label('qty'),
-                func.coalesce(func.sum(CaseStockIn.quantity * Product.price), 0).label('amt'),
+                func.coalesce(func.sum(CaseMovement.quantity), 0).label('qty'),
+                func.coalesce(func.sum(CaseMovement.quantity * Product.price), 0).label('amt'),
             )
-            .join(Case, CaseStockIn.case_id == Case.id)
+            .join(Case, CaseMovement.case_id == Case.id)
             .join(Product, Case.product_id == Product.id, isouter=True)
-            .where(CaseStockIn.stockin_date >= today_start)
-            .where(CaseStockIn.stockin_date < today_end)
+            .where(CaseMovement.direction == 'in')
+            .where(CaseMovement.movement_date >= today_start)
+            .where(CaseMovement.movement_date < today_end)
         )).one()
         warehouse_data.in_qty = int(csi_row.qty)
         warehouse_data.in_amount = round_money(float(csi_row.amt))
 
         cso_row = (await db.execute(
             select(
-                func.coalesce(func.sum(CaseStockOut.quantity), 0).label('qty'),
-                func.coalesce(func.sum(CaseStockOut.quantity * Product.price), 0).label('amt'),
+                func.coalesce(func.sum(CaseMovement.quantity), 0).label('qty'),
+                func.coalesce(func.sum(CaseMovement.quantity * Product.price), 0).label('amt'),
             )
-            .join(Case, CaseStockOut.case_id == Case.id)
+            .join(Case, CaseMovement.case_id == Case.id)
             .join(Product, Case.product_id == Product.id, isouter=True)
-            .where(CaseStockOut.stockout_date >= today_start)
-            .where(CaseStockOut.stockout_date < today_end)
+            .where(CaseMovement.direction == 'out')
+            .where(CaseMovement.movement_date >= today_start)
+            .where(CaseMovement.movement_date < today_end)
         )).one()
         warehouse_data.out_qty = int(cso_row.qty)
         warehouse_data.out_amount = round_money(float(cso_row.amt))

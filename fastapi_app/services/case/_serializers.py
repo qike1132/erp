@@ -1,42 +1,35 @@
-"""皮套序列化辅助
-
-从 case_service.py 按职责拆出,行为与原实现完全一致。
-"""
-from fastapi_app.shared_models import CaseStockIn, CaseStockOut
+"""皮套序列化辅助（SKU 主档 / 出入库流水）"""
+from fastapi_app.shared_models import Case, CaseMovement
 
 
-def _serialize_stockin(stockin: CaseStockIn) -> dict:
-    """将入库记录对象序列化为字典。
-
-    Args:
-        stockin: CaseStockIn 对象。
-
-    Returns:
-        包含入库记录字段的字典。
-    """
+def _serialize_item(c: Case) -> dict:
+    """将皮套 SKU 序列化为字典。"""
     return {
-        'id': stockin.id, 'stockin_no': stockin.stockin_no,
-        'stockin_date': stockin.stockin_date.strftime('%Y-%m-%d') if stockin.stockin_date else '',
-        'customer': stockin.customer, 'case_id': stockin.case_id,
-        'case_name': stockin.case.sync_name if stockin.case else '',
-        'case_barcode': stockin.case.sync_barcode if stockin.case else '',
-        'quantity': stockin.quantity, 'note': stockin.note or '',
+        'id': c.id,
+        'name': c.sync_name,
+        'barcode': c.sync_barcode or '',
+        'image': c.image or '',
+        'unit': c.unit or '',
+        'product_id': c.product_id,
+        'parent_id': c.parent_id,
+        'qty_per_set': c.qty_per_set if c.qty_per_set is not None else 1,
+        'initial_stock': c.initial_stock or 0,
+        'current_stock': c.current_stock or 0,
     }
 
-def _serialize_stockout(stockout: CaseStockOut) -> dict:
-    """将出库记录对象序列化为字典。
 
-    Args:
-        stockout: CaseStockOut 对象。
-
-    Returns:
-        包含出库记录字段的字典。
-    """
+def _serialize_movement(m: CaseMovement) -> dict:
+    """将出入库流水序列化为字典。"""
     return {
-        'id': stockout.id, 'stockout_no': stockout.stockout_no,
-        'stockout_date': stockout.stockout_date.strftime('%Y-%m-%d') if stockout.stockout_date else '',
-        'customer': stockout.customer or '', 'case_id': stockout.case_id,
-        'case_name': stockout.case.sync_name if stockout.case else '',
-        'case_barcode': stockout.case.sync_barcode if stockout.case else '',
-        'quantity': stockout.quantity, 'note': stockout.note or '',
+        'id': m.id,
+        'case_id': m.case_id,
+        'case_name': m.case.sync_name if m.case else '',
+        'case_barcode': m.case.sync_barcode if m.case else '',
+        'direction': m.direction,
+        'movement_no': m.movement_no,
+        'quantity': m.quantity,
+        'customer': m.customer or '',
+        'movement_date': m.movement_date.strftime('%Y-%m-%d') if m.movement_date else '',
+        'note': m.note or '',
+        'create_time': m.create_time.strftime('%Y-%m-%d %H:%M:%S') if m.create_time else '',
     }

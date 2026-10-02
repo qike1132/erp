@@ -6,8 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.cache_invalidation import InvalidationStrategy, cache_mgr
 from fastapi_app.shared_models import (
-    CaseStockIn,
-    CaseStockOut,
+    CaseMovement,
     Customer,
     CustomerAccessLog,
     Order,
@@ -161,7 +160,7 @@ async def delete_customer(db: AsyncSession, customer_id: int) -> None:
         raise ValueError("客户不存在")
 
     # 单次查询统计所有关联数据（计数明细而非仅 EXISTS），覆盖所有以客户名/客户ID 引用的表：
-    # - 名称字符串引用：Order/StockIn/StockOut/PackagingRecord/ProductionPlan/CaseStockIn/CaseStockOut
+    # - 名称字符串引用：Order/StockIn/StockOut/PackagingRecord/ProductionPlan/CaseMovement
     # - customer_id 外键引用（优先 ID 检查）：PurchaseOrder/PurchasePlan/CustomerAccessLog，
     #   同时兜底匹配冗余的 customer_name 字段（历史数据 customer_id 可能为 NULL）
     checks = await db.execute(
@@ -185,8 +184,8 @@ async def delete_customer(db: AsyncSession, customer_id: int) -> None:
             ).scalar_subquery().label('purchase_plans'),
             select(func.count()).where(PackagingRecord.customer == customer.name).scalar_subquery().label('packaging_records'),
             select(func.count()).where(ProductionPlan.customer_name == customer.name).scalar_subquery().label('production_plans'),
-            select(func.count()).where(CaseStockIn.customer == customer.name).scalar_subquery().label('case_stockins'),
-            select(func.count()).where(CaseStockOut.customer == customer.name).scalar_subquery().label('case_stockouts'),
+            select(func.count()).where(CaseMovement.customer == customer.name, CaseMovement.direction == 'in').scalar_subquery().label('case_stockins'),
+            select(func.count()).where(CaseMovement.customer == customer.name, CaseMovement.direction == 'out').scalar_subquery().label('case_stockouts'),
         )
     )
     row = checks.one()

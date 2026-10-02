@@ -18,7 +18,7 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from fastapi_app.services.numbering_sequence import read_daily_max
-from fastapi_app.shared_models import Base, Case, CaseStockOut, Order
+from fastapi_app.shared_models import Base, Case, CaseMovement, Order
 
 pytestmark = pytest.mark.integration
 
@@ -99,10 +99,10 @@ async def test_read_daily_max_three_char_prefix_cso(db):
     case = Case(name='测试皮套')
     db.add(case)
     await db.flush()
-    db.add(CaseStockOut(stockout_no='CSO-20260929-0007', case_id=case.id,
-                        quantity=1, stockout_date=datetime(2026, 9, 29, tzinfo=UTC)))
+    db.add(CaseMovement(case_id=case.id, direction='out', movement_no='CSO-20260929-0007',
+                        quantity=1, movement_date=datetime(2026, 9, 29, tzinfo=UTC)))
     await db.flush()
-    assert await read_daily_max(db, CaseStockOut, 'stockout_no', '20260929') == 7
+    assert await read_daily_max(db, CaseMovement, 'movement_no', '20260929') == 7
 
 
 @pytest.mark.asyncio

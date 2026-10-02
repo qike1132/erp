@@ -33,9 +33,7 @@ from fastapi_app.services.numbering import (
 from fastapi_app.services.order_deduction_service import process_order_deduction
 from fastapi_app.shared.stock_concurrency import check_stock_available, get_product_for_update
 from fastapi_app.shared_models import (
-    CaseInventoryLog,
-    CaseStockIn,
-    CaseStockOut,
+    CaseMovement,
     InventoryLog,
     Order,
     Product,
@@ -347,20 +345,15 @@ async def import_case_stockouts_service(db: AsyncSession, file: ExcelUpload) -> 
                         errors.append(reason)
                         skipped += 1
                         continue
-                    stockout_date = parse_date_value(stockout_date_val) or datetime.now()
-                    stockout_no = await generate_case_stockout_number(db)
-                    stockout = CaseStockOut(
-                        stockout_no=stockout_no, stockout_date=stockout_date, case_id=case.id,
-                        quantity=qty, customer=customer, note=str(note).strip() if note else '',
-                    )
-                    db.add(stockout)
+                    movement_date = parse_date_value(stockout_date_val) or datetime.now(UTC)
+                    movement_no = await generate_case_stockout_number(db)
+                    db.add(CaseMovement(
+                        case_id=case.id, direction='out', movement_no=movement_no,
+                        quantity=qty, customer=customer, movement_date=movement_date,
+                        note=str(note).strip() if note else '',
+                    ))
                     case.current_stock -= qty
-                    log = CaseInventoryLog(
-                        case_id=case.id, change_type='出库', change_quantity=-qty,
-                        related_id=stockout_no, customer=customer,
-                        note=f'批量导入出库：客户{customer}，数量{qty}' if customer else f'批量导入出库：数量{qty}',
-                    )
-                    db.add(log)
+                    case.version += 1
                 # savepoint 成功提交后才计数，失败行不计入 imported
                 imported += 1
             except (ValueError, TypeError, SQLAlchemyError) as exc:
@@ -430,20 +423,15 @@ async def import_case_stockins_service(db: AsyncSession, file: ExcelUpload) -> B
                         skipped += 1
                         continue
                     assert case is not None  # 同上：case_err 已判空，失败时 case 为 None
-                    stockin_date = parse_date_value(stockin_date_val) or datetime.now(UTC)  # aware UTC：stockin_date 列为 timestamptz
-                    stockin_no = await generate_case_stockin_number(db)
-                    stockin = CaseStockIn(
-                        stockin_no=stockin_no, stockin_date=stockin_date, case_id=case.id,
-                        quantity=qty, customer=customer, note=str(note).strip() if note else '',
-                    )
-                    db.add(stockin)
+                    stockin_date = parse_date_value(stockin_date_val) or datetime.now(UTC)  # aware UTC：movement_date 列为 timestamptz
+                    movement_no = await generate_case_stockin_number(db)
+                    db.add(CaseMovement(
+                        case_id=case.id, direction='in', movement_no=movement_no,
+                        quantity=qty, customer=customer, movement_date=stockin_date,
+                        note=str(note).strip() if note else '',
+                    ))
                     case.current_stock += qty
-                    log = CaseInventoryLog(
-                        case_id=case.id, change_type='入库', change_quantity=qty,
-                        related_id=stockin_no, customer=customer,
-                        note=f'批量导入入库：客户{customer}，数量{qty}' if customer else f'批量导入入库：数量{qty}',
-                    )
-                    db.add(log)
+                    case.version += 1
                 # savepoint 成功提交后才计数，失败行不计入 imported
                 imported += 1
             except (ValueError, TypeError, SQLAlchemyError) as exc:

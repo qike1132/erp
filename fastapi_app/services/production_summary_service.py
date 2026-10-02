@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.cache import cache_result
 from fastapi_app.core.sanitizer import escape_like
-from fastapi_app.shared_models import Case, CaseStockOut, CraftWork, PackagingRecord, Product
+from fastapi_app.shared_models import Case, CaseMovement, CraftWork, PackagingRecord, Product
 from fastapi_app.utils import parse_date_with_fallback
 
 logger = logging.getLogger(__name__)
@@ -336,14 +336,14 @@ async def _get_case_stockout_daily(db: AsyncSession, start: date, end: date) -> 
     # 范围条件（>= 当日零点，< 次日零点）而非 func.date()，使 stockout_date 索引可命中
     start_dt = datetime(start.year, start.month, start.day)
     end_dt = start_dt + timedelta(days=1)
-    result = await db.execute(select(func.date(CaseStockOut.stockout_date).label('d'), func.coalesce(func.sum(CaseStockOut.quantity), 0).label('total')).where(and_(CaseStockOut.stockout_date >= start_dt, CaseStockOut.stockout_date < end_dt)).group_by(func.date(CaseStockOut.stockout_date)))
+    result = await db.execute(select(func.date(CaseMovement.movement_date).label('d'), func.coalesce(func.sum(CaseMovement.quantity), 0).label('total')).where(and_(CaseMovement.direction == 'out', CaseMovement.movement_date >= start_dt, CaseMovement.movement_date < end_dt)).group_by(func.date(CaseMovement.movement_date)))
     return {str(row.d): int(row.total) for row in result.all()}
 
 async def _get_case_stockout_detail(db: AsyncSession, start: date, end: date) -> dict:
     """获取皮套出库按日+客户+产品明细"""
     start_dt = datetime(start.year, start.month, start.day)
     end_dt = start_dt + timedelta(days=1)
-    result = await db.execute(select(func.date(CaseStockOut.stockout_date).label('d'), CaseStockOut.customer, func.coalesce(Product.name, Case.name).label('product_name'), CaseStockOut.quantity).join(Case, CaseStockOut.case_id == Case.id).outerjoin(Product, Case.product_id == Product.id).where(and_(CaseStockOut.stockout_date >= start_dt, CaseStockOut.stockout_date < end_dt)).order_by(CaseStockOut.stockout_date))
+    result = await db.execute(select(func.date(CaseMovement.movement_date).label('d'), CaseMovement.customer, func.coalesce(Product.name, Case.name).label('product_name'), CaseMovement.quantity).join(Case, CaseMovement.case_id == Case.id).outerjoin(Product, Case.product_id == Product.id).where(and_(CaseMovement.direction == 'out', CaseMovement.movement_date >= start_dt, CaseMovement.movement_date < end_dt)).order_by(CaseMovement.movement_date))
     data: dict[str, list[dict[str, Any]]] = {}
     for row in result.all():
         d = str(row.d)

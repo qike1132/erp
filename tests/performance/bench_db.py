@@ -136,11 +136,11 @@ async def bench_other_services():
         print(f'  avg={results["products_page1"]["avg_ms"]:.1f}ms')
 
         # 皮套库存汇总
-        print('测试 case_service.get_case_inventory_summary...')
+        print('测试 case_service.get_case_inventory...')
         latencies = []
         for _i in range(5):
             start = time.perf_counter()
-            result = await case_service.get_case_inventory_summary(db, page=1, per_page=50)
+            result = await case_service.get_case_inventory(db, page=1, per_page=50)
             elapsed = (time.perf_counter() - start) * 1000
             latencies.append(elapsed)
         results['case_inventory_summary'] = {

@@ -158,19 +158,19 @@ async def bench_case_endpoints(session, token: str) -> list[BenchResult]:
 
     r = BenchResult('皮套库存汇总')
     for _ in range(ROUNDS):
-        _status, _, ms = await _request(session, 'GET', '/cases/inventory-summary?page=1&per_page=50', headers=headers)
+        _status, _, ms = await _request(session, 'GET', '/cases/inventory?page=1&per_page=50', headers=headers)
         r.latencies_ms.append(ms)
     results.append(r)
 
     r = BenchResult('皮套产品列表(分页)')
     for _ in range(ROUNDS):
-        _status, _, ms = await _request(session, 'GET', '/cases/products?page=1&per_page=50', headers=headers)
+        _status, _, ms = await _request(session, 'GET', '/cases/items?page=1&per_page=50', headers=headers)
         r.latencies_ms.append(ms)
     results.append(r)
 
     r = BenchResult('皮套入库列表')
     for _ in range(ROUNDS):
-        _status, _, ms = await _request(session, 'GET', '/cases/in/list?page=1&per_page=20', headers=headers)
+        _status, _, ms = await _request(session, 'GET', '/cases/movements?direction=in&page=1&per_page=20', headers=headers)
         r.latencies_ms.append(ms)
     results.append(r)
 

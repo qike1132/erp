@@ -36,7 +36,7 @@ SMOKE_TESTS = [
     ("数据查询", "GET", "/api/v1/products/search", None),
     ("订单查询", "GET", "/api/v1/orders/list", None),
     ("报表管理", "GET", "/api/v1/reports/order-logs", None),
-    ("皮套管理", "GET", "/api/v1/cases/in/list", None),
+    ("皮套管理", "GET", "/api/v1/cases/items", None),
     ("系统管理", "GET", "/api/v1/permissions/list", None),
     ("用户管理", "GET", "/api/v1/users/list", None),
     ("客户管理", "GET", "/api/v1/customers/list", None),
