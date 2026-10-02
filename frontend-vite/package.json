@@ -8,9 +8,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 5173",
-    "build": "vue-tsc -b && vite build",
-    "build:fast": "vite build --logLevel info",
-    "build:atomic": "vue-tsc -b && vite build --outDir dist-new --logLevel info && node scripts/swap-dist.mjs",
+    "build": "vue-tsc -b && node scripts/vite-build.mjs",
+    "build:fast": "node scripts/vite-build.mjs --logLevel info",
+    "build:atomic": "vue-tsc -b && node scripts/vite-build.mjs --outDir dist-new --logLevel info && node scripts/swap-dist.mjs",
     "build:open": "node scripts/build-refresh.mjs",
     "build:open:fast": "node scripts/build-refresh.mjs --fast",
     "check:routes": "node scripts/check-route-alignment.mjs",
