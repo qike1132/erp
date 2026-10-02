@@ -639,6 +639,18 @@ class Supervisor:
         print("[prod_runner] 已停止(前端 erp-web 为独立服务,不在此处理)")
 
 
+# 控制台控制处理器回调**必须挂在模块级**。ctypes 回调对象一旦失去引用就被回收，而
+# SetConsoleCtrlHandler 只存函数指针 —— 回调被回收后处理器即为悬空指针，Ctrl+C 到达时
+# 不再执行 sup.shutdown()，uvicorn 子进程无人回收，成为继续占用 :5002 的孤儿。
+#
+# 2026-10-02 实测证据：本进程 stdout（logs/erp-prod.log）里「已启动」出现 35 次、
+# 「正在关闭」与「已停止」各 0 次 —— shutdown 从未执行过；每次 `nssm restart erp-prod`
+# 都会留下上一棵后端进程树，同一端口上堆着两台后端。原写法把回调赋给**局部变量**
+# （注释虽写"防止 GC 回收"，但函数返回即失去引用，实测连显式 GC 都不用等就已被回收）。
+# 同款正确用法见 services/order/_common.py 的 _pending_tasks。
+_console_handler_ref: object | None = None
+
+
 def _install_signal_handlers(sup: Supervisor) -> None:
     if os.name == "nt":
         try:
@@ -650,9 +662,10 @@ def _install_signal_handlers(sup: Supervisor) -> None:
                 sup.shutdown()
                 return True  # 阻止默认终止，让 shutdown 完成
 
+            global _console_handler_ref
             HANDLER_ROUTINE = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_uint)
-            _handler_ref = HANDLER_ROUTINE(_win_handler)  # 防止 GC 回收
-            ctypes.windll.kernel32.SetConsoleCtrlHandler(_handler_ref, True)
+            _console_handler_ref = HANDLER_ROUTINE(_win_handler)
+            ctypes.windll.kernel32.SetConsoleCtrlHandler(_console_handler_ref, True)
         except (OSError, AttributeError):
             pass  # defensive: 异常静默处理,不影响主流程
     else:
