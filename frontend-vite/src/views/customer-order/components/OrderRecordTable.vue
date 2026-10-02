@@ -21,6 +21,7 @@
       :paginator="totalPages > 1"
       :rows="perPage"
       :total-records="totalRecords"
+      item-unit="单"
       row-key="_rowKey"
       row-group-mode="rowspan"
       :group-rows-by="GROUP_FIELDS"

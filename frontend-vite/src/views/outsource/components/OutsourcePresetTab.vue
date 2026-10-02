@@ -84,7 +84,6 @@ import UiSpinner from '@/components/ui/UiSpinner.vue'
 import OutsourceAddProcessDialog from './OutsourceAddProcessDialog.vue'
 import { useApiMutation } from '@/composables/useApiMutation'
 import { useAuthStore } from '@/stores/auth'
-import { toast } from '@/composables/useToast'
 
 const props = defineProps<{
   pendingProducts: { product_id: number; product_name: string; product_barcode: string | null; factory: string | null }[]

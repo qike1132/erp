@@ -10,7 +10,7 @@
       <option v-for="n in pageSizeOptions" :key="n" :value="n">{{ n }} 条/页</option>
     </select>
 
-    <span v-if="totalItems != null" class="ui-page-total">共 {{ totalItems }} 条</span>
+    <span v-if="totalItems != null" class="ui-page-total">共 {{ totalItems }} {{ itemUnit }}</span>
 
     <div class="ui-page-nav">
       <button class="ui-page-btn" :disabled="currentPage <= 1" aria-label="上一页" @click="go(currentPage - 1)">
@@ -40,13 +40,20 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   currentPage: number
   totalPages: number
   totalItems?: number
   pageSize?: number
   pageSizeOptions?: number[]
-}>()
+  /**
+   * 「共 N ？？」的量词。默认「条」；当分页按 A 计数、表体按 B 渲染时用它把口径说清
+   * （例：订单记录页按「单据」分页但一行一 SKU 渲染，量词用「单」而不是「条」）。
+   */
+  itemUnit?: string
+}>(), {
+  itemUnit: '条',
+})
 
 const emit = defineEmits<{
   'update:currentPage': [page: number]

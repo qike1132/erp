@@ -16,6 +16,7 @@
         :is-loading="isLoading"
         :total-items="totalItems"
         :per-page="perPage"
+        :current-page="currentPage"
         @add="openForm('add')"
         @edit="(row) => openForm('edit', row)"
         @toggle="handleToggle"
@@ -62,10 +63,8 @@ const {
   currentPage,
   perPage,
   isLoading,
-  isFetching,
   customers,
   totalItems,
-  totalPages,
   formVisible,
   formMode,
   submitting,

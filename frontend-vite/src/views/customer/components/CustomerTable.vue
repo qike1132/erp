@@ -7,6 +7,9 @@
       paginator
       :rows="perPage"
       :total-records="totalItems"
+      :current-page="currentPage"
+      :page-size-options="[]"
+      hide-paginator-on-single-page
       row-key="id"
       empty-message="暂无客户数据"
       @page="onPageChange"
@@ -74,6 +77,8 @@ defineProps<{
   isLoading: boolean
   totalItems: number
   perPage: number
+  /** 受控页码（1 基），由父组件的 currentPage 驱动，避免表格内部分页与回源页码失步 */
+  currentPage: number
 }>()
 
 const emit = defineEmits<{

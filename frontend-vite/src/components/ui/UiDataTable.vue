@@ -86,6 +86,16 @@ const props = withDefaults(
     /** 每页条数可选项（透传给 UiPagination 的每页条数选择器） */
     pageSizeOptions?: number[]
     totalRecords?: number
+    /**
+     * 受控页码（1 基）。传入后页码由父组件掌控：组件不再于 totalRecords 变化时
+     * 自动复位到第 1 页 —— 服务端分页下那会造成「表格显示第 N 页数据、指示器却
+     * 显示 1 / N」的失步（父组件仍按旧页码回源）。
+     */
+    currentPage?: number
+    /** 只有一页时隐藏整条分页器（默认 false，保持既有 13 个视图的渲染不变） */
+    hidePaginatorOnSinglePage?: boolean
+    /** 分页器「共 N ？？」的量词，透传给 UiPagination（默认「条」） */
+    itemUnit?: string
     selection?: T[] | null
     rowKey?: string
     striped?: boolean
@@ -113,6 +123,9 @@ const props = withDefaults(
     rows: 20,
     pageSizeOptions: () => [10, 20, 50, 100],
     totalRecords: 0,
+    currentPage: undefined,
+    hidePaginatorOnSinglePage: false,
+    itemUnit: '条',
     rowKey: 'id',
     striped: true,
     emptyMessage: '暂无数据',
@@ -147,15 +160,22 @@ const emit = defineEmits<{
 // ============================================================
 // Pagination state
 // ============================================================
-const currentPage = ref(1)
+const currentPage = ref(props.currentPage ?? 1)
 const totalPages = computed(() => {
   const total = props.totalRecords || props.data.length
   return Math.max(1, Math.ceil(total / props.rows))
 })
 
+// 受控模式：父组件传了 currentPage 就以它为准，组件不自行改页码
+watch(
+  () => props.currentPage,
+  (v) => { if (v != null) currentPage.value = v },
+)
+
+// 非受控模式才在总数变化时回到第 1 页；受控模式的复位由父组件决定
 watch(
   () => props.totalRecords,
-  () => { currentPage.value = 1 },
+  () => { if (props.currentPage == null) currentPage.value = 1 },
 )
 
 // ============================================================
@@ -358,10 +378,11 @@ watch(
 
     <!-- 统一分页器：与 outsource/beile-order 等视图共享 UiPagination 样式 -->
     <UiPagination
-      v-if="paginator"
+      v-if="paginator && !(hidePaginatorOnSinglePage && totalPages <= 1)"
       :current-page="currentPage"
       :total-pages="totalPages"
       :total-items="totalRecords || data.length"
+      :item-unit="itemUnit"
       :page-size="rows"
       :page-size-options="pageSizeOptions"
       @update:current-page="onPage"

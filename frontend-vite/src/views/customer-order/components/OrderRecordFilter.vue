@@ -23,13 +23,14 @@
     <UiButton variant="primary" size="sm" @click="$emit('search')">
       <FontAwesomeIcon icon="search" style="margin-right: 4px" aria-hidden="true" />查询
     </UiButton>
-    <span v-if="!isLoading" class="co-search-count">共 <b>{{ totalRecords }}</b> 条</span>
+    <!-- 量词用「单」：本页按单据分页、表体一行一 SKU 渲染，说「条」会与实际行数对不上 -->
+    <span v-if="!isLoading" class="co-search-count">共 <b>{{ totalRecords }}</b> 单</span>
   </div>
 </template>
 
 <script setup lang="ts">
 /**
- * OrderRecordFilter.vue — 记录查询的搜索工具条（搜索框 · 查询 · 共 N 条）
+ * OrderRecordFilter.vue — 记录查询的搜索工具条（搜索框 · 查询 · 共 N 单）
  *
  * 2026-10-01：整条从「记录列表」那一行上移到卡片页头右侧，与「录入 / 记录查询」
  * 两个 TAB 同排；「记录列表」标题与图标随之删除（用户要求）。

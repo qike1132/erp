@@ -25,6 +25,7 @@
         :action-id="actionId"
         :total-items="totalItems"
         :per-page="perPage"
+        :current-page="currentPage"
         @toggle="handleToggle"
         @edit="openEditDialog"
         @delete="handleDelete"
@@ -85,10 +86,8 @@ const {
   onSearchInput,
   clearSearch,
   isLoading,
-  isFetching,
   suppliers,
   totalItems,
-  totalPages,
   goPage,
   formOpen,
   submitting,
