@@ -27,7 +27,10 @@ alembic==1.16.0
 cryptography==50.0.1
 
 # ----- 安全 -----
-PyJWT==2.13.0
+# 2.13.0 → 2.15.0：修 13 条 PYSEC-2026-414x（其中 4141 需 2.15.0，其余 2.14.0 即可）。
+# 项目只用 jwt.encode / jwt.decode(algorithms=...) 这套现行 2.x API，无已移除参数，
+# 跨版无破坏面；升级后已跑全量回归。
+PyJWT==2.15.0
 argon2-cffi==25.1.0
 # bcrypt 仅用于迁移旧密码哈希，已移至 requirements/migration.txt
 # 若需验证旧 bcrypt 哈希：pip install -r requirements/migration.txt
