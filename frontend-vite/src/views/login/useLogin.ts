@@ -8,7 +8,7 @@ import { setAccessToken } from '@/utils/secureStorage'
 import { getErrorMessage } from '@/types/errors'
 import { preloadEcharts } from '@/utils/echartsPreload'
 import { prefetchDashboardData } from '@/views/dashboard/composables/useDashboardStats'
-import { devLog } from '@/utils/devLog'
+import { devError, devLog } from '@/utils/devLog'
 
 /**
  * 登录页共享逻辑（PC / Mobile 复用）
@@ -61,7 +61,7 @@ export function useLogin() {
       }
       const res = await authApi.login({
         username: form.username,
-        password: form.password,
+        password: form.password,  // secret-scan:allow 右值是表单变量引用，非硬编码凭据（既有代码，逐字在 HEAD 中）
         remember: isCapacitor ? true : form.remember,
       })
       // 登录成功清除贝乐未确认订单弹窗标记，实现「每登录会话弹一次」
@@ -105,7 +105,11 @@ export function useLogin() {
       loginSuccess = true
       router.push(redirect)
     } catch (err: unknown) {
-      console.error('[Login] 登录流程异常:', err)
+      // 不能把整个 err 交给 console：axios 的 AxiosError.config.data 就是登录请求体
+      // `{"username":...,"password":...}`，任何失败（最常见的就是口令错 401）都会把
+      // **明文口令**打进控制台，且 console.error 生产构建同样触发。只记状态码与消息。
+      devError('[Login] 登录流程异常:', (err as { response?: { status?: number } })?.response?.status,
+        (err as Error)?.message)
       perf.markEnd('auth-start')
       perf.measure('auth-api-failed', 'auth-start')
       const msg = getErrorMessage(err, '登录失败，请检查用户名和密码')

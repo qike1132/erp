@@ -17,6 +17,7 @@ from fastapi_app.core.redis_wrapper import safe_delete_pattern
 from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.core.validators import validate_not_empty
 from fastapi_app.services.bom_service import has_bom as product_has_bom  # noqa: F401
+from fastapi_app.services.signed_urls import strip_upload_signature
 from fastapi_app.shared.stock_concurrency import assert_stock_available, get_product_for_update
 from fastapi_app.shared_models import InventoryLog, Order, OrderItem, Product, StockIn, StockOut
 
@@ -219,7 +220,7 @@ async def create_product(db: AsyncSession, name: str, barcode: str | None,
         name=name,
         barcode=barcode or '',
         price=price or 0,
-        image=image or '',
+        image=strip_upload_signature(image or ''),
         factory=factory or '',
         initial_stock=initial_stock,
         current_stock=initial_stock
@@ -286,7 +287,9 @@ async def update_product(db: AsyncSession, product_id: int, name: str | None,
     if price is not None:
         product.price = price
     if image is not None:
-        product.image = image
+        # 剥掉上传接口回传的限时签名 query：原样入库会让出站的 sign_upload_url
+        # 走"已含 ?"的幂等分支不再重签 → 过期后图片 410 且无法自愈。
+        product.image = strip_upload_signature(image)
     if factory is not None:
         product.factory = factory
 

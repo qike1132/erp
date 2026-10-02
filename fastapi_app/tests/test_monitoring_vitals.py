@@ -193,7 +193,12 @@ class TestCleanupThrottle:
     @pytest.mark.asyncio
     async def test_cleanup_throttle_flag_set_before_await(self):
         """节流标志须在 await 之前置位，否则并发请求会同时触发清理（惊群）。"""
-        monitoring._last_cleanup_at = 0.0
+        # 用**负哨兵**而非 0.0：`_maybe_cleanup` 里 now=time.monotonic()，
+        # 而 Windows 上 monotonic 是"开机以来的秒数"。若设 0.0，则机器开机不足
+        # _CLEANUP_INTERVAL_SECONDS(3600) 时 now-0 < 3600 → 节流提前返回 →
+        # 标志不被置位 → 本测试必红（与产品代码无关，纯环境相关 flake）。
+        # 负哨兵使 now - _last_cleanup_at 恒 >= 间隔，与开机时长无关。
+        monitoring._last_cleanup_at = -1_000_000.0
         session = AsyncMock()
         with patch.object(
             monitoring, 'get_async_db_context',

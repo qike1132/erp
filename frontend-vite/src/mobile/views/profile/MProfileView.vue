@@ -25,7 +25,7 @@
       </MList>
 
       <MList>
-        <MListItem title="退出登录" subtitle="退出当前账号">
+        <MListItem title="退出登录" subtitle="退出当前账号" clickable @click="onLogout">
           <template #icon><div class="m-menu-icon" style="background:rgba(255,45,85,0.08)"><svg viewBox="0 0 24 24" fill="none" stroke="#FF2D55" stroke-width="2" width="16" height="16"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></svg></div></template>
           <template #accessory><span /></template>
         </MListItem>
@@ -40,15 +40,30 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useRouter } from 'vue-router'
+import { authApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import MobileNavBar from '@/mobile/layouts/components/MobileNavBar.vue'
 import MList from '@/mobile/components/MList.vue'
 import MListItem from '@/mobile/components/MListItem.vue'
 
 const authStore = useAuthStore()
+const router = useRouter()
 
 const networkConnected = computed(() => navigator.onLine)
 const networkInfo = computed(() => networkConnected.value ? '已连接' : '离线')
+
+// 原「退出登录」项既无 `to` 也无 `@click`，而 MListItem 只处理 `to`，
+// 点击什么都不发生 —— **移动端根本没法登出**（共用终端下用户以为已退出、会话仍在）。
+// 与桌面端 DashboardToolbar.handleLogout 同款：接口失败也照样清本地态并跳登录页。
+async function onLogout() {
+  try {
+    await authApi.logout()
+  } finally {
+    authStore.logout()
+    router.replace('/login')
+  }
+}
 </script>
 
 <style scoped>

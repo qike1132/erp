@@ -151,3 +151,37 @@ def test_local_upload_path_is_signed(monkeypatch):
     assert resp.image is not None
     assert resp.image.startswith('/static/uploads/20261001/a.webp?')
     assert 'st=' in resp.image and 's=' in resp.image
+
+
+def test_strip_upload_signature_removes_query():
+    """回归（2026-10-02 P4/P5 审计）：入库前必须剥掉限时签名 query。
+
+    上传接口回传的是已签名 URL；若原样入库，读时 sign_upload_url 会因"已含 ?"
+    走幂等分支**原样返回**（不重签）→ 过了 st 的到期时间 nginx secure_link 返回
+    410，图片永久失效。产品新增/编辑（哪怕只改名）约 1 小时后即触发。
+    """
+    from fastapi_app.services.signed_urls import strip_upload_signature
+
+    assert strip_upload_signature(
+        '/static/uploads/2026/10/x.webp?st=1759&s=abc'
+    ) == '/static/uploads/2026/10/x.webp'
+    # 无签名的原样返回
+    assert strip_upload_signature('/static/uploads/a.webp') == '/static/uploads/a.webp'
+    assert strip_upload_signature('') == ''
+    # 外部绝对 URL 只去 query，不动主机
+    assert strip_upload_signature('https://cdn.x/a.png?v=1') == 'https://cdn.x/a.png'
+
+
+def test_stripped_url_is_reissued_not_passthrough(monkeypatch):
+    """剥签名后再签发，必须得到**新鲜签名**而不是过期透传。"""
+    monkeypatch.setenv('UPLOAD_URL_SIGNING_SECRET', 's3cret')
+    from fastapi_app.services.signed_urls import sign_upload_url, strip_upload_signature
+
+    expired = '/static/uploads/2026/10/x.webp?st=1&s=deadbeef'
+    # 未剥：幂等透传，拿回的是同一个已过期串
+    assert sign_upload_url(expired) == expired
+    # 剥后再签：重新签发，带上全新的 st/s
+    fresh = sign_upload_url(strip_upload_signature(expired))
+    assert fresh != expired
+    assert fresh.startswith('/static/uploads/2026/10/x.webp?')
+    assert 'st=' in fresh and 's=' in fresh

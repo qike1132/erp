@@ -196,8 +196,12 @@ function onSort(event: DataTableSortEvent) {
   emit('sort', { field: event.sortField as string, order: event.sortOrder as number })
 }
 
-function onRowSelect(event: { data: T[] }) {
-  emit('update:selection', event.data)
+// PrimeVue 的 `update:selection` 事件**载荷就是选择值本身**（value: T[] | T | undefined），
+// 不是 `{ data }` 包装对象（那是 `@row-select` 事件的形状）。
+// 原先写 `event.data` 恒为 undefined → update:selection 永远发 undefined，
+// 任何调用方勾选行后选择态立刻被清空、批量操作拿不到行。
+function onRowSelect(value: T[]) {
+  emit('update:selection', value ?? [])
 }
 
 // ============================================================

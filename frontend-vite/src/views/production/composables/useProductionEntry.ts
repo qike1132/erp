@@ -168,6 +168,8 @@ export function useProductionEntry(
   const productSearchRef = ref<HTMLInputElement>()
   const quantityRef = ref<HTMLInputElement>()
   let searchTimer: ReturnType<typeof setTimeout> | null = null
+  // selectProduct 的单价请求序号（丢弃过期响应，防止乱序覆盖）
+  let _priceSeq = 0
 
   function onSearchInput() {
     if (searchTimer) clearTimeout(searchTimer)
@@ -230,18 +232,23 @@ export function useProductionEntry(
     form.product_id = product.id
     form.product_name = product.name
     form.barcode = product.barcode || ''
+    // 必须先归零：否则新产品无单价（price 为 0/null）时会**沿用上一个产品的单价**，
+    // 提交后 create_record 直接把错误单价写进生产记录，产值失真（后端不重算单价）。
+    form.unit_price = 0
     searchQuery.value = product.name
     searchResults.value = []
     showDropdown.value = false
     searchActiveIndex.value = -1
     pushRecent(product)
+    // 请求序号：连点 chip/快速换产品时，慢响应不得覆盖新产品的单价
+    const seq = ++_priceSeq
     try {
       const infoRes = await dailyProductionApi.productInfo(product.id)
-      if (infoRes?.data?.price) {
+      if (seq === _priceSeq && infoRes?.data?.price) {
         form.unit_price = infoRes.data.price
       }
     } catch {
-      // 获取单价失败不影响主流程
+      // 获取单价失败不影响主流程（此时 unit_price 保持 0，由用户手填）
     }
     // 选品即完成 → 焦点直奔数量框，键盘流不断线（鼠标点 chip 时同样受益）
     nextTick(() => quantityRef.value?.focus())

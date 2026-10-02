@@ -36,6 +36,19 @@ def signing_secret() -> str:
     return os.getenv("UPLOAD_URL_SIGNING_SECRET", "").strip()
 
 
+def strip_upload_signature(url: str) -> str:
+    """剥掉图片/附件引用上的签名 query，得到可长期入库的原始路径。
+
+    上传接口返回的是**限时签名** URL（`/static/uploads/x.webp?st=..&s=..`）。
+    若把带签名的整串**原样存库**，读时 `sign_upload_url` 会因"已含 ?"而按幂等
+    分支**原样返回**（不再重新签发）→ 过了 `st` 的到期时间，nginx secure_link
+    返回 **410**，图片/附件永久失效且无法自愈。
+    2026-10-02 P4/P5 审计实测据此确认：产品新增/编辑（哪怕只改名）约 1 小时后
+    图片 410。落库只存 key/路径，签名一律在出站时现签。
+    """
+    return url.split('?', 1)[0] if url else url
+
+
 def sign_upload_url(key: str, ttl_seconds: int = 3600) -> str:
     """为 storage key 签发限时访问 URL（幂等：已带签名的 URL 原样返回）。
 

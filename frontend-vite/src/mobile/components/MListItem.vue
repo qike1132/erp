@@ -1,5 +1,5 @@
 <template>
-  <div :class="['m-list-item', { clickable: !!to, active }]" @click="handleClick">
+  <div :class="['m-list-item', { clickable: clickable ?? !!to, active }]" @click="handleClick">
     <div v-if="$slots.icon" class="m-list-item-icon">
       <slot name="icon" />
     </div>
@@ -27,6 +27,8 @@ const props = defineProps<{
   subtitle?: string
   to?: string
   active?: boolean
+  /** 有动作但非跳转的项（如"退出登录"）：显式声明可点击样式，配合外部原生 @click 使用。 */
+  clickable?: boolean
 }>()
 
 const router = useRouter()
