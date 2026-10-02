@@ -25,6 +25,9 @@
             <span :class="['sc-dir', item.direction === 'in' ? 'sc-dir-in' : 'sc-dir-out']">
               {{ item.direction === 'in' ? '入库' : '出库' }}
             </span>
+            <span :class="['sc-type', item.isPart ? 'sc-type-part' : 'sc-type-main']">
+              {{ item.isPart ? '配件' : '主件' }}
+            </span>
             {{ item.caseName }}
           </div>
           <div class="sc-item-meta">
@@ -184,6 +187,9 @@ const emit = defineEmits<{
 .sc-dir { display: inline-block; padding: 1px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; margin-right: 6px; }
 .sc-dir-in { background: var(--color-success-50); color: var(--color-success-600); }
 .sc-dir-out { background: var(--color-danger-50); color: var(--color-danger-600); }
+.sc-type { display: inline-block; padding: 1px 8px; border-radius: 12px; font-size: 11px; font-weight: 700; margin-right: 6px; color: #fff; }
+.sc-type-main { background: var(--color-primary-500); }
+.sc-type-part { background: var(--color-warning-500); }
 
 .sc-qty-editor { display: flex; align-items: stretch; }
 .sc-qty-btn {

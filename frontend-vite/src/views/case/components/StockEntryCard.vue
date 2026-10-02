@@ -39,6 +39,10 @@
         </UiAutocomplete>
       </div>
 
+      <div v-if="!selectedName && !loadingTree" class="sec-tip">
+        输入关键词后，<b>在下方下拉里点选一个产品</b>，才会列出它的皮套（主件 + 配件），逐行填数量。
+      </div>
+
       <div v-if="loadingTree" class="sec-parts-loading"><UiLoadingIcon :loading="true" icon="spinner" /> 载入皮套…</div>
 
       <div v-else-if="parts.length" class="sec-parts">
@@ -49,11 +53,11 @@
         <div
           v-for="row in parts"
           :key="row.caseId"
-          :class="['sec-part-row', { 'sec-part-invalid': isInvalid(row) }]"
+          :class="['sec-part-row', row.isPart ? 'sec-part-row-part' : 'sec-part-row-main', { 'sec-part-invalid': isInvalid(row) }]"
         >
           <input v-model="row.checked" type="checkbox" class="sec-part-check" :aria-label="`选择 ${row.name}`" />
+          <span :class="row.isPart ? 'sec-tag-part' : 'sec-tag-main'">{{ row.isPart ? '配件' : '主件' }}</span>
           <span class="sec-part-name">{{ row.name }}</span>
-          <span v-if="row.isPart" class="sec-part-tag">配件</span>
           <span class="sec-part-stock" :class="{ 'sec-part-stock-zero': row.stock <= 0 }">库存 {{ row.stock }}</span>
           <input v-model.number="row.qty" type="number" min="1" step="1" class="sec-part-qty" :aria-label="`${row.name} 数量`" @keydown.enter.prevent="emitAdd" />
         </div>
@@ -164,7 +168,7 @@ function emitAdd() {
   if (!canAdd.value) return
   emit(
     'add',
-    checkedRows.value.map((r) => ({ caseId: r.caseId, caseName: r.name, quantity: r.qty })),
+    checkedRows.value.map((r) => ({ caseId: r.caseId, caseName: r.name, isPart: r.isPart, quantity: r.qty })),
   )
   // 加入后清空勾选与数量，便于继续录同一方向
   for (const r of parts.value) {
@@ -257,6 +261,15 @@ function emitAdd() {
 
 .sec-option-name { margin-right: 6px; }
 .sec-option-barcode { color: var(--color-text-muted); font-size: 11px; }
+.sec-tip {
+  margin: -4px 0 12px;
+  padding: 8px 12px;
+  border-radius: 9px;
+  background: var(--color-primary-50);
+  color: var(--color-primary-700);
+  font-size: 12px;
+  line-height: 1.5;
+}
 
 .sec-parts {
   border: 1px solid var(--color-border-light, #e2e8f0);
@@ -280,14 +293,18 @@ function emitAdd() {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px;
+  padding: 10px 12px;
   border-bottom: 1px solid var(--color-border-light, #f8fafc);
 }
 .sec-part-row:last-child { border-bottom: none; }
+.sec-part-row-main { background: var(--color-primary-50); }
+.sec-part-row-main .sec-part-name { font-weight: 700; color: var(--color-primary-700); }
+.sec-part-row-part { background: #fff; }
 .sec-part-row.sec-part-invalid { background: var(--color-danger-50); }
 .sec-part-check { width: 16px; height: 16px; flex-shrink: 0; cursor: pointer; }
 .sec-part-name { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; color: var(--color-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sec-part-tag { flex-shrink: 0; font-size: 11px; padding: 1px 7px; border-radius: 10px; background: var(--color-border-light); color: var(--color-text-secondary); }
+.sec-tag-main { flex-shrink: 0; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 10px; background: var(--color-primary-500); color: #fff; }
+.sec-tag-part { flex-shrink: 0; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 10px; background: var(--color-warning-500); color: #fff; }
 .sec-part-stock { flex-shrink: 0; font-size: 12px; color: var(--color-text-muted); }
 .sec-part-stock-zero { color: var(--color-danger-500); }
 .sec-part-qty {

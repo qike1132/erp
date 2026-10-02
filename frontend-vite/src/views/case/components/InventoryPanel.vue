@@ -84,7 +84,7 @@
             >
               <td class="left ip-indent">
                 {{ child.name }}
-                <span class="ip-tag ip-tag-part">配件 · 配比 ×{{ child.qty_per_set }}</span>
+                <span class="ip-tag ip-tag-part">配件</span>
               </td>
               <td><small class="ip-barcode">{{ child.barcode || '-' }}</small></td>
               <td>{{ child.unit || '-' }}</td>

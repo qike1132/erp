@@ -9,11 +9,12 @@ import { toISODate } from '@/utils/format'
 
 export type Direction = 'in' | 'out'
 
-/** 暂存单条目（自带方向） */
+/** 暂存单条目（自带方向与主件/配件标记） */
 export interface StagedStockItem {
   key: number
   caseId: string
   caseName: string
+  isPart: boolean
   direction: Direction
   date: string
   quantity: number
@@ -31,6 +32,7 @@ export interface CaseStockFormState {
 export interface StagedRowInput {
   caseId: string
   caseName: string
+  isPart: boolean
   quantity: number
 }
 
@@ -73,6 +75,7 @@ export function useCaseStockWorkbench() {
         key: ++stagedSeq,
         caseId: r.caseId,
         caseName: r.caseName,
+        isPart: r.isPart,
         direction: form.direction,
         date: form.date,
         quantity: r.quantity,

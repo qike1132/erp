@@ -1,5 +1,6 @@
 <template>
   <div class="set-wrap">
+    <!-- 产品选择 -->
     <div class="set-card">
       <div class="set-head">
         <FontAwesomeIcon icon="gear" style="color: var(--color-primary-500)" aria-hidden="true" />
@@ -26,28 +27,38 @@
     <div v-if="loading" class="set-loading"><UiLoadingIcon :loading="true" icon="spinner" /> 载入…</div>
 
     <div v-else-if="main" class="set-card">
-      <div class="set-head">
-        <span>主件：<b>{{ main.name }}</b></span>
-        <span class="set-tag">主件</span>
-        <span class="set-sub">库存 {{ main.current_stock }}</span>
-      </div>
+      <div class="set-sect-head">主件</div>
       <div class="set-body">
-        <div class="set-sub-head">配件（{{ rows.length }}）</div>
-
-        <div v-for="row in rows" :key="row.id" class="set-row">
-          <input v-model="row.name" class="set-input" aria-label="配件名称" />
-          <label class="set-qty-label">配比 ×<input v-model.number="row.qtyPerSet" type="number" min="1" class="set-qty" aria-label="配比" /></label>
-          <button class="set-btn set-btn-ghost" :disabled="saving" @click="savePart(row)">保存</button>
-          <button class="set-btn set-btn-del" :disabled="saving" @click="removePart(row)">删除</button>
+        <!-- 主件带 -->
+        <div class="set-main-band">
+          <span class="set-tag-main">主件</span>
+          <span class="set-main-name">{{ main.name }}</span>
+          <span class="set-main-stock">库存 {{ main.current_stock }}</span>
         </div>
-        <div v-if="!rows.length" class="set-empty">暂无配件，可在下方添加</div>
 
-        <div class="set-add-row">
-          <input v-model="newName" class="set-input" placeholder="新配件名称（如：鲨鱼帽子）" aria-label="新配件名称" />
-          <label class="set-qty-label">配比 ×<input v-model.number="newQty" type="number" min="1" class="set-qty" aria-label="新配件配比" /></label>
-          <button class="set-btn set-btn-primary" :disabled="saving || !newName.trim()" @click="onAdd">添加配件</button>
+        <!-- 配件卡片 -->
+        <div class="set-sect-head" style="background:none;border:none;padding:14px 0 8px">配件 <span class="set-sub">{{ rows.length }} 项</span></div>
+        <div class="set-chips">
+          <span v-for="row in rows" :key="row.id" class="set-chip">
+            <span class="set-tag-part">配件</span>
+            <span class="set-chip-name">{{ row.name }}</span>
+            <span class="set-chip-ratio">×{{ row.qtyPerSet }}</span>
+            <button class="set-chip-edit" :disabled="saving" aria-label="编辑" @click="openEdit(row)">改</button>
+            <button class="set-chip-del" :disabled="saving" aria-label="删除" @click="removePart(row)">✕</button>
+          </span>
+          <button v-if="!edit" class="set-chip-add" aria-label="添加配件" @click="openAdd">＋ 添加配件</button>
         </div>
-        <div class="set-hint">配比先存着备用（暂不参与计算）。配件与主件各自独立出入库。</div>
+
+        <!-- 添加 / 编辑 表单 -->
+        <div v-if="edit" class="set-edit">
+          <span class="set-tag-part" style="flex-shrink:0">{{ edit.id == null ? '新增' : '编辑' }}</span>
+          <input v-model="edit.name" class="set-cell-input" placeholder="配件名称（如：鲨鱼帽子）" aria-label="配件名称" />
+          <label class="set-qty-label">配比 ×<input v-model.number="edit.qty" type="number" min="1" class="set-cell-qty" aria-label="配比" /></label>
+          <button class="set-btn set-btn-primary" :disabled="saving || !edit.name.trim()" @click="submitEdit">保存</button>
+          <button class="set-btn set-btn-ghost" :disabled="saving" @click="edit = null">取消</button>
+        </div>
+
+        <div class="set-hint">配比先存着备用（暂不参与计算）；配件与主件各自独立出入库。</div>
       </div>
     </div>
 
@@ -59,12 +70,12 @@
 
 <script setup lang="ts">
 /**
- * CaseSettingsPanel — 皮套设置：按产品维护主件 + 配件（名称、配比）。
+ * CaseSettingsPanel — 皮套设置（主件带 + 配件卡片；点「改」或「＋」在下方编辑）。
  */
 import { ref } from 'vue'
 import UiAutocomplete from '@/components/ui/UiAutocomplete.vue'
 import UiLoadingIcon from '@/components/ui/UiLoadingIcon.vue'
-import { useCaseSettings } from '../composables/useCaseSettings'
+import { useCaseSettings, type EditablePart } from '../composables/useCaseSettings'
 import type { Product } from '@/types'
 
 const {
@@ -80,13 +91,24 @@ const {
   removePart,
 } = useCaseSettings()
 
-const newName = ref('')
-const newQty = ref(1)
+/** 当前编辑/新增的表单（id=null 表示新增） */
+const edit = ref<{ id: number | null; name: string; qty: number } | null>(null)
 
-function onAdd() {
-  void addPart(newName.value, newQty.value)
-  newName.value = ''
-  newQty.value = 1
+function openAdd() {
+  edit.value = { id: null, name: '', qty: 1 }
+}
+function openEdit(row: EditablePart) {
+  edit.value = { id: row.id, name: row.name, qty: row.qtyPerSet }
+}
+function submitEdit() {
+  const e = edit.value
+  if (!e || !e.name.trim()) return
+  if (e.id == null) {
+    addPart(e.name, e.qty)
+  } else {
+    savePart({ id: e.id, name: e.name, qtyPerSet: e.qty })
+  }
+  edit.value = null
 }
 </script>
 
@@ -109,66 +131,134 @@ function onAdd() {
   color: var(--color-text);
 }
 .set-sub { color: var(--color-text-muted); font-weight: 400; font-size: 12px; }
-.set-tag { font-size: 11px; padding: 1px 8px; border-radius: 10px; background: var(--color-primary-50); color: var(--color-primary-700); font-weight: 600; }
 .set-body { padding: 16px; }
 .set-label { display: block; font-size: 12px; font-weight: 600; color: var(--color-text-secondary); margin-bottom: 6px; }
 .set-option-name { margin-right: 6px; }
 .set-option-barcode { color: var(--color-text-muted); font-size: 11px; }
 
-.set-sub-head { font-size: 13px; font-weight: 600; color: var(--color-text-secondary); margin-bottom: 8px; }
-.set-row {
+.set-sect-head {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 8px;
+  padding: 10px 16px;
+  background: var(--color-surface, #f8fafc);
+  border-bottom: 1px solid var(--color-border-light, #f1f5f9);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-text-secondary);
 }
-.set-input {
-  flex: 1;
-  min-width: 0;
-  height: 34px;
+
+/* 主件带 */
+.set-main-band {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  background: var(--color-primary-50);
+  border-left: 4px solid var(--color-primary-500);
+  border-radius: 10px;
+}
+.set-main-name { font-size: 15px; font-weight: 700; color: var(--color-primary-700); }
+.set-main-stock { margin-left: auto; font-size: 12px; color: var(--color-text-muted); }
+
+.set-tag-main { flex-shrink: 0; display: inline-flex; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 10px; background: var(--color-primary-500); color: #fff; }
+.set-tag-part { flex-shrink: 0; display: inline-flex; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 10px; background: var(--color-warning-500); color: #fff; }
+
+/* 配件卡片 */
+.set-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.set-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px 6px 10px;
+  border: 1px solid var(--color-border-light, #e2e8f0);
+  border-radius: 20px;
+  background: #fff;
+  font-size: 13px;
+}
+.set-chip-name { font-weight: 600; color: var(--color-text); }
+.set-chip-ratio { color: var(--color-text-muted); font-size: 12px; }
+.set-chip-edit {
+  border: none;
+  background: var(--color-primary-50);
+  color: var(--color-primary-700);
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.set-chip-del {
+  border: none;
+  background: var(--color-danger-50);
+  color: var(--color-danger-600);
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 700;
+  width: 22px;
+  height: 22px;
+  cursor: pointer;
+}
+.set-chip-add {
+  border: 1px dashed var(--color-primary-300, #8babf5);
+  background: #fff;
+  color: var(--color-primary-600);
+  border-radius: 20px;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.set-chip-add:hover { background: var(--color-primary-50); }
+
+/* 编辑表单 */
+.set-edit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  background: #fbfcff;
+  border: 1px solid var(--color-border-light, #e2e8f0);
+  border-radius: 10px;
+}
+.set-edit .set-cell-input { flex: 1; }
+.set-cell-input {
+  width: 100%;
+  height: 32px;
   padding: 0 10px;
   border: 1px solid var(--color-border-light, #e2e8f0);
-  border-radius: 9px;
+  border-radius: 8px;
   font-size: 13px;
   color: var(--color-text);
   font-family: inherit;
   outline: none;
 }
-.set-input:focus { border-color: var(--color-primary-400); }
+.set-cell-input:focus { border-color: var(--color-primary-400); }
 .set-qty-label { flex-shrink: 0; display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--color-text-secondary); }
-.set-qty {
+.set-cell-qty {
   width: 56px;
-  height: 34px;
+  height: 32px;
   text-align: center;
   border: 1px solid var(--color-border-light, #e2e8f0);
-  border-radius: 9px;
+  border-radius: 8px;
   font-size: 13px;
   outline: none;
 }
 .set-btn {
   flex-shrink: 0;
-  height: 34px;
+  height: 32px;
   padding: 0 12px;
-  border-radius: 9px;
+  border-radius: 8px;
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
 }
 .set-btn:disabled { opacity: 0.45; cursor: not-allowed; }
-.set-btn-ghost { border: 1px solid var(--color-border-light, #e2e8f0); background: white; color: var(--color-text-secondary); }
-.set-btn-del { border: none; background: var(--color-danger-50); color: var(--color-danger-600); }
-.set-btn-primary { border: none; background: linear-gradient(135deg, var(--color-primary-500), var(--color-primary-700)); color: white; }
+.set-btn-ghost { border: 1px solid var(--color-border-light, #e2e8f0); background: #fff; color: var(--color-text-secondary); }
+.set-btn-primary { border: none; background: linear-gradient(135deg, var(--color-primary-500), var(--color-primary-700)); color: #fff; }
 
-.set-add-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px dashed var(--color-border-light);
-}
-.set-empty { color: var(--color-text-muted); font-size: 13px; padding: 8px 0; }
 .set-empty-outer { color: var(--color-text-muted); font-size: 13px; }
-.set-hint { margin-top: 10px; font-size: 12px; color: var(--color-text-muted); }
+.set-hint { margin-top: 12px; font-size: 12px; color: var(--color-text-muted); }
 .set-loading { display: flex; align-items: center; gap: 6px; padding: 12px; color: var(--color-text-muted); font-size: 13px; }
 </style>
