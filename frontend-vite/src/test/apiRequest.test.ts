@@ -143,3 +143,78 @@ describe('重试策略（通过 exports 行为间接验证）', () => {
     getSpy.mockRestore()
   })
 })
+
+// ---------------------------------------------------------------------------
+// 2026-10-02 P4/P5 审计：写操作**默认不再盲重试**。
+// 原实现对所有 POST/PUT/DELETE 在 502/503/504 时无条件重放一次 —— 而 nginx 在
+// 「后端已提交、响应途中断连」时正会返回 502，重放会**重复下单/重复扣减**。
+// 浏览器侧无法区分「未送达」与「已送达但响应丢失」，故默认关闭，仅显式 opt-in。
+// ---------------------------------------------------------------------------
+describe('写操作重试（默认关闭）', () => {
+  const gatewayErr = (status: number) => Object.assign(new Error(`status ${status}`), {
+    isAxiosError: true,
+    response: { status },
+  })
+
+  beforeEach(() => {
+    vi.resetModules()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('默认不重试：502 时 post 只发起一次（不重复下单）', async () => {
+    const request = await import('@/api/request')
+    const service = (await import('@/api/request')).default
+    const spy = vi.spyOn(service, 'post').mockRejectedValue(gatewayErr(502))
+
+    await expect(request.post('/orders/create', { qty: 1 })).rejects.toBeTruthy()
+    expect(spy).toHaveBeenCalledTimes(1)
+    spy.mockRestore()
+  })
+
+  it('默认不重试：503/504 同样只发起一次', async () => {
+    const request = await import('@/api/request')
+    const service = (await import('@/api/request')).default
+    for (const code of [503, 504]) {
+      const spy = vi.spyOn(service, 'post').mockRejectedValue(gatewayErr(code))
+      await expect(request.post('/x', {})).rejects.toBeTruthy()
+      expect(spy).toHaveBeenCalledTimes(1)
+      spy.mockRestore()
+    }
+  })
+
+  it('del 默认也不重试（避免二次 404 造成「删除失败」的假失败）', async () => {
+    const request = await import('@/api/request')
+    const service = (await import('@/api/request')).default
+    const spy = vi.spyOn(service, 'delete').mockRejectedValue(gatewayErr(502))
+
+    await expect(request.del('/orders/1')).rejects.toBeTruthy()
+    expect(spy).toHaveBeenCalledTimes(1)
+    spy.mockRestore()
+  })
+
+  it('显式 retryable:true 时才重试一次（幂等写可用）', async () => {
+    vi.useFakeTimers()
+    const request = await import('@/api/request')
+    const service = (await import('@/api/request')).default
+    const spy = vi.spyOn(service, 'post').mockRejectedValue(gatewayErr(502))
+
+    const p = request.post('/idempotent', {}, { retryable: true })
+    const assertion = expect(p).rejects.toBeTruthy()
+    await vi.advanceTimersByTimeAsync(1500)
+    await assertion
+    expect(spy).toHaveBeenCalledTimes(2)
+    spy.mockRestore()
+  })
+
+  it('retryable:true 但错误非网关码（如 422）仍不重试', async () => {
+    const request = await import('@/api/request')
+    const service = (await import('@/api/request')).default
+    const spy = vi.spyOn(service, 'post').mockRejectedValue(gatewayErr(422))
+
+    await expect(request.post('/x', {}, { retryable: true })).rejects.toBeTruthy()
+    expect(spy).toHaveBeenCalledTimes(1)
+    spy.mockRestore()
+  })
+})

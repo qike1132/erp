@@ -220,10 +220,22 @@ for f in $staged; do
             #    允许 f"" / r"" / b"" / rb"" 等前缀（Python 硬编码密钥必然是带引号的字面量）。
             #    注意：本层只收窄「口令赋值」规则；私钥头 / 云凭据特征（$secret_patterns）
             #    对所有文件类型仍然照常生效，不受此处影响。
+            #
+            # 2026-10-02 补 .ts/.tsx/.vue/.js（原先只有 .py，导致同款误报在 TS 里无法豁免）：
+            #    实测 `frontend-vite/src/views/login/useLogin.ts` 的 `password: form.password,`
+            #    **逐字已经在 HEAD 中**，却让任何触及该文件的提交都被拦，只能加行内
+            #    `// secret-scan:allow` 绕过。判据用「右值是纯标识符路径则排除」——
+            #    比 .py 的「必须带引号」更强（连函数调用 `getPass()` 一并排除），
+            #    且无需在 shell 里内嵌反引号；`password: 'hunter2…'` / `` `hunter2…` ``
+            #    这类字面量仍照常命中。
             case "$f" in
                 *.py)
                     pwd_matches=$(printf '%s\n' "$pwd_matches" \
                         | grep -E '[:=][[:space:]]*[A-Za-z]{0,3}["'\'']' || true)
+                    ;;
+                *.ts|*.tsx|*.vue|*.js|*.mjs|*.cjs)
+                    pwd_matches=$(printf '%s\n' "$pwd_matches" \
+                        | grep -Ev '[:=][[:space:]]*[A-Za-z_$][A-Za-z0-9_$.]*$' || true)
                     ;;
             esac
 

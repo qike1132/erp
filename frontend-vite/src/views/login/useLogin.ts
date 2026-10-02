@@ -61,7 +61,7 @@ export function useLogin() {
       }
       const res = await authApi.login({
         username: form.username,
-        password: form.password,  // secret-scan:allow 右值是表单变量引用，非硬编码凭据（既有代码，逐字在 HEAD 中）
+        password: form.password,
         remember: isCapacitor ? true : form.remember,
       })
       // 登录成功清除贝乐未确认订单弹窗标记，实现「每登录会话弹一次」

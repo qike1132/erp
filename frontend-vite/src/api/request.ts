@@ -184,16 +184,36 @@ export function get<T>(url: string, params?: Record<string, unknown>): Promise<T
   return p
 }
 
-/** 写操作仅对 502/503/504 网关错误重试一次（不重试 4xx 业务错误） */
+/** 写重试**仅在被调用方显式声明幂等时**生效；命中的网关错误码 */
 const WRITE_RETRY_CODES = [502, 503, 504]
 
+/**
+ * 写操作重试。
+ *
+ * ⚠️ 默认**不重试**（`retryable` 必须显式为 true 才重试一次）。
+ *
+ * 原实现对**所有** POST/PUT/DELETE 在 502/503/504 时无条件重放一次，这是对
+ * **非幂等**操作的盲重试：nginx 在「后端已提交、响应途中断连」时正会返回 502，
+ * 于是重放 `POST /orders`、`/deduct-stock`、`/approvals/approve` 就是
+ * **重复下单 / 重复扣减 / 重复审批**；DELETE 重放还会因二次为 404 而报
+ * "删除失败"，但数据其实已删（假失败）。
+ *
+ * 为什么不能靠"是否收到响应"来判定：浏览器侧**无法区分**「请求根本没送达」与
+ * 「已送达并处理、但响应在回程丢失」——任何 HTTP 响应（含 502）或超时都可能属于后者。
+ * 因此只有**调用方明确知道该操作幂等**时才允许重试（例如带幂等键、或纯覆盖写）。
+ */
 async function executeWriteWithRetry<T>(
   fn: () => Promise<T>,
+  retryable: boolean,
 ): Promise<T> {
   try {
     return await fn()
   } catch (error: unknown) {
-    if (axios.isAxiosError(error) && error.response && WRITE_RETRY_CODES.includes(error.response.status)) {
+    if (
+      retryable
+      && axios.isAxiosError(error) && error.response
+      && WRITE_RETRY_CODES.includes(error.response.status)
+    ) {
       await delay(RETRY_DELAY_MS)
       return fn() // 仅重试一次
     }
@@ -201,16 +221,16 @@ async function executeWriteWithRetry<T>(
   }
 }
 
-export function post<T>(url: string, data?: unknown): Promise<T> {
-  return executeWriteWithRetry(() => service.post(url, data) as Promise<T>)
+export function post<T>(url: string, data?: unknown, opts?: { retryable?: boolean }): Promise<T> {
+  return executeWriteWithRetry(() => service.post(url, data) as Promise<T>, opts?.retryable === true)
 }
 
-export function put<T>(url: string, data?: unknown): Promise<T> {
-  return executeWriteWithRetry(() => service.put(url, data) as Promise<T>)
+export function put<T>(url: string, data?: unknown, opts?: { retryable?: boolean }): Promise<T> {
+  return executeWriteWithRetry(() => service.put(url, data) as Promise<T>, opts?.retryable === true)
 }
 
-export function del<T>(url: string): Promise<T> {
-  return executeWriteWithRetry(() => service.delete(url) as Promise<T>)
+export function del<T>(url: string, opts?: { retryable?: boolean }): Promise<T> {
+  return executeWriteWithRetry(() => service.delete(url) as Promise<T>, opts?.retryable === true)
 }
 
 /**
