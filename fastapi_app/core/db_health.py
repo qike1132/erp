@@ -60,7 +60,12 @@ class DBHealthChecker:
         while self._running:
             try:
                 await self._perform_check()
-            except (OperationalError, DisconnectionError) as e:
+            except Exception as e:  # defensive: 任何异常都不得让探活循环退出
+                # 原先只捕 (OperationalError, DisconnectionError)，而连接池耗尽时
+                # engine.connect() 抛的是 sqlalchemy.exc.TimeoutError —— 它是
+                # SQLAlchemyError 子类、不在这两类里，会一路冒泡出 while 结束该 task，
+                # 但 self._running 仍为 True，start() 之后不会再启动 →
+                # 探活与统计**永久停摆**（/api/health 主流程仍走 verify_db_connectivity，不易察觉）。
                 logger.error("健康检查循环异常: %s", e)
             await asyncio.sleep(self.check_interval)
 

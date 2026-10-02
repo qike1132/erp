@@ -127,7 +127,12 @@ def get_trace_context() -> dict:
 
 
 def attach_trace_context(carrier: dict):
-    """从字典中提取并附加 OTel trace 上下文到当前执行环境"""
+    """从字典中提取并附加 OTel trace 上下文到当前执行环境。
+
+    ⚠️ 只 attach 不 detach —— OTel 规范要求配对 detach()，否则在同一 context 内泄漏
+    trace 上下文。本函数目前**全仓无调用点**（仅 docstring 提及），故当前不可达；
+    若今后接入消息消费端，请把 attach() 返回的 token 存下来并在处理完后 detach。
+    """
     if not carrier:
         return
     try:

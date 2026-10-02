@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.cache import cache_result
 from fastapi_app.core.database import get_async_db, get_async_read_db
-from fastapi_app.core.deps import get_current_user_id, require_any_permission, require_permission
+from fastapi_app.core.deps import require_any_permission, require_permission
 from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.core.limiter import limiter, rate_limit_key
 from fastapi_app.schemas.stock import (
@@ -421,7 +421,9 @@ async def _fetch_stock_stats(db: AsyncSession) -> dict:
 
 @router.get('/stats', response_model=StockStatsResponse)
 async def get_stock_stats(
-    user_id: int = Depends(get_current_user_id),
+    # 与同文件其它库存端点同口径。原先只依赖 get_current_user_id（登录即可），
+    # 任何通过认证但无库存权限的用户都能读到订单/备货聚合值。
+    _user: User = Depends(require_any_permission('stockin_manage', 'order_manage')),
     db: AsyncSession = Depends(get_async_read_db),
 ) -> StockStatsResponse:
     """库存统计数据：订单数量与备货数量。

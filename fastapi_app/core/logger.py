@@ -6,7 +6,6 @@
 """
 
 import logging
-import os
 import sys
 from datetime import UTC, datetime
 from logging.handlers import TimedRotatingFileHandler
@@ -84,12 +83,17 @@ def setup_logging():
 
 
 def _get_renderer():
-    """根据环境选择日志渲染器"""
-    env = os.getenv("APP_ENV", "development")
-    if env == "production":
+    """根据环境选择日志渲染器。
+
+    用 config._is_production_env() 这个**全库统一入口**判定，不要自己判等 APP_ENV：
+    它接受 prod/production 并容忍大小写与空白，而 `== "production"` 会把 APP_ENV=prod、
+    或本仓库已记录过的 NSSM AppEnvironmentExtra 单元素错配（APP_ENV 里混进其它键）判成
+    "非生产" → 生产落到带颜色的 ConsoleRenderer（非 JSON），Loki/Promtail 解析与告警受影响。
+    """
+    from fastapi_app.core.config import _is_production_env
+    if _is_production_env():
         return JSONRenderer(ensure_ascii=False)
-    else:
-        return structlog.dev.ConsoleRenderer(colors=True)
+    return structlog.dev.ConsoleRenderer(colors=True)
 
 
 def get_logger(name: str | None = None) -> structlog.stdlib.BoundLogger:

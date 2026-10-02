@@ -476,8 +476,16 @@ class Settings(BaseSettings):
     MAX_PAGE_SIZE: int = 100
 
     def sanitize_error(self, error: Exception) -> str:
-        """生产环境下脱敏错误消息，防止泄露数据库/内部信息"""
-        if self.FASTAPI_DEBUG or os.getenv("APP_ENV", "") == "development":
+        """生产环境下脱敏错误消息，防止泄露数据库/内部信息。
+
+        ⚠️ 这里的判定**刻意不用** _is_production_env()：那个入口判的是"是不是生产"，
+        而本函数要判的是"是不是**显式**开发环境"。方向必须是 fail-safe ——
+        APP_ENV 未设置、写错（prod/production/dev 之外的任意值）时一律**脱敏**。
+        （曾试图统一成 `not _is_production_env()`，那会让未设置 APP_ENV 的环境
+        返回异常原文，被 tests/test_error_sanitization.py 当场拦下。）
+        """
+        env = os.getenv("APP_ENV", "").strip().lower()
+        if self.FASTAPI_DEBUG or env in ("development", "dev"):
             return str(error)
         return "服务器内部错误，请联系管理员"
 

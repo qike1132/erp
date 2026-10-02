@@ -21,6 +21,14 @@ class ApprovalAction:
 
 
 class ApprovalOperation:
+    """审批**操作**名（与 ApprovalAction 区分）。
+
+    ⚠️ EDIT / DELETE 目前是**死代码**：全仓无引用，且不在下方 TRANSITIONS 的转移表里，
+    因此 `can_transition(status, ApprovalOperation.EDIT)` 恒为 False。当前无调用点故无 bug，
+    但将来若照这两个常量驱动"可编辑/可删除"校验，会**静默全部失败**。
+    要用请先把它们纳入转移表。
+    """
+
     EDIT = 'edit'
     DELETE = 'delete'
 

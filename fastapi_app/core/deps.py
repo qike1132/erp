@@ -68,6 +68,12 @@ class _TTLCache:
             self._data.clear()
 
 
+# 进程内 L1 权限缓存。
+# ⚠️ 是**进程级**的：生产为多 uvicorn worker + 独立 ARQ 进程，invalidate_user_permission_cache
+# 只清当前 worker。管理员在 worker A 改权限后，B/C/D 的旧缓存最长存活到 TTL（5s）——
+# 撤销权限后数秒内仍生效、授予权限后数秒内仍 403，均为**有界窗口**。
+# 如需强一致，可改为 Redis 共享失效（domain_events 已定义 USER_PERMISSION_CHANGED 事件，
+# 但目前**无消费方**）；维持现状则请在运维文档中写明"权限变更最坏 5s 生效"。
 _PERMISSION_CACHE = _TTLCache(ttl=5, maxsize=500)
 
 async def _get_cached_user(user_id: int) -> User | None:
@@ -193,7 +199,12 @@ async def _authenticate_user_id(request: Request, db: AsyncSession, *, fail_clos
     fail_closed=True 时，黑名单校验在 Redis 故障且本地缓存未命中的情况下拒绝请求。
     """
     cached_payload = getattr(request.state, '_jwt_payload', None)
-    if cached_payload is not None:
+    # fail_closed=True（get_current_user_id_strict）时**不走**这个早返回：否则同请求内若
+    # 已有非严格依赖先解过 token，strict 的黑名单 fail-closed 语义会被静默抹掉。
+    # 当前唯一 fail-closed 使用点是 /backup 的**路由级**依赖（router.py，FastAPI 先解算
+    # 路由级依赖），故当前不可利用；但把"fail-closed 是否生效"绑在依赖求值顺序上是脆的
+    # —— docs/round2-claim-verification-2026-10-01.md:167 已给过同一建议。
+    if cached_payload is not None and not fail_closed:
         user_id = cached_payload.get('sub')
         if user_id:
             return int(user_id)

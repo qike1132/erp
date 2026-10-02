@@ -1,7 +1,14 @@
 """审批管理接口
 
 提供审批列表查询、审批详情、同意/拒绝审批、待处理计数等端点。
-所有端点均要求 order_manage 权限。
+
+**权限：仅超管**（全部端点用 `require_superuser('order_manage')` —— 即
+「持有 order_manage **且** is_super」；而超管的 `has_permission` 恒真，故实际闸门就是
+`is_super`）。2026-10-02 与业务确认：审批仅超管是有意设计，**不放开**给 approval_manage 持有者。
+
+⚠️ 部署侧注意：导航项「审批管理」的权限码是 `approval_manage`，与本接口要求的
+order_manage/is_super 不是同一码。若把 approval_manage 授予非超管用户，对方会看到侧栏入口
+但打开即 403（"分配好权限却 403"那一类）。授予时请只给超管。
 """
 import logging
 

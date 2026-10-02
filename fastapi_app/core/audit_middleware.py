@@ -24,10 +24,15 @@ from fastapi_app.core.logger import logger
 WRITE_METHODS = {'POST', 'PUT', 'PATCH', 'DELETE'}
 
 RESOURCE_MAP = {
+    # ⚠️ 顺序敏感：_resolve_resource_type 取**首个**前缀命中，更具体的必须排在更宽的前面。
+    # 原先写的 '/api/v1/stock-out' 永远匹配不到 —— stock_router 挂在 /stock 前缀，
+    # 真实路径是 /api/v1/stock/out/...，会被后面的 '/api/v1/stock' 抢先命中，
+    # 于是**出库写操作的 resource_type 被记成 stock_in**（审计检索/取证时出入库混淆）。
     '/api/v1/orders': 'order',
     '/api/v1/products': 'product',
+    '/api/v1/stock/out': 'stock_out',
+    '/api/v1/stock/in': 'stock_in',
     '/api/v1/stock': 'stock_in',
-    '/api/v1/stock-out': 'stock_out',
     '/api/v1/customers': 'customer',
     '/api/v1/suppliers': 'supplier',
     '/api/v1/users': 'user',

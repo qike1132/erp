@@ -22,8 +22,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi_app.core.config import settings
 from fastapi_app.core.database import get_async_db, verify_db_connectivity
 from fastapi_app.core.db_health import db_health_checker
-from fastapi_app.core.deps import get_current_user_id
+from fastapi_app.core.deps import get_current_user_id, require_superuser
 from fastapi_app.core.middleware import degraded_reasons
+from fastapi_app.shared_models import User
 
 logger = logging.getLogger(__name__)
 
@@ -182,7 +183,10 @@ def register_health_routes(app: FastAPI) -> None:
 
     @app.get("/api/health/db", tags=["健康检查"])
     async def db_health_detail(
-        user_id: int = Depends(get_current_user_id),
+        # 收紧到超管：本端点返回 pg_settings（max_connections/shared_buffers/work_mem…）、
+        # pg_stat_activity 状态计数、连接池内部计数与 last_failure_detail —— 原先任意
+        # 已登录用户即可读取数据库/连接池内部配置，属低价值但非必要的攻击面。
+        _user: User = Depends(require_superuser()),
         db: AsyncSession = Depends(get_async_db),
     ):
         result: dict[str, Any] = {

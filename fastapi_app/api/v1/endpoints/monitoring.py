@@ -192,7 +192,9 @@ def _summarize_from_memory() -> dict:
     """进程内统计（降级路径，多 worker 各自独立）。"""
     result: dict[str, dict] = {}
     for key, values in _vital_stats.items():
-        name, rating = key.split(':')
+        # rsplit 而非 split：name 来自**未认证**的 POST /vitals，可含 ':'，
+        # 用 split 会返回 3+ 项直接 ValueError（该分支在 except 内抛出、无人兜底 → 500）。
+        name, rating = key.rsplit(':', 1)
         vals = list(values)
         result.setdefault(name, {})[rating] = {
             'count': len(vals),

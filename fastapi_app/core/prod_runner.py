@@ -385,16 +385,25 @@ class _Managed:
         return self.proc is not None and self.proc.poll() is None
 
     def kill_tree(self) -> None:
-        """终止整棵进程树（Windows taskkill /T；非 Windows 用进程组）。"""
+        """终止整棵进程树（Windows taskkill /T；非 Windows 用进程组）。
+
+        必须确认进程**真的**终止了：原先不看 taskkill 返回码、`wait` 超时也被 suppress，
+        随后无条件把 self.proc 置 None —— 若 taskkill 因权限/句柄失败，旧进程树仍占着
+        :5002，而监督器已按"进程已退出"把它安排重启 → 端口冲突 + 孤儿进程
+        （2026-10-02 排查 NSSM 孤儿时确认过这条链路）。
+        """
         if not self.proc:
             return
         pid = self.proc.pid
         if os.name == "nt":
-            subprocess.run(  # nosec B603 B607
+            result = subprocess.run(  # nosec B603 B607
                 ["taskkill", "/F", "/T", "/PID", str(pid)],
                 creationflags=_CREATE_NO_WINDOW,
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15,
             )
+            if result.returncode != 0:
+                print(f"[prod_runner] 警告: taskkill 返回 {result.returncode}，"
+                      f"PID {pid} 的进程树可能未终止（旧进程会继续占用端口）")
         else:
             import signal
             try:
@@ -403,6 +412,9 @@ class _Managed:
                 self.proc.terminate()
         with contextlib.suppress(subprocess.TimeoutExpired):
             self.proc.wait(timeout=5)
+        if self.proc.poll() is None:
+            print(f"[prod_runner] 警告: PID {pid} 在终止后仍存活，"
+                  f"它可能成为占用端口的孤儿进程，请手工确认")
         if self._logf:
             with contextlib.suppress(OSError):
                 self._logf.close()
