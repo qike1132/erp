@@ -16,6 +16,12 @@ logger = logging.getLogger(__name__)
 # 常量
 # ---------------------------------------------------------------------------
 BACKUP_DIR = Path(os.environ.get('BACKUP_DIR', 'backups/server'))
+# 备份文件扩展名（供 glob/扫描统一使用）。
+# ⚠️ 必须含 '.zip.enc'：生产 BACKUP_ENCRYPTION_ENABLED 默认为 true，落盘扩展名就是
+# `.zip.enc` 且**没有** `.zip` 兄弟文件。健康检查原先只 glob '*.zip'，导致
+# 「有备份却报没有备份/备份过旧」的假阳性，且加密备份从未被 testzip() 校验
+# （2026-10-02 P2 审计实测：生产恒报"最新备份 132 小时前"，而当天 14:00 刚出过加密包）。
+BACKUP_FILE_EXTENSIONS = ('.zip', '.zip.enc', '.tar.gz', '.tar')
 MAX_BACKUP_FILE_SIZE = 500 * 1024 * 1024
 RESTORE_LOCK_ID = 20240426
 BACKUP_LOCK_ID = 20240427

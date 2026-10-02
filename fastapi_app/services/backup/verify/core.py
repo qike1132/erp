@@ -121,18 +121,42 @@ async def query_table_rows(tname: str, db: AsyncSession, since: str | None = Non
 
 
 async def find_last_backup_timestamp() -> str | None:
-    """查找最近一次全量备份的导出时间"""
+    """查找最近一次**全量**备份的导出时间。
+
+    必须同时认出三种生产实际命名，否则恒返回 None（→ 增量退化为全表导出，
+    且 base_timestamp 为空致级联清理跳过该增量）：
+      · `erp_backup_<ts>.zip`        —— 手工全量
+      · `erp_auto_daily_<ts>.zip`    —— 自动全量（例行路径）
+      · `*.zip.enc`                  —— 加密全量（生产默认加密）
+
+    加密包**不解密**取 manifest：同名 `.meta` 伴随文件已带 `created_at` 与 `type`，
+    而加密包没有 `.zip` 兄弟文件，只按 `.zip` 匹配会漏掉全部生产备份。
+    """
     if not BACKUP_DIR.exists():
         return None
     for f in sorted(BACKUP_DIR.iterdir(), reverse=True):
-        if f.is_file() and f.name.startswith('erp_backup_') and f.name.endswith('.zip'):
+        if not f.is_file():
+            continue
+        name = f.name
+        if not (name.startswith(('erp_backup_', 'erp_auto_daily_'))
+                and name.endswith(('.zip', '.zip.enc'))):
+            continue
+        if name.endswith('.enc'):
+            meta_path = f.parent / (name + '.meta')
             try:
-                with zipfile.ZipFile(f, 'r') as zf:
-                    if 'manifest.json' in zf.namelist():
-                        mf = json.loads(zf.read('manifest.json'))
-                        return mf.get('exported_at')
-            except (OSError, zipfile.BadZipFile, ValueError):
+                meta = json.loads(meta_path.read_text(encoding='utf-8'))
+            except (OSError, ValueError):
                 continue
+            if meta.get('type') == 'full' and meta.get('created_at'):
+                return meta['created_at']
+            continue
+        try:
+            with zipfile.ZipFile(f, 'r') as zf:
+                if 'manifest.json' in zf.namelist():
+                    mf = json.loads(zf.read('manifest.json'))
+                    return mf.get('exported_at')
+        except (OSError, zipfile.BadZipFile, ValueError):
+            continue
     return None
 
 

@@ -550,3 +550,32 @@ class TestBackupHealthCheckService:
             assert result['overall_status'] == 'error'
             assert 'error' in result
             assert '测试异常' in result['error']
+
+    @pytest.mark.asyncio
+    async def test_check_backup_age_counts_encrypted_backups(self, health_check_service):
+        """回归（2026-10-02 P2 审计 H-1）：加密备份（.zip.enc）必须计入备份年龄。
+
+        生产 BACKUP_ENCRYPTION_ENABLED=true，落盘全是 `.zip.enc` 且**没有** `.zip`
+        兄弟文件。原先 glob 只认 `*.zip`，导致健康检查恒报"备份过旧"（实测生产恒报
+        最新备份 132 小时前，而当天刚出过加密包）——既持续假告警，又永远测不出
+        真正的"备份停了"。
+        """
+        with tempfile.TemporaryDirectory() as temp_dir:
+            backup_dir = Path(temp_dir)
+            # 一个陈旧的明文包 + 一个刚刚产出的加密包（生产常态）
+            old = backup_dir / 'erp_auto_daily_20260927_020504.zip'
+            old.touch()
+            old_mtime = (datetime.now() - timedelta(hours=132)).timestamp()
+            os.utime(old, (old_mtime, old_mtime))
+
+            fresh = backup_dir / 'erp_incremental_20261002_060002.zip.enc'
+            fresh.touch()
+
+            with patch('fastapi_app.services.backup.verify.health_check_service.BACKUP_DIR', backup_dir), \
+                 patch('fastapi_app.services.backup.verify.health_check_service.ensure_backup_dir'):
+
+                result = await health_check_service._check_backup_age()
+
+            assert result['healthy'] is True, result
+            assert result['latest_backup'] == fresh.name
+            assert result['age_hours'] < 1

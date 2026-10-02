@@ -136,7 +136,10 @@ def _last_match_before(cron_expr: str, now: datetime, max_days: int = 370) -> da
                 for m in minutes:
                     if m <= now.minute:
                         return day.replace(hour=h, minute=m)
-                break  # 当前小时无匹配分钟，当天无更早命中 → 回溯前一天
+                # 当前小时无匹配分钟 → 继续看**当天更早**的小时，不要 break。
+                # 原先 break 会放弃当天更早的命中、转算前一天：`30 6,18 * * *` 在 18:15
+                # 会算成"昨天 18:30"而非"今天 06:30" → due_schedules 可能漏掉本应补跑的窗口。
+                continue
         else:
             return day.replace(hour=hours[0], minute=minutes[0])
     return None

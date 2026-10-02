@@ -76,6 +76,15 @@ async def create_incremental_backup(
             failed_tables.append(tname)
 
     if not incremental_tables:
+        # 区分「真的没有变更」与「每张表都失败了」：后者若报 success=True 且 filename=None，
+        # 两个调用方（backup_tasks 手动/自动）都只判 filename → 会把它当成"本次无变更"，
+        # **不写记录、无告警、上报 ok**，把系统性故障伪装成正常。
+        if failed_tables:
+            return {
+                'success': False, 'filename': None,
+                'message': f'增量备份失败：{len(failed_tables)} 张表全部导出失败',
+                'total_rows': 0, 'failed_tables': failed_tables,
+            }
         return {
             'success': True, 'filename': None, 'message': '无变更数据需要备份',
             'total_rows': 0, 'failed_tables': failed_tables,

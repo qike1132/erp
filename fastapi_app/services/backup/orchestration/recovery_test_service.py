@@ -667,7 +667,11 @@ class DisasterRecoveryTestService:
             """))
             tables = [row[0] for row in result.fetchall()]
 
-            expected_tables = list(backup_info.get('manifest', {}).get('includes', {}).keys())
+            # 期望表清单取自 manifest['tables']。原先取 manifest['includes'] ——
+            # 那里装的是 filestore_count / config_files / redis_rdb 这类**打包项、不是表名**，
+            # 于是 missing_tables 恒非空、schema 验证**恒判失败** → 报告 overall_success=False
+            # → 发"灾备演练失败"告警（该任务已登记为月度调度，会周期性误报、淹没真故障）。
+            expected_tables = list(backup_info.get('manifest', {}).get('tables', {}).keys())
             if not expected_tables:
                 expected_tables = list(backup_info.get('tables', {}).keys())
 
@@ -718,7 +722,15 @@ class DisasterRecoveryTestService:
                     )
                     row_count = result.scalar() or 0
 
-                    expected_rows = table_data.get('count', 0)
+                    # 期望行数：**全量** manifest 的键是 'rows'（int），**增量**才是 'count'；
+                    # 增量与旧 dump.json 的 'rows' 是序列化行列表。原先只读 'count'，
+                    # 全量演练时恒得 0 → `row_count >= min(0, sample)` 恒真 → **校验恒通过**
+                    # （恢复少导/漏表也报"数据验证通过"，给出虚假的灾备就绪结论）。
+                    raw_expected = table_data.get('count')
+                    if raw_expected is None:
+                        rows_val = table_data.get('rows', 0)
+                        raw_expected = len(rows_val) if isinstance(rows_val, list) else rows_val
+                    expected_rows = int(raw_expected or 0)
 
                     validation_results[table_name] = {
                         'expected': expected_rows,

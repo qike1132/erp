@@ -9,6 +9,7 @@
 5. 健康报告生成和存储
 """
 
+import contextlib
 import json
 import logging
 import tempfile
@@ -22,12 +23,105 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
 from fastapi_app.core.database import get_async_db_context
-from fastapi_app.services.backup._constants import BACKUP_DIR
+from fastapi_app.services.backup._constants import BACKUP_DIR, BACKUP_FILE_EXTENSIONS
 from fastapi_app.services.backup.metrics.alert_service import alert_service
 from fastapi_app.services.backup.records import ensure_backup_dir
 from fastapi_app.shared_models.backup_record import BackupRecord
 
 logger = logging.getLogger(__name__)
+
+
+def _backup_encryption_password() -> str:
+    """校验备份所需的解密口令：优先 BACKUP_TEST_PASSWORD，回退到生产加密口令。
+
+    `BACKUP_TEST_PASSWORD` 生产通常未设置（校验用独立口令），而生产口令
+    `BACKUP_ENCRYPTION_PASSWORD`/`_KEY` 一定有（否则备份根本不会加密）。
+    """
+    import os
+    return (os.environ.get('BACKUP_TEST_PASSWORD')
+            or os.environ.get('BACKUP_ENCRYPTION_PASSWORD')
+            or os.environ.get('BACKUP_ENCRYPTION_KEY') or '')
+
+
+@contextlib.contextmanager
+def _open_backup_zip(file_path: Path):
+    """以只读方式打开备份 ZIP；`.zip.enc` 先解密到临时文件。
+
+    产出明文临时文件路径（调用方负责在 with 退出后自动清理）。
+    解密失败/无口令时抛 ValueError，由调用方转成"无法校验"（**不是**"文件损坏"——
+    后者会让清理侧把有效备份优先删掉）。
+    """
+    if not file_path.name.endswith('.enc'):
+        yield file_path
+        return
+
+    password = _backup_encryption_password()
+    if not password:
+        raise ValueError('备份已加密但未配置 BACKUP_TEST_PASSWORD / BACKUP_ENCRYPTION_PASSWORD，无法校验')
+
+    from fastapi_app.core.backup_encryption import decrypt_backup_auto
+    plaintext, _meta = decrypt_backup_auto(file_path.read_bytes(), password)
+    # delete=False：文件要活过 with 块供调用方读取，退出时由 finally 清理
+    with tempfile.NamedTemporaryFile(
+        prefix='hc_decrypt_', suffix='.zip', delete=False
+    ) as tmp:
+        tmp.write(plaintext)
+        tmp_path = Path(tmp.name)
+    try:
+        yield tmp_path
+    finally:
+        with contextlib.suppress(OSError):
+            tmp_path.unlink(missing_ok=True)
+
+
+def _verify_zip_payload(file_path: Path) -> dict[str, Any] | None:
+    """校验备份 ZIP 的完整性；通过返回 None，不通过返回「问题结果」dict。
+
+    加密包（`.zip.enc`）先解密再校验 —— 原先用 `suffix == '.zip'` 判定，
+    而 '.zip.enc' 的 suffix 是 '.enc'，**整个 zip 校验被静默跳过**
+    （只查了文件大小就报 healthy），加密备份的损坏永远发现不了。
+    """
+    name = file_path.name
+    try:
+        with _open_backup_zip(file_path) as zip_path, \
+                zipfile.ZipFile(zip_path, 'r') as zip_file:
+            test_result = zip_file.testzip()
+            if test_result is not None:
+                return {'filename': name, 'healthy': False, 'issue': f'ZIP文件损坏: {test_result}'}
+
+            if 'manifest.json' not in zip_file.namelist():
+                return {'filename': name, 'healthy': False, 'issue': '缺少必要文件: manifest.json'}
+
+            try:
+                manifest_data = json.loads(zip_file.read('manifest.json').decode('utf-8'))
+                if 'version' not in manifest_data:
+                    return {'filename': name, 'healthy': False, 'issue': 'manifest.json缺少version字段'}
+            except (json.JSONDecodeError, KeyError) as e:
+                return {'filename': name, 'healthy': False, 'issue': f'manifest.json解析失败: {e!s}'}
+    except ValueError as e:
+        # 加密包但拿不到口令 —— **不能判"损坏"**：唯一调用方 cleanup/service.py 在
+        # BACKUP_TEST_BEFORE_DELETE=true 时会把判"损坏"的备份**优先删除**，误判会删掉
+        # 有效备份。只报"无法校验"，并带上 unverifiable 标记供调用方区分。
+        return {'filename': name, 'healthy': False, 'unverifiable': True,
+                'issue': f'无法校验（{e!s}）'}
+    except (zipfile.BadZipFile, OSError) as e:
+        return {'filename': name, 'healthy': False, 'issue': f'ZIP文件损坏: {e!s}'}
+    return None
+
+
+def _iter_backup_files(patterns=BACKUP_FILE_EXTENSIONS) -> list[Path]:
+    """列出备份目录下的备份文件（含加密的 `.zip.enc`）。
+
+    统一入口，避免各处各写一份 glob —— 2026-10-02 P2 审计发现三处 glob 都只认
+    '*.zip'，而生产加密备份是 `.zip.enc`，导致健康检查恒报"备份过旧"（假阳性）
+    且加密包从未被校验。`.meta`/`.record` 等伴随文件不在此列。
+    """
+    files: list[Path] = []
+    for ext in patterns:
+        files.extend(BACKUP_DIR.glob(f'*{ext}'))
+    # 伴随文件不会被匹配到：'*.zip' 要求名字以 '.zip' **结尾**，
+    # 故 'x.zip.meta'、'x.zip.enc.meta' 都不在其中。
+    return files
 
 
 class BackupHealthCheckService:
@@ -192,10 +286,8 @@ class BackupHealthCheckService:
         try:
             ensure_backup_dir()
 
-            # 查找最新的备份文件
-            backup_files: list[Path] = []
-            for ext in ['.zip', '.tar.gz', '.tar']:
-                backup_files.extend(BACKUP_DIR.glob(f'*{ext}'))
+            # 查找最新的备份文件（含加密的 .zip.enc）
+            backup_files = _iter_backup_files()
 
             if not backup_files:
                 return {
@@ -242,10 +334,8 @@ class BackupHealthCheckService:
         try:
             ensure_backup_dir()
 
-            # 查找所有备份文件
-            backup_files: list[Path] = []
-            for ext in ['.zip']:  # 目前只检查zip格式
-                backup_files.extend(BACKUP_DIR.glob(f'*{ext}'))
+            # 查找所有备份文件（含加密的 .zip.enc）
+            backup_files = _iter_backup_files()
 
             if not backup_files:
                 return {
@@ -333,55 +423,12 @@ class BackupHealthCheckService:
                     'issue': '文件大小为0'
                 }
 
-            # 检查zip文件完整性
-            if file_path.suffix.lower() == '.zip':
-                try:
-                    with zipfile.ZipFile(file_path, 'r') as zip_file:
-                        # 测试zip文件是否可以打开
-                        test_result = zip_file.testzip()
-                        if test_result is not None:
-                            return {
-                                'filename': file_path.name,
-                                'healthy': False,
-                                'issue': f'ZIP文件损坏: {test_result}'
-                            }
-
-                        # 检查必要的文件（metadata.json 是可选的）
-                        required_files = ['manifest.json']
-                        missing_files = []
-                        for req_file in required_files:
-                            if req_file not in zip_file.namelist():
-                                missing_files.append(req_file)
-
-                        if missing_files:
-                            return {
-                                'filename': file_path.name,
-                                'healthy': False,
-                                'issue': f'缺少必要文件: {", ".join(missing_files)}'
-                            }
-
-                        # 检查manifest.json
-                        try:
-                            manifest_data = json.loads(zip_file.read('manifest.json').decode('utf-8'))
-                            if 'version' not in manifest_data:
-                                return {
-                                    'filename': file_path.name,
-                                    'healthy': False,
-                                    'issue': 'manifest.json缺少version字段'
-                                }
-                        except (json.JSONDecodeError, KeyError) as e:
-                            return {
-                                'filename': file_path.name,
-                                'healthy': False,
-                                'issue': f'manifest.json解析失败: {e!s}'
-                            }
-
-                except (zipfile.BadZipFile, OSError) as e:
-                    return {
-                        'filename': file_path.name,
-                        'healthy': False,
-                        'issue': f'ZIP文件损坏: {e!s}'
-                    }
+            # 检查 zip 完整性（含加密包；返回 issue 文案或 None）
+            is_zip_like = file_path.name.endswith(('.zip', '.zip.enc'))
+            if is_zip_like:
+                issue = _verify_zip_payload(file_path)
+                if issue is not None:
+                    return issue
 
             return {
                 'filename': file_path.name,
@@ -666,8 +713,8 @@ class BackupHealthCheckService:
                         'error': f"指定的备份文件不存在: {backup_file}"
                     }
             else:
-                # 使用最新的备份文件
-                backup_files = list(BACKUP_DIR.glob('*.zip'))
+                # 使用最新的备份文件（含加密的 .zip.enc）
+                backup_files = _iter_backup_files()
                 if not backup_files:
                     return {
                         'success': False,
@@ -679,9 +726,12 @@ class BackupHealthCheckService:
             with tempfile.TemporaryDirectory() as temp_dir:
                 temp_path = Path(temp_dir)
 
-                # 解压备份文件
+                # 解压备份文件（加密包先解密；拿不到口令时明确报"需密码"，
+                # **不能**当成"文件损坏" —— 唯一调用方 cleanup/service.py 会把判损坏的
+                # 备份在 BACKUP_TEST_BEFORE_DELETE=true 时优先删除）
                 try:
-                    with zipfile.ZipFile(test_file, 'r') as zip_ref:
+                    with _open_backup_zip(test_file) as zip_path, \
+                            zipfile.ZipFile(zip_path, 'r') as zip_ref:
                         zip_ref.extractall(temp_path)
 
                     # 检查必要的文件（metadata.json 是可选的）
