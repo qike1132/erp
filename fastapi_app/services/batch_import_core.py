@@ -159,7 +159,16 @@ async def _resolve_row_identity(context: dict, idx: int, customer: str, product_
 
 def _parse_positive_quantity(quantity, idx: int, *, label: str,
                              product_name: str, customer: str) -> int | None:
-    """把数量转成正整数；无法解析或非正数返回 ``None``（调用方跳过该行）。"""
+    """把数量转成正整数；无法解析或非正数返回 ``None``（调用方跳过该行）。
+
+    小数一律拒绝而不是静默截断：Excel 数值单元格若为 1.9 会被读成 float，
+    ``int(1.9)`` 得 1 就悄悄按 1 入库；而同样内容以文本 "1.9" 输入时 ``int()`` 抛错被拒 ——
+    同一输入因单元格类型不同结果不同。
+    """
+    if isinstance(quantity, float) and not quantity.is_integer():
+        logger.warning("%s导入：quantity 为小数，跳过该行 (product=%s, customer=%s, value=%r)",
+                       label, product_name, customer, quantity)
+        return None
     try:
         qty = int(quantity)
     except (ValueError, TypeError):
@@ -362,6 +371,9 @@ async def import_orders_from_data(db: AsyncSession, data_list: list, *, deps: Im
         qty = _parse_positive_quantity(
             quantity, idx, label='订单', product_name=product_name, customer=customer)
         if qty is None:
+            # 与客户/产品不存在的分支一致地给出**行级**可见消息。原先只写 logger.warning，
+            # 用户在导入报告里只看到「跳过 N 行」，不知是哪几行为何失败。
+            debug_messages.append(f'行{idx}: 数量无效 - {quantity!r}')
             return False
 
         order_no = await deps.generate_order_number(db)
@@ -453,6 +465,9 @@ async def import_stockins_from_data(db: AsyncSession, data_list: list, *, deps: 
         qty = _parse_positive_quantity(
             quantity, idx, label='备货', product_name=product_name, customer=customer)
         if qty is None:
+            # 与客户/产品不存在的分支一致地给出**行级**可见消息。原先只写 logger.warning，
+            # 用户在导入报告里只看到「跳过 N 行」，不知是哪几行为何失败。
+            debug_messages.append(f'行{idx}: 数量无效 - {quantity!r}')
             return False
 
         stockin_date = parse_date_value(stockin_date_val) or datetime.now(UTC)  # aware UTC：stockin_date 列为 timestamptz

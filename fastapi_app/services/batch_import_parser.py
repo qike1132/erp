@@ -214,6 +214,11 @@ def _parse_import_row(
     product = product or product_map.get(product_name)
     if not product:
         return None, f'产品不存在 - {product_name}'
+    # 小数一律拒绝而不是静默截断（与 batch_import_core._parse_positive_quantity 同口径）：
+    # Excel 数值单元格的 1.9 会被读成 float，int(1.9) 得 1 悄悄入库；而同样内容以文本
+    # "1.9" 输入时 int() 抛错被拒 —— 同一输入因单元格类型不同结果不同。
+    if isinstance(quantity, float) and not quantity.is_integer():
+        return None, qty_invalid_msg
     try:
         qty = int(quantity)
     except (ValueError, TypeError):

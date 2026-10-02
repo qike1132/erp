@@ -301,6 +301,8 @@ async def update_stock_with_optimistic_lock(
         except _StockVersionConflictError as exc:
             logger.warning(f'库存乐观锁冲突: 产品ID={product_id}, 第{exc.attempt}次重试')
 
+    # range(retries) 共 retries 次**尝试**（首次 + retries-1 次重试），文案按此写准，
+    # 不再写成「重试{retries}次」（差一）。测试以正则锁着「重试…次后仍失败」的措辞。
     raise StockConcurrentError(
-        f'库存并发冲突，重试{retries}次后仍失败: 产品ID={product_id}'
+        f'库存并发冲突，重试{retries - 1}次后仍失败: 产品ID={product_id}'
     )

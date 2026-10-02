@@ -17,10 +17,21 @@ def build_shipment_summary(orders: Sequence[Order], shipped_map: dict[int, int])
 
     Args:
         orders: 已按 order_date 升序的订单列表（可能为空）
-        shipped_map: {order_id: 净出货量}（已扣除退货，且排除入库抵扣）
+        shipped_map: {order_id: 净出货量}（已扣除退货，且排除入库抵扣）。
+            只统计 orders 内的订单 —— 键超出 orders 的部分会被忽略。
 
     Returns:
         dict: { order_quantity, shipped_quantity, available_quantity, orders }
+
+    口径说明（两处有意不同，勿当成 bug 去"修"）：
+      · ``available_quantity`` 是**业务可发货量** = ``max(0, 订单总量 - 已出货总量)``，
+        钳到 0 —— 表示"没有可发的了"；
+      · ``orders[i]['available']`` 是**明细算术差** = ``该单订单量 - 该单已出货量``，
+        不钳负 —— 展示真实差额。
+    只有在「已出货总量 > 订单总量」（超量出货的历史/异常数据）时两者才对不上；
+    校验路径只用汇总（``available_quantity <= 0`` 与 ``quantity > available_quantity``），
+    FIFO 分配只取明细里 ``> 0`` 的项，故钳与不钳不影响业务判定。
+    若某天要求「汇总 == 明细求和」，需同时改两边口径。
     """
     if not orders:
         return {
@@ -47,7 +58,10 @@ def build_shipment_summary(orders: Sequence[Order], shipped_map: dict[int, int])
             'available': order.quantity - non_deduction_shipped,
         })
 
-    total_shipped = sum(shipped_map.values())
+    # 只累加 orders 内的单：shipped_map 若含 orders 之外的 order_id（当前唯一调用方
+    # inventory_service.calculate_available_shipment_quantity 用 in_(order_ids) 过滤过，
+    # 不会出现），直接 sum(values()) 会让 shipped_quantity 偏大、available_quantity 偏小。
+    total_shipped = sum(shipped_map.get(order.id, 0) for order in orders)
     available_quantity = max(0, total_order_quantity - total_shipped)
 
     return {
