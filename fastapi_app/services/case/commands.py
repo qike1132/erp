@@ -161,6 +161,21 @@ async def batch_create_movements(db: AsyncSession, movements_data: list[dict]) -
     return {'success': True, 'results': results, 'failed': failed}
 
 
+async def _ensure_parent_is_root(db: AsyncSession, parent_id: int) -> None:
+    """校验 `parent_id` 指向一个**主件**（根件，即 parent_id IS NULL）。
+
+    统一不变量：**配件只能挂在主件下**（层级 ≤ 1）。这一条同时排掉了
+    「配件挂配件」造成的多级与环 —— 环（A.parent=B、B.parent=A）会让两者都从
+    `get_case_inventory` 的库存树里消失（它只展开根件的一层子女）。
+    FK 只保证父件**存在**，不保证它是根件。
+    """
+    parent = await db.get(Case, parent_id)
+    if not parent:
+        raise ValueError("所属主件不存在")
+    if parent.parent_id is not None:
+        raise ValueError("所属主件本身是配件；配件只能挂在主件下")
+
+
 async def create_case_item(db: AsyncSession, name: str | None = None, barcode: str | None = None,
                            image: str | None = None, unit: str | None = None,
                            product_id: int | None = None, parent_id: int | None = None,
@@ -175,6 +190,9 @@ async def create_case_item(db: AsyncSession, name: str | None = None, barcode: s
             name = linked.name
             if not barcode:
                 barcode = linked.barcode
+
+    if parent_id is not None:
+        await _ensure_parent_is_root(db, parent_id)
 
     case_obj = Case(
         name=name or '', barcode=barcode or '', image=image, unit=unit,
@@ -225,9 +243,7 @@ async def update_case_item(db: AsyncSession, case_id: int, update_data: dict) ->
         if parent_id == case_id:
             raise ValueError("不能把自己设为主件")
         if parent_id is not None:
-            parent = await db.get(Case, parent_id)
-            if not parent:
-                raise ValueError("所属主件不存在")
+            await _ensure_parent_is_root(db, parent_id)
         case_obj.parent_id = parent_id
 
     for field in ('name', 'barcode', 'image', 'unit', 'qty_per_set'):

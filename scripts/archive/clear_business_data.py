@@ -79,8 +79,8 @@ BUSINESS_TABLES = [
 SYSTEM_TABLES = [
     'user',
     'permission',
-    'country',
-    'device_token',
+    # country 表已由迁移 pg_standalone_055 删除
+    # device_token 表已由迁移 pg_standalone_054 删除
     'backup_record',
     'audit_log',
     'order_sync_config',

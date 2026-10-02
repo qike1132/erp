@@ -12,6 +12,7 @@
 import contextlib
 import json
 import logging
+import shutil
 import tempfile
 import zipfile
 from datetime import datetime, timedelta
@@ -59,30 +60,27 @@ def _open_backup_zip(file_path: Path):
     if not password:
         raise ValueError('备份已加密但未配置 BACKUP_TEST_PASSWORD / BACKUP_ENCRYPTION_PASSWORD，无法校验')
 
-    from fastapi_app.core.backup_encryption import BackupFileError, decrypt_backup_auto
+    from fastapi_app.core.backup_encryption import BackupFileError, decrypt_backup_to_file
+    # 流式解密：`decrypt_backup_to_file` 内存有界。原先 `read_bytes()` + `decrypt_backup_auto`
+    # 会把整份密文与整份明文**同时**读进内存 —— 对 GB 级备份是明显的内存峰值
+    # （本机内存 15.4GB，且健康检查可能一次校验多个包）。
+    tmp_dir = Path(tempfile.mkdtemp(prefix='hc_decrypt_'))
+    tmp_path = tmp_dir / 'backup.zip'
     try:
-        plaintext, _meta = decrypt_backup_auto(file_path.read_bytes(), password)
-    except BackupFileError as e:
-        # ⚠️ `BackupFileError` **不是** ValueError 子类（core/backup_encryption.py:30），
-        # 而口令错误 / 密文损坏 / 口令轮换后解不开旧包，抛的都是它。不转成 ValueError
-        # 就会穿透调用方的 `except ValueError` → 落到 perform_health_check 的兜底
-        # `except Exception` → **整份健康检查报"执行失败"，其它检查结果全丢**；
-        # 且清理侧看到 success=False 会把该包判成"损坏"、从 keep 列表剔除。
-        # 统一映射为 ValueError = "无法校验"，与本函数的契约一致。
-        raise ValueError(f'无法解密（口令错误或密文损坏）：{e}') from e
-
-    # delete=False：文件要活过 with 块供调用方读取，退出时由 finally 清理
-    with tempfile.NamedTemporaryFile(
-        prefix='hc_decrypt_', suffix='.zip', delete=False
-    ) as tmp:
-        # 先取路径再写：若 write 抛 OSError（磁盘满），finally 仍能清掉这个临时文件
-        tmp_path = Path(tmp.name)
-        tmp.write(plaintext)
-    try:
+        try:
+            decrypt_backup_to_file(file_path, tmp_path, password)
+        except BackupFileError as e:
+            # ⚠️ `BackupFileError` **不是** ValueError 子类（core/backup_encryption.py:30），
+            # 而口令错误 / 密文损坏 / 口令轮换后解不开旧包，抛的都是它。不转成 ValueError
+            # 就会穿透调用方的 `except ValueError` → 落到 perform_health_check 的兜底
+            # `except Exception` → **整份健康检查报"执行失败"，其它检查结果全丢**；
+            # 且清理侧看到 success=False 会把该包判成"损坏"、从 keep 列表剔除。
+            # 统一映射为 ValueError = "无法校验"，与本函数的契约一致。
+            raise ValueError(f'无法解密（口令错误或密文损坏）：{e}') from e
         yield tmp_path
     finally:
-        with contextlib.suppress(OSError):
-            tmp_path.unlink(missing_ok=True)
+        # 无论成功、抛错、还是调用方在 with 内抛错，都清掉整个临时目录
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 def _unverifiable_result(filename: str, err: Exception) -> dict[str, Any]:

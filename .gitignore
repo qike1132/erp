@@ -156,6 +156,12 @@ test_reports/
 .pytest_cache/
 .ruff_cache/
 /pytest-cache-files-*
+# pytest 临时根与本机 mkstemp/mkdtemp 产物：正常应落在 %TEMP%，但本机出现过
+# 落到**仓库根**的情况（2026-10-02 tmpz5p31wvu/、2026-10-03 pytest-of-Administrator/
+# 与两个 tmp????????）。加规则防 `git add -A` 把它们扫进索引。
+# `/tmp????????` 只匹配「tmp + 恰好 8 个字符」= mkstemp/mkdtemp 的默认名形，不会误伤 template/。
+/pytest-of-*/
+/tmp????????
 /.tmp_analysis/
 # Redis 快照副本
 *.rdb

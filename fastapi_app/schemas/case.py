@@ -10,6 +10,20 @@ _VALID_DIRECTIONS = ('in', 'out')
 
 
 # ===== SKU 主档 =====
+def _sanitize_image_url(v: str | None) -> str | None:
+    """图片 URL 的统一出站校验：拒绝不安全协议（`javascript:` / `data:` 等）。
+
+    抽成共用函数是为了 Create / Update **同口径** —— 原先只有 Create 挂了校验器，
+    Update 可以直接把 `javascript:` 存进库（2026-10-02 第二轮审计）。
+    """
+    if v:
+        sanitized = sanitize_url(v)
+        if not sanitized:
+            raise ValueError('图片URL包含不安全的协议')
+        return sanitized
+    return v
+
+
 class CaseItemCreate(BaseModel):
     name: str | None = None
     barcode: str | None = None
@@ -23,12 +37,7 @@ class CaseItemCreate(BaseModel):
     @field_validator('image')
     @classmethod
     def sanitize_image_url(cls, v: str | None) -> str | None:
-        if v:
-            sanitized = sanitize_url(v)
-            if not sanitized:
-                raise ValueError('图片URL包含不安全的协议')
-            return sanitized
-        return v
+        return _sanitize_image_url(v)
 
 
 class CaseItemUpdate(BaseModel):
@@ -38,6 +47,12 @@ class CaseItemUpdate(BaseModel):
     unit: str | None = None
     parent_id: int | None = None
     qty_per_set: int | None = Field(None, ge=1, le=9999999)
+
+    @field_validator('image')
+    @classmethod
+    def sanitize_image_url(cls, v: str | None) -> str | None:
+        # 与 Create 同口径 —— 原先 Update 缺这个校验器，可绕过协议白名单
+        return _sanitize_image_url(v)
 
 
 class CaseItemOut(BaseModel):

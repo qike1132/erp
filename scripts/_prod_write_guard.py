@@ -89,3 +89,26 @@ def require_prod_write_consent(action: str, *, hint: str = '') -> None:
     msg.append(f'已显式授权写生产库（{ENV_FLAG} 或 {ARG_FLAG}）。')
     msg.append('')
     print('\n'.join(msg), file=sys.stderr)
+
+
+def affected_rows(db, sql: str, *, dry_run: bool) -> int:
+    """按 `dry_run` 决定**执行删除**还是**只统计等价行数**。
+
+    `dry_run=True` 时把 `DELETE FROM t [WHERE …]` 换成 `SELECT COUNT(*) FROM t [WHERE …]`，
+    **绝不发出 DELETE**。
+
+    为什么需要它：清库脚本原先无条件执行 DELETE、只在 `db.commit()` 上区分 dry-run ——
+    于是 `--dry-run` 会真的跑删除语句（靠"不 commit"侥幸不落库），且遇外键冲突直接报错，
+    预览根本用不了。
+
+    放在本模块是**为了只有一份实现**：`clear_all_data.py` 与
+    `clear_purchase_center_data.py` 曾各写一份、逐字重复（2026-10-02 第二轮审计）。
+    """
+    from sqlalchemy import text
+
+    if dry_run:
+        _, _, tail = sql.partition('DELETE FROM ')
+        if not tail:
+            raise ValueError(f'affected_rows 只接受 DELETE FROM 语句，收到: {sql[:80]!r}')
+        return int(db.execute(text('SELECT COUNT(*) FROM ' + tail)).scalar() or 0)
+    return db.execute(text(sql)).rowcount

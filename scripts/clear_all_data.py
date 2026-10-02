@@ -21,7 +21,11 @@ from pathlib import Path
 
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
+# 同目录的脚本模块（_prod_write_guard）—— 显式加进来，
+# 这样无论以 `python scripts/x.py` 还是 importlib 加载都能导入
+sys.path.insert(0, str(Path(__file__).parent))
 
+from _prod_write_guard import affected_rows
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
@@ -97,18 +101,6 @@ def count_all_data(db: Session) -> dict:
     return counts
 
 
-def _affected(db: Session, sql: str, *, dry_run: bool) -> int:
-    """执行 DELETE 并返回影响行数；**dry_run 时改为等价 COUNT，绝不执行删除**。
-
-    修正原实现的缺陷：所有 clear_* 函数原先**无条件执行 DELETE**，仅在
-    `db.commit()` 上区分 dry-run —— 于是 `--dry-run` 会真的跑删除语句（靠
-    "不 commit"侥幸不落库），且一旦遇到外键冲突就报错，预览根本用不了。
-    """
-    if dry_run:
-        # DELETE FROM t [WHERE ...]  ->  SELECT COUNT(*) FROM t [WHERE ...]
-        _, _, tail = sql.partition('DELETE FROM ')
-        return int(db.execute(text('SELECT COUNT(*) FROM ' + tail)).scalar() or 0)
-    return db.execute(text(sql)).rowcount
 
 
 def clear_purchase_center(db: Session, dry_run: bool = True) -> dict:
@@ -121,19 +113,19 @@ def clear_purchase_center(db: Session, dry_run: bool = True) -> dict:
         print("\n[EXECUTE] 开始清空采购中心数据...")
 
     # 按照依赖关系从子表到父表删除
-    results['material_registration_item'] = _affected(db, "DELETE FROM material_registration_item", dry_run=dry_run)
-    results['material_registration'] = _affected(db, "DELETE FROM material_registration", dry_run=dry_run)
-    results['purchase_order_item'] = _affected(db, "DELETE FROM purchase_order_item", dry_run=dry_run)
-    results['purchase_order'] = _affected(db, "DELETE FROM purchase_order", dry_run=dry_run)
-    results['purchase_plan_detail'] = _affected(db, "DELETE FROM purchase_plan_details", dry_run=dry_run)
-    results['shipment_record'] = _affected(db, "DELETE FROM shipment_records", dry_run=dry_run)
-    results['purchase_plan'] = _affected(db, "DELETE FROM purchase_plans", dry_run=dry_run)
-    results['supplier'] = _affected(db, "DELETE FROM supplier", dry_run=dry_run)
+    results['material_registration_item'] = affected_rows(db, "DELETE FROM material_registration_item", dry_run=dry_run)
+    results['material_registration'] = affected_rows(db, "DELETE FROM material_registration", dry_run=dry_run)
+    results['purchase_order_item'] = affected_rows(db, "DELETE FROM purchase_order_item", dry_run=dry_run)
+    results['purchase_order'] = affected_rows(db, "DELETE FROM purchase_order", dry_run=dry_run)
+    results['purchase_plan_detail'] = affected_rows(db, "DELETE FROM purchase_plan_details", dry_run=dry_run)
+    results['shipment_record'] = affected_rows(db, "DELETE FROM shipment_records", dry_run=dry_run)
+    results['purchase_plan'] = affected_rows(db, "DELETE FROM purchase_plans", dry_run=dry_run)
+    results['supplier'] = affected_rows(db, "DELETE FROM supplier", dry_run=dry_run)
 
     # 相关的日志和查询
-    results['modification_log'] = _affected(db, "DELETE FROM modification_log WHERE target_type LIKE 'purchase%'", dry_run=dry_run)
-    results['saved_query'] = _affected(db, "DELETE FROM saved_query WHERE query_type LIKE 'purchase%'", dry_run=dry_run)
-    results['order_status_log'] = _affected(db, "DELETE FROM order_status_log WHERE target_type = 'purchase_order'", dry_run=dry_run)
+    results['modification_log'] = affected_rows(db, "DELETE FROM modification_log WHERE target_type LIKE 'purchase%'", dry_run=dry_run)
+    results['saved_query'] = affected_rows(db, "DELETE FROM saved_query WHERE query_type LIKE 'purchase%'", dry_run=dry_run)
+    results['order_status_log'] = affected_rows(db, "DELETE FROM order_status_log WHERE target_type = 'purchase_order'", dry_run=dry_run)
 
     if not dry_run:
         db.commit()
@@ -170,37 +162,37 @@ def clear_core_business(db: Session, dry_run: bool = True) -> dict:
         print("\n[EXECUTE] 开始清空核心业务数据...")
 
     # 生产相关
-    results['packaging_record'] = _affected(db, "DELETE FROM packaging_record", dry_run=dry_run)
-    results['craft_work'] = _affected(db, "DELETE FROM craft_work", dry_run=dry_run)
-    results['daily_production_record'] = _affected(db, "DELETE FROM daily_production_record", dry_run=dry_run)
-    results['production_plan_log'] = _affected(db, "DELETE FROM production_plan_log", dry_run=dry_run)
-    results['production_plan'] = _affected(db, "DELETE FROM production_plan", dry_run=dry_run)
+    results['packaging_record'] = affected_rows(db, "DELETE FROM packaging_record", dry_run=dry_run)
+    results['craft_work'] = affected_rows(db, "DELETE FROM craft_work", dry_run=dry_run)
+    results['daily_production_record'] = affected_rows(db, "DELETE FROM daily_production_record", dry_run=dry_run)
+    results['production_plan_log'] = affected_rows(db, "DELETE FROM production_plan_log", dry_run=dry_run)
+    results['production_plan'] = affected_rows(db, "DELETE FROM production_plan", dry_run=dry_run)
 
     # 库存相关
-    results['stock_return'] = _affected(db, "DELETE FROM stock_return", dry_run=dry_run)
-    results['stock_out'] = _affected(db, "DELETE FROM stock_out", dry_run=dry_run)
-    results['stock_in'] = _affected(db, "DELETE FROM stock_in", dry_run=dry_run)
-    results['inventory_log'] = _affected(db, "DELETE FROM inventory_log", dry_run=dry_run)
+    results['stock_return'] = affected_rows(db, "DELETE FROM stock_return", dry_run=dry_run)
+    results['stock_out'] = affected_rows(db, "DELETE FROM stock_out", dry_run=dry_run)
+    results['stock_in'] = affected_rows(db, "DELETE FROM stock_in", dry_run=dry_run)
+    results['inventory_log'] = affected_rows(db, "DELETE FROM inventory_log", dry_run=dry_run)
 
     # 订单相关
-    results['order_sync_record'] = _affected(db, "DELETE FROM order_sync_record", dry_run=dry_run)
-    results['sync_retry_queue'] = _affected(db, "DELETE FROM sync_retry_queue", dry_run=dry_run)
-    results['approval_log'] = _affected(db, "DELETE FROM approval_log", dry_run=dry_run)
-    results['approval_request'] = _affected(db, "DELETE FROM approval_request", dry_run=dry_run)
-    results['order_status_log'] = _affected(db, "DELETE FROM order_status_log WHERE target_type = 'unprocessed_order'", dry_run=dry_run)
-    results['order'] = _affected(db, "DELETE FROM \"order\"", dry_run=dry_run)
+    results['order_sync_record'] = affected_rows(db, "DELETE FROM order_sync_record", dry_run=dry_run)
+    results['sync_retry_queue'] = affected_rows(db, "DELETE FROM sync_retry_queue", dry_run=dry_run)
+    results['approval_log'] = affected_rows(db, "DELETE FROM approval_log", dry_run=dry_run)
+    results['approval_request'] = affected_rows(db, "DELETE FROM approval_request", dry_run=dry_run)
+    results['order_status_log'] = affected_rows(db, "DELETE FROM order_status_log WHERE target_type = 'unprocessed_order'", dry_run=dry_run)
+    results['order'] = affected_rows(db, "DELETE FROM \"order\"", dry_run=dry_run)
 
     # 产品BOM（product_packaging 已删，见迁移 054）
-    results['product_accessory'] = _affected(db, "DELETE FROM product_accessory", dry_run=dry_run)
-    results['product_material'] = _affected(db, "DELETE FROM product_material", dry_run=dry_run)
-    results['product_fabric'] = _affected(db, "DELETE FROM product_fabric", dry_run=dry_run)
-    results['product'] = _affected(db, "DELETE FROM product", dry_run=dry_run)
+    results['product_accessory'] = affected_rows(db, "DELETE FROM product_accessory", dry_run=dry_run)
+    results['product_material'] = affected_rows(db, "DELETE FROM product_material", dry_run=dry_run)
+    results['product_fabric'] = affected_rows(db, "DELETE FROM product_fabric", dry_run=dry_run)
+    results['product'] = affected_rows(db, "DELETE FROM product", dry_run=dry_run)
 
     # 其他
-    results['modification_log'] = _affected(db, "DELETE FROM modification_log WHERE target_type NOT LIKE 'purchase%'", dry_run=dry_run)
-    results['saved_query'] = _affected(db, "DELETE FROM saved_query WHERE query_type NOT LIKE 'purchase%'", dry_run=dry_run)
-    results['order_sync_config'] = _affected(db, "DELETE FROM order_sync_config", dry_run=dry_run)
-    results['customer_access_log'] = _affected(db, "DELETE FROM customer_access_log", dry_run=dry_run)
+    results['modification_log'] = affected_rows(db, "DELETE FROM modification_log WHERE target_type NOT LIKE 'purchase%'", dry_run=dry_run)
+    results['saved_query'] = affected_rows(db, "DELETE FROM saved_query WHERE query_type NOT LIKE 'purchase%'", dry_run=dry_run)
+    results['order_sync_config'] = affected_rows(db, "DELETE FROM order_sync_config", dry_run=dry_run)
+    results['customer_access_log'] = affected_rows(db, "DELETE FROM customer_access_log", dry_run=dry_run)
 
     if not dry_run:
         db.commit()
@@ -234,8 +226,8 @@ def clear_case_management(db: Session, dry_run: bool = True) -> dict:
     else:
         print("\n[EXECUTE] 开始清空皮套管理数据...")
 
-    results['case_movement'] = _affected(db, "DELETE FROM case_movement", dry_run=dry_run)
-    results['case'] = _affected(db, 'DELETE FROM "case"', dry_run=dry_run)
+    results['case_movement'] = affected_rows(db, "DELETE FROM case_movement", dry_run=dry_run)
+    results['case'] = affected_rows(db, 'DELETE FROM "case"', dry_run=dry_run)
 
     if not dry_run:
         db.commit()
@@ -259,16 +251,16 @@ def clear_system_management(db: Session, dry_run: bool = True, keep_admin: bool 
     else:
         print("\n[EXECUTE] 开始清空系统管理数据...")
 
-    results['app_version'] = _affected(db, "DELETE FROM app_version", dry_run=dry_run)
-    results['customer'] = _affected(db, "DELETE FROM customer", dry_run=dry_run)
+    results['app_version'] = affected_rows(db, "DELETE FROM app_version", dry_run=dry_run)
+    results['customer'] = affected_rows(db, "DELETE FROM customer", dry_run=dry_run)
 
     # 用户相关 - 保留admin用户（必须先删 user_permission 再删 user，否则外键约束报错）
     if keep_admin:
-        results['user_permission'] = _affected(db, "DELETE FROM user_permission WHERE user_id NOT IN (SELECT id FROM \"user\" WHERE username = 'admin')", dry_run=dry_run)
-        results['user'] = _affected(db, "DELETE FROM \"user\" WHERE username != 'admin'", dry_run=dry_run)
+        results['user_permission'] = affected_rows(db, "DELETE FROM user_permission WHERE user_id NOT IN (SELECT id FROM \"user\" WHERE username = 'admin')", dry_run=dry_run)
+        results['user'] = affected_rows(db, "DELETE FROM \"user\" WHERE username != 'admin'", dry_run=dry_run)
     else:
-        results['user_permission'] = _affected(db, "DELETE FROM user_permission", dry_run=dry_run)
-        results['user'] = _affected(db, "DELETE FROM \"user\"", dry_run=dry_run)
+        results['user_permission'] = affected_rows(db, "DELETE FROM user_permission", dry_run=dry_run)
+        results['user'] = affected_rows(db, "DELETE FROM \"user\"", dry_run=dry_run)
 
     if not dry_run:
         db.commit()
@@ -294,10 +286,10 @@ def clear_staging_data(db: Session, dry_run: bool = True) -> dict:
     else:
         print("\n[EXECUTE] 开始清空暂存数据...")
 
-    results['staging_stock_out'] = _affected(db, "DELETE FROM staging_stock_out", dry_run=dry_run)
-    results['staging_stock_in'] = _affected(db, "DELETE FROM staging_stock_in", dry_run=dry_run)
-    results['staging_order'] = _affected(db, "DELETE FROM staging_order", dry_run=dry_run)
-    results['staging_purchase_plan'] = _affected(db, "DELETE FROM staging_purchase_plan", dry_run=dry_run)
+    results['staging_stock_out'] = affected_rows(db, "DELETE FROM staging_stock_out", dry_run=dry_run)
+    results['staging_stock_in'] = affected_rows(db, "DELETE FROM staging_stock_in", dry_run=dry_run)
+    results['staging_order'] = affected_rows(db, "DELETE FROM staging_order", dry_run=dry_run)
+    results['staging_purchase_plan'] = affected_rows(db, "DELETE FROM staging_purchase_plan", dry_run=dry_run)
 
     if not dry_run:
         db.commit()

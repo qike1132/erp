@@ -52,7 +52,7 @@ KEEP_TABLES = [
     'permission',
     'customer',
     'customer_access_log',
-    'country',
+    # country 表已由迁移 pg_standalone_055 删除（原先在此保留会导致 _snapshot 报表不存在）
     'backup_settings',
     'backup_schedule',
     'order_sync_config',
@@ -378,6 +378,8 @@ def main() -> int:
     parser.add_argument('--dry-run', action='store_true', help='只预览清除范围')
     parser.add_argument('--execute', action='store_true', help='执行备份+清除+复核')
     parser.add_argument('--yes', action='store_true', help='跳过二次确认')
+    parser.add_argument('--allow-prod-write', action='store_true',
+                        help='显式授权写生产库（与 ERP_ALLOW_PROD_WRITE=1 等价）')
     parser.add_argument('--backup-dir', default=str(ROOT / 'backups' / 'pre-launch-purge'),
                         help='备份与报告输出目录')
     args = parser.parse_args()
@@ -402,6 +404,14 @@ def main() -> int:
         if args.dry_run:
             print('\n（dry-run 结束，未修改任何数据）')
             return 0
+
+        # 统一生产写护栏（与其他清库脚本同口径）：本脚本虽已自带 pg_dump 备份 + CONFIRM，
+        # 但仍是"一键清空多张生产表"，多一道显式授权更稳（dry-run 不受影响）。
+        from _prod_write_guard import require_prod_write_consent
+        require_prod_write_consent(
+            f'清除 {len(CLEAR_TABLES)} 张表的上线前模拟数据（--execute）',
+            hint='不可逆；本脚本会先做全库 pg_dump 备份并校验归档',
+        )
 
         if not args.yes:
             answer = input('\n将先备份全库，再清空上述数据（不可逆）。输入 CONFIRM 继续: ')
