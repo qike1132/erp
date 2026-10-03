@@ -58,6 +58,16 @@ Write-Host "  PyDir      : $PyDir"
 Write-Host "  OutDir     : $OutDir"
 Write-Host "  TargetIP   : $TargetIP"
 
+# ---- guard: 本脚本在生产主机上运行，绝不能把盘根/工程目录当输出目录递归删除 ----
+$OutFull  = [System.IO.Path]::GetFullPath($OutDir).TrimEnd('\', '/')
+$ProjFull = [System.IO.Path]::GetFullPath($ProjectDir).TrimEnd('\', '/')
+$RootFull = [System.IO.Path]::GetPathRoot($OutFull).TrimEnd('\', '/')
+if ($OutFull -eq '' -or $OutFull -eq $RootFull -or $OutFull -eq $ProjFull `
+        -or $ProjFull.StartsWith($OutFull + '\', [System.StringComparison]::OrdinalIgnoreCase)) {
+    Write-Fail "拒绝删除危险 OutDir: $OutFull（不能是盘根、也不能覆盖/包含 ProjectDir=$ProjFull）"
+    exit 1
+}
+
 if (Test-Path $OutDir) { Remove-Item $OutDir -Recurse -Force }
 foreach ($sub in @("runtime", "app", "settings", "deploy")) {
     New-Item -ItemType Directory -Force -Path (Join-Path $OutDir $sub) | Out-Null

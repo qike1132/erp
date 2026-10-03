@@ -1,9 +1,16 @@
+"""登录压测探针（**不是** pytest 用例）。
+
+⚠️ 2026-10-03 第五轮审计：本文件此前把 `asyncio.run(test())` 写在**模块级**，
+而 `testpaths = tests` 会 import 它 → **每次跑 pytest 都在向 `http://127.0.0.1:5002`
+发 10 次 admin 登录**（打真实后端、写登录限流计数），且不产生任何用例（假绿）。
+现加 `__main__` 守卫：只有显式 `python tests/stress/test_auth.py` 才执行。
+"""
 import asyncio
 
 import aiohttp
 
 
-async def test():
+async def _probe():
     async with aiohttp.ClientSession() as session:
         for i in range(10):
             try:
@@ -21,4 +28,6 @@ async def test():
                 print(f'{i}: error - {e}')
             await asyncio.sleep(0.1)
 
-asyncio.run(test())
+
+if __name__ == '__main__':
+    asyncio.run(_probe())

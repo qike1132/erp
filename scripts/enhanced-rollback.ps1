@@ -535,15 +535,15 @@ function Start-EnhancedRollback {
         }
         
         if (-not $allPassed) {
-            Write-RollbackLog "验证未通过，执行自动回滚" 'WARN'
-            $rollbackSuccess = Invoke-Rollback -BackupPath $backupResult.Primary -TargetPath $TargetPath
-            
-            if (-not $rollbackSuccess) {
-                Write-RollbackLog "自动回滚也失败了！" 'ERROR'
-                Invoke-AutoCleanup -Success $false
-                return $false
-            }
+            # Invoke-PreRollbackValidation 校验的是**刚创建的备份本身**
+            # （存在/完整性/磁盘空间/权限/试跑），不是"修复后状态"。
+            # 备份不可用 == 回滚点不成立 → 终止；绝不能拿一个校验失败的备份去回滚。
+            # （第五轮审计：原代码在此处调用 Invoke-Rollback，方向拧反 —— 备份越坏越回滚。）
+            Write-RollbackLog "备份验证未通过：回滚点不可用，终止（不执行回滚）" 'ERROR'
+            Invoke-AutoCleanup -Success $false
+            return $false
         }
+        Write-RollbackLog "备份验证通过：回滚点已就绪（如需回滚请显式调用 Invoke-Rollback）" 'SUCCESS'
     }
     
     # 步骤4: 自动清理（任务成功后）

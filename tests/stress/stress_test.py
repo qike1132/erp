@@ -28,6 +28,7 @@ import tracemalloc
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
+from urllib.parse import urlparse
 
 import aiohttp
 import psutil
@@ -762,6 +763,17 @@ def generate_protection_disable_config():
 
 async def main():
     """主函数"""
+    # ---- fail-closed 守卫（2026-10-03 第五轮审计）----
+    # 本脚本会对 BASE_URL 发写操作（含 DELETE /api/v1/orders/delete/1），
+    # 而 BASE_URL 默认指向 127.0.0.1:5002 —— 即本机**生产** uvicorn。
+    # 除非显式声明，否则拒绝运行，避免误删生产数据。
+    _host = (urlparse(BASE_URL).hostname or "").lower()
+    if _host in {"127.0.0.1", "localhost", "0.0.0.0", "::1", ""} and os.getenv("STRESS_TEST_ALLOW_PROD") != "1":
+        raise SystemExit(
+            f"拒绝运行：BASE_URL={BASE_URL} 指向本机（生产）。"
+            " 确认要对该环境执行写操作时，请显式设置 STRESS_TEST_ALLOW_PROD=1。"
+        )
+
     # 生成保护机制配置
     protection_config = generate_protection_disable_config()
 

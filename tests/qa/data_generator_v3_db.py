@@ -559,6 +559,14 @@ def insert_cases(session, count, product_ids):
 
 
 def main():
+    # ---- fail-closed 守卫（2026-10-03 第五轮审计）----
+    # 本脚本直连 settings.DATABASE_URL 并向各板块批量插入数万行**测试数据**；
+    # 本机 DATABASE_URL 即生产库。默认拒绝，需显式声明（沿用 _prod_write_guard 约定）。
+    if os.getenv("ERP_ALLOW_PROD_WRITE") != "1":
+        raise SystemExit(
+            "拒绝运行：本脚本会向 settings.DATABASE_URL（本机=生产库）批量插入测试数据。"
+            " 确认要写入时请显式设置 ERP_ALLOW_PROD_WRITE=1。"
+        )
     total_start = time.time()
     session = SessionLocal()
 

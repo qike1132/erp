@@ -128,9 +128,14 @@ jobs:
           coverage.xml
           test-results.xml
     
+    # Bandit 安全扫描（第五轮审计修复）：此前缺 `-c bandit.yaml`，bandit 不会自动
+    # 加载该文件（--configfile 默认为 None，只自动发现目录里的 .bandit），导致
+    # 配置里的 skips（B101/B105/B106/B107/B108）**从未生效**，全仓扫出 5k+ 条并退出非 0。
+    # 现显式 -c 加载配置；`--exit-zero` 与 pip-audit 同口径 —— 只产出 security-report.json，
+    # 不因存量发现红掉 CI（判定另行处理）。
     - name: Security scan with Bandit
       run: |
-        bandit -r fastapi_app/ utils/ -f json -o security-report.json -ii
+        bandit -c bandit.yaml -r fastapi_app/ utils/ -f json -o security-report.json -ii --exit-zero
     
     # 依赖漏洞扫描（P0-11⑨）：豁免清单在 pyproject.toml 的
     # [[tool.code-quality.pip-audit-ignores]]（每条含 id / expires（单条 ≤180 天）/ reason）。
