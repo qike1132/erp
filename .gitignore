@@ -241,6 +241,12 @@ _mc_contract_probe.py
 #     共 21 个）已 git rm --cached 移出跟踪（磁盘文件保留），此后由本规则兜住新产物。
 /backups/
 
+# prod_audit 运行期证据/状态目录（第六轮审计 2026-10-03）：
+# evidence/audit_state.json 是每次审核运行写入的**运行状态**（含 run_id/时间戳/失败信息），
+# 曾被跟踪且残留一次 2026-08-16 的 failed 运行，会造成每次运行都产生无意义 diff。
+# 已 git rm --cached 移出跟踪（磁盘文件保留），此后整个 evidence/ 由本规则兜住。
+/scripts/prod_audit/evidence/
+
 # Redis 生产配置含真实密码，禁止入库（模板见 redis.production.conf.template）
 config/redis.production.conf
 

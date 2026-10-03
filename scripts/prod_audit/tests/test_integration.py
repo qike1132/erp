@@ -107,6 +107,11 @@ class TestL1Isolation:
 
         assert isinstance(result, LayerResult)
         assert result.layer_id == "L1"
+        # 真断言（2026-10-03 第六轮审计）：此前只断言 layer_id —— 造了 2 行 ruff 输出
+        # 却从不检查是否真的解析成 issue，属空洞测试。这里校验两行都被解析出来。
+        found = {(i.file, i.line) for i in result.issues}
+        assert ("fastapi_app/foo.py", 42) in found, result.issues
+        assert ("fastapi_app/bar.py", 10) in found, result.issues
 
 
 # ---------------------------------------------------------------------------
