@@ -158,30 +158,6 @@ class TestGetCustomer:
 class TestSearchCustomers:
     """客户搜索"""
 
-    @pytest.mark.asyncio
-    @patch('fastapi_app.services.customer_service.search_customers')
-    async def test_search_customers(self, mock_search):
-        """搜索客户"""
-        customer = MagicMock()
-        customer.id = 1
-        customer.name = '测试客户A'
-        mock_search.return_value = [customer]
-
-        result = await mock_search(MagicMock(), '测试')
-
-        assert len(result) == 1
-        assert result[0].name == '测试客户A'
-
-    @pytest.mark.asyncio
-    @patch('fastapi_app.services.customer_service.search_customers')
-    async def test_search_customers_no_results(self, mock_search):
-        """搜索无结果"""
-        mock_search.return_value = []
-
-        result = await mock_search(MagicMock(), '不存在')
-
-        assert result == []
-
 
 class TestCreateCustomer:
     """创建客户"""
@@ -355,45 +331,3 @@ class TestToggleCustomerStatus:
 class TestDeleteCustomer:
     """删除客户"""
 
-    @pytest.mark.asyncio
-    @patch('fastapi_app.services.customer_service.delete_customer')
-    async def test_delete_customer_success(self, mock_delete):
-        """删除无关联客户"""
-        await mock_delete(MagicMock(), 1)
-        mock_delete.assert_called_once()
-
-    @pytest.mark.asyncio
-    @patch('fastapi_app.services.customer_service.delete_customer')
-    async def test_delete_customer_not_found(self, mock_delete):
-        """删除不存在的客户"""
-        mock_delete.side_effect = ValueError('客户不存在')
-
-        with pytest.raises(ValueError, match='客户不存在'):
-            await mock_delete(MagicMock(), 999)
-
-    @pytest.mark.asyncio
-    @patch('fastapi_app.services.customer_service.delete_customer')
-    async def test_delete_customer_with_orders(self, mock_delete):
-        """删除有订单关联的客户"""
-        mock_delete.side_effect = ValueError('已有相关单据')
-
-        with pytest.raises(ValueError, match='已有相关单据'):
-            await mock_delete(MagicMock(), 1)
-
-    @pytest.mark.asyncio
-    @patch('fastapi_app.services.customer_service.delete_customer')
-    async def test_delete_customer_with_stockins(self, mock_delete):
-        """删除有入库关联的客户"""
-        mock_delete.side_effect = ValueError('已有相关单据')
-
-        with pytest.raises(ValueError, match='已有相关单据'):
-            await mock_delete(MagicMock(), 1)
-
-    @pytest.mark.asyncio
-    @patch('fastapi_app.services.customer_service.delete_customer')
-    async def test_delete_customer_with_purchase_orders(self, mock_delete):
-        """删除有采购订单关联的客户"""
-        mock_delete.side_effect = ValueError('已有相关单据')
-
-        with pytest.raises(ValueError, match='已有相关单据'):
-            await mock_delete(MagicMock(), 1)

@@ -75,22 +75,6 @@ class TestGetOrders:
         assert result['total'] == 0
 
     @pytest.mark.asyncio
-    @patch('fastapi_app.services.order_crud.get_orders')
-    async def test_get_orders_with_data(self, mock_get):
-        """查询有数据的订单列表"""
-        mock_get.return_value = {
-            'items': [{'id': 1, 'order_no': 'ORD-001'}],
-            'total': 10,
-            'page': 1,
-            'per_page': 50,
-        }
-
-        result = await mock_get(MagicMock(), page=1, per_page=50)
-
-        assert result['total'] == 10
-        assert len(result['items']) == 1
-
-    @pytest.mark.asyncio
     async def test_get_orders_with_customer_filter(self, mock_async_db):
         """按客户筛选订单"""
         count_result = MagicMock()
@@ -199,29 +183,6 @@ class TestGetOrderById:
 
 class TestCreateOrder:
     """订单创建"""
-
-    @pytest.mark.asyncio
-    @patch('fastapi_app.services.order_crud.create_order')
-    async def test_create_order_success(self, mock_create, mock_user):
-        """正常创建订单"""
-        mock_create.return_value = {
-            'order_no': 'ORD-2024-001',
-            'customer': '测试客户',
-            'status': '待备货',
-        }
-
-        result = await mock_create(
-            MagicMock(),
-            product_id=1,
-            quantity=50,
-            customer='测试客户',
-            note='测试备注',
-            current_user=mock_user,
-            order_type='regular'
-        )
-
-        assert result['customer'] == '测试客户'
-        assert result['status'] == '待备货'
 
     @pytest.mark.asyncio
     async def test_create_order_zero_quantity(self, mock_async_db, mock_user):

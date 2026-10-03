@@ -15,10 +15,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from fastapi_app.services.product_service import (
-    ProductHasRelatedOrdersError,
-    ProductHasRelatedStockInsError,
-    ProductHasRelatedStockOutsError,
-    ProductNotFoundError,
     create_product,
     get_product_by_id,
     get_product_stock,
@@ -58,16 +54,6 @@ class TestGetProducts:
 
         assert len(result) == 1
         assert result[0]['name'] == '测试产品'
-
-    @pytest.mark.asyncio
-    @patch('fastapi_app.services.product_service.get_products')
-    async def test_get_products_limit(self, mock_get):
-        """limit 参数限制返回数量"""
-        mock_get.return_value = []
-
-        result = await mock_get(MagicMock(), limit=10)
-
-        assert result == []
 
 
 class TestGetProductsPage:
@@ -139,23 +125,6 @@ class TestGetProductsPage:
 
 class TestCreateProduct:
     """产品创建"""
-
-    @pytest.mark.asyncio
-    @patch('fastapi_app.services.product_service.create_product')
-    async def test_create_product_success(self, mock_create):
-        """正常创建产品"""
-        mock_create.return_value = {
-            'id': 1, 'name': '新产品', 'barcode': 'NEW001',
-            'current_stock': 100, 'initial_stock': 100,
-            'price': 99.99, 'factory': '东莞'
-        }
-
-        result = await mock_create(
-            MagicMock(), name='新产品', barcode='NEW001',
-            image=None, initial_stock=100, price=99.99, factory='东莞'
-        )
-
-        assert result['name'] == '新产品'
 
     @pytest.mark.asyncio
     async def test_create_product_empty_name(self, mock_async_db):
@@ -235,24 +204,6 @@ class TestUpdateProduct:
     """产品编辑"""
 
     @pytest.mark.asyncio
-    @patch('fastapi_app.services.product_service.update_product')
-    async def test_update_product_success(self, mock_update):
-        """正常编辑产品"""
-        mock_update.return_value = {
-            'id': 1, 'name': '新产品名', 'barcode': 'NEW001',
-            'price': 60.0, 'factory': '湖北'
-        }
-
-        result = await mock_update(
-            MagicMock(), product_id=1, name='新产品名',
-            barcode='NEW001', image=None, initial_stock=100,
-            price=60.0, factory='湖北'
-        )
-
-        assert result['name'] == '新产品名'
-        assert result['price'] == 60.0
-
-    @pytest.mark.asyncio
     @patch('fastapi_app.services.product_service.get_product_for_update')
     async def test_update_product_not_found(self, mock_get_product, mock_async_db):
         """编辑不存在的产品"""
@@ -317,49 +268,6 @@ class TestUpdateProduct:
 class TestDeleteProduct:
     """产品删除"""
 
-    @pytest.mark.asyncio
-    @patch('fastapi_app.services.product_service.delete_product')
-    async def test_delete_product_success(self, mock_delete):
-        """正常删除无关联产品"""
-        await mock_delete(MagicMock(), 1)
-        mock_delete.assert_called_once()
-
-    @pytest.mark.asyncio
-    @patch('fastapi_app.services.product_service.delete_product')
-    async def test_delete_product_not_found(self, mock_delete):
-        """删除不存在的产品"""
-        mock_delete.side_effect = ProductNotFoundError(product_id=999)
-
-        with pytest.raises(ProductNotFoundError):
-            await mock_delete(MagicMock(), 999)
-
-    @pytest.mark.asyncio
-    @patch('fastapi_app.services.product_service.delete_product')
-    async def test_delete_product_with_orders(self, mock_delete):
-        """删除有关联订单的产品"""
-        mock_delete.side_effect = ProductHasRelatedOrdersError(product_name='有订单产品', order_count=5)
-
-        with pytest.raises(ProductHasRelatedOrdersError):
-            await mock_delete(MagicMock(), 1)
-
-    @pytest.mark.asyncio
-    @patch('fastapi_app.services.product_service.delete_product')
-    async def test_delete_product_with_stockins(self, mock_delete):
-        """删除有关联入库单的产品"""
-        mock_delete.side_effect = ProductHasRelatedStockInsError(product_name='有入库产品', stockin_count=3)
-
-        with pytest.raises(ProductHasRelatedStockInsError):
-            await mock_delete(MagicMock(), 1)
-
-    @pytest.mark.asyncio
-    @patch('fastapi_app.services.product_service.delete_product')
-    async def test_delete_product_with_stockouts(self, mock_delete):
-        """删除有关联出库单的产品"""
-        mock_delete.side_effect = ProductHasRelatedStockOutsError(product_name='有出库产品', stockout_count=2)
-
-        with pytest.raises(ProductHasRelatedStockOutsError):
-            await mock_delete(MagicMock(), 1)
-
 
 class TestGetProductById:
     """按ID查询产品"""
@@ -387,27 +295,6 @@ class TestGetProductById:
 
 class TestSearchProducts:
     """产品搜索"""
-
-    @pytest.mark.asyncio
-    @patch('fastapi_app.services.product_service.search_products')
-    async def test_search_products(self, mock_search):
-        """搜索产品"""
-        mock_search.return_value = [{'id': 1, 'name': '手机壳', 'barcode': 'CASE001'}]
-
-        result = await mock_search(MagicMock(), '手机')
-
-        assert len(result) == 1
-        assert result[0]['name'] == '手机壳'
-
-    @pytest.mark.asyncio
-    @patch('fastapi_app.services.product_service.search_products')
-    async def test_search_products_no_results(self, mock_search):
-        """搜索无结果"""
-        mock_search.return_value = []
-
-        result = await mock_search(MagicMock(), '不存在')
-
-        assert result == []
 
 
 class TestGetProductStock:

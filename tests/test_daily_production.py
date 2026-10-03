@@ -10,7 +10,7 @@
 - 每日/月度汇总
 - 边界条件（无效部门、负数数量、超大数量、空产品名）
 """
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -378,54 +378,7 @@ class TestDeleteRecord:
 class TestGetDailySummary:
     """每日汇总"""
 
-    @pytest.mark.asyncio
-    @patch('fastapi_app.services.daily_production_service.get_daily_summary')
-    async def test_get_daily_summary_empty(self, mock_summary):
-        """空汇总"""
-        mock_summary.return_value = {'data': [], 'total_qty': 0, 'total_amount': 0}
-
-        result = await mock_summary(MagicMock(), target_date='2024-06-15')
-
-        assert 'data' in result
-        assert result['data'] == []
-
-    @pytest.mark.asyncio
-    @patch('fastapi_app.services.daily_production_service.get_daily_summary')
-    async def test_get_daily_summary_with_data(self, mock_summary):
-        """有数据汇总"""
-        mock_summary.return_value = {
-            'data': [{'product_name': '产品A', 'quantity': 100}],
-            'total_qty': 100,
-            'total_amount': 5000,
-        }
-
-        result = await mock_summary(MagicMock(), target_date='2024-06-15')
-
-        assert 'data' in result
-        assert len(result['data']) == 1
-
 
 class TestGetMonthlySummary:
     """月度汇总"""
 
-    @pytest.mark.asyncio
-    @patch('fastapi_app.services.daily_production_service.get_monthly_summary')
-    async def test_get_monthly_summary_empty(self, mock_summary):
-        """空月度汇总"""
-        mock_summary.return_value = {'summary': []}
-
-        result = await mock_summary(MagicMock(), year=2024, month=6)
-
-        assert 'summary' in result
-
-    @pytest.mark.asyncio
-    @patch('fastapi_app.services.daily_production_service.get_monthly_summary')
-    async def test_get_monthly_summary_with_data(self, mock_summary):
-        """有数据月度汇总"""
-        mock_summary.return_value = {
-            'summary': [{'product_name': '产品A', 'total_qty': 500}]
-        }
-
-        result = await mock_summary(MagicMock(), year=2024, month=6)
-
-        assert 'summary' in result

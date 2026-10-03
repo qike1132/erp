@@ -10,7 +10,7 @@
 
 使用 mock_async_db + mock_user fixtures，无需数据库。
 """
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -255,52 +255,7 @@ class TestUpdateSupplier:
 
         assert result['name'] == '保持原名称'
 
-    @pytest.mark.asyncio
-    @patch('fastapi_app.services.purchase_supplier_service.update_supplier')
-    async def test_update_supplier_same_name(self, mock_update):
-        """编辑供应商时名称不变"""
-        mock_update.return_value = {'id': 1, 'name': '供应商A', 'phone': '新电话'}
-
-        result = await mock_update(MagicMock(), 1, {'name': '供应商A', 'phone': '新电话'})
-        assert result['name'] == '供应商A'
-
 
 class TestDeleteSupplier:
     """供应商删除"""
 
-    @pytest.mark.asyncio
-    @patch('fastapi_app.services.purchase_supplier_service.delete_supplier')
-    async def test_delete_supplier_success(self, mock_delete):
-        """正常删除无关联的供应商"""
-        mock_delete.return_value = {'id': 1, 'name': '无关联供应商'}
-
-        result = await mock_delete(MagicMock(), 1)
-
-        assert result['id'] == 1
-
-    @pytest.mark.asyncio
-    @patch('fastapi_app.services.purchase_supplier_service.delete_supplier')
-    async def test_delete_supplier_not_found(self, mock_delete):
-        """删除不存在的供应商"""
-        mock_delete.side_effect = ValueError('供应商不存在')
-
-        with pytest.raises(ValueError, match='供应商不存在'):
-            await mock_delete(MagicMock(), 999)
-
-    @pytest.mark.asyncio
-    @patch('fastapi_app.services.purchase_supplier_service.delete_supplier')
-    async def test_delete_supplier_with_bom_data(self, mock_delete):
-        """删除有关联 BOM 数据的供应商"""
-        mock_delete.side_effect = ValueError('已有相关BOM或采购订单数据')
-
-        with pytest.raises(ValueError, match='已有相关BOM或采购订单数据'):
-            await mock_delete(MagicMock(), 2)
-
-    @pytest.mark.asyncio
-    @patch('fastapi_app.services.purchase_supplier_service.delete_supplier')
-    async def test_delete_supplier_with_purchase_order(self, mock_delete):
-        """删除有采购订单关联的供应商"""
-        mock_delete.side_effect = ValueError('已有相关BOM或采购订单数据')
-
-        with pytest.raises(ValueError, match='已有相关BOM或采购订单数据'):
-            await mock_delete(MagicMock(), 3)
