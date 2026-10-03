@@ -36,6 +36,11 @@ r"""孤儿模块机械校验（P0-8）。
   免得把一次性脚本判成孤儿。
 * 包 __init__.py 不是孤儿候选：from utils.log_rotation import x 在运行期隐式
   导入父包，静态图里却只记 utils.log_rotation；故可达集向上补齐父包。
+  **入边同理**（2026-10-03 修复）：``import a.b.c`` 在运行期必然执行 ``a/__init__.py``
+  与 ``a/b/__init__.py``，故每条边同时补上其祖先包（仅限 known 内真实存在的）。
+  否则断言 A 会把「子模块被导入、父包必然被导入」的包误判成「全仓零入边」，
+  白名单里的 ``__init__.py`` 会无端变红（P2 mypy 扩容 144→370 后暴露）。
+  这不削弱检测力：某包若既无子模块被导入、也无人直接引用，它依旧零入边，照旧被抓。
 """
 from __future__ import annotations
 
@@ -142,6 +147,22 @@ def _collect_edges(path: Path, module: str, is_package: bool, known: frozenset[s
     return targets
 
 
+def _with_parent_packages(dsts: set[str], known: frozenset[str]) -> set[str]:
+    """把「导入子模块 ⇒ 运行期必执行其全部祖先包 __init__」补进边集（只补 known 内的）。
+
+    这是 Python 的导入语义，**不是放宽判定**：包若有任一子模块被导入，它本身就活着；
+    反之（无子模块被导入、也无人直接 import 它）它仍然零入边，断言 A 照旧抓得到。
+    """
+    out = set(dsts)
+    for dst in dsts:
+        parts = dst.split('.')
+        for i in range(1, len(parts)):
+            parent = '.'.join(parts[:i])
+            if parent in known:
+                out.add(parent)
+    return out
+
+
 def _split_entries(buf: str) -> list[str]:
     return [tok.strip().replace('\\', '/') for tok in buf.replace('\n', ',').split(',') if tok.strip()]
 
@@ -218,6 +239,8 @@ def _build_graph(files: list[Path]) -> _Graph:
     prod_edges: dict[str, set[str]] = {}
     for mod, path in path_by_module.items():
         dsts = _collect_edges(path, mod, is_package[mod], frozen)
+        dsts = _with_parent_packages(dsts, frozen)
+        # 必须在补边之后：包导入自己的子模块时会把自己的祖先补回来（含自身）
         dsts.discard(mod)
         all_edges[mod] = dsts
         if not is_test[mod]:
