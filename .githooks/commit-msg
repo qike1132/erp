@@ -20,8 +20,11 @@
 msg_file="$1"
 [ -n "$msg_file" ] && [ -f "$msg_file" ] || exit 0
 
-# 已知的第三方 AI 工具（扩展名匹配用，大小写不敏感）
-tools='Codebuff|Cursor|Copilot|Windsurf|Aider|Devin|Cody|Tabnine|Continue|Qodo|Trae|Qoder|Cline|Roo'
+# 已知的第三方 AI 工具（大小写不敏感）。
+# ⚠️ 刻意**不含 `Cody`**：它既是 Sourcegraph Cody 的产品名，也是常见人名 ——
+#    实测 `Co-Authored-By: Cody <cody@example.com>` 会被误剥。宁可漏剥一个工具，
+#    不要静默丢弃人类协作者的归属。
+tools='Codebuff|Cursor|Copilot|Windsurf|Aider|Devin|Tabnine|Continue|Qodo|Trae|Qoder|Cline|Roo'
 
 tmp="$(mktemp)" || exit 0
 
@@ -35,7 +38,10 @@ sed -E \
 | awk '{ line[NR] = $0 } $0 ~ /[^[:space:]]/ { last = NR }
        END { for (i = 1; i <= last; i++) print line[i] }' > "$tmp"
 
-if ! cmp -s "$msg_file" "$tmp"; then
+# ⚠️ 绝不把**非空**的提交信息覆盖成**空**：sed/awk 一旦失败（如 BSD sed 不认 `I` 标志）
+# 会产出空输出，此时若直接 cp 就会把提交信息抹成 0 字节 → git 报 "empty commit message"。
+# 实测：sed 报错时 msg_file 由 36 字节变 0 字节。故只在「新内容非空」或「原信息本就为空」时才覆盖。
+if { [ -s "$tmp" ] || [ ! -s "$msg_file" ]; } && ! cmp -s "$msg_file" "$tmp"; then
     cp "$tmp" "$msg_file"
     echo "commit-msg: 已剥掉第三方 AI 工具署名尾行（AGENTS.md §7 AI 痕迹治理）" >&2
 fi

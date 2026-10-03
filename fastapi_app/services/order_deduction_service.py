@@ -30,6 +30,9 @@ async def process_order_deduction(
     order_quantity: int,
     deduct_stock: bool = True,
     custom_deduct_quantity: int | None = None,
+    # ⚠️ 兼容签名用，**恒被忽略**：函数开头会无条件 `get_product_for_update(db, product_id)`
+    # 重新加锁（锁序必须是 Product → StockIn；调用方可能传的是**无锁**对象，如
+    # batch_import_core 的 `_pre_load_product_map`）。保留该形参只为不改 4 个调用方。
     product: Product | None = None,
 ) -> tuple[int, list]:
     """

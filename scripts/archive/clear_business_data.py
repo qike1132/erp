@@ -6,9 +6,9 @@ import asyncio
 import sys
 from pathlib import Path
 
-# 让 `python scripts/archive/clear_business_data.py` 能直接跑：
-#   · scripts/  —— 同级的 _prod_write_guard
-#   · 项目根     —— fastapi_app
+# 让 `python scripts/archive/clear_business_data.py` 能直接跑。
+# 注意两次 insert(0)：**后插的在前** —— 最终顺序是「项目根(fastapi_app) → scripts/(_prod_write_guard)」。
+# 两者模块名不冲突，谁先都无所谓，此处按实际顺序写注释。
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 

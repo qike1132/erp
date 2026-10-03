@@ -126,7 +126,10 @@ def _verify_zip_payload(file_path: Path) -> dict[str, Any] | None:
                 manifest_data = json.loads(zip_file.read('manifest.json').decode('utf-8'))
                 if 'version' not in manifest_data:
                     return {'filename': name, 'healthy': False, 'issue': 'manifest.json缺少version字段'}
-            except (json.JSONDecodeError, KeyError) as e:
+            except (json.JSONDecodeError, UnicodeDecodeError, KeyError) as e:
+                # ⚠️ 必须显式列出 UnicodeDecodeError（`.decode('utf-8')` 对非法 UTF-8 抛它）：
+                # 它也是 ValueError 子类，不在这里接住就会落到外层 `except ValueError`
+                # 被误标成"无法校验"，而它其实是**真的损坏**。
                 return {'filename': name, 'healthy': False, 'issue': f'manifest.json解析失败: {e!s}'}
     except ValueError as e:
         # 加密包但拿不到口令 —— **不能判"损坏"**：唯一调用方 cleanup/service.py 在

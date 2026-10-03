@@ -170,10 +170,13 @@ async def create_test_production_data():
 if __name__ == '__main__':
     # 按「是否出现」判定，不看 argv[1] 位置：`... --allow-prod-write --create-test`
     # 这种带前置参数时，原先会漏判成只读分支（静默不写、也不报护栏）。
-    # 同时接受 `--create-test=1` 这类带值形态（原先只认裸 token；漏判方向是 fail-safe
-    # —— 只读分支不写库 —— 但会让人以为已生成测试数据）。
+    # 带值形态只认**真值**（`--create-test=1|true|yes`）—— 若把 `--create-test=0/false`
+    # 也算启用，等于把"明确表示别写"翻成写库分支（方向更危险）。
     _argv = sys.argv[1:]
-    if '--create-test' in _argv or any(a.startswith('--create-test=') for a in _argv):
+    if '--create-test' in _argv or any(
+        a.split('=', 1)[1].strip().lower() in ('1', 'true', 'yes', 'on')
+        for a in _argv if a.startswith('--create-test=')
+    ):
         # 只有这一支写库（else 是只读诊断，不加护栏）
         from _prod_write_guard import require_prod_write_consent
         require_prod_write_consent('向生产库插入测试生产记录（--create-test）')

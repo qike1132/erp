@@ -43,10 +43,13 @@ def _url_path(u: str) -> str:
     """取 URL 的 path 部分（剥掉 `scheme://host` 与 query）。
 
     用于识别**自站的绝对 URL**（用户从地址栏整串粘贴的 `https://host:3000/static/uploads/…`）
-    —— 这类也是本地上传件，签名要剥；而外部 CDN 的 path 不会落在 `/static/uploads/`。
+    —— 这类也是本地上传件，签名要剥、且**必须还原成相对 path**：
+    出站 `sign_image_url` 对带 scheme/netloc 的值**原样返回不重签**，
+    若把绝对 URL 落库，nginx secure_link 会**立即 403**（比"过期后 410"更糟）。
     """
     bare = u.split('?', 1)[0]
-    if bare.startswith(('http://', 'https://')):
+    low = bare.lower()  # scheme 大小写不敏感（HTTP:// 也要认）
+    if low.startswith(('http://', 'https://')):
         rest = bare.split('://', 1)[1]
     elif bare.startswith('//'):
         rest = bare[2:]
@@ -57,7 +60,7 @@ def _url_path(u: str) -> str:
 
 
 def strip_upload_signature(url: str) -> str:
-    """剥掉**本地上传**引用上的签名 query，得到可长期入库的原始路径。
+    """剥掉**本地上传**引用上的签名 query，得到可长期入库的**相对路径**。
 
     上传接口返回的是**限时签名** URL（`/static/uploads/x.webp?st=..&s=..`）。
     若把带签名的整串**原样存库**，读时 `sign_upload_url` 会因"已含 ?"而按幂等
@@ -68,17 +71,16 @@ def strip_upload_signature(url: str) -> str:
 
     ⚠️ 只对**本地**上传路径动手：`schemas/product.py` 明确放行外部 http(s) 直链，
     那些 URL 的 query（如 CDN 的 `?token=…`）是对方签发的，剥掉会让外链失效。
-    判定按 **path**（不看是不是绝对 URL）—— 自站绝对 URL 同样是本地上传件，
-    否则它会带着旧签名落库、过期后 410（第三轮审计补）。
+    判定按 **path**；**自站绝对 URL 也要还原成相对 path**（否则出站不重签 → 403）。
     """
     if not url:
         return url
-    bare = url.split('?', 1)[0]
-    if _url_path(url).startswith(_UPLOAD_PREFIX):
-        return bare
+    path = _url_path(url)
+    if path.startswith(_UPLOAD_PREFIX):
+        return path
     # 兼容裸 storage key（无前缀）形态：仅当带的是本系统的签名参数时才剥
     if not url.startswith(('http://', 'https://', '//')) and '?st=' in url and '&s=' in url:
-        return bare
+        return path
     return url
 
 
