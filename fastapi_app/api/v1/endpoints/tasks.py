@@ -2,6 +2,7 @@
 异步任务 API 端点
 任务提交与状态查询，基于 ARQ（原生 async 任务队列）。
 """
+import contextlib
 import os
 import shutil
 import tempfile
@@ -159,8 +160,14 @@ async def async_import_orders(
 
     from fastapi_app.core.arq_app import get_arq_pool
     from fastapi_app.tasks.batch_tasks import batch_import_orders_task
-    pool = await get_arq_pool()
-    job = await pool.enqueue_job(batch_import_orders_task.__name__, tmp_path, file.filename, current_user.id)
+    try:
+        pool = await get_arq_pool()
+        job = await pool.enqueue_job(batch_import_orders_task.__name__, tmp_path, file.filename, current_user.id)
+    except Exception:  # defensive: 入队失败须清理临时文件，异常类型取决于 Redis 驱动
+        # 第八轮审计：入队失败（如 Redis 不可用）时清理临时文件，避免 %TEMP% 堆积
+        with contextlib.suppress(OSError):
+            os.unlink(tmp_path)
+        raise
     task_id_str = job.job_id if job else ''
 
     return success_response(**{
@@ -184,8 +191,14 @@ async def async_import_stockins(
 
     from fastapi_app.core.arq_app import get_arq_pool
     from fastapi_app.tasks.batch_tasks import batch_import_stockins_task
-    pool = await get_arq_pool()
-    job = await pool.enqueue_job(batch_import_stockins_task.__name__, tmp_path, file.filename, current_user.id)
+    try:
+        pool = await get_arq_pool()
+        job = await pool.enqueue_job(batch_import_stockins_task.__name__, tmp_path, file.filename, current_user.id)
+    except Exception:  # defensive: 入队失败须清理临时文件，异常类型取决于 Redis 驱动
+        # 第八轮审计：入队失败（如 Redis 不可用）时清理临时文件，避免 %TEMP% 堆积
+        with contextlib.suppress(OSError):
+            os.unlink(tmp_path)
+        raise
     task_id_str = job.job_id if job else ''
 
     return success_response(**{
