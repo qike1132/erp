@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi_app.core.backup_progress import _sanitize_error
 from fastapi_app.core.cache import CacheDomain
 from fastapi_app.core.cache_invalidation import InvalidationStrategy, cache_mgr
 from fastapi_app.core.config import settings
@@ -92,7 +93,7 @@ async def list_orders(
     except (SQLAlchemyError, OSError) as e:
         # 仅捕获基础设施异常并转 500；编程错误（KeyError 等）自然抛给全局 handler 暴露真实堆栈
         logger.exception("[OrderList] 获取订单列表失败: %s", e)
-        raise HTTPException(status_code=500, detail=f"获取订单列表失败: {str(e)[:200]}") from e
+        raise HTTPException(status_code=500, detail=_sanitize_error(f"获取订单列表失败: {e}")) from e
 
     return OrderListResponse(data=result['items'], total=result['total'],
                              page=result['page'], per_page=result['per_page'])
@@ -228,7 +229,7 @@ async def list_unified_records(
         raise  # 业务异常（如非法日期 400）交由全局 handler，不被吞为 500
     except (SQLAlchemyError, OSError) as e:
         logger.exception("[OrderRecords] 获取合并记录失败: %s", e)
-        raise HTTPException(status_code=500, detail=f"获取合并记录失败: {str(e)[:200]}") from e
+        raise HTTPException(status_code=500, detail=_sanitize_error(f"获取合并记录失败: {e}")) from e
 
     return OrderListResponse(data=result['items'], total=result['total'],
                              page=result['page'], per_page=result['per_page'])

@@ -26,6 +26,7 @@ from fastapi_app.api.v1.endpoints.backup._deps import (
     _is_encrypted_data,
     require_backup_permission,
 )
+from fastapi_app.core.backup_progress import _sanitize_error
 from fastapi_app.core.database import get_async_read_db
 from fastapi_app.core.validators import require_upload_magic
 from fastapi_app.schemas.backup import (
@@ -64,7 +65,7 @@ async def validate_backup(
     except HTTPException:
         raise
     except (OSError, ValueError) as e:
-        raise HTTPException(status_code=400, detail=f'读取文件失败: {e}') from e
+        raise HTTPException(status_code=400, detail=_sanitize_error(f'读取文件失败: {e}')) from e
     # P0-12：扩展名之外校验文件头；加密备份是「4 字节元数据长度 + JSON 元数据 + 密文」
     # 的自定义容器（非 PK/{/1f8b 开头），必须先放行，否则会拒掉合法加密备份。
     if not _is_encrypted_data(content):

@@ -110,7 +110,7 @@ async def _read_backup_file(file: UploadFile) -> tuple[bytes, bool, str]:
     except HTTPException:
         raise
     except (OSError, ValueError) as e:
-        raise HTTPException(status_code=400, detail=f'读取文件失败: {e}') from e
+        raise HTTPException(status_code=400, detail=_sanitize_error(f'读取文件失败: {e}')) from e
     if not content:
         raise HTTPException(status_code=400, detail='备份文件内容为空')
     is_zip = filename.endswith('.zip') or filename.endswith('.zip.enc') or content[:4] == b'PK\x03\x04'
@@ -125,7 +125,7 @@ async def _read_backup_file(file: UploadFile) -> tuple[bytes, bool, str]:
             )
         except (OSError, EOFError, ValueError, zlib.error) as e:
             # BadGzipFile 是 OSError 子类；截断的 gz 抛 EOFError；坏块抛 zlib.error
-            raise HTTPException(status_code=400, detail=f'gzip 备份文件无法解压: {e}') from e
+            raise HTTPException(status_code=400, detail=_sanitize_error(f'gzip 备份文件无法解压: {e}')) from e
         is_json = True
     return content, is_zip, filename
 
@@ -312,7 +312,7 @@ async def restore_server_backup(
     except HTTPException:
         raise
     except (OSError, ValueError) as e:
-        raise HTTPException(status_code=400, detail=f'读取备份文件失败: {e}') from e
+        raise HTTPException(status_code=400, detail=_sanitize_error(f'读取备份文件失败: {e}')) from e
 
     decrypt_password = _get_encryption_password(password, x_backup_password)
 
@@ -401,7 +401,7 @@ async def restore_incremental_backup(
     except HTTPException:
         raise
     except OSError as e:
-        raise HTTPException(status_code=400, detail=f'读取备份文件失败: {e}') from e
+        raise HTTPException(status_code=400, detail=_sanitize_error(f'读取备份文件失败: {e}')) from e
     is_zip = safe_name.endswith('.zip') or safe_name.endswith('.zip.enc') or content[:4] == b'PK\x03\x04'
     if not is_zip:
         raise HTTPException(status_code=400, detail='增量备份文件必须是 ZIP 格式')
@@ -525,7 +525,7 @@ async def async_restore_server_backup(
     except HTTPException:
         raise
     except (OSError, ValueError) as e:
-        raise HTTPException(status_code=400, detail=f'读取备份文件失败: {e}') from e
+        raise HTTPException(status_code=400, detail=_sanitize_error(f'读取备份文件失败: {e}')) from e
 
     decrypt_password = _get_encryption_password(password, x_backup_password)
     from fastapi_app.core.backup_progress import create_progress, generate_task_id

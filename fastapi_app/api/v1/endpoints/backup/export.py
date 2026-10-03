@@ -30,6 +30,7 @@ from fastapi_app.api.v1.endpoints.backup._deps import (
     require_backup_permission,
 )
 from fastapi_app.core.audit_middleware import _buffer_audit_entry
+from fastapi_app.core.backup_progress import _sanitize_error
 from fastapi_app.core.database import get_async_db
 from fastapi_app.core.response import success_response
 from fastapi_app.schemas.backup import (
@@ -193,7 +194,7 @@ async def download_server_backup(
     try:
         size = filepath.stat().st_size
     except OSError as e:
-        raise HTTPException(status_code=400, detail=f'读取备份文件失败: {e}') from e
+        raise HTTPException(status_code=400, detail=_sanitize_error(f'读取备份文件失败: {e}')) from e
 
     await _audit_export_download(
         request, user, filename=safe_name, format='file',

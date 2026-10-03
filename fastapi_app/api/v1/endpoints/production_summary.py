@@ -13,6 +13,7 @@ from fastapi.responses import Response
 from sqlalchemy.exc import DisconnectionError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi_app.core.backup_progress import _sanitize_error
 from fastapi_app.core.config import settings
 from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_permission
@@ -308,7 +309,7 @@ async def upload_packaging_excel(
     try:
         content = await file.read()
     except (OSError, ValueError) as e:
-        raise HTTPException(status_code=400, detail=f'文件读取失败: {e}') from e
+        raise HTTPException(status_code=400, detail=_sanitize_error(f'文件读取失败: {e}')) from e
     # P0-12：扩展名之外再校验文件头（改扩展名的伪 xlsx 在此拦下）
     require_upload_magic(content, ('xlsx', 'xlsm'), filename=file.filename or '')
     async with db_transaction(db):
