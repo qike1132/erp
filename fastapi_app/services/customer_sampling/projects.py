@@ -24,14 +24,18 @@ from fastapi_app.shared_models import (
 logger = logging.getLogger(__name__)
 
 class _UnsetType(Enum):
-    """"未传参"哨兵类型（枚举字面量便于类型收窄）。"""
+    """"未传参"哨兵类型（枚举字面量便于类型收窄）。
 
-    TOKEN = 'unset'
+    成员名用 MARKER 而非 TOKEN：原名 TOKEN 会触发 bandit 的 S105「硬编码口令」
+    误报（值是 'unset'，与凭据无关），且名字本身也容易误读成认证令牌。
+    """
+
+    MARKER = 'unset'
 
 
 # 可空字段的"未传参"哨兵：区分「显式传 null = 清空」与「未传 = 不修改」。
 # 仅 update_project 签名内部使用，调用方经 endpoint 的 model_fields_set 判定后传参。
-_UNSET = _UnsetType.TOKEN
+_UNSET = _UnsetType.MARKER
 
 from .common import (
     _ensure_part_name_unique,
@@ -192,9 +196,9 @@ async def update_project(
     project_id: int,
     *,
     product_name: str | None = None,
-    pattern_maker_id: int | None | _UnsetType = _UNSET,
+    pattern_maker_id: int | _UnsetType | None = _UNSET,
     remark: str | None = None,
-    product_image_file_id: int | None | _UnsetType = _UNSET,
+    product_image_file_id: int | _UnsetType | None = _UNSET,
     current_version: str | None = None,
     version: int,
     user_id: int | None = None,

@@ -76,7 +76,7 @@ async def test_health_endpoint_exposes_degradation_with_status_200(client):
 
 def _code_of(func) -> str:
     """去掉注释/空行后的函数源码，用于「死分支不得回潮」的守卫断言。"""
-    lines = [ln for ln in inspect.getsource(func).splitlines()]
+    lines = inspect.getsource(func).splitlines()
     return "\n".join(ln for ln in lines if ln.strip() and not ln.lstrip().startswith('#'))
 
 

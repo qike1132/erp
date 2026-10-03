@@ -38,6 +38,7 @@ from fastapi_app.services.backup import BackupFileError, schedule_service
 from fastapi_app.services.backup.verify import query_service as backup_query_service
 from fastapi_app.shared_models import User
 
+
 def _iso_or_raw(value: object) -> object:
     """datetime 转 ISO 字符串，其余原样返回（与内联三元的输出形状一致）。"""
     return value.isoformat() if isinstance(value, datetime) else value

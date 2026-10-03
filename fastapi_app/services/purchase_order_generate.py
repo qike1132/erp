@@ -251,7 +251,9 @@ async def _load_product_names(db: AsyncSession, product_ids: list[int]) -> dict[
     prod_result = await db.execute(
         select(Product.id, Product.name).where(Product.id.in_(product_ids))
     )
-    return {p_id: name for p_id, name in prod_result.all()}
+    # 同 approval_service：推导式会被 C416 判为多余，dict(Row) 又过不了 mypy。
+    product_rows = [(p_id, name) for p_id, name in prod_result.all()]
+    return dict(product_rows)
 
 
 async def _load_bom_context(db: AsyncSession, product_ids: list[int]) -> _BomContext:

@@ -6,7 +6,7 @@
 所有写操作（创建/编辑/删除/切换状态）会失效相关缓存。
 """
 import logging
-from typing import Callable
+from collections.abc import Callable
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError

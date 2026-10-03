@@ -49,9 +49,8 @@ for name, sql in tests:
 
 print("\n" + "=" * 60)
 print("  同步版库存查询（SQL聚合优化后）...")
-from sqlalchemy.orm import Session
-
 from fastapi_app.shared.stock_crud_service import get_inventory
+from sqlalchemy.orm import Session
 
 session = Session(bind=e)
 t0 = time.time()

@@ -10,7 +10,7 @@ import asyncio
 import contextlib
 import json
 import logging
-from urllib.parse import quote_plus, urlparse, urlunparse
+from urllib.parse import quote_plus
 
 from fastapi_app.core.exception_handler import INFRA_EXCEPTIONS, RUNTIME_INFRA_EXCEPTIONS
 

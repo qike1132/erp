@@ -46,6 +46,20 @@ from fastapi_app.utils import validate_customer_name as _shared_validate_custome
 logger = logging.getLogger(__name__)
 
 
+def _require_not_none[T](value: T | None, source: str) -> T:
+    """把「失败时为 None」的解析结果收窄为非 None，否则抛 ValueError。
+
+    为什么不用 `assert`（S101，生产代码禁用 assert）：`-O` 下 assert 会被剥掉，
+    helper 契约一破就带着 None 继续往下跑；而裸 AssertionError 不在本模块
+    except (OSError, ValueError) 的捕获范围内 —— 会一路冒到端点变成 500。
+    改抛 ValueError 后恰好落回既有的解析错误分支，与「文件损坏 / Sheet 不存在」
+    返回同一种 success=False 结果（见各 import_*_service 末尾的 except）。
+    """
+    if value is None:
+        raise ValueError(f'{source}未返回数据')
+    return value
+
+
 # ==================== 数据验证 ====================
 
 # 使用 fastapi_app.utils 中的统一验证函数
@@ -222,7 +236,7 @@ async def import_orders_service(db: AsyncSession, file: ExcelUpload) -> BatchImp
         data_list, err = await _read_excel_sheets(file, ['订单管理'], '没有找到"订单管理"Sheet')
         if err:
             return BatchImportResult(success=False, message=err)
-        assert data_list is not None  # _read_excel_sheets 契约：失败时 data_list 为 None（err 已判空）
+        data_list = _require_not_none(data_list, 'Excel 解析')
         # 构建产品映射，支持按名称（小写）和条码查找
         all_products = await get_all_products(db)
         product_map = {prod.name.lower().strip(): prod for prod in all_products}
@@ -304,7 +318,7 @@ async def import_case_stockouts_service(db: AsyncSession, file: ExcelUpload) -> 
         data_list, err = await _read_excel_sheets(file, ['皮套出库', '皮套出货'], '没有找到可用的Sheet')
         if err:
             return BatchImportResult(success=False, message=err)
-        assert data_list is not None  # _read_excel_sheets 契约：失败时 data_list 为 None（err 已判空）
+        data_list = _require_not_none(data_list, 'Excel 解析')
         imported = skipped = 0
         errors = []
         for row_data in data_list:
@@ -336,7 +350,7 @@ async def import_case_stockouts_service(db: AsyncSession, file: ExcelUpload) -> 
                         errors.append(case_err)
                         skipped += 1
                         continue
-                    assert case is not None  # 同上：case_err 已判空，失败时 case 为 None
+                    case = _require_not_none(case, '皮套查询')
                     # 统一负库存校验入口（env ALLOW_NEGATIVE_STOCK，缺省拒绝）
                     if reason := check_stock_available(
                         case.current_stock, -qty,
@@ -389,7 +403,7 @@ async def import_case_stockins_service(db: AsyncSession, file: ExcelUpload) -> B
         data_list, err = await _read_excel_sheets(file, ['皮套入库', '皮套进库'], '没有找到可用的Sheet')
         if err:
             return BatchImportResult(success=False, message=err)
-        assert data_list is not None  # _read_excel_sheets 契约：失败时 data_list 为 None（err 已判空）
+        data_list = _require_not_none(data_list, 'Excel 解析')
         imported = 0
         skipped = 0
         errors = []
@@ -422,7 +436,7 @@ async def import_case_stockins_service(db: AsyncSession, file: ExcelUpload) -> B
                         errors.append(case_err)
                         skipped += 1
                         continue
-                    assert case is not None  # 同上：case_err 已判空，失败时 case 为 None
+                    case = _require_not_none(case, '皮套查询')
                     stockin_date = parse_date_value(stockin_date_val) or datetime.now(UTC)  # aware UTC：movement_date 列为 timestamptz
                     movement_no = await generate_case_stockin_number(db)
                     db.add(CaseMovement(
@@ -467,7 +481,7 @@ async def import_stockins_service(db: AsyncSession, file: ExcelUpload) -> BatchI
         data_list, err = await _read_excel_sheets(file, ['备货管理'], '没有找到"备货管理"Sheet')
         if err:
             return BatchImportResult(success=False, message=err)
-        assert data_list is not None  # _read_excel_sheets 契约：失败时 data_list 为 None（err 已判空）
+        data_list = _require_not_none(data_list, 'Excel 解析')
         # 构建产品映射，支持按名称（小写）和条码查找
         all_products = await get_all_products(db)
         product_map = {prod.name.lower().strip(): prod for prod in all_products}
@@ -548,7 +562,7 @@ async def import_stockouts_service(db: AsyncSession, file: ExcelUpload) -> Batch
         data_list, err = await _read_excel_sheets(file, ['出货管理'], '没有找到"出货管理"Sheet')
         if err:
             return BatchImportResult(success=False, message=err)
-        assert data_list is not None  # _read_excel_sheets 契约：失败时 data_list 为 None（err 已判空）
+        data_list = _require_not_none(data_list, 'Excel 解析')
         imported = 0
         skipped = 0
         errors = []
@@ -650,7 +664,7 @@ async def import_products_service(db: AsyncSession, file: ExcelUpload) -> BatchI
         data_list, err = await _read_excel_sheets(file, ['产品管理'], '没有找到"产品管理"Sheet')
         if err:
             return BatchImportResult(success=False, message=err)
-        assert data_list is not None  # _read_excel_sheets 契约：失败时 data_list 为 None（err 已判空）
+        data_list = _require_not_none(data_list, 'Excel 解析')
         imported = 0
         skipped = 0
         errors = []

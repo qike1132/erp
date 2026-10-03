@@ -76,7 +76,7 @@ def test_no_annotation_references_an_unbound_name():
 
 def test_all_function_type_hints_resolve():
     checked = 0
-    for name, obj in vars(mod).items():
+    for _name, obj in vars(mod).items():
         if inspect.isfunction(obj) and obj.__module__ == mod.__name__:
             typing.get_type_hints(obj)  # 注解名未导入时这里抛 NameError
             checked += 1

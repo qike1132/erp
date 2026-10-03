@@ -190,7 +190,7 @@ class TestLiveStagingWiring:
         monkeypatch.setattr(staging_stockout, "clear_staging_stockouts_by_session", AsyncMock(return_value=0))
         db = _fake_db()
 
-        imported, message, errors = await staging_stockout.import_staging_stockouts_from_excel(
+        imported, _message, errors = await staging_stockout.import_staging_stockouts_from_excel(
             db, XLSX_MAGIC, SESSION_ID
         )
 
@@ -205,7 +205,7 @@ class TestLiveStagingWiring:
         monkeypatch.setattr(staging_stockin, "clear_staging_stockins_by_session", AsyncMock(return_value=0))
         db = _fake_db()
 
-        imported, message, errors = await staging_stockin.import_staging_stockins_from_excel(
+        imported, _message, errors = await staging_stockin.import_staging_stockins_from_excel(
             db, XLSX_MAGIC, SESSION_ID
         )
 

@@ -18,7 +18,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.schema import CreateTable
 
 import migrations.versions.pg_standalone_061_add_product_stock_check as mig
-from fastapi_app.shared_models import Base, Product
+from fastapi_app.shared_models import Product
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _VERSIONS_DIR = _REPO_ROOT / "migrations" / "versions"

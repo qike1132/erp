@@ -102,7 +102,11 @@ async def get_approval_list(
         select(ApprovalRequest.status, func.count(ApprovalRequest.id))
         .group_by(ApprovalRequest.status)
     )
-    stats_dict = {status: count for status, count in stats_result.all()}
+    # 两种写法各被一条工具规则扇掉：dict 推导式触发 ruff C416（多余推导），
+    # 而 dict(rows) 过不了 mypy —— SQLAlchemy 2.0 的 Row[tuple[K, V]] 不匹配
+    # dict() 的 Iterable[tuple[_KT, _VT]] 重载。先落成显式 tuple 列表，两侧都干净。
+    status_counts = [(status, count) for status, count in stats_result.all()]
+    stats_dict = dict(status_counts)
 
     return {
         'approvals': [a.to_dict() for a in approvals],
