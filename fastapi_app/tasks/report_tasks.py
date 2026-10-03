@@ -45,9 +45,11 @@ async def export_report_task(ctx, report_type: str, filters: dict, user_id: int)
                 end_date = filters.get('end_date', '')
                 logs, stats = get_all_logs_data(session, report_type, customer=customer, product=product, status=status, start_date=start_date, end_date=end_date)
                 total_count = len(logs)
-                if len(logs) > 10000:
-                    logger.warning(f'报表数据超过10000条，已截断。实际: {total_count}')
-                    logs = logs[:10000]
+                # 第十轮审计：原「先全量读入内存 → 截断 10000」，截断发生在内存峰值之后，
+                # 防不住超量导出撑爆 worker；且静默截断让用户拿到不完整报表而不自知。
+                # 改为 fail-closed：超限直接失败并引导缩小范围（与 export_limits 门禁同语义）。
+                if total_count > 10000:
+                    return {'success': False, 'error': f'报表数据量过大（{total_count} 行，上限 10000），请缩小筛选范围后重新导出', 'task_id': job_id}
                 exporter = ReportExporter()
                 export_methods = {'order': exporter.export_order_logs, 'stockin': exporter.export_stockin_logs, 'stockout': exporter.export_stockout_logs, 'deduction': exporter.export_deduction_logs}
                 export_func = export_methods.get(report_type)

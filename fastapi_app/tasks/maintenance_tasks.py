@@ -78,8 +78,17 @@ async def _refresh_materialized_views(mv_names: list[str], label: str) -> None:
         async with get_async_db_context() as db:
             await _refresh_single_mv(db, mv_name)
 
-    await asyncio.gather(*(_refresh_one(name) for name in mv_names))
-    logger.info("%s物化视图刷新完成（%d 个并行）", label, len(mv_names))
+    results = await asyncio.gather(
+        *(_refresh_one(name) for name in mv_names), return_exceptions=True,
+    )
+    # 第十轮审计：原 gather 未 return_exceptions —— 单个 MV 刷新失败即整体抛出，
+    # 其余并行刷新成孤儿且不保证完成。现在逐个记录失败项，全部失败才整体抛出。
+    errors = [r for r in results if isinstance(r, BaseException)]
+    for err in errors:
+        logger.error("%s物化视图刷新失败: %s", label, err)
+    if len(errors) == len(mv_names):
+        raise errors[0]
+    logger.info("%s物化视图刷新完成（成功 %d/%d）", label, len(results) - len(errors), len(mv_names))
 
 
 async def refresh_dashboard_mv_task(ctx) -> dict:

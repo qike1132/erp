@@ -6,6 +6,7 @@ import contextlib
 import os
 import shutil
 import tempfile
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
@@ -86,8 +87,10 @@ def _validate_import_file(file: UploadFile) -> None:
         if header[:len(expected_sig)] != expected_sig:
             raise HTTPException(status_code=400, detail=f"文件内容与扩展名不匹配，可能不是有效的 {ext} 文件")
     elif ext == '.csv':
-        if header and header[0] < 0x20 and header[0] not in (0x09, 0x0a, 0x0d):
-            raise HTTPException(status_code=400, detail="CSV 文件包含非法控制字符")
+        # 第十轮审计：原仅查首字节 —— 改名 .csv 的二进制（zip/PK 等）首字节可能可打印
+        # 而蒙混过关。检查整个 8 字节头：出现非文本控制字符（Tab/LF/CR 除外）即拒绝。
+        if any(b < 0x20 and b not in (0x09, 0x0a, 0x0d) for b in header):
+            raise HTTPException(status_code=400, detail="CSV 文件包含非法控制字符，可能不是文本文件")
 
     file.file.seek(0)
 
@@ -230,7 +233,12 @@ async def async_export_report(
     }
 
     pool = await get_arq_pool()
-    job = await pool.enqueue_job(export_report_task.__name__, request.report_type, filters, current_user.id)
+    # 第十轮审计：导出任务 job_id 带归属前缀，download 端点据此校验归属
+    #（原任何持 batch_import 者凭 task_id 可下载他人导出文件）。
+    job = await pool.enqueue_job(
+        export_report_task.__name__, request.report_type, filters, current_user.id,
+        _job_id=f'exp-u{current_user.id}-{uuid4().hex}',
+    )
     task_id = job.job_id if job else ''
 
     return success_response(**{
@@ -257,6 +265,13 @@ async def download_task_result(
 
     if not isinstance(result, dict):
         raise HTTPException(status_code=500, detail="任务结果格式异常")
+
+    # 归属校验：导出任务的 job_id 带 `exp-u{uid}-` 前缀，非本人任务一律 404
+    #（既不泄露他人任务存在性，也不泄露其导出文件）。
+    if task_id.startswith('exp-u'):
+        expected = f'exp-u{current_user.id}-'
+        if not task_id.startswith(expected):
+            raise HTTPException(status_code=404, detail=f"任务 {task_id} 不存在或已过期")
 
     file_path = result.get("file_path")
     if not file_path or not os.path.exists(file_path):

@@ -95,6 +95,10 @@ async def batch_import_plans_task(ctx, file_path: str, original_filename: str, u
                 ws = wb.active
                 rows = list(ws.iter_rows(min_row=2, values_only=True))
                 wb.close()
+                # 第十轮审计：原无行数上界（对照 material_registration 5000 / case 20000）——
+                # 超大文件会整表载入内存。与前端导入模板量级对齐，20000 行封顶。
+                if len(rows) > 20000:
+                    raise ValueError(f'导入行数超限（{len(rows)} 行，上限 20000），请拆分文件后重试')
                 success_count = 0
                 errors = []
                 detected_month = None

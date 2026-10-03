@@ -38,20 +38,28 @@ _WS_HEARTBEAT_TIMEOUT = 60
 _WS_RATE_LIMIT = 30
 _WS_VERIFY_INTERVAL = 60
 
-_WS_PENDING_TICKETS: dict[str, int] = {}
+# 进程内票据表：value = (user_id, issued_monotonic)。
+# 第十轮审计：原只存 user_id —— 无时间戳无清理，票据在进程内**永久有效**（Redis 侧
+# 才有 30s TTL），且未消费的票据使内存单调增长。补时间戳 + 消费时校验年龄 + 签发时清理过期项。
+_WS_PENDING_TICKETS: dict[str, tuple[int, float]] = {}
 
 
 async def _issue_ws_ticket(user_id: int) -> str:
     from fastapi_app.core.redis_wrapper import safe_set
 
     ticket = secrets.token_urlsafe(32)
+    now = time.monotonic()
+    # 顺手清掉过期票据，防止内存单调增长
+    expired = [t for t, (_, ts) in _WS_PENDING_TICKETS.items() if now - ts > _WS_TICKET_TTL_SECONDS]
+    for t in expired:
+        _WS_PENDING_TICKETS.pop(t, None)
     await safe_set(
         _WS_TICKET_PREFIX + ticket,
         str(user_id),
         timeout=_WS_TICKET_TTL_SECONDS,
         context="WebSocket认证票据",
     )
-    _WS_PENDING_TICKETS[ticket] = user_id
+    _WS_PENDING_TICKETS[ticket] = (user_id, now)
     return ticket
 
 
@@ -61,18 +69,24 @@ async def _consume_ws_ticket(ticket: str) -> int | None:
     if not ticket:
         return None
 
-    user_id = _WS_PENDING_TICKETS.pop(ticket, None)
-    if user_id is None:
-        value = await safe_get(_WS_TICKET_PREFIX + ticket, context="WebSocket认证票据")
-        if value is None:
-            return None
-        try:
-            user_id = int(value)
-        except (TypeError, ValueError):
+    entry = _WS_PENDING_TICKETS.pop(ticket, None)
+    if entry is not None:
+        user_id, issued_at = entry
+        # 进程内票据同样遵守 30s TTL（与 Redis 侧一致）——超龄一律作废
+        if time.monotonic() - issued_at > _WS_TICKET_TTL_SECONDS:
+            await safe_delete(_WS_TICKET_PREFIX + ticket, context="WebSocket认证票据")
             return None
         await safe_delete(_WS_TICKET_PREFIX + ticket, context="WebSocket认证票据")
-    else:
-        await safe_delete(_WS_TICKET_PREFIX + ticket, context="WebSocket认证票据")
+        return user_id
+
+    value = await safe_get(_WS_TICKET_PREFIX + ticket, context="WebSocket认证票据")
+    if value is None:
+        return None
+    try:
+        user_id = int(value)
+    except (TypeError, ValueError):
+        return None
+    await safe_delete(_WS_TICKET_PREFIX + ticket, context="WebSocket认证票据")
     return user_id
 
 
