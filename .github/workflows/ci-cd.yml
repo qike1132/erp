@@ -12,7 +12,10 @@ jobs:
 
     services:
       postgres:
-        image: postgres:16-alpine
+        # 对齐生产版本（第七轮审计 2026-10-03）：生产实测 PostgreSQL 18.3
+        # （`show server_version`），此前 CI 用 16 —— 迁移门禁在 16 上验证，
+        # 与 18 存在保真度缺口（PG18 专有行为/语法测不出）。
+        image: postgres:18-alpine
         env:
           POSTGRES_DB: erp_test
           POSTGRES_USER: erp_test

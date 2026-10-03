@@ -300,8 +300,13 @@ class TestUserService:
         mock_db.execute = AsyncMock(side_effect=[mock_user_result, mock_perm_result])
 
         await update_user_permissions(mock_db, 1, [1, 2])
-        # sensitive permission should not be added
         assert mock_user.permissions.clear.called
+        # 真断言（2026-10-03 第七轮审计）：此前只断言 clear 被调用 —— 即使删掉
+        # user_service 里的 `if permission.code in SENSITIVE_PERMISSIONS: continue`
+        # 守卫，测试仍绿（假信心）。这里校验敏感权限 user_manage **未被授予**。
+        appended = [c.args[0] for c in mock_user.permissions.append.call_args_list]
+        assert sensitive_perm not in appended, '敏感权限 user_manage 不应被授予'
+        assert mock_permission in appended, '非敏感权限应被授予'
 
     @pytest.mark.asyncio
     async def test_get_permissions(self, mock_db, mock_permission):

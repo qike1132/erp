@@ -24,7 +24,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts._selftest_hook import SECRET_PATTERN
+from scripts._selftest_hook import PWD_PATTERN, SECRET_PATTERN
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 HOOK = PROJECT_ROOT / '.githooks' / 'pre-commit'
@@ -42,9 +42,33 @@ def _normalize(pattern: str) -> str:
     return pattern
 
 
+# `pwd_pattern` 的提取比 secret_patterns 难：shell 里它含引号拼接技巧
+# `["'"'"']`（产出正则 `["']`），朴素的 `[^']*` 会在第一个 `'` 处截断。
+# 下式显式允许 `'"'"'` 出现在值内，再还原为 `'`。
+_PWD_PATTERN_RE = re.compile(r"pwd_pattern='((?:[^']|'\"'\"')*)'")
+
+# pwd_pattern 专用归一化：在通用规则之上再加一条**有依据**的等价 ——
+# 字符类内 `\"` 与 `"` 语义相同（Python `re` 把 `\"` 当 `"`），镜像多写的
+# 反斜杠冗余但无害，故归一化掉以便逐字比对。
+_PWD_NORMALIZE = ((r'[[:space:]]', r'[ \t]'), (r'\"', '"'))
+
+
+def _normalize_pwd(pattern: str) -> str:
+    pattern = pattern.replace("'\"'\"'", "'")
+    for a, b in _PWD_NORMALIZE:
+        pattern = pattern.replace(a, b)
+    return pattern
+
+
 def _shell_secret_patterns() -> str:
     m = _SECRET_PATTERNS_RE.search(HOOK.read_text(encoding='utf-8'))
     assert m, f'未能从 {HOOK} 提取 secret_patterns（hook 结构可能已变）'
+    return m.group(1)
+
+
+def _shell_pwd_pattern() -> str:
+    m = _PWD_PATTERN_RE.search(HOOK.read_text(encoding='utf-8'))
+    assert m, f'未能从 {HOOK} 提取 pwd_pattern（hook 结构可能已变）'
     return m.group(1)
 
 
@@ -76,19 +100,29 @@ def test_both_sides_still_cover_known_credential_families(token: str) -> None:
     assert token in SECRET_PATTERN.pattern
 
 
-def test_pwd_pattern_not_compared_and_why() -> None:
-    """`pwd_pattern` 刻意**不**做字面比对。
+def test_mirror_matches_shell_pwd_pattern() -> None:
+    """镜像的 PWD_PATTERN 必须与 shell 的 pwd_pattern 一致（归一化后）。
 
-    shell 里它含引号拼接技巧（`["'"'"']`）来产出正则 `["']`，
-    字面提取需要完整的 shell 引用语义；用正则粗提取会得到被截断的片段，
-    从而产生一个「看起来在守卫、实际在自欺」的测试。
-    该模式的行为一致性改由 scripts/_selftest_hook.py 的 CASES 用例表覆盖
-    （那批用例正是从真实拦截事件里来的）。
+    第七轮审计（2026-10-03）：此前 `pwd_pattern` 只被断言"仍存在"，不做内容比对 ——
+    任一侧改动都不会被发现（覆盖率缺口）。现已纳入逐字比对：提取需处理 shell 的
+    引号技巧 `["'"'"']`（见 `_PWD_PATTERN_RE`），归一化需额外去掉字符类内冗余的
+    `\"`（与 `"` 语义等价）。
     """
-    text = HOOK.read_text(encoding='utf-8')
-    assert 'pwd_pattern=' in text
-    # 明确记录：这里的断言只是"该模式仍在"，不是"两侧一致"。
-    assert text.count('pwd_pattern=') >= 1
+    shell = _normalize_pwd(_shell_pwd_pattern())
+    mirror = _normalize_pwd(PWD_PATTERN.pattern)
+
+    assert mirror == shell, (
+        'scripts/_selftest_hook.py 的 PWD_PATTERN 与 .githooks/pre-commit 的\n'
+        'pwd_pattern 已漂移 —— 本地 hook 与 CI 扫描会用不同规则判断同一份代码。\n'
+        f'shell : {shell}\n'
+        f'mirror: {mirror}'
+    )
+
+
+def test_shell_pwd_pattern_present() -> None:
+    """确保 pwd_pattern 提取本身没有静默失效（hook 结构若变，提取会先红）。"""
+    assert '[Pp][Aa][Ss][Ss]' in _shell_pwd_pattern()
+
 
 
 # ---------------------------------------------------------------------------

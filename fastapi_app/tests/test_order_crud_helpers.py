@@ -55,7 +55,10 @@ class TestBuildBeileUnifiedQuery:
         )
         # subquery 应可编译
         compiled = str(subq.compile())
-        assert 'UNION' in compiled or 'union' in compiled.lower() or 'select' in compiled.lower()
+        # 真断言（2026-10-03 第七轮审计）：原断言末句 `or 'select' in ...` 对任何
+        # SELECT 恒真 → 整条退化为恒真，UNION 被删也发现不了。改为校验 UNION 与两部分。
+        assert 'union' in compiled.lower(), compiled
+        assert 'stock_in' in compiled.lower(), compiled
 
     def test_product_kw_filter_applies_to_both_parts(self):
         """product_kw 非空时应对 Order 的 SKU 与 StockIn 的产品做 ilike 过滤（服务端过滤，修复「先分页后过滤」漏数据）"""
