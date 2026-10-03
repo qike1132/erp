@@ -11,6 +11,7 @@ from datetime import datetime
 
 from sqlalchemy import text
 from sqlalchemy.exc import DisconnectionError, OperationalError
+from sqlalchemy.exc import TimeoutError as SATimeoutError
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +130,9 @@ class DBHealthChecker:
             async with engine.connect() as conn:
                 await conn.execute(text("SELECT 1"))
             return True
-        except (OperationalError, DisconnectionError) as e:
+        except (OperationalError, DisconnectionError, SATimeoutError) as e:
+            # 第八轮审计：连接池耗尽时 engine.connect() 抛 sqlalchemy.exc.TimeoutError，
+            # 原只捕 Operational/Disconnection → 漏报，健康检查谎报健康。
             self.last_failure_detail = f"异步引擎: {e.__class__.__name__}: {str(e)[:200]}"
             logger.warning("异步引擎连接检查失败: %s", self.last_failure_detail)
             return False

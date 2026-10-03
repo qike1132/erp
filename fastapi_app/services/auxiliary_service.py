@@ -133,9 +133,12 @@ async def orchestrate_batch_stockouts(db: AsyncSession, stockouts_data: list[dic
             for product_id, _ in successful_pairs:
                 product = product_map.get(product_id)
                 if product is not None:
+                    # 第八轮审计：原 sum 遍历全部 stockouts_data（含 success=False 的失败行）
+                    # → 同产品部分失败时上报的变动数量偏大。改为只累计成功行。
                     total_qty = sum(
-                        item['quantity'] for item in stockouts_data
+                        item['quantity'] for idx, item in enumerate(stockouts_data)
                         if item['product_id'] == product_id
+                        and result['results'][idx].get('success')
                     )
                     await safe_publish_event(
                         publish_stock_event, StockEvent.STOCK_CHANGED,

@@ -13,7 +13,7 @@ import os
 
 from fastapi import HTTPException
 
-from fastapi_app.core.deps import require_permission
+from fastapi_app.core.deps import require_any_permission
 from fastapi_app.services import backup as backup_service
 
 _background_tasks: set[asyncio.Task] = set()
@@ -101,10 +101,16 @@ def _get_backup_permission(endpoint_name: str) -> str:  # log-context: internal 
 
 def require_backup_permission(endpoint_name: str):  # log-context: internal helper 无请求上下文
     """
-    细粒度权限检查依赖工厂
+    细粒度权限检查依赖工厂。
+
+    第八轮审计：生产 permission 表**只有 `backup_manage`**（无 backup_read/create/
+    restore/delete），而 `has_permission` 只做 `xxx_manage → xxx_view` 继承、不映射到
+    这些细粒度码 → 非超管对全部备份端点恒 403（导航却显示「数据备份」）。
+    按本仓既有模式（require_any_permission 桥接导航码/接口码）放行 `backup_manage`：
+    它语义上即「管理备份（所有权限）」，且是当前唯一可授予的码。
     """
     permission = _get_backup_permission(endpoint_name)
-    return require_permission(permission)
+    return require_any_permission(permission, 'backup_manage')
 
 
 logger = logging.getLogger(__name__)

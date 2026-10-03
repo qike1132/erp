@@ -249,7 +249,11 @@ def register_websocket(app: FastAPI) -> None:
                 if data == "ping":
                     await websocket.send_text("pong")
         except WebSocketDisconnect:
-            _safe_disconnect(manager, websocket, int(user_id))
+            pass  # 断开清理统一走 finally
         except RuntimeError:
             logger.warning("WebSocket 连接异常断开: user_id=%s", user_id, exc_info=False)
+        finally:
+            # 第八轮审计：心跳超时/频率超限/用户禁用三条路径都是 close 后 `break`（正常退出
+            # try），此前 _safe_disconnect 只在 except 里 → 这些路径不清连接，socket 永久留在
+            # manager.active_connections。改到 finally 覆盖所有出口。
             _safe_disconnect(manager, websocket, int(user_id))

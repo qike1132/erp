@@ -11,6 +11,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.services.bom_service import (  # noqa: F401
     copy_bom as copy_bom_to_product,
 )
@@ -91,8 +92,10 @@ async def search_products_for_bom_copy(db: AsyncSession, keyword: str) -> list:
         )
         .where(
             or_(
-                Product.name.ilike(f'%{keyword}%'),
-                Product.barcode.ilike(f'%{keyword}%'),
+                # 第八轮审计：补 escape_like —— 此前 keyword 中的 % / _ 会被当通配符
+                # （`%` 命中全表）。同仓 _list.py / purchase_customer_service.py 均已转义。
+                Product.name.ilike(f'%{escape_like(keyword)}%'),
+                Product.barcode.ilike(f'%{escape_like(keyword)}%'),
             )
         )
         .limit(20)
