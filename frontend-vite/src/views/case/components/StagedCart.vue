@@ -26,7 +26,7 @@
               {{ item.direction === 'in' ? '入库' : '出库' }}
             </span>
             <span :class="['sc-type', item.isPart ? 'sc-type-part' : 'sc-type-main']">
-              {{ item.isPart ? '配件' : '主件' }}
+              {{ item.isPart ? '配件' : '皮套' }}
             </span>
             {{ item.caseName }}
           </div>

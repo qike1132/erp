@@ -25,7 +25,7 @@
         <div class="ip-title">
           <FontAwesomeIcon icon="warehouse" style="color: var(--color-primary-500)" aria-hidden="true" />
           皮套库存
-          <small class="ip-sub">主件可展开查看配件</small>
+          <small class="ip-sub">皮套可展开查看配件</small>
         </div>
         <div class="ip-actions">
           <!-- 必须同时接 @clear：UiSearchInput 的「×」只 emit update:modelValue + clear，
@@ -69,7 +69,7 @@
               <td class="left">
                 <span class="ip-caret"><FontAwesomeIcon icon="chevron-right" aria-hidden="true" /></span>
                 <strong class="ip-name">{{ node.name }}</strong>
-                <span v-if="node.children.length" class="ip-tag">主件 · {{ node.children.length }} 配件</span>
+                <span v-if="node.children.length" class="ip-tag">皮套 · {{ node.children.length }} 配件</span>
               </td>
               <td><small class="ip-barcode">{{ node.barcode || '-' }}</small></td>
               <td>{{ node.unit || '-' }}</td>

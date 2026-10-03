@@ -40,7 +40,7 @@
       </div>
 
       <div v-if="!selectedName && !loadingTree" class="sec-tip">
-        输入关键词后，<b>在下方下拉里点选一个产品</b>，才会列出它的皮套（主件 + 配件），逐行填数量。
+        输入关键词后，<b>在下方下拉里点选一个产品</b>，才会列出它的皮套与配件，逐行填数量。
       </div>
 
       <div v-if="loadingTree" class="sec-parts-loading"><UiLoadingIcon :loading="true" icon="spinner" /> 载入皮套…</div>
@@ -56,7 +56,7 @@
           :class="['sec-part-row', row.isPart ? 'sec-part-row-part' : 'sec-part-row-main', { 'sec-part-invalid': isInvalid(row) }]"
         >
           <input v-model="row.checked" type="checkbox" class="sec-part-check" :aria-label="`选择 ${row.name}`" />
-          <span :class="row.isPart ? 'sec-tag-part' : 'sec-tag-main'">{{ row.isPart ? '配件' : '主件' }}</span>
+          <span :class="row.isPart ? 'sec-tag-part' : 'sec-tag-main'">{{ row.isPart ? '配件' : '皮套' }}</span>
           <span class="sec-part-name">{{ row.name }}</span>
           <span class="sec-part-stock" :class="{ 'sec-part-stock-zero': row.stock <= 0 }">库存 {{ row.stock }}</span>
           <input v-model.number="row.qty" type="number" min="1" step="1" class="sec-part-qty" :aria-label="`${row.name} 数量`" @keydown.enter.prevent="emitAdd" />
@@ -66,7 +66,7 @@
         </div>
       </div>
 
-      <div v-else-if="selectedName" class="sec-parts-empty">该产品暂无皮套，提交时会自动建立主件</div>
+      <div v-else-if="selectedName" class="sec-parts-empty">该产品暂无皮套，提交时会自动建立皮套</div>
 
       <div class="sec-row">
         <div class="sec-field">

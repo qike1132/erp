@@ -171,9 +171,9 @@ async def _ensure_parent_is_root(db: AsyncSession, parent_id: int) -> None:
     """
     parent = await db.get(Case, parent_id)
     if not parent:
-        raise ValueError("所属主件不存在")
+        raise ValueError("所属皮套不存在")
     if parent.parent_id is not None:
-        raise ValueError("所属主件本身是配件；配件只能挂在主件下")
+        raise ValueError("所属皮套本身是配件；配件只能挂在皮套下")
 
 
 async def create_case_item(db: AsyncSession, name: str | None = None, barcode: str | None = None,
@@ -241,7 +241,7 @@ async def update_case_item(db: AsyncSession, case_id: int, update_data: dict) ->
     if 'parent_id' in update_data:
         parent_id = update_data['parent_id']
         if parent_id == case_id:
-            raise ValueError("不能把自己设为主件")
+            raise ValueError("不能把自己设为皮套")
         if parent_id is not None:
             await _ensure_parent_is_root(db, parent_id)
             # 被挂的件自身也**不能已有配件** —— 否则会产生"孙件"，而 get_case_inventory
