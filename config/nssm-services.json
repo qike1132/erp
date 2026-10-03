@@ -61,6 +61,7 @@
       "role": "业务缓存 Redis（:6379）",
       "application": "C:\\Redis\\redis-server.exe",
       "parameters": ["C:\\Redis\\redis.windows-service.conf"],
+      "_auth_note": "⚠️ 生产 6379 已启用认证（无口令 PING 返回 NOAUTH，2026-10-03 收口审计实测）。口令不写入本文件（凭据不入库）：灾备重建时从 .env 的 REDIS_PASSWORD 取值，写入 C:\\Redis\\redis.windows-service.conf 的 requirepass 指令（该 conf 不入库）或经 NSSM AppEnvironmentExtra 传入；须与 .env 一致，否则 erp-prod/erp-arq 连不上缓存。",
       "depends_on": []
     },
     {
@@ -68,6 +69,7 @@
       "role": "ARQ broker Redis（:6380）",
       "application": "C:\\Redis\\redis-server.exe",
       "parameters": ["D:\\erp_system\\config\\redis-broker.conf"],
+      "_auth_note": "⚠️ 生产 6380 同样已启用认证（无口令 PING 返回 NOAUTH，2026-10-03 实测）。config/redis-broker.conf 在本仓且不含 requirepass —— 灾备重建时须从 .env 取口令补 requirepass（或经 REDIS_BROKER_URL 的 DSN 传入），与 erp-arq 的连接配置保持一致。",
       "depends_on": []
     }
   ],
