@@ -455,8 +455,14 @@ class TestProcessStatusFlow:
     @pytest.mark.asyncio
     async def test_ship_process(self, mock_async_db):
         """发货工序：记录发货数量，状态 → shipped"""
-        p = make_order_process(pid=1)
-        mock_async_db.get = AsyncMock(return_value=p)
+        # 第八轮落地：_process_target_quantity 改为 fail-closed（无明细拒绝发货），
+        # 发货用例统一用 item_id + fake_get 提供 SKU 数量。
+        p = make_order_process(pid=1, item_id=1)
+        item = MagicMock()
+        item.quantity = 100
+        async def fake_get(model, pk, **_kwargs):
+            return item if model is OrderItem else p
+        mock_async_db.get = AsyncMock(side_effect=fake_get)
 
         result = await ship_order_process(mock_async_db, 1, 50, 'admin')
 
@@ -525,8 +531,12 @@ class TestProcessStatusFlow:
     @pytest.mark.asyncio
     async def test_ship_batch_accumulate(self, mock_async_db):
         """分批发货：多次发货数量累加，且每次追加流水"""
-        p = make_order_process(pid=1)
-        mock_async_db.get = AsyncMock(return_value=p)
+        p = make_order_process(pid=1, item_id=1)
+        item = MagicMock()
+        item.quantity = 100
+        async def fake_get(model, pk, **_kwargs):
+            return item if model is OrderItem else p
+        mock_async_db.get = AsyncMock(side_effect=fake_get)
 
         await ship_order_process(mock_async_db, 1, 50, 'admin')
         result = await ship_order_process(mock_async_db, 1, 30, 'admin')
@@ -774,8 +784,12 @@ class TestOutsourceRegressions:
 
         数量是「读-改-写」，不加锁时并发发货会相互覆盖（丢失更新）。
         """
-        p = make_order_process(pid=1)
-        mock_async_db.get = AsyncMock(return_value=p)
+        p = make_order_process(pid=1, item_id=1)
+        item = MagicMock()
+        item.quantity = 100
+        async def fake_get(model, pk, **_kwargs):
+            return item if model is OrderItem else p
+        mock_async_db.get = AsyncMock(side_effect=fake_get)
 
         await ship_order_process(mock_async_db, 1, 10, 'admin')
 

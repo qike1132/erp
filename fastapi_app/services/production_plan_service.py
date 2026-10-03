@@ -146,10 +146,17 @@ def _calc_monthly_summary(plan_list: list) -> dict:
     total_shipped_qty = 0
     warning_count = 0
     customer_summary = {}
+    # 第八轮审计：shipped_qty 来自 _calc_all_shipped_qty，是 (customer, product_name) 的
+    # **整月总量**；同一客户+产品有多条 plan 时每条都带同一值，直接累加会把已出货量放大 N 倍。
+    # 汇总时按 (customer, product_name) 去重，每键只计一次（plan 级明细行的 shipped_qty 显示不动）。
+    _counted_shipped: set[tuple[str, str]] = set()
     for p in plan_list:
         total_plan_qty += p['quantity']
         total_inventory_qty += p['inventory_qty']
-        total_shipped_qty += p['shipped_qty']
+        _key = (p['customer_name'], p['product_name'])
+        if _key not in _counted_shipped:
+            _counted_shipped.add(_key)
+            total_shipped_qty += p['shipped_qty']
         if p['stock_status'] == 'warning':
             warning_count += 1
         cn = p['customer_name']
@@ -158,7 +165,10 @@ def _calc_monthly_summary(plan_list: list) -> dict:
         cs = customer_summary[cn]
         cs['plan_qty'] += p['quantity']
         cs['inventory_qty'] += p['inventory_qty']
-        cs['shipped_qty'] += p['shipped_qty']
+        if _key not in _counted_shipped:
+            # _counted_shipped 在 total 循环里已加过本键 —— 客户级汇总同样只计一次
+            _counted_shipped.add(_key)
+            cs['shipped_qty'] += p['shipped_qty']
         cs['remaining_qty'] += p['remaining_qty']
         if p['stock_status'] == 'warning':
             cs['warning_count'] += 1

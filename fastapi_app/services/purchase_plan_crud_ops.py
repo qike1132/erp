@@ -224,6 +224,15 @@ async def update_detail(db: AsyncSession, detail_id: int, *, created_by: str='',
                 detail.plan_date = normalize_plan_date(kwargs[field])
             else:
                 setattr(detail, field, kwargs[field])
+    # 第八轮审计：create/add_details 都有跨月校验，update_detail 漏了 —— 改期到别的月时
+    # 日历按 plan_month 取数、按 plan_date 落格，数字静默丢失/不一致。
+    if detail.plan_date is not None and plan_month_row:
+        expected = plan_month_row[0]  # 'YYYY-MM'
+        y, m = (int(x) for x in expected.split('-'))
+        if detail.plan_date.year != y or detail.plan_date.month != m:
+            raise ValueError(
+                f'计划日期 {detail.plan_date.isoformat()} 与计划月份 {expected} 不一致，不允许跨月'
+            )
     await db.flush()
 
     async def _post_commit():

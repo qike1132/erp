@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from fastapi_app.core.config import settings
-from fastapi_app.core.deps import require_permission
+from fastapi_app.core.deps import require_superuser
 from fastapi_app.core.logger import logger
 from fastapi_app.core.redis_wrapper import get_client, safe_llen, safe_lrange, safe_lrem
 from fastapi_app.shared_models import User
@@ -92,7 +92,7 @@ def _parse_dead_letter_kwargs(kwargs_raw) -> dict:
 async def list_dead_letter(
     limit: int = Query(50, ge=1, le=200, description='返回条数'),
     offset: int = Query(0, ge=0, description='偏移量'),
-    _user: User = Depends(require_permission('admin')),
+    _user: User = Depends(require_superuser()),
 ):
     try:
         _require_redis()
@@ -108,7 +108,7 @@ async def list_dead_letter(
 
 
 @router.post('/dead-letter/{task_id}/retry', response_model=DeadLetterRetryResponse, summary='重试死信队列中的失败任务')
-async def retry_dead_letter_task(task_id: str, _user: User = Depends(require_permission('admin'))):
+async def retry_dead_letter_task(task_id: str, _user: User = Depends(require_superuser())):
     try:
         _require_redis()
         entries_raw = await safe_lrange(DLQ_KEY, 0, -1, context="死信队列")
@@ -145,7 +145,7 @@ async def retry_dead_letter_task(task_id: str, _user: User = Depends(require_per
 
 
 @router.delete('/dead-letter/{task_id}', response_model=DeadLetterRemoveResponse, summary='从死信队列中移除失败任务')
-async def remove_dead_letter_task(task_id: str, _user: User = Depends(require_permission('admin'))):
+async def remove_dead_letter_task(task_id: str, _user: User = Depends(require_superuser())):
     try:
         _require_redis()
         entries_raw = await safe_lrange(DLQ_KEY, 0, -1, context="死信队列")
@@ -167,7 +167,7 @@ async def remove_dead_letter_task(task_id: str, _user: User = Depends(require_pe
 
 
 @router.get('/dead-letter/stats', response_model=DeadLetterStatsResponse, summary='死信队列统计')
-async def dead_letter_stats(_user: User = Depends(require_permission('admin'))):
+async def dead_letter_stats(_user: User = Depends(require_superuser())):
     try:
         _require_redis()
         total = await safe_llen(DLQ_KEY, context="死信队列")

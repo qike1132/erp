@@ -364,7 +364,9 @@ async def get_customer_summary(db: AsyncSession, year: int, month: int) -> dict:
             ps['plan_qty'] += d.quantity
             ps['shipped_qty'] += shp_qty
             ps['remaining_qty'] += d.quantity - shp_qty
-            if _calc_stock_status(d.quantity, inv_qty) != 'sufficient':
+            # 第八轮审计：与 get_monthly_aggregated 对齐为**累计口径** —— 单行比较会漏掉
+            # "多条明细各自不超、累计超库存"的场景（该处注释已明确此约定）。
+            if _calc_stock_status(ps['plan_qty'], inv_qty) != 'sufficient':
                 ps['warning'] = True
     # 汇总到客户级别
     summary = {}

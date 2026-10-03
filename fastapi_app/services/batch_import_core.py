@@ -419,7 +419,12 @@ async def import_orders_from_data(db: AsyncSession, data_list: list, *, deps: Im
                 if deduct_value > 0:
                     await deps.process_order_deduction(db, order, product_id, deduct_value, deduct_stock=True, product=product)
             except (ValueError, TypeError, SQLAlchemyError) as e:
-                logger.error(f"订单导入 - 行{idx}: 抵扣处理异常: {e}", exc_info=True)
+                # 第八轮审计：原仅 logger.error 后仍 return True —— 该行计入 imported，
+                # 用户看到"成功导入"但抵扣未发生，订单与库存长期不符。改为 return False：
+                # 抵扣失败 = 该行失败（savepoint 回滚本行），用户在错误清单里可见。
+                logger.error(f"订单导入 - 行{idx}: 抵扣处理失败，本行按失败处理: {e}", exc_info=True)
+                debug_messages.append(f"行{idx}: 抵扣备货处理失败: {e}")
+                return False
 
         return True
 

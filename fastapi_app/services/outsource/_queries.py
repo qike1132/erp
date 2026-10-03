@@ -26,7 +26,15 @@ logger = logging.getLogger(__name__)
 
 
 async def _process_target_quantity(db: AsyncSession, p: OrderOutsourceProcess) -> int:
-    """工序目标数量：优先 SKU(order_item) 数量，无明细用订单数量；解析失败返回 0（不设上限）。"""
+    """工序目标数量：取 SKU(order_item) 数量。
+
+    第八轮审计：原在明细缺失/解析失败时回退 order.quantity（整单量）或 0（无上限）——
+    多 SKU 订单下按整单量放行会让该 SKU 工序**超发**；0 上限则完全失控。
+    改为 fail-closed：解析不出 SKU 数量即返回 0，调用方（ship_order_process 的
+    `if target > 0` 分支不设限？——否，0 表示无法判定，见下）——此处返回 0 会让
+    ship_order_process 跳过校验，因此改为抛错更安全；但 ship 已有行锁与流水，
+    保持「返回 0 = 不设限」会让审计缺陷持续，故改为**抛 ValueError 阻断发货**。
+    """
     try:
         if p.order_item_id is not None:
             item = await db.get(OrderItem, p.order_item_id)
@@ -34,14 +42,11 @@ async def _process_target_quantity(db: AsyncSession, p: OrderOutsourceProcess) -
                 qty = getattr(item, 'quantity', None)
                 if isinstance(qty, int) and qty > 0:
                     return int(qty)
-        order = await db.get(Order, p.order_id)
-        if order is not None:
-            qty = getattr(order, 'quantity', None)
-            if isinstance(qty, int) and qty > 0:
-                return int(qty)
-    except Exception:  # defensive: 目标解析失败不阻断发货（按无上限处理）
+    except Exception:  # defensive: DB 查询异常不阻断，由下面的统一 fail-closed 处理
         logger.warning('解析外发工序目标数量失败: process_id=%s', getattr(p, 'id', None), exc_info=True)
-    return 0
+    raise ValueError(
+        f'外发工序 {getattr(p, "id", "?")} 无法解析 SKU 数量（明细缺失或异常），拒绝发货以防超发'
+    )
 
 
 # ==================== 湖北外发订单列表 ====================

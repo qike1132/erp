@@ -302,11 +302,14 @@ def _get_stockout_logs(session, customer, product, start_date, end_date):
 
 def _get_deduction_logs(session, customer, product, start_date, end_date):
     # 左连 Order 以便按软删过滤，与出货导出及屏幕口径一致。
+    # 第八轮审计：与 _get_stockout_logs(:245) 对齐 —— 补「净量 > 0」过滤，全退抵扣
+    # （quantity == returned_quantity）不再以 0 数量计入导出与 total_count。
     query = select(StockOut).join(Product).outerjoin(
         Order, StockOut.order_id == Order.id
     ).where(
         StockOut.stockin_id.isnot(None),
         or_(StockOut.order_id.is_(None), Order.is_deleted.isnot(True)),
+        (StockOut.quantity - StockOut.returned_quantity) > 0,
     ).options(
         selectinload(StockOut.product),
         selectinload(StockOut.order)
@@ -325,6 +328,7 @@ def _get_deduction_logs(session, customer, product, start_date, end_date):
     ).where(
         StockOut.stockin_id.isnot(None),
         or_(StockOut.order_id.is_(None), Order.is_deleted.isnot(True)),
+        (StockOut.quantity - StockOut.returned_quantity) > 0,
     )
     if customer:
         stats_query = stats_query.where(StockOut.customer.like(f'%{escape_like(customer)}%'))
