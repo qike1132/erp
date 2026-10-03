@@ -42,7 +42,6 @@
           <span v-for="row in rows" :key="row.id" class="set-chip">
             <span class="set-tag-part">配件</span>
             <span class="set-chip-name">{{ row.name }}</span>
-            <span class="set-chip-ratio">×{{ row.qtyPerSet }}</span>
             <button class="set-chip-edit" :disabled="saving" aria-label="编辑" @click="openEdit(row)">改</button>
             <button class="set-chip-del" :disabled="saving" aria-label="删除" @click="removePart(row)">✕</button>
           </span>
@@ -53,12 +52,11 @@
         <div v-if="edit" class="set-edit">
           <span class="set-tag-part" style="flex-shrink:0">{{ edit.id == null ? '新增' : '编辑' }}</span>
           <input v-model="edit.name" class="set-cell-input" placeholder="配件名称（如：鲨鱼帽子）" aria-label="配件名称" />
-          <label class="set-qty-label">配比 ×<input v-model.number="edit.qty" type="number" min="1" class="set-cell-qty" aria-label="配比" /></label>
           <button class="set-btn set-btn-primary" :disabled="saving || !edit.name.trim()" @click="submitEdit">保存</button>
           <button class="set-btn set-btn-ghost" :disabled="saving" @click="edit = null">取消</button>
         </div>
 
-        <div class="set-hint">配比先存着备用（暂不参与计算）；配件与主件各自独立出入库。</div>
+        <div class="set-hint">配件与主件各自独立出入库。</div>
       </div>
     </div>
 
@@ -92,21 +90,21 @@ const {
 } = useCaseSettings()
 
 /** 当前编辑/新增的表单（id=null 表示新增） */
-const edit = ref<{ id: number | null; name: string; qty: number } | null>(null)
+const edit = ref<{ id: number | null; name: string } | null>(null)
 
 function openAdd() {
-  edit.value = { id: null, name: '', qty: 1 }
+  edit.value = { id: null, name: '' }
 }
 function openEdit(row: EditablePart) {
-  edit.value = { id: row.id, name: row.name, qty: row.qtyPerSet }
+  edit.value = { id: row.id, name: row.name }
 }
 function submitEdit() {
   const e = edit.value
   if (!e || !e.name.trim()) return
   if (e.id == null) {
-    addPart(e.name, e.qty)
+    addPart(e.name)
   } else {
-    savePart({ id: e.id, name: e.name, qtyPerSet: e.qty })
+    savePart({ id: e.id, name: e.name })
   }
   edit.value = null
 }

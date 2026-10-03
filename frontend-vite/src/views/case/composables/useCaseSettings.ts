@@ -7,11 +7,10 @@ import { showToast } from '@/composables/useToast'
 import { getErrorMessage } from '@/types/errors'
 import { CASE_QUERY_KEYS } from './useCaseStockWorkbench'
 
-/** 可编辑的配件行（名称 + 配比） */
+/** 可编辑的配件行（仅名称） */
 export interface EditablePart {
   id: number
   name: string
-  qtyPerSet: number
 }
 
 /**
@@ -29,7 +28,7 @@ export function useCaseSettings() {
   const saving = ref(false)
 
   watch(parts, (list) => {
-    rows.value = list.map((p) => ({ id: p.id, name: p.name, qtyPerSet: p.qty_per_set }))
+    rows.value = list.map((p) => ({ id: p.id, name: p.name }))
   })
 
   // 请求序号：快速连选产品时丢弃过期响应，否则会把配件挂到**错误的主件**下
@@ -65,7 +64,7 @@ export function useCaseSettings() {
     }
   }
 
-  async function addPart(name: string, qtyPerSet: number) {
+  async function addPart(name: string) {
     const n = name.trim()
     if (!n || !main.value) {
       showToast('请填配件名称', 'warning')
@@ -73,7 +72,7 @@ export function useCaseSettings() {
     }
     saving.value = true
     try {
-      await caseApi.createItem({ name: n, parent_id: main.value.id, qty_per_set: qtyPerSet })
+      await caseApi.createItem({ name: n, parent_id: main.value.id })
       showToast('已添加配件', 'success')
       await reload()
       invalidate()
@@ -91,7 +90,7 @@ export function useCaseSettings() {
     }
     saving.value = true
     try {
-      await caseApi.updateItem(row.id, { name: row.name.trim(), qty_per_set: row.qtyPerSet })
+      await caseApi.updateItem(row.id, { name: row.name.trim() })
       showToast('已保存', 'success')
       await reload()  // 必须回读：rows 由 watch(parts) 派生，invalidate() 触及不到它，
       invalidate()    // 否则 chip 上仍显示旧名称/旧配比，用户以为没保存成功
