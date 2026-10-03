@@ -47,8 +47,9 @@
 | 备份 | 备份/恢复/演练/健康检查 | `/api/v1/backup` |
 | 系统 | 认证、用户、权限、通知、仪表盘、监控 | `/api/v1/auth`、`/api/v1/users`、`/api/v1/permissions`、`/api/v1/notifications`、`/api/v1/dashboard`、`/api/v1/monitoring` |
 | 导入 | Excel 批量导入、PDF 出货单 OCR 识别 | `/api/v1/batch`、`/api/v1/ocr-import` |
+| 基础数据与运维 | 产品、客户、供应商、辅助接口、异步任务、死信队列、编号巡检 | `/api/v1/products`、`/api/v1/customers`、`/api/v1/suppliers`、`/api/v1/aux`、`/api/v1/tasks`、`/api/v1/dead-letter`、`/api/v1/numbering-audit` |
 
-后端共 **44 个路由模块、369 个路由处理器**（含 `backup/`、`purchase_center/` 两个聚合包；`fastapi_app/api/v1/router.py` 以绝对导入全部挂载，无孤儿模块）。
+后端共 **34 个端点模块、369 个路由处理器**：32 个扁平模块（286 个 handler）+ `backup/`、`purchase_center/` 两个**聚合包**（83 个 handler，经各自 `__init__.py` 汇总）。`fastapi_app/api/v1/router.py` 以绝对导入全部挂载，34/34 均 `include_router`，**零孤儿**（AST + 调用图实测，见附录 A）。
 
 ### 1.2 技术栈
 
@@ -68,7 +69,7 @@
 | 前端测试 | Vitest 4 + @vue/test-utils + jsdom（121 个测试文件） | — |
 | 桌面壳 | NSSM 服务管理器（Tkinter，PyInstaller 打包为 `ERP服务器管理器_vX.Y.exe`） | 见 `server_manager/constants.py` |
 
-仓库规模：后端 `fastapi_app/` + `utils/` 约 **12.6 万行 Python**；前端 `frontend-vite/src` 约 **2.2 万行** TS/Vue；Alembic 迁移 **102 个 revision，单 head**；后端测试 **301 个文件**。
+仓库规模：后端 `fastapi_app/` + `utils/` **126,259 行 Python**；前端 `frontend-vite/src` **92,713 行** TS/Vue（`*.vue` 48,115 / `*.ts` 44,598，其中测试 21,416 行 → 不含测试 **71,297 行**）；Alembic 迁移 **102 个 revision / 4 个 root / 单 head**；后端测试 **301 个文件**（`tests/` 114 + `fastapi_app/tests/` 187）；前端 Vitest **121 个文件**。
 
 ---
 
@@ -126,7 +127,7 @@ ARQ worker（独立进程/服务 erp-arq）：定时备份、批量任务、cron
 
 ```text
 fastapi_app/                 后端（FastAPI + SQLAlchemy async）
-  api/v1/                    路由汇总 + 44 个路由模块（含 2 个聚合包）
+  api/v1/                    路由汇总 + 34 个端点模块（32 扁平 + 2 聚合包）
   core/                      配置/数据库/中间件/ARQ/prod_runner 监督器
   services/                  业务服务层（backup/ 含备份、加密、恢复、清理）
   shared_models/             纯 SQLAlchemy 2.0 ORM
@@ -624,6 +625,7 @@ cd ..
 - 应用内「备份中心」是生产路径：`pg_dump` + 压缩 + 分片 AES 加密 + 增量 + 健康检查 + 智能清理（`fastapi_app/services/backup/`）。
 - 调度：`backup_schedule` 表；`scheduler_poller` 每 5 分钟扫表，错过的窗口会补跑（依赖 `erp-arq` 在线）。
 - 加密：`BACKUP_ENCRYPTION_PASSWORD`（或 `BACKUP_ENCRYPTION_KEY`）必须配置；`FALLBACK_TO_GENERATED` 必须保持 `false`。
+- ⚠️ **自定义备份路径慎设在盘符根下**（如 `D:\backups`）：校验靠「在目标目录建临时文件」探测可写性，而能否在盘根建文件随**执行账户/进程**而变（本机实测：同一会话的 bash 能建、项目 `.venv` 的 Python 不能 —— 见附录 A 遗留项 2）。用 `D:\erp_system\backups` 这类有真实父目录的路径最稳。
 - ⚠️ `backup_schedule.last_status` 是死字段（永远显示 `running`），**不要用它判断失败**——看 `backups/` 下产物时间戳。
 - 恢复：优先用应用内恢复流程；灾备时按加密包内 `root/.env` + `config/.env.production` 重建配置（顺序见 `docs/runbooks/env-config.md` §6）。
 - 人工排障用的库级脚本在 `scripts/database/`（`db_manager.py` / `restore_db.py`），**不是**生产备份路径。
@@ -685,6 +687,7 @@ cd ..
 ruff check .                                           # lint（ruff.toml）
 .\.venv\Scripts\python.exe -m mypy                     # 类型（mypy.ini）
 .\.venv\Scripts\python.exe -m pytest -q                # 回归（testpaths = tests + fastapi_app/tests）
+.\.venv\Scripts\python.exe scripts\check_orphan_modules.py  # 白名单 ⊆ 导入图 + 零入边孤儿（CI 门禁；⚠️ 当前 FAIL，见附录 A）
 
 # 前端（frontend-vite/ 下）
 npm run type-check                                     # vue-tsc --noEmit
@@ -695,6 +698,7 @@ npm run check:routes                                   # 路由对齐检查
 ```
 
 - 门禁阈值（`pyproject.toml`）：函数 ≤ **80** 行、Vue 组件 ≤ **400** 行、单文件 ≤ **1600** 行；基线在 `scripts/gate_baseline.json`，**只拦新增**。
+- ⚠️ `scripts/check_orphan_modules.py` 是 CI 门禁（`.github/workflows/ci-cd.yml`），**当前在 main 上为 FAIL**：`mypy.ini` 白名单 368 条里 6 个 `__init__.py` 条目零入边（P2 mypy 扩容遗留，非本轮引入）。修法需人拍板，见附录 A 遗留项 1。
 - 密钥扫描误报的正确处置：命中行尾加 `secret-scan:allow <理由>`；`.githooks/allowlist.txt` 是逐文件豁免，新增条目必须在提交信息里说明理由。
 - 本机未安装 `pre-commit` 时第 ④ 层降级（暂存含 `.py`/`.vue` 才直接跑门禁）；恢复完整门禁：`pip install pre-commit`。
 - CI：`.github/workflows/ci-cd.yml`（Ubuntu + Postgres 服务容器，跑迁移、后端测试、前端构建与检查）。CI **不部署**生产（托管 runner 无法访问内网机）。
@@ -706,7 +710,7 @@ npm run check:routes                                   # 路由对齐检查
 - 前缀 `/api/v1`；业务端点默认需登录（路由层统一注入认证依赖）；文档端点在 production 自动关闭。
 - 认证：`Authorization: Bearer <JWT>`（移动端/API）或 httpOnly Cookie（浏览器）；支持 RS256（推荐）与 HS256。
 - 权限：`require_permission("xxx_manage")` / `require_superuser()` 依赖工厂；`user_` 前缀敏感权限仅超管可见。
-- 统一响应：`{"success": bool, "detail": ..., "code": ..., "request_id": ..., "timestamp": ...}`。
+- **响应形状（刻意不引入统一信封中间件）**：成功 = `{"success": true, ...端点自有字段}`（构造收敛于 [fastapi_app/core/response.py](fastapi_app/core/response.py)，与内联 `{'success': True, **x}` 逐字节等价）；失败 = 全局异常处理器统一为 `{"success": false, "detail": ..., "status_code": ..., "request_id": ..., "timestamp": ..., ["code"]}`（`code` 只在 AppError / 422 / 500 出现）。`request_id` 在**响应头**恒有（`RequestIdMiddleware`），成功路径**不进响应体** —— 端点用 `response_model=` 声明契约，中间件新增的键会被模型白名单**静默丢弃**。
 - 分页：`page` + `per_page`。**没有统一口径** —— 各端点的默认值与上限不同（实测默认 `50`×19 / `20`×16 / `15`×2 / `200`×1 / `100`×1；上限 `500`×16 / `100`×12 / `200`×11），对接前请按**具体端点**的 Query 声明确认。
 - 前端：`npm run check:api` 保证移动端调用全部走共享 API 层；`npm run check:routes` 校验 PC/移动路由对齐（端独有路由属正常差异）。
 - WebSocket：`/ws/notifications`（Nginx 已配置升级与长超时）。
@@ -750,26 +754,40 @@ npm run check:routes                                   # 路由对齐检查
 
 ---
 
-## 附录 A. 质量与审计快照（2026-10-03）
+## 附录 A. 质量与审计快照（2026-10-03，第四轮全量复核）
 
-本快照是最近一次全量审核的实测结论，供后续对比：
+本轮是**只读全量复核**（不动业务代码）：计数一律用 `ast` 与 Alembic 官方 API 现场实测，不用正则 ——
+本轮据此纠正了 §1.1（端点模块数）、§1.2（前端行数）、§2.4、§7（盘根备份路径）与 §10（响应形状）的 5 处与现场不符。
 
 | 检查 | 结果 |
 |---|---|
-| `scripts/quality_gate.py`（项目 `.venv`） | **PASS**（9 项与基线一致；pip-audit 因 venv 未装 pip-audit 按 WARN 跳过） |
-| 用系统 Python 跑门禁 | **FAIL** —— pip-audit 扫到系统解释器 site-packages 104 条已知漏洞（口径问题，见 `docs/runbooks/service-lifecycle.md` 第 3 层说明） |
-| `ruff check .` | 123 个既有违规（多为脚本/测试历史代码；门禁口径 `scripts/ + server_manager/` 为 59 与基线一致） |
+| `scripts/quality_gate.py`（项目 `.venv`） | **PASS** —— 10 项全部「与基线一致」（N+1 0 / 宽 except 5 / 超长函数 51 / 巨型组件 7 / service commit 12 / BOM 0 / Alembic 图 0 / 环境漂移 0 / ruff 59 / pip-audit 豁免策略 0） |
+| `ruff check .` | 123 个既有违规（全仓口径；门禁口径 `scripts/ + server_manager/` = 59 与基线一致） |
 | `mypy` | **Success: no issues found in 368 source files** |
-| 前端 `vue-tsc --noEmit` | **0 错误** |
+| 前端 `vue-tsc --noEmit` | **0 错误**（Node v24.14.0） |
 | 前端 `npm run lint` | **0 error / 168 warning** |
-| `npm run check:api` / `check:routes` | **通过**（API 层 108 端点、移动端 44 文件、PC 195 视图；路由仅 3 条移动端独有差异） |
-| 后端 `pytest` | 本轮中断前 **1791 项通过、未见 FAILED/ERROR**（约 50% 进度；完整回归建议在维护窗口重跑） |
-| Alembic | **单 head**（102 revisions / 4 roots），门禁校验 0 违规 |
+| `npm run check:api` / `check:routes` | **通过**（API 层 108 端点 / 移动端 44 文件 / PC 195 视图；移动端独有路由 3 条属正常差异） |
+| 端点模块与路由（AST + 调用图） | **34 个端点模块 / 369 个 handler**；34/34 全部 `include_router`，**零孤儿** |
+| Alembic（`ScriptDirectory` API） | **单 head**（`pg_standalone_063_fix_order_status_check`）；102 revisions / **4 roots** |
 | 环境变量漂移 | **0 处** |
-| 服务状态 | `erp-prod` 等五服务 RUNNING；`erp-prod` 由 NSSM 托管，`arq.status=external` 属正常 |
+| NSSM 五服务与端口 | `erp-prod`→依赖 `erp-redis`、`erp-arq`→依赖 `erp-redis-broker`、broker 6380；与 `config/nssm-services.json` 一致 |
+| 生产健康 | `logs/prod_runner.json`：`mode=production`、`ready=true`、`frontend_ok=true`、`workers=8`（`arq.status=external` 属正常设计） |
+| 密钥卫生 | `.env`、`config/uploads-signing.conf`、`config/tls/*.key`、`config/pgbouncer/userlist.txt`、`_ops/credentials/**` 均被 `git check-ignore` 命中；版本库内只有 `*.example` 模板 |
+| 后端 `pytest`（全量 4109 项） | **1 failed / 3840 passed / 268 skipped（6 分 22 秒）**；日志 `logs/pytest_audit_2026-10-03.log` |
+| `scripts/check_orphan_modules.py` | **FAIL**（CI 门禁；见遗留项 1） |
 
-遗留关注项（与本次审核无关、非我引入）：
+唯一失败用例 —— `fastapi_app/tests/test_backup_m1.py::TestValidatePath::test_existing_root_parent_allowed`（单文件复跑稳定复现：1 failed / 25 passed）：
 
-1. **依赖漏洞**：现场 pip-audit 曾报 25 个包 172 条漏洞（其中 166 条已有修复版本）。正确处理是升级依赖，而不是登记豁免；破坏面评估后再批量升级。
-2. **`fastapi_app/README.md` 有陈旧表述**（写 PostgreSQL 16 / Celery），与实际（PG 18 / ARQ）不符，可另行修订。
-3. **后端全量回归**建议在维护窗口完整重跑一次并留档。
+- **现象**：断言 `validate_path('D:\no_such_dir_xyz\backups')` 合法，实际返回 `{'valid': False, 'error': '目录不可写: D:\'}`（单文件复跑稳定复现）。
+- **根因**：`validate_path` 向上找最近存在的父目录，落点是**盘符根 `D:\`**，而 `_is_writable` 是在该目录**建临时文件**；本机实测 `_is_writable('D:\') == False`、`_is_writable('D:\erp_system') == True`。
+- **性质：环境相关，不是稳定功能缺陷**。证据链：同一会话里 bash `touch /d/x` **成功**、`icacls D:\` 显示 `Authenticated Users:(M)` / `Administrators:(F)`（有写权限），但项目 `.venv` 的 Python 对 `D:\` 根做 `open(...,'w')` 与 `mkstemp` **均** `PermissionError [Errno 13]` —— 属**进程级**限制（安全策略/软件），不是 ACL。生产服务 `erp-prod`/`erp-arq` 以 **LocalSystem** 运行（注册表 `ObjectName`），口径未必与本机 shell 相同。
+- **代码层面真正该修的点（与环境无关）**：①`_is_writable` 的 docstring 写「尽力而为,失败不阻断」，但 `validate_path` 拿 False 当硬否决 —— 口径自相矛盾；②用「建文件」探测盘根本就不成立（盘根允许建目录、未必允许建文件）；③该用例硬编码 Windows 路径，Linux runner 上向上查找的落点是 CWD（可写），因此 **CI 抓不到**这层环境差异。
+
+遗留关注项（均非本轮引入，按处理优先级排序）：
+
+1. **CI 门禁 `check_orphan_modules.py` 在 main 上是红的**：`mypy.ini` 白名单 368 条中 6 个 `__init__.py` 条目零入边（`api/v1`、`services/{backup/metrics, dashboard, material_registration, purchase, serializers}`）。根因是 P2 批次的 mypy 扩容（白名单 144 → 370）新增了 `__init__.py` 条目，而扫描器的入边统计**不给父包补边**（只给可达集补，见其 docstring）—— 「子模块被导入」在保守图里不会给父包产生入边。两种修法需人拍板：①修扫描器（父包按子模块补入边，与断言 B 排除包的既有设计一致）；②从白名单移除这 6 条（会缩小 mypy 覆盖）。按「门禁只可能变严」的棘轮原则，本轮不动门禁语义。
+2. **备份路径校验的盘根口径不稳**（上表唯一失败用例）：可写探测 = 试建文件，结论随执行账户/进程而变；且 `_is_writable` 的 docstring（「失败不阻断」）与 `validate_path`（硬否决）矛盾。修法需先定语义：允许盘根 → 改探测方式（试建**子目录**）且让 docstring 与实现一致；拒绝 → 明确错误文案 + 把用例改成不依赖 Windows 盘根（否则 CI 永远抓不到）。
+3. **依赖漏洞**：现场 pip-audit 曾报 25 个包 172 条漏洞（其中 166 条已有修复版本），`pyproject.toml` 当前 **0 条豁免**。正确处理是升级依赖，而不是登记豁免；破坏面评估后再批量升级。
+4. **`fastapi_app/README.md` 仍陈旧**：第 8–10 行写 PostgreSQL 16 / Celery（含 `celery_app.py`），与实际（PG 18 / ARQ）不符；同文件第 156 行已自我纠正，前后矛盾，可另行修订。
+
+口径提醒：门禁必须用项目 `.venv` 跑 —— 系统解释器的 site-packages 会被 pip-audit 扫出上百条与本项目无关的漏洞，属纯口径噪声（见 `docs/runbooks/service-lifecycle.md` 第 3 层说明）。
