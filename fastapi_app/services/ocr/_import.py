@@ -70,7 +70,10 @@ async def import_staging_stockouts_from_file(db: AsyncSession, file_content: byt
                 if table_pages:
                     parsed_items = parse_html_shipping_tables(table_pages)
                     logger.info(f'RapidTable 表格识别: {filename}, 识别到 {len(table_pages)} 页表格, 解析出 {len(parsed_items)} 个出货项')
-            except (ValueError, TypeError, OSError) as e:
+            except (ValueError, TypeError, OSError, RuntimeError) as e:
+                # 2026-10-03 第八轮审计：_extractors 在 rapid_table 未装/初始化失败时抛
+                # RuntimeError，原 except 未捕获 → 注释声明的"回退到文本模式"永不执行，
+                # RuntimeError 冒泡成 500。补 RuntimeError 使回退真正生效。
                 logger.warning(f'RapidTable 表格识别失败，将回退到文本模式: {e}')
             if not parsed_items:
                 _prog(message='正在使用文本识别模式...', percent=30)
@@ -177,7 +180,9 @@ async def import_staging_stockouts_from_file(db: AsyncSession, file_content: byt
                 result_msg += f"。错误: {'; '.join(errors[:5])}"
             _prog(status='done', message=result_msg, percent=100)
             return (imported, result_msg, errors[:10] if errors else [])
-    except (ValueError, TypeError, OSError) as e:
+    except (ValueError, TypeError, OSError, RuntimeError) as e:
+        # 2026-10-03 第八轮审计：补 RuntimeError —— extract_text 在 rapidocr 未装/初始化
+        # 失败时抛 RuntimeError，原 except 未捕获会冒泡成 500；此处应优雅返回失败元组。
         logger.error(f'OCR 导入失败: {e!s}', exc_info=True)
         _prog(status='error', message=f'识别导入失败: {e!s}', percent=0)
         return (0, f'识别导入失败: {e!s}', [])

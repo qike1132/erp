@@ -334,15 +334,18 @@ async def get_production_summary(db: AsyncSession, year: int, month: int) -> dic
 async def _get_case_stockout_daily(db: AsyncSession, start: date, end: date) -> dict:
     """获取皮套出库按日汇总"""
     # 范围条件（>= 当日零点，< 次日零点）而非 func.date()，使 stockout_date 索引可命中
+    # 2026-10-03 第八轮审计：原 end_dt = start_dt + timedelta(days=1) 忽略 end 形参，
+    # 区间恒为 [start, start+1天) → 每月 2 号起皮套出库汇总恒为 0。改为按 end 计算。
     start_dt = datetime(start.year, start.month, start.day)
-    end_dt = start_dt + timedelta(days=1)
+    end_dt = datetime(end.year, end.month, end.day) + timedelta(days=1)
     result = await db.execute(select(func.date(CaseMovement.movement_date).label('d'), func.coalesce(func.sum(CaseMovement.quantity), 0).label('total')).where(and_(CaseMovement.direction == 'out', CaseMovement.movement_date >= start_dt, CaseMovement.movement_date < end_dt)).group_by(func.date(CaseMovement.movement_date)))
     return {str(row.d): int(row.total) for row in result.all()}
 
 async def _get_case_stockout_detail(db: AsyncSession, start: date, end: date) -> dict:
     """获取皮套出库按日+客户+产品明细"""
+    # 2026-10-03 第八轮审计：同 _get_case_stockout_daily，原区间只覆盖 start 当天。
     start_dt = datetime(start.year, start.month, start.day)
-    end_dt = start_dt + timedelta(days=1)
+    end_dt = datetime(end.year, end.month, end.day) + timedelta(days=1)
     result = await db.execute(select(func.date(CaseMovement.movement_date).label('d'), CaseMovement.customer, func.coalesce(Product.name, Case.name).label('product_name'), CaseMovement.quantity).join(Case, CaseMovement.case_id == Case.id).outerjoin(Product, Case.product_id == Product.id).where(and_(CaseMovement.direction == 'out', CaseMovement.movement_date >= start_dt, CaseMovement.movement_date < end_dt)).order_by(CaseMovement.movement_date))
     data: dict[str, list[dict[str, Any]]] = {}
     for row in result.all():

@@ -16,6 +16,7 @@ from sqlalchemy.orm import sessionmaker
 
 from fastapi_app.core.database import get_sync_engine
 from fastapi_app.core.logger import logger
+from fastapi_app.services.plan_utils import normalize_plan_date
 
 _SyncSession = sessionmaker(
     autocommit=False, autoflush=False, bind=get_sync_engine()
@@ -110,15 +111,12 @@ async def batch_import_plans_task(ctx, file_path: str, original_filename: str, u
                         if not customer_name or not barcode or quantity <= 0 or (not plan_date_str):
                             errors.append(f'第{i}行: 必填字段缺失或数量无效')
                             continue
-                        import calendar
-                        from datetime import datetime
-                        try:
-                            plan_date_val = datetime.strptime(plan_date_str, '%Y-%m-%d').date()
-                        except ValueError:
-                            parts = plan_date_str.strip().split('-')
-                            y, m = (int(parts[0]), int(parts[1]))
-                            d = min(int(parts[2]), calendar.monthrange(y, m)[1])
-                            plan_date_val = datetime(y, m, d).date()
+                        # 2026-10-03 第八轮审计：此处原为 normalize_plan_date 的**旧副本**，
+                        # 缺「剥时间部分」与「len(parts)!=3 守卫」——Excel 真日期单元格
+                        # （openpyxl 读出 '2026-09-15 00:00:00'）会解析失败致整批静默丢弃；
+                        # 畸形日期（如 '2026'）抛 IndexError 令任务崩溃、临时文件已删、
+                        # ARQ 重试必"文件不存在"。改调权威实现 plan_utils.normalize_plan_date。
+                        plan_date_val = normalize_plan_date(plan_date_str)
                         row_month = f'{plan_date_val.year}-{plan_date_val.month:02d}'
                         if detected_month is None:
                             detected_month = row_month
