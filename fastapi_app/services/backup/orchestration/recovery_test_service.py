@@ -423,6 +423,11 @@ class DisasterRecoveryTestService:
                 readable = self._open_backup_content(backup_path)
                 try:
                     with zipfile.ZipFile(readable, 'r') as zf:
+                        # zip-slip 防护：拒绝绝对路径或「..」逃逸出临时目录的成员
+                        for member in zf.namelist():
+                            member_path = (temp_path / member).resolve()
+                            if not member_path.is_relative_to(temp_path.resolve()):
+                                raise ValueError(f'备份包含非法路径成员（zip-slip），拒绝解包: {member}')
                         zf.extractall(temp_path)
                 finally:
                     if readable != backup_path:
@@ -735,7 +740,11 @@ class DisasterRecoveryTestService:
                     validation_results[table_name] = {
                         'expected': expected_rows,
                         'actual': row_count,
-                        'passed': row_count >= min(expected_rows, self.test_config['test_sample_size']),
+                        # 第八轮审计：原 `row_count >= min(expected_rows, test_sample_size)`
+                        # 让 10 万行的表只还原 100 行（= sample_size）即判通过 → 演练对
+                        # 「几乎空库」报成功。行数校验改为**必须全量一致**；sample_size
+                        # 仅保留用于其它抽样展示，不参与 pass 判定。
+                        'passed': row_count == expected_rows,
                         'match_percentage': round((row_count / expected_rows * 100) if expected_rows > 0 else 0, 2)
                     }
 

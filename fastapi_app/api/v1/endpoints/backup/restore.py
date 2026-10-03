@@ -27,6 +27,7 @@ from fastapi_app.api.v1.endpoints.backup._deps import (
     _get_encryption_password,
     require_backup_permission,
 )
+from fastapi_app.core.backup_progress import _sanitize_error
 from fastapi_app.core.database import get_async_db
 from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.core.response import success_response
@@ -168,7 +169,7 @@ def _restore_error_to_http(exc: Exception) -> HTTPException:
     （恢复失败是服务端问题，不应报 400 让客户端以为是自己传错了备份）。
     """
     logger.exception('备份恢复失败')
-    return HTTPException(status_code=500, detail=str(exc) or '备份恢复失败')
+    return HTTPException(status_code=500, detail=_sanitize_error(str(exc)) or '备份恢复失败')
 
 
 def _require_pre_restore_backup(pre_info: dict, allowed: bool) -> None:
@@ -237,7 +238,7 @@ async def import_backup(
                     confirm_sensitive=confirm_sensitive,
                 )
             except BackupError as e:
-                raise HTTPException(status_code=500, detail=str(e)) from e
+                raise HTTPException(status_code=500, detail=_sanitize_error(str(e))) from e
             result['pre_restore_backup'] = pre_restore_info
             total_rows = sum(td.get('rows', 0) for td in result.get('_manifest_tables', {}).values())
             result.pop('_manifest_tables', None)
@@ -331,7 +332,7 @@ async def restore_server_backup(
                     confirm_sensitive=confirm_sensitive,
                 )
             except BackupError as e:
-                raise HTTPException(status_code=500, detail=str(e)) from e
+                raise HTTPException(status_code=500, detail=_sanitize_error(str(e))) from e
         finally:
             await backup_service.release_restore_lock(zip_lock_owner)
         result['pre_restore_backup'] = pre_restore_info
@@ -413,7 +414,7 @@ async def restore_incremental_backup(
     except BackupLockError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
     except RestoreError as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail=_sanitize_error(str(e))) from e
     finally:
         await backup_service.release_restore_lock(incr_lock_owner)
     return result
