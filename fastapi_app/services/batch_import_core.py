@@ -145,8 +145,13 @@ async def _pre_load_stockin_existing_keys(db: AsyncSession) -> list[str]:
 
 
 def _stockin_dedupe_key_raw(customer: str, product_name: str, dt: datetime | date | None, qty: int) -> str:
+    """幂等键。归一化口径必须与 _resolve_row_identity / 落库行为一致：
+    - customer/product 去空白（resolve 后落库的名字快照同样 strip 过）
+    - 日期缺省视为「导入当天」——行处理里 `parse_date_value(...) or datetime.now(UTC)`
+      落库的就是当天，键若用 '' 会与库中已有记录对不上（漏拦）。
+    """
     d = dt.date() if isinstance(dt, datetime) else dt
-    d_str = d.isoformat() if d else ''
+    d_str = d.isoformat() if d else datetime.now(UTC).date().isoformat()
     return f'{str(customer).strip()}|{str(product_name).strip()}|{d_str}|{int(qty)}'
 
 

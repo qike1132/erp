@@ -85,6 +85,10 @@ def write_backup_meta_file(filepath, manifest: dict, *, record_type: str = 'full
         fp = Path(filepath)
         meta = {
             'created_at': manifest.get('exported_at') or datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            # 增量基准（snapshot 一致性起点）随 sidecar 落盘：加密包读不到 manifest，
+            # _read_backup_timestamp 对 .enc 只能查这里。缺了它加密路径回退 created_at，
+            # baseline 缺口修复对生产默认的加密备份无效。
+            'baseline_at': manifest.get('baseline_at'),
             'filename': fp.name,
             'size': fp.stat().st_size,
             'type': manifest.get('type', record_type),
