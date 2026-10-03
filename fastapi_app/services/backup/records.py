@@ -1,6 +1,7 @@
 """备份记录与状态。"""
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import io
 import json
@@ -28,6 +29,9 @@ logger = logging.getLogger(__name__)
 
 # 模块级记录写入失败计数器（P1+P2）：每累计 3 次失败发送一次告警，避免告警风暴
 _record_write_fail_count: int = 0
+
+# 后台告警任务强引用集合：asyncio 对 Task 仅持弱引用，不保存引用会被 GC 中途回收（官方文档警告）
+_background_tasks: set[asyncio.Task] = set()
 
 # 正式备份文件命名约定：m5_fix_verify_*/erp_m3drill_* 等演练/测试件不计入统计与列表
 _BACKUP_NAME_PREFIXES = ('erp_backup_', 'erp_incremental_', 'erp_auto_')
@@ -253,8 +257,6 @@ async def write_backup_record(
         if _record_write_fail_count % 3 == 0:
             # 告警失败不影响主流程
             with contextlib.suppress(Exception):
-                import asyncio
-
                 from fastapi_app.services.backup.metrics.alert_service import alert_service
                 # 尝试获取事件循环，有则发送告警，无则跳过（同步上下文无法 await）
                 try:
@@ -262,12 +264,15 @@ async def write_backup_record(
                 except RuntimeError:
                     loop = None
                 if loop:
-                    loop.create_task(alert_service.send_alert(
+                    # 保留强引用，避免告警任务被 GC 中途回收（asyncio 仅持弱引用）
+                    _task = loop.create_task(alert_service.send_alert(
                         task_name='backup_record_write',
                         error=f'备份记录写入已连续失败 {_record_write_fail_count} 次: {e}',
                         task_type='backup',
                         severity='error',
                     ))
+                    _background_tasks.add(_task)
+                    _task.add_done_callback(_background_tasks.discard)
 
 
 def list_backup_files() -> list[dict]:  # log-context: internal helper 无请求上下文

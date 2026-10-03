@@ -99,12 +99,18 @@ def _fifo_before_commit(session) -> None:
             session.info['fifo_dirty'] = True
 
 
+# 后台任务强引用集合：asyncio 对 Task 仅持弱引用，不保存引用会被 GC 中途回收（官方文档警告）。
+_background_tasks: set[asyncio.Task] = set()
+
+
 def _fifo_after_commit(session) -> None:
     if not session.info.get('fifo_dirty'):
         return
     session.info['fifo_dirty'] = False
     produced_dirty = session.info.pop('produced_dirty', False)
-    asyncio.get_running_loop().create_task(_invalidate_fifo_caches_safe(produced_dirty))
+    task = asyncio.get_running_loop().create_task(_invalidate_fifo_caches_safe(produced_dirty))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
 
 async def _invalidate_fifo_caches_safe(produced_dirty: bool = False) -> None:
