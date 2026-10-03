@@ -31,6 +31,7 @@ from fastapi_app.schemas.case import (
     CaseMovementListResponse,
     CaseMovementOut,
     CaseMovementUpdate,
+    CaseProductListResponse,
     CaseSearchItem,
     CaseTreeResponse,
 )
@@ -61,6 +62,17 @@ async def case_search(q: str = Query('', description='搜索关键词'),
                       db: AsyncSession = Depends(get_async_read_db)) -> list[dict]:
     """皮套 SKU 搜索（录入联想，附当前库存）。"""
     return await case_service.search_cases(db, q)
+
+
+@router.get('/products', response_model=CaseProductListResponse)
+async def case_products(page: int = Query(1, ge=1),
+                        per_page: int = Query(200, ge=1, le=200),
+                        search: str = Query(''),
+                        has_parts: str = Query('all', description='all/yes/no，按有无配件过滤'),
+                        user: User = Depends(require_permission('case_manage')),
+                        db: AsyncSession = Depends(get_async_read_db)) -> dict:
+    """产品列表（皮套设置用）：全部产品 + 各自配件数，供「有配件/无配件」筛选。"""
+    return await case_service.list_products_with_parts(db, page, per_page, search, has_parts)
 
 
 @router.get('/items', response_model=CaseItemListResponse)

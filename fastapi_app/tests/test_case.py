@@ -59,6 +59,37 @@ class TestCaseService:
         assert result['total'] == 0
 
     @pytest.mark.asyncio
+    async def test_list_products_with_parts_empty(self, mock_db):
+        from fastapi_app.services.case_service import list_products_with_parts
+        mock_count = MagicMock()
+        mock_count.scalar.return_value = 0
+        mock_data = MagicMock()
+        mock_data.all.return_value = []
+        mock_db.execute = AsyncMock(side_effect=[mock_count, mock_data])
+
+        result = await list_products_with_parts(mock_db)
+        assert result['products'] == []
+        assert result['total'] == 0
+
+    @pytest.mark.asyncio
+    async def test_list_products_with_parts_maps_part_count(self, mock_db):
+        """产品行映射出配件数与 has_parts 布尔（0 配件 → 无配件）。"""
+        from fastapi_app.services.case_service import list_products_with_parts
+        mock_count = MagicMock()
+        mock_count.scalar.return_value = 2
+        mock_data = MagicMock()
+        mock_data.all.return_value = [(1, '鲨鱼', '6901', 3), (2, '测试', None, 0)]
+        mock_db.execute = AsyncMock(side_effect=[mock_count, mock_data])
+
+        result = await list_products_with_parts(mock_db)
+        assert result['total'] == 2
+        assert result['products'][0] == {
+            'id': 1, 'name': '鲨鱼', 'barcode': '6901', 'part_count': 3, 'has_parts': True,
+        }
+        assert result['products'][1]['barcode'] == ''
+        assert result['products'][1]['has_parts'] is False
+
+    @pytest.mark.asyncio
     async def test_get_case_movements_empty(self, mock_db):
         from fastapi_app.services.case_service import get_case_movements
         mock_count = MagicMock()

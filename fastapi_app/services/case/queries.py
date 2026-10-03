@@ -3,7 +3,7 @@ import logging
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import aliased, joinedload
 
 from fastapi_app.core.exceptions import NotFoundError
 from fastapi_app.core.sanitizer import escape_like
@@ -16,7 +16,7 @@ from fastapi_app.services.case._common import (
     _normalize_pagination,
 )
 from fastapi_app.services.case._serializers import _serialize_item, _serialize_movement
-from fastapi_app.shared_models import DIRECTION_IN, DIRECTION_OUT, Case, CaseMovement
+from fastapi_app.shared_models import DIRECTION_IN, DIRECTION_OUT, Case, CaseMovement, Product
 from fastapi_app.utils import calc_total_pages
 
 logger = logging.getLogger(__name__)
@@ -162,6 +162,60 @@ async def _compute_inventory_stats(db: AsyncSession, conditions: list) -> dict:
         'total_stock': int(total_stock or 0),
         'total_in': await _sum_direction(DIRECTION_IN),
         'total_out': await _sum_direction(DIRECTION_OUT),
+    }
+
+
+async def list_products_with_parts(db: AsyncSession, page: int = 1, per_page: int = 200,
+                                   search: str = '', has_parts: str = 'all') -> dict:
+    """产品列表（皮套设置选择用）：每个产品附「配件数」，用于区分有配件/无配件。
+
+    「配件」= `case` 表中 `parent_id IS NOT NULL` 且 `product_id` 指向该产品的行；
+    只有主件、0 配件算「无配件」。`has_parts` 取 all/yes/no。
+    以 `product` 表为根（LEFT JOIN 配件计数子查询），故**覆盖全部产品**，包括从未建过皮套的。
+    """
+    page, per_page = _normalize_pagination(page, per_page, MAX_SUMMARY_PAGE_SIZE)
+
+    # 配件 = 主件（parent_id IS NULL）的子件；按**主件的 product_id** 归组。
+    # 不能按子件自身的 product_id 分组 —— 配件行（createItem 只给 name+parent_id）
+    # 的 product_id 是 NULL，那样数出来恒为 0，有配件也会显示"无配件"。
+    part_case = aliased(Case)
+    main_case = aliased(Case)
+    part_count = (
+        select(main_case.product_id.label('product_id'), func.count(part_case.id).label('part_count'))
+        .join(part_case, part_case.parent_id == main_case.id)
+        .where(main_case.parent_id.is_(None), main_case.product_id.is_not(None))
+        .group_by(main_case.product_id)
+        .subquery()
+    )
+    count_expr = func.coalesce(part_count.c.part_count, 0)
+
+    conditions = []
+    if search:
+        pattern = f'%{escape_like(search)}%'
+        conditions.append(or_(Product.name.like(pattern), Product.barcode.like(pattern)))  # sql-safe: escape_like/绑定参数
+    if has_parts == 'yes':
+        conditions.append(count_expr > 0)
+    elif has_parts == 'no':
+        conditions.append(count_expr == 0)
+
+    base = (
+        select(Product.id, Product.name, Product.barcode, count_expr.label('part_count'))
+        .outerjoin(part_count, part_count.c.product_id == Product.id)
+    )
+    if conditions:
+        base = base.where(*conditions)  # sql-safe: 绑定参数
+    total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar() or 0
+
+    offset = (page - 1) * per_page
+    rows = await db.execute(base.order_by(Product.id).offset(offset).limit(per_page))
+    products = [
+        {'id': pid, 'name': name or '', 'barcode': barcode or '',
+         'part_count': int(pc or 0), 'has_parts': int(pc or 0) > 0}
+        for pid, name, barcode, pc in rows.all()
+    ]
+    return {
+        'products': products, 'total': total, 'page': page, 'per_page': per_page,
+        'pages': calc_total_pages(total, per_page),
     }
 
 

@@ -86,6 +86,23 @@ class CaseSearchItem(BaseModel):
     parent_id: int | None = None
 
 
+# ===== 产品列表（皮套设置：按有配件/无配件选择） =====
+class CaseProductItem(BaseModel):
+    id: int
+    name: str = ''
+    barcode: str = ''
+    part_count: int = 0
+    has_parts: bool = False
+
+
+class CaseProductListResponse(BaseModel):
+    products: list[CaseProductItem] = []
+    total: int = 0
+    page: int = 1
+    per_page: int = 200
+    pages: int = 0
+
+
 class CaseItemCreateResponse(BaseModel):
     success: bool
     message: str = ''

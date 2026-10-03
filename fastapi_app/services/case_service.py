@@ -34,5 +34,6 @@ from fastapi_app.services.case.queries import (  # noqa: F401
     get_case_items,
     get_case_movement_detail,
     get_case_movements,
+    list_products_with_parts,
     search_cases,
 )
