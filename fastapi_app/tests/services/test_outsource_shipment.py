@@ -135,6 +135,30 @@ async def test_receive_shipment_idempotent(db):
     assert r2['success'] is True
 
 
+async def test_receive_shipment_split_same_process(db):
+    """回归（第八轮审计）：同一工序**分批发货**时，逐张发货单收货应各收本批数量，
+    不应把整道工序一次收满 —— 否则第二张发货单收货会报「该工序已收货」。"""
+    product = Product(id=1, name='电绣品', barcode='B1', factory='湖北')
+    order = Order(id=1, order_no='PO-20260919-0002', customer='贝乐客户',
+                  order_date=datetime(2026, 9, 19, 10, 0), product_id=1, quantity=100)
+    item = OrderItem(id=1, order_id=1, product_id=1, product_name='电绣品', product_barcode='B1', quantity=100)
+    process = OrderOutsourceProcess(id=1, order_id=1, order_item_id=1, product_id=1,
+                                    product_name='电绣品', process_type='电绣', sort_order=0, status='pending')
+    db.add_all([product, order, item, process])
+    await db.commit()
+
+    s1 = await create_shipment(db, order.id, [(process.id, 60)], username='shipper')
+    s2 = await create_shipment(db, order.id, [(process.id, 40)], username='shipper')
+
+    await receive_shipment(db, s1['id'], username='beile')
+    p = await db.get(OrderOutsourceProcess, process.id)
+    assert p.received_quantity == 60, f'收第一批发货单后应只收 60，实际 {p.received_quantity}'
+
+    await receive_shipment(db, s2['id'], username='beile')
+    p = await db.get(OrderOutsourceProcess, process.id)
+    assert p.received_quantity == 100
+
+
 async def test_list_shipments_filters_and_counts(db):
     """列表：状态筛选 + 待收货/已完成计数。"""
     order, process = await _seed(db)

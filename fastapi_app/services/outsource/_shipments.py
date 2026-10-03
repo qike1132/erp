@@ -309,9 +309,11 @@ async def receive_shipment(db: AsyncSession, shipment_id: int, username: str | N
         raise ValueError(f'发货单状态异常（{shipment.status}），无法确认收货')
 
     for item in shipment.items or []:
-        # 复用既有收货逻辑（行锁 + 数量校验 + 流水）；缺省按剩余待收数量收货
+        # 复用既有收货逻辑（行锁 + 数量校验 + 流水）；按**本发货单明细**的发货数量收货。
+        # 第八轮审计：原传 received_quantity=None → receive_order_process 取「整道工序剩余量」
+        # → 分批发货时收发货单 A 会把整道工序一次收满，随后收 B 命中 _is_fully_received 报"已收货"。
         if item.process_id is not None:
-            await receive_order_process(db, item.process_id, username, received_quantity=None)
+            await receive_order_process(db, item.process_id, username, received_quantity=item.shipped_quantity)
         item.received_quantity = item.shipped_quantity
 
     shipment.status = SHIPMENT_STATUS_RECEIVED
