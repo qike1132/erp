@@ -81,6 +81,14 @@ async def auth_headers(client):
     return {"Authorization": f"Bearer {resp.json().get('access_token', '')}"}
 
 
+# 显式豁免（收口审计 2026-10-03）：整棵 /api/v1/backup 路由挂
+# dependencies=[Depends(get_current_user_id_strict)]（router.py），黑名单校验
+# fail-closed —— 测试环境无 Redis，携带有效 token 也 401。这是**已知且唯一**的
+# 环境性豁免；除此之外任何端点返回 401/403 都会被断言拦下（本仓历史高发的
+# 鉴权坏掉 401 / 权限码错配 403 不再被白名单掩盖）。
+KNOWN_ENV_401 = {"数据备份"}
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("name,method,url,body", SMOKE_TESTS)
 async def test_smoke(client, auth_headers, name, method, url, body):
@@ -91,10 +99,15 @@ async def test_smoke(client, auth_headers, name, method, url, body):
     else:
         pytest.skip(f"Unsupported method: {method}")
 
-    assert resp.status_code in (200, 201, 403, 401), \
-        f"\n  【{name}】{method} {url}\n  状态码: HTTP {resp.status_code}\n  响应: {resp.text[:300]}"
+    if name in KNOWN_ENV_401:
+        # 豁免端点只要求"不要 5xx/404"——401 即环境性严格认证的预期结果
+        assert resp.status_code in (200, 201, 401), \
+            f"\n  【{name}】{method} {url}\n  状态码: HTTP {resp.status_code}\n  响应: {resp.text[:300]}"
+    else:
+        assert resp.status_code in (200, 201), \
+            f"\n  【{name}】{method} {url}\n  状态码: HTTP {resp.status_code}\n  响应: {resp.text[:300]}"
 
     if resp.status_code in (200, 201):
         print(f"\n  [PASS] {name}: {method} {url}")
     else:
-        print(f"\n  [WARN] {name}: {method} {url} -> {resp.status_code} (需认证/权限)")
+        print(f"\n  [ENV] {name}: {method} {url} -> {resp.status_code} (严格认证需 Redis，环境性豁免)")
