@@ -52,7 +52,9 @@ async def create_pattern_maker(db: AsyncSession, name: str) -> dict:
 async def delete_pattern_maker(db: AsyncSession, maker_id: int) -> dict:
     """删除版师
 
-    关联的打样项目 pattern_maker_id 会被 DB 外键 SET NULL 置空。
+    关联的打样项目 pattern_maker_id 会被 DB 外键 SET NULL 置空；
+    冗余列 pattern_maker_name 需在此显式清空（FK 不会碰它），否则打样项目
+    将继续显示已删除版师的姓名，分组统计也把旧名当真实版师归类。
     """
     result = await db.execute(
         select(PatternMaker).where(PatternMaker.id == maker_id)
@@ -62,6 +64,15 @@ async def delete_pattern_maker(db: AsyncSession, maker_id: int) -> dict:
         raise NotFoundError('版师不存在')
 
     name = maker.name
+    # 先清冗余名（此时尚未 SET NULL，用 id 匹配），再删除
+    from sqlalchemy import update as _update
+
+    from fastapi_app.shared_models.customer_sampling import CustomerSamplingProject
+    await db.execute(
+        _update(CustomerSamplingProject)
+        .where(CustomerSamplingProject.pattern_maker_id == maker_id)
+        .values(pattern_maker_name=None)
+    )
     await db.delete(maker)
     await db.flush()
 
