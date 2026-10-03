@@ -49,8 +49,15 @@ class User(Base):
         - 超级管理员拥有所有权限
         - 拥有 xxx_manage 顶级管理权限时，自动拥有 xxx_view 查看权限
           （manage 是 view 的超集，避免业务页面因缺少 view 权限被阻断）
+        - 例外：NO_MANAGE_INHERIT 中的业务子码**必须显式授权**，manage 不放行。
+          背景（第十一轮落地分析）：outsource_ship / outsource_receive 是外发
+          发货/收货的职责分离码（迁移 043 刻意按用户名回填授权以落实四眼原则），
+          若允许持 outsource_manage 者经 children 继承同时通过两端，则该设计被绕过。
         """
         SENSITIVE_PREFIXES = ['user_']
+
+        # manage 不得经继承放行的业务子码（须逐个显式授权）
+        NO_MANAGE_INHERIT = {'outsource_ship', 'outsource_receive'}
 
         for prefix in SENSITIVE_PREFIXES:
             if permission_code.startswith(prefix):
@@ -62,7 +69,7 @@ class User(Base):
         for p in self.permissions:
             if p.code == permission_code:
                 return True
-            if p.children:
+            if p.children and permission_code not in NO_MANAGE_INHERIT:
                 for child in p.children:
                     if child.code == permission_code:
                         return True
