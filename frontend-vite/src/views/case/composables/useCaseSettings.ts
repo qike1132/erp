@@ -1,64 +1,85 @@
-import { ref, watch } from 'vue'
-import { useQueryClient } from '@tanstack/vue-query'
+import { ref, computed } from 'vue'
+import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { caseApi } from '@/api'
-import { useCaseOptions } from './useCaseOptions'
-import type { CaseItem } from '@/api/case'
+import type { CaseItem, CaseProduct } from '@/api/case'
 import { showToast } from '@/composables/useToast'
 import { getErrorMessage } from '@/types/errors'
 import { CASE_QUERY_KEYS } from './useCaseStockWorkbench'
 
-/** 可编辑的配件行（仅名称） */
-export interface EditablePart {
-  id: number
-  name: string
-}
+export type { CaseProduct }
+
+/** 有配件 / 无配件 分段筛选 */
+export type PartsFilter = 'all' | 'yes' | 'no'
+
+/** 一次加载的产品数上限（与物料用量计算 ProductSelectColumn 同口径） */
+const PRODUCT_CAP = 200
 
 /**
- * 皮套设置：按产品取皮套主件，维护其配件（增/改名/配比/删）。
+ * 皮套设置：**以产品为根**。
+ * 数据源 = `GET /cases/products`（全部产品 + 各自配件数），一次载入后本地按
+ * 关键词 + 有/无配件过滤；选中产品时经 `POST /cases/for-product` 取其主件（不存在则自动建）
+ * 与配件清单，在右栏维护。过滤逻辑照抄物料用量计算的 `useProductPicker`。
  */
 export function useCaseSettings() {
   const queryClient = useQueryClient()
-  const { searchProducts, fetchCaseTree } = useCaseOptions()
 
-  const productQuery = ref('')
-  const main = ref<CaseItem | null>(null)
-  const parts = ref<CaseItem[]>([])
-  const rows = ref<EditablePart[]>([])
-  const loading = ref(false)
-  const saving = ref(false)
+  const keyword = ref('')
+  const partsFilter = ref<PartsFilter>('all')
 
-  watch(parts, (list) => {
-    rows.value = list.map((p) => ({ id: p.id, name: p.name }))
+  const { data, isLoading } = useQuery({
+    queryKey: ['case-products'],
+    queryFn: () => caseApi.products({ page: 1, per_page: PRODUCT_CAP }),
+    staleTime: 30_000,
   })
 
-  // 请求序号：快速连选产品时丢弃过期响应，否则会把配件挂到**错误的主件**下
-  // （addPart 用 main.value.id 作 parent_id → 写库错误）。
-  let loadSeq = 0
+  const products = computed<CaseProduct[]>(() => data.value?.products ?? [])
+  const capped = computed(() => products.value.length >= PRODUCT_CAP)
 
-  async function load(productId: number, name: string) {
-    const seq = ++loadSeq
-    productQuery.value = name
-    loading.value = true
+  const filtered = computed<CaseProduct[]>(() => {
+    let list = products.value
+    if (partsFilter.value === 'yes') list = list.filter((p) => p.has_parts)
+    else if (partsFilter.value === 'no') list = list.filter((p) => !p.has_parts)
+    const q = keyword.value.trim().toLowerCase()
+    if (q) {
+      list = list.filter(
+        (p) => p.name.toLowerCase().includes(q) || (p.barcode ?? '').toLowerCase().includes(q),
+      )
+    }
+    return list
+  })
+
+  // ---- 选中产品的皮套树（主件 + 配件）----
+  const selectedProductId = ref<number | null>(null)
+  const selectedMain = ref<CaseItem | null>(null)
+  const selectedParts = ref<CaseItem[]>([])
+  const loadingTree = ref(false)
+
+  async function loadTree(id: number) {
+    const tree = await caseApi.forProduct(id)
+    selectedMain.value = tree.main
+    selectedParts.value = tree.parts ?? []
+  }
+
+  async function selectProduct(id: number) {
+    if (selectedProductId.value === id && selectedMain.value) return
+    selectedProductId.value = id
+    loadingTree.value = true
     try {
-      const tree = await fetchCaseTree(productId)
-      if (seq !== loadSeq) return  // 已被更新的选择作废
-      main.value = tree?.main ?? null
-      parts.value = tree?.parts ?? []
+      await loadTree(id)
+    } catch (e: unknown) {
+      selectedMain.value = null
+      selectedParts.value = []
+      showToast(getErrorMessage(e, '加载该产品的皮套失败'), 'error')
     } finally {
-      if (seq === loadSeq) loading.value = false
+      loadingTree.value = false
     }
   }
 
-  function selectProduct(p: { id: number; name: string }) {
-    void load(p.id, p.name)
-  }
+  const saving = ref(false)
 
-  /** 用主件的 product_id 重新拉取（增删改后用） */
-  async function reload() {
-    if (main.value?.product_id) await load(main.value.product_id, main.value.name)
-  }
-
+  /** 配件增删改后：刷新当前树 + 失效产品列表（配件数变了）与库存相关查询 */
   function invalidate() {
+    queryClient.invalidateQueries({ queryKey: ['case-products'] })
     for (const key of CASE_QUERY_KEYS) {
       queryClient.invalidateQueries({ queryKey: [key] })
     }
@@ -66,15 +87,15 @@ export function useCaseSettings() {
 
   async function addPart(name: string) {
     const n = name.trim()
-    if (!n || !main.value) {
+    if (!n || !selectedMain.value) {
       showToast('请填配件名称', 'warning')
       return
     }
     saving.value = true
     try {
-      await caseApi.createItem({ name: n, parent_id: main.value.id })
+      await caseApi.createItem({ name: n, parent_id: selectedMain.value.id })
       showToast('已添加配件', 'success')
-      await reload()
+      if (selectedProductId.value != null) await loadTree(selectedProductId.value)
       invalidate()
     } catch (e: unknown) {
       showToast(getErrorMessage(e, '添加失败'), 'error')
@@ -83,17 +104,17 @@ export function useCaseSettings() {
     }
   }
 
-  async function savePart(row: EditablePart) {
-    if (!row.name.trim()) {
+  async function savePart(id: number, name: string) {
+    if (!name.trim()) {
       showToast('配件名称不能为空', 'warning')
       return
     }
     saving.value = true
     try {
-      await caseApi.updateItem(row.id, { name: row.name.trim() })
+      await caseApi.updateItem(id, { name: name.trim() })
       showToast('已保存', 'success')
-      await reload()  // 必须回读：rows 由 watch(parts) 派生，invalidate() 触及不到它，
-      invalidate()    // 否则 chip 上仍显示旧名称/旧配比，用户以为没保存成功
+      if (selectedProductId.value != null) await loadTree(selectedProductId.value)
+      invalidate()
     } catch (e: unknown) {
       showToast(getErrorMessage(e, '保存失败'), 'error')
     } finally {
@@ -101,12 +122,12 @@ export function useCaseSettings() {
     }
   }
 
-  async function removePart(row: EditablePart) {
+  async function removePart(id: number) {
     saving.value = true
     try {
-      await caseApi.deleteItem(row.id)
+      await caseApi.deleteItem(id)
       showToast('已删除', 'success')
-      await reload()
+      if (selectedProductId.value != null) await loadTree(selectedProductId.value)
       invalidate()
     } catch (e: unknown) {
       showToast(getErrorMessage(e, '删除失败'), 'error')
@@ -116,14 +137,18 @@ export function useCaseSettings() {
   }
 
   return {
-    productQuery,
-    searchProducts,
-    main,
-    parts,
-    rows,
-    loading,
-    saving,
+    keyword,
+    partsFilter,
+    products,
+    filtered,
+    capped,
+    isLoading,
+    selectedProductId,
+    selectedMain,
+    selectedParts,
+    loadingTree,
     selectProduct,
+    saving,
     addPart,
     savePart,
     removePart,

@@ -15,6 +15,23 @@ export interface CaseSearchItem {
   parent_id: number | null
 }
 
+/** 产品列表项（GET /cases/products）：附配件数，供「有配件/无配件」筛选 */
+export interface CaseProduct {
+  id: number
+  name: string
+  barcode: string
+  part_count: number
+  has_parts: boolean
+}
+
+export interface CaseProductListResponse {
+  products: CaseProduct[]
+  total: number
+  page: number
+  per_page: number
+  pages: number
+}
+
 /** 客户下拉选项 */
 export interface CustomerOption {
   value: string
@@ -153,6 +170,13 @@ export type CaseInventoryParams = {
   search?: string
 }
 
+export type CaseProductListParams = {
+  page?: number
+  per_page?: number
+  search?: string
+  has_parts?: 'all' | 'yes' | 'no'
+}
+
 export type CaseExportParams = {
   scope: 'movements' | 'inventory'
   case_id?: number
@@ -176,6 +200,9 @@ export const caseApi = {
 
   // --- 库存汇总（主件分组） ---
   inventory: (params: CaseInventoryParams) => get<CaseInventoryResponse>('/cases/inventory', params),
+
+  /** 产品列表（皮套设置）：全部产品 + 配件数，按有无配件筛选 */
+  products: (params?: CaseProductListParams) => get<CaseProductListResponse>('/cases/products', params),
 
   /** 取某产品的皮套主件（不存在则自动创建）+ 其配件 */
   forProduct: (productId: number) => post<CaseTree>('/cases/for-product', { product_id: productId }),
