@@ -244,6 +244,13 @@ async def update_case_item(db: AsyncSession, case_id: int, update_data: dict) ->
             raise ValueError("不能把自己设为主件")
         if parent_id is not None:
             await _ensure_parent_is_root(db, parent_id)
+            # 被挂的件自身也**不能已有配件** —— 否则会产生"孙件"，而 get_case_inventory
+            # 只展开根件的一层子女，孙件会从库存树里消失。加上这条，"层级 ≤ 1"才真正闭环。
+            child_count = (await db.execute(
+                select(func.count()).select_from(Case).where(Case.parent_id == case_id)
+            )).scalar() or 0
+            if child_count:
+                raise ValueError("该 SKU 下已有配件，不能再挂到别的 SKU 下（层级最多一层）")
         case_obj.parent_id = parent_id
 
     for field in ('name', 'barcode', 'image', 'unit', 'qty_per_set'):

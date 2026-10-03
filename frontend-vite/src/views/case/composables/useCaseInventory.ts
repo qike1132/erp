@@ -27,9 +27,9 @@ export function directionLabel(direction: string): string {
 export function useCaseInventory() {
   // ===== 库存汇总（主件分组） =====
   const invSearch = ref('')
-  // 已提交的关键词（组件层防抖后经 onInvSearchInput 赋值）。queryKey 与请求**必须**用它，
-  // 不能直接用 invSearch —— 那是 v-model 绑定，每敲一键都会变，会导致逐键打接口
-  //（旧版就是这样，重写时把 debouncedInvSearch 丢了，属行为回退）。
+  // 已**提交**的关键词（由组件层在「回车 / 点放大镜 / 点×清空」时经 onInvSearchInput 赋值
+  // —— UiSearchInput 没有内置防抖，是"显式提交"语义）。queryKey 与请求**必须**用它，
+  // 不能直接用 invSearch —— 那是 v-model 绑定，每敲一键都会变，会导致逐键打接口。
   const debouncedInvSearch = ref('')
   const invPage = ref(1)
   const invPerPage = ref(50)

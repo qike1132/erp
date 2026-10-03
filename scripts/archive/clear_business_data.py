@@ -4,6 +4,13 @@
 """
 import asyncio
 import sys
+from pathlib import Path
+
+# 让 `python scripts/archive/clear_business_data.py` 能直接跑：
+#   · scripts/  —— 同级的 _prod_write_guard
+#   · 项目根     —— fastapi_app
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from sqlalchemy import text
 
@@ -88,7 +95,20 @@ SYSTEM_TABLES = [
 
 
 async def clear_business_data():
-    """清空业务数据表"""
+    """清空业务数据表。
+
+    ⚠️ 这是**归档脚本**（功能已由带 dry-run/护栏的 `clear_all_data.py` 等取代）。
+    2026-10-03 第三轮审计发现：本脚本此前因 `BUSINESS_TABLES` 里含**已被迁移删除**的
+    `case_stock_out` 而必抛异常 → 整体回滚 → **等于空跑**；把表名修正为有效值后，
+    它变成**真的会 TRUNCATE CASCADE 清掉约 30 张业务表并 commit**，却**没有任何护栏**
+    —— 等于把一个"跑不动"的脚本修成了"一跑就清库"。故补上与其它清库脚本同口径的
+    生产写护栏（`ERP_ALLOW_PROD_WRITE=1` 或 `--allow-prod-write`）。
+    """
+    from _prod_write_guard import require_prod_write_consent
+    require_prod_write_consent(
+        f'TRUNCATE CASCADE 清空 {len(BUSINESS_TABLES)} 张业务表（归档脚本，无 dry-run）',
+        hint='不可逆；建议改用 scripts/clear_all_data.py --dry-run 先预览',
+    )
     _init_async_engine()
 
     print("=" * 60)

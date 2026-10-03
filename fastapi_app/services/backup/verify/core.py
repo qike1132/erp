@@ -129,13 +129,18 @@ def _read_backup_timestamp(f: Path, name: str) -> str | None:
     """读单个备份文件的「导出时间」；**只认全量**（partial 不能当增量基线）。
 
     加密包不解密：同名 `.meta` 已带 `type` 与 `created_at`。
+
+    `type` **缺字段时按 'full' 处理**：能被本函数前缀匹配到的文件名
+    （`erp_backup_*` / `erp_auto_daily_*`）本就是全量命名，而 legacy 的 manifest
+    可能没有 `type` 字段 —— 一刀切按非 full 排除会漏掉这些有效的全量。
+    只排除**明确标了** `type != 'full'`（即 table 级 partial 备份）的。
     """
     if name.endswith('.enc'):
         try:
             meta = json.loads((f.parent / (name + '.meta')).read_text(encoding='utf-8'))
         except (OSError, ValueError):
             return None
-        return meta.get('created_at') if meta.get('type') == 'full' else None
+        return meta.get('created_at') if meta.get('type', 'full') == 'full' else None
     try:
         with zipfile.ZipFile(f, 'r') as zf:
             if 'manifest.json' not in zf.namelist():
@@ -144,8 +149,8 @@ def _read_backup_timestamp(f: Path, name: str) -> str | None:
     except (OSError, zipfile.BadZipFile, ValueError):
         return None
     # 与 .enc 分支同口径校验 type：原先这里不校验，一个 type='partial' 的手工包
-    # 会被当成"最近一次全量"基准。
-    return mf.get('exported_at') if mf.get('type') == 'full' else None
+    # 会被当成"最近一次全量"基准。缺 type 字段按 'full' 处理（见上 docstring）。
+    return mf.get('exported_at') if mf.get('type', 'full') == 'full' else None
 
 
 async def find_last_backup_timestamp() -> str | None:

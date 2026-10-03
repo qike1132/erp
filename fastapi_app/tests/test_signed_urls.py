@@ -170,6 +170,14 @@ def test_strip_upload_signature_removes_query():
     assert strip_upload_signature('') == ''
     # 兼容裸 storage key 形态（无前缀但带本系统签名参数）
     assert strip_upload_signature('2026/10/x.webp?st=1&s=abc') == '2026/10/x.webp'
+    # **自站绝对 URL**（用户从地址栏整串粘贴）：path 落在地上传目录 → 同样要剥，
+    # 否则会带着旧签名落库、过期后 410（第三轮审计补）
+    assert strip_upload_signature(
+        'https://host:3000/static/uploads/x.webp?st=1&s=abc'
+    ) == 'https://host:3000/static/uploads/x.webp'
+    assert strip_upload_signature(
+        '//host/static/uploads/x.webp?st=1&s=abc'
+    ) == '//host/static/uploads/x.webp'
     # ⚠️ 外部绝对 URL **不动**：query 是对方 CDN 签发的，剥掉会让外链失效
     # （schemas/product.py 明确放行外部 http(s) 直链）
     assert strip_upload_signature('https://cdn.x/a.png?v=1') == 'https://cdn.x/a.png?v=1'

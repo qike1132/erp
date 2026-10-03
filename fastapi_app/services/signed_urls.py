@@ -39,6 +39,23 @@ def signing_secret() -> str:
 _UPLOAD_PREFIX = '/static/uploads/'
 
 
+def _url_path(u: str) -> str:
+    """取 URL 的 path 部分（剥掉 `scheme://host` 与 query）。
+
+    用于识别**自站的绝对 URL**（用户从地址栏整串粘贴的 `https://host:3000/static/uploads/…`）
+    —— 这类也是本地上传件，签名要剥；而外部 CDN 的 path 不会落在 `/static/uploads/`。
+    """
+    bare = u.split('?', 1)[0]
+    if bare.startswith(('http://', 'https://')):
+        rest = bare.split('://', 1)[1]
+    elif bare.startswith('//'):
+        rest = bare[2:]
+    else:
+        return bare
+    slash = rest.find('/')
+    return rest[slash:] if slash != -1 else '/'
+
+
 def strip_upload_signature(url: str) -> str:
     """剥掉**本地上传**引用上的签名 query，得到可长期入库的原始路径。
 
@@ -51,14 +68,17 @@ def strip_upload_signature(url: str) -> str:
 
     ⚠️ 只对**本地**上传路径动手：`schemas/product.py` 明确放行外部 http(s) 直链，
     那些 URL 的 query（如 CDN 的 `?token=…`）是对方签发的，剥掉会让外链失效。
+    判定按 **path**（不看是不是绝对 URL）—— 自站绝对 URL 同样是本地上传件，
+    否则它会带着旧签名落库、过期后 410（第三轮审计补）。
     """
     if not url:
         return url
-    if url.startswith(_UPLOAD_PREFIX):
-        return url.split('?', 1)[0]
+    bare = url.split('?', 1)[0]
+    if _url_path(url).startswith(_UPLOAD_PREFIX):
+        return bare
     # 兼容裸 storage key（无前缀）形态：仅当带的是本系统的签名参数时才剥
     if not url.startswith(('http://', 'https://', '//')) and '?st=' in url and '&s=' in url:
-        return url.split('?', 1)[0]
+        return bare
     return url
 
 

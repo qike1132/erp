@@ -18,6 +18,9 @@ CASES = [
     ('fastapi_app.services.stock_in_service', 'update_stockin'),
     ('fastapi_app.services.stock_in_service', 'delete_stockin'),
     ('fastapi_app.services.order.deduction', '_increase_deduction'),
+    # 第三轮审计补：这条路径原先靠调用方预锁 Product，而 batch_import_core 传的是
+    # **无锁**对象 → 实际顺序是 StockIn→Product，与上面三条反向 → 死锁环。
+    ('fastapi_app.services.order_deduction_service', 'process_order_deduction'),
 ]
 
 

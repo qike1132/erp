@@ -28,7 +28,10 @@
           <small class="ip-sub">主件可展开查看配件</small>
         </div>
         <div class="ip-actions">
-          <UiSearchInput v-model="invSearch" placeholder="搜索皮套名称 / 69码" @search="onInvSearchInput" />
+          <!-- 必须同时接 @clear：UiSearchInput 的「×」只 emit update:modelValue + clear，
+               不 emit search —— 而查询读的是 debouncedInvSearch（只在 onInvSearchInput 更新），
+               只绑 @search 会让「×」清空输入框却**不刷新表格**（第三轮审计） -->
+          <UiSearchInput v-model="invSearch" placeholder="搜索皮套名称 / 69码" @search="onInvSearchInput" @clear="onInvSearchInput" />
           <button class="ip-btn ip-btn-ghost" aria-label="刷新" @click="invRefetch()">
             <FontAwesomeIcon icon="sync-alt" style="margin-right: 4px" aria-hidden="true" />刷新
           </button>

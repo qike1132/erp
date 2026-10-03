@@ -44,13 +44,24 @@ def _backup_encryption_password() -> str:
             or os.environ.get('BACKUP_ENCRYPTION_KEY') or '')
 
 
+class _UnverifiableBackupError(ValueError):
+    """备份**无法校验**（口令缺失/错误、密文损坏、口令轮换后旧包解不开）。
+
+    刻意继承 `ValueError`（既有 `except ValueError` 调用方照常工作），但类型足够具体，
+    使 `perform_recovery_test` 能**精确**把它与 `json.JSONDecodeError` /
+    `UnicodeDecodeError`（都是 ValueError 子类，代表**真的损坏**）区分开 ——
+    否则一个 manifest 损坏、实际不可还原的备份会被判成"无法校验"，
+    而清理侧对 `unverifiable` 不判 corrupted、不从 keep 剔除 → 它永远不被优先清理。
+    """
+
+
 @contextlib.contextmanager
 def _open_backup_zip(file_path: Path):
     """以只读方式打开备份 ZIP；`.zip.enc` 先解密到临时文件。
 
     产出明文临时文件路径（调用方负责在 with 退出后自动清理）。
-    解密失败/无口令时抛 ValueError，由调用方转成"无法校验"（**不是**"文件损坏"——
-    后者会让清理侧把有效备份优先删掉）。
+    解密失败/无口令时抛 `_UnverifiableBackupError`，由调用方转成"无法校验"
+    （**不是**"文件损坏"—— 后者会让清理侧把有效备份优先删掉）。
     """
     if not file_path.name.endswith('.enc'):
         yield file_path
@@ -58,7 +69,7 @@ def _open_backup_zip(file_path: Path):
 
     password = _backup_encryption_password()
     if not password:
-        raise ValueError('备份已加密但未配置 BACKUP_TEST_PASSWORD / BACKUP_ENCRYPTION_PASSWORD，无法校验')
+        raise _UnverifiableBackupError('备份已加密但未配置 BACKUP_TEST_PASSWORD / BACKUP_ENCRYPTION_PASSWORD，无法校验')
 
     from fastapi_app.core.backup_encryption import BackupFileError, decrypt_backup_to_file
     # 流式解密：`decrypt_backup_to_file` 内存有界。原先 `read_bytes()` + `decrypt_backup_auto`
@@ -76,7 +87,7 @@ def _open_backup_zip(file_path: Path):
             # `except Exception` → **整份健康检查报"执行失败"，其它检查结果全丢**；
             # 且清理侧看到 success=False 会把该包判成"损坏"、从 keep 列表剔除。
             # 统一映射为 ValueError = "无法校验"，与本函数的契约一致。
-            raise ValueError(f'无法解密（口令错误或密文损坏）：{e}') from e
+            raise _UnverifiableBackupError(f'无法解密（口令错误或密文损坏）：{e}') from e
         yield tmp_path
     finally:
         # 无论成功、抛错、还是调用方在 with 内抛错，都清掉整个临时目录
@@ -795,8 +806,11 @@ class BackupHealthCheckService:
                     logger.info(f"恢复测试成功: {test_file.name}")
                     return result
 
-                except ValueError as e:
-                    # 加密包解不开（口令错/密文损坏）→ **不是**"损坏"（见 _open_backup_zip）
+                except _UnverifiableBackupError as e:
+                    # **精确**匹配"解不开"（口令错/密文损坏/口令轮换），**不是**"损坏"
+                    #（见 _open_backup_zip）。刻意不用裸 ValueError —— json.JSONDecodeError
+                    # 与 UnicodeDecodeError 都是 ValueError 子类、代表**真的损坏**，
+                    # 若被这里抢先捕获会误判成"无法校验"而永久留在 keep 里不被清理。
                     return _unverifiable_result(test_file.name, e)
                 except (zipfile.BadZipFile, OSError, json.JSONDecodeError) as e:
                     return {

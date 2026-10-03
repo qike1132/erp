@@ -160,7 +160,7 @@ _ops/credentials/            凭据存放处（已 gitignore，**永不入库**�
 
 ```powershell
 python -m venv .venv
-.venv\Scripts\pip.exe install -r requirements/dev.txt        # 含 base + ruff/mypy/pytest 等
+.venv\Scripts\pip.exe install -r requirements/dev.txt        # 含 base + ruff/mypy（**回归测试另装 requirements/test.txt** —— pytest 不在 dev.txt 里）
 
 Copy-Item .env.example .env                                   # 然后填 SECRET_KEY / DB_* / REDIS_*
 .venv\Scripts\python.exe -m alembic -c migrations/alembic.ini upgrade head
@@ -334,7 +334,7 @@ python -m venv .venv
 | 上传 URL 签名 | `openssl rand -hex 32` | `.env` 的 `UPLOAD_URL_SIGNING_SECRET` + `config/uploads-signing.conf` |
 | 备份加密口令 | `python -c "import secrets; print(secrets.token_urlsafe(32))"` | `.env` 的 `BACKUP_ENCRYPTION_PASSWORD`（**严禁留空**，见红线） |
 | `/metrics` Token | `python -c "import secrets; print(secrets.token_urlsafe(32))"` | `.env` 的 `METRICS_BEARER_TOKEN` |
-| 内网 TLS 自签证书（可选） | `config/tls/` 未入库；按现有 `server.crt`/`server.key` 同名生成，或暂不启用 443 | `config/tls/` |
+| 内网 TLS 自签证书（可选） | `config/tls/` 下**公钥证书已入库**（`ca.crt`/`server.crt`/`server.csr`/`server.ext`），**私钥 `*.key` 未入库**（`.gitignore`）；全新 clone 需自备 `server.key` 或重新签发 | `config/tls/` |
 
 统一把上面所有真实值记录到 `_ops/credentials/`（受 ACL 保护、不入库）。
 
@@ -397,7 +397,7 @@ cd D:\erp_system
 **B. 全新空白库引导**：迁移后库内没有任何用户，需要手工建一次 `admin`（系统没有内置种子）：
 
 ```powershell
-# 1) 生成 Argon2id 口令哈希（口令策略：≥8 位且含字母与数字）
+# 1) 生成 Argon2id 口令哈希（口令策略见 utils/password_validator.py：**≥6 位**，不强制字符类别）
 .\.venv\Scripts\python.exe -c "from fastapi_app.core.security import hash_password; print(hash_password('<你的强密码>'))"
 ```
 
@@ -550,7 +550,7 @@ Get-Content D:\erp_system\logs\prod_runner.json    # ready:true 且 frontend_ok:
   ```
 
   生产服务形态下把 `.env` 的 `WATCHDOG_EXPECT_SERVICES` 置 `true`（要求五服务 RUNNING）。
-- **日志策略**：唯一权威是 `config/log_policy.json`（轮转 50MB / 保留 14 天 / 目录上限 512MB），
+- **日志策略**：唯一权威是 `config/log_policy.json`（当前 **轮转 80MB / 保留 7 天 / 目录上限 300MB**），
   由 `prod_runner`（每 60s）、ARQ（每日 04:30）、桌面管理器（每 6h）三方共用。
 
 ### 4.17 升级与回滚（日常发布）
@@ -707,7 +707,7 @@ npm run check:routes                                   # 路由对齐检查
 - 认证：`Authorization: Bearer <JWT>`（移动端/API）或 httpOnly Cookie（浏览器）；支持 RS256（推荐）与 HS256。
 - 权限：`require_permission("xxx_manage")` / `require_superuser()` 依赖工厂；`user_` 前缀敏感权限仅超管可见。
 - 统一响应：`{"success": bool, "detail": ..., "code": ..., "request_id": ..., "timestamp": ...}`。
-- 分页：`page` + `per_page`（默认 20，上限 100）。
+- 分页：`page` + `per_page`。**没有统一口径** —— 各端点的默认值与上限不同（实测默认 `50`×19 / `20`×16 / `15`×2 / `200`×1 / `100`×1；上限 `500`×16 / `100`×12 / `200`×11），对接前请按**具体端点**的 Query 声明确认。
 - 前端：`npm run check:api` 保证移动端调用全部走共享 API 层；`npm run check:routes` 校验 PC/移动路由对齐（端独有路由属正常差异）。
 - WebSocket：`/ws/notifications`（Nginx 已配置升级与长超时）。
 - 契约快照对比（可选）：`CONTRACT_BASE_URL=http://127.0.0.1:5002 pytest tests/contract -v`。

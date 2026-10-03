@@ -46,6 +46,16 @@ async def process_order_deduction(
         return 0, deduction_details
 
     try:
+        # ⚠️ 统一锁序 **Product → StockIn**：必须**无条件**先锁 Product，不能只靠调用方。
+        # 调用方可能传入**未加锁**的 product —— `batch_import_core.import_orders_from_data`
+        # 的 `_pre_load_product_map` 只做 `select(Product)`（无 FOR UPDATE）。若此处跳过
+        # Product 锁，行锁会由后面的 `update_stock_with_optimistic_lock` 的 UPDATE 才取得，
+        # 实际顺序变成 **StockIn→Product**，与 `stock_in_service`（Product→StockIn）反向
+        # → 死锁环（2026-10-03 第三轮审计：上一轮只对齐了部分调用方，环被挪到了这条路径）。
+        # 对已持锁的调用方（order_batch_create / staging/order / batch_import_service），
+        # 重复加锁是同一事务内的 no-op。
+        product = await get_product_for_update(db, product_id)
+
         # 查询该订单对应产品的所有备货，按时间正序排列（加锁防止并发抵扣超额）
         result = await db.execute(
             select(StockIn)
@@ -117,8 +127,7 @@ async def process_order_deduction(
         })
 
         # 更新产品库存（统一走乐观锁写入口，WHERE version=旧值；不再直写 current_stock）
-        if product is None:
-            product = await get_product_for_update(db, product_id)
+        # product 已在函数开头无条件加锁，这里不再需要补锁
         if product and deduct_amount > 0:
             await update_stock_with_optimistic_lock(db, product_id, -deduct_amount)
 

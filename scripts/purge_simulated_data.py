@@ -6,7 +6,7 @@
 
 保留范围（禁止任何清除）:
   用户管理: user / user_permission / permission
-  客户管理: customer / customer_access_log / country
+  客户管理: customer / customer_access_log          # country 表已由迁移 pg_standalone_055 删除
   运行配置: backup_settings / backup_schedule / order_sync_config / alembic_version
 
 执行流程:
