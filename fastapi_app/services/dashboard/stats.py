@@ -98,10 +98,10 @@ async def _query_today_yesterday_base(db: AsyncSession, today_start: datetime, t
     # StockOut
     stockout_row = (await db.execute(
         select(
-            func.coalesce(func.sum(StockOut.quantity).filter(
+            func.coalesce(func.sum(StockOut.quantity - StockOut.returned_quantity).filter(
                 StockOut.stockout_date >= today_start, StockOut.stockout_date < today_end
             ), 0).label('today'),
-            func.coalesce(func.sum(StockOut.quantity).filter(
+            func.coalesce(func.sum(StockOut.quantity - StockOut.returned_quantity).filter(
                 StockOut.stockout_date >= yesterday_start, StockOut.stockout_date < today_start
             ), 0).label('yesterday'),
         ).where(StockOut.stockout_date >= yesterday_start, StockOut.stockout_date < today_end)

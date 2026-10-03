@@ -18,7 +18,7 @@ from ._constants import (
     BACKUP_FORMAT_VERSION,
     RESTORE_LOCK_ID,
 )
-from .crypto import get_backup_encryption_password, sha256_file
+from .crypto import get_backup_encryption_password, is_encryption_enabled, sha256_file
 from .exceptions import BackupError, BackupLockError, BinaryLogError, RestoreError
 from .json_backup import build_column_type_map, deserialize_value
 from .records import ensure_backup_dir
@@ -49,118 +49,133 @@ async def create_incremental_backup(
     from .restore import is_restore_in_progress
     if await is_restore_in_progress():
         raise BackupLockError('还原操作正在执行中，请等待还原完成后再备份')
-    timestamp = datetime.now(UTC).strftime('%Y%m%d_%H%M%S')
-    from fastapi_app.shared_models import Base
-    incremental_tables = {}
-    total_rows = 0
-    failed_tables: list[str] = []
-    effective_since = since or await find_last_backup_timestamp() or ''
-    for table in Base.metadata.sorted_tables:
-        tname = str(table.name)
-        try:
-            serialized_rows = await query_table_rows(tname, db, effective_since or None)
-            if serialized_rows:
-                columns = list(serialized_rows[0].keys())
-                incremental_tables[tname] = {'columns': columns, 'rows': serialized_rows, 'count': len(serialized_rows)}
-                total_rows += len(serialized_rows)
-        except (SQLAlchemyError, ValueError, OSError) as e:
-            # 这里吞掉异常会让备份「成功」但静默缺表 —— 2026-09-30 之前
-            # approval_request / approval_log 正是这样长期漏备的。故记 ERROR 并登记表名，
-            # 让调用方与 manifest 都能看到"哪些表没进备份"。
-            # S4：失败后必须回滚。PostgreSQL 的事务一旦出错就进入 aborted 状态，
-            # 不 rollback 的话后面每一张表都会抛 InFailedSQLTransactionError，
-            # 一张表出问题会连锁成「整份增量备份全空」（实测见 _qa_tmp/s4_cascade_probe.py）。
-            with contextlib.suppress(SQLAlchemyError):
-                await db.rollback()  # manual-tx: 单表失败后恢复事务，避免连锁失败
-            logger.error(f'增量备份表 {tname} 失败: {e}')
-            failed_tables.append(tname)
 
-    if not incremental_tables:
-        # 区分「真的没有变更」与「每张表都失败了」：后者若报 success=True 且 filename=None，
-        # 两个调用方（backup_tasks 手动/自动）都只判 filename → 会把它当成"本次无变更"，
-        # **不写记录、无告警、上报 ok**，把系统性故障伪装成正常。
-        if failed_tables:
+    # 第八轮审计：增量备份与全量备份互斥 —— 取同一个 DB advisory lock(BACKUP_LOCK_ID)，
+    # 防两者并发写 BACKUP_DIR / 同秒文件名互相覆盖。
+    from .orchestration.core import acquire_backup_lock, release_backup_lock
+    if not await acquire_backup_lock(db):
+        raise BackupLockError('另一个备份操作正在执行中，请稍后重试')
+    try:
+        timestamp = datetime.now(UTC).strftime('%Y%m%d_%H%M%S')
+        from fastapi_app.shared_models import Base
+        incremental_tables = {}
+        total_rows = 0
+        failed_tables: list[str] = []
+        effective_since = since or await find_last_backup_timestamp() or ''
+        for table in Base.metadata.sorted_tables:
+            tname = str(table.name)
+            try:
+                serialized_rows = await query_table_rows(tname, db, effective_since or None)
+                if serialized_rows:
+                    columns = list(serialized_rows[0].keys())
+                    incremental_tables[tname] = {'columns': columns, 'rows': serialized_rows, 'count': len(serialized_rows)}
+                    total_rows += len(serialized_rows)
+            except (SQLAlchemyError, ValueError, OSError) as e:
+                # 这里吞掉异常会让备份「成功」但静默缺表 —— 2026-09-30 之前
+                # approval_request / approval_log 正是这样长期漏备的。故记 ERROR 并登记表名，
+                # 让调用方与 manifest 都能看到"哪些表没进备份"。
+                # S4：失败后必须回滚。PostgreSQL 的事务一旦出错就进入 aborted 状态，
+                # 不 rollback 的话后面每一张表都会抛 InFailedSQLTransactionError，
+                # 一张表出问题会连锁成「整份增量备份全空」（实测见 _qa_tmp/s4_cascade_probe.py）。
+                with contextlib.suppress(SQLAlchemyError):
+                    await db.rollback()  # manual-tx: 单表失败后恢复事务，避免连锁失败
+                logger.error(f'增量备份表 {tname} 失败: {e}')
+                failed_tables.append(tname)
+
+        if not incremental_tables:
+            # 区分「真的没有变更」与「每张表都失败了」：后者若报 success=True 且 filename=None，
+            # 两个调用方（backup_tasks 手动/自动）都只判 filename → 会把它当成"本次无变更"，
+            # **不写记录、无告警、上报 ok**，把系统性故障伪装成正常。
+            if failed_tables:
+                return {
+                    'success': False, 'filename': None,
+                    'message': f'增量备份失败：{len(failed_tables)} 张表全部导出失败',
+                    'total_rows': 0, 'failed_tables': failed_tables,
+                }
             return {
-                'success': False, 'filename': None,
-                'message': f'增量备份失败：{len(failed_tables)} 张表全部导出失败',
+                'success': True, 'filename': None, 'message': '无变更数据需要备份',
                 'total_rows': 0, 'failed_tables': failed_tables,
             }
-        return {
-            'success': True, 'filename': None, 'message': '无变更数据需要备份',
-            'total_rows': 0, 'failed_tables': failed_tables,
-        }
 
-    with tempfile.TemporaryDirectory(prefix='erp_inc_') as tmpdir:
-        tmpdir_path = Path(tmpdir)
-        json_path = tmpdir_path / 'database' / 'dump.json'
-        json_path.parent.mkdir(parents=True, exist_ok=True)
-        backup_data = {
-            'version': BACKUP_FORMAT_VERSION, 'type': 'incremental',
-            'exported_at': datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S'),
-            'exported_by': user.username if hasattr(user, 'username') else str(user.id),
-            'remark': remark, 'base_timestamp': effective_since,
-            'table_count': len(incremental_tables), 'total_rows': total_rows,
-            'failed_tables': failed_tables,
-            'tables': incremental_tables,
-        }
-        json_path.write_bytes(json.dumps(backup_data, ensure_ascii=False, indent=2).encode('utf-8'))
-        zip_path = tmpdir_path / 'backup.zip'
-        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED, compresslevel=3) as zf:
-            zf.write(json_path, 'database/dump.json')
-            manifest = {
-                'version': BACKUP_FORMAT_VERSION, 'type': 'incremental', 'app_version': '2.0',
-                'exported_at': backup_data['exported_at'],
-                'exported_by': backup_data['exported_by'],
+        with tempfile.TemporaryDirectory(prefix='erp_inc_') as tmpdir:
+            tmpdir_path = Path(tmpdir)
+            json_path = tmpdir_path / 'database' / 'dump.json'
+            json_path.parent.mkdir(parents=True, exist_ok=True)
+            backup_data = {
+                'version': BACKUP_FORMAT_VERSION, 'type': 'incremental',
+                'exported_at': datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S'),
+                'exported_by': user.username if hasattr(user, 'username') else str(user.id),
                 'remark': remark, 'base_timestamp': effective_since,
                 'table_count': len(incremental_tables), 'total_rows': total_rows,
                 'failed_tables': failed_tables,
-                'includes': {},
-                'checksums': {'database/dump.json': sha256_file(json_path)},  # REV-14
+                'tables': incremental_tables,
             }
-            zf.writestr('manifest.json', json.dumps(manifest, ensure_ascii=False, indent=2).encode('utf-8'))
-        zip_bytes = zip_path.read_bytes()
+            json_path.write_bytes(json.dumps(backup_data, ensure_ascii=False, indent=2).encode('utf-8'))
+            zip_path = tmpdir_path / 'backup.zip'
+            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED, compresslevel=3) as zf:
+                zf.write(json_path, 'database/dump.json')
+                manifest = {
+                    'version': BACKUP_FORMAT_VERSION, 'type': 'incremental', 'app_version': '2.0',
+                    'exported_at': backup_data['exported_at'],
+                    'exported_by': backup_data['exported_by'],
+                    'remark': remark, 'base_timestamp': effective_since,
+                    'table_count': len(incremental_tables), 'total_rows': total_rows,
+                    'failed_tables': failed_tables,
+                    'includes': {},
+                    'checksums': {'database/dump.json': sha256_file(json_path)},  # REV-14
+                }
+                zf.writestr('manifest.json', json.dumps(manifest, ensure_ascii=False, indent=2).encode('utf-8'))
+            zip_bytes = zip_path.read_bytes()
 
-        # P0-1 统一加密语义：与 create_full_backup 一致，无随机密钥回退
-        if encrypt is True and not (encrypt_password or get_backup_encryption_password()):
-            raise BackupError('请求加密增量备份但未配置密码（encrypt_password 参数 / BACKUP_ENCRYPTION_PASSWORD 环境变量均未提供）')
-        if encrypt is False:
-            encryption_password = None
-        else:
-            encryption_password = encrypt_password or get_backup_encryption_password()
-            if encrypt is None and not encryption_password:
-                logger.warning("增量备份未显式指定 encrypt，且无可用密码，本次备份不加密")
-        encrypted = False
-        if encryption_password:
-            # ITER-1 T3：新写增量备份统一走分块格式（chunked-v1），旧格式仍可读。
-            from fastapi_app.core.backup_encryption import encrypt_backup_auto
-            try:
-                encrypted_bytes, meta_dict = encrypt_backup_auto(zip_bytes, encryption_password)
-                # 更新 manifest 以标记加密
-                manifest['encrypted'] = True
-                manifest['encryption'] = meta_dict
-                if encrypt_password:
-                    logger.info("使用用户提供的密码进行增量备份加密")
-                else:
-                    logger.info("使用环境变量配置的密钥进行增量备份加密")
-                zip_bytes = encrypted_bytes
-                encrypted = True
-            except Exception as e:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断
-                logger.error(f"增量备份加密失败: {e}")
-                raise BackupError(f"增量备份加密失败: {e}") from e
+            # P0-1 统一加密语义：与 create_full_backup 一致，无随机密钥回退
+            if encrypt is True and not (encrypt_password or get_backup_encryption_password()):
+                raise BackupError('请求加密增量备份但未配置密码（encrypt_password 参数 / BACKUP_ENCRYPTION_PASSWORD 环境变量均未提供）')
+            if encrypt is False:
+                encryption_password = None
+            else:
+                encryption_password = encrypt_password or get_backup_encryption_password()
+                if encrypt is None and not encryption_password:
+                    # 红线#4（第八轮审计）：加密已启用却拿不到密码 → fail-closed（同 create_full_backup）。
+                    if is_encryption_enabled():
+                        raise BackupError(
+                            '备份加密已启用（BACKUP_ENCRYPTION_ENABLED=true）但未配置可用的密码，'
+                            '拒绝产出不加密增量备份'
+                        )
+                    logger.warning("增量备份未显式指定 encrypt，且无可用密码，本次备份不加密")
+            encrypted = False
+            if encryption_password:
+                # ITER-1 T3：新写增量备份统一走分块格式（chunked-v1），旧格式仍可读。
+                from fastapi_app.core.backup_encryption import encrypt_backup_auto
+                try:
+                    encrypted_bytes, meta_dict = encrypt_backup_auto(zip_bytes, encryption_password)
+                    # 更新 manifest 以标记加密
+                    manifest['encrypted'] = True
+                    manifest['encryption'] = meta_dict
+                    if encrypt_password:
+                        logger.info("使用用户提供的密码进行增量备份加密")
+                    else:
+                        logger.info("使用环境变量配置的密钥进行增量备份加密")
+                    zip_bytes = encrypted_bytes
+                    encrypted = True
+                except Exception as e:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断
+                    logger.error(f"增量备份加密失败: {e}")
+                    raise BackupError(f"增量备份加密失败: {e}") from e
 
-    # P0-1: 加密备份落盘扩展名带 .enc；P0-4: 同步写 .meta sidecar
-    filename = f'erp_incremental_{timestamp}.zip.enc' if encrypted else f'erp_incremental_{timestamp}.zip'
-    filepath = BACKUP_DIR / filename
-    filepath.write_bytes(zip_bytes)
-    from .records import write_backup_meta_file
-    write_backup_meta_file(filepath, manifest, record_type='incremental')
-    return {
-        'success': True, 'filename': filename, 'size': len(zip_bytes),
-        'format': 'incremental', 'table_count': len(incremental_tables),
-        'total_rows': total_rows, 'exported_at': backup_data['exported_at'],
-        'base_timestamp': effective_since, 'remark': remark,
-        'encrypted': encrypted, 'failed_tables': failed_tables,
-    }
+        # P0-1: 加密备份落盘扩展名带 .enc；P0-4: 同步写 .meta sidecar
+        filename = f'erp_incremental_{timestamp}.zip.enc' if encrypted else f'erp_incremental_{timestamp}.zip'
+        filepath = BACKUP_DIR / filename
+        filepath.write_bytes(zip_bytes)
+        from .records import write_backup_meta_file
+        write_backup_meta_file(filepath, manifest, record_type='incremental')
+        return {
+            'success': True, 'filename': filename, 'size': len(zip_bytes),
+            'format': 'incremental', 'table_count': len(incremental_tables),
+            'total_rows': total_rows, 'exported_at': backup_data['exported_at'],
+            'base_timestamp': effective_since, 'remark': remark,
+            'encrypted': encrypted, 'failed_tables': failed_tables,
+        }
+    finally:
+        await release_backup_lock(db)
 
 
 async def create_wal_incremental_backup(
@@ -261,6 +276,12 @@ async def create_wal_incremental_backup(
 
     # 可选加密
     effective_encryption_password = encrypt_password or get_backup_encryption_password()
+    if not effective_encryption_password and is_encryption_enabled():
+        # 红线#4（第八轮审计）：加密已启用却拿不到密码 → fail-closed，不静默产明文。
+        raise BackupError(
+            'WAL 增量备份：加密已启用（BACKUP_ENCRYPTION_ENABLED=true）但未配置密码，'
+            '拒绝产出不加密备份'
+        )
     if effective_encryption_password:
         from fastapi_app.core.backup_encryption import encrypt_backup_auto
         try:

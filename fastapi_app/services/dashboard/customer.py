@@ -52,8 +52,8 @@ async def fetch_customer_out_details(
         result = await db.execute(
             select(
                 StockOut.customer,
-                func.coalesce(func.sum(StockOut.quantity), 0),
-                func.coalesce(func.sum(StockOut.quantity * Product.price), 0)
+                func.coalesce(func.sum(StockOut.quantity - StockOut.returned_quantity), 0),
+                func.coalesce(func.sum((StockOut.quantity - StockOut.returned_quantity) * Product.price), 0)
             )
             .join(Product, StockOut.product_id == Product.id, isouter=True)
             .where(StockOut.stockout_date >= start_time)

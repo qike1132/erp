@@ -36,6 +36,15 @@ def generate_encryption_key() -> str:
     return secrets.token_urlsafe(32)
 
 
+def is_encryption_enabled() -> bool:
+    """备份加密是否已启用。
+
+    供调用方在「无密码需降级为明文」前判断：若已启用加密却拿不到密码，
+    应 fail-closed（拒绝产出不加密备份），而非静默降级（AGENTS.md 红线#4）。
+    """
+    return bool(BACKUP_ENCRYPTION_ENABLED)
+
+
 def get_backup_encryption_password() -> str | None:  # log-context: internal helper 无请求上下文
     """获取备份加密密码（仅环境变量链，P0-1 起不再生成随机密钥）
 

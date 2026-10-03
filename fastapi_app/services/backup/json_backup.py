@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import ast
 import asyncio
-import contextlib
 import json
 import logging
 from datetime import UTC, date, datetime
@@ -518,25 +517,20 @@ async def restore_legacy_json(backup_data: dict, db: AsyncSession, task_id: str 
                 tname: {'rows': td.get('count', len(td.get('rows', [])))}
                 for tname, td in backup_data.get('tables', {}).items()
             }
-            from fastapi_app.core.database import _AsyncSessionLocal
-            verify_db = None
-            if _AsyncSessionLocal is not None:
-                verify_db = _AsyncSessionLocal()
-            try:
-                # JSON 路径不传 manifest_fingerprints：JSON 序列化会改变列的精确定文本
-                # 表示（float/字节/JSON 格式化/timestamptz 等），即便数据逻辑等价，基于
-                # COALESCE(col::text) 的 L2 指纹也必然假阴性。故 L2 对 JSON 路径退化为
-                # 跳过（match=None，不计 mismatch），overall_pass 依赖真实可验证的
-                # L1 行数 + L4 表结构。psql 路径（二进制级精确）仍完整校验 L2。
-                verification = await verify_restore(
-                    verify_db or db, manifest_tables,
-                    manifest_fingerprints=None,
-                    manifest_schema=backup_data.get('schema_snapshot'),
-                )
-            finally:
-                if verify_db is not None:
-                    with contextlib.suppress(OSError, ValueError, SQLAlchemyError):
-                        await verify_db.close()
+            # 2026-10-03 第八轮审计：此前用**独立连接** `_AsyncSessionLocal()` 校验，而此刻
+            # 主事务只 `flush()` 未 `commit`（commit 在 strategies.py 的调用方）→ READ COMMITTED
+            # 下独立连接看不到未提交的 DELETE/INSERT，读到的是**还原前**数据，「还原后校验」
+            # 实际没在校验还原结果。verify_restore 只做 SELECT，改用同一 session 即看到还原结果。
+            # JSON 路径不传 manifest_fingerprints：JSON 序列化会改变列的精确定文本
+            # 表示（float/字节/JSON 格式化/timestamptz 等），即便数据逻辑等价，基于
+            # COALESCE(col::text) 的 L2 指纹也必然假阴性。故 L2 对 JSON 路径退化为
+            # 跳过（match=None，不计 mismatch），overall_pass 依赖真实可验证的
+            # L1 行数 + L4 表结构。psql 路径（二进制级精确）仍完整校验 L2。
+            verification = await verify_restore(
+                db, manifest_tables,
+                manifest_fingerprints=None,
+                manifest_schema=backup_data.get('schema_snapshot'),
+            )
         except (SQLAlchemyError, ValueError, OSError) as e:
             logger.warning(f'恢复后验证失败: {e}')
             verification = {'overall_pass': False, 'error': str(e)}

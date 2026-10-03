@@ -27,7 +27,7 @@ from .._constants import (
     _backup_in_progress,
     config_files_to_package,
 )
-from ..crypto import get_backup_encryption_password, sha256_file
+from ..crypto import get_backup_encryption_password, is_encryption_enabled, sha256_file
 from ..dump import run_pg_dump
 from ..exceptions import (
     BackupError,
@@ -397,6 +397,14 @@ async def _do_create_full_backup(
         else:
             effective_encryption_password = encrypt_password or get_backup_encryption_password()
             if encrypt is None and not effective_encryption_password:
+                # 红线#4（第八轮审计）：加密已启用却拿不到密码 → fail-closed，绝不静默
+                # 产出不加密备份（此前仅告警+明文）。启动期 _validate_production_backup_config
+                # 已拒绝该配置启动，此处是 STRICT_CONFIG_CHECK 关闭时的纵深防线。
+                if is_encryption_enabled():
+                    raise BackupError(
+                        '备份加密已启用（BACKUP_ENCRYPTION_ENABLED=true）但未配置可用的 '
+                        'BACKUP_ENCRYPTION_PASSWORD / BACKUP_ENCRYPTION_KEY，拒绝产出不加密备份'
+                    )
                 logger.warning("create_full_backup 未显式指定 encrypt，且无可用密码，本次备份不加密")
         # 敏感配置随加密包分发：密钥泄露风险与备份加密绑定，明文包始终排除
         include_sensitive_config = bool(effective_encryption_password)

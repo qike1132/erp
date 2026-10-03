@@ -96,20 +96,20 @@ async def fetch_mobile_dashboard(
 
         stock_row = (await db.execute(
             select(
-                func.coalesce(func.sum(StockOut.quantity).filter(
+                func.coalesce(func.sum(StockOut.quantity - StockOut.returned_quantity).filter(
                     StockOut.stockout_date >= today_start, StockOut.stockout_date < today_end
                 ), 0).label('today_qty'),
-                func.coalesce(func.sum(StockOut.quantity * Product.price).filter(
+                func.coalesce(func.sum((StockOut.quantity - StockOut.returned_quantity) * Product.price).filter(
                     StockOut.stockout_date >= today_start, StockOut.stockout_date < today_end
                 ), 0).label('today_amt'),
-                func.coalesce(func.sum(StockOut.quantity).filter(
+                func.coalesce(func.sum(StockOut.quantity - StockOut.returned_quantity).filter(
                     StockOut.stockout_date >= month_start
                 ), 0).label('month_qty'),
-                func.coalesce(func.sum(StockOut.quantity * Product.price).filter(
+                func.coalesce(func.sum((StockOut.quantity - StockOut.returned_quantity) * Product.price).filter(
                     StockOut.stockout_date >= month_start
                 ), 0).label('month_amt'),
-                func.coalesce(func.sum(StockOut.quantity), 0).label('total_qty'),
-                func.coalesce(func.sum(StockOut.quantity * Product.price), 0).label('total_amt'),
+                func.coalesce(func.sum(StockOut.quantity - StockOut.returned_quantity), 0).label('total_qty'),
+                func.coalesce(func.sum((StockOut.quantity - StockOut.returned_quantity) * Product.price), 0).label('total_amt'),
             )
             .join(Product, StockOut.product_id == Product.id, isouter=True)
         )).one()
