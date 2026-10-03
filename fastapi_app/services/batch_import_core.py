@@ -7,7 +7,7 @@
 import logging
 from collections.abc import Callable, Hashable, Iterable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
@@ -118,6 +118,51 @@ async def _pre_load_order_context(db: AsyncSession) -> dict:
     ctx = await _pre_load_product_map(db)
     ctx['customer_names'] = await _pre_load_customer_names(db)
     return ctx
+
+
+async def _pre_load_stockin_existing_keys(db: AsyncSession) -> list[str]:
+    """加载**当天已有**备货记录的幂等键（客户|产品|YYYY-MM-DD|数量）。
+
+    第九轮审计：备货导入无 dedupe，同一 Excel 重复上传会让
+    current_stock += qty 再来一遍（库存翻倍）。行级唯一单号是系统生成的、
+    无稳定业务键，故取「客户+产品+日期+数量」组合为幂等键 —— 与库中当日
+    已有记录同键的行视为重复上传并跳过。窗口限定当天：既挡住最高频的
+    「重传同一文件」，又不影响隔天对同一客户+产品正常补货。
+    """
+    today = datetime.now(UTC).date()
+    day_start = datetime(today.year, today.month, today.day, tzinfo=UTC)
+    day_end = day_start + timedelta(days=1)
+    result = await db.execute(
+        select(StockIn.customer, Product.name, StockIn.stockin_date, StockIn.quantity)
+        .join(Product, StockIn.product_id == Product.id)
+        .where(StockIn.stockin_date >= day_start, StockIn.stockin_date < day_end)
+    )
+    keys: list[str] = []
+    for customer, product_name, dt, qty in result.all():
+        if customer and product_name:
+            keys.append(_stockin_dedupe_key_raw(customer, product_name, dt, qty))
+    return keys
+
+
+def _stockin_dedupe_key_raw(customer: str, product_name: str, dt: datetime | date | None, qty: int) -> str:
+    d = dt.date() if isinstance(dt, datetime) else dt
+    d_str = d.isoformat() if d else ''
+    return f'{str(customer).strip()}|{str(product_name).strip()}|{d_str}|{int(qty)}'
+
+
+def _stockin_dedupe_key(row: dict) -> str | None:
+    """备货导入行的幂等键；缺关键字段返回 None（保留该行走正常校验）。"""
+    customer = row.get('客户名称') or row.get('客户')
+    product = row.get('产品名称') or row.get('产品')
+    qty = row.get('数量') or row.get('备货数量')
+    dt = row.get('时间') or row.get('备货时间')
+    if customer is None or product is None or qty is None:
+        return None
+    parsed = parse_date_value(dt) if dt else None
+    try:
+        return _stockin_dedupe_key_raw(customer, product, parsed, int(qty))
+    except (TypeError, ValueError):
+        return None
 
 
 async def _resolve_row_identity(context: dict, idx: int, customer: str, product_name: str,
@@ -502,12 +547,24 @@ async def import_stockins_from_data(db: AsyncSession, data_list: list, *, deps: 
 
         return True
 
+    # 第九轮落地：文件内 + 与库中当日已有记录的幂等去重 —— 防同一 Excel 重复上传
+    # 把 current_stock += qty 跑两遍（库存翻倍）。
+    async def _pre_load(db):
+        ctx = await _pre_load_order_context(db)
+        ctx['existing_stockin_keys'] = await _pre_load_stockin_existing_keys(db)
+        return ctx
+
     return await _import_data_generic(
         db, data_list, _row_handler,
-        pre_load=_pre_load_order_context,
+        pre_load=_pre_load,
         use_savepoint=True,
         has_debug_messages=True,
         label="备货导入",
+        dedupe=DedupeSpec(
+            key_fn=_stockin_dedupe_key,
+            existing_keys_key='existing_stockin_keys',
+            label='备货记录（客户+产品+日期+数量）',
+        ),
     )
 
 
