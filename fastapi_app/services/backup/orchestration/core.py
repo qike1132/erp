@@ -7,7 +7,7 @@ import logging
 import os
 import tempfile
 import zipfile
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy import text
@@ -205,10 +205,12 @@ async def _do_create_full_backup(
     partial = include_set is not None or exclude_set is not None
 
     snapshot_id = None
+    baseline_at = ''  # 备份一致性起点（第八轮落地）：增量备份以此为基准，消除 exported_at 滞后缺口
     if use_snapshot:
         try:
             snapshot_id = await get_postgres_snapshot(db)
-            logger.info(f"获取数据库快照成功: {snapshot_id}")
+            baseline_at = datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S')
+            logger.info(f"获取数据库快照成功: {snapshot_id} (baseline_at={baseline_at})")
         except DatabaseSnapshotError as e:
             logger.warning(f"无法获取数据库快照，继续无快照备份: {e}")
 
@@ -363,6 +365,10 @@ async def _do_create_full_backup(
             'pg_version': dump_info.get('pg_version', ''),
             'db_name': dump_info.get('db_name', ''),
             'exported_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            # 一致性起点：pg_export_snapshot 获取时刻。增量备份应以它（而非滞后的
+            # exported_at）为 since 基准，否则 snapshot 起点到 exported_at 之间的改动
+            # 既不在全量、也不在增量，永久丢失。无快照路径留空，增量回退 exported_at。
+            'baseline_at': baseline_at,
             'exported_by': user.username if hasattr(user, 'username') else str(user.id),
             'remark': remark,
             'table_count': len(table_stats),

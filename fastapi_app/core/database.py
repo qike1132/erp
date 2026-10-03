@@ -45,7 +45,7 @@ def _get_pool_config() -> dict:
         pool_size = max(5, available // (workers * 2))
         max_overflow = max(3, available // (workers * 3))
 
-    return {
+    config = {
         "pool_size": pool_size,
         "pool_timeout": int(os.getenv("DB_POOL_TIMEOUT", "30")),
         # 连接最长存活秒数：到期回收重建，避免复用被中间设备静默丢弃的坏连接。
@@ -55,6 +55,13 @@ def _get_pool_config() -> dict:
         "pool_pre_ping": True,
         "pool_use_lifo": True,  # LIFO 策略，减少空闲连接
     }
+    if pgbouncer_enabled:
+        # 第十轮落地：PgBouncer transaction 模式下，同一客户端连接的事务会被
+        # 分摊到不同服务器连接，asyncpg 默认的预备语句（prepared statement）跨
+        # 事务复用会报 `prepared statement ... does not exist`。标准做法是关掉
+        # 客户端语句缓存（用简单查询协议），对 ORM 生成的短查询性能影响可忽略。
+        config["connect_args"] = {"statement_cache_size": 0}
+    return config
 
 
 _pool_config = _get_pool_config()

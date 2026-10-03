@@ -140,7 +140,12 @@ def _read_backup_timestamp(f: Path, name: str) -> str | None:
             meta = json.loads((f.parent / (name + '.meta')).read_text(encoding='utf-8'))
         except (OSError, ValueError):
             return None
-        return meta.get('created_at') if meta.get('type', 'full') == 'full' else None
+        if meta.get('type', 'full') != 'full':
+            return None
+        # 增量基准优先取 baseline_at（snapshot 获取时刻），回退 exported_at：
+        # exported_at 在 pg_dump 完成后才写入，滞后窗口内的改动会被 `>= since`
+        # 过滤掉（既不在全量也不在增量）。
+        return meta.get('baseline_at') or meta.get('created_at')
     try:
         with zipfile.ZipFile(f, 'r') as zf:
             if 'manifest.json' not in zf.namelist():
@@ -150,7 +155,9 @@ def _read_backup_timestamp(f: Path, name: str) -> str | None:
         return None
     # 与 .enc 分支同口径校验 type：原先这里不校验，一个 type='partial' 的手工包
     # 会被当成"最近一次全量"基准。缺 type 字段按 'full' 处理（见上 docstring）。
-    return mf.get('exported_at') if mf.get('type', 'full') == 'full' else None
+    if mf.get('type', 'full') != 'full':
+        return None
+    return mf.get('baseline_at') or mf.get('exported_at')
 
 
 async def find_last_backup_timestamp() -> str | None:
