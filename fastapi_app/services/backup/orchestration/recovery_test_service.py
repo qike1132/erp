@@ -4,8 +4,10 @@
 定期从备份中恢复测试数据到临时环境，验证恢复数据的完整性和可用性
 """
 
+import contextlib
 import json
 import logging
+import secrets
 import shutil
 import tempfile
 import zipfile
@@ -13,12 +15,12 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import text
+from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import NullPool
 
-from fastapi_app.services.backup._constants import BACKUP_DIR
+from fastapi_app.services.backup._constants import BACKUP_DIR, RECOVERY_TEST_LOCK_ID
 from fastapi_app.services.backup.metrics.alert_service import alert_service
 from fastapi_app.services.backup.records import ensure_backup_dir
 from fastapi_app.services.backup.verify.core import quote_table
@@ -46,11 +48,13 @@ class DisasterRecoveryTestService:
 
             # 测试数据库配置（F5: 凭据缺省回落主库配置——此前默认 postgres/空密码
             # 在本机必然认证失败，演练从未真正连通过）
-            'test_db_host': os.environ.get('BACKUP_TEST_DB_HOST', os.environ.get('DB_HOST', 'localhost')),
-            'test_db_port': int(os.environ.get('BACKUP_TEST_DB_PORT', os.environ.get('DB_PORT', '5432'))),
-            'test_db_name': os.environ.get('BACKUP_TEST_DB_NAME', 'erp_backup_test'),
-            'test_db_user': os.environ.get('BACKUP_TEST_DB_USER', os.environ.get('DB_USER', 'erp_app')),
-            'test_db_password': os.environ.get('BACKUP_TEST_DB_PASSWORD', os.environ.get('DB_PASSWORD', '')),
+            # 第十四轮：用 `or` 而非 `.get(k, default)` —— .env 里 BACKUP_TEST_DB_PASSWORD=
+            # 这类**键存在但值为空**时 `.get` 不会回退，仍拿空口令连库 → 认证失败。
+            'test_db_host': os.environ.get('BACKUP_TEST_DB_HOST') or os.environ.get('DB_HOST', 'localhost'),
+            'test_db_port': int(os.environ.get('BACKUP_TEST_DB_PORT') or os.environ.get('DB_PORT', '5432')),
+            'test_db_name': os.environ.get('BACKUP_TEST_DB_NAME') or 'erp_backup_test',
+            'test_db_user': os.environ.get('BACKUP_TEST_DB_USER') or os.environ.get('DB_USER', 'erp_app'),
+            'test_db_password': os.environ.get('BACKUP_TEST_DB_PASSWORD') or os.environ.get('DB_PASSWORD', ''),
 
             # 测试设置
             'test_sample_size': int(os.environ.get('BACKUP_TEST_SAMPLE_SIZE', '100')),
@@ -68,6 +72,40 @@ class DisasterRecoveryTestService:
             'test_report_retention_days': int(os.environ.get('BACKUP_TEST_REPORT_RETENTION_DAYS', '30')),
         }
 
+    def _acquire_recovery_test_lock(self):
+        """获取跨进程的恢复演练互斥锁（PG advisory lock）。
+
+        第十四轮：演练会 DROP/CREATE 同名测试库，同秒两次触发（cron 撞手动）会互毁。
+        返回 (engine, conn) 持锁句柄；已被占用时抛 RuntimeError（fail-fast）。
+        """
+        cfg = self.test_config
+        engine = create_engine(
+            f"postgresql+psycopg://{cfg['test_db_user']}:{cfg['test_db_password']}"
+            f"@{cfg['test_db_host']}:{cfg['test_db_port']}/postgres",  # sql-safe: 常量片段
+            poolclass=NullPool,
+        )
+        conn = engine.connect()
+        got = conn.execute(
+            text("SELECT pg_try_advisory_lock(:lock_id)"), {"lock_id": RECOVERY_TEST_LOCK_ID}
+        ).scalar()
+        if not got:
+            conn.close()
+            engine.dispose()
+            raise RuntimeError('已有灾难恢复演练在进行中，请稍后重试')
+        return engine, conn
+
+    @staticmethod
+    def _release_recovery_test_lock(lock) -> None:
+        """释放 `_acquire_recovery_test_lock` 的锁与连接（失败仅记日志）。"""
+        engine, conn = lock
+        with contextlib.suppress(Exception):
+            conn.execute(
+                text("SELECT pg_advisory_unlock(:lock_id)"), {"lock_id": RECOVERY_TEST_LOCK_ID}
+            )
+        with contextlib.suppress(Exception):
+            conn.close()
+            engine.dispose()
+
     async def perform_recovery_test(self, backup_file: str | None = None) -> dict[str, Any]:
         """
         执行灾难恢复测试
@@ -81,8 +119,11 @@ class DisasterRecoveryTestService:
         logger.info("开始执行灾难恢复测试...")
 
         test_start_time = datetime.now()
-        test_id = test_start_time.strftime('%Y%m%d_%H%M%S')
+        # 第十四轮：秒级 test_id 在并发/同秒双触发下会同名测试库互毁 —— 加随机后缀保证唯一。
+        test_id = test_start_time.strftime('%Y%m%d_%H%M%S') + '_' + secrets.token_hex(3)
 
+        # 跨进程互斥：同一时刻只允许一个演练（建/删测试库是破坏性且同名的）
+        lock = self._acquire_recovery_test_lock()
         test_env: dict[str, Any] | None = None
         cleanup_result: dict[str, Any] | None = None
         try:
@@ -157,6 +198,8 @@ class DisasterRecoveryTestService:
                     cleanup_result = await self._cleanup_test_environment(test_env)
                 except Exception as cleanup_err:  # broad-except: 清理失败不能掩盖主流程结果
                     logger.error(f"清理测试环境异常（{test_id}）: {cleanup_err}")
+            # 释放演练互斥锁（第十四轮）
+            self._release_recovery_test_lock(lock)
 
     async def _prepare_test_environment(self, test_id: str) -> dict[str, Any]:
         """准备测试环境"""
@@ -177,7 +220,7 @@ class DisasterRecoveryTestService:
 
             # 创建同步引擎用于管理数据库
             sync_engine = create_engine(
-                f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/postgres",  # sql-safe: escape_like/绑定参数/常量片段
+                f"postgresql+psycopg://{db_user}:{db_password}@{db_host}:{db_port}/postgres",  # sql-safe: escape_like/绑定参数/常量片段
                 poolclass=NullPool
             )
 
@@ -1040,7 +1083,7 @@ class DisasterRecoveryTestService:
             db_password = os.environ.get('DB_PASSWORD', '')
 
             sync_engine = create_engine(
-                f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/postgres",  # sql-safe: escape_like/绑定参数/常量片段
+                f"postgresql+psycopg://{db_user}:{db_password}@{db_host}:{db_port}/postgres",  # sql-safe: escape_like/绑定参数/常量片段
                 poolclass=NullPool
             )
 

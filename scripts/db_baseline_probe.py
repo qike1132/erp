@@ -66,7 +66,7 @@ def load_env() -> dict[str, str]:
 
 def build_dsn(cfg: dict[str, str]) -> str:
     return (
-        f"postgresql://{cfg['DB_USER']}:{cfg['DB_PASSWORD']}"
+        f"postgresql+psycopg://{cfg['DB_USER']}:{cfg['DB_PASSWORD']}"
         f"@{cfg['DB_HOST']}:{cfg['DB_PORT']}/{cfg['DB_NAME']}"
     )
 

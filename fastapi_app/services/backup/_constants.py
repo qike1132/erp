@@ -25,6 +25,8 @@ BACKUP_FILE_EXTENSIONS = ('.zip', '.zip.enc', '.tar.gz', '.tar')
 MAX_BACKUP_FILE_SIZE = 500 * 1024 * 1024
 RESTORE_LOCK_ID = 20240426
 BACKUP_LOCK_ID = 20240427
+# 灾难恢复演练互斥锁（第十四轮）：演练会建/删同名测试库，同秒两次触发会互毁。
+RECOVERY_TEST_LOCK_ID = 20240428
 BACKUP_OPERATION_TIMEOUT = int(os.environ.get('BACKUP_OPERATION_TIMEOUT', '1800'))
 _backup_in_progress: asyncio.Lock = asyncio.Lock()
 # 项目根目录：本文件位于 <root>/fastapi_app/services/backup/，故取 parents[3]。
