@@ -13,14 +13,16 @@ import { dashboardApi, stockApi } from '@/api'
 import { toast } from '@/composables/useToast'
 import { usePerfMark } from '@/composables/usePerfMark'
 import { devLog } from '@/utils/devLog'
+import type { StockStatsData } from '@/types/api'
 
-/** 库存统计响应结构 */
-export interface StockStats {
-  order_quantity: number
-  order_regular_quantity: number
-  order_custom_quantity: number
-  stockin_quantity: number
-}
+/**
+ * 库存统计响应结构。
+ *
+ * 直接取后端 OpenAPI 生成的类型（`api.d.ts`），不再手写——此前这里手抄了一份 4 字段形状，
+ * 其中 `order_regular_quantity` / `order_custom_quantity` 早在后端「库存聚合移除国家维度与
+ * 定制订单统计」时就被删除，前端从未跟上，成了静默的幻影字段。
+ */
+export type StockStats = StockStatsData
 
 // ===== Query Keys & 常量 =====
 const CACHE_TTL = 30_000
@@ -67,8 +69,7 @@ async function fetchStats(): Promise<Record<string, number>> {
 }
 
 async function fetchStockStats(): Promise<StockStats> {
-  const resp = await stockApi.stats()
-  return resp as StockStats
+  return stockApi.stats()
 }
 
 // ===== 预取（登录后调用，填充 Vue Query 缓存） =====
@@ -168,8 +169,6 @@ export function useDashboardStats() {
     if (stockQuery.isError.value) {
       return {
         order_quantity: stats.value?.order_today ?? 0,
-        order_regular_quantity: 0,
-        order_custom_quantity: 0,
         stockin_quantity: stats.value?.stockin_today ?? 0,
       }
     }
