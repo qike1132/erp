@@ -40,6 +40,7 @@ from fastapi_app.shared_models.customer_sampling import (
 )
 from fastapi_app.shared_models.daily_production_record import DailyProductionRecord
 from fastapi_app.shared_models.file_record import FileRecord
+from fastapi_app.shared_models.import_file_registry import ImportFileRegistry
 from fastapi_app.shared_models.inventory_log import InventoryLog
 from fastapi_app.shared_models.material_registration import MaterialRegistration, MaterialRegistrationItem
 from fastapi_app.shared_models.notification import Notification
@@ -117,6 +118,7 @@ __all__ = [
     'CustomerSamplingRole',
     'DailyProductionRecord',
     'FileRecord',
+    'ImportFileRegistry',
     'InventoryLog',
     'MaterialRegistration',
     'MaterialRegistrationItem',

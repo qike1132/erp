@@ -11,6 +11,16 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, File, Response, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi_app.api.v1.endpoints.import_guard import (
+    TYPE_CASE_STOCKINS,
+    TYPE_CASE_STOCKOUTS,
+    TYPE_COMPREHENSIVE,
+    TYPE_ORDERS,
+    TYPE_PRODUCTS,
+    TYPE_STOCKINS,
+    TYPE_STOCKOUTS,
+    run_guarded_import,
+)
 from fastapi_app.core.database import get_async_db
 from fastapi_app.core.deps import require_any_permission, require_permission
 from fastapi_app.schemas.batch import BatchImportResult, ComprehensiveImportResult
@@ -74,7 +84,10 @@ async def batch_import_orders(
     Returns:
         BatchImportResult: 包含导入结果、消息和条数的响应。
     """
-    return await import_orders_service(db, file)
+    return await run_guarded_import(
+        db, file, TYPE_ORDERS, current_user,
+        lambda f: import_orders_service(db, f),
+    )
 
 
 @router.post('/import-case-stockouts', response_model=BatchImportResult, summary='批量导入皮套出库')
@@ -93,7 +106,10 @@ async def batch_import_case_stockouts(
     Returns:
         BatchImportResult: 包含导入结果、消息和条数的响应。
     """
-    return await import_case_stockouts_service(db, file)
+    return await run_guarded_import(
+        db, file, TYPE_CASE_STOCKOUTS, current_user,
+        lambda f: import_case_stockouts_service(db, f),
+    )
 
 
 @router.post('/import-case-stockins', response_model=BatchImportResult, summary='批量导入皮套入库')
@@ -112,7 +128,10 @@ async def batch_import_case_stockins(
     Returns:
         BatchImportResult: 包含导入结果、消息和条数的响应。
     """
-    return await import_case_stockins_service(db, file)
+    return await run_guarded_import(
+        db, file, TYPE_CASE_STOCKINS, current_user,
+        lambda f: import_case_stockins_service(db, f),
+    )
 
 
 @router.post('/import-stockins', response_model=BatchImportResult, summary='批量导入备货')
@@ -131,7 +150,10 @@ async def batch_import_stockins(
     Returns:
         BatchImportResult: 包含导入结果、消息和条数的响应。
     """
-    return await import_stockins_service(db, file)
+    return await run_guarded_import(
+        db, file, TYPE_STOCKINS, current_user,
+        lambda f: import_stockins_service(db, f),
+    )
 
 
 @router.post('/import-stockouts', response_model=BatchImportResult, summary='批量导入出库')
@@ -150,7 +172,10 @@ async def batch_import_stockouts(
     Returns:
         BatchImportResult: 包含导入结果、消息和条数的响应。
     """
-    return await import_stockouts_service(db, file)
+    return await run_guarded_import(
+        db, file, TYPE_STOCKOUTS, current_user,
+        lambda f: import_stockouts_service(db, f),
+    )
 
 
 @router.post('/batch-import', response_model=BatchImportResult, summary='批量导入产品')
@@ -169,7 +194,10 @@ async def batch_import_products(
     Returns:
         BatchImportResult: 包含导入结果、消息和条数的响应。
     """
-    return await import_products_service(db, file)
+    return await run_guarded_import(
+        db, file, TYPE_PRODUCTS, current_user,
+        lambda f: import_products_service(db, f),
+    )
 
 
 @router.post('/import-comprehensive', response_model=ComprehensiveImportResult, summary='综合批量导入')
@@ -191,4 +219,7 @@ async def batch_import_comprehensive(
     Returns:
         ComprehensiveImportResult: 包含各类型导入数量和错误列表的响应。
     """
-    return await import_comprehensive_service(db, file)
+    return await run_guarded_import(
+        db, file, TYPE_COMPREHENSIVE, current_user,
+        lambda f: import_comprehensive_service(db, f),
+    )

@@ -42,6 +42,17 @@ sha256 哈希 + 导入类型构成业务唯一键，``UNIQUE (file_hash, import_
 建表用 ``IF NOT EXISTS``、加列用 ``ADD COLUMN IF NOT EXISTS``、
 索引带存在性守卫——重复执行安全。
 
+部署顺序（硬前提）
+------------------
+**必须先迁移、后重启**：本迁移创建的表/列是导入端点（``batch.py`` 7 个端点）
+运行时的硬依赖。启动链（``start.py`` / ``prod_runner.py`` / ``main.py``）
+**不会**自动执行 ``alembic upgrade``。若先拉代码重启而库仍停在 066，
+守卫的首条 ``SELECT ... import_file_registry`` 即 ``ProgrammingError``，
+7 个导入端点（含皮套页面在用的 case-stockins/stockouts）全体 500。
+
+    先: python -m alembic -c migrations/alembic.ini upgrade head
+    后: 重启 erp-prod（NSSM）
+
 Revision ID: pg_standalone_067_import_idempotency
 Revises: pg_standalone_066_case_product_root_unique
 Create Date: 2026-10-04
@@ -77,6 +88,20 @@ _DDL_IDEM_INDEX = (
     'ON inventory_log (idem_key) WHERE idem_key IS NOT NULL'
 )
 
+# 列注释：必须与 ORM 模型的 comment= 逐字一致，否则 alembic check 报 modify_comment。
+# 本仓惯例是迁移内写 COMMENT ON COLUMN（见 062 等），alembic 默认比较注释。
+_DDL_COMMENTS = (
+    "COMMENT ON COLUMN import_file_registry.file_hash IS '文件内容 sha256'",
+    "COMMENT ON COLUMN import_file_registry.import_type IS "
+    "'导入类型：orders/stockins/stockouts/case_*/products/comprehensive'",
+    "COMMENT ON COLUMN import_file_registry.original_filename IS '原始文件名'",
+    "COMMENT ON COLUMN import_file_registry.uploaded_by IS '上传用户ID'",
+    "COMMENT ON COLUMN import_file_registry.row_total IS '导入行数'",
+    "COMMENT ON COLUMN import_file_registry.result_summary IS '结果摘要'",
+    "COMMENT ON COLUMN inventory_log.idem_key IS "
+    "'导入幂等键（部分唯一索引 uq_inventory_log_idem；手工路径留空）'",
+)
+
 
 def upgrade() -> None:
     # ---- 第 1 层：文件指纹登记表 ----
@@ -86,6 +111,9 @@ def upgrade() -> None:
     # ---- 第 2 层：inventory_log 幂等列 + 部分唯一索引 ----
     op.execute(_DDL_ADD_IDEM_COLUMN)
     op.execute(_DDL_IDEM_INDEX)
+
+    for stmt in _DDL_COMMENTS:
+        op.execute(stmt)
 
 
 def downgrade() -> None:

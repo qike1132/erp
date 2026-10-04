@@ -24,6 +24,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _VERSIONS_DIR = _REPO_ROOT / "migrations" / "versions"
 _PREVIOUS_REVISION = "pg_standalone_066_case_product_root_unique"
 _PROBE = "__p1a_probe__"
+_PROBE_PRODUCT = "__p1a_probe_product__"
 
 
 # ---------------------------------------------------------------------------
@@ -93,6 +94,21 @@ def test_upgrade_ddl_statements(captured_ddl):
     assert "ADD COLUMN IF NOT EXISTS idem_key TEXT" in joined
     assert "CREATE UNIQUE INDEX IF NOT EXISTS uq_inventory_log_idem" in joined
     assert "WHERE idem_key IS NOT NULL" in joined
+    # 列注释：模型每列都写了 comment=，迁移必须同步发 COMMENT ON COLUMN，
+    # 否则 alembic check 报 modify_comment → CI 必红（真实踩过）。
+    assert joined.count("COMMENT ON COLUMN") == len(mig._DDL_COMMENTS)
+    assert "COMMENT ON COLUMN inventory_log.idem_key" in joined
+
+
+def test_migration_comments_match_model_declaration():
+    """迁移的列注释文案必须与模型逐字一致（alembic 按文本比较）。"""
+    from fastapi_app.shared_models import ImportFileRegistry
+
+    emitted = set(mig._DDL_COMMENTS)
+    for col in ImportFileRegistry.__table__.columns:
+        if col.comment:
+            expected = f"COMMENT ON COLUMN import_file_registry.{col.name} IS '{col.comment}'"
+            assert expected in emitted, f'{col.name} 的注释与模型不一致或未发 COMMENT'
 
 
 def test_downgrade_drops_in_reverse(captured_ddl):
@@ -106,7 +122,27 @@ def test_downgrade_drops_in_reverse(captured_ddl):
 
 
 # ---------------------------------------------------------------------------
-# 2) DB 行为：SQLite 内存库（迁移 DDL 原样执行）
+# 2) 模型声明：created_at 必须带 server_default（与迁移 DEFAULT now() 对齐）
+# ---------------------------------------------------------------------------
+def test_model_created_at_declares_server_default():
+    """模型与迁移不得分叉：模型缺 server_default 时，create_all 建的表
+    没有 DB 默认值，裸 SQL 插入 created_at 会 NotNullViolation（真实踩过）。
+    """
+    from fastapi_app.shared_models import ImportFileRegistry
+
+    col = ImportFileRegistry.__table__.c.created_at
+    assert col.server_default is not None, 'created_at 必须声明 server_default，与迁移 DEFAULT now() 一致'
+
+
+def test_model_declares_import_file_unique_constraint():
+    from fastapi_app.shared_models import ImportFileRegistry
+
+    names = {c.name for c in ImportFileRegistry.__table__.constraints if c.name}
+    assert 'uq_import_file' in names
+
+
+# ---------------------------------------------------------------------------
+# 3) DB 行为：SQLite 内存库（迁移 DDL 原样执行）
 # ---------------------------------------------------------------------------
 @pytest.fixture()
 def db(tmp_path):
@@ -218,19 +254,48 @@ _REGISTRY_TABLE_QUERY = text(
 )
 
 
+def _real_pg_engine():
+    """连**测试库**（erp_system_test），绝不连生产。
+
+    本仓其它真实 PG 测试一律走测试库（tests/conftest 的 TEST_DATABASE_URL，
+    由主库名加 ``_test`` 派生）。本测试早期误连生产库 —— 对活表做绝对行数
+    断言会在生产写入时假红，且把测试挂到生产库事务上，已改。
+    """
+    import os
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.pool import NullPool
+
+    from fastapi_app.core.config import settings
+
+    url = os.getenv('TEST_DATABASE_URL')
+    if not url:
+        main = settings.DATABASE_URL  # 同步 URL（psycopg）
+        derived = main.replace('/erp_system', '/erp_system_test')
+        if derived == main:
+            pytest.skip('无法从配置推导测试库名，跳过真实 PG 证明')
+        url = derived
+    # TEST_DATABASE_URL 在 CI 是 asyncpg 驱动；同步 create_engine 需 psycopg，
+    # 否则 connect 抛 MissingGreenlet 被静默吞成 skip（本测试就白跑了）。
+    url = url.replace('+asyncpg', '+psycopg')
+
+    engine = create_engine(url, poolclass=NullPool)
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+    except Exception as exc:  # pragma: no cover - 无测试库环境跳过
+        engine.dispose()
+        pytest.skip(f'测试库不可用，跳过真实 PG 证明: {exc!r}')
+    return engine
+
+
 def test_real_pg_transaction_scoped_proof():
     """事务内建表建索引 → 幂等约束逐条验证 → 整事务 ROLLBACK；库内零痕迹。
 
     自带建表：067 迁移可能尚未应用到目标库，故本证明不依赖其已应用。
+    只连测试库，且不对活表做行数绝对断言（生产写入会造成假红）。
     """
-    try:
-        from fastapi_app.core.database import get_sync_engine
-
-        engine = get_sync_engine()
-        with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
-    except Exception as exc:  # pragma: no cover - 无库环境跳过
-        pytest.skip(f"真实 PostgreSQL 不可用，跳过单事务证明: {exc!r}")
+    engine = _real_pg_engine()
 
     import json
 
@@ -242,19 +307,13 @@ def test_real_pg_transaction_scoped_proof():
                 "SELECT COUNT(*) FROM information_schema.columns"
                 " WHERE table_name = 'inventory_log' AND column_name = 'idem_key'"
             )).scalar() > 0,
-            "rows": conn.execute(text("SELECT COUNT(*) FROM inventory_log")).scalar(),
         }
-        # inventory_log.product_id 有 FK + NOT NULL：探针需用库中真实存在的产品
-        pid = conn.execute(text("SELECT id FROM product LIMIT 1")).scalar()
-
-    if pid is None:
-        pytest.skip("真实库中无 product 行，无法构造 inventory_log 探针")
 
     with engine.connect() as conn:
         trans = conn.begin()
         try:
             _pg_ensure_objects(conn, state)
-            _pg_run_idem_probes(conn, pid, json)
+            _pg_run_idem_probes(conn, json)
         finally:
             trans.rollback()
 
@@ -272,8 +331,18 @@ def _pg_ensure_objects(conn, state) -> None:
         conn.execute(text(mig._DDL_IDEM_INDEX))
 
 
-def _pg_run_idem_probes(conn, pid, json) -> None:
-    """幂等约束逐条验证。预期失败者用 SAVEPOINT 隔离 —— PG 事务报错后即 aborted。"""
+def _pg_run_idem_probes(conn, json) -> None:
+    """幂等约束逐条验证。预期失败者用 SAVEPOINT 隔离 —— PG 事务报错后即 aborted。
+
+    inventory_log.product_id 有 FK + NOT NULL：本函数在同一事务内自建一个
+    探针产品（回滚时一并消失），不依赖库中已有数据，避免空测试库直接跳过。
+    """
+    conn.execute(text(
+        "INSERT INTO product (name, initial_stock, current_stock) VALUES (:n, 0, 0)"
+    ), {"n": _PROBE_PRODUCT})
+    pid = conn.execute(
+        text("SELECT id FROM product WHERE name = :n"), {"n": _PROBE_PRODUCT}
+    ).scalar()
     log_insert = (
         "INSERT INTO inventory_log (product_id, change_type, change_quantity, idem_key)"
         " VALUES (:p, :t, :q, :k)"
@@ -288,9 +357,12 @@ def _pg_run_idem_probes(conn, pid, json) -> None:
     conn.execute(text(log_insert), {"p": pid, "t": "手工", "q": 5, "k": None})
     conn.execute(text(log_insert), {"p": pid, "t": "手工", "q": 5, "k": None})
     # 登记表唯一键：首插成功、同键二插拒绝
+    # created_at 显式给出：本证明不依赖表由谁创建（迁移 DDL 有 DEFAULT，
+    # 但 create_all 建的表在模型缺 server_default 时没有 —— 顺序依赖曾致失败）
     conn.execute(text(
-        "INSERT INTO import_file_registry (file_hash, import_type, original_filename, result_summary)"
-        " VALUES ('p1a-h', 'p1a', 'probe', :s)"
+        "INSERT INTO import_file_registry"
+        " (file_hash, import_type, original_filename, result_summary, created_at)"
+        " VALUES ('p1a-h', 'p1a', 'probe', :s, now())"
     ), {"s": json.dumps({"ok": 1})})
     sp = conn.begin_nested()
     with pytest.raises(IntegrityError):
@@ -302,15 +374,21 @@ def _pg_run_idem_probes(conn, pid, json) -> None:
 
 
 def _pg_assert_no_trace(engine, state) -> None:
-    """事务回滚后：自建对象若原不存在则应消失，探针行不留痕，存量行数不变。"""
+    """事务回滚后：自建对象若原不存在则应消失，探针行不留痕。
+
+    不对活表做行数绝对断言 —— 生产写入会让它假红（本测试只连测试库，
+    但测试库亦可能有并发写入）。
+    """
     with engine.connect() as conn:
         if not state["idx"]:
             assert conn.execute(_IDEM_INDEX_QUERY).scalar() is None
         if not state["tbl"]:
             assert conn.execute(_REGISTRY_TABLE_QUERY).scalar() is False
-        total = conn.execute(text("SELECT COUNT(*) FROM inventory_log")).scalar()
-        assert total == state["rows"]
         if state["col"]:
             assert conn.execute(
                 text("SELECT COUNT(*) FROM inventory_log WHERE idem_key = :k"), {"k": _PROBE}
             ).scalar() == 0
+        # 探针产品已随事务回滚消失
+        assert conn.execute(
+            text("SELECT COUNT(*) FROM product WHERE name = :n"), {"n": _PROBE_PRODUCT}
+        ).scalar() == 0
