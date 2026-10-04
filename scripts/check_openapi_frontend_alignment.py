@@ -20,13 +20,13 @@ check-route-alignment.mjs 只管前端路由。本脚本补上真正的端到端
 退出码
 ------
 0 = 所有字面量端点都能在后端 OpenAPI 里找到
-1 = 存在后端不提供的端点（或 --strict-allowlist 下的僵尸豁免）
-2 = 环境异常（前端 API 目录缺失、OpenAPI 生成失败、--openapi 文件不可解析）
+1 = 存在后端不提供的端点、--strict-allowlist 下的僵尸豁免，或 --snapshot 快照已过期
+2 = 环境异常（前端 API 目录缺失、OpenAPI 生成失败、--openapi/--snapshot 文件不可解析、--export 无法写出）
 
 用法
 ----
 python scripts/check_openapi_frontend_alignment.py [--openapi spec.json] [--export spec.json]
-       [--api-dir DIR] [--json] [--verbose] [--strict-allowlist]
+       [--api-dir DIR] [--snapshot spec.json] [--json] [--verbose] [--strict-allowlist]
 """
 from __future__ import annotations
 
@@ -212,6 +212,32 @@ def spec_paths(spec: dict) -> set[str]:
     return {str(p) for p in paths}
 
 
+def spec_fingerprint(spec: dict) -> str:
+    """结构化指纹：键序无关，用于比较两份规范是否等价。"""
+    return json.dumps(spec, sort_keys=True, ensure_ascii=False)
+
+
+def check_snapshot(live: dict, snapshot: dict) -> int:
+    """比较现算规范与已提交快照；返回 0=一致，1=过期。"""
+    if spec_fingerprint(live) == spec_fingerprint(snapshot):
+        print("[PASS] openapi.json 快照与后端 app.openapi() 一致。")
+        return 0
+    live_paths = spec_paths(live)
+    snap_paths = {str(p) for p in (snapshot.get("paths") or {})}
+    added = sorted(live_paths - snap_paths)
+    removed = sorted(snap_paths - live_paths)
+    print("[FAIL] openapi.json 快照已过期 —— 后端 schema 变了但没人重导。")
+    if added:
+        print("  后端新增路径 " + str(len(added)) + " 条，例如: " + ", ".join(added[:5]))
+    if removed:
+        print("  后端删除路径 " + str(len(removed)) + " 条，例如: " + ", ".join(removed[:5]))
+    if not added and not removed:
+        print("  路径集合相同，差异在 schema 定义内部（字段/类型）。")
+    print("  修复: python scripts/check_openapi_frontend_alignment.py --export frontend-vite/openapi.json")
+    print("        然后 cd frontend-vite && npm run gen:api，一并提交。")
+    return 1
+
+
 def audit(literals: list[dict], backend: set[str], allowlist: dict[str, str]) -> dict:
     missing = []
     for item in literals:
@@ -270,6 +296,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--openapi", type=Path, default=None, help="改用已导出的 openapi.json（离线校验）")
     parser.add_argument("--export", type=Path, default=None, help="把本次使用的 OpenAPI 规范写到该文件")
     parser.add_argument("--api-dir", type=Path, default=DEFAULT_API_DIR, help="前端 API 层目录（默认 frontend-vite/src/api）")
+    parser.add_argument("--snapshot", type=Path, default=None, help="比较该已提交快照与现算规范是否一致（过期即判失败）")
     parser.add_argument("--json", action="store_true", help="以 JSON 输出（机器可读）")
     parser.add_argument("--verbose", action="store_true", help="额外打印全部模板端点")
     parser.add_argument(
@@ -304,8 +331,23 @@ def main(argv: list[str] | None = None) -> int:
         print("[ERROR] " + str(exc), file=sys.stderr)
         return 2
 
+    if args.snapshot is not None:
+        try:
+            snapshot = load_spec_file(args.snapshot)
+        except SpecError as exc:
+            print("[ERROR] " + str(exc), file=sys.stderr)
+            return 2
+        with contextlib.redirect_stdout(sys.stderr if args.json else sys.stdout):
+            rc = check_snapshot(spec, snapshot)
+        if rc != 0:
+            return rc
+
     if args.export is not None:
-        args.export.write_text(json.dumps(spec, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        try:
+            args.export.write_text(json.dumps(spec, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        except OSError as exc:
+            print("[ERROR] 无法写出 --export 文件: " + str(exc), file=sys.stderr)
+            return 2
 
     result = audit(literals, backend, KNOWN_ABSENT)
     report.update(

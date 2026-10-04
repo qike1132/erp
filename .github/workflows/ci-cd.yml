@@ -99,10 +99,11 @@ jobs:
 
     # P1-12 前端契约真校验：把 frontend-vite/src/api/*.ts 里真实调用的端点与后端
     # fastapi_app.main:app.openapi() 的路径逐条比对（字面量端点断言，模板端点只列出）。
-    # 端点来源不做快照，全部现算，避免快照过期造成的假绿灯。
+    # 端点来源全部现算（app.openapi()）；另用 --snapshot 校验已提交的 frontend-vite/openapi.json
+    # 是否与本后端规范一致，快照过期即判红——堵住前端类型生成器只读快照引入的假绿灯。
     # 放在本 job（而非 lint job）：这里装了 requirements.txt，import fastapi_app 才可行。
     - name: Check frontend endpoints against backend OpenAPI
-      run: python scripts/check_openapi_frontend_alignment.py --verbose
+      run: python scripts/check_openapi_frontend_alignment.py --verbose --snapshot frontend-vite/openapi.json
 
     - name: Run prod_audit self-test suite
       # 与上面的「gated test suite」分开**独立进程**运行，原因有二：
