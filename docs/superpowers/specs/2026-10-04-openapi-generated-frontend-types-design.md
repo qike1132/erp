@@ -61,8 +61,8 @@ handler 注入的字段原样穿透。实测构造 14 字段 item 走 `OrderList
 
 后果：若把 `data` 收紧成 `list[OrderItemSchema]`，`response_model` 会**剥掉**这 5 个
 真实到达前端的字段——前端立刻坏掉。这是**不**动 `list[dict]` 的技术原因，
-不只是范围原因。生成器对这些响应产出 `unknown[]` 并在注释中标注，
-不假装覆盖。
+不只是范围原因。生成器对这些响应产出 `Array<Record<string, unknown>>`
+（`data` 实测是 required，故不带 `?`），不假装覆盖。
 
 **schema 名有两种形态。** 22 个被展平成 `fastapi_app__schemas__staging__StagingListResponse`。
 生成器需归一化尾段，否则这批 schema 匹配不上。实测无非法 TS 标识符、
@@ -95,7 +95,9 @@ Node，与现有 `check-*.mjs` 同栈。读 `openapi.json`，遍历 `components.
 | `enum` | 字面量联合 |
 | `allOf` | 交叉类型 |
 | `type: array`，`items` 有 properties | `Foo[]` |
-| `type: array`，`items` 为裸 object/dict | `unknown[]` + 注释标注 |
+| `type: array`，`items` 为裸 object/dict | `Array<Record<string, unknown>>` |
+| `type: array`，无 `items` | `Array<unknown>` |
+| `type: object`，`additionalProperties` 为 schema | `Record<string, T>` |
 | `integer` / `number` / `string` / `boolean` | 对应 TS 类型 |
 | 字段名非合法标识符 | 加引号原样保留 |
 
@@ -117,8 +119,8 @@ Node，与现有 `check-*.mjs` 同栈。读 `openapi.json`，遍历 `components.
 改为真实类型调用，断言随之消失。
 
 **不能消灭的部分必须说清**：20% 的接口响应是 `list[dict]`，生成器对它们产出
-`unknown[]`——`unknown` 仍然需要断言才能取属性。**这类断言消不掉**，
-生成器对它们无能为力。因此"消灭 130 处"不是本方案的目标；
+`Array<Record<string, unknown>>`——取属性得到的仍是 `unknown`，仍需断言/收窄。
+**这类断言消不掉**，生成器对它们无能为力。因此"消灭 130 处"不是本方案的目标；
 目标是**能消的消掉，并让剩余的断言数量从 130 下降到一个可解释的数字**。
 
 **逐个改，不批量 sed**——每处要判断该用哪个生成类型，以及 store/组件层是否已有
