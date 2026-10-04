@@ -570,15 +570,18 @@ async def restore_legacy_json(backup_data: dict, db: AsyncSession, task_id: str 
         await db.rollback()  # manual-tx: try/except 内显式事务控制
         raise RestoreError(f'恢复过程中出错: {e}') from e
 
+    # F7: 清空失败的表以"合并"而非"回滚"语义恢复——快照之后新增/变更的旧行会残留，
+    # 必须先进入 errors，database.status 才能与端点口径一致地报 partial。
+    # （此前在构造 result_dict 之后才 append，导致 database.status 恒为 ok，
+    #  与其自身非空的 errors 自相矛盾；端点虽按 errors 报 partial，但该字段会误导直接读它的人。）
+    for t in delete_failed:
+        errors.append(f'{t}: 清空失败，本表为合并恢复（备份点之后的旧行可能残留）')
+
     result_dict = {
         'database': {'status': 'ok' if not errors else 'partial', 'total_inserted': total_inserted},
         'total_inserted': total_inserted, 'results': results, 'errors': errors,
         'verification': verification,
     }
-    # F7: 清空失败的表以"合并"而非"回滚"语义恢复——快照之后新增/变更的旧行会残留，
-    # 必须进入 errors 让端点报 partial，避免用户误以为已精确回滚到备份点
-    for t in delete_failed:
-        errors.append(f'{t}: 清空失败，本表为合并恢复（备份点之后的旧行可能残留）')
     if not verification.get('overall_pass', True):
         result_dict['_verification_failed'] = True
     return result_dict
