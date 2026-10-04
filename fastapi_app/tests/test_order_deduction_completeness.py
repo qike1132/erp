@@ -137,6 +137,10 @@ class _LedgerSession:
             return _Result(rowcount=1)
 
         low = str(statement).lower()
+        if 'select "order".product_id' in low:
+            # 第十四轮：锁序预读（Product→Order）—— 无锁取 product_id（SQL 文本以
+            # select "order".product_id 开头，与全列锁读可区分）
+            return _Result(scalar=getattr(self.order, 'product_id', 1))
         if 'stock_in' in low:
             return _Result(rows=self.stockins)
         if 'stock_out' in low:

@@ -196,6 +196,14 @@ async def update_stockout(db: AsyncSession, stockout_id: int, new_quantity: int,
 
 async def delete_stockout(db: AsyncSession, stockout_id: int) -> None:
     """删除出库记录"""
+    # 第十四轮：锁序统一为 Product→StockOut —— update_stockout 是 P→SO，本函数原为
+    # SO→P（先锁出库行、delete_stockout_core 内再锁产品），同张出库单「编辑 vs 删除」
+    # 并发会互等行锁死锁。与 delete_stockreturn_core / update_stockin 的既修口径一致。
+    pid_result = await db.execute(select(StockOut.product_id).where(StockOut.id == stockout_id))
+    pid_row = pid_result.one_or_none()
+    if not pid_row:
+        raise ValueError('出库记录不存在')
+    await stock_service.get_product_for_update(db, pid_row[0])
     result = await db.execute(select(StockOut).where(StockOut.id == stockout_id).with_for_update())
     stockout_obj = result.scalar_one_or_none()
     if not stockout_obj:

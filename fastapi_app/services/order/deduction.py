@@ -259,6 +259,18 @@ async def update_deduct_quantity(
     「未完全生效」路径都不返回 success=True。函数内不 commit/rollback ——
     失败回滚由调用方（端点 db_transaction）边界保证。
     """
+    # 第十四轮：锁序统一为 Product→Order —— 出库创建路径是先锁 Product
+    # （create_stockout_core）再经 calculate_available_shipment_quantity 锁同客户全部
+    # Order；本函数原为 Order→Product（锁订单后 _increase/_decrease_deduction 再锁
+    # 产品），同产品+同客户「创建出库 vs 修改抵扣」并发会互等行锁死锁。
+    # 先无锁读 product_id 预锁产品；读不到（订单不存在/product_id 空）则跳过预锁，
+    # 由下方加锁后的既有校验按原口径抛「订单不存在」，语义不变。
+    _pid = (await db.execute(
+        select(Order.product_id).where(Order.id == order_id)
+    )).scalar_one_or_none()
+    if _pid is not None:
+        await get_product_for_update(db, _pid)
+
     result = await db.execute(select(Order).where(Order.id == order_id).with_for_update())
     order = result.scalar_one_or_none()
     if not order or order.is_deleted:

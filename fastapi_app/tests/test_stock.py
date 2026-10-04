@@ -233,7 +233,12 @@ class TestStockOutService:
         stockout_result.scalar_one_or_none.return_value = stockout
         product_name_result = MagicMock()
         product_name_result.one_or_none.return_value = ("产品A",)
-        mock_db.execute = AsyncMock(side_effect=[stockout_result, product_name_result])
+        # 第十四轮：delete_stockout 锁序 Product→StockOut：①预读 pid ②Product 锁 ③StockOut 锁 ④product_name
+        pid_result = MagicMock()
+        pid_result.one_or_none.return_value = (1,)
+        prod_lock_result = MagicMock()
+        prod_lock_result.scalar_one_or_none.return_value = MagicMock()
+        mock_db.execute = AsyncMock(side_effect=[pid_result, prod_lock_result, stockout_result, product_name_result])
         mock_db.commit = AsyncMock()
         mock_db.rollback = AsyncMock()
         with pytest.raises(ValueError, match="订单抵扣"):
@@ -254,7 +259,12 @@ class TestStockOutService:
         product_name_result = MagicMock()
         product_name_result.one_or_none.return_value = None
 
-        mock_db.execute = AsyncMock(side_effect=[stockout_result, product_name_result])
+        # 第十四轮：delete_stockout 锁序 Product→StockOut：①预读 pid ②Product 锁 ③StockOut 锁 ④product_name
+        pid_result = MagicMock()
+        pid_result.one_or_none.return_value = (1,)
+        prod_lock_result = MagicMock()
+        prod_lock_result.scalar_one_or_none.return_value = MagicMock()
+        mock_db.execute = AsyncMock(side_effect=[pid_result, prod_lock_result, stockout_result, product_name_result])
         mock_db.commit = AsyncMock()
         mock_db.rollback = AsyncMock()
 
@@ -413,7 +423,12 @@ class TestStockOutEndpoints:
         stockout_result.scalar_one_or_none.return_value = stockout
         product_name_result = MagicMock()
         product_name_result.one_or_none.return_value = ("产品A",)
-        mock_db.execute = AsyncMock(side_effect=[stockout_result, product_name_result])
+        # 第十四轮：delete_stockout 锁序 Product→StockOut：①预读 pid ②Product 锁 ③StockOut 锁 ④product_name
+        pid_result = MagicMock()
+        pid_result.one_or_none.return_value = (1,)
+        prod_lock_result = MagicMock()
+        prod_lock_result.scalar_one_or_none.return_value = MagicMock()
+        mock_db.execute = AsyncMock(side_effect=[pid_result, prod_lock_result, stockout_result, product_name_result])
         mock_db.commit = AsyncMock()
         mock_db.rollback = AsyncMock()
         response = await client.delete("/api/v1/stock/out/delete/1")

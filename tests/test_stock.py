@@ -566,8 +566,11 @@ class TestCreateStockReturn:
         # 显式建模调用序列：按 id 装载出货记录 → 乐观锁入口的两步序列
         # （SELECT 当前行 version=1 → 条件 UPDATE 命中一行）
         product.version = 1
+        # 第十四轮：create_stockreturn_core 先无锁预读 product_id（锁序统一 Product→StockOut）
+        pid_result = MagicMock()
+        pid_result.one_or_none.return_value = (1,)
         state = _wire_stock_write(
-            mock_async_db, product, new_stock=130, pre_results=(data_result,)
+            mock_async_db, product, new_stock=130, pre_results=(pid_result, data_result)
         )
 
         result = await create_stockreturn_core(
@@ -577,9 +580,10 @@ class TestCreateStockReturn:
 
         assert result is not None
         mock_async_db.add.assert_called_once()
-        assert state['consumed'] == 3  # 装载出货记录 + SELECT + UPDATE
-        # 第 4 次读是订单状态重算（按 id 装载 Order），与库存写入无关
-        assert len(state['calls']) == 4
+        # 第十四轮：预读 product_id + 装载出货记录 + SELECT + UPDATE = 4
+        assert state['consumed'] == 4
+        # 第 5 次读是订单状态重算（按 id 装载 Order），与库存写入无关
+        assert len(state['calls']) == 5
         assert product.current_stock == 130  # 100 + 30
 
     @pytest.mark.asyncio
@@ -603,9 +607,10 @@ class TestCreateStockReturn:
     @pytest.mark.asyncio
     async def test_create_stockreturn_stockout_not_found(self, mock_async_db):
         """出货记录不存在"""
-        data_result = MagicMock()
-        data_result.scalar_one_or_none.return_value = None
-        mock_async_db.execute = AsyncMock(return_value=data_result)
+        # 第十四轮：第一次 execute 是无锁预读 product_id（one_or_none() 为 None 即不存在）
+        pid_result = MagicMock()
+        pid_result.one_or_none.return_value = None
+        mock_async_db.execute = AsyncMock(return_value=pid_result)
 
         with pytest.raises(ValueError, match='出货记录不存在'):
             await create_stockreturn_core(

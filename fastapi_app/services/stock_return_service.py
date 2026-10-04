@@ -42,6 +42,14 @@ async def create_stockreturn_core(db: AsyncSession, stockout_id: int, quantity: 
     if quantity <= 0:
         raise ValueError('退货数量必须大于0')
 
+    # 第十四轮：锁序统一为 Product→StockOut。原 SO→P（先锁出库行、:79 再锁产品）
+    # 与 update_stockout（P→SO）相反，同张出库单「编辑 vs 退货」并发会死锁。
+    # 先无锁读 product_id 供预锁，再按原口径校验。
+    pid_row = (await db.execute(select(StockOut.product_id).where(StockOut.id == stockout_id))).one_or_none()
+    if not pid_row:
+        raise ValueError('出货记录不存在')
+    await stock_service.get_product_for_update(db, pid_row[0])
+
     stockout_result = await db.execute(select(StockOut).where(StockOut.id == stockout_id).with_for_update())
     stockout = stockout_result.scalar_one_or_none()
     if not stockout:
@@ -93,6 +101,8 @@ async def create_stockreturn_core(db: AsyncSession, stockout_id: int, quantity: 
 
 async def delete_stockreturn_core(db: AsyncSession, stockreturn: StockReturn) -> None:
     """删除退货记录核心逻辑"""
+    # 第十四轮：锁序统一为 Product→StockOut（原 SO→P，同 create_stockreturn_core 的死锁问题）。
+    await stock_service.get_product_for_update(db, stockreturn.product_id)
     stockout_result = await db.execute(select(StockOut).where(StockOut.id == stockreturn.stockout_id).with_for_update())
     stockout = stockout_result.scalar_one_or_none()
     if not stockout:
