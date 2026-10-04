@@ -72,8 +72,8 @@ describe('buildNameMap 撞名消歧', () => {
       'fastapi_app__schemas__production_plan__StagingListResponse',
     ]
     const m = buildNameMap(keys)
-    const a = m.get(keys[0])!
-    const b = m.get(keys[1])!
+    const a = m.get(keys[0]!)!
+    const b = m.get(keys[1]!)!
     expect(a).not.toBe(b)
     expect(a).toBe('staging_StagingListResponse')
     expect(b).toBe('production_plan_StagingListResponse')
