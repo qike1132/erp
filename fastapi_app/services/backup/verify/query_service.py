@@ -24,8 +24,10 @@ from fastapi_app.shared_models.backup_record import BackupRecord
 
 logger = logging.getLogger(__name__)
 
-# 文件名时间戳解析正则：erp_*_YYYYMMDD_HHMMSS.{zip,json,zip.enc}
-_FILENAME_TIMESTAMP_RE = re.compile(r'_(\d{8})_(\d{6})\.(?:zip|json|enc)$')
+# 文件名时间戳解析正则：erp_*_YYYYMMDD_HHMMSS[.mmm].{zip,json,zip.enc}
+# 毫秒段可选：第十四轮为解决同秒双全量同名互覆，文件名加了 3 位毫秒后缀；
+# 锚定 $ 之前不容-optional 会让这些新备份解析不出 created_at（补录与排序的唯一兜底）。
+_FILENAME_TIMESTAMP_RE = re.compile(r'_(\d{8})_(\d{6})(?:\d{3})?\.(?:zip|json|enc)$')
 
 
 def _parse_exported_at(value: str | None) -> datetime | None:
@@ -39,7 +41,7 @@ def _parse_exported_at(value: str | None) -> datetime | None:
 
 
 def _parse_timestamp_from_filename(filename: str) -> datetime | None:
-    """从文件名提取时间戳（格式 erp_*_YYYYMMDD_HHMMSS.zip），失败返回 None"""
+    """从文件名提取时间戳（格式 erp_*_YYYYMMDD_HHMMSS[.mmm].zip），失败返回 None"""
     if not filename:
         return None
     m = _FILENAME_TIMESTAMP_RE.search(filename)

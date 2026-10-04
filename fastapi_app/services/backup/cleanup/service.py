@@ -337,9 +337,14 @@ class BackupCleanupService:
             for suffix in ['.zip', '.json', '.enc']:
                 ts_str = ts_str.replace(suffix, '')
 
-            # 检查是否为有效时间戳格式 (YYYYMMDD_HHMMSS)
-            if len(ts_str) == 15 and ts_str[8] == '_':
-                return ts_str
+            # 有效时间戳：'YYYYMMDD_HHMMSS'（15 位），或第十四轮起的
+            # 'YYYYMMDD_HHMMSSmmm'（18 位，同秒双全量防同名互覆）。两种都要认 ——
+            # 只认 15 位会让毫秒级新全量在本函数返回 None，进而在清理时被判成
+            # "不属于任何全量链"，连带删除依赖它的增量链。
+            base, tail = ts_str[:15], ts_str[15:]
+            tail_ok = tail == '' or (len(tail) == 3 and tail.isdigit())
+            if tail_ok and len(base) == 15 and base[8] == '_':
+                return base
             return None
         except (ValueError, IndexError, AttributeError):
             return None

@@ -364,12 +364,16 @@ def normalize_backup_ts(ts: str | None) -> str:
     """把备份时间戳统一为 'YYYY-MM-DD HH:MM:SS'。
 
     备份系统里时间戳有两种来源、两种格式：
-      - 文件名中的时间戳：'YYYYMMDD_HHMMSS'（见 _extract_timestamp）
+      - 文件名中的时间戳：'YYYYMMDD_HHMMSS'，第十四轮起还可能是
+        'YYYYMMDD_HHMMSSmmm'（同秒双全量同名互覆，加 3 位毫秒后缀保证唯一）
       - manifest 的 base_timestamp：'YYYY-MM-DD HH:MM:SS'
 
     二者格式不一致时直接做字符串比较恒为 False，曾导致清理逻辑把所有增量备份
     判定为"不属于任何全量链"而无条件删除（数据丢失）。本函数是该修复的核心，
     必须保证幂等：已是标准格式的输入原样返回。
+
+    ⚠️ 毫秒后缀必须在此**一并容忍**：只认 15 位时，毫秒级的新全量既解析不出时间，
+    又会在清理时被判成"不属于任何全量链"而连带删掉依赖它的增量链（第十四轮回归）。
 
     Args:
         ts: 待归一化的时间戳，允许 None / 空串 / 非法格式。
@@ -381,11 +385,14 @@ def normalize_backup_ts(ts: str | None) -> str:
     if not ts:
         return ''
     ts = str(ts).strip()
-    if (len(ts) == _TS_FILENAME_LEN
-            and ts[_TS_FILENAME_SEP_INDEX] == '_'
-            and ts[:8].isdigit()
-            and ts[9:].isdigit()):
-        return f'{ts[:4]}-{ts[4:6]}-{ts[6:8]} {ts[9:11]}:{ts[11:13]}:{ts[13:15]}'
+    base, tail = ts[:15], ts[15:]
+    tail_ok = tail == '' or (len(tail) == 3 and tail.isdigit())
+    if (tail_ok
+            and len(base) == _TS_FILENAME_LEN
+            and base[_TS_FILENAME_SEP_INDEX] == '_'
+            and base[:8].isdigit()
+            and base[9:].isdigit()):
+        return f'{base[:4]}-{base[4:6]}-{base[6:8]} {base[9:11]}:{base[11:13]}:{base[13:15]}'
     return ts
 
 
