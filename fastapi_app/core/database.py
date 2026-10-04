@@ -10,6 +10,7 @@
 import asyncio
 import logging
 import os
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +46,7 @@ def _get_pool_config() -> dict:
         pool_size = max(5, available // (workers * 2))
         max_overflow = max(3, available // (workers * 3))
 
-    config = {
+    config: dict[str, Any] = {
         "pool_size": pool_size,
         "pool_timeout": int(os.getenv("DB_POOL_TIMEOUT", "30")),
         # 连接最长存活秒数：到期回收重建，避免复用被中间设备静默丢弃的坏连接。
