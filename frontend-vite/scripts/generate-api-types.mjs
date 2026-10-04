@@ -91,3 +91,35 @@ export function generateTypes(spec) {
   })
   return HEADER + blocks.join('\n\n') + '\n'
 }
+
+function main() {
+  const args = process.argv.slice(2)
+  const check = args.includes('--check')
+  const outI = args.indexOf('--out')
+  const out = outI >= 0 ? args[outI + 1] : null
+  const input = args.find((a, i) => !a.startsWith('--') && i !== outI + 1)
+  if (!input || !out) {
+    console.error('用法: node scripts/generate-api-types.mjs <openapi.json> --out <file> [--check]')
+    process.exit(2)
+  }
+  let spec
+  try { spec = JSON.parse(readFileSync(input, 'utf8')) }
+  catch (e) { console.error('[ERROR] 无法读取/解析 ' + input + ': ' + e.message); process.exit(2) }
+
+  const generated = generateTypes(spec)
+  if (check) {
+    let current
+    try { current = readFileSync(out, 'utf8') }
+    catch { console.error('[FAIL] 生成物不存在: ' + out + '（跑 `npm run gen:api` 生成）'); process.exit(1) }
+    if (current.replace(/\r\n/g, '\n') !== generated) {
+      console.error('[FAIL] ' + out + ' 与 openapi.json 不同步。跑 `npm run gen:api` 后提交。')
+      process.exit(1)
+    }
+    console.log('[PASS] ' + out + ' 与 openapi.json 同步。')
+    process.exit(0)
+  }
+  writeFileSync(out, generated, 'utf8')
+  console.log('[OK] 已生成 ' + out + '（' + generated.split('\n').length + ' 行）')
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main()

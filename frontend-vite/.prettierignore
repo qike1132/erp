@@ -1,0 +1,7 @@
+dist/**
+dist-new/**
+node_modules/**
+src/auto-imports.d.ts
+src/components.d.ts
+src/env.d.ts
+src/types/api.d.ts
