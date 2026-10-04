@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-04-openapi-generated-frontend-types-design.md`
 
-**范围说明：** 本计划覆盖 spec 的 ①导出 ②生成 ③门禁 ④收敛——但 ④ 只做「建立基线 + 用一个域证明收敛方法可行」。全仓 130 处 `as unknown as` 跨 51 个文件的收敛是独立的一轮工作，需单独立计划（见 Task 5 结尾）。
+**范围说明：** 本计划覆盖 spec 的 ①导出 ②生成 ③门禁 ④收敛——但 ④ 只做「建立基线 + 用一个域证明收敛方法可行」。全仓 `as unknown as`（实测排除 `src/test/` 后 41 处）的完整收敛是独立的一轮工作，需单独立计划（见 Task 5 结尾）。
 
 ## Global Constraints
 
@@ -26,7 +26,7 @@
 
 以下输入/失败模式最可能让使用者踩坑，各自在所属任务的测试里钉住：
 
-1. **生成物被 prettier 重排 → 同步检查假红。** 仓库无 `.prettierignore`，`lint-staged` 会对 `*.ts` 跑 prettier。漏配一个忽略路径就复发。（Task 2）
+1. **生成物被 prettier 重排 → 同步检查假红。** 仓库无 `.prettierignore`。实测 `core.hooksPath=D:\erp_system\.githooks`，前端 `.husky/pre-commit` 是死代码、`lint-staged` 当前不被任何活动钩子调用——但 `npm run format` / `prettier --write` 仍会重排 `src/types/api.d.ts`，此后 `check:types` 逐字节比对即假红。（Task 2）
 2. **尾段撞名的 schema 被静默合并。** 实测 10 组撞名（`StagingListResponse`、`TrendResponse`、`ActionResponse` 等），名字相同但结构不同，合并会让前端拿到错的类型。（Task 1）
 3. **`list[dict]` 响应被当成有类型。** `OrderListResponse.data` 生成 `Array<Record<string, unknown>>` 却可能被误当真实类型用，掩盖注入字段。（Task 2）
 4. **后端改字段但没人重导快照 → 假绿。** 生成器只读快照，快照过期则全链路无声通过。（Task 4）
@@ -133,6 +133,20 @@ describe('buildNameMap 撞名消歧', () => {
     expect(a).toBe('staging_StagingListResponse')
     expect(b).toBe('production_plan_StagingListResponse')
   })
+
+  it('三处同名也能全部消歧', () => {
+    const keys = [
+      'fastapi_app__schemas__customer_sampling__ActionResponse',
+      'fastapi_app__schemas__material_registration__ActionResponse',
+      'fastapi_app__schemas__purchase_center__ActionResponse',
+    ]
+    const names = keys.map((k) => buildNameMap(keys).get(k)!)
+    expect(new Set(names).size).toBe(3)
+  })
+
+  it('sanitize 后仍同名则抛错，不产出非法重复 interface', () => {
+    expect(() => buildNameMap(['a__b_x', 'a__b-x'])).toThrow(/schema 名冲突/)
+  })
 })
 
 describe('sanitizeIdent', () => {
@@ -190,6 +204,13 @@ export function buildNameMap(schemaKeys) {
       if (n === parts.length) chosen = parts.join('_')
     }
     map.set(key, sanitizeIdent(chosen))
+  }
+  // 兜底：sanitize 可能把两个不同的后缀压成同名（如 a__b_x 与 a__b-x），
+  // 那会产出两个同名 interface 使 api.d.ts 非法。宁可报错，也不静默合并。
+  const seen = new Set()
+  for (const [key, name] of map) {
+    if (seen.has(name)) throw new Error(`schema 名冲突: ${key} 与其它 schema 同解析为 ${name}`)
+    seen.add(name)
   }
   return map
 }
@@ -387,7 +408,7 @@ Expected: 退出码 0，打印契约检查结果，并写出 `frontend-vite/open
 Run: `cd frontend-vite && node scripts/generate-api-types.mjs openapi.json --out src/types/api.d.ts`
 Expected: `[OK] 已生成 src/types/api.d.ts（约 3000+ 行）`
 
-- [ ] **Step 5: 免疫 prettier 与 eslint**
+- [ ] **Step 5: 免疫 prettier/eslint，并放开测试的 node 类型**
 
 创建 `frontend-vite/.prettierignore`：
 
@@ -407,6 +428,14 @@ src/types/api.d.ts
     ignores: ['dist/**', 'node_modules/**', 'src/auto-imports.d.ts', 'src/components.d.ts', 'src/env.d.ts', 'src/types/api.d.ts'],
 ```
 
+修改 `frontend-vite/tsconfig.json:18`，把 `node` 加进 types：
+
+```json
+    "types": ["vite/client", "node"],
+```
+
+**为什么必须改**：`tsconfig.json` 的 `types: ["vite/client"]` 会关掉 `@types/node` 的全局注入，于是任何测试里 `import { readFileSync } from 'node:fs'` 都报 **TS2591**（`vue-tsc` 会红，`npm run build` 随之失败）。仓库现有测试全部刻意用 Vite 的 `?raw` 绕开这一点（见 `src/test/backupViewSaveErrorFeedback.test.ts:2` 的注释），但本计划的 Task 3/5 需要 `child_process` 与目录遍历，`?raw` 覆盖不到。`@types/node` 已是 devDependency（`package.json` 里 `^22.19.17`），加进 types 不引入新依赖。代价：`process`/`Buffer` 等全局在前端应用代码里也可用，失去一点防误用——这是本计划接受的取舍。
+
 - [ ] **Step 6: npm 接线**
 
 在 `frontend-vite/package.json` 的 `scripts` 里，`check:api` 那行之后插入：
@@ -416,10 +445,13 @@ src/types/api.d.ts
     "check:types": "node scripts/generate-api-types.mjs openapi.json --out src/types/api.d.ts --check",
 ```
 
-- [ ] **Step 7: 跑测试确认通过 + 确认门禁不被误伤**
+- [ ] **Step 7: 跑测试确认通过 + 确认类型检查与门禁不被误伤**
 
 Run: `cd frontend-vite && npx vitest run src/test/generateApiTypes.honesty.test.ts`
 Expected: PASS
+
+Run: `cd frontend-vite && npm run type-check`
+Expected: 退出码 0。**这一步不能省** —— vitest 不做类型检查，`node:fs` 的 TS2591 只有 `vue-tsc` 才报；漏跑会在 CI 的 `npm run build` 才炸。
 
 Run: `cd frontend-vite && npm run lint && npm run check:types`
 Expected: 两者均退出码 0。`check:types` 打印 `[PASS] ... 同步`
@@ -427,8 +459,8 @@ Expected: 两者均退出码 0。`check:types` 打印 `[PASS] ... 同步`
 - [ ] **Step 8: 提交**
 
 ```bash
-git add frontend-vite/scripts/generate-api-types.mjs frontend-vite/openapi.json frontend-vite/src/types/api.d.ts frontend-vite/.prettierignore frontend-vite/eslint.config.js frontend-vite/package.json frontend-vite/src/test/generateApiTypes.honesty.test.ts
-git commit -m "feat(前端): 生成 api.d.ts 并接上门禁 —— 生成物对 lint/format 免疫，避免同步检查假红"
+git add frontend-vite/scripts/generate-api-types.mjs frontend-vite/openapi.json frontend-vite/src/types/api.d.ts frontend-vite/.prettierignore frontend-vite/eslint.config.js frontend-vite/tsconfig.json frontend-vite/package.json frontend-vite/src/test/generateApiTypes.honesty.test.ts
+git commit -m "feat(前端): 生成 api.d.ts 并接上门禁 —— 生成物对 lint/format 免疫，放开测试的 node 类型"
 ```
 
 ---
@@ -533,7 +565,7 @@ git commit -m "test(前端): 钉住 api.d.ts 同步门禁能检出漂移，并�
 
 **Files:**
 - Modify: `scripts/check_openapi_frontend_alignment.py`（加 `--snapshot` 与比对函数）
-- Modify: `.github/workflows/ci-cd.yml:102-103`（test job 那一步加参数）
+- Modify: `.github/workflows/ci-cd.yml`（test job 的 `Check frontend endpoints against backend OpenAPI` 步骤加参数，实测在 104-105 行）
 - Test: `tests/test_openapi_snapshot_freshness.py`
 
 **Interfaces:**
@@ -554,6 +586,7 @@ git commit -m "test(前端): 钉住 api.d.ts 同步门禁能检出漂移，并�
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -563,27 +596,33 @@ SCRIPT = ROOT / "scripts" / "check_openapi_frontend_alignment.py"
 
 
 def _run(args: list[str]) -> subprocess.CompletedProcess:
+    # 强制子进程按 UTF-8 写管道：Windows 本地码页（GBK）下 encoding="utf-8" 严格解码会炸，
+    # 中文断言串 '一致' 一并失效。CI(Linux) 本就 UTF-8，此设置无害。
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
     return subprocess.run(
         [sys.executable, str(SCRIPT), *args],
-        capture_output=True, text=True, encoding="utf-8", cwd=str(ROOT),
+        capture_output=True, text=True, encoding="utf-8", env=env, cwd=str(ROOT),
     )
 
 
 def test_snapshot_fresh_passes(tmp_path: Path) -> None:
-    live = _run(["--export", str(tmp_path / "live.json")])
+    # 走 CI 的真实路径：现算 app.openapi() 与已导出的快照文件比对（不传 --openapi）
+    snap = tmp_path / "snap.json"
+    live = _run(["--export", str(snap)])
     assert live.returncode == 0, live.stderr
-    r = _run(["--openapi", str(tmp_path / "live.json"), "--snapshot", str(tmp_path / "live.json")])
+    r = _run(["--snapshot", str(snap)])
     assert r.returncode == 0, r.stdout + r.stderr
     assert "一致" in r.stdout
 
 
 def test_snapshot_stale_fails(tmp_path: Path) -> None:
-    live = _run(["--export", str(tmp_path / "live.json")])
+    snap = tmp_path / "snap.json"
+    live = _run(["--export", str(snap)])
     assert live.returncode == 0, live.stderr
-    stale = json.loads((tmp_path / "live.json").read_text(encoding="utf-8"))
+    stale = json.loads(snap.read_text(encoding="utf-8"))
     stale["paths"]["/__drift_probe__"] = {"get": {"responses": {"200": {"description": "x"}}}}
     (tmp_path / "stale.json").write_text(json.dumps(stale, ensure_ascii=False), encoding="utf-8")
-    r = _run(["--openapi", str(tmp_path / "live.json"), "--snapshot", str(tmp_path / "stale.json")])
+    r = _run(["--snapshot", str(tmp_path / "stale.json")])
     assert r.returncode == 1, r.stdout + r.stderr
     assert "过期" in r.stdout or "不一致" in r.stdout
 ```
@@ -630,7 +669,7 @@ def check_snapshot(live: dict, snapshot: dict) -> int:
     parser.add_argument("--snapshot", type=Path, default=None, help="比较该已提交快照与现算规范是否一致（过期即判失败）")
 ```
 
-在 `main()` 中 `spec` 求值之后（`backend = spec_paths(spec)` 之后）插入：
+在 `main()` 中 `spec` 求值之后（`backend = spec_paths(spec)` 之后）插入。**注意** `check_snapshot` 的 print 在 `--json` 下必须改道 stderr，否则会污染机器可读的 stdout：
 
 ```python
     if args.snapshot is not None:
@@ -639,9 +678,21 @@ def check_snapshot(live: dict, snapshot: dict) -> int:
         except SpecError as exc:
             print("[ERROR] " + str(exc), file=sys.stderr)
             return 2
-        rc = check_snapshot(spec, snapshot)
+        with contextlib.redirect_stdout(sys.stderr if args.json else sys.stdout):
+            rc = check_snapshot(spec, snapshot)
         if rc != 0:
             return rc
+```
+
+同时把 `--export` 的写入包成受控失败（目录不存在时当前会抛未捕获异常、退出码落成 1，与「漂移=1」撞码），改为：
+
+```python
+    if args.export is not None:
+        try:
+            args.export.write_text(json.dumps(spec, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        except OSError as exc:
+            print("[ERROR] 无法写出 --export 文件: " + str(exc), file=sys.stderr)
+            return 2
 ```
 
 - [ ] **Step 4: 跑测试确认通过**
@@ -651,7 +702,7 @@ Expected: PASS（两个用例）
 
 - [ ] **Step 5: CI 接线（test job）**
 
-修改 `.github/workflows/ci-cd.yml` 第 102-103 行那一步：
+修改 `.github/workflows/ci-cd.yml` 里名为 `Check frontend endpoints against backend OpenAPI` 的那一步（实测在 104-105 行，plan 生成物可能已移位，**按步骤名定位**）：
 
 ```yaml
     - name: Check frontend endpoints against backend OpenAPI
@@ -676,13 +727,14 @@ git commit -m "feat(门禁): OpenAPI 快照过期即判红 —— 堵住信号�
 
 **Files:**
 - Test: `frontend-vite/src/test/apiTypeAssertionBaseline.test.ts`
-- Modify: `frontend-vite/src/api/stock.ts:40`（首个收敛样例）
-- Modify: `frontend-vite/src/types/index.ts`（如需，导出 `InventoryResponse` 等已在生成物的类型）
+- Modify: `frontend-vite/src/api/stock.ts:37-41`（首个收敛样例）
 
 **Interfaces:**
 - Consumes: Task 2 的 `src/types/api.d.ts`
 
-**说明：** 实测 130 处 `as unknown as` 里，**api 层只有 2 处**（`stock.ts:40`、`request.ts:247`），其余 **128 处全在 views/stores 层**。本任务只做两件事：① 建立防回潮的基线回归；② 收敛 `stock.ts:40` 作为方法样例。视图层 128 处的收敛需单独立计划（spec ④ 明确要求逐个判断、发现存量 bug 就停下报告，不能批量 sed）。`request.ts:247` 的 `as unknown as Blob` 涉及 axios `responseType:'blob'` 的响应类型，收敛需单独核实，本任务不动它。
+**说明：** 实测 `as unknown as` 全 src 计 **132** 处，其中 **91 处在 `src/test/`**（测试里断言 mock 形状，不属收敛对象）。排除 test 后剩 **41** 处：views 33、utils 4、api 2、composables 1、mobile 1。本任务只做两件事：① 建立防回潮的基线回归（口径 = 排除 `src/test/`，实测 **41**）；② 收敛 `stock.ts` 一处作为方法样例。视图层那 39 处的收敛需单独立计划（spec ④ 明确要求逐个判断、发现存量 bug 就停下报告，不能批量 sed）。`request.ts:247` 的 `as unknown as Blob` 涉及 axios `responseType:'blob'` 的响应类型，收敛需单独核实，本任务不动它。
+
+**注意：不要把生成物 re-export 进 `src/types/index.ts`。** 实测生成名与手写名有 11 个重名（`InventoryResponse`、`StagingListResponse`、`MonthlySummary`、`NavItem`、`NavSection` 等），一旦在同模块重复导出会硬冲突。本任务只在 `stock.ts` 内定义局部类型，不碰 `index.ts`。
 
 - [ ] **Step 1: 写基线测试（记录当前断言数）**
 
@@ -717,8 +769,10 @@ export function countAssertions(): number {
 describe('as unknown as 断言基线', () => {
   it('断言总数不超过基线（防回潮）', () => {
     const total = countAssertions()
-    // 基线在执行本任务时实测填入；只允许下调，清理后同步收紧此值
-    expect(total).toBeLessThanOrEqual(130)
+    // 口径 = 排除 src/test/（测试里断言 mock 形状不算收敛对象）。执行本任务时先跑一次
+    // countAssertions() 取实测值填入；本计划撰写时实测为 41。注意本仓常有并发会话在改前端，
+    // 若执行时该值已变，以执行时实测为准（且不得放松到无意义的量级）。
+    expect(total).toBeLessThanOrEqual(41)
   })
 
   it('收敛样例：stockApi.stats 的断言已消除', () => {
@@ -783,6 +837,6 @@ git commit -m "test(前端): 钉住 as unknown as 基线，并收敛 stock 域�
 
 ## 已知遗留（不在本计划范围）
 
-1. **全仓 130 处 `as unknown as` 的完整收敛**——跨 51 个文件，需逐个判断用哪个生成类型、哪些是 store 适配层必须保留。单独立计划。
+1. **全仓 `as unknown as` 的完整收敛**——排除 `src/test/` 后 41 处，需逐个判断用哪个生成类型、哪些是 store 适配层必须保留。单独立计划。
 2. **77 个 `list[dict]` 响应的类型化**——需先给 schema 补注入字段，否则 `response_model` 会剥字段。独立且高风险，触碰生产响应契约。
 3. **schema 名展平的根因**——22 个 schema 被展平是因模块级同名类冲突（如两处 `ActionResponse`）。根治要改后端类名或模块结构，非前端范畴。
