@@ -103,6 +103,24 @@ export function useCaseStockWorkbench() {
     item.quantity = quantity
   }
 
+  /** 暂存行行内编辑方向（点击徽标切换） */
+  function updateStagedDirection(key: number, direction: Direction) {
+    const item = staged.value.find((s) => s.key === key)
+    if (item) item.direction = direction
+  }
+
+  /** 暂存行行内编辑日期（空值忽略，避免清空后无法提交） */
+  function updateStagedDate(key: number, date: string) {
+    const item = staged.value.find((s) => s.key === key)
+    if (item && date) item.date = date
+  }
+
+  /** 暂存行行内编辑备注 */
+  function updateStagedNote(key: number, note: string) {
+    const item = staged.value.find((s) => s.key === key)
+    if (item) item.note = note
+  }
+
   function clearStaged() {
     staged.value = []
   }
@@ -139,6 +157,61 @@ export function useCaseStockWorkbench() {
       }
     } catch (err: unknown) {
       showToast(getErrorMessage(err, '提交失败'), 'error')
+    } finally {
+      submitting.value = false
+      for (const key of CASE_QUERY_KEYS) {
+        queryClient.invalidateQueries({ queryKey: [key] })
+      }
+    }
+  }
+
+  /**
+   * 单条直提（不经暂存单）：一条走 `POST /cases/movements`，多条（勾了配件）走批量端点。
+   * 方向/日期/备注取自表单当前值。
+   */
+  async function submitDirect(rows: StagedRowInput[]) {
+    const valid = rows.filter((r) => r.caseId && Number.isInteger(r.quantity) && r.quantity >= 1)
+    const first = valid[0]
+    if (!first) {
+      showToast('请先选择要录入的皮套并填写数量', 'warning')
+      return
+    }
+    submitting.value = true
+    lastFailures.value = []
+    const label = form.direction === 'in' ? '入库' : '出库'
+    try {
+      if (valid.length === 1) {
+        const res = await caseApi.createMovement({
+          case_id: Number(first.caseId),
+          direction: form.direction,
+          quantity: first.quantity,
+          movement_date: form.date,
+          note: form.note.trim(),
+        })
+        if (res.success === false) {
+          showToast(`${label}失败`, 'error')
+          return
+        }
+        showToast(`${label}成功：${first.caseName} × ${first.quantity}`, 'success')
+      } else {
+        const res = await caseApi.batchMovements(
+          valid.map((r) => ({
+            case_id: Number(r.caseId),
+            direction: form.direction,
+            quantity: r.quantity,
+            movement_date: form.date,
+            note: form.note.trim(),
+          })),
+        )
+        const failed = res.failed ?? []
+        if (failed.length) {
+          showToast(`部分失败：成功 ${valid.length - failed.length} 条，失败 ${failed.length} 条`, 'error')
+        } else {
+          showToast(`${label}成功，共 ${valid.length} 条`, 'success')
+        }
+      }
+    } catch (err: unknown) {
+      showToast(getErrorMessage(err, `${label}失败`), 'error')
     } finally {
       submitting.value = false
       for (const key of CASE_QUERY_KEYS) {
@@ -208,9 +281,13 @@ export function useCaseStockWorkbench() {
     addStagedBatch,
     removeStaged,
     updateStagedQuantity,
+    updateStagedDirection,
+    updateStagedDate,
+    updateStagedNote,
     clearStaged,
     submitting,
     submitBatch,
+    submitDirect,
     lastFailures,
     showBatchUpload,
     excelFile,

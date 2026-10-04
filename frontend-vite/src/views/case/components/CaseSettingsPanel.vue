@@ -38,6 +38,15 @@
               <span class="cs-product-name">{{ p.name }}</span>
               <span v-if="p.barcode" class="cs-product-code">{{ p.barcode }}</span>
             </div>
+            <button
+              v-if="!p.has_parts"
+              type="button"
+              class="cs-quick-add"
+              title="直接添加配件"
+              @click.stop="quickAdd(p)"
+            >
+              ＋配件
+            </button>
             <span :class="['cs-badge', p.has_parts ? 'has' : 'no']">
               {{ p.has_parts ? '有配件' : '无配件' }}
             </span>
@@ -80,6 +89,7 @@
               <div class="cs-add-row">
                 <input
                   v-model="newName"
+                  ref="newPartRef"
                   class="cs-input"
                   placeholder="新配件名称（如：鲨鱼帽子）"
                   aria-label="新配件名称"
@@ -112,12 +122,12 @@
  * 右：选中产品的皮套主件 + 配件维护（点产品经 `POST /cases/for-product` 自动建主件）。
  * 观感对齐 material-calculator 的 ProductSelectColumn（复用全局 .mc-col-title/.mc-seg）。
  */
-import { ref, watch } from 'vue'
+import { ref, watch, nextTick } from 'vue'
 import UiSearchInput from '@/components/ui/UiSearchInput.vue'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import { useCaseSettings, type PartsFilter } from '../composables/useCaseSettings'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
-import type { CaseItem } from '@/api/case'
+import type { CaseItem, CaseProduct } from '@/api/case'
 
 const {
   keyword,
@@ -146,6 +156,7 @@ const FILTERS: { label: string; value: PartsFilter }[] = [
 
 const confirm = useConfirmDialog()
 const newName = ref('')
+const newPartRef = ref<HTMLInputElement | null>(null)
 
 /** 配件名称的编辑副本（按 id 索引），选中/刷新时同步 */
 const drafts = ref<Record<number, string>>({})
@@ -160,8 +171,22 @@ watch(
 )
 
 function onAdd() {
-  void addPart(newName.value)
+  void addOne()
+}
+
+async function addOne() {
+  const name = newName.value
+  if (!name.trim()) return
   newName.value = ''
+  await addPart(name)
+  void nextTick(() => newPartRef.value?.focus()) // 连续添加：加完回焦，可接着敲下一个
+}
+
+/** 「无配件」行的一键入口：选中该产品并把焦点落到「添加配件」输入框 */
+async function quickAdd(p: CaseProduct) {
+  await selectProduct(p.id)
+  await nextTick()
+  newPartRef.value?.focus()
 }
 
 async function askRemove(p: CaseItem) {
@@ -217,6 +242,17 @@ async function askRemove(p: CaseItem) {
 .cs-badge { flex-shrink: 0; padding: 1px 6px; border-radius: 4px; font-size: 11px; font-weight: 500; border: 1px solid; }
 .cs-badge.has { background: var(--color-success-50); color: var(--color-success-700); border-color: var(--color-success-200); }
 .cs-badge.no { background: var(--color-slate-100); color: var(--color-text-muted); border-color: var(--color-border); }
+
+/* 「无配件」行的一键加配件入口（hover 才显形，避免列表噪音） */
+.cs-quick-add {
+  flex-shrink: 0; height: 24px; padding: 0 8px; border-radius: 7px;
+  border: 1px solid var(--color-primary-300); background: var(--color-primary-50);
+  color: var(--color-primary-700); font-size: 11px; font-weight: 600; cursor: pointer;
+  opacity: 0; transition: opacity 0.15s ease;
+}
+.cs-product:hover .cs-quick-add,
+.cs-product.active .cs-quick-add { opacity: 1; }
+.cs-quick-add:focus-visible { opacity: 1; }
 
 .cs-cap-hint { padding: 6px 12px 0; font-size: 11px; color: var(--color-text-muted); }
 

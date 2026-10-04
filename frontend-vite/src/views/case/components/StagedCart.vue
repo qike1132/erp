@@ -13,7 +13,7 @@
     <div class="sc-list">
       <div v-if="!staged.length" class="sc-empty">
         <FontAwesomeIcon icon="box-open" aria-hidden="true" />
-        <p>左侧填写信息后点击「加入暂存单」</p>
+        <p>左侧录好后点「暂存」，可攒多条一起提交</p>
       </div>
       <div
         v-for="item in staged"
@@ -22,17 +22,36 @@
       >
         <div class="sc-item-main">
           <div class="sc-item-name">
-            <span :class="['sc-dir', item.direction === 'in' ? 'sc-dir-in' : 'sc-dir-out']">
+            <button
+              type="button"
+              :class="['sc-dir', item.direction === 'in' ? 'sc-dir-in' : 'sc-dir-out']"
+              :aria-label="`切换方向（当前${item.direction === 'in' ? '入库' : '出库'}）`"
+              title="点击切换入库/出库"
+              @click="emit('direction-change', item.key, item.direction === 'in' ? 'out' : 'in')"
+            >
               {{ item.direction === 'in' ? '入库' : '出库' }}
-            </span>
+            </button>
             <span :class="['sc-type', item.isPart ? 'sc-type-part' : 'sc-type-main']">
               {{ item.isPart ? '配件' : '皮套' }}
             </span>
             {{ item.caseName }}
           </div>
           <div class="sc-item-meta">
-            <span><FontAwesomeIcon icon="calendar-alt" aria-hidden="true" /> {{ item.date }}</span>
-            <span v-if="item.note" class="sc-item-note"><FontAwesomeIcon icon="note-sticky" aria-hidden="true" /> {{ item.note }}</span>
+            <input
+              type="date"
+              class="sc-meta-input sc-meta-date"
+              :value="item.date"
+              :aria-label="`${item.caseName} 日期`"
+              @change="emit('date-change', item.key, ($event.target as HTMLInputElement).value)"
+            />
+            <input
+              type="text"
+              class="sc-meta-input sc-meta-note"
+              :value="item.note"
+              placeholder="备注"
+              :aria-label="`${item.caseName} 备注`"
+              @change="emit('note-change', item.key, ($event.target as HTMLInputElement).value)"
+            />
           </div>
         </div>
         <div class="sc-item-side">
@@ -106,6 +125,9 @@ defineProps<{
 const emit = defineEmits<{
   remove: [key: number]
   'quantity-change': [key: number, quantity: number]
+  'direction-change': [key: number, direction: 'in' | 'out']
+  'date-change': [key: number, date: string]
+  'note-change': [key: number, note: string]
   clear: []
   submit: []
 }>()
@@ -178,13 +200,29 @@ const emit = defineEmits<{
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* 行内可编辑的日期 / 备注 */
+.sc-meta-input {
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid var(--color-border-light, #e2e8f0);
+  border-radius: 7px;
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--color-text);
+  background: #fff;
+  outline: none;
+}
+.sc-meta-input:focus { border-color: var(--color-primary-400); }
+.sc-meta-date { width: 132px; }
+.sc-meta-note { width: 140px; }
 .sc-item-side {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
 }
-.sc-dir { display: inline-block; padding: 1px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; margin-right: 6px; }
+.sc-dir { display: inline-block; padding: 1px 8px; border: none; border-radius: 12px; font-size: 11px; font-weight: 600; margin-right: 6px; font-family: inherit; cursor: pointer; }
 .sc-dir-in { background: var(--color-success-50); color: var(--color-success-600); }
 .sc-dir-out { background: var(--color-danger-50); color: var(--color-danger-600); }
 .sc-type { display: inline-block; padding: 1px 8px; border-radius: 12px; font-size: 11px; font-weight: 700; margin-right: 6px; color: #fff; }

@@ -10,16 +10,13 @@
         <button class="srp-btn srp-btn-ghost" aria-label="刷新" @click="refetch()">
           <FontAwesomeIcon icon="sync-alt" style="margin-right: 4px" aria-hidden="true" />刷新
         </button>
-        <button class="srp-btn srp-btn-ghost" aria-label="筛选" @click="showFilter = !showFilter">
-          <FontAwesomeIcon icon="filter" style="margin-right: 4px" aria-hidden="true" />筛选
-        </button>
-        <button class="srp-btn srp-btn-ghost" aria-label="导出 Excel" @click="emit('export')">
+        <button class="srp-btn srp-btn-ghost" aria-label="导出 Excel" @click="emit('export', { ...filters })">
           <FontAwesomeIcon icon="file-excel" style="margin-right: 4px" aria-hidden="true" />导出
         </button>
       </div>
     </div>
 
-    <div v-if="showFilter" class="srp-filter">
+    <div class="srp-filter">
       <div class="srp-filter-field">
         <label class="srp-label">方向</label>
         <div class="srp-seg">
@@ -37,9 +34,7 @@
         <UiDatePicker v-model="filters.end" style="width: 140px" />
       </div>
       <div class="srp-filter-actions">
-        <button class="srp-btn srp-btn-primary" aria-label="查询" @click="search()">
-          <FontAwesomeIcon icon="search" style="margin-right: 4px" aria-hidden="true" />查询
-        </button>
+        <span class="srp-filter-hint">筛选即时生效</span>
         <button class="srp-btn srp-btn-ghost" aria-label="重置" @click="resetFilters()">重置</button>
       </div>
     </div>
@@ -89,6 +84,7 @@
 import UiDataTable from '@/components/ui/UiDataTable.vue'
 import UiDatePicker from '@/components/ui/UiDatePicker.vue'
 import { useCaseStockRecords } from '../composables/useCaseStockRecords'
+import type { StockRecordFilters } from '../composables/useCaseStockRecords'
 import type { CaseMovement } from '@/api/case'
 
 defineProps<{
@@ -99,11 +95,11 @@ defineProps<{
 const emit = defineEmits<{
   edit: [row: CaseMovement]
   delete: [row: CaseMovement]
-  export: []
+  // 第十四轮：导出随当前筛选 —— 此前 emit 不带参，工作台只能导出全量，与所见不符。
+  export: [filters: StockRecordFilters]
 }>()
 
 const {
-  showFilter,
   filters,
   perPage,
   total,
@@ -113,7 +109,6 @@ const {
   list,
   columns,
   onPageChange,
-  search,
   resetFilters,
 } = useCaseStockRecords()
 </script>
@@ -204,7 +199,8 @@ const {
   cursor: pointer;
 }
 .srp-seg > button.active { background: var(--color-primary-50); color: var(--color-primary-700); }
-.srp-filter-actions { display: flex; gap: 8px; padding-bottom: 2px; }
+.srp-filter-actions { display: flex; gap: 8px; align-items: center; padding-bottom: 2px; }
+.srp-filter-hint { font-size: 12px; color: var(--color-text-muted); }
 
 .srp-dir { padding: 2px 10px; border-radius: 16px; font-size: 11px; font-weight: 600; }
 .srp-dir-in { background: var(--color-success-50); color: var(--color-success-600); }

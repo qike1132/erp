@@ -19,7 +19,7 @@
       :loading="logIsLoading && !logList.length"
       :paginator="logTotalPages > 1"
       :rows="logPerPage"
-      :total-records="logTotalPages * logPerPage"
+      :total-records="logTotal"
       row-key="id"
       striped
       @page="onLogPageChange"
@@ -55,6 +55,7 @@ defineProps<{
   /** 当前查看流水的 SKU（null 时抽屉关闭） */
   selectedCase: { id: number; name: string; barcode?: string } | null
   logTotalPages: number
+  logTotal: number
   logPerPage: number
   logIsLoading: boolean
   logIsFetching: boolean

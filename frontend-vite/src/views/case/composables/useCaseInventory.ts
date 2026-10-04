@@ -84,6 +84,7 @@ export function useCaseInventory() {
   })
 
   const logList = computed<CaseMovement[]>(() => logData.value?.movements ?? [])
+  const logTotal = computed(() => logData.value?.total ?? 0)
   const logTotalPages = computed(() => logData.value?.pages ?? 0)
 
   function openLogDrawer(row: CaseInventoryNode) {
@@ -115,6 +116,7 @@ export function useCaseInventory() {
     drawerOpen,
     logPage,
     logPerPage,
+    logTotal,
     logTotalPages,
     logIsLoading,
     logIsFetching,

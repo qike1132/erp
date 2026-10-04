@@ -57,19 +57,58 @@
           </MListItem>
         </MList>
       </template>
+
+      <!-- 皮套设置（产品 → 配件维护） -->
+      <template v-if="activeTab === 'settings'">
+        <div style="margin-top: 12px">
+          <MSearchBar v-model="keyword" placeholder="搜索产品名称 / 69码" />
+        </div>
+        <MFilterChips v-model="partsFilter" :chips="filterChips" style="margin: 12px 0" />
+        <div v-if="isLoading && !products.length" class="m-center"><MSpinner size="lg" /></div>
+        <MEmpty v-else-if="!filtered.length" title="没有匹配的产品" />
+        <MList v-else>
+          <MListItem
+            v-for="p in filtered"
+            :key="p.id"
+            :title="p.name"
+            :subtitle="p.barcode || '—'"
+            @click="openSettings(p)"
+          >
+            <template #value>{{ p.has_parts ? '有配件' : '无配件' }}</template>
+          </MListItem>
+        </MList>
+      </template>
     </div>
+
+    <!-- 配件维护（底部抽屉） -->
+    <MBottomSheet :visible="sheetOpen" :title="selectedMain?.name || '配件维护'" @update:visible="sheetOpen = $event">
+      <div v-if="loadingTree" class="m-center"><MSpinner /></div>
+      <template v-else>
+        <div v-for="pt in selectedParts" :key="pt.id" class="m-part-row">
+          <span class="m-part-name">{{ pt.name }}</span>
+          <button class="m-part-del" :disabled="saving" @click="removePart(pt.id)">删除</button>
+        </div>
+        <div v-if="!selectedParts.length" class="m-part-empty">暂无配件</div>
+        <div class="m-part-add">
+          <input v-model="newPartName" class="m-input" placeholder="新配件名称（如：鲨鱼帽子）" aria-label="新配件名称" />
+          <button class="m-submit-btn" :disabled="!newPartName.trim() || saving" @click="addNewPart">添加配件</button>
+        </div>
+      </template>
+    </MBottomSheet>
   </div>
 </template>
 
 <script setup lang="ts">
 /**
- * MCaseView — 移动端皮套管理：出入库（搜索选择 SKU + 数量提交）/ 库存查询。
+ * MCaseView — 移动端皮套管理：出入库（搜索选择 SKU + 数量提交）/ 库存查询 / 皮套设置（产品 → 配件）。
+ * 出入库与桌面端语义一致：**直接提交**（不经暂存单）。
  */
 import { ref, onMounted } from 'vue'
 import { caseApi } from '@/api'
-import type { CaseSearchItem, CaseItem, CaseMovementPayload } from '@/api/case'
+import type { CaseSearchItem, CaseItem, CaseMovementPayload, CaseProduct } from '@/api/case'
 import { showToast } from '@/composables/useToast'
 import { toISODate } from '@/utils/format'
+import { useCaseSettings, type PartsFilter } from '@/views/case/composables/useCaseSettings'
 import MobileNavBar from '@/mobile/layouts/components/MobileNavBar.vue'
 import MFilterChips from '@/mobile/components/MFilterChips.vue'
 import MSearchBar from '@/mobile/components/MSearchBar.vue'
@@ -77,9 +116,14 @@ import MList from '@/mobile/components/MList.vue'
 import MListItem from '@/mobile/components/MListItem.vue'
 import MEmpty from '@/mobile/components/MEmpty.vue'
 import MSpinner from '@/mobile/components/MSpinner.vue'
+import MBottomSheet from '@/mobile/components/MBottomSheet.vue'
 
 const activeTab = ref('stock')
-const tabChips = [{ label: '出入库', value: 'stock' }, { label: '库存', value: 'inventory' }]
+const tabChips = [
+  { label: '出入库', value: 'stock' },
+  { label: '库存', value: 'inventory' },
+  { label: '皮套设置', value: 'settings' },
+]
 const direction = ref<'in' | 'out'>('in')
 const dirChips = [{ label: '入库', value: 'in' }, { label: '出库', value: 'out' }]
 
@@ -157,6 +201,42 @@ function onInvSearch() {
   void loadInventory()
 }
 
+// ===== 皮套设置（复用桌面端 composable） =====
+const {
+  keyword,
+  partsFilter,
+  products,
+  filtered,
+  isLoading,
+  selectedMain,
+  selectedParts,
+  loadingTree,
+  selectProduct,
+  saving,
+  addPart,
+  removePart,
+} = useCaseSettings()
+
+const filterChips: { label: string; value: PartsFilter }[] = [
+  { label: '全部', value: 'all' },
+  { label: '有配件', value: 'yes' },
+  { label: '无配件', value: 'no' },
+]
+const sheetOpen = ref(false)
+const newPartName = ref('')
+
+async function openSettings(p: CaseProduct) {
+  sheetOpen.value = true
+  await selectProduct(p.id)
+}
+
+async function addNewPart() {
+  const n = newPartName.value
+  if (!n.trim()) return
+  newPartName.value = ''
+  await addPart(n)
+}
+
 onMounted(() => {
   void loadInventory()
 })
@@ -175,4 +255,11 @@ onMounted(() => {
 .m-submit-btn:active:not(:disabled) { opacity: 0.85; }
 .m-results { margin-top: 8px; background: var(--m-bg-card); border-radius: 10px; box-shadow: var(--m-shadow-card); overflow: hidden; max-height: 260px; overflow-y: auto; }
 .m-selected { margin-top: 8px; font-size: 13px; color: var(--m-text-secondary); }
+
+/* 配件维护抽屉 */
+.m-part-row { display: flex; align-items: center; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--m-bg-grouped); }
+.m-part-name { flex: 1; min-width: 0; font-size: 15px; color: var(--m-text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m-part-del { height: 32px; padding: 0 12px; border: none; border-radius: 8px; background: var(--color-danger-50); color: var(--color-danger-600); font-size: 13px; font-weight: 600; cursor: pointer; }
+.m-part-empty { padding: 16px 0; text-align: center; color: var(--m-text-secondary); font-size: 14px; }
+.m-part-add { display: flex; flex-direction: column; gap: 8px; margin-top: 16px; }
 </style>

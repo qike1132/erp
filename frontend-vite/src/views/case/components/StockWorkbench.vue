@@ -5,7 +5,9 @@
       <StockEntryCard
         v-model:form="form"
         :staged-count="staged.length"
+        :submitting="submitting"
         @add="addStagedBatch"
+        @submit="submitDirect"
       />
       <div class="sw-side">
         <StagedCart
@@ -15,6 +17,9 @@
           :last-failures="lastFailures"
           @remove="removeStaged"
           @quantity-change="updateStagedQuantity"
+          @direction-change="updateStagedDirection"
+          @date-change="updateStagedDate"
+          @note-change="updateStagedNote"
           @clear="clearStaged"
           @submit="submitBatch"
         />
@@ -62,7 +67,7 @@
 <script setup lang="ts">
 /**
  * StockWorkbench — 皮套出入库工作台（入库/出库合一）。
- * 录入：选产品 → 展开皮套主件/配件 → 勾选批量加入暂存单。
+ * 录入：一行快捷条（方向/产品/数量）→ Enter 直接提交单条；多条走「暂存」批量提交。
  */
 import StockEntryCard from './StockEntryCard.vue'
 import StagedCart from './StagedCart.vue'
@@ -82,9 +87,13 @@ const {
   addStagedBatch,
   removeStaged,
   updateStagedQuantity,
+  updateStagedDirection,
+  updateStagedDate,
+  updateStagedNote,
   clearStaged,
   submitting,
   submitBatch,
+  submitDirect,
   lastFailures,
   showBatchUpload,
   excelFile,
@@ -105,8 +114,14 @@ function openEdit(row: CaseMovement) {
 function handleDelete(row: CaseMovement) {
   void recordActions.handleDelete(row)
 }
-function exportRecords() {
-  void caseApi.exportXlsx({ scope: 'movements' })
+// 第十四轮：导出随当前筛选（面板 emit 携带）—— 此前硬编码 scope 导出全量，与所见不符。
+function exportRecords(f: { direction: '' | 'in' | 'out'; start: string; end: string }) {
+  void caseApi.exportXlsx({
+    scope: 'movements',
+    direction: f.direction || undefined,
+    start_date: f.start || undefined,
+    end_date: f.end || undefined,
+  })
 }
 </script>
 

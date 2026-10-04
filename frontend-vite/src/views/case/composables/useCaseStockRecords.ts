@@ -1,4 +1,4 @@
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useQuery, keepPreviousData } from '@tanstack/vue-query'
 import { caseApi } from '@/api'
 import type { CaseMovement, CaseMovementListParams } from '@/api/case'
@@ -22,6 +22,12 @@ export function useCaseStockRecords() {
   const filters = ref<StockRecordFilters>({ direction: '', start: '', end: '' })
   const page = ref(1)
   const perPage = ref(20)
+
+  // 筛选即改即查：queryKey 含 filters（改动会自动重新请求），这里只把页码归 1，
+  // 避免在第 2 页改筛选后仍停在旧页而看起来「没生效」。
+  watch(filters, () => {
+    page.value = 1
+  }, { deep: true })
 
   const { data, isLoading, isFetching, refetch } = useQuery({
     queryKey: [queryKey, page, filters, perPage],
@@ -56,11 +62,6 @@ export function useCaseStockRecords() {
     perPage.value = event.rows
   }
 
-  function search() {
-    page.value = 1
-    refetch()
-  }
-
   function resetFilters() {
     filters.value = { direction: '', start: '', end: '' }
     page.value = 1
@@ -68,7 +69,6 @@ export function useCaseStockRecords() {
   }
 
   return {
-    showFilter,
     filters,
     page,
     perPage,
@@ -80,7 +80,6 @@ export function useCaseStockRecords() {
     list,
     columns,
     onPageChange,
-    search,
     resetFilters,
   }
 }

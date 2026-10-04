@@ -1,23 +1,16 @@
 <template>
   <div class="ip-wrap">
-    <!-- 统计卡 -->
+    <!-- 统计：以「当前总库存」为主，其余收成一行次要信息（原先 4 张卡占满一行，信息太散） -->
     <div class="ip-stat-row">
-      <UiStatCard accent="blue">
-        <template #label>皮套种类</template>
-        {{ invStats?.total_items ?? invTotal }}
-      </UiStatCard>
-      <UiStatCard accent="green">
+      <UiStatCard accent="green" class="ip-stat-main">
         <template #label>当前总库存</template>
         {{ invStats?.total_stock ?? 0 }}
       </UiStatCard>
-      <UiStatCard accent="purple">
-        <template #label>累计入库</template>
-        {{ invStats?.total_in ?? 0 }}
-      </UiStatCard>
-      <UiStatCard accent="red">
-        <template #label>累计出库</template>
-        {{ invStats?.total_out ?? 0 }}
-      </UiStatCard>
+      <div class="ip-stat-side">
+        <span>皮套种类 <b>{{ invStats?.total_items ?? invTotal }}</b></span>
+        <span>累计入库 <b class="ip-side-in">{{ invStats?.total_in ?? 0 }}</b></span>
+        <span>累计出库 <b class="ip-side-out">{{ invStats?.total_out ?? 0 }}</b></span>
+      </div>
     </div>
 
     <div class="ip-section">
@@ -55,11 +48,7 @@
           <tr>
             <th class="left">皮套 / SKU</th>
             <th>69码</th>
-            <th>单位</th>
-            <th>期初</th>
-            <th>入库</th>
-            <th>出库</th>
-            <th>结存</th>
+            <th>库存</th>
             <th>流水</th>
           </tr>
         </thead>
@@ -72,10 +61,6 @@
                 <span v-if="node.children.length" class="ip-tag">皮套 · {{ node.children.length }} 配件</span>
               </td>
               <td><small class="ip-barcode">{{ node.barcode || '-' }}</small></td>
-              <td>{{ node.unit || '-' }}</td>
-              <td>{{ node.initial_stock }}</td>
-              <td class="ip-in">{{ node.total_in }}</td>
-              <td class="ip-out">{{ node.total_out }}</td>
               <td><span :class="['ip-stock', stockClass(node.current_stock)]">{{ node.current_stock }}</span></td>
               <td><button class="ip-btn ip-btn-ghost" aria-label="查看流水" @click.stop="openLogDrawer(node)">流水</button></td>
             </tr>
@@ -90,10 +75,6 @@
                 <span class="ip-tag ip-tag-part">配件</span>
               </td>
               <td><small class="ip-barcode">{{ child.barcode || '-' }}</small></td>
-              <td>{{ child.unit || '-' }}</td>
-              <td>{{ child.initial_stock }}</td>
-              <td class="ip-in">{{ child.total_in }}</td>
-              <td class="ip-out">{{ child.total_out }}</td>
               <td><span :class="['ip-stock', stockClass(child.current_stock)]">{{ child.current_stock }}</span></td>
               <td><button class="ip-btn ip-btn-ghost" aria-label="查看流水" @click.stop="openLogDrawer(node, child)">流水</button></td>
             </tr>
@@ -112,6 +93,7 @@
       v-model:visible="drawerOpen"
       :selected-case="selectedCase"
       :log-total-pages="logTotalPages"
+      :log-total="logTotal"
       :log-per-page="logPerPage"
       :log-is-loading="logIsLoading"
       :log-is-fetching="logIsFetching"
@@ -151,6 +133,7 @@ const {
   selectedCase,
   drawerOpen,
   logPerPage,
+  logTotal,
   logTotalPages,
   logIsLoading,
   logIsFetching,
@@ -192,8 +175,12 @@ function exportInventory() {
 
 <style scoped>
 .ip-wrap { display: flex; flex-direction: column; gap: 16px; }
-.ip-stat-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
-@media (max-width: 768px) { .ip-stat-row { grid-template-columns: repeat(2, 1fr); } }
+.ip-stat-row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.ip-stat-main { flex: 0 0 220px; }
+.ip-stat-side { display: flex; gap: 18px; flex-wrap: wrap; font-size: 13px; color: var(--color-text-secondary); }
+.ip-stat-side b { font-size: 15px; font-weight: 800; color: var(--color-text); font-variant-numeric: tabular-nums; margin-left: 2px; }
+.ip-stat-side .ip-side-in { color: var(--color-success-600); }
+.ip-stat-side .ip-side-out { color: var(--color-danger-500); }
 
 .ip-section {
   border: 1px solid var(--color-border-light, #e2e8f0);
@@ -235,8 +222,6 @@ function exportInventory() {
 
 .ip-name { color: var(--color-text); }
 .ip-barcode { color: var(--color-text-muted); }
-.ip-in { color: var(--color-success-600); font-weight: 600; }
-.ip-out { color: var(--color-danger-500); font-weight: 600; }
 .ip-stock { font-weight: 800; }
 .ip-stock-ok { color: var(--color-success-600); }
 .ip-stock-low { color: var(--color-warning-600, #d48806); }
