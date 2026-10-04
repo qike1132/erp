@@ -372,168 +372,200 @@ async def restore_database_from_json(zf, db: AsyncSession, task_id: str | None =
     }
 
 
+async def _disable_fk_constraints(db: AsyncSession) -> bool:
+    """superuser 时禁用外键约束，返回是否已设置 replica 角色。"""
+    try:
+        is_super = await db.execute(text("SELECT usesuper FROM pg_user WHERE usename = current_user"))
+        if is_super.scalar():
+            await db.execute(text("SET session_replication_role = 'replica'"))
+            return True
+        logger.info('当前用户非superuser，跳过禁用外键约束（将使用ON CONFLICT处理冲突）')
+    except (SQLAlchemyError, OSError) as e:
+        logger.warning(f'禁用外键约束失败: {e}')
+    return False
+
+
+async def _re_enable_fk_constraints(db: AsyncSession, replication_role_set: bool) -> None:
+    if replication_role_set:
+        try:
+            await db.execute(text("SET session_replication_role = 'origin'"))
+        except (SQLAlchemyError, OSError) as e:
+            logger.warning(f'重新启用外键约束失败: {e}')
+
+
+async def _clear_tables_for_restore(db: AsyncSession, backup_data: dict) -> list[str]:
+    """清空备份包含的表，返回清空失败的表名（F7: 失败必须显式上报，不能静默合并）。"""
+    from fastapi_app.shared_models import Base
+
+    delete_failed: list[str] = []
+    for table in reversed(Base.metadata.sorted_tables):
+        table_name = str(table.name)
+        if table_name not in backup_data.get('tables', {}):
+            continue
+        qtname = quote_table(table_name)  # REV-08
+        nested = await db.begin_nested()
+        try:
+            await db.execute(text(f'DELETE FROM {qtname}'))  # nosec; batch-loop: 逐表备份/恢复,无法批量 # sql-safe: escape_like/绑定参数/常量片段
+            await nested.commit()  # manual-tx: savepoint 嵌套事务管理
+        except (SQLAlchemyError, ValueError, OSError) as e:
+            await nested.rollback()  # manual-tx: savepoint 嵌套事务管理
+            delete_failed.append(table_name)
+            logger.warning(f'清空表 {table_name} 失败（外键约束）: {e}')
+    return delete_failed
+
+
+async def _invalidate_caches_after_restore() -> None:
+    try:
+        from fastapi_app.core.cache import CacheDomain, invalidate_related_caches
+        await invalidate_related_caches(CacheDomain.ALL)
+    except (RuntimeError, OSError, ValueError) as e:
+        logger.warning(f'恢复后缓存清除失败: {e}')
+    try:
+        from fastapi_app.core.purchase_cache import invalidate_purchase_caches
+        await invalidate_purchase_caches()  # 2026-08-24 审计修正: 协程必须 await
+    except (RuntimeError, OSError, ValueError) as e:
+        logger.warning(f'恢复后采购缓存清除失败: {e}')
+
+
+async def _verify_restored_json(db: AsyncSession, backup_data: dict) -> dict[str, object]:
+    """恢复后校验（JSON 路径：L2 指纹退化为跳过）。"""
+    from .verify import verify_restore
+
+    verification: dict[str, object] = {'overall_pass': True}
+    try:
+        manifest_tables = {
+            tname: {'rows': td.get('count', len(td.get('rows', [])))}
+            for tname, td in backup_data.get('tables', {}).items()
+        }
+        # 2026-10-03 第八轮审计：此前用**独立连接** `_AsyncSessionLocal()` 校验，而此刻
+        # 主事务只 `flush()` 未 `commit`（commit 在 strategies.py 的调用方）→ READ COMMITTED
+        # 下独立连接看不到未提交的 DELETE/INSERT，读到的是**还原前**数据，「还原后校验」
+        # 实际没在校验还原结果。verify_restore 只做 SELECT，改用同一 session 即看到还原结果。
+        # JSON 路径不传 manifest_fingerprints：JSON 序列化会改变列的精确定文本
+        # 表示（float/字节/JSON 格式化/timestamptz 等），即便数据逻辑等价，基于
+        # COALESCE(col::text) 的 L2 指纹也必然假阴性。故 L2 对 JSON 路径退化为
+        # 跳过（match=None，不计 mismatch），overall_pass 依赖真实可验证的
+        # L1 行数 + L4 表结构。psql 路径（二进制级精确）仍完整校验 L2。
+        verification = await verify_restore(
+            db, manifest_tables,
+            manifest_fingerprints=None,
+            manifest_schema=backup_data.get('schema_snapshot'),
+        )
+    except (SQLAlchemyError, ValueError, OSError) as e:
+        logger.warning(f'恢复后验证失败: {e}')
+        verification = {'overall_pass': False, 'error': str(e)}
+    return verification
+
+
+async def _restore_tables_from_json(db, tables_to_restore, backup_data, _report, total_tables) -> tuple[dict, int, list]:
+    """逐表从 JSON 恢复数据，返回 (results, total_inserted, errors)。"""
+    results = {}
+    total_inserted = 0
+    errors = []
+    processed_tables = 0
+    for table in tables_to_restore:
+        table_name = str(table.name)
+        table_data = backup_data['tables'][table_name]
+        columns = table_data.get('columns', [])
+        rows = table_data.get('rows', [])
+        table_col_names = {c.name for c in table.columns}
+        type_map = build_column_type_map(table)
+        BATCH_SIZE = 500
+        inserted = 0
+        batch_errors = []
+        qtname = quote_table(table_name)  # REV-08
+        # 自引用外键（如 permission.parent_id）需父行先于子行插入，
+        # 否则主键行序导致子行先插触发外键违规。整表排序后再切分批。
+        rows = _topo_sort_self_referencing(table, rows)
+        for batch_start in range(0, len(rows), BATCH_SIZE):
+            batch = rows[batch_start:batch_start + BATCH_SIZE]
+            nested = await db.begin_nested()
+            try:
+                for offset, row in enumerate(batch):
+                    idx = batch_start + offset
+                    if not row:
+                        continue
+                    valid_cols = [c for c in columns if c in type_map and c in row and c in table_col_names]
+                    if not valid_cols:
+                        continue
+                    col_str = ', '.join(f'"{c}"' for c in valid_cols)
+                    val_str = ', '.join(f':{c}__row{idx}' for c in valid_cols)
+                    params = {}
+                    for c in valid_cols:
+                        raw_val = row[c]
+                        col_type = type_map.get(c)
+                        deserialized = deserialize_value(raw_val, col_type) if col_type else raw_val
+                        params[f'{c}__row{idx}'] = deserialized
+                    pk_cols = [c.name for c in table.primary_key.columns]
+                    update_cols = [c for c in valid_cols if c not in pk_cols]
+                    if pk_cols and update_cols:
+                        update_str = ', '.join(f'"{c}" = EXCLUDED."{c}"' for c in update_cols)
+                        await db.execute(text(  # batch-loop: 逐表备份/恢复,无法批量
+                            f'INSERT INTO {qtname} ({col_str}) VALUES ({val_str}) ON CONFLICT ({", ".join(pk_cols)}) DO UPDATE SET {update_str}'  # nosec B608 — qtname 经 quote_table 白名单校验
+                        ), params)
+                    else:
+                        await db.execute(text(  # batch-loop: 逐表备份/恢复,无法批量
+                            f'INSERT INTO {qtname} ({col_str}) VALUES ({val_str}) ON CONFLICT DO NOTHING'  # nosec B608 — qtname 经 quote_table 白名单校验
+                        ), params)
+                    inserted += 1
+                await nested.commit()  # manual-tx: savepoint 嵌套事务管理
+            except (SQLAlchemyError, ValueError, TypeError) as e:
+                await nested.rollback()  # manual-tx: savepoint 嵌套事务管理
+                # 降级：batch 因非主键唯一约束冲突整体失败，逐行重试，跳过冲突行（REV-DO32）
+                skip = await _retry_batch_rowwise(
+                    db, qtname, batch, batch_start, columns, type_map, table_col_names, pk_cols)
+                if skip:
+                    batch_errors.append(
+                        f'批次 {batch_start // BATCH_SIZE + 1}: 降级跳过 {len(skip)} 行（唯一约束冲突）: {skip[:5]}')
+                    logger.warning(
+                        f'恢复表 {table_name} 批次 {batch_start // BATCH_SIZE + 1} '
+                        f'降级，跳过 {len(skip)} 行唯一约束冲突')
+                else:
+                    batch_errors.append(f'批次 {batch_start // BATCH_SIZE + 1}: {e}')
+                    logger.warning(f'恢复表 {table_name} 批次 {batch_start // BATCH_SIZE + 1} 失败: {e}')
+        if batch_errors:
+            results[table_name] = {'status': 'partial', 'inserted': inserted, 'batch_errors': batch_errors}
+            errors.append(f'{table_name}: {len(batch_errors)} 个批次失败')
+        else:
+            results[table_name] = {'status': 'ok', 'inserted': inserted}
+        total_inserted += inserted
+        processed_tables += 1
+
+        # 报告进度：0.1 到 0.9 之间按表进度递增
+        sub_progress = 0.1 + 0.8 * (processed_tables / total_tables) if total_tables > 0 else 0.9
+        await _report(sub_progress, f'已恢复 {processed_tables}/{total_tables} 表 ({table_name}: {inserted}条)')
+
+    return results, total_inserted, errors
+
+
 async def restore_legacy_json(backup_data: dict, db: AsyncSession, task_id: str | None = None) -> dict:
     """从 Legacy JSON 格式备份恢复数据库 (v1.0)"""
     from fastapi_app.core.backup_progress import update_progress as _upd_prog
     from fastapi_app.shared_models import Base
-
-    from .verify import verify_restore
 
     async def _report(sub: float, detail: str = ''):
         if task_id:
             await _upd_prog(task_id, 'restore_db', sub, detail)
             await asyncio.sleep(0)
 
-    results = {}
-    total_inserted = 0
-    errors = []
-    replication_role_set = False
-
     # 计算需要恢复的表数量用于进度计算
     tables_to_restore = [t for t in Base.metadata.sorted_tables if str(t.name) in backup_data.get('tables', {})]
     total_tables = len(tables_to_restore)
 
     try:
-        try:
-            is_super = await db.execute(text("SELECT usesuper FROM pg_user WHERE usename = current_user"))
-            if is_super.scalar():
-                await db.execute(text("SET session_replication_role = 'replica'"))
-                replication_role_set = True
-            else:
-                logger.info('当前用户非superuser，跳过禁用外键约束（将使用ON CONFLICT处理冲突）')
-        except (SQLAlchemyError, OSError) as e:
-            logger.warning(f'禁用外键约束失败: {e}')
+        replication_role_set = await _disable_fk_constraints(db)
 
         await _report(0.05, '清空现有数据...')
-        delete_failed: list[str] = []  # F7: 清空失败的表必须显式上报，不能再静默合并
-        for table in reversed(Base.metadata.sorted_tables):
-            table_name = str(table.name)
-            if table_name not in backup_data.get('tables', {}):
-                continue
-            qtname = quote_table(table_name)  # REV-08
-            nested = await db.begin_nested()
-            try:
-                await db.execute(text(f'DELETE FROM {qtname}'))  # nosec; batch-loop: 逐表备份/恢复,无法批量 # sql-safe: escape_like/绑定参数/常量片段
-                await nested.commit()  # manual-tx: savepoint 嵌套事务管理
-            except (SQLAlchemyError, ValueError, OSError) as e:
-                await nested.rollback()  # manual-tx: savepoint 嵌套事务管理
-                delete_failed.append(table_name)
-                logger.warning(f'清空表 {table_name} 失败（外键约束）: {e}')
+        delete_failed = await _clear_tables_for_restore(db, backup_data)
 
-        processed_tables = 0
-        for table in tables_to_restore:
-            table_name = str(table.name)
-            table_data = backup_data['tables'][table_name]
-            columns = table_data.get('columns', [])
-            rows = table_data.get('rows', [])
-            table_col_names = {c.name for c in table.columns}
-            type_map = build_column_type_map(table)
-            BATCH_SIZE = 500
-            inserted = 0
-            batch_errors = []
-            qtname = quote_table(table_name)  # REV-08
-            # 自引用外键（如 permission.parent_id）需父行先于子行插入，
-            # 否则主键行序导致子行先插触发外键违规。整表排序后再切分批。
-            rows = _topo_sort_self_referencing(table, rows)
-            for batch_start in range(0, len(rows), BATCH_SIZE):
-                batch = rows[batch_start:batch_start + BATCH_SIZE]
-                nested = await db.begin_nested()
-                try:
-                    for offset, row in enumerate(batch):
-                        idx = batch_start + offset
-                        if not row:
-                            continue
-                        valid_cols = [c for c in columns if c in type_map and c in row and c in table_col_names]
-                        if not valid_cols:
-                            continue
-                        col_str = ', '.join(f'"{c}"' for c in valid_cols)
-                        val_str = ', '.join(f':{c}__row{idx}' for c in valid_cols)
-                        params = {}
-                        for c in valid_cols:
-                            raw_val = row[c]
-                            col_type = type_map.get(c)
-                            deserialized = deserialize_value(raw_val, col_type) if col_type else raw_val
-                            params[f'{c}__row{idx}'] = deserialized
-                        pk_cols = [c.name for c in table.primary_key.columns]
-                        update_cols = [c for c in valid_cols if c not in pk_cols]
-                        if pk_cols and update_cols:
-                            update_str = ', '.join(f'"{c}" = EXCLUDED."{c}"' for c in update_cols)
-                            await db.execute(text(  # batch-loop: 逐表备份/恢复,无法批量
-                                f'INSERT INTO {qtname} ({col_str}) VALUES ({val_str}) ON CONFLICT ({", ".join(pk_cols)}) DO UPDATE SET {update_str}'  # nosec B608 — qtname 经 quote_table 白名单校验
-                            ), params)
-                        else:
-                            await db.execute(text(  # batch-loop: 逐表备份/恢复,无法批量
-                                f'INSERT INTO {qtname} ({col_str}) VALUES ({val_str}) ON CONFLICT DO NOTHING'  # nosec B608 — qtname 经 quote_table 白名单校验
-                            ), params)
-                        inserted += 1
-                    await nested.commit()  # manual-tx: savepoint 嵌套事务管理
-                except (SQLAlchemyError, ValueError, TypeError) as e:
-                    await nested.rollback()  # manual-tx: savepoint 嵌套事务管理
-                    # 降级：batch 因非主键唯一约束冲突整体失败，逐行重试，跳过冲突行（REV-DO32）
-                    skip = await _retry_batch_rowwise(
-                        db, qtname, batch, batch_start, columns, type_map, table_col_names, pk_cols)
-                    if skip:
-                        batch_errors.append(
-                            f'批次 {batch_start // BATCH_SIZE + 1}: 降级跳过 {len(skip)} 行（唯一约束冲突）: {skip[:5]}')
-                        logger.warning(
-                            f'恢复表 {table_name} 批次 {batch_start // BATCH_SIZE + 1} '
-                            f'降级，跳过 {len(skip)} 行唯一约束冲突')
-                    else:
-                        batch_errors.append(f'批次 {batch_start // BATCH_SIZE + 1}: {e}')
-                        logger.warning(f'恢复表 {table_name} 批次 {batch_start // BATCH_SIZE + 1} 失败: {e}')
-            if batch_errors:
-                results[table_name] = {'status': 'partial', 'inserted': inserted, 'batch_errors': batch_errors}
-                errors.append(f'{table_name}: {len(batch_errors)} 个批次失败')
-            else:
-                results[table_name] = {'status': 'ok', 'inserted': inserted}
-            total_inserted += inserted
-            processed_tables += 1
-
-            # 报告进度：0.1 到 0.9 之间按表进度递增
-            sub_progress = 0.1 + 0.8 * (processed_tables / total_tables) if total_tables > 0 else 0.9
-            await _report(sub_progress, f'已恢复 {processed_tables}/{total_tables} 表 ({table_name}: {inserted}条)')
+        results, total_inserted, errors = await _restore_tables_from_json(
+            db, tables_to_restore, backup_data, _report, total_tables
+        )
 
         await db.flush()
-        if replication_role_set:
-            try:
-                await db.execute(text("SET session_replication_role = 'origin'"))
-            except (SQLAlchemyError, OSError) as e:
-                logger.warning(f'重新启用外键约束失败: {e}')
-
-        try:
-            from fastapi_app.core.cache import CacheDomain, invalidate_related_caches
-            await invalidate_related_caches(CacheDomain.ALL)
-        except (RuntimeError, OSError, ValueError) as e:
-            logger.warning(f'恢复后缓存清除失败: {e}')
-        try:
-            from fastapi_app.core.purchase_cache import invalidate_purchase_caches
-            await invalidate_purchase_caches()  # 2026-08-24 审计修正: 协程必须 await
-        except (RuntimeError, OSError, ValueError) as e:
-            logger.warning(f'恢复后采购缓存清除失败: {e}')
-
-        verification: dict[str, object] = {'overall_pass': True}
-        try:
-            manifest_tables = {
-                tname: {'rows': td.get('count', len(td.get('rows', [])))}
-                for tname, td in backup_data.get('tables', {}).items()
-            }
-            # 2026-10-03 第八轮审计：此前用**独立连接** `_AsyncSessionLocal()` 校验，而此刻
-            # 主事务只 `flush()` 未 `commit`（commit 在 strategies.py 的调用方）→ READ COMMITTED
-            # 下独立连接看不到未提交的 DELETE/INSERT，读到的是**还原前**数据，「还原后校验」
-            # 实际没在校验还原结果。verify_restore 只做 SELECT，改用同一 session 即看到还原结果。
-            # JSON 路径不传 manifest_fingerprints：JSON 序列化会改变列的精确定文本
-            # 表示（float/字节/JSON 格式化/timestamptz 等），即便数据逻辑等价，基于
-            # COALESCE(col::text) 的 L2 指纹也必然假阴性。故 L2 对 JSON 路径退化为
-            # 跳过（match=None，不计 mismatch），overall_pass 依赖真实可验证的
-            # L1 行数 + L4 表结构。psql 路径（二进制级精确）仍完整校验 L2。
-            verification = await verify_restore(
-                db, manifest_tables,
-                manifest_fingerprints=None,
-                manifest_schema=backup_data.get('schema_snapshot'),
-            )
-        except (SQLAlchemyError, ValueError, OSError) as e:
-            logger.warning(f'恢复后验证失败: {e}')
-            verification = {'overall_pass': False, 'error': str(e)}
+        await _re_enable_fk_constraints(db, replication_role_set)
+        await _invalidate_caches_after_restore()
+        verification = await _verify_restored_json(db, backup_data)
     except (SQLAlchemyError, ValueError, OSError) as e:
         await db.rollback()  # manual-tx: try/except 内显式事务控制
         raise RestoreError(f'恢复过程中出错: {e}') from e

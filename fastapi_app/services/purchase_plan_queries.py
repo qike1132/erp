@@ -393,30 +393,8 @@ def _py_weekday_to_js(py_wd: int) -> str:
     return _PP_WDS[(py_wd + 1) % 7]
 
 
-@cache_result(
-    key_prefix="pp:agg",
-    ttl=120,
-    local_ttl=30,
-    # v2: 进度口径由「已出货」改为「已生产」（设计稿 §5）。
-    key_builder=lambda **kwargs: f"v2:y{kwargs.get('year', 0)}:m{kwargs.get('month', 0)}:c{kwargs.get('customer_id', 0)}",
-)
-async def get_monthly_aggregated(db: AsyncSession, year: int, month: int, customer_id: int=0) -> dict:
-    """月度聚合数据：在后端完成 rows + sku_summary + sku_date_index + customers 聚合，
-    避免向前端传输 20K+ 明细并在前端聚合（6.9 + 6.10）。
-
-    返回结构:
-      rows: 按日期聚合的列表（不含明细 plans）
-      sku_summary: 按 customer|product 聚合的 SKU 列表
-      sku_date_index: {customer|product: [{date,day,weekday,qty,customer,status}]}
-      customers: 客户汇总列表（合并原 customer-summary 逻辑）
-      customer_totals: 客户汇总总量
-
-    rows / sku_summary / customers 的进度字段为 produced_qty / _producedPct，
-    数据源为每日生产记录（三部门相加，窗口见 production_window）。
-    """
-    plan_month = f'{year}-{month:02d}'
-    days_in_month = calendar.monthrange(year, month)[1]
-
+async def _fetch_monthly_plan_rows(db: AsyncSession, plan_month: str, customer_id: int):
+    """查询指定月份（可选按客户过滤）的计划明细行。"""
     _sql = """
         SELECT d.id AS detail_id, d.plan_id, p.customer_id, p.customer_name,
                d.product_name, d.barcode, d.plan_date, d.quantity
@@ -424,20 +402,18 @@ async def get_monthly_aggregated(db: AsyncSession, year: int, month: int, custom
         JOIN purchase_plans p ON d.plan_id = p.id
         WHERE p.plan_month = :plan_month
     """ + (" AND p.customer_id = :customer_id" if customer_id else "")  # nosec B608
-    sql = text(_sql)
-
     params: dict = {'plan_month': plan_month}
     if customer_id:
         params['customer_id'] = customer_id
+    result = await db.execute(text(_sql), params)
+    return result.all()
 
-    result = await db.execute(sql, params)
-    rows = result.all()
 
-    detail_produced_map, fifo_degraded = await _build_fifo_produced_map_from_rows(db, rows, plan_month)
+def _aggregate_monthly_rows(rows, detail_produced_map, inventory_map) -> tuple[dict, dict, dict, dict]:
+    """单次遍历完成全部聚合：日期 / SKU / SKU日期索引 / 客户产品级。
 
-    inventory_map = await _get_inventory_map(db)
-
-    # ---- 单次遍历完成全部聚合 ----
+    返回 (by_date, by_key, prod_cust_date_map, product_summary)。
+    """
     by_date: dict[str, dict] = {}
     by_key: dict[str, dict] = {}
     _prod_cust_date_map: dict[str, dict[str, dict]] = {}
@@ -508,7 +484,11 @@ async def get_monthly_aggregated(db: AsyncSession, year: int, month: int, custom
         if _calc_stock_status(ps['plan_qty'], inv_qty) != 'sufficient':
             ps['warning'] = True
 
-    # 构建 rows 列表（字段名与前端 Row 类型对齐）
+    return by_date, by_key, _prod_cust_date_map, product_summary
+
+
+def _build_monthly_rows_list(by_date: dict, month: int) -> list:
+    """构建 rows 列表（字段名与前端 Row 类型对齐）。"""
     rows_list = []
     for date_str, d in by_date.items():
         rows_list.append({
@@ -524,8 +504,11 @@ async def get_monthly_aggregated(db: AsyncSession, year: int, month: int, custom
     max_plan = max((r['planCount'] for r in rows_list), default=0)
     for r in rows_list:
         r['_isPeak'] = r['planCount'] == max_plan and max_plan > 0
+    return rows_list
 
-    # sku_summary 列表（字段名与前端 SkuRow 类型对齐）
+
+def _build_sku_summary_list(by_key: dict) -> list:
+    """构建 sku_summary 列表（字段名与前端 SkuRow 类型对齐）。"""
     sku_summary = []
     for sk in by_key.values():
         sku_summary.append({
@@ -536,13 +519,11 @@ async def get_monthly_aggregated(db: AsyncSession, year: int, month: int, custom
             '_odd': False,
         })
     sku_summary.sort(key=lambda s: (s['customer_name'], s['barcode']))
+    return sku_summary
 
-    # sku_date_index
-    sku_date_index = {}
-    for k, dm in _prod_cust_date_map.items():
-        sku_date_index[k] = sorted(dm.values(), key=lambda x: x['date'])
 
-    # 客户汇总
+def _build_customer_totals(product_summary: dict) -> tuple[list, dict]:
+    """构建客户汇总列表与客户总量。"""
     summary: dict[int, dict] = {}
     for ps in product_summary.values():
         cid = ps['customer_id']
@@ -565,6 +546,54 @@ async def get_monthly_aggregated(db: AsyncSession, year: int, month: int, custom
         'total_remaining_qty': sum(s['remaining_qty'] for s in customers),
         'warning_count': sum(s['warning_count'] for s in customers),
     }
+    return customers, customer_totals
+
+
+@cache_result(
+    key_prefix="pp:agg",
+    ttl=120,
+    local_ttl=30,
+    # v2: 进度口径由「已出货」改为「已生产」（设计稿 §5）。
+    key_builder=lambda **kwargs: f"v2:y{kwargs.get('year', 0)}:m{kwargs.get('month', 0)}:c{kwargs.get('customer_id', 0)}",
+)
+async def get_monthly_aggregated(db: AsyncSession, year: int, month: int, customer_id: int=0) -> dict:
+    """月度聚合数据：在后端完成 rows + sku_summary + sku_date_index + customers 聚合，
+    避免向前端传输 20K+ 明细并在前端聚合（6.9 + 6.10）。
+
+    返回结构:
+      rows: 按日期聚合的列表（不含明细 plans）
+      sku_summary: 按 customer|product 聚合的 SKU 列表
+      sku_date_index: {customer|product: [{date,day,weekday,qty,customer,status}]}
+      customers: 客户汇总列表（合并原 customer-summary 逻辑）
+      customer_totals: 客户汇总总量
+
+    rows / sku_summary / customers 的进度字段为 produced_qty / _producedPct，
+    数据源为每日生产记录（三部门相加，窗口见 production_window）。
+    """
+    plan_month = f'{year}-{month:02d}'
+    days_in_month = calendar.monthrange(year, month)[1]
+
+    rows = await _fetch_monthly_plan_rows(db, plan_month, customer_id)
+
+    detail_produced_map, fifo_degraded = await _build_fifo_produced_map_from_rows(db, rows, plan_month)
+
+    inventory_map = await _get_inventory_map(db)
+
+    # ---- 单次遍历完成全部聚合 ----
+    by_date, by_key, _prod_cust_date_map, product_summary = _aggregate_monthly_rows(
+        rows, detail_produced_map, inventory_map
+    )
+
+    rows_list = _build_monthly_rows_list(by_date, month)
+    sku_summary = _build_sku_summary_list(by_key)
+
+    # sku_date_index
+    sku_date_index = {}
+    for k, dm in _prod_cust_date_map.items():
+        sku_date_index[k] = sorted(dm.values(), key=lambda x: x['date'])
+
+    # 客户汇总
+    customers, customer_totals = _build_customer_totals(product_summary)
 
     return {
         'year': year, 'month': month, 'days_in_month': days_in_month,

@@ -285,7 +285,19 @@ async def _save_material_bom_items(
         ))
 
 
-async def save_bom(db: AsyncSession, product_id: int, data: dict, username: str) -> str:
+def _resolve_role_id(item: dict, temp_role_map: dict):
+    """物料项 role_id：优先真实 id，其次用 role_key 映射新建角色"""
+    rid = item.get('role_id')
+    if rid is not None:
+        return rid
+    role_key = item.get('role_key')
+    if role_key:
+        return temp_role_map.get(role_key)
+    return None
+
+
+async def _load_product_with_bom(db: AsyncSession, product_id: int) -> Product:
+    """加载产品及其 BOM 关联，不存在则抛 ValueError。"""
     result = await db.execute(
         select(Product).options(
             selectinload(Product.material),
@@ -298,65 +310,66 @@ async def save_bom(db: AsyncSession, product_id: int, data: dict, username: str)
     product = result.scalars().first()
     if not product:
         raise ValueError('产品不存在')
+    return product
 
-    # ===== 默认 BOM 自定义名称（default_bom_label 键存在才更新，旧客户端不传则保持原状） =====
-    if 'default_bom_label' in data:
-        label = (data.get('default_bom_label') or '').strip() or None
-        if label != product.default_bom_label:
-            if label is not None:
-                db.add(ModificationLog(
-                    target_type='product', target_id=product.id,
-                    field_name='default_bom_label',
-                    old_value=product.default_bom_label or '', new_value=label,
-                    modifier_name=username,
-                ))
-            product.default_bom_label = label
 
-    # ===== 角色保存（roles 键存在才执行全量替换，旧客户端不传则保持原状） =====
+def _update_default_bom_label(db: AsyncSession, product: Product, data: dict, username: str) -> None:
+    """默认 BOM 自定义名称（default_bom_label 键存在才更新，旧客户端不传则保持原状）。"""
+    if 'default_bom_label' not in data:
+        return
+    label = (data.get('default_bom_label') or '').strip() or None
+    if label == product.default_bom_label:
+        return
+    if label is not None:
+        db.add(ModificationLog(
+            target_type='product', target_id=product.id,
+            field_name='default_bom_label',
+            old_value=product.default_bom_label or '', new_value=label,
+            modifier_name=username,
+        ))
+    product.default_bom_label = label
+
+
+async def _replace_bom_roles(db: AsyncSession, product: Product, data: dict, product_id: int, username: str) -> dict:
+    """角色全量替换（roles 键存在才执行），返回客户端临时 role_key -> 新建角色真实 id 映射。"""
+    temp_role_map: dict = {}
+    if 'roles' not in data:
+        return temp_role_map
     # 角色段解析抽到 bom_role_resolver（支持 global_role_id / role_key / id 三路径），
     # 避免本文件继续膨胀（958 行已超服务文件上限，风险 M2）。
-    temp_role_map: dict = {}  # 客户端临时 role_key -> 新建角色真实 id
-    if 'roles' in data:
-        resolution = await resolve_role_rows(
-            payload_roles=data.get('roles') or [],
-            existing_product_roles=list(product.roles),
-            db=db,
-            product_id=product_id,
-            username=username,
-        )
-        temp_role_map = resolution.temp_role_map
-        role_ids = resolution.role_ids
-        # 删除未出现在 payload 中的角色（物料由 DB 级 FK ON DELETE CASCADE 清理）
-        to_delete = [r for r in product.roles if r.id not in role_ids]
-        for role in to_delete:
-            db.add(ModificationLog(
-                target_type='role', target_id=role.id,
-                field_name='deleted',
-                old_value=role.role_name or '', new_value='(已删除)',
-                modifier_name=username,
-            ))
-            # AsyncSession.delete 是**协程**（SQLAlchemy 2.0 async API），
-            # 漏 await 会导致协程被丢弃、角色**静默不删除**。
-            await db.delete(role)
+    resolution = await resolve_role_rows(
+        payload_roles=data.get('roles') or [],
+        existing_product_roles=list(product.roles),
+        db=db,
+        product_id=product_id,
+        username=username,
+    )
+    temp_role_map = resolution.temp_role_map
+    role_ids = resolution.role_ids
+    # 删除未出现在 payload 中的角色（物料由 DB 级 FK ON DELETE CASCADE 清理）
+    to_delete = [r for r in product.roles if r.id not in role_ids]
+    for role in to_delete:
+        db.add(ModificationLog(
+            target_type='role', target_id=role.id,
+            field_name='deleted',
+            old_value=role.role_name or '', new_value='(已删除)',
+            modifier_name=username,
+        ))
+        # AsyncSession.delete 是**协程**（SQLAlchemy 2.0 async API），
+        # 漏 await 会导致协程被丢弃、角色**静默不删除**。
+        await db.delete(role)
+    return temp_role_map
 
-    def _resolve_role_id(item: dict):
-        """物料项 role_id：优先真实 id，其次用 role_key 映射新建角色"""
-        rid = item.get('role_id')
-        if rid is not None:
-            return rid
-        role_key = item.get('role_key')
-        if role_key:
-            return temp_role_map.get(role_key)
-        return None
 
-    # 填充物：支持 fillings 列表（每角色一条），兼容旧字段 filling（产品级）
+async def _save_filling_items(db: AsyncSession, product_id: int, data: dict, temp_role_map: dict, username: str) -> list:
+    """保存填充物（每角色一条，兼容旧字段 filling），返回归一化后的 fillings 列表。"""
     fillings_data = data.get('fillings')
     if not fillings_data and data.get('filling'):
         fillings_data = [data['filling']]
     # 批量预取填充物，避免循环内 N+1 查询
     existing_map: dict = {}
     if fillings_data:
-        filling_role_ids = [_resolve_role_id(fd) for fd in fillings_data]
+        filling_role_ids = [_resolve_role_id(fd, temp_role_map) for fd in fillings_data]
         non_none_ids = [rid for rid in filling_role_ids if rid]
         has_none_role = any(rid is None for rid in filling_role_ids)
         or_conditions = []
@@ -374,7 +387,7 @@ async def save_bom(db: AsyncSession, product_id: int, data: dict, username: str)
             existing_map = {m.role_id: m for m in batch_result.scalars()}
 
     for filling_data in fillings_data or []:
-        filling_role_id = _resolve_role_id(filling_data)
+        filling_role_id = _resolve_role_id(filling_data, temp_role_map)
         filling_material = existing_map.get(filling_role_id)
         if filling_material:
             old_data = {
@@ -411,6 +424,77 @@ async def save_bom(db: AsyncSession, product_id: int, data: dict, username: str)
                 unit=filling_data.get('unit', ''),
                 remark=filling_data.get('remark', ''),
             ))
+    return fillings_data or []
+
+
+async def _delete_removed_bom_items(db: AsyncSession, product_id: int, data: dict, fillings_data: list, username: str) -> None:
+    """删除 payload 外的面料/辅料/填充物行（角色感知客户端才执行）。"""
+    # 面料/辅料：删除未出现在 payload 中的行（含各角色行）
+    _delete_meta = {
+        'fabrics': ('fabric', 'fabric_name'),
+        'accessories': ('accessory', 'accessory_name'),
+    }
+    delete_targets: list[tuple[str, Any]] = [
+        ('fabrics', ProductFabric),
+        ('accessories', ProductAccessory),
+    ]
+    for category, model_cls in delete_targets:
+        existing_ids = {item['id'] for item in data.get(category, []) if item.get('id')}
+        result = await db.execute(  # batch-loop: 有意逐行处理,非 N+1
+            select(model_cls).where(
+                model_cls.product_id == product_id,
+                ~model_cls.id.in_(existing_ids) if existing_ids else true(),
+            )
+        )
+        deleted_rows = result.scalars().all()
+        target_type, name_attr = _delete_meta[category]
+        if deleted_rows:
+            # 先采集审计日志所需字段，再单条批量 DELETE 替代逐条 session.delete
+            delete_ids = []
+            for row in deleted_rows:
+                delete_ids.append(row.id)
+                db.add(ModificationLog(
+                    target_type=target_type, target_id=row.id,
+                    field_name='deleted',
+                    old_value=getattr(row, name_attr, '') or '',
+                    new_value='(已删除)',
+                    modifier_name=username,
+                ))
+            await db.execute(delete(model_cls).where(model_cls.id.in_(delete_ids)))  # batch-loop: 有意逐行处理,非 N+1
+
+    # 填充物：删除未出现在 payload 中的行（含产品级与各角色行）
+    submitted_filling_ids = [fd.get('id') for fd in fillings_data or [] if fd.get('id')]
+    filling_result = await db.execute(
+        select(ProductMaterial).where(
+            ProductMaterial.product_id == product_id,
+            ~ProductMaterial.id.in_(submitted_filling_ids) if submitted_filling_ids else true(),
+        )
+    )
+    fillings_to_delete = filling_result.scalars().all()
+    if fillings_to_delete:
+        filling_delete_ids = []
+        for filling_row in fillings_to_delete:
+            filling_delete_ids.append(filling_row.id)
+            db.add(ModificationLog(
+                target_type='material', target_id=filling_row.id,
+                field_name='deleted',
+                old_value='填充物', new_value='(已删除)',
+                modifier_name=username,
+            ))
+        await db.execute(delete(ProductMaterial).where(ProductMaterial.id.in_(filling_delete_ids)))  # batch-loop: 有意逐行处理,非 N+1
+
+
+async def save_bom(db: AsyncSession, product_id: int, data: dict, username: str) -> str:
+    product = await _load_product_with_bom(db, product_id)
+
+    # ===== 默认 BOM 自定义名称（default_bom_label 键存在才更新，旧客户端不传则保持原状） =====
+    _update_default_bom_label(db, product, data, username)
+
+    # ===== 角色保存（roles 键存在才执行全量替换，旧客户端不传则保持原状） =====
+    temp_role_map = await _replace_bom_roles(db, product, data, product_id, username)
+
+    # 填充物：支持 fillings 列表（每角色一条），兼容旧字段 filling（产品级）
+    fillings_data = await _save_filling_items(db, product_id, data, temp_role_map, username)
 
     fabrics_data = data.get('fabrics', [])
     await _save_material_bom_items(db, product_id, fabrics_data, 'fabric', ProductFabric, username, temp_role_map)
@@ -420,59 +504,7 @@ async def save_bom(db: AsyncSession, product_id: int, data: dict, username: str)
 
     # 角色感知客户端才执行"payload 外删除"（与角色全量替换同门控，避免旧客户端误删角色物料）
     if 'roles' in data:
-        # 面料/辅料：删除未出现在 payload 中的行（含各角色行）
-        _delete_meta = {
-            'fabrics': ('fabric', 'fabric_name'),
-            'accessories': ('accessory', 'accessory_name'),
-        }
-        delete_targets: list[tuple[str, type[ProductFabric] | type[ProductAccessory]]] = [
-            ('fabrics', ProductFabric),
-            ('accessories', ProductAccessory),
-        ]
-        for category, model_cls in delete_targets:
-            existing_ids = {item['id'] for item in data.get(category, []) if item.get('id')}
-            result = await db.execute(  # batch-loop: 有意逐行处理,非 N+1
-                select(model_cls).where(
-                    model_cls.product_id == product_id,
-                    ~model_cls.id.in_(existing_ids) if existing_ids else true(),
-                )
-            )
-            deleted_rows = result.scalars().all()
-            target_type, name_attr = _delete_meta[category]
-            if deleted_rows:
-                # 先采集审计日志所需字段，再单条批量 DELETE 替代逐条 session.delete
-                delete_ids = []
-                for row in deleted_rows:
-                    delete_ids.append(row.id)
-                    db.add(ModificationLog(
-                        target_type=target_type, target_id=row.id,
-                        field_name='deleted',
-                        old_value=getattr(row, name_attr, '') or '',
-                        new_value='(已删除)',
-                        modifier_name=username,
-                    ))
-                await db.execute(delete(model_cls).where(model_cls.id.in_(delete_ids)))  # batch-loop: 有意逐行处理,非 N+1
-
-        # 填充物：删除未出现在 payload 中的行（含产品级与各角色行）
-        submitted_filling_ids = [fd.get('id') for fd in fillings_data or [] if fd.get('id')]
-        filling_result = await db.execute(
-            select(ProductMaterial).where(
-                ProductMaterial.product_id == product_id,
-                ~ProductMaterial.id.in_(submitted_filling_ids) if submitted_filling_ids else true(),
-            )
-        )
-        fillings_to_delete = filling_result.scalars().all()
-        if fillings_to_delete:
-            filling_delete_ids = []
-            for filling_row in fillings_to_delete:
-                filling_delete_ids.append(filling_row.id)
-                db.add(ModificationLog(
-                    target_type='material', target_id=filling_row.id,
-                    field_name='deleted',
-                    old_value='填充物', new_value='(已删除)',
-                    modifier_name=username,
-                ))
-            await db.execute(delete(ProductMaterial).where(ProductMaterial.id.in_(filling_delete_ids)))  # batch-loop: 有意逐行处理,非 N+1
+        await _delete_removed_bom_items(db, product_id, data, fillings_data, username)
 
     return 'BOM 保存成功'
 
@@ -645,106 +677,70 @@ async def _copy_bom_into_role(
     }
 
 
-async def copy_bom(db: AsyncSession, target_product_id: int, data: dict, username: str = 'unknown') -> dict:
-    source_product_id = data.get('source_product_id')
-    overwrite = data.get('overwrite', False)
-    role_id = data.get('role_id')
-
-    if not source_product_id:
-        raise ValueError('请选择源产品')
-    if source_product_id == target_product_id:
-        raise ValueError('不能复制到同一产品')
-
-    src_result = await db.execute(
+async def _load_product_full(db: AsyncSession, product_id: int):
+    """加载产品及其 BOM 关联（不存在返回 None）。"""
+    result = await db.execute(
         select(Product).options(
             selectinload(Product.material),
             selectinload(Product.material_rows),
             selectinload(Product.fabrics),
             selectinload(Product.accessories),
             selectinload(Product.roles),
-        ).where(Product.id == source_product_id)
+        ).where(Product.id == product_id)
     )
-    source_product = src_result.scalar_one_or_none()
+    return result.scalar_one_or_none()
 
-    tgt_result = await db.execute(
-        select(Product).options(
-            selectinload(Product.material),
-            selectinload(Product.material_rows),
-            selectinload(Product.fabrics),
-            selectinload(Product.accessories),
-            selectinload(Product.roles),
-        ).where(Product.id == target_product_id)
-    )
-    target_product = tgt_result.scalar_one_or_none()
 
+async def _load_copy_products(db: AsyncSession, source_product_id: int, target_product_id: int) -> tuple[Product, Product]:
+    """加载 BOM 复制的源/目标产品并校验。"""
+    source_product = await _load_product_full(db, source_product_id)
+    target_product = await _load_product_full(db, target_product_id)
     if not source_product:
         raise ValueError(f'源产品ID {source_product_id} 不存在')
     if not target_product:
         raise ValueError(f'目标产品ID {target_product_id} 不存在')
     if not has_bom(source_product):
         raise ValueError('源产品没有配置BOM表')
+    return source_product, target_product
 
-    # ===== 目标角色模式：复制到当前选中的自定义角色 =====
-    if role_id is not None:
-        return await _copy_bom_into_role(
-            db, source_product, target_product, target_product_id, role_id, overwrite, username,
-        )
 
-    # ===== 目标角色名模式：按名称查找或新建角色后复制（支持前端未保存的新角色）=====
-    role_name = (data.get('role_name') or '').strip()
-    if role_name:
-        target_roles = list(getattr(target_product, 'roles', None) or [])
-        # a. 目标产品已有同名角色（镜像列）→ 幂等复用
+async def _resolve_role_by_name(db: AsyncSession, target_product: Product, target_product_id: int, role_name: str, username: str) -> ProductRole:
+    """按角色名在目标产品上查找/新建角色（支持前端未保存的新角色）。"""
+    target_roles = list(getattr(target_product, 'roles', None) or [])
+    # a. 目标产品已有同名角色（镜像列）→ 幂等复用
+    role = next(
+        (
+            r for r in target_roles
+            if (getattr(r, 'role_name', None) or getattr(r, 'name', '') or '').strip() == role_name
+        ),
+        None,
+    )
+    if role is None:
+        # b. 按名称查找或新建全局角色（copy_bom 不产生审计噪音）
+        global_role = await ensure_global_role(db, role_name, username)
+        # c. 目标产品已关联同一全局角色（镜像名漂移）→ 复用，避免撞
+        #    uq_product_role_product_global(product_id, global_role_id)
         role = next(
-            (
-                r for r in target_roles
-                if (getattr(r, 'role_name', None) or getattr(r, 'name', '') or '').strip() == role_name
-            ),
+            (r for r in target_roles if getattr(r, 'global_role_id', None) == global_role.id),
             None,
         )
-        if role is None:
-            # b. 按名称查找或新建全局角色（copy_bom 不产生审计噪音）
-            global_role = await ensure_global_role(db, role_name, username)
-            # c. 目标产品已关联同一全局角色（镜像名漂移）→ 复用，避免撞
-            #    uq_product_role_product_global(product_id, global_role_id)
-            role = next(
-                (r for r in target_roles if getattr(r, 'global_role_id', None) == global_role.id),
-                None,
-            )
-        if role is None:
-            # d. 新建关联行：global_role_id 必填（迁移 045 后 NOT NULL），role_name 取全局角色名
-            role = ProductRole(
-                product_id=target_product_id,
-                global_role_id=global_role.id,
-                role_name=global_role.name,
-            )
-            db.add(role)
-            await db.flush()
-            # 挂进关系集合，否则 _copy_bom_into_role 的归属校验会误判「角色不属于该产品」
-            target_product.roles.append(role)
-        return await _copy_bom_into_role(
-            db, source_product, target_product, target_product_id, role.id, overwrite, username,
+    if role is None:
+        # d. 新建关联行：global_role_id 必填（迁移 045 后 NOT NULL），role_name 取全局角色名
+        role = ProductRole(
+            product_id=target_product_id,
+            global_role_id=global_role.id,
+            role_name=global_role.name,
         )
+        db.add(role)
+        await db.flush()
+        # 挂进关系集合，否则 _copy_bom_into_role 的归属校验会误判「角色不属于该产品」
+        target_product.roles.append(role)
+    return role
 
-    # ===== 以下为 role_id 为空时的原有逻辑，保持行为完全不变 =====
-    if not overwrite and has_bom(target_product):
-        raise ValueError('目标产品已有BOM表，请确认是否覆盖')
 
-    # 源产品所有填充物（含各角色行，source_product.material 仅为产品级）
-    src_mat_result = await db.execute(
-        select(ProductMaterial).where(ProductMaterial.product_id == source_product_id)
-    )
-    source_materials = src_mat_result.scalars().all()
-
+def _copy_product_level_bom(db: AsyncSession, source_product: Product, target_product_id: int) -> int:
+    """复制产品级默认 BOM（role_id 为 NULL），返回复制的物料数。"""
     copied_count = 0
-
-    if overwrite:
-        # 先删目标角色（DB 级 FK CASCADE 一并清理其物料），再删产品级物料
-        await db.execute(delete(ProductRole).where(ProductRole.product_id == target_product_id))
-        await db.execute(delete(ProductMaterial).where(ProductMaterial.product_id == target_product_id))
-        await db.execute(delete(ProductFabric).where(ProductFabric.product_id == target_product_id))
-        await db.execute(delete(ProductAccessory).where(ProductAccessory.product_id == target_product_id))
-
     # ===== 产品级默认 BOM（role_id 为 NULL） =====
     if source_product.material and getattr(source_product.material, 'cotton_usage', Decimal('0')) > 0:
         old_mat = source_product.material
@@ -793,6 +789,18 @@ async def copy_bom(db: AsyncSession, target_product_id: int, data: dict, usernam
         ))
         copied_count += 1
 
+    return copied_count
+
+
+async def _create_target_roles(
+    db: AsyncSession,
+    source_product: Product,
+    target_product: Product,
+    target_product_id: int,
+    overwrite: bool,
+    username: str,
+) -> dict[int, ProductRole]:
+    """在目标产品上批量建/复用角色，返回 源角色id -> 目标角色 映射。"""
     # ===== 角色及其独立物料 =====
     # 先批量建角色并单次 flush 取 id（原逐 role flush 为 R 次往返），
     # 再按 role_id 建索引，避免对 fabrics/accessories/materials 的 R 次嵌套扫描。
@@ -826,9 +834,25 @@ async def copy_bom(db: AsyncSession, target_product_id: int, data: dict, usernam
         db.add(new_role)
         target_by_global[gid] = new_role
         role_id_map[old_role.id] = new_role
-    copied_count += len(role_id_map)
     if role_id_map:
         await db.flush()
+    return role_id_map
+
+
+async def _copy_role_materials(
+    db: AsyncSession,
+    source_product: Product,
+    target_product: Product,
+    target_product_id: int,
+    source_materials,
+    overwrite: bool,
+    username: str,
+) -> int:
+    """复制角色及其独立物料，返回复制计数（含新建角色数）。"""
+    role_id_map = await _create_target_roles(
+        db, source_product, target_product, target_product_id, overwrite, username,
+    )
+    copied_count = len(role_id_map)
 
     def _items_by_role(items):
         grouped: dict[int, list] = {}
@@ -885,6 +909,57 @@ async def copy_bom(db: AsyncSession, target_product_id: int, data: dict, usernam
                 remark=getattr(old_material, 'remark', '') or '',
             ))
             copied_count += 1
+
+    return copied_count
+
+
+async def copy_bom(db: AsyncSession, target_product_id: int, data: dict, username: str = 'unknown') -> dict:
+    source_product_id = data.get('source_product_id')
+    overwrite = data.get('overwrite', False)
+    role_id = data.get('role_id')
+
+    if not source_product_id:
+        raise ValueError('请选择源产品')
+    if source_product_id == target_product_id:
+        raise ValueError('不能复制到同一产品')
+
+    source_product, target_product = await _load_copy_products(db, source_product_id, target_product_id)
+
+    # ===== 目标角色模式：复制到当前选中的自定义角色 =====
+    if role_id is not None:
+        return await _copy_bom_into_role(
+            db, source_product, target_product, target_product_id, role_id, overwrite, username,
+        )
+
+    # ===== 目标角色名模式：按名称查找或新建角色后复制（支持前端未保存的新角色）=====
+    role_name = (data.get('role_name') or '').strip()
+    if role_name:
+        role = await _resolve_role_by_name(db, target_product, target_product_id, role_name, username)
+        return await _copy_bom_into_role(
+            db, source_product, target_product, target_product_id, role.id, overwrite, username,
+        )
+
+    # ===== 以下为 role_id 为空时的原有逻辑，保持行为完全不变 =====
+    if not overwrite and has_bom(target_product):
+        raise ValueError('目标产品已有BOM表，请确认是否覆盖')
+
+    # 源产品所有填充物（含各角色行，source_product.material 仅为产品级）
+    src_mat_result = await db.execute(
+        select(ProductMaterial).where(ProductMaterial.product_id == source_product_id)
+    )
+    source_materials = src_mat_result.scalars().all()
+
+    if overwrite:
+        # 先删目标角色（DB 级 FK CASCADE 一并清理其物料），再删产品级物料
+        await db.execute(delete(ProductRole).where(ProductRole.product_id == target_product_id))
+        await db.execute(delete(ProductMaterial).where(ProductMaterial.product_id == target_product_id))
+        await db.execute(delete(ProductFabric).where(ProductFabric.product_id == target_product_id))
+        await db.execute(delete(ProductAccessory).where(ProductAccessory.product_id == target_product_id))
+
+    copied_count = _copy_product_level_bom(db, source_product, target_product_id)
+    copied_count += await _copy_role_materials(
+        db, source_product, target_product, target_product_id, source_materials, overwrite, username,
+    )
 
     await db.flush()
 

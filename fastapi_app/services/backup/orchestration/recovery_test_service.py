@@ -7,10 +7,12 @@
 import contextlib
 import json
 import logging
+import re
 import secrets
 import shutil
 import tempfile
 import zipfile
+from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -26,6 +28,161 @@ from fastapi_app.services.backup.records import ensure_backup_dir
 from fastapi_app.services.backup.verify.core import quote_table
 
 logger = logging.getLogger(__name__)
+
+
+_IDENT_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
+
+
+def _safe_sql_ident(name: str) -> str:
+    """校验标识符格式并返回双引号包裹形式，防止 SQL 注入。"""
+    if not name or not _IDENT_RE.match(name):
+        raise ValueError(f"非法标识符: {name!r}")
+    return f'"{name}"'
+
+
+def _safe_sql_idents(names: list[str]) -> list[str]:
+    """批量校验标识符。"""
+    return [_safe_sql_ident(name) for name in names]
+
+
+async def _load_fk_groups(conn) -> dict[str, dict[str, Any]]:
+    """按约束名聚合外键定义（支持复合外键）。
+
+    子表列与引用表列分别聚合后再按 ordinal_position 对齐，避免直接 JOIN
+    information_schema.constraint_column_usage 产生笛卡尔积导致列错位。
+    """
+    result = await conn.execute(text("""
+        WITH fk_base AS (
+            SELECT
+                tc.constraint_name,
+                tc.table_name,
+                kcu.column_name,
+                kcu.ordinal_position
+            FROM
+                information_schema.table_constraints AS tc
+                JOIN information_schema.key_column_usage AS kcu
+                  ON tc.constraint_name = kcu.constraint_name
+            WHERE tc.constraint_type = 'FOREIGN KEY'
+        ),
+        fk_ref AS (
+            SELECT
+                tc.constraint_name,
+                ccu.table_name AS foreign_table_name,
+                ccu.column_name AS foreign_column_name,
+                ccu.ordinal_position
+            FROM
+                information_schema.table_constraints AS tc
+                JOIN information_schema.constraint_column_usage AS ccu
+                  ON ccu.constraint_name = tc.constraint_name
+            WHERE tc.constraint_type = 'FOREIGN KEY'
+        )
+        SELECT
+            b.constraint_name,
+            b.table_name,
+            b.column_name,
+            r.foreign_table_name,
+            r.foreign_column_name,
+            b.ordinal_position
+        FROM fk_base b
+        JOIN fk_ref r
+          ON b.constraint_name = r.constraint_name
+         AND b.ordinal_position = r.ordinal_position
+        ORDER BY b.constraint_name, b.ordinal_position
+    """))
+    fk_groups: dict[str, dict[str, Any]] = defaultdict(
+        lambda: {'table': '', 'columns': [], 'foreign_table': '', 'foreign_columns': []}
+    )
+    for row in result.fetchall():
+        constraint_name = row[0]
+        group = fk_groups[constraint_name]
+        group['constraint_name'] = constraint_name
+        group['table'] = row[1]
+        group['columns'].append(row[2])
+        group['foreign_table'] = row[3]
+        group['foreign_columns'].append(row[4])
+    return fk_groups
+
+
+async def _load_unique_groups(conn) -> dict[str, dict[str, Any]]:
+    """按约束名聚合唯一约束定义（支持复合唯一索引）。"""
+    result = await conn.execute(text("""
+        SELECT
+            tc.constraint_name,
+            tc.table_name,
+            kcu.column_name,
+            kcu.ordinal_position
+        FROM
+            information_schema.table_constraints AS tc
+            JOIN information_schema.key_column_usage AS kcu
+              ON tc.constraint_name = kcu.constraint_name
+        WHERE tc.constraint_type = 'UNIQUE'
+        ORDER BY tc.constraint_name, kcu.ordinal_position
+    """))
+    unique_groups: dict[str, dict[str, Any]] = defaultdict(
+        lambda: {'table': '', 'columns': []}
+    )
+    for row in result.fetchall():
+        constraint_name = row[0]
+        group = unique_groups[constraint_name]
+        group['constraint_name'] = constraint_name
+        group['table'] = row[1]
+        group['columns'].append(row[2])
+    return unique_groups
+
+
+async def _check_fk_violations(conn, fk_groups: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    """对每个 FK 执行 orphan row 检查（外键列非空但引用行缺失）。"""
+    fk_violations = []
+    for group in fk_groups.values():
+        table = _safe_sql_ident(group['table'])
+        columns = _safe_sql_idents(group['columns'])
+        foreign_table = _safe_sql_ident(group['foreign_table'])
+        foreign_columns = _safe_sql_idents(group['foreign_columns'])
+        join_clause = ' AND '.join(
+            f't.{c} = f.{fc}' for c, fc in zip(columns, foreign_columns, strict=False)
+        )
+        not_null_clause = ' AND '.join(f't.{c} IS NOT NULL' for c in columns)
+        orphan_sql = text(f"""
+            SELECT COUNT(*) FROM {table} t
+            LEFT JOIN {foreign_table} f ON {join_clause}
+            WHERE {not_null_clause} AND f.{foreign_columns[0]} IS NULL
+        """)  # nosec B608
+        orphan_count = (await conn.execute(orphan_sql)).scalar() or 0  # batch-loop: 逐表备份/恢复,无法批量
+        if orphan_count > 0:
+            fk_violations.append({
+                'constraint_name': group['constraint_name'],
+                'table': group['table'],
+                'columns': group['columns'],
+                'foreign_table': group['foreign_table'],
+                'foreign_columns': group['foreign_columns'],
+                'orphan_count': orphan_count,
+            })
+    return fk_violations
+
+
+async def _check_unique_violations(conn, unique_groups: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    """对每个 UNIQUE 约束执行重复值检查。"""
+    unique_violations = []
+    for group in unique_groups.values():
+        table = _safe_sql_ident(group['table'])
+        columns = _safe_sql_idents(group['columns'])
+        col_list = ', '.join(columns)
+        dup_sql = text(f"""
+            SELECT COUNT(*) FROM (
+                SELECT {col_list} FROM {table}
+                WHERE {' AND '.join(f'{c} IS NOT NULL' for c in columns)}
+                GROUP BY {col_list} HAVING COUNT(*) > 1
+            ) t
+        """)  # nosec B608
+        dup_groups = (await conn.execute(dup_sql)).scalar() or 0  # batch-loop: 逐表备份/恢复,无法批量
+        if dup_groups > 0:
+            unique_violations.append({
+                'constraint_name': group['constraint_name'],
+                'table': group['table'],
+                'columns': group['columns'],
+                'duplicate_groups': dup_groups,
+            })
+    return unique_violations
 
 
 class DisasterRecoveryTestService:
@@ -828,149 +985,11 @@ class DisasterRecoveryTestService:
         对每个唯一约束执行重复值检查，存在违反即视为验证失败。
         支持复合外键与复合唯一约束，按约束名分组后按列组合检查。
         """
-        import re
-        from collections import defaultdict
-
-        ident_re = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
-
-        def _safe_ident(name: str) -> str:
-            """校验标识符格式并返回双引号包裹形式，防止 SQL 注入。"""
-            if not name or not ident_re.match(name):
-                raise ValueError(f"非法标识符: {name!r}")
-            return f'"{name}"'
-
-        def _safe_idents(names: list[str]) -> list[str]:
-            """批量校验标识符。"""
-            return [_safe_ident(name) for name in names]
-
         try:
-            # 检查外键约束（按约束名分组，支持复合外键）。
-            # 子表列与引用表列分别聚合后再按 ordinal_position 对齐，避免直接 JOIN
-            # information_schema.constraint_column_usage 产生笛卡尔积导致列错位。
-            result = await conn.execute(text("""
-                WITH fk_base AS (
-                    SELECT
-                        tc.constraint_name,
-                        tc.table_name,
-                        kcu.column_name,
-                        kcu.ordinal_position
-                    FROM
-                        information_schema.table_constraints AS tc
-                        JOIN information_schema.key_column_usage AS kcu
-                          ON tc.constraint_name = kcu.constraint_name
-                    WHERE tc.constraint_type = 'FOREIGN KEY'
-                ),
-                fk_ref AS (
-                    SELECT
-                        tc.constraint_name,
-                        ccu.table_name AS foreign_table_name,
-                        ccu.column_name AS foreign_column_name,
-                        ccu.ordinal_position
-                    FROM
-                        information_schema.table_constraints AS tc
-                        JOIN information_schema.constraint_column_usage AS ccu
-                          ON ccu.constraint_name = tc.constraint_name
-                    WHERE tc.constraint_type = 'FOREIGN KEY'
-                )
-                SELECT
-                    b.constraint_name,
-                    b.table_name,
-                    b.column_name,
-                    r.foreign_table_name,
-                    r.foreign_column_name,
-                    b.ordinal_position
-                FROM fk_base b
-                JOIN fk_ref r
-                  ON b.constraint_name = r.constraint_name
-                 AND b.ordinal_position = r.ordinal_position
-                ORDER BY b.constraint_name, b.ordinal_position
-            """))
-
-            fk_groups: dict[str, dict[str, Any]] = defaultdict(
-                lambda: {'table': '', 'columns': [], 'foreign_table': '', 'foreign_columns': []}
-            )
-            for row in result.fetchall():
-                constraint_name = row[0]
-                group = fk_groups[constraint_name]
-                group['constraint_name'] = constraint_name
-                group['table'] = row[1]
-                group['columns'].append(row[2])
-                group['foreign_table'] = row[3]
-                group['foreign_columns'].append(row[4])
-
-            # 检查唯一约束（按约束名分组，支持复合唯一索引）
-            result = await conn.execute(text("""
-                SELECT
-                    tc.constraint_name,
-                    tc.table_name,
-                    kcu.column_name,
-                    kcu.ordinal_position
-                FROM
-                    information_schema.table_constraints AS tc
-                    JOIN information_schema.key_column_usage AS kcu
-                      ON tc.constraint_name = kcu.constraint_name
-                WHERE tc.constraint_type = 'UNIQUE'
-                ORDER BY tc.constraint_name, kcu.ordinal_position
-            """))
-
-            unique_groups: dict[str, dict[str, Any]] = defaultdict(
-                lambda: {'table': '', 'columns': []}
-            )
-            for row in result.fetchall():
-                constraint_name = row[0]
-                group = unique_groups[constraint_name]
-                group['constraint_name'] = constraint_name
-                group['table'] = row[1]
-                group['columns'].append(row[2])
-
-            # 对每个 FK 执行 orphan row 检查（外键列非空但引用行缺失）
-            fk_violations = []
-            for group in fk_groups.values():
-                table = _safe_ident(group['table'])
-                columns = _safe_idents(group['columns'])
-                foreign_table = _safe_ident(group['foreign_table'])
-                foreign_columns = _safe_idents(group['foreign_columns'])
-                join_clause = ' AND '.join(
-                    f't.{c} = f.{fc}' for c, fc in zip(columns, foreign_columns, strict=False)
-                )
-                not_null_clause = ' AND '.join(f't.{c} IS NOT NULL' for c in columns)
-                orphan_sql = text(f"""
-                    SELECT COUNT(*) FROM {table} t
-                    LEFT JOIN {foreign_table} f ON {join_clause}
-                    WHERE {not_null_clause} AND f.{foreign_columns[0]} IS NULL
-                """)  # nosec B608
-                orphan_count = (await conn.execute(orphan_sql)).scalar() or 0  # batch-loop: 逐表备份/恢复,无法批量
-                if orphan_count > 0:
-                    fk_violations.append({
-                        'constraint_name': group['constraint_name'],
-                        'table': group['table'],
-                        'columns': group['columns'],
-                        'foreign_table': group['foreign_table'],
-                        'foreign_columns': group['foreign_columns'],
-                        'orphan_count': orphan_count,
-                    })
-
-            # 对每个 UNIQUE 约束执行重复值检查
-            unique_violations = []
-            for group in unique_groups.values():
-                table = _safe_ident(group['table'])
-                columns = _safe_idents(group['columns'])
-                col_list = ', '.join(columns)
-                dup_sql = text(f"""
-                    SELECT COUNT(*) FROM (
-                        SELECT {col_list} FROM {table}
-                        WHERE {' AND '.join(f'{c} IS NOT NULL' for c in columns)}
-                        GROUP BY {col_list} HAVING COUNT(*) > 1
-                    ) t
-                """)  # nosec B608
-                dup_groups = (await conn.execute(dup_sql)).scalar() or 0  # batch-loop: 逐表备份/恢复,无法批量
-                if dup_groups > 0:
-                    unique_violations.append({
-                        'constraint_name': group['constraint_name'],
-                        'table': group['table'],
-                        'columns': group['columns'],
-                        'duplicate_groups': dup_groups,
-                    })
+            fk_groups = await _load_fk_groups(conn)
+            unique_groups = await _load_unique_groups(conn)
+            fk_violations = await _check_fk_violations(conn, fk_groups)
+            unique_violations = await _check_unique_violations(conn, unique_groups)
 
             # 约束总数为零（schema 损坏或无约束定义）时视为验证失败，
             # 避免空约束列表场景下 passed=True 掩盖"约束缺失"灾难情况
@@ -995,7 +1014,7 @@ class DisasterRecoveryTestService:
             }
 
         except (SQLAlchemyError, ValueError) as e:
-            # ValueError 来自 _safe_ident 对非法标识符的拒绝；
+            # ValueError 来自 _safe_sql_ident 对非法标识符的拒绝；
             # SQLAlchemyError 来自 information_schema 查询失败。
             # 两者均视为约束验证失败，避免异常逃逸至端点 500。
             logger.error(f"验证约束失败: {e}")

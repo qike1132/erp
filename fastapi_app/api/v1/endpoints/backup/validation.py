@@ -376,6 +376,180 @@ def _get_validation_cache_key(filename: str, password: str | None = None) -> str
     return hashlib.md5('_'.join(key_parts).encode(), usedforsecurity=False).hexdigest()
 
 
+def _decrypt_backup_content(
+    content: bytes,
+    filename: str,
+    x_backup_password: str | None,
+    file_size: int,
+) -> tuple[bytes, bool, dict | None]:
+    """检测备份是否加密并按需解密。
+
+    返回 (content, encrypted, early_response)：early_response 非 None 时调用方应直接
+    返回它（加密但无密码，或解密失败），此时 content 保持原样未解密。
+    """
+    encrypted = _is_encrypted_data(content)
+    if not encrypted:
+        return content, False, None
+
+    if not x_backup_password:
+        # 检查环境变量
+        env_password = os.environ.get('BACKUP_ENCRYPTION_PASSWORD')
+        if not env_password:
+            return content, True, {
+                'success': True,
+                'filename': filename,
+                'valid': False,
+                'encrypted': True,
+                'size': file_size,
+                'checksum': None,
+                'format_version': None,
+                'table_count': None,
+                'total_rows': None,
+                'created_at': None,
+                'issues': ['文件已加密但未提供密码']
+            }
+        password_to_use = env_password
+    else:
+        password_to_use = x_backup_password
+
+    try:
+        return _decrypt_backup_data(content, password_to_use), True, None
+    except Exception:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
+        logger.exception('验证备份文件时解密失败: %s', filename)
+        return content, True, {
+            'success': True,
+            'filename': filename,
+            'valid': False,
+            'encrypted': True,
+            'size': file_size,
+            'checksum': None,
+            'format_version': None,
+            'table_count': None,
+            'total_rows': None,
+            'created_at': None,
+            'issues': ['解密失败']
+        }
+
+
+def _validate_backup_format(content: bytes, filename: str) -> tuple[bool, list[str]]:
+    """按扩展名校验备份文件结构，返回 (valid, issues)。"""
+    issues: list[str] = []
+    valid = True
+
+    try:
+        # 尝试解析为ZIP文件
+        if filename.endswith('.zip') or filename.endswith('.zip.enc'):
+            with zipfile.ZipFile(io.BytesIO(content)) as zip_file:
+                # 检查必需的manifest文件
+                namelist = zip_file.namelist()
+                if 'manifest.json' not in namelist:
+                    issues.append('ZIP文件缺少manifest.json')
+                    valid = False
+
+                # 检查文件完整性。**分块读并有总量上限**：原来的 f.read() 会把成员
+                # 一次性解进内存，500MB 的压缩炸弹能解出几百 GB，校验接口就成了 OOM
+                # 入口。分块读对正常备份与原先等价（照样读全文），超限才中断。
+                remaining = backup_service.MAX_BACKUP_FILE_SIZE
+                for zip_info in zip_file.infolist():
+                    try:
+                        with zip_file.open(zip_info.filename) as f:
+                            while True:
+                                chunk = f.read(1024 * 1024)
+                                if not chunk:
+                                    break
+                                remaining -= len(chunk)
+                                if remaining < 0:
+                                    raise ValueError(
+                                        '解压后总体积超过大小限制，疑似压缩炸弹'
+                                    )
+                    except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
+                        issues.append(f'文件 {zip_info.filename} 损坏: {e!s}')
+                        valid = False
+                        break
+
+        # 尝试解析为JSON文件
+        elif filename.endswith('.json') or filename.endswith('.json.enc'):
+            try:
+                backup_data = json.loads(content.decode('utf-8'))
+                if 'tables' not in backup_data:
+                    issues.append('JSON文件缺少tables字段')
+                    valid = False
+            except json.JSONDecodeError as e:
+                issues.append(f'JSON解析失败: {e!s}')
+                valid = False
+
+        else:
+            issues.append('不支持的文件格式')
+            valid = False
+
+    except zipfile.BadZipFile as e:
+        issues.append(f'ZIP文件损坏: {e!s}')
+        valid = False
+    except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
+        issues.append(f'文件验证失败: {e!s}')
+        valid = False
+
+    return valid, issues
+
+
+def _extract_backup_metadata(content: bytes, filename: str) -> tuple:
+    """尝试从备份文件提取元数据，返回 (format_version, table_count, total_rows, created_at)。"""
+    format_version = None
+    table_count = None
+    total_rows = None
+    created_at = None
+    try:
+        if filename.endswith('.zip') or filename.endswith('.zip.enc'):
+            with zipfile.ZipFile(io.BytesIO(content)) as zip_file:
+                if 'manifest.json' in zip_file.namelist():
+                    with zip_file.open('manifest.json') as f:
+                        manifest = json.load(f)
+                        format_version = manifest.get('format_version')
+                        table_count = manifest.get('table_count')
+                        total_rows = manifest.get('total_rows')
+                        created_at = manifest.get('exported_at')
+        elif filename.endswith('.json') or filename.endswith('.json.enc'):
+            backup_data = json.loads(content.decode('utf-8'))
+            format_version = backup_data.get('format_version', '1.0')
+            table_count = len(backup_data.get('tables', {}))
+            total_rows = sum(len(table_data.get('data', [])) for table_data in backup_data.get('tables', {}).values())
+            created_at = backup_data.get('exported_at')
+    except (ValueError, TypeError, OSError, KeyError, json.JSONDecodeError, UnicodeDecodeError):
+        pass  # 元数据提取失败不影响验证结果; defensive: 异常静默处理,不影响主流程
+    return format_version, table_count, total_rows, created_at
+
+
+def _analyze_backup(
+    content: bytes,
+    filename: str,
+    encrypted: bool,
+    file_size: int,
+    checksum: str,
+    cache_key: str,
+) -> dict:
+    """校验格式、提取元数据并构建验证响应 dict。"""
+    valid, issues = _validate_backup_format(content, filename)
+    if valid:
+        format_version, table_count, total_rows, created_at = _extract_backup_metadata(content, filename)
+    else:
+        format_version = table_count = total_rows = created_at = None
+    return {
+        'success': True,
+        'filename': filename,
+        'valid': valid,
+        'encrypted': encrypted,
+        'size': file_size,
+        'checksum': checksum,
+        'format_version': format_version,
+        'table_count': table_count,
+        'total_rows': total_rows,
+        'created_at': created_at,
+        'issues': issues,
+        'cache_hit': False,
+        'cache_key': cache_key
+    }
+
+
 # ---------------------------------------------------------------------------
 # GET /validate/{filename}
 # ---------------------------------------------------------------------------
@@ -419,158 +593,21 @@ async def validate_backup_file(
         content = await asyncio.to_thread(filepath.read_bytes)
         file_size = len(content)
 
-        # 检查是否为加密文件
-        encrypted = _is_encrypted_data(content)
-
-        # 如果是加密文件，尝试解密
-        if encrypted:
-            if not x_backup_password:
-                # 检查环境变量
-                env_password = os.environ.get('BACKUP_ENCRYPTION_PASSWORD')
-                if not env_password:
-                    return {
-                        'success': True,
-                        'filename': filename,
-                        'valid': False,
-                        'encrypted': True,
-                        'size': file_size,
-                        'checksum': None,
-                        'format_version': None,
-                        'table_count': None,
-                        'total_rows': None,
-                        'created_at': None,
-                        'issues': ['文件已加密但未提供密码']
-                    }
-                password_to_use = env_password
-            else:
-                password_to_use = x_backup_password
-
-            try:
-                decrypted_content = _decrypt_backup_data(content, password_to_use)
-                content = decrypted_content
-            except Exception:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
-                logger.exception('验证备份文件时解密失败: %s', filename)
-                return {
-                    'success': True,
-                    'filename': filename,
-                    'valid': False,
-                    'encrypted': True,
-                    'size': file_size,
-                    'checksum': None,
-                    'format_version': None,
-                    'table_count': None,
-                    'total_rows': None,
-                    'created_at': None,
-                    'issues': ['解密失败']
-                }
-        else:
-            pass
+        # 检查是否为加密文件并按需解密；加密但无密码/解密失败时直接返回无效结果
+        content, encrypted, early = _decrypt_backup_content(
+            content, filename, x_backup_password, file_size
+        )
+        if early is not None:
+            return early
 
         # 计算校验和
         checksum = hashlib.sha256(content).hexdigest()
 
-        # 验证文件格式
-        issues = []
-        valid = True
-
-        try:
-            # 尝试解析为ZIP文件
-            if filename.endswith('.zip') or filename.endswith('.zip.enc'):
-                with zipfile.ZipFile(io.BytesIO(content)) as zip_file:
-                    # 检查必需的manifest文件
-                    namelist = zip_file.namelist()
-                    if 'manifest.json' not in namelist:
-                        issues.append('ZIP文件缺少manifest.json')
-                        valid = False
-
-                    # 检查文件完整性。**分块读并有总量上限**：原来的 f.read() 会把成员
-                    # 一次性解进内存，500MB 的压缩炸弹能解出几百 GB，校验接口就成了 OOM
-                    # 入口。分块读对正常备份与原先等价（照样读全文），超限才中断。
-                    remaining = backup_service.MAX_BACKUP_FILE_SIZE
-                    for zip_info in zip_file.infolist():
-                        try:
-                            with zip_file.open(zip_info.filename) as f:
-                                while True:
-                                    chunk = f.read(1024 * 1024)
-                                    if not chunk:
-                                        break
-                                    remaining -= len(chunk)
-                                    if remaining < 0:
-                                        raise ValueError(
-                                            '解压后总体积超过大小限制，疑似压缩炸弹'
-                                        )
-                        except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
-                            issues.append(f'文件 {zip_info.filename} 损坏: {e!s}')
-                            valid = False
-                            break
-
-            # 尝试解析为JSON文件
-            elif filename.endswith('.json') or filename.endswith('.json.enc'):
-                try:
-                    backup_data = json.loads(content.decode('utf-8'))
-                    if 'tables' not in backup_data:
-                        issues.append('JSON文件缺少tables字段')
-                        valid = False
-                except json.JSONDecodeError as e:
-                    issues.append(f'JSON解析失败: {e!s}')
-                    valid = False
-
-            else:
-                issues.append('不支持的文件格式')
-                valid = False
-
-        except zipfile.BadZipFile as e:
-            issues.append(f'ZIP文件损坏: {e!s}')
-            valid = False
-        except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
-            issues.append(f'文件验证失败: {e!s}')
-            valid = False
-
-        # 尝试提取元数据
-        format_version = None
-        table_count = None
-        total_rows = None
-        created_at = None
-
-        if valid:
-            try:
-                if filename.endswith('.zip') or filename.endswith('.zip.enc'):
-                    with zipfile.ZipFile(io.BytesIO(content)) as zip_file:
-                        if 'manifest.json' in zip_file.namelist():
-                            with zip_file.open('manifest.json') as f:
-                                manifest = json.load(f)
-                                format_version = manifest.get('format_version')
-                                table_count = manifest.get('table_count')
-                                total_rows = manifest.get('total_rows')
-                                created_at = manifest.get('exported_at')
-                elif filename.endswith('.json') or filename.endswith('.json.enc'):
-                    backup_data = json.loads(content.decode('utf-8'))
-                    format_version = backup_data.get('format_version', '1.0')
-                    table_count = len(backup_data.get('tables', {}))
-                    total_rows = sum(len(table_data.get('data', [])) for table_data in backup_data.get('tables', {}).values())
-                    created_at = backup_data.get('exported_at')
-            except (ValueError, TypeError, OSError, KeyError, json.JSONDecodeError, UnicodeDecodeError):
-                pass  # 元数据提取失败不影响验证结果; defensive: 异常静默处理,不影响主流程
-
-        # 构建响应
-        result = {
-            'success': True,
-            'filename': filename,
-            'valid': valid,
-            'encrypted': encrypted,
-            'size': file_size,
-            'checksum': checksum,
-            'format_version': format_version,
-            'table_count': table_count,
-            'total_rows': total_rows,
-            'created_at': created_at,
-            'issues': issues,
-            'cache_hit': False,
-            'cache_key': cache_key
-        }
+        # 校验格式、提取元数据并构建响应
+        result = _analyze_backup(content, filename, encrypted, file_size, checksum, cache_key)
 
         # 缓存验证结果（仅当验证成功时）
-        if valid:
+        if result['valid']:
             await _validation_cache.set(cache_key, result)
 
         return result

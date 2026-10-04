@@ -478,6 +478,136 @@ async def export_completed_orders(
 # local_ttl=0：禁用 L1，仅走 L2（同 orders:beile:list）。客户订单删除后「待审核订单」
 # 由 ORDER_DELETED 订阅清理 pending 采购单，若 L1 未跨 worker 失效，其余 worker
 # 会在 10s 内继续返回已删订单，表现为「采购-待审核页不实时更新」。
+def _build_unprocessed_unified_query():
+    """构建「未处理订单」的 UNION ALL 子查询（Order 待备货 + StockIn）。
+
+    P-1：数据库层完成排序/分页（轻量列）；P-6：NOT EXISTS + JSONB @> 替代预查询。
+    """
+    from fastapi_app.shared_models import Order as CustomerOrder
+    from fastapi_app.shared_models import StockIn
+
+    # Order 部分：status='待备货' 且未删除，NOT EXISTS 排除已被采购单关联的 ID
+    order_part = select(
+        literal('order').label('record_type'),
+        CustomerOrder.id.label('source_id'),
+        CustomerOrder.order_no.label('order_no'),
+        CustomerOrder.customer.label('customer'),
+        CustomerOrder.order_date.label('sort_date'),
+    ).where(
+        CustomerOrder.status == ORDER_STATUS_PENDING_STOCK,
+        CustomerOrder.is_deleted == False,  # noqa: E712
+        _build_not_processed_filter(CustomerOrder.id),
+    )
+    # StockIn 部分：NOT EXISTS 排除已被采购单 source_order_ids 关联的 ID
+    # （source_order_ids 中可能同时包含 Order ID 和 StockIn ID）
+    stockin_part = select(
+        literal('stockin').label('record_type'),
+        StockIn.id.label('source_id'),
+        StockIn.stockin_no.label('order_no'),
+        StockIn.customer.label('customer'),
+        StockIn.stockin_date.label('sort_date'),
+    ).where(_build_not_processed_filter(StockIn.id))
+    return union_all(order_part, stockin_part).subquery()
+
+
+async def _fetch_unprocessed_source_objects(db: AsyncSession, rows):
+    """按来源批量取当前页完整对象（Order 带 items / StockIn），返回两张 id→对象表。"""
+    from fastapi_app.shared_models import Order as CustomerOrder
+    from fastapi_app.shared_models import StockIn
+
+    order_ids = [r.source_id for r in rows if r.record_type == 'order']
+    stockin_ids = [r.source_id for r in rows if r.record_type == 'stockin']
+    orders_map: dict[int, CustomerOrder] = {}
+    if order_ids:
+        order_result = await db.execute(
+            select(CustomerOrder)
+            .options(selectinload(CustomerOrder.items))
+            .where(CustomerOrder.id.in_(order_ids))
+        )
+        for o in order_result.scalars().unique():
+            orders_map[o.id] = o
+    stockins_map: dict[int, StockIn] = {}
+    if stockin_ids:
+        stockin_result = await db.execute(
+            select(StockIn).where(StockIn.id.in_(stockin_ids))
+        )
+        for s in stockin_result.scalars():
+            stockins_map[s.id] = s
+    return orders_map, stockins_map
+
+
+async def _fetch_product_maps(db: AsyncSession, all_records: list[dict]):
+    """批量取当前页涉及的 product 名称/条码表 + BOM 集合。"""
+    from fastapi_app.shared_models import Product
+
+    product_ids_set: set[int] = set()
+    for rec in all_records:
+        if rec.get('product_id'):
+            product_ids_set.add(rec['product_id'])
+        for item in rec.get('items', []):
+            if item.get('product_id'):
+                product_ids_set.add(item['product_id'])
+    product_ids = list(product_ids_set)
+    pid_name_map: dict[int, str] = {}
+    pid_barcode_map: dict[int, str] = {}
+    if product_ids:
+        prod_result = await db.execute(
+            select(Product.id, Product.name, Product.barcode).where(Product.id.in_(product_ids))
+        )
+        for row in prod_result.all():
+            pid_name_map[row[0]] = row[1]
+            if row[2]:
+                pid_barcode_map[row[0]] = row[2]
+    bom_product_ids = await _fetch_bom_product_ids(db, product_ids)
+    return pid_name_map, pid_barcode_map, bom_product_ids
+
+
+def _serialize_unprocessed_orders(all_records: list[dict], pid_name_map: dict,
+                                  pid_barcode_map: dict, bom_product_ids: set) -> list[dict]:
+    """按当前页记录序列化为响应行（items 补产品名/条码 + has_bom）。"""
+    def _enrich_items(items: list) -> list:
+        enriched = []
+        for item in items:
+            pid = item.get('product_id')
+            enriched.append({
+                **item,
+                'product_name': item.get('product_name') or pid_name_map.get(pid, '未知产品') if pid else '未知产品',
+                'product_barcode': item.get('product_barcode') or pid_barcode_map.get(pid) if pid else None,
+                'has_bom': pid in bom_product_ids if pid else False,
+            })
+        return enriched
+
+    def _compute_order_has_bom(r: dict) -> bool:
+        items = r.get('items') or []
+        if not items:
+            # 兼容无 items 的旧记录：按顶层 product_id 判断
+            return r.get('product_id') in bom_product_ids if r.get('product_id') else False
+        # 多 SKU：所有 SKU 均需配置 BOM，否则该单无法审核
+        return all(item['product_id'] in bom_product_ids for item in items if item.get('product_id'))
+
+    return [
+        {
+            'id': r['id'],
+            'composite_id': r['composite_id'],
+            'source_order_id': r['source_order_id'],
+            'order_no': r['order_no'],
+            'customer': r['customer'],
+            'customer_name': r['customer_name'],
+            'product_id': r['product_id'],
+            'product_name': pid_name_map.get(r['product_id'], '未知产品') if r['product_id'] else '未知产品',
+            'quantity': r['quantity'],
+            'order_date': r['order_date'],
+            'has_bom': _compute_order_has_bom(r),
+            'create_time': r['create_time'],
+            'status': 'pending',
+            'record_type': r['record_type'],
+            'sku_count': r.get('sku_count', 1),
+            'items': _enrich_items(r.get('items', [])),
+        }
+        for r in all_records
+    ]
+
+
 @cache_result(
     key_prefix='orders:unprocessed',
     ttl=30,
@@ -499,34 +629,8 @@ async def get_unprocessed_orders(
     P-6 优化：用 NOT EXISTS + JSONB @> 子查询替代预查询 + .notin_()，
     消除 SQL 参数上限风险，结果实时准确，无需 30s 缓存。
     """
-    from fastapi_app.shared_models import Order as CustomerOrder
-    from fastapi_app.shared_models import Product, StockIn
-
     # ---- 构建 UNION ALL 子查询（轻量列，数据库层排序+分页）----
-    # Order 部分：status='待备货' 且未删除，NOT EXISTS 排除已被采购单关联的 ID
-    order_part = select(
-        literal('order').label('record_type'),
-        CustomerOrder.id.label('source_id'),
-        CustomerOrder.order_no.label('order_no'),
-        CustomerOrder.customer.label('customer'),
-        CustomerOrder.order_date.label('sort_date'),
-    ).where(
-        CustomerOrder.status == ORDER_STATUS_PENDING_STOCK,
-        CustomerOrder.is_deleted == False,  # noqa: E712
-        _build_not_processed_filter(CustomerOrder.id),
-    )
-
-    # StockIn 部分：NOT EXISTS 排除已被采购单 source_order_ids 关联的 ID
-    # （source_order_ids 中可能同时包含 Order ID 和 StockIn ID）
-    stockin_part = select(
-        literal('stockin').label('record_type'),
-        StockIn.id.label('source_id'),
-        StockIn.stockin_no.label('order_no'),
-        StockIn.customer.label('customer'),
-        StockIn.stockin_date.label('sort_date'),
-    ).where(_build_not_processed_filter(StockIn.id))
-
-    unified = union_all(order_part, stockin_part).subquery()
+    unified = _build_unprocessed_unified_query()
 
     # ---- 1. COUNT 总数（单次查询）----
     count_result = await db.execute(select(func.count()).select_from(unified))
@@ -565,26 +669,7 @@ async def get_unprocessed_orders(
         }
 
     # ---- 3. 按来源批量查询当前页完整数据 ----
-    order_ids = [r.source_id for r in rows if r.record_type == 'order']
-    stockin_ids = [r.source_id for r in rows if r.record_type == 'stockin']
-
-    orders_map: dict[int, CustomerOrder] = {}
-    if order_ids:
-        order_result = await db.execute(
-            select(CustomerOrder)
-            .options(selectinload(CustomerOrder.items))
-            .where(CustomerOrder.id.in_(order_ids))
-        )
-        for o in order_result.scalars().unique():
-            orders_map[o.id] = o
-
-    stockins_map: dict[int, StockIn] = {}
-    if stockin_ids:
-        stockin_result = await db.execute(
-            select(StockIn).where(StockIn.id.in_(stockin_ids))
-        )
-        for s in stockin_result.scalars():
-            stockins_map[s.id] = s
+    orders_map, stockins_map = await _fetch_unprocessed_source_objects(db, rows)
 
     # ---- 4. 按 SQL 排序顺序构建记录 ----
     all_records: list[dict] = []
@@ -598,71 +683,12 @@ async def get_unprocessed_orders(
             if stockin_obj:
                 all_records.append(_build_unprocessed_stockin_record(stockin_obj))
 
-    # ---- 5. 批量查询产品名称（覆盖所有 SKU 的 product_id）----
-    product_ids_set: set[int] = set()
-    for rec in all_records:
-        if rec.get('product_id'):
-            product_ids_set.add(rec['product_id'])
-        for item in rec.get('items', []):
-            if item.get('product_id'):
-                product_ids_set.add(item['product_id'])
-    product_ids = list(product_ids_set)
-    pid_name_map: dict[int, str] = {}
-    pid_barcode_map: dict[int, str] = {}
-    if product_ids:
-        prod_result = await db.execute(
-            select(Product.id, Product.name, Product.barcode).where(Product.id.in_(product_ids))
-        )
-        for row in prod_result.all():
-            pid_name_map[row[0]] = row[1]
-            if row[2]:
-                pid_barcode_map[row[0]] = row[2]
-
-    # 批量查询 BOM 信息
-    bom_product_ids = await _fetch_bom_product_ids(db, product_ids)
-
-    def _enrich_items(items: list) -> list:
-        enriched = []
-        for item in items:
-            pid = item.get('product_id')
-            enriched.append({
-                **item,
-                'product_name': item.get('product_name') or pid_name_map.get(pid, '未知产品') if pid else '未知产品',
-                'product_barcode': item.get('product_barcode') or pid_barcode_map.get(pid) if pid else None,
-                'has_bom': pid in bom_product_ids if pid else False,
-            })
-        return enriched
-
-    def _compute_order_has_bom(r: dict) -> bool:
-        items = r.get('items') or []
-        if not items:
-            # 兼容无 items 的旧记录：按顶层 product_id 判断
-            return r.get('product_id') in bom_product_ids if r.get('product_id') else False
-        # 多 SKU：所有 SKU 均需配置 BOM，否则该单无法审核
-        return all(item['product_id'] in bom_product_ids for item in items if item.get('product_id'))
-
+    # ---- 5. 批量查询产品名/BOM，并序列化为响应行 ----
+    pid_name_map, pid_barcode_map, bom_product_ids = await _fetch_product_maps(db, all_records)
     return {
-        'orders': [
-            {
-                'id': r['id'],
-                'composite_id': r['composite_id'],
-                'source_order_id': r['source_order_id'],
-                'order_no': r['order_no'],
-                'customer': r['customer'],
-                'customer_name': r['customer_name'],
-                'product_id': r['product_id'],
-                'product_name': pid_name_map.get(r['product_id'], '未知产品') if r['product_id'] else '未知产品',
-                'quantity': r['quantity'],
-                'order_date': r['order_date'],
-                'has_bom': _compute_order_has_bom(r),
-                'create_time': r['create_time'],
-                'status': 'pending',
-                'record_type': r['record_type'],
-                'sku_count': r.get('sku_count', 1),
-                'items': _enrich_items(r.get('items', [])),
-            }
-            for r in all_records
-        ],
+        'orders': _serialize_unprocessed_orders(
+            all_records, pid_name_map, pid_barcode_map, bom_product_ids
+        ),
         'total': total,
         'pages': calc_total_pages(total, per_page),
         'current_page': page,
