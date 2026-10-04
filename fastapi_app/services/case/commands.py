@@ -197,6 +197,13 @@ async def create_case_item(db: AsyncSession, name: str | None = None, barcode: s
                 barcode = linked.barcode
 
     if parent_id is not None:
+        # 层级操作与 update_case_item 的改挂接共用全局锁：否则并发「建配件(parent=X)」×
+        # 「改挂接(X.parent=Y)」各自读到对方仍是根件、双双通过 → 产生 Y→X→child 孙件，
+        # 从 get_case_inventory（只展开根件一层子女）的库存树里消失。取锁后
+        # _ensure_parent_is_root 读到的是已提交状态：改挂接先提交则此处报「本身是配件」，
+        # 建配件先提交则改挂接侧 child_count>0 拒绝——两个方向都被对方挡住。
+        # ⚠️ 不可在这里加「父件不得已有子件」检查：主件本就挂多个配件，那会误杀正常加配件。
+        await acquire_advisory_lock_async(db, number_lock_key('CASE_HIERARCHY', 'global'))
         await _ensure_parent_is_root(db, parent_id)
     elif product_id:
         # 第十四轮：主件(product_id 非空且 parent_id 为空)全局唯一 —— 取与

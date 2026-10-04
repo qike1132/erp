@@ -168,6 +168,18 @@ async def create_order(db: AsyncSession, product_id: int, quantity: int,
 
 async def update_order(db: AsyncSession, order_id: int, quantity: int,
                        customer: str, note: str, current_user: User) -> dict:
+    # 第十四轮补：锁序统一为 Product→Order —— 出库创建路径是 P→Order
+    #（create_stockout_core 先锁产品，再经 calculate_available_shipment_quantity
+    # FOR UPDATE 扫同客户全部 Order）。本函数原为 Order→P（先锁订单行、数量变化时
+    # _update_order_directly 内才 get_product_for_update），与出库创建并发会互等行锁死锁。
+    # 同 update_deduct_quantity 的做法：先无锁读 product_id 预锁产品；读不到
+    #（订单不存在/product_id 空）则跳过预锁，由下方加锁后的既有校验按原口径抛错，语义不变。
+    _pre_pid = (await db.execute(
+        select(Order.product_id).where(Order.id == order_id)
+    )).scalar_one_or_none()
+    if _pre_pid is not None:
+        await get_product_for_update(db, _pre_pid)
+
     result = await db.execute(select(Order).where(Order.id == order_id).with_for_update())
     order = result.scalar_one_or_none()
     if not order or order.is_deleted:
