@@ -168,18 +168,21 @@ async def _check_login_rate_limit(key: str) -> None:
 
         _redis = get_client()
         if _redis:
+            # 第十四轮：incr 与 expire 必须同一 pipeline —— 原实现 `_attempts == 1`
+            # 后单独 await expire，若此时连接断开/worker 崩溃，计数 key 永不过期
+            # （Redis 默认无 TTL），该 IP 永久 429。pipeline 里的 expire 与 incr
+            # 同批原子提交；对已存在但无 TTL 的 key（历史脏数据）由下方 expire
+            # 兜底重设（重复设置无害）。
             _pipe = _redis.pipeline()
             _pipe.incr(_login_burst_key)
+            _pipe.expire(_login_burst_key, LOGIN_BURST_WINDOW)
             _pipe.incr(_login_rate_limit_key)
-            _burst, _attempts = await _pipe.execute()
+            _pipe.expire(_login_rate_limit_key, LOGIN_ATTEMPT_WINDOW)
+            _burst, _, _attempts, _ = await _pipe.execute()
             note_command_success()
-            if _burst == 1:
-                await _redis.expire(_login_burst_key, LOGIN_BURST_WINDOW)
             if _burst > LOGIN_BURST_LIMIT:
                 logger.warning("[Login] 登录尝试过快，1分钟内超过%d次: IP=%s", LOGIN_BURST_LIMIT, key)
                 raise HTTPException(status_code=429, detail="登录尝试过于频繁，请1分钟后重试", headers={"Retry-After": str(LOGIN_BURST_WINDOW)})
-            if _attempts == 1:
-                await _redis.expire(_login_rate_limit_key, LOGIN_ATTEMPT_WINDOW)
             if _attempts > LOGIN_ATTEMPT_LIMIT:
                 logger.warning("[Login] 登录尝试过多，暂时锁定: IP=%s", key)
                 raise HTTPException(status_code=429, detail="登录尝试过多，请5分钟后重试", headers={"Retry-After": str(LOGIN_ATTEMPT_WINDOW)})

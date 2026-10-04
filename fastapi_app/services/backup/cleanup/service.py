@@ -10,6 +10,7 @@
 
 import json
 import logging
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -202,6 +203,17 @@ class BackupCleanupService:
                         file_path.name.startswith('erp_auto_') or
                         file_path.name.startswith('erp_incremental_')) or \
                    not (file_path.name.endswith('.zip') or file_path.name.endswith('.json') or file_path.name.endswith('.zip.enc')):
+                    continue
+
+                # 第十四轮：跳过「正在进行中」的备份 —— 备份任务写大 zip 可能耗时数十秒，
+                # cleanup 迭代到半截 zip 会误判 corrupted，进而可能被移出 keep 删除，
+                # 造成"最新备份被清理毁掉"。mtime < 120s 的文件视为仍在写入，本次不处理。
+                try:
+                    age_seconds = time.time() - file_path.stat().st_mtime
+                    if age_seconds < 120:
+                        logger.debug('跳过仍在写入的备份文件: %s (age=%.0fs)', file_path.name, age_seconds)
+                        continue
+                except OSError:
                     continue
 
                 file_info = {

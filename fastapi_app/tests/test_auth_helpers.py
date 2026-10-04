@@ -29,20 +29,21 @@ class TestCheckLoginRateLimit:
         """burst 与 window 计数均未超阈值时应正常返回（不抛异常）"""
         mock_redis = MagicMock()
         mock_pipe = MagicMock()
-        mock_pipe.execute = AsyncMock(return_value=(1, 1))
+        mock_pipe.execute = AsyncMock(return_value=(1, True, 1, True))
         mock_redis.pipeline = MagicMock(return_value=mock_pipe)
-        mock_redis.expire = AsyncMock()
         with patch('fastapi_app.core.redis_wrapper.get_client', return_value=mock_redis):
             await auth._check_login_rate_limit("192.168.1.1")
-        # 验证 expire 被调用以设置过期时间
-        assert mock_redis.expire.await_count == 2
+        # 第十四轮：incr+expire 必须同一 pipeline（防「incr 后崩溃 → key 永不过期」的
+        # TOCTOU），不再单独 await redis.expire。这里断言 pipeline 被构建且执行。
+        mock_redis.pipeline.assert_called_once()
+        mock_pipe.execute.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_rate_limit_raises_429_when_burst_exceeded(self):
         """burst 计数超过 LOGIN_BURST_LIMIT 时应抛 429"""
         mock_redis = MagicMock()
         mock_pipe = MagicMock()
-        mock_pipe.execute = AsyncMock(return_value=(auth.LOGIN_BURST_LIMIT + 1, 1))
+        mock_pipe.execute = AsyncMock(return_value=(auth.LOGIN_BURST_LIMIT + 1, True, 1, True))
         mock_redis.pipeline = MagicMock(return_value=mock_pipe)
         mock_redis.expire = AsyncMock()
         with patch('fastapi_app.core.redis_wrapper.get_client', return_value=mock_redis):
@@ -56,7 +57,7 @@ class TestCheckLoginRateLimit:
         """window 计数超过 LOGIN_ATTEMPT_LIMIT 时应抛 429"""
         mock_redis = MagicMock()
         mock_pipe = MagicMock()
-        mock_pipe.execute = AsyncMock(return_value=(1, auth.LOGIN_ATTEMPT_LIMIT + 1))
+        mock_pipe.execute = AsyncMock(return_value=(1, True, auth.LOGIN_ATTEMPT_LIMIT + 1, True))
         mock_redis.pipeline = MagicMock(return_value=mock_pipe)
         mock_redis.expire = AsyncMock()
         with patch('fastapi_app.core.redis_wrapper.get_client', return_value=mock_redis):

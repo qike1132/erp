@@ -129,7 +129,7 @@ class TestAuthEndpoints:
         # 现行实现：redis_wrapper.get_client() + pipeline 批量 incr burst/window 两个计数器
         mock_redis = MagicMock()
         mock_pipe = MagicMock()
-        mock_pipe.execute = AsyncMock(return_value=(101, 1))
+        mock_pipe.execute = AsyncMock(return_value=(101, True, 1, True))
         mock_redis.pipeline = MagicMock(return_value=mock_pipe)
         mock_redis.expire = AsyncMock()
 
@@ -154,7 +154,7 @@ class TestAuthEndpoints:
         mock_redis = MagicMock()
         # burst 计数正常（<=100），但 5 分钟窗口计数超过 300
         mock_pipe = MagicMock()
-        mock_pipe.execute = AsyncMock(return_value=(3, 301))
+        mock_pipe.execute = AsyncMock(return_value=(3, True, 301, True))
         mock_redis.pipeline = MagicMock(return_value=mock_pipe)
         mock_redis.expire = AsyncMock()
 

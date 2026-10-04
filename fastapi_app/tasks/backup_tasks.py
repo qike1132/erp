@@ -95,7 +95,9 @@ async def manual_full_backup_task(
                 exclude_tables=exclude_tables,
                 progress_cb=_svc_progress,
             )
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            # 第十四轮：秒级时间戳在同秒双全量（锁刚释放+小库秒完成）下会同名互覆——
+            # 落盘在 advisory 锁外（见该函数），加毫秒后缀保证唯一；解析端正则按搜索匹配不受影响。
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S') + datetime.now().strftime('%f')[:3]
             # P0-1: 加密备份扩展名带 .enc；P0-4: 同步写 .meta sidecar
             filename = (
                 f'erp_backup_{timestamp}.zip.enc' if manifest.get('encrypted')
@@ -675,7 +677,9 @@ async def _do_auto_backup(backup_type: str) -> dict:
                 encrypt_password=auto_password,
                 encrypt=bool(auto_password),
             )
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            # 第十四轮：秒级时间戳在同秒双全量（锁刚释放+小库秒完成）下会同名互覆——
+            # 落盘在 advisory 锁外（见该函数），加毫秒后缀保证唯一；解析端正则按搜索匹配不受影响。
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S') + datetime.now().strftime('%f')[:3]
             filename = (
                 f'erp_auto_daily_{timestamp}.zip.enc' if manifest.get('encrypted')
                 else f'erp_auto_daily_{timestamp}.zip'
