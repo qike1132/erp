@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <UiTabs :model-value="modelValue" @update:model-value="$emit('update:modelValue', $event)">
     <UiTabTrigger value="orders" class="flex-1">
       <FontAwesomeIcon icon="file-invoice-dollar" aria-hidden="true" /> 采购订单

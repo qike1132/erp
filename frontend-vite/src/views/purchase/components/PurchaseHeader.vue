@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="bg-gradient-to-r from-primary-500 to-primary-700 px-8 py-6 text-white relative overflow-hidden">
     <div class="absolute -top-1/2 -right-[10%] w-[300px] h-[300px] bg-white/[0.06] rounded-full" />
     <div class="absolute -bottom-[30%] right-[15%] w-[200px] h-[200px] bg-white/[0.04] rounded-full" />
