@@ -6,7 +6,7 @@ import logging
 from datetime import UTC, datetime
 
 from sqlalchemy import select
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 
@@ -91,26 +91,36 @@ async def sync_outsource_processes_for_order(
 
     created = 0
     skipped = 0
-    for item_id, product_id, product_name in skus:
-        for preset in presets.get(product_id, []):
-            key = (item_id, product_id, preset.process_type)
-            if key in existing:
-                skipped += 1
-                continue
-            db.add(OrderOutsourceProcess(
-                order_id=order.id,
-                order_item_id=item_id,
-                product_id=product_id,
-                product_name=product_name,
-                process_type=preset.process_type,
-                sort_order=preset.sort_order or 0,
-                status='pending',
-                created_by=username,
-            ))
-            created += 1
-
-    if created:
-        await db.flush()
+    try:
+        # 第十四轮：savepoint 隔离本次插入 —— 并发（双击/自动生成撞手工）下唯一索引
+        # uq_oosp_order_item_product_process 会拒绝重复键，此时只回滚本次 savepoint
+        # （不牵连外层订单创建事务），并按「全部跳过」返回，不向用户抛 500。
+        async with db.begin_nested():
+            for item_id, product_id, product_name in skus:
+                for preset in presets.get(product_id, []):
+                    key = (item_id, product_id, preset.process_type)
+                    if key in existing:
+                        skipped += 1
+                        continue
+                    db.add(OrderOutsourceProcess(
+                        order_id=order.id,
+                        order_item_id=item_id,
+                        product_id=product_id,
+                        product_name=product_name,
+                        process_type=preset.process_type,
+                        sort_order=preset.sort_order or 0,
+                        status='pending',
+                        created_by=username,
+                    ))
+                    created += 1
+            if created:
+                await db.flush()
+    except IntegrityError:
+        logger.info(
+            "外发工序生成并发冲突（唯一索引兜底，另一请求已生成）：order_id=%s，本次跳过 %d",
+            order.id, created,
+        )
+        return 0, created + skipped
     return created, skipped
 
 async def auto_generate_for_order(

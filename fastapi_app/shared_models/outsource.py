@@ -127,6 +127,15 @@ class OrderOutsourceProcess(Base):
         Index('ix_oosp_order_sort', 'order_id', 'sort_order'),
         Index('ix_oosp_status_date', 'status', 'create_time'),
         Index('ix_oosp_order_item', 'order_item_id'),
+        # 第十四轮：外发工序生成是 check-then-act（SELECT 已有集合 → INSERT），双击/并发
+        # 会重复插入同一 (订单,明细,产品,工序) 的工序行，各自可发满目标量 → 超发。
+        # 加唯一索引兜底；NULLS NOT DISTINCT 使 order_item_id 为空（单 SKU 旧订单）的行
+        # 也参与去重（PG 默认把 NULL 视为互不相同）。
+        Index(
+            'uq_oosp_order_item_product_process',
+            'order_id', 'order_item_id', 'product_id', 'process_type',
+            unique=True, postgresql_nulls_not_distinct=True,
+        ),
     )
 
     def __repr__(self):
