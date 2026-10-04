@@ -34,10 +34,17 @@ export interface StockInUpdatePayload {
   note?: string
 }
 
+export interface StockStats {
+  order_quantity: number
+  order_regular_quantity: number
+  order_custom_quantity: number
+  stockin_quantity: number
+}
+
 export const stockApi = {
-  stats: async () => {
-    const resp = await get<{ success: boolean; data: { order_quantity: number; order_regular_quantity: number; order_custom_quantity: number; stockin_quantity: number } }>('/stock/stats');
-    return resp.data ?? resp as unknown as typeof resp.data;
+  stats: async (): Promise<StockStats> => {
+    const resp = await get<{ success?: boolean; data?: StockStats }>('/stock/stats')
+    return resp.data ?? (resp as StockStats)
   },
   stockins: (params?: QueryParams) => get<StockInRecord[]>('/stock/in/list', params),
   stockouts: (params?: QueryParams) => get<{ stockouts?: StockOutRecord[]; items?: StockOutRecord[]; total?: number }>('/stock/out/list', params),
