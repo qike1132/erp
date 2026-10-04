@@ -293,6 +293,7 @@ jobs:
         npm run check:api:pc
         npm run check:routes
         npm run check:dto
+        npm run check:types
 
     # 上传上面单测步骤产出的 junit 报告（真实存在；`if: always()` 保证测试失败时也能取到）。
     # 原先上传的 frontend-vite/playwright-report/ 与 frontend-vite/test-results/ 两个路径
