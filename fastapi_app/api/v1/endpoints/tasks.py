@@ -153,7 +153,13 @@ async def async_import_orders(
     file: UploadFile = File(...),
     current_user: User = Depends(require_permission("batch_import")),
 ):
-    """异步批量导入订单（提交后台任务）"""
+    """异步批量导入订单（提交后台任务）
+
+    已知缺口：本端点**不走** ``import_guard.run_guarded_import``（文件指纹幂等）。
+    导入在 ARQ worker 中异步执行、与请求级事务分离，无法原子登记文件哈希；
+    故同一文件重复上传会重复建单，去重仅到 ARQ job_id 级（防 ``max_tries`` 重投）。
+    详见 ``api/v1/endpoints/import_guard.py`` 模块文档。
+    """
     _validate_import_file(file)
 
     suffix = os.path.splitext(file.filename or '')[1]
@@ -184,7 +190,11 @@ async def async_import_stockins(
     file: UploadFile = File(...),
     current_user: User = Depends(require_permission("batch_import")),
 ):
-    """异步批量导入备货（提交后台任务）"""
+    """异步批量导入备货（提交后台任务）
+
+    已知缺口：同 ``/tasks/import-orders`` —— 本端点**不走**文件指纹幂等守卫，
+    重复上传同一文件会重复入库；详见 ``api/v1/endpoints/import_guard.py`` 模块文档。
+    """
     _validate_import_file(file)
 
     suffix = os.path.splitext(file.filename or '')[1]

@@ -12058,7 +12058,7 @@
           "异步任务"
         ],
         "summary": "Async Import Orders",
-        "description": "异步批量导入订单（提交后台任务）",
+        "description": "异步批量导入订单（提交后台任务）\n\n已知缺口：本端点**不走** ``import_guard.run_guarded_import``（文件指纹幂等）。\n导入在 ARQ worker 中异步执行、与请求级事务分离，无法原子登记文件哈希；\n故同一文件重复上传会重复建单，去重仅到 ARQ job_id 级（防 ``max_tries`` 重投）。\n详见 ``api/v1/endpoints/import_guard.py`` 模块文档。",
         "operationId": "async_import_orders_api_v1_tasks_import_orders_post",
         "requestBody": {
           "content": {
@@ -12101,7 +12101,7 @@
           "异步任务"
         ],
         "summary": "Async Import Stockins",
-        "description": "异步批量导入备货（提交后台任务）",
+        "description": "异步批量导入备货（提交后台任务）\n\n已知缺口：同 ``/tasks/import-orders`` —— 本端点**不走**文件指纹幂等守卫，\n重复上传同一文件会重复入库；详见 ``api/v1/endpoints/import_guard.py`` 模块文档。",
         "operationId": "async_import_stockins_api_v1_tasks_import_stockins_post",
         "requestBody": {
           "content": {
