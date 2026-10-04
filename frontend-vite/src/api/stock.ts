@@ -3,6 +3,7 @@ import type {
   Product, StagingListResponse, StagingRow, StagingImportResult, InventoryItem,
   InventoryResponse, StockInRecord, StockOutRecord, ShipmentInfo, ApiResponse, QueryParams,
 } from '@/types'
+import type { StockStatsData } from '@/types/api'
 
 /**
  * `/aux/batch-submit-orders` / `-stockins` / `-stockouts` 的批量提交响应。
@@ -34,17 +35,10 @@ export interface StockInUpdatePayload {
   note?: string
 }
 
-export interface StockStats {
-  order_quantity: number
-  order_regular_quantity: number
-  order_custom_quantity: number
-  stockin_quantity: number
-}
-
 export const stockApi = {
-  stats: async (): Promise<StockStats> => {
-    const resp = await get<{ success?: boolean; data?: StockStats }>('/stock/stats')
-    return resp.data ?? (resp as StockStats)
+  stats: async (): Promise<StockStatsData> => {
+    const resp = await get<{ success?: boolean; data?: StockStatsData }>('/stock/stats')
+    return resp.data ?? (resp as StockStatsData)
   },
   stockins: (params?: QueryParams) => get<StockInRecord[]>('/stock/in/list', params),
   stockouts: (params?: QueryParams) => get<{ stockouts?: StockOutRecord[]; items?: StockOutRecord[]; total?: number }>('/stock/out/list', params),
