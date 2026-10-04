@@ -86,7 +86,7 @@
       <template v-else>
         <div v-for="pt in selectedParts" :key="pt.id" class="m-part-row">
           <span class="m-part-name">{{ pt.name }}</span>
-          <button class="m-part-del" :disabled="saving" @click="removePart(pt.id)">删除</button>
+          <button class="m-part-del" :disabled="saving" @click="askRemovePart(pt)">删除</button>
         </div>
         <div v-if="!selectedParts.length" class="m-part-empty">暂无配件</div>
         <div class="m-part-add">
@@ -235,6 +235,12 @@ async function addNewPart() {
   if (!n.trim()) return
   newPartName.value = ''
   await addPart(n)
+}
+
+/** 二次确认：误触即删配置项，与桌面端 CaseSettingsPanel 的确认弹窗同口径 */
+async function askRemovePart(pt: { id: number; name: string }) {
+  if (!window.confirm(`删除配件「${pt.name}」？`)) return
+  await removePart(pt.id)
 }
 
 onMounted(() => {

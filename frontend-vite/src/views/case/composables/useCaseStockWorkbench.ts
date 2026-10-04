@@ -109,10 +109,12 @@ export function useCaseStockWorkbench() {
     if (item) item.direction = direction
   }
 
-  /** 暂存行行内编辑日期（空值忽略，避免清空后无法提交） */
+  /** 暂存行行内编辑日期。清空时**回填今天**而不是静默忽略 ——
+   *  忽略会让输入框看起来已清空（Vue 只在 vnode 值变化时写 DOM，新旧都是旧日期
+   *  → 不回写），用户以为走了「今天」，实际提交的还是旧日期（台账日期错记）。 */
   function updateStagedDate(key: number, date: string) {
     const item = staged.value.find((s) => s.key === key)
-    if (item && date) item.date = date
+    if (item) item.date = date || toISODate()
   }
 
   /** 暂存行行内编辑备注 */
@@ -170,6 +172,10 @@ export function useCaseStockWorkbench() {
    * 方向/日期/备注取自表单当前值。
    */
   async function submitDirect(rows: StagedRowInput[]) {
+    // 重入守卫：提交按钮的 :disabled 只挡点击，**挡不住 Enter**（StockEntryCard 的
+    // @keydown.enter 直接调 onSubmit）。无守卫时「A 在飞 + 选好 B 按 Enter」会并发发出
+    // 第二个 createMovement，且先返回者会把 submitting 置 false 让按钮提前解锁。
+    if (submitting.value) return
     const valid = rows.filter((r) => r.caseId && Number.isInteger(r.quantity) && r.quantity >= 1)
     const first = valid[0]
     if (!first) {

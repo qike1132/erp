@@ -1,4 +1,4 @@
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { caseApi } from '@/api'
 import type { CaseItem, CaseProduct } from '@/api/case'
@@ -26,9 +26,27 @@ export function useCaseSettings() {
   const keyword = ref('')
   const partsFilter = ref<PartsFilter>('all')
 
+  // 击键防抖：keyword 直接进 queryKey（服务端 search），不防抖就是逐键打接口。
+  const committedKeyword = ref('')
+  let kwTimer: ReturnType<typeof setTimeout> | null = null
+  watch(keyword, (v) => {
+    if (kwTimer) clearTimeout(kwTimer)
+    kwTimer = setTimeout(() => {
+      committedKeyword.value = v.trim()
+    }, 300)
+  })
+
+  // 空关键词：一次拉前 200 个做本地过滤（对齐物料用量计算的 ProductSelectColumn）。
+  // 有关键词：**透传服务端 search** —— 只过滤本地那 200 条会让第 201 个及之后的产品
+  // 搜不出来也选不中，而「如未找到请用上方搜索」的提示反而误导（后端本就支持 search）。
   const { data, isLoading } = useQuery({
-    queryKey: ['case-products'],
-    queryFn: () => caseApi.products({ page: 1, per_page: PRODUCT_CAP }),
+    queryKey: ['case-products', committedKeyword.value],
+    queryFn: () =>
+      caseApi.products({
+        page: 1,
+        per_page: PRODUCT_CAP,
+        search: committedKeyword.value || undefined,
+      }),
     staleTime: 30_000,
   })
 
@@ -39,12 +57,6 @@ export function useCaseSettings() {
     let list = products.value
     if (partsFilter.value === 'yes') list = list.filter((p) => p.has_parts)
     else if (partsFilter.value === 'no') list = list.filter((p) => !p.has_parts)
-    const q = keyword.value.trim().toLowerCase()
-    if (q) {
-      list = list.filter(
-        (p) => p.name.toLowerCase().includes(q) || (p.barcode ?? '').toLowerCase().includes(q),
-      )
-    }
     return list
   })
 
@@ -53,25 +65,35 @@ export function useCaseSettings() {
   const selectedMain = ref<CaseItem | null>(null)
   const selectedParts = ref<CaseItem[]>([])
   const loadingTree = ref(false)
+  // 请求序号：快速连选产品时丢弃过期响应，否则会把配件挂到**错误的主件**下
+  // （addPart 用 selectedMain.value.id 作 parent_id → 写库错误）。第二轮审计 5b0eb728
+  // 加过，84005549 重写本文件时被删 —— 这次一次列出 200 行、单击即发请求，更易触发。
+  let loadSeq = 0
 
   async function loadTree(id: number) {
     const tree = await caseApi.forProduct(id)
-    selectedMain.value = tree.main
-    selectedParts.value = tree.parts ?? []
+    return tree
   }
 
   async function selectProduct(id: number) {
     if (selectedProductId.value === id && selectedMain.value) return
+    const seq = ++loadSeq
     selectedProductId.value = id
+    selectedMain.value = null
+    selectedParts.value = []
     loadingTree.value = true
     try {
-      await loadTree(id)
+      const tree = await loadTree(id)
+      if (seq !== loadSeq) return  // 已被更新的选择作废
+      selectedMain.value = tree.main
+      selectedParts.value = tree.parts ?? []
     } catch (e: unknown) {
+      if (seq !== loadSeq) return
       selectedMain.value = null
       selectedParts.value = []
       showToast(getErrorMessage(e, '加载该产品的皮套失败'), 'error')
     } finally {
-      loadingTree.value = false
+      if (seq === loadSeq) loadingTree.value = false
     }
   }
 

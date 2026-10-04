@@ -24,7 +24,7 @@
           </div>
         </div>
 
-        <div v-if="capped" class="cs-cap-hint">已加载前 {{ PRODUCT_CAP }} 个产品，如未找到请用上方搜索</div>
+        <div v-if="capped && !keyword.trim()" class="cs-cap-hint">已加载前 {{ PRODUCT_CAP }} 个产品，如未找到请用上方搜索</div>
         <div v-if="isLoading && !products.length" class="cs-state">载入…</div>
         <div v-else-if="!filtered.length" class="cs-state">没有匹配的产品</div>
         <ul v-else class="cs-products">

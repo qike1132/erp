@@ -18,7 +18,6 @@ export interface StockRecordFilters {
 export function useCaseStockRecords() {
   const queryKey = 'case-movements'
 
-  const showFilter = ref(false)
   const filters = ref<StockRecordFilters>({ direction: '', start: '', end: '' })
   const page = ref(1)
   const perPage = ref(20)
