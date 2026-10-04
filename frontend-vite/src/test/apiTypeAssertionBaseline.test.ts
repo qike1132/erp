@@ -26,10 +26,10 @@ export function countAssertions(): number {
 describe('as unknown as 断言基线', () => {
   it('断言总数不超过基线（防回潮）', () => {
     const total = countAssertions()
-    // 口径 = 排除 src/test/（测试里断言 mock 形状不算收敛对象）。执行本任务时先跑一次
-    // countAssertions() 取实测值填入；本计划撰写时实测为 41。注意本仓常有并发会话在改前端，
-    // 若执行时该值已变，以执行时实测为准（且不得放松到无意义的量级）。
-    expect(total).toBeLessThanOrEqual(41)
+    // 口径 = 排除 src/test/（测试里断言 mock 形状不算收敛对象）。收敛 stock.ts 一处后
+    // 实测为 40（收敛前为 41）。基线记录**改动后的实际剩余数**，任何净新增断言即判红。
+    // 注意本仓常有并发会话在改前端，若该值变化，以实测为准（且不得放松到无意义的量级）。
+    expect(total).toBeLessThanOrEqual(40)
   })
 
   it('收敛样例：stockApi.stats 的断言已消除', () => {
