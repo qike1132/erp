@@ -7,7 +7,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from fastapi_app.shared_models import Base
@@ -28,6 +28,11 @@ class Case(Base):
               postgresql_ops={'name': 'gin_trgm_ops'}),
         Index('idx_case_barcode_trgm', 'barcode', postgresql_using='gin',
               postgresql_ops={'barcode': 'gin_trgm_ops'}),
+        # 第十四轮：主件(product_id 非空且 parent_id 为空)全局唯一 —— 防并发/双击造重复主件
+        # （get_or_create_case_tree_for_product 的 scalar_one_or_none 遇重复会抛
+        # MultipleResultsFound → 500）。配件(parent_id 非空)不受此约束。
+        Index('uq_case_product_root', 'product_id', unique=True,
+              postgresql_where=text('parent_id IS NULL')),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)

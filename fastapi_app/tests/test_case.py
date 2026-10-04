@@ -122,7 +122,10 @@ class TestCaseService:
     @pytest.mark.asyncio
     async def test_delete_case_item_not_found(self, mock_db):
         from fastapi_app.services.case_service import delete_case_item
-        mock_db.get = AsyncMock(return_value=None)
+        # 第十四轮：delete_case_item 改为加锁读（with_for_update），不再用 db.get
+        res = MagicMock()
+        res.scalar_one_or_none.return_value = None
+        mock_db.execute = AsyncMock(return_value=res)
         with pytest.raises(ValueError, match="皮套不存在"):
             await delete_case_item(mock_db, 999)
 

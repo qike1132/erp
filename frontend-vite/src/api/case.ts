@@ -217,8 +217,10 @@ export const caseApi = {
   deleteMovement: (id: number) => del<CaseActionResponse>(`/cases/movements/${id}`),
 
   // --- Excel 批量导入（batch 域） ---
-  importStockins: (formData: FormData) => upload<{ success: boolean; imported?: number; message?: string }>('/batch/import-case-stockins', formData),
-  importStockouts: (formData: FormData) => upload<{ success: boolean; imported?: number; message?: string }>('/batch/import-case-stockouts', formData),
+  // timeout 120s：Excel 解析 + 写库常远超全局 15s，否则前端先超时、后端可能已写入
+  // → 用户重试造成重复出入库（与 OCR 导入同口径，见 request.ts:upload 注释）。
+  importStockins: (formData: FormData) => upload<{ success: boolean; imported?: number; message?: string }>('/batch/import-case-stockins', formData, undefined, 120000),
+  importStockouts: (formData: FormData) => upload<{ success: boolean; imported?: number; message?: string }>('/batch/import-case-stockouts', formData, undefined, 120000),
   downloadTemplate: (filename: string) => download('/batch/download-template', filename),
 
   // --- 导出 ---

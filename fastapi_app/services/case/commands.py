@@ -7,6 +7,7 @@ import logging
 from datetime import UTC, datetime
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.exceptions import BusinessError
@@ -154,11 +155,15 @@ async def batch_create_movements(db: AsyncSession, movements_data: list[dict]) -
             async with db.begin_nested():
                 result = await create_movement(db, case_id, direction, quantity, movement_date, customer, note)
             results.append({'index': idx, **result, 'client_id': item.get('id', '')})
-        except (ValueError, TypeError, RuntimeError, BusinessError) as e:
+        except (ValueError, TypeError, RuntimeError, BusinessError, SQLAlchemyError) as e:
+            # 第十四轮：补 SQLAlchemyError —— 缺它时（如 movement_no 唯一约束冲突）
+            # 会穿透 per-row savepoint 使整批 500，而非仅该条失败。
             logger.warning('批量出入库第 %s 条失败: %s', idx, e)
             failed.append({'index': idx, 'error': str(e)})
 
-    return {'success': True, 'results': results, 'failed': failed}
+    # 全部行失败（且有输入）时不谎报 success —— 让调用方/用户看到失败。
+    success = bool(results) or not movements_data
+    return {'success': success, 'results': results, 'failed': failed}
 
 
 async def _ensure_parent_is_root(db: AsyncSession, parent_id: int) -> None:
@@ -193,6 +198,18 @@ async def create_case_item(db: AsyncSession, name: str | None = None, barcode: s
 
     if parent_id is not None:
         await _ensure_parent_is_root(db, parent_id)
+    elif product_id:
+        # 第十四轮：主件(product_id 非空且 parent_id 为空)全局唯一 —— 取与
+        # get_or_create_case_tree_for_product 同一把 advisory lock 串行化，再查重；
+        # 唯一索引 uq_case_product_root 兜底。此前 create_case_item 不查重也不取锁，
+        # 双击/并发可造出同产品的第二个主件，使 get_or_create 的 scalar_one_or_none()
+        # 抛 MultipleResultsFound → 500。
+        await acquire_advisory_lock_async(db, number_lock_key('CASE_PRODUCT', str(product_id)))
+        existing_root = (await db.execute(
+            select(Case.id).where(Case.product_id == product_id, Case.parent_id.is_(None))
+        )).scalar_one_or_none()
+        if existing_root is not None:
+            raise ValueError('该产品已存在皮套主件，请直接编辑；如需新增请作为配件挂到主件下')
 
     case_obj = Case(
         name=name or '', barcode=barcode or '', image=image, unit=unit,
@@ -240,10 +257,24 @@ async def update_case_item(db: AsyncSession, case_id: int, update_data: dict) ->
 
     if 'parent_id' in update_data:
         parent_id = update_data['parent_id']
+        # 第十四轮：改挂接是层级操作，取全局 advisory lock 串行化 —— 否则并发
+        # PUT A.parent=B 与 PUT B.parent=A 各自读到对方仍是根件、双双通过 → A↔B 成环，
+        # 二者都从 get_case_inventory（只展开根件一层子女）的库存树里消失。
+        await acquire_advisory_lock_async(db, number_lock_key('CASE_HIERARCHY', 'global'))
         if parent_id == case_id:
             raise ValueError("不能把自己设为皮套")
         if parent_id is not None:
             await _ensure_parent_is_root(db, parent_id)
+            # 环检测：从新父件沿 parent 链上溯，不得遇到 case_id（防御纵深；正常 ≤1 层）
+            seen: set[int] = set()
+            cur: int | None = parent_id
+            while cur is not None and cur not in seen:
+                if cur == case_id:
+                    raise ValueError("不能把 SKU 挂到自己的下级，会形成环")
+                seen.add(cur)
+                cur = (await db.execute(
+                    select(Case.parent_id).where(Case.id == cur)
+                )).scalar_one_or_none()
             # 被挂的件自身也**不能已有配件** —— 否则会产生"孙件"，而 get_case_inventory
             # 只展开根件的一层子女，孙件会从库存树里消失。加上这条，"层级 ≤ 1"才真正闭环。
             child_count = (await db.execute(
@@ -264,7 +295,12 @@ async def update_case_item(db: AsyncSession, case_id: int, update_data: dict) ->
 
 async def delete_case_item(db: AsyncSession, case_id: int) -> None:
     """删除皮套 SKU。存在流水或下挂配件时禁止删除。"""
-    case_obj = await db.get(Case, case_id)
+    # 第十四轮：先锁 case 行再计数 —— create_movement 会锁 case 并插入流水；
+    # 不加锁时「计数=0 → 并发插入流水 → 删除 case」窗口内，case_movement 的
+    # ON DELETE CASCADE 会静默删掉那条流水（其库存影响不回退）→ 台账/库存漂移。
+    case_obj = (await db.execute(
+        select(Case).where(Case.id == case_id).with_for_update()
+    )).scalar_one_or_none()
     if not case_obj:
         raise ValueError("皮套不存在")
 

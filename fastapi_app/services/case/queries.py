@@ -54,9 +54,8 @@ async def search_cases(db: AsyncSession, query: str = '') -> list[dict]:
     conditions = _item_search_conditions(query)
     if conditions:
         q = q.where(*conditions)
-    else:
-        q = q.limit(DEFAULT_SEARCH_LIMIT)
-    q = q.order_by(Case.id)
+    # 第十四轮：LIMIT 对**两个分支**都加 —— 原只在无关键词分支加，带词查询可返回整表。
+    q = q.order_by(Case.id).limit(DEFAULT_SEARCH_LIMIT)
     result = await db.execute(q)
     cases = list(result.scalars().all())
     # 只读本表字段：**不要**用 c.sync_name/c.sync_barcode —— 它们在 product_id 非空时

@@ -66,6 +66,9 @@ useWebSocket({
     for (const key of caseQueryKeys()) {
       queryClient.invalidateQueries({ queryKey: [key] })
     }
+    // 第十四轮：一并失效「皮套设置」的产品列表（key case-products）—— 多端改配件后
+    // 该列表原先不刷新。
+    queryClient.invalidateQueries({ queryKey: ['case-products'] })
   },
 })
 </script>

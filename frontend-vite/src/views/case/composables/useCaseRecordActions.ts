@@ -58,7 +58,7 @@ export function useCaseRecordActions(
   }
 
   const saveEditMutation = useApiMutation(
-    (payload: { quantity: number; note: string; movement_date: string }) =>
+    (payload: { quantity: number; note: string; movement_date?: string }) =>
       caseApi.updateMovement(editForm.id, payload),
     {
       invalidate: invalidateAll,
@@ -72,11 +72,14 @@ export function useCaseRecordActions(
 
   async function saveEdit() {
     if (saveEditMutation.isSaving.value) return
-    await saveEditMutation.run({
+    const payload: { quantity: number; note: string; movement_date?: string } = {
       quantity: editForm.quantity,
       note: editForm.note,
-      movement_date: editForm.date,
-    })
+    }
+    // 第十四轮：日期被清空时不提交该字段 —— 后端对 '' 调 _parse_date 会 400「日期格式错误」，
+    // 省略该键则后端保持原日期不变（update_movement 是部分更新）。
+    if (editForm.date) payload.movement_date = editForm.date
+    await saveEditMutation.run(payload)
   }
 
   // ===== 删除 =====
