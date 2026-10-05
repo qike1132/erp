@@ -104,6 +104,12 @@ const {
 </script>
 
 <style scoped>
+/* 本页卡片直角（应用户要求）：全局 .page-card 在 @layer components 里是 18px，
+   scoped 未分层样式在层叠中优先于分层样式，此处覆盖只影响 /supplier */
+.page-card {
+  border-radius: 0;
+}
+
 .sp-container {
   padding: 0;
   margin: 0 auto;

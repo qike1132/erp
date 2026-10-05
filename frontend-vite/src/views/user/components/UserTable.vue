@@ -132,11 +132,17 @@ function handleDelete(row: UserRow) {
   padding: 16px 20px;
 }
 
+/* 对齐 /purchase 的方正表格风格（用户要求）：UiDataTable 包装层自带的
+   rounded-xl(12px) 是共享组件默认值，此处仅本页覆盖为直角 */
+.us-col-scroll :deep(.ui-data-table-wrapper) {
+  border-radius: 0;
+}
+
 /* Badge */
 .us-badge {
   display: inline-block;
   padding: 4px 10px;
-  border-radius: 16px;
+  border-radius: 4px;
   font-size: 12px;
   font-weight: 600;
 }
@@ -175,7 +181,7 @@ function handleDelete(row: UserRow) {
 .us-action-btn {
   padding: 5px 10px;
   border: 2px solid var(--color-border-light, #e2e8f0);
-  border-radius: 9px;
+  border-radius: 4px;
   background: white;
   font-size: 12px;
   font-weight: 600;
