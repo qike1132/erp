@@ -49,6 +49,13 @@ class StockOut(Base):
               postgresql_include=['quantity', 'returned_quantity']),
         Index('idx_stockout_deduction', 'product_id', desc('stockout_date'),
               postgresql_where=text("stockin_id IS NOT NULL")),
+        # 独立出货（stockin_id IS NULL）的库存 CTE 聚合主路径：
+        # WHERE stockin_id IS NULL AND product_id = ANY(..) AND customer = ..
+        # （见 services/stock_inventory_service.py、inventory_service.py）。
+        # ORM 原有的 idx_stockout_product_customer_type 是 (product_id, customer, stockin_id)，
+        # 不是这条 partial 索引，故需单独声明。
+        Index('idx_stockout_no_stockin', 'product_id', 'customer',
+              postgresql_where=text("stockin_id IS NULL")),
     )
 
     def __repr__(self):

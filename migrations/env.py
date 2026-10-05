@@ -82,17 +82,16 @@ _IGNORED_DB_ONLY_TABLES: set[str] = set()
 
 # 库独有索引（历史迁移所建，模型未声明；多为搜索/审计/覆盖索引，误删会掉性能）：
 # 注：idx_app_version_platform_code 已随 app_version 纳入 ORM（迁移 068），故移出白名单。
+#     idx_stockout_no_stockin / idx_order_date_id_desc 已纳入 ORM（迁移 070），故移出白名单。
 _IGNORED_DB_ONLY_INDEXES = {
     'idx_csfv_created_at',             # 054 建；生产同名旧索引先存在 → 新定义被跳过
     'idx_csfv_status',                 # 历史迁移所建
     'idx_csp_role_part_version',       # 054 建 unique；生产同名旧索引为 non-unique
-    'idx_inventory_log_product_time',  # 历史迁移所建
+    'idx_inventory_log_product_time',  # 待迁移 071 改名为 ..._date 后即可移出
     'idx_material_reg_date',           # 历史迁移所建（生产定义与模型分叉）
     'idx_material_reg_supplier',       # 历史迁移所建（生产在 supplier_name，模型在 supplier_id）
-    'idx_order_date_id_desc',          # 历史迁移所建
-    'idx_stockout_has_stockin',        # 历史迁移所建
-    'idx_stockout_no_stockin',         # 历史迁移所建
-    'idx_stockout_order_stockin',      # 历史迁移所建
+    'idx_stockout_has_stockin',        # 待迁移 071 删除后即可移出
+    'idx_stockout_order_stockin',      # 待迁移 071 删除后即可移出
 }
 
 # 库独有列（模型未声明）：按「表 → 列名」精确匹配，避免与其它表上的同名列
