@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi_app.core.exceptions import NotFoundError
 from fastapi_app.core.state_machine import StagingAction, StagingStatus, staging_machine
 from fastapi_app.core.validators import validate_quantity_range
+from fastapi_app.services.batch_import_core import _import_idem_key
 from fastapi_app.services.batch_service import process_order_deduction
 from fastapi_app.services.numbering import generate_order_number
 from fastapi_app.services.staging._generic import (
@@ -177,6 +178,10 @@ async def confirm_staging_orders(
                         change_type='订单',
                         change_quantity=staging.quantity,
                         related_id=order_no,
+                        idem_key=_import_idem_key(
+                            'order', staging.customer, staging_product_id, staging.quantity,
+                            staging.order_date or datetime.now(UTC),
+                        ),
                         note=f'批量导入订单：{order_no}',
                     )
                     db.add(log)

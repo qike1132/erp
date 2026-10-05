@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.exceptions import NotFoundError
 from fastapi_app.core.state_machine import StagingAction, StagingStatus, staging_machine
+from fastapi_app.services.batch_import_core import _import_idem_key
 from fastapi_app.services.numbering import generate_stockin_number
 from fastapi_app.services.staging._generic import (
     _generic_import_staging_from_excel,
@@ -150,6 +151,10 @@ async def confirm_staging_stockins(
                     change_type='备货',
                     change_quantity=staging.quantity,
                     related_id=stockin_no,
+                    idem_key=_import_idem_key(
+                        'stockin', staging.customer, product_id, staging.quantity,
+                        staging.stockin_date or datetime.now(UTC),
+                    ),
                     note=f'批量导入备货：{stockin_no}',
                 )
                 db.add(log)

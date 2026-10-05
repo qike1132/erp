@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.exceptions import BusinessError, NotFoundError
 from fastapi_app.schemas.batch import BatchImportResult, ComprehensiveImportResult, ExcelUpload
+from fastapi_app.services.batch_import_core import _import_idem_key, _row_failure_message
 from fastapi_app.services.inventory_service import calculate_available_shipment_quantity
 from fastapi_app.services.numbering import (
     generate_case_stockin_number,
@@ -269,8 +270,9 @@ async def import_orders_service(db: AsyncSession, file: ExcelUpload) -> BatchImp
                         skipped += 1
                         continue
                     order_no = await generate_order_number(db)
+                    order_date = datetime.now()
                     order = Order(
-                        order_no=order_no, customer=customer, order_date=datetime.now(),
+                        order_no=order_no, customer=customer, order_date=order_date,
                         product_id=product_id, quantity=qty,
                         note=str(note).strip() if note else '', status=ORDER_STATUS_PENDING_STOCK,
                     )
@@ -280,6 +282,7 @@ async def import_orders_service(db: AsyncSession, file: ExcelUpload) -> BatchImp
                     log = InventoryLog(
                         product_id=product_id, change_type='订单', change_quantity=qty,
                         related_id=order_no, note=f'批量导入订单：{order_no}',
+                        idem_key=_import_idem_key('order', customer, product_id, qty, order_date),
                     )
                     db.add(log)
                     if deduct_flag and str(deduct_flag).strip() == '是':
@@ -289,7 +292,7 @@ async def import_orders_service(db: AsyncSession, file: ExcelUpload) -> BatchImp
             except (ValueError, TypeError, SQLAlchemyError) as exc:
                 # savepoint 已自动回滚本行，不再整体 rollback（避免误伤已成功的行）
                 logger.error(f'订单导入 - 行处理失败: {exc}', exc_info=True)
-                errors.append('行处理失败')
+                errors.append(_row_failure_message(exc))
                 skipped += 1
                 continue
         # 提交交给请求级事务（get_async_db），服务层不再手动 commit
@@ -373,7 +376,7 @@ async def import_case_stockouts_service(db: AsyncSession, file: ExcelUpload) -> 
             except (ValueError, TypeError, SQLAlchemyError) as exc:
                 # savepoint 已自动回滚本行，不再整体 rollback（避免误伤已成功的行）
                 logger.error(f'皮套出库导入 - 行处理失败: {exc}', exc_info=True)
-                errors.append('行处理失败')
+                errors.append(_row_failure_message(exc))
                 skipped += 1
                 continue
         # 提交交给请求级事务（get_async_db），服务层不再手动 commit
@@ -451,7 +454,7 @@ async def import_case_stockins_service(db: AsyncSession, file: ExcelUpload) -> B
             except (ValueError, TypeError, SQLAlchemyError) as exc:
                 # savepoint 已自动回滚本行，不再整体 rollback（避免误伤已成功的行）
                 logger.error(f'皮套入库导入 - 行处理失败: {exc}', exc_info=True)
-                errors.append('行处理失败')
+                errors.append(_row_failure_message(exc))
                 skipped += 1
                 continue
         # 提交交给请求级事务（get_async_db），服务层不再手动 commit
@@ -525,6 +528,7 @@ async def import_stockins_service(db: AsyncSession, file: ExcelUpload) -> BatchI
                     log = InventoryLog(
                         product_id=product_id, change_type='备货', change_quantity=qty,
                         related_id=stockin_no, note=f'批量导入备货：{stockin_no}',
+                        idem_key=_import_idem_key('stockin', customer, product_id, qty, stockin_date),
                     )
                     db.add(log)
                 # savepoint 成功提交后才计数，失败行不计入 imported
@@ -532,7 +536,7 @@ async def import_stockins_service(db: AsyncSession, file: ExcelUpload) -> BatchI
             except (ValueError, TypeError, SQLAlchemyError) as exc:
                 # savepoint 已自动回滚本行，不再整体 rollback（避免误伤已成功的行）
                 logger.error(f'备货导入 - 行处理失败: {exc}', exc_info=True)
-                errors.append('行处理失败')
+                errors.append(_row_failure_message(exc))
                 skipped += 1
                 continue
         # 提交交给请求级事务（get_async_db），服务层不再手动 commit
@@ -627,6 +631,7 @@ async def import_stockouts_service(db: AsyncSession, file: ExcelUpload) -> Batch
                     log = InventoryLog(
                         product_id=product.id, change_type='出库', change_quantity=-qty,
                         related_id='', note=f'批量导入出库：客户{customer}，数量{qty}',
+                        idem_key=_import_idem_key('stockout', customer, product.id, qty, stockout_date),
                     )
                     db.add(log)
                 # savepoint 成功提交后才计数，失败行不计入 imported
@@ -634,7 +639,7 @@ async def import_stockouts_service(db: AsyncSession, file: ExcelUpload) -> Batch
             except (ValueError, TypeError, SQLAlchemyError) as exc:
                 # savepoint 已自动回滚本行，不再整体 rollback（避免误伤已成功的行）
                 logger.error(f'出库导入 - 行处理失败: {exc}', exc_info=True)
-                errors.append('行处理失败')
+                errors.append(_row_failure_message(exc))
                 skipped += 1
                 continue
         # 提交交给请求级事务（get_async_db），服务层不再手动 commit
@@ -706,7 +711,7 @@ async def import_products_service(db: AsyncSession, file: ExcelUpload) -> BatchI
             except (ValueError, TypeError, SQLAlchemyError) as exc:
                 # savepoint 已自动回滚本行，不再整体 rollback（避免误伤已成功的行）
                 logger.error(f'产品导入 - 行处理失败: {exc}', exc_info=True)
-                errors.append('行处理失败')
+                errors.append(_row_failure_message(exc))
                 skipped += 1
                 continue
         # 提交交给请求级事务（get_async_db），服务层不再手动 commit

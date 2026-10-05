@@ -4,6 +4,15 @@
 只允许导入一次。消灭「重传同一 Excel 导致库存翻倍 / 重复建单」——
 该缺陷在出货、订单导入路径上此前零防护。
 
+**覆盖范围（务必如实看待）**：本守卫只挂在 ``batch.py`` 的 7 个端点上。
+但前端**订单/备货导入实际走的是 staging 链路**（`/staging-orders/import`
++ `/staging-orders/confirm`，见 `frontend-vite/src/api/order.ts`），
+`/batch/import-orders|stockins|stockouts|import-comprehensive` 目前前端零调用
+（前端只调 `/batch/batch-import` 与 `/batch/import-case-*`）。
+即：用户界面上最常用的订单/备货导入，**本层未覆盖**（该缺口与 ARQ
+端点 `/tasks/import-*` 的缺口同类，均已记录待办）。
+第 2 层（`inventory_log.idem_key`）已接入 staging 与直连两套确认/导入实现。
+
 正确性依赖请求级事务（get_async_db 在请求结束提交）：登记行与导入
 产生/消费的业务行处于同一事务，任一方失败即整体回滚 —— 成功的导入
 留下永久登记，失败的导入不留痕、可原样重试。

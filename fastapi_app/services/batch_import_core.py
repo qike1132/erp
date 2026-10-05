@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy import func, select
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.services.batch_import_dedup import dedupe_by_keys
@@ -58,6 +58,41 @@ class ImportDeps:
 def default_import_deps() -> ImportDeps:
     """返回默认依赖包（模块级单例函数）。"""
     return ImportDeps()
+
+
+def _import_idem_key(prefix: str, customer: str, product_id: int, qty: int, when: datetime) -> str:
+    """导入行的幂等键（P1-a 第 2 层，写入 ``inventory_log.idem_key``）。
+
+    口径：同类型 + 同客户 + 同产品 + 同数量 + 同业务日 只允许一条流水。
+    业务已确认「同日同客户同产品同数量出货/下单多次」不会发生，故可直接去重。
+
+    **日期必须入键**：不同日的同客户同产品同数量是合法重复（常态补货/发货），
+    不带日期会永久误杀。模板无日期列时 ``when`` 取导入当日。
+
+    **时区归一**：调用点传入的有 aware（``datetime.now(UTC)``）也有 naive
+    （``datetime.now()``）。若直接 ``.date()``，UTC+8 下 00:00–08:00 两者会差一天
+    → 同一业务日产生两个键 → 跨路径/跨零点漏拦。故 aware 一律转本地日，
+    naive 本就是本地日，两者收敛到同一个本地日历日。
+
+    冲突由 ``inventory_log.uq_inventory_log_idem``（部分唯一索引）在 DB 层拦截；
+    行处理器跑在 savepoint 内，冲突被外层 ``except SQLAlchemyError`` 兜成
+    「该行跳过 + 错误清单提示」，不是整批 500。
+    """
+    day = when.astimezone().date() if when.tzinfo is not None else when.date()
+    return f'{prefix}:{str(customer).strip()}|{int(product_id)}|{int(qty)}|{day.isoformat()}'
+
+
+def _row_failure_message(exc: Exception, idx: int | None = None) -> str:
+    """行级失败的人话消息。
+
+    幂等键冲突单独识别：驱动原文（``duplicate key value violates unique
+    constraint "uq_inventory_log_idem" … sqlalche.me/…``）对不看代码的维护者
+    毫无用处。``idx`` 为 None 时不带行号（部分调用点循环无行号）。
+    """
+    at = f'行{idx}: ' if idx is not None else ''
+    if isinstance(exc, IntegrityError) and 'uq_inventory_log_idem' in str(exc):
+        return f'{at}与已导入的相同记录重复（同客户/产品/数量/业务日），已跳过'
+    return f'{at}异常 - {exc!s}'
 
 
 @dataclass(frozen=True)
@@ -283,15 +318,20 @@ async def _import_data_generic(
     for idx, row_data in rows_to_process:
         try:
             if use_savepoint:
+                # 计数必须在 savepoint 成功退出之后：InventoryLog 的 INSERT 要到
+                # savepoint 退出（autoflush）才落库，幂等键冲突恰在此时爆发。若在块内
+                # count+=1，冲突行会被虚报为「成功导入」——而「编辑后重传」每次都会撞键。
+                ok = False
                 async with db.begin_nested():
-                    if await row_handler(db, row_data, idx, context, debug_messages):
-                        count += 1
+                    ok = await row_handler(db, row_data, idx, context, debug_messages)
+                if ok:
+                    count += 1
             else:
                 if await row_handler(db, row_data, idx, context, debug_messages):
                     count += 1
         except (ValueError, TypeError, SQLAlchemyError) as e:
             if debug_messages is not None:
-                debug_messages.append(f"行{idx}: 异常 - {e!s}")
+                debug_messages.append(_row_failure_message(e, idx))
             logger.error(f"{label} - 行{idx}: 异常 - {e!s}", exc_info=True)
             continue
 
@@ -427,10 +467,11 @@ async def import_orders_from_data(db: AsyncSession, data_list: list, *, deps: Im
             return False
 
         order_no = await deps.generate_order_number(db)
+        order_date = datetime.now(UTC)  # aware UTC：order_date 列为 timestamptz
         order = Order(
             order_no=order_no,
             customer=customer,
-            order_date=datetime.now(UTC),  # aware UTC：order_date 列为 timestamptz
+            order_date=order_date,
             product_id=product_id,
             quantity=qty,
             note=str(note).strip() if note else '',
@@ -452,6 +493,7 @@ async def import_orders_from_data(db: AsyncSession, data_list: list, *, deps: Im
             change_type='订单',
             change_quantity=qty,
             related_id=order_no,
+            idem_key=_import_idem_key('order', customer, product_id, qty, order_date),
             note='综合导入订单：' + order_no
         )
         db.add(log)
@@ -546,6 +588,7 @@ async def import_stockins_from_data(db: AsyncSession, data_list: list, *, deps: 
             change_type='备货',
             change_quantity=qty,
             related_id=stockin_no,
+            idem_key=_import_idem_key('stockin', customer, product_id, qty, stockin_date),
             note='综合导入备货：' + stockin_no
         )
         db.add(log)
@@ -658,6 +701,7 @@ async def import_stockouts_from_data(db: AsyncSession, data_list: list, *, deps:
             change_type='出库',
             change_quantity=-qty,
             related_id='',
+            idem_key=_import_idem_key('stockout', customer, product.id, qty, stockout_date),
             note=f'综合导入出货：客户{customer}，数量{qty}'
         )
         db.add(log)

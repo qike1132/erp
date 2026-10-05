@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.exceptions import NotFoundError
 from fastapi_app.core.state_machine import StagingAction, StagingStatus, staging_machine
+from fastapi_app.services.batch_import_core import _import_idem_key
 from fastapi_app.services.batch_service import calculate_available_shipment_quantity
 from fastapi_app.services.numbering import generate_stockout_number
 from fastapi_app.services.staging._generic import (
@@ -226,6 +227,10 @@ async def confirm_staging_stockouts(
                     change_type='出库',
                     change_quantity=-staging.quantity,
                     related_id='',
+                    idem_key=_import_idem_key(
+                        'stockout', staging.customer, product_id, staging.quantity,
+                        staging.stockout_date or datetime.now(UTC),
+                    ),
                     note=f'批量导入出货：客户{staging.customer}，数量{staging.quantity}',
                 )
                 db.add(log)
