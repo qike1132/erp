@@ -76,7 +76,8 @@ def test_migration_revision_chain_and_single_head():
 
     heads = [rev for rev in graph if rev not in {p for ps in graph.values() for p in ps}]
     assert len(heads) == 1, f"迁移图必须单 head，实际: {heads}"
-    assert heads[0] == mig.revision
+    # 不把 head 钉死成 067：本文件只保证 067 在链上（上面已断言其 down_revision），
+    # 后续新增迁移（068/069…）本就应前移 head，钉死会让每次新增迁移都误红。
 
 
 @pytest.fixture()
