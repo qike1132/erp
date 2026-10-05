@@ -1,1 +1,47 @@
-Single-database configuration for Flask.
+# 数据库迁移（Alembic）约定
+
+## ⚠️ 禁止对生产库运行 alembic revision --autogenerate
+
+**禁止对生产库运行 alembic revision --autogenerate。**
+
+生产库 `erp_system` 存在**历史漂移**：一批「库里有、模型 `__table_args__` 未声明」的
+索引 / 表 / 列（例如 `idx_csfv_status`、`app_version`、`product_image_orphan_backup`，
+以及 `customer_sampling_fabric_version` 的 4 个库独有列）。autogenerate 会把它们
+一律生成为 `DROP INDEX` / `DROP TABLE` / `DROP COLUMN` 的**破坏性 DDL**：
+搜索索引被删会让查询变慢，`app_version` 被删会让 OTA 脚本直接报错。
+
+详见 `docs/audit-round2/03-data-layer.md`。
+
+## 生成迁移的正确姿势
+
+需要新增迁移时，**不要**对着生产库 autogenerate，按下面来：
+
+1. 起一个**临时空库**（例如本地 `createdb erp_tmp`）。
+2. 在空库上 `python -m alembic -c migrations/alembic.ini upgrade head`，
+   重建出与 ORM 一致的 schema。
+3. 改模型（`fastapi_app/shared_models/`）。
+4. 对着这个**空库**跑 `python -m alembic -c migrations/alembic.ini revision --autogenerate`，
+   生成迁移。
+5. 用空库 `upgrade head` + `check` 验证：既不失败、也不产生新漂移
+   —— 这正是 CI 的 `.github/workflows/ci-cd.yml` 所跑的判据（空库 `upgrade head` + `check`）。
+6. 若迁移要落地到生产库，用 `migrations/_legacy_base_guard.py` 的幂等包装
+   （`create_index_if_absent` / `create_table_if_absent` / `drop_table_if_exists` 等），
+   使它在「对象已存在/不存在」时都能安全重放。
+
+## 破坏性 DDL 守卫
+
+`migrations/versions/` 下**新增**的破坏性 DDL（DROP TABLE/INDEX/COLUMN/CONSTRAINT）
+会被 `fastapi_app/tests/test_migration_autogenerate_safety.py` 拦下，
+除非显式更新基线：
+
+```bash
+python -m migrations._destructive_scan --update-baseline
+```
+
+更新基线前必须逐条人工审阅；更新基线的提交要在提交信息里说明理由。
+
+## 其它
+
+- 迁移链保持**单一 head**。
+- 迁移只做结构/数据变更，不夹带业务逻辑。
+- 生效的生产启停通道是 NSSM，不由 alembic 管理。

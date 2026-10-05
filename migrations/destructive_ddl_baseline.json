@@ -1,0 +1,489 @@
+{
+  "_comment": "迁移破坏性 DDL 棘轮基线：由 python -m migrations._destructive_scan --update-baseline 生成。只在人工审阅后更新；更新需在提交信息里说明理由。",
+  "files": {
+    "migrations/versions/659467a97350_add_approval_system_and_order_lock_.py": [
+      "drop_column:is_locked",
+      "drop_column:lock_time",
+      "drop_column:locked_by_id",
+      "drop_column:stockin_id",
+      "drop_constraint:",
+      "drop_index:",
+      "drop_index:idx_approval_status_time",
+      "drop_index:idx_case_barcode",
+      "drop_index:idx_case_product",
+      "drop_index:idx_case_stockin_case_date",
+      "drop_index:idx_case_stockin_customer_case",
+      "drop_index:idx_case_stockin_customer_date",
+      "drop_index:idx_case_stockout_case_date",
+      "drop_index:idx_case_stockout_customer_date",
+      "drop_index:idx_order_locked",
+      "drop_table:approval_log",
+      "drop_table:approval_request"
+    ],
+    "migrations/versions/9b7b1ead6c4a_add_phone_column_to_user.py": [
+      "drop_column:phone",
+      "drop_index:",
+      "drop_index:idx_order_customer_product",
+      "drop_index:idx_order_customer_status",
+      "drop_index:idx_order_product_status",
+      "drop_index:idx_order_status_date",
+      "drop_index:idx_product_name_barcode",
+      "drop_index:idx_stockin_customer_date",
+      "drop_index:idx_stockin_customer_product",
+      "drop_index:idx_stockin_customer_product_date",
+      "drop_index:idx_stockin_product_date",
+      "drop_index:idx_stockout_customer_date",
+      "drop_index:idx_stockout_order",
+      "drop_index:idx_stockout_product_date",
+      "drop_index:idx_stockout_stockin",
+      "drop_table:bom_file",
+      "drop_table:process_file",
+      "drop_table:staging_orders",
+      "drop_table:staging_stockins",
+      "drop_table:staging_stockouts"
+    ],
+    "migrations/versions/add_backup_record.py": [
+      "drop_table:backup_record"
+    ],
+    "migrations/versions/add_batch_no_to_order.py": [
+      "drop_column:order|batch_no"
+    ],
+    "migrations/versions/add_country_table.py": [
+      "drop_table:country"
+    ],
+    "migrations/versions/add_customer_code_to_customer.py": [
+      "drop_column:customer|customer_code",
+      "drop_index:ix_customer_customer_code|customer"
+    ],
+    "migrations/versions/add_customer_to_purchase_order.py": [
+      "drop_column:purchase_order|customer_code",
+      "drop_column:purchase_order|customer_id",
+      "drop_column:purchase_order|customer_name",
+      "drop_constraint:fk_purchase_order_customer|purchase_order"
+    ],
+    "migrations/versions/add_device_token.py": [
+      "drop_table:device_token"
+    ],
+    "migrations/versions/add_file_records_table.py": [
+      "drop_index:idx_file_record_created_at",
+      "drop_index:idx_file_record_storage_key",
+      "drop_index:idx_file_record_uploader",
+      "drop_table:file_records"
+    ],
+    "migrations/versions/add_order_batch_fields.py": [
+      "drop_column:order|batch_completed_at",
+      "drop_column:order|batch_completed_by_id",
+      "drop_constraint:fk_order_batch_completed_by|order",
+      "drop_index:idx_batch_audit_batch_action",
+      "drop_index:idx_batch_audit_time",
+      "drop_index:idx_order_batch_completed_at",
+      "drop_index:idx_order_batch_no",
+      "drop_table:order_batch_audit_log"
+    ],
+    "migrations/versions/add_order_confirm_fields.py": [
+      "drop_column:order|confirmed_at",
+      "drop_column:order|confirmed_by_id",
+      "drop_index:ix_order_confirmed_at"
+    ],
+    "migrations/versions/add_order_type_country_to_stockin.py": [
+      "drop_column:stock_in|country",
+      "drop_column:stock_in|order_type"
+    ],
+    "migrations/versions/add_outsource_module.py": [
+      "drop_table:order_outsource_process",
+      "drop_table:outsource_process_type"
+    ],
+    "migrations/versions/add_outsource_process_flow.py": [
+      "drop_table:order_outsource_process_flow"
+    ],
+    "migrations/versions/add_outsource_ship_receive.py": [
+      "drop_column:order_outsource_process|received_quantity",
+      "drop_column:order_outsource_process|shipped_quantity"
+    ],
+    "migrations/versions/add_outsource_shipment.py": [
+      "drop_table:outsource_shipment",
+      "drop_table:outsource_shipment_item"
+    ],
+    "migrations/versions/add_product_factory.py": [
+      "drop_column:product|factory"
+    ],
+    "migrations/versions/add_product_price.py": [
+      "drop_column:product|price"
+    ],
+    "migrations/versions/add_product_version.py": [
+      "drop_column:product|version"
+    ],
+    "migrations/versions/add_production_plan.py": [
+      "drop_table:production_plan",
+      "drop_table:production_plan_log"
+    ],
+    "migrations/versions/add_purchase_plan_composite_indexes.py": [
+      "drop_index:idx_ppd_product_name",
+      "drop_index:idx_ppl_customer_name",
+      "drop_index:idx_ppl_month_customer"
+    ],
+    "migrations/versions/add_stock_return.py": [
+      "drop_column:stock_out|returned_quantity",
+      "drop_index:idx_stockreturn_customer_date",
+      "drop_index:idx_stockreturn_product_date",
+      "drop_index:idx_stockreturn_stockout",
+      "drop_table:stock_return"
+    ],
+    "migrations/versions/add_stockin_confirm_fields.py": [
+      "drop_column:stock_in|confirmed_at",
+      "drop_column:stock_in|confirmed_by_id",
+      "drop_index:ix_stock_in_confirmed_at"
+    ],
+    "migrations/versions/add_supplier_purchase_order.py": [
+      "drop_column:product_accessory|loss_rate",
+      "drop_column:product_accessory|material_category",
+      "drop_column:product_accessory|material_code",
+      "drop_column:product_accessory|remark",
+      "drop_column:product_accessory|specification",
+      "drop_column:product_accessory|supplier_id",
+      "drop_column:product_accessory|supplier_name",
+      "drop_column:product_accessory|unit",
+      "drop_column:product_accessory|update_time",
+      "drop_column:product_material|loss_rate",
+      "drop_column:product_material|material_code",
+      "drop_column:product_material|remark",
+      "drop_column:product_material|specification",
+      "drop_column:product_material|supplier_id",
+      "drop_column:product_material|supplier_name",
+      "drop_column:product_material|unit",
+      "drop_column:product_material|update_time",
+      "drop_table:product_fabric",
+      "drop_table:product_packaging",
+      "drop_table:purchase_order",
+      "drop_table:purchase_order_item",
+      "drop_table:supplier"
+    ],
+    "migrations/versions/add_updated_at_to_all_tables.py": [
+      "drop_column:updated_at",
+      "execute:DROP FUNCTION IF EXISTS trigger_set_updated_at()"
+    ],
+    "migrations/versions/add_user_factory_and_notification.py": [
+      "drop_column:user|factory",
+      "drop_index:ix_notification_created_at",
+      "drop_index:ix_notification_related_order_id",
+      "drop_index:ix_notification_user_read",
+      "drop_table:notification"
+    ],
+    "migrations/versions/change_order_status_nullable.py": [
+      "drop_index:idx_purchase_order_source_order_id"
+    ],
+    "migrations/versions/pg_standalone_002_add_indexes_and_order_status_constraint.py": [
+      "drop_index:idx_purchase_order_created_by",
+      "drop_index:idx_stockout_date",
+      "execute:ALTER TABLE \"order\" DROP CONSTRAINT IF EXISTS order_status_check"
+    ],
+    "migrations/versions/pg_standalone_003_add_performance_indexes.py": [
+      "drop_index:idx_customer_name",
+      "drop_index:idx_order_customer",
+      "drop_index:idx_order_order_type",
+      "drop_index:idx_order_product_status",
+      "drop_index:idx_order_status_order_date",
+      "drop_index:idx_product_barcode",
+      "drop_index:idx_product_name",
+      "drop_index:idx_purchase_order_customer",
+      "drop_index:idx_purchase_order_status_created",
+      "drop_index:idx_purchase_order_supplier_status",
+      "drop_index:idx_stockin_customer",
+      "drop_index:idx_stockin_product_date",
+      "drop_index:idx_stockout_customer",
+      "drop_index:idx_stockout_product_date"
+    ],
+    "migrations/versions/pg_standalone_004_add_trgm_indexes.py": [
+      "execute:DROP INDEX IF EXISTS idx_customer_contact_trgm",
+      "execute:DROP INDEX IF EXISTS idx_customer_name_trgm",
+      "execute:DROP INDEX IF EXISTS idx_customer_phone_trgm",
+      "execute:DROP INDEX IF EXISTS idx_product_barcode_trgm",
+      "execute:DROP INDEX IF EXISTS idx_product_name_trgm"
+    ],
+    "migrations/versions/pg_standalone_006_add_material_production_indexes.py": [
+      "drop_index:idx_dpr_product_id",
+      "drop_index:idx_material_reg_date",
+      "drop_index:idx_material_reg_purchase_order",
+      "drop_index:idx_material_reg_status",
+      "drop_index:idx_material_reg_status_date",
+      "drop_index:idx_material_reg_supplier"
+    ],
+    "migrations/versions/pg_standalone_007_add_inventory_cte_and_case_indexes.py": [
+      "drop_index:idx_order_product_customer_type",
+      "drop_index:idx_order_product_type_country",
+      "drop_index:idx_stockout_product_customer_noin",
+      "execute:DROP INDEX IF EXISTS idx_case_barcode_trgm",
+      "execute:DROP INDEX IF EXISTS idx_case_name_trgm"
+    ],
+    "migrations/versions/pg_standalone_008_add_batch_completed_to_order_status_check.py": [
+      "execute:ALTER TABLE \"order\" DROP CONSTRAINT IF EXISTS order_status_check"
+    ],
+    "migrations/versions/pg_standalone_010_add_fk_indexes_and_cleanup.py": [
+      "execute:DROP INDEX CONCURRENTLY IF EXISTS idx_customer_name",
+      "execute:DROP INDEX CONCURRENTLY IF EXISTS idx_order_batch_completed",
+      "execute:DROP INDEX CONCURRENTLY IF EXISTS idx_order_customer",
+      "execute:DROP INDEX CONCURRENTLY IF EXISTS idx_po_status_date_covering",
+      "execute:DROP INDEX CONCURRENTLY IF EXISTS idx_product_barcode",
+      "execute:DROP INDEX CONCURRENTLY IF EXISTS idx_product_name",
+      "execute:DROP INDEX CONCURRENTLY IF EXISTS idx_stockout_deduction",
+      "execute:DROP INDEX CONCURRENTLY IF EXISTS idx_stockout_order_stockin_qty",
+      "execute:DROP INDEX IF EXISTS idx_modification_log_modifier",
+      "execute:DROP INDEX IF EXISTS idx_order_sync_config_updated_by",
+      "execute:DROP INDEX IF EXISTS idx_product_accessory_supplier",
+      "execute:DROP INDEX IF EXISTS idx_product_fabric_supplier",
+      "execute:DROP INDEX IF EXISTS idx_product_material_supplier",
+      "execute:DROP INDEX IF EXISTS idx_product_packaging_supplier",
+      "execute:DROP INDEX IF EXISTS idx_staging_order_product",
+      "execute:DROP INDEX IF EXISTS idx_staging_stockin_product",
+      "execute:DROP INDEX IF EXISTS idx_staging_stockout_product"
+    ],
+    "migrations/versions/pg_standalone_011_performance_indexes.py": [
+      "execute:DROP INDEX CONCURRENTLY IF EXISTS idx_material_reg_create_time",
+      "execute:DROP INDEX CONCURRENTLY IF EXISTS idx_material_reg_date",
+      "execute:DROP INDEX CONCURRENTLY IF EXISTS idx_material_reg_item_reg_id",
+      "execute:DROP INDEX CONCURRENTLY IF EXISTS idx_material_reg_order_no",
+      "execute:DROP INDEX CONCURRENTLY IF EXISTS idx_material_reg_status",
+      "execute:DROP INDEX CONCURRENTLY IF EXISTS idx_material_reg_supplier",
+      "execute:DROP INDEX CONCURRENTLY IF EXISTS idx_order_not_deleted_customer",
+      "execute:DROP INDEX CONCURRENTLY IF EXISTS idx_order_not_deleted_date"
+    ],
+    "migrations/versions/pg_standalone_012_add_audit_log_table.py": [
+      "drop_index:idx_audit_action_date",
+      "drop_index:idx_audit_created_desc",
+      "drop_index:idx_audit_resource",
+      "drop_index:idx_audit_resource_date",
+      "drop_index:idx_audit_user_action",
+      "drop_table:audit_log",
+      "execute:DROP INDEX IF EXISTS idx_audit_not_login"
+    ],
+    "migrations/versions/pg_standalone_014_create_order_item.py": [
+      "drop_index:ix_order_item_order_id",
+      "drop_index:ix_order_item_order_product",
+      "drop_index:ix_order_item_product_id",
+      "drop_table:order_item"
+    ],
+    "migrations/versions/pg_standalone_015_pattern_room.py": [
+      "drop_index:idx_prb_created_at",
+      "drop_index:idx_prb_customer",
+      "drop_index:idx_prb_product_name",
+      "drop_index:idx_prb_status_version",
+      "drop_index:idx_prbi_bom_parent",
+      "drop_index:idx_prbi_category",
+      "drop_index:idx_prbi_supplier",
+      "drop_index:idx_prbiv_bom_item_version",
+      "drop_index:idx_prbiv_version",
+      "drop_index:idx_prcl_bom_time",
+      "drop_index:idx_prcl_created_at",
+      "drop_index:idx_prcl_type",
+      "drop_table:pattern_room_bom",
+      "drop_table:pattern_room_bom_item",
+      "drop_table:pattern_room_bom_item_version",
+      "drop_table:pattern_room_change_log"
+    ],
+    "migrations/versions/pg_standalone_016_dashboard_daily_stats_mv.py": [
+      "execute:DROP MATERIALIZED VIEW IF EXISTS mv_daily_order_quantity CASCADE;",
+      "execute:DROP MATERIALIZED VIEW IF EXISTS mv_daily_stockin_quantity CASCADE;",
+      "execute:DROP MATERIALIZED VIEW IF EXISTS mv_daily_stockout_quantity CASCADE;"
+    ],
+    "migrations/versions/pg_standalone_017_add_po_source_order_ids_gin_index.py": [
+      "execute:DROP INDEX IF EXISTS idx_purchase_order_source_ids_gin"
+    ],
+    "migrations/versions/pg_standalone_017_pattern_room_v2.py": [
+      "drop_index:idx_prb_created_at",
+      "drop_index:idx_prb_customer",
+      "drop_index:idx_prb_product_name",
+      "drop_index:idx_prb_status_version",
+      "drop_index:idx_prbi_bom_parent",
+      "drop_index:idx_prbi_category",
+      "drop_index:idx_prbi_supplier",
+      "drop_index:idx_prbiv_bom_item_version",
+      "drop_index:idx_prbiv_version",
+      "drop_index:idx_prcl2_sample_time",
+      "drop_index:idx_prcl2_type",
+      "drop_index:idx_prcl_bom_time",
+      "drop_index:idx_prcl_created_at",
+      "drop_index:idx_prcl_type",
+      "drop_index:idx_prpf_part_version",
+      "drop_index:idx_prpf_version",
+      "drop_index:idx_prs_created_at",
+      "drop_index:idx_prs_customer",
+      "drop_index:idx_prs_status",
+      "drop_index:idx_prsp_sample_sort",
+      "drop_table:pattern_room_bom",
+      "drop_table:pattern_room_bom_item",
+      "drop_table:pattern_room_bom_item_version",
+      "drop_table:pattern_room_change_log",
+      "drop_table:pattern_room_change_log_v2",
+      "drop_table:pattern_room_part_fabric",
+      "drop_table:pattern_room_sample",
+      "drop_table:pattern_room_sample_part"
+    ],
+    "migrations/versions/pg_standalone_017_product_aggregate_mv.py": [
+      "execute:DROP MATERIALIZED VIEW IF EXISTS mv_product_aggregate CASCADE;"
+    ],
+    "migrations/versions/pg_standalone_018_purchase_plan_unique_month_customer.py": [
+      "execute:DROP INDEX IF EXISTS idx_ppl_month_customer",
+      "execute:DROP INDEX IF EXISTS uq_ppl_month_customer"
+    ],
+    "migrations/versions/pg_standalone_019_customer_sampling.py": [
+      "drop_index:idx_cscl_action",
+      "drop_index:idx_cscl_project_time",
+      "drop_index:idx_csfv_created_at",
+      "drop_index:idx_csp_created_at",
+      "drop_index:idx_csp_customer",
+      "drop_index:idx_csp_part_sort",
+      "drop_index:idx_csp_product_name_trgm",
+      "drop_index:idx_csp_sequence_no",
+      "drop_index:idx_csp_updated_at_desc",
+      "drop_table:customer_sampling_change_log",
+      "drop_table:customer_sampling_fabric_version",
+      "drop_table:customer_sampling_part",
+      "drop_table:customer_sampling_project"
+    ],
+    "migrations/versions/pg_standalone_020_customer_sampling_changelog_set_null.py": [
+      "drop_constraint:customer_sampling_change_log"
+    ],
+    "migrations/versions/pg_standalone_021_remove_part_name_unique.py": [
+      "drop_column:customer_sampling_part|fabric_color_no",
+      "drop_constraint:uq_csp_part_name|customer_sampling_part",
+      "drop_index:idx_csp_part_name"
+    ],
+    "migrations/versions/pg_standalone_022_add_is_archived_to_sampling_project.py": [
+      "drop_column:customer_sampling_project|is_archived"
+    ],
+    "migrations/versions/pg_standalone_023_add_status.py": [
+      "drop_column:customer_sampling_project|status",
+      "drop_constraint:ck_csp_status_valid|customer_sampling_project"
+    ],
+    "migrations/versions/pg_standalone_024_drop_is_archived.py": [
+      "drop_column:customer_sampling_project|is_archived"
+    ],
+    "migrations/versions/pg_standalone_025_add_cs_indexes.py": [
+      "drop_index:idx_cscl_created_at",
+      "drop_index:idx_csfv_project_version"
+    ],
+    "migrations/versions/pg_standalone_027_drop_pattern_room_tables.py": [
+      "drop_table:"
+    ],
+    "migrations/versions/pg_standalone_028_customer_sampling_role.py": [
+      "drop_column:customer_sampling_fabric_version|role_id",
+      "drop_column:customer_sampling_part|role_id",
+      "drop_index:idx_cs_role_project_sort",
+      "drop_index:idx_csfv_role_id",
+      "drop_index:idx_csp_role_id",
+      "drop_index:idx_csp_role_part_version",
+      "drop_index:uq_csfv_role_version",
+      "drop_table:customer_sampling_role",
+      "execute:ALTER TABLE customer_sampling_fabric_version DROP CONSTRAINT IF EXISTS uq_csfv_p",
+      "execute:DROP INDEX IF EXISTS idx_csfv_project_version",
+      "execute:DROP INDEX IF EXISTS idx_csp_part_name",
+      "execute:DROP INDEX IF EXISTS idx_csp_part_name_version",
+      "execute:DROP INDEX IF EXISTS uq_csfv_project_version"
+    ],
+    "migrations/versions/pg_standalone_031_pattern_maker.py": [
+      "drop_column:customer_sampling_project|customer_id",
+      "drop_column:customer_sampling_project|customer_name",
+      "drop_column:customer_sampling_project|pattern_maker_id",
+      "drop_column:customer_sampling_project|pattern_maker_name",
+      "drop_constraint:customer_sampling_project_customer_id_fkey|customer_sampling_project",
+      "drop_constraint:customer_sampling_project_pattern_maker_id_fkey|customer_sampling_project",
+      "drop_index:idx_csp_customer",
+      "drop_index:idx_csp_pattern_maker",
+      "drop_index:idx_pattern_maker_name_trgm",
+      "drop_table:pattern_maker"
+    ],
+    "migrations/versions/pg_standalone_032_add_completed_at.py": [
+      "drop_column:customer_sampling_project|completed_at",
+      "drop_index:idx_csp_completed_at"
+    ],
+    "migrations/versions/pg_standalone_033_changelog_project_id_nullable.py": [
+      "drop_constraint:customer_sampling_change_log"
+    ],
+    "migrations/versions/pg_standalone_034_numbering_counter.py": [
+      "drop_table:numbering_counter"
+    ],
+    "migrations/versions/pg_standalone_035_backup_center_m1.py": [
+      "drop_column:backup_record|encrypted",
+      "drop_column:backup_record|manifest_summary",
+      "drop_column:backup_record|schedule_id",
+      "drop_index:idx_backup_record_schedule_id",
+      "drop_table:backup_schedule",
+      "drop_table:backup_settings"
+    ],
+    "migrations/versions/pg_standalone_038_product_role.py": [
+      "execute:ALTER TABLE product_material DROP CONSTRAINT product_material_product_id_key;",
+      "execute:ALTER TABLE product_material DROP CONSTRAINT uq_product_material_product_role;",
+      "execute:DROP TABLE product_role;"
+    ],
+    "migrations/versions/pg_standalone_039_product_default_bom_label.py": [
+      "execute:ALTER TABLE product DROP COLUMN default_bom_label;"
+    ],
+    "migrations/versions/pg_standalone_040_notification_related_order_idx.py": [
+      "execute:DROP INDEX IF EXISTS ix_notification_related_order;"
+    ],
+    "migrations/versions/pg_standalone_041_web_vital.py": [
+      "execute:DROP TABLE IF EXISTS web_vital;"
+    ],
+    "migrations/versions/pg_standalone_045_global_role.py": [
+      "execute:ALTER TABLE product_role DROP COLUMN IF EXISTS global_role_id;",
+      "execute:ALTER TABLE product_role DROP CONSTRAINT IF EXISTS fk_product_role_global_role;",
+      "execute:ALTER TABLE product_role DROP CONSTRAINT IF EXISTS uq_product_role_product_globa",
+      "execute:DROP TABLE IF EXISTS _pr_dup;",
+      "execute:DROP TABLE IF EXISTS role;"
+    ],
+    "migrations/versions/pg_standalone_049_stockin_soft_delete.py": [
+      "execute:ALTER TABLE stock_in DROP COLUMN IF EXISTS is_deleted",
+      "execute:DROP INDEX IF EXISTS idx_stockin_not_deleted"
+    ],
+    "migrations/versions/pg_standalone_050_cleanup_redundant_default_role.py": [
+      "execute:DROP TABLE tmp_cs_promote_role"
+    ],
+    "migrations/versions/pg_standalone_052_order_product_set_null.py": [
+      "execute:ALTER TABLE \"order\" ALTER COLUMN product_id DROP NOT NULL",
+      "execute:DO $$ DECLARE cname text; BEGIN SELECT conname INTO cname FROM pg_constraint WHE"
+    ],
+    "migrations/versions/pg_standalone_054_sync_schema_with_orm_metadata.py": [
+      "drop_constraint_if_exists:approval_request",
+      "drop_constraint_if_exists:order",
+      "drop_constraint_if_exists:outsource_shipment",
+      "drop_index_if_exists:",
+      "drop_table_if_empty:device_token",
+      "drop_table_if_empty:product_packaging"
+    ],
+    "migrations/versions/pg_standalone_055_remove_custom_order_country.py": [
+      "drop_column_if_absent:country",
+      "drop_column_if_absent:order_type",
+      "drop_index_if_exists:idx_order_custom_type",
+      "drop_table_if_exists:country"
+    ],
+    "migrations/versions/pg_standalone_059_numbering_audit.py": [
+      "drop_table:numbering_audit"
+    ],
+    "migrations/versions/pg_standalone_062_case_management_rebuild.py": [
+      "execute:ALTER TABLE \"case\" DROP COLUMN IF EXISTS parent_id",
+      "execute:ALTER TABLE \"case\" DROP COLUMN IF EXISTS qty_per_set",
+      "execute:ALTER TABLE \"case\" DROP COLUMN IF EXISTS unit",
+      "execute:ALTER TABLE \"case\" DROP CONSTRAINT IF EXISTS fk_case_parent",
+      "execute:DROP INDEX IF EXISTS idx_case_parent",
+      "execute:DROP TABLE IF EXISTS case_movement"
+    ],
+    "migrations/versions/pg_standalone_063_fix_order_status_check.py": [
+      "execute:ALTER TABLE \"order\" DROP CONSTRAINT IF EXISTS order_status_check"
+    ],
+    "migrations/versions/pg_standalone_064_oosp_unique_process.py": [
+      "drop_index:"
+    ],
+    "migrations/versions/pg_standalone_065_case_movement_indexes.py": [
+      "drop_index:"
+    ],
+    "migrations/versions/pg_standalone_066_case_product_root_unique.py": [
+      "drop_index:"
+    ],
+    "migrations/versions/pg_standalone_067_import_idempotency.py": [
+      "execute:ALTER TABLE inventory_log DROP COLUMN IF EXISTS idem_key",
+      "execute:DROP INDEX IF EXISTS idx_import_registry_type_time",
+      "execute:DROP INDEX IF EXISTS uq_inventory_log_idem",
+      "execute:DROP TABLE IF EXISTS import_file_registry"
+    ]
+  }
+}
