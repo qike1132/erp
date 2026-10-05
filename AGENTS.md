@@ -86,7 +86,9 @@ npm run check:routes              # 路由对齐检查
 ## 7. AI 工具痕迹治理
 
 仓库根目录曾被 15+ 个 AI 编程工具的痕迹目录污染。以下已在 `.gitignore` 中忽略，**不要提交**：
-`.agent/ .claude/ .cursor/ .graphflow/ .graphflow-cache/ graphflow-out/ .trae/ .qoder/ .workbuddy/ .reasonix/ .superpowers/ .codebuddy/ .freebuff/ .lean-ctx/ .resultverify/ .codeartsdoer/ dsh-web-dump-config.txt`
+`.agent/ .claude/ .cursor/ .graphflow/ .graphflow-cache/ graphflow-out/ .trae/ .qoder/ .workbuddy/ .reasonix/ .superpowers/ .codebuddy/ .freebuff/ .lean-ctx/ .resultverify/ .codeartsdoer/ .zcode/ .zcodeignore dsh-web-dump-config.txt`
+
+其中 `.zcodeignore` 是从 `.gitignore` 自动同步的派生文件（自述如此），入库会制造第二个真相源，故同样忽略（2026-10-05）。
 
 `AGENTS.md`（本文件）、`.windsurfrules`、`GEMINI.md`、`.github/copilot-instructions.md` **刻意不忽略**，因为它们是协作契约。
 

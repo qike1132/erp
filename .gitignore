@@ -381,6 +381,12 @@ _firefox_profile_*/
 /.graphflow-cache/
 /graphflow-out/
 
+# .zcodeignore / .zcode/：ZCode 工作区配置（2026-10-05）。
+#   .zcodeignore 自述「同步自 .gitignore」——是派生态，入库等于制造第二个
+#   真相源，必然漂移；.zcode/ 是该工具的运行态目录。均不入库。
+/.zcodeignore
+/.zcode/
+
 # /team/：team 多智能体技能的运行痕迹（ROSTER.json/STATE.json/RUN.log.md/TASKS.json
 #   等 run 中间态；目录名即当时的提示词，STATE.json 内含成员 UUID 与 goal 原文）。
 #   2026-10-01 确认：35 个此类文件被 85d21bdf「chore: checkpoint before switching
