@@ -487,6 +487,10 @@
     ],
     "migrations/versions/pg_standalone_069_drop_product_image_orphan_backup.py": [
       "drop_table_if_exists:product_image_orphan_backup"
+    ],
+    "migrations/versions/pg_standalone_071_drop_redundant_stockout_indexes.py": [
+      "drop_index:idx_stockout_has_stockin",
+      "drop_index:idx_stockout_order_stockin"
     ]
   }
 }
