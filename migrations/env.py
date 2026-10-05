@@ -57,6 +57,72 @@ config.set_main_option('sqlalchemy.url', get_engine_url())
 target_metadata = Base.metadata
 
 
+# ============================================================================
+# 库独有遗留对象白名单 —— include_object 回调
+#
+# 生产库因历史手工/早期迁移留下了若干「只存在于库、模型与迁移链都没有」的对象。
+# autogenerate 会把它判定为「应删除」，于是 alembic check 长期报噪音，且
+# `alembic revision --autogenerate` 会生成 DROP TABLE / DROP INDEX / DROP COLUMN
+# 的破坏性 DDL（涉及 trigram 搜索索引与审计索引，误删会掉性能）。本回调把这些
+# 对象排除出 check 与 autogenerate 的比较。
+#
+# 这是**显式白名单**（逐个点名），不是「凡模型没有就忽略」——后者会永久掩盖将来
+# 真实的漂移（例如有人手建了表却忘了写迁移）。名字命中即同时豁免「删」与「建」
+# 两个方向：库独有对象本就没有「建」侧；对 054 迁移因 create_index_if_absent 跳过
+# 而定义分叉的同名索引，两向同时豁免可一并避免产出注定因同名冲突失败的 CREATE。
+#
+# 本白名单只改比较逻辑，不改动/删除生产库任何对象。
+# ============================================================================
+
+# 库独有表：
+#   app_version                  —— 早期 add_app_version.py 所建，无 ORM 模型、0 行；
+#                                   OTA 脚本（insert_1_3_version.py 等）以裸 SQL 访问。
+#   product_image_orphan_backup  —— 无迁移、来源不明，无任何代码引用、0 行。
+_IGNORED_DB_ONLY_TABLES = {
+    'app_version',
+    'product_image_orphan_backup',
+}
+
+# 库独有索引（历史迁移所建，模型未声明；多为搜索/审计/覆盖索引，误删会掉性能）：
+_IGNORED_DB_ONLY_INDEXES = {
+    'idx_app_version_platform_code',   # 位于 app_version 表，随该表一并豁免
+    'idx_csfv_created_at',             # 054 建；生产同名旧索引先存在 → 新定义被跳过
+    'idx_csfv_status',                 # 历史迁移所建
+    'idx_csp_role_part_version',       # 054 建 unique；生产同名旧索引为 non-unique
+    'idx_inventory_log_product_time',  # 历史迁移所建
+    'idx_material_reg_date',           # 历史迁移所建（生产定义与模型分叉）
+    'idx_material_reg_supplier',       # 历史迁移所建（生产在 supplier_name，模型在 supplier_id）
+    'idx_order_date_id_desc',          # 历史迁移所建
+    'idx_stockout_has_stockin',        # 历史迁移所建
+    'idx_stockout_no_stockin',         # 历史迁移所建
+    'idx_stockout_order_stockin',      # 历史迁移所建
+}
+
+# 库独有列（模型未声明）：按「表 → 列名」精确匹配，避免与其它表上的同名列
+# （如 status 在十余张表都存在）互相污染。
+_IGNORED_DB_ONLY_COLUMNS = {
+    'customer_sampling_fabric_version': {
+        'status',
+        'version_label',
+        'confirmed_at',
+        'confirmed_by',
+    },
+}
+
+
+def include_object(object, name, type_, reflected, compare_to):
+    """Alembic 比较钩子：返回 False 表示该对象不参与 check / autogenerate 比较。
+
+    仅按上方显式白名单放行；未命中者一律返回 True，保持正常漂移可见。
+    """
+    if type_ == 'table':
+        return name not in _IGNORED_DB_ONLY_TABLES
+    if type_ == 'index':
+        return name not in _IGNORED_DB_ONLY_INDEXES
+    if type_ == 'column':
+        table_name = getattr(getattr(object, 'table', None), 'name', None)
+        return name not in _IGNORED_DB_ONLY_COLUMNS.get(table_name, ())
+    return True
 
 
 def run_migrations_offline():
@@ -73,7 +139,8 @@ def run_migrations_offline():
     """
     url = config.get_main_option("sqlalchemy.url")
     context.configure(
-        url=url, target_metadata=target_metadata, literal_binds=True
+        url=url, target_metadata=target_metadata, literal_binds=True,
+        include_object=include_object,
     )
 
     with context.begin_transaction():
@@ -112,6 +179,7 @@ def run_migrations_online():
             target_metadata=target_metadata,
             process_revision_directives=process_revision_directives,
             version_table=version_table,
+            include_object=include_object,
         )
 
         with context.begin_transaction():
