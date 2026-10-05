@@ -29,6 +29,68 @@ export const FACTORY_OPTIONS = ['东莞', '湖北'] as const
 /** 密码最小长度（与后端 utils/password_validator.PasswordValidator.MIN_LENGTH 保持一致） */
 export const PASSWORD_MIN_LENGTH = 6
 
+/**
+ * 权限分配弹窗「其他操作权限」分区的固定 key。
+ * 导航栏不显示的权限（is_nav=false 的操作权限、已下线项等）统一收进该分区，默认收起。
+ */
+export const EXTRAS_SECTION_KEY = '__extras__'
+
+/** 导航分区（仅需 items[].permission 与权限树按 code 匹配） */
+export interface NavSectionLike {
+  key?: string
+  title: string
+  items: { permission?: string }[]
+}
+
+/** 权限分配弹窗的一个分区 */
+export interface PermissionSection {
+  key: string
+  name: string
+  items: PermissionItem[]
+}
+
+/**
+ * 按导航栏分组权限树（纯函数，便于单测）。
+ *
+ * 以 navSections（后端导航数据，已剔除下线项）为**权威源**：分区顺序 / 命名 /
+ * 条目全部照抄导航栏，权限树按 code 匹配进来，从而保证「分配权限」界面与左侧
+ * 导航栏一一对应、改一处两边同步。
+ *
+ * 匹配不上的顶层权限（is_nav=false 的操作权限、已下线项、无 section 项）收进
+ * 末尾的「其他操作权限」区，默认收起，不干扰主视图。
+ */
+export function buildPermissionSections(
+  permissionTree: readonly PermissionItem[],
+  navSections: readonly NavSectionLike[],
+): PermissionSection[] {
+  const byCode = new Map<string, PermissionItem>()
+  for (const node of permissionTree) byCode.set(node.code, node)
+
+  const result: PermissionSection[] = []
+  const usedIds = new Set<number>()
+
+  for (const navSec of navSections) {
+    const items: PermissionItem[] = []
+    for (const navItem of navSec.items) {
+      const node = navItem.permission ? byCode.get(navItem.permission) : undefined
+      if (node && !usedIds.has(node.id)) {
+        items.push(node)
+        usedIds.add(node.id)
+      }
+    }
+    if (items.length > 0) {
+      result.push({ key: navSec.key || navSec.title, name: navSec.title, items })
+    }
+  }
+
+  const extras = permissionTree.filter((n) => !usedIds.has(n.id))
+  if (extras.length > 0) {
+    result.push({ key: EXTRAS_SECTION_KEY, name: '其他操作权限', items: extras })
+  }
+
+  return result
+}
+
 /** 从错误对象中提取后端返回的 detail 信息 */
 export function extractErrorMessage(err: unknown, fallback: string): string {
   const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
@@ -118,39 +180,10 @@ export function useUserManagement() {
   const permTargetUserId = ref(0)
   const permTargetName = ref('')
 
-  /** 按模块分区对权限树进行分组，section 顺序/命名以导航栏为权威源 */
-  const permissionSections = computed(() => {
-    // 1. 权限树按 section_key 分组
-    const permBySection = new Map<string, PermissionItem[]>()
-    for (const node of permissionTree.value) {
-      const secKey = node.section || 'other'
-      if (!permBySection.has(secKey)) permBySection.set(secKey, [])
-      permBySection.get(secKey)!.push(node)
-    }
-
-    // 2. 以导航栏的 section 顺序为基准构建结果
-    const result: { key: string; name: string; items: PermissionItem[] }[] = []
-    const usedKeys = new Set<string>()
-
-    // 导航栏中存在的 section，按导航栏顺序排列，使用导航栏的命名
-    for (const navSec of authStore.navSections) {
-      const secKey = navSec.key || navSec.title
-      const items = permBySection.get(secKey)
-      if (items && items.length > 0) {
-        result.push({ key: secKey, name: navSec.title, items })
-        usedKeys.add(secKey)
-      }
-    }
-
-    // 权限树中存在但导航栏中没有的 section（如只含 is_nav=False 非导航权限的 section），追加到末尾
-    for (const [secKey, items] of permBySection) {
-      if (usedKeys.has(secKey)) continue
-      const secName = items[0]?.section_name || secKey
-      result.push({ key: secKey, name: secName, items })
-    }
-
-    return result
-  })
+  /** 按导航栏分组权限树（顺序/命名/条目照抄导航，非导航权限收进「其他操作权限」区） */
+  const permissionSections = computed(() =>
+    buildPermissionSections(permissionTree.value, authStore.navSections),
+  )
 
   /** 判断权限节点是否展开 */
   function isPermExpanded(id: number): boolean {

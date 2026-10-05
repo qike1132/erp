@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>分配权限弹窗 · 重设计对比稿 · 2026-10-05</title>
+<style>
+  :root{
+    --p50:#eff5ff; --p100:#d6e4ff; --p200:#b8ccff; --p300:#8babf5; --p500:#5b8def; --p600:#3a6bd6; --p700:#2d5ab8;
+    --s50:#e8f9ef; --s100:#d0f3df; --s600:#1e9e55; --s700:#2e7d32;
+    --w50:#fff3e6; --w100:#ffe6cc; --w600:#e88e2e;
+    --d50:#fde8e8; --d100:#fbd0d0; --d600:#d44042;
+    --surface:#f4f6fc; --line:#e4e7ed; --line-light:#f0f2f5; --border-strong:#cbd5e1;
+    --t1:#1a1a2e; --t2:#475569; --t3:#595959; --t-muted:#64748b; --t-ph:#94a3b8;
+    --bg:#f5f6fa;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:26px 22px 70px;background:var(--bg);color:var(--t1);
+       font:13px/1.55 "Microsoft YaHei UI","Segoe UI",system-ui,sans-serif}
+  h1{font-size:19px;margin:0 0 6px}
+  .meta{color:var(--t2);font-size:12px;margin-bottom:14px}
+  .meta code{background:#e9ecf3;padding:1px 5px;border-radius:4px;font-family:Consolas,monospace}
+  .ask{background:#fff8e6;border-left:3px solid #f0b429;padding:10px 14px;border-radius:6px;
+       margin:0 0 22px;font-size:12.5px;color:#7a5300}
+  .ask b{color:#5c3d00}
+  h2{font-size:15px;margin:32px 0 4px;padding-top:12px;border-top:2px solid #e3e6ee}
+  h2 .tag{font-size:11px;font-weight:700;color:#fff;background:var(--p600);
+          padding:2px 8px;border-radius:999px;vertical-align:2px;margin-left:8px}
+  h2 .tag.now{background:#8a94a6}
+  h2 .tag.rec{background:var(--s600)}
+  .sub{color:var(--t2);font-size:12px;margin:0 0 14px}
+  .sub b{color:var(--t1)}
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start}
+  .cols3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;align-items:start}
+  @media (max-width:1100px){.cols,.cols3{grid-template-columns:1fr}}
+  .frame{background:#fff;border:1px solid var(--line);border-radius:10px;margin-bottom:14px;overflow:hidden}
+  .frame-hd{background:var(--surface);padding:7px 14px;font-size:12px;font-weight:700;color:var(--t2);
+            border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:8px}
+  .frame-hd .pill{font-weight:400;color:var(--t3)}
+
+  /* ===== 左侧导航栏（基准） ===== */
+  .sidebar{width:100%;background:#fff;padding:14px 12px}
+  .sb-section{margin-bottom:8px}
+  .sb-hd{width:100%;display:flex;align-items:center;justify-content:space-between;padding:8px 10px;
+         margin-bottom:4px;border-radius:12px;border:1px solid var(--line-light);background:#fff;
+         color:var(--t2);font-weight:700;font-size:14px}
+  .sb-hd.open{color:var(--p700);border-color:var(--p300);background:var(--p50)}
+  .chev{width:8px;height:8px;margin-right:2px;border-right:2px solid currentColor;border-bottom:2px solid currentColor;
+        transform:rotate(-45deg)}
+  .sb-hd.open .chev{transform:rotate(45deg)}
+  .sb-item{display:flex;align-items:center;gap:12px;padding:8px 10px;margin-bottom:4px;border-radius:12px;
+           color:var(--t1);font-weight:800;font-size:14px;background:#fff;border:1px solid var(--line-light);
+           box-shadow:0 1px 3px rgba(0,0,0,.04),0 4px 12px rgba(0,0,0,.06)}
+  .sb-item.on{background:linear-gradient(135deg,var(--p50),var(--p100));border-color:var(--p300)}
+  .sb-item.on .lbl{color:var(--p700)}
+  .sb-ic{width:32px;height:32px;border-radius:9px;display:flex;align-items:center;justify-content:center;
+         font-size:14px;color:var(--t2);background:var(--surface);flex-shrink:0}
+  .sb-item.on .sb-ic{background:linear-gradient(135deg,var(--p100),var(--p200));color:var(--p600)}
+
+  /* ===== 弹窗 ===== */
+  .modal{background:#fff;border:1px solid var(--line);border-radius:14px;overflow:hidden;
+         box-shadow:0 8px 30px rgba(20,30,60,.10)}
+  .modal-hd{padding:14px 18px;border-bottom:1px solid var(--line-light);display:flex;align-items:center;justify-content:space-between}
+  .modal-hd .t{font-size:15px;font-weight:800}
+  .modal-hd .x{color:var(--t-ph);font-size:16px}
+  .perm-hd{display:flex;justify-content:space-between;align-items:center;margin:0;padding:12px 18px 10px;
+           border-bottom:1px solid #e8ecf1}
+  .perm-hd .u{display:flex;align-items:baseline;gap:8px}
+  .perm-hd .u .lab{font-size:12px;font-weight:600;color:var(--t-muted)}
+  .perm-hd .u .nm{font-size:15px;font-weight:700}
+  .tgl{padding:6px 14px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;font-size:12px;
+       font-weight:600;color:var(--t2)}
+  .perm-body{padding:10px 18px 14px;display:flex;flex-direction:column;gap:6px;max-height:none}
+  .modal-ft{padding:12px 18px;border-top:1px solid var(--line-light);display:flex;justify-content:flex-end;gap:8px}
+  .abtn{padding:6px 16px;border:2px solid #e2e8f0;border-radius:9px;background:#fff;font-size:12px;font-weight:600;color:var(--t2)}
+  .abtn.pri{color:var(--p600)}
+
+  /* section 折叠头 */
+  .sec{border:1px solid #e2e8f0;border-radius:12px;margin-bottom:4px;overflow:hidden}
+  .sec-hd{display:flex;align-items:center;gap:8px;padding:9px 12px;background:#fff;color:var(--t2);
+          font-weight:700;font-size:14px}
+  .sec-hd.open{color:var(--p700);background:var(--p50)}
+  .sec-hd .ti{flex:1;text-align:left}
+  .cnt{font-size:11px;font-weight:600;color:var(--t-muted);background:#fff;padding:2px 8px;border-radius:10px;border:1px solid #e2e8f0}
+  .cnt.all{background:var(--p500);color:#fff;border-color:var(--p500)}
+  .sec-bd{padding:6px 8px 8px;display:flex;flex-direction:column;gap:6px}
+
+  /* 一级权限组 */
+  .grp{border:1px solid #e2e8f0;border-radius:10px;background:#fff;overflow:hidden}
+  .grp-hd{display:flex;align-items:center;gap:10px;padding:9px 12px;background:var(--surface)}
+  .grp-hd:hover{background:var(--p50)}
+  .grp-nm{display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:700;flex:1}
+  .grp-ic{width:18px;text-align:center;color:var(--p500);font-size:14px}
+  .grp-bd{padding:4px 12px 8px 40px;display:flex;flex-direction:column;gap:2px}
+  .it{display:flex;align-items:center;gap:10px;padding:6px 10px;border-radius:7px}
+  .it:hover{background:var(--p50)}
+  .it .nm{font-size:13px;font-weight:500}
+
+  /* 复选 */
+  .cb{width:16px;height:16px;border-radius:4px;border:1.5px solid var(--border-strong);background:#fff;
+      display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;color:#fff;font-size:11px;font-weight:900}
+  .cb.on{background:var(--p600);border-color:var(--p600)}
+  .cb.on::after{content:"✓"}
+  .cb.half{background:#fff;border-color:var(--p500)}
+  .cb.half::after{content:"";width:8px;height:2.5px;border-radius:2px;background:var(--p500)}
+  .expand{color:var(--t-muted);font-size:11px;flex-shrink:0}
+
+  /* 标注 */
+  .flag{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:700;padding:1px 6px;border-radius:6px;vertical-align:1px}
+  .flag.bad{background:var(--d50);color:var(--d600)}
+  .flag.add{background:var(--s50);color:var(--s700)}
+  .flag.warn{background:var(--w50);color:var(--w600)}
+  .note{background:var(--d50);border-left:3px solid var(--d600);padding:8px 12px;border-radius:6px;
+        font-size:12px;color:#7a2323;margin:10px 0 0}
+  .note.ok{background:var(--s50);border-color:var(--s600);color:#155e34}
+  .note li{margin:2px 0}
+  ul{margin:4px 0 0;padding-left:18px}
+
+  /* 左右分栏方案 */
+  .split{display:flex;min-height:340px}
+  .split-l{width:150px;border-right:1px solid var(--line-light);padding:10px;background:#fbfcfe;flex-shrink:0}
+  .grp-tab{display:flex;align-items:center;gap:8px;padding:9px 10px;border-radius:9px;font-size:13px;
+           font-weight:700;color:var(--t2);margin-bottom:3px}
+  .grp-tab.on{background:var(--p50);color:var(--p700);box-shadow:inset 0 0 0 1px var(--p200)}
+  .grp-tab .n{margin-left:auto;font-size:11px;font-weight:600;color:var(--t-muted)}
+  .grp-tab.on .n{color:var(--p600)}
+  .split-r{flex:1;padding:12px 14px;overflow:hidden}
+  .split-r .rhd{font-size:14px;font-weight:800;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+  .grp-tab.sub{margin-top:8px;color:var(--t3);border-top:1px dashed var(--line);padding-top:12px;border-radius:0}
+
+  .foot{color:var(--t2);font-size:12.5px;margin-top:30px;line-height:1.9;border-top:2px solid #e3e6ee;padding-top:16px}
+  .foot b{color:var(--t1)}
+  .kbd{background:#e9ecf3;padding:1px 5px;border-radius:4px;font-family:Consolas,monospace;font-size:11.5px}
+  .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--t2);margin-bottom:6px}
+</style>
+</head>
+<body>
+
+<h1>分配权限弹窗 · 重设计对比稿</h1>
+<div class="meta">
+  页面：<code>/user</code> → 用户列表「分配权限」　·　日期：2026-10-05　·　三套方案均为<b>静态效果图</b>，选定后再动代码
+</div>
+
+<div class="ask">
+  <b>问题（你说的"对不上"）</b>：导航栏和权限弹窗同读 <code>permission</code> 表，但弹窗会多出导航里根本没有的项
+  （<code>is_nav=false</code> 的操作权限、已下线项 <code>order_batch_manage</code>），且非导航 section 被整段丢到列表末尾，
+  导致<b>分组、顺序、命名、条目数</b>都跟左侧导航对不上。<br>
+  <b>请从下面三套里挑一套</b>（或指出要改的地方），我再据此改 <code>UserPermissionDialog.vue</code> + <code>useUserManagement.ts</code>。
+</div>
+
+<div class="legend">
+  <span><span class="flag bad">问题</span> 与导航不一致</span>
+  <span><span class="flag add">新增</span> 方案新增元素</span>
+  <span><span class="flag warn">收拢</span> 导航不显示的项</span>
+</div>
+
+<!-- ============================================================= -->
+<h2>对照基准：左侧导航栏（真实结构）<span class="tag now">现状</span></h2>
+<div class="sub">这就是用户日常看到的左侧导航。下面每套方案的<b>分组 / 顺序 / 名称 / 图标都应与此一致</b>。</div>
+
+<div class="cols">
+  <div class="frame">
+    <div class="frame-hd"><span>左侧导航栏</span><span class="pill">GET /dashboard/nav-sections</span></div>
+    <div class="sidebar">
+      <div class="sb-section">
+        <div class="sb-hd open"><span>开发</span><span class="chev"></span></div>
+        <div class="sb-item on"><span class="sb-ic">▦</span><span class="lbl">产品管理</span></div>
+        <div class="sb-item"><span class="sb-ic">◫</span><span class="lbl">客户管理</span></div>
+        <div class="sb-item"><span class="sb-ic">▤</span><span class="lbl">供应商管理</span></div>
+        <div class="sb-item"><span class="sb-ic">◈</span><span class="lbl">物料登记</span></div>
+      </div>
+      <div class="sb-section">
+        <div class="sb-hd open"><span>湖北订单</span><span class="chev"></span></div>
+        <div class="sb-item"><span class="sb-ic">▣</span><span class="lbl">湖北订单查询</span></div>
+        <div class="sb-item"><span class="sb-ic">➟</span><span class="lbl">湖北外发</span></div>
+      </div>
+      <div class="sb-section">
+        <div class="sb-hd open"><span>核心业务</span><span class="chev"></span></div>
+        <div class="sb-item"><span class="sb-ic">▦</span><span class="lbl">客户订单</span></div>
+        <div class="sb-item"><span class="sb-ic">▤</span><span class="lbl">库存管理</span></div>
+        <div class="sb-item"><span class="sb-ic">▥</span><span class="lbl">出库管理</span></div>
+        <div class="sb-item"><span class="sb-ic">⚙</span><span class="lbl">生产计划</span></div>
+        <div class="sb-item"><span class="sb-ic">◫</span><span class="lbl">皮套管理</span></div>
+        <div class="sb-item"><span class="sb-ic">▧</span><span class="lbl">批次号查询</span></div>
+        <div class="sb-item"><span class="sb-ic">◔</span><span class="lbl">报表中心</span></div>
+        <div class="sb-item"><span class="sb-ic">✓</span><span class="lbl">审批中心</span></div>
+      </div>
+      <div class="sb-section">
+        <div class="sb-hd open"><span>系统管理</span><span class="chev"></span></div>
+        <div class="sb-item"><span class="sb-ic">◉</span><span class="lbl">用户管理</span></div>
+        <div class="sb-item"><span class="sb-ic">⛁</span><span class="lbl">数据备份</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 现状弹窗 -->
+  <div class="frame">
+    <div class="frame-hd"><span>分配权限弹窗（现状）</span><span class="pill">GET /permissions/tree</span></div>
+    <div class="modal" style="border:0;border-radius:0;box-shadow:none">
+      <div class="perm-hd">
+        <div class="u"><span class="lab">目标用户</span><span class="nm">张三</span></div>
+        <span class="tgl">全选</span>
+      </div>
+      <div class="perm-body">
+        <div class="sec"><div class="sec-hd open"><span class="ti">开发</span><span class="cnt">4/9</span><span class="chev" style="transform:rotate(45deg)"></span></div>
+          <div class="sec-bd">
+            <div class="grp"><div class="grp-hd"><span class="cb on"></span><span class="grp-nm"><span class="grp-ic">▦</span>产品管理</span><span class="cnt">1/2</span><span class="expand">▾</span></div>
+              <div class="grp-bd">
+                <div class="it"><span class="cb on"></span><span class="nm">产品查询</span></div>
+                <div class="it"><span class="cb"></span><span class="nm">产品导出</span></div>
+              </div></div>
+            <div class="grp"><div class="grp-hd"><span class="cb"></span><span class="grp-nm"><span class="grp-ic">◫</span>客户管理</span></div></div>
+            <div class="grp"><div class="grp-hd"><span class="cb"></span><span class="grp-nm"><span class="grp-ic">▤</span>供应商管理</span></div></div>
+            <div class="grp"><div class="grp-hd"><span class="cb"></span><span class="grp-nm"><span class="grp-ic">◈</span>物料登记</span></div></div>
+          </div>
+        </div>
+
+        <div class="sec"><div class="sec-hd open"><span class="ti">湖北订单</span><span class="cnt">1/4</span><span class="chev" style="transform:rotate(45deg)"></span></div>
+          <div class="sec-bd">
+            <div class="grp"><div class="grp-hd"><span class="cb on"></span><span class="grp-nm"><span class="grp-ic">▣</span>湖北订单查询</span></div></div>
+            <div class="grp"><div class="grp-hd"><span class="cb"></span><span class="grp-nm"><span class="grp-ic">➟</span>湖北外发</span><span class="cnt">0/2</span><span class="expand">▾</span></div>
+              <div class="grp-bd">
+                <div class="it"><span class="cb"></span><span class="nm">湖北外发（发货）</span></div>
+                <div class="it"><span class="cb"></span><span class="nm">湖北外发（收货）</span></div>
+              </div></div>
+          </div>
+        </div>
+
+        <div class="sec"><div class="sec-hd open"><span class="ti">核心业务</span><span class="cnt">3/14</span><span class="chev" style="transform:rotate(45deg)"></span></div>
+          <div class="sec-bd">
+            <div class="grp"><div class="grp-hd"><span class="cb"></span><span class="grp-nm"><span class="grp-ic">▦</span>客户订单</span></div></div>
+            <div class="grp"><div class="grp-hd"><span class="cb"></span><span class="grp-nm"><span class="grp-ic">▤</span>库存管理</span></div></div>
+            <div class="grp"><div class="grp-hd"><span class="cb on"></span><span class="grp-nm"><span class="grp-ic">▧</span>批次号查询</span><span class="cnt">1/2</span><span class="expand">▾</span></div>
+              <div class="grp-bd">
+                <div class="it"><span class="cb on"></span><span class="nm">批量导入</span> <span class="flag bad">导航无此项</span></div>
+              </div></div>
+            <div class="grp"><div class="grp-hd"><span class="cb"></span><span class="grp-nm"><span class="grp-ic">▦</span>批次号管理</span> <span class="flag bad">已下线</span></div></div>
+          </div>
+        </div>
+
+        <div class="sec"><div class="sec-hd open"><span class="ti">其他</span><span class="cnt">0/3</span><span class="chev" style="transform:rotate(45deg)"></span></div>
+          <div class="sec-bd">
+            <div class="grp"><div class="grp-hd"><span class="cb"></span><span class="grp-nm">报表导出</span> <span class="flag bad">section 名与导航不符</span></div></div>
+            <div class="grp"><div class="grp-hd"><span class="cb"></span><span class="grp-nm">审批代理</span></div></div>
+            <div class="grp"><div class="grp-hd"><span class="cb"></span><span class="grp-nm">数据归档</span></div></div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-ft"><span class="abtn">取消</span><span class="abtn pri">保存</span></div>
+    </div>
+    <div class="note"><b>现状的 4 个对不上：</b>
+      <ul>
+        <li><b>① 多出条目</b>：批次号查询下挂着「批量导入」、还有「批次号管理」这种已下线项——导航里都没有。</li>
+        <li><b>② 多出子权限</b>：湖北外发的「发货 / 收货」、批量导入，导航不显示（导航只到一级项）。</li>
+        <li><b>③ 分组名对不上</b>：导航里没有的 section 被塞成「其他」，名字是数据库原始值，跟导航命名体系不一致。</li>
+        <li><b>④ 顺序对不上</b>：「其他」整段被追加到末尾，用户找不到；导航里也没有「其他」这个分组。</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================= -->
+<h2>方案 A：完全镜像导航栏<span class="tag rec">推荐</span></h2>
+<div class="sub">分组 / 顺序 / 名称 / 图标<b>严格照抄左侧导航</b>；导航不显示的操作权限（批量导入、外发发货/收货等）<b>收进每个 section 底部的「其他操作权限」折叠区</b>，默认收起，需要时才展开。用户扫一眼就知道自己给的权限对应导航哪一块。</div>
+
+<div class="frame">
+  <div class="frame-hd"><span>分配权限 · 张三</span><span class="pill">分组 = 导航分组</span></div>
+  <div class="modal" style="border:0;border-radius:0;box-shadow:none">
+    <div class="perm-hd">
+      <div class="u"><span class="lab">目标用户</span><span class="nm">张三</span></div>
+      <span class="tgl">全选</span>
+    </div>
+    <div class="perm-body">
+      <div class="sec"><div class="sec-hd open"><span class="ti">开发</span><span class="cnt">2/6</span><span class="chev" style="transform:rotate(45deg)"></span></div>
+        <div class="sec-bd">
+          <div class="grp"><div class="grp-hd"><span class="cb on"></span><span class="grp-nm"><span class="grp-ic">▦</span>产品管理</span><span class="cnt">1/2</span><span class="expand">▾</span></div>
+            <div class="grp-bd">
+              <div class="it"><span class="cb on"></span><span class="nm">产品查询</span></div>
+              <div class="it"><span class="cb"></span><span class="nm">产品导出</span></div>
+            </div></div>
+          <div class="grp"><div class="grp-hd"><span class="cb"></span><span class="grp-nm"><span class="grp-ic">◫</span>客户管理</span></div></div>
+          <div class="grp"><div class="grp-hd"><span class="cb on"></span><span class="grp-nm"><span class="grp-ic">▤</span>供应商管理</span></div></div>
+          <div class="grp"><div class="grp-hd"><span class="cb"></span><span class="grp-nm"><span class="grp-ic">◈</span>物料登记</span></div></div>
+        </div>
+      </div>
+
+      <div class="sec"><div class="sec-hd open"><span class="ti">湖北订单</span><span class="cnt">2/4</span><span class="chev" style="transform:rotate(45deg)"></span></div>
+        <div class="sec-bd">
+          <div class="grp"><div class="grp-hd"><span class="cb on"></span><span class="grp-nm"><span class="grp-ic">▣</span>湖北订单查询</span></div></div>
+          <div class="grp"><div class="grp-hd"><span class="cb on"></span><span class="grp-nm"><span class="grp-ic">➟</span>湖北外发</span><span class="cnt">2/2</span><span class="expand">▾</span></div>
+            <div class="grp-bd">
+              <div class="it"><span class="cb on"></span><span class="nm">湖北外发（发货）</span></div>
+              <div class="it"><span class="cb on"></span><span class="nm">湖北外发（收货）</span></div>
+            </div></div>
+        </div>
+      </div>
+
+      <div class="sec"><div class="sec-hd open"><span class="ti">核心业务</span><span class="cnt">1/8</span><span class="chev" style="transform:rotate(45deg)"></span></div>
+        <div class="sec-bd">
+          <div class="grp"><div class="grp-hd"><span class="cb"></span><span class="grp-nm"><span class="grp-ic">▦</span>客户订单</span></div></div>
+          <div class="grp"><div class="grp-hd"><span class="cb"></span><span class="grp-nm"><span class="grp-ic">▤</span>库存管理</span></div></div>
+          <div class="grp"><div class="grp-hd"><span class="cb"></span><span class="grp-nm"><span class="grp-ic">▥</span>出库管理</span></div></div>
+          <div class="grp"><div class="grp-hd"><span class="cb"></span><span class="grp-nm"><span class="grp-ic">⚙</span>生产计划</span></div></div>
+          <div class="grp"><div class="grp-hd"><span class="cb"></span><span class="grp-nm"><span class="grp-ic">◫</span>皮套管理</span></div></div>
+          <div class="grp"><div class="grp-hd"><span class="cb on"></span><span class="grp-nm"><span class="grp-ic">▧</span>批次号查询</span><span class="cnt">1/2</span><span class="expand">▾</span></div>
+            <div class="grp-bd">
+              <div class="it"><span class="cb on"></span><span class="nm">批量导入</span></div>
+            </div></div>
+          <div class="grp"><div class="grp-hd"><span class="cb"></span><span class="grp-nm"><span class="grp-ic">◔</span>报表中心</span></div></div>
+          <div class="grp"><div class="grp-hd"><span class="cb"></span><span class="grp-nm"><span class="grp-ic">✓</span>审批中心</span></div></div>
+        </div>
+      </div>
+
+      <div class="sec"><div class="sec-hd open"><span class="ti">系统管理</span><span class="cnt">1/2</span><span class="chev" style="transform:rotate(45deg)"></span></div>
+        <div class="sec-bd">
+          <div class="grp"><div class="grp-hd"><span class="cb on"></span><span class="grp-nm"><span class="grp-ic">◉</span>用户管理</span></div></div>
+          <div class="grp"><div class="grp-hd"><span class="cb"></span><span class="grp-nm"><span class="grp-ic">⛁</span>数据备份</span></div></div>
+          <div class="grp" style="border-style:dashed"><div class="grp-hd" style="background:#fbfcfe"><span class="cb"></span><span class="grp-nm"><span class="grp-ic" style="color:var(--t-muted)">⋯</span>其他操作权限</span><span class="cnt">0/2</span><span class="expand">▸</span></div></div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-ft"><span class="abtn">取消</span><span class="abtn pri">保存</span></div>
+  </div>
+  <div class="note ok"><b>方案 A 要点：</b>
+    <ul>
+      <li>section 完全等于导航分组（开发 / 湖北订单 / 核心业务 / 系统管理…），<b>不再出现「其他」</b>。</li>
+      <li>已下线项（<code>order_batch_manage</code>）直接不显示——与导航口径一致。</li>
+      <li>非导航操作权限（批量导入等）默认藏进「其他操作权限」，<b>不干扰主视图</b>；已勾选时计数照常显示。</li>
+      <li>图标、名称、顺序全部来自导航数据源，<b>改一处两边同时变</b>。</li>
+    </ul>
+  </div>
+</div>
+
+<!-- ============================================================= -->
+<h2>方案 B：左右分栏（设置页式）<span class="tag">备选</span></h2>
+<div class="sub">左列 = 导航分组列表（可一眼扫全，带 <code>已选/总数</code>），右列 = 选中分组的权限勾选。分组多、想快速定位时最省事；缺点是要点两次才能勾。</div>
+
+<div class="frame">
+  <div class="frame-hd"><span>分配权限 · 张三</span><span class="pill">左选分组 · 右勾权限</span></div>
+  <div class="modal" style="border:0;border-radius:0;box-shadow:none">
+    <div class="perm-hd">
+      <div class="u"><span class="lab">目标用户</span><span class="nm">张三</span></div>
+      <span class="tgl">全选</span>
+    </div>
+    <div class="split">
+      <div class="split-l">
+        <div class="grp-tab on">▦ 开发<span class="n">2/6</span></div>
+        <div class="grp-tab">▣ 湖北订单<span class="n">2/4</span></div>
+        <div class="grp-tab">▤ 采购中心<span class="n">0/6</span></div>
+        <div class="grp-tab">▧ 核心业务<span class="n">1/8</span></div>
+        <div class="grp-tab">◔ 数据<span class="n">0/3</span></div>
+        <div class="grp-tab">◉ 系统管理<span class="n">1/2</span></div>
+        <div class="grp-tab sub">⋯ 其他操作权限<span class="n">0/2</span></div>
+      </div>
+      <div class="split-r">
+        <div class="rhd">开发 <span class="cnt">2/6</span></div>
+        <div class="grp"><div class="grp-hd"><span class="cb on"></span><span class="grp-nm"><span class="grp-ic">▦</span>产品管理</span><span class="cnt">1/2</span><span class="expand">▾</span></div>
+          <div class="grp-bd">
+            <div class="it"><span class="cb on"></span><span class="nm">产品查询</span></div>
+            <div class="it"><span class="cb"></span><span class="nm">产品导出</span></div>
+          </div></div>
+        <div class="grp"><div class="grp-hd"><span class="cb"></span><span class="grp-nm"><span class="grp-ic">◫</span>客户管理</span></div></div>
+        <div class="grp"><div class="grp-hd"><span class="cb on"></span><span class="grp-nm"><span class="grp-ic">▤</span>供应商管理</span></div></div>
+        <div class="grp"><div class="grp-hd"><span class="cb"></span><span class="grp-nm"><span class="grp-ic">◈</span>物料登记</span></div></div>
+      </div>
+    </div>
+    <div class="modal-ft"><span class="abtn">取消</span><span class="abtn pri">保存</span></div>
+  </div>
+  <div class="note ok"><b>方案 B 要点：</b>分组 = 导航分组；左右联动定位快；<b>改动量比 A 大</b>（要新增分栏布局 + 选中态）。</div>
+</div>
+
+<!-- ============================================================= -->
+<h2>方案 C：只做对齐修正（最小改动）<span class="tag">备选</span></h2>
+<div class="sub">保留现有可折叠树形，只修 4 处：section 顺序/名称对齐导航、隐藏 <code>is_nav=false</code> 与已下线项、子权限归到正确 section、去掉凭空出现的「其他」段。<b>改动最小、上线最快、风险最低</b>，但非导航操作权限的归属仍略显零散。</div>
+
+<div class="cols3">
+  <div class="frame">
+    <div class="frame-hd"><span>修正前</span></div>
+    <div class="modal" style="border:0;border-radius:0;box-shadow:none">
+      <div class="perm-body" style="padding:12px">
+        <div class="sec"><div class="sec-hd open"><span class="ti">开发</span><span class="cnt">4/9</span></div></div>
+        <div class="sec"><div class="sec-hd open"><span class="ti">湖北订单</span><span class="cnt">1/4</span></div></div>
+        <div class="sec"><div class="sec-hd open"><span class="ti">核心业务</span><span class="cnt">3/14</span><span class="flag bad">含已下线项</span></div></div>
+        <div class="sec"><div class="sec-hd open"><span class="ti">其他</span><span class="cnt">0/3</span><span class="flag bad">导航无此段</span></div></div>
+      </div>
+    </div>
+  </div>
+  <div class="frame">
+    <div class="frame-hd"><span>修正后</span></div>
+    <div class="modal" style="border:0;border-radius:0;box-shadow:none">
+      <div class="perm-body" style="padding:12px">
+        <div class="sec"><div class="sec-hd open"><span class="ti">开发</span><span class="cnt">2/6</span></div></div>
+        <div class="sec"><div class="sec-hd open"><span class="ti">湖北订单</span><span class="cnt">2/4</span></div></div>
+        <div class="sec"><div class="sec-hd open"><span class="ti">核心业务</span><span class="cnt">1/8</span><span class="flag add">已下线项移除</span></div></div>
+        <div class="sec"><div class="sec-hd open"><span class="ti">系统管理</span><span class="cnt">1/2</span><span class="flag add">顺序对齐</span></div></div>
+      </div>
+    </div>
+  </div>
+  <div class="frame" style="padding:14px 16px">
+    <div style="font-size:12.5px;color:var(--t2);line-height:1.9">
+      <b style="color:var(--t1)">改动清单</b>
+      <ul>
+        <li>section 顺序 = 导航顺序</li>
+        <li>section 名 = 导航名</li>
+        <li>隐藏 <code>is_nav=false</code> / 已下线项</li>
+        <li>子权限归到父项所在 section</li>
+      </ul>
+      <b style="color:var(--t1)">不改</b>
+      <ul>
+        <li>不加「其他操作权限」分区</li>
+        <li>布局不变（仍是折叠树）</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<div class="foot">
+  <b>怎么选：</b>想让「分配权限」和左侧导航<b>一一对应、改一处两边同步</b> → 选 <b>A</b>（推荐，彻底解决"对不上"）；
+  分组多、想快速定位 → 选 <b>B</b>；只想尽快止血、风险最小 → 选 <b>C</b>。<br>
+  选定后我会改 <span class="kbd">frontend-vite/src/views/user/components/UserPermissionDialog.vue</span> +
+  <span class="kbd">frontend-vite/src/views/user/composables/useUserManagement.ts</span>（必要时加后端 section 口径对齐），
+  并跑 <span class="kbd">npm run type-check</span> / <span class="kbd">npm test</span> 验证。
+</div>
+
+</body>
+</html>

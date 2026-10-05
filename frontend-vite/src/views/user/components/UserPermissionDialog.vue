@@ -72,8 +72,7 @@ import { ref, watch } from 'vue'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import UiCheckbox from '@/components/ui/UiCheckbox.vue'
 import type { PermissionItem } from '@/types'
-
-type PermissionSection = { key: string; name: string; items: PermissionItem[] }
+import { EXTRAS_SECTION_KEY, type PermissionSection } from '@/views/user/composables/useUserManagement'
 
 const props = defineProps<{
   /** 权限分配目标用户名 */
@@ -109,12 +108,14 @@ const permDialogVisible = defineModel<boolean>('open', { default: false })
 /** 已展开的 section key 集合 */
 const openSections = ref<Set<string>>(new Set())
 
-/** 首次加载时默认展开所有 section，方便用户查看 */
+/** 首次加载时默认展开所有 section（「其他操作权限」区除外），方便用户查看 */
 watch(
   () => props.permissionSections,
   (sections) => {
     if (openSections.value.size === 0 && sections.length > 0) {
-      openSections.value = new Set(sections.map((s) => s.key))
+      openSections.value = new Set(
+        sections.filter((s) => s.key !== EXTRAS_SECTION_KEY).map((s) => s.key),
+      )
     }
   },
   { immediate: true },
@@ -252,7 +253,8 @@ function isSectionAllChecked(sec: PermissionSection): boolean {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.us-perm-section-count {
+.us-perm-section-count,
+.us-perm-group-count {
   font-size: 11px;
   font-weight: 600;
   color: var(--color-text-muted);
@@ -261,6 +263,8 @@ function isSectionAllChecked(sec: PermissionSection): boolean {
   border-radius: 10px;
   border: 1px solid var(--color-border-light, #e2e8f0);
   flex-shrink: 0;
+}
+.us-perm-section-count {
   transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
 }
 .us-perm-section-count.all-checked {
@@ -332,16 +336,6 @@ function isSectionAllChecked(sec: PermissionSection): boolean {
   color: var(--color-primary-500);
   width: 18px;
   text-align: center;
-  flex-shrink: 0;
-}
-.us-perm-group-count {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--color-text-muted);
-  background: white;
-  padding: 2px 8px;
-  border-radius: 10px;
-  border: 1px solid var(--color-border-light, #e2e8f0);
   flex-shrink: 0;
 }
 .us-perm-expand-icon {
