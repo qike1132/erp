@@ -121,14 +121,20 @@ function fmtSize(bytes?: number | null) {
 .brt-table td { padding: 10px 14px; font-size: 13px; color: var(--color-text); border-bottom: 1px solid var(--color-border-light); vertical-align: middle; }
 .brt-table tbody tr:hover td { background: var(--color-primary-50); }
 .mono { font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; font-size: 13px; }
-.brt-right { text-align: right; }
+/* 「操作」列整列居中（表头+按钮），与用户页 UiDataTable 操作列 align:'center' 一致。
+   必须连写提升特异性：.brt-table th 的 text-align:left(0,1,1) 高于单类 .brt-right(0,1,0)，
+   否则表头的对齐设置被吞掉，与列内按钮错位 */
+.brt-table th.brt-right,
+.brt-table td.brt-right { text-align: center; }
 .brt-badge { min-width: 20px; height: 20px; padding: 0 8px; border-radius: 10px; font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; white-space: nowrap; }
 .brt-badge-success { background: var(--color-success-50); color: var(--color-success-700); }
 .brt-badge-danger { background: var(--color-danger-50); color: var(--color-danger-700); }
 .brt-badge-processing { background: var(--color-primary-50); color: var(--color-primary-700); }
 .brt-badge-warning { background: var(--color-warning-50); color: var(--color-warning-700); }
 .brt-badge-neutral { background: var(--color-border-light); color: var(--color-text-secondary); }
-.brt-link { border: none; background: none; cursor: pointer; font-size: 12px; font-weight: 600; color: var(--color-primary-600); margin-left: 16px; transition: color 0.3s ease; }
+.brt-link { border: none; background: none; cursor: pointer; font-size: 12px; font-weight: 600; color: var(--color-primary-600); transition: color 0.3s ease; }
+/* 间距只放按钮之间：首按钮不带左 margin，居中时按钮组视觉重心才与列中心重合 */
+.brt-link + .brt-link { margin-left: 16px; }
 .brt-link:hover { color: var(--color-primary-700); }
 .brt-link-danger { color: var(--color-danger-500); }
 .brt-link-danger:hover { color: var(--color-danger-600); }
