@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-# -*- coding: utf-8 -*-
 r"""孤儿模块机械校验（P0-8）。
 
 用法::
@@ -246,7 +245,7 @@ def _build_graph(files: list[Path]) -> _Graph:
         if not is_test[mod]:
             prod_edges[mod] = dsts
 
-    indegree_all: dict[str, int] = {mod: 0 for mod in known}
+    indegree_all: dict[str, int] = dict.fromkeys(known, 0)
     for dsts in all_edges.values():
         for dst in dsts:
             indegree_all[dst] = indegree_all.get(dst, 0) + 1
