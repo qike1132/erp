@@ -484,6 +484,9 @@
       "execute:DROP INDEX IF EXISTS idx_import_registry_type_time",
       "execute:DROP INDEX IF EXISTS uq_inventory_log_idem",
       "execute:DROP TABLE IF EXISTS import_file_registry"
+    ],
+    "migrations/versions/pg_standalone_069_drop_product_image_orphan_backup.py": [
+      "drop_table_if_exists:product_image_orphan_backup"
     ]
   }
 }
