@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi_app.core.exceptions import NotFoundError
 from fastapi_app.core.state_machine import StagingAction, StagingStatus, staging_machine
 from fastapi_app.core.validators import validate_quantity_range
-from fastapi_app.services.batch_import_core import _import_idem_key
+from fastapi_app.services.batch_import_core import _import_idem_key, _row_failure_message
 from fastapi_app.services.batch_service import process_order_deduction
 from fastapi_app.services.numbering import generate_order_number
 from fastapi_app.services.staging._generic import (
@@ -203,8 +203,8 @@ async def confirm_staging_orders(
                     staging.status = staging_machine.transition(staging.status, StagingAction.APPROVE)
                     confirmed += 1
 
-            except (ValueError, TypeError, OSError) as e:
-                errors.append(f'订单{staging.customer}-{staging.product_name}确认失败: {e!s}')
+            except (ValueError, TypeError, OSError, SQLAlchemyError) as e:
+                errors.append(f'订单{staging.customer}-{staging.product_name}确认失败: {_row_failure_message(e)}')
                 staging.status = staging_machine.transition(staging.status, StagingAction.REJECT)
 
         await db.execute(

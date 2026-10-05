@@ -22,9 +22,10 @@
 变化 → 新哈希 → 放行）。
 
 **已知缺口（本层拦不住）**：仅比对字节。用 Excel 打开再保存会改变
-zip 时间戳 → 新哈希 → 放行。真正覆盖「编辑后重传」的是第 2 层
-（``inventory_log.idem_key`` 部分唯一索引 + 规范化业务键），当前仅建
-了地基、**尚未接线**；在此之前出货/订单导入对「编辑后重传」无防护。
+zip 时间戳 → 新哈希 → 放行。「编辑后重传」的**重叠行**改由第 2 层
+（``inventory_log.idem_key`` 部分唯一索引 + 规范化业务键）拦截 ——
+该层已接入直连导入与 staging 确认两套实现（见 ``batch_import_core``
+的 ``_import_idem_key``）。
 
 **不覆盖 ARQ 异步导入端点（刻意不接线）**：``/tasks/import-orders`` 与
 ``/tasks/import-stockins``（``api/v1/endpoints/tasks.py``）**不经本守卫**。

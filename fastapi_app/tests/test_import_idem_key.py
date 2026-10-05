@@ -15,6 +15,9 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SVC = _REPO_ROOT / 'fastapi_app' / 'services'
 # 所有「导入来源」写 InventoryLog 的模块（手工/审批/建品等路径不在此列，
 # 它们本就不设 idem_key）。
+# ⚠️ 已知未接第 2 层且**不在此列**：fastapi_app/tasks/batch_tasks.py 的
+#    /tasks/import-orders|stockins（ARQ 异步导入，前端无调用，缺口已在
+#    import_guard.py 留档）。将来若接线，本清单需同步。
 _IMPORT_MODULES = [
     _SVC / 'batch_import_service.py',
     _SVC / 'batch_import_core.py',
@@ -88,10 +91,47 @@ def test_every_import_inventory_log_sets_idem_key():
 def test_aware_and_naive_yield_same_local_day_key():
     """aware(UTC) 与 naive 必须收敛到同一个本地日历日 —— 否则跨路径/跨零点漏拦。
 
-    本机 UTC+8：UTC 日与本地日在 00:00–08:00 之间不同。键若直接 .date() 会分叉。
+    本机 UTC+8：UTC 日与本地日在 00:00--08:00 之间不同。键若直接 .date() 会分叉。
+    注意：断言依赖运行时区非零偏移，在 UTC 机器上是空转（固有弱点）。
     """
     # 取一个「UTC 日与本地日必然不同」的时刻（本地 07:00 = UTC 前一日 23:00）
     local = datetime(2026, 10, 5, 7, 0).astimezone()
     aware = local.astimezone(UTC)
     naive = datetime(2026, 10, 5, 7, 0)  # 同一本地壁钟时间的 naive 形态
     assert _import_idem_key('order', 'C', 1, 10, aware) == _import_idem_key('order', 'C', 1, 10, naive)
+
+
+# ---------------------------------------------------------------------------
+# 结构守卫：行级 except 必须捕获 SQLAlchemyError
+# ---------------------------------------------------------------------------
+_STAGING_CONFIRM_MODULES = [
+    _SVC / 'staging' / 'order.py',
+    _SVC / 'staging' / 'stockin.py',
+    _SVC / 'staging' / 'stockout.py',
+]
+
+
+def _except_names(path: Path) -> list[set[str]]:
+    tree = ast.parse(path.read_text(encoding='utf-8'), filename=str(path))
+    out = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ExceptHandler) and isinstance(node.type, ast.Tuple):
+            names = {e.id for e in node.type.elts if isinstance(e, ast.Name)}
+            if names:
+                out.append(names)
+    return out
+
+
+def test_oserror_handlers_also_catch_sqlalchemy_error():
+    """凡捕获 OSError 的 except 必须同时捕获 SQLAlchemyError。
+
+    H-1 根因（第四轮实测）：staging 三条确认路径的行级 except 原为
+    (ValueError, TypeError, OSError)，幂等键 IntegrityError 穿透它 → 冒到
+    db_transaction → 整批回滚 500 + 该行永远无法确认。此断言防止再次漏掉。
+    """
+    offenders: list[str] = []
+    for path in _STAGING_CONFIRM_MODULES:
+        for names in _except_names(path):
+            if 'OSError' in names and 'SQLAlchemyError' not in names:
+                offenders.append(path.name)
+    assert not offenders, f'以下模块的 except 捕获 OSError 但漏 SQLAlchemyError（幂等冲突会穿透）: {offenders}'
