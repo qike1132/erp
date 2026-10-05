@@ -7,14 +7,12 @@
  */
 import { ref, reactive, computed } from 'vue'
 import { useQuery, keepPreviousData } from '@tanstack/vue-query'
-import { stockReturnApi } from '@/api'
-import type { Customer, Product } from '@/types'
 import { showToast } from '@/composables/useToast'
 import { useApiMutation } from '@/composables/useApiMutation'
 import { useDebouncedSearch } from '@/composables/useDebouncedSearch'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { useAuthStore } from '@/stores/auth'
-import { customerApi } from '@/api'
+import { customerApi, stockReturnApi } from '@/api'
 import type { NameOption, StockReturnCreatePayload } from '@/api/stockReturn'
 
 /** 退货原因受控选项（P1 起落字典表；当前与后端 reason String(200) 自由文本兼容） */
@@ -131,37 +129,42 @@ export function useStockReturn() {
   /** P1-③ 幂等令牌：打开弹窗时生成一次 */
   const requestId = ref('')
 
-  /** 产品/客户下拉：退货模块专用 product-options + 全局客户字典 active-names */
-  const products = ref<NameOption[]>([])
+  /** 客户下拉：全局客户字典 active-names（仅登录即可访问） */
   const customers = ref<NameOption[]>([])
   const loadingCatalog = ref(false)
+  /** 产品下拉：随所选客户过滤（该客户订单 ∪ 出货中出现过的产品） */
+  const products = ref<NameOption[]>([])
+  const loadingProducts = ref(false)
 
   async function openStandalone() {
     Object.assign(form, emptyForm())
     requestId.value = newRequestId()
+    products.value = []
     formOpen.value = true
-    // 每次打开都重拉：客户目录可能新增，产品列表随采购变化
+    // 客户字典每次打开重拉（可能新增客户）
     loadingCatalog.value = true
     try {
-      const [prods, custs] = await Promise.all([
-        stockReturnApi.productOptions(),
-        customerApi.activeNames(),
-      ])
-      products.value = prods
-      customers.value = custs
+      customers.value = await customerApi.activeNames()
     } catch {
-      showToast('产品/客户列表加载失败', 'warning')
+      showToast('客户列表加载失败', 'warning')
     } finally {
       loadingCatalog.value = false
     }
   }
 
-  function onProductPicked(productId: number | null) {
-    const row = products.value.find((p) => p.id === productId) ?? null
-    Object.assign(form, {
-      product_id: row?.id ?? null,
-      product_name: row?.name ?? '',
-    })
+  /** 选定客户后拉取该客户名下的产品；切换客户时清空已选产品 */
+  async function onCustomerPicked(name: string) {
+    Object.assign(form, { product_id: null, product_name: '' })
+    products.value = []
+    if (!name) return
+    loadingProducts.value = true
+    try {
+      products.value = await stockReturnApi.productOptions(name)
+    } catch {
+      showToast('该客户的产品列表加载失败', 'warning')
+    } finally {
+      loadingProducts.value = false
+    }
   }
 
   const createMutation = useApiMutation(
@@ -237,8 +240,9 @@ export function useStockReturn() {
     products,
     customers,
     loadingCatalog,
+    loadingProducts,
     openStandalone,
-    onProductPicked,
+    onCustomerPicked,
     handleSubmit,
     handleDelete,
   }

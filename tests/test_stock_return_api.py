@@ -154,21 +154,54 @@ class TestStockReturnApi:
         resp = await client.get(f"{API_PREFIX}/product-options")
         assert resp.status_code == 403
 
-    async def test_product_options_lists_products(self, sr_api):
-        """manage 权限下产品候选返回 id/name（按名称排序）"""
-        from fastapi_app.shared_models import Product
+    async def test_product_options_requires_customer(self, sr_api):
+        """产品候选必须携带 customer（缺参 422）"""
+        client, _, _ = sr_api
+        resp = await client.get(f"{API_PREFIX}/product-options")
+        assert resp.status_code == 422
+
+    async def test_product_options_scoped_to_customer(self, sr_api):
+        """P1 录入语义：产品候选 = 该客户「订单 ∪ 出货」中出现过的产品"""
+        from fastapi_app.shared_models import Order, Product, StockOut
 
         client, db, _ = sr_api
         suffix = uuid.uuid4().hex[:8]
-        db.add(Product(name=f"候选产品B-{suffix}", current_stock=1))
-        db.add(Product(name=f"候选产品A-{suffix}", current_stock=1))
+        p_order = Product(name=f"候选产品B-{suffix}", current_stock=1)   # 仅订单
+        p_ship = Product(name=f"候选产品A-{suffix}", current_stock=1)   # 仅出货
+        p_none = Product(name=f"无关产品-{suffix}", current_stock=1)     # 无关联
+        db.add_all([p_order, p_ship, p_none])
+        await db.flush()
+        db.add(Order(
+            order_no=f"ORD-OPT-{suffix}", customer="候选客户甲",
+            product_id=p_order.id, quantity=5, status="待备货",
+        ))
+        db.add(StockOut(
+            stockout_no=f"SO-OPT-{suffix}", product_id=p_ship.id,
+            quantity=3, customer="候选客户甲", returned_quantity=0,
+        ))
         await db.flush()
 
-        resp = await client.get(f"{API_PREFIX}/product-options")
+        # 客户甲：订单产品 + 出货产品，无关产品不出现
+        resp = await client.get(
+            f"{API_PREFIX}/product-options", params={"customer": "候选客户甲"}
+        )
         assert resp.status_code == 200, resp.text
-        rows = [r for r in resp.json() if r["name"].endswith(suffix)]
-        assert [r["name"] for r in rows] == [f"候选产品A-{suffix}", f"候选产品B-{suffix}"]
-        assert all(set(r.keys()) == {"id", "name"} for r in rows)
+        names = [r["name"] for r in resp.json()]
+        assert names == [f"候选产品A-{suffix}", f"候选产品B-{suffix}"], names
+        assert all(set(r.keys()) == {"id", "name"} for r in resp.json())
+
+        # 其他客户：不共享候选甲的产品
+        resp = await client.get(
+            f"{API_PREFIX}/product-options", params={"customer": "无单客户乙"}
+        )
+        assert resp.json() == []
+
+        # 纯空白客户 → 422
+        resp = await client.get(
+            f"{API_PREFIX}/product-options", params={"customer": "   "}
+        )
+        assert resp.status_code == 422
+
 
     async def test_create_rejects_missing_customer(self, sr_api):
         """P1：客户为硬性必填——缺失或空白 → 422"""

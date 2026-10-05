@@ -49,8 +49,9 @@ export const stockReturnApi = {
       '/stock-returns/list',
       params,
     ),
-  /** 产品名称候选（退货模块自身 manage 门控，勿用 /products/list——那是 product_manage） */
-  productOptions: () => get<NameOption[]>('/stock-returns/product-options'),
+  /** 产品名称候选（随客户过滤；退货模块自身 manage 门控，勿用 /products/list——那是 product_manage） */
+  productOptions: (customer: string) =>
+    get<NameOption[]>('/stock-returns/product-options', { customer }),
   create: (data: StockReturnCreatePayload) =>
     post<{ success: boolean; message: string }>('/stock-returns/create', data),
   /** 取消退货（P1-① 软删除：记录保留，库存对称扣回） */

@@ -101,7 +101,9 @@
       :products="products"
       :customers="customers"
       :loading-catalog="loadingCatalog"
+      :loading-products="loadingProducts"
       @update:open="formOpen = $event"
+      @customer-change="onCustomerPicked"
       @submit="handleSubmit"
     />
 
@@ -162,6 +164,8 @@ const {
   products,
   customers,
   loadingCatalog,
+  loadingProducts,
+  onCustomerPicked,
   submitting,
   openStandalone,
   handleSubmit,

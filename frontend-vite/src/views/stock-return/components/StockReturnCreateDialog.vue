@@ -13,6 +13,7 @@
             v-model="form.customer"
             class="sr-select"
             :disabled="loadingCatalog"
+            @change="emit('customer-change', form.customer)"
           >
             <option value="" disabled>{{ loadingCatalog ? '客户加载中…' : '请选择客户' }}</option>
             <option v-for="c in customers" :key="c.id" :value="c.name">{{ c.name }}</option>
@@ -23,12 +24,15 @@
           <select
             v-model.number="form.product_id"
             class="sr-select"
-            :disabled="loadingCatalog"
+            :disabled="loadingProducts || !form.customer"
           >
-            <option :value="null" disabled>{{ loadingCatalog ? '产品加载中…' : '请选择产品' }}</option>
+            <option :value="null" disabled>{{ productPlaceholder }}</option>
             <option v-for="p in products" :key="p.id" :value="p.id">{{ p.name }}</option>
           </select>
         </div>
+      </div>
+      <div v-if="form.customer && !loadingProducts && products.length === 0" class="sr-empty-hint">
+        该客户名下暂无关联产品（取自其订单与出货记录）
       </div>
 
       <div class="sr-grid">
@@ -74,22 +78,32 @@
  * 产品下拉来自 catalog store（懒加载 + 跨页缓存）。
  * 可退数量无上限概念，以实物为准（服务层仅校验正整数）。
  */
+import { computed } from 'vue'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import type { NameOption } from '@/api/stockReturn'
 import { RETURN_REASON_OPTIONS, type StockReturnFormData } from '../composables/useStockReturn'
 
-defineProps<{
+const props = defineProps<{
   open: boolean
   submitting: boolean
   products: NameOption[]
   customers: NameOption[]
   loadingCatalog: boolean
+  loadingProducts: boolean
 }>()
 
 const emit = defineEmits<{
   'update:open': [value: boolean]
   submit: []
+  'customer-change': [name: string]
 }>()
+
+const productPlaceholder = computed(() => {
+  if (!form.value.customer) return '请先选择客户'
+  if (props.loadingProducts) return '产品加载中…'
+  if (props.products.length === 0) return '该客户暂无关联产品'
+  return '请选择产品'
+})
 
 /** 表单对象由 composable 持有（reactive）；经 v-model:form 传入，避免直接改 prop */
 const form = defineModel<StockReturnFormData>('form', { required: true })
@@ -150,6 +164,13 @@ const form = defineModel<StockReturnFormData>('form', { required: true })
 .sr-textarea:focus {
   outline: none;
   border-color: var(--color-primary-300);
+}
+.sr-empty-hint {
+  font-size: 12px;
+  color: var(--color-warning-700, #c47820);
+  background: var(--color-warning-50, #fff3e6);
+  border: 1px solid var(--color-warning-200, #ffd199);
+  padding: 6px 10px;
 }
 .sr-btn {
   min-height: 34px;
