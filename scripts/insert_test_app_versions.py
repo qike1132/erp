@@ -23,9 +23,8 @@ from _prod_write_guard import require_prod_write_consent
 
 require_prod_write_consent('向生产库插入测试 app 版本')
 
-from fastapi_app.shared_models.app_version import AppVersion
-
 from fastapi_app.core.config import Settings
+from fastapi_app.shared_models.app_version import AppVersion
 
 settings = Settings()
 
