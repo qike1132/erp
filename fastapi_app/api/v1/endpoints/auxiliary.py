@@ -253,7 +253,11 @@ async def available_shipment(
         return {'order_quantity': 0, 'shipped_quantity': 0, 'available_quantity': 0}
 
     from fastapi_app.services.batch_service import calculate_available_shipment_quantity
-    shipment_info = await calculate_available_shipment_quantity(db, product_id, customer)
+    # 本端点会话来自只读副本（get_async_read_db），副本无法执行行锁查询；
+    # 这里仅作展示，行锁与超额校验由出货提交事务自身完成
+    shipment_info = await calculate_available_shipment_quantity(
+        db, product_id, customer, lock_orders=False
+    )
 
     return {
         'order_quantity': shipment_info['order_quantity'],

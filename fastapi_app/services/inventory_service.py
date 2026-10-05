@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 async def calculate_available_shipment_quantity(
-    db: AsyncSession, product_id: int, customer: str
+    db: AsyncSession, product_id: int, customer: str, *, lock_orders: bool = True
 ) -> dict:
     """
     计算指定客户和产品的可出货量
@@ -29,6 +29,10 @@ async def calculate_available_shipment_quantity(
     1. 出货量严格受限于订单量
     2. 备货量只能通过订单抵扣使用，不能直接出货
     3. 可出货量 = 订单总量 - 已出货量（非抵扣出货）
+
+    lock_orders 默认对订单行加排他行锁（出货提交路径防超量竞态的依据，
+    勿在写路径关闭）。仅展示类端点可传 lock_orders=False：其会话可能来自
+    只读副本，热备副本处于只读模式，无法执行行锁查询。
     """
     where_clause = [
         Order.product_id == product_id,
@@ -37,12 +41,17 @@ async def calculate_available_shipment_quantity(
         Order.is_deleted.isnot(True),
     ]
 
-    result = await db.execute(
-        select(Order)
-        .where(*where_clause)
-        .order_by(Order.order_date.asc())
-        .with_for_update()
-    )
+    if lock_orders:
+        result = await db.execute(
+            select(Order)
+            .where(*where_clause)
+            .order_by(Order.order_date.asc())
+            .with_for_update()
+        )
+    else:
+        result = await db.execute(
+            select(Order).where(*where_clause).order_by(Order.order_date.asc())
+        )
     orders = result.scalars().all()
 
     if not orders:
