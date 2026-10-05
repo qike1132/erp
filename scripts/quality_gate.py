@@ -35,6 +35,8 @@ P0-11（2026-10-01）加固：违规数只来自机器可读来源
    **僵尸条目**（当前漏洞库里匹配不到该 id）失败；并打印豁免条数与 ≤30 天内
    即将到期的条目。僵尸判定需要漏洞库数据：CI 用 `--audit-report` 传入现场
    `pip-audit --format json` 的结果，本地没有数据时如实 WARN 并跳过该项。
+   本地现场审计的目标是**生产运行时** `.venv/Lib/site-packages`（pip_audit
+   `--path` 模式）；无 `.venv` 时回退审计门禁自身解释器环境。
 
 用法
 ----
@@ -328,15 +330,33 @@ def load_vuln_ids(audit_report: str | None) -> tuple[set[str] | None, str, str |
 
     if importlib.util.find_spec("pip_audit") is None:
         return None, "pip-audit 未安装", None
+    venv_site_packages = PROJECT_ROOT / ".venv" / "Lib" / "site-packages"
+    if venv_site_packages.is_dir():
+        # 生产运行时是 .venv（NSSM erp-prod/erp-arq 的解释器）；必须审计它的
+        # site-packages，而不是门禁自身解释器（全局工具链）环境——后者会拿
+        # litellm/tornado 等开发依赖的漏洞淹没生产信号。
+        audit_argv = [
+            sys.executable,
+            "-m",
+            "pip_audit",
+            "--format",
+            "json",
+            "--path",
+            str(venv_site_packages),
+        ]
+        source = f"现场 pip_audit --path 审计生产 venv（{venv_site_packages.relative_to(PROJECT_ROOT)}）"
+    else:
+        audit_argv = [sys.executable, "-m", "pip_audit", "--format", "json"]
+        source = "现场 `python -m pip_audit --format json`（无 .venv，审计门禁解释器环境）"
     try:
         proc = subprocess.run(
-            [sys.executable, "-m", "pip_audit", "--format", "json"],
+            audit_argv,
             cwd=PROJECT_ROOT,
             capture_output=True,
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=300,
+            timeout=600,
         )
     except (subprocess.TimeoutExpired, OSError) as exc:
         return None, f"pip-audit 执行失败（{exc}）", None
@@ -344,7 +364,7 @@ def load_vuln_ids(audit_report: str | None) -> tuple[set[str] | None, str, str |
         payload = json.loads(proc.stdout or "")
     except ValueError as exc:
         return None, f"pip-audit 输出不可解析（{exc}）", None
-    return _collect_vuln_ids(payload), "现场 `python -m pip_audit --format json`", None
+    return _collect_vuln_ids(payload), source, None
 
 
 def audit_ignores(
