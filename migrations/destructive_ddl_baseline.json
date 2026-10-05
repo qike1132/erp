@@ -104,6 +104,9 @@
       "drop_table:outsource_shipment",
       "drop_table:outsource_shipment_item"
     ],
+    "migrations/versions/add_po_dedup_unique_index.py": [
+      "execute:DROP INDEX IF EXISTS uq_po_pending_dedup"
+    ],
     "migrations/versions/add_product_factory.py": [
       "drop_column:product|factory"
     ],
@@ -431,6 +434,13 @@
       "execute:DROP TABLE IF EXISTS _pr_dup;",
       "execute:DROP TABLE IF EXISTS role;"
     ],
+    "migrations/versions/pg_standalone_046_po_spare_fields.py": [
+      "execute:ALTER TABLE purchase_order DROP COLUMN IF EXISTS spare_quantity",
+      "execute:ALTER TABLE purchase_order DROP COLUMN IF EXISTS spare_rate"
+    ],
+    "migrations/versions/pg_standalone_047_purchase_order_sku.py": [
+      "execute:DROP TABLE IF EXISTS purchase_order_sku"
+    ],
     "migrations/versions/pg_standalone_049_stockin_soft_delete.py": [
       "execute:ALTER TABLE stock_in DROP COLUMN IF EXISTS is_deleted",
       "execute:DROP INDEX IF EXISTS idx_stockin_not_deleted"
@@ -441,6 +451,9 @@
     "migrations/versions/pg_standalone_052_order_product_set_null.py": [
       "execute:ALTER TABLE \"order\" ALTER COLUMN product_id DROP NOT NULL",
       "execute:DO $$ DECLARE cname text; BEGIN SELECT conname INTO cname FROM pg_constraint WHE"
+    ],
+    "migrations/versions/pg_standalone_053_po_item_loss_rate.py": [
+      "execute:ALTER TABLE purchase_order_item DROP COLUMN IF EXISTS loss_rate"
     ],
     "migrations/versions/pg_standalone_054_sync_schema_with_orm_metadata.py": [
       "drop_constraint_if_exists:approval_request",
@@ -491,6 +504,12 @@
     "migrations/versions/pg_standalone_071_drop_redundant_stockout_indexes.py": [
       "drop_index:idx_stockout_has_stockin",
       "drop_index:idx_stockout_order_stockin"
+    ],
+    "migrations/versions/rebuild_po_dedup_index.py": [
+      "execute:DROP INDEX IF EXISTS uq_po_pending_dedup"
+    ],
+    "migrations/versions/rebuild_po_dedup_use_supplier_name.py": [
+      "execute:DROP INDEX IF EXISTS uq_po_pending_dedup"
     ]
   }
 }

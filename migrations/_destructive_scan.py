@@ -22,7 +22,9 @@ CONSTRAINT 等），与 `migrations/destructive_ddl_baseline.json` 基线比对�
 
 已知局限
 --------
-仅扫描 AST 字面量，不追踪变量拼接出的 SQL；`op.execute(变量)` 无法识别。
+仅扫描 AST 字面量（含 `op.execute(text("..."))` 包裹的那一层），不追踪变量/拼接出的
+SQL；把 DDL 先存进变量再传入的写法无法识别。autogenerate 产出的都是字面量
+（`op.drop_index('x', ...)` / `op.execute("DROP ...")`），故主要威胁已被覆盖。
 """
 
 from __future__ import annotations
@@ -65,10 +67,23 @@ def _callee_name(node: ast.Call) -> str | None:
 
 
 def _string_args(node: ast.Call, limit: int = 2) -> list[str]:
+    """提取调用的字符串实参；对 `text("...")` / `sa.text("...")` 包裹的再解一层。
+
+    裸 SQL 常写作 `op.execute(text("DROP ..."))` —— 字符串在 `text(...)` 调用里，
+    不是 `execute` 的直接实参，故需下钻一层，否则会漏掉这类破坏性 DDL。
+    """
     out: list[str] = []
     for arg in node.args:
+        value: str | None = None
         if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
-            out.append(" ".join(arg.value.split()))
+            value = arg.value
+        elif isinstance(arg, ast.Call) and _callee_name(arg) == "text":
+            for inner in arg.args:
+                if isinstance(inner, ast.Constant) and isinstance(inner.value, str):
+                    value = inner.value
+                    break
+        if value is not None:
+            out.append(" ".join(value.split()))
         if len(out) >= limit:
             break
     return out
