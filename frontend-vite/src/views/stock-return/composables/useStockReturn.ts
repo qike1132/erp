@@ -14,8 +14,8 @@ import { useApiMutation } from '@/composables/useApiMutation'
 import { useDebouncedSearch } from '@/composables/useDebouncedSearch'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { useAuthStore } from '@/stores/auth'
-import { useCatalogStore } from '@/stores/catalog'
-import type { StockReturnCreatePayload } from '@/api/stockReturn'
+import { customerApi } from '@/api'
+import type { NameOption, StockReturnCreatePayload } from '@/api/stockReturn'
 
 /** 退货原因受控选项（P1 起落字典表；当前与后端 reason String(200) 自由文本兼容） */
 export const RETURN_REASON_OPTIONS = ['质量问题', '错发', '多送', '客户不要', '换货', '其他'] as const
@@ -60,7 +60,6 @@ function newRequestId(): string {
 
 export function useStockReturn() {
   const auth = useAuthStore()
-  const catalog = useCatalogStore()
   const confirmDialog = useConfirmDialog()
   const actionId = ref<number | ''>(0)
 
@@ -132,19 +131,24 @@ export function useStockReturn() {
   /** P1-③ 幂等令牌：打开弹窗时生成一次 */
   const requestId = ref('')
 
-  /** 产品/客户下拉（catalog store 懒加载 + 跨页缓存） */
-  const products = computed<Product[]>(() => catalog.products)
-  const customers = computed<Customer[]>(() => catalog.customers)
+  /** 产品/客户下拉：退货模块专用 product-options + 全局客户字典 active-names */
+  const products = ref<NameOption[]>([])
+  const customers = ref<NameOption[]>([])
   const loadingCatalog = ref(false)
 
   async function openStandalone() {
     Object.assign(form, emptyForm())
     requestId.value = newRequestId()
     formOpen.value = true
-    if (products.value.length > 0 && customers.value.length > 0) return
+    // 每次打开都重拉：客户目录可能新增，产品列表随采购变化
     loadingCatalog.value = true
     try {
-      await Promise.all([catalog.ensureProducts(), catalog.ensureCustomers()])
+      const [prods, custs] = await Promise.all([
+        stockReturnApi.productOptions(),
+        customerApi.activeNames(),
+      ])
+      products.value = prods
+      customers.value = custs
     } catch {
       showToast('产品/客户列表加载失败', 'warning')
     } finally {

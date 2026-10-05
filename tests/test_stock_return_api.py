@@ -145,6 +145,31 @@ class TestStockReturnApi:
         })
         assert resp.status_code == 422
 
+    async def test_product_options_requires_manage(self, sr_api):
+        """产品候选端点要求 stock_return_manage：仅 view 权限 → 403"""
+        client, _, user_mock = sr_api
+        user_mock.has_permission = MagicMock(
+            side_effect=lambda code: code == "stock_return_view"
+        )
+        resp = await client.get(f"{API_PREFIX}/product-options")
+        assert resp.status_code == 403
+
+    async def test_product_options_lists_products(self, sr_api):
+        """manage 权限下产品候选返回 id/name（按名称排序）"""
+        from fastapi_app.shared_models import Product
+
+        client, db, _ = sr_api
+        suffix = uuid.uuid4().hex[:8]
+        db.add(Product(name=f"候选产品B-{suffix}", current_stock=1))
+        db.add(Product(name=f"候选产品A-{suffix}", current_stock=1))
+        await db.flush()
+
+        resp = await client.get(f"{API_PREFIX}/product-options")
+        assert resp.status_code == 200, resp.text
+        rows = [r for r in resp.json() if r["name"].endswith(suffix)]
+        assert [r["name"] for r in rows] == [f"候选产品A-{suffix}", f"候选产品B-{suffix}"]
+        assert all(set(r.keys()) == {"id", "name"} for r in rows)
+
     async def test_create_rejects_missing_customer(self, sr_api):
         """P1：客户为硬性必填——缺失或空白 → 422"""
         client, _, _ = sr_api

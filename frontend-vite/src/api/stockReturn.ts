@@ -31,6 +31,12 @@ export interface StockReturnCreatePayload {
   request_id?: string
 }
 
+/** 产品名称候选（/stock-returns/product-options） */
+export interface NameOption {
+  id: number
+  name: string
+}
+
 export const stockReturnApi = {
   list: (params?: {
     page?: number
@@ -43,6 +49,8 @@ export const stockReturnApi = {
       '/stock-returns/list',
       params,
     ),
+  /** 产品名称候选（退货模块自身 manage 门控，勿用 /products/list——那是 product_manage） */
+  productOptions: () => get<NameOption[]>('/stock-returns/product-options'),
   create: (data: StockReturnCreatePayload) =>
     post<{ success: boolean; message: string }>('/stock-returns/create', data),
   /** 取消退货（P1-① 软删除：记录保留，库存对称扣回） */

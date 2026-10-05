@@ -9,6 +9,7 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,14 +17,45 @@ from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_permission
 from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.schemas.stock import StockActionResponse, StockListResponse
-from fastapi_app.schemas.stock_return import StockReturnCreate
+from fastapi_app.schemas.stock_return import NameOption, StockReturnCreate
 from fastapi_app.services.stock_common import business_now
 from fastapi_app.services.stock_inventory_service import get_stockreturns
 from fastapi_app.services.stock_return_service import cancel_stockreturn, create_stockreturn
-from fastapi_app.shared_models import StockReturn, User
+from fastapi_app.shared_models import Product, StockReturn, User
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+# 新增退货弹窗的产品候选窗口大小（与前端约定）
+PRODUCT_OPTIONS_LIMIT = 500
+
+
+@router.get('/product-options', response_model=list[NameOption])
+async def list_product_options(
+    db: AsyncSession = Depends(get_async_read_db),
+    _user: User = Depends(require_permission('stock_return_manage')),
+) -> list[NameOption]:
+    """获取产品名称候选（新增退货弹窗下拉，硬性必填项）。
+
+    为什么模块内自建而不复用 /products/list：后者要求 product_manage，
+    只授退货权限的用户（迁移 069 最小授权模型）会 403——与
+    /customers/active-names 放宽为仅登录的先例同因，本端点按退货模块
+    自身的 manage 权限门控，随弹窗入口一起出现。
+
+    Args:
+        db: 异步数据库会话（只读副本）。
+        _user: 当前登录用户（仅需通过权限校验）。
+
+    Returns:
+        list[NameOption]: 产品 id/name 列表（按名称排序）。
+    """
+    result = await db.execute(
+        select(Product.id, Product.name)
+        .order_by(Product.name)
+        .limit(PRODUCT_OPTIONS_LIMIT)
+    )
+    return [NameOption(id=row[0], name=row[1]) for row in result.all()]
+
 
 @router.get('/list', response_model=StockListResponse)
 async def list_stock_returns(

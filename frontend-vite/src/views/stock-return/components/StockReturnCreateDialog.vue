@@ -75,14 +75,14 @@
  * 可退数量无上限概念，以实物为准（服务层仅校验正整数）。
  */
 import UiDialog from '@/components/ui/UiDialog.vue'
-import type { Customer, Product } from '@/types'
+import type { NameOption } from '@/api/stockReturn'
 import { RETURN_REASON_OPTIONS, type StockReturnFormData } from '../composables/useStockReturn'
 
 defineProps<{
   open: boolean
   submitting: boolean
-  products: Product[]
-  customers: Customer[]
+  products: NameOption[]
+  customers: NameOption[]
   loadingCatalog: boolean
 }>()
 

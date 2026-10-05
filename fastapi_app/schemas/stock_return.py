@@ -9,6 +9,12 @@ from datetime import datetime
 from pydantic import BaseModel, Field, field_validator
 
 
+class NameOption(BaseModel):
+    """下拉候选（产品/客户名称字典项）"""
+    id: int
+    name: str
+
+
 def _validate_date_format(v: str | None) -> str | None:
     """验证日期格式为 YYYY-MM-DD"""
     if v is not None:
