@@ -3,8 +3,8 @@
   "counts": {
     "n_plus_one": 0,
     "bare_except": 5,
-    "function_length": 51,
-    "vue_component_length": 7,
+    "function_length": 42,
+    "vue_component_length": 6,
     "service_commit": 12,
     "bom": 0,
     "alembic_heads": 0,
