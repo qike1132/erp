@@ -35,6 +35,7 @@ from fastapi_app.api.v1.endpoints.staging_order import router as staging_order_r
 from fastapi_app.api.v1.endpoints.staging_stockin import router as staging_stockin_router
 from fastapi_app.api.v1.endpoints.staging_stockout import router as staging_stockout_router
 from fastapi_app.api.v1.endpoints.stock import router as stock_router
+from fastapi_app.api.v1.endpoints.stock_return import router as stock_return_router
 from fastapi_app.api.v1.endpoints.supplier import router as supplier_router
 from fastapi_app.api.v1.endpoints.tasks import router as tasks_router
 from fastapi_app.api.v1.endpoints.user import router as user_router
@@ -119,6 +120,14 @@ api_router.include_router(
     stock_router,
     prefix="/stock",
     tags=["库存管理"],
+    dependencies=[Depends(get_current_user_id)],
+)
+
+# 退货管理路由 - 前缀 /api/v1/stock-returns
+api_router.include_router(
+    stock_return_router,
+    prefix="/stock-returns",
+    tags=["退货管理"],
     dependencies=[Depends(get_current_user_id)],
 )
 

@@ -91,9 +91,9 @@ from fastapi_app.services.stock_out_service import (  # noqa: F401
     update_stockout_core,
 )
 from fastapi_app.services.stock_return_service import (  # noqa: F401
+    cancel_stockreturn,
+    cancel_stockreturn_core,
     create_stockreturn,
     create_stockreturn_core,
-    delete_stockreturn,
-    delete_stockreturn_core,
     generate_stockreturn_number,
 )

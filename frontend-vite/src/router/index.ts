@@ -29,6 +29,7 @@ const pcRoutes: RouteRecordRaw[] = [
       { path: 'product', name: 'Product', component: () => import('@/views/product/ProductListView.vue'), meta: { hideHeader: true } },
       { path: 'stock', name: 'Stock', component: () => import('@/views/stock/StockView.vue'), meta: { hideHeader: true } },
       { path: 'stock-out', name: 'StockOut', component: () => import('@/views/stock/StockOutView.vue'), meta: { hideHeader: true } },
+      { path: 'stock-return', name: 'StockReturn', component: () => import('@/views/stock-return/StockReturnView.vue'), meta: { hideHeader: true } },
       // 湖北订单 / 外发工序 / 工序预设 拆分为三个独立路由页面：
       // /beile-order 湖北订单；/outsource 外发工序；/outsource/presets 工序预设
       { path: 'beile-order', name: 'BeileOrder', component: () => import('@/views/hubei/HubeiView.vue'), meta: { hideHeader: true } },

@@ -203,9 +203,13 @@ def _register_stock_event_subscriptions():
         subscribe(DomainEventType.STOCK_RETURN_DELETED, _make_stock_handler(
             'STOCK_RETURN_DELETED', need_recalc_delete=True,
         ))
+        subscribe(DomainEventType.STOCK_RETURN_CANCELLED, _make_stock_handler(
+            'STOCK_RETURN_CANCELLED', need_recalc_delete=True,
+        ))
         logger.info(
             '采购计划领域事件订阅已注册: STOCK_OUT_CREATED, STOCK_OUT_UPDATED, '
-            'STOCK_OUT_DELETED, STOCK_RETURN_CREATED, STOCK_RETURN_DELETED'
+            'STOCK_OUT_DELETED, STOCK_RETURN_CREATED, STOCK_RETURN_DELETED, '
+            'STOCK_RETURN_CANCELLED'
         )
     except Exception as e:  # defensive: 订阅注册失败不影响模块加载
         logger.warning('采购计划领域事件订阅注册失败（可忽略）: %s', e)

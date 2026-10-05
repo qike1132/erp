@@ -26,7 +26,8 @@ def calc_total_pages(total: int, per_page: int) -> int:
 
 def log_inventory_change(db, *, product_id: int, change_type: str,
                          change_quantity: int, related_id: str = '',
-                         note: str = '', customer: str | None = None) -> None:
+                         note: str = '', customer: str | None = None,
+                         idem_key: str | None = None) -> None:
     """创建库存流水日志并加入数据库会话。
 
     统一 InventoryLog 创建逻辑，消除各服务中 db.add(InventoryLog(...)) 重复。
@@ -41,6 +42,8 @@ def log_inventory_change(db, *, product_id: int, change_type: str,
         related_id: 关联记录 ID 字符串。
         note: 备注信息。
         customer: 客户名称（可选，退货等场景使用）。
+        idem_key: 幂等键（可选）。命中 uq_inventory_log_idem 部分唯一索引
+                  （仅对非 NULL 生效），用于请求级防重。
     """
     db.add(InventoryLog(
         product_id=product_id,
@@ -49,6 +52,7 @@ def log_inventory_change(db, *, product_id: int, change_type: str,
         related_id=related_id,
         note=note,
         customer=customer,
+        idem_key=idem_key,
     ))
 
 

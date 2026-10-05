@@ -26,6 +26,7 @@ class DomainEventType(StrEnum):
     STOCK_OUT_DELETED = 'stock_out.deleted'
     STOCK_RETURN_CREATED = 'stock_return.created'
     STOCK_RETURN_DELETED = 'stock_return.deleted'
+    STOCK_RETURN_CANCELLED = 'stock_return.cancelled'
     PRODUCT_UPDATED = 'product.updated'
     PURCHASE_PLAN_UPDATED = 'purchase_plan.updated'
     APPROVAL_DECISION = 'approval.decision'

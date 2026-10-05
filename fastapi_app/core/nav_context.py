@@ -31,6 +31,10 @@ logger = logging.getLogger(__name__)
 # 湖北订单与湖北外发为两个独立路由页面，各按自身权限显示
 SPECIAL_PERMISSION_MAP = {
     'outsource_manage': ['outsource_manage', 'outsource_view'],
+    # 退货管理：只授 manage（新增/删除）的用户也要能看到导航入口。
+    # 服务端 manage 已按命名规则含 view 的放行（User.has_permission），
+    # 但前端导航按 permission_codes「任一命中」判断，必须在此展开。
+    'stock_return_view': ['stock_return_view', 'stock_return_manage'],
     # 生产报表按部门拆权限后，只有部门码的用户也要能看到导航入口；
     # 任持其一即可见（前端侧栏按 permission_codes 做「任一命中」判断）。
     # 键用聚合码常量而非字面量：聚合码重命名时映射不会静默失配。

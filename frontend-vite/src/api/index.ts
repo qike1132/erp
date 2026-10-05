@@ -27,6 +27,8 @@ export type {
 export { customerApi } from './customer'
 export { supplierApi } from './supplier'
 export { stockApi } from './stock'
+export { stockReturnApi } from './stockReturn'
+export type { StockReturnRecord, StockReturnCreatePayload } from './stockReturn'
 export type { BatchSubmitResponse } from './stock'
 export { approvalApi } from './approval'
 export { batchApi } from './batch'

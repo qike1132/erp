@@ -17,7 +17,7 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.cache_invalidation import cache_mgr, schedule_post_commit_invalidation
@@ -36,7 +36,7 @@ from fastapi_app.shared.stock_concurrency import (
     check_stock_available,
     update_stock_with_optimistic_lock,
 )
-from fastapi_app.shared_models import Product, StockOut
+from fastapi_app.shared_models import Product, StockOut, StockReturn
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +111,14 @@ async def delete_stockout_core(db: AsyncSession, stockout: StockOut) -> None:
     if stockout.stockin_id is not None:
         raise ValueError('订单抵扣的出货记录不能直接删除！请通过订单管理进行修改。')
     if stockout.returned_quantity > 0:
-        raise ValueError('该出货记录已有退货关联，无法删除！请先删除退货记录。')
+        raise ValueError('该出货记录已有退货关联，无法删除！请先取消退货记录。')
+    # P1-①（072 RESTRICT 的应用层前置）：软取消的历史退货单 returned_quantity 已回减，
+    # 上面的口径拦不住，但 DB 外键 RESTRICT 仍会级联保护——这里前置校验给出 400 而非 500
+    linked = (await db.execute(
+        select(func.count()).select_from(StockReturn).where(StockReturn.stockout_id == stockout.id)
+    )).scalar() or 0
+    if linked:
+        raise ValueError('该出货存在关联的退货记录（含已取消），为保留可追溯记录无法删除！')
     # 先取行锁（产品不存在时由 get_product_for_update 抛错），库存写入走统一乐观锁入口
     await stock_service.get_product_for_update(db, stockout.product_id)
     await update_stock_with_optimistic_lock(db, stockout.product_id, stockout.quantity)

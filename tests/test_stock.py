@@ -508,15 +508,20 @@ class TestDeleteStockOut:
         product.version = 1
         mock_get_product.return_value = product
 
+        # P1 守卫前置查询：关联退货计数返回 0（scalar() 为 0 → falsy 放行）
+        linked_result = MagicMock()
+        linked_result.scalar.return_value = 0
         # 显式建模乐观锁入口的两步序列：SELECT 当前行 + 条件 UPDATE 命中一行
-        state = _wire_stock_write(mock_async_db, product, new_stock=150)
+        state = _wire_stock_write(
+            mock_async_db, product, new_stock=150, pre_results=(linked_result,)
+        )
 
         await delete_stockout_core(mock_async_db, stockout)
 
         assert product.current_stock == 150  # 100 + 50
         mock_async_db.delete.assert_called_once_with(stockout)
-        assert state['consumed'] == 2
-        assert len(state['calls']) == 2
+        assert state['consumed'] == 3  # 退货计数 + SELECT + UPDATE
+        assert len(state['calls']) == 3
         assert product.version == 2  # 乐观锁 version 递增经 refresh 回读
 
     @pytest.mark.asyncio
@@ -547,43 +552,30 @@ class TestCreateStockReturn:
     @patch('fastapi_app.services.stock_service.get_product_for_update')
     async def test_create_stockreturn_success(self, mock_get_product, mock_log,
                                                 mock_gen_no, mock_async_db):
-        """正常创建退货"""
+        """正常创建退货（P1 按产品制：无出货关联、无可退上限）"""
         mock_gen_no.return_value = 'SR-2024-0001'
 
         product = MagicMock()
         product.id = 1
         product.current_stock = 100
+        product.version = 1
+        product.name = '测试产品'
         mock_get_product.return_value = product
 
-        stockout = make_mock_stockout(quantity=100)
-        stockout.returned_quantity = 0
-        stockout.customer = '测试客户'
-        stockout.order_id = 1
-
-        data_result = MagicMock()
-        data_result.scalar_one_or_none.return_value = stockout
-
-        # 显式建模调用序列：按 id 装载出货记录 → 乐观锁入口的两步序列
-        # （SELECT 当前行 version=1 → 条件 UPDATE 命中一行）
-        product.version = 1
-        # 第十四轮：create_stockreturn_core 先无锁预读 product_id（锁序统一 Product→StockOut）
-        pid_result = MagicMock()
-        pid_result.one_or_none.return_value = (1,)
-        state = _wire_stock_write(
-            mock_async_db, product, new_stock=130, pre_results=(pid_result, data_result)
-        )
+        # 乐观锁入口两步序列：SELECT 当前行 version=1 → 条件 UPDATE 命中一行
+        state = _wire_stock_write(mock_async_db, product, new_stock=130)
 
         result = await create_stockreturn_core(
-            mock_async_db, stockout_id=1, quantity=30,
-            return_date=datetime.now(UTC), reason='质量问题', note='退货备注'
+            mock_async_db, product_id=1, quantity=30,
+            return_date=datetime.now(UTC), reason='质量问题', note='退货备注',
+            customer='测试客户',
         )
 
         assert result is not None
         mock_async_db.add.assert_called_once()
-        # 第十四轮：预读 product_id + 装载出货记录 + SELECT + UPDATE = 4
-        assert state['consumed'] == 4
-        # 第 5 次读是订单状态重算（按 id 装载 Order），与库存写入无关
-        assert len(state['calls']) == 5
+        # 按产品制：仅乐观锁的 SELECT + UPDATE 两次 execute，无出货/订单读写
+        assert state['consumed'] == 2
+        assert len(state['calls']) == 2
         assert product.current_stock == 130  # 100 + 30
 
     @pytest.mark.asyncio
@@ -591,7 +583,7 @@ class TestCreateStockReturn:
         """退货数量为0"""
         with pytest.raises(ValueError, match='退货数量必须大于0'):
             await create_stockreturn_core(
-                mock_async_db, stockout_id=1, quantity=0,
+                mock_async_db, product_id=1, quantity=0,
                 return_date=datetime.now(UTC)
             )
 
@@ -600,53 +592,37 @@ class TestCreateStockReturn:
         """退货数量为负"""
         with pytest.raises(ValueError, match='退货数量必须大于0'):
             await create_stockreturn_core(
-                mock_async_db, stockout_id=1, quantity=-5,
+                mock_async_db, product_id=1, quantity=-5,
                 return_date=datetime.now(UTC)
             )
 
     @pytest.mark.asyncio
-    async def test_create_stockreturn_stockout_not_found(self, mock_async_db):
-        """出货记录不存在"""
-        # 第十四轮：第一次 execute 是无锁预读 product_id（one_or_none() 为 None 即不存在）
-        pid_result = MagicMock()
-        pid_result.one_or_none.return_value = None
-        mock_async_db.execute = AsyncMock(return_value=pid_result)
+    @patch('fastapi_app.services.stock_service.generate_stockreturn_number')
+    @patch('fastapi_app.services.stock_service.log_inventory_change')
+    @patch('fastapi_app.services.stock_service.get_product_for_update')
+    async def test_create_stockreturn_request_id_dedup(self, mock_get_product, mock_log,
+                                                        mock_gen_no, mock_async_db):
+        """P1-③ 幂等：同 request_id 已登记过（流水命中）→ 拒绝"""
+        dup_result = MagicMock()
+        dup_result.first.return_value = (99,)  # inventory_log 已存在同 idem_key 行
+        mock_async_db.execute = AsyncMock(return_value=dup_result)
 
-        with pytest.raises(ValueError, match='出货记录不存在'):
+        with pytest.raises(ValueError, match='请勿重复提交'):
             await create_stockreturn_core(
-                mock_async_db, stockout_id=999, quantity=10,
-                return_date=datetime.now(UTC)
+                mock_async_db, product_id=1, quantity=10,
+                return_date=datetime.now(UTC), request_id='req-dedup-0001'
             )
 
     @pytest.mark.asyncio
-    async def test_create_stockreturn_deduction_protected(self, mock_async_db):
-        """抵扣出库不能退货"""
-        stockout = make_mock_stockout()
-        stockout.stockin_id = 5
-
-        data_result = MagicMock()
-        data_result.scalar_one_or_none.return_value = stockout
-        mock_async_db.execute = AsyncMock(return_value=data_result)
-
-        with pytest.raises(ValueError, match='订单抵扣的出货记录不能直接退货'):
+    @patch('fastapi_app.services.stock_service.generate_stockreturn_number')
+    @patch('fastapi_app.services.stock_service.log_inventory_change')
+    @patch('fastapi_app.services.stock_service.get_product_for_update',
+           side_effect=ValueError('产品不存在'))
+    async def test_create_stockreturn_product_not_found(self, mock_get_product, mock_log,
+                                                         mock_gen_no, mock_async_db):
+        """产品不存在（get_product_for_update 行锁抛错）"""
+        with pytest.raises(ValueError, match='产品不存在'):
             await create_stockreturn_core(
-                mock_async_db, stockout_id=1, quantity=10,
-                return_date=datetime.now(UTC)
-            )
-
-    @pytest.mark.asyncio
-    async def test_create_stockreturn_exceed_available(self, mock_async_db):
-        """退货数量超过可退数量"""
-        stockout = make_mock_stockout(quantity=100)
-        stockout.returned_quantity = 80
-        stockout.stockin_id = None
-
-        data_result = MagicMock()
-        data_result.scalar_one_or_none.return_value = stockout
-        mock_async_db.execute = AsyncMock(return_value=data_result)
-
-        with pytest.raises(ValueError, match='退货数量超过可退数量'):
-            await create_stockreturn_core(
-                mock_async_db, stockout_id=1, quantity=30,
+                mock_async_db, product_id=999, quantity=10,
                 return_date=datetime.now(UTC)
             )

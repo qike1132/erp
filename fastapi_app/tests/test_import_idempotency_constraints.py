@@ -76,7 +76,17 @@ def test_migration_revision_chain_and_single_head():
 
     heads = [rev for rev in graph if rev not in {p for ps in graph.values() for p in ps}]
     assert len(heads) == 1, f"迁移图必须单 head，实际: {heads}"
-    assert heads[0] == mig.revision
+    # 067 不必永远是 head（后续迁移正常前移——写死 head 曾在 068 落地时误红），
+    # 但必须可从 head 沿 down_revision（含 merge 多亲）回溯到达，即在主链上。
+    seen: set[str] = set()
+    frontier = list(heads)
+    while frontier:
+        rev = frontier.pop()
+        if rev in seen:
+            continue
+        seen.add(rev)
+        frontier.extend(graph.get(rev, ()))
+    assert mig.revision in seen, f"067 必须在迁移主链上（head={heads[0]}）"
 
 
 @pytest.fixture()

@@ -9,7 +9,7 @@
 """
 import hashlib
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import ColumnElement, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -202,13 +202,31 @@ async def get_stockouts(db: AsyncSession, page: int=1, per_page: int=50,
 
 
 async def get_stockreturns(db: AsyncSession, stockout_id: int | None = None,
-                           page: int = 1, per_page: int = 50) -> dict:
-    """获取退货列表（支持按出货ID筛选，支持分页）"""
+                           page: int = 1, per_page: int = 50,
+                           customer: str | None = None,
+                           start_date: str | None = None, end_date: str | None = None) -> dict:
+    """获取退货列表（支持按出货ID/客户/日期区间筛选，支持分页）"""
     # 构建共享过滤条件：stockout_id 为空时不加条件
     # （此前 `== stockout_id if stockout_id else True` 在无筛选时退化为 `== True` 恒假，导致 total 恒为 0）
     conditions = []
     if stockout_id:
         conditions.append(StockReturn.stockout_id == stockout_id)
+    if customer:
+        conditions.append(StockReturn.customer.like(f'%{escape_like(customer)}%'))
+    if start_date:
+        try:
+            sd = datetime.strptime(start_date, '%Y-%m-%d').replace(tzinfo=UTC)
+            conditions.append(StockReturn.return_date >= sd)
+        except ValueError:
+            pass  # defensive: 可选 ValueError 静默处理,不影响主流程
+    if end_date:
+        try:
+            # 左闭右开：end_date 当天整天都计入（含 23:59:59.x 的微秒记录，
+            # 退货时间由 business_now() 填充含微秒，23:59:59 口径会漏掉最后一秒内的单）
+            ed = (datetime.strptime(end_date, '%Y-%m-%d') + timedelta(days=1)).replace(tzinfo=UTC)
+            conditions.append(StockReturn.return_date < ed)
+        except ValueError:
+            pass  # defensive: 可选 ValueError 静默处理,不影响主流程
     total = (await db.execute(select(func.count(StockReturn.id)).where(*conditions))).scalar() or 0
     result = await db.execute(
         select(StockReturn)
@@ -231,6 +249,7 @@ async def get_stockreturns(db: AsyncSession, stockout_id: int | None = None,
             'stockout_no': stock_return.stockout.stockout_no if stock_return.stockout else '',
             'reason': stock_return.reason or '',
             'note': stock_return.note or '',
+            'status': stock_return.status,
         })
     return {'items': data, 'total': total, 'page': page, 'per_page': per_page}
 

@@ -29,10 +29,11 @@ class StockReturn(Base):
     product_id: Mapped[int] = mapped_column(Integer, ForeignKey('product.id', ondelete='RESTRICT'), nullable=False, comment='产品ID')
     quantity: Mapped[int] = mapped_column(Integer, nullable=False, comment='退货数量')
     customer: Mapped[str | None] = mapped_column(String(100), nullable=True, comment='客户名称')
-    stockout_id: Mapped[int] = mapped_column(Integer, ForeignKey('stock_out.id', ondelete='CASCADE'), nullable=False, comment='关联出货ID')
+    stockout_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('stock_out.id', ondelete='RESTRICT'), nullable=True, comment='关联出货ID（P1 起可空：按产品退货不关联出货，仅历史行有值）')
     order_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('order.id', ondelete='SET NULL'), nullable=True, comment='关联订单ID')
     reason: Mapped[str | None] = mapped_column(String(200), comment='退货原因')
     note: Mapped[str | None] = mapped_column(Text, comment='备注')
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default='active', server_default='active', comment='状态：active正常/cancelled已取消')
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), comment='更新时间')
 
     product: Mapped[Product] = relationship('Product', backref='stock_returns')
