@@ -148,7 +148,8 @@ async function fetchStockouts() {
     if (filterStart.value) params.start_date = filterStart.value
     if (filterEnd.value) params.end_date = filterEnd.value
     const res = await stockApi.stockouts(params)
-    const items = res.stockouts ?? res.items ?? []
+    // 后端 StockListResponse：列表在 data 键（stock.py 返回 data=result['items']）
+    const items = res.data ?? []
     stockoutRecords.value = items as StockoutRecord[]
     const total = res.total ?? items.length
     totalPages.value = Math.ceil(total / perPage.value) || 1

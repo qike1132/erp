@@ -123,7 +123,12 @@ export interface StockOutRecord {
   product_name: string
   product_id: number
   barcode?: string
+  product_image?: string
+  /** /stock/out/list 内嵌产品摘要；无产品时为 null */
+  product?: { id: number; name: string; barcode?: string; image?: string } | null
   quantity: number
+  /** 已退货数量；可退量 = quantity - returned_quantity */
+  returned_quantity?: number
   deducted?: boolean
   customer: string
   stockout_date: string

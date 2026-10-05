@@ -41,7 +41,8 @@ export const stockApi = {
     return resp.data ?? (resp as StockStatsData)
   },
   stockins: (params?: QueryParams) => get<StockInRecord[]>('/stock/in/list', params),
-  stockouts: (params?: QueryParams) => get<{ stockouts?: StockOutRecord[]; items?: StockOutRecord[]; total?: number }>('/stock/out/list', params),
+  // 后端 `StockListResponse`：列表在 `data` 键（schemas/stock.py），不是 stockouts/items
+  stockouts: (params?: QueryParams) => get<{ success?: boolean; data?: StockOutRecord[]; total?: number }>('/stock/out/list', params),
   inventory: (params?: QueryParams) => get<InventoryResponse>('/stock/inventory', params),
   editStockin: (id: number, data: StockInUpdatePayload) =>
     put<{ success?: boolean; message?: string }>(`/stock/in/edit/${id}`, data),
