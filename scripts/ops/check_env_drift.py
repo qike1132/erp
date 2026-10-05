@@ -58,9 +58,13 @@ TARGETS: tuple[tuple[Path, str, str], ...] = (
 EXCLUDE_DIRS = {
     ".git", "node_modules", "__pycache__", ".venv", "venv", "env",
     "dist", "build", ".mypy_cache", ".ruff_cache", ".pytest_cache",
+    # AI 工具痕迹目录（AGENTS.md §7）：均已被 .gitignore 忽略，不属于本仓代码契约。
+    # 曾因漏列 .claude 而把 GraphFlow 钩子（.claude/hooks/graphflow-context.py）里的
+    # GRAPHFLOW_* / CLAUDE_PROJECT_DIR 误判为「代码读取但模板未声明」的环境变量漂移。
     ".archive", ".workbuddy", ".trae", ".superpowers", ".qoder",
     ".codeartsdoer", ".freebuff", ".reasonix", ".lean-ctx", ".resultverify",
-    ".workbuddy-ai", ".arts", ".codebuddy", ".graphflow",
+    ".workbuddy-ai", ".arts", ".codebuddy", ".graphflow", ".graphflow-cache",
+    ".claude", ".cursor", ".agent",
     "_qa_tmp", "_ops", "backups", "temp", "evidence", "static", "docs",
     "tests", "migrations", "graphflow-out", "logs",
 }
