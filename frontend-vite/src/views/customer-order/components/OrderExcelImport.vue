@@ -1,5 +1,5 @@
 <template>
-  <div class="co-section-label" id="co-import-label"><FontAwesomeIcon icon="file-import" aria-hidden="true" /> 批量导入</div>
+  <div id="co-import-label" class="co-section-label"><FontAwesomeIcon icon="file-import" aria-hidden="true" /> 批量导入</div>
   <!--
     投放区语义化为 button：原先只是挂了 @click 的 <div>，
     既不可 Tab 到、也不能用 Enter/Space 触发，等于整条导入链路对键盘用户不存在。
