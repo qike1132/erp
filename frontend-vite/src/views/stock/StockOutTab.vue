@@ -15,6 +15,7 @@
             @add-staged="addStaged"
             @product-select="onProductSelect"
             @clear-shipment="shipmentInfo = null"
+            @ocr-staged="addOcrStaged"
             @imported="onStockoutImported"
           />
         </div>
@@ -188,6 +189,11 @@ async function addStaged() {
   form.quantity = 0
   form.note = ''
   shipmentInfo.value = null
+}
+
+/** OCR 粘贴识别确认后的条目：与手工录入进同一个暂存列表，提交前仍可改、删 */
+function addOcrStaged(items: StagedStockout[]) {
+  staged.value.push(...items)
 }
 
 // === 编辑暂存 ===

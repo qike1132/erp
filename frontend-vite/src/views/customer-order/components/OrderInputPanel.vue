@@ -108,12 +108,12 @@
           @update:is-drag-over="(v) => emit('update:isDragOver', v)"
         />
 
-        <!-- 粘贴图片识别（热区 + 确认弹窗整体封装在子组件里）。
+        <!-- 粘贴图片识别（热区 + 确认弹窗整体封装在共享组件里，与出货页共用）。
              仅订单模式显示：本链路产出的一律是订单条目（type='order'），
              在备货模式下给入口会造出与用户预期不符的记录类型。 -->
-        <OrderOcrPaste
+        <OcrPasteImport
           v-if="isOrder"
-          :add-items="addStagedItems"
+          :build-staged="buildOcrStaged"
           :default-customer="form.customer"
           :default-date="form.date"
           :search-products="searchProducts"
@@ -142,7 +142,9 @@ import UiAutocomplete from '@/components/ui/UiAutocomplete.vue'
 import OrderTypeSwitch from './OrderTypeSwitch.vue'
 import OrderDeductControl from './OrderDeductControl.vue'
 import OrderExcelImport from './OrderExcelImport.vue'
-import OrderOcrPaste from './OrderOcrPaste.vue'
+import OcrPasteImport from '@/components/ocr/OcrPasteImport.vue'
+import { buildOrderStagedItems } from '../composables/useOrderOcrStaging'
+import type { OcrDraftItem, OcrStagingContext } from '@/components/ocr/types'
 import type { FormState, ProductSuggestion, StagedItem } from '../composables/types'
 import {
   QUANTITY_MAX,
@@ -178,7 +180,7 @@ const quantityTouched = ref(false)
 /** 数量越界时的字段级错误态；范围与文案统一来自 quantityRange 模块 */
 const quantityInvalid = computed(() => quantityTouched.value && isQuantityOutOfRange(form.value.quantity))
 
-defineProps<{
+const props = defineProps<{
   isOrder: boolean
   customerOptions: { label: string; value: string }[]
   /** 当前还缺的必填项（面向用户的字段名），用于主动提示 */
@@ -207,6 +209,12 @@ const emit = defineEmits<{
   'add-staged': []
   'update:isDragOver': [value: boolean]
 }>()
+
+/** OCR 确认后的订单条目映射：识别与闸门在共享 OcrPasteImport 里，这里只决定落点 */
+function buildOcrStaged(drafts: OcrDraftItem[], ctx: OcrStagingContext): boolean {
+  props.addStagedItems(buildOrderStagedItems(drafts, ctx))
+  return true
+}
 </script>
 
 <style scoped>

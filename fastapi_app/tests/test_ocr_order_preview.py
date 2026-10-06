@@ -148,3 +148,69 @@ class TestOrderPreviewResult:
         mock_db.add.assert_not_called()
         mock_db.flush.assert_not_called()
         mock_db.commit.assert_not_called()
+
+
+def _override_user(allowed: set[str]):
+    """把 _get_user_with_permissions 覆盖为仅拥有 allowed 权限码的用户。
+
+    返回 (app, 依赖) 供用例在 finally 里恢复，避免泄漏到后续用例。
+    """
+    from fastapi_app.core.deps import _get_user_with_permissions
+    from fastapi_app.main import app
+
+    user = MagicMock()
+    user.id = 1
+    user.username = 'perm-probe'
+    user.is_super = False
+    user.has_permission = MagicMock(side_effect=lambda code: code in allowed)
+    app.dependency_overrides[_get_user_with_permissions] = lambda: user
+    return app, _get_user_with_permissions
+
+
+class TestOrderPreviewPermissions:
+    """权限契约守卫：订单页（order_manage）与出货页（stockout_manage）都能用这条识别预览。
+
+    2026-10-06 共享 components/ocr 后，出货页也走本端点；若有人收缩权限码，
+    这里会先红。
+    """
+
+    @pytest.mark.asyncio
+    async def test_stockout_manage_allowed(self, client, mock_db):
+        mock_db.execute = AsyncMock(side_effect=[
+            make_rows([make_product(7, '儿童保温杯500ml')]),
+            make_rows([make_customer(3, '华东商贸')]),
+        ])
+        app, dep = _override_user({'stockout_manage'})
+        try:
+            with patch('fastapi_app.services.ocr._order_preview.extract_text',
+                       return_value=CHAT_PAGES):
+                response = await client.post(URL, files=upload())
+        finally:
+            del app.dependency_overrides[dep]
+        assert response.status_code == 200
+        assert response.json()['success'] is True
+
+    @pytest.mark.asyncio
+    async def test_order_manage_still_allowed(self, client, mock_db):
+        mock_db.execute = AsyncMock(side_effect=[
+            make_rows([make_product(7, '儿童保温杯500ml')]),
+            make_rows([make_customer(3, '华东商贸')]),
+        ])
+        app, dep = _override_user({'order_manage'})
+        try:
+            with patch('fastapi_app.services.ocr._order_preview.extract_text',
+                       return_value=CHAT_PAGES):
+                response = await client.post(URL, files=upload())
+        finally:
+            del app.dependency_overrides[dep]
+        assert response.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_user_without_any_required_permission_403(self, client, mock_db):
+        app, dep = _override_user(set())
+        try:
+            response = await client.post(URL, files=upload())
+        finally:
+            del app.dependency_overrides[dep]
+        assert response.status_code == 403
+        assert '权限不足' in response.json()['detail']

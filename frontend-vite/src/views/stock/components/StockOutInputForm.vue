@@ -19,6 +19,7 @@
       <div class="form-field">
         <label class="form-label">产品名称</label>
         <UiAutocomplete
+          ref="productAcRef"
           v-model="form.search"
           :search-fn="searchFn"
           placeholder="输入产品名称或69码搜索"
@@ -51,7 +52,14 @@
         />
       </div>
 
-      <StockOutImportSection @imported="emit('imported')" />
+      <StockOutImportSection
+        :customer="form.customer"
+        :date="form.date"
+        :search-products="searchFn"
+        @ocr-staged="emit('ocr-staged', $event)"
+        @go-manual="focusProductInput"
+        @imported="emit('imported')"
+      />
 
       <UiButton
         :variant="canAdd ? 'danger' : 'outline'"
@@ -66,7 +74,8 @@
 </template>
 
 <script setup lang="ts">
-import type { ShipmentInfo, Product } from '@/types'
+import { ref } from 'vue'
+import type { ShipmentInfo, Product, StagedStockout } from '@/types'
 import UiSelect from '@/components/ui/UiSelect.vue'
 import UiDatePicker from '@/components/ui/UiDatePicker.vue'
 import UiButton from '@/components/ui/UiButton.vue'
@@ -97,7 +106,17 @@ const emit = defineEmits<{
   'product-select': [product: Product]
   'clear-shipment': []
   imported: []
+  /** OCR 粘贴识别确认后的暂存出货条目，转发给上层并入暂存列表 */
+  'ocr-staged': [items: StagedStockout[]]
+  'go-manual': []
 }>()
+
+/** 产品输入框引用：指引态「去录入」时把焦点交回这里（按暴露的接口结构声明） */
+const productAcRef = ref<{ focusInput: () => void } | null>(null)
+
+function focusProductInput() {
+  productAcRef.value?.focusInput()
+}
 
 function onSelect(product: Product) {
   emit('product-select', product)

@@ -154,8 +154,9 @@ async def preview_order_doc(
     file: UploadFile = File(..., description='订单图片或 PDF（支持粘贴上传的截图）'),
     customer: str = Query('', description='表单当前选中的客户名，图上没有客户信息时兜底'),
     db: AsyncSession = Depends(get_async_read_db),
-    # 订单图片识别由「客户订单」页触发（useOrderOcr.ts），与出货单链路不同码。
-    current_user: User = Depends(require_any_permission('batch_import', 'order_manage')),
+    # 「客户订单」页与「出货」页共用这条识别预览链路（前端 components/ocr），
+    # 两边的页面权限码都放行：任何能进对应录入页的用户都能预览（本端点不写库）。
+    current_user: User = Depends(require_any_permission('batch_import', 'order_manage', 'stockout_manage')),
 ):
     """识别订单图片（聊天截图 / 表格 / 拍照），返回待人工确认的条目。
 

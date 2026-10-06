@@ -34,60 +34,42 @@
     />
   </div>
 
-  <!-- OCR 识别 -->
-  <div class="so-section-label"><FontAwesomeIcon icon="file-pdf" aria-hidden="true" /> OCR 识别</div>
-  <div
-    class="so-section-header so-droppable so-droppable-danger"
-    :class="{ 'so-drag-over': ocrDragOver }"
-    @click="ocrInputRef?.click()"
-    @dragover.prevent="ocrDragOver = true"
-    @dragleave="ocrDragOver = false"
-    @drop.prevent="onOcrDrop"
-  >
-    <label class="form-label so-droppable-label">
-      <FontAwesomeIcon icon="file-pdf" class="label-icon" aria-hidden="true" />
-      <span v-if="pdfFiles.length" class="so-file-inline so-file-inline-danger"><FontAwesomeIcon icon="file-image" aria-hidden="true" />已选 {{ pdfFiles.length }} 个文件</span>
-      <span v-else>拖拽文件到标题栏 · 支持 PDF / PNG / JPG / BMP / TIFF</span>
-    </label>
-    <div class="so-inline-actions">
-      <button class="so-inline-btn" :disabled="!pdfFiles.length || ocrPreviewing" aria-label="预览" @click.stop="handleOcrPreview">
-        <UiLoadingIcon :loading="ocrPreviewing" icon="eye" />预览
-      </button>
-      <button class="so-inline-btn so-inline-btn-danger" :disabled="!pdfFiles.length || ocrImporting" aria-label="导入" @click.stop="handleOcrImport">
-        <UiLoadingIcon :loading="ocrImporting" icon="magic" />导入
-      </button>
-    </div>
-    <input
-      ref="ocrInputRef"
-      type="file"
-      accept=".pdf,.png,.jpg,.jpeg,.bmp,.tiff,.tif,.webp"
-      multiple
-      name="file"
-      style="display: none"
-      @change="onOcrFileSelect"
-    />
-  </div>
-  <div v-if="ocrProgress.show" class="so-section-body so-section-body-compact">
-    <div class="ocr-progress">
-      <div class="ocr-progress-bar">
-        <div class="ocr-progress-fill" :style="{ width: ocrProgress.pct + '%' }" />
-      </div>
-      <div class="ocr-progress-text">
-        <small>{{ ocrProgress.msg }}</small>
-        <small style="font-weight: 700; color: var(--color-danger-500)">{{ ocrProgress.pct }}%</small>
-      </div>
-    </div>
-  </div>
+  <!-- 粘贴识别：与客户订单页共用 components/ocr，确认后映射成暂存出货条目 -->
+  <div class="so-section-label"><FontAwesomeIcon icon="paste" aria-hidden="true" /> 粘贴识别</div>
+  <OcrPasteImport
+    :build-staged="buildStaged"
+    :default-customer="customer"
+    :default-date="date"
+    :search-products="searchProducts"
+    :download-template="handleDownloadTemplate"
+    @go-manual="emit('go-manual')"
+  />
 </template>
 
 <script setup lang="ts">
 import { ref } from 'vue'
 import { stockApi } from '@/api'
-import type { ApiResponse } from '@/types'
-import { useOcrImport } from '../composables/useOcrImport'
+import type { ApiResponse, Product, StagedStockout } from '@/types'
+import OcrPasteImport from '@/components/ocr/OcrPasteImport.vue'
+import { buildStockoutStagedItems } from '../composables/useStockoutOcrStaging'
+import type { OcrDraftItem, OcrStagingContext } from '@/components/ocr/types'
 import { showToast } from '@/composables/useToast'
 
-const emit = defineEmits<{ imported: [] }>()
+defineProps<{
+  /** 表单当前选中的客户：识别结果缺客户时的兜底 */
+  customer: string
+  /** 表单当前选中的出货时间 */
+  date: string
+  searchProducts: (q: string) => Promise<Product[]>
+}>()
+
+const emit = defineEmits<{
+  imported: []
+  /** OCR 确认后的暂存出货条目，由上层并入暂存列表 */
+  'ocr-staged': [items: StagedStockout[]]
+  /** 指引态「去录入」：由录入表单把焦点交给产品输入框 */
+  'go-manual': []
+}>()
 
 // === 批量导入 ===
 const excelFile = ref<File | null>(null)
@@ -160,13 +142,11 @@ async function handleImportExcel() {
   }
 }
 
-// === OCR 导入 (composable) ===
-const {
-  pdfFiles, ocrPreviewing, ocrImporting, ocrProgress, ocrInputRef, ocrDragOver,
-  onOcrFileSelect, onOcrDrop, handleOcrPreview, handleOcrImport,
-} = useOcrImport(() => {
-  emit('imported')
-})
+// === 粘贴识别（识别与闸门在共享 OcrPasteImport，这里只决定落点） ===
+function buildStaged(drafts: OcrDraftItem[], ctx: OcrStagingContext): boolean {
+  emit('ocr-staged', buildStockoutStagedItems(drafts, ctx))
+  return true
+}
 </script>
 
 <style scoped>
@@ -211,8 +191,6 @@ const {
   font-size: 12px;
   color: var(--color-text-muted);
 }
-.so-section-body { padding: 8px 0 0; }
-.so-section-body-compact { padding: 2px 12px 4px; }
 .form-label {
   display: block;
   font-weight: 500;
@@ -230,10 +208,6 @@ const {
   border-color: var(--color-success-400);
   background: var(--color-success-50);
 }
-.so-droppable-danger.so-drag-over {
-  border-color: var(--color-danger-400);
-  background: var(--color-danger-50);
-}
 .so-file-inline {
   font-size: 12px;
   font-weight: 400;
@@ -242,7 +216,6 @@ const {
   gap: 4px;
 }
 .so-file-inline-success { color: var(--color-success-700); }
-.so-file-inline-danger { color: var(--color-danger-700); }
 .so-inline-actions {
   display: flex;
   align-items: center;
@@ -271,33 +244,8 @@ const {
   border-color: var(--color-success-300);
   color: var(--color-success-600);
 }
-.so-inline-btn-danger:hover:not(:disabled) {
-  border-color: var(--color-danger-300);
-  color: var(--color-danger-600);
-}
 .so-inline-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
-}
-.ocr-progress { margin-top: 12px; }
-.ocr-progress-bar {
-  height: 8px;
-  border-radius: 4px;
-  background: var(--color-danger-50);
-  overflow: hidden;
-}
-.ocr-progress-fill {
-  height: 100%;
-  background: linear-gradient(90deg, var(--color-danger-400), var(--color-danger-600));
-  transition: width 0.3s ease;
-  border-radius: 4px;
-}
-.ocr-progress-text {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-top: 4px;
-  color: var(--color-text-secondary);
-  font-size: 12px;
 }
 </style>

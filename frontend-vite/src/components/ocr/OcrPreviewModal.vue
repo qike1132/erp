@@ -162,7 +162,7 @@
 
 <script setup lang="ts">
 /**
- * OcrPreviewModal — 粘贴图片识别的结果弹窗
+ * OcrPreviewModal — 粘贴图片识别的结果弹窗（客户订单 / 出货两页共用）
  *
  * 两种形态合一，省掉两套弹窗各自注册粘贴热区的重复：
  * - 有候选条目 → 可编辑确认表（三种匹配态：精确 / 模糊 / 未匹配）
@@ -173,10 +173,10 @@ import UiDialog from '@/components/ui/UiDialog.vue'
 import UiButton from '@/components/ui/UiButton.vue'
 import UiAutocomplete from '@/components/ui/UiAutocomplete.vue'
 import { useImagePaste } from '@/composables/useImagePaste'
-import type { OcrDraftItem, ProductSuggestion } from '../composables/types'
+import type { OcrDraftItem, OcrProductOption } from './types'
 
 const props = defineProps<{
-  /** true = 本次识别一条都没解析出来 → 指引态（**不看** drafts 长度，见 useOrderOcr.emptyResult） */
+  /** true = 本次识别一条都没解析出来 → 指引态（**不看** drafts 长度，见 useOcrPaste.emptyResult） */
   showGuide: boolean
   unmatchedCount: number
   invalidQuantityCount: number
@@ -187,7 +187,7 @@ const props = defineProps<{
   sourceName: string
   /** 表单当前选中的客户，用于标注「取自表单」 */
   defaultCustomer: string
-  searchProducts: (query: string) => Promise<ProductSuggestion[]>
+  searchProducts: (query: string) => Promise<OcrProductOption[]>
 }>()
 
 const emit = defineEmits<{
@@ -216,7 +216,7 @@ const totalQuantity = computed(() => drafts.value.reduce((sum, i) => sum + (i.qu
 
 /**
  * 可以导入：有行，且三道闸门都过。
- * 闸门与 `useOrderOcr.confirmImport` 的校验一一对应——按钮禁用和提交校验
+ * 闸门与 `useOcrPaste.confirmImport` 的校验一一对应——按钮禁用和提交校验
  * 必须用同一组条件，否则会出现「按钮能点但提交被拦」或反过来的错位。
  */
 const canConfirm = computed(
@@ -245,7 +245,7 @@ function confidenceText(row: OcrDraftItem): string {
   return `匹配度 ${Math.round((row.match_confidence || 0) * 100)}%`
 }
 
-function pickProduct(row: OcrDraftItem, item: ProductSuggestion) {
+function pickProduct(row: OcrDraftItem, item: OcrProductOption) {
   row.product_id = item.id
   row.product_name = item.name
   row.match_confidence = 1

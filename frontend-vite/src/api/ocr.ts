@@ -13,7 +13,7 @@ export const ocrApi = {
    *
    * ⚠️ 修正记录（2026-09-18）：`session_id` 后端为 **Query(..., 必填)**，原实现收了
    * `sessionId` 参数却**没有拼进 URL**（静默丢弃）→ 后端必然 422。
-   * 两处调用方各自绕开本函数手拼 URL 才得以工作（`OcrImportView.vue` 与 `useOcrImport.ts`），
+   * 当时的调用方各自绕开本函数手拼 URL 才得以工作，
    * 这正是「API 层与实际契约脱节」的典型表现。现补回参数并由调用方统一走本函数。
    */
   upload: (sessionId: string, formData: FormData) =>

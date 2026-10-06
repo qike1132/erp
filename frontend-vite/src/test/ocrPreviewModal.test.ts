@@ -7,8 +7,8 @@
  */
 import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
-import OcrPreviewModal from '@/views/customer-order/components/OcrPreviewModal.vue'
-import type { OcrDraftItem } from '@/views/customer-order/composables/types'
+import OcrPreviewModal from '@/components/ocr/OcrPreviewModal.vue'
+import type { OcrDraftItem } from '@/components/ocr/types'
 
 const row = (over: Partial<OcrDraftItem> = {}): OcrDraftItem => ({
   uid: over.uid ?? 'u1',

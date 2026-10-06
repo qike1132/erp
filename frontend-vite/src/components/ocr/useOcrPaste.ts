@@ -1,28 +1,29 @@
 /**
- * useOrderOcr — 粘贴图片识别订单的动作域
+ * useOcrPaste — 粘贴图片识别的动作域（客户订单 / 出货两页共用）
  *
- * 链路：粘贴/选图 → 上传预览端点（**不写库**）→ 弹窗人工确认 → 转成前端暂存条目。
+ * 链路：粘贴/选图 → 上传预览端点（**不写库**）→ 弹窗人工确认 → buildStaged 回调
+ * 把草稿映射成各自域的暂存条目。
  *
- * 落点是**前端暂存区**（origin: 'ocr'），确认后复用既有的批量提交流程，
+ * 这里只负责「识别 + 三道校验闸门」；条目长什么样由消费方在 buildStaged 里决定，
  * 因此这里没有对应的写接口——识别错了用户可以在弹窗或暂存区里改、删。
  */
 import { computed, ref } from 'vue'
 import { ocrApi } from '@/api'
 import { showToast } from '@/composables/useToast'
 import { getErrorMessage } from '@/types/errors'
-import { QUANTITY_MAX, QUANTITY_MIN } from './quantityRange'
-import type { OcrDraftItem, OcrOrderPreviewResult, StagedItem } from './types'
-import { genUid } from './useStagedItems'
+import { QUANTITY_MIN, QUANTITY_MAX } from '@/utils/quantity'
+import { genUid } from '@/utils/uid'
+import type { OcrDraftItem, OcrOrderPreviewResult, OcrStagingContext } from './types'
 
 /** 与后端 MAX_OCR_FILE_SIZE 保持一致 */
 const MAX_MB = 10
 
 /**
- * 导入前的数量校验（比 `isQuantityOutOfRange` 更严）。
+ * 导入前的数量校验（比实时输入框的「越界」判定更严）。
  *
- * 共享的 `isQuantityOutOfRange` 把「空值」当作「还没开始填」而不算越界——那对
- * 实时输入框是对的（一进页面就标红是噪音）。但导入时没有「还没填」这一说：
- * 空数量进暂存区会让整批提交 422。范围仍取自 quantityRange 的同一组常量。
+ * 实时输入把「空值」当作「还没开始填」而不算越界——那对输入框是对的（一进
+ * 页面就标红是噪音）。但导入时没有「还没填」这一说：空数量进暂存区会让整批
+ * 提交 422。
  */
 function isImportableQuantity(value: unknown): boolean {
   const n = typeof value === 'number' ? value : Number(value)
@@ -30,16 +31,19 @@ function isImportableQuantity(value: unknown): boolean {
   return n >= QUANTITY_MIN && n <= QUANTITY_MAX
 }
 
-export interface OrderOcrOptions {
-  /** 确认后把条目交给暂存区。用回调而不是 Ref，便于组件按需注入 */
-  addItems: (items: StagedItem[]) => void
+export interface OcrPasteOptions {
+  /**
+   * 三道闸门全过后：把草稿映射成各自域的暂存条目并入列，返回 false 视为未导入。
+   * 用回调而不是约定数据形状——订单（StagedItem）与出货（StagedStockout）各自决定落点。
+   */
+  buildStaged: (drafts: OcrDraftItem[], ctx: OcrStagingContext) => boolean
   /** 表单当前选中的客户：图上没有客户信息时兜底 */
   getDefaultCustomer: () => string
   /** 表单当前选中的时间：图上本来就没有日期 */
   getDefaultDate: () => string
 }
 
-export function useOrderOcr({ addItems, getDefaultCustomer, getDefaultDate }: OrderOcrOptions) {
+export function useOcrPaste({ buildStaged, getDefaultCustomer, getDefaultDate }: OcrPasteOptions) {
   const recognizing = ref(false)
   const dialogOpen = ref(false)
   const draftItems = ref<OcrDraftItem[]>([])
@@ -124,11 +128,9 @@ export function useOrderOcr({ addItems, getDefaultCustomer, getDefaultDate }: Or
   }
 
   /**
-   * 确认导入：转成前端暂存条目。
-   *
-   * 三道闸门都必须过，否则会把注定提交失败的数据放进暂存区：
+   * 确认导入：三道闸门都过才调 buildStaged，否则会把注定提交失败的数据放进暂存区：
    * 未匹配产品（没有 product_id）、数量非法（空/0/越界）、没客户。
-   * 手工录入路径有对应的 missingFields 校验，这里与它对齐。
+   * 手工录入路径有对应的必填校验，这里与它对齐。
    */
   function confirmImport(): boolean {
     if (!draftItems.value.length) return false
@@ -144,23 +146,12 @@ export function useOrderOcr({ addItems, getDefaultCustomer, getDefaultDate }: Or
       showToast(`还有 ${missingCustomerCount.value} 项没有客户，请先在表单选择客户`, 'warning')
       return false
     }
-    const date = getDefaultDate()
-    const fallbackCustomer = getDefaultCustomer()
-    const created: StagedItem[] = draftItems.value.map((draft) => ({
-      uid: genUid(),
-      origin: 'ocr',
-      type: 'order',
-      customer: draft.customer || fallbackCustomer,
-      productId: draft.product_id as number,
-      productName: draft.product_name,
-      quantity: draft.quantity,
-      date,
-      note: draft.note || '',
-      deductStock: false,
-      deductQuantity: 0,
-    }))
-    addItems(created)
-    showToast(`已加入 ${created.length} 条到暂存区，确认无误后提交`, 'success')
+    const ok = buildStaged(draftItems.value, {
+      date: getDefaultDate(),
+      fallbackCustomer: getDefaultCustomer(),
+    })
+    if (!ok) return false
+    showToast(`已加入 ${draftItems.value.length} 条到暂存区，确认无误后提交`, 'success')
     dialogOpen.value = false
     reset()
     return true

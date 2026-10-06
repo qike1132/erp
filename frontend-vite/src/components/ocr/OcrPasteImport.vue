@@ -1,6 +1,6 @@
 <template>
   <!--
-    粘贴图片识别：与 Excel 投放区并列成两条独立导入路径。
+    粘贴图片识别：与 Excel 投放区并列成一条独立导入路径。
     整块是 button 语义——可 Tab 到、Enter 触发，与 Excel 投放区一致。
   -->
   <div
@@ -9,7 +9,7 @@
     :class="{ 'op-paste-busy': recognizing }"
     role="button"
     tabindex="0"
-    :aria-label="recognizing ? '正在识别图片，请稍候' : '粘贴截图识别订单：截图后按 Ctrl+V，或按回车选择图片'"
+    :aria-label="recognizing ? '正在识别图片，请稍候' : '粘贴截图识别：截图后按 Ctrl+V，或按回车选择图片'"
     :aria-busy="recognizing ? 'true' : undefined"
     @click="openImageDialog"
     @keydown.enter.prevent="openImageDialog"
@@ -57,30 +57,31 @@
 
 <script setup lang="ts">
 /**
- * OrderOcrPaste — 粘贴图片识别（热区 + 确认弹窗 + 状态）整体封装
+ * OcrPasteImport — 粘贴图片识别（热区 + 确认弹窗 + 状态）整体封装。
  *
- * 封装成一个组件的原因：录入面板与主视图都逼近单文件 400 行门禁，
- * 把这条链路内聚到这里，两边只需各加一行接线。
+ * 客户订单与出货两页共用：识别与三道闸门在 useOcrPaste（./useOcrPaste），
+ * 「确认后条目长什么样」由 buildStaged 回调交给调用方决定——
+ * 订单映射成 StagedItem、出货映射成 StagedStockout，各自进自己的暂存区。
  */
 import { ref } from 'vue'
 import OcrPreviewModal from './OcrPreviewModal.vue'
 import { useImagePaste } from '@/composables/useImagePaste'
-import { useOrderOcr } from '../composables/useOrderOcr'
-import type { ProductSuggestion, StagedItem } from '../composables/types'
+import { useOcrPaste } from './useOcrPaste'
+import type { OcrDraftItem, OcrProductOption, OcrStagingContext } from './types'
 
 const props = defineProps<{
-  /** 确认后把条目交给暂存区 */
-  addItems: (items: StagedItem[]) => void
+  /** 三道闸门通过后：把草稿映射成各自域的暂存条目并入列，返回 false 视为未导入 */
+  buildStaged: (drafts: OcrDraftItem[], ctx: OcrStagingContext) => boolean
   /** 表单当前选中的客户：图上没有客户信息时兜底 */
   defaultCustomer: string
   /** 表单当前选中的时间 */
   defaultDate: string
-  searchProducts: (query: string) => Promise<ProductSuggestion[]>
+  searchProducts: (query: string) => Promise<OcrProductOption[]>
   downloadTemplate: () => void
 }>()
 
 const emit = defineEmits<{
-  /** 指引态「去录入」：由录入面板把焦点交给产品输入框 */
+  /** 指引态「去录入」：由调用方把焦点交给产品输入框 */
   'go-manual': []
 }>()
 
@@ -98,8 +99,8 @@ const {
   recognize,
   confirmImport,
   closeDialog,
-} = useOrderOcr({
-  addItems: (items) => props.addItems(items),
+} = useOcrPaste({
+  buildStaged: (drafts, ctx) => props.buildStaged(drafts, ctx),
   getDefaultCustomer: () => props.defaultCustomer,
   getDefaultDate: () => props.defaultDate,
 })
