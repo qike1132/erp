@@ -23,13 +23,14 @@ from fastapi_app.services.notification_service import StockEvent
 from fastapi_app.services.stock_common import _parse_date_preserve_time
 from fastapi_app.shared.stock_concurrency import apply_stock_delta_locked, assert_stock_available
 from fastapi_app.shared_models import Product, StockIn
+from fastapi_app.utils import inventory_balance_bounds
 
 logger = logging.getLogger(__name__)
 
 MAX_STOCK_QUANTITY = MAX_QUANTITY  # 库存数量上限，超过此值拒绝操作（值统一由 business_rules 管理）
 
 
-async def create_stockin_core(db: AsyncSession, product_id: int, quantity: int, customer: str, stockin_date: datetime, note: str) -> StockIn:
+async def create_stockin_core(db: AsyncSession, product_id: int, quantity: int, customer: str, stockin_date: datetime, note: str, operator_id: int | None = None) -> StockIn:
     if quantity <= 0:
         raise ValueError('入库数量必须大于 0')
     if quantity > MAX_STOCK_QUANTITY:
@@ -40,13 +41,15 @@ async def create_stockin_core(db: AsyncSession, product_id: int, quantity: int, 
     # 统一写入口：持锁路径也要带 version 守卫并递增 version。
     # 直接 `product.current_stock += quantity` 不会 bump version（Product 无 version_id_col），
     # 与走乐观锁的写入口并发时会因 WHERE version=旧值 仍命中而丢失更新。
-    await apply_stock_delta_locked(db, product, quantity)
+    updated = await apply_stock_delta_locked(db, product, quantity)
     await db.flush()  # 单次 flush：同时写入 StockIn INSERT + Product UPDATE，并填充 stockin.id
-    stock_service.log_inventory_change(db, product_id=product_id, change_type='入库', change_quantity=quantity, related_id=str(stockin.id), note=f'入库ID：{stockin.id}')
+    # 结存由锁内写入口返回值反推（禁止另行 SELECT：并发下会写出自相矛盾的流水）
+    before, after = inventory_balance_bounds(updated.current_stock, quantity)
+    stock_service.log_inventory_change(db, product_id=product_id, change_type='入库', change_quantity=quantity, related_id=str(stockin.id), note=f'入库ID：{stockin.id}', quantity_before=before, quantity_after=after, product_name=updated.name, operator_id=operator_id)
     return stockin  # 日志条目由调用方的 flush/commit 写入
 
 
-async def update_stockin_core(db: AsyncSession, stockin: StockIn, quantity: int, customer: str, stockin_date: datetime, note: str) -> StockIn:
+async def update_stockin_core(db: AsyncSession, stockin: StockIn, quantity: int, customer: str, stockin_date: datetime, note: str, operator_id: int | None = None) -> StockIn:
     result = await db.execute(select(StockIn).where(StockIn.id == stockin.id).with_for_update())
     stockin_row = result.scalar_one_or_none()
     if not stockin_row:
@@ -59,13 +62,14 @@ async def update_stockin_core(db: AsyncSession, stockin: StockIn, quantity: int,
     stockin.note = note
     if quantity != old_quantity:
         product = await stock_service.get_product_for_update(db, stockin.product_id)
-        await apply_stock_delta_locked(db, product, quantity - old_quantity)
-        stock_service.log_inventory_change(db, product_id=stockin.product_id, change_type='入库修改', change_quantity=quantity - old_quantity, related_id=str(stockin.id), note=f'入库修改ID：{stockin.id}')
+        updated = await apply_stock_delta_locked(db, product, quantity - old_quantity)
+        before, after = inventory_balance_bounds(updated.current_stock, quantity - old_quantity)
+        stock_service.log_inventory_change(db, product_id=stockin.product_id, change_type='入库修改', change_quantity=quantity - old_quantity, related_id=str(stockin.id), note=f'入库修改ID：{stockin.id}', quantity_before=before, quantity_after=after, product_name=updated.name, operator_id=operator_id)
     await db.flush()
     return stockin
 
 
-async def delete_stockin_core(db: AsyncSession, stockin: StockIn) -> None:
+async def delete_stockin_core(db: AsyncSession, stockin: StockIn, operator_id: int | None = None) -> None:
     if stockin.stockin_stockouts:
         raise ValueError('该入库记录已有出库关联，无法删除')
     product = await stock_service.get_product_for_update(db, stockin.product_id)
@@ -76,16 +80,17 @@ async def delete_stockin_core(db: AsyncSession, stockin: StockIn) -> None:
     )
     # 上面的 assert 保留是为了那条逐字固定的自定义文案（有测试锁着）；
     # 写入口统一走 apply_stock_delta_locked 以带上 version 守卫并递增 version。
-    await apply_stock_delta_locked(db, product, -stockin.quantity)
-    stock_service.log_inventory_change(db, product_id=stockin.product_id, change_type='入库删除', change_quantity=-stockin.quantity, related_id=str(stockin.id), note=f'入库删除ID：{stockin.id}')
+    updated = await apply_stock_delta_locked(db, product, -stockin.quantity)
+    before, after = inventory_balance_bounds(updated.current_stock, -stockin.quantity)
+    stock_service.log_inventory_change(db, product_id=stockin.product_id, change_type='入库删除', change_quantity=-stockin.quantity, related_id=str(stockin.id), note=f'入库删除ID：{stockin.id}', quantity_before=before, quantity_after=after, product_name=updated.name, operator_id=operator_id)
     await db.delete(stockin)
     await db.flush()
 
 
-async def create_stockin(db: AsyncSession, product_id: int, quantity: int, customer: str, stockin_date_str: str, note: str) -> dict:
+async def create_stockin(db: AsyncSession, product_id: int, quantity: int, customer: str, stockin_date_str: str, note: str, operator_id: int | None = None) -> dict:
     """创建入库记录"""
     stockin_date = _parse_date_preserve_time(stockin_date_str)
-    stockin = await stock_service.create_stockin_core(db, product_id, quantity, customer, stockin_date, note)
+    stockin = await stock_service.create_stockin_core(db, product_id, quantity, customer, stockin_date, note, operator_id=operator_id)
     await db.flush()
     await cache_mgr.invalidate_stock_and_order()
     schedule_post_commit_invalidation(db, cache_mgr.invalidate_stock_and_order)
@@ -98,7 +103,7 @@ async def create_stockin(db: AsyncSession, product_id: int, quantity: int, custo
     return {'id': stockin.id, 'stockin_no': stockin.stockin_no}
 
 
-async def update_stockin(db: AsyncSession, stockin_id: int, quantity: int, customer: str, stockin_date_str: str, note: str) -> None:
+async def update_stockin(db: AsyncSession, stockin_id: int, quantity: int, customer: str, stockin_date_str: str, note: str, operator_id: int | None = None) -> None:
     """更新入库记录。
 
     ⚠️ **锁序必须是 Product → StockIn**：order/deduction 与 order_batch_create 都是先锁
@@ -130,7 +135,7 @@ async def update_stockin(db: AsyncSession, stockin_id: int, quantity: int, custo
             message=f'修改入库数量将导致库存为负数（产品：{product.name}，当前库存：{product.current_stock}，变更量：{quantity - old_quantity}）',
         )
     old_stockin_no = stockin_obj.stockin_no
-    await update_stockin_core(db, stockin_obj, quantity, customer, stockin_date, note)
+    await update_stockin_core(db, stockin_obj, quantity, customer, stockin_date, note, operator_id=operator_id)
     await db.flush()
     await cache_mgr.invalidate_stock_and_order()
     schedule_post_commit_invalidation(db, cache_mgr.invalidate_stock_and_order)
@@ -140,7 +145,7 @@ async def update_stockin(db: AsyncSession, stockin_id: int, quantity: int, custo
     logger.info(f'入库编辑成功：{old_stockin_no}，数量变更：{old_quantity} -> {quantity}')
 
 
-async def delete_stockin(db: AsyncSession, stockin_id: int) -> None:
+async def delete_stockin(db: AsyncSession, stockin_id: int, operator_id: int | None = None) -> None:
     """删除入库记录。
 
     ⚠️ 锁序同 update_stockin：**Product → StockIn**（`delete_stockin_core` 内部会锁
@@ -158,7 +163,7 @@ async def delete_stockin(db: AsyncSession, stockin_id: int) -> None:
     if not stockin_obj:
         raise ValueError('入库记录不存在')
     stockin_no = stockin_obj.stockin_no
-    await stock_service.delete_stockin_core(db, stockin_obj)
+    await stock_service.delete_stockin_core(db, stockin_obj, operator_id=operator_id)
     await db.flush()
     await cache_mgr.invalidate_stock_and_order()
     schedule_post_commit_invalidation(db, cache_mgr.invalidate_stock_and_order)
@@ -168,7 +173,7 @@ async def delete_stockin(db: AsyncSession, stockin_id: int) -> None:
     logger.info(f'入库删除成功：{stockin_no}，数量：{stockin_obj.quantity}')
 
 
-async def batch_create_stockins(db: AsyncSession, stockins_data: list) -> dict:
+async def batch_create_stockins(db: AsyncSession, stockins_data: list, operator_id: int | None = None) -> dict:
     """批量创建入库记录"""
     validated = []
     errors_map = {}
@@ -196,7 +201,7 @@ async def batch_create_stockins(db: AsyncSession, stockins_data: list) -> dict:
             stockin_date = _parse_date_preserve_time(stockin_date_str) if stockin_date_str else datetime.now(UTC)  # aware UTC：stockin_date 列为 timestamptz，naive 值会被按本地时区解释致早 8h
             try:
                 async with db.begin_nested():
-                    stockin = await stock_service.create_stockin_core(db, product_id, quantity, customer, stockin_date, note)
+                    stockin = await stock_service.create_stockin_core(db, product_id, quantity, customer, stockin_date, note, operator_id=operator_id)
                 results[orig_idx] = {'success': True, 'stockin_no': stockin.stockin_no, 'id': stockin.id}
             except ValueError as e:
                 results[orig_idx] = {'success': False, 'error': str(e), 'id': item.get('id', '未知')}

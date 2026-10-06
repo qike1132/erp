@@ -378,16 +378,25 @@ async def test_batch_stockout_writes_via_locked_entry_without_nested_transaction
     mock_db.begin_nested.assert_not_called()  # 批量路径仍无嵌套事务
 
 
-async def test_batch_stockout_insufficient_stock_keeps_historic_message(mock_db):
+async def test_batch_stockout_insufficient_stock_denied_at_write_guard(mock_db):
+    """2026-10-06 校准：准入按客户+产品订单口径；产品级负库存由写入原子守卫兜底拒绝"""
     product = MagicMock()
     product.id = 1
     product.current_stock = 5
     product.version = 1
+    admit = {"available_quantity": 10, "order_quantity": 10, "shipped_quantity": 0, "orders": []}
 
     with patch(
         "fastapi_app.services.stock_service.get_product_for_update",
         new_callable=AsyncMock,
         return_value=product,
+    ), patch(
+        "fastapi_app.services.stock_service.calculate_available_shipment_quantity",
+        new_callable=AsyncMock,
+        return_value=admit,
+    ), patch(
+        "fastapi_app.services.stock_out_service.apply_stock_delta_locked",
+        side_effect=ValueError("库存不足！当前库存: 5，需要: 10"),
     ):
         result = await stock_out_service.batch_create_stockouts(
             mock_db,
@@ -395,5 +404,5 @@ async def test_batch_stockout_insufficient_stock_keeps_historic_message(mock_db)
         )
 
     assert result["results"][0]["success"] is False
-    assert result["results"][0]["error"] == "库存不足，当前库存: 5"
+    assert result["results"][0]["error"] == "库存不足！当前库存: 5，需要: 10"
     assert product.current_stock == 5

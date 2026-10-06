@@ -143,10 +143,13 @@ class TestBatchCreateStockoutsInsufficientStock:
     """库存不足场景"""
 
     async def test_insufficient_stock(self, mock_db):
-        """库存不足，出库失败"""
+        """库存不足，出库失败（2026-10-06 校准：准入为客户+产品订单口径，负库存由写入守卫拒绝）"""
         product = _make_product(current_stock=5)
+        shipment_info = _make_shipment_info(available_quantity=10, order_quantity=10, shipped_quantity=0, orders=[])
 
-        with patch('fastapi_app.services.stock_service.get_product_for_update', new_callable=AsyncMock, return_value=product):
+        with patch('fastapi_app.services.stock_service.get_product_for_update', new_callable=AsyncMock, return_value=product), \
+             patch('fastapi_app.services.stock_service.calculate_available_shipment_quantity', new_callable=AsyncMock, return_value=shipment_info), \
+             patch('fastapi_app.services.stock_out_service.apply_stock_delta_locked', side_effect=ValueError('库存不足！当前库存: 5，需要: 10')):
             result = await stock_service.batch_create_stockouts(mock_db, [_make_stockout_data(quantity=10)])
 
         assert result['results'][0]['success'] is False
@@ -154,10 +157,13 @@ class TestBatchCreateStockoutsInsufficientStock:
         assert '5' in result['results'][0]['error']
 
     async def test_zero_stock(self, mock_db):
-        """零库存出库"""
+        """零库存出库：客户+产品订单口径准入通过后，由写入守卫拒绝"""
         product = _make_product(current_stock=0)
+        shipment_info = _make_shipment_info(available_quantity=10, order_quantity=10, shipped_quantity=0, orders=[])
 
-        with patch('fastapi_app.services.stock_service.get_product_for_update', new_callable=AsyncMock, return_value=product):
+        with patch('fastapi_app.services.stock_service.get_product_for_update', new_callable=AsyncMock, return_value=product), \
+             patch('fastapi_app.services.stock_service.calculate_available_shipment_quantity', new_callable=AsyncMock, return_value=shipment_info), \
+             patch('fastapi_app.services.stock_out_service.apply_stock_delta_locked', side_effect=ValueError('库存不足！当前库存: 0，需要: 1')):
             result = await stock_service.batch_create_stockouts(mock_db, [_make_stockout_data(quantity=1)])
 
         assert result['results'][0]['success'] is False

@@ -68,10 +68,11 @@ EXPECTED_CALL_SITES = {
     "fastapi_app/services/staging/stockout.py": {"assert_stock_available": 1},
     # 删除入库（-stockin.quantity）／修改入库数量（quantity - old_quantity）
     "fastapi_app/services/stock_in_service.py": {"assert_stock_available": 2},
-    # 创建出库（-quantity）／修改出库（净出货量之差）／批量出库（返回 error dict）
+    # 出货准入已校准为「客户+产品」订单余量口径（calculate_available_shipment_quantity）；
+    # create/modify 两处 assert 保留；批量出库的负库存兜底由 apply_stock_delta_locked
+    # 内置原子守卫承担（守卫在统一写入口内部，不计服务层调用点）
     "fastapi_app/services/stock_out_service.py": {
         "assert_stock_available": 2,
-        "check_stock_available": 1,
     },
     # 删除退货（-stockreturn.quantity）
     "fastapi_app/services/stock_return_service.py": {"assert_stock_available": 1},
@@ -448,10 +449,10 @@ def test_call_sites_use_unified_entry(rel_path):
     assert _unified_calls(rel_path) == EXPECTED_CALL_SITES[rel_path]
 
 
-def test_total_call_sites_is_eleven():
+def test_total_call_sites_is_ten():
     total = sum(count for site in EXPECTED_CALL_SITES.values() for count in site.values())
-    assert total == 11
-    assert sum(sum(_unified_calls(rel).values()) for rel in IN_SCOPE_FILES) == 11
+    assert total == 10
+    assert sum(sum(_unified_calls(rel).values()) for rel in IN_SCOPE_FILES) == 10
 
 
 @pytest.mark.parametrize("rel_path", IN_SCOPE_FILES)
@@ -576,19 +577,28 @@ async def test_create_stockout_core_denies_then_policy_releases(monkeypatch):
         calc.assert_awaited()
 
 
-async def test_batch_stockout_item_denies_with_historic_message_then_releases(monkeypatch):
-    """站点 10：check 分支 + 返回 success/error 字典（拒绝文案逐字）。"""
+async def test_batch_stockout_item_denies_at_write_guard_then_releases(monkeypatch):
+    """站点 10（2026-10-06 校准）：准入按客户+产品订单口径；负库存由写入原子守卫拒绝。
+
+    前置的 product.current_stock 检查已移除（与客户级准入矛盾）；
+    拒绝文案来自统一写入口的 _shortage_message。
+    """
     _deny_env(monkeypatch)
     deny_product = MagicMock()
     deny_product.id = 1
     deny_product.current_stock = 5
     deny_product.version = 1
+    admit = {"available_quantity": 10, "order_quantity": 10, "shipped_quantity": 0, "orders": []}
     with patch("fastapi_app.services.stock_service.get_product_for_update",
-               new_callable=AsyncMock, return_value=deny_product):
+               new_callable=AsyncMock, return_value=deny_product), patch(
+        "fastapi_app.services.stock_service.calculate_available_shipment_quantity",
+        new_callable=AsyncMock, return_value=admit,
+    ), patch("fastapi_app.services.stock_out_service.apply_stock_delta_locked",
+             side_effect=ValueError("库存不足！当前库存: 5，需要: 10")):
         denied = await stock_out_service._process_single_stockout(
             _FakeSession(), {"product_id": 1, "customer": "客户A", "quantity": 10, "id": "t-2"},
         )
-    assert denied == {"success": False, "error": "库存不足，当前库存: 5", "id": "t-2"}
+    assert denied == {"success": False, "error": "库存不足！当前库存: 5，需要: 10", "id": "t-2"}
     assert deny_product.current_stock == 5
 
     monkeypatch.setenv("ALLOW_NEGATIVE_STOCK", "true")

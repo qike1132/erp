@@ -389,7 +389,9 @@ async def batch_submit_stockins(
 ):
     """批量提交入库"""
     from fastapi_app.services.auxiliary_service import orchestrate_batch_stockins
-    return await orchestrate_batch_stockins(db, [item.model_dump() for item in data.stockins])
+    return await orchestrate_batch_stockins(
+        db, [item.model_dump() for item in data.stockins], operator_id=user.id,
+    )
 
 
 @router.post("/batch-submit-stockouts", response_model=BatchStockoutResponse)
@@ -400,7 +402,9 @@ async def batch_submit_stockouts(
 ):
     """批量提交出库"""
     from fastapi_app.services.auxiliary_service import orchestrate_batch_stockouts
-    return await orchestrate_batch_stockouts(db, [item.model_dump() for item in data.stockouts])
+    return await orchestrate_batch_stockouts(
+        db, [item.model_dump() for item in data.stockouts], operator_id=user.id,
+    )
 
 
 # ==================== 系统状态 API ====================

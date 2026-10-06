@@ -121,7 +121,7 @@ async def create_stock_return(
         result = await create_stockreturn(
             db, stockout_id=data.stockout_id, quantity=data.quantity,
             return_date_str=return_date, reason=data.reason, note=data.note,
-            request_id=data.request_id,
+            request_id=data.request_id, operator_id=_user.id,
         )
     logger.info('退货创建成功：%s（stockout_id=%s，数量=%s）',
                 result['return_no'], data.stockout_id, data.quantity)
@@ -152,5 +152,5 @@ async def cancel_stock_return(
         logger.info('取消退货失败：return_id=%s 不存在', return_id)
         raise HTTPException(status_code=404, detail='退货记录不存在')
     async with db_transaction(db):
-        await cancel_stockreturn(db, stockreturn_id=return_id)
+        await cancel_stockreturn(db, stockreturn_id=return_id, operator_id=_user.id)
     return StockActionResponse(success=True, message='退货取消成功！库存已扣回')

@@ -6,7 +6,7 @@
 import logging
 from collections.abc import Awaitable, Callable
 
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -335,7 +335,8 @@ async def delete_product(db: AsyncSession, product_id: int) -> None:
 
     业务规则：
     - 有关联单据（订单/入库/出库）时拒绝删除
-    - 删除时级联删除库存日志
+    - 库存流水**保留**：删除前先把产品标识快照进流水行，删除后 product_id 由
+      DB 置空（外键 SET NULL，迁移 073），变动历史不随产品消失（R1）
 
     错误代码：
     - PRODUCT_NOT_FOUND: 产品不存在
@@ -372,9 +373,19 @@ async def delete_product(db: AsyncSession, product_id: int) -> None:
     if stockout_count > 0:
         raise ProductHasRelatedStockOutsError(product.name, stockout_count)
 
-    # 删除库存日志（批量删除避免逐条加载）
+    # R1：不再删除库存流水。外键已改 ON DELETE SET NULL，但 SET NULL 只保住行、
+    # 保不住「这是哪个产品」——故删除前把产品标识快照进该产品名下的存量流水，
+    # 使历史（含未接快照的旧写点）在删除后仍可读。
+    # 逐列 coalesce：已有快照（写入时带出的真实值）优先，缺哪列补哪列。
+    # 条码**只在此处快照**：产品存在时 JOIN 就能取到，写路径无需冗余它，
+    # 少一次热路径上的属性依赖（写路径只带 name）。
     await db.execute(
-        delete(InventoryLog).where(InventoryLog.product_id == product_id)
+        update(InventoryLog)
+        .where(InventoryLog.product_id == product_id)
+        .values(
+            product_name=func.coalesce(InventoryLog.product_name, product.name),
+            product_barcode=func.coalesce(InventoryLog.product_barcode, product.barcode),
+        )
     )
 
     product_name = product.name

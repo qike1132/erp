@@ -96,7 +96,7 @@ async def create_stockin(
         await stock_service.create_stockin(
             db, product_id=data.product_id, quantity=data.quantity,
             customer=data.customer, stockin_date_str=data.stockin_date,
-            note=data.note or '',
+            note=data.note or '', operator_id=_user.id,
         )
     return StockActionResponse(success=True, message='入库添加成功！')
 
@@ -135,7 +135,7 @@ async def edit_stockin(
     async with db_transaction(db):
         await stock_service.update_stockin(
             db, stockin_id=stockin_id, quantity=quantity, customer=customer,
-            stockin_date_str=stockin_date, note=note,
+            stockin_date_str=stockin_date, note=note, operator_id=_user.id,
         )
     return StockActionResponse(success=True, message='入库编辑成功！')
 
@@ -157,7 +157,7 @@ async def delete_stockin(
         StockActionResponse: 包含成功标志和提示消息的响应。
     """
     async with db_transaction(db):
-        await stock_service.delete_stockin(db, stockin_id)
+        await stock_service.delete_stockin(db, stockin_id, operator_id=_user.id)
     return StockActionResponse(success=True, message='入库删除成功！')
 
 
@@ -215,7 +215,7 @@ async def create_stockout(
         await stock_service.create_stockout(
             db, product_id=data.product_id, quantity=data.quantity,
             customer=data.customer, stockout_date_str=data.stockout_date,
-            note=data.note or '',
+            note=data.note or '', operator_id=_user.id,
         )
     return StockActionResponse(success=True, message='出库添加成功！')
 
@@ -254,7 +254,7 @@ async def edit_stockout(
     async with db_transaction(db):
         await stock_service.update_stockout(
             db, stockout_id=stockout_id, new_quantity=quantity, customer=customer,
-            stockout_date_str=stockout_date, note=note,
+            stockout_date_str=stockout_date, note=note, operator_id=_user.id,
         )
     return StockActionResponse(success=True, message='出库编辑成功！')
 
@@ -276,7 +276,7 @@ async def delete_stockout(
         StockActionResponse: 包含成功标志和提示消息的响应。
     """
     async with db_transaction(db):
-        await stock_service.delete_stockout(db, stockout_id)
+        await stock_service.delete_stockout(db, stockout_id, operator_id=_user.id)
     return StockActionResponse(success=True, message='出库删除成功！')
 
 

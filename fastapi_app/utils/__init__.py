@@ -24,10 +24,34 @@ def calc_total_pages(total: int, per_page: int) -> int:
     return (total + per_page - 1) // per_page
 
 
+def inventory_balance_bounds(current_stock_after: int, change_quantity: int) -> tuple[int, int]:
+    """由「写入口返回的变动后库存」与本次变更量反推 (变动前, 变动后)。
+
+    唯一合法来源是 **已持行锁的写入口**（apply_stock_delta_locked /
+    update_stock_with_optimistic_lock）的返回值：该值在锁内确定，天然与本次
+    变更同序。禁止改用 `SELECT current_stock` 反查 —— 并发下会读到交叉快照，
+    写出自我矛盾的流水；这正是 frappe/erpnext#51562（qty_after_transaction
+    并发算错，需 Repost Item Valuation 重算）的成因。
+
+    Args:
+        current_stock_after: 写入口返回的变动后库存。
+        change_quantity: 本次变更量（正增负减），须与写入口 delta 逐字一致。
+
+    Returns:
+        (quantity_before, quantity_after)
+    """
+    return current_stock_after - change_quantity, current_stock_after
+
+
 def log_inventory_change(db, *, product_id: int, change_type: str,
                          change_quantity: int, related_id: str = '',
                          note: str = '', customer: str | None = None,
-                         idem_key: str | None = None) -> None:
+                         idem_key: str | None = None,
+                         operator_id: int | None = None,
+                         quantity_before: int | None = None,
+                         quantity_after: int | None = None,
+                         product_name: str | None = None,
+                         product_barcode: str | None = None) -> None:
     """创建库存流水日志并加入数据库会话。
 
     统一 InventoryLog 创建逻辑，消除各服务中 db.add(InventoryLog(...)) 重复。
@@ -44,6 +68,15 @@ def log_inventory_change(db, *, product_id: int, change_type: str,
         customer: 客户名称（可选，退货等场景使用）。
         idem_key: 幂等键（可选）。命中 uq_inventory_log_idem 部分唯一索引
                   （仅对非 NULL 生效），用于请求级防重。
+        operator_id: 操作人用户 ID（可选）。ARQ 任务 / 脚本等无用户上下文时留 None。
+        quantity_before/quantity_after: 记账时序的前后库存，须由
+                  ``inventory_balance_bounds`` 从锁内写入口返回值推导，
+                  不要从数据库另行反查（见该函数 docstring）。
+        product_name: 产品名称快照（可选）。产品删除后外键置空，历史靠快照仍可读；
+                  调用方持有 Product 对象时带上（写路径只带名称）。
+        product_barcode: 产品条码快照（可选）。**一般无需在写路径传**——产品存在时
+                  可直接 JOIN 取到，只在产品删除时才有价值，由
+                  ``product_service.delete_product`` 删除前统一 coalesce 补齐。
     """
     db.add(InventoryLog(
         product_id=product_id,
@@ -53,6 +86,11 @@ def log_inventory_change(db, *, product_id: int, change_type: str,
         note=note,
         customer=customer,
         idem_key=idem_key,
+        operator_id=operator_id,
+        quantity_before=quantity_before,
+        quantity_after=quantity_after,
+        product_name=product_name,
+        product_barcode=product_barcode,
     ))
 
 

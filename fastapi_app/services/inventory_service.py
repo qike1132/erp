@@ -14,7 +14,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.shared.shipment_calc import build_shipment_summary
-from fastapi_app.shared_models import Order, StockOut
+from fastapi_app.shared_models import Order, Product, StockOut
 
 logger = logging.getLogger(__name__)
 
@@ -25,10 +25,11 @@ async def calculate_available_shipment_quantity(
     """
     计算指定客户和产品的可出货量
 
-    业务规则：
-    1. 出货量严格受限于订单量
+    业务规则（2026-10-06 校准）：
+    1. 出货量受限于订单量：可出货 = 订单总量 - 已出货量（非抵扣出货）
     2. 备货量只能通过订单抵扣使用，不能直接出货
-    3. 可出货量 = 订单总量 - 已出货量（非抵扣出货）
+    3. 出货还要有实物：生产即入库后 current_stock = 备货 + 生产 - 出库（产品净存量），
+       可出货量最终以 min(订单余量, 产品净存量) 封顶——订单再多，没生产的货也出不了
 
     lock_orders 默认对订单行加排他行锁（出货提交路径防超量竞态的依据，
     勿在写路径关闭）。仅展示类端点可传 lock_orders=False：其会话可能来自
@@ -71,4 +72,13 @@ async def calculate_available_shipment_quantity(
     )
     # order_id 列类型可空，查询已用 .in_(order_ids) 排除 NULL，守卫仅作类型收窄
     shipped_map = {o_id: total for o_id, total in shipped_result.all() if o_id is not None}
-    return build_shipment_summary(orders, shipped_map)
+    summary = build_shipment_summary(orders, shipped_map)
+
+    # 实物封顶（2026-10-06 校准）：订单口径的可出货量不得超过产品净存量
+    # （备货 + 生产 - 出库）。净存量无锁读取——写路径的原子负库存守卫
+    # （apply_stock_delta_locked）在扣减时兜底，显示/预检读旧值只是保守偏差。
+    product_row = await db.execute(select(Product).where(Product.id == product_id))
+    product = product_row.scalar_one_or_none()
+    if product is not None and summary.get('available_quantity', 0) > max(0, product.current_stock):
+        summary['available_quantity'] = max(0, product.current_stock)
+    return summary

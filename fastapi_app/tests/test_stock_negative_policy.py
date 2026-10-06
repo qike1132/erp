@@ -363,6 +363,8 @@ UNIFIED_ENTRY = STOCK_CONCURRENCY
 # 属统计阈值语义，与 t31 的 ALLOWED_RESIDUAL_ORDERING 逐字一致；在本任务写域之外，未改。
 DASHBOARD_STATS = REPO / "fastapi_app/services/dashboard/stats.py"
 DASHBOARD_STATS_HITS = ["stats.py:208: Product.current_stock <= 10"]
+# 2026-10-06 出货校准：可出货量 = min(订单余量, 产品净存量)，此比较为只读阈值（不写库存）
+INVENTORY_SERVICE = REPO / "fastapi_app/services/inventory_service.py"
 
 ORDERING_OPS = (ast.Lt, ast.LtE, ast.Gt, ast.GtE)
 
@@ -413,26 +415,34 @@ def test_no_inline_current_stock_comparison_left():
 def test_current_stock_ordering_files_are_exactly_unified_entry_and_threshold():
     """全仓（services/** + shared/**）只剩统一入口 + 具名豁免的只读阈值会比较 .current_stock。
 
-    实测集合（本次证据）= {fastapi_app/services/dashboard/stats.py,
-    fastapi_app/shared/stock_concurrency.py}：豁免项内命中逐字固化，统一入口内的 3 处
+    豁免项内命中逐字固化，统一入口内的 3 处
     命中（1 处竞态兜底判定 + 2 处 SQL 原子守卫）也逐项固定 —— 任何新增文件、新增比较或
     守卫被悄悄删掉都会让本断言失败。
+    2026-10-06 新增豁免：inventory_service 的可出货量实物封顶
+    （min(订单余量, 产品净存量)，只读阈值，不写库存），按内容而非行号断言。
     """
     hits = _ordering_hits_by_file()
     assert set(hits) == {
         UNIFIED_ENTRY.relative_to(REPO).as_posix(),
         DASHBOARD_STATS.relative_to(REPO).as_posix(),
+        INVENTORY_SERVICE.relative_to(REPO).as_posix(),
     }, hits
     assert hits[DASHBOARD_STATS.relative_to(REPO).as_posix()] == DASHBOARD_STATS_HITS
     unified = hits[UNIFIED_ENTRY.relative_to(REPO).as_posix()]
     assert len(unified) == 3, unified
     assert sum("current_stock + delta >= 0" in hit for hit in unified) == 2, unified
+    inv = hits[INVENTORY_SERVICE.relative_to(REPO).as_posix()]
+    assert len(inv) == 1 and 'available_quantity' in inv[0] and 'product.current_stock' in inv[0], inv
 
 
 def test_only_unified_entry_may_compare_current_stock():
-    """去掉具名豁免后，全仓唯一会比较 .current_stock 的文件就是统一入口。"""
+    """去掉具名豁免（dashboard 只读阈值 + inventory 出货封顶阈值）后，
+    全仓唯一会比较 .current_stock 的文件就是统一入口。"""
     hits = _ordering_hits_by_file()
-    residual = set(hits) - {DASHBOARD_STATS.relative_to(REPO).as_posix()}
+    residual = set(hits) - {
+        DASHBOARD_STATS.relative_to(REPO).as_posix(),
+        INVENTORY_SERVICE.relative_to(REPO).as_posix(),
+    }
     assert residual == {UNIFIED_ENTRY.relative_to(REPO).as_posix()}, hits
 
 

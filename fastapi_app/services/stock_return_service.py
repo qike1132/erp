@@ -32,6 +32,7 @@ from fastapi_app.services.stock_common import _parse_date_preserve_time
 from fastapi_app.services.stock_event_service import recalc_order_status_after_return
 from fastapi_app.shared.stock_concurrency import assert_stock_available, update_stock_with_optimistic_lock
 from fastapi_app.shared_models import InventoryLog, Product, StockOut, StockReturn
+from fastapi_app.utils import inventory_balance_bounds
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +45,8 @@ async def generate_stockreturn_number(db: AsyncSession) -> str:
 async def create_stockreturn_core(db: AsyncSession, stockout_id: int, quantity: int,
                                   return_date: datetime, reason: str | None = None,
                                   note: str | None = None,
-                                  request_id: str | None = None) -> StockReturn:
+                                  request_id: str | None = None,
+                                  operator_id: int | None = None) -> StockReturn:
     """创建退货记录核心逻辑（按出货明细退货：搜产品 -> 选出货单 -> 录数量）
 
     录入流程：新建退货单 -> 搜索产品名 -> 弹出该产品全部出货明细 -> 勾选要退的
@@ -105,10 +107,11 @@ async def create_stockreturn_core(db: AsyncSession, stockout_id: int, quantity: 
 
     # 恢复库存（统一走乐观锁写入口，WHERE version=旧值；不直写 current_stock）
     await stock_service.get_product_for_update(db, stockout.product_id)
-    await update_stock_with_optimistic_lock(db, stockout.product_id, quantity)
+    updated = await update_stock_with_optimistic_lock(db, stockout.product_id, quantity)
 
     # 写入库存日志（idem_key 供请求级防重；uq_inventory_log_idem 兜底）
-    stock_service.log_inventory_change(db, product_id=stockout.product_id, change_type='退货', change_quantity=quantity, related_id=str(stockreturn.id), note=f'退货ID：{stockreturn.id}，关联出货ID：{stockout_id}', customer=stockout.customer, idem_key=idem_key)
+    before, after = inventory_balance_bounds(updated.current_stock, quantity)
+    stock_service.log_inventory_change(db, product_id=stockout.product_id, change_type='退货', change_quantity=quantity, related_id=str(stockreturn.id), note=f'退货ID：{stockreturn.id}，关联出货ID：{stockout_id}', customer=stockout.customer, idem_key=idem_key, quantity_before=before, quantity_after=after, product_name=updated.name, operator_id=operator_id)
 
     # 重算订单状态（需先flush确保SUM查询读到最新的returned_quantity）
     if stockout.order_id:
@@ -155,7 +158,7 @@ async def search_returnable_stockouts(db: AsyncSession, keyword: str, limit: int
     return data
 
 
-async def cancel_stockreturn_core(db: AsyncSession, stockreturn: StockReturn) -> None:
+async def cancel_stockreturn_core(db: AsyncSession, stockreturn: StockReturn, operator_id: int | None = None) -> None:
     """取消退货记录核心逻辑（P1-① 软取消：保留记录，库存对称扣回）
 
     分支：历史关联行（stockout_id 非空）先回减 stock_out.returned_quantity；
@@ -183,10 +186,11 @@ async def cancel_stockreturn_core(db: AsyncSession, stockreturn: StockReturn) ->
         message=f'取消退货将导致库存为负数（当前库存：{product.current_stock}，退货数量：{stockreturn.quantity}）',
     )
     # 扣回库存统一走乐观锁写入口（不直写 current_stock）
-    await update_stock_with_optimistic_lock(db, stockreturn.product_id, -stockreturn.quantity)
+    updated = await update_stock_with_optimistic_lock(db, stockreturn.product_id, -stockreturn.quantity)
 
     # 写入库存日志（取消 = 退货的反向，type 与退货区分便于对账）
-    stock_service.log_inventory_change(db, product_id=stockreturn.product_id, change_type='退货取消', change_quantity=-stockreturn.quantity, related_id=str(stockreturn.id), note=f'退货取消ID：{stockreturn.id}', customer=stockreturn.customer)
+    before, after = inventory_balance_bounds(updated.current_stock, -stockreturn.quantity)
+    stock_service.log_inventory_change(db, product_id=stockreturn.product_id, change_type='退货取消', change_quantity=-stockreturn.quantity, related_id=str(stockreturn.id), note=f'退货取消ID：{stockreturn.id}', customer=stockreturn.customer, quantity_before=before, quantity_after=after, product_name=updated.name, operator_id=operator_id)
 
     # 仅历史关联行有 order_id：按产品退货不重算任何订单
     if stockreturn.order_id:
@@ -200,11 +204,13 @@ async def cancel_stockreturn_core(db: AsyncSession, stockreturn: StockReturn) ->
 async def create_stockreturn(db: AsyncSession, stockout_id: int, quantity: int,
                              return_date_str: str, reason: str | None = None,
                              note: str | None = None,
-                             request_id: str | None = None) -> dict:
+                             request_id: str | None = None,
+                             operator_id: int | None = None) -> dict:
     """创建退货记录（关联所选出货明细）"""
     return_date = _parse_date_preserve_time(return_date_str)
     stockreturn = await create_stockreturn_core(
         db, stockout_id, quantity, return_date, reason, note, request_id,
+        operator_id=operator_id,
     )
     await db.flush()
     await cache_mgr.invalidate_stock_and_order()
@@ -236,7 +242,7 @@ async def create_stockreturn(db: AsyncSession, stockout_id: int, quantity: int,
     return {'id': stockreturn.id, 'return_no': stockreturn.return_no}
 
 
-async def cancel_stockreturn(db: AsyncSession, stockreturn_id: int) -> None:
+async def cancel_stockreturn(db: AsyncSession, stockreturn_id: int, operator_id: int | None = None) -> None:
     """取消退货记录（P1-① 软取消：记录保留，库存/订单状态对称回冲）"""
     result = await db.execute(select(StockReturn).where(StockReturn.id == stockreturn_id).with_for_update())
     stockreturn_obj = result.scalar_one_or_none()
@@ -246,7 +252,7 @@ async def cancel_stockreturn(db: AsyncSession, stockreturn_id: int) -> None:
     cancelled_quantity = stockreturn_obj.quantity
     product_id = stockreturn_obj.product_id
     stockout_id = stockreturn_obj.stockout_id
-    await cancel_stockreturn_core(db, stockreturn_obj)
+    await cancel_stockreturn_core(db, stockreturn_obj, operator_id=operator_id)
     await db.flush()
     await cache_mgr.invalidate_stock_and_order()
     schedule_post_commit_invalidation(db, cache_mgr.invalidate_stock_and_order)

@@ -66,12 +66,12 @@ async def orchestrate_batch_orders(db: AsyncSession, orders_data: list[dict], cr
         raise
 
 
-async def orchestrate_batch_stockins(db: AsyncSession, stockins_data: list[dict]) -> dict:
+async def orchestrate_batch_stockins(db: AsyncSession, stockins_data: list[dict], operator_id: int | None = None) -> dict:
     """编排批量入库提交：创建入库 → 缓存失效"""
     from fastapi_app.services.stock_service import batch_create_stockins
     try:
         async with db_transaction(db):
-            result = await batch_create_stockins(db, stockins_data)
+            result = await batch_create_stockins(db, stockins_data, operator_id=operator_id)
 
         await cache_mgr.invalidate(
             InvalidationStrategy.DOMAIN,
@@ -83,11 +83,11 @@ async def orchestrate_batch_stockins(db: AsyncSession, stockins_data: list[dict]
         raise
 
 
-async def orchestrate_batch_stockouts(db: AsyncSession, stockouts_data: list[dict]) -> dict:
+async def orchestrate_batch_stockouts(db: AsyncSession, stockouts_data: list[dict], operator_id: int | None = None) -> dict:
     """编排批量出库提交：创建出库 → 缓存失效 → 采购计划重算 → 事件发布"""
     from fastapi_app.services.stock_service import batch_create_stockouts
     async with db_transaction(db):
-        result = await batch_create_stockouts(db, stockouts_data)
+        result = await batch_create_stockouts(db, stockouts_data, operator_id=operator_id)
 
     # Post-commit: cache invalidation + 采购计划重算 + 事件发布
     try:
