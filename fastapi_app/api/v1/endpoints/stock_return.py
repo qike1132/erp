@@ -9,7 +9,6 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,11 +16,15 @@ from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_permission
 from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.schemas.stock import StockActionResponse, StockListResponse
-from fastapi_app.schemas.stock_return import NameOption, StockReturnCreate
+from fastapi_app.schemas.stock_return import ShipmentOption, StockReturnCreate
 from fastapi_app.services.stock_common import business_now
 from fastapi_app.services.stock_inventory_service import get_stockreturns
-from fastapi_app.services.stock_return_service import cancel_stockreturn, create_stockreturn
-from fastapi_app.shared_models import Order, Product, StockOut, StockReturn, User
+from fastapi_app.services.stock_return_service import (
+    cancel_stockreturn,
+    create_stockreturn,
+    search_returnable_stockouts,
+)
+from fastapi_app.shared_models import StockReturn, User
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -30,52 +33,28 @@ router = APIRouter()
 PRODUCT_OPTIONS_LIMIT = 500
 
 
-@router.get('/product-options', response_model=list[NameOption])
-async def list_product_options(
-    customer: str = Query(..., min_length=1, description='客户名称（产品随客户过滤）'),
+@router.get('/shipment-options', response_model=list[ShipmentOption])
+async def list_shipment_options(
+    q: str = Query('', max_length=100, description='产品名称模糊搜索（空=最近可退明细）'),
     db: AsyncSession = Depends(get_async_read_db),
     _user: User = Depends(require_permission('stock_return_manage')),
-) -> list[NameOption]:
-    """获取指定客户的产品名称候选（新增退货弹窗，客户/产品均硬性必填）。
+) -> list[ShipmentOption]:
+    """按产品名搜索可退的出货明细（退货单录入第二步）。
 
-    产品集合 = 该客户「订单 ∪ 出货」中出现过的产品（去重、按名称排序）：
-    退货是客户把与本公司业务往来的货退回，产品范围必须限定在该客户名下，
-    而非全量产品字典。
-
-    为什么模块内自建而不复用 /products/list：后者要求 product_manage，
-    只授退货权限的用户（迁移 069 最小授权模型）会 403——与
-    /customers/active-names 放宽为仅登录的先例同因，本端点按退货模块
-    自身的 manage 权限门控，随弹窗入口一起出现。
+    仅列可退量 > 0 的明细；客户/订单由所选明细带出。模块内自建端点的原因
+    同 /customers/active-names 先例：/products/list 要求 product_manage，
+    只授退货权限的用户会 403。
 
     Args:
-        customer: 客户名称（精确匹配，来自客户字典）。
+        q: 产品名称模糊关键词（空=最近可退明细）。
         db: 异步数据库会话（只读副本）。
         _user: 当前登录用户（仅需通过权限校验）。
 
     Returns:
-        list[NameOption]: 该客户关联的产品 id/name 列表（按名称排序）。
+        list[ShipmentOption]: 出货明细（单号/客户/产品/数量/已退/可退/日期）。
     """
-    name = customer.strip()
-    if not name:
-        raise HTTPException(status_code=422, detail='客户名称不能为空')
-    result = await db.execute(
-        select(Product.id, Product.name)
-        .where(
-            or_(
-                Product.id.in_(
-                    select(Order.product_id).where(
-                        Order.customer == name, Order.product_id.isnot(None)
-                    )
-                ),
-                Product.id.in_(
-                    select(StockOut.product_id).where(StockOut.customer == name)
-                ),
-            )
-        )
-        .order_by(Product.name)
-        .limit(PRODUCT_OPTIONS_LIMIT)
-    )
-    return [NameOption(id=row[0], name=row[1]) for row in result.all()]
+    items = await search_returnable_stockouts(db, q.strip(), limit=50)
+    return [ShipmentOption(**item) for item in items]
 
 
 @router.get('/list', response_model=StockListResponse)
@@ -140,12 +119,12 @@ async def create_stock_return(
         },
     ):
         result = await create_stockreturn(
-            db, product_id=data.product_id, quantity=data.quantity,
+            db, stockout_id=data.stockout_id, quantity=data.quantity,
             return_date_str=return_date, reason=data.reason, note=data.note,
-            customer=data.customer, request_id=data.request_id,
+            request_id=data.request_id,
         )
-    logger.info('退货创建成功：%s（product_id=%s，数量=%s）',
-                result['return_no'], data.product_id, data.quantity)
+    logger.info('退货创建成功：%s（stockout_id=%s，数量=%s）',
+                result['return_no'], data.stockout_id, data.quantity)
     return StockActionResponse(success=True, message=f"退货添加成功！单号 {result['return_no']}")
 
 

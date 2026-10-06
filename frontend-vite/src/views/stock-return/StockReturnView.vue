@@ -96,14 +96,14 @@
 
     <StockReturnCreateDialog
       v-model:form="form"
+      v-model:search-keyword="searchKeyword"
       :open="formOpen"
       :submitting="submitting"
-      :products="products"
-      :customers="customers"
-      :loading-catalog="loadingCatalog"
-      :loading-products="loadingProducts"
+      :shipments="shipments"
+      :loading-shipments="loadingShipments"
       @update:open="formOpen = $event"
-      @customer-change="onCustomerPicked"
+      @search="searchShipments"
+      @pick="pickShipment"
       @submit="handleSubmit"
     />
 
@@ -161,11 +161,11 @@ const {
   debouncedSearch,
   formOpen,
   form,
-  products,
-  customers,
-  loadingCatalog,
-  loadingProducts,
-  onCustomerPicked,
+  searchKeyword,
+  shipments,
+  loadingShipments,
+  searchShipments,
+  pickShipment,
   submitting,
   openStandalone,
   handleSubmit,

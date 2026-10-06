@@ -18,13 +18,14 @@ import logging
 from datetime import datetime
 
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload
 
 from fastapi_app.core.cache_invalidation import cache_mgr, schedule_post_commit_invalidation
 from fastapi_app.core.domain_events import DomainEvent, DomainEventType
 from fastapi_app.core.domain_events import publish_with_retry as publish_domain_event
 from fastapi_app.core.exception_handler import safe_publish_event
+from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.services.notification_service import StockEvent
 from fastapi_app.services.numbering import generate_number_async
 from fastapi_app.services.stock_common import _parse_date_preserve_time
@@ -40,23 +41,38 @@ async def generate_stockreturn_number(db: AsyncSession) -> str:
     return await generate_number_async('SR', StockReturn, 'return_no', db)
 
 
-async def create_stockreturn_core(db: AsyncSession, product_id: int, quantity: int,
+async def create_stockreturn_core(db: AsyncSession, stockout_id: int, quantity: int,
                                   return_date: datetime, reason: str | None = None,
                                   note: str | None = None,
-                                  customer: str | None = None,
                                   request_id: str | None = None) -> StockReturn:
-    """创建退货记录核心逻辑（P1 录入变更：按产品退货，不关联出货单/订单）
+    """创建退货记录核心逻辑（按出货明细退货：搜产品 -> 选出货单 -> 录数量）
 
-    退货 = 收回货物入库的物理事件：选产品 + 数量，库存 +N、流水留痕；
-    不指定出货单（stockout_id=NULL）也不影响任何订单状态。数量无上限校验
-    （不存在"可退上限"概念，实物为准）。
+    录入流程：新建退货单 -> 搜索产品名 -> 弹出该产品全部出货明细 -> 勾选要退的
+    出货单 -> 录数量。可退量 = 该出货单数量 - 已退货量；客户/产品/订单由所选
+    明细带出，退回数量落在该出货单的已退量上，并重算订单状态、回补总库存。
+    订单抵扣出货（stockin_id 非空）与独立出货同等可退。
 
     request_id：前端每次打开新增弹窗生成的幂等令牌（同一次弹窗内重试视为同一请求）。
     命中即拒，防网络重试/双击造成的重复退货；重新打开弹窗会生成新令牌，不误杀合法的二次退货。
-    idem_key 直接存原始令牌（UUID），不与 staging 的 '类型|...' 键空间重叠，无需前缀拼接。
+    idem_key 直接存原始令牌（UUID），不与 staging 的键空间重叠，无需前缀拼接。
     """
     if quantity <= 0:
         raise ValueError('退货数量必须大于0')
+
+    # 锁序统一为 Product->StockOut（第十四轮死锁修复口径）
+    pid_row = (await db.execute(select(StockOut.product_id).where(StockOut.id == stockout_id))).one_or_none()
+    if not pid_row:
+        raise ValueError('出货记录不存在')
+    await stock_service.get_product_for_update(db, pid_row[0])
+
+    stockout_result = await db.execute(select(StockOut).where(StockOut.id == stockout_id).with_for_update())
+    stockout = stockout_result.scalar_one_or_none()
+    if not stockout:
+        raise ValueError('出货记录不存在')
+
+    available = stockout.quantity - stockout.returned_quantity
+    if quantity > available:
+        raise ValueError(f'退货数量超过可退数量！出货数量：{stockout.quantity}，已退货：{stockout.returned_quantity}，可退：{available}')
 
     # 幂等键 = 前端原始 requestId（UUID 字符串）。刻意不做任何拼接/格式化
     # （Mimosa 写入门禁对外部输入构造查询键零容忍），uq_inventory_log_idem 兜底。
@@ -68,40 +84,75 @@ async def create_stockreturn_core(db: AsyncSession, product_id: int, quantity: i
         if dup:
             raise ValueError('请勿重复提交：该请求已登记过退货')
 
-    # 产品行锁（产品不存在时由 get_product_for_update 抛错）；锁序仅 Product 单边
-    product = await stock_service.get_product_for_update(db, product_id)
-
     return_no = await stock_service.generate_stockreturn_number(db)
 
     stockreturn = StockReturn(
         return_no=return_no,
         return_date=return_date,
-        product_id=product_id,
+        product_id=stockout.product_id,
         quantity=quantity,
-        customer=customer or None,
+        customer=stockout.customer,
+        stockout_id=stockout_id,
+        order_id=stockout.order_id,
         reason=reason,
         note=note,
     )
     db.add(stockreturn)
     await db.flush()
 
+    # 退回数量落在所选出货明细上：累计已退量（列表/订单状态均可见）
+    stockout.returned_quantity += quantity
+
     # 恢复库存（统一走乐观锁写入口，WHERE version=旧值；不直写 current_stock）
-    await update_stock_with_optimistic_lock(db, product_id, quantity)
+    await stock_service.get_product_for_update(db, stockout.product_id)
+    await update_stock_with_optimistic_lock(db, stockout.product_id, quantity)
 
     # 写入库存日志（idem_key 供请求级防重；uq_inventory_log_idem 兜底）
-    stock_service.log_inventory_change(db, product_id=product_id, change_type='退货', change_quantity=quantity, related_id=str(stockreturn.id), note=f'退货ID：{stockreturn.id}，产品：{product.name}', customer=customer or None, idem_key=idem_key)
+    stock_service.log_inventory_change(db, product_id=stockout.product_id, change_type='退货', change_quantity=quantity, related_id=str(stockreturn.id), note=f'退货ID：{stockreturn.id}，关联出货ID：{stockout_id}', customer=stockout.customer, idem_key=idem_key)
 
-    if idem_key:
-        # 并发同 request_id 的竞态兜底：预检（无锁 select）拦不住同时进入的两个请求，
-        # 唯一索引在 flush 时抛 IntegrityError——savepoint 内转 400，避免 SQLAlchemyError→500
-        async with db.begin_nested():
-            try:
-                await db.flush()
-            except IntegrityError as e:
-                raise ValueError('请勿重复提交：该请求已登记过退货') from e
-    else:
+    # 重算订单状态（需先flush确保SUM查询读到最新的returned_quantity）
+    if stockout.order_id:
         await db.flush()
+        await recalc_order_status_after_return(db, stockout.order_id)
+
+    await db.flush()
     return stockreturn
+
+
+async def search_returnable_stockouts(db: AsyncSession, keyword: str, limit: int = 50) -> list[dict]:
+    """按产品名称模糊搜索可退的出货明细（退货单录入第二步的数据源）。
+
+    录入流程：搜产品名 -> 弹出该产品全部出货明细（单号/客户/数量/已退/可退/日期）
+    -> 勾选要退的明细 -> 录数量。仅列可退量 > 0 的明细，按出货时间倒序；
+    关键词为空时列最近的全部可退明细。客户/订单由所选明细带出。
+    """
+    name_filter = '%' + escape_like(keyword) + '%' if keyword else '%'
+    result = await db.execute(
+        select(StockOut)
+        .options(joinedload(StockOut.product))
+        .join(Product, StockOut.product_id == Product.id)
+        .where(
+            StockOut.quantity > StockOut.returned_quantity,
+            Product.name.like(name_filter),
+        )
+        .order_by(StockOut.stockout_date.desc(), StockOut.id.desc())
+        .limit(limit)
+    )
+    stockouts = result.scalars().unique().all()
+    data = []
+    for s in stockouts:
+        data.append({
+            'stockout_id': s.id,
+            'stockout_no': s.stockout_no,
+            'stockout_date': s.stockout_date.strftime('%Y-%m-%d') if s.stockout_date else '',
+            'product_id': s.product_id,
+            'product_name': s.product.name if s.product else '',
+            'customer': s.customer,
+            'quantity': s.quantity,
+            'returned_quantity': s.returned_quantity,
+            'available': s.quantity - s.returned_quantity,
+        })
+    return data
 
 
 async def cancel_stockreturn_core(db: AsyncSession, stockreturn: StockReturn) -> None:
@@ -146,15 +197,14 @@ async def cancel_stockreturn_core(db: AsyncSession, stockreturn: StockReturn) ->
     await db.flush()
 
 
-async def create_stockreturn(db: AsyncSession, product_id: int, quantity: int,
+async def create_stockreturn(db: AsyncSession, stockout_id: int, quantity: int,
                              return_date_str: str, reason: str | None = None,
                              note: str | None = None,
-                             customer: str | None = None,
                              request_id: str | None = None) -> dict:
-    """创建退货记录（按产品制，不关联出货单/订单）"""
+    """创建退货记录（关联所选出货明细）"""
     return_date = _parse_date_preserve_time(return_date_str)
     stockreturn = await create_stockreturn_core(
-        db, product_id, quantity, return_date, reason, note, customer, request_id,
+        db, stockout_id, quantity, return_date, reason, note, request_id,
     )
     await db.flush()
     await cache_mgr.invalidate_stock_and_order()
@@ -164,21 +214,25 @@ async def create_stockreturn(db: AsyncSession, product_id: int, quantity: int,
         await safe_publish_event(stock_service.publish_stock_event, StockEvent.STOCK_CHANGED, {'product_id': stockreturn.product_id, 'product_name': product.name, 'change_type': '退货', 'quantity': quantity, 'current_stock': product.current_stock}, context="退货事件发布")
 
     # 领域事件总线：退货创建 → 发布 STOCK_RETURN_CREATED 事件，触发采购计划重算（异步）
-    # 按产品退货不关联出货/订单，payload 仅携带产品维度信息
+    # 退货会减少已出货量，触发采购计划重算；客户/单号来自所选出货单
+    stockout = await db.get(StockOut, stockout_id)
+    customer_name = stockout.customer if stockout and stockout.customer else ''
     product_name = product.name if product is not None else ''
+    plan_month = stockout.stockout_date.strftime('%Y-%m') if stockout and stockout.stockout_date else ''
     await publish_domain_event(DomainEvent(
         event_type=DomainEventType.STOCK_RETURN_CREATED,
         domain='stock',
         payload={
             'product_id': stockreturn.product_id,
-            'customer': stockreturn.customer or '',
+            'customer': customer_name,
             'product_name': product_name,
-            'return_no': stockreturn.return_no,
+            'stockout_no': stockout.stockout_no if stockout else stockreturn.return_no,
             'deleted_quantity': quantity,
+            'plan_month': plan_month,
         },
     ))
 
-    logger.info(f'退货添加成功：{stockreturn.return_no}，产品ID：{product_id}，数量：{quantity}')
+    logger.info(f'退货添加成功：{stockreturn.return_no}，关联出货ID：{stockout_id}，数量：{quantity}')
     return {'id': stockreturn.id, 'return_no': stockreturn.return_no}
 
 

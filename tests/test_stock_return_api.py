@@ -114,7 +114,7 @@ class TestStockReturnApi:
             side_effect=lambda code: code == "stock_return_view"
         )
         resp = await client.post(f"{API_PREFIX}/create", json={
-            "product_id": 1, "quantity": 5,
+            "stockout_id": 1, "quantity": 5,
         })
         assert resp.status_code == 403
 
@@ -133,7 +133,7 @@ class TestStockReturnApi:
         """quantity<=0 被 Pydantic 拒绝（422），不触达服务层"""
         client, _, _ = sr_api
         resp = await client.post(f"{API_PREFIX}/create", json={
-            "product_id": 1, "quantity": 0, "customer": "流程客户",
+            "stockout_id": 1, "quantity": 0,
         })
         assert resp.status_code == 422
 
@@ -141,75 +141,46 @@ class TestStockReturnApi:
         """return_date 非 YYYY-MM-DD 被 Pydantic 拒绝（422）"""
         client, _, _ = sr_api
         resp = await client.post(f"{API_PREFIX}/create", json={
-            "product_id": 1, "quantity": 5, "customer": "流程客户", "return_date": "2026/10/05",
+            "stockout_id": 1, "quantity": 5, "customer": "流程客户", "return_date": "2026/10/05",
         })
         assert resp.status_code == 422
 
-    async def test_product_options_requires_manage(self, sr_api):
-        """产品候选端点要求 stock_return_manage：仅 view 权限 → 403"""
+    async def test_shipment_options_requires_manage(self, sr_api):
+        """明细搜索端点要求 stock_return_manage：仅 view 权限 -> 403"""
         client, _, user_mock = sr_api
         user_mock.has_permission = MagicMock(
             side_effect=lambda code: code == "stock_return_view"
         )
-        resp = await client.get(f"{API_PREFIX}/product-options")
+        resp = await client.get(f"{API_PREFIX}/shipment-options", params={"q": "板"})
         assert resp.status_code == 403
 
-    async def test_product_options_requires_customer(self, sr_api):
-        """产品候选必须携带 customer（缺参 422）"""
-        client, _, _ = sr_api
-        resp = await client.get(f"{API_PREFIX}/product-options")
-        assert resp.status_code == 422
-
-    async def test_product_options_scoped_to_customer(self, sr_api):
-        """P1 录入语义：产品候选 = 该客户「订单 ∪ 出货」中出现过的产品"""
-        from fastapi_app.shared_models import Order, Product, StockOut
+    async def test_shipment_options_search_and_availability(self, sr_api):
+        """按产品名搜可退明细：仅 available>0、带单号/客户/可退量"""
+        from fastapi_app.shared_models import Product, StockOut
 
         client, db, _ = sr_api
         suffix = uuid.uuid4().hex[:8]
-        p_order = Product(name=f"候选产品B-{suffix}", current_stock=1)   # 仅订单
-        p_ship = Product(name=f"候选产品A-{suffix}", current_stock=1)   # 仅出货
-        p_none = Product(name=f"无关产品-{suffix}", current_stock=1)     # 无关联
-        db.add_all([p_order, p_ship, p_none])
+        p1 = Product(name=f"鲨鱼板-{suffix}", current_stock=10)
+        p2 = Product(name=f"其他板-{suffix}", current_stock=10)
+        db.add_all([p1, p2])
         await db.flush()
-        db.add(Order(
-            order_no=f"ORD-OPT-{suffix}", customer="候选客户甲",
-            product_id=p_order.id, quantity=5, status="待备货",
-        ))
-        db.add(StockOut(
-            stockout_no=f"SO-OPT-{suffix}", product_id=p_ship.id,
-            quantity=3, customer="候选客户甲", returned_quantity=0,
-        ))
+        db.add(StockOut(stockout_no=f"SO-S1-{suffix}", product_id=p1.id,
+                        quantity=10, customer="客户甲", returned_quantity=2))
+        db.add(StockOut(stockout_no=f"SO-S2-{suffix}", product_id=p1.id,
+                        quantity=5, customer="客户乙", returned_quantity=5))
+        db.add(StockOut(stockout_no=f"SO-S3-{suffix}", product_id=p2.id,
+                        quantity=8, customer="客户丙", returned_quantity=0))
         await db.flush()
 
-        # 客户甲：订单产品 + 出货产品，无关产品不出现
-        resp = await client.get(
-            f"{API_PREFIX}/product-options", params={"customer": "候选客户甲"}
-        )
+        resp = await client.get(f"{API_PREFIX}/shipment-options", params={"q": "鲨鱼"})
         assert resp.status_code == 200, resp.text
-        names = [r["name"] for r in resp.json()]
-        assert names == [f"候选产品A-{suffix}", f"候选产品B-{suffix}"], names
-        assert all(set(r.keys()) == {"id", "name"} for r in resp.json())
+        rows = resp.json()
+        assert [r["stockout_no"] for r in rows] == [f"SO-S1-{suffix}"]
+        assert (rows[0]["quantity"], rows[0]["returned_quantity"], rows[0]["available"]) == (10, 2, 8)
 
-        # 其他客户：不共享候选甲的产品
-        resp = await client.get(
-            f"{API_PREFIX}/product-options", params={"customer": "无单客户乙"}
-        )
-        assert resp.json() == []
-
-        # 纯空白客户 → 422
-        resp = await client.get(
-            f"{API_PREFIX}/product-options", params={"customer": "   "}
-        )
-        assert resp.status_code == 422
-
-
-    async def test_create_rejects_missing_customer(self, sr_api):
-        """P1：客户为硬性必填——缺失或空白 → 422"""
-        client, _, _ = sr_api
-        for bad in ({}, {"customer": ""}, {"customer": "   "}):
-            payload = {"product_id": 1, "quantity": 5, **bad}
-            resp = await client.post(f"{API_PREFIX}/create", json=payload)
-            assert resp.status_code == 422, f"payload={payload}"
+        resp = await client.get(f"{API_PREFIX}/shipment-options")
+        nos = [r["stockout_no"] for r in resp.json()]
+        assert f"SO-S3-{suffix}" in nos and f"SO-S2-{suffix}" not in nos
 
     async def test_create_happy_path_fills_default_date(self, sr_api):
         """正常创建（按产品制）：服务层被以缺省当天日期/客户调用，端点返回单号"""
@@ -219,8 +190,7 @@ class TestStockReturnApi:
             new=AsyncMock(return_value={"id": 1, "return_no": "SR-20261005-0001"}),
         ) as mock_create:
             resp = await client.post(f"{API_PREFIX}/create", json={
-                "product_id": 9, "quantity": 5, "reason": "质量问题",
-                "customer": "流程客户",
+                "stockout_id": 9, "quantity": 5, "reason": "质量问题",
             })
         assert resp.status_code == 200, resp.text
         body = resp.json()
@@ -228,9 +198,8 @@ class TestStockReturnApi:
         assert "SR-20261005-0001" in body["message"]
         # return_date 缺省 → 传给服务层的是当天日期字符串
         kwargs = mock_create.call_args.kwargs
-        assert kwargs["product_id"] == 9
+        assert kwargs["stockout_id"] == 9
         assert kwargs["quantity"] == 5
-        assert kwargs["customer"] == "流程客户"
         assert kwargs["return_date_str"] and len(kwargs["return_date_str"]) == 10
 
     async def test_create_maps_value_error_to_400(self, sr_api):
@@ -241,7 +210,7 @@ class TestStockReturnApi:
             new=AsyncMock(side_effect=ValueError("退货数量超过可退数量！出货数量：50，已退货：50，可退：0")),
         ):
             resp = await client.post(f"{API_PREFIX}/create", json={
-                "product_id": 9, "quantity": 1, "customer": "流程客户",
+                "stockout_id": 9, "quantity": 1,
             })
         assert resp.status_code == 400
         assert "可退：0" in resp.json()["detail"]
@@ -348,12 +317,12 @@ class TestStockReturnApi:
             new=AsyncMock(return_value={"id": 1, "return_no": "SR-20261005-0001"}),
         ):
             first = await client.post(f"{API_PREFIX}/create", json={
-                "product_id": 9, "quantity": 5, "customer": "流程客户", "request_id": "req-abc12345",
+                "stockout_id": 9, "quantity": 5, "request_id": "req-abc12345",
             })
             assert first.status_code == 200
 
         # 第二次直接命中服务层的幂等预检（真实查询 InventoryLog.idem_key）
-        async def _fake_create(db, *, product_id, quantity, return_date_str, customer=None,
+        async def _fake_create(db, *, stockout_id, quantity, return_date_str, customer=None,
                                reason=None, note=None, request_id=None):
             # 模拟 service 真实行为：同 request_id 再次进入即拒
             raise ValueError('请勿重复提交：该请求已登记过退货')
@@ -363,7 +332,7 @@ class TestStockReturnApi:
             new=AsyncMock(side_effect=_fake_create),
         ):
             second = await client.post(f"{API_PREFIX}/create", json={
-                "product_id": 9, "quantity": 5, "customer": "流程客户", "request_id": "req-abc12345",
+                "stockout_id": 9, "quantity": 5, "request_id": "req-abc12345",
             })
         assert second.status_code == 400
         assert "请勿重复提交" in second.json()["detail"]

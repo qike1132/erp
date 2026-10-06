@@ -10,6 +10,8 @@ import uuid
 import pytest
 from sqlalchemy import select
 from test_stock_return_api import sr_api as _flow_api_fixture
+from fastapi_app.core.exceptions import db_transaction
+from fastapi_app.services import stock_service
 
 # pytest 按模块属性名注册导入的夹具：赋值回 sr_api，供本文件用例以 sr_api 参数取用
 sr_api = _flow_api_fixture
@@ -17,93 +19,118 @@ sr_api = _flow_api_fixture
 from fastapi_app.shared_models import InventoryLog, Order, Product, StockIn, StockOut, StockReturn
 
 
+
+async def _fresh_product(db, suffix, stock):
+    from fastapi_app.shared_models import Product
+    product = Product(name=f"流程产品-{suffix}", current_stock=stock)
+    db.add(product)
+    await db.flush()
+    return product
+
+
+async def _fresh_order(db, product, suffix, quantity):
+    from fastapi_app.shared_models import Order
+    order = Order(order_no=f"ORD-FLOW-{suffix}", product_id=product.id,
+                  customer=f"流程客户-{suffix}", quantity=quantity, status="待备货")
+    db.add(order)
+    await db.flush()
+    return order
+
+
 @pytest.mark.integration
 class TestStockReturnFullFlow:
     """按产品退货 · 全流程（模拟数据 + 真实服务层/HTTP）"""
 
-    async def test_product_return_and_cancel_cycle(self, sr_api):
-        """创建（库存+流水+列表）→ 幂等重复提交被拒 → 取消（对称扣回、记录保留）"""
+    async def test_stockout_return_and_cancel_cycle(self, sr_api):
+        """出货 -> 搜索明细 -> 退货(幂等) -> 超退拒绝 -> 取消(软删/对称回冲)"""
         client, db, _ = sr_api
         suffix = uuid.uuid4().hex[:8]
         customer = f"流程客户-{suffix}"
-        product = Product(name=f"退货流程产品-{suffix}", current_stock=100)
-        db.add(product)
-        await db.flush()
+        product = await _fresh_product(db, suffix, stock=100)
+        order = await _fresh_order(db, product, suffix, quantity=30)
 
-        # ---- 1) 列表为空 → 按产品创建退货 10：库存回补 + 流水 ----
-        resp = await client.get("/api/v1/stock-returns/list", params={"customer": customer})
-        assert resp.status_code == 200 and resp.json()["total"] == 0
-
-        resp = await client.post("/api/v1/stock-returns/create", json={
-            "product_id": product.id, "quantity": 10, "customer": customer,
-            "reason": "质量问题", "note": "E2E", "request_id": "flow-e2e-req-0001",
-        })
-        assert resp.status_code == 200, resp.text
-        assert "SR-" in resp.json()["message"]
-
-        await db.refresh(product)
-        assert product.current_stock == 110, "退货 10 后库存应回补至 110"
-
-        log_rows = (await db.execute(
-            select(InventoryLog).where(
-                InventoryLog.change_type == "退货",
-                InventoryLog.product_id == product.id,
+        async with db_transaction(db):
+            await stock_service.create_stockout(
+                db, product_id=product.id, quantity=30, customer=customer,
+                stockout_date_str="2026-10-05", note="流程测试",
             )
-        )).scalars().all()
-        assert any(r.change_quantity == 10 for r in log_rows), "应存在 change_type=退货、+10 的库存流水"
-
-        resp = await client.get("/api/v1/stock-returns/list", params={"customer": customer})
-        body = resp.json()
-        assert body["total"] == 1
-        row = body["data"][0]
-        return_id = row["id"]
-        assert row["product"]["name"] == product.name
-        assert row["stockout_no"] == "", "按产品退货无出货关联"
-        assert row["status"] == "active"
-
-        # ---- 2) P1-③ 幂等：同 request_id 重复提交 → 400，不二次累计 ----
-        resp = await client.post("/api/v1/stock-returns/create", json={
-            "product_id": product.id, "quantity": 10, "customer": customer,
-            "reason": "质量问题", "request_id": "flow-e2e-req-0001",
-        })
-        assert resp.status_code == 400
-        assert "请勿重复提交" in resp.json()["detail"]
         await db.refresh(product)
-        assert product.current_stock == 110, "重复请求不得二次累计库存"
+        assert product.current_stock == 70
+        stockout = (await db.execute(
+            select(StockOut).where(StockOut.customer == customer)
+        )).scalars().one()
+        await db.refresh(order)
+        assert order.status == "已出货"
 
-        # ---- 3) 第二笔退货（新弹窗新令牌，无上限概念）----
+        # 搜索明细：按产品名可搜到，可退 30
+        resp = await client.get("/api/v1/stock-returns/shipment-options",
+                                params={"q": "流程产品"})
+        assert resp.status_code == 200, resp.text
+        rows = [r for r in resp.json() if r["stockout_no"] == stockout.stockout_no]
+        assert rows and rows[0]["available"] == 30
+
+        # 退货 10（幂等令牌）：库存 80、明细已退 10、订单待出货
         resp = await client.post("/api/v1/stock-returns/create", json={
-            "product_id": product.id, "quantity": 5, "customer": customer,
-            "reason": "错发",
+            "stockout_id": stockout.id, "quantity": 10, "reason": "质量问题",
+            "request_id": "flow-e2e-req-0001",
         })
         assert resp.status_code == 200, resp.text
-        await db.refresh(product)
-        assert product.current_stock == 115
+        await db.refresh(product); await db.refresh(stockout); await db.refresh(order)
+        assert product.current_stock == 80
+        assert stockout.returned_quantity == 10
+        assert order.status == "待出货"
 
-        # ---- 4) 取消第一笔：库存对称扣回、记录保留、重复取消 400 ----
-        resp = await client.delete(f"/api/v1/stock-returns/{return_id}")
+        # 同令牌重复提交 -> 400，不二次累计
+        resp = await client.post("/api/v1/stock-returns/create", json={
+            "stockout_id": stockout.id, "quantity": 10, "reason": "质量问题",
+            "request_id": "flow-e2e-req-0001",
+        })
+        assert resp.status_code == 400 and "请勿重复提交" in resp.json()["detail"]
+        await db.refresh(stockout)
+        assert stockout.returned_quantity == 10
+
+        # 超退：可退 20，退 21 -> 400
+        resp = await client.post("/api/v1/stock-returns/create", json={
+            "stockout_id": stockout.id, "quantity": 21, "reason": "错发",
+        })
+        assert resp.status_code == 400 and "可退：20" in resp.json()["detail"]
+
+        # 恰好退满：可退 0，明细从搜索结果消失
+        resp = await client.post("/api/v1/stock-returns/create", json={
+            "stockout_id": stockout.id, "quantity": 20, "reason": "换货",
+        })
         assert resp.status_code == 200, resp.text
-        assert "取消" in resp.json()["message"]
         await db.refresh(product)
-        assert product.current_stock == 105, "取消 10 件应扣回至 105"
+        assert product.current_stock == 100
+        resp = await client.get("/api/v1/stock-returns/shipment-options",
+                                params={"q": "流程产品"})
+        assert resp.json() == []
 
-        resp = await client.delete(f"/api/v1/stock-returns/{return_id}")
-        assert resp.status_code == 400
-        assert "已取消" in resp.json()["detail"]
-
+        # 取消第一张：库存 90、明细已退 20、订单待出货；重复取消 400
         resp = await client.get("/api/v1/stock-returns/list", params={"customer": customer})
         body = resp.json()
-        assert body["total"] == 2, "软取消不清列表"
-        statuses = {r["id"]: r["status"] for r in body["data"]}
-        assert statuses[return_id] == "cancelled"
-        assert sum(1 for s in statuses.values() if s == "active") == 1
+        ids = {r["id"]: r for r in body["data"]}
+        first_id = next(rid for rid, r in ids.items() if r["quantity"] == 10)
+        resp = await client.delete(f"/api/v1/stock-returns/{first_id}")
+        assert resp.status_code == 200 and "取消" in resp.json()["message"]
+        await db.refresh(product); await db.refresh(stockout); await db.refresh(order)
+        assert product.current_stock == 90
+        assert stockout.returned_quantity == 20
+        assert order.status == "待出货"
+        resp = await client.delete(f"/api/v1/stock-returns/{first_id}")
+        assert resp.status_code == 400 and "已取消" in resp.json()["detail"]
 
-        # ---- 5) 取消第二笔：库存回到初始 100 ----
-        remaining_id = next(rid for rid, s in statuses.items() if s == "active")
-        resp = await client.delete(f"/api/v1/stock-returns/{remaining_id}")
+        # 取消第二张：全部回冲到出货后原点，记录保留
+        resp = await client.get("/api/v1/stock-returns/list", params={"customer": customer})
+        remaining = next(r for r in resp.json()["data"] if r["status"] == "active")
+        resp = await client.delete(f"/api/v1/stock-returns/{remaining['id']}")
         assert resp.status_code == 200, resp.text
-        await db.refresh(product)
-        assert product.current_stock == 100, "全部取消后回到初始库存"
+        await db.refresh(product); await db.refresh(stockout); await db.refresh(order)
+        assert product.current_stock == 70
+        assert stockout.returned_quantity == 0
+        assert order.status == "已出货"
+        resp = await client.get("/api/v1/stock-returns/list", params={"customer": customer})
+        assert all(r["status"] == "cancelled" for r in resp.json()["data"])
 
     async def test_cancel_legacy_stockout_linked_return(self, sr_api):
         """历史关联行（stockout_id 非空）取消：回减出货单 returned_quantity 并重算订单"""

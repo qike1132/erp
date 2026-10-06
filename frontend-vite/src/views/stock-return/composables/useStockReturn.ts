@@ -1,49 +1,55 @@
 /**
- * useStockReturn — 退货管理页面业务逻辑
+ * useStockReturn - 退货管理页面业务逻辑
  *
- * P1 录入变更：退货 = 选产品 + 数量（不关联出货单/订单），库存 +N、流水留痕。
- * 封装退货列表查询（服务端分页 + 客户/日期筛选）、
- * 新增退货（页内选产品）、取消（P1-① 软取消，带确认对话框）。
+ * 录入流程：新建退货单 -> 搜索产品名 -> 弹出该产品全部出货明细
+ * -> 勾选要退的明细 -> 录数量。可退量 = 明细出货量 - 已退量。
+ * 取消为软删除（记录保留、库存对称扣回）。
  */
 import { ref, reactive, computed } from 'vue'
 import { useQuery, keepPreviousData } from '@tanstack/vue-query'
+import { stockReturnApi } from '@/api'
 import { showToast } from '@/composables/useToast'
 import { useApiMutation } from '@/composables/useApiMutation'
 import { useDebouncedSearch } from '@/composables/useDebouncedSearch'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { useAuthStore } from '@/stores/auth'
-import { customerApi, stockReturnApi } from '@/api'
-import type { NameOption, StockReturnCreatePayload } from '@/api/stockReturn'
+import type { ShipmentOption, StockReturnCreatePayload } from '@/api/stockReturn'
 
 /** 退货原因受控选项（P1 起落字典表；当前与后端 reason String(200) 自由文本兼容） */
 export const RETURN_REASON_OPTIONS = ['质量问题', '错发', '多送', '客户不要', '换货', '其他'] as const
 
-/** 新增退货表单（按产品制） */
+/** 新增退货表单（关联所选出货明细） */
 export interface StockReturnFormData {
-  product_id: number | null
+  stockout_id: number | null
+  stockout_no: string
   product_name: string
   customer: string
   quantity: number | null
+  available: number | null
   reason: string
   note: string
 }
 
 function emptyForm(): StockReturnFormData {
   return {
-    product_id: null,
+    stockout_id: null,
+    stockout_no: '',
     product_name: '',
     customer: '',
     quantity: null,
+    available: null,
     reason: '',
     note: '',
   }
 }
 
 function validateReturnForm(form: StockReturnFormData): string | null {
-  if (!form.customer) return '请先选择客户'
-  if (!form.product_id) return '请先选择产品'
+  if (!form.stockout_id) return '请先在出货明细中选择要退的记录'
   const qty = form.quantity
   if (qty == null || !Number.isInteger(qty) || qty <= 0) return '退货数量必须为正整数'
+  if (form.available != null && qty > form.available) {
+    return `退货数量超过可退数量（可退 ${form.available}）`
+  }
   if (!form.reason) return '请选择退货原因'
   return null
 }
@@ -53,7 +59,7 @@ function newRequestId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID()
   }
-  return `req-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+  return 'req-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10)
 }
 
 export function useStockReturn() {
@@ -107,8 +113,7 @@ export function useStockReturn() {
         start_date: startDate.value || undefined,
         end_date: endDate.value || undefined,
       }),
-    // 本 composable 也会在出货行（StockOutRecords）实例化——无退货查看权限的
-    // 访客不应发出 /stock-returns/list 请求，否则后端记 403 审计噪音
+    // 本 composable 也在库存出货列表实例化——无退货查看权限的访客不应发请求（403 审计噪音）
     enabled: computed(() => auth.hasPermission('stock_return_view')),
     staleTime: 30_000,
     gcTime: 60_000,
@@ -122,55 +127,53 @@ export function useStockReturn() {
     currentPage.value = p
   }
 
-  // ---------- 新增退货（按产品制） ----------
+  // ---------- 新增退货：搜产品 -> 选出货明细 ----------
   const formOpen = ref(false)
   const form = reactive<StockReturnFormData>(emptyForm())
   const submitting = ref(false)
-  /** P1-③ 幂等令牌：打开弹窗时生成一次 */
+  /** P1-3 幂等令牌：打开弹窗时生成一次 */
   const requestId = ref('')
 
-  /** 客户下拉：全局客户字典 active-names（仅登录即可访问） */
-  const customers = ref<NameOption[]>([])
-  const loadingCatalog = ref(false)
-  /** 产品下拉：随所选客户过滤（该客户订单 ∪ 出货中出现过的产品） */
-  const products = ref<NameOption[]>([])
-  const loadingProducts = ref(false)
+  const searchKeyword = ref('')
+  const shipments = ref<ShipmentOption[]>([])
+  const loadingShipments = ref(false)
+
+  /** 按产品名搜可退出货明细（空关键词 = 最近可退明细） */
+  async function searchShipments() {
+    loadingShipments.value = true
+    try {
+      shipments.value = await stockReturnApi.shipmentOptions(searchKeyword.value.trim())
+    } catch {
+      showToast('出货明细搜索失败', 'warning')
+    } finally {
+      loadingShipments.value = false
+    }
+  }
 
   async function openStandalone() {
     Object.assign(form, emptyForm())
     requestId.value = newRequestId()
-    products.value = []
+    searchKeyword.value = ''
     formOpen.value = true
-    // 客户字典每次打开重拉（可能新增客户）
-    loadingCatalog.value = true
-    try {
-      customers.value = await customerApi.activeNames()
-    } catch {
-      showToast('客户列表加载失败', 'warning')
-    } finally {
-      loadingCatalog.value = false
-    }
+    await searchShipments()
   }
 
-  /** 选定客户后拉取该客户名下的产品；切换客户时清空已选产品 */
-  async function onCustomerPicked(name: string) {
-    Object.assign(form, { product_id: null, product_name: '' })
-    products.value = []
-    if (!name) return
-    loadingProducts.value = true
-    try {
-      products.value = await stockReturnApi.productOptions(name)
-    } catch {
-      showToast('该客户的产品列表加载失败', 'warning')
-    } finally {
-      loadingProducts.value = false
-    }
+  /** 勾选出货明细：客户/产品/可退量由明细带出，可退上限回填数量约束 */
+  function pickShipment(row: ShipmentOption) {
+    Object.assign(form, {
+      stockout_id: row.stockout_id,
+      stockout_no: row.stockout_no,
+      product_name: row.product_name,
+      customer: row.customer ?? '',
+      quantity: null,
+      available: row.available,
+    })
   }
 
   const createMutation = useApiMutation(
     (payload: StockReturnCreatePayload) => stockReturnApi.create(payload),
     {
-      invalidateKeys: ['stock-returns-list', 'inventory'],
+      invalidateKeys: ['stock-returns-list', 'stockouts-list', 'inventory'],
       successMsg: '退货添加成功',
       errorMsg: '退货添加失败',
     },
@@ -185,9 +188,8 @@ export function useStockReturn() {
     submitting.value = true
     try {
       const created = await createMutation.run({
-        product_id: form.product_id as number,
+        stockout_id: form.stockout_id as number,
         quantity: form.quantity as number,
-        customer: form.customer || undefined,
         reason: form.reason,
         note: form.note || undefined,
         request_id: requestId.value || undefined,
@@ -201,16 +203,16 @@ export function useStockReturn() {
     }
   }
 
-  // ---------- 取消退货（P1-① 软取消） ----------
+  // ---------- 取消退货（P1-1 软取消） ----------
   const deleteMutation = useApiMutation((id: number) => stockReturnApi.remove(id), {
-    invalidateKeys: ['stock-returns-list', 'inventory'],
+    invalidateKeys: ['stock-returns-list', 'stockouts-list', 'inventory'],
     successMsg: '退货取消成功',
     errorMsg: '退货取消失败',
   })
 
   async function handleDelete(row: { id: number; return_no: string; quantity: number }) {
     const ok = await confirmDialog.confirm(
-      `确定要取消退货单 ${row.return_no}（${row.quantity} 件）吗？库存将对称扣回，记录保留可追溯。`,
+      `确定要取消退货单 ${row.return_no}（${row.quantity} 件）吗？库存将对称扣回、订单状态重算，记录保留可追溯。`,
     )
     if (!ok) return
     actionId.value = row.id
@@ -237,12 +239,12 @@ export function useStockReturn() {
     formOpen,
     form,
     submitting,
-    products,
-    customers,
-    loadingCatalog,
-    loadingProducts,
+    searchKeyword,
+    shipments,
+    loadingShipments,
     openStandalone,
-    onCustomerPicked,
+    searchShipments,
+    pickShipment,
     handleSubmit,
     handleDelete,
   }
