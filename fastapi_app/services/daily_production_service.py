@@ -22,7 +22,8 @@ from fastapi_app.core.float_utils import round_money
 from fastapi_app.core.production_scope import PRODUCTION_DEPARTMENTS
 from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.core.validators import validate_not_empty
-from fastapi_app.shared_models import DailyProductionRecord, Product
+from fastapi_app.shared.stock_concurrency import assert_stock_available, get_product_for_update
+from fastapi_app.shared_models import DailyProductionRecord, InventoryLog, Product
 from fastapi_app.utils import calc_total_pages, parse_date_with_fallback
 
 logger = logging.getLogger(__name__)
@@ -40,6 +41,40 @@ class InvalidDateRangeError(ValueError):
     继承 ValueError，使既有「ValueError → 400」的映射继续生效；
     /export 端点需要把它与「行数超限的 ValueError」区分开（后者映 413）。
     """
+
+
+async def _apply_production_stock(
+    db: AsyncSession, record: DailyProductionRecord, *, delta: int, product_id: int | None = None,
+) -> None:
+    """生产数量变更同步库存（2026-10-06 用户裁决：生产即入库）。
+
+    对 product.current_stock 施加 delta 并写 InventoryLog 流水；
+    负向变化（改小/换产品回退/删除）走全仓统一的负库存准入 assert_stock_available
+    ——已出库消耗掉的数量不允许通过改/删生产记录洗成负库存。
+
+    product_id 为空（生产记录未匹配到产品档案）时不产生任何库存变化，
+    与 /stock 页 available_stock 口径（production_agg 仅统计 product_id 非空）一致。
+    """
+    pid = product_id if product_id is not None else record.product_id
+    if pid is None or delta == 0:
+        return
+    product = await get_product_for_update(db, pid)
+    if product is None:
+        logger.warning('生产记录 %s 库存联动跳过：产品 %s 不存在', record.id, pid)
+        return
+    if delta < 0:
+        assert_stock_available(
+            product.current_stock, delta,
+            message=f'生产记录变动将导致库存为负数（当前库存：{product.current_stock}，变化：{delta:+d}）',
+        )
+    product.current_stock += delta
+    db.add(InventoryLog(
+        product_id=pid,
+        change_type='生产入库' if delta > 0 else '生产入库冲销',
+        change_quantity=delta,
+        related_id=str(record.id),
+        note=f'生产录入 {record.department} {record.production_date}',
+    ))
 
 
 async def _build_product_price_fallback(
@@ -360,6 +395,8 @@ async def create_record(
     db.add(record)
     await db.flush()
     await db.refresh(record)
+    # 生产即入库（2026-10-06 用户裁决）：生产数量同步增加可出货库存
+    await _apply_production_stock(db, record, delta=quantity)
     logger.info(f'生产记录创建: {department} - {product_name} - {quantity} by {created_by}')
     return record
 
@@ -386,6 +423,9 @@ async def update_record(
     price = kwargs.get('unit_price', record.unit_price)
     validate_record_data(dept, name, qty, price)
 
+    # 库存联动基线（2026-10-06 生产即入库）：变更前快照
+    old_product_id, old_quantity = record.product_id, record.quantity
+
     for field in ('department', 'product_id', 'product_name', 'barcode', 'unit_price', 'quantity', 'remark'):
         if field in kwargs and kwargs[field] is not None:
             if field == 'product_name' and isinstance(kwargs[field], str):
@@ -401,6 +441,14 @@ async def update_record(
         record.production_date = new_date
 
     await db.flush()
+
+    # 库存联动：同产品按差额调整；换产品则旧产品回退、新产品全额入账
+    if old_product_id == record.product_id:
+        await _apply_production_stock(db, record, delta=record.quantity - old_quantity)
+    else:
+        await _apply_production_stock(db, record, delta=-old_quantity, product_id=old_product_id)
+        await _apply_production_stock(db, record, delta=record.quantity)
+
     await db.refresh(record)
     logger.info(f'生产记录更新: {record_id} by {created_by}')
     return record
@@ -434,6 +482,9 @@ async def delete_record(db: AsyncSession, record_id: int, *, operator: str = '')
         f'production_date={record.production_date} record_created_by={record.created_by} '
         f'operator={operator}'
     )
+    # 库存联动（2026-10-06 生产即入库）：删除生产记录同步回退库存；
+    # 若已发生出货导致库存不足，按全仓负库存政策拦截（assert_stock_available）
+    await _apply_production_stock(db, record, delta=-record.quantity)
     await db.delete(record)
 
 

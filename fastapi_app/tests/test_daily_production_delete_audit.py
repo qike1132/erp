@@ -38,6 +38,10 @@ class TestDeleteRecordAudit:
 
         with caplog.at_level(
             logging.INFO, logger='fastapi_app.services.daily_production_service',
+        ), patch(
+            # 本测试关注审计快照时序；库存联动另有专属测试（test_daily_production_stock_linkage.py）
+            'fastapi_app.services.daily_production_service._apply_production_stock',
+            new_callable=AsyncMock,
         ):
             await delete_record(db, 7, operator='李四')
 
