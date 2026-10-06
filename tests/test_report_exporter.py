@@ -1,0 +1,95 @@
+"""ReportExporter 导出冒烟测试
+
+背景：五类报表导出（订单/备货/出货/抵扣/退货）此前全仓无单测（2026-10-06 迭代审核 P2-2）。
+本文件参数化覆盖：
+- 每类导出的工作表名、表头、行值映射
+- Excel 公式注入清洗（=+-@ 开头字符串加制表符前缀）
+- generate_filename 的中文文件名映射
+"""
+import io
+
+import pytest
+from openpyxl import load_workbook
+
+from utils.report_exporter import ReportExporter, generate_filename
+
+# (导出方法, 工作表名, 表头, 行值取值键)
+_CASES = [
+    (
+        'export_order_logs', '订单流水',
+        ['下单时间', '客户', '产品名称', '数量', '备注'],
+        ['order_date', 'customer', 'product_name', 'quantity', 'note'],
+    ),
+    (
+        'export_stockin_logs', '备货流水',
+        ['备货时间', '客户', '产品名称', '备货数量', '备注'],
+        ['stockin_date', 'customer', 'product_name', 'quantity', 'note'],
+    ),
+    (
+        'export_stockout_logs', '出货流水',
+        ['出货时间', '客户', '产品名称', '出货数量', '备注'],
+        ['stockout_date', 'customer', 'product_name', 'quantity', 'note'],
+    ),
+    (
+        'export_deduction_logs', '备货抵扣流水',
+        ['抵扣时间', '客户', '产品名称', '抵扣数量', '订单备注'],
+        ['deduction_time', 'customer', 'product_name', 'quantity', 'order_note'],
+    ),
+    (
+        'export_return_logs', '退货流水',
+        ['退货时间', '客户', '产品名称', '退货数量', '备注'],
+        ['return_date', 'customer', 'product_name', 'quantity', 'note'],
+    ),
+]
+
+# 各类行键的全集（构造日志行时缺省补空，模拟真实行字典）
+_ALL_KEYS = sorted({k for _, _, _, keys in _CASES for k in keys})
+
+
+def _log(note: str, note_key: str = 'note') -> dict:
+    row = dict.fromkeys(_ALL_KEYS, '')
+    row.update({'customer': '测试客户', 'product_name': '测试产品', 'quantity': 12, note_key: note})
+    return row
+
+
+def _export(method: str, logs: list[dict]):
+    data: bytes = getattr(ReportExporter(), method)(logs, {'total_count': len(logs)})
+    return load_workbook(io.BytesIO(data)).active
+
+
+def _cell(ws, row: int, col: int):
+    """openpyxl 把空串写为空单元格，读回是 None；统一归一成 '' 再断言"""
+    return ws.cell(row=row, column=col).value or ''
+
+
+class TestExportSmoke:
+    """五类导出的表名/表头/行值/公式注入清洗"""
+
+    @pytest.mark.parametrize('method,sheet,headers,keys', _CASES)
+    def test_sheet_headers_and_rows(
+        self, method: str, sheet: str, headers: list[str], keys: list[str],
+    ):
+        log = _log('正常备注', keys[-1])
+        ws = _export(method, [log])
+
+        assert ws.title == sheet
+        assert [c.value for c in ws[1]] == headers
+        assert [_cell(ws, 2, i + 1) for i in range(len(keys))] == [log[k] for k in keys]
+
+    @pytest.mark.parametrize('method,keys', [(m, k) for m, _, _, k in _CASES])
+    def test_formula_injection_sanitized(self, method: str, keys: list[str]):
+        """'=' 开头的备注被加制表符前缀，阻止 Excel 公式解析"""
+        note_key = keys[-1]
+        ws = _export(method, [_log('=1+1', note_key)])
+
+        assert _cell(ws, 2, len(keys)) == '\t=1+1'
+
+    def test_export_bytes_are_xlsx(self):
+        """返回值是真实的 xlsx 字节（zip 魔数，可被 openpyxl 读回）"""
+        ws = _export('export_order_logs', [_log('x')])
+        assert ws.max_row >= 2
+
+    def test_generate_filename(self):
+        assert generate_filename('return') == '退货流水.xlsx'
+        assert generate_filename('order') == '订单流水.xlsx'
+        assert generate_filename('nope') == '报表.xlsx'

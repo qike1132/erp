@@ -110,8 +110,14 @@ class TaskStatusResponse(BaseModel):
     progress: float | None = None
 
 
+# 异步导出支持的报表类型 —— 必须与 /reports/export 的 ALLOWED_REPORT_TYPES、
+# report_data_service.get_all_logs_data / ReportExporter 的分支保持同口径
+# （tests/test_report.py::TestExportTypeParity 钉住三处一致）。
+ASYNC_EXPORT_REPORT_TYPES = ('order', 'stockin', 'stockout', 'deduction', 'return')
+
+
 class ReportExportRequest(BaseModel):
-    report_type: str  # order, stockin, stockout, deduction
+    report_type: str  # 见 ASYNC_EXPORT_REPORT_TYPES
     customer: str = ""
     product: str = ""
     status: str = ""
@@ -228,7 +234,7 @@ async def async_export_report(
     current_user: User = Depends(require_permission("batch_import")),
 ):
     """异步导出报表（提交后台任务）"""
-    if request.report_type not in ("order", "stockin", "stockout", "deduction"):
+    if request.report_type not in ASYNC_EXPORT_REPORT_TYPES:
         raise HTTPException(status_code=400, detail=f"不支持的报表类型: {request.report_type}")
 
     from fastapi_app.core.arq_app import get_arq_pool

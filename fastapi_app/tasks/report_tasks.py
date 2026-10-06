@@ -16,13 +16,24 @@ _SyncSession = sessionmaker(
     autocommit=False, autoflush=False, bind=get_sync_engine()
 )
 
+# 导出方法表：与 /reports/export 的 ALLOWED_REPORT_TYPES、tasks.py 的
+# ASYNC_EXPORT_REPORT_TYPES、report_data_service.get_all_logs_data 的分支同口径
+# （tests/test_report.py::TestExportTypeParity 钉住一致，新增报表类型四处同步改）。
+_EXPORT_METHODS = {
+    'order': 'export_order_logs',
+    'stockin': 'export_stockin_logs',
+    'stockout': 'export_stockout_logs',
+    'deduction': 'export_deduction_logs',
+    'return': 'export_return_logs',
+}
+
 
 async def export_report_task(ctx, report_type: str, filters: dict, user_id: int):
     """异步导出报表
 
     Args:
         ctx: ARQ 上下文（含 job_id）
-        report_type: 报表类型 (order/stockin/stockout/deduction)
+        report_type: 报表类型（见 _EXPORT_METHODS / ASYNC_EXPORT_REPORT_TYPES）
         filters: 筛选条件 {customer, product, status, start_date, end_date}
         user_id: 操作用户ID
 
@@ -51,10 +62,10 @@ async def export_report_task(ctx, report_type: str, filters: dict, user_id: int)
                 if total_count > 10000:
                     return {'success': False, 'error': f'报表数据量过大（{total_count} 行，上限 10000），请缩小筛选范围后重新导出', 'task_id': job_id}
                 exporter = ReportExporter()
-                export_methods = {'order': exporter.export_order_logs, 'stockin': exporter.export_stockin_logs, 'stockout': exporter.export_stockout_logs, 'deduction': exporter.export_deduction_logs}
-                export_func = export_methods.get(report_type)
-                if not export_func:
+                method_name = _EXPORT_METHODS.get(report_type)
+                if not method_name:
                     return {'success': False, 'error': f'不支持的报表类型: {report_type}', 'task_id': job_id}
+                export_func = getattr(exporter, method_name)
                 output_buffer = export_func(logs, stats)
                 import uuid
                 filename = f'{report_type}_report_{uuid.uuid4().hex[:8]}.xlsx'

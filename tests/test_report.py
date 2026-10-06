@@ -249,3 +249,27 @@ class TestGetReturnLogs:
         with _patch_generic():
             with pytest.raises(ValueError):
                 await get_return_logs(mock_async_db, start_date='2026/10/01')
+
+
+class TestExportTypeParity:
+    """导出类型口径一致性守卫
+
+    新增报表类型需四处同步：/reports/export 的 ALLOWED_REPORT_TYPES、
+    /tasks/export-report 的 ASYNC_EXPORT_REPORT_TYPES、ARQ worker 的
+    _EXPORT_METHODS、report_data_service.get_all_logs_data 的分支。
+    本类钉住前三处集合一致且方法表可解析（分支遗漏会在冒烟测试暴露）。
+    """
+
+    def test_type_sets_identical(self):
+        from fastapi_app.api.v1.endpoints.report import ALLOWED_REPORT_TYPES
+        from fastapi_app.api.v1.endpoints.tasks import ASYNC_EXPORT_REPORT_TYPES
+        from fastapi_app.tasks.report_tasks import _EXPORT_METHODS
+
+        assert set(ALLOWED_REPORT_TYPES) == set(ASYNC_EXPORT_REPORT_TYPES) == set(_EXPORT_METHODS)
+
+    def test_worker_methods_resolve(self):
+        from fastapi_app.tasks.report_tasks import _EXPORT_METHODS
+        from utils.report_exporter import ReportExporter
+
+        for attr in _EXPORT_METHODS.values():
+            assert callable(getattr(ReportExporter, attr)), attr
