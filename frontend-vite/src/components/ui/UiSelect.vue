@@ -10,13 +10,13 @@
     <div class="ui-select-wrapper">
       <ComboboxAnchor>
         <ComboboxInput
+          :id="id"
           :display-value="getDisplayValue"
           :placeholder="placeholder"
           :disabled="disabled"
           :aria-label="label || placeholder"
           :aria-required="required || undefined"
           :name="name"
-          :id="id"
           class="ui-select-input"
           @input="onInput"
         />

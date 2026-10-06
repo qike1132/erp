@@ -12,7 +12,7 @@
           {{ groupHook.error.value }}
         </UiAlert>
 
-        <PatternRoomSplitBody :is-narrow="isNarrow" v-model:drawer-open="drawerOpen">
+        <PatternRoomSplitBody v-model:drawer-open="drawerOpen" :is-narrow="isNarrow">
           <template #group-list>
             <CustomerGroupList
               :groups="groupHook.groups.value"

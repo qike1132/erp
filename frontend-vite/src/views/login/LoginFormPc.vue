@@ -4,10 +4,10 @@
     <!-- 属性名 show-password 含 password 字样，但绑定的是布尔显隐开关，不是凭据。 -->
     <!-- secret-scan:allow-next-line -->
     <LoginFormCard v-model:show-password="showPassword"
-      :loading="loading"
-      :error-msg="errorMsg"
-      v-model:form="form"
-      :handle-login="handleLogin"
+                   v-model:form="form"
+                   :loading="loading"
+                   :error-msg="errorMsg"
+                   :handle-login="handleLogin"
     />
   </div>
 </template>

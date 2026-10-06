@@ -91,15 +91,18 @@
                  cellLines 在 per-SKU 模式恒 1 行；回退模式为逐 SKU 名堆叠（与改动前逐字一致）。 -->
             <td v-if="item.row.isFirstSkuRow" :rowspan="item.row.skuRowSpan">
               <div v-for="(line, li) in item.row.cellLines" :key="`n-${li}`"
-                   :class="['sm-sku-line', { 'sm-sku-line--total': line.isTotal }]">{{ line.name }}</div>
+                   :class="['sm-sku-line', { 'sm-sku-line--total': line.isTotal }]"
+              >{{ line.name }}</div>
             </td>
             <td v-if="item.row.isFirstSkuRow" :rowspan="item.row.skuRowSpan">
               <div v-for="(line, li) in item.row.cellLines" :key="`q-${li}`"
-                   :class="['sm-sku-line', { 'sm-sku-line--total': line.isTotal }]">{{ formatQty(line.qty) }}</div>
+                   :class="['sm-sku-line', { 'sm-sku-line--total': line.isTotal }]"
+              >{{ formatQty(line.qty) }}</div>
             </td>
             <td v-if="item.row.isFirstSkuRow" :rowspan="item.row.skuRowSpan">
               <div v-for="(line, li) in item.row.cellLines" :key="`sp-${li}`"
-                   :class="['sm-sku-line', { 'sm-sku-line--total': line.isTotal }]">{{ formatQty(line.spare) }}</div>
+                   :class="['sm-sku-line', { 'sm-sku-line--total': line.isTotal }]"
+              >{{ formatQty(line.spare) }}</div>
             </td>
 
             <!-- 该 SKU 无 BOM：占位行（保留块结构，不隐藏该 SKU） -->

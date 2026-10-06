@@ -8,7 +8,7 @@
           type="text"
           placeholder="搜索产品名称"
           aria-label="搜索产品名称"
-        >
+        />
       </label>
     </div>
     <div class="osw-l-meta">
@@ -35,7 +35,7 @@
           :checked="isPickOn(g)"
           :aria-label="`勾选 ${g.productName}`"
           @click.stop="emit('toggle', g)"
-        >
+        />
         <!-- 单行：产品名称 + 跨订单角标 -->
         <span class="osw-prod-name" :title="g.productName">{{ g.productName }}</span>
         <span v-if="g.orderCount > 1" class="osw-prod-orders" :title="`该产品分布在 ${g.orderCount} 张订单`">{{ g.orderCount }}单</span>

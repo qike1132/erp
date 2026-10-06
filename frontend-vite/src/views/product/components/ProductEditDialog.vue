@@ -6,7 +6,7 @@
           <div class="bom-modal-header-left">
             <h5 class="bom-modal-title"><FontAwesomeIcon icon="edit" aria-hidden="true" /><span>编辑产品 - {{ editForm.name }}</span></h5>
           </div>
-          <button class="bom-modal-close" @click="editDialogVisible = false" aria-label="关闭"><FontAwesomeIcon icon="times" aria-hidden="true" /></button>
+          <button class="bom-modal-close" aria-label="关闭" @click="editDialogVisible = false"><FontAwesomeIcon icon="times" aria-hidden="true" /></button>
         </div>
         <div class="bom-modal-body">
           <div class="edit-modal-content">

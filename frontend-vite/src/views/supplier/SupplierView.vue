@@ -34,19 +34,19 @@
     </div>
 
     <SupplierFormDialog
+      v-model:form="form"
       :open="formOpen"
       mode="add"
       :submitting="submitting"
-      v-model:form="form"
       @update:open="formOpen = $event"
       @submit="handleAdd"
     />
 
     <SupplierFormDialog
+      v-model:form="editForm"
       :open="editDialogVisible"
       mode="edit"
       :submitting="editSubmitting"
-      v-model:form="editForm"
       @update:open="editDialogVisible = $event"
       @submit="handleEdit"
     />

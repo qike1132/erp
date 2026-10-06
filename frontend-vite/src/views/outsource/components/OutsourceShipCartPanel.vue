@@ -15,7 +15,7 @@
       <div v-if="!groups.length" class="osw-cart-empty">
         <div class="osw-cart-empty-ico"><FontAwesomeIcon icon="box-open" aria-hidden="true" /></div>
         <div class="osw-cart-empty-t">发货清单还是空的</div>
-        <div class="osw-cart-empty-s">从左侧勾选要发货的产品，在这里核对数量<br>同一工序跨订单合并为一行，数量默认等于剩余合计</div>
+        <div class="osw-cart-empty-s">从左侧勾选要发货的产品，在这里核对数量<br />同一工序跨订单合并为一行，数量默认等于剩余合计</div>
       </div>
 
       <div v-for="p in groups" :key="p.key" class="osw-cart-card">
@@ -43,7 +43,7 @@
                 type="checkbox"
                 class="osw-cbx"
                 :aria-label="`发货 ${p.productName} ${r.processType}`"
-              >
+              />
               <span class="osw-proc" :title="r.processType">{{ r.processType }}</span>
             </div>
             <div class="osw-cell-stats">
@@ -66,7 +66,7 @@
               :aria-label="`${p.productName} ${r.processType} 本次发货数量，上限 ${r.remaining}`"
               :title="isRowInvalid(r) ? `不能超过剩余未发 ${r.remaining.toLocaleString()}` : `上限 ${r.remaining.toLocaleString()}`"
               @input="onQtyInput(r, $event)"
-            >
+            />
           </div>
         </div>
       </div>

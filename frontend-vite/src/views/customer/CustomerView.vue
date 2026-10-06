@@ -27,10 +27,10 @@
 
     <!-- 新建/编辑弹窗 -->
     <CustomerFormDialog
+      v-model:form="form"
       :open="formVisible"
       :mode="formMode"
       :submitting="submitting"
-      v-model:form="form"
       @update:open="formVisible = $event"
       @submit="handleSubmit"
     />

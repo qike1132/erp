@@ -63,7 +63,8 @@
                 >
                   <template v-if="renamingTarget === 'default'">
                     <input ref="renameInputRef" v-model="renameInput" class="bom-role-edit-input" maxlength="50"
-                      @keydown.enter="commitRename" @keydown.esc="cancelRename" @blur="commitRename" @click.stop />
+                           @keydown.enter="commitRename" @keydown.esc="cancelRename" @blur="commitRename" @click.stop
+                    />
                   </template>
                   <template v-else>
                     <span class="bom-role-name">{{ defaultScopeName }}</span>
@@ -85,7 +86,8 @@
                 >
                   <template v-if="renamingTarget === role">
                     <input ref="renameInputRef" v-model="renameInput" class="bom-role-edit-input" maxlength="50"
-                      @keydown.enter="commitRename" @keydown.esc="cancelRename" @blur="commitRename" @click.stop />
+                           @keydown.enter="commitRename" @keydown.esc="cancelRename" @blur="commitRename" @click.stop
+                    />
                   </template>
                   <template v-else>
                     <span class="bom-role-name">{{ role.name }}</span>
@@ -94,7 +96,7 @@
                     <button class="bom-role-more" title="更多操作" @click.stop="toggleMenu(role)">⋯</button>
                     <div v-if="openMenu === role" class="bom-role-menu">
                       <button class="bom-menu-item" @click.stop="startRename(role, role.name)"><FontAwesomeIcon icon="pencil-alt" aria-hidden="true" /> 重命名</button>
-                      <div class="bom-menu-divider"></div>
+                      <div class="bom-menu-divider" />
                       <button class="bom-menu-item danger" @click.stop="removeRole(role); openMenu = null"><FontAwesomeIcon icon="trash-alt" aria-hidden="true" /> 删除</button>
                     </div>
                   </span>

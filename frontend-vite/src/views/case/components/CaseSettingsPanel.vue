@@ -88,8 +88,8 @@
 
               <div class="cs-add-row">
                 <input
-                  v-model="newName"
                   ref="newPartRef"
+                  v-model="newName"
                   class="cs-input"
                   placeholder="新配件名称（如：鲨鱼帽子）"
                   aria-label="新配件名称"

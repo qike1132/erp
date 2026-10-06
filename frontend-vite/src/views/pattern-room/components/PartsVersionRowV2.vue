@@ -14,7 +14,8 @@
           @click.stop="$emit('toggle-expand', group.part_name)"
         >
           <FontAwesomeIcon :icon="group.collapsed ? 'chevron-down' : 'chevron-up'"
-            aria-hidden="true" />
+                           aria-hidden="true"
+          />
         </button>
       </div>
     </td>

@@ -1,6 +1,6 @@
 <template>
-  <UiDialog :open="open" @update:open="$emit('update:open', $event)" title="采购订单详情" title-icon="" max-width-class="max-w-[720px]">
-    <template #title-icon><i class="fas fa-file-invoice" style="color:var(--color-primary-500);"></i></template>
+  <UiDialog :open="open" title="采购订单详情" title-icon="" max-width-class="max-w-[720px]" @update:open="$emit('update:open', $event)">
+    <template #title-icon><i class="fas fa-file-invoice" style="color:var(--color-primary-500);" /></template>
     <div v-if="orderPreview">
       <!-- 来源销售订单 -->
       <div v-if="orderPreview.source_orders && orderPreview.source_orders.length" class="mr-source-section">
