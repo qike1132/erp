@@ -30,9 +30,6 @@
           {{ (row as UserRow).status !== false ? '启用' : '禁用' }}
         </span>
       </template>
-      <template #column-body-create_time="{ row }">
-        {{ formatDate((row as UserRow).create_time) }}
-      </template>
       <template #column-body-actions="{ row }">
         <div class="us-action-group">
           <button class="us-action-btn us-action-primary" aria-label="权限" @click="openPermissionDialog(row as UserRow)">权限</button>
@@ -58,7 +55,6 @@
  */
 import UiDataTable from '@/components/ui/UiDataTable.vue'
 import type { TableColumn } from '@/components/ui/UiDataTable.vue'
-import { formatDate } from '@/utils/format'
 import type { User } from '@/types'
 import type { UserRow } from '@/views/user/composables/useUserManagement'
 
@@ -88,14 +84,13 @@ const emit = defineEmits<{
   delete: [row: UserRow]
 }>()
 
-/** UiDataTable 列定义 */
+/** UiDataTable 列定义（创建时间列已按需求移除；操作列居中） */
 const userColumns: TableColumn[] = [
   { field: 'username', header: '用户名', align: 'left' },
   { field: 'is_super', header: '角色', align: 'center' },
   { field: 'factory', header: '工厂', align: 'center' },
   { field: 'status', header: '状态', align: 'center' },
-  { field: 'create_time', header: '创建时间', align: 'left' },
-  { field: 'actions', header: '操作', align: 'right' },
+  { field: 'actions', header: '操作', align: 'center' },
 ]
 
 /** UiDataTable 分页变化处理：交给父组件更新查询 */
@@ -129,7 +124,8 @@ function handleDelete(row: UserRow) {
   flex: 1;
   overflow-y: auto;
   min-height: 0;
-  padding: 16px 20px;
+  /* 对齐 /customer：表格贴满卡片左右，不再留白（原 16px 20px） */
+  padding: 0;
 }
 
 /* 对齐 /purchase 的方正表格风格（用户要求）：UiDataTable 包装层自带的
@@ -175,7 +171,7 @@ function handleDelete(row: UserRow) {
 .us-action-group {
   display: flex;
   gap: 4px;
-  justify-content: flex-end;
+  justify-content: center;
   flex-wrap: wrap;
 }
 .us-action-btn {

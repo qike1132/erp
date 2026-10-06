@@ -111,6 +111,12 @@ function onPageChange(event: { page: number }) {
   overflow-y: auto;
   min-height: 0;
 }
+
+/* 对齐 /purchase 的方正表格风格（同 /user 页处理）：UiDataTable 包装层自带的
+   rounded-xl(12px) 是共享组件默认值，此处仅本页覆盖为直角 */
+.cu-table-wrap :deep(.ui-data-table-wrapper) {
+  border-radius: 0;
+}
 .cu-customer-cell {
   display: flex;
   align-items: center;
@@ -119,7 +125,7 @@ function onPageChange(event: { page: number }) {
 .cu-customer-avatar {
   width: 32px;
   height: 32px;
-  border-radius: 10px;
+  border-radius: 4px;
   background: var(--color-primary-50);
   color: var(--color-primary-600);
   font-weight: 700;
@@ -174,7 +180,7 @@ function onPageChange(event: { page: number }) {
 .cu-icon-btn {
   width: 32px;
   height: 32px;
-  border-radius: 9px;
+  border-radius: 4px;
   border: 2px solid transparent;
   display: inline-flex;
   align-items: center;
@@ -212,7 +218,7 @@ function onPageChange(event: { page: number }) {
 .cu-action-btn {
   padding: 7px 14px;
   border: 2px solid var(--color-border-light);
-  border-radius: 9px;
+  border-radius: 4px;
   background: white;
   font-size: 12px;
   font-weight: 600;

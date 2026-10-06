@@ -54,25 +54,25 @@ const emit = defineEmits<{
   margin-top: 6px;
   background: white;
   border: 1px solid var(--color-border);
-  border-radius: 12px;
+  border-radius: 14px;
   box-shadow: 0 12px 40px rgba(15, 23, 42, 0.15);
-  max-height: 260px;
+  max-height: 420px;
   overflow-y: auto;
   z-index: 20;
-  padding: 4px;
+  padding: 6px;
 }
 .pr-entry-dropdown-state {
-  padding: 16px;
-  font-size: 13px;
+  padding: 24px;
+  font-size: 16px;
   color: var(--color-text-muted);
   text-align: center;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 8px;
 }
 .pr-entry-dropdown-state i {
-  font-size: 14px;
+  font-size: 16px;
 }
 .pr-entry-dropdown-error {
   color: var(--color-danger-600);
@@ -80,14 +80,14 @@ const emit = defineEmits<{
 .pr-entry-dropdown-item {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
   width: 100%;
-  padding: 10px 12px;
+  padding: 15px 16px;
   border: none;
   background: transparent;
   text-align: left;
   cursor: pointer;
-  border-radius: 8px;
+  border-radius: 10px;
   font-family: inherit;
   color: inherit;
   transition: background 0.15s ease;
@@ -97,15 +97,15 @@ const emit = defineEmits<{
   background: var(--color-primary-50);
 }
 .pr-entry-dropdown-icon {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
   background: var(--color-border-light);
   color: var(--color-text-muted);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 13px;
+  font-size: 16px;
   flex-shrink: 0;
 }
 .pr-entry-dropdown-item.active .pr-entry-dropdown-icon {
@@ -117,10 +117,10 @@ const emit = defineEmits<{
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
 }
 .pr-entry-dropdown-name {
-  font-size: 13px;
+  font-size: 16px;
   font-weight: 700;
   color: var(--color-text);
   overflow: hidden;
@@ -130,20 +130,20 @@ const emit = defineEmits<{
 .pr-entry-dropdown-meta {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 11px;
+  gap: 10px;
+  font-size: 14px;
   color: var(--color-text-muted);
 }
 .pr-entry-dropdown-barcode {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
 }
 .pr-entry-dropdown-barcode i {
-  font-size: 10px;
+  font-size: 12px;
 }
 .pr-entry-dropdown-enter {
   color: var(--color-primary-700);
-  font-size: 12px;
+  font-size: 14px;
 }
 </style>
