@@ -49,7 +49,7 @@
 | 导入 | Excel 批量导入、PDF 出货单 OCR 识别 | `/api/v1/batch`、`/api/v1/ocr-import` |
 | 基础数据与运维 | 产品、客户、供应商、辅助接口、异步任务、死信队列、编号巡检 | `/api/v1/products`、`/api/v1/customers`、`/api/v1/suppliers`、`/api/v1/aux`、`/api/v1/tasks`、`/api/v1/dead-letter`、`/api/v1/numbering-audit` |
 
-后端共 **34 个端点模块、369 个路由处理器**：32 个扁平模块（286 个 handler）+ `backup/`、`purchase_center/` 两个**聚合包**（83 个 handler，经各自 `__init__.py` 汇总）。`fastapi_app/api/v1/router.py` 以绝对导入全部挂载，34/34 均 `include_router`，**零孤儿**（AST + 调用图实测，见附录 A）。
+后端共 **35 个路由模块、375 个路由处理器**：33 个扁平模块（292 个 handler）+ `backup/`、`purchase_center/` 两个**聚合包**（83 个 handler，经各自 `__init__.py` 汇总）。`fastapi_app/api/v1/router.py` 以绝对导入全部挂载，33/33 扁平模块均 `include_router`，**零孤儿**（AST + 调用图实测，见附录 A）。同目录下的 `import_guard.py` 是导入幂等守卫工具（被 `batch.py` 引用），**不注册路由**，不计入模块数。
 
 ### 1.2 技术栈
 
@@ -66,10 +66,10 @@
 | 可观测性 | structlog、Prometheus `/metrics`、OpenTelemetry、Sentry | — |
 | 前端 | Vue 3.5 + TypeScript 6 + Vite 7 + Pinia 3 + Vue Router 5 | Node **>= 22** |
 | UI | PrimeVue 4 + reka-ui + Tailwind CSS 4 + ECharts 6 | — |
-| 前端测试 | Vitest 4 + @vue/test-utils + jsdom（121 个测试文件） | — |
+| 前端测试 | Vitest 4 + @vue/test-utils + jsdom（128 个测试文件） | — |
 | 桌面壳 | NSSM 服务管理器（Tkinter，PyInstaller 打包为 `ERP服务器管理器_vX.Y.exe`） | 见 `server_manager/constants.py` |
 
-仓库规模：后端 `fastapi_app/` + `utils/` **126,259 行 Python**；前端 `frontend-vite/src` **92,713 行** TS/Vue（`*.vue` 48,115 / `*.ts` 44,598，其中测试 21,416 行 → 不含测试 **71,297 行**）；Alembic 迁移 **102 个 revision / 4 个 root / 单 head**；后端测试 **301 个文件**（`tests/` 114 + `fastapi_app/tests/` 187）；前端 Vitest **121 个文件**。
+仓库规模：后端 `fastapi_app/` + `utils/` **129,054 行 Python**；前端 `frontend-vite/src` **97,938 行** TS/Vue（`*.vue` 48,953 / `*.ts` 48,985，其中测试 22,042 行 → 不含测试 **75,896 行**）；Alembic 迁移 **110 个 revision / 4 个 root / 单 head**；后端测试 **308 个文件**（`tests/` 117 + `fastapi_app/tests/` 191）；前端 Vitest **128 个文件**。
 
 ---
 
@@ -127,7 +127,7 @@ ARQ worker（独立进程/服务 erp-arq）：定时备份、批量任务、cron
 
 ```text
 fastapi_app/                 后端（FastAPI + SQLAlchemy async）
-  api/v1/                    路由汇总 + 34 个端点模块（32 扁平 + 2 聚合包）
+  api/v1/                    路由汇总 + 35 个路由模块（33 扁平 + 2 聚合包）
   core/                      配置/数据库/中间件/ARQ/prod_runner 监督器
   services/                  业务服务层（backup/ 含备份、加密、恢复、清理）
   shared_models/             纯 SQLAlchemy 2.0 ORM
@@ -137,7 +137,7 @@ fastapi_app/                 后端（FastAPI + SQLAlchemy async）
 frontend-vite/               前端（Vue 3 + TS + Vite 7，Node >= 22）
   src/                       PC 与 mobile 双路由、api 层、stores、views
   scripts/                   build/check 脚本（vite-build.mjs、对齐检查等）
-migrations/versions/         Alembic 迁移（102 个，单一 head）
+migrations/versions/         Alembic 迁移（110 个，单一 head）
 server_manager.py + server_manager/  NSSM 服务管理器（唯一生产启停通道）
 scripts/                     运维与质量脚本（quality_gate.py、ops/、diag/、prod_audit/）
 config/                      nginx / redis / nssm 快照 / TLS / jwt / pgbouncer（见 config/README.md）
@@ -230,10 +230,18 @@ npm run dev                    # Vite dev server（本脚本默认 5173；vite.c
 | NSSM | **2.24** | **`C:\nssm\nssm.exe`**（不在 PATH，全部命令用绝对路径） |
 | Node.js | **>= 22** | 构建前端用（也可在别处构建后拷贝 `dist`） |
 | Git（可选但推荐） | 最新 | 拉代码与版本回滚 |
+| OpenSSL | **3.x** | §4.7 生成 RS256 密钥与随机口令需要；`openssl` 必须在 PATH 上 |
+| VC++ 运行库 | **2015–2022 x64** | Redis for Windows 与 PyInstaller 打包的管理器 exe 依赖；缺失时相关程序报 `VCRUNTIME140.dll` 找不到 |
+| 操作系统 | **Windows 10/11 或 Server 2019+（x64）** | 本部署依赖 NSSM/Windows 服务；必须是 64 位 |
 
 > 路径不是硬编码在 Python 代码里的：管理器与服务参数由 `_PROJECT_DIR` 推导；
 > 但 `config/nginx-windows.conf` 的 `include` / `alias`、`config/nssm-services.json` 里的
 > `D:\erp_system` 是**字面路径**，换路径必须替换。
+
+> ⚠️ **PG 客户端工具的落点是个坑**：解析顺序为 `PG_TOOLS_BIN` → 系统 PATH → 三个约定安装目录
+> （`C:\Program Files\PostgreSQL\*\bin`、`D:\PostgreSQL\bin`、`C:\PostgreSQL\bin`），见 [dump.py](fastapi_app/services/backup/dump.py#L25)。
+> **本机实测 `pg_dump`/`psql` 都不在 PATH 上，只靠 `D:\PostgreSQL\bin` 这个约定目录命中。**
+> 若把 PostgreSQL 装到别处又没有 `PG_TOOLS_BIN`（见 §4.8），备份会**静默降级为 JSON 导出**——功能看起来正常，产物却不是 `pg_dump`。
 
 ### 4.3 获取代码与准备目录
 
@@ -352,6 +360,7 @@ Copy-Item .env.example .env
 | `APP_ENV` | `production` | 生产自动关闭 `/api/docs`、启用强校验 |
 | `SECRET_KEY` | 4.7 生成 | 不得使用默认值/占位符 |
 | `DB_HOST/DB_PORT/DB_USER/DB_PASSWORD/DB_NAME` | `127.0.0.1 / 5432 / erp_app / <口令> / erp_system` | 连接池由 `UVICORN_WORKERS × DB_MAX_CONNECTIONS` 推导，不要另设池参数 |
+| `PG_TOOLS_BIN` | `D:\PostgreSQL\bin`（本机实际路径） | `pg_dump`/`pg_restore`/`psql` 所在目录。**留空且 PATH 里也没有 → 备份静默降级为 JSON 导出**（检测顺序见 §4.2 注） |
 | `REDIS_PASSWORD`、`REDIS_CACHE_URL`、`REDIS_BROKER_URL` | 与 4.5 一致 | broker 指向 `:6380`，cache 指向 `:6379` |
 | `ALLOWED_HOSTS` | 具体 IP/域名，**禁止 `*`** | 含 `*` 生产拒绝启动 |
 | `CORS_ORIGINS` | `http://<主机IP>:3000` | 不得含 `null` |
@@ -368,7 +377,9 @@ Copy-Item .env.example .env
 验收：
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\ops\check_env_drift.py       # [PASS]，模板 ↔ .env 无漂移
+.\.venv\Scripts\python.exe scripts\ops\check_env_drift.py       # 门禁口径（代码引用 ↔ .env.example）= 0；
+#   但**不带 --ci 的全量检查会 FAIL**：它还会比对运行时 .env 与两份灾备件 .env.production
+#   （本机当前 6 处 `!!`：.env.production 与 config/.env.production 各缺 3 键），详见附录 A.1
 .\.venv\Scripts\python.exe start.py --prod --check             # prod_runner 环境自检（不起进程）
 ```
 
@@ -398,7 +409,8 @@ cd D:\erp_system
 **B. 全新空白库引导**：迁移后库内没有任何用户，需要手工建一次 `admin`（系统没有内置种子）：
 
 ```powershell
-# 1) 生成 Argon2id 口令哈希（口令策略见 utils/password_validator.py：**≥6 位**，不强制字符类别）
+# 1) 生成 Argon2id 口令哈希（口令策略见 utils/password_validator.py：**≥6 位**，
+#    且**必须同时含大写字母 + 小写字母 + 数字**；弱口令黑名单只拒最明显者，"123456" 按业务要求放行）
 .\.venv\Scripts\python.exe -c "from fastapi_app.core.security import hash_password; print(hash_password('<你的强密码>'))"
 ```
 
@@ -447,11 +459,19 @@ Copy-Item D:\erp_system\config\uploads-signing.conf.example D:\erp_system\config
 C:\nginx\nginx.exe -p D:\erp_system -c D:\erp_system\config\nginx-windows.conf -t
 ```
 
-- 配置里含网关层限流（当前 `limit_req_dry_run on`，只记日志不拒绝），观察 3–7 天无误伤后改为 `off` 正式生效。
+- 配置里含网关层限流，**已翻正为 enforce 正式生效**（`b303a43c` 于 2026-10-03 移除 `limit_req_dry_run`；`perip` 放宽到 180r/m + burst 60）。此前「只记日志不拒绝」的观察期结论已写入配置注释。
 - `server_tokens off`、安全响应头、`/metrics` 仅本机白名单均已配置。
 - Windows 官方 nginx 无 upstream keepalive 模块，配置刻意不用 keepalive（用了会 400）。
 
 **防火墙**：只放行入站 TCP **3000**（启用 443 时再加 **443**）；5002/5432/6379/6380 一律仅回环。
+
+```powershell
+# 管理员 PowerShell（只放行用户入口；其余端口本就只绑回环，无需额外规则）
+New-NetFirewallRule -DisplayName "erp-web-3000" -Direction Inbound -Protocol TCP -LocalPort 3000 -Action Allow
+# 启用 443 时再加一条：
+New-NetFirewallRule -DisplayName "erp-web-443"  -Direction Inbound -Protocol TCP -LocalPort 443  -Action Allow
+# 核对：Get-NetFirewallRule -DisplayName "erp-web-*" | Format-Table DisplayName,Enabled,Direction,Action
+```
 
 ### 4.13 安装五个 Windows 服务
 
@@ -612,7 +632,7 @@ cd ..
 
 规则与约定：
 
-- **保持单一 head**（`scripts/check_alembic_heads.py` 与质量门禁共同守护）；迁移图不是线性链：102 个 revision、4 个 root。
+- **保持单一 head**（`scripts/check_alembic_heads.py` 与质量门禁共同守护）；迁移图不是线性链：110 个 revision、4 个 root。
 - 迁移只做结构/数据变更，**不夹带业务逻辑**。
 - `alembic.ini` 必须**纯 ASCII**（Alembic 以系统 locale 读取，中文 Windows 的 GBK 会 `UnicodeDecodeError`）。
 - `sqlalchemy.url` 只是占位，运行时由 `migrations/env.py` 用 `.env` 的 `DATABASE_URL` 覆盖。
@@ -702,7 +722,7 @@ npm run check:routes                                   # 路由对齐检查
 - 密钥扫描误报的正确处置：命中行尾加 `secret-scan:allow <理由>`；`.githooks/allowlist.txt` 是逐文件豁免，新增条目必须在提交信息里说明理由。
 - 本机未安装 `pre-commit` 时第 ④ 层降级（暂存含 `.py`/`.vue` 才直接跑门禁）；恢复完整门禁：`pip install pre-commit`。
 - CI：`.github/workflows/ci-cd.yml`（Ubuntu + Postgres 服务容器，跑迁移、后端测试、前端构建与检查）。CI **不部署**生产（托管 runner 无法访问内网机）。
-- ⚠️ CI 的 `lint` job 里有一个**存量即红**的步骤：`ruff check fastapi_app tests fastapi_app/tests utils`（全 scope、无基线棘轮）当前有 **24 条既有违规**（8× `S101` 生产代码里的 `assert`、3× `I001`、3× `F401`、3× `C416`、2× `RUF059`、2× `RUF036`，以及 `UP035`/`B007`/`S105` 各 1）。工作流自己的注释写明：棘轮门禁故意放在它**前面**，“即使 ruff 步骤因存量告警失败，门禁结果仍可见” —— 即该步骤的失败是**已知存量**，权威口径是棘轮门禁（见附录 A 遗留项 4）。
+- ✅ CI 的 `lint` job 曾有个**存量即红**的步骤：`ruff check fastapi_app tests fastapi_app/tests utils`（全 scope、无基线棘轮）曾有 **24 条既有违规**。**已于 `cf0fc743`（2026-10-03）全部清掉，该步骤现在全绿** —— 本机复核确认 `cf0fc743` 已在 `erp/main` 上。棘轮门禁仍刻意放在它**前面**，保证两者结果都可见。
 
 ---
 
@@ -755,40 +775,67 @@ npm run check:routes                                   # 路由对齐检查
 
 ---
 
-## 附录 A. 质量与审计快照（2026-10-03，第四轮全量复核）
+## 附录 A. 质量与审计快照
 
-本轮是**只读全量复核**（不动业务代码）：计数一律用 `ast` 与 Alembic 官方 API 现场实测，不用正则 ——
-本轮据此纠正了 §1.1（端点模块数）、§1.2（前端行数）、§2.4、§7（盘根备份路径）与 §10（响应形状）的 5 处与现场不符。
+### A.1 结构与现场复核（2026-10-06）
+
+本轮为**只读复核**（不动业务代码）：计数一律用 `ast` 与 Alembic 官方 API 现场实测，不用正则。
+**取值口径 = 提交态 HEAD** —— 复核当时工作区含其它线程的未提交改动，不能作为文档口径。
+据此刷新了 §1.1（路由模块数）、§1.2（规模）、§2.4、§6 与 §9 的过期数字。
+
+**本轮未重跑** heavy gates（quality_gate / mypy / 前端检查 / 全量 pytest）：工作区不是干净树，
+重跑结果不代表任何已提交状态。下表 A.1 为今日实测的**结构与现场**结论，A.2 为 2026-10-03 的**重运行**结论（沿用）。
 
 | 检查 | 结果 |
 |---|---|
-| `scripts/quality_gate.py`（项目 `.venv`） | **PASS** —— 10 项全部「与基线一致」（N+1 0 / 宽 except 5 / 超长函数 51 / 巨型组件 7 / service commit 12 / BOM 0 / Alembic 图 0 / 环境漂移 0 / ruff 59 / pip-audit 豁免策略 0） |
+| 端点模块与路由（AST） | **35 个路由模块 / 375 个 handler**；33 个扁平模块全部 `include_router`，**零孤儿**；同目录 `import_guard.py` 0 路由、不挂载 |
+| Alembic（`ScriptDirectory` API） | **单 head**（`pg_standalone_072_stock_return_fk_restrict`）；110 revisions / **4 roots**（工作区另有 1 个未提交迁移 073，故现场 `heads` 会显示为 073） |
+| 后端规模 | `fastapi_app/` 126,956 + `utils/` 2,098 = **129,054 行**（574 个 `.py`） |
+| 前端规模 | `frontend-vite/src` **97,938 行**（`.vue` 48,953 / `.ts` 48,985；测试 22,042 → 不含测试 75,896） |
+| 后端测试文件 | **308 个**（`tests/` 117 + `fastapi_app/tests/` 191） |
+| 前端测试文件 | **128 个** vitest |
+| 门禁基线（`scripts/gate_baseline.json`） | 超长函数 **42**（上一版 51）、巨型 Vue 组件 **6**（上一版 7）、宽 except 5、service commit 12、ruff 59，其余 0 |
+| `scripts/check_orphan_modules.py` | **PASS** —— 白名单 368/368 有入边；仅剩 1 条 WARN（`purchase_order_spare.py` 只被 `scripts/` 引用，不阻断） |
+| `scripts/check_alembic_heads.py` | **PASS**（heads=1、bases=4） |
+| 门禁 `env_drift` 子项 | **0**（口径：代码引用 ↔ `.env.example`） |
+| `scripts/ops/check_env_drift.py`（全量） | **FAIL，6 处 `!!`** —— `.env.production` 与 `config/.env.production` 各缺 3 键（`ALLOW_NEGATIVE_STOCK`、`INVENTORY_RECONCILE_ENABLED`、`UPLOAD_URL_SIGNING_SECRET`）；运行时 `.env` 另有 52 处 `??` 缺模板键（走默认值）与 3 处陈旧键（`FLASK_*`、`API_URL`） |
+| 运行环境实测 | Python **3.13.13** / PostgreSQL **18.3** / nginx **1.30.4** / NSSM **2.24** / Node **24.14.0** / OpenSSL **3.5.5** ✓ |
+| `pg_dump` 可达性 | **不在 PATH**，靠 `D:\PostgreSQL\bin` 约定目录命中（见 §4.2 注与 §4.8 `PG_TOOLS_BIN`） |
+| NSSM 五服务与端口 | `erp-prod`→依赖 `erp-redis`、`erp-arq`→依赖 `erp-redis-broker`、broker 6380；与 `config/nssm-services.json` 一致 |
+| 生产健康 | `logs/prod_runner.json`：`mode=production`、`ready=true`、`frontend_ok=true`、`workers=8`、`arq.status=external`（正常设计） |
+| 密钥卫生 | `.env`、`config/uploads-signing.conf`、`config/tls/*.key`、`config/pgbouncer/userlist.txt`、`_ops/credentials/**` 均被 `git check-ignore` 命中；版本库内只有 `*.example` 模板 |
+
+### A.2 全量门禁与回归（2026-10-03 运行，本轮未重跑）
+
+| 检查 | 结果 |
+|---|---|
+| `scripts/quality_gate.py`（项目 `.venv`） | **PASS** —— 10 项全部「与基线一致」（当时超长函数 51 / 巨型组件 7 —— 已被 `820a6554` 收紧为 42 / 6） |
 | `ruff check .` | 123 个既有违规（全仓口径；门禁口径 `scripts/ + server_manager/` = 59 与基线一致） |
 | `mypy` | **Success: no issues found in 368 source files** |
 | 前端 `vue-tsc --noEmit` | **0 错误**（Node v24.14.0） |
 | 前端 `npm run lint` | **0 error / 168 warning** |
 | `npm run check:api` / `check:routes` | **通过**（API 层 108 端点 / 移动端 44 文件 / PC 195 视图；移动端独有路由 3 条属正常差异） |
-| 端点模块与路由（AST + 调用图） | **34 个端点模块 / 369 个 handler**；34/34 全部 `include_router`，**零孤儿** |
-| Alembic（`ScriptDirectory` API） | **单 head**（`pg_standalone_063_fix_order_status_check`）；102 revisions / **4 roots** |
-| 环境变量漂移 | **0 处** |
-| NSSM 五服务与端口 | `erp-prod`→依赖 `erp-redis`、`erp-arq`→依赖 `erp-redis-broker`、broker 6380；与 `config/nssm-services.json` 一致 |
-| 生产健康 | `logs/prod_runner.json`：`mode=production`、`ready=true`、`frontend_ok=true`、`workers=8`（`arq.status=external` 属正常设计） |
-| 密钥卫生 | `.env`、`config/uploads-signing.conf`、`config/tls/*.key`、`config/pgbouncer/userlist.txt`、`_ops/credentials/**` 均被 `git check-ignore` 命中；版本库内只有 `*.example` 模板 |
-| 后端 `pytest`（全量 4113 项） | **1 failed / 3844 passed / 268 skipped（6 分 38 秒）**（含本轮新增的 4 个孤儿门禁回归用例）；唯一失败项仍是盘根用例（见下）。日志 `logs/pytest_audit_2026-10-03_after_gate_fix.log` |
-| `scripts/check_orphan_modules.py` | **PASS** —— 白名单 **368/368 有入边**（2026-10-03 修复：边集按导入语义补祖先包；修复前 6 个 `__init__.py` 零入边）；仅剩 1 条 WARN（`purchase_order_spare.py` 只被 `scripts/` 引用，不阻断） |
+| 后端 `pytest`（全量 4113 项） | **1 failed / 3844 passed / 268 skipped（6 分 38 秒）**；唯一失败项是盘根用例（见 A.3）。日志 `logs/pytest_audit_2026-10-03_after_gate_fix.log` |
 
-唯一失败用例 —— `fastapi_app/tests/test_backup_m1.py::TestValidatePath::test_existing_root_parent_allowed`（单文件复跑稳定复现：1 failed / 25 passed）：
+本章上一版仍写作「存量即红」的项，均已在 2026-10-03/04 落地修复：
+
+- `cf0fc743` —— 清掉 CI `Run Ruff gate` 的 24 条存量违规，lint job 全绿（见 §9）。
+- `820a6554` —— 门禁棘轮收紧：超长函数 51→42、巨型 Vue 组件 7→6。
+- `b303a43c` —— nginx 限流去掉 `limit_req_dry_run`，翻正为 enforce（见 §4.12）。
+
+### A.3 遗留关注项
+
+唯一失败用例（2026-10-03 全量运行）—— `fastapi_app/tests/test_backup_m1.py::TestValidatePath::test_existing_root_parent_allowed`（单文件复跑稳定复现：1 failed / 25 passed）：
 
 - **现象**：断言 `validate_path('D:\no_such_dir_xyz\backups')` 合法，实际返回 `{'valid': False, 'error': '目录不可写: D:\'}`（单文件复跑稳定复现）。
 - **根因**：`validate_path` 向上找最近存在的父目录，落点是**盘符根 `D:\`**，而 `_is_writable` 是在该目录**建临时文件**；本机实测 `_is_writable('D:\') == False`、`_is_writable('D:\erp_system') == True`。
 - **性质：环境相关，不是稳定功能缺陷**。证据链：同一会话里 bash `touch /d/x` **成功**、`icacls D:\` 显示 `Authenticated Users:(M)` / `Administrators:(F)`（有写权限），但项目 `.venv` 的 Python 对 `D:\` 根做 `open(...,'w')` 与 `mkstemp` **均** `PermissionError [Errno 13]` —— 属**进程级**限制（安全策略/软件），不是 ACL。生产服务 `erp-prod`/`erp-arq` 以 **LocalSystem** 运行（注册表 `ObjectName`），口径未必与本机 shell 相同。
 - **代码层面真正该修的点（与环境无关）**：①`_is_writable` 的 docstring 写「尽力而为,失败不阻断」，但 `validate_path` 拿 False 当硬否决 —— 口径自相矛盾；②用「建文件」探测盘根本就不成立（盘根允许建目录、未必允许建文件）；③该用例硬编码 Windows 路径，Linux runner 上向上查找的落点是 CWD（可写），因此 **CI 抓不到**这层环境差异。
 
-遗留关注项（均非本轮引入，按处理优先级排序）：
-
-1. **备份路径校验的盘根口径不稳**（上表唯一失败用例）：可写探测 = 试建文件，结论随执行账户/进程而变；且 `_is_writable` 的 docstring（「失败不阻断」）与 `validate_path`（硬否决）矛盾。修法需先定语义：允许盘根 → 改探测方式（试建**子目录**）且让 docstring 与实现一致；拒绝 → 明确错误文案 + 把用例改成不依赖 Windows 盘根（否则 CI 永远抓不到）。
+1. **备份路径校验的盘根口径不稳**（上方唯一失败用例）：可写探测 = 试建文件，结论随执行账户/进程而变；且 `_is_writable` 的 docstring（「失败不阻断」）与 `validate_path`（硬否决）矛盾。修法需先定语义：允许盘根 → 改探测方式（试建**子目录**）且让 docstring 与实现一致；拒绝 → 明确错误文案 + 把用例改成不依赖 Windows 盘根（否则 CI 永远抓不到）。
 2. **依赖漏洞**：现场 pip-audit 曾报 25 个包 172 条漏洞（其中 166 条已有修复版本），`pyproject.toml` 当前 **0 条豁免**。正确处理是升级依赖，而不是登记豁免；破坏面评估后再批量升级。
 3. **`fastapi_app/README.md` 仍陈旧**：第 8–10 行写 PostgreSQL 16 / Celery（含 `celery_app.py`），与实际（PG 18 / ARQ）不符；同文件第 156 行已自我纠正，前后矛盾，可另行修订。
-4. **CI `Run Ruff gate` 步骤存量即红**（见 §9 末条）：24 条既有违规（9 条可 `--fix`）。其中 8 条 `S101` 是生产代码里的 `assert`（`python -O` 下会被剥离，值得单独评估），其余为导入排序/未用导入/冗余推导式一类低风险项。清理后应同步收紧该步骤的全 scope 口径。
+4. ~~**CI `Run Ruff gate` 步骤存量即红**~~ —— **已于 `cf0fc743` 修复**（清掉 24 条存量违规，lint job 全绿，见 §9）。
+5. **`README_DEPLOY.txt` 曾与 README.md 互相矛盾**（写 v5.33 而实际 v5.34；口令口径写成「≥8 位 + 字母数字」）。已于 2026-10-06 对齐并互链，今后**单一真相源为 README.md**。
 
 口径提醒：门禁必须用项目 `.venv` 跑 —— 系统解释器的 site-packages 会被 pip-audit 扫出上百条与本项目无关的漏洞，属纯口径噪声（见 `docs/runbooks/service-lifecycle.md` 第 3 层说明）。
