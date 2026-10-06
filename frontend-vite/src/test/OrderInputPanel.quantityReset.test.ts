@@ -14,6 +14,7 @@ const form = reactive({
   note: '',
   deductStock: false,
   deductQuantity: 0,
+  shipmentPlans: [],
 } as FormState)
 
 function mountPanel(): VueWrapper<InstanceType<typeof OrderInputPanel>> {
@@ -72,7 +73,7 @@ describe('OrderInputPanel OCR 热区显隐', () => {
       global: {
         stubs: {
           UiAutocomplete: { template: '<input />' },
-          OrderOcrPaste: { template: '<div class="stub-ocr" />' },
+          OcrPasteImport: { template: '<div class="stub-ocr" />' },
         },
       },
       props: {

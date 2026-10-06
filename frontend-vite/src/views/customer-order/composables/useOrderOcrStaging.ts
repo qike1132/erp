@@ -25,5 +25,7 @@ export function buildOrderStagedItems(
     note: draft.note || '',
     deductStock: false,
     deductQuantity: 0,
+    // 分批出货计划（2026-10-06 v2）：OCR 导入条目默认无计划，可在暂存编辑弹窗补设
+    shipmentPlans: [],
   }))
 }

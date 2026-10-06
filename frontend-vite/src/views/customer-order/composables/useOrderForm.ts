@@ -2,6 +2,7 @@ import { ref, reactive, computed } from 'vue'
 import { auxApi } from '@/api'
 import { useCatalogStore } from '@/stores/catalog'
 import { isQuantityOutOfRange } from './quantityRange'
+import { planSplitsMessage } from './shipmentPlanRules'
 import type { FormState, ProductSuggestion, AvailableStockinItem } from './types'
 
 /** 产品搜索防抖由 UiAutocomplete 内部处理 */
@@ -60,6 +61,7 @@ export function useOrderForm() {
     deductStock: false,
     deductQuantity: 0,
     note: '',
+    shipmentPlans: [],
   })
   const isOrder = computed(() => form.type === 'order')
   /**
@@ -78,6 +80,13 @@ export function useOrderForm() {
 
   /** 数量已填但超出 [1, 9,999,999]（0、负数、超上限都算） */
   const quantityOutOfRange = computed(() => isQuantityOutOfRange(form.quantity))
+
+  /**
+   * 分批出货计划值错误（2026-10-06 v2）：''=合法。
+   * 与 quantityOutOfRange 同通道——缺项走 missingFields，值错误单独表达。
+   */
+  const planSplitsInvalid = computed(() =>
+    isOrder.value ? planSplitsMessage(form.shipmentPlans, form.quantity) : '')
 
   const canAdd = computed(() => missingFields.value.length === 0 && !quantityOutOfRange.value)
 
@@ -143,6 +152,7 @@ export function useOrderForm() {
     form.deductStock = false
     form.deductQuantity = 0
     deductInfoVisible.value = false
+    form.shipmentPlans = []
   }
 
   return {
@@ -151,6 +161,7 @@ export function useOrderForm() {
     canAdd,
     missingFields,
     quantityOutOfRange,
+    planSplitsInvalid,
     customerOptions,
     searchProducts,
     productSearchFailed,

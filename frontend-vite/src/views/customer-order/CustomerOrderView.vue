@@ -153,6 +153,7 @@ const {
   isOrder,
   missingFields,
   quantityOutOfRange,
+  planSplitsInvalid,
   customerOptions,
   searchProducts,
   productSearchFailed,
@@ -254,6 +255,11 @@ function addStaged() {
     showToast(QUANTITY_RANGE_MESSAGE, 'warning')
     return
   }
+  // 分批出货计划值错误（排满口径/行完整性）与数量越界同通道拦截
+  if (planSplitsInvalid.value) {
+    showToast(planSplitsInvalid.value, 'warning')
+    return
+  }
   stagedItems.value.push({
     uid: genUid(),
     // 手工条目只存在于前端：导入时不会被服务端结果替换
@@ -267,6 +273,8 @@ function addStaged() {
     note: form.note,
     deductStock: isOrder.value ? form.deductStock : false,
     deductQuantity: isOrder.value && form.deductStock ? form.deductQuantity : 0,
+    // 分批出货计划仅订单类型生效；备货条目一律无计划
+    shipmentPlans: isOrder.value ? form.shipmentPlans.map((s) => ({ ...s })) : [],
   })
   resetFormAfterAdd()
   inputPanelRef.value?.resetQuantityValidation()

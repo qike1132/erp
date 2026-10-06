@@ -86,6 +86,9 @@
           />
         </div>
 
+        <!-- 出货计划（2026-10-06）：仅订单类型；未勾选时界面与原流程零差异 -->
+        <ShipmentPlanControl v-if="isOrder" v-model:form="form" />
+
         <div class="co-form-group">
           <label class="co-label" for="co-note">备注</label>
           <textarea
@@ -141,6 +144,7 @@ import UiButton from '@/components/ui/UiButton.vue'
 import UiAutocomplete from '@/components/ui/UiAutocomplete.vue'
 import OrderTypeSwitch from './OrderTypeSwitch.vue'
 import OrderDeductControl from './OrderDeductControl.vue'
+import ShipmentPlanControl from './ShipmentPlanControl.vue'
 import OrderExcelImport from './OrderExcelImport.vue'
 import OcrPasteImport from '@/components/ocr/OcrPasteImport.vue'
 import { buildOrderStagedItems } from '../composables/useOrderOcrStaging'

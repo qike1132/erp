@@ -35,12 +35,12 @@ from fastapi_app.shared_models import (
 logger = logging.getLogger(__name__)
 
 
-async def orchestrate_batch_orders(db: AsyncSession, orders_data: list[dict]) -> dict:
-    """编排批量订单提交：创建订单 → 缓存失效 → 事件发布"""
+async def orchestrate_batch_orders(db: AsyncSession, orders_data: list[dict], created_by: str = '') -> dict:
+    """编排批量订单提交：创建订单 → 出货计划同步（同事务）→ 缓存失效 → 事件发布"""
     from fastapi_app.services.order_service import batch_create_orders
     try:
         async with db_transaction(db):
-            result = await batch_create_orders(db, orders_data)
+            result = await batch_create_orders(db, orders_data, created_by=created_by)
 
         await cache_mgr.invalidate(
             InvalidationStrategy.DOMAIN,

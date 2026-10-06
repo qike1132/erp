@@ -139,6 +139,37 @@ def _validate_one_item(order_data: dict, customer: str, product_map: dict, resul
             product.name, product_id,
         )
 
+    # 出货计划前置校验（2026-10-06 v2 分批版）：非空时逐批校验日期/数量，
+    # 且各批数量之和必须排满订单数量（用户裁决口径）；前置拦截比同步阶段报错更友好
+    raw_plans = order_data.get('shipment_plans') or []
+    shipment_plans: list[dict] = []
+    if raw_plans:
+        splits_total = 0
+        for split in raw_plans:
+            if not isinstance(split, dict):
+                _fail('分批出货计划数据格式错误')
+            plan_date_raw = str(split.get('plan_date') or '').strip()
+            if not plan_date_raw:
+                _fail('分批出货计划缺少出货日期')
+            try:
+                datetime.strptime(plan_date_raw, '%Y-%m-%d')
+            except ValueError:
+                _fail(f'出货日期格式错误，请使用 YYYY-MM-DD：{plan_date_raw}')
+            try:
+                split_qty = int(split.get('quantity', 0))
+            except (TypeError, ValueError):
+                _fail('分批数量必须为正整数')
+            if split_qty <= 0:
+                _fail('分批数量必须为正整数')
+            splits_total += split_qty
+            shipment_plans.append({
+                'plan_date': plan_date_raw,
+                'quantity': split_qty,
+                'note': str(split.get('note') or '').strip(),
+            })
+        if splits_total != quantity:
+            _fail(f'分批出货计划数量之和({splits_total})必须等于订单数量({quantity})')
+
     return {
         'product_id': product_id,
         'quantity': quantity,
@@ -147,6 +178,8 @@ def _validate_one_item(order_data: dict, customer: str, product_map: dict, resul
         'deduct_quantity': int(order_data.get('deduct_quantity', 0) or 0),
         'note': order_data.get('note', ''),
         'order_date': order_data.get('order_date') or '',
+        # 分批出货计划（v2）：空列表 = 无计划；同步落库由 _sync_shipment_plans 在同客户 savepoint 内完成
+        'shipment_plans': shipment_plans,
     }
 
 
@@ -254,6 +287,51 @@ async def _apply_deductions(
             raise _SavepointRollbackSignalError() from ded_err
 
 
+async def _sync_shipment_plans(
+    db: AsyncSession, order: Order, validated_items: list, customer: str, results: list, created_by: str,
+) -> None:
+    """把带出货计划标记的条目同步为采购计划明细（与订单同一 savepoint）。
+
+    同步失败 → 该客户订单组整体回滚（订单与计划同生共死，2026-10-06 设计稿）：
+    结果记入 results 后抛 _SavepointRollbackSignalError 触发回滚。
+
+    契约：sync 函数只抛 ValueError（本函数捕获并转为组失败）；
+    TypeError/OSError 属不可预期异常，向上传播走批量编排的整批失败分支
+    （该分支不做回调裁剪——回调残留仅威胁事件广播，不威胁数据一致性，2026-10-06 评审）。
+    """
+    from fastapi_app.services.shipment_plan_sync import sync_order_items_to_plans
+
+    # 记录本组 post-commit 回调注册标记：同步失败整组回滚时，同步过程中
+    # create_plan/add_details 注册的回调必须一并裁剪，否则外层提交会对已回滚的
+    # plan_id 广播 SHIPMENT_PLAN_UPLOADED（幽灵事件，2026-10-06 评审 P2）。
+    # 仅在确有分批计划时取标记，且 db.info/回调列表均做类型防护 —— Session.info
+    # 在生产恒为真实 dict，但测试 mock 可能不是，脆弱性不应外溢成整组失败。
+    callback_mark: int | None = None
+    if any(it.get('shipment_plans') for it in validated_items) and isinstance(db.info, dict):
+        callbacks = db.info.get('post_commit_callbacks')
+        callback_mark = len(callbacks) if isinstance(callbacks, list) else 0
+    try:
+        await sync_order_items_to_plans(
+            db,
+            customer_name=customer,
+            order_no=order.order_no,
+            validated_items=validated_items,
+            created_by=created_by,
+        )
+    except ValueError as sync_err:
+        if callback_mark is not None and isinstance(db.info, dict):
+            callbacks = db.info.get('post_commit_callbacks')
+            if isinstance(callbacks, list):
+                db.info['post_commit_callbacks'] = callbacks[:callback_mark]
+        logger.error(f"出货计划同步失败 customer={customer}: {sync_err}")
+        results.append({
+            'success': False,
+            'error': f'出货计划同步失败：{sync_err}',
+            'customer': customer,
+        })
+        raise _SavepointRollbackSignalError() from sync_err
+
+
 def _build_success_result(order: Order, customer: str, created_items: list) -> dict:
     """组装单个客户的成功结果（含全部 SKU 明细）。"""
     return {
@@ -318,12 +396,12 @@ async def _dispatch_notifications(
         )
 
 
-async def batch_create_orders(db: AsyncSession, orders_data: list) -> dict:
+async def batch_create_orders(db: AsyncSession, orders_data: list, created_by: str = '') -> dict:
     """批量创建订单
 
     按 customer 聚合：同一客户的多个 SKU 生成 1 个主订单 + N 个 OrderItem。
-    注意：同步至采购中心的操作不在此函数内执行，由调用方在事务提交后统一处理，
-    以确保同步线程池中的独立 Session 能读取到已提交的订单数据。
+    带 shipment_plans 分批计划的条目在本函数内（同客户 savepoint 中，订单创建成功后）
+    同步为采购计划明细，与订单同事务原子：同步失败整组回滚（2026-10-06 设计稿）。
     """
     results: list[dict] = []
     created_order_ids: list[int] = []
@@ -346,6 +424,7 @@ async def batch_create_orders(db: AsyncSession, orders_data: list) -> dict:
                 created_items = await _create_order_items(db, order, customer, validated_items)
                 await _auto_generate_outsource(db, order)
                 await _apply_deductions(db, order, created_items, validated_items, customer, results)
+                await _sync_shipment_plans(db, order, validated_items, customer, results, created_by)
                 results.append(_build_success_result(order, customer, created_items))
                 created_order_ids.append(order.id)
                 await _dispatch_notifications(db, order, created_items, product_map)

@@ -102,6 +102,8 @@ function toStagedOrder(i: StagingOrderItem): StagedItem {
     note: i.note,
     deductStock: i.deduct_stock,
     deductQuantity: i.deduct_quantity || 0,
+    // 导入条目默认无分批计划，可在暂存编辑弹窗补设（2026-10-06 v2）
+    shipmentPlans: [],
   }
 }
 
@@ -118,6 +120,7 @@ function toStagedStockin(i: StagingStockinItem): StagedItem {
     note: i.note,
     deductStock: false,
     deductQuantity: 0,
+    shipmentPlans: [],
   }
 }
 

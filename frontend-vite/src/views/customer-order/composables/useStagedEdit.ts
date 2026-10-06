@@ -7,6 +7,7 @@ import { ref, type Ref } from 'vue'
 import { auxApi } from '@/api'
 import { showToast } from '@/composables/useToast'
 import { QUANTITY_RANGE_MESSAGE, isQuantityOutOfRange } from './quantityRange'
+import { planSplitsMessage } from './shipmentPlanRules'
 import type { StagedItem, AvailableStockinItem } from './types'
 
 export function useStagedEdit(stagedItems: Ref<StagedItem[]>) {
@@ -19,7 +20,10 @@ export function useStagedEdit(stagedItems: Ref<StagedItem[]>) {
     const idx = stagedItems.value.findIndex((i) => i.uid === uid)
     if (idx < 0) return
     editStagedIdx.value = idx
-    const data: StagedItem = { ...stagedItems.value[idx]! }
+    const source = stagedItems.value[idx]!
+    // 深拷贝分批计划（2026-10-06 v2 评审 BLOCK）：数组若与暂存条目共享引用，
+    // 弹窗内的增删改会原地污染暂存数据，用户点「取消」也无法回退
+    const data: StagedItem = { ...source, shipmentPlans: source.shipmentPlans.map((s) => ({ ...s })) }
     editStagedData.value = data
     editStagedVisible.value = true
     if (data.type === 'order' && data.productId && data.customer) {
@@ -43,11 +47,28 @@ export function useStagedEdit(stagedItems: Ref<StagedItem[]>) {
       showToast(QUANTITY_RANGE_MESSAGE, 'warning')
       return
     }
+    // 分批出货计划校验（2026-10-06 v2）：行完整性 + 排满口径，
+    // 与录入表单同规则同文案，否则提交时会被后端整组拒绝
+    if (editStagedData.value && editStagedData.value.type === 'order') {
+      const msg = planSplitsMessage(editStagedData.value.shipmentPlans, editStagedData.value.quantity)
+      if (msg) {
+        showToast(msg, 'warning')
+        return
+      }
+    }
     if (editStagedIdx.value >= 0 && editStagedData.value) {
       if (editStagedData.value.deductQuantity > 0) editStagedData.value.deductStock = true
-      stagedItems.value[editStagedIdx.value] = { ...editStagedData.value }
+      // 落回同样深拷贝（2026-10-06 排查 INV-2）：落回若共享数组，暂存条目会与
+      // 仍存活的 editStagedData 保持引用关联，任何后续原地修改都会双向外溢
+      const saved = editStagedData.value
+      stagedItems.value[editStagedIdx.value] = {
+        ...saved,
+        shipmentPlans: saved.shipmentPlans.map((s) => ({ ...s })),
+      }
     }
     editStagedVisible.value = false
+    // 释放编辑副本：关闭弹窗后不留持数组引用的存活对象
+    editStagedData.value = null
   }
 
   return {

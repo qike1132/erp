@@ -55,7 +55,7 @@ function stagedItem(quantity: number): StagedItem {
     uid: 's1', origin: 'manual', type: 'order',
     customer: '审计客户', productId: 101, productName: '审计产品',
     quantity, date: '2026-09-18', note: '', deductStock: false,
-    deductQuantity: 0,
+    deductQuantity: 0, shipmentPlans: [],
   }
 }
 

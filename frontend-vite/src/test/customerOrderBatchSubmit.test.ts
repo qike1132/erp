@@ -58,6 +58,7 @@ function item(uid: string, type: 'order' | 'stockin'): StagedItem {
     note: '',
     deductStock: false,
     deductQuantity: 0,
+    shipmentPlans: [],
   }
 }
 

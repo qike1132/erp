@@ -8,7 +8,7 @@ import os
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlalchemy import delete, func, select, tuple_, update
+from sqlalchemy import delete, func, or_, select, tuple_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 
@@ -56,6 +56,7 @@ from fastapi_app.shared_models import (
     OutsourceShipment,
     OutsourceShipmentItem,
     Product,
+    PurchasePlanDetail,
     StockIn,
     StockOut,
     SyncRetryQueue,
@@ -402,6 +403,14 @@ async def _collect_order_deletion_graph(db: AsyncSession, order: Order, order_id
         'shipments': await _fetch_model_rows(
             db, OutsourceShipment, OutsourceShipment.order_id == order_id,
         ),
+        # 该订单同步产生的采购计划明细（分号边界防前缀误伤），供备份与级联清理
+        'shipment_plan_details': await _fetch_model_rows(
+            db, PurchasePlanDetail,
+            or_(
+                PurchasePlanDetail.remark == f'来源订单:{order.order_no}',
+                PurchasePlanDetail.remark.like(f'来源订单:{escape_like(order.order_no)}；%'),
+            ),
+        ),
     }
 
 
@@ -443,6 +452,7 @@ def _order_deletion_backup_payload(
         'order_status_logs': _serialize_model_rows(graph['status_logs'], OrderStatusLog),
         'outsource_shipments': _serialize_model_rows(graph['shipments'], OutsourceShipment),
         'outsource_shipment_items': _serialize_model_rows(graph['shipment_items'], OutsourceShipmentItem),
+        'shipment_plan_details': _serialize_model_rows(graph['shipment_plan_details'], PurchasePlanDetail),
     }
 
 
@@ -506,8 +516,11 @@ async def _purge_outsource_processes(db: AsyncSession, process_ids: list[int]) -
 
 async def _purge_order_related_rows(
     db: AsyncSession, order: Order, order_id: int, graph: dict,
-) -> None:
-    """删除/解绑订单的全部关联记录（出库、同步、审批、工序、状态日志、明细）。"""
+) -> dict:
+    """删除/解绑订单的全部关联记录（出库、同步、审批、工序、状态日志、明细）。
+
+    返回出货计划级联清理结果（供删除消息透出）。
+    """
     await db.execute(delete(StockOut).where(StockOut.order_id == order.id))
     await db.execute(delete(OrderSyncRecord).where(OrderSyncRecord.source_order_id == order_id))
     await db.execute(delete(SyncRetryQueue).where(SyncRetryQueue.source_order_id == order_id))
@@ -517,6 +530,10 @@ async def _purge_order_related_rows(
     await db.execute(update(OutsourceShipment).where(OutsourceShipment.order_id == order_id).values(order_id=None))
     await db.execute(delete(OrderStatusLog).where(OrderStatusLog.order_no == order.order_no))
     await db.execute(delete(OrderItem).where(OrderItem.order_id == order.id))
+    # 级联清理该订单同步产生的采购计划明细（2026-10-06 删除联动）：
+    # 否则订单删了、月历上的计划明细残留，与"订单与计划同生共死"的创建语义不对称
+    from fastapi_app.services.shipment_plan_sync import purge_shipment_plan_details_for_order
+    return await purge_shipment_plan_details_for_order(db, order.order_no)
 
 
 async def _delete_order_directly(
@@ -541,7 +558,7 @@ async def _delete_order_directly(
 
     await _rollback_order_stock_deduction(db, product, order, order_stockouts, total_deducted)
 
-    await _purge_order_related_rows(db, order, order_id, graph)
+    plan_purge = await _purge_order_related_rows(db, order, order_id, graph)
 
     db.add(AuditLog(
         user_id=current_user.id,
@@ -585,12 +602,16 @@ async def _delete_order_directly(
     })
 
     logger.info(
-        '订单删除成功：%s，操作人：%s，抵扣回滚：%s，级联流程清理：%s，备份：%s',
-        deleted_order_no, current_user.username, total_deducted, flow_count, backup_path,
+        '订单删除成功：%s，操作人：%s，抵扣回滚：%s，级联流程清理：%s，出货计划明细清理：%s，备份：%s',
+        deleted_order_no, current_user.username, total_deducted, flow_count,
+        plan_purge.get('detail_deleted', 0) if plan_purge else 0, backup_path,
     )
+    message = f'订单删除成功！已级联清理 {flow_count} 条关联流程记录，抵扣回滚数量：{total_deducted}'
+    if plan_purge and plan_purge.get('detail_deleted'):
+        message += f"，同步移除出货计划明细 {plan_purge['detail_deleted']} 条"
     return {
         'success': True,
-        'message': f'订单删除成功！已级联清理 {flow_count} 条关联流程记录，抵扣回滚数量：{total_deducted}',
+        'message': message,
         'requires_approval': False,
     }
 

@@ -81,6 +81,8 @@ export function useStagedItems() {
       deduct_quantity: i.deductQuantity || 0,
       note: i.note || '',
       order_date: i.date || '',
+      // 分批出货计划（2026-10-06 v2）：空数组 = 无计划；各批总和已在前端排满校验
+      shipment_plans: i.shipmentPlans.map((s) => ({ plan_date: s.date, quantity: s.quantity, note: s.note || '' })),
     }))
   }
 
@@ -103,8 +105,9 @@ export function useStagedItems() {
   /**
    * 统一播报。所有措辞都由 order/stockin 两个真实结果派生，
    * 因此不会出现「播报成功但实际未提交」这类与事实相反的反馈。
+   * syncedPlanCount：本次成功提交且带出货计划的订单条目数（在移除暂存项之前捕获）。
    */
-  function reportSubmit(order: SubmitOutcome, stockin: SubmitOutcome) {
+  function reportSubmit(order: SubmitOutcome, stockin: SubmitOutcome, syncedPlanCount = 0) {
     const done: string[] = []
     const kept: string[] = []
     if (order.attempted && !order.failed) done.push(`订单 ${order.count} 条`)
@@ -128,6 +131,10 @@ export function useStagedItems() {
       showToast(`订单创建失败（0/${order.count}）：${firstError}`, 'error')
       return
     }
+    if (syncedPlanCount > 0) {
+      showToast(`提交成功：已创建 ${createdCount} 个主订单（含 ${order.count} 个 SKU），其中 ${syncedPlanCount} 条已同步出货计划`, 'success')
+      return
+    }
     showToast(`提交成功：已创建 ${createdCount} 个主订单（含 ${order.count} 个 SKU）`, 'success')
   }
 
@@ -145,11 +152,16 @@ export function useStagedItems() {
       const stockin = await submitGroup(
         stockApi.batchSubmitStockins, buildStockinPayload(), '备货')
 
+      // 在移除暂存项之前捕获「成功提交且带计划」的条目数，供播报使用
+      const syncedPlanCount = order.attempted && !order.failed
+        ? stagedOrders.value.filter((i) => i.shipmentPlans.length > 0).length
+        : 0
+
       // 移除与播报共用同一组事实，二者不可能不一致
       if (order.attempted && !order.failed) dropUids(orderUids)
       if (stockin.attempted && !stockin.failed) dropUids(stockinUids)
 
-      reportSubmit(order, stockin)
+      reportSubmit(order, stockin, syncedPlanCount)
 
       // 订单 / 备货任一写入成功都会改变库存汇总与报表流水，统一失效派生查询
       const orderSubmitted = order.attempted && !order.failed

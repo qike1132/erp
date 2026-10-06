@@ -324,6 +324,12 @@ async def delete_supplier_api(
 
 # ==================== 批量提交 Pydantic 模型 ====================
 
+class BatchShipmentPlanSplit(BaseModel):
+    """单个出货计划批次（2026-10-06 v2：单订单可拆多批，总和必须排满订单量）"""
+    plan_date: str
+    quantity: int = Field(..., ge=1, le=9999999)
+    note: str = ""
+
 class BatchOrderItem(BaseModel):
     product_id: int = Field(..., gt=0)
     customer: str
@@ -332,6 +338,10 @@ class BatchOrderItem(BaseModel):
     deduct_quantity: int | None = None
     note: str = ""
     order_date: str | None = None
+    # 分批出货计划（2026-10-06 v2）：非空时订单创建后同事务写入采购计划明细，
+    # 每批一条；批次数与总和校验在 order_batch_create._validate_one_item。
+    # max_length 收口极端 payload 的落库放大（内网场景 50 批已远超业务可能）。
+    shipment_plans: list[BatchShipmentPlanSplit] = Field(default_factory=list, max_length=50)
 
 class BatchStockInItem(BaseModel):
     product_id: int = Field(..., gt=0)
@@ -366,7 +376,9 @@ async def batch_submit_orders(
 ):
     """批量提交订单"""
     from fastapi_app.services.auxiliary_service import orchestrate_batch_orders
-    return await orchestrate_batch_orders(db, [item.model_dump() for item in data.orders])
+    return await orchestrate_batch_orders(
+        db, [item.model_dump() for item in data.orders], created_by=user.username,
+    )
 
 
 @router.post("/batch-submit-stockins", response_model=BatchStockinResponse)

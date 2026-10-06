@@ -429,6 +429,11 @@ async def _handle_delete_approval(db: AsyncSession, approval: ApprovalRequest, o
         ApprovalRequest.id != approval.id,
     ))
 
+    # 级联清理该订单同步产生的采购计划明细（2026-10-06 删除联动，
+    # 与 order_crud._delete_order_directly 同一口径）
+    from fastapi_app.services.shipment_plan_sync import purge_shipment_plan_details_for_order
+    await purge_shipment_plan_details_for_order(db, order.order_no)
+
     if product is not None:
         db.add(InventoryLog(
             product_id=order.product_id,

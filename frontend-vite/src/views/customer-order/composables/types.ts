@@ -20,6 +20,20 @@ export type OrderDetailData = OrderItem & {
   data?: OrderItem
 }
 
+/**
+ * 单个出货计划批次（2026-10-06 v2 分批版）：
+ * 一条订单条目可拆多批，每批独立日期/数量/备注；
+ * 各批数量之和必须排满订单数量（用户裁决口径）。
+ */
+export interface ShipmentPlanSplit {
+  /** 出货日期 YYYY-MM-DD */
+  date: string
+  /** 批次数量 ≥1 */
+  quantity: number
+  /** 批次备注（落入计划明细 remark） */
+  note: string
+}
+
 /** 暂存列表项（录入页右栏） */
 export interface StagedItem {
   /** 唯一标识，用于异步操作后安全定位（避免索引失效） */
@@ -43,6 +57,11 @@ export interface StagedItem {
   note: string
   deductStock: boolean
   deductQuantity: number
+  /**
+   * 分批出货计划（仅订单类型有意义）：空数组 = 无计划。
+   * Excel/OCR 导入条目默认空，可在暂存编辑弹窗补设。
+   */
+  shipmentPlans: ShipmentPlanSplit[]
 }
 
 /** 录入表单状态 */
@@ -56,6 +75,8 @@ export interface FormState {
   deductStock: boolean
   deductQuantity: number
   note: string
+  /** 分批出货计划：仅订单类型显示与生效（切到备货时保留状态但不参与提交） */
+  shipmentPlans: ShipmentPlanSplit[]
 }
 
 /**

@@ -24,6 +24,15 @@
                 <span class="count-badge-subtle">数量: {{ item.quantity }}</span>
                 <span v-if="item.deductQuantity > 0" class="count-badge-subtle">抵扣: {{ item.deductQuantity }}</span>
                 <span v-if="item.note" class="count-badge-subtle">备注: {{ item.note }}</span>
+                <!-- 分批出货徽标（2026-10-06 v2）：每批一枚，超 2 批折叠；中性 chip 群中唯一的彩色信号点 -->
+                <template v-if="item.type === 'order' && item.shipmentPlans.length">
+                  <span v-for="(plan, pIdx) in item.shipmentPlans.slice(0, 2)" :key="pIdx" class="count-badge-subtle co-plan-chip">
+                    <FontAwesomeIcon icon="truck" aria-hidden="true" />出货: {{ plan.date.slice(5) }}×{{ plan.quantity }}
+                  </span>
+                  <span v-if="item.shipmentPlans.length > 2" class="count-badge-subtle co-plan-chip">
+                    +{{ item.shipmentPlans.length - 2 }}批
+                  </span>
+                </template>
               </span>
             </div>
             <div class="co-staged-actions">
@@ -155,6 +164,16 @@ const emit = defineEmits<{
   align-items: center;
   gap: 4px;
   font-weight: 500;
+}
+/* 出货计划 chip：primary 色调，与中性 chip 形成对比 */
+.co-plan-chip {
+  color: var(--color-primary-600);
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.co-plan-chip i {
+  font-size: 11px;
 }
 .co-staged-actions {
   display: flex;
