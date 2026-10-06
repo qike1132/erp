@@ -24,7 +24,7 @@
 | [10. API 与前端约定](#10-api-与前端约定) | 响应格式、鉴权、路由对齐 |
 | [11. 安全边界与红线](#11-安全边界与红线) | 会打挂生产的操作清单 |
 | [12. 文档导航](#12-文档导航) | 深挖某主题时去哪里找 |
-| [附录 A. 质量与审计快照](#附录-a-质量与审计快照2026-10-03) | 最近一次完整审核的结论 |
+| [附录 A. 质量与审计快照](#附录-a-质量与审计快照) | 最近一次完整审核的结论 |
 
 ---
 
@@ -211,6 +211,11 @@ npm run dev                    # Vite dev server（本脚本默认 5173；vite.c
 15) 部署后检查清单 → 16) 升级与回滚流程
 ```
 
+> 🤖 **把本章交给 AI 执行时的三条纪律**：①安装包一律从 §4.2 的**官方下载来源**取，
+> 不要凭记忆换源换版本（尤其 Redis 必须是 tporadowski 的 **5.0.14.1**，换成 7.x/8.x 的
+> Windows 构建会因配置指令/版本差异翻车）；②每步的验收命令失败就停下修复，**不要跳步**；
+> ③生成的一切真实口令/密钥只写 `.env` 与 `_ops/credentials/`，不写文档与聊天记录。
+
 ### 4.1 前置检查
 
 - [ ] **管理员权限**（安装服务、写 `C:\` 目录、注册计划任务都需要）
@@ -234,6 +239,19 @@ npm run dev                    # Vite dev server（本脚本默认 5173；vite.c
 | VC++ 运行库 | **2015–2022 x64** | Redis for Windows 与 PyInstaller 打包的管理器 exe 依赖；缺失时相关程序报 `VCRUNTIME140.dll` 找不到 |
 | 操作系统 | **Windows 10/11 或 Server 2019+（x64）** | 本部署依赖 NSSM/Windows 服务；必须是 64 位 |
 
+**官方下载来源**（AI 部署时照此取包，不要凭记忆找第三方镜像）：
+
+| 组件 | 下载 | 落位要求 |
+|---|---|---|
+| Python 3.13.x | python.org/downloads/windows（最新 3.13.x **64-bit installer**） | 之后用它创建项目 `.venv` |
+| PostgreSQL 18 | enterprisedb.com/downloads/postgres-postgresql-downloads（EDB 安装器） | 静默安装见 §4.4；装在默认目录则 `pg_dump` 探测可直接命中 |
+| Redis 5.0.14.1 | github.com/tporadowski/redis/releases（`Redis-x64-5.0.14.1.zip`） | 解压后 `redis-server.exe`/`redis-cli.exe` 在 `C:\Redis\` 根；**不要用 7.x/8.x 的第三方 Windows 构建** |
+| Nginx | nginx.org/en/download.html（Stable Windows zip） | 解压为 `C:\nginx\`（`nginx.exe`、`conf\mime.types` 就位） |
+| NSSM 2.24 | nssm.cc/download（`nssm-2.24.zip`） | 取 `win64\nssm.exe` 放到 `C:\nssm\nssm.exe` |
+| Node.js ≥22 | nodejs.org（LTS x64 msi） | 构建前端用 |
+| Git | git-scm.com/download/win | 拉代码与回滚；其自带 `usr\bin\openssl.exe` 可作 §4.7 的 openssl |
+| VC++ 运行库 | aka.ms/vs/17/release/vc_redist.x64.exe | 先于 Redis/管理器安装 |
+
 > 路径不是硬编码在 Python 代码里的：管理器与服务参数由 `_PROJECT_DIR` 推导；
 > 但 `config/nginx-windows.conf` 的 `include` / `alias`、`config/nssm-services.json` 里的
 > `D:\erp_system` 是**字面路径**，换路径必须替换。
@@ -246,6 +264,11 @@ npm run dev                    # Vite dev server（本脚本默认 5173；vite.c
 ### 4.3 获取代码与准备目录
 
 ```powershell
+# 前置（唯一需要账号 Owner 介入的一步）：本仓库是**私有仓库**，新服务器克隆前先放行凭据，二选一：
+#   SSH：生成密钥并把公钥加进 GitHub 仓库 Settings → Deploy keys（只读即可）
+ssh-keygen -t ed25519 -f "$env:USERPROFILE\.ssh\id_ed25519" -N ""
+#   HTTPS：用 PAT 克隆：git clone https://<PAT>@github.com/qike1132/erp.git D:\erp_system
+
 # 方式一：Git 克隆（推荐，便于回滚）
 git clone git@github.com:qike1132/erp.git D:\erp_system
 
@@ -259,6 +282,14 @@ New-Item -ItemType Directory -Force logs, backups         # 运行期目录（�
 ```
 
 ### 4.4 PostgreSQL：建库与账号
+
+静默安装（无人值守；已装好则跳过本段直接建库）：
+
+```powershell
+# EDB 安装器示例（安装包名以实际下载为准）；默认装到 C:\Program Files\PostgreSQL\18
+.\postgresql-18.x-x64.exe --mode unattended --superpassword "<超级用户强口令>" --serverport 5432
+# ⚠️ 装到非默认目录时，pg_dump 的三个约定探测目录都会落空 —— 必须设 .env 的 PG_TOOLS_BIN（§4.8）
+```
 
 用超级用户（`psql -U postgres`）执行，**替换为强口令并存入 `_ops/credentials`**：
 
