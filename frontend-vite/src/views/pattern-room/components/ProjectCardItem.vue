@@ -28,6 +28,7 @@
         />
         <!-- 清晰缩略图：加载完成后淡入 -->
         <img
+          ref="thumbImg"
           :src="proj.product_image_thumbnail_url || proj.product_image_url"
           class="cgl-thumb-img"
           alt=""
@@ -36,7 +37,7 @@
           loading="lazy"
           decoding="async"
           fetchpriority="low"
-          @error="onThumbError($event, proj)"
+          @error="onThumbError($event)"
           @load="thumbLoaded = true"
         />
         <span v-if="proj.status === 'completed'" class="cgl-card-status-badge">
@@ -108,10 +109,10 @@
  * 注意：卡片根元素的 click / keyup.enter（选中项目）由父组件通过
  * attrs 透传绑定（保持原 VirtualList 插槽内联写法），本组件不再重复绑定。
  */
-import { ref } from 'vue'
 import type { ProjectSummary } from '@/api/patternRoom'
+import { useProjectCardThumb } from '../composables/useProjectCardThumb'
 
-defineProps<{
+const props = defineProps<{
   /** 项目摘要数据 */
   proj: ProjectSummary
   /** 是否为当前选中项目（原 selectedProjectId === proj.id） */
@@ -135,16 +136,11 @@ const emit = defineEmits<{
   cancel: [id: number]
 }>()
 
-/** 本卡片缩略图加载完成状态（内部管理，避免父级 Set 更新引发全量卡片重渲染） */
-const thumbLoaded = ref(false)
-
-/**
- * 图片最终加载失败标记。
- * 历史数据存在 storage_key 指向的文件已丢失的情况（URL 仍非空但服务端 404），
- * 缩略图与原图均失败后置真，切换到 T 恤占位分支，
- * 否则骨架屏动画会永久闪烁（thumbLoaded 恒为 false）。
- */
-const imgFailed = ref(false)
+// 缩略图加载状态与错误回退链路（骨架屏→模糊图→清晰图→回退原图→占位），
+// 见 composables/useProjectCardThumb.ts
+const { thumbLoaded, thumbImg, imgFailed, onThumbError, onBlurError } = useProjectCardThumb(
+  () => props.proj,
+)
 
 /** 时间格式化缓存（同一 ISO 字符串多次渲染复用结果） */
 const _timeFormatCache = new Map<string, string>()
@@ -160,26 +156,6 @@ function formatTime(iso: string): string {
   return result
 }
 
-/**
- * 缩略图加载失败时回退到原图。
- * - 历史数据（缩略图未生成）会出现 404，需要回退
- * - 设置 data-fallback 标记位防止反复重试；回退图加载成功同样触发淡入
- * - 原图也失败（文件已丢失）时置 imgFailed，切换到占位分支停止骨架屏
- */
-function onThumbError(e: Event, proj: { product_image_url?: string | null }) {
-  const img = e.target as HTMLImageElement
-  if (img.dataset.fallback || !proj.product_image_url) {
-    imgFailed.value = true
-    return
-  }
-  img.dataset.fallback = '1'
-  img.src = proj.product_image_url
-}
-
-/** 模糊占位图加载失败：仅隐藏自身，不影响清晰图的加载与回退链路 */
-function onBlurError(e: Event) {
-  ;(e.target as HTMLImageElement).style.display = 'none'
-}
 </script>
 
 <style scoped>

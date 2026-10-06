@@ -24,6 +24,14 @@ export const PATTERN_ROOM_PAGE_SIZE = 20
 const SESSION_KEY = 'fb_pattern_room_cache_v1'
 /** 持久化体积上限：超限跳过写入，避免撑爆 sessionStorage（默认 5MB） */
 const MAX_PERSIST_CHARS = 300_000
+/**
+ * 持久化快照最长可恢复年龄：必须小于图片签名 URL 的有效期（后端
+ * signed_urls.sign_upload_url 默认 ttl=3600s，nginx secure_link 过期判 410）。
+ * 分组列表里内嵌 product_image_url 等限时签名链接；标签页闲置超过有效期后再
+ * 进入，恢复出的旧 URL 会 410，卡片双双加载失败切到占位图。超过本年龄的快照
+ * 直接作废（走正常前台加载），不再享受「F5 零请求」。
+ */
+const PERSISTED_MAX_AGE_MS = 45 * 60 * 1000
 
 interface GroupedCacheEntry {
   data: GroupedListResponse
@@ -102,6 +110,14 @@ function loadPersisted(): PersistedShape | null {
       || typeof shape.grouped !== 'object'
       || typeof shape.savedAt !== 'number'
     ) {
+      return null
+    }
+    // 快照里内嵌的限时签名图片 URL 已随时间过期（410）：超龄快照整体作废并清除，
+    // 避免恢复后先渲染出必然加载失败的旧图、再把卡片失败状态"焊死"在占位图上
+    if (Date.now() - shape.savedAt > PERSISTED_MAX_AGE_MS) {
+      try {
+        sessionStorage.removeItem(SESSION_KEY)
+      } catch { /* 静默 */ }
       return null
     }
     return shape
