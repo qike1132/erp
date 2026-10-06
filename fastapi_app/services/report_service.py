@@ -46,6 +46,7 @@ def _string_agg(expr: str, separator: str, distinct: bool = True) -> str:
     _ALLOWED_EXPRS = frozenset({
         'o.order_no', 'o.note', 's.stockin_no', 's.note',
         'so.stockout_no', 'so.note', 'so.customer',
+        'sr.return_no', 'sr.reason', 'sr.note',
     })
     if expr not in _ALLOWED_EXPRS:
         raise ValueError(f"非法SQL聚合表达式: {expr!r}，仅允许预定义表达式")  # sql-safe: escape_like/绑定参数/常量片段
@@ -158,6 +159,67 @@ async def get_order_logs(db: AsyncSession, customer: str = '', product: str = ''
     )
 
 
+@cache_result(
+    key_prefix='reports:return_logs',
+    ttl=30,
+    local_ttl=10,
+    key_builder=lambda *args, **kwargs: f"c:{kwargs.get('customer','')}:p:{kwargs.get('product','')}:sd:{kwargs.get('start_date','')}:ed:{kwargs.get('end_date','')}:pg:{kwargs.get('page',1)}:pp:{kwargs.get('per_page',20)}",
+)
+async def get_return_logs(db: AsyncSession, customer: str = '', product: str = '',
+                          start_date: str = '', end_date: str = '',
+                          page: int = 1, per_page: int = 20) -> dict:
+    """退货流水（仅 active，cancelled 已对称扣回不计入，COUNT(*) OVER() 合并计数查询）"""
+    per_page = min(max(1, per_page), 100)
+    customer = customer.strip()[:100]
+    product = product.strip()[:100]
+
+    where_clauses = ["sr.status = 'active'"]
+    params: dict[str, object] = {}
+
+    if customer:
+        where_clauses.append("COALESCE(sr.customer, '') LIKE :customer")
+        params['customer'] = f'%{escape_like(customer)}%'
+    if product:
+        where_clauses.append("(COALESCE(p.name, '') LIKE :product OR COALESCE(p.barcode, '') LIKE :product)")
+        params['product'] = f'%{escape_like(product)}%'
+    if start_date:
+        params['start_date'] = parse_date_strict(start_date, '开始')
+        where_clauses.append("sr.return_date >= :start_date")
+    if end_date:
+        params['end_date'] = parse_date_strict(end_date, '结束') + timedelta(days=1)
+        where_clauses.append("sr.return_date < :end_date")
+
+    return await _query_logs_generic(
+        db,
+        base_where=where_clauses,
+        params=params,
+        page=page,
+        per_page=per_page,
+        data_sql_template=f"""SELECT
+        DATE(sr.return_date) as return_date_only, sr.customer, p.name as product_name,
+        p.barcode as product_barcode,
+        SUM(sr.quantity) as total_quantity, COUNT(sr.id) as return_count,
+        {_string_agg('sr.return_no', ', ')} as return_nos,
+        {_string_agg('sr.reason', '; ')} as reasons,
+        {_string_agg('sr.note', '; ')} as notes,
+        COUNT(*) OVER() as total_count
+        FROM stock_return sr JOIN product p ON sr.product_id = p.id
+        WHERE 1=1 {{where_sql}}
+        GROUP BY DATE(sr.return_date), sr.customer, p.name, p.barcode
+        ORDER BY DATE(sr.return_date) DESC
+        LIMIT :limit OFFSET :offset""",  # nosec B608
+        qty_sql_template="SELECT COALESCE(SUM(sr.quantity), 0) FROM stock_return sr JOIN product p ON sr.product_id = p.id WHERE 1=1 {where_sql}",
+        row_mapper=lambda row: {
+            'return_date': row.return_date_only.strftime('%Y-%m-%d') if row.return_date_only else '-',
+            'customer': row.customer or '', 'product_name': row.product_name,
+            'product_barcode': row.product_barcode or '',
+            'quantity': row.total_quantity, 'return_count': row.return_count,
+            'return_nos': row.return_nos or '',
+            'note': '；'.join(x for x in (row.reasons or '', row.notes or '') if x),
+        },
+    )
+
+
 async def export_report_to_excel(db, report_type: str, customer: str = '', product: str = '',
                                   status: str = '', start_date: str = '', end_date: str = '') -> bytes:
     """导出报表为 Excel（内存缓冲区）
@@ -194,6 +256,7 @@ async def export_report_to_excel(db, report_type: str, customer: str = '', produ
                 "stockin": exporter.export_stockin_logs,
                 "stockout": exporter.export_stockout_logs,
                 "deduction": exporter.export_deduction_logs,
+                "return": exporter.export_return_logs,
             }
 
             export_func = export_methods.get(report_type)

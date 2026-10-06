@@ -1,7 +1,7 @@
 import { computed, type Ref } from 'vue'
 import type { TableColumn } from '@/components/ui/UiDataTable.vue'
 
-export type TabType = 'order' | 'stockin' | 'stockout' | 'deduction'
+export type TabType = 'order' | 'stockin' | 'stockout' | 'deduction' | 'return'
 
 export interface TabConfig {
   label: string
@@ -50,6 +50,15 @@ export const TAB_CONFIG: Record<TabType, TabConfig> = {
     countLabel: '抵扣数量',
     noteKey: 'order_note',
   },
+  return: {
+    label: '退货流水',
+    endpoint: '/reports/return-logs',
+    dateKey: 'return_date',
+    countKey: 'return_count',
+    dateLabel: '退货时间',
+    countLabel: '退货数量',
+    noteKey: 'note',
+  },
 }
 
 export const REPORT_TABS: { value: TabType; label: string }[] = [
@@ -57,15 +66,17 @@ export const REPORT_TABS: { value: TabType; label: string }[] = [
   { value: 'stockin', label: '备货流水' },
   { value: 'stockout', label: '出货流水' },
   { value: 'deduction', label: '备货抵扣流水' },
+  { value: 'return', label: '退货流水' },
 ]
 
-export type ReportEndpoint = 'orderLogs' | 'stockinLogs' | 'stockoutLogs' | 'deductionLogs'
+export type ReportEndpoint = 'orderLogs' | 'stockinLogs' | 'stockoutLogs' | 'deductionLogs' | 'returnLogs'
 
 const ENDPOINT_MAP: Record<TabType, ReportEndpoint> = {
   order: 'orderLogs',
   stockin: 'stockinLogs',
   stockout: 'stockoutLogs',
   deduction: 'deductionLogs',
+  return: 'returnLogs',
 }
 
 export function useReportConfig(activeTab: Ref<TabType>) {

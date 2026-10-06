@@ -7770,6 +7770,257 @@
         }
       }
     },
+    "/api/v1/stock-returns/shipment-options": {
+      "get": {
+        "tags": [
+          "退货管理"
+        ],
+        "summary": "List Shipment Options",
+        "description": "按产品名搜索可退的出货明细（退货单录入第二步）。\n\n仅列可退量 > 0 的明细；客户/订单由所选明细带出。模块内自建端点的原因\n同 /customers/active-names 先例：/products/list 要求 product_manage，\n只授退货权限的用户会 403。\n\nArgs:\n    q: 产品名称模糊关键词（空=最近可退明细）。\n    db: 异步数据库会话（只读副本）。\n    _user: 当前登录用户（仅需通过权限校验）。\n\nReturns:\n    list[ShipmentOption]: 出货明细（单号/客户/产品/数量/已退/可退/日期）。",
+        "operationId": "list_shipment_options_api_v1_stock_returns_shipment_options_get",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 100,
+              "description": "产品名称模糊搜索（空=最近可退明细）",
+              "default": "",
+              "title": "Q"
+            },
+            "description": "产品名称模糊搜索（空=最近可退明细）"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ShipmentOption"
+                  },
+                  "title": "Response List Shipment Options Api V1 Stock Returns Shipment Options Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/stock-returns/list": {
+      "get": {
+        "tags": [
+          "退货管理"
+        ],
+        "summary": "List Stock Returns",
+        "description": "获取退货列表（支持分页和筛选）。\n\nArgs:\n    page: 页码，从 1 开始。\n    per_page: 每页数量，1-500。\n    customer: 客户名筛选关键字。\n    start_date: 开始日期（YYYY-MM-DD）。\n    end_date: 结束日期（YYYY-MM-DD）。\n    db: 异步数据库会话（只读副本）。\n    _user: 当前登录用户（仅需通过权限校验）。\n\nReturns:\n    StockListResponse: 包含退货列表和分页信息的响应。",
+        "operationId": "list_stock_returns_api_v1_stock_returns_list_get",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "页码",
+              "default": 1,
+              "title": "Page"
+            },
+            "description": "页码"
+          },
+          {
+            "name": "per_page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "description": "每页数量",
+              "default": 50,
+              "title": "Per Page"
+            },
+            "description": "每页数量"
+          },
+          {
+            "name": "customer",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "客户",
+              "title": "Customer"
+            },
+            "description": "客户"
+          },
+          {
+            "name": "start_date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "开始日期",
+              "title": "Start Date"
+            },
+            "description": "开始日期"
+          },
+          {
+            "name": "end_date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "结束日期",
+              "title": "End Date"
+            },
+            "description": "结束日期"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StockListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/stock-returns/create": {
+      "post": {
+        "tags": [
+          "退货管理"
+        ],
+        "summary": "Create Stock Return",
+        "description": "添加退货记录（P1 按产品制：回补库存、写退货流水；不关联出货单/订单）。\n\nArgs:\n    data: 退货创建参数（产品、数量、客户、原因等）。\n    db: 异步数据库会话（读写主库）。\n    _user: 当前登录用户（仅需通过权限校验）。\n\nReturns:\n    StockActionResponse: 包含成功标志、提示消息与退货单号。",
+        "operationId": "create_stock_return_api_v1_stock_returns_create_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StockReturnCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StockActionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/stock-returns/{return_id}": {
+      "delete": {
+        "tags": [
+          "退货管理"
+        ],
+        "summary": "Cancel Stock Return",
+        "description": "取消退货记录（P1-① 软取消：记录保留，库存对称扣回、订单状态重算）。\n\nArgs:\n    return_id: 退货记录 ID。\n    db: 异步数据库会话（读写主库）。\n    _user: 当前登录用户（仅需通过权限校验）。\n\nReturns:\n    StockActionResponse: 包含成功标志和提示消息。\n\nRaises:\n    HTTPException: 退货记录不存在时抛出 404。",
+        "operationId": "cancel_stock_return_api_v1_stock_returns__return_id__delete",
+        "parameters": [
+          {
+            "name": "return_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Return Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StockActionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/users/list": {
       "get": {
         "tags": [
@@ -9423,13 +9674,118 @@
         }
       }
     },
+    "/api/v1/reports/return-logs": {
+      "get": {
+        "tags": [
+          "报表统计"
+        ],
+        "summary": "Return Logs",
+        "description": "退货流水查询（仅 active，已取消退货不计入）。\n\nArgs:\n    customer: 客户名称筛选，空串表示不筛选。\n    product: 产品名称筛选，空串表示不筛选。\n    start_date: 开始日期（字符串），空串表示不限制。\n    end_date: 结束日期（字符串），空串表示不限制。\n    page: 页码，从 1 开始。\n    per_page: 每页条数，1-100。\n    user: 当前操作用户（用于权限校验）。\n    db: 只读数据库会话。\n\nReturns:\n    ReportResponse: 退货流水分页结果。",
+        "operationId": "return_logs_api_v1_reports_return_logs_get",
+        "parameters": [
+          {
+            "name": "customer",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "客户筛选",
+              "default": "",
+              "title": "Customer"
+            },
+            "description": "客户筛选"
+          },
+          {
+            "name": "product",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "产品筛选",
+              "default": "",
+              "title": "Product"
+            },
+            "description": "产品筛选"
+          },
+          {
+            "name": "start_date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "开始日期",
+              "default": "",
+              "title": "Start Date"
+            },
+            "description": "开始日期"
+          },
+          {
+            "name": "end_date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "结束日期",
+              "default": "",
+              "title": "End Date"
+            },
+            "description": "结束日期"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "per_page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Per Page"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/reports/export": {
       "get": {
         "tags": [
           "报表统计"
         ],
         "summary": "Export Report",
-        "description": "导出报表为 Excel 文件。\n\nArgs:\n    report_type: 报表类型，可选值：order/stockin/stockout/deduction。\n    customer: 客户名称筛选，空串表示不筛选。\n    product: 产品名称筛选，空串表示不筛选。\n    status: 状态筛选，空串表示不筛选。\n    start_date: 开始日期（字符串），空串表示不限制。\n    end_date: 结束日期（字符串），空串表示不限制。\n    user: 当前操作用户（用于权限校验）。\n    db: 只读数据库会话。\n\nReturns:\n    StreamingResponse: Excel 文件流（含 Content-Disposition 头）。\n\nRaises:\n    HTTPException: 报表类型不支持时返回 400。",
+        "description": "导出报表为 Excel 文件。\n\nArgs:\n    report_type: 报表类型，可选值：order/stockin/stockout/deduction/return。\n    customer: 客户名称筛选，空串表示不筛选。\n    product: 产品名称筛选，空串表示不筛选。\n    status: 状态筛选，空串表示不筛选。\n    start_date: 开始日期（字符串），空串表示不限制。\n    end_date: 结束日期（字符串），空串表示不限制。\n    user: 当前操作用户（用于权限校验）。\n    db: 只读数据库会话。\n\nReturns:\n    StreamingResponse: Excel 文件流（含 Content-Disposition 头）。\n\nRaises:\n    HTTPException: 报表类型不支持时返回 400。",
         "operationId": "export_report_api_v1_reports_export_get",
         "parameters": [
           {
@@ -9438,10 +9794,10 @@
             "required": true,
             "schema": {
               "type": "string",
-              "description": "报表类型: order/stockin/stockout/deduction",
+              "description": "报表类型: order/stockin/stockout/deduction/return",
               "title": "Report Type"
             },
-            "description": "报表类型: order/stockin/stockout/deduction"
+            "description": "报表类型: order/stockin/stockout/deduction/return"
           },
           {
             "name": "customer",
@@ -32372,6 +32728,11 @@
             "title": "Deduction Time",
             "default": ""
           },
+          "return_date": {
+            "type": "string",
+            "title": "Return Date",
+            "default": ""
+          },
           "customer": {
             "type": "string",
             "title": "Customer",
@@ -32422,6 +32783,11 @@
             "title": "Deduction Count",
             "default": 0
           },
+          "return_count": {
+            "type": "integer",
+            "title": "Return Count",
+            "default": 0
+          },
           "order_nos": {
             "type": "string",
             "title": "Order Nos",
@@ -32430,6 +32796,11 @@
           "stockin_nos": {
             "type": "string",
             "title": "Stockin Nos",
+            "default": ""
+          },
+          "return_nos": {
+            "type": "string",
+            "title": "Return Nos",
             "default": ""
           },
           "note": {
@@ -33126,6 +33497,67 @@
         ],
         "title": "ShipmentMergeCreate",
         "description": "合并发货请求：把跨订单/跨客户的多道工序合并生成一张发货单（单事务原子）"
+      },
+      "ShipmentOption": {
+        "properties": {
+          "stockout_id": {
+            "type": "integer",
+            "title": "Stockout Id"
+          },
+          "stockout_no": {
+            "type": "string",
+            "title": "Stockout No"
+          },
+          "stockout_date": {
+            "type": "string",
+            "title": "Stockout Date"
+          },
+          "product_id": {
+            "type": "integer",
+            "title": "Product Id"
+          },
+          "product_name": {
+            "type": "string",
+            "title": "Product Name"
+          },
+          "customer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer"
+          },
+          "quantity": {
+            "type": "integer",
+            "title": "Quantity"
+          },
+          "returned_quantity": {
+            "type": "integer",
+            "title": "Returned Quantity"
+          },
+          "available": {
+            "type": "integer",
+            "title": "Available"
+          }
+        },
+        "type": "object",
+        "required": [
+          "stockout_id",
+          "stockout_no",
+          "stockout_date",
+          "product_id",
+          "product_name",
+          "customer",
+          "quantity",
+          "returned_quantity",
+          "available"
+        ],
+        "title": "ShipmentOption",
+        "description": "可退出货明细候选（按产品名搜索，带可退量）"
       },
       "ShipmentProgressItem": {
         "properties": {
@@ -34487,6 +34919,82 @@
         "type": "object",
         "title": "StockOutUpdate",
         "description": "更新出库请求"
+      },
+      "StockReturnCreate": {
+        "properties": {
+          "stockout_id": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Stockout Id",
+            "description": "所选出货明细ID（来自 shipment-options 搜索）"
+          },
+          "quantity": {
+            "type": "integer",
+            "maximum": 9999999.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Quantity",
+            "description": "退货数量"
+          },
+          "return_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return Date",
+            "description": "退货日期 (YYYY-MM-DD)，缺省为当天"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason",
+            "description": "退货原因"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note",
+            "description": "备注"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64,
+                "minLength": 8
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id",
+            "description": "幂等令牌（前端每次打开弹窗生成的 UUID）；同令牌重复提交返回 400"
+          }
+        },
+        "type": "object",
+        "required": [
+          "stockout_id",
+          "quantity"
+        ],
+        "title": "StockReturnCreate",
+        "description": "创建退货请求（按出货明细退货：搜产品 → 选出货明细 → 录数量）\n\n客户/产品/订单由所选出货明细带出；可退量（出货量 − 已退量）在\nservices/stock_return_service.create_stockreturn_core 校验，\n违例以 ValueError 抛出并经 db_transaction 统一映射为 400。"
       },
       "StockStatsData": {
         "properties": {

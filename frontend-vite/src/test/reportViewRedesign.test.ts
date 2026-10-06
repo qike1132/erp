@@ -23,6 +23,7 @@ vi.mock('@/api', () => ({
     stockinLogs: vi.fn(),
     stockoutLogs: vi.fn(),
     deductionLogs: vi.fn(),
+    returnLogs: vi.fn(),
   },
 }))
 
@@ -104,18 +105,19 @@ beforeEach(() => {
 })
 
 describe('ReportTabGroup —— 维度 tab', () => {
-  it('四个维度 tab 都在', () => {
+  it('五个维度 tab 都在', () => {
     expect(mountTabs().text()).toContain('订单流水')
     expect(mountTabs().text()).toContain('备货流水')
     expect(mountTabs().text()).toContain('出货流水')
     expect(mountTabs().text()).toContain('备货抵扣')
+    expect(mountTabs().text()).toContain('退货流水')
   })
 
   it('用系统的 UiTabs / UiTabTrigger，不自己写一套 tab 样式', () => {
     const w = mountTabs()
 
     expect(w.find('.ui-tab-group').exists()).toBe(true)
-    expect(w.findAll('.ui-tab-btn')).toHaveLength(4)
+    expect(w.findAll('.ui-tab-btn')).toHaveLength(5)
   })
 
   it('当前 tab 为选中态，切换后跟着变', () => {

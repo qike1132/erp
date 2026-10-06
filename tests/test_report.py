@@ -18,6 +18,7 @@ from fastapi_app.services.report_service import (
     _string_agg,
     get_deduction_logs,
     get_order_logs,
+    get_return_logs,
     get_stockin_logs,
     get_stockout_logs,
 )
@@ -206,3 +207,45 @@ class TestGetDeductionLogs:
             await get_deduction_logs(mock_async_db, customer='客户Y')
         where = m.call_args.kwargs['base_where']
         assert 'so.stockin_id IS NOT NULL' in where
+
+
+class TestGetReturnLogs:
+    """退货流水"""
+
+    @pytest.mark.asyncio
+    async def test_base_where_invariants(self, mock_async_db):
+        """固定条件：仅统计 active（cancelled 已对称扣回，不计入流水）"""
+        with _patch_generic() as m:
+            await get_return_logs(mock_async_db)
+        where = m.call_args.kwargs['base_where']
+        assert "sr.status = 'active'" in where
+
+    @pytest.mark.asyncio
+    async def test_filters_build_where(self, mock_async_db):
+        """客户/产品/日期筛选进入 where 条件"""
+        with _patch_generic() as m:
+            await get_return_logs(
+                mock_async_db, customer='客户Z', product='产品B',
+                start_date='2026-10-01', end_date='2026-10-31',
+            )
+        where = m.call_args.kwargs['base_where']
+        assert any("COALESCE(sr.customer, '') LIKE :customer" in c for c in where)
+        assert any("COALESCE(p.name, '') LIKE :product" in c for c in where)
+        assert any('sr.return_date >= :start_date' in c for c in where)
+        assert any('sr.return_date < :end_date' in c for c in where)
+        params = m.call_args.kwargs['params']
+        assert params['customer'] == '%客户Z%'
+
+    @pytest.mark.asyncio
+    async def test_per_page_clamped(self, mock_async_db):
+        """per_page 上限 100"""
+        with _patch_generic() as m:
+            await get_return_logs(mock_async_db, per_page=5000)
+        assert m.call_args.kwargs['per_page'] == 100
+
+    @pytest.mark.asyncio
+    async def test_invalid_date_raises(self, mock_async_db):
+        """非法日期格式抛 ValueError（与其他流水一致）"""
+        with _patch_generic():
+            with pytest.raises(ValueError):
+                await get_return_logs(mock_async_db, start_date='2026/10/01')

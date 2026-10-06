@@ -2347,6 +2347,7 @@ export interface ReportLogItem {
   stockin_date?: string
   stockout_date?: string
   deduction_time?: string
+  return_date?: string
   customer?: string
   product_name?: string
   product_barcode?: string
@@ -2357,8 +2358,10 @@ export interface ReportLogItem {
   stockin_count?: number
   stockout_count?: number
   deduction_count?: number
+  return_count?: number
   order_nos?: string
   stockin_nos?: string
+  return_nos?: string
   note?: string
 }
 
@@ -2495,6 +2498,18 @@ export interface ShipmentListResponse {
 
 export interface ShipmentMergeCreate {
   items: Array<ShipmentShipItem>
+}
+
+export interface ShipmentOption {
+  stockout_id: number
+  stockout_no: string
+  stockout_date: string
+  product_id: number
+  product_name: string
+  customer: string | null
+  quantity: number
+  returned_quantity: number
+  available: number
 }
 
 export interface ShipmentProgressItem {
@@ -2741,6 +2756,15 @@ export interface StockOutUpdate {
   customer?: string | null
   stockout_date?: string | null
   note?: string | null
+}
+
+export interface StockReturnCreate {
+  stockout_id: number
+  quantity: number
+  return_date?: string | null
+  reason?: string | null
+  note?: string | null
+  request_id?: string | null
 }
 
 export interface StockStatsData {

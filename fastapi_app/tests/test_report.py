@@ -66,6 +66,15 @@ class TestReportService:
         result = await get_deduction_logs(mock_db, page=1, per_page=20)
         assert result['logs'] == []
 
+    @pytest.mark.asyncio
+    async def test_get_return_logs_empty(self, mock_db, mock_empty_result):
+        from fastapi_app.services.report_service import get_return_logs
+        mock_db.execute = AsyncMock(return_value=mock_empty_result)
+
+        result = await get_return_logs(mock_db, page=1, per_page=20)
+        assert result['logs'] == []
+        assert result['stats']['total_count'] == 0
+
 
 class TestReportEndpoints:
     @pytest.mark.asyncio
@@ -109,3 +118,15 @@ class TestReportEndpoints:
 
         response = await client.get("/api/v1/reports/deduction-logs")
         assert response.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_return_logs_endpoint(self, client, mock_db):
+        mock_result = MagicMock()
+        mock_result.scalar.return_value = 0
+        mock_result.fetchall.return_value = []
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        response = await client.get("/api/v1/reports/return-logs")
+        assert response.status_code == 200
+        data = response.json()
+        assert data['success'] is True

@@ -15,7 +15,7 @@ from typing import Any
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
-from fastapi_app.shared_models import Order, Product, StockIn, StockOut
+from fastapi_app.shared_models import Order, Product, StockIn, StockOut, StockReturn
 from fastapi_app.shared_models.order import (
     ORDER_STATUS_PENDING_STOCK,
     ORDER_STATUS_SHIPPED,
@@ -45,7 +45,7 @@ def get_all_logs_data(
 
     Args:
         session: SQLAlchemy 同步会话
-        report_type: 报表类型 (order, stockin, stockout, deduction)
+        report_type: 报表类型 (order, stockin, stockout, deduction, return)
         customer: 客户筛选
         product: 产品筛选
         status: 状态筛选（仅订单）
@@ -69,6 +69,8 @@ def get_all_logs_data(
             return _get_stockout_logs(session, customer, product, start_date, end_date)
         elif report_type == 'deduction':
             return _get_deduction_logs(session, customer, product, start_date, end_date)
+        elif report_type == 'return':
+            return _get_return_logs(session, customer, product, start_date, end_date)
         else:
             logger.warning(f'未知报表类型: {report_type}')
             return [], {}
@@ -368,4 +370,54 @@ def _get_deduction_logs(session, customer, product, start_date, end_date):
         'total_orders': total_orders
     }
     logger.info('抵扣报表数据处理完成')
+    return logs, stats
+
+
+def _get_return_logs(session, customer, product, start_date, end_date):
+    # 与屏幕口径对齐（report_service.get_return_logs 的 sr.status = 'active'）：
+    # 已取消退货的库存已对称扣回，不计入导出，否则导出数字会大于页面显示值。
+    query = select(StockReturn).join(Product).where(
+        StockReturn.status == 'active',
+    ).options(selectinload(StockReturn.product))
+    if customer:
+        query = query.where(StockReturn.customer.like(f'%{escape_like(customer)}%'))
+    query = _apply_product_filter(query, product)
+    query = _apply_date_filters(query, StockReturn.return_date, start_date, end_date)
+
+    stats_query = select(
+        func.count(StockReturn.id),
+        func.coalesce(func.sum(StockReturn.quantity), 0),
+    ).join(Product, StockReturn.product_id == Product.id).where(
+        StockReturn.status == 'active',
+    )
+    if customer:
+        stats_query = stats_query.where(StockReturn.customer.like(f'%{escape_like(customer)}%'))
+    stats_query = _apply_product_filter(stats_query, product)
+    stats_query = _apply_date_filters(stats_query, StockReturn.return_date, start_date, end_date)
+    total, total_quantity = session.execute(stats_query).one()
+
+    logger.info(f'退货查询结果数: {total}')
+    logs: list[dict[str, Any]] = []
+    stmt = query.order_by(StockReturn.return_date.desc()).execution_options(yield_per=_YIELD_PER_BATCH)
+    for sr in session.scalars(stmt):
+        if len(logs) >= _MAX_EXPORT_ROWS:
+            logger.warning('退货报表导出达到最大行数 %d，已截断', _MAX_EXPORT_ROWS)
+            break
+        note = '；'.join(x for x in (sr.reason or '', sr.note or '') if x)
+        logs.append({
+            'id': sr.id,
+            'return_no': sr.return_no,
+            'return_date': sr.return_date.strftime('%Y-%m-%d %H:%M') if sr.return_date else '',
+            'customer': sr.customer or '',
+            'product_name': sr.product.name,
+            'product_barcode': sr.product.barcode or '',
+            'quantity': sr.quantity,
+            'note': note,
+        })
+
+    stats = {
+        'total_count': total,
+        'total_quantity': int(total_quantity),
+    }
+    logger.info('退货报表数据处理完成')
     return logs, stats

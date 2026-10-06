@@ -1,7 +1,7 @@
 """报表统计接口
 
 职责：
-    - 提供订单、备货、出货、抵扣四类流水的分页查询
+    - 提供订单、备货、出货、抵扣、退货五类流水的分页查询
     - 支持按客户、产品、状态、日期范围筛选
     - 支持将报表导出为 Excel 文件
 
@@ -19,7 +19,7 @@ from fastapi_app.services import report_service
 from fastapi_app.shared_models import User
 
 # 允许导出的报表类型
-ALLOWED_REPORT_TYPES = ('order', 'stockin', 'stockout', 'deduction')
+ALLOWED_REPORT_TYPES = ('order', 'stockin', 'stockout', 'deduction', 'return')
 
 router = APIRouter()
 
@@ -150,11 +150,42 @@ async def deduction_logs(
     )
 
 
+@router.get('/return-logs', response_model=ReportResponse)
+async def return_logs(
+    customer: str = Query('', description='客户筛选'),
+    product: str = Query('', description='产品筛选'),
+    start_date: str = Query('', description='开始日期'),
+    end_date: str = Query('', description='结束日期'),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=100),
+    user: User = Depends(require_permission('report_view')),
+    db: AsyncSession = Depends(get_async_read_db),
+) -> ReportResponse:
+    """退货流水查询（仅 active，已取消退货不计入）。
+
+    Args:
+        customer: 客户名称筛选，空串表示不筛选。
+        product: 产品名称筛选，空串表示不筛选。
+        start_date: 开始日期（字符串），空串表示不限制。
+        end_date: 结束日期（字符串），空串表示不限制。
+        page: 页码，从 1 开始。
+        per_page: 每页条数，1-100。
+        user: 当前操作用户（用于权限校验）。
+        db: 只读数据库会话。
+
+    Returns:
+        ReportResponse: 退货流水分页结果。
+    """
+    return await report_service.get_return_logs(
+        db, customer, product, start_date, end_date, page, per_page,
+    )
+
+
 @router.get('/export')
 @limiter.limit("100/minute", key_func=rate_limit_key)  # 内网宽松：导出接口取消严格限流；P0-6(d) 显式绑键
 async def export_report(
     request: Request,
-    report_type: str = Query(..., description='报表类型: order/stockin/stockout/deduction'),
+    report_type: str = Query(..., description='报表类型: order/stockin/stockout/deduction/return'),
     customer: str = Query('', description='客户筛选'),
     product: str = Query('', description='产品筛选'),
     status: str = Query('', description='状态筛选'),
@@ -166,7 +197,7 @@ async def export_report(
     """导出报表为 Excel 文件。
 
     Args:
-        report_type: 报表类型，可选值：order/stockin/stockout/deduction。
+        report_type: 报表类型，可选值：order/stockin/stockout/deduction/return。
         customer: 客户名称筛选，空串表示不筛选。
         product: 产品名称筛选，空串表示不筛选。
         status: 状态筛选，空串表示不筛选。

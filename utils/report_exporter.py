@@ -151,6 +151,35 @@ class ReportExporter:
 
         return self._save_workbook(wb)
 
+    def export_return_logs(self, logs: list[dict[str, Any]], stats: dict[str, Any]) -> bytes:
+        """
+        导出退货流水
+
+        Args:
+            logs: 退货日志列表
+            stats: 统计数据
+
+        Returns:
+            Excel文件二进制数据
+        """
+        wb = Workbook()
+        ws = wb.active
+        ws.title = '退货流水'
+
+        headers = [
+            '退货时间', '客户', '产品名称', '退货数量', '备注'
+        ]
+
+        self._write_sheet(ws, headers, logs, self._format_return_row)
+
+        ws.column_dimensions['A'].width = 18
+        ws.column_dimensions['B'].width = 12.5
+        ws.column_dimensions['C'].width = 75
+        ws.column_dimensions['D'].width = 11
+        ws.column_dimensions['E'].width = 40
+
+        return self._save_workbook(wb)
+
     def export_inventory_data(self, inventory_data: list[dict[str, Any]], stats: dict[str, Any]) -> bytes:
         """
         导出库存汇总数据
@@ -296,6 +325,16 @@ class ReportExporter:
             log.get('order_note', '')
         ]
 
+    def _format_return_row(self, log: dict) -> list:
+        """格式化退货行数据"""
+        return [
+            log.get('return_date', ''),
+            log.get('customer', ''),
+            log.get('product_name', ''),
+            log.get('quantity', 0),
+            log.get('note', '')
+        ]
+
     def _write_summary(self, ws, stats: dict, title: str, col_count: int):
         """
         写入统计信息
@@ -365,6 +404,7 @@ def generate_filename(report_type: str) -> str:
         'stockin': '备货流水',
         'stockout': '出货流水',
         'deduction': '备货抵扣流水',
+        'return': '退货流水',
         'inventory': '库存汇总'
     }
     name = type_map.get(report_type, '报表')

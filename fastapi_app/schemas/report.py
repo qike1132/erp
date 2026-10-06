@@ -7,6 +7,7 @@ class ReportLogItem(BaseModel):
     stockin_date: str = ''
     stockout_date: str = ''
     deduction_time: str = ''
+    return_date: str = ''
     customer: str = ''
     product_name: str = ''
     product_barcode: str = ''
@@ -17,8 +18,10 @@ class ReportLogItem(BaseModel):
     stockin_count: int = 0
     stockout_count: int = 0
     deduction_count: int = 0
+    return_count: int = 0
     order_nos: str = ''
     stockin_nos: str = ''
+    return_nos: str = ''
     note: str = ''
 
 
