@@ -66,10 +66,10 @@
 | 可观测性 | structlog、Prometheus `/metrics`、OpenTelemetry、Sentry | — |
 | 前端 | Vue 3.5 + TypeScript 6 + Vite 7 + Pinia 3 + Vue Router 5 | Node **>= 22** |
 | UI | PrimeVue 4 + reka-ui + Tailwind CSS 4 + ECharts 6 | — |
-| 前端测试 | Vitest 4 + @vue/test-utils + jsdom（128 个测试文件） | — |
+| 前端测试 | Vitest 4 + @vue/test-utils + jsdom（129 个测试文件） | — |
 | 桌面壳 | NSSM 服务管理器（Tkinter，PyInstaller 打包为 `ERP服务器管理器_vX.Y.exe`） | 见 `server_manager/constants.py` |
 
-仓库规模：后端 `fastapi_app/` + `utils/` **129,054 行 Python**；前端 `frontend-vite/src` **97,938 行** TS/Vue（`*.vue` 48,953 / `*.ts` 48,985，其中测试 22,042 行 → 不含测试 **75,896 行**）；Alembic 迁移 **110 个 revision / 4 个 root / 单 head**；后端测试 **308 个文件**（`tests/` 117 + `fastapi_app/tests/` 191）；前端 Vitest **128 个文件**。
+仓库规模：后端 `fastapi_app/` + `utils/` **130,246 行 Python**；前端 `frontend-vite/src` **98,735 行** TS/Vue（`*.vue` 49,260 / `*.ts` 49,475，其中测试 22,367 行 → 不含测试 **76,368 行**）；Alembic 迁移 **111 个 revision / 4 个 root / 单 head**；后端测试 **311 个文件**（`tests/` 118 + `fastapi_app/tests/` 193）；前端 Vitest **129 个文件**。
 
 ---
 
@@ -663,7 +663,7 @@ cd ..
 
 规则与约定：
 
-- **保持单一 head**（`scripts/check_alembic_heads.py` 与质量门禁共同守护）；迁移图不是线性链：110 个 revision、4 个 root。
+- **保持单一 head**（`scripts/check_alembic_heads.py` 与质量门禁共同守护）；迁移图不是线性链：111 个 revision、4 个 root。
 - 迁移只做结构/数据变更，**不夹带业务逻辑**。
 - `alembic.ini` 必须**纯 ASCII**（Alembic 以系统 locale 读取，中文 Windows 的 GBK 会 `UnicodeDecodeError`）。
 - `sqlalchemy.url` 只是占位，运行时由 `migrations/env.py` 用 `.env` 的 `DATABASE_URL` 覆盖。
@@ -808,35 +808,47 @@ npm run check:routes                                   # 路由对齐检查
 
 ## 附录 A. 质量与审计快照
 
-### A.1 结构与现场复核（2026-10-06）
+### A.1 第五轮全面复核（2026-10-06，工作区干净状态下实测）
 
-本轮为**只读复核**（不动业务代码）：计数一律用 `ast` 与 Alembic 官方 API 现场实测，不用正则。
-**取值口径 = 提交态 HEAD** —— 复核当时工作区含其它线程的未提交改动，不能作为文档口径。
-据此刷新了 §1.1（路由模块数）、§1.2（规模）、§2.4、§6 与 §9 的过期数字。
-
-**本轮未重跑** heavy gates（quality_gate / mypy / 前端检查 / 全量 pytest）：工作区不是干净树，
-重跑结果不代表任何已提交状态。下表 A.1 为今日实测的**结构与现场**结论，A.2 为 2026-10-03 的**重运行**结论（沿用）。
+本轮为**全面重审**：工作区干净、远端同步（HEAD `7be9af1c`），全部 heavy gates 重跑。
+**重要背景**：上一轮（第四轮）两次提交之间被顺带入库了 11 个功能提交（生产即入库、库存台账化 R1、
+出货计划拆分/同步等），其中包含工作区此前未提交的迁移 073 与若干新端点——**第四轮的规模类数字
+（行数/测试文件数/迁移数）是被这批代码作废的**，路由结构（35 模块/375 handler）未变。
 
 | 检查 | 结果 |
 |---|---|
-| 端点模块与路由（AST） | **35 个路由模块 / 375 个 handler**；33 个扁平模块全部 `include_router`，**零孤儿**；同目录 `import_guard.py` 0 路由、不挂载 |
-| Alembic（`ScriptDirectory` API） | **单 head**（`pg_standalone_072_stock_return_fk_restrict`）；110 revisions / **4 roots**（工作区另有 1 个未提交迁移 073，故现场 `heads` 会显示为 073） |
-| 后端规模 | `fastapi_app/` 126,956 + `utils/` 2,098 = **129,054 行**（574 个 `.py`） |
-| 前端规模 | `frontend-vite/src` **97,938 行**（`.vue` 48,953 / `.ts` 48,985；测试 22,042 → 不含测试 75,896） |
-| 后端测试文件 | **308 个**（`tests/` 117 + `fastapi_app/tests/` 191） |
-| 前端测试文件 | **128 个** vitest |
-| 门禁基线（`scripts/gate_baseline.json`） | 超长函数 **42**（上一版 51）、巨型 Vue 组件 **6**（上一版 7）、宽 except 5、service commit 12、ruff 59，其余 0 |
-| `scripts/check_orphan_modules.py` | **PASS** —— 白名单 368/368 有入边；仅剩 1 条 WARN（`purchase_order_spare.py` 只被 `scripts/` 引用，不阻断） |
-| `scripts/check_alembic_heads.py` | **PASS**（heads=1、bases=4） |
-| 门禁 `env_drift` 子项 | **0**（口径：代码引用 ↔ `.env.example`） |
-| `scripts/ops/check_env_drift.py`（全量） | **FAIL，6 处 `!!`** —— `.env.production` 与 `config/.env.production` 各缺 3 键（`ALLOW_NEGATIVE_STOCK`、`INVENTORY_RECONCILE_ENABLED`、`UPLOAD_URL_SIGNING_SECRET`）；运行时 `.env` 另有 52 处 `??` 缺模板键（走默认值）与 3 处陈旧键（`FLASK_*`、`API_URL`） |
-| 运行环境实测 | Python **3.13.13** / PostgreSQL **18.3** / nginx **1.30.4** / NSSM **2.24** / Node **24.14.0** / OpenSSL **3.5.5** ✓ |
-| `pg_dump` 可达性 | **不在 PATH**，靠 `D:\PostgreSQL\bin` 约定目录命中（见 §4.2 注与 §4.8 `PG_TOOLS_BIN`） |
-| NSSM 五服务与端口 | `erp-prod`→依赖 `erp-redis`、`erp-arq`→依赖 `erp-redis-broker`、broker 6380；与 `config/nssm-services.json` 一致 |
-| 生产健康 | `logs/prod_runner.json`：`mode=production`、`ready=true`、`frontend_ok=true`、`workers=8`、`arq.status=external`（正常设计） |
-| 密钥卫生 | `.env`、`config/uploads-signing.conf`、`config/tls/*.key`、`config/pgbouncer/userlist.txt`、`_ops/credentials/**` 均被 `git check-ignore` 命中；版本库内只有 `*.example` 模板 |
+| `scripts/quality_gate.py` | **PASS** —— 10 项与基线一致；ruff 门禁口径 **57**（基线 59，可收紧 2） |
+| `ruff check .`（全仓） | **101** 个既有违规（上轮 123 → 持续下降）；11 条可 `--fix` |
+| `mypy` | **Success: no issues found in 368 source files** |
+| 孤儿门禁 / 迁移图 | **PASS**（白名单 368/368 有入边，1 条不阻断 WARN；heads=1、bases=4） |
+| 门禁 `env_drift` 子项 | **0**；全量口径仍 **6 处 `!!`**（两份 `.env.production` 各缺 3 键，同上轮） |
+| 前端 `vue-tsc --noEmit` | **0 错误** |
+| 前端 `npm run lint` | **0 error / 72 warning**（上轮 168 → 持续收敛） |
+| `npm run check:api` / `check:routes` | **通过** |
+| 生产健康 | `prod_runner.json`：`ready=true`、`frontend_ok=true`、workers=8；`/api/health` healthy（backup ok、arq ok、8.5h 前有备份产物）；**双 Redis 带口令 PING 通过** |
+| 生产链路抽测 | 未签名上传 **403** / `/metrics` 无 token **401** / 生产 swagger+redoc **404**（全部符合设计） |
+| 端点结构（AST） | **35 个路由模块 / 375 个 handler**（33 扁平 + 2 聚合包）——与 README 断言一致，未变 |
+| 后端 `pytest`（全量） | **7 failed / 3845 passed / 268 skipped（8 分 27 秒）**，退出码 1。日志 `logs/pytest_audit_2026-10-06_round5.log` |
+| Alembic（`ScriptDirectory` API） | **单 head**（`pg_standalone_073_inventory_log_ledger_fields`，已入库）；111 revisions / **4 roots** |
 
-### A.2 全量门禁与回归（2026-10-03 运行，本轮未重跑）
+**7 个失败用例的分类与根因**（全部复跑稳定复现；无一属于本轮文档操作引入）：
+
+| # | 用例 | 根因归类 |
+|---|---|---|
+| 1 | `tests/test_daily_production.py::TestDeleteRecord::test_delete_record_success` | **测试过期**：Service 层新增的排序/字段消费让 mock 断言失配（`'<' not supported between MagicMock and int`，`daily_production_service.py:65`） |
+| 2 | `tests/test_stock_return_api.py::TestStockReturnApi::test_create_request_id_dedup` | **测试过期**：`_fake_create` stub 缺 `operator_id` 形参（Service 签名已扩） |
+| 3 | `fastapi_app/tests/test_stock_negative_policy_repo_wide.py::test_delete_stockreturn_core_message_verbatim_then_releases` | **测试过期**：函数已改名 `delete_stockreturn_core` → `cancel_stockreturn_core`（`f585040d` 拆上帝类时；**生产功能未丢**，DELETE 端点走软取消语义正常） |
+| 4 | `fastapi_app/tests/test_stock_optimistic_lock_unification.py::test_every_write_point_calls_unified_entry` | **同上**：期望集仍含旧名 `delete_stockreturn_core` |
+| 5 | `tests/test_available_shipment_soft_delete.py::test_soft_deleted_order_excluded_from_available_shipment` | **待归类**：`assert 0 == 100`——软删除订单未从 available-shipment 排除；与 `55b0881d`（出货准入口径校准）相关，需修复判定 |
+| 6 | `fastapi_app/tests/test_backup_m1.py::TestValidatePath::test_existing_root_parent_allowed` | **已知环境项**（见 A.3 遗留 1，非回归） |
+| 7 | `fastapi_app/tests/test_import_idempotency_constraints.py::test_real_pg_transaction_scoped_proof` | **测试隔离缺陷**：单跑 **PASSED**、全量 FAILED——`sqlalchemy` 尝试加载 psycopg2 方言（项目用 psycopg3），疑似前序某用例污染了全局方言注册/连接串状态 |
+
+> **修正记录**：第四轮 A.2 曾写「1 failed」——那是当时工作区口径的快照；本轮干净树全量跑出
+> 7 failed，其中 4 个是 `f585040d`/签名变更后未同步的测试（归属明确），1 个待归类，1 个已知环境项，
+> 1 个隔离问题。CI（Linux + PG 服务容器）与本机 Windows 差异仍存在，但**这 7 个不能再用
+> 「环境差异」一句话带过**：#1–#4 是代码变更后测试未同步，应当修。
+
+### A.2 全量门禁与回归（2026-10-03 运行，历史参照）
 
 | 检查 | 结果 |
 |---|---|
@@ -856,14 +868,14 @@ npm run check:routes                                   # 路由对齐检查
 
 ### A.3 遗留关注项
 
-唯一失败用例（2026-10-03 全量运行）—— `fastapi_app/tests/test_backup_m1.py::TestValidatePath::test_existing_root_parent_allowed`（单文件复跑稳定复现：1 failed / 25 passed）：
+盘根用例（在 2026-10-03 与 2026-10-06 两轮全量运行中都失败）—— `fastapi_app/tests/test_backup_m1.py::TestValidatePath::test_existing_root_parent_allowed`（单文件复跑稳定复现：1 failed / 25 passed）：
 
 - **现象**：断言 `validate_path('D:\no_such_dir_xyz\backups')` 合法，实际返回 `{'valid': False, 'error': '目录不可写: D:\'}`（单文件复跑稳定复现）。
 - **根因**：`validate_path` 向上找最近存在的父目录，落点是**盘符根 `D:\`**，而 `_is_writable` 是在该目录**建临时文件**；本机实测 `_is_writable('D:\') == False`、`_is_writable('D:\erp_system') == True`。
 - **性质：环境相关，不是稳定功能缺陷**。证据链：同一会话里 bash `touch /d/x` **成功**、`icacls D:\` 显示 `Authenticated Users:(M)` / `Administrators:(F)`（有写权限），但项目 `.venv` 的 Python 对 `D:\` 根做 `open(...,'w')` 与 `mkstemp` **均** `PermissionError [Errno 13]` —— 属**进程级**限制（安全策略/软件），不是 ACL。生产服务 `erp-prod`/`erp-arq` 以 **LocalSystem** 运行（注册表 `ObjectName`），口径未必与本机 shell 相同。
 - **代码层面真正该修的点（与环境无关）**：①`_is_writable` 的 docstring 写「尽力而为,失败不阻断」，但 `validate_path` 拿 False 当硬否决 —— 口径自相矛盾；②用「建文件」探测盘根本就不成立（盘根允许建目录、未必允许建文件）；③该用例硬编码 Windows 路径，Linux runner 上向上查找的落点是 CWD（可写），因此 **CI 抓不到**这层环境差异。
 
-1. **备份路径校验的盘根口径不稳**（上方唯一失败用例）：可写探测 = 试建文件，结论随执行账户/进程而变；且 `_is_writable` 的 docstring（「失败不阻断」）与 `validate_path`（硬否决）矛盾。修法需先定语义：允许盘根 → 改探测方式（试建**子目录**）且让 docstring 与实现一致；拒绝 → 明确错误文案 + 把用例改成不依赖 Windows 盘根（否则 CI 永远抓不到）。
+1. **备份路径校验的盘根口径不稳**（上方盘根用例，A.1 表第 6 项）：可写探测 = 试建文件，结论随执行账户/进程而变；且 `_is_writable` 的 docstring（「失败不阻断」）与 `validate_path`（硬否决）矛盾。修法需先定语义：允许盘根 → 改探测方式（试建**子目录**）且让 docstring 与实现一致；拒绝 → 明确错误文案 + 把用例改成不依赖 Windows 盘根（否则 CI 永远抓不到）。
 2. **依赖漏洞**：现场 pip-audit 曾报 25 个包 172 条漏洞（其中 166 条已有修复版本），`pyproject.toml` 当前 **0 条豁免**。正确处理是升级依赖，而不是登记豁免；破坏面评估后再批量升级。
 3. **`fastapi_app/README.md` 仍陈旧**：第 8–10 行写 PostgreSQL 16 / Celery（含 `celery_app.py`），与实际（PG 18 / ARQ）不符；同文件第 156 行已自我纠正，前后矛盾，可另行修订。
 4. ~~**CI `Run Ruff gate` 步骤存量即红**~~ —— **已于 `cf0fc743` 修复**（清掉 24 条存量违规，lint job 全绿，见 §9）。
