@@ -15,65 +15,64 @@
     </div>
 
     <div class="page-card-body">
-    <section class="bk-section">
-      <BackupOverviewCards :status="status" :loading="statusLoading" />
-    </section>
+      <section class="bk-section">
+        <BackupOverviewCards :status="status" :loading="statusLoading" />
+      </section>
 
-    <section class="bk-section">
-      <BackupActions
-        :busy="busy"
-        :task="taskState"
-        :on-full="triggerFull"
-        :on-incremental="triggerIncremental"
-        no-task-hint="选择全量或增量，同一时刻至多执行一个任务"
-      />
-    </section>
+      <section class="bk-section">
+        <BackupActions
+          :busy="busy"
+          :task="taskState"
+          :on-full="triggerFull"
+          :on-incremental="triggerIncremental"
+          no-task-hint="选择全量或增量，同一时刻至多执行一个任务"
+        />
+      </section>
 
-    <section class="bk-section bk-grid-two">
-      <ScheduleConfig
-        :schedules="schedules"
-        :saving="saving"
-        :on-save="saveSchedule"
-        :on-delete="deleteSchedule"
-        :on-trigger="triggerScheduleNow"
-      />
-      <PathSettings
-        :settings="settings"
-        :saving="saving"
-        :on-validate="validatePath"
-        :on-save="savePath"
-      />
-    </section>
+      <section class="bk-section bk-grid-two">
+        <ScheduleConfig
+          :schedules="schedules"
+          :saving="saving"
+          :on-save="saveSchedule"
+          :on-delete="deleteSchedule"
+          :on-trigger="triggerScheduleNow"
+        />
+        <PathSettings
+          :settings="settings"
+          :saving="saving"
+          :on-validate="validatePath"
+          :on-save="savePath"
+        />
+      </section>
 
-    <section class="bk-section">
-      <RestoreConfirmDialog
-        :open="wizardOpen"
-        :server-backups="serverBackups"
-        :initial-filename="wizardInitialFilename"
-        :plan="plan"
-        :plan-loading="planLoading"
-        :task="taskState"
-        :result="restoreResult"
-        :on-plan="previewPlan"
-        :on-execute="executeRestore"
-        @close="wizardOpen = false"
-      />
-      <div v-if="uploadRestoring" class="bk-upload-note">上传文件还原中：{{ (taskState?.phaseLabel) || '处理中…' }}</div>
-    </section>
+      <section class="bk-section">
+        <RestoreConfirmDialog
+          :open="wizardOpen"
+          :initial-filename="wizardInitialFilename"
+          :plan="plan"
+          :plan-loading="planLoading"
+          :task="taskState"
+          :result="restoreResult"
+          :on-plan="previewPlan"
+          :on-execute="executeRestore"
+          @close="wizardOpen = false"
+        />
+        <div v-if="uploadRestoring" class="bk-upload-note">上传文件还原中：{{ (taskState?.phaseLabel) || '处理中…' }}</div>
+      </section>
 
-    <section class="bk-section">
-      <BackupRecordTable
-        :rows="records"
-        :total="recordsTotal"
-        :page="recordsPage"
-        :page-size="recordsPageSize"
-        :loading="recordsLoading"
-        :on-page-change="loadRecords"
-        @restore="onRecordRestore"
-        @download="onRecordDownload"
-        @delete="onRecordDelete"
-      />
-    </section>
+      <section class="bk-section">
+        <BackupRecordTable
+          :rows="records"
+          :total="recordsTotal"
+          :page="recordsPage"
+          :page-size="recordsPageSize"
+          :loading="recordsLoading"
+          :on-page-change="loadRecords"
+          @restore="onRecordRestore"
+          @download="onRecordDownload"
+          @delete="onRecordDelete"
+        />
+      </section>
     </div>
   </div>
 </template>
@@ -87,7 +86,7 @@ import BackupOverviewCards from '@/components/backup/BackupOverviewCards.vue'
 import BackupActions from '@/components/backup/BackupActions.vue'
 import ScheduleConfig from '@/components/backup/ScheduleConfig.vue'
 import PathSettings from '@/components/backup/PathSettings.vue'
-import RestoreConfirmDialog, { type ServerBackupSummary, type RestoreExecuteOptions } from '@/components/backup/RestoreConfirmDialog.vue'
+import RestoreConfirmDialog, { type RestoreExecuteOptions } from '@/components/backup/RestoreConfirmDialog.vue'
 import BackupRecordTable, { type BackupRecordRow } from '@/components/backup/BackupRecordTable.vue'
 import { useBackupTask, type BackupTaskState } from '@/components/backup/composables/useBackupTask'
 
@@ -162,7 +161,6 @@ const recordsLoading = ref(false)
 /* ---------- 还原确认弹窗 ---------- */
 const wizardOpen = ref(false)
 const wizardInitialFilename = ref('')
-const serverBackups = ref<ServerBackupSummary[]>([])
 const plan = ref<BackupRestorePlan | null>(null)
 const planLoading = ref(false)
 
@@ -187,14 +185,6 @@ async function loadSettings() {
   try {
     settings.value = await backupApi.getSettings()
   } catch { settings.value = null }
-}
-async function loadServerBackups() {
-  try {
-    const res = await backupApi.listServerBackups()
-    serverBackups.value = (res.backups ?? []).map((b) => ({
-      filename: b.filename, size: b.size, created_at: b.created_at,
-    }))
-  } catch { serverBackups.value = [] }
 }
 
 async function triggerFull(opts?: { password?: string; tables?: string[]; excludeTables?: string[] }) {
@@ -309,7 +299,6 @@ async function onRecordDelete(filename: string) {
     await backupApi.deleteServerBackup(filename)
     toast.success('备份文件已删除')
     void loadRecords()
-    void loadServerBackups()
     void loadStatus()
   } catch (e) {
     toast.error(errText(e, '删除失败，请稍后重试'))
@@ -343,7 +332,6 @@ async function executeRestore(filename: string, opts?: RestoreExecuteOptions): P
   try {
     const res = await backupApi.asyncRestoreByName(filename, {
       confirmSensitive: opts?.confirmSensitive ?? false,
-      password: opts?.password,
     })
     if (!res.task_id) {
       // 无 task_id 则轮询无从启动、弹窗会永久停在进度态，按入队失败处理
@@ -383,7 +371,6 @@ onMounted(() => {
   void loadStatus()
   void loadSchedules()
   void loadSettings()
-  void loadServerBackups()
   void loadRecords(1)
 })
 </script>

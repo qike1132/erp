@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi_app.core.schedule_status import STATUS_RUNNING
 from fastapi_app.shared_models.backup_schedule import BackupSchedule
 
 from .settings_service import BackupSettingsError
@@ -28,6 +29,13 @@ TASK_TYPE_TO_FUNC: dict[str, str] = {
     'disaster_recovery_test': 'disaster_recovery_test_task',
 }
 VALID_TASK_TYPES = tuple(TASK_TYPE_TO_FUNC)
+
+# 调度任务卡在 running 超过该时长即视为「未执行」，允许补跑（见 due_schedules）。
+# 背景：last_run_at 在**入队时**写入，终态靠 ARQ 回调回写；任务执行中 worker 被
+# 服务重启杀死时回调永远不会来，状态卡 running 且窗口被误判为已消费。
+# 阈值须大于最慢任务的正常时长（并发双跑由任务函数内部 advisory lock 兜底）；
+# 当前全量备份约 5 秒量级，2 小时已留足增长余量。
+STALE_RUNNING_AFTER = timedelta(hours=2)
 
 # cron 5 段取值范围:分 时 日 月 周
 _FIELD_RANGES = ((0, 59), (0, 23), (1, 31), (1, 12), (0, 7))
@@ -243,6 +251,12 @@ async def due_schedules(db: AsyncSession, now: datetime) -> list[BackupSchedule]
     且该调度未在 last_due 之后执行过 → 触发（补跑错过的窗口）。
     与旧「当前分钟精确匹配」不同：worker 重启/采样错位错过窗口后，
     后续任意 poller 采样都会补跑，避免任务永久丢失。
+
+    「未执行过」以 last_run_at 为准 —— 它在**入队时**就写入，终态由 ARQ 回调
+    回写（core/schedule_status.py）。若 worker 在任务执行中被服务重启/崩溃杀死，
+    回调永远不会执行，调度卡在 running 且窗口被误判为已消费；因此卡在
+    'running' 超过 STALE_RUNNING_AFTER 的调度视为未执行并放行补跑
+    （poller 重新入队时会刷新 last_run_at/last_status）。
     """
     out: list[BackupSchedule] = []
     for row in await list_schedules(db):
@@ -253,6 +267,14 @@ async def due_schedules(db: AsyncSession, now: datetime) -> list[BackupSchedule]
             continue
         last_run = _as_local_naive(row.last_run_at)
         if last_run is not None and last_run >= last_due:
-            continue
+            # 窗口已入队 → 正常不补跑。仅当卡在 'running' 超过阈值（任务疑似
+            # 被杀死、终态回写不会再来）才视为未执行放行；'failed'/'success'
+            # 是真实终态，不补跑，避免失败任务被 poller 每 5 分钟反复重试。
+            if not (row.last_status == STATUS_RUNNING and now - last_run >= STALE_RUNNING_AFTER):
+                continue
+            logger.warning(
+                '调度 %s(%s) 卡在 running 超过 %s，疑似被 worker 重启杀死，本次采样视为未执行并补跑',
+                row.id, row.name, STALE_RUNNING_AFTER,
+            )
         out.append(row)
     return out

@@ -17,7 +17,8 @@
       <div class="ba-field">
         <label class="ba-field-label" for="ba-enc-pw">加密密码（可选）</label>
         <input id="ba-enc-pw" v-model="password" type="password" class="ba-input" autocomplete="new-password"
-          placeholder="留空则按服务端配置：环境变量密码或明文（绝不随机密钥）" />
+               placeholder="留空则按服务端配置：环境变量密码或明文（绝不随机密钥）"
+        />
       </div>
       <div class="ba-field">
         <label class="ba-field-label" for="ba-scope">备份范围</label>
@@ -41,7 +42,7 @@
       </div>
       <div class="ba-progress-row">
         <div class="ba-progress">
-          <div class="ba-progress-fill" :class="task.status === 'failed' ? 'ba-fill-danger' : 'ba-fill-processing'" :style="{ width: pct + '%' }"></div>
+          <div class="ba-progress-fill" :class="task.status === 'failed' ? 'ba-fill-danger' : 'ba-fill-processing'" :style="{ width: pct + '%' }" />
         </div>
         <span class="ba-pct">{{ pct }}%</span>
       </div>

@@ -21,8 +21,8 @@
             <td class="mono">{{ r.filename }}</td>
             <td><span class="brt-badge" :class="r.type === 'incremental' ? 'brt-badge-warning' : 'brt-badge-neutral'">{{ typeLabel(r.type) }}</span></td>
             <td class="mono">{{ r.size != null ? fmtSize(r.size) : '—' }}</td>
-            <td class="mono">{{ r.created_at?.slice(0, 16) ?? '—' }}</td>
-            <td><span class="brt-badge" :class="r.status === 'success' ? 'brt-badge-success' : r.status === 'failed' ? 'brt-badge-danger' : 'brt-badge-processing'">{{ r.status || '—' }}</span></td>
+            <td class="mono">{{ r.created_at?.slice(0, 10) ?? '—' }}</td>
+            <td><span class="brt-badge" :class="r.status === 'success' ? 'brt-badge-success' : r.status === 'failed' ? 'brt-badge-danger' : 'brt-badge-processing'">{{ statusLabel(r.status) }}</span></td>
             <td><span class="brt-badge" :class="r.source === 'fs' ? 'brt-badge-warning' : 'brt-badge-neutral'">{{ r.source === 'fs' ? '文件系统' : '数据库' }}</span></td>
             <td class="brt-right">
               <button class="brt-link brt-link-danger" :disabled="r.status === 'running'" @click="$emit('restore', r.filename)">还原</button>
@@ -98,6 +98,12 @@ const filtered = computed(() => {
 function typeLabel(t?: string) {
   if (t === 'incremental') return '增量'
   return '全量'
+}
+function statusLabel(s?: string) {
+  if (s === 'success') return '成功'
+  if (s === 'failed') return '失败'
+  if (s === 'running') return '进行中'
+  return s || '—'
 }
 function fmtSize(bytes?: number | null) {
   if (bytes == null) return '—'

@@ -661,25 +661,29 @@ async def _run_async_file_restore(
 @router.post('/restore/plan', response_model=BackupRestorePlanOut)
 async def restore_plan(
     payload: BackupRestorePlanRequest,
+    x_backup_password: str | None = Header(None, alias='X-Backup-Password'),
     user: User = Depends(require_backup_permission('restore_plan')),
     db: AsyncSession = Depends(get_async_db),
 ):
     """还原差异预览：manifest 行数 vs 当前库实时 COUNT(*)。
 
     权限:backup_read。仅做只读探测，不触发任何写/还原。
+    解密密码与其他还原端点同一条兜底链：body → X-Backup-Password 头 →
+    环境变量 BACKUP_ENCRYPTION_PASSWORD —— 服务端自加密的包无需用户输密即可预览。
     """
     try:
         manifest = restore_plan_service.read_manifest_from_backup(
-            payload.filename, password=payload.password,
+            payload.filename,
+            password=_get_encryption_password(payload.password, x_backup_password),
         )
     except restore_plan_service.EncryptedBackupError as e:
-        # 加密包缺密码**不是**失败终局：仍回 encrypted=True，前端才会渲染密码框并放行
+        # 三层兜底都拿不到密码（服务端未配置 BACKUP_ENCRYPTION_PASSWORD）才会走到这里：
+        # 仍回 encrypted=True 让界面能区分「加密包解不开」与「文件损坏」
         return BackupRestorePlanOut(
             success=False, filename=payload.filename, encrypted=True, error=str(e),
         )
     except (FileNotFoundError, ValueError) as e:
-        # 加密包即使解密失败（密码错）也要回 encrypted=True，否则前端的密码输入框会
-        # 随预览失败一起消失，用户连重试的入口都没有
+        # 加密包解密失败（密码错/文件损坏）也要回 encrypted=True，界面据此区分「加密包解不开」与「文件损坏」
         return BackupRestorePlanOut(
             success=False, filename=payload.filename,
             encrypted=payload.filename.endswith('.enc'), error=str(e),
@@ -689,4 +693,10 @@ async def restore_plan(
     except Exception as e:  # broad-except: 预览失败返回 message，不中断请求
         logger.warning(f'还原差异预览失败: {e}')
         return BackupRestorePlanOut(success=False, filename=payload.filename, error=str(e))
-    return BackupRestorePlanOut(success=True, filename=payload.filename, **plan)
+    # manifest 固化发生在加密**之前**，其内没有 encrypted 键（恒 False）；.enc 后缀才是
+    # 加密的权威信号——不覆盖的话加密包预览成功时会被误标为「明文包」
+    plan.pop('encrypted', None)
+    return BackupRestorePlanOut(
+        success=True, filename=payload.filename,
+        encrypted=payload.filename.endswith('.enc'), **plan,
+    )

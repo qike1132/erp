@@ -6,8 +6,10 @@ M2 调度 DB 化测试(TECHNICAL_PLAN.md v2 §7 M2)
 2. schedule_service CRUD:create/update/delete 校验
 3. due_schedules 幂等:同一小时窗口不重复入队,跨日再调度
 4. 迁移 036 对称 downgrade
+5. due_schedules stale-running 补跑:worker 被服务重启杀死后允许重入队
 """
 import ast
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -178,6 +180,53 @@ class TestDueSchedules:
         monkeypatch.setattr(schedule_service, 'list_schedules', AsyncMock(return_value=rows))
         due = await due_schedules(MagicMock(), datetime(2026, 8, 22, 2, 0))
         assert due == rows
+
+
+def _statused_row(cron, last_run_at, last_status):
+    """带 last_status 的行：stale-running 补跑测试用（_fake_row 不含该字段）。"""
+    r = _fake_row('full', cron, last_run_at=last_run_at)
+    r.last_status = last_status
+    return r
+
+
+class TestStaleRunningRefire:
+    """任务执行中 worker 被服务重启杀死 → 卡 running 且终态回调不会执行。
+
+    2026-10-05 生产实例：16:00 窗口 16:05 补跑入队后 3 秒被全栈重启杀死，
+    last_run_at 已标 16:05、last_status 永久停在 'running'，当天不再补跑。
+    修复语义：running 超过 STALE_RUNNING_AFTER 视为未执行，放行补跑。
+    """
+
+    CRON = '0 16 * * *'
+    LAST_RUN = datetime(2026, 10, 5, 16, 5)   # 窗口 16:00，入队于 16:05
+
+    @pytest.mark.asyncio
+    async def test_stale_running_refires_after_threshold(self, monkeypatch):
+        rows = [_statused_row(self.CRON, self.LAST_RUN, 'running')]
+        monkeypatch.setattr(schedule_service, 'list_schedules', AsyncMock(return_value=rows))
+        # 距入队整 2 小时（>= STALE_RUNNING_AFTER）→ 视为未执行
+        due = await due_schedules(MagicMock(), datetime(2026, 10, 5, 18, 5))
+        assert due == rows
+
+    @pytest.mark.asyncio
+    async def test_fresh_running_still_skipped(self, monkeypatch):
+        rows = [_statused_row(self.CRON, self.LAST_RUN, 'running')]
+        monkeypatch.setattr(schedule_service, 'list_schedules', AsyncMock(return_value=rows))
+        # 30 分钟 < 阈值：可能是正常执行中，不补跑（防并发双跑）
+        assert await due_schedules(MagicMock(), datetime(2026, 10, 5, 16, 35)) == []
+
+    @pytest.mark.asyncio
+    async def test_failed_terminal_state_not_refired(self, monkeypatch):
+        """真实失败是终态：不补跑，等下一个 cron 窗口（防每 5 分钟反复重试）。"""
+        rows = [_statused_row(self.CRON, self.LAST_RUN, 'failed')]
+        monkeypatch.setattr(schedule_service, 'list_schedules', AsyncMock(return_value=rows))
+        assert await due_schedules(MagicMock(), datetime(2026, 10, 5, 18, 5)) == []
+
+    @pytest.mark.asyncio
+    async def test_success_terminal_state_not_refired(self, monkeypatch):
+        rows = [_statused_row(self.CRON, self.LAST_RUN, 'success')]
+        monkeypatch.setattr(schedule_service, 'list_schedules', AsyncMock(return_value=rows))
+        assert await due_schedules(MagicMock(), datetime(2026, 10, 5, 18, 5)) == []
 
 
 # ===========================================================================

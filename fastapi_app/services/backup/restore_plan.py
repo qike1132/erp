@@ -54,7 +54,9 @@ def read_manifest_from_backup(
         raise FileNotFoundError(f'备份文件不存在: {filename}')
     if path.suffix.endswith('.enc'):
         if not password:
-            raise EncryptedBackupError('该备份已加密，请输入解密密码后预览')
+            raise EncryptedBackupError(
+            '该备份已加密，且服务端未配置解密密码（BACKUP_ENCRYPTION_PASSWORD），请联系管理员'
+        )
         from fastapi_app.core.backup_encryption import decrypt_backup_auto
 
         try:

@@ -2,7 +2,7 @@
   <div class="sc-card">
     <div class="sc-row">
       <div class="sc-label">启用定时备份</div>
-      <button class="sc-switch" :class="{ on: form.enabled }" role="switch" :aria-checked="form.enabled" @click="form.enabled = !form.enabled"></button>
+      <button class="sc-switch" :class="{ on: form.enabled }" role="switch" :aria-checked="form.enabled" @click="form.enabled = !form.enabled" />
     </div>
     <div class="sc-row">
       <div class="sc-label">任务类型</div>
@@ -37,11 +37,11 @@
     </div>
     <div class="sc-list">
       <div v-for="s in schedules" :key="String(s.id ?? s.name)" class="sc-item">
-    <span class="sc-item-name">{{ s.name }}</span>
-    <span class="sc-item-cron mono">{{ s.cron_expr || s.schedule }}</span>
-    <span class="sc-item-status">{{ s.enabled ? '已启用' : '已停用' }}</span>
-    <button class="sc-item-del" title="删除" @click="s.id != null && onDelete(s.id)">删除</button>
-  </div>
+        <span class="sc-item-name">{{ s.name }}</span>
+        <span class="sc-item-cron mono" :title="s.cron_expr || s.schedule || ''">{{ cronLabel(s.cron_expr || s.schedule) }}</span>
+        <span class="sc-item-status">{{ s.enabled ? '已启用' : '已停用' }}</span>
+        <button class="sc-item-del" title="删除" @click="s.id != null && onDelete(s.id)">删除</button>
+      </div>
       <div v-if="schedules.length === 0" class="sc-empty">暂无定时任务</div>
     </div>
   </div>
@@ -72,15 +72,47 @@ const TASK_TYPE_LABELS: Record<string, string> = {
   disaster_recovery_test: '灾备恢复演练',
 }
 
+const WEEKDAY_LABELS = ['日', '一', '二', '三', '四', '五', '六']
+
+/** 把 5 段 cron（分 时 日 月 周）转成中文时间描述，悬停可看原文。
+ *  只翻译本页会产生/常见的「纯数字或 *」形态；带步进、区间、月份的表达式原样回退。 */
+function cronLabel(expr?: string | null) {
+  const raw = (expr ?? '').trim()
+  const m = raw.match(/^(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)$/)
+  if (!m) return raw
+  const [, min = '', hour = '', dom = '', mon = '', dow = ''] = m
+  if (mon !== '*' || !/^\d{1,2}$/.test(hour) || !/^\d{1,2}$/.test(min)) return raw
+  const time = `${hour.padStart(2, '0')}:${min.padStart(2, '0')}`
+  if (dom === '*' && dow === '*') return `每天 ${time}`
+  if (dom === '*' && /^\d$/.test(dow)) return `每周${WEEKDAY_LABELS[Number(dow) % 7]} ${time}`
+  if (dow === '*' && /^\d{1,2}$/.test(dom)) return `每月${Number(dom)}日 ${time}`
+  return raw
+}
+
+/** timeInput("HH:MM") → (小时, 分钟)；type=time 清空时回退 02:00。
+ *  分钟必须进 cron：此前只取小时、分钟硬编码 0，用户选 08:27 保存成 `0 8 * * *`。 */
+function timeParts(): [number, number] {
+  const [h = '', m = ''] = timeInput.value.split(':')
+  const hh = Number.parseInt(h, 10)
+  const mm = Number.parseInt(m, 10)
+  return [
+    Number.isNaN(hh) ? 2 : Math.min(Math.max(hh, 0), 23),
+    Number.isNaN(mm) ? 0 : Math.min(Math.max(mm, 0), 59),
+  ]
+}
+
 watch(period, (p) => {
-  if (p === 'daily') form.cron_expr = `0 ${timeInput.value.split(':')[0]} * * *`
+  if (p === 'daily') {
+    const [hh, mm] = timeParts()
+    form.cron_expr = `${mm} ${hh} * * *`
+  }
 })
 
 function handleSave() {
-  const hour = parseInt(timeInput.value.split(':')[0] || '2', 10)
-  const cron = period.value === 'daily' ? `0 ${hour} * * *`
-    : period.value === 'weekly' ? `0 ${hour} * * 1`
-    : period.value === 'monthly' ? `0 ${hour} 1 * *`
+  const [hh, mm] = timeParts()
+  const cron = period.value === 'daily' ? `${mm} ${hh} * * *`
+    : period.value === 'weekly' ? `${mm} ${hh} * * 1`
+    : period.value === 'monthly' ? `${mm} ${hh} 1 * *`
     : form.cron_expr.trim() || '0 2 * * *'
   const typeLabel = TASK_TYPE_LABELS[taskType.value] ?? '自定义'
   props.onSave({ name: `自定义${typeLabel}`, task_type: taskType.value, cron_expr: cron, enabled: form.enabled })
