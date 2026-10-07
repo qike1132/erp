@@ -38,6 +38,17 @@ from fastapi_app.shared.stock_concurrency import (
     check_stock_available,
 )
 
+
+@pytest.fixture(autouse=True)
+def _default_inventory_balance():
+    """库存结余闸门（2026-10-07）默认充足，使本文件聚焦负库存策略语义。"""
+    with patch(
+        "fastapi_app.services.stock_service.get_inventory_balance",
+        new_callable=AsyncMock, return_value=10**9,
+    ):
+        yield
+
+
 REPO = Path(__file__).resolve().parents[2]
 
 # ---------------------------------------------------------------------------
@@ -54,7 +65,7 @@ IN_SCOPE_FILES = (
     "fastapi_app/services/stock_return_service.py",
 )
 
-# 每个文件期望的统一入口调用点数量（AST 统计 Call 节点，合计 11 处）
+# 每个文件期望的统一入口调用点数量（AST 统计 Call 节点，合计 9 处）
 EXPECTED_CALL_SITES = {
     # 删除订单：直写前的净变化量判定
     "fastapi_app/services/approval_service.py": {"assert_stock_available": 1},
@@ -69,12 +80,13 @@ EXPECTED_CALL_SITES = {
     # 删除入库（-stockin.quantity）／修改入库数量（quantity - old_quantity）
     "fastapi_app/services/stock_in_service.py": {"assert_stock_available": 2},
     # 出货准入已校准为「客户+产品」订单余量口径（calculate_available_shipment_quantity）；
-    # create/modify 两处 assert 保留；批量出库的负库存兜底由 apply_stock_delta_locked
-    # 内置原子守卫承担（守卫在统一写入口内部，不计服务层调用点）
+    # create 路径的产品级前置判定已于 2026-10-07 移除（与批量路径统一），
+    # modify 路径的 assert 保留；批量/单条的负库存兜底由统一写入口内置原子守卫承担
+    # （守卫在写入口内部，不计服务层调用点）。
     "fastapi_app/services/stock_out_service.py": {
-        "assert_stock_available": 2,
+        "assert_stock_available": 1,
     },
-    # 删除退货（-stockreturn.quantity）
+    # 取消退货（软取消，-stockreturn.quantity；e14eb4dd 起取代删除语义）
     "fastapi_app/services/stock_return_service.py": {"assert_stock_available": 1},
 }
 
@@ -449,10 +461,10 @@ def test_call_sites_use_unified_entry(rel_path):
     assert _unified_calls(rel_path) == EXPECTED_CALL_SITES[rel_path]
 
 
-def test_total_call_sites_is_ten():
+def test_total_call_sites_is_nine():
     total = sum(count for site in EXPECTED_CALL_SITES.values() for count in site.values())
-    assert total == 10
-    assert sum(sum(_unified_calls(rel).values()) for rel in IN_SCOPE_FILES) == 10
+    assert total == 9
+    assert sum(sum(_unified_calls(rel).values()) for rel in IN_SCOPE_FILES) == 9
 
 
 @pytest.mark.parametrize("rel_path", IN_SCOPE_FILES)
@@ -551,10 +563,15 @@ def _deny_env(monkeypatch) -> None:
 # ---------------------------------------------------------------------------
 # 3) + 4) 五个代表性站点的双分支运行时证据
 # ---------------------------------------------------------------------------
-async def test_create_stockout_core_denies_then_policy_releases(monkeypatch):
-    """站点 8：assert 分支 + 抛 ValueError（文案逐字）。"""
+async def test_create_stockout_core_defers_negative_stock_to_write_entry(monkeypatch):
+    """站点 8（2026-10-07 变更）：create_stockout_core 不再对 product.current_stock
+    做前置判定（与批量路径 _process_single_stockout 统一口径）。
+
+    current_stock 低于出货量时不再抛产品级「库存不足！」，而是继续走到订单余量校验；
+    负库存由写入口 update_stock_with_optimistic_lock 的原子守卫兜底。
+    """
     _deny_env(monkeypatch)
-    product = SimpleNamespace(current_stock=5)
+    product = SimpleNamespace(current_stock=5, name="产品X")
     db = _FakeSession()
     info = {"available_quantity": 0, "order_quantity": 0, "shipped_quantity": 0, "orders": []}
     with patch("fastapi_app.services.stock_service.get_product_for_update",
@@ -564,17 +581,10 @@ async def test_create_stockout_core_denies_then_policy_releases(monkeypatch):
     ) as calc:
         with pytest.raises(ValueError) as ei:
             await stock_out_service.create_stockout_core(db, 1, 8, "客户A", None, "")
-        assert str(ei.value) == "库存不足！"
-        calc.assert_not_awaited()  # 守卫先于任何后续校验/写入
+        # 前置 current_stock 断言已移除：拒绝来自订单口径，而非产品级「库存不足！」
+        assert str(ei.value) == "该客户没有可用的订单支持出货！请先创建订单。"
+        calc.assert_awaited()  # 直接进入后续校验（不再被前置断言拦下）
         assert db.added == []
-
-        monkeypatch.setenv("ALLOW_NEGATIVE_STOCK", "true")
-        with pytest.raises(ValueError) as ei2:
-            await stock_out_service.create_stockout_core(db, 1, 8, "客户A", None, "")
-        # 策略放行后越过库存守卫，落到下一道业务校验（可用订单量）——
-        # 即守卫确实不再拦截，且后续错误文案与改动前一致
-        assert str(ei2.value) == "该客户没有可用的订单支持出货！请先创建订单。"
-        calc.assert_awaited()
 
 
 async def test_batch_stockout_item_denies_at_write_guard_then_releases(monkeypatch):
@@ -684,14 +694,21 @@ async def test_update_stockin_wrapper_delta_guard_then_releases(monkeypatch):
 
 
 async def test_delete_stockreturn_core_message_verbatim_then_releases(monkeypatch):
-    """站点 11：assert 分支；并固化「先回减累计退货量、后判定」的既有语句顺序。"""
+    """站点 11：assert 分支；并固化「先回减累计退货量、后判定」的既有语句顺序。
+
+    2026-10-05 e14eb4dd 起「删除」语义由软取消（cancel_stockreturn_core）取代：
+    记录保留（status='cancelled'），库存/流水/订单回冲链路与删除完全对称，
+    负库存文案同步改为「取消退货将导致库存为负数」。
+    """
     _deny_env(monkeypatch)
     stockreturn = SimpleNamespace(
-        stockout_id=1, quantity=2, product_id=1, id=9, order_id=None, customer="客户A")
+        stockout_id=1, quantity=2, product_id=1, id=9, order_id=None, customer="客户A",
+        status="active")
     stockout = SimpleNamespace(id=1, returned_quantity=2)
     product = SimpleNamespace(current_stock=1, name="测试产品")
     stockreturn_release = SimpleNamespace(
-        stockout_id=1, quantity=2, product_id=1, id=10, order_id=None, customer="客户A")
+        stockout_id=1, quantity=2, product_id=1, id=10, order_id=None, customer="客户A",
+        status="active")
     stockout_release = SimpleNamespace(id=1, returned_quantity=2)
     with patch("fastapi_app.services.stock_service.get_product_for_update",
                new_callable=AsyncMock, return_value=product), patch(
@@ -700,21 +717,24 @@ async def test_delete_stockreturn_core_message_verbatim_then_releases(monkeypatc
         new_callable=AsyncMock,
     ) as upd:
         with pytest.raises(ValueError) as ei:
-            await stock_return_service.delete_stockreturn_core(
+            await stock_return_service.cancel_stockreturn_core(
                 _FakeSession(stockout), stockreturn,
             )
-        assert str(ei.value) == "删除退货将导致库存为负数（当前库存：1，退货数量：2）"
+        assert str(ei.value) == "取消退货将导致库存为负数（当前库存：1，退货数量：2）"
         upd.assert_not_awaited()
         assert product.current_stock == 1
         # 与改动前逐字一致：回减发生在守卫之前（异常后不提交，故无副作用）
         assert stockout.returned_quantity == 0
+        # 拒绝路径不得置为 cancelled（记录保持 active）
+        assert stockreturn.status == "active"
 
         monkeypatch.setenv("ALLOW_NEGATIVE_STOCK", "true")
-        await stock_return_service.delete_stockreturn_core(
+        await stock_return_service.cancel_stockreturn_core(
             _FakeSession(stockout_release), stockreturn_release,
         )
         upd.assert_awaited_once()
         assert product.current_stock == 1  # 真实写入口已被替换为替身，库存不变
+        assert stockreturn_release.status == "cancelled"  # 软取消：状态翻转，记录保留
 
 
 # ---------------------------------------------------------------------------

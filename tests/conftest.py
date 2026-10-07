@@ -433,6 +433,22 @@ async def test_product(async_db_session):
         )
         async_db_session.add(product)
         await async_db_session.flush()
+    # 库存结余闸门（2026-10-07）要求「包装部入库 − 已出货」≥ 出货量；
+    # 测试产品无生产数据时闸门恒拒，故补一条包装部入库记录（幂等、足量）。
+    from fastapi_app.shared_models import DailyProductionRecord
+    has_packaging = (await async_db_session.execute(
+        select(DailyProductionRecord.id).where(
+            DailyProductionRecord.department == 'packaging',
+            DailyProductionRecord.product_id == product.id,
+        ).limit(1)
+    )).scalar()
+    if not has_packaging:
+        async_db_session.add(DailyProductionRecord(
+            department='packaging', product_id=product.id,
+            product_name=product.name, barcode=product.barcode or '',
+            quantity=100000, production_date=datetime.now(UTC).date(),
+        ))
+        await async_db_session.flush()
     return product
 
 

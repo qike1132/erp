@@ -33,6 +33,16 @@ from fastapi_app.shared_models import Product
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
+
+@pytest.fixture(autouse=True)
+def _default_inventory_balance():
+    """库存结余闸门（2026-10-07）默认充足，使本文件聚焦乐观锁语义。"""
+    with patch(
+        "fastapi_app.services.stock_service.get_inventory_balance",
+        new_callable=AsyncMock, return_value=10**9,
+    ):
+        yield
+
 _SERVICE_FILES = (
     "fastapi_app/services/order/deduction.py",
     "fastapi_app/services/order_deduction_service.py",
@@ -66,7 +76,8 @@ _EXPECTED_CALL_SITES = {
     },
     "fastapi_app/services/stock_return_service.py": {
         "create_stockreturn_core": ["update_stock_with_optimistic_lock"],
-        "delete_stockreturn_core": ["update_stock_with_optimistic_lock"],
+        # e14eb4dd 起「删除」由软取消（cancel_stockreturn_core）取代，写入点同名迁移
+        "cancel_stockreturn_core": ["update_stock_with_optimistic_lock"],
     },
 }
 

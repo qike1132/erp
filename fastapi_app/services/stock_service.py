@@ -72,6 +72,7 @@ from fastapi_app.services.stock_inventory_service import (  # noqa: F401
     _resolve_products,
     _run_sql,
     get_inventory,
+    get_inventory_balance,
     get_inventory_paginated,
     get_stock_overview_stats,
     get_stockins,

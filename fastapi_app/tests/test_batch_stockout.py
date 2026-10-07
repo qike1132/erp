@@ -10,10 +10,27 @@
 - 未选择客户
 - 出货数量 <= 0
 - 部分成功部分失败
+- 库存结余闸门（2026-10-07 新增）
 """
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from fastapi_app.services import stock_service
+
+
+@pytest.fixture(autouse=True)
+def _default_inventory_balance():
+    """默认库存结余充足，使既有用例无需显式 mock 新闸门。
+
+    仅库存结余闸门用例会覆盖此 patch。
+    """
+    with patch(
+        'fastapi_app.services.stock_service.get_inventory_balance',
+        new_callable=AsyncMock, return_value=10**9,
+    ):
+        yield
+
 
 # ==================== 辅助函数 ====================
 
@@ -381,3 +398,68 @@ class TestBatchCreateStockoutsNoNestedTransaction:
             await stock_service.batch_create_stockouts(mock_db, [_make_stockout_data(quantity=10)])
 
         mock_db.begin_nested.assert_not_called()
+
+
+# ==================== 库存结余闸门（2026-10-07） ====================
+
+class TestBatchCreateStockoutsInventoryBalanceGate:
+    """库存（结余）闸门：包装部入库 − 已出货，产品级，与 /stock 页「库存」列同口径"""
+
+    async def test_balance_insufficient_rejected_with_message(self, mock_db):
+        """结余不足：拒绝，文案含客户、产品、可用与本次数量"""
+        product = _make_product(product_id=1, name="产品A")
+        shipment_info = _make_shipment_info(available_quantity=50, orders=[
+            {'order_id': 1, 'available': 50, 'quantity': 50}
+        ])
+
+        with patch('fastapi_app.services.stock_service.get_product_for_update', new_callable=AsyncMock, return_value=product), \
+             patch('fastapi_app.services.stock_service.get_inventory_balance', new_callable=AsyncMock, return_value=8), \
+             patch('fastapi_app.services.stock_service.calculate_available_shipment_quantity', new_callable=AsyncMock, return_value=shipment_info) as calc:
+
+            result = await stock_service.batch_create_stockouts(
+                mock_db, [_make_stockout_data(product_id=1, customer="客户A", quantity=10)]
+            )
+
+        assert result['results'][0]['success'] is False
+        error = result['results'][0]['error']
+        assert error == '客户「客户A」产品「产品A」库存不足：可用 8，本次 10'
+        # 库存闸门先于订单余量校验：不足时不再进入订单口径
+        calc.assert_not_awaited()
+        # 未扣减库存
+        assert product.current_stock == 100
+
+    async def test_balance_equal_quantity_allowed(self, mock_db):
+        """边界：结余恰好等于出货数量 → 放行"""
+        product = _make_product(product_id=1, name="产品A")
+        shipment_info = _make_shipment_info(available_quantity=10, orders=[
+            {'order_id': 1, 'available': 10, 'quantity': 10}
+        ])
+
+        with patch('fastapi_app.services.stock_service.get_product_for_update', new_callable=AsyncMock, return_value=product), \
+             patch('fastapi_app.services.stock_service.get_inventory_balance', new_callable=AsyncMock, return_value=10), \
+             patch('fastapi_app.services.stock_service.calculate_available_shipment_quantity', new_callable=AsyncMock, return_value=shipment_info), \
+             patch('fastapi_app.services.stock_service.generate_stockout_number', new_callable=AsyncMock, return_value='SO-001'):
+
+            result = await stock_service.batch_create_stockouts(
+                mock_db, [_make_stockout_data(product_id=1, customer="客户A", quantity=10)]
+            )
+
+        assert result['results'][0]['success'] is True
+
+    async def test_balance_sufficient_allowed(self, mock_db):
+        """结余充足 → 放行"""
+        product = _make_product(product_id=1, name="产品A")
+        shipment_info = _make_shipment_info(available_quantity=50, orders=[
+            {'order_id': 1, 'available': 50, 'quantity': 50}
+        ])
+
+        with patch('fastapi_app.services.stock_service.get_product_for_update', new_callable=AsyncMock, return_value=product), \
+             patch('fastapi_app.services.stock_service.get_inventory_balance', new_callable=AsyncMock, return_value=999), \
+             patch('fastapi_app.services.stock_service.calculate_available_shipment_quantity', new_callable=AsyncMock, return_value=shipment_info), \
+             patch('fastapi_app.services.stock_service.generate_stockout_number', new_callable=AsyncMock, return_value='SO-001'):
+
+            result = await stock_service.batch_create_stockouts(
+                mock_db, [_make_stockout_data(product_id=1, customer="客户A", quantity=10)]
+            )
+
+        assert result['results'][0]['success'] is True

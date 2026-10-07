@@ -25,6 +25,17 @@ async def _fresh_product(db, suffix, stock):
     product = Product(name=f"流程产品-{suffix}", current_stock=stock)
     db.add(product)
     await db.flush()
+    # 库存结余闸门（2026-10-07）：出货要求「包装部入库 − 已出货」≥ 出货量，
+    # 故补一条足量包装部入库记录。
+    from datetime import UTC, datetime
+
+    from fastapi_app.shared_models import DailyProductionRecord
+    db.add(DailyProductionRecord(
+        department='packaging', product_id=product.id,
+        product_name=product.name, barcode='', quantity=100000,
+        production_date=datetime.now(UTC).date(),
+    ))
+    await db.flush()
     return product
 
 

@@ -20,6 +20,8 @@ from sqlalchemy.sql.elements import TextClause
 from fastapi_app.core.cache import cache_result
 from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.shared_models import (
+    DailyProductionRecord,
+    InventoryLog,
     Order,
     OrderItem,
     Product,
@@ -437,6 +439,32 @@ async def get_inventory_paginated(db: AsyncSession, search_customer: str = '', s
         'page': page,
         'per_page': per_page,
     }
+
+
+async def get_inventory_balance(db: AsyncSession, product_id: int) -> int:
+    """单产品「库存（结余）」= 包装部入库 − 已出货。
+
+    口径与 get_inventory_paginated 的 CTE 逐字一致：包装部入库取
+    daily_production_record 中 department='packaging' 的 quantity 之和，
+    已出货取 inventory_log 出库三型的 change_quantity 之和（出库为负数，
+    故相加即净流出）。供出货前的库存闸门复用同一口径，避免另起一套。
+
+    注意：该指标是**产品级**的，不含客户维度 —— /stock 页同一产品在不同
+    客户行上显示的是同一个值。
+    """
+    packaging_qty = (await db.execute(
+        select(func.coalesce(func.sum(DailyProductionRecord.quantity), 0)).where(
+            DailyProductionRecord.department == 'packaging',
+            DailyProductionRecord.product_id == product_id,
+        )
+    )).scalar() or 0
+    shipped_net = (await db.execute(
+        select(func.coalesce(func.sum(InventoryLog.change_quantity), 0)).where(
+            InventoryLog.change_type.in_(('出库', '出库修改', '出库删除')),
+            InventoryLog.product_id == product_id,
+        )
+    )).scalar() or 0
+    return int(packaging_qty) + int(shipped_net)
 
 
 def _build_inventory_filter_params(search_product: str, search_customer: str,

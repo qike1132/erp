@@ -42,10 +42,32 @@ from fastapi_app.utils import inventory_balance_bounds
 logger = logging.getLogger(__name__)
 
 
+async def _assert_inventory_balance(
+    db: AsyncSession, product_id: int, product_name: str, customer: str, quantity: int,
+) -> None:
+    """出货前「库存（结余）」闸门（产品级）：不足则拒绝。
+
+    口径与 /stock 页「库存」列逐字同源（包装部入库 − 已出货），见
+    stock_inventory_service.get_inventory_balance。作为主闸门置于订单余量校验
+    之前；订单余量闸门保留（它同时是 FIFO 分配依据）。
+
+    Raises:
+        ValueError: 库存结余小于本次出货数量。
+    """
+    balance = await stock_service.get_inventory_balance(db, product_id)
+    if quantity > balance:
+        raise ValueError(
+            f'客户「{customer}」产品「{product_name}」库存不足：可用 {balance}，本次 {quantity}'
+        )
+
+
 async def create_stockout_core(db: AsyncSession, product_id: int, quantity: int, customer: str, stockout_date: datetime, note: str, operator_id: int | None = None) -> list[StockOut]:
     product = await stock_service.get_product_for_update(db, product_id)
-    # 负库存判定统一走统一入口（P1-2b），文案与改动前逐字一致
-    assert_stock_available(product.current_stock, -quantity, message='库存不足！')
+    # 闸门口径与批量路径（_process_single_stockout）统一：库存结余 + 订单余量。
+    # 产品级 current_stock 前置断言已移除（2026-10-06 批量路径同款裁定，2026-10-07
+    # 对齐单条路径）：它是备货口径，与客户级订单准入自相矛盾；负库存由写入口
+    # update_stock_with_optimistic_lock 的原子守卫兜底拒绝。
+    await _assert_inventory_balance(db, product_id, product.name, customer, quantity)
     shipment_info = await stock_service.calculate_available_shipment_quantity(db, product_id, customer)
     if shipment_info['available_quantity'] <= 0:
         raise ValueError('该客户没有可用的订单支持出货！请先创建订单。')
@@ -234,7 +256,7 @@ async def delete_stockout(db: AsyncSession, stockout_id: int, operator_id: int |
     """删除出库记录"""
     # 第十四轮：锁序统一为 Product→StockOut —— update_stockout 是 P→SO，本函数原为
     # SO→P（先锁出库行、delete_stockout_core 内再锁产品），同张出库单「编辑 vs 删除」
-    # 并发会互等行锁死锁。与 delete_stockreturn_core / update_stockin 的既修口径一致。
+    # 并发会互等行锁死锁。与 cancel_stockreturn_core / update_stockin 的既修口径一致。
     pid_result = await db.execute(select(StockOut.product_id).where(StockOut.id == stockout_id))
     pid_row = pid_result.one_or_none()
     if not pid_row:
@@ -343,6 +365,10 @@ async def _process_single_stockout(db: AsyncSession, item: dict, operator_id: in
         if product_id is None:
             raise ValueError(f'产品ID {product_id} 不存在')
         product = await stock_service.get_product_for_update(db, product_id)
+
+        # 库存结余主闸门（2026-10-07 用户裁决）：按 /stock 页「库存」列口径
+        # （包装部入库 − 已出货，产品级）先拦一道，不足即拒。
+        await _assert_inventory_balance(db, product_id, product.name, customer, quantity)
 
         # 库存准入校准（2026-10-06 用户裁决）：按「客户+产品」订单余量口径
         # ——出货量受限于该客户该产品的订单总量与已出货量之差，与 /stock 页

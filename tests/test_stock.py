@@ -334,20 +334,34 @@ class TestCreateStockOut:
         assert product.current_stock == 150  # 200 - 50，经 refresh 回读
 
     @pytest.mark.asyncio
+    @patch('fastapi_app.services.stock_service.log_inventory_change')
+    @patch('fastapi_app.services.stock_service.generate_stockout_number')
+    @patch('fastapi_app.services.stock_service.calculate_available_shipment_quantity')
     @patch('fastapi_app.services.stock_service.get_product_for_update')
-    async def test_create_stockout_insufficient_stock(self, mock_get_product,
-                                                        mock_async_db):
-        """库存不足"""
+    async def test_create_stockout_current_stock_guard_deferred_to_write_entry(
+            self, mock_get_product, mock_calc, mock_gen_no, mock_log, mock_async_db):
+        """current_stock 低于出货量不再由前置断言拒绝（2026-10-07 与批量路径统一），
+        改由写入口 update_stock_with_optimistic_lock 的负库存守卫拒绝。"""
         product = MagicMock()
         product.id = 1
+        product.name = '产品A'
         product.current_stock = 30
         mock_get_product.return_value = product
+        mock_calc.return_value = {
+            'available_quantity': 200, 'order_quantity': 200, 'shipped_quantity': 0,
+            'orders': [{'order_id': 1, 'available': 200}],
+        }
+        mock_gen_no.return_value = 'SO-1'
+        mock_async_db.begin_nested = MagicMock(return_value=AsyncMock())
 
-        with pytest.raises(ValueError, match='库存不足'):
-            await create_stockout_core(
-                mock_async_db, product_id=1, quantity=100,
-                customer='客户', stockout_date=datetime.now(UTC), note=''
-            )
+        with patch('fastapi_app.services.stock_out_service.update_stock_with_optimistic_lock',
+                   new_callable=AsyncMock,
+                   side_effect=ValueError('库存不足！当前库存: 30，需要: 100')):
+            with pytest.raises(ValueError, match='库存不足'):
+                await create_stockout_core(
+                    mock_async_db, product_id=1, quantity=100,
+                    customer='客户', stockout_date=datetime.now(UTC), note=''
+                )
 
     @pytest.mark.asyncio
     @patch('fastapi_app.services.stock_service.get_product_for_update')
