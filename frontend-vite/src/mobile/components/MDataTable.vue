@@ -93,10 +93,6 @@ defineEmits<{
   border-bottom: var(--m-border-subtle);
 }
 
-.m-dt-row:last-child {
-  border-bottom: none;
-}
-
 .m-dt-row--head {
   background: var(--m-bg-grouped);
 }

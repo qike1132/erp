@@ -624,9 +624,6 @@ h6 { font-size: 0.8125rem; }
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  .mc-table tbody tr:last-child td {
-    border-bottom: 0;
-  }
   .mc-table th.is-num,
   .mc-table td.is-num {
     text-align: center;
