@@ -50,13 +50,12 @@ def _get_pool_config() -> dict:
         "pool_size": pool_size,
         "pool_timeout": int(os.getenv("DB_POOL_TIMEOUT", "30")),
         # 连接最长存活秒数：到期回收重建，避免复用坏连接。
-        # 2026-10-07：服务器 postgresql.auto.conf 设 idle_session_timeout='5min'，
-        # 会终止空闲 >5min 的连接（实测日均 1000+ 次）。原默认 1800s 远大于它，
-        # 池中连接被服务器杀掉后仍被应用取用 → asyncpg 抛
-        # "cannot switch to state 15; another operation (2) is in progress"
-        # （物化视图刷新任务间歇失败，见 16:25:00 的 8 次 idle-session timeout）。
-        # 改为 240s（< 300s）：连接在服务器空闲超时前就被回收重建。
-        "pool_recycle": int(os.getenv("DB_POOL_RECYCLE", "240")),
+        # 必须 < 服务器 idle_session_timeout，否则池中连接被服务器杀掉后仍被应用取用
+        # → asyncpg 抛 "cannot switch to state 15; another operation (2) is in progress"
+        # （state 2 = PROTOCOL_ERROR_CONSUME；曾致物化视图刷新任务间歇失败，2026-10-07）。
+        # 服务器现值 idle_session_timeout='30min'（同日由 5min 调大），故取 1500s（25min，留 5min 余量）。
+        # 守卫：tests/test_pool_recycle_vs_idle_timeout.py。
+        "pool_recycle": int(os.getenv("DB_POOL_RECYCLE", "1500")),
         "max_overflow": max_overflow,
         "pool_pre_ping": True,
         "pool_use_lifo": True,  # LIFO 策略，减少空闲连接

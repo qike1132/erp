@@ -140,10 +140,10 @@ def test_dependency_end_to_end_returns_200(monkeypatch):
 def test_pool_config_includes_pool_recycle(monkeypatch):
     """P0-10：pool_recycle 必须真的进 _get_pool_config()（此前全仓 0 命中）。
 
-    默认值 240s < 服务器 idle_session_timeout(5min)，见
+    默认值 1500s < 服务器 idle_session_timeout(30min)，见
     tests/test_pool_recycle_vs_idle_timeout.py 的不变量守卫。
     """
     monkeypatch.delenv("DB_POOL_RECYCLE", raising=False)
-    assert database._get_pool_config()["pool_recycle"] == 240
+    assert database._get_pool_config()["pool_recycle"] == 1500
     monkeypatch.setenv("DB_POOL_RECYCLE", "600")
     assert database._get_pool_config()["pool_recycle"] == 600
