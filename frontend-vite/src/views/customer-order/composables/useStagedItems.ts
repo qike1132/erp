@@ -103,15 +103,51 @@ export function useStagedItems() {
   }
 
   /**
+   * 备货提交的逐条结果。后端 `batch_create_stockins` 用 `results[idx]` 按下标构造
+   * （stock_in_service.py:193/205/207/210），与提交的 payload 一一对应；
+   * 形状不符（缺 results 或长度不等）时返回 null，调用方退回「整批视为成功」的旧行为，
+   * 避免误判把已入库的行留在暂存区被重复提交。
+   */
+  function stockinOutcome(payload: Record<string, unknown>[], res: BatchSubmitOrdersResponse | null) {
+    const body = (res as { data?: BatchSubmitOrdersResponse } | null)?.data ?? res
+    const results = (body as { results?: { success?: boolean }[] } | null)?.results
+    if (!Array.isArray(results) || results.length !== payload.length) return null
+    const okFlags = results.map((r) => r?.success === true)
+    return {
+      okFlags,
+      okCount: okFlags.filter(Boolean).length,
+      okQty: payload.reduce((sum, item, i) => sum + (okFlags[i] ? Number(item.quantity) || 0 : 0), 0),
+    }
+  }
+
+  /**
    * 统一播报。所有措辞都由 order/stockin 两个真实结果派生，
    * 因此不会出现「播报成功但实际未提交」这类与事实相反的反馈。
    * syncedPlanCount：本次成功提交且带出货计划的订单条目数（在移除暂存项之前捕获）。
+   * stockinOkQty/stockinOkCount：备货**逐条成功**的件数与条数；stockinFailedCount：未入库条数。
+   * 备货直接增加库存，成功文案必须报出条数与件数——只报订单会让备货入库在用户眼前消失，
+   * 库存"凭空"多出（2026-10-06 MINISO 出库事故的根因之一）。
    */
-  function reportSubmit(order: SubmitOutcome, stockin: SubmitOutcome, syncedPlanCount = 0) {
+  function reportSubmit(
+    order: SubmitOutcome,
+    stockin: SubmitOutcome,
+    syncedPlanCount = 0,
+    stockinOkQty = 0,
+    stockinOkCount = 0,
+    stockinFailedCount = 0,
+  ) {
     const done: string[] = []
     const kept: string[] = []
     if (order.attempted && !order.failed) done.push(`订单 ${order.count} 条`)
-    if (stockin.attempted && !stockin.failed) done.push(`备货 ${stockin.count} 条`)
+    if (stockin.attempted && !stockin.failed) {
+      // HTTP 200 只代表请求成功，逐条结果才算数：部分失败不能按整批报
+      if (stockinOkCount > 0) {
+        const failedNote = stockinFailedCount > 0 ? `，${stockinFailedCount} 条未入库（已保留可重试）` : ''
+        done.push(`备货入库 ${stockinOkCount} 条（库存 +${stockinOkQty}）${failedNote}`)
+      } else if (stockinFailedCount > 0) {
+        kept.push(`备货 ${stockinFailedCount} 条`)
+      }
+    }
     if (order.attempted && order.failed) kept.push(`订单 ${order.count} 条`)
     if (stockin.attempted && stockin.failed) kept.push(`备货 ${stockin.count} 条`)
 
@@ -121,21 +157,25 @@ export function useStagedItems() {
       return
     }
     if (!order.attempted) {
-      showToast('提交成功', 'success')
+      // 走到这里说明本次只提交了备货（done 仅含备货段）
+      showToast(`提交成功：${done.join('、')}`, 'success')
       return
     }
     const res = order.res?.data ?? order.res
     const createdCount = res?.created_count ?? 0
     if (createdCount === 0) {
       const firstError = (res?.results ?? []).filter((r) => !r.success)[0]?.error || '未知原因'
-      showToast(`订单创建失败（0/${order.count}）：${firstError}`, 'error')
+      const stockinNote = done.find((s) => s.startsWith('备货'))
+      showToast(`订单创建失败（0/${order.count}）：${firstError}${stockinNote ? `；${stockinNote}` : ''}`, 'error')
       return
     }
+    const stockinNote = done.find((s) => s.startsWith('备货'))
+    const stockinTail = stockinNote ? `；${stockinNote}` : ''
     if (syncedPlanCount > 0) {
-      showToast(`提交成功：已创建 ${createdCount} 个主订单（含 ${order.count} 个 SKU），其中 ${syncedPlanCount} 条已同步出货计划`, 'success')
+      showToast(`提交成功：已创建 ${createdCount} 个主订单（含 ${order.count} 个 SKU），其中 ${syncedPlanCount} 条已同步出货计划${stockinTail}`, 'success')
       return
     }
-    showToast(`提交成功：已创建 ${createdCount} 个主订单（含 ${order.count} 个 SKU）`, 'success')
+    showToast(`提交成功：已创建 ${createdCount} 个主订单（含 ${order.count} 个 SKU）${stockinTail}`, 'success')
   }
 
   async function submitAll() {
@@ -144,24 +184,39 @@ export function useStagedItems() {
     try {
       const orderUids = stagedOrders.value.map((i) => i.uid)
       const stockinUids = stagedStockins.value.map((i) => i.uid)
+      // 提交内容在 await 之前定稿。提交在途期间用户仍可改暂存区（表单未接 submitting），
+      // 播报必须以「实际提交的那一批」为准——事后从活列表现算会与实际入库对不上。
+      const orderPayload = buildOrderPayload()
+      const stockinPayload = buildStockinPayload()
 
       // 两类条目各自独立提交：其一失败不阻断另一类，
       // 也不会把「从未尝试」错当成「已成功」（后者曾导致条目被静默移出暂存区）。
-      const order = await submitGroup(
-        stockApi.batchSubmitOrders, buildOrderPayload(), '订单')
-      const stockin = await submitGroup(
-        stockApi.batchSubmitStockins, buildStockinPayload(), '备货')
+      const order = await submitGroup(stockApi.batchSubmitOrders, orderPayload, '订单')
+      const stockin = await submitGroup(stockApi.batchSubmitStockins, stockinPayload, '备货')
 
       // 在移除暂存项之前捕获「成功提交且带计划」的条目数，供播报使用
       const syncedPlanCount = order.attempted && !order.failed
         ? stagedOrders.value.filter((i) => i.shipmentPlans.length > 0).length
         : 0
+      // 备货按**逐条结果**统计：请求返回 200 不代表每条都入库成功
+      const stockinRes = stockin.attempted && !stockin.failed
+        ? stockinOutcome(stockinPayload, stockin.res)
+        : null
+      const stockinOkCount = stockinRes ? stockinRes.okCount : stockin.count
+      const stockinOkQty = stockinRes
+        ? stockinRes.okQty
+        : stockinPayload.reduce((sum, i) => sum + (Number(i.quantity) || 0), 0)
+      const stockinFailedCount = stockinRes ? stockin.count - stockinRes.okCount : 0
 
       // 移除与播报共用同一组事实，二者不可能不一致
       if (order.attempted && !order.failed) dropUids(orderUids)
-      if (stockin.attempted && !stockin.failed) dropUids(stockinUids)
+      if (stockin.attempted && !stockin.failed) {
+        // 只移除**真正入库成功**的那几条；逐条失败的行留在暂存区供重试
+        // （形状不符时 stockinRes 为 null，退回整批移除，避免重复入库）
+        dropUids(stockinRes ? stockinUids.filter((_, i) => stockinRes.okFlags[i]) : stockinUids)
+      }
 
-      reportSubmit(order, stockin, syncedPlanCount)
+      reportSubmit(order, stockin, syncedPlanCount, stockinOkQty, stockinOkCount, stockinFailedCount)
 
       // 订单 / 备货任一写入成功都会改变库存汇总与报表流水，统一失效派生查询
       const orderSubmitted = order.attempted && !order.failed

@@ -78,19 +78,24 @@ export function useLogin() {
       if (isCapacitor && res.access_token) {
         setAccessToken(res.access_token)
       }
+      // ⚠️ 顺序敏感：下面两个预取都用「当前权限」做门控
+      //   （prefetchDashboardData 看 STOCK_STATS_PERMISSIONS；
+      //     patternRoom.prefetch 看 customer_sampling_manage），
+      //   而权限来自登录响应的 user.permissions。若在 setUserInfo 之前预取，
+      //   门控读到的是空 store → 恒 false → 两个预取都成了死代码（有权限的用户
+      //   也拿不到「0ms 首载」）。故必须先写用户信息，再预取。
+      //   位置须在 setAccessToken 之后：Capacitor 的 Bearer token 要先就绪。
+      if (res.user) {
+        authStore.setUserInfo(res.user)
+        devLog('[Login] 已通过登录响应设置用户信息, username:', res.user.username)
+      }
       // 🟢 并行预取 Dashboard 数据：登录成功后立即发起 stats + stock 请求，
       // 填充 Vue Query 缓存，用户到达 Dashboard 时命中缓存 → 首次加载 0ms
-      // 必须在 setAccessToken 之后调用，确保 Capacitor Bearer token 已就绪
       prefetchDashboardData(queryClient)
       // 🟢 并行预取 Pattern-Room 数据（分组列表 + 版师列表），填充 patternRoom Store 缓存，
       // 首次进入 /pattern-room 命中缓存 → 0ms 渲染、无「加载中...」（移动端无此模块，跳过）
       if (!isCapacitor) {
         usePatternRoomStore().prefetch().catch(() => { /* 预取失败静默 */ })
-      }
-      // 登录接口返回了用户信息时，直接写入 store（避免登录后再 GET /auth/me）
-      if (res.user) {
-        authStore.setUserInfo(res.user)
-        devLog('[Login] 已通过登录响应设置用户信息, username:', res.user.username)
       }
       await authStore.init(true)
       devLog('[Login] authStore.init 完成, loaded:', authStore.loaded, 'isLoggedIn:', authStore.isLoggedIn)
