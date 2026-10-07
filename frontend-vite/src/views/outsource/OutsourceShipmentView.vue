@@ -287,7 +287,6 @@ loadUnshippedQty()
   text-align: center; vertical-align: middle; color: var(--color-text);
 }
 .osv-table tbody td:last-child { border-right: none; }
-.osv-table tbody tr:last-child td { border-bottom: none; }
 .osv-table tbody tr:hover { background: var(--color-primary-50); }
 .osv-td-center { text-align: center !important; }
 .osv-td-nowrap { white-space: nowrap; }

@@ -129,7 +129,6 @@ function statusClass(status: string): string {
   text-align: center; border-bottom: 1px solid #e8ecf1; white-space: nowrap;
 }
 .osdd-table td { padding: 8px 12px; border-bottom: 1px solid #eef2f7; text-align: center; vertical-align: middle; }
-.osdd-table tbody tr:last-child td { border-bottom: none; }
 .osdd-td-left { text-align: left !important; }
 .osdd-proc {
   display: inline-block; font-size: 12px; font-weight: 600; color: var(--color-primary-700, #1d4ed8);

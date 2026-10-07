@@ -251,7 +251,6 @@ function statusClass(label: string): string {
   color: var(--color-text);
 }
 .oso-table tbody td:last-child { border-right: none; }
-.oso-table tbody tr:last-child td { border-bottom: none; }
 .oso-td-left { text-align: left !important; }
 .oso-td-center { text-align: center !important; }
 .oso-td-nowrap { white-space: nowrap; }

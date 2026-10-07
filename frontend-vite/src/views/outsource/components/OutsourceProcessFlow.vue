@@ -125,7 +125,6 @@ defineProps<{
   text-align: left;
   border-bottom: 1px solid #eef1f5;
 }
-.oso-proc-table tbody tr:last-child td { border-bottom: none; }
 .oso-proc-table th {
   font-size: 11.5px;
   font-weight: 600;

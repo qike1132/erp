@@ -248,7 +248,6 @@ async function handleDelete(pt: OutsourceProcessType) {
   color: var(--color-text);
 }
 .osp-table tbody td:last-child { border-right: none; }
-.osp-table tbody tr:last-child td { border-bottom: none; }
 .osp-table tbody tr:hover { background: var(--color-primary-50); }
 .osp-td-left { text-align: left !important; }
 .osp-td-center { text-align: center !important; }
