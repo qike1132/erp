@@ -40,7 +40,10 @@ class InventoryLog(Base):
     quantity_before: Mapped[int | None] = mapped_column(Integer, comment='变动前库存（记账时序；历史行为 NULL）')
     quantity_after: Mapped[int | None] = mapped_column(Integer, comment='变动后库存（记账时序；历史行为 NULL）')
     operator_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('user.id', ondelete='SET NULL'), nullable=True, index=True, comment='操作人ID（产品/脚本路径为 NULL）')
-    related_id: Mapped[str | None] = mapped_column(String(50), comment='关联单据编号')
+    # VARCHAR(500)（迁移 074）：出库 FIFO 多单把多条 stock_out.id 逗号拼接写入，
+    # 5 位数 id 约 9 条即超 50 字符 → StringDataRightTruncation → 正常出货 500。
+    # related_id 无索引，加宽为元数据级变更（与 067 提 idem_key 同范式）。
+    related_id: Mapped[str | None] = mapped_column(String(500), comment='关联单据编号（出库 FIFO 多单为逗号拼接的 stock_out.id 串）')
     idem_key: Mapped[str | None] = mapped_column(Text, comment='导入幂等键（部分唯一索引 uq_inventory_log_idem；手工路径留空）')
     note: Mapped[str | None] = mapped_column(Text, comment='备注')
     customer: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True, comment='客户名称')
