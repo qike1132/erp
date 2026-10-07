@@ -117,25 +117,6 @@ export interface StockInRecord {
   note?: string
 }
 
-export interface StockOutRecord {
-  id: number
-  stockout_no: string
-  product_name: string
-  product_id: number
-  barcode?: string
-  product_image?: string
-  /** /stock/out/list 内嵌产品摘要；无产品时为 null */
-  product?: { id: number; name: string; barcode?: string; image?: string } | null
-  quantity: number
-  /** 已退货数量；可退量 = quantity - returned_quantity */
-  returned_quantity?: number
-  deducted?: boolean
-  customer: string
-  stockout_date: string
-  status: string
-  note?: string
-}
-
 export interface InventoryItem {
   product_id: number
   product_name: string
@@ -613,26 +594,6 @@ export interface StagedStockout {
   date: string
   quantity: number
   note?: string
-}
-
-export interface StockoutRecordGroup {
-  date: string
-  expanded: boolean
-  records: StockOutRecord[]
-  totalQty: number
-  summaryList: StockoutRecordSummary[]
-}
-
-export interface StockoutRecordSummary {
-  key: string
-  firstId: number
-  customer: string
-  productName: string
-  productImage?: string
-  barcode?: string
-  quantity: number
-  deductQuantity: number
-  notesDisplay?: string
 }
 
 export interface StockoutBatchSubmit {

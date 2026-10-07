@@ -57,8 +57,9 @@
 
 <script setup lang="ts">
 /**
- * EditStockinModal.vue — 备货行编辑弹窗（记录查询页）
+ * EditStockinModal.vue — 备货行编辑弹窗（报表页备货流水）
  *
+ * 2026-10-06 记录查询 tab 收敛至报表页时自 customer-order/components 迁入。
  * 字段与后端 `PUT /stock/in/edit/{id}` 的 `StockInUpdate` 一一对应：
  * 数量 / 客户 / 备货日期 / 备注。产品刻意不可改 —— 换产品语义上等于换一条备货记录，
  * 后端 schema 也没有 product_id。改数量时后端会按差值同步调整产品当前库存。
@@ -78,7 +79,7 @@ import {
   QUANTITY_RANGE_MESSAGE,
   isQuantityOutOfRange,
   quantityAriaInvalid,
-} from '../composables/quantityRange'
+} from '@/utils/quantity'
 
 const props = defineProps<{
   open: boolean

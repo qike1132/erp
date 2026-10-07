@@ -1,28 +1,22 @@
 <template>
   <div class="so-container">
     <div class="page-card page-card-main">
-      <!-- 卡片头部 -->
+      <!-- 卡片头部（2026-10-06 记录查询 tab 移除：单 tab 静态页头，惯例基准 CustomerView.vue） -->
       <div class="page-card-header">
         <div class="so-tab-bar">
-          <button :class="['so-tab-btn', activeTab === 'input' && 'active']" aria-label="录入" @click="activeTab = 'input'">
+          <button class="so-tab-btn active" aria-label="录入">
             录入
-          </button>
-          <button :class="['so-tab-btn', activeTab === 'records' && 'active']" aria-label="记录查询" @click="activeTab = 'records'">
-            记录查询
           </button>
         </div>
       </div>
 
-      <StockOutTab :active-tab="activeTab" />
+      <StockOutTab />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
 import StockOutTab from './StockOutTab.vue'
-
-const activeTab = ref<'input' | 'records'>('input')
 </script>
 
 <style scoped>

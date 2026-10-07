@@ -29,10 +29,53 @@
         :per-page="perPage"
         :pagination="pagination"
         :current-cfg="currentCfg"
+        :can-edit="canEditRowActions"
+        :can-delete="canDeleteRowActions"
         @sort="onSort"
         @page="onPageChange"
+        @row-edit="onRowEdit"
+        @row-delete="onRowDelete"
       />
     </div>
+
+    <!-- 编辑订单弹窗（记录查询 tab 收敛至报表页，2026-10-06） -->
+    <EditOrderModal v-model:open="rowActions.detailOpen.value"
+                    v-model:edit-form="rowActions.editForm"
+                    :detail-data="rowActions.detailData.value"
+                    :available-stockin="rowActions.availableStockin.value"
+                    :saving="rowActions.saving.value"
+                    :deduct-retry-pending="rowActions.deductRetryPending.value"
+                    :get-status-class="rowActions.getStatusClass"
+                    :save-edit-order="rowActions.saveEditOrder"
+                    :retry-deduct-update="rowActions.retryDeductUpdate"
+    />
+
+    <!-- 编辑备货弹窗（备货流水里的备货行） -->
+    <EditStockinModal
+      v-model:open="rowActions.stockinEditVisible.value"
+      v-model:form="rowActions.stockinEditForm.value"
+      :customer-options="customerOptions"
+      :saving="rowActions.savingStockin.value"
+      :save-stockin-edit="rowActions.saveStockinEdit"
+    />
+
+    <!-- 聚合行还原出多条记录时的选择弹窗 -->
+    <ReportRecordPicker
+      v-model:open="rowActions.pickerOpen.value"
+      :records="rowActions.pickerRecords.value"
+      :action="rowActions.pickerAction.value"
+      @pick="rowActions.onPickerPick"
+    />
+
+    <!-- 删除确认对话框 -->
+    <UiConfirmDialog
+      :open="rowActions.confirmDialog.open"
+      :text="rowActions.confirmDialog.text"
+      :sub="rowActions.confirmDialog.sub"
+      :type="rowActions.confirmDialog.type"
+      @confirm="rowActions.confirmDialog.onConfirm"
+      @cancel="rowActions.confirmDialog.onCancel"
+    />
   </div>
 </template>
 
@@ -41,10 +84,16 @@ import { ref, reactive, computed } from 'vue'
 import { useQuery, keepPreviousData } from '@tanstack/vue-query'
 import { reportApi } from '@/api'
 import { useCatalogStore } from '@/stores/catalog'
+import { useAuthStore } from '@/stores/auth'
 import ReportTabGroup from './components/ReportTabGroup.vue'
 import ReportFilterBar from './components/ReportFilterBar.vue'
 import ReportTable from './components/ReportTable.vue'
+import EditOrderModal from './components/EditOrderModal.vue'
+import EditStockinModal from './components/EditStockinModal.vue'
+import ReportRecordPicker from './components/ReportRecordPicker.vue'
+import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import { useReportConfig, type TabType } from './composables/useReportConfig'
+import { useReportRowActions, type ReportActionTab } from './composables/useReportRowActions'
 
 const activeTab = ref<TabType>('order')
 const page = ref(1)
@@ -55,7 +104,20 @@ const sort = ref<{ field: string; order: number } | null>(null)
 
 const filters = reactive({ customer: '', product: '' })
 
-const { currentCfg, currentTabEndpoint, reportColumns } = useReportConfig(activeTab)
+const authStore = useAuthStore()
+/**
+ * 行内编辑/删除的权限裁决（2026-10-07 收紧为独立权限点）：
+ * 编辑=order_edit、删除=order_delete（迁移 075 种入，/user 权限树
+ * 「订单查询→订单列表」下的两个子项，超管在 hasPermission 内短路放行）。
+ * 后端写接口与还原数据源 /orders/records 已同步接受这两个码；
+ * 持有「客户订单(order_manage)」不再自动获得报表行操作，须显式勾选。
+ * 两项皆无时整个「操作」列不渲染（连表头一起），而不是空壳列。
+ */
+const canEditRowActions = computed(() => authStore.hasPermission('order_edit'))
+const canDeleteRowActions = computed(() => authStore.hasPermission('order_delete'))
+const canManageRowActions = computed(() => canEditRowActions.value || canDeleteRowActions.value)
+
+const { currentCfg, currentTabEndpoint, reportColumns } = useReportConfig(activeTab, canManageRowActions)
 
 const catalogStore = useCatalogStore()
 catalogStore.ensureActiveCustomerNames().catch(() => {})
@@ -63,6 +125,16 @@ catalogStore.ensureActiveCustomerNames().catch(() => {})
 const customerOptions = computed(() =>
   catalogStore.activeCustomerNames.map((c) => ({ value: c.name, label: c.name })),
 )
+
+const rowActions = useReportRowActions()
+
+/** 行内按钮 → 还原聚合行 → 单条直开 / 多条选择弹窗 */
+function onRowEdit(row: Record<string, unknown>) {
+  void rowActions.onRowAction(activeTab.value as ReportActionTab, 'edit', row)
+}
+function onRowDelete(row: Record<string, unknown>) {
+  void rowActions.onRowAction(activeTab.value as ReportActionTab, 'delete', row)
+}
 
 const { data: reportData, isLoading, isFetching } = useQuery({
   queryKey: ['report-data', activeTab, page, perPage, filters],
@@ -110,6 +182,10 @@ function doReset() {
 function onTabChange(value: TabType) {
   activeTab.value = value
   page.value = 1
+  // 切 tab 收尾：关闭还原选择弹窗，清空残留的还原态（防上一 tab 的弹窗串场）
+  rowActions.pickerOpen.value = false
+  rowActions.pickerRecords.value = []
+  rowActions.pickerAction.value = 'edit'
 }
 
 function onPageChange(event: { page: number; rows: number }) {

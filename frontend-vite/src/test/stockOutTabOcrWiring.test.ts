@@ -72,7 +72,6 @@ function mountTab() {
       stubs: {
         StockOutInputForm: false, // 真件——要测它的一跳转发
         StockOutImportSection: false, // 真件——要测它把 buildStaged 结果发成 ocr-staged
-        StockOutRecords: true,
         StockOutStagingList: StagingListStub,
         StockOutEditStagedDialog: true,
         UiConfirmDialog: true,
@@ -86,7 +85,6 @@ function mountTab() {
         UiLoadingIcon: { template: '<i />' },
       },
     },
-    props: { activeTab: 'input' as const },
   })
 }
 

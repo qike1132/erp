@@ -1,12 +1,13 @@
 /**
- * useStockinEdit — 记录查询页里「备货行」的编辑与删除动作域
+ * useStockinEdit — 「备货行」的编辑与删除动作域
  *
- * 记录查询把订单与备货混排在同一张表，但两者写路径不同：
+ * 2026-10-06 记录查询 tab 收敛至报表页时自 customer-order/composables 迁入。
+ * 报表页把订单与备货混排在同一张表，但两者写路径不同：
  *   订单 → orderApi.update / orderApi.delete（订单域）
  *   备货 → PUT /stock/in/edit/{id} · DELETE /stock/in/delete/{id}（库存域）
  *
- * 备货没有详情端点，所以编辑弹窗的数据直接取自列表行（/orders/records 已下发
- * 数量 / 客户 / 时间 / 备注）。后端删除自带两道保护（已关联出库的拒绝删、
+ * 备货没有详情端点，所以编辑弹窗的数据直接取自还原后的记录行（/orders/records
+ * 已下发数量 / 客户 / 时间 / 备注）。后端删除自带两道保护（已关联出库的拒绝删、
  * 会让库存变负的拒绝删；2026-10-01 起编辑数量同样有这两道守卫），
  * 失败原因由后端消息原样回显。
  *
@@ -19,7 +20,7 @@ import { useApiMutation } from '@/composables/useApiMutation'
 import { stockApi } from '@/api'
 import { showToast } from '@/composables/useToast'
 import { invalidateOrderDerivedQueries } from '@/utils/queryKeys'
-import type { OrderRecord } from './types'
+import type { OrderRecord } from './orderRecordTypes'
 
 type ConfirmDialogApi = {
   confirm: (msg: string, subMsg?: string, dialogType?: 'danger' | 'warning') => Promise<boolean>
@@ -44,7 +45,7 @@ export function useStockinEdit(
   const stockinEditVisible = ref(false)
   const stockinEditForm = ref<StockinEditForm | null>(null)
 
-  /** 打开备货编辑弹窗：把列表行摊成表单态 */
+  /** 打开备货编辑弹窗：把记录行摊成表单态 */
   function openStockinEdit(record: OrderRecord) {
     stockinEditForm.value = {
       id: record.id,

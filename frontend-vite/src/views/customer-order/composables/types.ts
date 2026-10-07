@@ -3,22 +3,11 @@
  *
  * OrderItem / StockInRecord 等通用类型从 @/types 复用，
  * 此处仅定义模块内部使用的类型。
- */
-import type { OrderItem } from '@/types'
-
-/**
- * 订单详情数据（orderApi.detail 返回）
  *
- * API 实际包含 order_no / batch_no / customer / product 等扩展字段，
- * 且兼容裸返回与 { data } 包裹两种结构；与 OrderItem 取交集描述。
+ * 2026-10-06 记录查询 tab 收敛至报表页：OrderRecord / OrderDetailData 已迁至
+ * views/report/composables/orderRecordTypes.ts（随消费方迁移）；
+ * OrderListResponse / StockinListResponse 全仓零引用，一并移除。
  */
-export type OrderDetailData = OrderItem & {
-  order_no?: string
-  batch_no?: string
-  customer?: string
-  product?: { id?: number; name?: string; barcode?: string; image?: string }
-  data?: OrderItem
-}
 
 /**
  * 单个出货计划批次（2026-10-06 v2 分批版）：
@@ -80,60 +69,9 @@ export interface FormState {
 }
 
 /**
- * 记录查询 tab 中的统一记录类型（订单或备货归一化后）。
- * 使用扁平接口而非联合类型，因为模板需要统一访问 customer / items / product 等字段，
- * 这些字段在不同记录类型中可能存在或不存在。
+ * 记录查询 tab 中的统一记录类型已迁出（2026-10-06）：
+ * 见 views/report/composables/orderRecordTypes.ts 的 OrderRecord。
  */
-export interface OrderRecord {
-  id: number
-  record_type: 'order' | 'stockin'
-  order_no?: string
-  stockin_no?: string
-  customer?: string
-  order_date?: string
-  stockin_date?: string
-  product_id?: number
-  product_name?: string
-  product?: { id?: number; name?: string; barcode?: string; image?: string }
-  barcode?: string
-  quantity: number
-  deduct_quantity?: number
-  deduct_stock?: boolean
-  deducted?: boolean
-  /** 备货行为 null（后端 /orders/records 统一记录契约） */
-  status: string | null
-  note?: string
-  is_locked?: boolean
-  locked_by_name?: string
-  /** 订单关联的工厂名列表（从 items 聚合，去重排序） */
-  factories?: string[]
-  items?: Array<{
-    id: number
-    product_name: string
-    product_barcode?: string
-    quantity: number
-    deduct_quantity?: number
-    note?: string
-  }>
-}
-
-/** 订单列表 API 响应（对应后端 OrderListResponse schema） */
-export interface OrderListResponse {
-  success: boolean
-  data: OrderRecord[]
-  total: number
-  page: number
-  per_page: number
-  /** 未确认湖北订单总数（beile-list 专用，列表顶部横幅使用） */
-  unconfirmed_count?: number
-}
-
-/** 备货列表 API 响应 */
-export interface StockinListResponse {
-  data?: OrderRecord[]
-  items?: OrderRecord[]
-  total?: number
-}
 
 /** 产品搜索建议项 */
 export interface ProductSuggestion {

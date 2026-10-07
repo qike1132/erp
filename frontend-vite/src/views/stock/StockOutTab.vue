@@ -1,7 +1,7 @@
 <template>
   <div class="stock-out-tab">
-    <!-- TAB: 录入 -->
-    <div v-show="activeTab === 'input'" class="so-tab-content">
+    <!-- 录入主区（2026-10-06 记录查询 tab 移除，本组件只承载录入） -->
+    <div class="so-tab-content">
       <div class="so-body">
         <!-- 左栏：出货信息录入 -->
         <div class="so-col">
@@ -45,11 +45,6 @@
       </div>
     </div>
 
-    <!-- TAB: 记录查询 -->
-    <div v-show="activeTab === 'records'" class="so-tab-content">
-      <StockOutRecords ref="recordsRef" :customer-options="customerOptions" />
-    </div>
-
     <!-- 编辑暂存出货弹窗 -->
     <StockOutEditStagedDialog
       v-model:open="editStagedOpen"
@@ -85,10 +80,7 @@ import { invalidateOrderDerivedQueries } from '@/utils/queryKeys'
 
 import StockOutInputForm from './components/StockOutInputForm.vue'
 import StockOutStagingList from './components/StockOutStagingList.vue'
-import StockOutRecords from './components/StockOutRecords.vue'
 import StockOutEditStagedDialog from './components/StockOutEditStagedDialog.vue'
-
-const props = defineProps<{ activeTab: 'input' | 'records' }>()
 
 const queryClient = useQueryClient()
 const confirmDialog = useConfirmDialog()
@@ -226,10 +218,8 @@ function saveEditStaged() {
 
 // === 批量提交 ===
 const submitting = ref(false)
-const recordsRef = ref<InstanceType<typeof StockOutRecords> | null>(null)
 
 const { submitBatch } = useStockOutActions(staged, submitting, () => {
-  recordsRef.value?.refresh()
   queryClient.invalidateQueries({ queryKey: ['pp-monthly'] })
   queryClient.invalidateQueries({ queryKey: ['pp-summary'] })
   // 出货会同时改变库存汇总与报表流水，统一失效派生查询
@@ -237,18 +227,10 @@ const { submitBatch } = useStockOutActions(staged, submitting, () => {
 })
 
 function onStockoutImported() {
-  recordsRef.value?.refresh()
   queryClient.invalidateQueries({ queryKey: ['pp-monthly'] })
   queryClient.invalidateQueries({ queryKey: ['pp-summary'] })
   invalidateOrderDerivedQueries(queryClient)
 }
-
-// 切换到记录查询tab时自动加载数据（首次进入时触发）
-watch(() => props.activeTab, (tab) => {
-  if (tab === 'records') {
-    recordsRef.value?.loadIfEmpty()
-  }
-})
 </script>
 
 <style scoped>

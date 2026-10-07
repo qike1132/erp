@@ -47,7 +47,7 @@ import {
   quantityAriaInvalid,
 } from '@/views/customer-order/composables/quantityRange'
 import { useStagedEdit } from '@/views/customer-order/composables/useStagedEdit'
-import { useOrderDetailEdit } from '@/views/customer-order/composables/useOrderDetailEdit'
+import { useOrderDetailEdit } from '@/views/report/composables/useOrderDetailEdit'
 import type { StagedItem } from '@/views/customer-order/composables/types'
 
 function stagedItem(quantity: number): StagedItem {

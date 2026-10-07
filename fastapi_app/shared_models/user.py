@@ -53,11 +53,14 @@ class User(Base):
           背景（第十一轮落地分析）：outsource_ship / outsource_receive 是外发
           发货/收货的职责分离码（迁移 043 刻意按用户名回填授权以落实四眼原则），
           若允许持 outsource_manage 者经 children 继承同时通过两端，则该设计被绕过。
+          order_edit / order_delete 同理（迁移 075 挂在「订单流水」report_manage 之下，
+          是报表流水行内编辑/删除的职责分离码）：持有「订单列表」仅可查看，
+          编辑与删除必须在 /user 显式勾选。
         """
         SENSITIVE_PREFIXES = ['user_']
 
         # manage 不得经继承放行的业务子码（须逐个显式授权）
-        NO_MANAGE_INHERIT = {'outsource_ship', 'outsource_receive'}
+        NO_MANAGE_INHERIT = {'outsource_ship', 'outsource_receive', 'order_edit', 'order_delete'}
 
         for prefix in SENSITIVE_PREFIXES:
             if permission_code.startswith(prefix):

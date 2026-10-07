@@ -42,9 +42,9 @@ vi.mock('@tanstack/vue-query', () => ({
   useQueryClient: () => ({ invalidateQueries: mocks.invalidateQueries }),
 }))
 
-import { useOrderDelete } from '@/views/customer-order/composables/useOrderDelete'
-import { useOrderDetailEdit } from '@/views/customer-order/composables/useOrderDetailEdit'
-import { useStockinEdit } from '@/views/customer-order/composables/useStockinEdit'
+import { useOrderDelete } from '@/views/report/composables/useOrderDelete'
+import { useOrderDetailEdit } from '@/views/report/composables/useOrderDetailEdit'
+import { useStockinEdit } from '@/views/report/composables/useStockinEdit'
 
 /** 三个关联页面实际使用的 query key 前缀 */
 const CROSS_PAGE_KEYS = [

@@ -111,7 +111,7 @@ const props = withDefaults(
      * 不传则行为与原来完全一致（本组件被 13 个视图共用，透传必须是纯可选的）。
      * ⚠️ 合并判据是**按值相等**，不是按分组 id —— 若分组列的原始值可能跨组重复
      * （例如多笔订单的日期都是同一天），必须让该列的 `field` 指向一个**组内唯一**的值，
-     * 否则会把相邻的不同组并成一个大格。详见 customer-order 的 recordRows.ts。
+     * 否则会把相邻的不同组并成一个大格。
      */
     rowGroupMode?: 'subheader' | 'rowspan'
     /** 参与行分组的列 field（与 rowGroupMode='rowspan' 搭配） */

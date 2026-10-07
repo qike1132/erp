@@ -1,15 +1,15 @@
 /**
  * useOrderDelete — 订单删除动作域
  *
- * 从 CustomerOrderView 内联实现搬移，逻辑原样保留：
- * 删除确认 → 调接口 → 失效库存派生查询缓存 → 刷新列表。
+ * 2026-10-06 记录查询 tab 收敛至报表页时自 customer-order/composables 迁入。
+ * 逻辑原样保留：删除确认 → 调接口 → 失效库存派生查询缓存 → 刷新列表。
  */
 import { useQueryClient } from '@tanstack/vue-query'
 import { orderApi } from '@/api'
 import { showToast } from '@/composables/useToast'
 import { getErrorMessage } from '@/types/errors'
 import { invalidateOrderDerivedQueries } from '@/utils/queryKeys'
-import type { OrderRecord } from './types'
+import type { OrderRecord } from './orderRecordTypes'
 
 type ConfirmDialogApi = {
   confirm: (msg: string, subMsg?: string, dialogType?: 'danger' | 'warning') => Promise<boolean>

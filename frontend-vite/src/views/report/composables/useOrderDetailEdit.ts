@@ -1,7 +1,9 @@
 /**
- * useOrderDetailEdit — 订单详情与编辑动作域（批次 2-3 拆分自 useOrderActions）
+ * useOrderDetailEdit — 订单详情与编辑动作域
  *
- * 承载详情弹窗、保存编辑（含抵扣两步更新与失败重试）。逻辑原样搬移。
+ * 2026-10-06 记录查询 tab 收敛至报表页时自 customer-order/composables 迁入，
+ * 承载详情弹窗、保存编辑（含抵扣两步更新与失败重试）；getStatusClass（状态样式
+ * 映射，原在 useOrderList）一并收编供 EditOrderModal 消费。逻辑原样搬移。
  */
 import { ref, reactive } from 'vue'
 import { useQueryClient } from '@tanstack/vue-query'
@@ -9,8 +11,22 @@ import { auxApi, orderApi } from '@/api'
 import { showToast } from '@/composables/useToast'
 import { getErrorMessage } from '@/types/errors'
 import { invalidateOrderDerivedQueries } from '@/utils/queryKeys'
-import { QUANTITY_RANGE_MESSAGE, isQuantityOutOfRange } from './quantityRange'
-import type { OrderRecord, OrderDetailData } from './types'
+import { QUANTITY_RANGE_MESSAGE, isQuantityOutOfRange } from '@/utils/quantity'
+import type { OrderRecord, OrderDetailData } from './orderRecordTypes'
+
+/** 状态样式映射（EditOrderModal 的状态点配色；类名沿用 customer-order 既有前缀） */
+export function getStatusClass(status: string): string {
+  const map: Record<string, string> = {
+    '待备货': 'co-status-pending',
+    '已备货': 'co-status-stocked',
+    '部分备货': 'co-status-partial',
+    '待出货': 'co-status-shipping',
+    '已出货': 'co-status-shipped',
+    '已取消': 'co-status-cancelled',
+    '批次已完成': 'co-status-completed',
+  }
+  return map[status] || 'co-status-pending'
+}
 
 export function useOrderDetailEdit(fetchOrders: () => Promise<void>) {
   const queryClient = useQueryClient()

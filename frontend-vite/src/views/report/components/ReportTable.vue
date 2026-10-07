@@ -36,6 +36,26 @@
           :title="cellText((row as Record<string, unknown>)[currentCfg.noteKey])"
         >{{ cellText((row as Record<string, unknown>)[currentCfg.noteKey]) }}</span>
       </template>
+      <template v-if="canEdit || canDelete" #column-body-actions="{ row }">
+        <div class="rp-action-group">
+          <button
+            v-if="canEdit"
+            class="rp-btn-icon rp-btn-edit"
+            :aria-label="`编辑 ${cellText((row as Record<string, unknown>).customer)} ${cellText((row as Record<string, unknown>).product_name)}`"
+            @click="emit('row-edit', row)"
+          >
+            <FontAwesomeIcon icon="pen-to-square" aria-hidden="true" />
+          </button>
+          <button
+            v-if="canDelete"
+            class="rp-btn-icon rp-btn-danger"
+            aria-label="删除该组记录"
+            @click="emit('row-delete', row)"
+          >
+            <FontAwesomeIcon icon="trash-alt" aria-hidden="true" />
+          </button>
+        </div>
+      </template>
     </UiDataTable>
   </div>
 </template>
@@ -61,11 +81,17 @@ defineProps<{
   perPage: number
   pagination: { pages?: number; total?: number } | undefined
   currentCfg: TabConfig
+  /** 行内编辑按钮门控（order_edit）；false 时该按钮不渲染 */
+  canEdit?: boolean
+  /** 行内删除按钮门控（order_delete）；false 时该按钮不渲染 */
+  canDelete?: boolean
 }>()
 
 const emit = defineEmits<{
   'page': [event: { page: number; rows: number }]
   'sort': [event: { field: string; order: number }]
+  'row-edit': [row: Record<string, unknown>]
+  'row-delete': [row: Record<string, unknown>]
 }>()
 
 /** 文本列：缺失即留白（后端可能给 null / 空串，不做占位符） */
@@ -102,6 +128,41 @@ function fmtQty(v: unknown): string {
 .rp-empty span { font-size: 14px; }
 .rp-qty { font-weight: 700; }
 .rp-note { color: var(--color-text-secondary); }
+
+/* 操作列（订单/备货流水的行内编辑/删除）：与原 OrderRecordTable 操作列同一套
+   （36×36 / FontAwesome / 同配色）；hover 只换背景色、不带 translateY 位移 ——
+   位移会造成扫读抖动与每帧重排（CustomerOrderView 既有注释口径）。 */
+.rp-action-group {
+  display: flex;
+  gap: 4px;
+  justify-content: center;
+}
+.rp-btn-icon {
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+.rp-btn-edit {
+  background: var(--color-warning-50);
+  color: var(--color-warning-600);
+}
+.rp-btn-edit:hover {
+  background: var(--color-warning-100);
+}
+.rp-btn-danger {
+  background: var(--color-danger-50);
+  color: var(--color-danger-600);
+}
+.rp-btn-danger:hover {
+  background: var(--color-danger-100);
+}
 
 /* 与 /stock 相同的表格处理：去掉 UiDataTable 容器的圆角内盒、固定表格布局
    （百分比列宽才是硬约束）、单元格单行省略、行分隔线随全局 PT 的 bodyRow 生效。 */

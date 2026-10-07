@@ -17,7 +17,8 @@ import { getErrorMessage } from '@/types/errors'
  *   run(vars)    —— OPT-09（2026-10-01）新增：失败不抛，返回 undefined 表示未成功，
  *                   适合「弹窗提交后按是否成功决定关不关」的场景
  *
- * 试点：customer-order 的 useStockinEdit。其余直呼写接口的调用点按模块逐步迁移
+ * 试点：views/report 的 useStockinEdit（2026-10-06 自 customer-order 迁入报表页）。
+ * 其余直呼写接口的调用点按模块逐步迁移
  * （OPT-09）；全部迁移完成前不启用「view 禁入写函数」的 lint 规则。
  */
 export function useApiMutation<TData = unknown, TVariables = unknown>(

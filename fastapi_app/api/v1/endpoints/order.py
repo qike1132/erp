@@ -19,7 +19,7 @@ from fastapi_app.core.cache import CacheDomain
 from fastapi_app.core.cache_invalidation import InvalidationStrategy, cache_mgr
 from fastapi_app.core.config import settings
 from fastapi_app.core.database import get_async_db, get_async_read_db
-from fastapi_app.core.deps import require_permission
+from fastapi_app.core.deps import require_any_permission, require_permission
 from fastapi_app.core.domain_events import DomainEvent, DomainEventType
 from fastapi_app.core.domain_events import publish as publish_domain_event
 from fastapi_app.core.exceptions import AppError, NotFoundError, db_transaction
@@ -199,7 +199,8 @@ async def list_unified_records(
     end_date: str | None = Query(None, description="结束日期筛选(YYYY-MM-DD)"),
     keyword: str | None = Query(None, description="搜索框 OR 关键字：单号/客户/产品名/条码"),
     db: AsyncSession = Depends(get_async_read_db),
-    user: User = Depends(require_permission("order_manage")),
+    # 报表流水行内编辑/删除（迁移 075 的 order_edit/order_delete）也要用本接口还原聚合行
+    user: User = Depends(require_any_permission("order_manage", "order_edit", "order_delete")),
 ) -> OrderListResponse:
     """获取订单+备货合并记录列表（只读，支持分页和多维度筛选）。
 
@@ -297,7 +298,7 @@ async def edit_order(
     order_id: int,
     data: OrderUpdate,
     db: AsyncSession = Depends(get_async_db),
-    user: User = Depends(require_permission("order_manage")),
+    user: User = Depends(require_any_permission("order_manage", "order_edit")),
 ) -> OrderActionResponse:
     """编辑订单（管理员直接编辑，非管理员提交审批）。
 
@@ -339,7 +340,7 @@ async def edit_order(
 async def delete_order(
     order_id: int,
     db: AsyncSession = Depends(get_async_db),
-    user: User = Depends(require_permission("order_manage")),
+    user: User = Depends(require_any_permission("order_manage", "order_delete")),
 ) -> OrderActionResponse:
     """删除订单（管理员直接删除，非管理员提交审批）。
 
@@ -469,7 +470,8 @@ async def update_deduct_quantity(
     order_id: int,
     deduct_quantity: int = Query(..., ge=0, description="新的抵扣备货数量"),
     db: AsyncSession = Depends(get_async_db),
-    user: User = Depends(require_permission("order_manage")),
+    # 编辑订单弹窗的两步更新之二（抵扣数量），跟随编辑权限
+    user: User = Depends(require_any_permission("order_manage", "order_edit")),
 ) -> OrderActionResponse:
     """修改订单的抵扣备货数量。
 

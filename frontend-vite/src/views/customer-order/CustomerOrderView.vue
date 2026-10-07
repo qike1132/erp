@@ -1,30 +1,17 @@
 <template>
   <div class="co-container">
     <div class="page-card page-card-main">
-      <!-- 卡片头部 -->
+      <!-- 卡片头部（2026-10-06 记录查询 tab 移除：单 tab 静态页头，惯例基准 CustomerView.vue） -->
       <div class="page-card-header">
         <div class="co-tab-bar">
-          <button :class="['co-tab-btn', activeTab === 'input' && 'active']" aria-label="录入" @click="activeTab = 'input'">
+          <button class="co-tab-btn active" aria-label="录入">
             录入
           </button>
-          <button :class="['co-tab-btn', activeTab === 'records' && 'active']" aria-label="记录查询" @click="activeTab = 'records'">
-            记录查询
-          </button>
         </div>
-        <!-- 搜索工具条只属于「记录查询」：录入页签下没有可搜的列表。
-             2026-10-01：从原「记录列表」那一行上移到页头右侧，与 TAB 同排。 -->
-        <OrderRecordFilter
-          v-if="activeTab === 'records'"
-          v-model:keyword="keyword"
-          :total-records="totalRecords"
-          :is-loading="isLoadingRecords || isFetchingRecords"
-          @search="search"
-          @clear="clearKeyword"
-        />
       </div>
 
-      <!-- TAB: 录入 -->
-      <div v-show="activeTab === 'input'" class="co-tab-content">
+      <!-- 录入主区 -->
+      <div class="co-tab-content">
         <div class="page-card-body">
           <!-- 左栏：录入表单 -->
           <OrderInputPanel
@@ -63,41 +50,7 @@
         </div>
       </div>
 
-      <!-- TAB: 记录查询 -->
-      <div v-show="activeTab === 'records'" class="co-tab-content">
-        <OrderRecordQuery
-          v-model:per-page="perPage"
-          :order-records="orderRecords"
-          :is-loading-records="isLoadingRecords"
-          :is-fetching-records="isFetchingRecords"
-          :error-message="errorMessage"
-          :current-page="currentPage"
-          :total-pages="totalPages"
-          :total-records="totalRecords"
-          :can-manage="canManage"
-          :fetch-orders="fetchOrders"
-          @view-detail="openDetail"
-          @delete-record="handleDeleteOrder"
-          @edit-stockin="openStockinEdit"
-          @delete-stockin="handleDeleteStockin"
-          @change-page="handleChangePage"
-          @retry="fetchOrders"
-        />
-      </div>
-
     </div>
-
-    <!-- 订单详情弹窗 -->
-    <EditOrderModal v-model:open="detailOpen"
-                    v-model:edit-form="editForm"
-                    :detail-data="detailData"
-                    :available-stockin="availableStockin"
-                    :saving="saving"
-                    :deduct-retry-pending="deductRetryPending"
-                    :get-status-class="getStatusClass"
-                    :save-edit-order="saveEditOrder"
-                    :retry-deduct-update="retryDeductUpdate"
-    />
 
     <!-- 编辑暂存弹窗 -->
     <EditStagedModal
@@ -106,15 +59,6 @@
       :edit-available-stock="editAvailableStock"
       :customer-options="customerOptions"
       :save-edit-staged="saveEditStaged"
-    />
-
-    <!-- 备货编辑弹窗（记录查询里的备货行） -->
-    <EditStockinModal
-      v-model:open="stockinEditVisible"
-      v-model:form="stockinEditForm"
-      :customer-options="customerOptions"
-      :saving="savingStockin"
-      :save-stockin-edit="saveStockinEdit"
     />
 
     <!-- 确认对话框 -->
@@ -130,23 +74,17 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick, computed } from 'vue'
+import { ref, nextTick } from 'vue'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import { showToast } from '@/composables/useToast'
-import { useAuthStore } from '@/stores/auth'
 import { QUANTITY_RANGE_MESSAGE } from './composables/quantityRange'
 import { useOrderForm } from './composables/useOrderForm'
-import { useOrderList } from './composables/useOrderList'
 import { useOrderActions } from './composables/useOrderActions'
 import type { StagedItem } from './composables/types'
 
 import OrderInputPanel from './components/OrderInputPanel.vue'
 import StagingArea from './components/StagingArea.vue'
-import OrderRecordQuery from './components/OrderRecordQuery.vue'
-import OrderRecordFilter from './components/OrderRecordFilter.vue'
-import EditOrderModal from './components/EditOrderModal.vue'
 import EditStagedModal from './components/EditStagedModal.vue'
-import EditStockinModal from './components/EditStockinModal.vue'
 
 const {
   form,
@@ -170,22 +108,6 @@ const {
 const inputPanelRef = ref<InstanceType<typeof OrderInputPanel> | null>(null)
 
 const {
-  keyword,
-  currentPage,
-  perPage,
-  totalPages,
-  isLoadingRecords,
-  isFetchingRecords,
-  errorMessage,
-  totalRecords,
-  orderRecords,
-  getStatusClass,
-  fetchOrders,
-  search,
-  clearKeyword,
-} = useOrderList()
-
-const {
   stagedItems,
   removeStagedItem,
   submitting,
@@ -202,36 +124,9 @@ const {
   onDrop,
   downloadTemplate,
   handleImport,
-  detailOpen,
-  detailData,
-  editForm,
-  availableStockin,
-  openDetail,
-  saveEditOrder,
-  saving,
-  deductRetryPending,
-  retryDeductUpdate,
   confirmDialog,
   genUid,
-  handleDeleteOrder,
-  stockinEditVisible,
-  stockinEditForm,
-  savingStockin,
-  openStockinEdit,
-  saveStockinEdit,
-  handleDeleteStockin,
-} = useOrderActions(form, isOrder, fetchOrders)
-
-const authStore = useAuthStore()
-/**
- * 订单/备货的写权限。
- *
- * 订单删除走 orderApi（order_manage）；备货的编辑/删除走后端 /stock/in/*，
- * 那两个端点的权限是 `stockin_manage` 或 `order_manage`。本页数据源
- * /orders/records 本身要求 order_manage，所以能打开这一页的人一定满足备货写权限，
- * 一个布尔量即可覆盖两类行。
- */
-const canManage = computed(() => authStore.hasPermission('order_manage'))
+} = useOrderActions(form, isOrder)
 
 /**
  * 粘贴图片识别确认后的条目并入暂存区。
@@ -284,20 +179,6 @@ function addStaged() {
     showToast(`已添加 1 条，暂存区共 ${stagedItems.value.length} 条`, 'success')
   })
 }
-
-/** 分页变化：仅更新页码（子组件已触发 fetchOrders） */
-function handleChangePage(page: number) {
-  currentPage.value = page
-}
-
-// ===== Tab switching =====
-const activeTab = ref<'input' | 'records'>('input')
-
-// 切换到记录查询tab时自动加载数据
-watch(activeTab, (tab) => {
-  // 每次进入都重新拉取：暂存区提交可能新增了订单，若沿用旧列表会显示过期数据
-  if (tab === 'records') fetchOrders()
-})
 </script>
 
 <style scoped>

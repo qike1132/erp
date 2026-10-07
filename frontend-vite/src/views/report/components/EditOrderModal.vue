@@ -129,14 +129,14 @@
 import { computed } from 'vue'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import UiButton from '@/components/ui/UiButton.vue'
-import type { OrderDetailData } from '../composables/types'
+import type { OrderDetailData } from '../composables/orderRecordTypes'
 import {
   QUANTITY_MAX,
   QUANTITY_MIN,
   QUANTITY_RANGE_MESSAGE,
   isQuantityOutOfRange,
   quantityAriaInvalid,
-} from '../composables/quantityRange'
+} from '@/utils/quantity'
 
 interface EditFormState {
   quantity: number
@@ -146,8 +146,8 @@ interface EditFormState {
 
 const props = defineProps<{
   open: boolean
-  // 详情数据由 useOrderActions 返回，API 实际包含 batch_no / items 等扩展字段，
-  // 类型见 composables/types.ts 的 OrderDetailData。
+  // 详情数据由 useReportRowActions 返回，API 实际包含 batch_no / items 等扩展字段，
+  // 类型见 composables/orderRecordTypes.ts 的 OrderDetailData。
   detailData: OrderDetailData | null
   availableStockin: number
   saving: boolean

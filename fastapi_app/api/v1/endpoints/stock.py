@@ -106,7 +106,8 @@ async def edit_stockin(
     stockin_id: int,
     data: StockInUpdate,
     db: AsyncSession = Depends(get_async_db),
-    _user: User = Depends(require_any_permission('stockin_manage', 'order_manage')),
+    # order_edit：报表流水行内编辑（迁移 075，/user「订单流水→编辑」）
+    _user: User = Depends(require_any_permission('stockin_manage', 'order_manage', 'order_edit')),
 ) -> StockActionResponse:
     """编辑入库记录。
 
@@ -144,7 +145,8 @@ async def edit_stockin(
 async def delete_stockin(
     stockin_id: int,
     db: AsyncSession = Depends(get_async_db),
-    _user: User = Depends(require_any_permission('stockin_manage', 'order_manage')),
+    # order_delete：报表流水行内删除（迁移 075，/user「订单流水→删除」）
+    _user: User = Depends(require_any_permission('stockin_manage', 'order_manage', 'order_delete')),
 ) -> StockActionResponse:
     """删除入库记录。
 
