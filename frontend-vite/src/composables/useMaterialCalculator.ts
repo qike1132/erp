@@ -2,7 +2,6 @@ import { ref, computed, onUnmounted } from 'vue'
 import { purchaseApi, type MaterialCalcProduct, type MaterialCalcRow, type MaterialCalcScopeGroup } from '@/api'
 import { showToast } from '@/composables/useToast'
 import { getErrorMessage } from '@/types/errors'
-import { deriveRoleMatrix } from '@/utils/roleMatrix'
 
 export interface OrderItem {
   product_id: number
@@ -35,8 +34,7 @@ export function clampQuantity(v: unknown): number {
  *
  * 响应口径：后端 `/calculate` **只追加** `groups`，扁平字段原样保留。
  * - `calcResults`：扁平字段（旧口径，保留用于回退渲染）；
- * - `calcGroups`：按「产品 × 作用域(角色)」分块（默认 BOM 恒首）；
- * - `matrix`：由 `calcGroups` 派生的跨角色对比矩阵（纯函数，A-5 缺失时为空矩阵）。
+ * - `calcGroups`：按「产品 × 作用域(角色)」分块（默认 BOM 恒首）。
  */
 // 订单物料条目上限（与后端 CalculateMaterialRequest.orders max_length=200 对齐）
 const MAX_ORDER_ITEMS = 200
@@ -54,8 +52,6 @@ export function useMaterialCalculator() {
   )
   const hasResults = computed(() => Object.values(calcResults.value).some((arr) => arr.length > 0))
   const hasGroups = computed(() => calcGroups.value.length > 0)
-  // 跨角色对比矩阵：groups 缺失/空 → 空矩阵（不抛错，A-5）
-  const matrix = computed(() => deriveRoleMatrix(calcGroups.value))
   const calcStatus = computed(() => {
     if (calculating.value) return '计算中...'
     const total = Object.values(calcResults.value).reduce((s, arr) => s + arr.length, 0)
@@ -154,7 +150,6 @@ export function useMaterialCalculator() {
     totalOrders,
     hasResults,
     hasGroups,
-    matrix,
     calcStatus,
     addProduct,
     removeProduct,

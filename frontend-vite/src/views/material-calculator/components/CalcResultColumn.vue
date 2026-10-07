@@ -74,7 +74,7 @@
 import { reactive, ref, computed, watch } from 'vue'
 import type { MaterialCalcRow, MaterialCalcScopeGroup } from '@/api'
 import { CALC_CATEGORY_LIST } from '@/composables/useMaterialCalculator'
-import { scopeKeyOf, scopeNameOf } from '@/utils/roleMatrix'
+import { scopeKeyOf, scopeNameOf } from '@/utils/scope'
 import { deriveCalcSummary, type SummaryRow } from '@/utils/calcSummary'
 import CalcCategoryBlock from './CalcCategoryBlock.vue'
 

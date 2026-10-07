@@ -7,7 +7,7 @@ import type { MaterialCalcRow, MaterialCalcScopeGroup } from '@/api'
  * deriveCalcSummary —— 物料计算器「汇总」TAB 的合并纯函数。
  *
  * 需求：多 SKU 录入时，相同「供应商 + 物料名称 + 规格/色号」的用量合并为一行、
- * 数量相加；合并口径与跨角色对比矩阵（roleMatrix.ts）一致：
+ * 数量相加；合并口径与计算器分块口径同源：
  *  · 合并键 = 分类 + 物料名 + 规格 + 供应商；单位不同 → 拆行，绝不跨单位相加；
  *  · sku_count = 贡献该行的不同产品数（同产品多角色只算 1 个）；
  *  · meta：productCount 按产品去重、totalQuantity 每个产品只累计一次订单数量

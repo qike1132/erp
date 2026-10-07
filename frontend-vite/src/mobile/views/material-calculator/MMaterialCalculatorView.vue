@@ -109,34 +109,6 @@
         </div>
       </div>
 
-      <!-- 跨作用域对比矩阵：窄屏横向滚动 + 首列吸附（保留并排对比价值，A-12） -->
-      <div v-if="matrix.visible" class="m-matrix">
-        <h3 class="m-results-title">跨作用域对比</h3>
-        <div class="m-matrix-scroll">
-          <table class="m-matrix-table">
-            <thead>
-              <tr>
-                <th class="m-mx-name-col">物料</th>
-                <th>单位</th>
-                <th v-for="s in matrix.scopes" :key="s.key" class="m-mx-num">{{ s.roleName }}</th>
-                <th class="m-mx-num m-mx-total">合计</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="row in matrix.rows" :key="row.key" :class="{ 'm-mx-split': row.unitConflict }">
-                <td class="m-mx-name-col">
-                  {{ row.materialName }}<span v-if="row.specification" class="m-mx-spec"> · {{ row.specification }}</span>
-                </td>
-                <td>{{ row.unit || '—' }}</td>
-                <td v-for="s in matrix.scopes" :key="s.key" class="m-mx-num">{{ cellText(row, s.key) }}</td>
-                <td class="m-mx-num m-mx-total">{{ numText(row.total) }} {{ row.unit }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-      <div v-else-if="matrix.reason === 'single-scope'" class="m-matrix-hint">仅 1 个作用域，无需跨作用域对比</div>
-
       <MBottomSheet v-model:visible="searchSheetVisible" title="选择产品">
         <MSearchBar v-model="searchQuery" placeholder="搜索产品..." />
         <div v-if="searchLoading" class="m-center"><MSpinner /></div>
@@ -162,7 +134,7 @@ import {
   CALC_CATEGORY_LIST,
   clampQuantity,
 } from '@/composables/useMaterialCalculator'
-import { scopeKeyOf, scopeNameOf, type MatrixRow } from '@/utils/roleMatrix'
+import { scopeKeyOf, scopeNameOf } from '@/utils/scope'
 import { deriveCalcSummary, type SummaryRow } from '@/utils/calcSummary'
 import MobileNavBar from '@/mobile/layouts/components/MobileNavBar.vue'
 import MSearchBar from '@/mobile/components/MSearchBar.vue'
@@ -177,7 +149,6 @@ const {
   calcResults,
   calcGroups,
   calculating,
-  matrix,
   addProduct: addProductToOrder,
   removeProduct,
   clearAll,
@@ -256,15 +227,6 @@ function groupCat(group: MaterialCalcScopeGroup, category: string): MaterialCalc
 function rowKeyOf(prefix: string, category: string, row: MaterialCalcRow): string {
   return [prefix, category, row.material_name || row.name || '', row.specification || '', row.supplier_name || '', row.unit || ''].join('|')
 }
-
-/** 矩阵数值：整数原样，非整数最多 3 位小数去尾零。 */
-function numText(v: number): string {
-  return Number.isInteger(v) ? String(v) : String(parseFloat(v.toFixed(3)))
-}
-function cellText(row: MatrixRow, scopeKey: string): string {
-  const v = row.cells[scopeKey]
-  return v == null ? '—' : numText(v)
-}
 </script>
 
 <style scoped>
@@ -307,18 +269,4 @@ function cellText(row: MatrixRow, scopeKey: string): string {
 .m-result-meta { font-size: 12px; color: var(--m-text-secondary); }
 .m-result-qty { font-size: 14px; font-weight: 600; color: var(--m-accent); margin-top: 2px; }
 .m-center { display: flex; justify-content: center; padding: 24px 0; }
-
-/* 跨作用域对比矩阵：横向滚动 + 首列吸附 */
-.m-matrix { margin-top: 20px; }
-.m-matrix-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; border-radius: var(--m-radius-md); background: var(--m-bg-card); box-shadow: var(--m-shadow-card); }
-.m-matrix-table { border-collapse: collapse; font-size: 12px; white-space: nowrap; }
-.m-matrix-table th,
-.m-matrix-table td { padding: 8px 10px; border-bottom: 0.5px solid rgba(0,0,0,0.05); text-align: left; }
-.m-matrix-table thead th { font-weight: 700; color: var(--m-text-secondary); }
-.m-mx-name-col { position: sticky; left: 0; background: var(--m-bg-card); z-index: 1; max-width: 150px; white-space: normal; color: var(--m-text-primary); }
-.m-mx-spec { color: var(--m-text-secondary); }
-.m-mx-num { text-align: right; font-variant-numeric: tabular-nums; }
-.m-mx-total { font-weight: 700; color: var(--m-accent); }
-.m-mx-split td { background: rgba(217, 119, 6, 0.06); }
-.m-matrix-hint { margin-top: 16px; font-size: 12px; color: var(--m-text-secondary); }
 </style>

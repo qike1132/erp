@@ -34,9 +34,6 @@
           :calc-groups="calcGroups"
         />
       </div>
-
-      <!-- 跨角色对比矩阵：≥2 个作用域时展示，默认折叠为 44px 摘要条 -->
-      <MatrixSection :matrix="matrix" />
     </div>
 
     <!-- Batch Input Modal -->
@@ -69,7 +66,6 @@ import MaterialCalcHeader from './components/MaterialCalcHeader.vue'
 import ProductSelectColumn from './components/ProductSelectColumn.vue'
 import OrderQuantityColumn from './components/OrderQuantityColumn.vue'
 import CalcResultColumn from './components/CalcResultColumn.vue'
-import MatrixSection from './components/MatrixSection.vue'
 
 // 计算引擎（全局 composable）：订单条目 / 分块结果 / 对比矩阵 / 防抖重算
 const {
@@ -80,7 +76,6 @@ const {
   selectedProductIds,
   totalOrders,
   hasResults,
-  matrix,
   calcStatus,
   addProduct,
   removeProduct,
@@ -170,11 +165,13 @@ function applyBatch() {
 }
 
 /* === Three Column Body ===
-   覆盖全局 .page-card-body：三列等宽 + 16px 间距。
-   原先没有 gap，三列严格零间隙、只靠 1px 竖线分隔，扫读时找不到分组边界。 */
+   覆盖全局 .page-card-body：三列 + 16px 间距。
+   三列**不再等宽**（2026-10-07）：结果列内容最密（5 列表格 + 长物料名，
+   等宽时名称被截断），左两列内容少、留白多 → 按 0.85 : 0.85 : 1.3 配比，
+   把宽度让给结果列。 */
 .page-card-body {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-columns: 0.85fr 0.85fr 1.3fr;
   gap: var(--sp-4);
   padding: var(--sp-4) var(--sp-5);
   flex: 1;

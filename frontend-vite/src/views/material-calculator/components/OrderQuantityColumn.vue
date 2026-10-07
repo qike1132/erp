@@ -16,13 +16,13 @@
           {{ item.name }}
         </div>
         <input
-          v-model.number="item.quantity"
+          :value="item.quantity === 0 ? '' : item.quantity"
           type="number"
           class="form-number-input mc-qty-input"
           min="0"
           step="1"
           aria-label="订单数量"
-          @input="emit('qty-input', item)"
+          @input="onQtyInput($event, item)"
         />
         <button class="mc-delete-btn" aria-label="删除" @click="emit('remove', item.product_id)">
           <FontAwesomeIcon icon="trash-alt" aria-hidden="true" />
@@ -34,6 +34,8 @@
 
 <script setup lang="ts">
 // 订单数量录入列（从 MaterialCalculatorView.vue 抽出，模板原样搬移）
+import { clampQuantity } from '@/composables/useMaterialCalculator'
+
 defineProps<{
   orderItems: { product_id: number; name: string; quantity: number }[]
   totalOrders: number
@@ -43,6 +45,17 @@ const emit = defineEmits<{
   'qty-input': [item: { quantity: number }]
   remove: [productId: number]
 }>()
+
+/**
+ * 数量输入：`0` 一律显示为空（新增产品默认留空白，不预填 0）。
+ * 因展示值由 `item.quantity` 派生，用 `:value` + 本处理器取代 `v-model`：
+ * 清空输入框 → 0 → 显示为空；非法/负值经 clampQuantity 归零。
+ */
+function onQtyInput(e: Event, item: { quantity: number }) {
+  const raw = (e.target as HTMLInputElement).value
+  item.quantity = raw === '' ? 0 : clampQuantity(raw)
+  emit('qty-input', item)
+}
 </script>
 
 <style scoped>

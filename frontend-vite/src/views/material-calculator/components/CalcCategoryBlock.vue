@@ -107,34 +107,24 @@ function unitOf(catKey: string, row: CalcRowVM): string {
 
 <style scoped>
 /* 列宽配比（colgroup 上的百分比）。
-   目标：让**相邻表头文字之间的空隙相等**。
-
-   空隙公式（.mc-table 是 table-layout:fixed，padding 8px）：
-       相邻空隙 = 本列盒宽 − 本列文字宽
-   （左列的右内边距 + 右列的左内边距 = 16px，正好抵消，故 padding 不参与）
-   ⇒ 要空隙处处相等，只需每列盒宽 = 文字宽 + 常数 C。
-   实测表头文字宽 33 / 44 / 48.6 / 44 / 22（合计 191.6），表宽 394.7
-   ⇒ 5C = 394.7 − 191.6 = 203.1 ⇒ C = 40.6
-   ⇒ 目标盒宽 73.6 / 84.6 / 89.2 / 84.6 / 62.6 ⇒ 百分比 18.7 / 21.4 / 22.6 / 21.4 / 15.9
-
-   「总采购量」列的表头与数据同带 .is-num 并居中、「规格/色号」列同带 .is-center 居中
-   （见 app.css），数值不再贴右边界、与表头同轴。对齐方式不改变列盒宽，故上面的百分比仍然成立。
-
-   百分比在 fixed 布局下是硬约束，表宽恒等于容器宽，不会溢出（见 app.css 的 .mc-table）。 */
+   2026-10-07 重配：结果列整体加宽（见 MaterialCalculatorView 的三列配比）后，
+   份额进一步向内容最长的「物料名称」倾斜 —— 旧配比（21.4%）下长物料名会被
+   省略号截断。其余列按内容体量递减：规格/色号 ≈ 供应商 > 总采购量 > 单位。
+   .mc-table 是 table-layout:fixed，百分比是硬约束，表宽恒等于容器宽、不溢出。 */
 .mc-col-supplier {
-  width: 18.7%;
+  width: 16%;
 }
 .mc-col-name {
-  width: 21.4%;
+  width: 30%;
 }
 .mc-col-spec {
-  width: 22.6%;
+  width: 19%;
 }
 .mc-col-qty {
-  width: 21.4%;
+  width: 20%;
 }
 .mc-col-unit {
-  width: 15.9%;
+  width: 15%;
 }
 
 /* 区块之间 1px 分隔线，末尾不加 */
