@@ -38,9 +38,7 @@
             <!-- .mc-table 是 table-layout:fixed + nowrap，长文本会被省略号截断
                  → 用 title 保证全文仍可悬浮查看（否则截断等于信息丢失） -->
             <td :title="row.supplier_name || ''">{{ row.supplier_name || '-' }}</td>
-            <td :title="row.material_name || ''">
-              {{ row.material_name }}<span v-if="showSkuCount && (row.sku_count ?? 0) > 1" class="mc-sku-badge">{{ row.sku_count }} 个SKU</span>
-            </td>
+            <td :title="row.material_name || ''">{{ row.material_name }}</td>
             <td class="is-center" :title="row.specification || ''">{{ row.specification || '-' }}</td>
             <td class="is-num">{{ quantityOf(categoryKey, row) }}</td>
             <td>{{ unitOf(categoryKey, row) }}</td>
@@ -59,23 +57,17 @@
  */
 import type { MaterialCalcRow } from '@/api'
 
-/** 带复合 row-key 的行视图模型（与 CalcResultColumn 的生成口径一致）。
- *  汇总视图下行带 `sku_count`（跨产品合并的 SKU 数，用于「N 个SKU」徽标）。 */
-type CalcRowVM = MaterialCalcRow & { __rk: string; sku_count?: number }
+/** 带复合 row-key 的行视图模型（与 CalcResultColumn 的生成口径一致）。 */
+type CalcRowVM = MaterialCalcRow & { __rk: string }
 
-withDefaults(
-  defineProps<{
-    /** 分类键：filling / fabric / accessory */
-    categoryKey: string
-    label: string
-    icon: string
-    rows: CalcRowVM[]
-    collapsed: boolean
-    /** 汇总视图：行带 sku_count > 1 时显示「N 个SKU」徽标（分块视图不显示）。 */
-    showSkuCount?: boolean
-  }>(),
-  { showSkuCount: false },
-)
+defineProps<{
+  /** 分类键：filling / fabric / accessory */
+  categoryKey: string
+  label: string
+  icon: string
+  rows: CalcRowVM[]
+  collapsed: boolean
+}>()
 
 const emit = defineEmits<{
   toggle: []
@@ -198,19 +190,5 @@ function unitOf(catKey: string, row: CalcRowVM): string {
 
 .mc-category-table {
   padding-bottom: var(--sp-2);
-}
-
-/* 跨 SKU 合并徽标：物料名后的小胶囊（仅汇总视图 sku_count > 1 的行渲染） */
-.mc-sku-badge {
-  display: inline-block;
-  margin-left: 4px;
-  padding: 0 5px;
-  border-radius: 999px;
-  background: var(--color-primary-50, #eff5ff);
-  color: var(--color-primary-700);
-  font-size: 9.5px;
-  font-weight: 700;
-  line-height: 15px;
-  vertical-align: 1px;
 }
 </style>

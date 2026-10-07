@@ -27,7 +27,7 @@ export type SummaryCategory = 'filling' | 'fabric' | 'accessory'
 
 export const SUMMARY_CATEGORIES: readonly SummaryCategory[] = ['filling', 'fabric', 'accessory'] as const
 
-/** 汇总行：MaterialCalcRow + 跨产品 SKU 数（用于「N 个SKU」徽标）。 */
+/** 汇总行：MaterialCalcRow + 跨产品 SKU 数（贡献该行的不同产品数）。 */
 export interface SummaryRow extends MaterialCalcRow {
   sku_count: number
 }

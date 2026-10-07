@@ -12,7 +12,7 @@ import type { MaterialCalcRow, MaterialCalcScopeGroup } from '@/api'
  * 「按产品查看」降级为后续 TAB，多角色 BOM 能力保留。
  *
  * 本机开不了浏览器预览：结构用挂载测试固化（汇总 TAB 首位/默认选中/合并行/
- * SKU 徽标/切回产品 TAB 仍是分块渲染），排版靠用户实测。
+ * 切回产品 TAB 仍是分块渲染），排版靠用户实测。
  */
 
 function row(over: Partial<MaterialCalcRow>): MaterialCalcRow {
@@ -77,17 +77,15 @@ describe('CalcResultColumn —— 「汇总」TAB（方案 A）', () => {
     const cells = fillingRows[0]!.findAll('td')
     expect(cells[1]!.text()).toContain('PP棉')
     expect(cells[3]!.text()).toBe('70')
-    // 跨 SKU 徽标
-    expect(fillingRows[0]!.text()).toContain('2 个SKU')
+    // 汇总行不再渲染 SKU 徽标（2026-10-07 按要求移除）
+    expect(fillingRows[0]!.text()).not.toContain('个SKU')
   })
 
-  it('汇总视图：单 SKU 物料不加徽标（区分「合并而来」与「本来就一行」）', () => {
+  it('汇总视图：不再渲染「N 个SKU」徽标（2026-10-07 按要求移除）', () => {
     const w = mountColumn(TWO_SKU_GROUPS)
 
-    const fabricRows = w.findAll('.mc-category-block')[1]!.findAll('tbody tr')
-    expect(fabricRows[0]!.text()).toContain('2 个SKU') // 短毛绒 合并行
-    // 水晶超柔只属于一个 SKU → 无徽标
-    expect(fabricRows.find((r) => r.text().includes('短毛绒'))!.text()).toContain('2 个SKU')
+    expect(w.findAll('.mc-sku-badge')).toHaveLength(0)
+    expect(w.text()).not.toContain('个SKU')
   })
 
   it('汇总视图：作用域条不再显示产品数/合计（2026-10-07 按要求移除）', () => {

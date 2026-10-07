@@ -54,7 +54,7 @@
                 class="m-result-row"
               >
                 <div class="m-result-name">
-                  {{ row.material_name || row.name }}<span v-if="row.sku_count > 1" class="m-sku-badge">{{ row.sku_count }} 个SKU</span>
+                  {{ row.material_name || row.name }}
                 </div>
                 <div class="m-result-meta">{{ row.supplier_name }} · {{ row.specification || '—' }}</div>
                 <div class="m-result-qty">{{ row.total_quantity }} {{ row.unit }}</div>
@@ -254,11 +254,6 @@ function rowKeyOf(prefix: string, category: string, row: MaterialCalcRow): strin
 .m-scope-badge.is-role { background: var(--m-accent); }
 /* 汇总卡徽标：与作用域徽标区分（灰底主色字，跨产品合并的标识） */
 .m-scope-badge.is-summary { background: var(--m-text-secondary); }
-.m-sku-badge {
-  display: inline-block; margin-left: 5px; padding: 1px 6px; border-radius: 999px;
-  background: rgba(91, 141, 239, 0.12); color: #2d5ab8;
-  font-size: 10px; font-weight: 700; vertical-align: 1px;
-}
 .m-scope-name { font-size: 14px; font-weight: 700; color: var(--m-text-primary); }
 .m-scope-qty { margin-left: auto; font-size: 12px; font-weight: 600; color: var(--m-accent); }
 

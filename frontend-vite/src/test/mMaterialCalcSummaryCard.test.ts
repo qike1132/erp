@@ -63,7 +63,7 @@ async function mountView(calcGroups: MaterialCalcScopeGroup[], orderItems: { pro
 }
 
 describe('MMaterialCalculatorView —— 「汇总」卡片（方案 A 移动端）', () => {
-  it('多 SKU 时首张结果卡是「汇总」卡：合并行、数量相加、带 SKU 徽标', async () => {
+  it('多 SKU 时首张结果卡是「汇总」卡：合并行、数量相加（不再渲染 SKU 徽标）', async () => {
     const w = await mountView(TWO_SKU_GROUPS)
 
     const cards = w.findAll('.m-scope-card')
@@ -75,7 +75,8 @@ describe('MMaterialCalculatorView —— 「汇总」卡片（方案 A 移动端
     const rows = summaryCard.findAll('.m-result-row')
     expect(rows).toHaveLength(1)
     expect(rows[0]!.find('.m-result-name').text()).toContain('PP棉')
-    expect(rows[0]!.find('.m-result-name').text()).toContain('2 个SKU')
+    // SKU 徽标已按 2026-10-07 要求移除（桌面端同步）
+    expect(rows[0]!.find('.m-result-name').text()).not.toContain('个SKU')
     expect(rows[0]!.find('.m-result-qty').text()).toContain('70') // 40 + 30
   })
 

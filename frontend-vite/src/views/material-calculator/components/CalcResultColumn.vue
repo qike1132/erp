@@ -44,7 +44,6 @@
           :label="section.label"
           :icon="section.icon"
           :rows="section.rows"
-          :show-sku-count="isSummary"
           :collapsed="sectionCollapsed(section.key)"
           @toggle="toggleSection(section.key)"
         />
