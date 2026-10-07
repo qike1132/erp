@@ -15,8 +15,8 @@
     <template v-else>
       <!-- 作用域条：汇总 TAB + 各产品 TAB → 左侧分段控件切换；
            仅 1 个作用域 → 纯文本名（无 TAB，行为与旧版一致）。
-           右侧仅在汇总视图显示产品数 + 订单合计；产品视图不再重复「产品名 + 数量」
-           （产品名与激活的 TAB 标签重复，数量在第 2 列已有输入框，属冗余）。 -->
+           右侧不再显示任何信息：产品名/数量与 TAB 标签、第 2 列输入框重复，
+           汇总口径的产品数与件数也被用户判定为冗余（2026-10-07）。 -->
       <div class="mc-scope-bar">
         <div v-if="scopeTabs.length > 1" class="mc-seg" role="tablist" aria-label="切换作用域">
           <button
@@ -33,13 +33,6 @@
           </button>
         </div>
         <span v-else-if="activeGroup" class="mc-scope-name">{{ groupName(activeGroup) }}</span>
-
-        <span v-if="isSummary" class="mc-scope-meta">
-          <span v-if="summary.productCount > 0" class="mc-scope-product">
-            {{ summary.productCount }} 个产品
-          </span>
-          <span class="mc-scope-qty">合计 <b>{{ summary.totalQuantity }}</b> 件</span>
-        </span>
       </div>
 
       <div class="mc-result-content">
@@ -300,35 +293,6 @@ function sectionCollapsed(category: string): boolean {
   font-weight: 600;
   color: var(--color-text);
   white-space: nowrap;
-}
-
-.mc-scope-meta {
-  margin-left: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-2);
-  min-width: 0;
-  /* 标签条独占整行后 meta 落到下一行右对齐；不收缩，超长产品名由内部
-     .mc-scope-product 的省略号兜底 */
-  flex: 0 0 auto;
-}
-
-.mc-scope-product {
-  font-size: var(--fs-cap);
-  color: var(--color-text-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.mc-scope-qty {
-  font-size: var(--fs-cap);
-  color: var(--color-text-muted);
-  white-space: nowrap;
-}
-.mc-scope-qty b {
-  color: var(--color-primary-700);
-  font-weight: 600;
 }
 
 /* === 结果滚动区 === */

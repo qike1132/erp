@@ -90,11 +90,11 @@ describe('CalcResultColumn —— 「汇总」TAB（方案 A）', () => {
     expect(fabricRows.find((r) => r.text().includes('短毛绒'))!.text()).toContain('2 个SKU')
   })
 
-  it('汇总视图：作用域条显示产品数与订单合计（2 个产品 · 合计 800 件）', () => {
+  it('汇总视图：作用域条不再显示产品数/合计（2026-10-07 按要求移除）', () => {
     const w = mountColumn(TWO_SKU_GROUPS)
 
-    expect(w.find('.mc-scope-bar').text()).toContain('2 个产品')
-    expect(w.find('.mc-scope-bar').text()).toContain('800')
+    expect(w.find('.mc-scope-meta').exists()).toBe(false)
+    expect(w.find('.mc-scope-bar').text()).not.toContain('个产品')
   })
 
   it('合计项数按汇总口径计（合并后 2 项，不是 4 项）', () => {
