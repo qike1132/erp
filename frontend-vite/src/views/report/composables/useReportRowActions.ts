@@ -174,7 +174,7 @@ export function useReportRowActions() {
     })
   }
 
-  /** 出货/抵扣：按单号取明细（出货=stockout_no，抵扣=关联订单号） */
+  /** 出货/抵扣：按单号取明细（出货=stockout_no，抵扣=关联订单号）；带产品名收窄 */
   async function resolveStockoutRecords(row: Record<string, unknown>, kind: 'stockout' | 'deduction'): Promise<StockFlowRecord[]> {
     const rawNos = kind === 'deduction' ? row.order_nos : row.stockout_nos
     const nos = parseGroupNos(String(rawNos ?? ''))
@@ -182,7 +182,8 @@ export function useReportRowActions() {
       showToast('未能找到该组对应的明细记录', 'error')
       return []
     }
-    const res = await stockApi.stockoutRecords(kind, nos.join(','))
+    // 同一订单可能对多个产品分别抵扣：只凭订单号会还原出他产品的抵扣行，带上行内产品名收窄
+    const res = await stockApi.stockoutRecords(kind, nos.join(','), String(row.product_name ?? ''))
     return res.data ?? []
   }
 

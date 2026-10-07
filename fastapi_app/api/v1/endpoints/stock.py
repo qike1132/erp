@@ -322,6 +322,7 @@ async def delete_stockout(
 async def list_stockout_records(
     kind: str = Query('stockout', pattern='^(stockout|deduction)$', description='stockout=独立出货，deduction=备货抵扣'),
     nos: str = Query('', description='逗号分隔单号（出货=stockout_no，抵扣=order_no）'),
+    product: str = Query('', description='产品名（收窄还原范围，避免同单多产品串行）'),
     db: AsyncSession = Depends(get_async_read_db),
     _user: User = Depends(require_any_permission(
         'stockout_manage', 'stockout_edit', 'stockout_delete', 'deduction_edit', 'deduction_delete',
@@ -332,13 +333,14 @@ async def list_stockout_records(
     Args:
         kind: 'stockout' 独立出货（stockin_id IS NULL）或 'deduction' 备货抵扣（按订单号匹配）。
         nos: 逗号分隔的单号；出货为 stockout_no，抵扣为关联订单 order_no。
+        product: 产品名；同一订单可能对多个产品分别抵扣，按产品收窄避免还原出他产品的行。
         db: 只读数据库会话。
         _user: 当前登录用户（仅需通过权限校验）。
 
     Returns:
         StockListResponse: 匹配的明细行（带 id/数量/客户/日期/备注等）。
     """
-    items = await get_stockout_records(db, kind=kind, nos=nos)
+    items = await get_stockout_records(db, kind=kind, nos=nos, product=product)
     return StockListResponse(data=items, total=len(items), page=1, per_page=len(items))
 
 

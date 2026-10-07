@@ -96,22 +96,23 @@ describe('出货流水行内操作', () => {
     mocks.stockoutRecords.mockResolvedValue({ data: [STOCKOUT_REC] })
     const api = makeActions()
 
-    await api.onRowAction('stockout', 'edit', { stockout_nos: 'SO-20261001-1', customer: 'MINISO国际' })
+    await api.onRowAction('stockout', 'edit', { stockout_nos: 'SO-20261001-1', customer: 'MINISO国际', product_name: '鲨鱼公仔' })
 
-    expect(mocks.stockoutRecords).toHaveBeenCalledWith('stockout', 'SO-20261001-1')
+    expect(mocks.stockoutRecords).toHaveBeenCalledWith('stockout', 'SO-20261001-1', '鲨鱼公仔')
     expect(api.stockoutEditVisible.value).toBe(true)
     expect(api.stockoutEditIsDeduction.value).toBe(false)
     expect(api.stockoutEditForm.value?.stockoutNo).toBe('SO-20261001-1')
     expect(api.stockoutEditForm.value?.quantity).toBe(12)
   })
 
-  it('抵扣：按 order_no 还原，标记为抵扣行', async () => {
+  it('抵扣：按 order_no 还原（带产品名收窄），标记为抵扣行', async () => {
     mocks.stockoutRecords.mockResolvedValue({ data: [DEDUCTION_REC] })
     const api = makeActions()
 
-    await api.onRowAction('deduction', 'edit', { order_nos: 'PO-1', customer: 'MINISO国际' })
+    await api.onRowAction('deduction', 'edit', { order_nos: 'PO-1', customer: 'MINISO国际', product_name: '鲨鱼公仔' })
 
-    expect(mocks.stockoutRecords).toHaveBeenCalledWith('deduction', 'PO-1')
+    // 产品名一并下发：同一订单对多产品抵扣时避免还原出他产品的行
+    expect(mocks.stockoutRecords).toHaveBeenCalledWith('deduction', 'PO-1', '鲨鱼公仔')
     expect(api.stockoutEditIsDeduction.value).toBe(true)
     expect(api.stockoutEditVisible.value).toBe(true)
   })

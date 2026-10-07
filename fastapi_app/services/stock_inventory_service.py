@@ -276,11 +276,13 @@ def _parse_nos(raw: str, limit: int = 500) -> list[str]:
     return out
 
 
-async def get_stockout_records(db: AsyncSession, kind: str = 'stockout', nos: str = '') -> list[dict]:
+async def get_stockout_records(db: AsyncSession, kind: str = 'stockout', nos: str = '', product: str = '') -> list[dict]:
     """按单号还原出货/抵扣明细行（报表聚合行 → 具体记录）。
 
     kind='stockout'：独立出货（stockin_id IS NULL），按 stockout_no 匹配。
     kind='deduction'：备货抵扣（stockin_id IS NOT NULL），按关联订单号 order_no 匹配。
+    product 非空时按产品名收窄——同一订单可能对多个产品分别抵扣，仅凭 order_no 会
+    还原出他产品的抵扣行（picker 里可能选错），故用行内产品名再收一道。
     返回行带 id / 单号 / 数量 / 已退量 / 客户 / 日期 / 备注 / 产品，供前端行内编辑与删除。
     """
     codes = _parse_nos(nos)
@@ -294,6 +296,9 @@ async def get_stockout_records(db: AsyncSession, kind: str = 'stockout', nos: st
         )
     else:
         stmt = select(StockOut).where(StockOut.stockin_id.is_(None), StockOut.stockout_no.in_(codes))
+    if product:
+        # 子查询而非 join：避免与 joinedload(StockOut.product) 形成对 product 的二次 join
+        stmt = stmt.where(StockOut.product_id.in_(select(Product.id).where(Product.name == product)))
     result = await db.execute(
         stmt.options(joinedload(StockOut.product)).order_by(StockOut.stockout_date.desc(), StockOut.id.desc())
     )

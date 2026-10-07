@@ -122,6 +122,19 @@ class TestStockoutRecords:
         assert _parse_nos('') == []
         assert _parse_nos(','.join(str(i) for i in range(600)), limit=500).__len__() == 500
 
+    async def test_product_narrows_deduction_restore(self, mock_db):
+        # 同一订单可能对多个产品分别抵扣：带 product 时应把它收进查询参数
+        mock_db.execute = AsyncMock(return_value=_rows_result([]))
+        await get_stockout_records(mock_db, kind='deduction', nos='PO-1', product='鲨鱼公仔')
+        compiled = mock_db.execute.await_args.args[0].compile()
+        assert '鲨鱼公仔' in compiled.params.values()
+
+    async def test_no_product_filter_when_omitted(self, mock_db):
+        mock_db.execute = AsyncMock(return_value=_rows_result([]))
+        await get_stockout_records(mock_db, kind='stockout', nos='SO-1')
+        compiled = mock_db.execute.await_args.args[0].compile()
+        assert '鲨鱼公仔' not in compiled.params.values()
+
 
 class TestStockreturnRecords:
     async def test_empty_nos_returns_empty(self, mock_db):

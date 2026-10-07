@@ -72,9 +72,12 @@ export const stockApi = {
   /**
    * 报表「出货/抵扣流水」聚合行还原（按单号取明细，供行内编辑/删除）。
    * kind='stockout' 按 stockout_no 匹配独立出货；kind='deduction' 按订单号匹配备货抵扣。
+   * product 传行内产品名收窄：同一订单可能对多个产品分别抵扣，只凭订单号会串到他产品。
    */
-  stockoutRecords: (kind: 'stockout' | 'deduction', nos: string) =>
-    get<{ success?: boolean; data: StockFlowRecord[] }>('/stock/out/records', { kind, nos }),
+  stockoutRecords: (kind: 'stockout' | 'deduction', nos: string, product = '') =>
+    get<{ success?: boolean; data: StockFlowRecord[] }>('/stock/out/records', {
+      kind, nos, ...(product ? { product } : {}),
+    }),
   /** 编辑出货/抵扣行（抵扣行后端会忽略 customer，只改数量/日期/备注） */
   editStockout: (id: number, data: StockOutUpdatePayload) =>
     put<{ success?: boolean; message?: string }>(`/stock/out/edit/${id}`, data),
