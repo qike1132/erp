@@ -21,6 +21,16 @@ from fastapi_app.shared_models import User
 # 允许导出的报表类型
 ALLOWED_REPORT_TYPES = ('order', 'stockin', 'stockout', 'deduction', 'return')
 
+
+def _factory_scope(user: User) -> str:
+    """工厂隔离口径：非超管且绑定工厂时只看本厂（product.factory）。
+
+    与 get_unified_records（order.py）的强制过滤同口径——报表此前不做隔离，
+    厂绑定用户能看到他厂聚合行，但点行内编辑/删除时还原接口按本厂过滤，
+    必然还原失败（2026-10-07 贝乐案例）。隔离前移到报表查询本身。
+    """
+    return user.factory if (user.factory and not user.is_super) else ''
+
 router = APIRouter()
 
 
@@ -54,6 +64,7 @@ async def order_logs(
     """
     return await report_service.get_order_logs(
         db, customer, product, status, start_date, end_date, page, per_page,
+        factory=_factory_scope(user),
     )
 
 
@@ -85,6 +96,7 @@ async def stockin_logs(
     """
     return await report_service.get_stockin_logs(
         db, customer, product, start_date, end_date, page, per_page,
+        factory=_factory_scope(user),
     )
 
 
@@ -116,6 +128,7 @@ async def stockout_logs(
     """
     return await report_service.get_stockout_logs(
         db, customer, product, start_date, end_date, page, per_page,
+        factory=_factory_scope(user),
     )
 
 
@@ -147,6 +160,7 @@ async def deduction_logs(
     """
     return await report_service.get_deduction_logs(
         db, customer, product, start_date, end_date, page, per_page,
+        factory=_factory_scope(user),
     )
 
 
@@ -178,6 +192,7 @@ async def return_logs(
     """
     return await report_service.get_return_logs(
         db, customer, product, start_date, end_date, page, per_page,
+        factory=_factory_scope(user),
     )
 
 
@@ -217,6 +232,7 @@ async def export_report(
 
     buffer = await report_service.export_report_to_excel(
         db, report_type, customer, product, status, start_date, end_date,
+        factory=_factory_scope(user),
     )
 
     filename = f'{report_type}_report.xlsx'

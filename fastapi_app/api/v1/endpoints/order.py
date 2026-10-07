@@ -240,7 +240,8 @@ async def list_unified_records(
 async def get_order(
     order_id: int,
     db: AsyncSession = Depends(get_async_read_db),
-    _user: User = Depends(require_permission("order_manage")),
+    # order_edit：报表流水行内编辑弹窗加载详情用（迁移 075）；删除流程走 records 还原，不经此接口
+    _user: User = Depends(require_any_permission("order_manage", "order_edit")),
 ) -> dict[str, Any]:
     """获取单个订单详情。
 

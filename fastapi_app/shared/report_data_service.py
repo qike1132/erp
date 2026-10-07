@@ -39,6 +39,7 @@ def get_all_logs_data(
     status: str = '',
     start_date: str = '',
     end_date: str = '',
+    factory: str = '',
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """
     获取指定类型报表的所有数据（不分页，用于导出）
@@ -62,15 +63,15 @@ def get_all_logs_data(
         status = status.strip()[:20]
 
         if report_type == 'order':
-            return _get_order_logs(session, customer, product, status, start_date, end_date)
+            return _get_order_logs(session, customer, product, status, start_date, end_date, factory)
         elif report_type == 'stockin':
-            return _get_stockin_logs(session, customer, product, start_date, end_date)
+            return _get_stockin_logs(session, customer, product, start_date, end_date, factory)
         elif report_type == 'stockout':
-            return _get_stockout_logs(session, customer, product, start_date, end_date)
+            return _get_stockout_logs(session, customer, product, start_date, end_date, factory)
         elif report_type == 'deduction':
-            return _get_deduction_logs(session, customer, product, start_date, end_date)
+            return _get_deduction_logs(session, customer, product, start_date, end_date, factory)
         elif report_type == 'return':
-            return _get_return_logs(session, customer, product, start_date, end_date)
+            return _get_return_logs(session, customer, product, start_date, end_date, factory)
         else:
             logger.warning(f'未知报表类型: {report_type}')
             return [], {}
@@ -108,7 +109,18 @@ def _apply_product_filter(query, product):
     return query
 
 
-def _get_order_logs(session, customer, product, status, start_date, end_date):
+def _apply_factory_filter(query, factory):
+    """工厂隔离：产品维度的 factory（与 order/unified.py 的 Product.factory 过滤同口径）。
+
+    非超管且绑定工厂的用户只看本厂产品的流水；NULL 工厂产品与 unified 的 == 语义
+    一致，不出现在任何厂绑定用户的视图里。
+    """
+    if factory:
+        query = query.where(Product.factory == factory)
+    return query
+
+
+def _get_order_logs(session, customer, product, status, start_date, end_date, factory=''):
     query = select(Order).join(Product).options(
         selectinload(Order.product),
         # Order.order_stockouts 由 StockOut.order 的 backref 在运行时注入
@@ -124,6 +136,7 @@ def _get_order_logs(session, customer, product, status, start_date, end_date):
     if customer:
         query = query.where(Order.customer.like(f'%{escape_like(customer)}%'))
     query = _apply_product_filter(query, product)
+    query = _apply_factory_filter(query, factory)
     if status:
         valid_statuses = VALID_ORDER_STATUSES
         if status in valid_statuses:
@@ -141,6 +154,7 @@ def _get_order_logs(session, customer, product, status, start_date, end_date):
     if customer:
         stats_query = stats_query.where(Order.customer.like(f'%{escape_like(customer)}%'))
     stats_query = _apply_product_filter(stats_query, product)
+    stats_query = _apply_factory_filter(stats_query, factory)
     if status and status in VALID_ORDER_STATUSES:
         stats_query = stats_query.where(Order.status == status)
     stats_query = _apply_date_filters(stats_query, Order.order_date, start_date, end_date)
@@ -186,7 +200,7 @@ def _get_order_logs(session, customer, product, status, start_date, end_date):
     return logs, stats
 
 
-def _get_stockin_logs(session, customer, product, start_date, end_date):
+def _get_stockin_logs(session, customer, product, start_date, end_date, factory=''):
     query = select(StockIn).join(Product).options(
         selectinload(StockIn.product),
         selectinload(StockIn.stockin_stockouts)
@@ -194,6 +208,7 @@ def _get_stockin_logs(session, customer, product, start_date, end_date):
     if customer:
         query = query.where(StockIn.customer.like(f'%{escape_like(customer)}%'))
     query = _apply_product_filter(query, product)
+    query = _apply_factory_filter(query, factory)
     query = _apply_date_filters(query, StockIn.stockin_date, start_date, end_date)
 
     stats_query = select(
@@ -203,6 +218,7 @@ def _get_stockin_logs(session, customer, product, start_date, end_date):
     if customer:
         stats_query = stats_query.where(StockIn.customer.like(f'%{escape_like(customer)}%'))
     stats_query = _apply_product_filter(stats_query, product)
+    stats_query = _apply_factory_filter(stats_query, factory)
     stats_query = _apply_date_filters(stats_query, StockIn.stockin_date, start_date, end_date)
     total, total_quantity = session.execute(stats_query).one()
 
@@ -237,7 +253,7 @@ def _get_stockin_logs(session, customer, product, start_date, end_date):
     return logs, stats
 
 
-def _get_stockout_logs(session, customer, product, start_date, end_date):
+def _get_stockout_logs(session, customer, product, start_date, end_date, factory=''):
     # 左连 Order 以便按软删过滤（与屏幕口径对齐：report_service.py 的
     # "(so.order_id IS NULL OR o2.is_deleted = false OR o2.is_deleted IS NULL)"）——
     # 挂到已软删订单上的出货不进导出，否则导出数字大于页面。
@@ -254,6 +270,7 @@ def _get_stockout_logs(session, customer, product, start_date, end_date):
     if customer:
         query = query.where(StockOut.customer.like(f'%{escape_like(customer)}%'))
     query = _apply_product_filter(query, product)
+    query = _apply_factory_filter(query, factory)
     query = _apply_date_filters(query, StockOut.stockout_date, start_date, end_date)
 
     stats_query = select(
@@ -269,6 +286,7 @@ def _get_stockout_logs(session, customer, product, start_date, end_date):
     if customer:
         stats_query = stats_query.where(StockOut.customer.like(f'%{escape_like(customer)}%'))
     stats_query = _apply_product_filter(stats_query, product)
+    stats_query = _apply_factory_filter(stats_query, factory)
     stats_query = _apply_date_filters(stats_query, StockOut.stockout_date, start_date, end_date)
     total, total_quantity = session.execute(stats_query).one()
 
@@ -302,7 +320,7 @@ def _get_stockout_logs(session, customer, product, start_date, end_date):
     return logs, stats
 
 
-def _get_deduction_logs(session, customer, product, start_date, end_date):
+def _get_deduction_logs(session, customer, product, start_date, end_date, factory=''):
     # 左连 Order 以便按软删过滤，与出货导出及屏幕口径一致。
     # 第八轮审计：与 _get_stockout_logs(:245) 对齐 —— 补「净量 > 0」过滤，全退抵扣
     # （quantity == returned_quantity）不再以 0 数量计入导出与 total_count。
@@ -319,6 +337,7 @@ def _get_deduction_logs(session, customer, product, start_date, end_date):
     if customer:
         query = query.filter(StockOut.customer.like(f'%{escape_like(customer)}%'))
     query = _apply_product_filter(query, product)
+    query = _apply_factory_filter(query, factory)
     query = _apply_date_filters(query, StockOut.stockout_date, start_date, end_date)
 
     stats_query = select(
@@ -335,6 +354,7 @@ def _get_deduction_logs(session, customer, product, start_date, end_date):
     if customer:
         stats_query = stats_query.where(StockOut.customer.like(f'%{escape_like(customer)}%'))
     stats_query = _apply_product_filter(stats_query, product)
+    stats_query = _apply_factory_filter(stats_query, factory)
     stats_query = _apply_date_filters(stats_query, StockOut.stockout_date, start_date, end_date)
     total, total_quantity, total_orders = session.execute(stats_query).one()
 
@@ -373,7 +393,7 @@ def _get_deduction_logs(session, customer, product, start_date, end_date):
     return logs, stats
 
 
-def _get_return_logs(session, customer, product, start_date, end_date):
+def _get_return_logs(session, customer, product, start_date, end_date, factory=''):
     # 与屏幕口径对齐（report_service.get_return_logs 的 sr.status = 'active'）：
     # 已取消退货的库存已对称扣回，不计入导出，否则导出数字会大于页面显示值。
     query = select(StockReturn).join(Product).where(
@@ -382,6 +402,7 @@ def _get_return_logs(session, customer, product, start_date, end_date):
     if customer:
         query = query.where(StockReturn.customer.like(f'%{escape_like(customer)}%'))
     query = _apply_product_filter(query, product)
+    query = _apply_factory_filter(query, factory)
     query = _apply_date_filters(query, StockReturn.return_date, start_date, end_date)
 
     stats_query = select(
@@ -393,6 +414,7 @@ def _get_return_logs(session, customer, product, start_date, end_date):
     if customer:
         stats_query = stats_query.where(StockReturn.customer.like(f'%{escape_like(customer)}%'))
     stats_query = _apply_product_filter(stats_query, product)
+    stats_query = _apply_factory_filter(stats_query, factory)
     stats_query = _apply_date_filters(stats_query, StockReturn.return_date, start_date, end_date)
     total, total_quantity = session.execute(stats_query).one()
 

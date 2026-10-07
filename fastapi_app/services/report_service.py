@@ -96,11 +96,11 @@ async def _query_logs_generic(
     key_prefix='reports:order_logs',
     ttl=30,
     local_ttl=10,
-    key_builder=lambda *args, **kwargs: f"c:{kwargs.get('customer','')}:p:{kwargs.get('product','')}:s:{kwargs.get('status','')}:sd:{kwargs.get('start_date','')}:ed:{kwargs.get('end_date','')}:pg:{kwargs.get('page',1)}:pp:{kwargs.get('per_page',20)}",
+    key_builder=lambda *args, **kwargs: f"c:{kwargs.get('customer','')}:p:{kwargs.get('product','')}:s:{kwargs.get('status','')}:f:{kwargs.get('factory','')}:sd:{kwargs.get('start_date','')}:ed:{kwargs.get('end_date','')}:pg:{kwargs.get('page',1)}:pp:{kwargs.get('per_page',20)}",
 )
 async def get_order_logs(db: AsyncSession, customer: str = '', product: str = '', status: str = '',
                          start_date: str = '', end_date: str = '',
-                         page: int = 1, per_page: int = 20) -> dict:
+                         page: int = 1, per_page: int = 20, factory: str = '') -> dict:
     """订单流水（分页+分组聚合，COUNT(*) OVER() 合并计数查询）"""
     per_page = min(max(1, per_page), 100)
     customer = customer.strip()[:100]
@@ -115,6 +115,9 @@ async def get_order_logs(db: AsyncSession, customer: str = '', product: str = ''
     if product:
         where_clauses.append("(p.name LIKE :product OR p.barcode LIKE :product)")
         params['product'] = f'%{escape_like(product)}%'
+    if factory:
+        where_clauses.append("p.factory = :factory")
+        params['factory'] = factory
     if status:
         valid = VALID_ORDER_STATUSES
         if status in valid:
@@ -163,11 +166,11 @@ async def get_order_logs(db: AsyncSession, customer: str = '', product: str = ''
     key_prefix='reports:return_logs',
     ttl=30,
     local_ttl=10,
-    key_builder=lambda *args, **kwargs: f"c:{kwargs.get('customer','')}:p:{kwargs.get('product','')}:sd:{kwargs.get('start_date','')}:ed:{kwargs.get('end_date','')}:pg:{kwargs.get('page',1)}:pp:{kwargs.get('per_page',20)}",
+    key_builder=lambda *args, **kwargs: f"c:{kwargs.get('customer','')}:p:{kwargs.get('product','')}:s:{kwargs.get('status','')}:f:{kwargs.get('factory','')}:sd:{kwargs.get('start_date','')}:ed:{kwargs.get('end_date','')}:pg:{kwargs.get('page',1)}:pp:{kwargs.get('per_page',20)}",
 )
 async def get_return_logs(db: AsyncSession, customer: str = '', product: str = '',
                           start_date: str = '', end_date: str = '',
-                          page: int = 1, per_page: int = 20) -> dict:
+                          page: int = 1, per_page: int = 20, factory: str = '') -> dict:
     """退货流水（仅 active，cancelled 已对称扣回不计入，COUNT(*) OVER() 合并计数查询）"""
     per_page = min(max(1, per_page), 100)
     customer = customer.strip()[:100]
@@ -182,6 +185,9 @@ async def get_return_logs(db: AsyncSession, customer: str = '', product: str = '
     if product:
         where_clauses.append("(COALESCE(p.name, '') LIKE :product OR COALESCE(p.barcode, '') LIKE :product)")
         params['product'] = f'%{escape_like(product)}%'
+    if factory:
+        where_clauses.append("p.factory = :factory")
+        params['factory'] = factory
     if start_date:
         params['start_date'] = parse_date_strict(start_date, '开始')
         where_clauses.append("sr.return_date >= :start_date")
@@ -221,7 +227,8 @@ async def get_return_logs(db: AsyncSession, customer: str = '', product: str = '
 
 
 async def export_report_to_excel(db, report_type: str, customer: str = '', product: str = '',
-                                  status: str = '', start_date: str = '', end_date: str = '') -> bytes:
+                                  status: str = '', start_date: str = '', end_date: str = '',
+                                  factory: str = '') -> bytes:
     """导出报表为 Excel（内存缓冲区）
 
     使用框架无关的 report_data_service 查询数据，通过 ReportExporter 生成 Excel，
@@ -242,7 +249,7 @@ async def export_report_to_excel(db, report_type: str, customer: str = '', produ
             logs, stats = get_all_logs_data(
                 session, report_type,
                 customer=customer, product=product, status=status,
-                start_date=start_date, end_date=end_date
+                start_date=start_date, end_date=end_date, factory=factory
             )
 
             truncated = len(logs) > 10000
@@ -280,11 +287,11 @@ async def export_report_to_excel(db, report_type: str, customer: str = '', produ
     key_prefix='reports:stockin_logs',
     ttl=30,
     local_ttl=10,
-    key_builder=lambda *args, **kwargs: f"c:{kwargs.get('customer','')}:p:{kwargs.get('product','')}:sd:{kwargs.get('start_date','')}:ed:{kwargs.get('end_date','')}:pg:{kwargs.get('page',1)}:pp:{kwargs.get('per_page',20)}",
+    key_builder=lambda *args, **kwargs: f"c:{kwargs.get('customer','')}:p:{kwargs.get('product','')}:s:{kwargs.get('status','')}:f:{kwargs.get('factory','')}:sd:{kwargs.get('start_date','')}:ed:{kwargs.get('end_date','')}:pg:{kwargs.get('page',1)}:pp:{kwargs.get('per_page',20)}",
 )
 async def get_stockin_logs(db: AsyncSession, customer: str = '', product: str = '',
                            start_date: str = '', end_date: str = '',
-                           page: int = 1, per_page: int = 20) -> dict:
+                           page: int = 1, per_page: int = 20, factory: str = '') -> dict:
     """备货流水（分页+分组聚合，COUNT(*) OVER() 合并计数查询）"""
     per_page = min(max(1, per_page), 100)
     customer = customer.strip()[:100]
@@ -299,6 +306,9 @@ async def get_stockin_logs(db: AsyncSession, customer: str = '', product: str = 
     if product:
         where_clauses.append("(COALESCE(p.name, '') LIKE :product OR COALESCE(p.barcode, '') LIKE :product)")
         params['product'] = f'%{escape_like(product)}%'
+    if factory:
+        where_clauses.append("p.factory = :factory")
+        params['factory'] = factory
     if start_date:
         params['start_date'] = parse_date_strict(start_date, '开始')
         where_clauses.append("s.stockin_date >= :start_date")
@@ -339,11 +349,11 @@ async def get_stockin_logs(db: AsyncSession, customer: str = '', product: str = 
     key_prefix='reports:stockout_logs',
     ttl=30,
     local_ttl=10,
-    key_builder=lambda *args, **kwargs: f"c:{kwargs.get('customer','')}:p:{kwargs.get('product','')}:sd:{kwargs.get('start_date','')}:ed:{kwargs.get('end_date','')}:pg:{kwargs.get('page',1)}:pp:{kwargs.get('per_page',20)}",
+    key_builder=lambda *args, **kwargs: f"c:{kwargs.get('customer','')}:p:{kwargs.get('product','')}:s:{kwargs.get('status','')}:f:{kwargs.get('factory','')}:sd:{kwargs.get('start_date','')}:ed:{kwargs.get('end_date','')}:pg:{kwargs.get('page',1)}:pp:{kwargs.get('per_page',20)}",
 )
 async def get_stockout_logs(db: AsyncSession, customer: str = '', product: str = '',
                             start_date: str = '', end_date: str = '',
-                            page: int = 1, per_page: int = 20) -> dict:
+                            page: int = 1, per_page: int = 20, factory: str = '') -> dict:
     """出货流水（仅手动出货，stockin_id IS NULL，COUNT(*) OVER() 合并计数查询）"""
     per_page = min(max(1, per_page), 100)
     customer = customer.strip()[:100]
@@ -359,6 +369,9 @@ async def get_stockout_logs(db: AsyncSession, customer: str = '', product: str =
     if product:
         where_clauses.append("(COALESCE(p.name, '') LIKE :product OR COALESCE(p.barcode, '') LIKE :product)")
         params['product'] = f'%{escape_like(product)}%'
+    if factory:
+        where_clauses.append("p.factory = :factory")
+        params['factory'] = factory
     if start_date:
         params['start_date'] = parse_date_strict(start_date, '开始')
         where_clauses.append("so.stockout_date >= :start_date")
@@ -403,11 +416,11 @@ async def get_stockout_logs(db: AsyncSession, customer: str = '', product: str =
     key_prefix='reports:deduction_logs',
     ttl=30,
     local_ttl=10,
-    key_builder=lambda *args, **kwargs: f"c:{kwargs.get('customer','')}:p:{kwargs.get('product','')}:sd:{kwargs.get('start_date','')}:ed:{kwargs.get('end_date','')}:pg:{kwargs.get('page',1)}:pp:{kwargs.get('per_page',20)}",
+    key_builder=lambda *args, **kwargs: f"c:{kwargs.get('customer','')}:p:{kwargs.get('product','')}:s:{kwargs.get('status','')}:f:{kwargs.get('factory','')}:sd:{kwargs.get('start_date','')}:ed:{kwargs.get('end_date','')}:pg:{kwargs.get('page',1)}:pp:{kwargs.get('per_page',20)}",
 )
 async def get_deduction_logs(db: AsyncSession, customer: str = '', product: str = '',
                               start_date: str = '', end_date: str = '',
-                              page: int = 1, per_page: int = 20) -> dict:
+                              page: int = 1, per_page: int = 20, factory: str = '') -> dict:
     """备货抵扣流水（stockin_id IS NOT NULL，COUNT(*) OVER() 合并计数查询）"""
     per_page = min(max(1, per_page), 100)
     customer = customer.strip()[:100]
@@ -423,6 +436,9 @@ async def get_deduction_logs(db: AsyncSession, customer: str = '', product: str 
     if product:
         where_clauses.append("(COALESCE(p.name, '') LIKE :product OR COALESCE(p.barcode, '') LIKE :product)")
         params['product'] = f'%{escape_like(product)}%'
+    if factory:
+        where_clauses.append("p.factory = :factory")
+        params['factory'] = factory
     if start_date:
         params['start_date'] = parse_date_strict(start_date, '开始')
         where_clauses.append("so.stockout_date >= :start_date")

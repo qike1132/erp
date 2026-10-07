@@ -63,11 +63,14 @@ ENDPOINTS: list[tuple[str, str, tuple[str, ...]]] = [
     # 报表流水行内编辑/删除（迁移 075 种入 order_edit/order_delete，/user「订单查询→
     # 订单列表」子项）：这两个独立码必须单独放行对应写接口与还原数据源
     ('GET', '/api/v1/orders/records', ('order_edit',)),
+    ('GET', '/api/v1/orders/1', ('order_edit',)),
     ('PUT', '/api/v1/orders/edit/1', ('order_edit',)),
     ('PUT', '/api/v1/orders/deduct/1', ('order_edit',)),
     ('DELETE', '/api/v1/orders/delete/1', ('order_delete',)),
     ('PUT', '/api/v1/stock/in/edit/1', ('order_edit',)),
     ('DELETE', '/api/v1/stock/in/delete/1', ('order_delete',)),
+    # 编辑弹窗的「可用备货量」提示接口
+    ('GET', '/api/v1/aux/available-stockins', ('order_edit',)),
 ]
 
 # 原有的权限码必须继续可用（不能让放宽把原口径顶掉）
