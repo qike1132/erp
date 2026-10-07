@@ -148,7 +148,7 @@ function handleImageError(row: Product) {
 .pd-col-scroll {
   flex: 1;
   overflow-y: auto;
-  padding: 16px 20px;
+  padding: 0;
 }
 
 /* ===== 表格 ===== */
