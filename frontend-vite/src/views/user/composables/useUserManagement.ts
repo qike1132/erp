@@ -222,27 +222,18 @@ export function useUserManagement() {
       const idx = permCheckedKeys.value.indexOf(id)
       if (idx >= 0) {
         permCheckedKeys.value.splice(idx, 1)
-        // Uncheck parent if no siblings checked
-        for (const parent of permissionTree.value) {
-          if (parent.children?.some((c) => c.id === id)) {
-            const anyChildChecked = parent.children.some((c) => permCheckedKeys.value.includes(c.id))
-            if (!anyChildChecked) {
-              const pidx = permCheckedKeys.value.indexOf(parent.id)
-              if (pidx >= 0) permCheckedKeys.value.splice(pidx, 1)
-            }
-            break
-          }
-        }
+        // 取消子项不连带取消父项（2026-10-07）：父项本身是「查看」授权，
+        // 逐个取消子项后应停留在「仅查看」——原先取消最后一个子项会连父项
+        // 一起取消，「只给看不给改」的授权永远配不出来。
       } else {
         permCheckedKeys.value.push(id)
-        // Check parent if all siblings checked
+        // 子项蕴含父项（2026-10-07）：勾任一子项必须带上父项。原先仅当兄弟
+        // 全勾才反推父项，会出现「有 编辑/删除 却没有 订单列表」的孤儿授权
+        // ——操作按钮无处展示，权限组合无意义。
         for (const parent of permissionTree.value) {
           if (parent.children?.some((c) => c.id === id)) {
-            const allChildrenChecked = parent.children.every((c) => permCheckedKeys.value.includes(c.id))
-            if (allChildrenChecked) {
-              if (!permCheckedKeys.value.includes(parent.id)) {
-                permCheckedKeys.value.push(parent.id)
-              }
+            if (!permCheckedKeys.value.includes(parent.id)) {
+              permCheckedKeys.value.push(parent.id)
             }
             break
           }
