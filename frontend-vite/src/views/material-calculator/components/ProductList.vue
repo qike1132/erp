@@ -23,7 +23,7 @@
             ]"
             @click="p.has_bom && emit('toggle', p)"
           >
-            <FontAwesomeIcon :icon="selectedIds.includes(p.id) ? 'check-square' : 'square'" class="mc-checkbox" aria-hidden="true" />
+            <FontAwesomeIcon :icon="selectedIds.includes(p.id) ? 'square-check' : 'square'" class="mc-checkbox" aria-hidden="true" />
             <div class="mc-product-details">
               <div class="mc-product-name">
                 {{ p.name }}

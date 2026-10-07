@@ -267,6 +267,7 @@ function sectionCollapsed(category: string): boolean {
 .mc-scope-bar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: var(--sp-2);
   min-height: 40px;
   min-width: 0;
@@ -275,23 +276,27 @@ function sectionCollapsed(category: string): boolean {
   flex-shrink: 0;
 }
 
-/* 作用域数多 / 产品名长时，让分段控件自身横向滚动而不是撑破窄列。
+/* 作用域数多 / 产品名长时：标签条**换行**而不是横向滚动。
+   原先是单行 overflow-x:auto + 隐藏滚动条 → SKU 一多，后面的标签被挤出可视区
+   又没有滚动提示，名称还被 220px 截断，单个 SKU 根本看不清。
+   flex-basis:100% 让标签条独占整行（占满列宽后长名也基本放得下），
+   meta 随之换到下一行右对齐；超长名单个仍省略号，靠 title 属性出全称。
    （本组件模板内的元素，scoped 能命中全局类 .mc-seg） */
 .mc-scope-bar .mc-seg {
+  flex: 1 1 100%;
   min-width: 0;
-  overflow-x: auto;
-  scrollbar-width: none;
+  flex-wrap: wrap;
+  height: auto;
+  min-height: 30px;
+  overflow: visible;
+  row-gap: 2px;
 }
-.mc-scope-bar .mc-seg::-webkit-scrollbar {
-  display: none;
-}
+/* 换行后容器高度自适应，全局的 `height: 100%` 会塌成 0 → 显式给按钮高度 */
 .mc-scope-bar .mc-seg > button {
+  height: 26px;
   min-width: 0;
-  /* 220px：实测最长真实产品名「招财猫盲盒毛绒挂件(混4款)」需 167px，
-     160px 会白截断 7px（作用域条可用 352px、两标签完整只需 223px）。
-     上限只用于防止单个超长名吃掉整条 bar，超出部分由 .mc-seg 横向滚动兜底 */
-  max-width: 220px;
-  flex-shrink: 0;
+  max-width: 100%;
+  flex-shrink: 1;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -309,6 +314,9 @@ function sectionCollapsed(category: string): boolean {
   align-items: center;
   gap: var(--sp-2);
   min-width: 0;
+  /* 标签条独占整行后 meta 落到下一行右对齐；不收缩，超长产品名由内部
+     .mc-scope-product 的省略号兜底 */
+  flex: 0 0 auto;
 }
 
 .mc-scope-product {
