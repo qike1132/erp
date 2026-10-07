@@ -15,7 +15,8 @@
     <template v-else>
       <!-- 作用域条：汇总 TAB + 各产品 TAB → 左侧分段控件切换；
            仅 1 个作用域 → 纯文本名（无 TAB，行为与旧版一致）。
-           右侧常驻当前视图的产品/数量信息，切换时同步更新。 -->
+           右侧仅在汇总视图显示产品数 + 订单合计；产品视图不再重复「产品名 + 数量」
+           （产品名与激活的 TAB 标签重复，数量在第 2 列已有输入框，属冗余）。 -->
       <div class="mc-scope-bar">
         <div v-if="scopeTabs.length > 1" class="mc-seg" role="tablist" aria-label="切换作用域">
           <button
@@ -33,18 +34,11 @@
         </div>
         <span v-else-if="activeGroup" class="mc-scope-name">{{ groupName(activeGroup) }}</span>
 
-        <span class="mc-scope-meta">
-          <!-- 汇总视图：产品数 + 订单合计；产品视图：该产品名 + 数量 -->
-          <template v-if="isSummary">
-            <span v-if="summary.productCount > 0" class="mc-scope-product">
-              {{ summary.productCount }} 个产品
-            </span>
-            <span class="mc-scope-qty">合计 <b>{{ summary.totalQuantity }}</b> 件</span>
-          </template>
-          <template v-else-if="activeGroup">
-            <span v-if="activeGroup.product_name" class="mc-scope-product">{{ activeGroup.product_name }}</span>
-            <span class="mc-scope-qty">数量 <b>{{ activeGroup.quantity }}</b></span>
-          </template>
+        <span v-if="isSummary" class="mc-scope-meta">
+          <span v-if="summary.productCount > 0" class="mc-scope-product">
+            {{ summary.productCount }} 个产品
+          </span>
+          <span class="mc-scope-qty">合计 <b>{{ summary.totalQuantity }}</b> 件</span>
         </span>
       </div>
 
