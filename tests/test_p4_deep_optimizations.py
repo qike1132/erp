@@ -56,6 +56,31 @@ class TestSlowQueryLogger:
         assert _get_threshold("SELECT * FROM export_data WHERE created_at > $1") == SLOW_QUERY_REPORT_THRESHOLD
         assert _get_threshold("SELECT * FROM dashboard_stats") == SLOW_QUERY_REPORT_THRESHOLD
 
+    def test_probe_queries_get_probe_threshold(self):
+        """健康探针（catalog/权限存在性检查）用 probe 阈值，不按 OLTP 0.2s 判。
+
+        2026-10-07：to_regclass / has_table_privilege 在 cron tick 上 0.24~0.36s，
+        但同刻业务查询不慢 —— 用 OLTP 阈值会持续假阳性刷屏。
+        """
+        from fastapi_app.core.slow_query import (
+            SLOW_QUERY_PROBE_THRESHOLD,
+            SLOW_QUERY_THRESHOLD,
+            _get_threshold,
+            _kind,
+        )
+
+        probe_sqls = [
+            "SELECT to_regclass($1)",
+            "SELECT has_table_privilege($1, 'order', 'SELECT')",
+        ]
+        for sql in probe_sqls:
+            assert _get_threshold(sql) == SLOW_QUERY_PROBE_THRESHOLD, sql
+            assert _kind(SLOW_QUERY_PROBE_THRESHOLD) == "probe"
+
+        # 普通 OLTP 查询不受影响
+        assert _get_threshold('SELECT id FROM "order" WHERE id = $1') == SLOW_QUERY_THRESHOLD
+        assert _kind(SLOW_QUERY_THRESHOLD) == "oltp"
+
 
 class TestRequestIdMiddleware:
     """X-Request-ID 链路追踪测试"""
