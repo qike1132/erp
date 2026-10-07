@@ -293,9 +293,6 @@ const columns: TableColumn[] = [
   min-height: 0;
   overflow-y: auto;
 }
-.sr-content :deep(.ui-data-table-wrapper) {
-  border-radius: 0;
-}
 .sr-mono {
   font-family: var(--font-mono);
   font-weight: 700;

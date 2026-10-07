@@ -128,12 +128,6 @@ function handleDelete(row: UserRow) {
   padding: 0;
 }
 
-/* 对齐 /purchase 的方正表格风格（用户要求）：UiDataTable 包装层自带的
-   rounded-xl(12px) 是共享组件默认值，此处仅本页覆盖为直角 */
-.us-col-scroll :deep(.ui-data-table-wrapper) {
-  border-radius: 0;
-}
-
 /* Badge */
 .us-badge {
   display: inline-block;

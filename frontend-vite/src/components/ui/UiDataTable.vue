@@ -237,7 +237,7 @@ watch(
 </script>
 
 <template>
-  <div class="ui-data-table-wrapper rounded-xl border border-border overflow-hidden">
+  <div class="ui-data-table-wrapper border border-border overflow-hidden">
     <!-- ============ 虚拟滚动模式 ============ -->
     <div
       v-if="virtual"

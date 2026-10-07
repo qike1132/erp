@@ -211,11 +211,10 @@ watch(() => [filters.customer, debouncedProduct.value], () => {
 .sk-num { font-weight: 500; }
 .sk-num-strong { font-weight: 700; }
 
-/* UiDataTable 的容器自带圆角与边框（共享组件，13 个视图共用）。
-   本页的稿是表格与卡片齐平、没有内层盒子，故在此抵消，不动共享组件。 */
+/* UiDataTable 的容器自带边框（共享组件，多个视图共用）。
+   本页的稿是表格与卡片齐平、没有内层盒子，故在此抵消边框，不动共享组件。 */
 .sk-card-main :deep(.ui-data-table-wrapper) {
   border: 0;
-  border-radius: 0;
 }
 
 /* 行分隔线与 hover 由全局 PT 的 bodyRow 段提供（2026-09-29 修正段名后全站生效）。

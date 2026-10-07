@@ -112,11 +112,6 @@ function onPageChange(event: { page: number }) {
   min-height: 0;
 }
 
-/* 对齐 /purchase 的方正表格风格（同 /user 页处理）：UiDataTable 包装层自带的
-   rounded-xl(12px) 是共享组件默认值，此处仅本页覆盖为直角 */
-.cu-table-wrap :deep(.ui-data-table-wrapper) {
-  border-radius: 0;
-}
 .cu-customer-cell {
   display: flex;
   align-items: center;

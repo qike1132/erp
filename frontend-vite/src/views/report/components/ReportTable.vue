@@ -164,11 +164,10 @@ function fmtQty(v: unknown): string {
   background: var(--color-danger-100);
 }
 
-/* 与 /stock 相同的表格处理：去掉 UiDataTable 容器的圆角内盒、固定表格布局
+/* 与 /stock 相同的表格处理：去掉 UiDataTable 容器的内层边框盒、固定表格布局
    （百分比列宽才是硬约束）、单元格单行省略、行分隔线随全局 PT 的 bodyRow 生效。 */
 .rp-table-wrap :deep(.ui-data-table-wrapper) {
   border: 0;
-  border-radius: 0;
 }
 .rp-table-wrap :deep(table) { table-layout: fixed; }
 .rp-table-wrap :deep([data-pc-section='bodycell']) {

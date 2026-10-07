@@ -154,7 +154,6 @@ function handleImageError(row: Product) {
 /* ===== 表格 ===== */
 .pd-table-wrap {
   overflow: hidden;
-  border-radius: 10px;
   border: 1px solid var(--color-border-light, #e2e8f0);
 }
 .pd-factory { font-size: 13px; font-weight: 500; color: var(--color-text); }

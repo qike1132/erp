@@ -106,11 +106,6 @@ function onPageChange(event: { page: number }) {
 </script>
 
 <style scoped>
-/* 对齐 /user、/customer 的方正表格风格：UiDataTable 包装层自带的
-   rounded-xl(12px) 是共享组件默认值，此处仅本页覆盖为直角 */
-.sp-content :deep(.ui-data-table-wrapper) {
-  border-radius: 0;
-}
 .sp-name {
   font-weight: 600;
   color: var(--color-text);
