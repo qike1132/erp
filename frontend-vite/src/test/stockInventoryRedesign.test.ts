@@ -5,7 +5,7 @@
  * 5 列口径 / 千分位与空值格式」这些是结构事实，在此固化。
  *
  * 设计要点（与 HTML 对比稿 v5 对齐）：
- *  · 第 1 行 = 标题 · 搜索 · 三格汇总 · 导出 Excel（原先分散在卡片头与过滤栏两处）
+ *  · 第 1 行 = 三格汇总 · 搜索 · 导出 Excel（2026-10-07 移除标题与图标，搜索右移）
  *  · 第 2 行 = 客户筛选 chips（独立成行）
  *  · 表格 5 列：客户 / 产品名称 / 订单数量 / 备货数量 / 总订单
  *  · 汇总与表格口径同名同源：总订单 = 订单数量 + 备货数量
@@ -44,7 +44,7 @@ vi.mock('@tanstack/vue-query', async () => {
 
 import InventoryStatRow from '@/views/stock/components/InventoryStatRow.vue'
 import InventoryToolbar from '@/views/stock/components/InventoryToolbar.vue'
-import InventoryCustomerBar from '@/views/stock/components/InventoryCustomerBar.vue'
+import CustomerChipBar from '@/components/ui/CustomerChipBar.vue'
 import InventoryTab from '@/views/stock/InventoryTab.vue'
 import UiDataTable from '@/components/ui/UiDataTable.vue'
 import type { InventoryItem } from '@/types'
@@ -56,12 +56,14 @@ const ITEMS: InventoryItem[] = [
     product_id: 1, product_name: 'S925银项链-淡水珍珠款', barcode: '6923748120031', customer: '滨发服饰',
     current_stock: 0, total_stockin: 1200, total_stockout: 860, total_deducted: 0,
     order_quantity: 320, stockin_quantity: 1200, total_stock: 1520, available_stock: 1140,
+    inventory_balance: 640,
   },
   {
     product_id: 2, product_name: '儿童保温杯-恐龙款', barcode: '6923748120117', customer: '贝乐教育',
     current_stock: 0, total_stockin: 0, total_stockout: 75, total_deducted: 0,
     // 后端把 0 值序列化成空串——展示层必须容错
     order_quantity: 75, stockin_quantity: '', total_stock: 75, available_stock: -75,
+    inventory_balance: 0,
   },
 ]
 
@@ -88,7 +90,7 @@ function mountToolbar(over: Record<string, unknown> = {}) {
 }
 
 function mountCustomerBar(over: Record<string, unknown> = {}) {
-  return mount(InventoryCustomerBar, {
+  return mount(CustomerChipBar, {
     props: { customers: ['滨发服饰', '贝乐教育'], selected: '', loading: false, ...over },
   })
 }
@@ -158,16 +160,24 @@ describe('InventoryStatRow —— 三格汇总', () => {
 })
 
 describe('InventoryToolbar —— 单行工具条', () => {
-  it('渲染页面标题与搜索框（搜索与汇总原先分处两行）', () => {
+  it('页头不再渲染「库存查询」标题与图标（2026-10-07 业务要求移除）', () => {
     const w = mountToolbar()
 
-    expect(w.find('h1').text()).toBe('库存查询')
-    expect(w.find('.sk-search-input').attributes('placeholder')).toContain('69 码')
+    expect(w.find('h1').exists()).toBe(false)
+    expect(w.find('.sk-title').exists()).toBe(false)
+    expect(w.find('.sb-search-input').attributes('placeholder')).toContain('69 码')
+  })
+
+  it('DOM 顺序为 汇总 → 搜索 → 导出（搜索已从左侧移到右侧）', () => {
+    const w = mountToolbar()
+    const order = w.findAll('.sk-toolbar > *').map((el) => el.classes()[0])
+
+    expect(order).toEqual(['sk-stat-row', 'sb-search', 'sk-export-btn'])
   })
 
   it('搜索框输入上抛 update:search（受控组件，不自己存状态）', async () => {
     const w = mountToolbar()
-    const input = w.find('.sk-search-input')
+    const input = w.find('.sb-search-input')
 
     await input.setValue('珍珠')
 
@@ -177,7 +187,7 @@ describe('InventoryToolbar —— 单行工具条', () => {
   it('回车触发 search，不依赖查询按钮', async () => {
     const w = mountToolbar({ search: '珍珠' })
 
-    await w.find('.sk-search-input').trigger('keyup.enter')
+    await w.find('.sb-search-input').trigger('keyup.enter')
 
     expect(w.emitted('search')).toHaveLength(1)
   })
@@ -229,11 +239,11 @@ describe('InventoryCustomerBar —— 客户独立成行', () => {
   })
 })
 
-describe('InventoryTab —— 5 列表格与数字格式', () => {
-  it('表头是 客户 / 产品名称 / 订单数量 / 备货数量 / 总订单', () => {
+describe('InventoryTab —— 6 列表格与数字格式', () => {
+  it('表头是 客户 / 产品名称 / 订单数量 / 备货数量 / 总订单 / 库存', () => {
     const headers = mountTab().findAll('th').map((th) => th.text().replace(/[▾▼]/g, '').trim())
 
-    expect(headers).toEqual(['客户', '产品名称', '订单数量', '备货数量', '总订单'])
+    expect(headers).toEqual(['客户', '产品名称', '订单数量', '备货数量', '总订单', '库存'])
   })
 
   it('不再有「可用库存」列', () => {
@@ -251,11 +261,18 @@ describe('InventoryTab —— 5 列表格与数字格式', () => {
     expect(cells?.[3]?.text()).toBe('')
   })
 
-  it('三个数值列的表头与数据都居中显示', () => {
+  it('库存列：显示结余（包装部入库 − 已出货），0 也显示为 0 不留白', () => {
+    const rows = mountTab().findAll('tbody tr')
+
+    expect(rows[0]!.findAll('td')[5]!.text()).toBe('640')
+    expect(rows[1]!.findAll('td')[5]!.text()).toBe('0')
+  })
+
+  it('四个数值列的表头与数据都居中显示', () => {
     const w = mountTab()
 
     const headers = w.findAll('th')
-    for (const i of [2, 3, 4]) {
+    for (const i of [2, 3, 4, 5]) {
       expect(headers[i]?.attributes('style')).toContain('center')
     }
 
@@ -286,14 +303,14 @@ describe('InventoryTab —— 5 列表格与数字格式', () => {
     expect(cells?.[2]?.find('.sk-num-strong').exists()).toBe(false)
   })
 
-  it('五列按比例分配宽度（定宽数值列会让产品名独吞余量、把数字推到最右）', () => {
+  it('六列按比例分配宽度（定宽数值列会让产品名独吞余量、把数字推到最右）', () => {
     const headers = mountTab().findAll('th')
 
-    // 客户 15% / 产品名称 35% / 三个数值列各 16.67%（合计 100%）
-    expect(headers[0]?.attributes('style')).toContain('15%')
-    expect(headers[1]?.attributes('style')).toContain('35%')
-    for (const i of [2, 3, 4]) {
-      expect(headers[i]?.attributes('style')).toContain('16.67%')
+    // 客户 13% / 产品名称 30% / 四个数值列各 14.25%（合计 100%）
+    expect(headers[0]?.attributes('style')).toContain('13%')
+    expect(headers[1]?.attributes('style')).toContain('30%')
+    for (const i of [2, 3, 4, 5]) {
+      expect(headers[i]?.attributes('style')).toContain('14.25%')
     }
   })
 

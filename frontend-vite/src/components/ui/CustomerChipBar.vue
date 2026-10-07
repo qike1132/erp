@@ -29,10 +29,12 @@
 
 <script setup lang="ts">
 /**
- * InventoryCustomerBar.vue — 客户筛选行（独立成一整行）
+ * CustomerChipBar.vue — 客户快捷选择行（独立成一整行）
  *
- * 客户 chips 与搜索框分属两行：chips 数量随客户数增长，挤在搜索旁边会把
- * 汇总数字与导出按钮压变形，独立成行后可横向滚动而不影响其它元素。
+ * 2026-10-07 从 views/stock/components/InventoryCustomerBar.vue 提取为共享组件，
+ * 供 /stock（库存汇总）页复用（原 /inventory-query 已并入该页），保持 chips 观感
+ * 与行为完全一致。客户 chips 与搜索框分属两行：chips 数量随客户数增长，挤在搜索
+ * 旁边会把汇总数字与导出按钮压变形，独立成行后可横向滚动而不影响其它元素。
  */
 defineProps<{
   customers: string[]

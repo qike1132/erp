@@ -1,23 +1,12 @@
 <template>
   <div class="sk-toolbar">
-    <div class="sk-title">
-      <FontAwesomeIcon icon="warehouse" aria-hidden="true" />
-      <h1>库存查询</h1>
-    </div>
-
-    <div class="sk-search">
-      <FontAwesomeIcon icon="search" class="sk-search-icon" aria-hidden="true" />
-      <input
-        class="sk-search-input"
-        :value="search"
-        placeholder="输入产品名称或 69 码"
-        aria-label="输入产品名称或 69 码"
-        @input="emit('update:search', ($event.target as HTMLInputElement).value)"
-        @keyup.enter="emit('search')"
-      />
-    </div>
-
     <InventoryStatRow v-if="hasData" :orders="orders" :stockin="stockin" />
+
+    <SearchBox
+      :model-value="search"
+      @update:model-value="emit('update:search', $event)"
+      @search="emit('search')"
+    />
 
     <button v-if="hasData" class="sk-export-btn" aria-label="导出" @click="emit('export')">
       <FontAwesomeIcon icon="file-excel" aria-hidden="true" />导出 Excel
@@ -29,10 +18,14 @@
 /**
  * InventoryToolbar.vue — 库存页单行工具条
  *
- * 把原先分散在两处的元素收进一行：卡片头的导出按钮、过滤栏的搜索与汇总。
+ * 布局（2026-10-07 调整）：三格汇总靠左，搜索框 + 导出按钮靠右。
+ * 原「库存查询」标题与仓库图标已按业务要求移除（该页现为库存汇总，
+ * 「库存查询」已并入本页的「库存」列）。
+ * 搜索框已抽为共享组件 SearchBox。
  * 纯受控组件：搜索词由父级持有（父级另有防抖副本驱动查询），本组件不存状态。
  * 无数据时汇总与导出一并隐藏（一排 0 与空导出没有意义）。
  */
+import SearchBox from '@/components/ui/SearchBox.vue'
 import InventoryStatRow from './InventoryStatRow.vue'
 
 defineProps<{
@@ -63,57 +56,11 @@ const emit = defineEmits<{
   border-bottom: 1px solid var(--color-border-light, #f0f2f5);
   flex-shrink: 0;
 }
-.sk-title {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  flex-shrink: 0;
+/* 汇总靠左；搜索 + 导出靠右（margin-left:auto 把这一组推到右侧）。
+   搜索框是子组件，其根节点带父级 scope 属性，故可在此命中。 */
+.sk-toolbar > .sb-search {
+  margin-left: auto;
 }
-.sk-title svg {
-  width: 18px;
-  height: 18px;
-  color: var(--color-primary-600);
-}
-.sk-title h1 {
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--color-text);
-  white-space: nowrap;
-}
-.sk-search {
-  position: relative;
-  flex-shrink: 0;
-}
-.sk-search-icon {
-  position: absolute;
-  left: 10px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 13px;
-  height: 13px;
-  color: var(--color-text-muted);
-  pointer-events: none;
-}
-.sk-search-input {
-  width: 230px;
-  padding: 7px 12px 7px 30px;
-  border: 1.5px solid var(--color-border);
-  border-radius: 9px;
-  background: white;
-  font-size: 12.5px;
-  font-family: inherit;
-  color: var(--color-text);
-  outline: none;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
-}
-.sk-search-input::placeholder { color: var(--color-text-muted); }
-.sk-search-input:focus {
-  border-color: var(--color-primary-500);
-  box-shadow: 0 0 0 3px rgba(91, 141, 239, 0.15);
-}
-.sk-search-input:focus-visible { outline: 2px solid var(--color-primary-500); outline-offset: 2px; }
-/* 汇总与导出靠右；搜索与标题靠左 */
-.sk-toolbar :deep(.sk-stat-row) { margin-left: auto; }
 .sk-export-btn {
   display: inline-flex;
   align-items: center;

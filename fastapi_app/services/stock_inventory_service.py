@@ -4,6 +4,7 @@
 包含入库/出库/退货列表查询（get_stockins/get_stockouts/get_stockreturns）、
 库存聚合查询（get_inventory/get_inventory_paginated）及其 SQL 聚合辅助函数、
 库存统计（get_stock_overview_stats）。
+「库存」列（结余 = 包装部入库 − 已出货）已并入 get_inventory_paginated 的 CTE。
 
 模块级 SQL 片段常量（_SI_PID/_SO_CUST 等）仅在此处使用，随函数一并迁移至此。
 """
@@ -18,7 +19,14 @@ from sqlalchemy.sql.elements import TextClause
 
 from fastapi_app.core.cache import cache_result
 from fastapi_app.core.sanitizer import escape_like
-from fastapi_app.shared_models import Order, OrderItem, Product, StockIn, StockOut, StockReturn
+from fastapi_app.shared_models import (
+    Order,
+    OrderItem,
+    Product,
+    StockIn,
+    StockOut,
+    StockReturn,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -470,17 +478,33 @@ filtered AS (
     SELECT ic.*, p.name AS product_name, p.barcode AS product_barcode,
         COALESCE(pa.production_qty, 0) AS production_qty,
         COALESCE(pst.total_stockout_qty, 0) AS total_product_stockout,
-        COALESCE(pa.production_qty, 0) - COALESCE(pst.total_stockout_qty, 0) AS available_stock
+        COALESCE(pa.production_qty, 0) - COALESCE(pst.total_stockout_qty, 0) AS available_stock,
+        -- 库存（结余）= 包装部入库 − 已出货（2026-10-07 业务裁定，口径见快照）
+        COALESCE(pprod.packaging_qty, 0) + COALESCE(ship.shipped_net, 0) AS inventory_balance
     FROM inventory_calc ic
     JOIN product p ON p.id = ic.product_id
     LEFT JOIN production_agg pa ON pa.product_id = ic.product_id
     LEFT JOIN product_stockout_total pst ON pst.product_id = ic.product_id
+    LEFT JOIN (
+        -- 只算包装部（department='packaging'）
+        SELECT product_id, SUM(quantity) AS packaging_qty
+        FROM daily_production_record
+        WHERE department = 'packaging' AND product_id IS NOT NULL
+        GROUP BY product_id
+    ) pprod ON pprod.product_id = ic.product_id
+    LEFT JOIN (
+        -- 出货三型（inventory_log 台账，出库为负数，故求和即净流出）
+        SELECT product_id, SUM(change_quantity) AS shipped_net
+        FROM inventory_log
+        WHERE change_type IN ('出库', '出库修改', '出库删除') AND product_id IS NOT NULL
+        GROUP BY product_id
+    ) ship ON ship.product_id = ic.product_id
     WHERE (ic.has_stockin OR ic.has_order) AND ic.total_qty > 0
 )
 SELECT f.product_id, f.customer, f.product_name, f.product_barcode,
     f.stockin_qty, f.direct_stockout_qty, f.order_stockout_qty,
     f.order_qty, f.remaining, f.total_qty,
-    f.production_qty, f.available_stock,
+    f.production_qty, f.available_stock, f.inventory_balance,
     COUNT(*) OVER() AS total_count,
     SUM(f.stockin_qty) OVER() AS sum_stockin,
     SUM(f.remaining) OVER() AS sum_order,
@@ -528,6 +552,8 @@ def _format_inventory_rows(rows) -> tuple[list, int, int, int, int, int]:
             'total_stock': int(row.total_qty) if int(row.total_qty) > 0 else '',
             'production_qty': production_qty if production_qty > 0 else '',
             'available_stock': available_stock if available_stock != 0 else '',
+            # 库存（结余）：0 与负数都要显示（不是「空值」），故原样输出
+            'inventory_balance': int(row.inventory_balance),
         })
 
     return inventory_data, total_items, sum_stockin, sum_order, sum_stock, total_available_stock
@@ -714,3 +740,4 @@ async def get_stock_overview_stats(db: AsyncSession) -> dict:
         'order_quantity': order_quantity,
         'stockin_quantity': stockin_quantity,
     }
+

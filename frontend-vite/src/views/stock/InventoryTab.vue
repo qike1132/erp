@@ -10,7 +10,7 @@
       @export="handleExport"
     />
 
-    <InventoryCustomerBar
+    <CustomerChipBar
       :customers="allCustomers"
       :selected="filters.customer"
       :loading="isFetching"
@@ -51,6 +51,9 @@
         <template #column-body-total_stock="{ row }">
           <span class="sk-num sk-num-strong">{{ fmtQty((row as InventoryItem).total_stock) }}</span>
         </template>
+        <template #column-body-inventory_balance="{ row }">
+          <span class="sk-num sk-num-strong">{{ fmtBalance((row as InventoryItem).inventory_balance) }}</span>
+        </template>
       </UiDataTable>
     </div>
   </div>
@@ -60,9 +63,10 @@
 /**
  * InventoryTab.vue — 库存明细（方案 B v5）
  *
- * 布局：一行工具条（标题·搜索·三格汇总·导出）→ 客户筛选行 → 5 列表格。
+ * 布局：一行工具条（标题·搜索·三格汇总·导出）→ 客户筛选行 → 6 列表格。
  * 列口径（与后端 CTE 一一对应）：
  *   订单数量 = 未发完的订单余量 · 备货数量 = 已入库未消耗 · 总订单 = 备货 + 订单余量
+ *   库存 = 包装部入库 − 已出货（结余，2026-10-07 由 /inventory-query 并入本页）
  * 三个数量列居中显示；有值走千分位，0 与空值留白（不做「—」之类的占位符）。
  * 排序为当前页客户端排序（服务端分页不变；要跨页排序需后端加 order_by 参数）。
  */
@@ -76,7 +80,7 @@ import { useDebouncedRef } from '@/composables/useDebouncedRef'
 import { useExport } from '@/composables/useExport'
 import { formatNumber } from '@/utils/format'
 import InventoryToolbar from './components/InventoryToolbar.vue'
-import InventoryCustomerBar from './components/InventoryCustomerBar.vue'
+import CustomerChipBar from '@/components/ui/CustomerChipBar.vue'
 
 const filters = reactive({ customer: '', product: '' })
 const debouncedProduct = useDebouncedRef(computed(() => filters.product), 300)
@@ -109,6 +113,12 @@ function fmtQty(v: unknown): string {
   return Number.isFinite(n) && n !== 0 ? formatNumber(n) : ''
 }
 
+/** 库存（结余）：0 与负数都要显示（不是「空值」），故不做留白 */
+function fmtBalance(v: unknown): string {
+  const n = Number(v)
+  return Number.isFinite(n) ? formatNumber(n) : ''
+}
+
 /** 排序取值：非数值列当作 0，避免 NaN 让排序整体失效 */
 function sortValue(row: InventoryItem, field: string): number {
   const n = Number((row as unknown as Record<string, unknown>)[field])
@@ -129,11 +139,12 @@ const inventoryColumns: TableColumn[] = [
   // 按比例分配而非定宽：定宽数值列（如各 140px）会把全部余量留给产品名列，
   // 宽屏上产品名列能独吞上千像素，三个数值列被推到最右、中间留一大片空档。
   // 百分比配合 table-layout: fixed（见样式）才是硬约束，五列按 15/35/16.67×3 铺满。
-  { field: 'customer', header: '客户', align: 'left', width: '15%' },
-  { field: 'product_name', header: '产品名称', align: 'left', width: '35%' },
-  { field: 'order_quantity', header: '订单数量', align: 'center', sortable: true, width: '16.67%' },
-  { field: 'stockin_quantity', header: '备货数量', align: 'center', sortable: true, width: '16.67%' },
-  { field: 'total_stock', header: '总订单', align: 'center', sortable: true, width: '16.67%' },
+  { field: 'customer', header: '客户', align: 'left', width: '13%' },
+  { field: 'product_name', header: '产品名称', align: 'left', width: '30%' },
+  { field: 'order_quantity', header: '订单数量', align: 'center', sortable: true, width: '14.25%' },
+  { field: 'stockin_quantity', header: '备货数量', align: 'center', sortable: true, width: '14.25%' },
+  { field: 'total_stock', header: '总订单', align: 'center', sortable: true, width: '14.25%' },
+  { field: 'inventory_balance', header: '库存', align: 'center', sortable: true, width: '14.25%' },
 ]
 
 const allCustomers = computed(() => (invData.value?.all_customers ?? []) as string[])

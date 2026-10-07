@@ -437,6 +437,7 @@ export interface BatchOrderItem {
   deduct_quantity?: number | null
   note?: string
   order_date?: string | null
+  shipment_plans?: Array<BatchShipmentPlanSplit>
 }
 
 export interface BatchOrderRequest {
@@ -496,6 +497,12 @@ export interface BatchQueryListResponse {
   total?: number
   page?: number
   per_page?: number
+}
+
+export interface BatchShipmentPlanSplit {
+  plan_date: string
+  quantity: number
+  note?: string
 }
 
 export interface BatchStockInItem {

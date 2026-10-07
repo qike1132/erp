@@ -137,6 +137,8 @@ export interface InventoryItem {
   stockin_quantity?: number | ''
   total_stock?: number | ''
   available_stock?: number | ''
+  /** 库存（结余）= 包装部入库 − 已出货；0 与负数都原样输出，不是空值 */
+  inventory_balance?: number
 }
 
 /** 后端 /stock/inventory 响应结构（InventoryResponse schema） */

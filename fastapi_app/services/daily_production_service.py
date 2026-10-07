@@ -18,10 +18,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.expression import Join
 
 from fastapi_app.core.business_rules import MAX_QUANTITY
+from fastapi_app.core.exception_handler import safe_publish_event
 from fastapi_app.core.float_utils import round_money
 from fastapi_app.core.production_scope import PRODUCTION_DEPARTMENTS
 from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.core.validators import validate_not_empty
+from fastapi_app.services.notification_service import StockEvent
 from fastapi_app.shared.stock_concurrency import assert_stock_available, get_product_for_update
 from fastapi_app.shared_models import DailyProductionRecord, InventoryLog, Product
 from fastapi_app.utils import calc_total_pages, parse_date_with_fallback
@@ -75,6 +77,19 @@ async def _apply_production_stock(
         related_id=str(record.id),
         note=f'生产录入 {record.department} {record.production_date}',
     ))
+    # 生产即入库也会改变库存视图（库存查询页的生产入库/结余列）——发库存变更事件，
+    # 让已接 WebSocket 的页面实时刷新（与入库/出库/退货三条写路径同款）。
+    await safe_publish_event(
+        stock_service.publish_stock_event, StockEvent.STOCK_CHANGED,
+        {
+            'product_id': pid,
+            'product_name': product.name,
+            'change_type': '生产入库' if delta > 0 else '生产入库冲销',
+            'quantity': delta,
+            'current_stock': product.current_stock,
+        },
+        context="生产事件发布",
+    )
 
 
 async def _build_product_price_fallback(
@@ -947,3 +962,7 @@ async def get_product_for_production(
         'barcode': product.barcode or '',
         'price': float(product.price) if hasattr(product, 'price') and product.price else 0,
     }
+
+
+# 底部引入 stock_service 以提供命名空间解析（延迟到调用期，避免循环依赖）
+from fastapi_app.services import stock_service

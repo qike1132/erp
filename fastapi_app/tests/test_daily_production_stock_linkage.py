@@ -138,3 +138,42 @@ async def test_delete_blocked_when_stock_already_shipped():
             await delete_record(db, 7, operator='李四')
     db.delete.assert_not_awaited()
     assert product.current_stock == 30  # 未被扣减
+
+
+@pytest.mark.asyncio
+async def test_create_publishes_stock_changed_event():
+    """生产即入库必须发库存变更事件——/stock 库存列（结余）靠 WS 推送实时刷新。"""
+    db = _db_with_record(None)
+    product = _product(current_stock=0)
+    with patch('fastapi_app.services.daily_production_service.get_product_for_update',
+               new_callable=AsyncMock, return_value=product), \
+         patch('fastapi_app.services.stock_service.publish_stock_event',
+               new_callable=AsyncMock) as mock_pub:
+        await create_record(
+            db, department='packaging', product_id=11, product_name='网易 鲨鱼',
+            barcode='BC11', unit_price=7, quantity=8888,
+            production_date_str='2026-10-06', created_by='张三',
+        )
+    mock_pub.assert_awaited()
+    event_type, payload = mock_pub.call_args.args
+    assert event_type == 'stock_changed'
+    assert payload['product_id'] == 11
+    assert payload['quantity'] == 8888
+    assert payload['current_stock'] == 8888
+
+
+@pytest.mark.asyncio
+async def test_delete_publishes_stock_changed_event():
+    """删除生产记录（回退库存）同样要发事件，否则前端看到的是陈旧结余。"""
+    record = _record(quantity=100)
+    product = _product(current_stock=100)
+    db = _db_with_record(record)
+    with patch('fastapi_app.services.daily_production_service.get_product_for_update',
+               new_callable=AsyncMock, return_value=product), \
+         patch('fastapi_app.services.stock_service.publish_stock_event',
+               new_callable=AsyncMock) as mock_pub:
+        await delete_record(db, 7, operator='李四')
+    mock_pub.assert_awaited()
+    event_type, payload = mock_pub.call_args.args
+    assert event_type == 'stock_changed'
+    assert payload['quantity'] == -100
