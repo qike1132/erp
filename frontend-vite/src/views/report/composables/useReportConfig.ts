@@ -89,13 +89,12 @@ export function useReportConfig(activeTab: Ref<TabType>, canManageRowActions?: R
   const reportColumns = computed<TableColumn[]>(() => {
     // 列宽按比例分配（配合表格的 table-layout: fixed 才是硬约束）；
     // 不约束时产品名与备注会把余量吃光，日期/数量被挤成窄条。
-    // 订单/备货流水行尾带「操作」列（行内编辑/删除，2026-10-06）：note 26%→17%，
-    // 末尾追加 9% 操作列（fixed 布局下不显式给宽会塌），合计仍 100%。
-    // 权限门控（2026-10-07）：无 order_manage 的用户整列不渲染（连表头一起），
-    // 不留空壳「操作」列；缺省 fail-closed。
-    const withActions =
-      (activeTab.value === 'order' || activeTab.value === 'stockin') &&
-      (canManageRowActions?.value ?? false)
+    // 五个维度都带行尾「操作」列（行内编辑/删除，2026-10-06 订单/备货起，
+    // 2026-10-07 扩展到出货/抵扣/退货）：note 26%→17%，末尾追加 9% 操作列
+    // （fixed 布局下不显式给宽会塌），合计仍 100%。
+    // 权限门控：无对应行内权限的用户整列不渲染（连表头一起），不留空壳
+    // 「操作」列；缺省 fail-closed。各 tab 的具体权限码由调用方（ReportView）决定。
+    const withActions = canManageRowActions?.value ?? false
     const columns: TableColumn[] = [
       { field: 'date', header: currentCfg.value.dateLabel, align: 'center', width: '16%' },
       { field: 'customer', header: '客户', align: 'center', width: '14%' },

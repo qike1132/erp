@@ -29,13 +29,14 @@ from fastapi_app.services.stock_common import _parse_date_preserve_time
 from fastapi_app.services.stock_event_service import (
     _publish_shipment_completed_events,
     _recalc_shipment_order_statuses,
+    recalc_order_status_after_return,
 )
 from fastapi_app.shared.stock_concurrency import (
     apply_stock_delta_locked,
     assert_stock_available,
     update_stock_with_optimistic_lock,
 )
-from fastapi_app.shared_models import Product, StockOut, StockReturn
+from fastapi_app.shared_models import Product, StockIn, StockOut, StockReturn
 from fastapi_app.utils import inventory_balance_bounds
 
 logger = logging.getLogger(__name__)
@@ -76,9 +77,24 @@ async def create_stockout_core(db: AsyncSession, product_id: int, quantity: int,
     return created_stockouts
 
 
+async def _assert_deduction_within_stockin(db: AsyncSession, stockout: StockOut, new_quantity: int) -> None:
+    """抵扣行改数量后，该备货被占用的净量不得超过备货总量（不含本行自身）。"""
+    stockin = await db.get(StockIn, stockout.stockin_id)
+    if stockin is None:
+        raise ValueError('关联的备货记录不存在')
+    others = (await db.execute(
+        select(func.coalesce(func.sum(StockOut.quantity - StockOut.returned_quantity), 0)).where(
+            StockOut.stockin_id == stockout.stockin_id, StockOut.id != stockout.id
+        )
+    )).scalar() or 0
+    if new_quantity - stockout.returned_quantity > stockin.quantity - int(others):
+        raise ValueError('抵扣数量超过该备货可用量！')
+
+
 async def update_stockout_core(db: AsyncSession, stockout: StockOut, new_quantity: int, customer: str, stockout_date: datetime, note: str, operator_id: int | None = None) -> StockOut:
-    if stockout.stockin_id is not None:
-        raise ValueError('订单抵扣的出货记录不能直接编辑！请通过订单管理进行修改。')
+    # 独立出货（stockin_id IS NULL）与备货抵扣（stockin_id 非空）都走这里：
+    # 抵扣行的客户/产品由订单与备货带出（客户不可改），数量变更需保证不超过所属备货可用量。
+    is_deduction = stockout.stockin_id is not None
     if new_quantity < stockout.returned_quantity:
         raise ValueError(f'出货数量不能小于已退货数量({stockout.returned_quantity})')
     old_quantity = stockout.quantity
@@ -92,7 +108,11 @@ async def update_stockout_core(db: AsyncSession, stockout: StockOut, new_quantit
         old_net - (new_quantity - stockout.returned_quantity),
         message='库存不足！',
     )
-    if customer and customer.strip():
+    if is_deduction:
+        # 抵扣行：客户不可改（改客户会与订单/备货脱钩），并校验不超过所属备货可用量
+        customer = stockout.customer or ''
+        await _assert_deduction_within_stockin(db, stockout, new_quantity)
+    elif customer and customer.strip():
         shipment_info = await stock_service.calculate_available_shipment_quantity(db, stockout.product_id, customer)
         available_with_current = shipment_info['available_quantity'] + old_net
         if new_quantity - stockout.returned_quantity > available_with_current:
@@ -111,8 +131,8 @@ async def update_stockout_core(db: AsyncSession, stockout: StockOut, new_quantit
 
 
 async def delete_stockout_core(db: AsyncSession, stockout: StockOut, operator_id: int | None = None) -> None:
-    if stockout.stockin_id is not None:
-        raise ValueError('订单抵扣的出货记录不能直接删除！请通过订单管理进行修改。')
+    # 独立出货与备货抵扣均可删除：抵扣行删除后所属备货可用量随之释放（派生），
+    # 关联订单状态由调用方重算（见 delete_stockout）。
     if stockout.returned_quantity > 0:
         raise ValueError('该出货记录已有退货关联，无法删除！请先取消退货记录。')
     # P1-①（072 RESTRICT 的应用层前置）：软取消的历史退货单 returned_quantity 已回减，
@@ -183,11 +203,16 @@ async def update_stockout(db: AsyncSession, stockout_id: int, new_quantity: int,
     old_stockout_no = stockout_obj.stockout_no
     await update_stockout_core(db, stockout_obj, new_quantity, customer, stockout_date, note, operator_id=operator_id)
     await db.flush()
+    # 订单状态派生重算：出货量（含抵扣行的抵扣量）变化会影响订单状态；函数名虽为
+    # return，逻辑是通用的「按出入库派生重算」（锁序 Product→StockOut→Order，与退货路径一致）
+    shipment_completed = await recalc_order_status_after_return(db, stockout_obj.order_id) if stockout_obj.order_id else None
     await cache_mgr.invalidate_stock_and_order()
     schedule_post_commit_invalidation(db, cache_mgr.invalidate_stock_and_order)
     product = await db.get(Product, stockout_obj.product_id)
     if product is not None:
         await safe_publish_event(stock_service.publish_stock_event, StockEvent.STOCK_CHANGED, {'product_id': stockout_obj.product_id, 'product_name': product.name, 'change_type': '出库编辑', 'quantity': new_quantity, 'current_stock': product.current_stock}, context="出库编辑事件发布")
+    if shipment_completed:
+        await _publish_shipment_completed_events([shipment_completed])
 
     # 领域事件总线：出库单更新 → 发布 STOCK_OUT_UPDATED 事件，触发采购计划缓存失效（异步）
     plan_month = stockout_obj.stockout_date.strftime('%Y-%m') if stockout_obj.stockout_date else ''
@@ -222,11 +247,15 @@ async def delete_stockout(db: AsyncSession, stockout_id: int, operator_id: int |
     stockout_no = stockout_obj.stockout_no
     deleted_quantity = stockout_obj.quantity
     customer_name = stockout_obj.customer or ''
+    order_id = stockout_obj.order_id
     product_result = await db.execute(select(Product.name).where(Product.id == stockout_obj.product_id))
     product_name_row = product_result.one_or_none()
     product_name = product_name_row[0] if product_name_row else ''
     await stock_service.delete_stockout_core(db, stockout_obj, operator_id=operator_id)
     await db.flush()
+    # 订单状态派生重算：删掉一条出货（含抵扣行）会释放对应出货/抵扣量
+    if order_id:
+        await recalc_order_status_after_return(db, order_id)
     await cache_mgr.invalidate_stock_and_order()
     schedule_post_commit_invalidation(db, cache_mgr.invalidate_stock_and_order)
     product = await db.get(Product, stockout_obj.product_id)

@@ -59,11 +59,32 @@
       :save-stockin-edit="rowActions.saveStockinEdit"
     />
 
+    <!-- 编辑出货/备货抵扣弹窗（出货流水 / 备货抵扣流水；抵扣行客户不可改） -->
+    <EditStockoutModal
+      v-model:open="rowActions.stockoutEditVisible.value"
+      v-model:form="rowActions.stockoutEditForm.value"
+      :customer-options="customerOptions"
+      :saving="rowActions.savingStockout.value"
+      :save-stockout-edit="rowActions.saveStockoutEdit"
+      :is-deduction="rowActions.stockoutEditIsDeduction.value"
+    />
+
+    <!-- 编辑退货弹窗（退货流水；后端单事务内取消+重建） -->
+    <EditReturnModal
+      v-model:open="rowActions.returnEditVisible.value"
+      v-model:form="rowActions.returnEditForm.value"
+      :saving="rowActions.savingReturn.value"
+      :save-return-edit="rowActions.saveReturnEdit"
+    />
+
     <!-- 聚合行还原出多条记录时的选择弹窗 -->
     <ReportRecordPicker
       v-model:open="rowActions.pickerOpen.value"
       :records="rowActions.pickerRecords.value"
       :action="rowActions.pickerAction.value"
+      :no-key="rowActions.pickerKeys.value.noKey"
+      :date-key="rowActions.pickerKeys.value.dateKey"
+      :note-key="rowActions.pickerKeys.value.noteKey"
       @pick="rowActions.onPickerPick"
     />
 
@@ -90,10 +111,12 @@ import ReportFilterBar from './components/ReportFilterBar.vue'
 import ReportTable from './components/ReportTable.vue'
 import EditOrderModal from './components/EditOrderModal.vue'
 import EditStockinModal from './components/EditStockinModal.vue'
+import EditStockoutModal from './components/EditStockoutModal.vue'
+import EditReturnModal from './components/EditReturnModal.vue'
 import ReportRecordPicker from './components/ReportRecordPicker.vue'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import { useReportConfig, type TabType } from './composables/useReportConfig'
-import { useReportRowActions, type ReportActionTab } from './composables/useReportRowActions'
+import { useReportRowActions, TAB_ROW_PERMISSIONS, type ReportActionTab } from './composables/useReportRowActions'
 
 const activeTab = ref<TabType>('order')
 const page = ref(1)
@@ -106,15 +129,15 @@ const filters = reactive({ customer: '', product: '' })
 
 const authStore = useAuthStore()
 /**
- * 行内编辑/删除的权限裁决（2026-10-07 收紧为独立权限点）：
- * 编辑=order_edit、删除=order_delete（迁移 075 种入，/user 权限树
- * 「订单查询→订单列表」下的两个子项，超管在 hasPermission 内短路放行）。
- * 后端写接口与还原数据源 /orders/records 已同步接受这两个码；
- * 持有「客户订单(order_manage)」不再自动获得报表行操作，须显式勾选。
- * 两项皆无时整个「操作」列不渲染（连表头一起），而不是空壳列。
+ * 行内编辑/删除的权限裁决（各维度独立职责分离码，2026-10-07）：
+ * 订单/备货 = order_edit / order_delete（迁移 075）；出货 = stockout_*、抵扣 = deduction_*、
+ * 退货 = return_*（迁移 079）。均在 /user 权限树「订单流水」下显式勾选，超管在
+ * hasPermission 内短路放行；持有页面级 manage 权限不再自动获得报表行操作。
+ * 当前 tab 两项皆无时整个「操作」列不渲染（连表头一起），而不是空壳列。
  */
-const canEditRowActions = computed(() => authStore.hasPermission('order_edit'))
-const canDeleteRowActions = computed(() => authStore.hasPermission('order_delete'))
+const rowPerms = computed(() => TAB_ROW_PERMISSIONS[activeTab.value])
+const canEditRowActions = computed(() => authStore.hasPermission(rowPerms.value.edit))
+const canDeleteRowActions = computed(() => authStore.hasPermission(rowPerms.value.delete))
 const canManageRowActions = computed(() => canEditRowActions.value || canDeleteRowActions.value)
 
 const { currentCfg, currentTabEndpoint, reportColumns } = useReportConfig(activeTab, canManageRowActions)

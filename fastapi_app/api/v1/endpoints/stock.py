@@ -30,6 +30,7 @@ from fastapi_app.schemas.stock import (
     StockOutUpdate,
 )
 from fastapi_app.services import stock_service
+from fastapi_app.services.stock_inventory_service import get_stockout_records
 from fastapi_app.shared_models import StockIn, StockOut, User
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,20 @@ router = APIRouter()
 
 # 导出库存数据的最大条数限制，超过则要求缩小查询范围
 MAX_EXPORT_INVENTORY_ROWS = 10000
+
+
+def _ensure_row_action_permission(user: User, *, is_deduction: bool, action: str) -> None:
+    """报表行内操作的权限裁决（出货 / 备货抵扣各自独立）。
+
+    action ∈ {'edit', 'delete'}。抵扣行（stockin_id 非空）认 deduction_*，独立出货
+    认 stockout_*；stockout_manage 作为页面级粗锁兜底放行两者（与备货端点
+    「manage 或行内子码」同口径）。缺省 fail-closed。
+    """
+    if user.has_permission('stockout_manage'):
+        return
+    code = f"{'deduction' if is_deduction else 'stockout'}_{action}"
+    if not user.has_permission(code):
+        raise HTTPException(status_code=403, detail='权限不足')
 
 
 @router.get('/in/list', response_model=StockListResponse)
@@ -227,11 +242,14 @@ async def edit_stockout(
     stockout_id: int,
     data: StockOutUpdate,
     db: AsyncSession = Depends(get_async_db),
-    _user: User = Depends(require_permission('stockout_manage')),
+    # 报表流水行内编辑（迁移 079）：独立出货认 stockout_edit，抵扣认 deduction_edit；
+    # 具体按行类型在处理器内裁决（见 _ensure_row_action_permission）。
+    _user: User = Depends(require_any_permission('stockout_manage', 'stockout_edit', 'deduction_edit')),
 ) -> StockActionResponse:
-    """编辑出库记录。
+    """编辑出库记录（独立出货与备货抵扣均支持）。
 
-    未提供的字段沿用记录原值，实现部分更新语义。
+    未提供的字段沿用记录原值，实现部分更新语义。抵扣行（stockin_id 非空）的客户
+    由订单/备货带出、不允许改；改数量时后端同步调整产品库存、备货可用量并重算订单状态。
 
     Args:
         stockout_id: 出库记录 ID。
@@ -243,14 +261,20 @@ async def edit_stockout(
         StockActionResponse: 包含成功标志和提示消息的响应。
 
     Raises:
-        HTTPException: 出库记录不存在时抛出 404。
+        HTTPException: 出库记录不存在时抛出 404；无对应行内权限时抛出 403。
     """
     stockout = await db.get(StockOut, stockout_id)
     if not stockout:
         logger.info('编辑出库失败：stockout_id=%s 不存在', stockout_id)
         raise HTTPException(status_code=404, detail='出库记录不存在')
+    is_deduction = stockout.stockin_id is not None
+    _ensure_row_action_permission(_user, is_deduction=is_deduction, action='edit')
     quantity = data.quantity if data.quantity is not None else stockout.quantity
-    customer = data.customer if data.customer is not None else stockout.customer or ''
+    # 抵扣行的客户由订单/备货带出，忽略前端传入值（改客户会与订单/备货脱钩）
+    if is_deduction:
+        customer = stockout.customer or ''
+    else:
+        customer = data.customer if data.customer is not None else stockout.customer or ''
     stockout_date = data.stockout_date if data.stockout_date else stockout.stockout_date.strftime('%Y-%m-%d') if stockout.stockout_date else ''
     note = data.note if data.note is not None else stockout.note or ''
     async with db_transaction(db):
@@ -265,9 +289,13 @@ async def edit_stockout(
 async def delete_stockout(
     stockout_id: int,
     db: AsyncSession = Depends(get_async_db),
-    _user: User = Depends(require_permission('stockout_manage')),
+    # 报表流水行内删除（迁移 079）：独立出货认 stockout_delete，抵扣认 deduction_delete
+    _user: User = Depends(require_any_permission('stockout_manage', 'stockout_delete', 'deduction_delete')),
 ) -> StockActionResponse:
-    """删除出库记录。
+    """删除出库记录（独立出货与备货抵扣均支持）。
+
+    删除会回补产品库存；抵扣行删除后所属备货可用量随之释放、关联订单状态重算。
+    已有退货关联的出货记录不能删除。
 
     Args:
         stockout_id: 出库记录 ID。
@@ -276,10 +304,42 @@ async def delete_stockout(
 
     Returns:
         StockActionResponse: 包含成功标志和提示消息的响应。
+
+    Raises:
+        HTTPException: 出库记录不存在时抛出 404；无对应行内权限时抛出 403。
     """
+    stockout = await db.get(StockOut, stockout_id)
+    if not stockout:
+        logger.info('删除出库失败：stockout_id=%s 不存在', stockout_id)
+        raise HTTPException(status_code=404, detail='出库记录不存在')
+    _ensure_row_action_permission(_user, is_deduction=stockout.stockin_id is not None, action='delete')
     async with db_transaction(db):
         await stock_service.delete_stockout(db, stockout_id, operator_id=_user.id)
     return StockActionResponse(success=True, message='出库删除成功！')
+
+
+@router.get('/out/records', response_model=StockListResponse)
+async def list_stockout_records(
+    kind: str = Query('stockout', pattern='^(stockout|deduction)$', description='stockout=独立出货，deduction=备货抵扣'),
+    nos: str = Query('', description='逗号分隔单号（出货=stockout_no，抵扣=order_no）'),
+    db: AsyncSession = Depends(get_async_read_db),
+    _user: User = Depends(require_any_permission(
+        'stockout_manage', 'stockout_edit', 'stockout_delete', 'deduction_edit', 'deduction_delete',
+    )),
+) -> StockListResponse:
+    """按单号还原出货/抵扣明细行（报表聚合行 → 具体记录，供行内编辑/删除）。
+
+    Args:
+        kind: 'stockout' 独立出货（stockin_id IS NULL）或 'deduction' 备货抵扣（按订单号匹配）。
+        nos: 逗号分隔的单号；出货为 stockout_no，抵扣为关联订单 order_no。
+        db: 只读数据库会话。
+        _user: 当前登录用户（仅需通过权限校验）。
+
+    Returns:
+        StockListResponse: 匹配的明细行（带 id/数量/客户/日期/备注等）。
+    """
+    items = await get_stockout_records(db, kind=kind, nos=nos)
+    return StockListResponse(data=items, total=len(items), page=1, per_page=len(items))
 
 
 @router.get('/inventory', response_model=InventoryResponse)

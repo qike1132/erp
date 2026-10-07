@@ -7517,7 +7517,7 @@
           "库存管理"
         ],
         "summary": "Edit Stockout",
-        "description": "编辑出库记录。\n\n未提供的字段沿用记录原值，实现部分更新语义。\n\nArgs:\n    stockout_id: 出库记录 ID。\n    data: 出库更新参数（仅包含需要修改的字段）。\n    db: 异步数据库会话（读写主库）。\n    _user: 当前登录用户（仅需通过权限校验）。\n\nReturns:\n    StockActionResponse: 包含成功标志和提示消息的响应。\n\nRaises:\n    HTTPException: 出库记录不存在时抛出 404。",
+        "description": "编辑出库记录（独立出货与备货抵扣均支持）。\n\n未提供的字段沿用记录原值，实现部分更新语义。抵扣行（stockin_id 非空）的客户\n由订单/备货带出、不允许改；改数量时后端同步调整产品库存、备货可用量并重算订单状态。\n\nArgs:\n    stockout_id: 出库记录 ID。\n    data: 出库更新参数（仅包含需要修改的字段）。\n    db: 异步数据库会话（读写主库）。\n    _user: 当前登录用户（仅需通过权限校验）。\n\nReturns:\n    StockActionResponse: 包含成功标志和提示消息的响应。\n\nRaises:\n    HTTPException: 出库记录不存在时抛出 404；无对应行内权限时抛出 403。",
         "operationId": "edit_stockout_api_v1_stock_out_edit__stockout_id__put",
         "parameters": [
           {
@@ -7570,7 +7570,7 @@
           "库存管理"
         ],
         "summary": "Delete Stockout",
-        "description": "删除出库记录。\n\nArgs:\n    stockout_id: 出库记录 ID。\n    db: 异步数据库会话（读写主库）。\n    _user: 当前登录用户（仅需通过权限校验）。\n\nReturns:\n    StockActionResponse: 包含成功标志和提示消息的响应。",
+        "description": "删除出库记录（独立出货与备货抵扣均支持）。\n\n删除会回补产品库存；抵扣行删除后所属备货可用量随之释放、关联订单状态重算。\n已有退货关联的出货记录不能删除。\n\nArgs:\n    stockout_id: 出库记录 ID。\n    db: 异步数据库会话（读写主库）。\n    _user: 当前登录用户（仅需通过权限校验）。\n\nReturns:\n    StockActionResponse: 包含成功标志和提示消息的响应。\n\nRaises:\n    HTTPException: 出库记录不存在时抛出 404；无对应行内权限时抛出 403。",
         "operationId": "delete_stockout_api_v1_stock_out_delete__stockout_id__delete",
         "parameters": [
           {
@@ -7590,6 +7590,65 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/StockActionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/stock/out/records": {
+      "get": {
+        "tags": [
+          "库存管理"
+        ],
+        "summary": "List Stockout Records",
+        "description": "按单号还原出货/抵扣明细行（报表聚合行 → 具体记录，供行内编辑/删除）。\n\nArgs:\n    kind: 'stockout' 独立出货（stockin_id IS NULL）或 'deduction' 备货抵扣（按订单号匹配）。\n    nos: 逗号分隔的单号；出货为 stockout_no，抵扣为关联订单 order_no。\n    db: 只读数据库会话。\n    _user: 当前登录用户（仅需通过权限校验）。\n\nReturns:\n    StockListResponse: 匹配的明细行（带 id/数量/客户/日期/备注等）。",
+        "operationId": "list_stockout_records_api_v1_stock_out_records_get",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(stockout|deduction)$",
+              "description": "stockout=独立出货，deduction=备货抵扣",
+              "default": "stockout",
+              "title": "Kind"
+            },
+            "description": "stockout=独立出货，deduction=备货抵扣"
+          },
+          {
+            "name": "nos",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "逗号分隔单号（出货=stockout_no，抵扣=order_no）",
+              "default": "",
+              "title": "Nos"
+            },
+            "description": "逗号分隔单号（出货=stockout_no，抵扣=order_no）"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StockListResponse"
                 }
               }
             }
@@ -7936,6 +7995,52 @@
         }
       }
     },
+    "/api/v1/stock-returns/records": {
+      "get": {
+        "tags": [
+          "退货管理"
+        ],
+        "summary": "List Return Records",
+        "description": "按退货单号还原退货明细行（报表聚合行 → 具体记录，供行内编辑/删除）。仅 active。\n\nArgs:\n    nos: 逗号分隔的退货单号（return_no）。\n    db: 只读数据库会话。\n    _user: 当前登录用户（仅需通过权限校验）。\n\nReturns:\n    StockListResponse: 匹配的退货明细行（带 id/数量/客户/日期/原因/备注等）。",
+        "operationId": "list_return_records_api_v1_stock_returns_records_get",
+        "parameters": [
+          {
+            "name": "nos",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "逗号分隔的退货单号（报表聚合行还原用）",
+              "default": "",
+              "title": "Nos"
+            },
+            "description": "逗号分隔的退货单号（报表聚合行还原用）"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StockListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/stock-returns/create": {
       "post": {
         "tags": [
@@ -7979,6 +8084,57 @@
       }
     },
     "/api/v1/stock-returns/{return_id}": {
+      "put": {
+        "tags": [
+          "退货管理"
+        ],
+        "summary": "Edit Stock Return",
+        "description": "编辑退货记录（单事务内「取消原退货 + 按同一出货明细重建」，原子）。\n\n未提供的字段沿用原值。新记录带新的 SR 单号，旧记录软取消保留可追溯；\n库存、出货已退量、订单状态按净变化对称调整。\n\nArgs:\n    return_id: 退货记录 ID。\n    data: 退货更新参数（仅包含需要修改的字段）。\n    db: 异步数据库会话（读写主库）。\n    _user: 当前登录用户（仅需通过权限校验）。\n\nReturns:\n    StockActionResponse: 包含成功标志、提示消息与新退货单号。\n\nRaises:\n    HTTPException: 退货记录不存在时抛出 404。",
+        "operationId": "edit_stock_return_api_v1_stock_returns__return_id__put",
+        "parameters": [
+          {
+            "name": "return_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Return Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StockReturnUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StockActionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
       "delete": {
         "tags": [
           "退货管理"
@@ -35047,6 +35203,65 @@
         ],
         "title": "StockReturnCreate",
         "description": "创建退货请求（按出货明细退货：搜产品 → 选出货明细 → 录数量）\n\n客户/产品/订单由所选出货明细带出；可退量（出货量 − 已退量）在\nservices/stock_return_service.create_stockreturn_core 校验，\n违例以 ValueError 抛出并经 db_transaction 统一映射为 400。"
+      },
+      "StockReturnUpdate": {
+        "properties": {
+          "quantity": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 9999999.0,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quantity",
+            "description": "退货数量"
+          },
+          "return_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return Date",
+            "description": "退货日期 (YYYY-MM-DD)"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason",
+            "description": "退货原因"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note",
+            "description": "备注"
+          }
+        },
+        "type": "object",
+        "title": "StockReturnUpdate",
+        "description": "编辑退货请求（PUT /stock/return/{id}）\n\n部分更新语义：未提供的字段沿用记录原值。实现为「单事务内取消原退货 + 按同一\n出货明细重建」——所以新记录带新的 SR 单号，旧记录软取消保留可追溯。\n可退量（出货量 − 已退量）在重建时校验（取消会先释放旧占用量）。"
       },
       "StockStatsData": {
         "properties": {

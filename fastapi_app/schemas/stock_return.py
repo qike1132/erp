@@ -50,3 +50,21 @@ class StockReturnCreate(BaseModel):
     @classmethod
     def validate_return_date(cls, v):
         return _validate_date_format(v)
+
+
+class StockReturnUpdate(BaseModel):
+    """编辑退货请求（PUT /stock/return/{id}）
+
+    部分更新语义：未提供的字段沿用记录原值。实现为「单事务内取消原退货 + 按同一
+    出货明细重建」——所以新记录带新的 SR 单号，旧记录软取消保留可追溯。
+    可退量（出货量 − 已退量）在重建时校验（取消会先释放旧占用量）。
+    """
+    quantity: int | None = Field(None, gt=0, le=9999999, description="退货数量")
+    return_date: str | None = Field(None, description="退货日期 (YYYY-MM-DD)")
+    reason: str | None = Field(None, max_length=200, description="退货原因")
+    note: str | None = Field(None, max_length=500, description="备注")
+
+    @field_validator('return_date')
+    @classmethod
+    def validate_return_date(cls, v):
+        return _validate_date_format(v)

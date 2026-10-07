@@ -2774,6 +2774,13 @@ export interface StockReturnCreate {
   request_id?: string | null
 }
 
+export interface StockReturnUpdate {
+  quantity?: number | null
+  return_date?: string | null
+  reason?: string | null
+  note?: string | null
+}
+
 export interface StockStatsData {
   order_quantity?: number
   stockin_quantity?: number

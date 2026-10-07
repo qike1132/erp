@@ -27,6 +27,16 @@ from fastapi_app.services.stock_service import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _default_inventory_balance():
+    """库存结余闸门（2026-10-07）默认充足，使既有出库用例聚焦各自语义。"""
+    with patch(
+        'fastapi_app.services.stock_service.get_inventory_balance',
+        new_callable=AsyncMock, return_value=10**9,
+    ):
+        yield
+
+
 def make_mock_stockin(id_val=1, quantity=100):
     """构造 mock 入库单"""
     si = MagicMock()
@@ -341,6 +351,26 @@ class TestCreateStockOut:
 
     @pytest.mark.asyncio
     @patch('fastapi_app.services.stock_service.get_product_for_update')
+    async def test_create_stockout_inventory_balance_insufficient(self, mock_get_product,
+                                                                    mock_async_db):
+        """库存结余不足（2026-10-07 闸门）：拒绝，文案含客户/产品/可用/本次"""
+        product = MagicMock()
+        product.id = 1
+        product.name = '产品A'
+        product.current_stock = 200
+        mock_get_product.return_value = product
+
+        with patch('fastapi_app.services.stock_service.get_inventory_balance',
+                   new_callable=AsyncMock, return_value=8):
+            with pytest.raises(ValueError) as ei:
+                await create_stockout_core(
+                    mock_async_db, product_id=1, quantity=10,
+                    customer='客户A', stockout_date=datetime.now(UTC), note=''
+                )
+        assert str(ei.value) == '客户「客户A」产品「产品A」库存不足：可用 8，本次 10'
+
+    @pytest.mark.asyncio
+    @patch('fastapi_app.services.stock_service.get_product_for_update')
     async def test_create_stockout_no_available_order(self, mock_get_product,
                                                         mock_async_db):
         """客户没有可用订单"""
@@ -392,12 +422,23 @@ class TestUpdateStockOut:
     """出库编辑"""
 
     @pytest.mark.asyncio
-    async def test_update_stockout_deduction_protected(self, mock_async_db):
-        """抵扣出库不能直接编辑"""
+    @patch('fastapi_app.services.stock_service.get_product_for_update')
+    async def test_update_stockout_deduction_over_stockin_protected(self, mock_get_product, mock_async_db):
+        """抵扣出库已允许直接编辑，但新抵扣量不得超过所属备货可用量（2026-10-07 放开）"""
+        product = MagicMock()
+        product.id = 1
+        product.current_stock = 200
+        mock_get_product.return_value = product
+
         stockout = make_mock_stockout()
         stockout.stockin_id = 5  # 抵扣出库
+        # db.get(StockIn, 5) → 备货总量 5；已被其它抵扣行占用 0
+        mock_async_db.get.return_value = MagicMock(quantity=5)
+        occupied = MagicMock()
+        occupied.scalar.return_value = 0
+        mock_async_db.execute.return_value = occupied
 
-        with pytest.raises(ValueError, match='订单抵扣的出货记录不能直接编辑'):
+        with pytest.raises(ValueError, match='抵扣数量超过'):
             await update_stockout_core(
                 mock_async_db, stockout, new_quantity=60,
                 customer='客户', stockout_date=datetime.now(UTC), note=''
@@ -525,13 +566,27 @@ class TestDeleteStockOut:
         assert product.version == 2  # 乐观锁 version 递增经 refresh 回读
 
     @pytest.mark.asyncio
-    async def test_delete_stockout_deduction_protected(self, mock_async_db):
-        """抵扣出库不能直接删除"""
+    @patch('fastapi_app.services.stock_service.log_inventory_change')
+    @patch('fastapi_app.services.stock_out_service.update_stock_with_optimistic_lock')
+    @patch('fastapi_app.services.stock_service.get_product_for_update')
+    async def test_delete_stockout_deduction_now_allowed(self, mock_get_product, mock_update, mock_log, mock_async_db):
+        """抵扣出库已允许直接删除（2026-10-07 放开；所属备货可用量随之释放）"""
+        product = MagicMock()
+        product.current_stock = 200
+        mock_get_product.return_value = product
+        mock_update.return_value = product
+
         stockout = make_mock_stockout()
         stockout.stockin_id = 5
+        stockout.returned_quantity = 0
+        # 无关联退货：count 查询返回 0
+        linked = MagicMock()
+        linked.scalar.return_value = 0
+        mock_async_db.execute.return_value = linked
 
-        with pytest.raises(ValueError, match='订单抵扣的出货记录不能直接删除'):
-            await delete_stockout_core(mock_async_db, stockout)
+        await delete_stockout_core(mock_async_db, stockout)
+
+        mock_async_db.delete.assert_awaited()
 
     @pytest.mark.asyncio
     async def test_delete_stockout_with_returns(self, mock_async_db):

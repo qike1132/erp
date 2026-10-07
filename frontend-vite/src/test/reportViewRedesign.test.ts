@@ -36,6 +36,17 @@ vi.mock('@/api', () => ({
     updateDeduct: vi.fn(),
     delete: vi.fn(),
   },
+  // 2026-10-07：出货/抵扣/退货行内操作链路（useReportRowActions）会用到
+  stockApi: {
+    stockoutRecords: vi.fn(),
+    editStockout: vi.fn(),
+    deleteStockout: vi.fn(),
+  },
+  stockReturnApi: {
+    records: vi.fn(),
+    update: vi.fn(),
+    remove: vi.fn(),
+  },
 }))
 
 vi.mock('@/stores/catalog', () => ({
@@ -108,6 +119,8 @@ function mountView() {
         // 弹窗与确认框不全量挂载：本文件锁表格结构，弹窗链路各自有专项测试
         EditOrderModal: true,
         EditStockinModal: true,
+        EditStockoutModal: true,
+        EditReturnModal: true,
         ReportRecordPicker: true,
         UiConfirmDialog: true,
       },
@@ -337,23 +350,21 @@ describe('ReportTable —— 行内操作列（订单/备货流水）', () => {
     expect(w.findAll('.rp-btn-danger').length).toBe(0)
   })
 
-  it('出货/抵扣/退货维度不生成操作列（列定义由 useReportConfig 决定）', async () => {
+  it('五个维度：有权限末列是操作列，无权限整列不渲染（列定义由 useReportConfig 决定）', async () => {
     const { useReportConfig } = await import('@/views/report/composables/useReportConfig')
     const { ref } = await import('vue')
-    for (const tab of ['stockout', 'deduction', 'return'] as const) {
-      const { reportColumns } = useReportConfig(ref(tab))
-      expect(reportColumns.value.some((c) => c.field === 'actions')).toBe(false)
-      expect(reportColumns.value[reportColumns.value.length - 1]!.width).toBe('26%')
+    const ALL = ['order', 'stockin', 'stockout', 'deduction', 'return'] as const
+    // 有权限（2026-10-07）：五个维度都在末列追加 9% 操作列，备注列 26%→17%
+    for (const tab of ALL) {
+      const cols = useReportConfig(ref(tab), ref(true)).reportColumns.value
+      expect(cols.at(-1)).toEqual({ field: 'actions', header: '操作', align: 'center', width: '9%' })
+      expect(cols[cols.length - 2]!.width).toBe('17%')
     }
-    for (const tab of ['order', 'stockin'] as const) {
-      const { reportColumns } = useReportConfig(ref(tab), ref(true))
-      expect(reportColumns.value.at(-1)).toEqual({ field: 'actions', header: '操作', align: 'center', width: '9%' })
-    }
-    // 无权限（2026-10-07）：整列不渲染（连表头一起），备注列收回 26%，不留空壳
-    for (const tab of ['order', 'stockin'] as const) {
-      const { reportColumns } = useReportConfig(ref(tab), ref(false))
-      expect(reportColumns.value.some((c) => c.field === 'actions')).toBe(false)
-      expect(reportColumns.value[reportColumns.value.length - 1]!.width).toBe('26%')
+    // 无权限：整列不渲染（连表头一起），备注列收回 26%，不留空壳
+    for (const tab of ALL) {
+      const cols = useReportConfig(ref(tab), ref(false)).reportColumns.value
+      expect(cols.some((c) => c.field === 'actions')).toBe(false)
+      expect(cols[cols.length - 1]!.width).toBe('26%')
     }
   })
 

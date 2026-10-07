@@ -195,22 +195,33 @@ class TestStockOutService:
                 customer="客户", stockout_date_str="2026-01-15", note=""
             )
 
-    async def test_update_stockout_is_deduction(self, mock_db):
-        pid_result = MagicMock()
-        pid_result.one_or_none.return_value = (1,)
+    async def test_update_stockout_deduction_over_stockin_rejected(self, mock_db):
+        # 2026-10-07：抵扣行（stockin_id 非空）已允许编辑，但新抵扣量不得超过所属备货可用量。
         stockout = MagicMock()
         stockout.id = 1
         stockout.stockin_id = 5
+        stockout.quantity = 10
+        stockout.returned_quantity = 0
+        stockout.product_id = 1
+        stockout.customer = "客户"
+        stockout.order_id = None
         stockout_result = MagicMock()
         stockout_result.scalar_one_or_none.return_value = stockout
-        mock_db.execute = AsyncMock(side_effect=[pid_result, stockout_result])
+        pid_result = MagicMock()
+        pid_result.one_or_none.return_value = (1,)
+        # 该备货已被其它抵扣行占用的净量（不含本行）
+        sum_result = MagicMock()
+        sum_result.scalar.return_value = 0
+        mock_db.execute = AsyncMock(side_effect=[pid_result, stockout_result, sum_result])
+        mock_db.get = AsyncMock(return_value=MagicMock(quantity=5))  # 备货总量 5
         mock_db.commit = AsyncMock()
         mock_db.rollback = AsyncMock()
-        with patch('fastapi_app.services.stock_service.get_product_for_update', new_callable=AsyncMock) as mock_get_product:
-            mock_get_product.return_value = MagicMock()
-            with pytest.raises(ValueError, match="订单抵扣"):
+        product = MagicMock()
+        product.current_stock = 1000
+        with patch('fastapi_app.services.stock_service.get_product_for_update', new_callable=AsyncMock, return_value=product):
+            with pytest.raises(ValueError, match="抵扣数量超过"):
                 await stock_service.update_stockout(
-                    mock_db, stockout_id=1, new_quantity=10,
+                    mock_db, stockout_id=1, new_quantity=8,
                     customer="客户", stockout_date_str="2026-01-15", note=""
                 )
 
@@ -221,12 +232,14 @@ class TestStockOutService:
         with pytest.raises(ValueError, match="不存在"):
             await stock_service.delete_stockout(mock_db, 999)
 
-    async def test_delete_stockout_is_deduction(self, mock_db):
+    async def test_delete_stockout_deduction_with_returns_rejected(self, mock_db):
+        # 2026-10-07：抵扣行已允许删除，但「已有退货关联」的出货（含抵扣）仍拒绝删除。
         stockout = MagicMock()
         stockout.id = 1
         stockout.stockin_id = 5
         stockout.stockout_no = "SO-001"
         stockout.quantity = 10
+        stockout.returned_quantity = 3
         stockout.product_id = 1
         stockout.customer = "客户"
         stockout_result = MagicMock()
@@ -241,7 +254,7 @@ class TestStockOutService:
         mock_db.execute = AsyncMock(side_effect=[pid_result, prod_lock_result, stockout_result, product_name_result])
         mock_db.commit = AsyncMock()
         mock_db.rollback = AsyncMock()
-        with pytest.raises(ValueError, match="订单抵扣"):
+        with pytest.raises(ValueError, match="已有退货关联"):
             await stock_service.delete_stockout(mock_db, 1)
 
     async def test_delete_stockout_success(self, mock_db):
@@ -249,10 +262,12 @@ class TestStockOutService:
         stockout.id = 1
         stockout.stockout_no = "SO-001"
         stockout.quantity = 10
+        stockout.returned_quantity = 0
         stockout.product_id = 1
         stockout.stockin_id = None
         stockout.customer = ""
         stockout.stockout_date = None
+        stockout.order_id = None
 
         stockout_result = MagicMock()
         stockout_result.scalar_one_or_none.return_value = stockout
@@ -411,14 +426,17 @@ class TestStockOutEndpoints:
             })
         assert response.status_code == 400
 
-    async def test_delete_stockout_is_deduction(self, client, mock_db):
+    async def test_delete_stockout_deduction_with_returns_rejected(self, client, mock_db):
+        # 2026-10-07：抵扣行已允许删除，但「已有退货关联」的出货（含抵扣）仍 400。
         stockout = MagicMock()
         stockout.id = 1
         stockout.stockin_id = 5
         stockout.stockout_no = "SO-001"
         stockout.quantity = 10
+        stockout.returned_quantity = 3
         stockout.product_id = 1
         stockout.customer = "客户"
+        mock_db.get = AsyncMock(return_value=stockout)
         stockout_result = MagicMock()
         stockout_result.scalar_one_or_none.return_value = stockout
         product_name_result = MagicMock()

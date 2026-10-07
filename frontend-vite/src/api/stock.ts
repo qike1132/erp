@@ -1,7 +1,7 @@
 import { get, post, put, del, upload, download } from './request'
 import type {
   Product, StagingListResponse, StagingRow, StagingImportResult, InventoryItem,
-  InventoryResponse, StockInRecord, StockOutRecord, ShipmentInfo, ApiResponse, QueryParams,
+  InventoryResponse, StockInRecord, ShipmentInfo, ApiResponse, QueryParams,
 } from '@/types'
 import type { StockStatsData } from '@/types/api'
 
@@ -35,18 +35,49 @@ export interface StockInUpdatePayload {
   note?: string
 }
 
+/** 编辑出货的请求体（后端 `schemas/stock.py::StockOutUpdate`，独立出货与备货抵扣共用） */
+export interface StockOutUpdatePayload {
+  quantity?: number
+  customer?: string
+  stockout_date?: string
+  note?: string
+}
+
+/** 报表「出货/抵扣流水」聚合行还原出的明细行（GET /stock/out/records） */
+export interface StockFlowRecord {
+  id: number
+  stockout_no: string
+  stockout_date: string
+  customer: string
+  product_id: number
+  product_name: string
+  barcode: string
+  quantity: number
+  returned_quantity: number
+  note: string
+  stockin_id: number | null
+  order_id: number | null
+}
+
 export const stockApi = {
   stats: async (): Promise<StockStatsData> => {
     const resp = await get<{ success?: boolean; data?: StockStatsData }>('/stock/stats')
     return resp.data ?? (resp as StockStatsData)
   },
   stockins: (params?: QueryParams) => get<StockInRecord[]>('/stock/in/list', params),
-  // 后端 `StockListResponse`：列表在 `data` 键（schemas/stock.py），不是 stockouts/items
-  stockouts: (params?: QueryParams) => get<{ success?: boolean; data?: StockOutRecord[]; total?: number }>('/stock/out/list', params),
   inventory: (params?: QueryParams) => get<InventoryResponse>('/stock/inventory', params),
   editStockin: (id: number, data: StockInUpdatePayload) =>
     put<{ success?: boolean; message?: string }>(`/stock/in/edit/${id}`, data),
   deleteStockin: (id: number) => del(`/stock/in/delete/${id}`),
+  /**
+   * 报表「出货/抵扣流水」聚合行还原（按单号取明细，供行内编辑/删除）。
+   * kind='stockout' 按 stockout_no 匹配独立出货；kind='deduction' 按订单号匹配备货抵扣。
+   */
+  stockoutRecords: (kind: 'stockout' | 'deduction', nos: string) =>
+    get<{ success?: boolean; data: StockFlowRecord[] }>('/stock/out/records', { kind, nos }),
+  /** 编辑出货/抵扣行（抵扣行后端会忽略 customer，只改数量/日期/备注） */
+  editStockout: (id: number, data: StockOutUpdatePayload) =>
+    put<{ success?: boolean; message?: string }>(`/stock/out/edit/${id}`, data),
   deleteStockout: (id: number) => del(`/stock/out/delete/${id}`),
   searchProducts: (q: string) => get<{ products?: Product }>('/aux/product-search', { q }),
   availableShipment: (productId: number, customer: string) =>

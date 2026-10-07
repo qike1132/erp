@@ -13,15 +13,16 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.database import get_async_db, get_async_read_db
-from fastapi_app.core.deps import require_permission
+from fastapi_app.core.deps import require_any_permission, require_permission
 from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.schemas.stock import StockActionResponse, StockListResponse
-from fastapi_app.schemas.stock_return import ShipmentOption, StockReturnCreate
+from fastapi_app.schemas.stock_return import ShipmentOption, StockReturnCreate, StockReturnUpdate
 from fastapi_app.services.stock_common import business_now
-from fastapi_app.services.stock_inventory_service import get_stockreturns
+from fastapi_app.services.stock_inventory_service import get_stockreturn_records, get_stockreturns
 from fastapi_app.services.stock_return_service import (
     cancel_stockreturn,
     create_stockreturn,
+    edit_stockreturn,
     search_returnable_stockouts,
 )
 from fastapi_app.shared_models import StockReturn, User
@@ -91,6 +92,28 @@ async def list_stock_returns(
     )
 
 
+@router.get('/records', response_model=StockListResponse)
+async def list_return_records(
+    nos: str = Query('', description='逗号分隔的退货单号（报表聚合行还原用）'),
+    db: AsyncSession = Depends(get_async_read_db),
+    _user: User = Depends(require_any_permission(
+        'stock_return_view', 'stock_return_manage', 'return_edit', 'return_delete',
+    )),
+) -> StockListResponse:
+    """按退货单号还原退货明细行（报表聚合行 → 具体记录，供行内编辑/删除）。仅 active。
+
+    Args:
+        nos: 逗号分隔的退货单号（return_no）。
+        db: 只读数据库会话。
+        _user: 当前登录用户（仅需通过权限校验）。
+
+    Returns:
+        StockListResponse: 匹配的退货明细行（带 id/数量/客户/日期/原因/备注等）。
+    """
+    items = await get_stockreturn_records(db, nos=nos)
+    return StockListResponse(data=items, total=len(items), page=1, per_page=len(items))
+
+
 @router.post('/create', response_model=StockActionResponse)
 async def create_stock_return(
     data: StockReturnCreate,
@@ -128,11 +151,54 @@ async def create_stock_return(
     return StockActionResponse(success=True, message=f"退货添加成功！单号 {result['return_no']}")
 
 
+@router.put('/{return_id}', response_model=StockActionResponse)
+async def edit_stock_return(
+    return_id: int,
+    data: StockReturnUpdate,
+    db: AsyncSession = Depends(get_async_db),
+    # 报表流水行内编辑（迁移 079）：return_edit 或页面级 stock_return_manage
+    _user: User = Depends(require_any_permission('stock_return_manage', 'return_edit')),
+) -> StockActionResponse:
+    """编辑退货记录（单事务内「取消原退货 + 按同一出货明细重建」，原子）。
+
+    未提供的字段沿用原值。新记录带新的 SR 单号，旧记录软取消保留可追溯；
+    库存、出货已退量、订单状态按净变化对称调整。
+
+    Args:
+        return_id: 退货记录 ID。
+        data: 退货更新参数（仅包含需要修改的字段）。
+        db: 异步数据库会话（读写主库）。
+        _user: 当前登录用户（仅需通过权限校验）。
+
+    Returns:
+        StockActionResponse: 包含成功标志、提示消息与新退货单号。
+
+    Raises:
+        HTTPException: 退货记录不存在时抛出 404。
+    """
+    stock_return = await db.get(StockReturn, return_id)
+    if not stock_return:
+        logger.info('编辑退货失败：return_id=%s 不存在', return_id)
+        raise HTTPException(status_code=404, detail='退货记录不存在')
+    async with db_transaction(
+        db,
+        error_map={IntegrityError: (400, '请勿重复提交：该请求已登记过退货')},
+    ):
+        result = await edit_stockreturn(
+            db, return_id=return_id, quantity=data.quantity,
+            return_date_str=data.return_date, reason=data.reason, note=data.note,
+            operator_id=_user.id,
+        )
+    logger.info('退货编辑成功：%s（return_id=%s）', result['return_no'], return_id)
+    return StockActionResponse(success=True, message=f"退货修改成功！单号 {result['return_no']}")
+
+
 @router.delete('/{return_id}', response_model=StockActionResponse)
 async def cancel_stock_return(
     return_id: int,
     db: AsyncSession = Depends(get_async_db),
-    _user: User = Depends(require_permission('stock_return_manage')),
+    # 报表流水行内删除（迁移 079）：return_delete 或页面级 stock_return_manage
+    _user: User = Depends(require_any_permission('stock_return_manage', 'return_delete')),
 ) -> StockActionResponse:
     """取消退货记录（P1-① 软取消：记录保留，库存对称扣回、订单状态重算）。
 

@@ -28,7 +28,7 @@ from fastapi_app.core.exception_handler import safe_publish_event
 from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.services.notification_service import StockEvent
 from fastapi_app.services.numbering import generate_number_async
-from fastapi_app.services.stock_common import _parse_date_preserve_time
+from fastapi_app.services.stock_common import _parse_date_preserve_time, business_now
 from fastapi_app.services.stock_event_service import recalc_order_status_after_return
 from fastapi_app.shared.stock_concurrency import assert_stock_available, update_stock_with_optimistic_lock
 from fastapi_app.shared_models import InventoryLog, Product, StockOut, StockReturn
@@ -283,6 +283,45 @@ async def cancel_stockreturn(db: AsyncSession, stockreturn_id: int, operator_id:
     ))
 
     logger.info(f'退货取消成功：{return_no}，数量：{cancelled_quantity}')
+
+
+async def edit_stockreturn(db: AsyncSession, return_id: int, quantity: int | None,
+                           return_date_str: str | None, reason: str | None,
+                           note: str | None, operator_id: int | None = None) -> dict:
+    """编辑退货记录（单事务内「取消原退货 + 按同一出货明细重建」，原子）。
+
+    退货没有就地更新端点；编辑 = 软取消旧记录（库存对称回冲）后按新值重建一条，
+    两步在同一事务内完成（调用方用 db_transaction 包裹）——任一步失败整体回滚，
+    不会留下「旧的取消了、新的没建起来」的中间态。取消会先释放旧占用量，
+    因此重建时的可退量校验基于释放后的值。新记录带新的 SR 单号。
+    """
+    result = await db.execute(select(StockReturn).where(StockReturn.id == return_id))
+    old = result.scalar_one_or_none()
+    if not old:
+        raise ValueError('退货记录不存在')
+    if old.status != 'active':
+        raise ValueError('该退货已取消，无法编辑')
+    stockout_id = old.stockout_id
+    if stockout_id is None:
+        raise ValueError('该退货未关联出货记录，无法编辑')
+
+    new_quantity = quantity if quantity is not None else old.quantity
+    if return_date_str:
+        new_date_str = return_date_str
+    elif old.return_date:
+        new_date_str = old.return_date.strftime('%Y-%m-%d')
+    else:
+        new_date_str = business_now().strftime('%Y-%m-%d')
+    new_reason = reason if reason is not None else old.reason
+    new_note = note if note is not None else old.note
+
+    await cancel_stockreturn(db, return_id, operator_id=operator_id)
+    created = await create_stockreturn(
+        db, stockout_id, new_quantity, new_date_str, new_reason, new_note,
+        request_id=None, operator_id=operator_id,
+    )
+    logger.info('退货编辑成功：原单 %s 取消，新建 %s', old.return_no, created['return_no'])
+    return created
 
 
 # 底部引入 stock_service 以提供命名空间解析（延迟到调用期，避免循环依赖）

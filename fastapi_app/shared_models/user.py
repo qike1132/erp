@@ -56,11 +56,19 @@ class User(Base):
           order_edit / order_delete 同理（迁移 075 挂在「订单流水」report_manage 之下，
           是报表流水行内编辑/删除的职责分离码）：持有「订单列表」仅可查看，
           编辑与删除必须在 /user 显式勾选。
+          stockout_edit/delete、deduction_edit/delete、return_edit/delete（迁移 079）
+          是出货/抵扣/退货三类报表流水的同类职责分离码，同样必须显式授权。
         """
         SENSITIVE_PREFIXES = ['user_']
 
         # manage 不得经继承放行的业务子码（须逐个显式授权）
-        NO_MANAGE_INHERIT = {'outsource_ship', 'outsource_receive', 'order_edit', 'order_delete'}
+        NO_MANAGE_INHERIT = {
+            'outsource_ship', 'outsource_receive',
+            'order_edit', 'order_delete',
+            'stockout_edit', 'stockout_delete',
+            'deduction_edit', 'deduction_delete',
+            'return_edit', 'return_delete',
+        }
 
         for prefix in SENSITIVE_PREFIXES:
             if permission_code.startswith(prefix):

@@ -262,6 +262,89 @@ async def get_stockreturns(db: AsyncSession, stockout_id: int | None = None,
     return {'items': data, 'total': total, 'page': page, 'per_page': per_page}
 
 
+def _parse_nos(raw: str, limit: int = 500) -> list[str]:
+    """逗号切分单号并 trim/去空/去重/限量（报表聚合行还原用）。"""
+    out: list[str] = []
+    seen: set[str] = set()
+    for part in (raw or '').split(','):
+        s = part.strip()
+        if s and s not in seen:
+            seen.add(s)
+            out.append(s)
+        if len(out) >= limit:
+            break
+    return out
+
+
+async def get_stockout_records(db: AsyncSession, kind: str = 'stockout', nos: str = '') -> list[dict]:
+    """按单号还原出货/抵扣明细行（报表聚合行 → 具体记录）。
+
+    kind='stockout'：独立出货（stockin_id IS NULL），按 stockout_no 匹配。
+    kind='deduction'：备货抵扣（stockin_id IS NOT NULL），按关联订单号 order_no 匹配。
+    返回行带 id / 单号 / 数量 / 已退量 / 客户 / 日期 / 备注 / 产品，供前端行内编辑与删除。
+    """
+    codes = _parse_nos(nos)
+    if not codes:
+        return []
+    if kind == 'deduction':
+        stmt = (
+            select(StockOut)
+            .join(Order, StockOut.order_id == Order.id)
+            .where(StockOut.stockin_id.is_not(None), Order.order_no.in_(codes))
+        )
+    else:
+        stmt = select(StockOut).where(StockOut.stockin_id.is_(None), StockOut.stockout_no.in_(codes))
+    result = await db.execute(
+        stmt.options(joinedload(StockOut.product)).order_by(StockOut.stockout_date.desc(), StockOut.id.desc())
+    )
+    data = []
+    for so in result.scalars().unique().all():
+        data.append({
+            'id': so.id,
+            'stockout_no': so.stockout_no,
+            'stockout_date': so.stockout_date.strftime('%Y-%m-%d') if so.stockout_date else '',
+            'customer': so.customer or '',
+            'product_id': so.product_id,
+            'product_name': so.product.name if so.product else '',
+            'barcode': so.product.barcode if so.product else '',
+            'quantity': so.quantity,
+            'returned_quantity': so.returned_quantity,
+            'note': so.note or '',
+            'stockin_id': so.stockin_id,
+            'order_id': so.order_id,
+        })
+    return data
+
+
+async def get_stockreturn_records(db: AsyncSession, nos: str = '') -> list[dict]:
+    """按退货单号还原退货明细行（报表聚合行 → 具体记录）。仅 active。"""
+    codes = _parse_nos(nos)
+    if not codes:
+        return []
+    result = await db.execute(
+        select(StockReturn)
+        .where(StockReturn.status == 'active', StockReturn.return_no.in_(codes))
+        .options(joinedload(StockReturn.product), joinedload(StockReturn.stockout))
+        .order_by(StockReturn.return_date.desc(), StockReturn.id.desc())
+    )
+    data = []
+    for sr in result.scalars().unique().all():
+        data.append({
+            'id': sr.id,
+            'return_no': sr.return_no,
+            'return_date': sr.return_date.strftime('%Y-%m-%d') if sr.return_date else '',
+            'customer': sr.customer or '',
+            'product_id': sr.product_id,
+            'product_name': sr.product.name if sr.product else '',
+            'quantity': sr.quantity,
+            'stockout_id': sr.stockout_id,
+            'stockout_no': sr.stockout.stockout_no if sr.stockout else '',
+            'reason': sr.reason or '',
+            'note': sr.note or '',
+        })
+    return data
+
+
 @cache_result(key_prefix='inventory', ttl=60, local_ttl=30, key_builder=lambda *args, **kwargs: f"c{kwargs.get('search_customer', '')}:p{kwargs.get('search_product', '')}")
 async def get_inventory(db: AsyncSession, search_customer: str='', search_product: str='') -> dict:
     """

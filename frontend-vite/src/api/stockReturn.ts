@@ -1,4 +1,4 @@
-import { get, post, del } from './request'
+import { get, post, put, del } from './request'
 
 /** 退货列表行（对应后端 get_stockreturns 的 data 元素） */
 export interface StockReturnRecord {
@@ -41,6 +41,29 @@ export interface StockReturnCreatePayload {
   request_id?: string
 }
 
+/** 编辑退货请求体（后端 schemas/stock_return.py::StockReturnUpdate） */
+export interface StockReturnUpdatePayload {
+  quantity?: number
+  return_date?: string
+  reason?: string
+  note?: string
+}
+
+/** 报表「退货流水」聚合行还原出的明细行（GET /stock-returns/records） */
+export interface StockReturnFlowRecord {
+  id: number
+  return_no: string
+  return_date: string
+  customer: string
+  product_id: number
+  product_name: string
+  quantity: number
+  stockout_id: number | null
+  stockout_no: string
+  reason: string
+  note: string
+}
+
 export const stockReturnApi = {
   list: (params?: {
     page?: number
@@ -58,6 +81,12 @@ export const stockReturnApi = {
     get<ShipmentOption[]>('/stock-returns/shipment-options', { q }),
   create: (data: StockReturnCreatePayload) =>
     post<{ success: boolean; message: string }>('/stock-returns/create', data),
+  /** 报表聚合行还原：按退货单号取明细（供行内编辑/删除） */
+  records: (nos: string) =>
+    get<{ success?: boolean; data: StockReturnFlowRecord[] }>('/stock-returns/records', { nos }),
+  /** 编辑退货（后端单事务内「取消原退货 + 重建」，新记录带新单号） */
+  update: (id: number, data: StockReturnUpdatePayload) =>
+    put<{ success?: boolean; message?: string }>(`/stock-returns/${id}`, data),
   /** 取消退货（P1-1 软删除：记录保留，库存对称扣回） */
   remove: (id: number) => del<{ success: boolean; message: string }>(`/stock-returns/${id}`),
 }
