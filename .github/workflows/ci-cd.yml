@@ -186,14 +186,13 @@ jobs:
         python-version: '3.13'
     
     - name: Install linters
-      # 除 ruff/mypy 外必须装 alembic：quality_gate 的 alembic_heads 门禁（MODE_EXIT）
-      # 跑 scripts/check_alembic_heads.py，该脚本按设计**只走 alembic 的
-      # ScriptDirectory** 解析迁移目录（朴素 AST 会漏 AnnAssign 产生伪影）。缺 alembic
-      # 时脚本返回退出码 2（环境异常），门禁保守判 unknown_violation → REGRESS ——
-      # 与迁移图无关的**假红**（2026-10-08 实测：`[ERROR] alembic 不可用`）。
+      # 装项目 dev 依赖（requirements/dev.txt = base.txt 的钉版 + ruff / mypy）。
+      # 必须走 requirements，不能用裸 `pip install sqlalchemy`：项目钉 sqlalchemy==2.0.49，
+      # 裸装会拉到 2.1.x，其 typing 收窄会让 mypy 在 12 处报错（本地 dev 环境 368 文件全绿）。
+      # alembic（quality_gate 的 alembic_heads 门禁需要）已随 base.txt 一并安装。
       run: |
         python -m pip install --upgrade pip
-        pip install ruff mypy alembic sqlalchemy
+        pip install -r requirements/dev.txt
     
     # 密钥扫描（CI 侧第二道防线）：`.githooks/pre-commit` 只在本地跑、且可被
     # `git commit --no-verify` 绕过 —— 该文件头部已把「CI 侧必须另有一道独立扫描」
