@@ -11,6 +11,22 @@ class TestReportSchemas:
         assert item.customer == "测试"
         assert item.quantity == 100
 
+    def test_report_response_keeps_flow_nos(self):
+        """聚合行的还原单号与备注不得被 response_model 裁掉（回归 2026-10-08）。
+
+        出货流水行内编辑/删除靠 stockout_nos 还原明细行，备货抵扣备注列读 order_note。
+        二者曾不在 ReportLogItem 里，被 FastAPI 的 response_model 静默剔除，前端
+        拿不到单号 → 弹「未能找到该组对应的明细记录」，行内操作从未生效。
+        """
+        from fastapi_app.schemas.report import ReportResponse
+        resp = ReportResponse(logs=[{
+            'stockout_nos': 'SO-20261006-0001',
+            'order_note': '抵扣备注',
+        }])
+        row = resp.model_dump()['logs'][0]
+        assert row['stockout_nos'] == 'SO-20261006-0001'
+        assert row['order_note'] == '抵扣备注'
+
     def test_report_export_request(self):
         from fastapi_app.schemas.report import ReportExportRequest
         req = ReportExportRequest(type="order", customer="客户1")

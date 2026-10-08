@@ -21,8 +21,10 @@ class ReportLogItem(BaseModel):
     return_count: int = 0
     order_nos: str = ''
     stockin_nos: str = ''
+    stockout_nos: str = ''
     return_nos: str = ''
     note: str = ''
+    order_note: str = ''
 
 
 class ReportResponse(BaseModel):

@@ -33018,6 +33018,11 @@
             "title": "Stockin Nos",
             "default": ""
           },
+          "stockout_nos": {
+            "type": "string",
+            "title": "Stockout Nos",
+            "default": ""
+          },
           "return_nos": {
             "type": "string",
             "title": "Return Nos",
@@ -33026,6 +33031,11 @@
           "note": {
             "type": "string",
             "title": "Note",
+            "default": ""
+          },
+          "order_note": {
+            "type": "string",
+            "title": "Order Note",
             "default": ""
           }
         },

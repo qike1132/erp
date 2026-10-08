@@ -2368,8 +2368,10 @@ export interface ReportLogItem {
   return_count?: number
   order_nos?: string
   stockin_nos?: string
+  stockout_nos?: string
   return_nos?: string
   note?: string
+  order_note?: string
 }
 
 export interface ReportResponse {
