@@ -39,12 +39,18 @@ const props = withDefaults(
     width?: string
     /** 居中面板（如宽表格明细），而不是贴边抽屉。此时 width 作为最大宽度。 */
     centered?: boolean
+    /**
+     * 点遮罩空白是否关闭（默认 true）。置 false 后只能用 ✕ / Esc 关 ——
+     * 用于「误触空白会丢掉内容/状态」的面板。
+     */
+    dismissable?: boolean
   }>(),
   {
     position: 'right',
     title: '',
     width: '520px',
     centered: false,
+    dismissable: true,
   },
 )
 
@@ -84,7 +90,7 @@ function onHide() {
     :position="drawerPosition"
     :style="panelStyle"
     :show-close-icon="true"
-    :dismissable="true"
+    :dismissable="dismissable"
     :close-on-escape="true"
     @update:visible="onHide"
   >

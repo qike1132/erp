@@ -80,9 +80,11 @@ export const plushCutePT: PrimeVuePTOptions = {
         'shadow-xl',
         'overflow-hidden',
         'animate-slide-up',
-        // 居中面板（宽表格明细等）：mask 的 flex 居中会把它摆到屏幕正中，这里只管限宽限高 + 圆角
+        // 居中面板（宽表格明细等）：mask 的 flex 居中会把它摆到屏幕正中。
+        // 高度写死而非自适应 —— 行数少时面板会跟着缩水，尺寸忽大忽小很别扭；
+        // 固定高度后内容区（content 的 flex-1 overflow-y-auto）自己滚动。
         props.position === 'center'
-          ? 'w-[95%] max-h-[88vh] rounded-2xl'
+          ? 'w-[95%] h-[85vh] rounded-2xl'
           : // 左右抽屉：撑满高度，宽度由 UiDrawer 传的 inline width 决定（这里的 520 仅兜底）；
             // 上下抽屉：占满宽度、限高。定位交给 mask 的 justify/align（见上）。
             props.position === 'left' || props.position === 'right'

@@ -2,6 +2,7 @@
   <UiDrawer
     :visible="open"
     centered
+    :dismissable="false"
     title="生产明细"
     width="1360px"
     @update:visible="emit('update:open', $event)"
@@ -158,7 +159,7 @@ const emit = defineEmits<{
 const pendingDelete = ref<DailyProductionRecord | null>(null)
 
 /**
- * 抽屉可被 Escape / 点遮罩关闭（UiDrawer 的 close-on-escape / dismissable），
+ * 本面板可被 Esc / 右上角 ✕ 关闭（点遮罩空白有意不关，见模板的 :dismissable="false"），
  * 而本组件由父级无条件渲染、关闭后并不卸载。若不清空 pendingDelete，
  * 重开抽屉会对一条已失去上下文的记录弹出删除确认 —— 对不可恢复的物理删除
  * 来说这是不可接受的，故抽屉一关就丢弃待删除状态。

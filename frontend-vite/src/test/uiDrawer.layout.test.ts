@@ -22,7 +22,7 @@ import UiDrawer from '@/components/ui/UiDrawer.vue'
 import { plushCutePT } from '@/styles/primevue-pt'
 
 function mountDrawer(props: Record<string, unknown> = {}) {
-  mount(UiDrawer, {
+  return mount(UiDrawer, {
     props: { visible: true, title: '标题', width: '960px', ...props },
     slots: { default: '<div data-test="body">BODY</div>' },
     attachTo: document.body,
@@ -81,7 +81,7 @@ describe('UiDrawer 布局契约', () => {
     expect(panel().classList.contains('w-full')).toBe(true)
   })
 
-  it('居中模式：面板居中、限宽限高，width 当作 max-width（而非固定宽度）', async () => {
+  it('居中模式：面板居中、固定尺寸，width 当作 max-width（而非固定宽度）', async () => {
     mountDrawer({ centered: true, width: '1100px' })
     await nextTick()
     await nextTick()
@@ -94,7 +94,35 @@ describe('UiDrawer 布局契约', () => {
     expect(panel().style.maxWidth).toBe('1100px')
     expect(panel().style.width).toBe('')
     expect(panel().classList.contains('w-[95%]')).toBe(true)
-    // 居中面板不能撑满高度，否则会变成整屏
+    // 高度必须写死：行数少时面板不能跟着内容缩水
+    expect(panel().classList.contains('h-[85vh]')).toBe(true)
+    // 但也不能撑满高度，否则会变成整屏
     expect(panel().classList.contains('h-full')).toBe(false)
+  })
+
+  it('dismissable 默认为 true：点遮罩空白会关闭', async () => {
+    const wrapper = mountDrawer()
+    await nextTick()
+    await nextTick()
+
+    document.querySelector<HTMLElement>('[data-pc-section="mask"]')!.dispatchEvent(
+      new MouseEvent('mousedown', { bubbles: true }),
+    )
+    await nextTick()
+
+    expect(wrapper.emitted('update:visible')).toEqual([[false]])
+  })
+
+  it('dismissable=false：点遮罩空白不关闭（只能用 ✕ / Esc）', async () => {
+    const wrapper = mountDrawer({ dismissable: false })
+    await nextTick()
+    await nextTick()
+
+    document.querySelector<HTMLElement>('[data-pc-section="mask"]')!.dispatchEvent(
+      new MouseEvent('mousedown', { bubbles: true }),
+    )
+    await nextTick()
+
+    expect(wrapper.emitted('update:visible')).toBeUndefined()
   })
 })
