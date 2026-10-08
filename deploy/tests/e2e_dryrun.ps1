@@ -91,6 +91,8 @@ try {
     'node_modules\dummy.txt',
     '.cursor\dummy.txt',
     '.codeartsdoer\dummy.txt',
+    '.mimosa\dummy.txt',
+    'pytest-of-Administrator\dummy.txt',
     '.zcodeignore'
   )
   foreach($rel in $dummyArtifacts){
@@ -134,7 +136,8 @@ try {
   Section '6/7 核验排除项（AI 痕迹 / 运行期数据不进包）'
   $mustAbsent = @(
     'app\_ops','app\config\pgbouncer','app\node_modules','app\.git',
-    'app\.venv','app\.codeartsdoer','app\.cursor','app\.zcodeignore'
+    'app\.venv','app\.codeartsdoer','app\.cursor','app\.zcodeignore',
+    'app\.mimosa','app\pytest-of-Administrator'
   )
   foreach($rel in $mustAbsent){ Assert (-not (Test-Path (Join-Path $OutDir $rel))) ("不存在：" + $rel) }
 

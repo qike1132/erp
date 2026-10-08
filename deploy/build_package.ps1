@@ -57,8 +57,8 @@ $xd = @((Join-Path $ProjectDir '.git'),(Join-Path $ProjectDir '.venv'),(Join-Pat
         (Join-Path $ProjectDir '_ops'),(Join-Path $ProjectDir 'config\pgbouncer'),
         (Join-Path $ProjectDir 'deploy\binaries'))
 # /XD 除构建垃圾外，须排除 AGENTS.md §7 的全部 AI 工具痕迹目录（15+），避免打进包
-$aiTrail = @('.agent','.claude','.cursor','.graphflow','.graphflow-cache','graphflow-out','.trae','.qoder','.workbuddy','.workbuddy-ai','.reasonix','.superpowers','.codebuddy','.freebuff','.lean-ctx','.resultverify','.codeartsdoer','.zcode','.agent-teams')
-robocopy $ProjectDir (Join-Path $OutDir 'app') /E /XD @('node_modules','__pycache__','.pytest_cache','.mypy_cache','.ruff_cache') $aiTrail @xd /XF @('*.pyc','*.pyo','*.log','*.tmp','*.pid','dsh-web-dump-config.txt','nul','.zcodeignore') /NFL /NDL /NJH /NJS /NP /R:1 /W:1 | Out-Null
+$aiTrail = @('.agent','.claude','.cursor','.graphflow','.graphflow-cache','graphflow-out','.trae','.qoder','.workbuddy','.workbuddy-ai','.reasonix','.superpowers','.codebuddy','.freebuff','.lean-ctx','.resultverify','.codeartsdoer','.zcode','.agent-teams','.mimosa')
+robocopy $ProjectDir (Join-Path $OutDir 'app') /E /XD @('node_modules','__pycache__','.pytest_cache','.mypy_cache','.ruff_cache','pytest-of-Administrator') $aiTrail @xd /XF @('*.pyc','*.pyo','*.log','*.tmp','*.pid','dsh-web-dump-config.txt','nul','.zcodeignore') /NFL /NDL /NJH /NJS /NP /R:1 /W:1 | Out-Null
 if($LASTEXITCODE -ge 8){ Write-Fail "robocopy 失败 (exit=$LASTEXITCODE)：拷 app 代码"; exit 1 }
 if($WithNodeModules){ robocopy (Join-Path $ProjectDir 'frontend-vite\node_modules') (Join-Path $OutDir 'app\frontend-vite\node_modules') /E /NFL /NDL /NJH /NJS /NP /R:1 /W:1 | Out-Null
   if($LASTEXITCODE -ge 8){ Write-Fail "robocopy 失败 (exit=$LASTEXITCODE)：拷 node_modules"; exit 1 } }
