@@ -80,6 +80,7 @@ $sdCases = @(
   @{ Out='D:\';             Proj='D:\erp_system'; Want=$false; Name='拒绝盘根' }
   @{ Out='D:\erp_system';   Proj='D:\erp_system'; Want=$false; Name='拒绝等于库目录' }
   @{ Out='D:\';             Proj='D:\erp_system'; Want=$false; Name='拒绝库目录的祖辈' }
+  @{ Out='D:\erp_system\pkg'; Proj='D:\erp_system'; Want=$false; Name='拒绝库目录的子孙' }
   @{ Out='D:\erp_portable'; Proj='D:\erp_system'; Want=$true;  Name='接受独立目录' }
 )
 foreach($c in $sdCases){

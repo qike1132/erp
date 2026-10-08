@@ -86,7 +86,7 @@ function Unprotect-File([string]$InPath,[string]$OutPath,[string]$Password){
 function Test-SafeOutDir([string]$OutDir,[string]$ProjectDir){
   $o=[IO.Path]::GetFullPath($OutDir).TrimEnd('\','/'); $p=[IO.Path]::GetFullPath($ProjectDir).TrimEnd('\','/')
   $r=[IO.Path]::GetPathRoot($o).TrimEnd('\','/')
-  -not ($o -eq '' -or $o -eq $r -or $o -eq $p -or $p.StartsWith($o + '\',[StringComparison]::OrdinalIgnoreCase))
+  -not ($o -eq '' -or $o -eq $r -or $o -eq $p -or $p.StartsWith($o + '\',[StringComparison]::OrdinalIgnoreCase) -or $o.StartsWith($p + '\',[StringComparison]::OrdinalIgnoreCase))
 }
 
 function Get-PgTool([string]$ExeName){
