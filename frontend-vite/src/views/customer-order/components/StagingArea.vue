@@ -70,7 +70,7 @@
           style="min-width: 200px"
           @click="emit('submit-all')"
         >
-          <FontAwesomeIcon icon="paper-plane" aria-hidden="true" />{{ submitting ? '提交中…' : `提交订单 (${stagedItems.length})` }}
+          <FontAwesomeIcon icon="paper-plane" aria-hidden="true" />{{ submitLabel }}
         </UiButton>
       </div>
     </div>
@@ -78,10 +78,11 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import UiButton from '@/components/ui/UiButton.vue'
 import type { StagedItem } from '../composables/types'
 
-defineProps<{
+const props = defineProps<{
   stagedItems: StagedItem[]
   submitting: boolean
 }>()
@@ -91,6 +92,18 @@ const emit = defineEmits<{
   'remove-staged': [uid: string]
   'submit-all': []
 }>()
+
+const orderCount = computed(() => props.stagedItems.filter((i) => i.type === 'order').length)
+const stockinCount = computed(() => props.stagedItems.length - orderCount.value)
+
+/** 按钮文案必须如实区分订单/备货：混着备货时「提交订单 (N)」会让人以为全是订单，
+ * 而备货是要写库存的（2026-10-06 出库"凭空库存"事故的可见性缺口之一） */
+const submitLabel = computed(() => {
+  if (props.submitting) return '提交中…'
+  if (orderCount.value && stockinCount.value) return `提交：订单 ${orderCount.value} + 备货 ${stockinCount.value}`
+  if (stockinCount.value) return `提交备货 (${stockinCount.value})`
+  return `提交订单 (${orderCount.value})`
+})
 </script>
 
 <style scoped>
