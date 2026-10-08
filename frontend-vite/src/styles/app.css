@@ -109,14 +109,17 @@
   /* Scrollbar */
   --color-scrollbar: #c1c1c1;
 
-  /* Z-Index scale */
+  /* Z-Index scale
+   * 注意：PrimeVue 自己的浮层走另一套更高的数值 —— main.ts 里 zIndex.modal=2100 /
+   * overlay=2000。所以凡是「要盖在 PrimeVue 抽屉/下拉之上」的层级（nested 弹窗、
+   * Toast），都必须超过 2100，否则会被 PrimeVue 的遮罩压住。 */
   --z-dropdown: 10;
   --z-sticky: 20;
   --z-overlay: 30;
   --z-modal: 40;
-  --z-overlay-nested: 60;
-  --z-modal-nested: 70;
-  --z-toast: 50;
+  --z-overlay-nested: 2200;
+  --z-modal-nested: 2210;
+  --z-toast: 2300;
 
   /* Font */
   --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', Roboto, sans-serif;

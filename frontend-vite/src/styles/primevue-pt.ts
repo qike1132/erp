@@ -66,26 +66,31 @@ export const plushCutePT: PrimeVuePTOptions = {
   // Drawer
   // ============================================================
   drawer: {
-    root: 'fixed inset-0 flex z-[var(--z-modal)]',
+    // PrimeVue 4.5 的 DOM 形状：mask 是全屏 flex 容器（主题用 inline style 按 position
+    // 设 justify/align/z-index），**root 是面板本体**，content 才是内层滚动体。
+    // 早期这里按更老的 DOM 写反了：把「全屏容器」类挂在 root、把「面板」类挂在 content。
+    // 后果 —— UiDrawer 的 width 落在 root（面板）上，却被 content 的 w-[520px] 盖过，
+    // 抽屉实测恒为 520px 宽，header 还被 root 的 flex 行布局甩到屏幕左侧中部。
     mask: 'fixed inset-0 bg-black/30 backdrop-blur-sm transition-opacity duration-300',
-    content: ({ props }: { props: { position: string } }) => ({
+    root: ({ props }: { props: { position: string } }) => ({
       class: [
         'relative',
         'flex flex-col',
         'bg-white',
         'shadow-xl',
-        props.position === 'right'
-          ? 'ml-auto h-full w-[520px] max-w-[95vw]'
-          : props.position === 'left'
-            ? 'mr-auto h-full w-[520px] max-w-[95vw]'
-            : props.position === 'bottom'
-              ? 'mt-auto w-full max-h-[80vh]'
-              : 'mb-auto w-full max-h-[80vh]',
-        'overflow-y-auto',
-        'px-6 py-5',
+        'overflow-hidden',
         'animate-slide-up',
+        // 居中面板（宽表格明细等）：mask 的 flex 居中会把它摆到屏幕正中，这里只管限宽限高 + 圆角
+        props.position === 'center'
+          ? 'w-[95%] max-h-[88vh] rounded-2xl'
+          : // 左右抽屉：撑满高度，宽度由 UiDrawer 传的 inline width 决定（这里的 520 仅兜底）；
+            // 上下抽屉：占满宽度、限高。定位交给 mask 的 justify/align（见上）。
+            props.position === 'left' || props.position === 'right'
+            ? 'h-full w-[520px] max-w-[95vw]'
+            : 'w-full max-h-[80vh]',
       ],
     }),
+    content: 'flex-1 min-h-0 overflow-y-auto px-6 py-5',
     header: 'flex items-center justify-between px-6 py-4 border-b border-border-light flex-shrink-0',
     title: 'text-lg font-bold text-heading',
   },

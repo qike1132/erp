@@ -29,20 +29,39 @@
  */
 // 按组件深导入（PrimeVue 官方推荐写法），显式声明依赖
 import Drawer from 'primevue/drawer'
+import { computed } from 'vue'
 
-withDefaults(
+const props = withDefaults(
   defineProps<{
     visible: boolean
     position?: 'left' | 'right' | 'top' | 'bottom'
     title?: string
     width?: string
+    /** 居中面板（如宽表格明细），而不是贴边抽屉。此时 width 作为最大宽度。 */
+    centered?: boolean
   }>(),
   {
     position: 'right',
     title: '',
     width: '520px',
+    centered: false,
   },
 )
+
+/**
+ * 居中模式走 PrimeVue 的 `center` 定位：mask 是 flex 容器，主题的 inline style 会对
+ * 未知 position 用 justify/align = center，于是面板落在屏幕正中（见 primevue-pt 的 drawer.root）。
+ */
+const drawerPosition = computed(() => (props.centered ? 'center' : props.position))
+
+/**
+ * 宽度：居中模式当作 max-width（面板用 w-[95%] 自适应）；左右抽屉是固定 width；
+ * 上下抽屉固定占满宽度（见 primevue-pt 的 drawer.root），不套用 width，否则会被默认 520px 压窄。
+ */
+const panelStyle = computed(() => {
+  if (props.centered) return { maxWidth: props.width }
+  return props.position === 'left' || props.position === 'right' ? { width: props.width } : undefined
+})
 
 defineSlots<{
   default: () => unknown
@@ -62,8 +81,8 @@ function onHide() {
 <template>
   <Drawer
     :visible="visible"
-    :position="position"
-    :style="{ width }"
+    :position="drawerPosition"
+    :style="panelStyle"
     :show-close-icon="true"
     :dismissable="true"
     :close-on-escape="true"

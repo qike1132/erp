@@ -296,7 +296,8 @@ defineExpose({ openRecordsFor, recordsOpen, recordsFilters })
   position: fixed;
   top: 20px;
   right: 20px;
-  z-index: 120;
+  /* 导出提示可能来自抽屉内（明细 → 导出），必须盖在 PrimeVue 抽屉遮罩（z 2100）之上 */
+  z-index: var(--z-toast);
   padding: 10px 18px;
   border-radius: 10px;
   font-size: 13px;
