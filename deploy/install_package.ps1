@@ -123,7 +123,7 @@ function Get-RedisKeyTtl([string]$RedisHost,[int]$Port,[string]$Password,[string
       $line=$enc.GetString($buf.ToArray())
       if($c[0] -eq 'AUTH' -and -not $line.StartsWith('+OK')){ return $null }
     }
-    if($line -match '^-?\d+$'){ return [int]$line }
+    if($line -match '^:?-?\d+$'){ return [int]($line -replace '^:','') }
     return $null
   } catch { return $null } finally { if($client){ $client.Close() } }
 }
