@@ -55,12 +55,15 @@ $xd = @((Join-Path $ProjectDir '.git'),(Join-Path $ProjectDir '.venv'),(Join-Pat
         (Join-Path $ProjectDir 'temp'),(Join-Path $ProjectDir 'backups'),(Join-Path $ProjectDir 'dist'),
         (Join-Path $ProjectDir '_ops'),(Join-Path $ProjectDir 'config\pgbouncer'))
 # /XD 除构建垃圾外，须排除 AGENTS.md §7 的全部 AI 工具痕迹目录（15+），避免打进包
-$aiTrail = @('.agent','.claude','.cursor','.graphflow','.graphflow-cache','graphflow-out','.trae','.qoder','.workbuddy','.reasonix','.superpowers','.codebuddy','.freebuff','.lean-ctx','.resultverify','.codeartsdoer','.zcode')
-robocopy $ProjectDir (Join-Path $OutDir 'app') /E /XD @('node_modules','__pycache__','.pytest_cache','.mypy_cache','.ruff_cache') $aiTrail @xd /XF @('*.pyc','*.pyo','*.log','*.tmp','*.pid','dsh-web-dump-config.txt','nul') /NFL /NDL /NJH /NJS /NP /R:1 /W:1 | Out-Null
-if($WithNodeModules){ robocopy (Join-Path $ProjectDir 'frontend-vite\node_modules') (Join-Path $OutDir 'app\frontend-vite\node_modules') /E /NFL /NDL /NJH /NJS /NP /R:1 /W:1 | Out-Null }
+$aiTrail = @('.agent','.claude','.cursor','.graphflow','.graphflow-cache','graphflow-out','.trae','.qoder','.workbuddy','.workbuddy-ai','.reasonix','.superpowers','.codebuddy','.freebuff','.lean-ctx','.resultverify','.codeartsdoer','.zcode','.agent-teams')
+robocopy $ProjectDir (Join-Path $OutDir 'app') /E /XD @('node_modules','__pycache__','.pytest_cache','.mypy_cache','.ruff_cache') $aiTrail @xd /XF @('*.pyc','*.pyo','*.log','*.tmp','*.pid','dsh-web-dump-config.txt','nul','.zcodeignore') /NFL /NDL /NJH /NJS /NP /R:1 /W:1 | Out-Null
+if($LASTEXITCODE -ge 8){ Write-Fail "robocopy 失败 (exit=$LASTEXITCODE)：拷 app 代码"; exit 1 }
+if($WithNodeModules){ robocopy (Join-Path $ProjectDir 'frontend-vite\node_modules') (Join-Path $OutDir 'app\frontend-vite\node_modules') /E /NFL /NDL /NJH /NJS /NP /R:1 /W:1 | Out-Null
+  if($LASTEXITCODE -ge 8){ Write-Fail "robocopy 失败 (exit=$LASTEXITCODE)：拷 node_modules"; exit 1 } }
 
 Write-Step '2/6 拷 runtime'
 robocopy $PyDir (Join-Path $OutDir 'runtime\python313') /E /XD '__pycache__' /XF @('*.pyc','*.pyo') /NFL /NDL /NJH /NJS /NP /R:1 /W:1 | Out-Null
+if($LASTEXITCODE -ge 8){ Write-Fail "robocopy 失败 (exit=$LASTEXITCODE)：拷 runtime"; exit 1 }
 if($DryRun){
   Write-Warn 'DryRun：跳过 runtime 依赖安装（pip install base/dev/test/ocr）与导入自检'
 } else {
@@ -72,13 +75,24 @@ if($DryRun){
 
 Write-Step '3/6 拷前端 dist'
 robocopy (Join-Path $ProjectDir 'frontend-vite\dist') (Join-Path $OutDir 'frontend\dist') /E /NFL /NDL /NJH /NJS /NP /R:1 /W:1 | Out-Null
+if($LASTEXITCODE -ge 8){ Write-Fail "robocopy 失败 (exit=$LASTEXITCODE)：拷 frontend\dist"; exit 1 }
 
 Write-Step '4/6 拷 settings + static + dump'
-Copy-Item (Join-Path $ProjectDir '.env') (Join-Path $OutDir 'settings\.env') -Force
-foreach($f in 'nginx-windows.conf','redis-broker.conf','security-headers.conf','log_policy.json','nssm-services.json'){ Copy-Item (Join-Path $ProjectDir "config\$f") (Join-Path $OutDir "settings\$f") -Force }
+$envSrc = Join-Path $ProjectDir '.env'
+if(-not (Test-Path $envSrc)){ Write-Fail "缺少设置文件 $envSrc"; exit 1 }
+Copy-Item $envSrc (Join-Path $OutDir 'settings\.env') -Force
+foreach($f in 'nginx-windows.conf','redis-broker.conf','security-headers.conf','log_policy.json','nssm-services.json'){
+  $src = Join-Path $ProjectDir "config\$f"
+  if(-not (Test-Path $src)){ Write-Fail "缺少设置文件 $src"; exit 1 }
+  Copy-Item $src (Join-Path $OutDir "settings\$f") -Force
+}
 robocopy (Join-Path $ProjectDir 'config\jwt') (Join-Path $OutDir 'settings\jwt') /E /NFL /NDL /NJH /NJS /NP | Out-Null
-Copy-Item (Join-Path $ProjectDir 'config\uploads-signing.conf') (Join-Path $OutDir 'settings\uploads-signing.conf') -Force
+if($LASTEXITCODE -ge 8){ Write-Fail "robocopy 失败 (exit=$LASTEXITCODE)：拷 settings\jwt"; exit 1 }
+$usSrc = Join-Path $ProjectDir 'config\uploads-signing.conf'
+if(-not (Test-Path $usSrc)){ Write-Fail "缺少设置文件 $usSrc"; exit 1 }
+Copy-Item $usSrc (Join-Path $OutDir 'settings\uploads-signing.conf') -Force
 robocopy (Join-Path $ProjectDir 'static') (Join-Path $OutDir 'data\static') /E /NFL /NDL /NJH /NJS /NP | Out-Null
+if($LASTEXITCODE -ge 8){ Write-Fail "robocopy 失败 (exit=$LASTEXITCODE)：拷 static"; exit 1 }
 if(Test-Path $binDir){ foreach($f in (Get-ChildItem $binDir -File)){ Copy-Item $f.FullName (Join-Path $OutDir 'binaries') -Force } }
 # install_package.ps1 由 Task 4 产出；此处缺失非致命（Task 4 后重建包即含）
 $instSrc = Join-Path $PSScriptRoot 'install_package.ps1'
@@ -110,13 +124,15 @@ target_ip  : $ServerIP
 if(-not $SkipZip -and -not $DryRun){
   Write-Step '6/6 加密 + sha256'
   if($EncryptKey){ Write-Warn '-EncryptKey 会进入 PowerShell 历史与进程列表；建议省略改用交互式隐藏输入' }
-  $tgz = Join-Path ([IO.Path]::GetDirectoryName($OutDir)) "erp_portable_$stamp.tar.gz"
-  Push-Location (Split-Path $OutDir -Parent)
-  & tar.exe -czf $tgz (Split-Path $OutDir -Leaf); $rc=$LASTEXITCODE; Pop-Location
+  $OutDirNorm = $OutDir.TrimEnd('\','/')
+  $tgz = Join-Path ([IO.Path]::GetDirectoryName($OutDirNorm)) "erp_portable_$stamp.tar.gz"
+  Push-Location (Split-Path $OutDirNorm -Parent)
+  & tar.exe -czf $tgz (Split-Path $OutDirNorm -Leaf); $rc=$LASTEXITCODE; Pop-Location
   if($rc -ne 0){ Write-Fail "tar 失败 exit=$rc"; exit 1 }
   if(-not $EncryptKey){ $sec=Read-Host -AsSecureString '设置便携包加密口令'; $EncryptKey=[Runtime.InteropServices.Marshal]::PtrToStringBSTR([Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec)) }
   $enc = "$tgz.enc"; Protect-File -InPath $tgz -OutPath $enc -Password $EncryptKey; Remove-Item $tgz -Force
-  ([IO.File]::ReadAllBytes($enc) | ForEach-Object { $_.ToString('x2') }) -join '' | Set-Content "$enc.sha256"
+  $hash = (Get-FileHash -Path $enc -Algorithm SHA256).Hash.ToLower()
+  [IO.File]::WriteAllText("$enc.sha256", $hash, [Text.UTF8Encoding]::new($false))
   Write-Ok "产出 $enc"
 }
 Write-Ok 'BUILD COMPLETE'
