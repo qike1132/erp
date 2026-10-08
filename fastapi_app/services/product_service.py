@@ -6,7 +6,7 @@
 import logging
 from collections.abc import Awaitable, Callable
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -348,11 +348,15 @@ async def delete_product(db: AsyncSession, product_id: int) -> None:
     if not product:
         raise ProductNotFoundError(product_id)
 
-    # 单次往返完成 3 类关联计数（多 SKU 订单需同时检查 Order.product_id 与 OrderItem.product_id）
-    # 软删除订单同样计入：其 order_item 行仍在，漏计会让删除走到外键违例（500）。
+    # 单次往返完成 3 类关联计数（多 SKU 订单需同时检查 Order.product_id 与 OrderItem.product_id）。
+    # 软删订单**不**因 Order.product_id 而计入：真实删除路径（order/commands.py 的
+    # _purge_order_related_rows）已清掉该订单的 order_item，软删订单不再持有对 product
+    # 的外键引用，故不阻塞删除（否则「订单已全删」的产品永远删不掉）。
+    # 但 order_item 仍引用本产品的订单必须计入 —— 那是 FK NO ACTION 的真实阻塞源，
+    # 也兜住历史遗留未清理明细的软删订单。
     order_subq = select(func.count(Order.id)).where(
         or_(
-            Order.product_id == product_id,
+            and_(Order.is_deleted.isnot(True), Order.product_id == product_id),
             Order.id.in_(select(OrderItem.order_id).where(OrderItem.product_id == product_id))
         )
     ).scalar_subquery()

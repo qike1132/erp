@@ -8,13 +8,15 @@ IntegrityError —— 此前未被捕获，端点把它变成 500，用户只看
 
 本文件锁定修复后的口径：
 - 被历史单据引用的产品，删除必须抛 ProductDeleteError（端点映射为 400）
-- 软删除订单同样算"被引用"，且给出具体的订单数文案
+- 仍持有 order_item 的软删除订单同样算"被引用"，且给出具体的订单数文案
+- 明细已随订单清理的软删订单不阻塞删除（订单全删的产品可正常删除）
 - 仅持有 BOM 物料行的产品仍应能正常删除（ORM 级联）
 """
 from datetime import UTC, datetime
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import delete as sa_delete
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from fastapi_app.services import product_service
@@ -50,11 +52,11 @@ def _make_product(name: str) -> Product:
 
 
 async def test_soft_deleted_order_blocks_product_delete(db):
-    """只有软删除订单的产品，删除必须被业务拒绝（而非 500）。
+    """软删订单**仍持有 order_item** 时，删除必须被业务拒绝（而非泛化的外键错误）。
 
-    回归：计数带 ``Order.is_deleted.isnot(True)``，软删订单不计入 →
-    计数为 0 → 走到 db.delete(product) → order_item 外键 NO ACTION
-    抛出 IntegrityError → 端点 500。
+    阻塞源是 order_item 对 product 的 FK NO ACTION（不是订单的软删状态本身）。
+    计数以 order_item 为准，故仍给出"已关联 N 个订单"的具体文案，
+    而不是走到 db.delete(product) 才被 IntegrityError 兜成泛化错误。
     """
     product = _make_product('PDEL-软删订单')
     db.add(product)
@@ -74,6 +76,38 @@ async def test_soft_deleted_order_blocks_product_delete(db):
 
     with pytest.raises(ProductHasRelatedOrdersError):
         await product_service.delete_product(db, product.id)
+
+
+async def test_product_with_only_soft_deleted_orders_can_be_deleted(db):
+    """订单已软删除且明细已随订单清理的产品，应能正常删除。
+
+    背景（2026-10-08）：关联计数曾无条件计入软删订单，导致「订单已全部删除」
+    的产品仍报"已关联 N 个订单"。真实删除路径（order/commands.py）会清掉
+    order_item，故软删订单不再构成外键阻塞 —— 计数应只拦活订单，
+    外加仍持有 order_item 的订单（后者是真正的 FK NO ACTION 阻塞源）。
+    """
+    product = _make_product('PDEL-仅软删订单')
+    db.add(product)
+    await db.flush()
+
+    order = Order(
+        order_no='PDEL-O-002', customer='PDEL客户', order_date=datetime.now(UTC),
+        product_id=product.id, quantity=1, status='待备货',
+    )
+    db.add(order)
+    await db.flush()
+    db.add(OrderItem(order_id=order.id, product_id=product.id, quantity=1))
+    await db.flush()
+
+    # 复刻真实删除路径：软删订单 + 清掉明细
+    await db.execute(sa_delete(OrderItem).where(OrderItem.order_id == order.id))
+    order.is_deleted = True
+    await db.flush()
+
+    await product_service.delete_product(db, product.id)
+    await db.flush()
+
+    assert await db.get(Product, product.id) is None
 
 
 async def test_uncounted_fk_blocks_product_delete(db):
