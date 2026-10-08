@@ -19,6 +19,7 @@
 > 「以管理员身份运行」。它们以 `-ExecutionPolicy Bypass` 调对应脚本，并在结束时 **`pause` 停住窗口**
 > （不再「闪退」，报错能看清）。要带参数（如 `-DryRun`）就在 cmd 里 `build.cmd -DryRun`，或给快捷方式加参数。
 > 注：`.cmd` 内为纯 ASCII（cmd.exe 按 OEM 代码页读取，中文会乱码）；中文输出由 PowerShell 脚本负责。
+> 也可双击**中文名** [`一键构建.cmd`](一键构建.cmd) / [`一键安装.cmd`](一键安装.cmd)——它们是上面两个的转发壳。
 
 ---
 
