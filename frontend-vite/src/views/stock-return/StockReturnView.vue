@@ -77,18 +77,15 @@
               {{ (row as StockReturnRow).status === 'cancelled' ? '已取消' : '正常' }}
             </span>
           </template>
-          <template v-if="canManage" #column-body-actions="{ row }">
-            <button
-              v-if="(row as StockReturnRow).status !== 'cancelled'"
-              class="sr-cancel-btn"
+          <template v-if="canEdit || canDelete" #column-body-actions="{ row }">
+            <StockReturnRowActions
+              :row="row as StockReturnRow"
+              :can-edit="canEdit"
+              :can-delete="canDelete"
               :disabled="actionId === (row as StockReturnRow).id"
-              aria-label="取消退货"
-              title="取消退货（记录保留，库存对称扣回）"
-              @click="handleDelete(row as StockReturnRow)"
-            >
-              <FontAwesomeIcon icon="rotate-left" aria-hidden="true" />
-            </button>
-            <span v-else class="sr-cancelled-mark">—</span>
+              @edit="openReturnEdit"
+              @delete="handleDelete"
+            />
           </template>
         </UiDataTable>
       </div>
@@ -105,6 +102,14 @@
       @search="searchShipments"
       @pick="pickShipment"
       @submit="handleSubmit"
+    />
+
+    <EditReturnModal
+      v-model:form="returnEditForm"
+      :open="returnEditVisible"
+      :saving="savingReturn"
+      :save-return-edit="saveReturnEdit"
+      @update:open="returnEditVisible = $event"
     />
 
     <UiConfirmDialog
@@ -136,12 +141,23 @@ import UiSearchInput from '@/components/ui/UiSearchInput.vue'
 import { useAuthStore } from '@/stores/auth'
 import type { StockReturnRecord } from '@/api/stockReturn'
 import StockReturnCreateDialog from './components/StockReturnCreateDialog.vue'
+import StockReturnRowActions from './components/StockReturnRowActions.vue'
+import EditReturnModal from '@/views/report/components/EditReturnModal.vue'
 import { useStockReturn } from './composables/useStockReturn'
 
 type StockReturnRow = StockReturnRecord
 
 const auth = useAuthStore()
 const canManage = computed(() => auth.hasPermission('stock_return_manage'))
+// 行内操作各自独立授权，且镜像后端 require_any_permission 的口径
+// （PUT/DELETE 均接受 stock_return_manage 或对应子码 return_edit/return_delete）——
+// 只授模块管理码的用户同样能操作，避免前端把后端允许的动作藏起来。
+const canEdit = computed(
+  () => auth.hasPermission('stock_return_manage') || auth.hasPermission('return_edit'),
+)
+const canDelete = computed(
+  () => auth.hasPermission('stock_return_manage') || auth.hasPermission('return_delete'),
+)
 
 const {
   confirmDialog,
@@ -170,6 +186,11 @@ const {
   openStandalone,
   handleSubmit,
   handleDelete,
+  returnEditVisible,
+  returnEditForm,
+  savingReturn,
+  openReturnEdit,
+  saveReturnEdit,
 } = useStockReturn()
 
 /** 信息条展示用：防抖后的客户关键字（searchTerm 是输入框实时值） */
@@ -180,7 +201,7 @@ function onPage(event: { page: number }) {
   goPage(event.page + 1)
 }
 
-const actionsColumn: TableColumn = { field: 'actions', header: '操作', align: 'center', width: '90px' }
+const actionsColumn: TableColumn = { field: 'actions', header: '操作', align: 'center', width: '110px' }
 
 const columns: TableColumn[] = [
   { field: 'return_no', header: '退货编号', align: 'left', width: '160px' },
@@ -191,7 +212,7 @@ const columns: TableColumn[] = [
   { field: 'stockout_no', header: '关联出货单号', align: 'left', width: '160px' },
   { field: 'reason', header: '退货原因', align: 'left' },
   { field: 'status', header: '状态', align: 'center', width: '90px' },
-  ...(canManage.value ? [actionsColumn] : []),
+  ...(canEdit.value || canDelete.value ? [actionsColumn] : []),
 ]
 </script>
 
@@ -320,34 +341,5 @@ const columns: TableColumn[] = [
   background: var(--color-border-light, #f0f2f5);
   color: var(--color-text-muted, #64748b);
   border-color: var(--color-border, #e4e7ed);
-}
-.sr-cancelled-mark {
-  color: var(--color-text-muted);
-}
-/* 取消（软删除）：琥珀色「撤销」语义，非危险红 */
-.sr-cancel-btn {
-  width: 34px;
-  height: 34px;
-  border-radius: 0;
-  border: 2px solid transparent;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 13px;
-  cursor: pointer;
-  padding: 0;
-  background: var(--color-warning-50, #fff3e6);
-  color: var(--color-warning-700, #c47820);
-  border-color: var(--color-warning-200, #ffd199);
-  transition: background 0.2s ease, color 0.2s ease;
-}
-.sr-cancel-btn:hover {
-  background: var(--color-warning-500, #ff9f43);
-  color: white;
-  border-color: transparent;
-}
-.sr-cancel-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
 }
 </style>

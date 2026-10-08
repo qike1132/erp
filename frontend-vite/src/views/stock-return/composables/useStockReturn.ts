@@ -13,7 +13,13 @@ import { useApiMutation } from '@/composables/useApiMutation'
 import { useDebouncedSearch } from '@/composables/useDebouncedSearch'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { useAuthStore } from '@/stores/auth'
-import type { ShipmentOption, StockReturnCreatePayload } from '@/api/stockReturn'
+import type {
+  ShipmentOption,
+  StockReturnCreatePayload,
+  StockReturnRecord,
+  StockReturnUpdatePayload,
+} from '@/api/stockReturn'
+import type { ReturnEditForm } from '@/views/report/composables/useReportRowActions'
 
 /** 退货原因受控选项（P1 起落字典表；当前与后端 reason String(200) 自由文本兼容） */
 export const RETURN_REASON_OPTIONS = ['质量问题', '错发', '多送', '客户不要', '换货', '其他'] as const
@@ -220,6 +226,55 @@ export function useStockReturn() {
     actionId.value = 0
   }
 
+  // ---------- 修改退货（后端单事务：取消原单 + 按同一出货明细重建，新单号） ----------
+  // 与报表「退货流水」行内编辑同逻辑、同弹窗（EditReturnModal）。
+  const returnEditVisible = ref(false)
+  const returnEditForm = ref<ReturnEditForm | null>(null)
+
+  const editMutation = useApiMutation(
+    (vars: { id: number; payload: StockReturnUpdatePayload }) =>
+      stockReturnApi.update(vars.id, vars.payload),
+    {
+      invalidateKeys: ['stock-returns-list', 'stockouts-list', 'inventory'],
+      successMsg: '退货修改成功',
+      errorMsg: '退货修改失败',
+    },
+  )
+
+  function openReturnEdit(row: StockReturnRecord) {
+    returnEditForm.value = {
+      id: row.id,
+      returnNo: row.return_no || '',
+      productName: row.product?.name || '',
+      quantity: row.quantity,
+      customer: row.customer || '',
+      date: (row.return_date || '').slice(0, 10),
+      reason: row.reason || '',
+      note: row.note || '',
+    }
+    returnEditVisible.value = true
+  }
+
+  async function saveReturnEdit() {
+    const form = returnEditForm.value
+    if (!form) return
+    if (!Number.isFinite(form.quantity) || form.quantity < 1) {
+      showToast('请填写大于 0 的退货数量', 'error')
+      return
+    }
+    const saved = await editMutation.run({
+      id: form.id,
+      payload: {
+        quantity: form.quantity,
+        ...(form.date ? { return_date: form.date } : {}),
+        reason: form.reason,
+        note: form.note,
+      },
+    })
+    // run() 失败返回 undefined（已弹错误 toast）——只有成功才关弹窗
+    if (saved !== undefined) returnEditVisible.value = false
+  }
+
   return {
     confirmDialog,
     actionId,
@@ -247,5 +302,10 @@ export function useStockReturn() {
     pickShipment,
     handleSubmit,
     handleDelete,
+    returnEditVisible,
+    returnEditForm,
+    savingReturn: editMutation.isSaving,
+    openReturnEdit,
+    saveReturnEdit,
   }
 }

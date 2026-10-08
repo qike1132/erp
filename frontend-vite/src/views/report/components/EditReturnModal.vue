@@ -56,7 +56,7 @@
 
 <script setup lang="ts">
 /**
- * EditReturnModal.vue — 退货行编辑弹窗（报表页退货流水）。
+ * EditReturnModal.vue — 退货行编辑弹窗（报表「退货流水」与 /stock-return 退货管理页共用）。
  *
  * 字段与后端 `PUT /stock-returns/{id}` 的 `StockReturnUpdate` 对应：数量 / 退货日期 /
  * 原因 / 备注。客户与产品由关联出货明细带出，不可改。后端实现为单事务内「取消原退货
