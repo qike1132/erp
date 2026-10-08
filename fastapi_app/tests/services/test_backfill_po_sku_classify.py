@@ -28,7 +28,8 @@ from fastapi_app.shared_models import (
     User,
 )
 
-_SCRIPT_PATH = Path(r"D:\erp_system\scripts\backfill_purchase_order_sku.py")
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_SCRIPT_PATH = _REPO_ROOT / "scripts" / "backfill_purchase_order_sku.py"
 
 
 def _load_script_module():

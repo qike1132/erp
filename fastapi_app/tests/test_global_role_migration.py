@@ -34,7 +34,7 @@ from pathlib import Path
 
 import pytest
 
-_MIGRATIONS_DIR = Path(r"D:\erp_system\migrations\versions")
+_MIGRATIONS_DIR = Path(__file__).resolve().parents[2] / "migrations" / "versions"
 _MIGRATION_FILE = "pg_standalone_045_global_role.py"
 
 # 三张物料表（本迁移的「轻迁移」对象：字段与外键零改动，仅改指重复行）

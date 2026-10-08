@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-_MIGRATIONS_DIR = Path(r"D:\erp_system\migrations\versions")
+_MIGRATIONS_DIR = Path(__file__).resolve().parents[2] / "migrations" / "versions"
 # 迁移模块在模块级导入的守卫模块；stub 窗口内会被首次导入，需一并恢复
 _GUARD_MODULE_NAME = "migrations._legacy_base_guard"
 
