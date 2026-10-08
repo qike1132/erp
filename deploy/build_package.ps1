@@ -53,7 +53,9 @@ foreach($s in 'app','runtime','settings','deploy','data','binaries','frontend'){
 Write-Step '1/6 拷代码'
 $xd = @((Join-Path $ProjectDir '.git'),(Join-Path $ProjectDir '.venv'),(Join-Path $ProjectDir 'logs'),
         (Join-Path $ProjectDir 'temp'),(Join-Path $ProjectDir 'backups'),(Join-Path $ProjectDir 'dist'),
-        (Join-Path $ProjectDir '_ops'),(Join-Path $ProjectDir 'config\pgbouncer'))
+        (Join-Path $ProjectDir 'build'),(Join-Path $ProjectDir 'evidence'),
+        (Join-Path $ProjectDir '_ops'),(Join-Path $ProjectDir 'config\pgbouncer'),
+        (Join-Path $ProjectDir 'deploy\binaries'))
 # /XD 除构建垃圾外，须排除 AGENTS.md §7 的全部 AI 工具痕迹目录（15+），避免打进包
 $aiTrail = @('.agent','.claude','.cursor','.graphflow','.graphflow-cache','graphflow-out','.trae','.qoder','.workbuddy','.workbuddy-ai','.reasonix','.superpowers','.codebuddy','.freebuff','.lean-ctx','.resultverify','.codeartsdoer','.zcode','.agent-teams')
 robocopy $ProjectDir (Join-Path $OutDir 'app') /E /XD @('node_modules','__pycache__','.pytest_cache','.mypy_cache','.ruff_cache') $aiTrail @xd /XF @('*.pyc','*.pyo','*.log','*.tmp','*.pid','dsh-web-dump-config.txt','nul','.zcodeignore') /NFL /NDL /NJH /NJS /NP /R:1 /W:1 | Out-Null
@@ -94,10 +96,14 @@ Copy-Item $usSrc (Join-Path $OutDir 'settings\uploads-signing.conf') -Force
 robocopy (Join-Path $ProjectDir 'static') (Join-Path $OutDir 'data\static') /E /NFL /NDL /NJH /NJS /NP | Out-Null
 if($LASTEXITCODE -ge 8){ Write-Fail "robocopy 失败 (exit=$LASTEXITCODE)：拷 static"; exit 1 }
 if(Test-Path $binDir){ foreach($f in (Get-ChildItem $binDir -File)){ Copy-Item $f.FullName (Join-Path $OutDir 'binaries') -Force } }
-# install_package.ps1 由 Task 4 产出；此处缺失非致命（Task 4 后重建包即含）
+# 包内 deploy\ 须自包含：install_package.ps1 与 _lib.ps1 一起落位
+# （否则从 <pkg>\deploy\ 运行安装端会在 dot-source _lib.ps1 处直接死掉）
 $instSrc = Join-Path $PSScriptRoot 'install_package.ps1'
+$libSrc  = Join-Path $PSScriptRoot '_lib.ps1'
 if(Test-Path $instSrc){ Copy-Item $instSrc (Join-Path $OutDir 'deploy\install_package.ps1') -Force }
 else { Write-Warn 'install_package.ps1 尚未创建（Task 4），本次包内暂缺' }
+if(Test-Path $libSrc){ Copy-Item $libSrc (Join-Path $OutDir 'deploy\_lib.ps1') -Force }
+else { Write-Warn '_lib.ps1 缺失，包内 deploy\ 将无法独立运行安装端' }
 $env:PGPASSWORD = (Read-EnvMap (Join-Path $ProjectDir '.env'))['DB_PASSWORD']
 if(-not $env:PGPASSWORD){ Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue; Write-Fail '源机 .env 缺 DB_PASSWORD，无法 dump'; exit 1 }
 & $pgDump -h localhost -p 5432 -U erp_app -d erp_system -Fc -f (Join-Path $OutDir 'data\erp_system.dump')
