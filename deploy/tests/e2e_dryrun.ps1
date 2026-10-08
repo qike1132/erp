@@ -137,7 +137,7 @@ try {
   $mustAbsent = @(
     'app\_ops','app\config\pgbouncer','app\node_modules','app\.git',
     'app\.venv','app\.codeartsdoer','app\.cursor','app\.zcodeignore',
-    'app\.mimosa','app\pytest-of-Administrator'
+    'app\.mimosa','app\pytest-of-Administrator','app\static'
   )
   foreach($rel in $mustAbsent){ Assert (-not (Test-Path (Join-Path $OutDir $rel))) ("不存在：" + $rel) }
 
