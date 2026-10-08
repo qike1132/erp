@@ -55,14 +55,19 @@ function Start-ErpService([string]$Name){
 function New-DeployRedisConf([string]$SrcConf,[string]$DstConf,[string]$Name,[string]$RedisRoot){
   # 去掉任何**生效**的 requirepass 行；口令只经 --requirepass 注入，绝不写进 .conf。
   # 并把 dir/logfile 指向部署目录（非默认 RedisDir 时避免脏数据/日志落到 C:\Redis）。
-  $dataDir = Join-Path $RedisRoot 'data'
-  New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
+  # ⚠️ 路径一律用**正斜杠**：Redis 把反斜杠当转义符，单反斜杠的 "C:\Redis\data"
+  #    会被解析成 C:Redisdata → 启动报 Can't chdir to 'C:Redisdata' → NSSM 崩溃循环置 Paused。
+  $root = $RedisRoot -replace '\\','/'
+  $dataDir = "$root/data"
+  New-Item -ItemType Directory -Force -Path (Join-Path $RedisRoot 'data') | Out-Null
   $lines=[IO.File]::ReadAllLines($SrcConf,[Text.UTF8Encoding]::new($false))
   $out = $lines | Where-Object { $_ -notmatch '^\s*requirepass(\s|$)' } | ForEach-Object {
     if($_ -match '^\s*dir\s'){ "dir $dataDir" }
-    elseif($_ -match '^\s*logfile\s'){ "logfile `"$RedisRoot\$Name.log`"" }
+    elseif($_ -match '^\s*logfile\s'){ "logfile `"$root/$Name.log`"" }
     else { $_ }
   }
+  # 防回归：生成的 dir/logfile 行不得残留反斜杠（Redis 会当转义符）
+  foreach($ln in $out){ if($ln -match '^\s*(dir|logfile)\s' -and $ln.Contains('\')){ Write-Fail "Redis conf 的 dir/logfile 含反斜杠（Redis 会当转义符）：$ln"; exit 1 } }
   [IO.File]::WriteAllText($DstConf, (($out -join "`r`n") + "`r`n"), [Text.UTF8Encoding]::new($false))
 }
 function New-BlankAdmin([string]$Py,[string]$Psql,[string]$TargetDir,[string]$WorkDir,[string]$DbUser,[string]$DbName,[string]$DbPw,[string]$AdminPassword){

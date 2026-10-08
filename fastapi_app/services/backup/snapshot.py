@@ -188,9 +188,10 @@ async def get_pg_version(host, port, user, password, env) -> str:
     """获取 PostgreSQL 版本字符串"""
     try:
         from ._proc import run_proc
+        from .dump import resolve_pg_tool  # 延迟导入避免与 dump 的循环依赖
         proc = await run_proc(
             [
-                'psql', '-h', host, '-p', port, '-U', user,
+                resolve_pg_tool('psql'), '-h', host, '-p', port, '-U', user,
                 '-d', os.getenv('DB_NAME', 'erp_system'),
                 '-t', '-c', 'SELECT version();',
             ],
