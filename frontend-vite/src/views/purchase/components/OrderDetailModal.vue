@@ -178,10 +178,6 @@ function scopeOf(item: { remark?: string | null }): string {
   vertical-align: middle;
 }
 
-.odm-table tbody tr:last-child td {
-  border-bottom: none;
-}
-
 .odm-table tbody tr:hover td {
   background: var(--color-primary-50, #eff5ff);
 }

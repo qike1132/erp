@@ -293,7 +293,6 @@ function removeRow(uid: string) {
   color: var(--color-text-secondary); border-bottom: 1px solid var(--color-border);
 }
 .ocr-table td { padding: 8px; border-bottom: 1px solid var(--color-border-light); vertical-align: top; }
-.ocr-table tr:last-child td { border-bottom: 0; }
 .c-cust { width: 150px; }
 .c-qty { width: 108px; }
 .c-note { width: 130px; }

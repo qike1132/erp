@@ -194,9 +194,6 @@ function onImgError(e: Event) {
   vertical-align: middle;
   color: var(--color-text);
 }
-.bo-table tbody tr:last-child td {
-  border-bottom: none;
-}
 .bo-table tbody tr:hover td {
   background: #fbfcff;
 }

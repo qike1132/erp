@@ -363,10 +363,6 @@ const flatRows = computed(() =>
   border-bottom: 1px solid var(--coq-border);
 }
 
-.coq-table tbody:last-child tr:last-child td {
-  border-bottom: none;
-}
-
 .coq-po-group {
   cursor: pointer;
   transition: background 0.15s ease;

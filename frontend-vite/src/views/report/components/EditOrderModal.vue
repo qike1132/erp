@@ -221,7 +221,6 @@ const openModel = computed({
   border-bottom: 1px solid var(--color-border-light, #e2e8f0); white-space: nowrap;
 }
 .oe-sku-table tbody td { padding: 8px 12px; border-bottom: 1px solid var(--color-border-light, #e2e8f0); color: var(--color-text); vertical-align: middle; }
-.oe-sku-table tbody tr:last-child td { border-bottom: none; }
 .oe-sku-table tbody tr:hover { background: var(--color-primary-50); }
 .oe-sku-product { display: flex; flex-direction: column; gap: 2px; font-weight: 500; }
 .oe-sku-barcode { font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; font-size: 10px; color: var(--color-text-muted); letter-spacing: 0.02em; }
