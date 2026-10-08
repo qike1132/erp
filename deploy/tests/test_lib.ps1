@@ -87,5 +87,22 @@ foreach($c in $sdCases){
   Assert (([bool](Test-SafeOutDir $c.Out $c.Proj)) -eq $c.Want) ("Test-SafeOutDir " + $c.Name + " ($($c.Out))")
 }
 
+# 主机字面量判定（IPv4/IPv6/域名），供安装端 .env 改写用
+$hostCases = @(
+  @{ H='192.168.1.97'; Want=$true;  Is6=$false; Name='IPv4' }
+  @{ H='240e:3b1:d052:1130:b156:742e:8e8a:fd37'; Want=$true; Is6=$true; Name='裸 IPv6' }
+  @{ H='[240e:3b1:d052:1130:b156:742e:8e8a:fd37]'; Want=$true; Is6=$true; Name='带方括号 IPv6' }
+  @{ H='erp.example.com'; Want=$true; Is6=$false; Name='域名' }
+  @{ H=''; Want=$false; Is6=$false; Name='空' }
+  @{ H='a,b'; Want=$false; Is6=$false; Name='逗号串非法' }
+  @{ H='has space'; Want=$false; Is6=$false; Name='含空白非法' }
+  @{ H='a:b'; Want=$false; Is6=$false; Name='单冒号非 IPv6' }
+  @{ H='::1'; Want=$true; Is6=$true; Name='简写 IPv6' }
+)
+foreach($c in $hostCases){
+  Assert (([bool](Test-HostLiteral $c.H)) -eq $c.Want) ("Test-HostLiteral " + $c.Name + " ($($c.H))")
+  Assert (([bool](Test-IsIPv6Literal $c.H)) -eq $c.Is6) ("Test-IsIPv6Literal " + $c.Name)
+}
+
 Remove-Item $tmp -Recurse -Force
 if($fail){ exit 1 } else { Write-Host 'ALL PASS' }

@@ -20,6 +20,7 @@
 > （不再「闪退」，报错能看清）。要带参数（如 `-DryRun`）就在 cmd 里 `build.cmd -DryRun`，或给快捷方式加参数。
 > 注：`.cmd` 内为纯 ASCII（cmd.exe 按 OEM 代码页读取，中文会乱码）；中文输出由 PowerShell 脚本负责。
 > 也可双击**中文名** [`一键构建.cmd`](一键构建.cmd) / [`一键安装.cmd`](一键安装.cmd)——它们是上面两个的转发壳。
+> 注：本目录 `.ps1` **一律带 UTF-8 BOM**——zh-CN 下 PowerShell 5.1 读「无 BOM 且含中文」的 `.ps1` 会按 GBK 解码而解析失败。
 
 ---
 

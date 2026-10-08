@@ -145,7 +145,7 @@ try {
   # ==========================================================
   Write-Step '0 提权 + 参数'
   if(-not (Test-Admin)){ Write-Fail '必须以管理员运行'; exit 1 }
-  if($ServerIP -notmatch '^\d{1,3}(\.\d{1,3}){3}$'){ Write-Fail "非法 ServerIP: $ServerIP"; exit 1 }
+  if(-not (Test-HostLiteral $ServerIP)){ Write-Fail "非法 ServerIP（需 IPv4 / IPv6 / 域名）: $ServerIP"; exit 1 }
   if(-not (Test-Path -LiteralPath $Package)){ Write-Fail "找不到安装包: $Package"; exit 1 }
   if(-not (Get-Command tar.exe -ErrorAction SilentlyContinue)){ Write-Fail '未找到 tar.exe（需 Win10 1809+）'; exit 1 }
   $drive=([IO.Path]::GetPathRoot($TargetDir)).TrimEnd('\',':')
@@ -392,9 +392,18 @@ try {
 
   # ==========================================================
   Write-Step '5 .env 改写'
-  Add-EnvListItemJson  $envPath 'ALLOWED_HOSTS'      $ServerIP
-  Add-EnvListItemComma $envPath 'CORS_ORIGINS'       "http://${ServerIP}:3000"
-  Add-EnvListItemComma $envPath 'WS_ALLOWED_ORIGINS' "${ServerIP}:3000"
+  # 主机字面量：IPv6 需两种写法（TrustedHost 取带方括号、WS 的 urlparse 取裸形式）；域名/IPv4 一种即可
+  $hBare = $ServerIP.Trim().Trim('[',']')
+  $is6   = Test-IsIPv6Literal $ServerIP
+  $hUrl  = if($is6){ "[$hBare]" } else { $hBare }
+  Add-EnvListItemJson  $envPath 'ALLOWED_HOSTS' $hUrl
+  if($is6){ Add-EnvListItemJson $envPath 'ALLOWED_HOSTS' $hBare }
+  # CORS_ORIGINS 同时给 https（公网/TLS）与 http（内网私网）；生产过滤器会自行剔除公网 http 源
+  Add-EnvListItemComma $envPath 'CORS_ORIGINS' "https://${hUrl}:3000"
+  Add-EnvListItemComma $envPath 'CORS_ORIGINS' "http://${hUrl}:3000"
+  # WS_ALLOWED_ORIGINS 是 host:port（不带 scheme）；IPv6 两种写法都加
+  Add-EnvListItemComma $envPath 'WS_ALLOWED_ORIGINS' "${hUrl}:3000"
+  if($is6){ Add-EnvListItemComma $envPath 'WS_ALLOWED_ORIGINS' "${hBare}:3000" }
   Set-EnvKey $envPath 'JWT_PRIVATE_KEY_PATH' (Join-Path $TargetDir 'config\jwt\private_v2.pem')
   Set-EnvKey $envPath 'JWT_PUBLIC_KEY_PATH'  (Join-Path $TargetDir 'config\jwt\public_v2.pem')
   # 注释 ASYNC_DATABASE_REPLICA_URL（副本未迁移，应用回退主库）
@@ -597,7 +606,7 @@ try {
       }
     } else { Write-Warn '未找到 scripts\diag\runtime_mode_probe.py，跳过运行模式探针' }
   }
-  Write-Ok "完成：http://${ServerIP}:3000  （请立即删除源包并确认 %TEMP% 已清）"
+  Write-Ok "完成：内网 http://${hUrl}:3000 ；若前置 TLS（自签/域名）则用 https://${hUrl}:3000  （请立即删除源包并确认 %TEMP% 已清）"
 } finally {
   if(Test-Path $work){ Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue }
   Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue

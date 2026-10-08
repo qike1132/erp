@@ -160,3 +160,22 @@ function Test-Prereqs([hashtable]$Wanted){
   foreach($k in $Wanted.Keys){ if(-not (Test-Path $Wanted[$k])){ $missing += $k } }
   $missing
 }
+
+function Test-HostLiteral([string]$HostValue){
+  # 判定是否是可作为 Host 的合法字面量：IPv4 / IPv6（裸或带方括号）/ 域名。空、含空白或非法字符 → $false。
+  if(-not $HostValue){ return $false }
+  $h = $HostValue.Trim()
+  if($h -match '^\d{1,3}(\.\d{1,3}){3}$'){ return $true }               # IPv4
+  if($h -match '^\[[0-9A-Fa-f:.]+\]$'){ return $true }                  # [IPv6]
+  # 裸 IPv6 至少两个冒号（最短 :: 也含两个）；单个冒号的全十六进制串（如 a:b）不是 IPv6
+  if($h.Contains(':') -and $h -match '^[0-9A-Fa-f:]+$' -and $h.Split(':').Count -ge 3){ return $true }
+  if($h -match '^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$'){ return $true } # 域名
+  return $false
+}
+
+function Test-IsIPv6Literal([string]$HostValue){
+  # 裸或带方括号的 IPv6 → $true（用于决定是否补带方括号形式）。
+  if(-not $HostValue){ return $false }
+  $h = $HostValue.Trim().Trim('[',']')
+  return ($h.Contains(':') -and ($h -match '^[0-9A-Fa-f:]+$') -and ($h.Split(':').Count -ge 3))
+}
