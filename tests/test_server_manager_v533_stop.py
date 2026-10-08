@@ -9,6 +9,8 @@
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import server_manager.app as sm  # (模块级代码无 Tk root, 导入安全;2026-09-28 包化)
 
@@ -27,6 +29,10 @@ def _netstat_runs(stdout):
     return lambda *a, **k: r
 
 
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="_find_port_pids 经 server_manager 调 netstat + subprocess.CREATE_NO_WINDOW，仅 Windows 可跑",
+)
 class TestFindPortPidsExclude:
     """_find_port_pids 必须按 exclude 跳过受管 PID，且端口精确匹配。"""
 

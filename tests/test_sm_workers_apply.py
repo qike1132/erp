@@ -14,7 +14,10 @@ server_manager **自身进程**的环境变量（默认 4），不是 NSSM 里�
 
 只伪造 ``run_capture``，不碰真实 NSSM、不 import tkinter —— CI 可跑。
 """
+import sys
 from pathlib import Path
+
+import pytest
 
 from server_manager.constants import _SVC_API, _SVC_ARQ
 from server_manager.service_ops import ServiceOps
@@ -155,6 +158,10 @@ def test_set_env_extra_key_rejects_empty_value():
 
 # ---------------------------------------------------------------- 只重启单个服务
 
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="restart_one_service 依赖 find_nssm()（仅 Windows 可定位 NSSM）；非 Windows 会走 sc 分支",
+)
 def test_restart_one_service_restarts_only_the_named_one():
     """worker 数变更只需重启 erp-prod —— 不得顺带重启 erp-arq / 前端 / 两个 Redis。"""
     fake = _FakeNssm({_SVC_API: CURRENT})
