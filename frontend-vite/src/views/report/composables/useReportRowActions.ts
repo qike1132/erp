@@ -138,7 +138,10 @@ export function useReportRowActions() {
 
   /** 订单/备货：还原聚合行为具体记录（orderApi.records 结构化筛选 + 单号精确回比） */
   async function resolveRecords(row: Record<string, unknown>, recordType: 'order' | 'stockin'): Promise<UnifiedRecord[]> {
-    const rawNos = String(row.order_nos ?? row.stockin_nos ?? '')
+    // 按维度取对应单号：不能写成 `row.order_nos ?? row.stockin_nos` ——
+    // 后端 ReportLogItem 的 order_nos 默认值是 ''（非 null），?? 只在 null/undefined 时穿透，
+    // 备货行会取到空串 → 还原单号为空 → 弹「未能找到该组对应的明细记录」。
+    const rawNos = String((recordType === 'order' ? row.order_nos : row.stockin_nos) ?? '')
     const groupDate = String((recordType === 'order' ? row.order_date : row.stockin_date) ?? '')
     const nos = parseGroupNos(rawNos)
     // 守卫只挡单号或日期为空；customer 为空不拦（备货流水按 COALESCE(s.customer,'') 分组，可为 NULL）

@@ -9,6 +9,7 @@ import { defineComponent, h } from 'vue'
 import { mount } from '@vue/test-utils'
 
 const mocks = vi.hoisted(() => ({
+  orderRecords: vi.fn(),
   stockoutRecords: vi.fn(),
   editStockout: vi.fn(),
   deleteStockout: vi.fn(),
@@ -22,11 +23,12 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock('@/api', () => ({
-  orderApi: { records: vi.fn(), detail: vi.fn(), update: vi.fn(), updateDeduct: vi.fn(), delete: vi.fn() },
+  orderApi: { records: mocks.orderRecords, detail: vi.fn(), update: vi.fn(), updateDeduct: vi.fn(), delete: vi.fn() },
   stockApi: {
     stockoutRecords: mocks.stockoutRecords,
     editStockout: mocks.editStockout,
     deleteStockout: mocks.deleteStockout,
+    deleteStockin: vi.fn(),
   },
   stockReturnApi: {
     records: mocks.returnRecords,
@@ -88,6 +90,42 @@ describe('TAB_ROW_PERMISSIONS', () => {
     expect(TAB_ROW_PERMISSIONS.stockout).toEqual({ edit: 'stockout_edit', delete: 'stockout_delete' })
     expect(TAB_ROW_PERMISSIONS.deduction).toEqual({ edit: 'deduction_edit', delete: 'deduction_delete' })
     expect(TAB_ROW_PERMISSIONS.return).toEqual({ edit: 'return_edit', delete: 'return_delete' })
+  })
+})
+
+describe('订单/备货流水行内操作', () => {
+  it('备货行：order_nos 为空串（后端默认值）时按 stockin_nos 还原', async () => {
+    mocks.orderRecords.mockResolvedValue({ data: [
+      { id: 5, record_type: 'stockin', order_no: 'BH-20261001-1', customer: 'MINISO国际', order_date: '2026-10-01' },
+    ] })
+    const api = makeActions()
+
+    // 回归 2026-10-08：后端 ReportLogItem 的 order_nos 默认值是 ''（非 null），
+    // 旧写法 `row.order_nos ?? row.stockin_nos` 会取到空串 → 单号为空 →
+    // 弹「未能找到该组对应的明细记录」，备货流水行内操作恒失败。
+    await api.onRowAction('stockin', 'delete', {
+      order_nos: '', stockin_nos: 'BH-20261001-1', stockin_date: '2026-10-01', customer: 'MINISO国际',
+    })
+
+    expect(mocks.orderRecords).toHaveBeenCalledWith(expect.objectContaining({
+      record_type: 'stockin', start_date: '2026-10-01', end_date: '2026-10-01',
+    }))
+    expect(mocks.showToast).not.toHaveBeenCalledWith('未能找到该组对应的明细记录', 'error')
+  })
+
+  it('订单行：按 order_nos 还原', async () => {
+    mocks.orderRecords.mockResolvedValue({ data: [
+      { id: 7, record_type: 'order', order_no: 'PO-1', customer: 'MINISO国际', order_date: '2026-10-01' },
+    ] })
+    const api = makeActions()
+
+    await api.onRowAction('order', 'delete', {
+      order_nos: 'PO-1', order_date: '2026-10-01', customer: 'MINISO国际',
+    })
+
+    expect(mocks.orderRecords).toHaveBeenCalledWith(expect.objectContaining({
+      record_type: 'order', start_date: '2026-10-01', end_date: '2026-10-01',
+    }))
   })
 })
 
