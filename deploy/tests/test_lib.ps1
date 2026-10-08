@@ -75,5 +75,16 @@ $flatFull = (@($argsFull | ForEach-Object { $_ -join ' ' }) -join "`n")
 Assert ($flatFull -match 'DependOnService') '有 DependOn 时产 DependOnService'
 Assert ($flatFull -match 'AppEnvironmentExtra') '有 Env 时产 AppEnvironmentExtra'
 
+# Test-SafeOutDir 危险路径守卫（表驱动；保护源树不被 OutDir 覆盖）
+$sdCases = @(
+  @{ Out='D:\';             Proj='D:\erp_system'; Want=$false; Name='拒绝盘根' }
+  @{ Out='D:\erp_system';   Proj='D:\erp_system'; Want=$false; Name='拒绝等于库目录' }
+  @{ Out='D:\';             Proj='D:\erp_system'; Want=$false; Name='拒绝库目录的祖辈' }
+  @{ Out='D:\erp_portable'; Proj='D:\erp_system'; Want=$true;  Name='接受独立目录' }
+)
+foreach($c in $sdCases){
+  Assert (([bool](Test-SafeOutDir $c.Out $c.Proj)) -eq $c.Want) ("Test-SafeOutDir " + $c.Name + " ($($c.Out))")
+}
+
 Remove-Item $tmp -Recurse -Force
 if($fail){ exit 1 } else { Write-Host 'ALL PASS' }
