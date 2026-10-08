@@ -1,7 +1,7 @@
 # ERP 离线便携包一键部署 — 设计文档
 
-- 日期：2026-10-08（v2，经两轮 opus 独立评审后修订）
-- 状态：待用户评审
+- 日期：2026-10-08（v3，经两轮 opus 评审 + 用户拍板 7 项未决后定稿）
+- 状态：待用户最终评审
 - 相关：`README.md` §3/§4、`AGENTS.md`、`scripts/migrate/*`（历史迁移脚本，**不复用其骨架**）
 
 ## 1. 背景与目标
@@ -26,9 +26,9 @@
 |---|---|---|
 | D1 | 形态 | 离线便携包（构建端 + 安装端） |
 | D2 | 数据 | 全镜像：`erp_system` 库 + `static/`（uploads/releases/files） |
-| D3 | 环境 | 运行 + 开发都装（base+dev+test 依赖随包） |
+| D3 | 环境 | 运行 + 开发都装（base+dev+test **+ocr** 依赖随包；OCR 属「功能不能少」） |
 | D4 | 基础软件 | 包内附官方安装包，安装端静默/解压装齐 |
-| D5 | 包保护 | 口令加密（`openssl enc aes-256-cbc -pbkdf2`；**包内自带 openssl.exe**，见 §5.8/§6.2） |
+| D5 | 包保护 | 口令加密：**PowerShell/.NET `Aes`（AES-256-CBC + PBKDF2-SHA256, 300k iters）流式加解密** —— 零外部二进制（见 §5.8/§6.2）；不用 openssl |
 | D6 | 实现 | 混合：新写 `deploy/` 两脚本；复用 `install_on_target.ps1` 已验证片段（`.env` ALLOWED_HOSTS/CORS 改写、NSSM `AppEnvironmentExtra` 一变量一元素） |
 | D7 | 全镜像路径 | `pg_restore` 恢复 dump（schema+数据保真）**→ 随后 `alembic upgrade head`** 对齐代码；`-Blank` 才走 alembic+`init_permissions.py`+`seed_nav.py`+建 admin |
 
@@ -59,7 +59,8 @@ settings/              .env / jwt/ / uploads-signing.conf / nginx-windows.conf /
                        redis*.conf / security-headers.conf / log_policy.json /
                        nssm-services.json / pgbouncer/ /（otel/promtail/prometheus/alert 可选）
 binaries/              PG18 安装器 / Redis-x64-5.0.14.1.zip / nginx zip /
-                       nssm-2.24.zip / node msi / vc_redist.x64.exe / **openssl.exe**
+                       nssm-2.24.zip / node msi / vc_redist.x64.exe
+                       （**无需 openssl**：包加解密用 .NET Aes）
 deploy/install_package.ps1
 manifest.txt           构建时间/Python 版本/各目录大小/文件数/dump 的 alembic_version/sha256
 最终：erp_portable_<yyyyMMdd_HHmm>.tar.gz.enc  +  .sha256
@@ -71,25 +72,27 @@ manifest.txt           构建时间/Python 版本/各目录大小/文件数/dump
 
 参数：`-ProjectDir`(默认 `D:\erp_system`)、`-OutDir`、`-PyDir`(默认自动定位**系统** Python 3.13)、`-SkipZip`、`-BuildFrontend`(默认关，见 §5.3)。
 
-1. **预检**：`.env`、`config/jwt/private_v2.pem`、`config/uploads-signing.conf`、`frontend-vite/dist/index.html` 均存在（缺则 FAIL）；`pg_dump` 可定位（`PG_TOOLS_BIN`→PATH→约定目录，**须含 18**）；`openssl` 在 PATH；`deploy/binaries/` 六件套齐全（缺则列清单+官方 URL 后 FAIL，不停在半个包上）。
+1. **预检**：`.env`、`config/jwt/private_v2.pem`、`config/uploads-signing.conf`、`frontend-vite/dist/index.html` 均存在（缺则 FAIL）；`pg_dump` 可定位（`PG_TOOLS_BIN`→PATH→约定目录，**须含 18**）；`deploy/binaries/` 六件套齐全（缺则列清单+官方 URL 后 FAIL，不停在半个包上）。
 2. **记录 git 状态**：`git rev-parse HEAD`、`git status --porcelain` 必须干净；记入 manifest。**不打包未提交改动**。
 3. **前端**：默认**只拷现成的 `frontend-vite/dist`**；缺失或明显过旧 → FAIL 并提示「先在开发机 `npm run build:atomic`」（**禁止在生产机上构建**：本机 `%TEMP%` EPERM + nginx 句柄 rename 锁，且会换掉在役 dist）。仅显式 `-BuildFrontend` 才构建（供非生产源机用）。
 4. **`pg_dump -Fc`** → `data/erp_system.dump`；同时读 `alembic_version` 记入 manifest。
-5. **拷 runtime**：从 `-PyDir`（**真·系统 Python 3.13 安装目录，不是 `.venv`**——`.venv` 的 `pyvenv.cfg` 指回外部 Python，拷走失效）robocopy 到 `runtime/python313`，然后 `runtime\python313\python.exe -m pip install -r requirements/base.txt -r requirements/dev.txt -r requirements/test.txt` 灌依赖。
+5. **拷 runtime**：从 `-PyDir`（**真·系统 Python 3.13 安装目录，不是 `.venv`**——`.venv` 的 `pyvenv.cfg` 指回外部 Python，拷走失效）robocopy 到 `runtime/python313`，然后 `runtime\python313\python.exe -m pip install -r requirements/base.txt -r requirements/dev.txt -r requirements/test.txt -r requirements/ocr.txt` 灌依赖（OCR 含 RapidOCR，约 500MB）。
 6. **自检**（**FAIL 即停，不 WARN**）：`runtime\python313\python.exe -c "import fastapi,uvicorn,sqlalchemy,asyncpg,pytest,ruff"`。
 7. **拷代码 + settings + `data/static/`**（robocopy，排除见 §4）。`.env` 拷自 `settings/.env`（明文，最终被加密）。
-8. **写 manifest + sha256**，然后 `tar -czf pkg.tar.gz <内容>`（**用 `-czf`，不要靠 `-a` 推扩展名**）→ `openssl enc -aes-256-cbc -pbkdf2 -iter 300000 -salt -in pkg.tar.gz -out erp_portable_*.tar.gz.enc` → 写 `.sha256` → 删中间 `pkg.tar.gz`。
+8. **写 manifest + sha256**，然后 `tar -czf pkg.tar.gz <内容>`（**用 `-czf`，不要靠 `-a` 推扩展名**）→ 用 .NET `Aes`（AES-256-CBC + PBKDF2-SHA256/300k，随机 salt+IV 写入包头）**流式加密** `pkg.tar.gz` → `erp_portable_<stamp>.tar.gz.enc` → 写 `.sha256` → 删中间 `pkg.tar.gz`。**不依赖 openssl。**
 9. **危险路径守卫**（照 `build_portable.ps1:61`）：拒绝 `OutDir` 为盘根 / 等于 / 包含 `ProjectDir`。
 10. **只读承诺的诚实边界**：`pg_dump`、读文件为只读；拷 `static/` 时若业务正在写文件，则包内该文件是某一时点快照（可接受；文档注明）。构建端**不** `npm`、**不**停/启服务。
 
 ## 6. 安装端流程（`install_package.ps1`，目标机管理员）
 
-参数：`-Package`、`-TargetDir`(默认 `D:\erp_system`)、`-ServerIP`、`-PgSuperPassword`、`-NginxDir`(默认 `C:\nginx`)、`-Force`、`-Blank`、`-EncryptKey`(优先 `Read-Host -AsSecureString`)、阶段开关 `-OnlyXxx/-SkipXxx`。
+参数：`-Package`、`-TargetDir`(默认 `D:\erp_system`)、`-ServerIP`、`-PgSuperPassword`、`-NginxDir`(默认 `C:\nginx`)、`-Force`、`-Blank`、`-EncryptKey`(优先 `Read-Host -AsSecureString`)、`-WithNodeModules`、阶段开关 `-OnlyXxx/-SkipXxx`。
+
+> **目标机路径（用户已定）**：与源机**同路径 `D:\erp_system`**。故 §6.6/§6.7/§6.10 的路径改写**默认跳过**；仅当 `-TargetDir ≠ D:\erp_system` 时才执行（脚本保留该能力，作为健壮性兜底）。
 
 **全程包在 `try { ... } finally { 清 %TEMP% 明文 }`**。每步 `[OK]/[WARN]/[FAIL]`，FAIL 即停并给修复提示。
 
 1. **提权校验** + `ServerIP` 合法性 + **磁盘空间预检**（≥ 包解压体积 + 落盘体积，manifest 里有各目录大小）。
-2. **解密解包**：用**包内 `binaries/openssl.exe`**（不用 `-EncryptKey` 明文参数，见 §7）`openssl enc -d` → `tar -xzf` 到 `%TEMP%\erp_pkg_<guid>\` → 校 `sha256`。
+2. **解密解包**：用 .NET `Aes` 解密（口令优先 `Read-Host -AsSecureString`，见 §7）→ `tar -xzf` 到 `%TEMP%\erp_pkg_<guid>\` → 校 `sha256`。**不依赖 openssl。**
 3. **装基础软件**（已装则跳过）：VC++（`vc_redist` 返回 1638=已装更高版本→**判成功**）→ PostgreSQL 18 静默（`--mode unattended --superpassword`；失败给官方 URL 与手动步骤）→ Redis（解压 `C:\Redis`）→ Nginx（解压 `-NginxDir`）→ NSSM（`C:\nssm\nssm.exe`）→ Node（msi 静默）。提示 Defender 可能隔离新 `python.exe`（加排除）。
 4. **建库**：`CREATE ROLE erp_app LOGIN PASSWORD '<包内 .env 的 DB_PASSWORD>'`（无则建/有则同步口令）+ `CREATE DATABASE erp_system WITH OWNER = erp_app`（**PG15+ owner 必须 erp_app**）。口令取自包内 `.env`，保证应用连得上。
 5. **部署代码**：`app/ → TargetDir`；`runtime/ → TargetDir\runtime\python313`；`frontend/dist → TargetDir\frontend-vite\dist`；`data/static → TargetDir\static`；建 `logs/`、`backups/`、`temp\`（NSSM AppStdout 写 `logs\<svc>.log`；`STRICT_CONFIG_CHECK` 校验 `BACKUP_DIR` 可写）。
@@ -121,7 +124,7 @@ manifest.txt           构建时间/Python 版本/各目录大小/文件数/dump
 
 ## 7. 加密与安全
 
-- 包用 `openssl enc -aes-256-cbc -pbkdf2 -iter 300000 -salt` 加密；**包内自带 `openssl.exe`**（全新 Windows 无此命令，解包第一步就要用）。
+- 包用 .NET `Aes`（AES-256-CBC + PBKDF2-SHA256, 300k iters, 随机 salt+IV）流式加密；**零外部二进制**（全新 Windows 必带 .NET，解包第一步即可用）。不用 openssl。
 - 口令：优先 `Read-Host -AsSecureString`；`-EncryptKey` 参数**会进 PowerShell 历史与进程列表**，脚本对此显式告警。
 - 包内含 `.env`（SECRET_KEY/DB/Redis/备份加密口令）、`config/jwt/private_v2.pem`、全量数据 → 最高敏感级；README 写明「内网/USB 可信通道传输，安装完**立即删除**源包与临时目录」。
 - **不入包**：`_ops/credentials/**`、`config/pgbouncer/userlist.txt`（明文口令，硬排除）。
@@ -153,17 +156,20 @@ manifest.txt           构建时间/Python 版本/各目录大小/文件数/dump
 | nginx 绝对路径/mime.types 漏改、443 定位脆 | 替换后 `nginx -t`；按内容定位 443 块；计数打印 |
 | 包内含密钥外泄 / 半途失败残留明文 | 口令加密 + finally 清 `%TEMP%` + 「传完即删」；`-EncryptKey` 告警 |
 | 看门狗指向不存在的系统 Python | 改写 `watchdog_task.cmd` 指向包内 runtime |
-| 与 `scripts/migrate/*` 双真相源 | README 明确 `deploy/` 为新权威 |
+| 与 `scripts/migrate/*` 双真相源 | **保留旧脚本**（用户定），在脚本头/README 标 deprecated 指向 `deploy/` |
+| 覆盖目标机已有旧 ERP（用户定「覆盖」） | 破坏性：须显式 `-Force`；先停+删旧五服务再落文件 |
 
-## 11. 未决问题（评审后请确认）
+## 11. 已决问题（用户 2026-10-08 拍板）
 
-1. **目标机是否与源机同路径 `D:\erp_system`？** 若可保证同路径，§6.6/§6.7/§6.10 的路径改写可大幅简化（甚至省去）。
-2. `scripts/migrate/*` 保留（标 deprecated）还是删除？
-3. **OCR（PDF 出货单识别）算不算「功能不能少」？** `requirements/ocr.txt` 约 500MB（RapidOCR），进不进 runtime？
-4. `backups/`（历史备份产物）是否进包？
-5. 目标机若已有旧 ERP 部署，脚本默认（覆盖 / 并存 / 报错）？
-6. 前端离线开发：`node_modules`（数百 MB）是否进包（否则目标机 `npm run dev` 需联网一次 `npm ci`）？
-7. `openssl.exe` 用哪份（Git for Windows 的 `usr\bin\openssl.exe` 复制一份？还是独立静态构建）？
+1. **目标机路径**：与源机**同路径 `D:\erp_system`** → 路径改写默认跳过（§6 保留能力作兜底）。
+2. **`scripts/migrate/*`**：**保留**；在脚本头/README 标 deprecated 指向 `deploy/`（新权威）。
+3. **OCR**：算「功能不能少」→ runtime 含 `requirements/ocr.txt`（RapidOCR，约 500MB）。
+4. **`backups/`**：**不进包**（目标机只建空目录满足 `BACKUP_DIR` 可写校验）。
+5. **目标机已有旧 ERP**：**覆盖**（停→删旧五服务→落文件；破坏性，须显式 `-Force`）。
+6. **前端离线开发**：**默认不带 `node_modules`**，加 `-WithNodeModules` 开关（生产只需 dist；开发在目标机 `npm ci` 一次；真要全离线开箱即开发再开开关）。
+7. **openssl**：**不用**——包加解密改用 .NET `Aes`（零外部二进制，§5.8/§6.2）。
+
+> 仍待落实（实施阶段，非设计阻塞）：目标机（或 VM/快照）必须由用户提供才能做端到端验证。
 
 ## 12. 验收标准
 
