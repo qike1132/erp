@@ -8,14 +8,16 @@
 
 <script setup lang="ts">
 /**
- * StockView.vue — 库存管理页面
+ * StockView.vue — 库存汇总页面（/stock，订单/备货口径）
  *
- * 职责：卡片容器 + 库存事件的缓存失效。
- * 页头（标题·搜索·汇总·导出）由 InventoryTab 内的 InventoryToolbar 渲染——
- * 原先导出按钮在此处、经 ref 调用子组件方法，改为工具条内直接触发后，
- * 这层 ref/itemCount 转发随之删除。
- * 订阅订单/库存 WebSocket 事件：订单创建、修改、删除（含其他端/其他标签页操作）
- * 后自动失效库存派生查询缓存，无需手动刷新。
+ * 2026-10-07 业务拍板：「库存查询」（生产−出货快照）独立成路由
+ * （/inventory-query 独立页已于 2026-10-07 删除，「库存」结余列并入本页表格），本页
+ * 回归 2026-10-06 之前的单视图形态，只承载「库存汇总」（InventoryTab）。
+ * 原「变动流水」tab 已于同日随功能下线整体删除。
+ * 职责：卡片容器 + 库存事件的缓存失效。页头（标题·搜索·汇总·导出）由
+ * InventoryTab 内的 InventoryToolbar 渲染。
+ * 订阅订单/库存 WebSocket 事件：订单创建、修改、删除（含其他端/其他标签页
+ * 操作）后自动失效库存派生查询缓存，无需手动刷新。
  */
 import { ref } from 'vue'
 import { useQueryClient } from '@tanstack/vue-query'
@@ -53,5 +55,9 @@ useWebSocket({
   box-sizing: border-box;
 }
 
-/* 卡片样式已迁移到全局 .page-card 系列（src/styles/app.css） */
+/* 本页卡片直角（对齐 /purchase、/stock-return 方正基准）：scoped 未分层样式
+   优先于 @layer components 里的全局 18px 圆角，仅影响 /stock。 */
+.page-card {
+  border-radius: 0;
+}
 </style>
