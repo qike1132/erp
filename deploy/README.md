@@ -15,6 +15,11 @@
 | [`install_package.ps1`](install_package.ps1) | 装配到目标机（**管理员**） | 目标机 |
 | `_lib.ps1` | 共用函数（被上面两者 dot-source） | 随包/随仓 |
 
+> 🖱️ **不想敲命令？双击启动器**：源机双击 [`build.cmd`](build.cmd)；目标机**右键** [`install.cmd`](install.cmd) →
+> 「以管理员身份运行」。它们以 `-ExecutionPolicy Bypass` 调对应脚本，并在结束时 **`pause` 停住窗口**
+> （不再「闪退」，报错能看清）。要带参数（如 `-DryRun`）就在 cmd 里 `build.cmd -DryRun`，或给快捷方式加参数。
+> 注：`.cmd` 内为纯 ASCII（cmd.exe 按 OEM 代码页读取，中文会乱码）；中文输出由 PowerShell 脚本负责。
+
 ---
 
 ## 步骤 1 —— 构建（在源机，也只在本机生产）
