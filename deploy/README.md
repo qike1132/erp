@@ -79,7 +79,8 @@ erp_portable_<yyyyMMdd_HHmm>.tar.gz.enc.sha256   # sha256 校验值
 ## 步骤 2 —— 传输（经可信通道）
 
 把上一步的两个产物（`.tar.gz.enc` 及其 `.sha256`）经**可信通道**送到目标机：内网共享/USB 均可，
-**不要**放公网。目标机可用 `Get-FileHash -Algorithm SHA256` 比对 `.sha256`。
+**不要**放公网。目标机可用 `Get-FileHash -Algorithm SHA256` 手工比对 `.sha256`；
+安装脚本在解密前也会**自动比对**与包同目录的 `<包名>.sha256`（缺失仅告警，不一致即 FAIL）。
 
 > ⚠️ **包里是什么，决定了传输与处置纪律**：便携包内含 **`.env`（数据库口令、Redis 口令）、
 > JWT 私钥 `private_v2.pem`、上传签名密钥，以及**整库 `pg_dump` 与全部用户上传的静态文件**。
@@ -95,11 +96,14 @@ erp_portable_<yyyyMMdd_HHmm>.tar.gz.enc.sha256   # sha256 校验值
 导入数据 → 注册五服务 → 防火墙 → 看门狗 → 验收）。
 
 ```powershell
-# 在包含 deploy\install_package.ps1 与 _lib.ps1 的目录运行
+# 在「仓库根」或「解包后的包根」运行 —— 二者都含一个 deploy\ 子目录，
+# 且其中 install_package.ps1 与 _lib.ps1 必须**同处一目录**（脚本按 $PSScriptRoot 找 _lib.ps1，
+# 所以只看两文件是否并排，与运行时的当前目录无关）。
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy\install_package.ps1 `
     -Package D:\erp_portable_20261008_1200.tar.gz.enc `
-    -ServerIP 192.168.1.97 `
-    -PgSuperPassword <postgres 超级用户口令>
+    -ServerIP 192.168.1.97
+# -PgSuperPassword 可省略：脚本先取包内 settings\.env 的 PG_SUPER_PASSWORD，取不到再退到交互式隐藏输入。
+# 显式传参会进 PowerShell 历史与进程列表（脚本启动时也会就此告警）。
 ```
 
 | 参数 | 默认 | 说明 |
@@ -107,13 +111,13 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy\install_package.p
 | `-Package` | **必填** | 便携包路径（`.tar.gz.enc`） |
 | `-TargetDir` | `D:\erp_system` | 目标部署路径，**默认与源机同路径** |
 | `-ServerIP` | `192.168.1.97` | 目标机对外 IP，用于改写 `ALLOWED_HOSTS` / `CORS_ORIGINS` / `WS_ALLOWED_ORIGINS` |
-| `-PgSuperPassword` | **必填** | 连接 `postgres` 超级用户建库/建角色用；为空即 FAIL |
-| `-AdminPassword` | 交互式提示 | **仅 `-Blank` 时**：新超管 `admin` 口令（Argon2id 哈希后写入；不落命令行/日志） |
+| `-PgSuperPassword` | 包内 `settings\.env` 的 `PG_SUPER_PASSWORD`，再退交互式 | 连接 `postgres` 超级用户建库/建角色用。**可省略**；命令行/包内/交互式三者都拿不到才 FAIL。显式传参会进 PowerShell 历史与进程列表，不推荐 |
+| `-AdminPassword` | 交互式提示 | **仅 `-Blank` 时**：新超管 `admin` 口令（Argon2id 哈希后写入；不落命令行/日志）。显式传参会进历史与进程列表 |
 | `-EncryptKey` | 交互式提示 | 包口令；省略则交互式隐藏输入（推荐） |
 | `-NginxDir` / `-RedisDir` / `-Nssm` | `C:\nginx` / `C:\Redis` / `C:\nssm\nssm.exe` | 基础软件落位，按需覆盖 |
 | `-Blank` | 关 | **空库起步**：`alembic upgrade head` → `init_permissions` → `seed_nav` → 建超管 `admin`（项目无内置用户种子，必须建一个否则装完无法登录） |
-| `-Force` | 关 | **覆盖**目标机已有部署（同路径目录 / 同名五服务 / 同库）：无此开关时**检测到冲突即拒绝且不改动任何现场** |
-| `-SkipVerify` | 关 | 跳过第 11 步验收（`/api/health`、`:3000`、`prod_runner.json` 检查） |
+| `-Force` | 关 | **覆盖**目标机已有部署（同路径目录 / 同名五服务 / 同库）：无此开关时**检测到冲突即拒绝**（不覆盖既有库/服务；基础软件步骤是幂等「已装跳过」，若冲突发生在该步之后，基础软件可能已先装上） |
+| `-SkipVerify` | 关 | 跳过第 11 步验收（`:5002`/`:3000` 健康、`prod_runner.json`、ARQ 哨兵键、运行模式探针） |
 
 **目标机要求**：
 
@@ -125,8 +129,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy\install_package.p
 
 **分阶段续跑**：安装流程**幂等**——每步先检测是否已完成（基础软件已装/库已存在/服务已注册……）
 再决定是否执行，中断后重跑同一命令即可从断点续做。
-但注意：**目标机若已存在 `TargetDir`、同名 `erp_system` 库或同名五服务，重跑会在冲突检测处 `Write-Fail`
-（不改动任何现场），需显式加 `-Force` 才覆盖重建**。
+但注意：一旦目标机已存在 `TargetDir`、同名 `erp_system` 库或同名五服务，重跑会在冲突检测处 `Write-Fail`
+（不覆盖既有库/服务），**必须显式加 `-Force` 才会覆盖重建**——即「续跑」只在尚未产生这些冲突时成立。
 
 **两种数据来源**：
 
@@ -136,6 +140,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy\install_package.p
 - `-Blank`（空库起步）：跳过 dump，直接建库 → `alembic upgrade head` → 种子权限/导航 → 建 `admin`。
 
 **装完**：入口为 `http://<ServerIP>:3000`。请**立即删除源包**，并确认 `%TEMP%` 已无明文解包残留。
+验收对 `http://127.0.0.1:3000/api/health`、`logs\prod_runner.json` 的 `ready`/`frontend_ok` 与 ARQ 哨兵键
+均**重试约 30 秒后仍失败即 FAIL**（不再把「半可用」当成功）；若 `scripts\diag\runtime_mode_probe.py` 存在，
+还会跑一次运行模式探针，判定非 `prod` 同样 FAIL。
 
 ---
 
@@ -145,4 +152,5 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy\install_package.p
 - **构建报「deploy\binaries\ 缺 …」**：按 §1.1 放齐 6 个安装包（`-DryRun` 可容忍缺失用于自检）。
 - **安装报「已存在，-Force 覆盖」**：目标机已有同路径目录或同名五服务；确认无误后加 `-Force`。
 - **安装报「目标盘可用空间不足 8GB」**：清理目标盘后重试。
-- **验收 `:3000` 未就绪但 `:5002` 正常**：多为前端 `dist` 或 nginx conf 问题，查 `logs\erp-web.log`。
+- **验收 `:3000` 未就绪**：现为**硬 FAIL**（重试 30s 后仍失败）——多为前端 `dist` 或 nginx conf 问题，查 `logs\erp-web.log`。
+- **验收「ARQ 哨兵键缺失」**：`erp-arq` 未在线（`arq:queue:health-check @6380` 不新鲜）——查 `logs\erp-arq.log` 与 broker `:6380`；定时备份会静默停摆，务必解决。
