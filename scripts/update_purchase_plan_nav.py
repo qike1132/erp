@@ -57,8 +57,11 @@ try:
 
     # 清除导航缓存
     try:
-        from utils.redis_cache import redis_cache
-        redis_cache.delete('nav_sections')
+        import asyncio
+
+        from fastapi_app.core.redis_wrapper import safe_delete
+
+        asyncio.run(safe_delete('nav_sections', context="出货计划导航缓存"))
         print("[OK] 导航缓存已清除")
     except Exception as e:
         print(f"[WARN] 清除缓存失败: {e}")

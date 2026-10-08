@@ -78,11 +78,14 @@ def main():
 
         # 清除 Redis 导航缓存
         try:
-            from utils.redis_cache import redis_cache
-            redis_cache.delete('nav_sections')
+            import asyncio
+
+            from fastapi_app.core.redis_wrapper import safe_delete
+
+            asyncio.run(safe_delete('nav_sections', context="生产报表导航缓存"))
             print("[OK] 已清除导航缓存")
-        except Exception:
-            print("[WARN] 清除导航缓存失败，请手动重启或等待缓存过期")
+        except Exception as exc:
+            print(f"[WARN] 清除导航缓存失败（等待 TTL 过期即可）: {exc}")
     finally:
         session.close()
 
