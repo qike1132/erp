@@ -696,9 +696,9 @@ async def test_update_stockin_wrapper_delta_guard_then_releases(monkeypatch):
 async def test_delete_stockreturn_core_message_verbatim_then_releases(monkeypatch):
     """站点 11：assert 分支；并固化「先回减累计退货量、后判定」的既有语句顺序。
 
-    2026-10-05 e14eb4dd 起「删除」语义由软取消（cancel_stockreturn_core）取代：
-    记录保留（status='cancelled'），库存/流水/订单回冲链路与删除完全对称，
-    负库存文案同步改为「取消退货将导致库存为负数」。
+    2026-10-05 e14eb4dd 起「删除」由 cancel_stockreturn_core 承担（库存/流水/订单
+    回冲链路与删除完全对称）；2026-10-09 起该函数在回冲后**直接删除记录**
+    （不再软取消保留）。负库存文案为「取消退货将导致库存为负数」。
     """
     _deny_env(monkeypatch)
     stockreturn = SimpleNamespace(
@@ -729,12 +729,13 @@ async def test_delete_stockreturn_core_message_verbatim_then_releases(monkeypatc
         assert stockreturn.status == "active"
 
         monkeypatch.setenv("ALLOW_NEGATIVE_STOCK", "true")
-        await stock_return_service.cancel_stockreturn_core(
-            _FakeSession(stockout_release), stockreturn_release,
-        )
+        session = _FakeSession(stockout_release)
+        await stock_return_service.cancel_stockreturn_core(session, stockreturn_release)
         upd.assert_awaited_once()
         assert product.current_stock == 1  # 真实写入口已被替换为替身，库存不变
-        assert stockreturn_release.status == "cancelled"  # 软取消：状态翻转，记录保留
+        # 2026-10-09 起取消即删除：记录被删、不再翻状态保留
+        assert stockreturn_release in session.deleted
+        assert stockreturn_release.status == "active"
 
 
 # ---------------------------------------------------------------------------

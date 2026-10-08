@@ -222,10 +222,8 @@ class TestStockReturnApi:
         assert resp.status_code == 404
         assert resp.json()["detail"] == "退货记录不存在"
 
-    async def test_cancel_happy_path_soft_delete(self, sr_api):
-        """P1-① 取消退货：库存链路回冲，记录保留且 status='cancelled'"""
-        from sqlalchemy import select
-
+    async def test_cancel_delegates_to_service_and_reports_success(self, sr_api):
+        """DELETE /{id} 委派给 cancel_stockreturn 并回传成功文案（端点层契约）。"""
         from fastapi_app.shared_models import Product, StockOut, StockReturn
 
         client, db, _ = sr_api
@@ -253,13 +251,40 @@ class TestStockReturnApi:
             resp = await client.delete(f"{API_PREFIX}/{stock_return.id}")
         assert resp.status_code == 200, resp.text
         assert resp.json()["success"] is True
-        assert "取消" in resp.json()["message"]
+        assert "删除" in resp.json()["message"]
         assert mock_cancel.call_args.kwargs["stockreturn_id"] == stock_return.id
-        # 软取消：记录仍在（service 层置 status，端点 mock 不影响本断言的对象存在性）
-        still_there = (await db.execute(
-            select(StockReturn).where(StockReturn.id == stock_return.id)
+
+    async def test_cancel_hard_deletes_record(self, sr_api):
+        """取消退货：回冲后记录被真正删除（2026-10-09 起不再软取消保留）。"""
+        from sqlalchemy import select
+
+        from fastapi_app.shared_models import Product, StockOut, StockReturn
+
+        client, db, _ = sr_api
+        suffix = uuid.uuid4().hex[:8]
+        product = Product(name=f"退货删除产品-{suffix}", current_stock=100)
+        db.add(product)
+        await db.flush()
+        stockout = StockOut(
+            stockout_no=f"SO-HDEL-{suffix}", product_id=product.id,
+            quantity=50, customer="退货删除客户", returned_quantity=5,
+        )
+        db.add(stockout)
+        await db.flush()
+        stock_return = StockReturn(
+            return_no=f"SR-HDEL-{suffix}", product_id=product.id, quantity=5,
+            customer="退货删除客户", stockout_id=stockout.id, reason="其他",
+        )
+        db.add(stock_return)
+        await db.flush()
+        rid = stock_return.id
+
+        resp = await client.delete(f"{API_PREFIX}/{rid}")
+        assert resp.status_code == 200, resp.text
+        gone = (await db.execute(
+            select(StockReturn).where(StockReturn.id == rid)
         )).scalar_one_or_none()
-        assert still_there is not None, "软取消后记录必须保留"
+        assert gone is None, "取消后记录必须已删除（不再软取消保留）"
 
     async def test_list_with_data_and_filters(self, sr_api):
         """GET /list 落真实数据：客户模糊筛选与日期区间过滤、关联字段回填"""

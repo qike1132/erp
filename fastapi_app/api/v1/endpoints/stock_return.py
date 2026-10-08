@@ -200,7 +200,7 @@ async def cancel_stock_return(
     # 报表流水行内删除（迁移 079）：return_delete 或页面级 stock_return_manage
     _user: User = Depends(require_any_permission('stock_return_manage', 'return_delete')),
 ) -> StockActionResponse:
-    """取消退货记录（P1-① 软取消：记录保留，库存对称扣回、订单状态重算）。
+    """取消退货记录（回冲库存/订单状态后**删除该行**，记录不留存）。
 
     Args:
         return_id: 退货记录 ID。
@@ -219,4 +219,4 @@ async def cancel_stock_return(
         raise HTTPException(status_code=404, detail='退货记录不存在')
     async with db_transaction(db):
         await cancel_stockreturn(db, stockreturn_id=return_id, operator_id=_user.id)
-    return StockActionResponse(success=True, message='退货取消成功！库存已扣回')
+    return StockActionResponse(success=True, message='退货已删除！库存已扣回')

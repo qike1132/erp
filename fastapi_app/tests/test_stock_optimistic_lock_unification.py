@@ -76,7 +76,8 @@ _EXPECTED_CALL_SITES = {
     },
     "fastapi_app/services/stock_return_service.py": {
         "create_stockreturn_core": ["update_stock_with_optimistic_lock"],
-        # e14eb4dd 起「删除」由软取消（cancel_stockreturn_core）取代，写入点同名迁移
+        # e14eb4dd 起「删除」由 cancel_stockreturn_core 承担（2026-10-09 起回冲后
+        # 直接删除记录），库存写入点同名迁移
         "cancel_stockreturn_core": ["update_stock_with_optimistic_lock"],
     },
 }

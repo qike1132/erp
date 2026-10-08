@@ -2,8 +2,8 @@
 退货（StockReturn）业务逻辑
 
 包含退货核心操作（*_core）与对外编排函数（create/cancel）。
-P1-① 删除语义已由软取消取代：cancel 保留记录（status='cancelled'），
-库存/流水/订单状态走与删除完全相同的对称回冲链路。
+取消退货 = **直接删除记录**（2026-10-09 起，取代 P1-① 的「软取消保留记录」）：
+库存/流水/订单状态走与删除完全相同的对称回冲链路，回冲完成后删除该行。
 P1-② 订单抵扣出货（stockin_id 非空）与独立出货同等可退。
 create 支持 request_id 幂等令牌（前端每次打开弹窗生成，重试去重）。
 
@@ -159,7 +159,7 @@ async def search_returnable_stockouts(db: AsyncSession, keyword: str, limit: int
 
 
 async def cancel_stockreturn_core(db: AsyncSession, stockreturn: StockReturn, operator_id: int | None = None) -> None:
-    """取消退货记录核心逻辑（P1-① 软取消：保留记录，库存对称扣回）
+    """取消退货记录核心逻辑（回冲库存/出货累计/订单状态后**删除该行**）
 
     分支：历史关联行（stockout_id 非空）先回减 stock_out.returned_quantity；
     按产品退货的新行（stockout_id=NULL）无出货可回减。锁序 Product→StockOut。
@@ -197,7 +197,11 @@ async def cancel_stockreturn_core(db: AsyncSession, stockreturn: StockReturn, op
         await db.flush()
         await recalc_order_status_after_return(db, stockreturn.order_id)
 
-    stockreturn.status = 'cancelled'
+    # 取消退货 = 回冲完成后直接删除记录（2026-10-09 起取代「软取消保留记录」）。
+    # 保留 cancelled 行会堆积用户看不见的作废记录，且其 product_id 外键
+    # （NOT NULL + RESTRICT）会永久阻塞产品删除；库存流水已写下「退货」「退货取消」
+    # 两条，对账口径不依赖退货行本身，故直接删行不丢库存真相。
+    await db.delete(stockreturn)
     await db.flush()
 
 
@@ -243,7 +247,7 @@ async def create_stockreturn(db: AsyncSession, stockout_id: int, quantity: int,
 
 
 async def cancel_stockreturn(db: AsyncSession, stockreturn_id: int, operator_id: int | None = None) -> None:
-    """取消退货记录（P1-① 软取消：记录保留，库存/订单状态对称回冲）"""
+    """取消退货记录（回冲库存/订单状态后删除该行）"""
     result = await db.execute(select(StockReturn).where(StockReturn.id == stockreturn_id).with_for_update())
     stockreturn_obj = result.scalar_one_or_none()
     if not stockreturn_obj:
