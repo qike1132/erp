@@ -37,13 +37,18 @@ ERP 系统 - 部署说明（简版速查）
     NSSM 2.24（C:\nssm\nssm.exe）      Redis for Windows（缓存 6379 + broker 6380 两实例）
     OpenSSL 3.x                        VC++ 2015-2022 x64 运行库
 
-⚠️ 两个容易漏的坑（都能让系统"看起来正常"却出错）：
+⚠️ 三个容易漏的坑（都能让系统"看起来正常"却出错）：
 1) PG 客户端工具：`pg_dump`/`psql` 默认**不在 PATH** 上，工具解析顺序是
    `PG_TOOLS_BIN` → PATH → 三个约定目录（`C:\Program Files\PostgreSQL\*\bin`、
    `D:\PostgreSQL\bin`、`C:\PostgreSQL\bin`）。装到别处又不设 `PG_TOOLS_BIN`，
    备份会**静默降级为 JSON 导出**。
 2) 生产服务固定指向 `.venv\Scripts\python.exe`；重建虚拟环境后必须重跑
    管理器「安装服务」或手工重设服务 Application。
+3) **OCR 可选依赖**：`requirements/ocr.txt` 在依赖清单里写作"可选"，但**不装 =
+   粘贴识别 / PDF 出货单识别整块不可用**（端点返回 503 并附安装命令）。
+   2026-10-08 的生产部署就漏装过它，用户当时只看到「服务器内部错误」。
+   自检：`.\.venv\Scripts\python.exe -c "import numpy, cv2, rapidocr, onnxruntime, fitz"`。
+   完整依赖检查单见 `README.md` §4.6。
 
 日常启停 / 切换运行模式
 ==========================

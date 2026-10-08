@@ -2,6 +2,7 @@
 
 从 ocr_service.py 按职责拆出,行为与原实现完全一致。
 """
+import importlib
 import logging
 import os
 from typing import Any
@@ -9,6 +10,46 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif', '.webp'}
+
+# OCR 可选依赖的安装指引（requirements/ocr.txt 同样是这一串）
+_OCR_INSTALL_HINT = 'pip install -r requirements/ocr.txt（约 500MB，可选装）'
+
+
+class OcrDependencyError(RuntimeError):
+    """OCR 可选依赖缺失。
+
+    刻意继承 RuntimeError：`_import.py` 里既有的 `except RuntimeError`（出货单表格
+    识别失败即回退文本模式）继续生效；同时端点可以单独捕获它，把可执行的修复指引
+    回给调用方，而不是只回一句「服务器内部错误」。
+
+    背景（2026-10-08 生产事故）：新部署的 venv 漏装 OCR 可选栈，用户粘贴图片只看到
+    「服务器内部错误」，真正的 `ModuleNotFoundError: No module named 'numpy'` 只躺在
+    日志里。缺依赖属于**可预期的部署状态**，应当自报家门。
+    """
+
+
+def _missing_modules(names: tuple[str, ...]) -> list[str]:
+    """返回其中缺失的模块名（不抛异常，便于一次性报全）"""
+    missing = []
+    for name in names:
+        try:
+            importlib.import_module(name)
+        except ImportError:
+            missing.append(name)
+    return missing
+
+
+def _require_modules(*names: str) -> None:
+    """惰性导入 OCR 依赖；缺任何一个都抛出带修复命令的 OcrDependencyError。
+
+    一次报全缺失项：逐个导入报错会让运维修一个再撞下一个。
+    """
+    missing = _missing_modules(names)
+    if missing:
+        raise OcrDependencyError(
+            f'OCR 依赖未安装：{"、".join(missing)}；请执行 {_OCR_INSTALL_HINT}'
+        )
+
 
 # 延迟初始化的提取器单例。
 #
@@ -33,7 +74,7 @@ def _get_pdf_extracter():
             _pdf_extracter = RapidOCRPDF()
             logger.info('RapidOCRPDF 提取器初始化成功')
         except ImportError:
-            raise RuntimeError('rapidocr_pdf 未安装，请执行: pip install rapidocr_pdf') from None
+            raise OcrDependencyError(f'OCR 依赖未安装：rapidocr_pdf；请执行 {_OCR_INSTALL_HINT}') from None
     return _pdf_extracter
 
 def _get_img_extracter():
@@ -45,7 +86,7 @@ def _get_img_extracter():
             _img_extracter = RapidOCR()
             logger.info('RapidOCR 图片识别器初始化成功')
         except ImportError:
-            raise RuntimeError('rapidocr 未安装，请执行: pip install rapidocr') from None
+            raise OcrDependencyError(f'OCR 依赖未安装：rapidocr；请执行 {_OCR_INSTALL_HINT}') from None
     return _img_extracter
 
 def _get_table_extracter():
@@ -58,7 +99,7 @@ def _get_table_extracter():
             _table_extracter = RapidTable(input_args)
             logger.info('RapidTable (SLANet-plus) 表格识别器初始化成功')
         except ImportError:
-            raise RuntimeError('rapid_table 未安装，请执行: pip install rapid-table') from None
+            raise OcrDependencyError(f'OCR 依赖未安装：rapid_table；请执行 {_OCR_INSTALL_HINT}') from None
     return _table_extracter
 
 def extract_text_from_pdf(pdf_content: bytes) -> list[dict]:
@@ -104,6 +145,7 @@ def extract_text_from_image(image_content: bytes) -> list[dict]:
     Returns:
         列表，每项包含 {"page": 页码(固定0), "text": 文本内容}
     """
+    _require_modules('numpy', 'cv2')
     import numpy as np
     extracter = _get_img_extracter()
     img_array = np.frombuffer(image_content, dtype=np.uint8)
@@ -146,6 +188,7 @@ def extract_table_structure(file_content: bytes, filename: str='') -> list[dict]
     与 extract_text 不同，本函数直接输出 HTML 表格结构，
     保留了行列对应关系，无需后置正则猜测。
     """
+    _require_modules('cv2', 'numpy')
     import cv2
     import numpy as np
     ext = os.path.splitext(filename or '')[1].lower()
@@ -178,6 +221,7 @@ def extract_table_structure(file_content: bytes, filename: str='') -> list[dict]
 
 def _pdf_to_images(pdf_content: bytes) -> list:
     """将 PDF 每一页转为 numpy 图片数组"""
+    _require_modules('cv2', 'fitz', 'numpy')
     import cv2
     import fitz
     import numpy as np
