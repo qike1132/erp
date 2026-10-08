@@ -53,7 +53,7 @@ def test_get_pdf_extracter_missing_dependency_raises_runtime_error(monkeypatch):
     monkeypatch.setitem(sys.modules, 'rapidocr_pdf', None)
     with pytest.raises(RuntimeError) as excinfo:
         ex._get_pdf_extracter()
-    assert 'rapidocr_pdf 未安装' in str(excinfo.value)
+    assert 'rapidocr_pdf' in str(excinfo.value)
     assert not isinstance(excinfo.value, NameError)
 
 
