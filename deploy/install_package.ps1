@@ -99,6 +99,41 @@ function New-BlankAdmin([string]$Py,[string]$Psql,[string]$TargetDir,[string]$Wo
   }
   Write-Ok '已创建超管 admin —— 请立即登录并修改口令'
 }
+function Get-RedisKeyTtl([string]$RedisHost,[int]$Port,[string]$Password,[string]$Key,[int]$Db=0){
+  # 只读诊断：连 Redis 依次发 AUTH/SELECT/TTL，返回键的 TTL 秒数。
+  # 键不存在/连接失败/认证失败 → $null。走原始 RESP over TcpClient：口令不进命令行与进程列表，
+  # 也不依赖 redis-cli.exe（并避开 PS5.1 原生 stderr 在 EA=Stop 下误抛的坑）。
+  $client=$null
+  try{
+    $client=[Net.Sockets.TcpClient]::new()
+    $client.Connect($RedisHost,$Port)
+    $stream=$client.GetStream(); $stream.ReadTimeout=5000; $stream.WriteTimeout=5000
+    $enc=[Text.Encoding]::UTF8
+    $cmds=New-Object 'System.Collections.Generic.List[object]'
+    if($Password){ $cmds.Add(@('AUTH',$Password)) }
+    if($Db -gt 0){ $cmds.Add(@('SELECT',"$Db")) }
+    $cmds.Add(@('TTL',$Key))
+    $line=$null
+    foreach($c in $cmds){
+      $sb=[Text.StringBuilder]::new(); [void]$sb.Append('*').Append($c.Count).Append("`r`n")
+      foreach($p in $c){ $b=$enc.GetBytes([string]$p); [void]$sb.Append('$').Append($b.Length).Append("`r`n").Append([string]$p).Append("`r`n") }
+      $payload=$enc.GetBytes($sb.ToString()); $stream.Write($payload,0,$payload.Length); $stream.Flush()
+      $buf=New-Object 'System.Collections.Generic.List[byte]'
+      while($true){ $x=$stream.ReadByte(); if($x -lt 0){ break }; if($x -eq 13){ [void]$stream.ReadByte(); break }; [void]$buf.Add([byte]$x) }
+      $line=$enc.GetString($buf.ToArray())
+      if($c[0] -eq 'AUTH' -and -not $line.StartsWith('+OK')){ return $null }
+    }
+    if($line -match '^-?\d+$'){ return [int]$line }
+    return $null
+  } catch { return $null } finally { if($client){ $client.Close() } }
+}
+function Test-ArqSentinel([string]$RedisHost='127.0.0.1',[int]$Port=6380,[string]$Password='',[int]$Db=0){
+  # ARQ 官方健康哨兵键判活（与 fastapi_app/core/arq_app.check_worker_health 同一契约）：
+  # broker 实例上 arq:queue:health-check 的 TTL 落在 0..61 视为新鲜在线（health_check_interval=60）。
+  $ttl = Get-RedisKeyTtl -RedisHost $RedisHost -Port $Port -Password $Password -Key 'arq:queue:health-check' -Db $Db
+  if($null -eq $ttl){ return $false }
+  return ($ttl -ge 0 -and $ttl -le 61)
+}
 
 $work = Join-Path $env:TEMP ("erp_pkg_" + [guid]::NewGuid().ToString('N'))
 try {
@@ -111,14 +146,32 @@ try {
   $drive=([IO.Path]::GetPathRoot($TargetDir)).TrimEnd('\',':')
   $free=(Get-PSDrive -Name $drive).Free
   if($free -lt 8GB){ Write-Fail "目标盘可用空间不足 8GB（实 $([math]::Round($free/1GB,1))GB）"; exit 1 }
-  if(-not $PgSuperPassword){ Write-Fail '-PgSuperPassword 必填（连接 postgres 超级用户建库/建角色）'; exit 1 }
+  # 命令行明文口令会进 PowerShell 历史与进程列表——与构建端同一告警
+  $cliSecrets=@(); if($EncryptKey){ $cliSecrets+='-EncryptKey' }; if($PgSuperPassword){ $cliSecrets+='-PgSuperPassword' }; if($AdminPassword){ $cliSecrets+='-AdminPassword' }
+  if($cliSecrets.Count -gt 0){ Write-Warn (($cliSecrets -join '/') + ' 会进入 PowerShell 历史与进程列表；建议省略改用交互式隐藏输入') }
   if(-not $EncryptKey){ $sec=Read-Host -AsSecureString '便携包口令'; $EncryptKey=[Runtime.InteropServices.Marshal]::PtrToStringBSTR([Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec)) }
 
   # ==========================================================
   Write-Step '1 解密解包'
+  # 包完整性：随包带的 .sha256 侧车先比对（spec §6.2）；缺失仅告警不硬失败
+  $shaSide = "$Package.sha256"
+  if(Test-Path -LiteralPath $shaSide){
+    $want=([IO.File]::ReadAllText($shaSide)).Trim().ToLower()
+    $got=(Get-FileHash -LiteralPath $Package -Algorithm SHA256).Hash.ToLower()
+    if(-not $want -or $want -ne $got){
+      Write-Fail "包 sha256 校验失败（期望 '$want'，实算 '$got'）——包损坏或被篡改"; exit 1
+    }
+    Write-Ok '包 sha256 校验通过'
+  } else {
+    Write-Warn "未找到 $shaSide，跳过包完整性校验（建议随包携带 .sha256）"
+  }
   New-Item -ItemType Directory -Force -Path $work | Out-Null
   $tgz = Join-Path $work 'p.tar.gz'
-  Unprotect-File -InPath $Package -OutPath $tgz -Password $EncryptKey
+  try {
+    Unprotect-File -InPath $Package -OutPath $tgz -Password $EncryptKey
+  } catch [System.Security.Cryptography.CryptographicException] {
+    Write-Fail '口令错误或包损坏（解密失败）'; exit 1
+  }
   & tar.exe -xzf $tgz -C $work
   if($LASTEXITCODE -ne 0){ throw 'tar 解包失败' }
   $pkgRoot = (Get-ChildItem $work -Directory | Where-Object { Test-Path (Join-Path $_.FullName 'manifest.txt') } | Select-Object -First 1)
@@ -126,16 +179,47 @@ try {
   $binDir = Join-Path $pkgRoot.FullName 'binaries'
   Write-Ok "解包到 $($pkgRoot.FullName)"
 
-  # ---- 覆盖守卫：无 -Force 时拒绝且不动现场 ----
+  # postgres 超级用户口令：优先命令行，其次包内 settings\.env 的 PG_SUPER_PASSWORD，最后交互式隐藏输入
+  if(-not $PgSuperPassword){
+    $pgEnv = Read-EnvMap (Join-Path $pkgRoot.FullName 'settings\.env')
+    if($pgEnv['PG_SUPER_PASSWORD']){ $PgSuperPassword=$pgEnv['PG_SUPER_PASSWORD']; Write-Ok '已从包内 settings\.env 取用 PG_SUPER_PASSWORD' }
+    else { $sec=Read-Host -AsSecureString 'postgres 超级用户口令'; $PgSuperPassword=[Runtime.InteropServices.Marshal]::PtrToStringBSTR([Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec)) }
+  }
+  if(-not $PgSuperPassword){ Write-Fail 'postgres 超级用户口令为空（-PgSuperPassword / 包内 PG_SUPER_PASSWORD / 交互式输入）'; exit 1 }
+
+  # ---- 覆盖守卫：无 -Force 时拒绝 ----
+  # 诚实边界：基础软件步骤是幂等「已装跳过」；若本步之后中途失败，可能已装过 PostgreSQL/Redis/nginx…
+  # 故只承诺「不覆盖既有库/服务」，不声称「未改动任何现场」。
   $five = @('erp-redis','erp-redis-broker','erp-prod','erp-arq','erp-web')
   $existingSvc = @($five | Where-Object { Get-Service -Name $_ -ErrorAction SilentlyContinue })
   $targetExists = Test-Path -LiteralPath $TargetDir
-  if(-not $Force -and ($targetExists -or $existingSvc.Count -gt 0)){
-    Write-Fail "$TargetDir 或同名服务已存在（$($existingSvc -join ',')）；覆盖请加 -Force（未改动任何现场）"
+
+  # 库存在性预检：仅在能定位 psql 时做（无 psql 则跳过，留待第 3 步判定）
+  $dbNameGuard = 'erp_system'
+  $pgEnvMap = Read-EnvMap (Join-Path $pkgRoot.FullName 'settings\.env')
+  if($pgEnvMap['DB_NAME']){ $dbNameGuard = $pgEnvMap['DB_NAME'] }
+  $dbExistsGuard = $false
+  $psqlGuard = Get-PgTool 'psql.exe'
+  if($psqlGuard){
+    try{
+      $env:PGPASSWORD = $PgSuperPassword
+      $q = (& $psqlGuard -h localhost -U postgres -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$dbNameGuard'" | Out-String).Trim()
+      if($q -eq '1'){ $dbExistsGuard = $true }
+    } catch { } finally { Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue }
+  } else {
+    Write-Warn '未定位到 psql，跳过建库前「库已存在」预检（第 3 步仍会判定）'
+  }
+
+  $conflicts=@()
+  if($targetExists){ $conflicts += $TargetDir }
+  if($existingSvc.Count -gt 0){ $conflicts += ($existingSvc -join ',') }
+  if($dbExistsGuard){ $conflicts += "库 $dbNameGuard" }
+  if(-not $Force -and $conflicts.Count -gt 0){
+    Write-Fail ("已存在: " + ($conflicts -join '; ') + "；覆盖请加 -Force（不会覆盖既有库/服务；基础软件可能已先装）")
     exit 1
   }
-  if($Force -and ($targetExists -or $existingSvc.Count -gt 0)){
-    Write-Warn "-Force：将覆盖 $TargetDir 与已有服务（$($existingSvc -join ',')）"
+  if($Force -and $conflicts.Count -gt 0){
+    Write-Warn ("-Force：将覆盖 " + ($conflicts -join '; '))
   }
 
   # ==========================================================
@@ -260,7 +344,7 @@ try {
       if($LASTEXITCODE -ne 0){ Write-Fail 'CREATE DATABASE（重建）失败'; exit 1 }
       Write-Ok "数据库 $dbName 已重建"
     } else {
-      Write-Fail "$dbName 已存在；覆盖请加 -Force（未改动任何现场）"; exit 1
+      Write-Fail "$dbName 已存在；覆盖请加 -Force（不会覆盖既有库/服务）"; exit 1
     }
   } finally { Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue }
 
@@ -448,20 +532,65 @@ try {
   if(-not $SkipVerify){
     Write-Step '11 验收'
     Start-Sleep -Seconds 15
+
+    # ① 后端 5002 /api/health（轮询 ~45s，仍失败即 FAIL）
     $ready=$false
     for($i=0;$i -lt 9;$i++){
       try{ $r=Invoke-WebRequest "http://127.0.0.1:5002/api/health" -UseBasicParsing -TimeoutSec 10; $ready=$true; break }catch{ Start-Sleep -Seconds 5 }
     }
     if($ready){ Write-Ok "后端 /api/health -> $($r.StatusCode)" }
     else { Write-Fail '后端 /api/health 未就绪（查 logs\erp-prod.log 与 logs\prod_runner.json）'; exit 1 }
-    try{ $r2=Invoke-WebRequest "http://127.0.0.1:3000/api/health" -UseBasicParsing -TimeoutSec 10; Write-Ok "用户入口 :3000 -> $($r2.StatusCode)" }catch{ Write-Warn "用户入口 :3000 未就绪: $($_.Exception.Message)" }
-    $pr = Join-Path $TargetDir 'logs\prod_runner.json'
-    if(Test-Path $pr){
-      try{ $j=Get-Content $pr -Raw | ConvertFrom-Json
-        if($j.ready -and $j.frontend_ok){ Write-Ok 'prod_runner.json：ready=true / frontend_ok=true' }
-        else { Write-Warn "prod_runner.json：ready=$($j.ready) frontend_ok=$($j.frontend_ok)" } }
-      catch{ Write-Warn 'prod_runner.json 解析失败' }
+
+    # ② 用户入口 3000/api/health（轮询 ~30s，仍失败即 FAIL——半可用不许报成功）
+    $webReady=$false
+    for($i=0;$i -lt 6;$i++){
+      try{ $r2=Invoke-WebRequest "http://127.0.0.1:3000/api/health" -UseBasicParsing -TimeoutSec 10; $webReady=$true; break }catch{ Start-Sleep -Seconds 5 }
     }
+    if($webReady){ Write-Ok "用户入口 :3000 -> $($r2.StatusCode)" }
+    else { Write-Fail '用户入口 http://127.0.0.1:3000/api/health 未就绪（查 logs\erp-web.log 与 config\nginx-windows.conf）'; exit 1 }
+
+    # ③ prod_runner.json ready/frontend_ok（轮询 ~30s，仍失败即 FAIL）
+    $pr = Join-Path $TargetDir 'logs\prod_runner.json'
+    $prReady=$false
+    for($i=0;$i -lt 6;$i++){
+      if(Test-Path $pr){
+        try{ $j=Get-Content $pr -Raw | ConvertFrom-Json; if($j.ready -and $j.frontend_ok){ $prReady=$true; break } }catch{}
+      }
+      Start-Sleep -Seconds 5
+    }
+    if($prReady){ Write-Ok 'prod_runner.json：ready=true / frontend_ok=true' }
+    else { Write-Fail "prod_runner.json 未就绪（ready/frontend_ok 未同时为真）：$pr"; exit 1 }
+
+    # ④ ARQ 哨兵键（broker :6380，见 README §4.14④）（轮询 ~30s，仍失败即 FAIL）
+    $envFinal = Read-EnvMap $envPath
+    $brokerDb = 0
+    if("$($envFinal['REDIS_BROKER_URL'])" -match 'rediss?://[^/]*/(\d+)'){ $brokerDb=[int]$Matches[1] }
+    $arqOk=$false
+    for($i=0;$i -lt 6;$i++){
+      if(Test-ArqSentinel -RedisHost '127.0.0.1' -Port 6380 -Password $envFinal['REDIS_PASSWORD'] -Db $brokerDb){ $arqOk=$true; break }
+      Start-Sleep -Seconds 5
+    }
+    if($arqOk){ Write-Ok 'ARQ 哨兵键在线（arq:queue:health-check @6380）' }
+    else { Write-Fail 'ARQ 哨兵键缺失（arq:queue:health-check @6380）—— erp-arq 未在线，定时备份将静默停摆'; exit 1 }
+
+    # ⑤ 运行模式探针（存在才跑；判定非 prod 即 FAIL）
+    $probe=$null
+    foreach($cand in @('scripts\diag\runtime_mode_probe.py','scripts\ops\runtime_mode_probe.py')){
+      $p=Join-Path $TargetDir $cand
+      if(Test-Path $p){ $probe=$p; break }
+    }
+    if($probe){
+      $pvOut=Join-Path $work 'probe.out'; $pvErr=Join-Path $work 'probe.err'
+      $pp=Start-Process -FilePath $py -ArgumentList @("`"$probe`"") -NoNewWindow -Wait -PassThru -RedirectStandardOutput $pvOut -RedirectStandardError $pvErr
+      if($pp.ExitCode -ne 0){ Write-Warn "运行模式探针退出码 $($pp.ExitCode)（无法判定，见 $pvErr）——跳过" }
+      else{
+        try{
+          $pv=((Get-Content $pvOut -Raw) | ConvertFrom-Json).verdict
+          if("$pv" -like 'prod*'){ Write-Ok "运行模式探针：verdict=$pv" }
+          else { Write-Fail "运行模式探针判定非 prod：verdict=$pv（查 logs\prod_runner.json 与启动参数）"; exit 1 }
+        } catch { Write-Warn "运行模式探针输出无法解析：$($_.Exception.Message)——跳过" }
+      }
+    } else { Write-Warn '未找到 scripts\diag\runtime_mode_probe.py，跳过运行模式探针' }
   }
   Write-Ok "完成：http://${ServerIP}:3000  （请立即删除源包并确认 %TEMP% 已清）"
 } finally {
