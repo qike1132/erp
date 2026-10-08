@@ -35,6 +35,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy\build_package.ps1
 | 参数 | 默认 | 说明 |
 |---|---|---|
 | `-ProjectDir` | `D:\erp_system` | 源项目路径 |
+| `-PyDir` | 自动探测 | 源机**系统 Python 3.13** 的目录（用于拷运行时并装依赖）。默认探测 `%LOCALAPPDATA%\Programs\Python\Python313` 与 `C:\Python313`，都不在时**硬 FAIL** |
 | `-OutDir` | `D:\erp_portable` | 组装目录（须为安全路径，脚本会拒绝 ProjectDir 的子孙目录以防误删库子树） |
 | `-ServerIP` | `192.168.1.97` | 写进 manifest，作为目标机对外地址 |
 | `-EncryptKey` | 交互式提示 | 包加密口令。**省略**则交互式隐藏输入（推荐）；若显式传参会进 PowerShell 历史与进程列表 |
@@ -49,12 +50,13 @@ erp_portable_<yyyyMMdd_HHmm>.tar.gz.enc     # 口令加密后的便携包
 erp_portable_<yyyyMMdd_HHmm>.tar.gz.enc.sha256   # sha256 校验值
 ```
 
-**构建前置（缺一即 FAIL，`-DryRun` 例外）**：
+**构建前置（缺一即 FAIL；`-DryRun` 仅对 `deploy\binaries\` 缺件宽容，其余项同样强制）**：
 
 - 源机存在：`.env`、`config\jwt\private_v2.pem`、`config\uploads-signing.conf`、`frontend-vite\dist\index.html`；
+- 源机有**系统 Python 3.13**（用于拷运行时并装依赖；默认探测 `%LOCALAPPDATA%\Programs\Python\Python313` 与 `C:\Python313`，缺失即 FAIL，可用 `-PyDir` 指定）；
 - `pg_dump` / `psql` 可被探测到（`PG_TOOLS_BIN` / PATH / 约定目录，含 PG18）；
 - **工作区干净**（`git status --porcelain` 为空）——不打包未提交改动；
-- `deploy\binaries\` 已放齐下列 6 个安装包（下一步）。
+- `deploy\binaries\` 已放齐下列 6 个安装包（下一步；`-DryRun` 例外）。
 
 ### 1.1 先往 `deploy\binaries\` 放 6 个安装包
 
@@ -67,7 +69,7 @@ erp_portable_<yyyyMMdd_HHmm>.tar.gz.enc.sha256   # sha256 校验值
 | Nginx for Windows | 官方 Windows zip | `nginx*zip` | https://nginx.org/en/download.html |
 | NSSM | **2.24** | `nssm*zip` | https://nssm.cc/download |
 | Node.js | **LTS x64 msi** | `node*.msi` | https://nodejs.org |
-| VC++ 运行库 | **2015–2022 x64** | `vc_redist*zip*`（可放 exe 或 zip） | https://aka.ms/vs/17/release/vc_redist.x64.exe |
+| VC++ 运行库 | **2015–2022 x64** | `vc_redist*`（**官方下载的是 `.exe`**；exe 或 zip 均可） | https://aka.ms/vs/17/release/vc_redist.x64.exe |
 
 > Python **不在**此清单：运行时（Python 3.13）已随包携带，目标机**无需**单独装 Python。
 > Redis 必须是 tporadowski 的 **5.0.14.1**，不要换 7.x/8.x 的第三方 Windows 构建。
@@ -122,7 +124,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy\install_package.p
 - Windows 10 1809+（需自带 `tar.exe`）。
 
 **分阶段续跑**：安装流程**幂等**——每步先检测是否已完成（基础软件已装/库已存在/服务已注册……）
-再决定是否执行；中断后**重跑同一命令即为续跑**，已完成项自动跳过，无需额外开关。
+再决定是否执行，中断后重跑同一命令即可从断点续做。
+但注意：**目标机若已存在 `TargetDir`、同名 `erp_system` 库或同名五服务，重跑会在冲突检测处 `Write-Fail`
+（不改动任何现场），需显式加 `-Force` 才覆盖重建**。
 
 **两种数据来源**：
 

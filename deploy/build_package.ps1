@@ -30,7 +30,7 @@ $miss = Test-Prereqs $need; if($miss){ Write-Fail ("缺少: " + ($miss -join ', 
 $pgDump = Get-PgTool 'pg_dump.exe'; if(-not $pgDump){ Write-Fail '未找到 pg_dump（PG_TOOLS_BIN/PATH/约定目录，含18）'; exit 1 }
 # dump 的 alembic_version 用 psql 读取（源机 .env 不保证有 DATABASE_URL，不能靠它连库）
 $psql = Get-PgTool 'psql.exe'; if(-not $psql){ Write-Fail '未找到 psql（PG_TOOLS_BIN/PATH/约定目录，含18）'; exit 1 }
-$binNeed = @{ 'PG安装器'='pg18*'; 'Redis'='Redis-x64-5.0.14.1*'; 'nginx'='nginx*zip'; 'nssm'='nssm*zip'; 'node'='node*.msi'; 'vcredist'='vc_redist*zip*' }
+$binNeed = @{ 'PG安装器'='pg18*'; 'Redis'='Redis-x64-5.0.14.1*'; 'nginx'='nginx*zip'; 'nssm'='nssm*zip'; 'node'='node*.msi'; 'vcredist'='vc_redist*' }
 $binDir = Join-Path $PSScriptRoot 'binaries'
 $binMiss=@(); foreach($k in $binNeed.Keys){ if(-not (Get-ChildItem $binDir -Filter $binNeed[$k] -ErrorAction SilentlyContinue)){ $binMiss+=$k } }
 if($binMiss){
