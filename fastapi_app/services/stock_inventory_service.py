@@ -217,9 +217,9 @@ async def get_stockreturns(db: AsyncSession, stockout_id: int | None = None,
                            start_date: str | None = None, end_date: str | None = None) -> dict:
     """获取退货列表（**仅 active**；支持按出货ID/客户/日期区间筛选，支持分页）
 
-    已取消（``status='cancelled'``）的退货是软取消后的作废行，不在退货管理页展示
-    —— 与退货流水报表口径一致（report_data_service 同样只查 active）。行仍保留在
-    库中供追溯，故这里只过滤展示、不删数据。
+    只展示 active 行 —— 与退货流水报表口径一致（report_data_service 同样只查 active）。
+    2026-10-09 起取消退货即删除该行，正常情况下不会再有 cancelled 行；此过滤是对
+    历史遗留作废行的防御，且必须落在 SQL 里才能保证分页 ``total`` 正确。
     """
     # 构建共享过滤条件：stockout_id 为空时不加条件
     # （此前 `== stockout_id if stockout_id else True` 在无筛选时退化为 `== True` 恒假，导致 total 恒为 0）
