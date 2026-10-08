@@ -312,10 +312,13 @@ CREATE DATABASE erp_system WITH OWNER = erp_app ENCODING = 'UTF8' TEMPLATE = tem
 `erp-redis`（缓存）与 `erp-redis-broker`（ARQ 队列）**必须分开**，避免缓存驱逐把排队任务清掉。
 
 ```powershell
-# 1) 缓存实例配置：以仓库 config/redis.production.conf 为基准，落地到 C:\Redis
-Copy-Item D:\erp_system\config\redis.production.conf C:\Redis\redis.windows-service.conf
-#    该文件已是：bind 127.0.0.1 / port 6379 / maxmemory 512mb allkeys-lru / appendonly yes
-#    口令【不要】写进配置文件 —— 由服务启动参数 --requirepass 注入（与 .env 一致）
+# 1) 缓存实例配置：以仓库**模板**为基准，落地到 C:\Redis
+#    ⚠️ 用 .template，不是 config/redis.production.conf —— 后者含真实口令、已 gitignore，
+#    全新 clone 根本没有这个文件
+Copy-Item D:\erp_system\config\redis.production.conf.template C:\Redis\redis.windows-service.conf
+#    模板已是：bind 127.0.0.1 / port 6379 / maxmemory 512mb allkeys-lru / appendonly yes / logfile 置空
+#    落地后【务必确认】文件里没有生效的 requirepass 行（模板中那行已注释）；
+#    口令只由服务启动参数 --requirepass 注入（与 .env 一致），绝不写进 .conf
 
 # 2) broker 实例：直接使用仓库内配置（port 6380，队列专用，无 AOF）
 #    D:\erp_system\config\redis-broker.conf
@@ -396,8 +399,8 @@ Copy-Item .env.example .env
 | `DB_HOST/DB_PORT/DB_USER/DB_PASSWORD/DB_NAME` | `127.0.0.1 / 5432 / erp_app / <口令> / erp_system` | 连接池由 `UVICORN_WORKERS × DB_MAX_CONNECTIONS` 推导，不要另设池参数 |
 | `PG_TOOLS_BIN` | `D:\PostgreSQL\bin`（本机实际路径） | `pg_dump`/`pg_restore`/`psql` 所在目录。**留空且 PATH 里也没有 → 备份静默降级为 JSON 导出**（检测顺序见 §4.2 注） |
 | `REDIS_PASSWORD`、`REDIS_CACHE_URL`、`REDIS_BROKER_URL` | 与 4.5 一致 | broker 指向 `:6380`，cache 指向 `:6379` |
-| `ALLOWED_HOSTS` | 具体 IP/域名，**禁止 `*`** | 含 `*` 生产拒绝启动 |
-| `CORS_ORIGINS` | `http://<主机IP>:3000` | 不得含 `null` |
+| `ALLOWED_HOSTS` | **JSON 数组**（如 `["192.168.1.97","localhost"]`），具体 IP/域名，**禁止 `*`** | 字段名与变量同名，pydantic 对 list 按 **JSON** 解析：写成裸 `*` 或逗号串会 `SettingsError` 直接起不来；含 `*` 生产拒绝启动 |
+| `CORS_ORIGINS` | **逗号串**（非 JSON，如 `http://<主机IP>:3000`） | 与 `ALLOWED_HOSTS` 格式**不同**；http:// 仅放行 localhost/私网 IP；不得含 `null` |
 | `JWT_ALGORITHM` + `JWT_PRIVATE_KEY_PATH` + `JWT_PUBLIC_KEY_PATH` | `RS256` + 4.7 的两个路径 | RS256 模式下两个文件必须真实存在，否则启动失败 |
 | `BACKUP_ENCRYPTION_ENABLED` + `BACKUP_ENCRYPTION_PASSWORD` | `true` + 强随机口令 | **口令为空会静默降级为不加密备份** |
 | `BACKUP_ENCRYPTION_FALLBACK_TO_GENERATED` | `false`（保持） | 置 true 会产生「事后无法解密」的备份 |
@@ -407,6 +410,10 @@ Copy-Item .env.example .env
 | `UVICORN_WORKERS` | 建议 4（8GB 内存） | 影响连接池分摊；重装服务后 NSSM 注入值优先于 `.env` |
 | `STORAGE_TYPE` | `local`（默认） | 用 S3/MinIO 才改 `s3` 并装 `requirements/s3.txt` |
 | `ALLOW_NEGATIVE_STOCK` | `false`（默认） | 置 true 只解除应用层闸门，DB 约束仍会拒绝 |
+
+> ⚠️ 改完 `.env` 或任何服务参数后，一律用 **`nssm restart <服务名>`**；
+> `nssm start` 对**已在运行**的服务返回 1 且不重载配置（进程仍是旧的、仍用旧 `.env`），
+> 极易被误当成「已重启」。`start` 只在首次拉起时用。
 
 验收：
 
@@ -494,8 +501,17 @@ Copy-Item D:\erp_system\config\uploads-signing.conf.example D:\erp_system\config
 #    将里面 <在此填入密钥...> 替换为与 .env 的 UPLOAD_URL_SIGNING_SECRET 逐字相同的值
 
 # 3) TLS（可选）：config\tls\server.crt / server.key 就位；不启用就把 443 server 块删掉
+#    ⚠️ 全新 clone 只有公钥（server.crt / ca.crt），私钥 server.key 被 gitignore、不随仓库来，
+#    默认即「不启用」：把 51–236 行的 443 server 块整段注释掉（保留注释便于日后启用）
 
-# 4) 语法测试（重要：-p 指定项目根，而不是 nginx 目录）
+# 4) 首次运行前建 nginx temp 目录（nginx -p <项目根> 时**不会自建**；
+#    缺失则 nginx -t 报 CreateDirectory() "...\temp\client_body_temp" failed）
+$root = 'D:\erp_system'
+foreach ($d in 'client_body_temp','proxy_temp','fastcgi_temp','uwsgi_temp','scgi_temp') {
+    New-Item -ItemType Directory -Force "$root\temp\$d" | Out-Null
+}
+
+# 5) 语法测试（重要：-p 指定项目根，而不是 nginx 目录）
 C:\nginx\nginx.exe -p D:\erp_system -c D:\erp_system\config\nginx-windows.conf -t
 ```
 
