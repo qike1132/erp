@@ -337,6 +337,9 @@ class TestDeleteOrder:
         """普通用户删除订单 - 走审批"""
         order = make_mock_order()
         mock_async_db.get = AsyncMock(return_value=order)
+        # 删除前置校验会查询关联退货记录：默认无退货
+        mock_async_db.execute = AsyncMock(return_value=MagicMock(
+            scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))))
 
         normal_user = MagicMock()
         normal_user.id = 2
@@ -363,6 +366,9 @@ class TestDeleteOrder:
         """超管直接删除订单"""
         order = make_mock_order()
         mock_async_db.get = AsyncMock(return_value=order)
+        # 删除前置校验会查询关联退货记录：默认无退货
+        mock_async_db.execute = AsyncMock(return_value=MagicMock(
+            scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))))
 
         super_user = MagicMock()
         super_user.id = 1
@@ -373,6 +379,27 @@ class TestDeleteOrder:
         result = await delete_order(mock_async_db, 1, super_user)
 
         assert result['success'] is True
+
+    @pytest.mark.asyncio
+    @patch('fastapi_app.services.order.commands._check_order_lock')
+    async def test_delete_order_with_linked_return_blocked(self, mock_check_lock, mock_async_db):
+        """有退货记录的订单不可删除：前置拒绝并说明原因（迁移 072 RESTRICT 的应用层前置）
+
+        回归 2026-10-08：鲨鱼订单 68927 因 stock_return.stockout_id RESTRICT 外键，
+        直删时 DB 抛 IntegrityError 被映射成含糊的 409；现应前置为带原因的 ValueError(→400)。
+        """
+        order = make_mock_order()
+        mock_async_db.get = AsyncMock(return_value=order)
+        res = MagicMock()
+        res.scalars.return_value.all.return_value = ['SR-20261006-0001']
+        mock_async_db.execute = AsyncMock(return_value=res)
+
+        super_user = MagicMock()
+        super_user.id = 1
+        super_user.is_super = True
+
+        with pytest.raises(ValueError, match='退货记录'):
+            await delete_order(mock_async_db, 1, super_user)
 
 
 class TestCancelApproval:

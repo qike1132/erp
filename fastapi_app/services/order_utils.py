@@ -10,10 +10,10 @@
 """
 import logging
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi_app.shared_models import Order, OrderItem, StockOut
+from fastapi_app.shared_models import Order, OrderItem, StockOut, StockReturn
 from fastapi_app.shared_models.order import compute_status_from_stockouts
 
 logger = logging.getLogger(__name__)
@@ -67,3 +67,33 @@ async def compute_order_status_from_db(db: AsyncSession, order: Order) -> str:
     )
     shipped_qty = max(0, int(result.scalar() or 0))
     return compute_status_from_stockouts(order, deducted_qty, shipped_qty)
+
+
+async def assert_no_linked_returns(db: AsyncSession, order_id: int) -> None:
+    """订单存在退货记录时禁止删除（迁移 072：stock_return.stockout_id ON DELETE RESTRICT）。
+
+    删除订单会级联物理删除其 stock_out，而退货记录的外键为 RESTRICT —— 只要出货行有
+    关联退货（无论是否已取消），就不允许删除，为的是保留可追溯的退货台账。两条删除
+    执行路径（直删 order/commands._delete_order_directly、审批通过 approval_service
+    ._handle_delete_approval）都必须先过这道校验，否则会退化成 DB 层 IntegrityError
+    被映射成 409「订单存在关联数据」的含糊报错（2026-10-08 鲨鱼订单 68927 实测）。
+
+    与删出货单的应用层前置校验（stock_out_service.delete_stockout_core）同口径。
+    """
+    result = await db.execute(
+        select(StockReturn.return_no).where(
+            or_(
+                StockReturn.order_id == order_id,
+                StockReturn.stockout_id.in_(
+                    select(StockOut.id).where(StockOut.order_id == order_id)
+                ),
+            )
+        ).order_by(StockReturn.id)
+    )
+    return_nos = list(result.scalars().all())
+    if return_nos:
+        shown = '、'.join(return_nos[:5])
+        more = f' 等 {len(return_nos)} 条' if len(return_nos) > 5 else ''
+        raise ValueError(
+            f'该订单存在退货记录（{shown}{more}），无法删除：已出货且有退货的订单需保留退货台账以便追溯。'
+        )

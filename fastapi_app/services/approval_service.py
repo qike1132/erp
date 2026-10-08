@@ -26,7 +26,11 @@ from fastapi_app.core.state_machine import (
 )
 from fastapi_app.core.validators import validate_not_empty, validate_quantity_range
 from fastapi_app.services.approval_log_service import create_approval_log as _create_approval_log
-from fastapi_app.services.order_utils import compute_order_status_from_db, sync_single_item_quantity
+from fastapi_app.services.order_utils import (
+    assert_no_linked_returns,
+    compute_order_status_from_db,
+    sync_single_item_quantity,
+)
 from fastapi_app.shared.stock_concurrency import assert_stock_available, get_product_for_update
 from fastapi_app.shared_models import (
     ApprovalLog,
@@ -375,6 +379,10 @@ async def _handle_delete_approval(db: AsyncSession, approval: ApprovalRequest, o
     Raises:
         ValueError: 关联产品不存在或库存将变为负数时抛出。
     """
+    # 退货记录存在时不可删除（迁移 072 RESTRICT 的应用层前置）：审批提交后才产生退货的
+    # 场景下，直删入口的校验不会覆盖到这里，故此处再挡一次，给出明确原因而非 DB 层 409。
+    await assert_no_linked_returns(db, order.id)
+
     # 产品删除后 order.product_id 会被置空（迁移 052：ON DELETE SET NULL）：
     # 此时无产品行可锁、无库存可回滚，且 inventory_log.product_id 是非空外键
     # （ON DELETE CASCADE），故跳过库存回滚，仅清理关联记录并软删除订单。

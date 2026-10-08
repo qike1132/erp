@@ -34,6 +34,7 @@ from fastapi_app.services.order._common import (
 )
 from fastapi_app.services.order_utils import (
     _batch_deduct_quantities,
+    assert_no_linked_returns,
     compute_order_status_from_db,
     sync_single_item_quantity,
 )
@@ -359,6 +360,11 @@ async def delete_order(db: AsyncSession, order_id: int, current_user: User) -> d
         raise ValueError('订单不存在')
 
     await _check_order_lock(db, order_id, order, current_user, '删除')
+
+    # 有退货记录的订单不可删除（迁移 072 RESTRICT 的应用层前置）：
+    # 删除会级联物理删 stock_out，撞 RESTRICT 外键；此处前置拒绝并说明原因，
+    # 避免退化成正删/审批两条路径都报含糊 409。置于分支前，非超管不会创建注定失败的审批。
+    await assert_no_linked_returns(db, order_id)
 
     if current_user.is_super:
         return await _delete_order_directly(db, order, order_id, current_user)
