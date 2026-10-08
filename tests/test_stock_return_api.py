@@ -309,6 +309,43 @@ class TestStockReturnApi:
         )
         assert resp.json()["data"] == []
 
+    async def test_list_excludes_cancelled_returns(self, sr_api):
+        """已取消（软取消）的退货不出现在 /list —— 与退货流水报表口径一致。
+
+        背景（2026-10-08）：退货管理页曾把 status='cancelled' 的作废行一并列出，
+        而报表只查 active，两个视图口径不一致。
+        """
+        from fastapi_app.shared_models import Product, StockOut, StockReturn
+
+        client, db, _ = sr_api
+        suffix = uuid.uuid4().hex[:8]
+        product = Product(name=f"退货取消产品-{suffix}", current_stock=10)
+        db.add(product)
+        await db.flush()
+        stockout = StockOut(
+            stockout_no=f"SO-CXL-{suffix}", product_id=product.id,
+            quantity=50, customer="取消测试客户", returned_quantity=0,
+        )
+        db.add(stockout)
+        await db.flush()
+        db.add_all([
+            StockReturn(
+                return_no=f"SR-CXL-A-{suffix}", product_id=product.id, quantity=5,
+                customer="取消测试客户", stockout_id=stockout.id, reason="错发", status="active",
+            ),
+            StockReturn(
+                return_no=f"SR-CXL-C-{suffix}", product_id=product.id, quantity=7,
+                customer="取消测试客户", stockout_id=stockout.id, reason="错发", status="cancelled",
+            ),
+        ])
+        await db.flush()
+
+        resp = await client.get(f"{API_PREFIX}/list")
+        assert resp.status_code == 200
+        nos = [row["return_no"] for row in resp.json()["data"]]
+        assert f"SR-CXL-A-{suffix}" in nos, "active 退货应出现"
+        assert f"SR-CXL-C-{suffix}" not in nos, "已取消退货不应出现"
+
     async def test_create_request_id_dedup(self, sr_api):
         """P1-③ 幂等：同 request_id 的第二次提交被拒（400 请勿重复提交）"""
         client, db, _ = sr_api
