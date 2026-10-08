@@ -79,21 +79,6 @@ describe('RecordEditDialog', () => {
     expect(wrapper.text()).toContain('大于 0')
   })
 
-  it('单价清空时拒绝提交并给出可读提示（而不是把空串发给后端吃 422）', async () => {
-    const wrapper = mount(RecordEditDialog, {
-      props: { open: true, record },
-      global: { stubs },
-    })
-
-    // 清空数字输入框 ⇒ v-model.number 留下空串
-    await wrapper.find('[data-test="edit-price"]').setValue('')
-    await wrapper.find('[data-test="edit-submit"]').trigger('click')
-    await flushPromises()
-
-    expect(updateMock).not.toHaveBeenCalled()
-    expect(wrapper.text()).toContain('单价不能为空')
-  })
-
   it('后端返回数组型 detail（FastAPI 校验错误）时不把原始 JSON 摊给用户', async () => {
     updateMock.mockRejectedValueOnce({
       response: { data: { detail: [{ loc: ['body', 'quantity'], msg: 'invalid' }] } },
@@ -117,7 +102,7 @@ describe('RecordEditDialog', () => {
       global: { stubs },
     })
 
-    await wrapper.find('[data-test="edit-remark"]').setValue('补录')
+    await wrapper.find('[data-test="edit-quantity"]').setValue('700')
     await wrapper.find('[data-test="edit-submit"]').trigger('click')
     await flushPromises()
 

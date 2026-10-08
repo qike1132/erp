@@ -1,73 +1,97 @@
 <template>
   <UiDrawer
     :visible="open"
+    centered
     title="生产明细"
-    width="960px"
+    width="1360px"
     @update:visible="emit('update:open', $event)"
   >
-    <RecordFilterBar
-      :filters="filters"
-      :departments="departments"
-      :created-by-options="createdByOptions"
-      @update:filters="emit('update:filters', $event)"
-      @search="emit('search')"
-      @export="emit('export')"
-    />
-
-    <div
-      data-test="drawer-summary"
-      class="flex flex-wrap items-center gap-3 border-b border-border-light px-4 py-2 text-xs font-semibold text-text-secondary"
-    >
-      <!-- 总条数不在这一行重复：表格底部的 UiPagination 已带「共 N 条」 -->
-      <span>合计产量 {{ formatNumber(summaryQuantity) }} 件</span>
-      <span>合计产值 {{ formatCurrency(summaryValue) }}</span>
-      <span v-if="summarySku !== null">涉及 {{ summarySku }} 个品种</span>
-    </div>
-
-    <div class="flex min-h-0 flex-1 flex-col">
-      <UiSkeleton v-if="loading" variant="table" :rows="6" />
-
-      <UiEmpty
-        v-else-if="!records.length"
-        data-test="records-empty"
-        icon="fas fa-inbox"
-        text="当前筛选下暂无记录"
+    <!-- rec-scope：只放大本面板内的表格/控件，不影响全站其它表格（见下方 scoped 样式） -->
+    <div class="rec-scope">
+      <RecordFilterBar
+        :filters="filters"
+        :departments="departments"
+        :created-by-options="createdByOptions"
+        @update:filters="emit('update:filters', $event)"
+        @search="emit('search')"
+        @export="emit('export')"
       />
 
-      <UiDataTable
-        v-else
-        :data="records"
-        :columns="COLUMNS"
-        row-key="id"
-        paginator
-        :rows="filters.perPage"
-        :total-records="total"
-        @page="onPage"
+      <div
+        data-test="drawer-summary"
+        class="flex flex-wrap items-center gap-4 border-b border-border-light px-4 py-3 text-sm font-semibold text-text-secondary"
       >
-        <template #column-body-department="{ row }">
-          <span class="rounded bg-surface px-1.5 py-0.5 text-[11px] font-bold">
-            {{ deptLabel(row.department) }}
-          </span>
-        </template>
-        <template #column-body-production_date="{ row }">{{ row.production_date }}</template>
-        <template #column-body-quantity="{ row }">
-          <strong class="tabular-nums">{{ formatNumber(row.quantity) }}</strong>
-        </template>
-        <template #column-body-production_value="{ row }">{{ formatCurrency(row.production_value) }}</template>
-        <template #column-body-actions="{ row }">
-          <span data-test="record-row" class="flex justify-center gap-2">
-            <button data-test="record-edit" class="text-xs font-bold text-primary-600" @click="emit('edit', row)">改</button>
-            <button data-test="record-delete" class="text-xs font-bold text-danger-600" @click="askDelete(row)">删</button>
-          </span>
-        </template>
-      </UiDataTable>
+        <!-- 总条数不在这一行重复：表格底部的 UiPagination 已带「共 N 条」 -->
+        <span>合计产量 {{ formatNumber(summaryQuantity) }} 件</span>
+        <span>合计产值 {{ formatCurrency(summaryValue) }}</span>
+        <span v-if="summarySku !== null">涉及 {{ summarySku }} 个品种</span>
+      </div>
+
+      <div class="flex min-h-0 flex-1 flex-col">
+        <UiSkeleton v-if="loading" variant="table" :rows="6" />
+
+        <UiEmpty
+          v-else-if="!records.length"
+          data-test="records-empty"
+          icon="fas fa-inbox"
+          text="当前筛选下暂无记录"
+        />
+
+        <UiDataTable
+          v-else
+          :data="records"
+          :columns="COLUMNS"
+          row-key="id"
+          paginator
+          :rows="filters.perPage"
+          :total-records="total"
+          @page="onPage"
+        >
+          <template #column-body-department="{ row }">
+            <span class="rounded bg-surface px-2 py-0.5 text-[13px] font-bold">
+              {{ deptLabel(row.department) }}
+            </span>
+          </template>
+          <template #column-body-production_date="{ row }">{{ row.production_date }}</template>
+          <template #column-body-quantity="{ row }">
+            <strong class="tabular-nums">{{ formatNumber(row.quantity) }}</strong>
+          </template>
+          <template #column-body-production_value="{ row }">{{ formatCurrency(row.production_value) }}</template>
+          <template #column-body-actions="{ row }">
+            <span data-test="record-row" class="flex items-center justify-center gap-2">
+              <button
+                type="button"
+                data-test="record-edit"
+                class="rec-act rec-act--edit"
+                title="编辑这条记录"
+                @click="emit('edit', row)"
+              >
+                <FontAwesomeIcon icon="pen-to-square" aria-hidden="true" />
+                <span>改</span>
+              </button>
+              <button
+                type="button"
+                data-test="record-delete"
+                class="rec-act rec-act--del"
+                title="删除这条记录"
+                @click="askDelete(row)"
+              >
+                <FontAwesomeIcon icon="trash-can" aria-hidden="true" />
+                <span>删</span>
+              </button>
+            </span>
+          </template>
+        </UiDataTable>
+      </div>
     </div>
 
     <!-- 删除二次确认：后端是物理删除且不可恢复，必须写明「删的是哪一条」。
          复用共享的 UiConfirmDialog —— 它自带焦点陷阱、Escape 关闭与滚动锁，
          这是全站最危险的操作，不能自建一个更弱的模态。
-         抽屉本身是 z-[var(--z-modal)]（40），若确认框沿用同一层级，谁盖谁取决于传送顺序；
-         故显式抬到嵌套层级（overlay 60 / modal 70），保证确认框永远在抽屉之上。 -->
+         抽屉是 PrimeVue 的 Drawer，其遮罩 z 由 PrimeVue 定为 2100（main.ts 的
+         zIndex.modal=2100）。确认框必须落在超出该层的嵌套层级（--z-overlay/modal-nested，
+         2200/2210），否则会被遮罩压住、点不到 —— 确认框在遮罩之下时，点击落在遮罩上
+         反而直接把抽屉关了，删除护栏等于不存在。 -->
     <UiConfirmDialog
       :open="!!pendingDelete"
       type="danger"
@@ -97,7 +121,7 @@ import RecordFilterBar from './RecordFilterBar.vue'
 import type { RecordFilters } from '../composables/recordFilters'
 
 // 规格 §4.2 的列清单里还有「单价」，此处有意不展示：产值 = 单价 × 数量，
-// 两者并列属重复信息，而抽屉可用宽度约 960px，十列会挤到每列都要截断。
+// 两者并列属重复信息，而居中面板可用宽度约 1100px，十列会挤到每列都要截断。
 // 单价仍可在编辑弹窗里查看与修改（Task 10）。
 const COLUMNS: TableColumn[] = [
   { field: 'production_date', header: '日期', width: '96px' },
@@ -179,3 +203,55 @@ function onPage(event: { page: number; rows: number }) {
   emit('update:filters', { ...props.filters, page: event.page + 1, perPage: event.rows })
 }
 </script>
+
+<style scoped>
+/* 「操作」列按钮：原先只是纯文字链接，字号小、不像可点控件。改成按钮形态。 */
+.rec-act {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.rec-act--edit {
+  color: var(--color-primary-600);
+  background: var(--color-primary-50);
+  border-color: var(--color-primary-200);
+}
+.rec-act--edit:hover {
+  color: #fff;
+  background: var(--color-primary-600);
+  border-color: var(--color-primary-600);
+}
+.rec-act--del {
+  color: var(--color-danger-600);
+  background: var(--color-danger-50);
+  border-color: var(--color-danger-200);
+}
+.rec-act--del:hover {
+  color: #fff;
+  background: var(--color-danger-600);
+  border-color: var(--color-danger-600);
+}
+
+/* 明细整体放大：只作用于本面板（.rec-scope 之内），全站其它表格不受影响 */
+.rec-scope :deep(td) {
+  padding: 16px 12px;
+  font-size: 15px;
+}
+.rec-scope :deep(th) {
+  padding: 14px 12px;
+  font-size: 13px;
+}
+.rec-scope :deep(.ui-select-input) {
+  height: 46px;
+  font-size: 14px;
+}
+</style>
