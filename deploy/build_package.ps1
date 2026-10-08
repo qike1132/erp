@@ -54,7 +54,9 @@ Write-Step '1/6 拷代码'
 $xd = @((Join-Path $ProjectDir '.git'),(Join-Path $ProjectDir '.venv'),(Join-Path $ProjectDir 'logs'),
         (Join-Path $ProjectDir 'temp'),(Join-Path $ProjectDir 'backups'),(Join-Path $ProjectDir 'dist'),
         (Join-Path $ProjectDir '_ops'),(Join-Path $ProjectDir 'config\pgbouncer'))
-robocopy $ProjectDir (Join-Path $OutDir 'app') /E /XD @('node_modules','__pycache__','.pytest_cache','.mypy_cache','.ruff_cache','.claude','.graphflow','.graphflow-cache') @xd /XF '*.pyc','*.pyo','*.log','*.tmp','*.pid' /NFL /NDL /NJH /NJS /NP /R:1 /W:1 | Out-Null
+# /XD 除构建垃圾外，须排除 AGENTS.md §7 的全部 AI 工具痕迹目录（15+），避免打进包
+$aiTrail = @('.agent','.claude','.cursor','.graphflow','.graphflow-cache','graphflow-out','.trae','.qoder','.workbuddy','.reasonix','.superpowers','.codebuddy','.freebuff','.lean-ctx','.resultverify','.codeartsdoer','.zcode')
+robocopy $ProjectDir (Join-Path $OutDir 'app') /E /XD @('node_modules','__pycache__','.pytest_cache','.mypy_cache','.ruff_cache') $aiTrail @xd /XF '*.pyc','*.pyo','*.log','*.tmp','*.pid','dsh-web-dump-config.txt' /NFL /NDL /NJH /NJS /NP /R:1 /W:1 | Out-Null
 if($WithNodeModules){ robocopy (Join-Path $ProjectDir 'frontend-vite\node_modules') (Join-Path $OutDir 'app\frontend-vite\node_modules') /E /NFL /NDL /NJH /NJS /NP /R:1 /W:1 | Out-Null }
 
 Write-Step '2/6 拷 runtime'
