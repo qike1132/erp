@@ -38,6 +38,7 @@ from fastapi_app.shared_models import (
     ApprovalRequest,
     InventoryLog,
     Order,
+    OrderItem,
     OrderSyncRecord,
     StockOut,
     User,
@@ -440,6 +441,11 @@ async def _handle_delete_approval(db: AsyncSession, approval: ApprovalRequest, o
         ApprovalRequest.order_id == order.id,
         ApprovalRequest.id != approval.id,
     ))
+
+    # 清掉订单明细：与直删路径（order/commands.py::_purge_order_related_rows）同口径。
+    # 明细的 product_id 是 FK NO ACTION，残留会永久阻塞该产品的删除；
+    # outsource.order_item_id 为 CASCADE，随明细一并清理。
+    await db.execute(sa_delete(OrderItem).where(OrderItem.order_id == order.id))
 
     # 级联清理该订单同步产生的采购计划明细（2026-10-06 删除联动，
     # 与 order_crud._delete_order_directly 同一口径）
