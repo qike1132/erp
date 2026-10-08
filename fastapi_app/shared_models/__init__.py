@@ -19,6 +19,7 @@ class Base(DeclarativeBase):
 
 
 # 全量导入所有模型，确保 Base.metadata 注册所有表（详见模块文档字符串）
+from fastapi_app.shared_models.app_version import AppVersion
 from fastapi_app.shared_models.approval import ApprovalLog, ApprovalRequest
 from fastapi_app.shared_models.audit_log import AuditLog
 from fastapi_app.shared_models.backup_record import BackupRecord
@@ -99,6 +100,7 @@ __all__ = [
     'MATERIAL_CATEGORIES',
     'SHIPMENT_STATUS_RECEIVED',
     'SHIPMENT_STATUS_SHIPPED',
+    'AppVersion',
     'ApprovalLog',
     'ApprovalRequest',
     'AuditLog',

@@ -288,7 +288,7 @@ async def _do_create_full_backup(
         #   既没证实内容也没证实行数，属于真实缺口，参与 complete。
         # - unbacked_tables：库中存在、本次产物不会包含的表。pg_dump 路径会整库导出，
         #   只有 JSON 降级路径（只遍历模型表）才会真的漏。这类表是已知的范围限制
-        #   （如 app_version / product_image_orphan_backup 等非业务表），只记录并告警，
+        #   （库中未纳入 ORM 的非业务表），只记录并告警，
         #   不参与 complete——否则每天自动全量都判 partial，健康检查与合规报告会被
         #   永久噪声淹没，反而掩盖真正的缺口。
         count_failed_tables = sorted(

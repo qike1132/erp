@@ -74,28 +74,24 @@ target_metadata = Base.metadata
 # 本白名单只改比较逻辑，不改动/删除生产库任何对象。
 # ============================================================================
 
-# 库独有表：
-#   app_version                  —— 早期 add_app_version.py 所建，无 ORM 模型、0 行；
-#                                   OTA 脚本（insert_1_3_version.py 等）以裸 SQL 访问。
-#   product_image_orphan_backup  —— 无迁移、来源不明，无任何代码引用、0 行。
-_IGNORED_DB_ONLY_TABLES = {
-    'app_version',
-    'product_image_orphan_backup',
-}
+# 库独有表：当前为空。
+#   app_version                  —— 已由 fastapi_app/shared_models/app_version.py 纳入 ORM
+#                                   （配套迁移 pg_standalone_081），不再是漂移项。
+#   product_image_orphan_backup  —— 已由迁移 pg_standalone_082 删除（该迁移应用后生效）。
+_IGNORED_DB_ONLY_TABLES: set[str] = set()
 
 # 库独有索引（历史迁移所建，模型未声明；多为搜索/审计/覆盖索引，误删会掉性能）：
+# 注：idx_app_version_platform_code 已随 app_version 纳入 ORM（迁移 081），故移出白名单。
+#     idx_stockout_no_stockin / idx_order_date_id_desc 已纳入 ORM（迁移 083），故移出白名单。
 _IGNORED_DB_ONLY_INDEXES = {
-    'idx_app_version_platform_code',   # 位于 app_version 表，随该表一并豁免
     'idx_csfv_created_at',             # 054 建；生产同名旧索引先存在 → 新定义被跳过
     'idx_csfv_status',                 # 历史迁移所建
     'idx_csp_role_part_version',       # 054 建 unique；生产同名旧索引为 non-unique
-    'idx_inventory_log_product_time',  # 历史迁移所建
+    'idx_inventory_log_product_time',  # 待迁移 084 改名为 ..._date 后即可移出
     'idx_material_reg_date',           # 历史迁移所建（生产定义与模型分叉）
     'idx_material_reg_supplier',       # 历史迁移所建（生产在 supplier_name，模型在 supplier_id）
-    'idx_order_date_id_desc',          # 历史迁移所建
-    'idx_stockout_has_stockin',        # 历史迁移所建
-    'idx_stockout_no_stockin',         # 历史迁移所建
-    'idx_stockout_order_stockin',      # 历史迁移所建
+    'idx_stockout_has_stockin',        # 待迁移 084 删除后即可移出
+    'idx_stockout_order_stockin',      # 待迁移 084 删除后即可移出
 }
 
 # 库独有列（模型未声明）：按「表 → 列名」精确匹配，避免与其它表上的同名列

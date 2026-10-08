@@ -122,6 +122,12 @@ class Order(Base):
               postgresql_where=text("is_deleted = false")),
         Index('idx_order_batch_completed', desc('batch_completed_at'),
               postgresql_where=text("batch_completed_at IS NOT NULL")),
+        # 订单列表游标分页主路径：ORDER BY order_date DESC, id DESC
+        # WHERE is_deleted IS NOT TRUE（见 services/order/queries.py:141-157）。
+        # 谓词必须与库中一致写作 `is_deleted IS NOT TRUE`（而非 ORM 别处的 `= false`），
+        # 否则 alembic 视为不同索引。
+        Index('idx_order_date_id_desc', desc('order_date'), desc('id'),
+              postgresql_where=text("is_deleted IS NOT TRUE")),
         {'quote': True},
     )
 

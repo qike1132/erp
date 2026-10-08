@@ -70,7 +70,6 @@ CLEAR_TABLES = [
     'customer_sampling_role',
     'customer_sampling_project',
     'pattern_maker',
-    'product_image_orphan_backup',
     'file_records',
     # 核心业务 - 库存与出库
     'stock_return',

@@ -64,6 +64,7 @@ npm run check:routes              # 路由对齐检查
 - `.githooks/commit-msg`（第 5 层）：**剥掉第三方 AI 工具的署名尾行**（`🤖 Generated with <tool>` / `Co-Authored-By: <tool> <...>`，工具列表见该文件）。背景：Codebuff 曾把署名写进 12 个提交（2026-08-11 起），与 §7 的 AI 痕迹治理意图相悖；就地剥离而非拒绝，避免阻断任何工具的工作流。**故意不剥 Claude 的署名**（本仓明确使用 Claude Code）。
 - 密钥扫描误报的**正确**处置是在命中行尾加 `secret-scan:allow <理由>`（或上一行加 `secret-scan:allow-next-line`）；`.githooks/allowlist.txt` 是逐文件豁免，**新增条目必须在提交信息里说明理由**。
 - 提交信息写**为什么**，不只写改了什么。一个提交只做一件事。提交前用 `git status --porcelain` 确认没有卷进 AI 痕迹或运行期数据。
+- 迁移：**禁止对生产库运行 `alembic revision --autogenerate`**（生产有历史漂移，会生成一批 `DROP INDEX`/`DROP TABLE`/`DROP COLUMN` 破坏性 DDL）。需生成迁移时先在**临时空库** `upgrade head`，改模型后再对空库 autogenerate，判据同 CI（空库 `upgrade head` + `check`）。`migrations/versions/` 下新增的破坏性 DDL 会被 `fastapi_app/tests/test_migration_autogenerate_safety.py` 拦下。详见 `migrations/README`。
 
 ## 5. 红线（会打挂生产，别做）
 
@@ -73,7 +74,7 @@ npm run check:routes              # 路由对齐检查
 4. **不要**让 `.env` 的 `BACKUP_ENCRYPTION_PASSWORD` 为空：`BACKUP_ENCRYPTION_ENABLED=true` 时会**静默降级为不加密备份**。
 5. **不要**修改或删除 `frontend-vite/vite.config.js` —— 它是 `vue-tsc -b` 编译 `vite.config.ts` 的**设计产物**，且有回归测试（`fastapi_app/tests/test_qa_prod_stack_regression.py`）断言二者一致。
 6. **不要**改 `core.hooksPath`（指到 husky 目录会废掉 `.githooks` 的密钥扫描）。
-7. Alembic 迁移只做结构/数据变更，不夹带业务逻辑；保持单 head。
+7. Alembic 迁移只做结构/数据变更，不夹带业务逻辑；保持单 head。**不得对生产库跑 autogenerate**（见 §4）。
 
 ## 6. 分析代码的方法（本项目踩过的坑）
 
