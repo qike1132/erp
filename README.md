@@ -390,6 +390,10 @@ python -m venv .venv
 Copy-Item .env.example .env
 ```
 
+> ⚠️ **写 `.env` 别用 PowerShell `Get-Content`/`Set-Content`**：Windows PowerShell 5.1 读写非 GBK
+> 内容会误判编码，把中文注释与配置行**粘成一行**（被粘的键随之失效），也容易写出 BOM/乱码。
+> 用 UTF-8 编辑器手改，或用 Python 生成（`open(path,'a',encoding='utf-8')`）——AGENTS.md §6 同款坑。
+
 **必填 / 生产必改键位**（完整清单见 [.env.example](.env.example) 的注释，逐条都有证据行）：
 
 | 键 | 生产取值 | 说明 |
