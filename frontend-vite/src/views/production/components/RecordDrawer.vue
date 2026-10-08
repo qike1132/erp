@@ -123,7 +123,7 @@ import type { RecordFilters } from '../composables/recordFilters'
 
 // 规格 §4.2 的列清单里还有「单价」，此处有意不展示：产值 = 单价 × 数量，
 // 两者并列属重复信息，而居中面板可用宽度约 1100px，十列会挤到每列都要截断。
-// 单价仍可在编辑弹窗里查看与修改（Task 10）。
+// 单价仅在录入弹窗（ProductionEntryDialog）可改；编辑弹窗已精简为日期/数量。
 const COLUMNS: TableColumn[] = [
   { field: 'production_date', header: '日期', width: '96px' },
   { field: 'department', header: '部门', width: '80px', align: 'center' },
