@@ -56,11 +56,11 @@ $xd = @((Join-Path $ProjectDir '.git'),(Join-Path $ProjectDir '.venv'),(Join-Pat
         (Join-Path $ProjectDir '_ops'),(Join-Path $ProjectDir 'config\pgbouncer'))
 # /XD 除构建垃圾外，须排除 AGENTS.md §7 的全部 AI 工具痕迹目录（15+），避免打进包
 $aiTrail = @('.agent','.claude','.cursor','.graphflow','.graphflow-cache','graphflow-out','.trae','.qoder','.workbuddy','.reasonix','.superpowers','.codebuddy','.freebuff','.lean-ctx','.resultverify','.codeartsdoer','.zcode')
-robocopy $ProjectDir (Join-Path $OutDir 'app') /E /XD @('node_modules','__pycache__','.pytest_cache','.mypy_cache','.ruff_cache') $aiTrail @xd /XF '*.pyc','*.pyo','*.log','*.tmp','*.pid','dsh-web-dump-config.txt' /NFL /NDL /NJH /NJS /NP /R:1 /W:1 | Out-Null
+robocopy $ProjectDir (Join-Path $OutDir 'app') /E /XD @('node_modules','__pycache__','.pytest_cache','.mypy_cache','.ruff_cache') $aiTrail @xd /XF @('*.pyc','*.pyo','*.log','*.tmp','*.pid','dsh-web-dump-config.txt') /NFL /NDL /NJH /NJS /NP /R:1 /W:1 | Out-Null
 if($WithNodeModules){ robocopy (Join-Path $ProjectDir 'frontend-vite\node_modules') (Join-Path $OutDir 'app\frontend-vite\node_modules') /E /NFL /NDL /NJH /NJS /NP /R:1 /W:1 | Out-Null }
 
 Write-Step '2/6 拷 runtime'
-robocopy $PyDir (Join-Path $OutDir 'runtime\python313') /E /XD '__pycache__' /XF '*.pyc','*.pyo' /NFL /NDL /NJH /NJS /NP /R:1 /W:1 | Out-Null
+robocopy $PyDir (Join-Path $OutDir 'runtime\python313') /E /XD '__pycache__' /XF @('*.pyc','*.pyo') /NFL /NDL /NJH /NJS /NP /R:1 /W:1 | Out-Null
 if($DryRun){
   Write-Warn 'DryRun：跳过 runtime 依赖安装（pip install base/dev/test/ocr）与导入自检'
 } else {
