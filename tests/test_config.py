@@ -36,7 +36,12 @@ class TestAllowedHostsProduction:
     def test_specific_hosts_ok_in_production(self):
         """生产环境指定具体域名不报错"""
         with patch.dict(os.environ, {"APP_ENV": "production"}):
-            s = Settings(ALLOWED_HOSTS=["erp.example.com"])
+            # 生产下 CORS 若含默认串里的 'null' 会触发 iframe 逃逸闸门；显式给合规源，
+            # 本用例只考察 ALLOWED_HOSTS。
+            s = Settings(
+                ALLOWED_HOSTS=["erp.example.com"],
+                BACKEND_CORS_ORIGINS=["https://erp.example.com"],
+            )
             assert s.ALLOWED_HOSTS == ["erp.example.com"]
 
     def test_wildcard_ok_in_dev(self):

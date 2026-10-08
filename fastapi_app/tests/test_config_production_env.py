@@ -71,6 +71,17 @@ class TestProductionGatesUnderMalformedEnv:
     """
 
     @pytest.fixture(autouse=True)
+    def _prod_required_env(self, monkeypatch: pytest.MonkeyPatch):
+        """本类用例靠 importlib.reload 重跑模块级 Settings()；CI 干净检出无 .env，
+        必须显式给出生产必需项 —— 否则 reload 会在 ALLOWED_HOSTS 缺失处直接
+        RuntimeError，用例根本到不了断言。"""
+        monkeypatch.setenv('ALLOWED_HOSTS', '["erp.example.com"]')
+        monkeypatch.setenv('SECRET_KEY', 'x' * 48)
+        # 不给 CORS 时 reload 会用类默认串（含 'null'），生产下同样触发 null 闸门；
+        # 显式给合法源，把本类用例聚焦在各自被测的闸门上。
+        monkeypatch.setenv('CORS_ORIGINS', 'https://erp.example.com')
+
+    @pytest.fixture(autouse=True)
     def _restore_settings_singleton(self):
         """reload 会重新执行模块级 ``settings = Settings()``，把全局单例替换为
         本用例 monkeypatch 环境下的新实例。若不恢复，后续用例里 ``from config
