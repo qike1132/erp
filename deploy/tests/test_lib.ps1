@@ -43,5 +43,25 @@ $mB = Read-EnvMap $envf2
 $arrB = @($mB['ALLOWED_HOSTS'] | ConvertFrom-Json | ForEach-Object { $_ })
 Assert ($rawB -match 'ALLOWED_HOSTS=\[') '追加第2项后仍写出数组'
 Assert ($arrB.Count -eq 2 -and @($arrB | Where-Object { $_ -eq '10.1.1.1' }).Count -eq 1) '追加第2项后长度2且不重复'
+# Add-EnvListItemComma 去重 + 追加
+$envf3 = Join-Path $tmp 'e3.env'
+[IO.File]::WriteAllText($envf3, "CORS_ORIGINS=`r`n", [Text.UTF8Encoding]::new($false))
+Add-EnvListItemComma -Path $envf3 -Key 'CORS_ORIGINS' -Item 'http://a'
+Add-EnvListItemComma -Path $envf3 -Key 'CORS_ORIGINS' -Item 'http://a'   # 二次应去重
+$mC = Read-EnvMap $envf3
+Assert ((@($mC['CORS_ORIGINS'].Split(',')).Count -eq 1) -and $mC['CORS_ORIGINS'] -eq 'http://a') '逗号列表二次去重，仅一项'
+Add-EnvListItemComma -Path $envf3 -Key 'CORS_ORIGINS' -Item 'http://b'   # 追加新项
+$mC2 = Read-EnvMap $envf3
+Assert ($mC2['CORS_ORIGINS'] -eq 'http://a,http://b') '逗号列表追加新项'
+
+# nginx 改写：2 处 D:/erp_system 全替换；443 server 块被注释；HTTP server 块保留
+$nf = Join-Path $tmp 'n.conf'; Copy-Item (Join-Path $PSScriptRoot 'fixtures\nginx-sample.conf') $nf
+$cnt = Update-NginxConf -ConfPath $nf -OldRoot 'D:/erp_system' -NewRoot 'E:/erp' -NginxDir 'C:\nginx'
+$body=[IO.File]::ReadAllText($nf)
+Assert ($cnt -ge 2) "nginx 替换计数>=2 (实=$cnt)"
+Assert ($body -notmatch 'D:/erp_system') '旧根全清'
+Assert ($body -match '#\s*server\s*\{[\s\S]*?listen 443 ssl[\s\S]*?\n\s*#?\s*\}') '443 块已注释'
+Assert ($body -match 'listen 3000 default_server') 'HTTP 块保留'
+
 Remove-Item $tmp -Recurse -Force
 if($fail){ exit 1 } else { Write-Host 'ALL PASS' }
