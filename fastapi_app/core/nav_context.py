@@ -194,9 +194,11 @@ async def get_nav_sections_async() -> dict:
             if key not in ordered_sections:
                 ordered_sections[key] = sections[key]
 
-        # 写入缓存
-        from fastapi_app.core.redis_wrapper import safe_set
-        await safe_set('nav_sections', ordered_sections, timeout=_nav_redis_ttl, context="导航缓存")
+        # 写入缓存 —— 空结果不写：种子未跑的新库会查出空导航，
+        # 若把空 dict 钉进 Redis（TTL 300s），补种子后前端仍会持续吃到空导航
+        if ordered_sections:
+            from fastapi_app.core.redis_wrapper import safe_set
+            await safe_set('nav_sections', ordered_sections, timeout=_nav_redis_ttl, context="导航缓存")
         async with _nav_cache_lock:
             _nav_local_cache["data"] = ordered_sections
             _nav_local_cache["cached_at"] = time.time()
