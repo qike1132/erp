@@ -41,9 +41,9 @@ function Set-EnvKey([string]$Path,[string]$Key,[string]$Value){
 
 function Add-EnvListItemJson([string]$Path,[string]$Key,[string]$Item){
   $m=Read-EnvMap $Path; $cur=@()
-  if($m.ContainsKey($Key) -and $m[$Key].Trim()){ try{ $cur=@($m[$Key] | ConvertFrom-Json) }catch{ $cur=@() } }
+  if($m.ContainsKey($Key) -and $m[$Key].Trim()){ try{ $cur=@($m[$Key] | ConvertFrom-Json | ForEach-Object { $_ }) }catch{ $cur=@() } }
   if($cur -notcontains $Item){ $cur+=$Item }
-  Set-EnvKey $Path $Key ($cur | ConvertTo-Json -Compress)
+  Set-EnvKey $Path $Key (ConvertTo-Json -InputObject @($cur) -Compress)
 }
 
 function Add-EnvListItemComma([string]$Path,[string]$Key,[string]$Item){

@@ -21,10 +21,27 @@ Copy-Item (Join-Path $PSScriptRoot 'fixtures\env-sample.env') $envf
 Add-EnvListItemJson -Path $envf -Key 'ALLOWED_HOSTS' -Item '10.0.0.5'
 Add-EnvListItemJson -Path $envf -Key 'ALLOWED_HOSTS' -Item '10.0.0.5'   # 二次应去重
 $m = Read-EnvMap $envf
-$arr = $m['ALLOWED_HOSTS'] | ConvertFrom-Json
-Assert (@($arr | Where-Object { $_ -eq '10.0.0.5' }).Count -eq 1) 'ALLOWED_HOSTS 去重'
+$arr = @($m['ALLOWED_HOSTS'] | ConvertFrom-Json | ForEach-Object { $_ })
+Assert (@($arr | Where-Object { $_ -eq '10.0.0.5' }).Count -eq 1 -and @($arr | Where-Object { $_ -eq 'localhost' }).Count -eq 1) 'ALLOWED_HOSTS 去重且保留原值'
 $raw = [IO.File]::ReadAllText($envf)
 Assert ($raw -match '数据库口令') '中文注释行保留'
 Assert ($raw[0] -ne [char]0xFEFF) '无 BOM'
+
+# 单元素也必须产出 JSON 数组（否则目标机 pydantic 按 list 解析裸串会 SettingsError）
+$envf2 = Join-Path $tmp 'e2.env'
+[IO.File]::WriteAllText($envf2, "ALLOWED_HOSTS=`r`n", [Text.UTF8Encoding]::new($false))
+Add-EnvListItemJson -Path $envf2 -Key 'ALLOWED_HOSTS' -Item '10.1.1.1'
+$rawA = [IO.File]::ReadAllText($envf2)
+$mA = Read-EnvMap $envf2
+$arrA = @($mA['ALLOWED_HOSTS'] | ConvertFrom-Json | ForEach-Object { $_ })
+Assert ($rawA -match 'ALLOWED_HOSTS=\[') '空表追加1项后写出以 [ 开头（数组）'
+Assert ($arrA.Count -eq 1 -and ($arrA[0] -is [string]) -and $arrA[0] -eq '10.1.1.1') '空表追加1项解析为长度1的扁平数组'
+Add-EnvListItemJson -Path $envf2 -Key 'ALLOWED_HOSTS' -Item '10.1.1.1'   # 二次应去重
+Add-EnvListItemJson -Path $envf2 -Key 'ALLOWED_HOSTS' -Item '10.2.2.2'   # 追加第 2 项
+$rawB = [IO.File]::ReadAllText($envf2)
+$mB = Read-EnvMap $envf2
+$arrB = @($mB['ALLOWED_HOSTS'] | ConvertFrom-Json | ForEach-Object { $_ })
+Assert ($rawB -match 'ALLOWED_HOSTS=\[') '追加第2项后仍写出数组'
+Assert ($arrB.Count -eq 2 -and @($arrB | Where-Object { $_ -eq '10.1.1.1' }).Count -eq 1) '追加第2项后长度2且不重复'
 Remove-Item $tmp -Recurse -Force
 if($fail){ exit 1 } else { Write-Host 'ALL PASS' }
