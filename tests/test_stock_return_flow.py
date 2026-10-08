@@ -10,14 +10,14 @@ import uuid
 import pytest
 from sqlalchemy import select
 from test_stock_return_api import sr_api as _flow_api_fixture
+
 from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.services import stock_service
 
 # pytest 按模块属性名注册导入的夹具：赋值回 sr_api，供本文件用例以 sr_api 参数取用
 sr_api = _flow_api_fixture
 
-from fastapi_app.shared_models import InventoryLog, Order, Product, StockIn, StockOut, StockReturn
-
+from fastapi_app.shared_models import Order, Product, StockOut, StockReturn
 
 
 async def _fresh_product(db, suffix, stock):
