@@ -20,6 +20,7 @@ param(
   [string]$RedisDir = 'C:\Redis',
   [string]$Nssm = 'C:\nssm\nssm.exe',
   [string]$EncryptKey = '',
+  [string]$AdminPassword = '',
   [switch]$Force, [switch]$Blank, [switch]$SkipVerify
 )
 . (Join-Path $PSScriptRoot '_lib.ps1')
@@ -51,11 +52,52 @@ function Start-ErpService([string]$Name){
   }
   Write-Ok "服务 $Name 运行中"
 }
-function New-DeployRedisConf([string]$SrcConf,[string]$DstConf){
-  # 去掉任何**生效**的 requirepass 行；口令只经 --requirepass 注入，绝不写进 .conf
+function New-DeployRedisConf([string]$SrcConf,[string]$DstConf,[string]$Name,[string]$RedisRoot){
+  # 去掉任何**生效**的 requirepass 行；口令只经 --requirepass 注入，绝不写进 .conf。
+  # 并把 dir/logfile 指向部署目录（非默认 RedisDir 时避免脏数据/日志落到 C:\Redis）。
+  $dataDir = Join-Path $RedisRoot 'data'
+  New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
   $lines=[IO.File]::ReadAllLines($SrcConf,[Text.UTF8Encoding]::new($false))
-  $filtered=$lines | Where-Object { $_ -notmatch '^\s*requirepass(\s|$)' }
-  [IO.File]::WriteAllText($DstConf, (($filtered -join "`r`n") + "`r`n"), [Text.UTF8Encoding]::new($false))
+  $out = $lines | Where-Object { $_ -notmatch '^\s*requirepass(\s|$)' } | ForEach-Object {
+    if($_ -match '^\s*dir\s'){ "dir $dataDir" }
+    elseif($_ -match '^\s*logfile\s'){ "logfile `"$RedisRoot\$Name.log`"" }
+    else { $_ }
+  }
+  [IO.File]::WriteAllText($DstConf, (($out -join "`r`n") + "`r`n"), [Text.UTF8Encoding]::new($false))
+}
+function New-BlankAdmin([string]$Py,[string]$Psql,[string]$TargetDir,[string]$WorkDir,[string]$DbUser,[string]$DbName,[string]$DbPw,[string]$AdminPassword){
+  # 空库引导：项目无内置用户种子，必须建一个超管，否则装完无法登录（README §4.10B）
+  $pw = $AdminPassword
+  if(-not $pw){
+    $sec = Read-Host -AsSecureString '新 admin 口令（Argon2id 哈希后写入）'
+    $pw = [Runtime.InteropServices.Marshal]::PtrToStringBSTR([Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec))
+  }
+  if(-not $pw){ Write-Fail 'admin 口令为空，无法建用户'; exit 1 }
+  # 口令经环境变量进 python，绝不拼进命令行（避免进命令历史/进程列表）
+  $env:ERP_ADMIN_PW = $pw
+  $prevPyPath = $env:PYTHONPATH
+  $env:PYTHONPATH = $TargetDir
+  $hash = $null
+  try {
+    $hash = (& $Py -c "import os; from fastapi_app.core.security import hash_password; print(hash_password(os.environ['ERP_ADMIN_PW']))" | Out-String).Trim()
+  } finally {
+    Remove-Item Env:ERP_ADMIN_PW -ErrorAction SilentlyContinue
+    if($prevPyPath){ $env:PYTHONPATH = $prevPyPath } else { Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue }
+  }
+  if(-not $hash){ Write-Fail 'admin 口令哈希生成失败（fastapi_app.core.security 导入异常？）'; exit 1 }
+  # 哈希经临时 SQL 文件喂给 psql，不进命令行；口令/哈希均不落日志
+  $sqlFile = Join-Path $WorkDir ('mkadmin_' + [guid]::NewGuid().ToString('N') + '.sql')
+  $sql = "INSERT INTO `"user`" (username, password, is_super, status, create_time, update_time) VALUES ('admin', '$hash', true, true, now(), now());"
+  [IO.File]::WriteAllText($sqlFile, $sql, [Text.UTF8Encoding]::new($false))
+  $env:PGPASSWORD = $DbPw
+  try {
+    & $Psql -h localhost -U $DbUser -d $DbName -v ON_ERROR_STOP=1 -f $sqlFile
+    if($LASTEXITCODE -ne 0){ Write-Fail 'admin 用户创建失败（见上方 psql 输出）'; exit 1 }
+  } finally {
+    Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
+    Remove-Item $sqlFile -Force -ErrorAction SilentlyContinue
+  }
+  Write-Ok '已创建超管 admin —— 请立即登录并修改口令'
 }
 
 $work = Join-Path $env:TEMP ("erp_pkg_" + [guid]::NewGuid().ToString('N'))
@@ -309,26 +351,43 @@ try {
       & $py -m alembic -c $alembicIni upgrade head
       if($LASTEXITCODE -ne 0){ Write-Fail 'alembic upgrade head 失败'; exit 1 }
       & $py (Join-Path $TargetDir 'scripts\init_permissions.py') --yes
+      if($LASTEXITCODE -ne 0){ Write-Fail 'init_permissions 失败'; exit 1 }
       & $py (Join-Path $TargetDir 'scripts\seed_nav.py')
-      Write-Warn '空库：请按 README §4.10B 建 admin（系统无内置种子，不建则无法登录）'
+      if($LASTEXITCODE -ne 0){ Write-Fail 'seed_nav 失败'; exit 1 }
+      New-BlankAdmin -Py $py -Psql $psql -TargetDir $TargetDir -WorkDir $work -DbUser $dbUser -DbName $dbName -DbPw $dbPw -AdminPassword $AdminPassword
     } else {
       $dump = Join-Path $pkgRoot.FullName 'data\erp_system.dump'
       if(-not (Test-Path $dump)){ Write-Fail "包内缺 data\erp_system.dump: $dump"; exit 1 }
+      $pgrestore = Get-PgTool 'pg_restore.exe'
+      if(-not $pgrestore){ Write-Fail '未找到 pg_restore.exe（PostgreSQL 客户端工具是否安装成功？）'; exit 1 }
       $env:PGPASSWORD = $dbPw
-      & (Get-PgTool 'pg_restore.exe') -h localhost -U $dbUser -d $dbName --no-owner --no-privileges -j 4 $dump
-      $rc = $LASTEXITCODE
-      Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
-      if($rc -ne 0){ Write-Warn "pg_restore 退出码 $rc（--no-owner 下常见 warning；继续做迁移对齐）" }
-      else { Write-Ok '数据库已从 dump 恢复' }
-      & $py -m alembic -c $alembicIni upgrade head   # dump 078 -> 代码 head 对齐
-      if($LASTEXITCODE -ne 0){ Write-Fail 'alembic upgrade head 失败（078 -> head 对齐）'; exit 1 }
-      Write-Ok '迁移已对齐到代码 head'
+      try {
+        # 输出落文件（不走本进程 stderr 重定向——EAP=Stop 下会终止）；非零即致命
+        $rcOut = Join-Path $work 'pg_restore.out'
+        $rcErr = Join-Path $work 'pg_restore.err'
+        $proc = Start-Process -FilePath $pgrestore -ArgumentList @('-h','localhost','-U',$dbUser,'-d',$dbName,'--no-owner','--no-privileges','-j','4',"`"$dump`"") -NoNewWindow -Wait -PassThru -RedirectStandardOutput $rcOut -RedirectStandardError $rcErr
+        if($proc.ExitCode -ne 0){
+          Write-Fail "pg_restore 失败（exit=$($proc.ExitCode)）：部分恢复不可用。末 20 行："
+          if(Test-Path $rcErr){ Get-Content $rcErr -Tail 20 | ForEach-Object { [Console]::Error.WriteLine("    $_") } }
+          exit 1
+        }
+        Write-Ok '数据库已从 dump 恢复'
+        & $py -m alembic -c $alembicIni upgrade head   # dump 078 -> 代码 head 对齐
+        if($LASTEXITCODE -ne 0){ Write-Fail 'alembic upgrade head 失败（078 -> head 对齐）'; exit 1 }
+        Write-Ok '迁移已对齐到代码 head'
+        # 哨兵：镜像库必须含用户（至少 admin），count<1 说明恢复不完整
+        $ucRaw = (& $psql -h localhost -U $dbUser -d $dbName -tAc 'select count(*) from "user"' | Out-String).Trim()
+        $uc = 0; [void][int]::TryParse($ucRaw, [ref]$uc)
+        if($uc -lt 1){ Write-Fail "恢复后镜像校验失败：user 计数='$ucRaw'（应 >=1，含 admin 等）"; exit 1 }
+        Write-Ok "镜像校验通过：user 行数=$uc"
+      } finally { Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue }
     }
   } finally { Pop-Location }
 
   # ==========================================================
   Write-Step '8 注册五服务'
-  $envs=@('APP_ENV=production','FASTAPI_DEBUG=false',"PYTHONPATH=$TargetDir",'PYTHONUTF8=1','PYTHONUNBUFFERED=1','UVICORN_WORKERS=4')
+  $uvW = (Read-EnvMap $envPath)['UVICORN_WORKERS']; if(-not $uvW){ $uvW = '4' }
+  $envs=@('APP_ENV=production','FASTAPI_DEBUG=false',"PYTHONPATH=$TargetDir",'PYTHONUTF8=1','PYTHONUNBUFFERED=1',"UVICORN_WORKERS=$uvW")
   $logDir = Join-Path $TargetDir 'logs'
   $redisPw = (Read-EnvMap $envPath)['REDIS_PASSWORD']
   if(-not $redisPw){ Write-Warn '.env 无 REDIS_PASSWORD —— Redis 将无认证启动（生产不建议）' }
@@ -340,10 +399,10 @@ try {
   if(-not (Test-Path $cacheTpl)){ $cacheTpl = Join-Path $TargetDir 'config\redis.production.conf' }
   if(-not (Test-Path $cacheTpl)){ Write-Fail '缺 config\redis.production.conf(.template)，无法生成缓存实例 conf'; exit 1 }
   $cacheConf = Join-Path $RedisDir 'redis.windows-service.conf'
-  New-DeployRedisConf $cacheTpl $cacheConf
+  New-DeployRedisConf $cacheTpl $cacheConf 'erp-redis' $RedisDir
   $brokerConf = Join-Path $TargetDir 'config\redis-broker.conf'
   if(-not (Test-Path $brokerConf)){ Write-Fail "缺 $brokerConf"; exit 1 }
-  New-DeployRedisConf $brokerConf $brokerConf
+  New-DeployRedisConf $brokerConf $brokerConf 'erp-redis-broker' $RedisDir
   $authArg = if($redisPw){ "--requirepass $redisPw" } else { '' }
 
   # 先装 Redis（erp-prod/arq 依赖其存在——SCM 拒绝依赖不存在的服务）
