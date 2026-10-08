@@ -164,8 +164,11 @@ python -m venv .venv
 .venv\Scripts\pip.exe install -r requirements/dev.txt        # 含 base + ruff/mypy（**回归测试另装 requirements/test.txt** —— pytest 不在 dev.txt 里）
 
 Copy-Item .env.example .env                                   # 然后填 SECRET_KEY / DB_* / REDIS_*
+# ⚠️ .env 里的 DATABASE_URL= / ASYNC_DATABASE_URL= 若留空会覆盖 DB_* 自动拼接，
+#    迁移将报 `Could not parse SQLAlchemy URL` —— 填完整串或删掉该行
 .venv\Scripts\python.exe -m alembic -c migrations/alembic.ini upgrade head
-.venv\Scripts\python.exe scripts\init_permissions.py          # 首次：初始化权限树
+.venv\Scripts\python.exe scripts\init_permissions.py          # 首次：初始化权限树（--yes 跳过确认）
+.venv\Scripts\python.exe scripts\seed_nav.py                  # 首次：补齐左侧导航（父权限 url/section 种子）
 
 python start.py --dev          # 仅后端：uvicorn reload，127.0.0.1:5002
 ```
@@ -425,9 +428,15 @@ cd D:\erp_system
 
 # 2) 权限树初始化（迁移建表之后）
 .\.venv\Scripts\python.exe scripts\init_permissions.py
+
+# 3) 左侧导航种子（init_permissions 不写 url/section，缺此步侧栏为空）
+.\.venv\Scripts\python.exe scripts\seed_nav.py
 ```
 
-> ⚠️ 迁移链包含历史 revision（如 `pg_standalone_006` 曾缺 `from alembic import op`，已修复）。
+> ⚠️ 全新库的 `erp_system` 必须以 `erp_app` 为 owner 建库
+> （`CREATE DATABASE erp_system WITH OWNER = erp_app`，见 §3.1）；PG 15+ 下非 owner
+> 仅凭 `GRANT` 仍会在迁移建表时报 `InsufficientPrivilege: 模式 public 权限不够`。
+> 迁移链包含历史 revision（如 `pg_standalone_006` 曾缺 `from alembic import op`，已修复）。
 > **任何全新安装都会经过整条链**，因此迁移完成后的验收不能只看退出码，还要跑一次应用启动。
 
 ### 4.10 初始管理员账号（全新空白库）
