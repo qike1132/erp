@@ -4,6 +4,7 @@
 成功响应 —— 没有指标就只能靠日志人肉发现「静默丢数据」。
 """
 import logging
+import os
 from types import SimpleNamespace
 
 import pytest
@@ -89,7 +90,7 @@ async def test_commit_failure_counts_and_reraises(monkeypatch, caplog):
     assert "/api/v1/orders" in message
     # 结构化字段（extra=）：request_id / db_name / path
     assert record.request_id == "req-p0-3-fixed"
-    assert record.db_name == "erp_system"
+    assert record.db_name == os.getenv("DB_NAME", "erp_system")
     assert record.path == "/api/v1/orders"
 
 

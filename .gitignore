@@ -435,3 +435,11 @@ _firefox_profile_*/
 /.agent-teams/
 # 根目录一次性排查脚本的 .ini 变体（与 /_*.py、/_*.sh、/_*.txt、/_*.json、/_*.mjs 同族）
 /_*.ini
+
+# === 2026-10-08 离线便携包：deploy/binaries 内容不入库 ===
+# deploy/build_package.ps1 要求把 6 个官方安装器放进 deploy\binaries\（pg18*/Redis/nginx/nssm/node/vc_redist），
+# 但它在打包前会拒绝「工作区不干净」。安装器里的 .msi/.exe 不被现有规则忽略（*.zip 已被上方 /Archive files 覆盖），
+# 一旦落位就会让 `git status --porcelain` 非空 —— 文档化的构建流程因此永远跑不起来（互为死结）。
+# 故按目录忽略其内容，仅保留 .gitkeep 占位，使该目录在全新克隆中即存在（预检与 README 所指的落位目录）。
+/deploy/binaries/*
+!/deploy/binaries/.gitkeep

@@ -199,6 +199,8 @@ npm run dev                    # Vite dev server（本脚本默认 5173；vite.c
 
 ## 4. 在新服务器上完整部署（生产）
 
+> 🚀 **一键部署**：新服务器可改用离线便携包，见 [`deploy/README.md`](deploy/README.md)（本节以下为逐条人工步骤，作为理解与排障参考仍保留）。
+
 > 目标形态：**Windows 主机 + Nginx :3000 + Uvicorn :5002 + PostgreSQL 18 + 双 Redis + NSSM 五服务**。
 > 本机（当前生产）参考路径：项目 `D:\erp_system`、Nginx `C:\nginx`、NSSM `C:\nssm`、Redis `C:\Redis`、PG 工具 `D:\PostgreSQL\bin`。
 > 全流程约 2–4 小时（不含数据迁移）；每步都有验收命令，**不要跳步**。

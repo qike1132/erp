@@ -357,6 +357,9 @@ class TestDeleteRecord:
         """正常删除"""
         record = MagicMock()
         record.id = 1
+        # delete_record 经 _apply_production_stock 联动库存：product_id 为 None 时提前返回，
+        # 不触碰 current_stock / InventoryLog（本用例只考察删除，置 None 绕开库存分支）。
+        record.product_id = None
         mock_async_db.execute = AsyncMock()
         mock_async_db.execute.return_value.scalar_one_or_none = MagicMock(return_value=record)
 

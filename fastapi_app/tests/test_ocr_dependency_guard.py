@@ -42,8 +42,9 @@ def upload(name: str = 'order.png', field: str = 'file') -> list:
 
 class TestRequireModules:
     def test_installed_module_passes(self):
-        # numpy 现在装在 venv 里；已装的依赖不应抛错
-        _require_modules('numpy')
+        # 用必然存在的 stdlib 模块验证「已装依赖不抛错」；刻意不用 numpy ——
+        # 它是可选 OCR 依赖，CI 只装 base（无 numpy），断言不能依赖它是否安装。
+        _require_modules('json')
 
     def test_missing_module_reports_actionable_hint(self):
         with pytest.raises(OcrDependencyError) as ei:
@@ -56,11 +57,11 @@ class TestRequireModules:
     def test_reports_all_missing_at_once(self):
         """一次报全：逐个报会让人修一个再撞下一个"""
         with pytest.raises(OcrDependencyError) as ei:
-            _require_modules('__missing_a__', 'numpy', '__missing_b__')
+            _require_modules('__missing_a__', 'json', '__missing_b__')
         msg = str(ei.value)
         assert '__missing_a__' in msg and '__missing_b__' in msg
-        # numpy 已安装，不该出现在缺失清单里
-        assert 'numpy' not in msg
+        # json（stdlib）必然存在，不该出现在缺失清单里
+        assert 'json' not in msg
 
     def test_error_is_runtime_error_subclass(self):
         """必须是 RuntimeError 子类：_import.py 靠 `except RuntimeError` 回退文本模式"""

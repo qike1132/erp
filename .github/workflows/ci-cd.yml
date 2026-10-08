@@ -28,6 +28,19 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
+      # 限流（slowapi）与缓存走 Redis；缺 Redis 时 slowapi 会静默回退内存存储并丢弃
+      # 路由级限额（见 fastapi_app/core/limiter.py 的 in_memory_fallback），使「N 次后应
+      # 429」的限流回归在 CI 上误报通过（2026-10-08 实测）。故 test job 需要 redis service。
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     env:
       DB_HOST: localhost
       DB_USER: erp_test
@@ -186,9 +199,13 @@ jobs:
         python-version: '3.13'
     
     - name: Install linters
+      # 装项目 dev 依赖（requirements/dev.txt = base.txt 的钉版 + ruff / mypy）。
+      # 必须走 requirements，不能用裸 `pip install sqlalchemy`：项目钉 sqlalchemy==2.0.49，
+      # 裸装会拉到 2.1.x，其 typing 收窄会让 mypy 在 12 处报错（本地 dev 环境 368 文件全绿）。
+      # alembic（quality_gate 的 alembic_heads 门禁需要）已随 base.txt 一并安装。
       run: |
         python -m pip install --upgrade pip
-        pip install ruff mypy
+        pip install -r requirements/dev.txt
     
     # 密钥扫描（CI 侧第二道防线）：`.githooks/pre-commit` 只在本地跑、且可被
     # `git commit --no-verify` 绕过 —— 该文件头部已把「CI 侧必须另有一道独立扫描」
