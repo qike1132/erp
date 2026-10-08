@@ -157,13 +157,15 @@ async def delete_stockout_core(db: AsyncSession, stockout: StockOut, operator_id
     # 关联订单状态由调用方重算（见 delete_stockout）。
     if stockout.returned_quantity > 0:
         raise ValueError('该出货记录已有退货关联，无法删除！请先取消退货记录。')
-    # P1-①（072 RESTRICT 的应用层前置）：软取消的历史退货单 returned_quantity 已回减，
-    # 上面的口径拦不住，但 DB 外键 RESTRICT 仍会级联保护——这里前置校验给出 400 而非 500
-    linked = (await db.execute(
-        select(func.count()).select_from(StockReturn).where(StockReturn.stockout_id == stockout.id)
-    )).scalar() or 0
-    if linked:
-        raise ValueError('该出货存在关联的退货记录（含已取消），为保留可追溯记录无法删除！')
+    # 072 RESTRICT 的应用层前置：出货行被退货记录引用即删不掉。已取消（status='cancelled'）
+    # 的退货在此解除关联后放行（退货行保留以留痕）；仍 active 的拒绝，给出 400 而非 DB 层 500。
+    linked_returns = list((await db.execute(
+        select(StockReturn).where(StockReturn.stockout_id == stockout.id)
+    )).scalars().all())
+    if any(r.status != 'cancelled' for r in linked_returns):
+        raise ValueError('该出货存在未取消的退货记录，为保留可追溯记录无法删除！')
+    for linked_return in linked_returns:
+        linked_return.stockout_id = None
     # 先取行锁（产品不存在时由 get_product_for_update 抛错），库存写入走统一乐观锁入口
     await stock_service.get_product_for_update(db, stockout.product_id)
     updated = await update_stock_with_optimistic_lock(db, stockout.product_id, stockout.quantity)

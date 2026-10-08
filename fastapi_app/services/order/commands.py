@@ -36,6 +36,7 @@ from fastapi_app.services.order_utils import (
     _batch_deduct_quantities,
     assert_no_linked_returns,
     compute_order_status_from_db,
+    detach_cancelled_returns_for_order,
     sync_single_item_quantity,
 )
 from fastapi_app.services.serializers.order_serializer import (
@@ -527,6 +528,9 @@ async def _purge_order_related_rows(
 
     返回出货计划级联清理结果（供删除消息透出）。
     """
+    # 先解除已取消退货对外键的引用（否则 RESTRICT 外键挡住下面的 stock_out 删除）；
+    # active 退货已在 delete_order 入口的 assert_no_linked_returns 处被拒。
+    await detach_cancelled_returns_for_order(db, order.id)
     await db.execute(delete(StockOut).where(StockOut.order_id == order.id))
     await db.execute(delete(OrderSyncRecord).where(OrderSyncRecord.source_order_id == order_id))
     await db.execute(delete(SyncRetryQueue).where(SyncRetryQueue.source_order_id == order_id))

@@ -29,6 +29,7 @@ from fastapi_app.services.approval_log_service import create_approval_log as _cr
 from fastapi_app.services.order_utils import (
     assert_no_linked_returns,
     compute_order_status_from_db,
+    detach_cancelled_returns_for_order,
     sync_single_item_quantity,
 )
 from fastapi_app.shared.stock_concurrency import assert_stock_available, get_product_for_update
@@ -419,6 +420,9 @@ async def _handle_delete_approval(db: AsyncSession, approval: ApprovalRequest, o
         )
         product.current_stock += net_change
 
+    # 先解除已取消退货对外键的引用（否则 RESTRICT 外键挡住下面的 stock_out 删除）；
+    # active 退货已在 _handle_delete_approval 开头的 assert_no_linked_returns 处被拒。
+    await detach_cancelled_returns_for_order(db, order.id)
     # 批量删除出库记录，避免逐条 ORM delete
     await db.execute(sa_delete(StockOut).where(StockOut.order_id == order.id))
 

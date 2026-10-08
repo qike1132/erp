@@ -287,6 +287,47 @@ class TestStockOutService:
             await stock_service.delete_stockout(mock_db, 1)
         mock_delete.assert_awaited_once()
 
+    async def test_delete_stockout_core_detaches_cancelled_returns(self, mock_db):
+        """已取消的退货记录在删出货时解除关联（记录保留），出货行得以删除（072 RESTRICT 的出口）。"""
+        from fastapi_app.services.stock_out_service import delete_stockout_core
+        stockout = MagicMock()
+        stockout.id = 1
+        stockout.quantity = 10
+        stockout.returned_quantity = 0
+        stockout.product_id = 1
+        cancelled = MagicMock()
+        cancelled.status = 'cancelled'
+        cancelled.stockout_id = 1
+        returns_result = MagicMock()
+        returns_result.scalars.return_value.all.return_value = [cancelled]
+        mock_db.execute = AsyncMock(return_value=returns_result)
+        mock_db.delete = AsyncMock()
+        mock_db.flush = AsyncMock()
+        with patch('fastapi_app.services.stock_out_service.stock_service.get_product_for_update', new_callable=AsyncMock), \
+             patch('fastapi_app.services.stock_out_service.update_stock_with_optimistic_lock', new_callable=AsyncMock) as mock_upd, \
+             patch('fastapi_app.services.stock_out_service.stock_service.log_inventory_change'):
+            mock_upd.return_value = MagicMock(current_stock=100, name='产品A')
+            await delete_stockout_core(mock_db, stockout)
+        assert cancelled.stockout_id is None
+        mock_db.delete.assert_awaited_once_with(stockout)
+
+    async def test_delete_stockout_core_active_return_rejected(self, mock_db):
+        """仍为 active 的退货记录拒绝删除出货行（保留可追溯台账）。"""
+        from fastapi_app.services.stock_out_service import delete_stockout_core
+        stockout = MagicMock()
+        stockout.id = 1
+        stockout.quantity = 10
+        stockout.returned_quantity = 0
+        stockout.product_id = 1
+        active = MagicMock()
+        active.status = 'active'
+        active.stockout_id = 1
+        returns_result = MagicMock()
+        returns_result.scalars.return_value.all.return_value = [active]
+        mock_db.execute = AsyncMock(return_value=returns_result)
+        with pytest.raises(ValueError, match='未取消的退货记录'):
+            await delete_stockout_core(mock_db, stockout)
+
 
 class TestInventoryService:
     """库存查看 Service 测试"""

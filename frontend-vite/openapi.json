@@ -7570,7 +7570,7 @@
           "库存管理"
         ],
         "summary": "Delete Stockout",
-        "description": "删除出库记录（独立出货与备货抵扣均支持）。\n\n删除会回补产品库存；抵扣行删除后所属备货可用量随之释放、关联订单状态重算。\n已有退货关联的出货记录不能删除。\n\nArgs:\n    stockout_id: 出库记录 ID。\n    db: 异步数据库会话（读写主库）。\n    _user: 当前登录用户（仅需通过权限校验）。\n\nReturns:\n    StockActionResponse: 包含成功标志和提示消息的响应。\n\nRaises:\n    HTTPException: 出库记录不存在时抛出 404；无对应行内权限时抛出 403。",
+        "description": "删除出库记录（独立出货与备货抵扣均支持）。\n\n删除会回补产品库存；抵扣行删除后所属备货可用量随之释放、关联订单状态重算。\n存在未取消退货记录的出货不能删除（已取消的退货会先解除关联再删除，退货记录保留）。\n\nArgs:\n    stockout_id: 出库记录 ID。\n    db: 异步数据库会话（读写主库）。\n    _user: 当前登录用户（仅需通过权限校验）。\n\nReturns:\n    StockActionResponse: 包含成功标志和提示消息的响应。\n\nRaises:\n    HTTPException: 出库记录不存在时抛出 404；无对应行内权限时抛出 403。",
         "operationId": "delete_stockout_api_v1_stock_out_delete__stockout_id__delete",
         "parameters": [
           {
