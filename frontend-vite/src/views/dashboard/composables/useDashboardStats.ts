@@ -12,6 +12,7 @@ import { computed, ref, watch } from 'vue'
 import { dashboardApi, stockApi } from '@/api'
 import { toast } from '@/composables/useToast'
 import { usePerfMark } from '@/composables/usePerfMark'
+import { useAuthStore } from '@/stores/auth'
 import { devLog } from '@/utils/devLog'
 import type { StockStatsData } from '@/types/api'
 
@@ -28,6 +29,13 @@ export type StockStats = StockStatsData
 const CACHE_TTL = 30_000
 const STATS_KEY = ['dashboard', 'stats'] as const
 const STOCK_KEY = ['dashboard', 'stock-stats'] as const
+
+// 与后端 GET /stock/stats 的权限依赖保持一致（fastapi_app/api/v1/endpoints/stock.py::
+// get_stock_stats → require_any_permission('stockin_manage', 'order_manage')）。
+// 无权限用户（如仅报表/贝乐订单账号）不发起该请求：后端会 403，全局 axios
+// 拦截器会对 403 弹「权限不足」，且本查询每 30s 自动刷新会反复弹窗。
+// 与 patternRoom 版师列表预取的门控先例同策略。
+const STOCK_STATS_PERMISSIONS = ['stockin_manage', 'order_manage'] as const
 
 const FALLBACK_STATS: Record<string, number> = {
   order_today: 0, order_yesterday: 0,
@@ -79,10 +87,14 @@ async function fetchStockStats(): Promise<StockStats> {
  * 失败静默处理，Dashboard 挂载时 useQuery 会正常 fetch
  */
 export function prefetchDashboardData(queryClient: QueryClient): Promise<void> {
-  return Promise.all([
+  const tasks: Promise<unknown>[] = [
     queryClient.prefetchQuery({ queryKey: STATS_KEY, queryFn: fetchStats, staleTime: CACHE_TTL }),
-    queryClient.prefetchQuery({ queryKey: STOCK_KEY, queryFn: fetchStockStats, staleTime: CACHE_TTL }),
-  ]).then(() => undefined).catch(() => {
+  ]
+  // 无库存权限的用户跳过 stock-stats 预取，避免每次登录产生一次 403 弹窗
+  if (useAuthStore().hasAnyPermission([...STOCK_STATS_PERMISSIONS])) {
+    tasks.push(queryClient.prefetchQuery({ queryKey: STOCK_KEY, queryFn: fetchStockStats, staleTime: CACHE_TTL }))
+  }
+  return Promise.all(tasks).then(() => undefined).catch(() => {
     // 预取失败静默处理
   })
 }
@@ -130,6 +142,8 @@ function handleStatsError(err: unknown): { msg: string; detail: string } {
 // ===== 主 Composable =====
 export function useDashboardStats() {
   const perf = usePerfMark('dashboard')
+  const authStore = useAuthStore()
+  const canViewStockStats = computed(() => authStore.hasAnyPermission([...STOCK_STATS_PERMISSIONS]))
 
   const statsQuery = useQuery({
     queryKey: STATS_KEY,
@@ -145,6 +159,8 @@ export function useDashboardStats() {
     staleTime: CACHE_TTL,
     refetchInterval: CACHE_TTL,
     retry: 1,
+    // 无权限时禁用查询：不发请求、refetchInterval 也不再触发
+    enabled: canViewStockStats,
   })
 
   // ===== 状态 =====
@@ -166,7 +182,9 @@ export function useDashboardStats() {
 
   const stockStats = computed<StockStats | null>(() => {
     if (stockQuery.data.value) return stockQuery.data.value
-    if (stockQuery.isError.value) {
+    // 无权限（查询被禁用）与请求失败同样降级：用 dashboard stats 的今日值兜底，
+    // 图表照常渲染（与既有 403 降级表现一致，只是不再发起注定 403 的请求）。
+    if (stockQuery.isError.value || !canViewStockStats.value) {
       return {
         order_quantity: stats.value?.order_today ?? 0,
         stockin_quantity: stats.value?.stockin_today ?? 0,
@@ -212,10 +230,12 @@ export function useDashboardStats() {
   // ===== 显式刷新（用于 retryLoad） =====
   async function loadStats() {
     perf.mark('api-start')
-    await Promise.all([
-      statsQuery.refetch(),
-      stockQuery.refetch(),
-    ])
+    const tasks: Promise<unknown>[] = [statsQuery.refetch()]
+    // 重试路径必须与 enabled 同口径门控：v5 的 refetch() 不受 enabled:false 约束
+    // （官方文档明示），否则无权限用户点「重试」会对 /stock/stats 发注定 403 的
+    // 请求，再次触发全局拦截器的「权限不足」弹窗。
+    if (canViewStockStats.value) tasks.push(stockQuery.refetch())
+    await Promise.all(tasks)
     perf.markEnd('api-start')
     perf.measure('api-stats', 'api-start')
   }
