@@ -32,7 +32,7 @@ def _apply(session, code, label):
     perm = session.query(Permission).filter_by(code=code).first()
     if perm is None:
         print(f"[WARN] 未找到权限记录 code={code}，请确认数据库已初始化")
-        return
+        return False
     changed = False
     if perm.section != TARGET_SECTION:
         perm.section = TARGET_SECTION
