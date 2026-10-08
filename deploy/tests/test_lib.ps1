@@ -63,5 +63,17 @@ Assert ($body -notmatch 'D:/erp_system') '旧根全清'
 Assert ($body -match '#\s*server\s*\{[\s\S]*?listen 443 ssl[\s\S]*?\n\s*#?\s*\}') '443 块已注释'
 Assert ($body -match 'listen 3000 default_server') 'HTTP 块保留'
 
+# Install-NssmService 可选键（DependOn/Env）容错：StrictMode 下缺席不抛、不产对应行
+$specMin = @{ Name='erp-web'; Application='C:\x\python.exe'; Parameters='-m x'; Directory='C:\d'; Stdout='C:\o.log'; Stderr='C:\e.log' }
+$argsMin = @(Get-NssmArgs $specMin)
+$flatMin = (@($argsMin | ForEach-Object { $_ -join ' ' }) -join "`n")
+Assert ($argsMin.Count -ge 1) 'Get-NssmArgs 缺可选键不抛且产出参数行'
+Assert ($flatMin -notmatch 'DependOnService' -and $flatMin -notmatch 'AppEnvironmentExtra') '缺可选键时不产 DependOnService/AppEnvironmentExtra'
+$specFull = $specMin.Clone(); $specFull['DependOn']='erp-redis'; $specFull['Env']=@('A=1','B=2')
+$argsFull = @(Get-NssmArgs $specFull)
+$flatFull = (@($argsFull | ForEach-Object { $_ -join ' ' }) -join "`n")
+Assert ($flatFull -match 'DependOnService') '有 DependOn 时产 DependOnService'
+Assert ($flatFull -match 'AppEnvironmentExtra') '有 Env 时产 AppEnvironmentExtra'
+
 Remove-Item $tmp -Recurse -Force
 if($fail){ exit 1 } else { Write-Host 'ALL PASS' }

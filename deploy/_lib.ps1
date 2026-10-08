@@ -128,22 +128,31 @@ function New-NginxTempDirs([string]$ProjectRoot){
   }
 }
 
+function Get-NssmArgs([hashtable]$Spec){
+  # 纯函数：组装 nssm 'set' 参数行（每行 string[]），供 Install-NssmService 调用，也可单测。
+  # 可选键 DependOn/Env 缺席时静默跳过——必须先 ContainsKey，否则 Set-StrictMode -Latest 会抛 PropertyNotFoundStrict。
+  $name=$Spec.Name
+  $list=New-Object 'System.Collections.Generic.List[object]'
+  $list.Add(@('set',$name,'AppParameters',$Spec.Parameters))
+  $list.Add(@('set',$name,'AppDirectory',$Spec.Directory))
+  $list.Add(@('set',$name,'AppStdout',$Spec.Stdout))
+  $list.Add(@('set',$name,'AppStderr',$Spec.Stderr))
+  $list.Add(@('set',$name,'AppRotateFiles','1'))
+  $list.Add(@('set',$name,'AppRotateBytes','10485760'))
+  $list.Add(@('set',$name,'AppExit','Default','Restart'))
+  $list.Add(@('set',$name,'AppRestartDelay','5000'))
+  $list.Add(@('set',$name,'Start','SERVICE_AUTO_START'))
+  $list.Add(@('set',$name,'AppNoConsole','1'))
+  if($Spec.ContainsKey('DependOn') -and $Spec.DependOn){ $list.Add(@('set',$name,'DependOnService',$Spec.DependOn)) }
+  if($Spec.ContainsKey('Env') -and $Spec.Env){ $list.Add(@(@('set',$name,'AppEnvironmentExtra')) + @($Spec.Env)) }
+  $list
+}
+
 function Install-NssmService([string]$Nssm,[hashtable]$Spec){
   $name=$Spec.Name
   if(Get-Service -Name $name -ErrorAction SilentlyContinue){ & $Nssm stop $name | Out-Null; & $Nssm remove $name confirm | Out-Null }
   & $Nssm install $name $Spec.Application | Out-Null
-  & $Nssm set $name AppParameters $Spec.Parameters | Out-Null
-  & $Nssm set $name AppDirectory $Spec.Directory | Out-Null
-  & $Nssm set $name AppStdout $Spec.Stdout | Out-Null
-  & $Nssm set $name AppStderr $Spec.Stderr | Out-Null
-  & $Nssm set $name AppRotateFiles 1 | Out-Null
-  & $Nssm set $name AppRotateBytes 10485760 | Out-Null
-  & $Nssm set $name AppExit Default Restart | Out-Null
-  & $Nssm set $name AppRestartDelay 5000 | Out-Null
-  & $Nssm set $name Start SERVICE_AUTO_START | Out-Null
-  & $Nssm set $name AppNoConsole 1 | Out-Null
-  if($Spec.DependOn){ & $Nssm set $name DependOnService $Spec.DependOn | Out-Null }
-  if($Spec.Env){ & $Nssm set $name AppEnvironmentExtra @($Spec.Env) | Out-Null }
+  foreach($a in (Get-NssmArgs $Spec)){ & $Nssm @a | Out-Null }
 }
 
 function Test-Prereqs([hashtable]$Wanted){
