@@ -34,7 +34,10 @@ async def db(test_engine):
 
 async def test_soft_deleted_order_excluded_from_available_shipment(db):
     """软删除的订单不再计入可出货量（旧实现会继续按它出货）。"""
-    product = Product(name='SAS-产品', barcode='SAS-P1', current_stock=0, initial_stock=0)
+    # current_stock 必须 >= 订单量：calculate_available_shipment_quantity 自 2026-10-06
+    # 起按「实物封顶」（available > current_stock 时钳到 current_stock）；若 current_stock=0
+    # 则封顶后恒为 0，就测不到软删过滤本身了。
+    product = Product(name='SAS-产品', barcode='SAS-P1', current_stock=100, initial_stock=100)
     db.add(product)
     await db.flush()
 

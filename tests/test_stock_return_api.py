@@ -323,7 +323,7 @@ class TestStockReturnApi:
 
         # 第二次直接命中服务层的幂等预检（真实查询 InventoryLog.idem_key）
         async def _fake_create(db, *, stockout_id, quantity, return_date_str, customer=None,
-                               reason=None, note=None, request_id=None):
+                               reason=None, note=None, request_id=None, operator_id=None):
             # 模拟 service 真实行为：同 request_id 再次进入即拒
             raise ValueError('请勿重复提交：该请求已登记过退货')
 

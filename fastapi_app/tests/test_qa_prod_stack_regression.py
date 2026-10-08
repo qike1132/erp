@@ -423,6 +423,14 @@ class TestD5Gzip:
 _FRONTEND = Path(__file__).resolve().parent.parent.parent / "frontend-vite"
 _PAIR_RE = re.compile(r"urlPattern:\s*(\S+),\s*handler:\s*'([A-Za-z]+)'")
 
+# vite.config.js 是 vue-tsc -b 从 .ts 编译出的生成物，被 frontend-vite/.gitignore 忽略，
+# CI 干净检出里没有它。此时跳过对产物的断言（.ts 侧的断言照常执行）。
+_VITE_JS_PATH = _FRONTEND / "vite.config.js"
+_JS_MISSING_SKIP = pytest.mark.skipif(
+    not _VITE_JS_PATH.exists(),
+    reason="CI 干净检出无 vue-tsc 生成物 vite.config.js（.gitignore 忽略）",
+)
+
 
 def _read(fname: str) -> str:
     return (_FRONTEND / fname).read_text(encoding="utf-8")
@@ -445,13 +453,19 @@ def _api_handler(text: str) -> str | None:
 
 
 class TestD6ViteConfigConsistency:
-    @pytest.mark.parametrize("fname", ["vite.config.ts", "vite.config.js"])
+    @pytest.mark.parametrize("fname", [
+        "vite.config.ts",
+        pytest.param("vite.config.js", marks=_JS_MISSING_SKIP),
+    ])
     def test_api_url_pattern_is_network_only(self, fname: str) -> None:
         handler = _api_handler(_read(fname))
         assert handler is not None, f"{fname}: 未找到 /api/ 的 runtimeCaching 条目"
         assert handler == "NetworkOnly", f"{fname}: /api/ handler={handler}（应为 NetworkOnly）"
 
-    @pytest.mark.parametrize("fname", ["vite.config.ts", "vite.config.js"])
+    @pytest.mark.parametrize("fname", [
+        "vite.config.ts",
+        pytest.param("vite.config.js", marks=_JS_MISSING_SKIP),
+    ])
     def test_no_caching_handlers_as_code(self, fname: str) -> None:
         """以 `handler: 'X'` 精确匹配代码，避免误伤注释里的同名字样。"""
         text = _read(fname)
@@ -459,6 +473,7 @@ class TestD6ViteConfigConsistency:
             assert f"handler: '{bad}'" not in text, f"{fname}: 仍存在 handler '{bad}'（缓存陈旧数据）"
             assert f'handler: "{bad}"' not in text, f"{fname}: 仍存在 handler \"{bad}\""
 
+    @_JS_MISSING_SKIP
     def test_two_configs_equivalent_on_caching(self) -> None:
         """vite.config.js 是 .ts 门禁产物且 Vite 优先加载 .js；二者 API 条目必须一致。"""
         ts_text = _read("vite.config.ts")
