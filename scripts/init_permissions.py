@@ -2,10 +2,12 @@
 权限体系初始化脚本
 支持大类全选模式的权限结构
 """
+import argparse
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 
 from sqlalchemy import text
 
@@ -88,7 +90,7 @@ PERMISSIONS_CONFIG = {
 }
 
 
-def init_permissions():
+def init_permissions(assume_yes: bool = False):
     """初始化权限数据"""
     session = SyncSessionLocal()
     try:
@@ -99,7 +101,11 @@ def init_permissions():
         existing_count = session.query(Permission).count()
         if existing_count > 0:
             print(f"\n权限表中已存在 {existing_count} 条数据")
-            response = input("是否要重新初始化？这将清除现有权限数据。(y/n): ")
+            if assume_yes:
+                response = 'y'
+                print("--yes：跳过确认，将清除现有权限数据并重新初始化")
+            else:
+                response = input("是否要重新初始化？这将清除现有权限数据。(y/n): ")
             if response.lower() != 'y':
                 print("操作已取消")
                 return
@@ -168,4 +174,7 @@ def init_permissions():
 
 
 if __name__ == '__main__':
-    init_permissions()
+    parser = argparse.ArgumentParser(description="权限体系初始化")
+    parser.add_argument('--yes', action='store_true', help="已存在数据时跳过交互确认，直接重新初始化")
+    args = parser.parse_args()
+    init_permissions(assume_yes=args.yes)
