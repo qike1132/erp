@@ -119,6 +119,17 @@ describe('分批校验规则（排满口径）', () => {
     form.shipmentPlans = [split('2026-10-10', 100)]
     expect(planSplitsInvalid.value).toBe('')
   })
+
+  it('resetFormAfterAdd 把类型归位「订单」（type 残留会让后续条目静默变成备货入库）', () => {
+    const { form, resetFormAfterAdd } = useOrderForm()
+    form.type = 'stockin'
+    form.quantity = 100
+    form.note = 'x'
+    resetFormAfterAdd()
+    expect(form.type).toBe('order')
+    expect(form.quantity).toBe(0)
+    expect(form.note).toBe('')
+  })
 })
 
 describe('useStagedItems payload 与播报', () => {
@@ -239,9 +250,9 @@ describe('ShipmentPlanControl 多行编辑器', () => {
 })
 
 describe('StagingArea 分批徽标', () => {
-  function mountArea(items: StagedItem[]) {
+  function mountArea(items: StagedItem[], submitting = false) {
     return mount(StagingArea, {
-      props: { stagedItems: items, submitting: false },
+      props: { stagedItems: items, submitting },
       global: { stubs: { FontAwesomeIcon: { template: '<i />' } } },
     })
   }
@@ -267,6 +278,32 @@ describe('StagingArea 分批徽标', () => {
   it('无计划/备货条目不渲染出货 chip', () => {
     const wrapper = mountArea([stagedItem(), stagedItem({ uid: 's1', type: 'stockin', shipmentPlans: [split('2026-10-10', 5)] })])
     expect(wrapper.text()).not.toContain('出货: 10-10')
+  })
+
+  it('提交按钮：只有订单 → 提交订单 (N)', () => {
+    const wrapper = mountArea([stagedItem({ uid: 'o1' }), stagedItem({ uid: 'o2' })])
+    expect(wrapper.text()).toContain('提交订单 (2)')
+    expect(wrapper.text()).not.toContain('备货')
+  })
+
+  it('提交按钮：只有备货 → 提交备货 (N)（不得谎称「提交订单」）', () => {
+    const wrapper = mountArea([stagedItem({ uid: 's1', type: 'stockin' })])
+    expect(wrapper.text()).toContain('提交备货 (1)')
+    expect(wrapper.text()).not.toContain('提交订单')
+  })
+
+  it('提交按钮：订单+备货混存 → 文案区分两类条数（备货要写库存，不得隐身）', () => {
+    const wrapper = mountArea([
+      stagedItem({ uid: 'o1' }),
+      stagedItem({ uid: 's1', type: 'stockin' }),
+      stagedItem({ uid: 's2', type: 'stockin' }),
+    ])
+    expect(wrapper.text()).toContain('订单 1 + 备货 2')
+  })
+
+  it('提交按钮：提交中 → 提交中…', () => {
+    const wrapper = mountArea([stagedItem()], true)
+    expect(wrapper.text()).toContain('提交中…')
   })
 })
 
