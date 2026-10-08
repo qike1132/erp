@@ -138,20 +138,26 @@ def _clear_nav_cache():
 
 
 def _fix_other_nav_sections(session):
-    """修复其他权限记录的 section/section_name/url/is_nav 字段"""
+    """修复其他权限记录的 section/section_name/url/is_nav 字段。
+
+    ⚠️ 取值必须与**生产库真值**一致（2026-10-08 只读导出的 parent_id IS NULL 行）。
+    本表原是 2026 年中的一次性映射，已与生产漂移；此处对齐，
+    否则再跑本脚本会把用户真实在用的导航改错（如把 user_manage 入口关掉）。
+    权威全量种子见 scripts/seed_nav.py。
+    """
     NAV_CONFIG = {
         'product_manage': {'url': 'product.products', 'section': 'core', 'section_name': '核心业务', 'icon': 'fa-box'},
-        'order_manage': {'url': 'customer_order.index', 'section': 'core', 'section_name': '核心业务', 'icon': 'fa-shopping-cart'},
-        'stockin_manage': {'url': 'stock.stockins', 'section': 'core', 'section_name': '核心业务', 'icon': 'fa-truck-loading'},
-        'stockout_manage': {'url': 'stock.stockouts', 'section': 'core', 'section_name': '核心业务', 'icon': 'fa-truck'},
-        'case_manage': {'url': 'case.case_management_page', 'section': 'core', 'section_name': '核心业务', 'icon': 'fa-suitcase'},
-        'report_manage': {'url': 'report.reports', 'section': 'data', 'section_name': '数据中心', 'icon': 'fa-chart-bar'},
-        'approval_manage': {'url': 'approval.approval_list', 'section': 'core', 'section_name': '核心业务', 'icon': 'fa-clipboard-check'},
-        'customer_manage': {'url': 'customer.customers', 'section': 'core', 'section_name': '核心业务', 'icon': 'fa-building'},
-        'supplier_manage': {'url': 'supplier.suppliers', 'section': 'purchase', 'section_name': '采购中心', 'icon': 'fa-truck'},
-        'user_manage': {'url': None, 'section': 'system', 'section_name': '系统管理', 'icon': 'fa-users-cog', 'is_nav': False},
-        'permission_manage': {'url': None, 'section': 'system', 'section_name': '系统管理', 'icon': 'fa-shield-alt', 'is_nav': False},
-        'production_summary_manage': {'url': 'production_summary.index', 'section': 'core', 'section_name': '核心业务', 'icon': 'fa-industry'},
+        'order_manage': {'url': 'customer_order.index', 'section': 'core', 'section_name': '核心业务', 'icon': 'fa-file-invoice'},
+        'stockin_manage': {'url': 'stock.stockins', 'section': 'core', 'section_name': '核心业务', 'icon': 'fa-truck-loading', 'is_nav': False},
+        'stockout_manage': {'url': 'stock.stockouts', 'section': 'core', 'section_name': '核心业务', 'icon': 'fa-shipping-fast'},
+        'case_manage': {'url': 'case.case_management_page', 'section': 'core', 'section_name': '核心业务', 'icon': 'fa-box-open'},
+        'report_manage': {'url': 'report.reports', 'section': 'data', 'section_name': '订单查询', 'icon': 'fa-chart-bar'},
+        'approval_manage': {'url': 'approval.approval_list', 'section': 'system', 'section_name': '系统管理', 'icon': 'fa-clipboard-check'},
+        'customer_manage': {'url': 'customer.customers', 'section': 'system', 'section_name': '系统管理', 'icon': 'fa-building'},
+        'supplier_manage': {'url': 'supplier.suppliers', 'section': 'purchase', 'section_name': '采购管理', 'icon': 'fa-truck'},
+        'user_manage': {'url': 'user.users', 'section': 'system', 'section_name': '系统管理', 'icon': 'fa-users-cog', 'is_nav': True},
+        'permission_manage': {'url': 'user.users', 'section': 'system', 'section_name': '系统管理', 'icon': 'fa-shield-alt', 'is_nav': False},
+        'production_summary_manage': {'section': None, 'section_name': None, 'is_nav': False},
         'batch_manage': {'url': 'sku_batch.sku_batch_page', 'section': 'core', 'section_name': '核心业务', 'icon': 'fa-table-cells'},
     }
 
