@@ -92,7 +92,14 @@ export const plushCutePT: PrimeVuePTOptions = {
             : 'w-full max-h-[80vh]',
       ],
     }),
-    content: 'flex-1 min-h-0 overflow-y-auto px-6 py-5',
+    // 居中面板（明细）的筛选栏自带内边距，且标题下沿已有边框，内容区若再留 20px 顶部内边距
+    // 就会在标题与筛选栏之间空出一条；故居中面板去掉顶部内边距，左右/上下抽屉保持原样。
+    content: ({ props }: { props: { position: string } }) => ({
+      class: [
+        'flex-1 min-h-0 overflow-y-auto px-6 pb-5',
+        props.position === 'center' ? 'pt-0' : 'pt-5',
+      ],
+    }),
     header: 'flex items-center justify-between px-6 py-4 border-b border-border-light flex-shrink-0',
     title: 'text-lg font-bold text-heading',
   },

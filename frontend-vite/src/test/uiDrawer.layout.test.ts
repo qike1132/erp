@@ -100,6 +100,23 @@ describe('UiDrawer 布局契约', () => {
     expect(panel().classList.contains('h-full')).toBe(false)
   })
 
+  it('居中面板的内容区去掉顶部内边距（标题下沿不留一条空白）', async () => {
+    mountDrawer({ centered: true })
+    await nextTick()
+    await nextTick()
+
+    expect(content().classList.contains('pt-0')).toBe(true)
+    expect(content().classList.contains('pt-5')).toBe(false)
+  })
+
+  it('左右抽屉的内容区保持顶部内边距（不受居中分支影响）', async () => {
+    mountDrawer()
+    await nextTick()
+    await nextTick()
+
+    expect(content().classList.contains('pt-5')).toBe(true)
+  })
+
   it('dismissable 默认为 true：点遮罩空白会关闭', async () => {
     const wrapper = mountDrawer()
     await nextTick()
