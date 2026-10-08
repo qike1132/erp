@@ -364,11 +364,28 @@ python -m venv .venv
 # 按需追加：
 #   requirements/test.txt       回归测试（pytest 等）
 #   requirements/dev.txt        ruff / mypy / pre-commit（开发机）
-#   requirements/ocr.txt        PDF 出货单 OCR（约 500MB，可选）
+#   requirements/ocr.txt        粘贴识别 / PDF 出货单 OCR（约 500MB）—— 见下方检查单
 #   requirements/s3.txt         STORAGE_TYPE=s3 时（MinIO/S3）
 #   requirements/migration.txt  仅迁移旧 bcrypt 口令哈希时
 #   requirements/desktop.txt    打包 server_manager.exe 时
 ```
+
+⚠️ **依赖检查单（部署后逐项自检）**
+
+「按需」的含义是**不装不影响其它功能**，不等于可以不装 —— 缺了对应功能就是整块不可用，
+而且过去表现为一句「服务器内部错误」，真因只躺在日志里（2026-10-08 生产即如此）。
+
+| 依赖文件 | 用途 | 缺了会怎样 | 自检 |
+|---|---|---|---|
+| `requirements/base.txt` | 生产必需（FastAPI / SQLAlchemy / PG / Redis / ARQ） | 服务起不来 | `python -c "import fastapi, sqlalchemy, asyncpg, redis"` |
+| `requirements/ocr.txt` | **粘贴识别**（客户订单页 / 出货页共用）、PDF 出货单 OCR | 该功能整块不可用：端点返回 **503** 并附安装命令（`_extractors.OcrDependencyError`） | `python -c "import numpy, cv2, rapidocr, rapidocr_pdf, rapid_table, onnxruntime, fitz"` |
+| `requirements/s3.txt` | `STORAGE_TYPE=s3` 时的对象存储 | 附件读写失败 | `python -c "import boto3"` |
+| `requirements/migration.txt` | 仅迁移旧 bcrypt 口令哈希时 | 迁移脚本不可用 | — |
+| `requirements/desktop.txt` | 打包 `server_manager.exe` 时 | 打包失败 | — |
+| `requirements/test.txt` / `dev.txt` | 回归测试 / ruff / mypy | CI 与本地检查不可用 | — |
+
+> 上面 `python` 均指 **`.\.venv\Scripts\python.exe`**（生产解释器）。
+> OCR 那条尤其容易漏：它在「按需」清单里看着像可选项，但**装了才是功能可用**。
 
 ⚠️ **NSSM 服务固定指向 `.venv\Scripts\python.exe`**。换/重建虚拟环境后，必须重跑一次
 管理器「安装服务」或手工重设服务 Application（否则服务仍指向旧解释器）。

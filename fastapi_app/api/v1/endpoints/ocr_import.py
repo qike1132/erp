@@ -25,6 +25,7 @@ from fastapi_app.schemas.ocr_import import (
     OcrPdfPreviewResult,
 )
 from fastapi_app.services import ocr_service as svc
+from fastapi_app.services.ocr._extractors import OcrDependencyError
 from fastapi_app.services.ocr_service import IMAGE_EXTENSIONS
 from fastapi_app.shared_models import User
 
@@ -87,7 +88,13 @@ async def upload_shipping_docs(files: list[UploadFile]=File(..., description='�
             valid_files += 1
             if len(files) > 1:
                 svc._update_progress(task_id, message=f'正在处理第 {i + 1}/{len(files)} 个文件: {filename}')
-            imported, message, errors = await svc.import_staging_stockouts_from_file(db, content, session_id, filename=filename, task_id=task_id)
+            try:
+                imported, message, errors = await svc.import_staging_stockouts_from_file(db, content, session_id, filename=filename, task_id=task_id)
+            except OcrDependencyError as e:
+                # 逐文件如实报出修复指引，别让整批 500（缺依赖时每个文件都会走到这里）
+                all_errors.append(f'{filename}: {e!s}')
+                logger.error('OCR 批量上传依赖缺失: %s', e)
+                continue
             total_imported += imported
             if errors:
                 all_errors.extend([f'{filename}: {e}' for e in errors])
@@ -144,6 +151,11 @@ async def preview_shipping_doc(file: UploadFile=File(..., description='PDF 或�
         if not pages and (not parsed_items):
             return OcrPdfPreviewResult(success=False, message='无法提取文本内容', filename=filename, page_count=0, pages=[], parsed_items=[])
         return OcrPdfPreviewResult(success=True, message=f'识别完成，共 {len(pages)} 页，识别到 {len(parsed_items)} 个出货项', filename=filename, page_count=len(pages), pages=[OcrPdfPagePreview(page=p.get('page', 0), text=p.get('text', '')[:500]) for p in pages], parsed_items=[OcrPdfParsedItem.model_validate(it) for it in parsed_items])
+    except OcrDependencyError as e:
+        # 缺 OCR 可选依赖是可预期的部署状态：明确告知修复方式。
+        # 不这样兜的话，用户只看到「服务器内部错误」，真因只躺在日志里（2026-10-08 生产事故）。
+        logger.error('OCR 依赖缺失（预览）: %s', e)
+        raise HTTPException(status_code=503, detail=str(e)) from e
     except (OperationalError, DisconnectionError) as e:
         logger.error(f'OCR 预览失败: {e!s}', exc_info=True)
         raise HTTPException(status_code=500, detail=f'识别失败: {settings.sanitize_error(e)}') from e
@@ -175,6 +187,10 @@ async def preview_order_doc(
     require_upload_magic(content, ext, filename=filename)  # P0-12：文件头校验，失败 400
     try:
         items, raw_text, warnings = await svc.preview_order_items(db, content, filename, customer)
+    except OcrDependencyError as e:
+        # 客户端按 503 展示可读指引；前端「粘贴识别」的失败提示会带上这句话
+        logger.error('OCR 依赖缺失（订单预览）: %s', e)
+        raise HTTPException(status_code=503, detail=str(e)) from e
     except (OperationalError, DisconnectionError) as e:
         logger.error(f'OCR 订单识别失败: {e!s}', exc_info=True)
         raise HTTPException(status_code=500, detail=f'识别失败: {settings.sanitize_error(e)}') from e
