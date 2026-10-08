@@ -145,6 +145,9 @@ export function useOrderForm() {
   }
 
   function resetFormAfterAdd() {
+    // 类型必须归位「订单」：备货条目会直接增加库存，type 残留会让后续添加的条目
+    // 在用户不注意时全部变成备货入库（2026-10-06 出库"凭空库存"事故的入口之一）
+    form.type = 'order'
     form.productSearch = ''
     form.productId = 0
     form.quantity = 0
