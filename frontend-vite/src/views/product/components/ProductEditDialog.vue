@@ -10,64 +10,66 @@
         </div>
         <div class="bom-modal-body">
           <div class="edit-modal-content">
-            <div class="pd-form-group">
-              <label class="pd-label">产品名称 <span class="required">*</span></label>
-              <div class="pd-input-wrap">
-                <FontAwesomeIcon icon="tag" class="pd-input-icon" aria-hidden="true" />
-                <input v-model="editForm.name" type="text" class="pd-input" required placeholder="请输入产品名称" name="product-name" autocomplete="off" aria-label="请输入产品名称" />
+            <div class="edit-grid">
+              <div class="pd-form-group edit-span2">
+                <label class="pd-label">产品名称 <span class="required">*</span></label>
+                <div class="pd-input-wrap">
+                  <FontAwesomeIcon icon="tag" class="pd-input-icon" aria-hidden="true" />
+                  <input v-model="editForm.name" type="text" class="pd-input" required placeholder="请输入产品名称" name="product-name" autocomplete="off" aria-label="请输入产品名称" />
+                </div>
               </div>
-            </div>
-            <div class="pd-form-group">
-              <label class="pd-label">69码/商品条码</label>
-              <div class="pd-input-wrap">
-                <FontAwesomeIcon icon="barcode" class="pd-input-icon" aria-hidden="true" />
-                <input v-model="editForm.barcode" type="text" class="pd-input" placeholder="例如：6958085574210" name="barcode" autocomplete="off" aria-label="例如：6958085574210" />
+              <div class="pd-form-group">
+                <label class="pd-label">69码/商品条码</label>
+                <div class="pd-input-wrap">
+                  <FontAwesomeIcon icon="barcode" class="pd-input-icon" aria-hidden="true" />
+                  <input v-model="editForm.barcode" type="text" class="pd-input" placeholder="例如：6958085574210" name="barcode" autocomplete="off" aria-label="例如：6958085574210" />
+                </div>
               </div>
-            </div>
-            <div class="pd-form-group">
-              <label class="pd-label">产品价格</label>
-              <div class="pd-input-wrap">
-                <FontAwesomeIcon icon="yen-sign" class="pd-input-icon" aria-hidden="true" />
-                <input v-model.number="editForm.price" type="number" class="pd-input" step="0.01" min="0" placeholder="请输入产品价格" name="price" autocomplete="off" aria-label="请输入产品价格" />
+              <div class="pd-form-group">
+                <label class="pd-label">产品价格</label>
+                <div class="pd-input-wrap">
+                  <FontAwesomeIcon icon="yen-sign" class="pd-input-icon" aria-hidden="true" />
+                  <input v-model.number="editForm.price" type="number" class="pd-input" step="0.01" min="0" placeholder="请输入产品价格" name="price" autocomplete="off" aria-label="请输入产品价格" />
+                </div>
               </div>
-            </div>
-            <div class="pd-form-group">
-              <label class="pd-label">工厂</label>
-              <div class="pd-input-wrap">
-                <FontAwesomeIcon icon="industry" class="pd-input-icon" aria-hidden="true" />
-                <select v-model="editForm.factory" class="pd-input pd-select" name="edit-factory" aria-label="工厂">
-                  <option value="" disabled>请选择工厂</option>
-                  <option v-for="f in factoryOptions" :key="f" :value="f">{{ f }}</option>
-                </select>
+              <div class="pd-form-group">
+                <label class="pd-label">工厂</label>
+                <div class="pd-input-wrap">
+                  <FontAwesomeIcon icon="industry" class="pd-input-icon" aria-hidden="true" />
+                  <select v-model="editForm.factory" class="pd-input pd-select" name="edit-factory" aria-label="工厂">
+                    <option value="" disabled>请选择工厂</option>
+                    <option v-for="f in factoryOptions" :key="f" :value="f">{{ f }}</option>
+                  </select>
+                </div>
               </div>
-            </div>
-            <div class="pd-form-group">
-              <label class="pd-label">所属客户</label>
-              <ProductCustomerSelect v-model="editForm.customerIds" :options="customerOptions" />
-            </div>
-            <div class="pd-form-group">
-              <label class="pd-label">产品图片</label>
-              <div
-                ref="editDropZoneRef"
-                class="pd-section-header pd-droppable"
-                :class="{ 'pd-drag-over': editDragOver || editPasteFlash }"
-                title="点击选择、拖拽或粘贴图片"
-                @click="editImageInputRef?.click()"
-                @dragover.prevent="onEditDragOver"
-                @dragleave="editDragOver = false"
-                @drop.prevent="onEditDrop"
-              >
-                <label class="form-label pd-droppable-label">
-                  <FontAwesomeIcon icon="image" class="label-icon" aria-hidden="true" />
-                  <template v-if="editForm.image">
-                    <span class="pd-file-inline pd-file-inline-success">
-                      <img loading="lazy" :src="resolveStaticUrl(editForm.image)" class="pd-thumb-preview" alt="产品图片" @click.stop="emit('open-image', editForm.image)" />
-                      <button type="button" class="pd-thumb-remove" aria-label="关闭" @click.stop="editForm.image = ''"><FontAwesomeIcon icon="times" aria-hidden="true" /></button>
-                    </span>
-                  </template>
-                  <span v-else>点击选择 / 拖拽 / 粘贴图片 · 支持 {{ ALLOWED_IMAGE_HINT }}</span>
-                </label>
-                <input ref="editImageInputRef" type="file" style="display: none" accept="image/*" name="image" @change="onEditImageSelect" />
+              <div class="pd-form-group">
+                <label class="pd-label">所属客户</label>
+                <ProductCustomerSelect v-model="editForm.customerIds" :options="customerOptions" close-on-select />
+              </div>
+              <div class="pd-form-group edit-span2">
+                <label class="pd-label">产品图片</label>
+                <div
+                  ref="editDropZoneRef"
+                  class="pd-section-header pd-droppable"
+                  :class="{ 'pd-drag-over': editDragOver || editPasteFlash }"
+                  title="点击选择、拖拽或粘贴图片"
+                  @click="editImageInputRef?.click()"
+                  @dragover.prevent="onEditDragOver"
+                  @dragleave="editDragOver = false"
+                  @drop.prevent="onEditDrop"
+                >
+                  <label class="form-label pd-droppable-label">
+                    <FontAwesomeIcon icon="image" class="label-icon" aria-hidden="true" />
+                    <template v-if="editForm.image">
+                      <span class="pd-file-inline pd-file-inline-success">
+                        <img loading="lazy" :src="resolveStaticUrl(editForm.image)" class="pd-thumb-preview" alt="产品图片" @click.stop="emit('open-image', editForm.image)" />
+                        <button type="button" class="pd-thumb-remove" aria-label="关闭" @click.stop="editForm.image = ''"><FontAwesomeIcon icon="times" aria-hidden="true" /></button>
+                      </span>
+                    </template>
+                    <span v-else>点击选择 / 拖拽 / 粘贴图片 · 支持 {{ ALLOWED_IMAGE_HINT }}</span>
+                  </label>
+                  <input ref="editImageInputRef" type="file" style="display: none" accept="image/*" name="image" @change="onEditImageSelect" />
+                </div>
               </div>
             </div>
           </div>
@@ -75,7 +77,7 @@
         <div class="bom-modal-footer">
           <button class="bom-btn-cancel" @click="editDialogVisible = false">取消</button>
           <button class="bom-btn-save" :disabled="editSubmitting" @click="handleEditSave">
-            <FontAwesomeIcon icon="save" aria-hidden="true" />{{ editSubmitting ? '保存中…' : '保存修改' }}
+            <FontAwesomeIcon :icon="editSubmitting ? 'spinner' : 'save'" :class="{ 'pd-btn-spin': editSubmitting }" aria-hidden="true" />{{ editSubmitting ? '保存中…' : '保存修改' }}
           </button>
         </div>
       </div>
@@ -224,39 +226,45 @@ defineExpose({ open })
   display: flex; align-items: center; justify-content: center; padding: 16px;
 }
 
-.edit-modal-content { padding: 20px; }
+.edit-modal-content { padding: 24px 28px; }
 
 /* ===== 表单 ===== */
-.pd-form-group { margin-bottom: 16px; }
+/* 双列栅格：名称与图片通栏，其余两两一行；窄屏回落单列 */
+.edit-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px 24px; }
+.edit-span2 { grid-column: 1 / -1; }
+@media (max-width: 800px) { .edit-grid { grid-template-columns: 1fr; } }
+.edit-grid :deep(.pcs-field) { min-height: 44px; padding: 8px 34px 8px 14px; border-radius: 12px; }
+.edit-grid :deep(.pcs-placeholder) { font-size: 15px; }
+.pd-form-group { margin-bottom: 0; }
 .pd-label {
   display: block;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--color-text-secondary);
-  margin-bottom: 6px;
+  margin-bottom: 8px;
   line-height: 1.4;
 }
 .required { color: var(--color-danger-500); font-weight: 700; }
 .pd-input-wrap { position: relative; }
 .pd-input-icon {
   position: absolute;
-  left: 12px;
+  left: 14px;
   top: 50%;
   transform: translateY(-50%);
   color: var(--color-text-secondary);
-  font-size: 14px;
+  font-size: 15px;
   z-index: 10;
   pointer-events: none;
 }
 .pd-input {
   width: 100%;
-  padding: 8px 12px 8px 36px;
-  font-size: 14px;
+  padding: 11px 14px 11px 40px;
+  font-size: 15px;
   line-height: 1.5;
   color: var(--color-text);
   background: white;
   border: 2px solid var(--color-border-light, #e2e8f0);
-  border-radius: 10px;
+  border-radius: 12px;
   transition: border-color 0.3s ease, box-shadow 0.3s ease;
   outline: none;
 }
@@ -282,11 +290,11 @@ defineExpose({ open })
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 8px 12px;
+  padding: 11px 14px;
   background: white;
   border: 2px solid var(--color-border-light, #e2e8f0);
   border-radius: var(--radius-input, 12px);
-  min-height: 40px;
+  min-height: 52px;
   box-sizing: border-box;
   cursor: default;
   transition: border-color 0.3s ease, background 0.3s ease;
@@ -304,7 +312,7 @@ defineExpose({ open })
   display: flex !important;
   margin-bottom: 0;
   cursor: pointer;
-  font-size: 14px !important;
+  font-size: 14.5px !important;
   font-weight: 400 !important;
   color: var(--color-text-muted) !important;
   align-items: center;
@@ -313,7 +321,7 @@ defineExpose({ open })
   color: var(--color-text-muted) !important;
 }
 .pd-file-inline {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   display: inline-flex;
   align-items: center;
@@ -323,46 +331,44 @@ defineExpose({ open })
   color: var(--color-success-600);
 }
 .pd-thumb-preview {
-  height: 28px;
-  width: 28px;
+  height: 40px;
+  width: 40px;
   object-fit: cover;
-  border-radius: 6px;
+  border-radius: 8px;
   border: 1px solid var(--color-border-light);
 }
 .pd-thumb-remove {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
   border: none;
   background: rgba(0,0,0,0.4);
   color: white;
-  font-size: 9px;
+  font-size: 11px;
   cursor: pointer;
   margin-left: 2px;
   transition: background 0.2s ease;
 }
 .pd-thumb-remove:hover { background: rgba(0,0,0,0.7); }
-
 /* ===== BOM模态框（编辑弹窗复用） ===== */
 .bom-modal-content {
   border-radius: 18px; border: none; box-shadow: 0 20px 60px rgba(0,0,0,0.15);
   overflow: hidden; background: white;
 }
-.edit-modal-dialog { max-width: 800px; width: 95vw; max-height: 90vh; display: flex; flex-direction: column; }
+.edit-modal-dialog { max-width: 1080px; width: 95vw; max-height: 90vh; display: flex; flex-direction: column; }
 .bom-modal-header {
   display: flex; justify-content: space-between; align-items: center;
-  padding: 20px 28px; background: transparent;
+  padding: 22px 28px; background: transparent;
   border-bottom: 1px solid var(--color-border-light, #e2e8f0);
 }
 .bom-modal-header-left { flex: 1; }
 .bom-modal-title {
   display: flex; align-items: center; gap: 10px;
-  font-size: 16px; font-weight: 700; color: var(--color-text); margin: 0;
+  font-size: 17px; font-weight: 700; color: var(--color-text); margin: 0;
 }
-.bom-modal-title i { color: var(--color-primary-500); }
 .bom-modal-close {
   width: 36px; height: 36px; border: none; background: var(--color-surface, #f8fafc);
   border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center;
@@ -372,21 +378,23 @@ defineExpose({ open })
 .bom-modal-body { padding: 0; background: var(--color-surface, #f8fafc); overflow-y: auto; flex: 1; }
 .bom-modal-footer {
   display: flex; justify-content: flex-end; align-items: center; gap: 10px;
-  padding: 20px 28px; background: white;
+  padding: 18px 28px; background: white;
   border-top: 1px solid var(--color-border-light, #e2e8f0);
 }
 .bom-btn-cancel {
-  padding: 10px 20px; background: white; color: var(--color-text);
-  border: 2px solid var(--color-border-light, #e2e8f0); border-radius: 10px;
-  font-size: 13px; font-weight: 600; cursor: pointer; transition: background 0.3s ease, transform 0.3s ease;
+  padding: 11px 22px; background: white; color: var(--color-text);
+  border: 2px solid var(--color-border-light, #e2e8f0); border-radius: 11px;
+  font-size: 14px; font-weight: 600; cursor: pointer; transition: background 0.3s ease, transform 0.3s ease;
 }
 .bom-btn-cancel:hover { background: var(--color-surface, #f8fafc); transform: translateY(-1px); }
 .bom-btn-save {
-  padding: 10px 20px; background: linear-gradient(135deg, var(--color-primary-500), var(--color-primary-600));
-  color: white; border: 2px solid var(--color-primary-500); border-radius: 10px;
-  font-size: 13px; font-weight: 600; cursor: pointer; transition: transform 0.3s ease, box-shadow 0.3s ease;
+  padding: 11px 22px; background: linear-gradient(135deg, var(--color-primary-500), var(--color-primary-600));
+  color: white; border: 2px solid var(--color-primary-500); border-radius: 11px;
+  font-size: 14px; font-weight: 600; cursor: pointer; transition: transform 0.3s ease, box-shadow 0.3s ease;
   display: flex; align-items: center; gap: 6px;
 }
 .bom-btn-save:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(59,130,246,0.3); }
-.bom-btn-save:disabled { opacity: 0.4; cursor: not-allowed; }
-</style>
+.bom-btn-save:disabled { opacity: 0.7; cursor: progress; }
+/* 保存等待期（可能数秒，见 2026-10-09 根因存档）：spinner 转起来让"活着"可见 */
+.pd-btn-spin { animation: pd-spin 0.8s linear infinite; }
+@keyframes pd-spin { to { transform: rotate(360deg); } }</style>
