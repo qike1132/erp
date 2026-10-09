@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>效果图 · SKU 客户归属（2026-10-09）</title>
+<style>
+  :root{
+    --primary-500:#0094bf; --primary-600:#007ea3; --primary-50:#e6f6fa; --primary-100:#cceef5;
+    --border:#e2e8f0; --border-light:#f1f5f9;
+    --text:#1e293b; --text-2:#64748b; --text-3:#94a3b8;
+    --surface:#f8fafc;
+    --success-50:#ecfdf5; --success-600:#059669; --success-400:#34d399;
+    --warning-50:#fffbeb; --warning-100:#fef3c7; --warning-600:#d97706;
+    --danger-50:#fef2f2; --danger-100:#fee2e2; --danger-500:#ef4444;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:28px;background:#eef2f6;color:var(--text);
+       font-family:"Microsoft YaHei","PingFang SC",system-ui,sans-serif;font-size:14px;line-height:1.6}
+  h1{font-size:20px;margin:0 0 4px}
+  .sub{color:var(--text-2);font-size:13px;margin-bottom:24px}
+  .panel{background:#fff;border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:26px;
+         box-shadow:0 1px 3px rgba(15,23,42,.06)}
+  .panel > h2{font-size:15px;margin:0 0 4px;display:flex;align-items:center;gap:8px}
+  .panel > h2 .num{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;
+         border-radius:50%;background:var(--primary-500);color:#fff;font-size:12px;font-weight:700}
+  .panel > p.note{color:var(--text-2);font-size:12.5px;margin:0 0 16px}
+  .tag{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;font-weight:600;line-height:1.7}
+  .tag-cust{background:var(--primary-50);color:var(--primary-600);border:1px solid var(--primary-100)}
+  .tag-none{background:var(--surface);color:var(--text-3);border:1px solid var(--border)}
+  .tag-new{background:var(--success-50);color:var(--success-600);border:1px solid #a7f3d0}
+  .tag-warn{background:var(--warning-50);color:var(--warning-600);border:1px solid var(--warning-100)}
+
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{background:var(--surface);color:var(--text-2);font-weight:700;font-size:12.5px;text-align:left;
+     padding:9px 12px;border-bottom:1px solid var(--border)}
+  td{padding:10px 12px;border-bottom:1px solid var(--border-light);vertical-align:middle}
+  .mono{font-family:Consolas,Monaco,monospace;font-size:12px;color:var(--text-2)}
+  .price{color:var(--danger-500);font-weight:600}
+  .thumb{width:44px;height:44px;border-radius:8px;background:var(--surface);border:1px solid var(--border);
+         display:flex;align-items:center;justify-content:center;color:var(--text-3);font-size:18px}
+  .bar{display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
+  .search{flex:1;min-width:220px;padding:7px 12px;border:2px solid var(--border);border-radius:10px;color:var(--text-3)}
+  .pillbtn{padding:6px 12px;border-radius:9px;border:1px solid var(--border);background:#fff;font-size:12.5px;color:var(--text-2)}
+  .pillbtn.on{background:var(--primary-500);border-color:var(--primary-500);color:#fff;font-weight:600}
+
+  /* 表单 */
+  .formgrid{display:grid;grid-template-columns:1fr 1fr;gap:14px 22px;max-width:820px}
+  .fg{display:flex;flex-direction:column;gap:6px}
+  .fg.full{grid-column:1/-1}
+  .fg label{font-size:12px;font-weight:600;color:var(--text-2)}
+  .inp{padding:8px 12px;border:2px solid var(--border);border-radius:10px;color:var(--text)}
+  .inp.ph{color:var(--text-3)}
+  .drop{border:2px dashed var(--border);border-radius:10px;padding:14px;text-align:center;color:var(--text-3);font-size:12.5px}
+
+  .picker{border:2px solid var(--border);border-radius:10px;padding:8px;display:flex;flex-wrap:wrap;gap:6px;align-items:center;min-height:44px}
+  .picker .chip{display:inline-flex;align-items:center;gap:6px;background:var(--primary-50);color:var(--primary-600);
+       border:1px solid var(--primary-100);border-radius:999px;padding:2px 8px 2px 10px;font-size:12.5px;font-weight:600}
+  .picker .chip .x{color:var(--primary-600);opacity:.6;font-weight:700;cursor:pointer}
+  .picker .caret{margin-left:auto;color:var(--text-3)}
+  .dropdown{border:1px solid var(--border);border-radius:10px;margin-top:6px;max-width:420px;overflow:hidden;
+       box-shadow:0 8px 20px rgba(15,23,42,.10)}
+  .dropdown .opt{padding:8px 12px;font-size:13px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border-light)}
+  .dropdown .opt:last-child{border-bottom:none}
+  .dropdown .opt .ck{width:15px;height:15px;border-radius:4px;border:2px solid var(--border);flex:none}
+  .dropdown .opt.sel .ck{background:var(--primary-500);border-color:var(--primary-500);position:relative}
+  .dropdown .opt.sel .ck::after{content:"✓";color:#fff;font-size:11px;position:absolute;left:2px;top:-3px}
+  .dropdown .hint{padding:6px 12px;font-size:11.5px;color:var(--text-3);background:var(--surface)}
+
+  .callout{border-left:3px solid var(--primary-500);background:var(--primary-50);border-radius:0 8px 8px 0;
+           padding:10px 14px;font-size:12.5px;color:#0b4a5c;margin-top:14px}
+  .callout.warn{border-left-color:var(--warning-600);background:var(--warning-50);color:#7c4a03}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:22px}
+  .badge-row{display:flex;gap:6px;flex-wrap:wrap}
+  .lab{font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px}
+  code{background:var(--surface);border:1px solid var(--border);border-radius:5px;padding:1px 5px;font-size:12px}
+</style>
+</head>
+<body>
+
+<h1>SKU 客户归属 · 效果图</h1>
+<div class="sub">2026-10-09 · 滨发协同系统 · 一个 SKU 可挂多个客户；未挂客户的 SKU 对所有客户可见（兼容现状）</div>
+
+<!-- ① 产品列表 -->
+<div class="panel">
+  <h2><span class="num">1</span>产品列表页（/product）</h2>
+  <p class="note">新增「客户」列 + 顶部客户筛选。未挂客户的 SKU 显示灰色「未分配」标签 —— 它仍然对所有客户可见。</p>
+
+  <div class="bar">
+    <div class="search">🔍 搜索产品名称或69码...</div>
+    <div class="pillbtn">客户 ▾ 全部</div>
+    <div class="pillbtn on">未分配 (12)</div>
+  </div>
+
+  <table>
+    <thead>
+      <tr><th style="width:70px">产品图片</th><th>产品名称</th><th style="width:150px">69码</th>
+          <th style="width:110px">产品价格</th><th style="width:90px">工厂</th>
+          <th style="width:220px">客户 <span class="tag tag-new">新增</span></th><th style="width:130px">操作</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><div class="thumb">🖼</div></td>
+        <td>小熊毛绒玩具 20cm</td><td class="mono">6958085574210</td><td class="price">¥ 12.50</td><td>东莞</td>
+        <td><div class="badge-row"><span class="tag tag-cust">贝乐</span></div></td>
+        <td><div class="badge-row"><span class="pillbtn">⚙</span><span class="pillbtn">✎</span><span class="pillbtn">🗑</span></div></td>
+      </tr>
+      <tr>
+        <td><div class="thumb">🖼</div></td>
+        <td>卡通抱枕 40×40</td><td class="mono">6958085574227</td><td class="price">¥ 18.00</td><td>湖北</td>
+        <td><div class="badge-row"><span class="tag tag-cust">贝乐</span><span class="tag tag-cust">海豚国际</span></div></td>
+        <td><div class="badge-row"><span class="pillbtn">⚙</span><span class="pillbtn">✎</span><span class="pillbtn">🗑</span></div></td>
+      </tr>
+      <tr>
+        <td><div class="thumb">🖼</div></td>
+        <td>恐龙玩偶 大号</td><td class="mono">—</td><td class="price">¥ 26.00</td><td>东莞</td>
+        <td><div class="badge-row"><span class="tag tag-none">未分配</span></div></td>
+        <td><div class="badge-row"><span class="pillbtn">⚙</span><span class="pillbtn">✎</span><span class="pillbtn">🗑</span></div></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="callout">
+    「未分配」筛选是个便捷入口：把还没挂客户的 SKU 一次列出来，逐个补齐。默认是「全部」。
+  </div>
+</div>
+
+<!-- ② 新增 / 编辑产品 -->
+<div class="panel">
+  <h2><span class="num">2</span>新增 / 编辑产品</h2>
+  <p class="note">左侧新增表单和编辑弹窗各加一个「所属客户」多选。两边共用一个控件，保证交互一致。</p>
+
+  <div class="two">
+    <div>
+      <div class="lab">新增产品（左栏）</div>
+      <div class="formgrid" style="grid-template-columns:1fr">
+        <div class="fg"><label>产品名称</label><div class="inp ph">例如：小熊毛绒玩具</div></div>
+        <div class="fg"><label>69码</label><div class="inp ph">例如：6958085574210</div></div>
+        <div class="fg"><label>工厂</label><div class="inp">东莞 ▾</div></div>
+        <div class="fg">
+          <label>所属客户 <span class="tag tag-new">新增</span></label>
+          <div class="picker">
+            <span class="chip">贝乐 <span class="x">×</span></span>
+            <span class="chip">海豚国际 <span class="x">×</span></span>
+            <span style="color:var(--text-3);font-size:13px">再选客户…</span>
+            <span class="caret">▾</span>
+          </div>
+          <div class="dropdown">
+            <div class="opt sel"><span class="ck"></span>贝乐</div>
+            <div class="opt sel"><span class="ck"></span>海豚国际</div>
+            <div class="opt"><span class="ck"></span>星辉玩具</div>
+            <div class="opt"><span class="ck"></span>万佳贸易</div>
+            <div class="hint">可多选；留空 = 不限制客户（所有客户都能选到这个 SKU）</div>
+          </div>
+        </div>
+        <div class="fg"><label>产品图片</label><div class="drop">点击选择 / 拖拽 / 粘贴图片</div></div>
+      </div>
+    </div>
+    <div>
+      <div class="lab">留空时的语义</div>
+      <div class="callout warn">
+        <b>不选任何客户 = 不限制</b>，而不是「谁都看不到」。<br>
+        这样上线当天，几百个存量 SKU 不用先全部挂好客户，下单页照常能搜到；<br>
+        谁家专属的 SKU 再逐个挂上客户即可，逐步收紧。
+      </div>
+      <div class="lab" style="margin-top:18px">编辑弹窗里的样子</div>
+      <div class="picker" style="max-width:380px">
+        <span class="chip">贝乐 <span class="x">×</span></span>
+        <span style="color:var(--text-3);font-size:13px">再选客户…</span>
+        <span class="caret">▾</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ③ 下单页 -->
+<div class="panel">
+  <h2><span class="num">3</span>下单 / 出货 / 备货 / 备货计划 —— 选产品时按客户过滤</h2>
+  <p class="note">四个页面的产品选择器是同一个组件，一处生效即全部生效。先选客户，再选产品；产品列表只列「属于该客户」或「未分配」的 SKU。</p>
+
+  <div class="two">
+    <div>
+      <div class="lab">客户 = 贝乐（选了客户 → 过滤）</div>
+      <div class="formgrid" style="grid-template-columns:1fr">
+        <div class="fg"><label>客户名称</label><div class="inp">贝乐 ▾</div></div>
+        <div class="fg">
+          <label>产品名称</label>
+          <div class="picker" style="min-height:40px">
+            <span style="color:var(--text-3);font-size:13px">搜索产品名称或69码…</span>
+            <span class="caret">▾</span>
+          </div>
+          <div class="dropdown">
+            <div class="opt"><span style="color:var(--success-600)">✓</span> 小熊毛绒玩具 20cm <span class="mono" style="margin-left:auto">贝乐</span></div>
+            <div class="opt"><span style="color:var(--success-600)">✓</span> 卡通抱枕 40×40 <span class="mono" style="margin-left:auto">贝乐 · 海豚</span></div>
+            <div class="opt"><span style="color:var(--text-3)">○</span> 恐龙玩偶 大号 <span class="mono" style="margin-left:auto">未分配</span></div>
+            <div class="hint">海豚国际专属的「小马挂件」不在列表里</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div>
+      <div class="lab">客户 = 海豚国际（同一个搜索词）</div>
+      <div class="formgrid" style="grid-template-columns:1fr">
+        <div class="fg"><label>客户名称</label><div class="inp">海豚国际 ▾</div></div>
+        <div class="fg">
+          <label>产品名称</label>
+          <div class="picker" style="min-height:40px">
+            <span style="color:var(--text-3);font-size:13px">搜索产品名称或69码…</span>
+            <span class="caret">▾</span>
+          </div>
+          <div class="dropdown">
+            <div class="opt"><span style="color:var(--success-600)">✓</span> 卡通抱枕 40×40 <span class="mono" style="margin-left:auto">贝乐 · 海豚</span></div>
+            <div class="opt"><span style="color:var(--success-600)">✓</span> 小马挂件 8cm <span class="mono" style="margin-left:auto">海豚国际</span></div>
+            <div class="opt"><span style="color:var(--text-3)">○</span> 恐龙玩偶 大号 <span class="mono" style="margin-left:auto">未分配</span></div>
+            <div class="hint">贝乐专属的「小熊毛绒玩具」不在列表里</div>
+          </div>
+        </div>
+      </div>
+      <div class="callout" style="margin-top:14px">
+        还没选客户时不过滤，列表与现在完全一致 —— 不存在「点进去发现搜不到东西」的意外。
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="panel" style="background:var(--surface)">
+  <h2 style="font-size:14px">实现要点（供你判断工作量）</h2>
+  <ul style="margin:8px 0 0;padding-left:20px;font-size:13px;color:var(--text)">
+    <li>新增关联表 <code>product_customer</code>（多对多）+ 一个迁移 <code>pg_standalone_085</code>，接在当前 head <code>084</code> 之后。</li>
+    <li>四个页面共用同一个搜索端点 <code>GET /aux/product-search</code>，加一个 <code>customer_id</code> 参数即可全覆盖；该端点有 Redis 缓存，缓存键要带上客户维度，否则会串结果。</li>
+    <li>产品新增/编辑/列表接口带上客户字段；改客户归属后要清搜索缓存，否则最长 5 分钟内列表还是旧的。</li>
+    <li>前端：新建一个客户多选控件（现有 <code>UiSelect</code> 是单选）；产品列表加一列 + 筛选。</li>
+    <li>本期只做前端过滤。后端硬校验（拦住 Excel 导入 / OCR 粘贴 / 直连接口绕过）另开任务。</li>
+  </ul>
+</div>
+
+</body>
+</html>

@@ -25,21 +25,24 @@ from fastapi_app.core.cache_keys import (
 )
 from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.services import product_service
+from fastapi_app.services.product_search_service import product_search_service
 
 # 首页无搜索时使用的缓存键（per_page=20 为端点默认值）
 _EXPECTED_KEY = build_cache_key(CacheNamespace.PRODUCT_LIST, 20)
 
 
 def _full_item(id_val: int, name: str) -> dict:
-    """与 Product.to_dict() 字段一致的完整商品 dict（9 字段）。
+    """与 Product.to_dict() 字段一致的完整商品 dict（10 字段，含 customers）。
 
     ProductListResponse.items 是 list[ProductResponse]，缺必填字段（initial_stock /
     current_stock）会在端点构造响应时抛 ValidationError，故假数据必须补全。
+    customers 由 product_service._load_customers_for_products 在服务层补上
+    （Product.to_dict 本身不含该字段）。
     """
     return {
         'id': id_val, 'name': name, 'barcode': None, 'price': 0.0,
         'image': None, 'factory': None, 'initial_stock': 0, 'current_stock': 0,
-        'create_time': None,
+        'create_time': None, 'customers': [],
     }
 
 
@@ -94,7 +97,7 @@ class TestListProductsCache:
         store, set_calls = fake_cache
         db_calls: list = []
 
-        async def fake_page(db, page=1, per_page=20, search=''):
+        async def fake_page(db, page=1, per_page=20, search='', **_kwargs):
             db_calls.append((page, per_page, search))
             return {
                 'items': list(_ITEMS),
@@ -122,7 +125,7 @@ class TestListProductsCache:
         _, _ = fake_cache
         items = [_full_item(1, 'A'), _full_item(2, 'B')]
 
-        async def fake_page(db, page=1, per_page=20, search=''):
+        async def fake_page(db, page=1, per_page=20, search='', **_kwargs):
             return {
                 'items': list(items),
                 'total': 2, 'page': page, 'per_page': per_page,
@@ -144,7 +147,7 @@ class TestListProductsCache:
         store, set_calls = fake_cache
         db_calls: list = []
 
-        async def fake_page(db, page=1, per_page=20, search=''):
+        async def fake_page(db, page=1, per_page=20, search='', **_kwargs):
             db_calls.append((page, per_page, search))
             return {'items': [], 'total': 0, 'page': page, 'per_page': per_page}
 
@@ -162,7 +165,7 @@ class TestListProductsCache:
         store, set_calls = fake_cache
         db_calls: list = []
 
-        async def fake_page(db, page=1, per_page=20, search=''):
+        async def fake_page(db, page=1, per_page=20, search='', **_kwargs):
             db_calls.append((page, per_page, search))
             return {'items': [], 'total': 0, 'page': page, 'per_page': per_page}
 
@@ -231,14 +234,22 @@ class TestProductListCacheInvalidation:
     def _spy_invalidation(self, monkeypatch):
         """记录 safe_delete_pattern 调用，并短路 cache_mgr 域失效（避免真实 Redis）"""
         recorded: list = []
+        search_invalidated: list = []
 
         async def fake_delete_pattern(pattern, context=""):
             recorded.append(pattern)
             return 0
 
+        async def fake_search_invalidate():
+            search_invalidated.append(True)
+
         monkeypatch.setattr(product_service, 'safe_delete_pattern', fake_delete_pattern)
         monkeypatch.setattr(product_service.cache_mgr, 'invalidate', AsyncMock())
+        # 产品搜索缓存的失效走搜索服务自己的 invalidate_cache()（域级失效覆盖不到
+        # product:search:*），故此处单独 spy，而不是复用 safe_delete_pattern
+        monkeypatch.setattr(product_search_service, 'invalidate_cache', fake_search_invalidate)
         self.recorded = recorded
+        self.search_invalidated = search_invalidated
 
     @staticmethod
     def _setup_create(mock_db):
@@ -259,11 +270,14 @@ class TestProductListCacheInvalidation:
         )
 
         callbacks = mock_db.info.get('post_commit_callbacks', [])
-        assert len(callbacks) == 1, '应注册恰好一个 post-commit 回调'
+        assert len(callbacks) == 2, '应注册两个 post-commit 回调（商品列表 + 产品搜索）'
         assert self.recorded == [], '注册阶段不得立即失效缓存'
+        assert self.search_invalidated == [], '注册阶段不得立即失效搜索缓存'
 
-        await callbacks[0]()
+        for callback in callbacks:
+            await callback()
         assert self.recorded == [PRODUCT_LIST_CACHE_PATTERN], '回调执行时必须失效 product:list:*'
+        assert self.search_invalidated == [True], '回调执行时必须失效产品搜索缓存'
 
     async def test_invalidation_deferred_until_commit(self, mock_db):
         """关键回归：post-commit 回调在提交前不得执行、提交后必须执行。

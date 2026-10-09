@@ -5,6 +5,7 @@
 """
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.database import get_async_db, get_async_read_db
@@ -19,7 +20,7 @@ from fastapi_app.services.auxiliary_service import (
     get_product_by_id,
     get_stockin_by_id,
 )
-from fastapi_app.shared_models import User
+from fastapi_app.shared_models import Customer, User
 
 
 class CacheClearResponse(BaseModel):
@@ -144,6 +145,8 @@ async def clear_cache(
 @router.get("/product-search", response_model=list[ProductSearchItem])
 async def product_search(
     q: str = Query('', max_length=100, description="搜索关键词"),
+    customer_id: int | None = Query(None, description="只看该客户可见的 SKU（属于该客户或未挂客户）"),
+    customer: str | None = Query(None, max_length=100, description="客户名称（与 customer_id 二选一）"),
     # 产品自动补全被三个页面共用：客户订单(order_manage)、出库管理(stockout_manage)、
     # 出货计划(production_plan_view)。原先只认 product_view（该码不在权限表里，只由
     # product_manage 经 manage→view 继承得来），按导航勾选的用户一律 403。
@@ -151,11 +154,28 @@ async def product_search(
         "product_view", "order_manage", "stockout_manage", "production_plan_view")),
     db: AsyncSession = Depends(get_async_read_db),
 ):
-    """产品搜索（支持名称、条码）——统一委托 ProductSearchService（与产品清单共用实现与缓存）"""
+    """产品搜索（支持名称、条码；可按客户过滤可见范围）
+
+    客户过滤口径见 services/product_visibility.py：**未挂客户的 SKU 对所有客户可见**。
+    下单 / 出货 / 备货 / 备货计划四个页面共用本端点，按客户过滤在此一处生效。
+    未选客户（不传 customer/customer_id）时不过滤，列表与改造前一致。
+    """
     if not q.strip():
         return []
     from fastapi_app.services.product_search_service import product_search_service
-    return await product_search_service.search_async_with_cache(db, q.strip(), limit=50)
+
+    resolved_customer_id = customer_id
+    if resolved_customer_id is None and customer and customer.strip():
+        resolved_customer_id = (await db.execute(
+            select(Customer.id).where(Customer.name == customer.strip())
+        )).scalar()
+        if resolved_customer_id is None:
+            # 客户名不存在 → 视为无可见 SKU，而不是「不过滤」：
+            # 后者会让一个拼错的客户名把全部 SKU 都放出来，与过滤目的相反。
+            return []
+
+    return await product_search_service.search_visible_to_customer_async_with_cache(
+        db, q.strip(), resolved_customer_id, limit=50)
 
 
 @router.get("/product-available-stock", response_model=ProductAvailableStockResponse)

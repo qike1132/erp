@@ -9,7 +9,7 @@ import hashlib
 import json
 import logging
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any, Generic, TypeVar
 
 from sqlalchemy import or_, select
@@ -82,8 +82,15 @@ class BaseSearchService(Generic[T], ABC):
         db: AsyncSession,
         keyword: str,
         status_filter: Any | None = None,
+        extra_conditions: Sequence[Any] | None = None,
     ):
-        """构建搜索查询（异步版本）"""
+        """构建搜索查询（异步版本）
+
+        Args:
+            extra_conditions: 调用方追加的额外 WHERE 条件（AND 组合）。
+                用于「可见性」这类与关键词无关的过滤（如按客户过滤产品），
+                避免子类覆写整个查询构建。
+        """
         model = self.get_model_class()
         query: Select = select(model)
 
@@ -96,6 +103,9 @@ class BaseSearchService(Generic[T], ABC):
             if keyword_conds:
                 conditions.append(or_(*keyword_conds))
 
+        if extra_conditions:
+            conditions.extend(extra_conditions)
+
         if conditions:
             query = query.where(*conditions)
 
@@ -107,18 +117,30 @@ class BaseSearchService(Generic[T], ABC):
         keyword: str,
         limit: int = 20,
         status_filter: Any | None = None,
+        extra_conditions: Sequence[Any] | None = None,
     ) -> list[dict]:
         """异步搜索，返回格式化后的 dict 列表"""
-        query = self.build_search_query_async(db, keyword, status_filter)
+        query = self.build_search_query_async(db, keyword, status_filter, extra_conditions)
         query = query.limit(limit)
         result = await db.execute(query)
         results = result.scalars().all()
         formatter = self.get_result_formatter()
         return [formatter(item) for item in results]
 
-    def _get_cache_key(self, keyword: str, limit: int, status_filter: Any | None = None) -> str:
-        """生成缓存键"""
-        params = f"{keyword}:{limit}:{status_filter}"
+    def _get_cache_key(
+        self,
+        keyword: str,
+        limit: int,
+        status_filter: Any | None = None,
+        cache_scope: str = "",
+    ) -> str:
+        """生成缓存键
+
+        Args:
+            cache_scope: 区分「同一关键词但过滤维度不同」的结果（如按客户过滤）。
+                不带它会串结果：甲客户先查后，乙客户会命中甲的缓存条目。
+        """
+        params = f"{keyword}:{limit}:{status_filter}:{cache_scope}"
         hash_val = hashlib.md5(params.encode(), usedforsecurity=False).hexdigest()[:12]
         return f"{self.cache_prefix}:search:{hash_val}"
 
@@ -128,15 +150,17 @@ class BaseSearchService(Generic[T], ABC):
         keyword: str,
         limit: int = 20,
         status_filter: Any | None = None,
+        extra_conditions: Sequence[Any] | None = None,
+        cache_scope: str = "",
     ) -> list[dict]:
         """带 Redis 缓存的异步搜索
 
         如果 cache_prefix 为空则跳过缓存，直接查询数据库。
         """
         if not self.cache_prefix:
-            return await self.search_async(db, keyword, limit, status_filter)
+            return await self.search_async(db, keyword, limit, status_filter, extra_conditions)
 
-        cache_key = self._get_cache_key(keyword, limit, status_filter)
+        cache_key = self._get_cache_key(keyword, limit, status_filter, cache_scope)
 
         cached = await safe_get(cache_key, context='搜索缓存')
         if cached is not None:
@@ -144,7 +168,7 @@ class BaseSearchService(Generic[T], ABC):
                 return json.loads(cached)
             return cached
 
-        results = await self.search_async(db, keyword, limit, status_filter)
+        results = await self.search_async(db, keyword, limit, status_filter, extra_conditions)
 
         await safe_set(
             cache_key,

@@ -30,6 +30,8 @@ class ProductCreate(BaseModel):
     image: str | None = Field(None, max_length=200, description='产品图片路径')
     factory: str | None = Field(None, max_length=50, description='所属工厂')
     initial_stock: int = Field(0, ge=0, le=100000, description='初始库存')
+    customer_ids: list[int] = Field(
+        default_factory=list, description='所属客户ID列表；留空 = 所有客户可见')
 
     @field_validator('image')
     @classmethod
@@ -56,6 +58,8 @@ class ProductUpdate(BaseModel):
     image: str | None = Field(None, max_length=200, description='产品图片路径')
     factory: str | None = Field(None, max_length=50, description='所属工厂')
     initial_stock: int | None = Field(None, ge=0, le=100000, description='初始库存')
+    customer_ids: list[int] | None = Field(
+        None, description='所属客户ID列表；None = 不改动归属，[] = 清空（回到所有客户可见）')
 
     @field_validator('image')
     @classmethod
@@ -73,6 +77,13 @@ class ProductUpdate(BaseModel):
         return _validate_factory(v)
 
 
+class ProductCustomerBrief(BaseModel):
+    """产品所属客户（列表/详情展示用）"""
+
+    id: int
+    name: str
+
+
 class ProductResponse(BaseModel):
     """产品响应"""
 
@@ -85,6 +96,7 @@ class ProductResponse(BaseModel):
     initial_stock: int
     current_stock: int
     create_time: datetime | str | None = None
+    customers: list[ProductCustomerBrief] = Field(default_factory=list)
 
     @field_validator('image', mode='after')
     @classmethod

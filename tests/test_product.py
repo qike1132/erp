@@ -82,21 +82,25 @@ class TestGetProductsPage:
     async def test_get_products_page_with_search(self, mock_async_db):
         """分页+搜索"""
         product = MagicMock()
+        product.id = 1
         product.to_dict.return_value = {'id': 1, 'name': '手机壳', 'barcode': 'CASE001'}
 
         data_result = MagicMock()
         data_result.scalars.return_value.all.return_value = [product]
 
+        # 第三次 execute 是客户归属查询（_load_customers_for_products）
         mock_async_db.execute = AsyncMock()
         mock_async_db.execute.side_effect = [
             MagicMock(scalar=MagicMock(return_value=1)),  # count
             data_result,  # data
+            MagicMock(all=MagicMock(return_value=[])),  # customers
         ]
 
         result = await get_products_page(mock_async_db, page=1, per_page=20, search='手机')
 
         assert result['total'] == 1
         assert len(result['items']) == 1
+        assert result['items'][0]['customers'] == []
 
     @pytest.mark.asyncio
     async def test_get_products_page_per_page_limits(self, mock_async_db):
@@ -276,13 +280,17 @@ class TestGetProductById:
     async def test_get_product_by_id_success(self, mock_async_db):
         """查询存在的产品"""
         product = MagicMock()
+        product.id = 1
         product.to_dict.return_value = {'id': 1, 'name': '产品A'}
         mock_async_db.get = AsyncMock(return_value=product)
+        # 详情会额外查一次客户归属（_load_customers_for_products）
+        mock_async_db.execute = AsyncMock(return_value=MagicMock(all=MagicMock(return_value=[])))
 
         result = await get_product_by_id(mock_async_db, 1)
 
         assert result['id'] == 1
         assert result['name'] == '产品A'
+        assert result['customers'] == []
 
     @pytest.mark.asyncio
     async def test_get_product_by_id_not_found(self, mock_async_db):

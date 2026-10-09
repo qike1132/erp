@@ -65,6 +65,7 @@ from fastapi_app.shared_models.packaging_record import PackagingRecord
 from fastapi_app.shared_models.pattern_maker import PatternMaker
 from fastapi_app.shared_models.permission import Permission
 from fastapi_app.shared_models.product import Product
+from fastapi_app.shared_models.product_customer import ProductCustomer
 from fastapi_app.shared_models.product_material import (
     MATERIAL_CATEGORIES,
     ProductAccessory,
@@ -144,6 +145,7 @@ __all__ = [
     'Permission',
     'Product',
     'ProductAccessory',
+    'ProductCustomer',
     'ProductFabric',
     'ProductMaterial',
     'ProductRole',

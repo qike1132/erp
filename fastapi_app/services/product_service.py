@@ -6,7 +6,7 @@
 import logging
 from collections.abc import Awaitable, Callable
 
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,9 +17,19 @@ from fastapi_app.core.redis_wrapper import safe_delete_pattern
 from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.core.validators import validate_not_empty
 from fastapi_app.services.bom_service import has_bom as product_has_bom  # noqa: F401
+from fastapi_app.services.product_visibility import unassigned_product, visible_to_customer
 from fastapi_app.services.signed_urls import strip_upload_signature
 from fastapi_app.shared.stock_concurrency import assert_stock_available, get_product_for_update
-from fastapi_app.shared_models import InventoryLog, Order, OrderItem, Product, StockIn, StockOut
+from fastapi_app.shared_models import (
+    Customer,
+    InventoryLog,
+    Order,
+    OrderItem,
+    Product,
+    ProductCustomer,
+    StockIn,
+    StockOut,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +64,63 @@ async def _invalidate_product_list_cache() -> None:
         await safe_delete_pattern(PRODUCT_LIST_CACHE_PATTERN, context="商品列表缓存")
     except Exception:  # broad-except: 缓存失效失败不得影响业务主流程
         logger.warning("商品列表缓存失效失败", exc_info=True)
+
+
+async def _invalidate_product_search_cache() -> None:
+    """失效产品搜索缓存（product:search:*）。
+
+    客户归属变化会改变「哪些客户能搜到这个 SKU」，产品改名/改条码会改变关键词命中，
+    两者都必须清搜索缓存，否则最长 5 分钟内下单页仍按旧归属返回结果。
+
+    注意：域级失效覆盖不到它 —— _DOMAIN_PATTERN_MAP 里 PRODUCT 域是 `products:*`
+    （复数），SEARCH 域是 `search:*`（无 product 前缀），都匹配不到 `product:search:*`。
+    故此处显式清，并沿用 post-commit 时机（与商品列表缓存同因：提交前失效会被并发读
+    回写脏数据）。
+    """
+    try:
+        from fastapi_app.services.product_search_service import product_search_service
+        await product_search_service.invalidate_cache()
+    except Exception:  # broad-except: 缓存失效失败不得影响业务主流程
+        logger.warning("产品搜索缓存失效失败", exc_info=True)
+
+
+async def _sync_product_customers(db: AsyncSession, product_id: int, customer_ids: list[int]) -> None:
+    """整体替换某产品的客户归属（先删后插）。
+
+    传空列表 = 清空归属，产品回到「所有客户可见」。
+
+    Raises:
+        ValueError: 含不存在的客户 ID（转 400，而不是让外键违例变成 500）。
+    """
+    unique_ids = list(dict.fromkeys(customer_ids))
+    if unique_ids:
+        found = set((await db.execute(
+            select(Customer.id).where(Customer.id.in_(unique_ids))
+        )).scalars().all())
+        missing = [cid for cid in unique_ids if cid not in found]
+        if missing:
+            raise ValueError(f'客户不存在（ID: {", ".join(str(m) for m in missing)}）')
+
+    await db.execute(delete(ProductCustomer).where(ProductCustomer.product_id == product_id))
+    for customer_id in unique_ids:
+        db.add(ProductCustomer(product_id=product_id, customer_id=customer_id))
+    await db.flush()
+
+
+async def _load_customers_for_products(db: AsyncSession, product_ids: list[int]) -> dict[int, list[dict]]:
+    """一次查询取回 {product_id: [{id, name}, ...]}，避免列表页逐行 N+1。"""
+    if not product_ids:
+        return {}
+    rows = (await db.execute(
+        select(ProductCustomer.product_id, Customer.id, Customer.name)
+        .join(Customer, Customer.id == ProductCustomer.customer_id)
+        .where(ProductCustomer.product_id.in_(product_ids))
+        .order_by(Customer.name)
+    )).all()
+    grouped: dict[int, list[dict]] = {}
+    for product_id, customer_id, name in rows:
+        grouped.setdefault(product_id, []).append({'id': customer_id, 'name': name})
+    return grouped
 
 
 class ProductDeleteError(Exception):
@@ -167,24 +234,46 @@ async def get_product_barcode_map(db: AsyncSession, limit: int | None = None, ba
     return result_map
 
 
-async def get_products_page(db: AsyncSession, page: int = 1, per_page: int = 20, search: str = '') -> dict:
-    """获取产品列表（分页+搜索），避免产品数过大时全量加载"""
+async def get_products_page(db: AsyncSession, page: int = 1, per_page: int = 20, search: str = '',
+                            customer_id: int | None = None,
+                            only_unassigned: bool = False) -> dict:
+    """获取产品列表（分页+搜索+客户归属筛选），避免产品数过大时全量加载
+
+    Args:
+        customer_id: 只看该客户可见的 SKU（属于该客户，或未挂客户）；None = 不过滤。
+        only_unassigned: 只看未挂客户的 SKU（补齐存量归属用），优先于 customer_id。
+    """
     per_page = min(max(1, per_page), 200)
-    query = select(Product)
-    count_query = select(func.count(Product.id))
+    conditions = []
     if search:
         escaped = escape_like(search)
-        search_filter = or_(Product.name.ilike(f'%{escaped}%', escape='\\'), Product.barcode.ilike(f'%{escaped}%', escape='\\'))
-        query = query.where(search_filter)
-        count_query = count_query.where(search_filter)
+        conditions.append(or_(
+            Product.name.ilike(f'%{escaped}%', escape='\\'),
+            Product.barcode.ilike(f'%{escaped}%', escape='\\'),
+        ))
+    if only_unassigned:
+        conditions.append(unassigned_product())
+    elif customer_id is not None:
+        conditions.append(visible_to_customer(customer_id))
+
+    query = select(Product)
+    count_query = select(func.count(Product.id))
+    if conditions:
+        query = query.where(*conditions)
+        count_query = count_query.where(*conditions)
+
     total = (await db.execute(count_query)).scalar() or 0
     result = await db.execute(
         query.order_by(Product.create_time.desc())
         .offset((page - 1) * per_page).limit(per_page)
     )
     products = result.scalars().all()
+    items = [p.to_dict() for p in products]
+    customers_by_product = await _load_customers_for_products(db, [p.id for p in products])
+    for item in items:
+        item['customers'] = customers_by_product.get(item['id'], [])
     return {
-        'items': [p.to_dict() for p in products],
+        'items': items,
         'total': total,
         'page': page,
         'per_page': per_page,
@@ -194,7 +283,8 @@ async def get_products_page(db: AsyncSession, page: int = 1, per_page: int = 20,
 async def create_product(db: AsyncSession, name: str, barcode: str | None,
                          image: str | None, initial_stock: int,
                          price: float | None = None,
-                         factory: str | None = None) -> dict:
+                         factory: str | None = None,
+                         customer_ids: list[int] | None = None) -> dict:
     """
     创建产品
 
@@ -203,6 +293,7 @@ async def create_product(db: AsyncSession, name: str, barcode: str | None,
     - 产品名称唯一（不区分大小写）
     - 初始库存 >= 0
     - 初始库存 > 0 时记录 InventoryLog
+    - customer_ids 非空时挂上客户归属；留空 = 所有客户可见
     """
     validate_not_empty(name, "产品名称")
     if initial_stock < 0:
@@ -245,10 +336,14 @@ async def create_product(db: AsyncSession, name: str, barcode: str | None,
         )
         db.add(log)
 
+    if customer_ids:
+        await _sync_product_customers(db, product.id, customer_ids)
+
     await db.flush()
     await db.refresh(product)
     await cache_mgr.invalidate(InvalidationStrategy.DOMAIN, CacheDomain.ORDER_AND_INVENTORY | CacheDomain.PRODUCT | CacheDomain.STOCKIN)
     _schedule_post_commit(db, _invalidate_product_list_cache)
+    _schedule_post_commit(db, _invalidate_product_search_cache)
     logger.info(f'产品添加成功：{name}，初始库存：{initial_stock}')
     return product.to_dict()
 
@@ -257,7 +352,8 @@ async def update_product(db: AsyncSession, product_id: int, name: str | None,
                          barcode: str | None, image: str | None,
                          initial_stock: int | None,
                          price: float | None = None,
-                         factory: str | None = None) -> dict:
+                         factory: str | None = None,
+                         customer_ids: list[int] | None = None) -> dict:
     """
     更新产品
 
@@ -265,6 +361,7 @@ async def update_product(db: AsyncSession, product_id: int, name: str | None,
     - 名称唯一性检查（排除自身）
     - 初始库存变更时调整 current_stock 并记录 InventoryLog；负库存判定收口到统一入口
       assert_stock_available（策略开关见 ALLOW_NEGATIVE_STOCK），不再内联比较
+    - customer_ids 为 None 时不动归属；传列表则整体替换（空列表 = 清空，回到所有客户可见）
     """
     product = await get_product_for_update(db, product_id)
     if not product:
@@ -316,6 +413,9 @@ async def update_product(db: AsyncSession, product_id: int, name: str | None,
         )
         db.add(log)
 
+    if customer_ids is not None:
+        await _sync_product_customers(db, product_id, customer_ids)
+
     try:
         await db.flush()
     except IntegrityError as e:
@@ -325,6 +425,7 @@ async def update_product(db: AsyncSession, product_id: int, name: str | None,
     await db.refresh(product)
     await cache_mgr.invalidate(InvalidationStrategy.DOMAIN, CacheDomain.ORDER_AND_INVENTORY | CacheDomain.PRODUCT | CacheDomain.STOCKIN)
     _schedule_post_commit(db, _invalidate_product_list_cache)
+    _schedule_post_commit(db, _invalidate_product_search_cache)
     logger.info(f'产品编辑成功：{product.name}')
     return product.to_dict()
 
@@ -403,6 +504,7 @@ async def delete_product(db: AsyncSession, product_id: int) -> None:
         raise ProductHasRelatedRecordsError(product_name) from e
     await cache_mgr.invalidate(InvalidationStrategy.DOMAIN, CacheDomain.ORDER_AND_INVENTORY | CacheDomain.PRODUCT | CacheDomain.STOCKIN)
     _schedule_post_commit(db, _invalidate_product_list_cache)
+    _schedule_post_commit(db, _invalidate_product_search_cache)
     logger.info(f'产品删除成功：{product.name}')
 
 
@@ -411,7 +513,9 @@ async def get_product_by_id(db: AsyncSession, product_id: int) -> dict:
     product = await db.get(Product, product_id)
     if not product:
         raise ValueError('产品不存在')
-    return product.to_dict()
+    data = product.to_dict()
+    data['customers'] = (await _load_customers_for_products(db, [product.id])).get(product.id, [])
+    return data
 
 
 async def search_products(db: AsyncSession, query: str, *, search_service=None) -> list[dict]:

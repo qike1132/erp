@@ -3969,7 +3969,7 @@
           "产品管理"
         ],
         "summary": "List Products",
-        "description": "产品列表（分页+缓存+搜索）\n\n仅「首页且无搜索」走缓存（TTL 60s），避免缓存键基数爆炸；\n带搜索或翻页直接查库。写操作经 product_service._invalidate_product_list_cache 失效。",
+        "description": "产品列表（分页+缓存+搜索+客户归属筛选）\n\n仅「首页且无搜索、无客户筛选」走缓存（TTL 60s），避免缓存键基数爆炸；\n带搜索、翻页或客户筛选直接查库。写操作经 product_service._invalidate_product_list_cache 失效。",
         "operationId": "list_products_api_v1_products_list_get",
         "parameters": [
           {
@@ -4006,6 +4006,36 @@
               "title": "Search"
             },
             "description": "搜索产品名称或69码"
+          },
+          {
+            "name": "customer_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "只看该客户可见的 SKU",
+              "title": "Customer Id"
+            },
+            "description": "只看该客户可见的 SKU"
+          },
+          {
+            "name": "only_unassigned",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "只看未挂客户的 SKU",
+              "default": false,
+              "title": "Only Unassigned"
+            },
+            "description": "只看未挂客户的 SKU"
           }
         ],
         "responses": {
@@ -11874,7 +11904,7 @@
           "辅助接口"
         ],
         "summary": "Product Search",
-        "description": "产品搜索（支持名称、条码）——统一委托 ProductSearchService（与产品清单共用实现与缓存）",
+        "description": "产品搜索（支持名称、条码；可按客户过滤可见范围）\n\n客户过滤口径见 services/product_visibility.py：**未挂客户的 SKU 对所有客户可见**。\n下单 / 出货 / 备货 / 备货计划四个页面共用本端点，按客户过滤在此一处生效。\n未选客户（不传 customer/customer_id）时不过滤，列表与改造前一致。",
         "operationId": "product_search_api_v1_aux_product_search_get",
         "parameters": [
           {
@@ -11889,6 +11919,43 @@
               "title": "Q"
             },
             "description": "搜索关键词"
+          },
+          {
+            "name": "customer_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "只看该客户可见的 SKU（属于该客户或未挂客户）",
+              "title": "Customer Id"
+            },
+            "description": "只看该客户可见的 SKU（属于该客户或未挂客户）"
+          },
+          {
+            "name": "customer",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 100
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "客户名称（与 customer_id 二选一）",
+              "title": "Customer"
+            },
+            "description": "客户名称（与 customer_id 二选一）"
           }
         ],
         "responses": {
@@ -30450,6 +30517,14 @@
             "title": "Initial Stock",
             "description": "初始库存",
             "default": 0
+          },
+          "customer_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Customer Ids",
+            "description": "所属客户ID列表；留空 = 所有客户可见"
           }
         },
         "type": "object",
@@ -30458,6 +30533,25 @@
         ],
         "title": "ProductCreate",
         "description": "创建产品请求"
+      },
+      "ProductCustomerBrief": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "ProductCustomerBrief",
+        "description": "产品所属客户（列表/详情展示用）"
       },
       "ProductInfoResponse": {
         "properties": {
@@ -30602,6 +30696,13 @@
               }
             ],
             "title": "Create Time"
+          },
+          "customers": {
+            "items": {
+              "$ref": "#/components/schemas/ProductCustomerBrief"
+            },
+            "type": "array",
+            "title": "Customers"
           }
         },
         "type": "object",
@@ -30780,6 +30881,21 @@
             ],
             "title": "Initial Stock",
             "description": "初始库存"
+          },
+          "customer_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer Ids",
+            "description": "所属客户ID列表；None = 不改动归属，[] = 清空（回到所有客户可见）"
           }
         },
         "type": "object",

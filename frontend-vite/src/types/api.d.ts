@@ -1914,6 +1914,12 @@ export interface ProductCreate {
   image?: string | null
   factory?: string | null
   initial_stock?: number
+  customer_ids?: Array<number>
+}
+
+export interface ProductCustomerBrief {
+  id: number
+  name: string
 }
 
 export interface ProductInfoResponse {
@@ -1940,6 +1946,7 @@ export interface ProductResponse {
   initial_stock: number
   current_stock: number
   create_time?: string | null
+  customers?: Array<ProductCustomerBrief>
 }
 
 export interface ProductSearchItem {
@@ -1969,6 +1976,7 @@ export interface ProductUpdate {
   image?: string | null
   factory?: string | null
   initial_stock?: number | null
+  customer_ids?: Array<number> | null
 }
 
 export interface ProductionPlanActionResponse {

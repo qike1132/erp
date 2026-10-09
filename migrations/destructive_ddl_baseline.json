@@ -535,6 +535,9 @@
     "migrations/versions/pg_standalone_085_add_user_department.py": [
       "execute:ALTER TABLE \"user\" DROP COLUMN IF EXISTS department"
     ],
+    "migrations/versions/pg_standalone_086_product_customer_link.py": [
+      "execute:DROP TABLE IF EXISTS product_customer"
+    ],
     "migrations/versions/rebuild_po_dedup_index.py": [
       "execute:DROP INDEX IF EXISTS uq_po_pending_dedup"
     ],

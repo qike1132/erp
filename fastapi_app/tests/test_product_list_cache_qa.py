@@ -57,6 +57,7 @@ _FULL_ITEM = {
     'initial_stock': 3,
     'current_stock': 5,
     'create_time': '2026-01-01 00:00:00',
+    'customers': [],
 }
 
 # 签发把 image 变成带 ?st=<到期秒>&s=<摘要> 的限时 URL（OPT-19）。st 取自 time.time()，
@@ -288,7 +289,7 @@ class TestResponseStructureConsistency:
         """真实缓存层下：二次请求命中缓存，响应 JSON 与首次（回源）逐字节一致"""
         db_calls = []
 
-        async def fake_page(db, page=1, per_page=20, search=''):
+        async def fake_page(db, page=1, per_page=20, search='', **_kwargs):
             db_calls.append((page, per_page, search))
             return {'items': [_FULL_ITEM], 'total': 1, 'page': page, 'per_page': per_page}
 
@@ -491,7 +492,7 @@ class TestCoverageGapsAndStampede:
         冷缓存下 N 个并发首页请求会各查一次 DB（N 次），非 1 次。"""
         db_calls = []
 
-        async def fake_page(db, page=1, per_page=20, search=''):
+        async def fake_page(db, page=1, per_page=20, search='', **_kwargs):
             db_calls.append(1)
             await asyncio.sleep(0.01)  # 模拟 DB 往返，放大并发窗口
             return {'items': [_FULL_ITEM], 'total': 1, 'page': page, 'per_page': per_page}
