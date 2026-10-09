@@ -113,3 +113,50 @@ async def test_inventory_balance_nets_order_deletion_rollback(db, monkeypatch):
     rows = [r for r in result['inventory_data'] if r['customer'] == '抵扣回滚结余客户']
     assert rows, '库存页应包含该客户行'
     assert rows[0]['inventory_balance'] == 0
+
+
+async def test_inventory_balance_nets_returns(db, monkeypatch):
+    """退货回补（退货）与取消（退货取消）都要计入已出货净额，且两处口径一致。
+
+    回归 2026-10-08：退货 2500 后「库存」列纹丝不动（shipped_net 不含退货类型）。
+    递进断言——旧口径在第二步会停在 -5000，从而暴露漏项。
+    """
+    product = Product(name='退货结余产品', barcode='INV-BAL-004', current_stock=0, initial_stock=0)
+    db.add(product)
+    await db.flush()
+    # 一条订单让 /stock 页出现该产品行（CTE 只输出 has_stockin/has_order 且 total_qty>0 的行）
+    db.add(Order(
+        order_no='INV-BAL-ORD-3', customer='退货结余客户', product_id=product.id,
+        quantity=5000, order_date=datetime.now(UTC), status='待备货',
+    ))
+    db.add(InventoryLog(
+        product_id=product.id, product_name=product.name, product_barcode='INV-BAL-004',
+        change_type='出库', change_quantity=-5000,
+    ))
+    await db.flush()
+    assert await svc.get_inventory_balance(db, product.id) == -5000
+
+    # 退货 2500：已出货净额 −5000 → −2500，结余随之 +2500
+    db.add(InventoryLog(
+        product_id=product.id, product_name=product.name, product_barcode='INV-BAL-004',
+        change_type='退货', change_quantity=2500,
+    ))
+    await db.flush()
+    assert await svc.get_inventory_balance(db, product.id) == -2500
+
+    # /stock 页 CTE 同口径
+    monkeypatch.setattr(svc, '_get_all_customers', svc._get_all_customers.__wrapped__)
+    result = await svc.get_inventory_paginated.__wrapped__(
+        db, search_customer='退货结余客户', search_product='退货结余产品', page=1, per_page=50,
+    )
+    rows = [r for r in result['inventory_data'] if r['customer'] == '退货结余客户']
+    assert rows, '库存页应包含该客户行'
+    assert rows[0]['inventory_balance'] == -2500
+
+    # 取消该退货：冲回 −2500，回到 −5000
+    db.add(InventoryLog(
+        product_id=product.id, product_name=product.name, product_barcode='INV-BAL-004',
+        change_type='退货取消', change_quantity=-2500,
+    ))
+    await db.flush()
+    assert await svc.get_inventory_balance(db, product.id) == -5000
