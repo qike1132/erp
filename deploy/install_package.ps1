@@ -501,7 +501,9 @@ try {
   $brokerConf = Join-Path $TargetDir 'config\redis-broker.conf'
   if(-not (Test-Path $brokerConf)){ Write-Fail "缺 $brokerConf"; exit 1 }
   New-DeployRedisConf $brokerConf $brokerConf 'erp-redis-broker' $RedisDir
-  $authArg = if($redisPw){ "--requirepass $redisPw" } else { '' }
+  # 口令加引号：不带引号时含空格/特殊字符的口令会被 NSSM 拆成多个参数，
+  # requirepass 只吃到第一段，实际口令与应用侧 .env 不一致（连不上）。
+  $authArg = if($redisPw){ ('--requirepass "{0}"' -f ($redisPw -replace '"','\"')) } else { '' }
 
   # 先装 Redis（erp-prod/arq 依赖其存在——SCM 拒绝依赖不存在的服务）
   Install-NssmService $Nssm @{Name='erp-redis';Application=$redisExe;Parameters=("$cacheConf $authArg").Trim();Directory=$RedisDir;Stdout=(Join-Path $logDir 'erp-redis.log');Stderr=(Join-Path $logDir 'erp-redis.log')}

@@ -18,6 +18,14 @@ function Read-EnvMap([string]$Path){
     $t=$line.Trim()
     if($t -match '^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$'){
       $v=$Matches[2].Trim()
+      # 剥掉「值后跟空白+#」的行内注释。只在不带引号的值上做：
+      # 带引号的值按整串保留（口令里含 # 合法）。
+      if($v -notmatch '^["''']'){
+        $hashIdx=$v.IndexOf(' #')
+        if($hashIdx -ge 0){ $v=$v.Substring(0,$hashIdx).Trim() }
+        elseif($v -eq '#'){ $v='' }
+        elseif($v.StartsWith('#')){ $v='' }
+      }
       if($v.Length -ge 2 -and (($v[0] -eq '"' -and $v[-1] -eq '"') -or ($v[0] -eq "'" -and $v[-1] -eq "'"))){ $v=$v.Substring(1,$v.Length-2) }
       $map[$Matches[1]]=$v
     }
