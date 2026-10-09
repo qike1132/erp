@@ -139,6 +139,9 @@ export const plushCutePT: PrimeVuePTOptions = {
         'px-3 py-3',
         'text-xs font-semibold text-text-secondary',
         'uppercase tracking-wider',
+        // 中文表头（2~4 字）在窄容器下会被 auto 列宽折成两行（/product「产品价格」「工厂」，
+        // 2026-10-09），全站表头一律单行 —— 列宽交给各视图的 width 定义分配。
+        'whitespace-nowrap',
         'bg-surface',
         'border-b-2 border-border',
         'text-center',

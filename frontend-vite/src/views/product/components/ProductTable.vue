@@ -135,13 +135,13 @@ function onSearchInput(q: string) {
 
 /** UiDataTable 列定义 */
 const productColumns: TableColumn[] = [
-  { field: 'image', header: '产品图片', align: 'center' },
+  { field: 'image', header: '产品图片', align: 'center', width: '120px' },
   { field: 'name', header: '产品名称', align: 'left' },
-  { field: 'barcode', header: '69码', align: 'center' },
-  { field: 'price', header: '产品价格', align: 'center' },
-  { field: 'factory', header: '工厂', align: 'center' },
-  { field: 'customers', header: '客户', align: 'left' },
-  { field: 'actions', header: '操作', align: 'center' },
+  { field: 'barcode', header: '69码', align: 'center', width: '110px' },
+  { field: 'price', header: '产品价格', align: 'center', width: '96px' },
+  { field: 'factory', header: '工厂', align: 'center', width: '80px' },
+  { field: 'customers', header: '客户', align: 'left', width: '140px' },
+  { field: 'actions', header: '操作', align: 'center', width: '132px' },
 ]
 
 /** UiDataTable 分页变化处理（PrimeVue page 为 0 索引） */
@@ -180,6 +180,16 @@ function handleImageError(row: Product) {
   display: flex;
   gap: 8px;
   align-items: center;
+}
+/* 客户筛选与 UiSearchInput 并排等高：UiSelect 基础样式(min-height:44px/字15px)比搜索框
+   (py-2.5/字14px)高 2~3px、大 1 号，2026-10-09 用户报不齐。试点：仅 /product 收口。 */
+.pd-col-actions :deep(.ui-select-input) {
+  min-height: 40px;
+  height: 40px;
+  padding: 0 2.5rem 0 0.75rem;
+  font-size: 13.5px;
+  line-height: 1;
+  border-radius: 10px;
 }
 .pd-col-scroll {
   flex: 1;
