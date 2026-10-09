@@ -451,8 +451,10 @@ async def get_inventory_balance(db: AsyncSession, product_id: int) -> int:
 
     口径与 get_inventory_paginated 的 CTE 逐字一致：包装部入库取
     daily_production_record 中 department='packaging' 的 quantity 之和，
-    已出货取 inventory_log 出库三型 + 订单删除回滚（抵扣回滚/抵扣回滚(审批)）
-    + 退货（退货/退货取消）的 change_quantity 之和（出库为负数，故相加即净流出）。
+    已出货取 inventory_log 出库三型 + 退货（退货/退货取消）的 change_quantity
+    之和（出库为负数，故相加即净流出）。不含抵扣三型（订单抵扣/取消抵扣/抵扣回滚）：
+    抵扣期间两侧对称净影响为零，而删单时的「抵扣回滚」若计入、对应的「订单抵扣」
+    却从未计入，结余会虚高回滚量（Round16 核实），故抵扣类整体不进结余。
     供出货前的库存闸门复用同一口径，避免另起一套。
 
     注意：该指标是**产品级**的，不含客户维度 —— /stock 页同一产品在不同
@@ -467,7 +469,7 @@ async def get_inventory_balance(db: AsyncSession, product_id: int) -> int:
     shipped_net = (await db.execute(
         select(func.coalesce(func.sum(InventoryLog.change_quantity), 0)).where(
             InventoryLog.change_type.in_(
-                ('出库', '出库修改', '出库删除', '抵扣回滚', '抵扣回滚(审批)',
+                ('出库', '出库修改', '出库删除',
                  '退货', '退货取消')),
             InventoryLog.product_id == product_id,
         )
@@ -617,14 +619,14 @@ filtered AS (
         GROUP BY product_id
     ) pprod ON pprod.product_id = ic.product_id
     LEFT JOIN (
-        -- 出货台账（inventory_log，出库为负数，故求和即净流出）：出货三型 + 订单删除回滚 + 退货。
-        -- 抵扣回滚/抵扣回滚(审批)：删订单会删掉抵扣型 stock_out 并写一条抵扣回滚冲抵，
-        --   漏掉它则原「出库」日志变成幽灵出货，结余显负（2026-10-08 实测）。
+        -- 出货台账（inventory_log，出库为负数，故求和即净流出）：出货三型 + 退货。
+        -- 抵扣三型（订单抵扣/取消抵扣/抵扣回滚）不进结余：抵扣期间两侧对称净影响为零，
+        --   删单时的「抵扣回滚」若计入而「订单抵扣」从未计入，结余虚高回滚量（Round16 核实）。
         -- 退货/退货取消：退货回补 +qty、取消再冲回 −qty；漏掉则结余不随退货变动
         --   （2026-10-08 实测：退货 2500 后结余纹丝不动）。
         SELECT product_id, SUM(change_quantity) AS shipped_net
         FROM inventory_log
-        WHERE change_type IN ('出库', '出库修改', '出库删除', '抵扣回滚', '抵扣回滚(审批)',
+        WHERE change_type IN ('出库', '出库修改', '出库删除',
                               '退货', '退货取消')
               AND product_id IS NOT NULL
         GROUP BY product_id

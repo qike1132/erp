@@ -21,8 +21,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.cache_invalidation import cache_mgr, schedule_post_commit_invalidation
-from fastapi_app.core.domain_events import DomainEvent, DomainEventType
-from fastapi_app.core.domain_events import publish_with_retry as publish_domain_event
+from fastapi_app.core.domain_events import DomainEvent, DomainEventType, schedule_post_commit_domain_event
 from fastapi_app.core.exception_handler import safe_publish_event
 from fastapi_app.services.notification_service import StockEvent
 from fastapi_app.services.stock_common import _parse_date_preserve_time, guard_stockout_deletion
@@ -186,10 +185,11 @@ async def create_stockout(db: AsyncSession, product_id: int, quantity: int, cust
 
     # 领域事件总线：出库单创建 → 发布 STOCK_OUT_CREATED 事件，供跨域订阅者消费
     # 采购计划重算与缓存失效由 purchase_plan_service 的事件处理器异步执行，解耦循环依赖
-    # publish_with_retry 内部已处理重试与错误日志，无需外层 try/except
+    # 提交后发布：订阅者（采购计划 FIFO 重算）用独立 session 读库，
+    # 提交前发布会读不到本次出货行，按旧数据算错并落库
     plan_month = stockout_date.strftime('%Y-%m') if stockout_date else ''
     product_name = product.name if product is not None else ''
-    await publish_domain_event(DomainEvent(
+    schedule_post_commit_domain_event(db, DomainEvent(
         event_type=DomainEventType.STOCK_OUT_CREATED,
         domain='stock',
         payload={
@@ -233,8 +233,9 @@ async def update_stockout(db: AsyncSession, stockout_id: int, new_quantity: int,
         await _publish_shipment_completed_events([shipment_completed])
 
     # 领域事件总线：出库单更新 → 发布 STOCK_OUT_UPDATED 事件，触发采购计划缓存失效（异步）
+    # 提交后发布（同 create_stockout：订阅者用独立 session 读库）
     plan_month = stockout_obj.stockout_date.strftime('%Y-%m') if stockout_obj.stockout_date else ''
-    await publish_domain_event(DomainEvent(
+    schedule_post_commit_domain_event(db, DomainEvent(
         event_type=DomainEventType.STOCK_OUT_UPDATED,
         domain='stock',
         payload={
@@ -281,8 +282,9 @@ async def delete_stockout(db: AsyncSession, stockout_id: int, operator_id: int |
         await safe_publish_event(stock_service.publish_stock_event, StockEvent.STOCK_CHANGED, {'product_id': stockout_obj.product_id, 'product_name': product.name, 'change_type': '出库删除', 'quantity': -deleted_quantity, 'current_stock': product.current_stock}, context="出库删除事件发布")
 
     # 领域事件总线：出库单删除 → 发布 STOCK_OUT_DELETED 事件，触发采购计划重算与缓存失效（异步）
+    # 提交后发布（同 create_stockout：订阅者用独立 session 读库）
     plan_month = stockout_obj.stockout_date.strftime('%Y-%m') if stockout_obj.stockout_date else ''
-    await publish_domain_event(DomainEvent(
+    schedule_post_commit_domain_event(db, DomainEvent(
         event_type=DomainEventType.STOCK_OUT_DELETED,
         domain='stock',
         payload={

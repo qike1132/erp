@@ -82,17 +82,20 @@ async def test_inventory_balance_zero_when_never_packaged(db, monkeypatch):
     assert await svc.get_inventory_balance(db, product.id) == 0
 
 
-async def test_inventory_balance_nets_order_deletion_rollback(db, monkeypatch):
-    """订单删除写「抵扣回滚」冲抵原「出库」，结余必须净掉它。
+async def test_inventory_balance_excludes_deduction_types(db, monkeypatch):
+    """抵扣三型不进结余（Round16 口径修正）。
 
-    回归 2026-10-08：抵扣型出库 -10000 + 对应抵扣回滚 +10000、无包装入库时，
-    旧口径只统计「出库三型」→ 结余显 -10000（幽灵出货）。现应净为 0。
+    Round16 核实：真实抵扣路径写的是「订单抵扣」(−) 而非「出库」，
+    且「取消抵扣」(+) 与之对称；删单时写「抵扣回滚」(+)/「抵扣回滚(审批)」(+)
+    ——若回滚计入而「订单抵扣」从未计入，结余虚高回滚量。故抵扣三型整体排除：
+    抵扣期间结余不变，删单回滚也不再改变结余。
     同时覆盖闸门函数与 /stock 页 CTE 两条口径。
     """
     product = Product(name='抵扣回滚结余产品', barcode='INV-BAL-003', current_stock=0, initial_stock=0)
     db.add(product)
     await db.flush()
-    for change_type, quantity in (('出库', -10000), ('抵扣回滚', 10000)):
+    # 真实抵扣生命周期：下单抵扣 −10000 → 审批删单回滚 +10000
+    for change_type, quantity in (('订单抵扣', -10000), ('抵扣回滚(审批)', 10000)):
         db.add(InventoryLog(
             product_id=product.id, product_name=product.name, product_barcode='INV-BAL-003',
             change_type=change_type, change_quantity=quantity,
@@ -104,6 +107,7 @@ async def test_inventory_balance_nets_order_deletion_rollback(db, monkeypatch):
     ))
     await db.flush()
 
+    # 抵扣与回滚都不影响结余：0（无包装入库、无真实出货）
     assert await svc.get_inventory_balance(db, product.id) == 0
 
     monkeypatch.setattr(svc, '_get_all_customers', svc._get_all_customers.__wrapped__)

@@ -54,8 +54,13 @@ async def export_report_task(ctx, report_type: str, filters: dict, user_id: int)
                 status = filters.get('status', '')
                 start_date = filters.get('start_date', '')
                 end_date = filters.get('end_date', '')
-                logs, stats = get_all_logs_data(session, report_type, customer=customer, product=product, status=status, start_date=start_date, end_date=end_date)
-                total_count = len(logs)
+                # 工厂隔离：入队端按操作者注入，任务端透传（Round16，与同步导出同口径）
+                factory = filters.get('factory', '')
+                logs, stats = get_all_logs_data(session, report_type, customer=customer, product=product, status=status, start_date=start_date, end_date=end_date, factory=factory)
+                # 超限判定用 stats 的 total_count（统计查询无行数上限）：明细查询在
+                # _MAX_EXPORT_ROWS 截断，len(logs) 恒 ≤10000，`len(logs) > 10000`
+                # 永不触发（Round16：fail-closed 原是死代码，超量被静默截成 10000 行）
+                total_count = int(stats.get('total_count', 0) or 0)
                 # 第十轮审计：原「先全量读入内存 → 截断 10000」，截断发生在内存峰值之后，
                 # 防不住超量导出撑爆 worker；且静默截断让用户拿到不完整报表而不自知。
                 # 改为 fail-closed：超限直接失败并引导缩小范围（与 export_limits 门禁同语义）。

@@ -94,8 +94,8 @@ EXPECTED_CALL_SITES = {
 # 每一条都标注了它是「纯增量（不适用本任务）」还是「写入侧（负向由统一入口覆盖）」。
 DOCUMENTED_WRITES = {
     "fastapi_app/services/approval_service.py": [
-        # 写入侧：net_change 可正可负，负向由同函数内 assert_stock_available 覆盖
-        "product.current_stock += net_change",
+        # 写入侧：total_deducted 可正可负，负向由同函数内 assert_stock_available 覆盖
+        "product.current_stock += total_deducted",
     ],
     "fastapi_app/services/order/commands.py": [
         # 写入侧：total_deducted 可正可负，负向由同函数内 assert_stock_available 覆盖

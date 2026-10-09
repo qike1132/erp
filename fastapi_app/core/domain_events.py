@@ -114,6 +114,38 @@ async def _broadcast(event: DomainEvent) -> bool:
         return False
 
 
+def schedule_post_commit_domain_event(session: Any, event: DomainEvent) -> None:
+    """注册「事务提交成功后」再发布的领域事件。
+
+    事件订阅者（如 purchase_plan_service 的 FIFO 重算）使用**独立 session** 读库，
+    事务提交前发布时读不到未提交的出货行，shipped_qty/plan.status 会按旧数据算错
+    并落库。payload 必须在注册前提取为标量（commit 后 session expire，回调里不能
+    再访问 ORM 属性）。
+
+    回调由 db_transaction 在 commit 成功后执行；不经 db_transaction 的调用方
+    （ARQ 任务、直连会话）注册无人执行，请直接 await publish_with_retry。
+    """
+    async def _publish() -> None:
+        await publish_with_retry(event)
+
+    info = getattr(session, 'info', None)
+    if not isinstance(info, dict):
+        # 与 schedule_post_commit_invalidation 同款退化：无法挂回调的会话当场发布
+        loop = asyncio.get_running_loop()
+        task = loop.create_task(_publish())
+        task.add_done_callback(_log_publish_task_exception)
+        return
+    info.setdefault('post_commit_callbacks', []).append(_publish)
+
+
+def _log_publish_task_exception(task: 'asyncio.Task[Any]') -> None:
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.warning('立即执行的领域事件发布回调失败: %s', exc, exc_info=exc)
+
+
 async def publish(event: DomainEvent) -> bool:
     """发布领域事件
 

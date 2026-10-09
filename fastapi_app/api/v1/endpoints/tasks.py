@@ -231,21 +231,26 @@ async def async_import_stockins(
 @router.post("/export-report", response_model=AsyncTaskSubmitResponse)
 async def async_export_report(
     request: ReportExportRequest,
-    current_user: User = Depends(require_permission("batch_import")),
+    # Round16：报表导出改 report_view（与同步导出端点一致），原 batch_import 与
+    # 报表无关——任何持导入权限者可读全量报表属权限面放大
+    current_user: User = Depends(require_permission("report_view")),
 ):
     """异步导出报表（提交后台任务）"""
     if request.report_type not in ASYNC_EXPORT_REPORT_TYPES:
         raise HTTPException(status_code=400, detail=f"不支持的报表类型: {request.report_type}")
 
+    # 工厂隔离与同步导出（report.py）同口径：非超管且绑定工厂只导本厂。
+    # Round16：原 filters 漏 factory，厂绑定用户可经异步任务导出他厂全部流水。
+    from fastapi_app.api.v1.endpoints.report import _factory_scope
     from fastapi_app.core.arq_app import get_arq_pool
     from fastapi_app.tasks.report_tasks import export_report_task
-
     filters = {
         "customer": request.customer,
         "product": request.product,
         "status": request.status,
         "start_date": request.start_date,
         "end_date": request.end_date,
+        "factory": _factory_scope(current_user),
     }
 
     pool = await get_arq_pool()

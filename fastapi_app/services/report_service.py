@@ -252,9 +252,13 @@ async def export_report_to_excel(db, report_type: str, customer: str = '', produ
                 start_date=start_date, end_date=end_date, factory=factory
             )
 
-            truncated = len(logs) > 10000
+            # 超限判定用 stats 的 total_count（统计查询无行数上限）：明细查询在
+            # _MAX_EXPORT_ROWS 截断，len(logs) 恒 ≤10000，原 `len(logs) > 10000`
+            # 永不触发（Round16：截断标记是死代码，超量被静默截断且无告警）
+            total_count = int(stats.get('total_count', 0) or 0)
+            truncated = total_count > 10000
             if truncated:
-                logger.warning(f"报表导出截断：共{len(logs)}条，仅导出前10000条")
+                logger.warning(f"报表导出截断：共{total_count}条，仅导出前10000条")
                 logs = logs[:10000]
 
             exporter = ReportExporter()

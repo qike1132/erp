@@ -36,11 +36,14 @@ from fastapi_app.shared.stock_concurrency import assert_stock_available, get_pro
 from fastapi_app.shared_models import (
     ApprovalLog,
     ApprovalRequest,
+    AuditLog,
     InventoryLog,
     Order,
     OrderItem,
+    OrderStatusLog,
     OrderSyncRecord,
     StockOut,
+    SyncRetryQueue,
     User,
 )
 from fastapi_app.utils import calc_total_pages
@@ -200,7 +203,7 @@ async def approve_request(db: AsyncSession, approval_id: int, current_user: User
     handler = _OPERATION_HANDLERS.get(approval.operation_type)
     if handler is None:
         raise ValueError(f"不支持的操作类型：{approval.operation_type}")
-    await handler(db, approval, order)
+    await handler(db, approval, order, current_user)
     approval.status = ApprovalRequest.STATUS_APPROVED
     approval.approver_id = current_user.id
     approval.approval_time = _utcnow()
@@ -367,7 +370,54 @@ async def _handle_edit_approval(db: AsyncSession, approval: ApprovalRequest, ord
     order.status = await compute_order_status_from_db(db, order)
 
 
-async def _handle_delete_approval(db: AsyncSession, approval: ApprovalRequest, order: Order) -> None:
+def _rollback_deduction_for_approval(
+    db: AsyncSession, product, order: Order, order_stockouts: list, total_deducted: int,
+) -> None:
+    """回滚每条出库记录的净抵扣数量（产品已删除时无库存与日志目标可写，跳过）。"""
+    if product is None:
+        return
+    for stockout in order_stockouts:
+        net_qty = stockout.quantity - stockout.returned_quantity
+        if net_qty <= 0:
+            continue
+        db.add(InventoryLog(
+            product_id=order.product_id,
+            change_type='抵扣回滚(审批)',
+            change_quantity=net_qty,
+            related_id=order.order_no,
+            note=f'审批删除订单回滚抵扣，净退回{net_qty}件',
+        ))
+    # 负库存判定统一走 fastapi_app.shared.stock_concurrency 入口（P1-2b）
+    assert_stock_available(
+        product.current_stock, total_deducted,
+        message=f'删除订单将导致库存为负数（当前库存：{product.current_stock}，净变化：{total_deducted:+d}）',
+    )
+    product.current_stock += total_deducted
+
+
+def _add_delete_audit_log(
+    db: AsyncSession, current_user: User, order: Order, approval_id: int, backup_path: str | None,
+) -> None:
+    """审批删订单的 AuditLog（与直删 _delete_order_directly 同口径，含备份路径）。"""
+    db.add(AuditLog(
+        user_id=current_user.id,
+        username=current_user.username,
+        action='DELETE',
+        resource_type='order',
+        resource_id=order.order_no,
+        detail=json.dumps({
+            'order_id': order.id,
+            'order_no': order.order_no,
+            'approval_id': approval_id,
+            'backup_path': backup_path,
+        }, ensure_ascii=False),
+        status_code=200,
+    ))
+
+
+async def _handle_delete_approval(
+    db: AsyncSession, approval: ApprovalRequest, order: Order, current_user: User,
+) -> None:
     """处理删除类审批：回滚库存抵扣、清理关联记录、软删除订单。
 
     删除该订单的其他 ApprovalRequest 记录（排除当前审批），
@@ -377,6 +427,7 @@ async def _handle_delete_approval(db: AsyncSession, approval: ApprovalRequest, o
         db: 数据库会话。
         approval: 审批请求对象。
         order: 关联订单对象。
+        current_user: 审批人（备份快照与 AuditLog 的操作者）。
 
     Raises:
         ValueError: 关联产品不存在或库存将变为负数时抛出。
@@ -399,27 +450,7 @@ async def _handle_delete_approval(db: AsyncSession, approval: ApprovalRequest, o
     order_stockouts = list(result.scalars().all())
     total_deducted = sum(so.quantity - so.returned_quantity for so in order_stockouts)
 
-    # 回滚每条出库记录的净抵扣数量（产品已删除时无库存与日志目标可写）
-    if product is not None:
-        for stockout in order_stockouts:
-            net_qty = stockout.quantity - stockout.returned_quantity
-            if net_qty <= 0:
-                continue
-            db.add(InventoryLog(
-                product_id=order.product_id,
-                change_type='抵扣回滚(审批)',
-                change_quantity=net_qty,
-                related_id=order.order_no,
-                note=f'审批删除订单回滚抵扣，净退回{net_qty}件',
-            ))
-
-        net_change = total_deducted
-        # 负库存判定统一走 fastapi_app.shared.stock_concurrency 入口（P1-2b）
-        assert_stock_available(
-            product.current_stock, net_change,
-            message=f'删除订单将导致库存为负数（当前库存：{product.current_stock}，净变化：{net_change:+d}）',
-        )
-        product.current_stock += net_change
+    _rollback_deduction_for_approval(db, product, order, order_stockouts, total_deducted)
 
     # 先解除已取消退货对外键的引用（否则 RESTRICT 外键挡住下面的 stock_out 删除）；
     # active 退货已在 _handle_delete_approval 开头的 assert_no_linked_returns 处被拒。
@@ -428,6 +459,22 @@ async def _handle_delete_approval(db: AsyncSession, approval: ApprovalRequest, o
     await db.execute(sa_delete(StockOut).where(StockOut.order_id == order.id))
 
     await db.execute(sa_delete(OrderSyncRecord).where(OrderSyncRecord.source_order_id == order.id))
+    # 与直删路径同口径（Round16 B1/B2）：同步重试队列与状态日志随订单清理，
+    # 否则 purchase_history 的状态日志仍指向已删订单（审计口径不一致）。
+    # 备份与 AuditLog 对齐直删：审批删同样可追溯、可恢复。
+    from fastapi_app.services.order.commands import (
+        _collect_order_deletion_graph,
+        _order_deletion_backup_payload,
+        _write_order_deletion_backup,
+    )
+    backup_graph = await _collect_order_deletion_graph(db, order, order.id)
+    backup_path = _write_order_deletion_backup(_order_deletion_backup_payload(
+        order, order.id, current_user, backup_graph,
+        len(backup_graph['status_logs']) + len(backup_graph['retry_records']),
+    ))
+    _add_delete_audit_log(db, current_user, order, approval.id, backup_path)
+    await db.execute(sa_delete(SyncRetryQueue).where(SyncRetryQueue.source_order_id == order.id))
+    await db.execute(sa_delete(OrderStatusLog).where(OrderStatusLog.order_no == order.order_no))
     approval_result = await db.execute(
         select(ApprovalRequest.id).where(
             ApprovalRequest.order_id == order.id,
@@ -474,7 +521,7 @@ async def _handle_delete_approval(db: AsyncSession, approval: ApprovalRequest, o
 
 # 审批操作类型 → handler 策略注册表（OCP）
 # 新增操作类型时：新增 handler 函数并在此注册一行，approve_request 主流程无需改动。
-_OPERATION_HANDLERS: dict[str, Callable[[AsyncSession, ApprovalRequest, Order], Awaitable[None]]] = {
+_OPERATION_HANDLERS: dict[str, Callable[[AsyncSession, ApprovalRequest, Order, User], Awaitable[None]]] = {
     ApprovalRequest.OPERATION_EDIT: _handle_edit_approval,
     ApprovalRequest.OPERATION_DELETE: _handle_delete_approval,
 }

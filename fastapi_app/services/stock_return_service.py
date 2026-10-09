@@ -22,8 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from fastapi_app.core.cache_invalidation import cache_mgr, schedule_post_commit_invalidation
-from fastapi_app.core.domain_events import DomainEvent, DomainEventType
-from fastapi_app.core.domain_events import publish_with_retry as publish_domain_event
+from fastapi_app.core.domain_events import DomainEvent, DomainEventType, schedule_post_commit_domain_event
 from fastapi_app.core.exception_handler import safe_publish_event
 from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.services.notification_service import StockEvent
@@ -227,11 +226,12 @@ async def create_stockreturn(db: AsyncSession, stockout_id: int, quantity: int,
 
     # 领域事件总线：退货创建 → 发布 STOCK_RETURN_CREATED 事件，触发采购计划重算（异步）
     # 退货会减少已出货量，触发采购计划重算；客户/单号来自所选出货单
+    # 提交后发布：订阅者（采购计划重算）用独立 session 读库，提交前发布读不到本次变更
     stockout = await db.get(StockOut, stockout_id)
     customer_name = stockout.customer if stockout and stockout.customer else ''
     product_name = product.name if product is not None else ''
     plan_month = stockout.stockout_date.strftime('%Y-%m') if stockout and stockout.stockout_date else ''
-    await publish_domain_event(DomainEvent(
+    schedule_post_commit_domain_event(db, DomainEvent(
         event_type=DomainEventType.STOCK_RETURN_CREATED,
         domain='stock',
         payload={
@@ -269,13 +269,14 @@ async def cancel_stockreturn(db: AsyncSession, stockreturn_id: int, operator_id:
     # 领域事件总线：退货取消 → 发布 STOCK_RETURN_CANCELLED 事件，触发采购计划重算（异步）
     # 取消退货会恢复已出货量，复用 recalc_plans_after_stockout_delete 逻辑（语义：回滚退货扣减）
     # 按产品退货（stockout_id=NULL）无出货可查，payload 不带出货单号
+    # 提交后发布（同 create_stockreturn：订阅者用独立 session 读库）
     stockout = None
     if stockout_id is not None:
         stockout = await db.get(StockOut, stockout_id)
     customer_name = stockout.customer if stockout and stockout.customer else ''
     product_name = product.name if product is not None else ''
     plan_month = stockout.stockout_date.strftime('%Y-%m') if stockout and stockout.stockout_date else ''
-    await publish_domain_event(DomainEvent(
+    schedule_post_commit_domain_event(db, DomainEvent(
         event_type=DomainEventType.STOCK_RETURN_CANCELLED,
         domain='stock',
         payload={
