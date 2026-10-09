@@ -8,7 +8,7 @@
 
 | # | 凭据 | 值形态 | 载体 | 当前是否在用 |
 |---|---|---|---|---|
-| **S1** | `PG_SUPER_PASSWORD` | 32 字符 | `.env:46` | **否** —— 应用代码从不读取（见 §2.1） |
+| **S1** | `PG_SUPER_PASSWORD` | 32 字符 | `.env:46` | **否** —— 应用代码从不读取（见 §2.1）<br>⚠️ 2026-10-09 起：备份恢复「重建数据库」会读取它，见 dump.py |
 | **S2** | pgbouncer 三账号共享口令 | 26 字符 | `config/pgbouncer/userlist.txt`，**已被 git 跟踪** | 否 —— PGBouncer 未运行（见 §2.2） |
 | **S3** | `BACKUP_ENCRYPTION_PASSWORD` | 42 字符 | `.env` | **是** —— 加密备份的唯一密钥来源（见 §2.3） |
 
@@ -63,6 +63,10 @@ PostgreSQL 服务：postgresql-x64-18 = Running，postgresql-replica = Running�
 ### 2.1 S1 —— PostgreSQL 超级用户口令
 
 **先说清性质：`PG_SUPER_PASSWORD` 是"死键"**。`deliverables/audit-2026-09-17/审计报告-配置依赖部署.md:59` 早已判定它是"代码从不读取的键"，与 `FLASK_ENV`/`FLASK_DEBUG`/`API_URL`/`DB_POOL_*` 并列。所以：
+
+> ⚠️ **2026-10-09 起不再是死键**：备份恢复需重建库（DROP/CREATE），而应用角色 `erp_app` 默认无
+> `CREATEDB`，故 `dump.py` 改用它执行重建（未配置时回退 `DB_USER`）。轮换后**必须同步更新 `.env`**，
+> 否则恢复会在建库权限预检处被拒绝（不会删库，但恢复无法进行）。
 
 - 改这个值**不会**影响应用运行（应用用 `DB_USER=erp_app` + `DB_PASSWORD` 连库）。
 - 但泄露的是**`postgres` 超级用户的口令** —— 拿到它等于完全接管数据库（含 `pg_read_server_files` 之类能力），**这是三件里最高危的**。

@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import threading
 import time
+from collections.abc import Mapping
 from pathlib import Path
 from typing import IO, cast
 
@@ -159,6 +160,125 @@ async def run_pg_dump(output_path: Path, snapshot_id: str | None = None) -> dict
         raise RuntimeError(f'pg_dump 执行失败: {e}') from e
 
 
+def _resolve_admin_credentials(
+    db_user: str, db_password: str, environ: Mapping[str, str] | None = None,
+) -> tuple[str, str]:
+    """解析重建数据库（DROP/CREATE）所用凭据，返回 (用户名, 口令)。
+
+    配置了 PG_SUPER_PASSWORD 时用超级用户（默认 PG_SUPER_USER=postgres）；否则回退应用角色
+    —— 此时该角色必须有 CREATEDB，否则重建前的权限预检会拒绝恢复（不会先删库）。
+    """
+    env = os.environ if environ is None else environ
+    super_password = env.get('PG_SUPER_PASSWORD')
+    if super_password:
+        # `or 'postgres'`：显式写成 PG_SUPER_USER=（空值）时 get 返回 ''，会让 psql -U '' 失败
+        return env.get('PG_SUPER_USER') or 'postgres', super_password
+    return db_user, db_password
+
+
+async def _admin_can_create_database(
+    *, db_host: str, db_port: str, admin_user: str, admin_env: dict,
+) -> str | None:
+    """预检执行者是否具备建库权（超级用户或 CREATEDB）。
+
+    通过返回 None；否则返回可直接展示的错误文案（调用方据此中止，且**不得**删除任何数据库）。
+    """
+    try:
+        cap_proc = await run_proc(
+            [
+                resolve_pg_tool('psql'), '-h', db_host, '-p', db_port, '-U', admin_user, '-d', 'postgres',
+                '-t', '-A', '-c',
+                'SELECT (rolsuper OR rolcreatedb)::text FROM pg_roles WHERE rolname = current_user;',
+            ],
+            env=admin_env, timeout=10,
+        )
+    except (TimeoutError, OSError, ValueError) as e:
+        return f'恢复已中止：无法确认建库权限（{e}）'
+    if cap_proc.returncode == 0 and (cap_proc.stdout or b'').decode(errors='replace').strip().lower() == 'true':
+        return None
+    cap_err = (cap_proc.stderr or b'').decode(errors='replace').strip()[:200]
+    logger.error('建库权限预检未通过，恢复中止（未删除任何数据库）: user=%s err=%s', admin_user, cap_err)
+    return (
+        f'恢复已中止（旧库未被删除）：数据库用户 {admin_user} 缺少建库权限'
+        '（既非超级用户也无 CREATEDB），或无法以该用户连接'
+        '（如 PG_SUPER_PASSWORD 失效）。继续会导致「删库成功、建库失败」。'
+        '请为该用户授予 CREATEDB，或核对 PG_SUPER_USER / PG_SUPER_PASSWORD 后重试。'
+        f' {cap_err}'
+    )
+
+
+async def _rebuild_database_with_admin(
+    *,
+    db_host: str,
+    db_port: str,
+    admin_user: str,
+    admin_env: dict,
+    db_user: str,
+    db_name: str,
+) -> dict | None:
+    """以管理员身份重建目标库（DROP + CREATE）。成功返回 None，失败返回错误 dict。
+
+    关键安全属性：**DROP 之前必须先确认执行者具备建库权**。否则 DROP 成功而 CREATE 失败时，
+    库会停在「已删未建」——这正是新机恢复丢库的直接原因（应用角色无 CREATEDB 而重建用它）。
+    预检失败一律返回错误且**不删除**任何数据库。
+    """
+    cap_err_msg = await _admin_can_create_database(
+        db_host=db_host, db_port=db_port, admin_user=admin_user, admin_env=admin_env,
+    )
+    if cap_err_msg is not None:
+        return {'status': 'error', 'error': cap_err_msg}
+    try:
+        pg_major = 13
+        try:
+            ver_proc = await run_proc(
+                [
+                    resolve_pg_tool('psql'), '-h', db_host, '-p', db_port, '-U', admin_user, '-d', 'postgres', '-t', '-c',
+                    'SHOW server_version;',
+                ],
+                env=admin_env, timeout=10,
+            )
+            if ver_proc.returncode == 0:
+                ver_str = (ver_proc.stdout or b'').decode(errors='replace').strip()
+                pg_major = int(ver_str.split('.')[0])
+        except (TimeoutError, OSError, ValueError):
+            pass  # defensive: 异常静默处理,不影响主流程
+        if pg_major >= 13:
+            drop_cmd = f'DROP DATABASE IF EXISTS "{db_name}" WITH (FORCE);'
+        else:
+            drop_cmd = f'DROP DATABASE IF EXISTS "{db_name}";'
+        drop_proc = await run_proc(
+            [resolve_pg_tool('psql'), '-h', db_host, '-p', db_port, '-U', admin_user, '-d', 'postgres', '-c', drop_cmd],
+            env=admin_env, timeout=60,
+        )  # nosec
+        if drop_proc.returncode != 0:
+            # P0：DROP 失败必须中止——否则后续会向一个所有权/状态未知的目标库导入，
+            # 单事务回滚后该库残留旧状态，"已整体回滚，当前为空库"的提示将不再成立。
+            drop_err = (drop_proc.stderr or b'').decode(errors='replace')
+            logger.error(f'DROP DATABASE 失败，恢复中止: {drop_err[:500]}')  # sql-safe: escape_like/绑定参数/常量片段
+            return {
+                'status': 'error',
+                'error': f'删除旧数据库失败（恢复已中止，未触碰目标库）: {drop_err[:300]}',
+            }
+        create_proc = await run_proc(
+            [
+                resolve_pg_tool('psql'), '-h', db_host, '-p', db_port, '-U', admin_user, '-d', 'postgres', '-c',
+                f'CREATE DATABASE "{db_name}" OWNER "{db_user}";',
+            ],
+            env=admin_env, timeout=30,
+        )  # nosec
+        if create_proc.returncode != 0:
+            # P0：CREATE 失败同样必须中止，理由同上。
+            create_err = (create_proc.stderr or b'').decode(errors='replace')
+            logger.error(f'CREATE DATABASE 失败，恢复中止: {create_err[:500]}')  # sql-safe: escape_like/绑定参数/常量片段
+            return {
+                'status': 'error',
+                'error': f'创建数据库失败（恢复已中止，旧库已被删除，请立即用 pre_restore 安全备份处理）: {create_err[:300]}',
+            }
+    except (TimeoutError, OSError, ValueError) as e:
+        return {'status': 'error', 'error': f'数据库重建失败: {e}'}
+    return None
+
+
 async def restore_database_via_psql(zf, db: AsyncSession, task_id: str | None = None) -> dict:
     """通过 psql 从 dump.sql.gz 恢复数据库"""
     import time as time_mod
@@ -223,6 +343,14 @@ async def restore_database_via_psql(zf, db: AsyncSession, task_id: str | None = 
     env = os.environ.copy()
     env['PGPASSWORD'] = db_password
 
+    # 重建数据库（DROP/CREATE）需要建库权，而应用角色 erp_app 默认**没有** CREATEDB
+    # （新机安装脚本 deploy/install_package.ps1 建角色时即未授予；生产机是历史上手工建的
+    # 角色才碰巧有）。此前重建用应用角色自身执行，该角色一旦无 CREATEDB 就必然
+    # 「删库成功、建库失败」，库停在已删未建。故重建改用超级用户，应用角色只负责数据导入。
+    admin_user, admin_password = _resolve_admin_credentials(db_user, db_password)
+    admin_env = os.environ.copy()
+    admin_env['PGPASSWORD'] = admin_password
+
     await _report(0.02, '关闭应用数据库连接')
     await asyncio.sleep(0)
     try:
@@ -243,11 +371,12 @@ async def restore_database_via_psql(zf, db: AsyncSession, task_id: str | None = 
         try:
             check_proc = await run_proc(
                 [
-                    resolve_pg_tool('psql'), '-h', db_host, '-p', db_port, '-U', db_user, '-d', 'postgres', '-t',
-                    '-v', f'db_name={db_name}',
-                    '-c', "SELECT COUNT(*) FROM pg_stat_activity WHERE datname = :'db_name';",  # nosec B608 — db_name 经 isidentifier() 白名单校验，psql 变量引用自动转义
+                    resolve_pg_tool('psql'), '-h', db_host, '-p', db_port, '-U', admin_user, '-d', 'postgres', '-t', '-A',
+                    # 用字面量而非 :'db_name'：psql 的 -c 不做变量插值（实测直接语法错误），
+                    # 旧写法让这两步恒失败并静默降级为「没有活跃连接」。db_name 已白名单校验。
+                    '-c', f"SELECT COUNT(*) FROM pg_stat_activity WHERE datname = '{db_name}';",  # nosec B608 — db_name 经 isidentifier() 白名单校验
                 ],
-                env=env, timeout=10,
+                env=admin_env, timeout=10,
             )
             if check_proc.returncode == 0:
                 active_count = int((check_proc.stdout or b'').decode(errors='replace').strip() or '0')
@@ -262,11 +391,10 @@ async def restore_database_via_psql(zf, db: AsyncSession, task_id: str | None = 
     try:
         term_proc = await run_proc(
             [
-                resolve_pg_tool('psql'), '-h', db_host, '-p', db_port, '-U', db_user, '-d', 'postgres',
-                '-v', f'db_name={db_name}',
-                '-c', "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = :'db_name' AND pid <> pg_backend_pid();",  # nosec B608 — db_name 经 isidentifier() 白名单校验，psql 变量引用自动转义
+                resolve_pg_tool('psql'), '-h', db_host, '-p', db_port, '-U', admin_user, '-d', 'postgres',
+                '-c', f"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '{db_name}' AND pid <> pg_backend_pid();",  # nosec B608 — db_name 经 isidentifier() 白名单校验
             ],
-            env=env, timeout=30,
+            env=admin_env, timeout=30,
         )
         # 返回码此前被丢弃：终止失败会被静默吞掉，随后「重建数据库」以晦涩的 DROP 报错收场。
         if term_proc.returncode != 0:
@@ -280,55 +408,12 @@ async def restore_database_via_psql(zf, db: AsyncSession, task_id: str | None = 
 
     await _report(0.14, '重建数据库')
     await asyncio.sleep(0)
-    try:
-        pg_major = 13
-        try:
-            ver_proc = await run_proc(
-                [
-                    resolve_pg_tool('psql'), '-h', db_host, '-p', db_port, '-U', db_user, '-d', 'postgres', '-t', '-c',
-                    'SHOW server_version;',
-                ],
-                env=env, timeout=10,
-            )
-            if ver_proc.returncode == 0:
-                ver_str = (ver_proc.stdout or b'').decode(errors='replace').strip()
-                pg_major = int(ver_str.split('.')[0])
-        except (TimeoutError, OSError, ValueError):
-            pass  # defensive: 异常静默处理,不影响主流程
-        if pg_major >= 13:
-            drop_cmd = f'DROP DATABASE IF EXISTS "{db_name}" WITH (FORCE);'
-        else:
-            drop_cmd = f'DROP DATABASE IF EXISTS "{db_name}";'
-        drop_proc = await run_proc(
-            [resolve_pg_tool('psql'), '-h', db_host, '-p', db_port, '-U', db_user, '-d', 'postgres', '-c', drop_cmd],
-            env=env, timeout=60,
-        )  # nosec
-        if drop_proc.returncode != 0:
-            # P0：DROP 失败必须中止——否则后续会向一个所有权/状态未知的目标库导入，
-            # 单事务回滚后该库残留旧状态，"已整体回滚，当前为空库"的提示将不再成立。
-            drop_err = (drop_proc.stderr or b'').decode(errors='replace')
-            logger.error(f'DROP DATABASE 失败，恢复中止: {drop_err[:500]}')  # sql-safe: escape_like/绑定参数/常量片段
-            return {
-                'status': 'error',
-                'error': f'删除旧数据库失败（恢复已中止，未触碰目标库）: {drop_err[:300]}',
-            }
-        create_proc = await run_proc(
-            [
-                resolve_pg_tool('psql'), '-h', db_host, '-p', db_port, '-U', db_user, '-d', 'postgres', '-c',
-                f'CREATE DATABASE "{db_name}" OWNER "{db_user}";',
-            ],
-            env=env, timeout=30,
-        )  # nosec
-        if create_proc.returncode != 0:
-            # P0：CREATE 失败同样必须中止，理由同上。
-            create_err = (create_proc.stderr or b'').decode(errors='replace')
-            logger.error(f'CREATE DATABASE 失败，恢复中止: {create_err[:500]}')  # sql-safe: escape_like/绑定参数/常量片段
-            return {
-                'status': 'error',
-                'error': f'创建数据库失败（恢复已中止，旧库已被删除，请立即用 pre_restore 安全备份处理）: {create_err[:300]}',
-            }
-    except (TimeoutError, OSError, ValueError) as e:
-        return {'status': 'error', 'error': f'数据库重建失败: {e}'}
+    rebuild_err = await _rebuild_database_with_admin(
+        db_host=db_host, db_port=db_port, admin_user=admin_user, admin_env=admin_env,
+        db_user=db_user, db_name=db_name,
+    )
+    if rebuild_err is not None:
+        return rebuild_err
 
     psql_start_time = time_mod.monotonic()
 
