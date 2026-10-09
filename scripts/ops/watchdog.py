@@ -45,6 +45,7 @@ import json
 import os
 import shutil
 import smtplib
+import ssl
 import subprocess
 import sys
 import time
@@ -121,11 +122,30 @@ def env_bool(name: str, default: bool = False) -> bool:
     return raw.lower() in {"1", "true", "yes", "on"}
 
 
+def _web_url_scheme() -> str:
+    """web 入口探针的 scheme：取 WEB_HEALTH_SCHEME，默认 http（与 prod_runner 同源）。"""
+    return env_str("WEB_HEALTH_SCHEME", "http").lower() or "http"
+
+
+def _ssl_context_for(url: str) -> ssl.SSLContext | None:
+    """https 时容忍自签/过期证书——本机回环探针只判「端口有人在服务」，不做证书链校验。
+
+    否则 erp-web/nginx 给 :3000 上 TLS 后探针会因自签证书一律失败，
+    制造「服务正常却报 web_entry=fail」的假故障（2026-10-09 新机事故的第四类）。
+    """
+    if not url.lower().startswith("https://"):
+        return None
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    return ctx
+
+
 def http_get(url: str, timeout: float) -> tuple[int, str]:
     """返回 (status_code, body[:4096])；HTTP 错误码也正常返回而不抛异常。"""
     request = urllib.request.Request(url, headers={"User-Agent": "erp-watchdog/1.0"})
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with urllib.request.urlopen(request, timeout=timeout, context=_ssl_context_for(url)) as response:
             return response.status, response.read(4096).decode("utf-8", "replace")
     except urllib.error.HTTPError as exc:
         return exc.code, exc.read(4096).decode("utf-8", "replace")
@@ -386,7 +406,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--verbose", action="store_true", help="打印全部检查项，含通过项")
     parser.add_argument("--expect-services", action="store_true", help="要求 NSSM 服务处于 RUNNING")
     parser.add_argument("--backend-url", default=env_str("WATCHDOG_BACKEND_URL", "http://127.0.0.1:5002"))
-    parser.add_argument("--web-url", default=env_str("WATCHDOG_WEB_URL", "http://127.0.0.1:3000"))
+    parser.add_argument("--web-url", default=env_str("WATCHDOG_WEB_URL", f"{_web_url_scheme()}://127.0.0.1:3000"))
     parser.add_argument("--timeout", type=float, default=env_float("WATCHDOG_TIMEOUT_SECONDS", 10.0))
     return parser
 

@@ -28,6 +28,7 @@ import io
 import json
 import os
 import socket
+import ssl
 import subprocess  # nosec B404
 import sys
 import time
@@ -181,6 +182,33 @@ def _broker_port() -> int:
 # ProxyHandler({}) 显式清空代理，保证探针永远直连。
 _OPENER_DIRECT = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
+
+def _web_health_scheme() -> str:
+    """前端健康探针（:3000 /nginx-health）使用的 scheme，取 WEB_HEALTH_SCHEME，默认 http。
+
+    背景（2026-10-09 新机事故）：探针原先硬编码 `http://127.0.0.1:{web_port}`，
+    erp-web/nginx 一旦给 :3000 上 TLS，明文请求会得到 400 → frontend_ok 恒 false、
+    watchdog 恒报 web_entry=fail（服务其实完全正常）。上 TLS 的机器置
+    WEB_HEALTH_SCHEME=https 即可；默认 http，未上 TLS 的机器行为不变。
+    """
+    return os.getenv("WEB_HEALTH_SCHEME", "http").strip().lower() or "http"
+
+
+def _probe_opener(scheme: str) -> urllib.request.OpenerDirector:
+    """按 scheme 返回探针 opener。
+
+    https 时容忍自签/过期证书（回环探针只判「端口有人在服务」，不做证书链校验；
+    否则自签证书会让探针一律失败，退回本函数要修的那个假故障）。同样清空代理。
+    """
+    if scheme != "https":
+        return _OPENER_DIRECT
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    return urllib.request.build_opener(
+        urllib.request.ProxyHandler({}), urllib.request.HTTPSHandler(context=ctx),
+    )
+
 # 健康检查失败原因留痕的节流间隔。此前 _http_ok 静默吞掉异常，排障时完全看不出
 # 失败原因（本次就是靠排除法才定位到代理），必须留痕。
 _HEALTH_FAIL_LOG_INTERVAL = 60.0
@@ -197,16 +225,21 @@ def _log_health_fail(err: BaseException) -> None:
     print(f"[prod_runner] 健康检查失败(60s 内不重复记录): {type(err).__name__}: {err}")
 
 
-def _http_ok(url: str, timeout: float = 5.0, expect_substr: str | None = None) -> bool:
+def _http_ok(
+    url: str, timeout: float = 5.0, expect_substr: str | None = None,
+    opener: urllib.request.OpenerDirector | None = None,
+) -> bool:
     """探测 url 是否可用。
 
     expect_substr 非空时额外要求响应体包含该子串。用于区分「目标服务就绪」与
     「同端口上的其它服务返回了 200」——典型如 :3000 上 nginx 缺席时由 Vite dev
     server 以 SPA fallback 对任意路径直出 200 + index.html，仅比较状态码会误判。
     既有调用方（后端/ARQ 探针）不传该参数，行为与修复前完全一致。
+
+    opener 非空时改用它发起请求（前端探针在 https 端口上需要容忍自签证书的 opener）。
     """
     try:
-        with _OPENER_DIRECT.open(url, timeout=timeout) as resp:  # nosec B310
+        with (opener or _OPENER_DIRECT).open(url, timeout=timeout) as resp:  # nosec B310
             if resp.status != 200:
                 return False
             if expect_substr is None:
@@ -543,10 +576,12 @@ class Supervisor:
         expect_substr 区分「nginx 真在服务」与「同端口其它服务(如 vite dev
         server 的 SPA fallback)返回 200」。
         """
+        scheme = _web_health_scheme()
         return _http_ok(
-            f"http://127.0.0.1:{self.web_port}/nginx-health",
+            f"{scheme}://127.0.0.1:{self.web_port}/nginx-health",
             timeout=1.5,
             expect_substr='"service":"nginx"',
+            opener=_probe_opener(scheme),
         )
 
     # -- 状态落盘 -----------------------------------------------------------
