@@ -56,14 +56,12 @@ from fastapi_app.services.purchase_plan_queries import (
     _compute_shipment_lookback_limit,
     _enrich_customer_icon_urls,
     get_customer_summary,
-    get_day_details,
     get_inventory_compare,
     get_monthly_aggregated,
     get_monthly_calendar,
     get_plan_detail,
     get_plan_list,
     get_shipment_progress,
-    get_shipment_records,
     get_shipment_records_by_date,
 )
 from fastapi_app.services.purchase_plan_shipment import (

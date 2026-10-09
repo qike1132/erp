@@ -14422,101 +14422,6 @@
         }
       }
     },
-    "/api/v1/plans/day-details": {
-      "get": {
-        "tags": [
-          "采购计划"
-        ],
-        "summary": "Day Details",
-        "description": "指定日期明细（6.9：按需加载当日明细，供日期详情弹窗使用）。\n\nArgs:\n    year: 年份。\n    month: 月份（1-12）。\n    day: 日期（1-31）。\n    customer_id: 客户 ID 筛选，0 表示不筛选。\n    factory: 工厂筛选，空表示不筛选；与 /purchase-plan 页面工厂选择联动。\n    db: 只读数据库会话。\n    _user: 当前操作用户（用于权限校验）。\n\nReturns:\n    DayDetailsResponse: 当日明细列表 + 按客户分组。\n\nRaises:\n    HTTPException: 数据库异常返回 500；查询超时返回 504。",
-        "operationId": "day_details_api_v1_plans_day_details_get",
-        "parameters": [
-          {
-            "name": "year",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "description": "年份",
-              "title": "Year"
-            },
-            "description": "年份"
-          },
-          {
-            "name": "month",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "maximum": 12,
-              "minimum": 1,
-              "description": "月份",
-              "title": "Month"
-            },
-            "description": "月份"
-          },
-          {
-            "name": "day",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "maximum": 31,
-              "minimum": 1,
-              "description": "日期",
-              "title": "Day"
-            },
-            "description": "日期"
-          },
-          {
-            "name": "customer_id",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "description": "客户ID筛选",
-              "default": 0,
-              "title": "Customer Id"
-            },
-            "description": "客户ID筛选"
-          },
-          {
-            "name": "factory",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "description": "工厂筛选（东莞/湖北/未标注），空表示不筛选",
-              "default": "",
-              "title": "Factory"
-            },
-            "description": "工厂筛选（东莞/湖北/未标注），空表示不筛选"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DayDetailsResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/v1/plans/inventory-compare": {
       "get": {
         "tags": [
@@ -14615,51 +14520,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ShipmentProgressResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/plans/shipment/records": {
-      "get": {
-        "tags": [
-          "采购计划"
-        ],
-        "summary": "Shipment Records",
-        "description": "获取指定计划的出货流水记录。\n\nArgs:\n    plan_id: 计划主单 ID。\n    db: 只读数据库会话。\n    _user: 当前操作用户（用于权限校验）。\n\nReturns:\n    ShipmentRecordsResponse: 出货流水记录列表。\n\nRaises:\n    HTTPException: 计划不存在返回 404；数据库异常返回 500。",
-        "operationId": "shipment_records_api_v1_plans_shipment_records_get",
-        "parameters": [
-          {
-            "name": "plan_id",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "description": "计划主单ID",
-              "title": "Plan Id"
-            },
-            "description": "计划主单ID"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ShipmentRecordsResponse"
                 }
               }
             }
@@ -25792,53 +25652,6 @@
         },
         "type": "object",
         "title": "DashboardStats"
-      },
-      "DayDetailsResponse": {
-        "properties": {
-          "date": {
-            "type": "string",
-            "title": "Date"
-          },
-          "weekday": {
-            "type": "string",
-            "title": "Weekday",
-            "default": ""
-          },
-          "plans": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "type": "array",
-            "title": "Plans",
-            "default": []
-          },
-          "by_customer": {
-            "additionalProperties": {
-              "items": {},
-              "type": "array"
-            },
-            "type": "object",
-            "title": "By Customer",
-            "default": {}
-          },
-          "produced_pct": {
-            "type": "number",
-            "title": "Produced Pct",
-            "default": 0.0
-          },
-          "fifo_degraded": {
-            "type": "boolean",
-            "title": "Fifo Degraded",
-            "default": false
-          }
-        },
-        "type": "object",
-        "required": [
-          "date"
-        ],
-        "title": "DayDetailsResponse",
-        "description": "指定日期明细响应（6.9：按需加载当日明细；produced_pct 为按每日生产记录计算的生产达标率）"
       },
       "DeadLetterListResponse": {
         "properties": {

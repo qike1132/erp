@@ -554,8 +554,8 @@ async def _get_produced_fifo_map(db: AsyncSession, plan_details: list, plan_mont
             produced_by_key = aggregate_produced_by_product(result.all())
 
             # 摊派必须落在「该月该产品的全部明细」上，而不是调用方传进来的子集 ——
-            # get_day_details 只传当天、带 customer_id 的调用只传该客户；若就着子集摊派，
-            # 被传进来的行会独吞整个窗口的产量，同一个计划行在月历与弹窗里给出不同数字。
+            # 带 customer_id 的调用只传该客户；若就着子集摊派，被传进来的行会独吞整个
+            # 窗口的产量，同一个计划行在不同视图里给出不同数字。
             # 出货路径同理（它把 all_details 放宽到相关主单的全部明细）。
             scope_details = (
                 await _month_details_for_products(db, plan_month, product_ids)

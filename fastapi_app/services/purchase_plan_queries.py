@@ -117,21 +117,6 @@ async def get_shipment_progress(db: AsyncSession, plan_id: int) -> dict:
         progress_list.append({'detail_id': d.id, 'product_name': d.product_name, 'barcode': d.barcode, 'plan_qty': d.quantity, 'shipped_qty': shp_qty, 'remaining_qty': remaining, 'percent': percent, 'shipment_status': calc_shipment_status(d.quantity, shp_qty)})
     return {'details': progress_list, 'fifo_degraded': fifo_degraded}
 
-async def get_shipment_records(db: AsyncSession, plan_id: int) -> list[dict]:
-    """获取指定计划关联的出货流水记录（直接从 stock_out 实时查询）"""
-    result = await db.execute(select(PurchasePlan).where(PurchasePlan.id == plan_id))
-    plan = result.scalar_one_or_none()
-    if not plan:
-        raise ValueError('采购计划不存在')
-    detail_result = await db.execute(select(PurchasePlanDetail.product_name).where(PurchasePlanDetail.plan_id == plan_id).distinct())
-    product_names = [row.product_name for row in detail_result.all()]
-    if not product_names:
-        return []
-    date_limit = _compute_shipment_lookback_limit(plan.plan_month)
-    result = await db.execute(select(StockOut.id, StockOut.stockout_no, StockOut.stockout_date, StockOut.quantity, StockOut.returned_quantity, StockOut.customer, StockOut.note, Product.name.label('product_name')).join(Product, StockOut.product_id == Product.id).where(and_(StockOut.customer == plan.customer_name, Product.name.in_(product_names), StockOut.customer.isnot(None), StockOut.customer != '', StockOut.stockout_date >= date_limit)).order_by(StockOut.stockout_date.desc(), StockOut.id.desc()).limit(_QUERY_LIMIT))
-    rows = result.all()
-    return [{'stockout_id': row.id, 'shipment_no': row.stockout_no, 'customer_name': row.customer or '', 'product_name': row.product_name, 'quantity': row.quantity - row.returned_quantity, 'shipment_date': row.stockout_date.strftime('%Y-%m-%d') if row.stockout_date else '', 'source_type': 'stockout', 'note': row.note or ''} for row in rows]
-
 
 def _compute_shipment_lookback_limit(plan_month: str) -> datetime:
     """根据计划月份计算出货记录查询的时间下限（S9 提取的辅助函数）
@@ -148,7 +133,7 @@ def _compute_shipment_lookback_limit(plan_month: str) -> datetime:
 async def get_shipment_records_by_date(db: AsyncSession, target_date: str) -> list[dict]:
     """S1 批量端点：按日期查询所有相关出货流水记录
 
-    用于替代 ShipmentRecordsTab.vue 中按 plan_id 分块 N+1 请求的模式。
+    按日期一次查回当日全部客户的出货流水，供批量场景使用（前端按 shipment_no 去重）。
     流程：
         1. 根据 target_date 从 monthly_calendar 数据中找出当日所有 plan_ids
         2. 查询这些计划对应的客户名 + 产品名集合
@@ -692,79 +677,6 @@ async def get_monthly_aggregated(db: AsyncSession, year: int, month: int, custom
         'year': year, 'month': month, 'days_in_month': days_in_month,
         'rows': rows_list, 'sku_summary': sku_summary, 'sku_date_index': sku_date_index,
         'customers': customers, 'customer_totals': customer_totals, 'fifo_degraded': fifo_degraded,
-    }
-
-
-@cache_result(
-    key_prefix="pp:day",
-    ttl=120,
-    local_ttl=30,
-    # v3: plans 增加 factory（东莞/湖北/未标注），支持按厂过滤当日明细。
-    key_builder=lambda **kwargs: f"v3:y{kwargs.get('year', 0)}:m{kwargs.get('month', 0)}:d{kwargs.get('day', 0)}:c{kwargs.get('customer_id', 0)}:f{kwargs.get('factory', '')}",
-)
-async def get_day_details(db: AsyncSession, year: int, month: int, day: int, customer_id: int=0, factory: str='') -> dict:
-    """指定日期的明细列表（按需加载，供日期详情弹窗使用，避免全量传输）。
-
-    factory 非空时只返回该工厂（UNSPEC_FACTORY 表示 product.factory IS NULL）的明细，
-    与 /purchase-plan 页面的工厂筛选保持一致。
-    """
-    plan_month = f'{year}-{month:02d}'
-    target_date = date(year, month, day)
-    date_str = target_date.isoformat()
-
-    _sql = """
-        SELECT d.id AS detail_id, d.plan_id, p.customer_id, p.customer_name,
-               d.product_name, d.barcode, d.plan_date, d.quantity,
-               pr.factory AS factory
-        FROM purchase_plan_details d
-        JOIN purchase_plans p ON d.plan_id = p.id
-        LEFT JOIN product pr ON d.product_id = pr.id
-        WHERE p.plan_month = :plan_month AND d.plan_date = :plan_date
-    """
-    params: dict = {'plan_month': plan_month, 'plan_date': target_date}
-    if customer_id:
-        _sql += ' AND p.customer_id = :customer_id'
-        params['customer_id'] = customer_id
-    if factory:
-        # '未标注' 对应 product.factory IS NULL，其余按值匹配
-        if factory == UNSPEC_FACTORY:
-            _sql += ' AND pr.factory IS NULL'
-        else:
-            _sql += ' AND pr.factory = :factory'
-            params['factory'] = factory
-
-    result = await db.execute(text(_sql), params)  # nosec B608
-    rows = result.all()
-
-    detail_produced_map, fifo_degraded = await _build_fifo_produced_map_from_rows(db, rows, plan_month)
-
-    plans = []
-    by_customer: dict[str, list] = {}
-    total_qty = 0
-    produced_qty = 0
-    for row in rows:
-        prod = detail_produced_map.get(row.detail_id, 0)
-        qty = row.quantity
-        plan = {
-            'detail_id': row.detail_id, 'plan_id': row.plan_id,
-            'customer_name': row.customer_name, 'product_name': row.product_name,
-            'barcode': row.barcode, 'quantity': qty, 'produced_qty': prod,
-            'remaining_qty': qty - prod, 'plan_date': date_str,
-            'factory': row.factory or UNSPEC_FACTORY,
-        }
-        plans.append(plan)
-        cn = row.customer_name or '未知'
-        if cn not in by_customer:
-            by_customer[cn] = []
-        by_customer[cn].append(plan)
-        total_qty += qty
-        produced_qty += prod
-
-    return {
-        'date': date_str, 'weekday': _py_weekday_to_js(target_date.weekday()),
-        'plans': plans, 'by_customer': by_customer,
-        'produced_pct': round_qty(produced_qty / total_qty * 100, precision_digits=1) if total_qty > 0 else 0,
-        'fifo_degraded': fifo_degraded,
     }
 
 

@@ -31,7 +31,6 @@ from fastapi_app.schemas.purchase_plan import (
     ConfirmStagingRequest,
     CreatePlanResponse,
     CustomerSummaryResponse,
-    DayDetailsResponse,
     InventoryCompareResponse,
     MonthlyAggregatedResponse,
     MonthlyCalendarResponse,
@@ -339,38 +338,6 @@ async def monthly_aggregated(year: int=Query(..., description='年份'), month: 
         logger.error(f'获取月度聚合数据异常: {e}', exc_info=True)
         raise HTTPException(status_code=500, detail='获取月度数据失败，请稍后重试') from e
 
-@router.get('/day-details', response_model=DayDetailsResponse)
-async def day_details(year: int=Query(..., description='年份'), month: int=Query(..., ge=1, le=12, description='月份'), day: int=Query(..., ge=1, le=31, description='日期'), customer_id: int=Query(0, description='客户ID筛选'), factory: str=Query('', description='工厂筛选（东莞/湖北/未标注），空表示不筛选'), db: AsyncSession=Depends(get_async_read_db), _user: User=Depends(require_permission('production_plan_view'))) -> DayDetailsResponse:
-    """指定日期明细（6.9：按需加载当日明细，供日期详情弹窗使用）。
-
-    Args:
-        year: 年份。
-        month: 月份（1-12）。
-        day: 日期（1-31）。
-        customer_id: 客户 ID 筛选，0 表示不筛选。
-        factory: 工厂筛选，空表示不筛选；与 /purchase-plan 页面工厂选择联动。
-        db: 只读数据库会话。
-        _user: 当前操作用户（用于权限校验）。
-
-    Returns:
-        DayDetailsResponse: 当日明细列表 + 按客户分组。
-
-    Raises:
-        HTTPException: 数据库异常返回 500；查询超时返回 504。
-    """
-    try:
-        async with asyncio.timeout(MONTHLY_QUERY_TIMEOUT_SECONDS):
-            return await purchase_plan_service.get_day_details(db, year, month, day, customer_id, factory)
-    except (OperationalError, DisconnectionError) as e:
-        logger.error(f'获取日期明细失败: {e}', exc_info=True)
-        raise HTTPException(status_code=500, detail=f'获取日期明细失败: {settings.sanitize_error(e)}') from e
-    except TimeoutError:
-        logger.error(f'获取日期明细超时: year={year} month={month} day={day}')
-        raise HTTPException(status_code=504, detail='获取日期明细超时，请稍后重试') from None
-    except Exception as e:  # broad-except: 端点兜底转 500 且不泄漏内部细节（DB/超时已在上方单独捕获）
-        logger.error(f'获取日期明细异常: {e}', exc_info=True)
-        raise HTTPException(status_code=500, detail='获取日期明细失败，请稍后重试') from e
-
 @router.get('/inventory-compare', response_model=InventoryCompareResponse)
 async def inventory_compare(year: int=Query(..., description='年份'), month: int=Query(..., ge=1, le=12, description='月份'), customer_id: int=Query(0, description='客户ID筛选'), db: AsyncSession=Depends(get_async_read_db), _user: User=Depends(require_permission('production_plan_view'))) -> dict[str, Any]:
     """库存对比数据。
@@ -416,30 +383,6 @@ async def shipment_progress(plan_id: int=Query(..., description='计划主单ID'
     except (OperationalError, DisconnectionError) as e:
         logger.error(f'获取出货进度失败: {e}', exc_info=True)
         raise HTTPException(status_code=500, detail=f'获取出货进度失败: {settings.sanitize_error(e)}') from e
-
-@router.get('/shipment/records', response_model=ShipmentRecordsResponse)
-async def shipment_records(plan_id: int=Query(..., description='计划主单ID'), db: AsyncSession=Depends(get_async_read_db), _user: User=Depends(require_permission('production_plan_view'))) -> dict[str, Any]:
-    """获取指定计划的出货流水记录。
-
-    Args:
-        plan_id: 计划主单 ID。
-        db: 只读数据库会话。
-        _user: 当前操作用户（用于权限校验）。
-
-    Returns:
-        ShipmentRecordsResponse: 出货流水记录列表。
-
-    Raises:
-        HTTPException: 计划不存在返回 404；数据库异常返回 500。
-    """
-    try:
-        records = await purchase_plan_service.get_shipment_records(db, plan_id)
-        return {'records': records}
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
-    except (OperationalError, DisconnectionError) as e:
-        logger.error(f'获取出货流水失败: {e}', exc_info=True)
-        raise HTTPException(status_code=500, detail=f'获取出货流水失败: {settings.sanitize_error(e)}') from e
 
 @router.get('/shipment/records-by-date', response_model=ShipmentRecordsResponse)
 async def shipment_records_by_date(date: str=Query(..., description='查询日期 YYYY-MM-DD'), db: AsyncSession=Depends(get_async_read_db), _user: User=Depends(require_permission('production_plan_view'))) -> dict[str, Any]:

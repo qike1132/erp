@@ -73,7 +73,6 @@
         :filtered="filtered"
         :sku-date-index="skuDateIndex"
         @refetch="refetch()"
-        @open-full="openFullDay"
       />
 
       <PurchasePlanMonthlySummary
@@ -95,7 +94,6 @@
         @refetch="refetch"
       />
 
-      <PlanDetailDialog v-model:open="planDialogOpen" :detail="selDetail" :y="y" :m="m" :factory="factory" />
       <SkuDetailDialog v-model:open="skuDetailOpen" :barcode="skuDetailBarcode" :name="skuDetailName" :date-detail="skuDateDetail" />
     </div>
   </div>
@@ -123,7 +121,6 @@ import type { CustSumItem } from './components/types';
 
 // 弹窗组件懒加载，减少首屏 chunk 体积（仅在用户交互时才加载）
 const CreateShipmentPlanDialog = defineAsyncComponent(() => import('./components/CreateShipmentPlanDialog.vue'));
-const PlanDetailDialog = defineAsyncComponent(() => import('./components/PlanDetailDialog.vue'));
 const SkuDetailDialog = defineAsyncComponent(() => import('./components/SkuDetailDialog.vue'));
 
 const qc = useQueryClient();
@@ -143,16 +140,6 @@ const custFilter = ref('');
 // 工厂筛选（作用于整页）：'all' 表示全部工厂
 const factory = ref<FactoryFilter>('all');
 
-// 当日明细的呈现从「选中即弹窗」改为「右栏内联，点按钮才开弹窗」：
-// sel 仍然只是「选中了哪一天」，弹窗开关与它解耦，右栏才有稳定的展示位。
-const planDialogOpen = ref(false);
-
-function openFullDay() {
-  if (sel.value) planDialogOpen.value = true;
-}
-
-// sel 被清空（切月 / 切 Tab / 清搜索）时同步关掉弹窗，避免它挂着一个已失效的日期
-watch(sel, (v) => { if (!v) planDialogOpen.value = false; });
 watch(globalKw, () => { if (viewTab.value === 'daily') sel.value = ''; });
 watch([y, m], () => { sel.value = ''; globalKw.value = ''; debouncedKw.value = ''; });
 watch(viewTab, () => { globalKw.value = ''; debouncedKw.value = ''; });
@@ -227,12 +214,6 @@ const filtered = computed(() => {
   return rows.value.filter(r => r.date.includes(k) || r.customerNames.some(n => n.toLowerCase().includes(k)));
 });
 
-// 按需查找，避免每次 rows 变化都预建 Map（rows 通常 ≤31 条，find 开销可忽略）
-const selDetail = computed(() => {
-  if (!sel.value) return null;
-  return rows.value.find(r => r.date === sel.value) ?? null;
-});
-
 // 延期 / 临期风险汇总。原先在顶栏拆成「已延期」「临期≤3天」两格，与右栏风险清单
 // 报的是同一件事 —— 现合并为一格「风险 N 天」，明细交给右栏清单与月历格子上的标记。
 const risks = computed(() => {
@@ -268,7 +249,7 @@ function resetMonth() {
   y.value = now.getFullYear();
   m.value = now.getMonth() + 1;
 }
-function onCreated() { showCreate.value = false; qc.invalidateQueries({ queryKey: ['pp-agg'] }); qc.invalidateQueries({ queryKey: ['pp-day'] }); }
+function onCreated() { showCreate.value = false; qc.invalidateQueries({ queryKey: ['pp-agg'] }); }
 
 /**
  * 批量导入完成。
@@ -293,7 +274,6 @@ function onImported(month?: string) {
   }
   // skuPage 由 useSkuSummary 内的 watch 监听筛选变化自动归位，此处无需手动重置
   qc.invalidateQueries({ queryKey: ['pp-agg'] })
-  qc.invalidateQueries({ queryKey: ['pp-day'] })
 }
 
 const { runExport } = useExport({ start: false });

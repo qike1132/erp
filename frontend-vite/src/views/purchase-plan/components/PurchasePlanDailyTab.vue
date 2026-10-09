@@ -56,7 +56,6 @@
               :customer-count="selRow.customerCount"
               :product-count="selProductCount"
               :factory="factory"
-              @open-full="emit('open-full')"
             />
             <PlanRiskList v-else :items="riskItems" @select="selectDate" />
           </div>
@@ -94,7 +93,6 @@ const props = defineProps<{
 const emit = defineEmits<{
   'update:sel': [value: string]
   refetch: []
-  'open-full': []
 }>()
 
 const TODAY_MS = startOfToday()

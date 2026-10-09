@@ -262,8 +262,8 @@ class TestProducedFifoMapSafe:
 class TestProducedAllocationScope:
     """摊派范围必须与调用方传进来的子集无关（评审 I2）。
 
-    get_day_details 只传当天的明细；若就着这个子集摊派，当天的行会独吞
-    整个窗口的产量，同一个计划行在月历上与在弹窗里会给出不同的数字。
+    调用方可能只传当天或单个客户的明细；若就着这个子集摊派，这些行会独吞
+    整个窗口的产量，同一个计划行在不同视图里会给出不同的数字。
     """
 
     @pytest.mark.asyncio

@@ -1059,15 +1059,6 @@ export interface DashboardStats {
   total_orders_today?: number
 }
 
-export interface DayDetailsResponse {
-  date: string
-  weekday?: string
-  plans?: Array<Record<string, unknown>>
-  by_customer?: Record<string, Array<unknown>>
-  produced_pct?: number
-  fifo_degraded?: boolean
-}
-
 export interface DeadLetterListResponse {
   total?: number
   offset?: number

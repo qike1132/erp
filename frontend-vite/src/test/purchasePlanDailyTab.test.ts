@@ -175,12 +175,6 @@ describe('右栏双态：风险清单 ⇄ 当日明细', () => {
     expect(texts.some(t => t.includes('企鹅企鹅企鹅') && t.includes('待生产'))).toBe(true)
   })
 
-  it('点「查看当日完整计划」上抛 open-full（弹窗由页面打开）', async () => {
-    const w = mountTab({ sel: '2026-09-08' })
-    await w.find('.sp-detail-btn').trigger('click')
-    expect(w.emitted('open-full')).toHaveLength(1)
-  })
-
   it('点风险清单里的一天 → 上抛该日期', async () => {
     const w = mountTab()
     await w.findAll('.sp-risk-row')[1]?.trigger('click')

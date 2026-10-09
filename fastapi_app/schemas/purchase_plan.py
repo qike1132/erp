@@ -210,16 +210,6 @@ class MonthlyAggregatedResponse(BaseModel):
     fifo_degraded: bool = False
 
 
-class DayDetailsResponse(BaseModel):
-    """指定日期明细响应（6.9：按需加载当日明细；produced_pct 为按每日生产记录计算的生产达标率）"""
-    date: str
-    weekday: str = ''
-    plans: list[dict] = []
-    by_customer: dict[str, list] = {}
-    produced_pct: float = 0.0
-    fifo_degraded: bool = False
-
-
 class CreatePlanResponse(BaseModel):
     success: bool
     data: dict = {}

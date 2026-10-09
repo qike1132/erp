@@ -34,10 +34,6 @@
         </ul>
       </div>
     </div>
-
-    <div class="sp-detail-foot">
-      <button class="sp-detail-btn" @click="emit('open-full')">查看当日完整计划（含条码 / 出货记录）</button>
-    </div>
   </div>
 </template>
 
@@ -55,10 +51,6 @@ defineProps<{
   productCount: number
   /** 当前工厂筛选；'all' 时每个产品前显示工厂色点 */
   factory: string
-}>()
-
-const emit = defineEmits<{
-  'open-full': []
 }>()
 
 const PENDING = { cls: 'st-wait', lbl: '待生产' }
@@ -219,28 +211,4 @@ function fmt(n: number): string {
 .st-ok { color: var(--color-success-600); }
 .st-part { color: var(--color-warning-600); }
 .st-wait { color: var(--color-warning-600); }
-
-.sp-detail-foot {
-  padding: 10px 16px;
-  border-top: 1px solid var(--color-border-light, #e2e8f0);
-}
-
-.sp-detail-btn {
-  width: 100%;
-  padding: 8px 12px;
-  border-radius: 9px;
-  border: 2px solid var(--color-border-light, #e2e8f0);
-  background: white;
-  color: var(--color-primary-600);
-  font-family: inherit;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.2s ease, border-color 0.2s ease;
-}
-
-.sp-detail-btn:hover {
-  background: var(--color-primary-50);
-  border-color: var(--color-primary-300);
-}
 </style>
