@@ -296,6 +296,15 @@ def _test_db_url() -> str:
 
 
 async def _clear_lock_rows(engine) -> None:
+    """清掉本夹具造的 JANITOR-LOCK-* 产品（前后各跑一次）。
+
+    刻意用裸 SQL 而非 ``product_service.delete_product``：这些产品由
+    ``_insert_lock_products`` 直接 INSERT，只用于加锁探测，**从不产生
+    inventory_log 流水行**，因此裸删不会留下「product_id/product_name/
+    product_barcode 全 NULL」的孤儿行；反之走服务层会引入对本夹具刻意
+    不依赖的 order/stock_in/stock_out 表的硬依赖（见 fixture 的
+    「测试库可能只有部分表」前提）。
+    """
     async with engine.begin() as conn:
         await conn.execute(
             text('DELETE FROM product WHERE name LIKE :prefix'),

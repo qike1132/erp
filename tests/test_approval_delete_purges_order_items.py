@@ -15,6 +15,7 @@ from fastapi_app.services.approval_service import approve_request
 from fastapi_app.shared_models import (
     ApprovalLog,
     ApprovalRequest,
+    InventoryLog,
     Order,
     OrderItem,
     Product,
@@ -41,6 +42,19 @@ async def approval_delete_cleanup(async_db_session):
         delete(OrderItem).where(OrderItem.order_id.in_(order_ids)))
     await async_db_session.execute(
         delete(Order).where(Order.order_no.like(f'{_ORDER_PREFIX}%')))
+    # 建单会为该产品写一条**无快照**流水（order/commands.py 直构 InventoryLog，
+    # 只带 product_id，不带 product_name/product_barcode）。裸删产品时外键
+    # ON DELETE SET NULL 只把 product_id 置空、保不住「这是哪个产品」，于是留下
+    # 一条 (product_id, product_name, product_barcode) 全 NULL 的孤儿行——它会污染
+    # 任何按 ``product_id IS NULL`` 取数的用例（共享测试库只在会话开始时整库重置，
+    # 本文件提交的行会存活到整轮结束）。故删产品前先清掉它名下的流水。
+    # 不用 product_service.delete_product：那条路径会**保留**流水（补快照后置空
+    # product_id），对「清掉本用例造的行」这个目的来说是残留而非清理。
+    product_ids = (await async_db_session.execute(
+        select(Product.id).where(Product.barcode == _PRODUCT_BARCODE))).scalars().all()
+    if product_ids:
+        await async_db_session.execute(
+            delete(InventoryLog).where(InventoryLog.product_id.in_(product_ids)))
     await async_db_session.execute(
         delete(Product).where(Product.barcode == _PRODUCT_BARCODE))
     await async_db_session.commit()
