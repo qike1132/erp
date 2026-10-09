@@ -32,6 +32,10 @@
         <span class="sp-bar">
           <i :class="barCls(c.row._producedPct)" :style="{ width: c.row._producedPct + '%' }" />
         </span>
+        <!-- 「全部」视图下叠加工厂构成条：一眼看出当天计划里各厂占比 -->
+        <span v-if="factory === 'all'" class="sp-fbar" aria-hidden="true">
+          <i v-for="seg in fbar(c.row)" :key="seg.f" :class="`fb-${factoryTone(seg.f)}`" :style="{ width: seg.w + '%' }" />
+        </span>
       </template>
       <span v-else-if="c.isToday" class="sp-today-hint">今天 · 无排产</span>
     </div>
@@ -44,6 +48,7 @@
 // 当日完整明细在右侧栏，格子不再承担「既要概览又要明细」的双重职责。
 import { computed } from 'vue'
 import { buildMonthCells, dayMarkFor, startOfToday, todayIso } from './dayStatus'
+import { factoryTone } from './factoryMeta'
 import type { Row } from './types'
 
 const props = defineProps<{
@@ -55,6 +60,8 @@ const props = defineProps<{
   /** 搜索是否正在生效（生效时未命中的日子淡化） */
   searching: boolean
   matchedDates: Set<string>
+  /** 当前工厂筛选；'all' 时格内叠加工厂构成条 */
+  factory: string
 }>()
 
 const emit = defineEmits<{
@@ -82,6 +89,16 @@ function barCls(pct: number): string {
   if (pct <= 0) return 'sp-bar-r'
   if (pct < 100) return 'sp-bar-a'
   return 'sp-bar-g'
+}
+
+/** 「全部」视图下格内的工厂构成条：按各厂当日计划量占比铺色 */
+function fbar(row: Row): { f: string; w: number }[] {
+  const fac = row.factories
+  if (!fac) return []
+  const entries = Object.entries(fac).filter(([, a]) => a.qty > 0)
+  const total = entries.reduce((n, [, a]) => n + a.qty, 0)
+  if (total <= 0) return []
+  return entries.map(([f, a]) => ({ f, w: (a.qty / total) * 100 }))
 }
 
 const cells = computed(() =>
@@ -147,7 +164,7 @@ function pick(c: (typeof cells.value)[number]): void {
 
 .sp-cell {
   position: relative;
-  min-height: 88px;
+  min-height: 96px;
   border: 1px solid var(--color-border-light, #f0f2f5);
   border-radius: var(--radius-sm, 10px);
   background: white;
@@ -314,4 +331,22 @@ function pick(c: (typeof cells.value)[number]): void {
 .sp-bar-r { background: var(--color-danger-500); }
 .sp-bar-a { background: var(--color-warning-500); }
 .sp-bar-g { background: var(--color-success-500); }
+
+/* 工厂构成条（仅「全部」视图）：与进度条同宽同高，颜色区分工厂 */
+.sp-fbar {
+  display: flex;
+  height: 4px;
+  border-radius: 2px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.sp-fbar > i {
+  display: block;
+  height: 100%;
+}
+
+.fb-dg { background: var(--color-primary-500, #5b8def); }
+.fb-hb { background: var(--color-purple-500, #8b5cf6); }
+.fb-other { background: var(--color-slate-300, #cbd5e1); }
 </style>

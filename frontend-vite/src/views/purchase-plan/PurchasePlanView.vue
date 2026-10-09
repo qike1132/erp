@@ -29,8 +29,8 @@
             />
           </div>
 
-          <!-- 第二行：月份上下文 + 该月汇总。
-               切月作用于整页（KPI 与两个 Tab 都跟着变），所以与 KPI 同行，
+          <!-- 第二行：月份上下文 + 工厂筛选 + 该月汇总。
+               切月与切工厂都作用于整页（KPI 与两个 Tab 都跟着变），所以与 KPI 同行，
                而不是挤在右上角与「新建」抢位置。 -->
           <div class="sp-head-row2">
             <PurchasePlanMonthNav
@@ -39,6 +39,11 @@
               @prev="prevMonth"
               @next="nextMonth"
               @reset="resetMonth"
+            />
+            <PurchasePlanFactoryFilter
+              v-model="factory"
+              :factories="availableFactories"
+              :totals="factoryTotals"
             />
             <PurchasePlanKpiStrip
               :plan-qty="planQtyNum"
@@ -60,6 +65,7 @@
         v-model:sel="sel"
         :y="y"
         :m="m"
+        :factory="factory"
         :is-loading="isLoading"
         :is-error="isError"
         :is-fetching="isFetching"
@@ -89,7 +95,7 @@
         @refetch="refetch"
       />
 
-      <PlanDetailDialog v-model:open="planDialogOpen" :detail="selDetail" :y="y" :m="m" />
+      <PlanDetailDialog v-model:open="planDialogOpen" :detail="selDetail" :y="y" :m="m" :factory="factory" />
       <SkuDetailDialog v-model:open="skuDetailOpen" :barcode="skuDetailBarcode" :name="skuDetailName" :date-detail="skuDateDetail" />
     </div>
   </div>
@@ -109,8 +115,10 @@ import PurchasePlanDailyTab from './components/PurchasePlanDailyTab.vue';
 import PurchasePlanToolbar from './components/PurchasePlanToolbar.vue';
 import PurchasePlanMonthNav from './components/PurchasePlanMonthNav.vue';
 import PurchasePlanKpiStrip from './components/PurchasePlanKpiStrip.vue';
+import PurchasePlanFactoryFilter from './components/PurchasePlanFactoryFilter.vue';
 import { usePurchasePlanData } from './composables/usePurchasePlanData';
 import { useSkuSummary } from './composables/useSkuSummary';
+import { useFactorySplit, type FactoryFilter } from './composables/useFactorySplit';
 import type { CustSumItem } from './components/types';
 
 // 弹窗组件懒加载，减少首屏 chunk 体积（仅在用户交互时才加载）
@@ -132,6 +140,8 @@ const sel = ref('');
 const showCreate = ref(false);
 const viewTab = ref<'daily' | 'summary'>('daily');
 const custFilter = ref('');
+// 工厂筛选（作用于整页）：'all' 表示全部工厂
+const factory = ref<FactoryFilter>('all');
 
 // 当日明细的呈现从「选中即弹窗」改为「右栏内联，点按钮才开弹窗」：
 // sel 仍然只是「选中了哪一天」，弹窗开关与它解耦，右栏才有稳定的展示位。
@@ -146,8 +156,29 @@ watch(sel, (v) => { if (!v) planDialogOpen.value = false; });
 watch(globalKw, () => { if (viewTab.value === 'daily') sel.value = ''; });
 watch([y, m], () => { sel.value = ''; globalKw.value = ''; debouncedKw.value = ''; });
 watch(viewTab, () => { globalKw.value = ''; debouncedKw.value = ''; });
+// 切工厂后，原来选中的日期/客户可能在新工厂下无数据，一并清掉避免空白页
+watch(factory, () => { sel.value = ''; custFilter.value = ''; });
 
-const { d, isLoading, isFetching, isError, refetch, rows, skuSummary, skuDateIndex, customers } = usePurchasePlanData(y, m, viewTab);
+const {
+  d, isLoading, isFetching, isError, refetch,
+  rows: rawRows, skuSummary: rawSkuSummary, skuDateIndex: rawSkuDateIndex, customers: rawCustomers,
+} = usePurchasePlanData(y, m, viewTab);
+
+// 工厂维度拆分：一次性拿到整月聚合后本地切换，切换零延迟（见 useFactorySplit）。
+// 下游的 rows / skuSummary / skuDateIndex / customers 全部是「已按工厂过滤」的视图。
+const { rows, skuSummary, skuDateIndex, customers, availableFactories, factoryTotals } = useFactorySplit({
+  factory,
+  rows: rawRows,
+  skuSummary: rawSkuSummary,
+  skuDateIndex: rawSkuDateIndex,
+  customers: rawCustomers,
+});
+
+// 切月后若该工厂当月已无计划，回落到「全部」——否则控件不再渲染该厂药丸，
+// 会出现「没有任何药丸处于选中态、页面却是空的」的困惑状态。
+watch(availableFactories, (list) => {
+  if (factory.value !== 'all' && !list.includes(factory.value)) factory.value = 'all';
+});
 
 const allCustomers = computed<CustSumItem[]>(() => {
   return [...customers.value].sort((a, b) => b.remaining_qty - a.remaining_qty);
@@ -184,6 +215,10 @@ const {
   skuDateDetail, skuDetailOpen, skuDetailBarcode, skuDetailName,
   openSkuDetail, toggleSkuSort,
 } = useSkuSummary({ skuSummary, skuDateIndex, custFilter, globalKw: debouncedKw, viewTab });
+
+// 切工厂会整体换掉 SKU 列表，页码必须归位：停在第 2 页而新列表只有 1 页时，
+// 分页控件（totalPages<=1 时隐藏）会消失，表格整片空白且无法退回。
+watch(factory, () => { skuPage.value = 1; });
 
 // 使用防抖后的搜索值，避免每次按键触发全量过滤
 const filtered = computed(() => {

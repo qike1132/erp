@@ -8101,7 +8101,7 @@
           "退货管理"
         ],
         "summary": "Edit Stock Return",
-        "description": "编辑退货记录（单事务内「取消原退货 + 按同一出货明细重建」，原子）。\n\n未提供的字段沿用原值。新记录带新的 SR 单号，旧记录软取消保留可追溯；\n库存、出货已退量、订单状态按净变化对称调整。\n\nArgs:\n    return_id: 退货记录 ID。\n    data: 退货更新参数（仅包含需要修改的字段）。\n    db: 异步数据库会话（读写主库）。\n    _user: 当前登录用户（仅需通过权限校验）。\n\nReturns:\n    StockActionResponse: 包含成功标志、提示消息与新退货单号。\n\nRaises:\n    HTTPException: 退货记录不存在时抛出 404。",
+        "description": "编辑退货记录（单事务内「取消原退货 + 按同一出货明细重建」，原子）。\n\n未提供的字段沿用原值。新记录带新的 SR 单号，旧记录**被删除**\n（2026-10-09 起取消即删行，不再软取消保留）；库存、出货已退量、订单状态按净变化对称调整。\n\nArgs:\n    return_id: 退货记录 ID。\n    data: 退货更新参数（仅包含需要修改的字段）。\n    db: 异步数据库会话（读写主库）。\n    _user: 当前登录用户（仅需通过权限校验）。\n\nReturns:\n    StockActionResponse: 包含成功标志、提示消息与新退货单号。\n\nRaises:\n    HTTPException: 退货记录不存在时抛出 404。",
         "operationId": "edit_stock_return_api_v1_stock_returns__return_id__put",
         "parameters": [
           {
@@ -8152,7 +8152,7 @@
           "退货管理"
         ],
         "summary": "Cancel Stock Return",
-        "description": "取消退货记录（P1-① 软取消：记录保留，库存对称扣回、订单状态重算）。\n\nArgs:\n    return_id: 退货记录 ID。\n    db: 异步数据库会话（读写主库）。\n    _user: 当前登录用户（仅需通过权限校验）。\n\nReturns:\n    StockActionResponse: 包含成功标志和提示消息。\n\nRaises:\n    HTTPException: 退货记录不存在时抛出 404。",
+        "description": "取消退货记录（回冲库存/订单状态后**删除该行**，记录不留存）。\n\nArgs:\n    return_id: 退货记录 ID。\n    db: 异步数据库会话（读写主库）。\n    _user: 当前登录用户（仅需通过权限校验）。\n\nReturns:\n    StockActionResponse: 包含成功标志和提示消息。\n\nRaises:\n    HTTPException: 退货记录不存在时抛出 404。",
         "operationId": "cancel_stock_return_api_v1_stock_returns__return_id__delete",
         "parameters": [
           {
@@ -14361,7 +14361,7 @@
           "采购计划"
         ],
         "summary": "Day Details",
-        "description": "指定日期明细（6.9：按需加载当日明细，供日期详情弹窗使用）。\n\nArgs:\n    year: 年份。\n    month: 月份（1-12）。\n    day: 日期（1-31）。\n    customer_id: 客户 ID 筛选，0 表示不筛选。\n    db: 只读数据库会话。\n    _user: 当前操作用户（用于权限校验）。\n\nReturns:\n    DayDetailsResponse: 当日明细列表 + 按客户分组。\n\nRaises:\n    HTTPException: 数据库异常返回 500；查询超时返回 504。",
+        "description": "指定日期明细（6.9：按需加载当日明细，供日期详情弹窗使用）。\n\nArgs:\n    year: 年份。\n    month: 月份（1-12）。\n    day: 日期（1-31）。\n    customer_id: 客户 ID 筛选，0 表示不筛选。\n    factory: 工厂筛选，空表示不筛选；与 /purchase-plan 页面工厂选择联动。\n    db: 只读数据库会话。\n    _user: 当前操作用户（用于权限校验）。\n\nReturns:\n    DayDetailsResponse: 当日明细列表 + 按客户分组。\n\nRaises:\n    HTTPException: 数据库异常返回 500；查询超时返回 504。",
         "operationId": "day_details_api_v1_plans_day_details_get",
         "parameters": [
           {
@@ -14412,6 +14412,18 @@
               "title": "Customer Id"
             },
             "description": "客户ID筛选"
+          },
+          {
+            "name": "factory",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "工厂筛选（东莞/湖北/未标注），空表示不筛选",
+              "default": "",
+              "title": "Factory"
+            },
+            "description": "工厂筛选（东莞/湖北/未标注），空表示不筛选"
           }
         ],
         "responses": {

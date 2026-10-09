@@ -340,7 +340,7 @@ async def monthly_aggregated(year: int=Query(..., description='年份'), month: 
         raise HTTPException(status_code=500, detail='获取月度数据失败，请稍后重试') from e
 
 @router.get('/day-details', response_model=DayDetailsResponse)
-async def day_details(year: int=Query(..., description='年份'), month: int=Query(..., ge=1, le=12, description='月份'), day: int=Query(..., ge=1, le=31, description='日期'), customer_id: int=Query(0, description='客户ID筛选'), db: AsyncSession=Depends(get_async_read_db), _user: User=Depends(require_permission('production_plan_view'))) -> DayDetailsResponse:
+async def day_details(year: int=Query(..., description='年份'), month: int=Query(..., ge=1, le=12, description='月份'), day: int=Query(..., ge=1, le=31, description='日期'), customer_id: int=Query(0, description='客户ID筛选'), factory: str=Query('', description='工厂筛选（东莞/湖北/未标注），空表示不筛选'), db: AsyncSession=Depends(get_async_read_db), _user: User=Depends(require_permission('production_plan_view'))) -> DayDetailsResponse:
     """指定日期明细（6.9：按需加载当日明细，供日期详情弹窗使用）。
 
     Args:
@@ -348,6 +348,7 @@ async def day_details(year: int=Query(..., description='年份'), month: int=Que
         month: 月份（1-12）。
         day: 日期（1-31）。
         customer_id: 客户 ID 筛选，0 表示不筛选。
+        factory: 工厂筛选，空表示不筛选；与 /purchase-plan 页面工厂选择联动。
         db: 只读数据库会话。
         _user: 当前操作用户（用于权限校验）。
 
@@ -359,7 +360,7 @@ async def day_details(year: int=Query(..., description='年份'), month: int=Que
     """
     try:
         async with asyncio.timeout(MONTHLY_QUERY_TIMEOUT_SECONDS):
-            return await purchase_plan_service.get_day_details(db, year, month, day, customer_id)
+            return await purchase_plan_service.get_day_details(db, year, month, day, customer_id, factory)
     except (OperationalError, DisconnectionError) as e:
         logger.error(f'获取日期明细失败: {e}', exc_info=True)
         raise HTTPException(status_code=500, detail=f'获取日期明细失败: {settings.sanitize_error(e)}') from e

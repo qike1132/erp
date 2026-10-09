@@ -66,6 +66,7 @@ function mountTab(over: { sel?: string } = {}): VueWrapper {
       filtered: ROWS,
       skuDateIndex: SKU_INDEX,
       sel: over.sel ?? '',
+      factory: 'all',
     },
     global: {
       stubs: {

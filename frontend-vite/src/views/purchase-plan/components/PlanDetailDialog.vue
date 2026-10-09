@@ -60,6 +60,8 @@ const props = defineProps<{
   detail: Row | null;
   y: number;
   m: number;
+  /** 当前工厂筛选（'all' 或具体工厂名），透传给当日明细接口保持与页面一致 */
+  factory: string;
 }>();
 
 const emit = defineEmits<{
@@ -71,11 +73,12 @@ const modalSelCust = ref('');
 
 // 按需加载当日明细（6.9：弹窗打开时才请求，避免全量传输）
 const { data: dayData, isLoading: dayLoading } = useQuery({
-  queryKey: ['pp-day', () => props.y, () => props.m, () => props.detail?._dayNum ?? 0],
+  queryKey: ['pp-day', () => props.y, () => props.m, () => props.detail?._dayNum ?? 0, () => props.factory],
   queryFn: async () => {
     const day = props.detail?._dayNum;
     if (!day) return null;
-    return await planApi.dayDetails({ year: props.y, month: props.m, day });
+    // 'all' 不下发工厂过滤；其余按工厂收敛当日明细
+    return await planApi.dayDetails({ year: props.y, month: props.m, day, factory: props.factory === 'all' ? '' : props.factory });
   },
   enabled: () => props.open && !!props.detail,
   staleTime: 60_000,

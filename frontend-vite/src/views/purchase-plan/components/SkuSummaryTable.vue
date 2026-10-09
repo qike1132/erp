@@ -4,6 +4,7 @@
       <thead>
         <tr>
           <th class="th-cust">客户名称</th>
+          <th class="th-factory">工厂</th>
           <th class="th-prod">产品名称</th>
           <th class="th-code">商品条码</th>
           <th
@@ -29,6 +30,7 @@
       <tbody>
         <tr v-for="s in rows" :key="`${s.customer_name}|${s.product_name}`" @click="emit('open-detail', { barcode: s.barcode, name: s.product_name, customer: s.customer_name })">
           <td class="td-cust">{{ s.customer_name }}</td>
+          <td class="td-factory"><span class="sp-fb" :class="`fb-${factoryTone(s.factory)}`">{{ s.factory || '未标注' }}</span></td>
           <td class="td-prod"><span class="sp-prod">{{ s.product_name }}</span></td>
           <td class="td-code"><span class="sp-code">{{ s.barcode }}</span></td>
           <td class="td-num num">{{ fmt(s.plan_qty) }}</td>
@@ -58,6 +60,7 @@
 // SKU 月度统计表 —— 从 PurchasePlanMonthlySummary 抽出（原文件加 chips 与分布面板后会破 400 行门禁）。
 // 排序/分页/筛选仍由 useSkuSummary 掌管，这里只负责渲染与事件上传。
 import UiPagination from '@/components/ui/UiPagination.vue'
+import { factoryTone } from './factoryMeta'
 import type { SkuRow } from './types'
 
 const props = defineProps<{
@@ -157,6 +160,20 @@ function progCls(pct: number): string {
 .td-part { color: var(--color-warning-600); font-weight: 700; }
 .td-done { color: var(--color-success-600); font-weight: 700; }
 .td-remain { color: var(--color-warning-600); font-weight: 700; }
+
+/* 工厂徽章：东莞主色 / 湖北紫 / 其余中性 */
+.sp-fb {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.fb-dg { background: var(--color-primary-50, #eff5ff); color: var(--color-primary-700, #2d5ab8); }
+.fb-hb { background: var(--color-purple-50, #f5f3ff); color: var(--color-purple-700, #6d28d9); }
+.fb-other { background: var(--color-slate-100, #f1f5f9); color: var(--color-text-muted, #64748b); }
 
 .th-sortable {
   cursor: pointer;

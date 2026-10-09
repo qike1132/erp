@@ -15,11 +15,15 @@
         <!-- 左：整月排产日历 -->
         <div class="sp-panel">
           <div class="sp-panel-head">
-            <span>{{ y }}年{{ pad(m) }}月 · 排产日历</span>
+            <span>{{ y }}年{{ pad(m) }}月 · 排产日历{{ factory === 'all' ? '' : '（仅' + factory + '）' }}</span>
             <span class="sp-inline-legend">
               <span><i class="lg-r" />逾期</span>
               <span><i class="lg-a" />临期≤3天</span>
               <span><i class="lg-g" />已完成</span>
+              <!-- 工厂图例随当月实际出现的工厂走（含「未标注」），与格内构成条颜色一一对应 -->
+              <template v-if="factory === 'all'">
+                <span v-for="f in rowFactories" :key="f"><i :class="`lg-${factoryTone(f)}`" />{{ f }}</span>
+              </template>
             </span>
           </div>
           <PlanMonthGrid
@@ -27,6 +31,7 @@
             :m="m"
             :rows="rows"
             :sel="sel"
+            :factory="factory"
             :searching="isSearching"
             :matched-dates="matchedDates"
             @select="selectDate"
@@ -50,6 +55,7 @@
               :total-qty="selRow.totalQty"
               :customer-count="selRow.customerCount"
               :product-count="selProductCount"
+              :factory="factory"
               @open-full="emit('open-full')"
             />
             <PlanRiskList v-else :items="riskItems" @select="selectDate" />
@@ -68,6 +74,7 @@ import PlanMonthGrid from './PlanMonthGrid.vue'
 import PlanDayDetail from './PlanDayDetail.vue'
 import PlanRiskList from './PlanRiskList.vue'
 import { daysFromToday, startOfToday } from './dayStatus'
+import { orderFactories, factoryTone } from './factoryMeta'
 import type { Row, SkuDateItem, PlanDayCustomerGroup, RiskItem } from './types'
 
 const props = defineProps<{
@@ -80,6 +87,8 @@ const props = defineProps<{
   filtered: Row[]
   skuDateIndex: Record<string, SkuDateItem[]>
   sel: string
+  /** 当前工厂筛选（'all' 或具体工厂名）；'all' 时日历格内叠加工厂构成条 */
+  factory: string
 }>()
 
 const emit = defineEmits<{
@@ -95,15 +104,22 @@ const pad = (n: number) => String(n).padStart(2, '0')
 const matchedDates = computed(() => new Set(props.filtered.map(r => r.date)))
 const isSearching = computed(() => props.filtered.length > 0 && props.filtered.length < props.rows.length)
 
+/** 当月实际出现过的工厂（按固定顺序），用于日历图例——含「未标注」，与格内构成条一一对应 */
+const rowFactories = computed<string[]>(() => {
+  const s = new Set<string>()
+  for (const r of props.rows) for (const f of Object.keys(r.factories ?? {})) s.add(f)
+  return orderFactories([...s])
+})
+
 // sku_date_index 的键为「客户|产品」，此处按日期反转成 日期 → 明细行 的索引
 const itemsByDate = computed(() => {
-  const map = new Map<string, { customer: string; product: string; qty: number; status: string }[]>()
+  const map = new Map<string, { customer: string; product: string; qty: number; status: string; factory?: string }[]>()
   for (const [key, entries] of Object.entries(props.skuDateIndex ?? {})) {
     const sep = key.indexOf('|')
     const customer = sep < 0 ? key : key.slice(0, sep)
     const product = sep < 0 ? '' : key.slice(sep + 1)
     for (const e of entries) {
-      const item = { customer, product, qty: e.qty, status: e.status }
+      const item = { customer, product, qty: e.qty, status: e.status, factory: e.factory }
       const list = map.get(e.date)
       if (list) list.push(item)
       else map.set(e.date, [item])
@@ -127,7 +143,7 @@ const groupsByDate = computed(() => {
         byCustomer.set(it.customer, g)
       }
       g.qty += it.qty
-      g.products.push({ product: it.product, qty: it.qty, status: it.status })
+      g.products.push({ product: it.product, qty: it.qty, status: it.status, factory: it.factory })
     }
     const list = [...byCustomer.values()]
     for (const g of list) g.products.sort((a, b) => b.qty - a.qty)
@@ -251,6 +267,10 @@ function selectDate(date: string): void {
 .lg-r { background: var(--color-danger-500); }
 .lg-a { background: var(--color-warning-500); }
 .lg-g { background: var(--color-success-500); }
+/* 工厂色档（与 factoryMeta.factoryTone 对应）：东莞主色 / 湖北紫 / 其余中性 */
+.lg-dg { background: var(--color-primary-500, #5b8def); }
+.lg-hb { background: var(--color-purple-500, #8b5cf6); }
+.lg-other { background: var(--color-slate-300, #cbd5e1); }
 
 .sp-search-hint {
   padding: 0 18px 14px;

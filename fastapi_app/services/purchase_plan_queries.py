@@ -35,6 +35,10 @@ SHIPMENT_RECORD_LOOKBACK_MONTHS = 12
 # 出货记录查询条数上限（P3: 从环境变量读取，便于调优）
 _QUERY_LIMIT = int(os.getenv('PURCHASE_QUERY_LIMIT', '500'))
 
+# 产品未标工厂（product.factory IS NULL）时的归集桶名。
+# 前端「工厂」筛选与日历构成条都以它作为一个独立取值，避免这类行在按厂拆分时凭空消失。
+UNSPEC_FACTORY = '未标注'
+
 
 def _calc_stock_status(plan_qty: int, inventory_qty: int) -> str:
     """库存状态：充足(>=计划) / 紧张(0<库存<计划) / 无库存(库存=0)"""
@@ -394,12 +398,18 @@ def _py_weekday_to_js(py_wd: int) -> str:
 
 
 async def _fetch_monthly_plan_rows(db: AsyncSession, plan_month: str, customer_id: int):
-    """查询指定月份（可选按客户过滤）的计划明细行。"""
+    """查询指定月份（可选按客户过滤）的计划明细行。
+
+    附带的 factory 来自 product.factory（经 d.product_id 关联），供 /purchase-plan
+    按工厂拆分查看使用。LEFT JOIN：产品缺失也不丢行（factory 退化为 NULL）。
+    """
     _sql = """
         SELECT d.id AS detail_id, d.plan_id, p.customer_id, p.customer_name,
-               d.product_name, d.barcode, d.plan_date, d.quantity
+               d.product_name, d.barcode, d.plan_date, d.quantity,
+               pr.factory AS factory
         FROM purchase_plan_details d
         JOIN purchase_plans p ON d.plan_id = p.id
+        LEFT JOIN product pr ON d.product_id = pr.id
         WHERE p.plan_month = :plan_month
     """ + (" AND p.customer_id = :customer_id" if customer_id else "")  # nosec B608
     params: dict = {'plan_month': plan_month}
@@ -409,10 +419,97 @@ async def _fetch_monthly_plan_rows(db: AsyncSession, plan_month: str, customer_i
     return result.all()
 
 
+def _accumulate_date(by_date: dict, *, date_str: str, dt, py_wd: int, customer_name: str,
+                     product_name: str, factory: str, qty: int, prod_qty: int, status: str) -> None:
+    """把一行明细并入「按日期」聚合（含按工厂桶）。"""
+    if date_str not in by_date:
+        by_date[date_str] = {
+            'date': date_str, 'day_num': dt.day if dt else 0,
+            'weekday': _py_weekday_to_js(py_wd),
+            '_cust_set': set(), 'plan_count': 0, 'total_qty': 0,
+            'produced_qty': 0, 'produced_count': 0, 'pending_count': 0,
+            '_factory': {},
+        }
+    d = by_date[date_str]
+    d['_cust_set'].add(customer_name)
+    d['plan_count'] += 1
+    d['total_qty'] += qty
+    d['produced_qty'] += prod_qty
+    if status == 'completed':
+        d['produced_count'] += 1
+    else:
+        d['pending_count'] += 1
+    # 按工厂拆分（供「全部」视图的构成条与按厂筛选后的日历取值）。
+    # rows/completed/pending 都是**明细行**计数，与日级 plan_count/_produced_count/
+    # _pending_count 同口径；prodN 才是去重产品数。custNames 供前端按厂筛选后
+    # 重算当日客户名（否则导出/风险清单会带出他厂客户）。
+    fa = d['_factory'].setdefault(
+        factory,
+        {'qty': 0, 'produced': 0, 'rows': 0, 'completed': 0, 'pending': 0, '_cust': set(), '_prod': set()},
+    )
+    fa['qty'] += qty
+    fa['produced'] += prod_qty
+    fa['rows'] += 1
+    if status == 'completed':
+        fa['completed'] += 1
+    else:
+        fa['pending'] += 1
+    fa['_cust'].add(customer_name)
+    fa['_prod'].add(product_name)
+
+
+def _accumulate_sku(by_key: dict, *, sku_key: str, barcode, product_name: str,
+                    customer_name: str, factory: str, qty: int, prod_qty: int, remain: int) -> None:
+    """把一行明细并入「按 SKU（客户|产品）」聚合。"""
+    if sku_key not in by_key:
+        by_key[sku_key] = {'barcode': barcode or '—', 'product_name': product_name,
+                           'plan_qty': 0, 'produced_qty': 0, 'remain_qty': 0,
+                           'customer_name': customer_name, 'factory': factory}
+    sk = by_key[sku_key]
+    sk['plan_qty'] += qty
+    sk['produced_qty'] += prod_qty
+    sk['remain_qty'] += remain
+
+
+def _accumulate_sku_date_index(prod_cust_date_map: dict, *, sku_key: str, date_str: str, dt,
+                               py_wd: int, customer_name: str, status: str, factory: str, qty: int) -> None:
+    """把一行明细并入「SKU × 日期」索引。"""
+    date_map = prod_cust_date_map.setdefault(sku_key, {})
+    if date_str not in date_map:
+        date_map[date_str] = {'date': date_str, 'day': dt.day if dt else 0,
+                              'weekday': _py_weekday_to_js(py_wd),
+                              'qty': 0, 'customer': customer_name, 'status': status,
+                              'factory': factory}
+    date_map[date_str]['qty'] += qty
+
+
+def _accumulate_customer_product(product_summary: dict, inventory_map: dict, *, customer_id: int,
+                                 customer_name: str, product_name: str, factory: str,
+                                 qty: int, prod_qty: int, remain: int) -> None:
+    """把一行明细并入「客户 × 产品」汇总。"""
+    inv_qty = inventory_map.get((customer_name, product_name), 0)
+    product_key = (customer_id, product_name)
+    if product_key not in product_summary:
+        product_summary[product_key] = {'customer_id': customer_id, 'customer_name': customer_name,
+                                        'plan_qty': 0, 'inventory_qty': inv_qty, 'produced_qty': 0,
+                                        'remaining_qty': 0, 'warning': False, 'factory': factory}
+    ps = product_summary[product_key]
+    ps['plan_qty'] += qty
+    ps['produced_qty'] += prod_qty
+    ps['remaining_qty'] += remain
+    # 预警按累计口径：该客户该产品当月计划总量超过该产品总库存即告警，
+    # 单行比较会漏掉"多条明细各自不超、累计超库存"的场景
+    if _calc_stock_status(ps['plan_qty'], inv_qty) != 'sufficient':
+        ps['warning'] = True
+
+
 def _aggregate_monthly_rows(rows, detail_produced_map, inventory_map) -> tuple[dict, dict, dict, dict]:
     """单次遍历完成全部聚合：日期 / SKU / SKU日期索引 / 客户产品级。
 
     返回 (by_date, by_key, prod_cust_date_map, product_summary)。
+
+    工厂维度：每行带 factory（来自 product.factory，缺失归 UNSPEC_FACTORY）。
+    按日/按 SKU/按客户出口都附带工厂信息，前端据此本地拆分，无需二次请求。
     """
     by_date: dict[str, dict] = {}
     by_key: dict[str, dict] = {}
@@ -428,69 +525,47 @@ def _aggregate_monthly_rows(rows, detail_produced_map, inventory_map) -> tuple[d
         status = 'completed' if prod_qty >= qty else ('partial' if prod_qty > 0 else 'pending')
         customer_name = row.customer_name or '未知客户'
         product_name = row.product_name or '—'
+        factory = getattr(row, 'factory', None) or UNSPEC_FACTORY
         py_wd = dt.weekday() if dt else 0
 
-        # 日期聚合
-        if date_str not in by_date:
-            by_date[date_str] = {
-                'date': date_str, 'day_num': dt.day if dt else 0,
-                'weekday': _py_weekday_to_js(py_wd),
-                '_cust_set': set(), 'plan_count': 0, 'total_qty': 0,
-                'produced_qty': 0, 'produced_count': 0, 'pending_count': 0,
-            }
-        d = by_date[date_str]
-        d['_cust_set'].add(customer_name)
-        d['plan_count'] += 1
-        d['total_qty'] += qty
-        d['produced_qty'] += prod_qty
-        if status == 'completed':
-            d['produced_count'] += 1
-        else:
-            d['pending_count'] += 1
+        _accumulate_date(by_date, date_str=date_str, dt=dt, py_wd=py_wd, customer_name=customer_name,
+                         product_name=product_name, factory=factory, qty=qty, prod_qty=prod_qty, status=status)
 
-        # SKU 聚合
         sku_key = f'{customer_name}|{product_name}'
-        if sku_key not in by_key:
-            by_key[sku_key] = {'barcode': row.barcode or '—', 'product_name': product_name,
-                               'plan_qty': 0, 'produced_qty': 0, 'remain_qty': 0, 'customer_name': customer_name}
-        sk = by_key[sku_key]
-        sk['plan_qty'] += qty
-        sk['produced_qty'] += prod_qty
-        sk['remain_qty'] += remain
-
-        # SKU 日期索引
-        if sku_key not in _prod_cust_date_map:
-            _prod_cust_date_map[sku_key] = {}
-        date_map = _prod_cust_date_map[sku_key]
-        if date_str not in date_map:
-            date_map[date_str] = {'date': date_str, 'day': dt.day if dt else 0,
-                                  'weekday': _py_weekday_to_js(py_wd),
-                                  'qty': 0, 'customer': customer_name, 'status': status}
-        date_map[date_str]['qty'] += qty
-
-        # 客户汇总（产品级）
-        inv_qty = inventory_map.get((customer_name, product_name), 0)
-        product_key = (row.customer_id, product_name)
-        if product_key not in product_summary:
-            product_summary[product_key] = {'customer_id': row.customer_id, 'customer_name': customer_name,
-                                            'plan_qty': 0, 'inventory_qty': inv_qty, 'produced_qty': 0,
-                                            'remaining_qty': 0, 'warning': False}
-        ps = product_summary[product_key]
-        ps['plan_qty'] += qty
-        ps['produced_qty'] += prod_qty
-        ps['remaining_qty'] += remain
-        # 预警按累计口径：该客户该产品当月计划总量超过该产品总库存即告警，
-        # 单行比较会漏掉"多条明细各自不超、累计超库存"的场景
-        if _calc_stock_status(ps['plan_qty'], inv_qty) != 'sufficient':
-            ps['warning'] = True
+        _accumulate_sku(by_key, sku_key=sku_key, barcode=row.barcode, product_name=product_name,
+                        customer_name=customer_name, factory=factory, qty=qty, prod_qty=prod_qty, remain=remain)
+        _accumulate_sku_date_index(_prod_cust_date_map, sku_key=sku_key, date_str=date_str, dt=dt,
+                                   py_wd=py_wd, customer_name=customer_name, status=status,
+                                   factory=factory, qty=qty)
+        _accumulate_customer_product(product_summary, inventory_map, customer_id=row.customer_id,
+                                     customer_name=customer_name, product_name=product_name,
+                                     factory=factory, qty=qty, prod_qty=prod_qty, remain=remain)
 
     return by_date, by_key, _prod_cust_date_map, product_summary
 
 
 def _build_monthly_rows_list(by_date: dict, month: int) -> list:
-    """构建 rows 列表（字段名与前端 Row 类型对齐）。"""
+    """构建 rows 列表（字段名与前端 Row 类型对齐）。
+
+    每行附带 factories：{工厂名: {qty, produced, pct, custN, prodN, rowN,
+    completedN, pendingN, custNames}}，前端按工厂筛选时直接取对应桶，
+    无需重新请求。rowN/completedN/pendingN 为明细行计数，与日级字段同口径。
+    """
     rows_list = []
     for date_str, d in by_date.items():
+        factories = {}
+        for fac, fa in d['_factory'].items():
+            factories[fac] = {
+                'qty': fa['qty'],
+                'produced': fa['produced'],
+                'pct': round_qty(fa['produced'] / fa['qty'] * 100, precision_digits=1) if fa['qty'] > 0 else 0,
+                'custN': len(fa['_cust']),
+                'prodN': len(fa['_prod']),
+                'rowN': fa['rows'],
+                'completedN': fa['completed'],
+                'pendingN': fa['pending'],
+                'custNames': sorted(fa['_cust']),
+            }
         rows_list.append({
             'date': date_str, '_dayNum': d['day_num'], '_weekday': d['weekday'],
             'customerCount': len(d['_cust_set']), 'planCount': d['plan_count'],
@@ -499,6 +574,7 @@ def _build_monthly_rows_list(by_date: dict, month: int) -> list:
             '_producedPct': round_qty(d['produced_qty'] / d['total_qty'] * 100, precision_digits=1) if d['total_qty'] > 0 else 0,
             'customerNames': sorted(d['_cust_set']),
             '_fullDate': f'{month}月{d["day_num"]}日', '_isPeak': False,
+            'factories': factories,
         })
     rows_list.sort(key=lambda r: r['date'])
     max_plan = max((r['planCount'] for r in rows_list), default=0)
@@ -508,13 +584,17 @@ def _build_monthly_rows_list(by_date: dict, month: int) -> list:
 
 
 def _build_sku_summary_list(by_key: dict) -> list:
-    """构建 sku_summary 列表（字段名与前端 SkuRow 类型对齐）。"""
+    """构建 sku_summary 列表（字段名与前端 SkuRow 类型对齐）。
+
+    每个 SKU 带 factory：产品所属工厂（缺失为 UNSPEC_FACTORY），前端按厂筛选/展示徽章。
+    """
     sku_summary = []
     for sk in by_key.values():
         sku_summary.append({
             'barcode': sk['barcode'], 'product_name': sk['product_name'],
             'plan_qty': sk['plan_qty'], 'produced_qty': sk['produced_qty'],
             'remain_qty': sk['remain_qty'], 'customer_name': sk['customer_name'],
+            'factory': sk.get('factory', UNSPEC_FACTORY),
             '_pct': round_qty(sk['produced_qty'] / sk['plan_qty'] * 100, precision_digits=1) if sk['plan_qty'] > 0 else 0,
             '_odd': False,
         })
@@ -523,14 +603,18 @@ def _build_sku_summary_list(by_key: dict) -> list:
 
 
 def _build_customer_totals(product_summary: dict) -> tuple[list, dict]:
-    """构建客户汇总列表与客户总量。"""
+    """构建客户汇总列表与客户总量。
+
+    每个客户附带 factories：{工厂名: {plan_qty, inventory_qty, produced_qty,
+    remaining_qty, warning_count}}，供前端按厂筛选后重算客户级指标。
+    """
     summary: dict[int, dict] = {}
     for ps in product_summary.values():
         cid = ps['customer_id']
         if cid not in summary:
             summary[cid] = {'customer_id': cid, 'customer_name': ps['customer_name'],
                             'plan_qty': 0, 'inventory_qty': 0, 'produced_qty': 0,
-                            'remaining_qty': 0, 'warning_count': 0}
+                            'remaining_qty': 0, 'warning_count': 0, 'factories': {}}
         s = summary[cid]
         s['plan_qty'] += ps['plan_qty']
         s['inventory_qty'] += ps['inventory_qty']
@@ -538,6 +622,15 @@ def _build_customer_totals(product_summary: dict) -> tuple[list, dict]:
         s['remaining_qty'] += ps['remaining_qty']
         if ps['warning']:
             s['warning_count'] += 1
+        fac = ps.get('factory', UNSPEC_FACTORY)
+        f = s['factories'].setdefault(fac, {'plan_qty': 0, 'inventory_qty': 0, 'produced_qty': 0,
+                                            'remaining_qty': 0, 'warning_count': 0})
+        f['plan_qty'] += ps['plan_qty']
+        f['inventory_qty'] += ps['inventory_qty']
+        f['produced_qty'] += ps['produced_qty']
+        f['remaining_qty'] += ps['remaining_qty']
+        if ps['warning']:
+            f['warning_count'] += 1
     customers = list(summary.values())
     customer_totals = {
         'total_plan_qty': sum(s['plan_qty'] for s in customers),
@@ -553,8 +646,8 @@ def _build_customer_totals(product_summary: dict) -> tuple[list, dict]:
     key_prefix="pp:agg",
     ttl=120,
     local_ttl=30,
-    # v2: 进度口径由「已出货」改为「已生产」（设计稿 §5）。
-    key_builder=lambda **kwargs: f"v2:y{kwargs.get('year', 0)}:m{kwargs.get('month', 0)}:c{kwargs.get('customer_id', 0)}",
+    # v3: rows/sku_summary/customers 增加工厂维度（东莞/湖北/未标注）。
+    key_builder=lambda **kwargs: f"v3:y{kwargs.get('year', 0)}:m{kwargs.get('month', 0)}:c{kwargs.get('customer_id', 0)}",
 )
 async def get_monthly_aggregated(db: AsyncSession, year: int, month: int, customer_id: int=0) -> dict:
     """月度聚合数据：在后端完成 rows + sku_summary + sku_date_index + customers 聚合，
@@ -606,29 +699,41 @@ async def get_monthly_aggregated(db: AsyncSession, year: int, month: int, custom
     key_prefix="pp:day",
     ttl=120,
     local_ttl=30,
-    # v2: 进度口径由「已出货」改为「已生产」（设计稿 §5）。
-    key_builder=lambda **kwargs: f"v2:y{kwargs.get('year', 0)}:m{kwargs.get('month', 0)}:d{kwargs.get('day', 0)}:c{kwargs.get('customer_id', 0)}",
+    # v3: plans 增加 factory（东莞/湖北/未标注），支持按厂过滤当日明细。
+    key_builder=lambda **kwargs: f"v3:y{kwargs.get('year', 0)}:m{kwargs.get('month', 0)}:d{kwargs.get('day', 0)}:c{kwargs.get('customer_id', 0)}:f{kwargs.get('factory', '')}",
 )
-async def get_day_details(db: AsyncSession, year: int, month: int, day: int, customer_id: int=0) -> dict:
-    """指定日期的明细列表（按需加载，供日期详情弹窗使用，避免全量传输）"""
+async def get_day_details(db: AsyncSession, year: int, month: int, day: int, customer_id: int=0, factory: str='') -> dict:
+    """指定日期的明细列表（按需加载，供日期详情弹窗使用，避免全量传输）。
+
+    factory 非空时只返回该工厂（UNSPEC_FACTORY 表示 product.factory IS NULL）的明细，
+    与 /purchase-plan 页面的工厂筛选保持一致。
+    """
     plan_month = f'{year}-{month:02d}'
     target_date = date(year, month, day)
     date_str = target_date.isoformat()
 
     _sql = """
         SELECT d.id AS detail_id, d.plan_id, p.customer_id, p.customer_name,
-               d.product_name, d.barcode, d.plan_date, d.quantity
+               d.product_name, d.barcode, d.plan_date, d.quantity,
+               pr.factory AS factory
         FROM purchase_plan_details d
         JOIN purchase_plans p ON d.plan_id = p.id
+        LEFT JOIN product pr ON d.product_id = pr.id
         WHERE p.plan_month = :plan_month AND d.plan_date = :plan_date
-    """ + (" AND p.customer_id = :customer_id" if customer_id else "")  # nosec B608
-    sql = text(_sql)
-
+    """
     params: dict = {'plan_month': plan_month, 'plan_date': target_date}
     if customer_id:
+        _sql += ' AND p.customer_id = :customer_id'
         params['customer_id'] = customer_id
+    if factory:
+        # '未标注' 对应 product.factory IS NULL，其余按值匹配
+        if factory == UNSPEC_FACTORY:
+            _sql += ' AND pr.factory IS NULL'
+        else:
+            _sql += ' AND pr.factory = :factory'
+            params['factory'] = factory
 
-    result = await db.execute(sql, params)
+    result = await db.execute(text(_sql), params)  # nosec B608
     rows = result.all()
 
     detail_produced_map, fifo_degraded = await _build_fifo_produced_map_from_rows(db, rows, plan_month)
@@ -645,6 +750,7 @@ async def get_day_details(db: AsyncSession, year: int, month: int, day: int, cus
             'customer_name': row.customer_name, 'product_name': row.product_name,
             'barcode': row.barcode, 'quantity': qty, 'produced_qty': prod,
             'remaining_qty': qty - prod, 'plan_date': date_str,
+            'factory': row.factory or UNSPEC_FACTORY,
         }
         plans.append(plan)
         cn = row.customer_name or '未知'
