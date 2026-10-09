@@ -10,11 +10,17 @@
 from __future__ import annotations
 
 import argparse
-import io
+import contextlib
 import sys
 from pathlib import Path
 
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+# 原地改编码，不要写 `sys.stdout = io.TextIOWrapper(sys.stdout.buffer, ...)`：
+# 重绑后旧 wrapper 失去引用被 GC，其 __del__ 会关闭**共享的**底层 buffer，于是同一进程里
+# 后续任何写入都抛 `ValueError: I/O operation on closed file`。本脚本 `import check_bom`
+# 时两者各重绑一次，随即触发（2026-10-09 实测）。
+# 非文本流（被重定向/被测试框架捕获）时保持原样。
+with contextlib.suppress(AttributeError, ValueError, OSError):
+    sys.stdout.reconfigure(encoding="utf-8")
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 BOM = b"\xef\xbb\xbf"
