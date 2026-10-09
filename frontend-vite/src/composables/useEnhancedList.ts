@@ -10,10 +10,29 @@ interface Options {
   enableKeyset?: boolean
 }
 
+/** 每页条数合法白名单：localStorage 可能被手改成任意值，回读必须校验 */
+const PER_PAGE_OPTIONS = [10, 20, 50, 100]
+
+function loadStoredPerPage(key: string): number | null {
+  try {
+    const raw = localStorage.getItem(`list-per-page:${key}`)
+    if (!raw) return null
+    const v = Number(raw)
+    if (PER_PAGE_OPTIONS.includes(v)) return v
+  } catch { /* 隐私模式等 localStorage 不可用：退回默认值 */ }
+  return null
+}
+
+function storePerPage(key: string, v: number) {
+  try {
+    localStorage.setItem(`list-per-page:${key}`, String(v))
+  } catch { /* 写失败不影响分页功能 */ }
+}
+
 export function useEnhancedList<T>(opts: Options) {
   const { key, url, perPage: defPP = 20, staleTime = 30_000, prefetchPages = 1, debounceMs = 300, extraParams, enableKeyset = false } = opts
   const qc = useQueryClient()
-  const page = ref(1), perPage = ref(defPP), search = ref('')
+  const page = ref(1), perPage = ref(loadStoredPerPage(key) ?? defPP), search = ref('')
   const dSearch = refDebounced(search, debounceMs)
   const sortBy = ref(''), sortOrder = ref<'asc'|'desc'>('desc'), total = ref(0)
   const keysetCursor = ref<string | number | undefined>(undefined)
@@ -62,7 +81,7 @@ export function useEnhancedList<T>(opts: Options) {
     sortBy: readonly(sortBy), sortOrder: readonly(sortOrder), items, total: readonly(total), totalPages,
     data, isLoading, isFetching, refetch,
     handlePageChange,
-    handleSizeChange: (v: number) => { perPage.value = v; page.value = 1; keysetCursor.value = undefined },
+    handleSizeChange: (v: number) => { perPage.value = v; page.value = 1; keysetCursor.value = undefined; storePerPage(key, v) },
     handleSort: (p: string, o: string|null) => { sortBy.value = p; sortOrder.value = o === 'ascending' ? 'asc' : 'desc'; page.value = 1; keysetCursor.value = undefined },
     handleSearch: (v: string) => { search.value = v },
     resetFilters: () => { search.value = ''; sortBy.value = ''; sortOrder.value = 'desc'; page.value = 1; keysetCursor.value = undefined },
