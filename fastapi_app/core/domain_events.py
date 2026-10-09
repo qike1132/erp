@@ -131,7 +131,10 @@ def schedule_post_commit_domain_event(session: Any, event: DomainEvent) -> None:
     info = getattr(session, 'info', None)
     if not isinstance(info, dict):
         # 与 schedule_post_commit_invalidation 同款退化：无法挂回调的会话当场发布
-        loop = asyncio.get_running_loop()
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return  # 无事件循环（同步上下文）：无法执行异步发布，只能放弃
         task = loop.create_task(_publish())
         task.add_done_callback(_log_publish_task_exception)
         return

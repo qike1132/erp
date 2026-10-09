@@ -11,7 +11,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
-from fastapi_app.core.deps import require_permission
+from fastapi_app.core.deps import require_any_permission, require_permission
 from fastapi_app.core.logger import logger
 from fastapi_app.core.response import success_response
 from fastapi_app.shared_models import User
@@ -137,7 +137,9 @@ class AsyncTaskSubmitResponse(BaseModel):
 @router.get("/status/{task_id}", response_model=TaskStatusResponse)
 async def get_task_status(
     task_id: str,
-    current_user: User = Depends(require_permission("batch_import")),
+    # 本端点同时服务导入任务(batch_import)与报表导出(report_view)，
+    # 任一权限即可轮询；否则报表导出提交(需 report_view)后无法查状态
+    current_user: User = Depends(require_any_permission("batch_import", "report_view")),
 ):
     """查询 ARQ 异步任务状态"""
     job = await _get_arq_job(task_id)
@@ -273,7 +275,8 @@ async def async_export_report(
 @router.get("/download/{task_id}")
 async def download_task_result(
     task_id: str,
-    current_user: User = Depends(require_permission("batch_import")),
+    # 同 status：导入任务与报表导出共用，任一权限即可下载
+    current_user: User = Depends(require_any_permission("batch_import", "report_view")),
 ):
     """下载 ARQ 异步任务生成的文件"""
     job = await _get_arq_job(task_id)
