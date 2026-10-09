@@ -60,7 +60,7 @@ ALLOWED_HOSTS 不得含 `*`、CORS 不得含 `null`）**之后**新增了一组�
 
 | 条件 | 理由 |
 |---|---|
-| `BACKUP_ENCRYPTION_ENABLED` 生效（默认 true）但 `BACKUP_ENCRYPTION_PASSWORD` 与 `BACKUP_ENCRYPTION_KEY` 都为空或是 `<...>` 占位 | 否则备份"静默降级为不加密"，加密承诺形同虚设 |
+| `BACKUP_ENCRYPTION_ENABLED` 生效（显式设 true；未声明时默认 false 即不加密）但 `BACKUP_ENCRYPTION_PASSWORD` 与 `BACKUP_ENCRYPTION_KEY` 都为空或是 `<...>` 占位 | 否则备份"静默降级为不加密"，加密承诺形同虚设 |
 | `BACKUP_DIR` 已存在但不是目录、或目录不可写（真实写探测） | 备份会失败且可能到很晚才发现 |
 
 **告警（仅 logger.warning，不阻断）**：`BACKUP_DIR` 未设置或不存在（`ensure_backup_dir()` 会建）、

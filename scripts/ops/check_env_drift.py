@@ -13,9 +13,9 @@
 
 实测（2026-09-30）：.env.production 缺模板 92 键、config/.env.production 缺 94 键，
 含全部 BACKUP_*（约 70 个）。而 `core/config.py` 的 SettingsConfigDict 是
-`extra="ignore"`，缺键会**静默走默认值**——最危险的是
-BACKUP_ENCRYPTION_ENABLED 默认 true 而 BACKUP_ENCRYPTION_PASSWORD 缺失，
-备份会静默降级为不加密（详见 docs/ops/2026-09-30-credential-rotation-runbook.md §2.3）。
+`extra="ignore"`，缺键会**静默走默认值**——备份加密自 2026-10-09 起默认 false
+（即不加密），缺键会让备份静默产出明文，需显式声明方可开启加密
+（背景详见 docs/ops/2026-09-30-credential-rotation-runbook.md §2.3）。
 
 本脚本只做**只读比对**，绝不改写任何 env 文件。
 

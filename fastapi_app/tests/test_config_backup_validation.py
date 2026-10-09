@@ -94,7 +94,7 @@ class TestBackupEncryptionFailFast:
         assert _validate_production_backup_config(force=True) == []
 
     def test_undeclared_flag_warns_but_does_not_raise(self, backup_env):
-        """未声明 BACKUP_ENCRYPTION_ENABLED（代码默认 true）只告警，不阻断启动。"""
+        """未声明 BACKUP_ENCRYPTION_ENABLED（代码默认 false）只告警，不阻断启动。"""
         backup_env.delenv("BACKUP_ENCRYPTION_ENABLED", raising=False)
         warnings = _validate_production_backup_config(force=True)
         assert any("BACKUP_ENCRYPTION_ENABLED" in w for w in warnings)

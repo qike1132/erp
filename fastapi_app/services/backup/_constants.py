@@ -17,9 +17,9 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 BACKUP_DIR = Path(os.environ.get('BACKUP_DIR', 'backups/server'))
 # 备份文件扩展名（供 glob/扫描统一使用）。
-# ⚠️ 必须含 '.zip.enc'：生产 BACKUP_ENCRYPTION_ENABLED 默认为 true，落盘扩展名就是
-# `.zip.enc` 且**没有** `.zip` 兄弟文件。健康检查原先只 glob '*.zip'，导致
-# 「有备份却报没有备份/备份过旧」的假阳性，且加密备份从未被 testzip() 校验
+# ⚠️ 必须含 '.zip.enc'：显式开启加密（BACKUP_ENCRYPTION_ENABLED=true）或历史遗留的
+# 加密包，落盘扩展名就是 `.zip.enc` 且**没有** `.zip` 兄弟文件。健康检查原先只 glob
+# '*.zip'，导致「有备份却报没有备份/备份过旧」的假阳性，且加密备份从未被 testzip() 校验
 # （2026-10-02 P2 审计实测：生产恒报"最新备份 132 小时前"，而当天 14:00 刚出过加密包）。
 BACKUP_FILE_EXTENSIONS = ('.zip', '.zip.enc', '.tar.gz', '.tar')
 MAX_BACKUP_FILE_SIZE = 500 * 1024 * 1024
@@ -48,7 +48,7 @@ _CHECKSUM_EXCLUDE_TABLES = {'alembic_version'}
 # 备份加密配置
 # P0-1(2026-08-23): FALLBACK_TO_GENERATED 默认改 false——随机密钥无人能找回,
 # 曾导致 /save 产出永久不可还原的 .zip。显式设 true 仅兼容旧部署,新代码禁止依赖。
-BACKUP_ENCRYPTION_ENABLED = os.environ.get('BACKUP_ENCRYPTION_ENABLED', 'true').lower() == 'true'
+BACKUP_ENCRYPTION_ENABLED = os.environ.get('BACKUP_ENCRYPTION_ENABLED', 'false').lower() == 'true'
 BACKUP_ENCRYPTION_PASSWORD = os.environ.get('BACKUP_ENCRYPTION_PASSWORD', '')
 BACKUP_ENCRYPTION_KEY = os.environ.get('BACKUP_ENCRYPTION_KEY', '')
 BACKUP_ENCRYPTION_FALLBACK_TO_GENERATED = os.environ.get('BACKUP_ENCRYPTION_FALLBACK_TO_GENERATED', 'false').lower() == 'true'

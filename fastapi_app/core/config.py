@@ -130,7 +130,7 @@ def filter_cors_origins(raw: str, *, is_production: bool) -> list[str]:
 # 背景：本应用**只加载项目根 .env**（见本文件顶部 load_dotenv 与 model_config 的 env_file）。
 # 生产机上 .env 与 .env.production / config/.env.production 长期漂移（缺 90+ 键，含全部
 # BACKUP_*），而备份服务读取这些键的方式又各不相同：
-#   · BACKUP_ENCRYPTION_ENABLED 默认 true   （services/backup/_constants.py:43）
+#   · BACKUP_ENCRYPTION_ENABLED 默认 false  （services/backup/_constants.py:51，2026-10-09 起）
 #   · BACKUP_ENCRYPTION_PASSWORD 默认 ''    （同文件 :44）
 #   ⇒ 两者组合会产出「看着成功、但无人能解开」的备份文件（P0-1 同类事故）。
 # 因此这里对「已启用备份加密却拿不到密钥」直接拒绝启动（fail fast）；
@@ -209,10 +209,10 @@ def _validate_production_backup_config(*, force: bool = False) -> list[str]:
 
     # 1) 备份加密
     encryption_declared = os.getenv("BACKUP_ENCRYPTION_ENABLED")
-    encryption_enabled = (encryption_declared or "true").strip().lower() == "true"
+    encryption_enabled = (encryption_declared or "false").strip().lower() == "true"
     if encryption_declared is None:
         warnings.append(
-            "未显式声明 BACKUP_ENCRYPTION_ENABLED（代码默认 true）；"
+            "未显式声明 BACKUP_ENCRYPTION_ENABLED（代码默认 false，即备份不加密）；"
             "请显式声明，避免默认值变更时静默改变备份行为"
         )
     if encryption_enabled:
