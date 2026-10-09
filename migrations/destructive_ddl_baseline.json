@@ -532,6 +532,9 @@
       "drop_index:idx_stockout_has_stockin",
       "drop_index:idx_stockout_order_stockin"
     ],
+    "migrations/versions/pg_standalone_085_add_user_department.py": [
+      "execute:ALTER TABLE \"user\" DROP COLUMN IF EXISTS department"
+    ],
     "migrations/versions/rebuild_po_dedup_index.py": [
       "execute:DROP INDEX IF EXISTS uq_po_pending_dedup"
     ],

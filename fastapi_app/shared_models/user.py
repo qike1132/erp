@@ -36,6 +36,7 @@ class User(Base):
     is_super: Mapped[bool] = mapped_column(Boolean, default=False, comment='是否超级用户')
     status: Mapped[bool] = mapped_column(Boolean, default=True, comment='是否启用')
     factory: Mapped[str | None] = mapped_column(String(20), nullable=True, comment='所属工厂：东莞/湖北/NULL')
+    department: Mapped[str | None] = mapped_column(String(20), nullable=True, comment='所属部门：生产部/仓库/业务部/采购部/NULL')
     create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), comment='创建时间')
     update_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), comment='更新时间')
 

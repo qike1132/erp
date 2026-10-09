@@ -33,6 +33,7 @@ async def create_user(
     password: str,
     is_super: bool,
     factory: str | None = None,
+    department: str | None = None,
 ) -> User:
     """创建用户"""
     # 验证密码复杂度
@@ -56,6 +57,7 @@ async def create_user(
         is_super=is_super,
         status=True,
         factory=factory or None,
+        department=department or None,
     )
     db.add(new_user)
     await db.flush()
@@ -69,12 +71,13 @@ async def update_user(
     password: str | None,
     is_super: bool | None,
     factory: str | None = None,
+    department: str | None = None,
 ) -> User:
     """更新用户
 
-    factory 参数语义：
+    factory / department 参数语义一致：
     - None：不修改
-    - 空字符串或合法工厂值：写入（空字符串视为清除为 NULL）
+    - 空字符串或合法值：写入（空字符串视为清除为 NULL）
     """
     result = await db.execute(select(User).where(User.id == user_id).with_for_update())
     user = result.scalar_one_or_none()
@@ -94,6 +97,9 @@ async def update_user(
 
     if factory is not None:
         user.factory = factory or None
+
+    if department is not None:
+        user.department = department or None
 
     await db.flush()
     await db.refresh(user)

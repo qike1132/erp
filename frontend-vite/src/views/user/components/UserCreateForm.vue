@@ -26,6 +26,13 @@
           <option v-for="f in FACTORY_OPTIONS" :key="f" :value="f">{{ f }}</option>
         </select>
       </div>
+      <div class="us-form-group">
+        <label>部门</label>
+        <select v-model="form.department" class="us-input" aria-label="部门">
+          <option value="">无</option>
+          <option v-for="d in DEPARTMENT_OPTIONS" :key="d" :value="d">{{ d }}</option>
+        </select>
+      </div>
       <p v-if="formError" class="us-form-error">{{ formError }}</p>
       <button type="submit" class="us-submit-btn" :disabled="submitting" :aria-label="submitting ? '添加中…' : '添加用户'">
         {{ submitting ? '添加中…' : '添加用户' }}
@@ -38,21 +45,21 @@
 /**
  * UserCreateForm.vue — 添加新用户表单（左栏）
  *
- * 从 UserView.vue 拆出：用户名/密码/超级管理员/工厂输入与提交校验。
+ * 从 UserView.vue 拆出：用户名/密码/超级管理员/工厂/部门输入与提交校验。
  */
 import { ref, reactive } from 'vue'
 import { useQueryClient } from '@tanstack/vue-query'
 import { userApi } from '@/api'
 import UiCheckbox from '@/components/ui/UiCheckbox.vue'
 import { showToast } from '@/composables/useToast'
-import { FACTORY_OPTIONS, PASSWORD_MIN_LENGTH, extractErrorMessage } from '@/views/user/composables/useUserManagement'
+import { DEPARTMENT_OPTIONS, FACTORY_OPTIONS, PASSWORD_MIN_LENGTH, extractErrorMessage } from '@/views/user/composables/useUserManagement'
 
 const queryClient = useQueryClient()
 
 const formError = ref('')
 const showPwd1 = ref(false)
 const submitting = ref(false)
-const form = reactive({ username: '', password: '', isSuper: false, factory: '' })
+const form = reactive({ username: '', password: '', isSuper: false, factory: '', department: '' })
 
 /** 密码输入框提示文案（长度取自单一来源常量） */
 const passwordHint = `至少${PASSWORD_MIN_LENGTH}位`
@@ -89,9 +96,10 @@ async function handleAdd() {
       password: form.password,
       is_super: form.isSuper,
       factory: form.factory || null,
+      department: form.department || null,
     })
     showToast('添加成功', 'success')
-    Object.assign(form, { username: '', password: '', isSuper: false, factory: '' })
+    Object.assign(form, { username: '', password: '', isSuper: false, factory: '', department: '' })
     queryClient.invalidateQueries({ queryKey: ['users-list'] })
   } catch (err: unknown) {
     showToast(extractErrorMessage(err, '添加失败'), 'error')

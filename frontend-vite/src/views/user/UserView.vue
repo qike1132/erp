@@ -28,12 +28,13 @@
       </div>
     </div>
 
-    <!-- 编辑用户工厂弹窗（拆分为子组件） -->
+    <!-- 编辑用户弹窗（工厂/部门，拆分为子组件） -->
     <UserEditDialog
       v-model:open="editDialogVisible"
       :edit-target-id="editTargetId"
       :edit-target-name="editTargetName"
       :initial-factory="editInitialFactory"
+      :initial-department="editInitialDepartment"
     />
 
     <!-- 权限分配弹窗（拆分为子组件） -->
@@ -96,6 +97,7 @@ const {
   editTargetId,
   editTargetName,
   editInitialFactory,
+  editInitialDepartment,
   openEditDialog,
   permDialogVisible,
   permSubmitting,

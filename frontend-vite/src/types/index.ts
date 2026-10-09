@@ -292,6 +292,8 @@ export interface User {
   permissions: string[]
   /** 所属工厂：东莞/湖北/NULL（跨厂管理员为 null） */
   factory?: string | null
+  /** 所属部门：生产部/仓库/业务部/采购部/NULL */
+  department?: string | null
 }
 
 export interface UserCreate {
@@ -300,6 +302,8 @@ export interface UserCreate {
   is_super?: boolean
   /** 所属工厂：东莞/湖北/NULL（空字符串表示清除） */
   factory?: string | null
+  /** 所属部门：生产部/仓库/业务部/采购部/NULL（空字符串表示清除） */
+  department?: string | null
 }
 
 export interface UserUpdate {
@@ -308,6 +312,8 @@ export interface UserUpdate {
   is_super?: boolean
   /** 所属工厂：东莞/湖北/NULL（空字符串表示清除） */
   factory?: string | null
+  /** 所属部门：生产部/仓库/业务部/采购部/NULL（空字符串表示清除） */
+  department?: string | null
 }
 
 export interface NavSection {

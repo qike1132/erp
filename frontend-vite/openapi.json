@@ -36678,6 +36678,19 @@
             ],
             "title": "Factory",
             "description": "所属工厂：东莞/湖北/NULL"
+          },
+          "department": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 20
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Department",
+            "description": "所属部门：生产部/仓库/业务部/采购部/NULL"
           }
         },
         "type": "object",
@@ -36842,6 +36855,17 @@
             ],
             "title": "Factory"
           },
+          "department": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Department"
+          },
           "create_time": {
             "anyOf": [
               {
@@ -36903,6 +36927,19 @@
             ],
             "title": "Factory",
             "description": "所属工厂：东莞/湖北/NULL（传空字符串表示清除）"
+          },
+          "department": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 20
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Department",
+            "description": "所属部门：生产部/仓库/业务部/采购部/NULL（传空字符串表示清除）"
           }
         },
         "type": "object",

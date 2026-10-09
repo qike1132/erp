@@ -25,6 +25,10 @@
         <span v-if="(row as UserRow).factory" :class="['us-badge', 'us-badge-factory']">{{ (row as UserRow).factory }}</span>
         <span v-else class="us-badge-muted-text">-</span>
       </template>
+      <template #column-body-department="{ row }">
+        <span v-if="(row as UserRow).department" :class="['us-badge', 'us-badge-department']">{{ (row as UserRow).department }}</span>
+        <span v-else class="us-badge-muted-text">-</span>
+      </template>
       <template #column-body-status="{ row }">
         <span :class="['us-badge', (row as UserRow).status !== false ? 'us-badge-success' : 'us-badge-muted']">
           {{ (row as UserRow).status !== false ? '启用' : '禁用' }}
@@ -50,7 +54,7 @@
 /**
  * UserTable.vue — 用户列表（右栏）
  *
- * 从 UserView.vue 拆出：UiDataTable 分页表格 + 角色/工厂/状态徽章 + 行操作按钮。
+ * 从 UserView.vue 拆出：UiDataTable 分页表格 + 角色/工厂/部门/状态徽章 + 行操作按钮。
  * 分页与行操作通过 emit 交回父组件处理。
  */
 import UiDataTable from '@/components/ui/UiDataTable.vue'
@@ -89,6 +93,7 @@ const userColumns: TableColumn[] = [
   { field: 'username', header: '用户名', align: 'left' },
   { field: 'is_super', header: '角色', align: 'center' },
   { field: 'factory', header: '工厂', align: 'center' },
+  { field: 'department', header: '部门', align: 'center' },
   { field: 'status', header: '状态', align: 'center' },
   { field: 'actions', header: '操作', align: 'center' },
 ]
@@ -155,6 +160,10 @@ function handleDelete(row: UserRow) {
 .us-badge-factory {
   background: var(--color-warning-50, #fef3c7);
   color: var(--color-warning-700, #b45309);
+}
+.us-badge-department {
+  background: var(--color-purple-50, #f5f3ff);
+  color: var(--color-purple-600, #7c3aed);
 }
 .us-badge-muted-text {
   color: var(--color-text-muted);

@@ -4,6 +4,17 @@ from pydantic import BaseModel, Field, field_validator
 from fastapi_app.schemas.product import _validate_factory
 from utils.password_validator import PasswordValidator
 
+# 用户所属部门（组织部门）。与 core/production_scope.py 的生产报表部门
+# （充棉部/手工部/包装部）无关，勿混用。
+VALID_DEPARTMENTS: tuple[str, ...] = ('生产部', '仓库', '业务部', '采购部')
+
+
+def _validate_department(v: str | None) -> str | None:
+    """校验部门值必须属于允许的选项集合，允许为空"""
+    if v and v not in VALID_DEPARTMENTS:
+        raise ValueError(f'部门值无效，必须是 {"/".join(VALID_DEPARTMENTS)} 之一')
+    return v
+
 
 class UserCreate(BaseModel):
     username: str = Field(..., min_length=1, max_length=50, description="用户名")
@@ -15,6 +26,7 @@ class UserCreate(BaseModel):
     )
     is_super: bool = Field(default=False, description="是否超级用户")
     factory: str | None = Field(default=None, max_length=20, description="所属工厂：东莞/湖北/NULL")
+    department: str | None = Field(default=None, max_length=20, description="所属部门：生产部/仓库/业务部/采购部/NULL")
 
     @field_validator('password')
     @classmethod
@@ -29,6 +41,11 @@ class UserCreate(BaseModel):
     def validate_factory(cls, v: str | None) -> str | None:
         return _validate_factory(v)
 
+    @field_validator('department')
+    @classmethod
+    def validate_department(cls, v: str | None) -> str | None:
+        return _validate_department(v)
+
 
 class UserUpdate(BaseModel):
     password: str | None = Field(
@@ -39,6 +56,7 @@ class UserUpdate(BaseModel):
     )
     is_super: bool | None = Field(default=None, description="是否超级用户")
     factory: str | None = Field(default=None, max_length=20, description="所属工厂：东莞/湖北/NULL（传空字符串表示清除）")
+    department: str | None = Field(default=None, max_length=20, description="所属部门：生产部/仓库/业务部/采购部/NULL（传空字符串表示清除）")
 
     @field_validator('password')
     @classmethod
@@ -55,6 +73,11 @@ class UserUpdate(BaseModel):
     def validate_factory(cls, v: str | None) -> str | None:
         return _validate_factory(v)
 
+    @field_validator('department')
+    @classmethod
+    def validate_department(cls, v: str | None) -> str | None:
+        return _validate_department(v)
+
 
 class UserPermissionUpdate(BaseModel):
     permission_ids: list[int] = Field(default_factory=list, description="权限ID列表")
@@ -66,6 +89,7 @@ class UserResponse(BaseModel):
     is_super: bool
     status: bool
     factory: str | None = None
+    department: str | None = None
     create_time: str | None = None
 
     class Config:

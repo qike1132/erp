@@ -19,6 +19,13 @@
           <option v-for="f in FACTORY_OPTIONS" :key="f" :value="f">{{ f }}</option>
         </select>
       </div>
+      <div class="us-form-group">
+        <label>部门</label>
+        <select v-model="editForm.department" class="us-input" aria-label="部门">
+          <option value="">无</option>
+          <option v-for="d in DEPARTMENT_OPTIONS" :key="d" :value="d">{{ d }}</option>
+        </select>
+      </div>
     </div>
     <template #footer>
       <button class="us-action-btn" aria-label="取消" @click="editDialogVisible = false">取消</button>
@@ -33,8 +40,8 @@
 /**
  * UserEditDialog.vue — 编辑用户弹窗
  *
- * 从 UserView.vue 拆出：展示用户名 + 重置密码（留空不改）+ 编辑所属工厂并保存。
- * 弹窗打开时从 initialFactory 同步初值。
+ * 从 UserView.vue 拆出：展示用户名 + 重置密码（留空不改）+ 编辑所属工厂/部门并保存。
+ * 弹窗打开时从 initialFactory / initialDepartment 同步初值。
  */
 import { ref, reactive, watch } from 'vue'
 import { useQueryClient } from '@tanstack/vue-query'
@@ -42,7 +49,7 @@ import { userApi } from '@/api'
 import type { UserUpdate } from '@/types'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import { showToast } from '@/composables/useToast'
-import { FACTORY_OPTIONS, PASSWORD_MIN_LENGTH, extractErrorMessage } from '@/views/user/composables/useUserManagement'
+import { DEPARTMENT_OPTIONS, FACTORY_OPTIONS, PASSWORD_MIN_LENGTH, extractErrorMessage } from '@/views/user/composables/useUserManagement'
 
 const props = defineProps<{
   /** 编辑目标用户 id */
@@ -51,6 +58,8 @@ const props = defineProps<{
   editTargetName: string
   /** 打开弹窗时的工厂初值 */
   initialFactory: string
+  /** 打开弹窗时的部门初值（缺省视为「无」） */
+  initialDepartment?: string
 }>()
 
 /** 弹窗开关（父组件 v-model:open） */
@@ -60,20 +69,21 @@ const queryClient = useQueryClient()
 
 const editSubmitting = ref(false)
 const showPwd = ref(false)
-const editForm = reactive<{ factory: string; password: string }>({ factory: '', password: '' })
+const editForm = reactive<{ factory: string; department: string; password: string }>({ factory: '', department: '', password: '' })
 
-// 弹窗打开时预填当前工厂值并清空密码
+// 弹窗打开时预填当前工厂/部门值并清空密码
 watch(editDialogVisible, (v) => {
   if (v) {
     editForm.factory = props.initialFactory
+    editForm.department = props.initialDepartment ?? ''
     editForm.password = ''
     showPwd.value = false
   }
 })
 
-/** 保存用户工厂/密码编辑 */
+/** 保存用户工厂/部门/密码编辑 */
 async function handleSaveEdit() {
-  const payload: UserUpdate = { factory: editForm.factory || null }
+  const payload: UserUpdate = { factory: editForm.factory || null, department: editForm.department || null }
   // 密码留空表示不修改；填了则校验长度（与新增用户保持一致）
   if (editForm.password) {
     if (editForm.password.length < PASSWORD_MIN_LENGTH) {

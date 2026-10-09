@@ -20,11 +20,15 @@ export interface UserRow {
   is_super?: boolean
   status?: boolean
   factory?: string | null
+  department?: string | null
   create_time?: string
 }
 
 /** 工厂下拉选项（与后端 VALID_FACTORIES 保持一致） */
 export const FACTORY_OPTIONS = ['东莞', '湖北'] as const
+
+/** 部门下拉选项（与后端 VALID_DEPARTMENTS 保持一致） */
+export const DEPARTMENT_OPTIONS = ['生产部', '仓库', '业务部', '采购部'] as const
 
 /** 密码最小长度（与后端 utils/password_validator.PasswordValidator.MIN_LENGTH 保持一致） */
 export const PASSWORD_MIN_LENGTH = 6
@@ -155,7 +159,7 @@ export function useUserManagement() {
     actionId.value = 0
   }
 
-  // ==================== 编辑用户工厂弹窗 ====================
+  // ==================== 编辑用户弹窗（工厂/部门） ====================
   const editDialogVisible = ref(false)
   /** 编辑目标用户 id（保存时使用） */
   const editTargetId = ref(0)
@@ -163,12 +167,15 @@ export function useUserManagement() {
   const editTargetName = ref('')
   /** 打开弹窗时的工厂初值（弹窗内同步到输入框） */
   const editInitialFactory = ref('')
+  /** 打开弹窗时的部门初值（弹窗内同步到输入框） */
+  const editInitialDepartment = ref('')
 
-  /** 打开编辑用户弹窗，预填当前工厂值 */
+  /** 打开编辑用户弹窗，预填当前工厂/部门值 */
   function openEditDialog(row: UserRow) {
     editTargetId.value = row.id
     editTargetName.value = row.username
     editInitialFactory.value = row.factory || ''
+    editInitialDepartment.value = row.department || ''
     editDialogVisible.value = true
   }
 
@@ -332,6 +339,7 @@ export function useUserManagement() {
     editTargetId,
     editTargetName,
     editInitialFactory,
+    editInitialDepartment,
     openEditDialog,
     permDialogVisible,
     permSubmitting,

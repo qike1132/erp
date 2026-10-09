@@ -3049,6 +3049,7 @@ export interface UserCreate {
   password: string
   is_super?: boolean
   factory?: string | null
+  department?: string | null
 }
 
 export interface UserInfoResponse {
@@ -3084,6 +3085,7 @@ export interface UserResponse {
   is_super: boolean
   status: boolean
   factory?: string | null
+  department?: string | null
   create_time?: string | null
 }
 
@@ -3091,6 +3093,7 @@ export interface UserUpdate {
   password?: string | null
   is_super?: boolean | null
   factory?: string | null
+  department?: string | null
 }
 
 export interface ValidationError {

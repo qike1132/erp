@@ -24,6 +24,43 @@ class TestUserSchemas:
         data = UserUpdate()
         assert data.password is None
         assert data.is_super is None
+        assert data.department is None
+
+    def test_user_create_with_department(self):
+        """部门为固定枚举之一时被接受"""
+        from fastapi_app.schemas.user import UserCreate
+        data = UserCreate(username="testuser", password="Test123!@", department="采购部")
+        assert data.department == "采购部"
+
+    def test_user_create_without_department_defaults_none(self):
+        from fastapi_app.schemas.user import UserCreate
+        data = UserCreate(username="testuser", password="Test123!@")
+        assert data.department is None
+
+    def test_user_create_invalid_department_rejected(self):
+        """非法部门值被拒绝（固定枚举，防写法漂移）"""
+        from pydantic import ValidationError
+
+        from fastapi_app.schemas.user import UserCreate
+        with pytest.raises(ValidationError):
+            UserCreate(username="testuser", password="Test123!@", department="生产")  # 应为 生产部
+
+    def test_user_update_department_clear(self):
+        """编辑时可传空字符串表示清除部门"""
+        from fastapi_app.schemas.user import UserUpdate
+        assert UserUpdate(department="").department == ""
+
+    def test_user_update_invalid_department_rejected(self):
+        from pydantic import ValidationError
+
+        from fastapi_app.schemas.user import UserUpdate
+        with pytest.raises(ValidationError):
+            UserUpdate(department="不存在部")
+
+    def test_user_response_includes_department(self):
+        from fastapi_app.schemas.user import UserResponse
+        resp = UserResponse(id=1, username="admin", is_super=True, status=True, department="仓库")
+        assert resp.department == "仓库"
 
     def test_user_permission_update(self):
         from fastapi_app.schemas.user import UserPermissionUpdate
@@ -233,6 +270,55 @@ class TestUserService:
         assert mock_db.flush.called
 
     @pytest.mark.asyncio
+    async def test_create_user_with_department(self, mock_db):
+        """创建用户时写入部门"""
+        from fastapi_app.services.user_service import create_user
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        with patch('fastapi_app.core.security.hash_password', return_value='hashed'):
+            await create_user(mock_db, "newuser", "Test123!@", False, None, "业务部")
+        added = mock_db.add.call_args.args[0]
+        assert added.department == "业务部"
+
+    @pytest.mark.asyncio
+    async def test_update_user_department_none_keeps(self, mock_db, mock_user):
+        """department 传 None 表示不修改（区别于空字符串清除）"""
+        from fastapi_app.services.user_service import update_user
+        mock_user.department = "仓库"
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_user
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        await update_user(mock_db, 1, None, None, None, None)
+        assert mock_user.department == "仓库"
+
+    @pytest.mark.asyncio
+    async def test_update_user_department_empty_clears(self, mock_db, mock_user):
+        """department 传空字符串表示清除为 NULL"""
+        from fastapi_app.services.user_service import update_user
+        mock_user.department = "仓库"
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_user
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        await update_user(mock_db, 1, None, None, None, "")
+        assert mock_user.department is None
+
+    @pytest.mark.asyncio
+    async def test_update_user_department_changes(self, mock_db, mock_user):
+        """换部门：写入新值"""
+        from fastapi_app.services.user_service import update_user
+        mock_user.department = "仓库"
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_user
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        await update_user(mock_db, 1, None, None, None, "采购部")
+        assert mock_user.department == "采购部"
+
+    @pytest.mark.asyncio
     async def test_toggle_user_status_success(self, mock_db, mock_user):
         from fastapi_app.services.user_service import toggle_user_status
         mock_result = MagicMock()
@@ -348,6 +434,7 @@ class TestUserEndpoints:
         mock_user.is_super = True
         mock_user.status = True
         mock_user.factory = None
+        mock_user.department = None
         mock_user.create_time = MagicMock()
         mock_user.create_time.strftime.return_value = "2024-01-01 00:00"
         mock_user.permissions = []
@@ -392,6 +479,26 @@ class TestUserEndpoints:
                 "username": "testuser", "password": "Test123!@", "is_super": False
             })
         assert response.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_create_user_with_department(self, client, mock_db):
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        with patch('fastapi_app.core.security.hash_password', return_value='hashed'):
+            response = await client.post("/api/v1/users/create", json={
+                "username": "newuser", "password": "Test123!@", "is_super": False, "department": "采购部"
+            })
+        assert response.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_create_user_with_invalid_department_rejected(self, client, mock_db):
+        """非法部门值在 schema 层被拒（422），不会落库"""
+        response = await client.post("/api/v1/users/create", json={
+            "username": "newuser", "password": "Test123!@", "is_super": False, "department": "不存在的部门"
+        })
+        assert response.status_code == 422
 
     @pytest.mark.asyncio
     async def test_toggle_user_status(self, client, mock_db):
