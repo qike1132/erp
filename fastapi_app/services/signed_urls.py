@@ -38,6 +38,13 @@ def signing_secret() -> str:
 
 _UPLOAD_PREFIX = '/static/uploads/'
 
+# 签发到期时间的对齐桶（秒）。st 从"now+ttl"改为"向上对齐到桶边界"，同一张图在
+# 桶内的所有签发得到**逐字节相同**的 URL —— 浏览器磁盘缓存（nginx 侧已发
+# expires 7d immutable）跨翻页/跨会话命中，不再每页全量重下（2026-10-09 用户
+# 报告：翻页后图片延迟 1-2s）。桶化只让实际有效期在 ttl ~ ttl+BUCKET 之间浮动，
+# nginx secure_link 判定与 md5 公式零改动。
+SIGN_EXPIRY_BUCKET_SECONDS = 3600
+
 
 def _url_path(u: str) -> str:
     """取 URL 的 path 部分（剥掉 `scheme://host` 与 query）。
@@ -107,7 +114,15 @@ def sign_upload_url(key: str, ttl_seconds: int = 3600) -> str:
     if not secret:
         return url
 
-    expired = int(time.time()) + ttl_seconds
+    # 到期时间对齐到桶边界：桶内重复签发 URL 相同 → 浏览器缓存命中。
+    # 不变量：对齐后 st ∈ [now+ttl, now+ttl+bucket)（有效期永不缩水）。
+    now = int(time.time())
+    expired = now + ttl_seconds
+    bucket = SIGN_EXPIRY_BUCKET_SECONDS
+    aligned = expired - (expired % bucket)
+    if aligned < expired:
+        aligned += bucket  # 向下取整丢了一段窗口 → 跳到下一桶边界
+    expired = aligned
     # $uri 为 nginx 解码后的请求路径；签名与校验两侧都用完整路径保持一致。
     uri = quote(url, safe="/")
     # nginx secure_link_md5 的哈希输入 = 表达式求值后的整串。conf 写

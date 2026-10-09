@@ -56,19 +56,24 @@ def test_tampered_signature_rejected(monkeypatch):
 
 
 def test_nginx_secure_link_md5_alignment(monkeypatch):
-    """核对与 nginx `secure_link_md5 "$secure_link_expires$uri secret"` 的公式一致。"""
+    """核对与 nginx `secure_link_md5 "$secure_link_expires$uri secret"` 的公式一致。
+
+    st 现在对齐到时间桶（test_repeated_signs_within_bucket_are_identical），
+    因此这里不再硬编码目标 expired 反推 ttl，而是取签发结果里**实际的 st**
+    核对 md5 公式 —— 公式本身必须逐字节稳定（2026-10-01 实测无空格签名 403）。
+    """
     secret = 'topsecret'
     monkeypatch.setenv('UPLOAD_URL_SIGNING_SECRET', secret)
-    expired = 1750000000
     key = '20261001/x.webp'
     uri = quote(f'/static/uploads/{key}', safe='/')
 
-    url = signed_urls.sign_upload_url(key, ttl_seconds=expired - int(time.time()))
+    url = signed_urls.sign_upload_url(key, ttl_seconds=600)
     got = url.split('s=')[1]
+    st = int(url.split('st=')[1].split('&')[0])
 
     expect = (
         base64.urlsafe_b64encode(
-            hashlib.md5(f'{expired}{uri} {secret}'.encode()).digest()  # secret 前有空格（nginx conf 写法）
+            hashlib.md5(f'{st}{uri} {secret}'.encode()).digest()  # secret 前有空格（nginx conf 写法）
         )
         .rstrip(b'=')
         .decode()
@@ -203,3 +208,38 @@ def test_stripped_url_is_reissued_not_passthrough(monkeypatch):
     assert fresh != expired
     assert fresh.startswith('/static/uploads/2026/10/x.webp?')
     assert 'st=' in fresh and 's=' in fresh
+
+
+def test_repeated_signs_within_bucket_are_identical(monkeypatch):
+    """回归（2026-10-09 用户报告）：翻页后图片延迟 1-2s 才显示。
+
+    根因：st=int(time.time())+ttl 每秒都变 → 翻页后同一张图的 URL query
+    不同 → 浏览器缓存全失效，每页 ~25 张图全部重下。
+    修复：expired 对齐到时间桶（BUCKET 秒的整数倍），桶内重复签发得到
+    **逐字节相同**的 URL → 浏览器磁盘缓存命中，翻页秒显。
+    安全性：桶化只让实际有效期在 ttl ~ ttl+BUCKET 之间浮动，nginx
+    secure_link 的过期判定与签名公式零改动。
+    """
+    monkeypatch.setenv('UPLOAD_URL_SIGNING_SECRET', 's3cret')
+    u1 = signed_urls.sign_upload_url('k/a.webp', ttl_seconds=600)
+    u2 = signed_urls.sign_upload_url('k/a.webp', ttl_seconds=600)
+    assert u1 == u2, '桶内重复签发必须得到相同 URL（浏览器缓存命中的前提）'
+
+
+def test_bucket_expiry_stays_in_ttl_window(monkeypatch):
+    """桶化后的 st 必须落在 [now+ttl, now+ttl+BUCKET) —— 有效期不缩水。"""
+    monkeypatch.setenv('UPLOAD_URL_SIGNING_SECRET', 's3cret')
+    ttl, bucket = 600, signed_urls.SIGN_EXPIRY_BUCKET_SECONDS
+    st = int(signed_urls.sign_upload_url('k/a.webp', ttl_seconds=ttl).split('st=')[1].split('&')[0])
+    now = int(time.time())
+    assert now + ttl <= st <= now + ttl + bucket
+
+
+def test_verify_still_works_with_bucketed_expiry(monkeypatch):
+    """桶化时间戳经 verify_signature 校验必须通过（公式未变）。"""
+    monkeypatch.setenv('UPLOAD_URL_SIGNING_SECRET', 's3cret')
+    url = signed_urls.sign_upload_url('k/a.webp', ttl_seconds=600)
+    from urllib.parse import parse_qs, urlparse
+
+    q = parse_qs(urlparse(url).query)
+    assert signed_urls.verify_signature('k/a.webp', int(q['st'][0]), q['s'][0]) is True
