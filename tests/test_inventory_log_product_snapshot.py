@@ -18,7 +18,9 @@
 1. 删产品后流水行仍在，product_id 置空、产品名/条码可从快照读出；
 2. 已有快照不被覆盖（只补 NULL）；
 3. 记账时序结存推导函数与 ``log_inventory_change`` 的字段透传；
-4. 迁移 073 的结构不变量（幂等守卫、SET NULL、downgrade 顺序）。
+4. 迁移 073 的结构不变量（幂等守卫、SET NULL、downgrade 顺序）；
+5. 迁移 087 的**写入侧兜底**：product_name 为空时由 BEFORE INSERT 触发器按
+   product_id 补齐（不改任何调用点、不覆盖显式快照、不动 barcode、不回填存量）。
 """
 from pathlib import Path
 
@@ -33,6 +35,10 @@ from fastapi_app.utils import inventory_balance_bounds, log_inventory_change
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _MIGRATION = _REPO_ROOT / 'migrations' / 'versions' / 'pg_standalone_073_inventory_log_ledger_fields.py'
+_MIGRATION_087 = (
+    _REPO_ROOT / 'migrations' / 'versions'
+    / 'pg_standalone_087_inventory_log_product_name_trigger.py'
+)
 
 
 @pytest_asyncio.fixture
@@ -225,3 +231,35 @@ def test_migration_073_downgrade_clears_orphans_before_restoring_not_null():
     assert 'DELETE FROM inventory_log WHERE product_id IS NULL' in downgrade_src
     assert downgrade_src.index('DELETE FROM inventory_log') < downgrade_src.index('SET NOT NULL')
     assert downgrade_src.index('SET NOT NULL') < downgrade_src.index('ON DELETE CASCADE')
+
+
+def test_migration_087_installs_idempotent_product_name_trigger():
+    """迁移 087：写入侧兜底 —— 存储层自动补 product_name，不依赖调用点自觉。
+
+    背景：R1（073）约定「写路径带 product_name」，但仓库里 26 处直接构造
+    ``InventoryLog(...)`` 的点都没带，只有走 ``log_inventory_change`` 的 9 处带了。
+    087 把补齐下沉到 inventory_log 的 BEFORE INSERT 触发器，一处覆盖所有现有与
+    未来的写点。本用例只读迁移源码（不连库），锁住它的关键口径。
+    """
+    src = _MIGRATION_087.read_text(encoding='utf-8')
+    upgrade_src = _function_source(src, 'upgrade')
+    downgrade_src = _function_source(src, 'downgrade')
+
+    # 幂等：函数 CREATE OR REPLACE；触发器先 DROP IF EXISTS 再建（可重复执行）
+    assert 'CREATE OR REPLACE FUNCTION fill_inventory_log_product_name()' in upgrade_src
+    assert 'DROP TRIGGER IF EXISTS fill_inventory_log_product_name ON inventory_log' in upgrade_src
+    assert 'CREATE TRIGGER fill_inventory_log_product_name' in upgrade_src
+    assert 'BEFORE INSERT ON inventory_log' in upgrade_src
+    assert 'FOR EACH ROW' in upgrade_src
+
+    # 只补空值：显式传入的快照（log_inventory_change 路径）不得被覆盖
+    assert 'IF NEW.product_name IS NULL AND NEW.product_id IS NOT NULL THEN' in upgrade_src
+    # 只补 name、不动 barcode（073 的既有设计：条码只在删除时快照）
+    assert 'NEW.product_barcode' not in upgrade_src
+    # 纯写入侧兜底：不回填存量行，也不改表结构
+    assert 'UPDATE inventory_log' not in upgrade_src
+    assert 'ALTER TABLE' not in upgrade_src
+
+    # 降级必须把触发器与函数一并撤掉，不留孤儿对象
+    assert 'DROP TRIGGER IF EXISTS fill_inventory_log_product_name ON inventory_log' in downgrade_src
+    assert 'DROP FUNCTION IF EXISTS fill_inventory_log_product_name()' in downgrade_src

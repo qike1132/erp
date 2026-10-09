@@ -538,6 +538,10 @@
     "migrations/versions/pg_standalone_086_product_customer_link.py": [
       "execute:DROP TABLE IF EXISTS product_customer"
     ],
+    "migrations/versions/pg_standalone_087_inventory_log_product_name_trigger.py": [
+      "execute:DROP FUNCTION IF EXISTS fill_inventory_log_product_name()",
+      "execute:DROP TRIGGER IF EXISTS fill_inventory_log_product_name ON inventory_log"
+    ],
     "migrations/versions/rebuild_po_dedup_index.py": [
       "execute:DROP INDEX IF EXISTS uq_po_pending_dedup"
     ],
