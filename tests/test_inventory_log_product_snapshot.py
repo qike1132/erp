@@ -131,27 +131,38 @@ async def test_delete_product_keeps_inventory_log_with_snapshot(db):
 
 @pytest.mark.integration
 async def test_delete_product_does_not_overwrite_existing_snapshot(db):
-    """已有快照（写入时带出的真实产品名）不被删除时的补写覆盖。"""
+    """已有快照（写入时带出的真实产品名）不被删除时的补写覆盖。
+
+    断言**只针对本用例造的两行**：``product_id IS NULL`` 是全局条件，别的用例用裸 SQL
+    删产品会留下同样为 NULL 的孤儿行，按全表断言会被跨文件污染（2026-10-09 CI 实测：
+    多出一行 ``(None, None)``）。按 id 取行同时仍然验证了外键 SET NULL 语义。
+    """
     product = _make_product('R1-快照优先')
     db.add(product)
     await db.flush()
 
-    db.add(InventoryLog(
+    kept = InventoryLog(
         product_id=product.id, change_type='入库', change_quantity=1,
         product_name='写入时快照名', product_barcode='BC-ORIG',
-    ))
-    db.add(InventoryLog(product_id=product.id, change_type='出库', change_quantity=-1))
+    )
+    filled = InventoryLog(product_id=product.id, change_type='出库', change_quantity=-1)
+    db.add(kept)
+    db.add(filled)
     await db.flush()
+    log_ids = [kept.id, filled.id]
 
     await product_service.delete_product(db, product.id)
     await db.flush()
 
     rows = (await db.execute(
-        select(InventoryLog.product_name, InventoryLog.product_barcode)
-        .where(InventoryLog.product_id.is_(None))
+        select(InventoryLog.product_id, InventoryLog.product_name, InventoryLog.product_barcode)
+        .where(InventoryLog.id.in_(log_ids))
         .order_by(InventoryLog.id)
     )).all()
-    assert rows == [('写入时快照名', 'BC-ORIG'), ('R1-快照优先', 'R1-快照优先')]
+    assert rows == [
+        (None, '写入时快照名', 'BC-ORIG'),
+        (None, 'R1-快照优先', 'R1-快照优先'),
+    ], '已有快照不得被覆盖；无快照行应补写产品名/条码；两行 product_id 均被外键置空'
 
 
 # ---------------------------------------------------------------------------

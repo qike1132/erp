@@ -1,7 +1,7 @@
 """退货管理全流程 E2E 测试（按产品退货，模拟数据走完整业务链）。
 
 P1 录入变更：退货 = 选产品 + 数量（不关联出货单/订单），库存 +N、流水留痕；
-取消（软删除）对称扣回并保留记录；request_id 幂等防重复提交。
+取消（2026-10-09 起 = 回冲后**删除记录**，取代旧的软取消）对称扣回；request_id 幂等防重复提交。
 全程经真实服务层与 ASGI HTTP，事务由 savepoint 统一回滚。
 另覆盖历史关联行（stockout_id 非空）取消时的 returned_quantity 回减分支。
 """
@@ -53,7 +53,7 @@ class TestStockReturnFullFlow:
     """按产品退货 · 全流程（模拟数据 + 真实服务层/HTTP）"""
 
     async def test_stockout_return_and_cancel_cycle(self, sr_api):
-        """出货 -> 搜索明细 -> 退货(幂等) -> 超退拒绝 -> 取消(软删/对称回冲)"""
+        """出货 -> 搜索明细 -> 退货(幂等) -> 超退拒绝 -> 取消(删除记录/对称回冲)"""
         client, db, _ = sr_api
         suffix = uuid.uuid4().hex[:8]
         customer = f"流程客户-{suffix}"
@@ -117,21 +117,22 @@ class TestStockReturnFullFlow:
                                 params={"q": "流程产品"})
         assert resp.json() == []
 
-        # 取消第一张：库存 90、明细已退 20、订单待出货；重复取消 400
+        # 取消第一张：库存 90、明细已退 20、订单待出货；该行被删除，重复取消 404
         resp = await client.get("/api/v1/stock-returns/list", params={"customer": customer})
         body = resp.json()
         ids = {r["id"]: r for r in body["data"]}
         first_id = next(rid for rid, r in ids.items() if r["quantity"] == 10)
         resp = await client.delete(f"/api/v1/stock-returns/{first_id}")
-        assert resp.status_code == 200 and "取消" in resp.json()["message"]
+        assert resp.status_code == 200 and "删除" in resp.json()["message"]
         await db.refresh(product); await db.refresh(stockout); await db.refresh(order)
         assert product.current_stock == 90
         assert stockout.returned_quantity == 20
         assert order.status == "待出货"
+        # 记录已删：再次取消同一 id 命中「不存在」而非「已取消」
         resp = await client.delete(f"/api/v1/stock-returns/{first_id}")
-        assert resp.status_code == 400 and "已取消" in resp.json()["detail"]
+        assert resp.status_code == 404 and "不存在" in resp.json()["detail"]
 
-        # 取消第二张：全部回冲到出货后原点，记录保留
+        # 取消第二张：全部回冲到出货后原点，记录删除
         resp = await client.get("/api/v1/stock-returns/list", params={"customer": customer})
         remaining = next(r for r in resp.json()["data"] if r["status"] == "active")
         resp = await client.delete(f"/api/v1/stock-returns/{remaining['id']}")
@@ -140,8 +141,9 @@ class TestStockReturnFullFlow:
         assert product.current_stock == 70
         assert stockout.returned_quantity == 0
         assert order.status == "已出货"
+        # 两张都已删除：列表只剩空集（get_stockreturns 仅返回 active 行）
         resp = await client.get("/api/v1/stock-returns/list", params={"customer": customer})
-        assert all(r["status"] == "cancelled" for r in resp.json()["data"])
+        assert resp.json()["data"] == []
 
     async def test_cancel_legacy_stockout_linked_return(self, sr_api):
         """历史关联行（stockout_id 非空）取消：回减出货单 returned_quantity 并重算订单"""
@@ -183,4 +185,4 @@ class TestStockReturnFullFlow:
         assert order.status == "已出货", "净出货回到 10/10，订单恢复已出货"
 
         resp = await client.get("/api/v1/stock-returns/list", params={"customer": customer})
-        assert resp.json()["data"][0]["status"] == "cancelled"
+        assert resp.json()["data"] == [], "取消即删除该行，列表不应再有记录"
