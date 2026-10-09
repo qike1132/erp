@@ -181,12 +181,22 @@ function handleImageError(row: Product) {
   gap: 8px;
   align-items: center;
 }
-/* 客户筛选与 UiSearchInput 并排等高：UiSelect 基础样式(min-height:44px/字15px)比搜索框
-   (py-2.5/字14px)高 2~3px、大 1 号，2026-10-09 用户报不齐。试点：仅 /product 收口。 */
+/* 客户筛选与 UiSearchInput 并排等高：两控件统一 40px 高/13.5px 字/10px 圆角。
+   筛选框侧收 UiSelect 基础样式(44px/15px)；搜索框侧收其默认 py-2.5(44px)/text-sm(14px)。 */
 .pd-col-actions :deep(.ui-select-input) {
+  min-width: 0;
   min-height: 40px;
   height: 40px;
   padding: 0 2.5rem 0 0.75rem;
+  font-size: 13.5px;
+  line-height: 1;
+  border-radius: 10px;
+}
+.pd-col-actions :deep(.ui-search-input input) {
+  height: 40px;
+  min-height: 40px;
+  padding-top: 0;
+  padding-bottom: 0;
   font-size: 13.5px;
   line-height: 1;
   border-radius: 10px;

@@ -61,7 +61,7 @@ function onClear() {
 </script>
 
 <template>
-  <div class="relative inline-flex items-center w-full max-w-sm">
+  <div class="ui-search-input relative inline-flex items-center w-full max-w-sm">
     <input
       type="text"
       :value="modelValue"
