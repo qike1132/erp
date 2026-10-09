@@ -189,11 +189,11 @@ class TestGetStockoutLogs:
 
     @pytest.mark.asyncio
     async def test_base_where_invariants(self, mock_async_db):
-        """固定条件：净出货量为正 + 非抵扣 + 关联订单未删除"""
+        """固定条件：出货毛量为正（不扣退货）+ 非抵扣 + 关联订单未删除"""
         with _patch_generic() as m:
             await get_stockout_logs(mock_async_db)
         where = m.call_args.kwargs['base_where']
-        assert '(so.quantity - so.returned_quantity) > 0' in where
+        assert 'so.quantity > 0' in where
         assert 'so.stockin_id IS NULL' in where
 
 

@@ -257,10 +257,12 @@ def _get_stockout_logs(session, customer, product, start_date, end_date, factory
     # 左连 Order 以便按软删过滤（与屏幕口径对齐：report_service.py 的
     # "(so.order_id IS NULL OR o2.is_deleted = false OR o2.is_deleted IS NULL)"）——
     # 挂到已软删订单上的出货不进导出，否则导出数字大于页面。
+    # 数量取**出货毛量**（quantity，不扣退货），与屏幕「出货流水」一致（2026-10-08 业务裁定）；
+    # 故过滤也用 quantity > 0，已全退的出货单仍进导出。
     query = select(StockOut).join(Product).outerjoin(
         Order, StockOut.order_id == Order.id
     ).where(
-        (StockOut.quantity - StockOut.returned_quantity) > 0,
+        StockOut.quantity > 0,
         StockOut.stockin_id.is_(None),
         or_(StockOut.order_id.is_(None), Order.is_deleted.isnot(True)),
     ).options(
@@ -275,11 +277,11 @@ def _get_stockout_logs(session, customer, product, start_date, end_date, factory
 
     stats_query = select(
         func.count(StockOut.id),
-        func.coalesce(func.sum(StockOut.quantity - StockOut.returned_quantity), 0),
+        func.coalesce(func.sum(StockOut.quantity), 0),
     ).join(Product, StockOut.product_id == Product.id).outerjoin(
         Order, StockOut.order_id == Order.id
     ).where(
-        (StockOut.quantity - StockOut.returned_quantity) > 0,
+        StockOut.quantity > 0,
         StockOut.stockin_id.is_(None),
         or_(StockOut.order_id.is_(None), Order.is_deleted.isnot(True)),
     )
@@ -305,7 +307,7 @@ def _get_stockout_logs(session, customer, product, start_date, end_date, factory
             'customer': so.customer or '',
             'product_name': so.product.name,
             'product_barcode': so.product.barcode or '',
-            'quantity': so.quantity - so.returned_quantity,
+            'quantity': so.quantity,
             'stockout_date': so.stockout_date.strftime('%Y-%m-%d %H:%M'),
             'order_no': order_no,
             'order_id': order_id,

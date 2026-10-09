@@ -354,12 +354,16 @@ async def get_stockin_logs(db: AsyncSession, customer: str = '', product: str = 
 async def get_stockout_logs(db: AsyncSession, customer: str = '', product: str = '',
                             start_date: str = '', end_date: str = '',
                             page: int = 1, per_page: int = 20, factory: str = '') -> dict:
-    """出货流水（仅手动出货，stockin_id IS NULL，COUNT(*) OVER() 合并计数查询）"""
+    """出货流水（仅手动出货，stockin_id IS NULL，COUNT(*) OVER() 合并计数查询）。
+
+    数量为**出货毛量**（SUM(quantity)），不扣退货——退货在「退货流水」tab 单独呈现，
+    故已全退的出货单仍按原出货量显示（2026-10-08 业务裁定）。
+    """
     per_page = min(max(1, per_page), 100)
     customer = customer.strip()[:100]
     product = product.strip()[:100]
 
-    where_clauses = ["(so.quantity - so.returned_quantity) > 0", "so.stockin_id IS NULL",
+    where_clauses = ["so.quantity > 0", "so.stockin_id IS NULL",
                      "(so.order_id IS NULL OR o2.is_deleted = false OR o2.is_deleted IS NULL)"]
     params: dict[str, object] = {}
 
@@ -388,7 +392,7 @@ async def get_stockout_logs(db: AsyncSession, customer: str = '', product: str =
         data_sql_template=f"""SELECT
         DATE(so.stockout_date) as stockout_date_only, so.customer, p.name as product_name,
         p.barcode as product_barcode,
-        SUM(so.quantity - so.returned_quantity) as total_quantity, COUNT(so.id) as stockout_count,
+        SUM(so.quantity) as total_quantity, COUNT(so.id) as stockout_count,
         {_string_agg('so.stockout_no', ', ')} as stockout_nos,
         {_string_agg('so.note', '; ')} as notes,
         COUNT(*) OVER() as total_count
@@ -398,7 +402,7 @@ async def get_stockout_logs(db: AsyncSession, customer: str = '', product: str =
         GROUP BY DATE(so.stockout_date), so.customer, p.name, p.barcode
         ORDER BY DATE(so.stockout_date) DESC
         LIMIT :limit OFFSET :offset""",  # nosec B608
-        qty_sql_template="""SELECT COALESCE(SUM(so.quantity - so.returned_quantity), 0)
+        qty_sql_template="""SELECT COALESCE(SUM(so.quantity), 0)
         FROM stock_out so JOIN product p ON so.product_id = p.id
         LEFT JOIN "order" o2 ON so.order_id = o2.id
         WHERE 1=1 {where_sql}""",
