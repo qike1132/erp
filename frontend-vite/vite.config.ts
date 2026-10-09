@@ -6,6 +6,7 @@ import AutoImport from 'unplugin-auto-import/vite'
 import Components from 'unplugin-vue-components/vite'
 import { PrimeVueResolver } from 'unplugin-vue-components/resolvers'
 import { VitePWA } from 'vite-plugin-pwa'
+import legacy from '@vitejs/plugin-legacy'
 import { resolve } from 'path'
 
 // FontAwesome 懒加载清单中的 CJS 图标子路径必须显式预构建：
@@ -42,6 +43,30 @@ export default defineConfig(({ mode }) => {
       Components({
         dts: 'src/components.d.ts',
         resolvers: [PrimeVueResolver()],
+      }),
+      // 旧 Chromium 内核兼容（第 1 层：JS）。
+      // Vite 7 默认编译目标是 'baseline-widely-available'(Chrome107/Edge107/Firefox104/
+      // Safari16)：旧内核解析 ??= / ||= / 类字段等语法即抛 SyntaxError —— 入口 chunk
+      // 失败=整页白屏，懒加载路由 chunk 失败=点菜单空白。本插件据此把现代 bundle 降到
+      // modernTargets，并只补缺失的运行时 API（Object.hasOwn / Array.at / replaceAll 等）。
+      // renderLegacyChunks:false —— 目标浏览器(≥Chrome61)已支持 <script type="module">，
+      // 无需 SystemJS/nomodule 回退；也避免注入内联脚本，与 SPA 入口 CSP
+      // `script-src 'self'`(无 'unsafe-inline') 不冲突
+      // （守卫测试 fastapi_app/tests/test_spa_csp_no_inline_scripts.py）。
+      // 注意：本插件会接管 build.target（覆盖 vite.config 里手写的值），故降级目标只在此声明。
+      legacy({
+        // 与 plugin-legacy 内置默认一致(edge79/firefox67/chrome64/safari12/chromeAndroid64/iOS12)，
+        // 显式写出以便日后按现场内核收紧/放宽。注意勿漏 chromeAndroid/iOS —— 本项目有移动端 UI。
+        modernTargets: [
+          'chrome >= 64',
+          'chromeAndroid >= 64',
+          'edge >= 79',
+          'firefox >= 67',
+          'safari >= 12',
+          'iOS >= 12',
+        ],
+        renderLegacyChunks: false,
+        modernPolyfills: true,
       }),
       VitePWA({
         registerType: 'autoUpdate',
