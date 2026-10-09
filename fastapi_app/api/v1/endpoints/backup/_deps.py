@@ -161,9 +161,20 @@ def _resolve_encryption(
     """
     解析端点的加密意图，返回 (是否实际加密, 密码)。
 
+    总开关优先：BACKUP_ENCRYPTION_ENABLED=false 时一律不加密，忽略调用方的 encrypt 意图
+    （与 create_full_backup / create_incremental_backup 口径统一）。
+
     请求加密但未配置任何密码时，明确降级为不加密并记录告警，
     绝不退化为随机密码加密（fail-safe：宁可明文可还原，不可密文打不开）。
     """
+    from fastapi_app.services.backup.crypto import is_encryption_enabled
+
+    if not is_encryption_enabled():
+        if encrypt:
+            logger.warning(
+                'BACKUP_ENCRYPTION_ENABLED=false，已忽略 encrypt=True 请求，本次导出不加密'
+            )
+        return False, None
     if not encrypt:
         return False, None
     resolved = _get_encryption_password(password, x_backup_password)

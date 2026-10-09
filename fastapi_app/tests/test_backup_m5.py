@@ -134,7 +134,9 @@ class TestExportEndpointAudit:
         assert kwargs['size'] == expected_size
 
     @pytest.mark.asyncio
-    async def test_export_zip_encrypted_triggers_audit(self, client, tmp_path):
+    async def test_export_zip_encrypted_triggers_audit(self, client, tmp_path, monkeypatch):
+        from fastapi_app.services.backup import crypto
+        monkeypatch.setattr(crypto, 'BACKUP_ENCRYPTION_ENABLED', True, raising=False)
         fake_zip = tmp_path / 'erp_backup_fake2.zip'
         fake_zip.write_bytes(b'PK\x03\x04' + b'0' * 100)
         manifest = {'zip_size': fake_zip.stat().st_size}
@@ -158,6 +160,35 @@ class TestExportEndpointAudit:
         kwargs = audit_mock.await_args.kwargs
         assert kwargs['filename'].endswith('.zip.enc')
         assert kwargs['encrypted'] is True
+
+    @pytest.mark.asyncio
+    async def test_export_master_switch_off_forces_plain_zip(self, client, tmp_path, monkeypatch):
+        """总开关关闭时，即便显式 encrypt=true 也产出明文 .zip（不再产生无人能开的 .enc）。"""
+        from fastapi_app.services.backup import crypto
+        monkeypatch.setattr(crypto, 'BACKUP_ENCRYPTION_ENABLED', False, raising=False)
+        fake_zip = tmp_path / 'erp_backup_fake3.zip'
+        fake_zip.write_bytes(b'PK\x03\x04' + b'0' * 100)
+        manifest = {'zip_size': fake_zip.stat().st_size}
+
+        audit_mock = AsyncMock()
+        with patch(
+            'fastapi_app.api.v1.endpoints.backup.export.backup_service.create_full_backup_to_file',
+            new=AsyncMock(return_value=(fake_zip, manifest)),
+        ), patch(
+            'fastapi_app.api.v1.endpoints.backup.export._audit_export_download',
+            new=audit_mock,
+        ):
+            resp = await client.get(
+                '/api/v1/backup/export',
+                params={'encrypt': True, 'format': 'zip'},
+                headers={'X-Backup-Password': 'secret-pw'},
+            )
+
+        assert resp.status_code == 200
+        kwargs = audit_mock.await_args.kwargs
+        assert kwargs['filename'].endswith('.zip')
+        assert not kwargs['filename'].endswith('.zip.enc')
+        assert kwargs['encrypted'] is False
 
     @pytest.mark.asyncio
     async def test_export_json_triggers_audit(self, client, tmp_path):

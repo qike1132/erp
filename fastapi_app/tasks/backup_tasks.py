@@ -73,7 +73,14 @@ async def manual_full_backup_task(
 
             # 加密 fail-safe:与端点 _resolve_encryption 一致——
             # 请求加密但未配置任何密码(参数/头/环境变量)时,降级为不加密,禁止随机密钥回退
-            if not encrypt:
+            # 总开关优先：BACKUP_ENCRYPTION_ENABLED=false 时忽略 encrypt 意图，一律明文。
+            if not backup_service.is_encryption_enabled():
+                if encrypt:
+                    logger.warning(
+                        'BACKUP_ENCRYPTION_ENABLED=false，已忽略 encrypt=True 请求，本次全量备份不加密'
+                    )
+                effective_password = None
+            elif not encrypt:
                 effective_password = None
             else:
                 effective_password = password or backup_service.BACKUP_ENCRYPTION_PASSWORD or None
@@ -669,9 +676,13 @@ async def _do_auto_backup(backup_type: str) -> dict:
         if backup_type == 'daily':
             # P0-1: 自动备份加密决策显式化——仅环境变量配置了密码才加密，
             # 绝不随机回退（旧路径在无密码时会用一次性随机密钥，产出不可还原备份）
-            auto_password = backup_service.BACKUP_ENCRYPTION_PASSWORD or None
-            if not auto_password:
-                logger.info('自动全量备份未配置 BACKUP_ENCRYPTION_PASSWORD，本次备份不加密')
+            # 总开关优先：BACKUP_ENCRYPTION_ENABLED=false 时一律明文。
+            if not backup_service.is_encryption_enabled():
+                auto_password = None
+            else:
+                auto_password = backup_service.BACKUP_ENCRYPTION_PASSWORD or None
+                if not auto_password:
+                    logger.info('自动全量备份未配置 BACKUP_ENCRYPTION_PASSWORD，本次备份不加密')
             zip_bytes, manifest = await backup_service.create_full_backup(
                 db, dummy_user, '每日自动全量备份',
                 encrypt_password=auto_password,

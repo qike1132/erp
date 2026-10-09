@@ -128,9 +128,16 @@ async def create_incremental_backup(
             zip_bytes = zip_path.read_bytes()
 
             # P0-1 统一加密语义：与 create_full_backup 一致，无随机密钥回退
-            if encrypt is True and not (encrypt_password or get_backup_encryption_password()):
+            # 总开关优先：BACKUP_ENCRYPTION_ENABLED=false 时忽略 encrypt 意图，一律明文。
+            if not is_encryption_enabled():
+                if encrypt:
+                    logger.warning(
+                        'BACKUP_ENCRYPTION_ENABLED=false，已忽略 encrypt=True 请求，本次增量备份不加密'
+                    )
+                encryption_password = None
+            elif encrypt is True and not (encrypt_password or get_backup_encryption_password()):
                 raise BackupError('请求加密增量备份但未配置密码（encrypt_password 参数 / BACKUP_ENCRYPTION_PASSWORD 环境变量均未提供）')
-            if encrypt is False:
+            elif encrypt is False:
                 encryption_password = None
             else:
                 encryption_password = encrypt_password or get_backup_encryption_password()

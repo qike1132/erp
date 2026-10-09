@@ -194,7 +194,7 @@ async function triggerFull(opts?: { password?: string; tables?: string[]; exclud
   try {
     const res = await backupApi.triggerFull({
       remark: partial ? '手动表级备份' : '手动全量备份',
-      encrypt: true,
+      encrypt: false,
       password: opts?.password,
       tables: opts?.tables?.length ? opts.tables : undefined,
       exclude_tables: opts?.excludeTables?.length ? opts.excludeTables : undefined,

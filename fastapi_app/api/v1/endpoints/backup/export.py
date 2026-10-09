@@ -217,7 +217,7 @@ async def export_backup(
     request: Request,
     remark: str = '',
     format: str = 'zip',
-    encrypt: bool = Query(True, description="是否启用加密"),
+    encrypt: bool = Query(False, description="是否启用加密（默认不加密；总开关 BACKUP_ENCRYPTION_ENABLED=false 时被忽略）"),
     x_backup_password: str | None = Header(None, alias='X-Backup-Password'),
     user: User = Depends(require_backup_permission('export_backup')),
     db: AsyncSession = Depends(get_async_db),
@@ -228,7 +228,7 @@ async def export_backup(
     参数：
     - remark: 备份备注
     - format: 备份格式，支持 'zip' 或 'json'
-    - encrypt: 是否启用加密，默认True
+    - encrypt: 是否启用加密，默认False（总开关 BACKUP_ENCRYPTION_ENABLED=false 时被忽略）
     - x_backup_password: 加密密码（请求头，H3：已移除 URL query 形式，避免密码进入访问日志/浏览器历史）
 
     加密密码获取优先级：
@@ -262,7 +262,7 @@ async def export_backup(
 @router.post('/save', response_model=BackupSaveResponse)
 async def save_backup_to_server(
     remark: str = '',
-    encrypt: bool = Query(True, description="是否启用加密"),
+    encrypt: bool = Query(False, description="是否启用加密（默认不加密；总开关 BACKUP_ENCRYPTION_ENABLED=false 时被忽略）"),
     password: str | None = Body(None, description="加密密码（H3：经 body 传递，避免进入访问日志/浏览器历史；为空时依次使用请求头/环境变量，均未配置时不加密）"),
     x_backup_password: str | None = Header(None, alias='X-Backup-Password'),
     user: User = Depends(require_backup_permission('save_backup_to_server')),
@@ -273,7 +273,7 @@ async def save_backup_to_server(
 
     参数：
     - remark: 备份备注
-    - encrypt: 是否启用加密，默认True
+    - encrypt: 是否启用加密，默认False（总开关 BACKUP_ENCRYPTION_ENABLED=false 时被忽略）
     - password: 加密密码（请求体，H3）
     - x_backup_password: 加密密码（请求头）
 
@@ -444,7 +444,7 @@ async def _sweep_chunk_bundle_files() -> None:
 async def get_backup_info(
     background_tasks: BackgroundTasks,
     remark: str = '',
-    encrypt: bool = Query(True, description="是否启用加密"),
+    encrypt: bool = Query(False, description="是否启用加密（默认不加密；总开关 BACKUP_ENCRYPTION_ENABLED=false 时被忽略）"),
     x_backup_password: str | None = Header(None, alias='X-Backup-Password'),
     user: User = Depends(require_backup_permission('get_backup_info')),
     db: AsyncSession = Depends(get_async_db),
@@ -530,7 +530,7 @@ async def export_backup_chunk(
     background_tasks: BackgroundTasks,
     bundle_id: str | None = Query(None, description="export-info 返回的分片会话 ID，命中缓存则直接切片，避免每片重新全量备份"),
     remark: str = '',
-    encrypt: bool = Query(True, description="是否启用加密"),
+    encrypt: bool = Query(False, description="是否启用加密（默认不加密；总开关 BACKUP_ENCRYPTION_ENABLED=false 时被忽略）"),
     x_backup_password: str | None = Header(None, alias='X-Backup-Password'),
     user: User = Depends(require_backup_permission('export_backup_chunk')),
     db: AsyncSession = Depends(get_async_db),
@@ -634,7 +634,7 @@ async def export_backup_enhanced(
     request: Request,
     remark: str = '',
     format: str = 'zip',
-    encrypt: bool = Query(True, description="是否启用加密"),
+    encrypt: bool = Query(False, description="是否启用加密（默认不加密；总开关 BACKUP_ENCRYPTION_ENABLED=false 时被忽略）"),
     x_backup_password: str | None = Header(None, alias='X-Backup-Password'),
     user: User = Depends(require_backup_permission('export_backup_enhanced')),
     db: AsyncSession = Depends(get_async_db),

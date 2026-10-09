@@ -277,12 +277,25 @@ class TestResolveEncryption:
     def test_encrypt_false_short_circuits(self):
         assert _deps._resolve_encryption(False, password='x') == (False, None)
 
-    def test_with_password(self):
+    def test_with_password(self, monkeypatch):
+        from fastapi_app.services.backup import crypto
+        monkeypatch.setattr(crypto, 'BACKUP_ENCRYPTION_ENABLED', True, raising=False)
         assert _deps._resolve_encryption(True, password='x') == (True, 'x')
 
-    def test_with_header(self):
+    def test_with_header(self, monkeypatch):
+        from fastapi_app.services.backup import crypto
+        monkeypatch.setattr(crypto, 'BACKUP_ENCRYPTION_ENABLED', True, raising=False)
         assert _deps._resolve_encryption(True, x_backup_password='h') == (True, 'h')
 
+    def test_master_switch_off_ignores_encrypt_true(self, monkeypatch):
+        """总开关关闭时，encrypt=True 必须被忽略并降级为明文（前端硬编码 encrypt=true）。"""
+        from fastapi_app.services.backup import crypto
+        monkeypatch.setattr(crypto, 'BACKUP_ENCRYPTION_ENABLED', False, raising=False)
+        assert _deps._resolve_encryption(True, password='x') == (False, None)
+        assert _deps._resolve_encryption(True, x_backup_password='h') == (False, None)
+
     def test_degrades_to_plain_when_unconfigured(self, monkeypatch):
+        from fastapi_app.services.backup import crypto
+        monkeypatch.setattr(crypto, 'BACKUP_ENCRYPTION_ENABLED', True, raising=False)
         monkeypatch.delenv('BACKUP_ENCRYPTION_PASSWORD', raising=False)
         assert _deps._resolve_encryption(True) == (False, None)

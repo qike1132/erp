@@ -396,9 +396,17 @@ async def _do_create_full_backup(
         # 打包，需在写 zip 前确定本次是否加密。
         # - encrypt=False / None（未显式要求加密）：环境变量有密码则加密，否则明文+告警
         # - encrypt=True：必须有密码（入参或环境变量），否则直接报错（宁可失败不可造出打不开的备份）
-        if encrypt is True and not (encrypt_password or get_backup_encryption_password()):
+        # 总开关优先：BACKUP_ENCRYPTION_ENABLED=false 时忽略调用方的 encrypt 意图，一律明文。
+        # 前端手动备份硬编码 encrypt=true，若不让开关短路，运维改环境变量将完全无效。
+        if not is_encryption_enabled():
+            if encrypt:
+                logger.warning(
+                    'BACKUP_ENCRYPTION_ENABLED=false，已忽略 encrypt=True 请求，本次全量备份不加密'
+                )
+            effective_encryption_password = None
+        elif encrypt is True and not (encrypt_password or get_backup_encryption_password()):
             raise BackupError('请求加密全量备份但未配置密码（encrypt_password 参数 / BACKUP_ENCRYPTION_PASSWORD 环境变量均未提供）')
-        if encrypt is False:
+        elif encrypt is False:
             effective_encryption_password = None
         else:
             effective_encryption_password = encrypt_password or get_backup_encryption_password()

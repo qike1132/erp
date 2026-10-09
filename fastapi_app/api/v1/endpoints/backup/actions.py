@@ -97,7 +97,7 @@ async def trigger_full_backup(
 
     参数:
     - remark: 备份备注
-    - encrypt: 是否启用加密,默认 True(未配置密码时降级为不加密)
+    - encrypt: 是否启用加密,默认 False(总开关 BACKUP_ENCRYPTION_ENABLED=false 时被忽略)
     - password / X-Backup-Password: 加密密码
 
     返回 202 + task_id,前端轮询 GET /progress/{task_id} 获取进度。

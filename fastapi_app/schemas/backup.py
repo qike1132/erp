@@ -255,7 +255,7 @@ class AsyncTaskResponse(BaseModel):
 class BackupEncryptionRequest(BaseModel):
     """加密备份请求参数"""
     password: str | None = Field(default=None, description="加密密码，为空时从环境变量获取或生成临时密码")
-    encrypt: bool = Field(default=True, description="是否启用加密")
+    encrypt: bool = Field(default=False, description="是否启用加密（默认不加密；总开关 BACKUP_ENCRYPTION_ENABLED=false 时本字段被忽略）")
 
 
 class BackupChunkInfo(BaseModel):
@@ -350,7 +350,7 @@ class BackupTaskTriggerOut(BaseModel):
 class BackupFullRequest(BaseModel):
     """全量备份触发请求"""
     remark: str = Field(default="", max_length=200, description="备份备注")
-    encrypt: bool = Field(default=True, description="是否启用加密(未配置密码时降级为不加密)")
+    encrypt: bool = Field(default=False, description="是否启用加密（默认不加密；总开关 BACKUP_ENCRYPTION_ENABLED=false 时被忽略）")
     password: str | None = Field(default=None, description="加密密码,为空时依次使用请求头/环境变量")
     tables: list[str] | None = Field(default=None, description="表级备份:仅备份指定表(与 exclude_tables 互斥)")
     exclude_tables: list[str] | None = Field(default=None, description="表级备份:排除指定表(与 tables 互斥)")
