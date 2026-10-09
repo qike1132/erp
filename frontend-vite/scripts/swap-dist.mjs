@@ -88,10 +88,20 @@ try {
   process.exit(1)
 }
 
-// 剪枝：顶层 + assets/ 里已不在新构建中的残留
-await prune(dist, new Set([...others, 'index.html']))
-if (existsSync(join(distNew, 'assets'))) {
-  await prune(join(dist, 'assets'), new Set(await readdir(join(distNew, 'assets'))))
+// 剪枝：顶层 + assets/ 里已不在新构建中的残留。
+// 剪枝失败不应导致整次发布报错退出：新内容已全部就位，残留旧文件只是
+// 占磁盘（旧 hash 文件名不会被引用），删不掉下次构建还会再试。
+for (const [dir, keep] of [
+  [dist, new Set([...others, 'index.html'])],
+  ...(existsSync(join(distNew, 'assets'))
+    ? [[join(dist, 'assets'), new Set(await readdir(join(distNew, 'assets')))]]
+    : []),
+]) {
+  try {
+    await prune(dir, keep)
+  } catch (err) {
+    console.warn('[swap-dist] ⚠️ 剪枝失败（不影响发布，残留旧文件下次构建再清）:', err?.message ?? err)
+  }
 }
 
 console.log('[swap-dist] dist 已有序复制替换完成（发布成功后无可回退副本，需回滚请用发布前备份）')

@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   returnUpdate: vi.fn(),
   returnRemove: vi.fn(),
   hasPermission: vi.fn((_c: string) => true),
+  hasAnyPermission: vi.fn((_c: string[]) => true),
   showToast: vi.fn(),
   confirm: vi.fn(async () => true),
   invalidateQueries: vi.fn(),
@@ -37,7 +38,7 @@ vi.mock('@/api', () => ({
   },
 }))
 vi.mock('@/stores/auth', () => ({
-  useAuthStore: () => ({ hasPermission: mocks.hasPermission }),
+  useAuthStore: () => ({ hasPermission: mocks.hasPermission, hasAnyPermission: mocks.hasAnyPermission }),
 }))
 vi.mock('@/composables/useToast', () => ({ showToast: mocks.showToast }))
 vi.mock('@/composables/useConfirmDialog', () => ({
@@ -80,16 +81,17 @@ const RETURN_REC = {
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.hasPermission.mockReturnValue(true)
+  mocks.hasAnyPermission.mockReturnValue(true)
   mocks.confirm.mockResolvedValue(true)
 })
 
 describe('TAB_ROW_PERMISSIONS', () => {
-  it('订单/备货用 order_*，出货/抵扣/退货各自独立码', () => {
-    expect(TAB_ROW_PERMISSIONS.order).toEqual({ edit: 'order_edit', delete: 'order_delete' })
-    expect(TAB_ROW_PERMISSIONS.stockin).toEqual({ edit: 'order_edit', delete: 'order_delete' })
-    expect(TAB_ROW_PERMISSIONS.stockout).toEqual({ edit: 'stockout_edit', delete: 'stockout_delete' })
-    expect(TAB_ROW_PERMISSIONS.deduction).toEqual({ edit: 'deduction_edit', delete: 'deduction_delete' })
-    expect(TAB_ROW_PERMISSIONS.return).toEqual({ edit: 'return_edit', delete: 'return_delete' })
+  it('订单/备货用 order_*，出货/抵扣/退货各自独立码；每项镜像后端 require_any 的 manage 兜底', () => {
+    expect(TAB_ROW_PERMISSIONS.order).toEqual({ edit: ['order_edit', 'order_manage'], delete: ['order_delete', 'order_manage'] })
+    expect(TAB_ROW_PERMISSIONS.stockin).toEqual({ edit: ['order_edit', 'order_manage', 'stockin_manage'], delete: ['order_delete', 'order_manage', 'stockin_manage'] })
+    expect(TAB_ROW_PERMISSIONS.stockout).toEqual({ edit: ['stockout_edit', 'stockout_manage'], delete: ['stockout_delete', 'stockout_manage'] })
+    expect(TAB_ROW_PERMISSIONS.deduction).toEqual({ edit: ['deduction_edit', 'stockout_manage'], delete: ['deduction_delete', 'stockout_manage'] })
+    expect(TAB_ROW_PERMISSIONS.return).toEqual({ edit: ['return_edit', 'stock_return_manage'], delete: ['return_delete', 'stock_return_manage'] })
   })
 })
 
@@ -168,7 +170,7 @@ describe('出货流水行内操作', () => {
   })
 
   it('无权限：toast 拒绝，不发起还原请求', async () => {
-    mocks.hasPermission.mockReturnValue(false)
+    mocks.hasAnyPermission.mockReturnValue(false)
     const api = makeActions()
 
     await api.onRowAction('stockout', 'edit', { stockout_nos: 'SO-1' })

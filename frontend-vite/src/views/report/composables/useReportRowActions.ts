@@ -13,7 +13,7 @@
  *   备货 → PUT /stock/in/edit · DELETE /stock/in/delete（库存域）
  *   出货 → PUT /stock/out/edit · DELETE /stock/out/delete（独立出货）
  *   抵扣 → 同上端点（后端按 stockin_id 区分，抵扣行客户不可改）
- *   退货 → PUT /stock-returns/{id}（取消+重建）· DELETE /stock-returns/{id}（软取消）
+ *   退货 → PUT /stock-returns/{id}（取消+重建）· DELETE /stock-returns/{id}（硬删除）
  *
  * 权限（迁移 075/079）：各维度独立职责分离码，见 TAB_ROW_PERMISSIONS；
  * 按钮渲染由 ReportView 按当前 tab 门控，这里再做一次兜底（程序化调用/入口遗漏）。
@@ -36,13 +36,15 @@ import type { OrderRecord } from './orderRecordTypes'
 export type ReportActionTab = 'order' | 'stockin' | 'stockout' | 'deduction' | 'return'
 export type ReportAction = 'edit' | 'delete'
 
-/** 各维度行内操作的权限码（迁移 075 订单/备货；079 出货/抵扣/退货） */
-export const TAB_ROW_PERMISSIONS: Record<ReportActionTab, { edit: string; delete: string }> = {
-  order: { edit: 'order_edit', delete: 'order_delete' },
-  stockin: { edit: 'order_edit', delete: 'order_delete' },
-  stockout: { edit: 'stockout_edit', delete: 'stockout_delete' },
-  deduction: { edit: 'deduction_edit', delete: 'deduction_delete' },
-  return: { edit: 'return_edit', delete: 'return_delete' },
+/** 各维度行内操作的权限码（迁移 075 订单/备货；079 出货/抵扣/退货）。
+ * 数组镜像后端 require_any_permission 的全部可放行码（含 manage 粗锁兜底）——
+ * 漏 manage 会让「只有页面级 manage 权限」的用户被前端误拦 403（后端本会放行）。 */
+export const TAB_ROW_PERMISSIONS: Record<ReportActionTab, { edit: string[]; delete: string[] }> = {
+  order: { edit: ['order_edit', 'order_manage'], delete: ['order_delete', 'order_manage'] },
+  stockin: { edit: ['order_edit', 'order_manage', 'stockin_manage'], delete: ['order_delete', 'order_manage', 'stockin_manage'] },
+  stockout: { edit: ['stockout_edit', 'stockout_manage'], delete: ['stockout_delete', 'stockout_manage'] },
+  deduction: { edit: ['deduction_edit', 'stockout_manage'], delete: ['deduction_delete', 'stockout_manage'] },
+  return: { edit: ['return_edit', 'stock_return_manage'], delete: ['return_delete', 'stock_return_manage'] },
 }
 
 /** picker 选择弹窗的列取值键（按维度；order/stockin 的备注在 items 内，见 recordNote） */
@@ -302,7 +304,7 @@ export function useReportRowActions() {
   async function handleDeleteReturn(record: StockReturnFlowRecord) {
     const ok = await confirmDialog.confirm(
       `确定取消退货「${record.return_no}」吗？`,
-      '取消为软取消（记录保留），库存与订单状态会对称回冲。此操作不可撤销。',
+      '取消将删除该退货单记录，库存与订单状态会对称回冲（对账以库存流水为准）。此操作不可撤销。',
       'danger',
     )
     if (!ok) return
@@ -343,11 +345,11 @@ export function useReportRowActions() {
   async function onRowAction(tab: ReportActionTab, action: ReportAction, row: Record<string, unknown>) {
     // 权限二次防线：按钮渲染已由 ReportView 门控，这里兜底程序化调用与未来入口遗漏
     const perm = TAB_ROW_PERMISSIONS[tab]
-    if (action === 'edit' && !authStore.hasPermission(perm.edit)) {
+    if (action === 'edit' && !authStore.hasAnyPermission(perm.edit)) {
       showToast('没有执行编辑的权限', 'error')
       return
     }
-    if (action === 'delete' && !authStore.hasPermission(perm.delete)) {
+    if (action === 'delete' && !authStore.hasAnyPermission(perm.delete)) {
       showToast('没有执行删除的权限', 'error')
       return
     }

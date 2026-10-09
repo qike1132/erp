@@ -39,6 +39,14 @@ export function useEnhancedList<T>(opts: Options) {
 
   watch(dSearch, () => { page.value = 1; keysetCursor.value = undefined })
 
+  // extraParams 变化（如筛选切换）也要重置页码：queryKey 会变并触发新查询，
+  // 但旧 page 若超出新结果页数会拿到空页。只在值真正变化时重置（首次运行跳过）。
+  if (extraParams) {
+    watch(extraParams, (n, o) => {
+      if (JSON.stringify(n) !== JSON.stringify(o)) { page.value = 1; keysetCursor.value = undefined }
+    })
+  }
+
   const qk = computed(() => [key, page.value, perPage.value, dSearch.value, sortBy.value, sortOrder.value, keysetCursor.value, extraParams?.() ?? {}])
   const qp = computed(() => ({
     page: page.value, per_page: perPage.value, search: dSearch.value || undefined,

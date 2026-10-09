@@ -132,12 +132,14 @@ const authStore = useAuthStore()
  * 行内编辑/删除的权限裁决（各维度独立职责分离码，2026-10-07）：
  * 订单/备货 = order_edit / order_delete（迁移 075）；出货 = stockout_*、抵扣 = deduction_*、
  * 退货 = return_*（迁移 079）。均在 /user 权限树「订单流水」下显式勾选，超管在
- * hasPermission 内短路放行；持有页面级 manage 权限不再自动获得报表行操作。
+ * hasPermission 内短路放行。
+ * 权限数组含后端 require_any 的 manage 兜底码（stockout_manage / stock_return_manage /
+ * order_manage 等）——镜像后端全部可放行路径，持有页面级 manage 的用户不应被前端拦。
  * 当前 tab 两项皆无时整个「操作」列不渲染（连表头一起），而不是空壳列。
  */
 const rowPerms = computed(() => TAB_ROW_PERMISSIONS[activeTab.value])
-const canEditRowActions = computed(() => authStore.hasPermission(rowPerms.value.edit))
-const canDeleteRowActions = computed(() => authStore.hasPermission(rowPerms.value.delete))
+const canEditRowActions = computed(() => authStore.hasAnyPermission(rowPerms.value.edit))
+const canDeleteRowActions = computed(() => authStore.hasAnyPermission(rowPerms.value.delete))
 const canManageRowActions = computed(() => canEditRowActions.value || canDeleteRowActions.value)
 
 const { currentCfg, currentTabEndpoint, reportColumns } = useReportConfig(activeTab, canManageRowActions)

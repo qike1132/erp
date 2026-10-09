@@ -3,7 +3,7 @@
  *
  * 录入流程：新建退货单 -> 搜索产品名 -> 弹出该产品全部出货明细
  * -> 勾选要退的明细 -> 录数量。可退量 = 明细出货量 - 已退量。
- * 取消为软删除（记录保留、库存对称扣回）。
+ * 取消为硬删除（记录移除、库存对称扣回；流水已记「退货」「退货取消」两条，不丢对账真相）。
  */
 import { ref, reactive, computed } from 'vue'
 import { useQuery, keepPreviousData } from '@tanstack/vue-query'
@@ -209,7 +209,7 @@ export function useStockReturn() {
     }
   }
 
-  // ---------- 取消退货（P1-1 软取消） ----------
+  // ---------- 取消退货（2026-10-09 起为硬删除：库存对称扣回，行本身移除） ----------
   const deleteMutation = useApiMutation((id: number) => stockReturnApi.remove(id), {
     invalidateKeys: ['stock-returns-list', 'stockouts-list', 'inventory'],
     successMsg: '退货取消成功',
@@ -218,7 +218,7 @@ export function useStockReturn() {
 
   async function handleDelete(row: { id: number; return_no: string; quantity: number }) {
     const ok = await confirmDialog.confirm(
-      `确定要取消退货单 ${row.return_no}（${row.quantity} 件）吗？库存将对称扣回、订单状态重算，记录保留可追溯。`,
+      `确定要取消退货单 ${row.return_no}（${row.quantity} 件）吗？库存将对称扣回、订单状态重算，该退货单记录将被删除（对账以库存流水为准）。`,
     )
     if (!ok) return
     actionId.value = row.id

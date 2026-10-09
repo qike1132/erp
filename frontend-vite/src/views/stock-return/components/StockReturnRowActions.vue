@@ -14,7 +14,7 @@
       class="sr-row-btn sr-row-btn-danger"
       :disabled="disabled"
       aria-label="删除退货"
-      title="删除退货（软取消：记录保留，库存对称扣回）"
+      title="删除退货（硬删除：记录移除，库存对称扣回）"
       @click="emit('delete', row)"
     >
       <FontAwesomeIcon icon="trash-alt" aria-hidden="true" />

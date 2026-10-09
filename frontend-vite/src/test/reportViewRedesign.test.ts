@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   orderLogsMock: vi.fn(),
   queryData: null as unknown as { value: unknown },
   hasPermission: vi.fn(() => true),
+  hasAnyPermission: vi.fn((_c: string[]) => true),
 }))
 
 vi.mock('@/api', () => ({
@@ -63,6 +64,7 @@ vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
     user: { factory: '' },
     hasPermission: mocks.hasPermission,
+    hasAnyPermission: mocks.hasAnyPermission,
   }),
 }))
 
@@ -188,6 +190,7 @@ async function emitSort(w: VueWrapper, field: string, order: number) {
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.hasPermission.mockReturnValue(true)
+  mocks.hasAnyPermission.mockReturnValue(true)
 })
 
 describe('ReportTabGroup —— 维度 tab', () => {
@@ -368,12 +371,12 @@ describe('ReportTable —— 行内操作列（订单/备货流水）', () => {
     }
   })
 
-  it('ReportView 的门控跟随 authStore.hasPermission', async () => {
-    mocks.hasPermission.mockReturnValue(false)
+  it('ReportView 的门控跟随 authStore.hasAnyPermission（含 manage 兜底镜像）', async () => {
+    mocks.hasAnyPermission.mockReturnValue(false)
     const w = mountView()
     expect(w.findAll('.rp-btn-edit').length).toBe(0)
     expect(w.findAll('.rp-btn-danger').length).toBe(0)
 
-    mocks.hasPermission.mockReturnValue(true)
+    mocks.hasAnyPermission.mockReturnValue(true)
   })
 })

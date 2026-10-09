@@ -188,16 +188,17 @@ export function useStagedItems() {
       // 播报必须以「实际提交的那一批」为准——事后从活列表现算会与实际入库对不上。
       const orderPayload = buildOrderPayload()
       const stockinPayload = buildStockinPayload()
+      // 「带计划」计数与 payload 同点定稿：submitGroup 的两个 await 期间
+      // removeStagedItem 可能让暂存区变短，事后过滤会漏算
+      const orderWithPlans = stagedOrders.value.filter((i) => i.shipmentPlans.length > 0).length
 
       // 两类条目各自独立提交：其一失败不阻断另一类，
       // 也不会把「从未尝试」错当成「已成功」（后者曾导致条目被静默移出暂存区）。
       const order = await submitGroup(stockApi.batchSubmitOrders, orderPayload, '订单')
       const stockin = await submitGroup(stockApi.batchSubmitStockins, stockinPayload, '备货')
 
-      // 在移除暂存项之前捕获「成功提交且带计划」的条目数，供播报使用
-      const syncedPlanCount = order.attempted && !order.failed
-        ? stagedOrders.value.filter((i) => i.shipmentPlans.length > 0).length
-        : 0
+      // 在移除暂存项之前捕获「成功提交且带计划」的条目数（await 前已定稿），供播报使用
+      const syncedPlanCount = order.attempted && !order.failed ? orderWithPlans : 0
       // 备货按**逐条结果**统计：请求返回 200 不代表每条都入库成功
       const stockinRes = stockin.attempted && !stockin.failed
         ? stockinOutcome(stockinPayload, stockin.res)

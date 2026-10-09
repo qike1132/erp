@@ -13,7 +13,7 @@ export interface StockReturnRecord {
   stockout_no: string
   reason: string
   note: string
-  /** P1-1：active 正常 / cancelled 已取消（软取消保留记录） */
+  /** active 正常 / cancelled 已取消（历史遗留值，2026-10-09 起取消即硬删除，存量行仍可能有 cancelled） */
   status: 'active' | 'cancelled' | string
 }
 
@@ -87,6 +87,6 @@ export const stockReturnApi = {
   /** 编辑退货（后端单事务内「取消原退货 + 重建」，新记录带新单号） */
   update: (id: number, data: StockReturnUpdatePayload) =>
     put<{ success?: boolean; message?: string }>(`/stock-returns/${id}`, data),
-  /** 取消退货（P1-1 软删除：记录保留，库存对称扣回） */
+  /** 取消退货（硬删除：记录移除，库存对称扣回；对账以库存流水为准） */
   remove: (id: number) => del<{ success: boolean; message: string }>(`/stock-returns/${id}`),
 }
