@@ -98,6 +98,33 @@ function Get-PgTool([string]$ExeName){
   $null
 }
 
+function Get-NginxServerBlockExtent([Collections.Generic.List[string]]$Lines,[int]$ListenIdx){
+  # 由 'listen ...' 行定位其所属 server 块的 [起始行, 结束行]（含配对花括号）。纯函数，供单测。
+  $s=$ListenIdx; while($s -ge 0 -and $Lines[$s] -notmatch 'server\s*\{'){ $s-- }
+  if($s -lt 0){ return ,@(-1,-1) }
+  $d=0; $e=$s
+  for($j=$s;$j -lt $Lines.Count;$j++){
+    $d += ([regex]::Matches($Lines[$j],'\{')).Count - ([regex]::Matches($Lines[$j],'\}')).Count
+    if($d -le 0 -and $j -gt $s){ $e=$j; break }
+  }
+  ,@($s,$e)
+}
+
+function ConvertTo-NginxHttpEntry([string[]]$BlockLines){
+  # 由 443 server 块派生 3000 HTTP 入口块：端口改 3000、去掉 ssl_* 指令、日志改回明文名。
+  # 部署包不带证书（443 块在安装端会被注释），故不另抄一份 3000 块——改 443 块后本块自动跟随。
+  $out=[Collections.Generic.List[string]]::new()
+  foreach($l in $BlockLines){
+    if($l -match '^\s*listen\s+\[::\]:443\s+ssl'){ $out.Add(($l -replace '\[::\]:443\s+ssl','[::]:3000')); continue }
+    if($l -match '^\s*listen\s+443\s+ssl'){ $out.Add(($l -replace 'listen\s+443\s+ssl','listen 3000')); continue }
+    if($l -match '^\s*ssl_(certificate_key|certificate|protocols|session_cache|session_timeout)\b'){ continue }
+    if($l -match 'nginx-access-ssl\.log'){ $out.Add(($l -replace 'nginx-access-ssl\.log','nginx-access.log')); continue }
+    if($l -match 'nginx-error-ssl\.log'){ $out.Add(($l -replace 'nginx-error-ssl\.log','nginx-error.log')); continue }
+    $out.Add($l)
+  }
+  ,$out
+}
+
 function Update-NginxConf([string]$ConfPath,[string]$OldRoot,[string]$NewRoot,[string]$NginxDir){
   $lines=[Collections.Generic.List[string]]([IO.File]::ReadAllLines($ConfPath,[Text.UTF8Encoding]::new($false)))
   $cnt=0
@@ -105,19 +132,37 @@ function Update-NginxConf([string]$ConfPath,[string]$OldRoot,[string]$NewRoot,[s
     if($lines[$i] -like "*$OldRoot*"){ $lines[$i]=$lines[$i].Replace($OldRoot,$NewRoot); $cnt++ }
     if($NginxDir -and $lines[$i] -match 'mime\.types'){ $lines[$i]=[regex]::Replace($lines[$i],'C:/nginx',($NginxDir -replace '\\','/')) }
   }
-  # 按内容注释 443 server 块：找到 'listen 443 ssl' 行，向上找最近的 'server {'，向下配对到该 server 的收尾 '}'
-  for($i=0;$i -lt $lines.Count;$i++){
-    if($lines[$i] -match 'listen\s+443\s+ssl'){
-      $start=$i; while($start -ge 0 -and $lines[$start] -notmatch 'server\s*\{'){ $start-- }
-      $depth=0; $end=$start
-      for($j=$start;$j -lt $lines.Count;$j++){
-        $depth += ([regex]::Matches($lines[$j],'\{')).Count - ([regex]::Matches($lines[$j],'\}')).Count
-        if($depth -le 0 -and $j -gt $start){ $end=$j; break }
+
+  # 部署包不带证书，故安装端对 443 块：①由它派生 3000 HTTP 入口块 ②整块注释掉。
+  # 顺序：先派生（用未注释内容）→ 注释 443（不改行数）→ 替换 3000 块。
+  $idx443=-1; for($i=0;$i -lt $lines.Count;$i++){ if($lines[$i] -match 'listen\s+443\s+ssl'){ $idx443=$i; break } }
+  if($idx443 -ge 0){
+    $b443=Get-NginxServerBlockExtent $lines $idx443
+    if($b443[0] -ge 0){
+      $httpBlock=ConvertTo-NginxHttpEntry @($lines[$b443[0]..$b443[1]])
+
+      # 3000 块：整块替换为派生块；连同其上方紧邻注释一起替换，避免留下「301 跳转」这类过期说明
+      $idx3000=-1; for($i=0;$i -lt $lines.Count;$i++){ if($lines[$i] -match 'listen\s+3000\s'){ $idx3000=$i; break } }
+      if($idx3000 -ge 0){
+        $b3000=Get-NginxServerBlockExtent $lines $idx3000
+        if($b3000[0] -ge 0){
+          $c=$b3000[0]; while($c-1 -ge 0 -and $lines[$c-1] -match '^\s*#'){ $c-- }
+          $indent=[regex]::Match($lines[$b3000[0]],'^\s*').Value
+          $new=[Collections.Generic.List[string]]::new()
+          $new.Add("$indent# ==================== 3000 HTTP 入口（安装端由 443 块派生） ====================")
+          $new.Add("$indent# 部署包不带证书：安装端注释 443 块，并由 443 块派生本块作 HTTP 入口")
+          $new.Add("$indent# （端口改 3000、去掉 ssl_* 指令）。改 443 块后本块自动跟随。")
+          foreach($l in $httpBlock){ $new.Add($l) }
+          $lines.RemoveRange($c, $b3000[1]-$c+1)
+          $lines.InsertRange($c, $new)
+        }
       }
-      for($k=$start;$k -le $end;$k++){ if($lines[$k] -notmatch '^\s*#'){ $lines[$k]='#'+$lines[$k] } }
-      $i=$end
+
+      # 注释 443 块：3000 块在其后，替换不改 443 行号（注释本身也不改行数）
+      for($k=$b443[0];$k -le $b443[1];$k++){ if($lines[$k] -notmatch '^\s*#'){ $lines[$k]='#'+$lines[$k] } }
     }
   }
+
   [IO.File]::WriteAllText($ConfPath, ($lines -join "`r`n") + "`r`n", [Text.UTF8Encoding]::new($false))
   $cnt
 }

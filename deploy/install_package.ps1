@@ -421,7 +421,7 @@ try {
   $nginxConf = Join-Path $TargetDir 'config\nginx-windows.conf'
   $newRoot = ($TargetDir -replace '\\','/')
   $cnt = Update-NginxConf -ConfPath $nginxConf -OldRoot 'D:/erp_system' -NewRoot $newRoot -NginxDir $NginxDir
-  Write-Ok "nginx conf 已改写（替换计数=$cnt，443 块已注释）"
+  Write-Ok "nginx conf 已改写（替换计数=$cnt，443 块已注释，3000 块由 443 派生为 HTTP 入口）"
   New-NginxTempDirs $TargetDir
   $nginxExe = Join-Path $NginxDir 'nginx.exe'
   if(Test-Path $nginxExe){

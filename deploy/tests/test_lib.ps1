@@ -54,7 +54,7 @@ Add-EnvListItemComma -Path $envf3 -Key 'CORS_ORIGINS' -Item 'http://b'   # 追�
 $mC2 = Read-EnvMap $envf3
 Assert ($mC2['CORS_ORIGINS'] -eq 'http://a,http://b') '逗号列表追加新项'
 
-# nginx 改写：2 处 D:/erp_system 全替换；443 server 块被注释；HTTP server 块保留
+# nginx 改写：D:/erp_system 全替换；443 块被注释；3000 块由 443 块派生为 HTTP 入口
 $nf = Join-Path $tmp 'n.conf'; Copy-Item (Join-Path $PSScriptRoot 'fixtures\nginx-sample.conf') $nf
 $cnt = Update-NginxConf -ConfPath $nf -OldRoot 'D:/erp_system' -NewRoot 'E:/erp' -NginxDir 'C:\nginx'
 $body=[IO.File]::ReadAllText($nf)
@@ -62,6 +62,29 @@ Assert ($cnt -ge 2) "nginx 替换计数>=2 (实=$cnt)"
 Assert ($body -notmatch 'D:/erp_system') '旧根全清'
 Assert ($body -match '#\s*server\s*\{[\s\S]*?listen 443 ssl[\s\S]*?\n\s*#?\s*\}') '443 块已注释'
 Assert ($body -match 'listen 3000 default_server') 'HTTP 块保留'
+Assert ($body -match '3000 HTTP 入口（安装端由 443 块派生）') '3000 块被替换为派生块'
+Assert ($body -match 'access_log logs/nginx-access\.log main;') '派生块日志改回明文名'
+Assert ($body -match 'location /api/') '派生块继承 443 块的 location'
+
+# ConvertTo-NginxHttpEntry 纯函数：端口/ssl_/日志 三类改写
+$derived = @(ConvertTo-NginxHttpEntry @(
+  '        listen 443 ssl default_server;',
+  '        listen [::]:443 ssl default_server;',
+  '        ssl_certificate     k.crt;',
+  '        ssl_certificate_key k.key;',
+  '        ssl_protocols       TLSv1.2 TLSv1.3;',
+  '        root frontend-vite/dist;',
+  '        access_log logs/nginx-access-ssl.log main;',
+  '        error_log logs/nginx-error-ssl.log warn;',
+  '        location /api/ { proxy_pass http://backend; }'
+))
+Assert (@($derived | Where-Object { $_ -match 'listen 3000 default_server;' }).Count -eq 1) '派生：IPv4 端口改 3000'
+Assert (@($derived | Where-Object { $_ -match 'listen \[::\]:3000 default_server;' }).Count -eq 1) '派生：IPv6 端口改 3000'
+Assert (@($derived | Where-Object { $_ -match 'ssl_' }).Count -eq 0) '派生：无任何 ssl_ 指令'
+Assert (@($derived | Where-Object { $_ -match 'access_log logs/nginx-access\.log main;' }).Count -eq 1) '派生：access_log 去 -ssl'
+Assert (@($derived | Where-Object { $_ -match 'error_log logs/nginx-error\.log warn;' }).Count -eq 1) '派生：error_log 去 -ssl'
+Assert (@($derived | Where-Object { $_ -match 'root frontend-vite/dist;' }).Count -eq 1) '派生：非 ssl 行原样保留'
+Assert (@($derived | Where-Object { $_ -match 'location /api/' }).Count -eq 1) '派生：location 原样保留'
 
 # Install-NssmService 可选键（DependOn/Env）容错：StrictMode 下缺席不抛、不产对应行
 $specMin = @{ Name='erp-web'; Application='C:\x\python.exe'; Parameters='-m x'; Directory='C:\d'; Stdout='C:\o.log'; Stderr='C:\e.log' }
