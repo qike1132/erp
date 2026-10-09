@@ -123,10 +123,11 @@ async def create_stockreturn_core(db: AsyncSession, stockout_id: int, quantity: 
 
 
 async def search_returnable_stockouts(db: AsyncSession, keyword: str, limit: int = 50) -> list[dict]:
-    """按产品名称模糊搜索可退的出货明细（退货单录入第二步的数据源）。
+    """按产品名称模糊搜索可退的**独立出货**明细（退货单录入第二步的数据源）。
 
     录入流程：搜产品名 -> 弹出该产品全部出货明细（单号/客户/数量/已退/可退/日期）
-    -> 勾选要退的明细 -> 录数量。仅列可退量 > 0 的明细，按出货时间倒序；
+    -> 勾选要退的明细 -> 录数量。仅独立出货（``stockin_id IS NULL``）——备货抵扣行不是
+    实际出货，退货只针对真正出过货的单；仅列可退量 > 0 的明细，按出货时间倒序；
     关键词为空时列最近的全部可退明细。客户/订单由所选明细带出。
     """
     name_filter = '%' + escape_like(keyword) + '%' if keyword else '%'
@@ -135,6 +136,7 @@ async def search_returnable_stockouts(db: AsyncSession, keyword: str, limit: int
         .options(joinedload(StockOut.product))
         .join(Product, StockOut.product_id == Product.id)
         .where(
+            StockOut.stockin_id.is_(None),
             StockOut.quantity > StockOut.returned_quantity,
             Product.name.like(name_filter),
         )

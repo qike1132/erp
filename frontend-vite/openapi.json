@@ -7847,7 +7847,7 @@
           "退货管理"
         ],
         "summary": "List Shipment Options",
-        "description": "按产品名搜索可退的出货明细（退货单录入第二步）。\n\n仅列可退量 > 0 的明细；客户/订单由所选明细带出。模块内自建端点的原因\n同 /customers/active-names 先例：/products/list 要求 product_manage，\n只授退货权限的用户会 403。\n\nArgs:\n    q: 产品名称模糊关键词（空=最近可退明细）。\n    db: 异步数据库会话（只读副本）。\n    _user: 当前登录用户（仅需通过权限校验）。\n\nReturns:\n    list[ShipmentOption]: 出货明细（单号/客户/产品/数量/已退/可退/日期）。",
+        "description": "按产品名搜索可退的**独立出货**明细（退货单录入第二步）。\n\n仅独立出货（stockin_id IS NULL）且可退量 > 0 的明细——备货抵扣行不是实际出货，\n不参与退货；客户/订单由所选明细带出。模块内自建端点的原因同 /customers/active-names\n先例：/products/list 要求 product_manage，只授退货权限的用户会 403。\n\nArgs:\n    q: 产品名称模糊关键词（空=最近可退明细）。\n    db: 异步数据库会话（只读副本）。\n    _user: 当前登录用户（仅需通过权限校验）。\n\nReturns:\n    list[ShipmentOption]: 出货明细（单号/客户/产品/数量/已退/可退/日期）。",
         "operationId": "list_shipment_options_api_v1_stock_returns_shipment_options_get",
         "parameters": [
           {

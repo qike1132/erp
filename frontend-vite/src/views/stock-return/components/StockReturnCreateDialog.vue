@@ -2,7 +2,7 @@
   <UiDialog
     :open="open"
     title="新增退货"
-    max-width-class="max-w-3xl"
+    max-width-class="max-w-[1280px]"
     :close-on-overlay-click="false"
     @update:open="emit('update:open', $event)"
   >
@@ -154,7 +154,7 @@ function onPick(s: ShipmentOption) {
 .sr-dialog-body {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
   padding: 4px 2px;
 }
 .sr-hint {
@@ -177,26 +177,26 @@ function onPick(s: ShipmentOption) {
 }
 .sr-ship-table {
   border: 1px solid var(--color-border, #e4e7ed);
-  max-height: 260px;
+  max-height: 620px;
   overflow-y: auto;
 }
 .sr-ship-table table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: 14px;
 }
 .sr-ship-table thead th {
   background: #f8fafc;
   color: #334155;
   font-weight: 700;
   text-align: left;
-  padding: 7px 10px;
+  padding: 11px 14px;
   border-bottom: 1px solid var(--color-border, #e4e7ed);
   position: sticky;
   top: 0;
 }
 .sr-ship-table tbody td {
-  padding: 7px 10px;
+  padding: 11px 14px;
   border-bottom: 1px solid var(--color-border-light, #f0f2f5);
   color: var(--color-text);
 }
@@ -252,10 +252,10 @@ function onPick(s: ShipmentOption) {
 .sr-input,
 .sr-select,
 .sr-textarea {
-  min-height: 34px;
+  min-height: 38px;
   padding: 4px 10px;
   border: 1px solid var(--color-border, #e4e7ed);
-  font-size: 13px;
+  font-size: 15px;
   color: var(--color-text);
   background: white;
   box-sizing: border-box;
@@ -270,11 +270,11 @@ function onPick(s: ShipmentOption) {
   border-color: var(--color-primary-300);
 }
 .sr-btn {
-  min-height: 34px;
-  padding: 0 16px;
+  min-height: 38px;
+  padding: 0 18px;
   border: 1px solid var(--color-border, #e4e7ed);
   background: white;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 700;
   color: var(--color-text-secondary);
   cursor: pointer;

@@ -40,11 +40,11 @@ async def list_shipment_options(
     db: AsyncSession = Depends(get_async_read_db),
     _user: User = Depends(require_permission('stock_return_manage')),
 ) -> list[ShipmentOption]:
-    """按产品名搜索可退的出货明细（退货单录入第二步）。
+    """按产品名搜索可退的**独立出货**明细（退货单录入第二步）。
 
-    仅列可退量 > 0 的明细；客户/订单由所选明细带出。模块内自建端点的原因
-    同 /customers/active-names 先例：/products/list 要求 product_manage，
-    只授退货权限的用户会 403。
+    仅独立出货（stockin_id IS NULL）且可退量 > 0 的明细——备货抵扣行不是实际出货，
+    不参与退货；客户/订单由所选明细带出。模块内自建端点的原因同 /customers/active-names
+    先例：/products/list 要求 product_manage，只授退货权限的用户会 403。
 
     Args:
         q: 产品名称模糊关键词（空=最近可退明细）。

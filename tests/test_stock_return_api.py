@@ -182,6 +182,32 @@ class TestStockReturnApi:
         nos = [r["stockout_no"] for r in resp.json()]
         assert f"SO-S3-{suffix}" in nos and f"SO-S2-{suffix}" not in nos
 
+    async def test_shipment_options_excludes_deduction_rows(self, sr_api):
+        """备货抵扣行（stockin_id 非空）不是实际出货，不出现在可退明细里（2026-10-08）。"""
+        from fastapi_app.shared_models import Product, StockIn, StockOut
+
+        client, db, _ = sr_api
+        suffix = uuid.uuid4().hex[:8]
+        product = Product(name=f"抵扣剔除-{suffix}", current_stock=10)
+        db.add(product)
+        await db.flush()
+        stockin = StockIn(stockin_no=f"SI-D1-{suffix}", product_id=product.id,
+                          quantity=10, customer="客户甲")
+        db.add(stockin)
+        await db.flush()
+        # 抵扣行：stockin_id 非空且可退量 > 0 —— 仍应被排除
+        db.add(StockOut(stockout_no=f"SO-D1-{suffix}", product_id=product.id,
+                        quantity=10, customer="客户甲", returned_quantity=0,
+                        stockin_id=stockin.id))
+        # 同产品的独立出货行：应保留
+        db.add(StockOut(stockout_no=f"SO-D2-{suffix}", product_id=product.id,
+                        quantity=7, customer="客户甲", returned_quantity=0))
+        await db.flush()
+
+        resp = await client.get(f"{API_PREFIX}/shipment-options", params={"q": "抵扣剔除"})
+        assert resp.status_code == 200, resp.text
+        assert [r["stockout_no"] for r in resp.json()] == [f"SO-D2-{suffix}"]
+
     async def test_create_happy_path_fills_default_date(self, sr_api):
         """正常创建（按产品制）：服务层被以缺省当天日期/客户调用，端点返回单号"""
         client, _, _ = sr_api
