@@ -71,7 +71,7 @@ npm run check:routes              # 路由对齐检查
 1. **不要删除**根 `utils/`（`fastapi_app/main.py` 直接 `from utils.redis_cache import ...`）、`fastapi_app/utils/`（十多个 service 依赖）、`server_manager.py` + `server_manager/`。
 2. **不要**把 `config/pgbouncer/userlist.txt` 或任何 `_ops/credentials/**` 加回版本库。
 3. **不要**让 uvicorn 绑 `0.0.0.0`（会绕过 nginx、并把 `/metrics` 暴露给同网段）。
-4. **不要**让 `.env` 的 `BACKUP_ENCRYPTION_PASSWORD` 为空：`BACKUP_ENCRYPTION_ENABLED=true` 时会**静默降级为不加密备份**。
+4. **不要**在开启加密时让 `.env` 的 `BACKUP_ENCRYPTION_PASSWORD` 为空：`BACKUP_ENCRYPTION_ENABLED=true` 且密码为空，`STRICT_CONFIG_CHECK=true` 下**拒绝启动**，否则**静默降级为不加密备份**。备份加密**默认关闭**（`BACKUP_ENCRYPTION_ENABLED` 缺省 `false`，2026-10-09 起）；要加密必须显式置 `true` 并配好密码。`BACKUP_ENCRYPTION_ENABLED=false` 是加密**总开关**，关闭时 API/前端传来的 `encrypt=true` 一律被忽略。
 5. **不要**修改或删除 `frontend-vite/vite.config.js` —— 它是 `vue-tsc -b` 编译 `vite.config.ts` 的**设计产物**，且有回归测试（`fastapi_app/tests/test_qa_prod_stack_regression.py`）断言二者一致。
 6. **不要**改 `core.hooksPath`（指到 husky 目录会废掉 `.githooks` 的密钥扫描）。
 7. Alembic 迁移只做结构/数据变更，不夹带业务逻辑；保持单 head。**不得对生产库跑 autogenerate**（见 §4）。
