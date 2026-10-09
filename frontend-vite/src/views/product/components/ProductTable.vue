@@ -6,7 +6,7 @@
         v-model="customerFilter"
         label="客户筛选"
         placeholder="客户"
-        style="width: 150px"
+        style="width: 150px; flex-shrink: 0"
         :options="customerFilterOptions"
       />
       <UiSearchInput :model-value="searchTerm" placeholder="搜索产品名称或69码..." @search="onSearchInput" @update:model-value="searchTerm = $event" />
@@ -190,6 +190,11 @@ function handleImageError(row: Product) {
   font-size: 13.5px;
   line-height: 1;
   border-radius: 10px;
+}
+/* 搜索框(max-w-sm=384px)在窄容器下会把 150px 的筛选框 flex 压缩(实测压到 107px)，
+   减去左右 padding 后内容区仅 ~51px，「全部客户」被裁 —— 禁止收缩(内联 flex-shrink:0)。 */
+.pd-col-actions :deep(.ui-select-input) {
+  min-width: 0;
 }
 .pd-col-scroll {
   flex: 1;
