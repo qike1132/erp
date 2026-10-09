@@ -25,7 +25,7 @@ from fastapi_app.core.domain_events import DomainEvent, DomainEventType
 from fastapi_app.core.domain_events import publish_with_retry as publish_domain_event
 from fastapi_app.core.exception_handler import safe_publish_event
 from fastapi_app.services.notification_service import StockEvent
-from fastapi_app.services.stock_common import _parse_date_preserve_time
+from fastapi_app.services.stock_common import _parse_date_preserve_time, guard_stockout_deletion
 from fastapi_app.services.stock_event_service import (
     _publish_shipment_completed_events,
     _recalc_shipment_order_statuses,
@@ -36,7 +36,7 @@ from fastapi_app.shared.stock_concurrency import (
     assert_stock_available,
     update_stock_with_optimistic_lock,
 )
-from fastapi_app.shared_models import Product, StockIn, StockOut, StockReturn
+from fastapi_app.shared_models import Product, StockIn, StockOut
 from fastapi_app.utils import inventory_balance_bounds
 
 logger = logging.getLogger(__name__)
@@ -157,15 +157,9 @@ async def delete_stockout_core(db: AsyncSession, stockout: StockOut, operator_id
     # 关联订单状态由调用方重算（见 delete_stockout）。
     if stockout.returned_quantity > 0:
         raise ValueError('该出货记录已有退货关联，无法删除！请先取消退货记录。')
-    # 072 RESTRICT 的应用层前置：出货行被退货记录引用即删不掉。已取消（status='cancelled'）
-    # 的退货在此解除关联后放行（退货行保留以留痕）；仍 active 的拒绝，给出 400 而非 DB 层 500。
-    linked_returns = list((await db.execute(
-        select(StockReturn).where(StockReturn.stockout_id == stockout.id)
-    )).scalars().all())
-    if any(r.status != 'cancelled' for r in linked_returns):
-        raise ValueError('该出货存在未取消的退货记录，为保留可追溯记录无法删除！')
-    for linked_return in linked_returns:
-        linked_return.stockout_id = None
+    # 072 RESTRICT 的应用层前置：守卫与「订单抵扣减少」路径共用同一实现
+    # （stock_common.guard_stockout_deletion），避免逐点各写一份而漂移。
+    await guard_stockout_deletion(db, stockout)
     # 先取行锁（产品不存在时由 get_product_for_update 抛错），库存写入走统一乐观锁入口
     await stock_service.get_product_for_update(db, stockout.product_id)
     updated = await update_stock_with_optimistic_lock(db, stockout.product_id, stockout.quantity)

@@ -40,6 +40,7 @@ from fastapi_app.services.order_utils import (
 from fastapi_app.services.serializers.order_serializer import (
     OrderSerializer,
 )
+from fastapi_app.services.stock_common import guard_stockout_deletion
 from fastapi_app.shared.stock_concurrency import (
     get_product_for_update,
     update_stock_with_optimistic_lock,
@@ -210,7 +211,9 @@ async def _decrease_deduction(
             continue
 
         if remaining >= effective_qty:
-            # 整条删除
+            # 整条删除：先过退货守卫（迁移 072 RESTRICT 的应用层前置）——active 退货
+            # 拒绝、已取消退货解除关联。放在库存/日志写入之前，失败时不产生半截副作用。
+            await guard_stockout_deletion(db, stockout)
             remaining -= effective_qty
             if product:
                 await update_stock_with_optimistic_lock(db, order_product_id, effective_qty)

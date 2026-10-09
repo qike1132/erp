@@ -1,11 +1,35 @@
 """
 库存模块共享辅助工具
 
-存放被入库/出库/退货多个子模块共用的工具函数，避免重复定义。
+存放被入库/出库/退货/订单抵扣多个子模块共用的工具函数，避免重复定义。
 """
 from datetime import datetime
 
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from fastapi_app.services.numbering_sequence import _BUSINESS_TZ
+from fastapi_app.shared_models import StockOut, StockReturn
+
+
+async def guard_stockout_deletion(db: AsyncSession, stockout: StockOut) -> None:
+    """出货行删除前的退货守卫（迁移 072 的 ``ON DELETE RESTRICT`` 应用层前置）。
+
+    出货行只要被退货记录引用（**无论是否已取消**）就删不掉。active 退货拒绝删除
+    （``ValueError`` → 400，保留可追溯台账）；已取消退货解除关联后放行（退货行保留）。
+
+    删出货行的各条路径（``stock_out_service.delete_stockout_core``、
+    ``order/deduction._decrease_deduction``）共用此守卫——逐点各写一份必然漂移：
+    2026-10-08/09 两次实测都是「某条路径漏挂守卫」→ 撞 RESTRICT 外键冒未映射的
+    ``IntegrityError``（500）。
+    """
+    linked = list((await db.execute(
+        select(StockReturn).where(StockReturn.stockout_id == stockout.id)
+    )).scalars().all())
+    if any(r.status != 'cancelled' for r in linked):
+        raise ValueError('该出货存在未取消的退货记录，为保留可追溯记录无法删除！')
+    for r in linked:
+        r.stockout_id = None
 
 
 def business_now() -> datetime:

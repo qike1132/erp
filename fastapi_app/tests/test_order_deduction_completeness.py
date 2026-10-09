@@ -114,12 +114,13 @@ class _LedgerSession:
     「从会话状态聚合」，而不是照抄请求量。
     """
 
-    def __init__(self, *, product, order=None, stockins=(), stockouts=(), stockout_rows=None):
+    def __init__(self, *, product, order=None, stockins=(), stockouts=(), stockout_rows=None, returns=()):
         self.product = product
         self.order = order
         self.stockins = list(stockins)
         self.rows = list(stockouts)
         self.stockout_rows = self.rows if stockout_rows is None else stockout_rows
+        self.returns = list(returns)
         self.logs: list = []
         self.deleted: list = []
         self.statements: list = []
@@ -143,6 +144,8 @@ class _LedgerSession:
             return _Result(scalar=getattr(self.order, 'product_id', 1))
         if 'stock_in' in low:
             return _Result(rows=self.stockins)
+        if 'stock_return' in low:
+            return _Result(rows=self.returns)
         if 'stock_out' in low:
             if 'is null' in low:  # 独立出货量（订单状态派生）
                 return _Result(scalar=self._shipped_total())
@@ -247,6 +250,16 @@ def _make_deduction_row(row_id=31, quantity=20, *, order_id=1, stockin_id=11, re
         id=row_id, stockout_no='SO-DEDUCT-' + str(row_id), product_id=9001,
         quantity=quantity, returned_quantity=returned, customer='客户A',
         order_id=order_id, stockin_id=stockin_id,
+    )
+
+
+def _make_return(return_id=1, *, stockout_id, status='active'):
+    """指向某出货行的退货记录（真实 ORM 实体，便于断言 stockout_id 被置空）。"""
+    from fastapi_app.shared_models import StockReturn
+
+    return StockReturn(
+        id=return_id, return_no='SR-DEDUCT-' + str(return_id), product_id=9001,
+        quantity=5, stockout_id=stockout_id, status=status,
     )
 
 
@@ -361,6 +374,42 @@ async def test_decrease_tail_guard_catches_unconsumable_remaining():
 
     assert db.deleted == [] and db.logs == [] and _updates(db) == []
     assert product.current_stock == 80
+
+
+async def test_decrease_rejects_row_with_active_return():
+    """减少抵扣要整条删掉的出货行若被 active 退货引用，必须拒绝。
+
+    回归 2026-10-09：_decrease_deduction 直删出货行、无退货守卫，撞迁移 072 的
+    ON DELETE RESTRICT 会以未映射的 IntegrityError(500) 冒出来。active 退货保留台账。
+    """
+    product = _make_product(stock=80)
+    row = _make_deduction_row(row_id=31, quantity=20, returned=5)
+    db = _LedgerSession(
+        product=product, order=_make_order(), stockouts=[row],
+        returns=[_make_return(return_id=1, stockout_id=31, status='active')],
+    )
+
+    with pytest.raises(ValueError, match='退货'):
+        await _decrease_deduction(db, db.order, 1, 15)
+
+    assert db.deleted == []                      # 出货行未被删
+    assert db.returns[0].stockout_id == 31       # 关联未被解除
+    assert db.logs == [] and _updates(db) == []
+
+
+async def test_decrease_detaches_cancelled_return_then_deletes():
+    """已取消的退货不阻碍删除：解除关联后照常删除该出货行（退货行保留）。"""
+    product = _make_product(stock=80)
+    row = _make_deduction_row(row_id=31, quantity=20, returned=5)
+    db = _LedgerSession(
+        product=product, order=_make_order(), stockouts=[row],
+        returns=[_make_return(return_id=2, stockout_id=31, status='cancelled')],
+    )
+
+    await _decrease_deduction(db, db.order, 1, 15)
+
+    assert db.deleted == [row]
+    assert db.returns[0].stockout_id is None     # 已解除关联，退货行保留
 
 
 async def test_empty_deduction_decrease_raises_with_full_shortfall():
