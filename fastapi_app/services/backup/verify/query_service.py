@@ -24,10 +24,13 @@ from fastapi_app.shared_models.backup_record import BackupRecord
 
 logger = logging.getLogger(__name__)
 
-# 文件名时间戳解析正则：erp_*_YYYYMMDD_HHMMSS[.mmm].{zip,json,zip.enc}
-# 毫秒段可选：第十四轮为解决同秒双全量同名互覆，文件名加了 3 位毫秒后缀；
+# 文件名时间戳解析正则：erp_*_YYYYMMDD_HHMMSS[mmm].{zip,json}[.enc]
+# 毫秒段可选（3 位纯数字、无点，对齐 cleanup/service.py 的 18 位口径）：
+# 第十四轮为解决同秒双全量同名互覆，文件名加了 3 位毫秒后缀；
 # 锚定 $ 之前不容-optional 会让这些新备份解析不出 created_at（补录与排序的唯一兜底）。
-_FILENAME_TIMESTAMP_RE = re.compile(r'_(\d{8})_(\d{6})(?:\d{3})?\.(?:zip|json|enc)$')
+# 注意：加密备份是双重后缀 `.zip.enc`，后缀必须是 (?:zip|json)(?:\.enc)? —— 只枚举
+# `enc` 会因「.zip.」段落在 `\.enc` 之前而整体匹配失败（曾致 .zip.enc 恒解析不出时间）。
+_FILENAME_TIMESTAMP_RE = re.compile(r'_(\d{8})_(\d{6})(?:\d{3})?\.(?:zip|json)(?:\.enc)?$')
 
 
 def _parse_exported_at(value: str | None) -> datetime | None:

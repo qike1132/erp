@@ -11,6 +11,7 @@ from fastapi_app.shared_models import (
     CustomerAccessLog,
     Order,
     PackagingRecord,
+    ProductCustomer,
     ProductionPlan,
     PurchaseOrder,
     PurchasePlan,
@@ -186,6 +187,9 @@ async def delete_customer(db: AsyncSession, customer_id: int) -> None:
             select(func.count()).where(ProductionPlan.customer_name == customer.name).scalar_subquery().label('production_plans'),
             select(func.count()).where(CaseMovement.customer == customer.name, CaseMovement.direction == 'in').scalar_subquery().label('case_stockins'),
             select(func.count()).where(CaseMovement.customer == customer.name, CaseMovement.direction == 'out').scalar_subquery().label('case_stockouts'),
+            # product_customer 随 FK CASCADE 静默清除，而可见性口径是
+            # 「未挂客户的 SKU 对所有客户可见」——漏数会瞬间放大 SKU 可见范围且无提示。
+            select(func.count()).where(ProductCustomer.customer_id == customer_id).scalar_subquery().label('product_customers'),
         )
     )
     row = checks.one()
@@ -200,6 +204,7 @@ async def delete_customer(db: AsyncSession, customer_id: int) -> None:
         '生产计划': row.production_plans,
         '皮套入仓': row.case_stockins,
         '皮套出仓': row.case_stockouts,
+        'SKU 客户归属': row.product_customers,
     }
     related = {label: cnt for label, cnt in related_counts.items() if cnt}
     if related:

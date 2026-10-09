@@ -13,6 +13,13 @@
 端点 `/tasks/import-*` 的缺口同类，均已记录待办）。
 第 2 层（`inventory_log.idem_key`）已接入 staging 与直连两套确认/导入实现。
 
+⚠️ **皮套导入（`/batch/import-case-*`）两层都未覆盖**：其写入目标是
+``CaseMovement``（无 ``idem_key`` 列），不走 ``inventory_log``，因此第 2 层
+业务键守卫对皮套行**不生效**。第 1 层（本守卫，按文件哈希）虽有挂接，
+但「仅比对字节」的缺口对皮套同样存在——Excel 重存即换哈希、放行，
+重叠的皮套行会重复入仓/出仓。防重传靠用户习惯 + ``movement_no`` 唯一
+（只防并发/重试，不防重传）。
+
 正确性依赖请求级事务（get_async_db 在请求结束提交）：登记行与导入
 产生/消费的业务行处于同一事务，任一方失败即整体回滚 —— 成功的导入
 留下永久登记，失败的导入不留痕、可原样重试。
@@ -25,7 +32,7 @@
 zip 时间戳 → 新哈希 → 放行。「编辑后重传」的**重叠行**改由第 2 层
 （``inventory_log.idem_key`` 部分唯一索引 + 规范化业务键）拦截 ——
 该层已接入直连导入与 staging 确认两套实现（见 ``batch_import_core``
-的 ``_import_idem_key``）。
+的 ``_import_idem_key``）。**皮套导入不走该层**（见上）。
 
 **不覆盖 ARQ 异步导入端点（刻意不接线）**：``/tasks/import-orders`` 与
 ``/tasks/import-stockins``（``api/v1/endpoints/tasks.py``）**不经本守卫**。
