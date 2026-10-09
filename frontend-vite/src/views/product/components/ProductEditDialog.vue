@@ -42,6 +42,10 @@
               </div>
             </div>
             <div class="pd-form-group">
+              <label class="pd-label">所属客户</label>
+              <ProductCustomerSelect v-model="editForm.customerIds" :options="customerOptions" />
+            </div>
+            <div class="pd-form-group">
               <label class="pd-label">产品图片</label>
               <div
                 ref="editDropZoneRef"
@@ -80,14 +84,17 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onBeforeUnmount } from 'vue'
+import { ref, reactive, computed, onBeforeUnmount } from 'vue'
 import { useQueryClient } from '@tanstack/vue-query'
 import { productApi } from '@/api'
 import { resolveStaticUrl } from '@/api/request'
+import { useCatalogStore } from '@/stores/catalog'
 import { uploadImage, ALLOWED_IMAGE_HINT } from '../composables/useImageUpload'
 import { useImagePaste } from '@/composables/useImagePaste'
 import { showToast } from '@/composables/useToast'
 import { getErrorMessage } from '@/types/errors'
+import ProductCustomerSelect from './ProductCustomerSelect.vue'
+import type { ProductCustomerRef } from '@/types'
 
 interface Product {
   id: number
@@ -97,6 +104,7 @@ interface Product {
   image: string | null
   factory?: string
   current_stock?: number
+  customers?: ProductCustomerRef[]
 }
 
 defineProps<{
@@ -109,10 +117,30 @@ const emit = defineEmits<{
 
 const queryClient = useQueryClient()
 
+// 客户下拉数据源：目录 store 统一缓存（与订单/出货页同源）
+const catalogStore = useCatalogStore()
+catalogStore.ensureActiveCustomerNames().catch(() => {
+  // 加载失败保持空列表，下次进入视图时重试
+})
+
+/** 当前编辑的产品自己挂着的客户（可能含已停用、不在 activeNames 里的） */
+const ownCustomers = ref<ProductCustomerRef[]>([])
+/**
+ * 选项 = 启用客户 ∪ 本产品已挂客户。
+ * 不并进来会出事：客户停用后 activeNames 里没有它，多选控件只能显示「客户 #id」，
+ * 用户看不清；而一旦在保存时按选项过滤，就会把这条归属静默抹掉（= 放开给所有客户）。
+ */
+const customerOptions = computed<ProductCustomerRef[]>(() => {
+  const byId = new Map<number, ProductCustomerRef>()
+  for (const c of catalogStore.activeCustomerNames) byId.set(c.id, { id: c.id, name: c.name })
+  for (const c of ownCustomers.value) if (!byId.has(c.id)) byId.set(c.id, c)
+  return [...byId.values()]
+})
+
 // ===== 编辑产品弹窗 =====
 const editDialogVisible = ref(false)
 const editSubmitting = ref(false)
-const editForm = reactive({ id: 0, name: '', barcode: '', price: 0, factory: '', image: '' })
+const editForm = reactive({ id: 0, name: '', barcode: '', price: 0, factory: '', image: '', customerIds: [] as number[] })
 const editImageInputRef = ref<HTMLInputElement | null>(null)
 const editDropZoneRef = ref<HTMLElement | null>(null)
 const editDragOver = ref(false)
@@ -140,7 +168,12 @@ useImagePaste({
 onBeforeUnmount(() => clearTimeout(editPasteFlashTimer))
 
 function open(row: Product) {
-  Object.assign(editForm, { id: row.id, name: row.name, barcode: row.barcode, price: row.price, factory: row.factory || '', image: row.image || '' })
+  ownCustomers.value = row.customers ?? []
+  Object.assign(editForm, {
+    id: row.id, name: row.name, barcode: row.barcode, price: row.price,
+    factory: row.factory || '', image: row.image || '',
+    customerIds: (row.customers ?? []).map((c) => c.id),
+  })
   editDialogVisible.value = true
 }
 
@@ -170,7 +203,7 @@ async function handleEditSave() {
   if (!editForm.name.trim()) { showToast('请输入产品名称', 'warning'); return }
   editSubmitting.value = true
   try {
-    await productApi.update(editForm.id, { name: editForm.name, barcode: editForm.barcode, price: editForm.price, factory: editForm.factory, image: editForm.image })
+    await productApi.update(editForm.id, { name: editForm.name, barcode: editForm.barcode, price: editForm.price, factory: editForm.factory, image: editForm.image, customer_ids: editForm.customerIds })
     showToast('保存成功', 'success')
     editDialogVisible.value = false
     queryClient.invalidateQueries({ queryKey: ['products-list'] })

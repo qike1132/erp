@@ -34,8 +34,16 @@ export const auxApi = {
    * ⚠️ 后端 `response_model=list[ProductSearchItem]` 返回**裸数组**，不是 `{ products }`。
    * 原声明 `get<{ products?: unknown }>` 与实际响应不符（调用方若读 `res.products` 恒为 undefined）。
    * 空关键词时后端直接返回 `[]`。
+   *
+   * `opts.customer`：按客户过滤可见范围（后端口径：未挂客户的 SKU 对所有客户可见）。
+   * 不传 = 不过滤，与改造前行为一致。下单/出货/备货/备货计划共用本端点。
    */
-  productSearch: (q: string) => get<ProductSearchItem[]>('/aux/product-search', { q }),
+  productSearch: (q: string, opts?: { customer?: string; customerId?: number }) =>
+    get<ProductSearchItem[]>('/aux/product-search', {
+      q,
+      customer: opts?.customer || undefined,
+      customer_id: opts?.customerId,
+    }),
   /**
    * 可用备货量查询（`GET /aux/available-stockins`，裸数组响应）。
    *

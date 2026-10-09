@@ -33,6 +33,10 @@
         </div>
       </div>
       <div class="pd-form-group">
+        <label class="pd-label">所属客户</label>
+        <ProductCustomerSelect v-model="form.customerIds" :options="customerOptions" />
+      </div>
+      <div class="pd-form-group">
         <label class="pd-label">产品图片</label>
         <div
           ref="imageDropZoneRef"
@@ -66,14 +70,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onBeforeUnmount } from 'vue'
+import { ref, reactive, computed, onBeforeUnmount } from 'vue'
 import { useQueryClient } from '@tanstack/vue-query'
 import { productApi } from '@/api'
 import { resolveStaticUrl } from '@/api/request'
+import { useCatalogStore } from '@/stores/catalog'
 import { uploadImage, ALLOWED_IMAGE_HINT } from '../composables/useImageUpload'
 import { useImagePaste } from '@/composables/useImagePaste'
 import { showToast } from '@/composables/useToast'
 import { getErrorMessage } from '@/types/errors'
+import ProductCustomerSelect from './ProductCustomerSelect.vue'
 
 defineProps<{
   factoryOptions: readonly string[]
@@ -85,8 +91,15 @@ const emit = defineEmits<{
 
 const queryClient = useQueryClient()
 
+// 客户下拉数据源：目录 store 统一缓存（与订单/出货页同源）
+const catalogStore = useCatalogStore()
+catalogStore.ensureActiveCustomerNames().catch(() => {
+  // 加载失败保持空列表，下次进入视图时重试
+})
+const customerOptions = computed(() => catalogStore.activeCustomerNames)
+
 const submitting = ref(false)
-const form = reactive({ name: '', barcode: '', price: 0, factory: '', image: '' })
+const form = reactive({ name: '', barcode: '', price: 0, factory: '', image: '', customerIds: [] as number[] })
 const imageInputRef = ref<HTMLInputElement | null>(null)
 const imageDropZoneRef = ref<HTMLElement | null>(null)
 const imageDragOver = ref(false)
@@ -145,9 +158,10 @@ async function handleAdd() {
       price: form.price ?? undefined,
       factory: form.factory || undefined,
       image: form.image || undefined,
+      customer_ids: form.customerIds,
     })
     showToast('添加成功', 'success')
-    Object.assign(form, { name: '', barcode: '', price: 0, factory: '', image: '' })
+    Object.assign(form, { name: '', barcode: '', price: 0, factory: '', image: '', customerIds: [] })
     queryClient.invalidateQueries({ queryKey: ['products-list'] })
   } catch (err: unknown) {
     showToast(getErrorMessage(err, '添加失败'), 'error')

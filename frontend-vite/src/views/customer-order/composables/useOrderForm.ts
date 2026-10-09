@@ -1,4 +1,4 @@
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, watch } from 'vue'
 import { auxApi } from '@/api'
 import { useCatalogStore } from '@/stores/catalog'
 import { isQuantityOutOfRange } from './quantityRange'
@@ -32,7 +32,9 @@ export function useOrderForm() {
   async function searchProducts(q: string): Promise<ProductSuggestion[]> {
     if (!q.trim()) return []
     try {
-      const d = await auxApi.productSearch(q)
+      // 带上当前客户：后端只返回属于该客户（或未挂客户）的 SKU。
+      // 未选客户时 customer 为 undefined，后端不过滤 —— 与改造前一致。
+      const d = await auxApi.productSearch(q, { customer: form.customer || undefined })
       productSearchFailed.value = false
       return (Array.isArray(d) ? d : []).map((p) => ({ value: p.name, id: p.id, name: p.name, barcode: p.barcode ?? '' }))
     } catch {
@@ -64,6 +66,14 @@ export function useOrderForm() {
     shipmentPlans: [],
   })
   const isOrder = computed(() => form.type === 'order')
+
+  // 切换客户 → 清掉已选产品。产品可见范围随客户变化，留着旧选择等于让用户提交一个
+  // 可能不属于新客户的 SKU（下拉里显示的结果也还是上一个客户的）。
+  watch(() => form.customer, () => {
+    form.productSearch = ''
+    form.productId = 0
+    if (form.deductStock) disableDeduct()
+  })
   /**
    * 当前还缺哪些必填项（只列**字段名**，用于「请先填写：…」）。
    * 越界属于「已填但值不合法」，由 quantityOutOfRange 单独表达并给出区间文案，

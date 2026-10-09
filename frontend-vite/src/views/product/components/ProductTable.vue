@@ -2,6 +2,13 @@
   <div class="pd-col-title">
     <span><FontAwesomeIcon icon="list" aria-hidden="true" /> 产品列表</span>
     <div class="pd-col-actions">
+      <UiSelect
+        v-model="customerFilter"
+        label="客户筛选"
+        placeholder="客户"
+        style="width: 150px"
+        :options="customerFilterOptions"
+      />
       <UiSearchInput :model-value="searchTerm" placeholder="搜索产品名称或69码..." @search="onSearchInput" @update:model-value="searchTerm = $event" />
     </div>
   </div>
@@ -35,6 +42,12 @@
         <template #column-body-barcode="{ row }"><span class="pd-barcode">{{ (row as Product).barcode || '-' }}</span></template>
         <template #column-body-price="{ row }"><span class="pd-price">{{ formatCurrency((row as Product).price) }}</span></template>
         <template #column-body-factory="{ row }"><span class="pd-factory">{{ (row as Product).factory || '-' }}</span></template>
+        <template #column-body-customers="{ row }">
+          <div class="pd-customers">
+            <span v-for="c in (row as Product).customers ?? []" :key="c.id" class="pd-customer-tag">{{ c.name }}</span>
+            <span v-if="!((row as Product).customers ?? []).length" class="pd-customer-none" title="未挂客户 = 所有客户都能选到这个 SKU">未分配</span>
+          </div>
+        </template>
         <template #column-body-actions="{ row }">
           <div class="pd-actions">
             <button class="pd-act-btn pd-act-bom" title="配置BOM表" aria-label="设置" @click="emit('open-bom', row as Product)">
@@ -54,12 +67,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import UiDataTable from '@/components/ui/UiDataTable.vue'
 import type { TableColumn } from '@/components/ui/UiDataTable.vue'
+import UiSelect from '@/components/ui/UiSelect.vue'
 import { useEnhancedList } from '@/composables/useEnhancedList'
+import { useCatalogStore } from '@/stores/catalog'
 import { formatCurrency } from '@/utils/format'
 import { resolveStaticUrl } from '@/api/request'
+import type { ProductCustomerRef } from '@/types'
 
 interface Product {
   id: number
@@ -69,6 +85,7 @@ interface Product {
   image: string | null
   factory?: string
   current_stock?: number
+  customers?: ProductCustomerRef[]
 }
 
 defineProps<{
@@ -82,6 +99,17 @@ const emit = defineEmits<{
   'open-image': [src: string]
 }>()
 
+// 客户筛选：'all' | 'unassigned' | 'id:<客户ID>'。
+// 「未分配」是补齐存量归属的入口 —— 未挂客户的 SKU 对所有客户可见，不急，但要能找得到。
+const customerFilter = ref('all')
+const catalogStore = useCatalogStore()
+catalogStore.ensureActiveCustomerNames().catch(() => { /* 失败保持空列表，下次重试 */ })
+const customerFilterOptions = computed(() => [
+  { label: '全部客户', value: 'all' },
+  { label: '未分配', value: 'unassigned' },
+  ...catalogStore.activeCustomerNames.map((c) => ({ label: c.name, value: `id:${c.id}` })),
+])
+
 // 产品列表
 const {
   items: paginatedProducts, total, search: searchTerm,
@@ -92,6 +120,13 @@ const {
   url: '/products/list',
   perPage: 20,
   staleTime: 30_000,
+  extraParams: () => {
+    if (customerFilter.value === 'unassigned') return { only_unassigned: true }
+    if (customerFilter.value.startsWith('id:')) {
+      return { customer_id: Number(customerFilter.value.slice(3)) }
+    }
+    return {}
+  },
 })
 
 function onSearchInput(q: string) {
@@ -105,6 +140,7 @@ const productColumns: TableColumn[] = [
   { field: 'barcode', header: '69码', align: 'center' },
   { field: 'price', header: '产品价格', align: 'center' },
   { field: 'factory', header: '工厂', align: 'center' },
+  { field: 'customers', header: '客户', align: 'left' },
   { field: 'actions', header: '操作', align: 'center' },
 ]
 
@@ -157,6 +193,29 @@ function handleImageError(row: Product) {
   border: 1px solid var(--color-border-light, #e2e8f0);
 }
 .pd-factory { font-size: 13px; font-weight: 500; color: var(--color-text); }
+
+/* ===== 客户列 ===== */
+.pd-customers { display: flex; flex-wrap: wrap; gap: 4px; }
+.pd-customer-tag {
+  display: inline-block;
+  padding: 1px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-primary-600);
+  background: var(--color-primary-50);
+  border: 1px solid var(--color-primary-100);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.pd-customer-none {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  background: var(--color-surface, #f8fafc);
+  border: 1px solid var(--color-border-light, #e2e8f0);
+  border-radius: 999px;
+  padding: 1px 8px;
+  white-space: nowrap;
+}
 .pd-thumb-box {
   width: 120px;
   height: 120px;

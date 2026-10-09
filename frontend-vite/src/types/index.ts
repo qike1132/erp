@@ -345,11 +345,21 @@ export interface PermissionItem {
   children?: PermissionItem[]
 }
 
+export interface ProductCustomerRef {
+  id: number
+  name: string
+}
+
 export interface Product {
   id: number
   name: string
   barcode?: string
-  customer?: string
+  /**
+   * 所属客户（多对多）。
+   * 空数组 = 未挂客户 = **对所有客户可见**（兼容存量 SKU 的口径）。
+   * 后端字段名 customers；提交时用 customer_ids（见 productApi.create/update）。
+   */
+  customers?: ProductCustomerRef[]
   category?: string
   unit?: string
   note?: string
