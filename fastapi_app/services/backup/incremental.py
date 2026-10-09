@@ -282,13 +282,22 @@ async def create_wal_incremental_backup(
     metadata_content = json.dumps(backup_info, indent=2, ensure_ascii=False).encode('utf-8')
 
     # 可选加密
-    effective_encryption_password = encrypt_password or get_backup_encryption_password()
-    if not effective_encryption_password and is_encryption_enabled():
-        # 红线#4（第八轮审计）：加密已启用却拿不到密码 → fail-closed，不静默产明文。
-        raise BackupError(
-            'WAL 增量备份：加密已启用（BACKUP_ENCRYPTION_ENABLED=true）但未配置密码，'
-            '拒绝产出不加密备份'
-        )
+    # 总开关优先：BACKUP_ENCRYPTION_ENABLED=false 时忽略入参密码，一律明文（不查入参，
+    # 否则显式传入 encrypt_password 会绕过总开关，重新落回「开关关了还产出密文」）。
+    if not is_encryption_enabled():
+        if encrypt_password:
+            logger.warning(
+                'BACKUP_ENCRYPTION_ENABLED=false，已忽略 encrypt_password 入参，本次 WAL 增量备份不加密'
+            )
+        effective_encryption_password = None
+    else:
+        effective_encryption_password = encrypt_password or get_backup_encryption_password()
+        if not effective_encryption_password:
+            # 红线#4（第八轮审计）：加密已启用却拿不到密码 → fail-closed，不静默产明文。
+            raise BackupError(
+                'WAL 增量备份：加密已启用（BACKUP_ENCRYPTION_ENABLED=true）但未配置密码，'
+                '拒绝产出不加密备份'
+            )
     if effective_encryption_password:
         from fastapi_app.core.backup_encryption import encrypt_backup_auto
         try:

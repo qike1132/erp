@@ -194,7 +194,10 @@ async function triggerFull(opts?: { password?: string; tables?: string[]; exclud
   try {
     const res = await backupApi.triggerFull({
       remark: partial ? '手动表级备份' : '手动全量备份',
-      encrypt: false,
+      // 表达「期望加密」的意图，最终是否加密由服务端总开关 BACKUP_ENCRYPTION_ENABLED 决定：
+      // 开关关闭 → 后端忽略本字段产出明文；开关开启 → 有密码才加密。前端硬编码 false 会让
+      // 开关重新打开后 UI 永远产不出加密包，故此处保持 true（由服务端裁决）。
+      encrypt: true,
       password: opts?.password,
       tables: opts?.tables?.length ? opts.tables : undefined,
       exclude_tables: opts?.excludeTables?.length ? opts.excludeTables : undefined,
