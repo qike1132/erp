@@ -10,6 +10,7 @@
 import asyncio
 import logging
 import os
+import time
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -21,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import sessionmaker
 
 from fastapi_app.core.config import settings
+from fastapi_app.core.exceptions import run_post_commit_callbacks
 
 
 def _get_pool_config() -> dict:
@@ -287,6 +289,15 @@ async def get_async_db(request: Request = None):  # type: ignore[assignment]
             except (RuntimeError, OSError, ValueError, SQLAlchemyError):
                 logger.warning("Session rollback failed (may be broken after psql restore)", exc_info=True)
             raise
+        # 提交成功后执行服务层注册的 post-commit 回调（缓存失效、事件广播等）。
+        # 此前只有 db_transaction 会跑回调；走 Unit-of-Work 路径的端点（batch 导入、
+        # order 删除等十余个）注册的回调被静默丢弃 —— run_post_commit_callbacks 的
+        # docstring 明说这类入口「必须在提交后显式调用」。回调失败不影响响应
+        # （内部已兜底），且此时业务数据已提交，绝不能因回调失败而 raise。
+        try:
+            await run_post_commit_callbacks(session)
+        except (RuntimeError, OSError, ValueError, SQLAlchemyError) as exc:
+            logger.warning("post-commit 回调执行失败（不影响已提交事务）: %s", exc, exc_info=True)
 
 
 from contextlib import asynccontextmanager, suppress
@@ -372,11 +383,44 @@ def _init_read_engine():
     )
     logger.info("只读副本引擎初始化成功: %s", replica_url.split("@")[-1] if "@" in replica_url else replica_url)
     _register_slow_listener_for_read_engine()
+    _reset_read_replica_circuit()  # 新建/重建副本引擎 → 熔断状态重新判定
 
 
-# 只读副本连接快速失败阈值（秒）：副本不可达/连接池耗尽/断连时，
-# 超过该阈值即降级主库，避免请求因副本故障长时间阻塞（pool_timeout 默认 30s）
-_READ_REPLICA_CHECKOUT_TIMEOUT = 2.0
+# 只读副本快速失败阈值（秒）：副本不可达/连接池耗尽/断连时，超过该阈值即降级主库
+# （pool_timeout 默认 30s）。正常往返在毫秒级，1s 预算足够宽裕又能在真故障时快速失败。
+_READ_REPLICA_CHECKOUT_TIMEOUT = 1.0
+# 连续失败达到该次数即熔断，冷却期内不再逐请求探测副本，直接走主库。
+_READ_REPLICA_FAIL_THRESHOLD = 3
+# 熔断冷却时长（秒）：到期后放行一次探测，成功则复位。
+_READ_REPLICA_COOLDOWN_SECONDS = 60.0
+
+# 熔断状态（进程内；UVICORN_WORKERS 各 worker 独立判定，可接受）
+_read_replica_fail_count = 0
+_read_replica_circuit_open_until = 0.0  # 以 time.monotonic() 为基准
+
+
+def _read_replica_circuit_is_open() -> bool:
+    """熔断是否处于打开（冷却）状态"""
+    return time.monotonic() < _read_replica_circuit_open_until
+
+
+def _record_read_replica_failure() -> None:
+    """记一次副本探测失败；连续失败达阈值即进入冷却。"""
+    global _read_replica_fail_count, _read_replica_circuit_open_until
+    _read_replica_fail_count += 1
+    if _read_replica_fail_count >= _READ_REPLICA_FAIL_THRESHOLD:
+        _read_replica_circuit_open_until = time.monotonic() + _READ_REPLICA_COOLDOWN_SECONDS
+        logger.warning(
+            "只读副本连续失败 %d 次，熔断 %.0fs：期间读操作直接走主库",
+            _read_replica_fail_count, _READ_REPLICA_COOLDOWN_SECONDS,
+        )
+
+
+def _reset_read_replica_circuit() -> None:
+    """副本探测成功（或连接池重建）后复位熔断状态。"""
+    global _read_replica_fail_count, _read_replica_circuit_open_until
+    _read_replica_fail_count = 0
+    _read_replica_circuit_open_until = 0.0
 
 
 async def get_async_read_db():
@@ -385,6 +429,9 @@ async def get_async_read_db():
     - 未配置副本时自动回退到主库
     - 副本连接在阈值内未就绪（不可达/池耗尽/断连）时快速降级主库，
       防止副本故障把请求拖入数秒级等待
+    - 连续失败达阈值即熔断：冷却期内不再逐请求探测副本，直接走主库，
+      避免副本长期亚健康时每个读请求都固定等满超时（2026-10-09：实测
+      每请求固定付出约 2s，一天触发 25 次）
     - 无 commit/rollback（只读操作无需事务控制）
     """
     _init_read_engine()
@@ -395,19 +442,34 @@ async def get_async_read_db():
             yield session
         return
 
+    if _read_replica_circuit_is_open():
+        # 已熔断：跳过探测，直接主库
+        async for primary_session in get_async_db():
+            yield primary_session
+        return
+
     session = _ReadSessionLocal()
     try:
         # 主动触发连接检出（含 pool_pre_ping）并施加快速失败超时
         async with asyncio.timeout(_READ_REPLICA_CHECKOUT_TIMEOUT):
             await session.execute(text("SELECT 1"))
     except (TimeoutError, SQLAlchemyError, OSError) as e:
+        _record_read_replica_failure()
         logger.warning("只读副本连接不可用（%.1fs），降级到主库: %s", _READ_REPLICA_CHECKOUT_TIMEOUT, e)
-        # 资源清理尽力而为：关闭失败不影响降级路径
-        with suppress(RuntimeError, OSError, ValueError, SQLAlchemyError):
-            await session.close()
+        # 超时/断连的连接必须作废，不能原样放回池里——否则后续请求会继续
+        # 检出这条坏连接，把一次故障放大成每个请求都等满超时。invalidate/close
+        # 本身含 rollback I/O，也套超时：黑洞式故障（TCP 挂着不响应）时
+        # 清理段不能成为第二个无限等待点。清理尽力而为，失败不影响降级路径。
+        with suppress(TimeoutError, RuntimeError, OSError, ValueError, SQLAlchemyError):
+            async with asyncio.timeout(_READ_REPLICA_CHECKOUT_TIMEOUT):
+                await session.invalidate()
+        with suppress(TimeoutError, RuntimeError, OSError, ValueError, SQLAlchemyError):
+            async with asyncio.timeout(_READ_REPLICA_CHECKOUT_TIMEOUT):
+                await session.close()
         async for primary_session in get_async_db():
             yield primary_session
         return
+    _reset_read_replica_circuit()
     try:
         yield session
     finally:
