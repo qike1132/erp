@@ -46,6 +46,9 @@ def _db_with_record(record):
     result = MagicMock()
     result.scalar_one_or_none.return_value = record
     db.execute = AsyncMock(return_value=result)
+    # 库存联动会登记 post-commit 缓存失效（schedule_post_commit_invalidation 走
+    # session.info.setdefault）——裸 AsyncMock 的 .info 不是 dict，会拿到协程。
+    db.info = {}
     return db
 
 

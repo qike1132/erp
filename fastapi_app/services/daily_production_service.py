@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.expression import Join
 
 from fastapi_app.core.business_rules import MAX_QUANTITY
+from fastapi_app.core.cache_invalidation import cache_mgr, schedule_post_commit_invalidation
 from fastapi_app.core.exception_handler import safe_publish_event
 from fastapi_app.core.float_utils import round_money
 from fastapi_app.core.production_scope import PRODUCTION_DEPARTMENTS
@@ -77,6 +78,13 @@ async def _apply_production_stock(
         related_id=str(record.id),
         note=f'生产录入 {record.department} {record.production_date}',
     ))
+    # 库存视图（/stock 的「库存」列 = 包装部入库 + 已出货净额）读的是
+    # inventory:paginated（ttl=120s / local 60s）：不失效的话，前端收到下面的
+    # STOCK_CHANGED 重取也会命中旧缓存，最长 120s 才看到新数量（2026-10-08 实测
+    # 「包装录入 5000 → /stock 延迟显示」）。与入库/出库/退货三条写路径同款：
+    # 提交前广覆盖 + post-commit 兜底（并发读回写脏值的竞态）。
+    await cache_mgr.invalidate_stock_and_order()
+    schedule_post_commit_invalidation(db, cache_mgr.invalidate_stock_and_order)
     # 生产即入库也会改变库存视图（库存查询页的生产入库/结余列）——发库存变更事件，
     # 让已接 WebSocket 的页面实时刷新（与入库/出库/退货三条写路径同款）。
     await safe_publish_event(

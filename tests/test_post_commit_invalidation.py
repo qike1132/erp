@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from fastapi_app.core.cache_invalidation import cache_mgr, schedule_post_commit_invalidation
 from fastapi_app.core.exceptions import db_transaction
-from fastapi_app.services import stock_out_service
+from fastapi_app.services import daily_production_service, stock_out_service
 from fastapi_app.shared_models import Product, StockOut
 
 pytestmark = pytest.mark.integration
@@ -100,6 +100,29 @@ async def test_delete_stockout_registers_post_commit_invalidation(db):
     await db.flush()
 
     await stock_out_service.delete_stockout(db, stockout.id)
+
+    callbacks = db.info.get('post_commit_callbacks', [])
+    assert cache_mgr.invalidate_stock_and_order in callbacks
+
+
+async def test_create_production_record_registers_post_commit_invalidation(db):
+    """生产记录写入后必须登记 post-commit 库存缓存失效回调。
+
+    回归 2026-10-08：包装录入 5000 后 /stock 的「库存」最长 120s 才变——生产写入
+    只清了 FIFO/pp 缓存（fifo_allocation 的会话钩子），没清 inventory:paginated
+    （ttl=120s），前端收到 WebSocket 事件重取仍命中旧缓存。
+    """
+    from datetime import date
+
+    product = Product(name='PCI-生产产品', barcode='PCI-PROD', current_stock=0, initial_stock=0)
+    db.add(product)
+    await db.flush()
+
+    await daily_production_service.create_record(
+        db, department='packaging', product_id=product.id, product_name='PCI-生产产品',
+        barcode='PCI-PROD', unit_price=1.0, quantity=5000,
+        production_date_str=date.today().isoformat(), created_by='tester',
+    )
 
     callbacks = db.info.get('post_commit_callbacks', [])
     assert cache_mgr.invalidate_stock_and_order in callbacks
