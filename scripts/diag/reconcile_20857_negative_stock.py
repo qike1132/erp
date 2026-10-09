@@ -28,6 +28,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 PRODUCT_ID = 20857
 EXPECTED_NEGATIVE = -13001
@@ -82,4 +83,8 @@ async def main(dry_run: bool) -> int:
 
 if __name__ == '__main__':
     sys.stdout.reconfigure(encoding='utf-8', errors='ignore')
+    from _prod_write_guard import require_prod_write_consent
+    if '--dry-run' not in sys.argv:
+        require_prod_write_consent('对平 product 20857 负库存（+13001 并 VALIDATE 约束）',
+                                   hint='走服务层写入口，单事务；幂等闸只认库存恰为 -13001')
     raise SystemExit(asyncio.run(main('--dry-run' in sys.argv)))

@@ -61,7 +61,20 @@ PERMISSIONS_CONFIG = {
         'module_name': '报表统计',
         'icon': 'fa-chart-bar',
         'parent': {'code': 'report_manage', 'name': '订单流水'},
-        'children': []
+        # 报表域行内操作子码，对齐迁移 pg_standalone_075/079 的插入内容：
+        # 空库部署链 init_permissions --yes 重建全部权限后，迁移里
+        # WHERE p.code='report_manage' 的 INSERT...SELECT 若父行缺失会静默插 0 行，
+        # 8 个子码永久缺失（2026-10-09 第 16 轮审计 High-2）。此处补齐保证空库也齐。
+        'children': [
+            {'code': 'order_edit', 'name': '编辑'},
+            {'code': 'order_delete', 'name': '删除'},
+            {'code': 'stockout_edit', 'name': '编辑'},
+            {'code': 'stockout_delete', 'name': '删除'},
+            {'code': 'deduction_edit', 'name': '编辑'},
+            {'code': 'deduction_delete', 'name': '删除'},
+            {'code': 'return_edit', 'name': '编辑'},
+            {'code': 'return_delete', 'name': '删除'},
+        ]
     },
     'approval': {
         'module_name': '审批管理',

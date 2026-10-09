@@ -27,7 +27,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 
 _REMARK_PREFIX = '来源订单:'
 # 同步链路只写全角「；」，半角「;」一并兼容（防御性）
@@ -41,6 +41,10 @@ def extract_order_no(remark: str) -> str:
 
 
 async def main(execute: bool) -> int:
+    if execute:
+        from _prod_write_guard import require_prod_write_consent
+        require_prod_write_consent('删除孤儿采购计划明细及其被清空的计划主单',
+                                   hint='误操作可依据 logs/ 下的备份手工恢复')
     # 不设置 APP_ENV：config 读取 .env（生产库）
     from fastapi_app.core.database import (
         ensure_engine_for_current_loop,
@@ -93,12 +97,18 @@ async def main(execute: bool) -> int:
             print('无孤儿明细，无需清理')
             return 0
 
-        # 计算删除孤儿后哪些主单会被清空
+        # 计算删除孤儿后哪些主单会被清空。
+        # 注意：不能从「带 remark 的明细」里数存活者 —— 同一主单还可能有手工明细
+        # （remark 为空），漏数会把非空主单判成空、连带其手工明细被 CASCADE 删掉。
+        # 与服务层（shipment_plan_sync）同口径：删完孤儿后回查 DB 每个主单的真实剩余数。
         remaining_by_plan: dict[int, int] = {}
-        survivors = [d for d in details if d not in orphans]
-        for d in survivors:
-            if d.plan_id in plan_ids:
-                remaining_by_plan[d.plan_id] = remaining_by_plan.get(d.plan_id, 0) + 1
+        if plan_ids:
+            rows = (await db.execute(
+                select(PurchasePlanDetail.plan_id, func.count(PurchasePlanDetail.id))
+                .where(PurchasePlanDetail.plan_id.in_(plan_ids))
+                .group_by(PurchasePlanDetail.plan_id)
+            )).all()
+            remaining_by_plan = {row[0]: row[1] for row in rows}
         emptied_plans = [p for p in plans if remaining_by_plan.get(p.id, 0) == 0]
         affected_months = sorted({p.plan_month for p in plans})
 
