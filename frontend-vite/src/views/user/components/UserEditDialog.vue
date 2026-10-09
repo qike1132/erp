@@ -6,7 +6,10 @@
       <div class="us-form-group">
         <label>新密码</label>
         <div class="us-input-wrapper">
-          <input v-model="editForm.password" :type="showPwd ? 'text' : 'password'" class="us-input" :placeholder="`留空则不修改，至少${PASSWORD_MIN_LENGTH}位`" aria-label="新密码，留空则不修改" />
+          <!-- autocomplete=new-password：让浏览器判定为「设置新密码」而非登录，
+               否则它会为本站已保存的凭据找用户名框，退化成填充页面上第一个
+               文本框（侧边栏菜单搜索框），并可能顺手把已保存口令灌进这里 -->
+          <input v-model="editForm.password" :type="showPwd ? 'text' : 'password'" class="us-input" name="new-password" autocomplete="new-password" :placeholder="`留空则不修改，至少${PASSWORD_MIN_LENGTH}位`" aria-label="新密码，留空则不修改" />
           <button type="button" class="us-pwd-toggle" aria-label="查看" @click="showPwd = !showPwd">
             <FontAwesomeIcon :icon="showPwd ? 'eye-slash' : 'eye'" aria-hidden="true" />
           </button>

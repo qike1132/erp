@@ -1,10 +1,14 @@
 <template>
   <div class="sb-search">
     <span class="sb-search-icon" aria-hidden="true" />
+    <!-- name/autocomplete 必填：裸文本框会被浏览器凭据自动填充当成用户名候选，
+         把本站保存的登录名灌进菜单搜索框（2026-10-09 /user 点编辑复现） -->
     <input
       v-model="model"
       type="text"
       class="sb-search-input"
+      name="nav-menu-search"
+      autocomplete="off"
       placeholder="搜索菜单..."
       aria-label="搜索菜单"
     />

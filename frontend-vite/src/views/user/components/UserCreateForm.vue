@@ -4,12 +4,14 @@
     <form class="us-form" @submit.prevent="handleAdd">
       <div class="us-form-group">
         <label>用户名 <span class="us-required">*</span></label>
-        <input v-model="form.username" class="us-input" placeholder="请输入用户名" aria-label="请输入用户名" />
+        <!-- 这是「新建账号」表单，不是登录表单：不标 autocomplete 会被浏览器当成
+             登录框，把本站保存的登录名（admin）自动填进用户名 -->
+        <input v-model="form.username" class="us-input" name="new-user-name" autocomplete="off" placeholder="请输入用户名" aria-label="请输入用户名" />
       </div>
       <div class="us-form-group">
         <label>密码 <span class="us-required">*</span></label>
         <div class="us-input-wrapper">
-          <input v-model="form.password" :type="showPwd1 ? 'text' : 'password'" class="us-input" :placeholder="passwordHint" :aria-label="passwordHint" />
+          <input v-model="form.password" :type="showPwd1 ? 'text' : 'password'" class="us-input" name="new-password" autocomplete="new-password" :placeholder="passwordHint" :aria-label="passwordHint" />
           <button type="button" class="us-pwd-toggle" aria-label="查看" @click="showPwd1 = !showPwd1">
             <FontAwesomeIcon :icon="showPwd1 ? 'eye-slash' : 'eye'" aria-hidden="true" />
           </button>
