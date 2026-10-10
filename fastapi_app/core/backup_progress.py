@@ -18,6 +18,8 @@ import re
 import uuid
 from datetime import UTC, datetime
 
+import redis  # 仅用其 TimeoutError/ConnectionError 异常类型（_get_redis 探活）
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -87,15 +89,37 @@ def _sanitize_error(error: str, max_len: int = 200) -> str:
 # Redis client resolution (same pattern as restore_progress.py)
 # ---------------------------------------------------------------------------
 async def _get_redis():
-    """Resolve an async Redis client using the same fallback chain as restore_progress.py."""
+    """Resolve an async Redis client using the same fallback chain as restore_progress.py.
+
+    会做一次真实 ``PING`` 探活（redis 客户端连接是**惰性**的：拿 client 对象不拨号，
+    ``set/get`` 时才真正连接）。2026-10-10 事故：broker(6380) 未运行时 ``_get_redis``
+    本身不抛错，各函数的 ``if client is None`` 降级永远走不到，首次 ``set()`` 才以
+    ``redis.exceptions.TimeoutError`` 炸穿——手动备份因此失败退出码 1。此处探活后，
+    Redis 不可用即返回 ``None``，让「仅记录日志」的降级路径真正可达。
+    """
+    _client = None
     try:
         from fastapi_app.core.redis_client import get_async_redis_client
-        client = await get_async_redis_client()
-        return client
-    except (ImportError, OSError, RuntimeError):
-        pass  # defensive: 异常静默处理,不影响主流程
-    from fastapi_app.core.redis_wrapper import get_client
-    return get_client()
+        _client = await get_async_redis_client()
+    except (ImportError, OSError, RuntimeError, redis.TimeoutError, redis.ConnectionError):
+        _client = None
+    if _client is None:
+        # 回退到同步 wrapper（与原 fallback 链一致）
+        try:
+            from fastapi_app.core.redis_wrapper import get_client
+            _client = get_client()
+        except (ImportError, OSError, RuntimeError):
+            return None
+    if _client is None:
+        return None
+    try:
+        await _client.ping()
+        return _client
+    except (OSError, RuntimeError, redis.TimeoutError, redis.ConnectionError, TypeError):
+        # TypeError：同步客户端的 ping 可能不是 coroutine（防御性兼容）
+        # defensive: 探活失败按不可用处理，进度追踪退化为仅日志
+        logger.warning("Redis 探活失败，备份/恢复进度追踪退化为仅记录日志")
+        return None
 
 
 async def is_redis_available() -> bool:
