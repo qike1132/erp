@@ -286,6 +286,42 @@ def _order_has_bom(record: dict, bom_product_ids: set) -> bool:
     return all(item['product_id'] in bom_product_ids for item in items if item.get('product_id'))
 
 
+async def list_auto_generate_candidates(db: AsyncSession) -> list[dict]:
+    """列出「可自动生成采购单」的未处理记录（供采购订单自动生成使用）。
+
+    即未处理记录（客户订单 status='待备货' 且未删除、未被采购单关联；备货记录未被
+    采购单关联）中，**全部 SKU 都已配置 BOM** 的那些 —— 与人工「一键审核」可勾选的
+    集合同口径。缺 BOM 的记录**不在**返回值内，等 BOM 配好后由下一次扫描纳入。
+
+    复用未处理列表的全部过滤/加载逻辑，只是不分页（取全集）。
+
+    Returns:
+        list[dict]: 每项含 composite_id / customer / order_no / record_type / source_id。
+    """
+    unified = _build_unprocessed_union()
+    result = await db.execute(
+        select(unified.c.record_type, unified.c.source_id, unified.c.customer)
+    )
+    # list(...)：result.all() 是 Sequence[Row]，_build_records_in_sql_order 标注为 list
+    rows = list(result.all())
+    if not rows:
+        return []
+    orders_map, stockins_map = await _load_unprocessed_sources(db, rows)
+    records = _build_records_in_sql_order(rows, orders_map, stockins_map)
+    bom_product_ids = await _fetch_bom_product_ids(db, _collect_record_product_ids(records))
+    return [
+        {
+            'composite_id': r['composite_id'],
+            'customer': r['customer'],
+            'order_no': r['order_no'],
+            'record_type': r['record_type'],
+            'source_id': r['source_order_id'],
+        }
+        for r in records
+        if _order_has_bom(r, bom_product_ids)
+    ]
+
+
 def _build_unprocessed_response(
     all_records: list, total: int, per_page: int, page: int,
     pid_name_map: dict, pid_barcode_map: dict, bom_product_ids: set,

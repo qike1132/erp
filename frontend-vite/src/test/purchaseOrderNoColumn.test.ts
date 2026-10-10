@@ -10,30 +10,14 @@
  */
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
-import PendingOrdersPanel from '@/views/purchase/components/PendingOrdersPanel.vue'
 import ActiveOrdersPanel from '@/views/purchase/components/ActiveOrdersPanel.vue'
 import CompletedOrdersPanel from '@/views/purchase/components/CompletedOrdersPanel.vue'
 
-function mountPending(orders: unknown[]) {
-  return mount(PendingOrdersPanel, {
-    props: {
-      orders,
-      loading: false,
-      total: orders.length,
-      currentPage: 1,
-      totalPages: 1,
-      selectedCompositeIds: [],
-      selectedCount: 0,
-      allSelected: false,
-    } as never,
-    global: { stubs: { UiCheckbox: true, UiPagination: true } },
-  })
-}
-
-function mountActive(orders: unknown[]) {
+function mountActive(orders: unknown[], unprocessedOrders: unknown[] = []) {
   return mount(ActiveOrdersPanel, {
     props: {
       orders,
+      unprocessedOrders,
       loading: false,
       total: orders.length,
       currentPage: 1,
@@ -60,7 +44,7 @@ function mountCompleted(orders: unknown[]) {
   })
 }
 
-const pendingRow = {
+const unprocessedRow = {
   composite_id: 'c1',
   id: 1,
   order_no: 'PO-20260929-0014',
@@ -99,15 +83,17 @@ const completedRow2Sku = {
   items: [],
 }
 
-describe('采购中心 · 待处理面板', () => {
+describe('采购中心 · 待生成行（并入待生产面板同表）', () => {
   it('表头含「订单号」且紧随时间列', () => {
-    const headers = mountPending([pendingRow]).findAll('th').map((th) => th.text())
+    const headers = mountActive([], [unprocessedRow]).findAll('th').map((th) => th.text())
     expect(headers).toContain('订单号')
     expect(headers.indexOf('订单号')).toBe(headers.indexOf('下单时间') + 1)
   })
 
-  it('行内渲染客户订单号', () => {
-    expect(mountPending([pendingRow]).text()).toContain('PO-20260929-0014')
+  it('行内渲染客户订单号；缺 BOM 时操作列提示无法下单', () => {
+    const text = mountActive([], [{ ...unprocessedRow, has_bom: false }]).text()
+    expect(text).toContain('PO-20260929-0014')
+    expect(text).toContain('未配置BOM，无法下单')
   })
 })
 
@@ -120,6 +106,11 @@ describe('采购中心 · 进行中面板', () => {
 
   it('行内渲染采购订单号', () => {
     expect(mountActive([activeRow]).text()).toContain('CG-20260928-0001')
+  })
+
+  it('类型列按来源显示：有来源客户订单 → 订单；无 → 备货', () => {
+    expect(mountActive([{ ...activeRow, source_order_no: 'PO-20260901-0001' }]).text()).toContain('订单')
+    expect(mountActive([{ ...activeRow, source_order_no: '' }]).text()).toContain('备货')
   })
 })
 

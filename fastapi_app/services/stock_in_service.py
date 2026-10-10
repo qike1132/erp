@@ -100,6 +100,9 @@ async def create_stockin(db: AsyncSession, product_id: int, quantity: int, custo
     else:
         logger.warning('入库事件发布失败：产品ID %s 不存在', product_id)
     logger.info(f'入库添加成功：{stockin.stockin_no}，客户：{customer}，产品ID：{product_id}，数量：{quantity}')
+    # 采购订单自动生成：提交后投递扫描任务（替代采购中心人工「一键审核」）
+    from fastapi_app.services.purchase._auto_generate import schedule_auto_generate_purchase_orders
+    schedule_auto_generate_purchase_orders(db)
     return {'id': stockin.id, 'stockin_no': stockin.stockin_no}
 
 
@@ -171,6 +174,10 @@ async def delete_stockin(db: AsyncSession, stockin_id: int, operator_id: int | N
     if product is not None:
         await safe_publish_event(stock_service.publish_stock_event, StockEvent.STOCK_CHANGED, {'product_id': stockin_obj.product_id, 'product_name': product.name, 'change_type': '入库删除', 'quantity': -stockin_obj.quantity, 'current_stock': product.current_stock}, context="入库删除事件发布")
     logger.info(f'入库删除成功：{stockin_no}，数量：{stockin_obj.quantity}')
+    # 备货记录没了 → 撤销引用它的 pending 采购单（与客户订单删除走 ORDER_DELETED 清理同款；
+    # 备货删除此前漏了这条，会留下拿着已不存在来源的采购单）。
+    from fastapi_app.services.purchase_order_revoke import schedule_stockin_deleted_side_effects
+    schedule_stockin_deleted_side_effects(db, stockin_id)
 
 
 async def batch_create_stockins(db: AsyncSession, stockins_data: list, operator_id: int | None = None) -> dict:
@@ -209,6 +216,11 @@ async def batch_create_stockins(db: AsyncSession, stockins_data: list, operator_
                 logger.error(f'批量入库单项失败: {e}', exc_info=True)
                 results[orig_idx] = {'success': False, 'error': str(e) or '入库处理失败，请稍后重试', 'id': item.get('id', '未知')}
         await db.flush()
+
+    if any(isinstance(r, dict) and r.get('success') for r in results):
+        # 采购订单自动生成：提交后投递扫描任务（替代采购中心人工「一键审核」）
+        from fastapi_app.services.purchase._auto_generate import schedule_auto_generate_purchase_orders
+        schedule_auto_generate_purchase_orders(db)
     return {'success': True, 'results': results}
 
 

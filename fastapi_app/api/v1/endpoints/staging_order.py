@@ -19,6 +19,7 @@ from fastapi_app.schemas.staging import (
     StagingResponse,
 )
 from fastapi_app.services import staging_service as svc
+from fastapi_app.services.purchase._auto_generate import schedule_auto_generate_purchase_orders
 from fastapi_app.shared_models import User
 
 logger = logging.getLogger(__name__)
@@ -91,6 +92,9 @@ async def confirm_staging_orders(session_id: str=Query('default', description='�
     scoped_session = f'u{current_user.id}:{session_id}'
     async with db_transaction(db):
         confirmed, errors = await svc.confirm_staging_orders(db, scoped_session)
+        if confirmed:
+            # 采购订单自动生成：提交后投递扫描任务（替代采购中心人工「一键审核」）
+            schedule_auto_generate_purchase_orders(db)
     if confirmed == 0 and errors:
         return StagingOrderConfirmResult(success=False, message=errors[0], confirmed=0, errors=errors)
     return StagingOrderConfirmResult(success=True, message=f'成功确认 {confirmed} 个订单', confirmed=confirmed, errors=errors)

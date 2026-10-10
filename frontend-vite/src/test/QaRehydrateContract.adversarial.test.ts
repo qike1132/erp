@@ -14,7 +14,6 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { ref } from 'vue'
 
 vi.mock('@/api', () => ({
   purchaseApi: {
@@ -84,13 +83,11 @@ function buildActions(summary: ReturnType<typeof useSummaryModal>) {
     selectedIds: [1, 2],
   }
   const actions = usePurchaseActions({
-    unprocessed: {} as never,
     purchaseOrders: purchaseOrders as never,
     completed: {} as never,
     summary,
     confirm: { confirm: vi.fn().mockResolvedValue(true) } as never,
     queryClient: { invalidateQueries: vi.fn() } as never,
-    isSubmitting: ref(false),
   })
   return { actions, purchaseOrders }
 }

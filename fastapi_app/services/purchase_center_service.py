@@ -105,8 +105,19 @@ def _register_order_event_subscriptions():
             if not order_id:
                 return
             try:
+                from fastapi_app.services.purchase._auto_generate import invalidate_purchase_caches
+                from fastapi_app.services.purchase_order_revoke import (
+                    revoke_pending_purchase_orders_for_order,
+                )
                 async with get_async_db_context() as db:
+                    # 撤销引用它的 pending 采购单，并把同张单里其余来源订单的状态重算回真实值
+                    # （否则同客户其余订单会永久卡在「已备货」）
+                    await revoke_pending_purchase_orders_for_order(db, order_id)
+                    # 兜底：没有 SKU 快照的存量单仍按旧的 JSON 口径清理
                     await cleanup_orphan_pending_purchase_orders(db, [order_id])
+                # 撤销发生在删除端点的采购缓存失效**之后**（独立事务、提交后）；这里必须再失效
+                # 一次，否则两动作之间被回填的旧列表会把已删的采购单继续展示到 TTL 到期。
+                await invalidate_purchase_caches()
             except Exception as e:  # defensive: 单个事件处理失败不影响其他事件
                 logger.error(
                     'ORDER_DELETED 处理失败: order_id=%s error=%s',

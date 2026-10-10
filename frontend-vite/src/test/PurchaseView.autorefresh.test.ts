@@ -95,10 +95,9 @@ vi.mock('@/composables/useConfirmDialog', () => ({
 
 import { mount, flushPromises } from '@vue/test-utils'
 import { nextTick } from 'vue'
-import PendingOrdersPanel from '@/views/purchase/components/PendingOrdersPanel.vue'
+import ActiveOrdersPanel from '@/views/purchase/components/ActiveOrdersPanel.vue'
 
 const stubs = {
-  PendingOrdersPanel: { template: '<div />' },
   ActiveOrdersPanel: { template: '<div />' },
   CompletedOrdersPanel: { template: '<div />' },
   OrderDetailModal: { template: '<div />' },
@@ -158,7 +157,7 @@ describe('PurchaseView auto-refresh orders filter (regression for BUG-PURCHASE-C
   })
 })
 
-describe('PendingOrdersPanel 错误态（迭代修复：加载失败不再误显空态/永久加载中）', () => {
+describe('ActiveOrdersPanel 错误态（迭代修复：加载失败不再误显空态/永久加载中）', () => {
   const panelStubs = {
     UiSpinner: { template: '<div />' },
     UiCheckbox: { template: '<div />' },
@@ -173,13 +172,12 @@ describe('PendingOrdersPanel 错误态（迭代修复：加载失败不再误显
     total: 0,
     currentPage: 1,
     totalPages: 1,
-    selectedCompositeIds: [],
-    selectedCount: 0,
+    selectedIds: [],
     allSelected: false,
   }
 
   it('error=true 且无数据时显示错误提示与重试按钮，点击触发 retry', async () => {
-    const wrapper = mount(PendingOrdersPanel, {
+    const wrapper = mount(ActiveOrdersPanel, {
       props: baseProps,
       global: { stubs: panelStubs },
     })
@@ -191,11 +189,11 @@ describe('PendingOrdersPanel 错误态（迭代修复：加载失败不再误显
   })
 
   it('error=false 且无数据时显示空态而非错误态', () => {
-    const wrapper = mount(PendingOrdersPanel, {
+    const wrapper = mount(ActiveOrdersPanel, {
       props: { ...baseProps, error: false },
       global: { stubs: panelStubs },
     })
-    expect(wrapper.text()).toContain('暂无未处理订单')
+    expect(wrapper.text()).toContain('暂无采购订单')
     expect(wrapper.text()).not.toContain('加载失败')
   })
 })

@@ -5,15 +5,6 @@
         <div class="pc-tab-group" role="tablist">
           <button
             role="tab"
-            :aria-selected="activeTab === 'pending'"
-            :class="['pc-tab-btn', { active: activeTab === 'pending' }]"
-            @click="switchTab('pending')"
-          >
-            待审核订单
-            <span v-if="unprocessed.total > 0" class="pc-tab-badge">{{ unprocessed.total }}</span>
-          </button>
-          <button
-            role="tab"
             :aria-selected="activeTab === 'active'"
             :class="['pc-tab-btn', { active: activeTab === 'active' }]"
             @click="switchTab('active')"
@@ -31,20 +22,8 @@
           </button>
         </div>
 
-        <div v-if="activeTab === 'pending'" class="pc-header-actions">
-          <button
-            class="pc-btn pc-btn-success"
-            :disabled="unprocessed.validSelectedCompositeIds.length === 0 || isSubmitting"
-            @click="handleOneClickGenerate"
-          >
-            <UiLoadingIcon :loading="isSubmitting" icon="magic" /> 一键审核订单 ({{
-              unprocessed.validSelectedCompositeIds.length
-            }})
-          </button>
-        </div>
-
-        <!-- 待生产订单 TAB 的操作区（与待审核 TAB 同款右上角位置） -->
-        <div v-else-if="activeTab === 'active'" class="pc-header-actions">
+        <!-- 待生产订单 TAB 的操作区 -->
+        <div v-if="activeTab === 'active'" class="pc-header-actions">
           <button
             class="pc-btn pc-btn-purple"
             :disabled="purchaseOrders.selectedIds.length === 0 || isSummarizing"
@@ -87,45 +66,28 @@
         <!-- P1-9: v-if 替代 v-show，非当前 tab 卸载 DOM 减轻 paint；
              数据层在 usePurchaseHandlers 顶层 composable（不随 Panel 卸载），
              配合 Vue Query 缓存切回秒出 -->
-        <!-- 待审核订单面板 -->
-        <PendingOrdersPanel
-          v-if="activeTab === 'pending'"
-          :orders="unprocessed.orders"
-          :loading="unprocessed.loading"
-          :fetching="unprocessed.fetching"
-          :error="unprocessed.error"
-          :total="unprocessed.total"
-          :current-page="unprocessed.currentPage"
-          :total-pages="unprocessed.totalPages"
-          :selected-composite-ids="unprocessed.selectedCompositeIds"
-          :selected-count="unprocessed.selectedCompositeIds.length"
-          :all-selected="unprocessed.allSelected"
-          @toggle-all="unprocessed.toggleAll"
-          @toggle-selection="unprocessed.toggleSelection"
-          @quick-generate="handleQuickGenerate"
-          @no-bom-error="handleNoBomError"
-          @change-page="unprocessed.load"
-          @retry="unprocessed.retry"
-        />
-
-        <!-- 待下订单面板 -->
-        <ActiveOrdersPanel
-          v-else-if="activeTab === 'active'"
-          :orders="purchaseOrders.orders"
-          :loading="purchaseOrders.loading"
-          :fetching="purchaseOrders.fetching"
-          :error="purchaseOrders.error"
-          :total="purchaseOrders.total"
-          :current-page="purchaseOrders.page"
-          :total-pages="purchaseOrders.pages"
-          :selected-ids="purchaseOrders.selectedIds"
-          :all-selected="purchaseOrders.allSelected"
-          @toggle-all="purchaseOrders.toggleAll"
-          @toggle-selection="purchaseOrders.toggleSelection"
-          @complete-order="handleCompleteOrder"
-          @update:current-page="handleOrderPageChange"
-          @retry="purchaseOrders.retry"
-        />
+        <template v-if="activeTab === 'active'">
+          <!-- 待生成行与待生产行同表并列（同列、无颜色区分）。
+               采购订单已改为自动生成：缺 BOM 的行在操作列提示「未配置BOM，无法下单」，
+               配好 BOM 后自动生成、自然变为待生产行。 -->
+          <ActiveOrdersPanel
+            :orders="purchaseOrders.orders"
+            :unprocessed-orders="unprocessed.orders"
+            :loading="purchaseOrders.loading"
+            :fetching="purchaseOrders.fetching || unprocessed.fetching"
+            :error="purchaseOrders.error"
+            :total="purchaseOrders.total"
+            :current-page="purchaseOrders.page"
+            :total-pages="purchaseOrders.pages"
+            :selected-ids="purchaseOrders.selectedIds"
+            :all-selected="purchaseOrders.allSelected"
+            @toggle-all="purchaseOrders.toggleAll"
+            @toggle-selection="purchaseOrders.toggleSelection"
+            @complete-order="handleCompleteOrder"
+            @update:current-page="handleOrderPageChange"
+            @retry="handleOrdersRetry"
+          />
+        </template>
 
         <!-- 记录查询面板 -->
         <CompletedOrdersPanel
@@ -191,7 +153,6 @@
 
 <script setup lang="ts">
 import { defineAsyncComponent } from 'vue'
-import PendingOrdersPanel from './components/PendingOrdersPanel.vue'
 import ActiveOrdersPanel from './components/ActiveOrdersPanel.vue'
 import CompletedOrdersPanel from './components/CompletedOrdersPanel.vue'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
@@ -203,7 +164,6 @@ import { usePurchaseHandlers } from './composables/usePurchaseHandlers'
 
 const {
   activeTab,
-  isSubmitting,
   isSummarizing,
   purchaseOrders,
   unprocessed,
@@ -213,9 +173,6 @@ const {
   detailVisible,
   detailOrder,
   switchTab,
-  handleOneClickGenerate,
-  handleQuickGenerate,
-  handleNoBomError,
   handleCompleteOrder,
   handleBatchComplete,
   handleSummary,
@@ -230,6 +187,12 @@ const {
   handleExport,
   exporting,
 } = usePurchaseHandlers()
+
+/** 待生产/待生成任一列表加载失败时，重试两者 */
+function handleOrdersRetry() {
+  purchaseOrders.retry()
+  unprocessed.retry()
+}
 </script>
 
 <style scoped lang="scss">

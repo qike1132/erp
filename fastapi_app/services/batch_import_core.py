@@ -346,6 +346,9 @@ async def _import_data_generic(
     # run_post_commit_callbacks），保证「提交后再清」，避免提交前失效被并发读回写脏数据。
     if count > 0:
         schedule_post_commit_invalidation(db, invalidate_batch_import_caches)
+        # 采购订单自动生成：提交后投递扫描任务（替代采购中心人工「一键审核」）
+        from fastapi_app.services.purchase._auto_generate import schedule_auto_generate_purchase_orders
+        schedule_auto_generate_purchase_orders(db)
 
     # 完成消息只进日志，不再 append 进 debug_messages：
     # debug_messages 的语义是「行级消息」，调用方（_process_comprehensive_sheet）

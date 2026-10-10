@@ -9,7 +9,6 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { ref } from 'vue'
 
 // 隔离外部依赖：useSummaryModal.ts 顶层 import purchaseApi from '@/api'，
 // 测试不发起真实请求，用最小 stub 替换即可。
@@ -561,13 +560,11 @@ describe('close() 复位损耗率（消除陈旧率跨单泄漏）', () => {
       selectedIds: [1, 2],
     }
     const actions = usePurchaseActions({
-      unprocessed: {} as never,
       purchaseOrders: purchaseOrders as never,
       completed: {} as never,
       summary,
       confirm: { confirm: vi.fn().mockResolvedValue(true) } as never,
       queryClient: { invalidateQueries: vi.fn() } as never,
-      isSubmitting: ref(false),
     })
     return { actions, purchaseOrders }
   }

@@ -20,7 +20,6 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { ref } from 'vue'
 
 vi.mock('@/api', () => ({
   purchaseApi: {
@@ -440,13 +439,11 @@ describe('B. 损耗率自动落库请求串行化', () => {
 // ---------------------------------------------------------------------------
 function buildActions(summary: ReturnType<typeof useSummaryModal>) {
   return usePurchaseActions({
-    unprocessed: {} as never,
     purchaseOrders: { completeOrder: vi.fn(), batchComplete: vi.fn(), selectedIds: [1] } as never,
     completed: {} as never,
     summary,
     confirm: { confirm: vi.fn().mockResolvedValue(true) } as never,
     queryClient: { invalidateQueries: vi.fn() } as never,
-    isSubmitting: ref(false),
   })
 }
 

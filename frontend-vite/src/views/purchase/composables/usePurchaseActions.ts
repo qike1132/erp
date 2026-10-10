@@ -1,119 +1,34 @@
-import { ref, type Ref } from 'vue'
+import { ref } from 'vue'
 import type { QueryClient } from '@tanstack/vue-query'
-import { purchaseApi } from '@/api'
 import { showToast } from '@/composables/useToast'
-import { getErrorMessage } from '@/types/errors'
 import { useExport } from '@/composables/useExport'
-import type { UnprocessedOrder } from '@/types'
-import { useUnprocessedOrders } from './useUnprocessedOrders'
 import { usePurchaseOrders } from './usePurchaseOrders'
 import { useCompletedOrders, type CompletedOrderFilters } from './useCompletedOrders'
 import { useSummaryModal } from './useSummaryModal'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
-import { invalidateOrderDerivedQueries } from '@/utils/queryKeys'
 
 /**
- * usePurchaseActions — 采购页面业务动作（审核/完成/汇总/筛选/导出）
+ * usePurchaseActions — 采购页面业务动作（完成/汇总/筛选/导出）
  *
  * 从 usePurchaseHandlers 拆出：接收已初始化的数据 composable 与共享状态，
  * 返回所有事件处理函数。纯逻辑可独立测试，不包含数据获取/实时刷新编排。
+ *
+ * 注：采购订单已改为自动生成，原先的「一键审核 / 单条审核」动作（handleOneClickGenerate
+ * / handleQuickGenerate / handleNoBomError）已移除。
  */
 interface PurchaseActionDeps {
-  unprocessed: ReturnType<typeof useUnprocessedOrders>
   purchaseOrders: ReturnType<typeof usePurchaseOrders>
   completed: ReturnType<typeof useCompletedOrders>
   summary: ReturnType<typeof useSummaryModal>
   confirm: ReturnType<typeof useConfirmDialog>
   queryClient: QueryClient
-  isSubmitting: Ref<boolean>
 }
 
 export function usePurchaseActions(deps: PurchaseActionDeps) {
-  const { unprocessed, purchaseOrders, completed, summary, confirm, queryClient, isSubmitting } = deps
+  const { purchaseOrders, completed, summary, confirm, queryClient } = deps
 
   /** 汇总下单请求中（弹窗要等接口返回才 open，用于按钮 loading 态） */
   const isSummarizing = ref(false)
-
-  async function handleOneClickGenerate() {
-    if (isSubmitting.value) return
-    const validIds = unprocessed.validSelectedCompositeIds
-    const allSelectedIds = unprocessed.selectedCompositeIds
-    if (validIds.length === 0) {
-      showToast('请选择至少一个有BOM配置的订单', 'warning')
-      return
-    }
-    const noBomOrders = unprocessed.orders.filter(
-      (o: UnprocessedOrder) => allSelectedIds.includes(o.composite_id) && !o.has_bom,
-    )
-    const skippedCount = noBomOrders.length
-    isSubmitting.value = true
-    const ok = await confirm.confirm(
-      `确定要审核 ${validIds.length} 个订单吗？`,
-      skippedCount > 0
-        ? `其中 ${skippedCount} 个订单因未配置BOM被排除（${noBomOrders.map((o) => o.order_no).join('、')}），审核通过后将自动计算物料用量并生成采购订单`
-        : '审核通过后将自动计算物料用量并生成采购订单',
-      'warning',
-    )
-    if (!ok) {
-      isSubmitting.value = false
-      return
-    }
-    try {
-      const res = await purchaseApi.oneClickGenerate({ composite_ids: validIds })
-      if (res.success) {
-        showToast(res.message || '审核成功', 'success')
-        unprocessed.clearSelection()
-        unprocessed.load()
-        purchaseOrders.load()
-        // 一键审核会把客户订单状态由「待备货」改为「已备货」，报表订单流水按 status 分组，
-        // 需一并失效派生查询，否则 /report 继续展示审核前的状态
-        invalidateOrderDerivedQueries(queryClient)
-      } else showToast(res.message || '审核失败', 'error')
-    } catch (err: unknown) {
-      showToast('审核失败: ' + getErrorMessage(err, ''), 'error')
-    } finally {
-      isSubmitting.value = false
-    }
-  }
-
-  async function handleQuickGenerate(compositeId: string) {
-    if (isSubmitting.value) return
-    const order = unprocessed.orders.find((o: UnprocessedOrder) => o.composite_id === compositeId)
-    if (!order?.has_bom) {
-      showToast(`订单 ${order?.order_no || ''}无法审核：该产品未配置BOM表`, 'error')
-      return
-    }
-    isSubmitting.value = true
-    const ok = await confirm.confirm(`确定要审核此订单吗？`, '审核通过后将自动计算物料用量并生成采购订单', 'warning')
-    if (!ok) {
-      isSubmitting.value = false
-      return
-    }
-    try {
-      const res = await purchaseApi.oneClickGenerate({ composite_ids: [compositeId] })
-      if (res.success) {
-        showToast(res.message || '审核成功', 'success')
-        unprocessed.load()
-        purchaseOrders.load()
-        // 同上：审核改变了客户订单状态，报表订单流水需一并失效
-        invalidateOrderDerivedQueries(queryClient)
-      } else showToast(res.message || '审核失败', 'error')
-    } catch (err: unknown) {
-      showToast('审核失败: ' + getErrorMessage(err, ''), 'error')
-    } finally {
-      isSubmitting.value = false
-    }
-  }
-
-  function handleNoBomError(order: UnprocessedOrder) {
-    const noBomItems = (order.items || []).filter((it) => it.has_bom === false)
-    if ((order.sku_count || 1) > 1 && noBomItems.length > 0) {
-      const names = noBomItems.map((it) => it.product_name).join('、')
-      showToast(`订单 ${order.order_no || ''}无法审核：以下 SKU 未配置BOM：${names}`, 'error', { duration: 6000 })
-    } else {
-      showToast(`订单 ${order.order_no || ''}无法审核：该产品未配置BOM表`, 'error')
-    }
-  }
 
   async function handleCompleteOrder(orderId: number) {
     const ok = await confirm.confirm('确认将此订单标记为下单完成？', '', 'warning')
@@ -237,9 +152,6 @@ export function usePurchaseActions(deps: PurchaseActionDeps) {
   }
 
   return {
-    handleOneClickGenerate,
-    handleQuickGenerate,
-    handleNoBomError,
     handleCompleteOrder,
     handleBatchComplete,
     handleSummary,

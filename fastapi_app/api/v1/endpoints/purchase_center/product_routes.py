@@ -33,6 +33,7 @@ from fastapi_app.schemas.purchase_center import (
     SearchSuggestionResponse,
 )
 from fastapi_app.services import purchase_center_service as svc
+from fastapi_app.services.purchase._auto_generate import schedule_bom_saved_side_effects
 
 router = APIRouter()
 
@@ -226,6 +227,8 @@ async def api_save_product_bom(
     try:
         async with db_transaction(db):
             msg = await svc.save_product_bom(db, product_id, data.model_dump(), _current_user.username)
+            # BOM 改动提交后：删空则撤销该产品尚未完成的采购单，随后自动生成（见 _auto_generate）
+            schedule_bom_saved_side_effects(db, product_id)
     except (SQLAlchemyError, RuntimeError) as e:
         logger.exception('保存BOM数据失败: product_id=%s', product_id)
         raise HTTPException(status_code=500, detail='保存失败，请稍后重试') from e

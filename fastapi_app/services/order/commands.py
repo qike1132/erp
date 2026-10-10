@@ -167,6 +167,10 @@ async def create_order(db: AsyncSession, product_id: int, quantity: int,
             'quantity': quantity,
         })
 
+    # 采购订单自动生成：提交后投递扫描任务（替代采购中心人工「一键审核」）
+    from fastapi_app.services.purchase._auto_generate import schedule_auto_generate_purchase_orders
+    schedule_auto_generate_purchase_orders(db)
+
     return order.to_dict()
 
 async def update_order(db: AsyncSession, order_id: int, quantity: int,

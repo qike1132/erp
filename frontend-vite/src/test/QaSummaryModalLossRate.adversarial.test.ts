@@ -14,7 +14,7 @@
  * 若 C/D/E 出现失败，恰为「源码缺陷」信号，须阻断放行。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { ref, nextTick } from 'vue'
+import { nextTick } from 'vue'
 
 // ---- hoisted mocks --------------------------------------------------------
 const api = vi.hoisted(() => ({
@@ -141,13 +141,11 @@ function buildActions(summary: ReturnType<typeof useSummaryModal>) {
   const confirm = { confirm: vi.fn().mockResolvedValue(true) }
   const queryClient = { invalidateQueries: vi.fn() }
   const actions = usePurchaseActions({
-    unprocessed: {} as never,
     purchaseOrders: purchaseOrders as never,
     completed: {} as never,
     summary,
     confirm: confirm as never,
     queryClient: queryClient as never,
-    isSubmitting: ref(false),
   })
   return { actions, purchaseOrders, confirm, queryClient }
 }

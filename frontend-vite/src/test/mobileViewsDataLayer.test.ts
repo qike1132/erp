@@ -281,7 +281,7 @@ describe('S12 移动端数据层统一', () => {
       expect(vm.detailTime).toBe('2026-09-02')
     })
 
-    it('一键审核提交后端下发的 composite_id（备货来源行前缀是 stockin，不能按 id 现拼）', async () => {
+    it('待生成 tab 只读展示（采购订单已改为自动生成，无人工审核按钮）', async () => {
       mocks.purchaseApi.orders.mockResolvedValue({ orders: [], total: 0, pages: 1, current_page: 1 })
       mocks.purchaseApi.unprocessedOrders.mockResolvedValue({
         orders: [unprocessedOrder(), unprocessedOrder({ id: 10, composite_id: 'stockin:3', product_name: '备货行' })],
@@ -290,17 +290,17 @@ describe('S12 移动端数据层统一', () => {
         current_page: 1,
       })
       mocks.purchaseApi.completed.mockResolvedValue({ orders: [], total: 0, pages: 1 })
-      mocks.purchaseApi.oneClickGenerate.mockResolvedValue({ success: true })
 
       const wrapper = mount(MPurchaseView, { global: { plugins: [makeRouter()] } })
       await flushPromises()
 
-      const vm = wrapper.vm as unknown as { activeTab: string; handleOneClick: () => Promise<void> }
+      const vm = wrapper.vm as unknown as { activeTab: string }
       vm.activeTab = 'unprocessed'
       await nextTick()
-      await vm.handleOneClick()
 
-      expect(mocks.purchaseApi.oneClickGenerate).toHaveBeenCalledWith({ composite_ids: ['order:9', 'stockin:3'] })
+      expect(wrapper.text()).toContain('待生成')
+      expect(wrapper.text()).not.toContain('一键审核')
+      expect(mocks.purchaseApi.oneClickGenerate).not.toHaveBeenCalled()
     })
   })
 

@@ -175,6 +175,10 @@ async def confirm_staging_stockins(
     )
     await db.flush()
 
+    if confirmed:
+        # 采购订单自动生成：提交后投递扫描任务（替代采购中心人工「一键审核」）
+        from fastapi_app.services.purchase._auto_generate import schedule_auto_generate_purchase_orders
+        schedule_auto_generate_purchase_orders(db)
     return confirmed, errors
 
 async def import_staging_stockins_from_excel(

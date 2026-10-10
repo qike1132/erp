@@ -86,7 +86,6 @@ import CompletedOrdersPanel from '@/views/purchase/components/CompletedOrdersPan
 import type { CompletedOrderFilters } from '@/views/purchase/composables/useCompletedOrders'
 
 const stubs = {
-  PendingOrdersPanel: { template: '<div />' },
   ActiveOrdersPanel: { template: '<div />' },
   CompletedOrdersPanel: { template: '<div />' },
   OrderDetailModal: { template: '<div />' },

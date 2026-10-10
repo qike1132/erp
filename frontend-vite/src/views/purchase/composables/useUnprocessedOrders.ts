@@ -1,4 +1,4 @@
-import { ref, computed, reactive, watch, onScopeDispose } from 'vue'
+import { ref, reactive, computed, watch, onScopeDispose } from 'vue'
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/vue-query'
 import { purchaseApi } from '@/api'
 import { showToast } from '@/composables/useToast'
@@ -15,21 +15,22 @@ interface UnprocessedOrdersResponse {
   latest_sync_time?: string | null
 }
 
-interface OneClickGenerateResponse {
-  success: boolean
-  message?: string
-  created_count: number
-  orders: { id: number; order_no: string }[]
-}
-
 /** Vue Query 缓存 key（与 persistQueryClient sessionStorage 持久化配合） */
 export const UNPROCESSED_QUERY_KEY = 'unprocessed-orders'
 
+/**
+ * 未处理（待生成）订单列表。
+ *
+ * 采购订单已改为后端自动生成，本 composable 现为**只读**数据源，仅供采购页
+ * 「待生成」区块展示「尚未生成采购单」的客户订单 / 备货记录（未配置BOM的会在
+ * 该区块标红提示）。不再包含勾选与生成动作。
+ */
 export function useUnprocessedOrders(options?: { refetchInterval?: () => number | false }) {
   const queryClient = useQueryClient()
   const currentPage = ref(1)
-  const perPage = ref(15)
-  const selectedCompositeIds = ref<string[]>([])
+  // 待生成行已并入「待生产订单」同一张表、不再单独分页，故一次多取以避免漏行。
+  // 正常情况下待生成行≈0（订单秒级自动生成），只有缺 BOM 的会滞留，量很小。
+  const perPage = ref(100)
 
   const { data, isLoading, isFetching, isError } = useQuery({
     queryKey: [UNPROCESSED_QUERY_KEY, () => currentPage.value, () => perPage.value],
@@ -40,12 +41,11 @@ export function useUnprocessedOrders(options?: { refetchInterval?: () => number 
           per_page: perPage.value,
         })) as unknown as UnprocessedOrdersResponse
       } catch (err) {
-        showToast(getErrorMessage(err, '加载待审核订单失败'), 'error')
+        showToast(getErrorMessage(err, '加载待生成订单失败'), 'error')
         throw err
       }
     },
-    // 每次显示都取数：持久化快照 + staleTime 会让刷新/切回本页时沿用旧列表
-    // （已删除的客户订单仍留在「待审核」约 30s）。
+    // 每次显示都取数：持久化快照 + staleTime 会让刷新/切回本页时沿用旧列表。
     staleTime: 0,
     gcTime: 60_000,
     refetchOnMount: 'always',
@@ -104,21 +104,6 @@ export function useUnprocessedOrders(options?: { refetchInterval?: () => number 
     }
   })
 
-  const orderMap = computed(() => {
-    const m = new Map<string, UnprocessedOrder>()
-    for (const o of orders.value) m.set(o.composite_id, o)
-    return m
-  })
-
-  const validSelectedCompositeIds = computed(() =>
-    selectedCompositeIds.value.filter((cid) => {
-      const o = orderMap.value.get(cid)
-      return o && o.has_bom
-    }),
-  )
-
-  const allSelected = computed(() => orders.value.length > 0 && selectedCompositeIds.value.length >= orders.value.length)
-
   function load(page?: number) {
     if (page !== undefined) {
       currentPage.value = page
@@ -127,41 +112,6 @@ export function useUnprocessedOrders(options?: { refetchInterval?: () => number 
       return Promise.resolve()
     }
     return queryClient.invalidateQueries({ queryKey: [UNPROCESSED_QUERY_KEY] })
-  }
-
-  function toggleSelection(compositeId: string) {
-    const idx = selectedCompositeIds.value.indexOf(compositeId)
-    if (idx >= 0) selectedCompositeIds.value.splice(idx, 1)
-    else selectedCompositeIds.value.push(compositeId)
-  }
-
-  function toggleAll(checked: boolean) {
-    if (checked) selectedCompositeIds.value = orders.value.map((o) => o.composite_id)
-    else selectedCompositeIds.value = []
-  }
-
-  function clearSelection() {
-    selectedCompositeIds.value = []
-  }
-
-  async function oneClickGenerate() {
-    if (validSelectedCompositeIds.value.length === 0) throw new Error('请选择至少一个有BOM配置的订单')
-    const res = (await purchaseApi.oneClickGenerate({
-      composite_ids: validSelectedCompositeIds.value,
-    })) as unknown as OneClickGenerateResponse
-    if (res.success) {
-      clearSelection()
-      return res
-    }
-    throw new Error(res.message || '审核失败')
-  }
-
-  async function quickGenerateSingle(compositeId: string) {
-    const order = orders.value.find((o) => o.composite_id === compositeId)
-    if (!order?.has_bom) throw new Error(`订单 ${order?.order_no || ''}无法审核：该产品未配置BOM表`)
-    const res = (await purchaseApi.oneClickGenerate({ composite_ids: [compositeId] })) as unknown as OneClickGenerateResponse
-    if (res.success) return res
-    throw new Error(res.message || '审核失败')
   }
 
   return reactive({
@@ -174,14 +124,6 @@ export function useUnprocessedOrders(options?: { refetchInterval?: () => number 
     currentPage,
     totalPages,
     perPage,
-    selectedCompositeIds,
-    validSelectedCompositeIds,
-    allSelected,
     load,
-    toggleSelection,
-    toggleAll,
-    clearSelection,
-    oneClickGenerate,
-    quickGenerateSingle,
   })
 }

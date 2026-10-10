@@ -444,6 +444,11 @@ async def batch_create_orders(db: AsyncSession, orders_data: list, created_by: s
             await db.rollback()  # manual-tx: try/except 内显式事务控制
             raise InternalError('批量创建订单时数据库异常') from e
 
+    if created_order_ids:
+        # 采购订单自动生成：提交后投递扫描任务（替代采购中心人工「一键审核」）
+        from fastapi_app.services.purchase._auto_generate import schedule_auto_generate_purchase_orders
+        schedule_auto_generate_purchase_orders(db)
+
     return {
         'success': True,
         'created_count': len(created_order_ids),

@@ -30,13 +30,13 @@
 
       <template v-if="activeTab === 'unprocessed'">
         <div v-if="unprocessedLoading" class="m-center"><MSpinner size="lg" /></div>
-        <MEmpty v-else-if="!unprocessed?.orders?.length" title="暂无待审核订单" />
-        <MList v-else :header="`待审核 (${unprocessed.total || 0})`">
+        <MEmpty v-else-if="!unprocessed?.orders?.length" title="暂无待生成订单" subtitle="未配置BOM的订单无法下单" />
+        <MList v-else :header="`待生成 (${unprocessed.total || 0})`">
           <MListItem
             v-for="order in unprocessed.orders"
             :key="order.id"
             :title="`#${order.id} ${order.product_name || ''}`"
-            :subtitle="`${order.quantity || 0}件 · ${order.customer || ''}`"
+            :subtitle="`${order.quantity || 0}件 · ${order.customer || ''}${order.has_bom === false ? ' · 未配置BOM，无法下单' : ''}`"
           >
             <template #icon>
               <div class="m-icon-bg" style="background:var(--m-accent-amber)">
@@ -45,10 +45,6 @@
             </template>
           </MListItem>
         </MList>
-        <button v-if="unprocessed?.orders?.length" class="m-fab" @click="handleOneClick">
-          <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" width="20" height="20"><polyline points="20 6 9 17 4 12" /></svg>
-          一键审核
-        </button>
       </template>
 
       <template v-if="activeTab === 'completed'">
@@ -101,7 +97,7 @@ import MBottomSheet from '@/mobile/components/MBottomSheet.vue'
 const activeTab = ref('orders')
 const tabChips = [
   { label: '采购中', value: 'orders' },
-  { label: '待审核', value: 'unprocessed' },
+  { label: '待生成', value: 'unprocessed' },
   { label: '已完成', value: 'completed' },
 ]
 
@@ -156,18 +152,6 @@ function showOrderDetail(order: PurchaseOrder | UnprocessedOrder) {
   detailVisible.value = true
 }
 
-async function handleOneClick() {
-  // 直接用后端下发的 composite_id（形如 'order:5' / 'stockin:3'），
-  // 不能按 id 现拼：备货来源的行前缀是 stockin 而非 order
-  const ids = (unprocessed.value?.orders ?? []).map((o) => o.composite_id)
-  if (!ids.length) return
-  try {
-    await purchaseApi.oneClickGenerate({ composite_ids: ids })
-    loadUnprocessed()
-    refetchOrders()
-  } catch { /* toast handled by request.ts */ }
-}
-
 function statusColor(s: string | undefined) {
   if (s === 'completed') return 'var(--m-accent-emerald)'
   if (s === 'pending') return 'var(--m-accent-amber)'
@@ -190,8 +174,6 @@ loadCompleted()
 .m-center { display: flex; justify-content: center; padding: 48px 0; }
 .m-icon-bg { width: 100%; height: 100%; border-radius: 8px; display: flex; align-items: center; justify-content: center; }
 .m-status-badge { font-size: 12px; font-weight: 600; }
-.m-fab { position: sticky; bottom: calc(var(--m-tabbar-safe) + 16px); left: 0; right: 0; margin: 16px auto 0; display: flex; align-items: center; justify-content: center; gap: 8px; height: 48px; padding: 0 24px; border: none; border-radius: 24px; background: var(--m-accent); color: white; font-size: 16px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 14px rgba(0,113,227,0.3); font-family: inherit; -webkit-tap-highlight-color: transparent; }
-.m-fab:active { transform: scale(0.95); }
 .m-detail-body { display: flex; flex-direction: column; gap: 12px; }
 .m-detail-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 0.5px solid rgba(0,0,0,0.06); }
 .m-detail-label { font-size: 14px; color: var(--m-text-secondary); }
