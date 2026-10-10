@@ -329,6 +329,17 @@ run_degraded_gate() {
 }
 
 if [ -n "$pc_bin" ]; then
+    # hook 环境缓存放仓内（未被显式设置时）。
+    # 本机 Python 写不了 C:\Users\Administrator\.cache —— ACL 让它拿 EACCES，SQLite 报
+    # "attempt to write a readonly database"，而 pre-commit 的默认 PRE_COMMIT_HOME 正是那里，
+    # 于是第 4 层永远起不来（2026-10-10 实测：普通 PowerShell 与关沙箱后同样复现，非沙箱问题）。
+    # 仓内目录已实测可写；CI/其它机器若已设 PRE_COMMIT_HOME 则尊重原值。
+    if [ -z "${PRE_COMMIT_HOME:-}" ]; then
+        PRE_COMMIT_HOME="$(pwd)/.pre-commit-home"
+    fi
+    export PRE_COMMIT_HOME
+    mkdir -p "$PRE_COMMIT_HOME" 2>/dev/null
+
     # 先捕获输出再回显：需要据此区分「hook 真的失败」与「pre-commit 自身崩了」。
     pc_out="$(PATH="$venv_bin:$PATH" "$pc_bin" run --hook-stage pre-commit --color=never 2>&1)"
     pc_rc=$?

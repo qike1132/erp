@@ -448,3 +448,9 @@ _firefox_profile_*/
 # 故按目录忽略其内容，仅保留 .gitkeep 占位，使该目录在全新克隆中即存在（预检与 README 所指的落位目录）。
 /deploy/binaries/*
 !/deploy/binaries/.gitkeep
+
+# === pre-commit hook 环境缓存（2026-10-10）===
+# 本机 Python 写不了 C:\Users\Administrator\.cache（ACL 拦 EACCES → SQLite "readonly database"），
+# 而那是 pre-commit 的默认 PRE_COMMIT_HOME，导致第 4 层永远跑不起来。
+# 故 .githooks/pre-commit 把 PRE_COMMIT_HOME 默认指到仓内该目录；纯缓存，不入库。
+/.pre-commit-home/
