@@ -26,7 +26,9 @@ vi.mock('primevue/autocomplete', () => ({
             'showEmptyMessage', 'emptySearchMessage', 'pt'],
     emits: ['update:modelValue', 'complete', 'item-select', 'focus'],
     setup(props: Record<string, unknown>, { emit, expose }: { emit: (...a: unknown[]) => void; expose: (o: object) => void }) {
-      expose({ show: showSpy, hide: vi.fn(), $el: null })
+      // 不要暴露 $el：让 Vue 回退到实例自身的 $el，组件才能 querySelector('input')
+      // 把原生 click 监听挂上 —— 这正是被测行为
+      expose({ show: showSpy, hide: vi.fn() })
       return () => h('div', { class: 'ac-stub' }, [
         h('input', {
           class: 'ac-input',
@@ -51,12 +53,12 @@ function mountAc(props: Record<string, unknown>) {
 describe('UiAutocomplete 打开下拉即列全量（listFn）', () => {
   beforeEach(() => showSpy.mockClear())
 
-  it('聚焦且输入为空时调 listFn，并展开面板', async () => {
+  it('点击输入框（空）时调 listFn，并展开面板', async () => {
     const listFn = vi.fn(async () => [...LIST])
     const searchFn = vi.fn(async () => [])
 
     const wrapper = mountAc({ listFn, searchFn })
-    await wrapper.find('.ac-input').trigger('focus')
+    await wrapper.find('.ac-input').trigger('click')
     await flushPromises()
 
     expect(listFn).toHaveBeenCalledTimes(1)
@@ -94,11 +96,11 @@ describe('UiAutocomplete 打开下拉即列全量（listFn）', () => {
     expect(wrapper.findAll('.ac-item')).toHaveLength(2)
   })
 
-  it('没传 listFn 时聚焦什么都不做（其余 6 个页面零影响）', async () => {
+  it('没传 listFn 时点击什么都不做（其余 6 个页面零影响）', async () => {
     const searchFn = vi.fn(async () => [])
 
     const wrapper = mountAc({ searchFn })
-    await wrapper.find('.ac-input').trigger('focus')
+    await wrapper.find('.ac-input').trigger('click')
     await flushPromises()
 
     expect(searchFn).not.toHaveBeenCalled()
@@ -110,14 +112,14 @@ describe('UiAutocomplete 打开下拉即列全量（listFn）', () => {
     const listFn = vi.fn(async () => [])
 
     const wrapper = mountAc({ listFn, emptyText: '请先选择客户' })
-    await wrapper.find('.ac-input').trigger('focus')
+    await wrapper.find('.ac-input').trigger('click')
     await flushPromises()
 
     expect(listFn).toHaveBeenCalledTimes(1)
     expect(showSpy).toHaveBeenCalled()
   })
 
-  it('聚焦时输入框已有值时：仍然列全量，不拿它当关键字搜', async () => {
+  it('点击时输入框已有值时：仍然列全量，不拿它当关键字搜', async () => {
     // 回归：曾经把 props.modelValue 当关键字传给 searchFn —— 于是「选中一个 SKU 之后再点
     // 输入框」会拿那个 SKU 的名字去搜，面板里又出现一条**和输入框一模一样**的条目，
     // 看起来就是「重复了」。点击的语义是「列该客户全部 SKU」，不是「搜当前值」。
@@ -125,7 +127,7 @@ describe('UiAutocomplete 打开下拉即列全量（listFn）', () => {
     const searchFn = vi.fn(async () => [{ id: 1, name: '小熊毛绒玩具 20cm' }])
 
     const wrapper = mountAc({ listFn, searchFn, modelValue: '小熊毛绒玩具 20cm' })
-    await wrapper.find('.ac-input').trigger('focus')
+    await wrapper.find('.ac-input').trigger('click')
     await flushPromises()
 
     expect(searchFn).not.toHaveBeenCalled()

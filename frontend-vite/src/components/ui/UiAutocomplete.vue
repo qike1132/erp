@@ -38,7 +38,7 @@
  *     </template>
  *   </UiAutocomplete>
  */
-import { ref, watch } from 'vue'
+import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import AutoComplete from 'primevue/autocomplete'
 import type { AutoCompleteCompleteEvent } from 'primevue'
 
@@ -143,19 +143,32 @@ function onComplete(event: AutoCompleteCompleteEvent) {
 }
 
 /**
- * 聚焦即拉全量并展开面板。只在调用方提供 listFn 时启用 —— 其余页面聚焦不打任何请求、
- * 也不会弹出一个空下拉。选中后处于抑制态时不展开（suppressAfterSelect 的语义是
- * 「别在编辑已选值时弹面板」）。
+ * 点击输入框 → 列全量并展开面板。只在调用方提供 listFn 时启用 —— 其余页面点输入框
+ * 不打任何请求、也不会弹出一个空下拉。
  *
- * ⚠️ 这里必须传**空关键字**，不能传 modelValue：传 modelValue 会变成"拿已选产品的名字
- * 去搜"，而那个名字当然能搜到它自己 —— 面板里就冒出一条与输入框**一模一样**的条目，
- * 用户看到的是"重复了"（2026-10-10 线上实测的 bug）。点击的语义是"列该客户全部 SKU"。
+ * ⚠️ 刻意挂在输入框的**原生 click** 上，而不是 PrimeVue 的 `focus` 事件：
+ * 选中一项后 PrimeVue 会把焦点交回输入框，`focus` 会**再触发一次** —— 于是刚选完面板
+ * 又被重新打开，用户看到的是「列表没关闭」（2026-10-10 线上实测，`listFn` 被调了两次）。
+ * click 是真实用户手势，选中引起的那次聚焦不会产生 click，天然把两者分开。
+ *
+ * ⚠️ 也不能拿 modelValue 当关键字传给 triggerSearch：那会变成「拿已选产品的名字去搜」，
+ * 而那个名字当然能搜到它自己 —— 面板里冒出一条与输入框**一模一样**的条目（同一个 bug 的
+ * 另一种表现，2026-10-10 首报）。点击的语义是「列该客户全部 SKU」。
  */
-function onFocus() {
+function onInputClick() {
   if (!props.listFn || suppressSearch.value) return
   triggerSearch('')
   acRef.value?.show?.()
 }
+
+/** PrimeVue 不对外暴露内层 input，原生监听只能自己在挂载后挂上、卸载时摘掉 */
+onMounted(() => {
+  acRef.value?.$el?.querySelector('input')?.addEventListener('click', onInputClick)
+})
+
+onBeforeUnmount(() => {
+  acRef.value?.$el?.querySelector('input')?.removeEventListener('click', onInputClick)
+})
 
 function triggerSearch(query: string) {
   const q = query.trim()
@@ -275,7 +288,6 @@ defineExpose({ setSuppressed, focusInput })
     :pt="required ? { pcInputText: { root: { 'aria-required': 'true' } } } : undefined"
     @update:model-value="onInputChange"
     @complete="onComplete"
-    @focus="onFocus"
     @item-select="onItemSelect"
   >
     <template v-if="$slots.option" #option="slotProps">
