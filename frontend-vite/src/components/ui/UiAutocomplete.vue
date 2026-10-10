@@ -146,10 +146,14 @@ function onComplete(event: AutoCompleteCompleteEvent) {
  * 聚焦即拉全量并展开面板。只在调用方提供 listFn 时启用 —— 其余页面聚焦不打任何请求、
  * 也不会弹出一个空下拉。选中后处于抑制态时不展开（suppressAfterSelect 的语义是
  * 「别在编辑已选值时弹面板」）。
+ *
+ * ⚠️ 这里必须传**空关键字**，不能传 modelValue：传 modelValue 会变成"拿已选产品的名字
+ * 去搜"，而那个名字当然能搜到它自己 —— 面板里就冒出一条与输入框**一模一样**的条目，
+ * 用户看到的是"重复了"（2026-10-10 线上实测的 bug）。点击的语义是"列该客户全部 SKU"。
  */
 function onFocus() {
   if (!props.listFn || suppressSearch.value) return
-  triggerSearch(props.modelValue ?? '')
+  triggerSearch('')
   acRef.value?.show?.()
 }
 
