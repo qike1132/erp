@@ -161,7 +161,7 @@ function openImageModal(src: string) {
 
 /* ===== 模态框遮罩 ===== */
 .pd-overlay {
-  position: fixed; inset: 0; z-index: 1050; background: rgba(0,0,0,0.5);
+  position: fixed; inset: 0; z-index: var(--z-page-modal); background: rgba(0,0,0,0.5);
   display: flex; align-items: center; justify-content: center; padding: 16px;
 }
 

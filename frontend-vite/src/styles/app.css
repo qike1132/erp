@@ -112,11 +112,15 @@
   /* Z-Index scale
    * 注意：PrimeVue 自己的浮层走另一套更高的数值 —— main.ts 里 zIndex.modal=2100 /
    * overlay=2000。所以凡是「要盖在 PrimeVue 抽屉/下拉之上」的层级（nested 弹窗、
-   * Toast），都必须超过 2100，否则会被 PrimeVue 的遮罩压住。 */
+   * Toast），都必须超过 2100，否则会被 PrimeVue 的遮罩压住。
+   * --z-page-modal 是项目自定义页面级弹窗（pd-overlay/pim-overlay 家族）的层级，
+   * 刻意低于 PrimeVue（2000+），使 PrimeVue 的下拉/抽屉能盖在其上；从这类弹窗
+   * 内新开的确认框等必须用 --z-*-nested（zLayers.test.ts 锁序）。 */
   --z-dropdown: 10;
   --z-sticky: 20;
   --z-overlay: 30;
   --z-modal: 40;
+  --z-page-modal: 1050;
   --z-overlay-nested: 2200;
   --z-modal-nested: 2210;
   --z-toast: 2300;

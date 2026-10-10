@@ -33,9 +33,17 @@ describe('Z 层级不变量', () => {
     expect(cssToken('z-toast')).toBeGreaterThan(cssToken('z-modal-nested'))
   })
 
-  it('基础层序保持单调：overlay < modal < overlay-nested < modal-nested', () => {
+  it('基础层序保持单调：overlay < modal < page-modal < overlay-nested < modal-nested', () => {
     expect(cssToken('z-overlay')).toBeLessThan(cssToken('z-modal'))
     expect(cssToken('z-modal')).toBeLessThan(cssToken('z-overlay-nested'))
     expect(cssToken('z-overlay-nested')).toBeLessThan(cssToken('z-modal-nested'))
+  })
+
+  it('页面级自定义弹窗层必须低于嵌套弹窗层（否则弹窗内确认框被遮挡）', () => {
+    // BomEditor/ProductEditDialog 等的遮罩 = --z-page-modal(1050)；其内弹出的
+    // UiConfirmDialog 用 --z-*-nested。若 page-modal 漂到 nested 之上，确认框
+    // 又会被压住（2026-10-10 实测的事故形态）。
+    expect(cssToken('z-page-modal')).toBeLessThan(cssToken('z-overlay-nested'))
+    expect(cssToken('z-page-modal')).toBeLessThan(cssToken('z-modal-nested'))
   })
 })

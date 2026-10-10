@@ -205,6 +205,8 @@
     :text="confirmDialog.text"
     :sub="confirmDialog.sub"
     :type="confirmDialog.type"
+    overlay-z-class="z-[var(--z-overlay-nested)]"
+    content-z-class="z-[var(--z-modal-nested)]"
     @confirm="confirmDialog.onConfirm"
     @cancel="confirmDialog.onCancel"
   />
@@ -316,7 +318,7 @@ defineExpose({ open: openBomModal })
 <style scoped>
 /* ===== 模态框遮罩 ===== */
 .pd-overlay {
-  position: fixed; inset: 0; z-index: 1050; background: rgba(0,0,0,0.5);
+  position: fixed; inset: 0; z-index: var(--z-page-modal); background: rgba(0,0,0,0.5);
   display: flex; align-items: center; justify-content: center; padding: 16px;
 }
 

@@ -24,7 +24,7 @@ defineEmits<{ 'update:image': [v: string | null] }>()
 <style>
 /* 前缀 pim-（ImagePreviewModal）：全局样式（Teleport 至 body），避免与 PrintDialog 的 pd-* 冲突 */
 .pim-overlay {
-  position: fixed; inset: 0; z-index: 1050; background: rgba(0,0,0,0.5);
+  position: fixed; inset: 0; z-index: var(--z-page-modal); background: rgba(0,0,0,0.5);
   display: flex; align-items: center; justify-content: center; padding: 16px;
 }
 .pim-modal {
