@@ -58,7 +58,7 @@
                 <td v-if="idx === 0" class="coq-td coq-td-muted" :rowspan="row.skuCount">
                   {{ formatDateTime(row.o.completed_at) }}
                 </td>
-                <!-- 订单号（采购订单 CG…）：订单级事实，整单 rowspan（2026-09-30 新增列） -->
+                <!-- 订单号（采购订单 PO…，2026-10-10 由 CG 统一为 PO）：订单级事实，整单 rowspan（2026-09-30 新增列） -->
                 <td v-if="idx === 0" class="coq-td coq-w-no" :rowspan="row.skuCount">
                   {{ row.o.order_no || '—' }}
                 </td>

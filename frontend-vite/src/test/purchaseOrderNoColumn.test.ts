@@ -5,8 +5,8 @@
  * （「已完成」的导出里其实已有「订单号」，只有屏上落后）。
  * 现按变体 A 统一叫「订单号」，置于时间列之后（与该页导出的列序一致）。
  *
- * 三个页签的单号含义不同——待处理是客户订单（PO），进行中/已完成是采购订单（CG），
- * 故本文件的数据故意用各自真实的单号前缀。
+ * 三个页签的单号含义不同——待处理是客户订单（PO），进行中/已完成是采购订单
+ * （2026-10-10 起也统一为 PO；此前为 CG）。故本文件的数据用各自真实的前缀。
  */
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
@@ -62,7 +62,7 @@ const unprocessedRow = {
 
 const activeRow = {
   id: 2,
-  order_no: 'CG-20260928-0001',
+  order_no: 'PO-20260928-0001',
   create_time: '2026-09-28T10:00:00',
   customer_name: 'MINISO国内',
   product_name: 'X',
@@ -73,7 +73,7 @@ const activeRow = {
 
 const completedRow2Sku = {
   id: 3,
-  order_no: 'CG-20260928-0002',
+  order_no: 'PO-20260928-0002',
   completed_at: '2026-09-28T17:20:00',
   customer_name: 'MINISO国内',
   sku_items: [
@@ -105,7 +105,7 @@ describe('采购中心 · 进行中面板', () => {
   })
 
   it('行内渲染采购订单号', () => {
-    expect(mountActive([activeRow]).text()).toContain('CG-20260928-0001')
+    expect(mountActive([activeRow]).text()).toContain('PO-20260928-0001')
   })
 
   it('类型列按来源显示：有来源客户订单 → 订单；无 → 备货', () => {
@@ -122,7 +122,7 @@ describe('采购中心 · 已完成面板', () => {
   })
 
   it('行内渲染采购订单号', () => {
-    expect(mountCompleted([completedRow2Sku]).text()).toContain('CG-20260928-0002')
+    expect(mountCompleted([completedRow2Sku]).text()).toContain('PO-20260928-0002')
   })
 
   it('多 SKU：订单号是订单级单元格（rowspan 覆盖整单），不在每个 SKU 行重复', () => {
@@ -134,13 +134,13 @@ describe('采购中心 · 已完成面板', () => {
     // 首行：每列都有格；订单号格带 rowspan=2
     const first = rows[0]!.findAll('td')
     expect(first.length).toBe(headers)
-    const noCell = first.find((td) => td.text().includes('CG-20260928-0002'))
+    const noCell = first.find((td) => td.text().includes('PO-20260928-0002'))
     expect(noCell, '首行应含订单号单元格').toBeTruthy()
     expect(noCell!.attributes('rowspan')).toBe('2')
 
     // 第 2 行：订单级格（完成时间/订单号/客户/操作 = 4 个）由 rowspan 覆盖，只剩 产品/数量
     const second = rows[1]!.findAll('td')
     expect(second.length).toBe(headers - 4)
-    expect(rows[1]!.text()).not.toContain('CG-20260928-0002')
+    expect(rows[1]!.text()).not.toContain('PO-20260928-0002')
   })
 })

@@ -99,7 +99,7 @@ async def test_behind_reported(db):
     ])
     await db.flush()
     report = await compute_audit(db)
-    po = next(r for r in report['prefixes'] if r['prefix'] == 'PO')
+    po = next(r for r in report['prefixes'] if r['prefix'] == 'PO' and r['table'] == 'order')
     assert po['data_max'] == 7
     assert po['counter'] == 3
     assert po['counter_behind'] is True
@@ -115,7 +115,7 @@ async def test_ahead_is_not_reported(db):
     ])
     await db.flush()
     report = await compute_audit(db)
-    po = next(r for r in report['prefixes'] if r['prefix'] == 'PO')
+    po = next(r for r in report['prefixes'] if r['prefix'] == 'PO' and r['table'] == 'order')
     assert po['data_max'] == 1
     assert po['counter'] == 45
     assert po['counter_behind'] is False
@@ -146,7 +146,7 @@ async def test_missing_counter_row_is_not_behind(db):
                  order_date=datetime.now(UTC)))
     await db.flush()
     report = await compute_audit(db)
-    po = next(r for r in report['prefixes'] if r['prefix'] == 'PO')
+    po = next(r for r in report['prefixes'] if r['prefix'] == 'PO' and r['table'] == 'order')
     assert po['data_max'] == 9
     assert po['counter'] is None
     assert po['counter_behind'] is False

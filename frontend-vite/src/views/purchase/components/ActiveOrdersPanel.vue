@@ -119,7 +119,7 @@
                     <span class="pc-order-date">{{ formatDate(o.create_time || o.order_date) }}</span>
                   </div>
                 </td>
-                <!-- 订单号（采购订单 CG…）：2026-09-30 新增列 -->
+                <!-- 订单号（采购订单 PO…，2026-10-10 由 CG 统一为 PO）：2026-09-30 新增列 -->
                 <td class="pc-td-nowrap"><span class="pc-order-no">{{ o.order_no || '-' }}</span></td>
                 <td class="pc-td-truncate pc-customer-cell" style="max-width:120px">{{ o.customer_name || '-' }}</td>
                 <td class="pc-barcode-cell">

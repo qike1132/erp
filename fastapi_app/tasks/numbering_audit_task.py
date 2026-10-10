@@ -64,7 +64,7 @@ async def _audit_entity(
     )).scalar() or 0)
     violation = {'table': table, 'column': column, 'count': bad} if bad else None
     return (
-        {'prefix': prefix, 'data_max': data_max, 'counter': counter, 'counter_behind': behind},
+        {'prefix': prefix, 'table': table, 'data_max': data_max, 'counter': counter, 'counter_behind': behind},
         violation,
     )
 
@@ -95,8 +95,10 @@ async def numbering_audit_task(ctx) -> dict:
         db.add_all([
             NumberingAudit(
                 scope=p['prefix'],
+                # 表名进 detail：2026-10-10 起 order 与 purchase_order 共用 'PO' 前缀，
+                # 两行 scope 相同，靠 detail 区分（见 migrations pg_standalone_089）。
                 counter_behind=1 if p['counter_behind'] else 0,
-                detail=f"data_max={p['data_max']} counter={p['counter']}",
+                detail=f"{p['table']} data_max={p['data_max']} counter={p['counter']}",
                 checked_at=now,
             )
             for p in report['prefixes']

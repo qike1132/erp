@@ -23,7 +23,9 @@ logger = logging.getLogger(__name__)
 # 表名/列名均为本白名单常量，SQL 文本拼接无用户输入（值仍走绑定参数）。
 NUMBERED_ENTITIES = [
     ('PO', 'order', 'order_no'),
-    ('CG', 'purchase_order', 'order_no'),
+    # 采购单 2026-10-10 起与客户订单共用 'PO' 前缀（迁移 pg_standalone_089）。
+    # 两条同前缀、不同表：各自 upsert 到同一 (PO, date) 键，GREATEST 取两者最大值。
+    ('PO', 'purchase_order', 'order_no'),
     ('BH', 'stock_in', 'stockin_no'),
     ('SO', 'stock_out', 'stockout_no'),
     ('CSO', 'case_movement', 'movement_no'),

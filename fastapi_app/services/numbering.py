@@ -138,8 +138,14 @@ async def generate_case_stockin_number(db: AsyncSession) -> str:
 
 
 async def generate_purchase_order_number(db: AsyncSession) -> str:
-    """生成采购订单编号 CG-YYYYMMDD-XXXX"""
-    return await generate_number_async('CG', PurchaseOrder, 'order_no', db)
+    """生成采购订单编号 PO-YYYYMMDD-XXXX。
+
+    与客户订单（``generate_order_number``）共用 ``PO`` 前缀 ⇒ 共用
+    ``numbering_counter`` 的 ``(PO, 日期)`` 水位，故两类单据不会重号；代价是
+    同一字符串可能同时存在于 ``order`` 与 ``purchase_order``（靠来源/类型区分）。
+    2026-10-10 由 ``CG`` 统一为 ``PO``，见迁移 ``pg_standalone_089_po_prefix_unify``。
+    """
+    return await generate_number_async('PO', PurchaseOrder, 'order_no', db)
 
 
 async def generate_customer_sampling_number(db: AsyncSession) -> str:
