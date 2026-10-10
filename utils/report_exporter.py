@@ -195,7 +195,7 @@ class ReportExporter:
         ws = wb.active
         ws.title = '库存汇总'
 
-        headers = ['客户', '产品名称', '订单数量', '备货数量', '总库存']
+        headers = ['客户', '产品名称', '订单数量', '备货数量', '总订单', '库存']
 
         self._write_inventory_sheet(ws, headers, inventory_data)
 
@@ -215,6 +215,7 @@ class ReportExporter:
                 item.get('customer', ''), item.get('product_name', ''),
                 item.get('order_quantity', 0),
                 item.get('stockin_quantity', 0), item.get('total_stock', 0),
+                item.get('inventory_balance', 0),
             ]
 
             for col_idx, value in enumerate(row_data, 1):
@@ -231,7 +232,7 @@ class ReportExporter:
             col_letter = chr(64 + col_idx) if col_idx <= 26 else chr(64 + (col_idx - 1) // 26) + chr(65 + (col_idx - 1) % 26)
             if col_idx == 2:  # B列 产品名称
                 ws.column_dimensions[col_letter].width = 75
-            elif headers[col_idx - 1] in ('备货数量', '总库存', '订单数量'):
+            elif headers[col_idx - 1] in ('备货数量', '总订单', '订单数量', '库存'):
                 ws.column_dimensions[col_letter].width = 12.5
             else:
                 ws.column_dimensions[col_letter].width = 18
@@ -243,7 +244,8 @@ class ReportExporter:
             log.get('product_name', ''),
             log.get('order_quantity', 0),
             log.get('stockin_quantity', 0),
-            log.get('total_stock', 0)
+            log.get('total_stock', 0),
+            log.get('inventory_balance', 0),
         ]
 
     def _write_sheet(self, ws, headers: list[str], logs: list[dict], row_formatter):

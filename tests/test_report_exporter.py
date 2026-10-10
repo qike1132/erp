@@ -93,3 +93,52 @@ class TestExportSmoke:
         assert generate_filename('return') == '退货流水.xlsx'
         assert generate_filename('order') == '订单流水.xlsx'
         assert generate_filename('nope') == '报表.xlsx'
+
+
+def _inventory_row(**over) -> dict:
+    """构造一行库存汇总数据（字段名对齐 stock_inventory_service._format_inventory_rows）"""
+    row = {
+        'customer': '测试客户',
+        'product_name': '测试产品',
+        'order_quantity': 12,
+        'stockin_quantity': 5,
+        'total_stock': 17,
+        'inventory_balance': 8,
+    }
+    row.update(over)
+    return row
+
+
+def _row_values(ws, row: int, ncols: int) -> list:
+    """读回整行原始值（不把 0 归一成空串——数值 0 / 负数要能断言）"""
+    return [ws.cell(row=row, column=c).value for c in range(1, ncols + 1)]
+
+
+_INVENTORY_HEADERS = ['客户', '产品名称', '订单数量', '备货数量', '总订单', '库存']
+
+
+class TestInventoryExport:
+    """库存汇总导出：表头与行须与 /stock 页表格 6 列同口径。
+
+    历史缺陷（2026-10-10）：导出只有 5 列，第 5 列表头误写成「总库存」
+    （应为「总订单」），且整列漏掉了「库存」。本测试锁定正确口径。
+    """
+
+    def test_headers_and_row_match_stock_page_columns(self):
+        data = ReportExporter().export_inventory_data([_inventory_row()], {'total_count': 1})
+        ws = load_workbook(io.BytesIO(data)).active
+
+        assert ws.title == '库存汇总'
+        assert [c.value for c in ws[1]] == _INVENTORY_HEADERS
+        assert _row_values(ws, 2, 6) == ['测试客户', '测试产品', 12, 5, 17, 8]
+
+    def test_inventory_balance_keeps_zero_and_negative(self):
+        """库存列 0 与负数原样输出（表格口径），不能变成空值"""
+        data = ReportExporter().export_inventory_data(
+            [_inventory_row(inventory_balance=0),
+             _inventory_row(product_name='负结余', inventory_balance=-2500)],
+            {'total_count': 2})
+        ws = load_workbook(io.BytesIO(data)).active
+
+        assert ws.cell(row=2, column=6).value == 0
+        assert ws.cell(row=3, column=6).value == -2500
