@@ -366,7 +366,12 @@ if [ -n "$pc_bin" ]; then
     # 于是第 4 层永远起不来（2026-10-10 实测：普通 PowerShell 与关沙箱后同样复现，非沙箱问题）。
     # 仓内目录已实测可写；CI/其它机器若已设 PRE_COMMIT_HOME 则尊重原值。
     if [ -z "${PRE_COMMIT_HOME:-}" ]; then
-        PRE_COMMIT_HOME="$(pwd)/.pre-commit-home"
+        # 必须用 Windows 形态路径（$repo_root 来自 git rev-parse，形如 D:/erp_system）。
+        # pre-commit 是 Windows 进程：`$(pwd)` 的 POSIX 形态（/d/erp_system）会被它当成
+        # 「当前盘符下的相对路径」→ D:\d\erp_system\… → makedirs 在 D:\d 处 PermissionError。
+        # 平时靠 MSYS 对子进程环境变量的自动路径转换兜住，但 MSYS_NO_PATHCONV=1 下不转换，
+        # pre-commit 直接起不来（2026-10-10 实测）。用 $repo_root 则与 MSYS 设置无关。
+        PRE_COMMIT_HOME="$repo_root/.pre-commit-home"
     fi
     export PRE_COMMIT_HOME
     mkdir -p "$PRE_COMMIT_HOME" 2>/dev/null
