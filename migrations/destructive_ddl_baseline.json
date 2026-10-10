@@ -542,6 +542,11 @@
       "execute:DROP FUNCTION IF EXISTS fill_inventory_log_product_name()",
       "execute:DROP TRIGGER IF EXISTS fill_inventory_log_product_name ON inventory_log"
     ],
+    "migrations/versions/pg_standalone_088_product_role_private_p1.py": [
+      "execute:ALTER TABLE product_role ALTER COLUMN global_role_id DROP NOT NULL",
+      "execute:ALTER TABLE product_role DROP CONSTRAINT IF EXISTS uq_product_role_product_globa",
+      "execute:DROP INDEX IF EXISTS uq_product_role_product_name_lower"
+    ],
     "migrations/versions/rebuild_po_dedup_index.py": [
       "execute:DROP INDEX IF EXISTS uq_po_pending_dedup"
     ],

@@ -2392,35 +2392,20 @@ export interface RoleBrief {
   version?: number
 }
 
-export interface RoleCreate {
-  name: string
-}
-
 export interface RoleCreateRequest {
   role_name: string
 }
 
-export interface RoleDeleteResponse {
-  success?: boolean
-  message?: string
-}
-
 export interface RoleItem {
   id?: number | null
-  global_role_id?: number | null
   role_key?: string | null
   role_name?: string
   name?: string | null
 }
 
-export interface RoleItemDTO {
-  id: number
-  global_role_id?: number | null
-  name: string
-}
-
-export interface RoleRename {
-  name: string
+export interface RoleListResponse {
+  success?: boolean
+  items?: Array<RoleBrief>
 }
 
 export interface RoleUpdateRequest {
@@ -3190,11 +3175,6 @@ export interface customer_sampling_ActionResponse {
   thumbnail_url?: string | null
 }
 
-export interface customer_sampling_RoleListResponse {
-  success?: boolean
-  items?: Array<RoleBrief>
-}
-
 export interface daily_production_TrendResponse {
   success?: boolean
   start_date?: string
@@ -3264,11 +3244,6 @@ export interface purchase_center_ProductListResponse {
   total?: number
   pages?: number
   current_page?: number
-}
-
-export interface purchase_center_RoleListResponse {
-  success?: boolean
-  roles?: Array<RoleItemDTO>
 }
 
 export interface purchase_plan_BarcodeValidationResponse {

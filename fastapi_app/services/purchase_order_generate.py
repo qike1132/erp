@@ -277,18 +277,16 @@ async def _load_bom_context(db: AsyncSession, product_ids: list[int]) -> _BomCon
     )
     ctx.accessory = _bom_rows_by_scope(acc_result.scalars().all())
 
-    from fastapi_app.shared_models import ProductRole, Role
+    from fastapi_app.shared_models import ProductRole
 
-    # 展示名优先取全局角色名（§7#10），缺失回退镜像列 role_name：迁移回填完成前
-    # global_role_id 可能为 NULL，故用外连接而非内连接，避免角色整行丢失。
+    # 角色为产品私有（迁移 088/089）：直接取本行 role_name，不再关联全局角色字典。
     role_result = await db.execute(
-        select(ProductRole.id, ProductRole.product_id, ProductRole.role_name, Role.name)
-        .join(Role, ProductRole.global_role_id == Role.id, isouter=True)
+        select(ProductRole.id, ProductRole.product_id, ProductRole.role_name)
         .where(ProductRole.product_id.in_(product_ids))
     )
     role_ids_by_pid: dict[int, set[int]] = defaultdict(set)
-    for rid, rpid, rname, gname in role_result.all():
-        ctx.role_names[(rpid, rid)] = gname or rname or ''
+    for rid, rpid, rname in role_result.all():
+        ctx.role_names[(rpid, rid)] = rname or ''
         role_ids_by_pid[rpid].add(rid)
 
     for pid in product_ids:
@@ -441,6 +439,44 @@ async def generate_purchase_orders_from_customer_orders(
         'message': f'成功生成 {len(generated_orders)} 个采购订单',
         'created_count': len(generated_orders),
         'orders': generated_orders,
+    }
+
+
+async def auto_generate_purchase_orders(db: AsyncSession) -> dict:
+    """自动生成采购订单（替代人工「一键审核」）。
+
+    扫描全部「可生成」候选（未处理、未被采购单关联、且全部 SKU 有 BOM，见
+    ``services.purchase._unprocessed.list_auto_generate_candidates``），按客户分组，
+    逐组调用 ``generate_purchase_orders_from_customer_orders``（生成逻辑一行不改）。
+
+    单组失败被隔离，不影响其它组；缺 BOM 的单自然不在候选内，等 BOM 配好后由下一次
+    扫描重新纳入。调用方负责事务提交与缓存失效。
+
+    Returns:
+        dict: ``{'success', 'generated_count', 'customer_count'}``。
+    """
+    from fastapi_app.services.purchase._unprocessed import list_auto_generate_candidates
+
+    candidates = await list_auto_generate_candidates(db)
+    if not candidates:
+        return {'success': True, 'generated_count': 0, 'customer_count': 0}
+
+    # 1 客户 = 1 采购单：同客户的多条来源合并到一次调用，保持与人工审核相同的口径。
+    groups: dict[str, list[str]] = defaultdict(list)
+    for cand in candidates:
+        groups[cand['customer']].append(cand['composite_id'])
+
+    generated_count = 0
+    for customer, composite_ids in groups.items():
+        try:
+            result = await generate_purchase_orders_from_customer_orders(db, composite_ids)
+            generated_count += int(result.get('created_count') or 0)
+        except Exception:  # broad-except: 单组失败隔离，其余组继续（兜底任务会重试）
+            logger.exception('采购订单自动生成失败（客户=%s，来源=%s）', customer, composite_ids)
+    return {
+        'success': True,
+        'generated_count': generated_count,
+        'customer_count': len(groups),
     }
 
 

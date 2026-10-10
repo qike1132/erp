@@ -114,13 +114,6 @@
                   @blur="commitAddRole"
                 />
                 <button v-else class="bom-role-add-btn" @click="startAddRole"><FontAwesomeIcon icon="plus" aria-hidden="true" />添加角色</button>
-                <!-- 全局角色入口：选择已有角色并关联到当前产品（不复制记录，A-1） -->
-                <BomRolePicker
-                  :associated-global-ids="associatedGlobalIds"
-                  @associate="onRoleAssociate"
-                  @renamed="onRoleRenamed"
-                  @deleted="onRoleDeleted"
-                />
               </div>
               <!-- P1-04：顶部常驻当前作用域徽标，避免误在别的角色作用域下编辑 -->
               <span class="bom-scope-badge" title="当前编辑作用域">
@@ -213,14 +206,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { nextTick, ref } from 'vue'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
-import { showToast } from '@/composables/useToast'
 import { useProductListActions } from '../composables/useProductListActions'
 import type { Role } from '../composables/bomTypes'
 import BomCopyDialog from './BomCopyDialog.vue'
-import BomRolePicker from './BomRolePicker.vue'
 import BomSupplierSelect from './BomSupplierSelect.vue'
 
 const confirmDialog = useConfirmDialog()
@@ -231,7 +222,6 @@ const {
   switchBomTab, openBomModal, addBomItem, deleteBomItem, saveBom,
   bomSupplierOptions,
   bomRoles, selectedRole, defaultScopeName, defaultScopeHasItems, selectRole, addRole, renameRole, renameDefaultScope, removeRole,
-  associateGlobalRole, applyGlobalRename, applyGlobalDeleted,
   quickCopyKeyword, quickCopyLoading,
   quickCopyProgress,
   searchProductsForBom, selectAutocompleteItem, quickCopyBom,
@@ -239,27 +229,6 @@ const {
   copyBomSourceProductId, copyBomPreview, copyBomOverwrite, copyBomProgress,
   searchProductForCopy, selectCopyBomProduct, confirmCopyBom,
 } = useProductListActions(confirmDialog)
-
-// ===== 全局角色入口（关联已有角色）：已关联的 global_role_id 集合，供选择器置灰 =====
-const associatedGlobalIds = computed<number[]>(() =>
-  bomRoles.value
-    .map(role => role.global_role_id)
-    .filter((id): id is number => id != null),
-)
-
-function onRoleAssociate(globalRole: { id: number; name: string }) {
-  const created = associateGlobalRole(globalRole)
-  if (created) showToast(`已关联角色「${globalRole.name}」`, 'success')
-  else showToast(`角色「${globalRole.name}」已关联`, 'info')
-}
-
-function onRoleRenamed(payload: { id: number; name: string }) {
-  applyGlobalRename(payload.id, payload.name)
-}
-
-function onRoleDeleted(globalRoleId: number) {
-  applyGlobalDeleted(globalRoleId)
-}
 
 // ===== 角色页签管理：⋯ 菜单 + 内联重命名 =====
 type TabKey = Role | 'default'

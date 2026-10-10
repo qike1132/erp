@@ -39,20 +39,12 @@ def _mat(category, name, usage, *, role_id=None, supplier='', spec='', unit='', 
     }
 
 
-class _FakeGlobalRole:
-    """全局角色替身（仅需 ``name``）。"""
-
-    def __init__(self, name):
-        self.name = name
-
-
 class _FakeProductRole:
-    """``ProductRole`` 替身（``_collect_role_names`` 需 ``id``/``role_name``/``global_role``）。"""
+    """``ProductRole`` 替身（角色产品私有：``_collect_role_names`` 只需 ``id`` / ``role_name``）。"""
 
-    def __init__(self, rid, *, global_name=None, mirror_name=''):
+    def __init__(self, rid, *, role_name=''):
         self.id = rid
-        self.role_name = mirror_name
-        self.global_role = _FakeGlobalRole(global_name) if global_name is not None else None
+        self.role_name = role_name
 
 
 class _FakeProduct:
@@ -233,7 +225,7 @@ class TestCalculateMaterialContract:
         product = _FakeProduct(1, '公仔', [
             _mat('fabric', '默认布', 1.0, role_id=None, supplier='S', spec='x', unit='米'),
             _mat('fabric', '乙布', 2.0, role_id=4, supplier='S', spec='x', unit='米'),
-        ], roles=[_FakeProductRole(4, global_name='乙')])
+        ], roles=[_FakeProductRole(4, role_name='乙')])
 
         result = await calculate_material(_mock_db([product]), [{'product_id': 1, 'quantity': 1}])
 
@@ -247,7 +239,7 @@ class TestCalculateMaterialContract:
         assert first['role_name'] == '默认BOM'
         assert first['product_id'] == 1
         assert first['product_name'] == '公仔'
-        # 角色块名取自全局角色名
+        # 角色块名取自本产品角色名
         role_block = next(g for g in result['groups'] if g['role_id'] == 4)
         assert role_block['role_name'] == '乙'
 

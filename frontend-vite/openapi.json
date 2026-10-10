@@ -701,166 +701,6 @@
         }
       }
     },
-    "/api/v1/purchase-center/roles": {
-      "get": {
-        "tags": [
-          "采购中心"
-        ],
-        "summary": "Api List Roles",
-        "description": "列出全部全局角色（跨产品复用字典）。",
-        "operationId": "api_list_roles_api_v1_purchase_center_roles_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/fastapi_app__schemas__purchase_center__RoleListResponse"
-                }
-              }
-            }
-          }
-        }
-      },
-      "post": {
-        "tags": [
-          "采购中心"
-        ],
-        "summary": "Api Create Role",
-        "description": "新建全局角色；名称冲突返回 400。",
-        "operationId": "api_create_role_api_v1_purchase_center_roles_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RoleCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "type": "object",
-                  "title": "Response Api Create Role Api V1 Purchase Center Roles Post"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/purchase-center/roles/{role_id}": {
-      "put": {
-        "tags": [
-          "采购中心"
-        ],
-        "summary": "Api Rename Role",
-        "description": "重命名全局角色；改名同步镜像列、不改物料归属（按 id）；冲突 400 / 不存在 404。",
-        "operationId": "api_rename_role_api_v1_purchase_center_roles__role_id__put",
-        "parameters": [
-          {
-            "name": "role_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Role Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RoleRename"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Api Rename Role Api V1 Purchase Center Roles  Role Id  Put"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "采购中心"
-        ],
-        "summary": "Api Delete Role",
-        "description": "删除全局角色；被任意产品引用时返回 409 且文案含引用数。",
-        "operationId": "api_delete_role_api_v1_purchase_center_roles__role_id__delete",
-        "parameters": [
-          {
-            "name": "role_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Role Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RoleDeleteResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/v1/purchase-center/customers": {
       "get": {
         "tags": [
@@ -19626,7 +19466,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/fastapi_app__schemas__customer_sampling__RoleListResponse"
+                  "$ref": "#/components/schemas/RoleListResponse"
                 }
               }
             }
@@ -26953,7 +26793,7 @@
           "product_id"
         ],
         "title": "MaterialCalcScopeGroup",
-        "description": "按「产品 × 作用域(角色)」分块的物料计算结果。\n\n``role_id is None`` 表示产品级默认 BOM，**恒为首块**；``role_name`` 取自全局\n角色名，缺失退化为 ``角色#<id>``（REQ-P0-05）。"
+        "description": "按「产品 × 作用域(角色)」分块的物料计算结果。\n\n``role_id is None`` 表示产品级默认 BOM，**恒为首块**；``role_name`` 取本产品角色名，\n缺失退化为 ``角色#<id>``（REQ-P0-05）。"
       },
       "MaterialCalculateResponse": {
         "properties": {
@@ -33104,23 +32944,6 @@
         "title": "RoleBrief",
         "description": "角色简要信息（列表展示）"
       },
-      "RoleCreate": {
-        "properties": {
-          "name": {
-            "type": "string",
-            "maxLength": 100,
-            "minLength": 1,
-            "title": "Name",
-            "description": "角色名（trim 后存储）"
-          }
-        },
-        "type": "object",
-        "required": [
-          "name"
-        ],
-        "title": "RoleCreate",
-        "description": "新建全局角色请求。"
-      },
       "RoleCreateRequest": {
         "properties": {
           "role_name": {
@@ -33138,22 +32961,6 @@
         "title": "RoleCreateRequest",
         "description": "新增角色请求"
       },
-      "RoleDeleteResponse": {
-        "properties": {
-          "success": {
-            "type": "boolean",
-            "title": "Success",
-            "default": true
-          },
-          "message": {
-            "type": "string",
-            "title": "Message",
-            "default": ""
-          }
-        },
-        "type": "object",
-        "title": "RoleDeleteResponse"
-      },
       "RoleItem": {
         "properties": {
           "id": {
@@ -33166,17 +32973,6 @@
               }
             ],
             "title": "Id"
-          },
-          "global_role_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Global Role Id"
           },
           "role_key": {
             "anyOf": [
@@ -33209,54 +33005,26 @@
         "additionalProperties": true,
         "type": "object",
         "title": "RoleItem",
-        "description": "BOM 角色明细（ProductRole）。\n\n支持三种入参：``global_role_id``（关联已有全局角色）/ ``role_key``（新建全局角色，\n客户端临时键）/ ``id``（既有产品角色关联行）。允许额外字段以兼容前端扩展字段。"
+        "description": "BOM 角色明细（ProductRole，**产品私有**）。\n\n支持两种入参：``role_key``（新建角色，客户端临时键）/ ``id``（既有产品角色行）；\n仅带名称时后端按 ``lower(trim(name))`` 在本产品内同名复用。允许额外字段以兼容前端扩展字段。"
       },
-      "RoleItemDTO": {
+      "RoleListResponse": {
         "properties": {
-          "id": {
-            "type": "integer",
-            "title": "Id"
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "default": true
           },
-          "global_role_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Global Role Id"
-          },
-          "name": {
-            "type": "string",
-            "title": "Name"
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RoleBrief"
+            },
+            "type": "array",
+            "title": "Items"
           }
         },
         "type": "object",
-        "required": [
-          "id",
-          "name"
-        ],
-        "title": "RoleItemDTO",
-        "description": "角色项投影：``id`` = role.id；``global_role_id`` 供 get_bom 角色投影复用。"
-      },
-      "RoleRename": {
-        "properties": {
-          "name": {
-            "type": "string",
-            "maxLength": 100,
-            "minLength": 1,
-            "title": "Name",
-            "description": "新角色名（trim 后存储）"
-          }
-        },
-        "type": "object",
-        "required": [
-          "name"
-        ],
-        "title": "RoleRename",
-        "description": "重命名全局角色请求。"
+        "title": "RoleListResponse",
+        "description": "角色列表响应"
       },
       "RoleUpdateRequest": {
         "properties": {
@@ -37382,25 +37150,6 @@
         "title": "ActionResponse",
         "description": "操作响应（创建/更新/删除）\n\nversion 字段：带乐观锁的更新操作（部位/角色/项目）返回更新后的新版本号，\n供前端局部回写，避免第二次编辑携带旧 version 触发 409。"
       },
-      "fastapi_app__schemas__customer_sampling__RoleListResponse": {
-        "properties": {
-          "success": {
-            "type": "boolean",
-            "title": "Success",
-            "default": true
-          },
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/RoleBrief"
-            },
-            "type": "array",
-            "title": "Items"
-          }
-        },
-        "type": "object",
-        "title": "RoleListResponse",
-        "description": "角色列表响应"
-      },
       "fastapi_app__schemas__daily_production__TrendResponse": {
         "properties": {
           "success": {
@@ -37727,25 +37476,6 @@
         },
         "type": "object",
         "title": "ProductListResponse"
-      },
-      "fastapi_app__schemas__purchase_center__RoleListResponse": {
-        "properties": {
-          "success": {
-            "type": "boolean",
-            "title": "Success",
-            "default": true
-          },
-          "roles": {
-            "items": {
-              "$ref": "#/components/schemas/RoleItemDTO"
-            },
-            "type": "array",
-            "title": "Roles",
-            "default": []
-          }
-        },
-        "type": "object",
-        "title": "RoleListResponse"
       },
       "fastapi_app__schemas__purchase_plan__BarcodeValidationResponse": {
         "properties": {

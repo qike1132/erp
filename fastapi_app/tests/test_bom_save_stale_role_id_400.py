@@ -132,6 +132,5 @@ async def test_stale_role_id_returns_400_end_to_end(_real_session_engine):
             )
             created = (await session.execute(select(ProductRole))).scalars().all()
             assert [r.role_name for r in created] == ['端点回归角色']
-            assert created[0].global_role_id is not None
     finally:
         app.dependency_overrides.pop(get_async_db, None)

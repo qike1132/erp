@@ -21,11 +21,6 @@ vi.mock('@/api', () => ({
   supplierApi: { options: vi.fn().mockResolvedValue({ suppliers: [] }) },
 }))
 
-vi.mock('@/api/role', () => ({
-  roleApi: { rename: vi.fn(), list: vi.fn().mockResolvedValue({ roles: [] }) },
-  RoleApiError: class RoleApiError extends Error {},
-}))
-
 import BomEditor from '@/views/product/components/BomEditor.vue'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 
@@ -35,7 +30,6 @@ function mountEditor() {
       stubs: {
         UiAutocomplete: true,
         BomCopyDialog: true,
-        BomRolePicker: true,
         BomSupplierSelect: true,
         FontAwesomeIcon: true,
       },

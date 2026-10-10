@@ -3,15 +3,10 @@
 /** BOM 物料类别 */
 export type BomCategory = 'fabric' | 'filling' | 'accessory'
 
-/** BOM 角色（一个 SKU 可关联多个角色，每个角色有独立物料清单） */
+/** BOM 角色（一个 SKU 可关联多个角色，每个角色有独立物料清单；角色为**产品私有**） */
 export interface Role {
   /** 后端角色 id（新建角色在保存前无 id） */
   id?: number
-  /**
-   * 关联的**全局角色** id（`role.id`）。设置后保存走 `global_role_id` 路径，
-   * 仅建立产品关联行、**不复制**全局角色记录；两产品引用同一角色 ⇒ 同一 id（A-1）。
-   */
-  global_role_id?: number | null
   /** 新建角色的客户端临时键，保存时经 role_key 归位物料 */
   role_key?: string
   name: string
@@ -92,39 +87,25 @@ export function resolveCopyTargetRole(selectedRole: Role | null): CopyTargetRole
   return { ok: true, roleId: null, roleName }
 }
 
-/**
- * 在已关联角色中按 `global_role_id` 查找（关联同一全局角色去重，A-1）。
- *
- * @param roles 当前产品的角色列表
- * @param globalRoleId 目标全局角色 id
- * @returns 命中的角色；未关联时返回 `undefined`
- */
-export function findRoleByGlobalId(roles: Role[], globalRoleId: number): Role | undefined {
-  return roles.find(role => role.global_role_id === globalRoleId)
-}
-
 /** `save_bom` 的单个角色负载项。 */
 export interface RolePayloadItem {
   /** 既有产品角色关联行 id（改名 / 保持）。 */
   id?: number
-  /** 关联已有全局角色（不复制记录）。 */
-  global_role_id?: number
-  /** 新建全局角色（客户端临时键）。 */
+  /** 新建角色（客户端临时键）。 */
   role_key?: string
-  /** 展示名（全局角色名 / 新建名）。 */
+  /** 角色名（产品私有）。 */
   role_name: string
   /** 兼容字段：与 `role_name` 同值，供后端 `role_name || name` 兜底解析。 */
   name?: string
 }
 
 /**
- * 构造 `save_bom` 的角色负载，明确三条互斥路径（§7#1 / REQ-P0-10）：
+ * 构造 `save_bom` 的角色负载，两条互斥路径：
  *
- * - 有 `id` → `{ id, role_name }`（既有产品关联行，按 id 保持物料归属，A-13）；
- * - 有 `global_role_id` → `{ global_role_id, role_name, name }`（关联已有全局角色）；
- * - 否则 → `{ role_key, role_name }`（新建全局角色，后端按名 find-or-create）。
+ * - 有 `id` → `{ id, role_name }`（既有产品角色行，按 id 保持物料归属，A-13）；
+ * - 否则 → `{ role_key, role_name }`（新建角色，后端按名在本产品内复用/新建）。
  *
- * 纯函数，便于单测直接断言 A-1（两产品引用同一角色 ⇒ 同一 global_role_id）。
+ * 纯函数，便于单测直接断言路径。
  *
  * @param roles 当前产品的角色列表
  * @returns 角色负载数组
@@ -134,9 +115,6 @@ export function buildRolePayload(roles: Role[]): RolePayloadItem[] {
     const roleName = (role.name || '').trim()
     if (role.id != null) {
       return { id: role.id, role_name: roleName }
-    }
-    if (role.global_role_id != null) {
-      return { global_role_id: role.global_role_id, role_name: roleName, name: roleName }
     }
     return { role_key: role.role_key, role_name: roleName }
   })

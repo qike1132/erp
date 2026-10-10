@@ -42,7 +42,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstanceState, selectinload
 
 from fastapi_app.services.product.bom_role_resolver import resolve_role_rows
-from fastapi_app.services.product.role_service import ensure_global_role
+from fastapi_app.services.product.role_service import _name_key
 from fastapi_app.services.purchase_supplier_service import resolve_bom_suppliers
 from fastapi_app.shared_models import (
     ModificationLog,
@@ -116,16 +116,11 @@ def _loaded_relation(entity, name: str):
 
 
 def _role_display_name(product_role) -> str:
-    """角色展示名：优先全局角色名（§7#10），回退回滚镜像列 ``role_name``。
+    """角色展示名：产品私有的 ``role_name``。
 
-    调用方（``get_bom``）必须已 ``selectinload(ProductRole.global_role)``，
-    否则 ``lazy='raise'`` 关系会抛 ``InvalidRequestError``（生产 500 历史根因）。
+    迁移 088/089 起角色为产品私有，不再有全局字典，故直接取本行名称
+    （不再 selectinload ``global_role``）。
     """
-    global_role = getattr(product_role, 'global_role', None)
-    if global_role is not None:
-        name = getattr(global_role, 'name', None)
-        if name:
-            return name
     return product_role.role_name or ''
 
 
@@ -165,8 +160,8 @@ async def get_bom(db: AsyncSession, product_id: int) -> dict | None:
     产品不存在时返回 ``None`` —— 注解必须带 ``| None``，
     否则调用方会误以为返回值恒为 dict 而漏掉空值检查。
 
-    ``roles`` 每项含 ``{id(product_role.id), global_role_id, name}``，展示名取自全局
-    角色名（回退镜像列），并按 ``(name, id)`` 升序（REQ-P0-10 / §7#2、#10）。
+    ``roles`` 每项含 ``{id(product_role.id), name}``，展示名取本行 ``role_name``，
+    并按 ``(name, id)`` 升序（REQ-P0-10 / §7#2、#10）。
     """
     result = await db.execute(
         select(Product).options(
@@ -174,7 +169,7 @@ async def get_bom(db: AsyncSession, product_id: int) -> dict | None:
             selectinload(Product.material_rows),
             selectinload(Product.fabrics),
             selectinload(Product.accessories),
-            selectinload(Product.roles).selectinload(ProductRole.global_role),
+            selectinload(Product.roles),
         ).where(Product.id == product_id)
     )
     product = result.scalars().first()
@@ -184,7 +179,6 @@ async def get_bom(db: AsyncSession, product_id: int) -> dict | None:
     role_items = [
         {
             'id': r.id,
-            'global_role_id': r.global_role_id,
             'name': _role_display_name(r),
         }
         for r in product.roles
@@ -336,7 +330,7 @@ async def _replace_bom_roles(db: AsyncSession, product: Product, data: dict, pro
     temp_role_map: dict = {}
     if 'roles' not in data:
         return temp_role_map
-    # 角色段解析抽到 bom_role_resolver（支持 global_role_id / role_key / id 三路径），
+    # 角色段解析抽到 bom_role_resolver（角色为产品私有：按 id / role_key / 名称解析），
     # 避免本文件继续膨胀（958 行已超服务文件上限，风险 M2）。
     resolution = await resolve_role_rows(
         payload_roles=data.get('roles') or [],
@@ -697,7 +691,7 @@ async def _copy_bom_into_role(
 
     await db.flush()
 
-    role_name = getattr(role, 'role_name', None) or getattr(role, 'name', '') or ''
+    role_name = role.role_name or ''
     logger.info(
         f'BOM复制成功(目标角色) | 操作人: {username} | '
         f'源产品: {source_product.name}({source_product.id}) | '
@@ -743,33 +737,17 @@ async def _load_copy_products(db: AsyncSession, source_product_id: int, target_p
     return source_product, target_product
 
 
-async def _resolve_role_by_name(db: AsyncSession, target_product: Product, target_product_id: int, role_name: str, username: str) -> ProductRole:
-    """按角色名在目标产品上查找/新建角色（支持前端未保存的新角色）。"""
+async def _resolve_role_by_name(db: AsyncSession, target_product: Product, target_product_id: int, role_name: str) -> ProductRole:
+    """按角色名在目标产品上查找/新建角色（支持前端未保存的新角色）。
+
+    角色为产品私有：只在**本产品**内按 ``lower(trim(name))`` 复用（同名即同一角色），
+    否则新建本产品行。
+    """
     target_roles = list(getattr(target_product, 'roles', None) or [])
-    # a. 目标产品已有同名角色（镜像列）→ 幂等复用
-    role = next(
-        (
-            r for r in target_roles
-            if (getattr(r, 'role_name', None) or getattr(r, 'name', '') or '').strip() == role_name
-        ),
-        None,
-    )
+    key = _name_key(role_name)
+    role = next((r for r in target_roles if _name_key(r.role_name) == key), None)
     if role is None:
-        # b. 按名称查找或新建全局角色（copy_bom 不产生审计噪音）
-        global_role = await ensure_global_role(db, role_name, username)
-        # c. 目标产品已关联同一全局角色（镜像名漂移）→ 复用，避免撞
-        #    uq_product_role_product_global(product_id, global_role_id)
-        role = next(
-            (r for r in target_roles if getattr(r, 'global_role_id', None) == global_role.id),
-            None,
-        )
-    if role is None:
-        # d. 新建关联行：global_role_id 必填（迁移 045 后 NOT NULL），role_name 取全局角色名
-        role = ProductRole(
-            product_id=target_product_id,
-            global_role_id=global_role.id,
-            role_name=global_role.name,
-        )
+        role = ProductRole(product_id=target_product_id, role_name=role_name.strip())
         db.add(role)
         await db.flush()
         # 挂进关系集合，否则 _copy_bom_into_role 的归属校验会误判「角色不属于该产品」
@@ -837,41 +815,31 @@ async def _create_target_roles(
     target_product: Product,
     target_product_id: int,
     overwrite: bool,
-    username: str,
 ) -> dict[int, ProductRole]:
-    """在目标产品上批量建/复用角色，返回 源角色id -> 目标角色 映射。"""
-    # ===== 角色及其独立物料 =====
-    # 先批量建角色并单次 flush 取 id（原逐 role flush 为 R 次往返），
-    # 再按 role_id 建索引，避免对 fabrics/accessories/materials 的 R 次嵌套扫描。
-    # 每个新关联行必须携带 global_role_id（迁移 045 后 NOT NULL + FK RESTRICT）；
-    # 覆盖模式已在上方批量删除目标全部角色，故仅非覆盖模式需按 global_role_id 去重。
-    target_by_global: dict[int, ProductRole] = {}
+    """在目标产品上批量建/复用角色，返回 源角色id -> 目标角色 映射。
+
+    角色为产品私有：按 ``lower(trim(role_name))`` 去重——目标产品已有同名角色则复用。
+    覆盖模式已在上方批量删除目标全部角色，故仅非覆盖模式需去重。
+    """
+    target_by_key: dict[str, ProductRole] = {}
     if not overwrite:
         for existing_role in (getattr(target_product, 'roles', None) or []):
-            gid_existing = getattr(existing_role, 'global_role_id', None)
-            if gid_existing is not None:
-                target_by_global[gid_existing] = existing_role
+            key = _name_key(existing_role.role_name)
+            if key:
+                target_by_key[key] = existing_role
     role_id_map: dict[int, ProductRole] = {}
     for old_role in source_product.roles:
-        gid = old_role.global_role_id
-        if gid is None:
-            # 历史遗留行（迁移 045 回填 + NOT NULL 后不应再出现）：按名称补齐全局角色
-            legacy_name = (old_role.role_name or '').strip()
-            if not legacy_name:
-                raise ValueError('源产品存在无名角色，无法复制')
-            gid = (await ensure_global_role(db, legacy_name, username)).id
-        reused = target_by_global.get(gid)
+        role_name = (old_role.role_name or '').strip()
+        if not role_name:
+            raise ValueError('源产品存在无名角色，无法复制')
+        key = _name_key(role_name)
+        reused = target_by_key.get(key)
         if reused is not None:
-            # 目标产品已关联同一全局角色 → 复用，避免撞 uq_product_role_product_global
             role_id_map[old_role.id] = reused
             continue
-        new_role = ProductRole(
-            product_id=target_product_id,
-            global_role_id=gid,
-            role_name=old_role.role_name,
-        )
+        new_role = ProductRole(product_id=target_product_id, role_name=role_name)
         db.add(new_role)
-        target_by_global[gid] = new_role
+        target_by_key[key] = new_role
         role_id_map[old_role.id] = new_role
     if role_id_map:
         await db.flush()
@@ -889,7 +857,7 @@ async def _copy_role_materials(
 ) -> int:
     """复制角色及其独立物料，返回复制计数（含新建角色数）。"""
     role_id_map = await _create_target_roles(
-        db, source_product, target_product, target_product_id, overwrite, username,
+        db, source_product, target_product, target_product_id, overwrite,
     )
     copied_count = len(role_id_map)
 
@@ -973,7 +941,7 @@ async def copy_bom(db: AsyncSession, target_product_id: int, data: dict, usernam
     # ===== 目标角色名模式：按名称查找或新建角色后复制（支持前端未保存的新角色）=====
     role_name = (data.get('role_name') or '').strip()
     if role_name:
-        role = await _resolve_role_by_name(db, target_product, target_product_id, role_name, username)
+        role = await _resolve_role_by_name(db, target_product, target_product_id, role_name)
         return await _copy_bom_into_role(
             db, source_product, target_product, target_product_id, role.id, overwrite, username,
         )

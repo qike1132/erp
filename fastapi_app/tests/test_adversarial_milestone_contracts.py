@@ -1,4 +1,4 @@
-"""里程碑契约·**对抗性**补充测试（T03 计算器口径 / 作用域排序 / 全局角色幂等）。
+"""里程碑契约·**对抗性**补充测试（T03 计算器口径 / 作用域排序）。
 
 本文件独立于既有 ``test_calculate_material_scope.py`` / ``test_purchase_order_generate_scope.py``，
 只补它们**未覆盖或覆盖为真空**的点，用于在不可逆迁移前做对抗性把关：
@@ -11,21 +11,16 @@
    - 去重、``None`` 至多一次、混合具名/无名。
 2. ``Σ(groups) ≡ 扁平`` 恒等式在**含包装类物料 + 同产品多行订单 + 无 BOM 产品**的混合
    输入下成立（既有用例的 ``packaging`` 恒为空集，恒等式对包装类**真空成立**）。
-3. ``role_service.ensure_global_role`` 幂等：同名（含大小写/空白归一化）重复调用返回
-   **同一 id**，且 ``role`` 表**只落一行**（真实异步 session + ``create_all``）。
+
+注：原第 3 节「``role_service.ensure_global_role`` 幂等」已随「角色产品私有化」
+（迁移 088/089，全局角色字典下线）一并删除。
 """
 import pytest
-import pytest_asyncio
-from sqlalchemy import event, func, select
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
 
-from fastapi_app.services.product.role_service import ensure_global_role
 from fastapi_app.services.purchase_product_service import (
     aggregate_materials,
     aggregate_materials_by_scope,
 )
-from fastapi_app.shared_models import Base, ProductRole, Role
 from fastapi_app.utils.scope_order import order_scopes
 
 # ---------------------------------------------------------------------------
@@ -194,76 +189,3 @@ class TestFlatGroupsIdentityMixedInput:
         assert by_role[None][('彩盒', 'L')] == pytest.approx(10.0)  # 1.0 × 10
         assert by_role[4][('彩盒', 'L')] == pytest.approx(20.0)     # 2.0 × 10（完整，非 ÷2）
         assert by_role[4][('贴纸', '')] == pytest.approx(5.0)       # 0.5 × 10
-
-
-# ---------------------------------------------------------------------------
-# 3) ensure_global_role 幂等（真实异步 session）
-# ---------------------------------------------------------------------------
-
-@pytest_asyncio.fixture
-async def _role_session():
-    """真实异步内存 SQLite（含 btrim UDF），仅建 role / product_role 表。"""
-    engine = create_async_engine(
-        'sqlite+aiosqlite:///:memory:',
-        poolclass=StaticPool,
-        connect_args={'check_same_thread': False},
-    )
-
-    @event.listens_for(engine.sync_engine, 'connect')
-    def _register_btrim(dbapi_connection, _record):  # pragma: no cover
-        dbapi_connection.create_function(
-            'btrim', 1, lambda v: v.strip() if isinstance(v, str) else v,
-        )
-
-    async with engine.begin() as conn:
-        await conn.run_sync(
-            lambda c: Base.metadata.create_all(
-                c, tables=[Role.__table__, ProductRole.__table__],
-            )
-        )
-    async with async_sessionmaker(engine, expire_on_commit=False)() as session:
-        yield session
-    await engine.dispose()
-
-
-class TestEnsureGlobalRoleIdempotent:
-    """同名「查找或新建」幂等：重复调用返回同一 id，且只落一行。"""
-
-    @pytest.mark.asyncio
-    async def test_same_name_returns_same_id_single_row(self, _role_session):
-        db = _role_session
-        first = await ensure_global_role(db, '源角色A')
-        second = await ensure_global_role(db, '源角色A')
-        assert first.id == second.id, '同名二次调用必须复用同一全局角色'
-        total = await db.scalar(select(func.count()).select_from(Role))
-        assert total == 1, f'不得重复插入，实得 {total} 行'
-
-    @pytest.mark.asyncio
-    async def test_idempotent_across_commit(self, _role_session):
-        """提交后再次调用仍幂等（跨事务边界）。"""
-        db = _role_session
-        first = await ensure_global_role(db, '源角色B')
-        await db.commit()
-        again = await ensure_global_role(db, '源角色B')
-        assert again.id == first.id
-        total = await db.scalar(select(func.count()).select_from(Role))
-        assert total == 1
-
-    @pytest.mark.asyncio
-    async def test_whitespace_and_case_are_same_key(self, _role_session):
-        """trim + 大小写归一同键：'  源角色C  ' 与 '源角色c' 视为同一角色。"""
-        db = _role_session
-        first = await ensure_global_role(db, '源角色C')
-        second = await ensure_global_role(db, '  源角色c  ')
-        assert second.id == first.id, 'trim/大小写归一后应命中同一行'
-        total = await db.scalar(select(func.count()).select_from(Role))
-        assert total == 1
-
-    @pytest.mark.asyncio
-    async def test_distinct_names_create_distinct_rows(self, _role_session):
-        db = _role_session
-        a = await ensure_global_role(db, '甲')
-        b = await ensure_global_role(db, '乙')
-        assert a.id != b.id
-        total = await db.scalar(select(func.count()).select_from(Role))
-        assert total == 2

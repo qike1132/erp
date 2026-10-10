@@ -4,7 +4,7 @@
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 # ============================================================
 # 产品/BOM 相关
@@ -112,14 +112,13 @@ class PackagingItem(BaseModel):
 
 
 class RoleItem(BaseModel):
-    """BOM 角色明细（ProductRole）。
+    """BOM 角色明细（ProductRole，**产品私有**）。
 
-    支持三种入参：``global_role_id``（关联已有全局角色）/ ``role_key``（新建全局角色，
-    客户端临时键）/ ``id``（既有产品角色关联行）。允许额外字段以兼容前端扩展字段。
+    支持两种入参：``role_key``（新建角色，客户端临时键）/ ``id``（既有产品角色行）；
+    仅带名称时后端按 ``lower(trim(name))`` 在本产品内同名复用。允许额外字段以兼容前端扩展字段。
     """
     model_config = {'extra': 'allow'}
     id: int | None = None
-    global_role_id: int | None = None
     role_key: str | None = None
     role_name: str = ''
     name: str | None = None
@@ -150,8 +149,8 @@ class MaterialCalcRow(BaseModel):
 class MaterialCalcScopeGroup(BaseModel):
     """按「产品 × 作用域(角色)」分块的物料计算结果。
 
-    ``role_id is None`` 表示产品级默认 BOM，**恒为首块**；``role_name`` 取自全局
-    角色名，缺失退化为 ``角色#<id>``（REQ-P0-05）。
+    ``role_id is None`` 表示产品级默认 BOM，**恒为首块**；``role_name`` 取本产品角色名，
+    缺失退化为 ``角色#<id>``（REQ-P0-05）。
     """
     product_id: int
     product_name: str = ''
@@ -175,37 +174,6 @@ class MaterialCalculateResponse(BaseModel):
     groups: list[MaterialCalcScopeGroup] = []
     total_categories: dict | None = None
     message: str | None = None
-
-
-# ============================================================
-# 全局角色字典（role）DTO
-# ============================================================
-
-class RoleItemDTO(BaseModel):
-    """角色项投影：``id`` = role.id；``global_role_id`` 供 get_bom 角色投影复用。"""
-    id: int
-    global_role_id: int | None = None
-    name: str
-
-
-class RoleCreate(BaseModel):
-    """新建全局角色请求。"""
-    name: str = Field(..., min_length=1, max_length=100, description='角色名（trim 后存储）')
-
-
-class RoleRename(BaseModel):
-    """重命名全局角色请求。"""
-    name: str = Field(..., min_length=1, max_length=100, description='新角色名（trim 后存储）')
-
-
-class RoleListResponse(BaseModel):
-    success: bool = True
-    roles: list[RoleItemDTO] = []
-
-
-class RoleDeleteResponse(BaseModel):
-    success: bool = True
-    message: str = ''
 
 
 # ============================================================

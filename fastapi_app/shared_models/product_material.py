@@ -64,21 +64,25 @@ class Role(Base):
 
 
 class ProductRole(Base):
-    """产品 × 全局角色 关联表（每个 SKU 可关联多个角色，如公仔的不同角色）。
+    """产品 × 角色（**产品私有**）关联表（每个 SKU 可关联多个角色，如公仔的不同角色）。
 
-    迁移后本表降级为「产品 × 全局角色」关联表，其 ``id`` **保持不变**——
-    三张物料表（``product_material`` / ``product_fabric`` / ``product_accessory``）
-    的 ``role_id`` 外键仍指向本表 ``id``，因此物料表零迁移。
+    本表 ``id`` 是三张物料表（``product_material`` / ``product_fabric`` /
+    ``product_accessory``）``role_id`` 外键的指向目标，因此**角色私有化改造不动物料表**。
 
-    - ``global_role_id``：指向全局角色字典 ``role.id``（ON DELETE RESTRICT，回填后 NOT NULL）；
-    - ``role_name``：**回滚兼容镜像列**，改名时与全局角色名同步，保证回滚后旧代码显示正确名。
+    角色为**产品私有**：同一产品内 ``role_name`` 唯一（``lower(role_name)``，写入前
+    trim），不同产品可有同名角色且互不影响（改名/删除只作用于本行）。
+
+    - ``role_name``：角色名（写入前 trim；本产品的权威名）；
+    - ``global_role_id``：**过渡残留列**（迁移 088 起可空、089 删除）。私有化后不再写入。
     """
+
     __tablename__ = 'product_role'
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     product_id: Mapped[int] = mapped_column(Integer, ForeignKey('product.id', ondelete='CASCADE'), nullable=False, comment='关联产品ID')
-    global_role_id: Mapped[int] = mapped_column(Integer, ForeignKey('role.id', ondelete='RESTRICT'), nullable=False, comment='全局角色ID(role.id)')
-    role_name: Mapped[str] = mapped_column(String(100), nullable=False, comment='角色名称（回滚兼容镜像列，改名时同步）')
+    # 过渡残留列：088 改为可空、不再写入；089 删除。见迁移 pg_standalone_088/089。
+    global_role_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('role.id', ondelete='RESTRICT'), nullable=True, comment='[过渡] 全局角色ID，088 起可空、089 删除')
+    role_name: Mapped[str] = mapped_column(String(100), nullable=False, comment='角色名称（产品私有；写入前 trim）')
     create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), comment='创建时间')
     update_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), comment='更新时间')
 
@@ -88,14 +92,17 @@ class ProductRole(Base):
 
     __table_args__ = (
         Index('idx_product_role_product', 'product_id'),
-        UniqueConstraint('product_id', 'global_role_id', name='uq_product_role_product_global'),
+        # 产品内角色名唯一（大小写不敏感）。用 text('lower(role_name)') 列表达式
+        # ——类体内 role_name 是 MappedColumn，用 func.lower 会渲染成绑定参数。
+        # 用可移植的 lower()（而非 btrim）：迁移 088 已把存量名 btrim 归一，
+        # 应用层写入前也 trim，故索引只需 lower；这样 SQLite 测试库也能建索引。
+        Index('uq_product_role_product_name_lower', 'product_id', text('lower(role_name)'), unique=True),
     )
 
     def to_dict(self):
         return {
             'id': self.id,
             'product_id': self.product_id,
-            'global_role_id': self.global_role_id,
             'role_name': self.role_name,
             'name': self.role_name,
             'create_time': self.create_time.strftime('%Y-%m-%d %H:%M:%S') if self.create_time else None,

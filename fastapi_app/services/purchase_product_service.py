@@ -19,7 +19,6 @@ from fastapi_app.shared_models import (
     ProductAccessory,
     ProductFabric,
     ProductMaterial,
-    ProductRole,
 )
 from fastapi_app.utils import calc_total_pages
 from fastapi_app.utils.scope_order import order_scopes, scope_label
@@ -446,17 +445,13 @@ def aggregate_materials_by_scope(
 def _collect_role_names(products: Sequence[Product]) -> dict[tuple[int, int], str]:
     """汇总 ``{(product_id, product_role.id): 显示名}``。
 
-    展示名优先取全局角色名（§7#10），缺失回退镜像列 ``role_name``。调用方须已
-    ``selectinload(Product.roles).selectinload(ProductRole.global_role)``，否则
-    ``ProductRole.global_role``（``lazy='raise'``）会抛 ``InvalidRequestError``——
-    这是**刻意 fail-loud**：对未加载关系不做静默探测（§7#6）。
+    角色为产品私有（迁移 088/089）：直接取本行 ``role_name``。调用方须已
+    ``selectinload(Product.roles)``。
     """
     names: dict[tuple[int, int], str] = {}
     for product in products:
         for pr in product.roles:
-            global_role = pr.global_role
-            name = getattr(global_role, 'name', None) if global_role is not None else None
-            names[(product.id, pr.id)] = name or pr.role_name or ''
+            names[(product.id, pr.id)] = pr.role_name or ''
     return names
 
 
@@ -485,8 +480,8 @@ async def calculate_material(db: AsyncSession, orders_data: list) -> dict:
             selectinload(Product.material_rows),
             selectinload(Product.fabrics),
             selectinload(Product.accessories),
-            # 计算器需按角色展示，故须加载 Product.roles 及其全局角色名（§7#10）。
-            selectinload(Product.roles).selectinload(ProductRole.global_role),
+            # 计算器需按角色展示，故须加载 Product.roles（角色为产品私有，直接用 role_name）。
+            selectinload(Product.roles),
         ).where(Product.id.in_(product_ids))
     )
     products = products_result.scalars().unique().all()
