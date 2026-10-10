@@ -315,13 +315,16 @@ def _validate_not_self_approval(approval: ApprovalRequest, current_user: User) -
         raise ValueError("不能审批自己提交的申请")
 
 
-async def _handle_edit_approval(db: AsyncSession, approval: ApprovalRequest, order: Order) -> None:
+async def _handle_edit_approval(
+    db: AsyncSession, approval: ApprovalRequest, order: Order, current_user: User,
+) -> None:
     """处理编辑类审批：应用订单修改并记录库存变更。
 
     Args:
         db: 数据库会话。
         approval: 审批请求对象（含 operation_data）。
         order: 关联订单对象。
+        current_user: 当前审批人（与 _handle_delete_approval 对称，注册表统一按 4 参派发）。
 
     Raises:
         ValueError: 审批数据解析失败或校验不通过时抛出。

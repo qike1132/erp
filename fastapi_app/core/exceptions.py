@@ -227,7 +227,12 @@ async def run_post_commit_callbacks(session: Any) -> None:
 
     回调失败只记录日志，不影响主流程（与 db_transaction 内行为一致）。
     """
-    callbacks = session.info.pop('post_commit_callbacks', [])
+    # 与 schedule 侧（cache_invalidation/domain_events）同口径：无 info 的会话
+    # （测试桩、轻量包装）没有注册入口，自然也没有待执行回调，静默跳过而非 AttributeError。
+    info = getattr(session, 'info', None)
+    if not isinstance(info, dict):
+        return
+    callbacks = info.pop('post_commit_callbacks', [])
     for callback in callbacks:
         try:
             await callback()

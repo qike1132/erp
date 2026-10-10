@@ -85,6 +85,20 @@ async def test_rollback_discards_scheduled_event(mock_db, calls):
     publish.assert_not_awaited()
 
 
+async def test_run_post_commit_callbacks_tolerates_no_info_session():
+    """回归（B2）：无 info 属性的会话（测试桩、轻量包装）不得让 get_async_db 收尾崩溃。
+
+    schedule 侧（cache_invalidation/domain_events）对无 info 会话已做退化容错，
+    执行侧此前仍硬取 session.info —— database.get_async_db 提交成功后调用本函数时
+    AttributeError 会冒泡成 500。口径对齐：无 info 即无注册入口，静默跳过。
+    """
+    class _NoInfoSession:
+        pass
+
+    # 不抛异常即通过
+    await run_post_commit_callbacks(_NoInfoSession())
+
+
 async def test_delete_endpoint_commits_before_broadcasting(client, mock_db, calls):
     """删除端点：必须先在请求内提交（响应返回即已落库），再广播 ORDER_DELETED
 

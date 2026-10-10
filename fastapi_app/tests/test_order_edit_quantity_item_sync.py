@@ -123,12 +123,13 @@ async def test_approval_edit_quantity_syncs_item():
 
     approval = MagicMock()
     approval.operation_data = _json.dumps({"quantity": 8888, "customer": "客户"})
+    user = MagicMock(id=99)  # 第 4 参：注册表统一按 4 参派发（B1 修复后与 delete 侧对称）
 
     with patch(
         "fastapi_app.services.approval_service.get_product_for_update",
         new_callable=AsyncMock, return_value=MagicMock(id=1, current_stock=100),
     ):
-        await approval_service._handle_edit_approval(db, approval, order)
+        await approval_service._handle_edit_approval(db, approval, order, user)
 
     assert order.quantity == 8888
     assert item.quantity == 8888, "审批通过的改数量未同步明细，列表页仍显示旧数量"

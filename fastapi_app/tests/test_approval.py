@@ -1,5 +1,5 @@
 """审批管理模块测试"""
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -164,6 +164,65 @@ class TestApprovalService:
         from fastapi_app.services.approval_service import _validate_not_self_approval
         mock_approval.requester_id = 2
         _validate_not_self_approval(mock_approval, mock_current_user)
+
+    @pytest.mark.asyncio
+    async def test_approve_edit_dispatches_handler(self, mock_db, mock_approval, mock_current_user):
+        """回归：approve_request 必须真正穿过 _OPERATION_HANDLERS 派发（B1）。
+
+        历史：三个 approve_request 用例都在前置校验（自审批/不存在/状态）处 raise，
+        从未走到 handler 派发行；ff67a6cd 把调用点改成 4 参后 _handle_edit_approval
+        仍是 3 参，编辑审批点同意即 TypeError → 500，测试全绿。
+        本用例 requester_id != approver_id、状态 pending，确保派发路径被执行。
+        """
+        import json as _json
+
+        from fastapi_app.services import approval_service
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_approval
+        mock_db.execute = AsyncMock(return_value=mock_result)
+        mock_approval.requester_id = 2
+        mock_approval.status = ApprovalRequest.STATUS_PENDING
+        mock_approval.operation_type = ApprovalRequest.OPERATION_EDIT
+        mock_approval.operation_data = _json.dumps({'quantity': 100, 'customer': '客户A'})
+        mock_order = MagicMock()
+        mock_order.id = 1
+        mock_order.order_no = 'ORD-001'
+        mock_order.is_deleted = False
+        mock_order.quantity = 50
+        mock_order.customer = '客户B'
+        mock_order.product_id = 1
+        mock_order.note = '旧备注'
+        mock_db.get = AsyncMock(return_value=mock_order)
+
+        # handler 内部依赖（预锁产品、明细同步、状态重算、审批日志）全部打桩
+        with patch.object(approval_service, 'get_product_for_update', new=AsyncMock()) as m_lock, \
+             patch.object(approval_service, 'sync_single_item_quantity', new=AsyncMock()) as m_sync, \
+             patch.object(approval_service, 'compute_order_status_from_db',
+                          new=AsyncMock(return_value='partially_deducted')) as m_status, \
+             patch.object(approval_service, '_create_approval_log', new=AsyncMock()):
+            result = await approval_service.approve_request(mock_db, 1, mock_current_user)
+
+        # 数量已按 operation_data 应用，明细同步与状态重算被调用
+        assert mock_order.quantity == 100
+        assert mock_order.customer == '客户A'
+        assert m_lock.await_count == 1
+        assert m_sync.await_count == 1
+        assert m_status.await_count == 1
+        assert mock_approval.status == ApprovalRequest.STATUS_APPROVED
+        assert "已同意" in result['message']
+
+    @pytest.mark.asyncio
+    async def test_operation_handlers_signature_contract(self):
+        """守卫：注册表内所有 handler 必须可按派发点的 4 参形态 bind（B1 根因）。"""
+        import inspect
+
+        from fastapi_app.services.approval_service import _OPERATION_HANDLERS
+        for operation, handler in _OPERATION_HANDLERS.items():
+            sig = inspect.signature(handler)
+            try:
+                sig.bind('db', 'approval', 'order', 'user')
+            except TypeError as e:
+                pytest.fail(f'{operation} 的 handler {handler.__name__} 无法按 4 参派发: {e}')
 
 
 class TestApprovalEndpoints:
