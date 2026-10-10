@@ -11904,7 +11904,7 @@
           "辅助接口"
         ],
         "summary": "Product Search",
-        "description": "产品搜索（支持名称、条码；可按客户过滤可见范围）\n\n客户过滤口径见 services/product_visibility.py：**未挂客户的 SKU 对所有客户可见**。\n下单 / 出货 / 备货 / 备货计划四个页面共用本端点，按客户过滤在此一处生效。\n未选客户（不传 customer/customer_id）时不过滤，列表与改造前一致。",
+        "description": "产品搜索（支持名称、条码；可按客户过滤可见范围）\n\n两种用法：\n- **搜索模式**：带 `q` 关键字，按名称/69码模糊匹配（下单/出货/备货/备货计划的自动补全）。\n- **浏览模式**：`q` 留空 + 带客户 —— 列出该客户可见的全部 SKU（下单页点开 SKU 列表用）。\n  留空且**不带客户**时返回空数组：宁可什么都不给，也不要把全部 SKU 放出来，\n  前端据此提示「请先选择客户」。\n\n客户过滤口径见 services/product_visibility.py：**未挂客户的 SKU 对所有客户可见**，\n按客户过滤在下单 / 出货 / 备货 / 备货计划四处共用本端点，故收在此一处。",
         "operationId": "product_search_api_v1_aux_product_search_get",
         "parameters": [
           {
@@ -11956,6 +11956,20 @@
               "title": "Customer"
             },
             "description": "客户名称（与 customer_id 二选一）"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "description": "返回条数上限（浏览模式一次列一批，搜索时保持小值）",
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "返回条数上限（浏览模式一次列一批，搜索时保持小值）"
           }
         ],
         "responses": {

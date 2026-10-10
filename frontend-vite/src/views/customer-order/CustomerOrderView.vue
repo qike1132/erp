@@ -28,6 +28,8 @@
             :importing="importing"
             :search-products="searchProducts"
             :product-search-failed="productSearchFailed"
+            :fetch-sku-list="fetchSkuList"
+            :sku-list-error="skuListError"
             :select-product="selectProduct"
             :handle-deduct-preview="handleDeductPreview"
             :open-deduct-edit="openDeductEdit"
@@ -95,6 +97,8 @@ const {
   customerOptions,
   searchProducts,
   productSearchFailed,
+  fetchSkuList,
+  skuListError,
   selectProduct,
   availableStock,
   deductInfoVisible,

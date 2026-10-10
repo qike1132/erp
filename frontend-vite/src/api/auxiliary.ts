@@ -37,12 +37,16 @@ export const auxApi = {
    *
    * `opts.customer`：按客户过滤可见范围（后端口径：未挂客户的 SKU 对所有客户可见）。
    * 不传 = 不过滤，与改造前行为一致。下单/出货/备货/备货计划共用本端点。
+   *
+   * `q` 留空 + 带客户 = **浏览模式**（下单页点开 SKU 列表用），一次列一批；
+   * 留空且不带客户时后端返回空数组 —— 见 fastapi_app/api/v1/endpoints/auxiliary.py。
    */
-  productSearch: (q: string, opts?: { customer?: string; customerId?: number }) =>
+  productSearch: (q: string, opts?: { customer?: string; customerId?: number; limit?: number }) =>
     get<ProductSearchItem[]>('/aux/product-search', {
       q,
       customer: opts?.customer || undefined,
       customer_id: opts?.customerId,
+      limit: opts?.limit,
     }),
   /**
    * 可用备货量查询（`GET /aux/available-stockins`，裸数组响应）。

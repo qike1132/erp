@@ -21,7 +21,7 @@ function mountPanel(): VueWrapper<InstanceType<typeof OrderInputPanel>> {
   return mount(OrderInputPanel, {
     global: {
       stubs: {
-        UiAutocomplete: { template: '<input />' },
+        ProductPickerDialog: { template: '<div class="stub-picker" />' },
       },
     },
     props: {
@@ -37,6 +37,8 @@ function mountPanel(): VueWrapper<InstanceType<typeof OrderInputPanel>> {
       isDragOver: false,
       searchProducts: vi.fn(async () => []),
       productSearchFailed: false,
+      fetchSkuList: vi.fn(async () => []),
+      skuListError: '',
       selectProduct: vi.fn(),
       handleDeductPreview: vi.fn(),
       openDeductEdit: vi.fn(),
@@ -72,7 +74,7 @@ describe('OrderInputPanel OCR 热区显隐', () => {
     return mount(OrderInputPanel, {
       global: {
         stubs: {
-          UiAutocomplete: { template: '<input />' },
+          ProductPickerDialog: { template: '<div class="stub-picker" />' },
           OcrPasteImport: { template: '<div class="stub-ocr" />' },
         },
       },
@@ -89,6 +91,8 @@ describe('OrderInputPanel OCR 热区显隐', () => {
         isDragOver: false,
         searchProducts: vi.fn(async () => []),
         productSearchFailed: false,
+        fetchSkuList: vi.fn(async () => []),
+        skuListError: '',
         selectProduct: vi.fn(),
         handleDeductPreview: vi.fn(),
         openDeductEdit: vi.fn(),

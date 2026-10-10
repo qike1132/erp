@@ -1,5 +1,6 @@
 import { ref, reactive, computed, watch } from 'vue'
 import { auxApi } from '@/api'
+import type { ProductSearchItem } from '@/api/auxiliary'
 import { useCatalogStore } from '@/stores/catalog'
 import { isQuantityOutOfRange } from './quantityRange'
 import { planSplitsMessage } from './shipmentPlanRules'
@@ -25,9 +26,24 @@ export function useOrderForm() {
   const customerList = computed(() => catalogStore.activeCustomerNames.map((c) => ({ name: c.name })))
   const customerOptions = computed(() => customerList.value.map((c: { name: string }) => ({ value: c.name, label: c.name })))
 
-  // ===== Product search (delegated to UiAutocomplete) =====
+  // ===== Product search / browse =====
   /** 产品搜索是否失败过。失败不能与「无匹配结果」混为一谈，否则用户会误判为产品不存在。 */
   const productSearchFailed = ref(false)
+  /** 浏览列表（弹窗点开时）是否加载失败。与「该客户没有产品」是两回事。 */
+  const skuListFailed = ref(false)
+
+  /** 浏览模式一次列多少条。弹窗不做分页，超过上限由弹窗给提示引导去搜索。 */
+  const SKU_BROWSE_LIMIT = 200
+
+  /**
+   * 后端搜索项 → 前端建议项。搜索与浏览共用同一个映射：OCR 粘贴导入的「手选产品」
+   * 也吃这个结构，两处各写一份迟早漂移，而漂移的表现是那条链路静默失效。
+   */
+  function toProductSuggestions(items: ProductSearchItem[] | null | undefined): ProductSuggestion[] {
+    return (Array.isArray(items) ? items : []).map((p) => ({
+      value: p.name, id: p.id, name: p.name, barcode: p.barcode ?? '',
+    }))
+  }
 
   async function searchProducts(q: string): Promise<ProductSuggestion[]> {
     if (!q.trim()) return []
@@ -36,9 +52,28 @@ export function useOrderForm() {
       // 未选客户时 customer 为 undefined，后端不过滤 —— 与改造前一致。
       const d = await auxApi.productSearch(q, { customer: form.customer || undefined })
       productSearchFailed.value = false
-      return (Array.isArray(d) ? d : []).map((p) => ({ value: p.name, id: p.id, name: p.name, barcode: p.barcode ?? '' }))
+      return toProductSuggestions(d)
     } catch {
       productSearchFailed.value = true
+      return []
+    }
+  }
+
+  /**
+   * 浏览模式：列出当前客户可见的全部 SKU（弹窗点开时调，此时还没有关键字）。
+   * 未选客户不发请求 —— 后端在没有客户时本就返回空，前端提前短路省一次往返。
+   */
+  async function fetchSkuList(): Promise<ProductSuggestion[]> {
+    if (!form.customer) {
+      skuListFailed.value = false
+      return []
+    }
+    try {
+      const d = await auxApi.productSearch('', { customer: form.customer, limit: SKU_BROWSE_LIMIT })
+      skuListFailed.value = false
+      return toProductSuggestions(d)
+    } catch {
+      skuListFailed.value = true
       return []
     }
   }
@@ -73,6 +108,16 @@ export function useOrderForm() {
     form.productSearch = ''
     form.productId = 0
     if (form.deductStock) disableDeduct()
+  })
+
+  /**
+   * 弹窗里「没有数据」的原因（空串 = 正常）。
+   * 三种空对用户的下一步完全不同：没选客户要去选客户、加载失败要重试、
+   * 客户真没挂产品要去产品页挂客户。一律显示「暂无数据」等于把用户扔在原地。
+   */
+  const skuListError = computed(() => {
+    if (!form.customer) return '请先选择客户'
+    return skuListFailed.value ? '加载失败，请重试' : ''
   })
   /**
    * 当前还缺哪些必填项（只列**字段名**，用于「请先填写：…」）。
@@ -178,6 +223,8 @@ export function useOrderForm() {
     customerOptions,
     searchProducts,
     productSearchFailed,
+    fetchSkuList,
+    skuListError,
     selectProduct,
     availableStock,
     deductInfoVisible,

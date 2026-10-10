@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>效果图 · 下单页产品选择改弹窗（2026-10-10）</title>
+<style>
+  :root{
+    --primary-500:#0094bf; --primary-600:#007ea3; --primary-50:#e6f6fa; --primary-100:#cceef5; --primary-400:#33a9cc;
+    --border:#cbd5e1; --border-light:#e2e8f0; --line:#f1f5f9;
+    --text:#1e293b; --text-2:#64748b; --text-3:#94a3b8;
+    --surface:#f8fafc;
+    --danger:#ef4444; --danger-50:#fef2f2;
+    --success-600:#059669;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:26px;background:#eef2f6;color:var(--text);
+       font-family:"Microsoft YaHei","PingFang SC",system-ui,sans-serif;font-size:14px;line-height:1.6}
+  h1{font-size:20px;margin:0 0 4px}
+  .sub{color:var(--text-2);font-size:13px;margin-bottom:22px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start}
+  .panel{background:#fff;border:1px solid var(--border-light);border-radius:12px;padding:18px;
+         box-shadow:0 1px 3px rgba(15,23,42,.06);margin-bottom:20px}
+  .panel > h2{font-size:14px;margin:0 0 3px;display:flex;align-items:center;gap:8px}
+  .panel > h2 .num{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;
+         border-radius:50%;background:var(--primary-500);color:#fff;font-size:11px;font-weight:700}
+  .panel > p.note{color:var(--text-2);font-size:12.5px;margin:0 0 14px}
+  .verdict{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11.5px;font-weight:700}
+  .v-a{background:#fff7ed;color:#c2410c;border:1px solid #fed7aa}
+  .v-b{background:var(--primary-50);color:var(--primary-600);border:1px solid var(--primary-100)}
+
+  /* ===== 录入面板复刻 ===== */
+  .co-panel{border:1px solid var(--border);border-radius:12px;overflow:hidden;background:#fff}
+  .co-head{display:flex;justify-content:space-between;align-items:center;padding:10px 16px;font-size:13px;font-weight:700;
+           border-bottom:1px solid var(--border);background:var(--surface)}
+  .co-body{padding:14px 16px}
+  .co-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
+  .co-fg{margin-bottom:12px}
+  .co-label{display:block;font-size:12.5px;font-weight:500;color:var(--text-2);margin-bottom:4px}
+  .req{color:var(--danger)}
+  .co-input{width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:10px;font-size:13.5px;
+            color:var(--text);background:#fff}
+  .co-input.ph{color:var(--text-3)}
+  .co-sel{display:flex;justify-content:space-between;align-items:center}
+  .sq{color:var(--text-3);font-size:11px}
+
+  /* 带浏览按钮的输入框（方案A） */
+  .with-btn{display:flex;gap:6px}
+  .with-btn .co-input{flex:1}
+  .browse-btn{display:inline-flex;align-items:center;gap:5px;padding:8px 12px;border:1px solid var(--border);
+              border-radius:10px;background:#fff;font-size:13px;color:var(--primary-600);font-weight:600;white-space:nowrap}
+  /* 可点击字段（方案B） */
+  .clickable{display:flex;justify-content:space-between;align-items:center;cursor:pointer}
+  .clickable:hover{border-color:var(--primary-400);box-shadow:0 0 0 4px rgba(0,148,191,.08)}
+
+  .btn-add{margin-top:6px;width:100%;padding:9px;border:none;border-radius:10px;font-size:13.5px;font-weight:600;color:#fff;
+           background:linear-gradient(135deg,var(--primary-500),var(--primary-600))}
+  .hint{font-size:11.5px;color:var(--text-3);margin:8px 0 0}
+
+  /* ===== 弹窗 ===== */
+  .dlg{width:100%;max-width:520px;border-radius:14px;overflow:hidden;border:1px solid var(--border-light);
+       box-shadow:0 18px 40px rgba(15,23,42,.18);background:#fff}
+  .dlg-head{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--line)}
+  .dlg-title{font-size:14px;font-weight:700}
+  .dlg-sub{font-size:11.5px;color:var(--text-2);margin-top:2px;font-weight:400}
+  .dlg-x{width:26px;height:26px;border-radius:8px;border:none;background:var(--surface);color:var(--text-2);cursor:pointer}
+  .dlg-body{padding:12px 16px 0}
+  .dlg-search{width:100%;padding:9px 12px;border:2px solid var(--border);border-radius:10px;font-size:13.5px;color:var(--text-3)}
+  .list{margin:10px 0 0;max-height:300px;overflow:auto;border:1px solid var(--line);border-radius:10px}
+  .item{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;font-size:13.5px;
+        border-bottom:1px solid var(--line);cursor:pointer}
+  .item:last-child{border-bottom:none}
+  .item:hover{background:var(--primary-50)}
+  .item.on{background:var(--primary-50);font-weight:600;color:var(--primary-600)}
+  .item .pick{font-size:11.5px;color:var(--text-3)}
+  .dlg-foot{display:flex;justify-content:space-between;align-items:center;padding:10px 16px;border-top:1px solid var(--line);
+            background:var(--surface);font-size:11.5px;color:var(--text-2)}
+  .empty{padding:26px 12px;text-align:center;color:var(--text-3);font-size:13px}
+
+  .callout{border-left:3px solid var(--primary-500);background:var(--primary-50);border-radius:0 8px 8px 0;
+           padding:9px 13px;font-size:12.5px;color:#0b4a5c;margin-top:12px}
+  .callout.warn{border-left-color:#d97706;background:#fffbeb;color:#7c4a03}
+  code{background:var(--surface);border:1px solid var(--border-light);border-radius:5px;padding:1px 5px;font-size:11.5px}
+  .k{font-size:11px;font-weight:700;color:var(--text-3);letter-spacing:.05em;text-transform:uppercase;margin-bottom:7px}
+</style>
+</head>
+<body>
+
+<h1>下单页「产品名称」改弹窗 · 效果图</h1>
+<div class="sub">2026-10-10 · /customer-order 订单信息录入 · 点击弹出 SKU 列表选择 + 关键字搜索</div>
+
+<div class="grid">
+
+  <!-- ===== 方案 A ===== -->
+  <div class="panel">
+    <h2><span class="num">A</span>保留输入框，右侧加「浏览」按钮 <span class="verdict v-a">改动最小</span></h2>
+    <p class="note">输入框照旧可打字搜索（下拉照旧），点右边按钮才弹出 SKU 列表。两种功能各占一个入口，互不干扰。</p>
+
+    <div class="co-panel">
+      <div class="co-head"><span>订单信息录入</span><span class="sq">订单 / 备货 切换</span></div>
+      <div class="co-body">
+        <div class="co-row">
+          <div class="co-fg" style="margin:0"><label class="co-label">订单时间</label><div class="co-input">2026-10-10</div></div>
+          <div class="co-fg" style="margin:0"><label class="co-label">客户名称 <span class="req">*</span></label><div class="co-input co-sel">贝乐 <span class="sq">▾</span></div></div>
+        </div>
+        <div class="co-fg">
+          <label class="co-label">产品名称 <span class="req">*</span></label>
+          <div class="with-btn">
+            <div class="co-input ph">输入产品名称搜索</div>
+            <div class="browse-btn">☰ 浏览</div>
+          </div>
+        </div>
+        <div class="co-row">
+          <div class="co-fg" style="margin:0"><label class="co-label">订单数量 <span class="req">*</span></label><div class="co-input ph">0</div></div>
+          <div class="co-fg" style="margin:0"><label class="co-label">库存抵扣</label><div class="co-input ph">未启用</div></div>
+        </div>
+        <button class="btn-add">＋ 新增订单</button>
+      </div>
+    </div>
+
+    <div class="callout">
+      打字搜索的心智模型完全不变，老用户零迁移成本。代价是产品框变成「输入框 + 按钮」两段，宽度被挤掉一点。
+    </div>
+  </div>
+
+  <!-- ===== 方案 B ===== -->
+  <div class="panel">
+    <h2><span class="num">B</span>输入框变成可点击字段，两个功能都进弹窗 <span class="verdict v-b">推荐</span></h2>
+    <p class="note">点整个字段就弹窗，弹窗顶部是搜索框、下面是列表。浏览和搜索在同一个地方，和你的描述最贴合。</p>
+
+    <div class="co-panel">
+      <div class="co-head"><span>订单信息录入</span><span class="sq">订单 / 备货 切换</span></div>
+      <div class="co-body">
+        <div class="co-row">
+          <div class="co-fg" style="margin:0"><label class="co-label">订单时间</label><div class="co-input">2026-10-10</div></div>
+          <div class="co-fg" style="margin:0"><label class="co-label">客户名称 <span class="req">*</span></label><div class="co-input co-sel">贝乐 <span class="sq">▾</span></div></div>
+        </div>
+        <div class="co-fg">
+          <label class="co-label">产品名称 <span class="req">*</span></label>
+          <div class="co-input clickable"><span class="ph" style="color:var(--text-3)">点击选择产品</span><span class="sq">☰ ▾</span></div>
+        </div>
+        <div class="co-row">
+          <div class="co-fg" style="margin:0"><label class="co-label">订单数量 <span class="req">*</span></label><div class="co-input ph">0</div></div>
+          <div class="co-fg" style="margin:0"><label class="co-label">库存抵扣</label><div class="co-input ph">未启用</div></div>
+        </div>
+        <button class="btn-add">＋ 新增订单</button>
+      </div>
+    </div>
+
+    <div class="callout warn">
+      选中的产品会显示在字段里（如「小熊毛绒玩具 20cm」），旁边有个小 × 可清空重选。
+      <br>代价：要打字也得先点一下打开弹窗（弹窗里搜索框自动聚焦，所以是「点一下 → 直接打字」）。
+    </div>
+  </div>
+</div>
+
+<!-- ===== 弹窗本身 ===== -->
+<div class="grid" style="grid-template-columns:1fr 1fr">
+  <div class="panel">
+    <h2><span class="num">1</span>弹窗（刚点开 · 还没输入关键字）</h2>
+    <p class="note">列出**当前客户可见的全部 SKU**（属于贝乐的 + 未挂客户的）。</p>
+    <div class="dlg">
+      <div class="dlg-head">
+        <div><div class="dlg-title">选择产品</div><div class="dlg-sub">客户：贝乐 · 共 37 个可用 SKU</div></div>
+        <button class="dlg-x">✕</button>
+      </div>
+      <div class="dlg-body">
+        <div class="dlg-search">🔍 输入产品名称或69码搜索…</div>
+        <div class="list">
+          <div class="item"><span>小熊毛绒玩具 20cm</span><span class="pick">选择</span></div>
+          <div class="item"><span>卡通抱枕 40×40</span><span class="pick">选择</span></div>
+          <div class="item"><span>恐龙玩偶 大号</span><span class="pick">选择</span></div>
+          <div class="item"><span>独角兽挂件 8cm</span><span class="pick">选择</span></div>
+          <div class="item"><span>小马挂件 8cm</span><span class="pick">选择</span></div>
+          <div class="item"><span>毛绒钥匙扣 熊猫款</span><span class="pick">选择</span></div>
+        </div>
+      </div>
+      <div class="dlg-foot"><span>点击一行即选中并关闭</span><span>仅显示该客户可选</span></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2><span class="num">2</span>弹窗（输入关键字后）</h2>
+    <p class="note">同一个弹窗、同一个端点，输入即缩小范围。</p>
+    <div class="dlg">
+      <div class="dlg-head">
+        <div><div class="dlg-title">选择产品</div><div class="dlg-sub">客户：贝乐 · 匹配「挂件」2 个</div></div>
+        <button class="dlg-x">✕</button>
+      </div>
+      <div class="dlg-body">
+        <div class="dlg-search" style="color:var(--text);border-color:var(--primary-400)">🔍 挂件</div>
+        <div class="list">
+          <div class="item on"><span>独角兽挂件 8cm</span><span class="pick">选择</span></div>
+          <div class="item"><span>小马挂件 8cm</span><span class="pick">选择</span></div>
+        </div>
+      </div>
+      <div class="dlg-foot"><span>点击一行即选中并关闭</span><span>仅显示该客户可选</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="panel">
+  <h2><span class="num">3</span>边界情形</h2>
+  <div class="grid" style="grid-template-columns:1fr 1fr 1fr">
+    <div>
+      <div class="k">还没选客户就点开</div>
+      <div class="dlg" style="max-width:100%">
+        <div class="dlg-head"><div class="dlg-title">选择产品</div><button class="dlg-x">✕</button></div>
+        <div class="dlg-body" style="padding-bottom:14px"><div class="empty">请先选择客户，再挑选产品<br><span style="font-size:11.5px">产品范围随客户变化</span></div></div>
+      </div>
+      <p class="hint">按你选的口径：只列当前客户的 SKU，所以没客户就没得列。</p>
+    </div>
+    <div>
+      <div class="k">该客户一个 SKU 都没有</div>
+      <div class="dlg" style="max-width:100%">
+        <div class="dlg-head"><div class="dlg-title">选择产品</div><button class="dlg-x">✕</button></div>
+        <div class="dlg-body" style="padding-bottom:14px"><div class="empty">该客户暂无可用产品<br><span style="font-size:11.5px">请到产品页给 SKU 挂上该客户，或输入关键字搜未挂客户的 SKU</span></div></div>
+      </div>
+      <p class="hint">不能只显示「无数据」——要说清下一步该去哪儿。</p>
+    </div>
+    <div>
+      <div class="k">该客户 SKU 很多</div>
+      <div class="dlg" style="max-width:100%">
+        <div class="dlg-body" style="padding:14px 16px">
+          <div class="item" style="border:1px solid var(--line);border-radius:8px"><span>…（前 200 个）</span><span class="pick">选择</span></div>
+          <div class="empty" style="padding:12px">还有更多产品未显示<br><span style="font-size:11.5px">请输入关键字缩小范围</span></div>
+        </div>
+      </div>
+      <p class="hint">弹窗不做分页，超过上限用提示引导去搜索。</p>
+    </div>
+  </div>
+</div>
+
+<div class="panel" style="background:var(--surface)">
+  <h2 style="font-size:13.5px">改动范围（两个方案都一样，差的是入口）</h2>
+  <ul style="margin:6px 0 0;padding-left:20px;font-size:13px">
+    <li>新建 <code>ProductPickerDialog.vue</code>：<code>UiDialog</code> + 顶部搜索框 + <code>VirtualList</code>（<code>MaterialDetailDialog.vue</code> 已有同款组合先例）。</li>
+    <li>后端 <code>/aux/product-search</code> 放行「空关键字 + 有客户」→ 返回该客户可见的 SKU 列表（不传客户仍返回空，避免把全部产品放出来）。</li>
+    <li><code>searchProducts(q)</code> 的签名与返回结构**保持不动** —— OCR 粘贴导入共用它，改了会让「手选产品」失效。</li>
+    <li>选中后只写 <code>form.productId</code> / <code>form.productSearch</code> 两个字段，提交链路（<code>buildOrderPayload</code>）零改动。</li>
+  </ul>
+</div>
+
+</body>
+</html>

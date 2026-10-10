@@ -212,3 +212,64 @@ async def test_aux_product_search_endpoint_without_customer_returns_all(async_cl
     assert resp.status_code == 200
     names = {item["name"] for item in resp.json()}
     assert {p_linked.name, p_free.name} <= names
+
+
+# ==================== 浏览模式：空关键字 + 有客户 ====================
+# 2026-10-10：下单页「产品名称」改成点击弹 SKU 列表，点开时还没有关键字，
+# 需要端点能把该客户可见的 SKU 列出来。未选客户时仍返回空 —— 否则会把
+# 全部 SKU 放出来，与「只列当前客户的 SKU」的约定相反。
+
+async def test_aux_product_search_empty_keyword_lists_customer_visible_skus(
+        async_client, async_db_session, auth_headers):
+    token = uuid.uuid4().hex[:8]
+    cust_a = await _make_customer(async_db_session, f"{token}-甲")
+    cust_b = await _make_customer(async_db_session, f"{token}-乙")
+    p_a = await _make_product(async_db_session, f"{token}-P甲", f"{token}A", [cust_a.id])
+    p_b = await _make_product(async_db_session, f"{token}-P乙", f"{token}B", [cust_b.id])
+    p_free = await _make_product(async_db_session, f"{token}-P未", f"{token}F")
+
+    resp = await async_client.get(
+        "/api/v1/aux/product-search", params={"customer": cust_a.name}, headers=auth_headers)
+    assert resp.status_code == 200
+    names = {item["name"] for item in resp.json()}
+    assert p_a.name in names, "甲自己的 SKU 要列出来"
+    assert p_free.name in names, "未挂客户的 SKU 对所有客户可见，也要列出来"
+    assert p_b.name not in names, "乙的专属 SKU 不能出现在甲的浏览列表里"
+
+
+async def test_aux_product_search_empty_keyword_without_customer_returns_empty(
+        async_client, async_db_session, auth_headers):
+    """没选客户就点开弹窗 → 返回空（前端据此提示「请先选择客户」），不能返回全部产品。"""
+    token = uuid.uuid4().hex[:8]
+    await _make_product(async_db_session, f"{token}-随便一个", f"{token}X")
+
+    resp = await async_client.get(
+        "/api/v1/aux/product-search", params={"q": ""}, headers=auth_headers)
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+async def test_aux_product_search_empty_keyword_unknown_customer_returns_empty(
+        async_client, async_db_session, auth_headers):
+    token = uuid.uuid4().hex[:8]
+    await _make_product(async_db_session, f"{token}-随便一个", f"{token}X")
+
+    resp = await async_client.get(
+        "/api/v1/aux/product-search",
+        params={"customer": f"{token}-不存在的客户"}, headers=auth_headers)
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+async def test_aux_product_search_limit_is_honored(async_client, async_db_session, auth_headers):
+    """浏览要一次列一批（默认给 200），但上限必须被尊重。"""
+    token = uuid.uuid4().hex[:8]
+    cust = await _make_customer(async_db_session, f"{token}-客户")
+    for i in range(4):
+        await _make_product(async_db_session, f"{token}-批量{i}", f"{token}{i}", [cust.id])
+
+    resp = await async_client.get(
+        "/api/v1/aux/product-search",
+        params={"customer": cust.name, "limit": 2}, headers=auth_headers)
+    assert resp.status_code == 200
+    assert len(resp.json()) == 2

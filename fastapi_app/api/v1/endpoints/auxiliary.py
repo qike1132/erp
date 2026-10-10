@@ -147,6 +147,7 @@ async def product_search(
     q: str = Query('', max_length=100, description="搜索关键词"),
     customer_id: int | None = Query(None, description="只看该客户可见的 SKU（属于该客户或未挂客户）"),
     customer: str | None = Query(None, max_length=100, description="客户名称（与 customer_id 二选一）"),
+    limit: int = Query(50, ge=1, le=200, description="返回条数上限（浏览模式一次列一批，搜索时保持小值）"),
     # 产品自动补全被三个页面共用：客户订单(order_manage)、出库管理(stockout_manage)、
     # 出货计划(production_plan_view)。原先只认 product_view（该码不在权限表里，只由
     # product_manage 经 manage→view 继承得来），按导航勾选的用户一律 403。
@@ -156,12 +157,15 @@ async def product_search(
 ):
     """产品搜索（支持名称、条码；可按客户过滤可见范围）
 
-    客户过滤口径见 services/product_visibility.py：**未挂客户的 SKU 对所有客户可见**。
-    下单 / 出货 / 备货 / 备货计划四个页面共用本端点，按客户过滤在此一处生效。
-    未选客户（不传 customer/customer_id）时不过滤，列表与改造前一致。
+    两种用法：
+    - **搜索模式**：带 `q` 关键字，按名称/69码模糊匹配（下单/出货/备货/备货计划的自动补全）。
+    - **浏览模式**：`q` 留空 + 带客户 —— 列出该客户可见的全部 SKU（下单页点开 SKU 列表用）。
+      留空且**不带客户**时返回空数组：宁可什么都不给，也不要把全部 SKU 放出来，
+      前端据此提示「请先选择客户」。
+
+    客户过滤口径见 services/product_visibility.py：**未挂客户的 SKU 对所有客户可见**，
+    按客户过滤在下单 / 出货 / 备货 / 备货计划四处共用本端点，故收在此一处。
     """
-    if not q.strip():
-        return []
     from fastapi_app.services.product_search_service import product_search_service
 
     resolved_customer_id = customer_id
@@ -174,8 +178,12 @@ async def product_search(
             # 后者会让一个拼错的客户名把全部 SKU 都放出来，与过滤目的相反。
             return []
 
+    keyword = q.strip()
+    if not keyword and resolved_customer_id is None:
+        return []
+
     return await product_search_service.search_visible_to_customer_async_with_cache(
-        db, q.strip(), resolved_customer_id, limit=50)
+        db, keyword, resolved_customer_id, limit=limit)
 
 
 @router.get("/product-available-stock", response_model=ProductAvailableStockResponse)
