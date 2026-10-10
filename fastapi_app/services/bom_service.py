@@ -43,6 +43,7 @@ from sqlalchemy.orm import InstanceState, selectinload
 
 from fastapi_app.services.product.bom_role_resolver import resolve_role_rows
 from fastapi_app.services.product.role_service import ensure_global_role
+from fastapi_app.services.purchase_supplier_service import resolve_bom_suppliers
 from fastapi_app.shared_models import (
     ModificationLog,
     Product,
@@ -484,8 +485,46 @@ async def _delete_removed_bom_items(db: AsyncSession, product_id: int, data: dic
         await db.execute(delete(ProductMaterial).where(ProductMaterial.id.in_(filling_delete_ids)))  # batch-loop: 有意逐行处理,非 N+1
 
 
+def _collect_bom_supplier_names(data: dict) -> list:
+    """收集 BOM payload 中引用的全部供应商名（含旧字段 filling 单对象形态）。"""
+    names: list = []
+    for key in ('fabrics', 'accessories', 'fillings'):
+        for item in data.get(key) or []:
+            names.append(item.get('supplier_name'))
+    filling = data.get('filling')
+    if isinstance(filling, dict):
+        names.append(filling.get('supplier_name'))
+    return names
+
+
+def _apply_bom_supplier_ids(data: dict, mapping: dict) -> None:
+    """按名称把 supplier.id 回填到每条物料 item。
+
+    仅当名称非空且命中映射时回填；空名保持前端传来的 ``supplier_id`` 原样，
+    避免把存量行合法的 supplier_id 抹成 None。
+    """
+    if not mapping:
+        return
+
+    def _fix(items) -> None:
+        for item in items or []:
+            name = (item.get('supplier_name') or '').strip()
+            if name and name in mapping:
+                item['supplier_id'] = mapping[name]
+
+    for key in ('fabrics', 'accessories', 'fillings'):
+        _fix(data.get(key))
+    filling = data.get('filling')
+    if isinstance(filling, dict):
+        _fix([filling])
+
+
 async def save_bom(db: AsyncSession, product_id: int, data: dict, username: str) -> str:
     product = await _load_product_with_bom(db, product_id)
+
+    # ===== 供应商：名称 -> supplier.id 解析，缺失的同事务自动建卡（REQ：BOM 供应商与 /supplier 同步）=====
+    supplier_map = await resolve_bom_suppliers(db, _collect_bom_supplier_names(data))
+    _apply_bom_supplier_ids(data, supplier_map)
 
     # ===== 默认 BOM 自定义名称（default_bom_label 键存在才更新，旧客户端不传则保持原状） =====
     _update_default_bom_label(db, product, data, username)

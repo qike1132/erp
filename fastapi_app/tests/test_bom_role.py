@@ -135,8 +135,18 @@ class TestSaveBom:
         empty_result.scalars.return_value.first.return_value = None
         empty_result.scalars.return_value.all.return_value = []
         counter = {'n': 0}
+        # save_bom 现在会先按名称解析供应商（对 supplier 表做 select/insert）。
+        # 用「语句文本是否含 supplier」把这类调用与既有的「按调用序号」断言解耦，
+        # 避免两套断言互相干扰（供应商查询统一返回空结果，不触发真实建卡逻辑的断言）。
+        supplier_result = MagicMock()
+        supplier_result.all.return_value = []
 
-        async def _execute_side_effect(*args, **kwargs):
+        async def _execute_side_effect(stmt=None, *args, **kwargs):
+            s = str(stmt).lower() if stmt is not None else ''
+            # 只认「纯供应商」语句：material 表的 select 也带 supplier_id/name 列，
+            # 用 'product' 是否出现把二者区分开，避免误拦填充/面料/辅料查询。
+            if 'supplier' in s and 'product' not in s:
+                return supplier_result
             counter['n'] += 1
             return product_result if counter['n'] == 1 else empty_result
 
@@ -341,8 +351,16 @@ class TestSaveBom:
         empty.scalars.return_value.all.return_value = []
 
         seq = iter([product_result, mat_result, empty, empty, mat_result, empty])
+        supplier_result = MagicMock()
+        supplier_result.all.return_value = []
 
-        async def _side_effect(*args, **kwargs):
+        async def _side_effect(stmt=None, *args, **kwargs):
+            # 供应商解析查询（select/insert supplier）不占用下面按序排列的结果
+            s = str(stmt).lower() if stmt is not None else ''
+            # 只认「纯供应商」语句：material 表的 select 也带 supplier_id/name 列，
+            # 用 'product' 是否出现把二者区分开，避免误拦填充/面料/辅料查询。
+            if 'supplier' in s and 'product' not in s:
+                return supplier_result
             try:
                 return next(seq)
             except StopIteration:

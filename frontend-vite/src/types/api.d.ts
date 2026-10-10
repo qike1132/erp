@@ -2877,6 +2877,16 @@ export interface SupplierListResponse {
   total?: number
 }
 
+export interface SupplierOption {
+  id: number
+  name: string
+}
+
+export interface SupplierOptionsResponse {
+  success?: boolean
+  suppliers?: Array<SupplierOption>
+}
+
 export interface SupplierOrderSummaryResponse {
   success?: boolean
   materials?: Array<Record<string, unknown>> | null

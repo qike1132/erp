@@ -9017,6 +9017,28 @@
         }
       }
     },
+    "/api/v1/suppliers/options": {
+      "get": {
+        "tags": [
+          "供应商管理"
+        ],
+        "summary": "List Supplier Options Api",
+        "description": "供应商下拉选项（id + 名称，按名称排序）。\n\n供 BOM 配置等选择器使用：product_manage 或 supplier_manage 均可访问，\n保证所有能配 BOM 的用户都能看到并选择供应商。**刻意不缓存**，以满足\n「供应商列表实时更新」的要求。\n\nArgs:\n    _current_user: 当前登录用户（权限校验依赖）。\n    db: 异步数据库会话（主库，避免复制延迟导致新建供应商不可见）。\n\nReturns:\n    SupplierOptionsResponse: 供应商选项列表。",
+        "operationId": "list_supplier_options_api_api_v1_suppliers_options_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupplierOptionsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/suppliers/create": {
       "post": {
         "tags": [
@@ -35681,6 +35703,44 @@
           "suppliers"
         ],
         "title": "SupplierListResponse"
+      },
+      "SupplierOption": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "SupplierOption",
+        "description": "供应商下拉选项（轻量，仅 id + 名称）。"
+      },
+      "SupplierOptionsResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "default": true
+          },
+          "suppliers": {
+            "items": {
+              "$ref": "#/components/schemas/SupplierOption"
+            },
+            "type": "array",
+            "title": "Suppliers",
+            "default": []
+          }
+        },
+        "type": "object",
+        "title": "SupplierOptionsResponse"
       },
       "SupplierOrderSummaryResponse": {
         "properties": {

@@ -4,8 +4,10 @@
 从 purchase_center_service.py 拆分，包含供应商 CRUD 及信息同步逻辑。
 """
 import logging
+from datetime import UTC, datetime
 
-from sqlalchemy import exists, func, select, update
+from sqlalchemy import exists, func, insert, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.sanitizer import escape_like
@@ -61,6 +63,73 @@ async def get_suppliers(db: AsyncSession, page: int = 1, per_page: int = 50, sea
         }
         supplier_list.append(s_dict)
     return {'items': supplier_list, 'total': total, 'page': page, 'per_page': per_page}
+
+
+# 供应商名称列长度上限（shared_models/supplier.py：String(100)）
+_SUPPLIER_NAME_MAX_LEN = 100
+
+
+async def list_supplier_options(db: AsyncSession) -> list[dict]:
+    """供应商下拉选项（id + 名称），按名称排序。
+
+    供 BOM 配置等选择器使用：刻意**不做缓存**，保证「实时」反映最新供应商表。
+    不过滤 status（与 catalog store 走 /suppliers/list 的口径一致，停用供应商仍可选择沿用）。
+    """
+    result = await db.execute(select(Supplier.id, Supplier.name).order_by(Supplier.name))
+    return [{'id': sid, 'name': name} for sid, name in result.all()]
+
+
+async def resolve_bom_suppliers(db: AsyncSession, names) -> dict[str, int]:
+    """把 BOM 物料引用的供应商名解析为 supplier.id 映射，缺失的按名建卡。
+
+    - trim + 去重 + 忽略空名；
+    - 名称超过 ``_SUPPLIER_NAME_MAX_LEN`` 直接抛 ValueError（调用端点经 db_transaction
+      的默认映射转 400，不会以「有 supplier_name 却无 supplier_id」的半成品状态落库）；
+    - 已存在（含停用）一律复用，绝不重复建；
+    - 建卡用 savepoint（begin_nested）兜底并发：两个请求同时建同名时，后者撞唯一约束
+      只回滚该 savepoint 并回查，不污染外层 BOM 保存事务。
+
+    Args:
+        db: 异步会话（调用方须处于同一事务内）。
+        names: 供应商名称可迭代对象（含 None / 空白，自动忽略）。
+
+    Returns:
+        dict[str, int]: 规整后的名称 -> supplier.id。
+
+    Raises:
+        ValueError: 存在超过长度上限的名称。
+    """
+    cleaned = {(n or '').strip() for n in names}
+    cleaned.discard('')
+    if not cleaned:
+        return {}
+
+    oversized = [n for n in cleaned if len(n) > _SUPPLIER_NAME_MAX_LEN]
+    if oversized:
+        raise ValueError(f'供应商名称过长（超过{_SUPPLIER_NAME_MAX_LEN}字符）：{oversized[0][:30]}')
+
+    existing = (
+        await db.execute(select(Supplier.id, Supplier.name).where(Supplier.name.in_(cleaned)))
+    ).all()
+    mapping: dict[str, int] = {name: sid for sid, name in existing}
+
+    missing = cleaned - set(mapping)
+    if missing:
+        now = datetime.now(UTC)
+        for name in sorted(missing):
+            try:
+                async with db.begin_nested():
+                    await db.execute(insert(Supplier).values(
+                        name=name, status=True, created_at=now, updated_at=now,
+                    ))
+            except IntegrityError:
+                # 并发请求抢先建同名 → 回查即可（savepoint 已回滚，外层事务不受影响）
+                pass
+        re_rows = (
+            await db.execute(select(Supplier.id, Supplier.name).where(Supplier.name.in_(missing)))
+        ).all()
+        mapping.update({name: sid for sid, name in re_rows})
+    return mapping
 
 
 async def create_supplier(db: AsyncSession, data: dict) -> dict:

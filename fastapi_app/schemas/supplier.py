@@ -39,6 +39,17 @@ class SupplierListResponse(BaseModel):
     total: int = 0
 
 
+class SupplierOption(BaseModel):
+    """供应商下拉选项（轻量，仅 id + 名称）。"""
+    id: int
+    name: str
+
+
+class SupplierOptionsResponse(BaseModel):
+    success: bool = True
+    suppliers: list[SupplierOption] = []
+
+
 class SupplierActionResponse(BaseModel):
     success: bool = True
     message: str

@@ -158,7 +158,9 @@
                             <option value="件">件</option><option value="套">套</option><option value="米">米</option><option value="平方">平方</option>
                           </select>
                         </td>
-                        <td><input v-model="item.supplier_name" type="text" class="bom-table-input" placeholder="输入供应商名称" name="supplier-name" autocomplete="off" /></td>
+                        <td>
+                          <BomSupplierSelect v-model="item.supplier_name" :options="bomSupplierOptions" />
+                        </td>
                         <td><input v-model.number="item.usage" type="number" class="bom-table-input" step="0.01" min="0" name="quantity" autocomplete="off" /></td>
                         <td><input v-model="item.remark" type="text" class="bom-table-input" placeholder="输入备注" name="remark" autocomplete="off" /></td>
                         <td><button class="bom-table-action-btn delete" aria-label="删除" @click="deleteBomItem(idx)"><FontAwesomeIcon icon="trash" aria-hidden="true" /></button></td>
@@ -217,6 +219,7 @@ import { useProductListActions } from '../composables/useProductListActions'
 import type { Role } from '../composables/bomTypes'
 import BomCopyDialog from './BomCopyDialog.vue'
 import BomRolePicker from './BomRolePicker.vue'
+import BomSupplierSelect from './BomSupplierSelect.vue'
 
 const confirmDialog = useConfirmDialog()
 
@@ -224,6 +227,7 @@ const {
   bomDialogVisible, bomProductName, currentBomCategory,
   bomTabs, currentBomItems, currentBomTabLabel, currentScopeLabel, currentScopeCount,
   switchBomTab, openBomModal, addBomItem, deleteBomItem, saveBom,
+  bomSupplierOptions,
   bomRoles, selectedRole, defaultScopeName, defaultScopeHasItems, selectRole, addRole, renameRole, renameDefaultScope, removeRole,
   associateGlobalRole, applyGlobalRename, applyGlobalDeleted,
   quickCopyKeyword, quickCopyLoading,

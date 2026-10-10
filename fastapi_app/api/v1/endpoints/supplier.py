@@ -14,13 +14,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.cache_keys import CACHE_KEY_PREFIX, CacheNamespace, build_cache_key
 from fastapi_app.core.database import get_async_db as get_db
-from fastapi_app.core.deps import require_permission
+from fastapi_app.core.deps import require_any_permission, require_permission
 from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.core.redis_wrapper import safe_delete_pattern, safe_get, safe_set
 from fastapi_app.schemas.supplier import (
     SupplierActionResponse,
     SupplierCreate,
     SupplierListResponse,
+    SupplierOption,
+    SupplierOptionsResponse,
     SupplierResponse,
     SupplierToggleResponse,
     SupplierUpdate,
@@ -179,6 +181,28 @@ async def list_suppliers(
         suppliers=[SupplierResponse(**s) for s in result['items']],
         total=result['total'],
     )
+
+
+@router.get('/options', response_model=SupplierOptionsResponse)
+async def list_supplier_options_api(
+    _current_user: User = Depends(require_any_permission('supplier_manage', 'product_manage')),
+    db: AsyncSession = Depends(get_db),
+) -> SupplierOptionsResponse:
+    """供应商下拉选项（id + 名称，按名称排序）。
+
+    供 BOM 配置等选择器使用：product_manage 或 supplier_manage 均可访问，
+    保证所有能配 BOM 的用户都能看到并选择供应商。**刻意不缓存**，以满足
+    「供应商列表实时更新」的要求。
+
+    Args:
+        _current_user: 当前登录用户（权限校验依赖）。
+        db: 异步数据库会话（主库，避免复制延迟导致新建供应商不可见）。
+
+    Returns:
+        SupplierOptionsResponse: 供应商选项列表。
+    """
+    options = await purchase_supplier_service.list_supplier_options(db)
+    return SupplierOptionsResponse(suppliers=[SupplierOption(**o) for o in options])
 
 
 @router.post('/create', response_model=SupplierActionResponse)

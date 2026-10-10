@@ -1,5 +1,5 @@
 import { ref, reactive, computed } from 'vue'
-import { productApi } from '@/api'
+import { productApi, supplierApi } from '@/api'
 import { roleApi, RoleApiError } from '@/api/role'
 import { showToast } from '@/composables/useToast'
 import type { BomItem, BomCategory, Role, ConfirmDialogLike } from './bomTypes'
@@ -50,6 +50,19 @@ export function useProductListActions(confirmDialog: ConfirmDialogLike) {
     { key: 'filling' as const, label: '填充类', icon: 'fas fa-cloud' },
     { key: 'accessory' as const, label: '辅料类', icon: 'fas fa-puzzle-piece' },
   ]
+
+  // ===== 供应商下拉选项（打开 BOM 弹窗时实时拉取，供供应商选择框使用） =====
+  const bomSupplierOptions = ref<{ id: number; name: string }[]>([])
+
+  async function loadSupplierOptions() {
+    try {
+      const res = await supplierApi.options()
+      bomSupplierOptions.value = res?.suppliers ?? []
+    } catch (error) {
+      console.error('加载供应商列表失败:', error)
+      bomSupplierOptions.value = []
+    }
+  }
 
   // ===== 角色状态（一对多：SKU -> 角色列表） =====
   const bomRoles = ref<Role[]>([])
@@ -102,7 +115,8 @@ export function useProductListActions(confirmDialog: ConfirmDialogLike) {
     bomProductName.value = row.name
     bomDialogVisible.value = true
     currentBomCategory.value = 'fabric'
-    await loadBomData(row.id)
+    // BOM 数据与供应商列表并行拉取：供应商列表每次打开都刷新（实时）
+    await Promise.all([loadBomData(row.id), loadSupplierOptions()])
   }
 
   async function loadBomData(productId: number) {
@@ -414,6 +428,8 @@ export function useProductListActions(confirmDialog: ConfirmDialogLike) {
     addBomItem,
     deleteBomItem,
     saveBom,
+    // 供应商下拉选项
+    bomSupplierOptions,
     // 角色
     bomRoles,
     selectedRole,

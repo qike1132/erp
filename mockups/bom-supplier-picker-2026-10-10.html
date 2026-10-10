@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>BOM 供应商选择框 · 效果稿（2026-10-10）</title>
+<style>
+  :root{
+    --primary-50:#eef4ff; --primary-100:#dce7ff; --primary-200:#c3d6ff;
+    --primary-400:#7aa2f7; --primary-500:#5b8def; --primary-600:#3b82f6; --primary-700:#2f6fdd;
+    --text:#1f2937; --muted:#6b7280; --border:#e2e8f0; --surface:#f8fafc;
+    --success-100:#dcfce7; --success-600:#16a34a; --danger-500:#ef4444;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:28px;background:#eef1f6;font-family:"Microsoft YaHei",-apple-system,Segoe UI,sans-serif;color:var(--text)}
+  h1{font-size:18px;margin:0 0 4px}
+  .sub{color:var(--muted);font-size:13px;margin:0 0 20px}
+  .two{display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap}
+  .card{background:#fff;border:1px solid var(--border);border-radius:14px;box-shadow:0 6px 20px rgba(15,23,42,.06);flex:1;min-width:420px}
+  .card h2{font-size:13px;margin:0;padding:12px 16px;border-bottom:1px solid var(--border);color:var(--muted);font-weight:600}
+  .card h2 b{color:var(--text)}
+  .pad{padding:16px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{text-align:left;padding:10px 12px;background:var(--surface);font-size:12px;color:var(--text);border-bottom:2px solid var(--primary-200);white-space:nowrap}
+  th .req{color:var(--danger-500);font-weight:700}
+  td{padding:9px 12px;border-bottom:1px solid #f1f5f9;vertical-align:middle}
+  .inp{width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;outline:none}
+  .inp.focus{border-color:var(--primary-400);box-shadow:0 0 0 3px rgba(59,130,246,.12)}
+  .cell{position:relative}
+  /* 下拉面板（对应组件的 Teleport + fixed 面板） */
+  .panel{position:absolute;top:calc(100% + 4px);left:0;width:100%;min-width:220px;background:#fff;
+    border:1px solid var(--border);border-radius:10px;box-shadow:0 14px 34px rgba(15,23,42,.16);
+    z-index:1500;overflow:hidden}
+  .panel .hd{padding:6px 12px;font-size:11px;color:var(--muted);background:var(--surface);border-bottom:1px solid var(--border)}
+  .panel .list{max-height:196px;overflow-y:auto}
+  .opt{padding:8px 12px;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .opt:hover,.opt.active{background:var(--primary-50)}
+  .opt .chk{color:var(--primary-600);font-weight:700}
+  .panel .empty{padding:12px;font-size:12.5px;color:var(--muted)}
+  .panel .empty em{color:var(--primary-700);font-style:normal;font-weight:600}
+  .create-hint{margin-top:6px;padding:6px 8px;border-radius:6px;background:var(--success-100);color:#14532d;font-size:12px}
+  .legend{margin-top:22px;background:#fff;border:1px solid var(--border);border-radius:14px;padding:16px 18px;max-width:980px}
+  .legend li{font-size:13px;line-height:1.9;color:#374151}
+  code{background:#f1f5f9;border-radius:4px;padding:1px 5px;font-size:12px}
+</style>
+</head>
+<body>
+  <h1>BOM 表配置 · 供应商选择框（效果稿）</h1>
+  <p class="sub">诉求：① 点击供应商框自动弹出供应商列表（来自 /supplier，实时）② 输入了 /supplier 里不存在的供应商名时，保存 BOM 成功后自动在 /supplier 建卡。</p>
+
+  <div class="two">
+    <!-- ===== 变更前 ===== -->
+    <div class="card">
+      <h2>变更前 · <b>纯文本输入</b>（无联想，靠记忆手打，易错名/重名）</h2>
+      <div class="pad">
+        <table>
+          <thead><tr><th style="width:34%">物料名称 <span class="req">*</span></th><th style="width:22%">规格型号 <span class="req">*</span></th><th style="width:14%">单位 <span class="req">*</span></th><th style="width:30%">供应商 <span class="req">*</span></th></tr></thead>
+          <tbody>
+            <tr><td>全棉汗布</td><td>180g</td><td>码</td><td><input class="inp" value="广州面料" placeholder="输入供应商名称"></td></tr>
+            <tr><td>罗纹</td><td>2x2</td><td>码</td><td><input class="inp" placeholder="输入供应商名称"></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ===== 变更后 ===== -->
+    <div class="card">
+      <h2>变更后 · <b>点击弹出供应商列表</b>（可搜、可选、可输入新名）</h2>
+      <div class="pad">
+        <table>
+          <thead><tr><th style="width:34%">物料名称 <span class="req">*</span></th><th style="width:22%">规格型号 <span class="req">*</span></th><th style="width:14%">单位 <span class="req">*</span></th><th style="width:30%">供应商 <span class="req">*</span></th></tr></thead>
+          <tbody>
+            <tr><td>全棉汗布</td><td>180g</td><td>码</td>
+              <td class="cell">
+                <input class="inp focus" value="" placeholder="选择或输入供应商">
+                <div class="panel">
+                  <div class="hd">供应商（来自 /supplier，实时）</div>
+                  <div class="list">
+                    <div class="opt active"><span>广州面料有限公司</span></div>
+                    <div class="opt"><span>东莞辅料厂</span></div>
+                    <div class="opt"><span>佛山纺织</span></div>
+                    <div class="opt"><span>绍兴印染</span><span class="chk">✓</span></div>
+                    <div class="opt"><span>江苏橡筋</span></div>
+                  </div>
+                </div>
+              </td>
+            </tr>
+            <tr><td>罗纹</td><td>2x2</td><td>码</td>
+              <td class="cell">
+                <input class="inp focus" value="新供应商甲" placeholder="选择或输入供应商">
+                <div class="panel">
+                  <div class="hd">无匹配 —— 保存后自动建卡</div>
+                  <div class="list">
+                    <div class="empty">
+                      未找到「<em>新供应商甲</em>」。
+                      <div class="create-hint">保存 BOM 成功后，会自动在 /supplier 创建该供应商（仅名称，状态=启用）</div>
+                    </div>
+                  </div>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <b>交互要点</b>
+    <ul>
+      <li>点击/聚焦输入框 → <b>立即弹出全部供应商</b>（默认按名称排序）。</li>
+      <li>键入 → 实时按名称（大小写不敏感）过滤；<code>↑/↓</code> 移动、<code>Enter</code> 选中、<code>Esc</code> 关闭，点击外部关闭。</li>
+      <li>可从列表选（回填名称），也可<b>直接输入新名</b>：保存 BOM 成功后由后端<b>同事务</b>自动在 /supplier 建卡并回填 <code>supplier_id</code>；名称已存在（含停用）则复用、不重复建。</li>
+      <li>面板 Teleport 到 <code>body</code> 用 <code>position:fixed</code>，避免被 BOM 表格的横向滚动容器裁剪；z-index≈1500，盖住 BOM 弹窗（1050）、避开 PrimeVue 浮层（2000+）。</li>
+      <li>名称上限 100 字符；超长保存时后端返回 400 明确提示，不产生半成品行。</li>
+    </ul>
+  </div>
+</body>
+</html>
