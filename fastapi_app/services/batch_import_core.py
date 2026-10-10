@@ -13,6 +13,8 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi_app.core.cache_invalidation import schedule_post_commit_invalidation
+from fastapi_app.services.batch_import_cache import invalidate_batch_import_caches
 from fastapi_app.services.batch_import_dedup import dedupe_by_keys
 from fastapi_app.services.batch_import_parser import parse_date_value, validate_customer_name
 from fastapi_app.services.inventory_service import calculate_available_shipment_quantity
@@ -22,6 +24,8 @@ from fastapi_app.services.numbering import (
     generate_stockout_number,
 )
 from fastapi_app.services.order_deduction_service import process_order_deduction
+from fastapi_app.services.signed_urls import strip_upload_signature
+from fastapi_app.services.xlsx_cell_images import guess_image_extension, parse_dispimg_id
 from fastapi_app.shared.stock_concurrency import check_stock_available, get_product_for_update
 from fastapi_app.shared_models import (
     Customer,
@@ -337,6 +341,12 @@ async def _import_data_generic(
 
     await db.flush()
 
+    # 有行成功才失效缓存：全跳过（重复/空文件）不需要清。
+    # 回调在请求收尾 commit 成功后执行（get_async_db / db_transaction 都会跑
+    # run_post_commit_callbacks），保证「提交后再清」，避免提交前失效被并发读回写脏数据。
+    if count > 0:
+        schedule_post_commit_invalidation(db, invalidate_batch_import_caches)
+
     # 完成消息只进日志，不再 append 进 debug_messages：
     # debug_messages 的语义是「行级消息」，调用方（_process_comprehensive_sheet）
     # 会把它整体并进 results.errors 展示给用户，混入完成消息会污染错误列表。
@@ -353,28 +363,131 @@ def _product_dedupe_key(row: dict) -> str | None:
     归一化必须与 ``Product.name`` 既有匹配口径一致（大小写不敏感、去空白），
     否则「Acme」与「acme 」会被当成两个产品 —— 正是要去防的那种重复。
     返回 ``None`` 表示该行没有产品名，无从判定唯一性，一律保留。
+
+    **带图片的行返回 ``None``（保留）**：这类行即便与库中产品同名也要走到行处理器，
+    才有机会给「尚无图片的已存在产品」补图；若在此按「与已有数据重复」剔除，图片
+    就永远进不来。因此批内同名查重改由行处理器用 ``created_products`` 兜住。
     """
     name = row.get('产品名称') or row.get('产品名') or row.get('名称')
     if not name:
         return None
+    if parse_dispimg_id(row.get('图片') or row.get('产品图片')):
+        return None
     return str(name).strip().casefold()
 
 
-async def import_products_from_data(db: AsyncSession, data_list: list) -> tuple[int, list[str]]:
+def _parse_product_price(price, name: str):
+    """把价格转成 ``Decimal``；无法解析时回落 0 并记警告。"""
+    # Decimal(str(...)) 直转：避免 float 二进制近似值进入 Numeric 列
+    from decimal import Decimal, InvalidOperation
+
+    try:
+        return Decimal(str(price)) if price else Decimal('0')
+    except (ValueError, TypeError, InvalidOperation):
+        logger.warning("产品导入：price 解析失败，使用默认值 0 (name=%s, value=%r)", name, price)
+        return Decimal('0')
+
+
+def _parse_product_stock(initial_stock, name: str) -> int:
+    """把初始库存转成整数；无法解析时回落 0 并记警告。"""
+    try:
+        return int(initial_stock) if initial_stock else 0
+    except ValueError:
+        logger.warning("产品导入：initial_stock 解析失败，使用默认值 0 (name=%s, value=%r)", name, initial_stock)
+        return 0
+
+
+async def _save_imported_image(
+    db: AsyncSession, image_bytes: bytes, name: str, uploader_id: int | None,
+) -> str | None:
+    """把单元格图片写入对象存储，返回可长期入库的 storage key；失败返回 None。
+
+    返回的是**剥掉限时签名**的相对路径 —— 与 ``create_product``/``update_product``
+    同口径：签名一律在出站时现签，原样存签名 URL 会让图片 1 小时后 410 且无法自愈。
+    """
+    from fastapi_app.services.storage_service import save_upload
+
+    ext = guess_image_extension(image_bytes)
+    if ext is None:
+        logger.warning('产品导入：图片格式无法识别，跳过该图片 (name=%s)', name)
+        return None
+    try:
+        saved = await save_upload(
+            content=image_bytes,
+            original_filename=f'{name}.{ext}',
+            db=db,
+            uploader_id=uploader_id,
+            generate_thumbnail=True,
+        )
+    except Exception as exc:  # defensive: 图片是可选附加项，任何失败都不应阻断整批导入
+        logger.warning('产品导入：图片保存失败，跳过该图片 (name=%s): %s', name, exc)
+        return None
+    return strip_upload_signature(saved['url'])
+
+
+async def _fill_existing_product_image(
+    db: AsyncSession, name: str, image_bytes: bytes | None, idx: int,
+    debug_messages: list, uploader_id: int | None,
+) -> bool:
+    """产品已存在时的行处理：该行带图片就按模板覆盖，不带则按重复跳过。
+
+    **覆盖而非「仅补空缺」**：图片修复必须能落到已有产品上 —— 例如透明底被压成
+    黑底后重传。若只补空缺，用户就只能删产品重建，而有库存/订单的产品根本删不掉。
+
+    仅在**行内带图片**时才会被调用（无图片的重复行在去重阶段已被剔除）。
+    """
+    if image_bytes is None:
+        debug_messages.append(f'行{idx}: 产品名称与已有数据重复，已跳过: {name}')
+        return False
+    # 用 .first() 而非 scalar_one_or_none：名称唯一约束只约束精确字符串，
+    # 「Acme」与「acme」可以并存，按 lower() 查会命中多行（与 get_product_by_name_ci 同口径）。
+    result = await db.execute(select(Product).where(func.lower(Product.name) == func.lower(name)))
+    product = result.scalars().first()
+    if product is None:
+        # 与预加载结果不一致（并发删除）：按重复跳过，不强行插入以免撞唯一约束
+        debug_messages.append(f'行{idx}: 产品名称与已有数据重复，已跳过: {name}')
+        return False
+    image_key = await _save_imported_image(db, image_bytes, name, uploader_id)
+    if not image_key:
+        debug_messages.append(f'行{idx}: 产品"{name}"的图片解析失败，未导入图片')
+        return False
+    product.image = image_key
+    return True
+
+
+async def import_products_from_data(
+    db: AsyncSession, data_list: list, *,
+    cell_images: dict[str, bytes] | None = None,
+    uploader_id: int | None = None,
+) -> tuple[int, list[str]]:
     """从数据列表导入产品。
+
+    「图片」列支持 WPS 单元格图片（``=DISPIMG("ID_xxx",1)``）：图片字节由调用方
+    从工作簿里提取好（``cell_images``），新产品的图片直接写入 ``product.image``；
+    产品已存在且该行带图片时按模板**覆盖**其图片（便于批量修图，见
+    :func:`_fill_existing_product_image`）。
+
+    Args:
+        db: 数据库会话。
+        data_list: 解析后的行数据。
+        cell_images: 单元格图片映射（图片 ID → 图片字节）；无图片时为 None/空。
+        uploader_id: 图片落库时登记的上传人；未知则 None。
 
     Returns:
         ``(成功导入条数, 错误消息列表)``。重复行（批内重复 / 与库中已有重复）
         在进入行处理**之前**被剔除，并为每行生成一条可读消息，
         不再像以前那样静默 ``return False``。
     """
+    images = cell_images or {}
+
     async def _pre_load(db):
         existing_result = await db.execute(select(func.lower(Product.name)))
         existing_names = {row[0].casefold() for row in existing_result.all() if row[0]}
-        return {'existing_names': existing_names}
+        return {'existing_names': existing_names, 'created_products': {}}
 
     async def _row_handler(db, row_data, idx, context, debug_messages):
         existing_names = context['existing_names']
+        created_products = context['created_products']
         name = row_data.get('产品名称') or row_data.get('产品名') or row_data.get('名称')
         barcode = row_data.get('69码') or row_data.get('条码') or row_data.get('条形码')
         price = row_data.get('产品价格') or row_data.get('价格')
@@ -384,35 +497,43 @@ async def import_products_from_data(db: AsyncSession, data_list: list) -> tuple[
             return False
 
         name = str(name).strip()
+        name_key = name.casefold()
 
-        # 与库中已有产品的重复已由 dedupe 前置剔除；此处保留为防御性检查
-        # （历史行为：直接 return False，不产生任何消息）。
-        if name.lower() in existing_names:
+        image_id = parse_dispimg_id(row_data.get('图片') or row_data.get('产品图片'))
+        image_bytes = images.get(image_id) if image_id else None
+
+        # 带图片的行绕过了 DB 去重（见 _product_dedupe_key），批内同名改在此拦截：
+        # 否则同文件内两条同名带图行会在最终 flush 时撞 product.name 唯一约束。
+        # 若本批先创建的那条**没图**、本行带图，则把图补进去 —— 该行之所以绕过
+        # 去重，正是为了让图片有机会落地；整行跳过会让图被静默丢弃。
+        pending = created_products.get(name_key)
+        if pending is not None:
+            if image_bytes is not None and not pending.image:
+                image_key = await _save_imported_image(db, image_bytes, name, uploader_id)
+                if image_key:
+                    pending.image = image_key
+                    debug_messages.append(f'行{idx}: 产品名称在文件内重复，图片已补入先前创建的同名产品: {name}')
+                    return False
+            debug_messages.append(f'行{idx}: 产品名称在文件内重复，已跳过: {name}')
             return False
 
-        try:
-            stock = int(initial_stock) if initial_stock else 0
-        except ValueError:
-            logger.warning("产品导入：initial_stock 解析失败，使用默认值 0 (name=%s, value=%r)", name, initial_stock)
-            stock = 0
+        if name_key in existing_names:
+            return await _fill_existing_product_image(
+                db, name, image_bytes, idx, debug_messages, uploader_id,
+            )
 
-        try:
-            # Decimal(str(...)) 直转：避免 float 二进制近似值进入 Numeric 列
-            from decimal import Decimal, InvalidOperation
-
-            price_val = Decimal(str(price)) if price else Decimal('0')
-        except (ValueError, TypeError, InvalidOperation):
-            logger.warning("产品导入：price 解析失败，使用默认值 0 (name=%s, value=%r)", name, price)
-            price_val = Decimal('0')
-
+        stock = _parse_product_stock(initial_stock, name)
         product = Product(
             name=name,
             barcode=str(barcode).strip() if barcode else '',
-            price=price_val,
+            price=_parse_product_price(price, name),
             initial_stock=stock,
-            current_stock=stock
+            current_stock=stock,
         )
+        if image_bytes is not None:
+            product.image = await _save_imported_image(db, image_bytes, name, uploader_id)
         db.add(product)
+        created_products[name_key] = product
         return True
 
     return await _import_data_generic(

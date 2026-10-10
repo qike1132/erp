@@ -13,12 +13,18 @@ from contextlib import asynccontextmanager, suppress
 from datetime import datetime
 
 from fastapi_app.schemas.batch import BatchImportResult, ExcelUpload
+from fastapi_app.services.xlsx_cell_images import extract_cell_images
 from fastapi_app.utils import parse_date_value as _shared_parse_date_value
 from fastapi_app.utils import validate_customer_name as _shared_validate_customer_name
 
 logger = logging.getLogger(__name__)
 
-MAX_BATCH_UPLOAD_SIZE = 5 * 1024 * 1024
+#: 上传文件大小上限。产品导入模板可内嵌 WPS 单元格图片，工作簿体积随图片数量增长
+#: （实测 33 张图 ≈ 2.3MB），5MB 很快就成为瓶颈；10MB 与 nginx
+#: ``client_max_body_size 10m``（config/nginx-windows.conf）对齐，使后端的友好报错
+#: 与反向代理的硬限制一致，不会出现「nginx 先 413、用户看不到原因」。
+MAX_BATCH_UPLOAD_SIZE = 10 * 1024 * 1024
+MAX_BATCH_UPLOAD_SIZE_MB = MAX_BATCH_UPLOAD_SIZE // 1024 // 1024
 
 
 # ==================== 数据验证 ====================
@@ -112,7 +118,7 @@ async def _save_uploaded_file(file: ExcelUpload):
         os.close(temp_fd)
         content = await file.read(MAX_BATCH_UPLOAD_SIZE + 1)
         if len(content) > MAX_BATCH_UPLOAD_SIZE:
-            raise ValueError('文件大小超过5MB限制，请拆分后重新上传')
+            raise ValueError(f'文件大小超过{MAX_BATCH_UPLOAD_SIZE_MB}MB限制，请拆分后重新上传')
         with open(temp_path, 'wb') as fh:
             await asyncio.to_thread(fh.write, content)
         yield temp_path
@@ -243,7 +249,7 @@ def _validate_xlsx_file(file: ExcelUpload) -> BatchImportResult | None:
 async def _read_excel_sheets(
     file: ExcelUpload, keywords: list[str], not_found_msg: str,
 ) -> tuple[list | None, str | None]:
-    """读取上传的 Excel 文件并解析目标 sheet 数据。
+    """读取上传的 Excel 文件并解析目标 sheet 数据（不提取单元格图片）。
 
     Args:
         file: 上传的文件对象。
@@ -254,14 +260,42 @@ async def _read_excel_sheets(
         tuple[list | None, str | None]: (数据列表, 错误消息)。
             成功时错误消息为 None；失败时数据列表为 None。
     """
+    data_list, err, _images = await _read_excel_sheets_with_cell_images(
+        file, keywords, not_found_msg, with_images=False,
+    )
+    return data_list, err
+
+
+async def _read_excel_sheets_with_cell_images(
+    file: ExcelUpload, keywords: list[str], not_found_msg: str, *, with_images: bool = True,
+) -> tuple[list | None, str | None, dict[str, bytes]]:
+    """读取目标 sheet 数据，并（可选）提取工作簿内的单元格图片。
+
+    产品导入模板的「图片」列由 WPS 写成 ``=DISPIMG("ID_xxx",1)``，图片字节并不在
+    单元格里，而是集中在 ``xl/cellimages.xml``（见 :mod:`.xlsx_cell_images`）。
+    故解析 sheet 之外还要把 ID→图片字节 取出来，交给行处理器落库。
+
+    Args:
+        file: 上传的文件对象。
+        keywords: sheet 名称匹配关键词列表。
+        not_found_msg: 未找到目标 sheet 时的错误消息。
+        with_images: 是否提取单元格图片。默认 True；不需要图片的导入传 False，
+            避免为一个不含图片的文件白白解压。
+
+    Returns:
+        tuple[list | None, str | None, dict[str, bytes]]:
+            (数据列表, 错误消息, 图片ID→图片字节)。失败时数据列表为 None，
+            错误消息非 None；图片提取失败只记日志，不影响数据解析结果。
+    """
     async with _save_uploaded_file(file) as temp_path:
         success, sheets, err = await read_excel_sheets_async(temp_path)
         if not success:
-            return None, f'Excel读取失败: {err}'
+            return None, f'Excel读取失败: {err}', {}
         target_sheet = _find_target_sheet(sheets, keywords)
         if not target_sheet:
-            return None, not_found_msg
+            return None, not_found_msg, {}
         success, data_list, err = await parse_excel_file_async(temp_path, target_sheet)
         if not success:
-            return None, f'数据解析失败: {err}'
-    return data_list, None
+            return None, f'数据解析失败: {err}', {}
+        images = await asyncio.to_thread(extract_cell_images, temp_path) if with_images else {}
+    return data_list, None, images

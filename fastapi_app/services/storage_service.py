@@ -216,9 +216,20 @@ def _open_image(content: bytes):
         return None
 
 
-def _image_to_rgb(img):
-    """转为 RGB 丢弃 alpha，WebP/JPEG 编码更稳定（不改动原图，返回新对象或原对象）"""
-    return img.convert('RGB') if img.mode not in ('RGB', 'L') else img
+def _image_for_webp(img):
+    """转成 WebP 可编码的模式，**保留透明通道**。
+
+    原实现无条件 ``img.convert('RGB')``：PIL 把 alpha=0 的像素按**黑色**填充，
+    于是透明底的抠图（产品图常态，如电商白底/抠图 PNG）在列表里变成黑块 ——
+    2026-10-09 导入带图模板时暴露，手动上传同样中招。
+    改为：已有 alpha 的保留 RGBA；调色板/灰度带透明信息的转 RGBA；其余转 RGB
+    （不给本就不透明的图凭空加一层 alpha）。
+    """
+    if img.mode in ('RGB', 'RGBA'):
+        return img
+    if img.mode in ('P', 'PA', 'LA') or 'transparency' in img.info:
+        return img.convert('RGBA')
+    return img.convert('RGB')
 
 
 def _resize_to_max(img, max_size: int):
@@ -242,7 +253,7 @@ def _encode_webp(img, quality: int, method: int) -> bytes:
 def _thumbnail_from_image(img, max_size: int = _THUMBNAIL_MAX_SIZE, quality: int = _THUMBNAIL_QUALITY) -> bytes | None:
     """基于已解码 Image 生成 400px WebP 缩略图；失败返回 None"""
     try:
-        return _encode_webp(_resize_to_max(_image_to_rgb(img), max_size), quality, method=4)
+        return _encode_webp(_resize_to_max(_image_for_webp(img), max_size), quality, method=4)
     except Exception as e:  # broad-except: 服务层容错，记录异常并返回安全默认值
         logger.warning('缩略图生成失败: %s', e)
         return None
@@ -251,7 +262,7 @@ def _thumbnail_from_image(img, max_size: int = _THUMBNAIL_MAX_SIZE, quality: int
 def _blur_from_image(img, max_size: int = _BLUR_MAX_SIZE, quality: int = _BLUR_QUALITY) -> bytes | None:
     """基于已解码 Image 生成 32px WebP 模糊占位图；失败返回 None"""
     try:
-        return _encode_webp(_resize_to_max(_image_to_rgb(img), max_size), quality, method=6)
+        return _encode_webp(_resize_to_max(_image_for_webp(img), max_size), quality, method=6)
     except Exception as e:  # broad-except: 服务层容错，记录异常并返回安全默认值
         logger.warning('模糊占位图生成失败: %s', e)
         return None
@@ -260,7 +271,7 @@ def _blur_from_image(img, max_size: int = _BLUR_MAX_SIZE, quality: int = _BLUR_Q
 def _compress_from_image(img, max_size: int = _FULL_MAX_SIZE, quality: int = _FULL_QUALITY) -> bytes | None:
     """基于已解码 Image 压缩主图（最长边 <=1600px，WebP q82）；失败返回 None"""
     try:
-        return _encode_webp(_resize_to_max(_image_to_rgb(img), max_size), quality, method=4)
+        return _encode_webp(_resize_to_max(_image_for_webp(img), max_size), quality, method=4)
     except Exception as e:  # broad-except: 服务层容错，记录异常并返回安全默认值
         logger.warning('主图压缩失败: %s', e)
         return None

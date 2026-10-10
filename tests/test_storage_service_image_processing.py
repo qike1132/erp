@@ -99,6 +99,44 @@ class TestMakeBlurPlaceholder:
         assert svc.make_blur_placeholder(b"not an image") is None
 
 
+class TestTransparencyPreserved:
+    """透明底图片不得被压成黑底（2026-10-09 带图模板导入暴露）。
+
+    原实现无条件 ``convert('RGB')``，PIL 把 alpha=0 的像素按**黑色**填充 ——
+    电商抠图（透明底 PNG）在产品列表里整块变黑。三个变体都必须保留 alpha。
+    """
+
+    @staticmethod
+    def _transparent_png(size=(60, 60)) -> bytes:
+        """四周全透明、中间一块不透明的红方块"""
+        img = Image.new("RGBA", size, (0, 0, 0, 0))
+        for x in range(20, 40):
+            for y in range(20, 40):
+                img.putpixel((x, y), (255, 0, 0, 255))
+        buf = BytesIO()
+        img.save(buf, format="PNG")
+        return buf.getvalue()
+
+    def test_thumbnail_keeps_alpha(self):
+        img = _decode_webp(svc.make_thumbnail(self._transparent_png()))
+        assert "A" in img.getbands(), "缩略图丢失了透明通道"
+        assert img.convert("RGBA").getpixel((0, 0))[3] == 0, "角落应是全透明而非黑块"
+
+    def test_compressed_main_keeps_alpha(self):
+        img = _decode_webp(svc.compress_image(self._transparent_png()))
+        assert "A" in img.getbands(), "主图丢失了透明通道"
+        assert img.convert("RGBA").getpixel((0, 0))[3] == 0
+
+    def test_blur_keeps_alpha(self):
+        img = _decode_webp(svc.make_blur_placeholder(self._transparent_png()))
+        assert "A" in img.getbands(), "模糊占位图丢失了透明通道"
+
+    def test_opaque_jpeg_gains_no_alpha(self):
+        """本就不透明的图不该凭空多出一层 alpha（无谓增大体积）"""
+        img = _decode_webp(svc.make_thumbnail(_make_jpeg(100, 80)))
+        assert "A" not in img.getbands()
+
+
 class TestKeyDerivation:
     def test_variant_key_suffixes(self):
         key = "customer-sampling/20260812/abc123.jpg"

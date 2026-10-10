@@ -20,9 +20,16 @@ from datetime import UTC, datetime
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi_app.core.cache_invalidation import schedule_post_commit_invalidation
 from fastapi_app.core.exceptions import BusinessError, NotFoundError
 from fastapi_app.schemas.batch import BatchImportResult, ComprehensiveImportResult, ExcelUpload
-from fastapi_app.services.batch_import_core import _import_idem_key, _row_failure_message
+from fastapi_app.services.batch_import_cache import invalidate_batch_import_caches
+from fastapi_app.services.batch_import_core import (
+    _import_idem_key,
+    _parse_product_price,
+    _row_failure_message,
+    _save_imported_image,
+)
 from fastapi_app.services.inventory_service import calculate_available_shipment_quantity
 from fastapi_app.services.numbering import (
     generate_case_stockin_number,
@@ -32,6 +39,7 @@ from fastapi_app.services.numbering import (
     generate_stockout_number,
 )
 from fastapi_app.services.order_deduction_service import process_order_deduction
+from fastapi_app.services.xlsx_cell_images import extract_cell_images, parse_dispimg_id
 from fastapi_app.shared.stock_concurrency import check_stock_available, get_product_for_update
 from fastapi_app.shared_models import (
     CaseMovement,
@@ -153,6 +161,8 @@ async def _allocate_stockout_to_orders(
 async def _process_comprehensive_sheet(
     db: AsyncSession, sheet_type: str, sheet_name: str,
     data_list: list, results: ComprehensiveImportResult,
+    cell_images: dict[str, bytes] | None = None,
+    uploader_id: int | None = None,
 ) -> None:
     """处理综合导入中的单个 Sheet。
 
@@ -162,6 +172,8 @@ async def _process_comprehensive_sheet(
         sheet_name: Sheet 名称（用于日志和错误信息）。
         data_list: 解析后的行数据列表。
         results: 综合导入结果对象，原地更新。
+        cell_images: 工作簿内的单元格图片（图片 ID → 字节），仅产品 Sheet 使用。
+        uploader_id: 图片落库时登记的上传人。
     """
     entry = _SHEET_IMPORTERS.get(sheet_type)
     if entry is None:
@@ -173,7 +185,9 @@ async def _process_comprehensive_sheet(
         # 计数在 savepoint 成功退出后才累加，保证上报数与实际落库一致
         async with db.begin_nested():
             # 四种 Sheet 的导入函数现在统一返回 (计数, 行级消息列表)。
-            count, messages = await importer(db, data_list)
+            count, messages = await _call_sheet_importer(
+                importer, db, data_list, cell_images, uploader_id,
+            )
         results.imported[count_key] += count
         if messages:
             # 行级消息（含去重跳过原因）此前被整体丢弃，用户只能看到
@@ -183,6 +197,20 @@ async def _process_comprehensive_sheet(
         # savepoint 上下文退出时已回滚本 Sheet 的未提交行
         logger.error(f'综合导入 - Sheet {sheet_name} 导入失败: {e}', exc_info=True)
         results.errors.append(f'Sheet {sheet_name} 导入失败')
+
+
+async def _call_sheet_importer(
+    importer, db: AsyncSession, data_list: list,
+    cell_images: dict[str, bytes] | None, uploader_id: int | None,
+) -> tuple[int, list]:
+    """调用 Sheet 导入函数。
+
+    只有产品导入接收单元格图片与上传人（其余 Sheet 无图片列），故在此分派，
+    而不是让所有导入函数都背上一组用不到的参数。
+    """
+    if importer is import_products_from_data:
+        return await importer(db, data_list, cell_images=cell_images, uploader_id=uploader_id)
+    return await importer(db, data_list)
 
 
 async def read_template_bytes() -> tuple[bytes, str]:
@@ -296,6 +324,8 @@ async def import_orders_service(db: AsyncSession, file: ExcelUpload) -> BatchImp
                 skipped += 1
                 continue
         # 提交交给请求级事务（get_async_db），服务层不再手动 commit
+        if imported > 0:
+            schedule_post_commit_invalidation(db, invalidate_batch_import_caches)
         return _build_batch_result(imported, skipped, errors, success_msg='成功导入', fail_msg='没有成功导入任何订单')
     except (OSError, ValueError) as exc:
         await db.rollback()  # manual-tx: try/except 内显式事务控制
@@ -380,6 +410,8 @@ async def import_case_stockouts_service(db: AsyncSession, file: ExcelUpload) -> 
                 skipped += 1
                 continue
         # 提交交给请求级事务（get_async_db），服务层不再手动 commit
+        if imported > 0:
+            schedule_post_commit_invalidation(db, invalidate_batch_import_caches)
         return _build_batch_result(imported, skipped, errors, success_msg='成功导入皮套出库', fail_msg='没有成功导入任何皮套出库')
     except (OSError, ValueError) as exc:
         await db.rollback()  # manual-tx: try/except 内显式事务控制
@@ -458,6 +490,8 @@ async def import_case_stockins_service(db: AsyncSession, file: ExcelUpload) -> B
                 skipped += 1
                 continue
         # 提交交给请求级事务（get_async_db），服务层不再手动 commit
+        if imported > 0:
+            schedule_post_commit_invalidation(db, invalidate_batch_import_caches)
         return _build_batch_result(imported, skipped, errors, success_msg='成功导入皮套入库', fail_msg='没有成功导入任何皮套入库')
     except (OSError, ValueError) as exc:
         await db.rollback()  # manual-tx: try/except 内显式事务控制
@@ -540,6 +574,8 @@ async def import_stockins_service(db: AsyncSession, file: ExcelUpload) -> BatchI
                 skipped += 1
                 continue
         # 提交交给请求级事务（get_async_db），服务层不再手动 commit
+        if imported > 0:
+            schedule_post_commit_invalidation(db, invalidate_batch_import_caches)
         return _build_batch_result(imported, skipped, errors, success_msg='成功导入备货', fail_msg='没有成功导入任何备货')
     except (OSError, ValueError) as exc:
         await db.rollback()  # manual-tx: try/except 内显式事务控制
@@ -643,6 +679,8 @@ async def import_stockouts_service(db: AsyncSession, file: ExcelUpload) -> Batch
                 skipped += 1
                 continue
         # 提交交给请求级事务（get_async_db），服务层不再手动 commit
+        if imported > 0:
+            schedule_post_commit_invalidation(db, invalidate_batch_import_caches)
         return _build_batch_result(imported, skipped, errors, success_msg='成功导入出货', fail_msg='没有成功导入任何出货')
     except (OSError, ValueError) as exc:
         await db.rollback()  # manual-tx: try/except 内显式事务控制
@@ -650,13 +688,18 @@ async def import_stockouts_service(db: AsyncSession, file: ExcelUpload) -> Batch
         return BatchImportResult(success=False, message='导入失败，请稍后重试')
 
 
-async def import_products_service(db: AsyncSession, file: ExcelUpload) -> BatchImportResult:
-    """批量导入产品 - 支持统一模板格式。
+async def import_products_service(
+    db: AsyncSession, file: ExcelUpload, *, uploader_id: int | None = None,
+) -> BatchImportResult:
+    """批量导入产品 - 支持统一模板格式（含 WPS 单元格图片）。
+
+    「图片」列由 WPS 写成 ``=DISPIMG("ID_xxx",1)``，图片字节集中在工作簿的
+    ``xl/cellimages.xml`` 里，故解析 sheet 之外还要把图片一并取出来落库。
 
     Args:
         file: 上传的 Excel 文件（.xlsx 格式）。
         db: 异步数据库会话（读写主库）。
-        current_user: 当前登录用户（仅需通过权限校验）。
+        uploader_id: 图片落库时登记的上传人（由端点传入当前用户 id）。
 
     Returns:
         BatchImportResult: 包含导入结果、消息和条数的响应。
@@ -666,7 +709,9 @@ async def import_products_service(db: AsyncSession, file: ExcelUpload) -> BatchI
     if (file_err := _validate_xlsx_file(file)):
         return file_err
     try:
-        data_list, err = await _read_excel_sheets(file, ['产品管理'], '没有找到"产品管理"Sheet')
+        data_list, err, cell_images = await _read_excel_sheets_with_cell_images(
+            file, ['产品管理'], '没有找到"产品管理"Sheet',
+        )
         if err:
             return BatchImportResult(success=False, message=err)
         data_list = _require_not_none(data_list, 'Excel 解析')
@@ -681,6 +726,8 @@ async def import_products_service(db: AsyncSession, file: ExcelUpload) -> BatchI
                     barcode = row_data.get('69码') or row_data.get('条码')
                     price = row_data.get('产品价格') or row_data.get('价格')
                     initial_stock = row_data.get('初始库存') or 0
+                    image_id = parse_dispimg_id(row_data.get('图片') or row_data.get('产品图片'))
+                    image_bytes = cell_images.get(image_id) if image_id else None
                     if not name:
                         skipped += 1
                         continue
@@ -688,23 +735,26 @@ async def import_products_service(db: AsyncSession, file: ExcelUpload) -> BatchI
                     # 检查产品是否已存在（按名称忽略大小写）
                     existing = await get_product_by_name_ci(db, name)
                     if existing:
+                        # 该行带图片 → 按模板覆盖（便于批量修图；与 core 的同名逻辑一致）
+                        if image_bytes is not None:
+                            image_key = await _save_imported_image(db, image_bytes, name, uploader_id)
+                            if image_key:
+                                existing.image = image_key
+                                imported += 1
+                                continue
                         skipped += 1
                         continue
                     try:
                         stock = int(initial_stock) if initial_stock else 0
                     except ValueError:
                         stock = 0
-                    try:
-                        # Decimal(str(...)) 直转：避免 float 二进制近似值进入 Numeric 列
-                        from decimal import Decimal, InvalidOperation
-
-                        price_val = Decimal(str(price)) if price else Decimal('0')
-                    except (ValueError, TypeError, InvalidOperation):
-                        price_val = Decimal('0')
                     product = Product(
                         name=name, barcode=str(barcode).strip() if barcode else '',
-                        price=price_val, initial_stock=stock, current_stock=stock,
+                        price=_parse_product_price(price, name), initial_stock=stock,
+                        current_stock=stock,
                     )
+                    if image_bytes is not None:
+                        product.image = await _save_imported_image(db, image_bytes, name, uploader_id)
                     db.add(product)
                 # savepoint 成功提交后才计数，失败行不计入 imported
                 imported += 1
@@ -715,6 +765,8 @@ async def import_products_service(db: AsyncSession, file: ExcelUpload) -> BatchI
                 skipped += 1
                 continue
         # 提交交给请求级事务（get_async_db），服务层不再手动 commit
+        if imported > 0:
+            schedule_post_commit_invalidation(db, invalidate_batch_import_caches)
         return _build_batch_result(imported, skipped, errors, success_msg='成功导入产品', fail_msg='没有找到需要导入的产品数据（可能都已存在）')
     except (OSError, ValueError) as exc:
         await db.rollback()  # manual-tx: try/except 内显式事务控制
@@ -722,16 +774,19 @@ async def import_products_service(db: AsyncSession, file: ExcelUpload) -> BatchI
         return BatchImportResult(success=False, message='导入失败，请稍后重试')
 
 
-async def import_comprehensive_service(db: AsyncSession, file: ExcelUpload) -> ComprehensiveImportResult:
+async def import_comprehensive_service(
+    db: AsyncSession, file: ExcelUpload, *, uploader_id: int | None = None,
+) -> ComprehensiveImportResult:
     """综合批量导入 - 支持4个Sheet自动识别。
 
     自动识别 Sheet 类型：产品管理、订单管理、备货管理、出货管理。
     每个 Sheet 独立处理，单个 Sheet 失败不影响其他 Sheet。
+    「产品管理」Sheet 的 WPS 单元格图片（``=DISPIMG(...)``）会一并落库。
 
     Args:
         file: 上传的 Excel 文件（.xlsx 格式）。
         db: 异步数据库会话（读写主库）。
-        current_user: 当前登录用户（仅需通过权限校验）。
+        uploader_id: 图片落库时登记的上传人（由端点传入当前用户 id）。
 
     Returns:
         ComprehensiveImportResult: 包含各类型导入数量和错误列表的响应。
@@ -749,6 +804,8 @@ async def import_comprehensive_service(db: AsyncSession, file: ExcelUpload) -> C
             results = ComprehensiveImportResult(success=True)
             # Sheet 名称到类型的映射
             sheet_mapping = {'产品管理': 'product', '订单管理': 'order', '备货管理': 'stockin', '出货管理': 'stockout'}
+            # 单元格图片只与产品 Sheet 相关；工作簿里没有 cellimages.xml 时立刻返回空字典
+            cell_images = await asyncio.to_thread(extract_cell_images, temp_path)
             for sheet_name in sheets:
                 sheet_type = _identify_sheet_type(sheet_name, sheet_mapping)
                 if not sheet_type:
@@ -759,7 +816,10 @@ async def import_comprehensive_service(db: AsyncSession, file: ExcelUpload) -> C
                     continue
                 if not data_list:
                     continue
-                await _process_comprehensive_sheet(db, sheet_type, sheet_name, data_list, results)
+                await _process_comprehensive_sheet(
+                    db, sheet_type, sheet_name, data_list, results,
+                    cell_images=cell_images, uploader_id=uploader_id,
+                )
             results.message = '导入完成！'
         # 提交交给请求级事务（get_async_db）：全部 Sheet 在同一事务内原子落库，
         # 单 Sheet 失败已被 savepoint 隔离，无需在此手动 commit
@@ -788,6 +848,7 @@ from fastapi_app.services.batch_import_parser import (  # noqa: F401
     _identify_sheet_type,
     _parse_import_row,
     _read_excel_sheets,
+    _read_excel_sheets_with_cell_images,
     _save_uploaded_file,
     _validate_xlsx_file,
     cleanup_temp_file,

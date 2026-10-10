@@ -196,7 +196,7 @@ async def batch_import_products(
     """
     return await run_guarded_import(
         db, file, TYPE_PRODUCTS, current_user,
-        lambda f: import_products_service(db, f),
+        lambda f: import_products_service(db, f, uploader_id=current_user.id),
     )
 
 
@@ -221,5 +221,5 @@ async def batch_import_comprehensive(
     """
     return await run_guarded_import(
         db, file, TYPE_COMPREHENSIVE, current_user,
-        lambda f: import_comprehensive_service(db, f),
+        lambda f: import_comprehensive_service(db, f, uploader_id=current_user.id),
     )

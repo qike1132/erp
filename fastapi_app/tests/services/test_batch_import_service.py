@@ -10,7 +10,15 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from fastapi_app.services import batch_import_service
+from fastapi_app.services import batch_import_core, batch_import_service
+
+_FAKE_IMAGE_KEY = '20261009/imported.webp'
+
+
+async def _fake_save_image(db, image_bytes, name, uploader_id):
+    """替身：不落对象存储，直接返回一个稳定的 storage key。"""
+    assert image_bytes, '图片字节不应为空'
+    return _FAKE_IMAGE_KEY
 
 
 class _MockNested:
@@ -379,3 +387,137 @@ class TestProductDedupeIntegration:
         )
         assert any('行3' in m for m in messages), f'与库中重复未回显: {messages}'
         assert any('行4' in m for m in messages), f'批内重复未回显: {messages}'
+
+
+class TestImportProductsWithImages:
+    """「图片」列（WPS 单元格图片 ``=DISPIMG(...)``）随产品落库的行为。
+
+    图片字节由调用方从工作簿提取（``cell_images``）；落对象存储的
+    :func:`_save_imported_image` 在此替换为替身，只验证「谁拿到了哪张图」。
+    """
+
+    _PNG = b'\x89PNG\r\n\x1a\n' + b'\x00' * 8
+
+    @staticmethod
+    def _db(existing_names=(), existing_product=None):
+        """第 1 次 execute 是预加载（.all()），其后是已存在产品的查询（.scalars().first()）。"""
+        db = AsyncMock()
+        preload = MagicMock()
+        preload.all.return_value = [(n,) for n in existing_names]
+        lookup = MagicMock()
+        lookup.scalars.return_value.first.return_value = existing_product
+        calls = {'n': 0}
+
+        async def _execute(*args, **kwargs):
+            calls['n'] += 1
+            return preload if calls['n'] == 1 else lookup
+
+        db.execute = AsyncMock(side_effect=_execute)
+        db.flush = AsyncMock()
+        db.add = MagicMock()
+        return db
+
+    @pytest.mark.asyncio
+    async def test_new_product_gets_image(self, monkeypatch):
+        monkeypatch.setattr(batch_import_core, '_save_imported_image', _fake_save_image)
+        db = self._db()
+        data = [{"产品名称": "新品A", "69码": "6901", "图片": '=DISPIMG("ID_X",1)'}]
+
+        count, _ = await batch_import_service.import_products_from_data(
+            db, data, cell_images={'ID_X': self._PNG},
+        )
+
+        assert count == 1
+        assert db.add.call_args_list[0].args[0].image == _FAKE_IMAGE_KEY
+
+    @pytest.mark.asyncio
+    async def test_row_with_image_bypasses_existing_dedupe(self, monkeypatch):
+        """带图片的行必须走到行处理器：否则同名产品的图片永远补不上。"""
+        monkeypatch.setattr(batch_import_core, '_save_imported_image', _fake_save_image)
+        product = MagicMock()
+        product.image = None
+        db = self._db(existing_names=['已有品'], existing_product=product)
+        data = [{"产品名称": "已有品", "图片": '=DISPIMG("ID_X",1)'}]
+
+        count, messages = await batch_import_service.import_products_from_data(
+            db, data, cell_images={'ID_X': self._PNG},
+        )
+
+        assert count == 1, '已存在且无图的产品应补图并计入导入'
+        assert product.image == _FAKE_IMAGE_KEY
+        assert not any('重复' in m for m in messages), f'补图行不应报重复: {messages}'
+
+    @pytest.mark.asyncio
+    async def test_existing_image_is_overwritten(self, monkeypatch):
+        """带图的行按模板覆盖已有图片 —— 批量修图必须能落到已有产品上"""
+        monkeypatch.setattr(batch_import_core, '_save_imported_image', _fake_save_image)
+        product = MagicMock()
+        product.image = '20260101/old.webp'
+        db = self._db(existing_names=['已有品'], existing_product=product)
+        data = [{"产品名称": "已有品", "图片": '=DISPIMG("ID_X",1)'}]
+
+        count, messages = await batch_import_service.import_products_from_data(
+            db, data, cell_images={'ID_X': self._PNG},
+        )
+
+        assert count == 1
+        assert product.image == _FAKE_IMAGE_KEY, '已有图片应被模板里的图替换'
+        assert not any('重复' in m for m in messages), f'覆盖行不应报重复: {messages}'
+
+    @pytest.mark.asyncio
+    async def test_in_file_duplicate_image_rows_are_reported(self, monkeypatch):
+        """同文件内两条同名带图行：保留首条，第二条回显跳过（不能撞唯一约束）"""
+        monkeypatch.setattr(batch_import_core, '_save_imported_image', _fake_save_image)
+        db = self._db()
+        data = [
+            {"产品名称": "新品A", "图片": '=DISPIMG("ID_X",1)'},
+            {"产品名称": "新品A", "图片": '=DISPIMG("ID_Y",1)'},
+        ]
+
+        count, messages = await batch_import_service.import_products_from_data(
+            db, data, cell_images={'ID_X': self._PNG, 'ID_Y': self._PNG},
+        )
+
+        assert count == 1
+        assert any('文件内重复' in m and '行3' in m for m in messages), (
+            f'批内重复未回显或行号错误: {messages}'
+        )
+
+    @pytest.mark.asyncio
+    async def test_image_on_later_duplicate_row_attaches_to_created_product(self, monkeypatch):
+        """同文件内「先出现无图行、后出现带图行」：图应补到刚创建的同名产品上。
+
+        带图行会绕过 DB 去重（见 ``_product_dedupe_key``），故两条同名行都会进入
+        行处理器。若只因「名称已在本批创建过」就整行跳过，后一行的图片会被静默
+        丢弃 —— 而该行带图恰恰是它绕过去重的理由。
+        """
+        monkeypatch.setattr(batch_import_core, '_save_imported_image', _fake_save_image)
+        db = self._db()
+        data = [
+            {"产品名称": "新品A", "69码": "6901"},                       # 先：无图
+            {"产品名称": "新品A", "图片": '=DISPIMG("ID_X",1)'},          # 后：带图
+        ]
+
+        count, messages = await batch_import_service.import_products_from_data(
+            db, data, cell_images={'ID_X': self._PNG},
+        )
+
+        created = db.add.call_args_list[0].args[0]
+        assert created.image == _FAKE_IMAGE_KEY, (
+            f'后出现的带图行，图片应补到文件内已创建的同名产品上: {messages}'
+        )
+        assert count == 1, f'图片只是并入已有行，不应虚增导入条数: count={count}'
+
+    @pytest.mark.asyncio
+    async def test_unresolved_image_id_is_ignored(self, monkeypatch):
+        """公式里的 ID 在 cell_images 中找不到（如手填/图被删）→ 仍导入产品，只是没图"""
+        monkeypatch.setattr(batch_import_core, '_save_imported_image', _fake_save_image)
+        db = self._db()
+        data = [{"产品名称": "新品A", "图片": '=DISPIMG("ID_MISSING",1)'}]
+
+        count, _ = await batch_import_service.import_products_from_data(
+            db, data, cell_images={'ID_OTHER': self._PNG},
+        )
+
+        assert count == 1
+        assert db.add.call_args_list[0].args[0].image is None
