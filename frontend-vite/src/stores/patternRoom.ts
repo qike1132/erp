@@ -262,16 +262,23 @@ export const usePatternRoomStore = defineStore('patternRoom', () => {
    * 内部吞掉错误，不影响调用方流程。
    */
   async function prefetch(): Promise<void> {
+    // 打样间读端点要求 customer_sampling_view 或 customer_sampling_manage
+    // （后端 require_any_permission）；无权限用户一律不预取 —— 否则每次登录都会
+    // 发出一次注定 403 的 grouped-list 请求，触发全局 axios 拦截器的「权限不足」
+    // 弹窗（表现为「其他用户一登录就显示无权限」）。
+    // 动态 import 避免与 auth store 形成循环依赖（auth store 顶部引用了本 store 的 clear）
+    const { useAuthStore } = await import('@/stores/auth')
+    const auth = useAuthStore()
+    if (!auth.hasAnyPermission(['customer_sampling_view', 'customer_sampling_manage'])) return
+
     const snap = getGroupedSnapshot(undefined, 'in_progress', 1)
     if (!snap || !snap.isFresh) {
       void fetchGrouped(undefined, 'in_progress', 1).catch(() => { /* 预取失败静默 */ })
     }
+    // 版师列表接口比读权限更严：只认 customer_sampling_manage，单独判定
+    if (!auth.hasPermission('customer_sampling_manage')) return
     const makers = getMakersSnapshot()
     if (!makers || !makers.isFresh) {
-      // 版师列表接口要求 customer_sampling_manage 权限，无权限用户不预取，避免每次登录产生 403 噪音
-      // 动态 import 避免与 auth store 形成循环依赖（auth store 顶部引用了本 store 的 clear）
-      const { useAuthStore } = await import('@/stores/auth')
-      if (!useAuthStore().hasPermission('customer_sampling_manage')) return
       void fetchMakers().catch(() => { /* 预取失败静默 */ })
     }
   }
