@@ -184,3 +184,5 @@ AI 说"修好了/应该没问题/测试过了"而实际没跑，是最高频的 
 ## 9. 可选工具
 
 GraphFlow MCP（`graphflow_*`）可作上下文压缩/规划辅助，**只是工具，不定义本项目约定**。使用时 `rootDir` 传本仓库绝对路径；`graphflow_context` 返回的是提示，不是项目事实。
+
+GraphFlow 的**行为规则**（何时调用哪个工具、`rootDir` 传法）由**用户级** `~/.claude/rules/graphflow.md` 统一提供——该文件是安装器托管的管理块，不要复制到本仓。项目级 `.claude/rules/graphflow.md`（未入库、被 `.gitignore:383` 忽略）只放用户级没有的补充（`graphflow_run` 后的 `report_outcome` 闭环、CLI 回退形式），**不要再往里塞行为规则或安装步骤**——两处写同一件事会制造第二真相源（§8）。
