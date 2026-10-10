@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><title>复现：UiSelect 溢出</title>
+<style>
+  .row { display: flex; gap: 8px; align-items: center; width: 500px; border: 1px dashed #ccc; padding: 4px; }
+  .root { width: 150px; position: relative; }
+  .anchor { display: flex; }
+  .inp { width: 100%; padding: 0 2.5rem 0 0.75rem; font-size: 13.5px; height: 40px; box-sizing: border-box; border: 2px solid #bae6fd; border-radius: 10px; }
+  .inp-fixed { min-width: 0; }
+  .search { width: 260px; padding: 0 12px; height: 40px; border: 2px solid #bae6fd; background: #f8fafc; box-sizing: border-box; }
+</style>
+</head>
+<body>
+<h3>现状复现（无 min-width:0）</h3>
+<div class="row">
+  <div class="root"><div class="anchor"><input id="a1" class="inp" value="全部客户"></div></div>
+  <input class="search" placeholder="搜索产品名称或69码...">
+</div>
+<h3>修复后（min-width:0）</h3>
+<div class="row">
+  <div class="root"><div class="anchor"><input id="a2" class="inp inp-fixed" value="全部客户"></div></div>
+  <input class="search" placeholder="搜索产品名称或69码...">
+</div>
+<pre id="out"></pre>
+<script>
+  const out = []
+  for (const id of ['a1', 'a2']) {
+    const el = document.getElementById(id)
+    const r = el.getBoundingClientRect()
+    const rootR = el.closest('.root').getBoundingClientRect()
+    out.push({ id, inputW: Math.round(r.width), rootW: Math.round(rootR.width), overflow: Math.round(r.right - rootR.right) })
+  }
+  document.getElementById('out').textContent = JSON.stringify(out, null, 2)
+</script>
+</body>
+</html>

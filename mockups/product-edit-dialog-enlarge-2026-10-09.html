@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>产品编辑弹窗 · 放大 — 效果图 (2026-10-09)</title>
+<style>
+  :root {
+    --primary-50:#eff5ff; --primary-100:#d6e4ff; --primary-200:#b8ccff;
+    --primary-300:#8babf5; --primary-400:#6d95f0; --primary-500:#5b8def;
+    --primary-600:#3a6bd6; --primary-700:#2d5ab8;
+    --success-50:#e8f9ef; --success-400:#4ade80; --success-600:#16a34a; --success-700:#2e7d32;
+    --danger-500:#ea5455;
+    --surface:#f4f6fc; --border:#e4e7ed; --border-light:#f0f2f5; --border-strong:#cbd5e1;
+    --text:#1a1a2e; --text-secondary:#475569; --text-muted:#64748b;
+    --slate-50:#f8fafc; --slate-100:#f1f5f9; --slate-200:#e2e8f0; --slate-300:#cbd5e1;
+    --ocean-deep:#87ceeb;
+    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Roboto, sans-serif;
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family:var(--font); background:var(--surface); color:var(--text); padding:22px; font-size:14px; }
+
+  .mock-note { max-width:1240px; margin:0 auto 18px; background:linear-gradient(135deg,#fff,var(--primary-50));
+    border:1px solid var(--primary-200); border-radius:14px; padding:14px 18px; font-size:12.5px; color:var(--text-secondary); line-height:1.7; }
+  .mock-note h1 { font-size:16px; color:var(--text); margin-bottom:6px; }
+  .mock-note b { color:var(--primary-700); }
+  .mock-note .tagline { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+  .mock-note .tag { background:#fff; border:1px solid var(--primary-200); border-radius:12px; padding:3px 10px; font-weight:600; color:var(--primary-700); }
+
+  /* 规格对照表 */
+  .spec { max-width:1240px; margin:0 auto 22px; background:#fff; border:1px solid var(--border); border-radius:14px; overflow:hidden; }
+  .spec table { width:100%; border-collapse:collapse; font-size:12.5px; }
+  .spec th, .spec td { padding:9px 14px; text-align:left; border-bottom:1px solid var(--border-light); }
+  .spec thead th { background:var(--slate-50); font-size:12px; color:var(--text-muted); font-weight:700; letter-spacing:.02em; }
+  .spec tbody tr:last-child td { border-bottom:none; }
+  .spec td.k { color:var(--text-secondary); font-weight:600; width:200px; }
+  .spec .rec { background:var(--primary-50); }
+  .spec .rec-tag { display:inline-block; background:var(--primary-500); color:#fff; font-size:10.5px; font-weight:700;
+    border-radius:999px; padding:1px 8px; margin-left:6px; vertical-align:1px; }
+
+  /* 每个方案的外框 */
+  .opt { max-width:1240px; margin:0 auto 30px; }
+  .opt-head { display:flex; align-items:baseline; gap:12px; margin:0 0 10px 4px; }
+  .opt-head h2 { font-size:14px; font-weight:700; }
+  .opt-head .dim { font-size:12px; color:var(--text-muted); font-variant-numeric:tabular-nums; }
+  .opt-head .badge { font-size:10.5px; font-weight:700; border-radius:999px; padding:2px 9px; }
+  .badge-now { background:var(--slate-200); color:var(--text-secondary); }
+  .badge-rec { background:var(--primary-500); color:#fff; }
+  .badge-alt { background:#fff; border:1px solid var(--border-strong); color:var(--text-secondary); }
+
+  /* 弹窗本体（贴合线上结构：overlay > content > header / body / footer） */
+  .stage { background:#dfe4ee; border-radius:14px; padding:26px 18px; display:flex; justify-content:center; }
+  .stage.tall { padding:34px 18px; }
+
+  .dlg { background:#fff; border-radius:18px; box-shadow:0 20px 60px rgba(0,0,0,.15); overflow:hidden;
+    display:flex; flex-direction:column; width:100%; }
+  .dlg-head { display:flex; justify-content:space-between; align-items:center;
+    padding:20px 28px; border-bottom:1px solid var(--border-light); }
+  .dlg-title { display:flex; align-items:center; gap:10px; font-size:16px; font-weight:700; color:var(--text); }
+  .dlg-title .ic { color:var(--primary-500); }
+  .dlg-close { width:36px; height:36px; border:none; background:var(--slate-50); border-radius:50%;
+    display:flex; align-items:center; justify-content:center; color:var(--text-secondary); font-size:15px; }
+  .dlg-body { padding:20px; background:var(--slate-50); }
+  .dlg-foot { display:flex; justify-content:flex-end; align-items:center; gap:10px;
+    padding:20px 28px; background:#fff; border-top:1px solid var(--border-light); }
+
+  /* 表单 */
+  .fg { margin-bottom:16px; }
+  .fg:last-child { margin-bottom:0; }
+  .lab { display:block; font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:6px; line-height:1.4; }
+  .req { color:var(--danger-500); font-weight:700; }
+  .iw { position:relative; }
+  .iw .ii { position:absolute; left:12px; top:50%; transform:translateY(-50%); color:var(--text-secondary); font-size:14px; pointer-events:none; }
+  .inp { width:100%; padding:8px 12px 8px 36px; font-size:14px; line-height:1.5; color:var(--text);
+    background:#fff; border:2px solid var(--border-light); border-radius:10px; font-family:inherit; }
+  .inp.ph { color:#94a3b8; }
+  .sel::after { content:"▾"; position:absolute; right:13px; top:50%; transform:translateY(-50%); color:var(--text-secondary); font-size:12px; pointer-events:none; }
+
+  /* 客户多选（复刻 pcs-field） */
+  .pcs { display:flex; flex-wrap:wrap; align-items:center; gap:6px; min-height:40px; padding:6px 32px 6px 12px;
+    border:2px solid var(--border-light); border-radius:10px; background:#fff; position:relative; }
+  .pcs .caret { position:absolute; right:12px; top:50%; transform:translateY(-50%); color:var(--text-secondary); font-size:12px; }
+  .chip { display:inline-flex; align-items:center; gap:4px; padding:2px 6px 2px 10px; font-size:12.5px; font-weight:600;
+    color:var(--primary-600); background:var(--primary-50); border:1px solid var(--primary-100); border-radius:999px; }
+  .chip b { opacity:.6; font-weight:400; }
+
+  /* 上传区 */
+  .drop { display:flex; justify-content:space-between; align-items:center; padding:8px 12px; background:#fff;
+    border:2px solid var(--border-light); border-radius:12px; min-height:40px; }
+  .drop .txt { display:flex; align-items:center; gap:8px; font-size:14px; color:var(--text-muted); }
+  .drop .thumb { height:28px; width:28px; border-radius:6px; background:linear-gradient(135deg,#c7d2fe,#a5b4fc);
+    border:1px solid var(--border); }
+
+  /* 按钮 */
+  .btn { padding:10px 20px; border-radius:10px; font-size:13px; font-weight:600; font-family:inherit; }
+  .btn-cancel { background:#fff; color:var(--text); border:2px solid var(--border-light); }
+  .btn-save { background:linear-gradient(135deg,var(--primary-500),var(--primary-600)); color:#fff;
+    border:2px solid var(--primary-500); display:inline-flex; align-items:center; gap:6px; }
+
+  /* ===== 方案 A / C 的放大变量 ===== */
+  .scaleA .dlg { max-width:1080px; }
+  .scaleA .dlg-head { padding:22px 28px; }
+  .scaleA .dlg-title { font-size:17px; }
+  .scaleA .dlg-body { padding:24px 28px; }
+  .scaleA .grid { display:grid; grid-template-columns:1fr 1fr; gap:18px 24px; }
+  .scaleA .grid .span2 { grid-column:1 / -1; }
+  @media (max-width:800px) { .scaleA .grid { grid-template-columns:1fr; } }
+  .scaleA .fg { margin-bottom:0; }
+  .scaleA .lab { font-size:13px; margin-bottom:8px; }
+  .scaleA .inp { padding:11px 14px 11px 40px; font-size:15px; border-radius:12px; }
+  .scaleA .iw .ii { left:14px; font-size:15px; }
+  .scaleA .pcs { min-height:44px; padding:8px 34px 8px 14px; border-radius:12px; }
+  .scaleA .pcs .placeholder { font-size:15px; }
+  .scaleA .drop { min-height:52px; padding:11px 14px; border-radius:12px; }
+  .scaleA .drop .txt { font-size:14.5px; }
+  .scaleA .drop .thumb { height:40px; width:40px; border-radius:8px; }
+  .scaleA .dlg-foot { padding:18px 28px; }
+  .scaleA .btn { padding:11px 22px; font-size:14px; border-radius:11px; }
+
+  .scaleC .dlg { max-width:1200px; }
+  .scaleC .dlg-head { padding:24px 32px; }
+  .scaleC .dlg-title { font-size:18px; }
+  .scaleC .dlg-body { padding:24px 32px; background:var(--slate-50); }
+  .scaleC .card { background:#fff; border:1px solid var(--border); border-radius:14px; padding:20px 22px; margin-bottom:18px; }
+  .scaleC .card:last-child { margin-bottom:0; }
+  .scaleC .card-h { font-size:12.5px; font-weight:700; color:var(--text-muted); letter-spacing:.04em;
+    margin-bottom:16px; display:flex; align-items:center; gap:8px; }
+  .scaleC .card-h::after { content:""; flex:1; height:1px; background:var(--border-light); }
+  .scaleC .grid { display:grid; grid-template-columns:1fr 1fr; gap:20px 26px; }
+  .scaleC .grid .span2 { grid-column:1 / -1; }
+  .scaleC .fg { margin-bottom:0; }
+  .scaleC .lab { font-size:13.5px; margin-bottom:9px; }
+  .scaleC .inp { padding:13px 16px 13px 44px; font-size:16px; border-radius:12px; }
+  .scaleC .iw .ii { left:15px; font-size:16px; }
+  .scaleC .pcs { min-height:50px; padding:9px 36px 9px 15px; border-radius:12px; }
+  .scaleC .chip { font-size:13.5px; padding:4px 8px 4px 12px; }
+  .scaleC .drop { min-height:60px; padding:13px 16px; border-radius:12px; }
+  .scaleC .drop .txt { font-size:15px; }
+  .scaleC .drop .thumb { height:46px; width:46px; border-radius:9px; }
+  .scaleC .dlg-foot { padding:20px 32px; }
+  .scaleC .btn { padding:12px 24px; font-size:14.5px; border-radius:11px; }
+
+  .foot-note { max-width:1240px; margin:6px auto 0; font-size:12px; color:var(--text-muted); line-height:1.8; }
+  .foot-note code { background:var(--slate-100); border-radius:4px; padding:1px 5px; font-size:11.5px; }
+</style>
+</head>
+<body>
+
+<div class="mock-note">
+  <h1>产品编辑弹窗 · 放大 — 效果图</h1>
+  <b>问题：</b>现在编辑产品的弹窗只有 <b>800px</b> 宽、6 个字段<b>单列</b>堆叠，在 1920 宽的屏幕上左右大片留白，控件也偏小（输入框 14px / 高约 36px），看着"缩"在中间。<br>
+  <b>目标：</b>把弹窗和控件整体放大一档，宽度利用起来改双列，常用字段一屏看完不用滚。<b>字段、顺序、接口、校验全部不变</b>，只改尺寸与排布。
+  <div class="tagline">
+    <span class="tag">字段不变</span>
+    <span class="tag">接口不变</span>
+    <span class="tag">交互不变</span>
+    <span class="tag">只动 CSS + 模板包一层栅格</span>
+  </div>
+</div>
+
+<div class="spec">
+  <table>
+    <thead>
+      <tr><th>规格</th><th>现状</th><th class="rec">方案 A · 加宽双列<span class="rec-tag">推荐</span></th><th>方案 C · 再大一档 + 分组</th></tr>
+    </thead>
+    <tbody>
+      <tr><td class="k">弹窗宽度</td><td>800px</td><td class="rec">1080px</td><td>1200px</td></tr>
+      <tr><td class="k">排布</td><td>单列</td><td class="rec">双列（名称/图片通栏）</td><td>双列 + 两张分组卡片</td></tr>
+      <tr><td class="k">输入框字号</td><td>14px</td><td class="rec">15px</td><td>16px</td></tr>
+      <tr><td class="k">输入框内边距</td><td>8 / 12px</td><td class="rec">11 / 14px</td><td>13 / 16px</td></tr>
+      <tr><td class="k">标签字号</td><td>12px</td><td class="rec">13px</td><td>13.5px</td></tr>
+      <tr><td class="k">内边距</td><td>20px</td><td class="rec">24 / 28px</td><td>24 / 32px</td></tr>
+      <tr><td class="k">图片缩略图</td><td>28px</td><td class="rec">40px</td><td>46px</td></tr>
+      <tr><td class="k">改动量</td><td>—</td><td class="rec">小（改 <code>&lt;style&gt;</code> + 套一层 grid）</td><td>中（拆两张卡片容器）</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ===================== 现状 ===================== -->
+<div class="opt">
+  <div class="opt-head">
+    <h2>现状</h2>
+    <span class="badge badge-now">当前线上</span>
+    <span class="dim">max-width 800px · 单列 · 输入 14px</span>
+  </div>
+  <div class="stage tall">
+    <div class="dlg" style="max-width:800px;">
+      <div class="dlg-head">
+        <div class="dlg-title"><span class="ic">✎</span><span>编辑产品 - 小熊毛绒玩具</span></div>
+        <button class="dlg-close">✕</button>
+      </div>
+      <div class="dlg-body">
+        <div class="fg">
+          <label class="lab">产品名称 <span class="req">*</span></label>
+          <div class="iw"><span class="ii">🏷</span><input class="inp" value="小熊毛绒玩具" readonly /></div>
+        </div>
+        <div class="fg">
+          <label class="lab">69码/商品条码</label>
+          <div class="iw"><span class="ii">▥</span><input class="inp" value="6958085574210" readonly /></div>
+        </div>
+        <div class="fg">
+          <label class="lab">产品价格</label>
+          <div class="iw"><span class="ii">¥</span><input class="inp" value="39.90" readonly /></div>
+        </div>
+        <div class="fg">
+          <label class="lab">工厂</label>
+          <div class="iw sel"><span class="ii">🏭</span><input class="inp" value="东莞" readonly /></div>
+        </div>
+        <div class="fg">
+          <label class="lab">所属客户</label>
+          <div class="pcs"><span class="chip">华越玩具 <b>×</b></span><span class="chip">宝利进出口 <b>×</b></span><span class="caret">▾</span></div>
+        </div>
+        <div class="fg">
+          <label class="lab">产品图片</label>
+          <div class="drop"><span class="txt">🖼 点击选择 / 拖拽 / 粘贴图片 · 支持 JPG/PNG</span></div>
+        </div>
+      </div>
+      <div class="dlg-foot">
+        <button class="btn btn-cancel">取消</button>
+        <button class="btn btn-save">💾 保存修改</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== 方案 A ===================== -->
+<div class="opt scaleA">
+  <div class="opt-head">
+    <h2>方案 A — 加宽 + 双列</h2>
+    <span class="badge badge-rec">推荐</span>
+    <span class="dim">max-width 1080px · 双列 · 输入 15px/44px</span>
+  </div>
+  <div class="stage">
+    <div class="dlg">
+      <div class="dlg-head">
+        <div class="dlg-title"><span class="ic">✎</span><span>编辑产品 - 小熊毛绒玩具</span></div>
+        <button class="dlg-close">✕</button>
+      </div>
+      <div class="dlg-body">
+        <div class="grid">
+          <div class="fg span2">
+            <label class="lab">产品名称 <span class="req">*</span></label>
+            <div class="iw"><span class="ii">🏷</span><input class="inp" value="小熊毛绒玩具" readonly /></div>
+          </div>
+          <div class="fg">
+            <label class="lab">69码/商品条码</label>
+            <div class="iw"><span class="ii">▥</span><input class="inp" value="6958085574210" readonly /></div>
+          </div>
+          <div class="fg">
+            <label class="lab">产品价格</label>
+            <div class="iw"><span class="ii">¥</span><input class="inp" value="39.90" readonly /></div>
+          </div>
+          <div class="fg">
+            <label class="lab">工厂</label>
+            <div class="iw sel"><span class="ii">🏭</span><input class="inp" value="东莞" readonly /></div>
+          </div>
+          <div class="fg">
+            <label class="lab">所属客户</label>
+            <div class="pcs"><span class="chip">华越玩具 <b>×</b></span><span class="chip">宝利进出口 <b>×</b></span><span class="caret">▾</span></div>
+          </div>
+          <div class="fg span2">
+            <label class="lab">产品图片</label>
+            <div class="drop">
+              <span class="txt"><span class="thumb"></span>已选择 · 点击可更换 / 拖拽 / 粘贴</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="dlg-foot">
+        <button class="btn btn-cancel">取消</button>
+        <button class="btn btn-save">💾 保存修改</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== 方案 C ===================== -->
+<div class="opt scaleC">
+  <div class="opt-head">
+    <h2>方案 C — 再大一档 + 分组卡片</h2>
+    <span class="badge badge-alt">可选</span>
+    <span class="dim">max-width 1200px · 双列 + 分组 · 输入 16px/50px</span>
+  </div>
+  <div class="stage">
+    <div class="dlg">
+      <div class="dlg-head">
+        <div class="dlg-title"><span class="ic">✎</span><span>编辑产品 - 小熊毛绒玩具</span></div>
+        <button class="dlg-close">✕</button>
+      </div>
+      <div class="dlg-body">
+        <div class="card">
+          <div class="card-h">基本信息</div>
+          <div class="grid">
+            <div class="fg span2">
+              <label class="lab">产品名称 <span class="req">*</span></label>
+              <div class="iw"><span class="ii">🏷</span><input class="inp" value="小熊毛绒玩具" readonly /></div>
+            </div>
+            <div class="fg">
+              <label class="lab">69码/商品条码</label>
+              <div class="iw"><span class="ii">▥</span><input class="inp" value="6958085574210" readonly /></div>
+            </div>
+            <div class="fg">
+              <label class="lab">产品价格</label>
+              <div class="iw"><span class="ii">¥</span><input class="inp" value="39.90" readonly /></div>
+            </div>
+            <div class="fg">
+              <label class="lab">工厂</label>
+              <div class="iw sel"><span class="ii">🏭</span><input class="inp" value="东莞" readonly /></div>
+            </div>
+            <div class="fg">
+              <label class="lab">所属客户</label>
+              <div class="pcs"><span class="chip">华越玩具 <b>×</b></span><span class="chip">宝利进出口 <b>×</b></span><span class="caret">▾</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-h">产品图片</div>
+          <div class="drop">
+            <span class="txt"><span class="thumb"></span>已选择 · 点击可更换 / 拖拽 / 粘贴</span>
+          </div>
+        </div>
+      </div>
+      <div class="dlg-foot">
+        <button class="btn btn-cancel">取消</button>
+        <button class="btn btn-save">💾 保存修改</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="foot-note">
+  <b>落地说明：</b>改动集中在 <code>frontend-vite/src/views/product/components/ProductEditDialog.vue</code>（<code>&lt;style&gt;</code> 尺寸 + <code>&lt;div class="grid"&gt;</code> 包一层）。<br>
+  左侧「新增产品」表单（<code>ProductBasicForm.vue</code>）是窄栏里的单列，<b>本方案不动它</b>；如需一并放大请说一声。<br>
+  弹窗宽度 1080px 在 1366×768 的老机器上仍会受 <code>width:95vw</code> 约束自动收窄，双列在窄屏下会退回单列（加一条媒体查询）。<br>
+  <b>注意：</b>效果图里的图标用的是 emoji 占位，线上是 FontAwesome 真实图标。
+</div>
+
+</body>
+</html>

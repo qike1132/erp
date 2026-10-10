@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>产品列表 UI 修复对比稿 2026-10-09</title>
+<style>
+  body { font-family: "Microsoft YaHei", system-ui, sans-serif; background: #f1f5f9; margin: 0; padding: 24px; }
+  h1 { font-size: 18px; color: #1e293b; }
+  h2 { font-size: 15px; color: #475569; margin: 24px 0 8px; }
+  .frame { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; margin-bottom: 8px; }
+
+  /* ===== 现状复现 ===== */
+  .now-titlebar { display: flex; align-items: center; justify-content: space-between; gap: 8px; border-bottom: 1px solid #f1f5f9; padding: 0 0 12px; }
+  .now-titlebar .t { font-size: 14px; font-weight: 700; color: #1e293b; }
+  .now-actions { display: flex; gap: 8px; align-items: center; }
+  /* 现状：UiSelect 高 ~46.5px / 字 15px；搜索框高 44px / 字 14px */
+  .now-select { width: 150px; padding: 10px 40px 10px 16px; font-size: 15px; line-height: 1.5; border: 2px solid #bae6fd; border-radius: 12px; background: #fff; box-sizing: border-box; color: #334155; position: relative; }
+  .now-select::after { content: "▾"; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); color: #94a3b8; font-size: 12px; }
+  .now-search { width: 260px; padding: 10px 36px 10px 16px; font-size: 14px; line-height: 20px; border: 2px solid #bae6fd; border-radius: 12px; background: #f8fafc; box-sizing: border-box; color: #334155; position: relative; }
+  .now-search::after { content: "🔍"; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font-size: 14px; opacity: .6; }
+  .now-table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 13px; }
+  .now-table th { padding: 12px; background: #f8fafc; border-bottom: 2px solid #e4e7ed; font-size: 12px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: .05em; text-align: center; }
+  .now-table td { padding: 12px; border-bottom: 1px solid #e4e7ed; text-align: center; color: #334155; }
+
+  /* ===== 修复后 ===== */
+  .fix-titlebar { display: flex; align-items: center; justify-content: space-between; gap: 8px; border-bottom: 1px solid #f1f5f9; padding: 0 0 12px; }
+  .fix-titlebar .t { font-size: 14px; font-weight: 700; color: #1e293b; }
+  .fix-actions { display: flex; gap: 8px; align-items: center; }
+  .fix-select, .fix-search { height: 40px; box-sizing: border-box; font-size: 13.5px; line-height: 1; border: 2px solid #bae6fd; border-radius: 10px; background: #fff; color: #334155; position: relative; }
+  .fix-select { width: 150px; padding: 0 34px 0 12px; appearance: none; }
+  .fix-select::after { content: "▾"; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); color: #94a3b8; font-size: 12px; pointer-events: none; }
+  .fix-search { width: 260px; padding: 0 36px 0 12px; background: #f8fafc; }
+  .fix-search::after { content: "🔍"; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font-size: 13px; opacity: .6; }
+  .fix-table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 13px; table-layout: fixed; }
+  .fix-table th { padding: 12px 8px; background: #f8fafc; border-bottom: 2px solid #e4e7ed; font-size: 12px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: .05em; text-align: center; white-space: nowrap; }
+  .fix-table td { padding: 12px; border-bottom: 1px solid #e4e7ed; text-align: center; color: #334155; overflow: hidden; text-overflow: ellipsis; }
+  .fix-table col.c-img { width: 120px; } .fix-table col.c-name { width: auto; } .fix-table col.c-bar { width: 110px; }
+  .fix-table col.c-price { width: 96px; } .fix-table col.c-fac { width: 80px; } .fix-table col.c-cust { width: 140px; } .fix-table col.c-act { width: 132px; }
+</style>
+</head>
+<body>
+<h1>/product 全部客户下拉框 &amp; 表头换行 — 修复对比稿（2026-10-09）</h1>
+
+<h2>① 现状复现（为什么各坏各的）</h2>
+<div class="frame">
+  <div class="now-titlebar">
+    <span class="t"><b>📋 产品列表</b></span>
+    <div class="now-actions">
+      <div class="now-select">全部客户</div>
+      <div class="now-search"><span style="opacity:.35">搜索产品名称或69码...</span></div>
+    </div>
+  </div>
+  <table class="now-table">
+    <colgroup><col style="width:14%"><col style="width:14%"><col style="width:14%"><col style="width:14%"><col style="width:14%"><col style="width:15%"><col style="width:15%"></colgroup>
+    <thead><tr><th>产品图片</th><th>产品名称</th><th>69码</th><th>产品价格</th><th>工厂</th><th>客户</th><th>操作</th></tr></thead>
+    <tbody><tr><td>图</td><td>示例产品</td><td>69xxx</td><td>¥12.50</td><td>工厂A</td><td><span style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:999px;padding:1px 8px;font-size:12px">客户X</span></td><td>⚙ ✏ 🗑</td></tr></tbody>
+  </table>
+  <p style="font-size:12px;color:#dc2626;margin:8px 0 0">
+    现状问题：筛选框（15px 字 / 44px min-height / padding 10-40-10-16）比搜索框（14px 字 / py-2.5）高 ~3px、字大 1px、圆角 12px vs 10px →
+    并排一眼不齐。表头因容器窄 + uppercase/letter-spacing 拉宽字距，「产品价格」「工厂」被折行。
+  </p>
+</div>
+
+<h2>② 修复方案（统一控件高度 = 40px / 字 13.5px；表头 nowrap + 按列定宽）</h2>
+<div class="frame">
+  <div class="fix-titlebar">
+    <span class="t"><b>📋 产品列表</b></span>
+    <div class="fix-actions">
+      <select class="fix-select"><option>全部客户</option></select>
+      <input class="fix-search" placeholder="搜索产品名称或69码...">
+    </div>
+  </div>
+  <table class="fix-table">
+    <colgroup><col class="c-img"><col class="c-name"><col class="c-bar"><col class="c-price"><col class="c-fac"><col class="c-cust"><col class="c-act"></colgroup>
+    <thead><tr><th>产品图片</th><th>产品名称</th><th>69码</th><th>产品价格</th><th>工厂</th><th>客户</th><th>操作</th></tr></thead>
+    <tbody><tr><td>图</td><td>示例产品</td><td>69xxx</td><td>¥12.50</td><td>工厂A</td><td><span style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:999px;padding:1px 8px;font-size:12px">客户X</span></td><td>⚙ ✏ 🗑</td></tr></tbody>
+  </table>
+  <p style="font-size:12px;color:#16a34a;margin:8px 0 0">
+    修复点：两控件统一 height:40px / 字 13.5px / 圆角 10px（对齐 UiSearchInput 的视觉基调）→ 并排等高。
+    表头 white-space:nowrap + table-layout:fixed 按列定宽 →「产品价格」「工厂」一行显示，窄容器也不折行。
+  </p>
+</div>
+</body>
+</html>
