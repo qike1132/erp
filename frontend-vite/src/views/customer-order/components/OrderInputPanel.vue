@@ -33,12 +33,22 @@
 
         <div class="co-form-group">
           <label class="co-label" for="co-product">产品名称 <span class="co-required" aria-hidden="true">*</span></label>
-          <ProductPickerField
-            ref="productFieldRef"
-            :model-value="form.productSearch"
-            @open="pickerOpen = true"
-            @clear="clearProduct"
-          />
+          <UiAutocomplete
+            id="co-product"
+            ref="productRef"
+            v-model="form.productSearch"
+            required
+            :search-fn="searchProducts"
+            :list-fn="fetchSkuList"
+            placeholder="输入产品名称搜索，或点击查看全部"
+            :empty-text="productEmptyText"
+            @select="selectProduct"
+            @update:model-value="form.productId = 0"
+          >
+            <template #option="{ item }">
+              {{ item.name }}
+            </template>
+          </UiAutocomplete>
         </div>
 
         <div class="co-form-row">
@@ -124,27 +134,15 @@
         </p>
       </form>
     </div>
-
-    <!-- 选择产品弹窗（浏览该客户可见的全部 SKU / 关键字搜索）；UiDialog 内部 teleport 到 body -->
-    <ProductPickerDialog
-      v-model:open="pickerOpen"
-      :customer-name="form.customer"
-      :fetch-sku-list="fetchSkuList"
-      :search-products="searchProducts"
-      :sku-list-error="skuListError"
-      :search-failed="productSearchFailed"
-      @select="onProductPicked"
-    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick } from 'vue'
+import { ref, computed } from 'vue'
 import UiSelect from '@/components/ui/UiSelect.vue'
 import UiDatePicker from '@/components/ui/UiDatePicker.vue'
 import UiButton from '@/components/ui/UiButton.vue'
-import ProductPickerField from './ProductPickerField.vue'
-import ProductPickerDialog from './ProductPickerDialog.vue'
+import UiAutocomplete from '@/components/ui/UiAutocomplete.vue'
 import OrderTypeSwitch from './OrderTypeSwitch.vue'
 import OrderDeductControl from './OrderDeductControl.vue'
 import ShipmentPlanControl from './ShipmentPlanControl.vue'
@@ -162,30 +160,29 @@ import {
 
 const form = defineModel<FormState>('form', { required: true })
 
-/** 产品字段的引用：弹窗关掉后把焦点交回来，支持连续录入 */
-const productFieldRef = ref<{ focus: () => void } | null>(null)
-/** 选择产品弹窗开关 */
-const pickerOpen = ref(false)
+/** 产品输入框引用：提交一条后把焦点交回这里，支持连续录入。
+ * UiAutocomplete 是泛型组件，无法用 InstanceType，故按暴露的接口结构声明。 */
+const productRef = ref<{ focusInput?: () => void } | null>(null)
+
+/** 供父组件在新增成功后调用 */
+function focusProductInput() {
+  productRef.value?.focusInput?.()
+}
 
 /**
- * 供父组件在新增成功后调用。
- * 方案 B（2026-10-10）下产品字段不再有文本输入框，连续录入的等价动作是**直接打开选择弹窗** ——
- * 否则用户点完「新增订单」还得再用鼠标去点一次产品字段。
+ * 下拉里「无内容」时的文案。三种「空」对用户的下一步完全不同：
+ * 没选客户要去选客户、搜不到要换关键字、客户真没挂产品要去产品页挂客户。
+ * 一律写「无数据」等于把用户扔在原地。
+ *
+ * 靠输入框有没有字来区分「浏览」与「搜索」两种模式 —— 与后端同口径：
+ * 空关键字 = 浏览该客户可见的全部 SKU，有关键字 = 关键字匹配。
  */
-function focusProductInput() {
-  pickerOpen.value = true
-}
-
-/** 弹窗选中一个 SKU：写进表单，关窗后把焦点交回字段 */
-function onProductPicked(item: ProductSuggestion) {
-  props.selectProduct(item)
-  void nextTick(() => productFieldRef.value?.focus())
-}
-
-function clearProduct() {
-  form.value.productId = 0
-  form.value.productSearch = ''
-}
+const productEmptyText = computed(() => {
+  if (form.value.productSearch.trim()) {
+    return props.productSearchFailed ? '搜索失败，请重试' : '无匹配结果'
+  }
+  return props.skuListError || '该客户暂无可用产品，请到产品页给 SKU 挂上该客户'
+})
 
 function resetQuantityValidation() {
   quantityTouched.value = false

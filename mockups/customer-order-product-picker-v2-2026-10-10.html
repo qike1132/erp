@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>效果图（改正版）· 产品名称点击弹出该客户全部 SKU</title>
+<style>
+  :root{
+    --primary-500:#0094bf; --primary-600:#007ea3; --primary-50:#e6f6fa; --primary-100:#cceef5; --primary-400:#33a9cc;
+    --border:#cbd5e1; --border-light:#e2e8f0; --line:#f1f5f9;
+    --text:#1e293b; --text-2:#64748b; --text-3:#94a3b8;
+    --surface:#f8fafc; --danger:#ef4444;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:26px;background:#eef2f6;color:var(--text);
+       font-family:"Microsoft YaHei","PingFang SC",system-ui,sans-serif;font-size:14px;line-height:1.6}
+  h1{font-size:20px;margin:0 0 4px}
+  .sub{color:var(--text-2);font-size:13px;margin-bottom:8px}
+  .banner{background:#fffbeb;border:1px solid #fed7aa;border-left:3px solid #d97706;border-radius:0 8px 8px 0;
+          padding:10px 14px;font-size:12.5px;color:#7c4a03;margin-bottom:20px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start}
+  .panel{background:#fff;border:1px solid var(--border-light);border-radius:12px;padding:18px;margin-bottom:20px;
+         box-shadow:0 1px 3px rgba(15,23,42,.06)}
+  .panel > h2{font-size:14px;margin:0 0 3px;display:flex;align-items:center;gap:8px}
+  .panel > h2 .num{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;
+         border-radius:50%;background:var(--primary-500);color:#fff;font-size:11px;font-weight:700}
+  .panel > p.note{color:var(--text-2);font-size:12.5px;margin:0 0 14px}
+  .k{font-size:11px;font-weight:700;color:var(--text-3);letter-spacing:.05em;text-transform:uppercase;margin-bottom:7px}
+
+  /* 录入面板复刻 */
+  .co-panel{border:1px solid var(--border);border-radius:12px;overflow:hidden;background:#fff}
+  .co-head{display:flex;justify-content:space-between;align-items:center;padding:10px 16px;font-size:13px;font-weight:700;
+           border-bottom:1px solid var(--border);background:var(--surface)}
+  .co-body{padding:14px 16px}
+  .co-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
+  .co-fg{margin-bottom:12px;position:relative}
+  .co-label{display:block;font-size:12.5px;font-weight:500;color:var(--text-2);margin-bottom:4px}
+  .req{color:var(--danger)}
+  .co-input{width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:10px;font-size:13.5px;color:var(--text);background:#fff}
+  .co-input.ph{color:var(--text-3)}
+  .co-input.focus{border-color:var(--primary-400);box-shadow:0 0 0 4px rgba(0,148,191,.1)}
+  .co-sel{display:flex;justify-content:space-between;align-items:center}
+  .sq{color:var(--text-3);font-size:11px}
+
+  /* 贴在字段下方的下拉面板 */
+  .dd{position:relative;margin-top:6px;border:1px solid var(--border-light);border-radius:10px;background:#fff;
+      box-shadow:0 10px 24px rgba(15,23,42,.14);overflow:hidden}
+  .dd-head{display:flex;justify-content:space-between;padding:7px 12px;font-size:11.5px;color:var(--text-2);background:var(--surface);
+           border-bottom:1px solid var(--line)}
+  .dd-list{max-height:230px;overflow:auto}
+  .dd-item{display:flex;justify-content:space-between;align-items:center;padding:9px 12px;font-size:13.5px;
+           border-bottom:1px solid var(--line);cursor:pointer}
+  .dd-item:last-child{border-bottom:none}
+  .dd-item:hover{background:var(--primary-50);color:var(--primary-600)}
+  .dd-item .pick{font-size:11.5px;color:var(--text-3)}
+  .dd-empty{padding:22px 12px;text-align:center;color:var(--text-3);font-size:13px}
+  .dd-foot{padding:6px 12px;font-size:11.5px;color:var(--text-3);background:var(--surface);display:flex;justify-content:space-between}
+
+  .callout{border-left:3px solid var(--primary-500);background:var(--primary-50);border-radius:0 8px 8px 0;
+           padding:9px 13px;font-size:12.5px;color:#0b4a5c;margin-top:12px}
+  code{background:var(--surface);border:1px solid var(--border-light);border-radius:5px;padding:1px 5px;font-size:11.5px}
+</style>
+</head>
+<body>
+
+<h1>「产品名称」点击弹出该客户全部 SKU · 效果图（改正版）</h1>
+<div class="sub">2026-10-10 · /customer-order 订单信息录入</div>
+<div class="banner">
+  <b>我上一版做错了</b>：我做成了「字段不可输入 + 点开一个居中的模态弹窗」。你要的是——字段<b>还是输入框</b>，<b>点它就地在下方弹出该客户的全部 SKU</b>；点列表选一个；<b>也可以打字</b>，打字时就地弹出对应的 SKU。下面是按这个理解重画的效果图，请确认。
+</div>
+
+<div class="grid">
+
+  <!-- 状态一：点击后（还没打字） -->
+  <div class="panel">
+    <h2><span class="num">1</span>点击产品名称后（还没打字）</h2>
+    <p class="note">就地在字段正下方弹出，列出<b>该客户可见的全部 SKU</b>。</p>
+    <div class="co-panel">
+      <div class="co-body">
+        <div class="co-row">
+          <div class="co-fg" style="margin:0"><label class="co-label">订单时间</label><div class="co-input">2026-10-10</div></div>
+          <div class="co-fg" style="margin:0"><label class="co-label">客户名称 <span class="req">*</span></label><div class="co-input co-sel">贝乐 <span class="sq">▾</span></div></div>
+        </div>
+        <div class="co-fg" style="margin-bottom:0">
+          <label class="co-label">产品名称 <span class="req">*</span></label>
+          <div class="co-input focus ph">输入产品名称搜索，或点击查看全部</div>
+          <div class="dd">
+            <div class="dd-head"><span>客户：贝乐</span><span>共 37 个可选 SKU</span></div>
+            <div class="dd-list">
+              <div class="dd-item"><span>小熊毛绒玩具 20cm</span><span class="pick">选择</span></div>
+              <div class="dd-item"><span>卡通抱枕 40×40</span><span class="pick">选择</span></div>
+              <div class="dd-item"><span>恐龙玩偶 大号</span><span class="pick">选择</span></div>
+              <div class="dd-item"><span>独角兽挂件 8cm</span><span class="pick">选择</span></div>
+              <div class="dd-item"><span>小马挂件 8cm</span><span class="pick">选择</span></div>
+              <div class="dd-item"><span>毛绒钥匙扣 熊猫款</span><span class="pick">选择</span></div>
+            </div>
+            <div class="dd-foot"><span>点一行即选中并填入</span><span>仅显示该客户可选</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="callout">这一条是现有自动补全<b>缺的能力</b>：现在空关键字后端返回空数组，所以「点一下看看有哪些」是做不到的。</div>
+  </div>
+
+  <!-- 状态二：打了关键字 -->
+  <div class="panel">
+    <h2><span class="num">2</span>打字之后（关键字过滤）</h2>
+    <p class="note">同一个下拉、同一套交互，只是内容按关键字过滤——<b>和现在用起来一样</b>，不用重新学。</p>
+    <div class="co-panel">
+      <div class="co-body">
+        <div class="co-row">
+          <div class="co-fg" style="margin:0"><label class="co-label">订单时间</label><div class="co-input">2026-10-10</div></div>
+          <div class="co-fg" style="margin:0"><label class="co-label">客户名称 <span class="req">*</span></label><div class="co-input co-sel">贝乐 <span class="sq">▾</span></div></div>
+        </div>
+        <div class="co-fg" style="margin-bottom:0">
+          <label class="co-label">产品名称 <span class="req">*</span></label>
+          <div class="co-input focus">挂件</div>
+          <div class="dd">
+            <div class="dd-head"><span>客户：贝乐</span><span>匹配「挂件」2 个</span></div>
+            <div class="dd-list">
+              <div class="dd-item"><span>独角兽挂件 8cm</span><span class="pick">选择</span></div>
+              <div class="dd-item"><span>小马挂件 8cm</span><span class="pick">选择</span></div>
+            </div>
+            <div class="dd-foot"><span>点一行即选中并填入</span><span>仅显示该客户可选</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="callout">这条是<b>现在就有</b>的能力（关键字搜索），保留不动。</div>
+  </div>
+</div>
+
+<div class="panel">
+  <h2><span class="num">3</span>边界情形</h2>
+  <div class="grid" style="grid-template-columns:1fr 1fr 1fr;gap:16px">
+    <div>
+      <div class="k">还没选客户就点开</div>
+      <div class="dd"><div class="dd-empty">请先选择客户，再挑选产品<br><span style="font-size:11.5px">产品范围随客户变化</span></div></div>
+      <p style="font-size:11.5px;color:var(--text-3);margin:8px 0 0">按你定的口径：只列当前客户的 SKU，没客户就没得列。</p>
+    </div>
+    <div>
+      <div class="k">该客户一个 SKU 都没有</div>
+      <div class="dd"><div class="dd-empty">该客户暂无可用产品<br><span style="font-size:11.5px">请到产品页给 SKU 挂上该客户</span></div></div>
+      <p style="font-size:11.5px;color:var(--text-3);margin:8px 0 0">不能只说「无数据」，要说清下一步去哪儿。</p>
+    </div>
+    <div>
+      <div class="k">SKU 很多</div>
+      <div class="dd"><div class="dd-item"><span>…（前 200 个）</span><span class="pick">选择</span></div>
+        <div class="dd-empty" style="padding:10px">还有更多未显示<br><span style="font-size:11.5px">请输入关键字缩小范围</span></div></div>
+      <p style="font-size:11.5px;color:var(--text-3);margin:8px 0 0">下拉不做分页，超过上限提示去搜。</p>
+    </div>
+  </div>
+</div>
+
+<div class="panel" style="background:var(--surface)">
+  <h2 style="font-size:13.5px">改动范围（比上一版小，因为后端能力已经就位）</h2>
+  <ul style="margin:6px 0 0;padding-left:20px;font-size:13px">
+    <li>后端<b>不用再改</b>：「空关键字 + 有客户 → 返回该客户可见的 SKU 列表」这条已经提交上线（<code>103c415b</code>）。</li>
+    <li><code>UiAutocomplete</code> 加一个<b>可选开关</b>（如 <code>listAllOnFocus</code>）：开启后聚焦/点击时先拉一次全量列表再显示。默认关，其余 4 个页面零影响。</li>
+    <li>撤掉上一版的 <code>ProductPickerField.vue</code> / <code>ProductPickerDialog.vue</code>，<code>OrderInputPanel</code> 恢复成输入框 + 打开下拉。</li>
+    <li><code>searchProducts(q)</code> 的签名与返回结构仍然不动（OCR 粘贴导入共用）。</li>
+  </ul>
+</div>
+
+</body>
+</html>

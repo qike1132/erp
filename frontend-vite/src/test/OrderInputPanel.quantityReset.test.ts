@@ -21,7 +21,7 @@ function mountPanel(): VueWrapper<InstanceType<typeof OrderInputPanel>> {
   return mount(OrderInputPanel, {
     global: {
       stubs: {
-        ProductPickerDialog: { template: '<div class="stub-picker" />' },
+        UiAutocomplete: { template: '<input />' },
       },
     },
     props: {
@@ -74,7 +74,7 @@ describe('OrderInputPanel OCR 热区显隐', () => {
     return mount(OrderInputPanel, {
       global: {
         stubs: {
-          ProductPickerDialog: { template: '<div class="stub-picker" />' },
+          UiAutocomplete: { template: '<input />' },
           OcrPasteImport: { template: '<div class="stub-ocr" />' },
         },
       },

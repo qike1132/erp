@@ -47,6 +47,10 @@ const props = withDefaults(
     modelValue?: string
     suggestions?: T[]
     searchFn?: (query: string) => Promise<T[]>
+    /** 「打开下拉即列全量」：调用方提供后，聚焦/清空输入（空关键字）时改调它，
+     * 下拉显示全量列表而不是一片空白。**不传则本组件行为一字不变**（其余 6 个页面
+     * 不提供，所以不会凭空弹出空下拉）。典型用法见下单页产品名称。 */
+    listFn?: () => Promise<T[]>
     optionLabel?: string
     placeholder?: string
     disabled?: boolean
@@ -112,7 +116,7 @@ function setSuppressed(v: boolean) {
   suppressSearch.value = v
 }
 
-const acRef = ref<{ $el?: HTMLElement } | null>(null)
+const acRef = ref<{ $el?: HTMLElement; show?: () => void; hide?: () => void } | null>(null)
 
 /** 把焦点交回输入框（连续录入场景：提交一条后无需重新 Tab 寻找入口） */
 function focusInput() {
@@ -138,6 +142,17 @@ function onComplete(event: AutoCompleteCompleteEvent) {
   triggerSearch(event.query)
 }
 
+/**
+ * 聚焦即拉全量并展开面板。只在调用方提供 listFn 时启用 —— 其余页面聚焦不打任何请求、
+ * 也不会弹出一个空下拉。选中后处于抑制态时不展开（suppressAfterSelect 的语义是
+ * 「别在编辑已选值时弹面板」）。
+ */
+function onFocus() {
+  if (!props.listFn || suppressSearch.value) return
+  triggerSearch(props.modelValue ?? '')
+  acRef.value?.show?.()
+}
+
 function triggerSearch(query: string) {
   const q = query.trim()
 
@@ -155,6 +170,28 @@ function triggerSearch(query: string) {
       const label = (item as Record<string, unknown>)[props.optionLabel!]
       return typeof label === 'string' && label.toLowerCase().includes(ql)
     })
+    emit('search', q)
+    return
+  }
+
+  // 「打开即列全量」：空关键字时改调 listFn，下拉显示全量列表而不是空列表。
+  // 放在 searchFn 之前，避免被 minQueryLength 的早退挡掉。
+  if (!q && props.listFn) {
+    const listSeq = ++requestSeq
+    loading.value = true
+    props.listFn()
+      .then((results) => {
+        if (listSeq === requestSeq) {
+          internalSuggestions.value = results || []
+          loading.value = false
+        }
+      })
+      .catch(() => {
+        if (listSeq === requestSeq) {
+          internalSuggestions.value = []
+          loading.value = false
+        }
+      })
     emit('search', q)
     return
   }
@@ -234,6 +271,7 @@ defineExpose({ setSuppressed, focusInput })
     :pt="required ? { pcInputText: { root: { 'aria-required': 'true' } } } : undefined"
     @update:model-value="onInputChange"
     @complete="onComplete"
+    @focus="onFocus"
     @item-select="onItemSelect"
   >
     <template v-if="$slots.option" #option="slotProps">
