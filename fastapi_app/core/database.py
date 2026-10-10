@@ -332,6 +332,13 @@ async def get_async_db_context():
             except (RuntimeError, OSError, ValueError, SQLAlchemyError):
                 logger.warning("Session rollback failed (may be broken after psql restore)", exc_info=True)
             raise
+        # 提交成功后执行 post-commit 回调（与 get_async_db 同款）：ARQ 任务等
+        # 非请求场景注册的缓存失效/领域事件回调此前被静默丢弃。回调失败不影响
+        # 已提交事务（run_post_commit_callbacks 内部已兜底）。
+        try:
+            await run_post_commit_callbacks(session)
+        except (RuntimeError, OSError, ValueError, SQLAlchemyError) as exc:
+            logger.warning("post-commit 回调执行失败（不影响已提交事务）: %s", exc, exc_info=True)
 
 
 def require_async_session_local() -> async_sessionmaker:
@@ -369,9 +376,17 @@ def _init_read_engine():
         logger.info("未配置只读副本，读取操作将使用主库")
         return
 
+    # 副本池在主池基础上减半（评审 2026-10-10 P0-3）：主池+副本池若各用一份
+    # pool_config，峰值 2×(pool_size+max_overflow)×workers 会超 PG
+    # max_connections。副本侧已有 1s 快速失败 + 熔断降级主库（见下方常量），
+    # 池减半不损可用性。
+    read_pool_config = dict(_pool_config)
+    read_pool_config["pool_size"] = max(2, _pool_config["pool_size"] // 2)
+    read_pool_config["max_overflow"] = max(1, _pool_config["max_overflow"] // 2)
+
     _read_engine = create_async_engine(
         replica_url,
-        **_pool_config,
+        **read_pool_config,
         echo=False,
     )
     _ReadSessionLocal = async_sessionmaker(
@@ -478,6 +493,7 @@ async def get_async_read_db():
 
 async def dispose_async_engines():
     global _async_engine, _AsyncSessionLocal, async_engine, _engine_loop
+    global _read_engine, _ReadSessionLocal
     if _async_engine is not None:
         try:
             await _async_engine.dispose()
@@ -487,6 +503,15 @@ async def dispose_async_engines():
     _AsyncSessionLocal = None
     async_engine = None
     _engine_loop = None
+    # 只读副本引擎一并释放（评审 2026-10-10 P2-12）：与 rebuild_pool 口径对称，
+    # 否则关停时副本池连接只能靠进程退出兜底。
+    if _read_engine is not None:
+        try:
+            await _read_engine.dispose()
+        except (OperationalError, DisconnectionError) as e:
+            logger.warning("只读副本引擎释放异常（可能已关闭）: %s", e)
+    _read_engine = None
+    _ReadSessionLocal = None
 
 
 async def rebuild_pool() -> bool:

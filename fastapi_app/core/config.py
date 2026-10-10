@@ -302,8 +302,14 @@ class Settings(BaseSettings):
     # 异步数据库URL - 使用 asyncpg 驱动（性能最优）
     ASYNC_DATABASE_URL: str = os.getenv("ASYNC_DATABASE_URL") or _build_database_uri()
 
-    # 同步数据库URL - 使用 psycopg3 驱动（用于 Alembic 迁移等场景）
-    DATABASE_URL: str = os.getenv("DATABASE_URL") or _build_sync_database_uri()
+    # 同步数据库URL - 使用 psycopg3 驱动（用于 Alembic 迁移等场景）。
+    # 环境变量若是裸 postgresql://（历史 .env 写法），补 psycopg3 驱动后缀：
+    # SQLAlchemy 同步方言默认 dbapi 是 psycopg2，生产 venv/CI 只装 psycopg3，
+    # 不补会 ModuleNotFoundError 硬失败（评审 2026-10-10 #4）。
+    _sync_url = os.getenv("DATABASE_URL") or _build_sync_database_uri()
+    if _sync_url.startswith("postgresql://"):
+        _sync_url = _sync_url.replace("postgresql://", "postgresql+psycopg://", 1)
+    DATABASE_URL: str = _sync_url
 
     # 只读副本 URL（可选，用于报表/列表查询的读写分离）
     # 设置 DATABASE_REPLICA_URL 后，get_async_read_db() 将使用此连接

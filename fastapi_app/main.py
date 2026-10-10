@@ -166,8 +166,10 @@ async def lifespan(application: FastAPI):
     # 领域事件订阅注册（原为 notification_service 模块导入期副作用，批次1 迁移至此显式执行）
     _register_domain_event_subscriptions()
 
-    from fastapi_app.core.purchase_cache import start_purchase_cache_listener
-    await start_purchase_cache_listener()
+    # 跨 worker 领域事件监听器（评审 2026-10-10 P0-2）：此前全仓无人调用
+    # start_event_listener，多 worker 下非发起 worker 收不到 domain_events
+    # 频道事件 → 进程内订阅者（缓存失效/WebSocket 转发）失效。后台任务，
+    # 自带重连；关停由下方 background_tasks 的 cancel+gather 统一回收。
 
     # L1 缓存跨 worker 失效广播（开关默认关，由 CACHE_L1_BROADCAST_ENABLED 启用）
     from fastapi_app.core.cache import start_l1_broadcast_listener
@@ -188,6 +190,14 @@ async def lifespan(application: FastAPI):
     # 预热库存缓存（后台执行，不阻塞启动）
     background_tasks = []
     task = asyncio.create_task(_warm_inventory_cache())
+    background_tasks.append(task)
+
+    # 跨 worker 领域事件监听器（评审 2026-10-10 P0-2）：此前全仓无人调用
+    # start_event_listener，多 worker 下非发起 worker 收不到 domain_events
+    # 频道事件 → 进程内订阅者（缓存失效/WebSocket 转发）失效。后台任务，
+    # 自带重连；关停由下方 background_tasks 的 cancel+gather 统一回收。
+    from fastapi_app.core.domain_events import start_event_listener
+    task = asyncio.create_task(start_event_listener())
     background_tasks.append(task)
 
     from fastapi_app.core.audit_middleware import _audit_flush_loop
@@ -234,6 +244,11 @@ async def lifespan(application: FastAPI):
         from utils.redis_cache import redis_cache
         with suppress(OSError, RuntimeError):
             await redis_cache.close()
+
+        # 共享 Redis 客户端（core.redis_client，评审 2026-10-10 P1-7）一并关闭
+        from fastapi_app.core.redis_client import close_async_redis_client
+        await close_async_redis_client()
+
         logger.info("数据库连接池已关闭")
 
     # 关闭超时保护：防止某步骤 hang 导致整个关闭阻塞

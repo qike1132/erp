@@ -22,6 +22,21 @@ import migrations.versions.pg_standalone_067_import_idempotency as mig
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _VERSIONS_DIR = _REPO_ROOT / "migrations" / "versions"
+
+
+def _ensure_sync_driver(url: str) -> str:
+    """同步 create_engine 必须显式指定 psycopg3 驱动。
+
+    `+asyncpg` 直接替换；**裸 `postgresql://`（.env 里 TEST_DATABASE_URL 常见写法）
+    也要补 `+psycopg`** —— 否则 SQLAlchemy 回落 psycopg2，在只装 psycopg3 的
+    环境（生产 venv/CI）ModuleNotFoundError 硬失败而非 skip（评审 2026-10-10 #4）。
+    """
+    if '+asyncpg' in url:
+        return url.replace('+asyncpg', '+psycopg')
+    if url.startswith('postgresql://'):
+        return url.replace('postgresql://', 'postgresql+psycopg://', 1)
+    return url
+
 _PREVIOUS_REVISION = "pg_standalone_066_case_product_root_unique"
 _PROBE = "__p1a_probe__"
 _PROBE_PRODUCT = "__p1a_probe_product__"
@@ -287,7 +302,7 @@ def _real_pg_engine():
         url = derived
     # TEST_DATABASE_URL 在 CI 是 asyncpg 驱动；同步 create_engine 需 psycopg，
     # 否则 connect 抛 MissingGreenlet 被静默吞成 skip（本测试就白跑了）。
-    url = url.replace('+asyncpg', '+psycopg')
+    url = _ensure_sync_driver(url)
 
     engine = create_engine(url, poolclass=NullPool)
     try:

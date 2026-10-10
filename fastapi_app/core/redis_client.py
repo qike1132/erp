@@ -49,11 +49,30 @@ async def get_async_redis_client():
                 url = url.replace("rediss://", f"rediss://:{encoded_password}@")
             elif url.startswith("redis://"):
                 url = url.replace("redis://", f"redis://:{encoded_password}@")
-        _async_redis_client = aioredis.from_url(url)
+        # 双超时（评审 2026-10-10 P1-7）：裸 from_url 无超时，Redis 挂起（而非
+        # 拒绝连接）时备份进度 WebSocket 等消费方可无限阻塞。正常内网往返毫秒级，
+        # 2s 预算足够宽裕；调用方均有 try/except 兜底，超时异常等价于"Redis 不可用"。
+        _async_redis_client = aioredis.from_url(
+            url,
+            socket_timeout=2.0,
+            socket_connect_timeout=2.0,
+            max_connections=50,
+        )
         return _async_redis_client
     except redis_infra_exceptions() as e:
         logger.warning("异步 Redis 客户端初始化失败: %s", e)
         return None
+
+
+async def close_async_redis_client():
+    """关闭并丢弃共享客户端（main.py 关停序调用，防泄漏连接）。"""
+    global _async_redis_client
+    if _async_redis_client is not None:
+        try:
+            await _async_redis_client.aclose()
+        except Exception as e:  # defensive: 关停路径，失败仅记日志
+            logger.warning("共享 Redis 客户端关闭失败: %s", e)
+    _async_redis_client = None
 
 
 def reset_async_redis_client():
