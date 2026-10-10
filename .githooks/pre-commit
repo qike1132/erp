@@ -278,18 +278,23 @@ elif command -v pre-commit >/dev/null 2>&1; then
     pc_bin="pre-commit"
 fi
 
-# 退而求其次：至少把质量门禁跑起来（它是纯 python 脚本）。
+# 退而求其次：把 .pre-commit-config.yaml 的两项检查在本地直接跑掉
+# （ruff --fix + 质量门禁），不依赖 pre-commit 的环境 bootstrap。
 # ⚡ 性能门：质量门禁是**全仓扫描**（AST + 前端组件），实测在 Windows/git-bash 下
 #    会让一次提交多花数十秒。而它只检查 .py / .vue，因此仅当暂存里确实有这两类文件时
 #    才运行——纯文档/配置提交直接跳过，避免把提交变成慢操作而诱发 --no-verify 滥用。
 run_degraded_gate() {
     need_gate=0
+    py_files=""
     old_ifs2=$IFS
     IFS='
 '
     for f in $staged; do
         case "$f" in
-            *.py|*.vue) need_gate=1; break ;;
+            *.py|*.vue) need_gate=1 ;;
+        esac
+        case "$f" in
+            *.py) py_files="$py_files $f" ;;
         esac
     done
     IFS=$old_ifs2
@@ -298,6 +303,32 @@ run_degraded_gate() {
         echo "pre-commit: 暂存内容不含 .py/.vue，跳过代码质量门禁（第 3 层）" >&2
         return 0
     fi
+
+    # ---- ruff：对齐 .pre-commit-config.yaml 的 ruff 钩子（--fix，仅 .py）----
+    # 与 pre-commit 同语义：改动了文件即判失败（需重新 `git add` 再提交），
+    # 而不是「修完就当通过」——否则自动修复会静默进入工作区却没进这次提交。
+    # 注意 ruff --fix 修完返回 0，故不能只看退出码，要比对文件哈希是否变化。
+    ruff_bin="$(pwd)/.venv/Scripts/ruff.exe"
+    [ -x "$ruff_bin" ] || ruff_bin="$(pwd)/.venv/Scripts/ruff"
+    if [ -n "$py_files" ] && [ -x "$ruff_bin" ]; then
+        ruff_before="$(git hash-object -- $py_files 2>/dev/null)"
+        "$ruff_bin" check --fix $py_files >/dev/null 2>&1
+        ruff_after="$(git hash-object -- $py_files 2>/dev/null)"
+        if [ "$ruff_before" != "$ruff_after" ]; then
+            echo "" >&2
+            echo "━━━ 提交被拒绝：ruff 已自动修复下列文件，请重新暂存后提交 ━━━" >&2
+            "$ruff_bin" check $py_files 1>&2 2>/dev/null || true
+            fail=1
+            return 0
+        fi
+        if ! "$ruff_bin" check $py_files >/dev/null 2>&1; then
+            "$ruff_bin" check $py_files 1>&2 2>/dev/null || true
+            echo "" >&2
+            echo "━━━ 提交被拒绝：ruff 未通过（第 3 层降级模式） ━━━" >&2
+            fail=1
+        fi
+    fi
+
     [ -f "scripts/quality_gate.py" ] || return 0
 
     py=""

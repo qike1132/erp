@@ -61,7 +61,7 @@ npm run check:routes              # 路由对齐检查
 - `quality_gate.py` 读 `pyproject.toml` 的 `[tool.code-quality]`：`max_function_length=80`、`max_vue_component_length=400`、`max_file_size=1600`。**只拦新增违规**；清理存量后可用 `--update-baseline` 收紧基线。
 - 提交钩子：`core.hooksPath = .githooks`。`.githooks/pre-commit` 分四层 —— ①危险路径 ②密钥内容扫描（**总是跑**）③Python 字面量收窄 ④`.pre-commit-config.yaml`（`ruff --fix` + local `quality-gate`；`ruff-format` 已于 2026-10-01 移除，理由见该文件注释）。
 - 第 ④ 层：`pre-commit` 装在项目 `.venv`（4.6.2，git-bash 的 PATH 通常看不到）。钩子按 **venv → PATH** 解析它，并以前缀 `.venv/Scripts` 的 PATH 运行 —— 这样 `entry: python scripts/quality_gate.py` 会用 venv 解释器；若落到系统 Python，门禁的 pip-audit 会混扫整机依赖直接判 FAIL、挡掉一切提交（2026-10-01 实测 172 条）。
-- 若 `pre-commit` **自身跑不起来**（首次使用需联网装 hook 环境、缓存目录不可写、崩溃退出码与 hook 失败撞码等），钩子自动回退到「直接跑 `quality_gate.py`」，**不因此拦截提交**；只有真正的 hook 失败（输出含 `- hook id:`）才判定为门禁未通过。
+- 若 `pre-commit` **自身跑不起来**（本机实测：hook 环境需联网 clone、而 python 派生的 MSYS `ssh/sh` 报 `NtCreateDirectoryObject 0xC0000022`），钩子回退到**直接跑等价的本地检查**：`ruff check --fix`（仅暂存里的 `.py`，改动了文件即拒绝、需重新暂存，与 pre-commit 的 ruff 钩子同语义）+ `quality_gate.py`。回退路径照常拦截真实违规，但**不因工具跑不起来而拦截**；只有 pre-commit 真失败（输出含 `- hook id:`）才按 pre-commit 的结论判负。
 - `.githooks/commit-msg`（第 5 层）：**剥掉第三方 AI 工具的署名尾行**（`🤖 Generated with <tool>` / `Co-Authored-By: <tool> <...>`，工具列表见该文件）。背景：Codebuff 曾把署名写进 12 个提交（2026-08-11 起），与 §7 的 AI 痕迹治理意图相悖；就地剥离而非拒绝，避免阻断任何工具的工作流。**故意不剥 Claude 的署名**（本仓明确使用 Claude Code）。
 - 密钥扫描误报的**正确**处置是在命中行尾加 `secret-scan:allow <理由>`（或上一行加 `secret-scan:allow-next-line`）；`.githooks/allowlist.txt` 是逐文件豁免，**新增条目必须在提交信息里说明理由**。
 - 提交信息写**为什么**，不只写改了什么。一个提交只做一件事。提交前用 `git status --porcelain` 确认没有卷进 AI 痕迹或运行期数据。
