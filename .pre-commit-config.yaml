@@ -1,19 +1,28 @@
 repos:
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.16.9
+  # 本地 hook 组（language: system）—— 不依赖 pre-commit 的联网 hook 环境 bootstrap。
+  #
+  # 2026-10-10：原 ruff 钩子来自 https://github.com/astral-sh/ruff-pre-commit（rev v0.16.9），
+  # 但本机到 github 的连接被重置/超时（实测 `git ls-remote` 21s 后 "Could not connect"），
+  # pre-commit 每次提交都要先克隆该仓库才能建 hook 环境 → 必然 rc=3 失败，白等 ~20s 后才
+  # 回退到 .githooks/pre-commit 的降级门禁。改为 repo: local 复用 .venv 里**同版本**的
+  # ruff（0.16.9），彻底去掉网络依赖。
+  # language: system ⇒ entry 走 PATH；.githooks/pre-commit 已把 .venv/Scripts 前置到 PATH
+  # （见该文件第 3 层的解析说明），故 `ruff` / `python` 都解析到项目 venv。
+  - repo: local
     hooks:
       - id: ruff
-        args: [--fix]
+        name: ruff --fix（本地 .venv，无需联网）
+        entry: ruff check --fix
+        language: system
+        types: [python]
       # ruff-format 钩子于 2026-10-01 移除（裁决 B）：本仓约 1000 个 .py 从未格式化，
       # 且存在一批「源码文本级守卫测试」（断言精确子串/行号/行数）。实测一次全仓 format
       # 会打断 16 个测试，见 docs/optimization-plan-2026-10-01-final.md §6.28。
       # 重新启用前必须先按 §6.28 把守卫测试改成抗格式，并单独一轮提交。
 
-  # 统一代码质量门禁（基线棘轮）：存量违规不阻断，新增即拦截。
-  # 实现见 scripts/quality_gate.py，阈值见 pyproject.toml [tool.code-quality]。
-  # 紧急情况可用 `git commit --no-verify` 绕过，但绕过不应成为常态。
-  - repo: local
-    hooks:
+      # 统一代码质量门禁（基线棘轮）：存量违规不阻断，新增即拦截。
+      # 实现见 scripts/quality_gate.py，阈值见 pyproject.toml [tool.code-quality]。
+      # 紧急情况可用 `git commit --no-verify` 绕过，但绕过不应成为常态。
       - id: quality-gate
         name: 代码质量门禁（新增违规即阻断）
         entry: python scripts/quality_gate.py

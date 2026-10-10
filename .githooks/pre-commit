@@ -386,14 +386,14 @@ if [ -n "$pc_bin" ]; then
         fail=1
     else
         # 工具跑不起来，**不等于**门禁失败。已知三种：
-        #   · 退出码 3 = pre-commit 自身意外错误（hook 环境未就绪 / 首次安装需联网而网络不通）；
+        #   · 退出码 3 = pre-commit 自身意外错误（hook 环境未就绪 / 配置错误）；
         #   · 退出码 130 = 中断；
         #   · 退出码 1 但输出里**没有** "- hook id:" = 崩溃在错误处理里（实测：缓存目录
         #     ~/.cache/pre-commit 对沙箱身份只读时，PermissionError 在错误处理阶段再抛，
         #     Python 以 1 退出，与「hook 失败」撞码）。
         # 三种都回退到降级门禁；若一并拦截，沙箱/离线环境会把所有提交挡死。
         echo "pre-commit: 未能运行 hook（退出码 $pc_rc），回退到降级门禁" >&2
-        echo "pre-commit: 首次使用需联网安装 hook 环境：$pc_bin run --all-files" >&2
+        echo "pre-commit: hook 环境未就绪；本仓 hook 均为本地、无需联网，可试：$pc_bin run --all-files" >&2
         run_degraded_gate
     fi
 else
