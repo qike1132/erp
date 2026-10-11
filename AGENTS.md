@@ -127,7 +127,7 @@ AI 说"修好了/应该没问题/测试过了"而实际没跑，是最高频的 
 写代码的 AI 评审自己会**确认偏误**（它记得自己的理由）。合并/部署前必须由**未参与实现的新鲜上下文**评审：只看 diff + 需求原文，不带实现的推理（源：superpowers requesting-code-review；BMAD：评审者以找问题为职责，"零发现"须触发重审）。
 
 - owner 问法：「**让一个没参与的新会话独立评审这个 diff，找出影响正确性的问题**」；别问"你觉得没问题吗"（它一定说没问题）。
-- **本仓提交前固定用 `/open-code-review:delegate-review`**（OCR 委派模式：OCR 定文件与规则、AI 执行评审）做独立评审：**无问题 → AI 直接代跑提交；发现问题 → 逐条列出并说明怎么修**。它是 AI 执行的评审，提交钩子无法机械判定通过与否，故只作规则、不作门禁（§8 例外）。
+- **本仓提交前固定用 `/open-code-review:delegate-review`**（OCR 委派模式：OCR 定文件与规则、AI 执行评审）做独立评审：**无问题 → AI 直接代跑提交；发现问题 → 逐条列出并说明怎么修**。**执行评审的子代理一律用最强模型，并迭代审核**（修复后复审直到零 High/Medium）。它是 AI 执行的评审，提交钩子无法机械判定通过与否，故只作规则、不作门禁（§8 例外）。
 
 - `quality_gate.py` 读 `pyproject.toml [tool.code-quality]`：`max_function_length=80`、`max_vue_component_length=400`、`max_file_size=1600`。**只拦新增违规**；清理存量后可 `--update-baseline` 收紧。
 - 提交钩子 `core.hooksPath = .githooks`。`.githooks/pre-commit` 四层：①危险路径 ②密钥扫描（**总是跑**）③Python 字面量收窄 ④`.pre-commit-config.yaml`（`ruff --fix` + local `quality-gate`；`ruff-format` 已于 2026-10-01 移除，理由见该文件注释）。

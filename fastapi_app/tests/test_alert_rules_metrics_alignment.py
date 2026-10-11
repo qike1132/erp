@@ -112,6 +112,13 @@ def test_refresh_dead_letter_queue_depth_sets_gauge():
     if not m.METRICS_AVAILABLE:
         pytest.skip("prometheus_client 未安装，指标为 NoOp")
 
+    # 关键顺序：先在 patch.dict **之外**完整导入 redis_wrapper（它传递性加载
+    # redis → jwt → cryptography → bcrypt 等 C 扩展链）。若让这些模块在
+    # patch.dict 上下文内才首次导入，退出时 patch.dict 会把它们从 sys.modules
+    # 剥离，但 PyO3 扩展已在解释器初始化过 → 进程内后续任何 import bcrypt 报
+    # 「may only be initialized once per interpreter」（二审 2026-10-11 H2 实证）。
+    import fastapi_app.core.redis_wrapper  # noqa: F401
+
     fake_client = AsyncMock()
     fake_client.llen = AsyncMock(return_value=7)
     # arq_callbacks 会传递性导入 config（非提权下 .env 的 ACL 读不了），

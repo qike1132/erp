@@ -28,7 +28,8 @@ sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8")
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_TIERS = ("base", "dev", "test", "ocr")
-_PIN_RE = re.compile(r"^([A-Za-z0-9_.\-]+)==([^\s;]+)", re.MULTILINE)
+# extras 也纳入比对（bar[baz]==2.0）；当前四份锁无 extras 行，防未来静默漏检
+_PIN_RE = re.compile(r"^([A-Za-z0-9_.\-\[\]]+)==([^\s;]+)", re.MULTILINE)
 
 
 def _pins(text: str) -> dict[str, str]:
@@ -38,8 +39,12 @@ def _pins(text: str) -> dict[str, str]:
 
 def _compile(tier: str, txt: Path, out: Path, env: dict) -> str | None:
     try:
+        # 平台口径必须钉死：锁是 Windows 产物（uvicorn[standard] 的 sys_platform marker
+        # 会随平台引入/剔除 uvloop 与 colorama），CI 在 ubuntu 上跑，不钉则每次
+        # fresh≠committed 必假红（评审 2026-10-11 二审 H1 实证）。
         r = subprocess.run(
-            ["uv", "pip", "compile", str(txt), "-o", str(out), "--quiet"],
+            ["uv", "pip", "compile", str(txt), "-o", str(out), "--quiet",
+             "--python-platform", "windows", "--python-version", "3.13"],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=600, check=False, env=env,
         )
