@@ -43,8 +43,14 @@ sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8")
 
 # 扫描范围：后端源码 + 测试 + 脚本 + 工具（不含迁移与构建产物）
 #            + 仓库根顶层 .py + 桌面壳包 server_manager/（全仓最大 .py 的所在）
+#            + 前端源码（评审 2026-10-11：此前只扫 .py，前端手写大文件不受任何体积门禁）
 SCAN_DIRS = ("fastapi_app", "tests", "utils", "scripts", "server_manager")
 EXCLUDE_DIRS = {"__pycache__", ".archive", "migrations"}
+SCAN_EXTS = (".py", ".ts", ".vue")
+FRONTEND_SRC = "frontend-vite/src"
+# 生成产物不受「上帝类」门禁约束：api.d.ts 由 `npm run generate-api-types` 生成，
+# 体积由 OpenAPI 决定、非人写，纳入门禁会让每次重新生成都失败。
+GENERATED_EXCLUDE = {"frontend-vite/src/types/api.d.ts"}
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 PYPROJECT = PROJECT_ROOT / "pyproject.toml"
@@ -73,6 +79,18 @@ def _threshold_from_pyproject() -> int:
         print(f"[WARN] 读取 pyproject.toml 失败，回落到阈值 {DEFAULT_THRESHOLD}：{exc}",
               file=sys.stderr)
     return DEFAULT_THRESHOLD
+
+
+def _is_scanned(path: str) -> bool:
+    """变更文件是否纳入扫描：.py 全收；.ts/.vue 仅前端 src（排除 node_modules）。"""
+    p = path.replace("\\", "/")
+    if p.endswith(".py"):
+        return True
+    return (
+        p.endswith((".ts", ".vue"))
+        and p.startswith(FRONTEND_SRC + "/")
+        and "node_modules" not in p
+    )
 
 
 def _git_changed_py_files(base: str = "HEAD") -> list[Path]:
@@ -104,7 +122,7 @@ def _git_changed_py_files(base: str = "HEAD") -> list[Path]:
 
     if base != "HEAD":
         changed = _run_git(["diff", "--name-only", "--diff-filter=AM", f"{base}...HEAD"])
-        return [Path(p) for p in dict.fromkeys(changed) if p.endswith(".py")]
+        return [Path(p) for p in dict.fromkeys(changed) if _is_scanned(p)]
 
     # 已跟踪文件的改动
     tracked = _run_git(["diff", "--name-only", "--diff-filter=AM", "HEAD"])
@@ -112,7 +130,7 @@ def _git_changed_py_files(base: str = "HEAD") -> list[Path]:
     staged = _run_git(["diff", "--cached", "--name-only", "--diff-filter=AM"])
     # 未跟踪的新文件
     untracked = _run_git(["ls-files", "--others", "--exclude-standard"])
-    return [Path(p) for p in dict.fromkeys(tracked + staged + untracked) if p.endswith(".py")]
+    return [Path(p) for p in dict.fromkeys(tracked + staged + untracked) if _is_scanned(p)]
 
 
 def _ref_resolves(ref: str) -> bool:
@@ -147,6 +165,12 @@ def _all_py_files() -> list[Path]:
         if any(part in EXCLUDE_DIRS for part in p.parts):
             continue
         files.append(p)
+    # 前端源码（.ts/.vue），排除 node_modules
+    frontend = PROJECT_ROOT / FRONTEND_SRC
+    if frontend.is_dir():
+        for p in frontend.rglob("*"):
+            if p.is_file() and p.suffix in (".ts", ".vue") and "node_modules" not in p.parts:
+                files.append(p)
     return files
 
 
@@ -181,6 +205,11 @@ def main() -> int:
 
     over: list[tuple[Path, int]] = []
     for f in files:
+        # 生成产物不受上帝类门禁约束。--all 给的是绝对路径、git 模式给的是相对路径，
+        # 统一转 posix 斜杠后按「以排除项结尾」比对。
+        norm = f.as_posix().replace("\\", "/")
+        if any(norm.endswith(ex) for ex in GENERATED_EXCLUDE):
+            continue
         try:
             line_count = sum(1 for _ in f.open(encoding="utf-8", errors="replace"))
         except OSError:
