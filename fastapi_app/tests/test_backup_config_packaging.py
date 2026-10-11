@@ -278,23 +278,37 @@ def test_manifest_records_excluded_runtime_env(isolated_pack_roots):
 
 
 def test_full_backup_path_calls_the_manifest_helper():
-    """真实写包路径（_do_create_full_backup）必须调用 record_config_includes。
+    """真实写包路径必须调用 record_config_includes。
 
-    只测 helper 本身不足以锁住行为：清单结果的接线在 260 行的写包函数里，
+    只测 helper 本身不足以锁住行为：清单结果的接线在写包函数里，
     被删/被绕过时 manifest 会静默丢掉 config_files_excluded（= 缺件不可审计）。
+
+    2026-10-11（P2-14⑤ 拆分）：写包体从 _do_create_full_backup 移到
+    _pack_backup_zip。守卫随之改为两段：①_pack_backup_zip 调用
+    pack_config_files/record_config_includes；②_do_create_full_backup 确实
+    调用 _pack_backup_zip —— 缺任一段即「接线断了」，与旧守卫等价。
     """
     tree = ast.parse(inspect.getsource(backup_core))
-    called: set[str] = set()
-    found = False
-    for node in ast.walk(tree):
-        if isinstance(node, ast.AsyncFunctionDef) and node.name == '_do_create_full_backup':
-            found = True
-            for inner in ast.walk(node):
-                if isinstance(inner, ast.Call) and isinstance(inner.func, ast.Name):
-                    called.add(inner.func.id)
-    assert found, '未找到 _do_create_full_backup —— 写包路径改名后本守卫需同步'
-    assert 'pack_config_files' in called
-    assert 'record_config_includes' in called, '写包路径未把配置清单结果写进 manifest'
+
+    def _calls_in(func_name: str) -> tuple[bool, set[str]]:
+        found = False
+        called: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.AsyncFunctionDef) and node.name == func_name:
+                found = True
+                for inner in ast.walk(node):
+                    if isinstance(inner, ast.Call) and isinstance(inner.func, ast.Name):
+                        called.add(inner.func.id)
+        return found, called
+
+    pack_found, pack_called = _calls_in('_pack_backup_zip')
+    assert pack_found, '未找到 _pack_backup_zip —— 写包路径改名后本守卫需同步'
+    assert 'pack_config_files' in pack_called
+    assert 'record_config_includes' in pack_called, '写包路径未把配置清单结果写进 manifest'
+
+    main_found, main_called = _calls_in('_do_create_full_backup')
+    assert main_found, '未找到 _do_create_full_backup —— 写包路径改名后本守卫需同步'
+    assert '_pack_backup_zip' in main_called, '编排路径未接上 _pack_backup_zip，写包被绕过'
 
 
 def test_runtime_env_round_trips_to_project_root_via_real_packaging(isolated_pack_roots):

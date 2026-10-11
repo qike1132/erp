@@ -11,6 +11,7 @@ order_batch_create 的接线（2026-10-06 v2 分批版设计稿）：
 - batch_create_orders 接线：created_by 透传、同步失败触发 savepoint 回滚并裁剪回调
 - 删除联动：purge 按订单号清理明细、删空主单、按月失效缓存
 """
+import functools
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -21,6 +22,17 @@ from fastapi_app.services.shipment_plan_sync import (
     purge_shipment_plan_details_for_order,
     sync_order_items_to_plans,
 )
+
+
+def _callback_month(cb) -> str:
+    """取出注册回调里被绑定的月份（兼容 partial 与 lambda 默认参数两种实现）。
+
+    实现侧 2026-10-11（P2-13）由 `lambda m=month:` 改为 `functools.partial`；
+    本断言只关心「哪个月份被捕获」，不绑定具体实现形态。
+    """
+    if isinstance(cb, functools.partial):
+        return cb.args[0]
+    return cb.__defaults__[0]
 
 
 def _make_product(pid, name=None, barcode=None):
@@ -450,9 +462,9 @@ class TestPurgeShipmentPlanDetailsForOrder:
             result = await purge_shipment_plan_details_for_order(db, 'PO-100')
         assert result == {'detail_deleted': 2, 'plan_deleted': 0}
         mock_sched.assert_called_once()
-        # 注册的是带月份参数的回调工厂
+        # 注册的是带月份参数的回调
         cb = mock_sched.call_args.args[1]
-        assert cb.__defaults__ and cb.__defaults__[0] == '2026-10'
+        assert _callback_month(cb) == '2026-10'
 
     @pytest.mark.asyncio
     async def test_purge_removes_emptied_plan(self):
@@ -477,5 +489,5 @@ class TestPurgeShipmentPlanDetailsForOrder:
         with patch('fastapi_app.services.purchase_plan_common._schedule_post_commit') as mock_sched:
             result = await purge_shipment_plan_details_for_order(db, 'PO-300')
         assert result == {'detail_deleted': 2, 'plan_deleted': 2}
-        months = {call.args[1].__defaults__[0] for call in mock_sched.call_args_list}
+        months = {_callback_month(call.args[1]) for call in mock_sched.call_args_list}
         assert months == {'2026-10', '2026-11'}
