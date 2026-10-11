@@ -31,7 +31,6 @@ from fastapi_app.services.order.beile import (
 )
 from fastapi_app.services.order.commands import (
     _delete_order_directly,
-    _generate_order_number,
     _update_order_directly,
     create_order,
     delete_order,

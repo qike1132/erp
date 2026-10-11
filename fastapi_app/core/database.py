@@ -34,7 +34,11 @@ def _get_pool_config() -> dict:
     """
     workers = int(os.getenv("UVICORN_WORKERS", "4"))
     # 确保: workers × (pool_size + max_overflow) < PG max_connections (默认100)
-    # 留 20 连接给 ARQ/迁移/管理工具
+    # 留 20 连接给 ARQ/迁移/管理工具。
+    # 2026-10-11（复核 N2）：预算必须包含副本池（_init_read_engine 按主池减半建），
+    # 否则 8 worker 下主 64 + 副本 24 = 88 > 80。先按 available 预算算出每 worker
+    # 的 (pool_size, max_overflow)，若含副本减半后两池合计仍超预算，则把两池
+    # 同比例缩到预算内（守卫：test_pool_budget_with_replica.py）。
     available = int(os.getenv("DB_MAX_CONNECTIONS", "100")) - 20
 
     # PgBouncer 启用时减小应用侧连接池（PgBouncer 负责连接复用）
@@ -47,6 +51,37 @@ def _get_pool_config() -> dict:
     else:
         pool_size = max(5, available // (workers * 2))
         max_overflow = max(3, available // (workers * 3))
+
+    # 副本池减半后的两池合计（_init_read_engine 用 ASYNC_DATABASE_REPLICA_URL
+    # 判断是否建池——未配置副本时不收缩，避免无副本部署白降 20% 容量）。
+    replica_url = os.getenv("ASYNC_DATABASE_REPLICA_URL", "").strip()
+    if replica_url:
+        replica_pool = max(2, pool_size // 2)
+        replica_overflow = max(1, max_overflow // 2)
+        peak = workers * (pool_size + max_overflow + replica_pool + replica_overflow)
+        if peak > available:
+            # 同比例收缩后若仍超（下限兜住），继续按 worker 均摊额度硬缩 pool_size
+            shrink = available / peak
+            pool_size = max(1, int(pool_size * shrink))
+            max_overflow = max(1, int(max_overflow * shrink))
+            # _init_read_engine 的下限是 max(2, //2) / max(1, //2)，此处用同一规则核算
+            replica_pool = max(2, pool_size // 2)
+            replica_overflow = max(1, max_overflow // 2)
+            while (workers * (pool_size + max_overflow + replica_pool + replica_overflow) > available
+                   and pool_size > 1):
+                pool_size -= 1
+                max_overflow = max(1, max_overflow - 1)
+                replica_pool = max(2, pool_size // 2)
+                replica_overflow = max(1, max_overflow // 2)
+            still = workers * (pool_size + max_overflow + replica_pool + replica_overflow)
+            if still > available:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "连接预算仍超：workers=%d 两池合计 %d > %d，"
+                    "请调低 UVICORN_WORKERS 或调大 DB_MAX_CONNECTIONS",
+                    workers, still, available,
+                )
+
 
     config: dict[str, Any] = {
         "pool_size": pool_size,

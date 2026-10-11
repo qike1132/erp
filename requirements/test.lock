@@ -49,8 +49,6 @@ cffi==2.1.1
     #   argon2-cffi-bindings
     #   cryptography
     #   trio
-charset-normalizer==3.4.0
-    # via -r requirements/base.txt
 click==8.5.0
     # via
     #   arq

@@ -62,22 +62,21 @@ async def _generate_plan_no() -> str:
     """
     生成计划编号：PP-YYYYMMDD-NNNN
 
-    序号经 numbering_counter 表原子 upsert 分配（见 services.numbering.
-    allocate_sequence）：计数独立短事务提交，多 worker 下无重号，业务回滚
-    仅产生跳号。种子由 read_daily_max 按编号日期段数值读取（spec §4.4 收口），
-    与日期列的时区口径解耦；plan_no 唯一约束与调用方 _persist_plan_with_retry
-    的重试保留作为二道防线。
+    2026-10-11（复核 P2-13）语义收敛：编号内核统一走 services.numbering.
+    generate_number_async（PP 前缀 + PurchasePlan.plan_no），与本仓订单/采购/
+    出入库取号共用同一套「进程内锁 + 当日最大编号种子 + numbering_counter
+    原子递增」。计数独立短事务提交，多 worker 下无重号，业务回滚仅产生跳号；
+    plan_no 唯一约束与调用方 _persist_plan_with_retry 的重试保留作为二道防线。
+
+    此前是独立重写（自建 seed 会话 + 手拼 f-string），与 generate_number_async
+    行为等价但双真值——改内核时漏改这里会静默分叉。
     """
     from fastapi_app.core.database import require_async_session_local
-    from fastapi_app.services.numbering import allocate_sequence, read_daily_max
-    from fastapi_app.services.numbering_sequence import business_date_str
+    from fastapi_app.services.numbering import generate_number_async
 
-    today_str = business_date_str()  # 编号日期段北京口径（spec §4.1 统一）
     session_factory = require_async_session_local()
-    async with session_factory() as seed_session:
-        seed = await read_daily_max(seed_session, PurchasePlan, 'plan_no', today_str)
-    next_seq = await allocate_sequence('PP', today_str, seed=seed)
-    return f'PP-{today_str}-{next_seq:04d}'
+    async with session_factory() as db:
+        return await generate_number_async('PP', PurchasePlan, 'plan_no', db)
 
 
 async def _log_action(db: AsyncSession, plan_id: int, action: str, old_value: dict | None, new_value: dict | None, operator: str) -> None:

@@ -7,6 +7,9 @@
 fastapi==0.137.1
 starlette==1.7.0
 uvicorn[standard]==0.46.0
+# python-multipart：FastAPI 文件上传（UploadFile）的运行时按需依赖，代码内零
+# 显式 import，删了它上传接口才会在运行时 500（复核 2026-10-11 P2-16：
+# 此前仅靠 uvicorn/fastapi 传递带入、无说明，静态工具易误判为可删）。
 python-multipart==0.0.32
 slowapi==0.1.9
 msgspec==0.21.1
@@ -39,7 +42,9 @@ bcrypt==5.0.0
 
 # ----- 环境配置 -----
 python-dotenv==1.2.2
-# Windows 无系统 tz 库，ZoneInfo('Asia/Shanghai') 依赖此包（编号北京口径）
+# Windows 无系统 tz 库，ZoneInfo('Asia/Shanghai') 依赖此包（编号北京口径）。
+# 同为「代码内零显式 import」的运行时按需依赖（zoneinfo 标准库按需加载 tzdata），
+# 删了它 Windows 上 ZoneInfo() 直接抛 ZoneInfoNotFoundError（复核 2026-10-11 P2-16）。
 tzdata>=2025.1
 # PyYAML：scripts/prod_audit/config_loader.py 直接 import yaml
 # （审核工具读 audit_config.yaml / rules_registry.yaml；CI 的 prod_audit 测试步骤依赖它）。
@@ -83,7 +88,8 @@ arq==0.28.0
 sentry-sdk[fastapi]==2.29.1
 
 # ----- 文本处理 -----
-charset-normalizer==3.4.0
+# charset-normalizer 已移除（复核 2026-10-11 P2-15）：它是 requests 的传递依赖，
+# 生产代码零 import；requests 本身仅在 dev 脚本使用（dev.txt 已显式声明）。
 
 # ----- HTTP 客户端 -----
 httpx==0.28.1

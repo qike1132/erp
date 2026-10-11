@@ -27,6 +27,7 @@ from fastapi_app.services.notification_service import (
     StockEvent,
     dispatch_factory_notifications,
 )
+from fastapi_app.services.numbering import generate_order_number
 from fastapi_app.services.order._common import (
     PermissionDeniedError,
     _safe_invalidate_purchase_cache,
@@ -101,7 +102,7 @@ async def create_order(db: AsyncSession, product_id: int, quantity: int,
 
     product = await get_product_for_update(db, product_id)
 
-    order_no = await _generate_order_number(db)
+    order_no = await generate_order_number(db)
 
     async with db.begin_nested():
         order = Order(
@@ -628,7 +629,3 @@ async def _delete_order_directly(
         'message': message,
         'requires_approval': False,
     }
-
-async def _generate_order_number(db: AsyncSession) -> str:
-    from fastapi_app.services.numbering import generate_order_number
-    return await generate_order_number(db)

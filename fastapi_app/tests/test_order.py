@@ -95,7 +95,7 @@ class TestOrderService:
         mock_db.refresh = AsyncMock()
 
         with patch('fastapi_app.services.order.commands.get_product_for_update', new_callable=AsyncMock, return_value=product):
-            with patch('fastapi_app.services.order.commands._generate_order_number', new_callable=AsyncMock, return_value="PO-001"):
+            with patch('fastapi_app.services.order.commands.generate_order_number', new_callable=AsyncMock, return_value="PO-001"):
                 # 外发工序自动生成属于副作用（防御性封装，失败不影响主流程），单测中隔离
                 with patch('fastapi_app.services.outsource_service.auto_generate_for_order', new_callable=AsyncMock):
                     # 缓存失效与事件发布（Redis/WS）同为副作用，单测中隔离，避免污染事件循环
@@ -259,7 +259,7 @@ class TestOrderEndpoints:
         mock_db.refresh = AsyncMock()
 
         with patch('fastapi_app.services.order.commands.get_product_for_update', new_callable=AsyncMock, return_value=product):
-            with patch('fastapi_app.services.order.commands._generate_order_number', new_callable=AsyncMock, return_value="PO-001"):
+            with patch('fastapi_app.services.order.commands.generate_order_number', new_callable=AsyncMock, return_value="PO-001"):
                 # 外发工序自动生成属于副作用（防御性封装，失败不影响主流程），单测中隔离
                 with patch('fastapi_app.services.outsource_service.auto_generate_for_order', new_callable=AsyncMock):
                     # 缓存失效与事件发布（Redis/WS）同为副作用，单测中隔离，避免污染事件循环

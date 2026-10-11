@@ -38,6 +38,11 @@ def _pins(text: str) -> dict[str, str]:
 
 
 def _compile(tier: str, txt: Path, out: Path, env: dict) -> str | None:
+    # 2026-10-11（P2-15 实证）：uv 0.12.5 的解析有「锁继承」行为——输出文件已存在时
+    # 会以旧内容为解析锚定、保持原版本不升级；fresh 就不再是 txt 的独立解析结果，
+    # 与 committed 比对会出现「永远同步」的假绿。故每次先删输出，逼出全新解析。
+    if out.exists():
+        out.unlink()
     try:
         # 平台口径必须钉死：锁是 Windows 产物（uvicorn[standard] 的 sys_platform marker
         # 会随平台引入/剔除 uvloop 与 colorama），CI 在 ubuntu 上跑，不钉则每次
@@ -64,8 +69,9 @@ def main(argv: list[str]) -> int:
     tiers = argv or list(DEFAULT_TIERS)
     # 本机 %TEMP% 与 uv 默认缓存目录（%LOCALAPPDATA%）对 D:\erp_system 下的进程有
     # 写入/删除限制（与 vitest/esbuild 同款坑），把 uv 的临时目录与缓存都指到仓内
-    # 可写位置（缓存持久化以加速；临时目录跑完清掉）。
-    tmp_root = ROOT / ".lockcheck-tmp"
+    # 可写位置（缓存持久化以加速；临时目录跑完清掉）。目录带 PID：并发跑两个门禁
+    # 实例时各自的 unlink/rmtree 不会互删（OCR 评审 2026-10-11 Low-4）。
+    tmp_root = ROOT / f".lockcheck-tmp-{os.getpid()}"
     tmp_root.mkdir(exist_ok=True)
     env = {
         **os.environ,

@@ -457,4 +457,4 @@ _firefox_profile_*/
 
 # uv 锁门禁的仓内缓存/临时目录（scripts/check_requirements_lock.py）
 .uv-cache/
-.lockcheck-tmp/
+.lockcheck-tmp*/
