@@ -220,6 +220,124 @@ async def _poll_for_refill(redis, cache_key: str, local_ttl: int) -> Any | None:
     return None
 
 
+def _build_cache_key(key_prefix: str, key_builder: Callable | None,
+                     sig: inspect.Signature, args: tuple, kwargs: dict) -> str:
+    """构建缓存键：有 key_builder 用参数名绑定；否则对参数做 md5 摘要。"""
+    if key_builder:
+        # 把位置参数绑定到参数名，key_builder 始终通过 kwargs 访问
+        bound = sig.bind(*args, **kwargs)
+        bound.apply_defaults()
+        return f"{key_prefix}:{key_builder(**bound.arguments)}"
+    params_str = json.dumps({'args': args, 'kwargs': kwargs}, sort_keys=True, default=str)
+    params_hash = hashlib.md5(params_str.encode(), usedforsecurity=False).hexdigest()[:10]
+    return f"{key_prefix}:{params_hash}"
+
+
+def _redis_circuit_check(now: datetime) -> bool:
+    """断路器：Redis 连续失败超过阈值时跳过。返回 Redis 是否可用。"""
+    global _redis_circuit_open_until, _redis_fail_count
+    if _redis_circuit_open_until is not None:
+        if now < _redis_circuit_open_until:
+            return False
+        _redis_circuit_open_until = None
+        _redis_fail_count = 0
+    return True
+
+
+def _note_redis_failure(now: datetime, e: Exception | None, *, record_op: str | None = None) -> None:
+    """记录一次 Redis 失败，达阈值开断路器（P2-14 从 wrapper 内三处重复提取）。
+
+    record_op：调用方如需打点（读路径打 redis_error）自行指定；写路径原实现
+    不打点，保持 None 以维持 metrics 语义不变。
+    """
+    global _redis_fail_count, _redis_circuit_open_until
+    _redis_fail_count += 1
+    if record_op:
+        _record_cache_op(record_op)
+    if _redis_fail_count >= _REDIS_CIRCUIT_THRESHOLD:
+        _redis_circuit_open_until = now + _REDIS_CIRCUIT_COOLDOWN
+        logger.warning("Redis 断路器开启，%s秒内跳过Redis: %s",
+                       _REDIS_CIRCUIT_COOLDOWN.total_seconds(), e)
+
+
+def _l1_get(cache_key: str, now: datetime) -> tuple[bool, Any]:
+    """L1 命中检查。返回 (命中?, 值)。过期条目不回插。"""
+    if cache_key in _cache_local:
+        value, expire_at = _cache_local.pop(cache_key)  # 移除
+        if now < expire_at:
+            _cache_local[cache_key] = (value, expire_at)  # 移到末尾（最近使用）
+            _record_cache_op('l1_hit')
+            return True, value
+        # 已过期，不回插
+    return False, None
+
+
+def _l1_put(cache_key: str, value: Any, local_ttl: int) -> None:
+    """写入 L1：先移除再插入，保证 OrderedDict 顺序，并做容量驱逐。"""
+    _cache_local.pop(cache_key, None)
+    _cache_local[cache_key] = (value, datetime.now() + timedelta(seconds=local_ttl))
+    _evict_local_cache()
+
+
+async def _compute_and_fill(func, args, kwargs, cache_key: str, local_ttl: int,
+                            redis, redis_available: bool, ttl: int = 60) -> Any:
+    """重算并回填 L1+L2（获锁路径与无 Redis 路径共用，P2-14 提取）。
+
+    L2 写失败按写路径语义处理：计数 + 断路器，不打点、不抛出。
+    """
+    result = await func(*args, **kwargs)
+    _l1_put(cache_key, result, local_ttl)
+    if redis and redis_available:
+        try:
+            await asyncio.wait_for(
+                redis.set(cache_key, result, timeout=int(ttl)),
+                timeout=CACHE_TIMEOUT
+            )
+            global _redis_fail_count
+            _redis_fail_count = 0
+        except (TimeoutError, OSError, ConnectionError, ValueError) as e:
+            _note_redis_failure(datetime.now(), e)
+    return result
+
+
+async def _read_l2(redis, cache_key: str) -> tuple[bool, Any]:
+    """L2 读取 + 断路器记账（P2-14 提取）。返回 (命中?, 值)。"""
+    global _redis_fail_count
+    try:
+        cached = await asyncio.wait_for(redis.get(cache_key), timeout=CACHE_TIMEOUT)
+        if cached is not None:
+            _redis_fail_count = 0
+            return True, cached
+        _redis_fail_count = 0
+    except (TimeoutError, OSError, ConnectionError, ValueError) as e:
+        _note_redis_failure(datetime.now(), e, record_op='redis_error')
+        logger.warning("Redis 缓存读取失败(timeout=%ss)，降级到数据库查询: %s", CACHE_TIMEOUT, e)
+    return False, None
+
+
+async def _stampede_resolve(redis, redis_available: bool, cache_key: str,
+                            local_ttl: int, lock_token: str) -> tuple[bool, Any]:
+    """击穿保护：未获锁时先轮询等持锁方回填，超时再试一次拿锁（P2-14 提取）。
+
+    返回 (是否最终持锁, 轮询得到的值)。轮询命中时 (False, value)——调用方直接返回。
+    """
+    global _redis_fail_count
+    lock_acquired = False
+    if redis and redis_available:
+        lock_acquired = await _acquire_stampede_lock(redis, f"{cache_key}:lock", lock_token)
+
+    if not lock_acquired and redis and redis_available:
+        # 未获锁：先轮询等持锁方回填（上限 _CACHE_REFILL_POLL_SECONDS），命中直接返回
+        polled = await _poll_for_refill(redis, cache_key, local_ttl)
+        if polled is not None:
+            _redis_fail_count = 0
+            _record_cache_op('wait')
+            return False, polled
+        # 轮询超时（持锁方还没写完）：再试一次拿锁，拿到就自己重算
+        lock_acquired = await _acquire_stampede_lock(redis, f"{cache_key}:lock", lock_token)
+    return lock_acquired, None
+
+
 def cache_result(
     key_prefix: str,
     ttl: int = 60,
@@ -240,127 +358,54 @@ def cache_result(
 
         @wraps(func)
         async def wrapper(*args, **kwargs):
-            global _redis_fail_count, _redis_circuit_open_until
+            global _redis_fail_count
             try:
-                if key_builder:
-                    # 把位置参数绑定到参数名，key_builder 始终通过 kwargs 访问
-                    bound = sig.bind(*args, **kwargs)
-                    bound.apply_defaults()
-                    cache_key = f"{key_prefix}:{key_builder(**bound.arguments)}"
-                else:
-                    params_str = json.dumps({'args': args, 'kwargs': kwargs}, sort_keys=True, default=str)
-                    params_hash = hashlib.md5(params_str.encode(), usedforsecurity=False).hexdigest()[:10]
-                    cache_key = f"{key_prefix}:{params_hash}"
-
+                cache_key = _build_cache_key(key_prefix, key_builder, sig, args, kwargs)
                 now = datetime.now()
 
-                if cache_key in _cache_local:
-                    value, expire_at = _cache_local.pop(cache_key)  # 移除
-                    if now < expire_at:
-                        _cache_local[cache_key] = (value, expire_at)  # 移到末尾（最近使用）
-                        _record_cache_op('l1_hit')
-                        return value
-                    # 已过期，不回插
+                hit, l1_value = _l1_get(cache_key, now)
+                if hit:
+                    return l1_value
 
                 # 断路器：Redis 连续失败超过阈值时跳过
-                redis_available = True
-                if _redis_circuit_open_until is not None:
-                    if now < _redis_circuit_open_until:
-                        redis_available = False
-                    else:
-                        _redis_circuit_open_until = None
-                        _redis_fail_count = 0
+                redis_available = _redis_circuit_check(now)
 
                 redis = _get_redis_cache() if redis_available else None
                 if redis:
-                    try:
-                        cached = await asyncio.wait_for(
-                            redis.get(cache_key),
-                            timeout=CACHE_TIMEOUT
-                        )
-                        if cached is not None:
-                            result = cached
-                            # 回填 L1：先移除再插入，保证 OrderedDict 顺序
-                            _cache_local.pop(cache_key, None)
-                            _cache_local[cache_key] = (result, now + timedelta(seconds=local_ttl))
-                            _redis_fail_count = 0
-                            _record_cache_op('l2_hit')
-                            return result
-                        _redis_fail_count = 0
-                    except (TimeoutError, OSError, ConnectionError, ValueError) as e:
-                        _redis_fail_count += 1
-                        _record_cache_op('redis_error')
-                        if _redis_fail_count >= _REDIS_CIRCUIT_THRESHOLD:
-                            _redis_circuit_open_until = now + _REDIS_CIRCUIT_COOLDOWN
-                            logger.warning("Redis 断路器开启，%s秒内跳过Redis: %s", _REDIS_CIRCUIT_COOLDOWN.total_seconds(), e)
-                        else:
-                            logger.warning("Redis 缓存读取失败(timeout=%ss)，降级到数据库查询: %s", CACHE_TIMEOUT, e)
+                    l2_hit, cached = await _read_l2(redis, cache_key)
+                    if l2_hit:
+                        _l1_put(cache_key, cached, local_ttl)
+                        _record_cache_op('l2_hit')
+                        return cached
 
                 # 缓存击穿保护：分布式锁防止雪崩（stampede）
                 # 获得锁的 worker 重算并回填；未获锁的 worker 短暂轮询后放弃等待自行重算
-                lock_key = f"{cache_key}:lock"
                 lock_token = uuid.uuid4().hex
-                lock_acquired = False
-                if redis and redis_available:
-                    lock_acquired = await _acquire_stampede_lock(redis, lock_key, lock_token)
-
-                if not lock_acquired and redis and redis_available:
-                    # 未获锁：先轮询等持锁方回填（上限 _CACHE_REFILL_POLL_SECONDS），命中直接返回
-                    polled = await _poll_for_refill(redis, cache_key, local_ttl)
-                    if polled is not None:
-                        _redis_fail_count = 0
-                        _record_cache_op('wait')
-                        return polled
-                    # 轮询超时（持锁方还没写完）：再试一次拿锁，拿到就自己重算
-                    lock_acquired = await _acquire_stampede_lock(redis, lock_key, lock_token)
+                lock_acquired, polled = await _stampede_resolve(
+                    redis, redis_available, cache_key, local_ttl, lock_token
+                )
+                if polled is not None:
+                    return polled
 
                 if lock_acquired:
                     # 获得锁：重算并回填缓存
                     try:
                         _record_cache_op('miss')
-                        result = await func(*args, **kwargs)
-                        _cache_local.pop(cache_key, None)
-                        _cache_local[cache_key] = (result, datetime.now() + timedelta(seconds=local_ttl))
-                        _evict_local_cache()
-                        if redis and redis_available:
-                            try:
-                                await asyncio.wait_for(
-                                    redis.set(cache_key, result, timeout=int(ttl)),
-                                    timeout=CACHE_TIMEOUT
-                                )
-                                _redis_fail_count = 0
-                            except (TimeoutError, OSError, ConnectionError, ValueError) as e:
-                                _redis_fail_count += 1
-                                if _redis_fail_count >= _REDIS_CIRCUIT_THRESHOLD:
-                                    _redis_circuit_open_until = datetime.now() + _REDIS_CIRCUIT_COOLDOWN
-                                    logger.warning("Redis 断路器开启: %s", e)
+                        result = await _compute_and_fill(
+                            func, args, kwargs, cache_key, local_ttl,
+                            redis, redis_available, ttl=ttl,
+                        )
                         return result
                     finally:
                         if redis is not None:
-                            await _release_stampede_lock(redis, lock_key, lock_token)
+                            await _release_stampede_lock(redis, f"{cache_key}:lock", lock_token)
 
                 # 未获锁且轮询未命中（或 Redis 不可用）：直接重算，保证请求总能返回
                 _record_cache_op('stale')
-                result = await func(*args, **kwargs)
-
-                # 写入 L1：先移除再插入，保证 OrderedDict 顺序
-                _cache_local.pop(cache_key, None)
-                _cache_local[cache_key] = (result, datetime.now() + timedelta(seconds=local_ttl))
-                _evict_local_cache()
-
-                if redis and redis_available:
-                    try:
-                        await asyncio.wait_for(
-                            redis.set(cache_key, result, timeout=int(ttl)),
-                            timeout=CACHE_TIMEOUT
-                        )
-                        _redis_fail_count = 0
-                    except (TimeoutError, OSError, ConnectionError, ValueError):
-                        _redis_fail_count += 1
-                        if _redis_fail_count >= _REDIS_CIRCUIT_THRESHOLD:
-                            _redis_circuit_open_until = datetime.now() + _REDIS_CIRCUIT_COOLDOWN
-
-                return result
+                return await _compute_and_fill(
+                    func, args, kwargs, cache_key, local_ttl,
+                    redis, redis_available, ttl=ttl,
+                )
 
             except (OSError, ConnectionError) as e:
                 logger.error("缓存装饰器执行失败: %s", e, exc_info=True)

@@ -52,3 +52,17 @@ def test_ticket_expired_rejected(app, monkeypatch):
         with client.websocket_connect("/ws/notifications?ticket=stale"):
             pass
     assert "stale" not in ws_module._WS_PENDING_TICKETS
+
+
+def test_rate_limit_bump_window(monkeypatch):
+    """拆分后 _bump_rate_window 的行为契约（P2-14）：60s 窗口重置 + 超限判定。"""
+    now = 1000.0
+    # 新窗口起算：计数从 0 → 1，不超限
+    count, start, over = ws_module._bump_rate_window(now, 0, now - 61)
+    assert (count, start) == (1, now) and not over
+    # 同窗口累加到阈值：不超限
+    count, _, over = ws_module._bump_rate_window(now, ws_module._WS_RATE_LIMIT - 1, now)
+    assert count == ws_module._WS_RATE_LIMIT and not over
+    # 再加一条：超限
+    count, _, over = ws_module._bump_rate_window(now, ws_module._WS_RATE_LIMIT, now)
+    assert count == ws_module._WS_RATE_LIMIT + 1 and over
