@@ -318,12 +318,22 @@ class L5ApiContract(LayerBase):
         return issues, "\n".join(raw_parts)
 
     def _extract_pydantic_models(self) -> dict[str, set[str]]:
-        """AST 提取 ``fastapi_app/schemas/`` 下 Pydantic 模型字段名。"""
+        """AST 提取 ``fastapi_app/schemas/`` 下 Pydantic 模型字段名。
+
+        只保留**被 schemas/ 之外引用**的模型：schemas/ 里有大量无人引用的死模型，
+        拿它们当基准会把「前端多出的字段」误报成契约不一致（评审 2026-10-11）。
+        """
         models: dict[str, set[str]] = {}
+        ambiguous: set[str] = set()  # 后端同名但字段集不同的模型（撞名，不可比对）
         schemas_dir = FASTAPI_APP_DIR / "schemas"
-        if not schemas_dir.exists():
-            return models
-        for py_file in schemas_dir.rglob("*.py"):
+        api_dir = FASTAPI_APP_DIR / "api"
+        py_files = list(schemas_dir.rglob("*.py")) if schemas_dir.exists() else []
+        if api_dir.exists():
+            # 端点目录内也有实际在跑的 schemas.py；旧实现只扫顶层 schemas/，会拿顶层
+            # 死模型当基准、却漏掉 endpoints 里的活模型（评审 2026-10-11）。两处都扫，
+            # 撞名交由 ambiguous 剔除。
+            py_files.extend(api_dir.rglob("schemas.py"))
+        for py_file in py_files:
             if "__pycache__" in py_file.parts:
                 continue
             try:
@@ -345,8 +355,33 @@ class L5ApiContract(LayerBase):
                     if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
                         fields.add(stmt.target.id)
                 if fields:
-                    models[node.name] = fields
-        return models
+                    if node.name in models and models[node.name] != fields:
+                        # 后端同名不同物（撞名）：与前端同款处理，剔除不比对（评审 2026-10-11）
+                        ambiguous.add(node.name)
+                    else:
+                        models.setdefault(node.name, fields)
+        referenced = self._identifiers_outside_schemas()
+        return {n: f for n, f in models.items() if n in referenced and n not in ambiguous}
+
+    def _identifiers_outside_schemas(self) -> set[str]:
+        """收集 ``fastapi_app/`` 下 schemas/ 与 tests/ 之外出现过的标识符（剔除死模型）。
+
+        排除 tests/：只被测试引用的模型不属 API 契约，拿它当基准是误报（评审 2026-10-11）。
+        """
+        names: set[str] = set()
+        schemas_root = FASTAPI_APP_DIR / "schemas"
+        for py_file in FASTAPI_APP_DIR.rglob("*.py"):
+            parts = py_file.parts
+            if "__pycache__" in parts or "tests" in parts:
+                continue
+            if schemas_root in py_file.parents:  # 顶层 schemas/ 本身不计入「引用方」
+                continue
+            try:
+                source = py_file.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            names.update(re.findall(r"\w+", source))
+        return names
 
     def _extract_ts_interfaces(self) -> dict[str, set[str]]:
         """正则提取 ``frontend-vite/src/`` 下 TypeScript interface/type 字段名。
@@ -355,6 +390,7 @@ class L5ApiContract(LayerBase):
         避免 ``[^}]*`` 在首个 ``}`` 处提前终止导致字段提取不完整。
         """
         interfaces: dict[str, set[str]] = {}
+        ambiguous: set[str] = set()  # 同名但字段集不同的 interface（撞名，不可比对）
         if not FRONTEND_SRC_DIR.exists():
             return interfaces
         # 匹配 interface/type 声明头部
@@ -362,7 +398,8 @@ class L5ApiContract(LayerBase):
             r"(?:interface|type)\s+(\w+)\s*(?:=\s*)?\{",
             re.MULTILINE,
         )
-        field_re = re.compile(r"^\s*(?:readonly\s+)?(\w+)\s*[?:]", re.MULTILINE)
+        # 要求冒号：旧的 [?:] 会把 `A extends B ? C : D` 里的 `B ?` 误当字段（评审 2026-10-11）
+        field_re = re.compile(r"^\s*(?:readonly\s+)?(\w+)\s*\??\s*:", re.MULTILINE)
         for ts_file in FRONTEND_SRC_DIR.rglob("*.ts"):
             if "node_modules" in ts_file.parts:
                 continue
@@ -378,10 +415,15 @@ class L5ApiContract(LayerBase):
                 if body is None:
                     continue
                 fields = {fm.group(1) for fm in field_re.finditer(body)}
-                if fields:
-                    # 同名合并(多文件定义取并集)
-                    interfaces[name] = interfaces.get(name, set()) | fields
-        return interfaces
+                if not fields:
+                    continue
+                if name in interfaces and interfaces[name] != fields:
+                    # 同名不同物：两个不相干的类型撞名。旧实现取并集，把二者揉成一个
+                    # 字段集，对后端同名模型只会制造假差异（评审 2026-10-11）——改为剔除。
+                    ambiguous.add(name)
+                else:
+                    interfaces.setdefault(name, fields)
+        return {n: f for n, f in interfaces.items() if n not in ambiguous}
 
     @staticmethod
     def _extract_balanced_braces(source: str, start: int) -> str | None:
