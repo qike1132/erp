@@ -48,6 +48,9 @@ _ALLOWED_BARE_CLIENT_CALLS: dict[str, str] = {
         '失败时每写请求一条无节流告警）',
     'fastapi_app/api/v1/endpoints/dead_letter.py':
         '读取 arq:dead_letter 死信队列，读写两侧均走 safe_* wrapper',
+    'fastapi_app/core/metrics.py':
+        '/metrics 抓取前经 LLEN arq:dead_letter 刷新死信深度 gauge（评审 2026-10-11）'
+        '——与写入方 safe_lpush 同一条客户端栈/同一 key，key 名来自 arq_callbacks.DLQ_KEY',
 }
 
 # 允许出现 "裸 client 变量名.set/get/..." 的标识符（用于精准定位直连用法）
