@@ -32,8 +32,10 @@ cryptography==50.0.1
 # 跨版无破坏面；升级后已跑全量回归。
 PyJWT==2.15.0
 argon2-cffi==25.1.0
-# bcrypt 仅用于迁移旧密码哈希，已移至 requirements/migration.txt
-# 若需验证旧 bcrypt 哈希：pip install -r requirements/migration.txt
+# bcrypt：验证旧格式（$2b$/$2a$/$2y$）密码哈希的运行时依赖。缺失时这些用户
+# 登录静默失败（N3 评审 2026-10-11），故必须随生产安装；migrate_password_hashes.py
+# 迁移路径也依赖它。
+bcrypt==5.0.0
 
 # ----- 环境配置 -----
 python-dotenv==1.2.2

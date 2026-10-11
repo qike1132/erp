@@ -798,7 +798,8 @@ async def sync_backup_records() -> dict:
             # 查询所有 BackupRecord，构建 filename → record 映射
             try:
                 rows = (await db.execute(select(BackupRecord))).scalars().all()
-            except Exception as e:
+            except Exception as e:  # defensive: 启动同步容错，失败不得阻断应用启动
+                logger.error('备份记录同步：查询 BackupRecord 失败: %s', e, exc_info=True)
                 result['errors'].append(f'查询 BackupRecord 失败: {e}')
                 return result
 
@@ -840,7 +841,8 @@ async def sync_backup_records() -> dict:
                     await db.flush()
                     await db.commit()  # 每条补录成功后立即提交，避免后续失败回滚已成功记录
                     result['backfilled'] += 1
-                except Exception as e:
+                except Exception as e:  # defensive: 单条失败不阻塞后续同步
+                    logger.warning('备份记录同步：补录 %s 失败: %s', fname, e)
                     result['errors'].append(f'补录 {fname} 失败: {e}')
                     with contextlib.suppress(Exception):  # defensive: rollback 失败不阻塞后续同步
                         await db.rollback()
@@ -852,7 +854,8 @@ async def sync_backup_records() -> dict:
                         await db.execute(sa_delete(BackupRecord).where(BackupRecord.id == r.id))
                         await db.commit()  # 每条删除成功后立即提交，避免后续失败回滚已成功记录
                         result['orphaned'] += 1
-                    except Exception as e:
+                    except Exception as e:  # defensive: 单条失败不阻塞后续同步
+                        logger.warning('备份记录同步：清理孤立记录 %s 失败: %s', r.filename, e)
                         result['errors'].append(f'清理孤立记录 {r.filename} 失败: {e}')
                         with contextlib.suppress(Exception):  # defensive: rollback 失败不阻塞后续同步
                             await db.rollback()
@@ -871,11 +874,13 @@ async def sync_backup_records() -> dict:
                         await db.flush()
                         await db.commit()  # 每条修正成功后立即提交，避免后续失败回滚已成功记录
                         result['zombie_fixed'] += 1
-                    except Exception as e:
+                    except Exception as e:  # defensive: 单条失败不阻塞后续同步
+                        logger.warning('备份记录同步：修正僵尸记录 %s 失败: %s', r.filename, e)
                         result['errors'].append(f'修正僵尸记录 {r.filename} 失败: {e}')
                         with contextlib.suppress(Exception):  # defensive: rollback 失败不阻塞后续同步
                             await db.rollback()
-    except Exception as e:
+    except Exception as e:  # defensive: 启动同步容错，失败不得阻断应用启动
+        logger.error('备份记录同步：同步过程异常: %s', e, exc_info=True)
         result['errors'].append(f'同步过程异常: {e}')
 
     return result

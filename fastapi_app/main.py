@@ -113,6 +113,69 @@ async def _warm_inventory_cache():
         logger.warning("库存缓存预热失败: %s", e)
 
 
+async def _perform_shutdown(background_tasks: list[asyncio.Task]) -> None:
+    # B2 评审（2026-10-11）：六步收尾此前无逐项隔离，任一步抛异常会跳过
+    # dispose_async_engines 与全部 redis 收尾；且真实异常只被 except
+    # TimeoutError 漏接（wait_for 只在超时抛 TimeoutError，协程自身异常
+    # 原样传播）→ 静默无日志。现逐步 try/except + 首尾哨兵，保证收尾
+    # 全部执行、且被硬杀时也能从日志判定走到哪一步。
+    logger.info("shutdown_step_begin pid=%s", os.getpid())
+
+    # 先刷写审计日志缓冲区，防止关闭时丢失数据
+    try:
+        from fastapi_app.core.audit_middleware import flush_audit_buffer
+        await flush_audit_buffer()
+    except Exception as e:  # defensive: shutdown audit flush failure must not block graceful shutdown
+        logger.warning("审计缓冲区刷写失败: %s", e)
+
+    async def _step(name, coro_fn):
+        try:
+            await coro_fn()
+        except Exception as e:
+            logger.warning("关停步骤 %s 失败: %s", name, e, exc_info=True)
+
+    # 再取消后台任务
+    for task in background_tasks:
+        task.cancel()
+    await asyncio.gather(*background_tasks, return_exceptions=True)
+
+    logger.info(f"{settings.APP_NAME} 正在关闭...")
+    from fastapi_app.core.cache import stop_l1_broadcast_listener
+    from fastapi_app.core.purchase_cache import stop_purchase_cache_listener
+    from fastapi_app.core.redis_client import close_async_redis_client
+    from fastapi_app.core.telemetry import shutdown_telemetry
+    from fastapi_app.services.notification_service import _get_async_redis_client, manager
+    from utils.redis_cache import redis_cache
+
+    await _step("stop_redis_listener", manager.stop_redis_listener)
+    await _step("stop_purchase_cache_listener", stop_purchase_cache_listener)
+    await _step("stop_l1_broadcast_listener", stop_l1_broadcast_listener)
+    await _step("db_health_checker_stop", db_health_checker.stop)
+    try:
+        shutdown_telemetry()  # sync 函数（telemetry.py:147），不可 await
+    except Exception as e:
+        logger.warning("关停步骤 shutdown_telemetry 失败: %s", e, exc_info=True)
+    await _step("dispose_async_engines", dispose_async_engines)
+
+    async def _close_notification_redis():
+        _notif_redis = await _get_async_redis_client()
+        if _notif_redis:
+            with suppress(OSError, RuntimeError):
+                await _notif_redis.aclose()
+
+    await _step("close_notification_redis", _close_notification_redis)
+
+    async def _close_redis_cache():
+        with suppress(OSError, RuntimeError):
+            await redis_cache.close()
+
+    await _step("close_redis_cache", _close_redis_cache)
+    await _step("close_async_redis_client", close_async_redis_client)
+
+    logger.info("数据库连接池已关闭")
+    logger.info("shutdown_step_end pid=%s", os.getpid())
+
+
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     setup_logging()
@@ -159,7 +222,13 @@ async def lifespan(application: FastAPI):
     try:
         from fastapi_app.services.backup.records import sync_backup_records
         sync_result = await sync_backup_records()
-        if sync_result.get('backfilled', 0) > 0 or sync_result.get('orphaned', 0) > 0:
+        # N1 评审（2026-10-11）：errors 计数此前无人消费，同步失败时零信号。
+        if sync_result.get('errors'):
+            logger.error(
+                '备份记录同步出现 %d 个错误（详情见 records.py 日志）: %s',
+                len(sync_result['errors']), sync_result['errors'][:5],
+            )
+        if sync_result.get('backfilled', 0) > 0 or sync_result.get('orphaned', 0) > 0 or sync_result.get('errors'):
             logger.info(
                 '备份记录同步完成: 补录 %d 条, 清理孤立 %d 条, 修正僵尸 %d 条',
                 sync_result['backfilled'], sync_result['orphaned'], sync_result.get('zombie_fixed', 0),
@@ -190,52 +259,14 @@ async def lifespan(application: FastAPI):
 
     yield
 
-    # 优雅关闭：提取为独立协程，配合超时保护
-    async def _perform_shutdown():
-        # 先刷写审计日志缓冲区，防止关闭时丢失数据
-        try:
-            from fastapi_app.core.audit_middleware import flush_audit_buffer
-            await flush_audit_buffer()
-        except Exception as e:  # defensive: shutdown audit flush failure must not block graceful shutdown
-            logger.warning("审计缓冲区刷写失败: %s", e)
-
-        # 再取消后台任务
-        for task in background_tasks:
-            task.cancel()
-        await asyncio.gather(*background_tasks, return_exceptions=True)
-
-        logger.info(f"{settings.APP_NAME} 正在关闭...")
-        await manager.stop_redis_listener()
-        from fastapi_app.core.purchase_cache import stop_purchase_cache_listener
-        await stop_purchase_cache_listener()
-        from fastapi_app.core.cache import stop_l1_broadcast_listener
-        await stop_l1_broadcast_listener()
-        await db_health_checker.stop()
-        from fastapi_app.core.telemetry import shutdown_telemetry
-        shutdown_telemetry()
-        await dispose_async_engines()
-
-        from fastapi_app.services.notification_service import _get_async_redis_client
-        _notif_redis = await _get_async_redis_client()
-        if _notif_redis:
-            with suppress(OSError, RuntimeError):
-                await _notif_redis.aclose()
-
-        from utils.redis_cache import redis_cache
-        with suppress(OSError, RuntimeError):
-            await redis_cache.close()
-
-        # 共享 Redis 客户端（core.redis_client，评审 2026-10-10 P1-7）一并关闭
-        from fastapi_app.core.redis_client import close_async_redis_client
-        await close_async_redis_client()
-
-        logger.info("数据库连接池已关闭")
-
     # 关闭超时保护：防止某步骤 hang 导致整个关闭阻塞
     try:
-        await asyncio.wait_for(_perform_shutdown(), timeout=15.0)
+        await asyncio.wait_for(_perform_shutdown(background_tasks), timeout=15.0)
     except TimeoutError:
         logger.error("优雅关闭超时（15s），强制退出")
+    except Exception as e:
+        # wait_for 会把协程自身异常原样传播（非 TimeoutError），必须显式记录
+        logger.error("优雅关闭异常退出: %s", e, exc_info=True)
 
 
 app = FastAPI(

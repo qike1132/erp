@@ -27,7 +27,7 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8")
 
 ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_TIERS = ("base", "dev", "test", "ocr")
+DEFAULT_TIERS = ("base", "dev", "test", "ocr", "s3", "desktop", "migration")
 # extras 也纳入比对（bar[baz]==2.0）；当前四份锁无 extras 行，防未来静默漏检
 _PIN_RE = re.compile(r"^([A-Za-z0-9_.\-\[\]]+)==([^\s;]+)", re.MULTILINE)
 
@@ -73,12 +73,17 @@ def main(argv: list[str]) -> int:
         "UV_CACHE_DIR": str(ROOT / ".uv-cache"),
     }
     failed: list[str] = []
+    unchecked: list[str] = []
     try:
         for tier in tiers:
             txt = ROOT / "requirements" / f"{tier}.txt"
             lock = ROOT / "requirements" / f"{tier}.lock"
             if not txt.exists() or not lock.exists():
-                print(f"[lock] 跳过 {tier}: 缺 {txt.name} 或 {lock.name}")
+                # 2026-10-11（N1 假绿洞）：缺锁必须算失败而不是跳过——此前走
+                # continue + 无条件 return 0，新增依赖不生成 .lock 时 CI 永远绿，
+                # 且打印「均一致」造成已校验的错觉。
+                unchecked.append(tier)
+                print(f"[lock] ✗ {tier}: 缺 {txt.name} 或 {lock.name}，未校验")
                 continue
             fresh_text = _compile(tier, txt, tmp_root / f"{tier}.lock", env)
             if fresh_text is None:
@@ -108,6 +113,9 @@ def main(argv: list[str]) -> int:
             "[lock] 失败：请刷新锁 —— "
             "uv pip compile requirements/<tier>.txt -o requirements/<tier>.lock"
         )
+        return 1
+    if unchecked:
+        print(f"[lock] 失败：{unchecked} 缺 .lock，请生成 —— uv pip compile requirements/<tier>.txt -o requirements/<tier>.lock")
         return 1
     print(f"[lock] 通过：{tiers} 的 .lock 与 .txt 均一致")
     return 0

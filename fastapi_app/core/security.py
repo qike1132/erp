@@ -10,6 +10,8 @@ import logging
 
 import argon2
 
+from fastapi_app.core.metrics import _get_or_create_counter
+
 _argon2_hasher = argon2.PasswordHasher(
     type=argon2.Type.ID,
     memory_cost=19456,
@@ -20,6 +22,13 @@ _argon2_hasher = argon2.PasswordHasher(
 )
 
 logger = logging.getLogger(__name__)
+
+_BCRYPT_MISSING_COUNTER = ("password_bcrypt_missing_total",
+                           "登录时遇到 bcrypt 哈希但 bcrypt 库未安装的次数")
+
+
+def _bcrypt_missing_counter():
+    return _get_or_create_counter(*_BCRYPT_MISSING_COUNTER)
 
 
 _MAX_PASSWORD_LENGTH = 1024
@@ -42,7 +51,11 @@ def _verify_bcrypt(password: str, password_hash: str) -> bool:
         import bcrypt
         return bcrypt.checkpw(password.encode('utf-8'), password_hash.encode('utf-8'))
     except ImportError:
-        logger.warning("bcrypt 未安装，无法验证 bcrypt 哈希")
+        # N3 评审（2026-10-11）：缺 bcrypt 时旧哈希用户登录静默失败（返回 False
+        # 而非 5xx），运维无从发现。加 metric + error 级日志使故障可观测。
+        _bcrypt_missing_counter().inc()
+        logger.error("bcrypt 未安装：旧格式（$2b$/$2a$/$2y$）密码哈希无法验证，"
+                     "相关用户登录将持续失败。请安装：pip install -r requirements/base.txt")
         return False
     except (ValueError, TypeError) as e:
         logger.debug(f"bcrypt 验证失败: {e}")

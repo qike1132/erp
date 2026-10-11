@@ -211,6 +211,7 @@ jobs:
     # 锁同步门禁（B1）：requirements/<tier>.txt 改了必须重跑 uv pip compile 刷新 .lock，
     # 否则锁会悄悄与声明脱节（改了依赖却不生效）。
     - name: Check requirements lock freshness
+      # 七档（N1 修复后 DEFAULT_TIERS 扩到全档）：缺 .lock 现在判失败而非跳过。
       run: python scripts/check_requirements_lock.py
     
     # 密钥扫描（CI 侧第二道防线）：`.githooks/pre-commit` 只在本地跑、且可被

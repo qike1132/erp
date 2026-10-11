@@ -20,6 +20,7 @@
   被删空的计划主单一并移除（见 purge_shipment_plan_details_for_order）。
 """
 import logging
+from functools import partial
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -171,10 +172,10 @@ async def purge_shipment_plan_details_for_order(db: AsyncSession, order_no: str)
     plan_deleted = 0
     if emptied_ids:
         result = await db.execute(delete(PurchasePlan).where(PurchasePlan.id.in_(emptied_ids)))
-        plan_deleted = result.rowcount or 0
+        plan_deleted = int(getattr(result, 'rowcount', 0) or 0)
 
     for month in affected_months:
-        _schedule_post_commit(db, lambda m=month: _invalidate_plan_caches(m))
+        _schedule_post_commit(db, partial(_invalidate_plan_caches, month))
 
     logger.info(
         '订单删除级联清理出货计划：order_no=%s，明细 %d 条，删空主单 %d 个（%s）',
