@@ -10,7 +10,7 @@
     "dev": "vite --host 0.0.0.0 --port 5173",
     "build": "vue-tsc -b && node scripts/vite-build.mjs",
     "build:fast": "node scripts/vite-build.mjs --logLevel info",
-    "build:atomic": "vue-tsc -b && node scripts/vite-build.mjs --outDir dist-new --logLevel info && node scripts/check-css-legacy.mjs dist-new && node scripts/swap-dist.mjs",
+    "build:atomic": "vue-tsc -b && node scripts/vite-build.mjs --outDir dist-new --logLevel info && node scripts/check-css-legacy.mjs dist-new && node scripts/swap-dist.mjs && node scripts/prune-dist-backups.mjs",
     "build:open": "node scripts/build-refresh.mjs",
     "build:open:fast": "node scripts/build-refresh.mjs --fast",
     "check:routes": "node scripts/check-route-alignment.mjs",
