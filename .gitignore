@@ -454,3 +454,7 @@ _firefox_profile_*/
 # 而那是 pre-commit 的默认 PRE_COMMIT_HOME，导致第 4 层永远跑不起来。
 # 故 .githooks/pre-commit 把 PRE_COMMIT_HOME 默认指到仓内该目录；纯缓存，不入库。
 /.pre-commit-home/
+
+# uv 锁门禁的仓内缓存/临时目录（scripts/check_requirements_lock.py）
+.uv-cache/
+.lockcheck-tmp/

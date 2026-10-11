@@ -68,9 +68,10 @@ Write-Step '2/6 拷 runtime'
 robocopy $PyDir (Join-Path $OutDir 'runtime\python313') /E /XD '__pycache__' /XF @('*.pyc','*.pyo') /NFL /NDL /NJH /NJS /NP /R:1 /W:1 | Out-Null
 if($LASTEXITCODE -ge 8){ Write-Fail "robocopy 失败 (exit=$LASTEXITCODE)：拷 runtime"; exit 1 }
 if($DryRun){
-  Write-Warn 'DryRun：跳过 runtime 依赖安装（pip install base/dev/test/ocr）与导入自检'
+  Write-Warn 'DryRun：跳过 runtime 依赖安装（pip install base/dev/test/ocr 锁）与导入自检'
 } else {
-  & (Join-Path $OutDir 'runtime\python313\python.exe') -m pip install -q -r (Join-Path $ProjectDir 'requirements\base.txt') -r (Join-Path $ProjectDir 'requirements\dev.txt') -r (Join-Path $ProjectDir 'requirements\test.txt') -r (Join-Path $ProjectDir 'requirements\ocr.txt')
+  # 用锁文件（B1）：钉死全部传递依赖，离线包环境可复现
+  & (Join-Path $OutDir 'runtime\python313\python.exe') -m pip install -q -r (Join-Path $ProjectDir 'requirements\base.lock') -r (Join-Path $ProjectDir 'requirements\dev.lock') -r (Join-Path $ProjectDir 'requirements\test.lock') -r (Join-Path $ProjectDir 'requirements\ocr.lock')
   if($LASTEXITCODE -ne 0){ Write-Fail "runtime 依赖安装失败 exit=$LASTEXITCODE"; exit 1 }
   $smoke = & (Join-Path $OutDir 'runtime\python313\python.exe') -c "import fastapi,uvicorn,sqlalchemy,asyncpg,pytest,ruff;print('imports-ok')" 2>&1
   if($smoke -notmatch 'imports-ok'){ Write-Fail "runtime 自检失败: $smoke"; exit 1 }
