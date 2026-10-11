@@ -87,30 +87,10 @@ async def _setup_redis_caches():
     except (RuntimeError, OSError, ValueError) as e:
         logger.warning("异步 Redis 客户端预热失败: %s", e)
 
-    from utils.redis_cache import redis_cache
-    try:
-        redis_url = (
-            getattr(settings, 'REDIS_CACHE_URL', None)
-            or os.getenv('REDIS_CACHE_URL')
-            or os.getenv('REDIS_URL')
-        )
-        if redis_url:
-            await redis_cache.init_app(redis_url=redis_url)
-        else:
-            redis_host = os.getenv('REDIS_HOST', 'localhost')
-            redis_port = int(os.getenv('REDIS_PORT', 6379))
-            redis_db = int(os.getenv('REDIS_DB', 0))
-            redis_pwd = os.getenv('REDIS_PASSWORD')
-            await redis_cache.init_app(
-                redis_host=redis_host,
-                redis_port=redis_port,
-                redis_db=redis_db,
-                redis_password=redis_pwd,
-            )
-        stats = await redis_cache.get_stats()
-        logger.info("Redis缓存管理器初始化完成: %s", stats.get('backend', 'unknown'))
-    except (OSError, ValueError) as e:
-        logger.warning("Redis缓存初始化失败: %s", e)
+    # 与 ARQ worker 共用同一初始化（2026-10-11：worker 此前从不初始化 redis_cache，
+    # 死信队列写不进、worker 侧 Redis 缓存全部静默降级）
+    from fastapi_app.core.redis_wrapper import init_redis_cache_manager
+    await init_redis_cache_manager()
 
     from fastapi_app.core.nav_context import invalidate_nav_cache
     try:

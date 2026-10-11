@@ -6,6 +6,7 @@ Redis 缓存操作统一包装器
 """
 import contextlib
 import logging
+import os
 from typing import Any
 
 from fastapi_app.core.exception_handler import INFRA_EXCEPTIONS
@@ -403,3 +404,41 @@ async def get_sentinel_aware_client() -> Any:
 
     # 回退到普通客户端
     return get_client()
+
+
+# ==================== 共享缓存管理器初始化 ====================
+
+async def init_redis_cache_manager() -> None:
+    """初始化 ``utils.redis_cache`` 的共享缓存管理器（API 与 ARQ worker 共用）。
+
+    ``redis_cache`` 必须在**每个使用它的进程**启动时 ``init_app()`` 一次，否则
+    ``ensure_client()`` 恒返回 ``None``，经本模块的所有路径静默降级
+    （返回 ``None``/``0``/空）。2026-10-11 发现：只有 API 进程的 lifespan 调用过
+    它，**ARQ worker 进程从不调用** —— 于是 worker 里 ``safe_lpush`` 写不进死信队列
+    （``arq:dead_letter`` 恒空）、worker 侧一切 Redis 缓存形同虚设。
+
+    API 的 ``main.py`` lifespan 与 worker 的 ``WorkerSettings.on_startup`` 都调用
+    本函数。失败静默降级（与 ``init_app`` 语义一致）：Redis 不可用不得阻断启动。
+    """
+    from fastapi_app.core.config import settings
+    from utils.redis_cache import redis_cache
+
+    try:
+        redis_url = (
+            settings.REDIS_CACHE_URL
+            or os.getenv('REDIS_CACHE_URL')
+            or os.getenv('REDIS_URL')
+        )
+        if redis_url:
+            await redis_cache.init_app(redis_url=redis_url)
+        else:
+            await redis_cache.init_app(
+                redis_host=settings.REDIS_HOST,
+                redis_port=settings.REDIS_PORT,
+                redis_db=settings.REDIS_DB,
+                redis_password=settings.REDIS_PASSWORD or None,
+            )
+        stats = await redis_cache.get_stats()
+        logger.info("Redis缓存管理器初始化完成: %s", stats.get('backend', 'unknown'))
+    except (OSError, ValueError) as e:
+        logger.warning("Redis缓存初始化失败: %s", e)

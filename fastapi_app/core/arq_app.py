@@ -327,7 +327,7 @@ class WorkerSettings:
     """ARQ Worker 配置（`arq fastapi_app.core.arq_app.WorkerSettings`）。"""
 
     async def on_startup(ctx) -> None:  # noqa: N805 - ARQ 约定为类内静态钩子（无 self）
-        """Worker 启动时的编号水位对账（与 FastAPI lifespan 同款，spec §5）。
+        """Worker 启动钩子：初始化共享 Redis 缓存管理器 + 编号水位对账（spec §5）。
 
         ARQ worker 是**独立进程**（NSSM 服务 erp-arq），不受 FastAPI lifespan 约束。
         若此处不对账，部署窗口内 worker 会抢在 web 进程对账提交前处理已入队的批量
@@ -341,6 +341,14 @@ class WorkerSettings:
         真实抬升），故 web/worker 双进程执行安全 —— 不新增锁。失败**不阻断**启动
         （刻意与 lifespan 一致），但记 ERROR 以便失败可见、不静默留窗。
         """
+        # 初始化共享 Redis 缓存管理器（与 API lifespan 同源）。2026-10-11 前 worker
+        # 从不初始化它 → redis_wrapper 的所有路径静默降级、safe_lpush 写不进死信队列。
+        try:
+            from fastapi_app.core.redis_wrapper import init_redis_cache_manager
+            await init_redis_cache_manager()
+        except Exception as e:  # defensive: Redis 初始化失败不得阻断 worker 启动
+            logger.error('worker Redis 缓存初始化失败（不影响启动）: %s', e)
+
         try:
             from fastapi_app.core.database import require_async_session_local
             from fastapi_app.services.numbering_reconcile import reconcile_numbering_counters
