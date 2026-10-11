@@ -161,16 +161,15 @@ jobs:
     # quality_gate.py 的 pip_audit 门禁：过期 / 僵尸条目（漏洞已消失）/ 超过有效期上限 /
     # 缺 reason / 未豁免漏洞 一律 FAIL 并退出码非 0。
     #
-    # ⚠️ 2026-10-02：本步骤暂用 --report（只报告、不判定失败）。
-    # 原因：豁免清单目前为空，而现场 pip-audit 实测 25 个包共 172 条漏洞，其中 166 条
-    # **已有修复版本** —— 正确处置是升级依赖（依既定纪律属"库侧变更"，另开任务），
-    # 而不是登记 100+ 条豁免把真实问题糊住。在此之前保持判定失败会让 test job 一上来就红，
-    # 反而挡住所有正常提交（与 quality_gate.py 自述的"红着的门禁终会被关掉"相悖）。
-    # 依赖升级完成后：把本行 --report 去掉，并按需只对确实无法升级的条目登记豁免。
-    - name: Dependency vulnerability scan (report-only until deps are upgraded)
+    # 2026-10-11 起恢复判定：de963b00（2026-10-02）已查明 172 条中 151 条属系统 python
+    # 的 AI 工具依赖（非本项目暴露面），venv 真实暴露面 21 条（PyJWT 13 + pip 8）当天
+    # 已升级清零并复扫通过。本日复扫 venv 全量（= 锁内容）仍为 0 漏洞，门禁判定模式
+    # 实测 PASS（exit 0），故拆除 report-only 降级。若未来出现新漏洞：对确无法升级的
+    # 条目按 pyproject [[tool.code-quality.pip-audit-ignores]] 登记豁免（≤180 天 + reason）。
+    - name: Dependency vulnerability scan
       run: |
         pip-audit --format json > dependency-audit.json || true
-        python scripts/quality_gate.py --only pip_audit --audit-report dependency-audit.json --report --verbose
+        python scripts/quality_gate.py --only pip_audit --audit-report dependency-audit.json --verbose
     
     - name: Upload security reports
       uses: actions/upload-artifact@v4

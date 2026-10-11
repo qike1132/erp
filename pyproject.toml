@@ -38,10 +38,10 @@ max_file_size = 1600
 #     `pip-audit --format json` 的结果；本地无数据时门禁会如实 WARN 并跳过。
 #   - 门禁同时打印豁免条数与 ≤30 天内即将到期的条目。
 #
-# 当前清单为**空**：2026-10-02 现场 pip-audit 实测 25 个包共 172 条漏洞，其中 166 条
-# **已有修复版本** —— 正确处置是升级依赖（属"库侧变更"，另开任务），而不是登记 100+
-# 条豁免把真实问题糊住。在依赖升级完成前，CI 的该步骤暂用 --report 只报告不判定
-# （见 .github/workflows/ci-cd.yml 的说明），机制本身由
+# 当前清单为**空**。172 条的历史口径（de963b00 查明）：其中 151 条属系统 python
+# 的 AI 工具依赖（非本项目暴露面），venv 真实暴露面 21 条（PyJWT 13 + pip 8）已于
+# 2026-10-02 升级清零并复扫通过；2026-10-11 复扫 venv 全量（= 锁内容）仍为 0 漏洞，
+# CI 该步骤已恢复判定（见 .github/workflows/ci-cd.yml）。机制本身由
 # `python scripts/quality_gate.py --self-test --only pip_audit` 用合成 fixture 证明。
 #
 # 新增条目的写法（示例，勿直接启用）：
