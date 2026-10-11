@@ -317,8 +317,11 @@ class Settings(BaseSettings):
     ASYNC_DATABASE_REPLICA_URL: str = os.getenv("ASYNC_DATABASE_REPLICA_URL", "")
 
     # Redis 配置（向后兼容：未配置独立实例时使用 REDIS_HOST/PORT/DB）
-    REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-    REDIS_HOST: str = os.getenv("REDIS_HOST", "localhost")
+    # 默认值用 127.0.0.1 而非 localhost：Windows 上 localhost 解析优先 ::1，
+    # 而 redis 只 bind IPv4，漏配 .env 的环境会连 ::1 超时（生产备份链路曾
+    # 因此 fail-closed 停摆，见 .env.example 注释与评审 2026-10-11 N1）。
+    REDIS_URL: str = os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0")
+    REDIS_HOST: str = os.getenv("REDIS_HOST", "127.0.0.1")
     REDIS_PORT: int = int(os.getenv("REDIS_PORT") or "6379")
     REDIS_DB: int = int(os.getenv("REDIS_DB") or "0")
     REDIS_PASSWORD: str = os.getenv("REDIS_PASSWORD", "")

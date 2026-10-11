@@ -46,13 +46,17 @@ groups:
           description: "服务 {{ $labels.service }} 错误率为 {{ $value | humanizePercentage }}。"
 
       - alert: ERP_DatabaseConnectionsHigh
-        expr: pg_stat_activity_count / pg_settings_max_connections * 100 > 80
+        # 用被真实赋值的连接池指标（db_health.py 每 30s 设 db_pool_*）；
+        # 原 pg_stat_activity_count / pg_settings_max_connections 从未导出，
+        # 规则永不触发（评审 2026-10-11 N2）。
+        expr: db_pool_checked_out{pool="async_main"} / db_pool_size{pool="async_main"} * 100 > 80
         for: 5m
         labels:
           severity: warning
         annotations:
-          summary: "PostgreSQL 连接数过高"
-          description: "数据库连接使用率为 {{ $value | humanizePercentage }}。"
+          summary: "数据库连接池使用率过高"
+          # $value 已是百分数(checked_out/size*100)，不能再过 humanizePercentage（会×100）
+          description: "数据库连接池使用率为 {{ $value }}%。"
 
       - alert: ERP_ArqTasksFailing
         expr: increase(arq_task_failure_total[5m]) > 10
@@ -64,6 +68,8 @@ groups:
           description: "最近 5 分钟 ARQ 失败任务数 > 10，请检查死信队列。"
 
       - alert: ERP_DeadLetterQueueGrowing
+        # arq_dead_letter_queue_depth 由 metrics.py 导出，在 /metrics 抓取前
+        # 经 Redis LLEN arq:dead_letter 刷新（评审 2026-10-11 N2 前该名不存在）。
         expr: arq_dead_letter_queue_depth > 10
         for: 15m
         labels:

@@ -363,6 +363,9 @@ def register_health_routes(app: FastAPI) -> None:
                     return JSONResponse(status_code=503, content={'detail': '监控端点未启用（未配置 METRICS_BEARER_TOKEN）'})
                 if not auth.startswith(f'Bearer {metrics_token}'):
                     return JSONResponse(status_code=401, content={'detail': '未授权访问'})
+            # 抓取前刷新死信队列深度（Redis LLEN），使 arq_dead_letter_queue_depth 实时
+            from fastapi_app.core.metrics import refresh_dead_letter_queue_depth
+            await refresh_dead_letter_queue_depth()
             return Response(content=get_metrics(), media_type=get_content_type())
     except (ImportError, AttributeError):
         pass  # defensive: 异常静默处理,不影响主流程

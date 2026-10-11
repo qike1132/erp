@@ -244,6 +244,33 @@ BACKUP_STATUS = _get_or_create_gauge(
     '备份状态(0=失败 1=成功 2=进行中)'
 )
 
+ARQ_DEAD_LETTER_QUEUE_DEPTH = _get_or_create_gauge(
+    'arq_dead_letter_queue_depth',
+    'ARQ 死信队列当前深度（条）'
+)
+
+
+async def refresh_dead_letter_queue_depth() -> None:
+    """刷新死信队列深度（Redis ``LLEN arq:dead_letter``）。
+
+    死信队列由 ARQ worker 进程写入，API 进程经共享 Redis 跨进程读取。
+    在 ``/metrics`` 抓取前调用，使 ``arq_dead_letter_queue_depth`` 反映实时值
+    （此前该指标名从未导出，``ERP_DeadLetterQueueGrowing`` 规则永不触发）。
+    读取走 ``redis_wrapper``（与写入方 ``safe_lpush`` 同一条客户端栈），
+    避免 ``REDIS_CACHE_URL != REDIS_URL`` 时读到不同 keyspace。
+    失败静默：指标刷新绝不能影响抓取本身。
+    """
+    try:
+        from fastapi_app.core.arq_callbacks import DLQ_KEY
+        from fastapi_app.core.redis_wrapper import get_client
+        client = get_client()
+        if client is None:
+            return
+        depth = await client.llen(DLQ_KEY)
+        ARQ_DEAD_LETTER_QUEUE_DEPTH.set(int(depth))
+    except Exception as e:  # defensive: 刷新失败不得影响抓取；debug 级留痕便于排障
+        logger.debug("死信队列深度刷新失败: %s", e)
+
 
 def get_metrics():
     """生成 Prometheus 格式的指标数据"""
