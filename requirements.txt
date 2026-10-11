@@ -13,11 +13,14 @@
 # 此文件引用分拆文件，兼容旧部署流程。
 # ============================================================
 # 锁文件（评审 2026-10-11 B1：Python 侧此前无锁，传递依赖不定版）
-#   base/dev/test 三档各有一份 *.lock，由：
-#     uv pip compile requirements/<tier>.txt -o requirements/<tier>.lock
+#   base/dev/test/ocr 四档各有一份 *.lock，由（平台口径必须钉死，锁是 Windows
+#   产物，不钉则非 Windows 机器上刷新出的锁与入库锁不一致、被门禁拒绝）：
+#     uv pip compile requirements/<tier>.txt -o requirements/<tier>.lock \
+#       --python-platform windows --python-version 3.13
 #   生成，钉死全部传递依赖，使换机重装得到同一套环境。重装可用：
 #     pip install -r requirements/base.lock
-#   ⚠️ 改了 requirements/<tier>.txt 后须重跑上面的命令刷新对应 .lock。
+#   ⚠️ 改了 requirements/<tier>.txt 后须重跑上面的命令刷新对应 .lock
+#   （scripts/check_requirements_lock.py 会校验，口径不同会响亮失败）。
 # ============================================================
 
 -r requirements/base.txt
