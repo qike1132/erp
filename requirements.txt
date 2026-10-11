@@ -12,6 +12,13 @@
 #
 # 此文件引用分拆文件，兼容旧部署流程。
 # ============================================================
+# 锁文件（评审 2026-10-11 B1：Python 侧此前无锁，传递依赖不定版）
+#   base/dev/test 三档各有一份 *.lock，由：
+#     uv pip compile requirements/<tier>.txt -o requirements/<tier>.lock
+#   生成，钉死全部传递依赖，使换机重装得到同一套环境。重装可用：
+#     pip install -r requirements/base.lock
+#   ⚠️ 改了 requirements/<tier>.txt 后须重跑上面的命令刷新对应 .lock。
+# ============================================================
 
 -r requirements/base.txt
 -r requirements/dev.txt
