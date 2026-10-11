@@ -131,7 +131,7 @@ async def _perform_shutdown(background_tasks: list[asyncio.Task]) -> None:
     async def _step(name, coro_fn):
         try:
             await coro_fn()
-        except Exception as e:
+        except Exception as e:  # defensive: 单步失败不阻塞其余关停步骤
             logger.warning("关停步骤 %s 失败: %s", name, e, exc_info=True)
 
     # 再取消后台任务
@@ -153,7 +153,7 @@ async def _perform_shutdown(background_tasks: list[asyncio.Task]) -> None:
     await _step("db_health_checker_stop", db_health_checker.stop)
     try:
         shutdown_telemetry()  # sync 函数（telemetry.py:147），不可 await
-    except Exception as e:
+    except Exception as e:  # defensive: 单步失败不阻塞其余关停步骤
         logger.warning("关停步骤 shutdown_telemetry 失败: %s", e, exc_info=True)
     await _step("dispose_async_engines", dispose_async_engines)
 
@@ -264,7 +264,7 @@ async def lifespan(application: FastAPI):
         await asyncio.wait_for(_perform_shutdown(background_tasks), timeout=15.0)
     except TimeoutError:
         logger.error("优雅关闭超时（15s），强制退出")
-    except Exception as e:
+    except Exception as e:  # defensive: 关停兜底记录，不再让异常静默逃逸
         # wait_for 会把协程自身异常原样传播（非 TimeoutError），必须显式记录
         logger.error("优雅关闭异常退出: %s", e, exc_info=True)
 

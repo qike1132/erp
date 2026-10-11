@@ -53,6 +53,12 @@ _CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 # ARQ 100MB、桌面壳 50MB）。
 LOG_ROTATE_CHECK_INTERVAL = 60.0
 
+# kill_tree 软杀等待窗口（复核 P1-9）：软杀对 CREATE_NO_WINDOW 子进程大概率
+# 无效，窗口刻意短——4s 等待远小于 nssm restart 的停机容忍，失败即升级硬杀。
+# 极端最坏链路：软杀 taskkill 超时 15s + 等待 4s + 硬杀 15s ≈ 34s（软杀实际秒回）。
+_SOFT_KILL_WAIT_SECONDS = 4.0
+_SOFT_KILL_POLL_INTERVAL = 0.2
+
 
 def _source_fingerprint() -> str:
     """本模块源码的 sha256（前 12 位）+ mtime —— 版本指纹。
@@ -418,25 +424,38 @@ class _Managed:
         return self.proc is not None and self.proc.poll() is None
 
     def kill_tree(self) -> None:
-        """终止整棵进程树（Windows taskkill /T；非 Windows 用进程组）。
+        """终止整棵进程树：Windows 先软杀、超时才升级硬杀；非 Windows 用进程组 SIGTERM。
 
-        必须确认进程**真的**终止了：原先不看 taskkill 返回码、`wait` 超时也被 suppress，
-        随后无条件把 self.proc 置 None —— 若 taskkill 因权限/句柄失败，旧进程树仍占着
-        :5002，而监督器已按"进程已退出"把它安排重启 → 端口冲突 + 孤儿进程
-        （2026-10-02 排查 NSSM 孤儿时确认过这条链路）。
+        2026-10-11（复核 P1-9）：原先对 uvicorn 子进程一律 `taskkill /F /T`，
+        TerminateProcess 使 lifespan 关停段从不执行（实测 84/160 次进入关停段
+        未走完、收尾哨兵「数据库连接池已关闭」自 2026-10-02 起再未亮）。
+        现先发不带 /F 的软杀并轮询等待，超时才升级 /F —— 未来子进程信号模型
+        变化（如 uvicorn 挂控制台处理器）时可自动获益；软杀对 CREATE_NO_WINDOW
+        子进程当前大概率无效，等待窗口刻意很短以免拖慢 nssm restart。
         """
         if not self.proc:
             return
         pid = self.proc.pid
         if os.name == "nt":
-            result = subprocess.run(  # nosec B603 B607
-                ["taskkill", "/F", "/T", "/PID", str(pid)],
+            soft = subprocess.run(  # nosec B603 B607
+                ["taskkill", "/T", "/PID", str(pid)],
                 creationflags=_CREATE_NO_WINDOW,
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15,
             )
-            if result.returncode != 0:
-                print(f"[prod_runner] 警告: taskkill 返回 {result.returncode}，"
-                      f"PID {pid} 的进程树可能未终止（旧进程会继续占用端口）")
+            deadline = time.monotonic() + _SOFT_KILL_WAIT_SECONDS
+            while time.monotonic() < deadline and self.proc.poll() is None:
+                time.sleep(_SOFT_KILL_POLL_INTERVAL)
+            if self.proc.poll() is None:
+                result = subprocess.run(  # nosec B603 B607
+                    ["taskkill", "/F", "/T", "/PID", str(pid)],
+                    creationflags=_CREATE_NO_WINDOW,
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15,
+                )
+                if result.returncode != 0:
+                    print(f"[prod_runner] 警告: taskkill 返回 {result.returncode}，"
+                          f"PID {pid} 的进程树可能未终止（旧进程会继续占用端口）")
+            elif soft.returncode != 0:
+                print(f"[prod_runner] 信息: 软杀返回 {soft.returncode} 但进程已退出")
         else:
             import signal
             try:

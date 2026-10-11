@@ -182,22 +182,38 @@ class L1StaticAnalysis(LayerBase):
         return issues, raw
 
     def _parse_ruff_output(self, stdout: str, builder_placeholder: object | None) -> list[AuditIssue]:
-        """解析 ruff concise 输出为 :class:`AuditIssue` 列表。"""
+        """解析 ruff concise 输出为 :class:`AuditIssue` 列表。
+
+        严重度按规则族映射（2026-10-11 复核修正）：原先一律硬编码 HIGH，
+        导致 29 条 scripts/ 机械违规（UP031 等）全部挤进 high 阻断计数。
+        E9/F63/F7/F82 前缀是语法级/未定义名错误 → HIGH；bandit 安全码
+        （B + S1xx~S6xx，用 fullmatch 防 SIM 前缀误伤）→ MEDIUM；
+        其余（UP/SIM 等风格类）→ LOW。
+        """
         builder = IssueBuilder()
         issues: list[AuditIssue] = []
+        _SYNTAX_PREFIXES = ("E9", "F63", "F7", "F82")
+        _SECURITY_CODE_RE = re.compile(r"[BS]\d{3}")
         for line in stdout.splitlines():
             m = _RUFF_LINE_RE.match(line.strip())
             if not m:
                 continue
+            code = m.group("code")
+            if code.startswith(_SYNTAX_PREFIXES):
+                severity = Severity.HIGH
+            elif _SECURITY_CODE_RE.fullmatch(code):
+                severity = Severity.MEDIUM
+            else:
+                severity = Severity.LOW
             issues.append(
                 builder.build(
                     layer_id=self.layer_id,
-                    severity=Severity.HIGH,
+                    severity=severity,
                     file=m.group("file"),
                     line=int(m.group("line")),
-                    description=f"ruff {m.group('code')}: {m.group('msg')}",
+                    description=f"ruff {code}: {m.group('msg')}",
                     suggestion="按 ruff 规则修复或显式 noqa 附说明",
-                    rule_id=f"L1-RUFF-{m.group('code')}",
+                    rule_id=f"L1-RUFF-{code}",
                     owner=DEFAULT_OWNER,
                     due_date=DEFAULT_DUE_DATE,
                 )
