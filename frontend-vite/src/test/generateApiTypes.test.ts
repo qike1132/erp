@@ -3,7 +3,6 @@ import { generateTypes, tsTypeOf, buildNameMap, sanitizeIdent } from '../../scri
 
 describe('tsTypeOf 映射规则', () => {
   it('基础类型与 required/optional', () => {
-    const map = new Map<string, string>()
     const spec = {
       components: {
         schemas: {

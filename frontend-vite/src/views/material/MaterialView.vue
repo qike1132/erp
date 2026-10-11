@@ -114,7 +114,7 @@ const activeTab = ref('progress')
 // 数据加载 / SWR 缓存 / 后台刷新 / 页内 toast（原文件逻辑抽至 composable，行为不变）
 const {
   toastMsg, toastType, toastIcon, toast,
-  pPage, pPerPage, pPages, pIsLoading, pIsFetching, progressRows, progressCount,
+  pPage, pPerPage, pPages, pIsLoading, pIsFetching, progressCount,
   progressOrderRows, filteredOrderRows, showSearchEmpty, searchKeyword, stats,
   hPerPage, hPages, hIsLoading, hIsFetching, hRegistrations,
   loadProgress, ensureProgressLoaded, ensureHistoryLoaded,

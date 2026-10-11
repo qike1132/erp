@@ -26,7 +26,7 @@
 </template>
 
 <script setup lang="ts">
-const props = withDefaults(
+withDefaults(
   defineProps<{
     accent?: 'blue' | 'green' | 'amber' | 'red' | 'purple' | 'ocean'
   }>(),

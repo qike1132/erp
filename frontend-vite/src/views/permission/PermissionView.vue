@@ -9,7 +9,7 @@
         <UiEmpty text="暂无权限数据" />
       </template>
       <div v-else class="py-2">
-        <PermissionNode v-for="node in permissionTree" :key="node.id" :node="node" :depth="0" />
+        <PermissionNode v-for="treeNode in permissionTree" :key="treeNode.id" :node="treeNode" :depth="0" />
       </div>
     </UiCard>
   </div>
@@ -22,7 +22,6 @@ import { FontAwesomeIcon } from '@fortawesome/vue-fontawesome'
 import { permissionApi } from '@/api'
 import type { PermissionItem } from '@/types'
 import UiCard from '@/components/ui/UiCard.vue'
-import UiBadge from '@/components/ui/UiBadge.vue'
 import UiSpinner from '@/components/ui/UiSpinner.vue'
 import UiEmpty from '@/components/ui/UiEmpty.vue'
 

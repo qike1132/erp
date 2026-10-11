@@ -54,7 +54,7 @@
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import type { DataTableSortEvent } from 'primevue/datatable'
-import { ref, watch, computed, onMounted, nextTick } from 'vue'
+import { ref, watch, computed, nextTick } from 'vue'
 import VirtualList from './VirtualList.vue'
 import UiSkeleton from './UiSkeleton.vue'
 import { useTableVirtualScroll } from '@/composables/useTableVirtualScroll'

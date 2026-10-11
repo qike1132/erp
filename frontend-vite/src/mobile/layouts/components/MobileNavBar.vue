@@ -28,6 +28,7 @@ defineProps<{
 
 const router = useRouter()
 const route = useRoute()
+void route
 
 // 全局通知铃铛是 fixed 悬浮在右上角（z-index 60，高于导航栏的 50），
 // 会盖住右侧插槽里的操作按钮导致点不到；有插槽内容时预留其占位宽度。

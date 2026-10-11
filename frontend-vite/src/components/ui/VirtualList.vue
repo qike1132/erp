@@ -117,10 +117,7 @@ function remeasureItem(index: number) {
   if (_heightMap.delete(index)) _heightVersion.value++
 }
 
-function _getItemHeight(index: number): number {
-  if (!props.dynamicHeight) return props.itemHeight
-  return _heightMap.get(index) || estimatedH.value
-}
+// （原 _getItemHeight 已删：与 _prefixSums 内联逻辑重复的死代码，评审 2026-10-11）
 
 const _prefixSums = computed(() => {
   if (!props.dynamicHeight) return null

@@ -1,6 +1,6 @@
 import { get, post, put, del, upload, download } from './request'
 import type {
-  Product, StagingListResponse, StagingRow, StagingImportResult, InventoryItem,
+  Product, StagingListResponse, StagingRow, StagingImportResult,
   InventoryResponse, StockInRecord, ShipmentInfo, ApiResponse, QueryParams,
 } from '@/types'
 import type { StockStatsData } from '@/types/api'

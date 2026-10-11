@@ -7,7 +7,7 @@
  * 防手改脏值进请求参数。
  */
 import { describe, it, expect, beforeEach } from 'vitest'
-import { mount, flushPromises } from '@vue/test-utils'
+import { mount } from '@vue/test-utils'
 import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query'
 import { defineComponent, h } from 'vue'
 import { useEnhancedList } from '@/composables/useEnhancedList'

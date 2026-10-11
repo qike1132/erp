@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/utils/devLog', () => ({ devLog: mocks.devLog }))
 
-import { clearCsrfCache, resolveStaticUrl, get } from '@/api/request'
+import { clearCsrfCache, resolveStaticUrl } from '@/api/request'
 
 describe('resolveStaticUrl', () => {
   afterEach(() => {

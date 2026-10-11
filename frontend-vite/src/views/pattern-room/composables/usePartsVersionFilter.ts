@@ -49,7 +49,7 @@ export function usePartsVersionFilter(
 
   function toggleVersion(partName: string, versionNo: string) {
     if (selectedVersion.value[partName] === versionNo) {
-      const { [partName]: _, ...rest } = selectedVersion.value
+      const { [partName]: _omit, ...rest } = selectedVersion.value
       selectedVersion.value = rest
       expandedParts.value.delete(partName)
     } else {

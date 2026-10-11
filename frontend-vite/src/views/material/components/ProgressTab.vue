@@ -97,7 +97,7 @@ import type { ProgressOrderRow, SupplierGroupRow } from '../composables/useMater
 import SupplierGroupCard from './SupplierGroupCard.vue'
 import { reactive } from 'vue'
 
-const props = defineProps<{
+defineProps<{
   /** 搜索过滤后的行（父级持有搜索词） */
   filteredRows: ProgressOrderRow[]
   /** 未过滤的行（fetching 提示与空态判断用） */

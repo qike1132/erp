@@ -338,7 +338,7 @@ export function useProductListActions(confirmDialog: ConfirmDialogLike) {
       } else {
         showToast(res.error || '保存失败', 'error')
       }
-    } catch (error) {
+    } catch {
       showToast('保存BOM失败', 'error')
     }
   }

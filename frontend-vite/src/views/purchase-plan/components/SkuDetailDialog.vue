@@ -30,7 +30,7 @@
 <script setup lang="ts">
 import type { SkuDateItem } from './types';
 
-const props = defineProps<{
+defineProps<{
   open: boolean;
   barcode: string;
   name: string;

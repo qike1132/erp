@@ -11,7 +11,7 @@
  *   3) 两个保存入口在越界时真的会拦住（实时标红可被绕过）
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { ref, reactive } from 'vue'
+import { ref } from 'vue'
 
 const mocks = vi.hoisted(() => ({
   getMock: vi.fn(),

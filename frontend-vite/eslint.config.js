@@ -58,7 +58,7 @@ export default tseslint.config(
   {
     rules: {
       '@typescript-eslint/no-explicit-any': 'warn',
-      '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+      '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_', ignoreRestSiblings: true }],
       '@typescript-eslint/no-unused-expressions': 'off',
       'no-console': ['error', { allow: ['warn', 'error'] }],
       'vue/multi-word-component-names': 'off',
@@ -73,6 +73,15 @@ export default tseslint.config(
     files: ['src/utils/devLog.ts'],
     rules: {
       'no-console': 'off',
+    },
+  },
+  {
+    // 测试文件不是 Vue 组件：关掉 Vue 组件专用规则与组件结构 lint
+    // （评审 2026-10-11：13 条 one-component-per-file + 1 条 no-explicit-any 全在 src/test/*.test.ts）
+    files: ['src/test/**/*.{ts,vue}'],
+    rules: {
+      'vue/one-component-per-file': 'off',
+      '@typescript-eslint/no-explicit-any': 'off',
     },
   },
   {

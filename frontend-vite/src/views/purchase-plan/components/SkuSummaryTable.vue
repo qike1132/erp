@@ -63,7 +63,7 @@ import UiPagination from '@/components/ui/UiPagination.vue'
 import { factoryTone } from './factoryMeta'
 import type { SkuRow } from './types'
 
-const props = defineProps<{
+defineProps<{
   rows: SkuRow[]
   sortField: string
   sortDir: 'asc' | 'desc'

@@ -122,7 +122,7 @@ import UiDialog from '@/components/ui/UiDialog.vue'
 import type { ShipmentOption } from '@/api/stockReturn'
 import { RETURN_REASON_OPTIONS, type StockReturnFormData } from '../composables/useStockReturn'
 
-const props = defineProps<{
+defineProps<{
   open: boolean
   submitting: boolean
   shipments: ShipmentOption[]

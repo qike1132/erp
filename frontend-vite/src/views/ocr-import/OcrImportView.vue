@@ -84,7 +84,8 @@ function handleFileChange(files: FileList) {
 }
 
 // 轮询进度
-const { data: progressData } = useQuery({
+// 轮询查询：数据在 queryFn 内直接落到本地 ref（progress/progressStatus/...），不解构 data
+useQuery({
   queryKey: ['ocr-progress', taskId],
   queryFn: async () => {
     if (!taskId.value) return null

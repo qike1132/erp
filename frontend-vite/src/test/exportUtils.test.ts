@@ -60,6 +60,7 @@ describe('downloadCsv', () => {
   let createObjectURL: ReturnType<typeof vi.fn>
   let revokeObjectURL: ReturnType<typeof vi.fn>
   let clickSpy: ReturnType<typeof vi.fn>
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- 跨用例捕获占位，赋值即副作用
   let capturedBlob: Blob | undefined
   let capturedParts: BlobPart[] | undefined
   let capturedType: string | undefined

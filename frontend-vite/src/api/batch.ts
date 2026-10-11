@@ -1,5 +1,5 @@
 import { get, upload, download } from './request'
-import type { BatchImportResult, BatchQueryItem, QueryParams } from '@/types'
+import type { BatchImportResult, BatchQueryItem } from '@/types'
 
 /** Excel 解析 + 落库耗时远超全局 15s 超时（与 stock / plan 的导入约定一致） */
 const IMPORT_TIMEOUT = 120_000

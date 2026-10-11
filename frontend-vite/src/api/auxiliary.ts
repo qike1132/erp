@@ -1,5 +1,5 @@
 import { get } from './request'
-import type { ApiResponse, QueryParams } from '@/types'
+import type { ApiResponse } from '@/types'
 
 /** 产品搜索建议项（后端 `auxiliary.py::ProductSearchItem`，裸数组响应） */
 export interface ProductSearchItem {

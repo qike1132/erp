@@ -282,7 +282,7 @@ function _renderToast(msg: string, type: ToastType, options: Required<ToastOptio
   }
 
   // auto dismiss
-  const timer = setTimeout(removeToast, options.duration)
+  void setTimeout(removeToast, options.duration)  // auto dismiss（未存句柄：toast 移除后回调自身幂等）
 
   // pause on hover (optional UX enhancement)
   wrap.onmouseenter = () => {
