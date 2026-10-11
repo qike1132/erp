@@ -15,3 +15,5 @@ py-spy==0.3.14
 
 # ----- 运维 / 压测脚本 -----
 requests>=2.32.0           # scripts/verify_perf_cache_v2.py 等；此前仅靠 ocr.txt 传递依赖隐式带入
+psycopg2-binary>=2.9       # scripts/{insert_1_3_version,insert_test_app_versions_simple,test_ota_flow}.py
+                           #   顶层 import psycopg2；应用侧已统一 psycopg3，此处仅为这几个一次性运维脚本
