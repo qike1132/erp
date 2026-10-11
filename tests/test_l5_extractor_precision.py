@@ -20,6 +20,8 @@ _KNOWN_NOISE = {
     "NavItem", "NavSection",      # 前端适配器产物
     "FactorySummarySaveRequest",  # 死模型当基准（活模型在 endpoints/**/schemas.py）
     "OneClickGenerateRequest",    # 同上
+    "ReportExportRequest",        # 死模型在 schemas/、活模型在 endpoints/tasks.py
+    "CacheClearResponse",         # 死模型在 schemas/、活模型在 endpoints/auxiliary.py
 }
 
 

@@ -329,10 +329,11 @@ class L5ApiContract(LayerBase):
         api_dir = FASTAPI_APP_DIR / "api"
         py_files = list(schemas_dir.rglob("*.py")) if schemas_dir.exists() else []
         if api_dir.exists():
-            # 端点目录内也有实际在跑的 schemas.py；旧实现只扫顶层 schemas/，会拿顶层
-            # 死模型当基准、却漏掉 endpoints 里的活模型（评审 2026-10-11）。两处都扫，
-            # 撞名交由 ambiguous 剔除。
-            py_files.extend(api_dir.rglob("schemas.py"))
+            # 端点目录内也有实际在跑的模型（inline BaseModel 或 schemas.py）；旧实现只扫
+            # 顶层 schemas/，会拿那里的死模型当基准、却漏掉 endpoints 里的活模型
+            # （评审 2026-10-11，ReportExportRequest/CacheClearResponse 因此假差异）。
+            # 两处都扫，撞名交由 ambiguous 剔除。
+            py_files.extend(api_dir.rglob("*.py"))
         for py_file in py_files:
             if "__pycache__" in py_file.parts:
                 continue
@@ -344,7 +345,8 @@ class L5ApiContract(LayerBase):
             for node in ast.walk(tree):
                 if not isinstance(node, ast.ClassDef):
                     continue
-                # 仅处理含 BaseModel 基类的类
+                # 仅处理直接含 BaseModel 基类的类（不做继承解析：按名预收类会丢掉重名类、
+                # 反而让撞名检测失效，见 2026-10-11 的回归——代价大于收益）
                 bases = {
                     b.id for b in node.bases if isinstance(b, ast.Name)
                 }
