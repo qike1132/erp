@@ -6,7 +6,7 @@ N+1 治理成果验证 / SQL 注入扫描扩展 / nosec B608 标注保留校验�
     - 复用存量 ``scripts/check_n_plus_one.py``
     - 复用上一轮 P0-1 N+1 治理基线(6 个高危文件循环内查询数为 0)
     - 复用上一轮 P0-3 CTE 索引验证基线
-    - ``stock_service.py`` 6 处 nosec B608 标注须保留且使用绑定参数
+    - ``stock_inventory_service.py`` 4 处 nosec B608 标注须保留且使用绑定参数
 
 任务来源: ``.codeartsdoer/specs/prod_code_review/tasks.md`` 第 5 节。
 """
@@ -47,9 +47,11 @@ _HIGH_RISK_N_PLUS_ONE_TARGETS: tuple[str, ...] = (
     "fastapi_app/services/stock_service.py",
 )
 
-# stock_service.py nosec B608 标注基线(上一轮 6 处)
-_STOCK_SERVICE_PATH: Path = SERVICES_DIR / "stock_service.py"
-_EXPECTED_NOSEC_B608_COUNT: int = 6
+# nosec B608 标注基线：stock_service.py 经重构 f585040d 已变为纯再导出 shim（0 处），
+# SQL 与标注迁到 stock_inventory_service.py（评审 2026-10-11 修：规则原先指向 shim 文件，
+# 稳定误报「0 < 预期 6」）。
+_STOCK_SERVICE_PATH: Path = SERVICES_DIR / "stock_inventory_service.py"
+_EXPECTED_NOSEC_B608_COUNT: int = 4
 
 # N+1 扫描脚本超时(秒)
 _N_PLUS_ONE_TIMEOUT: int = 300
@@ -273,7 +275,7 @@ class L4DataAccess(LayerBase):
     # ------------------------------------------------------------------
 
     def _check_nsec_b608(self, builder: IssueBuilder) -> list[AuditIssue]:
-        """验证 stock_service.py 6 处 nosec B608 标注保留且使用绑定参数。"""
+        """验证 stock_inventory_service.py 4 处 nosec B608 标注保留且使用绑定参数。"""
         issues: list[AuditIssue] = []
         if not _STOCK_SERVICE_PATH.exists():
             issues.append(
@@ -327,7 +329,7 @@ class L4DataAccess(LayerBase):
                     file=rel,
                     line=1,
                     description=(
-                        f"stock_service.py nosec B608 标注数 "
+                        f"stock_inventory_service.py nosec B608 标注数 "
                         f"{len(nosec_b608_lines)} < 预期 {_EXPECTED_NOSEC_B608_COUNT}"
                     ),
                     suggestion="恢复 nosec B608 标注或确认基线变更",

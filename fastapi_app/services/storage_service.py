@@ -81,8 +81,15 @@ class S3StorageBackend(StorageBackend):
     """S3 / MinIO 对象存储"""
 
     def __init__(self):
-        import boto3
-        from botocore.config import Config
+        try:
+            import boto3
+            from botocore.config import Config
+        except ImportError as e:  # 构造期即失败：给可操作提示，而非裸 ImportError
+            # 该分支只在 STORAGE_TYPE=='s3' 时走到（见 get_storage_backend）；默认 local 不受影响。
+            # boto3 是可选依赖，声明在 requirements/s3.txt，切 s3 前必须装。
+            raise RuntimeError(
+                "STORAGE_TYPE=s3 需要 boto3/botocore，请先 pip install -r requirements/s3.txt"
+            ) from e
 
         endpoint = settings.S3_ENDPOINT
         self.bucket = settings.S3_BUCKET
