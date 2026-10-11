@@ -29,6 +29,7 @@ from scripts.prod_audit.base.layer_base import (
     LayerStatus,
     Severity,
 )
+from scripts.prod_audit.base.size_utils import gzip_size
 
 if TYPE_CHECKING:
     pass
@@ -651,7 +652,7 @@ class L1StaticAnalysis(LayerBase):
                 )
 
         # 产物体积
-        total_size = sum(f.stat().st_size for f in dist_dir.rglob("*") if f.is_file())
+        total_size = sum(gzip_size(f) for f in dist_dir.rglob("*") if f.is_file())  # 判据是 gzip 后 ≤ 2MB（评审 2026-10-11）
         if total_size > _BUNDLE_SIZE_LIMIT_BYTES:
             issues.append(
                 builder.build(
@@ -659,7 +660,7 @@ class L1StaticAnalysis(LayerBase):
                     severity=Severity.MEDIUM,
                     file="frontend-vite/dist/",
                     line=1,
-                    description=f"产物体积 {total_size / 1024 / 1024:.2f}MB > 2MB",
+                    description=f"产物 gzip 后体积 {total_size / 1024 / 1024:.2f}MB > 2MB",
                     suggestion="启用代码分割/摇树优化/动态导入",
                     rule_id="L1-BUNDLE-SIZE-001",
                     owner=DEFAULT_OWNER,

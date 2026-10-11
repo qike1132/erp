@@ -1,6 +1,7 @@
 """
 验证页面性能优化 - 版本2：更健壮的登录和元素检测
 """
+import os
 import time
 
 import requests
@@ -11,7 +12,12 @@ API_BASE = "/api/v1"
 
 def get_fresh_token():
     url = "http://localhost:5002/api/v1/auth/login"
-    resp = requests.post(url, json={"username": "admin", "password": "admin123"}, timeout=10)
+    # 凭据从环境变量取，避免明文口令入库（评审 2026-10-11）
+    username = os.getenv("PERF_TEST_USERNAME", "admin")
+    password = os.getenv("PERF_TEST_PASSWORD", "")
+    if not password:
+        raise RuntimeError("请先设置 PERF_TEST_PASSWORD 环境变量（不要硬编码口令）")
+    resp = requests.post(url, json={"username": username, "password": password}, timeout=10)
     if resp.status_code == 200:
         return resp.json().get("access_token", "")
     raise RuntimeError(f"Login failed: {resp.status_code} {resp.text}")

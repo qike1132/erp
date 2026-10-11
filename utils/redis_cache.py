@@ -93,12 +93,14 @@ class RedisCacheManager:
         #: 当前退避时长，重建一次翻倍。
         self._retry_delay: float = self.RETRY_INITIAL_DELAY
 
-    async def init_app(self, app=None, redis_url: str | None = None, redis_host: str = 'localhost',
+    # 默认 127.0.0.1 而非 localhost：Windows 上 localhost 解析优先 ::1，而 redis
+    # 只 bind IPv4，漏配环境变量时会连 ::1 超时（评审 2026-10-11）。
+    async def init_app(self, app=None, redis_url: str | None = None, redis_host: str = '127.0.0.1',
                        redis_port: int = 6379, redis_db: int = 0, redis_password: str | None = None,
                        default_timeout: int = 300, key_prefix: str = 'erp:'):
         if app is not None:
             redis_url = redis_url or app.config.get('REDIS_CACHE_URL') or app.config.get('REDIS_URL') or os.getenv('REDIS_CACHE_URL') or os.getenv('REDIS_URL')
-            redis_host = app.config.get('REDIS_HOST', os.getenv('REDIS_HOST', 'localhost'))
+            redis_host = app.config.get('REDIS_HOST', os.getenv('REDIS_HOST', '127.0.0.1'))
             redis_port = int(app.config.get('REDIS_PORT', os.getenv('REDIS_PORT', 6379)))
             redis_db = int(app.config.get('REDIS_DB', os.getenv('REDIS_DB', 0)))
             redis_password = app.config.get('REDIS_PASSWORD', os.getenv('REDIS_PASSWORD'))

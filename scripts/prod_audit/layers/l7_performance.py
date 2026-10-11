@@ -30,6 +30,7 @@ from scripts.prod_audit.base.layer_base import (
     LayerStatus,
     Severity,
 )
+from scripts.prod_audit.base.size_utils import gzip_size
 
 PROJECT_ROOT: Path = Path(__file__).resolve().parents[3]
 """项目根目录(``D:\\erp_system``)。"""
@@ -511,7 +512,7 @@ class L7Performance(LayerBase):
         for asset in dist_dir.rglob("*.js"):
             if "node_modules" in asset.parts:
                 continue
-            size = asset.stat().st_size
+            size = gzip_size(asset)  # 判据是「gzip 后 ≤ 2MB」，非原始字节（评审 2026-10-11）
             total_size += size
             if size > limit_bytes:
                 oversized_files.append((asset, size))
@@ -528,7 +529,7 @@ class L7Performance(LayerBase):
                     file=rel,
                     line=1,
                     description=(
-                        f"前端产物总体积 {total_size // 1024}KB > "
+                        f"前端产物 gzip 后总体积 {total_size // 1024}KB > "
                         f"限制 {_BUNDLE_SIZE_LIMIT_MB}MB"
                     ),
                     suggestion="启用 code splitting / tree shaking / 按需加载减小体积",
@@ -545,7 +546,7 @@ class L7Performance(LayerBase):
                     severity=Severity.MEDIUM,
                     file=str(asset.relative_to(PROJECT_ROOT).as_posix()),
                     line=1,
-                    description=f"单个 JS 产物 {size // 1024}KB > 限制 {_BUNDLE_SIZE_LIMIT_MB}MB",
+                    description=f"单个 JS 产物 gzip 后 {size // 1024}KB > 限制 {_BUNDLE_SIZE_LIMIT_MB}MB",
                     suggestion="拆分该 chunk 或按需加载",
                     rule_id="L7-BUNDLE-CHUNK-001",
                     owner=DEFAULT_OWNER,

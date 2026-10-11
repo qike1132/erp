@@ -12,3 +12,6 @@ pre-commit>=4.0.0
 mypy>=1.15.0
 memory-profiler==0.61.0
 py-spy==0.3.14
+
+# ----- 运维 / 压测脚本 -----
+requests>=2.32.0           # scripts/verify_perf_cache_v2.py 等；此前仅靠 ocr.txt 传递依赖隐式带入

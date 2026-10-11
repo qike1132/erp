@@ -88,9 +88,16 @@ _CRITICAL_BUSINESS_KEYWORDS: frozenset[str] = frozenset(
     {"login", "logout", "create_order", "cancel_order", "deduct_stock", "backup", "restore"}
 )
 
-# 健康检查端点路径（S7：与 core/health.py 的真实探针契约一致；
-# 原先的 /healthz、/readyz 是 aux 模块里的 K8s 别名，已随重复端点删除）
-_HEALTH_ENDPOINT_PATHS: tuple[str, ...] = ("/health", "/health/live", "/health/ready")
+# 健康检查端点路径（S7：与 core/health.py 的真实探针契约一致 —— health.py:346/370-373
+# 注册的是 **/api/health、/api/health/live、/api/health/ready**；此前漏了 /api 前缀，
+# 靠下面的 endswith 宽松匹配才勉强命中，稳定误报「部分端点缺失」，评审 2026-10-11 修）
+_HEALTH_ENDPOINT_PATHS: tuple[str, ...] = ("/api/health", "/api/health/live", "/api/health/ready")
+
+# 路由注册路径提取：同时匹配装饰器写法（``@app.get("/x")``）与命令式注册
+# （``app.get("/x", tags=...)(handler)``）—— core/health.py 的探针全是命令式，
+# 旧正则只认 `@` 装饰器 → 稳定误报（评审 2026-10-11）。要求路径以 `/` 开头，
+# 滤掉 ``dict.get("k")`` 这类非路由调用。
+_ROUTE_RE = re.compile(r"\.\s*(?:get|post)\s*\(\s*[\"'](/[^\"']*)[\"']")
 
 # 监控指标须覆盖的关键维度
 _REQUIRED_METRIC_DIMENSIONS: frozenset[str] = frozenset(
@@ -275,10 +282,6 @@ class L8Observability(LayerBase):
             FASTAPI_APP_DIR / "core" / "health.py",
         ]
 
-        route_re = re.compile(
-            r"@\w+\.(get|post)\s*\(\s*[\"']([^\"']+)[\"']"
-        )
-
         all_files: list[Path] = []
         for d in scan_dirs:
             if d.exists():
@@ -292,11 +295,12 @@ class L8Observability(LayerBase):
                 source = py_file.read_text(encoding="utf-8")
             except (OSError, UnicodeDecodeError):
                 continue
-            for m in route_re.finditer(source):
-                path = m.group(2)
-                for health_path in _HEALTH_ENDPOINT_PATHS:
-                    if path == health_path or path.endswith(health_path):
-                        found_paths.add(health_path)
+            for m in _ROUTE_RE.finditer(source):
+                path = m.group(1)
+                # 精确匹配：去掉原先的 endswith 宽松匹配（它会让 /api/v1/backup/health
+                # 冒充 app 探针，掩盖真实缺失）
+                if path in _HEALTH_ENDPOINT_PATHS:
+                    found_paths.add(path)
 
         raw_parts.append(f"found_health_endpoints: {sorted(found_paths)}")
 

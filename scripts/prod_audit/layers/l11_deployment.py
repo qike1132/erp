@@ -46,12 +46,19 @@ FRONTEND_DIR: Path = PROJECT_ROOT / "frontend-vite"
 DEFAULT_OWNER: str = "deploy-readiness-reviewer"
 DEFAULT_DUE_DATE: str = "2026-09-30"
 
-# .env.example 须枚举的必需变量
+# .env.example 须枚举的必需变量（应用真正必填项）。
+# DATABASE_URL 是**可选覆盖**（config.py:309 ``os.getenv("DATABASE_URL") or _build_sync_database_uri()``），
+# .env.example 故意不列；ENVIRONMENT 全仓 0 读取（生产判定统一走 APP_ENV）。
+# 二者曾稳定产出 MEDIUM 误报（评审 2026-10-11）。
 _REQUIRED_ENV_VARS: tuple[str, ...] = (
-    "DATABASE_URL",
+    "DB_HOST",
+    "DB_PORT",
+    "DB_USER",
+    "DB_PASSWORD",
+    "DB_NAME",
+    "APP_ENV",
     "REDIS_URL",
     "SECRET_KEY",
-    "ENVIRONMENT",
 )
 
 # 硬编码密钥正则(在 .env.production 中检测)
