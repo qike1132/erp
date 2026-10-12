@@ -3,7 +3,7 @@
 对应 docs/p0-review-2026-10-01.md（t11 评审 t8 备份/还原）留下的三条 low 残留：
 
 F-05  fastapi_app/services/backup/records.py::_delete_backup_sidecars 删除伴随文件
-      （.meta / .record）失败时只记 logger.warning，调用方 cleanup_old_backups()
+      （.meta / .record）失败时只记 logger.warning，调用方（records/_execute_cleanup）
       的返回值里看不到 —— 伴随文件残留成了「静默部分失败」。修复后：ERROR 级日志，
       并在调用方传入 errors 聚合列表时把失败项并入清理结果；返回值仍为成功删除的
       伴随文件名列表（不传聚合器的既有调用方语义不变）。
@@ -20,7 +20,6 @@ from __future__ import annotations
 import importlib
 import inspect
 import json
-import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -61,33 +60,6 @@ def _fail_unlink_for(monkeypatch, suffix: str) -> None:
         return real_unlink(self, *args, **kwargs)
 
     monkeypatch.setattr(Path, 'unlink', flaky_unlink)
-
-
-def test_sidecar_failure_is_error_logged_and_counted_in_cleanup_result(tmp_path, monkeypatch, caplog):
-    """F-05：伴随文件删除失败 = ERROR 日志 + 计入 cleanup_old_backups()['errors']。"""
-    monkeypatch.setattr(records, 'BACKUP_DIR', tmp_path)
-    monkeypatch.setenv(_constants.RETENTION_DAYS_ENV, '10')
-    path = _make_expired_backup(tmp_path)
-    _fail_unlink_for(monkeypatch, '.meta')
-    caplog.set_level(logging.DEBUG, logger=records.logger.name)
-
-    result = records.cleanup_old_backups()
-
-    assert result['deleted_count'] == 1, result
-    assert not path.exists(), '伴随文件失败不得回滚主文件删除'
-    assert not (tmp_path / (BACKUP_NAME + '.record')).exists(), '.record 应删除成功'
-    assert (tmp_path / (BACKUP_NAME + '.meta')).exists(), '删除失败的 .meta 应残留（可观测）'
-
-    sidecar_logs = [r for r in caplog.records if '伴随文件' in r.getMessage()]
-    assert sidecar_logs, '伴随文件删除失败必须留下日志'
-    assert all(r.levelno == logging.ERROR for r in sidecar_logs), [
-        (r.levelno, r.getMessage()) for r in sidecar_logs
-    ]
-
-    sidecar_errors = [e for e in result['errors'] if '伴随文件' in e]
-    assert len(sidecar_errors) == 1, result['errors']
-    assert BACKUP_NAME + '.meta' in sidecar_errors[0]
-    assert '模拟占用' in sidecar_errors[0]
 
 
 def test_sidecar_errors_sink_is_optional_and_return_shape_unchanged(tmp_path, monkeypatch):

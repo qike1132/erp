@@ -224,7 +224,6 @@ __all__ = [  # noqa: RUF022
     "acquire_backup_lock",
     "acquire_restore_lock",
     "build_column_type_map",
-    "cleanup_old_backups",
     "cleanup_pre_restore_backups",
     "clear_stale_restore_lock",
     "combine_backup_chunks",

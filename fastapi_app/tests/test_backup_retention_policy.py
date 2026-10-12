@@ -14,7 +14,7 @@ import importlib
 import inspect
 import json
 import os
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -103,7 +103,6 @@ def test_cleanup_service_reads_the_same_env_keys(monkeypatch):
 @pytest.mark.parametrize('module_path', [
     'fastapi_app.services.backup.cleanup.service',
     'fastapi_app.services.backup.orchestration.policy_service',
-    'fastapi_app.services.backup.records',
 ])
 def test_retention_consumers_do_not_read_env_directly(module_path):
     """三个消费方一律走 _constants 单源：源码里不得再出现按保留键名取 env（AST 级）。
@@ -132,115 +131,9 @@ def test_retention_consumers_do_not_read_env_directly(module_path):
 
 
 # --------------------------------------------------------------------------
-# 清理行为：阈值运行时生效（旧实现硬编码 30 天 / 50 份）
-# --------------------------------------------------------------------------
-
-
-def test_cleanup_deletes_backup_older_than_env_days(backup_dir, monkeypatch):
-    """20 天前的备份 + env 10 天 ⇒ 删。旧实现硬编码 30 天会漏删。"""
-    _make_backup(backup_dir, 'erp_backup_20260901_000000.zip', age_days=20)
-    monkeypatch.setenv(RETENTION_DAYS_ENV, '10')
-    result = records.cleanup_old_backups()
-    assert result['deleted_count'] == 1, result
-    assert result['deleted_files'] == ['erp_backup_20260901_000000.zip']
-
-
-def test_cleanup_keeps_backup_within_env_days(backup_dir, monkeypatch):
-    """同一个 20 天前的备份 + env 30 天 ⇒ 留（证明阈值是运行时读的）。"""
-    _make_backup(backup_dir, 'erp_backup_20260901_000000.zip', age_days=20)
-    monkeypatch.setenv(RETENTION_DAYS_ENV, '30')
-    monkeypatch.setenv(RETENTION_COUNT_ENV, '100')
-    result = records.cleanup_old_backups()
-    assert result['deleted_count'] == 0, result
-    assert result['kept_count'] == 1
-
-
-def test_cleanup_count_threshold_follows_env_not_hardcoded_50(backup_dir, monkeypatch):
-    """55 份备份：env=60 ⇒ 一份不删（旧硬编码 50 会删 5 份）；env=50 ⇒ 删 5 份。"""
-    for i in range(55):
-        _make_backup(backup_dir, f'erp_backup_20260901_{i:06d}.zip')
-    monkeypatch.setenv(RETENTION_DAYS_ENV, '30')
-    monkeypatch.setenv(RETENTION_COUNT_ENV, '60')
-    assert records.cleanup_old_backups()['deleted_count'] == 0
-
-    monkeypatch.setenv(RETENTION_COUNT_ENV, '50')
-    result = records.cleanup_old_backups()
-    assert result['deleted_count'] == 5, result
-    assert result['kept_count'] == 50
-
-
-# --------------------------------------------------------------------------
 # 伴随文件：.meta / .record（含 .zip.enc.meta）必须随主文件一起删
+# （records.cleanup_old_backups 第二套清理实现已删除，行为由下方 cleanup 服务用例覆盖）
 # --------------------------------------------------------------------------
-
-
-def test_expired_encrypted_backup_removes_meta_and_record(backup_dir, monkeypatch):
-    """过期加密包删除后，.zip.enc.meta 与 .record 不得残留（历史 bug）。"""
-    path = _make_backup(backup_dir, 'erp_auto_daily_20260901_000000.zip.enc', age_days=20)
-    _write_sidecars(path)
-    monkeypatch.setenv(RETENTION_DAYS_ENV, '10')
-
-    result = records.cleanup_old_backups()
-
-    assert result['deleted_count'] == 1, result
-    assert not path.exists()
-    assert not (backup_dir / 'erp_auto_daily_20260901_000000.zip.enc.meta').exists()
-    assert not (backup_dir / 'erp_auto_daily_20260901_000000.zip.enc.record').exists()
-    assert [p.name for p in backup_dir.iterdir()] == []
-
-
-def test_kept_backup_sidecars_are_untouched(backup_dir, monkeypatch):
-    """未被清理的备份，其伴随文件必须原样保留。"""
-    path = _make_backup(backup_dir, 'erp_backup_20260901_000000.zip', age_days=1)
-    _write_sidecars(path)
-    monkeypatch.setenv(RETENTION_DAYS_ENV, '30')
-    monkeypatch.setenv(RETENTION_COUNT_ENV, '100')
-
-    records.cleanup_old_backups()
-
-    assert path.exists()
-    assert (backup_dir / 'erp_backup_20260901_000000.zip.meta').exists()
-    assert (backup_dir / 'erp_backup_20260901_000000.zip.record').exists()
-
-
-def test_meta_created_at_drives_age_instead_of_mtime(backup_dir, monkeypatch):
-    """年龄按 .meta.created_at 算（加密备份 mtime 可能被刷新）。
-
-    口径（P0-2 ④）：created_at 由 incremental.py 以 datetime.now(UTC) 写成，这里
-    按 naive 本地时间解析 ⇒ 本机 UTC+8 下年龄被少算 8 小时 ⇒ 更晚删（fail-safe）。
-    """
-    path = _make_backup(backup_dir, 'erp_backup_20260901_000000.zip', age_days=0)
-    created_at = (datetime.now() - timedelta(days=20)).strftime('%Y-%m-%d %H:%M:%S')
-    _write_sidecars(path, created_at=created_at, suffixes=('.meta',))
-    monkeypatch.setenv(RETENTION_DAYS_ENV, '10')
-
-    result = records.cleanup_old_backups()
-
-    assert result['deleted_count'] == 1, result
-    assert not (backup_dir / 'erp_backup_20260901_000000.zip.meta').exists()
-
-
-def test_sidecar_delete_failure_does_not_break_main_delete(backup_dir, monkeypatch):
-    """伴随文件删除失败不得影响主文件已删的事实；失败记 ERROR 日志并计入 errors（t25 起）。"""
-    path = _make_backup(backup_dir, 'erp_backup_20260901_000000.zip', age_days=20)
-    sidecars = _write_sidecars(path)
-    real_unlink = type(path).unlink
-
-    def flaky_unlink(self, *args, **kwargs):
-        if self.name.endswith('.meta'):
-            raise OSError('模拟占用')
-        return real_unlink(self, *args, **kwargs)
-
-    monkeypatch.setattr(type(path), 'unlink', flaky_unlink)
-    monkeypatch.setenv(RETENTION_DAYS_ENV, '10')
-
-    result = records.cleanup_old_backups()
-
-    assert result['deleted_count'] == 1, result
-    assert not path.exists()
-    assert not (backup_dir / 'erp_backup_20260901_000000.zip.record').exists()
-    assert (backup_dir / 'erp_backup_20260901_000000.zip.meta').exists(), '模拟失败件仍在'
-    assert sidecars  # 仅避免未使用告警
 
 
 async def test_execute_cleanup_removes_sidecars_of_encrypted_package(tmp_path, monkeypatch):
