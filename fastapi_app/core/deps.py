@@ -305,6 +305,10 @@ def require_permission(permission_name: str):
             )
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='权限不足')
         return current_user
+    # 把声明的权限码挂到依赖上，供测试/工具反射读取（不改运行时行为）。
+    # 函数对象没有该属性的类型声明，故加 type: ignore[attr-defined]；不用 setattr
+    # 是因为 ruff 的 B010 会把常量名的 setattr 判为违规。
+    permission_checker.__permission_codes__ = (permission_name,)  # type: ignore[attr-defined]
     return permission_checker
 
 
@@ -333,6 +337,8 @@ def require_any_permission(*permission_names: str):
             )
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='权限不足')
         return current_user
+    # 同 require_permission：把声明的权限码挂到依赖上，供反射读取。
+    permission_checker.__permission_codes__ = tuple(permission_names)  # type: ignore[attr-defined]
     return permission_checker
 
 
