@@ -43,6 +43,28 @@
 
 ---
 
+## 8. 路由表不是平的：`app.routes` 只有 13 条，业务路由在 `_IncludedRouter` 里
+
+2026-10-12 实测。想「遍历 app 的路由表做点全局检查」时会踩：
+
+```python
+len(app.routes)                 # 13   ← 只有健康检查 / 静态挂载 / ws / 根
+len(app.openapi()['paths'])     # 341  ← 真正的业务路由
+```
+
+业务路由被包在 **`_IncludedRouter`** 懒加载壳里（`vars()` 里有 `original_router` /
+`include_context`）。壳本身**没有 `.path` / `.dependant` / `.routes`**，所以：
+
+- 只扫 `app.routes` 顶层 → 得到空集合。**若据此写断言，测试会恒真**（这正是它危险的地方）。
+- 正确遍历要同时展开 `.routes` 与 `_IncludedRouter.original_router.routes`。
+- **展开后 `route.path` 不带 include 前缀**（前缀在匹配期拼），所以**不能靠路径识别端点**
+  ——要么按尾段 `endswith` 比，要么只断言与路径无关的属性。
+
+判别法：任何「扫全路由」的脚本，先打印 `len(app.routes)` 与 `len(app.openapi()['paths'])`
+对一下；差一个数量级就是踩到了。同理，任何据此得出的「某端点不存在」结论都不可信。
+
+---
+
 ## 关联
 
 - 运维护栏（红线之外的第二道人防）在 `AGENTS.md` §6.1——**常驻**，动手前必看。
