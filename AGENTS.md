@@ -17,7 +17,7 @@
 |---|---|
 | `fastapi_app/` | 后端：FastAPI + PostgreSQL + Redis/ARQ |
 | `fastapi_app/api/v1/router.py` | **绝对导入**挂载端点模块；零孤儿，"没被引用"≠可删 |
-| `fastapi_app/core/` | 配置、日志、ARQ 应用与回调、`prod_runner.py`（生产启动监督器） |
+| `fastapi_app/core/` | 配置、日志、ARQ 应用与回调、`prod_runner.py`（生产启动监督器）。core 是**组合根**，允许 import `services`（契约未禁止，勿当越层修） |
 | `fastapi_app/services/` | 业务服务层；`backup/` 含备份、加密、恢复、清理 |
 | `frontend-vite/` | 前端：Vue 3 + TS + Vite 7（**Node >= 22**） |
 | `migrations/versions/` | Alembic 迁移（**单一 head**） |
@@ -63,14 +63,14 @@ npm run check:types               # 类型对齐
 
 以上 = CI（`.github/workflows/ci-cd.yml`）三个 job（test/lint/frontend）门禁的**本地等价物**，少跑一项 CI 就可能变红。CI 红了先看哪个 job 的**第一个 failure step**。
 
-- **pytest 必须提权跑**：根 `.env` 的 ACL 只授予 Administrators/SYSTEM，非提权跑会因 conftest 读不到 `.env` 整批假红（连的是真实测试库 `erp_system_test`，非派生库）。正路：提权跑 `logs/_run_pytest_elevated.ps1`（全量 3956+ passed 实测通过）；非提权只读场景用「stub .env 为空流」脚本绕。
+- **pytest 必须提权跑**：根 `.env` 的 ACL 只授予 Administrators/SYSTEM，非提权跑会因 conftest 读不到 `.env` 整批假红（连的是真实测试库 `erp_system_test`，非派生库）。正路：提权跑 `logs/_run_pytest_elevated.ps1`（2026-10-12 实测全量 4353 passed / 271 skipped）；非提权只读场景用「stub .env 为空流」脚本绕。**全量 pytest 必须独占单实例**——两进程共用 `erp_system_test` 会互撞假红（`DROP SCHEMA` + 硬编码 `SO-PERF-*`，见 `docs/agents/pitfalls.md` §7）。
 - **vitest 要把 TEMP 指进仓内**（如 `frontend-vite/.vitest-tmp`），否则 EPERM mkdir 导致全部 0 test 失败；前端构建用 `npm run build:atomic`，esbuild 需 `ESBUILD_BINARY_PATH` 指外部副本，绕开 `%TEMP%` 删除限制。
 - **pip-audit 阶段性口径（2026-10-02 起）**：CI 该步骤是 `--report` 只报告不判负（172 条漏洞中 166 条已有修复版，正解是升级依赖）。**不要**为过门禁批量登记豁免；依赖升级后再收紧。
 - CI 的 lint job 另跑四项：`scan_secrets.py --verbose`（全树密钥）、`check_orphan_modules.py`（孤儿模块）、`file_size_gate.py`（PR 基线对比）、`check_requirements_lock.py`（`requirements/<tier>.lock` 与 `.txt` 同步，需 `uv`）。改动涉及模块接线/删文件/新增大文件/改 `requirements/*.txt` 时先本地跑。
 
 ### 改动范围 → 最小验证
 
-全量 pytest 须提权且 3956+ 条；按范围选强度，**跳过任何验证须写明理由**（文档改动、只读调查、CI-only 分析可接受）：
+全量 pytest 须提权且 4300+ 条（下限表述，实测见上）；按范围选强度，**跳过任何验证须写明理由**（文档改动、只读调查、CI-only 分析可接受）：
 
 | 改动范围 | 最小验证 |
 |---|---|

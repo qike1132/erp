@@ -27,6 +27,20 @@
 
 `C:\Program Files\Git\bin\bash.exe` 环境下 `python` 通常不可见，钩子靠**绝对路径**兜底。写脚本给 agent 或钩子用时，别假设 PATH 里有 python。
 
+## 6. `scripts/` 下一次性运维脚本的超长函数不是技术债
+
+`scripts/check_function_length.py` 的默认扫描面是 `fastapi_app` + `server_manager` + 仓库根顶层 `.py`，**不含 `scripts/`**——故 `scripts/` 里的 >80 行函数不进质量门禁。这些多为一次性运维/诊断脚本（跑一次即弃），拆它们没有收益，反而增加改动面与回归风险。
+
+- 2026-10-11 复核（`REVIEW-VERIFICATION.md` §2.7 ⑦）的处置：`scripts/prod_audit/**` 是**维护中的门禁框架**，11 条超长函数已全部拆到 ≤80 行；其余 17 条一次性脚本**按原样保留**（进 `check_function_length.py scripts` 的统计，但非门禁增量）。
+- 别因为「看到超长函数」就去拆 `scripts/` 下的一次性脚本；要拆只拆 `prod_audit` 这类被持续维护的框架代码。
+- 复核命令：`command .venv/Scripts/python.exe scripts/check_function_length.py scripts`。
+
+## 7. 两种 pytest 假红形态（本机实测）
+
+- **并发互撞**：`tests/conftest.py` 收尾 `DROP SCHEMA public CASCADE`，两进程共用同一测试库 `erp_system_test`。相隔 ~70s 重叠跑两次全量 → `8 failed / 7 errors`，报错 `asyncpg UniqueViolationError` 违反 `stock_out_stockout_no_key`、冲突值 `(stockout_no)=(SO-PERF-0000)`（来源 `tests/test_stock_routes.py` 硬编码 `f"SO-PERF-{i:04d}"`）。独占单跑即全绿。**全量 pytest 必须独占单实例**。
+- **`--basetemp` 越界**：`fastapi_app/tasks/batch_tasks.py` 的 `ALLOWED_UPLOAD_DIRS = [tempfile.gettempdir(), <repo>/static/uploads]` + `realpath+commonpath` 守卫；把 `--basetemp` 指到 `%TEMP%` 之外 → `test_batch_tasks_semantics.py` 4 条必假红（默认 basetemp 下 5 passed）。
+- 判别法：报错涉及**别的测试文件**的固定夹具值、或临时目录白名单守卫时，先怀疑跑法（并发 / 临时目录），而不是代码回归。
+
 ---
 
 ## 关联
