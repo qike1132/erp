@@ -33,12 +33,10 @@
             :label="node.name"
             @toggle="togglePermNode(node.id)"
           />
-          <FontAwesomeIcon
-            v-if="node.icon"
-            :icon="node.icon.replace('fa-', '')"
-            class="pd-mod-icon"
-            aria-hidden="true"
-          />
+          <!-- 图标槽始终占位：无图标的模块（如「其他操作权限」区那几个）不再让名字左移 -->
+          <span class="pd-mod-icon" aria-hidden="true">
+            <FontAwesomeIcon v-if="node.icon" :icon="node.icon.replace('fa-', '')" />
+          </span>
           <span class="pd-mod-name">{{ node.name }}</span>
           <span class="pd-pill" :class="{ all: stateOf(node) === 'all' }">{{ countOf(node) }}</span>
         </div>
