@@ -3,7 +3,6 @@
 从原 backup.py 拆分，URL / schema / 权限码保持不变：
 - POST /import                       一键恢复：从上传文件恢复
 - POST /restore-by-name/{filename}   从服务器默认路径恢复指定备份
-- POST /restore-incremental/{name}   从增量备份恢复
 - GET  /progress/{task_id}           查询异步任务进度
 - POST /async-import                 异步恢复：从上传文件恢复
 - POST /async-restore-by-name/{name} 异步恢复：从服务器文件恢复
@@ -37,13 +36,10 @@ from fastapi_app.schemas.backup import (
     BackupProgressOut,
     BackupRestorePlanOut,
     BackupRestorePlanRequest,
-    IncrementalRestoreResponse,
 )
 from fastapi_app.services import backup as backup_service
 from fastapi_app.services.backup import (
     BackupError,
-    BackupLockError,
-    RestoreError,
 )
 from fastapi_app.services.backup import restore_plan as restore_plan_service
 from fastapi_app.shared_models import User
@@ -369,55 +365,6 @@ async def restore_server_backup(
         'errors': result['errors'], 'pre_restore_backup': pre_restore_info,
         'restored_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
     }
-
-
-# ---------------------------------------------------------------------------
-# POST /restore-incremental/{filename}
-# ---------------------------------------------------------------------------
-@router.post('/restore-incremental/{filename}', response_model=IncrementalRestoreResponse)
-async def restore_incremental_backup(
-    filename: str,
-    confirm: bool = Query(False),
-    user: User = Depends(require_backup_permission('restore_incremental_backup')),
-    db: AsyncSession = Depends(get_async_db),
-):
-    """从增量备份恢复"""
-    if not confirm:
-        raise HTTPException(status_code=400, detail='恢复操作需要二次确认，请传入 confirm=true')
-    safe_name = Path(filename).name
-    if safe_name != filename:
-        raise HTTPException(status_code=400, detail='无效的文件名')
-    filepath = backup_service.BACKUP_DIR / safe_name
-    if not filepath.exists():
-        raise HTTPException(status_code=404, detail='备份文件不存在')
-    try:
-        if filepath.stat().st_size > backup_service.MAX_BACKUP_FILE_SIZE:
-            raise HTTPException(
-                status_code=400,
-                detail=f'备份文件超过大小限制({backup_service.MAX_BACKUP_FILE_SIZE // 1024 // 1024}MB)',
-            )
-        # H5: 大文件读取为阻塞 IO，移入线程池避免卡住事件循环
-        content = await asyncio.to_thread(filepath.read_bytes)
-    except HTTPException:
-        raise
-    except OSError as e:
-        raise HTTPException(status_code=400, detail=_sanitize_error(f'读取备份文件失败: {e}')) from e
-    is_zip = safe_name.endswith('.zip') or safe_name.endswith('.zip.enc') or content[:4] == b'PK\x03\x04'
-    if not is_zip:
-        raise HTTPException(status_code=400, detail='增量备份文件必须是 ZIP 格式')
-    # B2 修复：增量还原接入统一 Redis 还原锁，与全量还原互斥
-    # （此前仅持 PG advisory lock，与全量 psql 还原的 Redis 锁互不感知，
-    #   可并发执行：增量 upsert 连接会被全量还原的 pg_terminate_backend 杀死）
-    incr_lock_owner = await _acquire_sync_restore_lock(f'incremental_{safe_name}')
-    try:
-        result = await backup_service.restore_incremental(db, content, safe_name)
-    except BackupLockError as e:
-        raise HTTPException(status_code=409, detail=str(e)) from e
-    except RestoreError as e:
-        raise HTTPException(status_code=500, detail=_sanitize_error(str(e))) from e
-    finally:
-        await backup_service.release_restore_lock(incr_lock_owner)
-    return result
 
 
 # ---------------------------------------------------------------------------

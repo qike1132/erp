@@ -208,30 +208,6 @@ class BackupDeleteResponse(BaseModel):
     deleted: str = ""
 
 
-class IncrementalBackupResponse(BaseModel):
-    success: bool = True
-    filename: str | None = None
-    size: int = 0
-    format: str = "incremental"
-    table_count: int = 0
-    total_rows: int = 0
-    exported_at: str | None = None
-    base_timestamp: str | None = None
-    remark: str = ""
-    message: str | None = None
-
-
-class IncrementalRestoreResponse(BaseModel):
-    success: bool = True
-    format: str = "incremental"
-    filename: str = ""
-    total_upserted: int = 0
-    results: dict[str, Any] = {}
-    errors: list[str] = []
-    pre_restore_backup: dict[str, Any] | None = None
-    restored_at: str = ""
-
-
 class IntegrityCheckResponse(BaseModel):
     checked_at: str = ""
     total: int = 0
@@ -354,12 +330,6 @@ class BackupFullRequest(BaseModel):
     password: str | None = Field(default=None, description="加密密码,为空时依次使用请求头/环境变量")
     tables: list[str] | None = Field(default=None, description="表级备份:仅备份指定表(与 exclude_tables 互斥)")
     exclude_tables: list[str] | None = Field(default=None, description="表级备份:排除指定表(与 tables 互斥)")
-
-
-class BackupIncrementalRequest(BaseModel):
-    """增量备份触发请求"""
-    remark: str = Field(default="", max_length=200, description="备份备注")
-    since: str = Field(default="", description="增量基线时间戳,为空时自动取上次备份时间")
 
 
 class BackupSettingsOut(BaseModel):

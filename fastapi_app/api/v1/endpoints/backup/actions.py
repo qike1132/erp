@@ -1,7 +1,6 @@
 """备份任务化触发路由(M1)。
 
 - POST /full          手动全量备份 → 202 {task_id}(ARQ 入队)
-- POST /incremental   手动增量备份 → 202 {task_id}(ARQ 入队)
 
 设计要点(v2 方案 §4.2):
 - API 进程只做 鉴权/互斥检查/入队,不再同步执行长任务(原 POST /save 同步执行,
@@ -19,7 +18,6 @@ from fastapi_app.api.v1.endpoints.backup._deps import require_backup_permission
 from fastapi_app.core.database import get_async_db
 from fastapi_app.schemas.backup import (
     BackupFullRequest,
-    BackupIncrementalRequest,
     BackupTaskTriggerOut,
 )
 from fastapi_app.services import backup as backup_service
@@ -140,49 +138,4 @@ async def trigger_full_backup(
         task_id=task_id,
         message='全量备份任务已触发',
         task_name='manual_full_backup_task',
-    )
-
-
-# ---------------------------------------------------------------------------
-# POST /incremental
-# ---------------------------------------------------------------------------
-@router.post('/incremental', response_model=BackupTaskTriggerOut, status_code=status.HTTP_202_ACCEPTED)
-async def trigger_incremental_backup(
-    payload: BackupIncrementalRequest,
-    user: User = Depends(require_backup_permission('trigger_incremental_backup')),
-    db: AsyncSession = Depends(get_async_db),
-):
-    """手动增量备份(异步)。
-
-    参数:
-    - remark: 备份备注
-    - since: 增量基线时间戳,为空时自动取上次备份时间
-
-    返回 202 + task_id,前端轮询 GET /progress/{task_id} 获取进度。
-    权限:backup_create
-    """
-    from fastapi_app.core.backup_progress import create_progress, generate_task_id
-
-    await _check_task_mutex(db)
-    await _check_worker_online()
-
-    task_id = generate_task_id()
-    # 入队即建进度键，保证前端拿到 task_id 后轮询必有进度（同 /full）
-    await create_progress(task_id, operation_type='incremental', progress_type='backup')
-    try:
-        await _enqueue_task(
-            'manual_incremental_backup_task',
-            task_id=task_id,
-            remark=payload.remark,
-            since=payload.since,
-        )
-    except (RuntimeError, OSError, ConnectionError) as e:
-        logger.error('入队增量备份任务失败: %s', e)
-        raise HTTPException(status_code=500, detail='触发增量备份失败，请查看服务器日志') from e
-
-    logger.info('增量备份已入队 task_id=%s operator=%s', task_id, getattr(user, 'username', '?'))
-    return BackupTaskTriggerOut(
-        task_id=task_id,
-        message='增量备份任务已触发',
-        task_name='manual_incremental_backup_task',
     )
