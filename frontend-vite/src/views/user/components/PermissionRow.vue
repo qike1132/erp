@@ -9,20 +9,20 @@
     @keydown.enter.prevent="$emit('toggle')"
     @keydown.space.prevent="$emit('toggle')"
   >
-    <PermissionCheckBox :state="checked ? 'all' : 'none'" :label="item.name" :interactive="false" />
     <span class="pd-row-name">{{ item.name }}</span>
+    <PermissionChip :checked="checked" :label="item.name" :interactive="false" />
     <code class="pd-code">{{ item.code }}</code>
   </div>
 </template>
 
 <script setup lang="ts">
 /**
- * PermissionRow.vue — 分配权限弹窗右栏的一行权限
+ * PermissionRow.vue — 分配权限弹窗右栏的一行权限（「一行一项 + 开关胶囊」）
  *
- * 整行可点（勾选框为纯指示器，点击穿透给整行）；`checked` 决定高亮与 aria。
+ * 整行可点（胶囊为纯视觉，点击穿透给整行）；`checked` 决定高亮、aria 与胶囊文案。
  */
 import type { PermissionItem } from '@/types'
-import PermissionCheckBox from '@/views/user/components/PermissionCheckBox.vue'
+import PermissionChip from '@/views/user/components/PermissionChip.vue'
 
 defineProps<{
   /** 该行对应的权限 */
@@ -38,9 +38,9 @@ defineEmits<{ toggle: [] }>()
 .pd-row {
   display: flex;
   align-items: center;
-  gap: 11px;
+  gap: 10px;
   margin-bottom: 7px;
-  padding: 9px 12px;
+  padding: 8px 12px;
   border: 1px solid var(--color-border-light, #f0f2f5);
   border-radius: 10px;
   background: #fff;

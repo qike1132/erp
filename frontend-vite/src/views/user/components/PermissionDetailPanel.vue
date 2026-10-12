@@ -23,42 +23,30 @@
             @toggle="togglePermNode(node.id)"
           />
           <p class="pd-group">操作权限</p>
-          <!-- 变体 B：子权限正好是 /report 的行内操作码时，一行一个 TAB -->
+          <!-- 子权限正好是 /report 的行内操作码时，一行一个 TAB（每个 TAB 一对 编辑/删除） -->
           <template v-if="rowActionGroups">
             <div v-for="g in rowActionGroups" :key="g.label" class="pd-trow">
               <span class="pd-tnm">{{ g.label }}</span>
-              <button
+              <PermissionChip
                 v-if="g.edit"
-                type="button"
-                class="pd-op"
-                :class="{ on: isPermChecked(g.edit.id) }"
-                @click="togglePermNode(g.edit.id)"
+                :checked="isPermChecked(g.edit.id)"
+                :label="`编辑${g.label}`"
+                @toggle="togglePermNode(g.edit.id)"
               >
-                <PermissionCheckBox
-                  :state="isPermChecked(g.edit.id) ? 'all' : 'none'"
-                  :label="`编辑${g.label}`"
-                  :interactive="false"
-                />
                 编辑
-              </button>
-              <button
+              </PermissionChip>
+              <PermissionChip
                 v-if="g.delete"
-                type="button"
-                class="pd-op"
-                :class="{ on: isPermChecked(g.delete.id) }"
-                @click="togglePermNode(g.delete.id)"
+                :checked="isPermChecked(g.delete.id)"
+                :label="`删除${g.label}`"
+                @toggle="togglePermNode(g.delete.id)"
               >
-                <PermissionCheckBox
-                  :state="isPermChecked(g.delete.id) ? 'all' : 'none'"
-                  :label="`删除${g.label}`"
-                  :interactive="false"
-                />
                 删除
-              </button>
+              </PermissionChip>
               <code class="pd-tcodes">{{ codesOf(g) }}</code>
             </div>
           </template>
-          <!-- 其它模块：平铺子权限 -->
+          <!-- 其它模块：一行一项（权限名 + 开关胶囊） -->
           <template v-else>
             <PermissionRow
               v-for="row in childRows"
@@ -87,14 +75,14 @@
  *
  * 有子权限的模块先列「模块访问」（模块自身 = 可见/查看授权），再列「操作权限」。
  * 「操作权限」有两种呈现：
- * - **按 TAB 归组**（一行一个 TAB，每个 TAB 一对 编辑/删除）：当子权限正好是
+ * - **按 TAB 归组**（一行一个 TAB，每个 TAB 一对 编辑/删除 胶囊）：当子权限正好是
  *   /report 的行内操作码时启用（见 @/constants/reportRowActions）。这样
  *   「订单流水」下 5 个 tab × 编辑/删除 一眼看全，不用猜哪个码属于哪个 tab。
- * - **平铺**：其它模块照旧一行一个权限。
+ * - **一行一项**：其它模块一行一个权限（权限名 + 开关胶囊）。
  */
 import { computed } from 'vue'
 import type { PermissionItem } from '@/types'
-import PermissionCheckBox from '@/views/user/components/PermissionCheckBox.vue'
+import PermissionChip from '@/views/user/components/PermissionChip.vue'
 import PermissionRow from '@/views/user/components/PermissionRow.vue'
 import { ROW_ACTION_TABS } from '@/constants/reportRowActions'
 import {
@@ -125,14 +113,14 @@ interface RowActionGroup {
 /** 模块是否带操作权限 */
 const hasChildren = computed(() => (props.node?.children?.length ?? 0) > 0)
 
-/** 平铺路径用的子权限行 */
+/** 一行一项路径用的子权限行 */
 const childRows = computed<PermissionItem[]>(() =>
   hasChildren.value ? (props.node?.children ?? []) : [],
 )
 
 /**
  * 子权限正好是 /report 的行内操作码（`${resource}_edit` / `_delete`）时按 TAB 归组；
- * 只要有一个子项不属于这套码，就返回 null 走平铺（避免误把别的模块也当 TAB 结构）。
+ * 只要有一个子项不属于这套码，就返回 null 走「一行一项」（避免误把别的模块也当 TAB 结构）。
  */
 const rowActionGroups = computed<RowActionGroup[] | null>(() => {
   const children = props.node?.children ?? []
@@ -239,7 +227,7 @@ function countOf(n: PermissionItem): string {
   align-items: center;
   gap: 12px;
   margin-bottom: 8px;
-  padding: 9px 12px;
+  padding: 8px 12px;
   border: 1px solid var(--color-border-light, #f0f2f5);
   border-radius: 10px;
   background: #fff;
@@ -254,27 +242,6 @@ function countOf(n: PermissionItem): string {
   font-size: 13px;
   font-weight: 600;
   color: var(--color-text-secondary);
-}
-.pd-op {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 12px 4px 8px;
-  border: 1px solid var(--color-border-light, #e2e8f0);
-  border-radius: 999px;
-  background: #fff;
-  font-size: 12.5px;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-}
-.pd-op:hover {
-  border-color: var(--color-primary-300);
-}
-.pd-op.on {
-  background: var(--color-primary-50);
-  border-color: var(--color-primary-300);
-  color: var(--color-primary-700);
-  font-weight: 600;
 }
 .pd-tcodes {
   margin-left: auto;
