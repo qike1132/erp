@@ -153,12 +153,19 @@ class BackupCleanupService:
 
     def _enforce_keep_floor(self, backup_files: list[dict[str, Any]],
                             files_to_delete: set[str]) -> set[str]:
-        """兜底：任何情况下至少留一个可还原的全量备份（列表按 mtime 倒序，首个即最新）。"""
+        """兜底：任何情况下至少留一个可还原的全量备份。
+
+        只在**会删光**时介入，从删除集里救回最新且未被判定损坏的一个
+        （列表按 mtime 倒序，首个非 corrupted 即最新可还原者）。
+        """
         if any(f['name'] not in files_to_delete for f in backup_files):
             return files_to_delete
-        if not backup_files:
+        candidates = [f for f in backup_files if f.get('health_status') != 'corrupted']
+        if not candidates:
+            candidates = list(backup_files)
+        if not candidates:
             return files_to_delete
-        survivor = backup_files[0]['name']
+        survivor = candidates[0]['name']
         files_to_delete.discard(survivor)
         logger.warning('本次清理会删光全部 %d 个备份，已强制保留 %s', len(backup_files), survivor)
         return files_to_delete
