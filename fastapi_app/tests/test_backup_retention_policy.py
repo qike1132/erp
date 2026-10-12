@@ -93,14 +93,11 @@ def test_policy_service_and_constants_share_the_same_source(monkeypatch):
 
 
 def test_cleanup_service_reads_the_same_env_keys(monkeypatch):
-    """cleanup 服务的两项阈值与 _constants 单源同值（P0-2 ③ 已接线，不再自己读 env）。"""
+    """清理服务的保留天数与 _constants 单源同值（份数上限已随全量-only 策略移除）。"""
     from fastapi_app.services.backup.cleanup.service import BackupCleanupService
 
     monkeypatch.setenv(RETENTION_DAYS_ENV, '13')
-    monkeypatch.setenv(RETENTION_COUNT_ENV, '7')
-    config = BackupCleanupService._load_cleanup_config(None)
-    assert config['retention_days'] == 13 == retention_days()
-    assert config['retention_count'] == 7 == retention_count()
+    assert BackupCleanupService()._retention_days() == 13 == retention_days()
 
 
 @pytest.mark.parametrize('module_path', [
