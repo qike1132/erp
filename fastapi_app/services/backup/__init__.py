@@ -102,7 +102,6 @@ from .crypto import *  # noqa: F403
 from .dump import *  # noqa: F403
 from .exceptions import *  # noqa: F403
 from .filestore import *  # noqa: F403
-from .incremental import *  # noqa: F403
 from .json_backup import *  # noqa: F403
 from .orchestration import *  # noqa: F403
 from .records import *  # noqa: F403
@@ -233,16 +232,13 @@ __all__ = [  # noqa: RUF022
     "create_full_backup",
     "create_full_backup_to_file",
     # incremental
-    "create_incremental_backup",
     "create_pre_restore_backup",
-    "create_wal_incremental_backup",
     "delete_backup_file",
     "deserialize_value",
     # records
     "ensure_backup_dir",
     "ensure_pre_restore_dir",
     "execute_legacy_backup_to_bytes",
-    "find_last_backup_timestamp",
     "find_timestamp_column",
     "generate_encryption_key",
     "get_backup_encryption_password",
@@ -272,7 +268,6 @@ __all__ = [  # noqa: RUF022
     "restore_from_binary_log",
     "restore_from_chunks",
     "restore_from_zip",
-    "restore_incremental",
     "restore_legacy_json",
     "restore_meilisearch",
     "restore_non_dependent_components",

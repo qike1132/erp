@@ -3,12 +3,8 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
-import json
 import logging
-import re
-import zipfile
 from datetime import datetime
-from pathlib import Path
 
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, SQLAlchemyError
@@ -17,7 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .._constants import (
     _CHECKSUM_EXCLUDE_TABLES,
     _TIMESTAMP_CANDIDATES,
-    BACKUP_DIR,
     _ts_col_cache,
 )
 
@@ -120,78 +115,6 @@ async def query_table_rows(tname: str, db: AsyncSession, since: str | None = Non
             serialized_row[col] = serialize_value(row[col])
         serialized_rows.append(serialized_row)
     return serialized_rows
-
-
-_NAME_TS_RE = re.compile(r'(\d{8}_\d{6})')
-
-
-def _read_backup_timestamp(f: Path, name: str) -> str | None:
-    """读单个备份文件的「导出时间」；**只认全量**（partial 不能当增量基线）。
-
-    加密包不解密：同名 `.meta` 已带 `type` 与 `created_at`。
-
-    `type` **缺字段时按 'full' 处理**：能被本函数前缀匹配到的文件名
-    （`erp_backup_*` / `erp_auto_daily_*`）本就是全量命名，而 legacy 的 manifest
-    可能没有 `type` 字段 —— 一刀切按非 full 排除会漏掉这些有效的全量。
-    只排除**明确标了** `type != 'full'`（即 table 级 partial 备份）的。
-    """
-    if name.endswith('.enc'):
-        try:
-            meta = json.loads((f.parent / (name + '.meta')).read_text(encoding='utf-8'))
-        except (OSError, ValueError):
-            return None
-        if meta.get('type', 'full') != 'full':
-            return None
-        # 增量基准优先取 baseline_at（snapshot 获取时刻），回退 exported_at：
-        # exported_at 在 pg_dump 完成后才写入，滞后窗口内的改动会被 `>= since`
-        # 过滤掉（既不在全量也不在增量）。
-        return meta.get('baseline_at') or meta.get('created_at')
-    try:
-        with zipfile.ZipFile(f, 'r') as zf:
-            if 'manifest.json' not in zf.namelist():
-                return None
-            mf = json.loads(zf.read('manifest.json'))
-    except (OSError, zipfile.BadZipFile, ValueError):
-        return None
-    # 与 .enc 分支同口径校验 type：原先这里不校验，一个 type='partial' 的手工包
-    # 会被当成"最近一次全量"基准。缺 type 字段按 'full' 处理（见上 docstring）。
-    if mf.get('type', 'full') != 'full':
-        return None
-    return mf.get('baseline_at') or mf.get('exported_at')
-
-
-async def find_last_backup_timestamp() -> str | None:
-    """查找最近一次**全量**备份的导出时间。
-
-    必须同时认出三种生产实际命名，否则恒返回 None（→ 增量退化为全表导出，
-    且 base_timestamp 为空致级联清理跳过该增量）：
-      · `erp_backup_<ts>.zip`        —— 手工全量
-      · `erp_auto_daily_<ts>.zip`    —— 自动全量（例行路径）
-      · `*.zip.enc`                  —— 加密全量（生产默认加密）
-    """
-    if not BACKUP_DIR.exists():
-        return None
-
-    candidates: list[tuple[str, str]] = []
-    for f in BACKUP_DIR.iterdir():
-        if not f.is_file():
-            continue
-        name = f.name
-        if not (name.startswith(('erp_backup_', 'erp_auto_daily_'))
-                and name.endswith(('.zip', '.zip.enc'))):
-            continue
-        ts = _read_backup_timestamp(f, name)
-        if not ts:
-            continue
-        # ⚠️ 排序键取**文件名里的时间戳**，不能按文件名字符串降序取首个：
-        # 'erp_backup_' > 'erp_auto_daily_'（第 5 字符 b > a），会让几个月前的
-        # 手工全量盖过今天的自动全量 —— 这是扩展匹配集时引入的坑。
-        m = _NAME_TS_RE.search(name)
-        candidates.append((m.group(1) if m else '', ts))
-
-    if not candidates:
-        return None
-    return max(candidates, key=lambda kv: kv[0])[1]
 
 
 async def _verify_table_row_count(db: AsyncSession, table, qtname: str,
