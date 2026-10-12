@@ -61,10 +61,20 @@ jobs:
     # 的 18.x），而 runner 自带的 pg_dump 是 16（pgdg24.04）。大版本不匹配时 pg_dump
     # 直接 abort，让 test_restore_real_roundtrip 这类真跑 dump/restore 的用例在 CI 上
     # 必然失败（2026-10-12 实测：server version 18.6 / pg_dump version 16.15）。
-    # 装 18 客户端即可（postgresql-common 的 pg_wrapper 默认取最新版）；末行把版本打进
-    # 日志，日后回归时一眼能看出。
+    # ⚠️ Ubuntu 24.04 (noble) 默认源**没有** postgresql-client-18（只有 16），必须先加
+    # PGDG 官方源，否则 `E: Unable to locate package postgresql-client-18`
+    # （2026-10-12 CI run 38218718141 实测）。装 18 客户端即可（postgresql-common 的
+    # pg_wrapper 默认取最新版）；末行把版本打进日志，日后回归时一眼能看出。
     - name: Install PostgreSQL 18 client (must match the service major)
       run: |
+        sudo apt-get update
+        sudo apt-get install -y curl ca-certificates
+        sudo install -d /usr/share/postgresql-common/pgdg
+        sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+          https://www.postgresql.org/media/keys/ACCC4CF8.asc
+        . /etc/os-release
+        echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
+          | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
         sudo apt-get update
         sudo apt-get install -y postgresql-client-18
         pg_dump --version
