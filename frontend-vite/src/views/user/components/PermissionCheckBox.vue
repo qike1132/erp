@@ -2,9 +2,10 @@
   <span
     class="pd-box"
     :class="[state, { static: !interactive }]"
-    role="checkbox"
-    :aria-checked="ariaChecked"
-    :aria-label="label"
+    :role="interactive ? 'checkbox' : undefined"
+    :aria-checked="interactive ? ariaChecked : undefined"
+    :aria-label="interactive ? label : undefined"
+    :aria-hidden="interactive ? undefined : 'true'"
     :tabindex="interactive ? 0 : -1"
     @click.stop="onToggle"
     @keydown.enter.prevent.stop="onToggle"
@@ -19,6 +20,9 @@
  * 三态：全选（对勾）/ 半选（横杠）/ 未选（空框）。
  * `interactive=false` 退化为纯指示器（不参与 Tab、`pointer-events:none` 让点击穿透），
  * 供「整行可点」的右栏权限行使用；左栏模块行则用默认的独立交互。
+ * 纯指示器模式**不挂 role/aria**（`aria-hidden`）——它总被放进本身已带
+ * `role="checkbox"` 的行或 `<button>` 里，再挂一个复选框角色会变成控件套控件，
+ * 读屏器重复播报。
  */
 import { computed } from 'vue'
 import type { PermissionCheckState } from '@/views/user/composables/useUserManagement'
