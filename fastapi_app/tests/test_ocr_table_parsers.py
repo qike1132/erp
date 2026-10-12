@@ -7,6 +7,7 @@ _parse_ocr_table_format 原 117 行拆为四个单元。既有覆盖走 parse_or
 
 from fastapi_app.services.ocr._text_parsers import (
     _filter_data_lines,
+    _parse_ocr_table_format,
     _rows_from_aligned_columns,
 )
 
@@ -57,3 +58,28 @@ def test_rows_aligned_columns_customer_column_wins():
     rows = ['产品A', '50', '甲客户', '产品B', '30', '乙客户']
     items = _rows_from_aligned_columns(rows, col_order, default_customer='默认')
     assert [i['customer'] for i in items] == ['甲客户', '乙客户']
+
+
+def test_merged_header_expands_to_three_columns():
+    """合并表头行（客户名称+产品名称 同行）经 0.5 步长展开为三列，按列序取行。
+
+    期望值手工推导（对照原 docstring 的「客户名称产品名称 / 出货数量」示例）：
+    行 0 命中 customer+product_name → 虚拟列 0.0/0.5；行 1 命中 quantity → 列 1；
+    故列序 = [customer, product_name, quantity]，数据行三值按序入列。
+    """
+    lines = [
+        '客户名称产品名称',
+        '出货数量',
+        'MINISO国际',
+        '23cm企鹅公仔',
+        '10000',
+    ]
+    assert _parse_ocr_table_format(lines, '\n'.join(lines)) == [
+        {'customer': 'MINISO国际', 'product_name': '23cm企鹅公仔', 'quantity': 10000, 'note': ''},
+    ]
+
+
+def test_no_required_columns_returns_empty():
+    """表头缺 product_name 或 quantity 时不构成可解析表格。"""
+    lines = ['客户名称', '备注', '甲客户', '加急']
+    assert _parse_ocr_table_format(lines, '\n'.join(lines)) == []

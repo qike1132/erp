@@ -91,14 +91,14 @@ async def _recognize_items(file_content: bytes, filename: str, file_type: str, _
 
 
 def _build_staging_row(session_id: str, item: dict, all_products: list,
-                       product_map: dict, all_customers: list) -> tuple[StagingStockOut | None, str | None]:
-    """单个识别项 → StagingStockOut 行。返回 (row, error)；跳过项返回 (None, None)。"""
+                       product_map: dict, all_customers: list) -> StagingStockOut | None:
+    """单个识别项 → StagingStockOut 行；跳过项（空产品名/非正数量）返回 None。"""
     product_name = str(item.get('product_name', '')).strip()
     customer = str(item.get('customer', '')).strip()
     quantity = item.get('quantity', 0)
     note = str(item.get('note', '')).strip()
     if not product_name or quantity <= 0:
-        return None, None
+        return None
 
     product, match_confidence = fuzzy_match_product(product_name, all_products, product_map)
     matched_customer, customer_confidence = fuzzy_match_customer(customer, all_customers)
@@ -133,7 +133,7 @@ def _build_staging_row(session_id: str, item: dict, all_products: list,
 
     # stockout_date aware UTC：staging_stock_out.stockout_date 列为 timestamptz
     row = StagingStockOut(session_id=session_id, customer=customer, stockout_date=datetime.now(UTC), product_name=product_name, product_barcode='', product_id=product_id, quantity=quantity, note=note, is_validated=is_validated, validation_error=validation_error, stock_check_passed=stock_check_passed, stock_check_message=stock_check_message, status='pending')
-    return row, None
+    return row
 
 async def import_staging_stockouts_from_file(db: AsyncSession, file_content: bytes, session_id: str, filename: str='', task_id: str='') -> tuple[int, str, list[str]]:
     """
@@ -187,7 +187,7 @@ async def import_staging_stockouts_from_file(db: AsyncSession, file_content: byt
                         item_pct = 90 + int(idx / total * 6)
                         _prog(message=f'正在处理第 {idx}/{total} 项...', percent=item_pct)
                         await asyncio.sleep(0.02)
-                    row, _err = _build_staging_row(session_id, item, all_products, product_map, all_customers)
+                    row = _build_staging_row(session_id, item, all_products, product_map, all_customers)
                     if row is None:  # 跳过项（空产品名/非正数量）
                         continue
                     db.add(row)
