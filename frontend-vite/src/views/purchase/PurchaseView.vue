@@ -10,7 +10,7 @@
             @click="switchTab('active')"
           >
             待生产订单
-            <span v-if="purchaseOrders.total > 0" class="pc-tab-badge">{{ purchaseOrders.total }}</span>
+            <span v-if="activeOrderCount > 0" class="pc-tab-badge">{{ activeOrderCount }}</span>
           </button>
           <button
             role="tab"
@@ -38,7 +38,6 @@
           >
             <FontAwesomeIcon icon="check-double" aria-hidden="true" /> 批量确认订单 ({{ purchaseOrders.selectedIds.length }})
           </button>
-          <span class="count-badge">{{ purchaseOrders.total }} 个订单</span>
         </div>
 
         <!-- 记录查询 TAB 的筛选区（与 TAB 同一行、右上角） -->
@@ -152,7 +151,7 @@
 </template>
 
 <script setup lang="ts">
-import { defineAsyncComponent } from 'vue'
+import { computed, defineAsyncComponent } from 'vue'
 import ActiveOrdersPanel from './components/ActiveOrdersPanel.vue'
 import CompletedOrdersPanel from './components/CompletedOrdersPanel.vue'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
@@ -187,6 +186,12 @@ const {
   handleExport,
   exporting,
 } = usePurchaseHandlers()
+
+/**
+ * 待生产订单 TAB 徽标 = 表格实际行数口径：待生成行（unprocessed）+ 待生产行（purchaseOrders）。
+ * 二者同表并列渲染，只取 purchaseOrders.total 会漏掉待生成行，徽标小于可见行数。
+ */
+const activeOrderCount = computed(() => unprocessed.total + purchaseOrders.total)
 
 /** 待生产/待生成任一列表加载失败时，重试两者 */
 function handleOrdersRetry() {
