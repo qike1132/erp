@@ -61,17 +61,18 @@ PERMISSIONS_CONFIG = {
         'module_name': '报表统计',
         'icon': 'fa-chart-bar',
         'parent': {'code': 'report_manage', 'name': '订单流水'},
-        # 报表域行内操作子码，对齐迁移 pg_standalone_075/079 的插入内容：
+        # 报表域行内操作子码，对齐迁移 pg_standalone_075/079/091 的插入内容：
         # 空库部署链 init_permissions --yes 重建全部权限后，迁移里
         # WHERE p.code='report_manage' 的 INSERT...SELECT 若父行缺失会静默插 0 行，
-        # 8 个子码永久缺失（2026-10-09 第 16 轮审计 High-2）。此处补齐保证空库也齐。
-        # 名字带 TAB：这四个 tab 的行内编辑/删除是独立授权点，name 必须能区分
-        # （对齐报表页 useReportConfig.TAB_CONFIG.label；改这里要同步迁移
-        #  pg_standalone_090_report_row_action_permission_names，反之亦然）。
-        # order_* 被「订单流水」「备货流水」两个 tab 共用，见 TAB_ROW_PERMISSIONS。
+        # 子码永久缺失（2026-10-09 第 16 轮审计 High-2）。此处补齐保证空库也齐。
+        # 一个 tab 一对「编辑/删除」，name 与报表页 tab 名完全一致
+        # （对齐 useReportConfig.TAB_CONFIG.label；改这里要同步迁移
+        #  pg_standalone_091_report_row_action_per_tab，反之亦然）。
         'children': [
-            {'code': 'order_edit', 'name': '编辑订单/备货流水'},
-            {'code': 'order_delete', 'name': '删除订单/备货流水'},
+            {'code': 'order_edit', 'name': '编辑订单流水'},
+            {'code': 'order_delete', 'name': '删除订单流水'},
+            {'code': 'stockin_edit', 'name': '编辑备货流水'},
+            {'code': 'stockin_delete', 'name': '删除备货流水'},
             {'code': 'stockout_edit', 'name': '编辑出货流水'},
             {'code': 'stockout_delete', 'name': '删除出货流水'},
             {'code': 'deduction_edit', 'name': '编辑备货抵扣流水'},

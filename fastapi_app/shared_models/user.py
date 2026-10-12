@@ -57,6 +57,8 @@ class User(Base):
           order_edit / order_delete 同理（迁移 075 挂在「订单流水」report_manage 之下，
           是报表流水行内编辑/删除的职责分离码）：持有「订单列表」仅可查看，
           编辑与删除必须在 /user 显式勾选。
+          stockin_edit/delete（迁移 091）是「备货流水」tab 的同类码——原先备货借用了
+          order_*，拆出后不再经 order_* 继承放行。
           stockout_edit/delete、deduction_edit/delete、return_edit/delete（迁移 079）
           是出货/抵扣/退货三类报表流水的同类职责分离码，同样必须显式授权。
         """
@@ -66,6 +68,7 @@ class User(Base):
         NO_MANAGE_INHERIT = {
             'outsource_ship', 'outsource_receive',
             'order_edit', 'order_delete',
+            'stockin_edit', 'stockin_delete',
             'stockout_edit', 'stockout_delete',
             'deduction_edit', 'deduction_delete',
             'return_edit', 'return_delete',

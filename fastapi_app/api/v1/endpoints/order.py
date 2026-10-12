@@ -199,8 +199,8 @@ async def list_unified_records(
     end_date: str | None = Query(None, description="结束日期筛选(YYYY-MM-DD)"),
     keyword: str | None = Query(None, description="搜索框 OR 关键字：单号/客户/产品名/条码"),
     db: AsyncSession = Depends(get_async_read_db),
-    # 报表流水行内编辑/删除（迁移 075 的 order_edit/order_delete）也要用本接口还原聚合行
-    user: User = Depends(require_any_permission("order_manage", "order_edit", "order_delete")),
+    # 报表流水行内编辑/删除（迁移 075 的 order_*、091 的 stockin_*）也要用本接口还原聚合行
+    user: User = Depends(require_any_permission("order_manage", "order_edit", "order_delete", "stockin_edit", "stockin_delete")),
 ) -> OrderListResponse:
     """获取订单+备货合并记录列表（只读，支持分页和多维度筛选）。
 

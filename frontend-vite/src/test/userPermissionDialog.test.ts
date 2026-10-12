@@ -139,3 +139,70 @@ describe('UserPermissionDialog 双栏', () => {
     expect(w.find('.pd-foot-total').text()).toContain('已选 3 / 5 项')
   })
 })
+
+/**
+ * 行内操作按 /report 的 TAB 归组（变体 B）。
+ *
+ * 订单流水的子权限是 5 个 tab × 一对「编辑/删除」（迁移 091 起备货也独立），
+ * 平铺成 10 行看不出哪个码属于哪个 tab，故按 TAB 归成 5 行、每行两个胶囊。
+ */
+describe('UserPermissionDialog 行内操作按 TAB 归组', () => {
+  const ROW_ACTION_SECTIONS: PermissionSection[] = [
+    {
+      key: 'data',
+      name: '订单查询',
+      items: [
+        parent(100, 'report_manage', '订单流水', [
+          perm(101, 'order_edit', '编辑订单流水'),
+          perm(102, 'order_delete', '删除订单流水'),
+          perm(103, 'stockin_edit', '编辑备货流水'),
+          perm(104, 'stockin_delete', '删除备货流水'),
+          perm(105, 'stockout_edit', '编辑出货流水'),
+          perm(106, 'stockout_delete', '删除出货流水'),
+          perm(107, 'deduction_edit', '编辑备货抵扣流水'),
+          perm(108, 'deduction_delete', '删除备货抵扣流水'),
+          perm(109, 'return_edit', '编辑退货流水'),
+          perm(110, 'return_delete', '删除退货流水'),
+        ]),
+      ],
+    },
+  ]
+
+  function mountRowActions(overrides: Record<string, unknown> = {}) {
+    return mountDialog({
+      permissionSections: ROW_ACTION_SECTIONS,
+      permCheckedKeys: [],
+      ...overrides,
+    })
+  }
+
+  it('按 /report 的 5 个 TAB 归成 5 行，顺序与报表页一致', () => {
+    const w = mountRowActions()
+    expect(w.findAll('.pd-trow')).toHaveLength(5)
+    expect(w.findAll('.pd-tnm').map((e) => e.text())).toEqual([
+      '订单流水',
+      '备货流水',
+      '出货流水',
+      '备货抵扣流水',
+      '退货流水',
+    ])
+  })
+
+  it('每个 TAB 行有 编辑 / 删除 两个胶囊（共 10 个）', () => {
+    expect(mountRowActions().findAll('.pd-trow .pd-op')).toHaveLength(10)
+  })
+
+  it('点第 2 个 TAB 的「编辑」胶囊回传该权限 id（备货流水 → stockin_edit）', async () => {
+    const togglePermNode = vi.fn()
+    const w = mountRowActions({ togglePermNode })
+    // 5 行 × (编辑, 删除) 展平后 index 2 = 备货流水的「编辑」
+    await w.findAll('.pd-trow .pd-op')[2]!.trigger('click')
+    expect(togglePermNode).toHaveBeenCalledWith(103)
+  })
+
+  it('子权限不是行内操作码的模块仍走平铺（产品清单）', () => {
+    const w = mountDialog()
+    expect(w.findAll('.pd-trow')).toHaveLength(0)
+    expect(w.findAll('.pd-row').length).toBeGreaterThan(0)
+  })
+})

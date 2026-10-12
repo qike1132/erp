@@ -36,12 +36,13 @@ import type { OrderRecord } from './orderRecordTypes'
 export type ReportActionTab = 'order' | 'stockin' | 'stockout' | 'deduction' | 'return'
 export type ReportAction = 'edit' | 'delete'
 
-/** 各维度行内操作的权限码（迁移 075 订单/备货；079 出货/抵扣/退货）。
+/** 各维度行内操作的权限码（迁移 075 订单/备货；079 出货/抵扣/退货；091 备货拆出独立码）。
  * 数组镜像后端 require_any_permission 的全部可放行码（含 manage 粗锁兜底）——
- * 漏 manage 会让「只有页面级 manage 权限」的用户被前端误拦 403（后端本会放行）。 */
+ * 漏 manage 会让「只有页面级 manage 权限」的用户被前端误拦 403（后端本会放行）。
+ * TAB 名与权限码前缀的单一来源见 @/constants/reportRowActions。 */
 export const TAB_ROW_PERMISSIONS: Record<ReportActionTab, { edit: string[]; delete: string[] }> = {
   order: { edit: ['order_edit', 'order_manage'], delete: ['order_delete', 'order_manage'] },
-  stockin: { edit: ['order_edit', 'order_manage', 'stockin_manage'], delete: ['order_delete', 'order_manage', 'stockin_manage'] },
+  stockin: { edit: ['stockin_edit', 'order_manage', 'stockin_manage'], delete: ['stockin_delete', 'order_manage', 'stockin_manage'] },
   stockout: { edit: ['stockout_edit', 'stockout_manage'], delete: ['stockout_delete', 'stockout_manage'] },
   deduction: { edit: ['deduction_edit', 'stockout_manage'], delete: ['deduction_delete', 'stockout_manage'] },
   return: { edit: ['return_edit', 'stock_return_manage'], delete: ['return_delete', 'stock_return_manage'] },

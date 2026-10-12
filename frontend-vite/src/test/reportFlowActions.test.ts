@@ -86,9 +86,9 @@ beforeEach(() => {
 })
 
 describe('TAB_ROW_PERMISSIONS', () => {
-  it('订单/备货用 order_*，出货/抵扣/退货各自独立码；每项镜像后端 require_any 的 manage 兜底', () => {
+  it('每个 TAB 一对独立码（迁移 091 起备货也独立）；每项镜像后端 require_any 的 manage 兜底', () => {
     expect(TAB_ROW_PERMISSIONS.order).toEqual({ edit: ['order_edit', 'order_manage'], delete: ['order_delete', 'order_manage'] })
-    expect(TAB_ROW_PERMISSIONS.stockin).toEqual({ edit: ['order_edit', 'order_manage', 'stockin_manage'], delete: ['order_delete', 'order_manage', 'stockin_manage'] })
+    expect(TAB_ROW_PERMISSIONS.stockin).toEqual({ edit: ['stockin_edit', 'order_manage', 'stockin_manage'], delete: ['stockin_delete', 'order_manage', 'stockin_manage'] })
     expect(TAB_ROW_PERMISSIONS.stockout).toEqual({ edit: ['stockout_edit', 'stockout_manage'], delete: ['stockout_delete', 'stockout_manage'] })
     expect(TAB_ROW_PERMISSIONS.deduction).toEqual({ edit: ['deduction_edit', 'stockout_manage'], delete: ['deduction_delete', 'stockout_manage'] })
     expect(TAB_ROW_PERMISSIONS.return).toEqual({ edit: ['return_edit', 'stock_return_manage'], delete: ['return_delete', 'stock_return_manage'] })

@@ -15,27 +15,66 @@
         </button>
       </header>
       <div class="pd-rows">
-        <template v-for="row in rows" :key="row.item.id">
-          <p v-if="row.group" class="pd-group">{{ row.group }}</p>
-          <div
-            class="pd-row"
-            :class="{ on: isPermChecked(row.item.id) }"
-            role="checkbox"
-            :aria-checked="isPermChecked(row.item.id)"
-            tabindex="0"
-            @click="togglePermNode(row.item.id)"
-            @keydown.enter.prevent="togglePermNode(row.item.id)"
-            @keydown.space.prevent="togglePermNode(row.item.id)"
-          >
-            <PermissionCheckBox
-              :state="isPermChecked(row.item.id) ? 'all' : 'none'"
-              :label="row.item.name"
-              :interactive="false"
+        <template v-if="hasChildren">
+          <p class="pd-group">模块访问</p>
+          <PermissionRow
+            :item="node"
+            :checked="isPermChecked(node.id)"
+            @toggle="togglePermNode(node.id)"
+          />
+          <p class="pd-group">操作权限</p>
+          <!-- 变体 B：子权限正好是 /report 的行内操作码时，一行一个 TAB -->
+          <template v-if="rowActionGroups">
+            <div v-for="g in rowActionGroups" :key="g.label" class="pd-trow">
+              <span class="pd-tnm">{{ g.label }}</span>
+              <button
+                v-if="g.edit"
+                type="button"
+                class="pd-op"
+                :class="{ on: isPermChecked(g.edit.id) }"
+                @click="togglePermNode(g.edit.id)"
+              >
+                <PermissionCheckBox
+                  :state="isPermChecked(g.edit.id) ? 'all' : 'none'"
+                  :label="`编辑${g.label}`"
+                  :interactive="false"
+                />
+                编辑
+              </button>
+              <button
+                v-if="g.delete"
+                type="button"
+                class="pd-op"
+                :class="{ on: isPermChecked(g.delete.id) }"
+                @click="togglePermNode(g.delete.id)"
+              >
+                <PermissionCheckBox
+                  :state="isPermChecked(g.delete.id) ? 'all' : 'none'"
+                  :label="`删除${g.label}`"
+                  :interactive="false"
+                />
+                删除
+              </button>
+              <code class="pd-tcodes">{{ codesOf(g) }}</code>
+            </div>
+          </template>
+          <!-- 其它模块：平铺子权限 -->
+          <template v-else>
+            <PermissionRow
+              v-for="row in childRows"
+              :key="row.id"
+              :item="row"
+              :checked="isPermChecked(row.id)"
+              @toggle="togglePermNode(row.id)"
             />
-            <span class="pd-row-name">{{ row.item.name }}</span>
-            <code class="pd-code">{{ row.item.code }}</code>
-          </div>
+          </template>
         </template>
+        <PermissionRow
+          v-else
+          :item="node"
+          :checked="isPermChecked(node.id)"
+          @toggle="togglePermNode(node.id)"
+        />
       </div>
     </template>
     <p v-else class="pd-empty">请选择左侧模块</p>
@@ -46,12 +85,18 @@
 /**
  * PermissionDetailPanel.vue — 分配权限弹窗右栏：当前模块的权限清单
  *
- * 有子权限的模块先列「模块访问」（模块自身 = 可见/查看授权）再列「操作权限」；
- * 无子权限的模块只列自身一行。整行可点，勾选框为纯指示器（点击穿透给整行）。
+ * 有子权限的模块先列「模块访问」（模块自身 = 可见/查看授权），再列「操作权限」。
+ * 「操作权限」有两种呈现：
+ * - **按 TAB 归组**（一行一个 TAB，每个 TAB 一对 编辑/删除）：当子权限正好是
+ *   /report 的行内操作码时启用（见 @/constants/reportRowActions）。这样
+ *   「订单流水」下 5 个 tab × 编辑/删除 一眼看全，不用猜哪个码属于哪个 tab。
+ * - **平铺**：其它模块照旧一行一个权限。
  */
 import { computed } from 'vue'
 import type { PermissionItem } from '@/types'
 import PermissionCheckBox from '@/views/user/components/PermissionCheckBox.vue'
+import PermissionRow from '@/views/user/components/PermissionRow.vue'
+import { ROW_ACTION_TABS } from '@/constants/reportRowActions'
 import {
   collectModuleIds,
   countChecked,
@@ -70,26 +115,44 @@ const props = defineProps<{
   togglePermNode: (id: number) => void
 }>()
 
-/** 权限行 + 其分组标签（标签为空串表示不渲染） */
-interface DetailRow {
-  group: string
-  item: PermissionItem
+/** 一个 TAB 的「编辑/删除」一对权限 */
+interface RowActionGroup {
+  label: string
+  edit?: PermissionItem
+  delete?: PermissionItem
 }
 
 /** 模块是否带操作权限 */
 const hasChildren = computed(() => (props.node?.children?.length ?? 0) > 0)
 
-/** 行列表：有子权限时 = 模块自身 + 各操作权限（各带分组标签），否则只有模块自身 */
-const rows = computed<DetailRow[]>(() => {
-  const n = props.node
-  if (!n) return []
-  if (!hasChildren.value) return [{ group: '', item: n }]
-  const children = n.children ?? []
-  return [
-    { group: '模块访问', item: n },
-    ...children.map((c, i) => ({ group: i === 0 ? '操作权限' : '', item: c })),
-  ]
+/** 平铺路径用的子权限行 */
+const childRows = computed<PermissionItem[]>(() =>
+  hasChildren.value ? (props.node?.children ?? []) : [],
+)
+
+/**
+ * 子权限正好是 /report 的行内操作码（`${resource}_edit` / `_delete`）时按 TAB 归组；
+ * 只要有一个子项不属于这套码，就返回 null 走平铺（避免误把别的模块也当 TAB 结构）。
+ */
+const rowActionGroups = computed<RowActionGroup[] | null>(() => {
+  const children = props.node?.children ?? []
+  if (children.length === 0) return null
+  const groups: RowActionGroup[] = []
+  const matched = new Set<number>()
+  for (const tab of ROW_ACTION_TABS) {
+    const edit = children.find((c) => c.code === `${tab.resource}_edit`)
+    const del = children.find((c) => c.code === `${tab.resource}_delete`)
+    if (edit) matched.add(edit.id)
+    if (del) matched.add(del.id)
+    if (edit || del) groups.push({ label: tab.label, edit, delete: del })
+  }
+  return matched.size === children.length ? groups : null
 })
+
+/** TAB 行的权限码文本（如 "order_edit / order_delete"） */
+function codesOf(g: RowActionGroup): string {
+  return [g.edit?.code, g.delete?.code].filter(Boolean).join(' / ')
+}
 
 /** 模块（含子权限）的 id 集合大小 */
 const moduleIds = computed(() => (props.node ? collectModuleIds(props.node) : []))
@@ -150,36 +213,71 @@ function countOf(n: PermissionItem): string {
   font-weight: 700;
   color: var(--color-text-placeholder, #94a3b8);
 }
-.pd-row {
+.pd-link {
+  flex: none;
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-primary-600);
+  cursor: pointer;
+}
+.pd-link:hover {
+  text-decoration: underline;
+}
+.pd-empty {
+  margin: 24px 0;
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--color-text-placeholder, #94a3b8);
+}
+
+/* ===== TAB 归组行（一行一个 TAB） ===== */
+.pd-trow {
   display: flex;
   align-items: center;
-  gap: 11px;
-  margin-bottom: 7px;
+  gap: 12px;
+  margin-bottom: 8px;
   padding: 9px 12px;
   border: 1px solid var(--color-border-light, #f0f2f5);
   border-radius: 10px;
   background: #fff;
+}
+.pd-trow:hover {
+  border-color: var(--color-primary-200);
+  background: #fcfdff;
+}
+.pd-tnm {
+  width: 108px;
+  flex: none;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+.pd-op {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px 4px 8px;
+  border: 1px solid var(--color-border-light, #e2e8f0);
+  border-radius: 999px;
+  background: #fff;
+  font-size: 12.5px;
+  color: var(--color-text-secondary);
   cursor: pointer;
 }
-.pd-row:hover {
-  border-color: var(--color-primary-200);
-  background: var(--color-primary-50);
-}
-.pd-row.on {
+.pd-op:hover {
   border-color: var(--color-primary-300);
+}
+.pd-op.on {
   background: var(--color-primary-50);
-}
-.pd-row-name {
-  flex: 1;
-  min-width: 0;
-  font-size: 13.5px;
-  font-weight: 600;
-  color: var(--color-text);
-}
-.pd-row.on .pd-row-name {
+  border-color: var(--color-primary-300);
   color: var(--color-primary-700);
+  font-weight: 600;
 }
-.pd-code {
+.pd-tcodes {
+  margin-left: auto;
   flex: none;
   padding: 3px 7px;
   border: 1px solid var(--color-border-light, #f0f2f5);
@@ -187,12 +285,6 @@ function countOf(n: PermissionItem): string {
   background: var(--color-slate-50, #f8fafc);
   font-family: ui-monospace, Consolas, monospace;
   font-size: 11px;
-  color: var(--color-text-placeholder, #94a3b8);
-}
-.pd-empty {
-  margin: 24px 0;
-  text-align: center;
-  font-size: 12.5px;
   color: var(--color-text-placeholder, #94a3b8);
 }
 </style>
