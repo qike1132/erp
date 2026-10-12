@@ -583,7 +583,7 @@ async def _do_integrity_check() -> dict:
 
     backup_files = sorted(
         [f for f in backup_service.BACKUP_DIR.iterdir()
-         if f.is_file() and (f.name.startswith('erp_backup_') or f.name.startswith('erp_auto_') or f.name.startswith('erp_incremental_'))
+         if f.is_file() and (f.name.startswith('erp_backup_') or f.name.startswith('erp_auto_') or f.name.startswith('erp_incremental_'))  # erp_incremental_: 历史（全量-only 迁移前）残留，仍需识别
          and (f.name.endswith('.zip') or f.name.endswith('.zip.enc'))],
         key=lambda f: f.stat().st_mtime, reverse=True
     )

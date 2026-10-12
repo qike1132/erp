@@ -248,7 +248,7 @@ class TestListBackupFiles:
     def test_list_files(self, tmp_path):
         # 创建测试文件
         (tmp_path / 'erp_backup_20240115_103000.zip').write_bytes(b'dummy')
-        (tmp_path / 'erp_incremental_20240115_120000.zip').write_bytes(b'dummy')
+        (tmp_path / 'erp_auto_20240115_120000.zip').write_bytes(b'dummy')
         (tmp_path / 'other_file.txt').write_bytes(b'dummy')  # 不应被列出
 
         with patch('fastapi_app.services.backup.records.BACKUP_DIR', tmp_path):
@@ -256,7 +256,7 @@ class TestListBackupFiles:
             assert len(result) == 2
             filenames = [b['filename'] for b in result]
             assert 'erp_backup_20240115_103000.zip' in filenames
-            assert 'erp_incremental_20240115_120000.zip' in filenames
+            assert 'erp_auto_20240115_120000.zip' in filenames
             assert 'other_file.txt' not in filenames
 
 

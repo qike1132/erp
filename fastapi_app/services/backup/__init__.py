@@ -231,7 +231,6 @@ __all__ = [  # noqa: RUF022
     "create_database_snapshot_backup",
     "create_full_backup",
     "create_full_backup_to_file",
-    # incremental
     "create_pre_restore_backup",
     "delete_backup_file",
     "deserialize_value",

@@ -568,7 +568,7 @@ class TestBackupHealthCheckService:
             old_mtime = (datetime.now() - timedelta(hours=132)).timestamp()
             os.utime(old, (old_mtime, old_mtime))
 
-            fresh = backup_dir / 'erp_incremental_20261002_060002.zip.enc'
+            fresh = backup_dir / 'erp_auto_daily_20261002_060002.zip.enc'
             fresh.touch()
 
             with patch('fastapi_app.services.backup.verify.health_check_service.BACKUP_DIR', backup_dir), \

@@ -130,7 +130,7 @@ class TestGetMergedBackupRecords:
     async def test_fs_only_returns_fs_source_with_inferred_fields(self):
         """场景2: 文件系统有文件、DB无记录 → source='fs'，从文件名推断 type/trigger_type"""
         fs_entries = [
-            {'filename': 'erp_incremental_20240101_120000.zip', 'size': 100},
+            {'filename': 'erp_auto_20240101_120000.zip', 'size': 100},
             {'filename': 'erp_auto_20240102_120000.zip', 'size': 200},
             {'filename': 'erp_backup_20240103_120000.zip', 'size': 300},
         ]
@@ -143,13 +143,6 @@ class TestGetMergedBackupRecords:
 
         assert total == 3
         assert all(r['source'] == 'fs' for r in records)
-
-        # 增量备份：erp_incremental_ → type=incremental, trigger=manual
-        inc = next(r for r in records if 'incremental' in r['filename'])
-        assert inc['type'] == 'incremental'
-        assert inc['trigger_type'] == 'manual'
-        assert inc['status'] == 'success'  # fs 视为成功
-        assert inc['id'] is None
 
         # 自动备份：erp_auto_ → type=full, trigger=auto
         auto = next(r for r in records if r['filename'].startswith('erp_auto_'))
