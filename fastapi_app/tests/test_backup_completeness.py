@@ -62,11 +62,11 @@ class TestEvaluateBackupCompleteness:
         assert status == STATUS_PARTIAL
         assert 'order_item' in detail
 
-    def test_incremental_result_shape(self):
-        """增量任务返回的 result 直接喂进来也要判出 partial。"""
+    def test_result_shape_without_table_count(self):
+        """无 table_count 的 result（如历史增量产物）直接喂进来也要判出 partial。"""
         result = {
             'success': True,
-            'filename': 'erp_incremental_20260930_020503.zip',
+            'filename': 'erp_backup_20260930_020503.zip',
             'total_rows': 10,
             'failed_tables': ['approval_request', 'approval_log'],
         }

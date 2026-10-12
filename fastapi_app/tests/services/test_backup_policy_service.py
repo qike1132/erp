@@ -29,7 +29,6 @@ class TestBackupPolicyService:
         """
         with patch.dict(os.environ, {
             'BACKUP_FULL_CRON': '0 2 * * *',
-            'BACKUP_INCREMENTAL_CRON': '0 */1 * * *',
             'BACKUP_RETENTION_DAYS': '30',
             'BACKUP_RETENTION_COUNT': '100',
             'BACKUP_ENCRYPTION_ENABLED': 'false',
@@ -60,7 +59,6 @@ class TestBackupPolicyService:
         config = policy_service._load_policy_config()
 
         assert 'full_backup_cron' in config
-        assert 'incremental_backup_cron' in config
         assert 'retention_days' in config
         assert 'retention_count' in config
         assert 'encryption_enabled' in config
@@ -76,7 +74,6 @@ class TestBackupPolicyService:
         assert 'notify_on_warning' in config
 
         assert config['full_backup_cron'] == '0 2 * * *'
-        assert config['incremental_backup_cron'] == '0 */1 * * *'
         assert config['retention_days'] == 30
         assert config['retention_count'] == 100
         assert config['encryption_enabled'] is False
@@ -101,7 +98,6 @@ class TestBackupPolicyService:
         assert 'created_at' in policy
         assert 'updated_at' in policy
         assert 'full_backup' in policy
-        assert 'incremental_backup' in policy
         assert 'retention' in policy
         assert 'encryption' in policy
         assert 'compression' in policy
@@ -109,18 +105,19 @@ class TestBackupPolicyService:
         assert 'notification' in policy
         assert 'performance' in policy
         assert 'storage' in policy
+        assert 'incremental_backup' not in policy
 
         assert policy['policy_name'] == 'default'
         assert policy['description'] == '默认备份策略'
         assert policy['version'] == '1.0'
         assert policy['full_backup']['enabled'] is True
         assert policy['full_backup']['schedule'] == '0 2 * * *'
-        assert policy['incremental_backup']['enabled'] is True
-        assert policy['incremental_backup']['schedule'] == '0 */1 * * *'
         assert policy['retention']['enabled'] is True
         assert policy['retention']['strategy'] == 'hybrid'
         assert policy['retention']['retention_days'] == 30
-        assert policy['retention']['retention_count'] == 100
+        assert 'retention_count' not in policy['retention']
+        assert 'keep_manual_backups' not in policy['retention']
+        assert 'keep_failed_backups' not in policy['retention']
         assert policy['encryption']['enabled'] is False
         assert policy['encryption']['algorithm'] == 'AES256'
         assert policy['compression']['enabled'] is True
@@ -168,10 +165,6 @@ class TestBackupPolicyService:
                 'enabled': True,
                 'schedule': '0 2 * * *'
             },
-            'incremental_backup': {
-                'enabled': True,
-                'schedule': '0 */1 * * *'
-            },
             'retention': {
                 'enabled': True,
                 'strategy': 'hybrid',
@@ -189,10 +182,6 @@ class TestBackupPolicyService:
         invalid_policy = {
             'policy_name': 'test_policy',
             # 缺少 full_backup
-            'incremental_backup': {
-                'enabled': True,
-                'schedule': '0 */1 * * *'
-            },
             'retention': {
                 'enabled': True,
                 'strategy': 'hybrid'
@@ -211,10 +200,6 @@ class TestBackupPolicyService:
                 'enabled': True,
                 'schedule': 'invalid cron'
             },
-            'incremental_backup': {
-                'enabled': True,
-                'schedule': '0 */1 * * *'
-            },
             'retention': {
                 'enabled': True,
                 'strategy': 'hybrid'
@@ -232,10 +217,6 @@ class TestBackupPolicyService:
             'full_backup': {
                 'enabled': True,
                 'schedule': '0 2 * * *'
-            },
-            'incremental_backup': {
-                'enabled': True,
-                'schedule': '0 */1 * * *'
             },
             'retention': {
                 'enabled': True,
@@ -256,10 +237,6 @@ class TestBackupPolicyService:
             'full_backup': {
                 'enabled': True,
                 'schedule': '0 2 * * *'
-            },
-            'incremental_backup': {
-                'enabled': True,
-                'schedule': '0 */1 * * *'
             },
             'retention': {
                 'enabled': True,
@@ -284,10 +261,6 @@ class TestBackupPolicyService:
             'full_backup': {
                 'enabled': True,
                 'schedule': '0 2 * * *'
-            },
-            'incremental_backup': {
-                'enabled': True,
-                'schedule': '0 */1 * * *'
             },
             'retention': {
                 'enabled': True,
@@ -409,10 +382,6 @@ class TestBackupPolicyService:
                     'enabled': True,
                     'schedule': '0 3 * * *'
                 },
-                'incremental_backup': {
-                    'enabled': True,
-                    'schedule': '0 */1 * * *'
-                },
                 'retention': {
                     'enabled': True,
                     'strategy': 'hybrid',
@@ -455,8 +424,7 @@ class TestBackupPolicyService:
         with patch.object(policy_service, 'get_current_policy') as mock_get_policy:
             mock_get_policy.return_value = {
                 'policy_name': 'disabled_policy',
-                'full_backup': {'enabled': False},
-                'incremental_backup': {'enabled': False}
+                'full_backup': {'enabled': False}
             }
 
             result = await policy_service.apply_backup_policy()
@@ -477,7 +445,6 @@ class TestBackupPolicyService:
             mock_get_policy.return_value = {
                 'policy_name': 'test_policy',
                 'full_backup': {'enabled': True},
-                'incremental_backup': {'enabled': True},
                 'storage': {'sync_to_secondary': False}
             }
 
@@ -521,8 +488,7 @@ class TestBackupPolicyService:
 
             mock_get_policy.return_value = {
                 'policy_name': 'test_policy',
-                'full_backup': {'enabled': True},
-                'incremental_backup': {'enabled': True}
+                'full_backup': {'enabled': True}
             }
 
             mock_checks.side_effect = Exception('策略检查失败')
@@ -595,7 +561,6 @@ class TestBackupPolicyService:
             mock_get_policy.return_value = {
                 'policy_name': 'test_policy',
                 'full_backup': {'enabled': True, 'schedule': '0 2 * * *'},
-                'incremental_backup': {'enabled': True, 'schedule': '0 */1 * * *'},
                 'retention': {
                     'enabled': True,
                     'strategy': 'hybrid',
@@ -615,10 +580,9 @@ class TestBackupPolicyService:
                 percent=85.0
             )
 
-            # 模拟数据库查询（get_policy_compliance 依次查询全量、增量备份）
+            # 模拟数据库查询（get_policy_compliance 只查询全量备份）
             mock_session = AsyncMock()
             mock_result_full = MagicMock()
-            mock_result_inc = MagicMock()
 
             # 模拟全量备份记录
             full_record = MagicMock()
@@ -626,13 +590,7 @@ class TestBackupPolicyService:
             full_record.status = 'success'
             mock_result_full.scalars.return_value.all.return_value = [full_record, full_record]
 
-            # 模拟增量备份记录
-            inc_record = MagicMock()
-            inc_record.type = 'incremental'
-            inc_record.status = 'success'
-            mock_result_inc.scalars.return_value.all.return_value = [inc_record] * 22
-
-            mock_session.execute.side_effect = [mock_result_full, mock_result_inc]
+            mock_session.execute.side_effect = [mock_result_full]
             mock_context.return_value.__aenter__.return_value = mock_session
 
             compliance = await policy_service.get_policy_compliance()
@@ -646,10 +604,10 @@ class TestBackupPolicyService:
 
             assert compliance['policy_name'] == 'test_policy'
             assert compliance['backup_schedule']['full_backup_enabled'] is True
-            assert compliance['backup_schedule']['incremental_backup_enabled'] is True
             assert compliance['backup_schedule']['full_backups_last_24h'] == 2
-            assert compliance['backup_schedule']['incremental_backups_last_24h'] == 22
-            assert compliance['backup_schedule']['compliance'] is True  # 至少1个全量，20个增量
+            assert compliance['backup_schedule']['compliance'] is True  # 至少1个全量
+            assert 'incremental_backup_enabled' not in compliance['backup_schedule']
+            assert 'incremental_backups_last_24h' not in compliance['backup_schedule']
 
             assert compliance['retention_policy']['enabled'] is True
             assert compliance['retention_policy']['strategy'] == 'hybrid'

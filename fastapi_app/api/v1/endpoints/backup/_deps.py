@@ -47,12 +47,10 @@ def _get_backup_permission(endpoint_name: str) -> str:  # log-context: internal 
         'export_backup': 'backup_create',
         'export_backup_enhanced': 'backup_create',
         'save_backup_to_server': 'backup_create',
-        'save_incremental_backup': 'backup_create',
         'download_server_backup': 'backup_create',
 
         # M1 任务化触发
         'trigger_full_backup': 'backup_create',
-        'trigger_incremental_backup': 'backup_create',
 
         # M1 settings
         'get_backup_settings': 'backup_read',
@@ -62,7 +60,6 @@ def _get_backup_permission(endpoint_name: str) -> str:  # log-context: internal 
         # 恢复权限
         'import_backup': 'backup_restore',
         'restore_server_backup': 'backup_restore',
-        'restore_incremental_backup': 'backup_restore',
         'async_import_backup': 'backup_restore',
         'async_restore_server_backup': 'backup_restore',
 
@@ -162,7 +159,7 @@ def _resolve_encryption(
     解析端点的加密意图，返回 (是否实际加密, 密码)。
 
     总开关优先：BACKUP_ENCRYPTION_ENABLED=false 时一律不加密，忽略调用方的 encrypt 意图
-    （与 create_full_backup / create_incremental_backup 口径统一）。
+    （与 create_full_backup 口径统一）。
 
     请求加密但未配置任何密码时，明确降级为不加密并记录告警，
     绝不退化为随机密码加密（fail-safe：宁可明文可还原，不可密文打不开）。

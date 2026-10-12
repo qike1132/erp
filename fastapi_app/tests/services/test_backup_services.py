@@ -120,7 +120,7 @@ def test_config_loading():
         assert health_service.health_config['disk_space_threshold'] == 15.0
         assert policy_service.policy_config['retention_days'] == 60
         assert metrics_service.metrics_config['collection_interval'] == 120
-        assert cleanup_service.cleanup_config['smart_cleanup_enabled'] is False
+        assert 'smart_cleanup_enabled' not in cleanup_service.cleanup_config
         assert recovery_service.test_config['test_frequency_days'] == 14
 
 

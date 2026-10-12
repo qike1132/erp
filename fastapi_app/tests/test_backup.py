@@ -6,21 +6,18 @@
 import json
 import os
 import zipfile
-from datetime import datetime, timedelta
+from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from fastapi_app.services.backup import (
     BACKUP_FORMAT_VERSION,
-    BACKUP_MAX_COUNT,
-    BACKUP_RETENTION_DAYS,
     BackupError,
     BackupFileError,
     BackupLockError,
     RestoreError,
     build_column_type_map,
-    cleanup_old_backups,
     delete_backup_file,
     deserialize_value,
     ensure_backup_dir,
@@ -251,7 +248,7 @@ class TestListBackupFiles:
     def test_list_files(self, tmp_path):
         # 创建测试文件
         (tmp_path / 'erp_backup_20240115_103000.zip').write_bytes(b'dummy')
-        (tmp_path / 'erp_incremental_20240115_120000.zip').write_bytes(b'dummy')
+        (tmp_path / 'erp_auto_20240115_120000.zip').write_bytes(b'dummy')
         (tmp_path / 'other_file.txt').write_bytes(b'dummy')  # 不应被列出
 
         with patch('fastapi_app.services.backup.records.BACKUP_DIR', tmp_path):
@@ -259,50 +256,8 @@ class TestListBackupFiles:
             assert len(result) == 2
             filenames = [b['filename'] for b in result]
             assert 'erp_backup_20240115_103000.zip' in filenames
-            assert 'erp_incremental_20240115_120000.zip' in filenames
+            assert 'erp_auto_20240115_120000.zip' in filenames
             assert 'other_file.txt' not in filenames
-
-
-# ---------------------------------------------------------------------------
-# 备份保留策略测试
-# ---------------------------------------------------------------------------
-
-class TestCleanupOldBackups:
-    def test_cleanup_empty_directory(self, tmp_path):
-        with patch('fastapi_app.services.backup.records.BACKUP_DIR', tmp_path):
-            result = cleanup_old_backups()
-            assert result['deleted_count'] == 0
-            assert result['kept_count'] == 0
-
-    def test_cleanup_old_files(self, tmp_path):
-        # 创建旧备份文件
-        old_file = tmp_path / 'erp_backup_20240101_000000.zip'
-        old_file.write_bytes(b'dummy')
-        # 设置修改时间为 31 天前
-        old_time = (datetime.now() - timedelta(days=31)).timestamp()
-        os.utime(old_file, (old_time, old_time))
-
-        # 创建新备份文件
-        new_file = tmp_path / 'erp_backup_20240115_000000.zip'
-        new_file.write_bytes(b'dummy')
-
-        with patch('fastapi_app.services.backup.records.BACKUP_DIR', tmp_path):
-            result = cleanup_old_backups()
-            assert result['deleted_count'] == 1
-            assert result['kept_count'] == 1
-            assert not old_file.exists()
-            assert new_file.exists()
-
-    def test_cleanup_max_count(self, tmp_path):
-        # 创建超过最大数量的备份
-        for i in range(BACKUP_MAX_COUNT + 5):
-            f = tmp_path / f'erp_backup_202401{i:02d}_000000.zip'
-            f.write_bytes(b'dummy')
-
-        with patch('fastapi_app.services.backup.records.BACKUP_DIR', tmp_path):
-            result = cleanup_old_backups()
-            assert result['deleted_count'] == 5
-            assert result['kept_count'] == BACKUP_MAX_COUNT
 
 
 # ---------------------------------------------------------------------------
@@ -355,91 +310,6 @@ class TestNormalizeBackupTs:
         assert normalize_backup_ts('not-a-ts') == 'not-a-ts'
         assert normalize_backup_ts('  2026-09-13 01:00:00  ') == '2026-09-13 01:00:00'
 
-    def test_service_delegates_to_pure_function(self):
-        """BackupCleanupService._normalize_backup_ts 必须委托到同一纯函数，
-        防止将来有人只改一处造成实现漂移。"""
-        from fastapi_app.services.backup.cleanup.service import BackupCleanupService
-        from fastapi_app.services.backup.records import normalize_backup_ts
-
-        # 不实例化（__init__ 依赖较重）：直接以 None 作 self 调用，验证委托
-        for sample in ('20260913_010000', '2026-09-13 01:00:00', '', None, 'junk'):
-            assert BackupCleanupService._normalize_backup_ts(None, sample) == normalize_backup_ts(sample)
-
-
-# ---------------------------------------------------------------------------
-# 级联删除端到端测试
-#
-# 为什么单独写这一组：TestNormalizeBackupTs 只验证纯函数**自身**正确，
-# 无法发现"函数写对了但调用点忘了调用"的情况。2026-09-14 的重构中确实
-# 出现过这种退化（records.py 提升了函数，却把两处调用点的 normalize 去掉了，
-# 导致级联比较回退成原生字符串比较，所有增量备份被无条件删除 = 数据丢失），
-# 而当时 7 个纯函数测试**全部通过**。因此必须从 cleanup_old_backups 入口
-# 端到端锁死"比较发生在归一化之后"这一契约。
-# ---------------------------------------------------------------------------
-
-def _write_zip_with_manifest(path, base_timestamp):
-    """生成一个含 manifest.json/base_timestamp 的增量备份 zip。"""
-    with zipfile.ZipFile(path, 'w') as zf:
-        zf.writestr('manifest.json', json.dumps({'base_timestamp': base_timestamp}))
-
-
-class TestCascadeCleanup:
-    def test_incremental_survives_when_base_full_exists(self, tmp_path):
-        """基础全量还在 → 增量必须保留。
-
-        回归点：文件名 'YYYYMMDD_HHMMSS' 与 manifest 'YYYY-MM-DD HH:MM:SS'
-        混比较恒为 False（'20260913_010000' > '2026-09-13 01:00:00'，
-        因第 6 位 '6' > '0'），会让 base_exists 恒 False → 增量被误删。
-        """
-        full = tmp_path / 'erp_backup_20260913_010000.zip'
-        full.write_bytes(b'dummy')
-        incr = tmp_path / 'erp_incremental_20260913_020000.zip'
-        _write_zip_with_manifest(incr, '2026-09-13 01:00:00')  # 同一时刻的 manifest 格式
-
-        with patch('fastapi_app.services.backup.records.BACKUP_DIR', tmp_path):
-            result = cleanup_old_backups()
-
-        assert incr.exists(), '基础全量仍在，增量备份不应被删除（归一化缺失会导致此处失败）'
-        assert result['deleted_count'] == 0
-
-    def test_incremental_cascade_deleted_when_base_full_removed(self, tmp_path):
-        """基础全量已过期被删 → 依赖它的增量应级联删除（策略 3 正向生效）。
-
-        与上一个测试配对：证明级联逻辑既不过度删除、也不失效。
-        """
-        old_ts = (datetime.now() - timedelta(days=BACKUP_RETENTION_DAYS + 5)).timestamp()
-        full = tmp_path / 'erp_backup_20200101_010000.zip'
-        full.write_bytes(b'dummy')
-        os.utime(full, (old_ts, old_ts))  # 全量过期 → 必删
-
-        incr = tmp_path / 'erp_incremental_20200101_020000.zip'
-        _write_zip_with_manifest(incr, '2020-01-01 01:00:00')
-        os.utime(incr, (old_ts, old_ts))
-
-        with patch('fastapi_app.services.backup.records.BACKUP_DIR', tmp_path):
-            result = cleanup_old_backups()
-
-        assert not full.exists()
-        assert not incr.exists(), '基础全量被删后，增量应级联删除'
-        assert result['deleted_count'] == 2
-
-    def test_incremental_survives_when_newer_base_exists(self, tmp_path):
-        """存在更早（<=base_ts）的全量 → 增量保留，验证比较方向正确。"""
-        full = tmp_path / 'erp_backup_20260901_000000.zip'  # 早于 base_ts
-        full.write_bytes(b'dummy')
-        incr = tmp_path / 'erp_incremental_20260913_020000.zip'
-        _write_zip_with_manifest(incr, '2026-09-13 01:00:00')
-
-        with patch('fastapi_app.services.backup.records.BACKUP_DIR', tmp_path):
-            cleanup_old_backups()
-
-        assert incr.exists()
-        assert full.exists()
-
-
-# ---------------------------------------------------------------------------
-# 异常类测试
-# ---------------------------------------------------------------------------
 
 class TestExceptions:
     def test_backup_error(self):
@@ -481,7 +351,7 @@ class TestConstants:
 
         monkeypatch.delenv(RETENTION_DAYS_ENV, raising=False)
         monkeypatch.delenv(RETENTION_COUNT_ENV, raising=False)
-        assert retention_days() == RETENTION_DAYS_DEFAULT == 30
+        assert retention_days() == RETENTION_DAYS_DEFAULT == 7
         assert retention_count() == RETENTION_COUNT_DEFAULT == 100
 
     def test_retention_constants_stay_importable(self, monkeypatch):
@@ -489,7 +359,7 @@ class TestConstants:
 
         修复前这里被放宽成 isinstance(int) + > 0：若有人把模块常量重新硬编码回
         旧值（份额 50），本测试不再报警。现在固定 env 后 reload 模块，逐个**等值**
-        比对快照、单源函数与缺省口径（30 天 / 100 份，与 policy_service、cleanup 一致）。
+        比对快照、单源函数与缺省口径（天数 7（全量-only 后改默认）/ 100 份）。
         """
         import importlib
 
@@ -508,7 +378,7 @@ class TestConstants:
             monkeypatch.delenv(RETENTION_DAYS_ENV, raising=False)
             monkeypatch.delenv(RETENTION_COUNT_ENV, raising=False)
             defaulted = importlib.reload(_constants)
-            assert RETENTION_DAYS_DEFAULT == 30
+            assert RETENTION_DAYS_DEFAULT == 7
             assert RETENTION_COUNT_DEFAULT == 100
             assert defaulted.BACKUP_RETENTION_DAYS == defaulted.retention_days() == RETENTION_DAYS_DEFAULT
             assert defaulted.BACKUP_MAX_COUNT == defaulted.retention_count() == RETENTION_COUNT_DEFAULT

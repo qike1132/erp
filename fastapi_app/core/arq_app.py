@@ -214,14 +214,12 @@ class CommitBatcher:
 from fastapi_app.tasks.backup_tasks import (
     apply_backup_policy_task,
     auto_daily_backup_task,
-    auto_incremental_backup_task,
     backup_cleanup_task,
     backup_health_check_task,
     backup_integrity_check_task,
     backup_metrics_report_task,
     disaster_recovery_test_task,
     manual_full_backup_task,
-    manual_incremental_backup_task,
     scheduler_poller,
 )
 from fastapi_app.tasks.batch_tasks import (
@@ -368,10 +366,8 @@ class WorkerSettings:
         batch_import_stockins_task,
         scheduler_poller,
         auto_daily_backup_task,
-        auto_incremental_backup_task,
-        manual_full_backup_task,
-        manual_incremental_backup_task,
-        backup_integrity_check_task,
+            manual_full_backup_task,
+            backup_integrity_check_task,
         backup_cleanup_task,
         backup_health_check_task,
         apply_backup_policy_task,

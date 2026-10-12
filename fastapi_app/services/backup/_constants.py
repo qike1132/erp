@@ -187,12 +187,12 @@ _RESTORE_LOCK_TTL = 3600  # 1 hour
 # services/backup/records.py 的 _backup_created_time 文档字符串。
 RETENTION_DAYS_ENV = 'BACKUP_RETENTION_DAYS'
 RETENTION_COUNT_ENV = 'BACKUP_RETENTION_COUNT'
-RETENTION_DAYS_DEFAULT = 30
+RETENTION_DAYS_DEFAULT = 7  # 默认 7（2026-10-12 全量-only 策略）
 RETENTION_COUNT_DEFAULT = 100
 
 
 def retention_days() -> int:
-    """备份保留天数（env ``BACKUP_RETENTION_DAYS``，缺省 30）。"""
+    """备份保留天数（env ``BACKUP_RETENTION_DAYS``，缺省 7）。"""
     return int(os.environ.get(RETENTION_DAYS_ENV, str(RETENTION_DAYS_DEFAULT)))
 
 

@@ -32,7 +32,7 @@ def _make_backup(d: Path, name: str, age_hours: float) -> Path:
 
 class TestBackupFreshness:
     def test_recent_backup_is_ok(self, backup_dir: Path) -> None:
-        _make_backup(backup_dir, "erp_incremental_20260928_1000.zip", age_hours=3)
+        _make_backup(backup_dir, "erp_auto_daily_20260928_1000.zip", age_hours=3)
         r = freshness.backup_freshness()
         assert r["ok"] is True
         assert 2.5 < r["age_hours"] < 3.5
@@ -55,7 +55,7 @@ class TestBackupFreshness:
 
     def test_newest_file_wins(self, backup_dir: Path) -> None:
         _make_backup(backup_dir, "erp_auto_daily_20260920_0200.zip", age_hours=100)
-        _make_backup(backup_dir, "erp_incremental_20260928_1600.zip", age_hours=1)
+        _make_backup(backup_dir, "erp_auto_daily_20260928_1600.zip", age_hours=1)
         r = freshness.backup_freshness()
         assert r["ok"] is True
         assert r["age_hours"] < 2

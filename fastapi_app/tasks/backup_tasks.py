@@ -170,95 +170,6 @@ async def manual_full_backup_task(
         return {'status': 'error', 'error': str(e)}
 
 
-async def manual_incremental_backup_task(ctx, *, task_id: str | None = None, remark: str = '', since: str = ''):
-    """手动增量备份（ARQ 异步任务，M1 新增）。
-
-    由 POST /api/v1/backup/incremental 入队触发；写 Redis 进度，
-    完成后落 backup_record(trigger_type='manual', record_type='incremental')。
-
-    注意:task_id 由入口端点生成并传入(与前端 POST /incremental 返回的 task_id 一致)。
-    """
-    task_id = task_id or generate_task_id()
-    await create_progress(task_id, operation_type='incremental', progress_type='backup')
-    job_try = ctx.get('job_try', 1)
-    start_time = datetime.now()
-    operator = 'manual_user'
-
-    try:
-        await update_progress(task_id, 'init', 0.1, '开始增量备份')
-        from fastapi_app.core.database import get_async_db_context
-        from fastapi_app.services import backup as backup_service
-        from fastapi_app.shared_models import User as UserModel
-
-        backup_service.ensure_backup_dir()
-
-        async with get_async_db_context() as db:
-            dummy_user = UserModel()
-            dummy_user.username = operator
-            dummy_user.id = 0
-
-            await update_progress(task_id, 'export_db', 0.2, '扫描增量变更')
-            result = await backup_service.create_incremental_backup(
-                db, dummy_user, remark or '手动增量备份', since,
-                encrypt=False,  # 手动增量不隐式加密(fail-safe,避免随机密钥)
-            )
-
-            # S4：增量缺表信号由 create_incremental_backup 的 failed_tables 承载，
-            # 过去该信号被丢弃，导致「静默漏表」的备份照样记 success。
-            inc_status, inc_detail = backup_service.STATUS_SUCCESS, ''
-            if result.get('filename'):
-                await update_progress(task_id, 'write_file', 0.9, f'写入 {result["filename"]}')
-                inc_status, inc_detail = backup_service.evaluate_backup_completeness(result)
-                await backup_service.write_backup_record(
-                    db, record_type='incremental', trigger_type='manual',
-                    filename=result['filename'], size=result.get('size'),
-                    table_count=result.get('table_count'),
-                    total_rows=result.get('total_rows'),
-                    operator=operator,
-                    remark=backup_service.compose_remark(remark or '手动增量备份', inc_detail),
-                    status=inc_status,
-                    encrypted=result.get('encrypted', False),
-                    manifest_summary={
-                        'base_timestamp': result.get('base_timestamp'),
-                        'checksums': result.get('checksums'),
-                        'failed_tables': result.get('failed_tables') or [],
-                    },
-                )
-            else:
-                logger.info('手动增量备份: 无变更数据')
-
-        result_out = {
-            'status': 'ok' if inc_status == backup_service.STATUS_SUCCESS else 'partial',
-            'backup_status': inc_status,
-            'type': 'incremental',
-            'result': result,
-            'failed_tables': result.get('failed_tables') or [],
-        }
-        await complete_progress(task_id, result=result_out)
-        logger.info(f'手动增量备份完成: {result}')
-        return result_out
-
-    except Exception as e:  # defensive: background task must log/alert failure instead of propagating
-        error_msg = f'手动增量备份失败: {e}'
-        logger.error(error_msg)
-        await fail_progress(task_id, error=str(e))
-        await _send_backup_alert(
-            task_name='manual_incremental_backup',
-            error=error_msg,
-            task_type='backup',
-            severity='error',
-            additional_info={
-                'start_time': start_time.isoformat(),
-                'end_time': datetime.now().isoformat(),
-                'retry_count': job_try - 1,
-                'exception_type': type(e).__name__,
-            },
-        )
-        if job_try < _MAX_TRIES:
-            raise e
-        return {'status': 'error', 'error': str(e)}
-
-
 async def _send_backup_alert(task_name: str, error: str, task_type: str = 'backup', severity: str = 'error', additional_info: dict | None = None):
     """发送备份告警"""
     try:
@@ -478,80 +389,6 @@ async def _do_auto_backup_with_metrics(backup_type: str):
         raise e
 
 
-async def auto_incremental_backup_task(ctx):
-    """自动增量备份（带告警和监控）"""
-    job_try = ctx.get('job_try', 1)
-    logger.info('开始执行自动增量备份...')
-    start_time = datetime.now()
-
-    try:
-        # 使用指数退避重试机制
-        from fastapi_app.services.backup.metrics.alert_service import alert_service
-        success, result = await alert_service.retry_with_backoff(
-            _do_auto_backup_with_metrics,
-            'incremental',
-            task_name='auto_incremental_backup'
-        )
-
-        if success:
-            logger.info(f'自动增量备份完成: {result}')
-
-            # 发送成功通知（如果配置了）
-            import os
-            if os.environ.get('BACKUP_NOTIFY_SUCCESS', 'false').lower() == 'true':
-                await _send_backup_alert(
-                    task_name='auto_incremental_backup',
-                    error=f'自动增量备份成功: {result.get("filename", "未知文件")}',
-                    task_type='backup',
-                    severity='info',
-                    additional_info=result
-                )
-
-            return result
-        else:
-            error_msg = f'自动增量备份失败: {result!s}'
-            logger.error(error_msg)
-
-            # 发送失败告警
-            await _send_backup_alert(
-                task_name='auto_incremental_backup',
-                error=error_msg,
-                task_type='backup',
-                severity='error',
-                additional_info={
-                    'start_time': start_time.isoformat(),
-                    'end_time': datetime.now().isoformat(),
-                    'retry_count': job_try - 1
-                }
-            )
-
-            if job_try < _MAX_TRIES:
-                raise result if isinstance(result, BaseException) else RuntimeError(str(result))
-            return {'status': 'error', 'error': str(result)}
-
-    except Exception as e:  # defensive: background task must log/alert failure instead of propagating
-        error_msg = f'自动增量备份失败: {e}'
-        logger.error(error_msg)
-
-        # 发送异常告警
-        await _send_backup_alert(
-            task_name='auto_incremental_backup',
-            error=error_msg,
-            task_type='backup',
-            severity='error',
-            additional_info={
-                'start_time': start_time.isoformat(),
-                'end_time': datetime.now().isoformat(),
-                'retry_count': job_try - 1,
-                'exception_type': type(e).__name__
-            }
-        )
-
-        if job_try < _MAX_TRIES:
-            raise e
-        return {'status': 'error', 'error': str(e)}
-
-
 async def backup_integrity_check_task(ctx):
     """备份完整性巡检（带告警）"""
     job_try = ctx.get('job_try', 1)
@@ -722,28 +559,7 @@ async def _do_auto_backup(backup_type: str) -> dict:
                 'total_rows': manifest.get('total_rows'),
                 'failed_tables': manifest.get('failed_tables') or [],
             }
-        else:
-            result = await backup_service.create_incremental_backup(db, dummy_user, '自动增量备份')
-            # S4：增量缺表（failed_tables）必须落到记录状态上
-            inc_status, inc_detail = backup_service.STATUS_SUCCESS, ''
-            if result.get('filename'):
-                inc_status, inc_detail = backup_service.evaluate_backup_completeness(result)
-                await backup_service.write_backup_record(
-                    db, record_type='incremental', trigger_type='auto',
-                    filename=result['filename'], size=result.get('size'),
-                    table_count=result.get('table_count'),
-                    total_rows=result.get('total_rows'),
-                    operator='system_auto',
-                    remark=backup_service.compose_remark('自动增量备份', inc_detail),
-                    status=inc_status,
-                )
-            return {
-                'status': 'ok' if inc_status == backup_service.STATUS_SUCCESS else 'partial',
-                'backup_status': inc_status,
-                'type': 'incremental',
-                'result': result,
-                'failed_tables': result.get('failed_tables') or [],
-            }
+        raise ValueError(f'仅支持 daily 自动备份，收到: {backup_type}')
 
 
 async def _do_integrity_check() -> dict:
@@ -766,7 +582,7 @@ async def _do_integrity_check() -> dict:
 
     backup_files = sorted(
         [f for f in backup_service.BACKUP_DIR.iterdir()
-         if f.is_file() and (f.name.startswith('erp_backup_') or f.name.startswith('erp_auto_') or f.name.startswith('erp_incremental_'))
+         if f.is_file() and (f.name.startswith('erp_backup_') or f.name.startswith('erp_auto_') or f.name.startswith('erp_incremental_'))  # erp_incremental_: 历史（全量-only 迁移前）残留，仍需识别
          and (f.name.endswith('.zip') or f.name.endswith('.zip.enc'))],
         key=lambda f: f.stat().st_mtime, reverse=True
     )

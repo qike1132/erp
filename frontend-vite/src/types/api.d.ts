@@ -150,11 +150,6 @@ export interface BackupImportResponse {
   restored_at?: string
 }
 
-export interface BackupIncrementalRequest {
-  remark?: string
-  since?: string
-}
-
 export interface BackupIntegrityCheckResponse {
   success?: boolean
   checked_at: string
@@ -1190,30 +1185,6 @@ export interface HubeiProductSearchItem {
   name: string
   barcode?: string | null
   factory?: string | null
-}
-
-export interface IncrementalBackupResponse {
-  success?: boolean
-  filename?: string | null
-  size?: number
-  format?: string
-  table_count?: number
-  total_rows?: number
-  exported_at?: string | null
-  base_timestamp?: string | null
-  remark?: string
-  message?: string | null
-}
-
-export interface IncrementalRestoreResponse {
-  success?: boolean
-  format?: string
-  filename?: string
-  total_upserted?: number
-  results?: Record<string, unknown>
-  errors?: Array<string>
-  pre_restore_backup?: Record<string, unknown> | null
-  restored_at?: string
 }
 
 export interface IntegrityCheckResponse {

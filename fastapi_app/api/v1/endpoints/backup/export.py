@@ -3,7 +3,6 @@
 从原 backup.py 拆分，URL / schema / 权限码保持不变：
 - GET  /export                  一键备份全部数据（磁盘流式返回）
 - POST /save                    一键备份到服务器默认路径
-- POST /save-incremental        增量备份
 - GET  /export-info             获取备份文件信息（分片数量等）
 - GET  /export-chunk/{i}        下载备份文件的指定分片
 - GET  /export-enhanced         支持 Range 请求头的增强备份导出
@@ -37,7 +36,6 @@ from fastapi_app.schemas.backup import (
     BackupChunkInfo,
     BackupChunkResponse,
     BackupSaveResponse,
-    IncrementalBackupResponse,
 )
 from fastapi_app.services import backup as backup_service
 from fastapi_app.services.backup import BackupError
@@ -336,25 +334,6 @@ async def save_backup_to_server(
         'includes': manifest.get('includes', {}), 'remark': remark,
         'backup_status': export_status,
         'failed_tables': manifest.get('failed_tables') or []})
-
-
-# ---------------------------------------------------------------------------
-# POST /save-incremental
-# ---------------------------------------------------------------------------
-@router.post('/save-incremental', response_model=IncrementalBackupResponse)
-async def save_incremental_backup(
-    remark: str = '',
-    since: str = Query(''),
-    user: User = Depends(require_backup_permission('save_incremental_backup')),
-    db: AsyncSession = Depends(get_async_db),
-):
-    """增量备份"""
-    try:
-        result = await backup_service.create_incremental_backup(db, user, remark, since)
-    except (BackupError, RuntimeError, OSError) as e:
-        logger.error(f'增量备份失败: {e}')
-        raise HTTPException(status_code=500, detail='增量备份失败，请查看服务器日志') from e
-    return result
 
 
 # ---------------------------------------------------------------------------

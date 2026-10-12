@@ -4,9 +4,6 @@
       <button class="ba-btn ba-btn-primary" :disabled="busy || !!task?.taskId" @click="handleFull">
         一键全量备份
       </button>
-      <button class="ba-btn ba-btn-outline" :disabled="busy || !!task?.taskId" @click="onIncremental">
-        增量备份
-      </button>
       <button class="ba-adv-toggle" @click="advancedOpen = !advancedOpen">
         {{ advancedOpen ? '收起选项' : '高级选项' }}
       </button>
@@ -70,7 +67,6 @@ const props = defineProps<{
   busy: boolean
   task: BackupTaskState | null
   onFull: (opts?: FullBackupOptions) => void
-  onIncremental: () => void
   noTaskHint?: string
 }>()
 

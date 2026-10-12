@@ -157,6 +157,39 @@ describe('PurchaseView auto-refresh orders filter (regression for BUG-PURCHASE-C
   })
 })
 
+describe('待生产订单 tab 徽标计数（回归：漏算「待生成」行导致与表格行数对不上）', () => {
+  beforeEach(() => {
+    mocks.ordersMock.mockReset()
+    mocks.unprocessedMock.mockReset()
+    // 表格同表并列渲染「待生成行 + 待生产行」：1 张待生产采购单 + 8 行待生成 = 9 行
+    mocks.ordersMock.mockResolvedValue({
+      orders: [{ id: 1 }], total: 1, pages: 1, current_page: 1,
+    })
+    mocks.unprocessedMock.mockResolvedValue({
+      orders: [{ composite_id: 'o-68940' }], total: 8, pages: 1, current_page: 1,
+    })
+  })
+
+  it('徽标 = 待生产采购单数 + 待生成行数', async () => {
+    const wrapper = mount(PurchaseView, { global: { stubs } })
+    await flushPromises()
+    await nextTick()
+
+    const badge = wrapper.find('.pc-tab-badge')
+    expect(badge.exists(), 'tab 徽标应存在').toBe(true)
+    expect(badge.text()).toBe('9')
+  })
+
+  it('右上角不再渲染「N 个订单」标签', async () => {
+    const wrapper = mount(PurchaseView, { global: { stubs } })
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.find('.count-badge').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('个订单')
+  })
+})
+
 describe('ActiveOrdersPanel 错误态（迭代修复：加载失败不再误显空态/永久加载中）', () => {
   const panelStubs = {
     UiSpinner: { template: '<div />' },

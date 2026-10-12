@@ -8,9 +8,8 @@ import json
 import logging
 import shutil
 import zipfile
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
-from typing import TypedDict
 
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,8 +18,6 @@ from ._constants import (
     _MAX_PRE_RESTORE_BACKUPS,
     BACKUP_DIR,
     PRE_RESTORE_DIR,
-    retention_count,
-    retention_days,
 )
 from .crypto import sha256_bytes, sha256_file
 from .exceptions import BackupFileError
@@ -40,17 +37,6 @@ _BACKUP_FILE_SUFFIXES = ('.zip', '.json', '.zip.enc')
 # 文件名时间戳格式：'YYYYMMDD_HHMMSS'（见 normalize_backup_ts 与 _extract_timestamp）
 _TS_FILENAME_LEN = 15
 _TS_FILENAME_SEP_INDEX = 8
-
-
-class _BackupRecord(TypedDict):
-    """cleanup_old_backups 内部的备份条目（纯类型层声明，运行期仍是普通 dict）。"""
-
-    path: Path
-    name: str
-    mtime: datetime
-    size: int
-    is_incremental: bool
-    base_timestamp: str | None
 
 
 def _is_backup_file(f: Path) -> bool:  # log-context: internal helper 无请求上下文
@@ -634,124 +620,6 @@ def _delete_backup_sidecars(filepath: Path, errors: list[str] | None = None) -> 
             if errors is not None:
                 errors.append(f'伴随文件清理失败 {sidecar.name}: {e}')
     return removed
-
-
-def _retention_thresholds() -> tuple[int, int]:
-    """运行时读取保留策略阈值 (days, count) —— env 单一真源，调用时求值。"""
-    return retention_days(), retention_count()
-
-
-def cleanup_old_backups() -> dict:  # log-context: internal helper 无请求上下文
-    """清理过期备份文件
-
-    策略（阈值来自 env 单一真源，见 _constants.retention_days / retention_count）：
-    1. 删除超过 BACKUP_RETENTION_DAYS 天的备份
-    2. 如果总数超过 BACKUP_RETENTION_COUNT，删除最旧的
-    3. 增量备份依赖其基础全量备份，删除全量备份时级联删除依赖它的增量备份
-
-    删除主文件时同步删除 .meta / .record 伴随文件（含 .zip.enc.meta）。
-
-    Returns: dict with deleted_count, kept_count, errors（含伴随文件清理失败，F-05）
-    """
-    # 阈值运行时求值（与 policy_service / cleanup 共用 env 单一真源；monkeypatch.setenv 亦生效）
-    retention_days_value, retention_count_value = _retention_thresholds()
-
-    if not BACKUP_DIR.exists():
-        return {'deleted_count': 0, 'kept_count': 0, 'errors': []}
-
-    now = datetime.now()
-    cutoff = now - timedelta(days=retention_days_value)
-    deleted = []
-    errors: list[str] = []
-
-    # 收集所有备份文件及其元数据
-    backups: list[_BackupRecord] = []
-    for f in BACKUP_DIR.iterdir():
-        if not f.is_file():
-            continue
-        if not ((f.name.startswith('erp_backup_') or f.name.startswith('erp_auto_') or f.name.startswith('erp_incremental_'))
-                and (f.name.endswith('.zip') or f.name.endswith('.json') or f.name.endswith('.zip.enc'))):
-            continue
-        mtime = _backup_created_time(f)
-        size = f.stat().st_size
-        is_incremental = 'incremental' in f.name
-        base_timestamp = None
-
-        # 读取增量备份的基础时间戳
-        if is_incremental and f.name.endswith('.zip'):
-            try:
-                with zipfile.ZipFile(f, 'r') as zf:
-                    if 'manifest.json' in zf.namelist():
-                        manifest = json.loads(zf.read('manifest.json'))
-                        base_timestamp = manifest.get('base_timestamp')
-            except (OSError, zipfile.BadZipFile, ValueError):
-                pass  # defensive: 异常静默处理,不影响主流程
-
-        backups.append({
-            'path': f, 'name': f.name, 'mtime': mtime, 'size': size,
-            'is_incremental': is_incremental, 'base_timestamp': base_timestamp,
-        })
-
-    # 按时间排序（最新的在前）
-    backups.sort(key=lambda b: b['mtime'], reverse=True)
-
-    # 标记需要删除的文件
-    to_delete = set()
-
-    # 策略1: 删除超过保留天数的
-    for b in backups:
-        if b['mtime'] < cutoff:
-            to_delete.add(b['name'])
-
-    # 策略2: 超过最大数量的
-    if len(backups) - len(to_delete) > retention_count_value:
-        # 从最旧的开始删除
-        for b in reversed(backups):
-            if b['name'] in to_delete:
-                continue
-            if len(backups) - len(to_delete) <= retention_count_value:
-                break
-            to_delete.add(b['name'])
-
-    # 策略3: 级联删除 - 删除全量备份时，删除依赖它的增量备份
-    full_backup_timestamps = set()
-    for b in backups:
-        if not b['is_incremental'] and b['name'] not in to_delete:
-            # 提取全量备份的时间戳
-            try:
-                ts_str = b['name'].replace('erp_backup_', '').replace('erp_auto_daily_', '').replace('.zip', '').replace('.json', '').replace('.enc', '')
-                full_backup_timestamps.add(ts_str)
-            except (ValueError, IndexError):
-                pass  # defensive: 异常静默处理,不影响主流程
-
-    # 检查增量备份的基础全量备份是否还在
-    for b in backups:
-        if b['is_incremental'] and (base_timestamp := b['base_timestamp']):
-            # 文件名时间戳 'YYYYMMDD_HHMMSS' 与 manifest 'YYYY-MM-DD HH:MM:SS'
-            # 格式不一致，直接字符串比较恒为 False，会把所有增量误判为"无基座"而删；
-            # 必须先归一化再比较（数据丢失根因）。
-            normalized_base = normalize_backup_ts(base_timestamp)
-            if not any(normalize_backup_ts(ts) <= normalized_base for ts in full_backup_timestamps):
-                to_delete.add(b['name'])
-
-    # 执行删除
-    for name in to_delete:
-        filepath = BACKUP_DIR / name
-        try:
-            filepath.unlink()
-            deleted.append(name)
-            logger.info(f'已清理过期备份: {name}')
-            _delete_backup_sidecars(filepath, errors)
-        except OSError as e:
-            errors.append(f'{name}: {e}')
-            logger.warning(f'清理备份失败: {name}: {e}')
-
-    return {
-        'deleted_count': len(deleted),
-        'kept_count': len(backups) - len(deleted),
-        'deleted_files': deleted,
-        'errors': errors,
-    }
 
 
 async def sync_backup_records() -> dict:

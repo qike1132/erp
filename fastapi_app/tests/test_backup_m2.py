@@ -35,7 +35,7 @@ class TestCronMatches:
         assert cron_matches('0 2 * * *', __import__('datetime').datetime(2026, 8, 22, 2, 0)) is True
         assert cron_matches('0 2 * * *', __import__('datetime').datetime(2026, 8, 22, 3, 0)) is False
 
-    def test_incremental_5shift(self):
+    def test_cron_5shift(self):
         from datetime import datetime
         for h in (6, 10, 14, 18, 22):
             assert cron_matches('0 6,10,14,18,22 * * *', datetime(2026, 8, 22, h, 0)) is True, h

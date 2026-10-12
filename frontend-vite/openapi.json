@@ -16863,60 +16863,6 @@
         }
       }
     },
-    "/api/v1/backup/save-incremental": {
-      "post": {
-        "tags": [
-          "数据备份"
-        ],
-        "summary": "Save Incremental Backup",
-        "description": "增量备份",
-        "operationId": "save_incremental_backup_api_v1_backup_save_incremental_post",
-        "parameters": [
-          {
-            "name": "remark",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "default": "",
-              "title": "Remark"
-            }
-          },
-          {
-            "name": "since",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "default": "",
-              "title": "Since"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IncrementalBackupResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/v1/backup/export-info": {
       "get": {
         "tags": [
@@ -17345,59 +17291,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BackupImportResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/backup/restore-incremental/{filename}": {
-      "post": {
-        "tags": [
-          "数据备份"
-        ],
-        "summary": "Restore Incremental Backup",
-        "description": "从增量备份恢复",
-        "operationId": "restore_incremental_backup_api_v1_backup_restore_incremental__filename__post",
-        "parameters": [
-          {
-            "name": "filename",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Filename"
-            }
-          },
-          {
-            "name": "confirm",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "boolean",
-              "default": false,
-              "title": "Confirm"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IncrementalRestoreResponse"
                 }
               }
             }
@@ -17938,48 +17831,6 @@
               }
             }
           }
-        },
-        "responses": {
-          "202": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BackupTaskTriggerOut"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/backup/incremental": {
-      "post": {
-        "tags": [
-          "数据备份"
-        ],
-        "summary": "Trigger Incremental Backup",
-        "description": "手动增量备份(异步)。\n\n参数:\n- remark: 备份备注\n- since: 增量基线时间戳,为空时自动取上次备份时间\n\n返回 202 + task_id,前端轮询 GET /progress/{task_id} 获取进度。\n权限:backup_create",
-        "operationId": "trigger_incremental_backup_api_v1_backup_incremental_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/BackupIncrementalRequest"
-              }
-            }
-          },
-          "required": true
         },
         "responses": {
           "202": {
@@ -20755,26 +20606,6 @@
         "type": "object",
         "title": "BackupImportResponse"
       },
-      "BackupIncrementalRequest": {
-        "properties": {
-          "remark": {
-            "type": "string",
-            "maxLength": 200,
-            "title": "Remark",
-            "description": "备份备注",
-            "default": ""
-          },
-          "since": {
-            "type": "string",
-            "title": "Since",
-            "description": "增量基线时间戳,为空时自动取上次备份时间",
-            "default": ""
-          }
-        },
-        "type": "object",
-        "title": "BackupIncrementalRequest",
-        "description": "增量备份触发请求"
-      },
       "BackupIntegrityCheckResponse": {
         "properties": {
           "success": {
@@ -21103,7 +20934,7 @@
           "type": {
             "type": "string",
             "title": "Type",
-            "description": "备份类型: full/incremental/restore"
+            "description": "备份类型: full/restore"
           },
           "trigger_type": {
             "type": "string",
@@ -21515,8 +21346,8 @@
           "task_type": {
             "type": "string",
             "title": "Task Type",
-            "description": "full/incremental/integrity_check/cleanup",
-            "default": "incremental"
+            "description": "full/integrity_check/cleanup",
+            "default": "full"
           },
           "cron_expr": {
             "type": "string",
@@ -26181,143 +26012,6 @@
         ],
         "title": "HubeiProductSearchItem",
         "description": "湖北工厂 SKU 搜索建议项（工序预设页搜索框数据源）"
-      },
-      "IncrementalBackupResponse": {
-        "properties": {
-          "success": {
-            "type": "boolean",
-            "title": "Success",
-            "default": true
-          },
-          "filename": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Filename"
-          },
-          "size": {
-            "type": "integer",
-            "title": "Size",
-            "default": 0
-          },
-          "format": {
-            "type": "string",
-            "title": "Format",
-            "default": "incremental"
-          },
-          "table_count": {
-            "type": "integer",
-            "title": "Table Count",
-            "default": 0
-          },
-          "total_rows": {
-            "type": "integer",
-            "title": "Total Rows",
-            "default": 0
-          },
-          "exported_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Exported At"
-          },
-          "base_timestamp": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Base Timestamp"
-          },
-          "remark": {
-            "type": "string",
-            "title": "Remark",
-            "default": ""
-          },
-          "message": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Message"
-          }
-        },
-        "type": "object",
-        "title": "IncrementalBackupResponse"
-      },
-      "IncrementalRestoreResponse": {
-        "properties": {
-          "success": {
-            "type": "boolean",
-            "title": "Success",
-            "default": true
-          },
-          "format": {
-            "type": "string",
-            "title": "Format",
-            "default": "incremental"
-          },
-          "filename": {
-            "type": "string",
-            "title": "Filename",
-            "default": ""
-          },
-          "total_upserted": {
-            "type": "integer",
-            "title": "Total Upserted",
-            "default": 0
-          },
-          "results": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Results",
-            "default": {}
-          },
-          "errors": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Errors",
-            "default": []
-          },
-          "pre_restore_backup": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Pre Restore Backup"
-          },
-          "restored_at": {
-            "type": "string",
-            "title": "Restored At",
-            "default": ""
-          }
-        },
-        "type": "object",
-        "title": "IncrementalRestoreResponse"
       },
       "IntegrityCheckResponse": {
         "properties": {

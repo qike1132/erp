@@ -24,8 +24,7 @@
           :busy="busy"
           :task="taskState"
           :on-full="triggerFull"
-          :on-incremental="triggerIncremental"
-          no-task-hint="选择全量或增量，同一时刻至多执行一个任务"
+          no-task-hint="同一时刻至多执行一个任务"
         />
       </section>
 
@@ -210,20 +209,6 @@ async function triggerFull(opts?: { password?: string; tables?: string[]; exclud
     toast.error(errText(e, '触发全量备份失败，请稍后重试'))
   }
 }
-async function triggerIncremental() {
-  busy.value = true
-  taskKind.value = '备份'
-  try {
-    const res = await backupApi.triggerIncremental({ remark: '手动增量备份' })
-    activeTaskId.value = res.task_id
-    toast.info('增量备份任务已触发')
-  } catch (e) {
-    busy.value = false
-    activeTaskId.value = null
-    toast.error(errText(e, '触发增量备份失败，请稍后重试'))
-  }
-}
-
 async function saveSchedule(data: { name: string; task_type: string; cron_expr: string; enabled: boolean }) {
   saving.value = true
   try {
@@ -245,11 +230,12 @@ async function deleteSchedule(id: number) {
 }
 async function triggerScheduleNow() {
   const first = schedules.value.find((s) => s.enabled)
-  if (first?.name) {
-    await backupApi.triggerSchedule(first.name)
-  } else {
-    await triggerIncremental()
+  if (!first?.name) {
+    // 无启用的定时任务时不回退触发任何备份（全量属重操作，静默发起会让用户意外）
+    toast.info('当前没有启用的定时任务')
+    return
   }
+  await backupApi.triggerSchedule(first.name)
 }
 
 async function validatePath(path: string) {

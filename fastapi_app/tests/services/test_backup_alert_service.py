@@ -357,7 +357,7 @@ class TestBackupAlertService:
             ),
             MagicMock(
                 id=2,
-                type='incremental',
+                type='auto',
                 filename='backup2.zip',
                 error_message='WARNING: 备份超时',
                 created_at=datetime.now()
@@ -387,7 +387,7 @@ class TestBackupAlertService:
 
             assert stats['total_failures'] == 3
             assert stats['by_task_type']['full'] == 2
-            assert stats['by_task_type']['incremental'] == 1
+            assert stats['by_task_type']['auto'] == 1
             assert stats['by_severity']['error'] == 1
             assert stats['by_severity']['warning'] == 1
             assert stats['by_severity']['critical'] == 1

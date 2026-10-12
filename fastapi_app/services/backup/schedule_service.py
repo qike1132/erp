@@ -1,7 +1,7 @@
 """备份定时调度服务(M2)。
 
 将 ARQ 硬编码 cron 迁移到 backup_schedule 表，由 scheduler_poller 每 5 分钟读取本表，
-按 cron 表达式将到期任务入队。支持 full/incremental/integrity_check/cleanup 四类，
+按 cron 表达式将到期任务入队。支持 full/integrity_check/cleanup 等类，
 与现有 auto_* 任务函数一一映射，保证迁移后定时行为与现状等价。
 """
 from __future__ import annotations
@@ -22,7 +22,6 @@ logger = logging.getLogger(__name__)
 # 任务类型 → ARQ 任务函数名（与 arq_app.WorkerSettings.functions 对齐）
 TASK_TYPE_TO_FUNC: dict[str, str] = {
     'full': 'auto_daily_backup_task',
-    'incremental': 'auto_incremental_backup_task',
     'integrity_check': 'backup_integrity_check_task',
     'cleanup': 'backup_cleanup_task',
     # P1-4: 灾备演练月度例行化（迁移 037 种子 '30 3 1 * *'）

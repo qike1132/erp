@@ -153,7 +153,7 @@ class TestBackupMetricsService:
             }
 
             metrics = await metrics_service.collect_backup_metrics(
-                backup_type='incremental',
+                backup_type='auto',
                 start_time=start_time,
                 end_time=end_time,
                 backup_size=backup_size,
@@ -162,7 +162,7 @@ class TestBackupMetricsService:
                 additional_metrics=None
             )
 
-            assert metrics['backup_type'] == 'incremental'
+            assert metrics['backup_type'] == 'auto'
             assert metrics['success'] is False
             assert metrics['error_message'] == '备份失败：磁盘空间不足'
             assert metrics['compression_ratio'] is None  # 没有原始大小
@@ -315,7 +315,7 @@ class TestBackupMetricsService:
             success_record.size = 1024 * 1024 * 100  # 100MB
 
             failed_record = MagicMock()
-            failed_record.type = 'incremental'
+            failed_record.type = 'auto'
             failed_record.status = 'failed'
             failed_record.duration_seconds = 150.2
             failed_record.size = 1024 * 1024 * 50  # 50MB
@@ -352,13 +352,13 @@ class TestBackupMetricsService:
 
             # 检查类型统计
             assert 'full' in summary['type_stats']
-            assert 'incremental' in summary['type_stats']
+            assert 'auto' in summary['type_stats']
             assert summary['type_stats']['full']['count'] == 2
             assert summary['type_stats']['full']['success'] == 2
             assert summary['type_stats']['full']['failed'] == 0
-            assert summary['type_stats']['incremental']['count'] == 1
-            assert summary['type_stats']['incremental']['success'] == 0
-            assert summary['type_stats']['incremental']['failed'] == 1
+            assert summary['type_stats']['auto']['count'] == 1
+            assert summary['type_stats']['auto']['success'] == 0
+            assert summary['type_stats']['auto']['failed'] == 1
 
     @pytest.mark.asyncio
     async def test_get_performance_summary_by_type(self, metrics_service, mock_backup_record):
