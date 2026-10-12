@@ -26,8 +26,3 @@ export const ROW_ACTION_TABS: readonly RowActionTab[] = [
   { resource: 'deduction', label: '备货抵扣流水' },
   { resource: 'return', label: '退货流水' },
 ]
-
-/** 权限码前缀 → 所属 TAB（不在表内返回 undefined） */
-export function rowActionTabOf(resource: string): RowActionTab | undefined {
-  return ROW_ACTION_TABS.find((t) => t.resource === resource)
-}
