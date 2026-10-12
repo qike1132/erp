@@ -4,7 +4,7 @@ M1 备份任务化测试(TECHNICAL_PLAN.md v2 §7 M1)
 覆盖:
 1. settings_service.validate_path:路径校验(绝对路径/非法字符/穿越/黑名单/可写/空间)
 2. settings_service.get_settings / save_settings:读写与回退
-3. 端点 POST /full、/incremental:202 入队 + 409 互斥
+3. 端点 POST /full:202 入队 + 409 互斥
 4. 端点 GET/POST /settings、POST /settings/validate-path
 
 注意:本文件独立运行(conftest 的 client fixture 存在 event loop 污染,见项目规则)。
@@ -172,7 +172,7 @@ class TestSettingsService:
 
 
 # ===========================================================================
-# 3. 端点:POST /full /incremental(202 + 409)
+# 3. 端点:POST /full(202 + 409)
 # ===========================================================================
 
 @pytest_asyncio.fixture
@@ -215,7 +215,7 @@ async def client():
 
 
 class TestTriggerEndpoints:
-    """端点 /full、/incremental 的入队与互斥行为。
+    """端点 /full 的入队与互斥行为。
 
     注意：端点在入队前会调用 _check_worker_online()（ARQ Worker 在线预检），
     Worker 不在线时返回 503 WORKER_OFFLINE——这是**有意的正确设计**，用于避免
@@ -256,24 +256,6 @@ class TestTriggerEndpoints:
         assert not any(k.startswith('_') for k in call_kwargs)
         assert call_kwargs['remark'] == '手动测试'
         assert call_kwargs['task_id'] == body['task_id']
-
-    @pytest.mark.asyncio
-    async def test_incremental_returns_202(self, client):
-        fake_pool = AsyncMock()
-        with patch(
-            'fastapi_app.core.arq_app.get_arq_pool',
-            new=AsyncMock(return_value=fake_pool),
-        ), patch(
-            'fastapi_app.api.v1.endpoints.backup.actions._check_task_mutex',
-            new=AsyncMock(),
-        ):
-            resp = await client.post('/api/v1/backup/incremental', json={'since': '20260820_020000'})
-        assert resp.status_code == 202
-        body = resp.json()
-        assert body['task_id']
-        assert body['task_name'] == 'manual_incremental_backup_task'
-        call_kwargs = fake_pool.enqueue_job.call_args.kwargs
-        assert call_kwargs['since'] == '20260820_020000'
 
     @pytest.mark.asyncio
     async def test_full_returns_503_when_worker_offline(self, client):

@@ -19,7 +19,7 @@ class BackupSchedule(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False, comment='任务名称')
-    task_type: Mapped[str] = mapped_column(String(30), nullable=False, default='incremental', comment='任务类型: full/incremental/integrity_check/cleanup/disaster_recovery_test')
+    task_type: Mapped[str] = mapped_column(String(30), nullable=False, default='full', comment='任务类型: full/integrity_check/cleanup/disaster_recovery_test')
     cron_expr: Mapped[str] = mapped_column(String(100), nullable=False, comment='cron 表达式(如 0 2 * * * 或 0 6,10,14,18,22 * * *)')
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, comment='是否启用')
     last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), comment='上次执行时间')
