@@ -93,10 +93,16 @@ async def test_skips_file_being_written(svc, tmp_path, monkeypatch):
 
 
 async def test_incremental_files_are_not_scanned(svc, tmp_path, monkeypatch):
-    """残留的 erp_incremental_* 不扫、不动（Review Focus 3）。"""
+    """残留的 erp_incremental_* 不扫、不动（Review Focus 3）。
+
+    同时放一份保留期内的全量：total_files == 1 证明增量文件**没进扫描结果**，
+    而非"进了扫描但碰巧没删"（旧实现下仅断言没删是恒绿的）。
+    """
     inc = _make(tmp_path, 'erp_incremental_20260901_000000.zip', age_days=40)
+    _make(tmp_path, 'erp_auto_daily_20261011_000000.zip', age_days=1)
     monkeypatch.setenv(RETENTION_DAYS_ENV, '7')
-    await svc.smart_cleanup()
+    result = await svc.smart_cleanup()
+    assert result['summary']['total_files'] == 1, result
     assert inc.exists(), '增量文件不在扫描范围内，不应被删'
 
 

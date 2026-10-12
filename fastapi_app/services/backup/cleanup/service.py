@@ -20,7 +20,7 @@ import psutil
 from sqlalchemy.exc import SQLAlchemyError
 
 from fastapi_app.core.database import get_async_db_context
-from fastapi_app.services.backup._constants import BACKUP_DIR, retention_count, retention_days
+from fastapi_app.services.backup._constants import BACKUP_DIR, retention_days
 from fastapi_app.services.backup.metrics.alert_service import alert_service
 from fastapi_app.services.backup.records import _delete_backup_sidecars
 from fastapi_app.shared_models.backup_record import BackupRecord
@@ -59,22 +59,16 @@ class BackupCleanupService:
         self.cleanup_config = self._load_cleanup_config()
 
     def _load_cleanup_config(self) -> dict[str, Any]:
-        """清理配置：保留策略两项走 _constants 单源（运行时求值）。"""
+        """清理服务配置。
+
+        仅保留仍被读取的键。已**退役**、不再被清理规则读取的 env（删代码读的同时
+        已从 .env.example 移除，避免运维误信）：BACKUP_KEEP_MANUAL / BACKUP_KEEP_FAILED /
+        BACKUP_SMART_CLEANUP / BACKUP_TEST_SAMPLE_RATE / BACKUP_NOTIFY_CLEANUP /
+        BACKUP_TEST_BEFORE_DELETE。保留策略见 _retention_days()。
+        """
         import os
 
-        return {
-            'retention_days': retention_days(),
-            'retention_count': retention_count(),
-            'disk_space_threshold': float(os.environ.get('BACKUP_DISK_SPACE_THRESHOLD', '10.0')),
-            'smart_cleanup_enabled': os.environ.get('BACKUP_SMART_CLEANUP', 'true').lower() == 'true',
-            'keep_manual_backups': os.environ.get('BACKUP_KEEP_MANUAL', 'true').lower() == 'true',
-            'keep_failed_backups': os.environ.get('BACKUP_KEEP_FAILED', 'false').lower() == 'true',
-            'min_free_space_gb': float(os.environ.get('BACKUP_MIN_FREE_SPACE_GB', '10.0')),
-            'recovery_test_before_delete': os.environ.get('BACKUP_TEST_BEFORE_DELETE', 'false').lower() == 'true',
-            'test_sample_rate': float(os.environ.get('BACKUP_TEST_SAMPLE_RATE', '10.0')),
-            'notify_on_cleanup': os.environ.get('BACKUP_NOTIFY_CLEANUP', 'true').lower() == 'true',
-            'cleanup_report_days': int(os.environ.get('BACKUP_CLEANUP_REPORT_DAYS', '7')),
-        }
+        return {'cleanup_report_days': int(os.environ.get('BACKUP_CLEANUP_REPORT_DAYS', '7'))}
 
     def _retention_days(self) -> int:
         """保留天数：env 单一真源（BACKUP_RETENTION_DAYS，默认 7），运行时求值。"""
@@ -157,6 +151,11 @@ class BackupCleanupService:
 
         只在**会删光**时介入，从删除集里救回最新且未被判定损坏的一个
         （列表按 mtime 倒序，首个非 corrupted 即最新可还原者）。
+
+        注意：全量-only 扫描（_get_backup_files_info）已不产出 health_status，
+        `f.get('health_status') != 'corrupted'` 当前恒真、candidates 恒等于全部 ——
+        保留该过滤是**有意的防御分支**（未来若恢复健康检测可直接生效，
+        test_backup_cleanup_keep_floor.py 仍直测它）。
         """
         if any(f['name'] not in files_to_delete for f in backup_files):
             return files_to_delete
