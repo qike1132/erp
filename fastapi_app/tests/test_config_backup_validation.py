@@ -36,7 +36,6 @@ _OTHER_KEYS = (
     "BACKUP_ALERT_SMTP_HOST",
     "BACKUP_STORAGE_LOCATION",
     "BACKUP_FULL_CRON",
-    "BACKUP_INCREMENTAL_CRON",
 )
 
 
@@ -54,7 +53,6 @@ def backup_env(monkeypatch, tmp_path):
     monkeypatch.setenv("BACKUP_DIR", str(tmp_path))
     monkeypatch.setenv("BACKUP_STORAGE_LOCATION", str(tmp_path))
     monkeypatch.setenv("BACKUP_FULL_CRON", "0 2 * * *")
-    monkeypatch.setenv("BACKUP_INCREMENTAL_CRON", "0 */1 * * *")
     monkeypatch.setenv("METRICS_BEARER_TOKEN", "baseline-token")
     monkeypatch.setenv("BACKUP_ALERT_WEBHOOK_ENABLED", "false")
     monkeypatch.setenv("BACKUP_ALERT_EMAIL_ENABLED", "false")
@@ -177,10 +175,10 @@ class TestNonFatalWarnings:
         assert any("BACKUP_ALERT_SMTP_HOST" in w for w in warnings)
 
     def test_missing_cron_keys_warn_with_defaults(self, backup_env):
-        _set(backup_env, BACKUP_FULL_CRON="", BACKUP_INCREMENTAL_CRON="")
+        _set(backup_env, BACKUP_FULL_CRON="")
         warnings = _validate_production_backup_config(force=True)
         joined = " ".join(warnings)
-        assert "BACKUP_FULL_CRON" in joined and "BACKUP_INCREMENTAL_CRON" in joined
+        assert "BACKUP_FULL_CRON" in joined
 
 
 class TestPytestExemption:

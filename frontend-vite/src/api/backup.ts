@@ -111,10 +111,6 @@ export const backupApi = {
   },
   downloadByName: (filename: string) => download(`/backup/download/${encodeURIComponent(filename)}`, filename),
   deleteServerBackup: (filename: string) => del(`/backup/delete-by-name/${encodeURIComponent(filename)}`),
-  saveIncremental: (remark: string, since?: string) =>
-    post<{ success: boolean; filename?: string; total_rows?: number }>(`/backup/save-incremental?remark=${encodeURIComponent(remark)}${since ? '&since=' + encodeURIComponent(since) : ''}`),
-  restoreIncremental: (filename: string) =>
-    post<{ success: boolean; total_upserted?: number }>(`/backup/restore-incremental/${encodeURIComponent(filename)}?confirm=true`),
   asyncImport: (formData: FormData, opts?: RestoreOptions) => {
     const q = new URLSearchParams({ confirm: 'true' })
     if (opts?.confirmSensitive) q.set('confirm_sensitive', 'true')
@@ -136,9 +132,7 @@ export const backupApi = {
   // --- M4 六模块新增绑定（任务化 / 调度 / settings / 概览 / 差异预览） ---
   triggerFull: (payload?: { remark?: string; encrypt?: boolean; password?: string; tables?: string[]; exclude_tables?: string[] }) =>
     post<{ success: boolean; task_id: string; task_name: string; message?: string }>('/backup/full', payload ?? {}),
-  triggerIncremental: (payload?: { remark?: string; since?: string }) =>
-    post<{ success: boolean; task_id: string; task_name: string; message?: string }>('/backup/incremental', payload ?? {}),
-  getStatus: () => get<ApiResponse & { backup_dir?: string; total_backups?: number; last_full_backup?: unknown; disk_usage_percent?: number | null; last_incremental?: unknown }>('/backup/status'),
+  getStatus: () => get<ApiResponse & { backup_dir?: string; total_backups?: number; last_full_backup?: unknown; disk_usage_percent?: number | null }>('/backup/status'),
   listSchedules: () => get<{ success: boolean; tasks: BackupScheduleItem[] }>('/backup/schedule'),
   createSchedule: (body: { name: string; task_type: string; cron_expr: string; enabled?: boolean }) =>
     post<{ success: boolean; tasks: BackupScheduleItem[] }>('/backup/schedule', body),

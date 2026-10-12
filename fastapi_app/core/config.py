@@ -251,7 +251,6 @@ def _validate_production_backup_config(*, force: bool = False) -> list[str]:
     for _key, _default, _label in (
         ("BACKUP_STORAGE_LOCATION", "BACKUP_DIR", "备份存储位置"),
         ("BACKUP_FULL_CRON", "0 2 * * *", "全量备份计划"),
-        ("BACKUP_INCREMENTAL_CRON", "0 */1 * * *", "增量备份计划"),
     ):
         if not os.getenv(_key, "").strip():
             warnings.append(f"未显式声明 {_key}（{_label}），将使用默认值 {_default}")

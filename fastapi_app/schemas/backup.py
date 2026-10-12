@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 class BackupRecordOut(BaseModel):
     """备份记录响应"""
     id: int | None = None
-    type: str = Field(description="备份类型: full/incremental/restore")
+    type: str = Field(description="备份类型: full/restore")
     trigger_type: str = Field(description="触发方式: manual/auto")
     filename: str | None = None
     size: int | None = None
@@ -57,7 +57,7 @@ class BackupScheduleTask(BaseModel):
 class BackupScheduleCreate(BaseModel):
     """定时任务新增"""
     name: str = Field(description="任务名称")
-    task_type: str = Field(default='incremental', description="full/incremental/integrity_check/cleanup")
+    task_type: str = Field(default='full', description="full/integrity_check/cleanup")
     cron_expr: str = Field(description="cron 表达式(如 0 2 * * *)")
     enabled: bool = True
 

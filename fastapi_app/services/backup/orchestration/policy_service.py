@@ -3,8 +3,7 @@
 
 提供备份策略配置和管理功能：
 1. 全量备份频率配置
-2. 增量备份频率配置
-3. 保留策略（时间、数量）
+2. 保留策略（时间、数量）
 4. 加密设置
 5. 策略应用和执行
 """
@@ -53,9 +52,6 @@ class BackupPolicyService:
         return {
             # 全量备份频率（cron表达式）
             'full_backup_cron': os.environ.get('BACKUP_FULL_CRON', '0 2 * * *'),  # 每天凌晨2点
-
-            # 增量备份频率（cron表达式）
-            'incremental_backup_cron': os.environ.get('BACKUP_INCREMENTAL_CRON', '0 */1 * * *'),  # 每小时
 
             # 保留策略 - 时间（天）：env 单一真源 _constants.retention_days()（P0-2）
             'retention_days': retention_days(),
@@ -119,21 +115,10 @@ class BackupPolicyService:
                 'max_retries': 3,
                 'retry_delay_minutes': 5
             },
-            'incremental_backup': {
-                'enabled': True,
-                'schedule': self.policy_config['incremental_backup_cron'],
-                'description': '每小时增量备份',
-                'timeout_minutes': 10,
-                'max_retries': 2,
-                'retry_delay_minutes': 2
-            },
             'retention': {
                 'enabled': True,
                 'strategy': 'hybrid',  # hybrid/time/count
                 'retention_days': self.policy_config['retention_days'],
-                'retention_count': self.policy_config['retention_count'],
-                'keep_manual_backups': True,
-                'keep_failed_backups': False,
                 'min_free_space_gb': 10
             },
             'encryption': {
@@ -215,15 +200,14 @@ class BackupPolicyService:
         """验证策略数据"""
         try:
             # 检查必需字段
-            required_fields = ['policy_name', 'full_backup', 'incremental_backup', 'retention']
+            required_fields = ['policy_name', 'full_backup', 'retention']
             for field in required_fields:
                 if field not in policy_data:
                     return False, f"缺少必需字段: {field}"
 
             # 验证cron表达式
             cron_fields = [
-                ('full_backup.schedule', policy_data.get('full_backup', {}).get('schedule')),
-                ('incremental_backup.schedule', policy_data.get('incremental_backup', {}).get('schedule'))
+                ('full_backup.schedule', policy_data.get('full_backup', {}).get('schedule'))
             ]
 
             for field_name, cron_expr in cron_fields:
@@ -342,11 +326,6 @@ class BackupPolicyService:
             if full_cron:
                 self.policy_config['full_backup_cron'] = full_cron
 
-            # 更新增量备份cron
-            inc_cron = policy.get('incremental_backup', {}).get('schedule')
-            if inc_cron:
-                self.policy_config['incremental_backup_cron'] = inc_cron
-
             # 更新保留策略
             retention = policy.get('retention', {})
             if retention.get('strategy') in ['hybrid', 'time']:
@@ -388,8 +367,7 @@ class BackupPolicyService:
             policy = await self.get_current_policy()
 
             # 检查策略是否启用
-            if not policy.get('full_backup', {}).get('enabled', True) and \
-               not policy.get('incremental_backup', {}).get('enabled', True):
+            if not policy.get('full_backup', {}).get('enabled', True):
                 return {
                     'success': True,
                     'message': '备份策略已禁用',
@@ -485,18 +463,10 @@ class BackupPolicyService:
 
             # 检查计划任务有效性
             full_schedule = policy.get('full_backup', {}).get('schedule', '')
-            inc_schedule = policy.get('incremental_backup', {}).get('schedule', '')
 
             if full_schedule and not self._is_valid_cron(full_schedule):
                 checks['schedule_validity']['passed'] = False
                 checks['schedule_validity']['message'] = f'全量备份计划无效: {full_schedule}'
-
-            if inc_schedule and not self._is_valid_cron(inc_schedule):
-                checks['schedule_validity']['passed'] = False
-                if checks['schedule_validity']['message']:
-                    checks['schedule_validity']['message'] += f'; 增量备份计划无效: {inc_schedule}'
-                else:
-                    checks['schedule_validity']['message'] = f'增量备份计划无效: {inc_schedule}'
 
             if checks['schedule_validity']['passed']:
                 checks['schedule_validity']['message'] = '计划任务配置有效'
@@ -664,16 +634,6 @@ class BackupPolicyService:
                 full_result = await db.execute(full_stmt)
                 full_backups = full_result.scalars().all()
 
-                # 增量备份
-                inc_stmt = (
-                    select(BackupRecord)
-                    .where(BackupRecord.type == 'incremental')
-                    .where(BackupRecord.status == 'success')
-                    .where(BackupRecord.created_at >= cutoff_time)
-                )
-                inc_result = await db.execute(inc_stmt)
-                inc_backups = inc_result.scalars().all()
-
             # 检查磁盘空间
             import psutil
             storage_location = Path(policy.get('storage', {}).get('primary_location', str(BACKUP_DIR)))
@@ -688,10 +648,7 @@ class BackupPolicyService:
                     'full_backup_enabled': policy.get('full_backup', {}).get('enabled', True),
                     'full_backup_schedule': policy.get('full_backup', {}).get('schedule'),
                     'full_backups_last_24h': len(full_backups),
-                    'incremental_backup_enabled': policy.get('incremental_backup', {}).get('enabled', True),
-                    'incremental_backup_schedule': policy.get('incremental_backup', {}).get('schedule'),
-                    'incremental_backups_last_24h': len(inc_backups),
-                    'compliance': len(full_backups) > 0 and len(inc_backups) >= 20  # 至少1个全量，20个增量
+                    'compliance': len(full_backups) > 0  # 至少1个全量
                 },
                 'retention_policy': {
                     'enabled': policy.get('retention', {}).get('enabled', True),
