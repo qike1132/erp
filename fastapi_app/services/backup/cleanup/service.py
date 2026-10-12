@@ -1,13 +1,14 @@
-"""
-备份清理服务 - 优化版本
+"""备份清理服务 —— 全量-only，按天数保留。
 
-提供智能备份清理功能：
-1. 基于存储空间使用率
-2. 基于备份重要性（手动备份优先保留）
-3. 基于恢复测试结果（损坏备份优先删除）
-4. 生成清理报告和通知
-"""
+规则（唯一）：扫描 BACKUP_DIR 下全量文件（erp_backup_ 手动 / erp_auto_ 自动，
+后缀 .zip/.zip.enc），年龄（.meta.created_at，缺则 mtime）> BACKUP_RETENTION_DAYS
+天即删；手动与自动一视同仁；任何情况下至少保留最新 1 个。
 
+保留的既有方法（语义原样）：_execute_cleanup / _delete_backup_records /
+_save_cleanup_report / _cleanup_old_reports / _send_cleanup_notification /
+get_cleanup_history；__init__/_load_cleanup_config 为上述方法的配置依赖
+（cleanup_report_days 等），一并保留。
+"""
 import json
 import logging
 import time
@@ -21,19 +22,24 @@ from sqlalchemy.exc import SQLAlchemyError
 from fastapi_app.core.database import get_async_db_context
 from fastapi_app.services.backup._constants import BACKUP_DIR, retention_count, retention_days
 from fastapi_app.services.backup.metrics.alert_service import alert_service
-from fastapi_app.services.backup.records import _delete_backup_sidecars, normalize_backup_ts
-from fastapi_app.services.backup.verify.health_check_service import health_check_service
+from fastapi_app.services.backup.records import _delete_backup_sidecars
 from fastapi_app.shared_models.backup_record import BackupRecord
 
 logger = logging.getLogger(__name__)
 
+_FULL_PREFIXES = ('erp_backup_', 'erp_auto_')
+_FULL_SUFFIXES = ('.zip', '.zip.enc')
+_WRITE_GRACE_SECONDS = 120
+
+
+def ensure_backup_dir() -> None:  # log-context: internal helper 无请求上下文
+    """确保备份目录存在。**必须定义在本模块**（用本模块 BACKUP_DIR），
+    否则从 records 导入会让测试的 monkeypatch(BACKUP_DIR) 失效、在真实目录建目录。"""
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+
 
 def _backup_created_time(f: Path) -> datetime:  # log-context: internal helper 无请求上下文
-    """获取备份文件的真实创建时间。
-
-    优先读取伴随的 ``.meta`` 文件中的 ``created_at``（加密备份的 mtime 可能被刷新）；
-    无 meta 时回退到文件系统 mtime。
-    """
+    """备份文件真实创建时间：优先 .meta.created_at，缺则 mtime。"""
     meta_path = f.parent / (f.name + '.meta')
     if meta_path.exists():
         try:
@@ -47,506 +53,115 @@ def _backup_created_time(f: Path) -> datetime:  # log-context: internal helper �
 
 
 class BackupCleanupService:
-    """备份清理服务类"""
+    """备份清理服务：全量-only、按天数保留。"""
 
     def __init__(self):
         self.cleanup_config = self._load_cleanup_config()
 
     def _load_cleanup_config(self) -> dict[str, Any]:
-        """加载清理配置
-
-        保留策略两项（P0-2）不再自己读环境变量，改调 _constants 的单源函数 ——
-        此前这里、records 的硬编码 50 份、policy_service 各读一份，同一台机器上
-        「清理」按 50 份删而「策略校验」按 100 份算，删除量无法解释。
-        """
+        """清理配置：保留策略两项走 _constants 单源（运行时求值）。"""
         import os
 
         return {
-            # 保留策略 - 时间（天）：env 单一真源 BACKUP_RETENTION_DAYS（默认 30）
             'retention_days': retention_days(),
-
-            # 保留策略 - 数量：env 单一真源 BACKUP_RETENTION_COUNT（默认 100）
             'retention_count': retention_count(),
-
-            # 存储空间阈值（百分比）
             'disk_space_threshold': float(os.environ.get('BACKUP_DISK_SPACE_THRESHOLD', '10.0')),
-
-            # 智能清理设置
             'smart_cleanup_enabled': os.environ.get('BACKUP_SMART_CLEANUP', 'true').lower() == 'true',
             'keep_manual_backups': os.environ.get('BACKUP_KEEP_MANUAL', 'true').lower() == 'true',
             'keep_failed_backups': os.environ.get('BACKUP_KEEP_FAILED', 'false').lower() == 'true',
             'min_free_space_gb': float(os.environ.get('BACKUP_MIN_FREE_SPACE_GB', '10.0')),
-
-            # 恢复测试设置
             'recovery_test_before_delete': os.environ.get('BACKUP_TEST_BEFORE_DELETE', 'false').lower() == 'true',
             'test_sample_rate': float(os.environ.get('BACKUP_TEST_SAMPLE_RATE', '10.0')),
-
-            # 通知设置
             'notify_on_cleanup': os.environ.get('BACKUP_NOTIFY_CLEANUP', 'true').lower() == 'true',
             'cleanup_report_days': int(os.environ.get('BACKUP_CLEANUP_REPORT_DAYS', '7')),
         }
 
+    def _retention_days(self) -> int:
+        """保留天数：env 单一真源（BACKUP_RETENTION_DAYS，默认 7），运行时求值。"""
+        return retention_days()
+
     async def smart_cleanup(self) -> dict[str, Any]:
-        """
-        智能备份清理
-
-        Returns:
-            Dict[str, Any]: 清理结果
-        """
-        logger.info("开始智能备份清理...")
-
+        logger.info('开始备份清理（全量-only，保留 %d 天）...', self._retention_days())
         try:
-            # 检查磁盘空间
             disk_info = await self._check_disk_space()
-
-            # 获取所有备份文件信息
             backup_files = await self._get_backup_files_info()
-
             if not backup_files:
-                return {
-                    'success': True,
-                    'message': '没有找到备份文件',
-                    'cleaned_files': [],
-                    'kept_files': [],
-                    'disk_info': disk_info
-                }
+                return {'success': True, 'message': '没有找到备份文件',
+                        'cleaned_files': [], 'kept_files': [], 'disk_info': disk_info}
 
-            # 标记需要保留的文件
-            files_to_keep = await self._mark_files_to_keep(backup_files, disk_info)
+            cutoff = datetime.now() - timedelta(days=self._retention_days())
+            files_to_keep = {f['name'] for f in backup_files if f['mtime'] >= cutoff}
+            files_to_delete = {f['name'] for f in backup_files if f['name'] not in files_to_keep}
+            files_to_delete = self._enforce_keep_floor(backup_files, files_to_delete)
+            files_to_keep = {f['name'] for f in backup_files} - files_to_delete
 
-            # 标记需要删除的文件
-            files_to_delete = await self._mark_files_to_delete(backup_files, files_to_keep, disk_info)
-
-            # 执行删除
             cleanup_result = await self._execute_cleanup(files_to_delete)
-
-            # 生成报告
             report = await self._generate_cleanup_report(
-                backup_files, files_to_keep, files_to_delete, cleanup_result, disk_info
-            )
-
-            # 发送通知
-            if self.cleanup_config['notify_on_cleanup'] and cleanup_result['deleted_count'] > 0:
+                backup_files, files_to_keep, files_to_delete, cleanup_result, disk_info)
+            if cleanup_result['deleted_count'] > 0:
                 await self._send_cleanup_notification(report)
-
-            logger.info(f"智能清理完成: 删除 {cleanup_result['deleted_count']} 个文件，保留 {len(files_to_keep)} 个文件")
+            logger.info('备份清理完成: 删除 %d，保留 %d',
+                        cleanup_result['deleted_count'], len(files_to_keep))
             return report
-
         except Exception as e:  # defensive: cleanup task must report failure but not crash
-            logger.error(f"智能备份清理失败: {e}")
-
-            # 发送错误告警
-            await alert_service.send_alert(
-                task_name='smart_cleanup',
-                error=f"智能备份清理失败: {e!s}",
-                task_type='cleanup',
-                severity='error'
-            )
-
-            return {
-                'success': False,
-                'error': str(e),
-                'message': '智能备份清理失败'
-            }
+            logger.error('备份清理失败: %s', e)
+            await alert_service.send_alert(task_name='smart_cleanup',
+                                           error=f'备份清理失败: {e!s}',
+                                           task_type='cleanup', severity='error')
+            return {'success': False, 'error': str(e), 'message': '备份清理失败'}
 
     async def _check_disk_space(self) -> dict[str, Any]:
-        """检查磁盘空间"""
+        """磁盘信息（仅用于报告，不再驱动删除）。"""
         try:
             ensure_backup_dir()
             backup_path = BACKUP_DIR.resolve()
-
-            disk_usage = psutil.disk_usage(str(backup_path))
-
-            free_gb = disk_usage.free / (1024 ** 3)
-            total_gb = disk_usage.total / (1024 ** 3)
-            used_percent = disk_usage.percent
-            free_percent = 100 - used_percent
-
-            threshold = self.cleanup_config['disk_space_threshold']
-            min_free_gb = self.cleanup_config['min_free_space_gb']
-
-            needs_cleanup = free_percent < threshold or free_gb < min_free_gb
-
-            return {
-                'path': str(backup_path),
-                'total_gb': round(total_gb, 2),
-                'used_gb': round(disk_usage.used / (1024 ** 3), 2),
-                'free_gb': round(free_gb, 2),
-                'used_percent': round(used_percent, 2),
-                'free_percent': round(free_percent, 2),
-                'threshold_percent': threshold,
-                'min_free_gb': min_free_gb,
-                'needs_cleanup': needs_cleanup,
-                'cleanup_reason': '磁盘空间不足' if needs_cleanup else '磁盘空间充足'
-            }
-
+            u = psutil.disk_usage(str(backup_path))
+            free_gb = u.free / (1024 ** 3)
+            return {'path': str(backup_path), 'total_gb': round(u.total / 1024**3, 2),
+                    'used_gb': round(u.used / 1024**3, 2), 'free_gb': round(free_gb, 2),
+                    'used_percent': round(u.percent, 2),
+                    'free_percent': round(100 - u.percent, 2)}
         except OSError as e:
-            logger.error(f"检查磁盘空间失败: {e}")
-            return {
-                'error': str(e),
-                'needs_cleanup': True,
-                'cleanup_reason': f'磁盘空间检查失败: {e!s}'
-            }
+            logger.error('检查磁盘空间失败: %s', e)
+            return {'error': str(e)}
 
     async def _get_backup_files_info(self) -> list[dict[str, Any]]:
-        """获取所有备份文件信息"""
+        """扫描全量备份文件（不含增量）。"""
         try:
             ensure_backup_dir()
-
-            backup_files: list[dict[str, Any]] = []
-            for file_path in BACKUP_DIR.iterdir():
-                if not file_path.is_file():
+            out: list[dict[str, Any]] = []
+            for fp in BACKUP_DIR.iterdir():
+                if not fp.is_file():
                     continue
-
-                # 只处理备份文件
-                if not (file_path.name.startswith('erp_backup_') or
-                        file_path.name.startswith('erp_auto_') or
-                        file_path.name.startswith('erp_incremental_')) or \
-                   not (file_path.name.endswith('.zip') or file_path.name.endswith('.json') or file_path.name.endswith('.zip.enc')):
+                if not (fp.name.startswith(_FULL_PREFIXES) and fp.name.endswith(_FULL_SUFFIXES)):
                     continue
-
-                # 第十四轮：跳过「正在进行中」的备份 —— 备份任务写大 zip 可能耗时数十秒，
-                # cleanup 迭代到半截 zip 会误判 corrupted，进而可能被移出 keep 删除，
-                # 造成"最新备份被清理毁掉"。mtime < 120s 的文件视为仍在写入，本次不处理。
                 try:
-                    age_seconds = time.time() - file_path.stat().st_mtime
-                    if age_seconds < 120:
-                        logger.debug('跳过仍在写入的备份文件: %s (age=%.0fs)', file_path.name, age_seconds)
+                    if time.time() - fp.stat().st_mtime < _WRITE_GRACE_SECONDS:
+                        logger.debug('跳过仍在写入的备份文件: %s', fp.name)
                         continue
                 except OSError:
                     continue
-
-                file_info = {
-                    'path': file_path,
-                    'name': file_path.name,
-                    'size_bytes': file_path.stat().st_size,
-                    'size_mb': round(file_path.stat().st_size / (1024 ** 2), 2),
-                    'mtime': _backup_created_time(file_path),
-                    'is_incremental': 'incremental' in file_path.name,
-                    'is_manual': file_path.name.startswith('erp_backup_'),
-                    'is_auto': file_path.name.startswith('erp_auto_'),
-                    'base_timestamp': None,
-                    'importance_score': 0,
-                    'health_status': 'unknown',
-                    'recovery_test_passed': None
-                }
-
-                # 尝试读取manifest获取更多信息（加密备份 .enc 无法直接读取，跳过）
-                if file_path.name.endswith('.zip') and not file_path.name.endswith('.zip.enc'):
-                    try:
-                        import zipfile
-                        with zipfile.ZipFile(file_path, 'r') as zf:
-                            if 'manifest.json' in zf.namelist():
-                                manifest = json.loads(zf.read('manifest.json'))
-                                file_info['base_timestamp'] = manifest.get('base_timestamp')
-                                file_info['table_count'] = manifest.get('table_count')
-                                file_info['total_rows'] = manifest.get('total_rows')
-                                file_info['backup_type'] = manifest.get('backup_type', 'unknown')
-                    except (zipfile.BadZipFile, OSError, json.JSONDecodeError):
-                        file_info['health_status'] = 'corrupted'
-
-                backup_files.append(file_info)
-
-            # 按修改时间排序（最新的在前）
-            backup_files.sort(key=lambda x: x['mtime'], reverse=True)
-
-            return backup_files
-
+                out.append({'path': fp, 'name': fp.name,
+                            'size_bytes': fp.stat().st_size,
+                            'size_mb': round(fp.stat().st_size / 1024**2, 2),
+                            'mtime': _backup_created_time(fp)})
+            out.sort(key=lambda x: x['mtime'], reverse=True)
+            return out
         except OSError as e:
-            logger.error(f"获取备份文件信息失败: {e}")
+            logger.error('获取备份文件信息失败: %s', e)
             return []
 
-    async def _mark_files_to_keep(self,
-                                 backup_files: list[dict[str, Any]],
-                                 disk_info: dict[str, Any]) -> set[str]:
-        """标记需要保留的文件"""
-        files_to_keep = set()
-
-        try:
-            # 1. 保留最新的N个文件（基于数量策略）
-            retention_count = self.cleanup_config['retention_count']
-            for file_info in backup_files[:retention_count]:
-                files_to_keep.add(file_info['name'])
-
-            # 2. 保留在保留时间内的文件
-            retention_days = self.cleanup_config['retention_days']
-            cutoff_date = datetime.now() - timedelta(days=retention_days)
-
-            for file_info in backup_files:
-                if file_info['mtime'] >= cutoff_date:
-                    files_to_keep.add(file_info['name'])
-
-            # 3. 保留手动备份（如果配置）
-            if self.cleanup_config['keep_manual_backups']:
-                for file_info in backup_files:
-                    if file_info['is_manual']:
-                        files_to_keep.add(file_info['name'])
-
-            # 4. 保留重要的增量备份链
-            await self._mark_incremental_chains(backup_files, files_to_keep)
-
-            # 5. 计算文件重要性分数并保留高分文件
-            await self._calculate_importance_scores(backup_files, files_to_keep, disk_info)
-
-            # 6. 执行恢复测试（如果启用）并标记损坏文件为可删除
-            if self.cleanup_config['recovery_test_before_delete']:
-                await self._test_backup_files(backup_files, files_to_keep)
-
-            return files_to_keep
-
-        except Exception as e:  # defensive: keep all files when marking fails
-            logger.error(f"标记保留文件失败: {e}")
-            # 如果出错，保留所有文件
-            return {file_info['name'] for file_info in backup_files}
-
-    async def _mark_incremental_chains(self,
-                                     backup_files: list[dict[str, Any]],
-                                     files_to_keep: set[str]) -> None:
-        """标记增量备份链"""
-        try:
-            # 找出所有全量备份
-            full_backups = []
-            for file_info in backup_files:
-                if not file_info['is_incremental']:
-                    full_backups.append(file_info)
-
-            # 对于每个保留的全量备份，保留其增量备份链
-            for full_backup in full_backups:
-                if full_backup['name'] in files_to_keep:
-                    _full_ts = self._extract_timestamp(full_backup['name'])
-                    full_timestamp = self._normalize_backup_ts(_full_ts) if _full_ts else None
-                    if full_timestamp:
-                        # 找到基于此全量备份的增量备份
-                        for file_info in backup_files:
-                            if (file_info['is_incremental'] and
-                                file_info['base_timestamp'] and
-                                self._normalize_backup_ts(str(file_info['base_timestamp'])) <= full_timestamp):
-                                files_to_keep.add(file_info['name'])
-
-        except Exception as e:  # defensive: incremental chain marking must not abort cleanup
-            logger.error(f"标记增量备份链失败: {e}")
-
-    def _extract_timestamp(self, filename: str) -> str | None:
-        """从文件名提取时间戳"""
-        try:
-            # 移除前缀和后缀
-            ts_str = filename
-            for prefix in ['erp_backup_', 'erp_auto_daily_', 'erp_incremental_']:
-                ts_str = ts_str.replace(prefix, '')
-
-            for suffix in ['.zip', '.json', '.enc']:
-                ts_str = ts_str.replace(suffix, '')
-
-            # 有效时间戳：'YYYYMMDD_HHMMSS'（15 位），或第十四轮起的
-            # 'YYYYMMDD_HHMMSSmmm'（18 位，同秒双全量防同名互覆）。两种都要认 ——
-            # 只认 15 位会让毫秒级新全量在本函数返回 None，进而在清理时被判成
-            # "不属于任何全量链"，连带删除依赖它的增量链。
-            base, tail = ts_str[:15], ts_str[15:]
-            tail_ok = tail == '' or (len(tail) == 3 and tail.isdigit())
-            if tail_ok and len(base) == 15 and base[8] == '_':
-                return base
-            return None
-        except (ValueError, IndexError, AttributeError):
-            return None
-
-    def _normalize_backup_ts(self, ts: str) -> str:
-        """委托到 records.normalize_backup_ts（纯函数，无实例状态）。
-
-        保留本方法是为了不改动既有调用点（_mark_incremental_chains 等），
-        实现已统一到模块级纯函数，避免"同一逻辑两处实现"漂移。
-        """
-        return normalize_backup_ts(ts)
-
-    async def _calculate_importance_scores(self,
-                                         backup_files: list[dict[str, Any]],
-                                         files_to_keep: set[str],
-                                         disk_info: dict[str, Any]) -> None:
-        """计算文件重要性分数"""
-        try:
-            # 根据磁盘空间需求调整保留策略
-            free_percent = disk_info.get('free_percent', 100)
-            free_gb = disk_info.get('free_gb', 0)
-
-            # 如果磁盘空间充足，保留更多文件
-            if free_percent >= 20 and free_gb >= 50:
-                return  # 空间充足，保留所有标记的文件
-
-            # 空间不足，需要更严格的筛选
-            for file_info in backup_files:
-                if file_info['name'] in files_to_keep:
-                    score = 0
-
-                    # 手动备份得分更高
-                    if file_info['is_manual']:
-                        score += 10
-
-                    # 全量备份得分更高
-                    if not file_info['is_incremental']:
-                        score += 5
-
-                    # 较新的文件得分更高
-                    file_age_days = (datetime.now() - file_info['mtime']).days
-                    if file_age_days <= 7:
-                        score += 8
-                    elif file_age_days <= 30:
-                        score += 5
-                    elif file_age_days <= 90:
-                        score += 2
-
-                    # 较大的文件得分较低（占用更多空间）
-                    size_gb = file_info['size_bytes'] / (1024 ** 3)
-                    if size_gb > 1:
-                        score -= int(size_gb)  # 每GB减1分
-
-                    # 健康状态好的文件得分更高
-                    if file_info['health_status'] == 'corrupted':
-                        score -= 10
-
-                    file_info['importance_score'] = score
-
-            # 按分数排序，保留高分文件
-            sorted_files = sorted(backup_files, key=lambda x: x.get('importance_score', 0), reverse=True)
-
-            # 根据可用空间决定保留数量
-            available_space_gb = free_gb
-            target_free_gb = self.cleanup_config['min_free_space_gb']
-            space_to_free_gb = max(0, target_free_gb - available_space_gb)
-
-            if space_to_free_gb > 0:
-                # 需要释放空间，从低分文件开始删除
-                total_size_freed = 0
-                files_to_remove = set()
-
-                for file_info in reversed(sorted_files):
-                    if file_info['name'] in files_to_keep:
-                        file_size_gb = file_info['size_bytes'] / (1024 ** 3)
-                        total_size_freed += file_size_gb
-                        files_to_remove.add(file_info['name'])
-
-                        if total_size_freed >= space_to_free_gb:
-                            break
-
-                # 从保留列表中移除
-                files_to_keep.difference_update(files_to_remove)
-
-        except Exception as e:  # defensive: scoring failure should not abort cleanup
-            logger.error(f"计算重要性分数失败: {e}")
-
-    async def _test_backup_files(self,
-                               backup_files: list[dict[str, Any]],
-                               files_to_keep: set[str]) -> None:
-        """测试备份文件"""
-        try:
-            if not self.cleanup_config['recovery_test_before_delete']:
-                return
-
-            sample_rate = self.cleanup_config['test_sample_rate'] / 100.0
-
-            for file_info in backup_files:
-                # 只测试不在保留列表中的文件
-                if file_info['name'] in files_to_keep:
-                    continue
-
-                # 抽样测试
-                import random
-                if random.random() > sample_rate:  # nosec B311
-                    continue
-
-                # 执行恢复测试
-                test_result = await health_check_service.perform_recovery_test(file_info['name'])
-
-                if test_result.get('success', False):
-                    file_info['recovery_test_passed'] = True
-                    file_info['health_status'] = 'healthy'
-                    # 测试通过的文件可以考虑保留
-                    if test_result.get('table_count', 0) > 0:
-                        files_to_keep.add(file_info['name'])
-                elif test_result.get('unverifiable'):
-                    # 无法校验（拿不到/用错口令、密文损坏）—— 既不算通过也**不算损坏**。
-                    # 判 corrupted 会把它从 keep 剔除、成为优先删除候选，可能删掉有效备份。
-                    file_info['recovery_test_passed'] = False
-                    file_info['health_status'] = 'unknown'
-                else:
-                    file_info['recovery_test_passed'] = False
-                    file_info['health_status'] = 'corrupted'
-                    # 测试失败的文件优先删除
-                    if file_info['name'] in files_to_keep:
-                        files_to_keep.remove(file_info['name'])
-
-        except Exception as e:  # defensive: recovery test failure should not abort cleanup
-            logger.error(f"备份文件测试失败: {e}")
-
-    def _enforce_keep_floor(self,
-                            backup_files: list[dict[str, Any]],
+    def _enforce_keep_floor(self, backup_files: list[dict[str, Any]],
                             files_to_delete: set[str]) -> set[str]:
-        """兜底：任何情况下至少留一个可还原的备份。
-
-        清理是唯一会**删备份**的路径，而"删光了"意味着系统从此没有回滚点 ——
-        `restore_from_zip` 无从下手，事故时才发现已无路可退。触发场景都真实存在：
-        所有文件都健康测试失败被移出 keep、retention/max_count 配成极端值、
-        或磁盘压力大到把 keep 集也吃干净。
-
-        只在**会删光**时介入，从删除集里救回最新且未被判定损坏的一个（列表按
-        mtime 倒序，首个非 corrupted 即最新可还原者）。
-        """
+        """兜底：任何情况下至少留一个可还原的全量备份（列表按 mtime 倒序，首个即最新）。"""
         if any(f['name'] not in files_to_delete for f in backup_files):
             return files_to_delete
-
-        candidates = [f for f in backup_files if f.get('health_status') != 'corrupted']
-        if not candidates:
-            # 全被判定损坏：仍然留一个 —— 损坏≠不可人工抢救，且"全删"更不可逆
-            candidates = list(backup_files)
-        if not candidates:
+        if not backup_files:
             return files_to_delete
-
-        survivor = candidates[0]['name']
+        survivor = backup_files[0]['name']
         files_to_delete.discard(survivor)
-        logger.warning(
-            '本次清理会删光全部 %d 个备份（无回滚点），已强制保留 %s',
-            len(backup_files), survivor,
-        )
+        logger.warning('本次清理会删光全部 %d 个备份，已强制保留 %s', len(backup_files), survivor)
         return files_to_delete
-
-    async def _mark_files_to_delete(self,
-                                  backup_files: list[dict[str, Any]],
-                                  files_to_keep: set[str],
-                                  disk_info: dict[str, Any]) -> set[str]:
-        """标记需要删除的文件"""
-        files_to_delete = set()
-
-        try:
-            # 标记所有不在保留列表中的文件为删除
-            for file_info in backup_files:
-                if file_info['name'] not in files_to_keep:
-                    files_to_delete.add(file_info['name'])
-
-            # 如果磁盘空间仍然不足，删除更多文件
-            if disk_info.get('needs_cleanup', False):
-                # 按重要性分数排序（从低到高）
-                sorted_files = sorted(
-                    [f for f in backup_files if f['name'] in files_to_keep],
-                    key=lambda x: x.get('importance_score', 0)
-                )
-
-                available_space_gb = disk_info.get('free_gb', 0)
-                target_free_gb = self.cleanup_config['min_free_space_gb']
-                space_needed_gb = max(0, target_free_gb - available_space_gb)
-
-                space_freed_gb = 0
-                for file_info in sorted_files:
-                    if space_freed_gb >= space_needed_gb:
-                        break
-
-                    file_size_gb = file_info['size_bytes'] / (1024 ** 3)
-                    files_to_delete.add(file_info['name'])
-                    files_to_keep.remove(file_info['name'])
-                    space_freed_gb += file_size_gb
-
-            return self._enforce_keep_floor(backup_files, files_to_delete)
-
-        except Exception as e:  # defensive: deletion marking failure should not abort cleanup
-            logger.error(f"标记删除文件失败: {e}")
-            return set()
 
     async def _execute_cleanup(self, files_to_delete: set[str]) -> dict[str, Any]:
         """执行清理操作"""
@@ -640,105 +255,28 @@ class BackupCleanupService:
                                      files_to_delete: set[str],
                                      cleanup_result: dict[str, Any],
                                      disk_info: dict[str, Any]) -> dict[str, Any]:
-        """生成清理报告"""
         try:
-            total_size_mb = sum(f['size_mb'] for f in backup_files)
-            kept_size_mb = sum(f['size_mb'] for f in backup_files if f['name'] in files_to_keep)
-            deleted_size_mb = sum(f['size_mb'] for f in backup_files if f['name'] in files_to_delete)
-
-            # 统计文件类型
-            file_types = {
-                'manual': len([f for f in backup_files if f['is_manual']]),
-                'auto': len([f for f in backup_files if f['is_auto']]),
-                'incremental': len([f for f in backup_files if f['is_incremental']]),
-                'full': len([f for f in backup_files if not f['is_incremental']]),
-            }
-
-            # 统计健康状态
-            health_status: dict[str, int] = {}
-            for file_info in backup_files:
-                status = file_info.get('health_status', 'unknown')
-                health_status[status] = health_status.get(status, 0) + 1
-
+            total_mb = sum(f['size_mb'] for f in backup_files)
+            deleted_mb = sum(f['size_mb'] for f in backup_files if f['name'] in files_to_delete)
+            kept_mb = sum(f['size_mb'] for f in backup_files if f['name'] in files_to_keep)
             report = {
                 'timestamp': datetime.now().isoformat(),
                 'success': cleanup_result['success'],
                 'disk_info': disk_info,
+                'retention_days': self._retention_days(),
                 'summary': {
-                    'total_files': len(backup_files),
-                    'kept_files': len(files_to_keep),
+                    'total_files': len(backup_files), 'kept_files': len(files_to_keep),
                     'deleted_files': len(files_to_delete),
-                    'total_size_mb': round(total_size_mb, 2),
-                    'kept_size_mb': round(kept_size_mb, 2),
-                    'deleted_size_mb': round(deleted_size_mb, 2),
-                    'space_freed_percent': round((deleted_size_mb / total_size_mb * 100) if total_size_mb > 0 else 0, 2),
+                    'total_size_mb': round(total_mb, 2), 'kept_size_mb': round(kept_mb, 2),
+                    'deleted_size_mb': round(deleted_mb, 2),
                 },
-                'file_types': file_types,
-                'health_status': health_status,
                 'cleanup_result': cleanup_result,
-                'recommendations': self._generate_cleanup_recommendations(
-                    backup_files, files_to_keep, files_to_delete, disk_info
-                )
             }
-
-            # 保存报告
             await self._save_cleanup_report(report)
-
             return report
-
         except Exception as e:  # defensive: report generation must not abort cleanup
-            logger.error(f"生成清理报告失败: {e}")
-            return {
-                'timestamp': datetime.now().isoformat(),
-                'success': False,
-                'error': str(e),
-                'message': '生成清理报告失败'
-            }
-
-    def _generate_cleanup_recommendations(self,
-                                        backup_files: list[dict[str, Any]],
-                                        files_to_keep: set[str],
-                                        files_to_delete: set[str],
-                                        disk_info: dict[str, Any]) -> list[str]:
-        """生成清理建议"""
-        recommendations = []
-
-        # 磁盘空间建议
-        free_percent = disk_info.get('free_percent', 100)
-        free_gb = disk_info.get('free_gb', 0)
-        min_free_gb = self.cleanup_config['min_free_space_gb']
-
-        if free_percent < 10:
-            recommendations.append(f"磁盘空间严重不足 ({free_percent:.1f}% 可用)，建议增加存储空间")
-        elif free_gb < min_free_gb:
-            recommendations.append(f"磁盘空间不足 ({free_gb:.1f}GB 可用)，建议清理更多备份或增加存储空间")
-
-        # 备份文件数量建议
-        total_files = len(backup_files)
-        retention_count = self.cleanup_config['retention_count']
-
-        if total_files > retention_count * 2:
-            recommendations.append(f"备份文件数量过多 ({total_files} 个)，超过保留数量 ({retention_count}) 的两倍，建议调整保留策略")
-
-        # 文件健康状态建议
-        corrupted_files = [f for f in backup_files if f.get('health_status') == 'corrupted']
-        if corrupted_files:
-            recommendations.append(f"发现 {len(corrupted_files)} 个损坏的备份文件，建议检查备份过程")
-
-        # 增量备份链建议
-        incremental_files = [f for f in backup_files if f['is_incremental']]
-        full_files = [f for f in backup_files if not f['is_incremental']]
-
-        if incremental_files and not full_files:
-            recommendations.append("只有增量备份没有全量备份，建议创建全量备份")
-        elif len(incremental_files) > len(full_files) * 10:
-            recommendations.append(f"增量备份数量 ({len(incremental_files)}) 远多于全量备份 ({len(full_files)})，建议调整备份策略")
-
-        # 如果没有建议，添加正面反馈
-        if not recommendations:
-            recommendations.append("备份清理策略运行良好，无需额外操作")
-
-        return recommendations
+            logger.error('生成清理报告失败: %s', e)
+            return {'timestamp': datetime.now().isoformat(), 'success': False, 'error': str(e)}
 
     async def _save_cleanup_report(self, report: dict[str, Any]) -> None:
         """保存清理报告"""
@@ -862,8 +400,3 @@ class BackupCleanupService:
 
 # 全局清理服务实例
 cleanup_service = BackupCleanupService()
-
-
-def ensure_backup_dir():  # log-context: internal helper 无请求上下文
-    """确保备份目录存在"""
-    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
