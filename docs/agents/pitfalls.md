@@ -65,6 +65,35 @@ len(app.openapi()['paths'])     # 341  ← 真正的业务路由
 
 ---
 
+## 9. 本机无法验证的改动（CI-only）必须先证实前提，别凭推断
+
+2026-10-12。给 CI 的 test job 加了一步 `sudo apt-get install -y postgresql-client-18`
+（理由：service 是 `postgres:18-alpine`，而 runner 自带的 `pg_dump` 是 16，大版本不匹配时
+pg_dump 直接 abort）。**本机是 Windows，这一步没有任何本地验证手段**，我凭「PGDG 的包名
+就叫 `postgresql-client-18`」推断它在 Ubuntu 24.04 的默认源里——实际不在：
+
+```
+E: Unable to locate package postgresql-client-18
+```
+
+runner 镜像**预装**了 16 的 PGDG 包（`pg_dump --version` 报 `16.15-1.pgdg24.04+2`），但
+**没有留 PGDG 仓库配置**——「镜像里有这个二进制」不等于「apt 源里有这个包」。正解是先加
+PGDG 源再装（`.github/workflows/ci-cd.yml` 该步注释 + 提交 `7ae03d14`）。
+
+**判别法**：改动落在本机跑不了的地方（CI job、远端构建、容器内步骤）时，先问「这个前提我
+能证实吗」——
+
+- **能证实** → 去证实：先加一步只做探测（`apt-cache policy <pkg>` / `apt-cache search`，
+  把结果打进日志），或先在分支上单跑一次该 workflow，确认前提成立再写安装步骤。
+- **不能证实** → 在注释里写明「这是未经本地验证的推断」，并**预期第一次会红**、盯结果。
+
+**同源的反面样本**（同一次会话更早）：重写 `logs/_run_pytest_elevated.ps1` 时把注释写成
+中文，PS 5.1 解不了无 BOM 的 UTF-8 中文 → 脚本在**解析阶段**就 `ParserError` 退出；而我把
+`Start-Process` 返回 0（「发起成功」）当成了「跑起来了」，白等好几轮才想到去验证脚本本身。
+**「命令没报错」不等于「事情做了」。** 改工具脚本后，先用最小参数把它跑一遍再交给它干活。
+
+---
+
 ## 关联
 
 - 运维护栏（红线之外的第二道人防）在 `AGENTS.md` §6.1——**常驻**，动手前必看。
