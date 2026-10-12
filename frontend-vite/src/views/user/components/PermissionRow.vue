@@ -11,7 +11,6 @@
   >
     <span class="pd-row-name">{{ item.name }}</span>
     <PermissionChip :checked="checked" :label="item.name" :interactive="false" />
-    <code class="pd-code">{{ item.code }}</code>
   </div>
 </template>
 
@@ -63,15 +62,5 @@ defineEmits<{ toggle: [] }>()
 }
 .pd-row.on .pd-row-name {
   color: var(--color-primary-700);
-}
-.pd-code {
-  flex: none;
-  padding: 3px 7px;
-  border: 1px solid var(--color-border-light, #f0f2f5);
-  border-radius: 6px;
-  background: var(--color-slate-50, #f8fafc);
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 11px;
-  color: var(--color-text-placeholder, #94a3b8);
 }
 </style>

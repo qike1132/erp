@@ -43,7 +43,6 @@
               >
                 删除
               </PermissionChip>
-              <code class="pd-tcodes">{{ codesOf(g) }}</code>
             </div>
           </template>
           <!-- 其它模块：一行一项（权限名 + 开关胶囊） -->
@@ -136,11 +135,6 @@ const rowActionGroups = computed<RowActionGroup[] | null>(() => {
   }
   return matched.size === children.length ? groups : null
 })
-
-/** TAB 行的权限码文本（如 "order_edit / order_delete"） */
-function codesOf(g: RowActionGroup): string {
-  return [g.edit?.code, g.delete?.code].filter(Boolean).join(' / ')
-}
 
 /** 模块（含子权限）的 id 集合大小 */
 const moduleIds = computed(() => (props.node ? collectModuleIds(props.node) : []))
@@ -237,21 +231,10 @@ function countOf(n: PermissionItem): string {
   background: #fcfdff;
 }
 .pd-tnm {
-  width: 108px;
-  flex: none;
+  flex: 1;
+  min-width: 0;
   font-size: 13px;
   font-weight: 600;
   color: var(--color-text-secondary);
-}
-.pd-tcodes {
-  margin-left: auto;
-  flex: none;
-  padding: 3px 7px;
-  border: 1px solid var(--color-border-light, #f0f2f5);
-  border-radius: 6px;
-  background: var(--color-slate-50, #f8fafc);
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 11px;
-  color: var(--color-text-placeholder, #94a3b8);
 }
 </style>
