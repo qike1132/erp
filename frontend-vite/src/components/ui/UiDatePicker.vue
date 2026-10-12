@@ -42,7 +42,14 @@ const props = withDefaults(
     /** 必填项：向辅助技术暴露 aria-required */
     required?: boolean
   }>(),
-  {},
+  {
+    modelValue: undefined,
+    label: undefined,
+    placeholder: undefined,
+    id: undefined,
+    name: undefined,
+    autocomplete: undefined,
+  },
 )
 
 defineEmits<{

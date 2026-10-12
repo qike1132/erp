@@ -30,6 +30,8 @@ withDefaults(
   }>(),
   {
     disabled: false,
+    ariaLabel: undefined,
+    name: undefined,
   },
 )
 

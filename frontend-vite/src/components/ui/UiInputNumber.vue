@@ -61,7 +61,7 @@ const props = withDefaults(
     label?: string
     name?: string
   }>(),
-  { min: -Infinity, max: Infinity, step: 1 },
+  { min: -Infinity, max: Infinity, step: 1, label: undefined, name: undefined },
 )
 
 const emit = defineEmits<{

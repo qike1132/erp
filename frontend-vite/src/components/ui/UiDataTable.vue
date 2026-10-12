@@ -134,6 +134,7 @@ const props = withDefaults(
     rowHeight: 48,
     rowGroupMode: undefined,
     groupRowsBy: undefined,
+    selection: undefined,
   },
 )
 

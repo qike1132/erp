@@ -31,6 +31,12 @@ const props = withDefaults(
   }>(),
   {
     type: 'text',
+    modelValue: undefined,
+    placeholder: undefined,
+    label: undefined,
+    id: undefined,
+    name: undefined,
+    autocomplete: undefined,
   },
 )
 

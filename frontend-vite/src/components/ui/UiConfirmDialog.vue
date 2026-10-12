@@ -54,6 +54,7 @@ const props = withDefaults(
     // 显式声明为 undefined：转发给 UiDialog 后由其自身默认值兜底（不改变既有层级）。
     overlayZClass: undefined,
     contentZClass: undefined,
+    sub: undefined,
   },
 )
 

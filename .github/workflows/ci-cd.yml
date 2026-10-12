@@ -55,7 +55,7 @@ jobs:
       COVERAGE_MIN: "40"
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
 
     # pg_dump 必须与服务端同一个大版本：service 是 postgres:18-alpine（刻意对齐生产
     # 的 18.x），而 runner 自带的 pg_dump 是 16（pgdg24.04）。大版本不匹配时 pg_dump
@@ -65,6 +65,9 @@ jobs:
     # PGDG 官方源，否则 `E: Unable to locate package postgresql-client-18`
     # （2026-10-12 CI run 38218718141 实测）。装 18 客户端即可（postgresql-common 的
     # pg_wrapper 默认取最新版）；末行把版本打进日志，日后回归时一眼能看出。
+    # Ubuntu 26.04 (resolute) 同理：ubuntu-latest 自 2026-10-19 起迁往 26.04，而
+    # apt.postgresql.org 已发布 resolute-pgdg 且含 postgresql-client-18（2026-10-12 实测），
+    # 故 ${VERSION_CODENAME} 替换在 24.04 / 26.04 上都能解析到正确仓库，无需按 codename 分支。
     - name: Install PostgreSQL 18 client (must match the service major)
       run: |
         sudo apt-get update
@@ -80,12 +83,12 @@ jobs:
         pg_dump --version
 
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: '3.13'
 
     - name: Cache dependencies
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: ~/.cache/pip
         key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt', 'requirements/**/*.txt') }}
@@ -159,7 +162,7 @@ jobs:
     #   coverage.xml 仍由下方 artifact 归档，覆盖率门槛由后面的
     #   "Check coverage threshold" 步骤就地判定，信号没有丢失。
     - name: Upload test report
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       with:
         name: test-report
         path: |
@@ -194,7 +197,7 @@ jobs:
         python scripts/quality_gate.py --only pip_audit --audit-report dependency-audit.json --verbose
     
     - name: Upload security reports
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       with:
         name: security-reports
         path: |
@@ -209,14 +212,14 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
       with:
         # fetch-depth: 0：file_size_gate 需对比 PR 基线（origin/<base_ref>...HEAD）。
         # 默认浅检出(depth 1)取不到基线 ref → 门禁回落「无扫描文件」空转。
         fetch-depth: 0
     
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: '3.13'
     
@@ -292,10 +295,10 @@ jobs:
         working-directory: frontend-vite
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
 
     - name: Set up Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v5
       with:
         # Node 22：与本地开发环境一致，且满足 @capacitor/cli@8 (>=22) 与 vite@7 (^20.19 || >=22.12) 的要求
         node-version: '22'
@@ -349,7 +352,7 @@ jobs:
     # if-no-files-found 默认 warn 会让它静默空转。
     - name: Upload frontend test artifacts
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       with:
         name: frontend-test-artifacts
         if-no-files-found: error
@@ -360,10 +363,10 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
     
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: '3.13'
     
