@@ -85,6 +85,9 @@ MODE_PIP_AUDIT = "pip-audit"  # 进程内校验 pyproject.toml 的豁免策略
 
 SELFTEST_PREFIX = "[SELFTEST]"
 RUFF_TARGETS = ("scripts", "server_manager")
+# 复杂度 / 循环遮蔽门禁的扫描面：后端 + 脚本 + 桌面壳（第一方 Python）。
+# 与 RUFF_TARGETS 不同——这两条规则的存量主要在 fastapi_app。
+COMPLEXITY_TARGETS = ("fastapi_app", "scripts", "server_manager")
 
 
 @dataclass(frozen=True)
@@ -97,14 +100,22 @@ class Gate:
     extra_args: tuple[str, ...] = ()
     count_key: str = "total"
     accepts_paths: bool = False
+    # 仅 MODE_RUFF 用：select 非空时命令行追加 `--select <select>`（供 C901/PLW2901
+    # 这类**不进全局 select** 的规则单独设门禁——进全局会打红 CI 的 ruff 步骤）；
+    # targets 非空时覆盖默认扫描面（默认 RUFF_TARGETS = scripts + server_manager）。
+    select: str = ""
+    targets: tuple[str, ...] = ()
 
     def argv(self, thresholds: dict[str, int], probe_dir: Path | None = None) -> list[str]:
         """构造调用命令（阈值来自 pyproject，按门禁类型注入）。"""
         if self.mode == MODE_RUFF:
             if probe_dir is not None:
-                return [ruff_bin(), "check", str(probe_dir), "--select", "F401",
+                return [ruff_bin(), "check", str(probe_dir), "--select", self.select or "F401",
                         "--output-format", "json", "--no-cache"]
-            return [ruff_bin(), "check", *RUFF_TARGETS, "--output-format", "json", "--no-cache"]
+            cmd = [ruff_bin(), "check", *(self.targets or RUFF_TARGETS)]
+            if self.select:
+                cmd += ["--select", self.select]
+            return [*cmd, "--output-format", "json", "--no-cache"]
         base = [sys.executable, str(PROJECT_ROOT / self.script), *self.extra_args]
         if self.key == "function_length":
             base += ["--max-length", str(thresholds["max_function_length"])]
@@ -195,6 +206,28 @@ GATES: tuple[Gate, ...] = (
         fix_hint="修掉 ruff 报出的问题；确需豁免只能在 ruff.toml 的 "
         "[tool.ruff.lint.per-file-ignores] 里写具体规则 + 理由"
         "（不允许新增裸 ignore，也不允许命令行 --select/--ignore 覆盖）",
+        accepts_paths=True,
+    ),
+    # C901 / PLW2901 刻意**不进** ruff.toml 的全局 select（进全局会把 CI 的
+    # `ruff check fastapi_app tests ...` 步骤打红）。这里用独立门禁 + 棘轮基线
+    # 只拦新增；阈值 max-complexity=25 配在 ruff.toml 的 [lint.mccabe]。
+    Gate(
+        key="complexity",
+        title="圈复杂度 C901（ruff --select C901，阈值见 ruff.toml [lint.mccabe]）",
+        mode=MODE_RUFF,
+        select="C901",
+        targets=COMPLEXITY_TARGETS,
+        fix_hint="按职责拆函数降低分支数（早返回 / 提取子函数）；"
+        "确需保留大函数请评审后上调 ruff.toml 的 max-complexity 并说明理由",
+        accepts_paths=True,
+    ),
+    Gate(
+        key="loop_shadow",
+        title="循环变量遮蔽（ruff --select PLW2901）",
+        mode=MODE_RUFF,
+        select="PLW2901",
+        targets=COMPLEXITY_TARGETS,
+        fix_hint="重命名内层循环变量，别复用外层循环名（PLW2901）",
         accepts_paths=True,
     ),
     Gate(
@@ -624,6 +657,10 @@ _LONG_FUNC_BAD = (
 )
 _VUE_BAD = ("<template>\n" + "<div>cell</div>\n" * 420 + "</template>\n").encode()
 _VUE_CLEAN = b"<template>\n<div>cell</div>\n</template>\n"
+# 30 个 if 分支 → 圈复杂度 31 > ruff.toml [lint.mccabe] max-complexity(25) → C901 命中
+_COMPLEX_BAD = ("def f(x):\n" + "".join(f"    if x == {i}:\n        return {i}\n" for i in range(30))
+                + "    return -1\n").encode()
+_COMPLEX_CLEAN = b"def f(x):\n    return x\n"
 
 # key -> ((违规文件名, 内容), (干净文件名, 内容))
 SELFTEST_FIXTURES: dict[str, tuple[tuple[str, bytes], tuple[str, bytes]]] = {
@@ -647,6 +684,14 @@ SELFTEST_FIXTURES: dict[str, tuple[tuple[str, bytes], tuple[str, bytes]]] = {
         ("probe.py", b"\xef\xbb\xbfvalue = 1\n"),
         ("probe.py", b"value = 1\n"),
     ),
+    "complexity": (
+        ("probe.py", _COMPLEX_BAD),
+        ("probe.py", _COMPLEX_CLEAN),
+    ),
+    "loop_shadow": (
+        ("probe.py", b"for x in []:\n    for x in []:\n        pass\n"),
+        ("probe.py", b"for x in []:\n    for y in []:\n        pass\n"),
+    ),
 }
 SELFTEST_RUFF_PROBE = (("probe.py", b"import os\n"), ("probe.py", b"import sys\n\nprint(sys.path)\n"))
 
@@ -667,7 +712,6 @@ def _selftest_probe_run(gate_key: str, probe_dir: Path) -> tuple[int, str]:
 
 def _pip_audit_fixtures(max_days: int, today: date) -> list[tuple[str, bool, str]]:
     """返回 [(说明, 期望有无问题, TOML 文本)]，用于策略层合成自检。"""
-    live = {"PYSEC-2026-0001"}
     header = "[[tool.code-quality.pip-audit-ignores]]\n"
     return [
         ("过期条目", True,
@@ -780,7 +824,7 @@ def run_selftest(gates: tuple[Gate, ...], thresholds: dict[str, int], audit_repo
             report("REGRESS" in out_bad, f"{gate.key}: 人为违规 → 报告里出现 REGRESS")
             (probe_dir / bad_name).unlink()
             (probe_dir / clean_name).write_bytes(clean_bytes)
-            rc_good, out_good = _selftest_probe_run(gate.key, probe_dir)
+            rc_good, _ = _selftest_probe_run(gate.key, probe_dir)
             report(rc_good == 0, f"{gate.key}: 移除违规 → runner 退出码 {rc_good}（要求 0）")
     finally:
         shutil.rmtree(tmp_root, ignore_errors=True)
