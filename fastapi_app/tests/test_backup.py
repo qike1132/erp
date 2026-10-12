@@ -4,6 +4,7 @@
 测试 backup_service.py 的核心函数。
 """
 import json
+import os
 import zipfile
 from datetime import datetime
 from unittest.mock import MagicMock, patch
@@ -11,17 +12,30 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from fastapi_app.services.backup import (
+    BACKUP_FORMAT_VERSION,
+    BackupError,
     BackupFileError,
+    BackupLockError,
+    RestoreError,
     build_column_type_map,
     delete_backup_file,
     deserialize_value,
     ensure_backup_dir,
+    get_checksum_tables,
     list_backup_files,
     quote_table,
     serialize_value,
     sha256_bytes,
     sha256_file,
     validate_backup_file,
+)
+from fastapi_app.services.backup._constants import (
+    RETENTION_COUNT_DEFAULT,
+    RETENTION_COUNT_ENV,
+    RETENTION_DAYS_DEFAULT,
+    RETENTION_DAYS_ENV,
+    retention_count,
+    retention_days,
 )
 
 # ---------------------------------------------------------------------------
@@ -295,3 +309,105 @@ class TestNormalizeBackupTs:
         from fastapi_app.services.backup.records import normalize_backup_ts
         assert normalize_backup_ts('not-a-ts') == 'not-a-ts'
         assert normalize_backup_ts('  2026-09-13 01:00:00  ') == '2026-09-13 01:00:00'
+
+
+class TestExceptions:
+    def test_backup_error(self):
+        err = BackupError('test error')
+        assert str(err) == 'test error'
+        assert isinstance(err, Exception)
+
+    def test_backup_lock_error(self):
+        err = BackupLockError('lock failed')
+        assert isinstance(err, BackupError)
+
+    def test_backup_file_error(self):
+        err = BackupFileError('file not found')
+        assert isinstance(err, BackupError)
+
+    def test_restore_error(self):
+        err = RestoreError('restore failed')
+        assert isinstance(err, BackupError)
+
+
+# ---------------------------------------------------------------------------
+# 常量测试
+# ---------------------------------------------------------------------------
+
+class TestConstants:
+    def test_backup_format_version(self):
+        assert BACKUP_FORMAT_VERSION == '2.0'
+
+    def test_retention_config(self, monkeypatch):
+        """保留策略由 env 单一真源驱动（此前在本模块硬编码 30 天/50 份）。
+
+        旧实现：_constants 硬编码 30/50，而 policy_service / cleanup 服务各自读 env
+        （默认 30/100）⇒ 同一台机器上「策略显示保留 100 份」而「实际按 50 份删」。
+        """
+        monkeypatch.setenv(RETENTION_DAYS_ENV, '17')
+        monkeypatch.setenv(RETENTION_COUNT_ENV, '9')
+        assert retention_days() == 17
+        assert retention_count() == 9
+
+        monkeypatch.delenv(RETENTION_DAYS_ENV, raising=False)
+        monkeypatch.delenv(RETENTION_COUNT_ENV, raising=False)
+        assert retention_days() == RETENTION_DAYS_DEFAULT == 7
+        assert retention_count() == RETENTION_COUNT_DEFAULT == 100
+
+    def test_retention_constants_stay_importable(self, monkeypatch):
+        """模块级常量是启动快照，必须与保留策略单源函数**等值**（P0-2 F-04）。
+
+        修复前这里被放宽成 isinstance(int) + > 0：若有人把模块常量重新硬编码回
+        旧值（份额 50），本测试不再报警。现在固定 env 后 reload 模块，逐个**等值**
+        比对快照、单源函数与缺省口径（天数 7（全量-only 后改默认）/ 100 份）。
+        """
+        import importlib
+
+        from fastapi_app.services.backup import _constants
+
+        original = {key: os.environ.get(key) for key in (RETENTION_DAYS_ENV, RETENTION_COUNT_ENV)}
+        try:
+            # env 覆盖：reload 后的快照 == env 值 == 单源函数返回值
+            monkeypatch.setenv(RETENTION_DAYS_ENV, '11')
+            monkeypatch.setenv(RETENTION_COUNT_ENV, '7')
+            overridden = importlib.reload(_constants)
+            assert overridden.BACKUP_RETENTION_DAYS == overridden.retention_days() == 11
+            assert overridden.BACKUP_MAX_COUNT == overridden.retention_count() == 7
+
+            # env 缺省：reload 后的快照 == 缺省值 == 单源函数返回值
+            monkeypatch.delenv(RETENTION_DAYS_ENV, raising=False)
+            monkeypatch.delenv(RETENTION_COUNT_ENV, raising=False)
+            defaulted = importlib.reload(_constants)
+            assert RETENTION_DAYS_DEFAULT == 7
+            assert RETENTION_COUNT_DEFAULT == 100
+            assert defaulted.BACKUP_RETENTION_DAYS == defaulted.retention_days() == RETENTION_DAYS_DEFAULT
+            assert defaulted.BACKUP_MAX_COUNT == defaulted.retention_count() == RETENTION_COUNT_DEFAULT
+        finally:
+            # 把模块快照还原到测试前的 env 口径，避免 reload 泄漏给同进程后续用例
+            for key, value in original.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+            importlib.reload(_constants)
+
+
+# ---------------------------------------------------------------------------
+# get_checksum_tables 测试
+# ---------------------------------------------------------------------------
+
+class TestGetChecksumTables:
+    def test_excludes_alembic_version(self):
+        with patch('fastapi_app.shared_models.Base') as mock_base:
+            table1 = MagicMock()
+            table1.name = 'users'
+            table2 = MagicMock()
+            table2.name = 'alembic_version'
+            table3 = MagicMock()
+            table3.name = 'orders'
+            mock_base.metadata.sorted_tables = [table1, table2, table3]
+
+            result = get_checksum_tables()
+            assert 'users' in result
+            assert 'orders' in result
+            assert 'alembic_version' not in result
