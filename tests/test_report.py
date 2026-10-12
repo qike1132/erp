@@ -141,7 +141,9 @@ class TestGetOrderLogs:
             )
         where = m.call_args.kwargs['base_where']
         assert any('o.customer LIKE' in c for c in where)
-        assert any('p.name LIKE' in c for c in where)
+        # 产品筛选与 SELECT 的显示口径同源（COALESCE(p.*, oi.*)）：多 SKU 展开后，
+        # 产品行缺失的 SKU 行会显示 oi.product_name，筛选必须也能命中它。
+        assert any('COALESCE(p.name, oi.product_name) LIKE :product' in c for c in where)
         assert any('o.status = :status' in c for c in where)
 
     @pytest.mark.asyncio

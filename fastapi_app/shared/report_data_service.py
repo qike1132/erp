@@ -3,10 +3,10 @@
 
 接受 SQLAlchemy Session 参数，框架无关。
 
-TODO(multi-sku-order): 本模块多处 SQL 直接引用 Order.product_id/Order.quantity
-（JOIN、sum 聚合）及遍历 order.product/order.quantity。多 SKU 模型下这些为首 item
-兼容值，完整改造涉及业务语义变更，待后续 spec 改造为 JOIN OrderItem。
-当前依赖 Task 3 设置的兼容值。
+多 SKU 订单：``Order.product_id/quantity`` 是「首个 SKU / 全部 SKU 之和」兼容值。
+订单流水（``_get_order_logs``）已按 ``order_item`` 展开为一行一个 SKU，产品筛选/
+工厂隔离也落到明细；无明细的历史订单回退到兼容列。其余四类流水（备货/出货/抵扣/
+退货）的源表本身就是 SKU 粒度（``product_id`` 在主表上），无需展开。
 """
 import logging
 from datetime import datetime, timedelta
@@ -15,7 +15,7 @@ from typing import Any
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
-from fastapi_app.shared_models import Order, Product, StockIn, StockOut, StockReturn
+from fastapi_app.shared_models import Order, OrderItem, Product, StockIn, StockOut, StockReturn
 from fastapi_app.shared_models.order import (
     ORDER_STATUS_PENDING_STOCK,
     ORDER_STATUS_SHIPPED,
@@ -120,75 +120,117 @@ def _apply_factory_filter(query, factory):
     return query
 
 
-def _get_order_logs(session, customer, product, status, start_date, end_date, factory=''):
-    query = select(Order).join(Product).options(
-        selectinload(Order.product),
-        # Order.order_stockouts 由 StockOut.order 的 backref 在运行时注入
-        # （shared_models/stock_out.py:38），mypy 无法静态感知该属性。
-        # 改为显式 back_populates 需在 order.py 反向声明 StockOut，会引入
-        # 模型层循环导入风险，收益不成比例，故此处作用域化忽略。
-        selectinload(Order.order_stockouts),  # type: ignore[attr-defined]
-    )
+def _apply_order_filters(query, customer, product, status, start_date, end_date, factory):
+    """订单流水的公共筛选（明细查询与统计查询同源，两者才对得上）。
+
+    工厂条件复用 ``_apply_factory_filter``：调用方已把 ``Product`` 外连接到「该行的
+    SKU 产品」（见 ``_get_order_logs``），故条件天然落到明细行 —— 任一 SKU 命中即算
+    命中，与屏幕口径一致。产品条件**不走**共享的 ``_apply_product_filter``，理由见下。
+    """
     # 与屏幕口径对齐（report_service.get_order_logs 的 "(o.is_deleted = false OR
     # o.is_deleted IS NULL)"）：软删订单不进导出，否则导出数字会大于页面显示值。
     # 该列可空，用 IS NOT TRUE 同时覆盖 false 与 NULL。
     query = query.where(Order.is_deleted.isnot(True))
     if customer:
         query = query.where(Order.customer.like(f'%{escape_like(customer)}%'))
-    query = _apply_product_filter(query, product)
+    # 产品筛选与显示同源：显示用 COALESCE(Product.name, OrderItem.product_name)
+    # （见 _order_log_row），筛选也必须带上 SKU 快照，否则产品行缺失（被删）的行
+    # 「显示得出、按名字搜不到」（左连接下 Product.name 为 NULL，旧写法把它排除）。
+    # ⚠️ 不能改共享的 _apply_product_filter —— 备货/出货/抵扣/退货四类流水的查询里
+    # 没有 OrderItem 连接，在那里引用会打挂 SQL。
+    if product:
+        like = f'%{escape_like(product)}%'
+        query = query.where(
+            or_(
+                func.coalesce(Product.name, OrderItem.product_name).like(like),
+                func.coalesce(Product.barcode, OrderItem.product_barcode).like(like),
+            )
+        )
     query = _apply_factory_filter(query, factory)
-    if status:
-        valid_statuses = VALID_ORDER_STATUSES
-        if status in valid_statuses:
-            query = query.where(Order.status == status)
-    query = _apply_date_filters(query, Order.order_date, start_date, end_date)
-
-    stats_query = select(
-        func.count(Order.id),
-        func.coalesce(func.sum(Order.quantity), 0),
-        func.count(Order.id).filter(Order.status == ORDER_STATUS_PENDING_STOCK),
-        func.count(Order.id).filter(Order.status == ORDER_STATUS_SHIPPED),
-    ).join(Product, Order.product_id == Product.id)
-    # 与上方明细查询同口径：统计也排除软删订单，两者才对得上。
-    stats_query = stats_query.where(Order.is_deleted.isnot(True))
-    if customer:
-        stats_query = stats_query.where(Order.customer.like(f'%{escape_like(customer)}%'))
-    stats_query = _apply_product_filter(stats_query, product)
-    stats_query = _apply_factory_filter(stats_query, factory)
     if status and status in VALID_ORDER_STATUSES:
-        stats_query = stats_query.where(Order.status == status)
-    stats_query = _apply_date_filters(stats_query, Order.order_date, start_date, end_date)
+        query = query.where(Order.status == status)
+    return _apply_date_filters(query, Order.order_date, start_date, end_date)
+
+
+def _order_log_row(order, item, prod) -> dict[str, Any]:
+    """单行「订单 × SKU」报表记录；``item`` 为 None 时回退 ``order`` 兼容列。
+
+    ``prod`` 是该行 SKU 的产品（左连接，可能为 None）；产品名优先取实时产品名
+    （与屏幕 ``COALESCE(p.name, oi.product_name)`` 同口径），缺失时回退 SKU 快照。
+    """
+    if item is not None:
+        row_id, qty = item.id, item.quantity
+        name = (prod.name if prod is not None else item.product_name) or ''
+        barcode = (prod.barcode if prod is not None else item.product_barcode) or ''
+    else:
+        row_id, qty = order.id, order.quantity
+        name = (prod.name if prod is not None else '') or ''
+        barcode = (prod.barcode or '') if prod is not None else ''
+    return {
+        'id': row_id,
+        'order_no': order.order_no,
+        'customer': order.customer,
+        'product_name': name,
+        'product_barcode': barcode,
+        'quantity': qty,
+        'status': order.status,
+        'order_date': order.order_date.strftime('%Y-%m-%d %H:%M'),
+    }
+
+
+def _get_order_logs(session, customer, product, status, start_date, end_date, factory=''):
+    # 多 SKU：一行 = 一个 (订单 × SKU)。按 order_item 外连接展开（无明细的历史订单
+    # 回退 order 兼容列），产品/工厂筛选也因此落到明细行 —— 与屏幕 get_order_logs
+    # 同口径（按某个非首个 SKU 筛选时只出那一行，而非整单全部 SKU）。
+    item_product_id = func.coalesce(OrderItem.product_id, Order.product_id)
+    item_qty = func.coalesce(OrderItem.quantity, Order.quantity)
+    query = (
+        select(Order, OrderItem, Product)
+        .outerjoin(OrderItem, OrderItem.order_id == Order.id)
+        .outerjoin(Product, Product.id == item_product_id)
+        # Order.order_stockouts 由 StockOut.order 的 backref 在运行时注入
+        # （shared_models/stock_out.py:38），mypy 无法静态感知该属性。
+        # 改为显式 back_populates 需在 order.py 反向声明 StockOut，会引入
+        # 模型层循环导入风险，收益不成比例，故此处作用域化忽略。
+        .options(selectinload(Order.order_stockouts))  # type: ignore[attr-defined]
+    )
+    query = _apply_order_filters(
+        query, customer, product, status, start_date, end_date, factory)
+
+    # 统计与明细同粒度（订单 × SKU）：按 SKU 筛选时 count/sum 才对得上明细行。
+    stats_query = (
+        select(
+            func.count(),
+            func.coalesce(func.sum(item_qty), 0),
+            func.count().filter(Order.status == ORDER_STATUS_PENDING_STOCK),
+            func.count().filter(Order.status == ORDER_STATUS_SHIPPED),
+        )
+        .select_from(Order)
+        .outerjoin(OrderItem, OrderItem.order_id == Order.id)
+        .outerjoin(Product, Product.id == item_product_id)
+    )
+    stats_query = _apply_order_filters(
+        stats_query, customer, product, status, start_date, end_date, factory)
     total, total_quantity, pending_count, completed_count = session.execute(stats_query).one()
 
     logger.info(f'订单查询结果数: {total}')
     logs: list[dict[str, Any]] = []
-    stmt = query.order_by(Order.order_date.desc()).execution_options(yield_per=_YIELD_PER_BATCH)
-    for order in session.scalars(stmt):
+    stmt = (query.order_by(Order.order_date.desc(), Order.id, OrderItem.id)
+            .execution_options(yield_per=_YIELD_PER_BATCH))
+    for order, item, prod in session.execute(stmt):
         if len(logs) >= _MAX_EXPORT_ROWS:
             logger.warning('订单报表导出达到最大行数 %d，已截断', _MAX_EXPORT_ROWS)
             break
         deducted_quantity = sum(so.quantity - so.returned_quantity for so in order.order_stockouts if so.stockin_id) if hasattr(order, 'order_stockouts') and order.order_stockouts else 0
         note = order.note or ''
         if deducted_quantity > 0:
-            # TODO(multi-sku-order): order.quantity 在多 SKU 下为首 item 兼容值，抵扣备注需按 OrderItem 维度；待后续 spec 改造。
+            # order.quantity 为全部 SKU 之和，抵扣备注是订单级信息，逐 SKU 行重复展示
             deduction_note = f'订单{order.quantity}抵扣备货{deducted_quantity}'
-            if note:
-                note = f'{deduction_note}，{note}'
-            else:
-                note = deduction_note
-        # TODO(multi-sku-order): order.product.name/order.quantity 在多 SKU 下为首 item 兼容值，报表需按 OrderItem 维度展开；待后续 spec 改造。
-        logs.append({
-            'id': order.id,
-            'order_no': order.order_no,
-            'customer': order.customer,
-            'product_name': order.product.name,
-            'product_barcode': order.product.barcode or '',
-            'quantity': order.quantity,
-            'status': order.status,
-            'order_date': order.order_date.strftime('%Y-%m-%d %H:%M'),
-            'note': note,
-            'deducted_quantity': deducted_quantity
-        })
+            note = f'{deduction_note}，{note}' if note else deduction_note
+        row = _order_log_row(order, item, prod)
+        row['note'] = note
+        row['deducted_quantity'] = deducted_quantity
+        logs.append(row)
 
     stats = {
         'total_count': total,

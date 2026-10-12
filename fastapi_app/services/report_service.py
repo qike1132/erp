@@ -113,7 +113,12 @@ async def get_order_logs(db: AsyncSession, customer: str = '', product: str = ''
         where_clauses.append("o.customer LIKE :customer")
         params['customer'] = f'%{escape_like(customer)}%'
     if product:
-        where_clauses.append("(p.name LIKE :product OR p.barcode LIKE :product)")
+        # 与 SELECT 的显示口径同源（{item_name}/{item_barcode} 都是
+        # COALESCE(p.*, oi.*)）：否则产品行缺失（被删）的 SKU 行会「显示得出、
+        # 按名字搜不到」——左连接下 p.name 为 NULL，旧写法直接把它排除掉。
+        where_clauses.append(
+            "(COALESCE(p.name, oi.product_name) LIKE :product "
+            "OR COALESCE(p.barcode, oi.product_barcode) LIKE :product)")
         params['product'] = f'%{escape_like(product)}%'
     if factory:
         where_clauses.append("p.factory = :factory")
@@ -132,6 +137,16 @@ async def get_order_logs(db: AsyncSession, customer: str = '', product: str = ''
 
     order_tbl = _quote_identifier("order")
 
+    # 多 SKU 订单：Order.product_id/quantity 是「首个 SKU / 全部 SKU 之和」兼容值，
+    # 直接聚合会把整单量挂在首个 SKU 名下、并吞掉其余 SKU（2026-10-12 MINISO 案例）。
+    # 故按 order_item 展开，一行 = 一个 (订单 × SKU)；无明细的历史订单回退兼容列
+    # （LEFT JOIN + COALESCE，避免被内连接丢掉）。
+    item_join = ("LEFT JOIN order_item oi ON oi.order_id = o.id "
+                 "LEFT JOIN product p ON p.id = COALESCE(oi.product_id, o.product_id)")
+    item_qty = "COALESCE(oi.quantity, o.quantity)"
+    item_name = "COALESCE(p.name, oi.product_name)"
+    item_barcode = "COALESCE(p.barcode, oi.product_barcode)"
+
     return await _query_logs_generic(
         db,
         base_where=where_clauses,
@@ -139,18 +154,18 @@ async def get_order_logs(db: AsyncSession, customer: str = '', product: str = ''
         page=page,
         per_page=per_page,
         data_sql_template=f"""SELECT
-        DATE(o.order_date) as order_date_only, o.customer, p.name as product_name,
-        p.barcode as product_barcode, o.status,
-        SUM(o.quantity) as total_quantity, COUNT(o.id) as order_count,
+        DATE(o.order_date) as order_date_only, o.customer, {item_name} as product_name,
+        {item_barcode} as product_barcode, o.status,
+        SUM({item_qty}) as total_quantity, COUNT(DISTINCT o.id) as order_count,
         {_string_agg('o.order_no', ', ')} as order_nos,
         {_string_agg('o.note', '; ')} as notes,
         COUNT(*) OVER() as total_count
-        FROM {order_tbl} o JOIN product p ON o.product_id = p.id
+        FROM {order_tbl} o {item_join}
         WHERE 1=1 {{where_sql}}
-        GROUP BY DATE(o.order_date), o.customer, p.name, p.barcode, o.status
-        ORDER BY DATE(o.order_date) DESC
+        GROUP BY DATE(o.order_date), o.customer, {item_name}, {item_barcode}, o.status
+        ORDER BY DATE(o.order_date) DESC, o.customer, {item_name}, {item_barcode}, o.status
         LIMIT :limit OFFSET :offset""",  # nosec B608
-        qty_sql_template=f"SELECT COALESCE(SUM(o.quantity), 0) FROM {order_tbl} o JOIN product p ON o.product_id = p.id WHERE 1=1 {{where_sql}}",  # nosec B608
+        qty_sql_template=f"SELECT COALESCE(SUM({item_qty}), 0) FROM {order_tbl} o {item_join} WHERE 1=1 {{where_sql}}",  # nosec B608
         row_mapper=lambda row: {
             'order_date': row.order_date_only.strftime('%Y-%m-%d') if row.order_date_only else '-',
             'customer': row.customer, 'product_name': row.product_name,
