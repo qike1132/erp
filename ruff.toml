@@ -49,6 +49,11 @@ ignore = [
 # TypeError，见该文件内 P0 审计注释）。该顺序与 isort 冲突，故对本文件关闭 I001 以保护契约。
 # 守卫测试：fastapi_app/tests/test_backup_p0.py::TestSourceGuards::test_package_restore_lock_resolves_to_redis_version
 "fastapi_app/services/backup/__init__.py" = ["I001"]
+# scripts/diag/runtime_mode_probe.py：Redis RESP 协议探针，UP031 命中集中在**字节串**
+# % 格式化（如 b"$%d\r\n%s\r\n" % (len(b), b)）——bytes 不支持 f-string，此处没有可行
+# 的自动改写（ruff 自身也把该修复标为 unsafe）；余下几处是 %-format 拼诊断消息，手改
+# 无收益且易错。同文件的 B904 / SIM105 已手工修（2026-10-12 复核 P1-6）。
+"scripts/diag/runtime_mode_probe.py" = ["UP031"]
 
 [format]
 # 2026-10-01（§6.28 裁决 B）：原为 "single"，与本仓实际风格（双引号）相反。

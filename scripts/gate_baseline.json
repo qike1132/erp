@@ -9,7 +9,7 @@
     "bom": 0,
     "alembic_heads": 0,
     "env_drift": 0,
-    "ruff": 55,
+    "ruff": 32,
     "complexity": 4,
     "loop_shadow": 13,
     "pip_audit": 0

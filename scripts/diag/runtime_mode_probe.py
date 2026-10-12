@@ -41,6 +41,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -55,7 +56,7 @@ try:
     import psutil
 except ImportError:  # pragma: no cover
     print("需要 psutil：请用系统 Python 运行（managed venv 未装 psutil）", file=sys.stderr)
-    raise SystemExit(2)
+    raise SystemExit(2) from None
 
 API_PORT = 5002
 WEB_PORT = 3000
@@ -235,10 +236,8 @@ def probe_arq(env: dict[str, str]) -> dict[str, object]:
         return info
     finally:
         if sock is not None:
-            try:
+            with contextlib.suppress(OSError):
                 sock.close()
-            except OSError:
-                pass
 
 
 def probe_frontend() -> dict[str, object]:
