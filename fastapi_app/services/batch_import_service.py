@@ -16,17 +16,28 @@ import logging
 import os
 from collections.abc import Callable
 from datetime import UTC, datetime
+from zipfile import BadZipFile
 
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.cache_invalidation import schedule_post_commit_invalidation
 from fastapi_app.core.exceptions import BusinessError, NotFoundError
-from fastapi_app.schemas.batch import BatchImportResult, ComprehensiveImportResult, ExcelUpload
+from fastapi_app.schemas.batch import (
+    BatchImportResult,
+    ComprehensiveImportResult,
+    ExcelUpload,
+    ProductImportPreviewResult,
+    ProductImportPreviewRow,
+    ProductImportPreviewSummary,
+)
 from fastapi_app.services.batch_import_cache import invalidate_batch_import_caches
 from fastapi_app.services.batch_import_core import (
+    _backfill_empty_product_fields,
+    _fmt_money,
     _import_idem_key,
     _parse_product_price,
+    _resolve_import_customer_id,
     _row_failure_message,
     _save_imported_image,
 )
@@ -46,6 +57,7 @@ from fastapi_app.shared_models import (
     InventoryLog,
     Order,
     Product,
+    ProductCustomer,
     StockIn,
     StockOut,
 )
@@ -53,6 +65,11 @@ from fastapi_app.shared_models.order import ORDER_STATUS_PENDING_STOCK
 from fastapi_app.utils import validate_customer_name as _shared_validate_customer_name
 
 logger = logging.getLogger(__name__)
+
+#: 产品 Sheet 的名称关键词。模板自 2026-10-12 起改名为「新品录入」（表头同步改为
+#: ``客户 | 产品名称 | 工厂 | 69码 | 产品价格 | 图片``），旧名「产品管理」继续识别，
+#: 使存量文件与用户手上的旧模板都还能导入。
+PRODUCT_SHEET_KEYWORDS = ['产品管理', '新品录入']
 
 
 def _require_not_none[T](value: T | None, source: str) -> T:
@@ -688,6 +705,159 @@ async def import_stockouts_service(db: AsyncSession, file: ExcelUpload) -> Batch
         return BatchImportResult(success=False, message='导入失败，请稍后重试')
 
 
+async def _read_product_sheet(
+    file: ExcelUpload,
+) -> tuple[list, dict, str | None]:
+    """读「新品录入」Sheet 的行数据与单元格图片。
+
+    Returns:
+        ``(data_list, cell_images, err)``；``err`` 非 None 时 ``data_list`` 为空列表
+        （调用方应先判 ``err``，不必再处理 ``None``）。
+    """
+    try:
+        data_list, err, cell_images = await _read_excel_sheets_with_cell_images(
+            file, PRODUCT_SHEET_KEYWORDS, '没有找到"新品录入"Sheet',
+        )
+    except (OSError, ValueError, BadZipFile) as exc:
+        # 扩展名对但内容不是 zip/工作簿（改名、下载损坏、手改二进制）：给出可读提示，
+        # 而不是把 BadZipFile 漏到 500。导入与预览共用本入口，两边行为一致。
+        logger.warning('产品导入：Excel 解析失败: %s', exc)
+        return [], {}, '文件无法解析，请确认是有效的 .xlsx 文件（可重新下载模板填写）'
+    if err:
+        return [], {}, err
+    return _require_not_none(data_list, 'Excel 解析'), cell_images or {}, None
+
+
+async def _classify_product_row(
+    db: AsyncSession, row_data: dict, idx: int, context: dict,
+) -> ProductImportPreviewRow:
+    """把一行 Excel 分类成「新增 / 补全 / 跳过 / 错误」，**不写库**。
+
+    判定与 :func:`import_products_service` 的导入循环同源：已存在的行走
+    :func:`_backfill_empty_product_fields` 的 ``dry_run`` 模式（同一段代码只算不写），
+    因此预览看到的改动等于导入会做的改动。
+
+    ``context`` 持有跨行状态：``customer_cache``（客户名 → id 缓存）与
+    ``seen_names``（本文件内已出现过的产品名，用于批内去重）。
+
+    **批内同名重复行**：第二行起按「跳过」处置（``seen_names``），与导入路径的批内
+    去重同口径 —— 导入侧同样跳过它、不把该行的字段并进上一行刚建的产品。因此预览的
+    「写入 / 跳过」计数与真实导入一致（由 ``tests/test_product_import_preview.py`` 的
+    哨兵用例锁住）。
+    """
+    from fastapi_app.services.batch_service import get_product_by_name_ci
+
+    name = row_data.get('产品名称') or row_data.get('名称')
+    barcode = row_data.get('69码') or row_data.get('条码')
+    price = row_data.get('产品价格') or row_data.get('价格')
+    factory = row_data.get('工厂')
+    customer_name = row_data.get('客户') or row_data.get('客户名称')
+    image_id = parse_dispimg_id(row_data.get('图片') or row_data.get('产品图片'))
+    image_bytes = context['cell_images'].get(image_id) if image_id else None
+
+    if not name:
+        return ProductImportPreviewRow(
+            row_no=idx, action='error', messages=['缺少产品名称，本行无法导入'])
+
+    name = str(name).strip()
+    name_key = name.casefold()
+    is_duplicate = name_key in context['seen_names']
+    messages: list[str] = []
+    # 重复行按「跳过」处置，与导入侧同口径：不为它播报客户警告（导入侧的去重判断也在
+    # 解析客户之前）。仍解析一次，好在表里给出准确的客户匹配态供人工核对。
+    customer_id = await _resolve_import_customer_id(
+        db, customer_name, context['customer_cache'], idx,
+        [] if is_duplicate else messages)
+    customer_display = str(customer_name).strip() if customer_name else ''
+
+    action = 'skip'
+    changes: list[str] = []
+    if is_duplicate:
+        messages.append('产品名称在文件内重复，已跳过')
+    else:
+        context['seen_names'].add(name_key)
+        existing = await get_product_by_name_ci(db, name)
+        if existing is None:
+            action = 'create'
+            changes = ['新建产品']
+        else:
+            changed, changes = await _backfill_empty_product_fields(
+                db, existing, price=price, factory=factory, customer_id=customer_id,
+                customer_name=customer_display, dry_run=True)
+            if image_bytes is not None:
+                # 图片按模板覆盖（与导入同口径）：只要带图就算「有改动」
+                changes.append('更新图片')
+                changed = True
+            action = 'backfill' if changed else 'skip'
+
+    return ProductImportPreviewRow(
+        row_no=idx, action=action, name=name,
+        barcode=str(barcode).strip() if barcode else '',
+        price=_fmt_money(_parse_product_price(price, name)) if price else '',
+        price_raw='' if price is None else str(price),
+        factory=str(factory).strip() if factory else '',
+        customer_name=customer_display,
+        customer_matched=customer_id is not None,
+        has_image=image_bytes is not None,
+        changes=changes,
+        messages=messages,
+    )
+
+
+async def preview_products_service(
+    db: AsyncSession, file: ExcelUpload,
+) -> ProductImportPreviewResult:
+    """产品导入预览 —— 逐行分类，**不写库、不落图片**。
+
+    用户在确认前看到的就是「导入将要做什么」：每行标出 新增/补全/跳过/错误，并给出
+    解析出的客户、价格、工厂与将改动的字段。确认由前端把同一文件重发给
+    ``POST /batch/batch-import`` 完成（本函数不做任何写入）。
+
+    Args:
+        db: 数据库会话（**只读**使用）。
+        file: 上传的 Excel 文件（.xlsx 格式）。
+
+    Returns:
+        ProductImportPreviewResult: 逐行结果与汇总计数。
+    """
+    filename = getattr(file, 'filename', '') or ''
+    if (file_err := _validate_xlsx_file(file)):
+        return ProductImportPreviewResult(success=False, message=file_err.message, filename=filename)
+    try:
+        data_list, cell_images, err = await _read_product_sheet(file)
+    except (OSError, ValueError) as exc:
+        logger.error(f'产品导入预览失败: {exc}', exc_info=True)
+        return ProductImportPreviewResult(success=False, message='解析失败，请稍后重试', filename=filename)
+    if err:
+        return ProductImportPreviewResult(success=False, message=err, filename=filename)
+
+    context: dict = {'cell_images': cell_images, 'customer_cache': {}, 'seen_names': set()}
+    rows: list[ProductImportPreviewRow] = []
+    counts = {'create': 0, 'backfill': 0, 'skip': 0, 'error': 0}
+    for idx, row_data in enumerate(data_list, start=2):
+        try:
+            row = await _classify_product_row(db, row_data, idx, context)
+        except (ValueError, TypeError, SQLAlchemyError) as exc:
+            # 单行分类失败不拖垮整份预览（与导入循环同口径）：标为错误行，其余照常。
+            logger.warning('产品导入预览 - 行%s 分类失败: %s', idx, exc)
+            row = ProductImportPreviewRow(
+                row_no=idx, action='error', messages=[_row_failure_message(exc, idx)])
+        rows.append(row)
+        counts[row.action] = counts.get(row.action, 0) + 1
+
+    summary = ProductImportPreviewSummary(**counts)
+    writable = summary.create + summary.backfill
+    if writable:
+        message = (f'将写入 {writable} 条（新增 {summary.create} + 补全 {summary.backfill}），'
+                   f'跳过 {summary.skip + summary.error} 条')
+    else:
+        message = '没有可导入的数据（可能都已存在或格式有误）'
+    return ProductImportPreviewResult(
+        success=writable > 0, message=message, filename=filename,
+        row_count=len(rows), summary=summary, rows=rows,
+    )
+
+
 async def import_products_service(
     db: AsyncSession, file: ExcelUpload, *, uploader_id: int | None = None,
 ) -> BatchImportResult:
@@ -709,22 +879,24 @@ async def import_products_service(
     if (file_err := _validate_xlsx_file(file)):
         return file_err
     try:
-        data_list, err, cell_images = await _read_excel_sheets_with_cell_images(
-            file, ['产品管理'], '没有找到"产品管理"Sheet',
-        )
+        data_list, cell_images, err = await _read_product_sheet(file)
         if err:
             return BatchImportResult(success=False, message=err)
-        data_list = _require_not_none(data_list, 'Excel 解析')
         imported = 0
         skipped = 0
-        errors = []
-        for row_data in data_list:
+        errors: list[str] = []
+        customer_cache: dict = {}
+        seen_names: set[str] = set()
+        # 行号从 2 起：Excel 第 1 行是表头，与用户看到的行号一致（与 core 那条实现同口径）
+        for idx, row_data in enumerate(data_list, start=2):
             try:
                 # savepoint 隔离单行：行内异常仅回滚本行，不影响循环内已成功的行
                 async with db.begin_nested():
                     name = row_data.get('产品名称') or row_data.get('名称')
                     barcode = row_data.get('69码') or row_data.get('条码')
                     price = row_data.get('产品价格') or row_data.get('价格')
+                    factory = row_data.get('工厂')
+                    customer_name = row_data.get('客户') or row_data.get('客户名称')
                     initial_stock = row_data.get('初始库存') or 0
                     image_id = parse_dispimg_id(row_data.get('图片') or row_data.get('产品图片'))
                     image_bytes = cell_images.get(image_id) if image_id else None
@@ -732,17 +904,35 @@ async def import_products_service(
                         skipped += 1
                         continue
                     name = str(name).strip()
+                    name_key = name.casefold()
+                    if name_key in seen_names:
+                        # 文件内同名重复行 → 跳过。与 core 路径的去重同口径，也与导入
+                        # 预览的判定一致：本行若落进下面的「已存在」分支，会把上一行刚建
+                        # 的同名产品补全并计数，而预览说它是「跳过」—— 预览说写入 N 条、
+                        # 导入写 N+1 条，正是那条哨兵测试要拦的漂移。
+                        skipped += 1
+                        errors.append(f'行{idx}: 产品名称在文件内重复，已跳过: {name}')
+                        continue
+                    seen_names.add(name_key)
+                    customer_id = await _resolve_import_customer_id(
+                        db, customer_name, customer_cache, idx, errors)
                     # 检查产品是否已存在（按名称忽略大小写）
                     existing = await get_product_by_name_ci(db, name)
                     if existing:
-                        # 该行带图片 → 按模板覆盖（便于批量修图；与 core 的同名逻辑一致）
+                        # 已存在 → 只补空值（价格/工厂/客户归属）；图片仍按模板覆盖
+                        changed, _ = await _backfill_empty_product_fields(
+                            db, existing, price=price, factory=factory, customer_id=customer_id,
+                            customer_name=str(customer_name).strip() if customer_name else '')
                         if image_bytes is not None:
                             image_key = await _save_imported_image(db, image_bytes, name, uploader_id)
                             if image_key:
                                 existing.image = image_key
-                                imported += 1
-                                continue
-                        skipped += 1
+                                changed = True
+                        if changed:
+                            imported += 1
+                        else:
+                            skipped += 1
+                            errors.append(f'行{idx}: 产品名称与已有数据重复，已存在且无可补字段，未改动: {name}')
                         continue
                     try:
                         stock = int(initial_stock) if initial_stock else 0
@@ -750,18 +940,22 @@ async def import_products_service(
                         stock = 0
                     product = Product(
                         name=name, barcode=str(barcode).strip() if barcode else '',
-                        price=_parse_product_price(price, name), initial_stock=stock,
-                        current_stock=stock,
+                        price=_parse_product_price(price, name),
+                        factory=str(factory).strip() if factory else '',
+                        initial_stock=stock, current_stock=stock,
                     )
                     if image_bytes is not None:
                         product.image = await _save_imported_image(db, image_bytes, name, uploader_id)
                     db.add(product)
+                    if customer_id is not None:
+                        await db.flush()  # 挂归属需要 product.id
+                        db.add(ProductCustomer(product_id=product.id, customer_id=customer_id))
                 # savepoint 成功提交后才计数，失败行不计入 imported
                 imported += 1
             except (ValueError, TypeError, SQLAlchemyError) as exc:
                 # savepoint 已自动回滚本行，不再整体 rollback（避免误伤已成功的行）
                 logger.error(f'产品导入 - 行处理失败: {exc}', exc_info=True)
-                errors.append(_row_failure_message(exc))
+                errors.append(_row_failure_message(exc, idx))
                 skipped += 1
                 continue
         # 提交交给请求级事务（get_async_db），服务层不再手动 commit
@@ -779,9 +973,9 @@ async def import_comprehensive_service(
 ) -> ComprehensiveImportResult:
     """综合批量导入 - 支持4个Sheet自动识别。
 
-    自动识别 Sheet 类型：产品管理、订单管理、备货管理、出货管理。
+    自动识别 Sheet 类型：新品录入、订单管理、备货管理、出货管理。
     每个 Sheet 独立处理，单个 Sheet 失败不影响其他 Sheet。
-    「产品管理」Sheet 的 WPS 单元格图片（``=DISPIMG(...)``）会一并落库。
+    「新品录入」Sheet 的 WPS 单元格图片（``=DISPIMG(...)``）会一并落库。
 
     Args:
         file: 上传的 Excel 文件（.xlsx 格式）。
@@ -803,7 +997,10 @@ async def import_comprehensive_service(
             # 一旦出块 temp_path 即失效，再读会得到 'no workbook found at path'。
             results = ComprehensiveImportResult(success=True)
             # Sheet 名称到类型的映射
-            sheet_mapping = {'产品管理': 'product', '订单管理': 'order', '备货管理': 'stockin', '出货管理': 'stockout'}
+            sheet_mapping = {
+                '新品录入': 'product', '产品管理': 'product', '订单管理': 'order',
+                '备货管理': 'stockin', '出货管理': 'stockout',
+            }
             # 单元格图片只与产品 Sheet 相关；工作簿里没有 cellimages.xml 时立刻返回空字典
             cell_images = await asyncio.to_thread(extract_cell_images, temp_path)
             for sheet_name in sheets:

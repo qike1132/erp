@@ -58,12 +58,30 @@ async def test_import_template_products_carry_images(async_db_session, tmp_path,
     assert result.imported == 2, result.message
 
     rows = (await async_db_session.execute(select(Product))).scalars().all()
-    imported = [p for p in rows if p.name.startswith('3寸MINI FAMILY')]
+    imported = [p for p in rows if p.name.startswith('MINISO长条靠枕')]
     assert len(imported) == 2, [p.name for p in rows]
     for product in imported:
         assert product.image, f'{product.name} 未导入图片'
         path = tmp_path / _storage_key(product.image)
         assert path.is_file(), f'{product.name} 的图片文件不存在: {product.image}'
-        # 模板里的图是透明底抠图，压缩后必须仍带 alpha —— 早期实现会把它压成黑底
-        with Image.open(path) as img:
-            assert 'A' in img.getbands(), f'{product.name} 的图片丢了透明通道（会显示成黑底）'
+
+
+async def test_transparent_png_survives_webp_conversion(async_db_session, tmp_path, monkeypatch):
+    """透明底抠图转 WebP 后必须仍带 alpha —— 早期实现会把它压成黑底。
+
+    模板里的示例图已换成实拍图（不带 alpha），故这里用合成透明 PNG 直测转换链路，
+    不再依赖模板恰好含透明图。
+    """
+    monkeypatch.setattr(
+        storage_service, '_backend', storage_service.LocalStorageBackend(base_dir=tmp_path),
+    )
+    buf = io.BytesIO()
+    Image.new('RGBA', (24, 24), (255, 0, 0, 0)).save(buf, format='PNG')
+
+    saved = await batch_import_service._save_imported_image(
+        async_db_session, buf.getvalue(), '透明底测试', None,
+    )
+
+    assert saved, '图片未落库'
+    with Image.open(tmp_path / _storage_key(saved)) as img:
+        assert 'A' in img.getbands(), f'透明通道丢失（会显示成黑底）: {img.getbands()}'

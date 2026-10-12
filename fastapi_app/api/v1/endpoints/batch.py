@@ -23,7 +23,11 @@ from fastapi_app.api.v1.endpoints.import_guard import (
 )
 from fastapi_app.core.database import get_async_db
 from fastapi_app.core.deps import require_any_permission, require_permission
-from fastapi_app.schemas.batch import BatchImportResult, ComprehensiveImportResult
+from fastapi_app.schemas.batch import (
+    BatchImportResult,
+    ComprehensiveImportResult,
+    ProductImportPreviewResult,
+)
 from fastapi_app.services.batch_import_service import (
     import_case_stockins_service,
     import_case_stockouts_service,
@@ -32,6 +36,7 @@ from fastapi_app.services.batch_import_service import (
     import_products_service,
     import_stockins_service,
     import_stockouts_service,
+    preview_products_service,
     read_template_bytes,
 )
 from fastapi_app.shared_models import User
@@ -176,6 +181,35 @@ async def batch_import_stockouts(
         db, file, TYPE_STOCKOUTS, current_user,
         lambda f: import_stockouts_service(db, f),
     )
+
+
+@router.post('/batch-import/preview', response_model=ProductImportPreviewResult,
+             summary='预览产品批量导入（不写库）')
+async def preview_batch_import_products(
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(require_permission('batch_import')),
+) -> ProductImportPreviewResult:
+    """预览产品批量导入 —— 逐行分类，**不写库、不落图片**。
+
+    用户先在这里核对「将新增/补全/跳过哪些行、客户与价格识别成了什么」，确认后前端
+    把同一文件重发给 ``POST /batch/batch-import`` 才真正入库。
+
+    两处刻意的选择：
+    - **不经 ``run_guarded_import``**：那个守卫会登记文件指纹（同文件只允许导入一次）。
+      预览必须可重复，且不能把用户的文件提前锁死。
+    - **用主库会话**（非只读副本）：预览要与随后在主库上的导入同口径，副本延迟会让
+      「预览说新增、导入说已存在」这类错位出现。
+
+    Args:
+        file: 上传的 Excel 文件（.xlsx 格式）。
+        db: 异步数据库会话（本端点只读使用）。
+        current_user: 当前登录用户（仅需通过权限校验）。
+
+    Returns:
+        ProductImportPreviewResult: 逐行结果与汇总计数。
+    """
+    return await preview_products_service(db, file)
 
 
 @router.post('/batch-import', response_model=BatchImportResult, summary='批量导入产品')
