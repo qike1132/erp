@@ -626,6 +626,18 @@ class L1StaticAnalysis(LayerBase):
             return issues, build_log
 
         # 扫描 console.log / as any
+        issues.extend(self._scan_dist_for_markers(builder, dist_dir))
+
+        # 产物体积
+        issues.extend(self._check_bundle_size(builder, dist_dir))
+
+        return issues, build_log
+
+    def _scan_dist_for_markers(
+        self, builder: IssueBuilder, dist_dir: Path
+    ) -> list[AuditIssue]:
+        """扫描 dist/ 产物中的 console.log(high) 与 as any(medium) 残留。"""
+        issues: list[AuditIssue] = []
         console_pattern = re.compile(r"console\.log")
         any_pattern = re.compile(r"\bas\s+any\b")
         for asset in dist_dir.rglob("*"):
@@ -666,8 +678,13 @@ class L1StaticAnalysis(LayerBase):
                         due_date=DEFAULT_DUE_DATE,
                     )
                 )
+        return issues
 
-        # 产物体积
+    def _check_bundle_size(
+        self, builder: IssueBuilder, dist_dir: Path
+    ) -> list[AuditIssue]:
+        """检查 dist/ 产物 gzip 后总体积是否超阈值(>2MB → medium)。"""
+        issues: list[AuditIssue] = []
         total_size = sum(gzip_size(f) for f in dist_dir.rglob("*") if f.is_file())  # 判据是 gzip 后 ≤ 2MB（评审 2026-10-11）
         if total_size > _BUNDLE_SIZE_LIMIT_BYTES:
             issues.append(
@@ -683,8 +700,7 @@ class L1StaticAnalysis(LayerBase):
                     due_date=DEFAULT_DUE_DATE,
                 )
             )
-
-        return issues, build_log
+        return issues
 
     # ------------------------------------------------------------------
     # 证据归档

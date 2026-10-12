@@ -687,6 +687,32 @@ class L12Report(LayerBase):
         )
 
         # 4. Markdown 摘要
+        md_content = self._build_summary_markdown(raw_outputs)
+        path_md = await archiver.archive(
+            layer_id=self.layer_id,
+            evidence_type=EvidenceType.GATE_LOG,
+            content=md_content,
+            filename="L12/audit_summary.md",
+        )
+
+        # 5. issues.json
+        issues_json = json.dumps(
+            [issue.model_dump(mode="json") for issue in issues],
+            ensure_ascii=False,
+            indent=2,
+        )
+        path_issues = await archiver.archive(
+            layer_id=self.layer_id,
+            evidence_type=EvidenceType.GATE_LOG,
+            content=issues_json,
+            filename="L12/issues.json",
+        )
+
+        return path_md or path_report or path_signoff or path_tracker or path_issues
+
+    @staticmethod
+    def _build_summary_markdown(raw_outputs: dict[str, str]) -> str:
+        """构建 L12 Markdown 摘要(评分 / 历史对比 / 可执行建议)。"""
         try:
             score_data = json.loads(raw_outputs.get("score", "{}"))
         except (json.JSONDecodeError, TypeError):
@@ -730,25 +756,4 @@ class L12Report(LayerBase):
                 f"- **{rec.get('priority', '?')}** "
                 f"[{rec.get('layer_id', '?')}] {rec.get('recommendation', '')}\n"
             )
-
-        path_md = await archiver.archive(
-            layer_id=self.layer_id,
-            evidence_type=EvidenceType.GATE_LOG,
-            content=md_content,
-            filename="L12/audit_summary.md",
-        )
-
-        # 5. issues.json
-        issues_json = json.dumps(
-            [issue.model_dump(mode="json") for issue in issues],
-            ensure_ascii=False,
-            indent=2,
-        )
-        path_issues = await archiver.archive(
-            layer_id=self.layer_id,
-            evidence_type=EvidenceType.GATE_LOG,
-            content=issues_json,
-            filename="L12/issues.json",
-        )
-
-        return path_md or path_report or path_signoff or path_tracker or path_issues
+        return md_content

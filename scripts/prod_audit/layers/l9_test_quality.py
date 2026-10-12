@@ -166,14 +166,10 @@ class L9TestQuality(LayerBase):
     # 10.1 覆盖率分级阈值
     # ------------------------------------------------------------------
 
-    async def _check_coverage(
-        self, builder: IssueBuilder
-    ) -> tuple[list[AuditIssue], str]:
-        """执行 ``pytest --cov=fastapi_app --cov-report=json`` 并按分级阈值校验。"""
-        issues: list[AuditIssue] = []
-        raw_parts: list[str] = []
-
-        cmd = [
+    @staticmethod
+    def _coverage_cmd() -> list[str]:
+        """覆盖率 pytest 命令行。"""
+        return [
             sys.executable,
             "-m",
             "pytest",
@@ -183,10 +179,27 @@ class L9TestQuality(LayerBase):
             "-q",
         ]
 
+    def _coverage_issue(self, builder: IssueBuilder, severity, description: str,
+                        suggestion: str, file: str = "tests/") -> AuditIssue:
+        """构造 L9 覆盖率问题的统一入口（rule_id/owner/due_date 恒定）。"""
+        return builder.build(
+            layer_id=self.layer_id,
+            severity=severity,
+            file=file,
+            line=1,
+            description=description,
+            suggestion=suggestion,
+            rule_id="L9-COVERAGE-001",
+            owner=DEFAULT_OWNER,
+            due_date=DEFAULT_DUE_DATE,
+        )
+
+    async def _run_coverage_pytest(self, builder: IssueBuilder):
+        """执行覆盖率 pytest。成功返回 (proc, None)；失败返回 (None, (issues, raw_text))。"""
         try:
             proc = await asyncio.to_thread(
                 subprocess.run,
-                cmd,
+                self._coverage_cmd(),
                 capture_output=True,
                 encoding="utf-8",
                 cwd=str(PROJECT_ROOT),
@@ -194,81 +207,56 @@ class L9TestQuality(LayerBase):
                 check=False,
             )
         except subprocess.TimeoutExpired:
-            issues.append(
-                builder.build(
-                    layer_id=self.layer_id,
-                    severity=Severity.HIGH,
-                    file="tests/",
-                    line=1,
-                    description=f"pytest 覆盖率执行超时(>{_PYTEST_TIMEOUT}s)",
-                    suggestion="检查测试套件规模或增大超时阈值",
-                    rule_id="L9-COVERAGE-001",
-                    owner=DEFAULT_OWNER,
-                    due_date=DEFAULT_DUE_DATE,
-                )
+            issue = self._coverage_issue(
+                builder, Severity.HIGH,
+                f"pytest 覆盖率执行超时(>{_PYTEST_TIMEOUT}s)",
+                "检查测试套件规模或增大超时阈值",
             )
-            return issues, "TIMEOUT"
+            return None, ([issue], "TIMEOUT")
         except FileNotFoundError:
-            issues.append(
-                builder.build(
-                    layer_id=self.layer_id,
-                    severity=Severity.HIGH,
-                    file="tests/",
-                    line=1,
-                    description="pytest 未安装,无法执行覆盖率分析",
-                    suggestion="安装 pytest 与 pytest-cov",
-                    rule_id="L9-COVERAGE-001",
-                    owner=DEFAULT_OWNER,
-                    due_date=DEFAULT_DUE_DATE,
-                )
+            issue = self._coverage_issue(
+                builder, Severity.HIGH,
+                "pytest 未安装,无法执行覆盖率分析",
+                "安装 pytest 与 pytest-cov",
             )
-            return issues, "pytest 未安装"
+            return None, ([issue], "pytest 未安装")
+        return proc, None
 
-        raw_parts.append(f"pytest_exit_code: {proc.returncode}")
-        raw_parts.append(f"pytest_stdout_tail:\n{proc.stdout[-2000:]}")
-        if proc.stderr:
-            raw_parts.append(f"pytest_stderr_tail:\n{proc.stderr[-1000:]}")
-
+    def _load_coverage_json(self, builder: IssueBuilder, issues: list[AuditIssue]) -> dict | None:
+        """读取并解析 coverage.json；失败时往 issues 追加问题并返回 None。"""
         coverage_file = PROJECT_ROOT / "coverage.json"
         if not coverage_file.exists():
             issues.append(
-                builder.build(
-                    layer_id=self.layer_id,
-                    severity=Severity.MEDIUM,
-                    file="coverage.json",
-                    line=1,
-                    description="覆盖率报告 coverage.json 未生成(降级为警告,不阻断 pipeline)",
-                    suggestion=(
+                self._coverage_issue(
+                    builder, Severity.MEDIUM,
+                    "覆盖率报告 coverage.json 未生成(降级为警告,不阻断 pipeline)",
+                    (
                         "如需覆盖率分级校验,请手动执行: "
                         "python -m pytest --cov=fastapi_app "
                         "--cov-report=json:coverage.json fastapi_app/tests/"
                     ),
-                    rule_id="L9-COVERAGE-001",
-                    owner=DEFAULT_OWNER,
-                    due_date=DEFAULT_DUE_DATE,
+                    file="coverage.json",
                 )
             )
-            return issues, "\n".join(raw_parts)
-
+            return None
         try:
-            cov_data = json.loads(coverage_file.read_text(encoding="utf-8"))
+            return json.loads(coverage_file.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError) as exc:
             issues.append(
-                builder.build(
-                    layer_id=self.layer_id,
-                    severity=Severity.HIGH,
+                self._coverage_issue(
+                    builder, Severity.HIGH,
+                    f"解析覆盖率报告失败: {exc}",
+                    "重新生成覆盖率报告",
                     file="coverage.json",
-                    line=1,
-                    description=f"解析覆盖率报告失败: {exc}",
-                    suggestion="重新生成覆盖率报告",
-                    rule_id="L9-COVERAGE-001",
-                    owner=DEFAULT_OWNER,
-                    due_date=DEFAULT_DUE_DATE,
                 )
             )
-            return issues, "\n".join(raw_parts)
+            return None
 
-        # 按模块分级校验
+    def _evaluate_coverage_tiers(self, cov_data: dict, builder: IssueBuilder
+                                 ) -> tuple[list[AuditIssue], list[str]]:
+        """按模块分级统计最低覆盖率并对低于阈值者出问题。返回 (issues, raw_parts)。"""
+        issues: list[AuditIssue] = []
+        raw_parts: list[str] = []
         files_cov: dict[str, dict[str, object]] = cov_data.get("files", {})
         tier_min_cov: dict[str, float] = dict.fromkeys(_COVERAGE_THRESHOLDS, 0.0)
         tier_file_count: dict[str, int] = dict.fromkeys(_COVERAGE_THRESHOLDS, 0)
@@ -294,21 +282,42 @@ class L9TestQuality(LayerBase):
                 continue
             if min_cov < threshold:
                 issues.append(
-                    builder.build(
-                        layer_id=self.layer_id,
-                        severity=Severity.MEDIUM,
+                    self._coverage_issue(
+                        builder, Severity.MEDIUM,
+                        f"{tier} 模块覆盖率 {min_cov:.1f}% 低于阈值 {threshold}%",
+                        f"补充 {tier} 模块单元测试至覆盖率 ≥ {threshold}%",
                         file=f"fastapi_app/ ({tier})",
-                        line=1,
-                        description=(
-                            f"{tier} 模块覆盖率 {min_cov:.1f}% 低于阈值 {threshold}%"
-                        ),
-                        suggestion=f"补充 {tier} 模块单元测试至覆盖率 ≥ {threshold}%",
-                        rule_id="L9-COVERAGE-001",
-                        owner=DEFAULT_OWNER,
-                        due_date=DEFAULT_DUE_DATE,
                     )
                 )
+        return issues, raw_parts
 
+    async def _check_coverage(
+        self, builder: IssueBuilder
+    ) -> tuple[list[AuditIssue], str]:
+        """执行 ``pytest --cov=fastapi_app --cov-report=json`` 并按分级阈值校验。
+
+        2026-10-11（复核 P2-14⑦）：原 134 行拆为命令行构造 / 执行 / 报告加载 /
+        分级评估四个单元，主方法只保留编排与 raw 汇总。
+        """
+        issues: list[AuditIssue] = []
+        raw_parts: list[str] = []
+
+        proc, err_result = await self._run_coverage_pytest(builder)
+        if err_result is not None:
+            return err_result
+
+        raw_parts.append(f"pytest_exit_code: {proc.returncode}")
+        raw_parts.append(f"pytest_stdout_tail:\n{proc.stdout[-2000:]}")
+        if proc.stderr:
+            raw_parts.append(f"pytest_stderr_tail:\n{proc.stderr[-1000:]}")
+
+        cov_data = self._load_coverage_json(builder, issues)
+        if cov_data is None:
+            return issues, "\n".join(raw_parts)
+
+        tier_issues, tier_raw = self._evaluate_coverage_tiers(cov_data, builder)
+        issues.extend(tier_issues)
+        raw_parts.extend(tier_raw)
         return issues, "\n".join(raw_parts)
 
     @staticmethod

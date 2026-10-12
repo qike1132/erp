@@ -459,7 +459,26 @@ class L10Frontend(LayerBase):
                 )
             ], f"READ_ERROR: {exc}"
 
+        rel = capacitor_file.relative_to(PROJECT_ROOT).as_posix()
+
         # 校验关键字段
+        self._check_capacitor_fields(source, rel, builder, issues, raw_parts)
+        # 校验 server url 配置(生产环境须指向后端 API)
+        self._check_capacitor_server_url(source, rel, builder, issues, raw_parts)
+        # 校验 .env.capacitor 存在
+        self._check_capacitor_env(builder, issues, raw_parts)
+
+        return issues, "\n".join(raw_parts)
+
+    def _check_capacitor_fields(
+        self,
+        source: str,
+        rel: str,
+        builder: IssueBuilder,
+        issues: list[AuditIssue],
+        raw_parts: list[str],
+    ) -> None:
+        """校验 capacitor.config.ts 关键字段齐全。"""
         for field in _CAPACITOR_REQUIRED_FIELDS:
             field_re = re.compile(rf"{field}\s*:\s*['\"]([^'\"]+)['\"]")
             match = field_re.search(source)
@@ -468,7 +487,7 @@ class L10Frontend(LayerBase):
                     builder.build(
                         layer_id=self.layer_id,
                         severity=Severity.HIGH,
-                        file=str(capacitor_file.relative_to(PROJECT_ROOT).as_posix()),
+                        file=rel,
                         line=1,
                         description=f"capacitor.config.ts 缺少 {field} 配置",
                         suggestion=f"添加 {field} 字段",
@@ -480,7 +499,15 @@ class L10Frontend(LayerBase):
             else:
                 raw_parts.append(f"{field}: {match.group(1)}")
 
-        # 校验 server url 配置(生产环境须指向后端 API)
+    def _check_capacitor_server_url(
+        self,
+        source: str,
+        rel: str,
+        builder: IssueBuilder,
+        issues: list[AuditIssue],
+        raw_parts: list[str],
+    ) -> None:
+        """校验 capacitor.config.ts 的 server.url 配置。"""
         server_url_re = re.compile(r"url\s*:\s*['\"]([^'\"]+)['\"]")
         server_match = server_url_re.search(source)
         if server_match:
@@ -490,7 +517,7 @@ class L10Frontend(LayerBase):
                 builder.build(
                     layer_id=self.layer_id,
                     severity=Severity.MEDIUM,
-                    file=str(capacitor_file.relative_to(PROJECT_ROOT).as_posix()),
+                    file=rel,
                     line=1,
                     description="capacitor.config.ts 未配置 server.url",
                     suggestion="添加 server.url 指向后端 API 地址",
@@ -500,7 +527,13 @@ class L10Frontend(LayerBase):
                 )
             )
 
-        # 校验 .env.capacitor 存在
+    def _check_capacitor_env(
+        self,
+        builder: IssueBuilder,
+        issues: list[AuditIssue],
+        raw_parts: list[str],
+    ) -> None:
+        """校验 .env.capacitor 存在。"""
         env_capacitor = FRONTEND_DIR / ".env.capacitor"
         if not env_capacitor.exists():
             issues.append(
@@ -522,8 +555,6 @@ class L10Frontend(LayerBase):
                 raw_parts.append(f"env_capacitor_lines: {len(env_content.splitlines())}")
             except (OSError, UnicodeDecodeError):
                 pass
-
-        return issues, "\n".join(raw_parts)
 
     # ------------------------------------------------------------------
     # 证据归档

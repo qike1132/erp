@@ -36,7 +36,12 @@ from scripts.prod_audit.base.layer_base import (
     ReleaseDecision,
     Severity,
 )
-from scripts.prod_audit.config_loader import AuditConfig, ConfigLoader, RulesRegistry
+from scripts.prod_audit.config_loader import (
+    AuditConfig,
+    ConfigLoader,
+    LayerConfig,
+    RulesRegistry,
+)
 from scripts.prod_audit.evidence_archiver import EvidenceArchiver
 from scripts.prod_audit.exceptions import (
     AuditConfigError,
@@ -323,86 +328,15 @@ class AuditOrchestrator:
         for idx in range(start_idx, len(LAYER_ORDER)):
             layer_id = LAYER_ORDER[idx]
             layer_cfg = self.config.get_layer(layer_id)
-
-            # 层禁用跳过
-            if not layer_cfg.enabled:
-                layer_results[layer_id] = LayerResult(
-                    layer_id=layer_id,
-                    layer_name=layer_cfg.layer_name,
-                    status=LayerStatus.SKIPPED,
-                    issues=[],
-                    evidence_path=None,
-                    started_at=datetime.now(UTC),
-                    finished_at=datetime.now(UTC),
-                    error=None,
-                    layer_score=100.0,
-                    weight=self.config.get_weight(layer_id),
-                )
-                await self._save_state(run_id, layer_id, layer_results, started_at)
-                continue
-
-            # 加载层执行器
-            executor = self._get_executor(layer_id)
-            if executor is None:
-                # 层执行器尚未实现
-                raise NotImplementedError(
-                    f"Layer executor for {layer_id} ({layer_cfg.layer_name}) "
-                    f"is not implemented. Module "
-                    f"'scripts.prod_audit.layers.{LAYER_MODULE_NAMES[layer_id]}' "
-                    "not found. Implement the layer executor in a subsequent task group."
-                )
-
-            # 同步上下文：将已完成层结果注入 context，供后续层（如 L12）读取
-            context.previous_results = list(layer_results.values())
-
-            # 执行层审核
-            layer_started = datetime.now(UTC)
-            try:
-                result = await executor.run(context)
-            except AuditLayerBlockedError:
-                raise
-            except Exception as exc:
-                result = LayerResult(
-                    layer_id=layer_id,
-                    layer_name=layer_cfg.layer_name,
-                    status=LayerStatus.FAILED,
-                    issues=[],
-                    evidence_path=None,
-                    started_at=layer_started,
-                    finished_at=datetime.now(UTC),
-                    error=str(exc),
-                    layer_score=0.0,
-                    weight=self.config.get_weight(layer_id),
-                )
-                layer_results[layer_id] = result
-                await self._save_state(run_id, layer_id, layer_results, started_at)
-                raise
-
-            result.weight = self.config.get_weight(layer_id)
-            layer_results[layer_id] = result
-
-            # 持久化状态
-            await self._save_state(run_id, layer_id, layer_results, started_at)
-
-            # 归档门禁日志
-            await self._archive_gate_log(layer_id, result)
-
-            # 门禁检查
-            if not executor.check_gate(result.issues, blocking_threshold):
-                blocking_issues = [
-                    i
-                    for i in result.issues
-                    if _SEVERITY_THRESHOLD_MAP.get(
-                        self.config.severity_threshold, Severity.HIGH
-                    )
-                    in (Severity.CRITICAL, Severity.HIGH)
-                    and i.severity in (Severity.CRITICAL, Severity.HIGH)
-                ]
-                summary = (
-                    f"{len(blocking_issues)} blocking issue(s) at "
-                    f"{self.config.severity_threshold}+ severity"
-                )
-                raise AuditLayerBlockedError(layer_id, summary)
+            await self._execute_layer(
+                layer_id,
+                layer_cfg,
+                context,
+                run_id,
+                layer_results,
+                started_at,
+                blocking_threshold,
+            )
 
         # 计算评分
         score = self._calculate_score(layer_results, started_at)
@@ -427,6 +361,108 @@ class AuditOrchestrator:
             started_at=started_at,
             finished_at=finished_at,
         )
+
+    async def _execute_layer(
+        self,
+        layer_id: str,
+        layer_cfg: LayerConfig,
+        context: AuditContext,
+        run_id: str,
+        layer_results: dict[str, LayerResult],
+        started_at: datetime,
+        blocking_threshold: Severity,
+    ) -> None:
+        """执行单层审核：跳过/失败/门禁阻断的处理与状态持久化。"""
+        # 层禁用跳过
+        if not layer_cfg.enabled:
+            layer_results[layer_id] = LayerResult(
+                layer_id=layer_id,
+                layer_name=layer_cfg.layer_name,
+                status=LayerStatus.SKIPPED,
+                issues=[],
+                evidence_path=None,
+                started_at=datetime.now(UTC),
+                finished_at=datetime.now(UTC),
+                error=None,
+                layer_score=100.0,
+                weight=self.config.get_weight(layer_id),
+            )
+            await self._save_state(run_id, layer_id, layer_results, started_at)
+            return
+
+        # 加载层执行器
+        executor = self._get_executor(layer_id)
+        if executor is None:
+            # 层执行器尚未实现
+            raise NotImplementedError(
+                f"Layer executor for {layer_id} ({layer_cfg.layer_name}) "
+                f"is not implemented. Module "
+                f"'scripts.prod_audit.layers.{LAYER_MODULE_NAMES[layer_id]}' "
+                "not found. Implement the layer executor in a subsequent task group."
+            )
+
+        # 同步上下文：将已完成层结果注入 context，供后续层（如 L12）读取
+        context.previous_results = list(layer_results.values())
+
+        # 执行层审核
+        layer_started = datetime.now(UTC)
+        try:
+            result = await executor.run(context)
+        except AuditLayerBlockedError:
+            raise
+        except Exception as exc:
+            result = LayerResult(
+                layer_id=layer_id,
+                layer_name=layer_cfg.layer_name,
+                status=LayerStatus.FAILED,
+                issues=[],
+                evidence_path=None,
+                started_at=layer_started,
+                finished_at=datetime.now(UTC),
+                error=str(exc),
+                layer_score=0.0,
+                weight=self.config.get_weight(layer_id),
+            )
+            layer_results[layer_id] = result
+            await self._save_state(run_id, layer_id, layer_results, started_at)
+            raise
+
+        result.weight = self.config.get_weight(layer_id)
+        layer_results[layer_id] = result
+
+        # 持久化状态
+        await self._save_state(run_id, layer_id, layer_results, started_at)
+
+        # 归档门禁日志
+        await self._archive_gate_log(layer_id, result)
+
+        # 门禁检查
+        self._enforce_layer_gate(layer_id, executor, result, blocking_threshold)
+
+    def _enforce_layer_gate(
+        self,
+        layer_id: str,
+        executor: LayerBase,
+        result: LayerResult,
+        blocking_threshold: Severity,
+    ) -> None:
+        """层门禁检查：存在阻断问题时抛出 AuditLayerBlockedError。"""
+        if executor.check_gate(result.issues, blocking_threshold):
+            return
+        blocking_issues = [
+            i
+            for i in result.issues
+            if _SEVERITY_THRESHOLD_MAP.get(
+                self.config.severity_threshold, Severity.HIGH
+            )
+            in (Severity.CRITICAL, Severity.HIGH)
+            and i.severity in (Severity.CRITICAL, Severity.HIGH)
+        ]
+        summary = (
+            f"{len(blocking_issues)} blocking issue(s) at "
+            f"{self.config.severity_threshold}+ severity"
+        )
+        raise AuditLayerBlockedError(layer_id, summary)
 
     async def _save_state(
         self,
@@ -501,55 +537,11 @@ class AuditOrchestrator:
             result = layer_results.get(layer_id)
             weight = self.config.get_weight(layer_id)
             weights.append(WeightEntry(layer_id=layer_id, weight=weight))
-
-            if result is None or result.status == LayerStatus.SKIPPED:
-                layer_scores.append(
-                    LayerScoreEntry(
-                        layer_id=layer_id,
-                        score=100.0,
-                        basis="Layer skipped (disabled), no penalty.",
-                    )
-                )
-                total_score += 100.0 * weight
-                continue
-
-            if result.status == LayerStatus.FAILED:
-                layer_scores.append(
-                    LayerScoreEntry(
-                        layer_id=layer_id,
-                        score=0.0,
-                        basis=f"Layer failed: {result.error or 'unknown error'}",
-                    )
-                )
-                basis_parts.append(f"{layer_id}: FAILED (0)")
-                continue
-
-            # 计算扣分
-            deduction = 0
-            issue_count_by_severity: dict[Severity, int] = {}
-            for issue in result.issues:
-                p = penalty_map.get(issue.severity, 0)
-                deduction += p
-                issue_count_by_severity[issue.severity] = (
-                    issue_count_by_severity.get(issue.severity, 0) + 1
-                )
-                if issue.severity in (Severity.CRITICAL, Severity.HIGH):
-                    has_blocking = True
-
-            layer_score = max(0.0, 100.0 - deduction)
-            layer_scores.append(
-                LayerScoreEntry(
-                    layer_id=layer_id,
-                    score=layer_score,
-                    basis=(
-                        f"100 - {deduction} (deduction: "
-                        f"{', '.join(f'{s.value}={c}' for s, c in issue_count_by_severity.items())})"
-                    ),
-                )
+            delta, layer_blocking = self._score_single_layer(
+                layer_id, result, weight, penalty_map, layer_scores, basis_parts
             )
-            total_score += layer_score * weight
-            if deduction > 0:
-                basis_parts.append(f"{layer_id}: {layer_score:.1f} (-{deduction})")
+            total_score += delta
+            has_blocking = has_blocking or layer_blocking
 
         total_score = round(total_score, 2)
         is_ready = total_score >= self.config.readiness_threshold and not has_blocking
@@ -571,6 +563,65 @@ class AuditOrchestrator:
             )
         except Exception as exc:
             raise ScoreCalculationError(f"Failed to build ProductionReadinessScore: {exc}") from exc
+
+    def _score_single_layer(
+        self,
+        layer_id: str,
+        result: LayerResult | None,
+        weight: float,
+        penalty_map: dict[Severity, int],
+        layer_scores: list[LayerScoreEntry],
+        basis_parts: list[str],
+    ) -> tuple[float, bool]:
+        """计算单层得分，返回 (总分增量, 是否含阻断问题)。"""
+        if result is None or result.status == LayerStatus.SKIPPED:
+            layer_scores.append(
+                LayerScoreEntry(
+                    layer_id=layer_id,
+                    score=100.0,
+                    basis="Layer skipped (disabled), no penalty.",
+                )
+            )
+            return 100.0 * weight, False
+
+        if result.status == LayerStatus.FAILED:
+            layer_scores.append(
+                LayerScoreEntry(
+                    layer_id=layer_id,
+                    score=0.0,
+                    basis=f"Layer failed: {result.error or 'unknown error'}",
+                )
+            )
+            basis_parts.append(f"{layer_id}: FAILED (0)")
+            return 0.0, False
+
+        # 计算扣分
+        deduction = 0
+        issue_count_by_severity: dict[Severity, int] = {}
+        layer_blocking = False
+        for issue in result.issues:
+            p = penalty_map.get(issue.severity, 0)
+            deduction += p
+            issue_count_by_severity[issue.severity] = (
+                issue_count_by_severity.get(issue.severity, 0) + 1
+            )
+            if issue.severity in (Severity.CRITICAL, Severity.HIGH):
+                layer_blocking = True
+
+        layer_score = max(0.0, 100.0 - deduction)
+        layer_scores.append(
+            LayerScoreEntry(
+                layer_id=layer_id,
+                score=layer_score,
+                basis=(
+                    f"100 - {deduction} (deduction: "
+                    f"{', '.join(f'{s.value}={c}' for s, c in issue_count_by_severity.items())})"
+                ),
+            )
+        )
+        if deduction > 0:
+            basis_parts.append(f"{layer_id}: {layer_score:.1f} (-{deduction})")
+        return layer_score * weight, layer_blocking
 
     def _generate_signoff(
         self,

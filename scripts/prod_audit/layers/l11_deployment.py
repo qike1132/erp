@@ -274,6 +274,67 @@ class L11Deployment(LayerBase):
         raw_parts: list[str] = []
 
         # 1. .env.example 存在且枚举完整
+        example_issues, example_raw = self._check_env_example(builder)
+        issues.extend(example_issues)
+        raw_parts.extend(example_raw)
+
+        # 2. .env.production 无硬编码密钥
+        env_prod = PROJECT_ROOT / ".env.production"
+        if env_prod.exists():
+            try:
+                prod_lines = env_prod.read_text(encoding="utf-8").splitlines()
+            except (OSError, UnicodeDecodeError) as exc:
+                issues.append(
+                    builder.build(
+                        layer_id=self.layer_id,
+                        severity=Severity.HIGH,
+                        file=".env.production",
+                        line=1,
+                        description=f"读取 .env.production 失败: {exc}",
+                        suggestion="检查文件权限与编码",
+                        rule_id="L11-HARDCODED-SECRET-001",
+                        owner=DEFAULT_OWNER,
+                        due_date=DEFAULT_DUE_DATE,
+                    )
+                )
+                return issues, "\n".join(raw_parts)
+
+            for idx, line in enumerate(prod_lines, start=1):
+                stripped = line.strip()
+                if not stripped or stripped.startswith("#"):
+                    continue
+                if _HARDCODED_SECRET_RE.search(line):
+                    issues.append(
+                        builder.build(
+                            layer_id=self.layer_id,
+                            severity=Severity.CRITICAL,
+                            file=".env.production",
+                            line=idx,
+                            description="检测到硬编码密钥/密码(非环境变量引用)",
+                            suggestion="改为从环境变量或密钥管理服务读取",
+                            rule_id="L11-HARDCODED-SECRET-001",
+                            owner=DEFAULT_OWNER,
+                            due_date=DEFAULT_DUE_DATE,
+                        )
+                    )
+            raw_parts.append(f"env_prod_lines: {len(prod_lines)}")
+        else:
+            raw_parts.append(".env.production 不存在,跳过硬编码密钥检查")
+
+        # 3. core/config.py Pydantic Settings 校验
+        config_issues, config_raw = self._check_pydantic_settings(builder)
+        issues.extend(config_issues)
+        raw_parts.extend(config_raw)
+
+        return issues, "\n".join(raw_parts)
+
+    def _check_env_example(
+        self, builder: IssueBuilder
+    ) -> tuple[list[AuditIssue], list[str]]:
+        """审查 .env.example 存在且枚举全部必需环境变量。"""
+        issues: list[AuditIssue] = []
+        raw_parts: list[str] = []
+
         env_example = PROJECT_ROOT / ".env.example"
         if not env_example.exists():
             issues.append(
@@ -332,50 +393,15 @@ class L11Deployment(LayerBase):
                         )
                     )
 
-        # 2. .env.production 无硬编码密钥
-        env_prod = PROJECT_ROOT / ".env.production"
-        if env_prod.exists():
-            try:
-                prod_lines = env_prod.read_text(encoding="utf-8").splitlines()
-            except (OSError, UnicodeDecodeError) as exc:
-                issues.append(
-                    builder.build(
-                        layer_id=self.layer_id,
-                        severity=Severity.HIGH,
-                        file=".env.production",
-                        line=1,
-                        description=f"读取 .env.production 失败: {exc}",
-                        suggestion="检查文件权限与编码",
-                        rule_id="L11-HARDCODED-SECRET-001",
-                        owner=DEFAULT_OWNER,
-                        due_date=DEFAULT_DUE_DATE,
-                    )
-                )
-                return issues, "\n".join(raw_parts)
+        return issues, raw_parts
 
-            for idx, line in enumerate(prod_lines, start=1):
-                stripped = line.strip()
-                if not stripped or stripped.startswith("#"):
-                    continue
-                if _HARDCODED_SECRET_RE.search(line):
-                    issues.append(
-                        builder.build(
-                            layer_id=self.layer_id,
-                            severity=Severity.CRITICAL,
-                            file=".env.production",
-                            line=idx,
-                            description="检测到硬编码密钥/密码(非环境变量引用)",
-                            suggestion="改为从环境变量或密钥管理服务读取",
-                            rule_id="L11-HARDCODED-SECRET-001",
-                            owner=DEFAULT_OWNER,
-                            due_date=DEFAULT_DUE_DATE,
-                        )
-                    )
-            raw_parts.append(f"env_prod_lines: {len(prod_lines)}")
-        else:
-            raw_parts.append(".env.production 不存在,跳过硬编码密钥检查")
+    def _check_pydantic_settings(
+        self, builder: IssueBuilder
+    ) -> tuple[list[AuditIssue], list[str]]:
+        """审查 core/config.py 使用 Pydantic BaseSettings 管理配置。"""
+        issues: list[AuditIssue] = []
+        raw_parts: list[str] = []
 
-        # 3. core/config.py Pydantic Settings 校验
         config_file = CORE_DIR / "config.py"
         if config_file.exists():
             try:
@@ -399,7 +425,7 @@ class L11Deployment(LayerBase):
             except (OSError, UnicodeDecodeError):
                 pass
 
-        return issues, "\n".join(raw_parts)
+        return issues, raw_parts
 
     # ------------------------------------------------------------------
     # 12.1 依赖锁文件(requirements.txt / package-lock.json)
@@ -447,27 +473,48 @@ class L11Deployment(LayerBase):
                 )
                 return issues, "\n".join(raw_parts)
 
-            for idx, line in enumerate(req_lines, start=1):
-                stripped = line.strip()
-                if not stripped or stripped.startswith("#") or stripped.startswith("-"):
-                    continue
-                if _FLOATING_VERSION_RE.match(stripped):
-                    issues.append(
-                        builder.build(
-                            layer_id=self.layer_id,
-                            severity=Severity.HIGH,
-                            file="requirements.txt",
-                            line=idx,
-                            description=f"浮动版本依赖: {stripped}",
-                            suggestion="使用 == 锁定精确版本",
-                            rule_id="L11-DEP-UNLOCKED-001",
-                            owner=DEFAULT_OWNER,
-                            due_date=DEFAULT_DUE_DATE,
-                        )
-                    )
+            issues.extend(self._scan_floating_requirements(builder, req_lines))
             raw_parts.append(f"requirements_lines: {len(req_lines)}")
 
         # 2. package-lock.json 存在
+        lock_issues, lock_raw = self._check_package_lock(builder)
+        issues.extend(lock_issues)
+        raw_parts.extend(lock_raw)
+
+        return issues, "\n".join(raw_parts)
+
+    def _scan_floating_requirements(
+        self, builder: IssueBuilder, req_lines: list[str]
+    ) -> list[AuditIssue]:
+        """扫描 requirements.txt 中浮动版本(>= / > / < / <= / ~= / *)依赖行。"""
+        issues: list[AuditIssue] = []
+        for idx, line in enumerate(req_lines, start=1):
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or stripped.startswith("-"):
+                continue
+            if _FLOATING_VERSION_RE.match(stripped):
+                issues.append(
+                    builder.build(
+                        layer_id=self.layer_id,
+                        severity=Severity.HIGH,
+                        file="requirements.txt",
+                        line=idx,
+                        description=f"浮动版本依赖: {stripped}",
+                        suggestion="使用 == 锁定精确版本",
+                        rule_id="L11-DEP-UNLOCKED-001",
+                        owner=DEFAULT_OWNER,
+                        due_date=DEFAULT_DUE_DATE,
+                    )
+                )
+        return issues
+
+    def _check_package_lock(
+        self, builder: IssueBuilder
+    ) -> tuple[list[AuditIssue], list[str]]:
+        """审查 package-lock.json 是否存在且可解析。"""
+        issues: list[AuditIssue] = []
+        raw_parts: list[str] = []
+
         lock_file = FRONTEND_DIR / "package-lock.json"
         if not lock_file.exists():
             issues.append(
@@ -491,7 +538,7 @@ class L11Deployment(LayerBase):
             except (json.JSONDecodeError, OSError):
                 raw_parts.append("package-lock.json 解析失败")
 
-        return issues, "\n".join(raw_parts)
+        return issues, raw_parts
 
     # ------------------------------------------------------------------
     # 12.3 数据库迁移(Alembic 无 pending)
@@ -545,19 +592,7 @@ class L11Deployment(LayerBase):
         raw_parts.append(f"alembic_ini: {_rel(alembic_ini)}")
         raw_parts.append(f"alembic_dir: {_rel(alembic_dir)}")
 
-        # versions 目录: 先按 ini 的 script_location 解析,再回落 ini 同级 / alembic 目录
-        search_roots: list[Path] = []
-        script_root = _resolve_script_location(alembic_ini)
-        if script_root is not None:
-            search_roots.append(script_root)
-        if alembic_ini is not None:
-            search_roots.append(alembic_ini.parent)
-        if alembic_dir is not None:
-            search_roots.append(alembic_dir)
-
-        versions_dir = next(
-            (r / "versions" for r in search_roots if (r / "versions").is_dir()), None
-        )
+        versions_dir = self._resolve_versions_dir(alembic_ini, alembic_dir)
 
         if versions_dir is None:
             issues.append(
@@ -575,9 +610,43 @@ class L11Deployment(LayerBase):
             )
             return issues, "\n".join(raw_parts)
 
+        mf_issues, mf_raw = self._scan_migration_files(builder, versions_dir)
+        issues.extend(mf_issues)
+        raw_parts.extend(mf_raw)
+
+        return issues, "\n".join(raw_parts)
+
+    @staticmethod
+    def _resolve_versions_dir(
+        alembic_ini: Path | None, alembic_dir: Path | None
+    ) -> Path | None:
+        """解析 Alembic ``versions`` 目录。
+
+        versions 目录: 先按 ini 的 script_location 解析,再回落 ini 同级 / alembic 目录。
+        """
+        search_roots: list[Path] = []
+        script_root = _resolve_script_location(alembic_ini)
+        if script_root is not None:
+            search_roots.append(script_root)
+        if alembic_ini is not None:
+            search_roots.append(alembic_ini.parent)
+        if alembic_dir is not None:
+            search_roots.append(alembic_dir)
+
+        return next(
+            (r / "versions" for r in search_roots if (r / "versions").is_dir()), None
+        )
+
+    def _scan_migration_files(
+        self, builder: IssueBuilder, versions_dir: Path
+    ) -> tuple[list[AuditIssue], list[str]]:
+        """统计 versions 目录下的迁移文件,无迁移文件时发 MEDIUM。"""
+        issues: list[AuditIssue] = []
         migration_files = list(versions_dir.glob("*.py"))
-        raw_parts.append(f"versions_dir: {_rel(versions_dir)}")
-        raw_parts.append(f"migration_files: {len(migration_files)}")
+        raw_parts = [
+            f"versions_dir: {_rel(versions_dir)}",
+            f"migration_files: {len(migration_files)}",
+        ]
 
         if not migration_files:
             issues.append(
@@ -594,7 +663,7 @@ class L11Deployment(LayerBase):
                 )
             )
 
-        return issues, "\n".join(raw_parts)
+        return issues, raw_parts
 
     # ------------------------------------------------------------------
     # 12.3 健康检查端点(/health /ready)

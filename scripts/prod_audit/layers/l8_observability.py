@@ -550,7 +550,41 @@ class L8Observability(LayerBase):
                 )
             ], f"READ_ERROR: {exc}"
 
+        rel = metrics_file.relative_to(PROJECT_ROOT).as_posix()
+
         # 检查指标维度覆盖(Counter/Histogram/Gauge 关键词 + 维度名)
+        self._check_metrics_dimensions(source, rel, builder, issues, raw_parts)
+
+        # 2. 检查 /metrics 端点
+        found_metrics_endpoint = self._find_metrics_endpoint()
+
+        raw_parts.append(f"metrics_endpoint_found: {found_metrics_endpoint}")
+        if not found_metrics_endpoint:
+            issues.append(
+                builder.build(
+                    layer_id=self.layer_id,
+                    severity=Severity.MEDIUM,
+                    file="fastapi_app/",
+                    line=1,
+                    description="未发现 /metrics 端点(Prometheus 指标暴露)",
+                    suggestion="添加 /metrics 端点暴露 Prometheus 指标",
+                    rule_id="L8-METRICS-ENDPOINT-001",
+                    owner=DEFAULT_OWNER,
+                    due_date=DEFAULT_DUE_DATE,
+                )
+            )
+
+        return issues, "\n".join(raw_parts)
+
+    def _check_metrics_dimensions(
+        self,
+        source: str,
+        rel: str,
+        builder: IssueBuilder,
+        issues: list[AuditIssue],
+        raw_parts: list[str],
+    ) -> None:
+        """检查指标维度覆盖(Counter/Histogram/Gauge 关键词 + 维度名)。"""
         metric_def_re = re.compile(
             r"(?i)\b(Counter|Histogram|Gauge|Summary)\s*\(\s*[\"']([^\"']+)[\"']"
         )
@@ -569,7 +603,7 @@ class L8Observability(LayerBase):
                 builder.build(
                     layer_id=self.layer_id,
                     severity=Severity.MEDIUM,
-                    file=str(metrics_file.relative_to(PROJECT_ROOT).as_posix()),
+                    file=rel,
                     line=1,
                     description=f"监控指标未覆盖关键维度: {sorted(missing_dimensions)}",
                     suggestion="补充缺失的 Prometheus 指标定义",
@@ -579,7 +613,8 @@ class L8Observability(LayerBase):
                 )
             )
 
-        # 2. 检查 /metrics 端点
+    def _find_metrics_endpoint(self) -> bool:
+        """检查 /metrics 端点(endpoints/、main.py、core/health.py)。"""
         metrics_endpoint_re = re.compile(r"[\"'](/metrics)[\"']")
         found_metrics_endpoint = False
         for py_file in ENDPOINTS_V1_DIR.rglob("*.py"):
@@ -610,24 +645,7 @@ class L8Observability(LayerBase):
                     found_metrics_endpoint = True
             except (OSError, UnicodeDecodeError):
                 pass
-
-        raw_parts.append(f"metrics_endpoint_found: {found_metrics_endpoint}")
-        if not found_metrics_endpoint:
-            issues.append(
-                builder.build(
-                    layer_id=self.layer_id,
-                    severity=Severity.MEDIUM,
-                    file="fastapi_app/",
-                    line=1,
-                    description="未发现 /metrics 端点(Prometheus 指标暴露)",
-                    suggestion="添加 /metrics 端点暴露 Prometheus 指标",
-                    rule_id="L8-METRICS-ENDPOINT-001",
-                    owner=DEFAULT_OWNER,
-                    due_date=DEFAULT_DUE_DATE,
-                )
-            )
-
-        return issues, "\n".join(raw_parts)
+        return found_metrics_endpoint
 
     # ------------------------------------------------------------------
     # 证据归档

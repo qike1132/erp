@@ -315,11 +315,7 @@ class L4DataAccess(LayerBase):
         lines = source.splitlines()
 
         # 统计 nosec B608 标注(兼容 noqa 与 nosec 两种写法)
-        nosec_b608_lines: list[int] = []
-        nosec_re = re.compile(r"#\s*(?:noqa\s*:\s*|nosec\s+)B608", re.IGNORECASE)
-        for idx, line in enumerate(lines, start=1):
-            if nosec_re.search(line):
-                nosec_b608_lines.append(idx)
+        nosec_b608_lines = self._collect_nosec_b608_lines(lines)
 
         if len(nosec_b608_lines) < _EXPECTED_NOSEC_B608_COUNT:
             issues.append(
@@ -340,6 +336,27 @@ class L4DataAccess(LayerBase):
             )
 
         # 校验每处 nosec B608 附近使用绑定参数(:param)
+        self._check_nosec_binding_params(lines, nosec_b608_lines, rel, builder, issues)
+        return issues
+
+    def _collect_nosec_b608_lines(self, lines: list[str]) -> list[int]:
+        """统计 nosec B608 标注行号(兼容 noqa 与 nosec 两种写法)。"""
+        nosec_b608_lines: list[int] = []
+        nosec_re = re.compile(r"#\s*(?:noqa\s*:\s*|nosec\s+)B608", re.IGNORECASE)
+        for idx, line in enumerate(lines, start=1):
+            if nosec_re.search(line):
+                nosec_b608_lines.append(idx)
+        return nosec_b608_lines
+
+    def _check_nosec_binding_params(
+        self,
+        lines: list[str],
+        nosec_b608_lines: list[int],
+        rel: str,
+        builder: IssueBuilder,
+        issues: list[AuditIssue],
+    ) -> None:
+        """校验每处 nosec B608 附近使用绑定参数(:param)。"""
         binding_re = re.compile(r":\w+")
         # 注释中含"绑定参数"关键词视为已确认安全(通过模块级常量间接绑定)
         binding_note_re = re.compile(r"绑定参数|常量", re.IGNORECASE)
@@ -366,7 +383,6 @@ class L4DataAccess(LayerBase):
                         due_date=DEFAULT_DUE_DATE,
                     )
                 )
-        return issues
 
     # ------------------------------------------------------------------
     # 证据归档
