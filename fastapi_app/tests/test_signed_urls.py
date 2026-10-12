@@ -73,7 +73,7 @@ def test_nginx_secure_link_md5_alignment(monkeypatch):
 
     expect = (
         base64.urlsafe_b64encode(
-            hashlib.md5(f'{st}{uri} {secret}'.encode()).digest()  # secret 前有空格（nginx conf 写法）
+            hashlib.md5(f'{st}{uri} {secret}'.encode(), usedforsecurity=False).digest()  # secret 前有空格（nginx conf 写法）；usedforsecurity=False：与 nginx secure_link_md5 对齐，非安全用途
         )
         .rstrip(b'=')
         .decode()
