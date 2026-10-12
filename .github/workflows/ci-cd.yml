@@ -56,12 +56,24 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-    
+
+    # pg_dump 必须与服务端同一个大版本：service 是 postgres:18-alpine（刻意对齐生产
+    # 的 18.x），而 runner 自带的 pg_dump 是 16（pgdg24.04）。大版本不匹配时 pg_dump
+    # 直接 abort，让 test_restore_real_roundtrip 这类真跑 dump/restore 的用例在 CI 上
+    # 必然失败（2026-10-12 实测：server version 18.6 / pg_dump version 16.15）。
+    # 装 18 客户端即可（postgresql-common 的 pg_wrapper 默认取最新版）；末行把版本打进
+    # 日志，日后回归时一眼能看出。
+    - name: Install PostgreSQL 18 client (must match the service major)
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y postgresql-client-18
+        pg_dump --version
+
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
         python-version: '3.13'
-    
+
     - name: Cache dependencies
       uses: actions/cache@v4
       with:
