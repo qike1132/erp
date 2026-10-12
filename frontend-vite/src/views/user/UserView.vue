@@ -45,11 +45,8 @@
       :perm-checked-keys="permCheckedKeys"
       :perm-is-all-checked="permIsAllChecked"
       :perm-submitting="permSubmitting"
-      :is-perm-expanded="isPermExpanded"
-      :toggle-perm-expand="togglePermExpand"
       :is-perm-checked="isPermChecked"
       :toggle-perm-node="togglePermNode"
-      :get-perm-child-count="getPermChildCount"
       :toggle-all-perms="toggleAllPerms"
       :handle-save-permission="handleSavePermission"
     />
@@ -71,7 +68,7 @@
  * 职责：
  * - 左栏：添加新用户（用户名、密码、超级管理员勾选）
  * - 右栏：用户列表（分页、启用/禁用切换、删除）
- * - 权限分配弹窗：按模块分组展示权限树，支持全选/级联选择
+ * - 权限分配弹窗：双栏主从（左选模块 / 右配权限），支持搜索、三态勾选与父子级联
  *
  * 页面逻辑下沉到 composables/useUserManagement.ts；新增表单/用户表格/
  * 编辑弹窗/权限弹窗分别拆分为 components/ 下的子组件。
@@ -104,11 +101,8 @@ const {
   permCheckedKeys,
   permTargetName,
   permissionSections,
-  isPermExpanded,
-  togglePermExpand,
   isPermChecked,
   togglePermNode,
-  getPermChildCount,
   permIsAllChecked,
   toggleAllPerms,
   openPermissionDialog,

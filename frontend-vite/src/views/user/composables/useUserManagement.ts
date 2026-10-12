@@ -95,6 +95,65 @@ export function buildPermissionSections(
   return result
 }
 
+/** 一组权限节点的勾选状态：全选 / 半选 / 未选 */
+export type PermissionCheckState = 'all' | 'partial' | 'none'
+
+/** 收集单个模块（顶层权限）连同其子权限的 id */
+export function collectModuleIds(node: PermissionItem): number[] {
+  const ids = [node.id]
+  for (const c of node.children ?? []) ids.push(c.id)
+  return ids
+}
+
+/** 收集分区下所有权限 id（含子权限） */
+export function collectSectionIds(sec: PermissionSection): number[] {
+  return sec.items.flatMap(collectModuleIds)
+}
+
+/** 统计 ids 中已被勾选的数量 */
+export function countChecked(ids: readonly number[], checked: readonly number[]): number {
+  return ids.filter((id) => checked.includes(id)).length
+}
+
+/** 判定一组权限 id 的勾选状态（空集合按「未选」处理，避免误显示成全选） */
+export function getPermissionCheckState(
+  ids: readonly number[],
+  checked: readonly number[],
+): PermissionCheckState {
+  if (ids.length === 0) return 'none'
+  const n = countChecked(ids, checked)
+  if (n === 0) return 'none'
+  if (n === ids.length) return 'all'
+  return 'partial'
+}
+
+/**
+ * 按关键词过滤分区：命中模块名/code、模块下任一子权限名/code，或分区名本身。
+ * 空白查询原样返回（浅拷贝，避免调用方误改入参）。
+ */
+export function filterPermissionSections(
+  sections: readonly PermissionSection[],
+  query: string,
+): PermissionSection[] {
+  const q = query.trim().toLowerCase()
+  if (!q) return [...sections]
+  const result: PermissionSection[] = []
+  for (const sec of sections) {
+    if (sec.name.toLowerCase().includes(q)) {
+      result.push(sec)
+      continue
+    }
+    const items = sec.items.filter((node) => {
+      if (node.name.toLowerCase().includes(q) || node.code.toLowerCase().includes(q)) return true
+      return (node.children ?? []).some(
+        (c) => c.name.toLowerCase().includes(q) || c.code.toLowerCase().includes(q),
+      )
+    })
+    if (items.length > 0) result.push({ ...sec, items })
+  }
+  return result
+}
+
 /** 从错误对象中提取后端返回的 detail 信息 */
 export function extractErrorMessage(err: unknown, fallback: string): string {
   const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
@@ -183,7 +242,6 @@ export function useUserManagement() {
   const permDialogVisible = ref(false)
   const permissionTree = ref<PermissionItem[]>([])
   const permCheckedKeys = ref<number[]>([])
-  const permExpandedKeys = ref<Set<number>>(new Set())
   const permTargetUserId = ref(0)
   const permTargetName = ref('')
 
@@ -192,17 +250,8 @@ export function useUserManagement() {
     buildPermissionSections(permissionTree.value, authStore.navSections),
   )
 
-  /** 判断权限节点是否展开 */
-  function isPermExpanded(id: number): boolean {
-    return permExpandedKeys.value.has(id)
-  }
-
-  /** 切换权限节点的展开/折叠状态 */
-  function togglePermExpand(id: number) {
-    const s = permExpandedKeys.value
-    if (s.has(id)) s.delete(id)
-    else s.add(id)
-  }
+  /** 全部权限 id（含子权限） */
+  const allPermissionIds = computed(() => permissionTree.value.flatMap(collectModuleIds))
 
   /** 判断权限节点是否已选中 */
   function isPermChecked(id: number): boolean {
@@ -249,36 +298,16 @@ export function useUserManagement() {
     }
   }
 
-  /** 获取权限节点子项的选中计数文本（如 "2/5"） */
-  function getPermChildCount(node: PermissionItem, checked: number[]): string {
-    if (!node.children?.length) return ''
-    const total = node.children.length
-    const checkedCount = node.children.filter((c) => checked.includes(c.id)).length
-    return `${checkedCount}/${total}`
-  }
-
   /** 是否所有权限节点均已选中 */
-  const permIsAllChecked = computed(() => {
-    const allIds: number[] = []
-    for (const node of permissionTree.value) {
-      allIds.push(node.id)
-      for (const c of node.children ?? []) allIds.push(c.id)
-    }
-    return allIds.length > 0 && allIds.every((id: number) => permCheckedKeys.value.includes(id))
-  })
+  const permIsAllChecked = computed(
+    () =>
+      allPermissionIds.value.length > 0 &&
+      countChecked(allPermissionIds.value, permCheckedKeys.value) === allPermissionIds.value.length,
+  )
 
   /** 全选/取消全选所有权限 */
   function toggleAllPerms() {
-    const allIds: number[] = []
-    for (const node of permissionTree.value) {
-      allIds.push(node.id)
-      for (const c of node.children ?? []) allIds.push(c.id)
-    }
-    if (permIsAllChecked.value) {
-      permCheckedKeys.value = []
-    } else {
-      permCheckedKeys.value = [...allIds]
-    }
+    permCheckedKeys.value = permIsAllChecked.value ? [] : [...allPermissionIds.value]
   }
 
   /** 打开权限分配弹窗，加载权限树和用户已有权限 */
@@ -298,7 +327,6 @@ export function useUserManagement() {
       ])
       permissionTree.value = permRes
       permCheckedKeys.value = userPermRes.user_permission_ids
-      permExpandedKeys.value = new Set()
       permDialogVisible.value = true
     } catch {
       showToast('加载权限数据失败', 'error')
@@ -346,11 +374,8 @@ export function useUserManagement() {
     permCheckedKeys,
     permTargetName,
     permissionSections,
-    isPermExpanded,
-    togglePermExpand,
     isPermChecked,
     togglePermNode,
-    getPermChildCount,
     permIsAllChecked,
     toggleAllPerms,
     openPermissionDialog,
