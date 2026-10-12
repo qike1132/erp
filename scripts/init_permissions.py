@@ -105,6 +105,22 @@ PERMISSIONS_CONFIG = {
         'parent': {'code': 'production_summary_manage', 'name': '生产报表(全部)'},
         'children': []
     },
+    'backup': {
+        'module_name': '数据备份',
+        'icon': 'fa-database',
+        'parent': {'code': 'backup_manage', 'name': '数据备份'},
+        # 细粒度子码。备份端点走 require_any_permission(<细粒度码>, 'backup_manage')
+        # （见 fastapi_app/api/v1/endpoints/backup/_deps.py），即「持 backup_manage 全通，
+        # 也可只授其中一个」。这 4 个码此前**全仓（种子 / 迁移 / 生产库）都不存在**
+        # （2026-10-12 提权核查），等于细粒度授权是死配置——/user 里根本点不到。
+        # 改这里要同步迁移 pg_standalone_093_backup_child_permissions，反之亦然。
+        'children': [
+            {'code': 'backup_read', 'name': '查看备份'},
+            {'code': 'backup_create', 'name': '创建备份'},
+            {'code': 'backup_restore', 'name': '恢复备份'},
+            {'code': 'backup_delete', 'name': '删除备份'},
+        ]
+    },
 }
 
 
