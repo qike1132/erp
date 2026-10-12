@@ -75,13 +75,13 @@ describe('buildPermissionSections', () => {
     const tree = [
       perm(1, 'product_manage'),
       perm(2, 'order_batch_manage', { is_nav: false }), // 已从导航下线
-      perm(3, 'finance_view', { is_nav: false }),
+      perm(3, 'stockin_manage', { is_nav: false }),
     ]
     const sections = buildPermissionSections(tree, [nav('开发', 'dev', ['product_manage'])])
     expect(sections).toHaveLength(2)
     expect(nth(sections, 1).key).toBe(EXTRAS_SECTION_KEY)
     expect(nth(sections, 1).name).toBe('其他操作权限')
-    expect(nth(sections, 1).items.map((i) => i.code)).toEqual(['order_batch_manage', 'finance_view'])
+    expect(nth(sections, 1).items.map((i) => i.code)).toEqual(['order_batch_manage', 'stockin_manage'])
   })
 
   it('全部匹配时不产生附加区', () => {
