@@ -60,15 +60,17 @@ ENDPOINTS: list[tuple[str, str, tuple[str, ...]]] = [
     ('DELETE', '/api/v1/stock/in/delete/1', ('order_manage',)),
     ('DELETE', '/api/v1/aux/stockin/1', ('order_manage',)),
     ('POST', '/api/v1/aux/batch-submit-stockins', ('order_manage',)),
-    # 报表流水行内编辑/删除（迁移 075 种入 order_edit/order_delete，/user「订单查询→
-    # 订单列表」子项）：这两个独立码必须单独放行对应写接口与还原数据源
+    # 报表流水行内编辑/删除（迁移 075 种入 order_edit/order_delete；迁移 091 把「备货流水」
+    # 从 order_* 拆出 stockin_edit/stockin_delete）：这些独立码必须单独放行对应写接口与
+    # 还原数据源。备货行现在认 stockin_*，不再由 order_* 放行（091「干净起步」，见
+    # test_report_row_action_permission_names.py 的源码级断言）。
     ('GET', '/api/v1/orders/records', ('order_edit',)),
     ('GET', '/api/v1/orders/1', ('order_edit',)),
     ('PUT', '/api/v1/orders/edit/1', ('order_edit',)),
     ('PUT', '/api/v1/orders/deduct/1', ('order_edit',)),
     ('DELETE', '/api/v1/orders/delete/1', ('order_delete',)),
-    ('PUT', '/api/v1/stock/in/edit/1', ('order_edit',)),
-    ('DELETE', '/api/v1/stock/in/delete/1', ('order_delete',)),
+    ('PUT', '/api/v1/stock/in/edit/1', ('stockin_edit',)),
+    ('DELETE', '/api/v1/stock/in/delete/1', ('stockin_delete',)),
     # 编辑弹窗的「可用备货量」提示接口
     ('GET', '/api/v1/aux/available-stockins', ('order_edit',)),
 ]
