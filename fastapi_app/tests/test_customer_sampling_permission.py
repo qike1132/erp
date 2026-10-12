@@ -33,8 +33,6 @@ _GET_ROUTES = [
 ]
 _HTTP_PATHS = [http for _rel, http in _GET_ROUTES]
 
-_CHECKER_QUALNAME = 'require_any_permission.<locals>.permission_checker'
-
 
 def _make_user(codes):
     """构造仅持有这些权限码的普通用户。"""
@@ -64,20 +62,18 @@ def _router_get(rel_path):
 
 
 def _read_checkers(route):
-    """取出路由上由 require_any_permission 生成的依赖 -> [(callable, 权限码元组)]。"""
+    """取出路由上权限依赖声明的权限码 -> [(callable, 权限码元组)]。
+
+    权限码从依赖函数上的 ``__permission_codes__`` 读取（core/deps.py 的工厂挂载），
+    不再扒 ``__closure__`` 单元格——闭包单元格的顺序/存在性是 CPython 实现细节，
+    工厂一改即失效（这正是该属性存在的理由）。
+    """
     found = []
     for dep in getattr(route.dependant, 'dependencies', []):
         call = getattr(dep, 'call', None)
-        if getattr(call, '__qualname__', '') != _CHECKER_QUALNAME:
-            continue
-        for cell in getattr(call, '__closure__', None) or ():
-            try:
-                value = cell.cell_contents
-            except ValueError:
-                continue
-            if isinstance(value, tuple) and value and all(isinstance(v, str) for v in value):
-                found.append((call, value))
-                break
+        codes = getattr(call, '__permission_codes__', None)
+        if codes:
+            found.append((call, codes))
     return found
 
 

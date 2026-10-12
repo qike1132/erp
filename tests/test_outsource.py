@@ -1028,22 +1028,18 @@ class TestShipReceivePermissions:
 
     @staticmethod
     def _route_permission(suffix: str, method: str = 'POST') -> str | None:
-        """取出该路由实际依赖的权限点名称（require_permission 的闭包变量）"""
+        """取出该路由声明的权限点名称（require_permission 挂的 __permission_codes__）"""
         from fastapi_app.api.v1.endpoints.outsource import router
 
         for route in router.routes:
             if not getattr(route, 'path', '').endswith(suffix) or method not in route.methods:
                 continue
             for dep in route.dependant.dependencies:
-                if getattr(dep.call, '__name__', '') != 'permission_checker':
-                    continue
-                for cell in dep.call.__closure__ or ():
-                    try:
-                        value = cell.cell_contents
-                    except ValueError:  # pragma: no cover - 空闭包单元格
-                        continue
-                    if isinstance(value, str):
-                        return value
+                codes = getattr(dep.call, '__permission_codes__', None)
+                if codes:
+                    # 只认单码声明（require_permission）：多码的 require_any_permission 返回
+                    # None，这样路由一旦从单码放宽成「任一码」，下面的断言就会失败。
+                    return codes[0] if len(codes) == 1 else None
         return None
 
     def test_ship_and_receive_routes_use_permission_points(self):
