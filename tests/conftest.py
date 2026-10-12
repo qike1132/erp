@@ -241,9 +241,13 @@ async def app_on_test_db(test_engine):
 
     # 同步完成设置替换与引擎丢弃（ dispose 需要旧 loop，放 try 外统一处理）
     _settings.ASYNC_DATABASE_URL = TEST_DATABASE_URL
-    _settings.DATABASE_URL = TEST_DATABASE_URL.replace(
-        "+asyncpg", ""
-    )  # 同步驱动 psycopg3
+    # 同步引擎与生产同驱动（psycopg3）。⚠️ 必须 replace 成 '+psycopg' 而不是删空：
+    # 只删 '+asyncpg' 会留下**裸 postgresql://**，SQLAlchemy 同步方言默认挑 psycopg2，
+    # 而本仓只声明 psycopg3（psycopg2 仅在 requirements/dev.txt，供几个一次性运维脚本）。
+    # 且裸 URL 会绕过 config.py 的**导入期**规范化（那段只在 config 首次加载时跑一次），
+    # 于是 report_tasks 这类模块级建同步引擎的地方报 ModuleNotFoundError: psycopg2
+    # （2026-10-12 实测：tests/test_report.py::TestExportTypeParity 2 条假红）。
+    _settings.DATABASE_URL = TEST_DATABASE_URL.replace("+asyncpg", "+psycopg")
     _settings.ASYNC_DATABASE_REPLICA_URL = ""  # 测试不依赖只读副本
 
     stale = db_mod._async_engine
