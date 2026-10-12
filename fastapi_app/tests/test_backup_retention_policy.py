@@ -72,12 +72,12 @@ def test_retention_helpers_follow_env(monkeypatch):
 
 
 def test_retention_defaults_match_documented_values(monkeypatch):
-    """缺省值 30 天 / 100 份（不是历史硬编码的 30/50）。"""
+    """缺省保留天数 7（2026-10-12 起全量-only 策略；原为 30）。"""
     monkeypatch.delenv(RETENTION_DAYS_ENV, raising=False)
     monkeypatch.delenv(RETENTION_COUNT_ENV, raising=False)
-    assert RETENTION_DAYS_DEFAULT == 30
+    assert RETENTION_DAYS_DEFAULT == 7
     assert RETENTION_COUNT_DEFAULT == 100
-    assert retention_days() == 30
+    assert retention_days() == 7
     assert retention_count() == 100
 
 
