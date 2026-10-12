@@ -48,6 +48,7 @@ const props = withDefaults(defineProps<{
   buffer: 10,
   dynamicHeight: false,
   estimatedHeight: 48,
+  itemKey: undefined,
 })
 
 const emit = defineEmits<{

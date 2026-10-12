@@ -86,6 +86,11 @@ const props = withDefaults(
     showLoading: true,
     appendTo: 'body',
     suppressAfterSelect: false,
+    searchFn: undefined,
+    listFn: undefined,
+    debounceMs: undefined,
+    id: undefined,
+    emptyText: undefined,
   },
 )
 

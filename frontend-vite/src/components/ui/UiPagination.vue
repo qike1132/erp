@@ -53,6 +53,9 @@ const props = withDefaults(defineProps<{
   itemUnit?: string
 }>(), {
   itemUnit: '条',
+  totalItems: undefined,
+  pageSize: undefined,
+  pageSizeOptions: undefined,
 })
 
 const emit = defineEmits<{

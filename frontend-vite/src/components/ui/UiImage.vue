@@ -22,7 +22,7 @@ const props = withDefaults(
     width?: number | string
     height?: number | string
   }>(),
-  { width: undefined, height: undefined },
+  { width: undefined, height: undefined, alt: undefined, fit: undefined, className: undefined },
 )
 
 const fitClass = computed(() => {

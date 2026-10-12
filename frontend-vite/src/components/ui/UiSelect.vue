@@ -95,6 +95,12 @@ const props = withDefaults(
   {
     options: () => [],
     emptyText: '无匹配项',
+    modelValue: undefined,
+    placeholder: undefined,
+    label: undefined,
+    contentClass: undefined,
+    name: undefined,
+    id: undefined,
   },
 )
 

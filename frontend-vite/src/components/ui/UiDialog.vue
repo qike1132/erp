@@ -73,6 +73,9 @@ const props = withDefaults(
     overlayZClass: 'z-[var(--z-overlay)]',
     contentZClass: 'z-[var(--z-modal)]',
     closeOnOverlayClick: true,
+    title: undefined,
+    srTitle: undefined,
+    description: undefined,
   },
 )
 

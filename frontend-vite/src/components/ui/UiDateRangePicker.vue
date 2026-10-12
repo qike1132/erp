@@ -32,6 +32,7 @@ const props = withDefaults(
     placeholder: '选择日期范围',
     disabled: false,
     dateFormat: 'yy-mm-dd',
+    modelValue: undefined,
   },
 )
 
