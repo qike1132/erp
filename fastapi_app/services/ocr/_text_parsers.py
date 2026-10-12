@@ -8,38 +8,15 @@ import re
 logger = logging.getLogger(__name__)
 
 
-def _parse_ocr_table_format(lines: list[str], all_text: str) -> list[dict]:
+def _scan_header_columns(lines: list[str], header_keywords: dict[str, list[str]]
+                         ) -> tuple[dict[int, str | list[str]], int]:
+    """扫描表头行，确定各行的列归属与表头结束位置。
+
+    返回 (line_col_map, header_end)。同一行命中多个关键词时按出现位置排序
+    （虚拟列，后续用 0.5 步长展开成列序）。
     """
-    解析 OCR 输出的表格格式
-
-    OCR 引擎识别表格时，通常将每个单元格作为独立文本行输出，
-    导致原本同一行的多列数据变成了多行。
-
-    典型 OCR 输出:
-    产品名称
-    数量
-    备注
-    红色手提包
-    100
-    加急
-    蓝色钱包
-    200
-    常规
-
-    也支持表头关键词合并在同一行的情况:
-    客户名称产品名称
-    出货数量
-    MINISO国际
-    23cm企鹅公仔
-    10000
-
-    本函数通过检测表头关键词来确定列数和列顺序，
-    然后按固定列数将后续行重新组合为数据行。
-    """
-    items = []
-    header_keywords = {'product_name': ['产品名称', '产品', '品名', '商品', '物料'], 'quantity': ['出货数量', '数量', '数', 'qty', 'QTY'], 'customer': ['客户名称', '客户', '收货', '买方'], 'note': ['备注', '说明', '摘要', 'Remark', '备注说明']}
     line_col_map: dict[int, str | list[str]] = {}
-    used_cols = set()
+    used_cols: set[str] = set()
     header_end = 0
     for i, line in enumerate(lines):
         line_stripped = line.strip()
@@ -80,6 +57,15 @@ def _parse_ocr_table_format(lines: list[str], all_text: str) -> list[dict]:
                     line_col_map[i] = col_name
                     used_cols.add(col_name)
                     header_end = max(header_end, i)
+    return line_col_map, header_end
+
+
+def _expand_header_columns(line_col_map: dict[int, str | list[str]]
+                           ) -> tuple[dict[float | int, str], list[str], int] | None:
+    """把合并表头展开成虚拟行号 → 列名映射，推导列序与列数。
+
+    缺 product_name 或 quantity 列时返回 None（不构成可解析表格）。
+    """
     expanded_map = {}
     for line_idx, col in line_col_map.items():
         if isinstance(col, list):
@@ -90,14 +76,14 @@ def _parse_ocr_table_format(lines: list[str], all_text: str) -> list[dict]:
             expanded_map[line_idx] = col
     col_names_found = set(expanded_map.values())
     if 'product_name' not in col_names_found or 'quantity' not in col_names_found:
-        return []
+        return None
     sorted_keys = sorted(expanded_map.keys())
     col_order = [expanded_map[k] for k in sorted_keys]
-    num_cols = len(col_order)
-    header_start = int(sorted_keys[0])
-    customer = _extract_customer_from_header(lines[:header_start + 1])
-    data_start = header_end + 1
-    data_lines = lines[data_start:]
+    return expanded_map, col_order, int(sorted_keys[0])
+
+
+def _filter_data_lines(data_lines: list[str]) -> list[str]:
+    """过滤数据区的空白行、分隔线与合计/页码等噪声行。"""
     filtered_data = []
     for line in data_lines:
         stripped = line.strip()
@@ -108,6 +94,14 @@ def _parse_ocr_table_format(lines: list[str], all_text: str) -> list[dict]:
         if re.search('^合计|^总计|^小计|^签章|^第\\s*\\d+\\s*页|^共\\s*\\d+\\s*页', stripped):
             continue
         filtered_data.append(stripped)
+    return filtered_data
+
+
+def _rows_from_aligned_columns(filtered_data: list[str], col_order: list[str],
+                               default_customer: str) -> list[dict]:
+    """按固定列数把过滤后的行重新组合为数据行。"""
+    items: list[dict] = []
+    num_cols = len(col_order)
     for i in range(0, len(filtered_data) - num_cols + 1, num_cols):
         row_values = filtered_data[i:i + num_cols]
         row_dict = {}
@@ -123,9 +117,34 @@ def _parse_ocr_table_format(lines: list[str], all_text: str) -> list[dict]:
         quantity = _parse_quantity(quantity_str)
         if quantity <= 0:
             continue
-        row_customer = row_dict.get('customer', '').strip() or customer
+        row_customer = row_dict.get('customer', '').strip() or default_customer
         note = row_dict.get('note', '').strip()
         items.append({'customer': row_customer, 'product_name': product_name, 'quantity': quantity, 'note': note})
+    return items
+
+
+def _parse_ocr_table_format(lines: list[str], all_text: str) -> list[dict]:
+    """
+    解析 OCR 输出的表格格式（2026-10-11 复核 P2-14⑥ 拆分：表头扫描/列展开/
+    行过滤/对齐重组各自成单元，主函数只保留串接与滑动窗口回退）。
+
+    OCR 引擎识别表格时，通常将每个单元格作为独立文本行输出，
+    导致原本同一行的多列数据变成了多行。本函数通过检测表头关键词确定列数
+    和列顺序，然后按固定列数将后续行重新组合为数据行。
+    """
+    header_keywords = {'product_name': ['产品名称', '产品', '品名', '商品', '物料'], 'quantity': ['出货数量', '数量', '数', 'qty', 'QTY'], 'customer': ['客户名称', '客户', '收货', '买方'], 'note': ['备注', '说明', '摘要', 'Remark', '备注说明']}
+    items = []
+
+    line_col_map, header_end = _scan_header_columns(lines, header_keywords)
+    expanded = _expand_header_columns(line_col_map)
+    if expanded is None:
+        return []
+    _expanded_map, col_order, header_start = expanded
+    customer = _extract_customer_from_header(lines[:header_start + 1])
+
+    data_lines = lines[header_end + 1:]
+    filtered_data = _filter_data_lines(data_lines)
+    items = _rows_from_aligned_columns(filtered_data, col_order, customer)
     if not items and len(filtered_data) >= 2:
         items = _parse_ocr_sliding_window(filtered_data, col_order, customer)
     return items

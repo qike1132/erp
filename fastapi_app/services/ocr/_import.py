@@ -24,86 +24,142 @@ from fastapi_app.shared_models import Customer, Product, StagingStockOut
 logger = logging.getLogger(__name__)
 
 
-async def import_staging_stockouts_from_file(db: AsyncSession, file_content: bytes, session_id: str, filename: str='', task_id: str='') -> tuple[int, str, list[str]]:
-    """
-    从 PDF / 图片出货单导入出货到暂存区
 
-    流程:
-    1. 根据文件类型自动选择 PDF 或图片 OCR 提取文本
-    2. 解析出货单字段
-    3. 匹配产品、校验库存
-    4. 写入暂存区
 
-    Args:
-        db: 异步数据库会话
-        file_content: 文件字节内容
-        session_id: 会话 ID
-        filename: 原始文件名（用于日志和类型判断）
-        task_id: 进度追踪 ID（可选）
+def _simulate_ocr_progress_steps() -> list[tuple[float, str]]:
+    """文本 OCR 的模拟进度步（真实识别无回调，用固定节奏给前端反馈）。"""
+    return [(35, '正在识别文字...'), (42, '正在提取文本内容...'), (50, '正在进行文字识别...'),
+            (58, '正在整理识别结果...'), (65, '即将完成文本提取...')]
 
-    Returns:
-        (imported_count, message, errors)
-    """
 
+def _prog_fn(task_id: str):
     def _prog(**kwargs):
         if task_id:
             _update_progress(task_id, **kwargs)
+    return _prog
+
+
+async def _recognize_items(file_content: bytes, filename: str, file_type: str, _prog) -> tuple[list[dict], list, list]:
+    """识别阶段：RapidTable 表格优先，失败/无表格回退文本 OCR + 字段解析。
+
+    返回 (parsed_items, table_pages, text_pages)。
+    """
+    loop = asyncio.get_running_loop()
+    parsed_items: list[dict] = []
+    table_pages: list = []
+    text_pages: list = []
+    try:
+        _prog(message='正在识别表格结构...', percent=12)
+        table_pages = await loop.run_in_executor(None, extract_table_structure, file_content, filename)
+        if table_pages:
+            parsed_items = parse_html_shipping_tables(table_pages)
+            logger.info(f'RapidTable 表格识别: {filename}, 识别到 {len(table_pages)} 页表格, 解析出 {len(parsed_items)} 个出货项')
+    except (ValueError, TypeError, OSError, RuntimeError) as e:
+        # 2026-10-03 第八轮审计：_extractors 在 rapid_table 未装/初始化失败时抛
+        # RuntimeError，原 except 未捕获 → 注释声明的"回退到文本模式"永不执行，
+        # RuntimeError 冒泡成 500。补 RuntimeError 使回退真正生效。
+        logger.warning(f'RapidTable 表格识别失败，将回退到文本模式: {e}')
+    if parsed_items:
+        return parsed_items, table_pages, text_pages
+
+    _prog(message='正在使用文本识别模式...', percent=30)
+    ocr_future = loop.run_in_executor(None, extract_text, file_content, filename)
+    steps = _simulate_ocr_progress_steps()
+
+    async def _simulate_ocr_progress():
+        for pct, msg in steps:
+            await asyncio.sleep(0.4)
+            _prog(message=msg, percent=pct)
+
+    sim_task = asyncio.create_task(_simulate_ocr_progress())
+    try:
+        text_pages = await ocr_future
+    finally:
+        sim_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await sim_task
+    if not text_pages:
+        return [], table_pages, text_pages
+    final_ocr_pct = 70
+    _prog(message=f'{file_type}文本提取完成，共 {len(text_pages)} 页', percent=final_ocr_pct)  # sql-safe: escape_like/绑定参数/常量片段
+    await asyncio.sleep(0.05)
+    logger.info(f"{file_type} OCR 提取完成: {filename}, 共 {len(text_pages)} 页, 文本长度: {sum(len(p['text']) for p in text_pages)}")  # sql-safe: escape_like/绑定参数/常量片段
+    _prog(message='正在解析出货单字段...', percent=75)
+    await asyncio.sleep(0.05)
+    parsed_items = parse_shipping_document(text_pages)
+    return parsed_items, table_pages, text_pages
+
+
+def _build_staging_row(session_id: str, item: dict, all_products: list,
+                       product_map: dict, all_customers: list) -> tuple[StagingStockOut | None, str | None]:
+    """单个识别项 → StagingStockOut 行。返回 (row, error)；跳过项返回 (None, None)。"""
+    product_name = str(item.get('product_name', '')).strip()
+    customer = str(item.get('customer', '')).strip()
+    quantity = item.get('quantity', 0)
+    note = str(item.get('note', '')).strip()
+    if not product_name or quantity <= 0:
+        return None, None
+
+    product, match_confidence = fuzzy_match_product(product_name, all_products, product_map)
+    matched_customer, customer_confidence = fuzzy_match_customer(customer, all_customers)
+    if matched_customer and customer_confidence >= 0.7:
+        if customer_confidence < 1.0:
+            logger.info(f"客户模糊匹配: OCR='{customer}' -> DB='{matched_customer.name}', 置信度={customer_confidence:.2f}")
+        customer = matched_customer.name
+
+    is_validated = False
+    validation_error = ''
+    product_id = None
+    stock_check_passed = False
+    stock_check_message = ''
+    match_info_parts = []
+    if product:
+        is_validated = True
+        product_id = product.id
+        original_ocr_name = product_name
+        product_name = product.name
+        if match_confidence < 1.0:
+            match_info_parts.append(f"产品模糊匹配: OCR='{original_ocr_name}'→'{product_name}'({match_confidence:.0%})")
+        # 负库存判定统一走统一入口（P1-2b）；此处只产出暂存行的校验结论
+        if check_stock_available(product.current_stock, -quantity) is not None:
+            stock_check_message = f'库存不足，当前库存: {product.current_stock}'
+        else:
+            stock_check_passed = True
+            stock_check_message = f'库存充足，当前库存: {product.current_stock}'
+    else:
+        validation_error = f'产品"{product_name}"不存在'
+    if match_info_parts:
+        note = note + '；' + '；'.join(match_info_parts) if note else '；'.join(match_info_parts)
+
+    # stockout_date aware UTC：staging_stock_out.stockout_date 列为 timestamptz
+    row = StagingStockOut(session_id=session_id, customer=customer, stockout_date=datetime.now(UTC), product_name=product_name, product_barcode='', product_id=product_id, quantity=quantity, note=note, is_validated=is_validated, validation_error=validation_error, stock_check_passed=stock_check_passed, stock_check_message=stock_check_message, status='pending')
+    return row, None
+
+async def import_staging_stockouts_from_file(db: AsyncSession, file_content: bytes, session_id: str, filename: str='', task_id: str='') -> tuple[int, str, list[str]]:
+    """
+    从 PDF / 图片出货单导入出货到暂存区（2026-10-11 复核 P2-14⑥ 拆分）。
+
+    流程: 识别（表格→文本回退）→ 匹配校验 → 写入暂存区；
+    各阶段见 _recognize_items / _build_staging_row。
+    """
+    _prog = _prog_fn(task_id)
     try:
         async with db.begin_nested():  # SAVEPOINT：失败只回滚本文件，不触碰调用方事务（原先裸 db.rollback() 会把同批次前面文件已写入的暂存行一起回滚）
-            _prog(status='processing', message=f'正在识别 {filename}...', filename=filename, percent=5)
-            await asyncio.sleep(0)
             ext = os.path.splitext(filename or '')[1].lower()
             is_pdf = ext == '.pdf'
             file_type = 'PDF' if is_pdf else '图片'
+            _prog(status='processing', message=f'正在识别 {filename}...', filename=filename, percent=5)
+            await asyncio.sleep(0)
             if is_pdf:
                 _prog(message=f'正在加载 PDF {filename}...', percent=8)
             else:
                 _prog(message=f'正在读取图片 {filename}...', percent=8)
             await asyncio.sleep(0)
-            loop = asyncio.get_running_loop()
-            parsed_items = []
-            table_pages = []
-            text_pages = []
-            try:
-                _prog(message='正在识别表格结构...', percent=12)
-                table_pages = await loop.run_in_executor(None, extract_table_structure, file_content, filename)
-                if table_pages:
-                    parsed_items = parse_html_shipping_tables(table_pages)
-                    logger.info(f'RapidTable 表格识别: {filename}, 识别到 {len(table_pages)} 页表格, 解析出 {len(parsed_items)} 个出货项')
-            except (ValueError, TypeError, OSError, RuntimeError) as e:
-                # 2026-10-03 第八轮审计：_extractors 在 rapid_table 未装/初始化失败时抛
-                # RuntimeError，原 except 未捕获 → 注释声明的"回退到文本模式"永不执行，
-                # RuntimeError 冒泡成 500。补 RuntimeError 使回退真正生效。
-                logger.warning(f'RapidTable 表格识别失败，将回退到文本模式: {e}')
-            if not parsed_items:
-                _prog(message='正在使用文本识别模式...', percent=30)
-                ocr_future = loop.run_in_executor(None, extract_text, file_content, filename)
-                _ocr_simulated_pct = 30
-                _ocr_simulated_msgs = [(35, '正在识别文字...'), (42, '正在提取文本内容...'), (50, '正在进行文字识别...'), (58, '正在整理识别结果...'), (65, '即将完成文本提取...')]
 
-                async def _simulate_ocr_progress():
-                    nonlocal _ocr_simulated_pct
-                    for pct, msg in _ocr_simulated_msgs:
-                        await asyncio.sleep(0.4)
-                        _ocr_simulated_pct = pct
-                        _prog(message=msg, percent=pct)
-                sim_task = asyncio.create_task(_simulate_ocr_progress())
-                try:
-                    text_pages = await ocr_future
-                finally:
-                    sim_task.cancel()
-                    with contextlib.suppress(asyncio.CancelledError):
-                        await sim_task
-                if not text_pages:
-                    _prog(status='error', message='文件无法提取文本内容', percent=0)
-                    return (0, '文件无法提取文本内容，可能是空白文件或图片质量过低', [])
-                final_ocr_pct = max(70, _ocr_simulated_pct)
-                _prog(message=f'{file_type}文本提取完成，共 {len(text_pages)} 页', percent=final_ocr_pct)  # sql-safe: escape_like/绑定参数/常量片段
-                await asyncio.sleep(0.05)
-                logger.info(f"{file_type} OCR 提取完成: {filename}, 共 {len(text_pages)} 页, 文本长度: {sum(len(p['text']) for p in text_pages)}")  # sql-safe: escape_like/绑定参数/常量片段
-                _prog(message='正在解析出货单字段...', percent=75)
-                await asyncio.sleep(0.05)
-                parsed_items = parse_shipping_document(text_pages)
+            parsed_items, table_pages, text_pages = await _recognize_items(file_content, filename, file_type, _prog)
+            if not text_pages and not parsed_items:
+                _prog(status='error', message='文件无法提取文本内容', percent=0)
+                return (0, '文件无法提取文本内容，可能是空白文件或图片质量过低', [])
             if not parsed_items:
                 preview_pages = table_pages or text_pages
                 raw_text_preview = '\n'.join(p.get('text', '')[:200] for p in preview_pages[:3])
@@ -124,50 +180,17 @@ async def import_staging_stockouts_from_file(db: AsyncSession, file_content: byt
             await asyncio.sleep(0.05)
             imported = 0
             errors = []
+            total = len(parsed_items)
             for idx, item in enumerate(parsed_items, start=1):
                 try:
-                    product_name = str(item.get('product_name', '')).strip()
-                    customer = str(item.get('customer', '')).strip()
-                    quantity = item.get('quantity', 0)
-                    note = str(item.get('note', '')).strip()
-                    if not product_name or quantity <= 0:
-                        continue
-                    if len(parsed_items) > 1 and (idx % 5 == 0 or idx == len(parsed_items)):
-                        item_pct = 90 + int(idx / len(parsed_items) * 6)
-                        _prog(message=f'正在处理第 {idx}/{len(parsed_items)} 项...', percent=item_pct)
+                    if total > 1 and (idx % 5 == 0 or idx == total):
+                        item_pct = 90 + int(idx / total * 6)
+                        _prog(message=f'正在处理第 {idx}/{total} 项...', percent=item_pct)
                         await asyncio.sleep(0.02)
-                    product, match_confidence = fuzzy_match_product(product_name, all_products, product_map)
-                    matched_customer, customer_confidence = fuzzy_match_customer(customer, all_customers)
-                    if matched_customer and customer_confidence >= 0.7:
-                        if customer_confidence < 1.0:
-                            logger.info(f"客户模糊匹配: OCR='{customer}' -> DB='{matched_customer.name}', 置信度={customer_confidence:.2f}")
-                        customer = matched_customer.name
-                    is_validated = False
-                    validation_error = ''
-                    product_id = None
-                    stock_check_passed = False
-                    stock_check_message = ''
-                    match_info_parts = []
-                    if product:
-                        is_validated = True
-                        product_id = product.id
-                        original_ocr_name = product_name
-                        product_name = product.name
-                        if match_confidence < 1.0:
-                            match_info_parts.append(f"产品模糊匹配: OCR='{original_ocr_name}'→'{product_name}'({match_confidence:.0%})")
-                        # 负库存判定统一走统一入口（P1-2b）；此处只产出暂存行的校验结论
-                        if check_stock_available(product.current_stock, -quantity) is not None:
-                            stock_check_message = f'库存不足，当前库存: {product.current_stock}'
-                        else:
-                            stock_check_passed = True
-                            stock_check_message = f'库存充足，当前库存: {product.current_stock}'
-                    else:
-                        validation_error = f'产品"{product_name}"不存在'
-                    if match_info_parts:
-                        note = note + '；' + '；'.join(match_info_parts) if note else '；'.join(match_info_parts)
-                    # stockout_date aware UTC：staging_stock_out.stockout_date 列为 timestamptz
-                    staging_stockout = StagingStockOut(session_id=session_id, customer=customer, stockout_date=datetime.now(UTC), product_name=product_name, product_barcode='', product_id=product_id, quantity=quantity, note=note, is_validated=is_validated, validation_error=validation_error, stock_check_passed=stock_check_passed, stock_check_message=stock_check_message, status='pending')
-                    db.add(staging_stockout)
+                    row, _err = _build_staging_row(session_id, item, all_products, product_map, all_customers)
+                    if row is None:  # 跳过项（空产品名/非正数量）
+                        continue
+                    db.add(row)
                     imported += 1
                 except (ValueError, TypeError, OSError) as e:
                     errors.append(f'第{idx}项处理失败: {e!s}')
@@ -186,4 +209,6 @@ async def import_staging_stockouts_from_file(db: AsyncSession, file_content: byt
         logger.error(f'OCR 导入失败: {e!s}', exc_info=True)
         _prog(status='error', message=f'识别导入失败: {e!s}', percent=0)
         return (0, f'识别导入失败: {e!s}', [])
+
+
 import_staging_stockouts_from_pdf = import_staging_stockouts_from_file
