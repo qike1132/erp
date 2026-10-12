@@ -59,6 +59,10 @@ def test_soft_kill_tried_first_without_force(monkeypatch) -> None:
 
     monkeypatch.setattr(prod_runner.subprocess, "run", fake_run)
     monkeypatch.setattr(prod_runner.time, "sleep", lambda s: None)
+    # 必须钉住平台：kill_tree 在 os.name == "nt" 才走 taskkill 分支。不钉的话在
+    # Linux CI 上会落进 POSIX 分支（os.killpg → self.proc.terminate()），
+    # _FakeProc 没有 terminate → AttributeError，断言 /F 也永远不成立。
+    monkeypatch.setattr(prod_runner.os, "name", "nt")
     svc.kill_tree()
     assert calls, "应至少调用过一次 taskkill"
     assert all("/F" not in c for c in calls), f"软杀窗口内不应升级 /F: {calls}"
@@ -78,6 +82,8 @@ def test_escalates_to_force_after_timeout(monkeypatch) -> None:
     monkeypatch.setattr(prod_runner.time, "sleep", lambda s: None)
     monkeypatch.setattr(prod_runner, "_SOFT_KILL_WAIT_SECONDS", 0.01)
     monkeypatch.setattr(prod_runner, "_SOFT_KILL_POLL_INTERVAL", 0.001)
+    # 同上：钉住平台，否则 Linux CI 会落进 POSIX 分支。
+    monkeypatch.setattr(prod_runner.os, "name", "nt")
     svc.kill_tree()
     assert any("/F" in c for c in calls), f"软杀超时后必须升级 /F: {calls}"
 
