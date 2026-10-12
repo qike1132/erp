@@ -230,11 +230,12 @@ async function deleteSchedule(id: number) {
 }
 async function triggerScheduleNow() {
   const first = schedules.value.find((s) => s.enabled)
-  if (first?.name) {
-    await backupApi.triggerSchedule(first.name)
-  } else {
-    await triggerFull()
+  if (!first?.name) {
+    // 无启用的定时任务时不回退触发任何备份（全量属重操作，静默发起会让用户意外）
+    toast.info('当前没有启用的定时任务')
+    return
   }
+  await backupApi.triggerSchedule(first.name)
 }
 
 async function validatePath(path: string) {

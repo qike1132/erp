@@ -53,12 +53,12 @@ describe('BackupRecordTable 分页', () => {
   })
 
   it('筛选只作用于当前页（服务端无筛选入口）', async () => {
-    const wrapper = mountTable([row('full.zip', { type: 'full' }), row('inc.zip', { type: 'incremental' })], 2, 42)
+    const wrapper = mountTable([row('full.zip', { type: 'full' }), row('restore.zip', { type: 'restore' })], 2, 42)
 
-    await wrapper.findAll('select')[0]!.setValue('incremental')
+    await wrapper.findAll('select')[0]!.setValue('full')
 
-    expect(wrapper.text()).toContain('inc.zip')
-    expect(wrapper.text()).not.toContain('full.zip')
+    expect(wrapper.text()).toContain('full.zip')
+    expect(wrapper.text()).not.toContain('restore.zip')
   })
 
   it('翻页按钮按服务端 total 计算页数并派发事件', async () => {

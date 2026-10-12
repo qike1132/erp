@@ -2,7 +2,7 @@
   <div class="brt-card">
     <div class="brt-toolbar">
       <select v-model="typeFilter" class="brt-select">
-        <option value="">全部类型</option><option value="full">全量</option><option value="incremental">增量</option>
+        <option value="">全部类型</option><option value="full">全量</option>
       </select>
       <select v-model="statusFilter" class="brt-select">
         <option value="">全部状态</option><option value="success">成功</option><option value="failed">失败</option><option value="running">进行中</option>
@@ -19,7 +19,7 @@
         <tbody>
           <tr v-for="r in filtered" :key="r.id ?? r.filename">
             <td class="mono">{{ r.filename }}</td>
-            <td><span class="brt-badge" :class="r.type === 'incremental' ? 'brt-badge-warning' : 'brt-badge-neutral'">{{ typeLabel(r.type) }}</span></td>
+            <td><span class="brt-badge brt-badge-neutral">{{ typeLabel(r.type) }}</span></td>
             <td class="mono">{{ r.size != null ? fmtSize(r.size) : '—' }}</td>
             <td class="mono">{{ r.created_at?.slice(0, 10) ?? '—' }}</td>
             <td><span class="brt-badge" :class="r.status === 'success' ? 'brt-badge-success' : r.status === 'failed' ? 'brt-badge-danger' : 'brt-badge-processing'">{{ statusLabel(r.status) }}</span></td>
@@ -96,7 +96,7 @@ const filtered = computed(() => {
 })
 
 function typeLabel(t?: string) {
-  if (t === 'incremental') return '增量'
+  if (t === 'restore') return '还原'
   return '全量'
 }
 function statusLabel(s?: string) {
