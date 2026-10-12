@@ -191,7 +191,8 @@ def test_expected_cron_matches_the_036_seed() -> None:
     assert mod._EXPECTED_CRON == '0 6,10,14,18,22 * * *'
 
 
-@pytest.mark.parametrize('name', ['incremental', 'full'])
+# incremental 已随全量-only 策略移除，不再是被调度的真实类型
+@pytest.mark.parametrize('name', ['full'])
 def test_task_type_is_a_real_scheduler_type(name: str) -> None:
     from fastapi_app.services.backup.schedule_service import TASK_TYPE_TO_FUNC
 

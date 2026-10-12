@@ -559,8 +559,7 @@ async def _do_auto_backup(backup_type: str) -> dict:
                 'total_rows': manifest.get('total_rows'),
                 'failed_tables': manifest.get('failed_tables') or [],
             }
-        if backup_type != 'daily':
-            raise ValueError(f'仅支持 daily 自动备份，收到: {backup_type}')
+        raise ValueError(f'仅支持 daily 自动备份，收到: {backup_type}')
 
 
 async def _do_integrity_check() -> dict:
