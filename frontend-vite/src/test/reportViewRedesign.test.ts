@@ -29,13 +29,15 @@ vi.mock('@/api', () => ({
     deductionLogs: vi.fn(),
     returnLogs: vi.fn(),
   },
-  // 报表行还原链路（useReportRowActions → useOrderDetailEdit/useOrderDelete）会用到
+  // 报表行内操作链路（useReportRowActions → orderApi/stockApi/stockReturnApi）
   orderApi: {
     records: vi.fn(),
     detail: vi.fn(),
     update: vi.fn(),
     updateDeduct: vi.fn(),
     delete: vi.fn(),
+    updateItem: vi.fn(),
+    deleteItem: vi.fn(),
   },
   // 2026-10-07：出货/抵扣/退货行内操作链路（useReportRowActions）会用到
   stockApi: {
@@ -120,11 +122,10 @@ function mountView() {
       plugins: [[PrimeVue, { unstyled: true, pt: plushCutePT }]],
       stubs: {
         // 弹窗与确认框不全量挂载：本文件锁表格结构，弹窗链路各自有专项测试
-        EditOrderModal: true,
+        EditOrderItemModal: true,
         EditStockinModal: true,
         EditStockoutModal: true,
         EditReturnModal: true,
-        ReportRecordPicker: true,
         UiConfirmDialog: true,
       },
     },
