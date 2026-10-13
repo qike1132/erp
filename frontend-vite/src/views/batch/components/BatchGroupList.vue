@@ -19,24 +19,22 @@
           >
             <span class="bt-chip-date">{{ formatDate(order.order_date) }}</span>
             <span class="bt-chip-qty">{{ order.quantity }}</span>
-            <template v-if="order.record_type !== 'stockin'">
-              <input
-                class="bt-batch-input"
-                :class="{ 'bt-batch-input--has-value': order.batch_no }"
-                :value="editingId === order.id ? editingValue : (order.batch_no ?? '')"
-                :placeholder="editingId === order.id ? '批次号' : '批次号'"
-                @focus="startEdit(order)"
-                @input="onBatchInput($event, order)"
-                @keydown.enter.prevent="saveBatchNo(order)"
-                @keydown.escape="cancelEdit"
-                @blur="saveBatchNo(order)"
-              />
-              <button
-                v-if="order.batch_no"
-                class="bt-complete-btn"
-                @click.stop="openCompleteConfirm(order)"
-              >完成</button>
-            </template>
+            <input
+              class="bt-batch-input"
+              :class="{ 'bt-batch-input--has-value': order.batch_no }"
+              :value="editingKey === recordKey(order) ? editingValue : (order.batch_no ?? '')"
+              placeholder="批次号"
+              @focus="startEdit(order)"
+              @input="onBatchInput($event, order)"
+              @keydown.enter.prevent="saveBatchNo(order)"
+              @keydown.escape="cancelEdit"
+              @blur="saveBatchNo(order)"
+            />
+            <button
+              v-if="order.batch_no"
+              class="bt-complete-btn"
+              @click.stop="openCompleteConfirm(order)"
+            >完成</button>
           </div>
         </div>
       </div>
@@ -83,28 +81,33 @@ function chipStatusClass(order: BatchQueryItem): string {
 }
 
 // ---- Batch number inline editing ----
-const editingId = ref<number | null>(null)
+// 订单/备货来自不同表，id 可能撞号 → 用 record_type:id 复合键定位，避免串扰
+const editingKey = ref<string | null>(null)
 const editingValue = ref('')
 const editingOriginal = ref('')
 const saving = ref(false)
 
-/** 开始编辑某订单的批次号 */
+function recordKey(order: BatchQueryItem): string {
+  return `${order.record_type ?? 'order'}:${order.id}`
+}
+
+/** 开始编辑某条记录的批次号 */
 function startEdit(order: BatchQueryItem) {
-  editingId.value = order.id
+  editingKey.value = recordKey(order)
   editingValue.value = order.batch_no ?? ''
   editingOriginal.value = order.batch_no ?? ''
 }
 
 function onBatchInput(event: Event, order: BatchQueryItem) {
-  if (editingId.value !== order.id) {
-    editingId.value = order.id
+  if (editingKey.value !== recordKey(order)) {
+    editingKey.value = recordKey(order)
     editingOriginal.value = order.batch_no ?? ''
   }
   editingValue.value = (event.target as HTMLInputElement).value
 }
 
 function cancelEdit() {
-  editingId.value = null
+  editingKey.value = null
   editingValue.value = ''
 }
 
@@ -114,18 +117,21 @@ async function saveBatchNo(order: BatchQueryItem) {
   const newValue = editingValue.value.trim()
   // Only save if value actually changed from the original
   if (newValue === editingOriginal.value) {
-    editingId.value = null
+    editingKey.value = null
     return
   }
   if (!newValue) {
-    editingId.value = null
+    editingKey.value = null
     return
   }
   saving.value = true
   try {
-    await orderBatchApi.updateBatchNo(order.id, { batch_no: newValue || null })
+    await orderBatchApi.updateBatchNo(order.id, {
+      batch_no: newValue || null,
+      record_type: order.record_type === 'stockin' ? 'stockin' : 'order',
+    })
     showToast('批次号已更新', 'success')
-    editingId.value = null
+    editingKey.value = null
     emit('refresh')
   } catch {
     showToast('批次号更新失败', 'error')
@@ -146,7 +152,7 @@ function openCompleteConfirm(order: BatchQueryItem) {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  padding: 0 24px 16px;
+  padding: 0;
   overflow-y: auto;
   flex: 1;
   min-width: 0;
@@ -155,14 +161,11 @@ function openCompleteConfirm(order: BatchQueryItem) {
 .bt-group-card {
   border: 2px solid var(--color-border-light, #e2e8f0);
   border-radius: 12px;
-  transition: background 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
   min-width: 0;
   overflow: hidden;
-}
-.bt-group-card:hover {
-  border-color: var(--color-primary-500);
-  background: var(--color-primary-50);
-  box-shadow: 0 2px 8px rgba(91, 141, 239, 0.15);
+  /* .bt-groups 是纵向 flex 滚动容器：子项若可收缩会「压扁到不溢出」，
+     导致列表永远滚不动、内容被裁。禁止收缩才会真正溢出并可滚动。 */
+  flex-shrink: 0;
 }
 
 .bt-group-header {
@@ -387,9 +390,6 @@ function openCompleteConfirm(order: BatchQueryItem) {
   }
   .bt-product-info {
     width: auto;
-  }
-  .bt-groups {
-    padding: 0 16px 12px;
   }
 }
 </style>
