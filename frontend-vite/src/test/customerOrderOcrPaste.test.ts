@@ -2,7 +2,7 @@
  * 订单页「粘贴图片识别 → 人工确认 → 进暂存区」行为测试。
  *
  * 识别与闸门在共享的 useOcrPaste（components/ocr，客户订单/出货两页共用），
- * 这里按 OrderInputPanel 的真实组合方式（buildStaged = buildOrderStagedItems）
+ * 这里按 OrderInputPanel 的真实组合方式（buildStaged = buildCustomerOrderStagedItems）
  * 锁死四件事：
  *   1) customer 参数必须真的拼进 URL（本仓库 API 层踩过「参数被静默丢弃」的坑）
  *   2) 未匹配的产品不允许导入（没有 product_id 的话提交必然失败）
@@ -28,7 +28,7 @@ vi.mock('@/composables/useToast', () => ({ showToast: vi.fn() }))
 
 import { showToast } from '@/composables/useToast'
 import { useOcrPaste } from '@/components/ocr/useOcrPaste'
-import { buildOrderStagedItems } from '@/views/customer-order/composables/useOrderOcrStaging'
+import { buildCustomerOrderStagedItems } from '@/views/customer-order/composables/useOrderOcrStaging'
 import type { StagedItem } from '@/views/customer-order/composables/types'
 
 const okItems = [
@@ -61,7 +61,7 @@ const okItems = [
 function setup(collected: StagedItem[] = []) {
   const ocr = useOcrPaste({
     buildStaged: (drafts, ctx) => {
-      collected.push(...buildOrderStagedItems(drafts, ctx))
+      collected.push(...buildCustomerOrderStagedItems(drafts, ctx))
       return true
     },
     getDefaultCustomer: () => '表单客户',
@@ -256,7 +256,7 @@ describe('useOcrPaste — 审核修复的闸门', () => {
     const collected: StagedItem[] = []
     const ocr = useOcrPaste({
       buildStaged: (drafts, ctx) => {
-        collected.push(...buildOrderStagedItems(drafts, ctx))
+        collected.push(...buildCustomerOrderStagedItems(drafts, ctx))
         return true
       },
       getDefaultCustomer: () => '',

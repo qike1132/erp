@@ -27,11 +27,13 @@ from fastapi_app.services.order_crud import (
     cancel_approval,
     create_order,
     delete_order,
+    delete_order_item,
     get_my_approvals,
     get_order_by_id,
     get_orders,
     update_deduct_quantity,
     update_order,
+    update_order_item,
 )
 
 # Facade 显式 re-export 清单：防止 ruff F401 误删兼容层导入
@@ -49,11 +51,13 @@ __all__ = [
     'cancel_approval',
     'create_order',
     'delete_order',
+    'delete_order_item',
     'get_my_approvals',
     'get_order_by_id',
     'get_orders',
     'update_deduct_quantity',
     'update_order',
+    'update_order_item',
 ]
 
 logger = logging.getLogger(__name__)

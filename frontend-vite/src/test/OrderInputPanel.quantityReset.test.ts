@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { mount, VueWrapper } from '@vue/test-utils'
 import OrderInputPanel from '@/views/customer-order/components/OrderInputPanel.vue'
-import type { FormState } from '@/views/customer-order/composables/types'
+import type { FormState, StagedItem } from '@/views/customer-order/composables/types'
 
 const form = reactive({
   id: 0,
@@ -69,13 +69,31 @@ describe('OrderInputPanel quantity validation', () => {
   })
 })
 
-describe('OrderInputPanel OCR 热区显隐', () => {
+/** OcrPasteImport 替身：点击时以测试草稿调用注入的 buildStaged 回调（走真实映射链） */
+const OcrStub = defineComponent({
+  name: 'OcrPasteImport',
+  props: { buildStaged: { type: Function, required: true } },
+  data() {
+    return {
+      drafts: [{
+        raw_product_name: '儿童保温杯500ml', product_id: 7, product_name: '儿童保温杯 500ml',
+        match_confidence: 1, quantity: 3, unit: '箱', customer: '客户A', customer_id: 1,
+        customer_confidence: 1, note: '',
+      }],
+      ctx: { date: '2026-10-13', fallbackCustomer: '表单客户' },
+    }
+  },
+  template: '<button class="fire-ocr" @click="buildStaged(drafts, ctx)">fire</button>',
+})
+
+describe('OrderInputPanel OCR 热区（订单 / 备货共用同一条识别链路）', () => {
   function mountWith(isOrder: boolean) {
-    return mount(OrderInputPanel, {
+    const addStagedItems = vi.fn()
+    const wrapper = mount(OrderInputPanel, {
       global: {
         stubs: {
           UiAutocomplete: { template: '<input />' },
-          OcrPasteImport: { template: '<div class="stub-ocr" />' },
+          OcrPasteImport: OcrStub,
         },
       },
       props: {
@@ -100,18 +118,35 @@ describe('OrderInputPanel OCR 热区显隐', () => {
         onDrop: vi.fn(),
         downloadTemplate: vi.fn(),
         handleImport: vi.fn(),
-        addStagedItems: vi.fn(),
+        addStagedItems,
       },
     })
+    return { wrapper, addStagedItems }
   }
 
   it('订单模式下显示粘贴识别热区', () => {
-    expect(mountWith(true).find('.stub-ocr').exists()).toBe(true)
+    expect(mountWith(true).wrapper.find('.fire-ocr').exists()).toBe(true)
   })
 
-  it('备货模式下不显示（本链路产出的一律是订单条目）', () => {
-    // 回归：热区曾无条件渲染，而 OCR 条目硬编码 type='order'，
-    // 于是备货模式下粘贴会造出订单记录
-    expect(mountWith(false).find('.stub-ocr').exists()).toBe(false)
+  it('备货模式下同样显示粘贴识别热区', () => {
+    expect(mountWith(false).wrapper.find('.fire-ocr').exists()).toBe(true)
+  })
+
+  it('订单模式确认后条目 type=order', async () => {
+    const { wrapper, addStagedItems } = mountWith(true)
+    await wrapper.find('.fire-ocr').trigger('click')
+
+    const items = addStagedItems.mock.calls[0]![0] as StagedItem[]
+    expect(items[0]).toMatchObject({
+      origin: 'ocr', type: 'order', productId: 7, customer: '客户A', date: '2026-10-13',
+    })
+  })
+
+  it('备货模式确认后条目 type=stockin（提交时按 type 分流到备货接口）', async () => {
+    const { wrapper, addStagedItems } = mountWith(false)
+    await wrapper.find('.fire-ocr').trigger('click')
+
+    const items = addStagedItems.mock.calls[0]![0] as StagedItem[]
+    expect(items[0]).toMatchObject({ origin: 'ocr', type: 'stockin' })
   })
 })

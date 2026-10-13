@@ -43,6 +43,16 @@ class OrderItemCreate(BaseModel):
     note: str | None = Field(None, max_length=500, description="备注")
 
 
+class OrderItemUpdate(BaseModel):
+    """单个订单明细（SKU）编辑 schema（报表流水行内编辑，2026-10-13）
+
+    仅允许改该 SKU 的数量与备注；客户是订单级字段，不走此接口。
+    未传字段沿用原值（部分更新语义）。
+    """
+    quantity: int | None = Field(None, gt=0, le=9999999, description="该 SKU 数量")
+    note: str | None = Field(None, max_length=500, description="该 SKU 备注")
+
+
 class OrderDetailResponse(BaseModel):
     """单个订单详情响应"""
     id: int

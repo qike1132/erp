@@ -71,9 +71,9 @@ async def test_multi_sku_order_expands_to_one_row_per_sku(db):
     assert rows['墩椰毛绒挂件']['quantity'] == 19680
     # 整单合计不变（不重复、不丢失）
     assert result['stats']['total_quantity'] == 125520
-    # 两行同属一张订单
-    assert rows['墩椰毛绒挂件']['order_nos'] == 'ORD-MSKU-001'
-    assert rows['墩椰毛绒挂件']['order_count'] == 1
+    # 两行同属一张订单（2026-10-13：去聚合后改为订单级字段 order_no/item_count）
+    assert rows['墩椰毛绒挂件']['order_no'] == 'ORD-MSKU-001'
+    assert rows['墩椰毛绒挂件']['item_count'] == 2
 
 
 async def test_multi_sku_order_product_filter_matches_non_first_sku(db):
@@ -121,6 +121,43 @@ async def test_order_without_items_falls_back_to_compat_columns(db):
     assert len(result['logs']) == 1
     assert result['logs'][0]['product_name'] == '无明细回退产品'
     assert result['logs'][0]['quantity'] == 777
+
+
+async def test_order_logs_paginate_by_order_and_expose_items(db):
+    """订单流水改母行-明细：total=订单数（非 SKU 行数）、一行一 SKU、带订单号与时间到分。"""
+    p_a = await _make_product(db, '分页SKU-A', 'PG-MSKU-A')
+    p_b = await _make_product(db, '分页SKU-B', 'PG-MSKU-B')
+    customer = '分页测试客户'
+
+    # 订单1：2 个 SKU
+    o1 = Order(order_no='ORD-PG-001', customer=customer, product_id=p_a.id,
+               quantity=300, order_date=datetime.now(UTC), status='待备货')
+    db.add(o1)
+    await db.flush()
+    db.add_all([
+        OrderItem(order_id=o1.id, product_id=p_a.id, product_name=p_a.name,
+                  product_barcode=p_a.barcode, quantity=100),
+        OrderItem(order_id=o1.id, product_id=p_b.id, product_name=p_b.name,
+                  product_barcode=p_b.barcode, quantity=200),
+    ])
+    # 订单2：1 个 SKU
+    o2 = Order(order_no='ORD-PG-002', customer=customer, product_id=p_a.id,
+               quantity=50, order_date=datetime.now(UTC), status='待备货')
+    db.add(o2)
+    await db.flush()
+    db.add(OrderItem(order_id=o2.id, product_id=p_a.id, product_name=p_a.name,
+                     product_barcode=p_a.barcode, quantity=50))
+    await db.flush()
+
+    result = await report_service.get_order_logs.__wrapped__(
+        db, customer=customer, page=1, per_page=15)
+
+    # total 是订单数（2），不是 SKU 行数（3）
+    assert result['pagination']['total'] == 2, 'total 应为订单数'
+    assert len(result['logs']) == 3, '共 3 个 SKU 行（2+1）'
+    assert all('order_id' in r and 'item_id' in r for r in result['logs'])
+    assert all(':' in r['order_date'] for r in result['logs']), '时间应到分'
+    assert {r['order_no'] for r in result['logs']} == {'ORD-PG-001', 'ORD-PG-002'}
 
 
 # ---------------------------------------------------------------------------

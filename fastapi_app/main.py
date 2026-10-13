@@ -99,18 +99,44 @@ async def _setup_redis_caches():
         logger.warning("导航缓存清除失败: %s", e)
 
 
+# 库存缓存保热（见 _warm_inventory_cache）：启动延迟给连接池留就绪时间；间隔必须
+# 显著小于 inventory:paginated 的 L2 TTL(120s)，否则会出现「缓存刚过期、刷新还没
+# 跑」的空窗。两个值都是模块常量，便于测试改写。
+_INVENTORY_WARMUP_STARTUP_DELAY_SECONDS = 2
+_INVENTORY_WARMUP_INTERVAL_SECONDS = 60
+
+
 async def _warm_inventory_cache():
-    """启动时预热库存缓存，确保首次请求命中缓存"""
-    await asyncio.sleep(2)  # 等待数据库连接池就绪
-    try:
-        from fastapi_app.core.database import get_async_db
-        from fastapi_app.services.stock_service import get_inventory_paginated
-        async for db in get_async_db():
-            await get_inventory_paginated(db, page=1, per_page=20)
-            logger.info("库存缓存预热完成")
-            break
-    except Exception as e:  # defensive: startup cache warmup failure must not block application boot
-        logger.warning("库存缓存预热失败: %s", e)
+    """启动预热 + 周期性保热库存缓存（/stock 默认键）。
+
+    预热解决「重启后首次进入 /stock 冷缓存」；周期保热让该键常驻 L1/L2 ——
+    命中缓存只读 Redis、不碰 PG，把 /stock 热路径从「主机/DB 争用时可能卡数秒」
+    里摘出来。依据（2026-10-13 独立评审）：这条 CTE 本身只要 0.24ms，日志里
+    4.99s 的尖刺是主机争用（同刻 products/list 卡到 15s），不是查询复杂度。
+
+    每个 worker 进程各跑一份（lifespan 每进程执行），故各进程自己的 L1 也被刷新。
+    失败只记日志、绝不抛出：保热是优化，不该影响服务。
+    """
+    await asyncio.sleep(_INVENTORY_WARMUP_STARTUP_DELAY_SECONDS)  # 等待数据库连接池就绪
+    from fastapi_app.core.database import get_async_db_context
+    from fastapi_app.services.stock_service import get_inventory_paginated
+
+    warmed = False
+    while True:
+        try:
+            async with get_async_db_context() as db:
+                # per_page 必须与前端 /stock 默认每页条数一致（缓存键含 per_page），
+                # 由 fastapi_app/tests/test_inventory_warmup_key_alignment.py 守住。
+                await get_inventory_paginated(db, page=1, per_page=20)
+            if not warmed:
+                # 只报一次成功：否则每 60s × N 个 worker 会把日志刷满
+                logger.info("库存缓存预热完成")
+                warmed = True
+        except asyncio.CancelledError:
+            raise  # 关停：交给 background_tasks 的 cancel+gather 回收
+        except Exception as e:  # defensive: 保热失败不得影响服务
+            logger.warning("库存缓存保热失败: %s", e)
+        await asyncio.sleep(_INVENTORY_WARMUP_INTERVAL_SECONDS)
 
 
 async def _perform_shutdown(background_tasks: list[asyncio.Task]) -> None:
@@ -236,7 +262,7 @@ async def lifespan(application: FastAPI):
     except Exception as e:  # defensive: 启动容错——备份记录同步失败不得阻断应用启动
         logger.warning('启动时备份记录同步失败（不影响启动）: %s', e)
 
-    # 预热库存缓存（后台执行，不阻塞启动）
+    # 库存缓存预热 + 周期保热（后台执行，不阻塞启动）
     background_tasks = []
     task = asyncio.create_task(_warm_inventory_cache())
     background_tasks.append(task)

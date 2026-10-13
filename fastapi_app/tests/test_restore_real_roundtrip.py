@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import gzip
 import os
+import shutil
 import tempfile
 import zipfile
 from pathlib import Path
@@ -125,6 +126,8 @@ async def test_restore_roundtrip_and_verify(restore_env, _require_pg_tools):
 
     admin_url = restore_env['admin_url']
     scratch_db = restore_env['scratch_db']
+    # 在 try 外先绑定：mkdtemp 本身失败时 finally 也要能安全跳过清理
+    tmpdir: Path | None = None
 
     try:
         try:
@@ -174,7 +177,16 @@ async def test_restore_roundtrip_and_verify(restore_env, _require_pg_tools):
         await engine.dispose()
         assert count == 1, f"restore 后探针数据丢失（count={count}）"
     finally:
-        await _drop_scratch(admin_url, scratch_db)
+        # 两层 try/finally：_drop_scratch 自己也可能抛（scratch 库被并发会话占用时
+        # DROP DATABASE ... WITH (FORCE) 会失败，2026-10-13 实测），不能因此漏掉临时目录清理。
+        try:
+            await _drop_scratch(admin_url, scratch_db)
+        finally:
+            # 清掉本次的临时目录。原先只 drop scratch 库、不删 tmpdir：
+            # mkdtemp 默认落在系统 %TEMP%，本机 %TEMP% 不可用时 Python 会**回落到 CWD**，
+            # 于是每跑一次全量就在仓库根留下一个 `restore_probe_*/`（2026-10-13 实测）。
+            if tmpdir is not None:
+                shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 async def test_restore_refuses_without_createdb(restore_env, _require_pg_tools):
@@ -196,16 +208,21 @@ async def test_restore_refuses_without_createdb(restore_env, _require_pg_tools):
     # 造一个最小合法 ZIP（含 dump 成员）；scratch 库不存在，restore 的建库权预检
     # 应在 DROP 之前拒绝（本机有权限时会 skip）。
     tmpdir = Path(tempfile.mkdtemp(prefix='restore_probe_refuse_'))
-    zip_path = tmpdir / 'probe.zip'
-    with zipfile.ZipFile(zip_path, 'w') as zf:
-        zf.writestr('database/dump.sql.gz', gzip.compress(b'SELECT 1;'))
+    try:
+        zip_path = tmpdir / 'probe.zip'
+        with zipfile.ZipFile(zip_path, 'w') as zf:
+            zf.writestr('database/dump.sql.gz', gzip.compress(b'SELECT 1;'))
 
-    engine = _engine(restore_env['scratch_url'])
-    ProbeSession = sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
-    async with ProbeSession() as db:
-        with zipfile.ZipFile(zip_path) as zf:
-            result = await restore_database_via_psql(zf, db)
-    await engine.dispose()
+        engine = _engine(restore_env['scratch_url'])
+        ProbeSession = sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+        async with ProbeSession() as db:
+            with zipfile.ZipFile(zip_path) as zf:
+                result = await restore_database_via_psql(zf, db)
+        await engine.dispose()
+    finally:
+        # 与上一条用例同因：本机 %TEMP% 不可用时 mkdtemp 回落到 CWD，
+        # 不删就会在仓库根留下 restore_probe_refuse_*/（2026-10-13 实测）
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
     if result.get('status') == 'ok':
         pytest.skip('DB_USER 实际具备建库权（本机环境特殊），拒绝路径无法触发')

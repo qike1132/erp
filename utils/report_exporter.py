@@ -50,17 +50,19 @@ class ReportExporter:
         ws.title = '订单流水'
 
         headers = [
-            '下单时间', '客户', '产品名称', '数量', '备注'
+            '下单时间', '订单号', '客户', '产品名称', '条码', '数量', '备注'
         ]
 
         self._write_sheet(ws, headers, logs, self._format_order_row)
 
         # 设置订单流水专用的列宽
         ws.column_dimensions['A'].width = 18  # 下单时间
-        ws.column_dimensions['B'].width = 12.5  # 客户 2.5cm
-        ws.column_dimensions['C'].width = 75  # 产品名称 15cm
-        ws.column_dimensions['D'].width = 11  # 数量 2.2cm
-        ws.column_dimensions['E'].width = 40  # 备注 8cm
+        ws.column_dimensions['B'].width = 22  # 订单号
+        ws.column_dimensions['C'].width = 12.5  # 客户
+        ws.column_dimensions['D'].width = 55  # 产品名称
+        ws.column_dimensions['E'].width = 16  # 条码
+        ws.column_dimensions['F'].width = 11  # 数量
+        ws.column_dimensions['G'].width = 40  # 备注
 
         return self._save_workbook(wb)
 
@@ -80,16 +82,18 @@ class ReportExporter:
         ws.title = '备货流水'
 
         headers = [
-            '备货时间', '客户', '产品名称', '备货数量', '备注'
+            '备货时间', '备货单号', '客户', '产品名称', '条码', '备货数量', '备注'
         ]
 
         self._write_sheet(ws, headers, logs, self._format_stockin_row)
 
         ws.column_dimensions['A'].width = 18
-        ws.column_dimensions['B'].width = 12.5
-        ws.column_dimensions['C'].width = 75
-        ws.column_dimensions['D'].width = 11
-        ws.column_dimensions['E'].width = 40
+        ws.column_dimensions['B'].width = 22
+        ws.column_dimensions['C'].width = 12.5
+        ws.column_dimensions['D'].width = 55
+        ws.column_dimensions['E'].width = 16
+        ws.column_dimensions['F'].width = 11
+        ws.column_dimensions['G'].width = 40
 
         return self._save_workbook(wb)
 
@@ -109,16 +113,18 @@ class ReportExporter:
         ws.title = '出货流水'
 
         headers = [
-            '出货时间', '客户', '产品名称', '出货数量', '备注'
+            '出货时间', '出货单号', '客户', '产品名称', '条码', '出货数量', '备注'
         ]
 
         self._write_sheet(ws, headers, logs, self._format_stockout_row)
 
         ws.column_dimensions['A'].width = 18
-        ws.column_dimensions['B'].width = 12.5
-        ws.column_dimensions['C'].width = 75
-        ws.column_dimensions['D'].width = 11
-        ws.column_dimensions['E'].width = 40
+        ws.column_dimensions['B'].width = 22
+        ws.column_dimensions['C'].width = 12.5
+        ws.column_dimensions['D'].width = 55
+        ws.column_dimensions['E'].width = 16
+        ws.column_dimensions['F'].width = 11
+        ws.column_dimensions['G'].width = 40
 
         return self._save_workbook(wb)
 
@@ -138,16 +144,19 @@ class ReportExporter:
         ws.title = '备货抵扣流水'
 
         headers = [
-            '抵扣时间', '客户', '产品名称', '抵扣数量', '订单备注'
+            '抵扣时间', '出货单号', '订单号', '客户', '产品名称', '条码', '抵扣数量', '订单备注'
         ]
 
         self._write_sheet(ws, headers, logs, self._format_deduction_row)
 
         ws.column_dimensions['A'].width = 18
-        ws.column_dimensions['B'].width = 12.5
-        ws.column_dimensions['C'].width = 75
-        ws.column_dimensions['D'].width = 11
-        ws.column_dimensions['E'].width = 40
+        ws.column_dimensions['B'].width = 22
+        ws.column_dimensions['C'].width = 22
+        ws.column_dimensions['D'].width = 12.5
+        ws.column_dimensions['E'].width = 45
+        ws.column_dimensions['F'].width = 16
+        ws.column_dimensions['G'].width = 11
+        ws.column_dimensions['H'].width = 40
 
         return self._save_workbook(wb)
 
@@ -167,16 +176,18 @@ class ReportExporter:
         ws.title = '退货流水'
 
         headers = [
-            '退货时间', '客户', '产品名称', '退货数量', '备注'
+            '退货时间', '退货单号', '客户', '产品名称', '条码', '退货数量', '备注'
         ]
 
         self._write_sheet(ws, headers, logs, self._format_return_row)
 
         ws.column_dimensions['A'].width = 18
-        ws.column_dimensions['B'].width = 12.5
-        ws.column_dimensions['C'].width = 75
-        ws.column_dimensions['D'].width = 11
-        ws.column_dimensions['E'].width = 40
+        ws.column_dimensions['B'].width = 22
+        ws.column_dimensions['C'].width = 12.5
+        ws.column_dimensions['D'].width = 55
+        ws.column_dimensions['E'].width = 16
+        ws.column_dimensions['F'].width = 11
+        ws.column_dimensions['G'].width = 40
 
         return self._save_workbook(wb)
 
@@ -291,8 +302,10 @@ class ReportExporter:
         """格式化订单行数据"""
         return [
             log.get('order_date', ''),
+            log.get('order_no', ''),
             log.get('customer', ''),
             log.get('product_name', ''),
+            log.get('product_barcode', ''),
             log.get('quantity', 0),
             log.get('note', '')
         ]
@@ -301,8 +314,10 @@ class ReportExporter:
         """格式化备货行数据"""
         return [
             log.get('stockin_date', ''),
+            log.get('record_no') or log.get('stockin_no', ''),
             log.get('customer', ''),
             log.get('product_name', ''),
+            log.get('product_barcode', ''),
             log.get('quantity', 0),
             log.get('note', '')
         ]
@@ -311,8 +326,10 @@ class ReportExporter:
         """格式化出货行数据"""
         return [
             log.get('stockout_date', ''),
+            log.get('record_no') or log.get('stockout_no', ''),
             log.get('customer', ''),
             log.get('product_name', ''),
+            log.get('product_barcode', ''),
             log.get('quantity', 0),
             log.get('note', '')
         ]
@@ -321,8 +338,11 @@ class ReportExporter:
         """格式化抵扣行数据"""
         return [
             log.get('deduction_time', ''),
+            log.get('record_no') or log.get('stockout_no', ''),
+            log.get('order_no', ''),
             log.get('customer', ''),
             log.get('product_name', ''),
+            log.get('product_barcode') or log.get('sku', ''),
             log.get('quantity', 0),
             log.get('order_note', '')
         ]
@@ -331,8 +351,10 @@ class ReportExporter:
         """格式化退货行数据"""
         return [
             log.get('return_date', ''),
+            log.get('record_no') or log.get('return_no', ''),
             log.get('customer', ''),
             log.get('product_name', ''),
+            log.get('product_barcode', ''),
             log.get('quantity', 0),
             log.get('note', '')
         ]

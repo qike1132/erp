@@ -29,6 +29,7 @@
         :per-page="perPage"
         :pagination="pagination"
         :current-cfg="currentCfg"
+        :active-tab="activeTab"
         :can-edit="canEditRowActions"
         :can-delete="canDeleteRowActions"
         @sort="onSort"
@@ -38,16 +39,12 @@
       />
     </div>
 
-    <!-- 编辑订单弹窗（记录查询 tab 收敛至报表页，2026-10-06） -->
-    <EditOrderModal v-model:open="rowActions.detailOpen.value"
-                    v-model:edit-form="rowActions.editForm"
-                    :detail-data="rowActions.detailData.value"
-                    :available-stockin="rowActions.availableStockin.value"
-                    :saving="rowActions.saving.value"
-                    :deduct-retry-pending="rowActions.deductRetryPending.value"
-                    :get-status-class="rowActions.getStatusClass"
-                    :save-edit-order="rowActions.saveEditOrder"
-                    :retry-deduct-update="rowActions.retryDeductUpdate"
+    <!-- 编辑订单明细弹窗（订单流水行内编辑单个 SKU，2026-10-13） -->
+    <EditOrderItemModal
+      v-model:open="rowActions.orderItemEditVisible.value"
+      v-model:form="rowActions.orderItemEditForm.value"
+      :saving="rowActions.savingOrderItem.value"
+      :save-order-item-edit="rowActions.saveOrderItemEdit"
     />
 
     <!-- 编辑备货弹窗（备货流水里的备货行） -->
@@ -77,17 +74,6 @@
       :save-return-edit="rowActions.saveReturnEdit"
     />
 
-    <!-- 聚合行还原出多条记录时的选择弹窗 -->
-    <ReportRecordPicker
-      v-model:open="rowActions.pickerOpen.value"
-      :records="rowActions.pickerRecords.value"
-      :action="rowActions.pickerAction.value"
-      :no-key="rowActions.pickerKeys.value.noKey"
-      :date-key="rowActions.pickerKeys.value.dateKey"
-      :note-key="rowActions.pickerKeys.value.noteKey"
-      @pick="rowActions.onPickerPick"
-    />
-
     <!-- 删除确认对话框 -->
     <UiConfirmDialog
       :open="rowActions.confirmDialog.open"
@@ -109,11 +95,10 @@ import { useAuthStore } from '@/stores/auth'
 import ReportTabGroup from './components/ReportTabGroup.vue'
 import ReportFilterBar from './components/ReportFilterBar.vue'
 import ReportTable from './components/ReportTable.vue'
-import EditOrderModal from './components/EditOrderModal.vue'
+import EditOrderItemModal from './components/EditOrderItemModal.vue'
 import EditStockinModal from './components/EditStockinModal.vue'
 import EditStockoutModal from './components/EditStockoutModal.vue'
 import EditReturnModal from './components/EditReturnModal.vue'
-import ReportRecordPicker from './components/ReportRecordPicker.vue'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import { useReportConfig, type TabType } from './composables/useReportConfig'
 import { useReportRowActions, TAB_ROW_PERMISSIONS, type ReportActionTab } from './composables/useReportRowActions'
@@ -207,10 +192,6 @@ function doReset() {
 function onTabChange(value: TabType) {
   activeTab.value = value
   page.value = 1
-  // 切 tab 收尾：关闭还原选择弹窗，清空残留的还原态（防上一 tab 的弹窗串场）
-  rowActions.pickerOpen.value = false
-  rowActions.pickerRecords.value = []
-  rowActions.pickerAction.value = 'edit'
 }
 
 function onPageChange(event: { page: number; rows: number }) {

@@ -1,21 +1,23 @@
 /**
- * 报表页行内操作（出货 / 备货抵扣 / 退货）—— useReportRowActions 行为测试（2026-10-07）。
+ * 报表页行内操作（2026-10-13 改「直连单条记录」）—— useReportRowActions 行为测试。
  *
- * 覆盖：各维度权限码映射、聚合行还原（出货按 stockout_no、抵扣按 order_no、退货按 return_no）、
- * 单条直开对应编辑弹窗、多条弹 picker、权限兜底拒绝、保存/删除的写路径与抵扣行客户不下发。
+ * 覆盖：各维度权限码映射、订单 tab 单 SKU 编辑/删除直连 /orders/items、
+ * 出货/抵扣/退货按 record_id 直连各自单条接口、权限兜底拒绝。
+ * （旧「聚合行还原 + picker」流程已随报表行改「一行一记录」整体移除。）
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { defineComponent, h } from 'vue'
 import { mount } from '@vue/test-utils'
 
 const mocks = vi.hoisted(() => ({
-  orderRecords: vi.fn(),
-  stockoutRecords: vi.fn(),
-  editStockout: vi.fn(),
-  deleteStockout: vi.fn(),
-  returnRecords: vi.fn(),
-  returnUpdate: vi.fn(),
-  returnRemove: vi.fn(),
+  updateItem: vi.fn(async () => ({})),
+  deleteItem: vi.fn(async () => ({ message: '明细删除成功' })),
+  editStockin: vi.fn(async () => ({})),
+  deleteStockin: vi.fn(async () => ({})),
+  editStockout: vi.fn(async () => ({})),
+  deleteStockout: vi.fn(async () => ({})),
+  returnUpdate: vi.fn(async () => ({ message: '退货修改成功' })),
+  returnRemove: vi.fn(async () => ({})),
   hasPermission: vi.fn((_c: string) => true),
   hasAnyPermission: vi.fn((_c: string[]) => true),
   showToast: vi.fn(),
@@ -24,18 +26,14 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock('@/api', () => ({
-  orderApi: { records: mocks.orderRecords, detail: vi.fn(), update: vi.fn(), updateDeduct: vi.fn(), delete: vi.fn() },
+  orderApi: { updateItem: mocks.updateItem, deleteItem: mocks.deleteItem },
   stockApi: {
-    stockoutRecords: mocks.stockoutRecords,
+    editStockin: mocks.editStockin,
+    deleteStockin: mocks.deleteStockin,
     editStockout: mocks.editStockout,
     deleteStockout: mocks.deleteStockout,
-    deleteStockin: vi.fn(),
   },
-  stockReturnApi: {
-    records: mocks.returnRecords,
-    update: mocks.returnUpdate,
-    remove: mocks.returnRemove,
-  },
+  stockReturnApi: { update: mocks.returnUpdate, remove: mocks.returnRemove },
 }))
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({ hasPermission: mocks.hasPermission, hasAnyPermission: mocks.hasAnyPermission }),
@@ -66,16 +64,28 @@ function makeActions() {
   return api!
 }
 
-const STOCKOUT_REC = {
-  id: 21, stockout_no: 'SO-20261001-1', stockout_date: '2026-10-01', customer: 'MINISO国际',
-  product_id: 3, product_name: '鲨鱼公仔', barcode: '690', quantity: 12, returned_quantity: 2,
-  note: '急单', stockin_id: null, order_id: 7,
+/** 报表行（后端 ReportLogItem）——订单 tab 一行一 SKU */
+const ORDER_ROW = {
+  order_id: 7, item_id: 12, order_no: 'SO-1', order_date: '2026-10-13 09:12',
+  customer: 'MINISO国际', product_name: '鲨鱼公仔', product_barcode: '690', quantity: 150,
+  item_note: '加急', order_note: '整单备注', item_count: 2, order_total_qty: 300,
 }
-const DEDUCTION_REC = { ...STOCKOUT_REC, id: 22, stockout_no: 'SO-D1', stockin_id: 5 }
-const RETURN_REC = {
-  id: 31, return_no: 'SR-20261001-1', return_date: '2026-10-01', customer: 'MINISO国际',
-  product_id: 3, product_name: '鲨鱼公仔', quantity: 4, stockout_id: 21, stockout_no: 'SO-1',
-  reason: '破损', note: '备注',
+const STOCKOUT_ROW = {
+  record_id: 21, record_no: 'SO-20261001-1', stockout_date: '2026-10-01 10:00',
+  customer: 'MINISO国际', product_name: '鲨鱼公仔', product_barcode: '690', quantity: 12, note: '急单',
+}
+// 抵扣行真实形状（get_deduction_logs）：quantity 是**净量**、另有 gross_quantity/stockout_date/note
+// （回归评审 I-1：若照搬 stockout 行键，编辑会把毛量改成净量）
+const DEDUCTION_ROW = {
+  record_id: 22, record_no: 'SO-D1', deduction_time: '2026-10-01 10:00', stockout_date: '2026-10-01 10:00',
+  customer: 'MINISO国际', product_name: '鲨鱼公仔', product_barcode: '690',
+  quantity: 80, gross_quantity: 100, note: '出货备注', order_no: 'SO-9', order_note: '订单备注',
+}
+// 退货行真实形状：reason 与 note 分开下发（回归评审 I-3：reason 不能丢）
+const RETURN_ROW = {
+  record_id: 31, record_no: 'SR-20261001-1', return_date: '2026-10-01 11:00',
+  customer: 'MINISO国际', product_name: '鲨鱼公仔', product_barcode: '690',
+  quantity: 4, reason: '破损', note: '客户反馈', note_display: '破损；客户反馈',
 }
 
 beforeEach(() => {
@@ -95,170 +105,113 @@ describe('TAB_ROW_PERMISSIONS', () => {
   })
 })
 
-describe('订单/备货流水行内操作', () => {
-  it('备货行：order_nos 为空串（后端默认值）时按 stockin_nos 还原', async () => {
-    mocks.orderRecords.mockResolvedValue({ data: [
-      { id: 5, record_type: 'stockin', order_no: 'BH-20261001-1', customer: 'MINISO国际', order_date: '2026-10-01' },
-    ] })
+describe('订单流水：单 SKU 直连', () => {
+  it('编辑：打开明细弹窗，表单取该行的 item_id/数量/备注', async () => {
     const api = makeActions()
+    await api.onRowAction('order', 'edit', ORDER_ROW)
 
-    // 回归 2026-10-08：后端 ReportLogItem 的 order_nos 默认值是 ''（非 null），
-    // 旧写法 `row.order_nos ?? row.stockin_nos` 会取到空串 → 单号为空 →
-    // 弹「未能找到该组对应的明细记录」，备货流水行内操作恒失败。
-    await api.onRowAction('stockin', 'delete', {
-      order_nos: '', stockin_nos: 'BH-20261001-1', stockin_date: '2026-10-01', customer: 'MINISO国际',
-    })
-
-    expect(mocks.orderRecords).toHaveBeenCalledWith(expect.objectContaining({
-      record_type: 'stockin', start_date: '2026-10-01', end_date: '2026-10-01',
-    }))
-    expect(mocks.showToast).not.toHaveBeenCalledWith('未能找到该组对应的明细记录', 'error')
+    expect(api.orderItemEditVisible.value).toBe(true)
+    expect(api.orderItemEditForm.value).toMatchObject({ itemId: 12, productName: '鲨鱼公仔', quantity: 150, note: '加急' })
   })
 
-  it('订单行：按 order_nos 还原', async () => {
-    mocks.orderRecords.mockResolvedValue({ data: [
-      { id: 7, record_type: 'order', order_no: 'PO-1', customer: 'MINISO国际', order_date: '2026-10-01' },
-    ] })
+  it('删除：直接调 deleteItem(item_id)，不再走还原/picker', async () => {
     const api = makeActions()
+    await api.onRowAction('order', 'delete', ORDER_ROW)
 
-    await api.onRowAction('order', 'delete', {
-      order_nos: 'PO-1', order_date: '2026-10-01', customer: 'MINISO国际',
-    })
+    expect(mocks.deleteItem).toHaveBeenCalledWith(12)
+    expect(mocks.invalidateQueries).toHaveBeenCalled()
+  })
 
-    expect(mocks.orderRecords).toHaveBeenCalledWith(expect.objectContaining({
-      record_type: 'order', start_date: '2026-10-01', end_date: '2026-10-01',
-    }))
+  it('保存：调 updateItem(item_id, {quantity, note})', async () => {
+    const api = makeActions()
+    await api.onRowAction('order', 'edit', ORDER_ROW)
+    api.orderItemEditForm.value = { ...api.orderItemEditForm.value!, quantity: 200, note: '改' }
+    await api.saveOrderItemEdit()
+
+    expect(mocks.updateItem).toHaveBeenCalledWith(12, { quantity: 200, note: '改' })
+    expect(api.orderItemEditVisible.value).toBe(false)
+  })
+
+  it('无 item_id（历史订单）时拒绝，不调接口', async () => {
+    const api = makeActions()
+    await api.onRowAction('order', 'delete', { ...ORDER_ROW, item_id: 0 })
+
+    expect(mocks.deleteItem).not.toHaveBeenCalled()
+    expect(mocks.showToast).toHaveBeenCalled()
   })
 })
 
-describe('出货流水行内操作', () => {
-  it('单条：按 stockout_no 还原并打开出货编辑弹窗', async () => {
-    mocks.stockoutRecords.mockResolvedValue({ data: [STOCKOUT_REC] })
+describe('出货 / 备货抵扣流水：按 record_id 直连', () => {
+  it('出货删除：调 deleteStockout(record_id)', async () => {
     const api = makeActions()
+    await api.onRowAction('stockout', 'delete', STOCKOUT_ROW)
 
-    await api.onRowAction('stockout', 'edit', { stockout_nos: 'SO-20261001-1', customer: 'MINISO国际', product_name: '鲨鱼公仔' })
-
-    expect(mocks.stockoutRecords).toHaveBeenCalledWith('stockout', 'SO-20261001-1', '鲨鱼公仔')
-    expect(api.stockoutEditVisible.value).toBe(true)
-    expect(api.stockoutEditIsDeduction.value).toBe(false)
-    expect(api.stockoutEditForm.value?.stockoutNo).toBe('SO-20261001-1')
-    expect(api.stockoutEditForm.value?.quantity).toBe(12)
-  })
-
-  it('抵扣：按 order_no 还原（带产品名收窄），标记为抵扣行', async () => {
-    mocks.stockoutRecords.mockResolvedValue({ data: [DEDUCTION_REC] })
-    const api = makeActions()
-
-    await api.onRowAction('deduction', 'edit', { order_nos: 'PO-1', customer: 'MINISO国际', product_name: '鲨鱼公仔' })
-
-    // 产品名一并下发：同一订单对多产品抵扣时避免还原出他产品的行
-    expect(mocks.stockoutRecords).toHaveBeenCalledWith('deduction', 'PO-1', '鲨鱼公仔')
-    expect(api.stockoutEditIsDeduction.value).toBe(true)
-    expect(api.stockoutEditVisible.value).toBe(true)
-  })
-
-  it('多条：打开选择弹窗，不直接编辑', async () => {
-    mocks.stockoutRecords.mockResolvedValue({ data: [STOCKOUT_REC, { ...STOCKOUT_REC, id: 99 }] })
-    const api = makeActions()
-
-    await api.onRowAction('stockout', 'edit', { stockout_nos: 'SO-1,SO-2' })
-
-    expect(api.pickerOpen.value).toBe(true)
-    expect(api.stockoutEditVisible.value).toBe(false)
-    expect(api.pickerRecords.value).toHaveLength(2)
-    expect(api.pickerKeys.value.noKey).toBe('stockout_no')
-  })
-
-  it('无权限：toast 拒绝，不发起还原请求', async () => {
-    mocks.hasAnyPermission.mockReturnValue(false)
-    const api = makeActions()
-
-    await api.onRowAction('stockout', 'edit', { stockout_nos: 'SO-1' })
-
-    expect(mocks.showToast).toHaveBeenCalled()
-    expect(mocks.stockoutRecords).not.toHaveBeenCalled()
-    expect(api.stockoutEditVisible.value).toBe(false)
-  })
-
-  it('保存出货编辑：调 editStockout 并失效报表缓存', async () => {
-    mocks.editStockout.mockResolvedValue({ success: true })
-    const api = makeActions()
-    api.stockoutEditForm.value = {
-      id: 21, stockoutNo: 'SO-1', productName: '鲨鱼公仔', quantity: 15,
-      customer: 'MINISO国际', date: '2026-10-02', note: '改',
-    }
-    api.stockoutEditIsDeduction.value = false
-
-    await api.saveStockoutEdit()
-
-    expect(mocks.editStockout).toHaveBeenCalledWith(21, expect.objectContaining({ quantity: 15, customer: 'MINISO国际', stockout_date: '2026-10-02' }))
-    expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['report-data'] })
-    expect(api.stockoutEditVisible.value).toBe(false)
-  })
-
-  it('保存抵扣编辑：不下发 customer（由订单/备货带出）', async () => {
-    mocks.editStockout.mockResolvedValue({ success: true })
-    const api = makeActions()
-    api.stockoutEditForm.value = {
-      id: 22, stockoutNo: 'SO-D1', productName: '鲨鱼公仔', quantity: 6,
-      customer: '被忽略的客户', date: '2026-10-02', note: '',
-    }
-    api.stockoutEditIsDeduction.value = true
-
-    await api.saveStockoutEdit()
-
-    const payload = mocks.editStockout.mock.calls[0]![1] as Record<string, unknown>
-    expect(payload.quantity).toBe(6)
-    expect('customer' in payload).toBe(false)
-  })
-
-  it('删除：确认后调 deleteStockout', async () => {
-    mocks.stockoutRecords.mockResolvedValue({ data: [STOCKOUT_REC] })
-    mocks.deleteStockout.mockResolvedValue({ success: true })
-    const api = makeActions()
-
-    await api.onRowAction('stockout', 'delete', { stockout_nos: 'SO-1' })
-    // 单条直开会直接走删除确认
-    expect(mocks.confirm).toHaveBeenCalled()
     expect(mocks.deleteStockout).toHaveBeenCalledWith(21)
   })
+
+  it('抵扣删除：调 deleteStockout(record_id)，编辑弹窗标 isDeduction', async () => {
+    const api = makeActions()
+    await api.onRowAction('deduction', 'edit', DEDUCTION_ROW)
+
+    expect(api.stockoutEditVisible.value).toBe(true)
+    expect(api.stockoutEditIsDeduction.value).toBe(true)
+    // 回归 I-1：数量必须取**毛量**（gross_quantity=100），不能取净量 80
+    expect(api.stockoutEditForm.value).toMatchObject({ id: 22, stockoutNo: 'SO-D1', quantity: 100, note: '出货备注' })
+  })
+
+  it('抵扣编辑保存：回写毛量而非净量（不把出货量改错）', async () => {
+    const api = makeActions()
+    await api.onRowAction('deduction', 'edit', DEDUCTION_ROW)
+    await api.saveStockoutEdit()
+
+    expect(mocks.editStockout).toHaveBeenCalledWith(22, expect.objectContaining({ quantity: 100 }))
+  })
+
+  it('出货编辑保存：客户随表单下发', async () => {
+    const api = makeActions()
+    await api.onRowAction('stockout', 'edit', STOCKOUT_ROW)
+    await api.saveStockoutEdit()
+
+    expect(mocks.editStockout).toHaveBeenCalledWith(21, expect.objectContaining({ quantity: 12, customer: 'MINISO国际' }))
+  })
 })
 
-describe('退货流水行内操作', () => {
-  it('单条：按 return_no 还原并打开退货编辑弹窗', async () => {
-    mocks.returnRecords.mockResolvedValue({ data: [RETURN_REC] })
+describe('退货流水：按 record_id 直连', () => {
+  it('删除：调 stockReturnApi.remove(record_id)', async () => {
     const api = makeActions()
+    await api.onRowAction('return', 'delete', RETURN_ROW)
 
-    await api.onRowAction('return', 'edit', { return_nos: 'SR-20261001-1', customer: 'MINISO国际' })
-
-    expect(mocks.returnRecords).toHaveBeenCalledWith('SR-20261001-1')
-    expect(api.returnEditVisible.value).toBe(true)
-    expect(api.returnEditForm.value?.returnNo).toBe('SR-20261001-1')
-    expect(api.returnEditForm.value?.reason).toBe('破损')
+    expect(mocks.returnRemove).toHaveBeenCalledWith(31)
   })
 
-  it('保存退货编辑：调 update', async () => {
-    mocks.returnUpdate.mockResolvedValue({ success: true, message: '退货修改成功！单号 SR-NEW' })
+  it('编辑：打开弹窗并按 record_id 保存（reason 原值回写，不被清空）', async () => {
     const api = makeActions()
-    api.returnEditForm.value = {
-      id: 31, returnNo: 'SR-1', productName: '鲨鱼公仔', quantity: 6,
-      customer: 'MINISO国际', date: '2026-10-03', reason: '新原因', note: '新备注',
-    }
-
+    await api.onRowAction('return', 'edit', RETURN_ROW)
+    expect(api.returnEditVisible.value).toBe(true)
+    expect(api.returnEditForm.value).toMatchObject({ id: 31, reason: '破损', note: '客户反馈' })
     await api.saveReturnEdit()
 
-    expect(mocks.returnUpdate).toHaveBeenCalledWith(31, expect.objectContaining({ quantity: 6, return_date: '2026-10-03', reason: '新原因', note: '新备注' }))
-    expect(api.returnEditVisible.value).toBe(false)
+    // 回归 I-3：reason 必须是 '破损'（旧映射硬编码 '' → 保存会清空原因）
+    expect(mocks.returnUpdate).toHaveBeenCalledWith(31, expect.objectContaining({ quantity: 4, reason: '破损' }))
+  })
+})
+
+describe('权限兜底', () => {
+  it('无编辑权限：拒绝且不调接口', async () => {
+    mocks.hasAnyPermission.mockReturnValue(false)
+    const api = makeActions()
+    await api.onRowAction('order', 'edit', ORDER_ROW)
+
+    expect(api.orderItemEditVisible.value).toBe(false)
+    expect(mocks.updateItem).not.toHaveBeenCalled()
+    expect(mocks.showToast).toHaveBeenCalled()
   })
 
-  it('取消退货：确认后调 remove', async () => {
-    mocks.returnRecords.mockResolvedValue({ data: [RETURN_REC] })
-    mocks.returnRemove.mockResolvedValue({ success: true, message: 'ok' })
+  it('无删除权限：拒绝且不调接口', async () => {
+    mocks.hasAnyPermission.mockReturnValue(false)
     const api = makeActions()
+    await api.onRowAction('order', 'delete', ORDER_ROW)
 
-    await api.onRowAction('return', 'delete', { return_nos: 'SR-1' })
-
-    expect(mocks.confirm).toHaveBeenCalled()
-    expect(mocks.returnRemove).toHaveBeenCalledWith(31)
+    expect(mocks.deleteItem).not.toHaveBeenCalled()
   })
 })

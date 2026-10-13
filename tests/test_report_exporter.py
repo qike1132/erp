@@ -14,31 +14,32 @@ from openpyxl import load_workbook
 from utils.report_exporter import ReportExporter, generate_filename
 
 # (导出方法, 工作表名, 表头, 行值取值键)
+# 2026-10-13：表头补「单号/订单号」与「条码」两列（把行里已有的字段渲染出来）。
 _CASES = [
     (
         'export_order_logs', '订单流水',
-        ['下单时间', '客户', '产品名称', '数量', '备注'],
-        ['order_date', 'customer', 'product_name', 'quantity', 'note'],
+        ['下单时间', '订单号', '客户', '产品名称', '条码', '数量', '备注'],
+        ['order_date', 'order_no', 'customer', 'product_name', 'product_barcode', 'quantity', 'note'],
     ),
     (
         'export_stockin_logs', '备货流水',
-        ['备货时间', '客户', '产品名称', '备货数量', '备注'],
-        ['stockin_date', 'customer', 'product_name', 'quantity', 'note'],
+        ['备货时间', '备货单号', '客户', '产品名称', '条码', '备货数量', '备注'],
+        ['stockin_date', 'record_no', 'customer', 'product_name', 'product_barcode', 'quantity', 'note'],
     ),
     (
         'export_stockout_logs', '出货流水',
-        ['出货时间', '客户', '产品名称', '出货数量', '备注'],
-        ['stockout_date', 'customer', 'product_name', 'quantity', 'note'],
+        ['出货时间', '出货单号', '客户', '产品名称', '条码', '出货数量', '备注'],
+        ['stockout_date', 'record_no', 'customer', 'product_name', 'product_barcode', 'quantity', 'note'],
     ),
     (
         'export_deduction_logs', '备货抵扣流水',
-        ['抵扣时间', '客户', '产品名称', '抵扣数量', '订单备注'],
-        ['deduction_time', 'customer', 'product_name', 'quantity', 'order_note'],
+        ['抵扣时间', '出货单号', '订单号', '客户', '产品名称', '条码', '抵扣数量', '订单备注'],
+        ['deduction_time', 'record_no', 'order_no', 'customer', 'product_name', 'product_barcode', 'quantity', 'order_note'],
     ),
     (
         'export_return_logs', '退货流水',
-        ['退货时间', '客户', '产品名称', '退货数量', '备注'],
-        ['return_date', 'customer', 'product_name', 'quantity', 'note'],
+        ['退货时间', '退货单号', '客户', '产品名称', '条码', '退货数量', '备注'],
+        ['return_date', 'record_no', 'customer', 'product_name', 'product_barcode', 'quantity', 'note'],
     ),
 ]
 
@@ -93,6 +94,63 @@ class TestExportSmoke:
         assert generate_filename('return') == '退货流水.xlsx'
         assert generate_filename('order') == '订单流水.xlsx'
         assert generate_filename('nope') == '报表.xlsx'
+
+
+class TestExportRowKeyAlignment:
+    """新增的「单号/条码」列必须能取到 `report_data_service` 的真实行键。
+
+    回归 2026-10-13（评审 C-1）：exporter 读 `record_no`/`product_barcode`，而数据源
+    四个 tab 的行键原本是 `stockin_no`/`stockout_no`/`return_no`/`sku` —— 键名漂移会让
+    新列**整列空白**，而 `TestExportSmoke` 的行键是自建的（镜像断言），永远测不出。
+    本类用**数据源真实产出的键**喂 exporter，锁死两侧键名一致。
+    """
+
+    def test_four_tabs_no_and_barcode_columns_are_populated(self):
+        exporter = ReportExporter()
+        # 行键照抄 report_data_service 各 _get_*_logs 的**旧键**（不含 record_no）——
+        # 逼出导出器的回退分支；数据源现已同时下发 record_no（见下条用例）。
+        cases = [
+            ('export_stockin_logs', {
+                'id': 1, 'stockin_no': 'SI-1', 'customer': 'C',
+                'product_name': 'P', 'product_barcode': 'B1', 'quantity': 1,
+                'remaining': 1, 'stockin_date': '2026-10-13 09:00', 'note': '',
+            }, 'SI-1'),
+            ('export_stockout_logs', {
+                'id': 2, 'stockout_no': 'SO-1', 'customer': 'C',
+                'product_name': 'P', 'product_barcode': 'B1', 'quantity': 1,
+                'stockout_date': '2026-10-13 09:00', 'order_no': 'SO-1', 'order_id': 9, 'note': '',
+            }, 'SO-1'),
+            ('export_deduction_logs', {
+                'id': 3, 'deduction_time': '2026-10-13 09:00', 'stockout_no': 'SO-1',
+                'customer': 'C', 'product_name': 'P', 'sku': 'B1',
+                'quantity': 1, 'order_no': 'SO-1', 'order_id': 9, 'order_note': '',
+            }, 'SO-1'),
+            ('export_return_logs', {
+                'id': 4, 'return_no': 'SR-1',
+                'return_date': '2026-10-13 09:00', 'customer': 'C', 'product_name': 'P',
+                'product_barcode': 'B1', 'quantity': 1, 'note': '',
+            }, 'SR-1'),
+        ]
+        for method, row, expected_no in cases:
+            data: bytes = getattr(exporter, method)([row], {'total_count': 1})
+            ws = load_workbook(io.BytesIO(data)).active
+            values = [c.value for c in ws[2]]
+            assert expected_no in values, f'{method} 的单号列应取到 {expected_no}，实际 {values}'
+            assert 'B1' in values, f'{method} 的条码列应取到 B1，实际 {values}'
+
+    def test_four_tabs_canonical_record_no_also_works(self):
+        """数据源新下发的规范键 record_no 也必须被导出器读到（两种键都能取）。"""
+        exporter = ReportExporter()
+        cases = [
+            ('export_stockin_logs', {'record_no': 'SI-9', 'stockin_date': 'x', 'product_barcode': 'B9', 'quantity': 1}, 'SI-9'),
+            ('export_stockout_logs', {'record_no': 'SO-9', 'stockout_date': 'x', 'product_barcode': 'B9', 'quantity': 1}, 'SO-9'),
+            ('export_deduction_logs', {'record_no': 'SO-9', 'deduction_time': 'x', 'product_barcode': 'B9', 'quantity': 1}, 'SO-9'),
+            ('export_return_logs', {'record_no': 'SR-9', 'return_date': 'x', 'product_barcode': 'B9', 'quantity': 1}, 'SR-9'),
+        ]
+        for method, row, expected_no in cases:
+            data: bytes = getattr(exporter, method)([row], {'total_count': 1})
+            values = [c.value for c in load_workbook(io.BytesIO(data)).active[2]]
+            assert expected_no in values and 'B9' in values, f'{method} 规范键未生效：{values}'
 
 
 def _inventory_row(**over) -> dict:

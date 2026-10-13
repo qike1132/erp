@@ -4970,6 +4970,100 @@
         }
       }
     },
+    "/api/v1/orders/items/{item_id}": {
+      "put": {
+        "tags": [
+          "订单管理"
+        ],
+        "summary": "Edit Order Item",
+        "description": "编辑单个订单明细（SKU）：改数量/备注后重算订单兼容数量与状态。\n\n报表流水行内编辑（2026-10-13）：item 级直改、不走审批（owner 裁决），\n但仍过 `_check_order_lock`（被他人锁定/审批中的订单不可改）。\nValueError（订单/明细不存在、数量越界）由 db_transaction 默认映射为 400。\n\nArgs:\n    item_id: 订单明细 ID。\n    data: 明细更新参数（仅含需修改的字段）。\n    db: 异步数据库会话（读写主库）。\n    user: 当前登录用户，用于权限与锁定判断。\n\nReturns:\n    OrderActionResponse: 含成功标志与提示消息的响应。",
+        "operationId": "edit_order_item_api_v1_orders_items__item_id__put",
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Item Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrderItemUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/fastapi_app__schemas__order__OrderActionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "订单管理"
+        ],
+        "summary": "Delete Order Item",
+        "description": "删除单个订单明细（SKU）。\n\n删到空等价删整张订单（复用整单删除的审批/锁定/备份，非超管会变成提交审批）；\n已被备货抵扣的 SKU 拒删。error_map 与整单删除端点同口径。\n\nArgs:\n    item_id: 订单明细 ID。\n    db: 异步数据库会话（读写主库）。\n    user: 当前登录用户，用于权限与锁定判断。\n\nReturns:\n    OrderActionResponse: 含成功标志与提示消息的响应（末项删除时透传 delete_order 的真实返回）。\n\nRaises:\n    HTTPException: 明细/订单不存在返回 400；权限不足 403；关联数据冲突 409；\n        删除前备份失败或数据库异常返回 500。",
+        "operationId": "delete_order_item_api_v1_orders_items__item_id__delete",
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Item Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/fastapi_app__schemas__order__OrderActionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/orders/delete/{order_id}": {
       "delete": {
         "tags": [
@@ -28041,6 +28135,40 @@
         "title": "OrderItemSchema",
         "description": "订单明细（SKU 粒度）响应 schema"
       },
+      "OrderItemUpdate": {
+        "properties": {
+          "quantity": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 9999999.0,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quantity",
+            "description": "该 SKU 数量"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note",
+            "description": "该 SKU 备注"
+          }
+        },
+        "type": "object",
+        "title": "OrderItemUpdate",
+        "description": "单个订单明细（SKU）编辑 schema（报表流水行内编辑，2026-10-13）\n\n仅允许改该 SKU 的数量与备注；客户是订单级字段，不走此接口。\n未传字段沿用原值（部分更新语义）。"
+      },
       "OrderListResponse": {
         "properties": {
           "success": {
@@ -32667,6 +32795,66 @@
       },
       "ReportLogItem": {
         "properties": {
+          "record_id": {
+            "type": "integer",
+            "title": "Record Id",
+            "default": 0
+          },
+          "record_no": {
+            "type": "string",
+            "title": "Record No",
+            "default": ""
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason",
+            "default": ""
+          },
+          "gross_quantity": {
+            "type": "integer",
+            "title": "Gross Quantity",
+            "default": 0
+          },
+          "stockout_date": {
+            "type": "string",
+            "title": "Stockout Date",
+            "default": ""
+          },
+          "note_display": {
+            "type": "string",
+            "title": "Note Display",
+            "default": ""
+          },
+          "order_id": {
+            "type": "integer",
+            "title": "Order Id",
+            "default": 0
+          },
+          "order_no": {
+            "type": "string",
+            "title": "Order No",
+            "default": ""
+          },
+          "item_id": {
+            "type": "integer",
+            "title": "Item Id",
+            "default": 0
+          },
+          "item_count": {
+            "type": "integer",
+            "title": "Item Count",
+            "default": 0
+          },
+          "order_total_qty": {
+            "type": "integer",
+            "title": "Order Total Qty",
+            "default": 0
+          },
+          "item_note": {
+            "type": "string",
+            "title": "Item Note",
+            "default": ""
+          },
           "order_date": {
             "type": "string",
             "title": "Order Date",
@@ -32675,11 +32863,6 @@
           "stockin_date": {
             "type": "string",
             "title": "Stockin Date",
-            "default": ""
-          },
-          "stockout_date": {
-            "type": "string",
-            "title": "Stockout Date",
             "default": ""
           },
           "deduction_time": {

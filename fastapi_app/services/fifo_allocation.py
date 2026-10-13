@@ -114,9 +114,15 @@ def _fifo_after_commit(session) -> None:
 
 
 async def _invalidate_fifo_caches_safe(produced_dirty: bool = False) -> None:
+    # PATTERN 策略收**字符串**通配符（见 cache_invalidation.invalidate 的 docstring）。
+    # 2026-10-13 修：这里原先传的是单元素列表 `['plan_fifo:*']` ——
+    # invalidate_cache 会把它当 pattern 交给 redis_cache._make_key，
+    # `list.startswith` 抛 AttributeError，被下面的 except 吞成「等待 TTL 兜底」。
+    # 后果：L1（invalidate_local_cache）清了，**L2/Redis 从没清过**，多 worker 部署下
+    # 其它 worker 的 plan_fifo 分配结果最长 30 分钟（FIFO_CACHE_TTL）显示旧值。
     try:
-        await cache_mgr.invalidate(InvalidationStrategy.PATTERN, ['plan_fifo:*'])
-        await cache_mgr.invalidate(InvalidationStrategy.PATTERN, [f'{PRODUCTION_FIFO_CACHE_PREFIX}:*'])
+        await cache_mgr.invalidate(InvalidationStrategy.PATTERN, 'plan_fifo:*')
+        await cache_mgr.invalidate(InvalidationStrategy.PATTERN, f'{PRODUCTION_FIFO_CACHE_PREFIX}:*')
         invalidate_local_cache('plan_fifo:*')
         invalidate_local_cache(f'{PRODUCTION_FIFO_CACHE_PREFIX}:*')
         if produced_dirty:
@@ -124,7 +130,7 @@ async def _invalidate_fifo_caches_safe(produced_dirty: bool = False) -> None:
             # 只清分配缓存不够：页面读的是 pp:* 聚合，TTL 120s（本地 30s）内会一直显示旧值，
             # 「录入生产记录 → 刷新页面应变」的人工验收会因此假失败。
             # 出货写入不在这里清 pp:* —— 那条链路已由 shipment recalc 调 _invalidate_plan_caches。
-            await cache_mgr.invalidate(InvalidationStrategy.PATTERN, ['pp:*'])
+            await cache_mgr.invalidate(InvalidationStrategy.PATTERN, 'pp:*')
             invalidate_local_cache('pp:*')
     except Exception:  # defensive: 缓存失效失败不阻断业务，靠 TTL 兜底
         logger.warning("分配缓存全量失效失败（等待 TTL 过期兜底）", exc_info=True)

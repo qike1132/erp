@@ -92,6 +92,53 @@ async def _query_logs_generic(
     }
 
 
+def _order_logs_sql(order_tbl: str, item_join: str, item_qty: str,
+                    item_name: str, item_barcode: str,
+                    item_where_sql: str) -> tuple[str, str]:
+    """订单流水的 (data_sql, qty_sql) 模板（2026-10-13 改母行-明细）。
+
+    按**订单**分页（LIMIT/OFFSET 落在订单上）、展开为一行一个 (订单 × SKU)。
+    data_sql 必须自带 `total_count` 列（`_query_logs_generic` 取 `results[0].total_count`）：
+    CTE 已 `GROUP BY o.id`（每行=一张订单），`COUNT(*) OVER ()` 在 LIMIT **之前**求值
+    → 全量匹配的**订单数**（不能用展开后的 `COUNT(*)`，那是 SKU 行数）。
+    qty_sql 保持「Σ 明细数量」语义（进 stats.total_quantity），不挪用成订单数。
+
+    `item_where_sql`：**明细级**筛选（产品/工厂），只作用于外层展开行 —— 保留旧契约
+    「按某 SKU 筛选时只出该 SKU 行，而非整单全部 SKU」（CTE 里用全量 where 选订单，
+    外层用它收窄到匹配的明细行）。
+    """
+    data_sql = f"""WITH page_orders AS (
+        SELECT o.id, COUNT(*) OVER () AS total_count
+        FROM {order_tbl} o
+        LEFT JOIN order_item oi ON oi.order_id = o.id
+        LEFT JOIN product p ON p.id = COALESCE(oi.product_id, o.product_id)
+        WHERE 1=1 {{where_sql}}
+        GROUP BY o.id
+        ORDER BY MAX(o.order_date) DESC, o.id DESC
+        LIMIT :limit OFFSET :offset
+    )
+    SELECT o.id AS order_id, o.order_no,
+           to_char(o.order_date, 'YYYY-MM-DD HH24:MI') AS order_date,
+           o.customer, o.note AS order_note,
+           oi.id AS item_id, {item_name} AS product_name,
+           {item_barcode} AS product_barcode,
+           {item_qty} AS quantity, oi.note AS item_note,
+           COUNT(*) OVER (PARTITION BY o.id) AS item_count,
+           SUM({item_qty}) OVER (PARTITION BY o.id) AS order_total_qty,
+           po.total_count
+    FROM page_orders po
+    JOIN {order_tbl} o ON o.id = po.id
+    LEFT JOIN order_item oi ON oi.order_id = o.id
+    LEFT JOIN product p ON p.id = COALESCE(oi.product_id, o.product_id)
+    WHERE 1=1 {item_where_sql}
+    ORDER BY o.order_date DESC, o.id DESC, oi.id"""  # nosec B608
+    qty_sql = (
+        f"SELECT COALESCE(SUM({item_qty}), 0) FROM {order_tbl} o {item_join} "
+        "WHERE 1=1 {where_sql}"
+    )  # nosec B608
+    return data_sql, qty_sql
+
+
 @cache_result(
     key_prefix='reports:order_logs',
     ttl=30,
@@ -101,27 +148,36 @@ async def _query_logs_generic(
 async def get_order_logs(db: AsyncSession, customer: str = '', product: str = '', status: str = '',
                          start_date: str = '', end_date: str = '',
                          page: int = 1, per_page: int = 20, factory: str = '') -> dict:
-    """订单流水（分页+分组聚合，COUNT(*) OVER() 合并计数查询）"""
+    """订单流水（按订单分页、一行一 SKU；母行-明细由前端按 order_id 聚合）。
+
+    2026-10-13 改造：由「按 (日期,客户,产品) 分组」改为「按订单分页 + 展开 SKU」，
+    每行带订单级字段（order_id/order_no/order_date 到分/order_note/item_count/
+    order_total_qty）与 SKU 级字段（item_id/product_name/product_barcode/quantity/item_note）。
+    """
     per_page = min(max(1, per_page), 100)
     customer = customer.strip()[:100]
     product = product.strip()[:100]
 
     where_clauses = ["(o.is_deleted = false OR o.is_deleted IS NULL)"]
+    # 明细级筛选（产品/工厂）：CTE 用全量 where 选订单，外层用它收窄到匹配的 SKU 行
+    item_where_clauses: list[str] = []
     params: dict[str, object] = {}
 
     if customer:
         where_clauses.append("o.customer LIKE :customer")
         params['customer'] = f'%{escape_like(customer)}%'
     if product:
-        # 与 SELECT 的显示口径同源（{item_name}/{item_barcode} 都是
+        # 与 SELECT 的显示口径同源（item_name/item_barcode 都是
         # COALESCE(p.*, oi.*)）：否则产品行缺失（被删）的 SKU 行会「显示得出、
         # 按名字搜不到」——左连接下 p.name 为 NULL，旧写法直接把它排除掉。
-        where_clauses.append(
-            "(COALESCE(p.name, oi.product_name) LIKE :product "
-            "OR COALESCE(p.barcode, oi.product_barcode) LIKE :product)")
+        cond = ("(COALESCE(p.name, oi.product_name) LIKE :product "
+                "OR COALESCE(p.barcode, oi.product_barcode) LIKE :product)")
+        where_clauses.append(cond)
+        item_where_clauses.append(cond)
         params['product'] = f'%{escape_like(product)}%'
     if factory:
         where_clauses.append("p.factory = :factory")
+        item_where_clauses.append("p.factory = :factory")
         params['factory'] = factory
     if status:
         valid = VALID_ORDER_STATUSES
@@ -138,7 +194,6 @@ async def get_order_logs(db: AsyncSession, customer: str = '', product: str = ''
     order_tbl = _quote_identifier("order")
 
     # 多 SKU 订单：Order.product_id/quantity 是「首个 SKU / 全部 SKU 之和」兼容值，
-    # 直接聚合会把整单量挂在首个 SKU 名下、并吞掉其余 SKU（2026-10-12 MINISO 案例）。
     # 故按 order_item 展开，一行 = 一个 (订单 × SKU)；无明细的历史订单回退兼容列
     # （LEFT JOIN + COALESCE，避免被内连接丢掉）。
     item_join = ("LEFT JOIN order_item oi ON oi.order_id = o.id "
@@ -147,32 +202,32 @@ async def get_order_logs(db: AsyncSession, customer: str = '', product: str = ''
     item_name = "COALESCE(p.name, oi.product_name)"
     item_barcode = "COALESCE(p.barcode, oi.product_barcode)"
 
+    item_where_sql = (" AND " + " AND ".join(item_where_clauses)) if item_where_clauses else ""
+    data_sql, qty_sql = _order_logs_sql(
+        order_tbl, item_join, item_qty, item_name, item_barcode, item_where_sql)
+
     return await _query_logs_generic(
         db,
         base_where=where_clauses,
         params=params,
         page=page,
         per_page=per_page,
-        data_sql_template=f"""SELECT
-        DATE(o.order_date) as order_date_only, o.customer, {item_name} as product_name,
-        {item_barcode} as product_barcode, o.status,
-        SUM({item_qty}) as total_quantity, COUNT(DISTINCT o.id) as order_count,
-        {_string_agg('o.order_no', ', ')} as order_nos,
-        {_string_agg('o.note', '; ')} as notes,
-        COUNT(*) OVER() as total_count
-        FROM {order_tbl} o {item_join}
-        WHERE 1=1 {{where_sql}}
-        GROUP BY DATE(o.order_date), o.customer, {item_name}, {item_barcode}, o.status
-        ORDER BY DATE(o.order_date) DESC, o.customer, {item_name}, {item_barcode}, o.status
-        LIMIT :limit OFFSET :offset""",  # nosec B608
-        qty_sql_template=f"SELECT COALESCE(SUM({item_qty}), 0) FROM {order_tbl} o {item_join} WHERE 1=1 {{where_sql}}",  # nosec B608
+        data_sql_template=data_sql,
+        qty_sql_template=qty_sql,
         row_mapper=lambda row: {
-            'order_date': row.order_date_only.strftime('%Y-%m-%d') if row.order_date_only else '-',
-            'customer': row.customer, 'product_name': row.product_name,
+            'order_id': row.order_id,
+            'item_id': row.item_id or 0,          # 无明细历史订单 LEFT JOIN 出 NULL
+            'order_no': row.order_no or '',
+            'order_date': row.order_date or '-',  # 已是 to_char 文本（到分）
+            'customer': row.customer or '',
+            'product_name': row.product_name or '',
             'product_barcode': row.product_barcode or '',
-            'quantity': row.total_quantity, 'status': row.status,
-            'order_count': row.order_count,
-            'order_nos': row.order_nos or '', 'note': row.notes or '',
+            'quantity': row.quantity or 0,
+            'item_note': row.item_note or '',
+            'order_note': row.order_note or '',
+            'note': row.item_note or row.order_note or '',
+            'item_count': row.item_count or 1,
+            'order_total_qty': int(row.order_total_qty or 0),
         },
     )
 
@@ -216,27 +271,25 @@ async def get_return_logs(db: AsyncSession, customer: str = '', product: str = '
         params=params,
         page=page,
         per_page=per_page,
-        data_sql_template=f"""SELECT
-        DATE(sr.return_date) as return_date_only, sr.customer, p.name as product_name,
-        p.barcode as product_barcode,
-        SUM(sr.quantity) as total_quantity, COUNT(sr.id) as return_count,
-        {_string_agg('sr.return_no', ', ')} as return_nos,
-        {_string_agg('sr.reason', '; ')} as reasons,
-        {_string_agg('sr.note', '; ')} as notes,
-        COUNT(*) OVER() as total_count
+        data_sql_template="""SELECT
+        sr.id AS record_id, sr.return_no AS record_no,
+        to_char(sr.return_date, 'YYYY-MM-DD HH24:MI') AS return_date,
+        sr.customer, p.name AS product_name, p.barcode AS product_barcode,
+        sr.quantity, sr.reason, sr.note,
+        COUNT(*) OVER() AS total_count
         FROM stock_return sr JOIN product p ON sr.product_id = p.id
-        WHERE 1=1 {{where_sql}}
-        GROUP BY DATE(sr.return_date), sr.customer, p.name, p.barcode
-        ORDER BY DATE(sr.return_date) DESC
+        WHERE 1=1 {where_sql}
+        ORDER BY sr.return_date DESC, sr.id DESC
         LIMIT :limit OFFSET :offset""",  # nosec B608
         qty_sql_template="SELECT COALESCE(SUM(sr.quantity), 0) FROM stock_return sr JOIN product p ON sr.product_id = p.id WHERE 1=1 {where_sql}",
         row_mapper=lambda row: {
-            'return_date': row.return_date_only.strftime('%Y-%m-%d') if row.return_date_only else '-',
-            'customer': row.customer or '', 'product_name': row.product_name,
-            'product_barcode': row.product_barcode or '',
-            'quantity': row.total_quantity, 'return_count': row.return_count,
-            'return_nos': row.return_nos or '',
-            'note': '；'.join(x for x in (row.reasons or '', row.notes or '') if x),
+            'record_id': row.record_id, 'record_no': row.return_no or '',
+            'return_date': row.return_date or '-', 'customer': row.customer or '',
+            'product_name': row.product_name or '', 'product_barcode': row.product_barcode or '',
+            'quantity': row.quantity or 0,
+            # reason/note 分开下发：行内编辑要原值回写，note 若给合并串会把原因写进备注字段
+            'reason': row.reason or '', 'note': row.note or '',
+            'note_display': '；'.join(x for x in (row.reason or '', row.note or '') if x),
         },
     )
 
@@ -341,25 +394,22 @@ async def get_stockin_logs(db: AsyncSession, customer: str = '', product: str = 
         params=params,
         page=page,
         per_page=per_page,
-        data_sql_template=f"""SELECT
-        DATE(s.stockin_date) as stockin_date_only, s.customer, p.name as product_name,
-        p.barcode as product_barcode,
-        SUM(s.quantity) as total_quantity, COUNT(s.id) as stockin_count,
-        {_string_agg('s.stockin_no', ', ')} as stockin_nos,
-        {_string_agg('s.note', '; ')} as notes,
-        COUNT(*) OVER() as total_count
+        data_sql_template="""SELECT
+        s.id AS record_id, s.stockin_no AS record_no,
+        to_char(s.stockin_date, 'YYYY-MM-DD HH24:MI') AS stockin_date,
+        s.customer, p.name AS product_name, p.barcode AS product_barcode,
+        s.quantity, s.note,
+        COUNT(*) OVER() AS total_count
         FROM stock_in s JOIN product p ON s.product_id = p.id
-        WHERE 1=1 {{where_sql}}
-        GROUP BY DATE(s.stockin_date), s.customer, p.name, p.barcode
-        ORDER BY DATE(s.stockin_date) DESC
+        WHERE 1=1 {where_sql}
+        ORDER BY s.stockin_date DESC, s.id DESC
         LIMIT :limit OFFSET :offset""",  # nosec B608
         qty_sql_template="SELECT COALESCE(SUM(s.quantity), 0) FROM stock_in s JOIN product p ON s.product_id = p.id WHERE 1=1 {where_sql}",
         row_mapper=lambda row: {
-            'stockin_date': row.stockin_date_only.strftime('%Y-%m-%d') if row.stockin_date_only else '-',
-            'customer': row.customer, 'product_name': row.product_name,
-            'product_barcode': row.product_barcode or '',
-            'quantity': row.total_quantity, 'stockin_count': row.stockin_count,
-            'stockin_nos': row.stockin_nos or '', 'note': row.notes or '',
+            'record_id': row.record_id, 'record_no': row.record_no or '',
+            'stockin_date': row.stockin_date or '-', 'customer': row.customer or '',
+            'product_name': row.product_name or '', 'product_barcode': row.product_barcode or '',
+            'quantity': row.quantity or 0, 'note': row.note or '',
         },
     )
 
@@ -408,29 +458,26 @@ async def get_stockout_logs(db: AsyncSession, customer: str = '', product: str =
         params=params,
         page=page,
         per_page=per_page,
-        data_sql_template=f"""SELECT
-        DATE(so.stockout_date) as stockout_date_only, so.customer, p.name as product_name,
-        p.barcode as product_barcode,
-        SUM(so.quantity) as total_quantity, COUNT(so.id) as stockout_count,
-        {_string_agg('so.stockout_no', ', ')} as stockout_nos,
-        {_string_agg('so.note', '; ')} as notes,
-        COUNT(*) OVER() as total_count
+        data_sql_template="""SELECT
+        so.id AS record_id, so.stockout_no AS record_no,
+        to_char(so.stockout_date, 'YYYY-MM-DD HH24:MI') AS stockout_date,
+        so.customer, p.name AS product_name, p.barcode AS product_barcode,
+        so.quantity, so.note,
+        COUNT(*) OVER() AS total_count
         FROM stock_out so JOIN product p ON so.product_id = p.id
         LEFT JOIN "order" o2 ON so.order_id = o2.id
-        WHERE 1=1 {{where_sql}}
-        GROUP BY DATE(so.stockout_date), so.customer, p.name, p.barcode
-        ORDER BY DATE(so.stockout_date) DESC
+        WHERE 1=1 {where_sql}
+        ORDER BY so.stockout_date DESC, so.id DESC
         LIMIT :limit OFFSET :offset""",  # nosec B608
         qty_sql_template="""SELECT COALESCE(SUM(so.quantity), 0)
         FROM stock_out so JOIN product p ON so.product_id = p.id
         LEFT JOIN "order" o2 ON so.order_id = o2.id
         WHERE 1=1 {where_sql}""",
         row_mapper=lambda row: {
-            'stockout_date': row.stockout_date_only.strftime('%Y-%m-%d') if row.stockout_date_only else '-',
-            'customer': row.customer or '', 'product_name': row.product_name,
-            'product_barcode': row.product_barcode or '',
-            'quantity': row.total_quantity, 'stockout_count': row.stockout_count,
-            'stockout_nos': row.stockout_nos or '', 'note': row.notes or '',
+            'record_id': row.record_id, 'record_no': row.record_no or '',
+            'stockout_date': row.stockout_date or '-', 'customer': row.customer or '',
+            'product_name': row.product_name or '', 'product_barcode': row.product_barcode or '',
+            'quantity': row.quantity or 0, 'note': row.note or '',
         },
     )
 
@@ -478,27 +525,32 @@ async def get_deduction_logs(db: AsyncSession, customer: str = '', product: str 
         page=page,
         per_page=per_page,
         data_sql_template=f"""SELECT
-        DATE(so.stockout_date) as deduction_date_only, so.customer, p.name as product_name,
-        p.barcode as sku,
-        SUM(so.quantity - so.returned_quantity) as total_quantity, COUNT(so.id) as deduction_count,
-        {_string_agg('o.order_no', ', ')} as order_nos,
-        {_string_agg('o.note', '; ')} as order_notes,
-        COUNT(*) OVER() as total_count
+        so.id AS record_id, so.stockout_no AS record_no,
+        to_char(so.stockout_date, 'YYYY-MM-DD HH24:MI') AS deduction_time,
+        to_char(so.stockout_date, 'YYYY-MM-DD HH24:MI') AS stockout_date,
+        so.customer, p.name AS product_name, p.barcode AS product_barcode,
+        (so.quantity - so.returned_quantity) AS quantity,
+        so.quantity AS gross_quantity, so.note AS stockout_note,
+        o.order_no AS order_no, o.note AS order_note,
+        COUNT(*) OVER() AS total_count
         FROM stock_out so JOIN product p ON so.product_id = p.id
         LEFT JOIN {order_tbl} o ON so.order_id = o.id
         WHERE 1=1 {{where_sql}}
-        GROUP BY DATE(so.stockout_date), so.customer, p.name, p.barcode
-        ORDER BY DATE(so.stockout_date) DESC
+        ORDER BY so.stockout_date DESC, so.id DESC
         LIMIT :limit OFFSET :offset""",  # nosec B608
         qty_sql_template=f"""SELECT COALESCE(SUM(so.quantity - so.returned_quantity), 0)
         FROM stock_out so JOIN product p ON so.product_id = p.id
         LEFT JOIN {order_tbl} o ON so.order_id = o.id
         WHERE 1=1 {{where_sql}}""",  # nosec B608
         row_mapper=lambda row: {
-            'deduction_time': row.deduction_date_only.strftime('%Y-%m-%d') if row.deduction_date_only else '-',
-            'customer': row.customer or '', 'product_name': row.product_name,
-            'sku': row.sku or '',
-            'quantity': row.total_quantity, 'deduction_count': row.deduction_count,
-            'order_nos': row.order_nos or '', 'order_note': row.order_notes or '',
+            'record_id': row.record_id, 'record_no': row.record_no or '',
+            'deduction_time': row.deduction_time or '-', 'customer': row.customer or '',
+            'product_name': row.product_name or '', 'product_barcode': row.product_barcode or '',
+            'quantity': row.quantity or 0,
+            # 行内编辑需要「毛量」与「出货日期/真备注」（quantity 是净量，直接回写会把毛量改错）
+            'gross_quantity': row.gross_quantity or 0,
+            'stockout_date': row.stockout_date or '-',
+            'note': row.stockout_note or '',
+            'order_no': row.order_no or '', 'order_note': row.order_note or '',
         },
     )

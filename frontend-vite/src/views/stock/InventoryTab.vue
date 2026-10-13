@@ -22,7 +22,7 @@
       <UiDataTable
         :data="inventory"
         :columns="inventoryColumns"
-        :loading="isLoading && inventory.length === 0"
+        :loading="false"
         :paginator="totalItems > perPage"
         :rows="perPage"
         :total-records="totalItems"
@@ -31,7 +31,10 @@
         @page="onPageChange"
       >
         <template #empty>
-          <div class="sk-empty">
+          <!-- 首屏未命中缓存时后端要跑一次全量 CTE（实测冷缓存 4~5s），
+               用骨架屏替代 PrimeVue 的空白加载遮罩，避免「白屏数秒」的观感 -->
+          <UiSkeleton v-if="isLoading" variant="table" :rows="8" class="sk-loading-skeleton" />
+          <div v-else class="sk-empty">
             <FontAwesomeIcon icon="warehouse" aria-hidden="true" />
             <span>暂无库存数据</span>
           </div>
@@ -64,6 +67,7 @@
  * InventoryTab.vue — 库存明细（方案 B v5）
  *
  * 布局：一行工具条（标题·搜索·三格汇总·导出）→ 客户筛选行 → 6 列表格。
+ * 表格体是唯一滚动区，分页器常驻卡片底部（见 <style> 里 .sk-card-main 段的说明）。
  * 列口径（与后端 CTE 一一对应）：
  *   订单数量 = 未发完的订单余量 · 备货数量 = 已入库未消耗 · 总订单 = 备货 + 订单余量
  *   库存 = 包装部入库 − 已出货（结余，2026-10-07 由 /inventory-query 并入本页）
@@ -76,6 +80,7 @@ import { stockApi } from '@/api'
 import type { InventoryItem } from '@/types'
 import UiDataTable from '@/components/ui/UiDataTable.vue'
 import type { TableColumn } from '@/components/ui/UiDataTable.vue'
+import UiSkeleton from '@/components/ui/UiSkeleton.vue'
 import { useDebouncedRef } from '@/composables/useDebouncedRef'
 import { useExport } from '@/composables/useExport'
 import { formatNumber } from '@/utils/format'
@@ -85,7 +90,12 @@ import CustomerChipBar from '@/components/ui/CustomerChipBar.vue'
 const filters = reactive({ customer: '', product: '' })
 const debouncedProduct = useDebouncedRef(computed(() => filters.product), 300)
 const page = ref(1)
-const perPage = ref(15)
+// 20 = 分页器「每页条数」的默认项（UiDataTable.pageSizeOptions 的 [10,20,50,100]），
+// 也必须是后端启动预热用的 per_page（fastapi_app/main.py::_warm_inventory_cache）。
+// 原为 15：既不在可选项里（select 显示与真实条数不符），又与预热键不一致 →
+// 服务器重启后首次进入本页永远冷缓存、白屏数秒（两处对齐由
+// fastapi_app/tests/test_inventory_warmup_key_alignment.py 守住）。
+const perPage = ref(20)
 const sort = ref<{ field: string; order: number } | null>(null)
 
 const {
@@ -189,7 +199,32 @@ watch(() => [filters.customer, debouncedProduct.value], () => {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  overflow: hidden;
+}
+/* 分页器钉在卡片底部、表格体自己滚动（2026-10-13）。
+   此前 .sk-card-main 直接 overflow-y:auto，而 UiDataTable 的容器是它的 flex 项：
+   flex-shrink 默认 1 且自带 overflow:hidden，行数变多（15→20）时整块被压扁裁掉
+   —— 表格下半截与分页器一起消失，且不出现滚动条（用户报的「20 条/页后没有滑动条、
+   翻页选择器不在最底部」）。改成：容器撑满高度的 flex 列，DataTable 作唯一滚动区，
+   分页器 flex-shrink:0 常驻底部。 */
+.sk-card-main :deep(.ui-data-table-wrapper) {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  /* 共享组件自带边框；本页的稿是表格与卡片齐平、没有内层盒子，故在此抵消 */
+  border: 0;
+}
+/* DataTable 根节点（生产为 unstyled+PT，靠 data-pc-name 命中，p-* 类名不存在） */
+.sk-card-main :deep([data-pc-name='datatable']) {
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  /* 预留滚动条槽：行数变化时滚动条出现/消失不再让表头横向跳动 */
+  scrollbar-gutter: stable;
+}
+.sk-card-main :deep(.ui-pagination) {
+  flex-shrink: 0;
 }
 /* 百分比列宽必须配 fixed 布局才是硬约束：auto 布局把百分比当建议值，
    余量仍会全塞给内容最长的那列（产品名列独吞、数值列被推最右）。 */
@@ -222,10 +257,9 @@ watch(() => [filters.customer, debouncedProduct.value], () => {
 .sk-num { font-weight: 500; }
 .sk-num-strong { font-weight: 700; }
 
-/* UiDataTable 的容器自带边框（共享组件，多个视图共用）。
-   本页的稿是表格与卡片齐平、没有内层盒子，故在此抵消边框，不动共享组件。 */
-.sk-card-main :deep(.ui-data-table-wrapper) {
-  border: 0;
+/* 首屏骨架屏：贴着表格的左右内边距，占满卡片剩余高度 */
+.sk-loading-skeleton {
+  padding: 16px 20px;
 }
 
 /* 行分隔线与 hover 由全局 PT 的 bodyRow 段提供（2026-09-29 修正段名后全站生效）。
@@ -283,6 +317,7 @@ watch(() => [filters.customer, debouncedProduct.value], () => {
 
 .sk-fetching-bar {
   height: 2px;
+  flex-shrink: 0;
   background: var(--color-primary-100, #e0f2fe);
   overflow: hidden;
   border-radius: 1px;
