@@ -547,6 +547,13 @@
       "execute:ALTER TABLE product_role DROP CONSTRAINT IF EXISTS uq_product_role_product_globa",
       "execute:DROP INDEX IF EXISTS uq_product_role_product_name_lower"
     ],
+    "migrations/versions/pg_standalone_096_stockin_batch_fields.py": [
+      "drop_column_if_exists:stock_in|batch_completed_at",
+      "drop_column_if_exists:stock_in|batch_completed_by_id",
+      "drop_column_if_exists:stock_in|batch_no",
+      "drop_constraint_if_exists:fk_stockin_batch_completed_by|stock_in",
+      "drop_index_if_exists:idx_stockin_batch_no"
+    ],
     "migrations/versions/rebuild_po_dedup_index.py": [
       "execute:DROP INDEX IF EXISTS uq_po_pending_dedup"
     ],

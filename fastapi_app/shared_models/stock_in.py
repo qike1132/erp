@@ -30,6 +30,11 @@ class StockIn(Base):
     product_id: Mapped[int] = mapped_column(Integer, ForeignKey('product.id', ondelete='RESTRICT'), nullable=False, index=True, comment='产品ID')
     quantity: Mapped[int] = mapped_column(Integer, nullable=False, comment='备货数量')
     note: Mapped[str | None] = mapped_column(Text, comment='备注')
+    batch_no: Mapped[str | None] = mapped_column(String(100), comment='批次号')
+    batch_completed_at: Mapped[datetime | None] = mapped_column(DateTime, comment='批次完成时间')
+    batch_completed_by_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey('user.id', ondelete='SET NULL'), comment='批次完成操作人ID'
+    )
     # 湖北备货确认流程：confirmed_at IS NULL 视为「未确认备货」（与订单确认流程对齐）
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime, comment='备货确认时间（湖北备货确认流程）')
     confirmed_by_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('user.id', ondelete='SET NULL'), comment='备货确认人ID')
@@ -39,9 +44,13 @@ class StockIn(Base):
     product: Mapped[Product] = relationship('Product', backref='stockins')
     stockin_stockouts: Mapped[list[StockOut]] = relationship('StockOut', backref='stockin')
     confirmed_by: Mapped[User | None] = relationship('User', foreign_keys=[confirmed_by_id], backref='confirmed_stockins')
+    batch_completed_by: Mapped[User | None] = relationship(
+        'User', foreign_keys=[batch_completed_by_id], backref='batch_completed_stockins'
+    )
 
     __table_args__ = (
         Index('idx_stockin_customer_product', 'customer', 'product_id'),
+        Index('idx_stockin_batch_no', 'batch_no'),
         Index('idx_stockin_product_date', 'product_id', 'stockin_date'),
         Index('idx_stockin_customer_date', 'customer', 'stockin_date'),
         Index('idx_stockin_customer_product_date', 'customer', 'product_id', 'stockin_date'),
