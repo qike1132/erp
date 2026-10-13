@@ -178,8 +178,33 @@ async def test_preview_flags_unknown_customer(async_db_session, local_storage):
     assert any('不存在于客户主数据' in m for m in row.messages), row.messages
 
 
-# ==================== 3. 预览与真实导入口径一致 ====================
+async def test_preview_treats_unstorable_image_row_as_skip(async_db_session, local_storage):
+    """已存在产品 + 图片格式无法识别：预览必须判「跳过」，与导入同口径。
 
+    回归（2026-10-13）：预览原先无条件把「带图」算作改动（backfill / 更新图片），
+    而导入侧 ``_save_imported_image`` 认不出魔数（EMF/BMP/TIFF 等 WPS 单元格图片）
+    就跳过该图、该行不算改动 —— 预览高估写入数，与
+    ``test_preview_summary_matches_real_import`` 锁定的口径相悖。
+    """
+    await _add_product(async_db_session, '预览坏图-已存在', price=0)
+    await async_db_session.flush()
+
+    row = {'客户': '', '产品名称': '预览坏图-已存在', '工厂': '', '69码': '',
+           '产品价格': '', '图片': '=DISPIMG("ID_bad",1)'}
+    context = {'cell_images': {'ID_bad': b'EMF-not-an-image'},
+               'customer_cache': {}, 'seen_names': set()}
+
+    preview_row = await batch_import_service._classify_product_row(
+        async_db_session, row, 2, context)
+
+    # 该行确实带着图片字节（否则这条测试测的不是图片那条分支）
+    assert preview_row.has_image is True
+    assert preview_row.action == 'skip', preview_row
+    assert '更新图片' not in preview_row.changes, preview_row.changes
+    assert any('图片' in m for m in preview_row.messages), preview_row.messages
+
+
+# ==================== 3. 预览与真实导入口径一致 ====================
 
 async def test_preview_summary_matches_real_import(async_db_session, local_storage):
     """同一文件：预览的汇总必须能预测真实导入的 imported / skipped。

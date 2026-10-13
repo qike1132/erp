@@ -50,7 +50,11 @@ from fastapi_app.services.numbering import (
     generate_stockout_number,
 )
 from fastapi_app.services.order_deduction_service import process_order_deduction
-from fastapi_app.services.xlsx_cell_images import extract_cell_images, parse_dispimg_id
+from fastapi_app.services.xlsx_cell_images import (
+    extract_cell_images,
+    guess_image_extension,
+    parse_dispimg_id,
+)
 from fastapi_app.shared.stock_concurrency import check_stock_available, get_product_for_update
 from fastapi_app.shared_models import (
     CaseMovement,
@@ -744,6 +748,11 @@ async def _classify_product_row(
     去重同口径 —— 导入侧同样跳过它、不把该行的字段并进上一行刚建的产品。因此预览的
     「写入 / 跳过」计数与真实导入一致（由 ``tests/test_product_import_preview.py`` 的
     哨兵用例锁住）。
+
+    已知边界：预览**看不到库级约束**（名称超 100 字、价格超 ``Numeric(10,2)`` 上限、
+    工厂超 50 字等），这类行会显示为「新增」而导入时整行失败。导入侧会如实回显该行
+    的错误，不会静默 —— 若将来这类输入变常见，应在 ``_parse_product_price`` /
+    字段校验处收口，而不是把列长抄一份到预览里。
     """
     from fastapi_app.services.batch_service import get_product_by_name_ci
 
@@ -785,9 +794,15 @@ async def _classify_product_row(
                 db, existing, price=price, factory=factory, customer_id=customer_id,
                 customer_name=customer_display, dry_run=True)
             if image_bytes is not None:
-                # 图片按模板覆盖（与导入同口径）：只要带图就算「有改动」
-                changes.append('更新图片')
-                changed = True
+                # 图片按模板覆盖（与导入同口径），但**必须先过同一道可落库判定**：
+                # `_save_imported_image` 认不出魔数（EMF/BMP/TIFF 等 WPS 单元格图片）
+                # 就跳过该图、该行因此不算改动。这里不预判，预览就会把「更新图片」
+                # 算进写入数，而导入实际跳过 —— 预览高估，正是那条哨兵要拦的漂移。
+                if guess_image_extension(image_bytes) is None:
+                    messages.append('该行图片格式无法识别，导入时将跳过图片')
+                else:
+                    changes.append('更新图片')
+                    changed = True
             action = 'backfill' if changed else 'skip'
 
     return ProductImportPreviewRow(
