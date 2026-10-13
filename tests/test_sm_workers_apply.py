@@ -60,8 +60,22 @@ class _FakeNssm:
         return -1, f'unexpected verb {verb}'
 
 
+class _QuietQueue:
+    """ServiceOps 会把进度/刷新消息放进 msg_queue；本文件不关心内容，收下即可。
+
+    2026-10-13：``restart_one_service`` 改走 ``restart_service_via_stop_start`` 后会
+    发日志消息，原先传 ``msg_queue=None`` 的旧夹具会 AttributeError —— 补齐注入。
+    """
+
+    def __init__(self):
+        self.msgs = []
+
+    def put(self, item):
+        self.msgs.append(item)
+
+
 def _svc(fake: _FakeNssm) -> ServiceOps:
-    ops = ServiceOps(msg_queue=None, gate=None, project_dir=Path('.'), log_message=lambda *a, **k: None)
+    ops = ServiceOps(msg_queue=_QuietQueue(), gate=None, project_dir=Path('.'), log_message=lambda *a, **k: None)
     ops.run_capture = fake
     return ops
 
@@ -163,13 +177,21 @@ def test_set_env_extra_key_rejects_empty_value():
     reason="restart_one_service 依赖 find_nssm()（仅 Windows 可定位 NSSM）；非 Windows 会走 sc 分支",
 )
 def test_restart_one_service_restarts_only_the_named_one():
-    """worker 数变更只需重启 erp-prod —— 不得顺带重启 erp-arq / 前端 / 两个 Redis。"""
+    """worker 数变更只需重启 erp-prod —— 不得顺带重启 erp-arq / 前端 / 两个 Redis。
+
+    2026-10-13 起重启语义改为显式 stop→start（`nssm restart` 在停机阶段返回非 0 时
+    会跳过 start，见 service_ops.restart_service_via_stop_start 的 docstring），
+    故断言的是这对动词，而不是 `nssm restart`。
+    """
     fake = _FakeNssm({_SVC_API: CURRENT})
     ops = _svc(fake)
+    ops.wait_service = lambda name, target, timeout, **kw: 'STOPPED'
     ops.wait_service_running = lambda name, timeout=25: True
     assert ops.restart_one_service(_SVC_API) is True
-    restarted = [c[2] for c in fake.calls if len(c) > 1 and c[1] == 'restart']
-    assert restarted == [_SVC_API], f'只应重启 {_SVC_API}，实际 {restarted}'
+    touched = [(c[1], c[2]) for c in fake.calls
+               if len(c) > 2 and c[1] in ('stop', 'start', 'restart')]
+    assert touched == [('stop', _SVC_API), ('start', _SVC_API)], \
+        f'只应对 {_SVC_API} 先停后起，实际 {touched}'
 
 
 # ---------------------------------------------------------------- 接线（app.py 为 tkinter 绑定，按本仓惯例用源码断言）

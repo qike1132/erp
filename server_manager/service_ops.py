@@ -32,12 +32,17 @@ class ServiceOps:
     瘦转发(``_svc_state`` / ``_nssm_install`` 等),使既有调用点不必改写。
     """
 
-    def __init__(self, msg_queue, gate, project_dir, log_message):
-        """``msg_queue`` / ``gate`` / ``project_dir`` / ``log_message`` 由 app 注入。"""
+    def __init__(self, msg_queue, gate, project_dir, log_message, release_ports=None):
+        """``msg_queue`` / ``gate`` / ``project_dir`` / ``log_message`` 由 app 注入。
+
+        ``release_ports`` 可选注入：重启链路启动前清 5002/3000 的能力（实现留在 app，
+        与 ``DevModeOps`` 同一注入方式）。未注入则跳过清理。
+        """
         self._msg_queue = msg_queue
         self._gate = gate
         self._project_dir = project_dir
         self._log_message = log_message
+        self._release_ports = release_ports
 
     def find_nssm(self):
         found = shutil.which('nssm')
@@ -519,6 +524,63 @@ class ServiceOps:
         except OSError as e:
             self._log_message(f'{name} 设置依赖失败（nssm: {reason.strip() or "非零退出"}）: {e}', 'WARNING')
 
+    def _clean_ports_if_injected(self):
+        """启动前清 5002/3000 端口占用（能力由 app 注入；未注入则跳过）。
+
+        ★ 重启链路必须和「启动生产模式」一样先清端口：:5002 若被**非受管**进程占着
+        （历史孤儿后端、GUI 开发栈顶着），新后端起不来 —— 而服务状态照样 RUNNING、
+        界面照样报「启动成功」，ERP 实际不可用（假成功）。app 注入的 ``_release_ports``
+        自带受管 PID 排除与 managed_unknown fail-safe，不会误杀正在服务的受管进程。
+        """
+        if not self._release_ports:
+            return
+        self._msg_queue.put(('log', {'text': '正在清理端口...'}))
+        self._release_ports()
+
+    def restart_service_via_stop_start(self, name, nssm=None, stop_timeout=20, start_timeout=25):
+        """重启单个服务：显式 `nssm stop` → 等 STOPPED → `nssm start` → 等 RUNNING。
+
+        ★ 为什么不用 `nssm restart`（2026-10-13 实证根因）：NSSM 2.24 的 restart 是
+
+            int ret = control_service(SERVICE_CONTROL_STOP, ...);
+            if (ret) nssm_exit(ret);              // ← 停机阶段返回非 0 就**直接退出**
+            nssm_exit(control_service(START, ...));   // ← 于是 start 根本没发出
+
+        （nssm.cpp:271-275）。停机阶段一失败，服务就永远停在 STOPPED，而本模块
+        原先只报一句「25s 内未进入 RUNNING」，用户必须手点『启动』才能恢复。
+        erp-prod 的停机正好容易踩到：被管进程收尾若超出 NSSM 停机预算
+        （AppStopMethodConsole/Threads 各 1500ms），stop 这条链就会失败。
+        2026-10-12 17:34 / 20:58、2026-10-13 08:12 三次复现；Windows 事件日志里
+        只有 STOP 控制、没有 START 控制，是这条路径的指纹。
+
+        显式 stop→start 让 start **无条件**执行（与 ``sc`` 回退分支同一语义），
+        stop 的返回码只用来如实告警 —— 否则「重启后起不来」永远无据可查。
+
+        返回 ``(ok, state, pid)``，与 ``start_one_service`` 一致。
+        """
+        nssm = nssm or self.find_nssm()
+        self._msg_queue.put(('log', {'text': f'正在重启生产服务 {name}...'}))
+        if nssm:
+            code, out = self.run_capture([nssm, 'stop', name], timeout=15)
+            if code != 0:
+                # 非 0 不代表一定没停成（1056「已在运行中」、1052 之类都可能出现），
+                # 但必须如实说；吞掉返回码正是「重启后起不来」查不出原因的原因。
+                self._msg_queue.put(('log', {
+                    'text': f'{name} stop 返回非零 (code={code}): {(out or "").strip()[:160]}；仍继续启动',
+                    'level': 'WARNING'}))
+            state = self.wait_service(name, 'STOPPED', stop_timeout, abort_on_unknown=True)
+        else:
+            self.run_capture(['sc', 'stop', name], timeout=30)
+            state = self.wait_service(name, 'STOPPED', stop_timeout)
+        if 'STOPPED' not in state.upper():
+            # 停机没等到终态也必须如实说：否则日志里只剩 start 一侧的消息，停机阶段的
+            # 超时完全静默，与「故障无据可查」正相反。仍继续启动 —— start 一侧会给出
+            # 「已在运行中」或轮询超时的真实结论，不会假报成功。
+            self._msg_queue.put(('log', {
+                'text': f'{name} 在 {stop_timeout}s 内未确认 STOPPED（当前: {state}），仍继续启动',
+                'level': 'WARNING'}))
+        return self.start_one_service(name, timeout=start_timeout)
+
     def service_cmd_sync(self, verb):
         """停止/重启生产服务：逐服务执行 + 轮询确认终态。
 
@@ -526,6 +588,9 @@ class ServiceOps:
         （2026-09-16 用户实测：stop 打印完 5 秒后服务仍在 RUNNING）。
         """
         nssm = self.find_nssm()
+        if verb == 'restart':
+            # 清一次即可：清的是**非受管**端口占用，与迭代顺序无关，不必每个服务重扫。
+            self._clean_ports_if_injected()
         for name in _SVC_ALL:
             self._gate.checkpoint()
             if verb == 'stop':
@@ -535,14 +600,8 @@ class ServiceOps:
                 else:
                     self._msg_queue.put(('log', {'text': f'{name} 在 45s 内未确认 STOPPED（当前: {self.svc_state(name)}），请到服务管理器检查', 'level': 'WARNING'}))
             elif verb == 'restart':
-                self._msg_queue.put(('log', {'text': f'正在重启生产服务 {name}...'}))
-                if nssm:
-                    self.run_capture([nssm, 'restart', name], timeout=30)
-                else:
-                    # sc 无 restart：先停后起，终态以轮询为准
-                    self.run_capture(['sc', 'stop', name], timeout=30)
-                    self.run_capture(['sc', 'start', name], timeout=30)
-                self.wait_service_running(name, timeout=25)
+                # ★ 不走 `nssm restart`：它停机失败就不发 start（见 restart_service_via_stop_start）
+                self.restart_service_via_stop_start(name, nssm=nssm)
         self._msg_queue.put(('hosting_refresh', {}))
 
     def wait_service_running(self, name, timeout=25):
@@ -576,21 +635,16 @@ class ServiceOps:
                 self._msg_queue.put(('log', {'text': f'{name} start 返回非零 (code={code}): {(out or "").strip()[:160]}', 'level': 'WARNING'}))
         return self.wait_service_running(name, timeout=timeout)
 
-    def restart_one_service(self, name, timeout=30):
+    def restart_one_service(self, name, timeout=25):
         """只重启一个服务。
 
         与 ``service_cmd_sync('restart')`` 的区别：后者遍历 ``_SVC_ALL``（含 erp-arq、
         前端与两个 Redis）。改 worker 数只需重启 erp-prod —— 不该顺带掐掉 ARQ 的在途
-        任务与 Redis。
+        任务与 Redis。重启语义统一走 ``restart_service_via_stop_start``（不再用
+        ``nssm restart``：停机阶段失败它会跳过 start，理由见该方法 docstring）。
         """
-        nssm = self.find_nssm()
-        if nssm:
-            self.run_capture([nssm, 'restart', name], timeout=timeout)
-        else:
-            # sc 无 restart：先停后起，终态以轮询为准
-            self.run_capture(['sc', 'stop', name], timeout=timeout)
-            self.run_capture(['sc', 'start', name], timeout=timeout)
-        return self.wait_service_running(name, timeout=25)
+        self._clean_ports_if_injected()
+        return self.restart_service_via_stop_start(name, start_timeout=timeout)
 
     def uninstall_services_flow(self, nssm):
         for name in (_SVC_API, _SVC_ARQ, _SVC_WEB):

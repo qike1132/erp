@@ -1,8 +1,14 @@
-"""kill_tree 软杀优先测试（2026-10-11 复核 P1-9）。
+"""kill_tree 软杀优先测试（2026-10-11 复核 P1-9 / 2026-10-13 修正其回归）。
 
 原实现对 uvicorn 子进程一律 `taskkill /F /T`，lifespan 关停段从不执行
 （复核实测 84/160 次进入关停段未走完、收尾哨兵自 2026-10-02 起再未亮）。
-新契约：Windows 先发软杀（taskkill 不带 /F），轮询等退出，超时才升级 /F。
+契约：Windows 先发软杀（taskkill 不带 /F）；**软杀报告成功才轮询等待**，
+否则立刻升级 /F。
+
+2026-10-13：P1-9 原版无条件等 4s，而软杀对 CREATE_NO_WINDOW 子进程实测
+0.06s 就回 rc=128（「只能强制终止此进程(带 /F 选项)」）、一个都没杀掉 ——
+白等的 4s 超出 NSSM 的 3s 停机预算，监督器被 TerminateProcess 掉，
+uvicorn 进程树成为继续占着 :5002 的孤儿（当日 08:12 现场）。
 """
 
 from __future__ import annotations
@@ -86,6 +92,56 @@ def test_escalates_to_force_after_timeout(monkeypatch) -> None:
     monkeypatch.setattr(prod_runner.os, "name", "nt")
     svc.kill_tree()
     assert any("/F" in c for c in calls), f"软杀超时后必须升级 /F: {calls}"
+
+
+def test_failed_soft_kill_escalates_without_waiting(monkeypatch) -> None:
+    """软杀报告失败（Windows 实测 rc=128）→ 不进入等待窗口，立刻硬杀。
+
+    等待窗口只在软杀**报告成功**时才有意义。白等会把监督器拖出 NSSM 的
+    3s 停机预算（AppStopMethodConsole/Threads 各 1500ms），监督器被
+    TerminateProcess 掉，uvicorn 进程树就没人回收、成为占着 :5002 的孤儿。
+    """
+    proc = _FakeProc(exit_after=10**9)  # 永不自己退出
+    svc = _make_svc(proc)
+    calls: list[list[str]] = []
+    slept: list[float] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        # 真实世界：不带 /F 的 taskkill 对 CREATE_NO_WINDOW 子进程回 128
+        return subprocess.CompletedProcess(cmd, 128 if "/F" not in cmd else 0)
+
+    monkeypatch.setattr(prod_runner.subprocess, "run", fake_run)
+    monkeypatch.setattr(prod_runner.time, "sleep", lambda s: slept.append(s))
+    # 钉住平台，否则 Linux CI 会落进 POSIX 分支
+    monkeypatch.setattr(prod_runner.os, "name", "nt")
+    svc.kill_tree()
+    assert any("/F" in c for c in calls), f"软杀失败必须立刻硬杀: {calls}"
+    assert not slept, f"软杀失败不得进入等待窗口，实际 sleep={slept}"
+
+
+def test_soft_kill_success_but_no_exit_is_logged(monkeypatch, capsys) -> None:
+    """软杀报成功却没在窗口内退出 → 升级硬杀，且**必须留痕**。
+
+    否则「优雅关停没走完」只能靠事后发现收尾哨兵不亮来反推（P1-9 的教训）。
+    """
+    proc = _FakeProc(exit_after=10**9)  # 永不自己退出
+    svc = _make_svc(proc)
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0)  # 软杀「成功」
+
+    monkeypatch.setattr(prod_runner.subprocess, "run", fake_run)
+    monkeypatch.setattr(prod_runner.time, "sleep", lambda s: None)
+    monkeypatch.setattr(prod_runner, "_SOFT_KILL_WAIT_SECONDS", 0.01)
+    monkeypatch.setattr(prod_runner, "_SOFT_KILL_POLL_INTERVAL", 0.001)
+    monkeypatch.setattr(prod_runner.os, "name", "nt")
+    svc.kill_tree()
+    out = capsys.readouterr().out
+    assert any("/F" in c for c in calls), f"窗口内没退出必须升级硬杀: {calls}"
+    assert "软杀成功但" in out and "升级硬杀" in out, f"升级原因必须留痕，实际输出={out!r}"
 
 
 def test_non_windows_uses_sigterm(monkeypatch) -> None:
