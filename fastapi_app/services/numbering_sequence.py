@@ -16,16 +16,13 @@ SQL 为常量文本，所有值经 :prefix/:number_date/:last_seq 绑定参数�
 """
 import logging
 from datetime import datetime
-from zoneinfo import ZoneInfo
 
 from sqlalchemy import BigInteger, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-logger = logging.getLogger(__name__)
+from fastapi_app.core.business_time import _BUSINESS_TZ  # 业务时区唯一定义点已下沉到 core.business_time
 
-# 编号日期段的业务口径时区。Windows 无系统 tz 库，ZoneInfo('Asia/Shanghai')
-# 依赖 requirements/base.txt 的 tzdata 包。
-_BUSINESS_TZ = ZoneInfo('Asia/Shanghai')
+logger = logging.getLogger(__name__)
 
 
 def business_date_str() -> str:

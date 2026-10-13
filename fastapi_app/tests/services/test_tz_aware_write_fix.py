@@ -116,3 +116,18 @@ def test_fmt_business_renders_beijing():
     assert fmt_business(datetime(2026, 10, 13, 0, 30, tzinfo=UTC)) == '2026-10-13 08:30'
     assert fmt_business(datetime(2026, 10, 12, 16, 0, tzinfo=UTC), '%Y-%m-%d') == '2026-10-13'
     assert fmt_business(None) == ''
+
+
+def test_staging_order_to_dict_renders_in_beijing():
+    """暂存订单的 order_date / created_at 展示按北京时间（不再按 UTC 早 8h）。"""
+    from fastapi_app.shared_models import StagingOrder
+
+    so = StagingOrder(
+        order_date=datetime(2026, 10, 13, 0, 30, tzinfo=UTC),
+        created_at=datetime(2026, 10, 13, 0, 30, 15, tzinfo=UTC),
+    )
+
+    d = so.to_dict()
+
+    assert d['order_date'] == '2026-10-13 08:30'
+    assert d['created_at'] == '2026-10-13 08:30:15'
