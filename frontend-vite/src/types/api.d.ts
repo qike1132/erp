@@ -416,6 +416,7 @@ export interface BatchImportResult {
 export interface BatchNoUpdate {
   batch_no?: string | null
   sync_same_batch?: boolean
+  record_type?: string
 }
 
 export interface BatchNoUpdateResponse {
