@@ -6794,7 +6794,7 @@
           "订单批次号"
         ],
         "summary": "Complete Batch",
-        "description": "完成指定批次，将批次内所有订单归档。\n\nArgs:\n    data: 批次完成请求体（含 batch_no）。\n    db: 读写数据库会话。\n    user: 当前操作用户。\n\nReturns:\n    BatchCompleteResponse: 归档结果（含成功数与失败订单列表）。",
+        "description": "完成指定批次，将批次内「已出货」订单与该批次备货归档。\n\nArgs:\n    data: 批次完成请求体（含 batch_no）。\n    db: 读写数据库会话。\n    user: 当前操作用户。\n\nReturns:\n    BatchCompleteResponse: 归档结果（含订单/备货成功数与失败订单列表）。",
         "operationId": "complete_batch_api_v1_order_batch_batch_complete_post",
         "requestBody": {
           "content": {
@@ -22127,6 +22127,11 @@
           "completed_count": {
             "type": "integer",
             "title": "Completed Count",
+            "default": 0
+          },
+          "completed_stockins": {
+            "type": "integer",
+            "title": "Completed Stockins",
             "default": 0
           },
           "failed_orders": {

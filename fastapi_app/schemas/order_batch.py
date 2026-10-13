@@ -59,6 +59,7 @@ class BatchCompleteResponse(BaseModel):
     success: bool = True
     message: str = ''
     completed_count: int = 0
+    completed_stockins: int = 0
     failed_orders: list[dict] = []
 
 

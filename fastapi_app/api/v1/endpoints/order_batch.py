@@ -156,7 +156,7 @@ async def complete_batch(
     db: AsyncSession = Depends(get_async_db),
     user: User = Depends(require_any_permission('batch_manage', 'order_manage')),
 ) -> BatchCompleteResponse:
-    """完成指定批次，将批次内所有订单归档。
+    """完成指定批次，将批次内「已出货」订单与该批次备货归档。
 
     Args:
         data: 批次完成请求体（含 batch_no）。
@@ -164,14 +164,15 @@ async def complete_batch(
         user: 当前操作用户。
 
     Returns:
-        BatchCompleteResponse: 归档结果（含成功数与失败订单列表）。
+        BatchCompleteResponse: 归档结果（含订单/备货成功数与失败订单列表）。
     """
     async with db_transaction(db):
         result = await order_batch_service.complete_batch(db, batch_no=data.batch_no, user=user)
     return BatchCompleteResponse(
         success=True,
-        message=f"批次完成，{result['completed_count']}个订单已归档",
+        message=f"批次完成，{result['completed_count']}个订单、{result.get('completed_stockins', 0)}条备货已归档",
         completed_count=result['completed_count'],
+        completed_stockins=result.get('completed_stockins', 0),
         failed_orders=result['failed_orders'],
     )
 

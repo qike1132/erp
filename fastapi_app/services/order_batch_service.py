@@ -134,7 +134,7 @@ def _build_batch_stockin_branch(whitelist, batch_no, customer, keyword):
         StockIn.stockin_date.label('sort_date'),
         literal('stockin').label('record_type'),
         StockIn.id.label('record_id'),
-    )
+    ).where(StockIn.is_deleted.isnot(True))
 
     if whitelist:
         stockin_branch = stockin_branch.where(StockIn.customer.in_(whitelist))
@@ -243,7 +243,7 @@ async def get_batch_query_list(
     # 支 1：订单（过滤条件与原实现逐条一致）
     order_branch = _build_batch_order_branch(whitelist, batch_no, status, customer, keyword)
 
-    # 支 2：备货（按 batch_no 过滤；无 is_deleted/status 过滤，与原实现一致）
+    # 支 2：备货（按 batch_no 过滤；过滤 is_deleted，与订单分支及 complete_batch 口径一致）
     stockin_branch = _build_batch_stockin_branch(whitelist, batch_no, customer, keyword)
 
     # total = 两支各自 COUNT 之和（复用同一分支查询，过滤条件绝对一致，不受分页影响）

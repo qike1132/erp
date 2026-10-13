@@ -110,6 +110,24 @@ class TestBuildBatchStockinBranch:
         compiled = str(branch.compile())
         assert 'batch_no' in compiled
 
+    def test_build_stockin_branch_filters_deleted(self):
+        """备货分支须过滤 is_deleted，与订单分支及 complete_batch 口径一致"""
+        branch = order_batch_service._build_batch_stockin_branch(
+            whitelist=None, batch_no=None, customer=None, keyword=None,
+        )
+        compiled = str(branch.compile())
+        assert 'is_deleted' in compiled
+
+
+# ============================================================================
+# BatchCompleteResponse（端点响应须含备货计数，否则被 response_model 剥掉）
+# ============================================================================
+class TestBatchCompleteResponse:
+    def test_declares_completed_stockins(self):
+        from fastapi_app.schemas.order_batch import BatchCompleteResponse
+        r = BatchCompleteResponse(completed_count=0, completed_stockins=3, failed_orders=[])
+        assert r.completed_stockins == 3
+
 
 # ============================================================================
 # _serialize_batch_orders
