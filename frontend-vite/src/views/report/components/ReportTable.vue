@@ -181,12 +181,14 @@ const rows = computed<Record<string, unknown>[]>(() => {
   const out: Record<string, unknown>[] = []
   for (const g of groupByOrder(props.logs)) {
     if (g.items.length === 1) {
-      out.push({ ...g.items[0], ...g.fields, _kind: 'single', __rk: `o-${g.order_id}` })
+      const only = g.items[0]!
+      // note 必须取回 SKU 自己的：g.fields.note 是订单备注，展开在后面会把它覆盖掉
+      out.push({ ...only, ...g.fields, note: only.note, _kind: 'single', __rk: `o-${g.order_id}` })
     } else {
       out.push({ ...g.fields, _kind: 'parent', __rk: `o-${g.order_id}` })
       if (expanded.value.has(g.order_id)) {
         for (const it of g.items) {
-          out.push({ ...it, ...g.fields, _kind: 'child', __rk: `i-${String(it.item_id)}` })
+          out.push({ ...it, ...g.fields, note: it.note, _kind: 'child', __rk: `i-${String(it.item_id)}` })
         }
       }
     }

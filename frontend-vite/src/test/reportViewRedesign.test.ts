@@ -333,9 +333,9 @@ describe('ReportView —— 表格与数字格式', () => {
 
 describe('ReportTable —— 订单流水母行-明细', () => {
   const MULTI = [
-    { order_id: 201, item_id: 21, order_no: 'SO-M1', order_date: '2026-10-13 09:12', customer: 'MINISO国际', product_name: '鲨鱼毛绒公仔-60cm', product_barcode: '6901', quantity: 100, order_total_qty: 300, item_count: 2, order_note: '补单', note: '补单' },
-    { order_id: 201, item_id: 22, order_no: 'SO-M1', order_date: '2026-10-13 09:12', customer: 'MINISO国际', product_name: '企鹅玩偶-40cm', product_barcode: '6902', quantity: 200, order_total_qty: 300, item_count: 2, order_note: '补单', note: '补单' },
-    { order_id: 202, item_id: 23, order_no: 'SO-M2', order_date: '2026-10-13 10:05', customer: 'TOP TOY', product_name: '小熊抱枕-35cm', product_barcode: '6903', quantity: 50, order_total_qty: 50, item_count: 1, order_note: '', note: '' },
+    { order_id: 201, item_id: 21, order_no: 'SO-M1', order_date: '2026-10-13 09:12', customer: 'MINISO国际', product_name: '鲨鱼毛绒公仔-60cm', product_barcode: '6901', quantity: 100, order_total_qty: 300, item_count: 2, order_note: '整单备注', item_note: 'SKU-A备注', note: 'SKU-A备注' },
+    { order_id: 201, item_id: 22, order_no: 'SO-M1', order_date: '2026-10-13 09:12', customer: 'MINISO国际', product_name: '企鹅玩偶-40cm', product_barcode: '6902', quantity: 200, order_total_qty: 300, item_count: 2, order_note: '整单备注', item_note: 'SKU-B备注', note: 'SKU-B备注' },
+    { order_id: 202, item_id: 23, order_no: 'SO-M2', order_date: '2026-10-13 10:05', customer: 'TOP TOY', product_name: '小熊抱枕-35cm', product_barcode: '6903', quantity: 50, order_total_qty: 50, item_count: 1, order_note: '', item_note: '单行备注', note: '单行备注' },
   ]
 
   it('多 SKU 订单默认折叠：只剩母行，产品名称列显示「共 N 个 SKU」', () => {
@@ -374,6 +374,21 @@ describe('ReportTable —— 订单流水母行-明细', () => {
     const w = mountTable(MULTI, true)
     expect(w.text()).toContain('SO-M1')
     expect(w.text()).toContain('SO-M2')
+  })
+
+  it('备注列：母行显示订单备注、子行/单行显示各自的 SKU 备注（不被订单备注覆盖）', async () => {
+    const w = mountTable(MULTI, true)
+    await w.find('.rp-caret').trigger('click')
+
+    const rows = w.findAll('tbody tr')
+    const parent = rows.find((r) => r.classes().includes('order-row') && r.text().includes('共 2 个 SKU'))!
+    const children = rows.filter((r) => r.classes().includes('child-row'))
+    const single = rows.find((r) => r.classes().includes('single-row'))!
+
+    expect(parent.find('.rp-note').text()).toBe('整单备注')
+    expect(children[0]!.find('.rp-note').text()).toBe('SKU-A备注')
+    expect(children[1]!.find('.rp-note').text()).toBe('SKU-B备注')
+    expect(single.find('.rp-note').text()).toBe('单行备注')
   })
 })
 
