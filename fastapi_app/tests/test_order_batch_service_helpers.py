@@ -268,3 +268,53 @@ class TestSerializeBatchStockins:
         result = await order_batch_service._serialize_batch_stockins(db, [12])
         assert result[12]['product_name'] is None
         assert result[12]['product_barcode'] is None
+
+    @pytest.mark.asyncio
+    async def test_serialize_stockins_includes_batch_fields(self):
+        """备货序列化应带上真实 batch_no / batch_completed_at；未完成时 status 为 None"""
+        mock_stockin = MagicMock()
+        mock_stockin.id = 20
+        mock_stockin.stockin_no = "SI-020"
+        mock_stockin.customer = "客户E"
+        mock_stockin.stockin_date = datetime(2026, 3, 1, 9, 0)
+        mock_stockin.product_id = 8
+        product = MagicMock()
+        product.name = "产品Z"
+        product.barcode = "690008"
+        mock_stockin.product = product
+        mock_stockin.quantity = 7
+        mock_stockin.batch_no = "B2026"
+        mock_stockin.batch_completed_at = None
+
+        result_mock = MagicMock()
+        result_mock.unique.return_value.scalars.return_value.all.return_value = [mock_stockin]
+        db = AsyncMock()
+        db.execute = AsyncMock(return_value=result_mock)
+
+        result = await order_batch_service._serialize_batch_stockins(db, [20])
+        assert result[20]['batch_no'] == 'B2026'
+        assert result[20]['batch_completed_at'] is None
+        assert result[20]['status'] is None
+
+    @pytest.mark.asyncio
+    async def test_serialize_stockins_completed_sets_status(self):
+        """已完成的备货 status 应为 '批次已完成'，batch_completed_at 为字符串"""
+        mock_stockin = MagicMock()
+        mock_stockin.id = 21
+        mock_stockin.stockin_no = "SI-021"
+        mock_stockin.customer = "客户F"
+        mock_stockin.stockin_date = datetime(2026, 3, 2, 9, 0)
+        mock_stockin.product_id = 9
+        mock_stockin.product = None
+        mock_stockin.quantity = 3
+        mock_stockin.batch_no = "B2026"
+        mock_stockin.batch_completed_at = datetime(2026, 3, 3, 12, 0)
+
+        result_mock = MagicMock()
+        result_mock.unique.return_value.scalars.return_value.all.return_value = [mock_stockin]
+        db = AsyncMock()
+        db.execute = AsyncMock(return_value=result_mock)
+
+        result = await order_batch_service._serialize_batch_stockins(db, [21])
+        assert result[21]['status'] == '批次已完成'
+        assert result[21]['batch_completed_at'] == '2026-03-03 12:00'

@@ -210,10 +210,10 @@ async def _serialize_batch_stockins(db: AsyncSession, page_stockin_ids: list[int
                 'quantity': s.quantity,
                 'deducted_qty': 0,
                 'shipped_qty': 0,
-                'status': None,
+                'status': '批次已完成' if s.batch_completed_at else None,
                 'computed_status': None,
-                'batch_no': None,
-                'batch_completed_at': None,
+                'batch_no': s.batch_no,
+                'batch_completed_at': s.batch_completed_at.strftime('%Y-%m-%d %H:%M') if s.batch_completed_at else None,
                 'is_locked': None,
                 'record_type': 'stockin',
             }
