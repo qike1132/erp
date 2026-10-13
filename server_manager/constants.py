@@ -10,7 +10,7 @@ from pathlib import Path
 
 _IS_WINDOWS = sys.platform == 'win32'
 
-_VERSION = 'v5.34'
+_VERSION = 'v5.35'
 _WINDOW_TITLE = f'ERP 服务器管理器 {_VERSION}'
 _REDIS_PORT = 6379
 _REDIS_EXE_PATHS = [Path(r'C:\Redis\redis-server.exe'), Path(r'C:\Program Files\Redis\redis-server.exe')]

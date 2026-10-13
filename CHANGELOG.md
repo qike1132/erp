@@ -1,5 +1,24 @@
 # 变更日志 (Changelog)
 
+## [2026-10-13] 服务器管理器 v5.35：修复「点重启后 erp-prod 起不来」
+
+### 🔴 修复：重启后服务停在 STOPPED，必须手点「启动」才能恢复
+- **现场**：管理器日志 3 次 `erp-prod 在 25s 内未进入 RUNNING（当前: 1 STOPPED）`（10-12 17:34、10-12 20:58、10-13 08:12），每次都紧跟「正在重启生产服务 erp-prod...」；事后手点一次「启动」即恢复。
+- **根因（一）**：重启被交给 `nssm restart`，而 NSSM 2.24 的实现是 `ret = control_service(STOP); if (ret) nssm_exit(ret); control_service(START);`（nssm.cpp:271-275）——**停机阶段返回非 0 就直接退出，start 根本不会发出**。Windows 事件日志的指纹完全吻合：08:12 那次 `erp-prod` 只收到 STOP control、没有 START control，而同一刻其余 4 个服务都是 STOP+START 成对。更糟的是管理器把 nssm 的返回码与 stderr **全部丢弃**，界面上只剩「25s 内未进入 RUNNING」，故障无从定位。
+- **根因（二）**：`prod_runner.kill_tree` 的软杀等待把停机拖出了 NSSM 的停机预算。NSSM 预算是 `AppStopMethodConsole=1500ms + AppStopMethodThreads=1500ms ≈ 3s`（NSSM 默认值，本仓 `nssm_install` 未覆盖），而软杀链路要 ~4.2s：实测 `taskkill /T`（不带 `/F`）对 `CREATE_NO_WINDOW` 子进程 **0.06s 就返回 rc=128**（「只能强制终止此进程(带 /F 选项)」）、一个进程都没杀掉，随后却白等 4s 才硬杀。监督器被 NSSM TerminateProcess 掉，**uvicorn 进程树成为继续占着 :5002 的孤儿**。此回归由 2026-10-11 的 P1-9（`657ccee4`）引入，其注释「4s 远小于 nssm restart 的停机容忍」是错的。
+- **改法**：`ServiceOps.restart_service_via_stop_start` 取代 `nssm restart` —— 显式 `nssm stop` → 等 STOPPED → `nssm start` → 等 RUNNING，**start 无条件执行**；stop 的返回码与原文如实写进日志，停机未确认 STOPPED 也告警。整栈重启与「只重启 erp-prod」共用它。`kill_tree` 改为「软杀只在它**报告成功**（rc=0）时才等待」，窗口 4.0 → 1.0s（软杀 0.06 + 窗口 + 硬杀 0.05 ≈ 1.1s，仍在 1500ms 内），软杀成功却超时升级时留一条 WARNING（免得「优雅关停没走完」以后只能靠收尾哨兵不亮反推）。
+- **顺带（消灭假成功）**：重启链路补上清端口（注入 app 的 `_release_ports`，与「启动生产模式」一致）。实测孤儿占着时 `bind 127.0.0.1:5002` 报 WinError 10048 —— 不清端口的话重启会变成「服务 RUNNING、界面报启动成功，但后端崩在绑定上」。
+
+### ✅ 验证
+- 聚焦回归 79 passed，含新增 `tests/test_sm_restart_stop_start.py`（stop→start 顺序、停机非零仍发 start、停机失败原文入日志、停机未确认告警、清端口时序、未注入不报错）。
+- 变异检查逐条做过：把 start 改回 `nssm restart` → 4 条新测试全红；去掉软杀 `rc==0` 门 → 对应测试红；去掉三处新增行为 → 三条新测试 1:1 变红；恢复后全绿。
+- `ruff`（改动文件）All checks passed、`mypy` Success 379 files、`scripts/quality_gate.py` exit 0 PASS。
+- 独立评审（未参与实现的新上下文、最强模型）两轮：首轮 2 个 Medium（软杀窗口偏小、停机未确认时静默）已修，复审**零 High/Medium**。
+
+### 🏗️ 打包
+- 版本号 `v5.34 → v5.35`（`constants._VERSION` + `server_manager.spec` 产物名 + README/README_DEPLOY 的现行版本表述）。
+- **注意**：`.venv` 里没有 PyInstaller，重打包要用系统 Python（已装 6.19.0），且需先关闭正在运行的 `ERP服务器管理器_v5.34.exe`（文件被占用会写不进去）。命令：`pyinstaller server_manager.spec` → 产出 `dist/ERP服务器管理器_v5.35.exe`。
+
 ## [2026-09-30] 服务器管理器 v5.34：生产日志实时输出 + 日志文件定时清理
 
 ### 🔴 修复：生产模式「运行日志不是实时输出」
