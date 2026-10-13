@@ -73,7 +73,7 @@ class TestBuildBatchStockinBranch:
     def test_build_stockin_branch_minimal(self):
         """无筛选条件时应返回包含 base 列的 select 语句"""
         branch = order_batch_service._build_batch_stockin_branch(
-            whitelist=None, customer=None, keyword=None,
+            whitelist=None, batch_no=None, customer=None, keyword=None,
         )
         compiled = str(branch.compile())
         assert 'stockin' in compiled.lower()
@@ -81,7 +81,7 @@ class TestBuildBatchStockinBranch:
     def test_build_stockin_branch_with_whitelist(self):
         """whitelist 非空时应添加 customer IN 条件"""
         branch = order_batch_service._build_batch_stockin_branch(
-            whitelist=["客户A"], customer=None, keyword=None,
+            whitelist=["客户A"], batch_no=None, customer=None, keyword=None,
         )
         compiled = str(branch.compile())
         assert 'customer' in compiled
@@ -89,7 +89,7 @@ class TestBuildBatchStockinBranch:
     def test_build_stockin_branch_with_customer(self):
         """customer 非空时应添加 customer 等值条件"""
         branch = order_batch_service._build_batch_stockin_branch(
-            whitelist=None, customer="MINISO", keyword=None,
+            whitelist=None, batch_no=None, customer="MINISO", keyword=None,
         )
         compiled = str(branch.compile())
         assert 'customer' in compiled
@@ -97,10 +97,18 @@ class TestBuildBatchStockinBranch:
     def test_build_stockin_branch_with_keyword_joins_product(self):
         """keyword 非空时应 JOIN Product 表"""
         branch = order_batch_service._build_batch_stockin_branch(
-            whitelist=None, customer=None, keyword="商品",
+            whitelist=None, batch_no=None, customer=None, keyword="商品",
         )
         compiled = str(branch.compile())
         assert 'product' in compiled.lower()
+
+    def test_build_stockin_branch_with_batch_no_filter(self):
+        """batch_no 非空时应添加 batch_no 等值条件"""
+        branch = order_batch_service._build_batch_stockin_branch(
+            whitelist=None, batch_no="B9", customer=None, keyword=None,
+        )
+        compiled = str(branch.compile())
+        assert 'batch_no' in compiled
 
 
 # ============================================================================
