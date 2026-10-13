@@ -500,8 +500,17 @@ async def complete_batch(
     result = await db.execute(stmt)
     orders = result.scalars().all()
 
-    if not orders:
-        raise ValueError(f"批次 {batch_no} 没有可完成的订单")
+    stockin_result = await db.execute(
+        select(StockIn).where(
+            StockIn.batch_no == batch_no,
+            StockIn.batch_completed_at.is_(None),
+            StockIn.is_deleted.isnot(True),
+        ).with_for_update()
+    )
+    stockins = stockin_result.scalars().all()
+
+    if not orders and not stockins:
+        raise ValueError(f"批次 {batch_no} 没有可完成的记录")
 
     now = datetime.now(UTC).replace(tzinfo=None)
     completed = []
@@ -519,20 +528,27 @@ async def complete_batch(
         o.status = await compute_order_status_from_db(db, o)
         completed.append(o)
 
+    # 备货无出货状态：批次完成时无条件标记（查询已限定未完成）
+    for s in stockins:
+        s.batch_completed_at = now
+        s.batch_completed_by_id = user.id
+
     _write_audit_log(
         db, batch_no=batch_no, action='batch_complete',
         order_ids=[o.id for o in completed], user=user,
-        detail=f"完成{len(completed)}单, 失败{len(failed_orders)}单",
+        detail=f"完成{len(completed)}单+{len(stockins)}备货, 失败{len(failed_orders)}单",
     )
     await db.flush()
 
     await _safe_publish_event("batch_completed", {
         "batch_no": batch_no,
         "completed_count": len(completed),
+        "completed_stockins": len(stockins),
         "failed_count": len(failed_orders),
     })
 
     return {
         'completed_count': len(completed),
+        'completed_stockins': len(stockins),
         'failed_orders': failed_orders,
     }

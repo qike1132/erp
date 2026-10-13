@@ -375,3 +375,76 @@ class TestUpdateStockinBatchNo:
                 db, stockin_id=31, batch_no=None, user=MagicMock(),
             )
         assert mock_stockin.batch_no is None
+
+
+# ============================================================================
+# complete_batch（含备货）
+# ============================================================================
+class TestCompleteBatchStockins:
+    @pytest.mark.asyncio
+    async def test_completes_stockins_of_batch(self):
+        """完成批次时该批次未完成的备货也被标记完成"""
+        mock_stockin = MagicMock()
+        mock_stockin.id = 40
+        mock_stockin.batch_completed_at = None
+        stockin_result = MagicMock()
+        stockin_result.scalars.return_value.all.return_value = [mock_stockin]
+
+        order_result = MagicMock()
+        order_result.scalars.return_value.all.return_value = []  # 无订单
+
+        db = AsyncMock()
+        db.execute = AsyncMock(side_effect=[order_result, stockin_result])
+
+        user = MagicMock()
+        user.id = 1
+        user.username = "admin"
+
+        with patch('fastapi_app.services.order_batch_service._safe_publish_event', new=AsyncMock()), \
+             patch('fastapi_app.services.order_batch_service._write_audit_log'):
+            out = await order_batch_service.complete_batch(db, batch_no='B9', user=user)
+
+        assert mock_stockin.batch_completed_at is not None
+        assert mock_stockin.batch_completed_by_id == 1
+        assert out['completed_stockins'] == 1
+
+    @pytest.mark.asyncio
+    async def test_no_orders_no_stockins_raises(self):
+        """订单与备货都为空时应抛 ValueError"""
+        empty = MagicMock()
+        empty.scalars.return_value.all.return_value = []
+        db = AsyncMock()
+        db.execute = AsyncMock(return_value=empty)
+        with pytest.raises(ValueError):
+            await order_batch_service.complete_batch(db, batch_no='B-none', user=MagicMock())
+
+    @pytest.mark.asyncio
+    async def test_mixed_batch_order_failed_stockin_completed(self):
+        """批次里订单未出货 → 进 failed_orders；备货照常完成"""
+        mock_order = MagicMock()
+        mock_order.id = 50
+        mock_order.order_no = "PO-50"
+        mock_order.status = "待出货"  # != ORDER_STATUS_SHIPPED
+        order_result = MagicMock()
+        order_result.scalars.return_value.all.return_value = [mock_order]
+
+        mock_stockin = MagicMock()
+        mock_stockin.id = 51
+        mock_stockin.batch_completed_at = None
+        stockin_result = MagicMock()
+        stockin_result.scalars.return_value.all.return_value = [mock_stockin]
+
+        db = AsyncMock()
+        db.execute = AsyncMock(side_effect=[order_result, stockin_result])
+
+        user = MagicMock()
+        user.id = 1
+        user.username = "admin"
+        with patch('fastapi_app.services.order_batch_service._safe_publish_event', new=AsyncMock()), \
+             patch('fastapi_app.services.order_batch_service._write_audit_log'):
+            out = await order_batch_service.complete_batch(db, batch_no='B9', user=user)
+
+        assert out['completed_count'] == 0
+        assert len(out['failed_orders']) == 1
+        assert out['completed_stockins'] == 1
+        assert mock_stockin.batch_completed_at is not None
