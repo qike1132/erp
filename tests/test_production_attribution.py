@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from fastapi_app.core.cache_invalidation import cache_mgr
 from fastapi_app.services import fifo_allocation as fifo
 from fastapi_app.services import purchase_plan_shipment as pps
 from fastapi_app.services.fifo_allocation import allocate_fifo
@@ -332,10 +333,10 @@ class TestProductionAggregateCacheInvalidation:
 
     @pytest.mark.asyncio
     async def test_produced_dirty_clears_plan_aggregate_caches(self):
-        patterns: list[str] = []
+        captured: list[tuple] = []
 
-        async def _inv(_strategy, pats):
-            patterns.extend(pats)
+        async def _inv(strategy, target=None):
+            captured.append((strategy, target))
 
         mgr = MagicMock()
         mgr.invalidate = AsyncMock(side_effect=_inv)
@@ -344,15 +345,15 @@ class TestProductionAggregateCacheInvalidation:
             await fifo._invalidate_fifo_caches_safe(produced_dirty=True)
         local_pats = [c.args[0] for c in local.call_args_list]
 
-        assert any(p.startswith('pp:') for p in patterns), patterns
+        assert any(t.startswith('pp:') for _, t in captured), captured
         assert any(p.startswith('pp:') for p in local_pats), local_pats
 
     @pytest.mark.asyncio
     async def test_not_produced_dirty_leaves_plan_aggregate_caches_alone(self):
-        patterns: list[str] = []
+        captured: list[tuple] = []
 
-        async def _inv(_strategy, pats):
-            patterns.extend(pats)
+        async def _inv(strategy, target=None):
+            captured.append((strategy, target))
 
         mgr = MagicMock()
         mgr.invalidate = AsyncMock(side_effect=_inv)
@@ -360,4 +361,37 @@ class TestProductionAggregateCacheInvalidation:
              patch.object(fifo, 'invalidate_local_cache'):
             await fifo._invalidate_fifo_caches_safe(produced_dirty=False)
 
-        assert not any(p.startswith('pp:') for p in patterns), patterns
+        assert not any(t.startswith('pp:') for _, t in captured), captured
+
+    @pytest.mark.asyncio
+    async def test_pattern_targets_are_strings_not_lists(self):
+        """PATTERN 策略的 target 必须是**字符串**（回归 2026-10-13）。
+
+        原实现传的是单元素列表 `['plan_fifo:*']`：`invalidate_cache` 把它当 pattern
+        交给 `redis_cache._make_key`，`list.startswith` 抛 AttributeError，被
+        `_invalidate_fifo_caches_safe` 的 except 吞成「等待 TTL 兜底」——
+        **L1 清了、L2/Redis 从没清过**，多 worker 部署下其它 worker 的 plan_fifo
+        分配结果最长 30 分钟（FIFO_CACHE_TTL）显示旧值。
+
+        这里既断言「传的是字符串」这一契约（与 `invalidate()` docstring 一致、
+        不依赖测试环境有无 Redis），又把捕获到的调用**原样打到真 cache_mgr 上**
+        复现失败路径（列表会在此真的抛 AttributeError）。
+        """
+        captured: list[tuple] = []
+
+        async def _inv(strategy, target=None):
+            captured.append((strategy, target))
+
+        mgr = MagicMock()
+        mgr.invalidate = AsyncMock(side_effect=_inv)
+        with patch.object(fifo, 'cache_mgr', mgr), \
+             patch.object(fifo, 'invalidate_local_cache'):
+            await fifo._invalidate_fifo_caches_safe(produced_dirty=True)
+
+        assert captured, '未发生任何 Redis 失效调用'
+        bad = [(s, t) for s, t in captured if not isinstance(t, str)]
+        assert not bad, f'PATTERN 的 target 必须是字符串，收到：{bad}'
+
+        real_invalidate = cache_mgr.invalidate
+        for strategy, target in captured:
+            await real_invalidate(strategy, target)  # 列表 target 会在此抛 AttributeError
