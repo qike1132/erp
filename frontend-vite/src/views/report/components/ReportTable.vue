@@ -10,6 +10,7 @@
       :total-records="pagination?.total ?? 0"
       row-key="__rk"
       :row-class="rowClassOf"
+      :striped="false"
       @sort="emit('sort', $event)"
       @page="emit('page', $event)"
     >
@@ -159,6 +160,7 @@ function groupByOrder(logs: Record<string, unknown>[]): OrderGroup[] {
           order_date: r.order_date ?? '',
           customer: r.customer ?? '',
           order_note: r.order_note ?? '',
+          note: r.order_note ?? '',   // 母行备注列显示订单备注（noteKey='note'）
           item_count: r.item_count ?? 1,
           order_total_qty: r.order_total_qty ?? 0,
         },

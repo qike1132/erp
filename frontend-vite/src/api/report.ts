@@ -11,6 +11,11 @@ import type { QueryParams } from '@/types'
 export interface ReportLogItem {
   record_id: number
   record_no: string
+  /** 退货原因（与 note 分开） */
+  reason: string
+  /** 抵扣行编辑所需：毛量 / 合并展示备注 */
+  gross_quantity: number
+  note_display: string
   order_id: number
   order_no: string
   item_id: number

@@ -305,13 +305,18 @@ export function useReportRowActions() {
     } as unknown as OrderRecord
   }
 
-  /** 报表行 → 出货记录形状（openStockoutEdit / handleDeleteStockout 消费） */
-  function stockoutRecordFromRow(row: Record<string, unknown>): StockFlowRecord {
+  /** 报表行 → 出货记录形状（openStockoutEdit / handleDeleteStockout 消费）
+   *
+   * 抵扣行的 `quantity` 是**净量**（quantity − returned），直接回写会把出货毛量改错；
+   * 故抵扣行取后端另下发的 `gross_quantity`，日期/备注也取后端补的 `stockout_date`/`note`。
+   */
+  function stockoutRecordFromRow(row: Record<string, unknown>, isDeduction = false): StockFlowRecord {
+    const qty = isDeduction ? rowNum(row, 'gross_quantity') : rowNum(row, 'quantity')
     return {
       id: rowNum(row, 'record_id'),
       stockout_no: rowStr(row, 'record_no'),
       product_name: rowStr(row, 'product_name'),
-      quantity: rowNum(row, 'quantity'),
+      quantity: qty,
       customer: rowStr(row, 'customer'),
       stockout_date: rowStr(row, 'stockout_date'),
       note: rowStr(row, 'note'),
@@ -327,7 +332,7 @@ export function useReportRowActions() {
       quantity: rowNum(row, 'quantity'),
       customer: rowStr(row, 'customer'),
       return_date: rowStr(row, 'return_date'),
-      reason: '',
+      reason: rowStr(row, 'reason'),
       note: rowStr(row, 'note'),
     } as unknown as StockReturnFlowRecord
   }
@@ -359,7 +364,7 @@ export function useReportRowActions() {
         return
       }
       if (tab === 'stockout' || tab === 'deduction') {
-        const rec = stockoutRecordFromRow(row)
+        const rec = stockoutRecordFromRow(row, tab === 'deduction')
         if (action === 'edit') openStockoutEdit(rec, tab === 'deduction')
         else await handleDeleteStockout(rec)
         return

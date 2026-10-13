@@ -287,7 +287,9 @@ async def get_return_logs(db: AsyncSession, customer: str = '', product: str = '
             'return_date': row.return_date or '-', 'customer': row.customer or '',
             'product_name': row.product_name or '', 'product_barcode': row.product_barcode or '',
             'quantity': row.quantity or 0,
-            'note': '；'.join(x for x in (row.reason or '', row.note or '') if x),
+            # reason/note 分开下发：行内编辑要原值回写，note 若给合并串会把原因写进备注字段
+            'reason': row.reason or '', 'note': row.note or '',
+            'note_display': '；'.join(x for x in (row.reason or '', row.note or '') if x),
         },
     )
 
@@ -525,8 +527,10 @@ async def get_deduction_logs(db: AsyncSession, customer: str = '', product: str 
         data_sql_template=f"""SELECT
         so.id AS record_id, so.stockout_no AS record_no,
         to_char(so.stockout_date, 'YYYY-MM-DD HH24:MI') AS deduction_time,
+        to_char(so.stockout_date, 'YYYY-MM-DD HH24:MI') AS stockout_date,
         so.customer, p.name AS product_name, p.barcode AS product_barcode,
         (so.quantity - so.returned_quantity) AS quantity,
+        so.quantity AS gross_quantity, so.note AS stockout_note,
         o.order_no AS order_no, o.note AS order_note,
         COUNT(*) OVER() AS total_count
         FROM stock_out so JOIN product p ON so.product_id = p.id
@@ -543,7 +547,10 @@ async def get_deduction_logs(db: AsyncSession, customer: str = '', product: str 
             'deduction_time': row.deduction_time or '-', 'customer': row.customer or '',
             'product_name': row.product_name or '', 'product_barcode': row.product_barcode or '',
             'quantity': row.quantity or 0,
+            # 行内编辑需要「毛量」与「出货日期/真备注」（quantity 是净量，直接回写会把毛量改错）
+            'gross_quantity': row.gross_quantity or 0,
+            'stockout_date': row.stockout_date or '-',
+            'note': row.stockout_note or '',
             'order_no': row.order_no or '', 'order_note': row.order_note or '',
-            'note': row.order_note or '',
         },
     )

@@ -32805,6 +32805,26 @@
             "title": "Record No",
             "default": ""
           },
+          "reason": {
+            "type": "string",
+            "title": "Reason",
+            "default": ""
+          },
+          "gross_quantity": {
+            "type": "integer",
+            "title": "Gross Quantity",
+            "default": 0
+          },
+          "stockout_date": {
+            "type": "string",
+            "title": "Stockout Date",
+            "default": ""
+          },
+          "note_display": {
+            "type": "string",
+            "title": "Note Display",
+            "default": ""
+          },
           "order_id": {
             "type": "integer",
             "title": "Order Id",
@@ -32843,11 +32863,6 @@
           "stockin_date": {
             "type": "string",
             "title": "Stockin Date",
-            "default": ""
-          },
-          "stockout_date": {
-            "type": "string",
-            "title": "Stockout Date",
             "default": ""
           },
           "deduction_time": {

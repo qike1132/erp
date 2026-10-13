@@ -74,10 +74,18 @@ const STOCKOUT_ROW = {
   record_id: 21, record_no: 'SO-20261001-1', stockout_date: '2026-10-01 10:00',
   customer: 'MINISO国际', product_name: '鲨鱼公仔', product_barcode: '690', quantity: 12, note: '急单',
 }
-const DEDUCTION_ROW = { ...STOCKOUT_ROW, record_id: 22, record_no: 'SO-D1', order_no: 'SO-9' }
+// 抵扣行真实形状（get_deduction_logs）：quantity 是**净量**、另有 gross_quantity/stockout_date/note
+// （回归评审 I-1：若照搬 stockout 行键，编辑会把毛量改成净量）
+const DEDUCTION_ROW = {
+  record_id: 22, record_no: 'SO-D1', deduction_time: '2026-10-01 10:00', stockout_date: '2026-10-01 10:00',
+  customer: 'MINISO国际', product_name: '鲨鱼公仔', product_barcode: '690',
+  quantity: 80, gross_quantity: 100, note: '出货备注', order_no: 'SO-9', order_note: '订单备注',
+}
+// 退货行真实形状：reason 与 note 分开下发（回归评审 I-3：reason 不能丢）
 const RETURN_ROW = {
   record_id: 31, record_no: 'SR-20261001-1', return_date: '2026-10-01 11:00',
-  customer: 'MINISO国际', product_name: '鲨鱼公仔', product_barcode: '690', quantity: 4, note: '破损',
+  customer: 'MINISO国际', product_name: '鲨鱼公仔', product_barcode: '690',
+  quantity: 4, reason: '破损', note: '客户反馈', note_display: '破损；客户反馈',
 }
 
 beforeEach(() => {
@@ -147,7 +155,16 @@ describe('出货 / 备货抵扣流水：按 record_id 直连', () => {
 
     expect(api.stockoutEditVisible.value).toBe(true)
     expect(api.stockoutEditIsDeduction.value).toBe(true)
-    expect(api.stockoutEditForm.value).toMatchObject({ id: 22, stockoutNo: 'SO-D1', quantity: 12 })
+    // 回归 I-1：数量必须取**毛量**（gross_quantity=100），不能取净量 80
+    expect(api.stockoutEditForm.value).toMatchObject({ id: 22, stockoutNo: 'SO-D1', quantity: 100, note: '出货备注' })
+  })
+
+  it('抵扣编辑保存：回写毛量而非净量（不把出货量改错）', async () => {
+    const api = makeActions()
+    await api.onRowAction('deduction', 'edit', DEDUCTION_ROW)
+    await api.saveStockoutEdit()
+
+    expect(mocks.editStockout).toHaveBeenCalledWith(22, expect.objectContaining({ quantity: 100 }))
   })
 
   it('出货编辑保存：客户随表单下发', async () => {
@@ -167,13 +184,15 @@ describe('退货流水：按 record_id 直连', () => {
     expect(mocks.returnRemove).toHaveBeenCalledWith(31)
   })
 
-  it('编辑：打开弹窗并按 record_id 保存', async () => {
+  it('编辑：打开弹窗并按 record_id 保存（reason 原值回写，不被清空）', async () => {
     const api = makeActions()
     await api.onRowAction('return', 'edit', RETURN_ROW)
     expect(api.returnEditVisible.value).toBe(true)
+    expect(api.returnEditForm.value).toMatchObject({ id: 31, reason: '破损', note: '客户反馈' })
     await api.saveReturnEdit()
 
-    expect(mocks.returnUpdate).toHaveBeenCalledWith(31, expect.objectContaining({ quantity: 4 }))
+    // 回归 I-3：reason 必须是 '破损'（旧映射硬编码 '' → 保存会清空原因）
+    expect(mocks.returnUpdate).toHaveBeenCalledWith(31, expect.objectContaining({ quantity: 4, reason: '破损' }))
   })
 })
 

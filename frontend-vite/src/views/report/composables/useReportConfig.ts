@@ -70,7 +70,8 @@ export const TAB_CONFIG: Record<TabType, TabConfig> = {
     countKey: 'return_count',
     dateLabel: '退货时间',
     countLabel: '退货数量',
-    noteKey: 'note',
+    // 退货的备注列展示「原因；备注」合并串（行内编辑仍按分开的 reason/note 回写）
+    noteKey: 'note_display',
     noLabel: '退货单号',
     noKey: 'record_no',
   },

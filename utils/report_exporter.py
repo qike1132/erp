@@ -314,7 +314,7 @@ class ReportExporter:
         """格式化备货行数据"""
         return [
             log.get('stockin_date', ''),
-            log.get('record_no', ''),
+            log.get('record_no') or log.get('stockin_no', ''),
             log.get('customer', ''),
             log.get('product_name', ''),
             log.get('product_barcode', ''),
@@ -326,7 +326,7 @@ class ReportExporter:
         """格式化出货行数据"""
         return [
             log.get('stockout_date', ''),
-            log.get('record_no', ''),
+            log.get('record_no') or log.get('stockout_no', ''),
             log.get('customer', ''),
             log.get('product_name', ''),
             log.get('product_barcode', ''),
@@ -338,11 +338,11 @@ class ReportExporter:
         """格式化抵扣行数据"""
         return [
             log.get('deduction_time', ''),
-            log.get('record_no', ''),
+            log.get('record_no') or log.get('stockout_no', ''),
             log.get('order_no', ''),
             log.get('customer', ''),
             log.get('product_name', ''),
-            log.get('product_barcode', ''),
+            log.get('product_barcode') or log.get('sku', ''),
             log.get('quantity', 0),
             log.get('order_note', '')
         ]
@@ -351,7 +351,7 @@ class ReportExporter:
         """格式化退货行数据"""
         return [
             log.get('return_date', ''),
-            log.get('record_no', ''),
+            log.get('record_no') or log.get('return_no', ''),
             log.get('customer', ''),
             log.get('product_name', ''),
             log.get('product_barcode', ''),

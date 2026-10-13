@@ -292,12 +292,18 @@ async def delete_order_item(db: AsyncSession, item_id: int, current_user: User) 
     产品），若此处不先预锁产品，会与出库创建路径（P→O）构成 AB-BA 死锁。
     """
     head = (await db.execute(
-        select(OrderItem.order_id, OrderItem.product_id).where(OrderItem.id == item_id)
+        select(OrderItem.order_id, OrderItem.product_id,
+               Order.product_id.label('order_product_id'))
+        .join(Order, Order.id == OrderItem.order_id)
+        .where(OrderItem.id == item_id)
     )).one_or_none()
     if head is None:
         raise ValueError('订单明细不存在')
-    if head.product_id is not None:
-        await get_product_for_update(db, head.product_id)
+    # 预锁「明细产品」与「订单兼容产品」两行（按 id 升序）——末项分支会进 delete_order →
+    # _delete_order_directly 再锁 order.product_id；若不预锁，本路径会以
+    # P(明细)→O→P(兼容) 参与并发，与整单编辑的 P(兼容)→O 互等行锁死锁。
+    for pid in sorted({p for p in (head.product_id, head.order_product_id) if p is not None}):
+        await get_product_for_update(db, pid)
     order = (await db.execute(
         select(Order).where(Order.id == head.order_id).with_for_update()
     )).scalar_one_or_none()
@@ -329,6 +335,11 @@ async def delete_order_item(db: AsyncSession, item_id: int, current_user: User) 
     pid, qty = item.product_id, item.quantity
     await db.delete(item)
     await db.flush()
+    # 删掉的正是「订单兼容产品」所指明细时，把兼容值指向剩余的任一明细，避免悬空
+    if pid is not None and pid == order.product_id:
+        order.product_id = (await db.execute(
+            select(OrderItem.product_id).where(OrderItem.order_id == order.id).limit(1)
+        )).scalar_one_or_none()
     total = (await db.execute(
         select(func.coalesce(func.sum(OrderItem.quantity), 0))
         .where(OrderItem.order_id == order.id)

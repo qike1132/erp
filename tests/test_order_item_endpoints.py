@@ -134,6 +134,28 @@ async def test_delete_last_item_removes_order(
 
 
 @pytest.mark.asyncio
+async def test_delete_first_item_moves_order_product_id(
+    async_client, async_db_session, seeded_multi_sku_order, auth_headers,
+):
+    """删掉首个 SKU 后，order.product_id（兼容值）指向剩余明细，不留悬空（评审 I-2）。"""
+    from sqlalchemy import select
+
+    order_id, item_ids = seeded_multi_sku_order
+    before = (await async_db_session.execute(
+        select(Order.product_id).where(Order.id == order_id))).scalar_one()
+
+    r = await async_client.delete(f"/api/v1/orders/items/{item_ids[0]}", headers=auth_headers)
+    assert r.status_code == 200, r.text
+
+    after = (await async_db_session.execute(
+        select(Order.product_id).where(Order.id == order_id))).scalar_one()
+    remaining_pid = (await async_db_session.execute(
+        select(OrderItem.product_id).where(OrderItem.id == item_ids[1]))).scalar_one()
+    assert after == remaining_pid, '删首项后 order.product_id 应指向剩余明细'
+    assert after != before
+
+
+@pytest.mark.asyncio
 async def test_delete_item_with_deduction_is_rejected(
     async_client, seeded_deducted_item, auth_headers,
 ):
