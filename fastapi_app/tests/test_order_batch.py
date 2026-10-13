@@ -129,7 +129,7 @@ class TestCompleteBatch:
         mock_scalar.scalars.return_value.all.return_value = []
         mock_db.execute.return_value = mock_scalar
 
-        with pytest.raises(ValueError, match="没有可完成的订单"):
+        with pytest.raises(ValueError, match="没有可完成的记录"):
             await order_batch_service.complete_batch(mock_db, batch_no="EMPTY", user=mock_user)
 
     @pytest.mark.asyncio
