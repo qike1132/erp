@@ -22,16 +22,9 @@
         </div>
       </template>
 
-      <!-- 展开列：母行箭头 / 子行树线（仅订单 tab 有该列） -->
+      <!-- 展开列：仅子行树线（母行整行可点展开，2026-10-13 去掉冗余的 ▶ 按钮） -->
       <template #column-body-expand="{ row }">
-        <button
-          v-if="row._kind === 'parent'"
-          class="rp-caret"
-          :class="{ open: isExpanded(Number(row.order_id)) }"
-          :aria-label="isExpanded(Number(row.order_id)) ? '收起 SKU' : '展开 SKU'"
-          @click.stop="toggle(Number(row.order_id))"
-        >▶</button>
-        <span v-else-if="row._kind === 'child'" class="rp-tree">└</span>
+        <span v-if="row._kind === 'child'" class="rp-tree">└</span>
       </template>
 
       <template #column-body-date="{ row }">
@@ -93,7 +86,7 @@
  * 2026-10-13：订单 tab 改母行-明细——按 order_id 把「一行一 SKU」的扁平结果聚成
  * 母行（订单）+ 子行（SKU）；单 SKU 订单压成一行。母行与子行是**同一张表的真实行**、
  * 共用同一 `<colgroup>`，靠 `rowClass` 区分样式、不做左缩进 → 产品名称/条码/数量/
- * 备注/操作永远与表头对齐。展开/折叠 = 前端增删子行（点母行整行或首列箭头均可，2026-10-13）。
+ * 备注/操作永远与表头对齐。展开/折叠 = 前端增删子行（点母行整行，2026-10-13）。
  * 其余四个 tab 直接平铺（一行 = 一条记录）。
  */
 import { computed, ref, watch } from 'vue'
@@ -128,17 +121,13 @@ const emit = defineEmits<{
 
 /** 展开的订单 id 集合（仅订单 tab 用） */
 const expanded = ref<Set<number>>(new Set())
-function isExpanded(orderId: number): boolean {
-  return expanded.value.has(orderId)
-}
 function toggle(orderId: number) {
   const next = new Set(expanded.value)
   if (next.has(orderId)) next.delete(orderId)
   else next.add(orderId)
   expanded.value = next
 }
-// 2026-10-13 优化点①：点母行整行 = 展开/收起（子行/单行不响应）。
-// 箭头按钮自身带 @click.stop，点它不会冒泡到这里，避免一次点击触发两回。
+// 2026-10-13：点母行整行 = 展开/收起（子行/单行不响应）。
 function onRowClick(row: Record<string, unknown>) {
   if (row._kind === 'parent') toggle(Number(row.order_id))
 }
@@ -248,15 +237,7 @@ function fmtQty(v: unknown): string {
 .rp-no { color: var(--color-primary-700, #2d5ab8); font-weight: 600; }
 .rp-barcode { color: var(--color-text-muted); }
 
-/* 展开箭头 / 子行树线（层级不靠缩进，只靠首列字符 → 不破坏列对齐） */
-.rp-caret {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 22px; height: 22px; border-radius: 6px; border: 1px solid var(--color-border, #e4e7ed);
-  background: #fff; color: var(--color-text-secondary); cursor: pointer; font-size: 10px;
-  transition: transform 0.18s ease, background 0.18s, color 0.18s;
-}
-.rp-caret:hover { background: var(--color-primary-50, #eff5ff); color: var(--color-primary-600); }
-.rp-caret.open { transform: rotate(90deg); color: var(--color-primary-600); }
+/* 子行树线（层级不靠缩进，只靠首列字符 → 不破坏列对齐） */
 .rp-tree { color: #9db8e0; font-size: 13px; }
 
 /* 母行整行可点 = 展开/收起（2026-10-13 优化点①），给手型提示可点性 */

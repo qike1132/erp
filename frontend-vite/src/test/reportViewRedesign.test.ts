@@ -166,6 +166,11 @@ function mountTable(logs: Record<string, unknown>[], canManage: boolean) {
   })
 }
 
+/** 点母行整行展开（2026-10-13 移除 ▶ 按钮后，展开唯一入口） */
+async function clickParentRow(w: VueWrapper) {
+  await w.findAll('tbody tr').find((r) => r.classes().includes('parent-row'))!.trigger('click')
+}
+
 function mountTabs(over: Record<string, unknown> = {}) {
   return mount(ReportTabGroup, { props: { modelValue: 'order', ...over } })
 }
@@ -348,9 +353,9 @@ describe('ReportTable —— 订单流水母行-明细', () => {
     expect(parent).toBeTruthy()
   })
 
-  it('点箭头展开：出现 2 条子行，且子行带 child-row 类、产品名称是各自 SKU', async () => {
+  it('展开后出现 2 条子行，且子行带 child-row 类、产品名称是各自 SKU', async () => {
     const w = mountTable(MULTI, true)
-    await w.find('.rp-caret').trigger('click')
+    await clickParentRow(w)
 
     const rows = w.findAll('tbody tr')
     expect(rows).toHaveLength(4)  // 母行 + 2 子行 + 单 SKU 行
@@ -384,6 +389,19 @@ describe('ReportTable —— 订单流水母行-明细', () => {
     expect(w.findAll('tbody tr')).toHaveLength(4)  // 子行点击不改变展开态
   })
 
+  it('展开列已无 ▶ 按钮：母行首列留空，子行仍是 └ 树线（2026-10-13 移除按钮）', async () => {
+    const w = mountTable(MULTI, true)
+    expect(w.find('.rp-caret').exists()).toBe(false)
+
+    await clickParentRow(w)
+    const rows = w.findAll('tbody tr')
+    const parent = rows.find((r) => r.classes().includes('parent-row'))!
+    const child = rows.find((r) => r.classes().includes('child-row'))!
+    expect(parent.find('.rp-caret').exists()).toBe(false)
+    expect(parent.find('.rp-tree').exists()).toBe(false)  // 母行首列留空
+    expect(child.find('.rp-tree').exists()).toBe(true)    // 子行仍有 └
+  })
+
   it('首列「时间」左对齐（优化点②：内容贴住左边框，参照 /stock 客户列）', async () => {
     const { useReportConfig } = await import('@/views/report/composables/useReportConfig')
     const { ref } = await import('vue')
@@ -395,7 +413,7 @@ describe('ReportTable —— 订单流水母行-明细', () => {
 
   it('母行不挂操作按钮，子行/单 SKU 行挂', async () => {
     const w = mountTable(MULTI, true)
-    await w.find('.rp-caret').trigger('click')
+    await clickParentRow(w)
 
     const rows = w.findAll('tbody tr')
     const parent = rows.find((r) => r.classes().includes('order-row') && r.text().includes('共 2 个 SKU'))!
@@ -411,7 +429,7 @@ describe('ReportTable —— 订单流水母行-明细', () => {
 
   it('备注列：母行显示订单备注、子行/单行显示各自的 SKU 备注（不被订单备注覆盖）', async () => {
     const w = mountTable(MULTI, true)
-    await w.find('.rp-caret').trigger('click')
+    await clickParentRow(w)
 
     const rows = w.findAll('tbody tr')
     const parent = rows.find((r) => r.classes().includes('order-row') && r.text().includes('共 2 个 SKU'))!
