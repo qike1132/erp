@@ -8,6 +8,7 @@ class ReportLogItem(BaseModel):
     record_no: str = ''
     # 订单流水母行-明细（2026-10-13）：订单级字段 + SKU 级字段
     order_id: int = 0
+    order_no: str = ''
     item_id: int = 0
     item_count: int = 0
     order_total_qty: int = 0

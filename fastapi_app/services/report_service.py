@@ -271,27 +271,23 @@ async def get_return_logs(db: AsyncSession, customer: str = '', product: str = '
         params=params,
         page=page,
         per_page=per_page,
-        data_sql_template=f"""SELECT
-        DATE(sr.return_date) as return_date_only, sr.customer, p.name as product_name,
-        p.barcode as product_barcode,
-        SUM(sr.quantity) as total_quantity, COUNT(sr.id) as return_count,
-        {_string_agg('sr.return_no', ', ')} as return_nos,
-        {_string_agg('sr.reason', '; ')} as reasons,
-        {_string_agg('sr.note', '; ')} as notes,
-        COUNT(*) OVER() as total_count
+        data_sql_template="""SELECT
+        sr.id AS record_id, sr.return_no AS record_no,
+        to_char(sr.return_date, 'YYYY-MM-DD HH24:MI') AS return_date,
+        sr.customer, p.name AS product_name, p.barcode AS product_barcode,
+        sr.quantity, sr.reason, sr.note,
+        COUNT(*) OVER() AS total_count
         FROM stock_return sr JOIN product p ON sr.product_id = p.id
-        WHERE 1=1 {{where_sql}}
-        GROUP BY DATE(sr.return_date), sr.customer, p.name, p.barcode
-        ORDER BY DATE(sr.return_date) DESC
+        WHERE 1=1 {where_sql}
+        ORDER BY sr.return_date DESC, sr.id DESC
         LIMIT :limit OFFSET :offset""",  # nosec B608
         qty_sql_template="SELECT COALESCE(SUM(sr.quantity), 0) FROM stock_return sr JOIN product p ON sr.product_id = p.id WHERE 1=1 {where_sql}",
         row_mapper=lambda row: {
-            'return_date': row.return_date_only.strftime('%Y-%m-%d') if row.return_date_only else '-',
-            'customer': row.customer or '', 'product_name': row.product_name,
-            'product_barcode': row.product_barcode or '',
-            'quantity': row.total_quantity, 'return_count': row.return_count,
-            'return_nos': row.return_nos or '',
-            'note': '；'.join(x for x in (row.reasons or '', row.notes or '') if x),
+            'record_id': row.record_id, 'record_no': row.return_no or '',
+            'return_date': row.return_date or '-', 'customer': row.customer or '',
+            'product_name': row.product_name or '', 'product_barcode': row.product_barcode or '',
+            'quantity': row.quantity or 0,
+            'note': '；'.join(x for x in (row.reason or '', row.note or '') if x),
         },
     )
 
@@ -396,25 +392,22 @@ async def get_stockin_logs(db: AsyncSession, customer: str = '', product: str = 
         params=params,
         page=page,
         per_page=per_page,
-        data_sql_template=f"""SELECT
-        DATE(s.stockin_date) as stockin_date_only, s.customer, p.name as product_name,
-        p.barcode as product_barcode,
-        SUM(s.quantity) as total_quantity, COUNT(s.id) as stockin_count,
-        {_string_agg('s.stockin_no', ', ')} as stockin_nos,
-        {_string_agg('s.note', '; ')} as notes,
-        COUNT(*) OVER() as total_count
+        data_sql_template="""SELECT
+        s.id AS record_id, s.stockin_no AS record_no,
+        to_char(s.stockin_date, 'YYYY-MM-DD HH24:MI') AS stockin_date,
+        s.customer, p.name AS product_name, p.barcode AS product_barcode,
+        s.quantity, s.note,
+        COUNT(*) OVER() AS total_count
         FROM stock_in s JOIN product p ON s.product_id = p.id
-        WHERE 1=1 {{where_sql}}
-        GROUP BY DATE(s.stockin_date), s.customer, p.name, p.barcode
-        ORDER BY DATE(s.stockin_date) DESC
+        WHERE 1=1 {where_sql}
+        ORDER BY s.stockin_date DESC, s.id DESC
         LIMIT :limit OFFSET :offset""",  # nosec B608
         qty_sql_template="SELECT COALESCE(SUM(s.quantity), 0) FROM stock_in s JOIN product p ON s.product_id = p.id WHERE 1=1 {where_sql}",
         row_mapper=lambda row: {
-            'stockin_date': row.stockin_date_only.strftime('%Y-%m-%d') if row.stockin_date_only else '-',
-            'customer': row.customer, 'product_name': row.product_name,
-            'product_barcode': row.product_barcode or '',
-            'quantity': row.total_quantity, 'stockin_count': row.stockin_count,
-            'stockin_nos': row.stockin_nos or '', 'note': row.notes or '',
+            'record_id': row.record_id, 'record_no': row.record_no or '',
+            'stockin_date': row.stockin_date or '-', 'customer': row.customer or '',
+            'product_name': row.product_name or '', 'product_barcode': row.product_barcode or '',
+            'quantity': row.quantity or 0, 'note': row.note or '',
         },
     )
 
@@ -463,29 +456,26 @@ async def get_stockout_logs(db: AsyncSession, customer: str = '', product: str =
         params=params,
         page=page,
         per_page=per_page,
-        data_sql_template=f"""SELECT
-        DATE(so.stockout_date) as stockout_date_only, so.customer, p.name as product_name,
-        p.barcode as product_barcode,
-        SUM(so.quantity) as total_quantity, COUNT(so.id) as stockout_count,
-        {_string_agg('so.stockout_no', ', ')} as stockout_nos,
-        {_string_agg('so.note', '; ')} as notes,
-        COUNT(*) OVER() as total_count
+        data_sql_template="""SELECT
+        so.id AS record_id, so.stockout_no AS record_no,
+        to_char(so.stockout_date, 'YYYY-MM-DD HH24:MI') AS stockout_date,
+        so.customer, p.name AS product_name, p.barcode AS product_barcode,
+        so.quantity, so.note,
+        COUNT(*) OVER() AS total_count
         FROM stock_out so JOIN product p ON so.product_id = p.id
         LEFT JOIN "order" o2 ON so.order_id = o2.id
-        WHERE 1=1 {{where_sql}}
-        GROUP BY DATE(so.stockout_date), so.customer, p.name, p.barcode
-        ORDER BY DATE(so.stockout_date) DESC
+        WHERE 1=1 {where_sql}
+        ORDER BY so.stockout_date DESC, so.id DESC
         LIMIT :limit OFFSET :offset""",  # nosec B608
         qty_sql_template="""SELECT COALESCE(SUM(so.quantity), 0)
         FROM stock_out so JOIN product p ON so.product_id = p.id
         LEFT JOIN "order" o2 ON so.order_id = o2.id
         WHERE 1=1 {where_sql}""",
         row_mapper=lambda row: {
-            'stockout_date': row.stockout_date_only.strftime('%Y-%m-%d') if row.stockout_date_only else '-',
-            'customer': row.customer or '', 'product_name': row.product_name,
-            'product_barcode': row.product_barcode or '',
-            'quantity': row.total_quantity, 'stockout_count': row.stockout_count,
-            'stockout_nos': row.stockout_nos or '', 'note': row.notes or '',
+            'record_id': row.record_id, 'record_no': row.record_no or '',
+            'stockout_date': row.stockout_date or '-', 'customer': row.customer or '',
+            'product_name': row.product_name or '', 'product_barcode': row.product_barcode or '',
+            'quantity': row.quantity or 0, 'note': row.note or '',
         },
     )
 
@@ -533,27 +523,27 @@ async def get_deduction_logs(db: AsyncSession, customer: str = '', product: str 
         page=page,
         per_page=per_page,
         data_sql_template=f"""SELECT
-        DATE(so.stockout_date) as deduction_date_only, so.customer, p.name as product_name,
-        p.barcode as sku,
-        SUM(so.quantity - so.returned_quantity) as total_quantity, COUNT(so.id) as deduction_count,
-        {_string_agg('o.order_no', ', ')} as order_nos,
-        {_string_agg('o.note', '; ')} as order_notes,
-        COUNT(*) OVER() as total_count
+        so.id AS record_id, so.stockout_no AS record_no,
+        to_char(so.stockout_date, 'YYYY-MM-DD HH24:MI') AS deduction_time,
+        so.customer, p.name AS product_name, p.barcode AS product_barcode,
+        (so.quantity - so.returned_quantity) AS quantity,
+        o.order_no AS order_no, o.note AS order_note,
+        COUNT(*) OVER() AS total_count
         FROM stock_out so JOIN product p ON so.product_id = p.id
         LEFT JOIN {order_tbl} o ON so.order_id = o.id
         WHERE 1=1 {{where_sql}}
-        GROUP BY DATE(so.stockout_date), so.customer, p.name, p.barcode
-        ORDER BY DATE(so.stockout_date) DESC
+        ORDER BY so.stockout_date DESC, so.id DESC
         LIMIT :limit OFFSET :offset""",  # nosec B608
         qty_sql_template=f"""SELECT COALESCE(SUM(so.quantity - so.returned_quantity), 0)
         FROM stock_out so JOIN product p ON so.product_id = p.id
         LEFT JOIN {order_tbl} o ON so.order_id = o.id
         WHERE 1=1 {{where_sql}}""",  # nosec B608
         row_mapper=lambda row: {
-            'deduction_time': row.deduction_date_only.strftime('%Y-%m-%d') if row.deduction_date_only else '-',
-            'customer': row.customer or '', 'product_name': row.product_name,
-            'sku': row.sku or '',
-            'quantity': row.total_quantity, 'deduction_count': row.deduction_count,
-            'order_nos': row.order_nos or '', 'order_note': row.order_notes or '',
+            'record_id': row.record_id, 'record_no': row.record_no or '',
+            'deduction_time': row.deduction_time or '-', 'customer': row.customer or '',
+            'product_name': row.product_name or '', 'product_barcode': row.product_barcode or '',
+            'quantity': row.quantity or 0,
+            'order_no': row.order_no or '', 'order_note': row.order_note or '',
+            'note': row.order_note or '',
         },
     )
