@@ -8,9 +8,8 @@ class ReportLogItem(BaseModel):
     record_no: str = ''
     # 退货原因（与 note 分开；行内编辑按原值回写用）
     reason: str = ''
-    # 抵扣行编辑所需：毛量 / 出货日期 / 出货备注 / 合并展示备注
+    # 抵扣行编辑所需：毛量 / 合并展示备注（出货日期复用下面的 stockout_date）
     gross_quantity: int = 0
-    stockout_date: str = ''
     note_display: str = ''
     # 订单流水母行-明细（2026-10-13）：订单级字段 + SKU 级字段
     order_id: int = 0
