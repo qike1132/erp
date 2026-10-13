@@ -11,6 +11,7 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi_app.core.cache_invalidation import cache_mgr, schedule_post_commit_invalidation
 from fastapi_app.core.exceptions import NotFoundError
 from fastapi_app.core.state_machine import StagingAction, StagingStatus, staging_machine
 from fastapi_app.core.validators import validate_quantity_range
@@ -218,6 +219,15 @@ async def confirm_staging_orders(
     except (SQLAlchemyError, RuntimeError, OSError, ValueError) as e:
         logger.error(f'确认暂存订单时发生错误: {e!s}', exc_info=True)
         raise
+
+    if confirmed > 0:
+        # 本路径写的是**真实** order + inventory_log + product.current_stock（抵扣分支
+        # 还会经 process_order_deduction 写 stock_out）—— 全是 /stock 缓存
+        # （inventory:paginated，ttl=120s）的输入表。不失效则确认后页面最长 120s
+        # 仍显示旧数（2026-10-13 评审发现的漏点；同族写路径 order/commands.py 等
+        # 都有这两行）。
+        await cache_mgr.invalidate_stock_and_order()
+        schedule_post_commit_invalidation(db, cache_mgr.invalidate_stock_and_order)
 
     return confirmed, errors
 

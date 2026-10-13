@@ -11,6 +11,7 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi_app.core.cache_invalidation import cache_mgr, schedule_post_commit_invalidation
 from fastapi_app.core.exceptions import NotFoundError
 from fastapi_app.core.state_machine import StagingAction, StagingStatus, staging_machine
 from fastapi_app.services.batch_import_core import _import_idem_key, _row_failure_message
@@ -280,6 +281,14 @@ async def confirm_staging_stockouts(
                 await publish_event(StockEvent.SHIPMENT_COMPLETED, co)
             except Exception as e:  # defensive: 单个事件发布失败不影响确认结果
                 logger.warning("出货完成事件发布失败: %s", e)
+
+    if confirmed > 0:
+        # 本路径写的是**真实** stock_out + inventory_log + product.current_stock ——
+        # 全是 /stock 缓存（inventory:paginated，ttl=120s）的输入表。不失效则确认后
+        # 页面最长 120s 仍显示旧数（2026-10-13 评审发现的漏点；同族写路径
+        # stock_out_service.py 等处都有这两行）。
+        await cache_mgr.invalidate_stock_and_order()
+        schedule_post_commit_invalidation(db, cache_mgr.invalidate_stock_and_order)
 
     return confirmed, errors
 

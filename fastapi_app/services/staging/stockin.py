@@ -10,6 +10,7 @@ from sqlalchemy import CursorResult, delete, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi_app.core.cache_invalidation import cache_mgr, schedule_post_commit_invalidation
 from fastapi_app.core.exceptions import NotFoundError
 from fastapi_app.core.state_machine import StagingAction, StagingStatus, staging_machine
 from fastapi_app.services.batch_import_core import _import_idem_key, _row_failure_message
@@ -179,6 +180,12 @@ async def confirm_staging_stockins(
         # 采购订单自动生成：提交后投递扫描任务（替代采购中心人工「一键审核」）
         from fastapi_app.services.purchase._auto_generate import schedule_auto_generate_purchase_orders
         schedule_auto_generate_purchase_orders(db)
+        # 本路径写的是**真实** stock_in + inventory_log + product.current_stock ——
+        # 全是 /stock 缓存（inventory:paginated，ttl=120s）的输入表。不失效则确认后
+        # 页面最长 120s 仍显示旧数（2026-10-13 评审发现的漏点；同族写路径
+        # stock_in_service.py 等处都有这两行）。
+        await cache_mgr.invalidate_stock_and_order()
+        schedule_post_commit_invalidation(db, cache_mgr.invalidate_stock_and_order)
     return confirmed, errors
 
 async def import_staging_stockins_from_excel(
