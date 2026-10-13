@@ -129,15 +129,17 @@ def _build_batch_order_branch(whitelist, batch_no, status, customer, keyword):
     return order_branch
 
 
-def _build_batch_stockin_branch(whitelist, customer, keyword):
+def _build_batch_stockin_branch(whitelist, batch_no, customer, keyword):
     stockin_branch = select(
         StockIn.stockin_date.label('sort_date'),
         literal('stockin').label('record_type'),
         StockIn.id.label('record_id'),
-    )
+    ).where(StockIn.is_deleted.isnot(True))
 
     if whitelist:
         stockin_branch = stockin_branch.where(StockIn.customer.in_(whitelist))
+    if batch_no:
+        stockin_branch = stockin_branch.where(StockIn.batch_no == batch_no)
     if customer:
         stockin_branch = stockin_branch.where(StockIn.customer == customer)
     if keyword:
@@ -210,10 +212,10 @@ async def _serialize_batch_stockins(db: AsyncSession, page_stockin_ids: list[int
                 'quantity': s.quantity,
                 'deducted_qty': 0,
                 'shipped_qty': 0,
-                'status': None,
+                'status': '批次已完成' if s.batch_completed_at else None,
                 'computed_status': None,
-                'batch_no': None,
-                'batch_completed_at': None,
+                'batch_no': s.batch_no,
+                'batch_completed_at': s.batch_completed_at.strftime('%Y-%m-%d %H:%M') if s.batch_completed_at else None,
                 'is_locked': None,
                 'record_type': 'stockin',
             }
@@ -241,8 +243,8 @@ async def get_batch_query_list(
     # 支 1：订单（过滤条件与原实现逐条一致）
     order_branch = _build_batch_order_branch(whitelist, batch_no, status, customer, keyword)
 
-    # 支 2：备货（无 is_deleted/batch_no/status 过滤，与原实现一致）
-    stockin_branch = _build_batch_stockin_branch(whitelist, customer, keyword)
+    # 支 2：备货（按 batch_no 过滤；过滤 is_deleted，与订单分支及 complete_batch 口径一致）
+    stockin_branch = _build_batch_stockin_branch(whitelist, batch_no, customer, keyword)
 
     # total = 两支各自 COUNT 之和（复用同一分支查询，过滤条件绝对一致，不受分页影响）
     order_total = int((await db.execute(
@@ -424,6 +426,35 @@ async def update_batch_no(
     return {'updated_count': len(updated_ids)}
 
 
+async def update_stockin_batch_no(
+    db: AsyncSession,
+    *,
+    stockin_id: int,
+    batch_no: str | None,
+    user: User,
+) -> dict:
+    """更新单条备货记录的批次号（订单路径见 update_batch_no）。
+
+    备货无 sync_same_batch 语义；行级锁与审计/事件对齐订单路径。
+    """
+    result = await db.execute(select(StockIn).where(StockIn.id == stockin_id).with_for_update())
+    stockin = result.scalar_one_or_none()
+    if not stockin:
+        raise ValueError(f"备货记录不存在: {stockin_id}")
+
+    old_batch_no = stockin.batch_no
+    stockin.batch_no = batch_no
+    _write_audit_log(
+        db, batch_no=batch_no or old_batch_no or '', action='batch_number_change',
+        order_ids=[stockin_id], user=user, old_value=old_batch_no, new_value=batch_no,
+        detail='record_type=stockin',
+    )
+    await db.flush()
+
+    await _safe_publish_event("batch_no_updated", {"batch_no": batch_no or '', "stockin_ids": [stockin_id]})
+    return {'updated_count': 1}
+
+
 async def batch_assign(
     db: AsyncSession,
     *,
@@ -471,8 +502,17 @@ async def complete_batch(
     result = await db.execute(stmt)
     orders = result.scalars().all()
 
-    if not orders:
-        raise ValueError(f"批次 {batch_no} 没有可完成的订单")
+    stockin_result = await db.execute(
+        select(StockIn).where(
+            StockIn.batch_no == batch_no,
+            StockIn.batch_completed_at.is_(None),
+            StockIn.is_deleted.isnot(True),
+        ).with_for_update()
+    )
+    stockins = stockin_result.scalars().all()
+
+    if not orders and not stockins:
+        raise ValueError(f"批次 {batch_no} 没有可完成的记录")
 
     now = datetime.now(UTC).replace(tzinfo=None)
     completed = []
@@ -490,20 +530,27 @@ async def complete_batch(
         o.status = await compute_order_status_from_db(db, o)
         completed.append(o)
 
+    # 备货无出货状态：批次完成时无条件标记（查询已限定未完成）
+    for s in stockins:
+        s.batch_completed_at = now
+        s.batch_completed_by_id = user.id
+
     _write_audit_log(
         db, batch_no=batch_no, action='batch_complete',
         order_ids=[o.id for o in completed], user=user,
-        detail=f"完成{len(completed)}单, 失败{len(failed_orders)}单",
+        detail=f"完成{len(completed)}单+{len(stockins)}备货, 失败{len(failed_orders)}单",
     )
     await db.flush()
 
     await _safe_publish_event("batch_completed", {
         "batch_no": batch_no,
         "completed_count": len(completed),
+        "completed_stockins": len(stockins),
         "failed_count": len(failed_orders),
     })
 
     return {
         'completed_count': len(completed),
+        'completed_stockins': len(stockins),
         'failed_orders': failed_orders,
     }

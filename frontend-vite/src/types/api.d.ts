@@ -403,6 +403,7 @@ export interface BatchCompleteResponse {
   success?: boolean
   message?: string
   completed_count?: number
+  completed_stockins?: number
   failed_orders?: Array<Record<string, unknown>>
 }
 
@@ -416,6 +417,7 @@ export interface BatchImportResult {
 export interface BatchNoUpdate {
   batch_no?: string | null
   sync_same_batch?: boolean
+  record_type?: string
 }
 
 export interface BatchNoUpdateResponse {

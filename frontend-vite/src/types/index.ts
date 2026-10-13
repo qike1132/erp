@@ -660,6 +660,7 @@ export interface BatchQueryItem {
 export interface BatchNoUpdatePayload {
   batch_no: string | null
   sync_same_batch?: boolean
+  record_type?: 'order' | 'stockin'
 }
 
 export interface BatchAssignPayload {

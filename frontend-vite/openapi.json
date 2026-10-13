@@ -6787,22 +6787,22 @@
         }
       }
     },
-    "/api/v1/order-batch/orders/{order_id}/batch-no": {
+    "/api/v1/order-batch/orders/{record_id}/batch-no": {
       "put": {
         "tags": [
           "订单批次号"
         ],
         "summary": "Update Order Batch No",
-        "description": "更新单个订单的批次号，可选同步同批次其他订单。\n\nArgs:\n    order_id: 订单 ID。\n    data: 批次号更新请求体（含 batch_no 与 sync_same_batch 标志）。\n    db: 读写数据库会话。\n    user: 当前操作用户。\n\nReturns:\n    BatchNoUpdateResponse: 更新结果（含受影响行数）。\n\nRaises:\n    HTTPException: 订单不存在或批次号非法时由 db_transaction 转换抛出。",
-        "operationId": "update_order_batch_no_api_v1_order_batch_orders__order_id__batch_no_put",
+        "description": "更新单条记录（订单或备货）的批次号，可选同步同批次其他订单。\n\nArgs:\n    record_id: 记录 ID（订单或备货，按 data.record_type 决定落到哪张表）。\n    data: 批次号更新请求体（含 batch_no / sync_same_batch / record_type）。\n    db: 读写数据库会话。\n    user: 当前操作用户。\n\nReturns:\n    BatchNoUpdateResponse: 更新结果（含受影响行数）。\n\nRaises:\n    HTTPException: 记录不存在或批次号非法时由 db_transaction 转换抛出。",
+        "operationId": "update_order_batch_no_api_v1_order_batch_orders__record_id__batch_no_put",
         "parameters": [
           {
-            "name": "order_id",
+            "name": "record_id",
             "in": "path",
             "required": true,
             "schema": {
               "type": "integer",
-              "title": "Order Id"
+              "title": "Record Id"
             }
           }
         ],
@@ -6888,7 +6888,7 @@
           "订单批次号"
         ],
         "summary": "Complete Batch",
-        "description": "完成指定批次，将批次内所有订单归档。\n\nArgs:\n    data: 批次完成请求体（含 batch_no）。\n    db: 读写数据库会话。\n    user: 当前操作用户。\n\nReturns:\n    BatchCompleteResponse: 归档结果（含成功数与失败订单列表）。",
+        "description": "完成指定批次，将批次内「已出货」订单与该批次备货归档。\n\nArgs:\n    data: 批次完成请求体（含 batch_no）。\n    db: 读写数据库会话。\n    user: 当前操作用户。\n\nReturns:\n    BatchCompleteResponse: 归档结果（含订单/备货成功数与失败订单列表）。",
         "operationId": "complete_batch_api_v1_order_batch_batch_complete_post",
         "requestBody": {
           "content": {
@@ -22223,6 +22223,11 @@
             "title": "Completed Count",
             "default": 0
           },
+          "completed_stockins": {
+            "type": "integer",
+            "title": "Completed Stockins",
+            "default": 0
+          },
           "failed_orders": {
             "items": {
               "additionalProperties": true,
@@ -22289,6 +22294,13 @@
             "title": "Sync Same Batch",
             "description": "是否同步更新同批次其他订单",
             "default": false
+          },
+          "record_type": {
+            "type": "string",
+            "pattern": "^(order|stockin)$",
+            "title": "Record Type",
+            "description": "记录类型：order/stockin",
+            "default": "order"
           }
         },
         "type": "object",
