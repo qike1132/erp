@@ -88,6 +88,11 @@ export const orderApi = {
   create: (data: Partial<OrderItem>) => post<OrderItem>('/orders/create', data),
   update: (id: number, data: Partial<OrderItem>) => put<OrderItem>(`/orders/edit/${id}`, data),
   delete: (id: number) => del(`/orders/delete/${id}`),
+  /** 编辑单个订单明细（SKU）：数量/备注（报表流水行内编辑，2026-10-13） */
+  updateItem: (id: number, data: { quantity?: number; note?: string }) =>
+    put<OrderItem>(`/orders/items/${id}`, data),
+  /** 删除单个订单明细（SKU）；删到空等价删整单（走整单删除的审批/备份） */
+  deleteItem: (id: number) => del(`/orders/items/${id}`),
   lock: (id: number) => post(`/orders/lock/${id}`),
   unlock: (id: number) => post(`/orders/unlock/${id}`),
   deductStock: (id: number) => post(`/orders/deduct-stock/${id}`),
