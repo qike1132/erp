@@ -9,7 +9,9 @@
         style="width: 150px; flex-shrink: 0"
         :options="customerFilterOptions"
       />
-      <UiSearchInput :model-value="searchTerm" placeholder="搜索产品名称或69码..." @search="onSearchInput" @update:model-value="searchTerm = $event" />
+      <!-- 必须走 setSearchTerm，不能写 `searchTerm = $event`：search 是 useEnhancedList
+           暴露的 readonly ref，直接赋值被 Vue 静默忽略（仅 dev 警告），关键词永远进不了查询。 -->
+      <UiSearchInput :model-value="searchTerm" placeholder="搜索产品名称或69码..." @search="onSearchInput" @update:model-value="setSearchTerm" />
     </div>
   </div>
   <div class="pd-col-scroll">
