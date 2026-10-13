@@ -140,7 +140,9 @@ class TestListProductsCache:
         body = hit.json()
         assert body['success'] is True
         assert body['total'] == 2
-        assert body['items'] == items
+        # image_thumb 是出站派生字段（2026-10-13）。本夹具 image=None → 派生结果也是 None，
+        # 但它会作为 null 出现在每个 item 里；与真实响应一致才算「命中/未命中结构相同」。
+        assert body['items'] == [{**it, 'image_thumb': None} for it in items]
 
     async def test_page2_does_not_write_cache(self, client, monkeypatch, fake_cache):
         """page>1：不读也不写缓存"""

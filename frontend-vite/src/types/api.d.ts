@@ -1939,6 +1939,7 @@ export interface ProductResponse {
   barcode?: string | null
   price?: number | null
   image?: string | null
+  image_thumb?: string | null
   factory?: string | null
   initial_stock: number
   current_stock: number

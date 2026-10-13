@@ -366,6 +366,8 @@ export interface Product {
   status?: boolean
   price?: number
   image?: string
+  /** 列表缩略图（后端出站派生；缺失时前端回退 image） */
+  image_thumb?: string
   /** 规格型号 */
   specification?: string
   /** 所属工厂：东莞/湖北 */
