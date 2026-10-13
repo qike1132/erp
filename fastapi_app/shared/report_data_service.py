@@ -15,6 +15,7 @@ from typing import Any
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
+from fastapi_app.services.business_time import fmt_business
 from fastapi_app.shared_models import Order, OrderItem, Product, StockIn, StockOut, StockReturn
 from fastapi_app.shared_models.order import (
     ORDER_STATUS_PENDING_STOCK,
@@ -174,7 +175,7 @@ def _order_log_row(order, item, prod) -> dict[str, Any]:
         'product_barcode': barcode,
         'quantity': qty,
         'status': order.status,
-        'order_date': order.order_date.strftime('%Y-%m-%d %H:%M'),
+        'order_date': fmt_business(order.order_date),
     }
 
 

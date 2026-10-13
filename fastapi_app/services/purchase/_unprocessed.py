@@ -12,6 +12,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from fastapi_app.services.business_time import fmt_business
 from fastapi_app.shared_models import (
     ProductAccessory,
     ProductFabric,
@@ -75,8 +76,8 @@ def _build_unprocessed_order_record(order) -> dict:
         'product_id': first_item.product_id if first_item else None,
         'product_name': first_item.product_name if first_item else None,
         'quantity': first_item.quantity if first_item else 0,
-        'order_date': order.order_date.strftime('%Y-%m-%d') if order.order_date else '',
-        'create_time': order.order_date.strftime('%Y-%m-%d %H:%M') if order.order_date else '',
+        'order_date': fmt_business(order.order_date, '%Y-%m-%d'),
+        'create_time': fmt_business(order.order_date),
         'record_type': 'order',
         'items': items_data,
         'sku_count': len(items_data),

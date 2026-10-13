@@ -143,7 +143,7 @@ class TestBuildUnprocessedOrderRecordMultiSku:
         assert record['quantity'] == 0
 
     def test_order_date_formatting(self):
-        """订单日期格式化为 YYYY-MM-DD 和 YYYY-MM-DD HH:MM。"""
+        """订单日期按**北京时间**格式化为 YYYY-MM-DD 和 YYYY-MM-DD HH:MM。"""
         order = _make_order(
             order_id=1,
             order_no='DD20260720001',
@@ -155,7 +155,8 @@ class TestBuildUnprocessedOrderRecordMultiSku:
         record = _build_unprocessed_order_record(order)
 
         assert record['order_date'] == '2026-07-20'
-        assert record['create_time'] == '2026-07-20 14:30'
+        # 存库为 aware UTC，展示按北京时间（14:30 UTC → 22:30 北京），不再按 UTC 渲染
+        assert record['create_time'] == '2026-07-20 22:30'
 
     def test_order_with_none_date(self):
         """订单日期为 None 时不抛异常，返回空字符串。"""

@@ -107,3 +107,12 @@ def test_fmt_beile_time_and_fmt_dt_agree():
         None,
     ):
         assert _fmt_dt(dt) == (_fmt_beile_time(dt) or None)
+
+
+def test_fmt_business_renders_beijing():
+    """展示口径：aware-UTC 的 DB 时间 → 北京时间字符串（与报表屏幕 to_char 同源）。"""
+    from fastapi_app.services.business_time import fmt_business
+
+    assert fmt_business(datetime(2026, 10, 13, 0, 30, tzinfo=UTC)) == '2026-10-13 08:30'
+    assert fmt_business(datetime(2026, 10, 12, 16, 0, tzinfo=UTC), '%Y-%m-%d') == '2026-10-13'
+    assert fmt_business(None) == ''
