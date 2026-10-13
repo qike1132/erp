@@ -3,6 +3,15 @@ from pydantic import BaseModel
 
 
 class ReportLogItem(BaseModel):
+    # 记录级标识（2026-10-13：四 tab 改一行一记录后，逐行单号/ID 才有意义）
+    record_id: int = 0
+    record_no: str = ''
+    # 订单流水母行-明细（2026-10-13）：订单级字段 + SKU 级字段
+    order_id: int = 0
+    item_id: int = 0
+    item_count: int = 0
+    order_total_qty: int = 0
+    item_note: str = ''
     order_date: str = ''
     stockin_date: str = ''
     stockout_date: str = ''
