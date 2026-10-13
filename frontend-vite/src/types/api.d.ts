@@ -1572,6 +1572,11 @@ export interface OrderItemSchema {
   note?: string | null
 }
 
+export interface OrderItemUpdate {
+  quantity?: number | null
+  note?: string | null
+}
+
 export interface OrderListResponse {
   success?: boolean
   data: Array<Record<string, unknown>>
@@ -2356,6 +2361,14 @@ export interface ReportExportRequest {
 }
 
 export interface ReportLogItem {
+  record_id?: number
+  record_no?: string
+  order_id?: number
+  order_no?: string
+  item_id?: number
+  item_count?: number
+  order_total_qty?: number
+  item_note?: string
   order_date?: string
   stockin_date?: string
   stockout_date?: string
