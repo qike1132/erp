@@ -114,13 +114,15 @@ export function useReportConfig(activeTab: Ref<TabType>, canManageRowActions?: R
     const columns: TableColumn[] = []
     if (isOrder) columns.push({ field: 'expand', header: '', align: 'center', width: '4%' })
     columns.push(
-      { field: 'date', header: cfg.dateLabel, align: 'center', width: isOrder ? '13%' : (withActions ? '14%' : '15%') },
+      // 2026-10-13 优化点②：首列「时间」改左对齐、订单 tab 列宽重分配，让左侧内容
+      // 贴住左边框（参照 /stock 的「客户」列）。订单分支合计 4+12+15+11+19+11+9+10+9=100%。
+      { field: 'date', header: cfg.dateLabel, align: 'left', width: isOrder ? '12%' : (withActions ? '14%' : '15%') },
       { field: 'no', header: cfg.noLabel, align: 'left', width: isOrder ? '15%' : (withActions ? '16%' : '17%') },
-      { field: 'customer', header: '客户', align: 'left', width: isOrder ? '10%' : (withActions ? '11%' : '12%') },
-      { field: 'product_name', header: '产品名称', align: 'left', width: isOrder ? '18%' : (withActions ? '20%' : '22%') },
+      { field: 'customer', header: '客户', align: 'left', width: isOrder ? '11%' : (withActions ? '11%' : '12%') },
+      { field: 'product_name', header: '产品名称', align: 'left', width: isOrder ? '19%' : (withActions ? '20%' : '22%') },
       { field: 'product_barcode', header: '条码', align: 'left', width: isOrder ? '11%' : (withActions ? '11%' : '12%') },
       { field: 'quantity', header: cfg.countLabel, align: 'center', width: isOrder ? '9%' : (withActions ? '9%' : '10%'), sortable: true },
-      { field: 'note', header: activeTab.value === 'deduction' ? '订单备注' : '备注', align: 'left', width: isOrder ? '11%' : (withActions ? '10%' : '12%') },
+      { field: 'note', header: activeTab.value === 'deduction' ? '订单备注' : '备注', align: 'left', width: isOrder ? '10%' : (withActions ? '10%' : '12%') },
     )
     if (withActions) columns.push({ field: 'actions', header: '操作', align: 'center', width: '9%' })
     return columns

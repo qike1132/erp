@@ -13,6 +13,7 @@
       :striped="false"
       @sort="emit('sort', $event)"
       @page="emit('page', $event)"
+      @row-click="onRowClick"
     >
       <template #empty>
         <div class="rp-empty">
@@ -28,7 +29,7 @@
           class="rp-caret"
           :class="{ open: isExpanded(Number(row.order_id)) }"
           :aria-label="isExpanded(Number(row.order_id)) ? '收起 SKU' : '展开 SKU'"
-          @click="toggle(Number(row.order_id))"
+          @click.stop="toggle(Number(row.order_id))"
         >▶</button>
         <span v-else-if="row._kind === 'child'" class="rp-tree">└</span>
       </template>
@@ -92,7 +93,7 @@
  * 2026-10-13：订单 tab 改母行-明细——按 order_id 把「一行一 SKU」的扁平结果聚成
  * 母行（订单）+ 子行（SKU）；单 SKU 订单压成一行。母行与子行是**同一张表的真实行**、
  * 共用同一 `<colgroup>`，靠 `rowClass` 区分样式、不做左缩进 → 产品名称/条码/数量/
- * 备注/操作永远与表头对齐。展开/折叠 = 前端增删子行。
+ * 备注/操作永远与表头对齐。展开/折叠 = 前端增删子行（点母行整行或首列箭头均可，2026-10-13）。
  * 其余四个 tab 直接平铺（一行 = 一条记录）。
  */
 import { computed, ref, watch } from 'vue'
@@ -135,6 +136,11 @@ function toggle(orderId: number) {
   if (next.has(orderId)) next.delete(orderId)
   else next.add(orderId)
   expanded.value = next
+}
+// 2026-10-13 优化点①：点母行整行 = 展开/收起（子行/单行不响应）。
+// 箭头按钮自身带 @click.stop，点它不会冒泡到这里，避免一次点击触发两回。
+function onRowClick(row: Record<string, unknown>) {
+  if (row._kind === 'parent') toggle(Number(row.order_id))
 }
 // 切 tab 时收起（避免上一屏的展开态串场）
 watch(() => props.activeTab, () => { expanded.value = new Set() })
@@ -198,7 +204,7 @@ const rows = computed<Record<string, unknown>[]>(() => {
 
 function rowClassOf(row: Record<string, unknown>): string {
   const k = row._kind
-  if (k === 'parent') return 'order-row'
+  if (k === 'parent') return 'order-row parent-row'
   if (k === 'child') return 'child-row'
   if (k === 'single') return 'order-row single-row'
   return ''
@@ -252,6 +258,9 @@ function fmtQty(v: unknown): string {
 .rp-caret:hover { background: var(--color-primary-50, #eff5ff); color: var(--color-primary-600); }
 .rp-caret.open { transform: rotate(90deg); color: var(--color-primary-600); }
 .rp-tree { color: #9db8e0; font-size: 13px; }
+
+/* 母行整行可点 = 展开/收起（2026-10-13 优化点①），给手型提示可点性 */
+.rp-table-wrap :deep(tr.parent-row) { cursor: pointer; }
 
 /* 子行：靠底色 + 左侧竖线表示层级，不做任何左缩进（否则破坏列对齐） */
 .rp-table-wrap :deep(tr.child-row) { background: #f8fbff; }

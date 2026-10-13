@@ -297,13 +297,13 @@ describe('ReportView —— 表格与数字格式', () => {
     const styles = headers.map((th) => th.attributes('style') ?? '')
 
     expect(styles[0]).toContain('4%')   // 展开
-    expect(styles[1]).toContain('13%')  // 下单时间
+    expect(styles[1]).toContain('12%')  // 下单时间
     expect(styles[2]).toContain('15%')  // 订单号
-    expect(styles[3]).toContain('10%')  // 客户
-    expect(styles[4]).toContain('18%')  // 产品名称
+    expect(styles[3]).toContain('11%')  // 客户
+    expect(styles[4]).toContain('19%')  // 产品名称
     expect(styles[5]).toContain('11%')  // 条码
     expect(styles[6]).toContain('9%')   // 数量
-    expect(styles[7]).toContain('11%')  // 备注
+    expect(styles[7]).toContain('10%')  // 备注
     expect(styles[8]).toContain('9%')   // 操作
   })
 
@@ -358,6 +358,39 @@ describe('ReportTable —— 订单流水母行-明细', () => {
     expect(children).toHaveLength(2)
     expect(children[0]!.text()).toContain('鲨鱼毛绒公仔-60cm')
     expect(children[1]!.text()).toContain('企鹅玩偶-40cm')
+  })
+
+  it('点母行整行即展开/收起（优化点①：不用点箭头）', async () => {
+    const w = mountTable(MULTI, true)
+    const parentRow = () =>
+      w.findAll('tbody tr').find((r) => r.classes().includes('parent-row'))!
+
+    expect(w.findAll('tbody tr')).toHaveLength(2)  // 默认折叠：母行 + 单 SKU 行
+
+    await parentRow().trigger('click')
+    expect(w.findAll('tbody tr')).toHaveLength(4)  // 展开出 2 条子行
+
+    await parentRow().trigger('click')
+    expect(w.findAll('tbody tr')).toHaveLength(2)  // 再点一次收起
+  })
+
+  it('点子行/单行不误触展开（只有母行响应整行点击）', async () => {
+    const w = mountTable(MULTI, true)
+    await w.findAll('tbody tr').find((r) => r.classes().includes('parent-row'))!.trigger('click')
+    expect(w.findAll('tbody tr')).toHaveLength(4)
+
+    const child = w.findAll('tbody tr').find((r) => r.classes().includes('child-row'))!
+    await child.trigger('click')
+    expect(w.findAll('tbody tr')).toHaveLength(4)  // 子行点击不改变展开态
+  })
+
+  it('首列「时间」左对齐（优化点②：内容贴住左边框，参照 /stock 客户列）', async () => {
+    const { useReportConfig } = await import('@/views/report/composables/useReportConfig')
+    const { ref } = await import('vue')
+    for (const tab of ['order', 'stockin', 'stockout', 'deduction', 'return'] as const) {
+      const cols = useReportConfig(ref(tab), ref(true)).reportColumns.value
+      expect(cols.find((c) => c.field === 'date')!.align).toBe('left')
+    }
   })
 
   it('母行不挂操作按钮，子行/单 SKU 行挂', async () => {

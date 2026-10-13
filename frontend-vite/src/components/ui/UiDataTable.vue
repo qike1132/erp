@@ -26,7 +26,7 @@
  *   update:selection  - 选中行变化
  *   page              - 分页变化: { page, rows }
  *   sort              - 排序变化: { field, order }
- *   rowClick          - 行点击: (row: T) => void
+ *   rowClick          - 行点击: (row: T) => void（emit 早已声明但一直没接线，2026-10-13 接上）
  *
  * Slots:
  *   column-body-{field}  - 自定义列模板（field 为 columns[].field）
@@ -34,17 +34,8 @@
  *   loading              - 自定义加载态
  *
  * 示例：
- *   <UiDataTable
- *     :data="products"
- *     :columns="columns"
- *     :loading="isLoading"
- *     paginator
- *     :rows="20"
- *     @rowClick="openDetail"
- *   >
- *     <template #column-body-status="{ row }">
- *       <UiStatusBadge :status="row.status" />
- *     </template>
+ *   <UiDataTable :data="products" :columns="columns" :loading="isLoading" paginator :rows="20" @rowClick="openDetail">
+ *     <template #column-body-status="{ row }"><UiStatusBadge :status="row.status" /></template>
  *   </UiDataTable>
  */
 // 按组件深导入（PrimeVue 官方推荐写法）：显式声明依赖，无需解析 barrel 入口。
@@ -341,6 +332,7 @@ watch(
         }"
         @update:selection="onRowSelect"
         @sort="onSort"
+        @row-click="emit('rowClick', $event.data)"
       >
         <!-- 动态列 -->
         <Column
