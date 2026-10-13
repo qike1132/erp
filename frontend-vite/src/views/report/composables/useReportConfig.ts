@@ -11,6 +11,10 @@ export interface TabConfig {
   dateLabel: string
   countLabel: string
   noteKey: string
+  /** 「单号」列的表头（订单号 / 备货单号 / 出货单号 / 退货单号） */
+  noLabel: string
+  /** 「单号」列的取值键（订单 tab 用 order_no；其余 tab 用 record_no） */
+  noKey: string
 }
 
 export const TAB_CONFIG: Record<TabType, TabConfig> = {
@@ -22,6 +26,8 @@ export const TAB_CONFIG: Record<TabType, TabConfig> = {
     dateLabel: '下单时间',
     countLabel: '数量',
     noteKey: 'note',
+    noLabel: '订单号',
+    noKey: 'order_no',
   },
   stockin: {
     label: '备货流水',
@@ -31,6 +37,8 @@ export const TAB_CONFIG: Record<TabType, TabConfig> = {
     dateLabel: '备货时间',
     countLabel: '备货数量',
     noteKey: 'note',
+    noLabel: '备货单号',
+    noKey: 'record_no',
   },
   stockout: {
     label: '出货流水',
@@ -40,6 +48,8 @@ export const TAB_CONFIG: Record<TabType, TabConfig> = {
     dateLabel: '出货时间',
     countLabel: '出货数量',
     noteKey: 'note',
+    noLabel: '出货单号',
+    noKey: 'record_no',
   },
   deduction: {
     label: '备货抵扣流水',
@@ -49,6 +59,9 @@ export const TAB_CONFIG: Record<TabType, TabConfig> = {
     dateLabel: '抵扣时间',
     countLabel: '抵扣数量',
     noteKey: 'order_note',
+    // 抵扣行的「单号」= 被抵扣的订单号（用户诉求：看清是哪张订单）
+    noLabel: '订单号',
+    noKey: 'order_no',
   },
   return: {
     label: '退货流水',
@@ -58,6 +71,8 @@ export const TAB_CONFIG: Record<TabType, TabConfig> = {
     dateLabel: '退货时间',
     countLabel: '退货数量',
     noteKey: 'note',
+    noLabel: '退货单号',
+    noKey: 'record_no',
   },
 }
 
@@ -87,21 +102,25 @@ export function useReportConfig(activeTab: Ref<TabType>, canManageRowActions?: R
   }
 
   const reportColumns = computed<TableColumn[]>(() => {
-    // 列宽按比例分配（配合表格的 table-layout: fixed 才是硬约束）；
-    // 不约束时产品名与备注会把余量吃光，日期/数量被挤成窄条。
-    // 五个维度都带行尾「操作」列（行内编辑/删除，2026-10-06 订单/备货起，
-    // 2026-10-07 扩展到出货/抵扣/退货）：note 26%→17%，末尾追加 9% 操作列
-    // （fixed 布局下不显式给宽会塌），合计仍 100%。
-    // 权限门控：无对应行内权限的用户整列不渲染（连表头一起），不留空壳
-    // 「操作」列；缺省 fail-closed。各 tab 的具体权限码由调用方（ReportView）决定。
+    // 2026-10-13 改版：单号列可见、时间到分、末列由「状态」改「备注」。
+    // 订单 tab 多一个「展开」占位列（母行-明细的箭头/树线），其余四个 tab 平铺无此列。
+    // 列宽按比例分配（配合表格 table-layout: fixed 才是硬约束），各分支合计 100%。
+    // 权限门控：无对应行内权限的用户整列不渲染（连表头一起），不留空壳「操作」列；缺省 fail-closed。
     const withActions = canManageRowActions?.value ?? false
-    const columns: TableColumn[] = [
-      { field: 'date', header: currentCfg.value.dateLabel, align: 'center', width: '16%' },
-      { field: 'customer', header: '客户', align: 'center', width: '14%' },
-      { field: 'product_name', header: '产品名称', align: 'left', width: '28%' },
-      { field: 'quantity', header: currentCfg.value.countLabel, align: 'center', width: '16%', sortable: true },
-      { field: 'note', header: activeTab.value === 'deduction' ? '订单备注' : '备注', align: 'left', width: withActions ? '17%' : '26%' },
-    ]
+    const isOrder = activeTab.value === 'order'
+    const cfg = currentCfg.value
+
+    const columns: TableColumn[] = []
+    if (isOrder) columns.push({ field: 'expand', header: '', align: 'center', width: '4%' })
+    columns.push(
+      { field: 'date', header: cfg.dateLabel, align: 'center', width: isOrder ? '13%' : (withActions ? '14%' : '15%') },
+      { field: 'no', header: cfg.noLabel, align: 'left', width: isOrder ? '15%' : (withActions ? '16%' : '17%') },
+      { field: 'customer', header: '客户', align: 'left', width: isOrder ? '10%' : (withActions ? '11%' : '12%') },
+      { field: 'product_name', header: '产品名称', align: 'left', width: isOrder ? '18%' : (withActions ? '20%' : '22%') },
+      { field: 'product_barcode', header: '条码', align: 'left', width: isOrder ? '11%' : (withActions ? '11%' : '12%') },
+      { field: 'quantity', header: cfg.countLabel, align: 'center', width: isOrder ? '9%' : (withActions ? '9%' : '10%'), sortable: true },
+      { field: 'note', header: activeTab.value === 'deduction' ? '订单备注' : '备注', align: 'left', width: isOrder ? '11%' : (withActions ? '10%' : '12%') },
+    )
     if (withActions) columns.push({ field: 'actions', header: '操作', align: 'center', width: '9%' })
     return columns
   })

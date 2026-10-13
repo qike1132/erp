@@ -116,6 +116,7 @@ const props = withDefaults(
     rowGroupMode?: 'subheader' | 'rowspan'
     /** 参与行分组的列 field（与 rowGroupMode='rowspan' 搭配） */
     groupRowsBy?: string | string[]
+    rowClass?: (row: T) => string  // 透传 PrimeVue rowClass：报表页母行-明细区分样式（2026-10-13）
   }>(),
   {
     loading: false,
@@ -134,6 +135,7 @@ const props = withDefaults(
     rowHeight: 48,
     rowGroupMode: undefined,
     groupRowsBy: undefined,
+    rowClass: undefined,
     selection: undefined,
   },
 )
@@ -328,6 +330,7 @@ watch(
         :data-key="rowKey"
         :row-group-mode="rowGroupMode"
         :group-rows-by="groupRowsBy"
+        :row-class="rowClass"
         :striped-rows="striped"
         :row-hover="true"
         :scrollable="false"

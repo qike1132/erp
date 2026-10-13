@@ -104,10 +104,11 @@ import ReportFilterBar from '@/views/report/components/ReportFilterBar.vue'
 import ReportTable from '@/views/report/components/ReportTable.vue'
 import UiDataTable from '@/components/ui/UiDataTable.vue'
 
+// 每行一张「单 SKU 订单」（distinct order_id → 渲染成 3 个单 SKU 压一行）
 const LOGS = [
-  { id: 1, order_date: '2026-09-29 14:32', customer: 'MINISO国际', product_name: '鲨鱼毛绒公仔-60cm', quantity: 15000, note: '客户临时补单' },
-  { id: 2, order_date: '2026-09-29 11:08', customer: 'TOP TOY', product_name: '鲨鱼毛绒公仔-60cm', quantity: 10000, note: '' },
-  { id: 3, order_date: '2026-09-28 16:45', customer: '网易严选', product_name: '咸鱼按摩捶-海盐蓝', quantity: 5000, note: '' },
+  { id: 1, order_id: 101, item_id: 11, order_no: 'SO-001', order_date: '2026-09-29 14:32', customer: 'MINISO国际', product_name: '鲨鱼毛绒公仔-60cm', product_barcode: '6901', quantity: 15000, order_total_qty: 15000, item_count: 1, note: '客户临时补单' },
+  { id: 2, order_id: 102, item_id: 12, order_no: 'SO-002', order_date: '2026-09-29 11:08', customer: 'TOP TOY', product_name: '鲨鱼毛绒公仔-60cm', product_barcode: '6901', quantity: 10000, order_total_qty: 10000, item_count: 1, note: '' },
+  { id: 3, order_id: 103, item_id: 13, order_no: 'SO-003', order_date: '2026-09-28 16:45', customer: '网易严选', product_name: '咸鱼按摩捶-海盐蓝', product_barcode: '6902', quantity: 5000, order_total_qty: 5000, item_count: 1, note: '' },
 ]
 
 const RESPONSE = { logs: LOGS, pagination: { total: 1284, pages: 86 } }
@@ -136,12 +137,15 @@ function mountTable(logs: Record<string, unknown>[], canManage: boolean) {
     props: {
       logs,
       columns: [
-        { field: 'date', header: '下单时间', align: 'center', width: '16%' },
-        { field: 'customer', header: '客户', align: 'center', width: '14%' },
-        { field: 'product_name', header: '产品名称', align: 'left', width: '28%' },
-        { field: 'quantity', header: '数量', align: 'center', width: '16%', sortable: true },
-        { field: 'note', header: '备注', align: 'left', width: '17%' },
-        { field: 'actions', header: '操作', align: 'left', width: '9%' },
+        { field: 'expand', header: '', align: 'center', width: '4%' },
+        { field: 'date', header: '下单时间', align: 'center', width: '13%' },
+        { field: 'no', header: '订单号', align: 'left', width: '15%' },
+        { field: 'customer', header: '客户', align: 'left', width: '10%' },
+        { field: 'product_name', header: '产品名称', align: 'left', width: '18%' },
+        { field: 'product_barcode', header: '条码', align: 'left', width: '11%' },
+        { field: 'quantity', header: '数量', align: 'center', width: '9%', sortable: true },
+        { field: 'note', header: '备注', align: 'left', width: '11%' },
+        { field: 'actions', header: '操作', align: 'center', width: '9%' },
       ],
       isLoading: false,
       isFetching: false,
@@ -151,7 +155,9 @@ function mountTable(logs: Record<string, unknown>[], canManage: boolean) {
       currentCfg: {
         label: '订单流水', endpoint: '/reports/order-logs', dateKey: 'order_date',
         countKey: 'order_count', dateLabel: '下单时间', countLabel: '数量', noteKey: 'note',
+        noLabel: '订单号', noKey: 'order_no',
       },
+      activeTab: 'order' as const,
       canEdit: canManage,
       canDelete: canManage,
     },
@@ -285,29 +291,32 @@ describe('ReportView —— 单行工具条', () => {
 })
 
 describe('ReportView —— 表格与数字格式', () => {
-  it('订单流水六列按比例分配宽度（末列 9% 是操作列）', () => {
+  it('订单流水九列按比例分配宽度（首列展开占位、末列 9% 是操作列）', () => {
     const headers = mountView().findAll('th')
     const styles = headers.map((th) => th.attributes('style') ?? '')
 
-    expect(styles[0]).toContain('16%')
-    expect(styles[1]).toContain('14%')
-    expect(styles[2]).toContain('28%')
-    expect(styles[3]).toContain('16%')
-    expect(styles[4]).toContain('17%')
-    expect(styles[5]).toContain('9%')
+    expect(styles[0]).toContain('4%')   // 展开
+    expect(styles[1]).toContain('13%')  // 下单时间
+    expect(styles[2]).toContain('15%')  // 订单号
+    expect(styles[3]).toContain('10%')  // 客户
+    expect(styles[4]).toContain('18%')  // 产品名称
+    expect(styles[5]).toContain('11%')  // 条码
+    expect(styles[6]).toContain('9%')   // 数量
+    expect(styles[7]).toContain('11%')  // 备注
+    expect(styles[8]).toContain('9%')   // 操作
   })
 
   it('数量走千分位并加粗', () => {
     const cells = mountView().findAll('tbody tr')[0]!.findAll('td')
 
-    expect(cells[3]?.text()).toContain('15,000')
-    expect(cells[3]?.find('.rp-qty').exists()).toBe(true)
+    expect(cells[6]?.text()).toContain('15,000')
+    expect(cells[6]?.find('.rp-qty').exists()).toBe(true)
   })
 
   it('空值留白，不显示「-」占位符', () => {
     const cells = mountView().findAll('tbody tr')[1]!.findAll('td')
 
-    expect(cells[4]?.text()).toBe('')
+    expect(cells[7]?.text()).toBe('')
   })
 
   it('数量列可排序（当前页客户端重排）', async () => {
@@ -318,6 +327,52 @@ describe('ReportView —— 表格与数字格式', () => {
 
     await emitSort(w, 'quantity', -1)
     expect(w.findAll('tbody tr')[0]?.text()).toContain('15,000')
+  })
+})
+
+describe('ReportTable —— 订单流水母行-明细', () => {
+  const MULTI = [
+    { order_id: 201, item_id: 21, order_no: 'SO-M1', order_date: '2026-10-13 09:12', customer: 'MINISO国际', product_name: '鲨鱼毛绒公仔-60cm', product_barcode: '6901', quantity: 100, order_total_qty: 300, item_count: 2, order_note: '补单', note: '补单' },
+    { order_id: 201, item_id: 22, order_no: 'SO-M1', order_date: '2026-10-13 09:12', customer: 'MINISO国际', product_name: '企鹅玩偶-40cm', product_barcode: '6902', quantity: 200, order_total_qty: 300, item_count: 2, order_note: '补单', note: '补单' },
+    { order_id: 202, item_id: 23, order_no: 'SO-M2', order_date: '2026-10-13 10:05', customer: 'TOP TOY', product_name: '小熊抱枕-35cm', product_barcode: '6903', quantity: 50, order_total_qty: 50, item_count: 1, order_note: '', note: '' },
+  ]
+
+  it('多 SKU 订单默认折叠：只剩母行，产品名称列显示「共 N 个 SKU」', () => {
+    const w = mountTable(MULTI, true)
+    const rows = w.findAll('tbody tr')
+
+    // 202 是单 SKU → 压一行；201 折叠 → 只有母行；合计 2 行
+    expect(rows).toHaveLength(2)
+    const parent = rows.find((r) => r.classes().includes('order-row') && r.text().includes('共 2 个 SKU'))
+    expect(parent).toBeTruthy()
+  })
+
+  it('点箭头展开：出现 2 条子行，且子行带 child-row 类、产品名称是各自 SKU', async () => {
+    const w = mountTable(MULTI, true)
+    await w.find('.rp-caret').trigger('click')
+
+    const rows = w.findAll('tbody tr')
+    expect(rows).toHaveLength(4)  // 母行 + 2 子行 + 单 SKU 行
+    const children = rows.filter((r) => r.classes().includes('child-row'))
+    expect(children).toHaveLength(2)
+    expect(children[0]!.text()).toContain('鲨鱼毛绒公仔-60cm')
+    expect(children[1]!.text()).toContain('企鹅玩偶-40cm')
+  })
+
+  it('母行不挂操作按钮，子行/单 SKU 行挂', async () => {
+    const w = mountTable(MULTI, true)
+    await w.find('.rp-caret').trigger('click')
+
+    const rows = w.findAll('tbody tr')
+    const parent = rows.find((r) => r.classes().includes('order-row') && r.text().includes('共 2 个 SKU'))!
+    expect(parent.find('.rp-btn-edit').exists()).toBe(false)
+    expect(rows.filter((r) => r.classes().includes('child-row'))[0]!.find('.rp-btn-edit').exists()).toBe(true)
+  })
+
+  it('单号列渲染订单号', () => {
+    const w = mountTable(MULTI, true)
+    expect(w.text()).toContain('SO-M1')
+    expect(w.text()).toContain('SO-M2')
   })
 })
 
@@ -357,18 +412,37 @@ describe('ReportTable —— 行内操作列（订单/备货流水）', () => {
     const { useReportConfig } = await import('@/views/report/composables/useReportConfig')
     const { ref } = await import('vue')
     const ALL = ['order', 'stockin', 'stockout', 'deduction', 'return'] as const
-    // 有权限（2026-10-07）：五个维度都在末列追加 9% 操作列，备注列 26%→17%
+    // 有权限（2026-10-13）：五个维度都在末列追加 9% 操作列
     for (const tab of ALL) {
       const cols = useReportConfig(ref(tab), ref(true)).reportColumns.value
       expect(cols.at(-1)).toEqual({ field: 'actions', header: '操作', align: 'center', width: '9%' })
-      expect(cols[cols.length - 2]!.width).toBe('17%')
     }
-    // 无权限：整列不渲染（连表头一起），备注列收回 26%，不留空壳
+    // 无权限：整列不渲染（连表头一起），不留空壳
     for (const tab of ALL) {
       const cols = useReportConfig(ref(tab), ref(false)).reportColumns.value
       expect(cols.some((c) => c.field === 'actions')).toBe(false)
-      expect(cols[cols.length - 1]!.width).toBe('26%')
     }
+  })
+
+  it('列定义：单号列 + 条码列都在、无状态列；订单 tab 多一个展开占位列', async () => {
+    const { useReportConfig } = await import('@/views/report/composables/useReportConfig')
+    const { ref } = await import('vue')
+
+    const orderCols = useReportConfig(ref('order'), ref(true)).reportColumns.value
+    expect(orderCols.map((c) => c.field)).toEqual(
+      ['expand', 'date', 'no', 'customer', 'product_name', 'product_barcode', 'quantity', 'note', 'actions'])
+    expect(orderCols.find((c) => c.field === 'no')!.header).toBe('订单号')
+
+    const stockinCols = useReportConfig(ref('stockin'), ref(true)).reportColumns.value
+    expect(stockinCols.some((c) => c.field === 'expand')).toBe(false)
+    expect(stockinCols.find((c) => c.field === 'no')!.header).toBe('备货单号')
+    expect(stockinCols.find((c) => c.field === 'product_barcode')!.header).toBe('条码')
+    // 末列由「状态」改「备注」：不再有状态列
+    expect(stockinCols.some((c) => c.field === 'status')).toBe(false)
+
+    // 抵扣 tab 的「单号」= 订单号
+    const dedCols = useReportConfig(ref('deduction'), ref(true)).reportColumns.value
+    expect(dedCols.find((c) => c.field === 'no')!.header).toBe('订单号')
   })
 
   it('ReportView 的门控跟随 authStore.hasAnyPermission（含 manage 兜底镜像）', async () => {

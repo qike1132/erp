@@ -29,6 +29,7 @@
         :per-page="perPage"
         :pagination="pagination"
         :current-cfg="currentCfg"
+        :active-tab="activeTab"
         :can-edit="canEditRowActions"
         :can-delete="canDeleteRowActions"
         @sort="onSort"
