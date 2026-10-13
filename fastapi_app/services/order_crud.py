@@ -35,6 +35,7 @@ from fastapi_app.services.order.commands import (
     create_order,
     delete_order,
     update_order,
+    update_order_item,
 )
 from fastapi_app.services.order.deduction import (
     _decrease_deduction,

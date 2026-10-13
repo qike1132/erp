@@ -30,6 +30,7 @@ from fastapi_app.schemas.order import (
     OrderActionResponse,
     OrderCreate,
     OrderDetailResponse,
+    OrderItemUpdate,
     OrderListResponse,
     OrderUpdate,
 )
@@ -332,6 +333,36 @@ async def edit_order(
         result = await order_service.update_order(
             db, order_id=order_id, quantity=quantity,
             customer=customer, note=note, current_user=user
+        )
+    await cache_mgr.invalidate_dashboard()
+    return OrderActionResponse(success=result['success'], message=result['message'])
+
+
+@router.put("/items/{item_id}", response_model=OrderActionResponse)
+async def edit_order_item(
+    item_id: int,
+    data: OrderItemUpdate,
+    db: AsyncSession = Depends(get_async_db),
+    user: User = Depends(require_any_permission("order_manage", "order_edit")),
+) -> OrderActionResponse:
+    """编辑单个订单明细（SKU）：改数量/备注后重算订单兼容数量与状态。
+
+    报表流水行内编辑（2026-10-13）：item 级直改、不走审批（owner 裁决），
+    但仍过 `_check_order_lock`（被他人锁定/审批中的订单不可改）。
+    ValueError（订单/明细不存在、数量越界）由 db_transaction 默认映射为 400。
+
+    Args:
+        item_id: 订单明细 ID。
+        data: 明细更新参数（仅含需修改的字段）。
+        db: 异步数据库会话（读写主库）。
+        user: 当前登录用户，用于权限与锁定判断。
+
+    Returns:
+        OrderActionResponse: 含成功标志与提示消息的响应。
+    """
+    async with db_transaction(db):
+        result = await order_service.update_order_item(
+            db, item_id, data.quantity, data.note, user,
         )
     await cache_mgr.invalidate_dashboard()
     return OrderActionResponse(success=result['success'], message=result['message'])
