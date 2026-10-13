@@ -2,7 +2,6 @@
   <div class="co-col">
     <div class="co-col-title">
       <span><FontAwesomeIcon icon="edit" aria-hidden="true" /> {{ isOrder ? '订单信息录入' : '备货信息录入' }}</span>
-      <OrderTypeSwitch v-model:form="form" :is-order="isOrder" />
     </div>
     <div class="co-col-scroll">
       <form @submit.prevent="emit('add-staged')">
@@ -113,10 +112,9 @@
         />
 
         <!-- 粘贴图片识别（热区 + 确认弹窗整体封装在共享组件里，与出货页共用）。
-             仅订单模式显示：本链路产出的一律是订单条目（type='order'），
-             在备货模式下给入口会造出与用户预期不符的记录类型。 -->
+             订单与备货两种模式都提供：同一条识别链路，差别只在确认后条目的 type
+             （订单 → 'order'，备货 → 'stockin'，提交时按 type 分流到各自接口）。 -->
         <OcrPasteImport
-          v-if="isOrder"
           :build-staged="buildOcrStaged"
           :default-customer="form.customer"
           :default-date="form.date"
@@ -143,12 +141,11 @@ import UiSelect from '@/components/ui/UiSelect.vue'
 import UiDatePicker from '@/components/ui/UiDatePicker.vue'
 import UiButton from '@/components/ui/UiButton.vue'
 import UiAutocomplete from '@/components/ui/UiAutocomplete.vue'
-import OrderTypeSwitch from './OrderTypeSwitch.vue'
 import OrderDeductControl from './OrderDeductControl.vue'
 import ShipmentPlanControl from './ShipmentPlanControl.vue'
 import OrderExcelImport from './OrderExcelImport.vue'
 import OcrPasteImport from '@/components/ocr/OcrPasteImport.vue'
-import { buildOrderStagedItems } from '../composables/useOrderOcrStaging'
+import { buildCustomerOrderStagedItems } from '../composables/useOrderOcrStaging'
 import type { OcrDraftItem, OcrStagingContext } from '@/components/ocr/types'
 import type { FormState, ProductSuggestion, StagedItem } from '../composables/types'
 import {
@@ -234,9 +231,10 @@ const emit = defineEmits<{
   'update:isDragOver': [value: boolean]
 }>()
 
-/** OCR 确认后的订单条目映射：识别与闸门在共享 OcrPasteImport 里，这里只决定落点 */
+/** OCR 确认后的条目映射：识别与闸门在共享 OcrPasteImport 里，这里只决定落点。
+ *  条目 type 跟随当前录入模式（订单 / 备货），提交时按 type 分流到各自接口。 */
 function buildOcrStaged(drafts: OcrDraftItem[], ctx: OcrStagingContext): boolean {
-  props.addStagedItems(buildOrderStagedItems(drafts, ctx))
+  props.addStagedItems(buildCustomerOrderStagedItems(drafts, ctx, props.isOrder ? 'order' : 'stockin'))
   return true
 }
 </script>

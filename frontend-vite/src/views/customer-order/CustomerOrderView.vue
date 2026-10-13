@@ -1,13 +1,11 @@
 <template>
   <div class="co-container">
     <div class="page-card page-card-main">
-      <!-- 卡片头部（2026-10-06 记录查询 tab 移除：单 tab 静态页头，惯例基准 CustomerView.vue） -->
+      <!-- 卡片头部（2026-10-13）：左上角原「录入」是 2026-10-06 记录查询 tab 收敛至 /report
+           后留下的单 tab（点了没反应），已删除；订单/备货切换器自左栏列标题上移到页头左上角，
+           让「这一页在录什么」第一眼可见。 -->
       <div class="page-card-header">
-        <div class="co-tab-bar">
-          <button class="co-tab-btn active" aria-label="录入">
-            录入
-          </button>
-        </div>
+        <OrderTypeSwitch v-model:form="form" :is-order="isOrder" />
       </div>
 
       <!-- 录入主区 -->
@@ -85,6 +83,7 @@ import { useOrderActions } from './composables/useOrderActions'
 import type { StagedItem } from './composables/types'
 
 import OrderInputPanel from './components/OrderInputPanel.vue'
+import OrderTypeSwitch from './components/OrderTypeSwitch.vue'
 import StagingArea from './components/StagingArea.vue'
 import EditStagedModal from './components/EditStagedModal.vue'
 
@@ -223,46 +222,5 @@ function addStaged() {
 /* 栏间分隔线 */
 .co-tab-content :deep(.co-col + .co-col) {
   border-left: 1px solid var(--color-border, #cbd5e1);
-}
-
-/* ===== Tab 切换栏 ===== */
-.co-tab-bar {
-  display: inline-flex;
-  gap: 4px;
-  padding: 4px;
-  border-radius: 12px;
-  background: white;
-  border: 1px solid var(--color-border-light);
-  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
-}
-.co-tab-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 8px 14px;
-  min-height: 32px;
-  border: none;
-  border-radius: 9px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--color-text-secondary);
-  background: transparent;
-  cursor: pointer;
-  transition: background 0.2s ease, color 0.2s ease;
-}
-/* hover 只改颜色，不做位移：列表/切换器上的位移会造成扫读抖动与每帧重排 */
-.co-tab-btn:hover {
-  background: var(--color-primary-50);
-  color: var(--color-primary-600);
-}
-.co-tab-btn:focus-visible {
-  outline: 2px solid var(--color-primary-500);
-  outline-offset: 2px;
-}
-.co-tab-btn.active {
-  background: var(--color-primary-50);
-  color: var(--color-primary-700);
-  box-shadow: inset 0 0 0 1px var(--color-primary-200, var(--color-primary-100));
 }
 </style>

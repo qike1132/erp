@@ -8,8 +8,9 @@
  *   - 编辑订单弹窗 SKU 表格 → test/CustomerOrderView.skuExpand.test.ts
  *   - 备货编辑/删除动作域 → test/customerOrderCrossPageInvalidation.test.ts
  *
- * 现职责：锁「单 tab 新现实」——页头只剩一个静态「录入」按钮，
- * 记录查询的痕迹（搜索框 / 类型徽章 / 记录列表）不得回潮。
+ * 现职责：锁「页头新现实」（2026-10-13）——左上角的「录入」单 tab 已删除，
+ * 订单/备货切换器自左栏列标题上移到页头左上角；记录查询的痕迹
+ * （搜索框 / 类型徽章 / 记录列表）不得回潮。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
@@ -85,21 +86,58 @@ const stubs = {
   UiAutocomplete: { template: '<input />' },
 }
 
-describe('CustomerOrderView 单 tab 结构守卫（2026-10-06 记录查询 tab 移除）', () => {
+describe('CustomerOrderView 页头结构守卫（2026-10-13 录入 tab 移除 + 切换器上移）', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     mocks.customerActiveNamesMock.mockReset()
     mocks.customerActiveNamesMock.mockResolvedValue({ names: [] })
   })
 
-  it('页头只有「录入」一个 tab 按钮，且恒为选中态', async () => {
+  it('左上角「录入」单 tab 已删除，不得回潮', async () => {
     const wrapper = mount(CustomerOrderView, { global: { stubs } })
     await flushPromises()
 
-    const tabBtns = wrapper.findAll('button.co-tab-btn')
-    expect(tabBtns.length).toBe(1)
-    expect(tabBtns[0]!.text()).toBe('录入')
-    expect(tabBtns[0]!.classes()).toContain('active')
+    expect(wrapper.find('.co-tab-bar').exists()).toBe(false)
+    expect(wrapper.findAll('button.co-tab-btn')).toHaveLength(0)
+  })
+
+  it('订单/备货切换器位于页头（左上角）', async () => {
+    const wrapper = mount(CustomerOrderView, { global: { stubs } })
+    await flushPromises()
+
+    const header = wrapper.find('.page-card-header')
+    expect(header.exists()).toBe(true)
+    expect(header.find('.co-type-switch').exists()).toBe(true)
+  })
+
+  it('切换器不再埋在左栏列标题里', async () => {
+    const wrapper = mount(CustomerOrderView, { global: { stubs } })
+    await flushPromises()
+
+    expect(wrapper.find('.co-col-title .co-type-switch').exists()).toBe(false)
+  })
+
+  it('切换器两个按钮为 订单/备货，默认订单态且左栏标题同步', async () => {
+    const wrapper = mount(CustomerOrderView, { global: { stubs } })
+    await flushPromises()
+
+    const btns = wrapper.findAll('.co-type-switch button')
+    expect(btns).toHaveLength(2)
+    expect(btns[0]!.text()).toContain('订单')
+    expect(btns[1]!.text()).toContain('备货')
+    expect(btns[0]!.classes()).toContain('active')
+    expect(wrapper.find('.co-col-title').text()).toContain('订单信息录入')
+  })
+
+  it('点「备货」→ 切换器选中态与左栏标题一起切到备货', async () => {
+    const wrapper = mount(CustomerOrderView, { global: { stubs } })
+    await flushPromises()
+
+    await wrapper.findAll('.co-type-switch button')[1]!.trigger('click')
+    await nextTick()
+
+    expect(wrapper.find('.co-col-title').text()).toContain('备货信息录入')
+    expect(wrapper.findAll('.co-type-switch button')[1]!.classes()).toContain('active')
   })
 
   it('「记录查询」按钮不得回潮', async () => {
