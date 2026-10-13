@@ -368,6 +368,40 @@ async def edit_order_item(
     return OrderActionResponse(success=result['success'], message=result['message'])
 
 
+@router.delete("/items/{item_id}", response_model=OrderActionResponse)
+async def delete_order_item(
+    item_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    user: User = Depends(require_any_permission("order_manage", "order_delete")),
+) -> OrderActionResponse:
+    """删除单个订单明细（SKU）。
+
+    删到空等价删整张订单（复用整单删除的审批/锁定/备份，非超管会变成提交审批）；
+    已被备货抵扣的 SKU 拒删。error_map 与整单删除端点同口径。
+
+    Args:
+        item_id: 订单明细 ID。
+        db: 异步数据库会话（读写主库）。
+        user: 当前登录用户，用于权限与锁定判断。
+
+    Returns:
+        OrderActionResponse: 含成功标志与提示消息的响应（末项删除时透传 delete_order 的真实返回）。
+
+    Raises:
+        HTTPException: 明细/订单不存在返回 400；权限不足 403；关联数据冲突 409；
+            删除前备份失败或数据库异常返回 500。
+    """
+    async with db_transaction(db, error_map={
+        IntegrityError: lambda e: HTTPException(status_code=409, detail='订单存在关联数据，无法删除'),
+        PermissionDeniedError: lambda e: HTTPException(status_code=403, detail=settings.sanitize_business_error(e)),
+        OSError: lambda e: HTTPException(status_code=500, detail='删除前备份失败，操作已回滚，请稍后重试'),
+        SQLAlchemyError: lambda e: HTTPException(status_code=500, detail='数据库操作失败，删除已回滚'),
+    }):
+        result = await order_service.delete_order_item(db, item_id, user)
+    await cache_mgr.invalidate_dashboard()
+    return OrderActionResponse(success=result['success'], message=result['message'])
+
+
 @router.delete("/delete/{order_id}", response_model=OrderActionResponse)
 async def delete_order(
     order_id: int,

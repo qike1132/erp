@@ -280,6 +280,85 @@ async def update_order_item(db: AsyncSession, item_id: int, quantity: int | None
     return {'success': True, 'message': '明细修改成功', 'requires_approval': False}
 
 
+async def delete_order_item(db: AsyncSession, item_id: int, current_user: User) -> dict:
+    """删除单个订单明细（SKU）。
+
+    - 非末项：删该 item、重算订单兼容数量与状态；item 级直改、不走审批。
+    - 末项：等价删整张订单 —— 复用 `delete_order`（含审批/锁定/备份），**透传其返回值**
+      （非超管会变成提交审批，订单不立即删除，故不能硬编码成功文案）。
+    - 已被备货抵扣（该订单+该产品存在 stockin_id 非空的出货）时拒删。
+
+    锁序 Product→Order→Item：`_delete_order_directly` 内部是 Order→Product（先锁单再锁
+    产品），若此处不先预锁产品，会与出库创建路径（P→O）构成 AB-BA 死锁。
+    """
+    head = (await db.execute(
+        select(OrderItem.order_id, OrderItem.product_id).where(OrderItem.id == item_id)
+    )).one_or_none()
+    if head is None:
+        raise ValueError('订单明细不存在')
+    if head.product_id is not None:
+        await get_product_for_update(db, head.product_id)
+    order = (await db.execute(
+        select(Order).where(Order.id == head.order_id).with_for_update()
+    )).scalar_one_or_none()
+    if not order or order.is_deleted:
+        raise ValueError('订单不存在')
+    await _check_order_lock(db, order.id, order, current_user, '删除')
+
+    deducted = (await db.execute(
+        select(func.coalesce(func.sum(StockOut.quantity - StockOut.returned_quantity), 0))
+        .where(StockOut.order_id == order.id,
+               StockOut.product_id == head.product_id,
+               StockOut.stockin_id.isnot(None))
+    )).scalar_one()
+    if int(deducted) > 0:
+        raise ValueError('该产品在本订单已被备货抵扣，无法删除')
+
+    siblings = (await db.execute(
+        select(func.count()).select_from(OrderItem).where(OrderItem.order_id == order.id)
+    )).scalar_one()
+    if siblings <= 1:
+        return await delete_order(db, order.id, current_user)
+
+    item = (await db.execute(
+        select(OrderItem).where(OrderItem.id == item_id).with_for_update()
+    )).scalar_one_or_none()
+    if item is None:
+        raise ValueError('订单明细不存在')
+    # 先取值再删：delete+flush 后不再读对象属性
+    pid, qty = item.product_id, item.quantity
+    await db.delete(item)
+    await db.flush()
+    total = (await db.execute(
+        select(func.coalesce(func.sum(OrderItem.quantity), 0))
+        .where(OrderItem.order_id == order.id)
+    )).scalar_one()
+    order.quantity = int(total)
+    db.add(InventoryLog(
+        product_id=pid, change_type='订单修改',
+        change_quantity=-qty,
+        related_id=order.order_no, note=f'订单明细删除：{order.order_no}',
+    ))
+    await db.flush()
+
+    order.status = await compute_order_status_from_db(db, order)
+    try:
+        await dispatch_factory_notifications(db, order, 'order_updated', None)
+    except Exception as notify_err:  # broad-except: 通知失败不影响删单
+        logger.warning(
+            "工厂通知派发失败 order_no=%s: %s", order.order_no, notify_err, exc_info=True,
+        )
+    await cache_mgr.invalidate(
+        InvalidationStrategy.DOMAIN,
+        CacheDomain.ORDER_AND_INVENTORY | CacheDomain.REPORT,
+    )
+    schedule_post_commit_invalidation(db, _invalidate_order_domains)
+    await _safe_invalidate_purchase_cache()
+    schedule_post_commit_event(db, StockEvent.ORDER_UPDATED,
+                               {'order_id': order.id, 'order_no': order.order_no})
+    return {'success': True, 'message': '明细删除成功', 'requires_approval': False}
+
+
 async def _update_order_directly(
     db: AsyncSession, order: Order, order_id: int,
     quantity: int, customer: str, note: str,
