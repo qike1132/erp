@@ -8,7 +8,7 @@
 - 分组级校验失败隔离
 - _SavepointRollbackSignalError 触发 savepoint 回滚并继续下一组
 """
-from datetime import UTC, datetime
+from datetime import timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -17,6 +17,8 @@ from fastapi_app.services.order_batch_create import (
     batch_create_orders,
 )
 from fastapi_app.shared_models import Order
+
+_BJ = timezone(timedelta(hours=8))
 
 
 def _make_product(pid, name=None, barcode=None):
@@ -235,7 +237,11 @@ class TestUserSelectedOrderDate:
 
         assert result["created_count"] == 1
         order = self._added_order(db)
-        assert order.order_date == datetime(2026, 9, 25, tzinfo=UTC)
+        # 口径（2026-10-13）：日期取所选、时分秒取当前北京时间（存 aware UTC）。
+        # 断言北京日历日 == 所选日；不再断言等于 UTC 零点——那正是报表按
+        # Asia/Shanghai 渲染成「08:00」的 bug。
+        assert order.order_date.tzinfo is not None
+        assert order.order_date.astimezone(_BJ).date().isoformat() == "2026-09-25"
 
     @pytest.mark.asyncio
     async def test_missing_order_date_falls_back_to_now(self):

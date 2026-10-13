@@ -28,6 +28,7 @@ from fastapi_app.services.notification_service import (
     dispatch_beile_unconfirmed_notifications,
     dispatch_factory_notifications,
 )
+from fastapi_app.services.numbering_sequence import _BUSINESS_TZ
 from fastapi_app.services.order_deduction_service import process_order_deduction
 from fastapi_app.shared_models import (
     InventoryLog,
@@ -45,10 +46,15 @@ class _SavepointRollbackSignalError(Exception):
 
 
 def _resolve_order_date(raw) -> datetime:
-    """把用户选择的下单日期（YYYY-MM-DD）解析为 aware UTC 当日零点。
+    """把用户选择的下单日期（YYYY-MM-DD）解析为 aware UTC。
 
-    未提供（空值）时回退当前时刻。order_date 列为 timestamptz，必须写 aware 值，
-    否则 asyncpg 会按 Asia/Shanghai 解释导致时刻偏移 8 小时。
+    未提供（空值）时回退当前时刻。
+    用户只填日期时：日期取所选、**时分秒取当前北京时间**（与备货
+    ``stock_common._parse_date_preserve_time`` 同口径），再转 aware UTC 存储。
+
+    order_date 列为 timestamptz；若按「UTC 当日零点」写（旧实现），报表用
+    ``to_char(order_date, ...)`` 在会话时区 Asia/Shanghai 下会渲染成 ``08:00``
+    （2026-10-13 修复：下单时间小时分不准）。
     """
     if not raw:
         return datetime.now(UTC)
@@ -56,7 +62,10 @@ def _resolve_order_date(raw) -> datetime:
         parsed = datetime.strptime(str(raw).strip(), '%Y-%m-%d')
     except (ValueError, TypeError):
         raise ValueError(f'订单时间格式错误，请使用 YYYY-MM-DD 格式：{raw}') from None
-    return datetime(parsed.year, parsed.month, parsed.day, tzinfo=UTC)
+    now_bj = datetime.now(_BUSINESS_TZ)
+    return datetime(parsed.year, parsed.month, parsed.day,
+                    now_bj.hour, now_bj.minute, now_bj.second,
+                    tzinfo=_BUSINESS_TZ).astimezone(UTC)
 
 
 def _collect_product_ids(orders_data: list) -> list[int]:

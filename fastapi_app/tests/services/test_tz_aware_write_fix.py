@@ -13,13 +13,41 @@ pg_standalone_013 已把 ``order.order_date`` 等列迁移为 timestamptz，但�
 2. outsource 的 ``_fmt_dt`` 展示口径与 beile 的 ``_fmt_beile_time`` 一致
    （aware UTC / naive UTC → 北京时间），避免裸 strftime 把 UTC 当地面时间。
 """
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
+
+_BJ = timezone(timedelta(hours=8))
 
 
 def _aware(dt: datetime | None) -> bool:
     return dt is not None and dt.tzinfo is not None
+
+
+def test_resolve_order_date_keeps_picked_date_with_current_beijing_time(monkeypatch):
+    """用户只填日期时：日期取所选、时分秒取当前北京时间，存 aware UTC。
+
+    回归 2026-10-13：原实现返回「UTC 当日零点」（``datetime(y,m,d,tzinfo=UTC)``），
+    报表按会话时区 Asia/Shanghai 渲染成 ``08:00``（小时分不准）。
+    """
+    from fastapi_app.services import order_batch_create
+
+    frozen = datetime(2026, 10, 13, 16, 30, 45, tzinfo=_BJ)
+
+    class _FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return frozen.astimezone(tz) if tz else frozen.replace(tzinfo=None)
+
+    monkeypatch.setattr(order_batch_create, 'datetime', _FrozenDateTime)
+
+    got = order_batch_create._resolve_order_date('2026-10-01')
+
+    assert _aware(got), 'order_date 必须是 aware 值'
+    # 所选日期保留，时分秒取当前北京时间（16:30:45）
+    assert got.astimezone(_BJ) == datetime(2026, 10, 1, 16, 30, 45, tzinfo=_BJ)
+    # 绝不是 UTC 当日零点（旧 bug：会显示成 08:00）
+    assert got != datetime(2026, 10, 1, tzinfo=UTC)
 
 
 @pytest.mark.asyncio

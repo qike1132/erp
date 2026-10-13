@@ -133,9 +133,9 @@ async def _fetch_orders_page(db: AsyncSession, query, conditions: list,
     """执行分页查询，深翻页自动切换 keyset 分页。"""
     # 常规翻页：OFFSET + LIMIT
     if offset <= OFFSET_THRESHOLD:
-        # 必须带 Order.id 次级键：批量下单把 order_date 写成当日 UTC 零点
-        # （见 order_batch_create._resolve_order_date），同一天创建的订单该值完全相同，
-        # 只按 order_date 排序时同值行之间顺序由物理顺序决定、不稳定 → 跨页漏行/重复行。
+        # 必须带 Order.id 次级键：order_date 可能重复（同一秒内批量下单，见
+        # order_batch_create._resolve_order_date），只按 order_date 排序时同值行
+        # 之间顺序由物理顺序决定、不稳定 → 跨页漏行/重复行。
         # 下方 keyset 分支本来就用了 (order_date, id)，两处口径必须一致。
         result = await db.execute(
             query.order_by(Order.order_date.desc(), Order.id.desc())
