@@ -18,32 +18,30 @@
         <div class="bt-header-search">
           <UiInput v-model="filters.keyword" placeholder="搜索" style="width: 160px" />
           <UiButton variant="primary" @click="refetch()"> 查询 </UiButton>
-        </div>
-        <div class="bt-header-actions">
           <button class="bt-whitelist-btn" aria-label="设置" @click="showWhitelistModal = true">
             <FontAwesomeIcon icon="cog" aria-hidden="true" />
           </button>
-          <!-- 白名单设置弹窗（拆分为子组件） -->
-          <BatchWhitelistModal
-            v-model:open="showWhitelistModal"
-            :customers="whitelistCustomers"
-            :all-customers="allCustomers"
-            @saved="refreshAfterWhitelistSaved"
-          />
-          <!-- 完成批次确认弹窗 -->
-          <div v-if="showCompleteModal" class="bt-whitelist-overlay" @click.self="showCompleteModal = false">
-            <div class="bt-whitelist-modal">
-              <div class="bt-whitelist-header">
-                <span>确认完成批次</span>
-                <button class="bt-whitelist-close" aria-label="关闭" @click="showCompleteModal = false">&times;</button>
-              </div>
-              <div class="bt-whitelist-body" style="padding: 20px; font-size: 14px; color: var(--color-text);">
-                确定要完成批次 <strong>{{ completingBatchNo }}</strong> 吗？完成后该批次将不再显示。
-              </div>
-              <div class="bt-whitelist-footer">
-                <UiButton variant="outline" @click="showCompleteModal = false">取消</UiButton>
-                <UiButton variant="primary" :disabled="completing" @click="confirmComplete">确定</UiButton>
-              </div>
+        </div>
+        <!-- 白名单设置弹窗（拆分为子组件） -->
+        <BatchWhitelistModal
+          v-model:open="showWhitelistModal"
+          :customers="whitelistCustomers"
+          :all-customers="allCustomers"
+          @saved="refreshAfterWhitelistSaved"
+        />
+        <!-- 完成批次确认弹窗 -->
+        <div v-if="showCompleteModal" class="bt-whitelist-overlay" @click.self="showCompleteModal = false">
+          <div class="bt-whitelist-modal">
+            <div class="bt-whitelist-header">
+              <span>确认完成批次</span>
+              <button class="bt-whitelist-close" aria-label="关闭" @click="showCompleteModal = false">&times;</button>
+            </div>
+            <div class="bt-whitelist-body" style="padding: 20px; font-size: 14px; color: var(--color-text);">
+              确定要完成批次 <strong>{{ completingBatchNo }}</strong> 吗？完成后该批次将不再显示。
+            </div>
+            <div class="bt-whitelist-footer">
+              <UiButton variant="outline" @click="showCompleteModal = false">取消</UiButton>
+              <UiButton variant="primary" :disabled="completing" @click="confirmComplete">确定</UiButton>
             </div>
           </div>
         </div>
@@ -121,11 +119,21 @@ const {
 /* ===== 容器 (Section 1) ===== */
 .bt-container {
   padding: 0;
-  margin: 0 auto;
   height: 100%;
+  min-height: 0;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
+  /* 页面整体禁止文本选中，避免鼠标拖动时整页高亮 */
+  user-select: none;
+  -webkit-user-select: none;
+}
+/* 容器内的输入框/文本域仍需可选中、可编辑 */
+.bt-container :deep(input),
+.bt-container :deep(textarea) {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 /* ===== 卡片 (Section 3) ===== */
@@ -168,19 +176,13 @@ const {
 }
 
 /* ===== 头部操作区 ===== */
-.bt-header-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  order: 2;
-}
-
+/* 搜索 + 查询 + 设置 作为一组贴右上角（左侧留给客户 tab） */
 .bt-header-search {
   display: flex;
   align-items: center;
   gap: 8px;
   margin-left: auto;
+  flex-shrink: 0;
 }
 
 /* ===== TAB 切换栏 (Section 23) ===== */
