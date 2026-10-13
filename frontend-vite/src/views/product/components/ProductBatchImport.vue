@@ -14,13 +14,25 @@
       <span v-else>拖拽文件到标题栏 · 支持 .xlsx / .xls</span>
     </label>
     <div class="pd-inline-actions">
-      <button class="pd-inline-btn" aria-label="模板 {{ importing ? '导入中…' : '导入' }}" @click.stop="downloadTemplate">模板</button>
-      <button class="pd-inline-btn pd-inline-btn-success" :disabled="!excelFile" :aria-label="importing ? '导入中…' : '导入'" @click.stop="handleBatchImport">
-        {{ importing ? '导入中…' : '导入' }}
+      <button class="pd-inline-btn" aria-label="模板 下载" @click.stop="downloadTemplate">模板</button>
+      <button
+        class="pd-inline-btn pd-inline-btn-preview"
+        :disabled="!excelFile || previewing"
+        :aria-label="previewing ? '预览中…' : '预览'"
+        @click.stop="handlePreview"
+      >
+        {{ previewing ? '预览中…' : '预览' }}
       </button>
     </div>
     <input ref="excelInputRef" type="file" style="display: none" accept=".xlsx,.xls" name="file" aria-label="file" @change="onExcelSelect" />
   </div>
+
+  <ProductImportPreviewModal
+    v-model:open="showPreview"
+    :result="previewResult"
+    :importing="importing"
+    @confirm="handleConfirmImport"
+  />
 </template>
 
 <script setup lang="ts">
@@ -29,13 +41,18 @@ import { useQueryClient } from '@tanstack/vue-query'
 import { batchApi } from '@/api'
 import { showToast } from '@/composables/useToast'
 import { getErrorMessage } from '@/types/errors'
+import ProductImportPreviewModal from './ProductImportPreviewModal.vue'
+import type { ProductImportPreviewResult } from '@/types/api'
 
 const queryClient = useQueryClient()
 
 const excelFile = ref<File | null>(null)
 const excelInputRef = ref<HTMLInputElement | null>(null)
 const excelDragOver = ref(false)
+const previewing = ref(false)
 const importing = ref(false)
+const showPreview = ref(false)
+const previewResult = ref<ProductImportPreviewResult | null>(null)
 
 function onExcelSelect(e: Event) {
   const file = (e.target as HTMLInputElement).files?.[0]
@@ -53,15 +70,51 @@ function handleExcelFile(file: File) {
   excelFile.value = file
 }
 
-async function handleBatchImport() {
+function buildFormData(): FormData {
+  const formData = new FormData()
+  formData.append('file', excelFile.value as File)
+  return formData
+}
+
+/**
+ * 预览：先看清「将新增/补全/跳过什么、客户与价格识别成什么」，再决定要不要入库。
+ *
+ * 文件级错误（格式不对、解析失败）没有可核对的行 → 直接提示，不弹窗；
+ * 只要解析出了行就打开弹窗（哪怕全部不可导入，也让用户看到原因）。
+ */
+async function handlePreview() {
+  if (!excelFile.value) return
+  previewing.value = true
+  try {
+    const result = await batchApi.previewProducts(buildFormData())
+    if (!result.rows?.length) {
+      showToast(result.message || '预览失败', 'error')
+      return
+    }
+    previewResult.value = result
+    showPreview.value = true
+  } catch (err: unknown) {
+    showToast(getErrorMessage(err, '预览失败'), 'error')
+  } finally {
+    previewing.value = false
+  }
+}
+
+/** 确认导入：把浏览器里留着的同一份文件重发给导入端点（写入在这里才发生）。 */
+async function handleConfirmImport() {
   if (!excelFile.value) return
   importing.value = true
-  const formData = new FormData()
-  formData.append('file', excelFile.value)
   try {
-    await batchApi.importProducts(formData)
-    showToast('导入成功', 'success')
-    excelFile.value = null
+    const result = await batchApi.importProducts(buildFormData())
+    // 按后端结果如实提示：`success=false`（例如「产品都已存在，未改动」）与行级问题
+    // 都写在 message 里。以前无视结果一律弹「导入成功」，把「其实一条都没更新」
+    // 显示成成功，用户据此以为「客户和价格识别不了」。
+    showToast(result.message || (result.success ? '导入成功' : '导入失败'), result.success ? 'success' : 'error')
+    if (result.success) {
+      excelFile.value = null
+      showPreview.value = false
+      previewResult.value = null
+    }
     queryClient.invalidateQueries({ queryKey: ['products-list'] })
   } catch (err: unknown) {
     showToast(getErrorMessage(err, '导入失败'), 'error')
@@ -137,12 +190,13 @@ function downloadTemplate() {
   border-color: var(--color-ocean-deep);
   color: var(--color-primary-600);
 }
-.pd-inline-btn-success {
-  border-color: var(--color-success-400);
-  color: var(--color-success-600);
+.pd-inline-btn-preview {
+  border-color: var(--color-primary-500);
+  color: var(--color-primary-600);
+  background: var(--color-primary-50);
 }
-.pd-inline-btn-success:hover {
-  background: var(--color-success-50);
+.pd-inline-btn-preview:hover {
+  background: var(--color-primary-100);
 }
 .pd-inline-btn:disabled {
   opacity: 0.4;

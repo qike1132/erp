@@ -2789,6 +2789,48 @@
         }
       }
     },
+    "/api/v1/batch/batch-import/preview": {
+      "post": {
+        "tags": [
+          "批量导入"
+        ],
+        "summary": "预览产品批量导入（不写库）",
+        "description": "预览产品批量导入 —— 逐行分类，**不写库、不落图片**。\n\n用户先在这里核对「将新增/补全/跳过哪些行、客户与价格识别成了什么」，确认后前端\n把同一文件重发给 ``POST /batch/batch-import`` 才真正入库。\n\n两处刻意的选择：\n- **不经 ``run_guarded_import``**：那个守卫会登记文件指纹（同文件只允许导入一次）。\n  预览必须可重复，且不能把用户的文件提前锁死。\n- **用主库会话**（非只读副本）：预览要与随后在主库上的导入同口径，副本延迟会让\n  「预览说新增、导入说已存在」这类错位出现。\n\nArgs:\n    file: 上传的 Excel 文件（.xlsx 格式）。\n    db: 异步数据库会话（本端点只读使用）。\n    current_user: 当前登录用户（仅需通过权限校验）。\n\nReturns:\n    ProductImportPreviewResult: 逐行结果与汇总计数。",
+        "operationId": "preview_batch_import_products_api_v1_batch_batch_import_preview_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_preview_batch_import_products_api_v1_batch_batch_import_preview_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductImportPreviewResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/batch/batch-import": {
       "post": {
         "tags": [
@@ -23116,6 +23158,20 @@
         ],
         "title": "Body_import_staging_stockouts_api_v1_staging_stockouts_import_post"
       },
+      "Body_preview_batch_import_products_api_v1_batch_batch_import_preview_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_preview_batch_import_products_api_v1_batch_batch_import_preview_post"
+      },
       "Body_preview_order_doc_api_v1_ocr_import_order_preview_post": {
         "properties": {
           "file": {
@@ -29936,6 +29992,167 @@
         "title": "ProductCustomerBrief",
         "description": "产品所属客户（列表/详情展示用）"
       },
+      "ProductImportPreviewResult": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "description": "是否成功解析出可预览的行"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "结果消息"
+          },
+          "filename": {
+            "type": "string",
+            "title": "Filename",
+            "description": "文件名",
+            "default": ""
+          },
+          "row_count": {
+            "type": "integer",
+            "title": "Row Count",
+            "description": "解析出的数据行数",
+            "default": 0
+          },
+          "summary": {
+            "$ref": "#/components/schemas/ProductImportPreviewSummary",
+            "description": "汇总计数"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/ProductImportPreviewRow"
+            },
+            "type": "array",
+            "title": "Rows",
+            "description": "逐行结果"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "message"
+        ],
+        "title": "ProductImportPreviewResult",
+        "description": "产品导入预览结果（**不写库**，由前端人工核对后再确认导入）。"
+      },
+      "ProductImportPreviewRow": {
+        "properties": {
+          "row_no": {
+            "type": "integer",
+            "title": "Row No",
+            "description": "Excel 行号（表头为第 1 行，数据从 2 起）"
+          },
+          "action": {
+            "type": "string",
+            "title": "Action",
+            "description": "create=新增 / backfill=补全 / skip=跳过 / error=错误"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "产品名称（原样，未做匹配）",
+            "default": ""
+          },
+          "barcode": {
+            "type": "string",
+            "title": "Barcode",
+            "description": "69码",
+            "default": ""
+          },
+          "price": {
+            "type": "string",
+            "title": "Price",
+            "description": "解析后的价格（错误/空行为空串）",
+            "default": ""
+          },
+          "price_raw": {
+            "type": "string",
+            "title": "Price Raw",
+            "description": "文件里的价格原值，便于核对识别是否正确",
+            "default": ""
+          },
+          "factory": {
+            "type": "string",
+            "title": "Factory",
+            "description": "工厂",
+            "default": ""
+          },
+          "customer_name": {
+            "type": "string",
+            "title": "Customer Name",
+            "description": "客户列原值",
+            "default": ""
+          },
+          "customer_matched": {
+            "type": "boolean",
+            "title": "Customer Matched",
+            "description": "客户名是否命中客户主数据",
+            "default": false
+          },
+          "has_image": {
+            "type": "boolean",
+            "title": "Has Image",
+            "description": "该行是否带图片",
+            "default": false
+          },
+          "changes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Changes",
+            "description": "将改动的字段（补全行给出改前改后）"
+          },
+          "messages": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Messages",
+            "description": "行级提示（客户未匹配等）"
+          }
+        },
+        "type": "object",
+        "required": [
+          "row_no",
+          "action"
+        ],
+        "title": "ProductImportPreviewRow",
+        "description": "产品导入预览的单行结果（**只分类，不写库**）。\n\n``action`` 取值：``create`` 新增 / ``backfill`` 补全 / ``skip`` 跳过 / ``error`` 错误。"
+      },
+      "ProductImportPreviewSummary": {
+        "properties": {
+          "create": {
+            "type": "integer",
+            "title": "Create",
+            "description": "将新增的行数",
+            "default": 0
+          },
+          "backfill": {
+            "type": "integer",
+            "title": "Backfill",
+            "description": "将补全的行数",
+            "default": 0
+          },
+          "skip": {
+            "type": "integer",
+            "title": "Skip",
+            "description": "将跳过的行数",
+            "default": 0
+          },
+          "error": {
+            "type": "integer",
+            "title": "Error",
+            "description": "无法导入的行数",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "title": "ProductImportPreviewSummary",
+        "description": "产品导入预览的汇总计数（与行分类一一对应）。"
+      },
       "ProductInfoResponse": {
         "properties": {
           "success": {
@@ -30045,6 +30262,17 @@
               }
             ],
             "title": "Image"
+          },
+          "image_thumb": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Thumb"
           },
           "factory": {
             "anyOf": [

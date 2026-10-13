@@ -6,7 +6,7 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from utils.sanitizer import sanitize_url
 
@@ -92,6 +92,9 @@ class ProductResponse(BaseModel):
     barcode: str | None = None
     price: float | None = 0
     image: str | None = None
+    # 列表缩略图（出站派生，见 derive_image_thumb）：存量老图多为数 MB 的 png/jpg，
+    # 列表里用 400px 缩略图可把每页图片流量从数十 MB 降到 <1MB。前端拿不到则回退 image。
+    image_thumb: str | None = None
     factory: str | None = None
     initial_stock: int
     current_stock: int
@@ -121,6 +124,27 @@ class ProductResponse(BaseModel):
         if parsed.scheme or parsed.netloc:
             return v
         return sign_upload_url(v)
+
+    @model_validator(mode='after')
+    def derive_image_thumb(self) -> 'ProductResponse':
+        """出站派生缩略图 URL（列表用）。
+
+        `image` 已在字段校验器里签发成 `/static/uploads/<key>?st=..&s=..`；缩略图
+        key 是**确定性后缀**（storage_service.get_thumbnail_key 追加 `.thumb.webp`），
+        故直接从签名 URL 的 path 部分派生后再签发——不需要给 DB 加列、不需要迁移。
+        缩略图文件不存在时前端会收到 404 并回退原图（ProductTable 的 handleImageError）。
+
+        外部直链（http/https/协议相对）不是本地 uploads key，保持 None，避免把外链
+        拼成 `/static/uploads/https://...` 而损坏（与 sign_image_url 同一约定）。
+        """
+        img = self.image
+        if img and img.startswith('/static/uploads/'):
+            from fastapi_app.services.signed_urls import sign_upload_url
+            from fastapi_app.services.storage_service import get_thumbnail_key
+
+            bare = img.split('?', 1)[0]
+            self.image_thumb = sign_upload_url(get_thumbnail_key(bare))
+        return self
 
     class Config:
         from_attributes = True

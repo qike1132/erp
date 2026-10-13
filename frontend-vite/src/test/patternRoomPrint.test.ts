@@ -20,6 +20,7 @@ const { getPartsByVersion } = vi.hoisted(() => ({ getPartsByVersion: vi.fn() }))
 vi.mock('@/api/patternRoom', () => ({ patternRoomApi: { getPartsByVersion } }))
 
 import { usePatternRoomPrint } from '@/views/pattern-room/composables/usePatternRoomPrint'
+import { PART_EDIT_FIELDS } from '@/views/pattern-room/composables/usePartInlineEdit'
 
 function makeRole(id: number, roleName: string, currentVersion = 'T1'): RoleBrief {
   return {
@@ -184,6 +185,55 @@ describe('PrintDialog 排版（图片居表头右上 · 部位表通栏）', () 
     const width = Number(imageBoxRule.match(/width:\s*(\d+)px/)?.[1] ?? 0)
 
     expect(width).toBeGreaterThanOrEqual(180)
+  })
+})
+
+describe('PrintDialog 列对齐（各角色分段共用同一套列位置）', () => {
+  /**
+   * 背景：每个角色分段渲染的是**独立**的 <table>，浏览器 auto 布局会按各表自身
+   * 内容算列宽，同一列在不同分段下左右漂移（打印预览里表现为列错位）。
+   * jsdom 不做排版，测不了像素位置，故守住根因对应的结构不变量：
+   * 每个分段都必须带同一份显式 colgroup，列宽不再由内容决定。
+   */
+  it('每个角色分段渲染同一份 colgroup（列宽与 PART_EDIT_FIELDS 一致）', () => {
+    mountSheet(
+      [makeRole(1, '熊'), makeRole(2, '狗')],
+      // 两段内容宽度差异大：第二段多一行且带更长的色号
+      [makePart(1, '主体'), makePart(2, '主体'), makePart(2, '耳朵')],
+    )
+
+    const tables = [...document.querySelectorAll('.pd-table')]
+    expect(tables.length).toBeGreaterThan(1)
+
+    const colWidths = tables.map((t) =>
+      [...t.querySelectorAll('colgroup col')].map((c) => (c as HTMLElement).style.width),
+    )
+
+    // 每段都必须有全部列的显式宽度（缺 colgroup 时为 []，会在此失败）
+    expect(colWidths[0]).toHaveLength(2 + PART_EDIT_FIELDS.length)
+    expect(colWidths[0]!.every((w) => w !== '')).toBe(true)
+    // 三个业务列宽来自 PART_EDIT_FIELDS（单一事实来源），与屏幕二维表一致
+    expect(colWidths[0]!.slice(2)).toEqual(PART_EDIT_FIELDS.map((f) => f.width))
+    // 各分段之间完全一致——任一列漂移即失败
+    for (const widths of colWidths) expect(widths).toEqual(colWidths[0])
+  })
+
+  it('打印表用 table-layout: fixed（列宽由 colgroup 决定，而非各段内容）', () => {
+    const tableRule = printDialogSource.match(/\.pd-table \{[\s\S]*?\}/)?.[0] ?? ''
+
+    expect(tableRule).toContain('table-layout: fixed')
+  })
+})
+
+describe('PrintDialog 部位名称列对齐', () => {
+  it('部位名称列左对齐，且特异性高于通用居中规则', () => {
+    // 通用规则 `.pd-table th, .pd-table td` 特异性 (0,1,1)，部位列若只写
+    // `.pd-th-part, .pd-td-part` 是 (0,1,0)，会被静默覆盖成居中（本意左对齐失效）。
+    // 必须带 .pd-table 前缀提升到 (0,2,0)。
+    const rule = printDialogSource.match(/\.pd-table \.pd-th-part[\s\S]*?\}/)?.[0] ?? ''
+
+    expect(rule).toContain('.pd-td-part')
+    expect(rule).toContain('text-align: left')
   })
 })
 

@@ -45,6 +45,12 @@
             </span>
           </div>
           <table class="pd-table">
+            <!-- 显式列宽：每个角色分段是独立 <table>，共用同一份 colgroup 才能保证列位置一致 -->
+            <colgroup>
+              <col style="width: 100px" />
+              <col style="width: 60px" />
+              <col v-for="field in PART_EDIT_FIELDS" :key="field.key" :style="{ width: field.width }" />
+            </colgroup>
             <thead>
               <tr>
                 <th class="pd-th-part">部位名称</th>
@@ -261,6 +267,9 @@ defineExpose({ updatePrintTime })
   border-collapse: collapse;
   font-size: 13px;
   font-variant-numeric: tabular-nums;
+  /* 固定列宽：每个角色分段是独立 <table>，auto 布局会各按自身内容算列宽，
+     导致同一列在不同分段下左右漂移。用 colgroup + fixed 让全部分段共用列位置。 */
+  table-layout: fixed;
 }
 
 .pd-table th,
@@ -269,7 +278,8 @@ defineExpose({ updatePrintTime })
   border-bottom: 1px solid #eceff3;
   text-align: center;
   color: #16202e;
-  white-space: nowrap;
+  /* 列宽固定后不再随内容变宽：允许换行，避免长供应商/布料名溢出到相邻列 */
+  white-space: normal;
 }
 
 .pd-table th {
@@ -281,8 +291,10 @@ defineExpose({ updatePrintTime })
   border-bottom: 1px solid #d5dbe3;
 }
 
-.pd-th-part,
-.pd-td-part {
+/* 部位名称列左对齐：必须带 .pd-table 前缀把特异性提到 (0,2,0)，
+   否则会被上面的 `.pd-table th, .pd-table td`（0,1,1）静默覆盖成居中。 */
+.pd-table .pd-th-part,
+.pd-table .pd-td-part {
   text-align: left;
 }
 

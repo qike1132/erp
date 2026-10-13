@@ -612,6 +612,10 @@ export interface Body_import_staging_stockouts_api_v1_staging_stockouts_import_p
   file: string
 }
 
+export interface Body_preview_batch_import_products_api_v1_batch_batch_import_preview_post {
+  file: string
+}
+
 export interface Body_preview_order_doc_api_v1_ocr_import_order_preview_post {
   file: string
 }
@@ -1884,6 +1888,37 @@ export interface ProductCustomerBrief {
   name: string
 }
 
+export interface ProductImportPreviewResult {
+  success: boolean
+  message: string
+  filename?: string
+  row_count?: number
+  summary?: ProductImportPreviewSummary
+  rows?: Array<ProductImportPreviewRow>
+}
+
+export interface ProductImportPreviewRow {
+  row_no: number
+  action: string
+  name?: string
+  barcode?: string
+  price?: string
+  price_raw?: string
+  factory?: string
+  customer_name?: string
+  customer_matched?: boolean
+  has_image?: boolean
+  changes?: Array<string>
+  messages?: Array<string>
+}
+
+export interface ProductImportPreviewSummary {
+  create?: number
+  backfill?: number
+  skip?: number
+  error?: number
+}
+
 export interface ProductInfoResponse {
   success?: boolean
   data?: Record<string, unknown>
@@ -1904,6 +1939,7 @@ export interface ProductResponse {
   barcode?: string | null
   price?: number | null
   image?: string | null
+  image_thumb?: string | null
   factory?: string | null
   initial_stock: number
   current_stock: number

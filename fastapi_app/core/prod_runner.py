@@ -53,10 +53,20 @@ _CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 # ARQ 100MB、桌面壳 50MB）。
 LOG_ROTATE_CHECK_INTERVAL = 60.0
 
-# kill_tree 软杀等待窗口（复核 P1-9）：软杀对 CREATE_NO_WINDOW 子进程大概率
-# 无效，窗口刻意短——4s 等待远小于 nssm restart 的停机容忍，失败即升级硬杀。
-# 极端最坏链路：软杀 taskkill 超时 15s + 等待 4s + 硬杀 15s ≈ 34s（软杀实际秒回）。
-_SOFT_KILL_WAIT_SECONDS = 4.0
+# kill_tree 软杀等待窗口 —— **只在软杀自己报告成功（rc=0）时才会进入**。
+# 实测（2026-10-13）：对 CREATE_NO_WINDOW 子进程 `taskkill /T`（不带 /F）0.06s 就返回
+# rc=128「只能强制终止此进程(带 /F 选项)」，一个进程都没杀掉；此时等待纯属白等，
+# 直接升级硬杀（/F 实测 0.05s 即完成）。
+# ★ 窗口上限受 NSSM 停机预算硬约束：AppStopMethodConsole=1500ms +
+#   AppStopMethodThreads=1500ms（NSSM 默认值，本仓 nssm_install 未覆盖）—— 监督器
+#   若没在这 ~3s 内退干净，NSSM 会 TerminateProcess 掉它，**uvicorn 子进程树就没人
+#   回收，变成继续占着 :5002 的孤儿**（2026-10-13 08:12 现场：erp-prod 服务 STOPPED，
+#   而 5002 上仍有一整棵后端树在服务）。窗口必须远小于 1500ms。
+#   旧值 4.0 的注释写「4s 远小于 nssm restart 的停机容忍」——**该判断是错的**，
+#   正是 2026-10-11 P1-9 引入孤儿的原因。现取 1.0s：软杀(0.06s)+窗口+硬杀(0.05s)
+#   ≈1.1s，仍在 NSSM 的 1500ms console 预算内，同时给「软杀真能生效」的那天留下
+#   足够走完 lifespan 关停段的余地（0.5s 几乎必然不够，等于静默退回硬杀）。
+_SOFT_KILL_WAIT_SECONDS = 1.0
 _SOFT_KILL_POLL_INTERVAL = 0.2
 
 
@@ -429,9 +439,13 @@ class _Managed:
         2026-10-11（复核 P1-9）：原先对 uvicorn 子进程一律 `taskkill /F /T`，
         TerminateProcess 使 lifespan 关停段从不执行（实测 84/160 次进入关停段
         未走完、收尾哨兵「数据库连接池已关闭」自 2026-10-02 起再未亮）。
-        现先发不带 /F 的软杀并轮询等待，超时才升级 /F —— 未来子进程信号模型
-        变化（如 uvicorn 挂控制台处理器）时可自动获益；软杀对 CREATE_NO_WINDOW
-        子进程当前大概率无效，等待窗口刻意很短以免拖慢 nssm restart。
+        现先发不带 /F 的软杀；**软杀报告成功才轮询等待**，否则直接升级 /F。
+
+        2026-10-13（修正 P1-9 的回归）：P1-9 无条件等 4s，而软杀对
+        CREATE_NO_WINDOW 子进程实测 0.06s 就回 rc=128、什么都没杀 —— 于是每次停机
+        都白等 4s，超过 NSSM 的 3s 停机预算，监督器被 TerminateProcess 掉，
+        uvicorn 进程树成为占着 :5002 的孤儿。现在软杀失败即硬杀（合计 ~0.1s），
+        监督器能在 NSSM 的 console 窗口内自行退干净。
         """
         if not self.proc:
             return
@@ -442,10 +456,20 @@ class _Managed:
                 creationflags=_CREATE_NO_WINDOW,
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15,
             )
-            deadline = time.monotonic() + _SOFT_KILL_WAIT_SECONDS
-            while time.monotonic() < deadline and self.proc.poll() is None:
-                time.sleep(_SOFT_KILL_POLL_INTERVAL)
+            # 软杀返回非 0 = 它一个进程都没终止（CREATE_NO_WINDOW 子进程必得 128），
+            # 等待窗口只在它报告成功时才有意义 —— 否则纯属把监督器拖出 NSSM 的停机预算。
+            soft_ok = soft.returncode == 0
+            if soft_ok:
+                deadline = time.monotonic() + _SOFT_KILL_WAIT_SECONDS
+                while time.monotonic() < deadline and self.proc.poll() is None:
+                    time.sleep(_SOFT_KILL_POLL_INTERVAL)
             if self.proc.poll() is None:
+                if soft_ok:
+                    # 软杀报告成功却没在窗口内退出 = 优雅关停没走完，正被硬杀接管
+                    # （P1-9 要避免的那条路）。必须留痕，否则将来只能从「哨兵又不亮」
+                    # 反推是哪一步退化的。
+                    print(f"[prod_runner] 警告: 软杀成功但 PID {pid} 在 "
+                          f"{_SOFT_KILL_WAIT_SECONDS}s 内未退出，升级硬杀（优雅关停未走完）")
                 result = subprocess.run(  # nosec B603 B607
                     ["taskkill", "/F", "/T", "/PID", str(pid)],
                     creationflags=_CREATE_NO_WINDOW,
@@ -454,8 +478,6 @@ class _Managed:
                 if result.returncode != 0:
                     print(f"[prod_runner] 警告: taskkill 返回 {result.returncode}，"
                           f"PID {pid} 的进程树可能未终止（旧进程会继续占用端口）")
-            elif soft.returncode != 0:
-                print(f"[prod_runner] 信息: 软杀返回 {soft.returncode} 但进程已退出")
         else:
             import signal
             try:

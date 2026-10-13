@@ -127,7 +127,8 @@ AI 说"修好了/应该没问题/测试过了"而实际没跑，是最高频的 
 写代码的 AI 评审自己会**确认偏误**（它记得自己的理由）。合并/部署前必须由**未参与实现的新鲜上下文**评审：只看 diff + 需求原文，不带实现的推理（源：superpowers requesting-code-review；BMAD：评审者以找问题为职责，"零发现"须触发重审）。
 
 - owner 问法：「**让一个没参与的新会话独立评审这个 diff，找出影响正确性的问题**」；别问"你觉得没问题吗"（它一定说没问题）。
-- **本仓提交前固定用 `/open-code-review:delegate-review`**（OCR 委派模式：OCR 定文件与规则、AI 执行评审）做独立评审：**无问题 → AI 直接代跑提交；发现问题 → 逐条列出并说明怎么修**。**执行评审的子代理一律用最强模型，并迭代审核**（修复后复审直到零 High/Medium）。它是 AI 执行的评审，提交钩子无法机械判定通过与否，故只作规则、不作门禁（§8 例外）。
+- **本仓的评审时点是「推送前一次」，不是「每次提交前」**（owner 2026-10-13 定，取代原先的提交前固定评审）：修复 → 跑门禁 → **只提交当前任务**（不夹带并发会话的活、不夹带别的事）→ **等 owner 说「推送」** → 这时才用 `/open-code-review:delegate-review` **一次**审完**当前分支相对 main 的 merge-base 起的全部提交**（= 这个 CL 会带进 main 的整坨，含其他会话已推但未合的提交；OCR 定文件与规则、AI 执行评审）→ **迭代到零 High/Medium 才推送** → 跑 CL（提交变更评审）→ 盯到 CL 全绿。理由：逐提交评审会把同一段代码反复审，而提交钩子本就判不了「评审做没做」；攒到推送前一次，审的是**真正要进 main 的那一坨**。
+- **执行评审的子代理一律用最强模型**，修复后复审直到零 High/Medium。它是 AI 执行的评审，提交钩子无法机械判定通过与否，故只作规则、不作门禁（§8 例外）。
 
 - `quality_gate.py` 读 `pyproject.toml [tool.code-quality]`：`max_function_length=80`、`max_vue_component_length=400`、`max_file_size=1600`。**只拦新增违规**；清理存量后可 `--update-baseline` 收紧。
 - 提交钩子 `core.hooksPath = .githooks`。`.githooks/pre-commit` 四层：①危险路径 ②密钥扫描（**总是跑**）③Python 字面量收窄 ④`.pre-commit-config.yaml`（`ruff --fix` + local `quality-gate`；`ruff-format` 已于 2026-10-01 移除，理由见该文件注释）。
@@ -135,7 +136,7 @@ AI 说"修好了/应该没问题/测试过了"而实际没跑，是最高频的 
 - `pre-commit` **自身跑不起来时**（本机实测：hook 环境需联网 clone，而 python 派生的 MSYS `ssh/sh` 报 `NtCreateDirectoryObject 0xC0000022`），钩子回退跑等价本地检查：`ruff check --fix`（仅暂存 `.py`，改动即拒绝、需重新暂存）+ `quality_gate.py`。回退照常拦真实违规，但**不因工具跑不起来而拦截**；只有 pre-commit 真失败（输出含 `- hook id:`）才按它判负。
 - `.githooks/commit-msg`（第 5 层）：**剥掉第三方 AI 工具署名尾行**（`🤖 Generated with <tool>` / `Co-Authored-By: <tool>`，清单见该文件）。背景：Codebuff 曾写进 12 个提交（2026-08-11 起），与 §7 相悖；就地剥离不阻断工作流。**故意不剥 Claude 的署名**。
 - 密钥扫描误报的**正确**处置：命中行尾加 `secret-scan:allow <理由>`（或上一行 `secret-scan:allow-next-line`）；`.githooks/allowlist.txt` 是逐文件豁免，**新增条目须在提交信息说明理由**。
-- 提交信息写**为什么**；一个提交只做一件事；提交前 `git status --porcelain` 确认没卷进 AI 痕迹或运行期数据。
+- 提交信息写**为什么**；一个提交只做一件事；**只 `git add` 当前任务涉及的文件**；提交前 `git status --porcelain` 确认没卷进 AI 痕迹或运行期数据。
 - 迁移：**禁止对生产库 `alembic revision --autogenerate`**（生产有历史漂移，会生成 `DROP INDEX/TABLE/COLUMN` 破坏性 DDL）。需生成时先在**临时空库** `upgrade head`，改模型后对空库 autogenerate，判据同 CI（空库 `upgrade head` + `check`）。新增破坏性 DDL 会被 `fastapi_app/tests/test_migration_autogenerate_safety.py` 拦下。详见 `migrations/README`。
 
 ## 5. 红线（会打挂生产，别做）

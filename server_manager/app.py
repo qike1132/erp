@@ -1,5 +1,5 @@
 """
-ERP 服务器管理器 GUI（版本号唯一真源见 server_manager.constants 的 _VERSION，当前 v5.34）
+ERP 服务器管理器 GUI（版本号唯一真源见 server_manager.constants 的 _VERSION，当前 v5.35）
 功能:
   - 一键启动前后端：同时启动 FastAPI 后端 + Vue/Vite 前端 + Redis服务
   - 一键重启：停止所有进程和端口，然后重新启动服务
@@ -226,7 +226,8 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
         # 服务操作层(T4 包化)：NSSM/sc 查询、启停、安装、卸载。msg_queue/gate/
         # project_dir/log_message 一律注入;本模块不 import app,也不持有 app 状态
         # (nssm 搜索由 ServiceOps.find_nssm 自行完成,无外部注入)。
-        self.svc = ServiceOps(self._msg_queue, self._gate, _PROJECT_DIR, self.log_message)
+        self.svc = ServiceOps(self._msg_queue, self._gate, _PROJECT_DIR, self.log_message,
+                              release_ports=self._release_ports)
         # Redis 探活/启停层(T3 包化)：RedisOps 自持 redis_process；服务层能力
         # (wait_service/svc_state/find_nssm/run_capture,T4 起归 service_ops)
         # 与 app 的 _read_stdout 一律注入,本类不 import app。

@@ -243,3 +243,56 @@ def test_verify_still_works_with_bucketed_expiry(monkeypatch):
 
     q = parse_qs(urlparse(url).query)
     assert signed_urls.verify_signature('k/a.webp', int(q['st'][0]), q['s'][0]) is True
+
+
+def test_product_response_derives_signed_image_thumb(monkeypatch):
+    """回归（2026-10-13 图片优化）：ProductResponse 必须出站派生 image_thumb。
+
+    列表页此前直接用原图：存量 50 张 png/jpg 合计 ~50MB（最大 4.1MB），每页图片
+    流量数十 MB。缩略图 key 是确定性后缀（原图 key + '.thumb.webp'），故由已签名的
+    image 直接派生即可，无需给 DB 加列。这里核对派生出的路径与签发参数。
+    """
+    monkeypatch.setenv('UPLOAD_URL_SIGNING_SECRET', 's3cret')
+    from fastapi_app.schemas.product import ProductResponse
+
+    resp = ProductResponse(
+        id=1, name='P', initial_stock=0, current_stock=0,
+        image='/static/uploads/20261001/a.png',
+    )
+    assert resp.image_thumb is not None
+    assert resp.image_thumb.startswith('/static/uploads/20261001/a.png.thumb.webp?')
+    assert 'st=' in resp.image_thumb and 's=' in resp.image_thumb
+    # 与主图落在同一个时间桶 —— 否则两者缓存生命周期不一致
+    assert (resp.image_thumb.split('st=')[1].split('&')[0]
+            == resp.image.split('st=')[1].split('&')[0])
+    # 缩略图 key 与主图 key 不同 → 摘要必须不同（防「原样透传主图」的退化）
+    assert resp.image_thumb.split('s=')[1] != resp.image.split('s=')[1]
+
+
+def test_image_thumb_is_none_for_external_url(monkeypatch):
+    """外部直链没有本地缩略图 → image_thumb 必须为 None（前端据此回退原图）。"""
+    monkeypatch.setenv('UPLOAD_URL_SIGNING_SECRET', 's3cret')
+    from fastapi_app.schemas.product import ProductResponse
+
+    for url in ('https://cdn.example.com/a.png', 'http://x/a.png', '//cdn.x/a.png'):
+        resp = ProductResponse(id=1, name='P', initial_stock=0, current_stock=0, image=url)
+        assert resp.image_thumb is None, f'{url} 不该派生出缩略图'
+
+
+def test_image_thumb_is_none_without_image():
+    """无图 → 两个字段都为 None。"""
+    from fastapi_app.schemas.product import ProductResponse
+
+    resp = ProductResponse(id=1, name='P', initial_stock=0, current_stock=0, image=None)
+    assert resp.image is None and resp.image_thumb is None
+
+
+def test_image_thumb_unsigned_when_no_secret():
+    """密钥未配置时缩略图 URL 不带签名（与签发层 fail-safe 联动）。"""
+    from fastapi_app.schemas.product import ProductResponse
+
+    resp = ProductResponse(
+        id=1, name='P', initial_stock=0, current_stock=0,
+        image='/static/uploads/20261001/a.png',
+    )
+    assert resp.image_thumb == '/static/uploads/20261001/a.png.thumb.webp'

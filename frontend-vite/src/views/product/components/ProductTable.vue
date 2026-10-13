@@ -9,7 +9,9 @@
         style="width: 150px; flex-shrink: 0"
         :options="customerFilterOptions"
       />
-      <UiSearchInput :model-value="searchTerm" placeholder="搜索产品名称或69码..." @search="onSearchInput" @update:model-value="searchTerm = $event" />
+      <!-- 必须走 setSearchTerm，不能写 `searchTerm = $event`：search 是 useEnhancedList
+           暴露的 readonly ref，直接赋值被 Vue 静默忽略（仅 dev 警告），关键词永远进不了查询。 -->
+      <UiSearchInput :model-value="searchTerm" placeholder="搜索产品名称或69码..." @search="onSearchInput" @update:model-value="setSearchTerm" />
     </div>
   </div>
   <div class="pd-col-scroll">
@@ -32,7 +34,7 @@
         </template>
         <template #column-body-image="{ row }">
           <div v-if="(row as Product).image && !failedImageIds.has((row as Product).id)" class="pd-thumb-box" @click="emit('open-image', (row as Product).image!)">
-            <img loading="lazy" :src="resolveStaticUrl((row as Product).image!)" class="pd-thumb-img" :alt="(row as Product).name" @error="handleImageError(row as Product)" />
+            <img loading="lazy" :src="thumbSrc(row as Product)" class="pd-thumb-img" :alt="(row as Product).name" @error="handleImageError(row as Product)" />
           </div>
           <div v-else class="pd-thumb-box">
             <div class="pd-no-image"><FontAwesomeIcon icon="image" aria-hidden="true" /></div>
@@ -83,6 +85,7 @@ interface Product {
   barcode: string
   price: number
   image: string | null
+  image_thumb?: string | null
   factory?: string
   current_stock?: number
   customers?: ProductCustomerRef[]
@@ -152,8 +155,22 @@ function onPageChange(event: { page: number; rows: number }) {
 
 // ===== 图片加载失败处理 =====
 const failedImageIds = ref<Set<number>>(new Set())
+// 缩略图缺失/404 时先回退原图（存量老图可能还没补缩略图），原图也失败才显示占位
+const thumbFallbackIds = ref<Set<number>>(new Set())
+
+/** 列表用图：优先 400px 缩略图（后端出站派生 image_thumb），拿不到则回退原图 */
+function thumbSrc(row: Product): string {
+  const thumb = row.image_thumb
+  if (thumb && !thumbFallbackIds.value.has(row.id)) return resolveStaticUrl(thumb)
+  return resolveStaticUrl(row.image ?? '')
+}
 
 function handleImageError(row: Product) {
+  // 缩略图失败 → 先退回原图；原图也失败 → 显示占位
+  if (row.image_thumb && !thumbFallbackIds.value.has(row.id)) {
+    thumbFallbackIds.value = new Set(thumbFallbackIds.value).add(row.id)
+    return
+  }
   failedImageIds.value = new Set(failedImageIds.value).add(row.id)
 }
 </script>

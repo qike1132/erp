@@ -8,6 +8,7 @@ import logging
 from collections.abc import Callable, Hashable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal, InvalidOperation
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -32,6 +33,7 @@ from fastapi_app.shared_models import (
     InventoryLog,
     Order,
     Product,
+    ProductCustomer,
     StockIn,
     StockOut,
 )
@@ -428,27 +430,97 @@ async def _save_imported_image(
     return strip_upload_signature(saved['url'])
 
 
+async def _resolve_import_customer_id(
+    db: AsyncSession, customer_name, cache: dict, idx: int | None, messages: list,
+) -> int | None:
+    """把「客户」列的名字解析成客户 ID（带进程内缓存）。
+
+    客户名是可选的：模板里没填就返回 ``None``，不影响产品入库。名字填了但不在
+    客户主数据中，记一条行级消息并返回 ``None`` —— 产品照建，只是不挂归属
+    （「未挂客户的 SKU 对所有客户可见」）。不静默：否则用户以为挂上了。
+    """
+    if not customer_name:
+        return None
+    key = str(customer_name).strip()
+    if not key:
+        return None
+    if key not in cache:
+        cache[key] = (await db.execute(
+            select(Customer.id).where(Customer.name == key).limit(1)
+        )).scalar()
+    customer_id = cache[key]
+    if customer_id is None:
+        at = f'行{idx}: ' if idx is not None else ''
+        messages.append(f"{at}客户'{key}'不存在于客户主数据，未挂客户归属")
+    return customer_id
+
+
+def _fmt_money(value) -> str:
+    """金额统一两位小数展示（预览里的「改前改后」与行内价格同口径）。"""
+    try:
+        return f'{Decimal(str(value)):.2f}'
+    except (InvalidOperation, ValueError, TypeError):
+        return str(value)
+
+
+async def _backfill_empty_product_fields(
+    db: AsyncSession, product: Product, *, price, factory, customer_id: int | None,
+    customer_name: str = '', dry_run: bool = False,
+) -> tuple[bool, list[str]]:
+    """对**已存在**的产品做「只补空值」回填，返回 ``(是否有改动, 改动说明)``。
+
+    只写库里为空的字段：价格 0/NULL、工厂空、尚无任何客户归属。这样重传文件能把
+    「先建的产品」补齐（用户真实场景：先建了产品，后来才拿到价格和客户），
+    又不会覆盖人工改过的价格与归属 —— 覆盖式导入会让「拿旧文件重传」抹掉新价格。
+
+    ``dry_run=True`` 只算出 ``改动说明`` 而不落库，供导入预览使用。判定与实际写入
+    同在下方这段代码里，故预览据此渲染的改动必然等于导入会做的改动。
+
+    ``dry_run`` 下传入的 ``product`` 必定是库里已有的行（本批新建的产品在预览里
+    不会落库），因此下面的客户归属查询能正常按 ``product.id`` 读到真实状态。
+    """
+    changed = False
+    changes: list[str] = []
+    if price is not None and (product.price is None or float(product.price) == 0):
+        parsed = _parse_product_price(price, product.name)
+        if parsed != 0:
+            changes.append(f'价格 {_fmt_money(product.price or 0)} → {_fmt_money(parsed)}')
+            if not dry_run:
+                product.price = parsed
+            changed = True
+    if factory and not (product.factory or '').strip():
+        new_factory = str(factory).strip()
+        changes.append(f'工厂 空 → {new_factory}')
+        if not dry_run:
+            product.factory = new_factory
+        changed = True
+    if customer_id is not None:
+        if product.id is None and not dry_run:
+            # 本批刚创建、尚未 flush：挂关联前需要 product.id（预览不会走到这里）
+            await db.flush()
+        has_link = (await db.execute(
+            select(ProductCustomer.id).where(ProductCustomer.product_id == product.id).limit(1)
+        )).scalar() is not None
+        if not has_link:
+            changes.append(f'挂客户「{customer_name}」' if customer_name else '挂客户归属')
+            if not dry_run:
+                db.add(ProductCustomer(product_id=product.id, customer_id=customer_id))
+            changed = True
+    return changed, changes
+
+
 async def _fill_existing_product_image(
-    db: AsyncSession, name: str, image_bytes: bytes | None, idx: int,
+    db: AsyncSession, product: Product, name: str, image_bytes: bytes | None, idx: int,
     debug_messages: list, uploader_id: int | None,
 ) -> bool:
-    """产品已存在时的行处理：该行带图片就按模板覆盖，不带则按重复跳过。
+    """已存在产品的图片按模板**覆盖**，返回是否写入了图片。
 
     **覆盖而非「仅补空缺」**：图片修复必须能落到已有产品上 —— 例如透明底被压成
     黑底后重传。若只补空缺，用户就只能删产品重建，而有库存/订单的产品根本删不掉。
-
-    仅在**行内带图片**时才会被调用（无图片的重复行在去重阶段已被剔除）。
+    （价格/工厂/客户归属走 :func:`_backfill_empty_product_fields` 的「只补空值」，
+    与图片口径不同：价格被覆盖的代价比图片大得多。）
     """
     if image_bytes is None:
-        debug_messages.append(f'行{idx}: 产品名称与已有数据重复，已跳过: {name}')
-        return False
-    # 用 .first() 而非 scalar_one_or_none：名称唯一约束只约束精确字符串，
-    # 「Acme」与「acme」可以并存，按 lower() 查会命中多行（与 get_product_by_name_ci 同口径）。
-    result = await db.execute(select(Product).where(func.lower(Product.name) == func.lower(name)))
-    product = result.scalars().first()
-    if product is None:
-        # 与预加载结果不一致（并发删除）：按重复跳过，不强行插入以免撞唯一约束
-        debug_messages.append(f'行{idx}: 产品名称与已有数据重复，已跳过: {name}')
         return False
     image_key = await _save_imported_image(db, image_bytes, name, uploader_id)
     if not image_key:
@@ -458,6 +530,16 @@ async def _fill_existing_product_image(
     return True
 
 
+async def _find_product_by_name_ci(db: AsyncSession, name: str) -> Product | None:
+    """按名称（忽略大小写）取产品。
+
+    用 ``.first()`` 而非 ``scalar_one_or_none``：名称唯一约束只约束精确字符串，
+    「Acme」与「acme」可以并存，按 lower() 查会命中多行（与 get_product_by_name_ci 同口径）。
+    """
+    result = await db.execute(select(Product).where(func.lower(Product.name) == func.lower(name)))
+    return result.scalars().first()
+
+
 async def import_products_from_data(
     db: AsyncSession, data_list: list, *,
     cell_images: dict[str, bytes] | None = None,
@@ -465,10 +547,17 @@ async def import_products_from_data(
 ) -> tuple[int, list[str]]:
     """从数据列表导入产品。
 
+    列口径（2026-10-12 用户裁定，Sheet 名「新品录入」）：
+    ``客户 | 产品名称 | 工厂 | 69码 | 产品价格 | 图片``。
+    「客户」列挂 ``product_customer`` 归属（客户名不在主数据则记行级消息、不挂）；
+    「工厂」列写 ``product.factory``。
+
+    新产品按文件落库；**已存在**的产品只补空值（价格 0/空、工厂空、无客户归属），
+    不覆盖人工改过的价格与归属（见 :func:`_backfill_empty_product_fields`），
+    图片例外 —— 仍按模板覆盖（便于批量修图，见 :func:`_fill_existing_product_image`）。
+
     「图片」列支持 WPS 单元格图片（``=DISPIMG("ID_xxx",1)``）：图片字节由调用方
-    从工作簿里提取好（``cell_images``），新产品的图片直接写入 ``product.image``；
-    产品已存在且该行带图片时按模板**覆盖**其图片（便于批量修图，见
-    :func:`_fill_existing_product_image`）。
+    从工作簿里提取好（``cell_images``），新产品的图片直接写入 ``product.image``。
 
     Args:
         db: 数据库会话。
@@ -477,9 +566,9 @@ async def import_products_from_data(
         uploader_id: 图片落库时登记的上传人；未知则 None。
 
     Returns:
-        ``(成功导入条数, 错误消息列表)``。重复行（批内重复 / 与库中已有重复）
-        在进入行处理**之前**被剔除，并为每行生成一条可读消息，
-        不再像以前那样静默 ``return False``。
+        ``(成功导入条数, 错误消息列表)``。「条数」含新建与**有改动**的补全；
+        未改动（字段都已填、图也没带）的行计入消息，不再静默 ``return False``。
+        批内同名重复行在进入行处理前剔除并逐条回显。
     """
     images = cell_images or {}
 
@@ -491,9 +580,12 @@ async def import_products_from_data(
     async def _row_handler(db, row_data, idx, context, debug_messages):
         existing_names = context['existing_names']
         created_products = context['created_products']
+        customer_cache = context.setdefault('customer_id_cache', {})
         name = row_data.get('产品名称') or row_data.get('产品名') or row_data.get('名称')
         barcode = row_data.get('69码') or row_data.get('条码') or row_data.get('条形码')
         price = row_data.get('产品价格') or row_data.get('价格')
+        factory = row_data.get('工厂')
+        customer_name = row_data.get('客户') or row_data.get('客户名称')
         initial_stock = row_data.get('初始库存') or row_data.get('库存') or 0
 
         if not name:
@@ -501,6 +593,8 @@ async def import_products_from_data(
 
         name = str(name).strip()
         name_key = name.casefold()
+        customer_id = await _resolve_import_customer_id(
+            db, customer_name, customer_cache, idx, debug_messages)
 
         image_id = parse_dispimg_id(row_data.get('图片') or row_data.get('产品图片'))
         image_bytes = images.get(image_id) if image_id else None
@@ -509,33 +603,55 @@ async def import_products_from_data(
         # 否则同文件内两条同名带图行会在最终 flush 时撞 product.name 唯一约束。
         # 若本批先创建的那条**没图**、本行带图，则把图补进去 —— 该行之所以绕过
         # 去重，正是为了让图片有机会落地；整行跳过会让图被静默丢弃。
+        #
+        # **只补图片，不做字段回填**：文件内同名重复行按「跳过」处置（无图行在去重
+        # 阶段已被丢弃，这里只是把带图行补齐到同一语义）。若在此回填价格/工厂/客户，
+        # 两行同名就会被合并计数，而导入预览按「重复 → 跳过」判定 —— 预览说写入 N 条、
+        # 导入却写 N+1 条，正是 tests/test_product_import_preview.py 那条哨兵要拦的漂移。
         pending = created_products.get(name_key)
         if pending is not None:
             if image_bytes is not None and not pending.image:
                 image_key = await _save_imported_image(db, image_bytes, name, uploader_id)
                 if image_key:
                     pending.image = image_key
-                    debug_messages.append(f'行{idx}: 产品名称在文件内重复，图片已补入先前创建的同名产品: {name}')
+                    debug_messages.append(
+                        f'行{idx}: 产品名称在文件内重复，图片已补入先前创建的同名产品: {name}')
                     return False
             debug_messages.append(f'行{idx}: 产品名称在文件内重复，已跳过: {name}')
             return False
 
         if name_key in existing_names:
-            return await _fill_existing_product_image(
-                db, name, image_bytes, idx, debug_messages, uploader_id,
-            )
+            product = await _find_product_by_name_ci(db, name)
+            if product is None:
+                # 与预加载结果不一致（并发删除）：按重复跳过，不强行插入以免撞唯一约束
+                debug_messages.append(f'行{idx}: 产品名称与已有数据重复，已跳过: {name}')
+                return False
+            changed, _ = await _backfill_empty_product_fields(
+                db, product, price=price, factory=factory, customer_id=customer_id,
+                customer_name=customer_name)
+            if await _fill_existing_product_image(
+                db, product, name, image_bytes, idx, debug_messages, uploader_id,
+            ):
+                changed = True
+            if not changed:
+                debug_messages.append(f'行{idx}: 产品名称与已有数据重复，已存在且无可补字段，未改动: {name}')
+            return changed
 
         stock = _parse_product_stock(initial_stock, name)
         product = Product(
             name=name,
             barcode=str(barcode).strip() if barcode else '',
             price=_parse_product_price(price, name),
+            factory=str(factory).strip() if factory else '',
             initial_stock=stock,
             current_stock=stock,
         )
         if image_bytes is not None:
             product.image = await _save_imported_image(db, image_bytes, name, uploader_id)
         db.add(product)
+        if customer_id is not None:
+            await db.flush()  # 挂归属需要 product.id
+            db.add(ProductCustomer(product_id=product.id, customer_id=customer_id))
         created_products[name_key] = product
         return True
 
@@ -545,9 +661,12 @@ async def import_products_from_data(
         use_savepoint=False,
         has_debug_messages=True,
         label="产品导入",
+        # 只做**批内**去重：与库中已有产品同名的行必须走到行处理器，才有机会按
+        # 「只补空值」回填价格/工厂/客户（用户真实场景：先建了产品，后来才拿到
+        # 这些字段）。此前把「与库中重复」的行也在这里剔除，等于把回填机会一起
+        # 丢了 —— 无图的行根本到不了行处理器。
         dedupe=DedupeSpec(
             key_fn=_product_dedupe_key,
-            existing_keys_key='existing_names',
             label='产品名称',
         ),
     )
