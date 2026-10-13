@@ -14,31 +14,32 @@ from openpyxl import load_workbook
 from utils.report_exporter import ReportExporter, generate_filename
 
 # (导出方法, 工作表名, 表头, 行值取值键)
+# 2026-10-13：表头补「单号/订单号」与「条码」两列（把行里已有的字段渲染出来）。
 _CASES = [
     (
         'export_order_logs', '订单流水',
-        ['下单时间', '客户', '产品名称', '数量', '备注'],
-        ['order_date', 'customer', 'product_name', 'quantity', 'note'],
+        ['下单时间', '订单号', '客户', '产品名称', '条码', '数量', '备注'],
+        ['order_date', 'order_no', 'customer', 'product_name', 'product_barcode', 'quantity', 'note'],
     ),
     (
         'export_stockin_logs', '备货流水',
-        ['备货时间', '客户', '产品名称', '备货数量', '备注'],
-        ['stockin_date', 'customer', 'product_name', 'quantity', 'note'],
+        ['备货时间', '备货单号', '客户', '产品名称', '条码', '备货数量', '备注'],
+        ['stockin_date', 'record_no', 'customer', 'product_name', 'product_barcode', 'quantity', 'note'],
     ),
     (
         'export_stockout_logs', '出货流水',
-        ['出货时间', '客户', '产品名称', '出货数量', '备注'],
-        ['stockout_date', 'customer', 'product_name', 'quantity', 'note'],
+        ['出货时间', '出货单号', '客户', '产品名称', '条码', '出货数量', '备注'],
+        ['stockout_date', 'record_no', 'customer', 'product_name', 'product_barcode', 'quantity', 'note'],
     ),
     (
         'export_deduction_logs', '备货抵扣流水',
-        ['抵扣时间', '客户', '产品名称', '抵扣数量', '订单备注'],
-        ['deduction_time', 'customer', 'product_name', 'quantity', 'order_note'],
+        ['抵扣时间', '出货单号', '订单号', '客户', '产品名称', '条码', '抵扣数量', '订单备注'],
+        ['deduction_time', 'record_no', 'order_no', 'customer', 'product_name', 'product_barcode', 'quantity', 'order_note'],
     ),
     (
         'export_return_logs', '退货流水',
-        ['退货时间', '客户', '产品名称', '退货数量', '备注'],
-        ['return_date', 'customer', 'product_name', 'quantity', 'note'],
+        ['退货时间', '退货单号', '客户', '产品名称', '条码', '退货数量', '备注'],
+        ['return_date', 'record_no', 'customer', 'product_name', 'product_barcode', 'quantity', 'note'],
     ),
 ]
 
