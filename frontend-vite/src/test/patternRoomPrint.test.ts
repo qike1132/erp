@@ -225,6 +225,18 @@ describe('PrintDialog 列对齐（各角色分段共用同一套列位置）', (
   })
 })
 
+describe('PrintDialog 部位名称列对齐', () => {
+  it('部位名称列左对齐，且特异性高于通用居中规则', () => {
+    // 通用规则 `.pd-table th, .pd-table td` 特异性 (0,1,1)，部位列若只写
+    // `.pd-th-part, .pd-td-part` 是 (0,1,0)，会被静默覆盖成居中（本意左对齐失效）。
+    // 必须带 .pd-table 前缀提升到 (0,2,0)。
+    const rule = printDialogSource.match(/\.pd-table \.pd-th-part[\s\S]*?\}/)?.[0] ?? ''
+
+    expect(rule).toContain('.pd-td-part')
+    expect(rule).toContain('text-align: left')
+  })
+})
+
 // ==================== usePatternRoomPrint 取数 ====================
 
 describe('usePatternRoomPrint 取数（最终版本无数据时回退）', () => {

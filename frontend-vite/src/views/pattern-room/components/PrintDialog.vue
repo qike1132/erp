@@ -291,8 +291,10 @@ defineExpose({ updatePrintTime })
   border-bottom: 1px solid #d5dbe3;
 }
 
-.pd-th-part,
-.pd-td-part {
+/* 部位名称列左对齐：必须带 .pd-table 前缀把特异性提到 (0,2,0)，
+   否则会被上面的 `.pd-table th, .pd-table td`（0,1,1）静默覆盖成居中。 */
+.pd-table .pd-th-part,
+.pd-table .pd-td-part {
   text-align: left;
 }
 
