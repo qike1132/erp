@@ -318,3 +318,60 @@ class TestSerializeBatchStockins:
         result = await order_batch_service._serialize_batch_stockins(db, [21])
         assert result[21]['status'] == '批次已完成'
         assert result[21]['batch_completed_at'] == '2026-03-03 12:00'
+
+
+# ============================================================================
+# update_stockin_batch_no
+# ============================================================================
+class TestUpdateStockinBatchNo:
+    @pytest.mark.asyncio
+    async def test_sets_batch_no(self):
+        """写 StockIn.batch_no，不涉及订单同步"""
+        mock_stockin = MagicMock()
+        mock_stockin.id = 30
+        mock_stockin.batch_no = None
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = mock_stockin
+        db = AsyncMock()
+        db.execute = AsyncMock(return_value=result)
+
+        user = MagicMock()
+        user.id = 1
+        user.username = "admin"
+
+        with patch('fastapi_app.services.order_batch_service._safe_publish_event', new=AsyncMock()), \
+             patch('fastapi_app.services.order_batch_service._write_audit_log'):
+            out = await order_batch_service.update_stockin_batch_no(
+                db, stockin_id=30, batch_no='B9', user=user,
+            )
+        assert mock_stockin.batch_no == 'B9'
+        assert out['updated_count'] == 1
+
+    @pytest.mark.asyncio
+    async def test_missing_raises(self):
+        """备货不存在应抛 ValueError"""
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = None
+        db = AsyncMock()
+        db.execute = AsyncMock(return_value=result)
+        with pytest.raises(ValueError):
+            await order_batch_service.update_stockin_batch_no(
+                db, stockin_id=999, batch_no='B9', user=MagicMock(),
+            )
+
+    @pytest.mark.asyncio
+    async def test_clears_batch_no(self):
+        """传 null 清空备货批次号"""
+        mock_stockin = MagicMock()
+        mock_stockin.id = 31
+        mock_stockin.batch_no = 'OLD'
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = mock_stockin
+        db = AsyncMock()
+        db.execute = AsyncMock(return_value=result)
+        with patch('fastapi_app.services.order_batch_service._safe_publish_event', new=AsyncMock()), \
+             patch('fastapi_app.services.order_batch_service._write_audit_log'):
+            await order_batch_service.update_stockin_batch_no(
+                db, stockin_id=31, batch_no=None, user=MagicMock(),
+            )
+        assert mock_stockin.batch_no is None

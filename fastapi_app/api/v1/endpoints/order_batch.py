@@ -94,18 +94,18 @@ async def list_batch_orders(
     return OrderBatchListResponse(data=result['items'], total=result['total'], page=page, per_page=per_page)
 
 
-@router.put('/orders/{order_id}/batch-no', response_model=BatchNoUpdateResponse)
+@router.put('/orders/{record_id}/batch-no', response_model=BatchNoUpdateResponse)
 async def update_order_batch_no(
-    order_id: int,
+    record_id: int,
     data: BatchNoUpdate,
     db: AsyncSession = Depends(get_async_db),
     user: User = Depends(require_any_permission('batch_manage', 'order_manage')),
 ) -> BatchNoUpdateResponse:
-    """更新单个订单的批次号，可选同步同批次其他订单。
+    """更新单条记录（订单或备货）的批次号，可选同步同批次其他订单。
 
     Args:
-        order_id: 订单 ID。
-        data: 批次号更新请求体（含 batch_no 与 sync_same_batch 标志）。
+        record_id: 记录 ID（订单或备货，按 data.record_type 决定落到哪张表）。
+        data: 批次号更新请求体（含 batch_no / sync_same_batch / record_type）。
         db: 读写数据库会话。
         user: 当前操作用户。
 
@@ -113,12 +113,17 @@ async def update_order_batch_no(
         BatchNoUpdateResponse: 更新结果（含受影响行数）。
 
     Raises:
-        HTTPException: 订单不存在或批次号非法时由 db_transaction 转换抛出。
+        HTTPException: 记录不存在或批次号非法时由 db_transaction 转换抛出。
     """
     async with db_transaction(db):
-        result = await order_batch_service.update_batch_no(
-            db, order_id=order_id, batch_no=data.batch_no, sync_same_batch=data.sync_same_batch, user=user,
-        )
+        if data.record_type == 'stockin':
+            result = await order_batch_service.update_stockin_batch_no(
+                db, stockin_id=record_id, batch_no=data.batch_no, user=user,
+            )
+        else:
+            result = await order_batch_service.update_batch_no(
+                db, order_id=record_id, batch_no=data.batch_no, sync_same_batch=data.sync_same_batch, user=user,
+            )
     return BatchNoUpdateResponse(success=True, message='批次号更新成功', updated_count=result['updated_count'])
 
 

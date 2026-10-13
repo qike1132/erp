@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 class BatchNoUpdate(BaseModel):
     batch_no: str | None = Field(None, max_length=100, description='批次号')
     sync_same_batch: bool = Field(False, description='是否同步更新同批次其他订单')
+    record_type: str = Field('order', pattern='^(order|stockin)$', description='记录类型：order/stockin')
 
 
 class BatchAssignRequest(BaseModel):

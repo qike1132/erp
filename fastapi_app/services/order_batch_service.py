@@ -424,6 +424,35 @@ async def update_batch_no(
     return {'updated_count': len(updated_ids)}
 
 
+async def update_stockin_batch_no(
+    db: AsyncSession,
+    *,
+    stockin_id: int,
+    batch_no: str | None,
+    user: User,
+) -> dict:
+    """更新单条备货记录的批次号（订单路径见 update_batch_no）。
+
+    备货无 sync_same_batch 语义；行级锁与审计/事件对齐订单路径。
+    """
+    result = await db.execute(select(StockIn).where(StockIn.id == stockin_id).with_for_update())
+    stockin = result.scalar_one_or_none()
+    if not stockin:
+        raise ValueError(f"备货记录不存在: {stockin_id}")
+
+    old_batch_no = stockin.batch_no
+    stockin.batch_no = batch_no
+    _write_audit_log(
+        db, batch_no=batch_no or old_batch_no or '', action='batch_number_change',
+        order_ids=[stockin_id], user=user, old_value=old_batch_no, new_value=batch_no,
+        detail='record_type=stockin',
+    )
+    await db.flush()
+
+    await _safe_publish_event("batch_no_updated", {"batch_no": batch_no or '', "stockin_ids": [stockin_id]})
+    return {'updated_count': 1}
+
+
 async def batch_assign(
     db: AsyncSession,
     *,
