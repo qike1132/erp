@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   exportInventoryMock: vi.fn(),
   refetchMock: vi.fn(),
   queryData: null as unknown as { value: unknown },
+  queryLoading: null as unknown as { value: boolean },
 }))
 
 vi.mock('@/api', () => ({
@@ -30,11 +31,13 @@ vi.mock('@/api', () => ({
 vi.mock('@tanstack/vue-query', async () => {
   const { ref: vueRef } = await import('vue')
   const dataRef = vueRef<unknown>(null)
+  const loadingRef = vueRef(false)
   mocks.queryData = dataRef as { value: unknown }
+  mocks.queryLoading = loadingRef as { value: boolean }
   return {
     useQuery: () => ({
       data: dataRef,
-      isLoading: vueRef(false),
+      isLoading: loadingRef,
       isFetching: vueRef(false),
       refetch: mocks.refetchMock,
     }),
@@ -76,7 +79,7 @@ const INV_RESPONSE = {
   all_customers: ['滨发服饰', '贝乐教育'],
   total_items: 43,
   page: 1,
-  per_page: 15,
+  per_page: 20,
 }
 
 function mountStat(over: { orders?: number; stockin?: number } = {}) {
@@ -108,8 +111,9 @@ async function emitSort(w: VueWrapper, field: string, order: number) {
   await nextTick()
 }
 
-function mountTab() {
-  mocks.queryData.value = INV_RESPONSE
+function mountTab(opts: { data?: unknown; loading?: boolean } = {}) {
+  mocks.queryData.value = opts.data === undefined ? INV_RESPONSE : opts.data
+  mocks.queryLoading.value = opts.loading ?? false
   // 按生产配置挂载：main.ts 用的是 unstyled + PT，默认模式渲染出的
   // `p-*` 类名在生产里并不存在，断言会建立在假象上（排序图标那次就踩了这个坑）
   return mount(InventoryTab, {
@@ -156,6 +160,19 @@ describe('InventoryStatRow —— 三格汇总', () => {
     expect(stats[0]?.attributes('title')).toBe('未发完的订单数量')
     expect(stats[1]?.attributes('title')).toBe('已入库未消耗')
     expect(stats[2]?.attributes('title')).toBe('订单数量 + 备货数量')
+  })
+
+  it('每格把本格强调色下发给数字（渐变文字靠 --sk-stat-color 取色，与圆点同色系）', () => {
+    const stats = mountStat().findAll('.sk-stat')
+
+    // 断言的是「颜色变量确实下发了」这一结构事实：若模板不再绑定 style，
+    // 数字的渐变会退化成写死的默认色，与左侧圆点脱钩（此处即会红）。
+    // 注意要带冒号：`--sk-stat-color-soft` 也以 `--sk-stat-color` 开头，
+    // 不加冒号的 contains 会被它蒙混过关（变异检查实测）。
+    expect(stats[0]?.attributes('style')).toContain('--sk-stat-color:')
+    expect(stats[0]?.attributes('style')).toContain('--color-primary-500')
+    expect(stats[1]?.attributes('style')).toContain('--color-success-500')
+    expect(stats[2]?.attributes('style')).toContain('--color-info-500')
   })
 })
 
@@ -367,5 +384,47 @@ describe('InventoryTab —— 6 列表格与数字格式', () => {
     await w.find('.sk-export-btn').trigger('click')
 
     expect(mocks.exportInventoryMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('InventoryTab —— 分页器与首屏加载态', () => {
+  it('每页条数选择器的当前值必须是可选项之一（否则显示条数与真实条数不符）', () => {
+    // 回归：默认 perPage 原为 15，不在 [10,20,50,100] 里 —— 原生 select 找不到
+    // 匹配项，浏览器回落到第一项，于是「显示 10 条/页、实际 15 条」。
+    const select = mountTab().find('.ui-page-size')
+
+    expect(select.exists()).toBe(true)
+    const el = select.element as HTMLSelectElement
+    const optionValues = Array.from(el.querySelectorAll('option')).map(
+      (o) => (o as HTMLOptionElement).value,
+    )
+    expect(optionValues).toContain(el.value)
+    expect(el.value).toBe('20')
+  })
+
+  it('首屏加载中显示骨架屏，而不是「暂无库存数据」的空白空态', () => {
+    const w = mountTab({ data: null, loading: true })
+
+    expect(w.find('.sk-loading-skeleton').exists()).toBe(true)
+    expect(w.find('.sk-empty').exists()).toBe(false)
+  })
+
+  it('加载结束且确无数据时，才显示空态', () => {
+    const w = mountTab({ data: { ...INV_RESPONSE, data: [], total_items: 0 }, loading: false })
+
+    expect(w.find('.sk-loading-skeleton').exists()).toBe(false)
+    expect(w.find('.sk-empty').exists()).toBe(true)
+  })
+
+  it('表格容器是撑满高度的 flex 列，分页器与表格体分列滚动区内外（分页器钉底）', () => {
+    // jsdom 无排版引擎，测不了「钉在底部」；这里锁住支撑该布局的结构事实：
+    // 分页器与 DataTable 同级且都在 UiDataTable 容器内，容器本身是 flex 列。
+    const w = mountTab()
+    const wrapper = w.find('.ui-data-table-wrapper')
+
+    expect(wrapper.exists()).toBe(true)
+    expect(wrapper.find('.ui-pagination').exists()).toBe(true)
+    // 生产为 unstyled+PT：DataTable 根节点靠 data-pc-name 命中（见 InventoryTab 样式）
+    expect(wrapper.find('[data-pc-name="datatable"]').exists()).toBe(true)
   })
 })
