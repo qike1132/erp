@@ -59,6 +59,22 @@ class TestReportService:
         assert result['stats']['total_count'] == 0
 
     @pytest.mark.asyncio
+    async def test_get_order_logs_search_also_matches_order_no(self, mock_db, mock_empty_result):
+        """搜索框兼搜订单号：product 关键字须同时匹配 o.order_no（2026-10-13）。
+
+        前端搜索框占位符为「产品名称 / SKU / 订单号」，靠这一个 product 参数承载；
+        若漏掉 o.order_no 条件，按订单号搜会恒空（且不报错）。
+        """
+        from fastapi_app.services.report_service import get_order_logs
+        mock_db.execute = AsyncMock(return_value=mock_empty_result)
+
+        await get_order_logs(mock_db, product='SO-2026', page=1, per_page=20)
+
+        sqls = [str(call.args[0]) for call in mock_db.execute.call_args_list]
+        assert sqls, '应至少执行一次查询'
+        assert any('o.order_no LIKE :product' in sql for sql in sqls), '订单号搜索条件缺失'
+
+    @pytest.mark.asyncio
     async def test_get_stockin_logs_empty(self, mock_db, mock_empty_result):
         from fastapi_app.services.report_service import get_stockin_logs
         mock_db.execute = AsyncMock(return_value=mock_empty_result)

@@ -170,8 +170,11 @@ async def get_order_logs(db: AsyncSession, customer: str = '', product: str = ''
         # 与 SELECT 的显示口径同源（item_name/item_barcode 都是
         # COALESCE(p.*, oi.*)）：否则产品行缺失（被删）的 SKU 行会「显示得出、
         # 按名字搜不到」——左连接下 p.name 为 NULL，旧写法直接把它排除掉。
+        # 2026-10-13：搜索框兼作「订单号」搜索——追加 o.order_no 匹配（订单级条件，
+        # 命中即整单所有 SKU 行都出；前端搜索框占位符已同步为「产品名称 / SKU / 订单号」）。
         cond = ("(COALESCE(p.name, oi.product_name) LIKE :product "
-                "OR COALESCE(p.barcode, oi.product_barcode) LIKE :product)")
+                "OR COALESCE(p.barcode, oi.product_barcode) LIKE :product "
+                "OR o.order_no LIKE :product)")
         where_clauses.append(cond)
         item_where_clauses.append(cond)
         params['product'] = f'%{escape_like(product)}%'
