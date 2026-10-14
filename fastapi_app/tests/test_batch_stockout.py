@@ -12,11 +12,12 @@
 - 部分成功部分失败
 - 库存结余闸门（2026-10-07 新增）
 """
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from fastapi_app.services import stock_service
+from fastapi_app.services import stock_common, stock_out_service, stock_service
 
 
 @pytest.fixture(autouse=True)
@@ -463,3 +464,38 @@ class TestBatchCreateStockoutsInventoryBalanceGate:
             )
 
         assert result['results'][0]['success'] is True
+
+
+class TestBatchStockoutDateTimezone:
+    """回归：批量出货的 stockout_date 必须是「北京墙钟 → aware UTC」。
+
+    2026-10-14 事故：_create_stockout_records 把北京墙钟 .replace(tzinfo=UTC)，
+    timestamptz 列在会话时区 Asia/Shanghai 下渲染成 +8（11:20 → 19:20）。
+    """
+
+    async def test_batch_stockout_date_uses_beijing_wall_clock(self, monkeypatch, mock_db):
+        frozen = datetime(2026, 9, 30, 16, 30, 0, tzinfo=UTC)  # 北京 2026-10-01 00:30
+
+        class _FrozenDatetime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return frozen.replace(tzinfo=None) if tz is None else frozen.astimezone(tz)
+
+            @classmethod
+            def strptime(cls, date_string, fmt):
+                return datetime.strptime(date_string, fmt)
+
+        monkeypatch.setattr(stock_common, 'datetime', _FrozenDatetime)
+        monkeypatch.setattr(
+            stock_service, 'generate_stockout_number',
+            AsyncMock(return_value='SO-20261001-0001'),
+        )
+
+        created = await stock_out_service._create_stockout_records(
+            mock_db, product_id=1, customer='客户A', note='',
+            stockout_date_str='2026-10-01', quantity=5,
+            orders=[{'order_id': 1, 'available': 5}],
+        )
+
+        # 北京 2026-10-01 00:30 == UTC 2026-09-30 16:30（不是 2026-10-01 00:30 UTC）
+        assert created[0].stockout_date == datetime(2026, 9, 30, 16, 30, tzinfo=UTC)

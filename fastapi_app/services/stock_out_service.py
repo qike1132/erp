@@ -24,7 +24,11 @@ from fastapi_app.core.cache_invalidation import cache_mgr, schedule_post_commit_
 from fastapi_app.core.domain_events import DomainEvent, DomainEventType, schedule_post_commit_domain_event
 from fastapi_app.core.exception_handler import safe_publish_event
 from fastapi_app.services.notification_service import StockEvent
-from fastapi_app.services.stock_common import _parse_date_preserve_time, guard_stockout_deletion
+from fastapi_app.services.stock_common import (
+    _BUSINESS_TZ,
+    _parse_date_preserve_time,
+    guard_stockout_deletion,
+)
 from fastapi_app.services.stock_event_service import (
     _publish_shipment_completed_events,
     _recalc_shipment_order_statuses,
@@ -321,6 +325,17 @@ def _validate_stockout_batch(stockouts_data: list) -> tuple[list, dict]:
     return validated, errors_map
 
 
+def _resolve_stockout_datetime(date_str: str) -> datetime:
+    """YYYY-MM-DD → 该日北京墙钟（时分秒取当前北京时间）对应的 aware UTC。
+
+    stock_out.stockout_date 是 timestamptz，报表用 ``to_char(...)`` 在会话时区
+    Asia/Shanghai 下渲染。旧实现把北京墙钟 ``.replace(tzinfo=UTC)``，等于把它当
+    UTC 再按 +8 渲染 → 显示晚 8 小时（2026-10-14 SO-20261014-0001 实测 11:20 → 19:20）。
+    口径与 ``order_batch_create._resolve_order_date`` 一致（2026-10-13 下单时间同类修复）。
+    """
+    return _parse_date_preserve_time(date_str).replace(tzinfo=_BUSINESS_TZ).astimezone(UTC)
+
+
 async def _create_stockout_records(db: AsyncSession, product_id: int, customer: str,
                                    note: str, stockout_date_str: str, quantity: int,
                                    orders: list) -> list[StockOut]:
@@ -336,7 +351,7 @@ async def _create_stockout_records(db: AsyncSession, product_id: int, customer: 
         stockout_no = await stock_service.generate_stockout_number(db)
         stockout = StockOut(
             stockout_no=stockout_no, product_id=product_id, quantity=ship_qty,
-            stockout_date=(_parse_date_preserve_time(stockout_date_str).replace(tzinfo=UTC) if stockout_date_str else datetime.now(UTC)),
+            stockout_date=(_resolve_stockout_datetime(stockout_date_str) if stockout_date_str else datetime.now(UTC)),
             customer=customer, order_id=order_detail['order_id'], note=note
         )
         db.add(stockout)
