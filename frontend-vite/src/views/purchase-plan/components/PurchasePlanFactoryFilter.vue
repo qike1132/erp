@@ -18,7 +18,7 @@
 </template>
 
 <script setup lang="ts">
-// 工厂分段控件 —— 与「月份」同属「限定数据范围」的维度，故并排在第二行。
+// 工厂 Tab 组 —— 头部第一行左侧（视图 Tab 在其右），与「月份」同属「限定数据范围」的维度。
 // 切换后整页（KPI / 日历 / 当日明细 / SKU 表）跟着收敛到所选工厂。
 import { computed } from 'vue';
 import { orderFactories, factoryTone } from './factoryMeta';

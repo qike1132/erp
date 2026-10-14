@@ -267,8 +267,6 @@ function exportCSV() {
 </script>
 
 <style scoped lang="scss">
-@use './purchase-plan-common.scss' as *;
-
 .sp-container {
   height: 100%;
   padding: 0;
