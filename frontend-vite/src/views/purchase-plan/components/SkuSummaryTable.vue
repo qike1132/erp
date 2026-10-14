@@ -1,12 +1,20 @@
 <template>
   <div class="sp-sku-wrap">
     <table class="sp-sku-table">
+      <colgroup>
+        <col class="c-cust" /><col class="c-factory" /><col class="c-prod" /><col class="c-code" />
+        <col class="c-num" /><col class="c-num" /><col class="c-num" /><col class="c-prog" />
+      </colgroup>
       <thead>
+        <tr class="sp-th-group">
+          <th class="th-cust" rowspan="2">客户名称</th>
+          <th class="th-factory" rowspan="2">工厂</th>
+          <th class="th-prod" rowspan="2">产品名称</th>
+          <th class="th-code" rowspan="2">商品条码</th>
+          <th class="th-group-qty" colspan="3">数量（件）</th>
+          <th class="th-prog" rowspan="2">进度</th>
+        </tr>
         <tr>
-          <th class="th-cust">客户名称</th>
-          <th class="th-factory">工厂</th>
-          <th class="th-prod">产品名称</th>
-          <th class="th-code">商品条码</th>
           <th
             v-for="col in SORT_COLS"
             :key="col.key"
@@ -24,7 +32,6 @@
               <FontAwesomeIcon v-else icon="sort" class="th-sort-muted" aria-hidden="true" />
             </span>
           </th>
-          <th class="th-prog">进度</th>
         </tr>
       </thead>
       <tbody>
@@ -143,8 +150,21 @@ function progCls(pct: number): string {
   cursor: pointer;
 }
 
+/* 斑马纹：偶数行淡底。必须写在 hover 之前——两条选择器同权重（0,3,3），
+   靠声明顺序决出胜负，hover 在后才能盖过斑马纹。 */
+.sp-sku-table tbody tr:nth-child(even) td {
+  background: var(--color-slate-50, #f8fafc);
+}
+
 .sp-sku-table tbody tr:hover td {
   background: var(--color-primary-50);
+}
+
+/* 列分组层：「数量（件）」跨三列居中，底色比表头略深以示分组。
+   权重 (0,3,0) > 上方 `.sp-sku-table th` (0,2,1)，可覆盖其 text-align: left。 */
+.sp-th-group .th-group-qty {
+  text-align: center;
+  background: var(--color-slate-100, #f1f5f9);
 }
 
 /* 数字列右对齐：左对齐时位数不同的数量无法纵向比大小。

@@ -110,6 +110,16 @@ describe('PurchasePlanMonthlySummary 表格与面板', () => {
     expect(w.find('.sp-sku-table thead').text()).toContain('进度')
   })
 
+  it('表头有「数量（件）」分组层', () => {
+    const w = mountSummary()
+    expect(w.find('.sp-sku-table thead').text()).toContain('数量（件）')
+  })
+
+  it('数字列头右对齐（.th-num 共 3 个）', () => {
+    const w = mountSummary()
+    expect(w.findAll('.sp-sku-table .th-num')).toHaveLength(3)
+  })
+
   it('数字列走千分位', () => {
     expect(mountSummary().find('.sp-sku-table tbody').text()).toContain('6,000')
   })
