@@ -26,12 +26,14 @@
           <span>可退出货明细</span>
           <span class="sr-count">{{ shipments.length }} 条</span>
         </header>
-        <StockReturnShipmentList
-          :shipments="shipments"
-          :loading="loadingShipments"
-          :picked-id="pickedId"
-          @pick="onPick"
-        />
+        <div class="sr-pane-body">
+          <StockReturnShipmentList
+            :shipments="shipments"
+            :loading="loadingShipments"
+            :picked-id="pickedId"
+            @pick="onPick"
+          />
+        </div>
       </section>
     </div>
 
@@ -168,7 +170,7 @@ function fillMax() {
   flex: 1;
 }
 
-/* 不再 overflow:hidden —— 否则表头 position:sticky 会失效（弹窗 body 才是滚动容器） */
+/* 面板头部固定，内容区自己滚（为什么不能让弹窗 body 滚，见 .sr-pane-body） */
 .sr-pane {
   display: flex;
   flex-direction: column;
@@ -176,6 +178,17 @@ function fillMax() {
   border: 1px solid var(--color-border, #e4e7ed);
   border-radius: 12px;
   background: #fff;
+  overflow: hidden;
+}
+.sr-pane-body {
+  /*
+   * 列表自己滚，而不是让弹窗 body 滚：UiDialog 的 body 带 p-6 内边距，若由它滚，
+   * sticky 表头会贴在内边距**下方**，正在滚动的行就从那条 24px 缝里透出来
+   * （2026-10-14 反馈「内容透视过表头」）。这里没有内边距，表头贴得住。
+   * 用 vh 兜高度（弹窗是 h-fit，height:100% 解析不出来），保证弹窗 body 不出现第二条滚动条。
+   */
+  max-height: calc(90vh - 460px);
+  overflow: auto;
 }
 .sr-pane-head {
   display: flex;
