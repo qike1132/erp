@@ -95,6 +95,9 @@ class ProductResponse(BaseModel):
     # 列表缩略图（出站派生，见 derive_image_thumb）：存量老图多为数 MB 的 png/jpg，
     # 列表里用 400px 缩略图可把每页图片流量从数十 MB 降到 <1MB。前端拿不到则回退 image。
     image_thumb: str | None = None
+    # 预览弹窗用「原图」（出站派生，见 derive_image_original）：存量图被 repoint 成压缩
+    # .webp（scripts/repoint_product_images_to_webp.py），原图仍在盘上；找不到则回退 image。
+    image_original: str | None = None
     factory: str | None = None
     initial_stock: int
     current_stock: int
@@ -144,6 +147,25 @@ class ProductResponse(BaseModel):
 
             bare = img.split('?', 1)[0]
             self.image_thumb = sign_upload_url(get_thumbnail_key(bare))
+        return self
+
+    @model_validator(mode='after')
+    def derive_image_original(self) -> 'ProductResponse':
+        """出站派生「原图」URL（预览弹窗用）。
+
+        存量图在 2026-10-13 被 repoint 成压缩 .webp（scripts/repoint_product_images_to_webp.py），
+        原图 png/jpg 仍保留在盘上；预览弹窗要显示原始分辨率，故按同目录同名兄弟文件找回
+        （storage_service.find_original_key）。找不到（外链 / 非本地 / 非 .webp / 无原图）→
+        回退 `image` 本身，前端无需分支。
+        """
+        img = self.image
+        if not img:
+            return self
+        from fastapi_app.services.signed_urls import sign_upload_url
+        from fastapi_app.services.storage_service import find_original_key
+
+        orig = find_original_key(img.split('?', 1)[0])
+        self.image_original = sign_upload_url(orig) if orig else img
         return self
 
     class Config:

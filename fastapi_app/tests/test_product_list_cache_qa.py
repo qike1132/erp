@@ -82,11 +82,14 @@ def _expected_item(signed_urls):
 
     image_thumb 是出站**派生**字段（缩略图 key = 原图 key + '.thumb.webp'，见
     schemas/product.py::derive_image_thumb），_FULL_ITEM 里没有，故在此补上。
+    image_original 同为派生字段（见 derive_image_original）；此处 image 非本地 .webp，
+    找不到原图 → 回退 image 本身。
     """
     return {
         **_FULL_ITEM,
         'image': signed_urls.sign_upload_url(_FULL_ITEM['image']),
         'image_thumb': signed_urls.sign_upload_url(_FULL_ITEM['image'] + '.thumb.webp'),
+        'image_original': signed_urls.sign_upload_url(_FULL_ITEM['image']),
     }
 
 
@@ -312,11 +315,11 @@ class TestResponseStructureConsistency:
         body = hit.json()
         assert body['success'] is True
         assert body['total'] == 1 and isinstance(body['total'], int)
-        # 除 image / image_thumb 经出站签发/派生外，其余字段与值都不得变形
+        # 除 image / image_thumb / image_original 经出站签发/派生外，其余字段与值都不得变形
         expected = _expected_item(frozen_signing)
         assert body['items'] == [expected]
-        assert {k: v for k, v in body['items'][0].items() if k not in ('image', 'image_thumb')} == \
-            {k: v for k, v in _FULL_ITEM.items() if k not in ('image', 'image_thumb')}
+        assert {k: v for k, v in body['items'][0].items() if k not in ('image', 'image_thumb', 'image_original')} == \
+            {k: v for k, v in _FULL_ITEM.items() if k not in ('image', 'image_thumb', 'image_original')}
         # 缓存键确实以单前缀写入
         assert any(k.startswith('erp:product:list:') for k in redis_cache._fallback_cache)
 
@@ -327,11 +330,12 @@ class TestResponseStructureConsistency:
         dumped = resp.model_dump()
         assert len(dumped['items']) == 1
         rebuilt = dumped['items'][0]
-        assert {k: v for k, v in rebuilt.items() if k not in ('image', 'image_thumb')} == \
-            {k: v for k, v in _FULL_ITEM.items() if k not in ('image', 'image_thumb')}
+        assert {k: v for k, v in rebuilt.items() if k not in ('image', 'image_thumb', 'image_original')} == \
+            {k: v for k, v in _FULL_ITEM.items() if k not in ('image', 'image_thumb', 'image_original')}
         assert rebuilt['image'] == frozen_signing.sign_upload_url(_FULL_ITEM['image'])
         assert rebuilt['image_thumb'] == \
             frozen_signing.sign_upload_url(_FULL_ITEM['image'] + '.thumb.webp')
+        assert rebuilt['image_original'] == frozen_signing.sign_upload_url(_FULL_ITEM['image'])
         assert dumped['total'] == 1 and isinstance(dumped['total'], int)
         assert dumped['success'] is True
         # 缓存里那份原始 dict 不得被改动（签发只发生在序列化期）

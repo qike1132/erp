@@ -326,6 +326,28 @@ def get_blur_key(storage_key: str) -> str:
     return f'{storage_key}{_BLUR_SUFFIX}'
 
 
+_UPLOAD_URL_PREFIX = '/static/uploads/'
+# 存量图 png/jpg 被 repoint 到压缩 .webp 后，原图仍留在盘上（见
+# scripts/repoint_product_images_to_webp.py）；预览弹窗要展示原图，按这些扩展名找回。
+_ORIGINAL_IMAGE_EXTS = ('.png', '.jpg', '.jpeg', '.gif')
+
+
+def find_original_key(storage_key: str) -> str | None:
+    """给定压缩主图 key（.webp），返回同目录同名的原始 png/jpg 兄弟 key；无则 None。
+
+    仅本地存储、且 key 位于 /static/uploads/ 下、扩展名为 .webp 时才探测磁盘；
+    外链 / 非 .webp / 无兄弟原图一律返回 None，调用方回退主图本身。
+    """
+    if not storage_key.startswith(_UPLOAD_URL_PREFIX) or not storage_key.lower().endswith('.webp'):
+        return None
+    stem = storage_key[: -len('.webp')]
+    rel = stem[len(_UPLOAD_URL_PREFIX):]
+    for ext in _ORIGINAL_IMAGE_EXTS:
+        if (LOCAL_UPLOAD_DIR / f'{rel}{ext}').is_file():
+            return f'{stem}{ext}'
+    return None
+
+
 def make_blur_placeholder(content: bytes, max_size: int = _BLUR_MAX_SIZE, quality: int = _BLUR_QUALITY) -> bytes | None:
     """生成 32px WebP 低质量模糊占位图（blur-up）
 

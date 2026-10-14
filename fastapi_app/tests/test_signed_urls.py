@@ -296,3 +296,63 @@ def test_image_thumb_unsigned_when_no_secret():
         image='/static/uploads/20261001/a.png',
     )
     assert resp.image_thumb == '/static/uploads/20261001/a.png.thumb.webp'
+
+
+def test_product_response_derives_image_original_from_webp_sibling(monkeypatch, tmp_path):
+    """回归（2026-10-14）：预览弹窗需原图 —— image 是压缩 .webp 时，image_original 指向盘上原图兄弟。
+
+    存量图被 repoint 到 .webp（scripts/repoint_product_images_to_webp.py），原图仍在盘上；
+    预览弹窗据此显示原始分辨率。核对派生路径与签发参数，并防「原样透传压缩图」的退化。
+    """
+    monkeypatch.setenv('UPLOAD_URL_SIGNING_SECRET', 's3cret')
+    import fastapi_app.services.storage_service as storage_service
+
+    monkeypatch.setattr(storage_service, 'LOCAL_UPLOAD_DIR', tmp_path)
+    (tmp_path / '20261009').mkdir()
+    (tmp_path / '20261009' / 'x.png').write_bytes(b'original')
+
+    from fastapi_app.schemas.product import ProductResponse
+
+    resp = ProductResponse(
+        id=1, name='P', initial_stock=0, current_stock=0,
+        image='/static/uploads/20261009/x.webp',
+    )
+    assert resp.image_original is not None
+    assert resp.image_original.startswith('/static/uploads/20261009/x.png?')
+    assert 'st=' in resp.image_original and 's=' in resp.image_original
+    # 原图 key 与压缩主图 key 不同 → 摘要必须不同（防「原样透传压缩图」退化）
+    assert resp.image_original.split('s=')[1] != resp.image.split('s=')[1]
+
+
+def test_image_original_falls_back_to_image_when_no_sibling(monkeypatch, tmp_path):
+    """盘上没有原图兄弟 → image_original 回退 image（前端无需分支）。"""
+    monkeypatch.setenv('UPLOAD_URL_SIGNING_SECRET', 's3cret')
+    import fastapi_app.services.storage_service as storage_service
+
+    monkeypatch.setattr(storage_service, 'LOCAL_UPLOAD_DIR', tmp_path)
+
+    from fastapi_app.schemas.product import ProductResponse
+
+    resp = ProductResponse(
+        id=1, name='P', initial_stock=0, current_stock=0,
+        image='/static/uploads/20261009/x.webp',
+    )
+    assert resp.image_original == resp.image
+
+
+def test_image_original_is_image_for_non_webp_and_external(monkeypatch):
+    """非 .webp 本地 key 与外链都不探测磁盘，image_original 即 image。"""
+    monkeypatch.setenv('UPLOAD_URL_SIGNING_SECRET', 's3cret')
+    from fastapi_app.schemas.product import ProductResponse
+
+    for url in ('/static/uploads/20261001/a.png', 'https://cdn.example.com/a.png', '//cdn.x/a.png'):
+        resp = ProductResponse(id=1, name='P', initial_stock=0, current_stock=0, image=url)
+        assert resp.image_original == resp.image, f'{url} 的 image_original 应为 image'
+
+
+def test_image_original_is_none_without_image():
+    """无图 → image_original 为 None。"""
+    from fastapi_app.schemas.product import ProductResponse
+
+    resp = ProductResponse(id=1, name='P', initial_stock=0, current_stock=0, image=None)
+    assert resp.image_original is None

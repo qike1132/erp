@@ -1947,6 +1947,7 @@ export interface ProductResponse {
   price?: number | null
   image?: string | null
   image_thumb?: string | null
+  image_original?: string | null
   factory?: string | null
   initial_stock: number
   current_stock: number
@@ -2369,7 +2370,6 @@ export interface ReportLogItem {
   record_no?: string
   reason?: string
   gross_quantity?: number
-  stockout_date?: string
   note_display?: string
   order_id?: number
   order_no?: string
@@ -2379,6 +2379,7 @@ export interface ReportLogItem {
   item_note?: string
   order_date?: string
   stockin_date?: string
+  stockout_date?: string
   deduction_time?: string
   return_date?: string
   customer?: string

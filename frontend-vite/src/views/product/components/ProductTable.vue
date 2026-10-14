@@ -33,7 +33,7 @@
           </div>
         </template>
         <template #column-body-image="{ row }">
-          <div v-if="(row as Product).image && !failedImageIds.has((row as Product).id)" class="pd-thumb-box" @click="emit('open-image', (row as Product).image!)">
+          <div v-if="(row as Product).image && !failedImageIds.has((row as Product).id)" class="pd-thumb-box" @click="emit('open-image', (row as Product).image_original ?? (row as Product).image!)">
             <img loading="lazy" :src="thumbSrc(row as Product)" class="pd-thumb-img" :alt="(row as Product).name" @error="handleImageError(row as Product)" />
           </div>
           <div v-else class="pd-thumb-box">
@@ -86,6 +86,7 @@ interface Product {
   price: number
   image: string | null
   image_thumb?: string | null
+  image_original?: string | null
   factory?: string
   current_stock?: number
   customers?: ProductCustomerRef[]
