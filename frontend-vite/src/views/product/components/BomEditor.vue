@@ -50,16 +50,23 @@
                 <button class="bom-btn-add-v2" @click="addBomItem"><FontAwesomeIcon icon="plus" aria-hidden="true" />添加物料</button>
               </div>
             </div>
-            <!-- 角色页签：点 tab 切换BOM，点「⋯」管理（重命名/删除） -->
+            <!-- 角色页签：左键切换 BOM 作用域，右键打开菜单（重命名 / 删除角色）
+                 与 pattern-room RoleTabs 同形态（页签上不再放「⋯」按钮） -->
             <div class="bom-role-bar">
               <span class="bom-role-label"><FontAwesomeIcon icon="tags" aria-hidden="true" /> 角色：</span>
               <div class="bom-role-tabs">
                 <!-- 默认BOM 页签（产品级，可重命名、不可删除） -->
                 <div
                   v-if="defaultScopeHasItems"
-                  class="bom-role-tab default-tab"
+                  class="bom-role-tab"
                   :class="{ active: selectedRole === null }"
-                  @click="selectRole(null); openMenu = null"
+                  tabindex="0"
+                  title="右键打开菜单"
+                  aria-haspopup="menu"
+                  :aria-expanded="roleMenu?.key === 'default'"
+                  @click="selectRole(null); closeMenu()"
+                  @contextmenu="onRoleContextMenu($event, 'default')"
+                  @keydown="onRoleTabKeydown($event, 'default')"
                 >
                   <template v-if="renamingTarget === 'default'">
                     <input ref="renameInputRef" v-model="renameInput" class="bom-role-edit-input" maxlength="50"
@@ -69,12 +76,6 @@
                   <template v-else>
                     <span class="bom-role-name">{{ defaultScopeName }}</span>
                   </template>
-                  <span class="bom-role-more-wrap">
-                    <button class="bom-role-more" title="更多操作" @click.stop="toggleMenu('default')">⋯</button>
-                    <div v-if="openMenu === 'default'" class="bom-role-menu">
-                      <button class="bom-menu-item" @click.stop="startRename('default', defaultScopeName)"><FontAwesomeIcon icon="pencil-alt" aria-hidden="true" /> 重命名</button>
-                    </div>
-                  </span>
                 </div>
                 <!-- 角色页签 -->
                 <div
@@ -82,7 +83,13 @@
                   :key="role.id ?? role.role_key"
                   class="bom-role-tab"
                   :class="{ active: selectedRole === role }"
-                  @click="selectRole(role); openMenu = null"
+                  tabindex="0"
+                  title="右键打开菜单"
+                  aria-haspopup="menu"
+                  :aria-expanded="roleMenu?.key === role"
+                  @click="selectRole(role); closeMenu()"
+                  @contextmenu="onRoleContextMenu($event, role)"
+                  @keydown="onRoleTabKeydown($event, role)"
                 >
                   <template v-if="renamingTarget === role">
                     <input ref="renameInputRef" v-model="renameInput" class="bom-role-edit-input" maxlength="50"
@@ -92,35 +99,54 @@
                   <template v-else>
                     <span class="bom-role-name">{{ role.name }}</span>
                   </template>
-                  <span class="bom-role-more-wrap">
-                    <button class="bom-role-more" title="更多操作" @click.stop="toggleMenu(role)">⋯</button>
-                    <div v-if="openMenu === role" class="bom-role-menu">
-                      <button class="bom-menu-item" @click.stop="startRename(role, role.name)"><FontAwesomeIcon icon="pencil-alt" aria-hidden="true" /> 重命名</button>
-                      <div class="bom-menu-divider" />
-                      <button class="bom-menu-item danger" @click.stop="removeRole(role); openMenu = null"><FontAwesomeIcon icon="trash-alt" aria-hidden="true" /> 删除</button>
-                    </div>
-                  </span>
                 </div>
-                <!-- 添加角色 -->
-                <input
-                  v-if="addingRole"
-                  ref="roleAddInputRef"
-                  v-model="newRoleName"
-                  class="bom-role-add-input"
-                  maxlength="50"
-                  placeholder="角色名，回车确认"
-                  @keydown.enter="commitAddRole"
-                  @keydown.esc="cancelAddRole"
-                  @blur="commitAddRole"
-                />
-                <button v-else class="bom-role-add-btn" @click="startAddRole"><FontAwesomeIcon icon="plus" aria-hidden="true" />添加角色</button>
+                <!-- 添加角色：与 pattern-room RoleTabs 的「新增角色」同形态
+                     （常驻虚线图标按钮 → 右侧追加内联输入框；回车/失焦确认，Esc 取消） -->
+                <span class="bom-role-add-wrap">
+                  <button type="button" class="bom-role-add-btn" title="新增角色" aria-label="新增角色" @click="startAddRole"><FontAwesomeIcon icon="plus" aria-hidden="true" /></button>
+                  <input
+                    v-if="addingRole"
+                    ref="roleAddInputRef"
+                    v-model="newRoleName"
+                    class="bom-role-add-input"
+                    maxlength="100"
+                    placeholder="角色名称"
+                    @keydown.enter="commitAddRole"
+                    @keydown.esc="cancelAddRole"
+                    @blur="commitAddRole"
+                  />
+                </span>
               </div>
               <!-- P1-04：顶部常驻当前作用域徽标，避免误在别的角色作用域下编辑 -->
               <span class="bom-scope-badge" title="当前编辑作用域">
                 <FontAwesomeIcon icon="tags" aria-hidden="true" />
                 当前作用域：<strong>{{ currentScopeLabel }}</strong>
               </span>
-              <span v-if="!bomRoles.length && !defaultScopeHasItems" class="bom-role-empty">尚未配置角色，点击"＋ 添加角色"开始</span>
+              <span v-if="!bomRoles.length && !defaultScopeHasItems" class="bom-role-empty">尚未配置角色，点击「＋」新增角色开始</span>
+              <!-- 右键菜单：与 pattern-room RoleTabs 的 .role-tab-menu 同形态
+                   （遮罩负责点击/滚轮/再次右键关闭；键盘路径打开后焦点入首个菜单项）
+                   必须留在角色栏**末尾**：v-if 节点插在兄弟列表中间时按位置配对会错位，
+                   整栏（含页签）会被重建 → 焦点无法归还、内联改名输入被冲掉 -->
+              <div
+                v-if="roleMenu"
+                class="bom-role-menu-mask"
+                @click="closeMenu()"
+                @contextmenu.prevent="closeMenu()"
+                @wheel="closeMenu()"
+              />
+              <div v-if="roleMenu" class="bom-role-menu" role="menu" :style="{ left: `${roleMenu.x}px`, top: `${roleMenu.y}px` }">
+                <button ref="menuItemEl" type="button" role="menuitem" class="bom-menu-item" @click="onMenuRename">
+                  <FontAwesomeIcon icon="pencil-alt" aria-hidden="true" />
+                  重命名
+                </button>
+                <template v-if="roleMenu.key !== 'default'">
+                  <div class="bom-menu-divider" />
+                  <button type="button" role="menuitem" class="bom-menu-item danger" @click="onMenuRemove">
+                    <FontAwesomeIcon icon="trash-alt" aria-hidden="true" />
+                    删除角色
+                  </button>
+                </template>
+              </div>
             </div>
             <div v-if="quickCopyProgress.visible" class="mb-3">
               <div class="pd-progress"><div class="pd-progress-bar" :style="{ width: quickCopyProgress.percent + '%' }" /></div>
@@ -206,7 +232,7 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, ref } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { useProductListActions } from '../composables/useProductListActions'
@@ -230,20 +256,107 @@ const {
   searchProductForCopy, selectCopyBomProduct, confirmCopyBom,
 } = useProductListActions(confirmDialog)
 
-// ===== 角色页签管理：⋯ 菜单 + 内联重命名 =====
+// ===== 角色页签管理：右键菜单（重命名 / 删除角色）+ 内联重命名 =====
+// 与 pattern-room RoleTabs 同形态：删除入口不再挂在页签上的「⋯」按钮，改为右键弹出。
 type TabKey = Role | 'default'
-const openMenu = ref<TabKey | null>(null)
+const roleMenu = ref<{ key: TabKey; x: number; y: number } | null>(null)
+const menuTriggerEl = ref<HTMLElement | null>(null)
+const menuItemEl = ref<HTMLButtonElement | null>(null)
 const renamingTarget = ref<TabKey | null>(null)
 const renameInput = ref('')
 const renameInputRef = ref<HTMLInputElement | HTMLInputElement[] | null>(null)
 
-function toggleMenu(key: TabKey) {
-  openMenu.value = openMenu.value === key ? null : key
+/** 关闭菜单；restoreFocus 仅用于键盘路径（不抢鼠标用户刚点的位置） */
+function closeMenu(restoreFocus = false) {
+  if (!roleMenu.value) return
+  roleMenu.value = null
+  if (restoreFocus) menuTriggerEl.value?.focus()
 }
+
+/** 打开菜单（贴近视口边缘时向内收拢），并把焦点移入首个菜单项 */
+async function openRoleMenu(key: TabKey, x: number, y: number, trigger: HTMLElement) {
+  const MENU_WIDTH = 148
+  const MENU_HEIGHT = 82 // 重命名 + 分隔线 + 删除角色
+  const MARGIN = 8
+  menuTriggerEl.value = trigger
+  roleMenu.value = {
+    key,
+    // Math.max 兜底：视口比菜单还小时也要留在可点击范围内（不能出负坐标）
+    x: Math.max(MARGIN, Math.min(x, window.innerWidth - MENU_WIDTH - MARGIN)),
+    y: Math.max(MARGIN, Math.min(y, window.innerHeight - MENU_HEIGHT - MARGIN)),
+  }
+  await nextTick()
+  menuItemEl.value?.focus()
+}
+
+function onRoleContextMenu(e: MouseEvent, key: TabKey) {
+  e.preventDefault()
+  openRoleMenu(key, e.clientX, e.clientY, e.currentTarget as HTMLElement)
+}
+
+/**
+ * 页签键盘入口。
+ *
+ * - ContextMenu 键 / Shift+F10 → 打开右键菜单（与 RoleTabs 同）；
+ * - Enter / Space → 切换作用域：页签是 div（重命名时要内联渲染 input，button 不能嵌 input），
+ *   所以原生按钮的「Enter/Space 触发 click」得显式补上。
+ */
+function onRoleTabKeydown(e: KeyboardEvent, key: TabKey) {
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault()
+    selectRole(key === 'default' ? null : key)
+    closeMenu()
+    return
+  }
+  if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
+    e.preventDefault()
+    const trigger = e.currentTarget as HTMLElement
+    const rect = trigger.getBoundingClientRect()
+    openRoleMenu(key, rect.left + 12, rect.bottom + 4, trigger)
+  }
+}
+
+function onMenuRename() {
+  const key = roleMenu.value?.key
+  closeMenu(true)
+  if (key === undefined) return
+  if (key === 'default') startRename('default', defaultScopeName.value)
+  else if (bomRoles.value.includes(key)) startRename(key, key.name)
+}
+
+function onMenuRemove() {
+  const key = roleMenu.value?.key
+  closeMenu(true)
+  // 菜单打开期间角色可能已被其他操作删掉，别对不存在的角色发起删除
+  if (key && key !== 'default' && bomRoles.value.includes(key)) void removeRole(key)
+}
+
+function onDocumentKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape') closeMenu(true)
+}
+
+/** 窗口尺寸或滚动变化后菜单会与页签错位，直接关闭 */
+function onViewportChange() {
+  closeMenu()
+}
+
+onMounted(() => {
+  document.addEventListener('keydown', onDocumentKeydown)
+  window.addEventListener('resize', onViewportChange)
+  // scroll 不冒泡，需 capture 才能收到任意滚动容器（含键盘翻页滚动）的事件
+  window.addEventListener('scroll', onViewportChange, true)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', onDocumentKeydown)
+  window.removeEventListener('resize', onViewportChange)
+  window.removeEventListener('scroll', onViewportChange, true)
+})
+
 function startRename(key: TabKey, name: string) {
   renamingTarget.value = key
   renameInput.value = name
-  openMenu.value = null
+  closeMenu()
   nextTick(() => {
     const list = Array.isArray(renameInputRef.value) ? renameInputRef.value : [renameInputRef.value]
     list[0]?.focus()
@@ -262,24 +375,32 @@ function cancelRename() {
   renamingTarget.value = null
 }
 
-// ===== 添加角色（内联输入，回车确认） =====
+// ===== 添加角色：与 pattern-room RoleTabs 的「新增角色」同口径 =====
+// 常驻图标按钮 → 内联输入框；回车/失焦确认，Esc 取消；trim 后非空才新增。
 const addingRole = ref(false)
 const newRoleName = ref('')
 const roleAddInputRef = ref<HTMLInputElement | null>(null)
 
-function startAddRole() {
+async function startAddRole() {
   addingRole.value = true
   newRoleName.value = ''
-  nextTick(() => roleAddInputRef.value?.focus())
+  await nextTick()
+  roleAddInputRef.value?.focus()
 }
 function commitAddRole() {
-  if (!addingRole.value) return
-  addRole(newRoleName.value)
+  const name = newRoleName.value.trim()
+  if (name) addRole(name)
   addingRole.value = false
+  newRoleName.value = ''
 }
 function cancelAddRole() {
   addingRole.value = false
+  newRoleName.value = ''
 }
+// 收起时清空输入（兜底：Esc 后 input 被卸载，不一定再触发 blur）
+watch(addingRole, (v) => {
+  if (!v) newRoleName.value = ''
+})
 
 defineExpose({ open: openBomModal })
 </script>
@@ -408,65 +529,85 @@ defineExpose({ open: openBomModal })
 }
 .bom-role-label i { color: var(--color-primary-500); }
 .bom-role-tabs { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; flex: 1; }
+/* 角色页签外观与 pattern-room RoleTabs 的 .role-tab 逐条同规范
+   （用户反馈 m00132：选中/未选中颜色要与参照页一致；默认BOM 不再有独立的虚线灰底） */
 .bom-role-tab {
   display: inline-flex; align-items: center; gap: 6px;
-  padding: 7px 8px 7px 14px; border-radius: 9px; cursor: pointer;
-  font-size: 13px; font-weight: 600; color: var(--color-text-secondary);
-  border: 1px solid transparent; position: relative; user-select: none;
-  transition: background 0.16s ease, color 0.16s ease, border-color 0.16s ease, transform 0.16s ease;
+  padding: 6px 12px;
+  border: 1px solid var(--color-border-light, #e5e7eb);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--color-text-secondary, #6b7280);
+  font-size: 13px; font-family: inherit; font-weight: 500;
+  cursor: pointer; transition: all 0.15s ease; user-select: none;
 }
-.bom-role-tab:hover { background: var(--color-primary-50); color: var(--color-primary-600); }
+.bom-role-tab:hover {
+  border-color: var(--color-primary-300, #93c5fd);
+  color: var(--color-primary-600, #3b82f6);
+  background: var(--color-primary-50, #eff6ff);
+}
 .bom-role-tab.active {
-  background: linear-gradient(135deg, var(--color-primary-500), var(--color-primary-600));
-  color: #fff; box-shadow: 0 4px 12px rgba(59,130,246,0.28);
+  color: #fff;
+  background: linear-gradient(135deg, var(--color-primary-500, #3b82f6), var(--color-primary-600, #2563eb));
+  border-color: var(--color-primary-600, #2563eb);
+  box-shadow: 0 2px 6px rgba(59, 130, 246, 0.25);
 }
-.bom-role-tab.default-tab { border-style: dashed; border-color: var(--color-border-light, #e2e8f0); }
-.bom-role-tab.default-tab.active {
-  background: var(--color-surface, #f8fafc); color: var(--color-text);
-  border-color: var(--color-border-light, #e2e8f0); border-style: solid; box-shadow: none;
+.bom-role-tab.active:hover {
+  color: #fff;
+  background: linear-gradient(135deg, var(--color-primary-600, #2563eb), var(--color-primary-700, #1d4ed8));
 }
+/* 键盘聚焦时的焦点环（页签可 Tab 聚焦，便于键盘打开右键菜单） */
+.bom-role-tab:focus-visible { outline: 2px solid var(--color-primary-400, #60a5fa); outline-offset: 1px; }
 .bom-role-name { white-space: nowrap; }
 .bom-role-edit-input {
   width: 96px; padding: 2px 8px; border: 1px solid var(--color-primary-400); border-radius: 6px;
-  font-size: 13px; font-weight: 600; outline: none;
+  font-size: 13px; font-weight: 600; outline: none; user-select: text;
 }
-.bom-role-more-wrap { position: relative; display: inline-flex; }
-.bom-role-more {
-  width: 20px; height: 20px; border: none; border-radius: 6px; background: transparent;
-  color: inherit; cursor: pointer; font-size: 14px; line-height: 1; opacity: 0.55;
-  display: flex; align-items: center; justify-content: center;
-  transition: opacity 0.15s ease, background 0.15s ease;
-}
-.bom-role-more:hover { opacity: 1; background: rgba(0,0,0,.12); }
+/* 右键菜单：与 pattern-room RoleTabs 的 .role-tab-menu 同规范（遮罩负责点击/滚轮/再次右键关闭） */
+.bom-role-menu-mask { position: fixed; inset: 0; z-index: 1000; }
 .bom-role-menu {
-  position: absolute; top: calc(100% + 6px); right: 0; z-index: 30; min-width: 140px;
-  background: #fff; border: 1px solid var(--color-border-light, #e2e8f0); border-radius: 10px;
-  box-shadow: 0 12px 32px rgba(15,23,42,.16); padding: 5px;
-  animation: bom-menu-pop 0.15s ease;
+  position: fixed; z-index: 1001; min-width: 140px; padding: 5px;
+  border: 1px solid var(--color-border-light, #e2e8f0); border-radius: 10px;
+  background: #fff; box-shadow: 0 12px 32px rgba(15, 23, 42, 0.16);
+  animation: role-tab-menu-pop 0.15s ease;
 }
-@keyframes bom-menu-pop { from { transform: scale(.96) translateY(-4px); opacity: 0; } to { transform: scale(1) translateY(0); opacity: 1; } }
+/* 与参照页同名：Vue 会把 scoped 样式里的 keyframes 重写为带组件 hash 的名字，跨组件不会互相覆盖 */
+@keyframes role-tab-menu-pop { from { transform: scale(0.96) translateY(-4px); opacity: 0; } to { transform: scale(1) translateY(0); opacity: 1; } }
 .bom-menu-item {
-  display: flex; align-items: center; gap: 8px; width: 100%;
-  padding: 8px 10px; border: none; border-radius: 7px; background: transparent;
-  font-size: 13px; font-weight: 600; color: var(--color-text); cursor: pointer; text-align: left;
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 10px;
+  border: none; border-radius: 7px; background: transparent;
+  font-family: inherit; font-size: 13px; font-weight: 600;
+  color: var(--color-text-primary); text-align: left; cursor: pointer;
   transition: background 0.14s ease;
 }
-.bom-menu-item:hover { background: var(--color-primary-50); }
-.bom-menu-item.danger { color: var(--color-danger-600); }
-.bom-menu-item.danger:hover { background: var(--color-danger-50); }
+/* 参照页菜单只有「删除角色」（自带 hover）；这里多了「重命名」，补一条非危险项的 hover */
+.bom-menu-item:not(.danger):hover { background: var(--color-primary-50, #eff6ff); }
+.bom-menu-item.danger { color: var(--color-danger-600, #d44042); }
+.bom-menu-item.danger:hover { background: var(--color-danger-50, #fde8e8); }
+/* 菜单项由键盘聚焦时（打开即聚焦）给出可见焦点 */
+.bom-menu-item:focus-visible { outline: 2px solid var(--color-primary-400, #60a5fa); outline-offset: -2px; }
 .bom-menu-divider { height: 1px; background: var(--color-border-lighter, #f1f5f9); margin: 4px 0; }
 .bom-role-empty { font-size: 13px; color: var(--color-text-secondary); }
-.bom-role-add-input {
-  border: 1px solid var(--color-primary-400); border-radius: 9px; padding: 7px 12px;
-  font-size: 13px; width: 140px; outline: none; box-shadow: 0 0 0 3px rgba(59,130,246,.12);
-}
+/* 添加角色：与 pattern-room RoleTabs 的 .role-tab-add / .role-tab-input 同规范 */
+.bom-role-add-wrap { display: inline-flex; align-items: center; gap: 4px; }
 .bom-role-add-btn {
-  display: inline-flex; align-items: center; gap: 6px;
-  border: 2px dashed var(--color-primary-200); background: var(--color-primary-50);
-  color: var(--color-primary-600); border-radius: 9px; padding: 7px 14px;
-  font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.2s ease;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px;
+  border: 1px dashed var(--color-border-light, #e5e7eb); border-radius: 8px;
+  background: transparent; color: var(--color-text-secondary, #6b7280);
+  cursor: pointer; font-size: 11px; transition: all 0.15s ease;
 }
-.bom-role-add-btn:hover { border-color: var(--color-primary-400); background: var(--color-primary-100); }
+.bom-role-add-btn:hover {
+  border-color: var(--color-primary-400, #60a5fa);
+  color: var(--color-primary-600, #3b82f6);
+  background: var(--color-primary-50, #eff6ff);
+}
+.bom-role-add-input {
+  width: 120px; padding: 6px 10px;
+  border: 1px solid var(--color-primary-400, #60a5fa); border-radius: 8px;
+  font-size: 13px; font-family: inherit; outline: none;
+  box-shadow: 0 0 0 2px var(--color-primary-100, #dbeafe);
+}
 /* P1-04：当前作用域常驻徽标 */
 .bom-scope-badge {
   display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
