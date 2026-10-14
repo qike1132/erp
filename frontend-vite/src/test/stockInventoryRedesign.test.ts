@@ -46,6 +46,8 @@ vi.mock('@tanstack/vue-query', async () => {
 })
 
 import InventoryStatRow from '@/views/stock/components/InventoryStatRow.vue'
+// 源码级断言用（scoped <style> 不会注入到 test-utils 的 DOM，渐变文字契约只能读原文）
+import statRowSource from '@/views/stock/components/InventoryStatRow.vue?raw'
 import InventoryToolbar from '@/views/stock/components/InventoryToolbar.vue'
 import CustomerChipBar from '@/components/ui/CustomerChipBar.vue'
 import InventoryTab from '@/views/stock/InventoryTab.vue'
@@ -162,17 +164,39 @@ describe('InventoryStatRow —— 三格汇总', () => {
     expect(stats[2]?.attributes('title')).toBe('订单数量 + 备货数量')
   })
 
-  it('每格把本格强调色下发给数字（渐变文字靠 --sk-stat-color 取色，与圆点同色系）', () => {
+  it('数字走常规文本色：格容器与数字元素都不再带内联强调色', () => {
     const stats = mountStat().findAll('.sk-stat')
 
-    // 断言的是「颜色变量确实下发了」这一结构事实：若模板不再绑定 style，
-    // 数字的渐变会退化成写死的默认色，与左侧圆点脱钩（此处即会红）。
-    // 注意要带冒号：`--sk-stat-color-soft` 也以 `--sk-stat-color` 开头，
-    // 不加冒号的 contains 会被它蒙混过关（变异检查实测）。
-    expect(stats[0]?.attributes('style')).toContain('--sk-stat-color:')
-    expect(stats[0]?.attributes('style')).toContain('--color-primary-500')
-    expect(stats[1]?.attributes('style')).toContain('--color-success-500')
-    expect(stats[2]?.attributes('style')).toContain('--color-info-500')
+    // 2026-10-14 起三项数字统一常规色。若有人把 --sk-stat-color 之类的强调色
+    // 重新绑回格容器（恢复渐变文字的前置条件），或给数字加内联色，此处立刻变红。
+    for (const s of stats) {
+      expect(s.attributes('style') ?? '').toBe('')
+      expect(s.find('.sk-stat-value').attributes('style') ?? '').toBe('')
+    }
+  })
+
+  it('源码里不再有渐变文字（background-clip:text / text-fill-color:transparent）', () => {
+    expect(statRowSource).not.toContain('background-clip: text')
+    expect(statRowSource).not.toContain('-webkit-text-fill-color: transparent')
+    expect(statRowSource).not.toContain('color: transparent')
+    // 数字仍显式声明常规文本色，且颜色不来自任何按格变量
+    expect(statRowSource).toContain('color: var(--color-text)')
+    expect(statRowSource).not.toContain('--sk-stat-color')
+  })
+
+  it('配色只剩标签圆点：每格仅圆点带内联色，三格圆点颜色互不相同', () => {
+    const stats = mountStat().findAll('.sk-stat')
+    const dots = stats.map((s) => s.find('.sk-stat-dot').attributes('style') ?? '')
+
+    for (const s of stats) {
+      // 每格只允许圆点带内联 style：格容器或数字一旦重新拿到颜色（渐变文字的前置条件）即红。
+      // 注意 findAll 不含自身，故格容器要单独查 attributes('style')。
+      expect(s.attributes('style') ?? '').toBe('')
+      const styled = s.findAll('[style]')
+      expect(styled).toHaveLength(1)
+      expect(styled[0]!.classes()).toContain('sk-stat-dot')
+    }
+    expect(new Set(dots).size).toBe(3)
   })
 })
 
