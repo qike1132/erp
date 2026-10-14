@@ -78,7 +78,7 @@ AI 说"修好了/应该没问题/测试过了"而实际没跑，是最高频的 
 
 - `quality_gate.py` 读 `pyproject.toml [tool.code-quality]`：`max_function_length=80`、`max_vue_component_length=400`、`max_file_size=1600`。**只拦新增违规**；清理存量后可 `--update-baseline` 收紧。
 - 提交钩子 `core.hooksPath = .githooks`。`.githooks/pre-commit` 四层：①危险路径 ②密钥扫描（**总是跑**）③Python 字面量收窄 ④`.pre-commit-config.yaml`（`ruff --fix` + local `quality-gate`；`ruff-format` 已于 2026-10-01 移除，理由见该文件注释）。
-- 第 ④ 层：`pre-commit` 在项目 `.venv`（git-bash PATH 通常看不到）。钩子按 **venv → PATH** 解析并以 `.venv/Scripts` 为 PATH 前缀，使 `entry: python scripts/quality_gate.py` 用 venv 解释器；落到系统 Python 会让 pip-audit 混扫整机依赖判 FAIL、挡掉所有提交（2026-10-01 实测 172 条）。
+- 第 ④ 层：`pre-commit` 在项目 `.venv`（4.6.2，git-bash PATH 通常看不到）。钩子按 **venv → PATH** 解析并以 `.venv/Scripts` 为 PATH 前缀，使 `entry: python scripts/quality_gate.py` 用 venv 解释器；落到系统 Python 会让 pip-audit 混扫整机依赖判 FAIL、挡掉所有提交（2026-10-01 实测 172 条）。
 - `pre-commit` **自身跑不起来时**（本机实测：hook 环境需联网 clone，而 python 派生的 MSYS `ssh/sh` 报 `NtCreateDirectoryObject 0xC0000022`），钩子回退跑等价本地检查：`ruff check --fix`（仅暂存 `.py`，改动即拒绝、需重新暂存）+ `quality_gate.py`。回退照常拦真实违规，但**不因工具跑不起来而拦截**；只有 pre-commit 真失败（输出含 `- hook id:`）才按它判负。
 - `.githooks/commit-msg`（第 5 层）：**剥掉第三方 AI 工具署名尾行**（`🤖 Generated with <tool>` / `Co-Authored-By: <tool>`，清单见该文件）。背景：Codebuff 曾写进 12 个提交（2026-08-11 起），与 §7 相悖；就地剥离不阻断工作流。**故意不剥 Claude 的署名**。
 - 密钥扫描误报的**正确**处置：命中行尾加 `secret-scan:allow <理由>`（或上一行 `secret-scan:allow-next-line`）；`.githooks/allowlist.txt` 是逐文件豁免，**新增条目须在提交信息说明理由**。

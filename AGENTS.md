@@ -116,7 +116,7 @@ npm run check:types               # 类型对齐
 3. **回滚路径是什么？**说清改坏了怎么恢复（备份在哪、上一个 commit、服务如何回到原状态）。**说不出口 = 不许动手。**
 4. **动的是"声明要写"的开关吗？**`--allow-prod-write` / `ERP_ALLOW_PROD_WRITE=1` 是「我真的要写」，不是「试试看」——**测护栏时绝不能授权写**（2026-10-03 因此往生产插过 3 行测试数据）。
 5. **工作区有别人的活吗？**并发会话常同时写本仓；`git status` 看到陌生改动**先问，别 stash/回退**（曾误判成"测试残留"把用户的活 stash 走）。
-6. **重启后端 = 把「工作区当前签出的代码」跑进生产。**`erp-prod` 是 `python -m fastapi_app.core.prod_runner`，**直接吃 `D:\erp_system` 工作区的源码**，不是打包产物也不是固定 commit——**工作区不在 main 时重启，就把那条分支的代码跑进了生产**（2026-10-14：工作区在 `claude/mystifying-*` 分支期间重启了后端，生产 API 08:26–09:43 一直返回旧字段 `order_nos`/日期-only，而前端已是新版 → 页面「订单号」整列空白、跨行合并不生效；前端新+后端旧这种"半坏"状态最容易只往前端查）。重启前先 `git rev-parse --abbrev-ref HEAD` 确认在 main；重启后核实**到底加载了哪份代码**——看 `fastapi_app/**/__pycache__/*.pyc` 的 mtime（= 导入时刻）与里面的字段指纹，别信 `prod_runner.json` 的 `started_at`（§6.1-7 同理）。
+6. **重启后端 = 把「工作区当前签出的代码」跑进生产。**`erp-prod` 是 `python -m fastapi_app.core.prod_runner --no-arq`，**直接吃 `D:\erp_system` 工作区的源码**，不是打包产物也不是固定 commit——**工作区不在 main 时重启，就把那条分支的代码跑进了生产**（2026-10-14：工作区在 `claude/mystifying-*` 分支期间重启了后端，生产 API 08:26–09:43 一直返回旧字段 `order_nos`/日期-only，而前端已是新版 → 页面「订单号」整列空白、跨行合并不生效；前端新+后端旧这种"半坏"状态最容易只往前端查）。重启前先 `git rev-parse --abbrev-ref HEAD` 确认在 main；重启后核实**到底加载了哪份代码**——**主判据是字段指纹**：`grep` `fastapi_app/**/__pycache__/*.pyc` 里的字段名（如 `order_no` vs `order_nos`）即可判定新旧。**pyc 的 mtime 只能说明「导入不早于该时刻」**（CPython 只在源码比 pyc 新时才重编译，同一份代码重复导入**不会**刷新它——实测两次导入 mtime 不变、改源码后才变），它给的是「这份代码被编译的时刻」，不是「本次进程的导入时刻」；`prod_runner.json` 的 `started_at` 会骗人，别信（§6.1-7 同理）。
 7. **验证过"真的做了"吗？**NSSM 非提权调用**静默失败且退出码仍 0**；重启是否生效只看 PID CreationDate，不看命令回显。
 8. **结论记档**：按 §8 回写。
 
