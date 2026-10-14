@@ -94,6 +94,28 @@ PGDG 源再装（`.github/workflows/ci-cd.yml` 该步注释 + 提交 `7ae03d14`�
 
 ---
 
+## 10. 发布后浏览器仍跑旧代码 = Workbox SW 预缓存了 `index.html`
+
+2026-10-14 实测。现象：`build:atomic` 已换 dist、nginx 确认在服务新入口、把那个 chunk 拉下来反编译也确认是新代码，**浏览器打开还是旧界面，且无痕也一样**。
+
+**根因**：`vite.config.ts` 的 VitePWA 里 `globPatterns` 含 `html`，而 generateSW 的 `navigateFallback` 默认就是 `'index.html'`（`vite-plugin-pwa/dist/index.js`）⇒ 生成的 `sw.js` 里同时有 `precacheAndRoute([{url:"index.html",…}])` 和 `new NavigationRoute(createHandlerBoundToURL("index.html"))` ⇒ **SW 用预缓存的旧 index.html 应答所有导航**（含 `/report`），里面引用的还是旧入口 chunk ⇒ 整套旧代码。
+
+**无痕为什么也不灵**：无痕 profile 的 SW 活到**该窗口组全部关闭**为止。只要那个无痕窗口在构建之前访问过本站，它就一直拿旧预缓存——刷新多少次都没用，这也是最容易把人带偏的地方（"无痕都旧，那肯定是服务器旧"）。
+
+**判别顺序**（别再从"我的改动没生效"查起）：
+
+1. **服务端先自证**：`curl -sk https://<host>/ | grep -oE 'assets/index-[A-Za-z0-9_-]+\.js'` 与 `frontend-vite/dist/index.html` 里的入口比对；再把该 chunk 拉下来 `grep` 新代码的指纹（如 `_g_date`）。服务器是新的 ⇒ 到此为止，**问题在浏览器**，别再翻构建配置。
+2. **看浏览器实际加载了哪个 chunk**（Console）：`performance.getEntriesByType('resource').filter(r=>/ReportView-/.test(r.name)).map(r=>r.name.split('/').pop())` —— 输出旧 hash 即 SW/缓存供旧文件。
+3. **清法**：关掉所有无痕窗口再开新的（最干净）／DevTools → Application → Service Workers → Unregister + Clear site data／`Ctrl+Shift+R`。
+
+注：`index.html` 的响应头本就是 `Cache-Control: no-store`，**HTTP 缓存不背这个锅**；`/api/` 是 NetworkOnly，业务数据也不受影响——只有 HTML 这一层被 SW 拦了。
+
+**已修**（2026-10-14，提交 `acaa11d7`）：`navigateFallback: null` + `globIgnores: ['**/index.html']`。**两个必须成对**，缺一即坏（只删预缓存 → NavigationRoute 绑到不存在的 URL，`createHandlerBoundToURL` 抛 `non-precached-url`；只关 navigateFallback → workbox 预缓存的 `directoryIndex` 默认 `index.html`，从根路径进站仍中招），理由见 `vite.config.ts` 该处注释。
+
+⚠️ **但这条修复只对"下一个版本"生效**：已装旧 SW 的客户端仍要等浏览器自己去取新 `sw.js`，而 Chrome 对同一 SW 的字节级更新检查**最长 24h 节流**。所以**发布后短期内仍可能看到旧界面，别据此判定发布失败**——按上面三步先分清是服务端旧还是浏览器旧。
+
+---
+
 ## 关联
 
 - 运维护栏（红线之外的第二道人防）在 `AGENTS.md` §6.1——**常驻**，动手前必看。
