@@ -116,6 +116,24 @@ PGDG 源再装（`.github/workflows/ci-cd.yml` 该步注释 + 提交 `7ae03d14`�
 
 ---
 
+## 11. 并发会话提交时，工作区会短暂「看起来被回退」——那是 pre-commit 的 stash 窗口
+
+2026-10-14 实测。本机常常多个会话同时改同一个工作区。当**另一个**会话执行 `git commit` 时，
+它的 pre-commit 框架会打印 `[WARNING] Unstaged files detected`，把**所有未暂存改动**
+（包括你这个会话正在写的文件）`git stash` 走，跑完门禁再 `Restore` 回来。
+
+于是你会在几分钟内反复看到：刚写完的文件 `git status` 干净、内容退回 HEAD 版本，过一会儿又全回来。
+**这不是别人回退你的活，是提交钩子的正常时序。** 本次会话因此在 stock-return / components/ui 上
+误判过一次，重写了两遍文件。
+
+判别与对策：
+
+- 提交输出里出现 `Stashing unstaged files to …patch*` / `Restored changes from …`，或 `git stash list` 临时多一条又消失，即为该窗口。
+- **窗口内不要下结论、不要重写文件、更别用 `git checkout`/`git stash` 去"救"**——等它 pop 回来再核对。
+- 这与 `AGENTS.md` §6.1-5「看到陌生改动先问，别 stash/回退」同源：**并发工作区里，git 命令本身也是并发写者。**
+
+---
+
 ## 关联
 
 - 运维护栏（红线之外的第二道人防）在 `AGENTS.md` §6.1——**常驻**，动手前必看。
