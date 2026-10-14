@@ -84,6 +84,7 @@
         :fetching="isFetching"
         :has-data="summaryCustomers.length > 0"
         :customers="allCustomers"
+        :factory="factory"
         :sorted-sku-list="sortedSkuList"
         :paginated-sku-list="paginatedSkuList"
         :sku-total-pages="skuTotalPages"

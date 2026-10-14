@@ -11,6 +11,8 @@
     <template v-else>
       <div v-if="fetching" class="sp-fetching-bar"><div class="sp-fetching-progress" /></div>
 
+      <FactorySummaryCard v-if="factory === 'all'" :customers="customers" />
+
       <div class="sp-layout">
         <div class="sp-panel">
           <div class="sp-panel-head">
@@ -65,6 +67,7 @@
 import { computed } from 'vue'
 import SkuSummaryTable from './SkuSummaryTable.vue'
 import CustomerDistPanel from './CustomerDistPanel.vue'
+import FactorySummaryCard from './FactorySummaryCard.vue'
 import type { CustSumItem, SkuRow } from './types'
 
 const props = defineProps<{
@@ -73,6 +76,8 @@ const props = defineProps<{
   fetching: boolean
   hasData: boolean
   customers: CustSumItem[]
+  /** 工厂筛选（'all' 表示全部）；仅「全部」时展示顶部按工厂汇总卡片 */
+  factory: string
   custFilter: string
   sortedSkuList: SkuRow[]
   paginatedSkuList: SkuRow[]
