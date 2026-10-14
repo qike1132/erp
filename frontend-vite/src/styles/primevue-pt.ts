@@ -127,7 +127,12 @@ export const plushCutePT: PrimeVuePTOptions = {
       ],
     }),
     columnResizeIndicator: 'absolute top-0 right-0 w-1 h-full bg-primary cursor-col-resize',
-    emptyMessage: 'py-12 text-center text-sm text-text-muted',
+    // 空态分两段：文案段挂在 <tr>（emptyMessage），尺寸段挂在单元格（emptyMessageCell）。
+    // <tr> 的垂直 padding 不生效（浏览器对表格行忽略 padding），原先只在 tr 上写 py-12，
+    // 空表体就塌成 ~24px 一条，表格下边框紧贴表头下边框 —— 视觉上「表头下面多了一条横线」
+    // （/stock-return 2026-10-14 报障）。尺寸改挂单元格后空态是一块 96px 的居中提示。
+    emptyMessage: 'text-center text-sm text-text-muted',
+    emptyMessageCell: { class: 'text-center text-sm text-text-muted', style: { height: '96px' } },
   },
 
   // ============================================================

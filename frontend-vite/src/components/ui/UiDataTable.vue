@@ -15,7 +15,7 @@
  *   selection    - v-model:selection 选中行
  *   rowKey       - 行唯一键字段（默认 'id'）
  *   striped      - 斑马纹（默认 true）
- *   emptyMessage - 空数据文本
+ *   emptyMessage - 空数据文本（空态单元格高度见 primevue-pt 的 datatable.emptyMessageCell）
  *   virtual      - 启用虚拟滚动（默认 false）。开启后表格主体由 VirtualList 渲染，
  *                  DOM 节点从 O(n) 降到 O(可视区)，适用于单页渲染 200+ 行的场景。
  *                  注意：虚拟模式下分页仍可用，但建议配合服务端分页使用。
@@ -327,7 +327,12 @@ watch(
         :scrollable="false"
         :responsive="true"
         :pt="{
-          emptyMessage: 'py-12 text-center text-sm text-text-muted',
+          // 空态文案由 `emptyMessage` 段渲染（<tr>），尺寸必须挂在单元格段上：
+          // <tr> 的垂直 padding 被浏览器忽略（表格行不吃 padding），原先只给 tr 写
+          // py-12 ⇒ 空表体塌成 ~24px 一条，表格下边框紧贴表头下边框，看起来就是
+          // 「表头下面凭空多了一条横线」（/stock-return 2026-10-14 报障）。
+          emptyMessage: 'text-center text-sm text-text-muted',
+          emptyMessageCell: { class: 'text-center text-sm text-text-muted', style: { height: '96px' } },
           loadingOverlay: 'absolute inset-0 bg-white/70 flex items-center justify-center z-10',
         }"
         @update:selection="onRowSelect"
@@ -364,9 +369,11 @@ watch(
           </template>
         </Column>
 
-        <!-- 空态 -->
-        <template v-if="$slots.empty" #empty>
-          <slot name="empty" />
+        <!-- 空态：PrimeVue 4 的 DataTable 已没有 emptyMessage prop，空态只认 #empty 插槽。
+             所以文案必须在这里兜底渲染 —— 原先只在父级传了 #empty 时才提供插槽，
+             `empty-message` 成了死 prop，空表一片空白（2026-10-14 /stock-return 报障）。 -->
+        <template #empty>
+          <slot name="empty">{{ emptyMessage }}</slot>
         </template>
 
         <!-- 加载态 -->
