@@ -82,6 +82,30 @@ async def test_inventory_balance_zero_when_never_packaged(db, monkeypatch):
     assert await svc.get_inventory_balance(db, product.id) == 0
 
 
+async def test_packaging_production_only_product_visible_on_stock_page(db, monkeypatch):
+    """仅有包装部生产入库、没有备货/订单的商品，也必须出现在 /stock 页。"""
+    product = Product(
+        name='仅包装生产可见产品', barcode='INV-BAL-005', current_stock=1000, initial_stock=0,
+    )
+    db.add(product)
+    await db.flush()
+    db.add(DailyProductionRecord(
+        department='packaging', product_id=product.id,
+        product_name=product.name, barcode='INV-BAL-005',
+        quantity=1000, production_date=datetime.now(UTC).date(),
+    ))
+    await db.flush()
+
+    monkeypatch.setattr(svc, '_get_all_customers', svc._get_all_customers.__wrapped__)
+    result = await svc.get_inventory_paginated.__wrapped__(
+        db, search_product=product.name, page=1, per_page=50,
+    )
+    rows = [r for r in result['inventory_data'] if r['product_name'] == product.name]
+    assert rows, '仅包装部生产入库的商品也应在 /stock 页出现'
+    assert rows[0]['customer'] == ''
+    assert rows[0]['inventory_balance'] == 1000
+
+
 async def test_inventory_balance_excludes_deduction_types(db, monkeypatch):
     """抵扣三型不进结余（Round16 口径修正）。
 
