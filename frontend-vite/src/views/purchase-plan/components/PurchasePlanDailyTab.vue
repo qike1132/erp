@@ -215,32 +215,6 @@ function selectDate(date: string): void {
   }
 }
 
-.sp-panel {
-  background: white;
-  border: 1px solid var(--color-border-light, #e2e8f0);
-  border-radius: var(--radius-md, 14px);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.06);
-  overflow: hidden;
-}
-
-.sp-panel-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 12px 18px;
-  border-bottom: 1px solid var(--color-border-light, #e2e8f0);
-  font-size: 13px;
-  font-weight: 800;
-  color: var(--color-heading);
-}
-
-.sp-panel-head .xs {
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--color-text-muted, #8c96ad);
-}
-
 /* 图例只此一处（原卡片版的图例在面板底部另有一条，且状态标签在卡片上重复出现） */
 .sp-inline-legend {
   display: flex;
