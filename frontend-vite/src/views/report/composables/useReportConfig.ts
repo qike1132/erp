@@ -11,7 +11,7 @@ export interface TabConfig {
   dateLabel: string
   countLabel: string
   noteKey: string
-  /** 「单号」列的表头（订单号 / 备货单号 / 出货单号 / 退货单号） */
+  /** 「单号」列的表头（2026-10-13 起五个 tab 统一为「订单号」；列里的值仍是各自的单号） */
   noLabel: string
   /** 「单号」列的取值键（订单 tab 用 order_no；其余 tab 用 record_no） */
   noKey: string
@@ -37,7 +37,7 @@ export const TAB_CONFIG: Record<TabType, TabConfig> = {
     dateLabel: '备货时间',
     countLabel: '备货数量',
     noteKey: 'note',
-    noLabel: '备货单号',
+    noLabel: '订单号',
     noKey: 'record_no',
   },
   stockout: {
@@ -48,7 +48,7 @@ export const TAB_CONFIG: Record<TabType, TabConfig> = {
     dateLabel: '出货时间',
     countLabel: '出货数量',
     noteKey: 'note',
-    noLabel: '出货单号',
+    noLabel: '订单号',
     noKey: 'record_no',
   },
   deduction: {
@@ -72,7 +72,7 @@ export const TAB_CONFIG: Record<TabType, TabConfig> = {
     countLabel: '退货数量',
     // 退货的备注列展示「原因；备注」合并串（行内编辑仍按分开的 reason/note 回写）
     noteKey: 'note_display',
-    noLabel: '退货单号',
+    noLabel: '订单号',
     noKey: 'record_no',
   },
 }
@@ -104,26 +104,23 @@ export function useReportConfig(activeTab: Ref<TabType>, canManageRowActions?: R
 
   const reportColumns = computed<TableColumn[]>(() => {
     // 2026-10-13 改版：单号列可见、时间到分、末列由「状态」改「备注」。
-    // 订单 tab 多一个「展开」占位列（母行-明细的箭头/树线），其余四个 tab 平铺无此列。
     // 列宽按比例分配（配合表格 table-layout: fixed 才是硬约束），各分支合计 100%。
+    // 2026-10-13 v2：订单流水不再有独立的「展开」空列（▶ 按钮已删），子行树线挪进「时间」列做
+    // 前缀 → 首列（时间）与其余四个 tab 一样贴住左边框（参照 /stock 的「客户」列）。
+    // 五个 tab 列集相同（订单流水的平铺行/母行-明细共用同一套列），故共用同一套列宽。
     // 权限门控：无对应行内权限的用户整列不渲染（连表头一起），不留空壳「操作」列；缺省 fail-closed。
     const withActions = canManageRowActions?.value ?? false
-    const isOrder = activeTab.value === 'order'
     const cfg = currentCfg.value
 
-    const columns: TableColumn[] = []
-    if (isOrder) columns.push({ field: 'expand', header: '', align: 'center', width: '4%' })
-    columns.push(
-      // 2026-10-13 优化点②：首列「时间」改左对齐、订单 tab 列宽重分配，让左侧内容
-      // 贴住左边框（参照 /stock 的「客户」列）。订单分支合计 4+12+15+11+19+11+9+10+9=100%。
-      { field: 'date', header: cfg.dateLabel, align: 'left', width: isOrder ? '12%' : (withActions ? '14%' : '15%') },
-      { field: 'no', header: cfg.noLabel, align: 'left', width: isOrder ? '15%' : (withActions ? '16%' : '17%') },
-      { field: 'customer', header: '客户', align: 'left', width: isOrder ? '11%' : (withActions ? '11%' : '12%') },
-      { field: 'product_name', header: '产品名称', align: 'left', width: isOrder ? '19%' : (withActions ? '20%' : '22%') },
-      { field: 'product_barcode', header: '条码', align: 'left', width: isOrder ? '11%' : (withActions ? '11%' : '12%') },
-      { field: 'quantity', header: cfg.countLabel, align: 'center', width: isOrder ? '9%' : (withActions ? '9%' : '10%'), sortable: true },
-      { field: 'note', header: activeTab.value === 'deduction' ? '订单备注' : '备注', align: 'left', width: isOrder ? '10%' : (withActions ? '10%' : '12%') },
-    )
+    const columns: TableColumn[] = [
+      { field: 'date', header: cfg.dateLabel, align: 'left', width: withActions ? '14%' : '15%' },
+      { field: 'no', header: cfg.noLabel, align: 'left', width: withActions ? '16%' : '17%' },
+      { field: 'customer', header: '客户', align: 'left', width: withActions ? '11%' : '12%' },
+      { field: 'product_name', header: '产品名称', align: 'left', width: withActions ? '20%' : '22%' },
+      { field: 'product_barcode', header: '条码', align: 'left', width: withActions ? '11%' : '12%' },
+      { field: 'quantity', header: cfg.countLabel, align: 'center', width: withActions ? '9%' : '10%', sortable: true },
+      { field: 'note', header: activeTab.value === 'deduction' ? '订单备注' : '备注', align: 'left', width: withActions ? '10%' : '12%' },
+    ]
     if (withActions) columns.push({ field: 'actions', header: '操作', align: 'center', width: '9%' })
     return columns
   })

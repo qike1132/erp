@@ -10,7 +10,7 @@
     <div class="rp-field">
       <UiInput
         v-model="filters.product"
-        placeholder="产品名称或 SKU"
+        placeholder="产品名称 / SKU / 订单号"
         @keyup.enter="emit('search')"
       />
     </div>
