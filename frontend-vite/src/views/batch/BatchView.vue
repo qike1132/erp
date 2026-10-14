@@ -30,7 +30,8 @@
           @saved="refreshAfterWhitelistSaved"
         />
         <!-- 完成批次确认弹窗 -->
-        <div v-if="showCompleteModal" class="bt-whitelist-overlay" @click.self="showCompleteModal = false">
+        <!-- 全站约定（2026-10-14）：点遮罩空白不关闭弹窗，只走 ✕ / 取消 -->
+        <div v-if="showCompleteModal" class="bt-whitelist-overlay">
           <div class="bt-whitelist-modal">
             <div class="bt-whitelist-header">
               <span>确认完成批次</span>

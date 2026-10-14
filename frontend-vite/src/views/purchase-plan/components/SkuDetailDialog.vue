@@ -1,6 +1,7 @@
 <template>
   <Transition name="sp-modal">
-    <div v-if="open" class="sp-modal-bg" @click.self="close">
+    <!-- 全站约定（2026-10-14）：点遮罩空白不关闭弹窗，只走 ✕ -->
+    <div v-if="open" class="sp-modal-bg">
       <div class="sp-sku-detail-modal">
         <div class="sp-sku-detail-header">
           <div>

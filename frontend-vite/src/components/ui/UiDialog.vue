@@ -65,14 +65,18 @@ const props = withDefaults(
     maxWidthClass?: string
     overlayZClass?: string
     contentZClass?: string
-    /** 点击遮罩/空白处是否关闭弹窗（默认 true） */
+    /**
+     * 点击遮罩/空白处是否关闭弹窗。
+     * 默认 **false**（2026-10-14 全站约定）：误点空白会丢掉已填内容，故一律不关，
+     * 只走 ✕ / 取消 / Esc。确需「点空白即关」的调用方显式传 true。
+     */
     closeOnOverlayClick?: boolean
   }>(),
   {
     maxWidthClass: 'max-w-[800px]',
     overlayZClass: 'z-[var(--z-overlay)]',
     contentZClass: 'z-[var(--z-modal)]',
-    closeOnOverlayClick: true,
+    closeOnOverlayClick: false,
     title: undefined,
     srTitle: undefined,
     description: undefined,

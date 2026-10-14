@@ -7,7 +7,9 @@
  *   → interactOutside → UiDialog.onInteractOutside → (closeOnOverlayClick=false 则 preventDefault)
  *   → 决定是否 emit dismiss → DialogRoot update:open → SummaryModal close
  *
- * 反向对照（默认 closeOnOverlayClick=true 必须触发 update:open）证明断言有效、非恒真。
+ * 反向对照（显式 closeOnOverlayClick=true 必须触发 update:open）证明断言有效、非恒真。
+ * 2026-10-14 起 UiDialog 默认 closeOnOverlayClick=false（全站不点空白关闭），
+ * 「点空白即关」改为显式 opt-in。
  */
 import { describe, it, expect, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
@@ -90,8 +92,19 @@ function mountSummary() {
 }
 
 describe('BUG-2「点击遮罩/空白处不应关闭」— 真实 UiDialog 行为级验证', () => {
-  it('【反向对照】默认 closeOnOverlayClick=true → 遮罩外侧 pointerdown 触发 update:open(false)', async () => {
+  it('【默认行为】不传 closeOnOverlayClick → 遮罩外侧 pointerdown 不触发 update:open（全站默认不点空白关闭）', async () => {
     const wrapper = mountDialog()
+    await settle()
+    pointerDownOutside()
+    await settle()
+
+    expect(wrapper.emitted('update:open')).toBeFalsy()
+
+    wrapper.unmount()
+  })
+
+  it('【显式反向对照】closeOnOverlayClick=true → 遮罩外侧 pointerdown 触发 update:open(false)（opt-in 仍生效）', async () => {
+    const wrapper = mountDialog({ closeOnOverlayClick: true })
     await settle()
     pointerDownOutside()
     await settle()

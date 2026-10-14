@@ -117,8 +117,21 @@ describe('UiDrawer 布局契约', () => {
     expect(content().classList.contains('pt-5')).toBe(true)
   })
 
-  it('dismissable 默认为 true：点遮罩空白会关闭', async () => {
+  it('dismissable 默认为 false：点遮罩空白不关闭（2026-10-14 全站默认）', async () => {
     const wrapper = mountDrawer()
+    await nextTick()
+    await nextTick()
+
+    document.querySelector<HTMLElement>('[data-pc-section="mask"]')!.dispatchEvent(
+      new MouseEvent('mousedown', { bubbles: true }),
+    )
+    await nextTick()
+
+    expect(wrapper.emitted('update:visible')).toBeUndefined()
+  })
+
+  it('dismissable=true：点遮罩空白会关闭（显式 opt-in 仍生效）', async () => {
+    const wrapper = mountDrawer({ dismissable: true })
     await nextTick()
     await nextTick()
 

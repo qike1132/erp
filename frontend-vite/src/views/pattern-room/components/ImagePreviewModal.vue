@@ -1,6 +1,7 @@
 <template>
   <Teleport to="body">
-    <div v-if="image" class="pim-overlay" @click.self="$emit('update:image', null)">
+    <!-- 全站约定（2026-10-14）：点遮罩空白不关闭弹窗，只走 ✕ -->
+    <div v-if="image" class="pim-overlay">
       <div class="pim-modal pim-dialog">
         <div class="pim-header">
           <h5 class="pim-title">产品图片</h5>

@@ -1,6 +1,6 @@
 <template>
   <Teleport to="body">
-    <div v-if="editDialogVisible" class="pd-overlay" @click.self="editDialogVisible = false">
+    <div v-if="editDialogVisible" class="pd-overlay">
       <div class="bom-modal-content edit-modal-dialog">
         <div class="bom-modal-header">
           <div class="bom-modal-header-left">

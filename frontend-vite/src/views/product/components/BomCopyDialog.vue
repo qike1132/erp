@@ -1,6 +1,7 @@
 <template>
   <Teleport to="body">
-    <div v-if="open" class="pd-overlay" @click.self="open = false">
+    <!-- 全站约定（2026-10-14）：点遮罩空白不关闭弹窗，只走 ✕ / 取消 -->
+    <div v-if="open" class="pd-overlay">
       <div class="bom-modal-content copy-bom-modal-dialog">
         <div class="bom-modal-header">
           <div class="bom-modal-header-left">

@@ -1,5 +1,6 @@
 <template>
-  <div v-if="open" class="rw-overlay" @click.self="onTryClose">
+  <!-- 全站约定（2026-10-14）：点遮罩空白不关闭弹窗，只走 ✕ / 取消 -->
+  <div v-if="open" class="rw-overlay">
     <div class="rw-dialog">
       <div class="rw-head">
         <h3 class="rw-title">还原备份</h3>

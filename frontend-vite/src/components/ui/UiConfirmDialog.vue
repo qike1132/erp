@@ -38,7 +38,10 @@ const props = withDefaults(
     text: string
     sub?: string
     type?: 'danger' | 'warning'
-    /** 点击遮罩/空白处是否关闭弹窗（默认 true） */
+    /**
+     * 点击遮罩/空白处是否关闭弹窗。默认 **false**（2026-10-14 全站约定）：
+     * 确认框只走「取消 / 确认」，避免误点空白把待确认的动作吞掉。
+     */
     closeOnOverlayClick?: boolean
     /**
      * 嵌套于另一模态（如抽屉）之上时的 z 层级类名。
@@ -50,7 +53,7 @@ const props = withDefaults(
   }>(),
   {
     type: 'danger',
-    closeOnOverlayClick: true,
+    closeOnOverlayClick: false,
     // 显式声明为 undefined：转发给 UiDialog 后由其自身默认值兜底（不改变既有层级）。
     overlayZClass: undefined,
     contentZClass: undefined,

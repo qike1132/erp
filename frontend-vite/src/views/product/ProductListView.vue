@@ -25,7 +25,8 @@
 
     <!-- 图片查看模态框 -->
     <Teleport to="body">
-      <div v-if="imageModalVisible" class="pd-overlay" @click.self="imageModalVisible = false">
+      <!-- 全站约定（2026-10-14）：点遮罩空白不关闭弹窗，只走 ✕ -->
+      <div v-if="imageModalVisible" class="pd-overlay">
         <div class="pd-modal pd-modal-img-dialog">
           <div class="pd-modal-header">
             <h5 class="pd-modal-title">产品图片</h5>

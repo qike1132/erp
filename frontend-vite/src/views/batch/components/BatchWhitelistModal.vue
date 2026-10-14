@@ -1,6 +1,7 @@
 <template>
   <!-- 白名单设置弹窗 -->
-  <div v-if="showWhitelistModal" class="bt-whitelist-overlay" @click.self="showWhitelistModal = false">
+  <!-- 全站约定（2026-10-14）：点遮罩空白不关闭弹窗，只走 ✕ / 取消 -->
+  <div v-if="showWhitelistModal" class="bt-whitelist-overlay">
     <div class="bt-whitelist-modal">
       <div class="bt-whitelist-header">
         <span>白名单客户</span>
