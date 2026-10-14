@@ -208,12 +208,12 @@ const columns: TableColumn[] = [
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 10px 20px;
+  gap: 9px;
+  padding: 12px 24px;
   border: 2px solid var(--color-border-light);
   border-radius: var(--radius-button, 14px);
   background: white;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 600;
   cursor: pointer;
   transition: background 0.3s ease, border-color 0.3s ease;

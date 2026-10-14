@@ -3,11 +3,11 @@
     <table>
       <colgroup>
         <col style="width: 68px" />
-        <col style="width: 180px" />
-        <col style="width: 158px" />
+        <col style="width: 200px" />
+        <col style="width: 170px" />
         <col />
         <col style="width: 80px" />
-        <col style="width: 124px" />
+        <col style="width: 136px" />
       </colgroup>
       <thead>
         <tr>
@@ -58,10 +58,10 @@
 
 <script setup lang="ts">
 /**
- * StockReturnShipmentList.vue — 新增退货弹窗左侧「可退出货明细」表。
+ * StockReturnShipmentList.vue — 新增退货弹窗的「可退出货明细」表。
  *
- * 从 StockReturnCreateDialog 拆出：该弹窗整体超过 400 行（scripts/check_vue_component_length.py），
- * 把这张表连同它的样式下沉到这里。纯展示 + 单事件，选中态由父级 pickedId 控制。
+ * 纯展示 + 单事件：整行可点（选中态由父级 pickedId 控制）。录入表单不在这里，
+ * 而是由弹窗固定在底部（方案 C），所以本组件不再持有展开行。
  */
 import type { ShipmentOption } from '@/api/stockReturn'
 
@@ -75,21 +75,18 @@ const emit = defineEmits<{ pick: [row: ShipmentOption] }>()
 </script>
 
 <style scoped>
-.sr-ship-table {
-  max-height: 560px;
-  overflow-y: auto;
-}
+/* 不设内部滚动：列表高度交给弹窗 body 滚动，避免和底部固定录入条叠成双滚动条 */
 .sr-ship-table table {
   width: 100%;
   border-collapse: collapse;
   table-layout: fixed;
-  font-size: 15px;
+  font-size: 16px;
 }
 .sr-ship-table thead th {
   position: sticky;
   top: 0;
   z-index: 1;
-  padding: 13px 16px;
+  padding: 15px 18px;
   background: #fff;
   color: #334155;
   font-weight: 700;
@@ -98,7 +95,7 @@ const emit = defineEmits<{ pick: [row: ShipmentOption] }>()
   border-bottom: 1px solid var(--color-border, #e4e7ed);
 }
 .sr-ship-table tbody td {
-  padding: 13px 16px;
+  padding: 15px 18px;
   border-bottom: 1px solid var(--color-border-light, #f0f2f5);
   color: var(--color-text);
   vertical-align: middle;
@@ -124,7 +121,7 @@ const emit = defineEmits<{ pick: [row: ShipmentOption] }>()
   text-align: center;
 }
 .sr-ship-table .empty {
-  padding: 30px 12px;
+  padding: 34px 12px;
   text-align: center;
   color: var(--color-text-muted, #64748b);
 }
@@ -133,19 +130,21 @@ const emit = defineEmits<{ pick: [row: ShipmentOption] }>()
   font-weight: 700;
   color: var(--color-primary-700);
 }
-.ellipsis,
-.sr-prod {
+.ellipsis {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 .sr-prod {
+  /* 产品名是本表唯一的弹性列，长名必须整段可见：允许换行，不加 nowrap/ellipsis */
   font-weight: 600;
   color: var(--color-text);
+  line-height: 1.35;
+  word-break: break-word;
 }
 .sr-prod-sub {
   margin-top: 2px;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--color-text-muted, #64748b);
   white-space: nowrap;
 }

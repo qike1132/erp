@@ -166,14 +166,16 @@ export function useStockReturn() {
 
   /** 勾选出货明细：客户/产品/可退量由明细带出，可退上限回填数量约束 */
   function pickShipment(row: ShipmentOption) {
+    const switched = form.stockout_id !== row.stockout_id
     Object.assign(form, {
       stockout_id: row.stockout_id,
       stockout_no: row.stockout_no,
       product_name: row.product_name,
       customer: row.customer ?? '',
-      quantity: null,
       available: row.available,
     })
+    // 换行才清空数量：重复点同一行（固定录入条下很容易误点第二次）不该抹掉刚填的数字
+    if (switched) form.quantity = null
   }
 
   const createMutation = useApiMutation(
