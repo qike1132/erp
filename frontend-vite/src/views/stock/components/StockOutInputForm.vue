@@ -22,7 +22,9 @@
           ref="productAcRef"
           v-model="form.search"
           :search-fn="searchFn"
-          placeholder="输入产品名称或69码搜索"
+          :list-fn="listFn"
+          :empty-text="emptyText"
+          placeholder="输入产品名称或69码搜索，或点击查看全部"
           @select="onSelect"
           @update:model-value="onSearchInput"
         >
@@ -97,6 +99,10 @@ defineProps<{
   canAdd: boolean
   stagedCount: number
   searchFn: (q: string) => Promise<Product[]>
+  /** 点击输入框列全量：当前客户可见的 SKU 浏览列表（与客户订单页同款能力） */
+  listFn: () => Promise<Product[]>
+  /** 下拉无结果时的文案；区分「请先选客户 / 搜索失败 / 该客户暂无产品」 */
+  emptyText: string
 }>()
 
 const form = defineModel<StockOutForm>('form', { required: true })

@@ -12,6 +12,8 @@
             :can-add="canAdd"
             :staged-count="staged.length"
             :search-fn="searchProductsForAutocomplete"
+            :list-fn="fetchSkuList"
+            :empty-text="productEmptyText"
             @add-staged="addStaged"
             @product-select="onProductSelect"
             @clear-shipment="shipmentInfo = null"
@@ -77,6 +79,7 @@ import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { showToast } from '@/composables/useToast'
 import { toISODate } from '@/utils/format'
 import { invalidateOrderDerivedQueries } from '@/utils/queryKeys'
+import { useStockOutProductSearch } from './composables/useStockOutProductSearch'
 
 import StockOutInputForm from './components/StockOutInputForm.vue'
 import StockOutStagingList from './components/StockOutStagingList.vue'
@@ -92,17 +95,6 @@ catalogStore.ensureActiveCustomerNames().catch(() => {
 })
 const customerNames = computed(() => catalogStore.activeCustomerNames.map((c) => c.name))
 const customerOptions = computed(() => customerNames.value.map((name) => ({ value: name, label: name })))
-
-// === 产品搜索 ===
-async function searchProductsForAutocomplete(q: string): Promise<Product[]> {
-  if (!q.trim()) return []
-  try {
-    const data = await stockApi.searchProducts(q)
-    return Array.isArray(data) ? data : (data?.products ? [data.products] : [])
-  } catch {
-    return []
-  }
-}
 
 function onProductSelect(product: Product) {
   form.productId = String(product.id)
@@ -129,6 +121,13 @@ async function fetchShipmentInfo() {
 // === 表单 ===
 const today = toISODate()
 const form = reactive({ customer: '', date: today, search: '', productId: '', quantity: 0, note: '' })
+
+// === 产品搜索 / 浏览（与客户订单页同款：按客户过滤 + 点击查看全部） ===
+const {
+  searchProducts: searchProductsForAutocomplete,
+  fetchSkuList,
+  productEmptyText,
+} = useStockOutProductSearch(form)
 
 const canAdd = computed(() => {
   if (!form.customer || !form.productId || form.quantity < 1 || !form.date) return false
