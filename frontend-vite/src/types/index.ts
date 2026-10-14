@@ -391,6 +391,8 @@ export interface DailyProductionRecord {
   id: number
   department: string
   product_id?: number | null
+  customer_id?: number | null
+  customer_name?: string | null
   product_name: string
   barcode: string
   unit_price: number

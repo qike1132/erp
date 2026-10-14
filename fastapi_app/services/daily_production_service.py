@@ -26,7 +26,7 @@ from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.core.validators import validate_not_empty
 from fastapi_app.services.notification_service import StockEvent
 from fastapi_app.shared.stock_concurrency import assert_stock_available, get_product_for_update
-from fastapi_app.shared_models import DailyProductionRecord, InventoryLog, Product
+from fastapi_app.shared_models import Customer, DailyProductionRecord, InventoryLog, Product
 from fastapi_app.utils import calc_total_pages, parse_date_with_fallback
 
 logger = logging.getLogger(__name__)
@@ -137,6 +137,19 @@ def validate_record_data(
         raise ValueError(f'生产数量不能超过 {MAX_QUANTITY}')
     if unit_price < 0:
         raise ValueError('单价不能为负数')
+
+
+async def _resolve_customer_name(db: AsyncSession, customer_id: int | None) -> str | None:
+    """校验客户并返回名称快照；空客户直接返回 None。"""
+    if customer_id is None:
+        return None
+    result = await db.execute(
+        select(Customer.name).where(Customer.id == customer_id, Customer.status.is_(True))
+    )
+    customer_name = result.scalar_one_or_none()
+    if customer_name is None:
+        raise ValueError('客户不存在或已停用')
+    return customer_name
 
 
 # ==================== CRUD ====================
@@ -389,6 +402,7 @@ async def create_record(
     department: str,
     product_id: int | None,
     product_name: str,
+    customer_id: int | None = None,
     barcode: str,
     unit_price: float,
     quantity: int,
@@ -404,9 +418,12 @@ async def create_record(
     if prod_date > date.today():
         raise ValueError('不能录入未来日期的生产数据')
 
+    customer_name = await _resolve_customer_name(db, customer_id)
     record = DailyProductionRecord(
         department=department,
         product_id=product_id,
+        customer_id=customer_id,
+        customer_name=customer_name,
         product_name=product_name.strip(),
         barcode=barcode or '',
         unit_price=unit_price,
@@ -448,6 +465,9 @@ async def update_record(
 
     # 库存联动基线（2026-10-06 生产即入库）：变更前快照
     old_product_id, old_quantity = record.product_id, record.quantity
+    if 'customer_id' in kwargs:
+        record.customer_id = kwargs['customer_id']
+        record.customer_name = await _resolve_customer_name(db, kwargs['customer_id'])
 
     for field in ('department', 'product_id', 'product_name', 'barcode', 'unit_price', 'quantity', 'remark'):
         if field in kwargs and kwargs[field] is not None:

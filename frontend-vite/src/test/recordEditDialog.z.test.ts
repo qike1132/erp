@@ -3,12 +3,17 @@
  * 由 PrimeVue 定为 2100（main.ts 的 zIndex.modal）。所以本弹窗必须用超过该层的嵌套层级
  * （--z-overlay/modal-nested），否则会被遮罩压住、点不到 —— 曾实测被遮挡。
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
+import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
 
 import RecordEditDialog from '@/views/production/components/RecordEditDialog.vue'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import type { DailyProductionRecord } from '@/types'
+
+vi.mock('@/api/customer', () => ({
+  customerApi: { activeNames: vi.fn().mockResolvedValue([]) },
+}))
 
 const record: DailyProductionRecord = {
   id: 1,
@@ -25,7 +30,11 @@ const record: DailyProductionRecord = {
 
 describe('RecordEditDialog 层级', () => {
   it('用嵌套层级，保证盖在抽屉遮罩之上', () => {
-    const wrapper = mount(RecordEditDialog, { props: { open: true, record } })
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const wrapper = mount(RecordEditDialog, {
+      props: { open: true, record },
+      global: { plugins: [[VueQueryPlugin, { queryClient }]] },
+    })
 
     const dialog = wrapper.findComponent(UiDialog)
     expect(dialog.props('overlayZClass')).toBe('z-[var(--z-overlay-nested)]')

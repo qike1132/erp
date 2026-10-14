@@ -484,7 +484,7 @@ def _build_inventory_filter_params(search_product: str, search_customer: str,
     Returns:
         (params, clauses) - params: 查询参数字典; clauses: SQL片段字典
     """
-    params: dict = {}
+    params: dict = {'sc_is_empty': not bool(search_customer)}
     pid_clause = ''
     pids_param = None
     if search_product and product_ids:
@@ -567,10 +567,17 @@ order_agg AS (
     GROUP BY COALESCE(oi.product_id, o.product_id), o.customer
 ),
 production_agg AS (
-    SELECT product_id, SUM(quantity) AS production_qty
+    SELECT product_id,
+        SUM(quantity) AS production_qty,
+        SUM(CASE WHEN department = 'packaging' THEN quantity ELSE 0 END) AS packaging_qty
     FROM daily_production_record
     WHERE product_id IS NOT NULL{c['prod_pid']}
     GROUP BY product_id
+),
+packaging_production_products AS (
+    SELECT product_id
+    FROM production_agg
+    WHERE packaging_qty > 0
 ),
 product_stockout_total AS (
     SELECT product_id, SUM(quantity - returned_quantity) AS total_stockout_qty
@@ -580,19 +587,22 @@ product_stockout_total AS (
 ),
 merged AS (
     SELECT
-        COALESCE(si.product_id, so.product_id, od.product_id) AS product_id,
-        COALESCE(si.customer, so.customer, od.customer) AS customer,
+        COALESCE(si.product_id, so.product_id, od.product_id, pp.product_id) AS product_id,
+        COALESCE(si.customer, so.customer, od.customer, '') AS customer,
         COALESCE(si.stockin_qty, 0) AS stockin_qty,
         CASE WHEN si.product_id IS NOT NULL THEN true ELSE false END AS has_stockin,
         COALESCE(so.direct_stockout_qty, 0) AS direct_stockout_qty,
         COALESCE(so.order_stockout_qty, 0) AS order_stockout_qty,
         COALESCE(od.order_qty, 0) AS order_qty,
-        CASE WHEN od.product_id IS NOT NULL THEN true ELSE false END AS has_order
+        CASE WHEN od.product_id IS NOT NULL THEN true ELSE false END AS has_order,
+        CASE WHEN pp.product_id IS NOT NULL THEN true ELSE false END AS has_packaging_production
     FROM stockin_agg si
     FULL OUTER JOIN stockout_agg so ON si.product_id = so.product_id AND si.customer = so.customer
     FULL OUTER JOIN order_agg od
         ON COALESCE(si.product_id, so.product_id) = od.product_id
         AND COALESCE(si.customer, so.customer) = od.customer
+    FULL OUTER JOIN packaging_production_products pp
+        ON COALESCE(si.product_id, so.product_id, od.product_id) = pp.product_id
 ),
 inventory_calc AS (
     SELECT m.*,
@@ -606,18 +616,11 @@ filtered AS (
         COALESCE(pst.total_stockout_qty, 0) AS total_product_stockout,
         COALESCE(pa.production_qty, 0) - COALESCE(pst.total_stockout_qty, 0) AS available_stock,
         -- 库存（结余）= 包装部入库 − 已出货（2026-10-07 业务裁定，口径见快照）
-        COALESCE(pprod.packaging_qty, 0) + COALESCE(ship.shipped_net, 0) AS inventory_balance
+        COALESCE(pa.packaging_qty, 0) + COALESCE(ship.shipped_net, 0) AS inventory_balance
     FROM inventory_calc ic
     JOIN product p ON p.id = ic.product_id
     LEFT JOIN production_agg pa ON pa.product_id = ic.product_id
     LEFT JOIN product_stockout_total pst ON pst.product_id = ic.product_id
-    LEFT JOIN (
-        -- 只算包装部（department='packaging'）
-        SELECT product_id, SUM(quantity) AS packaging_qty
-        FROM daily_production_record
-        WHERE department = 'packaging' AND product_id IS NOT NULL
-        GROUP BY product_id
-    ) pprod ON pprod.product_id = ic.product_id
     LEFT JOIN (
         -- 出货台账（inventory_log，出库为负数，故求和即净流出）：出货三型 + 退货。
         -- 抵扣三型（订单抵扣/取消抵扣/抵扣回滚）不进结余：抵扣期间两侧对称净影响为零，
@@ -631,7 +634,8 @@ filtered AS (
               AND product_id IS NOT NULL
         GROUP BY product_id
     ) ship ON ship.product_id = ic.product_id
-    WHERE (ic.has_stockin OR ic.has_order) AND ic.total_qty > 0
+    WHERE (ic.has_stockin OR ic.has_order OR (ic.has_packaging_production AND :sc_is_empty))
+      AND (ic.total_qty > 0 OR (ic.has_packaging_production AND :sc_is_empty))
 )
 SELECT f.product_id, f.customer, f.product_name, f.product_barcode,
     f.stockin_qty, f.direct_stockout_qty, f.order_stockout_qty,

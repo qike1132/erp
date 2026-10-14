@@ -8,8 +8,8 @@
  * 数量框 ↑↓ ∓1 / Shift+↑↓ ∓10、⏎ 提交、Ctrl+⏎ 任意位置提交、Esc 关闭。
  */
 import { ref, reactive, computed, watch, nextTick, onUnmounted, type WritableComputedRef } from 'vue'
-import { useQueryClient } from '@tanstack/vue-query'
-import { dailyProductionApi, productApi } from '@/api'
+import { useQuery, useQueryClient } from '@tanstack/vue-query'
+import { customerApi, dailyProductionApi, productApi } from '@/api'
 import { showToast } from '@/composables/useToast'
 import type { Product, ProductionDepartment } from '@/types'
 
@@ -23,6 +23,8 @@ export interface DepartmentOption {
 /** 录入表单状态 */
 export interface ProductionEntryForm {
   product_id: number | null
+  customer_id: number | null
+  customer_name: string
   product_name: string
   barcode: string
   unit_price: number
@@ -36,6 +38,7 @@ export interface CreatedRecordSummary {
   product_name: string
   department: string
   quantity: number
+  customer_name?: string
 }
 
 export const PRODUCTION_DEPARTMENTS: readonly DepartmentOption[] = [
@@ -113,6 +116,8 @@ export function useProductionEntry(
 
   const form = reactive<ProductionEntryForm>({
     product_id: null,
+    customer_id: null,
+    customer_name: '',
     product_name: '',
     barcode: '',
     unit_price: 0,
@@ -121,6 +126,13 @@ export function useProductionEntry(
   })
   const formErrors = reactive<Record<string, string>>({})
   const computedValue = computed(() => (form.quantity || 0) * (form.unit_price || 0))
+
+  const { data: customerData } = useQuery({
+    queryKey: ['customer-active-names'],
+    queryFn: () => customerApi.activeNames(),
+    staleTime: 5 * 60 * 1000,
+  })
+  const customerOptions = computed(() => customerData.value ?? [])
 
   // ===== 少录错护栏 =====
   /** 未选产品或数量 ≤ 0 时不允许提交（按钮禁用 + handleSubmit 兜底） */
@@ -263,6 +275,13 @@ export function useProductionEntry(
     duplicateTotal.value = 0
   }
 
+  function selectCustomer(customerId: number | null) {
+    form.customer_id = customerId
+    form.customer_name = customerId == null
+      ? ''
+      : customerOptions.value.find((c) => c.id === customerId)?.name ?? ''
+  }
+
   function validateField(field: string): boolean {
     formErrors[field] = ''
     if (field === 'quantity') {
@@ -339,6 +358,8 @@ export function useProductionEntry(
 
   function clearEntryFields() {
     form.product_id = null
+    form.customer_id = null
+    form.customer_name = ''
     form.product_name = ''
     form.barcode = ''
     form.unit_price = 0
@@ -350,7 +371,11 @@ export function useProductionEntry(
 
   /** 提交成功后的清空：保留部门（连续录入同一部门是常态） */
   function resetQuickForm() {
+    const customerId = form.customer_id
+    const customerName = form.customer_name
     clearEntryFields()
+    form.customer_id = customerId
+    form.customer_name = customerName
     duplicateTotal.value = 0
     searchResults.value = []
     showDropdown.value = false
@@ -386,6 +411,7 @@ export function useProductionEntry(
       const res = (await dailyProductionApi.createRecord({
         department: formDept.value,
         product_id: form.product_id,
+        customer_id: form.customer_id,
         product_name: form.product_name,
         barcode: form.barcode,
         unit_price: form.unit_price || 0,
@@ -402,6 +428,7 @@ export function useProductionEntry(
           product_name: form.product_name,
           department: formDept.value,
           quantity: form.quantity,
+          customer_name: form.customer_name,
         }
       }
       showToast('录入成功', 'success')
@@ -554,6 +581,8 @@ export function useProductionEntry(
     confirmSearchSelection,
     selectProduct,
     clearProduct,
+    selectCustomer,
+    customerOptions,
     validateField,
     closeEntryDrawer,
     handleSubmit,

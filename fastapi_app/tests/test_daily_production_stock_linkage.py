@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from fastapi_app.services.daily_production_service import (
+    _resolve_customer_name,
     create_record,
     delete_record,
     update_record,
@@ -84,6 +85,50 @@ async def test_create_without_product_id_skips_stock():
     stock_adds = [c for c in db.add.call_args_list if isinstance(c.args[0], MagicMock) and hasattr(c.args[0], 'current_stock')]
     assert not stock_adds  # 无产品可加
     assert record.quantity == 100
+
+
+@pytest.mark.asyncio
+async def test_create_record_with_customer_sets_snapshot():
+    db = _db_with_record(None)
+    with patch(
+        'fastapi_app.services.daily_production_service._resolve_customer_name',
+        new_callable=AsyncMock,
+        return_value='客户A',
+    ):
+        record = await create_record(
+            db, department='filling', product_id=None, product_name='带客户产品',
+            customer_id=5, barcode='', unit_price=7, quantity=100,
+            production_date_str='2026-10-06', created_by='张三',
+        )
+
+    assert record.customer_id == 5
+    assert record.customer_name == '客户A'
+
+
+@pytest.mark.asyncio
+async def test_resolve_customer_name_rejects_missing_or_disabled():
+    db = AsyncMock()
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = None
+    db.execute = AsyncMock(return_value=result)
+
+    with pytest.raises(ValueError, match='客户不存在或已停用'):
+        await _resolve_customer_name(db, 999)
+
+
+@pytest.mark.asyncio
+async def test_update_record_customer_change_sets_snapshot():
+    record = _record(quantity=100)
+    db = _db_with_record(record)
+    with patch(
+        'fastapi_app.services.daily_production_service._resolve_customer_name',
+        new_callable=AsyncMock,
+        return_value='客户B',
+    ):
+        await update_record(db, 7, customer_id=6, created_by='张三')
+
+    assert record.customer_id == 6
+    assert record.customer_name == '客户B'
 
 
 @pytest.mark.asyncio

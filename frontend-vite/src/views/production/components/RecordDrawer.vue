@@ -53,6 +53,7 @@
               {{ deptLabel(row.department) }}
             </span>
           </template>
+          <template #column-body-customer_name="{ row }">{{ row.customer_name || '—' }}</template>
           <template #column-body-production_date="{ row }">{{ row.production_date }}</template>
           <template #column-body-quantity="{ row }">
             <strong class="tabular-nums">{{ formatNumber(row.quantity) }}</strong>
@@ -127,6 +128,7 @@ import type { RecordFilters } from '../composables/recordFilters'
 const COLUMNS: TableColumn[] = [
   { field: 'production_date', header: '日期', width: '96px' },
   { field: 'department', header: '部门', width: '80px', align: 'center' },
+  { field: 'customer_name', header: '客户', width: '130px' },
   { field: 'product_name', header: '产品' },
   { field: 'barcode', header: '69 码', width: '110px' },
   { field: 'quantity', header: '数量', width: '80px', align: 'right' },
@@ -179,7 +181,8 @@ const summarySku = computed(() => props.stats?.total_sku ?? null)
 const deleteSummary = computed(() => {
   const row = pendingDelete.value
   if (!row) return ''
-  return `${row.product_name} · ${formatNumber(row.quantity)} 件 · ${row.production_date} · ${deptLabel(row.department)}`
+  const customer = row.customer_name ? `${row.customer_name} · ` : ''
+  return `${customer}${row.product_name} · ${formatNumber(row.quantity)} 件 · ${row.production_date} · ${deptLabel(row.department)}`
 })
 
 function deptLabel(department: string): string {

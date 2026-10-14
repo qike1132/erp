@@ -151,6 +151,7 @@ async def create_record(
             department=data.department,
             product_id=data.product_id,
             product_name=data.product_name,
+            customer_id=data.customer_id,
             barcode=data.barcode,
             unit_price=data.unit_price,
             quantity=data.quantity,

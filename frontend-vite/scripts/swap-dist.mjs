@@ -28,8 +28,10 @@
  * 发布前自行备份：
  *     cp -r frontend-vite/dist backups/frontend-dist-$(date +%Y%m%d-%H%M%S)
  *   回滚方式：把备份复制回 dist。
- *   发布链尾的 prune-dist-backups.mjs 会按「每自然日最后一份、保留最近 7 天」自动清理
- *   历史备份（含 dist_prev_* 与 dist-new 残留），因此当日锚点不会被清，跨 7 天的会没。
+ *   发布链尾的 prune-dist-backups.mjs 会按「每自然日只留**时间最晚**的一份、保留最近 7 天」
+ *   自动清理历史备份（含 dist_prev_* 与 dist-new 残留）。注意语义：**同日多份只留最新一份**，
+ *   按目录名时间戳（非 mtime）比较——若当天已存在更晚的备份，本次发布前的备份会被清掉，
+ *   所以当天回滚锚点以**最后一份**为准；跨 7 天的会没。
  *
  * 用法：npm run build:atomic  （构建到 dist-new 后自动执行本脚本）
  */

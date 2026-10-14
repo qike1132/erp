@@ -1,12 +1,18 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
+import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
 
 const updateMock = vi.fn()
+const customerActiveNamesMock = vi.fn()
 vi.mock('@/api/production', () => ({
   dailyProductionApi: { updateRecord: (...a: unknown[]) => updateMock(...a) },
 }))
+vi.mock('@/api/customer', () => ({
+  customerApi: { activeNames: (...a: unknown[]) => customerActiveNamesMock(...a) },
+}))
 
 import RecordEditDialog from '@/views/production/components/RecordEditDialog.vue'
+import CustomerSelect from '@/views/production/components/CustomerSelect.vue'
 import type { DailyProductionRecord } from '@/types'
 
 const record: DailyProductionRecord = {
@@ -37,12 +43,17 @@ describe('RecordEditDialog', () => {
   beforeEach(() => {
     updateMock.mockReset()
     updateMock.mockResolvedValue({ success: true, message: 'ok' })
+    customerActiveNamesMock.mockReset()
+    customerActiveNamesMock.mockResolvedValue([{ id: 5, name: '客户A' }])
   })
 
   it('只提交被改动过的字段', async () => {
     const wrapper = mount(RecordEditDialog, {
       props: { open: true, record },
-      global: { stubs },
+      global: {
+        plugins: [[VueQueryPlugin, { queryClient: new QueryClient({ defaultOptions: { queries: { retry: false } } }) }]],
+        stubs,
+      },
     })
 
     await wrapper.find('[data-test="edit-quantity"]').setValue('700')
@@ -52,10 +63,30 @@ describe('RecordEditDialog', () => {
     expect(updateMock).toHaveBeenCalledWith(7, { quantity: 700 })
   })
 
+  it('修改客户后提交 customer_id', async () => {
+    const wrapper = mount(RecordEditDialog, {
+      props: { open: true, record },
+      global: {
+        plugins: [[VueQueryPlugin, { queryClient: new QueryClient({ defaultOptions: { queries: { retry: false } } }) }]],
+        stubs,
+      },
+    })
+    await flushPromises()
+
+    wrapper.findComponent(CustomerSelect).vm.$emit('update:modelValue', 5)
+    await wrapper.find('[data-test="edit-submit"]').trigger('click')
+    await flushPromises()
+
+    expect(updateMock).toHaveBeenCalledWith(7, { customer_id: 5 })
+  })
+
   it('没有改动时不提交，只关闭', async () => {
     const wrapper = mount(RecordEditDialog, {
       props: { open: true, record },
-      global: { stubs },
+      global: {
+        plugins: [[VueQueryPlugin, { queryClient: new QueryClient({ defaultOptions: { queries: { retry: false } } }) }]],
+        stubs,
+      },
     })
 
     await wrapper.find('[data-test="edit-submit"]').trigger('click')
@@ -68,7 +99,10 @@ describe('RecordEditDialog', () => {
   it('数量改为 0 时拒绝提交并给出提示', async () => {
     const wrapper = mount(RecordEditDialog, {
       props: { open: true, record },
-      global: { stubs },
+      global: {
+        plugins: [[VueQueryPlugin, { queryClient: new QueryClient({ defaultOptions: { queries: { retry: false } } }) }]],
+        stubs,
+      },
     })
 
     await wrapper.find('[data-test="edit-quantity"]').setValue('0')
@@ -85,7 +119,10 @@ describe('RecordEditDialog', () => {
     })
     const wrapper = mount(RecordEditDialog, {
       props: { open: true, record },
-      global: { stubs },
+      global: {
+        plugins: [[VueQueryPlugin, { queryClient: new QueryClient({ defaultOptions: { queries: { retry: false } } }) }]],
+        stubs,
+      },
     })
 
     await wrapper.find('[data-test="edit-quantity"]').setValue('700')
@@ -99,7 +136,10 @@ describe('RecordEditDialog', () => {
   it('保存成功后 emit saved', async () => {
     const wrapper = mount(RecordEditDialog, {
       props: { open: true, record },
-      global: { stubs },
+      global: {
+        plugins: [[VueQueryPlugin, { queryClient: new QueryClient({ defaultOptions: { queries: { retry: false } } }) }]],
+        stubs,
+      },
     })
 
     await wrapper.find('[data-test="edit-quantity"]').setValue('700')

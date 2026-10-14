@@ -15,6 +15,17 @@
       </div>
 
       <label class="flex flex-col gap-1.5">
+        <span class="text-xs font-bold text-text-secondary">客户</span>
+        <CustomerSelect
+          data-test="edit-customer"
+          :model-value="form.customer_id"
+          :options="customerOptions"
+          placeholder="客户（选填）"
+          @update:model-value="form.customer_id = $event"
+        />
+      </label>
+
+      <label class="flex flex-col gap-1.5">
         <span class="text-xs font-bold text-text-secondary">生产日期</span>
         <input v-model="form.production_date" data-test="edit-date" type="date" class="rounded-lg border border-border-light px-3 py-2 text-sm" />
       </label>
@@ -39,11 +50,14 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
+import { useQuery } from '@tanstack/vue-query'
 
 import UiDialog from '@/components/ui/UiDialog.vue'
+import { customerApi } from '@/api/customer'
 import { dailyProductionApi } from '@/api/production'
 import type { DailyProductionRecord } from '@/types'
+import CustomerSelect from './CustomerSelect.vue'
 
 const props = defineProps<{
   open: boolean
@@ -60,16 +74,36 @@ const error = ref('')
 
 // 只保留本弹窗可改的字段：单价与备注不在此编辑（产值 = 单价 × 数量，改数量时单价不动）。
 const form = reactive({
+  customer_id: null as number | null,
   production_date: '',
   quantity: 0,
 })
 
-const original = reactive({ production_date: '', quantity: 0 })
+const original = reactive({ customer_id: null as number | null, production_date: '', quantity: 0 })
+
+const { data: customerData } = useQuery({
+  queryKey: ['customer-active-names'],
+  queryFn: () => customerApi.activeNames(),
+  staleTime: 5 * 60 * 1000,
+})
+
+const customerOptions = computed(() => {
+  const options = [...(customerData.value ?? [])]
+  const currentId = props.record?.customer_id
+  if (currentId != null && !options.some((c) => c.id === currentId)) {
+    options.push({
+      id: currentId,
+      name: props.record?.customer_name || `客户 #${currentId}`,
+    })
+  }
+  return options
+})
 
 watch(
   () => [props.open, props.record] as const,
   () => {
     if (!props.open || !props.record) return
+    form.customer_id = props.record.customer_id ?? null
     form.production_date = props.record.production_date
     form.quantity = props.record.quantity
     Object.assign(original, form)
@@ -81,6 +115,7 @@ watch(
 /** 只提交改动过的字段：后端 PUT 接受部分字段，未改动的字段不该被覆盖 */
 function changedFields(): Record<string, unknown> {
   const diff: Record<string, unknown> = {}
+  if (form.customer_id !== original.customer_id) diff.customer_id = form.customer_id
   if (form.production_date !== original.production_date) diff.production_date = form.production_date
   if (form.quantity !== original.quantity) diff.quantity = form.quantity
   return diff
