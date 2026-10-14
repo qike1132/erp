@@ -63,6 +63,14 @@ describe('UiDataTable 空态', () => {
     expect(w.text()).not.toContain('暂无数据')
   })
 
+  it('不再向 DataTable 透传不存在的 responsive 属性（PrimeVue 4 无此 prop，纯 DOM 噪音）', () => {
+    const w = mountTable({ data: ROWS })
+    const root = w.find('[data-pc-name="datatable"]')
+
+    expect(root.exists()).toBe(true)
+    expect(root.attributes('responsive')).toBeUndefined()
+  })
+
   it('PT 契约：尺寸段在 emptyMessageCell，emptyMessage 段只管文案', () => {
     const datatable = plushCutePT.datatable
     if (typeof datatable !== 'object' || datatable === null) {

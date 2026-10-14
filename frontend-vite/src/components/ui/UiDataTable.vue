@@ -244,7 +244,6 @@ watch(
         <DataTable
           :value="[]"
           :scrollable="false"
-          :responsive="false"
           class="ui-data-table-vs-head-table"
         >
           <Column
@@ -325,7 +324,6 @@ watch(
         :striped-rows="striped"
         :row-hover="true"
         :scrollable="false"
-        :responsive="true"
         :pt="{
           // 空态文案由 `emptyMessage` 段渲染（<tr>），尺寸必须挂在单元格段上：
           // <tr> 的垂直 padding 被浏览器忽略（表格行不吃 padding），原先只给 tr 写

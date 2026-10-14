@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { defineComponent, h, nextTick } from 'vue'
+import { defineComponent, h, nextTick, watch } from 'vue'
 import { mount, type VueWrapper } from '@vue/test-utils'
 import { usePatternRoomLayout } from '@/views/pattern-room/composables/usePatternRoomLayout'
 
@@ -80,9 +80,13 @@ function setMedia(next: MediaCtx): void {
   for (const q of queries) q.dispatch()
 }
 
+/** isNarrow 出现过的每个值（watch 只记录变化；初始值由挂载断言覆盖） */
+let narrowSeen: boolean[] = []
+
 const Probe = defineComponent({
   setup() {
     const { isNarrow } = usePatternRoomLayout()
+    watch(isNarrow, (v) => narrowSeen.push(v))
     return () => h('span', { 'data-narrow': String(isNarrow.value) })
   },
 })
@@ -91,6 +95,7 @@ let wrapper: VueWrapper | null = null
 
 /** 挂载探针；onMounted 在微任务中执行，必须 await nextTick 后再断言 */
 async function mountProbe(): Promise<void> {
+  narrowSeen = []
   wrapper = mount(Probe)
   await nextTick()
 }
@@ -133,15 +138,19 @@ describe('usePatternRoomLayout × 打印媒体', () => {
     expect(isNarrowRendered()).toBe(false)
   })
 
-  it('打印结束后回到屏幕媒体，isNarrow 仍为 false（不产生卸载/重挂载）', async () => {
+  it('打印 → 回到屏幕全程 isNarrow 从未翻真（不产生卸载/重挂载）', async () => {
     await mountProbe()
 
     setMedia({ media: 'print', width: 794 })
     await nextTick()
+    // 打印期间就要查一次：只看末态会漏掉「中途翻真又复位」的旧代码行为
+    expect(isNarrowRendered()).toBe(false)
     setMedia({ media: 'screen', width: 1440 })
     await nextTick()
 
     expect(isNarrowRendered()).toBe(false)
+    // watch 全程捕获 isNarrow 的每次取值，中途任何一次翻真都会留痕
+    expect(narrowSeen).not.toContain(true)
   })
 
   it('屏幕下从宽屏缩到窄屏再恢复，isNarrow 跟随变化', async () => {
