@@ -324,7 +324,12 @@ async def delete_order_item(db: AsyncSession, item_id: int, current_user: User) 
         select(func.count()).select_from(OrderItem).where(OrderItem.order_id == order.id)
     )).scalar_one()
     if siblings <= 1:
-        return await delete_order(db, order.id, current_user)
+        # 末项删除 = 整单删除：回传 order_id，供端点层在事务提交后补发 ORDER_DELETED。
+        # 采购中心订阅该领域事件撤回本订单已自动生成的 pending 采购单；漏发会让
+        # 采购单残留在 /purchase（2026-10-13 PO-20261013-23761/23763 事故）。
+        result = await delete_order(db, order.id, current_user)
+        result['order_id'] = order.id
+        return result
 
     item = (await db.execute(
         select(OrderItem).where(OrderItem.id == item_id).with_for_update()

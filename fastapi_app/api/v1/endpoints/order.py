@@ -368,6 +368,24 @@ async def edit_order_item(
     return OrderActionResponse(success=result['success'], message=result['message'])
 
 
+async def _publish_order_deleted(order_id: int) -> None:
+    """订单确已删除后发布 ORDER_DELETED（采购中心据此撤回该订单的 pending 采购单）。
+
+    必须在事务提交后调用。非超管删除只是提交审批（requires_approval=True），订单并未
+    删除，不得发布——否则会误撤该订单仍在使用的采购单。
+    """
+    try:
+        await publish_domain_event(DomainEvent(
+            event_type=DomainEventType.ORDER_DELETED,
+            domain='order',
+            payload={'order_id': order_id},
+        ))
+    except Exception:  # defensive: 领域事件发布失败不影响删除操作结果
+        logger.warning("ORDER_DELETED 领域事件发布失败", exc_info=True)
+        from fastapi_app.core.metrics import DOMAIN_EVENT_PUBLISH_FAILURES
+        DOMAIN_EVENT_PUBLISH_FAILURES.labels(event_type='order_deleted').inc()
+
+
 @router.delete("/items/{item_id}", response_model=OrderActionResponse)
 async def delete_order_item(
     item_id: int,
@@ -399,6 +417,12 @@ async def delete_order_item(
     }):
         result = await order_service.delete_order_item(db, item_id, user)
     await cache_mgr.invalidate_dashboard()
+    # 末项删除会转成整单删除（service 回传 order_id）：与整单删除端点同口径发布
+    # ORDER_DELETED，否则采购中心订阅不到、不会撤回该订单已生成的 pending 采购单。
+    if result.get('success') and not result.get('requires_approval'):
+        deleted_order_id = result.get('order_id')
+        if deleted_order_id is not None:
+            await _publish_order_deleted(int(deleted_order_id))
     return OrderActionResponse(success=result['success'], message=result['message'])
 
 
@@ -456,17 +480,9 @@ async def delete_order(
     await cache_mgr.invalidate_dashboard()
     # 领域事件：ORDER_DELETED 在事务提交后发布（订阅者使用独立 session，需可见已提交变更）；
     # 面向前端的实时广播已由 service 的 schedule_post_commit_event 注册并执行。
-    if result.get('success'):
-        try:
-            await publish_domain_event(DomainEvent(
-                event_type=DomainEventType.ORDER_DELETED,
-                domain='order',
-                payload={'order_id': order_id},
-            ))
-        except Exception:  # defensive: 领域事件发布失败不影响删除操作结果
-            logger.warning("ORDER_DELETED 领域事件发布失败", exc_info=True)
-            from fastapi_app.core.metrics import DOMAIN_EVENT_PUBLISH_FAILURES
-            DOMAIN_EVENT_PUBLISH_FAILURES.labels(event_type='order_deleted').inc()
+    # 仅订单真的被删除才发；非超管提交审批时订单仍在，发事件会误撤其 pending 采购单。
+    if result.get('success') and not result.get('requires_approval'):
+        await _publish_order_deleted(order_id)
     return OrderActionResponse(success=result['success'], message=result['message'])
 
 
