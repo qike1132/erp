@@ -69,7 +69,7 @@
                   @keydown="onRoleTabKeydown($event, 'default')"
                 >
                   <template v-if="renamingTarget === 'default'">
-                    <input ref="renameInputRef" v-model="renameInput" class="bom-role-edit-input" maxlength="50"
+                    <input ref="renameInputRef" v-model="renameInput" class="bom-role-edit-input" maxlength="100"
                            @keydown.enter="commitRename" @keydown.esc="cancelRename" @blur="commitRename" @click.stop
                     />
                   </template>
@@ -92,7 +92,7 @@
                   @keydown="onRoleTabKeydown($event, role)"
                 >
                   <template v-if="renamingTarget === role">
-                    <input ref="renameInputRef" v-model="renameInput" class="bom-role-edit-input" maxlength="50"
+                    <input ref="renameInputRef" v-model="renameInput" class="bom-role-edit-input" maxlength="100"
                            @keydown.enter="commitRename" @keydown.esc="cancelRename" @blur="commitRename" @click.stop
                     />
                   </template>
@@ -302,6 +302,10 @@ function onRoleContextMenu(e: MouseEvent, key: TabKey) {
  *   所以原生按钮的「Enter/Space 触发 click」得显式补上。
  */
 function onRoleTabKeydown(e: KeyboardEvent, key: TabKey) {
+  if ((e.target as HTMLElement | null)?.closest('input')) return
+  // 内联重命名 input 是页签 div 的子节点，keydown 会冒泡到这里。参照页 RoleTabs 的页签是
+  // button、内部永远没有 input，所以那边不需要这层判断；这里必须放行——否则空格被
+  // preventDefault 吞掉，含空格的角色名（「裁床 1 组」）根本输不进去。
   if (e.key === 'Enter' || e.key === ' ') {
     e.preventDefault()
     selectRole(key === 'default' ? null : key)
@@ -563,7 +567,10 @@ defineExpose({ open: openBomModal })
   width: 96px; padding: 2px 8px; border: 1px solid var(--color-primary-400); border-radius: 6px;
   font-size: 13px; font-weight: 600; outline: none; user-select: text;
 }
-/* 右键菜单：与 pattern-room RoleTabs 的 .role-tab-menu 同规范（遮罩负责点击/滚轮/再次右键关闭） */
+/* 右键菜单：与 pattern-room RoleTabs 的 .role-tab-menu 同规范（遮罩负责点击/滚轮/再次右键关闭）。
+   1000/1001 是照搬 RoleTabs.vue:250/255 的裸值，刻意不走 --z-* token：这两个值只在弹窗
+   自身（.bom-modal-overlay，--z-page-modal=1050）的层叠上下文里互相比较，换成 token 反而
+   会与参照页漂开。 */
 .bom-role-menu-mask { position: fixed; inset: 0; z-index: 1000; }
 .bom-role-menu {
   position: fixed; z-index: 1001; min-width: 140px; padding: 5px;

@@ -1,7 +1,7 @@
 /**
  * BOM 配置弹窗「角色页签」与 pattern-room 对齐的回归测试。
  *
- * 用户反馈（m00132）：① 添加角色后的页签颜色要与参照页一致；② 删除角色要改成
+ * 用户反馈：① 添加角色后的页签颜色要与参照页一致；② 删除角色要改成
  * 「右键点角色 → 弹出删除角色」。
  *
  * 对齐契约（参照 frontend-vite/src/views/pattern-room/components/RoleTabs.vue）：
@@ -215,6 +215,31 @@ describe('BomEditor 角色页签：菜单健壮性与键盘可达（对齐 RoleT
     await nextTick()
     expect(tabAt(0).classes()).toContain('active')
     expect(tabAt(1).classes()).not.toContain('active')
+  })
+
+  it('重命名输入框：空格不被页签快捷键吞掉，maxlength 与参照页/后端口径一致', async () => {
+    await mountOpened()
+    await tabAt(1).trigger('contextmenu')
+    await nextTick()
+    await qa('.bom-menu-item')[0]!.trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    const input = q('.bom-role-edit-input')
+
+    // 页签的 keydown 监听挂在 div 上，input 的按键会冒泡上去。参照页 RoleTabs 的页签是
+    // button、内部永远没有 input，所以那边不需要放行；这里若不放行，空格会被
+    // preventDefault 吞掉，「裁床 1 组」这类含空格的角色名根本输不进去。
+    const space = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true })
+    input.element.dispatchEvent(space)
+    expect(space.defaultPrevented).toBe(false)
+
+    await input.setValue('裁床 1 组')
+    expect((input.element as HTMLInputElement).value).toBe('裁床 1 组')
+
+    // 后端 ProductRole.role_name 是 String(100)，参照页 RoleTabs.vue 也是 100：
+    // 改名输入框若停在 50，长角色名会在前端被悄悄截断。
+    expect(input.attributes('maxlength')).toBe('100')
   })
 })
 
