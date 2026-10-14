@@ -71,6 +71,18 @@ export default defineConfig(({ mode }) => {
       VitePWA({
         registerType: 'autoUpdate',
         workbox: {
+          // 2026-10-14：SW 不再接管 HTML —— 发布后用户一直看到旧界面的根因。
+          // 原状：generateSW 默认 navigateFallback='index.html' + 预缓存收 index.html，
+          // 于是 SW 用预缓存的旧 index.html 应答所有导航（含 /report）→ 里面引用的还是
+          // 旧入口 chunk → 整套旧代码；且无痕窗口的 SW 活到该窗口组全关为止，刷新无用。
+          // 下面两行必须**成对**存在，缺一即坏：
+          //   · navigateFallback: null 关掉 NavigationRoute；只删 index.html 的预缓存
+          //     会让它绑到不存在的 URL → createHandlerBoundToURL 抛 non-precached-url。
+          //   · globIgnores 把 index.html 移出预缓存；只关 navigateFallback 的话，
+          //     workbox 预缓存的 directoryIndex 默认 'index.html'，从根路径进站仍中招。
+          // hashed 资源（js/css）照旧预缓存 CacheFirst，性能不受影响；导航一律回源。
+          navigateFallback: null,
+          globIgnores: ['**/index.html'],
           globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
           runtimeCaching: [
             {
