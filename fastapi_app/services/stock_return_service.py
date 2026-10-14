@@ -51,7 +51,7 @@ async def create_stockreturn_core(db: AsyncSession, stockout_id: int, quantity: 
     录入流程：新建退货单 -> 搜索产品名 -> 弹出该产品全部出货明细 -> 勾选要退的
     出货单 -> 录数量。可退量 = 该出货单数量 - 已退货量；客户/产品/订单由所选
     明细带出，退回数量落在该出货单的已退量上，并重算订单状态、回补总库存。
-    订单抵扣出货（stockin_id 非空）与独立出货同等可退。
+    仅独立出货（``stockin_id IS NULL``）可退；备货抵扣行不是实际出货，拒绝退货。
 
     request_id：前端每次打开新增弹窗生成的幂等令牌（同一次弹窗内重试视为同一请求）。
     命中即拒，防网络重试/双击造成的重复退货；重新打开弹窗会生成新令牌，不误杀合法的二次退货。
@@ -70,6 +70,12 @@ async def create_stockreturn_core(db: AsyncSession, stockout_id: int, quantity: 
     stockout = stockout_result.scalar_one_or_none()
     if not stockout:
         raise ValueError('出货记录不存在')
+    # 只退真出货：备货抵扣行（stockin_id 非空）不是实际出货，拒绝退货。
+    # 否则会写 '退货' 正流水，而结余公式含「退货」、不含「订单抵扣」→
+    # /stock「库存(结余)」虚增（抵扣从未减过结余、退货却往上加）。
+    # 与界面 search_returnable_stockouts（仅列 stockin_id IS NULL）对齐。
+    if stockout.stockin_id is not None:
+        raise ValueError('备货抵扣行不是实际出货，不可退货')
 
     available = stockout.quantity - stockout.returned_quantity
     if quantity > available:

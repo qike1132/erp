@@ -186,3 +186,35 @@ class TestStockReturnFullFlow:
 
         resp = await client.get("/api/v1/stock-returns/list", params={"customer": customer})
         assert resp.json()["data"] == [], "取消即删除该行，列表不应再有记录"
+
+    async def test_deduction_row_return_rejected(self, sr_api):
+        """备货抵扣行（stockin_id 非空）不可退货 → 400（对齐界面/设计：只退真出货）。
+
+        回归：create_stockreturn_core 原先不校验 stockin_id，直接调 API 可对抵扣行退货
+        → 写 '退货' 正流水 → /stock「库存(结余)」虚增（抵扣从未减过结余、退货却往上加）。
+        界面（search_returnable_stockouts）只列独立出货，此处把接口与界面对齐。
+        """
+        from fastapi_app.shared_models import StockIn
+        client, db, _ = sr_api
+        suffix = uuid.uuid4().hex[:8]
+        customer = f"抵扣退货客户-{suffix}"
+        product = await _fresh_product(db, suffix, stock=100)
+        order = await _fresh_order(db, product, suffix, quantity=30)
+        stockin = StockIn(stockin_no=f"BH-DED-{suffix}", product_id=product.id,
+                          quantity=30, customer=customer, note="抵扣测试")
+        db.add(stockin)
+        await db.flush()
+        stockout = StockOut(
+            stockout_no=f"SO-DED-{suffix}", product_id=product.id, quantity=30,
+            customer=customer, order_id=order.id, stockin_id=stockin.id, note="[订单抵扣]",
+        )
+        db.add(stockout)
+        await db.flush()
+
+        resp = await client.post("/api/v1/stock-returns/create", json={
+            "stockout_id": stockout.id, "quantity": 10, "reason": "不应允许",
+        })
+        assert resp.status_code == 400, resp.text
+        assert "抵扣" in resp.json()["detail"]
+        await db.refresh(stockout)
+        assert stockout.returned_quantity == 0, "被拒后不应留下已退量"
