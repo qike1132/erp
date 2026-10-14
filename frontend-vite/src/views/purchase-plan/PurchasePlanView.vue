@@ -76,6 +76,7 @@ import PurchasePlanHeader from './components/PurchasePlanHeader.vue';
 import { usePurchasePlanData } from './composables/usePurchasePlanData';
 import { useSkuSummary } from './composables/useSkuSummary';
 import { useFactorySplit, type FactoryFilter } from './composables/useFactorySplit';
+import { useDefaultTodaySelection } from './composables/useDefaultTodaySelection';
 import type { CustSumItem } from './components/types';
 
 // 弹窗组件懒加载，减少首屏 chunk 体积（仅在用户交互时才加载）
@@ -100,10 +101,11 @@ const custFilter = ref('');
 const factory = ref<FactoryFilter>('all');
 
 watch(globalKw, () => { if (viewTab.value === 'daily') sel.value = ''; });
-watch([y, m], () => { sel.value = ''; globalKw.value = ''; debouncedKw.value = ''; });
+watch([y, m], () => { globalKw.value = ''; debouncedKw.value = ''; });
 watch(viewTab, () => { globalKw.value = ''; debouncedKw.value = ''; });
-// 切工厂后，原来选中的日期/客户可能在新工厂下无数据，一并清掉避免空白页
-watch(factory, () => { sel.value = ''; custFilter.value = ''; });
+// 切工厂后，原来选中的客户可能在新工厂下无数据，清掉避免空白页
+// （选中的日期交给 useDefaultTodaySelection 决定，不再这里清）
+watch(factory, () => { custFilter.value = ''; });
 
 const {
   d, isLoading, isFetching, isError, refetch,
@@ -119,6 +121,10 @@ const { rows, skuSummary, skuDateIndex, customers, availableFactories, factoryTo
   skuDateIndex: rawSkuDateIndex,
   customers: rawCustomers,
 });
+
+// 默认选中今天：数据到达 / 换月 / 换工厂时把 sel 落到今天（若今天在本月且有排产），
+// 省去用户手点一天才能看到日明细；用户手动改选后本次上下文不再覆盖（见 composable）。
+useDefaultTodaySelection({ y, m, factory, rows, sel });
 
 // 切月后若该工厂当月已无计划，回落到「全部」——否则控件不再渲染该厂药丸，
 // 会出现「没有任何药丸处于选中态、页面却是空的」的困惑状态。
