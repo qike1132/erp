@@ -1,79 +1,51 @@
 /**
  * 「按工厂汇总」卡片（FactorySummaryCard）—— 覆盖：
- *   1. 按 customers[].factories 聚合出每厂一格 + 末尾合计格；
+ *   1. 渲染当前工厂一行：对 customers 顶层 plan_qty/produced_qty 求和；
  *   2. 完成率条按 0红/未满琥珀/满绿 上色；
- *   3. 无 factories 的客户只剩合计一格。
+ *   3. 空客户列表不除零。
  * 纯展示组件，mount 时不需要 PrimeVue。
  */
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import FactorySummaryCard from '@/views/purchase-plan/components/FactorySummaryCard.vue'
-import type { CustSumItem, FactoryCustAgg } from '@/views/purchase-plan/components/types'
+import type { CustSumItem } from '@/views/purchase-plan/components/types'
 
-function facAgg(plan: number, produced: number): FactoryCustAgg {
+function cust(plan: number, produced: number): CustSumItem {
   return {
-    plan_qty: plan, inventory_qty: 0, produced_qty: produced,
-    remaining_qty: plan - produced, warning_count: 0,
+    customer_id: 1, customer_name: '客户甲', plan_qty: plan, inventory_qty: 0,
+    produced_qty: produced, remaining_qty: plan - produced, warning_count: 0,
   }
 }
 
-const CUST: CustSumItem[] = [
-  {
-    customer_id: 1, customer_name: '客户甲', plan_qty: 150, inventory_qty: 0,
-    produced_qty: 120, remaining_qty: 30, warning_count: 0,
-    factories: {
-      '东莞': facAgg(100, 100),
-      '湖北': facAgg(50, 20),
-    },
-  },
-]
-
-// 三档配色：东莞 0% 红 / 湖北 40% 琥珀 / 未标注 100% 绿
-const CUST_TONES: CustSumItem[] = [
-  {
-    customer_id: 1, customer_name: '客户甲', plan_qty: 300, inventory_qty: 0,
-    produced_qty: 140, remaining_qty: 160, warning_count: 0,
-    factories: {
-      '东莞': facAgg(100, 0),
-      '湖北': facAgg(100, 40),
-      '未标注': facAgg(100, 100),
-    },
-  },
-]
-
-function mountCard(customers: CustSumItem[]) {
-  return mount(FactorySummaryCard, { props: { customers } })
+function mountCard(customers: CustSumItem[], factory = '东莞') {
+  return mount(FactorySummaryCard, { props: { customers, factory } })
 }
 
 describe('FactorySummaryCard', () => {
-  it('按 factories 渲染每厂一格 + 合计', () => {
-    const w = mountCard(CUST)
-    expect(w.findAll('.sp-fsum-cell')).toHaveLength(3)
-    expect(w.findAll('.sp-fsum-plan').map(s => s.text())).toEqual(['100', '50', '150'])
-    // 顺序：东莞 → 湖北 → 合计
-    expect(w.findAll('.sp-fsum-name').map(s => s.text())).toEqual(['东莞', '湖北', '合计'])
-    // 合计格带 sp-fsum-total
-    expect(w.find('.sp-fsum-total').exists()).toBe(true)
+  it('渲染当前工厂一行，汇总 customers 顶层 plan_qty/produced_qty', () => {
+    const w = mountCard([cust(100, 100), cust(50, 20)])
+    expect(w.findAll('.sp-fsum-cell')).toHaveLength(1)
+    expect(w.find('.sp-fsum-name').text()).toBe('东莞')
+    expect(w.find('.sp-fsum-plan').text()).toBe('150')
+    expect(w.find('.sp-fsum-sub').text()).toContain('120')
+    expect(w.find('.sp-fsum-pct').text()).toBe('80%')
   })
 
   it('完成率配色 0红/未满琥珀/满绿', () => {
-    const w = mountCard(CUST_TONES)
-    const bars = w.findAll('.sp-fsum-meter > i')
-    // 东莞 0% 红 / 湖北 40% 琥珀 / 未标注 100% 绿 / 合计 46.6% 琥珀
-    expect(bars[0]?.classes()).toContain('fm-r')
-    expect(bars[1]?.classes()).toContain('fm-a')
-    expect(bars[2]?.classes()).toContain('fm-g')
+    expect(mountCard([cust(100, 0)]).find('.sp-fsum-meter > i').classes()).toContain('fm-r')
+    expect(mountCard([cust(100, 40)]).find('.sp-fsum-meter > i').classes()).toContain('fm-a')
+    expect(mountCard([cust(100, 100)]).find('.sp-fsum-meter > i').classes()).toContain('fm-g')
   })
 
-  it('无 factories 时只有合计行', () => {
-    const noFac: CustSumItem[] = [
-      {
-        customer_id: 1, customer_name: '客户甲', plan_qty: 150, inventory_qty: 0,
-        produced_qty: 120, remaining_qty: 30, warning_count: 0,
-      },
-    ]
-    const w = mountCard(noFac)
-    expect(w.findAll('.sp-fsum-cell')).toHaveLength(1)
-    expect(w.find('.sp-fsum-cell').classes()).toContain('sp-fsum-total')
+  it('工厂名作标题，色档跟随工厂', () => {
+    const w = mountCard([cust(10, 5)], '湖北')
+    expect(w.find('.sp-fsum-name').text()).toBe('湖北')
+    expect(w.find('.sp-fsum-cell').attributes('data-tone')).toBe('hb')
+  })
+
+  it('空客户列表：计划量 0、完成率 0，不除零', () => {
+    const w = mountCard([])
+    expect(w.find('.sp-fsum-plan').text()).toBe('0')
+    expect(w.find('.sp-fsum-pct').text()).toBe('0%')
   })
 })

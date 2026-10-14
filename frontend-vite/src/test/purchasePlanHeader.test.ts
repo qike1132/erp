@@ -3,7 +3,7 @@
  *
  * 本任务把 PurchasePlanView.vue 的 .sp-head 抽成本组件，并顺势把工厂 Tab
  * 放到第一行左侧（视图 Tab 在其右）。这里固化两条结构诉求：
- *   1. 工厂 Tab 组（含 data-f='all'）在视图 Tab 组之左；
+ *   1. 工厂 Tab 组（含 data-f='东莞'）在视图 Tab 组之左；
  *   2. 头部内所有交互（视图切换 / 翻月 / 导出 / 新建）都只上抛事件，不自作主张。
  */
 import { describe, it, expect } from 'vitest'
@@ -31,7 +31,7 @@ function mountHeader(over: Record<string, unknown> = {}): VueWrapper {
       factoryTotals: { 东莞: 100, 湖北: 50 },
       kpi: KPI,
       viewTab: 'daily',
-      factory: 'all',
+      factory: '东莞',
       globalKw: '',
       ...over,
     },
@@ -51,8 +51,8 @@ describe('PurchasePlanHeader：工厂 Tab 左置', () => {
     const w = mountHeader()
     const groups = w.findAll('.sp-tab-group')
     expect(groups).toHaveLength(2)
-    // 第 0 组是工厂 Tab 组：含 data-f='all'
-    expect(groups[0]?.find("[data-f='all']").exists()).toBe(true)
+    // 第 0 组是工厂 Tab 组：含 data-f='东莞'
+    expect(groups[0]?.find("[data-f='东莞']").exists()).toBe(true)
     // 第 1 组是视图 Tab：排产日历 / 月度汇总
     expect(groups[1]?.text()).toContain('排产日历')
     expect(groups[1]?.text()).toContain('月度汇总')

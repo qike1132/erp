@@ -11,7 +11,7 @@
     <template v-else>
       <div v-if="fetching" class="sp-fetching-bar"><div class="sp-fetching-progress" /></div>
 
-      <FactorySummaryCard v-if="factory === 'all'" :customers="customers" />
+      <FactorySummaryCard :customers="customers" :factory="factory" />
 
       <div class="sp-layout">
         <div class="sp-panel">
@@ -76,7 +76,7 @@ const props = defineProps<{
   fetching: boolean
   hasData: boolean
   customers: CustSumItem[]
-  /** 工厂筛选（'all' 表示全部）；仅「全部」时展示顶部按工厂汇总卡片 */
+  /** 工厂筛选（具体工厂名）；顶部按工厂汇总卡片展示该厂一行 */
   factory: string
   custFilter: string
   sortedSkuList: SkuRow[]

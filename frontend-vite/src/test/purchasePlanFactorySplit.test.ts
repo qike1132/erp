@@ -3,8 +3,8 @@
  *
  * 钉住三件事：
  *   1. useFactorySplit —— 本地按工厂拆分 rows / skuSummary / skuDateIndex / customers；
- *   2. PurchasePlanFactoryFilter —— 选项顺序、选中态、点击 emit；
- *   3. SkuSummaryTable 工厂列、PlanMonthGrid 的工厂构成条（仅「全部」视图出现）。
+ *   2. PurchasePlanFactoryFilter —— 选项顺序（无「全部」）、选中态、点击 emit；
+ *   3. SkuSummaryTable 工厂列。
  */
 import { describe, it, expect } from 'vitest'
 import { ref, computed } from 'vue'
@@ -13,7 +13,6 @@ import { useFactorySplit } from '@/views/purchase-plan/composables/useFactorySpl
 import { orderFactories, factoryTone } from '@/views/purchase-plan/components/factoryMeta'
 import PurchasePlanFactoryFilter from '@/views/purchase-plan/components/PurchasePlanFactoryFilter.vue'
 import SkuSummaryTable from '@/views/purchase-plan/components/SkuSummaryTable.vue'
-import PlanMonthGrid from '@/views/purchase-plan/components/PlanMonthGrid.vue'
 import type { Row, SkuRow, SkuDateItem, CustSumItem, FactoryDayAgg } from '@/views/purchase-plan/components/types'
 
 function row(date: string, factories: Row['factories'], over: Partial<Row> = {}): Row {
@@ -144,15 +143,15 @@ describe('factoryMeta', () => {
 })
 
 describe('PurchasePlanFactoryFilter', () => {
-  const mountFilter = (modelValue = 'all') => mount(PurchasePlanFactoryFilter, {
+  const mountFilter = (modelValue = '东莞') => mount(PurchasePlanFactoryFilter, {
     props: { modelValue, factories: ['湖北', '东莞'], totals: { '东莞': 160, '湖北': 50 } },
   })
 
-  it('顺序固定为 全部 → 东莞 → 湖北，且显示各厂计划量', () => {
+  it('顺序固定为 东莞 → 湖北（无「全部」），且显示各厂计划量', () => {
     const w = mountFilter()
     const tabs = w.findAll('.sp-tab')
-    expect(tabs.map(t => t.attributes('data-f'))).toEqual(['all', '东莞', '湖北'])
-    expect(w.findAll('.sp-factory-cnt').map(s => s.text())).toEqual(['210', '160', '50'])
+    expect(tabs.map(t => t.attributes('data-f'))).toEqual(['东莞', '湖北'])
+    expect(w.findAll('.sp-factory-cnt').map(s => s.text())).toEqual(['160', '50'])
   })
 
   it('选中态跟随 modelValue', () => {
@@ -164,7 +163,7 @@ describe('PurchasePlanFactoryFilter', () => {
 
   it('点击某个工厂 emit update:modelValue', async () => {
     const w = mountFilter()
-    await w.findAll('.sp-tab')[2]!.trigger('click')
+    await w.findAll('.sp-tab')[1]!.trigger('click')
     expect(w.emitted('update:modelValue')?.[0]).toEqual(['湖北'])
   })
 })
@@ -178,34 +177,5 @@ describe('SkuSummaryTable 工厂列', () => {
     expect(w.find('.sp-sku-table thead').text()).toContain('工厂')
     const badges = w.findAll('.td-factory .sp-fb')
     expect(badges.map(b => b.text())).toEqual(['东莞', '湖北'])
-  })
-})
-
-describe('PlanMonthGrid 工厂构成条', () => {
-  const mountGrid = (factory: string) => mount(PlanMonthGrid, {
-    props: { y: 2026, m: 10, rows: ROWS, sel: '', searching: false, matchedDates: new Set<string>(), factory },
-  })
-
-  it('「全部」视图：格内出现工厂构成条（东莞段 + 湖北段）', () => {
-    const w = mountGrid('all')
-    const bars = w.findAll('.sp-fbar')
-    expect(bars.length).toBeGreaterThan(0)
-    // 10-05 两厂：构成条含一个东莞段与一个湖北段
-    const segs = w.findAll('.sp-fbar > i')
-    expect(segs.some(s => s.classes().includes('fb-dg'))).toBe(true)
-    expect(segs.some(s => s.classes().includes('fb-hb'))).toBe(true)
-  })
-
-  it('按单工厂筛选：不出现构成条', () => {
-    const w = mountGrid('东莞')
-    expect(w.findAll('.sp-fbar')).toHaveLength(0)
-  })
-
-  it('未标工厂的构成段用中性色档（fb-other），不再是硬编码的两色', () => {
-    const rows = [row('2026-10-05', { '未标注': fac({ qty: 10, custN: 1, prodN: 1, rowN: 1, custNames: ['客户丙'] }) })]
-    const w = mount(PlanMonthGrid, {
-      props: { y: 2026, m: 10, rows, sel: '', searching: false, matchedDates: new Set<string>(), factory: 'all' },
-    })
-    expect(w.findAll('.sp-fbar > i').some(s => s.classes().includes('fb-other'))).toBe(true)
   })
 })

@@ -45,7 +45,7 @@ function mountSummary(over: Record<string, unknown> = {}): VueWrapper {
       fetching: false,
       hasData: true,
       customers: CUSTOMERS,
-      factory: 'all',
+      factory: '东莞',
       custFilter: '',
       sortedSkuList: SKUS,
       paginatedSkuList: SKUS,
@@ -93,11 +93,9 @@ describe('PurchasePlanMonthlySummary 客户 chips', () => {
 })
 
 describe('PurchasePlanMonthlySummary 按工厂汇总卡片', () => {
-  it('全部 Tab 下渲染按工厂汇总卡片', () => {
-    expect(mountSummary({ factory: 'all' }).find('.sp-fsum').exists()).toBe(true)
-  })
-  it('单厂 Tab 下不渲染按工厂汇总卡片', () => {
-    expect(mountSummary({ factory: '东莞' }).find('.sp-fsum').exists()).toBe(false)
+  it('任意工厂 Tab 下都渲染按工厂汇总卡片', () => {
+    expect(mountSummary({ factory: '东莞' }).find('.sp-fsum').exists()).toBe(true)
+    expect(mountSummary({ factory: '湖北' }).find('.sp-fsum').exists()).toBe(true)
   })
 })
 

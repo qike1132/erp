@@ -10,7 +10,7 @@
       :data-tone="factoryTone(opt.value)"
       @click="emit('update:modelValue', opt.value)"
     >
-      <i v-if="opt.value !== 'all'" class="sp-factory-dot" />
+      <i class="sp-factory-dot" />
       {{ opt.label }}
       <span v-if="opt.count != null" class="sp-factory-cnt num">{{ fmt(opt.count) }}</span>
     </button>
@@ -35,14 +35,10 @@ const emit = defineEmits<{
   'update:modelValue': [value: string];
 }>();
 
-/** 全部 → 东莞 → 湖北 → 其余（未标注等）按字典序 */
-const options = computed(() => {
-  const total = Object.values(props.totals).reduce((a, b) => a + b, 0);
-  return [
-    { value: 'all', label: '全部', count: total },
-    ...orderFactories(props.factories).map(f => ({ value: f, label: f, count: props.totals[f] ?? 0 })),
-  ];
-});
+/** 东莞 → 湖北 → 其余（未标注等）按字典序 */
+const options = computed(() =>
+  orderFactories(props.factories).map(f => ({ value: f, label: f, count: props.totals[f] ?? 0 })),
+);
 
 function fmt(n: number): string {
   return Number(n || 0).toLocaleString('zh-CN');

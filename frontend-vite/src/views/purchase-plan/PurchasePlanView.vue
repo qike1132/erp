@@ -97,8 +97,8 @@ const sel = ref('');
 const showCreate = ref(false);
 const viewTab = ref<'daily' | 'summary'>('daily');
 const custFilter = ref('');
-// 工厂筛选（作用于整页）：'all' 表示全部工厂
-const factory = ref<FactoryFilter>('all');
+// 工厂筛选（作用于整页）：默认东莞，当月无东莞数据时回落到当月首个工厂
+const factory = ref<FactoryFilter>('东莞');
 
 watch(globalKw, () => { if (viewTab.value === 'daily') sel.value = ''; });
 watch([y, m], () => { globalKw.value = ''; debouncedKw.value = ''; });
@@ -126,10 +126,10 @@ const { rows, skuSummary, skuDateIndex, customers, availableFactories, factoryTo
 // 省去用户手点一天才能看到日明细；用户手动改选后本次上下文不再覆盖（见 composable）。
 useDefaultTodaySelection({ y, m, factory, rows, sel });
 
-// 切月后若该工厂当月已无计划，回落到「全部」——否则控件不再渲染该厂药丸，
+// 切月后若该工厂当月已无计划，回落到当月首个工厂——否则控件不再渲染该厂药丸，
 // 会出现「没有任何药丸处于选中态、页面却是空的」的困惑状态。
 watch(availableFactories, (list) => {
-  if (factory.value !== 'all' && !list.includes(factory.value)) factory.value = 'all';
+  if (!list.includes(factory.value)) factory.value = list[0] ?? '';
 });
 
 const allCustomers = computed<CustSumItem[]>(() => {

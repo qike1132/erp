@@ -19,13 +19,6 @@
         </div>
         <ul class="sp-prod-list">
           <li v-for="p in g.products" :key="p.product" class="sp-prod-row">
-            <i
-              v-if="factory === 'all'"
-              class="sp-prod-fdot"
-              :class="`fd-${factoryTone(p.factory)}`"
-              :title="p.factory || '未标注'"
-              aria-hidden="true"
-            />
             <span class="sp-prod-name" :title="p.product">{{ p.product }}</span>
             <span class="sp-prod-dots" aria-hidden="true" />
             <span class="sp-prod-qty num">{{ fmt(p.qty) }}</span>
@@ -40,7 +33,6 @@
 <script setup lang="ts">
 // 右栏的当日明细 —— 客户分组 + 全部产品，不截断，超出滚动。
 // 条目按产品行展示的是「该客户该产品当日」的出货状态，与后端 getShipmentStatus 同口径。
-import { factoryTone } from './factoryMeta'
 import type { PlanDayCustomerGroup } from './types'
 
 defineProps<{
@@ -49,8 +41,6 @@ defineProps<{
   totalQty: number
   customerCount: number
   productCount: number
-  /** 当前工厂筛选；'all' 时每个产品前显示工厂色点 */
-  factory: string
 }>()
 
 const PENDING = { cls: 'st-wait', lbl: '待生产' }
@@ -173,19 +163,6 @@ function fmt(n: number): string {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-
-/* 工厂色点（仅「全部」视图）：东莞主色 / 湖北紫 / 其余中性 */
-.sp-prod-fdot {
-  flex-shrink: 0;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  align-self: center;
-}
-
-.fd-dg { background: var(--color-primary-500, #5b8def); }
-.fd-hb { background: var(--color-purple-500, #8b5cf6); }
-.fd-other { background: var(--color-slate-300, #cbd5e1); }
 
 .sp-prod-dots {
   flex: 1 1 auto;
