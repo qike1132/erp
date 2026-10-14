@@ -133,6 +133,11 @@ def ok(r):
         return False
 
 
+def _rejected(r):
+    """期望被业务校验拒绝：必须是 HTTP 400（非 500/超时/网络异常）。"""
+    return r is not None and r.status_code == 400
+
+
 # ============================ 备份 / 清理 ============================
 def find_pg_dump():
     exe = shutil.which('pg_dump')
@@ -210,6 +215,20 @@ def cleanup():
             log(f'  {name:<24} skip: {str(e)[:100]}')
     with contextlib.suppress(Exception):
         db_exec('DELETE FROM packaging_record WHERE product_name LIKE :x', {'x': 'ZZTEST%'})
+    # 刷新物化视图 + 清 Redis 应用缓存（与 zztest_cleanup.py 一致，避免重跑吃旧缓存）
+    for mv in ('mv_daily_order_quantity', 'mv_daily_stockin_quantity',
+               'mv_daily_stockout_quantity', 'mv_product_aggregate'):
+        with contextlib.suppress(Exception):
+            db_exec(f'REFRESH MATERIALIZED VIEW "{mv}"')
+    with contextlib.suppress(Exception):
+        import redis
+        _rc = redis.Redis(host=settings.REDIS_HOST, port=settings.REDIS_PORT, db=settings.REDIS_DB,
+                          password=settings.REDIS_PASSWORD or None, decode_responses=True)
+        _rc.ping()
+        _keys = list(_rc.scan_iter('erp:*'))
+        if _keys:
+            _rc.delete(*_keys)
+        _rc.close()
 
 
 # ============================ 运行期模型 ============================
@@ -279,6 +298,9 @@ def run_one_sku(m: SkuModel, dates, counters, lock):
                 oid = rr[0][0]
                 m.ord_total += Q
                 n_order += 1
+        # 回填 order_date 必须早于出货：出货 FIFO 按 order_date 升序分配（计划 §5）
+        if oid:
+            db_exec('UPDATE "order" SET order_date=:d WHERE id=:o', {'d': ds + ' 12:00:00', 'o': oid})
         # 抵扣（随机模式，受备货可用量约束）
         mode = random.choice(['shipped_full', 'shipped_partial', 'stocked_full', 'stocked_partial', 'pending'])
         if mode == 'shipped_full':
@@ -296,6 +318,10 @@ def run_one_sku(m: SkuModel, dates, counters, lock):
             if ok(call('PUT', f'/api/v1/orders/deduct/{oid}', params={'deduct_quantity': D})):
                 m.deducted += D
                 m.ded_total += D
+        # 回填抵扣 stockout_date（同样早于出货）
+        if oid:
+            db_exec('UPDATE stock_out SET stockout_date=:d WHERE order_id=:o AND stockin_id IS NOT NULL',
+                    {'d': ds + ' 12:00:00', 'o': oid})
         # 出货闸门 = 订单余量(Q − 已出货) 与 结余；本单为新单，已出货=0 → 上限 Q
         Sh = min(want_Sh, Q, m.balance)
         if Sh > 0:
@@ -322,26 +348,27 @@ def run_one_sku(m: SkuModel, dates, counters, lock):
                     else:
                         m.shipped -= rq       # 独立出货退货：净出货减少 → 结余增加
                     m.returned += rq
-        # 回填当日 order_date + 抵扣 stockout_date（中午，避免 UTC 跨日）
-        if oid:
-            db_exec('UPDATE "order" SET order_date=:d WHERE id=:o', {'d': ds + ' 12:00:00', 'o': oid})
-            db_exec('UPDATE stock_out SET stockout_date=:d WHERE order_id=:o AND stockin_id IS NOT NULL',
-                    {'d': ds + ' 12:00:00', 'o': oid})
 
-        # 失败用例注入（每 20 天一次）：越量出货 + 越量抵扣
+        # 失败用例注入（每 20 天一次）：必须被业务校验拒绝（400，非 500/超时）
         if di % 20 == 0:
-            rr = call('POST', '/api/v1/stock/out/create', json={
+            rr = call('POST', '/api/v1/stock/out/create', json={      # ① 越量出货
                 'product_id': m.pid, 'quantity': 9999999, 'customer': CUST,
+                'stockout_date': ds, 'note': 'ZZTEST-FAIL'})
+            rr_n = call('POST', '/api/v1/stock/out/create', json={    # ② 无订单出货
+                'product_id': m.pid, 'quantity': 1, 'customer': 'ZZTEST_NOORDER',
                 'stockout_date': ds, 'note': 'ZZTEST-FAIL'})
             with lock:
                 counters['over_ship'] += 1
-                if not ok(rr):
+                counters['no_order_ship'] += 1
+                if _rejected(rr):
                     counters['over_ship_rejected'] += 1
-            if oid:
+                if _rejected(rr_n):
+                    counters['no_order_ship_rejected'] += 1
+            if oid:                                                    # ③ 越量抵扣
                 rr2 = call('PUT', f'/api/v1/orders/deduct/{oid}', params={'deduct_quantity': 9999999})
                 with lock:
                     counters['over_deduct'] += 1
-                    if not ok(rr2):
+                    if _rejected(rr2):
                         counters['over_deduct_rejected'] += 1
 
         if di % 30 == 0:
@@ -361,9 +388,11 @@ def derive_all(models):
         r = db_exec('SELECT '
                     'COALESCE(SUM(CASE WHEN stockin_id IS NOT NULL THEN quantity-returned_quantity ELSE 0 END),0), '
                     'COALESCE(SUM(CASE WHEN stockin_id IS NULL AND order_id IS NOT NULL THEN quantity-returned_quantity ELSE 0 END),0), '
-                    'COALESCE(SUM(CASE WHEN stockin_id IS NULL AND order_id IS NULL THEN quantity-returned_quantity ELSE 0 END),0) '
+                    'COALESCE(SUM(CASE WHEN stockin_id IS NULL AND order_id IS NULL THEN quantity-returned_quantity ELSE 0 END),0), '
+                    'COALESCE(SUM(CASE WHEN stockin_id IS NULL THEN quantity ELSE 0 END),0) '
                     'FROM stock_out WHERE product_id=:p AND customer=:c', {'p': pid, 'c': CUST}, fetch=True)
-        d['ded'], d['ship'], d['direct'] = int(r[0][0]), int(r[0][1]), int(r[0][2])
+        d['ded'], d['ship'], d['direct'], d['ship_gross'] = (
+            int(r[0][0]), int(r[0][1]), int(r[0][2]), int(r[0][3]))
         r = db_exec('SELECT COALESCE(SUM(si.quantity - COALESCE(sub.consumed,0)),0) FROM stock_in si '
                     'LEFT JOIN (SELECT stockin_id, SUM(quantity-returned_quantity) consumed FROM stock_out '
                     'WHERE stockin_id IS NOT NULL GROUP BY stockin_id) sub ON sub.stockin_id=si.id '
@@ -416,6 +445,41 @@ def read_stock_totals():
     return {'order': int(j.get('total_order_quantity', 0) or 0),
             'stockin': int(j.get('total_stockin_quantity', 0) or 0),
             'stock': int(j.get('total_stock', 0) or 0)}
+
+
+def verify_order_statuses():
+    """逐单核对订单状态 == compute_status_from_stockouts 口径（/purchase 派生）。
+
+    派生优先级（shared_models/order.py）：batch_completed_at → 已出货(ship≥ord) →
+    待出货(ship>0) → 已备货(ded≥ord) → 部分备货(ded>0) → 待备货。
+    """
+    rows = db_exec(
+        'SELECT o.order_no, o.quantity, o.status, o.batch_completed_at, '
+        'COALESCE(d.ded,0), COALESCE(s.ship,0) '
+        'FROM "order" o '
+        'LEFT JOIN (SELECT order_id, SUM(quantity-returned_quantity) ded FROM stock_out '
+        '           WHERE stockin_id IS NOT NULL GROUP BY order_id) d ON d.order_id=o.id '
+        'LEFT JOIN (SELECT order_id, SUM(quantity-returned_quantity) ship FROM stock_out '
+        '           WHERE stockin_id IS NULL GROUP BY order_id) s ON s.order_id=o.id '
+        'WHERE o.customer=:c AND o.is_deleted IS NOT TRUE', {'c': CUST}, fetch=True)
+    bad = []
+    for ono, qty, status, bca, ded_raw, ship_raw in rows:
+        ded, ship = int(ded_raw), int(ship_raw)
+        if bca:
+            exp = '批次已完成'
+        elif ship >= qty:
+            exp = '已出货'
+        elif ship > 0:
+            exp = '待出货'
+        elif ded >= qty:
+            exp = '已备货'
+        elif ded > 0:
+            exp = '部分备货'
+        else:
+            exp = '待备货'
+        if status != exp:
+            bad.append(f'{ono}: status={status} 期望={exp} (ord={qty} ded={ded} ship={ship})')
+    return bad
 
 
 # ============================ 主流程 ============================
@@ -471,7 +535,8 @@ def main():
     dates = [start + timedelta(days=k) for k in range(days)]
     log(f'日期窗口: {dates[0]} .. {dates[-1]}  ({days} 天)  workers={workers}')
 
-    counters = {'over_ship': 0, 'over_ship_rejected': 0, 'over_deduct': 0, 'over_deduct_rejected': 0}
+    counters = {'over_ship': 0, 'over_ship_rejected': 0, 'over_deduct': 0, 'over_deduct_rejected': 0,
+                'no_order_ship': 0, 'no_order_ship_rejected': 0}
     lock = threading.Lock()
     t0 = datetime.now()
     n_order = 0
@@ -507,7 +572,7 @@ def main():
                 if got != want:
                     mismatches.append(f'{m.name}: /stock.{field} 实测={got} 期望={want}')
         for flow, want in [('order-logs', d['ord']), ('stockin-logs', d['stockin_total']),
-                           ('stockout-logs', d['ship']), ('deduction-logs', d['ded'])]:
+                           ('stockout-logs', d['ship_gross']), ('deduction-logs', d['ded'])]:
             got = read_report_total(flow, m.name)
             if got != want:
                 mismatches.append(f'{m.name}: /report/{flow} 实测={got} 期望={want}')
@@ -523,8 +588,13 @@ def main():
             if got != want:
                 mismatches.append(f'/stock 顶部「{label}」: 实测={got} 期望={want}')
 
+    # /purchase 订单状态派生逐单核对
+    for x in verify_order_statuses():
+        mismatches.append(f'/purchase 状态: {x}')
+
     fail_ok = (counters['over_ship_rejected'] == counters['over_ship']
-               and counters['over_deduct_rejected'] == counters['over_deduct'])
+               and counters['over_deduct_rejected'] == counters['over_deduct']
+               and counters['no_order_ship_rejected'] == counters['no_order_ship'])
 
     sec('核对结果')
     log(f'  SKU 数={len(models)}  订单={n_order}')
@@ -534,7 +604,7 @@ def main():
         for x in mismatches[:80]:
             log(f'     - {x}')
     else:
-        log('  所有 SKU 的 /stock 与 /report 读数 == 独立推导期望值（0 处不一致）')
+        log('  所有 SKU 的 /stock + /report 四流水 + 顶部聚合 + /purchase 逐单状态 == 独立推导（0 处不一致）')
 
     verdict = 'PASS' if (not mismatches and fail_ok) else 'FAIL'
     sec(f'ZZTEST BATCH {verdict}  {datetime.now().isoformat()}')

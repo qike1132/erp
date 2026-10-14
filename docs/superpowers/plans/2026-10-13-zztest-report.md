@@ -66,4 +66,28 @@
 
 ## 7. 待办
 
-- 测试数据仍在生产库（1 客户 + 50 SKU + 9000 单及关联）→ 核对完毕后用 `zztest_cleanup.py` 清理。
+- 测试数据已按 `ZZTEST` 作用域清理（残留 0）。
+
+## 8. 脚本修复与测试盲区（2026-10-14，opus 独立审核后）
+
+独立审核（未参与实现的新鲜上下文）发现并修复：
+
+| 级别 | 修复 |
+|---|---|
+| H1 | `zztest_batch.py` 内核对 `stockout-logs` **误用净量** → 改用毛量 `ship_gross`（与 `zztest_verify.py` 一致）。此前有退货时**必然假红**——即上一轮全量 FAIL 的真因 |
+| H2 | 新增 **/purchase 逐单状态核对**：`status == 派生(Σded/Σship/ord)`（batch 与 verify 都加）。原缺失，规格要求项落空 |
+| M3 | 回填 `order_date` / 抵扣 `stockout_date` **移到出货之前**（出货 FIFO 按 `order_date` 升序，原实现晚于出货） |
+| M4 | 失败用例断言改为**必须 HTTP 400**（原 `not ok()` 把 500/超时也算"被拒"）；补「无订单出货」用例（共 3 类） |
+| M5 | batch 内嵌 cleanup 补 **刷物化视图 + 清 Redis**（与 `zztest_cleanup.py` 一致，避免重跑吃旧缓存假红） |
+
+### ⚠️ 测试盲区（测试永远测不出、只有读代码能发现）
+
+**抵扣行退货虚增「库存结余」**：`stock_return_service.py:113` 对抵扣行退货写 `退货` +qty 库存流水，
+而结余公式（`get_inventory_balance` / CTE）**含 `退货`、不含 `订单抵扣`** → 抵扣从没从结余扣过，
+退货却往结余加 → **结余虚增 = 退货量**。
+
+本测试的期望值公式与应用的结余公式**逐字同构（镜像口径）** → **永远测不出**这个偏差。
+这是**应用侧口径问题**，需 owner 裁定：
+- UI 只允许退「独立出货」（`search_returnable_stockouts` 明确 `stockin_id IS NULL`）；
+- 但 **API（`POST /stock-returns/create`）不拦抵扣行退货**，两者不一致。
+

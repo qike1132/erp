@@ -142,11 +142,39 @@ if ok(r):
         if got != want:
             mismatches.append(f'/stock 顶部「{label}」: 实测={got} 期望={want}')
 
+# /purchase 订单状态派生逐单核对
+srows = q(
+    'SELECT o.order_no, o.quantity, o.status, o.batch_completed_at, '
+    'COALESCE(d.ded,0), COALESCE(s.ship,0) '
+    'FROM "order" o '
+    'LEFT JOIN (SELECT order_id, SUM(quantity-returned_quantity) ded FROM stock_out '
+    '           WHERE stockin_id IS NOT NULL GROUP BY order_id) d ON d.order_id=o.id '
+    'LEFT JOIN (SELECT order_id, SUM(quantity-returned_quantity) ship FROM stock_out '
+    '           WHERE stockin_id IS NULL GROUP BY order_id) s ON s.order_id=o.id '
+    'WHERE o.customer=:c AND o.is_deleted IS NOT TRUE', {'c': CUST})
+for ono, qty, status, bca, ded_raw, ship_raw in srows:
+    ded, ship = int(ded_raw), int(ship_raw)
+    if bca:
+        exp_s = '批次已完成'
+    elif ship >= qty:
+        exp_s = '已出货'
+    elif ship > 0:
+        exp_s = '待出货'
+    elif ded >= qty:
+        exp_s = '已备货'
+    elif ded > 0:
+        exp_s = '部分备货'
+    else:
+        exp_s = '待备货'
+    if status != exp_s:
+        mismatches.append(f'/purchase {ono}: status={status} 期望={exp_s}')
+
 print(f'\n=== 核对结果：{"PASS" if not mismatches else "FAIL"} ===')
 if mismatches:
     print(f'发现 {len(mismatches)} 处不一致：')
     for x in mismatches[:60]:
         print(f'  - {x}')
 else:
-    print('全部 SKU 的 /stock（订单数量/备货数量/出货数量/总订单/库存结余）+ 4 条流水 + 顶部聚合 == 独立推导（0 处不一致）')
+    print('全部 SKU 的 /stock（订单数量/备货数量/出货数量/总订单/库存结余）+ 4 条流水 + 顶部聚合'
+          ' + /purchase 逐单状态 == 独立推导（0 处不一致）')
 print('DONE')
