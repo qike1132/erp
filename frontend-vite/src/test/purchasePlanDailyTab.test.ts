@@ -97,13 +97,12 @@ describe('排产日历：整月一屏', () => {
     expect(w.findAll('.sp-cell-empty')).toHaveLength(32)
   })
 
-  it('有排产的格子显示当日总量与客户/产品数', () => {
-    const w = mountTab()
-    const cell = cellOf(w, 8)
+  it('有排产的格子只显示当日总量，不再有客户/产品数元信息与进度条', () => {
+    const cell = cellOf(mountTab(), 8)
     expect(cell?.classes()).toContain('sp-cell-danger')
     expect(cell?.find('.sp-qty').text()).toContain('5,000')
-    expect(cell?.find('.sp-cell-meta').text()).toContain('3客户')
-    expect(cell?.find('.sp-cell-meta').text()).toContain('5产品')
+    expect(cell?.find('.sp-cell-meta').exists()).toBe(false)
+    expect(cell?.find('.sp-bar').exists()).toBe(false)
   })
 
   it('逾期/临期/完成三种状态在格子上各有标记', () => {

@@ -24,14 +24,6 @@
 
       <template v-if="c.row">
         <span class="sp-qty num">{{ fmt(c.row.totalQty) }}<small>件</small></span>
-        <span class="sp-cell-meta">
-          <span>{{ c.row.customerCount }}客户</span>
-          <i aria-hidden="true" />
-          <span>{{ c.row.planCount }}产品</span>
-        </span>
-        <span class="sp-bar">
-          <i :class="barCls(c.row._producedPct)" :style="{ width: c.row._producedPct + '%' }" />
-        </span>
         <!-- 「全部」视图下叠加工厂构成条：一眼看出当天计划里各厂占比 -->
         <span v-if="factory === 'all'" class="sp-fbar" aria-hidden="true">
           <i v-for="seg in fbar(c.row)" :key="seg.f" :class="`fb-${factoryTone(seg.f)}`" :style="{ width: seg.w + '%' }" />
@@ -84,13 +76,6 @@ function fmt(n: number): string {
   return Number(n || 0).toLocaleString('zh-CN')
 }
 
-/** 进度条配色与卡片/表格同口径：0 未出、未满 100 部分、100 完成 */
-function barCls(pct: number): string {
-  if (pct <= 0) return 'sp-bar-r'
-  if (pct < 100) return 'sp-bar-a'
-  return 'sp-bar-g'
-}
-
 /** 「全部」视图下格内的工厂构成条：按各厂当日计划量占比铺色 */
 function fbar(row: Row): { f: string; w: number }[] {
   const fac = row.factories
@@ -127,7 +112,7 @@ function cellCls(c: (typeof cells.value)[number]): string[] {
 function aria(c: (typeof cells.value)[number]): string {
   const r = c.row
   if (!r) return ''
-  return `${c.day}日 周${c.weekday}，共 ${r.totalQty} 件，${r.customerCount} 家客户 ${r.planCount} 个产品，查看当日明细`
+  return `${c.day}日 周${c.weekday}，共 ${r.totalQty} 件，查看当日明细`
 }
 
 function pick(c: (typeof cells.value)[number]): void {
@@ -164,7 +149,7 @@ function pick(c: (typeof cells.value)[number]): void {
 
 .sp-cell {
   position: relative;
-  min-height: 96px;
+  min-height: 76px;
   border: 1px solid var(--color-border-light, #f0f2f5);
   border-radius: var(--radius-sm, 10px);
   background: white;
@@ -288,25 +273,6 @@ function pick(c: (typeof cells.value)[number]): void {
   margin-left: 1px;
 }
 
-.sp-cell-meta {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 10px;
-  color: var(--color-text-muted);
-  white-space: nowrap;
-  overflow: hidden;
-}
-
-.sp-cell-meta i {
-  width: 3px;
-  height: 3px;
-  border-radius: 50%;
-  background: currentColor;
-  opacity: 0.5;
-  flex-shrink: 0;
-}
-
 .sp-today-hint {
   margin-top: auto;
   font-size: 10px;
@@ -314,25 +280,7 @@ function pick(c: (typeof cells.value)[number]): void {
   color: var(--color-primary-600);
 }
 
-.sp-bar {
-  display: block;
-  height: 4px;
-  border-radius: 2px;
-  background: rgba(0, 0, 0, 0.06);
-  overflow: hidden;
-}
-
-.sp-bar > i {
-  display: block;
-  height: 100%;
-  border-radius: 2px;
-}
-
-.sp-bar-r { background: var(--color-danger-500); }
-.sp-bar-a { background: var(--color-warning-500); }
-.sp-bar-g { background: var(--color-success-500); }
-
-/* 工厂构成条（仅「全部」视图）：与进度条同宽同高，颜色区分工厂 */
+/* 工厂构成条（仅「全部」视图）：细色条，颜色区分工厂 */
 .sp-fbar {
   display: flex;
   height: 4px;
