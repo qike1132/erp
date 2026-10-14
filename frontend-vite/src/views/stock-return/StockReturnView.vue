@@ -217,11 +217,7 @@ const columns: TableColumn[] = [
 </script>
 
 <style scoped>
-/* 本页卡片直角（对齐 /purchase、/supplier 方正基准）：scoped 未分层样式
-   优先于 @layer components 里的全局 18px 圆角，仅影响 /stock-return */
-.page-card {
-  border-radius: 0;
-}
+/* 卡片样式走全局 .page-card 系列（src/styles/app.css，18px 圆角），与 /report 一致 */
 
 .sr-container {
   padding: 0;
