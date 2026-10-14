@@ -12,6 +12,7 @@ class ProductionRecordCreate(BaseModel):
     """创建生产记录"""
     department: str = Field(..., pattern=r'^(filling|handcraft|packaging)$', description="部门")
     product_id: int | None = Field(None, description="关联产品ID")
+    customer_id: int | None = Field(None, description="客户ID")
     product_name: str = Field(..., min_length=1, max_length=100, description="产品名称")
     barcode: str = Field('', max_length=50, description="69码")
     unit_price: float = Field(0, ge=0, description="单价")
@@ -24,6 +25,7 @@ class ProductionRecordUpdate(BaseModel):
     """更新生产记录"""
     department: str | None = Field(None, pattern=r'^(filling|handcraft|packaging)$', description="部门")
     product_id: int | None = Field(None, description="关联产品ID")
+    customer_id: int | None = Field(None, description="客户ID")
     product_name: str | None = Field(None, min_length=1, max_length=100, description="产品名称")
     barcode: str | None = Field(None, max_length=50, description="69码")
     unit_price: float | None = Field(None, ge=0, description="单价")
@@ -37,6 +39,8 @@ class ProductionRecordItem(BaseModel):
     id: int
     department: str
     product_id: int | None = None
+    customer_id: int | None = None
+    customer_name: str = ''
     product_name: str
     barcode: str = ''
     unit_price: float = 0

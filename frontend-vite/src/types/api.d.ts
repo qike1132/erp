@@ -2038,6 +2038,7 @@ export interface ProductionRecordActionResponse {
 export interface ProductionRecordCreate {
   department: string
   product_id?: number | null
+  customer_id?: number | null
   product_name: string
   barcode?: string
   unit_price?: number
@@ -2059,6 +2060,7 @@ export interface ProductionRecordListResponse {
 export interface ProductionRecordUpdate {
   department?: string | null
   product_id?: number | null
+  customer_id?: number | null
   product_name?: string | null
   barcode?: string | null
   unit_price?: number | null

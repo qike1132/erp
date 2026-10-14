@@ -47,6 +47,14 @@
               </div>
             </div>
 
+            <CustomerSelect
+              data-test="qe-customer"
+              :model-value="form.customer_id"
+              :options="customerOptions"
+              placeholder="客户（选填）"
+              @update:model-value="selectCustomer"
+            />
+
             <div class="pr-qe-search">
               <FontAwesomeIcon icon="search" class="pr-qe-search-icon" aria-hidden="true" />
               <input
@@ -115,6 +123,8 @@
           <!-- 慢路径收进「详细」：单价自动带出、日期默认选中日、备注选填 -->
           <div class="pr-qe-hint" data-test="qe-hint">
             <span>单价 {{ form.unit_price > 0 ? formatCurrency(form.unit_price) : '—' }}（自动）</span>
+            <span class="pr-qe-dot">·</span>
+            <span>客户 {{ form.customer_name || '空' }}</span>
             <span class="pr-qe-dot">·</span>
             <span>备注（{{ form.remark || '空' }}）</span>
             <span class="pr-qe-dot">·</span>
@@ -197,6 +207,7 @@ import { computed } from 'vue'
 import { formatCurrency } from '@/utils/format'
 import EntryDetailFields from './EntryDetailFields.vue'
 import ProductSearchDropdown from './ProductSearchDropdown.vue'
+import CustomerSelect from './CustomerSelect.vue'
 import { useProductionEntry } from '@/views/production/composables/useProductionEntry'
 
 const props = defineProps<{
@@ -250,6 +261,8 @@ const {
   confirmSearchSelection,
   selectProduct,
   clearProduct,
+  selectCustomer,
+  customerOptions,
   validateField,
   closeEntryDrawer,
   handleSubmit,
@@ -288,7 +301,7 @@ defineExpose({ handleSubmit, closeEntryDrawer })
 .pr-qe-input::placeholder { color: var(--color-text-placeholder); }
 
 /* 快捷行 */
-.pr-qe-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 14px; }
+.pr-qe-row { display: grid; grid-template-columns: auto 220px minmax(0, 1fr) auto auto; align-items: center; gap: 14px; }
 .pr-qe-dept { position: relative; }
 .pr-qe-dept-chip { display: inline-flex; align-items: center; gap: 10px; height: 64px; padding: 0 22px; border: 2px solid var(--color-border); border-radius: 16px; background: white; font-size: 16px; font-weight: 700; color: var(--color-text-secondary); cursor: pointer; font-family: inherit; white-space: nowrap; transition: all 0.2s ease; }
 .pr-qe-dept-chip:hover { border-color: var(--color-border-strong); }
@@ -356,7 +369,7 @@ defineExpose({ handleSubmit, closeEntryDrawer })
 .pr-qe-enter-from, .pr-qe-leave-to { opacity: 0; }
 .pr-qe-enter-from .pr-qe-modal, .pr-qe-leave-to .pr-qe-modal { transform: scale(0.96) translateY(8px); opacity: 0; }
 
-@media (max-width: 900px) {
+@media (max-width: 1100px) {
   .pr-qe-row { grid-template-columns: 1fr; }
   .pr-qe-dept-chip, .pr-qe-qty, .pr-qe-submit { width: 100%; justify-content: center; }
 }

@@ -30908,6 +30908,18 @@
             "title": "Product Id",
             "description": "关联产品ID"
           },
+          "customer_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer Id",
+            "description": "客户ID"
+          },
           "product_name": {
             "type": "string",
             "maxLength": 100,
@@ -31044,6 +31056,18 @@
             ],
             "title": "Product Id",
             "description": "关联产品ID"
+          },
+          "customer_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer Id",
+            "description": "客户ID"
           },
           "product_name": {
             "anyOf": [

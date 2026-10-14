@@ -16,6 +16,7 @@ const createMock = vi.fn()
 const deleteMock = vi.fn()
 const productInfoMock = vi.fn()
 const searchMock = vi.fn()
+const customerActiveNamesMock = vi.fn()
 
 vi.mock('@/api', () => ({
   dailyProductionApi: {
@@ -24,12 +25,16 @@ vi.mock('@/api', () => ({
     deleteRecord: (...a: unknown[]) => deleteMock(...a),
     productInfo: (...a: unknown[]) => productInfoMock(...a),
   },
+  customerApi: {
+    activeNames: (...a: unknown[]) => customerActiveNamesMock(...a),
+  },
   productApi: { search: (...a: unknown[]) => searchMock(...a) },
 }))
 
 vi.mock('@/composables/useToast', () => ({ showToast: vi.fn() }))
 
 import ProductionEntryDialog from '@/views/production/components/ProductionEntryDialog.vue'
+import CustomerSelect from '@/views/production/components/CustomerSelect.vue'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import { showToast } from '@/composables/useToast'
 
@@ -107,6 +112,8 @@ beforeEach(() => {
   deleteMock.mockReset()
   productInfoMock.mockReset()
   searchMock.mockReset()
+  customerActiveNamesMock.mockReset()
+  customerActiveNamesMock.mockResolvedValue([{ id: 5, name: '客户A' }])
   // 无 keyword 的查询 = 头部「今天已录 N 条」；带 keyword 的 = 重复校验
   recordsMock.mockImplementation(async (params: { keyword?: string }) => {
     if (params?.keyword) {
@@ -150,6 +157,21 @@ describe('ProductionEntryDialog 快捷行布局', () => {
     expect(hint).toContain('¥7.00')
     expect(hint).toContain('备注（空）')
     expect(hint).toContain('2026-09-30')
+  })
+
+  it('选择客户后提交带 customer_id', async () => {
+    const w = mountDialog()
+    await flushPromises()
+
+    w.findComponent(CustomerSelect).vm.$emit('update:modelValue', 5)
+    await nextTick()
+    await selectFirstProduct(w)
+    await w.find('[data-test="qe-quantity"]').setValue('10')
+    await w.find('[data-test="qe-submit"]').trigger('click')
+    await flushPromises()
+
+    expect(createMock).toHaveBeenCalledWith(expect.objectContaining({ customer_id: 5 }))
+    expect(w.find('[data-test="qe-hint"]').text()).toContain('客户A')
   })
 
   it('头部显示「今天已录 N 条」（按选中日期取记录总数）', async () => {
