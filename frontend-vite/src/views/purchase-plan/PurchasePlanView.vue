@@ -4,60 +4,21 @@
       <div class="page-card-header">
         <!-- 外层必须是纵向容器：.page-card-header 是 flex-wrap:nowrap 的横向 flex，
              两行直接放进去会被并排摆开。 -->
-        <div class="sp-head">
-          <div class="sp-head-row1">
-            <div class="sp-tab-group" role="tablist">
-              <button
-                role="tab"
-                :aria-selected="viewTab === 'daily'"
-                :class="['sp-tab', { 'sp-tab-active': viewTab === 'daily' }]"
-                @click="viewTab = 'daily'"
-              >排产日历</button>
-              <button
-                role="tab"
-                :aria-selected="viewTab === 'summary'"
-                :class="['sp-tab', { 'sp-tab-active': viewTab === 'summary' }]"
-                @click="viewTab = 'summary'"
-              >月度汇总</button>
-            </div>
-
-            <PurchasePlanToolbar
-              v-model:global-kw="globalKw"
-              :view-tab="viewTab"
-              @export="viewTab === 'daily' ? exportCSV() : exportSkuCSV()"
-              @create="showCreate = true"
-            />
-          </div>
-
-          <!-- 第二行：月份上下文 + 工厂筛选 + 该月汇总。
-               切月与切工厂都作用于整页（KPI 与两个 Tab 都跟着变），所以与 KPI 同行，
-               而不是挤在右上角与「新建」抢位置。 -->
-          <div class="sp-head-row2">
-            <PurchasePlanMonthNav
-              :y="y"
-              :m="m"
-              @prev="prevMonth"
-              @next="nextMonth"
-              @reset="resetMonth"
-            />
-            <PurchasePlanFactoryFilter
-              v-model="factory"
-              :factories="availableFactories"
-              :totals="factoryTotals"
-            />
-            <PurchasePlanKpiStrip
-              :plan-qty="planQtyNum"
-              :produced-qty="producedQtyNum"
-              :remain-qty="remainQtyNum"
-              :pct="sKpi.pct"
-              :plan-days="rows.length"
-              :risk-days="riskDays"
-              :risk-overdue="risks.delayedCount"
-              :risk-expiring="risks.expiringCount"
-              :risk-qty="riskQty"
-            />
-          </div>
-        </div>
+        <PurchasePlanHeader
+          v-model:view-tab="viewTab"
+          v-model:factory="factory"
+          v-model:global-kw="globalKw"
+          :y="y"
+          :m="m"
+          :factories="availableFactories"
+          :factory-totals="factoryTotals"
+          :kpi="kpi"
+          @prev="prevMonth"
+          @next="nextMonth"
+          @reset="resetMonth"
+          @export="viewTab === 'daily' ? exportCSV() : exportSkuCSV()"
+          @create="showCreate = true"
+        />
       </div>
 
       <PurchasePlanDailyTab
@@ -111,10 +72,7 @@ import { useExport } from '@/composables/useExport';
 import { downloadCsv, buildCsvRow } from '@/utils/csv';
 import PurchasePlanMonthlySummary from './components/PurchasePlanMonthlySummary.vue';
 import PurchasePlanDailyTab from './components/PurchasePlanDailyTab.vue';
-import PurchasePlanToolbar from './components/PurchasePlanToolbar.vue';
-import PurchasePlanMonthNav from './components/PurchasePlanMonthNav.vue';
-import PurchasePlanKpiStrip from './components/PurchasePlanKpiStrip.vue';
-import PurchasePlanFactoryFilter from './components/PurchasePlanFactoryFilter.vue';
+import PurchasePlanHeader from './components/PurchasePlanHeader.vue';
 import { usePurchasePlanData } from './composables/usePurchasePlanData';
 import { useSkuSummary } from './composables/useSkuSummary';
 import { useFactorySplit, type FactoryFilter } from './composables/useFactorySplit';
@@ -233,6 +191,19 @@ const risks = computed(() => {
 const riskDays = computed(() => risks.value.delayedCount + risks.value.expiringCount);
 const riskQty = computed(() => risks.value.delayedQty + risks.value.expiringQty);
 
+// 打包 KPI 条所需值传给头部组件（KpiStrip 的展示 props）。
+const kpi = computed(() => ({
+  planQty: planQtyNum.value,
+  producedQty: producedQtyNum.value,
+  remainQty: remainQtyNum.value,
+  pct: sKpi.value.pct,
+  planDays: rows.value.length,
+  riskDays: riskDays.value,
+  riskOverdue: risks.value.delayedCount,
+  riskExpiring: risks.value.expiringCount,
+  riskQty: riskQty.value,
+}));
+
 function exportSkuCSV() {
   const list = sortedSkuList.value;
   if (!list.length) { showToast('无数据', 'error'); return; }
@@ -298,36 +269,5 @@ function exportCSV() {
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
-}
-
-/* 头部两行：第一行「看哪个 Tab + 做什么」，第二行「看哪个月 + 这个月怎么样」。
-   原先全部挤在一行，切月/搜索/导出/新建没有主次。 */
-.sp-head {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  flex: 1;
-  min-width: 0;
-}
-
-.sp-head-row1 {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.sp-head-row2 {
-  display: flex;
-  align-items: stretch;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-
-@media (max-width: 900px) {
-  .sp-head-row2 {
-    flex-direction: column;
-    align-items: stretch;
-  }
 }
 </style>
