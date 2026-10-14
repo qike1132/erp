@@ -150,21 +150,21 @@ describe('PurchasePlanFactoryFilter', () => {
 
   it('顺序固定为 全部 → 东莞 → 湖北，且显示各厂计划量', () => {
     const w = mountFilter()
-    const pills = w.findAll('.sp-factory-pill')
-    expect(pills.map(p => p.attributes('data-f'))).toEqual(['all', '东莞', '湖北'])
+    const tabs = w.findAll('.sp-tab')
+    expect(tabs.map(t => t.attributes('data-f'))).toEqual(['all', '东莞', '湖北'])
     expect(w.findAll('.sp-factory-cnt').map(s => s.text())).toEqual(['210', '160', '50'])
   })
 
   it('选中态跟随 modelValue', () => {
     const w = mountFilter('东莞')
-    const active = w.findAll('.sp-factory-pill').filter(p => p.classes().includes('is-active'))
+    const active = w.findAll('.sp-tab').filter(t => t.classes().includes('sp-tab-active'))
     expect(active).toHaveLength(1)
     expect(active[0]!.attributes('data-f')).toBe('东莞')
   })
 
   it('点击某个工厂 emit update:modelValue', async () => {
     const w = mountFilter()
-    await w.findAll('.sp-factory-pill')[2]!.trigger('click')
+    await w.findAll('.sp-tab')[2]!.trigger('click')
     expect(w.emitted('update:modelValue')?.[0]).toEqual(['湖北'])
   })
 })

@@ -1,22 +1,19 @@
 <template>
-  <div class="sp-factory-box">
-    <span class="sp-factory-label">工厂</span>
-    <div class="sp-factory-seg" role="tablist" aria-label="工厂筛选">
-      <button
-        v-for="opt in options"
-        :key="opt.value"
-        role="tab"
-        :aria-selected="modelValue === opt.value"
-        :class="['sp-factory-pill', { 'is-active': modelValue === opt.value }]"
-        :data-f="opt.value"
-        :data-tone="factoryTone(opt.value)"
-        @click="emit('update:modelValue', opt.value)"
-      >
-        <i v-if="opt.value !== 'all'" class="sp-factory-dot" />
-        {{ opt.label }}
-        <span v-if="opt.count != null" class="sp-factory-cnt num">{{ fmt(opt.count) }}</span>
-      </button>
-    </div>
+  <div class="sp-tab-group" role="tablist" aria-label="工厂筛选">
+    <button
+      v-for="opt in options"
+      :key="opt.value"
+      role="tab"
+      :aria-selected="modelValue === opt.value"
+      :class="['sp-tab', { 'sp-tab-active': modelValue === opt.value }]"
+      :data-f="opt.value"
+      :data-tone="factoryTone(opt.value)"
+      @click="emit('update:modelValue', opt.value)"
+    >
+      <i v-if="opt.value !== 'all'" class="sp-factory-dot" />
+      {{ opt.label }}
+      <span v-if="opt.count != null" class="sp-factory-cnt num">{{ fmt(opt.count) }}</span>
+    </button>
   </div>
 </template>
 
@@ -53,53 +50,7 @@ function fmt(n: number): string {
 </script>
 
 <style scoped lang="scss">
-.sp-factory-box {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  background: white;
-  border: 1px solid var(--color-border-light, #e2e8f0);
-  border-radius: var(--radius-md, 14px);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.06);
-  padding: 0 12px;
-  flex-shrink: 0;
-}
-
-.sp-factory-label {
-  font-size: 12px;
-  font-weight: 800;
-  color: var(--color-text-muted, #64748b);
-  white-space: nowrap;
-}
-
-.sp-factory-seg {
-  display: inline-flex;
-  gap: 3px;
-  padding: 3px;
-  background: var(--color-slate-100, #f1f5f9);
-  border-radius: 10px;
-}
-
-.sp-factory-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 7px 13px;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  font-family: inherit;
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--color-text-secondary, #475569);
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background 0.2s ease, color 0.2s ease;
-}
-
-.sp-factory-pill:hover {
-  color: var(--color-primary-600);
-}
+@use '../purchase-plan-common.scss' as *;
 
 .sp-factory-dot {
   width: 8px;
@@ -110,27 +61,16 @@ function fmt(n: number): string {
 }
 
 /* 色点与选中态配色走 factoryTone 的色档（非状态色，避免与红/黄/绿语义冲突） */
-.sp-factory-pill[data-tone='dg'] .sp-factory-dot { background: var(--color-primary-500, #5b8def); }
-.sp-factory-pill[data-tone='hb'] .sp-factory-dot { background: var(--color-purple-500, #8b5cf6); }
+.sp-tab[data-tone='dg'] .sp-factory-dot { background: var(--color-primary-500, #5b8def); }
+.sp-tab[data-tone='hb'] .sp-factory-dot { background: var(--color-purple-500, #8b5cf6); }
 
-.sp-factory-pill.is-active {
-  background: white;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.10);
-  color: var(--color-primary-700, #2d5ab8);
-}
-
-.sp-factory-pill.is-active[data-tone='hb'] { color: var(--color-purple-700, #6d28d9); }
+.sp-tab-active[data-tone='dg'] { background: var(--color-primary-50, #eff5ff); color: var(--color-primary-700, #2d5ab8); }
+.sp-tab-active[data-tone='hb'] { background: var(--color-purple-50, #f5f3ff); color: var(--color-purple-700, #6d28d9); }
+.sp-tab-active[data-tone='other'] { background: var(--color-slate-100, #f1f5f9); color: var(--color-text-secondary, #475569); }
 
 .sp-factory-cnt {
   font-size: 11px;
   font-weight: 700;
   opacity: 0.65;
-}
-
-@media (max-width: 900px) {
-  .sp-factory-box {
-    width: 100%;
-    overflow-x: auto;
-  }
 }
 </style>
