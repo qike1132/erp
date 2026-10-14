@@ -11,30 +11,13 @@
           <FontAwesomeIcon icon="plus" aria-hidden="true" /> 新增退货
         </button>
         <div class="page-toolbar-right">
-          <div class="sr-filter-row">
-            <input v-model="startDate" type="date" class="sr-date-input" aria-label="开始日期" @change="applyFilter" />
-            <span class="sr-date-sep">~</span>
-            <input v-model="endDate" type="date" class="sr-date-input" aria-label="结束日期" @change="applyFilter" />
-            <UiSearchInput v-model="searchTerm"
-                           placeholder="搜索客户名称..."
-                           @update:model-value="onSearchInput"
-                           @clear="clearSearch"
-            />
-          </div>
+          <UiSearchInput
+            v-model="searchTerm"
+            placeholder="搜索客户名称..."
+            @update:model-value="onSearchInput"
+            @clear="clearSearch"
+          />
         </div>
-      </div>
-
-      <div class="sr-info-bar">
-        <span>共 <b>{{ totalItems }}</b> 条退货记录</span>
-        <template v-if="startDate || endDate">
-          <span class="sep" />
-          <span>日期 {{ startDate || '…' }} ~ {{ endDate || '…' }}</span>
-        </template>
-        <template v-if="debouncedVisible">
-          <span class="sep" />
-          <span>客户「{{ debouncedVisible }}」</span>
-        </template>
-        <button class="sr-reset-btn" @click="clearSearch">重置筛选</button>
       </div>
 
       <div class="sr-content">
@@ -163,18 +146,14 @@ const {
   confirmDialog,
   actionId,
   searchTerm,
-  startDate,
-  endDate,
   currentPage,
   perPage,
   onSearchInput,
   clearSearch,
-  applyFilter,
   isLoading,
   returns,
   totalItems,
   goPage,
-  debouncedSearch,
   formOpen,
   form,
   searchKeyword,
@@ -192,9 +171,6 @@ const {
   openReturnEdit,
   saveReturnEdit,
 } = useStockReturn()
-
-/** 信息条展示用：防抖后的客户关键字（searchTerm 是输入框实时值） */
-const debouncedVisible = debouncedSearch
 
 /** UiDataTable 分页事件（0 基页码）→ 服务端分页 goPage（1 基），与 SupplierTable 同构 */
 function onPage(event: { page: number }) {
@@ -232,12 +208,12 @@ const columns: TableColumn[] = [
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  padding: 7px 14px;
+  gap: 8px;
+  padding: 10px 20px;
   border: 2px solid var(--color-border-light);
-  border-radius: 0;
+  border-radius: var(--radius-button, 14px);
   background: white;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
   cursor: pointer;
   transition: background 0.3s ease, border-color 0.3s ease;
@@ -249,60 +225,6 @@ const columns: TableColumn[] = [
 .sr-action-btn-primary:hover {
   background: var(--color-primary-50);
   border-color: var(--color-primary-300);
-}
-
-.sr-filter-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.sr-date-input {
-  height: 34px;
-  padding: 0 8px;
-  border: 1px solid var(--color-border, #e4e7ed);
-  font-size: 12px;
-  color: var(--color-text);
-  background: white;
-}
-.sr-date-input:focus {
-  outline: none;
-  border-color: var(--color-primary-300);
-}
-.sr-date-sep {
-  color: var(--color-text-muted);
-}
-
-/* 一行信息条（~40px）：汇总用，不做大卡片统计区 */
-.sr-info-bar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  height: 40px;
-  padding: 0 24px;
-  border-bottom: 1px solid var(--color-border-light, #f1f5f9);
-  font-size: 13px;
-  color: var(--color-text-secondary);
-}
-.sr-info-bar b {
-  color: var(--color-primary-700);
-}
-.sr-info-bar .sep {
-  width: 1px;
-  height: 14px;
-  background: var(--color-border, #e4e7ed);
-}
-.sr-reset-btn {
-  margin-left: auto;
-  border: none;
-  background: none;
-  color: var(--color-primary-600);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  padding: 0;
-}
-.sr-reset-btn:hover {
-  text-decoration: underline;
 }
 
 .sr-content {
