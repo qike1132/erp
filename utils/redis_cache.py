@@ -527,54 +527,7 @@ class CacheConfig:
     APPROVAL_PENDING = ('approval:pending', 60)
 
 
-
-async def warmup_cache():
-    """缓存预热 - 应用启动时加载热点数据到Redis
-
-    优先级: 权限 > 产品列表 > 仪表盘 > 库存统计
-    """
-    logger.info('开始缓存预热...')
-    warmed = 0
-
-    try:
-        from fastapi_app.core.database import get_async_db_context
-        async with get_async_db_context() as db:
-            from sqlalchemy import select
-
-            from fastapi_app.shared_models import Permission, Product, User, user_permission
-
-            try:
-                # 批量 JOIN 查询：一次获取所有活跃用户及其权限，消除 N+1 问题
-                result = await db.execute(
-                    select(User.id, Permission.code)
-                    .join(user_permission, User.id == user_permission.c.user_id)
-                    .join(Permission, Permission.id == user_permission.c.permission_id)
-                    .where(User.status.is_(True))  # SQLAlchemy 表达式，语义为 SQL 布尔比较
-                )
-                user_perms: dict[int, list[str]] = {}
-                for uid, code in result.all():
-                    user_perms.setdefault(uid, []).append(code)
-                for uid, codes in user_perms.items():
-                    await redis_cache.set(
-                        f'user:permissions:uid_{uid}',
-                        codes,
-                        3600,
-                    )
-                    warmed += 1
-            except Exception as e:
-                logger.warning('权限缓存预热失败: %s', e)
-
-            try:
-                from sqlalchemy import func as sa_func
-                count_result = await db.execute(select(sa_func.count()).select_from(Product))
-                product_count = count_result.scalar() or 0
-                await redis_cache.set('product:list:count', product_count, 600)
-                warmed += 1
-            except Exception as e:
-                logger.warning('产品计数缓存预热失败: %s', e)
-
-    except Exception as e:
-        logger.warning('缓存预热数据库连接失败: %s', e)
-
-    logger.info('缓存预热完成，预热 %d 项', warmed)
-    return warmed
+# warmup_cache 已于 2026-10-15 迁至 fastapi_app/core/cache_warmup.py：
+# 它需要 import fastapi_app.core.database 与 fastapi_app.shared_models，留在本模块
+# 会构成「utils → fastapi_app」与「fastapi_app → utils」的包级循环（此前双向都靠
+# 函数内延迟 import 才不炸）。迁移后本模块是纯 Redis 客户端，零 fastapi_app 依赖。

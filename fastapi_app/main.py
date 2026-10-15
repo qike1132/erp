@@ -279,7 +279,9 @@ async def lifespan(application: FastAPI):
     task = asyncio.create_task(_audit_flush_loop())
     background_tasks.append(task)
 
-    from utils.redis_cache import warmup_cache
+    # 2026-10-15：warmup_cache 自根 utils/redis_cache.py 迁入 core/cache_warmup.py
+    # （原实现内 import fastapi_app.* 与 fastapi_app→utils 构成包级循环，见其模块 docstring）
+    from fastapi_app.core.cache_warmup import warmup_cache
     task = asyncio.create_task(warmup_cache())
     background_tasks.append(task)
 
