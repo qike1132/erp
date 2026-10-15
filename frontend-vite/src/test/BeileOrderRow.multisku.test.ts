@@ -10,6 +10,7 @@
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import BeileOrderRow from '@/views/beile-order/components/BeileOrderRow.vue'
+import { beileColumns, beileMinWidth } from '@/views/beile-order/composables/useBeileOrders'
 import type { BeileOrderRow as BeileOrderRowType } from '@/views/beile-order/composables/useBeileOrders'
 
 function baseItem(extra: Record<string, unknown> = {}): BeileOrderRowType {
@@ -163,6 +164,54 @@ describe('BeileOrderRow 订单块（一行一 SKU + 订单级列跨行）', () =
     // 2 SKU = span 2
     const orderCell = wrapper.find('.bo-td-order-no')
     expect(orderCell.attributes('style')).toContain('grid-row: 1 / span 2')
+  })
+
+  it('订单块行高：下限 56px、上限 auto（内容可撑高，不硬裁）', () => {
+    const wrapper = mountRow(multiUnordered())
+    const style = wrapper.find('.bo-block').attributes('style') ?? ''
+    // 只取 grid-auto-rows 那一条声明（避免匹配到 grid-template-columns 里的 minmax）
+    const autoRowsDecl = style
+      .split(';')
+      .map((s) => s.trim())
+      .find((s) => s.startsWith('grid-auto-rows')) ?? ''
+    expect(autoRowsDecl).toContain('minmax')
+    expect(autoRowsDecl).toContain('auto')
+  })
+
+  it('产品名称单行显示：名称单元格 nowrap（超长省略号 + hover 看全名）', () => {
+    // 需求（2026-10-15）：产品名称尽量单行显示，超长用省略号截断，hover 看全名。
+    const longName = 'MINI FAMILY系列（第8款花环毛绒挂件10个装小礼盒，含PDQ）'
+    const wrapper = mountRow(baseItem({
+      items: [{ id: 1, product_name: longName, quantity: 10 }],
+      quantity: 10,
+    }))
+
+    const nameCell = wrapper.findAll('.bo-td').find((c) => c.find('.bo-sku-name').exists())
+    expect(nameCell).toBeTruthy()
+    // 单行：单元格 nowrap → .bo-sku-name 的 text-overflow:ellipsis 生效
+    expect(nameCell!.classes()).toContain('bo-td-nowrap')
+    // 超长时仍可 hover 看全名
+    expect(nameCell!.find('.bo-sku-name').attributes('title')).toBe(longName)
+  })
+
+  it('列宽：收窄次要列、产品名称列加宽；订单号/下单时间不截断、总宽不增（不新增横向滚动）', () => {
+    const cols = beileColumns({ canPrint: false, confirmStatus: 'unconfirmed' })
+    const width = (k: string) => cols.find((c) => c.key === k)!.width as number
+
+    // 产品名称列显著加宽（180 → 375）
+    expect(width('productName')).toBeGreaterThanOrEqual(370)
+    // 收窄的次要列
+    expect(width('type')).toBeLessThanOrEqual(80)
+    expect(width('customer')).toBeLessThanOrEqual(130)
+    expect(width('factory')).toBeLessThanOrEqual(90)
+    expect(width('productBarcode')).toBeLessThanOrEqual(125)
+    expect(width('orderQty')).toBeLessThanOrEqual(95)
+    expect(width('opened')).toBeLessThanOrEqual(95)
+    // 单号 16 字符 / 时间到分 16 字符：保持够宽不被截断
+    expect(width('orderNo')).toBeGreaterThanOrEqual(140)
+    expect(width('date')).toBeGreaterThanOrEqual(135)
+    // 总宽（各列宽之和，flex 按 160 保底）不超过原值 1600，故不新增横向滚动
+    expect(beileMinWidth(cols)).toBeLessThanOrEqual(1600)
   })
 
   it('confirmable 门控：有权限（true）渲染确认按钮，无权限（false）隐藏', () => {

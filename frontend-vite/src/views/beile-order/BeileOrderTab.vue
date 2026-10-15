@@ -280,7 +280,7 @@ watch([page, appliedProduct, appliedCustomer, confirmStatus], () => {
   font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.05em;
   border-bottom: 2px solid #b8bec6;
   color: var(--color-text-secondary);
   white-space: nowrap;

@@ -186,22 +186,22 @@ export function beileColumns(opts: { canPrint: boolean; confirmStatus: string })
   const cols: BeileCol[] = []
   if (opts.canPrint) cols.push({ key: 'select', label: '', width: 40, align: 'center', scope: 'order' })
   cols.push(
-    { key: 'type', label: '订单类型', width: 90, align: 'center', scope: 'order' },
-    { key: 'orderNo', label: '订单号', width: 160, align: 'center', scope: 'order' },
-    { key: 'date', label: '下单时间', width: 150, align: 'center', scope: 'order' },
-    { key: 'customer', label: '客户名称', width: 170, align: 'center', scope: 'order' },
-    { key: 'factory', label: '工厂', width: 100, align: 'center', scope: 'order' },
-    { key: 'productName', label: '产品名称', width: 180, align: 'center', scope: 'sku' },
-    { key: 'productBarcode', label: '产品条码', width: 130, align: 'center', scope: 'sku' },
-    { key: 'orderQty', label: '订单数量', width: 110, align: 'center', scope: 'sku' },
-    { key: 'prodQty', label: '生产数量', width: 110, align: 'center', scope: 'sku' },
-    { key: 'opened', label: '小义开单', width: 110, align: 'center', scope: 'order' },
+    { key: 'type', label: '订单类型', width: 70, align: 'center', scope: 'order' },
+    { key: 'orderNo', label: '订单号', width: 145, align: 'center', scope: 'order' },
+    { key: 'date', label: '下单时间', width: 140, align: 'center', scope: 'order' },
+    { key: 'customer', label: '客户名称', width: 125, align: 'center', scope: 'order' },
+    { key: 'factory', label: '工厂', width: 85, align: 'center', scope: 'order' },
+    { key: 'productName', label: '产品名称', width: 375, align: 'center', scope: 'sku' },
+    { key: 'productBarcode', label: '产品条码', width: 120, align: 'center', scope: 'sku' },
+    { key: 'orderQty', label: '订单数量', width: 90, align: 'center', scope: 'sku' },
+    { key: 'prodQty', label: '生产数量', width: 90, align: 'center', scope: 'sku' },
+    { key: 'opened', label: '小义开单', width: 90, align: 'center', scope: 'order' },
   )
   if (opts.confirmStatus !== 'unconfirmed') {
-    cols.push({ key: 'confirmStatus', label: '确认状态', width: 110, align: 'center', scope: 'order' })
+    cols.push({ key: 'confirmStatus', label: '确认状态', width: 90, align: 'center', scope: 'order' })
   }
   if (opts.confirmStatus !== 'confirmed') {
-    cols.push({ key: 'confirmAction', label: '确认操作', width: 130, align: 'center', scope: 'order' })
+    cols.push({ key: 'confirmAction', label: '确认操作', width: 110, align: 'center', scope: 'order' })
   }
   cols.push({ key: 'note', label: '备注', width: 'flex', align: 'left', scope: 'order' })
   return cols
@@ -273,7 +273,11 @@ export function useBeileOrderBlock(opts: BeileOrderBlockOptions) {
 
   const blockStyle = computed(() => ({
     gridTemplateColumns: beileGridTemplate(cols.value),
-    gridAutoRows: `${BEILE_ROW_HEIGHT}px`,
+    // 行高下限 56px、上限随内容（对齐 /report 订单流水）：产品名称换行超过一行时
+    // 行随之增高、完整显示；若写死 56px，长名称会被 `.bo-td` 的 overflow:hidden 裁掉
+    // （实证 PO-20261015-2585 有 40 字名称，180px 列宽换行 >2 行即被截断）。
+    // 虚拟滚动为变高模式（dynamicHeight），按实测块高定位，故允许行高变化。
+    gridAutoRows: `minmax(${BEILE_ROW_HEIGHT}px, auto)`,
   }))
 
   /** 单元格显式定位：span>1 即跨行合并（等效 rowspan） */

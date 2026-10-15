@@ -33,7 +33,7 @@
       <!-- 订单号 -->
       <span v-else-if="col.key === 'orderNo'" class="bo-order-no" :title="item.order_no || ''">{{ item.order_no || '-' }}</span>
 
-      <span v-else-if="col.key === 'date'" class="bo-cell-muted" :title="item.order_date || ''">{{ item.order_date || '-' }}</span>
+      <span v-else-if="col.key === 'date'" class="bo-date" :title="item.order_date || ''">{{ item.order_date || '-' }}</span>
 
       <span v-else-if="col.key === 'customer'" class="bo-customer" :title="item.customer || ''">{{ item.customer || '-' }}</span>
 
@@ -69,7 +69,7 @@
       <span v-else-if="col.key === 'confirmAction'" class="bo-confirm-badge bo-confirm-badge--done">已确认</span>
 
       <!-- 备注 -->
-      <span v-else-if="col.key === 'note'" class="bo-cell-muted" :title="item.note || ''">{{ item.note || '-' }}</span>
+      <span v-else-if="col.key === 'note'" class="bo-note" :title="item.note || ''">{{ item.note || '-' }}</span>
     </div>
 
     <!-- SKU 列：逐 SKU 一行（产品名称/产品条码/订单数量/生产数量） -->
@@ -78,7 +78,7 @@
         v-for="col in skuCols"
         :key="`s-${si}-${col.key}`"
         class="bo-td"
-        :class="[`bo-td-${col.align}`, { 'bo-td-nowrap': col.key !== 'productName' }]"
+        :class="[`bo-td-${col.align}`, 'bo-td-nowrap']"
         :style="cellStyle(col.key, si + 1, 1)"
       >
         <span
@@ -200,9 +200,15 @@ function handleConfirm(item: BeileOrderRowType) {
 }
 
 /* SKU 逐行：产品名称 / 条码 */
-.bo-sku-name,
 .bo-customer {
   font-weight: 600;
+  color: var(--color-text);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bo-sku-name {
+  font-weight: 500;
   color: var(--color-text);
   max-width: 100%;
   overflow: hidden;
@@ -235,8 +241,16 @@ function handleConfirm(item: BeileOrderRowType) {
   font-weight: 600;
   color: var(--color-text);
 }
-.bo-cell-muted {
-  color: var(--color-text-muted);
+/* 下单时间 / 备注：字号与颜色对齐 /outsource（日期正文 13px 正文色、备注 12px text-secondary） */
+.bo-date {
+  font-size: 13px;
+  color: var(--color-text);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bo-note {
+  color: var(--color-text-secondary);
   font-size: 12px;
   max-width: 100%;
   overflow: hidden;
@@ -249,14 +263,14 @@ function handleConfirm(item: BeileOrderRowType) {
   align-items: center;
   justify-content: center;
   padding: 2px 8px;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
   border-radius: 5px;
   line-height: 1.5;
 }
 .bo-type-badge--order {
   background: var(--color-success-50, #e8f9ef);
-  color: var(--color-success-700, #2e7d32);
+  color: var(--color-success-600, #1e9e55);
 }
 .bo-type-badge--stockin {
   background: var(--color-primary-50, #eff5ff);
@@ -277,7 +291,7 @@ function handleConfirm(item: BeileOrderRowType) {
   justify-content: center;
   padding: 3px 10px;
   border-radius: 8px;
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 600;
   white-space: nowrap;
 }
