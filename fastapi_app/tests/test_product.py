@@ -4,6 +4,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from pydantic import ValidationError
 
 from fastapi_app.schemas.product import ProductCreate, ProductUpdate
 from fastapi_app.services import product_service
@@ -20,15 +21,15 @@ class TestProductSchemas:
         assert data.initial_stock == 50
 
     def test_product_create_name_required(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ProductCreate()
 
     def test_product_create_negative_stock(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ProductCreate(name="测试", initial_stock=-1)
 
     def test_product_create_large_stock(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ProductCreate(name="测试", initial_stock=200000)
 
     def test_product_update_all_optional(self):

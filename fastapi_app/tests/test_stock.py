@@ -4,6 +4,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from pydantic import ValidationError
 
 from fastapi_app.schemas.stock import StockInCreate, StockInUpdate, StockOutCreate
 from fastapi_app.services import stock_service
@@ -22,7 +23,7 @@ class TestStockSchemas:
         assert data.quantity == 10
 
     def test_stockin_create_invalid_quantity(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             StockInCreate(product_id=1, quantity=0, customer="客户", stockin_date="2026-01-15")
 
     def test_stockin_update_all_optional(self):
@@ -38,7 +39,7 @@ class TestStockSchemas:
         assert data.product_id == 1
 
     def test_stockout_create_invalid_quantity(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             StockOutCreate(product_id=1, quantity=-5, customer="客户", stockout_date="2026-01-15")
 
 

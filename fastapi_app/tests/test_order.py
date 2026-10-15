@@ -4,6 +4,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from pydantic import ValidationError
 
 from fastapi_app.schemas.order import OrderCreate, OrderUpdate
 from fastapi_app.services import order_service
@@ -36,15 +37,15 @@ class TestOrderSchemas:
         assert data.note is None
 
     def test_order_create_invalid_quantity_zero(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             OrderCreate(product_id=1, quantity=0, customer="客户")
 
     def test_order_create_invalid_quantity_negative(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             OrderCreate(product_id=1, quantity=-1, customer="客户")
 
     def test_order_create_invalid_customer_empty(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             OrderCreate(product_id=1, quantity=10, customer="")
 
     def test_order_update_all_optional(self):
