@@ -424,6 +424,107 @@ class TestGuards:
         assert items == []
 
 
+class TestHeaderlessTable:
+    """无表头三列表（客户 / 产品 / 数量），OCR 每格独立成行。
+
+    素材取自 2026-10-15 用户真机截图（无表头，首行即数据）经 RapidOCR 的实际输出。
+    没有表头可依，只能靠**结构**认表：锚点间隔恒为 3 + 领先列重复（见
+    `_parse_headerless_cells`）。本类同时钉住「不认什么」——收紧的边界与认表同等重要。
+    """
+
+    REAL = '\n'.join([
+        'MINISO国际',
+        '3寸MINIFAMILY蒸包毛绒挂件（GIGI猪）',
+        '1680',
+        'MINISO国际',
+        '3寸MINIFAMILY蒸包毛绒挂件（墩墩）',
+        '3360',
+        'MINISO国际',
+        'MINIFAMILY杯面团子系列毛绒公仔盲盒',
+        '8512',
+    ])
+
+    def test_three_column_headerless_table_parses(self):
+        items = parse_order_document(pages(self.REAL))
+        assert names(items) == [
+            '3寸MINIFAMILY蒸包毛绒挂件（GIGI猪）',
+            '3寸MINIFAMILY蒸包毛绒挂件（墩墩）',
+            'MINIFAMILY杯面团子系列毛绒公仔盲盒',
+        ]
+        assert qtys(items) == [1680, 3360, 8512]
+
+    def test_repeated_leading_column_maps_to_customer(self):
+        items = parse_order_document(pages(self.REAL))
+        assert [i['customer'] for i in items] == ['MINISO国际', 'MINISO国际', 'MINISO国际']
+
+    def test_spec_column_makes_period_four_and_is_rejected(self):
+        """客户/产品/规格/数量（锚点间隔 4）→ 拒绝。
+
+        相邻配对会取到「规格」当产品名（间隔 4 时产品列不在锚点上一行），
+        整表产品全错、模糊匹配归零——比返回 0 条更糟，故整体拒绝。
+
+        产品名刻意不以数字结尾：否则逐行解析（路径 3 的贪婪紧凑正则）会
+        先把它拆成「名称 / 尾数」，掩盖兜底路径本身的行为。
+        """
+        text = '\n'.join([
+            'MINISO国际', '蒸包挂件', '大号', '1680',
+            'MINISO国际', '毛绒公仔', '大号', '3360',
+        ])
+        assert parse_order_document(pages(text)) == []
+
+    def test_serial_number_column_makes_period_four_and_is_rejected(self):
+        """序号/客户/产品/数量（锚点间隔 4）→ 拒绝。
+
+        此形态与「客户/产品/规格/数量」在结构上无法区分（两者都让锚点上一行不再是
+        产品），保守起见整体拒绝。该用例专门钉住「锚点间隔必须等于 3」这条约束——
+        它的领先列是重复的（客户），仅靠「领先列重复」一条挡不住。
+        """
+        text = '\n'.join([
+            '1', 'MINISO国际', '蒸包挂件', '1680',
+            '2', 'MINISO国际', '毛绒公仔', '3360',
+        ])
+        assert parse_order_document(pages(text)) == []
+
+    def test_chat_number_lines_are_rejected(self):
+        """「名称 / 数字」列表（锚点间隔 2）与订单表结构上不可分，宁可拒绝。
+
+        否则「张三 / 13800138000」这类通讯录/金额行会被当成订单（电话号当数量）。
+        """
+        text = '\n'.join([
+            '张三', '13800138000', '李四', '13900139000', '王五', '13700137000',
+        ])
+        assert parse_order_document(pages(text)) == []
+
+    def test_two_column_table_is_out_of_scope(self):
+        """产品/数量两列（间隔 2）不在本次收紧范围内，同样拒绝"""
+        text = '\n'.join(['儿童保温杯', '50', '卡通雨伞', '30', '水壶', '20'])
+        assert parse_order_document(pages(text)) == []
+
+    def test_non_repeating_leading_column_is_rejected(self):
+        """领先列各不相同 → 不是客户列（可能是产品/规格列），拒绝"""
+        text = '\n'.join([
+            '张三', '保温杯', '100',
+            '李四', '雨伞', '200',
+            '王五', '水壶', '300',
+        ])
+        assert parse_order_document(pages(text)) == []
+
+    def test_unit_lines_do_not_break_period(self):
+        """锚点之间夹着量词行时，扣掉量词后周期仍是 3"""
+        text = '\n'.join([
+            'MINISO国际', '儿童保温杯', '50', '箱',
+            'MINISO国际', '卡通雨伞', '30', '箱',
+        ])
+        items = parse_order_document(pages(text))
+        assert names(items) == ['儿童保温杯', '卡通雨伞']
+        assert qtys(items) == [50, 30]
+        assert units(items) == ['箱', '箱']
+
+    def test_single_row_is_rejected(self):
+        """只有一组「名称 / 数量」不足以判定是表格"""
+        assert parse_order_document(pages('MINISO国际\n儿童保温杯\n50')) == []
+
+
 class TestUnits:
     def test_units_cover_common_measure_words(self):
         for u in ['箱', '件', '个', '包', '袋', '盒', '条', '只', '支', '瓶', '桶', '套', '把']:

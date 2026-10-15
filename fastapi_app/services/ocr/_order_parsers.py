@@ -13,6 +13,8 @@
 表单已选客户兜底（对应需求「无法识别到客户信息时给替代方案」）。
 """
 import re
+from collections import Counter
+from itertools import pairwise
 
 from fastapi_app.services.ocr._text_parsers import (
     _extract_customer_from_header,
@@ -372,17 +374,70 @@ def _parse_order_cells(lines: list[str]) -> list[dict]:
     return items
 
 
+# 无表头表格的锚点周期。只认「客户 / 产品 / 数量」三列，见 _parse_headerless_cells。
+_HEADERLESS_PERIOD = 3
+
+
+def _parse_headerless_cells(lines: list[str]) -> list[dict]:
+    """无表头、单元格逐行的**三列**表（客户 / 产品 / 数量）。
+
+    截图没截到表头时 `_parse_order_cells` 无从下手（它靠表头定列），此路径改靠
+    **结构**认表。两条约束缺一不可：
+
+    1. **锚点间隔恒为 3**。锚点＝纯数字行且其上一行是名称行；间隔按「扣掉夹在中间
+       的量词行」后计算。间隔 2 是「名称 / 数字」列表（通讯录、金额清单），间隔 ≥4
+       说明产品与数量之间还夹着规格等列——两者都会让产品列错位，宁可整体拒绝。
+    2. **领先列（锚点往上第 2 行）在表内重复出现**。这是「客户列」的特征；各不相同
+       的领先列更可能是产品/规格列，同样拒绝。
+
+    只认这一种形态是刻意的：更宽的容错会把非表格截图**静默**解析成错行错客户的
+    订单，比返回 0 条更难被发现。
+    """
+    anchors = [
+        i for i, line in enumerate(lines)
+        if i > 0 and _is_pure_number(line) and _is_data_cell(lines[i - 1])
+    ]
+    if len(anchors) < 2:
+        return []
+
+    for a, b in pairwise(anchors):
+        units_between = sum(1 for k in range(a + 1, b) if lines[k] in UNITS)
+        if (b - a) - units_between != _HEADERLESS_PERIOD:
+            return []
+
+    leads = [lines[a - 2] for a in anchors if a >= 2]
+    if not leads or max(Counter(leads).values()) < 2:
+        return []
+
+    items: list[dict] = []
+    for a in anchors:
+        quantity = _parse_quantity(lines[a])
+        if quantity <= 0:
+            continue
+        unit = lines[a + 1] if a + 1 < len(lines) and lines[a + 1] in UNITS else ''
+        items.append({
+            'product_name': lines[a - 1].strip(),
+            'quantity': quantity,
+            'unit': unit,
+            'customer': lines[a - 2].strip() if a >= 2 else '',
+            'note': '',
+        })
+    return items
+
+
 def parse_order_document(pages: list[dict]) -> list[dict]:
     """把 OCR 文本页解析成订单条目。
 
-    三条路径按「精度递减、容错递增」排序，命中即返回：
+    四条路径按「精度递减、容错递增」排序，命中即返回：
 
     1. **表头同行、列对齐的表** → 位置法解析，列对得准，最精确；
-    2. **单元格逐行的表** → 名称/数量/单位各占一行，靠「名称行紧跟数字行」配对；
-    3. **逐行解析** → 同一行内含名称+数量（聊天截图的主路径），对空格与对齐都不敏感。
+    2. **有表头、单元格逐行的表** → 表头定列 + 数量行做锚点；
+    3. **无表头、单元格逐行的三列表**（客户/产品/数量）→ 靠「锚点间隔恒为 3 +
+       领先列重复」认表，见 `_parse_headerless_cells`；
+    4. **逐行解析** → 同一行内含名称+数量（聊天截图的主路径），对空格与对齐都不敏感。
 
-    顺序不可随意调换：第 2 条必须排在第 3 条之前。单元格表里若某产品名以数字结尾
-    （如「保温杯500」），第 3 条会把行尾数字当成数量配出「保温杯/500」，
+    顺序不可随意调换：第 2、3 条都必须排在第 4 条之前。单元格表里若某产品名以数字
+    结尾（如「保温杯500」），第 4 条会把行尾数字当成数量配出「保温杯/500」，
     而真实数量在下一行。
 
     Returns:
@@ -403,6 +458,8 @@ def parse_order_document(pages: list[dict]) -> list[dict]:
         items = _from_table_items(_parse_table_format(lines, all_text))
     if not items:
         items = _parse_order_cells(lines)
+    if not items:
+        items = _parse_headerless_cells(lines)
     if not items:
         items = _parse_order_lines(lines)
 
