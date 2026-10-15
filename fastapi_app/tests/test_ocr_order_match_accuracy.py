@@ -15,6 +15,7 @@
     这属于人工确认环节兜住的范围。
 """
 import random
+import zlib
 from unittest.mock import MagicMock
 
 import pytest
@@ -94,7 +95,10 @@ def _evaluate(names: list[str], trials: int) -> dict:
     correct = wrong = miss = 0
     for name in names:
         for noise in _NOISES:
-            r = random.Random(hash(name) & 0xFFFF)
+            # 种子必须跨进程稳定：hash(str) 按 PYTHONHASHSEED 加盐，同一文件两次
+            # 运行生成不同噪声 → 阈值断言（recall>=95%）在边界处不可复现（Erratic
+            # Test，2026-10-15 修）。crc32 无盐，测试因此确定性。
+            r = random.Random(zlib.crc32(name.encode('utf-8')) & 0xFFFF)
             for _ in range(trials):
                 variant = noise(name, r)
                 if not variant.strip():
@@ -133,7 +137,7 @@ class TestAccuracyOnRealCatalog:
         total = 0
         for name in REAL:
             for noise in _NOISES:
-                r = random.Random(hash(name) & 0xFFFF)
+                r = random.Random(zlib.crc32(name.encode('utf-8')) & 0xFFFF)
                 for _ in range(8):
                     variant = noise(name, r)
                     if not variant.strip():

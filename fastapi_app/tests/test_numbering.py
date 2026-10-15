@@ -18,11 +18,12 @@ class TestNumberingFormat:
 
     @pytest.mark.asyncio
     async def test_generate_order_number_format(self):
+        # 日期只读一次：mock 返回值与断言共用同一 today，跨午夜不再假红（Erratic Test）
+        today = datetime.now().strftime('%Y%m%d')
         with patch('fastapi_app.services.numbering.generate_number_async', new_callable=AsyncMock) as mock_generate:
-            mock_generate.return_value = f"PO-{datetime.now().strftime('%Y%m%d')}-0001"
+            mock_generate.return_value = f"PO-{today}-0001"
             number = await generate_order_number(MagicMock())
 
-        today = datetime.now().strftime('%Y%m%d')
         assert number.startswith(f'PO-{today}-')
         assert len(number) == 16  # PO-YYYYMMDD-XXXX
         assert number.split('-')[-1].isdigit()
@@ -30,11 +31,11 @@ class TestNumberingFormat:
 
     @pytest.mark.asyncio
     async def test_generate_stockin_number_format(self):
+        today = datetime.now().strftime('%Y%m%d')
         with patch('fastapi_app.services.numbering.generate_number_async', new_callable=AsyncMock) as mock_generate:
-            mock_generate.return_value = f"BH-{datetime.now().strftime('%Y%m%d')}-0001"
+            mock_generate.return_value = f"BH-{today}-0001"
             number = await generate_stockin_number(MagicMock())
 
-        today = datetime.now().strftime('%Y%m%d')
         assert number.startswith(f'BH-{today}-')
         assert len(number) == 16  # BH-YYYYMMDD-XXXX
         assert number.split('-')[-1].isdigit()
@@ -52,13 +53,13 @@ class TestNumberingFormat:
     @pytest.mark.asyncio
     async def test_generate_purchase_order_number_format(self):
         """采购订单编号前缀为 PO（2026-10-10 由 CG 统一为 PO）。"""
+        today = datetime.now().strftime('%Y%m%d')
         with patch('fastapi_app.services.numbering.generate_number_async', new_callable=AsyncMock) as mock_generate:
-            mock_generate.return_value = f"PO-{datetime.now().strftime('%Y%m%d')}-0001"
+            mock_generate.return_value = f"PO-{today}-0001"
             number = await generate_purchase_order_number(MagicMock())
 
         # 断言真正传给取号内核的前缀，而非只断言 mock 的返回值
         assert mock_generate.call_args.args[0] == 'PO'
-        today = datetime.now().strftime('%Y%m%d')
         assert number.startswith(f'PO-{today}-')
         assert len(number) == 16  # PO-YYYYMMDD-XXXX
         assert number.split('-')[-1].isdigit()
