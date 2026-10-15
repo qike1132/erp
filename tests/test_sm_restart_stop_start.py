@@ -96,12 +96,23 @@ def test_stop_failure_is_surfaced_with_its_message():
     assert '服务无法接受控制信息' in warns[0], '告警必须带上 nssm 的原始输出'
 
 
-def test_whole_stack_restart_covers_every_service_with_stop_start():
-    """整栈重启：每个受管服务各走一次 stop→start，顺序不变。"""
+def test_whole_stack_restart_is_two_phase_stop_then_start():
+    """整栈重启必须两阶段：先逆序全停，再原序全起（绝不逐服务 stop→start）。
+
+    逐服务 stop→start 会让依赖方（erp-prod/erp-arq）先回 RUNNING，等轮到被依赖的
+    erp-redis / erp-redis-broker 时，SCM 以「停止控制被发送到其他正在运行的服务所
+    依赖的服务」拒停（_SVC_DEPENDS 写成了 DependOnService）→ nssm stop 返回非零、
+    Redis 从未停过，其「重启」静默 no-op。两阶段先逆序全停（依赖方先停，不挡被依赖
+    者），再原序全起（被依赖者先起，与 SCM 开机序一致）。
+    """
     ops, _q = _ops()
     ops.service_cmd_sync('restart')
-    pairs = [(c[1], c[2]) for c in ops.calls]
-    assert pairs == [v for name in _SVC_ALL for v in (('stop', name), ('start', name))]
+    calls = [(c[1], c[2]) for c in ops.calls]
+    n = len(_SVC_ALL)
+    verbs = [c[1] for c in ops.calls]
+    assert verbs == ['stop'] * n + ['start'] * n, f'必须整段停、整段起，实际 {verbs}'
+    assert calls[:n] == [('stop', name) for name in reversed(_SVC_ALL)], '停机阶段须逆序（依赖方在前）'
+    assert calls[n:] == [('start', name) for name in _SVC_ALL], '启动阶段须原序（被依赖者先起）'
     assert not [c for c in ops.calls if c[1] == 'restart']
 
 

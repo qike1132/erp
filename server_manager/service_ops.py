@@ -21,6 +21,7 @@ from server_manager.constants import (
     _SVC_ALL,
     _SVC_API,
     _SVC_ARQ,
+    _SVC_REVERSE,
     _SVC_WEB,
 )
 
@@ -564,6 +565,16 @@ class ServiceOps:
         nssm = nssm or self.find_nssm()
         prev_pid = self.svc_pid(name)
         self._msg_queue.put(('log', {'text': f'正在重启生产服务 {name}...'}))
+        self._stop_service_sync(name, nssm, stop_timeout)
+        return self.start_one_service(name, timeout=start_timeout, prev_pid=prev_pid)
+
+    def _stop_service_sync(self, name, nssm, stop_timeout=20):
+        """显式 `nssm stop` 并轮询确认 STOPPED；停机非零返回 / 超时都如实告警。
+
+        停机阶段的失败必须写进日志，否则「重启后起不来」永远无据可查——这正是
+        2026-10-13 那次只能靠 Windows 事件日志反推的原因。返回确认到的终态字符串。
+        单服务重启与整栈两阶段停机的**停机侧**共用本方法，避免两处告警口径漂移。
+        """
         if nssm:
             code, out = self.run_capture([nssm, 'stop', name], timeout=15)
             if code != 0:
@@ -583,29 +594,46 @@ class ServiceOps:
             self._msg_queue.put(('log', {
                 'text': f'{name} 在 {stop_timeout}s 内未确认 STOPPED（当前: {state}），仍继续启动',
                 'level': 'WARNING'}))
-        return self.start_one_service(name, timeout=start_timeout, prev_pid=prev_pid)
+        return state
 
     def service_cmd_sync(self, verb):
         """停止/重启生产服务：逐服务执行 + 轮询确认终态。
 
         NSSM 的 stop/restart 都是立即返回——不等终态就报「已执行」等于什么都没说
         （2026-09-16 用户实测：stop 打印完 5 秒后服务仍在 RUNNING）。
+
+        ★ 重启走**依赖拓扑两阶段**（2026-10-15 实证根因）：逐服务 stop→start 会让
+        依赖方（erp-prod/erp-arq）先回 RUNNING，等轮到被依赖的 erp-redis /
+        erp-redis-broker 时，SCM 以「停止控制被发送到其他正在运行的服务所依赖的
+        服务」拒停 → 那两个 Redis 从未停过、其「重启」静默 no-op，每轮还各自空等满
+        超时。故先按 ``_SVC_REVERSE`` 逆序全停并确认，再按 ``_SVC_ALL`` 原序全起
+        （被依赖者先起，与 SCM 开机序一致）。
         """
         nssm = self.find_nssm()
         if verb == 'restart':
             # 清一次即可：清的是**非受管**端口占用，与迭代顺序无关，不必每个服务重扫。
             self._clean_ports_if_injected()
-        for name in _SVC_ALL:
-            self._gate.checkpoint()
-            if verb == 'stop':
+            # 阶段一：逆序全停——依赖方先停，不挡被依赖的 Redis。
+            # 停前记 PID：停后 PID 未变即该服务从未停成（SCM 因依赖方在跑而拒停），
+            # 由 start_one_service→wait_service_running 据此改报「未生效」，与单服务重启同口径。
+            prev_pids: dict[str, int | None] = {}
+            for name in _SVC_REVERSE:
+                self._gate.checkpoint()
+                prev_pids[name] = self.svc_pid(name)
+                self._msg_queue.put(('log', {'text': f'正在停止生产服务 {name}...'}))
+                self._stop_service_sync(name, nssm)
+            # 阶段二：原序全起——被依赖者先起，与 SCM 开机序一致。
+            for name in _SVC_ALL:
+                self._gate.checkpoint()
+                self.start_one_service(name, prev_pid=prev_pids.get(name))
+        elif verb == 'stop':
+            for name in _SVC_ALL:
+                self._gate.checkpoint()
                 self._msg_queue.put(('log', {'text': f'正在停止生产服务 {name}...'}))
                 if self.wait_service_stopped(name, timeout=45):
                     self._msg_queue.put(('log', {'text': f'{name} 已停止 (state={self.svc_state(name)})'}))
                 else:
                     self._msg_queue.put(('log', {'text': f'{name} 在 45s 内未确认 STOPPED（当前: {self.svc_state(name)}），请到服务管理器检查', 'level': 'WARNING'}))
-            elif verb == 'restart':
-                # ★ 不走 `nssm restart`：它停机失败就不发 start（见 restart_service_via_stop_start）
-                self.restart_service_via_stop_start(name, nssm=nssm)
         self._msg_queue.put(('hosting_refresh', {}))
 
     def wait_service_running(self, name, timeout=25, prev_pid=None):
