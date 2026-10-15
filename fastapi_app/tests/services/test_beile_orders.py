@@ -19,6 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
+from fastapi_app.core.cache import invalidate_cache
 from fastapi_app.core.exceptions import ConflictError, NotFoundError
 from fastapi_app.services.notification_service import BEILE_UNCONFIRMED_TYPE
 from fastapi_app.services.order.beile import (
@@ -46,6 +47,10 @@ async def db():
 
     仅建本测试涉及的表：全量 metadata 含 PG 专用类型（JSONB 等），sqlite 无法编译。
     必须包含 PurchaseOrder（门控与数量同步依赖 completed 采购单）。
+
+    每个用例开始前失效 beile L2 缓存：`get_beile_unconfirmed_count` /
+    `get_beile_orders_with_stockins` 带 60s TTL 且 key 不含数据指纹，
+    跨用例存活会让「总数/列表」读到上个用例的串号结果（假红）。
     """
     engine = create_async_engine('sqlite+aiosqlite:///:memory:')
     tables = [
@@ -56,6 +61,7 @@ async def db():
     async with engine.begin() as conn:
         await conn.run_sync(lambda c: Base.metadata.create_all(c, tables=tables))
     maker = sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+    await invalidate_cache('orders:beile:*')
     async with maker() as session:
         yield session
     await engine.dispose()
@@ -124,26 +130,58 @@ async def _seed(db: AsyncSession) -> User:
     return user
 
 
-async def test_beile_list_merged_sorted_and_shaped(db):
-    await _seed(db)
-    result = await get_beile_orders_with_stockins(db, page=1, per_page=50)
+async def _seed_mixed_factory(db: AsyncSession) -> None:
+    """混工厂订单（复现生产 BUG PO-20261015-2584）：3 SKU 含东莞工厂产品。
 
-    # 东莞的订单/备货被排除，其余 5 条按日期倒序、同秒 tiebreaker 订单在前
-    assert [(r['record_type'], r['id']) for r in result['items']] == [
-        ('order', 12), ('stockin', 21), ('order', 11), ('order', 14), ('stockin', 22),
-    ]
-    assert result['total'] == 5
-    assert result['unconfirmed_count'] == 3  # 未确认：o1/o2/s1（o4/s2 已确认，o3/s3 非湖北）
+    订单因任一湖北 SKU 入选湖北列表（SQL any()），行构建必须把 items 收窄为
+    湖北 SKU —— 否则东莞 SKU 会泄漏进湖北列表的页面/详情/导出/打印（AC-12 同源）。
+    """
+    user = User(id=1, username='hubei_op', password='x', factory='湖北')
+    p_hb1 = Product(id=1, name='湖北001', barcode='690011', factory='湖北')
+    p_dg = Product(id=2, name='蛋仔派对盲盒', barcode='690012', factory='东莞')
+    p_hb2 = Product(id=3, name='湖北004', barcode='690013', factory='湖北')
+    o = Order(
+        id=50, order_no='PO-20261015-2584', customer='混单客户',
+        order_date=datetime(2026, 10, 15, 10, 0, 0), product_id=1, quantity=3,
+        items=[
+            OrderItem(product_id=1, product_name='湖北001', product_barcode='690011', quantity=1),
+            OrderItem(product_id=2, product_name='蛋仔派对盲盒', product_barcode='690012', quantity=1),
+            OrderItem(product_id=3, product_name='湖北004', product_barcode='690013', quantity=1),
+        ],
+    )
+    db.add_all([user, p_hb1, p_dg, p_hb2, o])
+    await db.commit()
 
-    first = result['items'][0]
-    assert first['order_no'] == 'PO-012'
-    assert first['customer'] == '客户B'
-    assert first['factories'] == ['湖北']
-    assert first['confirmed'] is False
-    assert first['items'][0]['product_barcode'] == '690002'
-    # product_image 已随惰性加载风险一并下线，不应再出现在响应中
-    assert 'product_image' not in first
-    assert 'product_image' not in result['items'][1]  # stockin 记录
+
+async def test_beile_list_mixed_factory_order_narrows_items_to_factory(db):
+    """生产 BUG 回归（2026-10-15）：混工厂订单的 items 必须收窄为本工厂 SKU。
+
+    PO-20261015-2584 含东莞 SKU「蛋仔派对盲盒」；SQL 按「任一湖北 SKU 命中」选整单后，
+    行构建若不收窄 items，东莞 SKU 就出现在湖北列表（生产实证 item id=67396 泄漏）。
+    """
+    await _seed_mixed_factory(db)
+    result = await get_beile_orders_with_stockins(db, page=1, per_page=50, customer='混单客户')
+    assert [(r['record_type'], r['id']) for r in result['items']] == [('order', 50)]
+    row = result['items'][0]
+    # items 只含湖北 SKU；东莞 SKU 绝不出现（页面/详情/导出/打印同源，AC-12）
+    assert [it['product_name'] for it in row['items']] == ['湖北001', '湖北004']
+    assert all(it['product_name'] != '蛋仔派对盲盒' for it in row['items'])
+    # 顶部产品名回落到首个本厂 SKU（不再是无工厂归属的首行）
+    assert row['product_name'] == '湖北001'
+
+
+async def test_beile_list_keyword_hit_on_foreign_factory_sku_does_not_leak(db):
+    """搜索态同源泄漏回归：关键字只命中他厂 SKU 时，混工厂订单不得出现在湖北列表。"""
+    await _seed_mixed_factory(db)
+    # 「蛋仔」只命中东莞 SKU → 湖北列表不得出现该订单（旧实现：整单带着东莞行泄漏）
+    leaked = await get_beile_orders_with_stockins(
+        db, page=1, per_page=50, customer='混单客户', product_kw='蛋仔')
+    assert leaked['items'] == []
+    # 命中湖北 SKU：订单出现，items 只含命中的湖北 SKU（数量口径同步只统计命中集合）
+    hit = await get_beile_orders_with_stockins(
+        db, page=1, per_page=50, customer='混单客户', product_kw='湖北')
+    assert [(r['record_type'], r['id']) for r in hit['items']] == [('order', 50)]
+    assert [it['product_name'] for it in hit['items'][0]['items']] == ['湖北001', '湖北004']
 
 
 async def test_beile_list_confirm_status_filter(db):

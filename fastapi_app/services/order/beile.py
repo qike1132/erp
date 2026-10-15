@@ -7,7 +7,7 @@ import logging
 from datetime import UTC, datetime, timedelta, timezone
 from typing import NamedTuple
 
-from sqlalchemy import desc, func, literal, or_, select, union_all, update
+from sqlalchemy import and_, desc, func, literal, or_, select, union_all, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 
@@ -80,9 +80,14 @@ def _build_beile_unified_query(confirmed: bool | None, customer, factory, produc
         order_part = order_part.where(Order.customer.like(f'%{escape_like(customer)}%'))
     if product_kw:
         kw = f'%{escape_like(product_kw)}%'
-        # 订单侧：任一 SKU 的 product_name / product_barcode 命中
+        # 订单侧：**本厂** SKU 的 product_name / product_barcode 命中。
+        # 工厂条件必须与关键字条件合并在同一个 any()：两个独立的 any() 会让
+        # 「关键字命中他厂 SKU、本厂 SKU 不命中」的混工厂单误入选（生产 BUG 2026-10-15）
         order_part = order_part.where(
-            Order.items.any(or_(OrderItem.product_name.ilike(kw), OrderItem.product_barcode.ilike(kw)))
+            Order.items.any(and_(
+                OrderItem.product.has(Product.factory == factory),
+                or_(OrderItem.product_name.ilike(kw), OrderItem.product_barcode.ilike(kw)),
+            ))
         )
 
     # StockIn 部分：通过 product.factory 筛选（备货同样参与确认状态筛选）
@@ -544,18 +549,34 @@ def _build_beile_order_record(
     使订单级数量（purchase_order_qty / spare_quantity / items 求和回退）都只统计
     命中集合——列表的「订单数量 / 生产数量」即「搜索到的 SKU 的数量」，
     不再显示整个订单的总数量。产品名称列直接读收窄后的 items。
+
+    **工厂收窄（生产 BUG 2026-10-15，PO-20261015-2584）**：SQL 按「任一本厂 SKU 命中
+    即整单入选」（``Order.items.any(...)``），行构建若不收窄，同单里的**他厂 SKU**
+    （如东莞）会泄漏进湖北列表（页面/详情/导出/打印同源）。故 source_items 先按
+    ``item.product.factory == factory`` 收窄，与 SQL 入选语义对齐；无 product 关联的
+    历史行（factory 不可判）保留（与 SQL ``Product.factory == factory`` 的
+    ``has()`` 隐式 INNER JOIN 语义一致：无 product 即不入选，但历史兼容列行仍在）。
     """
+    # 工厂收窄：只保留本厂 SKU（item.product 为 None 的历史行保留，不误杀）
+    factory_items = [
+        it for it in (order.items or [])
+        if it.product is None or it.product.factory == factory
+    ]
+    # 防御：全部 SKU 都无工厂归属且过滤为空时回退全量，绝不出「空 items 订单」
+    if not factory_items:
+        factory_items = list(order.items or [])
+
     matched_items: list[OrderItem] | None = None
     kwl = (product_kw or '').strip().casefold()
     if kwl:
         cand = [
-            it for it in (order.items or [])
+            it for it in factory_items
             if kwl in _norm_name(it.product_name) or kwl in _norm_name(it.product_barcode)
         ]
         # 防御：SQL 已保证整单至少一个 SKU 命中；Python 侧因转义/时序差异过滤为空时
-        # 回退全量，绝不出「空 items 订单」（空单会把合计行清零）
-        matched_items = cand if cand else list(order.items or [])
-    source_items = matched_items if matched_items is not None else (order.items or [])
+        # 回退工厂收窄结果，绝不出「空 items 订单」（空单会把合计行清零）
+        matched_items = cand if cand else list(factory_items)
+    source_items = matched_items if matched_items is not None else factory_items
 
     items_data = [
         {
