@@ -2,8 +2,9 @@ ERP 系统 - 部署说明（简版速查）
 ========================
 
 > 📌 **本文件是速查卡，不是权威手册。** 完整手册（含**从零部署**全流程、五服务注册、
-> 运行环境清单、备份恢复与红线）见仓库根 **`README.md`**。
-> **两者若有冲突，一律以 `README.md` 为准**；发现不一致请改 `README.md` 并回来同步本文件。
+> 运行环境清单、备份恢复与红线）见 **`docs/PROJECT_MANUAL.md`**（原仓库根 `README.md`）。
+> **两者若有冲突，一律以 `docs/PROJECT_MANUAL.md` 为准**；发现不一致请改它并回来同步本文件。
+> 仓库根 **`README.md`** 现为**给 AI 代理的一键部署提示词**（把整篇发给 AI，它按流程逐步部署）。
 > 本文件在 2026-10-06 做过一次口径对齐（管理器版本号、口令策略）。
 
 > ⚠️ 本文在 2026-09-18 整体重写。此前版本描述的是**已废弃的 Flask + PyInstaller
@@ -27,7 +28,7 @@ ERP 系统 - 部署说明（简版速查）
 - 前后端**启停解耦**：重启 `erp-prod` 不影响前端静态服务；
 - 后端进程入口是 `python -m fastapi_app.core.prod_runner`，**不是 exe 单体**。
 
-运行环境（完整清单见 `README.md` §4.2）
+运行环境（完整清单见 `docs/PROJECT_MANUAL.md` §4.2）
 ========================================
 
 必须是 64 位 Windows（10/11 或 Server 2019+）。核心组件与实测版本：
@@ -48,7 +49,7 @@ ERP 系统 - 部署说明（简版速查）
    粘贴识别 / PDF 出货单识别整块不可用**（端点返回 503 并附安装命令）。
    2026-10-08 的生产部署就漏装过它，用户当时只看到「服务器内部错误」。
    自检：`.\.venv\Scripts\python.exe -c "import numpy, cv2, rapidocr, onnxruntime, fitz"`。
-   完整依赖检查单见 `README.md` §4.6。
+   完整依赖检查单见 `docs/PROJECT_MANUAL.md` §4.6。
 
 日常启停 / 切换运行模式
 ==========================
@@ -90,14 +91,15 @@ ERP 系统 - 部署说明（简版速查）
 
 - 结构变更走 Alembic 迁移（`migrations/`），**不要**用 `create_all` 代替迁移。
 - 改完配置跑一次漂移检查：`python scripts/ops/check_env_drift.py`（注意：不带 `--ci`
-  的全量口径还会比对 `.env` 与两份 `.env.production`，当前有存量缺口，见 `README.md` 附录 A.1）。
+  的全量口径还会比对 `.env` 与两份 `.env.production`，当前有存量缺口，见 `docs/PROJECT_MANUAL.md` 附录 A.1）。
 
 相关文档
 ==========
 
 | 主题 | 位置 |
 |---|---|
-| **完整部署与运维手册（权威）** | `README.md` |
+| **完整部署与运维手册（权威）** | `docs/PROJECT_MANUAL.md` |
+| **AI 一键部署提示词**（发给 AI 代理用） | `README.md` |
 | 服务生命周期与模式切换（必读） | `docs/runbooks/service-lifecycle.md` |
 | 后端说明与模块结构 | `fastapi_app/README.md` |
 | 变更历史 | `CHANGELOG.md` |
