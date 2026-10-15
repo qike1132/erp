@@ -38,6 +38,11 @@ _SVC_DEPENDS = {
 #   ★ 启动流程【不】用它：Redis 由 _start_redis / _ensure_redis_broker 先起。
 #   ★ 切开发模式的「停生产」也不用它：开发模式同样依赖 Redis。
 _SVC_ALL = (_SVC_API, _SVC_ARQ, _SVC_WEB, _SVC_REDIS_CACHE, _SVC_REDIS_BROKER)
+# 整栈重启的**停机**顺序 = _SVC_ALL 的逆序：依赖方（erp-prod/erp-arq）先停，
+#   否则 SCM 会以「停止控制被发送到其他正在运行的服务所依赖的服务」拒停被依赖的
+#   erp-redis / erp-redis-broker（DependOnService 见 _SVC_DEPENDS）→ 那两个 Redis
+#   的「重启」变成静默 no-op。启动仍按 _SVC_ALL 原序（被依赖者先起，与开机序一致）。
+_SVC_REVERSE = tuple(reversed(_SVC_ALL))
 # 会写入 UVICORN_WORKERS 的服务：erp-prod 是唯一消费方；erp-arq 不读它，一并写入
 #   只为保持两者 AppEnvironmentExtra 一致（免得「安装生产服务」拿其中一个的值覆盖出分歧）。
 #   ★ 刻意不含 _SVC_WEB：erp-web 是 nginx，Python 环境变量对它无意义 ——
