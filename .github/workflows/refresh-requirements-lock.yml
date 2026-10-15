@@ -2,11 +2,14 @@ name: Refresh requirements locks
 
 # 上游发版会让 requirements/<tier>.lock 与 <tier>.txt 的重新解析结果脱节，
 # 使 lint 门禁「Check requirements lock freshness」无缘无故变红（与代码改动无关）。
-# 本工作流每周在 CI 环境重跑 uv pip compile 刷新全部锁并开 PR，把「追上游」
-# 变成后台自动任务，而不是让人/CI 被动撞红。
+# 本工作流每周在 CI 环境重跑 uv pip compile 刷新全部锁，把「追上游」变成后台
+# 自动任务，而不是让人/CI 被动撞红。
 #
 # 为什么必须在 CI 跑而不是本地：本地 PyPI 镜像可能滞后（实测本机解析 pluggy 1.6.0，
 # 而 CI 解析 1.7.0），本地刷新的锁仍会与 CI 口径不符 → CI 依旧红。
+#
+# 为什么直接推 main 而非开 PR：本仓未开「Allow GitHub Actions to create and approve
+# pull requests」，开 PR 会被拒；锁刷新是纯机械变更，直接提交即可。
 
 on:
   schedule:
@@ -15,7 +18,6 @@ on:
 
 permissions:
   contents: write
-  pull-requests: write
 
 jobs:
   refresh:
@@ -35,13 +37,14 @@ jobs:
               --quiet --python-platform windows --python-version 3.13
           done
 
-      - name: Open PR if changed
-        uses: peter-evans/create-pull-request@v7
-        with:
-          commit-message: 'chore(deps): 自动刷新 requirements 锁'
-          title: 'chore(deps): 自动刷新 requirements 锁（上游漂移）'
-          body: |
-            本 PR 由 `refresh-requirements-lock` 工作流自动生成，刷新上游发版导致的锁过期。
-            合并后 lint 门禁「Check requirements lock freshness」恢复绿色。
-          branch: chore/auto-refresh-requirements-lock
-          delete-branch: true
+      - name: Commit and push if changed
+        run: |
+          if git diff --quiet -- requirements/; then
+            echo "锁已最新，无需刷新"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add requirements/
+          git commit -m "chore(deps): 自动刷新 requirements 锁（上游漂移）"
+          git push
