@@ -195,8 +195,16 @@ class ServiceOps:
 
         ★ '未知'（探测通道不可用）时立刻返回 False，让调用方按『未能确认』
         如实汇报 —— 不能把「查不出来」洗成「已停止」。
+
+        ★ nssm 缺失时必须回退 `sc stop`（与 _stop_service_sync / stop_managed_services
+        同款分支）：直接把 find_nssm() 的 None 塞进 argv 会让 subprocess.run 抛异常、
+        被 run_capture 吞成 (-1, ...) —— 停止命令根本没发出，调用方却继续轮询到超时。
         """
-        self.run_capture([self.find_nssm(), 'stop', name], timeout=15)
+        nssm = self.find_nssm()
+        if nssm:
+            self.run_capture([nssm, 'stop', name], timeout=15)
+        else:
+            self.run_capture(['sc', 'stop', name], timeout=30)
         return 'STOPPED' in self.wait_service(name, 'STOPPED', timeout, abort_on_unknown=True)
 
     def managed_service_pids(self):
@@ -435,17 +443,24 @@ class ServiceOps:
     # 这里只替换一个键、其余元素逐项原样保留 —— 免得为了改 worker 数把
     # APP_ENV/PYTHONUTF8 等一并重写。
 
-    def _read_env_extra(self, nssm, name) -> list[str] | None:
+    def _read_env_extra(self, nssm, name, timeout=20) -> list[str] | None:
         """读 AppEnvironmentExtra 的元素列表；None 表示读取失败（与「空列表」区分）。"""
-        code, out = self.run_capture([nssm, 'get', name, 'AppEnvironmentExtra'])
+        code, out = self.run_capture([nssm, 'get', name, 'AppEnvironmentExtra'], timeout=timeout)
         if code != 0:
             return None
         # nssm get 对 MULTI_SZ 逐元素一行输出；空白行是终止空元素，剔除。
         return [line.strip() for line in out.splitlines() if line.strip()]
 
-    def get_env_extra_key(self, nssm, name, key) -> str | None:
-        """读某个键的**已配置**值。界面用它显示真值，避免「显示 4、实际 8」的静默降级。"""
-        elements = self._read_env_extra(nssm, name)
+    def get_env_extra_key(self, nssm, name, key, read_timeout=None) -> str | None:
+        """读某个键的**已配置**值。界面用它显示真值，避免「显示 4、实际 8」的静默降级。
+
+        ``read_timeout``：主线程调用方可传短超时（如 3s）防 nssm 卡住冻界面；
+        None 沿用 run_capture 默认 20s。
+        """
+        if read_timeout is not None:
+            elements = self._read_env_extra(nssm, name, timeout=read_timeout)
+        else:
+            elements = self._read_env_extra(nssm, name)
         if elements is None:
             return None
         prefix = f'{key}='

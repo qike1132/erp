@@ -49,10 +49,7 @@ from server_manager.hosting_view import HostingViewMixin
 from server_manager.log_view import LogViewMixin
 from server_manager.redis_ops import RedisOps
 from server_manager.service_ops import ServiceOps
-from server_manager.widgets import RoundedButton, StatusBadge, _lerp_color
-from server_manager.windows_ops import (
-    taskkill as _taskkill,
-)
+from server_manager.widgets import RoundedButton, StatusBadge
 
 if _IS_WINDOWS:
     import io
@@ -248,8 +245,8 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
         self._set_window_icon()
         self._center_window()
         self.root.deiconify()
-        self._fade_in()
-        self._animate_cards_intro()
+        # 装饰动画已裁剪（2026-10-15 审计）：本机核显低配（i5-10400），
+        # fade-in 11 帧 + 卡片脉冲 11 帧 × N 卡合计 ~24 次 after 重绘只拖慢首帧。
         self._check_interval, self._after_ids = 5000, {}
         self._run_env_checks()
         self.check_server_status()
@@ -274,36 +271,22 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
         if not (_PROJECT_DIR / '.env').is_file():
             errors.append(f"未找到 .env 配置文件: {_PROJECT_DIR / '.env'}\n服务器启动将因缺少 SECRET_KEY 而失败")
         if errors:
-            self.root.after(500, lambda: messagebox.showwarning("环境检查警告", "\n\n".join(errors)))
+            # deiconify 已完成，直接弹（原先 after(500) 与首帧 fade-in 叠加，告警被动画盖）
+            messagebox.showwarning("环境检查警告", "\n\n".join(errors))
             for err in errors:
                 self.log_message(err, 'ERROR')
 
     # ── Redis 探活/启停转发(T3 包化:实现已迁 server_manager/redis_ops.py) ──────
     # 保留同名瘦转发,既有调用点与静态断言不必改写。
-
-    def _get_env_value(self, key: str) -> str:
-        return self.redis.get_env_value(key)
+    # （2026-10-15 审计：_get_env_value/_redis_ping/_redis_service_state/
+    #   _start_redis_via_service/_start_redis_process 五个转发全仓 0 调用点，
+    #   注释所称「静态断言」实测不存在 —— 已删。仍有调用点的转发保留如下。）
 
     def _find_redis(self):
         return self.redis._find_redis()
 
-    def _redis_ping(self, port, password):
-        return self.redis.ping(port, password)
-
     def _is_redis_running(self):
         return self.redis.is_redis_running()
-
-    def _redis_service_state(self, name):
-        return self.redis.redis_service_state(name)
-
-    def _start_redis_via_service(self, name):
-        return self.redis.start_redis_via_service(name)
-
-    def _start_redis(self):
-        return self.redis.start_redis()
-
-    def _start_redis_process(self):
-        return self.redis._start_redis_process()
 
     def _is_broker_running(self):
         return self.redis.is_broker_running()
@@ -314,41 +297,8 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
     def _stop_redis(self):
         return self.redis.stop_redis()
 
-    def _fade_in(self):
-        try:
-            self.root.attributes('-alpha', 0.0)
-            def step(i):
-                if i > 10:
-                    self.root.attributes('-alpha', 1.0)
-                    return
-                self.root.attributes('-alpha', i / 10)
-                self.root.after(30, lambda: step(i + 1))
-            step(0)
-        except Exception:
-            pass
-
-    def _animate_cards_intro(self):
-        try:
-            for idx, card in enumerate(self._server_cards):
-                self.root.after(80 * idx, lambda c=card: self._pulse_card_border(c))
-        except Exception:
-            pass
-
-    def _pulse_card_border(self, card):
-        base, accent = self._PALETTE['border_card'], self._PALETTE['accent_h']
-        def tick(i):
-            if i > 10:
-                with contextlib.suppress(Exception):
-                    card.configure(highlightbackground=base)
-                return
-            t = i / 10
-            color = _lerp_color(base, accent, t * 2) if t <= 0.5 else _lerp_color(accent, base, (t - 0.5) * 2)
-            try:
-                card.configure(highlightbackground=color)
-            except Exception:
-                return
-            self.root.after(30, lambda: tick(i + 1))
-        tick(0)
+    # _fade_in / _animate_cards_intro / _pulse_card_border 为 v5.33 的装饰动画，
+    # 已于 2026-10-15 从启动序列整体移除（低配机首帧拖累）。
 
     def _center_window(self):
         self.root.update_idletasks()
@@ -389,9 +339,19 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
         self.root.after(0, self._do_quit)
 
     def _do_quit(self):
-        if self._mode != 'none':
-            self._stop_process()
-            self._mode = 'none'
+        # ★ 同步终止开发进程（不经闸门、不依赖守护线程）：
+        #   ① 旧实现走 _stop_process → gate.start 起的是守护线程，主线程随即
+        #     root.destroy() → 解释器关闭 → 守护 worker 连同其中的 taskkill 一起
+        #     被掐断，连后端都可能杀不完（竞态）。
+        #   ② 旧实现只杀 self._process（后端），从不碰 _frontend_process —— 开发
+        #     模式运行中退出会让 vite dev server 残留在 :3000（进程孤儿）。
+        #   ③ 退出瞬间若有动作在飞，gate.start 会直接被拒（拒绝消息投进再也无人
+        #     消费的队列），后端 + 前端 + 直接拉起的 Redis 全部孤儿。
+        #   terminate_dev_processes 同步杀前后端两棵进程树（各至多等 5s），确定性
+        #   换时间。同理同步收掉直接拉起的 Redis（服务托管的实例不归本进程管）。
+        self._terminate_dev_processes('退出')
+        self._stop_redis()
+        self._mode = 'none'
         # 退出前收掉日志轮询线程：它是守护线程，但显式停能保证 join 后再销毁 Tk，
         # 不会出现「窗口没了、线程还在往已关闭的队列投消息」。
         self.prod_logs.stop()
@@ -441,53 +401,9 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
     # 注：日志面板与日志运维(log_message / _build_log_section / 文件定时清理 /
     # 生产日志实时回灌)已整体抽到 LogViewMixin(T8，见 server_manager/log_view.py)，
     # 本类经继承使用；此处不再保留瘦转发。
-
-    def _stop_process(self):
-        """停止当前调试模式进程（经动作闸门串行；可被紧急停止取消）"""
-        self._gate.start('停止服务', self._stop_process_flow)
-
-    def _stop_process_flow(self):
-        proc = self._process
-        self._process = None
-        if not (proc and proc.poll() is None):
-            self._msg_queue.put(('ui_update', {}))
-            return
-        pid = proc.pid
-        self._msg_queue.put(('log', {'text': f"正在终止进程树 (根 PID: {pid})..."}))
-        try:
-            if _IS_WINDOWS:
-                child_pids = self._collect_process_tree(pid)
-                self._msg_queue.put(('log', {'text': f"发现 {len(child_pids)+1} 个关联进程"}))
-                _taskkill(pid)
-                for cpid in child_pids:
-                    with contextlib.suppress(Exception):
-                        _taskkill(cpid)
-                with contextlib.suppress(Exception):
-                    proc.wait(timeout=3)
-                self._kill_port_sync(_API_PORT)
-            else:
-                import signal
-                try:
-                    os.killpg(os.getpgid(pid), signal.SIGTERM)
-                except Exception:
-                    proc.terminate()
-                proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            try:
-                proc.kill()
-                proc.wait(timeout=3)
-            except Exception:
-                pass
-            self._msg_queue.put(('log', {'text': f"进程 (PID: {pid}) 超时，已强制 kill", 'level': 'WARNING'}))
-            self._kill_port_sync(_API_PORT)
-        except Exception as e:
-            self._msg_queue.put(('log', {'text': f"终止进程异常: {e!s}", 'level': 'ERROR'}))
-            self._kill_port_sync(_API_PORT)
-        finally:
-            self._msg_queue.put(('ui_update', {}))
-
-    def _collect_process_tree(self, root_pid):
-        return windows_ops.collect_process_tree(root_pid)
+    # 注：旧 _stop_process/_stop_process_flow（只杀后端、经守护线程、退出路径竞态）
+    # 已随 2026-10-15 退出路径修复删除 —— 退出统一走 _terminate_dev_processes +
+    # _stop_redis（见 _do_quit），开发停止走 dev.stop_dual_flow。
 
     def _kill_port_sync(self, port, exclude=None, managed_pids_fn=None):
         return windows_ops.kill_port_sync(port, exclude, managed_pids_fn)
@@ -848,6 +764,16 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
         is_none = self._mode == 'none'
         current_mode_key = self._current_mode_key
         self._update_card_ui('dual_dev', is_dual_dev, is_none, is_starting and current_mode_key == 'dual_dev', is_restarting and current_mode_key == 'dual_dev')
+        # 生产卡按钮随权威状态(sc query→_prod_running)联动：已停止时「停止/重启」
+        # 置灰、点不到（原先恒可点，虽闸门兜底无害但语义误导）。状态未知(_prod_unknown)
+        # 时全部保持可点 —— 「查不出来」不能当成「已停止」。
+        prod_active = self._prod_running
+        prod_buttons = (('svc_stop_btn', prod_active), ('svc_restart_btn', prod_active))
+        for attr, enabled in prod_buttons:
+            btn = getattr(self, attr, None)
+            if btn is not None:
+                with contextlib.suppress(Exception):
+                    btn.config(state='normal' if (enabled or self._prod_unknown) else 'disabled')
         # stop_all总是可用，作为紧急重置
         self.stop_all_btn.config(state='normal')
         self._update_mode_badge()
@@ -859,13 +785,17 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
     def _update_card_ui(self, mode_key, is_active, is_none, is_starting=False, is_restarting=False):
         status = getattr(self, f'{mode_key}_status')
         start_btn = getattr(self, f'{mode_key}_start_btn')
+        stop_btn = getattr(self, f'{mode_key}_stop_btn')
         restart_btn = getattr(self, f'{mode_key}_restart_btn')
         # 统一状态枚举：starting→部署中(蓝弧) / restarting→重启中(橙闪) / active→运行中(绿呼吸) / stopped→已停止(灰空心)
         state = 'deploying' if is_starting else 'restarting' if is_restarting else 'running' if is_active else 'stopped'
         state_text = '启动中' if is_starting else '重启中' if is_restarting else '运行中' if is_active else '已停止'
         status.set_state(state, state_text)
-        start_btn.config(state='disabled' if (is_starting or is_restarting) else 'normal')
-        restart_btn.config(state='disabled' if (not is_active or is_starting or is_restarting) else 'normal')
+        in_transition = is_starting or is_restarting
+        start_btn.config(state='disabled' if in_transition else 'normal')
+        # 停止/重启只在运行中可用；「停止中」由闸门 op_busy 全量置灰兜底
+        stop_btn.config(state='normal' if is_active else 'disabled')
+        restart_btn.config(state='disabled' if (not is_active or in_transition) else 'normal')
 
     def check_server_status(self):
         if self._mode in ('none', 'restarting', 'starting'):
@@ -938,7 +868,7 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
         content.columnconfigure(1, weight=1, uniform='mode_cards')
         content.rowconfigure(0, weight=0)
         content.rowconfigure(1, weight=1)
-        self._build_server_card(content, 0, 0, '开发模式', 'DEV', 'FastAPI + Vue3 / Vite · 热重载 · 自动切换', 'dual_dev', self.start_dual_dev, self.stop_dual_dev, self.restart_dual_dev)
+        self._build_server_card(content, 0, 0, '开发模式', 'FastAPI + Vue3 / Vite · 热重载 · 自动切换', 'dual_dev', self.start_dual_dev, self.stop_dual_dev, self.restart_dual_dev)
         self._build_prod_card(content, 0, 1)
         self._build_log_section(content)
 
@@ -965,7 +895,7 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
         tk.Frame(body, bg=self._PALETTE['border'], height=1).pack(fill=tk.X, pady=(13, 0))
         return body
 
-    def _build_server_card(self, parent, row, col, title, script_label, desc, mode_key, start_cmd, stop_cmd, restart_cmd, columnspan=1):
+    def _build_server_card(self, parent, row, col, title, desc, mode_key, start_cmd, stop_cmd, restart_cmd, columnspan=1):
         card = self._card(parent, row, col, columnspan=columnspan)
         body = self._card_head(card, 'DEV', self._PALETTE['success_tint'], self._PALETTE['success'], title, desc)
         # 状态行：胶囊状态徽章（详情页场景）
@@ -979,11 +909,18 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
         start_btn = RoundedButton(btns, text='启动开发', variant='solid', tone='success', command=start_cmd, canvas_bg=self._PALETTE['bg_card'])
         self._action_buttons.append(start_btn)   # 参与「动作期间置灰」（紧急停止不登记）
         start_btn.pack(side=tk.LEFT)
+        # 只停开发模式（不动 Redis / 不做全量清扫）：2026-10-15 前该能力存在
+        # （stop_dual_dev）但按钮在 v5.33 卡片改版时被丢掉，成了 UI 不可达的死方法 ——
+        # 当时只能靠「紧急停止」（连 Redis 一起停）或「启动生产服务」间接停开发。
+        stop_btn = RoundedButton(btns, text='停止', variant='outlined', tone='danger', command=stop_cmd, state='disabled', canvas_bg=self._PALETTE['bg_card'])
+        self._action_buttons.append(stop_btn)
+        stop_btn.pack(side=tk.LEFT, padx=(8, 0))
         restart_btn = RoundedButton(btns, text='重启', variant='outlined', tone='accent', command=restart_cmd, state='disabled', canvas_bg=self._PALETTE['bg_card'])
         self._action_buttons.append(restart_btn)
         restart_btn.pack(side=tk.LEFT, padx=(8, 0))
         setattr(self, f'{mode_key}_status', status_badge)
         setattr(self, f'{mode_key}_start_btn', start_btn)
+        setattr(self, f'{mode_key}_stop_btn', stop_btn)
         setattr(self, f'{mode_key}_restart_btn', restart_btn)
 
     # ===================== 生产模式 (Windows 服务 + NSSM) =====================
@@ -1005,12 +942,6 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
 
     def _stop_managed_services(self):
         return self.svc.stop_managed_services()
-
-    def _find_loose_prod_runner_pids(self, exclude=()):
-        return windows_ops.find_loose_prod_runner_pids(exclude)
-
-    def _find_project_residual_pids(self, exclude=()):
-        return windows_ops.find_project_residual_pids(_PROJECT_DIR, exclude)
 
     def _ensure_production_stopped(self):
         return self.svc.ensure_production_stopped()
@@ -1154,6 +1085,9 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
 
         必须读 NSSM 真值：``os.getenv`` 取的是 server_manager 自身环境，与生产
         实际生效值无关 —— 旧实现因此显示 4 而生产跑 8，点「安装服务」就把它降回 4。
+
+        ★ 限 3s 超时：本方法在 _build_prod_card 里**主线程**执行，run_capture 默认
+        20s —— nssm 一卡整个首帧就冻住 20s。读不到只损失「初值显示」，不值得赌。
         """
         try:
             nssm = self._find_nssm()
@@ -1165,6 +1099,15 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
             self.log_message('读取 NSSM 中的 Worker 数失败，退回本机环境变量', 'WARNING')
         return str(int(os.getenv('UVICORN_WORKERS', '4')))
 
+    def _read_workers_current(self, nssm) -> str | None:
+        """带 3s 超时读 NSSM 里已配置的 Worker 数；失败/超时返回 None（供 _apply_workers
+        做主线程读现状，不默认 20s 冻界面）。"""
+        try:
+            return self.svc.get_env_extra_key(nssm, _SVC_API, 'UVICORN_WORKERS',
+                                              read_timeout=3)
+        except Exception:
+            return None
+
     def _apply_workers(self):
         """主线程：读现状 + 弹窗确认 + 交给闸门。（tkinter 不许跨线程，弹窗必须在这里）"""
         nssm = self._find_nssm()
@@ -1174,11 +1117,12 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
         target = (self.hosting_workers_var.get() or '').strip()
         if not target:
             return
-        current = self.svc.get_env_extra_key(nssm, _SVC_API, 'UVICORN_WORKERS')
+        current = self._read_workers_current(nssm)
         if current == target:
             self.log_message(f'Worker 已是 {target}，无需变更')
             return
-        # 服务在跑才需要重启；已停止时只写配置，下次启动自然生效，不必吓人一跳
+        # 读不到现状（超时/失败）时仍允许变更：写侧 set_env_extra_key 会回读校验，
+        # 拿不到「旧值」只损失确认弹窗里的一行展示，不应阻断操作。
         needs_restart = 'RUNNING' in self._svc_state(_SVC_API)
         if needs_restart and not messagebox.askyesno(
             '确认重启 erp-prod',

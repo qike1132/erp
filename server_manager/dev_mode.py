@@ -169,10 +169,12 @@ class DevModeOps:
 
     def stop_dual_flow(self, label):
         self._msg_queue.put(('log', {'text': f"正在停止{label}..."}))
+        self._gate.checkpoint()
         frontend_proc, backend_proc = self.frontend_process, self.process
         self.frontend_process, self.process = None, None
         for proc, name in [(frontend_proc, '前端'), (backend_proc, '后端')]:
             if proc and proc.poll() is None:
+                self._gate.checkpoint()
                 self._msg_queue.put(('log', {'text': f'正在终止{name}进程树 (PID: {proc.pid})...'}))
                 if _IS_WINDOWS:
                     with contextlib.suppress(Exception):
@@ -270,22 +272,28 @@ class DevModeOps:
             self._msg_queue.put(('log', {'text': f"读取日志异常: {e!s}", 'level': 'ERROR'}))
 
     def read_frontend_stdout(self, proc):
-        batch = []
-        while True:
-            try:
-                line = proc.stdout.readline()
-                if not line:
+        # 与 read_stdout 同款 try/finally：循环退出后必须关 stdout，
+        # 否则管道句柄悬到 GC（对齐 read_stdout 的收尾契约）。
+        try:
+            batch = []
+            while True:
+                try:
+                    line = proc.stdout.readline()
+                    if not line:
+                        break
+                    text = self._svc.decode_output(line, strip=True)  # 统一解码(含 UTF-16)，修复中文 Windows 前端输出乱码
+                    if text:
+                        level = 'ERROR' if any(k in text.lower() for k in ['error', 'exception', 'failed']) else 'INFO'
+                        batch.append((f'[WEB] {text}', level))
+                        if len(batch) >= 10:
+                            for t, l in batch:
+                                self._msg_queue.put(('log', {'text': t, 'level': l}))
+                            batch.clear()
+                except Exception:
                     break
-                text = self._svc.decode_output(line, strip=True)  # 统一解码(含 UTF-16)，修复中文 Windows 前端输出乱码
-                if text:
-                    level = 'ERROR' if any(k in text.lower() for k in ['error', 'exception', 'failed']) else 'INFO'
-                    batch.append((f'[WEB] {text}', level))
-                    if len(batch) >= 10:
-                        for t, l in batch:
-                            self._msg_queue.put(('log', {'text': t, 'level': l}))
-                        batch.clear()
-            except Exception:
-                break
-        if batch:
-            for t, l in batch:
-                self._msg_queue.put(('log', {'text': t, 'level': l}))
+            if batch:
+                for t, l in batch:
+                    self._msg_queue.put(('log', {'text': t, 'level': l}))
+        finally:
+            with contextlib.suppress(Exception):
+                proc.stdout.close()
