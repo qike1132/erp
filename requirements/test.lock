@@ -198,7 +198,7 @@ packaging==26.3
     #   pytest-sugar
 pillow==12.3.0
     # via -r requirements/base.txt
-pluggy==1.6.0
+pluggy==1.7.0
     # via
     #   pytest
     #   pytest-cov
