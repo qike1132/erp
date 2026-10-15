@@ -3,6 +3,9 @@
 完整流程：建客户/SKU → 生产入库 → 备货入库 → 下单 → 抵扣 → 【对抵扣退货】→ 看结余。
 只读 + 打 ZZTEST_REPRO 标记的少量测试数据，跑完自动清理。
 需提权（根 .env ACL）；需 ERP_ALLOW_PROD_WRITE=1。
+
+修复 6acee445 后：抵扣行退货被守卫以 400 拒绝，脚本打印「守卫已生效」——
+本脚本兼作守卫回归（断言退货响应码，避免把「脚本自身失败」误读成「未复现」）。
 """
 from __future__ import annotations
 
@@ -75,14 +78,19 @@ def cleanup():
                 f'DELETE FROM daily_production_record WHERE product_id IN {pset}',
                 'DELETE FROM stock_out WHERE customer=:c', 'DELETE FROM stock_in WHERE customer=:c',
                 f'DELETE FROM order_item WHERE order_id IN {oset}',
+                f'DELETE FROM approval_request WHERE order_id IN {oset}',
                 'DELETE FROM "order" WHERE customer=:c',
                 f'DELETE FROM product_customer WHERE product_id IN {pset}',
                 f'DELETE FROM product WHERE id IN {pset}', 'DELETE FROM customer WHERE name=:c'):
         with contextlib.suppress(Exception):
             q(sql, {'c': CUST})
     with contextlib.suppress(Exception):
-        db = list(client.get('/api/v1/reports/return-logs', params={'customer': CUST}).json().get('logs', []))
-        del db
+        q('DELETE FROM packaging_record WHERE product_name LIKE :x', {'x': 'ZZTEST_REPRO%'})
+    # 残留复核（与 zztest_cleanup 同口径）：删不干净必须报警，不能静默留生产库
+    left_p = q("SELECT COUNT(*) FROM product WHERE name LIKE 'ZZTEST_REPRO%'", fetch=True)[0][0]
+    left_c = q('SELECT COUNT(*) FROM customer WHERE name=:c', {'c': CUST}, fetch=True)[0][0]
+    if left_p or left_c:
+        print(f'!! 清理残留：product={left_p} customer={left_c}，请人工核查生产库')
 
 
 print('=' * 70)
@@ -120,10 +128,13 @@ print(f'[4] 抵扣 300（货没走）        → 结余 = {before}   ← 正确�
 # 6) 对这笔「抵扣」退货 300（界面做不了，只能走接口）
 sid = q('SELECT id FROM stock_out WHERE order_id=:o AND stockin_id IS NOT NULL ORDER BY id DESC LIMIT 1',
         {'o': oid}, fetch=True)[0][0]
-post('/api/v1/stock-returns/create', stockout_id=sid, quantity=300, return_date='2026-06-01',
-     reason='ZZTEST_REPRO', note='ZZTEST_REPRO')
+r = post('/api/v1/stock-returns/create', stockout_id=sid, quantity=300, return_date='2026-06-01',
+         reason='ZZTEST_REPRO', note='ZZTEST_REPRO')
+if r.status_code not in (200, 400):
+    raise SystemExit(f'脚本异常：退货接口返回 HTTP {r.status_code}（非 200/400，无法判定）：{r.text[:200]}')
 after = balance(pid)
-print(f'[5] 对「抵扣行」退货 300      → 结余 = {after}   ← ❌ 应仍为 {before}，却多了 {after - before}')
+print(f'[5] 对「抵扣行」退货 300      → 结余 = {after}   ← HTTP {r.status_code}'
+      f'（400=守卫拒绝，符合修复后预期；200=守卫未生效）')
 
 print('-' * 70)
 print('inventory_log（该 SKU）：')
@@ -131,7 +142,12 @@ for r in q('SELECT change_type, change_quantity FROM inventory_log WHERE product
            {'p': pid}, fetch=True):
     print(f'   {r[0]:<8} {r[1]:>8}')
 print('-' * 70)
-verdict = 'BUG 复现成功（结余虚增）' if after > before else '未复现'
+if after > before:
+    verdict = 'BUG 复现成功（结余虚增，守卫未生效）'
+elif r.status_code == 400:
+    verdict = '守卫已生效（抵扣行退货被 400 拒绝，结余未变）'
+else:
+    verdict = f'异常：结余未变但退货返回 HTTP {r.status_code}（非 400），需人工核查'
 print(f'结论：{verdict}：{before} → {after}（+{after - before}）')
 print('=' * 70)
 

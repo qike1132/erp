@@ -3,6 +3,9 @@
 场景（用户给的数字）：下单10000 → 备货10000 → 新订单5000+抵扣5000 → 包装入库15000
 → 出货10000 → 退货1000。唯一差别：退货选中【出货单】还是【抵扣行】。
 只打 ZZTEST_CMP 标记，跑完自动清理。需提权 + ERP_ALLOW_PROD_WRITE=1。
+
+修复 6acee445 后：退【出货单】预期 200、退【抵扣行】预期 400（守卫拒绝）；
+脚本对退货响应码断言，避免把「脚本自身失败」误读成「无差异」。
 """
 from __future__ import annotations
 
@@ -80,11 +83,20 @@ def cleanup():
                 f'DELETE FROM inventory_log WHERE product_id IN {pset}',
                 f'DELETE FROM daily_production_record WHERE product_id IN {pset}',
                 'DELETE FROM stock_out WHERE customer=:c', 'DELETE FROM stock_in WHERE customer=:c',
-                f'DELETE FROM order_item WHERE order_id IN {oset}', 'DELETE FROM "order" WHERE customer=:c',
+                f'DELETE FROM order_item WHERE order_id IN {oset}',
+                f'DELETE FROM approval_request WHERE order_id IN {oset}',
+                'DELETE FROM "order" WHERE customer=:c',
                 f'DELETE FROM product_customer WHERE product_id IN {pset}',
                 f'DELETE FROM product WHERE id IN {pset}', 'DELETE FROM customer WHERE name=:c'):
         with contextlib.suppress(Exception):
             q(sql, {'c': CUST})
+    with contextlib.suppress(Exception):
+        q('DELETE FROM packaging_record WHERE product_name LIKE :x', {'x': 'ZZTEST_CMP%'})
+    # 残留复核（与 zztest_cleanup 同口径）：删不干净必须报警，不能静默留生产库
+    left_p = q("SELECT COUNT(*) FROM product WHERE name LIKE 'ZZTEST_CMP%'", fetch=True)[0][0]
+    left_c = q('SELECT COUNT(*) FROM customer WHERE name=:c', {'c': CUST}, fetch=True)[0][0]
+    if left_p or left_c:
+        print(f'!! 清理残留：product={left_p} customer={left_c}，请人工核查生产库')
 
 
 def run(label, return_target):
@@ -120,9 +132,12 @@ def run(label, return_target):
         sid = q('SELECT id FROM stock_out WHERE product_id=:p AND customer=:c AND stockin_id IS NOT NULL '
                 'AND quantity-returned_quantity >= 1000 ORDER BY id DESC LIMIT 1', {'p': pid, 'c': CUST}, fetch=True)[0][0]
         who = '抵扣行'
-    post('/api/v1/stock-returns/create', json={'stockout_id': sid, 'quantity': 1000, 'return_date': '2026-06-01', 'reason': 'ZZTEST_CMP', 'note': 'ZZTEST_CMP'})
+    r = post('/api/v1/stock-returns/create', json={'stockout_id': sid, 'quantity': 1000, 'return_date': '2026-06-01', 'reason': 'ZZTEST_CMP', 'note': 'ZZTEST_CMP'})
+    expect = 200 if return_target == 'ship' else 400
+    if r.status_code != expect:
+        raise SystemExit(f'脚本异常：退{who}预期 HTTP {expect}，实得 {r.status_code}：{r.text[:200]}')
     after = stock_cols(pid)
-    print(f'  {"退货1000(退" + who + ")":<16} {after}')
+    print(f'  {"退货1000(退" + who + ")":<16} {after}   [HTTP {r.status_code}]')
     print(f'  → 退货前结余={before["库存结余"]}  退货后结余={after["库存结余"]}  变化={after["库存结余"] - before["库存结余"]:+d}')
     return before, after
 
