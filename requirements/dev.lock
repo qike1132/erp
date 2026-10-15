@@ -65,7 +65,7 @@ fastapi==0.137.1
     # via
     #   -r requirements/base.txt
     #   sentry-sdk
-filelock==4.1.1
+filelock==4.2.0
     # via
     #   python-discovery
     #   virtualenv
