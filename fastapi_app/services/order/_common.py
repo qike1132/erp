@@ -58,11 +58,16 @@ def schedule_post_commit_event(session, event_type: str, data: dict) -> None:
 
     仅在使用 db_transaction 的调用链上生效（其 commit 成功后执行回调）；
     自行 commit 的入口需在提交后调用 run_post_commit_callbacks。
+
+    挂载实现委托 core.domain_events.schedule_post_commit_callback
+    （post-commit 调度唯一事实来源，2026-10-15 收敛）。
     """
+    from fastapi_app.core.domain_events import schedule_post_commit_callback
+
     async def _publish() -> None:
         await _safe_publish_event(event_type, data)
 
-    session.info.setdefault('post_commit_callbacks', []).append(_publish)
+    schedule_post_commit_callback(session, _publish)
 
 
 def _log_background_task_exception(task: asyncio.Task) -> None:

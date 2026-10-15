@@ -7,7 +7,7 @@
 import asyncio
 import json
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -114,6 +114,37 @@ async def _broadcast(event: DomainEvent) -> bool:
         return False
 
 
+def schedule_post_commit_callback(session: Any, callback: 'Callable[[], Coroutine[Any, Any, Any]]') -> bool:
+    """注册「事务提交成功后」执行的回调（post-commit 调度的唯一实现，2026-10-15 收敛）。
+
+    此前「挂 ``session.info['post_commit_callbacks']`` + 无 info 会话退化为立即执行」
+    的机制在 cache_invalidation / domain_events / order/_common 各写一遍，语义漂移
+    风险高（docstring 各自维护）。现收敛为本函数：
+
+    - 会话有 dict 型 ``info``：回调追加进 ``info['post_commit_callbacks']``，由
+      ``db_transaction`` / ``get_async_db`` 在 commit 成功后执行（``run_post_commit_callbacks``）；
+    - 会话无 ``info``（测试桩、轻量包装）：**退化为立即执行**——注册了也无人执行，
+      与其静默丢弃，不如当场跑（回调异常由 done-callback 兜底记日志）；
+    - 同步上下文（无事件循环）：放弃（无法执行异步回调）。
+
+    返回是否成功挂载/调度（False = 同步上下文放弃）。
+    """
+    info = getattr(session, 'info', None)
+    if not isinstance(info, dict):
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return False  # 无事件循环（同步上下文）：无法执行异步回调，只能放弃
+        try:
+            task: asyncio.Task[Any] = loop.create_task(callback())
+        except TypeError:
+            return False  # callback 不是可调用出协程的对象：放弃而非炸主流程
+        task.add_done_callback(_log_publish_task_exception)
+        return True
+    info.setdefault('post_commit_callbacks', []).append(callback)
+    return True
+
+
 def schedule_post_commit_domain_event(session: Any, event: DomainEvent) -> None:
     """注册「事务提交成功后」再发布的领域事件。
 
@@ -125,20 +156,11 @@ def schedule_post_commit_domain_event(session: Any, event: DomainEvent) -> None:
     回调由 db_transaction 在 commit 成功后执行；不经 db_transaction 的调用方
     （ARQ 任务、直连会话）注册无人执行，请直接 await publish_with_retry。
     """
+
     async def _publish() -> None:
         await publish_with_retry(event)
 
-    info = getattr(session, 'info', None)
-    if not isinstance(info, dict):
-        # 与 schedule_post_commit_invalidation 同款退化：无法挂回调的会话当场发布
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            return  # 无事件循环（同步上下文）：无法执行异步发布，只能放弃
-        task = loop.create_task(_publish())
-        task.add_done_callback(_log_publish_task_exception)
-        return
-    info.setdefault('post_commit_callbacks', []).append(_publish)
+    schedule_post_commit_callback(session, _publish)
 
 
 def _log_publish_task_exception(task: 'asyncio.Task[Any]') -> None:

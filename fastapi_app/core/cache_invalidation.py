@@ -9,7 +9,6 @@
 
 所有方法在 Redis 不可用时静默降级，不影响核心业务流程。
 """
-import asyncio
 import logging
 from collections.abc import Callable, Coroutine
 from enum import Enum
@@ -149,26 +148,11 @@ def schedule_post_commit_invalidation(
     Session 的标准属性（dict），没有它说明这不是请求级 Unit-of-Work 会话（测试桩、
     轻量包装等），回调注册了也无人执行 —— 与其静默丢弃，不如当场清一次
     （宁可多清不漏清）。立即执行路径自带异常兜底，失败只记日志。
+
+    实现委托给 ``core.domain_events.schedule_post_commit_callback``（post-commit
+    调度的唯一事实来源，2026-10-15 收敛；此前本模块与 domain_events / order/_common
+    各持一份同款拷贝）。
     """
-    info = getattr(session, 'info', None)
-    if not isinstance(info, dict):
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            return  # 无事件循环（同步上下文）：无法执行异步回调，只能放弃
-        try:
-            task: asyncio.Task[Any] = loop.create_task(callback())
-        except TypeError:
-            return  # callback 不是可调用出协程的对象：放弃而非炸主流程
-        task.add_done_callback(_log_task_exception)
-        return
-    info.setdefault('post_commit_callbacks', []).append(callback)
+    from fastapi_app.core.domain_events import schedule_post_commit_callback
 
-
-def _log_task_exception(task: 'asyncio.Task[Any]') -> None:
-    """立即执行路径的异常兜底（缓存失效失败只记日志，不影响业务）。"""
-    if task.cancelled():
-        return
-    exc = task.exception()
-    if exc is not None:
-        logger.warning('立即执行的缓存失效回调失败: %s', exc, exc_info=exc)
+    schedule_post_commit_callback(session, callback)

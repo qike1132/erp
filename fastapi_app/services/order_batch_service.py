@@ -15,12 +15,11 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
-# event_bus 迁移说明（暂保留，不迁移至 domain_events）：
-# event_bus.safe_publish_event 承担 WebSocket 广播（经 notification_service），
-# 本文件发布的 "batch_no_updated" / "batch_completed" 为任意字符串事件名，
-# 而 domain_events.publish_with_retry 需要 DomainEventType 枚举值（无对应 batch 事件），
-# 且不具备 WS 实时通知能力——强行迁移会丢失前端实时推送，行为不等价。
-from fastapi_app.core.event_bus import safe_publish_event as _safe_publish_event
+# 事件发布（2026-10-15 收敛）：本文件发布的 "batch_no_updated" / "batch_completed"
+# 为仅走 WebSocket 广播的字符串事件名（无对应 DomainEventType 枚举值），统一经
+# core.exception_handler.safe_publish_event 发布——失败仅记日志、不中断主流程。
+# 原 core/event_bus.py 的同名 safe_publish_event 已删除（双签名撞名，详见其迁移说明）。
+from fastapi_app.core.exception_handler import safe_publish_event as _safe_publish_event_call
 from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.services.serializers.order_serializer import OrderSerializer
 from fastapi_app.shared_models import Order, OrderBatchAuditLog, OrderSyncConfig, Product, StockIn, StockOut, User
@@ -30,6 +29,20 @@ logger = logging.getLogger(__name__)
 
 _WHITELIST_CACHE_KEY = "order_batch:whitelist"
 _WHITELIST_TTL = 300
+
+
+async def _safe_publish_event(event_type: str, data: dict) -> None:
+    """安全发布批次事件（仅 WebSocket 广播，失败不影响主流程）。
+
+    保留模块级函数名：测试按 `order_batch_service._safe_publish_event` 打桩，
+    且统一走 core.exception_handler 的参数化安全发布（原 core/event_bus.py
+    同名函数 2026-10-15 删除，消除「同名双签名」的 import 陷阱）。
+    """
+    from fastapi_app.services.notification_service import publish_event
+
+    await _safe_publish_event_call(
+        publish_event, event_type, data, context="批次事件发布",
+    )
 
 
 async def _get_redis_client():

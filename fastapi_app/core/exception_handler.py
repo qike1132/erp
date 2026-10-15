@@ -37,6 +37,8 @@ INFRA_EXCEPTIONS: tuple[type[BaseException], ...] = (OSError, ConnectionError, *
 # 收敛说明：此前 purchase_cache.py 有本地副本 _LOCAL_INFRA_EXCEPTIONS，
 # event_bus.py / order/_common.py 则直接写星号解包（未纳入类型门禁故未暴露）。
 # 现统一到本常量，避免同一变通方案在多个文件里各写一遍。
+# （event_bus.py 已于 2026-10-15 删除——其同名 safe_publish_event 与本函数签名
+#  不同，构成 import 陷阱；唯一调用方 order_batch_service 已改用本函数。）
 RUNTIME_INFRA_EXCEPTIONS: tuple[type[BaseException], ...] = (RuntimeError, *INFRA_EXCEPTIONS)
 
 
