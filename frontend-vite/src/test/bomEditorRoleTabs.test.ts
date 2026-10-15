@@ -217,7 +217,7 @@ describe('BomEditor 角色页签：菜单健壮性与键盘可达（对齐 RoleT
     expect(tabAt(1).classes()).not.toContain('active')
   })
 
-  it('重命名输入框：空格不被页签快捷键吞掉，maxlength 与参照页/后端口径一致', async () => {
+  it('重命名输入框：空格不被页签快捷键吞掉，maxlength 截断边界 = 后端列宽（100）', async () => {
     await mountOpened()
     await tabAt(1).trigger('contextmenu')
     await nextTick()
@@ -234,12 +234,26 @@ describe('BomEditor 角色页签：菜单健壮性与键盘可达（对齐 RoleT
     input.element.dispatchEvent(space)
     expect(space.defaultPrevented).toBe(false)
 
-    await input.setValue('裁床 1 组')
-    expect((input.element as HTMLInputElement).value).toBe('裁床 1 组')
+    // 截断边界必须等于后端列宽：ProductRole.role_name = String(100)
+    // （fastapi_app/shared_models/product_material.py:85）。从后端源码取值而不是写死 100：
+    // 列宽真改了这里跟着变，前端若把 maxlength 写回 50 则立刻失配。
+    const model = readSfc('../fastapi_app/shared_models/product_material.py')
+    const roleNameLen = Number(/role_name:\s*Mapped\[str\]\s*=\s*mapped_column\(String\((\d+)\)/.exec(model)?.[1])
+    expect(roleNameLen).toBe(100)
+    expect(input.attributes('maxlength')).toBe(String(roleNameLen))
 
-    // 后端 ProductRole.role_name 是 String(100)，参照页 RoleTabs.vue 也是 100：
-    // 改名输入框若停在 50，长角色名会在前端被悄悄截断。
-    expect(input.attributes('maxlength')).toBe('100')
+    // 显式截断断言：边界内的最长名字（100 字）必须**一字不少**走完重命名流程。
+    // 提交路径里若藏了 slice(0, 50) 之类的截断，下面两条断言立刻红。
+    const atLimit = '甲'.repeat(roleNameLen)
+    await input.setValue(atLimit)
+    await input.trigger('keydown.enter')
+    await flushPromises()
+    await nextTick()
+
+    expect(exists('.bom-role-edit-input')).toBe(false)
+    const renamed = tabAt(1).text()
+    expect(renamed).toBe(atLimit)
+    expect(renamed.length).toBe(roleNameLen)
   })
 })
 

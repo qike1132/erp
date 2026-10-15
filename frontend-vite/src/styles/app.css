@@ -115,7 +115,10 @@
    * Toast），都必须超过 2100，否则会被 PrimeVue 的遮罩压住。
    * --z-page-modal 是项目自定义页面级弹窗（pd-overlay/pim-overlay 家族）的层级，
    * 刻意低于 PrimeVue（2000+），使 PrimeVue 的下拉/抽屉能盖在其上；从这类弹窗
-   * 内新开的确认框等必须用 --z-*-nested（zLayers.test.ts 锁序）。 */
+   * 内新开的确认框等必须用 --z-*-nested（zLayers.test.ts 锁序）。
+   * 例外：页面内自绘的局部浮层（pattern-room RoleTabs 与 BOM 角色页签的右键菜单，
+   * 1000/1001）刻意用裸值、不走本表 token —— 它们只在弹窗自身（--z-page-modal=1050）
+   * 的层叠上下文里互相比较，换成 token 反而会与参照页漂开。 */
   --z-dropdown: 10;
   --z-sticky: 20;
   --z-overlay: 30;
