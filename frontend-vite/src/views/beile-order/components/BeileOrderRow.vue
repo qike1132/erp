@@ -74,7 +74,7 @@
     </div>
 
     <!-- SKU 列：逐 SKU 一行（产品名称/产品条码/订单数量/生产数量） -->
-    <template v-for="(sku, si) in skus" :key="si">
+    <template v-for="(sku, si) in skus" :key="sku.id ?? si">
       <div
         v-for="col in skuCols"
         :key="`s-${si}-${col.key}`"

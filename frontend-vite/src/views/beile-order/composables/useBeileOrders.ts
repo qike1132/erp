@@ -108,6 +108,8 @@ export function rowTotalProductionQty(row: BeileOrderRow): number | null {
  * 页面、导出 XLS、打印预览三处复用，而无需强转完整 OrderSKU。
  */
 export type SkuQtyFields = {
+  /** SKU 行主键（页面逐 SKU 行有；无明细回落行无）——供 v-for 稳定 key 用 */
+  id?: number
   product_name?: string | null
   product_barcode?: string | null
   quantity?: number

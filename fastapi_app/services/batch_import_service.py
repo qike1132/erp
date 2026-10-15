@@ -341,7 +341,7 @@ async def read_template_bytes() -> tuple[bytes, str]:
 async def import_orders_service(db: AsyncSession, file: ExcelUpload) -> BatchImportResult:
     """批量导入订单 - 支持统一模板格式。
 
-    骨架见 :func:`_run_sheet_import`；本函数只负责订单行的写入逻辑
+    骨架见 :func:`_run_sheet_rows`；本函数只负责订单行的写入逻辑
     （客户校验经 :func:`_reject_unknown_customer` 与 core 路径同口径）。
     """
     from fastapi_app.services.batch_service import get_all_products
