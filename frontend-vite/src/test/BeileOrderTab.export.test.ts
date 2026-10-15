@@ -94,10 +94,6 @@ const stubs = {
   UiSpinner: { template: '<span class="ui-spinner-stub" />' },
   UiPagination: { template: '<div class="ui-pagination-stub" />' },
   UiButton: { template: '<button type="button"><slot /></button>' },
-  UiDialog: {
-    props: ['open', 'title', 'maxWidthClass'],
-    template: '<div v-if="open" class="ui-dialog-stub"><slot /><slot name="footer" /></div>',
-  },
   HubeiSearchBar: { template: '<div class="hu-search-stub" />' },
   VirtualList: {
     props: ['items'],
@@ -364,7 +360,7 @@ describe('BeileOrderTab 导出与打印功能', () => {
     expect((bodyHtml.match(/<tr>/g) || []).length).toBe(2 + 1) // +1 thead
   })
 
-  it('多 SKU 订单：逐 SKU 输出订单数量/生产数量 + 追加订单级「合计」行（FIX-3）', async () => {
+  it('多 SKU 订单：逐 SKU 输出订单数量/生产数量（无「合计」行，FIX-3）', async () => {
     mocks.queryData.value = makeListResponse({
       total: 1,
       data: [
@@ -394,29 +390,29 @@ describe('BeileOrderTab 导出与打印功能', () => {
     })
     const wrapper = await mountTab()
 
-    // 导出：2 个 SKU 逐行 + 1 行订单级合计 = 3 tbody 行
+    // 导出：2 个 SKU 逐行 = 2 tbody 行
     await wrapper.find('.bo-toolbar-btn--export').trigger('click')
     await flushPromises()
     const [exportHtml, exportFilename] = mocks.downloadXlsMock.mock.calls[0]!
     expect(exportFilename).toMatch(/\.xls$/)
     const exportTrCount = (exportHtml.match(/<tr>/g) || []).length
-    // 1 thead + 3 tbody = 4 <tr>
-    expect(exportTrCount).toBe(4)
+    // 1 thead + 2 tbody = 3 <tr>
+    expect(exportTrCount).toBe(3)
     // 逐 SKU 数量出现在导出 HTML（不再整段 rowspan 到订单级）
     expect(exportHtml).toContain('产品X')
     expect(exportHtml).toContain('产品Y')
-    expect(exportHtml).toContain('合计')
+    expect(exportHtml).not.toContain('合计')
 
-    // 打印：勾选后 printHtml bodyHtml 亦为 1 thead + 3 tbody = 4 <tr>
+    // 打印：勾选后 printHtml bodyHtml 亦为 1 thead + 2 tbody = 3 <tr>
     const checkbox = wrapper.find('.bo-td-select [role="checkbox"]')
     await checkbox.trigger('click')
     await nextTick()
     await wrapper.find('.bo-toolbar-btn--print').trigger('click')
     await flushPromises()
     const [, printBody] = mocks.printHtmlMock.mock.calls[0]!
-    expect((printBody.match(/<tr>/g) || []).length).toBe(4)
-    // 订单级列（订单类型/客户等）用 rowspan="3" 合并跨「2 SKU 行 + 合计行」
-    expect(printBody).toContain('rowspan="3"')
+    expect((printBody.match(/<tr>/g) || []).length).toBe(3)
+    // 订单级列（订单类型/客户等）用 rowspan="2" 合并跨「2 SKU 行」
+    expect(printBody).toContain('rowspan="2"')
     expect(printBody).toContain('产品X')
     expect(printBody).toContain('产品Y')
   })
@@ -483,8 +479,8 @@ describe('BeileOrderTab 导出与打印功能', () => {
 
     const doc = new DOMParser().parseFromString(html, 'text/html')
     const rows = [...doc.querySelectorAll('tbody tr')]
-    // 行序：id101(1 SKU=1行) + id102(2 SKU=2行 + 合计1行) = 4 行
-    expect(rows.length).toBe(4)
+    // 行序：id101(1 SKU=1行) + id102(2 SKU=2行) = 3 行
+    expect(rows.length).toBe(3)
 
     const cellsOf = (tr: Element) => [...tr.querySelectorAll('td')].map((td) => td.textContent || '')
     // 列序：订单类型(0) | 订单号(1) | 下单时间(2) | 客户(3) | 工厂(4)
@@ -512,12 +508,6 @@ describe('BeileOrderTab 导出与打印功能', () => {
     expect(sku2Cells[1]).toBe('690003')
     expect(sku2Cells[2]).toBe('20')
     expect(sku2Cells[3]).toBe('—')
-    // 行3 = 订单级「合计」（订单数量=各 SKU 之和=30，生产数量=—，条码列空）
-    const totalCells = cellsOf(rows[3]!)
-    expect(totalCells[0]).toBe('合计')
-    expect(totalCells[1]).toBe('')
-    expect(totalCells[2]).toBe('30')
-    expect(totalCells[3]).toBe('—')
   })
 
   it('列表 DOM：表头含「订单数量」「生产数量」「产品名称/产品条码」且无「备品数量」列；已下单行生产数量 = 订单数量 + 备品数量，未下单行为「—」', async () => {
@@ -628,7 +618,7 @@ describe('buildSummaryTbody 逐 SKU 导出（FIX-3 / AC-12 同源）', () => {
   const tds = (tr: string) => [...tr.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map((m) => m[1]!)
   const trsOf = (html: string) => html.split('<tr>').slice(1).map((s) => s.slice(0, s.indexOf('</tr>')))
 
-  it('多 SKU：逐 SKU 订单数量 + 订单级「合计」行（= rowTotal），订单级列 rowspan=3', () => {
+  it('多 SKU：逐 SKU 订单数量，订单级列 rowspan=2（无「合计」行）', () => {
     const html = buildSummaryTbody([
       mkRow({
         is_ordered: false,
@@ -640,8 +630,8 @@ describe('buildSummaryTbody 逐 SKU 导出（FIX-3 / AC-12 同源）', () => {
     ], '')
 
     const trs = trsOf(html)
-    expect(trs.length).toBe(3)
-    expect(html).toContain('rowspan="3"')
+    expect(trs.length).toBe(2)
+    expect(html).toContain('rowspan="2"')
 
     const r1 = tds(trs[0]!)
     expect(r1[1]).toBe('PO-900') // 订单号列（订单级，由 rowspan 覆盖整单）
@@ -654,15 +644,9 @@ describe('buildSummaryTbody 逐 SKU 导出（FIX-3 / AC-12 同源）', () => {
     expect(r2[0]).toBe('Y')
     expect(r2[1]).toBe('-')
     expect(r2[2]).toBe('20')
-
-    const r3 = tds(trs[2]!)
-    expect(r3[0]).toBe('合计')
-    expect(r3[1]).toBe('') // 条码列空
-    expect(r3[2]).toBe('30')
-    expect(r3[3]).toBe('—')
   })
 
-  it('命中逐 SKU 快照（po_sku）：逐 SKU 显示实际下单量 + 生产量，合计 = rowTotal', () => {
+  it('命中逐 SKU 快照（po_sku）：逐 SKU 显示实际下单量 + 生产量', () => {
     const html = buildSummaryTbody([
       mkRow({
         is_ordered: true,
@@ -684,9 +668,6 @@ describe('buildSummaryTbody 逐 SKU 导出（FIX-3 / AC-12 同源）', () => {
     expect(r2[1]).toBe('-')
     expect(r2[2]).toBe('18')
     expect(r2[3]).toBe('20') // 18 + 2
-    const r3 = tds(trs[2]!)
-    expect(r3[2]).toBe('30')
-    expect(r3[3]).toBe('33') // 30 + 3
   })
 
   it('关键字筛选与页面同源：仅输出命中关键字的 SKU（filterVisibleSkus）', () => {

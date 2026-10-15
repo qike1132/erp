@@ -2,11 +2,10 @@
   <!-- 汇总列表订单块：一行一 SKU，订单级列跨行合并（对齐 /report 订单流水的多 SKU 效果） -->
   <div
     :class="[
-      'bo-block bo-row-clickable',
+      'bo-block',
       { 'bo-row-highlight': highlightId !== null && String(item.id) === highlightId },
     ]"
     :style="blockStyle"
-    @click="openDetail(item)"
   >
     <!-- 订单级列：grid-row 跨 span 行（等效 rowspan），首行起排 -->
     <div
@@ -100,25 +99,6 @@
         >{{ skuProductionQty(item, sku) ?? '—' }}</span>
       </div>
     </template>
-
-    <!-- 多 SKU 合计行（与导出/打印 buildSummaryTbody 的「合计」行同源，AC-12） -->
-    <template v-if="hasTotalRow">
-      <div
-        v-for="col in skuCols"
-        :key="`t-${col.key}`"
-        class="bo-td bo-total-cell"
-        :class="[`bo-td-${col.align}`]"
-        :style="cellStyle(col.key, span, 1)"
-      >
-        <span v-if="col.key === 'productName'" class="bo-total-label">合计</span>
-        <span v-else-if="col.key === 'orderQty'" class="bo-total-qty">{{ totalOrderQty }}</span>
-        <span
-          v-else-if="col.key === 'prodQty'"
-          class="bo-total-qty"
-          :class="{ 'bo-prod--none': totalProdQty === null }"
-        >{{ totalProdQty ?? '—' }}</span>
-      </div>
-    </template>
   </div>
 </template>
 
@@ -128,7 +108,7 @@
  *
  * 2026-10-15 多 SKU 改版（对齐 /report 订单流水方案 C）：
  * 一行一 SKU，订单级列跨 span 行合并（CSS Grid，等效 rowspan），SKU 列
- * （产品名称/产品条码/订单数量/生产数量）逐行渲染；多 SKU 追加「合计」行。
+ * （产品名称/产品条码/订单数量/生产数量）逐行渲染。
  * 列序/列宽与布局/数量口径统一走 useBeileOrderBlock（与表头、导出/打印同源，AC-12）。
  */
 import {
@@ -162,8 +142,6 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  /** 行点击：打开订单详情 */
-  open: [item: BeileOrderRowType]
   /** 确认订单 */
   confirm: [item: BeileOrderRowType]
   /** 切换行选中状态（携带整行：选中键 = record_type:id 复合，防订单/备货 id 撞号串扰） */
@@ -177,20 +155,8 @@ const {
   blockStyle,
   cellStyle,
   skus,
-  hasTotalRow,
   span,
-  totalOrderQty,
-  totalProdQty,
 } = useBeileOrderBlock(props)
-
-/** 行点击：交给父组件打开详情弹窗（300ms 防连点） */
-let lastOpenAt = 0
-function openDetail(item: BeileOrderRowType) {
-  const now = Date.now()
-  if (now - lastOpenAt < 300) return
-  lastOpenAt = now
-  emit('open', item)
-}
 
 /** 确认订单：交给父组件执行确认流程 */
 function handleConfirm(item: BeileOrderRowType) {
@@ -204,6 +170,7 @@ function handleConfirm(item: BeileOrderRowType) {
   display: grid;
   width: 100%;
   font-size: 13px;
+  color: var(--color-text);
 }
 .bo-td {
   box-sizing: border-box;
@@ -220,14 +187,6 @@ function handleConfirm(item: BeileOrderRowType) {
 }
 .bo-td-center {
   justify-content: center;
-}
-.bo-row-clickable {
-  cursor: pointer;
-  color: var(--color-text);
-  transition: background 0.2s ease;
-}
-.bo-row-clickable:hover {
-  background: var(--color-primary-50);
 }
 .bo-td-select {
   padding: 10px 8px;
@@ -269,21 +228,6 @@ function handleConfirm(item: BeileOrderRowType) {
 .bo-prod--none {
   font-weight: 400;
   color: var(--color-text-muted);
-}
-
-/* 多 SKU 合计行（与导出/打印「合计」行同源） */
-.bo-total-cell {
-  background: var(--color-surface, #f8fafc);
-}
-.bo-total-label {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--color-text-secondary);
-}
-.bo-total-qty {
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
 }
 
 /* 文本 */

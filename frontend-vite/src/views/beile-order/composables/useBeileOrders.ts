@@ -2,7 +2,7 @@
  * useBeileOrders.ts — 湖北订单列表数据逻辑
  *
  * 从 BeileOrderTab.vue 下沉的逻辑：查询（vue-query）、筛选、分页、
- * 确认状态切换、订单确认（乐观更新）、详情弹窗状态、
+ * 确认状态切换、订单确认（乐观更新）、
  * 选中/导出/打印（原 BeileOrderTab 头部桥接逻辑上提至此）。
  *
  * HubeiView 调用 provideBeileOrders() 创建唯一实例并 provide，
@@ -72,33 +72,10 @@ function skuMatchesKeyword(sku: { product_name?: string | null; product_barcode?
     || (sku.product_barcode || '').toLowerCase().includes(kw)
 }
 
-// ==================== 逐 SKU / 订单级数量口径（页面 = 导出 = 打印 单一真源） ====================
+// ==================== 逐 SKU 数量口径（页面 = 导出 = 打印 单一真源） ====================
 // 方案 C：后端已持久化 purchase_order_sku 逐 SKU 快照，并在 /beile-list 的 items[] 上注入
 // purchase_order_qty / spare_quantity / is_ordered / per_sku_source。以下函数是「数量口径」的
-// 唯一权威实现，BeileOrderRow.vue、详情弹窗、导出/打印三处共用，杜绝口径再次漂移。
-
-/**
- * 订单级「订单数量」合计（全量 SKU，**不随筛选变化** → 消除 RC-3 语义漂移）：
- * 已下单**且订单级数量可得** → purchase_order_qty（方案 C 修正为「该来源自身逐 SKU 之和」）；
- * 订单级数量为 null（如备货模糊匹配降级，见后端 pos_exact=False）→ 回退各 SKU 客户订单量之和，
- * **绝不用 `?? 0` 渲染成 0**；
- * 未下单 → 各 SKU 客户订单量之和；无 SKU 明细 → 订单 quantity。
- */
-export function rowTotalOrderQty(row: BeileOrderRow): number {
-  if (row.is_ordered === true && row.purchase_order_qty != null) return row.purchase_order_qty
-  const items = row.items || []
-  if (items.length > 0) return items.reduce((sum, s) => sum + (s.quantity || 0), 0)
-  return row.quantity || 0
-}
-
-/**
- * 订单级「生产数量」合计 = 订单数量 + 备品数量（计算字段，不落库）；
- * 未下单**或订单级数量为 null（不可得）** → null（展示为「—」，无派生意义，不得编造 0）。
- */
-export function rowTotalProductionQty(row: BeileOrderRow): number | null {
-  if (row.is_ordered !== true || row.purchase_order_qty == null) return null
-  return row.purchase_order_qty + (row.spare_quantity ?? 0)
-}
+// 唯一权威实现，BeileOrderRow.vue、导出/打印两处共用，杜绝口径再次漂移。
 
 /**
  * 数量口径计算所需的「最小 SKU 字段集」。
@@ -170,7 +147,7 @@ export function skuProductionQty(row: BeileOrderRow, sku: SkuQtyFields): number 
  * 1) 命中逐 SKU 快照（per_sku_source === 'po_sku'）→ 真·采购单实际下单量；
  * 2) 单 SKU 行且整行已下单**且订单级数量可得**（purchase_order_qty != null）→ 订单级即等于该 SKU。
  * ⚠️ 订单级数量为 null（备货模糊匹配降级，D-R2-1）时该 SKU 显示的是**自身订单原数量回退值**，
- *    并非采购单实际下单量 → **不加粗**（与 skuOrderQty / skuProductionQty / rowTotal* 守卫口径一致）。
+ *    并非采购单实际下单量 → **不加粗**（与 skuOrderQty / skuProductionQty 守卫口径一致）。
  */
 export function skuIsOrdered(row: BeileOrderRow, sku: SkuQtyFields): boolean {
   if (sku.per_sku_source === 'po_sku') return true
@@ -196,7 +173,7 @@ export interface BeileCol {
   scope: BeileColScope
 }
 
-/** 行块内单行高度（px）：SKU 行 / 合计行 / 订单级跨行格的每行高一致（虚拟滚动定高基准） */
+/** 行块内单行高度（px）：SKU 行 / 订单级跨行格的每行高一致（虚拟滚动定高基准） */
 export const BEILE_ROW_HEIGHT = 56
 
 /**
@@ -254,16 +231,15 @@ export function visibleSkus(item: BeileOrderRow, keyword: string): SkuQtyFields[
 }
 
 /**
- * 订单块视图模型：可见 SKU 明细 + 是否追加「合计」行 + 订单级列合并跨度。
+ * 订单块视图模型：可见 SKU 明细 + 订单级列合并跨度。
  * 页面 grid-row 跨行、导出 rowspan、虚拟滚动块高预估都由此派生，杜绝三处分叉。
  */
 export function beileBlockView(
   item: BeileOrderRow,
   keyword: string,
-): { skus: SkuQtyFields[]; hasTotalRow: boolean; span: number } {
+): { skus: SkuQtyFields[]; span: number } {
   const skus = visibleSkus(item, keyword)
-  const hasTotalRow = skus.length > 1
-  return { skus, hasTotalRow, span: skus.length + (hasTotalRow ? 1 : 0) }
+  return { skus, span: skus.length }
 }
 
 /** useBeileOrderBlock 入参形状：BeileOrderRow.vue 的 props（响应式传入，computed 才能追踪） */
@@ -275,7 +251,7 @@ export interface BeileOrderBlockOptions {
 }
 
 /**
- * 订单块视图模型：列拆分 / 单元格定位 / 可见 SKU / 合计行 / 合计数。
+ * 订单块视图模型：列拆分 / 单元格定位 / 可见 SKU。
  * 从 BeileOrderRow.vue 抽出（组件 ≤400 行门禁），布局与数量口径仍与
  * 导出 buildSummaryTbody 同源（AC-12）。传入 props 实例即可，
  * 内部 computed 直接读 opts.xxx 保持响应式追踪（勿预先解构）。
@@ -312,12 +288,10 @@ export function useBeileOrderBlock(opts: BeileOrderBlockOptions) {
    * 可见 SKU（与导出/打印 buildSummaryTbody 的 filterVisibleSkus 同源）：
    * 无 items 明细的备货记录回落为单行（订单级 product_name / quantity）。
    */
-  /** 块视图模型（可见 SKU / 合计行 / 合并跨度）：与导出、块高预估共用单一真源 */
+  /** 块视图模型（可见 SKU / 合并跨度）：与导出、块高预估共用单一真源 */
   const blockView = computed(() => beileBlockView(opts.item, opts.keyword || ''))
   const skus = computed<SkuQtyFields[]>(() => blockView.value.skus)
-  /** 多 SKU 追加「合计」行 */
-  const hasTotalRow = computed(() => blockView.value.hasTotalRow)
-  /** 订单级列的合并跨度 = 逐 SKU 行数 +（多 SKU 时的）合计行 */
+  /** 订单级列的合并跨度 = 逐 SKU 行数 */
   const span = computed(() => blockView.value.span)
 
   return {
@@ -326,11 +300,7 @@ export function useBeileOrderBlock(opts: BeileOrderBlockOptions) {
     blockStyle,
     cellStyle,
     skus,
-    hasTotalRow,
     span,
-    /** 订单级合计（合计行） */
-    totalOrderQty: computed(() => rowTotalOrderQty(opts.item)),
-    totalProdQty: computed(() => rowTotalProductionQty(opts.item)),
   }
 }
 
@@ -361,9 +331,7 @@ function summaryProductionText(v: number | null): string {
  * - 「产品名称 / 产品条码 / 订单数量 / 生产数量」**逐 SKU 输出**，复用页面同一真源函数
  *   （skuOrderQty / skuProductionQty），不再整段 rowspan 到订单级；
  * - 「小义开单」为订单级事实，保持整单 rowspan；
- * - 「订单类型 / 下单时间 / 客户名称 / 工厂」为订单级，整单 rowspan；
- * - 多 SKU 订单额外追加一行订单级「合计」（rowTotalOrderQty / rowTotalProductionQty 口径），
- *   保证导出/打印不丢失订单总量。
+ * - 「订单类型 / 下单时间 / 客户名称 / 工厂」为订单级，整单 rowspan。
  *
  * @param items 待输出订单行（导出=当前展示页；打印=选中行）
  * @param keyword 已应用的产品关键字：与页面行一致，仅输出命中该关键字的 SKU
@@ -378,8 +346,8 @@ export function buildSummaryTbody(items: BeileOrderRow[], keyword: string): stri
     const openedText = summaryOpenedLabel(item)
     const note = item.note || ''
 
-    // 可见 SKU / 合计行 / 合并跨度：与页面行块、块高预估共用单一真源（beileBlockView）
-    const { skus, hasTotalRow, span } = beileBlockView(item, keyword)
+    // 可见 SKU / 合并跨度：与页面行块、块高预估共用单一真源（beileBlockView）
+    const { skus, span } = beileBlockView(item, keyword)
     const spanAttr = span > 1 ? ` rowspan="${span}"` : ''
 
     skus.forEach((sku, idx) => {
@@ -395,17 +363,6 @@ export function buildSummaryTbody(items: BeileOrderRow[], keyword: string): stri
       cells.push(`<td>${idx === 0 ? escapeHtml(note) : ''}</td>`)
       html += `<tr>${cells.join('')}</tr>`
     })
-
-    if (hasTotalRow) {
-      // 订单级合计行：与页面折叠行 / rowTotal* 同源，保证「合计 == 订单总量」
-      html += '<tr>'
-        + '<td>合计</td>'
-        + '<td></td>'
-        + `<td>${escapeHtml(String(rowTotalOrderQty(item)))}</td>`
-        + `<td>${escapeHtml(summaryProductionText(rowTotalProductionQty(item)))}</td>`
-        + '<td></td>'
-        + '</tr>'
-    }
   }
   return html
 }
@@ -532,15 +489,6 @@ export function useBeileOrders() {
   function setConfirmStatus(v: string) {
     confirmStatus.value = v
     page.value = 1
-  }
-
-  /** 订单详情弹窗状态 */
-  const detailOpen = ref(false)
-  const detailData = ref<BeileOrderRow | null>(null)
-
-  function openDetail(item: BeileOrderRow) {
-    detailData.value = item
-    detailOpen.value = true
   }
 
   /** 确认中订单 id 集合（防止重复点击，按钮禁用态依赖） */
@@ -795,9 +743,6 @@ export function useBeileOrders() {
     handleReset,
     goPage,
     setConfirmStatus,
-    detailOpen,
-    detailData,
-    openDetail,
     confirmingIds,
     handleConfirm,
     // 选中

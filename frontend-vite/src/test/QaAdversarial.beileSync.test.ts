@@ -256,7 +256,6 @@ const stubs = {
   UiSpinner: { template: '<span class="ui-spinner-stub" />' },
   UiPagination: { template: '<div class="ui-pagination-stub" />' },
   UiButton: { template: '<button type="button"><slot /></button>' },
-  UiDialog: { props: ['open'], template: '<div v-if="open" class="ui-dialog-stub"><slot /><slot name="footer" /></div>' },
   HubeiSearchBar: { template: '<div class="hu-search-stub" />' },
   VirtualList: {
     props: ['items'],
@@ -327,7 +326,7 @@ describe('G. 导出/打印同源（AC-12）：表头列数 == 数据行逻辑列
     expect(cells[9]).toBe('已开单')    // 小义开单 = 已开单（is_ordered=true）
   })
 
-  it('多 SKU + 未下单：逐 SKU 输出订单数量（各 SKU 自身）+ 追加订单级「合计」行；生产数量为「—」、小义开单为「未开单」', async () => {
+  it('多 SKU + 未下单：逐 SKU 输出订单数量（各 SKU 自身）；生产数量为「—」、小义开单为「未开单」', async () => {
     mocks.queryData.value = makeListResponse({
       total: 2,
       data: [
@@ -353,8 +352,8 @@ describe('G. 导出/打印同源（AC-12）：表头列数 == 数据行逻辑列
     expect(nCols).toBe(11)
 
     const rows = Array.from(doc.querySelectorAll('tbody tr'))
-    // FIX-3：逐 SKU 2 行 + 订单级「合计」1 行 = 3 行；每行逻辑列数 == 表头 11 列（rowspan 网格自洽）
-    expect(rows.length).toBe(3)
+    // 逐 SKU 2 行（不再追加「合计」行）；每行逻辑列数 == 表头 11 列（rowspan 网格自洽）
+    expect(rows.length).toBe(2)
     const widths = logicalWidths(rows, nCols)
     expect(widths.every((w) => w === nCols)).toBe(true)
 
@@ -364,11 +363,11 @@ describe('G. 导出/打印同源（AC-12）：表头列数 == 数据行逻辑列
     expect(firstCells[1]!.textContent).toBe('PO-102')  // 订单号（订单级，rowspan 覆盖整单）
     expect(firstCells[5]!.textContent).toBe('产品B')
     expect(firstCells[6]!.textContent).toBe('690002')  // 产品条码（逐 SKU）
-    expect(firstCells[7]!.textContent).toBe('10')   // 逐 SKU 订单数量（该 SKU 自身，不再整段订单合计）
+    expect(firstCells[7]!.textContent).toBe('10')   // 逐 SKU 订单数量（该 SKU 自身）
     expect(firstCells[8]!.textContent).toBe('—')    // 未下单生产数量 → 「—」
     expect(firstCells[9]!.textContent).toBe('未开单')
-    // 订单级「小义开单」列 rowspan=3（跨 2 SKU 行 + 合计行）
-    expect(firstCells[9]!.getAttribute('rowspan')).toBe('3')
+    // 订单级「小义开单」列 rowspan=2（跨 2 SKU 行）
+    expect(firstCells[9]!.getAttribute('rowspan')).toBe('2')
 
     // 第 2 行（SKU 产品B2）：仅 产品名称/产品条码/订单数量/生产数量/备注 = 5 td（订单级列由 rowspan 覆盖）
     const secondCells = Array.from(rows[1]!.querySelectorAll('td'))
@@ -377,13 +376,6 @@ describe('G. 导出/打印同源（AC-12）：表头列数 == 数据行逻辑列
     expect(secondCells[1]!.textContent).toBe('690003')
     expect(secondCells[2]!.textContent).toBe('20')
     expect(secondCells[3]!.textContent).toBe('—')
-
-    // 第 3 行：订单级「合计」= 各 SKU 之和（30），生产数量「—」，条码列空
-    const totalCells = Array.from(rows[2]!.querySelectorAll('td'))
-    expect(totalCells[0]!.textContent).toBe('合计')
-    expect(totalCells[1]!.textContent).toBe('')
-    expect(totalCells[2]!.textContent).toBe('30')
-    expect(totalCells[3]!.textContent).toBe('—')
   })
 })
 

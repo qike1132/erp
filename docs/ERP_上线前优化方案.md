@@ -51,6 +51,8 @@
 - 缺失导出：`skuIsOrdered` / `skuOrderQty` / `skuProductionQty` / `rowTotalOrderQty` / `rowTotalProductionQty` / `SkuQtyFields` / `NOT_ORDERED_TIP` / `NOT_ORDERED_TOAST`（原在 `views/beile-order/composables/useBeileOrders.ts`，本改动删除）。
 - test 报错 11 处：`BeileQuantityNullGuard.test.ts`、`BeileOrderRow.*.test.ts`、`QaAdversarial.beileSync.test.ts`。
 
+> 注（2026-10-15）：本节引用的 `BeileOrderDetailDialog.vue` 已随「订单详情弹窗」整体删除；文中定位与代码片段为当时记录，保留原貌。
+
 **根因**：删除导出时未同步消费方 —— 消费方 `BeileOrderDetailDialog.vue` **未被修改**，仍引用旧 API。
 
 **改法（二选一，推荐 A）**
@@ -532,6 +534,8 @@ async function logout() {
 | P0-1 | `frontend-vite/src/views/beile-order/components/BeileOrderDetailDialog.vue` | 32, 86–90 | 修引用 |
 | P0-1 | `frontend-vite/src/views/pattern-room/PatternRoomView.vue` | 27, 99, 170, 253, 260 | 修引用 |
 | P0-1 | `frontend-vite/package.json` | `build:fast` | 改名+禁用 |
+
+> 注（2026-10-15）：上表 P0-1 的 `BeileOrderDetailDialog.vue` 已随「订单详情弹窗」整体删除，该行定位为当时记录。
 | P0-2 | `frontend-vite/vite.config.ts` | 57–81 | 回退 runtimeCaching |
 | P0-3① | `tests/test_migration_timezone.py` | 52–139 | 加夹具 |
 | P0-3② | `tests/test_migrate_erp_web_dryrun.py` | 16–18 | 改解码 + OS 守卫 |

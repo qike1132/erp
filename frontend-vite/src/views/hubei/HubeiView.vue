@@ -69,7 +69,7 @@
 /**
  * HubeiView.vue — 湖北订单页面（/beile-order）
  *
- * 湖北订单页面：展示湖北工厂生产订单（BeileOrderTab，含详情弹窗/通知跳转高亮）。
+ * 湖北订单页面：展示湖北工厂生产订单（BeileOrderTab，含通知跳转高亮）。
  *
  * - 路由：/beile-order
  * - 状态管理：调用 provideBeileOrders() 创建唯一状态实例并 provide 给

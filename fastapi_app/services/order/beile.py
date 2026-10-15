@@ -45,7 +45,7 @@ _BEILE_TZ = timezone(timedelta(hours=8))
 def _fmt_beile_time(dt: datetime | None) -> str:
     """UTC（aware timestamptz 或 naive UTC）→ 北京时间 'YYYY-MM-DD HH:MM'。
 
-    页面行 / 详情弹窗 / 导出 XLS / 打印预览共用该输出（前端不做二次时区换算）。
+    页面行 / 导出 XLS / 打印预览共用该输出（前端不做二次时区换算）。
     """
     if not dt:
         return ''

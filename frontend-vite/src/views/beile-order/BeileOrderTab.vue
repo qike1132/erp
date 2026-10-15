@@ -64,7 +64,6 @@
                       :selectable="canPrint"
                       :selected="selectedIds.has(rowKey(item))"
                       :keyword="appliedProduct"
-                      @open="openDetail"
                       @confirm="handleConfirm"
                       @toggle-select="toggleSelect"
                     />
@@ -92,9 +91,6 @@
         />
       </template>
     </div>
-
-    <!-- 订单详情弹窗（两级结构之二：SKU 明细） -->
-    <BeileOrderDetailDialog v-model:open="detailOpen" :detail-data="detailData" />
   </div>
 </template>
 
@@ -102,9 +98,7 @@
 /**
  * BeileOrderTab.vue — 湖北订单汇总列表子组件（两级结构之一级）
  *
- * 职责：以虚拟滚动表格展示 factory=湖北 的订单，一行一单（订单级汇总）。
- * 逐 SKU 明细下沉到详情弹窗（BeileOrderDetailDialog），列表不再承载 SKU 行，
- * 消除多 SKU 订单在单行中的信息拥挤。
+ * 职责：以虚拟滚动表格展示 factory=湖北 的订单，一行一 SKU（订单级列跨行合并）。
  * 数据/筛选/分页/确认/选中/导出/打印逻辑下沉到
  * composables/useBeileOrders.ts，由父组件 HubeiView 通过
  * provide/inject 共享同一状态实例，本组件仅注入并负责
@@ -116,7 +110,6 @@ import UiSpinner from '@/components/ui/UiSpinner.vue'
 import UiCheckbox from '@/components/ui/UiCheckbox.vue'
 import VirtualList from '@/components/ui/VirtualList.vue'
 import BeileOrderRow from '@/views/beile-order/components/BeileOrderRow.vue'
-import BeileOrderDetailDialog from '@/views/beile-order/components/BeileOrderDetailDialog.vue'
 import {
   injectBeileOrders,
   BEILE_ROW_HEIGHT,
@@ -143,9 +136,6 @@ const {
   displayOrders,
   highlightId,
   goPage,
-  detailOpen,
-  detailData,
-  openDetail,
   confirmingIds,
   handleConfirm,
   rowKey,
@@ -163,7 +153,7 @@ const gridTemplate = computed(() => beileGridTemplate(cols.value))
 const tableMinWidth = computed(() => beileMinWidth(cols.value))
 
 /**
- * 变高虚拟滚动的「预估块高」：订单块高度 = (SKU 行数 + 多 SKU 合计行) × 56px。
+ * 变高虚拟滚动的「预估块高」：订单块高度 = SKU 行数 × 56px。
  * 块行数由 beileBlockView 单一真源派生（与页面行块、导出同源，杜绝布局分叉）。
  * 用当前页平均块高作预估值，首屏占位更贴近真实；实际高度由 VirtualList 的
  * ResizeObserver 测量后逐块校正（min-height 占位 + measureItems）。

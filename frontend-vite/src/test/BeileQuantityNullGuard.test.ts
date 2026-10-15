@@ -25,8 +25,6 @@ import {
   skuOrderQty,
   skuProductionQty,
   skuIsOrdered,
-  rowTotalOrderQty,
-  rowTotalProductionQty,
   type BeileOrderRow,
   type SkuQtyFields,
 } from '@/views/beile-order/composables/useBeileOrders'
@@ -63,14 +61,6 @@ describe('D-R2-1 前端 null 守卫：订单级数量为 null 时不得编造数
     expect(skuProductionQty(degradedRow, degradedSku)).toBeNull()
   })
 
-  it('rowTotalOrderQty：已下单 + 订单级数量 null → 回退各 SKU 之和（不得为 0）', () => {
-    expect(rowTotalOrderQty(degradedRow)).toBe(10000)
-  })
-
-  it('rowTotalProductionQty：已下单 + 订单级数量 null → null（不得编造 0）', () => {
-    expect(rowTotalProductionQty(degradedRow)).toBeNull()
-  })
-
   it('对照：订单级数量可得时正常回退订单级值（订单路径行为不变）', () => {
     const okSku = { ...degradedSku, purchase_order_qty: 10000, spare_quantity: 500 } as unknown as SkuQtyFields
     const okRow = {
@@ -84,8 +74,6 @@ describe('D-R2-1 前端 null 守卫：订单级数量为 null 时不得编造数
 
     expect(skuOrderQty(okRow, okSku)).toBe(10000)
     expect(skuProductionQty(okRow, okSku)).toBe(10500)
-    expect(rowTotalOrderQty(okRow)).toBe(10000)
-    expect(rowTotalProductionQty(okRow)).toBe(10500)
   })
 })
 

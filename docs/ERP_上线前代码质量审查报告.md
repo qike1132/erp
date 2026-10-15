@@ -27,6 +27,8 @@
 - 生产源码错误集中在 `BeileOrderDetailDialog.vue`（6 处）与 `PatternRoomView.vue`（5 处）：
   引用了 `useBeileOrders.ts` 中被**本次改动删除**的导出（`skuOrderQty`/`rowTotalOrderQty`/`NOT_ORDERED_TIP` 等）。
   实测：HEAD 版本这些符号**存在**（各出现 2–5 次），工作区版本**已为 0 次**。
+
+> 注（2026-10-15）：`BeileOrderDetailDialog.vue` 已随「订单详情弹窗」整体删除；本段为当时审查记录，保留原貌。
 - 后端同名重构痕迹：`TODO(multi-sku-order)` 共 **95 处**，横跨 `order/approval/inventory/purchase/report/shipment` 等模块，
   注释明写"**当前依赖首 item 兼容值**"（`order.py:269`、`approval_service.py:320`、`order/commands.py:206` …）。
 
@@ -402,6 +404,8 @@ for bad in ("StaleWhileRevalidate", "NetworkFirst"):
 | **P0-6** | B6 | 运维 GUI 破坏性操作无二次确认 | `server_manager.py:3108`（全仓 0 处 `askyesno`） | 未加确认环节 | 任何 `nssm remove` / 批量 stop 前加 `messagebox.askyesno` | 1–2 人时 |
 
 > P0-1/P0-2 若选择"该分支不发布"，则工作量并入后续窗口；但**其余 P0 与分支无关，必须处理**。
+
+> 注（2026-10-15）：上表 P0-1 位置列的 `BeileOrderDetailDialog.vue` 已随「订单详情弹窗」整体删除，该条为当时审查记录。
 
 ### 5.2 上线后 1 个月内（非阻断，但影响稳定与合规）
 

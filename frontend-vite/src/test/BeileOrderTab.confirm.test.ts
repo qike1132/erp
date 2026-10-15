@@ -81,10 +81,6 @@ const stubs = {
   UiSpinner: { template: '<span class="ui-spinner-stub" />' },
   UiPagination: { template: '<div class="ui-pagination-stub" />' },
   UiButton: { template: '<button type="button"><slot /></button>' },
-  UiDialog: {
-    props: ['open', 'title', 'maxWidthClass'],
-    template: '<div v-if="open" class="ui-dialog-stub"><slot /><slot name="footer" /></div>',
-  },
   VirtualList: {
     props: ['items'],
     methods: {

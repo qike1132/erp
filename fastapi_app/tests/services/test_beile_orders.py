@@ -465,7 +465,7 @@ async def test_beile_list_search_narrows_items_and_qty_to_matched_skus(db, monke
     assert [it['product_name'] for it in row15['items']] == ['变形金刚', '蛋黄派']
     # 既有兼容字段语义（铁律 D★）：未下单 purchase_order_qty = record['quantity'] = 首个 SKU 原数量
     assert row15['purchase_order_qty'] == 60
-    # 前端 rowTotalOrderQty 的实际口径（items 求和）= 全单 100
+    # 订单级合计口径（items 求和）= 全单 100
     assert sum(it['quantity'] or 0 for it in row15['items']) == 100
 
 

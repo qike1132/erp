@@ -77,7 +77,7 @@ describe('BeileOrderRow 搜索态：keyword 收窄逐 SKU 行 + SKU 级数量', 
     expect(wrapper.find('.bo-total-label').exists()).toBe(false)
   })
 
-  it('搜索态多 SKU 命中：逐 SKU 名称/数量各占一行，合计 = 命中集合 rollup', () => {
+  it('搜索态多 SKU 命中：逐 SKU 名称/数量各占一行', () => {
     const item = baseItem({
       is_ordered: true,
       purchase_order_qty: 76,
@@ -101,10 +101,8 @@ describe('BeileOrderRow 搜索态：keyword 收窄逐 SKU 行 + SKU 级数量', 
     expect(wrapper.findAll('.bo-qty').map((n) => n.text())).toEqual(['66', '10'])
     // 逐 SKU 生产数量 = 下单量 + 备品
     expect(wrapper.findAll('.bo-prod').map((n) => n.text())).toEqual(['72', '11'])
-    // 多 SKU 合计行 = 订单级 rollup（由后端保证）
-    const totalQtys = wrapper.findAll('.bo-total-qty')
-    expect(totalQtys[0]!.text()).toBe('76')
-    expect(totalQtys[1]!.text()).toBe('83')
+    // 无「合计」行
+    expect(wrapper.find('.bo-total-label').exists()).toBe(false)
   })
 
   it('keyword 只命中部分 SKU：仅渲染命中 SKU 行（filterVisibleSkus，与导出同源）', () => {
