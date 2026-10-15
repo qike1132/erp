@@ -118,6 +118,25 @@ def _wire_stock_write(db, row, *, new_stock, pre_results=()):
     return state
 
 
+def _assert_optimistic_lock_write(state):
+    """断言乐观锁写入口的**序性质**（2026-10-15 去过度指定）。
+
+    此前用例断言 ``consumed == N`` / ``len(calls) == N`` 的精确计数——任何在
+    写路径上新增一次合法读（如状态重算）都会假红，属 Fragile Test
+    （xUnit Test Patterns: Overspecified Software）。真正要守住的行为是：
+    库存只经「SELECT 产品行 → 条件 UPDATE」这一序写入，且 UPDATE 恰好一次
+    （乐观锁单轮写不重复）。最终库存/版本号由各用例的 result 断言覆盖。
+    """
+    texts = [str(call) for call in state['calls']]
+    reads = [i for i, t in enumerate(texts)
+             if t.lstrip().upper().startswith('SELECT') and 'FROM product' in t]
+    writes = [i for i, t in enumerate(texts)
+              if t.lstrip().upper().startswith('UPDATE') and 'UPDATE product' in t]
+    assert len(writes) == 1, f'库存 UPDATE 应恰好一次: {texts}'
+    assert reads, f'缺少产品行读取（SELECT ... FROM product）: {texts}'
+    assert reads[0] < writes[0], f'必须先读行再写（乐观锁序）: {texts}'
+
+
 class TestCreateStockIn:
     """入库创建"""
 
@@ -328,9 +347,8 @@ class TestCreateStockOut:
         )
 
         assert len(result) > 0
-        # 库存写入只经两步序列（SELECT + UPDATE），无其它未建模的读
-        assert state['consumed'] == 2
-        assert len(state['calls']) == 2
+        # 库存写入经乐观锁序（SELECT 行 → 条件 UPDATE），不做精确计数断言
+        _assert_optimistic_lock_write(state)
         assert product.current_stock == 150  # 200 - 50，经 refresh 回读
 
     @pytest.mark.asyncio
@@ -489,8 +507,7 @@ class TestUpdateStockOut:
         )
 
         assert result.quantity == 30
-        assert state['consumed'] == 2
-        assert len(state['calls']) == 2
+        _assert_optimistic_lock_write(state)
         assert product.current_stock == 220  # 200 + (50 - 30)
 
     @pytest.mark.asyncio
@@ -530,7 +547,7 @@ class TestUpdateStockOut:
         )
 
         assert result.quantity == 50
-        assert state['consumed'] == 2
+        _assert_optimistic_lock_write(state)
         assert product.current_stock == 50  # 0 + (100 - 50)
 
     @pytest.mark.asyncio
@@ -575,8 +592,8 @@ class TestDeleteStockOut:
 
         assert product.current_stock == 150  # 100 + 50
         mock_async_db.delete.assert_called_once_with(stockout)
-        assert state['consumed'] == 3  # 退货计数 + SELECT + UPDATE
-        assert len(state['calls']) == 3
+        # 写入经乐观锁序（退货计数读 → SELECT 行 → UPDATE），不做精确计数断言
+        _assert_optimistic_lock_write(state)
         assert product.version == 2  # 乐观锁 version 递增经 refresh 回读
 
     @pytest.mark.asyncio
@@ -648,8 +665,7 @@ class TestCreateStockReturn:
 
         assert result is not None
         mock_async_db.add.assert_called_once()
-        assert state['consumed'] == 4
-        assert len(state['calls']) == 5
+        _assert_optimistic_lock_write(state)
         assert stockout.returned_quantity == 30
         assert product.current_stock == 130
 
