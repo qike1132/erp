@@ -43,13 +43,14 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from server_manager.constants import _SVC_API, _SVC_ARQ, _SVC_WEB
-from server_manager.service_ops import ServiceOps
+from server_manager.service_ops import decode_output
 
 # 轮转 / 保留 / 策略的**唯一实现**在 utils/log_rotation.py（与后端 ARQ cron、prod_runner
 # 共用）。这里全部重新导出：log_view 与测试仍从本模块取名字，机制却只有一份。
@@ -133,6 +134,38 @@ def _classify(text: str) -> str:
     return 'INFO'
 
 
+def log_file_size(path) -> int:
+    """日志文件当前字节数；读取失败返回 0（原 app._log_size，T9 收编，纯文件 IO）。"""
+    try:
+        return os.path.getsize(path)
+    except OSError:
+        return 0
+
+
+def read_log_tail_lines(path, start_offset=0, lines=15, max_bytes=65536) -> list[str]:
+    """读取日志文件自 start_offset 起新增内容的末尾 lines 行（有界读取）。
+
+    NSSM 的 stdout/stderr 重定向是追加写：start 之前先记下文件大小，之后把
+    「新增字节」的尾部回灌界面才是本次运行的输出；文件被轮转重开（大小小于
+    offset）时按全新文件处理。历史日志绝不回灌。
+    （原 app._read_log_lines，T9 收编 —— 纯文件 IO 住 ops 层。）
+    """
+    try:
+        with open(path, 'rb') as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            if start_offset > size:
+                # 文件被轮转重开（当前大小小于记录的 offset）：按全新文件处理
+                begin = max(0, size - max_bytes)
+            else:
+                begin = max(start_offset, size - max_bytes, 0)
+            f.seek(begin)
+            raw = f.read().splitlines()
+        return [ln.decode('utf-8', 'replace').strip() for ln in raw[-lines:] if ln.strip()]
+    except OSError:
+        return []
+
+
 def _group_by_level(lines: list[str]):
     """把逐行级别归并成「同级别的连续段」，减少投递的消息条数。"""
     run: list[str] = []
@@ -164,11 +197,11 @@ class ProdLogTailer:
     MAX_PENDING_BYTES = 512 * 1024
 
     def __init__(self, msg_queue, project_dir, services=PROD_LOG_SERVICES, interval=1.0,
-                 decode=ServiceOps.decode_output):
+                 decode=decode_output):
         """``msg_queue`` / ``project_dir`` 由 app 注入；``interval`` 为轮询周期(秒)。
 
         ``decode`` 默认复用管理器**唯一的**字节流解码器
-        (``service_ops.ServiceOps.decode_output``，含 UTF-16/GBK 回退):
+        (``service_ops.decode_output`` 模块级纯函数，含 UTF-16/GBK 回退):
         日志文件由 uvicorn/ARQ/nginx 按各自编码写入，再写一份只认 UTF-8 的
         解码器就会重演「中文日志乱码、排障被堵死」的老问题。
         """

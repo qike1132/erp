@@ -28,7 +28,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from server_manager import windows_ops
+from server_manager import log_ops, windows_ops
 from server_manager.action_gate import _EMERGENCY_JOIN_SEC, ActionGate
 from server_manager.constants import (
     _API_PORT,
@@ -214,6 +214,9 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
         self._prod_unknown = False      # 生产服务状态「未知」(sc query 失败) —— 仅供展示层，勿与 _prod_running 混用
         self._hosting_collecting, self._hosting_refresh_requested = False, False
         self._hosting_collect_started, self._hosting_last_warn = 0.0, ''
+        # 紧急停止进行中：清扫窗口内滞留的采集结果不得翻改 _prod_running、
+        # 操作按钮保持置灰，由 stop_all 完成消息复位（M1/M3）。
+        self._stopping_all = False
         # 最近一次「启动/重启生产服务」的时刻（0 表示本次会话还没启动过）。
         # 用于区分「刚启动、首份快照还没落盘」与「跑着跑着 prod_runner 掉了」。
         self._prod_start_ts = 0.0
@@ -279,11 +282,8 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
     # ── Redis 探活/启停转发(T3 包化:实现已迁 server_manager/redis_ops.py) ──────
     # 保留同名瘦转发,既有调用点与静态断言不必改写。
     # （2026-10-15 审计：_get_env_value/_redis_ping/_redis_service_state/
-    #   _start_redis_via_service/_start_redis_process 五个转发全仓 0 调用点，
-    #   注释所称「静态断言」实测不存在 —— 已删。仍有调用点的转发保留如下。）
-
-    def _find_redis(self):
-        return self.redis._find_redis()
+    #   _start_redis_via_service/_start_redis_process/_find_redis 六个转发
+    #   全仓 0 调用点，注释所称「静态断言」实测不存在 —— 已删。）
 
     def _is_redis_running(self):
         return self.redis.is_redis_running()
@@ -349,6 +349,13 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
         #     消费的队列），后端 + 前端 + 直接拉起的 Redis 全部孤儿。
         #   terminate_dev_processes 同步杀前后端两棵进程树（各至多等 5s），确定性
         #   换时间。同理同步收掉直接拉起的 Redis（服务托管的实例不归本进程管）。
+        # ★ 先取消在飞行动作再杀（与 stop_all 同款两步）：若「启动开发模式」worker
+        #   正卡在健康轮询里，不取消的话它会继续 Popen vite/uvicorn，解释器退出把
+        #   守护 worker 掐断后，刚拉起的进程照样孤儿 —— 注释 ③ 竞态的另一半。
+        #   wait_idle 上限取紧急停止同款 8s：到点未退就放弃等待继续杀（反正后面
+        #   的进程树终止会兜住已拉起的部分）。
+        self._gate.cancel('退出')
+        self._gate.wait_idle(_EMERGENCY_JOIN_SEC)
         self._terminate_dev_processes('退出')
         self._stop_redis()
         self._mode = 'none'
@@ -467,6 +474,10 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
                 elif msg_type == 'log_health':
                     # 巡检线程只投递结果，面板渲染与告警归口主线程（同 hosting_apply 的范式）
                     self._apply_log_health(data['report'])
+                elif msg_type == 'log_flush':
+                    # worker 线程直调 log_message 后经队列回主线程 flush（M4：
+                    # 跨线程 after_idle 是间歇崩溃来源；此分支是唯一的 flush 触发器）
+                    self._do_flush()
                 elif msg_type == 'hosting_refresh':
                     # 生产模式状态立即刷新（取消已排定的一轮，避免刷新链叠加）
                     try:
@@ -491,6 +502,15 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
                     if self._mode in ('starting', 'restarting', 'stopping'):
                         self._mode, self._current_mode_key = 'none', ''
                     self._update_all_ui()
+                elif msg_type == 'stop_all_done':
+                    # 紧急停止清扫完成 → 复位「全停中」与过渡态、放开按钮
+                    self._stopping_all = False
+                    if self._mode == 'stopping':
+                        self._mode, self._current_mode_key = 'none', ''
+                    self._set_actions_enabled(True)
+                    self._update_all_ui()
+                    # 全停窗口内丢弃过的采集结果在此补一轮（立即恢复真实状态显示）
+                    self._refresh_hosting_status()
             except Exception:
                 # 单条消息处理失败不能中断 poll 调度链，否则日志/状态更新全部停摆
                 pass
@@ -554,9 +574,18 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
         self._gate.cancel('紧急停止')
 
         # 先在主线程立即重置状态（双重保险）
-        self._mode = 'none'
+        # ★ 不直接置 'none'：清扫可持续数十秒（5 服务各至多 45s + 端口 3 轮重试），
+        #   mode=none 会让开发卡/生产卡立刻回到「已停止、启动可点」—— 清扫窗口内
+        #   点启动，gate.start 会把上面的取消标志 clear 掉，与清扫并发互踩。
+        #   置 'stopping'（徽章显示「停止中」、_update_card_ui 全部置灰按钮），
+        #   由清扫完成的 ui_update 消息收尾时经 _apply_hosting_data / op 事件复位。
+        self._mode = 'stopping'
         self._current_mode_key = ""
         self._prod_running = False
+        # ★ M1/M3：清扫期间停用全部操作按钮 + 置「全停中」标志（滞留的采集结果
+        #   不得把 _prod_running 翻回 True / 重新点亮生产按钮）。
+        self._stopping_all = True
+        self._set_actions_enabled(False)
         self._update_all_ui()
 
         self.log_message("正在执行停止/重置操作...")
@@ -619,9 +648,13 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
                     }))
                 else:
                     self._msg_queue.put(('log', {'text': "已清理所有残留进程和端口"}))
+                # 清扫完成：解除「全停中」状态（stop_all 设置），经 ui_update 一起生效
+                self._msg_queue.put(('stop_all_done', {}))
                 self._msg_queue.put(('ui_update', {}))
             except Exception as e:
                 self._msg_queue.put(('log', {'text': f"停止过程出错: {e!s}", 'level': 'ERROR'}))
+                self._msg_queue.put(('stop_all_done', {}))
+                self._msg_queue.put(('ui_update', {}))
         threading.Thread(target=_stop_all_worker, daemon=True).start()
 
     def _kill_residual_async(self):
@@ -1309,7 +1342,8 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
         # NSSM 日志是追加写：先记下两个日志文件的当前大小，之后只回灌「本次启动
         # 之后新增的字节」——直接取文件尾会把上几次运行的旧输出（旧 PID、旧崩溃栈）
         # 当现状展示（2026-09-16 实机启动踩过）。
-        offsets = {name: self._log_size(_PROJECT_DIR / 'logs' / f'{name}.log')
+        # （_log_size/_read_log_lines 已收编 log_ops（T9）：纯文件 IO 住 ops 层。）
+        offsets = {name: log_ops.log_file_size(_PROJECT_DIR / 'logs' / f'{name}.log')
                    for name in (_SVC_API, _SVC_ARQ, _SVC_WEB)}
         ok_api, api_state, api_pid = self._start_one_service(_SVC_API)
         if not broker_ok:
@@ -1327,8 +1361,8 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
         # 对齐开发模式里 Redis/uvicorn 的实时输出。
         self._gate.checkpoint()
         for name in (_SVC_API, _SVC_ARQ, _SVC_WEB):
-            fresh = self._read_log_lines(_PROJECT_DIR / 'logs' / f'{name}.log',
-                                         start_offset=offsets[name], lines=30)
+            fresh = log_ops.read_log_tail_lines(_PROJECT_DIR / 'logs' / f'{name}.log',
+                                               start_offset=offsets[name], lines=30)
             if fresh:
                 self._msg_queue.put(('log_batch', {'lines': [f'[{name}] {ln}' for ln in fresh], 'level': 'INFO'}))
             else:
@@ -1345,36 +1379,6 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
                     f'请检查 {_SVC_REDIS_BROKER} 服务') if not broker_ok else ''
             self._msg_queue.put(('log', {'text': f'生产模式启动未完全成功{hint}，请查看上方日志与 logs 目录下的服务日志', 'level': 'WARNING'}))
         self._msg_queue.put(('hosting_refresh', {}))
-
-    @staticmethod
-    def _log_size(path):
-        try:
-            return os.path.getsize(path)
-        except OSError:
-            return 0
-
-    @staticmethod
-    def _read_log_lines(path, start_offset=0, lines=15, max_bytes=65536):
-        """读取日志文件自 start_offset 起新增内容的末尾 lines 行（有界读取）。
-
-        NSSM 的 stdout/stderr 重定向是追加写：start 之前先记下文件大小，之后把
-        「新增字节」的尾部回灌界面才是本次运行的输出；文件被轮转重开（大小小于
-        offset）时按全新文件处理。历史日志绝不回灌。
-        """
-        try:
-            with open(path, 'rb') as f:
-                f.seek(0, os.SEEK_END)
-                size = f.tell()
-                if start_offset > size:
-                    # 文件被轮转重开（当前大小小于记录的 offset）：按全新文件处理
-                    begin = max(0, size - max_bytes)
-                else:
-                    begin = max(start_offset, size - max_bytes, 0)
-                f.seek(begin)
-                raw = f.read().splitlines()
-            return [ln.decode('utf-8', 'replace').strip() for ln in raw[-lines:] if ln.strip()]
-        except OSError:
-            return []
 
     def _start_one_service(self, name, timeout=25):
         return self.svc.start_one_service(name, timeout)

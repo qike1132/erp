@@ -272,12 +272,11 @@ class LogViewMixin:
             fn(message)
         if not self._flush_pending:
             self._flush_pending = True
-            try:
-                self.root.after_idle(self._do_flush)
-            except RuntimeError:
-                # 窗口销毁竞态：after_idle 会抛 RuntimeError —— 复位标志，
-                # 免得 _flush_pending 卡在 True 让后续日志永远不再刷新。
-                self._flush_pending = False
+            # ★ 本方法会从 worker 线程被调（ServiceOps/DevModeOps 注入的 log_message、
+            #   msg_queue 之外的直调路径），after_idle 是 Tk 调用 —— 跨线程碰 Tk 是
+            #   间歇崩溃经典来源。改投消息队列，由主线程 _poll_queue 统一触发 flush
+            #   （与全包「worker 只投递、主线程操作 Tk」的不变量对齐，M4）。
+            self._msg_queue.put(('log_flush', {}))
 
     def _do_flush(self):
         self._flush_pending = False

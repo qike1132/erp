@@ -16,6 +16,8 @@ ROOT = Path(__file__).resolve().parent.parent
 APP = ROOT / "server_manager" / "app.py"
 SVC_OPS = ROOT / "server_manager" / "service_ops.py"
 DM = ROOT / "server_manager" / "dev_mode.py"
+HOSTING_VIEW = ROOT / "server_manager" / "hosting_view.py"
+LOG_VIEW = ROOT / "server_manager" / "log_view.py"
 
 sys.path.insert(0, str(ROOT))
 
@@ -181,3 +183,118 @@ def test_env_check_dialog_not_delayed():
     body = _func_src(APP, "_run_env_checks")
     assert all("after(500" not in ln for ln in _code_lines(body))
     assert "messagebox.showwarning" in body
+
+
+# ── 8. 2026-10-16 结构评审修复（H1/H2/M1~M4/L1~L3）─────────────────────────
+
+def test_dev_health_checks_bypass_proxy():
+    """开发模式健康检查必须用 _HTTP_DIRECT（裸 urlopen 吃系统代理 → 间歇假失败）。"""
+    text = DM.read_text(encoding="utf-8")
+    assert "_HTTP_DIRECT.urlopen" in text, "开发模式探测未绕开系统代理（H1）"
+    body_start = _func_src(DM, "start_dual_thread")
+    assert body_start.count("_HTTP_DIRECT.urlopen") == 2, "前后端两处探测都要走直连 opener"
+    for ln in _code_lines(body_start):
+        assert "urllib.request.urlopen" not in ln, "仍残留走系统代理的裸 urlopen"
+
+
+def test_do_quit_cancels_inflight_action():
+    """退出必须先取消在飞行动作并等它退出（否则刚 Popen 的进程照样孤儿，H2）。"""
+    body = _func_src(APP, "_do_quit")
+    assert "self._gate.cancel(" in body, "退出未取消在飞行动作"
+    assert "wait_idle(" in body, "退出未等待在飞行动作退出"
+
+
+def test_stop_all_locks_buttons_during_sweep():
+    """紧急停止清扫窗口：按钮必须置灰、mode=stopping、_stopping_all 标志（M1/L4）。"""
+    body = _func_src(APP, "stop_all")
+    assert "_stopping_all = True" in body, "未置「全停中」标志（M3 联动）"
+    assert "_set_actions_enabled(False)" in body, "清扫期间未置灰操作按钮（M1）"
+    assert "self._mode = 'stopping'" in body, "未置 stopping 过渡态（L4）"
+    # 完成消息必须复位标志并放开按钮（含异常路径；两处 put = 成功/异常两条路径）
+    worker = _func_src(APP, "stop_all")
+    assert worker.count("'stop_all_done'") == 2, "成功/异常两条路径都要发 stop_all_done"
+    dispatch = _func_src(APP, "_process_pending_messages")
+    assert "'stop_all_done'" in dispatch and "_stopping_all = False" in dispatch
+
+
+def test_hosting_apply_drops_results_during_stop_all():
+    """全停窗口内滞留的采集结果不得翻改 _prod_running（M3）。"""
+    body = _func_src(HOSTING_VIEW, "_apply_hosting_data")
+    assert "_stopping_all" in body, "渲染层未判「全停中」标志"
+
+
+def test_web_svc_state_collected_off_main_thread():
+    """erp-web 服务状态必须在采集阶段读，渲染阶段 sc query 冻主线程（M2）。"""
+    collect = _func_src(HOSTING_VIEW, "_collect_hosting_data")
+    assert "web_svc_state" in collect, "web 状态未在采集阶段读取"
+    render = _func_src(HOSTING_VIEW, "_apply_running_status")
+    assert "self._svc_state(" not in render, "渲染阶段仍在主线程跑 sc query"
+    assert "web_svc_state" in render
+
+
+def test_log_message_no_cross_thread_tk():
+    """log_message 从 worker 线程被调：flush 必须经消息队列回主线程，不得 after_idle（M4）。"""
+    body = _func_src(LOG_VIEW, "log_message")
+    assert all("after_idle" not in ln for ln in _code_lines(body)), "跨线程 after_idle 是间歇崩溃来源"
+    assert "log_flush" in body, "未改走队列投递"
+    dispatch = _func_src(APP, "_process_pending_messages")
+    assert "'log_flush'" in dispatch and "_do_flush()" in dispatch, "主线程未派发 log_flush"
+
+
+def test_find_redis_forwarder_removed():
+    """L1：_find_redis 死转发不得回潮（2026-10-16 结构评审补删）。"""
+    src = APP.read_text(encoding="utf-8")
+    assert "def _find_redis" not in src
+
+
+def test_log_io_helpers_moved_to_log_ops():
+    """L2：_log_size/_read_log_lines 应收编 log_ops，app 不再有纯文件 IO 方法。"""
+    src = APP.read_text(encoding="utf-8")
+    assert "def _log_size" not in src and "def _read_log_lines" not in src
+    ops_text = (ROOT / "server_manager" / "log_ops.py").read_text(encoding="utf-8")
+    assert "def log_file_size" in ops_text and "def read_log_tail_lines" in ops_text
+    assert "log_ops.log_file_size" in src and "log_ops.read_log_tail_lines" in src
+
+
+def test_decode_output_is_module_level():
+    """L3：decode_output 应为模块级纯函数；类内保留转发、log_ops 不再 import ServiceOps。"""
+    ops_text = (ROOT / "server_manager" / "log_ops.py").read_text(encoding="utf-8")
+    assert "from server_manager.service_ops import decode_output" in ops_text
+    assert "import ServiceOps" not in ops_text, "log_ops 不应为解码器依赖整个服务层"
+    src = SVC_OPS.read_text(encoding="utf-8")
+    assert "def decode_output(raw" in src, "模块级实现缺失"
+    # run_capture 与既有调用点仍走同一实现（不产生第二真相源）
+    assert "return decode_output(raw, strip=strip)" in src
+
+
+def test_read_log_tail_lines_behavior():
+    """行为级：read_log_tail_lines 只回灌 offset 之后的新增尾部（轮转重开按全新文件）。"""
+    import tempfile
+    from server_manager.log_ops import read_log_tail_lines
+
+    with tempfile.TemporaryDirectory() as td:
+        p = Path(td) / "a.log"
+        p.write_bytes("old line\r\n".encode() * 10)
+        offset = p.stat().st_size
+        # 追加新内容 → 只回灌新增尾部
+        with open(p, "ab") as f:
+            f.write("new1\r\nnew2\r\nnew3\r\n".encode())
+        assert read_log_tail_lines(p, start_offset=offset, lines=2) == ["new2", "new3"]
+        # 文件被轮转重开（size < offset）→ 按全新文件读尾部
+        p.write_bytes("fresh\r\n".encode())
+        assert read_log_tail_lines(p, start_offset=offset, lines=5) == ["fresh"]
+        # 不存在的文件 → 空列表不抛错
+        assert read_log_tail_lines(Path(td) / "nope.log") == []
+
+
+def test_decode_output_behavior_preserved():
+    """行为级：提为模块级后解码行为逐字不变（UTF-16 BOM / GBK / replace 回退）。"""
+    from server_manager.service_ops import decode_output
+
+    assert decode_output("你好\r\n".encode("gbk"), strip=True) == "你好"
+    assert decode_output("ok\r\n".encode("utf-16"), strip=True) == "ok"
+    # NUL 密度启发（UTF-16LE 无 BOM）
+    assert decode_output("abc".encode("utf-16-le")) == "abc"
+    assert decode_output(b"") == ""
+    # 不可解码字节 → replace 回退，不抛错
+    assert decode_output(b"\xff\xfe\xfe\xff\x00") != ""

@@ -86,10 +86,13 @@ def test_every_early_return_updates_backup_badge() -> None:
     对目标模块 ``hosting_view.py`` 按 AST 取**函数体**,并加防空转断言。
     """
     # 4 个「放弃理由」分支拆出的三个提前 return 助手(collect_error 分支已是第一个 return)。
+    # 2026-10-16 M3 修复:紧急停止清扫窗口的丢弃分支(_apply_stopping_all)也是放弃型
+    # ——滞留的采集结果不得让徽章显示与停止矛盾,故纳入同一白名单(契约扩展,非放松)。
     abandonment_helpers = (
         "_apply_collect_error",
         "_apply_services_stopped",
         "_apply_status_untrusted",
+        "_apply_stopping_all",
     )
     # 每个放弃型助手自身必须真的置灰备份徽章,否则「经过助手」也只是形式。
     for helper in abandonment_helpers:

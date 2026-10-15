@@ -26,6 +26,50 @@ from server_manager.constants import (
 )
 
 
+def decode_output(raw, *, strip=False):
+    """把子进程的原始字节流解码为文本（Windows 控制台程序编码并不统一）。
+
+    · nssm 走宽字符 API，输出是 **UTF-16LE**：按 utf-8 解会得到
+      "E r r o r   c r e a t i n g   s e r v i c e !" 这种隔字带空格的乱码，
+      中文错误文本更是整段变成 U+FFFD。2026-09-16 实测：nssm 明明回了
+      「指定的服务已存在。」，界面/日志里却只剩不可读字符，故障定位被直接堵死。
+    · sc.exe 走 OEM 代码页（中文系统 cp936/GBK），偶尔夹杂 UTF-8。
+
+    因此先按 BOM / NUL 密度判 UTF-16，再回落到多编码严格试探；
+    任何一步都不抛异常——解码失败只降级为 replace，绝不因此吞掉真实返回码。
+
+    ``strip=True`` 供逐行读取用（去行尾换行）。原先这是另一份实现 _decode_line，
+    只差「没有 UTF-16 分支」——逐行读 nssm 这类宽字符输出时会退化成乱码。
+    （2026-10-16 结构评审 L3：由 ServiceOps 的 staticmethod 提为模块级纯函数，
+    使 log_ops 不必为复用它而依赖整个服务层；类内保留同名转发。）
+    """
+    def _fin(text: str) -> str:
+        return text.strip() if strip else text
+
+    if not raw:
+        return ''
+    if raw[:2] in (b'\xff\xfe', b'\xfe\xff'):
+        try:
+            return _fin(raw.decode('utf-16', errors='replace').lstrip(chr(0xFEFF)))
+        except Exception:  # noqa: S110 - 解码试探，失败即回退下一种编码
+            pass
+    elif raw.count(b'\x00') * 4 > len(raw):
+        # UTF-16LE 的 ASCII 段每个字符后跟一个 \x00，NUL 占比远高于任何 8bit 编码
+        try:
+            return _fin(raw.decode('utf-16-le', errors='replace'))
+        except Exception:  # noqa: S110 - 解码探测，失败即试下一种编码
+            pass
+    preferred = locale.getpreferredencoding(False) or ''
+    for enc in ('utf-8', 'gb18030', 'cp936', preferred):
+        if not enc:
+            continue
+        try:
+            return _fin(raw.decode(enc, errors='strict'))
+        except Exception:  # noqa: S112 - 解码探测，失败即试下一种编码
+            continue
+    return _fin(raw.decode('utf-8', errors='replace'))
+
+
 class ServiceOps:
     """生产模式(Windows 服务 + NSSM)的查询、启停、安装与卸载。
 
@@ -56,45 +100,9 @@ class ServiceOps:
 
     @staticmethod
     def decode_output(raw, *, strip=False):
-        """把子进程的原始字节流解码为文本（Windows 控制台程序编码并不统一）。
-
-        · nssm 走宽字符 API，输出是 **UTF-16LE**：按 utf-8 解会得到
-          "E r r o r   c r e a t i n g   s e r v i c e !" 这种隔字带空格的乱码，
-          中文错误文本更是整段变成 U+FFFD。2026-09-16 实测：nssm 明明回了
-          「指定的服务已存在。」，界面/日志里却只剩不可读字符，故障定位被直接堵死。
-        · sc.exe 走 OEM 代码页（中文系统 cp936/GBK），偶尔夹杂 UTF-8。
-
-        因此先按 BOM / NUL 密度判 UTF-16，再回落到多编码严格试探；
-        任何一步都不抛异常——解码失败只降级为 replace，绝不因此吞掉真实返回码。
-
-        ``strip=True`` 供逐行读取用（去行尾换行）。原先这是另一份实现 _decode_line，
-        只差「没有 UTF-16 分支」——逐行读 nssm 这类宽字符输出时会退化成乱码。
-        """
-        def _fin(text: str) -> str:
-            return text.strip() if strip else text
-
-        if not raw:
-            return ''
-        if raw[:2] in (b'\xff\xfe', b'\xfe\xff'):
-            try:
-                return _fin(raw.decode('utf-16', errors='replace').lstrip('\ufeff'))
-            except Exception:  # noqa: S110 - \u89e3\u7801\u63a2\u6d4b\uff0c\u5931\u8d25\u5373\u56de\u9000\u4e0b\u4e00\u79cd\u7f16\u7801
-                pass
-        elif raw.count(b'\x00') * 4 > len(raw):
-            # UTF-16LE 的 ASCII 段每个字符后跟一个 \x00，NUL 占比远高于任何 8bit 编码
-            try:
-                return _fin(raw.decode('utf-16-le', errors='replace'))
-            except Exception:  # noqa: S110 - 解码探测，失败即回退下一种编码
-                pass
-        preferred = locale.getpreferredencoding(False) or ''
-        for enc in ('utf-8', 'gb18030', 'cp936', preferred):
-            if not enc:
-                continue
-            try:
-                return _fin(raw.decode(enc, errors='strict'))
-            except Exception:  # noqa: S112 - 解码探测，失败即试下一种编码
-                continue
-        return _fin(raw.decode('utf-8', errors='replace'))
+        """统一解码器的既有入口（实现已提为模块级 ``decode_output``，见其 docstring）。
+        保留 staticmethod 形态：既有调用点（dev_mode 经实例、run_capture 内部）不必改写。"""
+        return decode_output(raw, strip=strip)
 
     def run_capture(self, args, timeout=20):
         try:

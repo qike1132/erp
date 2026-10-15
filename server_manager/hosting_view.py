@@ -61,6 +61,10 @@ class HostingViewMixin:
         # `sc query`，已删。
         status_file = self._PROJECT_DIR / 'logs' / 'prod_runner.json'
         data['status'], data['read_err'], data['mtime'], data['stale'], data['mtime_str'] = {}, None, 0, False, '—'
+        # 前端徽章 external 分支需要的服务状态也在采集阶段一并读齐：
+        # 渲染阶段（主线程）跑 sc query(5s 超时) 会冻界面 —— 与本函数的
+        # 「阻塞操作绝不在主线程」自述矛盾（M2，2026-10-16 结构评审）。
+        data['web_svc_state'] = self._svc_state(_SVC_WEB)
         if not data['api_running']:
             return data
         # 服务运行中：读取状态文件并校验新鲜度
@@ -100,6 +104,13 @@ class HostingViewMixin:
         计时器重挂留在调度器上，故各助手的 ``return`` 语义与拆分前一致。
         """
         try:
+            # ★ 紧急停止清扫窗口内丢弃本轮：滞留的采集线程（不受闸门管）带着旧快照
+            #   落地会把 _prod_running 翻回 True、_update_mode_badge 显示「生产模式」，
+            #   与正在执行的紧急停止矛盾并重新点亮生产按钮（M3）。收尾的
+            #   stop_all_done 会主动补一轮 hosting_refresh，本轮不丢信息。
+            if getattr(self, '_stopping_all', False):
+                self._apply_stopping_all()
+                return
             self._prod_running = data.get('api_running', False)
             # ★ 三态语义贯通：sc query 失败(未知)必须独立记录，展示层据此显示「状态未知」，
             # 绝不能落成「已停止」——否则查不出来会被误当成生产已停、诱导误判。
@@ -162,6 +173,17 @@ class HostingViewMixin:
         self.hosting_backup_badge.set_state('stopped', '备份 状态未知')
         self._warn_once('collect-error',
                         f"状态收集失败（{data.get('error', '未知原因')}），界面本轮不更新")
+
+    def _apply_stopping_all(self):
+        """紧急停止清扫窗口内的丢弃分支（放弃型助手，backup_badge 契约同款）：
+        本轮采集结果不可信，全部徽章置「状态未知」—— 绝不能滞留上一轮的绿/红，
+        否则清扫期间界面还在显示「运行中/备份正常」，与正在执行的停止互相矛盾。"""
+        self.hosting_backup_badge.set_state('stopped', '备份 状态未知')
+        for badge, label in ((self.hosting_backend_badge, '后端'),
+                             (self.hosting_arq_badge, 'ARQ'),
+                             (self.hosting_frontend_badge, '前端'),
+                             (self.hosting_ready_badge, '就绪')):
+            self._set_badge(badge, 'stopped', f'{label} 状态未知')
 
     def _apply_services_stopped(self, data):
         """服务未运行分支：以 sc query 为权威，不读状态文件。出口唯一。"""
@@ -284,7 +306,7 @@ class HostingViewMixin:
         # prod_runner 的 frontend_ok 探针作交叉验证(探针区分 SPA fallback)。
         fe = svcs.get('frontend') or {}
         if fe.get('status') == 'external':
-            web_state = self._svc_state(_SVC_WEB)
+            web_state = data.get('web_svc_state', '未知')
             if 'RUNNING' in web_state:
                 if status.get('frontend_ok'):
                     self._set_badge(self.hosting_frontend_badge, 'running', '前端 运行中')

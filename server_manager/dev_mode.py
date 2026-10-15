@@ -24,10 +24,9 @@ import os
 import subprocess
 import threading
 import time
-import urllib.request
 
 from server_manager import windows_ops
-from server_manager.constants import _API_PORT, _IS_WINDOWS, _WEB_PORT
+from server_manager.constants import _API_PORT, _HTTP_DIRECT, _IS_WINDOWS, _WEB_PORT
 
 
 class DevModeOps:
@@ -119,7 +118,9 @@ class DevModeOps:
             for _ in range(30):
                 self._gate.checkpoint()
                 try:
-                    urllib.request.urlopen(f'http://127.0.0.1:{_API_PORT}/api/health', timeout=2)
+                    # ★ 必须绕开系统代理（constants 的既有事故：prod_runner 曾因
+                    #   代理转发 127.0.0.1 探测间歇失败而误判后端崩溃）。
+                    _HTTP_DIRECT.urlopen(f'http://127.0.0.1:{_API_PORT}/api/health', timeout=2)
                     backend_ready = True
                     break
                 except Exception:
@@ -146,7 +147,7 @@ class DevModeOps:
             for _ in range(60):
                 self._gate.checkpoint()
                 try:
-                    urllib.request.urlopen(f'http://127.0.0.1:{_WEB_PORT}/', timeout=2)
+                    _HTTP_DIRECT.urlopen(f'http://127.0.0.1:{_WEB_PORT}/', timeout=2)
                     frontend_ready = True
                     break
                 except Exception:
