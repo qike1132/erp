@@ -123,9 +123,9 @@ import {
   beileColumns,
   beileGridTemplate,
   beileMinWidth,
-  filterVisibleSkus,
+  beileBlockView,
 } from '@/views/beile-order/composables/useBeileOrders'
-import type { BeileOrderRow as BeileOrderRowType, SkuQtyFields } from '@/views/beile-order/composables/useBeileOrders'
+import type { BeileOrderRow as BeileOrderRowType } from '@/views/beile-order/composables/useBeileOrders'
 
 const {
   PAGE_SIZE_OPTIONS,
@@ -164,6 +164,7 @@ const tableMinWidth = computed(() => beileMinWidth(cols.value))
 
 /**
  * 变高虚拟滚动的「预估块高」：订单块高度 = (SKU 行数 + 多 SKU 合计行) × 56px。
+ * 块行数由 beileBlockView 单一真源派生（与页面行块、导出同源，杜绝布局分叉）。
  * 用当前页平均块高作预估值，首屏占位更贴近真实；实际高度由 VirtualList 的
  * ResizeObserver 测量后逐块校正（min-height 占位 + measureItems）。
  */
@@ -171,13 +172,7 @@ const estimatedBlockHeight = computed(() => {
   const list = displayOrders.value
   if (list.length === 0) return BEILE_ROW_HEIGHT
   let total = 0
-  for (const o of list) {
-    const base: SkuQtyFields[] = (o.items && o.items.length > 0)
-      ? o.items
-      : [{ product_name: o.product_name ?? null, quantity: o.quantity ?? 0 }]
-    const n = filterVisibleSkus(base, appliedProduct.value).length
-    total += (n + (n > 1 ? 1 : 0)) * BEILE_ROW_HEIGHT
-  }
+  for (const o of list) total += beileBlockView(o, appliedProduct.value).span * BEILE_ROW_HEIGHT
   return Math.max(BEILE_ROW_HEIGHT, Math.round(total / list.length))
 })
 
