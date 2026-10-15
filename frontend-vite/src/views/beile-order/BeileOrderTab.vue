@@ -41,7 +41,7 @@
                 </div>
               </div>
 
-              <!-- 虚拟滚动主体：订单块变高（行块高度 = SKU 行数 × 56px），dynamicHeight 自适应 -->
+              <!-- 虚拟滚动主体：订单块变高（行块高度 = SKU 行数 × 44px），dynamicHeight 自适应 -->
               <div ref="listAreaRef" class="bo-list-area">
                 <VirtualList
                   v-if="listAreaHeight > 0"
@@ -153,7 +153,7 @@ const gridTemplate = computed(() => beileGridTemplate(cols.value))
 const tableMinWidth = computed(() => beileMinWidth(cols.value))
 
 /**
- * 变高虚拟滚动的「预估块高」：订单块高度 = SKU 行数 × 56px。
+ * 变高虚拟滚动的「预估块高」：订单块高度 = SKU 行数 × 44px。
  * 块行数由 beileBlockView 单一真源派生（与页面行块、导出同源，杜绝布局分叉）。
  * 用当前页平均块高作预估值，首屏占位更贴近真实；实际高度由 VirtualList 的
  * ResizeObserver 测量后逐块校正（min-height 占位 + measureItems）。
@@ -271,7 +271,7 @@ watch([page, appliedProduct, appliedCustomer, confirmStatus], () => {
 }
 .bo-th {
   box-sizing: border-box;
-  padding: 10px 14px;
+  padding: 7px 14px;
   border-right: 1px solid #d8dce2;
   overflow: hidden;
   display: flex;
@@ -298,7 +298,7 @@ watch([page, appliedProduct, appliedCustomer, confirmStatus], () => {
   justify-content: center;
 }
 .bo-th-select {
-  padding: 10px 8px;
+  padding: 7px 8px;
 }
 
 /* ===== 虚拟滚动列表区 ===== */

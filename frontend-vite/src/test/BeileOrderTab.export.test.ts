@@ -233,7 +233,7 @@ describe('BeileOrderTab 导出与打印功能', () => {
     expect(html).toContain('订单数量')
     expect(html).toContain('生产数量')
     expect(html).not.toContain('备品数量')
-    expect(html).toContain('产品条码')
+    expect(html).not.toContain('产品条码')
     expect(html).not.toContain('确认状态')
     expect(html).toContain('<tbody>')
   })
@@ -340,7 +340,7 @@ describe('BeileOrderTab 导出与打印功能', () => {
     expect(bodyHtml).toContain('订单数量')
     expect(bodyHtml).toContain('生产数量')
     expect(bodyHtml).not.toContain('备品数量')
-    expect(bodyHtml).toContain('产品条码')
+    expect(bodyHtml).not.toContain('产品条码')
     expect(bodyHtml).not.toContain('确认状态')
   })
 
@@ -484,33 +484,30 @@ describe('BeileOrderTab 导出与打印功能', () => {
 
     const cellsOf = (tr: Element) => [...tr.querySelectorAll('td')].map((td) => td.textContent || '')
     // 列序：订单类型(0) | 订单号(1) | 下单时间(2) | 客户(3) | 工厂(4)
-    //       | 产品名称(5) | 产品条码(6) | 订单数量(7) | 生产数量(8) | 小义开单(9) | 备注(10)
+    //       | 产品名称(5) | 订单数量(6) | 生产数量(7) | 小义开单(8) | 备注(9)
     // 已下单（单 SKU）行：订单数量=8、生产数量=8+2=10、小义开单=已开单
     const orderedCells = cellsOf(rows[0]!)
     expect(orderedCells[1]).toBe('PO-101')
     expect(orderedCells[5]).toBe('产品A')
-    expect(orderedCells[6]).toBe('690001')
-    expect(orderedCells[7]).toBe('8')
-    expect(orderedCells[8]).toBe('10')
-    expect(orderedCells[9]).toBe('已开单')
+    expect(orderedCells[6]).toBe('8')
+    expect(orderedCells[7]).toBe('10')
+    expect(orderedCells[8]).toBe('已开单')
     // 未下单（多 SKU）订单：逐 SKU 输出订单数量，生产数量=—（不可派生）
     // 行1 = 产品B（订单数量=10，携带订单级 rowspan 单元格）
     const sku1Cells = cellsOf(rows[1]!)
     expect(sku1Cells[1]).toBe('PO-102')
     expect(sku1Cells[5]).toBe('产品B')
-    expect(sku1Cells[6]).toBe('690002')
-    expect(sku1Cells[7]).toBe('10')
-    expect(sku1Cells[8]).toBe('—')
-    expect(sku1Cells[9]).toBe('未开单')
-    // 行2 = 产品B2（订单数量=20；订单级列由 rowspan 覆盖，故仅 5 个 td：名称/条码/数量/生产/备注）
+    expect(sku1Cells[6]).toBe('10')
+    expect(sku1Cells[7]).toBe('—')
+    expect(sku1Cells[8]).toBe('未开单')
+    // 行2 = 产品B2（订单数量=20；订单级列由 rowspan 覆盖，故仅 4 个 td：名称/数量/生产/备注）
     const sku2Cells = cellsOf(rows[2]!)
     expect(sku2Cells[0]).toBe('产品B2')
-    expect(sku2Cells[1]).toBe('690003')
-    expect(sku2Cells[2]).toBe('20')
-    expect(sku2Cells[3]).toBe('—')
+    expect(sku2Cells[1]).toBe('20')
+    expect(sku2Cells[2]).toBe('—')
   })
 
-  it('列表 DOM：表头含「订单数量」「生产数量」「产品名称/产品条码」且无「备品数量」列；已下单行生产数量 = 订单数量 + 备品数量，未下单行为「—」', async () => {
+  it('列表 DOM：表头含「订单数量」「生产数量」「产品名称」且无「产品条码」「备品数量」列；已下单行生产数量 = 订单数量 + 备品数量，未下单行为「—」', async () => {
     mocks.queryData.value = makeListResponse({
       total: 2,
       unconfirmed_count: 0,
@@ -568,17 +565,17 @@ describe('BeileOrderTab 导出与打印功能', () => {
     const wrapper = await mountTab()
 
     // 表头：文案 + 列序，备品数量独立列已删除；2026-10-15 多 SKU 改版后
-    // 「SKU 数」徽章列换成逐 SKU 的「产品名称 / 产品条码」列（对齐 /report 订单流水）
+    // 「SKU 数」徽章列换成逐 SKU 的「产品名称」列（对齐 /report 订单流水）；
+    // 「产品条码」列已于 2026-10-15 用户裁决删除，宽度并入产品名称
     const headers = wrapper.findAll('.bo-th').map((h) => h.text())
     expect(headers).toContain('订单数量')
     expect(headers).toContain('生产数量')
     expect(headers).toContain('产品名称')
-    expect(headers).toContain('产品条码')
+    expect(headers).not.toContain('产品条码')
     expect(headers).not.toContain('SKU')
     expect(headers).not.toContain('备品数量')
     expect(headers.indexOf('订单数量')).toBeLessThan(headers.indexOf('生产数量'))
-    expect(headers.indexOf('产品名称')).toBeLessThan(headers.indexOf('产品条码'))
-    expect(headers.indexOf('产品条码')).toBeLessThan(headers.indexOf('订单数量'))
+    expect(headers.indexOf('产品名称')).toBeLessThan(headers.indexOf('订单数量'))
     // 订单号列（2026-09-29 恢复；保留类型列，订单号紧随其后）
     expect(headers).toContain('订单号')
     expect(headers.indexOf('订单号')).toBe(headers.indexOf('订单类型') + 1)
@@ -636,14 +633,12 @@ describe('buildSummaryTbody 逐 SKU 导出（FIX-3 / AC-12 同源）', () => {
     const r1 = tds(trs[0]!)
     expect(r1[1]).toBe('PO-900') // 订单号列（订单级，由 rowspan 覆盖整单）
     expect(r1[5]).toBe('X')
-    expect(r1[6]).toBe('-') // 无条码 → '-'
-    expect(r1[7]).toBe('10')
-    expect(r1[8]).toBe('—')
+    expect(r1[6]).toBe('10')
+    expect(r1[7]).toBe('—')
 
     const r2 = tds(trs[1]!)
     expect(r2[0]).toBe('Y')
-    expect(r2[1]).toBe('-')
-    expect(r2[2]).toBe('20')
+    expect(r2[1]).toBe('20')
   })
 
   it('命中逐 SKU 快照（po_sku）：逐 SKU 显示实际下单量 + 生产量', () => {
@@ -661,13 +656,12 @@ describe('buildSummaryTbody 逐 SKU 导出（FIX-3 / AC-12 同源）', () => {
 
     const trs = trsOf(html)
     const r1 = tds(trs[0]!)
-    expect(r1[7]).toBe('12')
-    expect(r1[8]).toBe('13') // 12 + 1
+    expect(r1[6]).toBe('12')
+    expect(r1[7]).toBe('13') // 12 + 1
     const r2 = tds(trs[1]!)
     expect(r2[0]).toBe('Y')
-    expect(r2[1]).toBe('-')
-    expect(r2[2]).toBe('18')
-    expect(r2[3]).toBe('20') // 18 + 2
+    expect(r2[1]).toBe('18')
+    expect(r2[2]).toBe('20') // 18 + 2
   })
 
   it('关键字筛选与页面同源：仅输出命中关键字的 SKU（filterVisibleSkus）', () => {
@@ -701,7 +695,7 @@ describe('buildSummaryTbody 逐 SKU 导出（FIX-3 / AC-12 同源）', () => {
     expect(trs.length).toBe(1)
     expect(html).not.toContain('合计')
     const cells = tds(trs[0]!)
-    expect(cells[7]).toBe('8')
-    expect(cells[8]).toBe('10')
+    expect(cells[6]).toBe('8')
+    expect(cells[7]).toBe('10')
   })
 })

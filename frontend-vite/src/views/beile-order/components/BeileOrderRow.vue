@@ -72,7 +72,7 @@
       <span v-else-if="col.key === 'note'" class="bo-note" :title="item.note || ''">{{ item.note || '-' }}</span>
     </div>
 
-    <!-- SKU 列：逐 SKU 一行（产品名称/产品条码/订单数量/生产数量） -->
+    <!-- SKU 列：逐 SKU 一行（产品名称/订单数量/生产数量） -->
     <template v-for="(sku, si) in skus" :key="sku.id ?? si">
       <div
         v-for="col in skuCols"
@@ -86,7 +86,6 @@
           class="bo-sku-name"
           :title="sku.product_name || ''"
         >{{ sku.product_name || '-' }}</span>
-        <span v-else-if="col.key === 'productBarcode'" class="bo-barcode" :title="sku.product_barcode || ''">{{ sku.product_barcode || '-' }}</span>
         <span
           v-else-if="col.key === 'orderQty'"
           class="bo-qty"
@@ -108,7 +107,7 @@
  *
  * 2026-10-15 多 SKU 改版（对齐 /report 订单流水方案 C）：
  * 一行一 SKU，订单级列跨 span 行合并（CSS Grid，等效 rowspan），SKU 列
- * （产品名称/产品条码/订单数量/生产数量）逐行渲染。
+ * （产品名称/订单数量/生产数量）逐行渲染。
  * 列序/列宽与布局/数量口径统一走 useBeileOrderBlock（与表头、导出/打印同源，AC-12）。
  */
 import {
@@ -174,7 +173,7 @@ function handleConfirm(item: BeileOrderRowType) {
 }
 .bo-td {
   box-sizing: border-box;
-  padding: 10px 14px;
+  padding: 6px 14px;
   border-right: 1px solid #d8dce2;
   border-bottom: 1px solid #d8dce2;
   overflow: hidden;
@@ -189,7 +188,7 @@ function handleConfirm(item: BeileOrderRowType) {
   justify-content: center;
 }
 .bo-td-select {
-  padding: 10px 8px;
+  padding: 6px 8px;
 }
 .bo-row-highlight {
   background: var(--color-warning-50) !important;
@@ -199,7 +198,7 @@ function handleConfirm(item: BeileOrderRowType) {
   white-space: nowrap;
 }
 
-/* SKU 逐行：产品名称 / 条码 */
+/* SKU 逐行：产品名称 */
 .bo-customer {
   font-weight: 600;
   color: var(--color-text);
@@ -210,14 +209,6 @@ function handleConfirm(item: BeileOrderRowType) {
 .bo-sku-name {
   font-weight: 500;
   color: var(--color-text);
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.bo-barcode {
-  font-family: Consolas, ui-monospace, monospace;
-  font-size: 12px;
-  color: var(--color-text-muted, #64748b);
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;

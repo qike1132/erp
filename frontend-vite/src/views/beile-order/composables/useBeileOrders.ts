@@ -174,7 +174,7 @@ export interface BeileCol {
 }
 
 /** 行块内单行高度（px）：SKU 行 / 订单级跨行格的每行高一致（虚拟滚动定高基准） */
-export const BEILE_ROW_HEIGHT = 56
+export const BEILE_ROW_HEIGHT = 44
 
 /**
  * 计算当前可见列（按视觉顺序）。可见性：
@@ -191,8 +191,7 @@ export function beileColumns(opts: { canPrint: boolean; confirmStatus: string })
     { key: 'date', label: '下单时间', width: 140, align: 'center', scope: 'order' },
     { key: 'customer', label: '客户名称', width: 125, align: 'center', scope: 'order' },
     { key: 'factory', label: '工厂', width: 85, align: 'center', scope: 'order' },
-    { key: 'productName', label: '产品名称', width: 375, align: 'center', scope: 'sku' },
-    { key: 'productBarcode', label: '产品条码', width: 120, align: 'center', scope: 'sku' },
+    { key: 'productName', label: '产品名称', width: 495, align: 'center', scope: 'sku' },
     { key: 'orderQty', label: '订单数量', width: 90, align: 'center', scope: 'sku' },
     { key: 'prodQty', label: '生产数量', width: 90, align: 'center', scope: 'sku' },
     { key: 'opened', label: '小义开单', width: 90, align: 'center', scope: 'order' },
@@ -273,9 +272,9 @@ export function useBeileOrderBlock(opts: BeileOrderBlockOptions) {
 
   const blockStyle = computed(() => ({
     gridTemplateColumns: beileGridTemplate(cols.value),
-    // 行高下限 56px、上限随内容（对齐 /report 订单流水）：产品名称换行超过一行时
-    // 行随之增高、完整显示；若写死 56px，长名称会被 `.bo-td` 的 overflow:hidden 裁掉
-    // （实证 PO-20261015-2585 有 40 字名称，180px 列宽换行 >2 行即被截断）。
+    // 行高下限 44px、上限随内容（对齐 /report 订单流水）：产品名称换行超过一行时
+    // 行随之增高、完整显示；若写死 44px，长名称会被 `.bo-td` 的 overflow:hidden 裁掉
+    // （实证 PO-20261015-2585 有 40 字名称）。
     // 虚拟滚动为变高模式（dynamicHeight），按实测块高定位，故允许行高变化。
     gridAutoRows: `minmax(${BEILE_ROW_HEIGHT}px, auto)`,
   }))
@@ -332,7 +331,7 @@ function summaryProductionText(v: number | null): string {
  * 构建汇总表 tbody HTML（页面 = 导出 XLS = 打印预览同源，AC-12）。
  *
  * 粒度（任务书 D.13 裁决）：
- * - 「产品名称 / 产品条码 / 订单数量 / 生产数量」**逐 SKU 输出**，复用页面同一真源函数
+ * - 「产品名称 / 订单数量 / 生产数量」**逐 SKU 输出**，复用页面同一真源函数
  *   （skuOrderQty / skuProductionQty），不再整段 rowspan 到订单级；
  * - 「小义开单」为订单级事实，保持整单 rowspan；
  * - 「订单类型 / 下单时间 / 客户名称 / 工厂」为订单级，整单 rowspan。
@@ -360,7 +359,6 @@ export function buildSummaryTbody(items: BeileOrderRow[], keyword: string): stri
         for (const c of orderCells) cells.push(`<td${spanAttr}>${escapeHtml(c)}</td>`)
       }
       cells.push(`<td>${escapeHtml(sku.product_name || '-')}</td>`)
-      cells.push(`<td>${escapeHtml(sku.product_barcode || '-')}</td>`)
       cells.push(`<td>${escapeHtml(String(skuOrderQty(item, sku)))}</td>`)
       cells.push(`<td>${escapeHtml(summaryProductionText(skuProductionQty(item, sku)))}</td>`)
       if (idx === 0) cells.push(`<td${spanAttr}>${escapeHtml(openedText)}</td>`)
@@ -604,14 +602,15 @@ export function useBeileOrders() {
   const canExport = computed(() => authStore.hasPermission('beile_order_export'))
   const canPrint = computed(() => authStore.hasPermission('beile_order_print'))
 
-  /** 汇总表列头（含产品明细）：产品名称后为「产品条码」，其后依次「订单数量」「生产数量」「小义开单」（页面 = 导出 XLS = 打印预览同源，AC-12）。
+  /** 汇总表列头（含产品明细）：产品名称后依次「订单数量」「生产数量」「小义开单」（页面 = 导出 XLS = 打印预览同源，AC-12）。
+   *  「产品条码」列已删除（2026-10-15 用户裁决）：页面/导出/打印三处同步去掉，宽度并入产品名称。
    *  「备品数量」独立列已删除（用户裁决 2026-09-18）：spare_quantity 仅作为生产数量的计算输入，不再单独展示 */
   const SUMMARY_HEADERS = [
-    '订单类型', '订单号', '下单时间', '客户名称', '工厂', '产品名称', '产品条码', '订单数量', '生产数量', '小义开单', '备注',
+    '订单类型', '订单号', '下单时间', '客户名称', '工厂', '产品名称', '订单数量', '生产数量', '小义开单', '备注',
   ]
 
   /** 汇总表各列宽度（px），用于导出 XLS 列宽分配（列数与 SUMMARY_HEADERS 一致） */
-  const SUMMARY_COL_WIDTHS = [90, 160, 120, 130, 80, 220, 130, 90, 90, 90, 180]
+  const SUMMARY_COL_WIDTHS = [90, 160, 120, 130, 80, 350, 90, 90, 90, 180]
 
   // 汇总表 tbody 的构建（含逐 SKU 粒度）已提到模块作用域：`buildSummaryTbody(items, keyword)`，
   // 以便被导出/打印复用，并可被单测直接导入验证（页面 = 导出 = 打印 单一真源，AC-12）。

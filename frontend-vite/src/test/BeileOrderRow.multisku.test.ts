@@ -2,7 +2,7 @@
  * 汇总列表「订单块」多 SKU 前端回归（2026-10-15 多 SKU 改版，对齐 /report 订单流水）。
  *
  * 覆盖：
- * - 一行一 SKU：产品名称/产品条码/订单数量/生产数量逐行渲染，订单级列跨行合并。
+ * - 一行一 SKU：产品名称/订单数量/生产数量逐行渲染，订单级列跨行合并。
  * - 数量口径（单一真源）：逐 SKU = skuOrderQty / skuProductionQty / skuIsOrdered。
  * - 未下单：生产数量「—」，不编造 0（D-R2-1）。
  * - keyword 过滤逐 SKU（与导出 buildSummaryTbody 的 filterVisibleSkus 同源）。
@@ -83,16 +83,12 @@ function multiWithPoSku() {
 }
 
 describe('BeileOrderRow 订单块（一行一 SKU + 订单级列跨行）', () => {
-  it('多 SKU 订单：逐 SKU 一行（名称/条码/订单数量/生产数量），未下单生产数量「—」，无「合计」行', () => {
+  it('多 SKU 订单：逐 SKU 一行（名称/订单数量/生产数量），未下单生产数量「—」，无「合计」行', () => {
     const wrapper = mountRow(multiUnordered())
 
     // 逐 SKU 行：产品名称 X / Y 各占一行
     const names = wrapper.findAll('.bo-sku-name').map((n) => n.text())
     expect(names).toEqual(['X', 'Y'])
-
-    // 逐 SKU 条码
-    const barcodes = wrapper.findAll('.bo-barcode').map((n) => n.text())
-    expect(barcodes).toEqual(['bX', 'bY'])
 
     // 逐 SKU 订单数量：10 / 20（客户订单原数量，未下单）
     const qtys = wrapper.findAll('.bo-qty').map((n) => n.text())
@@ -166,7 +162,7 @@ describe('BeileOrderRow 订单块（一行一 SKU + 订单级列跨行）', () =
     expect(orderCell.attributes('style')).toContain('grid-row: 1 / span 2')
   })
 
-  it('订单块行高：下限 56px、上限 auto（内容可撑高，不硬裁）', () => {
+  it('订单块行高：下限 44px、上限 auto（内容可撑高，不硬裁）', () => {
     const wrapper = mountRow(multiUnordered())
     const style = wrapper.find('.bo-block').attributes('style') ?? ''
     // 只取 grid-auto-rows 那一条声明（避免匹配到 grid-template-columns 里的 minmax）
@@ -175,6 +171,7 @@ describe('BeileOrderRow 订单块（一行一 SKU + 订单级列跨行）', () =
       .map((s) => s.trim())
       .find((s) => s.startsWith('grid-auto-rows')) ?? ''
     expect(autoRowsDecl).toContain('minmax')
+    expect(autoRowsDecl).toContain('44px')
     expect(autoRowsDecl).toContain('auto')
   })
 
@@ -198,15 +195,16 @@ describe('BeileOrderRow 订单块（一行一 SKU + 订单级列跨行）', () =
     const cols = beileColumns({ canPrint: false, confirmStatus: 'unconfirmed' })
     const width = (k: string) => cols.find((c) => c.key === k)!.width as number
 
-    // 产品名称列显著加宽（180 → 375）
-    expect(width('productName')).toBeGreaterThanOrEqual(370)
+    // 产品名称列显著加宽（375 → 495，并入原「产品条码」列的 120px）
+    expect(width('productName')).toBeGreaterThanOrEqual(490)
     // 收窄的次要列
     expect(width('type')).toBeLessThanOrEqual(80)
     expect(width('customer')).toBeLessThanOrEqual(130)
     expect(width('factory')).toBeLessThanOrEqual(90)
-    expect(width('productBarcode')).toBeLessThanOrEqual(125)
     expect(width('orderQty')).toBeLessThanOrEqual(95)
     expect(width('opened')).toBeLessThanOrEqual(95)
+    // 「产品条码」列已删除（2026-10-15 用户裁决）：宽度并入产品名称
+    expect(cols.some((c) => c.key === 'productBarcode')).toBe(false)
     // 单号 16 字符 / 时间到分 16 字符：保持够宽不被截断
     expect(width('orderNo')).toBeGreaterThanOrEqual(140)
     expect(width('date')).toBeGreaterThanOrEqual(135)
