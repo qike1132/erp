@@ -90,6 +90,77 @@ def _require_not_none[T](value: T | None, source: str) -> T:
     return value
 
 
+# ==================== 单 Sheet 导入共享骨架 ====================
+
+async def _run_sheet_rows(
+    db: AsyncSession,
+    data_list: list,
+    row_writer,
+    success_msg: str,
+    fail_msg: str,
+    *,
+    log_label: str,
+) -> BatchImportResult:
+    """单 Sheet 批量导入的共享行循环（2026-10-15 抽取）。
+
+    此前 5 个 ``import_*_service`` 各持一份逐字相同的骨架：行循环（savepoint
+    隔离单行）→ 计数 → post-commit 缓存失效 → 结果构建 → 异常兜底。改导入
+    规则要同步 5 处（2026-08-10 的孤儿订单事故正是 core 路径改了、单 Sheet
+    端点漏改），故收敛为一份。文件校验与读 Sheet 由调用方先行完成（订单/
+    备货路径要在循环前预加载产品映射与客户名单，读 Sheet 的时机归调用方）。
+
+    Args:
+        row_writer: ``async (db, row_data) -> tuple[bool, str | None]``。
+            在 savepoint 内写一行；返回 ``(True, None)`` 计入 imported；
+            ``(False, None)`` 静默跳过；``(False, msg)`` 记录错误消息并跳过
+            （消息文案由 row_writer 负责，保持既有用户可见文案不变）。
+            行内抛 (ValueError, TypeError, SQLAlchemyError) 由骨架统一回滚
+            该行、记异常消息、计 skipped。
+        log_label: 行级异常日志前缀（如 '订单导入'）。
+    """
+    imported = 0
+    skipped = 0
+    errors: list[str] = []
+    for row_data in data_list:
+        try:
+            # savepoint 隔离单行：行内异常仅回滚本行，不影响循环内已成功的行
+            async with db.begin_nested():
+                ok, row_err = await row_writer(db, row_data)
+            if not ok:
+                if row_err is not None:
+                    errors.append(row_err)
+                skipped += 1
+                continue
+            # savepoint 成功提交后才计数，失败行不计入 imported
+            imported += 1
+        except (ValueError, TypeError, SQLAlchemyError) as exc:
+            # savepoint 已自动回滚本行，不再整体 rollback（避免误伤已成功的行）
+            logger.error(f'{log_label} - 行处理失败: {exc}', exc_info=True)
+            errors.append(_row_failure_message(exc))
+            skipped += 1
+            continue
+    # 提交交给请求级事务（get_async_db），服务层不再手动 commit
+    if imported > 0:
+        schedule_post_commit_invalidation(db, invalidate_batch_import_caches)
+    return _build_batch_result(imported, skipped, errors, success_msg=success_msg, fail_msg=fail_msg)
+
+
+def _reject_unknown_customer(customer: str, customer_names: set) -> str | None:
+    """客户主数据校验（单一事实来源，2026-10-15 收敛）。
+
+    与 core 路径 ``batch_import_core._resolve_row_identity`` 同一道校验：customer
+    是无外键的名字快照，不校验会在库里留下永远关联不到客户的孤儿单据
+    （2026-08-10 曾因此产生 19 张孤儿订单）。此前该校验在
+    import_orders_service / import_stockins_service 各抄一份 + 事故注释两份。
+
+    Returns:
+        客户不在主数据时返回错误消息；通过时返回 None。
+    """
+    if customer not in customer_names:
+        return f'客户"{customer}"不存在于客户主数据，请先在客户管理中创建'
+    return None
+
+
 # ==================== 数据验证 ====================
 
 # 使用 fastapi_app.utils 中的统一验证函数
@@ -270,13 +341,8 @@ async def read_template_bytes() -> tuple[bytes, str]:
 async def import_orders_service(db: AsyncSession, file: ExcelUpload) -> BatchImportResult:
     """批量导入订单 - 支持统一模板格式。
 
-    Args:
-        file: 上传的 Excel 文件（.xlsx 格式）。
-        db: 异步数据库会话（读写主库）。
-        current_user: 当前登录用户（仅需通过权限校验）。
-
-    Returns:
-        BatchImportResult: 包含导入结果、消息和条数的响应。
+    骨架见 :func:`_run_sheet_import`；本函数只负责订单行的写入逻辑
+    （客户校验经 :func:`_reject_unknown_customer` 与 core 路径同口径）。
     """
     from fastapi_app.services.batch_service import get_all_products
 
@@ -291,63 +357,45 @@ async def import_orders_service(db: AsyncSession, file: ExcelUpload) -> BatchImp
         all_products = await get_all_products(db)
         product_map = {prod.name.lower().strip(): prod for prod in all_products}
         product_map.update({prod.barcode: prod for prod in all_products if prod.barcode})
-        # 客户必须在客户主数据中：customer 是无外键的名字快照，不校验会在库里留下
-        # 永远关联不到客户的孤儿单据（2026-08-10 曾因此产生 19 张孤儿订单）。
-        # core 路径的 _resolve_row_identity 一直有这道校验，下面两个单 Sheet 端点漏了。
+        # 客户必须在客户主数据中（校验经 _reject_unknown_customer，与 core 路径同口径）
         customer_names = await _pre_load_customer_names(db)
-        imported = 0
-        skipped = 0
-        errors = []
-        for row_data in data_list:
-            try:
-                # savepoint 隔离单行：行内异常仅回滚本行，不影响循环内已成功的行
-                async with db.begin_nested():
-                    deduct_flag = row_data.get('抵扣备货')
-                    note = row_data.get('备注')
-                    parsed = _parse_import_row(row_data, product_map, '订单数量', '订单数量无效')
-                    if parsed is None:
-                        skipped += 1
-                        continue
-                    if parsed[0] is None:
-                        errors.append(parsed[1])
-                        skipped += 1
-                        continue
-                    customer, product_id, qty = parsed
-                    # 客户主数据校验（与 core 的 _resolve_row_identity 同口径）
-                    if customer not in customer_names:
-                        errors.append(f'客户"{customer}"不存在于客户主数据，请先在客户管理中创建')
-                        skipped += 1
-                        continue
-                    order_no = await generate_order_number(db)
-                    order_date = datetime.now()
-                    order = Order(
-                        order_no=order_no, customer=customer, order_date=order_date,
-                        product_id=product_id, quantity=qty,
-                        note=str(note).strip() if note else '', status=ORDER_STATUS_PENDING_STOCK,
-                    )
-                    db.add(order)
-                    await db.flush()
-                    locked_product = await get_product_for_update(db, product_id)
-                    log = InventoryLog(
-                        product_id=product_id, change_type='订单', change_quantity=qty,
-                        related_id=order_no, note=f'批量导入订单：{order_no}',
-                        idem_key=_import_idem_key('order', customer, product_id, qty, order_date),
-                    )
-                    db.add(log)
-                    if deduct_flag and str(deduct_flag).strip() == '是':
-                        await process_order_deduction(db, order, product_id, qty, deduct_stock=True, product=locked_product)
-                # savepoint 成功提交后才计数，失败行不计入 imported
-                imported += 1
-            except (ValueError, TypeError, SQLAlchemyError) as exc:
-                # savepoint 已自动回滚本行，不再整体 rollback（避免误伤已成功的行）
-                logger.error(f'订单导入 - 行处理失败: {exc}', exc_info=True)
-                errors.append(_row_failure_message(exc))
-                skipped += 1
-                continue
-        # 提交交给请求级事务（get_async_db），服务层不再手动 commit
-        if imported > 0:
-            schedule_post_commit_invalidation(db, invalidate_batch_import_caches)
-        return _build_batch_result(imported, skipped, errors, success_msg='成功导入', fail_msg='没有成功导入任何订单')
+
+        async def _write_order_row(db: AsyncSession, row_data: dict) -> tuple[bool, str | None]:
+            deduct_flag = row_data.get('抵扣备货')
+            note = row_data.get('备注')
+            parsed = _parse_import_row(row_data, product_map, '订单数量', '订单数量无效')
+            if parsed is None:
+                return False, None
+            if parsed[0] is None:
+                return False, parsed[1]
+            customer, product_id, qty = parsed
+            # 客户主数据校验（与 core 的 _resolve_row_identity 同口径）
+            if (cust_err := _reject_unknown_customer(customer, customer_names)) is not None:
+                return False, cust_err
+            order_no = await generate_order_number(db)
+            order_date = datetime.now()
+            order = Order(
+                order_no=order_no, customer=customer, order_date=order_date,
+                product_id=product_id, quantity=qty,
+                note=str(note).strip() if note else '', status=ORDER_STATUS_PENDING_STOCK,
+            )
+            db.add(order)
+            await db.flush()
+            locked_product = await get_product_for_update(db, product_id)
+            log = InventoryLog(
+                product_id=product_id, change_type='订单', change_quantity=qty,
+                related_id=order_no, note=f'批量导入订单：{order_no}',
+                idem_key=_import_idem_key('order', customer, product_id, qty, order_date),
+            )
+            db.add(log)
+            if deduct_flag and str(deduct_flag).strip() == '是':
+                await process_order_deduction(db, order, product_id, qty, deduct_stock=True, product=locked_product)
+            return True, None
+
+        return await _run_sheet_rows(
+            db, data_list, _write_order_row,
+            '成功导入', '没有成功导入任何订单', log_label='订单导入',
+        )
     except (OSError, ValueError) as exc:
         await db.rollback()  # manual-tx: try/except 内显式事务控制
         logger.error(f'订单批量导入失败: {exc}', exc_info=True)
@@ -355,15 +403,7 @@ async def import_orders_service(db: AsyncSession, file: ExcelUpload) -> BatchImp
 
 
 async def import_case_stockouts_service(db: AsyncSession, file: ExcelUpload) -> BatchImportResult:
-    """批量导入皮套出库。
-
-    Args:
-        file: 上传的 Excel 文件（.xlsx 格式）。
-        db: 异步数据库会话（读写主库）。
-
-    Returns:
-        BatchImportResult: 包含导入结果、消息和条数的响应。
-    """
+    """批量导入皮套出库（骨架见 :func:`_run_sheet_rows`）。"""
     from fastapi_app.services.batch_service import find_case_locked
 
     if (file_err := _validate_xlsx_file(file)):
@@ -373,67 +413,48 @@ async def import_case_stockouts_service(db: AsyncSession, file: ExcelUpload) -> 
         if err:
             return BatchImportResult(success=False, message=err)
         data_list = _require_not_none(data_list, 'Excel 解析')
-        imported = skipped = 0
-        errors = []
-        for row_data in data_list:
+
+        async def _write_case_stockout_row(db: AsyncSession, row_data: dict) -> tuple[bool, str | None]:
+            product_identifier = row_data.get('产品名称') or row_data.get('产品') or row_data.get('皮套名称') or row_data.get('皮套')
+            quantity = row_data.get('出库数量') or row_data.get('数量')
+            customer = row_data.get('客户名称') or row_data.get('客户')
+            stockout_date_val = row_data.get('时间') or row_data.get('出库时间')
+            note = row_data.get('备注')
+            if not product_identifier or not quantity:
+                return False, None
+            product_identifier = str(product_identifier).strip()
+            customer = str(customer).strip() if customer else ''
             try:
-                # savepoint 隔离单行：行内异常仅回滚本行，不影响循环内已成功的行
-                async with db.begin_nested():
-                    product_identifier = row_data.get('产品名称') or row_data.get('产品') or row_data.get('皮套名称') or row_data.get('皮套')
-                    quantity = row_data.get('出库数量') or row_data.get('数量')
-                    customer = row_data.get('客户名称') or row_data.get('客户')
-                    stockout_date_val = row_data.get('时间') or row_data.get('出库时间')
-                    note = row_data.get('备注')
-                    if not product_identifier or not quantity:
-                        skipped += 1
-                        continue
-                    product_identifier = str(product_identifier).strip()
-                    customer = str(customer).strip() if customer else ''
-                    try:
-                        qty = int(quantity)
-                        if qty <= 0:
-                            errors.append('出库数量必须大于0')
-                            skipped += 1
-                            continue
-                    except ValueError:
-                        errors.append('出库数量必须是整数')
-                        skipped += 1
-                        continue
-                    case, case_err = await find_case_locked(db, product_identifier)
-                    if case_err:
-                        errors.append(case_err)
-                        skipped += 1
-                        continue
-                    case = _require_not_none(case, '皮套查询')
-                    # 统一负库存校验入口（env ALLOW_NEGATIVE_STOCK，缺省拒绝）
-                    if reason := check_stock_available(
-                        case.current_stock, -qty,
-                        message=f'库存不足，当前库存: {case.current_stock}',
-                    ):
-                        errors.append(reason)
-                        skipped += 1
-                        continue
-                    movement_date = parse_date_value(stockout_date_val) or datetime.now(UTC)
-                    movement_no = await generate_case_stockout_number(db)
-                    db.add(CaseMovement(
-                        case_id=case.id, direction='out', movement_no=movement_no,
-                        quantity=qty, customer=customer, movement_date=movement_date,
-                        note=str(note).strip() if note else '',
-                    ))
-                    case.current_stock -= qty
-                    case.version += 1
-                # savepoint 成功提交后才计数，失败行不计入 imported
-                imported += 1
-            except (ValueError, TypeError, SQLAlchemyError) as exc:
-                # savepoint 已自动回滚本行，不再整体 rollback（避免误伤已成功的行）
-                logger.error(f'皮套出库导入 - 行处理失败: {exc}', exc_info=True)
-                errors.append(_row_failure_message(exc))
-                skipped += 1
-                continue
-        # 提交交给请求级事务（get_async_db），服务层不再手动 commit
-        if imported > 0:
-            schedule_post_commit_invalidation(db, invalidate_batch_import_caches)
-        return _build_batch_result(imported, skipped, errors, success_msg='成功导入皮套出库', fail_msg='没有成功导入任何皮套出库')
+                qty = int(quantity)
+                if qty <= 0:
+                    return False, '出库数量必须大于0'
+            except ValueError:
+                return False, '出库数量必须是整数'
+            case, case_err = await find_case_locked(db, product_identifier)
+            if case_err:
+                return False, case_err
+            case = _require_not_none(case, '皮套查询')
+            # 统一负库存校验入口（env ALLOW_NEGATIVE_STOCK，缺省拒绝）
+            if reason := check_stock_available(
+                case.current_stock, -qty,
+                message=f'库存不足，当前库存: {case.current_stock}',
+            ):
+                return False, reason
+            movement_date = parse_date_value(stockout_date_val) or datetime.now(UTC)
+            movement_no = await generate_case_stockout_number(db)
+            db.add(CaseMovement(
+                case_id=case.id, direction='out', movement_no=movement_no,
+                quantity=qty, customer=customer, movement_date=movement_date,
+                note=str(note).strip() if note else '',
+            ))
+            case.current_stock -= qty
+            case.version += 1
+            return True, None
+
+        return await _run_sheet_rows(
+            db, data_list, _write_case_stockout_row,
+            '成功导入皮套出库', '没有成功导入任何皮套出库', log_label='皮套出库导入',
+        )
     except (OSError, ValueError) as exc:
         await db.rollback()  # manual-tx: try/except 内显式事务控制
         logger.error(f'皮套出库批量导入失败: {exc}', exc_info=True)
@@ -441,16 +462,7 @@ async def import_case_stockouts_service(db: AsyncSession, file: ExcelUpload) -> 
 
 
 async def import_case_stockins_service(db: AsyncSession, file: ExcelUpload) -> BatchImportResult:
-    """批量导入皮套入库。
-
-    Args:
-        file: 上传的 Excel 文件（.xlsx 格式）。
-        db: 异步数据库会话（读写主库）。
-        current_user: 当前登录用户（仅需通过权限校验）。
-
-    Returns:
-        BatchImportResult: 包含导入结果、消息和条数的响应。
-    """
+    """批量导入皮套入库（骨架见 :func:`_run_sheet_rows`）。"""
     from fastapi_app.services.batch_service import find_case_locked
 
     if (file_err := _validate_xlsx_file(file)):
@@ -460,60 +472,42 @@ async def import_case_stockins_service(db: AsyncSession, file: ExcelUpload) -> B
         if err:
             return BatchImportResult(success=False, message=err)
         data_list = _require_not_none(data_list, 'Excel 解析')
-        imported = 0
-        skipped = 0
-        errors = []
-        for row_data in data_list:
+
+        async def _write_case_stockin_row(db: AsyncSession, row_data: dict) -> tuple[bool, str | None]:
+            product_identifier = row_data.get('产品名称') or row_data.get('产品') or row_data.get('皮套名称') or row_data.get('皮套')
+            quantity = row_data.get('入库数量') or row_data.get('数量')
+            customer = row_data.get('客户名称') or row_data.get('客户')
+            stockin_date_val = row_data.get('时间') or row_data.get('入库时间')
+            note = row_data.get('备注')
+            if not product_identifier or not quantity:
+                return False, None
+            product_identifier = str(product_identifier).strip()
+            customer = str(customer).strip() if customer else ''
             try:
-                # savepoint 隔离单行：行内异常仅回滚本行，不影响循环内已成功的行
-                async with db.begin_nested():
-                    product_identifier = row_data.get('产品名称') or row_data.get('产品') or row_data.get('皮套名称') or row_data.get('皮套')
-                    quantity = row_data.get('入库数量') or row_data.get('数量')
-                    customer = row_data.get('客户名称') or row_data.get('客户')
-                    stockin_date_val = row_data.get('时间') or row_data.get('入库时间')
-                    note = row_data.get('备注')
-                    if not product_identifier or not quantity:
-                        skipped += 1
-                        continue
-                    product_identifier = str(product_identifier).strip()
-                    customer = str(customer).strip() if customer else ''
-                    try:
-                        qty = int(quantity)
-                        if qty <= 0:
-                            errors.append('入库数量必须大于0')
-                            skipped += 1
-                            continue
-                    except ValueError:
-                        errors.append('入库数量必须是整数')
-                        skipped += 1
-                        continue
-                    case, case_err = await find_case_locked(db, product_identifier)
-                    if case_err:
-                        errors.append(case_err)
-                        skipped += 1
-                        continue
-                    case = _require_not_none(case, '皮套查询')
-                    stockin_date = parse_date_value(stockin_date_val) or datetime.now(UTC)  # aware UTC：movement_date 列为 timestamptz
-                    movement_no = await generate_case_stockin_number(db)
-                    db.add(CaseMovement(
-                        case_id=case.id, direction='in', movement_no=movement_no,
-                        quantity=qty, customer=customer, movement_date=stockin_date,
-                        note=str(note).strip() if note else '',
-                    ))
-                    case.current_stock += qty
-                    case.version += 1
-                # savepoint 成功提交后才计数，失败行不计入 imported
-                imported += 1
-            except (ValueError, TypeError, SQLAlchemyError) as exc:
-                # savepoint 已自动回滚本行，不再整体 rollback（避免误伤已成功的行）
-                logger.error(f'皮套入库导入 - 行处理失败: {exc}', exc_info=True)
-                errors.append(_row_failure_message(exc))
-                skipped += 1
-                continue
-        # 提交交给请求级事务（get_async_db），服务层不再手动 commit
-        if imported > 0:
-            schedule_post_commit_invalidation(db, invalidate_batch_import_caches)
-        return _build_batch_result(imported, skipped, errors, success_msg='成功导入皮套入库', fail_msg='没有成功导入任何皮套入库')
+                qty = int(quantity)
+                if qty <= 0:
+                    return False, '入库数量必须大于0'
+            except ValueError:
+                return False, '入库数量必须是整数'
+            case, case_err = await find_case_locked(db, product_identifier)
+            if case_err:
+                return False, case_err
+            case = _require_not_none(case, '皮套查询')
+            stockin_date = parse_date_value(stockin_date_val) or datetime.now(UTC)  # aware UTC：movement_date 列为 timestamptz
+            movement_no = await generate_case_stockin_number(db)
+            db.add(CaseMovement(
+                case_id=case.id, direction='in', movement_no=movement_no,
+                quantity=qty, customer=customer, movement_date=stockin_date,
+                note=str(note).strip() if note else '',
+            ))
+            case.current_stock += qty
+            case.version += 1
+            return True, None
+
+        return await _run_sheet_rows(
+            db, data_list, _write_case_stockin_row,
+            '成功导入皮套入库', '没有成功导入任何皮套入库', log_label='皮套入库导入',
+        )
     except (OSError, ValueError) as exc:
         await db.rollback()  # manual-tx: try/except 内显式事务控制
         logger.error(f'皮套入库批量导入失败: {exc}', exc_info=True)
@@ -521,16 +515,7 @@ async def import_case_stockins_service(db: AsyncSession, file: ExcelUpload) -> B
 
 
 async def import_stockins_service(db: AsyncSession, file: ExcelUpload) -> BatchImportResult:
-    """批量导入备货 - 支持统一导入模板。
-
-    Args:
-        file: 上传的 Excel 文件（.xlsx 格式）。
-        db: 异步数据库会话（读写主库）。
-        current_user: 当前登录用户（仅需通过权限校验）。
-
-    Returns:
-        BatchImportResult: 包含导入结果、消息和条数的响应。
-    """
+    """批量导入备货 - 支持统一导入模板（骨架见 :func:`_run_sheet_rows`）。"""
     from fastapi_app.services.batch_service import get_all_products
 
     if (file_err := _validate_xlsx_file(file)):
@@ -544,60 +529,42 @@ async def import_stockins_service(db: AsyncSession, file: ExcelUpload) -> BatchI
         all_products = await get_all_products(db)
         product_map = {prod.name.lower().strip(): prod for prod in all_products}
         product_map.update({prod.barcode: prod for prod in all_products if prod.barcode})
-        # 客户必须在客户主数据中：customer 是无外键的名字快照，不校验会在库里留下
-        # 永远关联不到客户的孤儿单据（2026-08-10 曾因此产生 19 张孤儿订单）。
-        # core 路径的 _resolve_row_identity 一直有这道校验，下面两个单 Sheet 端点漏了。
+        # 客户必须在客户主数据中（校验经 _reject_unknown_customer，与 core 路径同口径）
         customer_names = await _pre_load_customer_names(db)
-        imported = 0
-        skipped = 0
-        errors = []
-        for row_data in data_list:
-            try:
-                # savepoint 隔离单行：行内异常仅回滚本行，不影响循环内已成功的行
-                async with db.begin_nested():
-                    stockin_date_val = row_data.get('时间') or row_data.get('备货时间')
-                    note = row_data.get('备注')
-                    parsed = _parse_import_row(row_data, product_map, '备货数量', '备货数量无效')
-                    if parsed is None:
-                        skipped += 1
-                        continue
-                    if parsed[0] is None:
-                        errors.append(parsed[1])
-                        skipped += 1
-                        continue
-                    customer, product_id, qty = parsed
-                    # 客户主数据校验（与 core 的 _resolve_row_identity 同口径）
-                    if customer not in customer_names:
-                        errors.append(f'客户"{customer}"不存在于客户主数据，请先在客户管理中创建')
-                        skipped += 1
-                        continue
-                    stockin_date = parse_date_value(stockin_date_val) or datetime.now(UTC)  # aware UTC：stockin_date 列为 timestamptz
-                    stockin_no = await generate_stockin_number(db)
-                    stockin = StockIn(
-                        stockin_no=stockin_no, stockin_date=stockin_date, customer=customer,
-                        product_id=product_id, quantity=qty, note=str(note).strip() if note else '',
-                    )
-                    db.add(stockin)
-                    locked_product = await get_product_for_update(db, product_id)
-                    locked_product.current_stock += qty
-                    log = InventoryLog(
-                        product_id=product_id, change_type='备货', change_quantity=qty,
-                        related_id=stockin_no, note=f'批量导入备货：{stockin_no}',
-                        idem_key=_import_idem_key('stockin', customer, product_id, qty, stockin_date),
-                    )
-                    db.add(log)
-                # savepoint 成功提交后才计数，失败行不计入 imported
-                imported += 1
-            except (ValueError, TypeError, SQLAlchemyError) as exc:
-                # savepoint 已自动回滚本行，不再整体 rollback（避免误伤已成功的行）
-                logger.error(f'备货导入 - 行处理失败: {exc}', exc_info=True)
-                errors.append(_row_failure_message(exc))
-                skipped += 1
-                continue
-        # 提交交给请求级事务（get_async_db），服务层不再手动 commit
-        if imported > 0:
-            schedule_post_commit_invalidation(db, invalidate_batch_import_caches)
-        return _build_batch_result(imported, skipped, errors, success_msg='成功导入备货', fail_msg='没有成功导入任何备货')
+
+        async def _write_stockin_row(db: AsyncSession, row_data: dict) -> tuple[bool, str | None]:
+            stockin_date_val = row_data.get('时间') or row_data.get('备货时间')
+            note = row_data.get('备注')
+            parsed = _parse_import_row(row_data, product_map, '备货数量', '备货数量无效')
+            if parsed is None:
+                return False, None
+            if parsed[0] is None:
+                return False, parsed[1]
+            customer, product_id, qty = parsed
+            # 客户主数据校验（与 core 的 _resolve_row_identity 同口径）
+            if (cust_err := _reject_unknown_customer(customer, customer_names)) is not None:
+                return False, cust_err
+            stockin_date = parse_date_value(stockin_date_val) or datetime.now(UTC)  # aware UTC：stockin_date 列为 timestamptz
+            stockin_no = await generate_stockin_number(db)
+            stockin = StockIn(
+                stockin_no=stockin_no, stockin_date=stockin_date, customer=customer,
+                product_id=product_id, quantity=qty, note=str(note).strip() if note else '',
+            )
+            db.add(stockin)
+            locked_product = await get_product_for_update(db, product_id)
+            locked_product.current_stock += qty
+            log = InventoryLog(
+                product_id=product_id, change_type='备货', change_quantity=qty,
+                related_id=stockin_no, note=f'批量导入备货：{stockin_no}',
+                idem_key=_import_idem_key('stockin', customer, product_id, qty, stockin_date),
+            )
+            db.add(log)
+            return True, None
+
+        return await _run_sheet_rows(
+            db, data_list, _write_stockin_row,
+            '成功导入备货', '没有成功导入任何备货', log_label='备货导入',
+        )
     except (OSError, ValueError) as exc:
         await db.rollback()  # manual-tx: try/except 内显式事务控制
         logger.error(f'备货批量导入失败: {exc}', exc_info=True)
@@ -605,16 +572,7 @@ async def import_stockins_service(db: AsyncSession, file: ExcelUpload) -> BatchI
 
 
 async def import_stockouts_service(db: AsyncSession, file: ExcelUpload) -> BatchImportResult:
-    """批量导入出库。
-
-    Args:
-        file: 上传的 Excel 文件（.xlsx 格式）。
-        db: 异步数据库会话（读写主库）。
-        current_user: 当前登录用户（仅需通过权限校验）。
-
-    Returns:
-        BatchImportResult: 包含导入结果、消息和条数的响应。
-    """
+    """批量导入出库（骨架见 :func:`_run_sheet_rows`）。"""
     from fastapi_app.services.batch_service import get_product_by_identifier
 
     if (file_err := _validate_xlsx_file(file)):
@@ -624,85 +582,59 @@ async def import_stockouts_service(db: AsyncSession, file: ExcelUpload) -> Batch
         if err:
             return BatchImportResult(success=False, message=err)
         data_list = _require_not_none(data_list, 'Excel 解析')
-        imported = 0
-        skipped = 0
-        errors = []
-        for row_data in data_list:
+
+        async def _write_stockout_row(db: AsyncSession, row_data: dict) -> tuple[bool, str | None]:
+            product_identifier = row_data.get('产品名称') or row_data.get('产品')
+            quantity = row_data.get('出货数量') or row_data.get('数量')
+            customer = row_data.get('客户名称') or row_data.get('客户')
+            stockout_date_val = row_data.get('时间') or row_data.get('出货时间')
+            note = row_data.get('备注')
+            if not product_identifier or not quantity:
+                return False, None
+            product_identifier = str(product_identifier).strip()
+            customer = str(customer).strip() if customer else ''
+            if not customer:
+                return False, '出货必须选择客户'
+            product = await get_product_by_identifier(db, product_identifier)
+            if not product:
+                return False, f'产品 {product_identifier} 不存在'
+            product = await get_product_for_update(db, product.id)
             try:
-                # savepoint 隔离单行：行内异常仅回滚本行，不影响循环内已成功的行
-                async with db.begin_nested():
-                    product_identifier = row_data.get('产品名称') or row_data.get('产品')
-                    quantity = row_data.get('出货数量') or row_data.get('数量')
-                    customer = row_data.get('客户名称') or row_data.get('客户')
-                    stockout_date_val = row_data.get('时间') or row_data.get('出货时间')
-                    note = row_data.get('备注')
-                    if not product_identifier or not quantity:
-                        skipped += 1
-                        continue
-                    product_identifier = str(product_identifier).strip()
-                    customer = str(customer).strip() if customer else ''
-                    if not customer:
-                        errors.append('出货必须选择客户')
-                        skipped += 1
-                        continue
-                    product = await get_product_by_identifier(db, product_identifier)
-                    if not product:
-                        errors.append(f'产品 {product_identifier} 不存在')
-                        skipped += 1
-                        continue
-                    product = await get_product_for_update(db, product.id)
-                    try:
-                        qty = int(quantity)
-                        if qty <= 0:
-                            errors.append('出库数量必须大于0')
-                            skipped += 1
-                            continue
-                    except ValueError:
-                        errors.append('出库数量必须是整数')
-                        skipped += 1
-                        continue
-                    # 统一负库存校验入口（env ALLOW_NEGATIVE_STOCK，缺省拒绝）
-                    if reason := check_stock_available(
-                        product.current_stock, -qty,
-                        message=f'库存不足，当前库存: {product.current_stock}',
-                    ):
-                        errors.append(reason)
-                        skipped += 1
-                        continue
-                    # 校验可出货量（基于订单支持）
-                    shipment_info = await calculate_available_shipment_quantity(
-                        db, product.id, customer,
-                    )
-                    if shipment_info['available_quantity'] <= 0:
-                        errors.append(f'客户{customer}没有可用的订单支持出货')
-                        skipped += 1
-                        continue
-                    if qty > shipment_info['available_quantity']:
-                        errors.append(f"出货数量{qty}超过可出货量{shipment_info['available_quantity']}")
-                        skipped += 1
-                        continue
-                    stockout_date = parse_date_value(stockout_date_val) or datetime.now()
-                    # 按订单可用量分配出货，直到出货数量耗尽
-                    await _allocate_stockout_to_orders(db, product, qty, customer, stockout_date, note, shipment_info)
-                    product.current_stock -= qty
-                    log = InventoryLog(
-                        product_id=product.id, change_type='出库', change_quantity=-qty,
-                        related_id='', note=f'批量导入出库：客户{customer}，数量{qty}',
-                        idem_key=_import_idem_key('stockout', customer, product.id, qty, stockout_date),
-                    )
-                    db.add(log)
-                # savepoint 成功提交后才计数，失败行不计入 imported
-                imported += 1
-            except (ValueError, TypeError, SQLAlchemyError) as exc:
-                # savepoint 已自动回滚本行，不再整体 rollback（避免误伤已成功的行）
-                logger.error(f'出库导入 - 行处理失败: {exc}', exc_info=True)
-                errors.append(_row_failure_message(exc))
-                skipped += 1
-                continue
-        # 提交交给请求级事务（get_async_db），服务层不再手动 commit
-        if imported > 0:
-            schedule_post_commit_invalidation(db, invalidate_batch_import_caches)
-        return _build_batch_result(imported, skipped, errors, success_msg='成功导入出货', fail_msg='没有成功导入任何出货')
+                qty = int(quantity)
+                if qty <= 0:
+                    return False, '出库数量必须大于0'
+            except ValueError:
+                return False, '出库数量必须是整数'
+            # 统一负库存校验入口（env ALLOW_NEGATIVE_STOCK，缺省拒绝）
+            if reason := check_stock_available(
+                product.current_stock, -qty,
+                message=f'库存不足，当前库存: {product.current_stock}',
+            ):
+                return False, reason
+            # 校验可出货量（基于订单支持）
+            shipment_info = await calculate_available_shipment_quantity(
+                db, product.id, customer,
+            )
+            if shipment_info['available_quantity'] <= 0:
+                return False, f'客户{customer}没有可用的订单支持出货'
+            if qty > shipment_info['available_quantity']:
+                return False, f"出货数量{qty}超过可出货量{shipment_info['available_quantity']}"
+            stockout_date = parse_date_value(stockout_date_val) or datetime.now()
+            # 按订单可用量分配出货，直到出货数量耗尽
+            await _allocate_stockout_to_orders(db, product, qty, customer, stockout_date, note, shipment_info)
+            product.current_stock -= qty
+            log = InventoryLog(
+                product_id=product.id, change_type='出库', change_quantity=-qty,
+                related_id='', note=f'批量导入出库：客户{customer}，数量{qty}',
+                idem_key=_import_idem_key('stockout', customer, product.id, qty, stockout_date),
+            )
+            db.add(log)
+            return True, None
+
+        return await _run_sheet_rows(
+            db, data_list, _write_stockout_row,
+            '成功导入出货', '没有成功导入任何出货', log_label='出库导入',
+        )
     except (OSError, ValueError) as exc:
         await db.rollback()  # manual-tx: try/except 内显式事务控制
         logger.error(f'出库批量导入失败: {exc}', exc_info=True)
