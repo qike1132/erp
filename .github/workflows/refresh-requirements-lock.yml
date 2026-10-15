@@ -1,0 +1,47 @@
+name: Refresh requirements locks
+
+# 上游发版会让 requirements/<tier>.lock 与 <tier>.txt 的重新解析结果脱节，
+# 使 lint 门禁「Check requirements lock freshness」无缘无故变红（与代码改动无关）。
+# 本工作流每周在 CI 环境重跑 uv pip compile 刷新全部锁并开 PR，把「追上游」
+# 变成后台自动任务，而不是让人/CI 被动撞红。
+#
+# 为什么必须在 CI 跑而不是本地：本地 PyPI 镜像可能滞后（实测本机解析 pluggy 1.6.0，
+# 而 CI 解析 1.7.0），本地刷新的锁仍会与 CI 口径不符 → CI 依旧红。
+
+on:
+  schedule:
+    - cron: '17 3 * * 1' # 每周一 03:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Refresh all locks
+        run: |
+          set -e
+          for tier in base dev test ocr s3 desktop migration; do
+            rm -f "requirements/$tier.lock"
+            uv pip compile "requirements/$tier.txt" -o "requirements/$tier.lock" \
+              --quiet --python-platform windows --python-version 3.13
+          done
+
+      - name: Open PR if changed
+        uses: peter-evans/create-pull-request@v7
+        with:
+          commit-message: 'chore(deps): 自动刷新 requirements 锁'
+          title: 'chore(deps): 自动刷新 requirements 锁（上游漂移）'
+          body: |
+            本 PR 由 `refresh-requirements-lock` 工作流自动生成，刷新上游发版导致的锁过期。
+            合并后 lint 门禁「Check requirements lock freshness」恢复绿色。
+          branch: chore/auto-refresh-requirements-lock
+          delete-branch: true
