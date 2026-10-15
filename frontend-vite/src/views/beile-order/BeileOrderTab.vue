@@ -17,35 +17,39 @@
         <div class="bo-table-wrap">
           <!-- 水平滚动容器：表头与虚拟列表主体同处其中 → 横向滚动天然同步 -->
           <div class="bo-table-scroll">
-            <div class="bo-table-inner" :style="{ minWidth: tableMinWidth() + 'px' }">
-              <!-- 表头（独立于虚拟滚动，粘在顶部）；右内边距 = 纵向滚动条宽度，保证与行左对齐 -->
-              <div class="bo-grid bo-grid-header" :style="{ paddingRight: scrollbarWidth + 'px' }">
-                <div v-if="canPrint" class="bo-th bo-th-center bo-th-select" style="width: 40px;">
-                  <UiCheckbox :checked="isAllSelected" @update:checked="toggleSelectAll" />
+            <div class="bo-table-inner" :style="{ minWidth: tableMinWidth + 'px' }">
+              <!-- 表头（独立于虚拟滚动，粘在顶部）；与行块同用 beileGridTemplate 列模板，逐列对齐 -->
+              <div
+                class="bo-grid bo-grid-header"
+                :style="{ paddingRight: scrollbarWidth + 'px', gridTemplateColumns: gridTemplate }"
+              >
+                <div
+                  v-for="col in cols"
+                  :key="col.key"
+                  class="bo-th"
+                  :class="[`bo-th-${col.align}`, { 'bo-th-select': col.key === 'select' }]"
+                >
+                  <UiCheckbox
+                    v-if="col.key === 'select'"
+                    :checked="isAllSelected"
+                    @update:checked="toggleSelectAll"
+                  />
+                  <template v-else-if="col.key === 'prodQty'">
+                    <span title="生产数量 = 订单数量 + 备品数量">生产数量</span>
+                  </template>
+                  <template v-else>{{ col.label }}</template>
                 </div>
-                <div class="bo-th bo-th-center" style="width: 90px;">订单类型</div>
-                <div class="bo-th bo-th-center" style="width: 160px;">订单号</div>
-                <div class="bo-th bo-th-center" style="width: 150px;">下单时间</div>
-                <div class="bo-th bo-th-center" style="width: 170px;">客户名称</div>
-                <div class="bo-th bo-th-center" style="width: 100px;">工厂</div>
-                <!-- 产品名称：搜索态专属列（后端按 product 参数收窄 items 到命中 SKU） -->
-                <div v-if="appliedProduct" class="bo-th bo-th-center" style="width: 180px;">产品名称</div>
-                <div class="bo-th bo-th-center" style="width: 90px;">SKU</div>
-                <div class="bo-th bo-th-center" style="width: 110px;">订单数量</div>
-                <div class="bo-th bo-th-center" style="width: 110px;" title="生产数量 = 订单数量 + 备品数量">生产数量</div>
-                <div class="bo-th bo-th-center" style="width: 110px;">小义开单</div>
-                <div v-if="confirmStatus !== 'unconfirmed'" class="bo-th bo-th-center" style="width: 110px;">确认状态</div>
-                <div v-if="confirmStatus !== 'confirmed'" class="bo-th bo-th-center" style="width: 130px;">确认操作</div>
-                <div class="bo-th bo-th-left" style="width: 160px;">备注</div>
               </div>
 
-              <!-- 虚拟滚动主体：固定行高（汇总单行，无展开） -->
+              <!-- 虚拟滚动主体：订单块变高（行块高度 = SKU 行数 × 56px），dynamicHeight 自适应 -->
               <div ref="listAreaRef" class="bo-list-area">
                 <VirtualList
                   v-if="listAreaHeight > 0"
                   ref="virtualListRef"
                   :items="displayOrders"
-                  :item-height="56"
+                  :dynamic-height="true"
+                  :estimated-height="estimatedBlockHeight"
+                  :item-height="BEILE_ROW_HEIGHT"
                   :container-height="listAreaHeight"
                   :item-key="(i: BeileOrderRowType) => i.id"
                   class="bo-virtual-list"
@@ -59,7 +63,7 @@
                       :confirmable="canConfirm"
                       :selectable="canPrint"
                       :selected="selectedIds.has(rowKey(item))"
-                      :has-keyword="!!appliedProduct"
+                      :keyword="appliedProduct"
                       @open="openDetail"
                       @confirm="handleConfirm"
                       @toggle-select="toggleSelect"
@@ -106,15 +110,22 @@
  * provide/inject 共享同一状态实例，本组件仅注入并负责
  * 虚拟滚动容器高度测量与滚动归位。
  */
-import { ref, watch, onUnmounted } from 'vue'
+import { ref, computed, watch, onUnmounted, nextTick } from 'vue'
 import UiPagination from '@/components/ui/UiPagination.vue'
 import UiSpinner from '@/components/ui/UiSpinner.vue'
 import UiCheckbox from '@/components/ui/UiCheckbox.vue'
 import VirtualList from '@/components/ui/VirtualList.vue'
 import BeileOrderRow from '@/views/beile-order/components/BeileOrderRow.vue'
 import BeileOrderDetailDialog from '@/views/beile-order/components/BeileOrderDetailDialog.vue'
-import { injectBeileOrders } from '@/views/beile-order/composables/useBeileOrders'
-import type { BeileOrderRow as BeileOrderRowType } from '@/views/beile-order/composables/useBeileOrders'
+import {
+  injectBeileOrders,
+  BEILE_ROW_HEIGHT,
+  beileColumns,
+  beileGridTemplate,
+  beileMinWidth,
+  filterVisibleSkus,
+} from '@/views/beile-order/composables/useBeileOrders'
+import type { BeileOrderRow as BeileOrderRowType, SkuQtyFields } from '@/views/beile-order/composables/useBeileOrders'
 
 const {
   PAGE_SIZE_OPTIONS,
@@ -146,11 +157,37 @@ const {
   canPrint,
 } = injectBeileOrders()
 
+// ==================== 列布局（与行块共用 beileColumns 单一真源） ====================
+const cols = computed(() => beileColumns({ canPrint: canPrint.value, confirmStatus: confirmStatus.value }))
+const gridTemplate = computed(() => beileGridTemplate(cols.value))
+const tableMinWidth = computed(() => beileMinWidth(cols.value))
+
+/**
+ * 变高虚拟滚动的「预估块高」：订单块高度 = (SKU 行数 + 多 SKU 合计行) × 56px。
+ * 用当前页平均块高作预估值，首屏占位更贴近真实；实际高度由 VirtualList 的
+ * ResizeObserver 测量后逐块校正（min-height 占位 + measureItems）。
+ */
+const estimatedBlockHeight = computed(() => {
+  const list = displayOrders.value
+  if (list.length === 0) return BEILE_ROW_HEIGHT
+  let total = 0
+  for (const o of list) {
+    const base: SkuQtyFields[] = (o.items && o.items.length > 0)
+      ? o.items
+      : [{ product_name: o.product_name ?? null, quantity: o.quantity ?? 0 }]
+    const n = filterVisibleSkus(base, appliedProduct.value).length
+    total += (n + (n > 1 ? 1 : 0)) * BEILE_ROW_HEIGHT
+  }
+  return Math.max(BEILE_ROW_HEIGHT, Math.round(total / list.length))
+})
+
 // ==================== 虚拟滚动容器高度测量 ====================
 const listAreaRef = ref<HTMLElement | null>(null)
 const listAreaHeight = ref(0)
 const virtualListRef = ref<{
   scrollToTop: () => void
+  measureItems?: () => void
+  remeasureItem?: (index: number) => void
 } | null>(null)
 
 function measureListArea() {
@@ -159,15 +196,11 @@ function measureListArea() {
   }
 }
 
-// 水平滚动所需的最小宽度 = 各列最小宽之和（与表头 / 行内联列宽一致）
-function tableMinWidth() {
-  let w = 90 + 150 + 170 + 100 + 90 + 110 + 110 + 110 + 160
-  if (canPrint.value) w += 40
-  if (appliedProduct.value) w += 180
-  if (confirmStatus.value !== 'unconfirmed') w += 110
-  if (confirmStatus.value !== 'confirmed') w += 130
-  return w
-}
+// 展示列表变化（翻页/筛选/确认乐观移除）后作废全部块高缓存并重测：
+// dynamicHeight 的 min-height 占位会顶住旧高度，不作废则新页块高错乱。
+watch(displayOrders, () => {
+  nextTick(() => virtualListRef.value?.measureItems?.())
+})
 
 /** 纵向滚动条宽度：表头需预留等宽右内边距，使末列与行左对齐 */
 const scrollbarWidth = ref(0)
@@ -241,8 +274,9 @@ watch([page, appliedProduct, appliedCustomer, confirmStatus], () => {
   display: flex;
   flex-direction: column;
 }
+/* 表头：CSS Grid，列模板由 beileGridTemplate 与行块同源（逐列对齐） */
 .bo-grid {
-  display: flex;
+  display: grid;
   width: 100%;
   font-size: 13px;
 }
@@ -252,7 +286,6 @@ watch([page, appliedProduct, appliedCustomer, confirmStatus], () => {
 }
 .bo-th {
   box-sizing: border-box;
-  flex: 0 0 auto;
   padding: 10px 14px;
   border-right: 1px solid #d8dce2;
   overflow: hidden;
@@ -268,7 +301,6 @@ watch([page, appliedProduct, appliedCustomer, confirmStatus], () => {
   white-space: nowrap;
 }
 .bo-th:last-child {
-  flex: 1 1 auto;
   min-width: 160px;
   border-right: none;
 }

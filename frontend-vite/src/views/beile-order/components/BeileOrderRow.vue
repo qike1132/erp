@@ -1,81 +1,65 @@
 <template>
-  <!-- 汇总列表单行：一行一单，仅订单级汇总字段；SKU 明细下沉到详情弹窗 -->
+  <!-- 汇总列表订单块：一行一 SKU，订单级列跨行合并（对齐 /report 订单流水的多 SKU 效果） -->
   <div
     :class="[
-      'bo-grid bo-grid-row bo-row-clickable',
+      'bo-block bo-row-clickable',
       { 'bo-row-highlight': highlightId !== null && String(item.id) === highlightId },
     ]"
+    :style="blockStyle"
     @click="openDetail(item)"
   >
-    <div v-if="selectable" class="bo-td bo-td-center bo-td-select" style="width: 40px;" @click.stop>
-      <UiCheckbox :checked="selected" :aria-label="`选择订单 ${item.order_no || item.id}`" @update:checked="$emit('toggleSelect', item)" />
-    </div>
+    <!-- 订单级列：grid-row 跨 span 行（等效 rowspan），首行起排 -->
+    <div
+      v-for="col in orderCols"
+      :key="`o-${col.key}`"
+      class="bo-td"
+      :class="[`bo-td-${col.align}`, { 'bo-td-order-no': col.key === 'orderNo', 'bo-td-select': col.key === 'select', 'bo-td-nowrap': col.key !== 'note' }]"
+      :style="cellStyle(col.key, 1, span)"
+    >
+      <!-- 行选择 -->
+      <UiCheckbox
+        v-if="col.key === 'select'"
+        :checked="selected"
+        :aria-label="`选择订单 ${item.order_no || item.id}`"
+        @click.stop
+        @update:checked="$emit('toggleSelect', item)"
+      />
 
-    <!-- 订单类型：订单/备货徽章 -->
-    <div class="bo-td bo-td-center" style="width: 90px;">
-      <span v-if="item.record_type === 'stockin'" class="bo-type-badge bo-type-badge--stockin">备货</span>
-      <span v-else class="bo-type-badge bo-type-badge--order">订单</span>
-    </div>
+      <!-- 订单类型：订单/备货徽章 -->
+      <template v-else-if="col.key === 'type'">
+        <span v-if="item.record_type === 'stockin'" class="bo-type-badge bo-type-badge--stockin">备货</span>
+        <span v-else class="bo-type-badge bo-type-badge--order">订单</span>
+      </template>
 
-    <!-- 订单号：紧随类型列之后（2026-09-29 恢复；类型列保留） -->
-    <div class="bo-td bo-td-center bo-td-nowrap bo-td-order-no" style="width: 160px;">
-      <span class="bo-order-no" :title="item.order_no || ''">{{ item.order_no || '-' }}</span>
-    </div>
+      <!-- 订单号 -->
+      <span v-else-if="col.key === 'orderNo'" class="bo-order-no" :title="item.order_no || ''">{{ item.order_no || '-' }}</span>
 
-    <div class="bo-td bo-td-center bo-td-nowrap" style="width: 150px;">
-      <span class="bo-cell-muted" :title="item.order_date || ''">{{ item.order_date || '-' }}</span>
-    </div>
+      <span v-else-if="col.key === 'date'" class="bo-cell-muted" :title="item.order_date || ''">{{ item.order_date || '-' }}</span>
 
-    <div class="bo-td bo-td-center bo-td-nowrap" style="width: 170px;">
-      <span class="bo-customer" :title="item.customer || ''">{{ item.customer || '-' }}</span>
-    </div>
+      <span v-else-if="col.key === 'customer'" class="bo-customer" :title="item.customer || ''">{{ item.customer || '-' }}</span>
 
-    <div class="bo-td bo-td-center bo-td-nowrap" style="width: 100px;">
-      <span class="bo-cell-main">{{ item.factories?.join(', ') || '湖北' }}</span>
-    </div>
+      <span v-else-if="col.key === 'factory'" class="bo-cell-main">{{ item.factories?.join(', ') || '湖北' }}</span>
 
-    <!-- 产品名称：搜索态专属列（后端已把 items 收窄为命中 SKU，此处直接读收窄结果） -->
-    <div v-if="hasKeyword" class="bo-td bo-td-center bo-td-nowrap" style="width: 180px;">
-      <span class="bo-search-name" :title="searchName">{{ searchName }}</span>
-    </div>
+      <!-- 小义开单 -->
+      <template v-else-if="col.key === 'opened'">
+        <span v-if="item.is_ordered === true" class="bo-open-badge bo-open-badge--done">已开单</span>
+        <span
+          v-else-if="item.confirmed === false"
+          class="bo-open-badge bo-open-badge--pending"
+          :title="NOT_ORDERED_TIP"
+        >未开单</span>
+        <span v-else class="bo-open-badge bo-open-badge--muted">未开单</span>
+      </template>
 
-    <!-- SKU 数：多 SKU 订单用徽章提示，点击同样进入详情 -->
-    <div class="bo-td bo-td-center" style="width: 90px;">
-      <span class="bo-sku-count" :class="{ 'bo-sku-count--multi': skuCount > 1 }">{{ skuCount }} 项</span>
-    </div>
+      <!-- 确认状态 -->
+      <template v-else-if="col.key === 'confirmStatus'">
+        <span v-if="item.confirmed" class="bo-confirm-badge bo-confirm-badge--done">已确认</span>
+        <span v-else class="bo-confirm-badge bo-confirm-badge--pending">未确认</span>
+      </template>
 
-    <!-- 订单数量：订单级汇总（rowTotalOrderQty 口径），来自采购单实际下单量时加粗 -->
-    <div class="bo-td bo-td-center" style="width: 110px;">
-      <span class="bo-qty" :class="{ 'bo-qty--ordered': item.is_ordered === true }">{{ totalOrderQty }}</span>
-    </div>
-
-    <!-- 生产数量：订单级汇总 = 订单数量 + 备品数量；不可派生显示「—」 -->
-    <div class="bo-td bo-td-center" style="width: 110px;">
-      <span v-if="totalProdQty !== null" class="bo-prod">{{ totalProdQty }}</span>
-      <span v-else class="bo-prod bo-prod--none">—</span>
-    </div>
-
-    <!-- 小义开单 -->
-    <div class="bo-td bo-td-center" style="width: 110px;">
-      <span v-if="item.is_ordered === true" class="bo-open-badge bo-open-badge--done">已开单</span>
-      <span
-        v-else-if="item.confirmed === false"
-        class="bo-open-badge bo-open-badge--pending"
-        :title="NOT_ORDERED_TIP"
-      >未开单</span>
-      <span v-else class="bo-open-badge bo-open-badge--muted">未开单</span>
-    </div>
-
-    <!-- 确认状态列：未确认 TAB 下整列隐藏 -->
-    <div v-if="confirmStatus !== 'unconfirmed'" class="bo-td bo-td-center" style="width: 110px;">
-      <span v-if="item.confirmed" class="bo-confirm-badge bo-confirm-badge--done">已确认</span>
-      <span v-else class="bo-confirm-badge bo-confirm-badge--pending">未确认</span>
-    </div>
-
-    <!-- 确认操作列：未确认记录显示确认按钮 -->
-    <div v-if="confirmStatus !== 'confirmed'" class="bo-td bo-td-center" style="width: 130px;">
+      <!-- 确认操作 -->
       <button
-        v-if="confirmable && !item.confirmed"
+        v-else-if="col.key === 'confirmAction' && confirmable && !item.confirmed"
         class="bo-confirm-btn"
         :disabled="isConfirming || (item.confirmed === false && item.is_ordered === false)"
         :title="item.confirmed === false && item.is_ordered === false ? NOT_ORDERED_TOAST : ''"
@@ -83,34 +67,77 @@
       >
         {{ isConfirming ? '确认中…' : '确认订单' }}
       </button>
-      <span v-else class="bo-confirm-badge bo-confirm-badge--done">已确认</span>
+      <span v-else-if="col.key === 'confirmAction'" class="bo-confirm-badge bo-confirm-badge--done">已确认</span>
+
+      <!-- 备注 -->
+      <span v-else-if="col.key === 'note'" class="bo-cell-muted" :title="item.note || ''">{{ item.note || '-' }}</span>
     </div>
 
-    <!-- 备注：订单级，单行省略 -->
-    <div class="bo-td bo-td-left bo-td-nowrap" style="width: 160px;">
-      <span class="bo-cell-muted" :title="item.note || ''">{{ item.note || '-' }}</span>
-    </div>
+    <!-- SKU 列：逐 SKU 一行（产品名称/产品条码/订单数量/生产数量） -->
+    <template v-for="(sku, si) in skus" :key="si">
+      <div
+        v-for="col in skuCols"
+        :key="`s-${si}-${col.key}`"
+        class="bo-td"
+        :class="[`bo-td-${col.align}`, { 'bo-td-nowrap': col.key !== 'productName' }]"
+        :style="cellStyle(col.key, si + 1, 1)"
+      >
+        <span
+          v-if="col.key === 'productName'"
+          class="bo-sku-name"
+          :title="sku.product_name || ''"
+        >{{ sku.product_name || '-' }}</span>
+        <span v-else-if="col.key === 'productBarcode'" class="bo-barcode" :title="sku.product_barcode || ''">{{ sku.product_barcode || '-' }}</span>
+        <span
+          v-else-if="col.key === 'orderQty'"
+          class="bo-qty"
+          :class="{ 'bo-qty--ordered': skuIsOrdered(item, sku) }"
+        >{{ skuOrderQty(item, sku) }}</span>
+        <span
+          v-else-if="col.key === 'prodQty'"
+          class="bo-prod"
+          :class="{ 'bo-prod--none': skuProductionQty(item, sku) === null }"
+        >{{ skuProductionQty(item, sku) ?? '—' }}</span>
+      </div>
+    </template>
+
+    <!-- 多 SKU 合计行（与导出/打印 buildSummaryTbody 的「合计」行同源，AC-12） -->
+    <template v-if="hasTotalRow">
+      <div
+        v-for="col in skuCols"
+        :key="`t-${col.key}`"
+        class="bo-td bo-total-cell"
+        :class="[`bo-td-${col.align}`]"
+        :style="cellStyle(col.key, span, 1)"
+      >
+        <span v-if="col.key === 'productName'" class="bo-total-label">合计</span>
+        <span v-else-if="col.key === 'orderQty'" class="bo-total-qty">{{ totalOrderQty }}</span>
+        <span
+          v-else-if="col.key === 'prodQty'"
+          class="bo-total-qty"
+          :class="{ 'bo-prod--none': totalProdQty === null }"
+        >{{ totalProdQty ?? '—' }}</span>
+      </div>
+    </template>
   </div>
 </template>
 
 <script setup lang="ts">
 /**
- * BeileOrderRow.vue — 湖北订单汇总列表单行（两级结构之一级）
+ * BeileOrderRow.vue — 湖北订单汇总列表「订单块」（两级结构之一级）
  *
- * 一行一单，只承载订单级汇总字段：类型 / 下单时间 / 客户 / 工厂 /
- * SKU 数 / 订单数量 / 生产数量 / 小义开单 / 确认状态 / 确认操作 / 备注。
- * 逐 SKU 明细不再内嵌到列表行，而是点击整行进入详情弹窗（二级），
- * 从而彻底消除「20 个 SKU 挤在单行」的可读性问题。
- *
- * 数量口径（单一真源）：订单数量 = rowTotalOrderQty，生产数量 = rowTotalProductionQty，
- * 均为订单级汇总，与详情弹窗 / 导出 XLS / 打印预览同源（AC-12）。
+ * 2026-10-15 多 SKU 改版（对齐 /report 订单流水方案 C）：
+ * 一行一 SKU，订单级列跨 span 行合并（CSS Grid，等效 rowspan），SKU 列
+ * （产品名称/产品条码/订单数量/生产数量）逐行渲染；多 SKU 追加「合计」行。
+ * 列序/列宽与布局/数量口径统一走 useBeileOrderBlock（与表头、导出/打印同源，AC-12）。
  */
-import { computed } from 'vue'
 import {
   NOT_ORDERED_TIP,
   NOT_ORDERED_TOAST,
-  rowTotalOrderQty,
-  rowTotalProductionQty,
+  useBeileOrderBlock,
+  skuIsOrdered,
+  skuOrderQty,
+  skuProductionQty,
   type BeileOrderRow as BeileOrderRowType,
 } from '@/views/beile-order/composables/useBeileOrders'
 import UiCheckbox from '@/components/ui/UiCheckbox.vue'
@@ -130,8 +157,8 @@ const props = defineProps<{
   selectable: boolean
   /** 当前行是否被选中 */
   selected: boolean
-  /** 搜索态：展示「产品名称」列（命中产品名，后端已收窄 items） */
-  hasKeyword?: boolean
+  /** 已应用的产品关键字：仅渲染命中 SKU（与导出/打印 filterVisibleSkus 同源） */
+  keyword?: string
 }>()
 
 const emit = defineEmits<{
@@ -143,24 +170,18 @@ const emit = defineEmits<{
   toggleSelect: [item: BeileOrderRowType]
 }>()
 
-/** SKU 数量（订单级汇总事实） */
-const skuCount = computed(() => (props.item.items || []).length)
-/** 订单级「订单数量」汇总 */
-const totalOrderQty = computed(() => rowTotalOrderQty(props.item))
-/** 订单级「生产数量」汇总；未下单 → null */
-const totalProdQty = computed(() => rowTotalProductionQty(props.item))
-
-/**
- * 搜索态「命中产品名」：items 已由后端收窄为命中的 SKU，多 SKU 用顿号连接；
- * 无 items 明细（如备货行）时回落订单级 product_name。
- */
-const searchName = computed(() => {
-  const names = (props.item.items || [])
-    .map((s) => s.product_name)
-    .filter((n): n is string => !!n)
-  if (names.length > 0) return [...new Set(names)].join('、')
-  return props.item.product_name || '-'
-})
+// 布局与数量口径统一走 composable（组件 ≤400 行门禁；口径单一真源 AC-12）
+const {
+  orderCols,
+  skuCols,
+  blockStyle,
+  cellStyle,
+  skus,
+  hasTotalRow,
+  span,
+  totalOrderQty,
+  totalProdQty,
+} = useBeileOrderBlock(props)
 
 /** 行点击：交给父组件打开详情弹窗（300ms 防连点） */
 let lastOpenAt = 0
@@ -178,27 +199,21 @@ function handleConfirm(item: BeileOrderRowType) {
 </script>
 
 <style scoped>
-/* 汇总列表行：flex 网格，列宽与表头一致 */
-.bo-grid {
-  display: flex;
+/* 订单块：CSS Grid，列模板与表头同源（beileGridTemplate） */
+.bo-block {
+  display: grid;
   width: 100%;
   font-size: 13px;
 }
 .bo-td {
   box-sizing: border-box;
-  flex: 0 0 auto;
   padding: 10px 14px;
   border-right: 1px solid #d8dce2;
+  border-bottom: 1px solid #d8dce2;
   overflow: hidden;
-  align-self: stretch;
   display: flex;
   align-items: center;
   justify-content: center;
-}
-.bo-td:last-child {
-  flex: 1 1 auto;
-  min-width: 160px;
-  border-right: none;
 }
 .bo-td-left {
   justify-content: flex-start;
@@ -206,57 +221,46 @@ function handleConfirm(item: BeileOrderRowType) {
 .bo-td-center {
   justify-content: center;
 }
-.bo-grid-row {
-  height: 100%;
-  align-items: center;
-  border-bottom: 1px solid #d8dce2;
+.bo-row-clickable {
+  cursor: pointer;
   color: var(--color-text);
   transition: background 0.2s ease;
 }
-.bo-grid-row:hover {
+.bo-row-clickable:hover {
   background: var(--color-primary-50);
+}
+.bo-td-select {
+  padding: 10px 8px;
 }
 .bo-row-highlight {
   background: var(--color-warning-50) !important;
   box-shadow: inset 3px 0 0 var(--color-warning-500);
 }
-.bo-row-clickable {
-  cursor: pointer;
-}
-.bo-td-select {
-  padding: 10px 8px;
-}
 .bo-td-nowrap {
   white-space: nowrap;
 }
 
-/* 订单类型徽章列：点击整行打开详情，无需单独链接 */
-
-/* SKU 数 */
-/* SKU 数与「订单数量 / 生产数量」同处一行数字区，须同字号同形态。
-   原实现为 12px + 胶囊（padding 1px 8px / 圆角 6px / 多 SKU 加浅蓝底），
-   与相邻数字列的 13px 纯文本不一致 —— 胶囊底视觉上像一个多余的「标签图标」。
-   统一为 13px 纯文本；多 SKU 曾以「蓝色 + 600 字重」强调，但同列内
-   「4 项(蓝600) vs 1 项(灰400)」被判定为行间不一致 —— SKU 数本身已表达
-   数量差异，无需再加视觉强调。全列统一灰 400（元数据弱于数量列正文）。
-   .bo-sku-count--multi 类保留仅作语义/测试钩子，不再产生视觉差异。 */
-.bo-sku-count {
-  display: inline-flex;
-  align-items: center;
-  font-size: 13px;
-  font-weight: 400;
+/* SKU 逐行：产品名称 / 条码 */
+.bo-sku-name,
+.bo-customer {
+  font-weight: 600;
+  color: var(--color-text);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bo-barcode {
+  font-family: Consolas, ui-monospace, monospace;
+  font-size: 12px;
   color: var(--color-text-muted, #64748b);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* 数量：订单数量 / 生产数量同排数字统一取正文色，仅以字重区分 */
-.bo-qty {
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-/* 已下单的 700 字重强调已移除：同列内「已开单行 700 vs 未开单行 600」
-   构成行间不一致，且行内「小义开单」徽章已表达同一信息。
-   .bo-qty--ordered 类保留仅作语义/测试钩子，不再产生视觉差异。 */
+/* .bo-qty--ordered 仅作语义/测试钩子，不再产生视觉差异（行间一致性裁决） */
+.bo-qty,
 .bo-prod {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
@@ -267,24 +271,25 @@ function handleConfirm(item: BeileOrderRowType) {
   color: var(--color-text-muted);
 }
 
-/* 文本 */
-.bo-customer {
-  font-weight: 600;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
+/* 多 SKU 合计行（与导出/打印「合计」行同源） */
+.bo-total-cell {
+  background: var(--color-surface, #f8fafc);
 }
+.bo-total-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+.bo-total-qty {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* 文本 */
 .bo-cell-main {
   font-weight: 600;
   color: var(--color-text);
-}
-/* 搜索态「产品名称」：命中的产品名（多 SKU 顿号连接），过长省略 */
-.bo-search-name {
-  font-weight: 600;
-  color: var(--color-text);
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 .bo-cell-muted {
   color: var(--color-text-muted);
@@ -305,10 +310,6 @@ function handleConfirm(item: BeileOrderRowType) {
   border-radius: 5px;
   line-height: 1.5;
 }
-/* 与 .bo-open-badge--done / .bo-confirm-badge--done 统一取 success-700：
-   三者底色同为 success-50，文字色必须同档，否则同一浅绿底上并存两种绿
-   （success-600 #1e9e55 为青绿、success-700 #2e7d32 为黄绿，色相不同）。
-   另：success-600 在 success-50 上对比度仅 3.2:1，低于 WCAG AA 4.5:1。 */
 .bo-type-badge--order {
   background: var(--color-success-50, #e8f9ef);
   color: var(--color-success-700, #2e7d32);
@@ -324,28 +325,8 @@ function handleConfirm(item: BeileOrderRowType) {
   color: var(--color-text);
   letter-spacing: 0.2px;
 }
-.bo-open-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 3px 10px;
-  border-radius: 8px;
-  font-size: 12px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-.bo-open-badge--done {
-  background: var(--color-success-50);
-  color: var(--color-success-700);
-}
-.bo-open-badge--pending {
-  background: var(--color-warning-50);
-  color: var(--color-warning-600);
-}
-.bo-open-badge--muted {
-  background: var(--color-surface, #f4f6fc);
-  color: var(--color-text-secondary);
-}
+/* 状态徽章（小义开单 / 确认状态 / 确认操作 fallback）共用同一形态 */
+.bo-open-badge,
 .bo-confirm-badge {
   display: inline-flex;
   align-items: center;
@@ -356,13 +337,19 @@ function handleConfirm(item: BeileOrderRowType) {
   font-weight: 600;
   white-space: nowrap;
 }
+.bo-open-badge--done,
+.bo-confirm-badge--done {
+  background: var(--color-success-50);
+  color: var(--color-success-700);
+}
+.bo-open-badge--pending,
 .bo-confirm-badge--pending {
   background: var(--color-warning-50);
   color: var(--color-warning-600);
 }
-.bo-confirm-badge--done {
-  background: var(--color-success-50);
-  color: var(--color-success-700);
+.bo-open-badge--muted {
+  background: var(--color-surface, #f4f6fc);
+  color: var(--color-text-secondary);
 }
 .bo-confirm-btn {
   display: inline-flex;

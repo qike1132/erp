@@ -516,7 +516,7 @@ describe('BeileOrderTab 导出与打印功能', () => {
     expect(totalCells[2]).toBe('—')
   })
 
-  it('列表 DOM：表头含「订单数量」「生产数量」「SKU」且无「备品数量」列；已下单行生产数量 = 订单数量 + 备品数量，未下单行为「—」', async () => {
+  it('列表 DOM：表头含「订单数量」「生产数量」「产品名称/产品条码」且无「备品数量」列；已下单行生产数量 = 订单数量 + 备品数量，未下单行为「—」', async () => {
     mocks.queryData.value = makeListResponse({
       total: 2,
       unconfirmed_count: 0,
@@ -573,13 +573,18 @@ describe('BeileOrderTab 导出与打印功能', () => {
     })
     const wrapper = await mountTab()
 
-    // 表头：文案 + 列序，备品数量独立列已删除
+    // 表头：文案 + 列序，备品数量独立列已删除；2026-10-15 多 SKU 改版后
+    // 「SKU 数」徽章列换成逐 SKU 的「产品名称 / 产品条码」列（对齐 /report 订单流水）
     const headers = wrapper.findAll('.bo-th').map((h) => h.text())
     expect(headers).toContain('订单数量')
     expect(headers).toContain('生产数量')
-    expect(headers).toContain('SKU')
+    expect(headers).toContain('产品名称')
+    expect(headers).toContain('产品条码')
+    expect(headers).not.toContain('SKU')
     expect(headers).not.toContain('备品数量')
     expect(headers.indexOf('订单数量')).toBeLessThan(headers.indexOf('生产数量'))
+    expect(headers.indexOf('产品名称')).toBeLessThan(headers.indexOf('产品条码'))
+    expect(headers.indexOf('产品条码')).toBeLessThan(headers.indexOf('订单数量'))
     // 订单号列（2026-09-29 恢复；保留类型列，订单号紧随其后）
     expect(headers).toContain('订单号')
     expect(headers.indexOf('订单号')).toBe(headers.indexOf('订单类型') + 1)

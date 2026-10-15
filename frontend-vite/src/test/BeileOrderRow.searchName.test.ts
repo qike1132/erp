@@ -1,12 +1,13 @@
 /**
- * 搜索态行展示回归：BeileOrderRow「产品名称」列 + SKU 级数量。
+ * 搜索态行展示回归（2026-10-15 多 SKU 改版后）：keyword 收窄逐 SKU 行 + SKU 级数量。
  *
- * 需求（2026-09-19 第二轮）：搜索后列表新增「产品名称」表头，显示搜索到的产品名；
- * 「订单数量 / 生产数量」只统计所搜索 SKU 对应的数量，不显示整个订单的合计。
+ * 需求（2026-09-19 第二轮）：搜索后只显示命中的产品，数量只统计所搜索 SKU 对应的数量；
+ * 2026-10-15 多 SKU 改版后，「产品名称」为逐 SKU 常驻列（原搜索态专属的顿号拼接列已取消），
+ * keyword 通过 filterVisibleSkus 收窄逐 SKU 行（与导出 buildSummaryTbody 同源）。
  *
  * 分工：后端 beile.py 在搜索时把 items 收窄为命中 SKU 并重算订单级数量
  * （test_beile_orders.py::test_beile_list_search_narrows_items_and_qty_to_matched_skus）；
- * 本文件验证行组件在搜索态的呈现（列出现 / 名称 join / 数量读收窄后的口径）。
+ * 本文件验证行组件在搜索态的呈现（逐 SKU 名称列 / keyword 收窄 / 数量读收窄后的口径）。
  */
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
@@ -33,7 +34,7 @@ function baseItem(extra: Record<string, unknown> = {}): BeileOrderRowType {
   } as unknown as BeileOrderRowType
 }
 
-function mountRow(item: BeileOrderRowType, hasKeyword: boolean) {
+function mountRow(item: BeileOrderRowType, keyword = '') {
   return mount(BeileOrderRow, {
     props: {
       item,
@@ -43,14 +44,14 @@ function mountRow(item: BeileOrderRowType, hasKeyword: boolean) {
       confirmable: true,
       selectable: false,
       selected: false,
-      hasKeyword,
+      keyword,
     },
     global: { stubs: { UiCheckbox: true } },
   })
 }
 
-describe('BeileOrderRow 搜索态：产品名称列 + SKU 级数量', () => {
-  it('搜索态：显示命中产品名（多 SKU 顿号连接），数量 = 收窄后 items 合计 60（非全单 100）', () => {
+describe('BeileOrderRow 搜索态：keyword 收窄逐 SKU 行 + SKU 级数量', () => {
+  it('搜索态单 SKU 命中：显示命中产品名，数量 = 收窄后 SKU 数量 60（非全单合计）', () => {
     // 服务端收窄后形态：items 只含命中 SKU「变形金刚」；订单级数量已按命中集合重算
     const item = baseItem({
       is_ordered: false,
@@ -61,23 +62,26 @@ describe('BeileOrderRow 搜索态：产品名称列 + SKU 级数量', () => {
         { id: 1, product_name: '变形金刚', product_barcode: '690001', quantity: 60, note: '' },
       ],
     })
-    const wrapper = mountRow(item, true)
+    const wrapper = mountRow(item, '变形金刚')
 
-    const name = wrapper.find('.bo-search-name')
-    expect(name.exists()).toBe(true)
-    expect(name.text()).toBe('变形金刚')
+    // 逐 SKU 产品名称列（常驻列，逐行渲染）
+    const names = wrapper.findAll('.bo-sku-name')
+    expect(names.length).toBe(1)
+    expect(names[0]!.text()).toBe('变形金刚')
 
-    // 数量列只统计命中 SKU（后端收窄保证；此处行读到的就是收窄后的口径）
-    expect(wrapper.find('.bo-qty').text()).toBe('60')
+    // 数量列只统计命中 SKU（后端收窄 + 前端 filterVisibleSkus 同键生效）
+    expect(wrapper.findAll('.bo-qty').map((n) => n.text())).toEqual(['60'])
     // 未下单：生产数量「—」
-    expect(wrapper.find('.bo-prod').text()).toBe('—')
+    expect(wrapper.findAll('.bo-prod').map((n) => n.text())).toEqual(['—'])
+    // 单 SKU：无合计行
+    expect(wrapper.find('.bo-total-label').exists()).toBe(false)
   })
 
-  it('搜索态多 SKU 命中：名称顿号连接；已下单快照场景数量 = 命中集合 rollup', () => {
+  it('搜索态多 SKU 命中：逐 SKU 名称/数量各占一行，合计 = 命中集合 rollup', () => {
     const item = baseItem({
       is_ordered: true,
-      purchase_order_qty: 66,
-      spare_quantity: 6,
+      purchase_order_qty: 76,
+      spare_quantity: 7,
       items: [
         {
           id: 1, product_name: '变形金刚', product_barcode: '690001', quantity: 60, note: '',
@@ -89,32 +93,58 @@ describe('BeileOrderRow 搜索态：产品名称列 + SKU 级数量', () => {
         },
       ],
     })
-    const wrapper = mountRow(item, true)
+    const wrapper = mountRow(item, '变形金刚')
 
-    expect(wrapper.find('.bo-search-name').text()).toBe('变形金刚、变形金刚plus')
-    // 订单级数量 = purchase_order_qty（命中集合 rollup，由后端保证）
-    expect(wrapper.find('.bo-qty').text()).toBe('66')
-    // 生产数量 = 订单数量 + 备品 = 66 + 6
-    expect(wrapper.find('.bo-prod').text()).toBe('72')
+    // 逐 SKU 名称（不再顿号拼接到单格）
+    expect(wrapper.findAll('.bo-sku-name').map((n) => n.text())).toEqual(['变形金刚', '变形金刚plus'])
+    // 逐 SKU 订单数量 = 各自采购单实际下单量 66 / 10
+    expect(wrapper.findAll('.bo-qty').map((n) => n.text())).toEqual(['66', '10'])
+    // 逐 SKU 生产数量 = 下单量 + 备品
+    expect(wrapper.findAll('.bo-prod').map((n) => n.text())).toEqual(['72', '11'])
+    // 多 SKU 合计行 = 订单级 rollup（由后端保证）
+    const totalQtys = wrapper.findAll('.bo-total-qty')
+    expect(totalQtys[0]!.text()).toBe('76')
+    expect(totalQtys[1]!.text()).toBe('83')
   })
 
-  it('非搜索态（hasKeyword 缺省 / false）：不渲染产品名称列', () => {
+  it('keyword 只命中部分 SKU：仅渲染命中 SKU 行（filterVisibleSkus，与导出同源）', () => {
     const item = baseItem({
       is_ordered: false,
       purchase_order_qty: 0,
       spare_quantity: 0,
-      items: [{ id: 1, product_name: '变形金刚', product_barcode: '690001', quantity: 60, note: '' }],
+      items: [
+        { id: 1, product_name: '变形金刚', product_barcode: '690001', quantity: 60, note: '' },
+        { id: 2, product_name: '奥特曼', product_barcode: '690002', quantity: 40, note: '' },
+      ],
     })
-    expect(mountRow(item, false).find('.bo-search-name').exists()).toBe(false)
+    const wrapper = mountRow(item, '变形金刚')
+    expect(wrapper.findAll('.bo-sku-name').map((n) => n.text())).toEqual(['变形金刚'])
+    expect(wrapper.find('.bo-total-label').exists()).toBe(false)
   })
 
-  it('备货行（无 items 明细）：产品名称回落订单级 product_name', () => {
+  it('非搜索态（keyword 空）：渲染全部 SKU', () => {
+    const item = baseItem({
+      is_ordered: false,
+      purchase_order_qty: 0,
+      spare_quantity: 0,
+      items: [
+        { id: 1, product_name: '变形金刚', product_barcode: '690001', quantity: 60, note: '' },
+        { id: 2, product_name: '奥特曼', product_barcode: '690002', quantity: 40, note: '' },
+      ],
+    })
+    const wrapper = mountRow(item)
+    expect(wrapper.findAll('.bo-sku-name').map((n) => n.text())).toEqual(['变形金刚', '奥特曼'])
+  })
+
+  it('备货行（无 items 明细）：逐 SKU 行回落订单级 product_name（单行）', () => {
     const item = baseItem({
       record_type: 'stockin',
       product_name: '变形金刚',
       items: [],
     })
-    const wrapper = mountRow(item, true)
-    expect(wrapper.find('.bo-search-name').text()).toBe('变形金刚')
+    const wrapper = mountRow(item, '变形金刚')
+    const names = wrapper.findAll('.bo-sku-name')
+    expect(names.length).toBe(1)
+    expect(names[0]!.text()).toBe('变形金刚')
   })
 })

@@ -175,6 +175,144 @@ export function skuIsOrdered(row: BeileOrderRow, sku: SkuQtyFields): boolean {
   return row.is_ordered === true && (row.items?.length ?? 0) === 1 && row.purchase_order_qty != null
 }
 
+// ==================== 列布局单一真源（页面表头 = 行块网格，逐列同源） ====================
+// 2026-10-15 多 SKU 改版：页面从「一行一单」改为「一行一 SKU + 订单级列跨行合并」
+// （对齐 /report 订单流水的方案 C）。订单级列（类型/单号/时间/客户/工厂/小义开单/
+// 确认/备注）在行块内跨 `span` 行合并；SKU 列（产品名称/条码/订单数量/生产数量）逐行。
+// 列序 / 列宽 / 可见性由本表唯一决定，BeileOrderTab（表头）与 BeileOrderRow（行块）
+// 共用，杜绝两处列定义漂移导致错位。
+
+export type BeileColScope = 'order' | 'sku'
+
+export interface BeileCol {
+  key: string
+  label: string
+  /** 列宽（px）；'flex' = 末列弹性占满剩余宽度 */
+  width: number | 'flex'
+  align: 'left' | 'center'
+  /** order = 订单级（跨行合并）；sku = 逐 SKU 行 */
+  scope: BeileColScope
+}
+
+/** 行块内单行高度（px）：SKU 行 / 合计行 / 订单级跨行格的每行高一致（虚拟滚动定高基准） */
+export const BEILE_ROW_HEIGHT = 56
+
+/**
+ * 计算当前可见列（按视觉顺序）。可见性：
+ * - select（打印权限）：canPrint
+ * - confirmStatus / confirmAction：随 confirmStatus 筛选互斥显隐（与旧实现一致）
+ * 其余列恒可见。
+ */
+export function beileColumns(opts: { canPrint: boolean; confirmStatus: string }): BeileCol[] {
+  const cols: BeileCol[] = []
+  if (opts.canPrint) cols.push({ key: 'select', label: '', width: 40, align: 'center', scope: 'order' })
+  cols.push(
+    { key: 'type', label: '订单类型', width: 90, align: 'center', scope: 'order' },
+    { key: 'orderNo', label: '订单号', width: 160, align: 'center', scope: 'order' },
+    { key: 'date', label: '下单时间', width: 150, align: 'center', scope: 'order' },
+    { key: 'customer', label: '客户名称', width: 170, align: 'center', scope: 'order' },
+    { key: 'factory', label: '工厂', width: 100, align: 'center', scope: 'order' },
+    { key: 'productName', label: '产品名称', width: 180, align: 'center', scope: 'sku' },
+    { key: 'productBarcode', label: '产品条码', width: 130, align: 'center', scope: 'sku' },
+    { key: 'orderQty', label: '订单数量', width: 110, align: 'center', scope: 'sku' },
+    { key: 'prodQty', label: '生产数量', width: 110, align: 'center', scope: 'sku' },
+    { key: 'opened', label: '小义开单', width: 110, align: 'center', scope: 'order' },
+  )
+  if (opts.confirmStatus !== 'unconfirmed') {
+    cols.push({ key: 'confirmStatus', label: '确认状态', width: 110, align: 'center', scope: 'order' })
+  }
+  if (opts.confirmStatus !== 'confirmed') {
+    cols.push({ key: 'confirmAction', label: '确认操作', width: 130, align: 'center', scope: 'order' })
+  }
+  cols.push({ key: 'note', label: '备注', width: 'flex', align: 'left', scope: 'order' })
+  return cols
+}
+
+/** CSS Grid 列模板（表头与行块共用，保证逐列对齐） */
+export function beileGridTemplate(cols: BeileCol[]): string {
+  return cols.map((c) => (c.width === 'flex' ? 'minmax(160px, 1fr)' : `${c.width}px`)).join(' ')
+}
+
+/** 水平滚动最小宽度 = 各列宽之和（弹性列按 160px 保底） */
+export function beileMinWidth(cols: BeileCol[]): number {
+  return cols.reduce((sum, c) => sum + (c.width === 'flex' ? 160 : c.width), 0)
+}
+
+// ==================== 订单块视图模型（BeileOrderRow 的 computed 群） ====================
+
+/** useBeileOrderBlock 入参形状：BeileOrderRow.vue 的 props（响应式传入，computed 才能追踪） */
+export interface BeileOrderBlockOptions {
+  item: BeileOrderRow
+  confirmStatus: string
+  selectable: boolean
+  keyword?: string
+}
+
+/**
+ * 订单块视图模型：列拆分 / 单元格定位 / 可见 SKU / 合计行 / 合计数。
+ * 从 BeileOrderRow.vue 抽出（组件 ≤400 行门禁），布局与数量口径仍与
+ * 导出 buildSummaryTbody 同源（AC-12）。传入 props 实例即可，
+ * 内部 computed 直接读 opts.xxx 保持响应式追踪（勿预先解构）。
+ */
+export function useBeileOrderBlock(opts: BeileOrderBlockOptions) {
+  const cols = computed<BeileCol[]>(() => beileColumns({
+    canPrint: opts.selectable,
+    confirmStatus: opts.confirmStatus,
+  }))
+  const orderCols = computed(() => cols.value.filter((c) => c.scope === 'order'))
+  const skuCols = computed(() => cols.value.filter((c) => c.scope === 'sku'))
+
+  /** 列 key → grid-column 序号（1 基） */
+  const colIndex = computed(() => {
+    const m = new Map<string, number>()
+    cols.value.forEach((c, i) => m.set(c.key, i + 1))
+    return m
+  })
+
+  const blockStyle = computed(() => ({
+    gridTemplateColumns: beileGridTemplate(cols.value),
+    gridAutoRows: `${BEILE_ROW_HEIGHT}px`,
+  }))
+
+  /** 单元格显式定位：span>1 即跨行合并（等效 rowspan） */
+  function cellStyle(key: string, row: number, span: number) {
+    return {
+      gridColumn: String(colIndex.value.get(key) ?? 1),
+      gridRow: span > 1 ? `${row} / span ${span}` : String(row),
+    }
+  }
+
+  /**
+   * 可见 SKU（与导出/打印 buildSummaryTbody 的 filterVisibleSkus 同源）：
+   * 无 items 明细的备货记录回落为单行（订单级 product_name / quantity）。
+   */
+  const skus = computed<SkuQtyFields[]>(() => {
+    const item = opts.item
+    const base: SkuQtyFields[] = (item.items && item.items.length > 0)
+      ? item.items
+      : [{ product_name: item.product_name ?? null, product_barcode: null, quantity: item.quantity ?? 0 }]
+    return filterVisibleSkus(base, opts.keyword || '')
+  })
+
+  /** 多 SKU 追加「合计」行 */
+  const hasTotalRow = computed(() => skus.value.length > 1)
+  /** 订单级列的合并跨度 = 逐 SKU 行数 +（多 SKU 时的）合计行（与 buildSummaryTbody 一致） */
+  const span = computed(() => skus.value.length + (hasTotalRow.value ? 1 : 0))
+
+  return {
+    orderCols,
+    skuCols,
+    blockStyle,
+    cellStyle,
+    skus,
+    hasTotalRow,
+    span,
+    /** 订单级合计（合计行） */
+    totalOrderQty: computed(() => rowTotalOrderQty(opts.item)),
+    totalProdQty: computed(() => rowTotalProductionQty(opts.item)),
+  }
+}
+
 // ==================== 汇总表（导出 XLS = 打印预览，与页面同一真源） ====================
 
 /** HTML 特殊字符转义（导出 / 打印共用） */
