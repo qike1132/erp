@@ -17,11 +17,16 @@
 
 `deliverables/`、`*.md` 报告里的结论是**写作当时的快照**，可能早已失效（实例：某报告称 `utils.redis_cache` 不存在，实际它一直在被 `fastapi_app/main.py` 使用）。**以代码为准**，文档只作为线索。
 
-## 4. 本机 shell 是 Windows PowerShell 5.1（不是 pwsh 7）
+## 4. 终端默认用 PowerShell 7（`pwsh`），不要用 5.1（`powershell.exe`）
+
+2026-10-15 起本机已装 **PowerShell 7**（`C:\Program Files\PowerShell\7\pwsh.exe`，机器 PATH 已含；**新会话**可直接 `pwsh`，旧会话 PATH 未刷新需用绝对路径）。**默认一律用 `pwsh`**，除非明确指定、或目标脚本只兼容 5.1。
+
+5.1 的坑（仅在被迫用 `powershell.exe` 时才需提防）：
 
 - `-Encoding utf8` 会写 BOM；
 - 没有 `Get-Content -AsByteStream`；
-- 把内联 `if(){...}else{...}` 塞进字符串插值会触发 `MissingEndParenthesisInExpression`，并让**整段脚本一行都不执行**（静默！）——分步写、先赋值再输出。
+- 把内联 `if(){...}else{...}` 塞进字符串插值会触发 `MissingEndParenthesisInExpression`，并让**整段脚本一行都不执行**（静默！）——分步写、先赋值再输出；
+- 无 BOM 的 UTF-8 中文脚本在**解析阶段**就 `ParserError`（见 §9 反面样本）。
 
 ## 5. git-bash 里 `python` 常常不在 PATH
 
