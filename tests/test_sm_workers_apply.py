@@ -186,7 +186,7 @@ def test_restart_one_service_restarts_only_the_named_one():
     fake = _FakeNssm({_SVC_API: CURRENT})
     ops = _svc(fake)
     ops.wait_service = lambda name, target, timeout, **kw: 'STOPPED'
-    ops.wait_service_running = lambda name, timeout=25: True
+    ops.wait_service_running = lambda name, timeout=25, **kw: True
     assert ops.restart_one_service(_SVC_API) is True
     touched = [(c[1], c[2]) for c in fake.calls
                if len(c) > 2 and c[1] in ('stop', 'start', 'restart')]

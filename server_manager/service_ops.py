@@ -77,13 +77,13 @@ class ServiceOps:
         if raw[:2] in (b'\xff\xfe', b'\xfe\xff'):
             try:
                 return _fin(raw.decode('utf-16', errors='replace').lstrip('\ufeff'))
-            except Exception:
+            except Exception:  # noqa: S110 - \u89e3\u7801\u63a2\u6d4b\uff0c\u5931\u8d25\u5373\u56de\u9000\u4e0b\u4e00\u79cd\u7f16\u7801
                 pass
         elif raw.count(b'\x00') * 4 > len(raw):
             # UTF-16LE 的 ASCII 段每个字符后跟一个 \x00，NUL 占比远高于任何 8bit 编码
             try:
                 return _fin(raw.decode('utf-16-le', errors='replace'))
-            except Exception:
+            except Exception:  # noqa: S110 - 解码探测，失败即回退下一种编码
                 pass
         preferred = locale.getpreferredencoding(False) or ''
         for enc in ('utf-8', 'gb18030', 'cp936', preferred):
@@ -91,7 +91,7 @@ class ServiceOps:
                 continue
             try:
                 return _fin(raw.decode(enc, errors='strict'))
-            except Exception:
+            except Exception:  # noqa: S112 - 解码探测，失败即试下一种编码
                 continue
         return _fin(raw.decode('utf-8', errors='replace'))
 
@@ -479,7 +479,7 @@ class ServiceOps:
         if not replaced:  # 该键原本不存在 → 追加，而不是丢弃其余
             updated.append(new_element)
 
-        code, out = self.run_capture([nssm, 'set', name, 'AppEnvironmentExtra'] + updated)
+        code, out = self.run_capture([nssm, 'set', name, 'AppEnvironmentExtra', *updated])
         if code != 0:
             return False, f'写入 {name} 失败：{out.strip() or f"退出码 {code}"}'
 
@@ -556,9 +556,13 @@ class ServiceOps:
         显式 stop→start 让 start **无条件**执行（与 ``sc`` 回退分支同一语义），
         stop 的返回码只用来如实告警 —— 否则「重启后起不来」永远无据可查。
 
+        停前先记 PID：停后 PID 未变即服务从未停成（SCM 因依赖方在跑而拒停），本次
+        「重启」实际没发生 —— 由 ``wait_service_running`` 据此改报「未生效」而非「启动成功」。
+
         返回 ``(ok, state, pid)``，与 ``start_one_service`` 一致。
         """
         nssm = nssm or self.find_nssm()
+        prev_pid = self.svc_pid(name)
         self._msg_queue.put(('log', {'text': f'正在重启生产服务 {name}...'}))
         if nssm:
             code, out = self.run_capture([nssm, 'stop', name], timeout=15)
@@ -579,7 +583,7 @@ class ServiceOps:
             self._msg_queue.put(('log', {
                 'text': f'{name} 在 {stop_timeout}s 内未确认 STOPPED（当前: {state}），仍继续启动',
                 'level': 'WARNING'}))
-        return self.start_one_service(name, timeout=start_timeout)
+        return self.start_one_service(name, timeout=start_timeout, prev_pid=prev_pid)
 
     def service_cmd_sync(self, verb):
         """停止/重启生产服务：逐服务执行 + 轮询确认终态。
@@ -604,22 +608,35 @@ class ServiceOps:
                 self.restart_service_via_stop_start(name, nssm=nssm)
         self._msg_queue.put(('hosting_refresh', {}))
 
-    def wait_service_running(self, name, timeout=25):
+    def wait_service_running(self, name, timeout=25, prev_pid=None):
         """轮询直到服务 RUNNING；返回 (ok, state, pid)，成功/超时都写日志。
 
         NSSM start/restart 立即返回，服务要经 START_PENDING 才到 RUNNING——
         不轮询就报「已执行」等于什么都没说。超时仍未 RUNNING 如实告警并指路日志文件。
+
+        ``prev_pid`` 由**重启**路径传入停机前的 PID：停后 PID 未变 = 服务从未停成
+        （如 SCM 因「有正在运行的依赖方」拒停 erp-redis / erp-redis-broker），本次
+        「重启」实际没发生。此时若只报「启动成功」，运维会误以为配置已生效（改
+        redis.conf 后点重启的典型场景）——故改报「未生效」。
         """
         state = self.wait_service(name, 'RUNNING', timeout)
         if 'RUNNING' in state.upper():
             pid = self.svc_pid(name)
+            if prev_pid is not None and pid == prev_pid:
+                self._msg_queue.put(('log', {
+                    'text': f'{name} 仍是原进程 (PID: {pid})，本次重启未生效（停机未停成）',
+                    'level': 'WARNING'}))
+                return True, state, pid
             self._msg_queue.put(('log', {'text': f'{name} 启动成功 (state={state}, PID: {pid if pid is not None else "?"})'}))
             return True, state, pid
         self._msg_queue.put(('log', {'text': f'{name} 在 {timeout}s 内未进入 RUNNING（当前: {state}），请查看 logs\\{name}.log', 'level': 'WARNING'}))
         return False, state, None
 
-    def start_one_service(self, name, timeout=25):
-        """发出启动命令并轮询确认 RUNNING；返回 (ok, state, pid)。"""
+    def start_one_service(self, name, timeout=25, prev_pid=None):
+        """发出启动命令并轮询确认 RUNNING；返回 (ok, state, pid)。
+
+        ``prev_pid`` 透传给 ``wait_service_running``，供重启路径判定本次是否真的重启。
+        """
         nssm = self.find_nssm()
         self._msg_queue.put(('log', {'text': f'正在启动生产服务 {name}...'}))
         if nssm:
@@ -628,12 +645,13 @@ class ServiceOps:
             code, out = self.run_capture(['sc', 'start', name], timeout=20)
         if code != 0:
             out_l = (out or '').lower()
-            if '1056' in out or 'already' in out_l:
+            # 中文系统 nssm 不带数字码、文案本地化，故同时匹配中文（对照 svc_installed）。
+            if '1056' in out or 'already' in out_l or '已在运行' in out:
                 self._msg_queue.put(('log', {'text': f'{name} 已在运行中，跳过 start'}))
-            elif '1053' not in out:
+            elif not ('1053' in out or '没有及时响应' in out):
                 # 1053/超时类错误不代表失败（服务可能仍在启动中），以轮询结果为准
                 self._msg_queue.put(('log', {'text': f'{name} start 返回非零 (code={code}): {(out or "").strip()[:160]}', 'level': 'WARNING'}))
-        return self.wait_service_running(name, timeout=timeout)
+        return self.wait_service_running(name, timeout=timeout, prev_pid=prev_pid)
 
     def restart_one_service(self, name, timeout=25):
         """只重启一个服务。

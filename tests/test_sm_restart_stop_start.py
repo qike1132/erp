@@ -43,8 +43,13 @@ class _Recorder:
         return [d.get('text', '') for kind, d in self.msgs if kind == 'log']
 
 
-def _ops(stop_rc=0, stop_out=''):
-    """造一个只在内存里跑的 ServiceOps：子进程调用与轮询全部伪造。"""
+def _ops(stop_rc=0, stop_out='', *, real_wait_running=False):
+    """造一个只在内存里跑的 ServiceOps：子进程调用与轮询全部伪造。
+
+    ``real_wait_running=True`` 时不伪造 ``wait_service_running`` —— 供「PID 未变 =
+    本次重启未生效」这类要跑真实判定逻辑的用例。``svc_pid`` 一律伪造：PID 探测与
+    本文件关心的启停时序正交，不该真跑 ``sc queryex`` 污染 ``ops.calls``。
+    """
     q = _Recorder()
     ops = ServiceOps(q, _Gate(), Path('D:/erp_system'), lambda *a, **k: None)
     ops.find_nssm = lambda: NSSM
@@ -57,8 +62,10 @@ def _ops(stop_rc=0, stop_out=''):
         return 0, ''
 
     ops.run_capture = fake_run
+    ops.svc_pid = lambda name: None
     ops.wait_service = lambda name, target, timeout, **kw: 'STOPPED'
-    ops.wait_service_running = lambda name, timeout=25: (True, '4 RUNNING', 4242)
+    if not real_wait_running:
+        ops.wait_service_running = lambda name, timeout=25, prev_pid=None: (True, '4 RUNNING', 4242)
     return ops, q
 
 
@@ -136,3 +143,56 @@ def test_unconfirmed_stop_is_reported_not_silent():
     warns = [t for t in q.texts() if '未确认 STOPPED' in t]
     assert warns, f'停机未确认必须告警，实际日志={q.texts()}'
     assert '仍继续启动' in warns[0], '告警须说明仍会继续启动，避免与后续「启动成功」自相矛盾'
+
+
+def test_restart_flags_noop_when_stop_never_took_effect():
+    """停机被 SCM 拒（依赖方在跑）→ PID 不变 → 必须报「未生效」，不得只报「启动成功」。
+
+    erp-redis / erp-redis-broker 有依赖方（erp-prod / erp-arq）：全栈重启轮到它们时，
+    依赖方已重启回 RUNNING，SCM 拒停 → 服务从未停过（2026-10-15 现场：PID 18792 全程未变）。
+    若只报「启动成功」，运维会以为配置已生效（改 redis.conf 后点重启的典型场景）——假成功。
+    """
+    ops, q = _ops(
+        stop_rc=1,
+        stop_out='erp-redis: STOP: 停止控制被发送到其他正在运行的服务所依赖的服务。',
+        real_wait_running=True,
+    )
+    ops.svc_pid = lambda name: 18792      # 停前停后同一 PID：从未停成
+    ops.wait_service = lambda name, target, timeout, **kw: '4 RUNNING'
+    ok, _state, pid = ops.restart_service_via_stop_start('erp-redis')
+    assert ok is True and pid == 18792
+    texts = q.texts()
+    assert any('未生效' in t for t in texts), f'停机未生效必须报「未生效」，实际={texts}'
+    assert not any('启动成功' in t for t in texts), f'PID 未变时不得只报「启动成功」，实际={texts}'
+
+
+def test_restart_reports_success_when_pid_changes():
+    """真实重启（PID 变了）仍报「启动成功」——防新判定把正常重启也误判成未生效。"""
+    ops, q = _ops(real_wait_running=True)
+    pids = iter([111, 222])               # 停前 111 → 停后 222
+    ops.svc_pid = lambda name: next(pids)
+    ops.wait_service = lambda name, target, timeout, **kw: '4 RUNNING'
+    ok, _state, pid = ops.restart_service_via_stop_start('erp-prod')
+    assert ok is True and pid == 222
+    texts = q.texts()
+    assert any('启动成功' in t for t in texts), texts
+    assert not any('未生效' in t for t in texts), texts
+
+
+def test_start_already_running_localized_is_not_a_warning():
+    """中文 nssm 输出「服务的实例已在运行中。」不含 1056/already，不得误报 WARNING。"""
+    ops, q = _ops()
+    ops.run_capture = lambda args, timeout=20: (1, 'erp-redis: START: 服务的实例已在运行中。')
+    ops.start_one_service('erp-redis')
+    texts = q.texts()
+    assert any('已在运行中，跳过 start' in t for t in texts), f'应识别为已在运行，实际={texts}'
+    assert not any('返回非零' in t for t in texts), f'不得误报非零 WARNING，实际={texts}'
+
+
+def test_start_timeout_localized_is_not_a_warning():
+    """中文 1053「服务没有及时响应启动或控制请求。」属超时类，以轮询为准，不报 WARNING。"""
+    ops, q = _ops()
+    ops.run_capture = lambda args, timeout=20: (1, 'erp-redis: START: 服务没有及时响应启动或控制请求。')
+    ops.start_one_service('erp-redis')
+    texts = q.texts()
+    assert not any('返回非零' in t for t in texts), f'1053 超时类不得报 WARNING，实际={texts}'
