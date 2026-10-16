@@ -72,6 +72,15 @@
       :refresh="refreshAfterAdd"
       @remove-pending="emit('removePending', $event)"
     />
+
+    <UiConfirmDialog
+      :open="confirmDialog.open"
+      :text="confirmDialog.text"
+      :sub="confirmDialog.sub"
+      :type="confirmDialog.type"
+      @confirm="confirmDialog.onConfirm"
+      @cancel="confirmDialog.onCancel"
+    />
   </div>
 </template>
 
@@ -81,8 +90,10 @@ import { useQuery } from '@tanstack/vue-query'
 import { outsourceApi } from '@/api'
 import type { OutsourceProcessType } from '@/api/outsource'
 import UiSpinner from '@/components/ui/UiSpinner.vue'
+import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import OutsourceAddProcessDialog from './OutsourceAddProcessDialog.vue'
 import { useApiMutation } from '@/composables/useApiMutation'
+import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { useAuthStore } from '@/stores/auth'
 
 const props = defineProps<{
@@ -184,9 +195,13 @@ const deleteMutation = useApiMutation((id: number) => outsourceApi.deleteProcess
 })
 
 async function handleDelete(pt: OutsourceProcessType) {
-  if (!window.confirm(`确认删除「${pt.process_type}」工序？`)) return
+  const ok = await confirmDialog.confirm(`确认删除「${pt.process_type}」工序？`, '删除后该产品的外发工序配置将同步更新。')
+  if (!ok) return
   await deleteMutation.run(pt.id)
 }
+
+/** 删除工序的统一确认框（走 UiConfirmDialog，支持回车确认/Esc 取消） */
+const confirmDialog = useConfirmDialog()
 </script>
 
 <style scoped>

@@ -72,6 +72,16 @@
           @delete="onRecordDelete"
         />
       </section>
+
+      <!-- 删除备份文件确认框（统一走 UiConfirmDialog：Enter 确认 / Esc 取消） -->
+      <UiConfirmDialog
+        :open="confirmDialog.open"
+        :text="confirmDialog.text"
+        :sub="confirmDialog.sub"
+        :type="confirmDialog.type"
+        @confirm="confirmDialog.onConfirm"
+        @cancel="confirmDialog.onCancel"
+      />
     </div>
   </div>
 </template>
@@ -81,6 +91,8 @@ import { onMounted, ref } from 'vue'
 import { backupApi } from '@/api'
 import type { BackupRestorePlan, BackupScheduleItem, BackupSettings } from '@/api/backup'
 import { toast } from '@/composables/useToast'
+import { useConfirmDialog } from '@/composables/useConfirmDialog'
+import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import BackupOverviewCards from '@/components/backup/BackupOverviewCards.vue'
 import BackupActions from '@/components/backup/BackupActions.vue'
 import ScheduleConfig from '@/components/backup/ScheduleConfig.vue'
@@ -95,6 +107,8 @@ const statusLoading = ref(false)
 const schedules = ref<BackupScheduleItem[]>([])
 const settings = ref<BackupSettings | null>(null)
 const saving = ref(false)
+/** 删除备份文件的统一确认框（走 UiConfirmDialog，支持回车确认/Esc 取消） */
+const confirmDialog = useConfirmDialog()
 
 /* ---------- 任务进度（备份 + 还原 + 上传共用统一轮询） ---------- */
 const activeTaskId = ref<string | null>(null)
@@ -302,7 +316,8 @@ async function onRecordDownload(filename: string) {
 }
 
 async function onRecordDelete(filename: string) {
-  if (!window.confirm(`确定删除备份文件「${filename}」？该操作不可恢复。`)) return
+  const ok = await confirmDialog.confirm(`确定删除备份文件「${filename}」？`, '该操作不可恢复。')
+  if (!ok) return
   try {
     await backupApi.deleteServerBackup(filename)
     toast.success('备份文件已删除')

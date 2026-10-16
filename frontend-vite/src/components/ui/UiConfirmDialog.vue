@@ -28,9 +28,15 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
 import UiDialog from './UiDialog.vue'
 import UiButton from './UiButton.vue'
+
+/** 焦点落在这些元素内时，Enter 归输入框自己（确认框自身从不含输入框，
+ *  但确认框可能从带输入框的表单里弹出——此时抢 Enter 会打断用户正在填的内容）。 */
+function isTypingTarget(t: EventTarget | null): boolean {
+  return !!(t as HTMLElement | null)?.closest?.('input, textarea, [contenteditable="true"]')
+}
 
 const props = withDefaults(
   defineProps<{
@@ -66,6 +72,50 @@ const emit = defineEmits<{
   confirm: []
   cancel: []
 }>()
+
+/**
+ * 键盘操作（2026-10-16）：弹窗打开期间监听 keydown，Enter = 确认、Esc = 取消，
+ * 让删除确认可以纯键盘完成。焦点在输入框内时 Enter 不抢（交给输入框）。
+ * 监听器挂在 document 上：确认框出现在 Teleport/Portal 里，组件自身节点未必在页面上，
+ * 但 keydown 会冒泡到 document。已关闭/未打开时不挂，避免泄漏到全局。
+ */
+let bound = false
+
+function keyHandler(e: KeyboardEvent) {
+  if (e.key === 'Enter') {
+    if (isTypingTarget(e.target)) return
+    e.preventDefault()
+    // 立即摘监听再 emit：连按 Enter 不会重复触发删除
+    unbindKeys()
+    emit('confirm')
+  } else if (e.key === 'Escape') {
+    e.preventDefault()
+    unbindKeys()
+    emit('cancel')
+  }
+}
+
+function bindKeys() {
+  if (!props.open || bound) return
+  document.addEventListener('keydown', keyHandler)
+  bound = true
+}
+
+function unbindKeys() {
+  if (!bound) return
+  document.removeEventListener('keydown', keyHandler)
+  bound = false
+}
+
+onMounted(bindKeys)
+onBeforeUnmount(unbindKeys)
+watch(
+  () => props.open,
+  (open) => {
+    if (open) bindKeys()
+    else unbindKeys()
+  },
+)
 
 function onOpenUpdate(val: boolean) {
   emit('update:open', val)
