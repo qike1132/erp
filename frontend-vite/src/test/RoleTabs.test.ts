@@ -160,6 +160,18 @@ describe('RoleTabs 右键菜单健壮性', () => {
   })
 })
 
+describe('RoleTabs 激活态回退（角色列表异步加载期间）', () => {
+  it('currentRoleId 为 null 时首个角色仍显示为激活，避免标签先白后蓝', () => {
+    const w = mount(RoleTabs, {
+      props: { roles: ROLES, currentRoleId: null, canManage: true },
+      attachTo: document.body,
+    })
+    wrapper = w
+    expect(tabAt(w, 0).classes()).toContain('role-tab--active')
+    expect(tabAt(w, 1).classes()).not.toContain('role-tab--active')
+  })
+})
+
 describe('RoleTabs 无角色态（角色可被全部删除）', () => {
   it('项目无角色时仍渲染「新增角色」入口，避免无法再建角色', () => {
     wrapper = mount(RoleTabs, {
