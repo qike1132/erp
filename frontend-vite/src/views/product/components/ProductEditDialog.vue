@@ -4,6 +4,7 @@
     max-width-class="max-w-[1080px]"
     overlay-z-class="z-[var(--z-page-modal)]"
     content-z-class="z-[var(--z-page-modal)] edit-modal-card"
+    body-class="edit-modal-pane"
     @update:open="editDialogVisible = $event"
   >
     <template #title>
@@ -368,5 +369,9 @@ defineExpose({ open })
 <style>
 .edit-modal-card {
   border-radius: 18px !important;
+}
+/* body 由 UiDialog 渲染：恢复迁移前的浅灰底（原 .bom-modal-body 的 background） */
+.edit-modal-pane {
+  background: var(--color-surface, #f8fafc) !important;
 }
 </style>

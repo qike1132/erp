@@ -233,9 +233,12 @@ onBeforeUnmount(() => {
   z-index 2100 与 PrimeVue 浮层同档：项目自定义弹窗是 1050，
   低于 1050 的面板在弹窗里会「渲染了但看不见」。
 */
+/* 面板 teleport 到 body；reka-ui 模态弹窗（UiDialog）打开时会把 body 设为 pointer-events:none，
+   面板作为 body 的兄弟会继承 → 选项点不动。显式恢复本子树可交互。 */
 .pcs-panel {
   position: fixed;
   z-index: 2100;
+  pointer-events: auto;
   display: flex;
   flex-direction: column;
   background: white;

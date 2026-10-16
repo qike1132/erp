@@ -33,9 +33,11 @@
         <UiDialog
           :open="showCompleteModal"
           title="确认完成批次"
+          :description="`确定要完成批次 ${completingBatchNo} 吗？完成后该批次将不再显示。`"
           max-width-class="max-w-[360px]"
           overlay-z-class="z-[var(--z-page-modal)]"
           content-z-class="z-[var(--z-page-modal)] bt-complete-card"
+          body-class="bt-complete-pane"
           @update:open="showCompleteModal = $event"
         >
           <div class="bt-complete-body">
@@ -312,7 +314,7 @@ const {
 .bt-complete-card {
   max-height: 480px !important;
 }
-.bt-complete-card > .p-6 {
+.bt-complete-pane {
   padding: 20px !important;
 }
 </style>

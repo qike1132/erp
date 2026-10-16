@@ -6,11 +6,12 @@
     max-width-class="max-w-[360px]"
     overlay-z-class="z-[var(--z-page-modal)]"
     content-z-class="z-[var(--z-page-modal)] bt-whitelist-card"
+    body-class="bt-whitelist-pane"
     @update:open="showWhitelistModal = $event"
   >
     <div class="bt-whitelist-body">
       <label v-for="c in allCustomers" :key="c" class="bt-whitelist-item">
-        <input v-model="whitelistEdit" type="checkbox" :value="c" aria-label="勾选项" />
+        <input v-model="whitelistEdit" type="checkbox" :value="c" :aria-label="`启用客户 ${c}`" />
         <span>{{ c }}</span>
       </label>
     </div>
@@ -105,7 +106,7 @@ async function saveWhitelist() {
 .bt-whitelist-card {
   max-height: 480px !important;
 }
-.bt-whitelist-card > .p-6 {
+.bt-whitelist-pane {
   padding: 12px 20px !important;
 }
 </style>
