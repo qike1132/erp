@@ -22,6 +22,7 @@ from server_manager.constants import (
     _SVC_API,
     _SVC_ARQ,
     _SVC_REVERSE,
+    _SVC_START_ORDER,
     _SVC_WEB,
 )
 
@@ -647,7 +648,10 @@ class ServiceOps:
                 state = self._stop_service_sync(name, nssm)
                 # ★ 消费停机终态：任一服务没停成即中止本轮重启。
                 #   SCM 拒停（1051，被运行中的依赖方占着）与被依赖方拒绝收尾都属此类。
-                if 'STOPPED' not in state.upper():
+                #   '未安装' 例外：服务不存在（sc query 返 1060）时无需停，不能当成
+                #   「停不掉」而中止整栈 —— 与 stop_managed_services / ensure_production_stopped
+                #   对「未安装」的同口径一致（erp-web 无 nginx、Redis 手工起时都会出现）。
+                if 'STOPPED' not in state.upper() and '未安装' not in state:
                     failed_stop.append(name)
                     break
             if failed_stop:
@@ -664,7 +668,7 @@ class ServiceOps:
                 #   ERP 就整体下线，而故障只是「某个被依赖服务停不掉」。故按启动序补拉起
                 #   已停服务（仍在跑的自然会被 start 跳过），把现场还原成「全部在跑、
                 #   本次重启部分未生效」，由 wait_service_running 的 prev_pid 判定如实标注。
-                for name in _SVC_ALL:
+                for name in _SVC_START_ORDER:
                     if name in failed_stop:
                         continue
                     self._gate.checkpoint()
@@ -673,8 +677,8 @@ class ServiceOps:
                         self.start_one_service(name, prev_pid=prev_pids.get(name))
                 self._msg_queue.put(('hosting_refresh', {}))
                 return
-            # 阶段二：原序全起——被依赖者先起，与 SCM 开机序一致。
-            for name in _SVC_ALL:
+            # 阶段二：按启动序全起——被依赖者（Redis）先起，与停机序相反。
+            for name in _SVC_START_ORDER:
                 self._gate.checkpoint()
                 self.start_one_service(name, prev_pid=prev_pids.get(name))
         elif verb == 'stop':

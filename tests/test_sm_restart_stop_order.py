@@ -25,8 +25,6 @@ arq 重连 6380 把 broker 永久钉死，下次重启同样失败。
 import ast
 from pathlib import Path
 
-import pytest
-
 ROOT = Path(__file__).resolve().parent.parent
 CONSTANTS = ROOT / "server_manager" / "constants.py"
 SVC_OPS = ROOT / "server_manager" / "service_ops.py"
@@ -46,6 +44,7 @@ def _constants() -> dict:
     return {
         "ALL": c._SVC_ALL,
         "REVERSE": c._SVC_REVERSE,
+        "START": c._SVC_START_ORDER,
         "DEPENDS": c._SVC_DEPENDS,
     }
 
@@ -98,6 +97,60 @@ class TestStopFailureHaltsStartPhase:
     def test_stop_failure_is_reported_as_warning(self):
         body = _func_src(SVC_OPS, "service_cmd_sync")
         assert "WARNING" in body, "停机失败必须如实告警，不得静默继续"
+
+
+class TestStartOrderIsTopological:
+    """启动序必须让被依赖者先起（arq 之前 broker 已起，prod 之前 cache 已起）。
+
+    2026-10-16 OCR finding：停机侧改真停（不再被 SCM 1051 挡住）后，启动侧若仍按
+    ``_SVC_ALL``（依赖方在前）迭代，会把 arq 排在 broker 之前 → 复现 constants L25
+    描述的 6380 抢连成环。故启动侧必须用 ``_SVC_START_ORDER``（= _SVC_REVERSE 的逆序）。
+    """
+
+    def test_broker_starts_before_arq(self):
+        c = _constants()
+        order = c["START"]
+        assert order.index(_SVC_BROKER) < order.index(_SVC_ARQ), (
+            f"启动序 {order}：erp-arq 依赖 erp-redis-broker，broker 必须先起")
+
+    def test_cache_starts_before_prod(self):
+        c = _constants()
+        order = c["START"]
+        assert order.index(_SVC_CACHE) < order.index(_SVC_API), (
+            f"启动序 {order}：erp-prod 依赖缓存实例，erp-redis 必须先起")
+
+    def test_every_dependency_starts_before_its_depender(self):
+        """通用偏序：_SVC_DEPENDS 里每个 (depender → dependency) 都满足启动先后。"""
+        c = _constants()
+        order = c["START"]
+        for depender, deps in c["DEPENDS"].items():
+            for dep in deps:
+                assert order.index(dep) < order.index(depender), (
+                    f"启动序违反依赖图：{dep} 必须在依赖它的 {depender} 之前起")
+
+    def test_start_covers_all_services(self):
+        c = _constants()
+        assert sorted(c["START"]) == sorted(c["ALL"]), "启动表必须覆盖全部服务"
+
+    def test_restart_start_side_uses_start_order(self):
+        """service_cmd_sync 的启动侧（阶段二 + 中止恢复）必须用 _SVC_START_ORDER，
+        不得再用 _SVC_ALL（那是停机序）。"""
+        body = _func_src(SVC_OPS, "service_cmd_sync")
+        assert "_SVC_START_ORDER" in body, \
+            "启动侧未使用 _SVC_START_ORDER（启动序仍按停机序迭代）"
+
+
+class TestNotInstalledServiceDoesNotAbortRestart:
+    """'未安装' 的服务不得中止整栈重启（与 stop_managed_services / ensure_production_stopped 同口径）。
+
+    无 nginx（erp-web 未装）或 Redis 手工起（erp-redis/-broker 未装）时，sc query 返 1060
+    → svc_state 判 '未安装'。若把它当成「停不掉」，整栈重启会在中途被误中止。
+    """
+
+    def test_stop_guard_exempts_not_installed(self):
+        body = _func_src(SVC_OPS, "service_cmd_sync")
+        assert "未安装" in body, \
+            "停机中止判定未豁免 '未安装'，无 nginx / 手工 Redis 时会误中止整栈重启"
 
 
 def _func_src(module: Path, name: str) -> str:

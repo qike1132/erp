@@ -297,7 +297,9 @@ defineEmits<{
 .pvt-row--editing {
   background: #fefce8;
 }
-.pvt-inline-input {
+/* 该 class 既用在原生 <input> 上，也经 input-class 落到 PartFieldCombobox 子组件的 input 上；
+   后者只带子组件 scope id → 用 :deep 穿透，两条路径都命中。 */
+:deep(.pvt-inline-input) {
   width: 100%;
   max-width: 100%;
   padding: 4px 6px;
@@ -310,7 +312,7 @@ defineEmits<{
   background: #fff;
   color: var(--color-text-primary, #1a1a2e);
 }
-.pvt-inline-input:focus {
+:deep(.pvt-inline-input:focus) {
   border-color: var(--color-warning-500, #ff9f43);
   box-shadow: 0 0 0 2px var(--color-warning-100, #ffedd5);
 }

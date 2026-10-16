@@ -143,7 +143,7 @@ function closeDialog() {
             <PartFieldCombobox
               v-if="field.historyCandidates"
               v-model="row[field.key]"
-              class="batch-part-input"
+              input-class="batch-part-input"
               :options="candidatesFor(field.key)"
               :placeholder="field.placeholder"
               :maxlength="field.formMaxlength"
@@ -240,7 +240,9 @@ function closeDialog() {
   color: var(--color-danger-500, #ef4444);
 }
 
-.batch-part-input {
+/* 该 class 同时用在原生 <input>（本组件模板内）与 PartFieldCombobox 的 input（子组件内），
+   后者只带子组件 scope id，父组件 scoped 规则够不到 → 用 :deep 穿透，两条路径都命中。 */
+:deep(.batch-part-input) {
   width: 100%;
   padding: 6px 10px;
   border: 1px solid var(--color-border-light);
@@ -254,7 +256,7 @@ function closeDialog() {
   box-sizing: border-box;
 }
 
-.batch-part-input:focus {
+:deep(.batch-part-input:focus) {
   border-color: var(--color-primary-500);
 }
 

@@ -47,7 +47,7 @@ _SVC_ALL = (_SVC_API, _SVC_ARQ, _SVC_WEB, _SVC_REDIS_CACHE, _SVC_REDIS_BROKER)
 #     永久钉死 → 下次重启同样失败。实机取证：sc enumdepend erp-redis-broker 的唯一
 #     依赖方是 erp-arq 且 RUNNING；pid 11096 持有 3 条到 127.0.0.1:6380 的
 #     ESTABLISHED。故停机序由 _SVC_DEPENDS 推导（被依赖者越晚停越安全）。
-#   启动仍按 _SVC_ALL 原序（被依赖者先起，与 SCM 开机序一致）。
+#   启动序另见下方 _SVC_START_ORDER（= _SVC_REVERSE 的逆序：被依赖者先起）。
 def _stop_order():
     """按 _SVC_DEPENDS 拓扑排序生成停机序：依赖方在前，被依赖者在后。
 
@@ -76,6 +76,12 @@ def _stop_order():
 
 
 _SVC_REVERSE = _stop_order()
+# 整栈重启的**启动**顺序 = 停机逆拓扑的逆：被依赖者（Redis）先起。
+#   ★ 为什么不用 _SVC_ALL（2026-10-16 OCR finding）：_SVC_ALL 是「依赖方在前」的**停机**序，
+#     直接拿它启动会把 erp-arq 排在 erp-redis-broker 之前、erp-prod 排在 erp-redis 之前 →
+#     复现上面 L25 描述的开机并行竞态（arq 抢连 6380 失败 → NSSM 重拉成环）。停机侧改真停
+#     （不再被 SCM 1051 挡住）后，启动侧这个顺序才会显形。
+_SVC_START_ORDER = tuple(reversed(_SVC_REVERSE))
 # 会写入 UVICORN_WORKERS 的服务：erp-prod 是唯一消费方；erp-arq 不读它，一并写入
 #   只为保持两者 AppEnvironmentExtra 一致（免得「安装生产服务」拿其中一个的值覆盖出分歧）。
 #   ★ 刻意不含 _SVC_WEB：erp-web 是 nginx，Python 环境变量对它无意义 ——
