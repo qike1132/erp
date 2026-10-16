@@ -17,7 +17,7 @@
             :empty-text="productEmptyText"
             @add-staged="addStaged"
             @product-select="onProductSelect"
-            @clear-shipment="shipmentInfo = null"
+            @clear-shipment="clearShipmentSelection"
             @ocr-staged="addOcrStaged"
             @imported="onStockoutImported"
           />
@@ -122,22 +122,34 @@ async function fetchShipmentInfo() {
 
 // === 成品库存批次列表（选定 SKU 后带出，供按批次扣减） ===
 const batchOptions = ref<BatchAvailable[]>([])
+/** 请求序号：快速切换 SKU/客户时丢弃过期响应，避免旧结果覆盖新结果 */
+let batchReqSeq = 0
 
 async function fetchBatchOptions() {
   if (!form.productId) {
     batchOptions.value = []
     return
   }
+  const seq = ++batchReqSeq
   try {
     const res = await finishedStockApi.batches(Number(form.productId), form.customer || undefined)
+    if (seq !== batchReqSeq) return // 已有更新的请求在途，丢弃过期响应
     batchOptions.value = res.data ?? []
   } catch {
+    if (seq !== batchReqSeq) return
     batchOptions.value = []
   }
   // 当前选中批次若不在新列表里则清空，避免提交一个不存在/不属于该产品的批次
   if (form.batchNo && !batchOptions.value.some((b) => b.batch_no === form.batchNo)) {
     form.batchNo = ''
   }
+}
+
+/** 产品选择被清空（StockOutInputForm 的 clear-shipment）：批次也要一并清掉 */
+function clearShipmentSelection() {
+  shipmentInfo.value = null
+  batchOptions.value = []
+  form.batchNo = ''
 }
 
 // === 表单 ===
@@ -234,7 +246,9 @@ function addOcrStaged(items: StagedStockout[]) {
 // === 编辑暂存 ===
 const editStagedOpen = ref(false)
 const editStagedIdx = ref(-1)
-const editStagedForm = reactive({ customer: '', date: '', productName: '', quantity: 1, note: '', batchNo: '' })
+// 注：编辑暂存弹窗不支持改批次（批次在列表徽标里展示，选错只能删了重加）；
+// 故这里不引入 batchNo 字段，避免看似可改实则空转。
+const editStagedForm = reactive({ customer: '', date: '', productName: '', quantity: 1, note: '' })
 
 function openEditStaged(idx: number) {
   editStagedIdx.value = idx
@@ -245,7 +259,6 @@ function openEditStaged(idx: number) {
   editStagedForm.productName = item.product_name || ''
   editStagedForm.quantity = item.quantity || 1
   editStagedForm.note = item.note || ''
-  editStagedForm.batchNo = item.batch_no || ''
   editStagedOpen.value = true
 }
 
@@ -257,7 +270,6 @@ function saveEditStaged() {
   item.date = editStagedForm.date
   item.quantity = editStagedForm.quantity
   item.note = editStagedForm.note
-  item.batch_no = editStagedForm.batchNo || undefined
   editStagedOpen.value = false
 }
 

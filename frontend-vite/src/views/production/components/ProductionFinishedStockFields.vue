@@ -50,27 +50,30 @@ defineProps<{ error?: string }>()
   flex-wrap: wrap;
   align-items: center;
   gap: 12px;
-  margin-top: 10px;
   padding: 10px 12px;
   border: 1px solid var(--color-border-light);
   border-radius: 12px;
   background: var(--color-slate-50);
 }
 .pr-fin-field { display: flex; align-items: center; gap: 8px; }
-.pr-fin-label { font-size: 13px; font-weight: 600; color: var(--color-text-secondary); white-space: nowrap; }
+.pr-fin-label { font-size: 15px; font-weight: 600; color: var(--color-text-secondary); white-space: nowrap; }
+/* 尺度对齐弹窗既有大控件（EntryDetailFields：17px/14px/14px/60px），
+   否则相邻两块一大一小显得像嵌进来的小部件 */
 .pr-fin-input {
-  padding: 7px 11px;
-  border: 1.5px solid var(--color-border);
-  border-radius: 9px;
+  padding: 14px 18px;
+  min-height: 60px;
+  font-size: 17px;
+  border: 2px solid var(--color-border);
+  border-radius: 14px;
   background: #fff;
   font-family: inherit;
-  font-size: 13px;
   color: var(--color-text);
   outline: none;
-  width: 190px;
+  width: 220px;
+  box-sizing: border-box;
 }
 .pr-fin-input::placeholder { color: var(--color-text-placeholder); }
 .pr-fin-input:focus { border-color: var(--color-primary-500); box-shadow: 0 0 0 3px rgba(91, 141, 239, 0.15); }
-.pr-fin-check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--color-text-secondary); cursor: pointer; }
-.pr-fin-error { flex-basis: 100%; color: var(--color-danger-500); font-size: 12px; }
+.pr-fin-check { display: inline-flex; align-items: center; gap: 6px; font-size: 15px; font-weight: 600; color: var(--color-text-secondary); cursor: pointer; }
+.pr-fin-error { flex-basis: 100%; color: var(--color-danger-500); font-size: 13px; }
 </style>

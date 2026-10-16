@@ -125,10 +125,11 @@ const props = defineProps<{
 
 const form = defineModel<StockOutForm>('form', { required: true })
 
-/** 批次下拉选项：显示批次号 + 该批次可用量 */
-const batchSelectOptions = computed(() =>
-  props.batchOptions.map((b) => ({ value: b.batch_no, label: `${b.batch_no}（可用 ${b.available_quantity}）` })),
-)
+/** 批次下拉选项：首项为空值（可改回「不指定批次」），其余显示批次号 + 该批次可用量 */
+const batchSelectOptions = computed(() => [
+  { value: '', label: '不指定批次（整产品扣减）' },
+  ...props.batchOptions.map((b) => ({ value: b.batch_no, label: `${b.batch_no}（可用 ${b.available_quantity}）` })),
+])
 /** 当前选中批次（用于显示可用量提示） */
 const selectedBatch = computed(() => props.batchOptions.find((b) => b.batch_no === form.value.batchNo) ?? null)
 

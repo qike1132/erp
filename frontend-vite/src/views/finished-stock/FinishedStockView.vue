@@ -4,7 +4,7 @@
     <div class="fs-toolbar">
       <div class="fs-stat-row">
         <div class="fs-stat">
-          <div class="fs-stat-top"><span class="fs-stat-dot" style="background: var(--color-info-500)" /><span class="fs-stat-label">可用库存</span></div>
+          <div class="fs-stat-top"><span class="fs-stat-dot" /><span class="fs-stat-label">可用库存</span></div>
           <div class="fs-stat-value">{{ fmtNum(data?.total_available ?? 0) }}</div>
         </div>
       </div>
@@ -14,22 +14,13 @@
       </div>
     </div>
 
-    <!-- 客户快捷切换行 -->
-    <div class="fs-customer-row">
-      <span class="fs-customer-label"><FontAwesomeIcon icon="users" aria-hidden="true" />客户</span>
-      <div class="fs-chip-scroll">
-        <button type="button" :class="['fs-chip', { active: !filters.customer }]" @click="filters.customer = ''">
-          <FontAwesomeIcon icon="th-large" aria-hidden="true" />全部
-        </button>
-        <button
-          v-for="c in customerList"
-          :key="c"
-          type="button"
-          :class="['fs-chip', { active: filters.customer === c }]"
-          @click="filters.customer = c"
-        >{{ c }}</button>
-      </div>
-    </div>
+    <!-- 客户快捷切换行（复用 /stock 同款共享组件） -->
+    <CustomerChipBar
+      :customers="customerList"
+      :selected="filters.customer"
+      :loading="isLoading"
+      @select="filters.customer = $event"
+    />
 
     <!-- 表格：SKU 大格（图片/产品名/69码跨行合并）+ 批次子行 -->
     <div class="fs-card-main">
@@ -60,6 +51,10 @@
             <small v-if="!filters.customer" class="fs-cust">{{ (row as FinishedStockItem).customer_name || '未指定客户' }}</small>
           </span>
         </template>
+        <!-- 69码（field 被换成分组键，必须显式渲染原字段，否则会显示分组键本身） -->
+        <template #column-body-_g_barcode="{ row }">
+          <span>{{ (row as FinishedStockItem).barcode }}</span>
+        </template>
         <!-- 批次号 -->
         <template #column-body-batch_no="{ row }">
           <span v-if="(row as FinishedStockItem).batch_no" class="fs-badge-batch">{{ (row as FinishedStockItem).batch_no }}</span>
@@ -67,7 +62,7 @@
         </template>
         <!-- 库存 -->
         <template #column-body-batch_available="{ row }">
-          <span v-if="(row as FinishedStockItem).batch_available <= 100" class="fs-qty-low">
+          <span v-if="(row as FinishedStockItem).batch_available <= LOW_STOCK_THRESHOLD" class="fs-qty-low">
             <FontAwesomeIcon icon="triangle-exclamation" aria-hidden="true" />{{ fmtNum((row as FinishedStockItem).batch_available) }}
           </span>
           <span v-else class="fs-qty-ok">{{ fmtNum((row as FinishedStockItem).batch_available) }}</span>
@@ -104,6 +99,7 @@ import { ref, computed, watch } from 'vue'
 import { useQuery, keepPreviousData } from '@tanstack/vue-query'
 import UiDataTable from '@/components/ui/UiDataTable.vue'
 import type { TableColumn } from '@/components/ui/UiDataTable.vue'
+import CustomerChipBar from '@/components/ui/CustomerChipBar.vue'
 import { formatNumber } from '@/utils/format'
 import { resolveStaticUrl } from '@/api/request'
 import { finishedStockApi } from '@/api'
@@ -112,6 +108,8 @@ import { batchSortKey, compareBatchNo } from './batchSort'
 import type { FinishedStockItem } from '@/types'
 
 const filters = ref({ customer: '', product: '' })
+/** 低库存高亮阈值（≤ 该值标红预警） */
+const LOW_STOCK_THRESHOLD = 100
 const debouncedProduct = useDebouncedRef(computed(() => filters.value.product), 300)
 const page = ref(1)
 const perPage = ref(20)
@@ -170,7 +168,8 @@ const uiColumns = computed(() => baseColumns.map((c) => ({ ...c, field: GROUP_FI
 
 function fmtNum(v: unknown): string {
   const n = Number(v)
-  return Number.isFinite(n) && n !== 0 ? formatNumber(n) : String(n === 0 ? 0 : '')
+  if (!Number.isFinite(n)) return ''
+  return formatNumber(n)
 }
 
 /** 排序取值：批次号走专用键（见 batchSort），其余按数值。 */
@@ -202,7 +201,9 @@ const skuGroups = computed(() => {
       ? [...rows].sort((x, y) => {
           const a = sortVal(x as unknown as Record<string, unknown>, s.field)
           const b = sortVal(y as unknown as Record<string, unknown>, s.field)
-          return (a < b ? -1 : a > b ? 1 : 0) * s.order
+          if (a < b) return -s.order
+          if (a > b) return s.order
+          return 0
         })
       : [...rows].sort((x, y) => compareBatchNo(x.batch_no, y.batch_no))
     for (const r of ordered) {
@@ -239,7 +240,7 @@ function onPage(event: { page: number; rows: number }) {
 .fs-stat { display: flex; flex-direction: column; gap: 1px; padding: 0 16px; }
 .fs-stat + .fs-stat { border-left: 1px solid var(--color-border-light, #f0f2f5); }
 .fs-stat-top { display: flex; align-items: center; gap: 5px; }
-.fs-stat-dot { width: 6px; height: 6px; border-radius: 2px; flex-shrink: 0; }
+.fs-stat-dot { width: 6px; height: 6px; border-radius: 2px; flex-shrink: 0; background: var(--color-info-500); }
 .fs-stat-label { font-size: 11px; font-weight: 500; color: var(--color-text-secondary); white-space: nowrap; }
 .fs-stat-value { font-size: 17px; font-weight: 700; line-height: 1.2; color: var(--color-text); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .fs-search { position: relative; flex-shrink: 0; }
@@ -248,15 +249,6 @@ function onPage(event: { page: number; rows: number }) {
 .fs-search-input::placeholder { color: var(--color-text-muted); }
 .fs-search-input:focus { border-color: var(--color-primary-500); box-shadow: 0 0 0 3px rgba(91,141,239,0.15); }
 
-.fs-customer-row { display: flex; align-items: center; gap: 10px; padding: 9px 20px; border-bottom: 1px solid var(--color-border-light); background: linear-gradient(to bottom, var(--color-slate-50), #fff); flex-shrink: 0; }
-.fs-customer-label { display: flex; align-items: center; gap: 5px; flex-shrink: 0; font-size: 11.5px; font-weight: 600; color: var(--color-text-secondary); white-space: nowrap; }
-.fs-customer-label svg { width: 12px; height: 12px; color: var(--color-primary-500); }
-.fs-chip-scroll { display: flex; gap: 6px; overflow-x: auto; flex: 1; min-width: 0; padding: 2px 0; scrollbar-width: none; }
-.fs-chip-scroll::-webkit-scrollbar { display: none; }
-.fs-chip { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; padding: 5px 14px; border: 1.5px solid var(--color-border); border-radius: 999px; background: #fff; font-family: inherit; font-size: 12px; font-weight: 600; color: var(--color-text-secondary); white-space: nowrap; cursor: pointer; user-select: none; transition: all .2s ease; }
-.fs-chip svg { width: 11px; height: 11px; }
-.fs-chip:hover { border-color: var(--color-primary-500); color: var(--color-primary-600); }
-.fs-chip.active { background: var(--color-primary-600); border-color: var(--color-primary-600); color: #fff; }
 
 .fs-card-main { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 .fs-card-main :deep(.ui-data-table-wrapper) { flex: 1; min-height: 0; display: flex; flex-direction: column; border: 0; }

@@ -554,6 +554,14 @@
       "drop_constraint_if_exists:fk_stockin_batch_completed_by|stock_in",
       "drop_index_if_exists:idx_stockin_batch_no"
     ],
+    "migrations/versions/pg_standalone_098_finished_stock_batch.py": [
+      "drop_column_if_exists:daily_production_record|batch_no",
+      "drop_column_if_exists:daily_production_record|custom_country",
+      "drop_column_if_exists:daily_production_record|is_custom",
+      "drop_column_if_exists:stock_out|batch_no",
+      "drop_index_if_exists:idx_dpr_batch_no",
+      "drop_index_if_exists:idx_stockout_batch_no"
+    ],
     "migrations/versions/rebuild_po_dedup_index.py": [
       "execute:DROP INDEX IF EXISTS uq_po_pending_dedup"
     ],

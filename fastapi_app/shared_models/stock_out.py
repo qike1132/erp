@@ -57,8 +57,9 @@ class StockOut(Base):
         # 不是这条 partial 索引，故需单独声明。
         Index('idx_stockout_no_stockin', 'product_id', 'customer',
               postgresql_where=text("stockin_id IS NULL")),
-        # 成品库存批次级扣减的批次聚合路径：WHERE batch_no = .. AND stockin_id IS NULL。
-        # 排除备货抵扣行（stockin_id 非空）——与批次可用量口径一致。
+        # 成品库存批次聚合的 partial 覆盖：出货聚合恒带 stockin_id IS NULL（排除备货抵扣行）。
+        # 注：聚合按 coalesce(batch_no,'') 分组、且 group by 还带 product_id/customer，
+        # 故 btree 不能用于该等值条件本身，本索引只加速 partial 谓词的扫描。
         Index('idx_stockout_batch_no', 'batch_no',
               postgresql_where=text("stockin_id IS NULL")),
     )

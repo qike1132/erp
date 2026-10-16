@@ -181,6 +181,20 @@ async def test_batches_by_product_excludes_empty_batch(async_db_session):
     assert [b['batch_no'] for b in batches] == ['B1']
 
 
+async def test_same_batch_two_customers_no_double_deduct(async_db_session):
+    """同一 (产品,批次) 有两个客户的入库行时，出货只扣一次（不按客户拆行）。"""
+    db = async_db_session
+    p = await _mk_product(db)
+    await _mk_prod(db, product_id=p.id, qty=100, batch_no='B9', customer_name='甲')
+    await _mk_prod(db, product_id=p.id, qty=60, batch_no='B9', customer_name='乙')
+    await _mk_stockout(db, product_id=p.id, qty=40, batch_no='B9', customer='甲')
+    rows = [r for r in await _rows(db) if r['product_id'] == p.id]
+    assert len(rows) == 1                      # 同一批次并成一行
+    assert rows[0]['batch_in_qty'] == 160
+    assert rows[0]['batch_available'] == 120   # 只扣一次 40
+    assert rows[0]['customer_name'] == ''      # 跨客户 → 未指定
+
+
 async def test_total_available_is_global_not_page(async_db_session):
     """total_available 是过滤后全量合计，不是当前页求和（翻页/筛选时数字不应跳动）。"""
     db = async_db_session

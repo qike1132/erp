@@ -47,6 +47,9 @@ export interface CreatedRecordSummary {
   customer_name?: string
 }
 
+/** 包装部部门码：成品库存相关字段/校验只对它生效（避免字面量在多处漂移） */
+export const PACKAGING_DEPT = 'packaging'
+
 export const PRODUCTION_DEPARTMENTS: readonly DepartmentOption[] = [
   { value: 'filling', label: '充棉部', icon: 'fas fa-cloud' },
   { value: 'handcraft', label: '手工部', icon: 'fas fa-hand-sparkles' },
@@ -134,6 +137,14 @@ export function useProductionEntry(
     custom_country: '',
   })
   const formErrors = reactive<Record<string, string>>({})
+
+  /** 批次/定制属「某个产品的生产批次」，换产品必须一并清掉，否则会串到另一个产品。 */
+  function clearFinishedStockFields() {
+    form.batch_no = ''
+    form.is_custom = false
+    form.custom_country = ''
+    formErrors.custom_country = ''
+  }
   const computedValue = computed(() => (form.quantity || 0) * (form.unit_price || 0))
 
   const { data: customerData } = useQuery({
@@ -200,6 +211,7 @@ export function useProductionEntry(
       form.product_name = ''
       form.barcode = ''
       form.unit_price = 0
+      clearFinishedStockFields()
       duplicateTotal.value = 0
     }
     if (!searchQuery.value.trim()) {
@@ -256,6 +268,7 @@ export function useProductionEntry(
     // 必须先归零：否则新产品无单价（price 为 0/null）时会**沿用上一个产品的单价**，
     // 提交后 create_record 直接把错误单价写进生产记录，产值失真（后端不重算单价）。
     form.unit_price = 0
+    clearFinishedStockFields()
     searchQuery.value = product.name
     searchResults.value = []
     showDropdown.value = false
@@ -281,6 +294,7 @@ export function useProductionEntry(
     form.barcode = ''
     searchQuery.value = ''
     form.unit_price = 0
+    clearFinishedStockFields()
     duplicateTotal.value = 0
   }
 
@@ -319,7 +333,7 @@ export function useProductionEntry(
       valid = false
     }
     // 包装部：标了定制就必须填国家（与后端 _validate_custom 同口径）
-    if (formDept.value === 'packaging' && form.is_custom && !form.custom_country.trim()) {
+    if (formDept.value === PACKAGING_DEPT && form.is_custom && !form.custom_country.trim()) {
       formErrors.custom_country = '定制产品必须填写定制国家'
       valid = false
     }
@@ -447,7 +461,7 @@ export function useProductionEntry(
         production_date: selectedDateModel.value,
         remark: form.remark,
         // 成品库存字段仅包装部有意义；其它部门不传，避免脏数据
-        ...(formDept.value === 'packaging'
+        ...(formDept.value === PACKAGING_DEPT
           ? {
               batch_no: form.batch_no.trim() || null,
               is_custom: form.is_custom,

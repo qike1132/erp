@@ -41,8 +41,26 @@ def upgrade() -> None:
         'ON stock_out (batch_no) WHERE stockin_id IS NULL'
     ))
 
+    # 导航权限行：permission 表是运行时的权限权威源（/user 分配弹窗、侧栏导航都读它），
+    # 默认安装路径只跑 alembic upgrade（不跑 scripts/seed_nav.py，那是 -Blank 分支专用），
+    # 故必须在此幂等种入，否则旧库升级/镜像恢复的实例没有「成品库存」入口。照 069 写法。
+    op.execute(
+        """
+        INSERT INTO permission (name, code, url, icon, section, section_name, sort_order, is_nav, updated_at)
+        SELECT '成品库存', 'finished_stock_view', '/finished-stock', 'fa-boxes-stacked', 'core', '核心业务', 8, true, now()
+        WHERE NOT EXISTS (SELECT 1 FROM permission WHERE code = 'finished_stock_view')
+        """
+    )
+
 
 def downgrade() -> None:
+    op.execute(
+        """
+        DELETE FROM user_permission
+        WHERE permission_id IN (SELECT id FROM permission WHERE code = 'finished_stock_view')
+        """
+    )
+    op.execute("DELETE FROM permission WHERE code = 'finished_stock_view'")
     drop_index_if_exists('idx_stockout_batch_no', table_name='stock_out')
     drop_column_if_exists('stock_out', 'batch_no')
     drop_index_if_exists('idx_dpr_batch_no', table_name='daily_production_record')

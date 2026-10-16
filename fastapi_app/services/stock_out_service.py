@@ -65,6 +65,9 @@ async def _assert_inventory_balance(
 
 
 async def create_stockout_core(db: AsyncSession, product_id: int, quantity: int, customer: str, stockout_date: datetime, note: str, operator_id: int | None = None, batch_no: str | None = None) -> list[StockOut]:
+    # 批次串归一化：与批量路径 _process_single_stockout 同口径（schema 未做 strip，
+    # 直连 API 时可带前后空白；生产记录里的批次已被 strip 过，不归一化会匹配不到 → 误报不足）。
+    batch_no = (batch_no or '').strip() or None
     product = await stock_service.get_product_for_update(db, product_id)
     # 闸门口径与批量路径（_process_single_stockout）统一：库存结余 + 订单余量。
     # 产品级 current_stock 前置断言已移除（2026-10-06 批量路径同款裁定，2026-10-07
@@ -156,7 +159,9 @@ async def update_stockout_core(db: AsyncSession, stockout: StockOut, new_quantit
         from fastapi_app.services.finished_stock_service import get_batch_available
         batch_available = await get_batch_available(db, stockout.product_id, batch_no_val)
         net_delta = (new_quantity - stockout.returned_quantity) - old_net
-        if net_delta > batch_available:
+        # 只在净增时拦：净减/不变是释放批次量，即便该批次已被透支（可用为负）也必须放行，
+        # 否则「把出货改小」这种修复动作反而被拒。
+        if net_delta > 0 and net_delta > batch_available:
             raise ValueError(f'批次「{batch_no_val}」可用库存不足：可用 {batch_available}，本次净增 {net_delta}')
     stockout.quantity = new_quantity
     stockout.stockout_date = stockout_date
