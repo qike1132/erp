@@ -25,6 +25,7 @@
             </div>
             <div class="so-staged-badges">
               <span class="badge-tag badge-danger">数量: {{ item.quantity }}</span>
+              <span v-if="item.batch_no" class="badge-tag badge-secondary">批次: {{ item.batch_no }}</span>
               <span v-if="item.note" class="badge-tag badge-secondary">备注: {{ item.note }}</span>
             </div>
           </div>

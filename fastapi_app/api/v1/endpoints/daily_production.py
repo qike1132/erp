@@ -158,6 +158,9 @@ async def create_record(
             production_date_str=data.production_date,
             remark=data.remark or '',
             created_by=user.username if hasattr(user, 'username') else '',
+            batch_no=data.batch_no,
+            is_custom=data.is_custom,
+            custom_country=data.custom_country,
         )
     return ProductionRecordActionResponse(success=True, message='生产记录创建成功', id=record.id)
 

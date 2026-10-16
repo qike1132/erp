@@ -59,6 +59,7 @@ export function useStockOutActions(
         quantity: stockout.quantity,
         stockout_date: stockout.date,
         note: stockout.note,
+        batch_no: stockout.batch_no || null,
       }))
 
       const result = await stockApi.batchSubmitStockouts(stockoutsForApi) as ApiResponse & { results?: Array<{ success: boolean; error?: string }> }

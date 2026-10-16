@@ -385,6 +385,7 @@ class BatchStockOutItem(BaseModel):
     quantity: int = Field(..., gt=0, le=9999999)
     note: str = ""
     stockout_date: str | None = None
+    batch_no: str | None = Field(None, max_length=100, description="批次号（指定则按该批次扣减成品库存）")
 
 class BatchOrderRequest(BaseModel):
     orders: list[BatchOrderItem]

@@ -232,7 +232,7 @@ async def create_stockout(
         await stock_service.create_stockout(
             db, product_id=data.product_id, quantity=data.quantity,
             customer=data.customer, stockout_date_str=data.stockout_date,
-            note=data.note or '', operator_id=_user.id,
+            note=data.note or '', operator_id=_user.id, batch_no=data.batch_no,
         )
     return StockActionResponse(success=True, message='出库添加成功！')
 

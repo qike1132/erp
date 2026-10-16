@@ -395,6 +395,11 @@ export interface BatchAssignResponse {
   updated_count?: number
 }
 
+export interface BatchAvailableItem {
+  batch_no?: string
+  available_quantity?: number
+}
+
 export interface BatchCaseMovementRequest {
   movements: Array<Record<string, unknown>>
 }
@@ -412,6 +417,11 @@ export interface BatchImportResult {
   message: string
   imported?: number
   skipped?: number
+}
+
+export interface BatchListResponse {
+  success?: boolean
+  data?: Array<BatchAvailableItem>
 }
 
 export interface BatchNoUpdate {
@@ -520,6 +530,7 @@ export interface BatchStockOutItem {
   quantity: number
   note?: string
   stockout_date?: string | null
+  batch_no?: string | null
 }
 
 export interface BatchStockOutRequest {
@@ -1159,6 +1170,28 @@ export interface FillingItem {
   specification?: string
   unit?: string
   remark?: string
+}
+
+export interface FinishedStockItem {
+  customer_name?: string
+  product_id: number
+  product_name?: string
+  barcode?: string
+  batch_no?: string
+  image?: string
+  batch_in_qty?: number
+  batch_available?: number
+  is_custom?: boolean
+  custom_country?: string
+}
+
+export interface FinishedStockSummaryResponse {
+  success?: boolean
+  data?: Array<FinishedStockItem>
+  total?: number
+  page?: number
+  per_page?: number
+  all_customers?: Array<string>
 }
 
 export interface FrontendErrorLogRequest {
@@ -2064,6 +2097,9 @@ export interface ProductionRecordCreate {
   quantity: number
   production_date: string
   remark?: string | null
+  batch_no?: string | null
+  is_custom?: boolean | null
+  custom_country?: string | null
 }
 
 export interface ProductionRecordListResponse {
@@ -2086,6 +2122,9 @@ export interface ProductionRecordUpdate {
   quantity?: number | null
   production_date?: string | null
   remark?: string | null
+  batch_no?: string | null
+  is_custom?: boolean | null
+  custom_country?: string | null
 }
 
 export interface ProductionSummaryResponse {
@@ -2780,6 +2819,7 @@ export interface StockOutCreate {
   customer: string
   stockout_date: string
   note?: string | null
+  batch_no?: string | null
 }
 
 export interface StockOutUpdate {

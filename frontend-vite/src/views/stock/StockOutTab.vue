@@ -9,6 +9,7 @@
             v-model:form="form"
             :customer-options="customerOptions"
             :shipment-info="shipmentInfo"
+            :batch-options="batchOptions"
             :can-add="canAdd"
             :staged-count="staged.length"
             :search-fn="searchProductsForAutocomplete"
@@ -69,9 +70,9 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch } from 'vue'
 import { useQueryClient } from '@tanstack/vue-query'
-import { stockApi } from '@/api'
+import { stockApi, finishedStockApi } from '@/api'
 import { useCatalogStore } from '@/stores/catalog'
-import type { ShipmentInfo, StagedStockout, Product } from '@/types'
+import type { ShipmentInfo, StagedStockout, Product, BatchAvailable } from '@/types'
 import { useStockOutActions } from './composables/useStockOutActions'
 import UiButton from '@/components/ui/UiButton.vue'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
@@ -100,6 +101,7 @@ function onProductSelect(product: Product) {
   form.productId = String(product.id)
   form.search = product.name
   fetchShipmentInfo()
+  fetchBatchOptions()
 }
 
 // === 可出货量查询 ===
@@ -118,9 +120,29 @@ async function fetchShipmentInfo() {
   }
 }
 
+// === 成品库存批次列表（选定 SKU 后带出，供按批次扣减） ===
+const batchOptions = ref<BatchAvailable[]>([])
+
+async function fetchBatchOptions() {
+  if (!form.productId) {
+    batchOptions.value = []
+    return
+  }
+  try {
+    const res = await finishedStockApi.batches(Number(form.productId), form.customer || undefined)
+    batchOptions.value = res.data ?? []
+  } catch {
+    batchOptions.value = []
+  }
+  // 当前选中批次若不在新列表里则清空，避免提交一个不存在/不属于该产品的批次
+  if (form.batchNo && !batchOptions.value.some((b) => b.batch_no === form.batchNo)) {
+    form.batchNo = ''
+  }
+}
+
 // === 表单 ===
 const today = toISODate()
-const form = reactive({ customer: '', date: today, search: '', productId: '', quantity: 0, note: '' })
+const form = reactive({ customer: '', date: today, search: '', productId: '', quantity: 0, note: '', batchNo: '' })
 
 // === 产品搜索 / 浏览（与客户订单页同款：按客户过滤 + 点击查看全部） ===
 const {
@@ -135,7 +157,10 @@ const canAdd = computed(() => {
 })
 
 watch(() => form.customer, () => {
-  if (form.productId) fetchShipmentInfo()
+  if (form.productId) {
+    fetchShipmentInfo()
+    fetchBatchOptions()
+  }
 })
 
 // === 暂存列表 ===
@@ -166,6 +191,15 @@ async function addStaged() {
     }
   }
 
+  // 批次级闸门（前端即时提示）：选了批次且超过该批次可用 → 拦下
+  if (form.batchNo) {
+    const opt = batchOptions.value.find((b) => b.batch_no === form.batchNo)
+    if (opt && form.quantity > opt.available_quantity) {
+      showToast(`批次「${form.batchNo}」可用不足！可用: ${opt.available_quantity}`, 'error')
+      return
+    }
+  }
+
   staged.value.push({
     id: Date.now(),
     product_id: form.productId,
@@ -174,12 +208,15 @@ async function addStaged() {
     date: form.date,
     quantity: form.quantity,
     note: form.note,
+    batch_no: form.batchNo || undefined,
   })
   form.search = ''
   form.productId = ''
   form.quantity = 0
   form.note = ''
+  form.batchNo = ''
   shipmentInfo.value = null
+  batchOptions.value = []
 }
 
 /** OCR 粘贴识别确认后的条目：与手工录入进同一个暂存列表，提交前仍可改、删 */
@@ -190,7 +227,7 @@ function addOcrStaged(items: StagedStockout[]) {
 // === 编辑暂存 ===
 const editStagedOpen = ref(false)
 const editStagedIdx = ref(-1)
-const editStagedForm = reactive({ customer: '', date: '', productName: '', quantity: 1, note: '' })
+const editStagedForm = reactive({ customer: '', date: '', productName: '', quantity: 1, note: '', batchNo: '' })
 
 function openEditStaged(idx: number) {
   editStagedIdx.value = idx
@@ -201,6 +238,7 @@ function openEditStaged(idx: number) {
   editStagedForm.productName = item.product_name || ''
   editStagedForm.quantity = item.quantity || 1
   editStagedForm.note = item.note || ''
+  editStagedForm.batchNo = item.batch_no || ''
   editStagedOpen.value = true
 }
 
@@ -212,6 +250,7 @@ function saveEditStaged() {
   item.date = editStagedForm.date
   item.quantity = editStagedForm.quantity
   item.note = editStagedForm.note
+  item.batch_no = editStagedForm.batchNo || undefined
   editStagedOpen.value = false
 }
 

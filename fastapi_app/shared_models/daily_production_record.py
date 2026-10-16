@@ -6,7 +6,7 @@
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Date, DateTime, ForeignKey, Index, Integer, Numeric, String
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from fastapi_app.core.float_utils import round_money
@@ -22,6 +22,7 @@ class DailyProductionRecord(Base):
         Index('idx_dpr_barcode', 'barcode'),
         Index('idx_dpr_product_id', 'product_id'),
         Index('idx_dpr_customer_id', 'customer_id'),
+        Index('idx_dpr_batch_no', 'batch_no'),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -48,6 +49,9 @@ class DailyProductionRecord(Base):
     )
     quantity: Mapped[int] = mapped_column(Integer, nullable=False, comment='生产数量')
     production_date: Mapped[date] = mapped_column(Date, nullable=False, comment='生产日期')
+    batch_no: Mapped[str | None] = mapped_column(String(100), nullable=True, comment='批次号（复用订单批次体系，自由文本）')
+    is_custom: Mapped[bool | None] = mapped_column(Boolean, nullable=True, comment='是否定制（NULL/false 均视为常规）')
+    custom_country: Mapped[str | None] = mapped_column(String(100), nullable=True, comment='定制国家（仅 is_custom=true 时有意义）')
     remark: Mapped[str | None] = mapped_column(String(500), nullable=True, comment='备注')
     create_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), comment='创建时间')
     created_by: Mapped[str | None] = mapped_column(String(50), nullable=True, comment='创建人')
@@ -73,6 +77,9 @@ class DailyProductionRecord(Base):
             'quantity': self.quantity,
             'production_value': round_money(up * self.quantity),
             'production_date': self.production_date.isoformat() if self.production_date else '',
+            'batch_no': self.batch_no or '',
+            'is_custom': bool(self.is_custom),
+            'custom_country': self.custom_country or '',
             'remark': self.remark or '',
             'create_time': self.create_time.strftime('%Y-%m-%d %H:%M:%S') if self.create_time else '',
             'created_by': self.created_by or '',

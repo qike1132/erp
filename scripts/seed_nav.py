@@ -35,6 +35,7 @@ NAV_SEED: list[dict] = [
     {'code': 'order_batch_manage', 'name': '订单批次号', 'icon': 'fa-layer-group', 'url': 'order_batch.index', 'section': 'core', 'section_name': '核心业务', 'sort_order': 5, 'is_nav': True},
     {'code': 'stock_return_view', 'name': '退货管理', 'icon': 'fa-rotate-left', 'url': '/stock-return', 'section': 'core', 'section_name': '核心业务', 'sort_order': 6, 'is_nav': True},
     {'code': 'stock_return_manage', 'name': '退货管理(全部)', 'icon': None, 'url': None, 'section': 'core', 'section_name': '核心业务', 'sort_order': 7, 'is_nav': False},
+    {'code': 'finished_stock_view', 'name': '成品库存', 'icon': 'fa-boxes-stacked', 'url': '/finished-stock', 'section': 'core', 'section_name': '核心业务', 'sort_order': 8, 'is_nav': True},
     {'code': 'production_plan_view', 'name': '出货计划', 'icon': 'fa-truck', 'url': 'purchase_plan.plan_list', 'section': 'core', 'section_name': '核心业务', 'sort_order': 14, 'is_nav': True},
     {'code': 'production_summary_view', 'name': '生产报表', 'icon': 'fa-industry', 'url': 'production_summary.index', 'section': 'core', 'section_name': '核心业务', 'sort_order': 24, 'is_nav': True},
     {'code': 'batch_manage', 'name': '批次号查询', 'icon': 'fa-table-cells', 'url': 'sku_batch.sku_batch_page', 'section': 'core', 'section_name': '核心业务', 'sort_order': 34, 'is_nav': True},

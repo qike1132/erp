@@ -30,6 +30,12 @@ export interface ProductionEntryForm {
   unit_price: number
   quantity: number
   remark: string
+  /** 包装部成品库存：批次号（复用订单批次体系） */
+  batch_no: string
+  /** 包装部成品库存：是否定制 */
+  is_custom: boolean
+  /** 包装部成品库存：定制国家（仅 is_custom 时有意义） */
+  custom_country: string
 }
 
 /** 刚创建的记录（用于「刚才录的」条与撤销） */
@@ -123,6 +129,9 @@ export function useProductionEntry(
     unit_price: 0,
     quantity: 0,
     remark: '',
+    batch_no: '',
+    is_custom: false,
+    custom_country: '',
   })
   const formErrors = reactive<Record<string, string>>({})
   const computedValue = computed(() => (form.quantity || 0) * (form.unit_price || 0))
@@ -309,6 +318,11 @@ export function useProductionEntry(
       showToast('请选择生产部门', 'warning')
       valid = false
     }
+    // 包装部：标了定制就必须填国家（与后端 _validate_custom 同口径）
+    if (formDept.value === 'packaging' && form.is_custom && !form.custom_country.trim()) {
+      formErrors.custom_country = '定制产品必须填写定制国家'
+      valid = false
+    }
     return valid
   }
 
@@ -365,6 +379,9 @@ export function useProductionEntry(
     form.unit_price = 0
     form.quantity = 0
     form.remark = ''
+    form.batch_no = ''
+    form.is_custom = false
+    form.custom_country = ''
     searchQuery.value = ''
     Object.keys(formErrors).forEach((k) => (formErrors[k] = ''))
   }
@@ -419,6 +436,14 @@ export function useProductionEntry(
         production_value: Number(computedValue.value),
         production_date: selectedDateModel.value,
         remark: form.remark,
+        // 成品库存字段仅包装部有意义；其它部门不传，避免脏数据
+        ...(formDept.value === 'packaging'
+          ? {
+              batch_no: form.batch_no.trim() || null,
+              is_custom: form.is_custom,
+              custom_country: form.is_custom ? (form.custom_country.trim() || null) : null,
+            }
+          : {}),
       } as Record<string, unknown>)) as { id?: number | null } | null
 
       const createdId = res?.id ?? null

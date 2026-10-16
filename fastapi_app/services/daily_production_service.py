@@ -139,6 +139,12 @@ def validate_record_data(
         raise ValueError('单价不能为负数')
 
 
+def _validate_custom(is_custom: bool | None, custom_country: str | None) -> None:
+    """定制标记校验：标了定制就必须有国家（唯一新增校验，见成品库存方案）。"""
+    if is_custom and not (custom_country or '').strip():
+        raise ValueError('定制产品必须填写定制国家')
+
+
 async def _resolve_customer_name(db: AsyncSession, customer_id: int | None) -> str | None:
     """校验客户并返回名称快照；空客户直接返回 None。"""
     if customer_id is None:
@@ -409,9 +415,13 @@ async def create_record(
     production_date_str: str,
     remark: str = '',
     created_by: str = '',
+    batch_no: str | None = None,
+    is_custom: bool | None = None,
+    custom_country: str | None = None,
 ) -> DailyProductionRecord:
     """创建生产记录"""
     validate_record_data(department, product_name, quantity, unit_price)
+    _validate_custom(is_custom, custom_country)
     prod_date = parse_date_with_fallback(production_date_str)
 
     # 限制不能录入未来日期的数据
@@ -430,6 +440,9 @@ async def create_record(
         quantity=quantity,
         production_date=prod_date,
         remark=remark.strip() if remark else None,
+        batch_no=(batch_no or '').strip() or None,
+        is_custom=bool(is_custom),
+        custom_country=((custom_country or '').strip() or None) if is_custom else None,
         created_by=(created_by or '').strip(),
     )
     db.add(record)
@@ -482,6 +495,18 @@ async def update_record(
         if new_date > date.today():
             raise ValueError('不能将生产日期修改为未来日期')
         record.production_date = new_date
+
+    # 批次/定制字段：允许显式置空（判 'in kwargs' 而非 'is not None'）
+    if 'batch_no' in kwargs:
+        record.batch_no = (kwargs['batch_no'] or '').strip() or None
+    if 'is_custom' in kwargs:
+        record.is_custom = bool(kwargs['is_custom'])
+    if 'custom_country' in kwargs:
+        record.custom_country = (kwargs['custom_country'] or '').strip() or None
+    # 用最终值校验（改任一字段后 is_custom/custom_country 都可能变化）
+    _validate_custom(record.is_custom, record.custom_country)
+    if not record.is_custom:
+        record.custom_country = None
 
     await db.flush()
 

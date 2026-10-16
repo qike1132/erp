@@ -15,6 +15,7 @@ from fastapi_app.api.v1.endpoints.customer_sampling import router as customer_sa
 from fastapi_app.api.v1.endpoints.daily_production import router as daily_production_router
 from fastapi_app.api.v1.endpoints.dashboard import router as dashboard_router
 from fastapi_app.api.v1.endpoints.dead_letter import router as dead_letter_router
+from fastapi_app.api.v1.endpoints.finished_stock import router as finished_stock_router
 from fastapi_app.api.v1.endpoints.material_registration import router as material_reg_router
 from fastapi_app.api.v1.endpoints.monitoring import router as monitoring_router
 from fastapi_app.api.v1.endpoints.notification import router as notification_router
@@ -328,5 +329,13 @@ api_router.include_router(
     numbering_audit_router,
     prefix="/numbering-audit",
     tags=["编号巡检"],
+    dependencies=[Depends(get_current_user_id)],
+)
+
+# 成品库存（批次级）只读路由 - 前缀 /api/v1/finished-stock
+api_router.include_router(
+    finished_stock_router,
+    prefix="/finished-stock",
+    tags=["成品库存"],
     dependencies=[Depends(get_current_user_id)],
 )
