@@ -228,7 +228,7 @@ pyjwt==2.15.0
     # via
     #   -r requirements/base.txt
     #   redis
-python-discovery==1.6.2
+python-discovery==1.6.3
     # via virtualenv
 python-dotenv==1.2.2
     # via
