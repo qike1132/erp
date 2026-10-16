@@ -212,6 +212,31 @@ def test_restart_abort_attempts_start_when_state_unknown():
         f'状态不可确认时必须告警，实际 {[d["text"][:40] for d in warns]}'
 
 
+def test_restart_abort_skips_not_installed_services():
+    """中止恢复时，'未安装'（sc 1060）的服务无可恢复，不得被 start（否则 1060 + 白等 25s）。"""
+    ops, _q = _ops()
+    real_wait = ops.wait_service
+
+    def wait_stuck(name, target, timeout, **kw):
+        if name == _SVC_REDIS_BROKER and target == 'STOPPED':
+            return '4 RUNNING'
+        return real_wait(name, target, timeout, **kw)
+
+    ops.wait_service = wait_stuck
+
+    def state(name):
+        if name == _SVC_REDIS_BROKER:
+            return '4 RUNNING'
+        if name == _SVC_WEB:
+            return '未安装'
+        return '1 STOPPED'
+
+    ops.svc_state = state
+    ops.service_cmd_sync('restart')
+    started = [c[2] for c in ops.calls if c[1] == 'start']
+    assert _SVC_WEB not in started, f"未安装的 {_SVC_WEB} 不该被 start，实际 {started}"
+
+
 def test_restart_clears_ports_before_stopping_and_starting():
     """重启前必须先清端口。
 

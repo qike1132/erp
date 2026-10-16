@@ -679,6 +679,10 @@ class ServiceOps:
                     state_now = self.svc_state(name).upper()
                     if 'RUNNING' in state_now:
                         continue
+                    # '未安装'（sc 1060）无可恢复，跳过 —— 与上面的停机豁免同口径；否则会误报
+                    # 「状态不可确认」+ 对不存在的服务 start（1060）+ 白等 25s 超时。
+                    if '未安装' in state_now:
+                        continue
                     if 'STOPPED' not in state_now:
                         self._msg_queue.put(('log', {
                             'text': f'中止重启：{name} 状态不可确认（当前: {state_now}），仍尝试拉起',
