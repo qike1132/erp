@@ -659,6 +659,18 @@ class ServiceOps:
                             f'重连 6380 把被依赖服务永久钉死（自锁循环）。'
                             f'请到 services.msc 检查依赖方状态，或稍后重试。',
                     'level': 'WARNING'}))
+                # ★ 恢复可用性：停机是**逆拓扑**（被依赖者最后停），中止发生在中间时，
+                #   已停掉的都是排在前面的依赖方（prod/arq/web/cache）—— 不把它们拉回来
+                #   ERP 就整体下线，而故障只是「某个被依赖服务停不掉」。故按启动序补拉起
+                #   已停服务（仍在跑的自然会被 start 跳过），把现场还原成「全部在跑、
+                #   本次重启部分未生效」，由 wait_service_running 的 prev_pid 判定如实标注。
+                for name in _SVC_ALL:
+                    if name in failed_stop:
+                        continue
+                    self._gate.checkpoint()
+                    if 'STOPPED' in self.svc_state(name).upper():
+                        self._msg_queue.put(('log', {'text': f'中止重启：恢复已停止的 {name}...'}))
+                        self.start_one_service(name, prev_pid=prev_pids.get(name))
                 self._msg_queue.put(('hosting_refresh', {}))
                 return
             # 阶段二：原序全起——被依赖者先起，与 SCM 开机序一致。

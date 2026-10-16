@@ -123,14 +123,17 @@ def test_whole_stack_restart_is_two_phase_stop_then_start():
 
 
 def test_restart_aborts_when_a_service_refuses_to_stop():
-    """停机失败必须中止本轮重启，不得带病进入启动阶段（2026-10-16 实机事故）。
+    """停机失败必须中止本轮重启，不得重新启动失败的服务（2026-10-16 实机事故）。
 
     broker 停不掉却照常启动 → arq 重连 6380 把 broker 永久钉死 → 下次重启同样失败
     （自锁循环）。实机指纹：erp-redis-broker stop 返回 1051、20s 内未确认 STOPPED，
     而日志里紧跟着是「正在启动生产服务 erp-arq...」。
+
+    ★ 中止≠全体不起：停机是逆拓扑（被依赖者最后停），中止发生在中间时**已停掉的都是
+      前面的依赖方**（prod/arq/web/cache）。不把它们拉回来 ERP 就整体下线，而故障只是
+      「某个被依赖服务停不掉」。故断言的是：失败的那个**不得**被启动，其余已停服务应恢复。
     """
     ops, q = _ops()
-    # 让 broker（逆拓扑序的最后一位）停机超时：轮询永远回不到 STOPPED
     real_wait = ops.wait_service
 
     def wait_stuck(name, target, timeout, **kw):
@@ -139,12 +142,40 @@ def test_restart_aborts_when_a_service_refuses_to_stop():
         return real_wait(name, target, timeout, **kw)
 
     ops.wait_service = wait_stuck
+    # 已停服务(start 才发得出去)：broker 之外的四个都视为已停
+    real_state = ops.svc_state if hasattr(ops, 'svc_state') else None
+
+    def state(name):
+        return '4 RUNNING' if name == _SVC_REDIS_BROKER else '1 STOPPED'
+
+    ops.svc_state = state
     ops.service_cmd_sync('restart')
-    starts = [c for c in ops.calls if c[1] == 'start']
-    assert not starts, f'停机失败后不得启动任何服务，实际发起了 {len(starts)} 个 start'
+    started = [c[2] for c in ops.calls if c[1] == 'start']
+    assert _SVC_REDIS_BROKER not in started, \
+        f'停机失败的服务绝不能被启动（自锁循环），实际启动了: {started}'
     warns = [d for _k, d in q.msgs if d.get('level') == 'WARNING']
     assert any('中止本轮重启' in d['text'] for d in warns), \
         f'必须如实告警已中止重启，实际告警: {[d["text"][:40] for d in warns]}'
+
+
+def test_restart_abort_restores_already_stopped_services():
+    """中止时必须恢复已停服务，否则只是「broker 停不掉」却让整套 ERP 下线。"""
+    ops, q = _ops()
+    real_wait = ops.wait_service
+
+    def wait_stuck(name, target, timeout, **kw):
+        if name == _SVC_REDIS_BROKER and target == 'STOPPED':
+            return '4 RUNNING'
+        return real_wait(name, target, timeout, **kw)
+
+    ops.wait_service = wait_stuck
+    ops.svc_state = lambda name: '4 RUNNING' if name == _SVC_REDIS_BROKER else '1 STOPPED'
+    ops.service_cmd_sync('restart')
+    started = [c[2] for c in ops.calls if c[1] == 'start']
+    for name in _SVC_ALL:
+        if name == _SVC_REDIS_BROKER:
+            continue
+        assert name in started, f'已停的 {name} 必须被恢复启动（否则 ERP 无故下线），实际启动 {started}'
 
 
 def test_restart_clears_ports_before_stopping_and_starting():
