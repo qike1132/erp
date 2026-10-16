@@ -26384,6 +26384,11 @@
             "title": "Total",
             "default": 0
           },
+          "total_available": {
+            "type": "integer",
+            "title": "Total Available",
+            "default": 0
+          },
           "page": {
             "type": "integer",
             "title": "Page",

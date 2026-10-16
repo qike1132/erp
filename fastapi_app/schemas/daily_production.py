@@ -54,9 +54,6 @@ class ProductionRecordItem(BaseModel):
     production_value: float = 0
     production_date: str
     remark: str | None = None
-    batch_no: str = ''
-    is_custom: bool = False
-    custom_country: str = ''
     create_time: str | None = None
     created_by: str | None = None
 

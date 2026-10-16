@@ -29,9 +29,9 @@ async def _mk_product(db, name=None, barcode=None) -> Product:
 
 async def _mk_prod(db, *, product_id, qty, batch_no=None, customer_name=None,
                    dept='packaging', d=date(2026, 10, 15),
-                   is_custom=False, country=None) -> DailyProductionRecord:
+                   is_custom=False, country=None, product_name=None) -> DailyProductionRecord:
     r = DailyProductionRecord(
-        department=dept, product_id=product_id, product_name=_uniq('成品'),
+        department=dept, product_id=product_id, product_name=product_name or _uniq('成品'),
         barcode='', unit_price=0, quantity=qty, production_date=d,
         batch_no=batch_no, customer_name=customer_name,
         is_custom=is_custom, custom_country=country,
@@ -123,6 +123,18 @@ async def test_null_batch_and_customer_buckets(async_db_session):
     assert row['batch_available'] == 60
 
 
+async def test_unbatched_stockout_deducts_unbatched_bucket(async_db_session):
+    """无批次出货必须落进 ''（未分批次）桶扣减——否则该桶只减入库不减出货、可用量虚高。"""
+    db = async_db_session
+    p = await _mk_product(db)
+    await _mk_prod(db, product_id=p.id, qty=100, batch_no=None)
+    await _mk_stockout(db, product_id=p.id, qty=40, batch_no=None)
+    rows = [r for r in await _rows(db) if r['product_id'] == p.id]
+    assert len(rows) == 1
+    assert rows[0]['batch_no'] == ''
+    assert rows[0]['batch_available'] == 60
+
+
 async def test_product_id_null_excluded(async_db_session):
     """product_id 为 NULL 的生产记录不进成品库存（与 _apply_production_stock 一致）。"""
     db = async_db_session
@@ -167,6 +179,19 @@ async def test_batches_by_product_excludes_empty_batch(async_db_session):
     await _mk_prod(db, product_id=p.id, qty=5, batch_no='B1')
     batches = await fss.get_batches_by_product(db, p.id)
     assert [b['batch_no'] for b in batches] == ['B1']
+
+
+async def test_total_available_is_global_not_page(async_db_session):
+    """total_available 是过滤后全量合计，不是当前页求和（翻页/筛选时数字不应跳动）。"""
+    db = async_db_session
+    p = await _mk_product(db)
+    name = _uniq('TOT')
+    await _mk_prod(db, product_id=p.id, qty=100, batch_no='TA1', product_name=name)
+    await _mk_prod(db, product_id=p.id, qty=50, batch_no='TA2', product_name=name)
+    res = await fss.get_finished_stock_summary(db, product_search=name, per_page=1)
+    assert res['total'] == 2
+    assert len(res['data']) == 1          # 本页只 1 行
+    assert res['total_available'] == 150  # 但合计是全量
 
 
 # ==================== 定制校验（纯逻辑） ====================

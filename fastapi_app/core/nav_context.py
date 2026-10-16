@@ -35,6 +35,9 @@ SPECIAL_PERMISSION_MAP = {
     # 服务端 manage 已按命名规则含 view 的放行（User.has_permission），
     # 但前端导航按 permission_codes「任一命中」判断，必须在此展开。
     'stock_return_view': ['stock_return_view', 'stock_return_manage'],
+    # 成品库存：页面服务 /stock 同一批用户（stock_view / stockin_manage），
+    # 任持其一即应看到入口；否则这些用户看不到「成品库存」菜单。
+    'finished_stock_view': ['finished_stock_view', 'stock_view', 'stockin_manage'],
     # 生产报表按部门拆权限后，只有部门码的用户也要能看到导航入口；
     # 任持其一即可见（前端侧栏按 permission_codes 做「任一命中」判断）。
     # 键用聚合码常量而非字面量：聚合码重命名时映射不会静默失配。

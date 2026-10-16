@@ -73,6 +73,13 @@ ENDPOINTS: list[tuple[str, str, tuple[str, ...]]] = [
     ('DELETE', '/api/v1/stock/in/delete/1', ('stockin_delete',)),
     # 编辑弹窗的「可用备货量」提示接口
     ('GET', '/api/v1/aux/available-stockins', ('order_edit',)),
+    # 成品库存页（导航码 finished_stock_view，见 seed_nav.py）→ 只读聚合 + 批次列表。
+    # 页面服务 /stock 同一批用户，故接口同时接受 stock_view / stockin_manage；
+    # 这里锁定「只授 finished_stock_view 的用户不被 403」（导航码↔接口码对齐）。
+    ('GET', '/api/v1/finished-stock/summary', ('finished_stock_view',)),
+    ('GET', '/api/v1/finished-stock/batches', ('finished_stock_view',)),
+    # /batches 的唯一消费方是出库管理页（stockout_manage），该码也必须能取批次
+    ('GET', '/api/v1/finished-stock/batches', ('stockout_manage',)),
 ]
 
 # 原有的权限码必须继续可用（不能让放宽把原口径顶掉）

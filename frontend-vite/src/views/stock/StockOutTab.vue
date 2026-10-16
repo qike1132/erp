@@ -191,12 +191,19 @@ async function addStaged() {
     }
   }
 
-  // 批次级闸门（前端即时提示）：选了批次且超过该批次可用 → 拦下
+  // 批次级闸门（前端即时提示）：选了批次且「已暂存同批次量 + 本次」超过该批次可用 → 拦下。
+  // 必须计入已暂存：同一批次可多次「新增出货」，只比本次单条会放过累计超额
+  // （提交时被后端批次闸门拒，只得到「部分出货成功」）。
   if (form.batchNo) {
     const opt = batchOptions.value.find((b) => b.batch_no === form.batchNo)
-    if (opt && form.quantity > opt.available_quantity) {
-      showToast(`批次「${form.batchNo}」可用不足！可用: ${opt.available_quantity}`, 'error')
-      return
+    if (opt) {
+      const stagedSameBatch = staged.value
+        .filter((s) => s.product_id === form.productId && s.customer === form.customer && (s.batch_no || '') === form.batchNo)
+        .reduce((sum, s) => sum + (s.quantity || 0), 0)
+      if (stagedSameBatch + form.quantity > opt.available_quantity) {
+        showToast(`批次「${form.batchNo}」可用不足！可用: ${opt.available_quantity}，已暂存: ${stagedSameBatch}`, 'error')
+        return
+      }
     }
   }
 

@@ -326,6 +326,12 @@ export function useProductionEntry(
     return valid
   }
 
+  // 定制国家错误在输入变化后即时清除：该字段由子组件渲染、没有 blur/input 钩子，
+  // 不清会一直红着，直到某次提交成功（clearEntryFields）才消失。
+  watch(() => [form.is_custom, form.custom_country], () => {
+    if (formErrors.custom_country) formErrors.custom_country = ''
+  })
+
   // ===== 今日计数与重复提示 =====
   async function refreshTodayCount() {
     const { year, month } = monthParts(selectedDateModel.value)
@@ -420,6 +426,10 @@ export function useProductionEntry(
     queryClient.invalidateQueries({ queryKey: ['daily-production-records'] })
     queryClient.invalidateQueries({ queryKey: ['daily-production-daily-summary'] })
     queryClient.invalidateQueries({ queryKey: ['daily-production-monthly-summary'] })
+    // 包装部生产记录直接进成品库存聚合（finished_stock_service），
+    // 不同步失效会让成品库存页在 staleTime 内读到旧快照（vue-query 缓存持久化到
+    // sessionStorage，切换过去不重新发请求）。
+    queryClient.invalidateQueries({ queryKey: ['finished-stock'] })
   }
 
   async function confirmSubmit() {

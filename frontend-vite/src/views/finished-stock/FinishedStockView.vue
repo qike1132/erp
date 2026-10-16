@@ -1,18 +1,17 @@
 <template>
   <div class="fs-page">
-    <!-- 工具条：汇总 + 搜索 + 导出 -->
+    <!-- 工具条：汇总 + 搜索 -->
     <div class="fs-toolbar">
       <div class="fs-stat-row">
         <div class="fs-stat">
           <div class="fs-stat-top"><span class="fs-stat-dot" style="background: var(--color-info-500)" /><span class="fs-stat-label">可用库存</span></div>
-          <div class="fs-stat-value">{{ fmtNum(totalAvailable) }}</div>
+          <div class="fs-stat-value">{{ fmtNum(data?.total_available ?? 0) }}</div>
         </div>
       </div>
       <div class="fs-search">
         <FontAwesomeIcon icon="search" class="fs-search-icon" aria-hidden="true" />
         <input v-model="filters.product" class="fs-search-input" placeholder="输入产品名称或 69 码" aria-label="搜索成品库存" />
       </div>
-      <button class="fs-export-btn" aria-label="导出"><FontAwesomeIcon icon="file-excel" aria-hidden="true" />导出 Excel</button>
     </div>
 
     <!-- 客户快捷切换行 -->
@@ -47,14 +46,18 @@
         @page="onPage"
         @sort="onSort"
       >
-        <!-- 产品图片（SKU 大格内，与产品名同行显示） -->
+        <!-- 产品图片（独立列，随 SKU 大格跨行合并） -->
+        <template #column-body-_g_image="{ row }">
+          <span v-if="(row as FinishedStockItem).image && !failedKeys.has(groupKeyOf(row as FinishedStockItem))" class="fs-thumb-box">
+            <img loading="lazy" :src="thumbSrc(row as FinishedStockItem)" :alt="(row as FinishedStockItem).product_name" @error="onImgError(row as FinishedStockItem)" />
+          </span>
+          <span v-else class="fs-no-image"><FontAwesomeIcon icon="file-image" aria-hidden="true" /></span>
+        </template>
+        <!-- 产品名称（「全部客户」时补一行淡色客户名，否则不同客户同产品无法区分） -->
         <template #column-body-_g_product="{ row }">
-          <span class="fs-sku-cell">
-            <span v-if="(row as FinishedStockItem).image && !failedKeys.has((row as FinishedStockItem).barcode)" class="fs-thumb-box">
-              <img loading="lazy" :src="thumbSrc(row as FinishedStockItem)" :alt="(row as FinishedStockItem).product_name" @error="onImgError(row as FinishedStockItem)" />
-            </span>
-            <span v-else class="fs-no-image"><FontAwesomeIcon icon="file-image" aria-hidden="true" /></span>
-            <strong>{{ (row as FinishedStockItem).product_name }}</strong>
+          <span class="fs-name-cell">
+            <strong class="fs-name">{{ (row as FinishedStockItem).product_name }}</strong>
+            <small v-if="!filters.customer" class="fs-cust">{{ (row as FinishedStockItem).customer_name || '未指定客户' }}</small>
           </span>
         </template>
         <!-- 批次号 -->
@@ -86,36 +89,40 @@
 /**
  * FinishedStockView.vue — 成品库存（批次级）
  *
- * 布局（Excel 风格 SKU 行合并）：一行 = 一个批次；同一产品的
- * 「图片 / 产品名称 / 69码」并成一个跨行大格（SKU 大格），
- * 批次号 / 库存 / 定制 逐行渲染 —— 它们各自属于具体批次。
+ * 布局（Excel 风格 SKU 行合并）：一行 = 一个批次；同一 SKU 的
+ * 「图片 / 产品名称 / 69码」并成一个跨行大格，批次号 / 库存 / 定制 逐行渲染。
  * 机制照 views/report/components/ReportTable.vue（PrimeVue rowGroupMode='rowspan'）：
- * 要合并的列 field 换成分组键（_g_*），显示值仍从 body 槽取原字段，
- * 分组键 = barcode（同 SKU 同键 → 并成一个大格）。
+ * 要合并的列 field 换成分组键（_g_*），显示值仍从 body 槽取原字段。
+ *
+ * 分组键 = 客户 + 产品ID（后端按 (customer, product, batch) 聚合；同一批次号可能
+ * 出现在不同客户下，故客户必须进键，否则不同客户的行会被错误并成一个大格）。
+ * 用 product_id 而非 barcode：barcode 可空，无 69 码的产品会被并成一组。
  *
  * 数据源 GET /finished-stock/summary（与 /stock 同源：包装部入库 + 批次出货扣减）。
  */
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useQuery, keepPreviousData } from '@tanstack/vue-query'
 import UiDataTable from '@/components/ui/UiDataTable.vue'
 import type { TableColumn } from '@/components/ui/UiDataTable.vue'
 import { formatNumber } from '@/utils/format'
 import { resolveStaticUrl } from '@/api/request'
 import { finishedStockApi } from '@/api'
-import { batchSortKey } from './batchSort'
+import { useDebouncedRef } from '@/composables/useDebouncedRef'
+import { batchSortKey, compareBatchNo } from './batchSort'
 import type { FinishedStockItem } from '@/types'
 
 const filters = ref({ customer: '', product: '' })
+const debouncedProduct = useDebouncedRef(computed(() => filters.value.product), 300)
 const page = ref(1)
 const perPage = ref(20)
 /** 排序态：批次号/库存 列可点（order: 1 升序 / -1 降序） */
 const sort = ref<{ field: string; order: number } | null>(null)
 
 const { data, isLoading } = useQuery({
-  queryKey: ['finished-stock', () => filters.value.customer, () => filters.value.product, () => page.value, () => perPage.value],
+  queryKey: ['finished-stock', () => filters.value.customer, debouncedProduct, () => page.value, () => perPage.value],
   queryFn: () => finishedStockApi.summary({
     customer: filters.value.customer || undefined,
-    product: filters.value.product || undefined,
+    product: debouncedProduct.value || undefined,
     page: page.value,
     per_page: perPage.value,
   }),
@@ -123,11 +130,22 @@ const { data, isLoading } = useQuery({
   placeholderData: keepPreviousData,
 })
 
+// 过滤条件变化回到第 1 页：否则停在 page>1 会请求到不存在的页（空表），
+// 且 UiDataTable 分页器与父级 page 会脱节（照 InventoryTab 的既有做法）。
+watch(() => [filters.value.customer, debouncedProduct.value], () => {
+  page.value = 1
+})
+
 const customerList = computed(() => (data.value?.all_customers ?? []) as string[])
 
-/** 图片加载失败的行（按 barcode 记），失败后退化成「无图」占位 */
+/** 分组键：客户 + 产品ID（见文件头注释） */
+function groupKeyOf(row: FinishedStockItem): string {
+  return `${row.customer_name || ''}\u0000${row.product_id}`
+}
+
+/** 图片加载失败的分组（失败后退化成「无图」占位） */
 const failedKeys = ref<Set<string>>(new Set())
-function onImgError(row: FinishedStockItem): void { failedKeys.value.add(row.barcode) }
+function onImgError(row: FinishedStockItem): void { failedKeys.value.add(groupKeyOf(row)) }
 function thumbSrc(row: FinishedStockItem): string {
   return resolveStaticUrl(row.image || '')
 }
@@ -142,7 +160,7 @@ const GROUP_ROWS_BY = ['_g_image', '_g_product', '_g_barcode']
 
 const baseColumns: TableColumn[] = [
   { field: 'image', header: '图片', align: 'center', width: '84px' },
-  { field: 'product_name', header: '产品名称', align: 'left', width: '26%' },
+  { field: 'product_name', header: '产品名称', align: 'left', width: '30%' },
   { field: 'barcode', header: '69码', align: 'left', width: '16%' },
   { field: 'batch_no', header: '批次号', align: 'left', sortable: true, width: '22%' },
   { field: 'batch_available', header: '库存', align: 'center', sortable: true, width: '12%' },
@@ -162,21 +180,22 @@ function sortVal(row: Record<string, unknown>, field: string): number | string {
   return Number.isFinite(n) ? n : 0
 }
 
-/** 按产品（barcode）聚合，同 SKU 的批次行相邻 */
+/** 按分组键聚合，同 SKU 的批次行相邻 */
 const skuGroups = computed(() => {
   const items = (data.value?.data ?? []) as FinishedStockItem[]
   const map = new Map<string, FinishedStockItem[]>()
   for (const r of items) {
-    const arr = map.get(r.barcode)
+    const k = groupKeyOf(r)
+    const arr = map.get(k)
     if (arr) arr.push(r)
-    else map.set(r.barcode, [r])
+    else map.set(k, [r])
   }
   // SKU 组按产品名稳定排列、不参与列排序（否则点库存列会把组序打乱、破坏合并观感）
   const groups = [...map.entries()].sort((a, b) =>
     (a[1][0]?.product_name ?? '').localeCompare(b[1][0]?.product_name ?? '', 'zh'),
   )
   const out: (FinishedStockItem & Record<string, unknown>)[] = []
-  for (const [barcode, rows] of groups) {
+  for (const [key, rows] of groups) {
     // 组内按当前排序列排；默认按批次号升序（= 生产时间正序）
     const s = sort.value
     const ordered = s
@@ -185,15 +204,14 @@ const skuGroups = computed(() => {
           const b = sortVal(y as unknown as Record<string, unknown>, s.field)
           return (a < b ? -1 : a > b ? 1 : 0) * s.order
         })
-      : [...rows].sort((x, y) => batchSortKey(x.batch_no).localeCompare(batchSortKey(y.batch_no)))
+      : [...rows].sort((x, y) => compareBatchNo(x.batch_no, y.batch_no))
     for (const r of ordered) {
       out.push({
         ...r,
-        barcode,
-        __rk: `${barcode}-${r.batch_no || 'none'}`,
-        _g_image: barcode,
-        _g_product: barcode,
-        _g_barcode: barcode,
+        __rk: `${key}-${r.batch_no || 'none'}`,
+        _g_image: key,
+        _g_product: key,
+        _g_barcode: key,
       })
     }
   }
@@ -201,7 +219,6 @@ const skuGroups = computed(() => {
 })
 
 const tableRows = computed(() => skuGroups.value)
-const totalAvailable = computed(() => tableRows.value.reduce((s, r) => s + Number(r.batch_available || 0), 0))
 
 /** PrimeVue 排序事件：order 为 1 升序 / -1 降序 / 0 取消 */
 function onSort(event: { field: string; order: number }) {
@@ -230,8 +247,6 @@ function onPage(event: { page: number; rows: number }) {
 .fs-search-input { width: 230px; padding: 7px 12px 7px 30px; border: 1.5px solid var(--color-border); border-radius: 9px; background: #fff; font-size: 12.5px; font-family: inherit; color: var(--color-text); outline: none; }
 .fs-search-input::placeholder { color: var(--color-text-muted); }
 .fs-search-input:focus { border-color: var(--color-primary-500); box-shadow: 0 0 0 3px rgba(91,141,239,0.15); }
-.fs-export-btn { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; padding: 7px 14px; border: 1.5px solid var(--color-success-200); border-radius: 9px; background: #fff; font-family: inherit; font-size: 12.5px; font-weight: 600; color: var(--color-success-600); white-space: nowrap; cursor: pointer; }
-.fs-export-btn:hover { background: var(--color-success-50); border-color: var(--color-success-500); }
 
 .fs-customer-row { display: flex; align-items: center; gap: 10px; padding: 9px 20px; border-bottom: 1px solid var(--color-border-light); background: linear-gradient(to bottom, var(--color-slate-50), #fff); flex-shrink: 0; }
 .fs-customer-label { display: flex; align-items: center; gap: 5px; flex-shrink: 0; font-size: 11.5px; font-weight: 600; color: var(--color-text-secondary); white-space: nowrap; }
@@ -254,16 +269,17 @@ function onPage(event: { page: number; rows: number }) {
 .fs-card-main :deep(th[aria-sort='ascending'] [data-pc-section='sorticon']),
 .fs-card-main :deep(th[aria-sort='descending'] [data-pc-section='sorticon']) { color: var(--color-primary-600); }
 
-.fs-sku-cell { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.fs-sku-cell strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fs-name { font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fs-name-cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.fs-cust { font-size: 11px; color: var(--color-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fs-thumb-box {
-  width: 44px; height: 44px; flex-shrink: 0; border-radius: 8px; overflow: hidden;
-  background: var(--color-surface, #f8fafc); display: flex; align-items: center; justify-content: center;
+  width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 8px; overflow: hidden; background: var(--color-surface, #f8fafc);
 }
 .fs-thumb-box img { width: 100%; height: 100%; object-fit: contain; }
 .fs-no-image {
-  width: 44px; height: 44px; flex-shrink: 0; border-radius: 8px; display: flex; align-items: center;
-  justify-content: center; background: var(--color-surface, #f8fafc); color: var(--color-text-secondary);
+  width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 8px; background: var(--color-surface, #f8fafc); color: var(--color-text-secondary);
   font-size: 18px; opacity: 0.5;
 }
 .fs-badge-batch { display: inline-flex; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; background: var(--color-primary-50); color: var(--color-primary-700); white-space: nowrap; }

@@ -7,17 +7,15 @@
 
 产品级结余闸门（get_inventory_balance）不变，本服务只在其上叠加批次维度，
 不产生第二真相源。批次可用按 (product_id, batch_no) 匹配（批次号编码一次生产，
-现实中归属单一客户）；同批次跨客户属边缘情形，此处按产品+批次对齐。
+现实中归属单一客户）；同批次跨客户属边缘情形，此处按产品+批次对齐——若同一
+(product, batch) 真有多个客户的入库行，出货量会在这些行上重复扣减（已知限制，
+见 OCR 评审）。'' （未分批次）桶同此口径：无批次出货按产品扣减，不细分客户。
 """
-import logging
-
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.shared_models import DailyProductionRecord, Product, StockOut
-
-logger = logging.getLogger(__name__)
 
 PACKAGING = 'packaging'
 
@@ -52,7 +50,12 @@ def _batch_in_subq():
 
 
 def _batch_out_subq():
-    """出货聚合：按 (产品, 批次) 分组，排除备货抵扣行。"""
+    """出货聚合：按 (产品, 批次) 分组，排除备货抵扣行。
+
+    不过滤 batch_no IS NULL：无批次出货（默认「不指定批次」路径 + 全部存量行）仍消耗
+    产品级库存，必须落进 ''（未分批次）桶，否则该桶只减入库不减出货、可用量虚高
+    （与 get_batch_available 的 coalesce 口径也会分叉）。
+    """
     batch_key = func.coalesce(StockOut.batch_no, '')
     return (
         select(
@@ -60,10 +63,7 @@ def _batch_out_subq():
             batch_key.label('batch_no'),
             func.sum(StockOut.quantity - StockOut.returned_quantity).label('batch_out_qty'),
         )
-        .where(
-            StockOut.stockin_id.is_(None),
-            StockOut.batch_no.isnot(None),
-        )
+        .where(StockOut.stockin_id.is_(None))
         .group_by(StockOut.product_id, batch_key)
         .subquery()
     )
@@ -128,8 +128,17 @@ async def get_finished_stock_summary(
         bi.c.batch_no,
     )
 
+    # 全量（过滤后、未分页）的行数与可用库存合计：页面顶部汇总要的是全量值，
+    # 不能拿当前页的行求和（翻页/筛选会让数字跳动）。
     count_sq = base.order_by(None).subquery()
-    total = (await db.execute(select(func.count()).select_from(count_sq))).scalar() or 0
+    agg = (await db.execute(
+        select(
+            func.count().label('total'),
+            func.coalesce(func.sum(count_sq.c.batch_available), 0).label('total_available'),
+        ).select_from(count_sq)
+    )).one()
+    total = int(agg.total or 0)
+    total_available = int(agg.total_available or 0)
 
     rows = (await db.execute(base.limit(per_page).offset((page - 1) * per_page))).mappings().all()
     data = [
@@ -152,6 +161,7 @@ async def get_finished_stock_summary(
     return {
         'data': data,
         'total': int(total),
+        'total_available': total_available,
         'page': page,
         'per_page': per_page,
         'all_customers': all_customers,

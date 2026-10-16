@@ -172,6 +172,8 @@ export interface FinishedStockSummary {
   success: boolean
   data: FinishedStockItem[]
   total: number
+  /** 过滤后全量（非当前页）的可用库存合计 */
+  total_available: number
   page: number
   per_page: number
   all_customers: string[]

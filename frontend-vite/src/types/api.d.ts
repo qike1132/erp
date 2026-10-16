@@ -1189,6 +1189,7 @@ export interface FinishedStockSummaryResponse {
   success?: boolean
   data?: Array<FinishedStockItem>
   total?: number
+  total_available?: number
   page?: number
   per_page?: number
   all_customers?: Array<string>
