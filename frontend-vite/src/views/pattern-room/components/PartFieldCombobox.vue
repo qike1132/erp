@@ -18,7 +18,7 @@
       @keydown.down.prevent="move(1)"
       @keydown.up.prevent="move(-1)"
       @keydown.enter.prevent="chooseHighlighted"
-      @keydown.esc.stop="handleClose"
+      @keydown.esc="handleEsc"
     />
     <Teleport to="body">
       <!--
@@ -127,7 +127,16 @@ function handleOpen() {
   nextTick(positionPanel)
 }
 
-function handleClose() {
+/**
+ * Esc 只在面板打开时由本组件消费并 stopPropagation。
+ *
+ * 面板已关时必须放行：宿主是 reka-ui UiDialog（PartFormDialog 等），它的
+ * DismissableLayer 靠 Esc 关弹窗。若无条件 stop，面板关着时按 Esc 会被吞掉，
+ * 弹窗就再也无法用键盘关闭。
+ */
+function handleEsc(e: KeyboardEvent) {
+  if (!open.value) return
+  e.stopPropagation()
   open.value = false
 }
 
@@ -141,7 +150,10 @@ function handleBlur(e: FocusEvent) {
 }
 
 function choose(opt: CandidateOption) {
-  text.value = displayOf(opt)
+  // 程序化赋值不受原生 maxlength 约束，须自己夹：后端 BatchPartItem.supplier_name
+  // 上限 100 而 PartUpdateRequest 上限 200，行内编辑存下的长值会成为候选，不夹就会在
+  // 批量弹窗里写入一个手输永远达不到的长度 → 后端 422。
+  text.value = displayOf(opt).slice(0, props.maxlength)
   emit('update:modelValue', text.value)
   open.value = false
 }
@@ -161,15 +173,42 @@ function move(delta: number) {
   highlight.value = (highlight.value + delta + n) % n
 }
 
+/** 面板与输入框的间距、面板理想最大高度（与样式里的 max-height 保持一致） */
+const PANEL_GAP = 4
+const PANEL_MAX_H = 240
+
 function positionPanel() {
   const el = inputRef.value
   if (!el) return
   const r = el.getBoundingClientRect()
+  const vw = window.innerWidth || document.documentElement.clientWidth
+  const vh = window.innerHeight || document.documentElement.clientHeight
+
+  const below = vh - r.bottom - PANEL_GAP
+  const above = r.top - PANEL_GAP
+
+  let top: number
+  let maxH: number
+  if (below >= PANEL_MAX_H || below >= above) {
+    // 下方放得下，或下方仍比上方宽裕 → 正常展开在下方
+    top = r.bottom + PANEL_GAP
+    maxH = Math.min(PANEL_MAX_H, Math.max(below, 0))
+  } else {
+    // 下方不够（input 靠近视口底部）→ 翻到上方，底边贴 input 顶
+    maxH = Math.min(PANEL_MAX_H, Math.max(above, 0))
+    top = Math.max(PANEL_GAP, r.top - PANEL_GAP - maxH)
+  }
+
+  // 右侧溢出时向左收，避免宽面板（如长供应商名）被视口裁掉
+  const width = Math.min(r.width, vw - r.left - PANEL_GAP)
+  const left = Math.min(r.left, Math.max(PANEL_GAP, vw - width - PANEL_GAP))
+
   panelStyle.value = {
     position: 'fixed',
-    top: `${r.bottom + 4}px`,
-    left: `${r.left}px`,
-    width: `${r.width}px`,
+    top: `${Math.round(top)}px`,
+    left: `${Math.round(left)}px`,
+    width: `${Math.round(width)}px`,
+    maxHeight: `${Math.round(maxH)}px`,
   }
 }
 

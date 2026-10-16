@@ -200,4 +200,83 @@ describe('PartFieldCombobox', () => {
     await nextTick()
     expect(panelEl()).toBeFalsy()
   })
+
+  /**
+   * 回归（队友转交的 OCR Medium #1）：Esc 此前用 `@keydown.esc.stop` 无条件 stopPropagation，
+   * 不只面板打开时。面板已关后再按 Esc 被本组件吞掉 → 宿主 reka-ui UiDialog 的
+   * DismissableLayer 收不到 Esc，弹窗再也没法用键盘关。
+   */
+  it('Esc 只在本组件面板打开时拦截，否则放行给宿主', async () => {
+    const w = mountBox()
+    const input = w.find('input')
+
+    // 用一个祖先监听器模拟宿主 reka-ui DismissableLayer 的 Esc 处理
+    const hostSaw: string[] = []
+    const onHostEsc = (e: Event) => hostSaw.push((e as KeyboardEvent).key)
+    document.body.addEventListener('keydown', onHostEsc)
+
+    // 面板已关：Esc 必须放行，宿主收得到
+    input.element.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+    )
+    await nextTick()
+    expect(hostSaw).toEqual(['Escape'])
+
+    // 面板开着：Esc 必须被本组件消费，不冒泡到宿主（否则会连带关掉整个弹窗）
+    await input.trigger('focus')
+    await nextTick()
+    expect(panelEl()).toBeTruthy()
+    input.element.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+    )
+    await nextTick()
+    expect(panelEl()).toBeFalsy()
+    expect(hostSaw).toEqual(['Escape'])  // 仍然只有面板关着那一次
+
+    document.body.removeEventListener('keydown', onHostEsc)
+  })
+
+  /**
+   * 回归（队友转交的 OCR Medium #2）：面板恒定位到 input.bottom+4，无视口边界。
+   * input 靠近视口底部时 fixed 面板整体落在视口外，而滚动又会关面板 →
+   * 选项既看不见也滚不到。此处用 getBoundingClientRect 桩让 input 贴在视口底部。
+   */
+  it('input 靠近视口底部时面板翻到上方，且不超出视口', async () => {
+    const w = mountBox()
+    const input = w.find('input')
+    // 让 input 落在视口最底部（jsdom 视口默认 768 高）
+    input.element.getBoundingClientRect = () =>
+      ({ top: 700, bottom: 740, left: 10, right: 210, width: 200, height: 40 }) as DOMRect
+    await input.trigger('focus')
+    await nextTick()
+
+    const panel = panelEl() as HTMLElement
+    expect(panel).toBeTruthy()
+    const top = Number.parseFloat(panel.style.top)
+    // 面板 top 必须为负或不小于 input.bottom —— 即翻到 input 上方，而不是 744 视口外
+    expect(top).toBeLessThan(740)
+    expect(top).toBeGreaterThanOrEqual(0)
+    // max-height 被夹住：面板底边不越过视口底部
+    expect(Number.parseFloat(panel.style.maxHeight)).toBeLessThanOrEqual(768)
+  })
+
+  /**
+   * 回归（队友转交的 OCR Medium #3）：choose() 是程序化赋值，原生 maxlength 只挡手输。
+   * 后端 BatchPartItem.supplier_name 上限 100，而 PartUpdateRequest.supplier_name 上限 200
+   * （前端 formMaxlength=100 / inlineMaxlength=200 忠实反映了这个不一致）。
+   * 行内编辑存下的 101–200 字供应商名会成为候选，在批量弹窗里选中就写入一个
+   * 手输永远达不到的值 → 提交 422（string_too_long），用户无法解释。
+   */
+  it('选中候选时夹到 maxlength，避免程序化写入超出上限的值', async () => {
+    const LONG = '甲'.repeat(150)
+    const w = mountBox({ options: [{ value: LONG, count: 2 }], maxlength: 100 })
+    await w.find('input').trigger('focus')
+    await nextTick()
+    const target = document.body.querySelectorAll('.bss-option')[0] as HTMLElement
+    target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+    await nextTick()
+    const emitted = w.emitted('update:modelValue')?.at(-1)?.[0] as string
+    expect(emitted).toHaveLength(100)
+    expect(emitted).toBe('甲'.repeat(100))
+  })
 })
