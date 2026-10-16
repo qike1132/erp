@@ -16708,7 +16708,7 @@
           "数据备份"
         ],
         "summary": "Delete Backup Schedule",
-        "description": "删除定时任务（backup_manage）",
+        "description": "删除定时任务（backup_manage）\n\n校验类任务（完整性巡检 / 灾备演练）整类受保护、不允许删除，见\nschedule_service.GUARDED_TASK_TYPES —— 误删会静默失去备份可用性保障。",
         "operationId": "delete_backup_schedule_api_v1_backup_schedule__schedule_id__delete",
         "parameters": [
           {

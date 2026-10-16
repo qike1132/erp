@@ -255,8 +255,8 @@ async def delete_schedule(db: AsyncSession, schedule_id: int) -> bool:
         )
         raise BackupSettingsError(
             f'"{row.name}"（{row.task_type}）不允许删除：它是「备份是否真能还原」的'
-            '自动保障，误删后无人告警。如确需停用，请改为"禁用"（enabled=false），'
-            '校验与演练仍会留档可随时恢复；确需删除请联系管理员改库。'
+            '自动保障，误删后无人告警。校验与演练停用后仍会留档可随时恢复，'
+            '确需删除请联系管理员。'
         )
     await db.delete(row)
     await db.flush()

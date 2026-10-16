@@ -294,6 +294,9 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
     def _ensure_redis_broker(self):
         return self.redis.ensure_redis_broker()
 
+    def _start_redis(self):
+        return self.redis.start_redis()
+
     def _stop_redis(self):
         return self.redis.stop_redis()
 
@@ -498,8 +501,14 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
                     self._set_actions_enabled(True)
                     self._update_all_ui()
                 elif msg_type == 'op_aborted':
-                    # 动作被取消/异常中止 → 清掉过渡态，避免 UI 卡在「启动中/重启中」
-                    if self._mode in ('starting', 'restarting', 'stopping'):
+                    # 动作被取消/异常中止 → 清掉过渡态，避免 UI 卡在「启动中/重启中」。
+                    # ★ 但不得越权复位「全停中」的过渡态：紧急停止打断一个在飞动作时，
+                    #   被取消的 worker 退出时【必然】投 op_aborted，而此时清扫仍在后台跑
+                    #   （5 服务各至多 45s + 端口 3 轮重试，数十秒）。若这里把
+                    #   _mode 从 'stopping' 复位成 'none'，按钮立即恢复可点，用户点
+                    #   「启动」会与清扫线程的 _kill_port_sync/nssm start 并发互踩。
+                    #   清扫期间的过渡态只允许 stop_all_done 复位。
+                    if not self._stopping_all and self._mode in ('starting', 'restarting', 'stopping'):
                         self._mode, self._current_mode_key = 'none', ''
                     self._update_all_ui()
                 elif msg_type == 'stop_all_done':
@@ -515,6 +524,12 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
                 # 单条消息处理失败不能中断 poll 调度链，否则日志/状态更新全部停摆
                 pass
             processed += 1
+        # ★ 每轮 poll 结束时无条件 flush 一次（_do_flush 幂等且便宜）。
+        # 只靠 'log_flush' 消息不够：worker 每秒可直调 log_message 数十次，
+        # 会投出大量空 payload 的 log_flush，挤占上面 processed < 30 的配额，
+        # 把真正的 log / log_batch 推到下一轮（200ms 后）——崩溃循环刷日志时
+        # 运行面板的「最新输出」会明显滞后于实际日志，排障时看到的是假最新。
+        self._do_flush()
 
     # ===================== 动作闸门接入（P0-3） =====================
     #
@@ -1125,7 +1140,8 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
         try:
             nssm = self._find_nssm()
             if nssm:
-                value = self.svc.get_env_extra_key(nssm, _SVC_API, 'UVICORN_WORKERS')
+                value = self.svc.get_env_extra_key(nssm, _SVC_API, 'UVICORN_WORKERS',
+                                                    read_timeout=3)
                 if value and value.isdigit():
                     return value
         except Exception:  # defensive: 读 NSSM 失败不得阻断界面构建

@@ -277,7 +277,6 @@ async def delete_backup_schedule(
 
     校验类任务（完整性巡检 / 灾备演练）整类受保护、不允许删除，见
     schedule_service.GUARDED_TASK_TYPES —— 误删会静默失去备份可用性保障。
-    停用请改 enabled=false。
     """
     try:
         deleted = await schedule_service.delete_schedule(db, schedule_id)
