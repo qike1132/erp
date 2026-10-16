@@ -23,21 +23,21 @@
       </div>
     </div>
 
-    <!-- 图片查看模态框 -->
-    <Teleport to="body">
-      <!-- 全站约定（2026-10-14）：点遮罩空白不关闭弹窗，只走 ✕ -->
-      <div v-if="imageModalVisible" class="pd-overlay">
-        <div class="pd-modal pd-modal-img-dialog">
-          <div class="pd-modal-header">
-            <h5 class="pd-modal-title">产品图片</h5>
-            <button class="pd-modal-close" aria-label="关闭" @click="imageModalVisible = false"><FontAwesomeIcon icon="times" aria-hidden="true" /></button>
-          </div>
-          <div class="pd-modal-body">
-            <img loading="lazy" :src="resolveStaticUrl(imageModalSrc)" class="pd-modal-img-view" alt="产品图片" />
-          </div>
-        </div>
+    <!-- 图片查看模态框（共享 UiDialog：Esc / 焦点陷阱 / 滚动锁内建；点遮罩空白不关闭，2026-10-14 约定） -->
+    <UiDialog
+      :open="imageModalVisible"
+      max-width-class="max-w-[800px]"
+      overlay-z-class="z-[var(--z-page-modal)]"
+      content-z-class="z-[var(--z-page-modal)] pd-modal-img-card"
+      @update:open="imageModalVisible = $event"
+    >
+      <template #title>
+        <span class="pd-modal-title">产品图片</span>
+      </template>
+      <div class="pd-modal-body">
+        <img loading="lazy" :src="resolveStaticUrl(imageModalSrc)" class="pd-modal-img-view" alt="产品图片" />
       </div>
-    </Teleport>
+    </UiDialog>
 
     <!-- BOM配置模态框 -->
     <BomEditor ref="bomEditorRef" />
@@ -63,6 +63,7 @@ import { productApi } from '@/api'
 import { resolveStaticUrl } from '@/api/request'
 import { showToast } from '@/composables/useToast'
 import { getErrorMessage } from '@/types/errors'
+import UiDialog from '@/components/ui/UiDialog.vue'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import ProductForm from './components/ProductForm.vue'
@@ -160,31 +161,8 @@ function openImageModal(src: string) {
   border-left: 1px solid var(--color-border-light, #f1f5f9);
 }
 
-/* ===== 模态框遮罩 ===== */
-.pd-overlay {
-  position: fixed; inset: 0; z-index: var(--z-page-modal); background: rgba(0,0,0,0.5);
-  display: flex; align-items: center; justify-content: center; padding: 16px;
-}
-
-/* ===== 图片模态框 ===== */
-.pd-modal {
-  border-radius: 18px; border: none; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25);
-  background: white; overflow: hidden;
-}
-.pd-modal-img-dialog { max-width: 90vw; width: 800px; }
-.pd-modal-header {
-  padding: 14px 20px; background: transparent;
-  border-bottom: 1px solid var(--color-border-light, #f1f5f9);
-  display: flex; justify-content: space-between; align-items: center;
-}
+/* ===== 图片模态框（外壳由 UiDialog 提供，此处仅保留图片区视觉） ===== */
 .pd-modal-title { font-size: 14px; font-weight: 700; color: var(--color-text); }
-.pd-modal-close {
-  width: 32px; height: 32px; border-radius: 8px; border: none;
-  background: var(--color-surface, #f8fafc); color: var(--color-text-secondary);
-  display: flex; align-items: center; justify-content: center; font-size: 14px;
-  transition: background 0.2s ease, color 0.2s ease; cursor: pointer;
-}
-.pd-modal-close:hover { background: var(--color-border-light, #e2e8f0); color: var(--color-text); }
 .pd-modal-body {
   padding: 20px; background: var(--color-surface, #f8fafc);
   display: flex; align-items: center; justify-content: center; min-height: 50vh;
@@ -198,5 +176,12 @@ function openImageModal(src: string) {
 @media (max-width: 1199.98px) {
   .page-card-body { grid-template-columns: 1fr; }
   .pd-col + .pd-col { border-left: none; border-top: 1px solid var(--color-border-light, #f1f5f9); }
+}
+</style>
+
+<!-- 卡片元素由 UiDialog 渲染并 portal 到 body，scoped 样式够不到 → 全局维持迁移前的 18px 圆角 -->
+<style>
+.pd-modal-img-card {
+  border-radius: 18px !important;
 }
 </style>

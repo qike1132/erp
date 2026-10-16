@@ -1,60 +1,59 @@
 <template>
-  <Teleport to="body">
-    <!-- 全站约定（2026-10-14）：点遮罩空白不关闭弹窗，只走 ✕ / 取消 -->
-    <div v-if="open" class="pd-overlay">
-      <div class="bom-modal-content copy-bom-modal-dialog">
-        <div class="bom-modal-header">
-          <div class="bom-modal-header-left">
-            <h5 class="bom-modal-title"><FontAwesomeIcon icon="copy" aria-hidden="true" /><span>复制BOM表</span></h5>
+  <!-- 共享 UiDialog：Esc / 焦点陷阱 / 滚动锁内建；点遮罩空白不关闭（closeOnOverlayClick 默认 false） -->
+  <UiDialog
+    :open="open"
+    max-width-class="max-w-[1200px]"
+    overlay-z-class="z-[var(--z-page-modal)]"
+    content-z-class="z-[var(--z-page-modal)] copy-bom-modal-card"
+    @update:open="open = $event"
+  >
+    <template #title>
+      <FontAwesomeIcon icon="copy" class="text-primary-500" aria-hidden="true" />
+      <span>复制BOM表</span>
+    </template>
+    <div class="mb-4">
+      <label class="pd-label mb-2"><FontAwesomeIcon icon="search" class="me-2" aria-hidden="true" />搜索源产品</label>
+      <div class="pd-input-wrap">
+        <FontAwesomeIcon icon="tag" class="pd-input-icon" aria-hidden="true" />
+        <input v-model="searchKeyword" type="text" class="pd-input" placeholder="输入产品名称或条码进行搜索" name="search" autocomplete="off" aria-label="输入产品名称或条码进行搜索" @keydown.enter="emit('search')" />
+      </div>
+      <div class="mt-2"><button class="pd-btn pd-btn-primary pd-btn-sm" aria-label="搜索" @click="emit('search')"><FontAwesomeIcon icon="search" class="me-2" aria-hidden="true" />搜索</button></div>
+    </div>
+    <div v-if="products.length > 0" class="mb-4">
+      <label class="pd-label mb-2"><FontAwesomeIcon icon="box" class="me-2" aria-hidden="true" />选择源产品</label>
+      <div class="copy-bom-product-list">
+        <div v-for="product in products" :key="product.id" class="copy-bom-product-item" :class="{ selected: sourceProductId === product.id }" @click="emit('select-product', product)">
+          <div>
+            <div class="product-name">{{ product.name }}</div>
+            <div class="product-barcode">{{ product.barcode ? '条码: ' + product.barcode : '' }}</div>
           </div>
-          <button class="bom-modal-close" aria-label="关闭" @click="open = false"><FontAwesomeIcon icon="times" aria-hidden="true" /></button>
-        </div>
-        <div class="bom-modal-body">
-          <div class="mb-4">
-            <label class="pd-label mb-2"><FontAwesomeIcon icon="search" class="me-2" aria-hidden="true" />搜索源产品</label>
-            <div class="pd-input-wrap">
-              <FontAwesomeIcon icon="tag" class="pd-input-icon" aria-hidden="true" />
-              <input v-model="searchKeyword" type="text" class="pd-input" placeholder="输入产品名称或条码进行搜索" name="search" autocomplete="off" aria-label="输入产品名称或条码进行搜索" @keydown.enter="emit('search')" />
-            </div>
-            <div class="mt-2"><button class="pd-btn pd-btn-primary pd-btn-sm" aria-label="搜索" @click="emit('search')"><FontAwesomeIcon icon="search" class="me-2" aria-hidden="true" />搜索</button></div>
-          </div>
-          <div v-if="products.length > 0" class="mb-4">
-            <label class="pd-label mb-2"><FontAwesomeIcon icon="box" class="me-2" aria-hidden="true" />选择源产品</label>
-            <div class="copy-bom-product-list">
-              <div v-for="product in products" :key="product.id" class="copy-bom-product-item" :class="{ selected: sourceProductId === product.id }" @click="emit('select-product', product)">
-                <div>
-                  <div class="product-name">{{ product.name }}</div>
-                  <div class="product-barcode">{{ product.barcode ? '条码: ' + product.barcode : '' }}</div>
-                </div>
-                <span class="product-status" :class="product.has_bom ? 'has-bom' : 'no-bom'">{{ product.has_bom ? '有BOM' : '无BOM' }}</span>
-              </div>
-            </div>
-          </div>
-          <BomPreview :preview="preview" />
-          <div v-if="preview" class="mb-4">
-            <label class="form-check-label">
-              <input v-model="overwrite" type="checkbox" class="form-check-input" aria-label="勾选项" />
-              <strong>覆盖现有BOM表</strong>
-              <span class="text-muted block text-sm">如果目标产品已有BOM表，勾选此项将覆盖原数据</span>
-            </label>
-          </div>
-          <div v-if="progress.visible" class="mb-4">
-            <div class="pd-progress"><div class="pd-progress-bar" :style="{ width: progress.percent + '%' }" /></div>
-            <p class="pd-progress-text">{{ progress.text }}</p>
-          </div>
-        </div>
-        <div class="bom-modal-footer">
-          <button class="bom-btn-cancel" aria-label="取消" @click="open = false">取消</button>
-          <button class="bom-btn-save" :disabled="!sourceProductId" aria-label="确认复制" @click="emit('confirm')"><FontAwesomeIcon icon="check" class="me-2" aria-hidden="true" />确认复制</button>
+          <span class="product-status" :class="product.has_bom ? 'has-bom' : 'no-bom'">{{ product.has_bom ? '有BOM' : '无BOM' }}</span>
         </div>
       </div>
     </div>
-  </Teleport>
+    <BomPreview :preview="preview" />
+    <div v-if="preview" class="mb-4">
+      <label class="form-check-label">
+        <input v-model="overwrite" type="checkbox" class="form-check-input" aria-label="勾选项" />
+        <strong>覆盖现有BOM表</strong>
+        <span class="text-muted block text-sm">如果目标产品已有BOM表，勾选此项将覆盖原数据</span>
+      </label>
+    </div>
+    <div v-if="progress.visible" class="mb-4">
+      <div class="pd-progress"><div class="pd-progress-bar" :style="{ width: progress.percent + '%' }" /></div>
+      <p class="pd-progress-text">{{ progress.text }}</p>
+    </div>
+    <template #footer>
+      <button class="bom-btn-cancel" aria-label="取消" @click="open = false">取消</button>
+      <button class="bom-btn-save" :disabled="!sourceProductId" aria-label="确认复制" @click="emit('confirm')"><FontAwesomeIcon icon="check" class="me-2" aria-hidden="true" />确认复制</button>
+    </template>
+  </UiDialog>
 </template>
 
 <script setup lang="ts">
 import type { BomSearchProduct, BomPreviewStats, ProgressState } from '../composables/bomTypes'
 import BomPreview from './BomPreview.vue'
+import UiDialog from '@/components/ui/UiDialog.vue'
 
 defineProps<{
   products: BomSearchProduct[]
@@ -75,12 +74,6 @@ const emit = defineEmits<{
 </script>
 
 <style scoped>
-/* ===== 模态框遮罩 ===== */
-.pd-overlay {
-  position: fixed; inset: 0; z-index: var(--z-page-modal); background: rgba(0,0,0,0.5);
-  display: flex; align-items: center; justify-content: center; padding: 16px;
-}
-
 /* ===== 表单 ===== */
 .pd-label {
   display: block;
@@ -143,44 +136,9 @@ const emit = defineEmits<{
 }
 .pd-btn-sm { padding: 5px 10px; font-size: 11px; }
 
-/* ===== BOM模态框 =====
-   尺寸契约（勿改回 height:auto）：弹窗**恒定高度**，不随内容条数变化。
-   与 BomEditor.vue 同口径：外框固定，内部滚动。 */
-.bom-modal-content {
-  border-radius: 18px; border: none; box-shadow: 0 20px 60px rgba(0,0,0,0.15);
-  overflow: hidden; background: white;
-}
-.copy-bom-modal-dialog {
-  max-width: 1200px; width: 90vw;
-  height: 90vh; min-height: 620px; max-height: 90vh;
-  display: flex; flex-direction: column;
-}
-.bom-modal-header {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 20px 28px; background: transparent;
-  border-bottom: 1px solid var(--color-border-light, #e2e8f0);
-  flex: 0 0 auto;
-}
-.bom-modal-header-left { flex: 1; }
-.bom-modal-title {
-  display: flex; align-items: center; gap: 10px;
-  font-size: 16px; font-weight: 700; color: var(--color-text); margin: 0;
-}
-.bom-modal-title i { color: var(--color-primary-500); }
-.bom-modal-close {
-  width: 36px; height: 36px; border: none; background: var(--color-surface, #f8fafc);
-  border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center;
-  color: var(--color-text-secondary); font-size: 16px; transition: background 0.3s ease, color 0.3s ease, transform 0.3s ease;
-}
-.bom-modal-close:hover { background: var(--color-border-light, #e2e8f0); color: var(--color-text); transform: rotate(90deg); }
-/* body：占满剩余高度并内部滚动（min-height 必须为 0，否则内容少时反向撑高外框） */
-.bom-modal-body { padding: 0; background: var(--color-surface, #f8fafc); flex: 1 1 auto; min-height: 0; overflow-y: auto; }
-.bom-modal-footer {
-  display: flex; justify-content: flex-end; align-items: center; gap: 10px;
-  padding: 20px 28px; background: white;
-  border-top: 1px solid var(--color-border-light, #e2e8f0);
-  flex: 0 0 auto;
-}
+/* 尺寸契约（勿改回随内容变化）：弹窗恒定高度 90vh，内容多少只影响内部滚动位置。
+   高度 / 圆角 / body 内边距由文件末尾的全局 .copy-bom-modal-card 规则维持
+   （卡片与 body 均由 UiDialog 渲染，scoped 样式够不到）。 */
 .bom-btn-cancel {
   padding: 10px 20px; background: white; color: var(--color-text);
   border: 2px solid var(--color-border-light, #e2e8f0); border-radius: 10px;
@@ -220,4 +178,18 @@ const emit = defineEmits<{
 .text-muted { color: var(--color-text-secondary); }
 .form-check-input { width: 1.125rem; height: 1.125rem; margin-right: 0.5rem; }
 .form-check-label { display: flex; align-items: flex-start; gap: 0.5rem; }
+</style>
+
+<!-- 卡片与 body 均由 UiDialog 渲染并 portal 到 body，scoped 样式够不到 → 全局维持迁移前观感 -->
+<style>
+.copy-bom-modal-card {
+  border-radius: 18px !important;
+  height: 90vh !important;
+  min-height: 620px !important;
+}
+.copy-bom-modal-card > .p-6 {
+  padding: 0 !important;
+  min-height: 0 !important;
+  background: var(--color-surface, #f8fafc) !important;
+}
 </style>

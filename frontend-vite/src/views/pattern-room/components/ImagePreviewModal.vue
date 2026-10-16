@@ -1,54 +1,53 @@
 <template>
-  <Teleport to="body">
-    <!-- 全站约定（2026-10-14）：点遮罩空白不关闭弹窗，只走 ✕ -->
-    <div v-if="image" class="pim-overlay">
-      <div class="pim-modal pim-dialog">
-        <div class="pim-header">
-          <h5 class="pim-title">产品图片</h5>
-          <button class="pim-close" aria-label="关闭" @click="$emit('update:image', null)"><FontAwesomeIcon icon="times" aria-hidden="true" /></button>
-        </div>
-        <div class="pim-body">
-          <img loading="lazy" :src="resolveStaticUrl(image)" class="pim-img-view" alt="产品图片" />
-        </div>
-      </div>
+  <!--
+    产品图片「原图」预览。迁移到共享 UiDialog（2026-10-16）以复用它的
+    Esc 关闭 / 焦点陷阱 / 滚动锁，替代原先只有 ✕ 一条关闭路径的手写 Teleport 遮罩。
+    行为：Esc 关闭、✕ 关闭；点遮罩空白不关闭（UiDialog closeOnOverlayClick 默认 false，
+    即全站约定 2026-10-14）。
+    对外契约不变：image prop + update:image 事件；image↔open 的适配只在本组件内部完成，
+    不把 image 语义泄漏给 UiDialog。
+  -->
+  <UiDialog
+    :open="image !== null"
+    max-width-class="max-w-[800px]"
+    overlay-z-class="z-[var(--z-page-modal)]"
+    content-z-class="z-[var(--z-page-modal)] pim-card"
+    @update:open="onOpenChange"
+  >
+    <template #title>
+      <span class="pim-title">产品图片</span>
+    </template>
+    <div class="pim-body">
+      <img v-if="image" :src="resolveStaticUrl(image)" class="pim-img-view" alt="产品图片" />
     </div>
-  </Teleport>
+  </UiDialog>
 </template>
 
 <script setup lang="ts">
 import { resolveStaticUrl } from '@/api/request'
+import UiDialog from '@/components/ui/UiDialog.vue'
 
 defineProps<{ image: string | null }>()
-defineEmits<{ 'update:image': [v: string | null] }>()
+const emit = defineEmits<{ 'update:image': [v: string | null] }>()
+
+/** UiDialog 的 open = 「image 非空」；关闭（Esc / ✕ / 取消）时把 image 置空，维持对外契约 */
+function onOpenChange(open: boolean) {
+  if (!open) emit('update:image', null)
+}
 </script>
 
 <style>
-/* 前缀 pim-（ImagePreviewModal）：全局样式（Teleport 至 body），避免与 PrintDialog 的 pd-* 冲突 */
-.pim-overlay {
-  position: fixed; inset: 0; z-index: var(--z-page-modal); background: rgba(0,0,0,0.5);
-  display: flex; align-items: center; justify-content: center; padding: 16px;
-}
-.pim-modal {
-  border-radius: 18px; border: none; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25);
-  background: white; overflow: hidden;
-}
-.pim-dialog { max-width: 90vw; width: 800px; }
-.pim-header {
-  padding: 14px 20px; background: transparent;
-  border-bottom: 1px solid var(--color-border-light, #f1f5f9);
-  display: flex; justify-content: space-between; align-items: center;
+/* pim- 前缀：内容经 DialogPortal 渲染到 body，需全局样式（非 scoped）。
+   仅保留迁移后仍生效的视觉声明；遮罩 50% 黑、焦点陷阱、滚动锁由 UiDialog 提供。 */
+.pim-card {
+  /* UiDialog 默认 rounded-2xl(16px)；此处维持迁移前的 18px 圆角 */
+  border-radius: 18px !important;
 }
 .pim-title { font-size: 14px; font-weight: 700; color: var(--color-text); }
-.pim-close {
-  width: 32px; height: 32px; border-radius: 8px; border: none;
-  background: var(--color-surface, #f8fafc); color: var(--color-text-secondary);
-  display: flex; align-items: center; justify-content: center; font-size: 14px;
-  transition: background 0.2s ease, color 0.2s ease; cursor: pointer;
-}
-.pim-close:hover { background: var(--color-border-light, #e2e8f0); color: var(--color-text); }
 .pim-body {
-  padding: 20px; background: var(--color-surface, #f8fafc);
-  display: flex; align-items: center; justify-content: center; min-height: 50vh;
+  display: flex; align-items: center; justify-content: center;
+  min-height: 50vh; background: var(--color-surface, #f8fafc);
+  border-radius: 12px;
 }
 .pim-img-view {
   max-width: 100%; max-height: 80vh; object-fit: contain;

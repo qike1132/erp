@@ -1,24 +1,24 @@
 <template>
-  <!-- 白名单设置弹窗 -->
-  <!-- 全站约定（2026-10-14）：点遮罩空白不关闭弹窗，只走 ✕ / 取消 -->
-  <div v-if="showWhitelistModal" class="bt-whitelist-overlay">
-    <div class="bt-whitelist-modal">
-      <div class="bt-whitelist-header">
-        <span>白名单客户</span>
-        <button class="bt-whitelist-close" aria-label="关闭" @click="showWhitelistModal = false">&times;</button>
-      </div>
-      <div class="bt-whitelist-body">
-        <label v-for="c in allCustomers" :key="c" class="bt-whitelist-item">
-          <input v-model="whitelistEdit" type="checkbox" :value="c" aria-label="勾选项" />
-          <span>{{ c }}</span>
-        </label>
-      </div>
-      <div class="bt-whitelist-footer">
-        <UiButton variant="outline" @click="showWhitelistModal = false">取消</UiButton>
-        <UiButton variant="primary" :disabled="whitelistSaving" @click="saveWhitelist">保存</UiButton>
-      </div>
+  <!-- 白名单设置弹窗（共享 UiDialog：Esc / 焦点陷阱 / 滚动锁内建；点遮罩空白不关闭） -->
+  <UiDialog
+    :open="showWhitelistModal"
+    title="白名单客户"
+    max-width-class="max-w-[360px]"
+    overlay-z-class="z-[var(--z-page-modal)]"
+    content-z-class="z-[var(--z-page-modal)] bt-whitelist-card"
+    @update:open="showWhitelistModal = $event"
+  >
+    <div class="bt-whitelist-body">
+      <label v-for="c in allCustomers" :key="c" class="bt-whitelist-item">
+        <input v-model="whitelistEdit" type="checkbox" :value="c" aria-label="勾选项" />
+        <span>{{ c }}</span>
+      </label>
     </div>
-  </div>
+    <template #footer>
+      <UiButton variant="outline" @click="showWhitelistModal = false">取消</UiButton>
+      <UiButton variant="primary" :disabled="whitelistSaving" @click="saveWhitelist">保存</UiButton>
+    </template>
+  </UiDialog>
 </template>
 
 <script setup lang="ts">
@@ -31,6 +31,7 @@
 import { ref, watch } from 'vue'
 import { orderBatchApi } from '@/api'
 import UiButton from '@/components/ui/UiButton.vue'
+import UiDialog from '@/components/ui/UiDialog.vue'
 import { showToast } from '@/composables/useToast'
 
 const props = defineProps<{
@@ -76,47 +77,8 @@ async function saveWhitelist() {
 </script>
 
 <style scoped>
-/* ===== 白名单弹窗 ===== */
-.bt-whitelist-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.3);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 100;
-}
-.bt-whitelist-modal {
-  background: white;
-  border-radius: 16px;
-  width: 360px;
-  max-height: 480px;
-  display: flex;
-  flex-direction: column;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
-}
-.bt-whitelist-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 20px;
-  font-size: 15px;
-  font-weight: 700;
-  border-bottom: 1px solid var(--color-border-light);
-}
-.bt-whitelist-close {
-  background: none;
-  border: none;
-  font-size: 20px;
-  color: var(--color-text-muted);
-  cursor: pointer;
-  padding: 0 4px;
-  line-height: 1;
-}
+/* 外壳（遮罩 / 卡片 / 头部 / 关闭 / 底栏）由共享 UiDialog 提供 */
 .bt-whitelist-body {
-  padding: 12px 20px;
-  overflow-y: auto;
-  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -136,11 +98,14 @@ async function saveWhitelist() {
   accent-color: var(--color-primary-500);
   cursor: pointer;
 }
-.bt-whitelist-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  padding: 12px 20px;
-  border-top: 1px solid var(--color-border-light);
+</style>
+
+<!-- 卡片与 body 由 UiDialog 渲染并 portal 到 body → 全局维持迁移前的最大高度与内边距 -->
+<style>
+.bt-whitelist-card {
+  max-height: 480px !important;
+}
+.bt-whitelist-card > .p-6 {
+  padding: 12px 20px !important;
 }
 </style>

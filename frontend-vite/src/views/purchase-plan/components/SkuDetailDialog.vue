@@ -1,35 +1,35 @@
 <template>
-  <Transition name="sp-modal">
-    <!-- 全站约定（2026-10-14）：点遮罩空白不关闭弹窗，只走 ✕ -->
-    <div v-if="open" class="sp-modal-bg">
-      <div class="sp-sku-detail-modal">
-        <div class="sp-sku-detail-header">
-          <div>
-            <div class="sp-sku-detail-title">{{ name }}</div>
-            <div class="sp-sku-detail-sub">{{ barcode }}</div>
-          </div>
-          <button class="sp-modal-btn sp-modal-btn-close" aria-label="关闭" @click="close"><FontAwesomeIcon icon="times" aria-hidden="true" /></button>
-        </div>
-        <div class="sp-sku-detail-body">
-          <div v-if="!dateDetail.length" class="sp-sku-detail-empty">该 SKU 本月暂无出货计划</div>
-          <div v-else class="sp-sku-detail-list">
-            <div class="sp-sku-detail-header-row">
-              <span class="sp-sku-detail-header-label">日期</span>
-              <span class="sp-sku-detail-header-label">数量</span>
-            </div>
-            <div v-for="item in dateDetail" :key="item.date" class="sp-sku-detail-row" :class="{ 'sp-sku-detail-shipped': item.status === 'completed' }">
-              <span class="sp-sku-detail-date">{{ item.date }}</span>
-              <span class="sp-sku-detail-qty">{{ item.qty }}</span>
-            </div>
-          </div>
-        </div>
+  <!-- 共享 UiDialog：Esc / 焦点陷阱 / 滚动锁内建；点遮罩空白不关闭（closeOnOverlayClick 默认 false） -->
+  <UiDialog
+    :open="open"
+    max-width-class="max-w-[640px]"
+    overlay-z-class="z-[var(--z-page-modal)]"
+    content-z-class="z-[var(--z-page-modal)] sp-sku-detail-card"
+    @update:open="emit('update:open', $event)"
+  >
+    <template #title>
+      <div class="sp-sku-detail-title-wrap">
+        <div class="sp-sku-detail-title">{{ name }}</div>
+        <div class="sp-sku-detail-sub">{{ barcode }}</div>
+      </div>
+    </template>
+    <div v-if="!dateDetail.length" class="sp-sku-detail-empty">该 SKU 本月暂无出货计划</div>
+    <div v-else class="sp-sku-detail-list">
+      <div class="sp-sku-detail-header-row">
+        <span class="sp-sku-detail-header-label">日期</span>
+        <span class="sp-sku-detail-header-label">数量</span>
+      </div>
+      <div v-for="item in dateDetail" :key="item.date" class="sp-sku-detail-row" :class="{ 'sp-sku-detail-shipped': item.status === 'completed' }">
+        <span class="sp-sku-detail-date">{{ item.date }}</span>
+        <span class="sp-sku-detail-qty">{{ item.qty }}</span>
       </div>
     </div>
-  </Transition>
+  </UiDialog>
 </template>
 
 <script setup lang="ts">
 import type { SkuDateItem } from './types';
+import UiDialog from '@/components/ui/UiDialog.vue';
 
 defineProps<{
   open: boolean;
@@ -41,67 +41,15 @@ defineProps<{
 const emit = defineEmits<{
   'update:open': [value: boolean];
 }>();
-
-function close() {
-  emit('update:open', false);
-}
 </script>
 
 <style scoped>
-.sp-modal-bg {
-  position: fixed;
-  inset: 0;
-  z-index: 900;
-  background: rgba(0,0,0,0.4);
-  backdrop-filter: blur(4px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-}
-
-.sp-modal-btn {
-  width: 36px;
-  height: 36px;
-  border-radius: 9px;
-  border: 1px solid var(--color-border-light);
-  background: white;
-  color: var(--color-text-secondary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: border-color 0.3s ease, color 0.3s ease, background 0.3s ease;
-}
-
-.sp-modal-btn:hover {
-  border-color: var(--color-primary-300);
-  color: var(--color-primary-500);
-  background: var(--color-primary-50);
-}
-
-.sp-sku-detail-modal {
-  background: white;
-  border-radius: var(--radius-modal, 28px);
-  box-shadow: 0 12px 48px rgba(0,0,0,0.15);
-  width: 90%;
-  max-width: 640px;
-  max-height: 80vh;
+/* 外壳（遮罩 / 卡片 / 头部 / 关闭）由共享 UiDialog 提供 */
+.sp-sku-detail-title-wrap {
   display: flex;
   flex-direction: column;
-  overflow: hidden;
-  transform: translateZ(0);
-  contain: layout style paint;
-}
-
-.sp-sku-detail-header {
-  display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 20px 24px 16px;
-  border-bottom: 1px solid var(--color-border-light, #e2e8f0);
 }
-
 .sp-sku-detail-title {
   font-size: 17px;
   font-weight: 700;
@@ -112,12 +60,6 @@ function close() {
   font-size: 12px;
   color: var(--color-text-muted);
   margin-top: 2px;
-}
-
-.sp-sku-detail-body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 20px 24px;
 }
 
 .sp-sku-detail-empty {
@@ -175,5 +117,13 @@ function close() {
   font-weight: 800;
   color: var(--color-primary-700);
   font-variant-numeric: tabular-nums;
+}
+</style>
+
+<!-- 卡片由 UiDialog 渲染并 portal 到 body，scoped 样式够不到 → 全局维持迁移前的圆角 / 最大高度 -->
+<style>
+.sp-sku-detail-card {
+  border-radius: var(--radius-modal, 28px) !important;
+  max-height: 80vh !important;
 }
 </style>

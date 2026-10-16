@@ -1,88 +1,84 @@
 <template>
-  <Teleport to="body">
-    <div v-if="editDialogVisible" class="pd-overlay">
-      <div class="bom-modal-content edit-modal-dialog">
-        <div class="bom-modal-header">
-          <div class="bom-modal-header-left">
-            <h5 class="bom-modal-title"><FontAwesomeIcon icon="edit" aria-hidden="true" /><span>编辑产品 - {{ editForm.name }}</span></h5>
-          </div>
-          <button class="bom-modal-close" aria-label="关闭" @click="editDialogVisible = false"><FontAwesomeIcon icon="times" aria-hidden="true" /></button>
+  <UiDialog
+    :open="editDialogVisible"
+    max-width-class="max-w-[1080px]"
+    overlay-z-class="z-[var(--z-page-modal)]"
+    content-z-class="z-[var(--z-page-modal)] edit-modal-card"
+    @update:open="editDialogVisible = $event"
+  >
+    <template #title>
+      <FontAwesomeIcon icon="edit" class="text-primary-500" aria-hidden="true" />
+      <span>编辑产品 - {{ editForm.name }}</span>
+    </template>
+    <div class="edit-grid">
+      <div class="pd-form-group edit-span2">
+        <label class="pd-label">产品名称 <span class="required">*</span></label>
+        <div class="pd-input-wrap">
+          <FontAwesomeIcon icon="tag" class="pd-input-icon" aria-hidden="true" />
+          <input v-model="editForm.name" type="text" class="pd-input" required placeholder="请输入产品名称" name="product-name" autocomplete="off" aria-label="请输入产品名称" />
         </div>
-        <div class="bom-modal-body">
-          <div class="edit-modal-content">
-            <div class="edit-grid">
-              <div class="pd-form-group edit-span2">
-                <label class="pd-label">产品名称 <span class="required">*</span></label>
-                <div class="pd-input-wrap">
-                  <FontAwesomeIcon icon="tag" class="pd-input-icon" aria-hidden="true" />
-                  <input v-model="editForm.name" type="text" class="pd-input" required placeholder="请输入产品名称" name="product-name" autocomplete="off" aria-label="请输入产品名称" />
-                </div>
-              </div>
-              <div class="pd-form-group">
-                <label class="pd-label">69码/商品条码</label>
-                <div class="pd-input-wrap">
-                  <FontAwesomeIcon icon="barcode" class="pd-input-icon" aria-hidden="true" />
-                  <input v-model="editForm.barcode" type="text" class="pd-input" placeholder="例如：6958085574210" name="barcode" autocomplete="off" aria-label="例如：6958085574210" />
-                </div>
-              </div>
-              <div class="pd-form-group">
-                <label class="pd-label">产品价格</label>
-                <div class="pd-input-wrap">
-                  <FontAwesomeIcon icon="yen-sign" class="pd-input-icon" aria-hidden="true" />
-                  <input v-model.number="editForm.price" type="number" class="pd-input" step="0.01" min="0" placeholder="请输入产品价格" name="price" autocomplete="off" aria-label="请输入产品价格" />
-                </div>
-              </div>
-              <div class="pd-form-group">
-                <label class="pd-label">工厂</label>
-                <div class="pd-input-wrap">
-                  <FontAwesomeIcon icon="industry" class="pd-input-icon" aria-hidden="true" />
-                  <select v-model="editForm.factory" class="pd-input pd-select" name="edit-factory" aria-label="工厂">
-                    <option value="" disabled>请选择工厂</option>
-                    <option v-for="f in factoryOptions" :key="f" :value="f">{{ f }}</option>
-                  </select>
-                </div>
-              </div>
-              <div class="pd-form-group">
-                <label class="pd-label">所属客户</label>
-                <ProductCustomerSelect v-model="editForm.customerIds" :options="customerOptions" close-on-select />
-              </div>
-              <div class="pd-form-group edit-span2">
-                <label class="pd-label">产品图片</label>
-                <div
-                  ref="editDropZoneRef"
-                  class="pd-section-header pd-droppable"
-                  :class="{ 'pd-drag-over': editDragOver || editPasteFlash }"
-                  title="点击选择、拖拽或粘贴图片"
-                  @click="editImageInputRef?.click()"
-                  @dragover.prevent="onEditDragOver"
-                  @dragleave="editDragOver = false"
-                  @drop.prevent="onEditDrop"
-                >
-                  <label class="form-label pd-droppable-label">
-                    <FontAwesomeIcon icon="image" class="label-icon" aria-hidden="true" />
-                    <template v-if="editForm.image">
-                      <span class="pd-file-inline pd-file-inline-success">
-                        <img loading="lazy" :src="resolveStaticUrl(editForm.image)" class="pd-thumb-preview" alt="产品图片" @click.stop="emit('open-image', editForm.image)" />
-                        <button type="button" class="pd-thumb-remove" aria-label="关闭" @click.stop="editForm.image = ''"><FontAwesomeIcon icon="times" aria-hidden="true" /></button>
-                      </span>
-                    </template>
-                    <span v-else>点击选择 / 拖拽 / 粘贴图片 · 支持 {{ ALLOWED_IMAGE_HINT }}</span>
-                  </label>
-                  <input ref="editImageInputRef" type="file" style="display: none" accept="image/*" name="image" @change="onEditImageSelect" />
-                </div>
-              </div>
-            </div>
-          </div>
+      </div>
+      <div class="pd-form-group">
+        <label class="pd-label">69码/商品条码</label>
+        <div class="pd-input-wrap">
+          <FontAwesomeIcon icon="barcode" class="pd-input-icon" aria-hidden="true" />
+          <input v-model="editForm.barcode" type="text" class="pd-input" placeholder="例如：6958085574210" name="barcode" autocomplete="off" aria-label="例如：6958085574210" />
         </div>
-        <div class="bom-modal-footer">
-          <button class="bom-btn-cancel" @click="editDialogVisible = false">取消</button>
-          <button class="bom-btn-save" :disabled="editSubmitting" @click="handleEditSave">
-            <FontAwesomeIcon :icon="editSubmitting ? 'spinner' : 'save'" :class="{ 'pd-btn-spin': editSubmitting }" aria-hidden="true" />{{ editSubmitting ? '保存中…' : '保存修改' }}
-          </button>
+      </div>
+      <div class="pd-form-group">
+        <label class="pd-label">产品价格</label>
+        <div class="pd-input-wrap">
+          <FontAwesomeIcon icon="yen-sign" class="pd-input-icon" aria-hidden="true" />
+          <input v-model.number="editForm.price" type="number" class="pd-input" step="0.01" min="0" placeholder="请输入产品价格" name="price" autocomplete="off" aria-label="请输入产品价格" />
+        </div>
+      </div>
+      <div class="pd-form-group">
+        <label class="pd-label">工厂</label>
+        <div class="pd-input-wrap">
+          <FontAwesomeIcon icon="industry" class="pd-input-icon" aria-hidden="true" />
+          <select v-model="editForm.factory" class="pd-input pd-select" name="edit-factory" aria-label="工厂">
+            <option value="" disabled>请选择工厂</option>
+            <option v-for="f in factoryOptions" :key="f" :value="f">{{ f }}</option>
+          </select>
+        </div>
+      </div>
+      <div class="pd-form-group">
+        <label class="pd-label">所属客户</label>
+        <ProductCustomerSelect v-model="editForm.customerIds" :options="customerOptions" close-on-select />
+      </div>
+      <div class="pd-form-group edit-span2">
+        <label class="pd-label">产品图片</label>
+        <div
+          ref="editDropZoneRef"
+          class="pd-section-header pd-droppable"
+          :class="{ 'pd-drag-over': editDragOver || editPasteFlash }"
+          title="点击选择、拖拽或粘贴图片"
+          @click="editImageInputRef?.click()"
+          @dragover.prevent="onEditDragOver"
+          @dragleave="editDragOver = false"
+          @drop.prevent="onEditDrop"
+        >
+          <label class="form-label pd-droppable-label">
+            <FontAwesomeIcon icon="image" class="label-icon" aria-hidden="true" />
+            <template v-if="editForm.image">
+              <span class="pd-file-inline pd-file-inline-success">
+                <img loading="lazy" :src="resolveStaticUrl(editForm.image)" class="pd-thumb-preview" alt="产品图片" @click.stop="emit('open-image', editForm.image)" />
+                <button type="button" class="pd-thumb-remove" aria-label="关闭" @click.stop="editForm.image = ''"><FontAwesomeIcon icon="times" aria-hidden="true" /></button>
+              </span>
+            </template>
+            <span v-else>点击选择 / 拖拽 / 粘贴图片 · 支持 {{ ALLOWED_IMAGE_HINT }}</span>
+          </label>
+          <input ref="editImageInputRef" type="file" style="display: none" accept="image/*" name="image" @change="onEditImageSelect" />
         </div>
       </div>
     </div>
-  </Teleport>
+    <template #footer>
+      <button class="bom-btn-cancel" @click="editDialogVisible = false">取消</button>
+      <button class="bom-btn-save" :disabled="editSubmitting" @click="handleEditSave">
+        <FontAwesomeIcon :icon="editSubmitting ? 'spinner' : 'save'" :class="{ 'pd-btn-spin': editSubmitting }" aria-hidden="true" />{{ editSubmitting ? '保存中…' : '保存修改' }}
+      </button>
+    </template>
+  </UiDialog>
 </template>
 
 <script setup lang="ts">
@@ -96,6 +92,7 @@ import { useImagePaste } from '@/composables/useImagePaste'
 import { showToast } from '@/composables/useToast'
 import { getErrorMessage } from '@/types/errors'
 import ProductCustomerSelect from './ProductCustomerSelect.vue'
+import UiDialog from '@/components/ui/UiDialog.vue'
 import type { ProductCustomerRef } from '@/types'
 
 interface Product {
@@ -220,13 +217,7 @@ defineExpose({ open })
 </script>
 
 <style scoped>
-/* ===== 模态框遮罩 ===== */
-.pd-overlay {
-  position: fixed; inset: 0; z-index: var(--z-page-modal); background: rgba(0,0,0,0.5);
-  display: flex; align-items: center; justify-content: center; padding: 16px;
-}
-
-.edit-modal-content { padding: 24px 28px; }
+/* 外壳（遮罩 / 卡片 / 头部 / 底栏 / 关闭）由共享 UiDialog 提供 */
 
 /* ===== 表单 ===== */
 /* 双列栅格：名称与图片通栏，其余两两一行；窄屏回落单列 */
@@ -353,34 +344,7 @@ defineExpose({ open })
   transition: background 0.2s ease;
 }
 .pd-thumb-remove:hover { background: rgba(0,0,0,0.7); }
-/* ===== BOM模态框（编辑弹窗复用） ===== */
-.bom-modal-content {
-  border-radius: 18px; border: none; box-shadow: 0 20px 60px rgba(0,0,0,0.15);
-  overflow: hidden; background: white;
-}
-.edit-modal-dialog { max-width: 1080px; width: 95vw; max-height: 90vh; display: flex; flex-direction: column; }
-.bom-modal-header {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 22px 28px; background: transparent;
-  border-bottom: 1px solid var(--color-border-light, #e2e8f0);
-}
-.bom-modal-header-left { flex: 1; }
-.bom-modal-title {
-  display: flex; align-items: center; gap: 10px;
-  font-size: 17px; font-weight: 700; color: var(--color-text); margin: 0;
-}
-.bom-modal-close {
-  width: 36px; height: 36px; border: none; background: var(--color-surface, #f8fafc);
-  border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center;
-  color: var(--color-text-secondary); font-size: 16px; transition: background 0.3s ease, color 0.3s ease, transform 0.3s ease;
-}
-.bom-modal-close:hover { background: var(--color-border-light, #e2e8f0); color: var(--color-text); transform: rotate(90deg); }
-.bom-modal-body { padding: 0; background: var(--color-surface, #f8fafc); overflow-y: auto; flex: 1; }
-.bom-modal-footer {
-  display: flex; justify-content: flex-end; align-items: center; gap: 10px;
-  padding: 18px 28px; background: white;
-  border-top: 1px solid var(--color-border-light, #e2e8f0);
-}
+/* ===== 底栏按钮（由 UiDialog #footer 承载） ===== */
 .bom-btn-cancel {
   padding: 11px 22px; background: white; color: var(--color-text);
   border: 2px solid var(--color-border-light, #e2e8f0); border-radius: 11px;
@@ -397,4 +361,12 @@ defineExpose({ open })
 .bom-btn-save:disabled { opacity: 0.7; cursor: progress; }
 /* 保存等待期（可能数秒，见 2026-10-09 根因存档）：spinner 转起来让"活着"可见 */
 .pd-btn-spin { animation: pd-spin 0.8s linear infinite; }
-@keyframes pd-spin { to { transform: rotate(360deg); } }</style>
+@keyframes pd-spin { to { transform: rotate(360deg); } }
+</style>
+
+<!-- 卡片元素由 UiDialog 渲染并 portal 到 body，scoped 样式够不到 → 全局维持迁移前的 18px 圆角 -->
+<style>
+.edit-modal-card {
+  border-radius: 18px !important;
+}
+</style>

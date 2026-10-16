@@ -29,23 +29,23 @@
           :all-customers="allCustomers"
           @saved="refreshAfterWhitelistSaved"
         />
-        <!-- 完成批次确认弹窗 -->
-        <!-- 全站约定（2026-10-14）：点遮罩空白不关闭弹窗，只走 ✕ / 取消 -->
-        <div v-if="showCompleteModal" class="bt-whitelist-overlay">
-          <div class="bt-whitelist-modal">
-            <div class="bt-whitelist-header">
-              <span>确认完成批次</span>
-              <button class="bt-whitelist-close" aria-label="关闭" @click="showCompleteModal = false">&times;</button>
-            </div>
-            <div class="bt-whitelist-body" style="padding: 20px; font-size: 14px; color: var(--color-text);">
-              确定要完成批次 <strong>{{ completingBatchNo }}</strong> 吗？完成后该批次将不再显示。
-            </div>
-            <div class="bt-whitelist-footer">
-              <UiButton variant="outline" @click="showCompleteModal = false">取消</UiButton>
-              <UiButton variant="primary" :disabled="completing" @click="confirmComplete">确定</UiButton>
-            </div>
+        <!-- 完成批次确认弹窗（共享 UiDialog：Esc / 焦点陷阱 / 滚动锁内建；点遮罩空白不关闭） -->
+        <UiDialog
+          :open="showCompleteModal"
+          title="确认完成批次"
+          max-width-class="max-w-[360px]"
+          overlay-z-class="z-[var(--z-page-modal)]"
+          content-z-class="z-[var(--z-page-modal)] bt-complete-card"
+          @update:open="showCompleteModal = $event"
+        >
+          <div class="bt-complete-body">
+            确定要完成批次 <strong>{{ completingBatchNo }}</strong> 吗？完成后该批次将不再显示。
           </div>
-        </div>
+          <template #footer>
+            <UiButton variant="outline" @click="showCompleteModal = false">取消</UiButton>
+            <UiButton variant="primary" :disabled="completing" @click="confirmComplete">确定</UiButton>
+          </template>
+        </UiDialog>
       </div>
 
       <!-- 主内容 -->
@@ -89,6 +89,7 @@
 import { ref } from 'vue'
 import UiInput from '@/components/ui/UiInput.vue'
 import UiButton from '@/components/ui/UiButton.vue'
+import UiDialog from '@/components/ui/UiDialog.vue'
 import UiSpinner from '@/components/ui/UiSpinner.vue'
 import BatchGroupList from '@/views/batch/components/BatchGroupList.vue'
 import BatchWhitelistModal from '@/views/batch/components/BatchWhitelistModal.vue'
@@ -269,57 +270,10 @@ const {
   transform: translateY(-1px);
 }
 
-/* ===== 完成批次确认弹窗（复用白名单弹窗样式） ===== */
-.bt-whitelist-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.3);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 100;
-}
-.bt-whitelist-modal {
-  background: white;
-  border-radius: 16px;
-  width: 360px;
-  max-height: 480px;
-  display: flex;
-  flex-direction: column;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
-}
-.bt-whitelist-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 20px;
-  font-size: 15px;
-  font-weight: 700;
-  border-bottom: 1px solid var(--color-border-light);
-}
-.bt-whitelist-close {
-  background: none;
-  border: none;
-  font-size: 20px;
-  color: var(--color-text-muted);
-  cursor: pointer;
-  padding: 0 4px;
-  line-height: 1;
-}
-.bt-whitelist-body {
-  padding: 12px 20px;
-  overflow-y: auto;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.bt-whitelist-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  padding: 12px 20px;
-  border-top: 1px solid var(--color-border-light);
+/* ===== 完成批次确认弹窗（外壳由共享 UiDialog 提供） ===== */
+.bt-complete-body {
+  font-size: 14px;
+  color: var(--color-text);
 }
 
 /* ===== Fetching bar ===== */
@@ -350,5 +304,15 @@ const {
   .bt-filterbar {
     padding: 0 16px 12px;
   }
+}
+</style>
+
+<!-- 卡片与 body 由 UiDialog 渲染并 portal 到 body → 全局维持迁移前的最大高度与内边距 -->
+<style>
+.bt-complete-card {
+  max-height: 480px !important;
+}
+.bt-complete-card > .p-6 {
+  padding: 20px !important;
 }
 </style>
