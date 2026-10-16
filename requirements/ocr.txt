@@ -18,6 +18,16 @@ rapid-table==3.0.0
 # ----- 推理运行时 -----
 onnxruntime==1.22.0
 
+# ----- 传导依赖（显式钉死，勿删） -----
+# omegaconf 是 rapidocr / rapid-table 的传递依赖，两者顶层都
+# `from omegaconf import DictConfig`，import 不了整个 OCR 栈就是坏的。
+# 2.3.x 依赖 antlr4-python3-runtime==4.9.*，而该版本在 PyPI 上只有源码包
+# （无二进制 wheel），按本文件用 pip 重装极易漏掉它 →
+# `ModuleNotFoundError: No module named 'antlr4'`（2026-10-16 生产事故）。
+# 2.4.0 已去掉 antlr4 依赖，故显式钉在 2.4.0：解析器再怎么走也回不到 2.3.x。
+# 回归测试 fastapi_app/tests/test_ocr_stack_importable.py 锁「OCR 栈可导入」。
+omegaconf==2.4.0
+
 # ----- PDF 渲染 -----
 PyMuPDF==1.25.0
 

@@ -117,6 +117,7 @@ numpy==2.5.4
     #   shapely
 omegaconf==2.4.0
     # via
+    #   -r requirements/ocr.txt
     #   rapid-table
     #   rapidocr
 onnxruntime==1.22.0
