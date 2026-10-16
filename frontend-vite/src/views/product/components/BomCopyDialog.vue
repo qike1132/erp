@@ -6,6 +6,7 @@
     overlay-z-class="z-[var(--z-page-modal)]"
     content-z-class="z-[var(--z-page-modal)] copy-bom-modal-card"
     body-class="copy-bom-body"
+    :body-padded="false"
     @update:open="open = $event"
   >
     <template #title>
@@ -189,8 +190,7 @@ const emit = defineEmits<{
   min-height: 620px !important;
 }
 .copy-bom-body {
-  padding: 0 !important;
-  min-height: 0 !important;
-  background: var(--color-surface, #f8fafc) !important;
+  min-height: 0;
+  background: var(--color-surface, #f8fafc);
 }
 </style>

@@ -29,7 +29,7 @@
       max-width-class="max-w-[800px]"
       overlay-z-class="z-[var(--z-page-modal)]"
       content-z-class="z-[var(--z-page-modal)] pd-modal-img-card"
-      body-class="pd-modal-pane"
+      :body-padded="false"
       @update:open="imageModalVisible = $event"
     >
       <template #title>
@@ -184,9 +184,5 @@ function openImageModal(src: string) {
 <style>
 .pd-modal-img-card {
   border-radius: 18px !important;
-}
-/* body 由 UiDialog 渲染：清掉它自带的 p-6，只留图片区自己的 20px 内边距，避免双层留白 */
-.pd-modal-pane {
-  padding: 0 !important;
 }
 </style>

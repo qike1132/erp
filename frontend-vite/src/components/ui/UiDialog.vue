@@ -40,7 +40,7 @@
             <FontAwesomeIcon icon="times" aria-hidden="true" />
           </DialogClose>
         </div>
-        <div :class="['p-6 overflow-y-auto flex-1 overscroll-contain', bodyClass]">
+        <div :class="['overflow-y-auto flex-1 overscroll-contain', { 'p-6': bodyPadded }, bodyClass]">
           <slot />
         </div>
         <div v-if="$slots.footer" class="px-6 py-4 border-t border-border-light flex justify-end gap-2">
@@ -67,10 +67,14 @@ const props = withDefaults(
     contentZClass?: string
     /**
      * 额外加到 body 容器的 class。内容经 DialogPortal 渲染到 body，调用方的 scoped 样式
-     * 够不到 body 容器；需要覆盖 body 的内边距/背景时用这个钩子，**不要**去改 UiDialog 内部的
-     * `p-6` 类名（那是实现细节，改了会静默失效）。
+     * 够不到 body 容器；需要覆盖 body 的背景/内边距时用这个钩子。
      */
     bodyClass?: string
+    /**
+     * body 是否带内置内边距（`p-6`），默认 true。需要自定义内边距时传 false —— 否则
+     * 得跟内置 `p-6` 抢优先级（只能靠全局 `!important`，且 UiDialog 改 `p-6` 会静默失效）。
+     */
+    bodyPadded?: boolean
     /**
      * 点击遮罩/空白处是否关闭弹窗。
      * 默认 **false**（2026-10-14 全站约定）：误点空白会丢掉已填内容，故一律不关，
@@ -83,6 +87,7 @@ const props = withDefaults(
     overlayZClass: 'z-[var(--z-overlay)]',
     contentZClass: 'z-[var(--z-modal)]',
     bodyClass: undefined,
+    bodyPadded: true,
     closeOnOverlayClick: false,
     title: undefined,
     srTitle: undefined,

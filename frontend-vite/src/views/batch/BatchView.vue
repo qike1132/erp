@@ -38,6 +38,7 @@
           overlay-z-class="z-[var(--z-page-modal)]"
           content-z-class="z-[var(--z-page-modal)] bt-complete-card"
           body-class="bt-complete-pane"
+          :body-padded="false"
           @update:open="showCompleteModal = $event"
         >
           <div class="bt-complete-body">
@@ -315,6 +316,6 @@ const {
   max-height: 480px !important;
 }
 .bt-complete-pane {
-  padding: 20px !important;
+  padding: 20px;
 }
 </style>

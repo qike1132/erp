@@ -161,4 +161,43 @@ describe('PartFieldCombobox', () => {
     expect(panel).toBeTruthy()
     expect(getComputedStyle(panel).pointerEvents).toBe('auto')
   })
+
+  /**
+   * 回归（OCR finding 2026-10-16）：options 异步缩短后 highlight 可能越界，
+   * 旧实现 `filtered.value[highlight.value]!` 用非空断言把真实的 undefined 藏起来，
+   * Enter 时 choose(undefined) → displayOf 抛 TypeError。修法：用 min 夹住索引。
+   */
+  it('回归：options 缩短致 highlight 越界时，Enter 夹到有效项、不抛错', async () => {
+    const w = mountBox({
+      options: [
+        { value: 'A', count: 1 },
+        { value: 'B', count: 1 },
+        { value: 'C', count: 1 },
+      ],
+    })
+    const input = w.find('input')
+    await input.trigger('focus')
+    await nextTick()
+    await input.trigger('keydown.down')
+    await input.trigger('keydown.down') // highlight = 2
+    await w.setProps({ options: [{ value: 'A', count: 1 }] }) // filtered 缩到 1，highlight 仍为 2
+    await nextTick()
+    await input.trigger('keydown.enter') // 越界：应夹到 index 0
+    expect(w.emitted('update:modelValue')?.at(-1)).toEqual(['A'])
+  })
+
+  /**
+   * 回归（OCR finding 2026-10-16）：面板此前只由 Esc / 外部 mousedown / 滚动 / resize 关闭，
+   * 无 @blur —— 键盘 Tab 移走焦点（不触发 mousedown）时面板不关，多行会各自叠开。
+   */
+  it('回归：焦点离开输入框（blur）即关面板', async () => {
+    const w = mountBox()
+    const input = w.find('input')
+    await input.trigger('focus')
+    await nextTick()
+    expect(panelEl()).toBeTruthy()
+    await input.trigger('blur')
+    await nextTick()
+    expect(panelEl()).toBeFalsy()
+  })
 })

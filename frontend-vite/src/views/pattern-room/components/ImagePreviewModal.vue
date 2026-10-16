@@ -8,10 +8,11 @@
     不把 image 语义泄漏给 UiDialog。
   -->
   <UiDialog
-    :open="image !== null"
+    :open="!!image"
     max-width-class="max-w-[800px]"
     overlay-z-class="z-[var(--z-page-modal)]"
     content-z-class="z-[var(--z-page-modal)] pim-card"
+    :body-padded="false"
     @update:open="onOpenChange"
   >
     <template #title>
@@ -46,7 +47,7 @@ function onOpenChange(open: boolean) {
 .pim-title { font-size: 14px; font-weight: 700; color: var(--color-text); }
 .pim-body {
   display: flex; align-items: center; justify-content: center;
-  min-height: 50vh; background: var(--color-surface, #f8fafc);
+  min-height: 50vh; padding: 20px; background: var(--color-surface, #f8fafc);
   border-radius: 12px;
 }
 .pim-img-view {

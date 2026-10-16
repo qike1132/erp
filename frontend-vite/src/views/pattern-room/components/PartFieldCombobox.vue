@@ -14,6 +14,7 @@
       @focus="handleOpen"
       @click="handleOpen"
       @input="onInput"
+      @blur="handleBlur"
       @keydown.down.prevent="move(1)"
       @keydown.up.prevent="move(-1)"
       @keydown.enter.prevent="chooseHighlighted"
@@ -130,6 +131,15 @@ function handleClose() {
   open.value = false
 }
 
+/** 焦点离开本组件（Tab / 程序化移焦）时关面板。选项已用 @mousedown.prevent 保焦点，
+    所以点选不会走到这里；仅当焦点确实移到 root/panel 之外才关（relatedTarget 为 null
+    说明没落到具体元素上，同样关）。 */
+function handleBlur(e: FocusEvent) {
+  const next = e.relatedTarget as Node | null
+  if (next && (rootRef.value?.contains(next) || panelRef.value?.contains(next))) return
+  open.value = false
+}
+
 function choose(opt: CandidateOption) {
   text.value = displayOf(opt)
   emit('update:modelValue', text.value)
@@ -138,7 +148,10 @@ function choose(opt: CandidateOption) {
 
 function chooseHighlighted() {
   if (!open.value || !filtered.value.length) return
-  choose(filtered.value[highlight.value]!)
+  // highlight 可能在 filtered 缩短后越界（options 异步替换 / modelValue 回写重算）：
+  // 用 min 夹住，别让 `!` 把真实的 undefined 藏起来（choose → displayOf 会抛）。
+  const opt = filtered.value[Math.min(highlight.value, filtered.value.length - 1)]
+  if (opt) choose(opt)
 }
 
 function move(delta: number) {

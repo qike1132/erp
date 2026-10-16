@@ -372,6 +372,6 @@ defineExpose({ open })
 }
 /* body 由 UiDialog 渲染：恢复迁移前的浅灰底（原 .bom-modal-body 的 background） */
 .edit-modal-pane {
-  background: var(--color-surface, #f8fafc) !important;
+  background: var(--color-surface, #f8fafc);
 }
 </style>

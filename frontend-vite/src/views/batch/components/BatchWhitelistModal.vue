@@ -7,6 +7,7 @@
     overlay-z-class="z-[var(--z-page-modal)]"
     content-z-class="z-[var(--z-page-modal)] bt-whitelist-card"
     body-class="bt-whitelist-pane"
+    :body-padded="false"
     @update:open="showWhitelistModal = $event"
   >
     <div class="bt-whitelist-body">
@@ -107,6 +108,6 @@ async function saveWhitelist() {
   max-height: 480px !important;
 }
 .bt-whitelist-pane {
-  padding: 12px 20px !important;
+  padding: 12px 20px;
 }
 </style>
