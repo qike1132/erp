@@ -559,7 +559,7 @@ New-NetFirewallRule -DisplayName "erp-web-443"  -Direction Inbound -Protocol TCP
 
 ### 4.13 安装五个 Windows 服务
 
-**首选：管理器 GUI**（`python server_manager.py` 或已打包的 `ERP服务器管理器_v5.35.exe`，需管理员）：
+**首选：管理器 GUI**（`python server_manager.py` 或已打包的 `ERP服务器管理器_v5.40.exe`，需管理员）：
 
 1. 打开管理器 → 「安装服务」→ 它按当前 Worker 数安装 **erp-prod / erp-arq / erp-web**，
    自动写入环境变量（`APP_ENV=production`、`PYTHONPATH`、`PYTHONUTF8`、`PYTHONUNBUFFERED`、`UVICORN_WORKERS`）

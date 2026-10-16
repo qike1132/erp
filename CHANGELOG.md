@@ -1,5 +1,37 @@
 # 变更日志 (Changelog)
 
+## [2026-10-16] 服务器管理器 v5.40：退出进程孤儿 / 紧急停止窗口 / 跨线程 Tk 等审计修复
+
+两轮修复合并发版（2026-10-15 审计修复 `4169aa03` + 2026-10-16 结构评审修复 `1dd4de90`）。
+
+### 🔴 修复（高危）
+- **退出进程孤儿**：`_do_quit` 旧实现只杀后端、不碰 `_frontend_process`（开发模式退出后 vite 残留 :3000）、且经守护线程起 taskkill 会被解释器关闭掐断（竞态）；退出瞬间有动作在飞时闸门直接拒绝、后端+前端+直接拉起的 Redis 三重孤儿。改为同步 `terminate_dev_processes` + `_stop_redis`，且先 `gate.cancel` + `wait_idle`（H2：不取消在飞动作的话，启动 worker 会继续 Popen 进程然后被掐断，照样孤儿）。
+- **开发模式健康检查吃系统代理**：两处 `127.0.0.1` 探测用裸 `urlopen`（constants 已实证的事故模式：代理转发本机探测间歇假失败 → 误杀刚拉起的进程），改 `_HTTP_DIRECT` 直连 opener。
+
+### 🟡 修复（中危——「紧急停止窗口」一族）
+- **M1**：紧急停止清扫期（可达数十秒）按钮全可点，此时点启动 `gate.start` 会 clear 掉取消标志、与清扫并发互踩。清扫期置灰全部操作按钮，`stop_all_done`（成功/异常两路）复位。
+- **M3/L4**：`_prod_running` 双写方，滞留的采集结果在清扫期翻回 True 与停止矛盾；`_mode` 直落 'none' 让徽章谎报「已停止」。加 `_stopping_all` 标志丢弃窗口内采集轮（放弃型助手 `_apply_stopping_all` 全徽章置「状态未知」），mode 走 'stopping' 过渡态。
+- **M2**：`sc query` 漏在 Tk 主线程渲染阶段（5s 超时冻界面），`web_svc_state` 挪进采集阶段。
+- **M4**：`log_message` 从 worker 线程调 `root.after_idle`（跨线程碰 Tk，间歇崩溃经典来源），flush 改经 `log_flush` 消息队列回主线程派发。
+- **开发卡补「停止」按钮**：v5.33 卡片改版把停止按钮丢了，`stop_dual_dev` 成了 UI 不可达死方法，只能靠「紧急停止」（连 Redis 一起停）间接停开发。补按钮（仅运行中可用）。
+
+### 🟢 修复（低危清理）
+- `wait_service_stopped` 在 nssm 缺失时把 None 塞 argv 被 run_capture 吞成 -1（停止命令根本没发出），补 `sc stop` 回退。
+- `read_frontend_stdout` 退出后不关 stdout（句柄悬到 GC），补 try/finally。
+- `stop_dual_flow` 作为闸门 worker 全程无 checkpoint，补步骤边界。
+- Worker 数读取默认 20s 超时且在主线程跑（nssm 卡住冻界面），主线程读现状改走 3s 限时通道。
+- 删 9 个全仓零引用死转发（含上轮漏网的 `_find_redis`）；`_log_size`/`_read_log_lines` 收编 log_ops；`decode_output` 提为模块级纯函数（log_ops 不再依赖整个 ServiceOps）。
+- 生产卡「停止/重启」随 `_prod_running` 联动；环境检查告警去 `after(500)`；裁剪首帧装饰动画（低配机拖累）。
+
+### ✅ 验证
+- server_manager 全家 161 passed（新增 `tests/test_sm_audit_2026_10_15.py` 29 条，含 sc 回退/日志尾部读取/解码器行为级验证；既有 backup_badge 契约在 M3 第一版上真实拦截「丢弃不置灰」，按契约补弃型助手）。
+- `quality_gate.py` PASS（ruff 棘轮累计净减 13）；app.py 违规数与改前基线持平。
+- app.py 1525 → 1473 行。
+
+### 🏗️ 打包
+- 版本号 `v5.35 → v5.40`（`constants._VERSION` + `server_manager.spec` 产物名 + `docs/PROJECT_MANUAL.md` 现行版本表述）。
+- `.venv` 里没有 PyInstaller，重打包用系统 Python（已装 6.19.0），且需先退出正在运行的管理器 exe（文件被占用写不进去）。产物 `dist/ERP服务器管理器_v5.40.exe`。
+
 ## [2026-10-13] 服务器管理器 v5.35：修复「点重启后 erp-prod 起不来」
 
 ### 🔴 修复：重启后服务停在 STOPPED，必须手点「启动」才能恢复

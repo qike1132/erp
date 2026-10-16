@@ -1,5 +1,5 @@
 """
-ERP 服务器管理器 GUI（版本号唯一真源见 server_manager.constants 的 _VERSION，当前 v5.35）
+ERP 服务器管理器 GUI（版本号唯一真源见 server_manager.constants 的 _VERSION，当前 v5.40）
 功能:
   - 一键启动前后端：同时启动 FastAPI 后端 + Vue/Vite 前端 + Redis服务
   - 一键重启：停止所有进程和端口，然后重新启动服务
