@@ -99,6 +99,7 @@ def test_probe_reaches_a_live_local_server(live_health_server):
 def test_direct_and_proxied_both_work_without_proxy(live_health_server):
     """本机无代理时两种 opener 都应通（排除「只有直连能通」的过度断言）。"""
     import urllib.request
+
     from server_manager.constants import _HTTP_DIRECT
     assert _HTTP_DIRECT.open(f"http://127.0.0.1:{live_health_server}/", timeout=2).status == 200
     assert urllib.request.urlopen(f"http://127.0.0.1:{live_health_server}/", timeout=2).status == 200
