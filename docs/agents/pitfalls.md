@@ -139,6 +139,36 @@ PGDG 源再装（`.github/workflows/ci-cd.yml` 该步注释 + 提交 `7ae03d14`�
 
 ---
 
+## 12. 清理「死代码」时，前缀 grep 会命中夹在中间的**活**名字
+
+2026-10-16 实测（server_manager v5.40）：删 `app.py` 里「零引用 Redis 转发」时，
+用 `grep -E "_start_redis_via_service|_start_redis_process"` 挑名字。这两个确实是死转发，
+但**夹在它们中间、同样以 `_start_redis` 开头的 `_start_redis()` 是活转发** ——
+它在 `_start_services_flow`（启动生产服务）里有真实调用点，被一并删掉。
+后果：点「启动服务」必崩 `AttributeError: '_start_redis'`（生产启动流程 100% 失效）。
+
+正解：**逐个名字**统计调用点，且用词边界锚定，别用一串 `|` 前缀模式一把梭：
+
+```bash
+for n in _start_redis _get_env_value _redis_ping; do
+  grep -rn "self\.$n\b" --include="*.py" server_manager/ tests/ | grep -v "def $n"
+done
+```
+
+`_start_redis\b` 的词边界让 `_start_redis_via_service` 不再误配；逐个跑才能看出谁活谁死。
+（本次同批 9 个转发里只有这 1 个是活的——**前缀越接近，越容易漏**。）
+
+## 13. 换 API 前先确认被调用对象的**类型**有没有那方法
+
+同次事故的第二半：为绕开系统代理，把探测从裸 `urllib.request.urlopen` 换成
+`_HTTP_DIRECT.urlopen(...)`。`_HTTP_DIRECT` 是 `build_opener(ProxyHandler({}))` 的产物，
+类型 `OpenerDirector`——它**只有 `.open`，没有 `.urlopen`**（native urlopen 与 opener 实例
+的 API 不同名）。探测每次必抛 `AttributeError`，又被外层 `except Exception` 吞掉，
+表现成「30 次探测全失败 → 杀掉已 startup complete 的健康后端」。
+
+正解：调用前先证方法存在，或直接用 `.open`（同仓 `hosting_view.py:87` 用的正是 `.open，
+照抄即可）。**被 `except` 吞掉的异常不会消失，只会变成更贵的行为缺陷。**
+
 ## 关联
 
 - 运维护栏（红线之外的第二道人防）在 `AGENTS.md` §6.1——**常驻**，动手前必看。
