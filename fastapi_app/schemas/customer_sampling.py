@@ -73,6 +73,25 @@ class PartListResponse(BaseModel):
     items: list[PartDetail] = Field(default_factory=list)
 
 
+class FieldCandidateValue(BaseModel):
+    """单个历史候选值（板房部位字段的历史录入去重值）
+
+    value 为 trim 后的展示值；count 为该值（trim + 忽略大小写归并后）的历史使用次数。
+    """
+    value: str
+    count: int
+
+
+class FieldCandidatesResponse(BaseModel):
+    """部位字段历史候选响应（按字段名分组）
+
+    fields 为「字段名 -> 候选列表」；只包含请求的字段（未请求的键不出现）。
+    字段名白名单与前端 PartEditableKey 同源，见 endpoint 的 _CANDIDATE_FIELDS。
+    """
+    success: bool = True
+    fields: dict[str, list[FieldCandidateValue]] = Field(default_factory=dict)
+
+
 class PartsByVersionResponse(BaseModel):
     """部位跨版本汇总响应（部位+版本二维表数据源）"""
     success: bool = True

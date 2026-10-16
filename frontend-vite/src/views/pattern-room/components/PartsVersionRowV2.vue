@@ -33,8 +33,17 @@
       <span v-else>-</span>
     </td>
     <td v-for="field in PART_EDIT_FIELDS" :key="field.key">
+      <PartFieldCombobox
+        v-if="editingPartId === part.id && field.historyCandidates"
+        v-model="editForm[field.key]"
+        input-class="pvt-inline-input"
+        :options="candidatesFor(field.key)"
+        :placeholder="field.placeholder"
+        :maxlength="field.inlineMaxlength"
+        :empty-hint="field.historyCandidates.hint"
+      />
       <input
-        v-if="editingPartId === part.id"
+        v-else-if="editingPartId === part.id"
         v-model="editForm[field.key]"
         class="pvt-inline-input"
         :placeholder="field.placeholder"
@@ -99,6 +108,7 @@
 <script setup lang="ts">
 import type { PartDetail } from '@/api/patternRoom'
 import type { GroupedRow } from '../composables/usePartsVersionFilter'
+import PartFieldCombobox from './PartFieldCombobox.vue'
 import { PART_EDIT_FIELDS, injectPartInlineEdit } from '../composables/usePartInlineEdit'
 
 defineProps<{
@@ -109,7 +119,7 @@ defineProps<{
 
 // 编辑态（editingPartId / editForm / startEdit / saveEdit / cancelEdit）经
 // provide/inject 直连，避免经 ProjectDetailPanel、PartsVersionTableV2 两层透传
-const { editingPartId, editForm, startEdit, saveEdit, cancelEdit } = injectPartInlineEdit()
+const { editingPartId, editForm, startEdit, saveEdit, cancelEdit, candidatesFor } = injectPartInlineEdit()
 
 defineEmits<{
   'toggle-expand': [partName: string]

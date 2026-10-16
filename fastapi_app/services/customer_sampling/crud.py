@@ -9,6 +9,7 @@ from fastapi_app.services.customer_sampling.parts import (
     copy_part_version,
     create_part,
     delete_part,
+    get_part_field_candidates,
     list_parts,
     update_part,
 )

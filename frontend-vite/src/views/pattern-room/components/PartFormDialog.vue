@@ -2,8 +2,17 @@
 import { ref, computed, watch } from 'vue'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import UiButton from '@/components/ui/UiButton.vue'
+import PartFieldCombobox from './PartFieldCombobox.vue'
 import type { BatchPartCreateRequest } from '@/api/patternRoom'
-import { PART_EDIT_FIELDS, createEmptyEditData, type PartEditData } from '../composables/usePartInlineEdit'
+import {
+  PART_EDIT_FIELDS,
+  createEmptyEditData,
+  injectPartInlineEdit,
+  type PartEditData,
+} from '../composables/usePartInlineEdit'
+
+// 候选来源经页面级 provide 下发（PatternRoomView），此处只消费不加载。
+const { candidatesFor } = injectPartInlineEdit()
 
 /**
  * 批量新增部位表单行。
@@ -131,7 +140,17 @@ function closeDialog() {
             class="batch-part-form__cell"
             :class="`batch-part-form__cell--${field.modifier}`"
           >
+            <PartFieldCombobox
+              v-if="field.historyCandidates"
+              v-model="row[field.key]"
+              class="batch-part-input"
+              :options="candidatesFor(field.key)"
+              :placeholder="field.placeholder"
+              :maxlength="field.formMaxlength"
+              :empty-hint="field.historyCandidates.hint"
+            />
             <input
+              v-else
               v-model="row[field.key]"
               class="batch-part-input"
               :placeholder="field.placeholder"

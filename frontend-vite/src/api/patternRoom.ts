@@ -6,7 +6,7 @@
  * 后端 schema:   fastapi_app/schemas/customer_sampling.py
  *
  * 保持导出名 `patternRoomApi` 不变以兼容 `api/index.ts`。
- * 内部完全重写为面向"客户分组 + 部位布料 + 版本快照"扁平结构的 22 个 API 方法。
+ * 内部完全重写为面向"客户分组 + 部位布料 + 版本快照"扁平结构的 23 个 API 方法。
  */
 import { get, post, put, del, upload } from './request'
 
@@ -68,6 +68,26 @@ export interface PartDetail {
 export interface PartListResponse {
   success: boolean
   items: PartDetail[]
+}
+
+/** 单个历史候选值（板房已录字段值 trim + 忽略大小写归并后的结果） */
+export interface PartFieldCandidateValue {
+  /** trim 后的展示值 */
+  value: string
+  /** 历史使用次数（归并后累加） */
+  count: number
+}
+
+/** 部位字段历史候选查询参数（fields 缺省 supplier_name,fabric_name） */
+export interface PartFieldCandidatesParams {
+  fields?: string
+  limit?: number
+}
+
+/** 部位字段历史候选响应（按字段名分组，只含请求的字段） */
+export interface PartFieldCandidatesResponse {
+  success: boolean
+  fields: Record<string, PartFieldCandidateValue[]>
 }
 
 /** 部位跨版本汇总响应 */
@@ -471,4 +491,11 @@ export const patternRoomApi = {
   // ---------- 21. 删除角色 ----------
   deleteRole: (roleId: number) =>
     del<ActionResponse>(`/pattern-room/roles/${roleId}`),
+
+  // ---------- 22. 部位字段历史候选 ----------
+  getPartFieldCandidates: (params?: PartFieldCandidatesParams) =>
+    get<PartFieldCandidatesResponse>(
+      '/pattern-room/part-field-candidates',
+      params as Record<string, unknown> | undefined,
+    ),
 }

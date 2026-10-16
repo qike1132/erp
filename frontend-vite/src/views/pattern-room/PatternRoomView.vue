@@ -133,6 +133,7 @@ import { usePatternRoomPartActions } from './composables/usePatternRoomPartActio
 import { usePatternRoomLayout } from './composables/usePatternRoomLayout'
 import { usePatternRoomGroupFilter } from './composables/usePatternRoomGroupFilter'
 import { providePartInlineEdit } from './composables/usePartInlineEdit'
+import { usePartFieldCandidates } from './composables/usePartFieldCandidates'
 
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { usePermission } from '@/composables/usePermission'
@@ -168,9 +169,14 @@ const {
 
 const { isNarrow, drawerOpen } = usePatternRoomLayout()
 
+// 板房字段历史候选（供应商/布料名称）：页面级拉一次并缓存，
+// 经 providePartInlineEdit 下发给批量表单与行内编辑，避免每行各发请求。
+const partCandidates = usePartFieldCandidates()
+
 onMounted(() => {
   groupHook.loadGrouped(searchKeyword.value || undefined, 'in_progress', 1)
   loadPatternMakers()
+  partCandidates.load()
 })
 
 // keep-alive 场景下的返回静默校验（不替代 onMounted，而是互补）：
@@ -262,6 +268,7 @@ providePartInlineEdit({
   startEdit: onStartEdit,
   saveEdit: onSaveEdit,
   cancelEdit: onCancelEdit,
+  candidatesFor: (key) => partCandidates.get(key),
 })
 
 watch(selectedProjectId, (newId) => {

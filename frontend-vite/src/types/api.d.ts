@@ -1126,6 +1126,16 @@ export interface FactorySummarySaveRequest {
   spare_rate?: number | null
 }
 
+export interface FieldCandidateValue {
+  value: string
+  count: number
+}
+
+export interface FieldCandidatesResponse {
+  success?: boolean
+  fields?: Record<string, Array<FieldCandidateValue>>
+}
+
 export interface FieldDiff {
   field: string
   old?: unknown

@@ -19,7 +19,7 @@ from fastapi_app.shared_models import Permission, User
 _READ_CODES = ('customer_sampling_view', 'customer_sampling_manage')
 _PREFIX = '/api/v1/pattern-room'
 
-# (router 内的相对路径, 测试用 HTTP 路径) —— 9 个 GET，与方案列出的 9 个读端点一一对应
+# (router 内的相对路径, 测试用 HTTP 路径) —— 与下方列出的读端点一一对应
 _GET_ROUTES = [
     ('/grouped-list', '/api/v1/pattern-room/grouped-list'),
     ('/projects', '/api/v1/pattern-room/projects'),
@@ -30,6 +30,7 @@ _GET_ROUTES = [
     ('/projects/{project_id}/change-logs', '/api/v1/pattern-room/projects/1/change-logs'),
     ('/projects/{project_id}/parts-by-version', '/api/v1/pattern-room/projects/1/parts-by-version'),
     ('/projects/{project_id}/roles', '/api/v1/pattern-room/projects/1/roles'),
+    ('/part-field-candidates', '/api/v1/pattern-room/part-field-candidates'),
 ]
 _HTTP_PATHS = [http for _rel, http in _GET_ROUTES]
 
@@ -93,8 +94,8 @@ def _fake_request():
     })
 
 
-def test_router_still_exposes_exactly_the_nine_read_endpoints():
-    """护栏：本用例覆盖的就是方案点名的 9 个 GET，增删读端点必须同步改测试。"""
+def test_router_still_exposes_exactly_the_listed_read_endpoints():
+    """护栏：本用例覆盖的就是 _GET_ROUTES 点名的读端点，增删读端点必须同步改测试。"""
     gets = sorted(
         route.path
         for route in cs.router.routes
@@ -105,7 +106,7 @@ def test_router_still_exposes_exactly_the_nine_read_endpoints():
 
 @pytest.mark.parametrize('rel_path,http_path', _GET_ROUTES)
 def test_every_get_route_is_bound_to_read_permission(rel_path, http_path):
-    """9 个 GET 都必须挂 require_any_permission(读码, 管理码)。"""
+    """全部列出的 GET 都必须挂 require_any_permission(读码, 管理码)。"""
     checkers = _read_checkers(_router_get(rel_path))
     assert checkers, f'{rel_path} 上没有 require_any_permission 依赖（读接口对任何登录用户裸奔）'
     for _call, names in checkers:

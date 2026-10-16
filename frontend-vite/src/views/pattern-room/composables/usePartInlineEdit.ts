@@ -1,5 +1,5 @@
 import { inject, provide, reactive, ref, watch, type InjectionKey, type Ref } from 'vue'
-import type { PartDetail } from '@/api/patternRoom'
+import type { PartDetail, PartFieldCandidateValue } from '@/api/patternRoom'
 
 /**
  * 部位可编辑字段元数据 —— 单一事实来源（CP-1）
@@ -28,6 +28,16 @@ export interface PartFieldMeta {
   modifier: 'supplier' | 'fabric' | 'color'
   /** 二维表 colgroup 列宽 */
   width: string
+  /**
+   * 该字段是否带「板房历史候选」下拉。
+   * 声明后，批量表单与行内编辑的该列自动渲染为带候选回填的输入框
+   * （候选由后端 GET /pattern-room/part-field-candidates 按 key 提供）。
+   * 不给色号等字段声明即保持纯文本。以后开新字段下拉只需在此加一行
+   * + 后端 _CANDIDATE_FIELDS 加一行（两处同源）。
+   *
+   * hint 为「未匹配」时的空态提示后半句。
+   */
+  historyCandidates?: { hint: string }
 }
 
 /** 部位可编辑字段，顺序即各表格/表单中的列顺序 */
@@ -40,6 +50,7 @@ export const PART_EDIT_FIELDS: readonly PartFieldMeta[] = [
     inlineMaxlength: 200,
     modifier: 'supplier',
     width: '110px',
+    historyCandidates: { hint: '保存后将自动记录' },
   },
   {
     key: 'fabric_name',
@@ -49,6 +60,7 @@ export const PART_EDIT_FIELDS: readonly PartFieldMeta[] = [
     inlineMaxlength: 200,
     modifier: 'fabric',
     width: '110px',
+    historyCandidates: { hint: '保存后将自动记录' },
   },
   {
     key: 'fabric_color_no',
@@ -88,6 +100,12 @@ export interface PartInlineEditContext {
   startEdit: (part: PartDetail) => void
   saveEdit: (part: PartDetail) => void
   cancelEdit: () => void
+  /**
+   * 取某部位字段的历史候选数组（板房已录值，供 PartFieldCombobox）。
+   * 由页面级宿主（PatternRoomView）提供候选来源并注入；无候选/未加载时返回空数组
+   * （此时 PartFieldCombobox 退化为纯文本输入，仍可自由录入新值）。
+   */
+  candidatesFor: (key: PartEditableKey) => PartFieldCandidateValue[]
 }
 
 export const PART_INLINE_EDIT_KEY: InjectionKey<PartInlineEditContext> = Symbol('partInlineEdit')

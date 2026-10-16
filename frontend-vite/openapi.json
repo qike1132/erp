@@ -19616,6 +19616,72 @@
         }
       }
     },
+    "/api/v1/pattern-room/part-field-candidates": {
+      "get": {
+        "tags": [
+          "板房管理"
+        ],
+        "summary": "Api Get Part Field Candidates",
+        "description": "部位字段历史候选值（板房已录供应商/布料名称去重统计，供录入框候选回填）\n\n纯只读：不建表、不加外键、无迁移。候选只取板房自己录过的值，\n不合并供应商主数据。",
+        "operationId": "api_get_part_field_candidates_api_v1_pattern_room_part_field_candidates_get",
+        "parameters": [
+          {
+            "name": "fields",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "需要的字段名（逗号分隔，白名单内；缺省 supplier_name,fabric_name）",
+              "title": "Fields"
+            },
+            "description": "需要的字段名（逗号分隔，白名单内；缺省 supplier_name,fabric_name）"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "每组返回条数上限",
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "每组返回条数上限"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FieldCandidatesResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/pattern-maker/pattern-makers": {
       "get": {
         "tags": [
@@ -25863,6 +25929,47 @@
         "type": "object",
         "title": "FactorySummarySaveRequest",
         "description": "保存工厂订单编辑请求。\n\n- `edits` 允许为空：损耗率输入框在非编辑态即可交互，用户可能「只改了损耗率、\n  没有任何布料改动」，此时仅靠 `order_ids` + `spare_rate` 也要能落库。\n- `order_ids`：本次汇总涉及的采购单 ID 列表，用于在无编辑项时定位要写入备品的采购单。\n- `spare_rate`：对该次涉及的所有采购单覆盖写的损耗率（千分之几）；`None` 表示不覆盖。"
+      },
+      "FieldCandidateValue": {
+        "properties": {
+          "value": {
+            "type": "string",
+            "title": "Value"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "value",
+          "count"
+        ],
+        "title": "FieldCandidateValue",
+        "description": "单个历史候选值（板房部位字段的历史录入去重值）\n\nvalue 为 trim 后的展示值；count 为该值（trim + 忽略大小写归并后）的历史使用次数。"
+      },
+      "FieldCandidatesResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "default": true
+          },
+          "fields": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/components/schemas/FieldCandidateValue"
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Fields"
+          }
+        },
+        "type": "object",
+        "title": "FieldCandidatesResponse",
+        "description": "部位字段历史候选响应（按字段名分组）\n\nfields 为「字段名 -> 候选列表」；只包含请求的字段（未请求的键不出现）。\n字段名白名单与前端 PartEditableKey 同源，见 endpoint 的 _CANDIDATE_FIELDS。"
       },
       "FieldDiff": {
         "properties": {

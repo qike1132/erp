@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -333,6 +334,80 @@ async def batch_create_parts(
         project_id, role_id, len(created_ids), created_ids,
     )
     return {'ids': created_ids, 'count': len(created_ids)}
+
+# 候选字段白名单：与前端 PartEditableKey（usePartInlineEdit.ts）同源维护。
+# 开新字段下拉时两边都要加（元数据一行 + 这里一行），不要只改一处。
+_CANDIDATE_FIELDS: dict[str, Any] = {
+    'supplier_name': CustomerSamplingPart.supplier_name,
+    'fabric_name': CustomerSamplingPart.fabric_name,
+}
+
+
+async def get_part_field_candidates(
+    db: AsyncSession,
+    *,
+    fields: tuple[str, ...] = ('supplier_name', 'fabric_name'),
+    limit: int = 50,
+) -> dict:
+    """部位字段历史候选值（板房已录值的去重统计，只读）
+
+    背景：supplier_name / fabric_name 是自由文本，无主数据表、无唯一约束，
+    同一供应商/布料在多个 SKU 上反复出现。本函数把板房历史录入值 trim + 忽略大小写
+    归并后按使用次数降序返回，供前端录入框做候选回填。
+
+    LIMIT 位置（关键）：SQL 不设 LIMIT。因为 ' 美利达' / '美利达 ' / 'MEILIDA'
+    是三个 GROUP BY 组各占一个名额，SQL 先截断会把归并后的高频真值挤出候选。
+    故：SQL 全量 group → Python 归并累加 → 排序 → 再截断。两列 distinct 值远小于
+    表行数，全量拉回无内存风险。
+
+    Args:
+        fields: 需要的字段名（白名单内），未请求的字段不查询、不出现在返回里
+        limit: 每组返回条数上限
+
+    Returns:
+        {'success': True, 'fields': {字段名: [{'value': str, 'count': int}, ...]}}
+    """
+    unknown = [f for f in fields if f not in _CANDIDATE_FIELDS]
+    if unknown:
+        raise ValueError(f'不支持的候选字段: {unknown}')
+
+    out: dict[str, list[dict[str, Any]]] = {}
+    for name in fields:
+        col = _CANDIDATE_FIELDS[name]
+        # 遍历固定白名单 _CANDIDATE_FIELDS（当前 2 项，不随业务数据增长），非数据量 N+1。
+        rows = (await db.execute(  # batch-loop: 固定字段白名单逐字段独立 group_by，N 恒=字段数
+            select(col, func.count())
+            .where(col.isnot(None))
+            .group_by(col)
+        )).all()
+
+        # 以 trim 后小写为键归并：同值（含首尾空格/大小写差异）只留一条，count 累加；
+        # 显示值取该组内单变体次数最多的原始写法，且输出前 trim（不回填空格变体）。
+        merged: dict[str, dict[str, Any]] = {}
+        for raw_value, count in rows:
+            if raw_value is None:
+                continue
+            trimmed = raw_value.strip()
+            if not trimmed:
+                continue
+            key = trimmed.lower()
+            entry = merged.get(key)
+            if entry is None:
+                merged[key] = {'value': trimmed, 'count': count, '_best': count}
+            else:
+                entry['count'] += count
+                if count > entry['_best']:
+                    entry['_best'] = count
+                    entry['value'] = trimmed
+
+        ordered = sorted(
+            ({'value': e['value'], 'count': e['count']} for e in merged.values()),
+            key=lambda it: (-it['count'], it['value']),
+        )
+        out[name] = ordered[:limit]
+
+    return {'success': True, 'fields': out}
+
 
 async def list_parts(db: AsyncSession, project_id: int, *, role_id: int | None = None) -> dict:
     """部位列表查询（按 sort_order 升序，含布料信息）

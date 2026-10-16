@@ -23,6 +23,7 @@ from fastapi_app.schemas.customer_sampling import (
     ActionResponse,
     BatchPartCreateRequest,
     ChangeLogListResponse,
+    FieldCandidatesResponse,
     GroupedListResponse,
     PartCreateRequest,
     PartListResponse,
@@ -71,6 +72,10 @@ PERM = 'customer_sampling_manage'
 # scripts/add_dev_dept_nav.py 给开发部的发放），故现有角色访问不受影响；
 # 将来新增只读角色时只发 customer_sampling_view 即可读到本模块数据。
 READ_PERM = 'customer_sampling_view'
+
+# 候选字段白名单：与 services/customer_sampling/parts.py 的 _CANDIDATE_FIELDS、
+# 前端 PartEditableKey（usePartInlineEdit.ts）同源维护。开新字段下拉三处都要加。
+_CANDIDATE_FIELDS = ('supplier_name', 'fabric_name')
 
 
 # ==================== 1. 按客户分组聚合查询 ====================
@@ -487,6 +492,32 @@ async def api_update_role(
             user_id=current_user.id,
         )
     return success_response(**{'message': '更新成功', **result})
+
+
+# ==================== 21. 部位字段历史候选 ====================
+
+@router.get('/part-field-candidates', response_model=FieldCandidatesResponse)
+@_svc_error_guard('查询失败')
+async def api_get_part_field_candidates(
+    fields: str | None = Query(
+        None,
+        description='需要的字段名（逗号分隔，白名单内；缺省 supplier_name,fabric_name）',
+    ),
+    limit: int = Query(50, ge=1, le=100, description='每组返回条数上限'),
+    db: AsyncSession = Depends(get_read_db),
+    _read_perm: User = Depends(require_any_permission(READ_PERM, PERM)),
+) -> dict[str, Any]:
+    """部位字段历史候选值（板房已录供应商/布料名称去重统计，供录入框候选回填）
+
+    纯只读：不建表、不加外键、无迁移。候选只取板房自己录过的值，
+    不合并供应商主数据。
+    """
+    requested = tuple(
+        f.strip() for f in fields.split(',') if f.strip()
+    ) if fields else _CANDIDATE_FIELDS
+    if not set(requested) <= set(_CANDIDATE_FIELDS):
+        raise HTTPException(status_code=422, detail='包含不支持的候选字段')
+    return await svc.get_part_field_candidates(db, fields=requested, limit=limit)
 
 
 # ==================== 20. 删除角色 ====================
