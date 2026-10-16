@@ -39,9 +39,16 @@ _BUTTON_VARIANT_PALETTE = {
         'fg': '#ffffff', 'subtle_border': '#f5b8b1',
         'transparent_fill': '#ffffff',
     },
+    # ★ neutral 的 fill 必须是「可作描边/文字的品牌色」，不能填表面底色：
+    #   outlined 变体拿 tone_cfg['fill'] 当边框色+字色（见 __init__ 分支），
+    #   旧值 '#f2f2f7' 让「刷新/打开日志」画成灰框白底灰字，像褪色/半透明
+    #   （2026-10-16 实测复现：canvas polygon fill 读出 #f2f2f7；存量自包化
+    #   首步 b03d3510 起就如此，solid 用法下恰好正常所以从未暴露）。
+    #   取 iOS 次级文字灰（_PALETTE['text_secondary'] 同族）；tint 保持 #f2f2f7，
+    #   故 subtle 变体（淡灰底）与 solid 用法行为不变。
     'neutral': {
-        'fill': '#f2f2f7', 'fill_h': '#e5e5ea', 'tint': '#f2f2f7', 'tint_h': '#e5e5ea',
-        'fg': '#1d1d1f', 'subtle_border': '#e5e5ea',
+        'fill': '#6e6e73', 'fill_h': '#5a5a5f', 'tint': '#f2f2f7', 'tint_h': '#e5e5ea',
+        'fg': '#ffffff', 'subtle_border': '#e5e5ea',
         'transparent_fill': '#ffffff',
     },
 }
