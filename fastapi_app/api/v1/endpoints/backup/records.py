@@ -273,8 +273,16 @@ async def delete_backup_schedule(
     user: User = Depends(require_backup_permission('delete_backup_schedule')),
     db: AsyncSession = Depends(get_async_db),
 ):
-    """删除定时任务（backup_manage）"""
-    deleted = await schedule_service.delete_schedule(db, schedule_id)
+    """删除定时任务（backup_manage）
+
+    校验类任务（完整性巡检 / 灾备演练）整类受保护、不允许删除，见
+    schedule_service.GUARDED_TASK_TYPES —— 误删会静默失去备份可用性保障。
+    停用请改 enabled=false。
+    """
+    try:
+        deleted = await schedule_service.delete_schedule(db, schedule_id)
+    except schedule_service.BackupSettingsError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     if not deleted:
         raise HTTPException(status_code=404, detail=f'调度任务 {schedule_id} 不存在')
     return {'success': True, 'task_name': str(schedule_id), 'message': '调度任务已删除'}

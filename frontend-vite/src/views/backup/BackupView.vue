@@ -168,8 +168,13 @@ async function loadStatus() {
   try {
     const s = await backupApi.getStatus()
     status.value = s as unknown as Record<string, unknown>
-  } catch {
+  } catch (e) {
+    // 必须提示：status=null 时概览卡片（BackupOverviewCards）用 `props.status ?? {}`
+    // 兜底，渲染成「上次备份：暂无 / 备份总数：0 个」，与「从没配过备份」视觉一致。
+    // 这页恰恰是运维确认备份是否正常的地方，后端挂掉时若只显示空态会误判为无备份。
+    console.warn('[backup] 加载备份状态失败', e)
     status.value = null
+    toast.error(errText(e, '加载备份状态失败，页面显示的空态不可信'))
   } finally {
     statusLoading.value = false
   }
@@ -178,12 +183,21 @@ async function loadSchedules() {
   try {
     const res = await backupApi.listSchedules()
     schedules.value = res.tasks ?? []
-  } catch { schedules.value = [] }
+  } catch (e) {
+    // 空列表会被读成「没配定时任务」—— 而巡检/演练的例行调度恰恰最容易被误删
+    console.warn('[backup] 加载定时任务失败', e)
+    schedules.value = []
+    toast.error(errText(e, '加载定时任务失败，请勿据空列表判断备份巡检已停用'))
+  }
 }
 async function loadSettings() {
   try {
     settings.value = await backupApi.getSettings()
-  } catch { settings.value = null }
+  } catch (e) {
+    console.warn('[backup] 加载备份设置失败', e)
+    settings.value = null
+    toast.error(errText(e, '加载备份设置失败'))
+  }
 }
 
 async function triggerFull(opts?: { password?: string; tables?: string[]; excludeTables?: string[] }) {
@@ -266,7 +280,12 @@ async function loadRecords(page = recordsPage.value) {
     records.value = (body.records ?? (body.data?.records as BackupRecordRow[] | undefined) ?? []) as BackupRecordRow[]
     recordsTotal.value = (typeof body.total === 'number' ? body.total : records.value.length)
     recordsPage.value = page
-  } catch { records.value = [] } finally { recordsLoading.value = false }
+  } catch (e) {
+    // 「暂无备份记录」是最不能误判的一条：它既可能是真的没有，也可能是加载失败
+    console.warn('[backup] 加载备份记录失败', e)
+    records.value = []
+    toast.error(errText(e, '加载备份记录失败，空列表不代表没有备份'))
+  } finally { recordsLoading.value = false }
 }
 function onRecordRestore(filename: string) {
   wizardInitialFilename.value = filename

@@ -29,6 +29,14 @@ TASK_TYPE_TO_FUNC: dict[str, str] = {
 }
 VALID_TASK_TYPES = tuple(TASK_TYPE_TO_FUNC)
 
+# 删除守卫：这两类任务**整类**不许从界面删除（不论还剩几条、是否已禁用）。
+# 背景：2026-10-12 与 2026-10-16 两次实测，生产 backup_schedule 都只剩 2 行
+# （full + cleanup）——完整性巡检 integrity_check 与月度灾备演练
+# disaster_recovery_test 都不在。删除路径只有 UI 的 DELETE /backup/schedule/{id}，
+# 无任何保护，误删后无人告警，备份到底能不能还原只能靠人想起来手工跑。
+# schedule_delete_guard_test 锁死此行为。
+GUARDED_TASK_TYPES = ('integrity_check', 'disaster_recovery_test')
+
 # 调度任务卡在 running 超过该时长即视为「未执行」，允许补跑（见 due_schedules）。
 # 背景：last_run_at 在**入队时**写入，终态靠 ARQ 回调回写；任务执行中 worker 被
 # 服务重启杀死时回调永远不会来，状态卡 running 且窗口被误判为已消费。
@@ -238,9 +246,35 @@ async def delete_schedule(db: AsyncSession, schedule_id: int) -> bool:
     row = await get_schedule(db, schedule_id)
     if row is None:
         return False
+    if await _is_irreplaceable(db, row):
+        logger.error(
+            '拒绝删除备份调度 %s(name=%s, task_type=%s)：该任务是备份可用性/灾备能力的'
+            '唯一自动保障。历史上生产曾因此丢失自动巡检与灾备演练，只能靠人想起来手工跑'
+            '（见迁移 056 的漂移修复记录）',
+            row.id, row.name, row.task_type,
+        )
+        raise BackupSettingsError(
+            f'"{row.name}"（{row.task_type}）不允许删除：它是「备份是否真能还原」的'
+            '自动保障，误删后无人告警。如确需停用，请改为"禁用"（enabled=false），'
+            '校验与演练仍会留档可随时恢复；确需删除请联系管理员改库。'
+        )
     await db.delete(row)
     await db.flush()
     return True
+
+
+async def _is_irreplaceable(db: AsyncSession, row: BackupSchedule) -> bool:
+    """该行是否属于「删了就失去自动保障」的不可替代调度。
+
+    口径按 **task_type**（而非 name）：name 是用户可改字段，按它匹配会被改名绕过
+    （迁移 057 正是为此才把匹配键从 name 换成 task_type）。
+
+    整类禁止删除，不采用「留一条就行」的宽松口径：这两类任务的意义是「校验备份
+    是否真能还原」，而不是「某条备份计划」。宽松口径下运维把 5 条巡检删到剩 1 条
+    就再也删不动，而残留那条还可能 cron 写错永不触发 —— 问题依旧存在且更难发现。
+    行数多少不改变「这类任务必须有人自动跑」的事实，故不看其他行。
+    """
+    return row.task_type in GUARDED_TASK_TYPES
 
 
 async def due_schedules(db: AsyncSession, now: datetime) -> list[BackupSchedule]:
