@@ -270,18 +270,19 @@ def test_decode_output_is_module_level():
 def test_read_log_tail_lines_behavior():
     """行为级：read_log_tail_lines 只回灌 offset 之后的新增尾部（轮转重开按全新文件）。"""
     import tempfile
+
     from server_manager.log_ops import read_log_tail_lines
 
     with tempfile.TemporaryDirectory() as td:
         p = Path(td) / "a.log"
-        p.write_bytes("old line\r\n".encode() * 10)
+        p.write_bytes(b"old line\r\n" * 10)
         offset = p.stat().st_size
         # 追加新内容 → 只回灌新增尾部
         with open(p, "ab") as f:
-            f.write("new1\r\nnew2\r\nnew3\r\n".encode())
+            f.write(b"new1\r\nnew2\r\nnew3\r\n")
         assert read_log_tail_lines(p, start_offset=offset, lines=2) == ["new2", "new3"]
         # 文件被轮转重开（size < offset）→ 按全新文件读尾部
-        p.write_bytes("fresh\r\n".encode())
+        p.write_bytes(b"fresh\r\n")
         assert read_log_tail_lines(p, start_offset=offset, lines=5) == ["fresh"]
         # 不存在的文件 → 空列表不抛错
         assert read_log_tail_lines(Path(td) / "nope.log") == []
