@@ -38,11 +38,44 @@ _SVC_DEPENDS = {
 #   ★ 启动流程【不】用它：Redis 由 _start_redis / _ensure_redis_broker 先起。
 #   ★ 切开发模式的「停生产」也不用它：开发模式同样依赖 Redis。
 _SVC_ALL = (_SVC_API, _SVC_ARQ, _SVC_WEB, _SVC_REDIS_CACHE, _SVC_REDIS_BROKER)
-# 整栈重启的**停机**顺序 = _SVC_ALL 的逆序：依赖方（erp-prod/erp-arq）先停，
-#   否则 SCM 会以「停止控制被发送到其他正在运行的服务所依赖的服务」拒停被依赖的
-#   erp-redis / erp-redis-broker（DependOnService 见 _SVC_DEPENDS）→ 那两个 Redis
-#   的「重启」变成静默 no-op。启动仍按 _SVC_ALL 原序（被依赖者先起，与开机序一致）。
-_SVC_REVERSE = tuple(reversed(_SVC_ALL))
+# 整栈重启的**停机**顺序必须按依赖图**逆拓扑**：依赖方（erp-prod/erp-arq/erp-web）
+#   先停，被依赖者（erp-redis/erp-redis-broker）后停。
+#   ★ 为什么不是 reversed(_SVC_ALL)（2026-10-16 实机事故）：字面逆序把被依赖的
+#     broker 顶到第一位，此时 erp-arq 还在 RUNNING 并持有到 6380 的连接，SCM 以
+#     「停止控制被发送到其他正在运行的服务所依赖的服务」（1051）拒停 broker →
+#     停机阶段全部空转超时（20s/个）→ 阶段二照常启动 → arq 重连 6380 把 broker
+#     永久钉死 → 下次重启同样失败。实机取证：sc enumdepend erp-redis-broker 的唯一
+#     依赖方是 erp-arq 且 RUNNING；pid 11096 持有 3 条到 127.0.0.1:6380 的
+#     ESTABLISHED。故停机序由 _SVC_DEPENDS 推导（被依赖者越晚停越安全）。
+#   启动仍按 _SVC_ALL 原序（被依赖者先起，与 SCM 开机序一致）。
+def _stop_order():
+    """按 _SVC_DEPENDS 拓扑排序生成停机序：依赖方在前，被依赖者在后。
+
+    _SVC_DEPENDS 是 depender -> [dependencies]（erp-arq 依赖 broker）。停机时依赖方
+    必须先停，故做一次逆拓扑 DFS：访问某服务前，先把**依赖它的**服务入列。
+    """
+    deps: dict[str, set[str]] = {name: set() for name in _SVC_ALL}
+    for depender, targets in _SVC_DEPENDS.items():
+        for target in targets:
+            deps.setdefault(target, set())   # target 可能暂无依赖方
+            if depender in deps:
+                deps[target].add(depender)
+
+    order: list[str] = []
+
+    def _visit(svc: str) -> None:
+        if svc in order:
+            return
+        for depender in sorted(deps.get(svc, ()), key=_SVC_ALL.index):
+            _visit(depender)               # 依赖方先入列
+        order.append(svc)
+
+    for svc in _SVC_ALL:
+        _visit(svc)
+    return tuple(order)
+
+
+_SVC_REVERSE = _stop_order()
 # 会写入 UVICORN_WORKERS 的服务：erp-prod 是唯一消费方；erp-arq 不读它，一并写入
 #   只为保持两者 AppEnvironmentExtra 一致（免得「安装生产服务」拿其中一个的值覆盖出分歧）。
 #   ★ 刻意不含 _SVC_WEB：erp-web 是 nginx，Python 环境变量对它无意义 ——

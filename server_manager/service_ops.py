@@ -625,26 +625,42 @@ class ServiceOps:
         NSSM 的 stop/restart 都是立即返回——不等终态就报「已执行」等于什么都没说
         （2026-09-16 用户实测：stop 打印完 5 秒后服务仍在 RUNNING）。
 
-        ★ 重启走**依赖拓扑两阶段**（2026-10-15 实证根因）：逐服务 stop→start 会让
-        依赖方（erp-prod/erp-arq）先回 RUNNING，等轮到被依赖的 erp-redis /
-        erp-redis-broker 时，SCM 以「停止控制被发送到其他正在运行的服务所依赖的
-        服务」拒停 → 那两个 Redis 从未停过、其「重启」静默 no-op，每轮还各自空等满
-        超时。故先按 ``_SVC_REVERSE`` 逆序全停并确认，再按 ``_SVC_ALL`` 原序全起
-        （被依赖者先起，与 SCM 开机序一致）。
+        ★ 重启走**依赖拓扑两阶段**：停机序取 ``_SVC_REVERSE``（由 ``_SVC_DEPENDS``
+        拓扑排序：依赖方先停、被依赖者后停），确认全部 STOPPED 后再原序全起。
+        ★ 停机失败必须**中止本轮重启**（2026-10-16 实机事故）：曾有无视停机终态、
+          无条件进入启动阶段的实现 —— broker 停不掉却照常启动 → arq 重连 6380 把
+          被依赖服务永久钉死 → 下次重启同样失败（自锁循环）。停不掉就不起。
         """
         nssm = self.find_nssm()
         if verb == 'restart':
             # 清一次即可：清的是**非受管**端口占用，与迭代顺序无关，不必每个服务重扫。
             self._clean_ports_if_injected()
-            # 阶段一：逆序全停——依赖方先停，不挡被依赖的 Redis。
-            # 停前记 PID：停后 PID 未变即该服务从未停成（SCM 因依赖方在跑而拒停），
-            # 由 start_one_service→wait_service_running 据此改报「未生效」，与单服务重启同口径。
+            # 阶段一：逆拓扑停机——依赖方先停，不挡被依赖的 Redis。
+            # 停前记 PID：停后 PID 未变即服务从未停成，由 wait_service_running
+            # 据此改报「未生效」，与单服务重启同口径。
             prev_pids: dict[str, int | None] = {}
+            failed_stop: list[str] = []
             for name in _SVC_REVERSE:
                 self._gate.checkpoint()
                 prev_pids[name] = self.svc_pid(name)
                 self._msg_queue.put(('log', {'text': f'正在停止生产服务 {name}...'}))
-                self._stop_service_sync(name, nssm)
+                state = self._stop_service_sync(name, nssm)
+                # ★ 消费停机终态：任一服务没停成即中止本轮重启。
+                #   SCM 拒停（1051，被运行中的依赖方占着）与被依赖方拒绝收尾都属此类。
+                if 'STOPPED' not in state.upper():
+                    failed_stop.append(name)
+                    break
+            if failed_stop:
+                # 如实汇报：哪个服务没停成、当前什么状态、以及为什么必须停下（防自锁）。
+                self._msg_queue.put(('log', {
+                    'text': f'{"、".join(failed_stop)} 未能确认 STOPPED（当前: '
+                            f'{"、".join(self.svc_state(n) for n in failed_stop)}），'
+                            f'已中止本轮重启、服务保持原状。若强行启动会让 erp-arq '
+                            f'重连 6380 把被依赖服务永久钉死（自锁循环）。'
+                            f'请到 services.msc 检查依赖方状态，或稍后重试。',
+                    'level': 'WARNING'}))
+                self._msg_queue.put(('hosting_refresh', {}))
+                return
             # 阶段二：原序全起——被依赖者先起，与 SCM 开机序一致。
             for name in _SVC_ALL:
                 self._gate.checkpoint()
