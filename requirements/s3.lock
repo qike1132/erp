@@ -68,7 +68,7 @@ h11==0.16.0
     # via
     #   httpcore
     #   uvicorn
-hiredis==3.4.2
+hiredis==3.5.0
     # via redis
 httpcore==1.0.9
     # via httpx
