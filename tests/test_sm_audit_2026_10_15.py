@@ -188,13 +188,18 @@ def test_env_check_dialog_not_delayed():
 # ── 8. 2026-10-16 结构评审修复（H1/H2/M1~M4/L1~L3）─────────────────────────
 
 def test_dev_health_checks_bypass_proxy():
-    """开发模式健康检查必须用 _HTTP_DIRECT（裸 urlopen 吃系统代理 → 间歇假失败）。"""
+    """开发模式健康检查必须用 _HTTP_DIRECT 直连 opener（裸 urlopen 吃系统代理 → 间歇假失败）。
+
+    ★ 且必须用 ``.open``：``OpenerDirector`` 没有 ``urlopen`` 方法（2026-10-16
+    事故：写 .urlopen 每次必抛 AttributeError，被外层 except 吞掉 → 探测永远
+    失败 → 杀掉已 startup complete 的健康后端）。
+    """
     text = DM.read_text(encoding="utf-8")
-    assert "_HTTP_DIRECT.urlopen" in text, "开发模式探测未绕开系统代理（H1）"
+    assert "_HTTP_DIRECT.open(" in text, "开发模式探测未绕开系统代理（H1）"
     body_start = _func_src(DM, "start_dual_thread")
-    assert body_start.count("_HTTP_DIRECT.urlopen") == 2, "前后端两处探测都要走直连 opener"
+    assert body_start.count("_HTTP_DIRECT.open(") == 2, "前后端两处探测都要走直连 opener"
     for ln in _code_lines(body_start):
-        assert "urllib.request.urlopen" not in ln, "仍残留走系统代理的裸 urlopen"
+        assert "_HTTP_DIRECT.urlopen" not in ln, ".urlopen 每次必抛 AttributeError（OpenerDirector 无此方法）"
 
 
 def test_do_quit_cancels_inflight_action():

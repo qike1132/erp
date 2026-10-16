@@ -120,7 +120,12 @@ class DevModeOps:
                 try:
                     # ★ 必须绕开系统代理（constants 的既有事故：prod_runner 曾因
                     #   代理转发 127.0.0.1 探测间歇失败而误判后端崩溃）。
-                    _HTTP_DIRECT.urlopen(f'http://127.0.0.1:{_API_PORT}/api/health', timeout=2)
+                    #   ★ 必须用 .open：_HTTP_DIRECT 是 OpenerDirector，没有
+                    #     urlopen 方法（2026-10-16 事故：.urlopen 每次必抛
+                    #     AttributeError，被外层 except 吞掉 → 30 次探测全失败
+                    #     → 杀掉已 startup complete 的健康后端）。hosting_view
+                    #     用的正是 .open，此处对齐。
+                    _HTTP_DIRECT.open(f'http://127.0.0.1:{_API_PORT}/api/health', timeout=2)
                     backend_ready = True
                     break
                 except Exception:
@@ -147,7 +152,8 @@ class DevModeOps:
             for _ in range(60):
                 self._gate.checkpoint()
                 try:
-                    _HTTP_DIRECT.urlopen(f'http://127.0.0.1:{_WEB_PORT}/', timeout=2)
+                    # 同后端探测：直连 opener + .open（见上注释）
+                    _HTTP_DIRECT.open(f'http://127.0.0.1:{_WEB_PORT}/', timeout=2)
                     frontend_ready = True
                     break
                 except Exception:
