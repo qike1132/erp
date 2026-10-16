@@ -659,22 +659,33 @@ class ServiceOps:
                 self._msg_queue.put(('log', {
                     'text': f'{"、".join(failed_stop)} 未能确认 STOPPED（当前: '
                             f'{"、".join(self.svc_state(n) for n in failed_stop)}），'
-                            f'已中止本轮重启、服务保持原状。若强行启动会让 erp-arq '
+                            f'已中止本轮重启（未停成的服务不会被启动，已停服务将尝试恢复）。'
+                            f'若强行启动会让 erp-arq '
                             f'重连 6380 把被依赖服务永久钉死（自锁循环）。'
                             f'请到 services.msc 检查依赖方状态，或稍后重试。',
                     'level': 'WARNING'}))
                 # ★ 恢复可用性：停机是**逆拓扑**（被依赖者最后停），中止发生在中间时，
                 #   已停掉的都是排在前面的依赖方（prod/arq/web/cache）—— 不把它们拉回来
                 #   ERP 就整体下线，而故障只是「某个被依赖服务停不掉」。故按启动序补拉起
-                #   已停服务（仍在跑的自然会被 start 跳过），把现场还原成「全部在跑、
-                #   本次重启部分未生效」，由 wait_service_running 的 prev_pid 判定如实标注。
+                #   已停服务，把现场还原成「全部在跑、本次重启部分未生效」，由
+                #   wait_service_running 的 prev_pid 判定如实标注。
+                #   ★ 判据一律取**当下的 svc_state**，不按 failed_stop 名单跳过：失败的那个
+                #     服务也可能已到达 STOPPED（wait_service 只返最后一次轮询态），按名跳过
+                #     会把它留在 STOPPED 且无日志；仍在跑的会被下面的判据跳过。
+                #   ★ '未知' / STOP_PENDING 不可确认时也尝试拉起（start 已在跑的服务只会回
+                #     「已在运行中」，无害），绝不静默丢下一个已停服务。
                 for name in _SVC_START_ORDER:
-                    if name in failed_stop:
-                        continue
                     self._gate.checkpoint()
-                    if 'STOPPED' in self.svc_state(name).upper():
+                    state_now = self.svc_state(name).upper()
+                    if 'RUNNING' in state_now:
+                        continue
+                    if 'STOPPED' not in state_now:
+                        self._msg_queue.put(('log', {
+                            'text': f'中止重启：{name} 状态不可确认（当前: {state_now}），仍尝试拉起',
+                            'level': 'WARNING'}))
+                    else:
                         self._msg_queue.put(('log', {'text': f'中止重启：恢复已停止的 {name}...'}))
-                        self.start_one_service(name, prev_pid=prev_pids.get(name))
+                    self.start_one_service(name, prev_pid=prev_pids.get(name))
                 self._msg_queue.put(('hosting_refresh', {}))
                 return
             # 阶段二：按启动序全起——被依赖者（Redis）先起，与停机序相反。

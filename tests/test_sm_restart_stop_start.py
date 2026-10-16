@@ -19,7 +19,7 @@ AppStopMethodConsole/Threads 各 1500ms 时就会），服务永远停在 STOPPE
 """
 from pathlib import Path
 
-from server_manager.constants import _SVC_ALL, _SVC_REDIS_BROKER, _SVC_REVERSE
+from server_manager.constants import _SVC_ALL, _SVC_REDIS_BROKER, _SVC_REVERSE, _SVC_START_ORDER, _SVC_WEB
 from server_manager.service_ops import ServiceOps
 
 NSSM = r'C:\nssm\nssm.exe'
@@ -97,19 +97,22 @@ def test_stop_failure_is_surfaced_with_its_message():
 
 
 def test_whole_stack_restart_is_two_phase_stop_then_start():
-    """整栈重启必须两阶段：先全停，再原序全起（绝不逐服务 stop→start）。
+    """整栈重启必须两阶段：先全停，再按启动序全起（绝不逐服务 stop→start）。
 
     逐服务 stop→start 会让依赖方（erp-prod/erp-arq）先回 RUNNING，等轮到被依赖的
     erp-redis / erp-redis-broker 时，SCM 以「停止控制被发送到其他正在运行的服务所
     依赖的服务」拒停（_SVC_DEPENDS 写成了 DependOnService）→ nssm stop 返回非零、
-    Redis 从未停过，其「重启」静默 no-op。两阶段先全停，再原序全起（被依赖者先起，
-    与 SCM 开机序一致）。
+    Redis 从未停过，其「重启」静默 no-op。两阶段先全停，再按 _SVC_START_ORDER 全起
+    （被依赖者先起）。
 
     ★ 2026-10-16 修正：停机序断言此前写的是 ``reversed(_SVC_ALL)`` —— 那正是实机
       事故根因（字面逆序把被依赖的 broker 顶到第一位，撞上还在跑并持有 6380 连接的
       erp-arq，SCM 以 1051 拒停，停机整段空转 20s 超时后仍照常启动，arq 重连把
       broker 永久钉死）。停机序改按 _SVC_DEPENDS 逆拓扑（依赖方在前），此处随之
       更新为锁 _SVC_REVERSE —— 顺序本身由 test_sm_restart_stop_order.py 锁正确性。
+    ★ 2026-10-16（OCR finding）：启动侧同步改为 _SVC_START_ORDER（= _SVC_REVERSE
+      逆序，被依赖者先起）。原断言锁的 ``_SVC_ALL`` 是「依赖方在前」的停机序，
+      拿它启动会把 erp-arq 排在 erp-redis-broker 之前 → 复现 6380 抢连成环。
     """
     ops, _q = _ops()
     ops.service_cmd_sync('restart')
@@ -118,7 +121,7 @@ def test_whole_stack_restart_is_two_phase_stop_then_start():
     verbs = [c[1] for c in ops.calls]
     assert verbs == ['stop'] * n + ['start'] * n, f'必须整段停、整段起，实际 {verbs}'
     assert calls[:n] == [('stop', name) for name in _SVC_REVERSE], '停机阶段须逆拓扑（依赖方在前）'
-    assert calls[n:] == [('start', name) for name in _SVC_ALL], '启动阶段须原序（被依赖者先起）'
+    assert calls[n:] == [('start', name) for name in _SVC_START_ORDER], '启动阶段须按 _SVC_START_ORDER（被依赖者先起）'
     assert not [c for c in ops.calls if c[1] == 'restart']
 
 
@@ -143,8 +146,6 @@ def test_restart_aborts_when_a_service_refuses_to_stop():
 
     ops.wait_service = wait_stuck
     # 已停服务(start 才发得出去)：broker 之外的四个都视为已停
-    real_state = ops.svc_state if hasattr(ops, 'svc_state') else None
-
     def state(name):
         return '4 RUNNING' if name == _SVC_REDIS_BROKER else '1 STOPPED'
 
@@ -160,7 +161,7 @@ def test_restart_aborts_when_a_service_refuses_to_stop():
 
 def test_restart_abort_restores_already_stopped_services():
     """中止时必须恢复已停服务，否则只是「broker 停不掉」却让整套 ERP 下线。"""
-    ops, q = _ops()
+    ops, _q = _ops()
     real_wait = ops.wait_service
 
     def wait_stuck(name, target, timeout, **kw):
@@ -176,6 +177,39 @@ def test_restart_abort_restores_already_stopped_services():
         if name == _SVC_REDIS_BROKER:
             continue
         assert name in started, f'已停的 {name} 必须被恢复启动（否则 ERP 无故下线），实际启动 {started}'
+
+
+def test_restart_abort_attempts_start_when_state_unknown():
+    """中止恢复时，状态不可确认（'未知' / STOP_PENDING）的服务也要尝试拉起，不得静默丢弃。
+
+    OCR finding（2026-10-16）：恢复循环若只在 svc_state 恰为 'STOPPED' 时才 start，
+    则 '未知'（sc 被拦/超时——正是刚导致中止的探针通道）与 STOP_PENDING 会无 start、
+    无日志地掉队，服务留在 STOPPED，与「把现场还原成全部在跑」相悖。
+    """
+    ops, q = _ops()
+    real_wait = ops.wait_service
+
+    def wait_stuck(name, target, timeout, **kw):
+        if name == _SVC_REDIS_BROKER and target == 'STOPPED':
+            return '4 RUNNING'
+        return real_wait(name, target, timeout, **kw)
+
+    ops.wait_service = wait_stuck
+
+    def state(name):
+        if name == _SVC_REDIS_BROKER:
+            return '4 RUNNING'
+        if name == _SVC_WEB:
+            return '未知'
+        return '1 STOPPED'
+
+    ops.svc_state = state
+    ops.service_cmd_sync('restart')
+    started = [c[2] for c in ops.calls if c[1] == 'start']
+    assert _SVC_WEB in started, f'状态不可确认的 {_SVC_WEB} 也必须尝试拉起，实际启动 {started}'
+    warns = [d for _k, d in q.msgs if d.get('level') == 'WARNING']
+    assert any('状态不可确认' in d['text'] for d in warns), \
+        f'状态不可确认时必须告警，实际 {[d["text"][:40] for d in warns]}'
 
 
 def test_restart_clears_ports_before_stopping_and_starting():
