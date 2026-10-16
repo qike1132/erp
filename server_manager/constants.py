@@ -61,13 +61,20 @@ def _stop_order():
             if depender in deps:
                 deps[target].add(depender)
 
+    # 排序键对「不在 _SVC_ALL 里的名字」也要有值：本函数在导入期运行，畸形 _SVC_DEPENDS
+    #   会让 _SVC_ALL.index 抛 ValueError → 整个 server_manager 包导入即崩。
+    idx = {name: i for i, name in enumerate(_SVC_ALL)}
     order: list[str] = []
+    state: dict[str, int] = {}   # 1=在 DFS 栈上，2=已完成
 
     def _visit(svc: str) -> None:
-        if svc in order:
+        # 三色标记：栈上再次遇到（环）直接返回，避免无限递归 → 导入期 RecursionError。
+        if state.get(svc):
             return
-        for depender in sorted(deps.get(svc, ()), key=_SVC_ALL.index):
+        state[svc] = 1
+        for depender in sorted(deps.get(svc, ()), key=lambda n: idx.get(n, len(_SVC_ALL))):
             _visit(depender)               # 依赖方先入列
+        state[svc] = 2
         order.append(svc)
 
     for svc in _SVC_ALL:
