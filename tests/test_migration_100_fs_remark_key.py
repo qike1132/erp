@@ -133,6 +133,28 @@ def test_dedup_keeps_latest_updated_at():
     conn.close()
 
 
+def test_dedup_breaks_timestamp_ties_by_id():
+    """2026-10-17 审计 AUD-11：同键同时间戳时必须以 id 做确定性 tie-break。
+
+    旧实现只删「严格更旧」的行，平局时谁也不删，唯一索引创建失败、迁移中断。
+    """
+    _engine, conn = _make_db([
+        (1, 'A', 'B1', '旧备注', 2),
+        (2, 'A', 'B1', '同时间戳更新写入', 2),
+    ])
+    _run_upgrade(conn)
+    rows = conn.execute(sa.text(
+        'SELECT id, remark FROM finished_stock_remark ORDER BY id'
+    )).fetchall()
+    # 同时间戳保留 id 最大者（2），另一行被删
+    assert [(r[0], r[1]) for r in rows] == [(2, '同时间戳更新写入')]
+    idx = conn.execute(sa.text(
+        "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='finished_stock_remark'"
+    )).fetchall()
+    assert 'uq_fs_remark_prod_batch' in {r[0] for r in idx}
+    conn.close()
+
+
 def test_upgrade_idempotent_when_no_dups():
     """无重复时仅换索引，数据原样保留。"""
     _engine, conn = _make_db([

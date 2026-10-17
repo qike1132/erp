@@ -50,14 +50,20 @@ import { getErrorMessage } from '@/types/errors'
 
 type UploadOptions = { file: File; onProgress?: (e: { percent: number }) => void }
 
-/** /ocr-import/progress 轮询响应 */
+/** /ocr-import/progress 轮询响应（后端键为 status/percent/message） */
 interface OcrProgressResult {
-  progress: number
+  progress?: number
   status: string
+  percent?: number
+  message?: string
   percentage?: number
   success_count?: number
   errors?: string[]
 }
+
+// 2026-10-17 审计 AUD-03：后端写的是 done/percent，此前前端读 completed/percentage
+// → 进度恒 0、终态永不命中、无限轮询。not_found 也必须是终态。
+const OCR_TERMINAL_STATUSES = ['done', 'completed', 'failed', 'error', 'not_found']
 
 const taskId = ref('')
 const progress = ref(0)
@@ -90,14 +96,14 @@ useQuery({
   queryFn: async () => {
     if (!taskId.value) return null
     const res = (await ocrApi.progress(taskId.value)) as OcrProgressResult
-    progress.value = res.percentage ?? 0
-    if (res.status === 'completed') {
+    progress.value = res.percent ?? res.percentage ?? 0
+    if (res.status === 'done' || res.status === 'completed') {
       progressStatus.value = 'success'
       progressText.value = '识别完成'
       ocrResult.value = res
-    } else if (res.status === 'failed') {
+    } else if (res.status === 'failed' || res.status === 'error' || res.status === 'not_found') {
       progressStatus.value = 'exception'
-      progressText.value = '识别失败'
+      progressText.value = res.status === 'not_found' ? '任务不存在或已过期' : '识别失败'
       ocrResult.value = res
     } else {
       progressText.value = `处理中 ${progress.value}%`
@@ -106,8 +112,8 @@ useQuery({
   },
   enabled: () => !!taskId.value && progressStatus.value === '',
   refetchInterval: (query) => {
-    const data = query.state.data as { percentage?: number; status: string } | null
-    if (data?.status === 'completed' || data?.status === 'failed') return false
+    const data = query.state.data as { status: string } | null
+    if (data && OCR_TERMINAL_STATUSES.includes(data.status)) return false
     return 800
   },
 })

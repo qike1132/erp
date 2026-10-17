@@ -225,9 +225,16 @@ def _init_sync_engine():
     if _sync_engine is not None:
         return
 
+    # 2026-10-17 审计 AUD-09：_pool_config 里的 connect_args 是 asyncpg 专属
+    # （PgBouncer 模式下 statement_cache_size=0），同步引擎走 psycopg3，
+    # 不认识该参数——PGBOUNCER_ENABLED=true 时会在 conninfo 解析阶段直接报错，
+    # 迁移/ARQ 同步任务/scripts 全灭。同步引擎必须剔除 connect_args。
+    sync_pool_config = {
+        key: value for key, value in _pool_config.items() if key != 'connect_args'
+    }
     _sync_engine = create_engine(
         settings.DATABASE_URL,
-        **_pool_config,
+        **sync_pool_config,
         echo=False,
     )
     _SyncSessionLocal = sessionmaker(

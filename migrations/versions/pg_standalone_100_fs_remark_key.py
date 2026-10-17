@@ -21,15 +21,22 @@ _NEW_INDEX = 'uq_fs_remark_prod_batch'
 
 
 def upgrade() -> None:
-    # 去重：同 (product_id, batch_no) 保留最新 updated_at
+    # 去重：同 (product_id, batch_no) 保留最新 updated_at。
+    # 2026-10-17 审计 AUD-11：旧实现用 JOIN 只删「严格更旧」的行——两行
+    # COALESCE(updated_at, create_time) 完全相等时谁也不删，随后 CREATE UNIQUE
+    # INDEX 必然失败、整个迁移回滚。改用 ROW_NUMBER 并以 id 做确定性 tie-break
+    # （同时间戳保留 id 最大者，即最后写入的那行）。
     dedup = sa.text("""
         DELETE FROM finished_stock_remark WHERE id IN (
-            SELECT a.id FROM finished_stock_remark a
-            JOIN finished_stock_remark b
-              ON a.product_id = b.product_id
-             AND a.batch_no = b.batch_no
-             AND a.id <> b.id
-             AND COALESCE(a.updated_at, a.create_time) < COALESCE(b.updated_at, b.create_time)
+            SELECT id FROM (
+                SELECT id,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY product_id, batch_no
+                           ORDER BY COALESCE(updated_at, create_time) DESC, id DESC
+                       ) AS rn
+                FROM finished_stock_remark
+            ) ranked
+            WHERE rn > 1
         )
     """)
     op.execute(dedup)

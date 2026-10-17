@@ -45,7 +45,7 @@ async def create_ocr_task(current_user: User=Depends(require_any_permission('bat
     前端应先调用此接口获取 task_id，再带 task_id 调用 /upload，
     同时可立即开始轮询 /progress/{task_id} 获取实时进度。
     """
-    task_id = svc.create_progress()
+    task_id = await svc.create_progress()
     return {'task_id': task_id}
 
 @router.post('/upload', response_model=OcrPdfImportResult, summary='批量上传出货单识别导入')
@@ -59,9 +59,11 @@ async def upload_shipping_docs(files: list[UploadFile]=File(..., description='�
     - 识别结果自动写入暂存出货表（staging_stock_out）
     - 返回 task_id 用于查询进度
     """
-    if not task_id or task_id not in svc._progress_store:
-        task_id = svc.create_progress()
-    svc._update_progress(task_id, status='processing', percent=2, message=f'共 {len(files)} 个文件待处理...')
+    # 2026-10-17 审计 AUD-03：进度已迁 Redis，跨 worker 可见。
+    # 未传 task_id 时新建；传了但未知（过期/旧客户端）由 _update_progress 自动初始化。
+    if not task_id:
+        task_id = await svc.create_progress()
+    await svc._update_progress(task_id, status='processing', percent=2, message=f'共 {len(files)} 个文件待处理...')
     total_imported = 0
     all_errors: list[str] = []
     file_results: list[dict] = []
@@ -87,7 +89,7 @@ async def upload_shipping_docs(files: list[UploadFile]=File(..., description='�
                 continue
             valid_files += 1
             if len(files) > 1:
-                svc._update_progress(task_id, message=f'正在处理第 {i + 1}/{len(files)} 个文件: {filename}')
+                await svc._update_progress(task_id, message=f'正在处理第 {i + 1}/{len(files)} 个文件: {filename}')
             try:
                 imported, message, errors = await svc.import_staging_stockouts_from_file(db, content, session_id, filename=filename, task_id=task_id)
             except OcrDependencyError as e:
@@ -100,7 +102,7 @@ async def upload_shipping_docs(files: list[UploadFile]=File(..., description='�
                 all_errors.extend([f'{filename}: {e}' for e in errors])
             file_results.append({'filename': filename, 'imported': imported, 'message': message})
     overall_message = f'共处理 {len(file_results)} 个文件，识别导入 {total_imported} 个出货到暂存区'
-    svc._update_progress(task_id, status='done', percent=100, message=overall_message)
+    await svc._update_progress(task_id, status='done', percent=100, message=overall_message)
     return OcrPdfImportResult(success=total_imported > 0 or len(file_results) == 0, message=overall_message, total_imported=total_imported, file_count=len(file_results), file_results=file_results, errors=all_errors[:20], task_id=task_id)
 
 @router.get('/progress/{task_id}', summary='查询 OCR 识别进度')
@@ -110,7 +112,10 @@ async def get_ocr_progress(task_id: str, current_user: User=Depends(require_any_
 
     返回当前状态、百分比、消息等信息。
     """
-    progress = svc.get_progress(task_id)
+    progress = await svc.get_progress(task_id)
+    if progress is None:
+        # 明确终态：前端据此停止轮询（此前查不到时静默新建全 0 进度 → 永远 0%）
+        return {'status': 'not_found', 'percent': 0, 'message': '任务不存在或已过期'}
     return progress
 
 @router.post('/preview', response_model=OcrPdfPreviewResult, summary='预览 OCR 识别结果（不写入暂存区）')

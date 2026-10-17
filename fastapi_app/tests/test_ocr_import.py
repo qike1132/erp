@@ -10,7 +10,7 @@ class TestOcrImportEndpoints:
     async def test_create_ocr_task_success(self, client):
         """测试创建 OCR 识别任务 - 正常返回 task_id"""
         with patch('fastapi_app.services.ocr_service.create_progress',
-                    return_value='test-task-id-001'):
+                    new_callable=AsyncMock, return_value='test-task-id-001'):
             response = await client.post("/api/v1/ocr-import/create-task")
             assert response.status_code == 200
             data = response.json()
@@ -28,7 +28,7 @@ class TestOcrImportEndpoints:
         }
 
         with patch('fastapi_app.services.ocr_service.get_progress',
-                    return_value=mock_progress):
+                    new_callable=AsyncMock, return_value=mock_progress):
             response = await client.get("/api/v1/ocr-import/progress/test-task-id-001")
             assert response.status_code == 200
             data = response.json()
@@ -39,7 +39,7 @@ class TestOcrImportEndpoints:
     async def test_get_ocr_progress_not_found(self, client):
         """测试查询 OCR 识别进度 - 任务不存在"""
         with patch('fastapi_app.services.ocr_service.get_progress',
-                    return_value={'status': 'not_found', 'percent': 0, 'message': '任务不存在'}):
+                    new_callable=AsyncMock, return_value=None):
             response = await client.get("/api/v1/ocr-import/progress/nonexistent-id")
             assert response.status_code == 200
             data = response.json()
@@ -85,7 +85,8 @@ class TestOcrImportEndpoints:
         """测试上传 OCR 文件 - 传入有效的 task_id"""
         with patch('fastapi_app.services.ocr_service._progress_store',
                     {'existing-task-id': {'status': 'pending', 'percent': 0, 'message': ''}}):
-            with patch('fastapi_app.services.ocr_service._update_progress'):
+            with patch('fastapi_app.services.ocr_service._update_progress',
+                        new_callable=AsyncMock):
                 with patch('fastapi_app.services.ocr_service.import_staging_stockouts_from_file',
                             new_callable=AsyncMock,
                             return_value=(0, 'no files', [])):

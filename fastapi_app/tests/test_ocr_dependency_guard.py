@@ -11,7 +11,7 @@
   3. 端点把它转成可读的 503，而不是 500「服务器内部错误」。
 """
 from io import BytesIO
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -101,8 +101,8 @@ class TestEndpointsSurfaceIt:
 
         with patch.object(svc, 'import_staging_stockouts_from_file',
                           new=AsyncMock(side_effect=OcrDependencyError(MISSING_MSG))), \
-             patch.object(svc, 'create_progress', return_value='t-1'), \
-             patch.object(svc, '_update_progress', MagicMock()), \
+             patch.object(svc, 'create_progress', new_callable=AsyncMock, return_value='t-1'), \
+             patch.object(svc, '_update_progress', AsyncMock()), \
              patch.object(svc, '_progress_store', {'t-1': {}}):
             response = await client.post(
                 '/api/v1/ocr-import/upload?session_id=s1&task_id=t-1', files=upload(field='files'))

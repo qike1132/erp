@@ -37,8 +37,6 @@ from fastapi_app.services.ocr._order_preview import (  # noqa: F401
     preview_order_items,
 )
 from fastapi_app.services.ocr._progress import (  # noqa: F401
-    _cleanup_progress_store,
-    _progress_lock,
     _progress_store,
     _update_progress,
     create_progress,
