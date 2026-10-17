@@ -219,7 +219,7 @@ async def _run_batch_import_async(file_path: str, job_id: str, task_label: str, 
         # 保留文件以供 ARQ 重试（max_tries 控制重试上限）
         delete_file = False
         raise exc
-    except Exception as exc:
+    except Exception as exc:  # defensive: 记录后原样上抛，只改 delete_file 语义保留源文件供 ARQ 重试
         # 2026-10-17 审计 F-BE-CORE-02：非预期异常（SQLAlchemyError 死锁/断连、
         # assert 失败等）原先走 delete_file=True → finally 删掉用户源文件 →
         # ARQ 三次重试全部「文件不存在」。既然异常在向外抛（任务未成功），文件
