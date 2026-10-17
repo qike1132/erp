@@ -5,6 +5,7 @@
 """
 import logging
 from collections.abc import Awaitable, Callable
+from decimal import Decimal
 
 from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
@@ -382,7 +383,8 @@ async def update_product(db: AsyncSession, product_id: int, name: str | None,
     if barcode is not None:
         product.barcode = barcode
     if price is not None:
-        product.price = price
+        # 列为 Numeric：用 Decimal 赋值，避免 float 二进制误差进价格
+        product.price = Decimal(str(price))
     if image is not None:
         # 剥掉上传接口回传的限时签名 query：原样入库会让出站的 sign_upload_url
         # 走"已含 ?"的幂等分支不再重签 → 过期后图片 410 且无法自愈。

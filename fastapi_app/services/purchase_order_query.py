@@ -9,6 +9,7 @@ purchase_order_query_helpers.py，并在文件末尾 re-export，
 确保 `from fastapi_app.services.purchase_order_query import X`
 （X 为任意原函数名/模块级常量）保持兼容。
 """
+import logging
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import desc, func, literal, or_, select, union_all
@@ -17,11 +18,13 @@ from sqlalchemy.orm import selectinload
 
 from fastapi_app.core.cache import cache_result
 from fastapi_app.core.sanitizer import escape_like
-from fastapi_app.services.export_limits import ensure_within_export_limit
+from fastapi_app.services.export_limits import EXPORT_MAX_ROWS
 from fastapi_app.shared_models import PurchaseOrder, PurchaseOrderItem, Supplier
 from fastapi_app.shared_models.order import ORDER_STATUS_PENDING_STOCK
 from fastapi_app.shared_models.purchase_order import PurchaseOrderStatus
 from fastapi_app.utils import calc_total_pages
+
+logger = logging.getLogger(__name__)
 
 
 # local_ttl=0：禁用 L1，仅走 L2（同 orders:beile:list）。生产多 worker 且
@@ -434,12 +437,14 @@ async def export_completed_orders(
         query = query.where(PurchaseOrder.completed_at <= f'{eff_end} 23:59:59')  # sql-safe: escape_like/绑定参数/常量片段
     query = query.order_by(PurchaseOrder.completed_at.desc())
 
-    # 2026-10-17 审计 P2-03：导出无行数上界（姊妹导出函数都有），
-    # 超量时占住 worker 并放大内存。与 daily_production 同口径先计数再拒。
-    await ensure_within_export_limit(db, select(func.count()).select_from(query.subquery()))
+    # 2026-10-17 审计 P2-03：导出行数上界（与姊妹导出同口径：多取一行判断超限）
+    query = query.limit(EXPORT_MAX_ROWS + 1)
 
     result = await db.execute(query)
     orders = result.all()
+    if len(orders) > EXPORT_MAX_ROWS:
+        logger.warning('已完成订单导出超过最大行数 %d，已截断', EXPORT_MAX_ROWS)
+        orders = orders[:EXPORT_MAX_ROWS]
 
     rows = []
     order_ids = [o.id for o in orders]
