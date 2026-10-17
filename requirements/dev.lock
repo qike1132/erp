@@ -19,7 +19,7 @@ arq==0.28.0
     # via -r requirements/base.txt
 asgiref==3.12.1
     # via opentelemetry-instrumentation-asgi
-ast-serialize==0.13.0
+ast-serialize==0.13.1
     # via mypy
 asyncpg==0.31.0
     # via -r requirements/base.txt
