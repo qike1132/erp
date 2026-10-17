@@ -25,9 +25,9 @@
       />
 
       <!-- 表格：SKU 大格（图片/产品名/69码跨行合并）+ 批次子行 -->
-      <!-- page-card-body 自带 20px/24px 内边距（给有边距的内容页用）；本页表格需贴卡片边，
-           故在此归零，观感与 /stock 的表格一致。 -->
-      <div class="page-card-body fs-table-body">
+      <!-- 用 fs-card-main（自带 padding:0 的 flex 列）而非 page-card-body：后者带
+           20/24 内边距与 scrollbar-gutter 预留槽，会留出四边空隙。对齐 /stock 的 sk-card-main。 -->
+      <div class="fs-card-main">
         <UiDataTable
           :data="tableRows"
           :columns="uiColumns"
@@ -328,9 +328,7 @@ function onPage(event: { page: number; rows: number }) {
 .fs-export-btn:hover { background: var(--color-success-50); border-color: var(--color-success-500); }
 .fs-export-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 
-.fs-card-main { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
-/* 归零 page-card-body 的内边距，让表格贴卡片边（不产生左侧空隙）；观感对齐 /stock */
-.fs-table-body { padding: 0; }
+.fs-card-main { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; padding: 0; }
 .fs-card-main :deep(.ui-data-table-wrapper) { flex: 1; min-height: 0; display: flex; flex-direction: column; border: 0; }
 .fs-card-main :deep([data-pc-name='datatable']) { flex: 1; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; }
 .fs-card-main :deep(.ui-pagination) { flex-shrink: 0; }
