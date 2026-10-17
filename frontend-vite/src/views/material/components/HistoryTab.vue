@@ -9,7 +9,7 @@
           :loading="hIsLoading && !hRegistrations.length"
           :paginator="true"
           :rows="hPerPage"
-          :total-records="hPages * hPerPage"
+          :total-records="hCount"
           row-key="id"
           @page="emit('page', $event)"
         >
@@ -55,6 +55,8 @@ defineProps<{
   hIsFetching: boolean
   hPerPage: number
   hPages: number
+  /** 后端精确总条数（2026-10-17 审计 P2-43） */
+  hCount: number
 }>()
 
 const emit = defineEmits<{

@@ -14,7 +14,7 @@
         :items="mergedItems"
         :item-height="90"
         :container-height="360"
-        :item-key="(i) => i.material_name"
+        :item-key="(i) => `${i.supplier_name || ''}|${i.material_name}`"
       >
         <template #default="{ item: i }">
           <div class="mr-sku-row" style="margin-bottom:0;">
@@ -22,9 +22,9 @@
             <div class="mr-sku-bar"><div :class="['mr-sku-fill', fillClass(i)]" :style="{ width: i.progress + '%' }" /></div>
             <div class="mr-sku-info">
               <span>分类: <b>{{ CATEGORY_MAP[i.material_category] || '-' }}</b></span>
-              <span>数量: <b>{{ i.ordered_quantity }}</b> {{ i.unit || '' }}</span>
-              <span>已到货: <b style="color:var(--color-success-500);">{{ i.received_quantity }}</b></span>
-              <span>未到: <b style="color:var(--color-warning-500);">{{ i.remaining_quantity }}</b></span>
+              <span>数量: <b>{{ formatQuantity(i.ordered_quantity) }}</b> {{ i.unit || '' }}</span>
+              <span>已到货: <b style="color:var(--color-success-500);">{{ formatQuantity(i.received_quantity) }}</b></span>
+              <span>未到: <b style="color:var(--color-warning-500);">{{ formatQuantity(i.remaining_quantity) }}</b></span>
               <button v-if="canManage && i.received_quantity < i.ordered_quantity" class="mr-btn mr-btn-success mr-btn-sm" title="登记收货数量" aria-label="收货" @click="$emit('openReceive', i)"><FontAwesomeIcon icon="box" /> 收货</button>
               <span v-else-if="i.received_quantity >= i.ordered_quantity" style="color:var(--color-success-500);font-weight:600;">&#10003; 已完成</span>
             </div>
@@ -39,6 +39,7 @@
 import { computed } from 'vue'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import VirtualList from '@/components/ui/VirtualList.vue'
+import { formatQuantity } from '@/utils/quantity'
 
 interface RegItem {
   id: number

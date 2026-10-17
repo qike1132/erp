@@ -172,7 +172,10 @@ function statusLabel(status: string) {
 function statusOf(p: Plan): string {
   const qty = Number(p.quantity || 0)
   const produced = Number(p.produced_qty || 0)
-  if (qty > 0 && produced >= qty) return 'completed'
+  // 2026-10-17 审计 P2-62：与后端 calc_shipment_status 逐字对齐——
+  // 后端是 shipped_qty >= plan_qty 即 completed（plan=0 时为 completed），
+  // 此前的 qty>0 前置守卫会在边界值上与后端分叉。
+  if (produced >= qty) return 'completed'
   if (produced > 0) return 'partial'
   return 'pending'
 }

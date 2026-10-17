@@ -271,6 +271,7 @@ export function useMaterialRegistrations(activeTab: Ref<string>) {
 
   const hRegistrations = computed<Registration[]>(() => historyQuery.data.value?.registrations || [])
   const hPages = computed(() => historyQuery.data.value?.pages ?? historyQuery.data.value?.total_pages ?? 1)
+  const historyCount = computed(() => historyQuery.data.value?.total ?? 0)
   const hIsLoading = computed(() => historyQuery.isLoading.value)
   const hIsFetching = computed(() => historyQuery.isFetching.value && !historyQuery.isLoading.value)
 
@@ -308,7 +309,7 @@ export function useMaterialRegistrations(activeTab: Ref<string>) {
     toastMsg, toastType, toastIcon, toast,
     pPage, pPerPage, pPages, pIsLoading, pIsFetching, progressRows, progressCount,
     progressOrderRows, filteredOrderRows, showSearchEmpty, searchKeyword, stats,
-    hPage, hPerPage, hPages, hIsLoading, hIsFetching, hRegistrations,
+    hPage, hPerPage, hPages, historyCount, hIsLoading, hIsFetching, hRegistrations,
     loadProgress, loadHistory, ensureProgressLoaded, ensureHistoryLoaded,
     onProgressPageChange, onHistoryPageChange,
   }

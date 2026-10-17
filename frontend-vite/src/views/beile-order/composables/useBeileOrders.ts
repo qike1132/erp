@@ -376,10 +376,10 @@ export function useBeileOrders() {
 
   /**
    * 输入文本与已应用筛选分离：
-   * - filters.orderNo / filters.customer = 输入框显示文本（用户自由键入，不触发筛选）
+   * - filters.productKw / filters.customer = 输入框显示文本（用户自由键入，不触发筛选）
    * - appliedProduct / appliedCustomer = 已确认的筛选值（选择建议 / 点击查询后生效）
    */
-  const filters = reactive({ orderNo: '', customer: '' })
+  const filters = reactive({  productKw: '', customer: '' })
   const appliedProduct = ref('')
   const appliedCustomer = ref('')
 
@@ -469,13 +469,13 @@ export function useBeileOrders() {
 
   function handleSearch() {
     // 点击查询按钮：将输入框当前文本确认为筛选值
-    appliedProduct.value = filters.orderNo
+    appliedProduct.value = filters.productKw
     appliedCustomer.value = filters.customer
     refetch()
   }
 
   function handleReset() {
-    filters.orderNo = ''
+    filters.productKw = ''
     filters.customer = ''
     appliedProduct.value = ''
     appliedCustomer.value = ''
@@ -691,7 +691,7 @@ export function useBeileOrders() {
    * 600ms > 下拉搜索防抖 500ms，快速连续键入不会逐键触发查询抖动。
    */
   let applyKwTimer: ReturnType<typeof setTimeout> | null = null
-  watch(() => filters.orderNo, (val) => {
+  watch(() => filters.productKw, (val) => {
     if (applyKwTimer) {
       clearTimeout(applyKwTimer)
       applyKwTimer = null

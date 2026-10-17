@@ -237,9 +237,20 @@ async function addStaged() {
     // SKU/客户的陈旧值（闸门与展示都按它判定），null≠「已验证为最新」。
     await fetchShipmentInfo()
     const avail = shipmentInfo.value?.available_quantity
-    if (avail !== undefined && form.quantity > avail) {
-      showToast(`出货数量超过可出货量！可出货: ${avail}`, 'error')
-      return
+    if (avail !== undefined) {
+      // 2026-10-17 审计 P2-45：产品级可出货量校验必须累计同产品/客户已暂存量，
+      // 否则多次添加可累计超过可用量，提交时才被后端拒（部分出货成功）。
+      const stagedSameProduct = staged.value
+        .filter((s) => s.product_id === form.productId && s.customer === form.customer)
+        .reduce((sum, s) => sum + (s.quantity || 0), 0)
+      const effectiveAvail = avail - stagedSameProduct
+      if (form.quantity > effectiveAvail) {
+        showToast(
+          `出货数量超过可出货量！可出货: ${effectiveAvail}（已暂存 ${stagedSameProduct}）`,
+          'error',
+        )
+        return
+      }
     }
   }
 
@@ -297,6 +308,11 @@ function saveEditStaged() {
   if (editStagedIdx.value < 0) return
   const item = staged.value[editStagedIdx.value]
   if (!item) return
+  // 2026-10-17 审计 P2-46：编辑对话框此前无输入校验（HTML min 不拦键入）
+  if (!Number.isInteger(editStagedForm.quantity) || editStagedForm.quantity < 1) {
+    showToast('数量必须为正整数', 'warning')
+    return
+  }
   // 批次闸门同样要过：编辑可把数量调大，绕过它就会在提交时才被后端拒（部分出货成功）。
   // excludeId 排除被编辑项自身——它已计入 staged，不排除会把可用量算小。
   if (!checkBatchAvailability({

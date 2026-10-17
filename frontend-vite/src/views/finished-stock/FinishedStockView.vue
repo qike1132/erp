@@ -122,7 +122,7 @@
  * 数据源 GET /finished-stock/summary（与 /stock 同源：包装部入库 + 批次出货扣减）。
  */
 import { ref, computed, watch } from 'vue'
-import { useQuery, keepPreviousData } from '@tanstack/vue-query'
+import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/vue-query'
 import UiDataTable from '@/components/ui/UiDataTable.vue'
 import type { TableColumn } from '@/components/ui/UiDataTable.vue'
 import CustomerChipBar from '@/components/ui/CustomerChipBar.vue'
@@ -147,6 +147,7 @@ const LOW_STOCK_THRESHOLD = 100
 const debouncedProduct = useDebouncedRef(computed(() => filters.value.product), 300)
 const page = ref(1)
 const perPage = ref(20)
+const queryClient = useQueryClient()
 
 const { data, isLoading } = useQuery({
   queryKey: ['finished-stock', () => filters.value.customer, debouncedProduct, () => page.value, () => perPage.value],
@@ -234,6 +235,9 @@ async function saveRemark(row: FinishedStockRow, text: string) {
       remark: text,
     })
     row.remark = text.trim()
+    // 2026-10-17 审计 P2-44：只改本地行对象时，翻页/重渲染会从旧缓存重建并丢改动；
+    // 保存成功后失效查询缓存，让服务端真值回填。
+    queryClient.invalidateQueries({ queryKey: ['finished-stock'] })
     showToast('备注已保存', 'success')
     editingKey.value = null
   } catch (err: unknown) {

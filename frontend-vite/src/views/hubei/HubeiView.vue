@@ -119,8 +119,8 @@ useWebSocket({
 
 /** 筛选栏 v-model：双向绑定到 composable 的 filters（reactive） */
 const filterOrderNo = computed({
-  get: () => filters.orderNo,
-  set: (v: string) => { filters.orderNo = v },
+  get: () => filters.productKw,
+  set: (v: string) => { filters.productKw = v },
 })
 const filterCustomer = computed({
   get: () => filters.customer,

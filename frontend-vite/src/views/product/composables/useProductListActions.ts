@@ -48,6 +48,8 @@ export function useProductListActions(confirmDialog: ConfirmDialogLike) {
   // 2026-10-17 审计 F-FE-WS-A-01：读失败时编辑基线被清成空集，若仍允许保存，
   // 后端「全量替换」语义会把该 SKU 整张 BOM 删光。此标记禁止在未加载成功时保存。
   const bomLoadFailed = ref(false)
+  // 2026-10-17 审计 P2-51：保存防重复提交（双击会并发发起两次全量替换）
+  const bomSaving = ref(false)
 
   const bomTabs = [
     { key: 'fabric' as const, label: '面料类', icon: 'fas fa-scroll' },
@@ -123,7 +125,11 @@ export function useProductListActions(confirmDialog: ConfirmDialogLike) {
     await Promise.all([loadBomData(row.id), loadSupplierOptions()])
   }
 
+  // 2026-10-17 审计 P2-58：加载序号防竞态——快速切换产品时旧响应可能覆盖新数据
+  let bomLoadSeq = 0
+
   async function loadBomData(productId: number) {
+    const seq = ++bomLoadSeq
     bomRoles.value = []
     selectedRole.value = null
     defaultScopeName.value = '默认BOM'
@@ -135,6 +141,7 @@ export function useProductListActions(confirmDialog: ConfirmDialogLike) {
         product?: { roles?: { id: number; name: string }[]; default_bom_label?: string | null }
         materials?: BomMaterialRecord[]
       }
+      if (seq !== bomLoadSeq) return // 已被更新的加载取代，丢弃旧响应
       if (!res.success) {
         // success=false 同样不能当编辑基线（空基线 + 保存 = 全删）
         bomLoadFailed.value = true
@@ -169,6 +176,7 @@ export function useProductListActions(confirmDialog: ConfirmDialogLike) {
       selectedRole.value = null
       bomLoadFailed.value = false // 数据完整落地，解除保存禁令
     } catch (error) {
+      if (seq !== bomLoadSeq) return
       console.error('加载BOM数据失败:', error)
       bomLoadFailed.value = true
       showToast('加载BOM数据失败，禁止保存', 'error')
@@ -263,6 +271,7 @@ export function useProductListActions(confirmDialog: ConfirmDialogLike) {
   }
 
   async function saveBom() {
+    if (bomSaving.value) return
     // 2026-10-17 审计 F-FE-WS-A-01：BOM 未加载成功时基线是空集，
     // 提交会按「全量替换」语义删光该 SKU 整张 BOM —— 禁止保存。
     if (bomLoadFailed.value) {
@@ -350,6 +359,7 @@ export function useProductListActions(confirmDialog: ConfirmDialogLike) {
     }
 
     try {
+      bomSaving.value = true
       const payload = {
         fabrics,
         accessories,
@@ -370,6 +380,8 @@ export function useProductListActions(confirmDialog: ConfirmDialogLike) {
       }
     } catch {
       showToast('保存BOM失败', 'error')
+    } finally {
+      bomSaving.value = false
     }
   }
 

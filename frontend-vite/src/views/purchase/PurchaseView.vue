@@ -143,7 +143,7 @@
       @apply-loss-rate="handleApplyLossRate"
       @apply-fabric-loss-rate="handleApplyFabricLossRate"
       @export-factory="summary.exportFactory"
-      @export-supplier="summary.exportSupplier"
+      @export-supplier="handleExportSupplier"
       @print-factory="summary.printFactory"
       @print-supplier="summary.printSupplier"
     />
@@ -184,6 +184,7 @@ const {
   handleCompletedPageChange,
   handleRemoveCompletedFilter,
   handleExport,
+  handleExportSupplier,
   exporting,
 } = usePurchaseHandlers()
 

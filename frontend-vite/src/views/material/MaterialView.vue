@@ -33,6 +33,7 @@
         :p-is-fetching="pIsFetching"
         :p-per-page="pPerPage"
         :p-pages="pPages"
+        :p-count="progressCount"
         :show-search-empty="showSearchEmpty"
         @page="onProgressPageChange"
         @view-supplier="viewSupplierDetail"
@@ -46,6 +47,7 @@
         :h-is-fetching="hIsFetching"
         :h-per-page="hPerPage"
         :h-pages="hPages"
+        :h-count="historyCount"
         @page="onHistoryPageChange"
         @view-detail="viewDetail"
       />
@@ -116,7 +118,7 @@ const {
   toastMsg, toastType, toastIcon, toast,
   pPage, pPerPage, pPages, pIsLoading, pIsFetching, progressCount,
   progressOrderRows, filteredOrderRows, showSearchEmpty, searchKeyword, stats,
-  hPerPage, hPages, hIsLoading, hIsFetching, hRegistrations,
+  hPerPage, hPages, historyCount, hIsLoading, hIsFetching, hRegistrations,
   loadProgress, ensureProgressLoaded, ensureHistoryLoaded,
   onProgressPageChange, onHistoryPageChange,
 } = useMaterialRegistrations(activeTab)

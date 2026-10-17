@@ -19,7 +19,7 @@
           :loading="pIsLoading && !progressOrderRows.length"
           :paginator="true"
           :rows="pPerPage"
-          :total-records="pPages * pPerPage"
+          :total-records="pCount"
           row-key="orderNo"
           @page="emit('page', $event)"
         >
@@ -106,6 +106,8 @@ defineProps<{
   pIsFetching: boolean
   pPerPage: number
   pPages: number
+  /** 后端精确总条数（2026-10-17 审计 P2-43：此前用 pages × perPage 估算） */
+  pCount: number
   showSearchEmpty: boolean
 }>()
 

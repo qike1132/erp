@@ -263,7 +263,13 @@ async function triggerScheduleNow() {
     toast.info('当前没有启用的定时任务')
     return
   }
-  await backupApi.triggerSchedule(first.name)
+  try {
+    await backupApi.triggerSchedule(first.name)
+    toast.success('已触发定时备份')
+  } catch {
+    // 2026-10-17 审计 P2-56：此前是全文件唯一无 catch 的写操作
+    toast.error('触发定时备份失败，请重试')
+  }
 }
 
 async function validatePath(path: string) {

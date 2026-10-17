@@ -260,8 +260,9 @@ export function useStockReturn() {
   async function saveReturnEdit() {
     const form = returnEditForm.value
     if (!form) return
-    if (!Number.isFinite(form.quantity) || form.quantity < 1) {
-      showToast('请填写大于 0 的退货数量', 'error')
+    // 2026-10-17 审计 P2-47：与新建口径一致，必须为正整数（此前允许 1.5）
+    if (!Number.isInteger(form.quantity) || form.quantity < 1) {
+      showToast('退货数量必须为正整数', 'error')
       return
     }
     const saved = await editMutation.run({

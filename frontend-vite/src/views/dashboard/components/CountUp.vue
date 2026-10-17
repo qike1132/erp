@@ -3,7 +3,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
+import { ref, watch, onMounted, onUnmounted } from 'vue'
 
 const props = defineProps<{
   target: number
@@ -41,5 +41,11 @@ watch(() => props.target, (newVal, oldVal) => {
 
 onMounted(() => {
   animate(0, props.target, props.duration ?? 800)
+})
+
+// 2026-10-17 审计 P2-57：组件卸载后 rAF 链会继续跑到结束，写已卸载组件的 ref
+onUnmounted(() => {
+  if (rafId) cancelAnimationFrame(rafId)
+  rafId = null
 })
 </script>

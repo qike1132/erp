@@ -8,7 +8,7 @@
  * 修复：键入停顿 600ms 自动把输入文本确认为筛选值（appliedProduct），
  * 服务端 product 过滤 + 客户端 displayOrders 二次过滤同键生效。
  *
- * 测试通过宿主组件直接操作 provideBeileOrders 状态实例（filters.orderNo），
+ * 测试通过宿主组件直接操作 provideBeileOrders 状态实例（filters.productKw），
  * 用 fake timers 推进防抖窗口，断言：
  * - 未停顿满 600ms 不应用（避免输入中途表格抖动）；
  * - 停顿满 600ms 自动应用 → displayOrders 仅保留命中行；
@@ -137,7 +137,7 @@ describe('beile-order 搜索：自由键入防抖自动应用（BUG-1）', () =>
   it('键入未停顿满 600ms 不应用筛选（避免输入中途表格抖动）', async () => {
     const wrapper = await mountHost()
     const bo = (wrapper.vm as unknown as { bo: { filters: { orderNo: string }; appliedProduct: { value: string } } }).bo
-    bo.filters.orderNo = '变形金刚'
+    bo.filters.productKw = '变形金刚'
     await flushPromises()
     vi.advanceTimersByTime(599)
     await nextTick()
@@ -153,7 +153,7 @@ describe('beile-order 搜索：自由键入防抖自动应用（BUG-1）', () =>
         displayOrders: { value: Array<{ id: number; product_name?: string }> }
       }
     }).bo
-    bo.filters.orderNo = '变形金刚'
+    bo.filters.productKw = '变形金刚'
     await flushPromises()
     vi.advanceTimersByTime(600)
     await nextTick()
@@ -168,10 +168,10 @@ describe('beile-order 搜索：自由键入防抖自动应用（BUG-1）', () =>
     const bo = (wrapper.vm as unknown as {
       bo: { filters: { orderNo: string }; appliedProduct: { value: string } }
     }).bo
-    bo.filters.orderNo = '变形'
+    bo.filters.productKw = '变形'
     await flushPromises()
     vi.advanceTimersByTime(400)
-    bo.filters.orderNo = '变形金刚'
+    bo.filters.productKw = '变形金刚'
     await flushPromises()
     vi.advanceTimersByTime(400)
     expect(bo.appliedProduct.value).toBe('')
@@ -185,12 +185,12 @@ describe('beile-order 搜索：自由键入防抖自动应用（BUG-1）', () =>
     const bo = (wrapper.vm as unknown as {
       bo: { filters: { orderNo: string }; appliedProduct: { value: string } }
     }).bo
-    bo.filters.orderNo = '变形金刚'
+    bo.filters.productKw = '变形金刚'
     await flushPromises()
     vi.advanceTimersByTime(600)
     await nextTick()
     expect(bo.appliedProduct.value).toBe('变形金刚')
-    bo.filters.orderNo = ''
+    bo.filters.productKw = ''
     await flushPromises()
     expect(bo.appliedProduct.value).toBe('')
   })

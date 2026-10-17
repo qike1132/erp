@@ -5,9 +5,6 @@
       <router-view />
     </div>
     <MobileTabBar :tabs="tabs" @tab-click="handleTabAction" />
-    <MobileSubPage :visible="subPageVisible" @closed="subPageVisible = false">
-      <router-view name="sub" />
-    </MobileSubPage>
     <div v-if="quickActionsVisible" class="m-quick-overlay" @click="quickActionsVisible = false">
       <div class="m-quick-sheet" @click.stop>
         <h3 class="m-quick-title">快捷操作</h3>
@@ -34,12 +31,10 @@ import { ref, computed, h, defineComponent, markRaw, type Component } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import MobileTabBar from './components/MobileTabBar.vue'
-import MobileSubPage from './components/MobileSubPage.vue'
 import MobileNotificationBell from './components/MobileNotificationBell.vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
-const subPageVisible = ref(false)
 const quickActionsVisible = ref(false)
 
 /**

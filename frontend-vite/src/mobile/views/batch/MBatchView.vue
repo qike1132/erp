@@ -54,7 +54,9 @@ import MListItem from '@/mobile/components/MListItem.vue'
 import MEmpty from '@/mobile/components/MEmpty.vue'
 import MSpinner from '@/mobile/components/MSpinner.vue'
 
-type BatchItem = BatchQueryItem & { order_id?: number }
+// 2026-10-17 审计 P2-65：后端 BatchQueryItem 不返回 order_id，此前前端扩展的
+// 幽灵字段永远 undefined（已随 item-key 修正一并移除）
+type BatchItem = BatchQueryItem
 
 const keyword = ref('')
 const statusFilter = ref('all')

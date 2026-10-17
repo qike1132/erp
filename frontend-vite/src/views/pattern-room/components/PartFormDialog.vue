@@ -3,6 +3,7 @@ import { ref, computed, watch } from 'vue'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import UiButton from '@/components/ui/UiButton.vue'
 import PartFieldCombobox from './PartFieldCombobox.vue'
+import { showToast } from '@/composables/useToast'
 import type { BatchPartCreateRequest } from '@/api/patternRoom'
 import {
   PART_EDIT_FIELDS,
@@ -79,7 +80,11 @@ function handleSubmit() {
   const seen = new Set<string>()
   for (const row of filledRows) {
     const name = row.part_name.trim()
-    if (seen.has(name)) return
+    if (seen.has(name)) {
+      // 2026-10-17 审计 P2-39：此前静默 return，用户点提交无任何反馈
+      showToast(`部位名称「${name}」重复，请修改后再提交`, 'warning')
+      return
+    }
     seen.add(name)
   }
 

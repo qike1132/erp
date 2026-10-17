@@ -8,6 +8,8 @@ import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { useWebSocket } from '@/composables/useWebSocket'
 import { usePurchaseDetail } from './usePurchaseDetail'
 import { usePurchaseActions } from './usePurchaseActions'
+import { showToast } from '@/composables/useToast'
+import { getErrorMessage } from '@/types/errors'
 
 /**
  * usePurchaseHandlers — 采购页面顶层协调器
@@ -77,6 +79,19 @@ export function usePurchaseHandlers() {
   unprocessed.load()
   purchaseOrders.load()
 
+  /**
+   * 2026-10-17 审计 P2-40：导出供应商失败时此前无 catch，异常进入 Vue
+   * app.config.errorHandler，界面弹出「页面渲染出现异常，请刷新页面重试」——
+   * 与真实原因（导出接口失败）完全无关。改为就地提示。
+   */
+  async function handleExportSupplier() {
+    try {
+      await summary.exportSupplier()
+    } catch (e) {
+      showToast(getErrorMessage(e) || '导出供应商失败', 'error')
+    }
+  }
+
   return {
     activeTab,
     purchaseOrders,
@@ -88,6 +103,7 @@ export function usePurchaseHandlers() {
     detailOrder,
     switchTab,
     handleViewDetail,
+    handleExportSupplier,
     ...actions,
   }
 }
