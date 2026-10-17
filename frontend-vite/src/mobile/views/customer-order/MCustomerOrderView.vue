@@ -42,9 +42,22 @@ import MList from '@/mobile/components/MList.vue'
 import MListItem from '@/mobile/components/MListItem.vue'
 import MEmpty from '@/mobile/components/MEmpty.vue'
 import MSpinner from '@/mobile/components/MSpinner.vue'
+import { showToast } from '@/composables/useToast'
 
 const activeTab = ref('all')
-const tabChips = [{ label: '全部', value: 'all' }, { label: '待处理', value: 'pending' }, { label: '已完成', value: 'completed' }]
+// 2026-10-17 审计 AUD-20：筛选值必须是后端中文状态（shared_models/order.py
+// VALID_ORDER_STATUSES）。此前用 pending/completed 等英文键，/orders/list
+// 会按等值匹配直接返回空列表——状态筛选 100% 失效且用户无任何反馈。
+const tabChips = [
+  { label: '全部', value: 'all' },
+  { label: '待备货', value: '待备货' },
+  { label: '部分备货', value: '部分备货' },
+  { label: '已备货', value: '已备货' },
+  { label: '待出货', value: '待出货' },
+  { label: '已出货', value: '已出货' },
+  { label: '批次已完成', value: '批次已完成' },
+  { label: '已取消', value: '已取消' },
+]
 const keyword = ref('')
 // 字段与后端 OrderSerializer.LIST_CONFIG 对齐（F-FE-MOBILE-02：原先读
 // product_name/customer_name/date 等后端不返回的键，副标题恒为空）
@@ -60,6 +73,11 @@ async function handleSearch() {
     const res = await orderApi.list({ keyword: keyword.value, status: activeTab.value === 'all' ? '' : activeTab.value, page: page.value, per_page: perPage })
     orders.value = res?.data || []
     total.value = res?.total || 0
+  } catch {
+    // 此前无 catch：请求失败时列表静默保持旧数据（或空白），用户零感知
+    orders.value = []
+    total.value = 0
+    showToast('订单查询失败，请重试', 'error')
   } finally { loading.value = false }
 }
 
@@ -67,20 +85,20 @@ watch([activeTab, page], handleSearch)
 onMounted(handleSearch)
 
 function orderColor(s: string | undefined) {
-  if (s === 'completed' || s === 'done') return 'var(--m-accent-emerald)'
-  if (s === 'pending') return 'var(--m-accent-amber)'
-  if (s === 'cancelled') return 'var(--m-accent-rose)'
+  if (s === '已出货' || s === '批次已完成') return 'var(--m-accent-emerald)'
+  if (s === '待备货' || s === '部分备货') return 'var(--m-accent-amber)'
+  if (s === '已取消') return 'var(--m-accent-rose)'
   return 'var(--m-accent)'
 }
 function orderBg(s: string | undefined) {
-  if (s === 'completed' || s === 'done') return 'rgba(48,209,88,0.1)'
-  if (s === 'pending') return 'rgba(255,149,0,0.1)'
-  if (s === 'cancelled') return 'rgba(255,45,85,0.1)'
+  if (s === '已出货' || s === '批次已完成') return 'rgba(48,209,88,0.1)'
+  if (s === '待备货' || s === '部分备货') return 'rgba(255,149,0,0.1)'
+  if (s === '已取消') return 'rgba(255,45,85,0.1)'
   return 'rgba(0,113,227,0.1)'
 }
 function orderLabel(s: string | undefined) {
-  const map: Record<string, string> = { pending: '待处理', processing: '处理中', completed: '已完成', done: '已完成', cancelled: '已取消' }
-  return (s && map[s]) || s || '—'
+  // 后端状态本身即中文展示文案；未知值原样显示，不再维护第二套映射
+  return s || '—'
 }
 </script>
 

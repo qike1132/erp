@@ -9,6 +9,7 @@ import { nextTick, ref, type Ref } from 'vue'
 import type { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { patternRoomApi } from '@/api/patternRoom'
 import type { BatchPartCreateRequest, PartDetail, PartUpdateRequest } from '@/api/patternRoom'
+import { showToast } from '@/composables/useToast'
 import { getErrorStatus } from '@/types/errors'
 import { createEmptyEditData, PART_EDIT_FIELDS, usePartInlineEdit, type PartEditData } from './usePartInlineEdit'
 import { createManageGuard } from './useManageGuard'
@@ -93,6 +94,9 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
       }
     } catch (e) {
       console.error('[PatternRoomView] 批量创建部位失败:', e)
+      // 2026-10-17 审计 AUD-12：全局拦截器对非 401/403 无用户兜底，
+      // catch 里只打 console 等于「假成功」——用户看不到任何失败信号。
+      showToast('批量创建部位失败，请重试', 'error')
     } finally {
       partHook.submitting.value = false
     }
@@ -113,6 +117,7 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
       }
     } catch (e) {
       console.error('[PatternRoomView] 设置最终版本失败:', e)
+      showToast('设置最终版本失败，请重试', 'error')
     }
   }
 
@@ -151,6 +156,7 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
       }
     } catch (e) {
       console.error('[PatternRoomView] 复制部位版本失败:', e)
+      showToast('复制部位版本失败，请重试', 'error')
     }
   }
 
@@ -207,6 +213,7 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
       }
     } catch (e) {
       console.error('[PatternRoomView] 保存部位编辑失败:', e)
+      showToast('保存失败，请重试', 'error')
       // 409 乐观锁冲突：局部 patch 未更新 version，需全量刷新获取最新数据
       if (getErrorStatus(e) === 409 && selectedProjectId.value) {
         await partHook.fetchPartsByVersion(
@@ -242,6 +249,7 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
       }
     } catch (e) {
       console.error('[PatternRoomView] 删除部位版本失败:', e)
+      showToast('删除部位版本失败，请重试', 'error')
     }
   }
 

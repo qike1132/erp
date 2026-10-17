@@ -116,6 +116,7 @@ export function usePatternRoomProjectActions(options: UsePatternRoomProjectActio
       }
     } catch (e) {
       console.error('[PatternRoomView] 标记完成失败:', e)
+      showToast('标记完成失败，请重试', 'error')
     }
   }
 
@@ -135,6 +136,7 @@ export function usePatternRoomProjectActions(options: UsePatternRoomProjectActio
       }
     } catch (e) {
       console.error('[PatternRoomView] 取消项目失败:', e)
+      showToast('取消项目失败，请重试', 'error')
     }
   }
 

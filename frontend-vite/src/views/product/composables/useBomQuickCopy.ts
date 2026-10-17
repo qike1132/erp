@@ -6,18 +6,24 @@ import type { BomSearchProduct, ProgressState, Role } from './bomTypes'
 
 interface UseBomQuickCopyDeps {
   currentProductId: Ref<number | null>
+  /** 当前产品名（用于覆盖确认文案） */
+  currentProductName: Ref<string>
   reloadBom: (productId: number) => Promise<void>
   /** 当前选中的角色；null = 默认 BOM 作用域，复制物料将归属到该角色 */
   selectedRole: Ref<Role | null>
   /** 复制成功后按 id 回选目标角色（新建角色落库后 id 会变） */
   selectRoleById: (roleId: number) => void
+  /** 默认作用域覆盖前的二次确认（目标产品已有 BOM 时调用） */
+  confirmOverwrite: (productName: string) => Promise<boolean>
 }
 
 /**
  * BOM 快速复制（UiAutocomplete 驱动）
  * 简化版：自动补全委托给 UiAutocomplete，本模块只处理复制逻辑。
  */
-export function useBomQuickCopy({ currentProductId, reloadBom, selectedRole, selectRoleById }: UseBomQuickCopyDeps) {
+export function useBomQuickCopy({
+  currentProductId, currentProductName, reloadBom, selectedRole, selectRoleById, confirmOverwrite,
+}: UseBomQuickCopyDeps) {
   const quickCopyKeyword = ref('')
   const quickCopyLoading = ref(false)
   const quickCopyProgress = reactive<ProgressState>({ visible: false, percent: 0, text: '' })
@@ -104,6 +110,34 @@ export function useBomQuickCopy({ currentProductId, reloadBom, selectedRole, sel
       quickCopyLoading.value = false
       showToast(target.message, 'warning')
       return
+    }
+
+    quickCopyLoading.value = true
+
+    // 2026-10-17 审计 AUD-18：未选角色时走产品级默认作用域，后端 overwrite=true
+    // 会先删目标产品四张 BOM 表再替换。此前快速复制全程零确认——误点即不可逆
+    // 数据丢失。目标已有 BOM 时必须先确认（角色作用域由用户显式选择，维持原行为）。
+    if (target.roleId == null && currentProductId.value != null) {
+      try {
+        const existing = (await productApi.loadBom(currentProductId.value)) as {
+          success?: boolean
+          materials?: unknown[]
+        }
+        if (existing?.success && (existing.materials?.length ?? 0) > 0) {
+          const ok = await confirmOverwrite(currentProductName.value)
+          if (!ok) {
+            hideProgress()
+            quickCopyLoading.value = false
+            return
+          }
+        }
+      } catch {
+        // 读取失败时保守放行原逻辑？不——无法确认是否覆盖，宁可中止并提示
+        hideProgress()
+        quickCopyLoading.value = false
+        showToast('读取目标产品 BOM 失败，已取消复制', 'error')
+        return
+      }
     }
 
     showProgress(40, `正在从 "${sourceName}" 复制BOM...`)

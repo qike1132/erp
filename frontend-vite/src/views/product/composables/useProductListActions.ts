@@ -378,9 +378,16 @@ export function useProductListActions(confirmDialog: ConfirmDialogLike) {
   // 注入 selectRoleById：复制成功后回选目标角色（新建角色落库后 id 会变）
   const quickCopy = useBomQuickCopy({
     currentProductId,
+    currentProductName: bomProductName,
     reloadBom: loadBomData,
     selectedRole,
     selectRoleById,
+    // 2026-10-17 审计 AUD-18：默认作用域覆盖前二次确认，避免误点清空目标 BOM
+    confirmOverwrite: (productName: string) => confirmDialog.confirm(
+      `目标产品「${productName}」已有 BOM，快速复制将删除其全部角色/面料/辅料/填充物并替换为源产品 BOM。确定继续吗？`,
+      '此操作不可从界面恢复',
+      'danger',
+    ),
   })
 
   // ===== 复制 BOM 对话框（抽离至 useBomCopyDialog） =====
