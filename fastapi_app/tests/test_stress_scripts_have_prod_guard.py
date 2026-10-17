@@ -8,7 +8,6 @@
    「新增一个压测脚本忘了加守卫」被当场拦住。
 """
 import ast
-import os
 from pathlib import Path
 from urllib.parse import urlparse
 

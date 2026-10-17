@@ -244,6 +244,12 @@ async def lifespan(application: FastAPI):
     from fastapi_app.core.cache import start_l1_broadcast_listener
     await start_l1_broadcast_listener()
 
+    # 2026-10-17 审计 F-BE-CORE-08：采购中心跨进程失效监听器原先只有关停钩子、
+    # 从未启动（erp:cache_invalidation 频道有发布方无消费方）。与 L1 广播并列启动，
+    # 自带重连；关停由下方 stop_purchase_cache_listener 统一回收。
+    from fastapi_app.core.purchase_cache import start_purchase_cache_listener
+    await start_purchase_cache_listener()
+
     # 启动时同步备份记录与文件系统（P1+P2：补录缺失/清理孤立/修正僵尸状态）
     try:
         from fastapi_app.services.backup.records import sync_backup_records

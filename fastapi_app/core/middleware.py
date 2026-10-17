@@ -239,6 +239,19 @@ def _setup_csrf(app: FastAPI) -> None:
                         status_code=403,
                         content={"detail": "CSRF token 验证失败"},
                     )
+            else:
+                # 2026-10-17 审计 F-BE-CORE-07：同时带 Bearer 头与 Cookie 的请求
+                # 原先两支都不进（无 else）→ CSRF 与 Origin 双双不校验，而 deps 的
+                # 认证链在 Bearer 解码失败时会静默回落 Cookie —— 攻击者以
+                # credentials:'include' + 伪 Bearer 头即可借受害者 Cookie 认证。
+                # 按「存在 Cookie 会话就按 Cookie 请求对待」收口：必须过 double-submit。
+                csrf_cookie = request.cookies.get("fastapi_csrf_token")
+                csrf_header = request.headers.get("X-CSRF-Token")
+                if not csrf_cookie or not csrf_header or not secrets.compare_digest(csrf_cookie, csrf_header):
+                    return JSONResponse(
+                        status_code=403,
+                        content={"detail": "CSRF token 验证失败"},
+                    )
 
         response = await call_next(request)
 
