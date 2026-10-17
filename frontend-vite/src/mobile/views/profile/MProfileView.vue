@@ -13,10 +13,9 @@
       </div>
 
       <MList header="设置" style="margin-bottom: 16px">
-        <MListItem title="账号信息" subtitle="查看个人资料">
-          <template #icon><div class="m-menu-icon" style="background:rgba(0,113,227,0.08)"><svg viewBox="0 0 24 24" fill="none" stroke="#0071E3" stroke-width="2" width="16" height="16"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></svg></div></template>
-        </MListItem>
-        <MListItem title="权限管理" subtitle="查看权限列表" to="/notifications">
+        <!-- F-FE-MOBILE-08：原「账号信息」无 to 无 click 是死行，已删；
+             「权限管理」原 to=/notifications 文案误导，改为如实「通知中心」。 -->
+        <MListItem title="通知中心" subtitle="查看通知" to="/notifications">
           <template #icon><div class="m-menu-icon" style="background:rgba(175,82,222,0.08)"><svg viewBox="0 0 24 24" fill="none" stroke="#AF52DE" stroke-width="2" width="16" height="16"><rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg></div></template>
         </MListItem>
         <MListItem title="网络状态" :subtitle="networkInfo">
@@ -39,7 +38,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { authApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
@@ -50,8 +49,17 @@ import MListItem from '@/mobile/components/MListItem.vue'
 const authStore = useAuthStore()
 const router = useRouter()
 
-const networkConnected = computed(() => navigator.onLine)
+// F-FE-MOBILE-09：computed(()=>navigator.onLine) 的来源非响应式，首渲染后
+// 永久缓存——离线仍显示「已连接」。改由 online/offline 事件驱动响应式 ref。
+const networkConnected = ref(navigator.onLine)
 const networkInfo = computed(() => networkConnected.value ? '已连接' : '离线')
+const _updateNet = () => { networkConnected.value = navigator.onLine }
+window.addEventListener('online', _updateNet)
+window.addEventListener('offline', _updateNet)
+onUnmounted(() => {
+  window.removeEventListener('online', _updateNet)
+  window.removeEventListener('offline', _updateNet)
+})
 
 // 原「退出登录」项既无 `to` 也无 `@click`，而 MListItem 只处理 `to`，
 // 点击什么都不发生 —— **移动端根本没法登出**（共用终端下用户以为已退出、会话仍在）。

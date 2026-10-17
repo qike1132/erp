@@ -177,6 +177,9 @@ function summaryCat(category: string): SummaryRow[] {
 
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 watch(searchQuery, (q) => {
+  // F-FE-MOBILE-01：结果渲染在底部抽屉里，而 searchSheetVisible 全文件无置 true
+  // 之处——抽屉永不打开，移动端无法添加产品。有关键词即打开。
+  searchSheetVisible.value = !!q
   if (searchTimer) clearTimeout(searchTimer)
   if (!q) { searchResults.value = []; return }
   searchTimer = setTimeout(async () => {

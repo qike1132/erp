@@ -68,12 +68,14 @@ const filteredProducts = computed(() => {
 
 function handleSearch(val: string) {
   searchQuery.value = val
+  loadProducts() // 服务端搜索：关键词变化即重查
 }
 
 async function loadProducts() {
   loading.value = true
   try {
-    const res = await productApi.list({ page: 1, per_page: MOBILE_LIST_PAGE_SIZE })
+    // F-FE-MOBILE-07：服务端搜索（原先只拉 200 条本地过滤，第 201 条起「未找到匹配」是假阴性）
+    const res = await productApi.list({ page: 1, per_page: MOBILE_LIST_PAGE_SIZE, search: searchQuery.value })
     products.value = res.items ?? []
   } catch (e) {
     console.error('[MProductView] load failed:', e)

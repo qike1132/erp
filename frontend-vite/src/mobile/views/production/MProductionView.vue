@@ -29,6 +29,7 @@
 </template>
 
 <script setup lang="ts">
+import { toISODate } from '@/utils/format'
 import { ref, computed, watch, onMounted } from 'vue'
 import { dailyProductionApi } from '@/api'
 import type { DailySummary, MonthlySummary } from '@/types'
@@ -41,7 +42,8 @@ import MSpinner from '@/mobile/components/MSpinner.vue'
 
 const viewTab = ref('daily')
 const viewChips = [{ label: '日报', value: 'daily' }, { label: '月报', value: 'monthly' }]
-const selectedDate = ref(new Date().toISOString().slice(0, 10))
+// F-FE-MOBILE-06：toISOString 按 UTC 切日，东八区 00:00–07:59 会取到昨天。
+const selectedDate = ref(toISODate())
 const monthlyYear = ref(new Date().getFullYear())
 const monthlyMonth = ref(new Date().getMonth() + 1)
 // 日报/月报响应直接复用 @/types 的 DTO（S12；原先本地 ProductionSummary 带索引签名，
@@ -96,7 +98,7 @@ function prevDate() {
     monthlyMonth.value--
     if (monthlyMonth.value < 1) { monthlyMonth.value = 12; monthlyYear.value-- }
   } else {
-    const d = new Date(selectedDate.value); d.setDate(d.getDate() - 1); selectedDate.value = d.toISOString().slice(0, 10)
+    const d = new Date(selectedDate.value + 'T00:00:00'); d.setDate(d.getDate() - 1); selectedDate.value = toISODate(d)
   }
 }
 function nextDate() {
@@ -104,7 +106,7 @@ function nextDate() {
     monthlyMonth.value++
     if (monthlyMonth.value > 12) { monthlyMonth.value = 1; monthlyYear.value++ }
   } else {
-    const d = new Date(selectedDate.value); d.setDate(d.getDate() + 1); selectedDate.value = d.toISOString().slice(0, 10)
+    const d = new Date(selectedDate.value + 'T00:00:00'); d.setDate(d.getDate() + 1); selectedDate.value = toISODate(d)
   }
 }
 

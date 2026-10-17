@@ -5,7 +5,7 @@
       <MFilterChips v-model="activeTab" :chips="tabChips" />
 
       <template v-if="activeTab === 'orders'">
-        <MSearchBar v-model="keyword" placeholder="搜索订单号/产品..." @search="refetchOrders" />
+        <MSearchBar v-model="keyword" placeholder="搜索订单号/产品..." @search="() => refetchOrders()" />
         <div v-if="ordersLoading" class="m-center"><MSpinner size="lg" /></div>
         <MEmpty v-else-if="!orders?.orders?.length" title="暂无采购订单" subtitle="新订单将实时推送" />
         <MList v-else header="采购中">
@@ -26,6 +26,13 @@
             </template>
           </MListItem>
         </MList>
+        <UiPagination
+          v-if="(orders?.total || 0) > MOBILE_PAGE_SIZE"
+          :current-page="ordersPage"
+          :total-pages="Math.ceil((orders?.total || 0) / MOBILE_PAGE_SIZE)"
+          :total-items="orders?.total || 0"
+          @update:current-page="(p: number) => { ordersPage = p; refetchOrders(p) }"
+        />
       </template>
 
       <template v-if="activeTab === 'unprocessed'">
@@ -48,7 +55,7 @@
       </template>
 
       <template v-if="activeTab === 'completed'">
-        <MSearchBar v-model="completedKeyword" placeholder="搜索已完成订单..." />
+        <MSearchBar v-model="completedKeyword" placeholder="搜索已完成订单..." @search="loadCompleted()" />
         <div v-if="completedLoading" class="m-center"><MSpinner size="lg" /></div>
         <MEmpty v-else-if="!completedOrders?.orders?.length" title="暂无已完成订单" />
         <MList v-else header="已完成">
@@ -103,6 +110,10 @@ const tabChips = [
 
 const keyword = ref('')
 const completedKeyword = ref('')
+// F-FE-MOBILE-05：读 total + 翻页（原先恒第 1 页，第 51 条起在移动端不可达）
+const ordersPage = ref(1)
+const unprocessedPage = ref(1)
+const completedPage = ref(1)
 
 // 列表响应类型由 API 层签名推导，移动端不再自行声明后端 DTO（S12）
 type PurchaseOrderList = Awaited<ReturnType<typeof purchaseApi.orders>>
@@ -132,19 +143,21 @@ const detailTime = computed(() => {
   return order.order_date || '—'
 })
 
-async function refetchOrders() {
+async function refetchOrders(page = 1) {
   ordersLoading.value = true
-  try { orders.value = await purchaseApi.orders({ page: 1, per_page: MOBILE_PAGE_SIZE }) } finally { ordersLoading.value = false }
+  try { orders.value = await purchaseApi.orders({ page, per_page: MOBILE_PAGE_SIZE, keyword: keyword.value }) } finally { ordersLoading.value = false }
 }
 
-async function loadUnprocessed() {
+async function loadUnprocessed(page = 1) {
+  // 注：/unprocessed-orders 端点无 keyword 参数（审计 F-FE-MOBILE-04 仅
+  // 采购中/已完成两个页签的后端支持搜索），此页签搜索待端点增强后接线。
   unprocessedLoading.value = true
-  try { unprocessed.value = await purchaseApi.unprocessedOrders({ page: 1, per_page: MOBILE_PAGE_SIZE }) } finally { unprocessedLoading.value = false }
+  try { unprocessed.value = await purchaseApi.unprocessedOrders({ page, per_page: MOBILE_PAGE_SIZE }) } finally { unprocessedLoading.value = false }
 }
 
-async function loadCompleted() {
+async function loadCompleted(page = 1) {
   completedLoading.value = true
-  try { completedOrders.value = await purchaseApi.completed({ page: 1, per_page: MOBILE_PAGE_SIZE }) } finally { completedLoading.value = false }
+  try { completedOrders.value = await purchaseApi.completed({ page, per_page: MOBILE_PAGE_SIZE, keyword: completedKeyword.value }) } finally { completedLoading.value = false }
 }
 
 function showOrderDetail(order: PurchaseOrder | UnprocessedOrder) {
