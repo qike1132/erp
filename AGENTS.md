@@ -47,8 +47,8 @@
 
 ```bash
 python scripts/quality_gate.py    # 基线棘轮门禁：违规数【超过】scripts/gate_baseline.json 才失败
-ruff check .                      # lint（ruff.toml）
-mypy                              # 类型（mypy.ini）
+ruff check fastapi_app tests fastapi_app/tests utils   # lint（与 CI 同口径；scripts/ + server_manager/ 存量违规走棘轮记账，`ruff check .` 会报出它们）
+mypy --config-file mypy.ini --no-native-parser         # 类型（mypy.ini）。本机 mypy 2.4.0 的 ast_serialize 是需手工构建的 Rust 扩展，默认跑法会 INTERNAL ERROR（G-01）
 pytest -q                         # 回归（testpaths = tests + fastapi_app/tests）
 cd frontend-vite
 npm run type-check                # vue-tsc --noEmit
@@ -65,7 +65,7 @@ npm run check:types               # 类型对齐
 
 - **pytest 必须提权跑**：根 `.env` 的 ACL 只授予 Administrators/SYSTEM，非提权跑会因 conftest 读不到 `.env` 整批假红（连的是真实测试库 `erp_system_test`，非派生库）。正路：提权跑 `logs/_run_pytest_elevated.ps1`（2026-10-12 实测全量 4353 passed / 271 skipped）；非提权只读场景用「stub .env 为空流」脚本绕。**全量 pytest 必须独占单实例**——两进程共用 `erp_system_test` 会互撞假红（`DROP SCHEMA` + 硬编码 `SO-PERF-*`，见 `docs/agents/pitfalls.md` §7）。
 - **vitest 要把 TEMP 指进仓内**（如 `frontend-vite/.vitest-tmp`），否则 EPERM mkdir 导致全部 0 test 失败；前端构建用 `npm run build:atomic`，esbuild 需 `ESBUILD_BINARY_PATH` 指外部副本，绕开 `%TEMP%` 删除限制。
-- **pip-audit 阶段性口径（2026-10-02 起）**：CI 该步骤是 `--report` 只报告不判负（172 条漏洞中 166 条已有修复版，正解是升级依赖）。**不要**为过门禁批量登记豁免；依赖升级后再收紧。
+- **pip-audit 口径（2026-10-11 起）**：CI 已恢复判定——步骤输出 JSON 后由 `scripts/quality_gate.py --only pip_audit` 判定（豁免项见 `ruff.toml` 的 `[tool.code-quality.pip-audit-ignores]`）。**不要**为过门禁批量登记豁免；依赖升级后再收紧。
 - CI 的 lint job 另跑四项：`scan_secrets.py --verbose`（全树密钥）、`check_orphan_modules.py`（孤儿模块）、`file_size_gate.py`（PR 基线对比）、`check_requirements_lock.py`（`requirements/<tier>.lock` 与 `.txt` 同步，需 `uv`）。改动涉及模块接线/删文件/新增大文件/改 `requirements/*.txt` 时先本地跑。
 
 ### 改动范围 → 最小验证

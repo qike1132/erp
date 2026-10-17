@@ -3,8 +3,10 @@ line-length = 120
 
 # docs/ 归档文档与根目录一次性脚本历史上积累 40 条风格违规（复核 2026-10-11：
 # `ruff check .` 97 条中 docs 37 + check_workspace_acl.py 3），它们不是生产代码，
-# 扫进来只会污染全仓口径（棘轮只管 scripts/ + server_manager/）。排除后
-# `ruff check .` 与 CI 口径（fastapi_app tests fastapi_app/tests utils）一致。
+# 扫进来只会污染全仓口径（棘轮只管 scripts/ + server_manager/）。
+# 注意：exclude 只去掉 docs 与根脚本；scripts/ + server_manager/ 的存量违规仍会
+# 出现在 `ruff check .` 中（由 quality_gate 棘轮记账）。CI 口径是四目标
+# （fastapi_app tests fastapi_app/tests utils），本地请用同一命令，勿用 `ruff check .`。
 exclude = ["docs", "check_workspace_acl.py"]
 
 [lint]
