@@ -25,7 +25,7 @@ def upgrade() -> None:
         sa.Column('product_id', sa.Integer(), sa.ForeignKey('product.id', ondelete='CASCADE'), nullable=False, comment='产品ID'),
         sa.Column('batch_no', sa.String(length=100), nullable=False, server_default='', comment='批次号（空串=未分批次）'),
         sa.Column('remark', sa.Text(), nullable=False, server_default='', comment='备注内容'),
-        sa.Column('create_time', sa.DateTime(timezone=True), server_default=sa.func.now(), comment='创建时间'),
+        sa.Column('create_time', sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now(), comment='创建时间'),
         sa.Column('updated_at', sa.DateTime(timezone=True), comment='更新时间'),
     )
     # UPSERT 落点：(客户,产品,批次) 唯一。照既有 create_index_if_absent（幂等按名判重）
