@@ -77,6 +77,7 @@ async def list_orders(
     start_date: str | None = Query(None, description="开始日期筛选(YYYY-MM-DD)"),
     end_date: str | None = Query(None, description="结束日期筛选(YYYY-MM-DD)"),
     factory: str | None = Query(None, description="工厂筛选：东莞/湖北"),
+    keyword: str | None = Query(None, max_length=100, description="关键词筛选（订单号/产品名）"),
     db: AsyncSession = Depends(get_async_read_db),
     user: User = Depends(require_permission("order_manage")),
 ) -> OrderListResponse:

@@ -110,12 +110,12 @@ async def get_finished_stock_summary(
             (bo.c.product_id == bi.c.product_id) & (bo.c.batch_no == bi.c.batch_no),
         )
         .outerjoin(Product, Product.id == bi.c.product_id)
-        # 备注按聚合口径关联：customer_name 需与聚合展示值对齐（跨客户批次显示 ''）
+        # 备注键只含 (产品,批次)：customer_name 是派生展示值，批次客户构成变化会抖动，
+        # 拿它当关联键会让备注静默失联（单客户塌成 '' 后 ON 条件匹配不上）
         .outerjoin(
             FinishedStockRemark,
             (FinishedStockRemark.product_id == bi.c.product_id)
-            & (FinishedStockRemark.batch_no == bi.c.batch_no)
-            & (func.coalesce(FinishedStockRemark.customer_name, '') == bi.c.customer_name),
+            & (FinishedStockRemark.batch_no == bi.c.batch_no),
         )
     )
 
@@ -246,16 +246,17 @@ async def get_batch_available(db: AsyncSession, product_id: int, batch_no: str) 
 
 
 async def upsert_remark(
-    db: AsyncSession, *, customer_name: str, product_id: int, batch_no: str, remark: str,
+    db: AsyncSession, *, customer_name: str = '', product_id: int, batch_no: str, remark: str,
 ) -> None:
-    """页面级备注 UPSERT：键 (客户,产品,批次) 一行一条；内容清空则删行。
+    """页面级备注 UPSERT：键 (产品,批次) 一行一条；内容清空则删行。
 
-    用 PG 的 INSERT ... ON CONFLICT DO UPDATE（唯一索引 uq_fs_remark_cust_prod_batch
+    ``customer_name`` 仅为兼容既有 API 签名而保留，只作展示快照存档，
+    **不参与关联**（它是派生展示值，会随批次客户构成抖动）。
+    用 PG 的 INSERT ... ON CONFLICT DO UPDATE（唯一索引 uq_fs_remark_prod_batch
     兜底），避免「先查后写」的并发竞态；空备注走 DELETE，不留空行。
     """
     from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-    cust = (customer_name or '').strip()
     bno = (batch_no or '').strip()
     text = (remark or '').strip()
 
@@ -263,7 +264,6 @@ async def upsert_remark(
         from sqlalchemy import delete
         await db.execute(
             delete(FinishedStockRemark).where(
-                func.coalesce(FinishedStockRemark.customer_name, '') == cust,
                 FinishedStockRemark.product_id == product_id,
                 FinishedStockRemark.batch_no == bno,
             )
@@ -271,10 +271,10 @@ async def upsert_remark(
         return
 
     stmt = pg_insert(FinishedStockRemark).values(
-        customer_name=cust, product_id=product_id, batch_no=bno, remark=text,
+        customer_name=(customer_name or '').strip(), product_id=product_id, batch_no=bno, remark=text,
     )
     stmt = stmt.on_conflict_do_update(
-        index_elements=['customer_name', 'product_id', 'batch_no'],
+        index_elements=['product_id', 'batch_no'],
         set_={'remark': text, 'updated_at': func.now()},
     )
     await db.execute(stmt)

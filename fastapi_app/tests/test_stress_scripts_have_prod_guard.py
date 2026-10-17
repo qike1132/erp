@@ -19,7 +19,7 @@ if str(REPO) not in __import__('sys').path:
     import sys
     sys.path.insert(0, str(REPO))
 
-from tests._prod_guard import require_non_production  # noqa: E402
+from tests._prod_guard import require_non_production
 
 # stress_test.py 有自己的守卫实现（先于本模块存在），不强制迁移
 LEGACY_SELF_GUARDED = {"tests/stress/stress_test.py"}

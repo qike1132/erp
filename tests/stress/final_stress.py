@@ -2,14 +2,16 @@
 ERP系统压力测试 - 优化版（共享token，避免登录限速）
 """
 
-import sys as _sys, os as _os
+import os as _os
+import sys as _sys
+
 _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
-from _prod_guard import require_non_production
 import asyncio
 import statistics
 import time
 
 import aiohttp
+from _prod_guard import require_non_production
 
 BASE_URL = "http://127.0.0.1:5002"
 CONCURRENT_USERS = 100

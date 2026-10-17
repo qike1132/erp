@@ -5,12 +5,14 @@
 发 10 次 admin 登录**（打真实后端、写登录限流计数），且不产生任何用例（假绿）。
 现加 `__main__` 守卫：只有显式 `python tests/stress/test_auth.py` 才执行。
 """
-import sys as _sys, os as _os
+import os as _os
+import sys as _sys
+
 _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
-from _prod_guard import require_non_production
 import asyncio
 
 import aiohttp
+from _prod_guard import require_non_production
 
 
 async def _probe():
@@ -33,5 +35,6 @@ async def _probe():
 
 
 if __name__ == '__main__':
+    BASE_URL = "http://127.0.0.1:5002"
     require_non_production(BASE_URL)  # fail-closed 守卫（F-TEST-BE-TOP-02）
     asyncio.run(_probe())

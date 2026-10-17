@@ -86,6 +86,46 @@ async def test_empty_batch_key_distinct_from_real_batch(async_db_session):
     assert by_batch == {'': '无批次备注', 'B1': '有批次备注'}
 
 
+async def test_remark_survives_customer_display_collapse(async_db_session):
+    """回归：批次先单客户 A 写备注，后新增客户 B 使展示值塌成 ''，备注不得失联。
+
+    备注键只含 (产品,批次)——客户是派生展示值，会随批次客户构成抖动。
+    """
+    db = async_db_session
+    p = await _mk_product(db)
+    name = _uniq('RM-COLLAPSE')
+    await _mk_prod(db, product_id=p.id, qty=100, batch_no='RMX', product_name=name)
+
+    res = await fss.get_finished_stock_summary(db, product_search=name)
+    row = res['data'][0]
+    assert row['customer_name'] == 'C'
+
+    await fss.upsert_remark(db, customer_name=row['customer_name'], product_id=p.id, batch_no='RMX', remark='单客户期备注')
+    await db.flush()
+
+    # 同一批次新增另一个客户的入库行 → display_cust 塌成 ''
+    await _mk_prod(db, product_id=p.id, qty=50, batch_no='RMX', product_name=name)
+    # _mk_prod 写死 customer_name='C'，此处手工补一条 D 客户行
+    from datetime import date
+    db.add(DailyProductionRecord(
+        department='packaging', product_id=p.id, product_name=name,
+        barcode='', unit_price=0, quantity=50, production_date=date(2026, 10, 15),
+        batch_no='RMX', customer_name='D',
+    ))
+    await db.flush()
+
+    res2 = await fss.get_finished_stock_summary(db, product_search=name)
+    assert res2['data'][0]['customer_name'] == ''
+    assert res2['data'][0]['remark'] == '单客户期备注'
+
+    # 塌缩后再写一次备注，仍只更新同一行，不产生孤儿
+    await fss.upsert_remark(db, customer_name='', product_id=p.id, batch_no='RMX', remark='塌缩后备注')
+    await db.flush()
+    rows = await _rows(db, p.id)
+    assert len(rows) == 1
+    assert rows[0].remark == '塌缩后备注'
+
+
 async def test_clear_remark_deletes_row(async_db_session):
     """内容清空即删除该行（不留空行）。"""
     db = async_db_session

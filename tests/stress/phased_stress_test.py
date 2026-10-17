@@ -4,15 +4,17 @@ ERP系统分阶段压力测试
 阶段2: 10分钟/30并发
 阶段3: 15分钟/50并发
 """
-import sys as _sys, os as _os
+import os as _os
+import sys as _sys
+
 _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
-from _prod_guard import require_non_production
 import asyncio
 import statistics
 import time
 from datetime import datetime
 
 import aiohttp
+from _prod_guard import require_non_production
 
 BASE_URL = "http://127.0.0.1:5002"
 
