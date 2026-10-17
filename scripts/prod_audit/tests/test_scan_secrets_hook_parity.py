@@ -136,7 +136,7 @@ def test_shell_pwd_pattern_present() -> None:
 # 标记是否生效取决于 shell 的执行路径，静态提取正则无法覆盖，故用真实提交验证。
 
 
-def _commit_in_temp_repo(tmp_path: Path, body: str) -> subprocess.CompletedProcess:
+def _commit_in_temp_repo(tmp_path: Path, body: str, filename: str = 'sample.py') -> subprocess.CompletedProcess:
     """在临时仓库里真跑一次 `git commit`，返回其结果。"""
     repo = tmp_path / 'repo'
     (repo / '.githooks').mkdir(parents=True)
@@ -160,8 +160,10 @@ def _commit_in_temp_repo(tmp_path: Path, body: str) -> subprocess.CompletedProce
                        ('commit.gpgsign', 'false')):
         assert run('config', key, value).returncode == 0
 
-    (repo / 'sample.py').write_text(body, encoding='utf-8')
-    assert run('add', 'sample.py').returncode == 0
+    target = repo / filename
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(body, encoding='utf-8')
+    assert run('add', filename).returncode == 0
     return run('commit', '-m', 'x')
 
 
@@ -195,5 +197,19 @@ def test_hook_honours_inline_marker(tmp_path: Path, literal: str) -> None:
     result = _commit_in_temp_repo(tmp_path, f'{literal}  # secret-scan:allow\n')
     assert result.returncode == 0, (
         'hook 未识别行内 secret-scan:allow。\n'
+        f'{result.stdout}{result.stderr}'
+    )
+
+
+def test_hook_blocks_private_key_under_docs(tmp_path: Path) -> None:
+    """路径层 parity（2026-10-17 审计 AUD-25）。
+
+    CI 侧 scan_secrets.py 刻意不豁免 docs/（2026-09-17 凭据事故就在
+    docs/ui-redesign/）；本地 hook 曾用 `*/docs/*` 放行私钥文件，导致
+    「本地放行、push 后 CI 才红」——密钥已进远端历史。两侧必须同口径。
+    """
+    result = _commit_in_temp_repo(tmp_path, 'dummy\n', filename='docs/sample.pem')
+    assert result.returncode != 0, (
+        'docs/ 下的私钥文件被本地 hook 放行——与 CI 侧口径漂移。\n'
         f'{result.stdout}{result.stderr}'
     )

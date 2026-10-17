@@ -616,7 +616,12 @@ def evaluate(gate: Gate, outcome: GateOutcome, base: int | None) -> Judgement:
                      base=base, count=count)
 
 
-def load_baseline() -> dict[str, int]:
+def load_baseline() -> dict[str, int] | None:
+    """读取基线；文件缺失返回空基线，**解析失败返回 None（调用方必须失败退出）**。
+
+    2026-10-17 审计 AUD-24：此前解析失败静默返回 {} → 所有门禁判 NEW（不失败）
+    → 门禁静默全绿。基线损坏必须保守失败。
+    """
     if not BASELINE_PATH.exists():
         return {}
     try:
@@ -624,8 +629,8 @@ def load_baseline() -> dict[str, int]:
             data = json.load(fh)
         return {k: int(v) for k, v in (data.get("counts") or {}).items()}
     except (OSError, ValueError) as exc:
-        print(f"[WARN] 基线文件不可读，按空基线处理：{exc}", file=sys.stderr)
-        return {}
+        print(f"[ERROR] 基线文件损坏，拒绝按空基线放行：{exc}", file=sys.stderr)
+        return None
 
 
 def save_baseline(counts: dict[str, int]) -> None:
@@ -844,10 +849,40 @@ def run_selftest(gates: tuple[Gate, ...], thresholds: dict[str, int], audit_repo
     return 0
 
 
+def apply_update_baseline(args, hard_failure: bool, regressions, counts_now) -> int:
+    """处理 --update-baseline（2026-10-17 审计 AUD-24）。
+
+    棘轮的放松方向必须有机器拦截：存在新增违规（REGRESS）时拒绝写入新基线，
+    否则一条命令就能把「新增 N 处违规」洗成新基线。确需上调时必须显式 --force，
+    并打印逐门禁 old → new 供评审留痕。
+    """
+    if hard_failure:
+        print("[ERROR] 有门禁拿不到机器可读计数，拒绝重建基线（避免把异常写成基线）。")
+        return 2
+    if regressions and not args.force:
+        print(
+            "[ERROR] 存在新增违规，拒绝重建基线（这会让棘轮放松）。"
+            "确需上调请显式加 --force。"
+        )
+        return 2
+    if regressions and args.force:
+        print("[FORCE] 基线将上调：")
+        for gate, _outcome, judgement in regressions:
+            print(f"  {gate.key}: {judgement.base} → {judgement.count}")
+    save_baseline(counts_now)
+    print(f"[OK] 基线已更新：{BASELINE_PATH.relative_to(PROJECT_ROOT)}")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="统一代码质量门禁（基线棘轮）")
     parser.add_argument("--report", action="store_true", help="只报告，不判定失败")
     parser.add_argument("--update-baseline", action="store_true", help="用当前结果重建基线")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="配合 --update-baseline：允许在存在新增违规时上调基线（会打印 old→new）",
+    )
     parser.add_argument("--verbose", action="store_true", help="打印失败门禁的机器可读输出")
     parser.add_argument("--only", help="只运行指定门禁（key）")
     parser.add_argument(
@@ -866,6 +901,9 @@ def main() -> int:
 
     thresholds = load_thresholds()
     baseline = load_baseline()
+    if baseline is None:
+        print("[ERROR] 基线文件损坏，拒绝继续（保守失败，避免静默全绿）。")
+        return 2
 
     selected = tuple(g for g in GATES if not args.only or g.key == args.only)
     if not selected:
@@ -956,12 +994,7 @@ def main() -> int:
         print("[REPORT 模式] 不判定失败。")
         return 0
     if args.update_baseline:
-        if hard_failure:
-            print("[ERROR] 有门禁拿不到机器可读计数，拒绝重建基线（避免把异常写成基线）。")
-            return 2
-        save_baseline(counts_now)
-        print(f"[OK] 基线已更新：{BASELINE_PATH.relative_to(PROJECT_ROOT)}")
-        return 0
+        return apply_update_baseline(args, hard_failure, regressions, counts_now)
     if hard_failure or regressions:
         print("[FAIL] 存在新增质量问题，请修复后重试。")
         return 1

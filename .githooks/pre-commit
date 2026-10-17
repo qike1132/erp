@@ -98,10 +98,13 @@ for f in $staged; do
     esac
 
     # 私钥 / 凭据文件（允许 *.example / *.sample / *.template）
+    # 2026-10-17 审计 AUD-25：移除 `*/docs/*` 豁免——CI 侧 scan_secrets.py 刻意
+    # 不豁免 docs/（2026-09-17 的 428 个 Edge 凭据文件事故正发生在 docs/ui-redesign/）。
+    # 本地放行、CI 事后报警等于密钥已进远端历史，必须两侧同口径。
     case "$f" in
         *.pem|*.key|*.p12|*.pfx|*id_rsa|*id_ed25519|*.keystore|*.jks)
             case "$f" in
-                *.example|*.sample|*.template|*.md|*/docs/*) : ;;
+                *.example|*.sample|*.template|*.md) : ;;
                 *) hit="私钥/证书文件" ;;
             esac ;;
     esac
