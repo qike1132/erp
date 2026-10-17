@@ -4,6 +4,7 @@
 """
 import asyncio
 import contextlib
+import inspect
 import logging
 import os
 import tempfile
@@ -64,12 +65,12 @@ async def _build_product_map(db: AsyncSession) -> dict[str, Product]:
 
 async def _validate_and_map_product(
     product_map: dict[str, Product], product_name: str
-) -> tuple[bool, str, int | None]:
+) -> tuple[bool, str, int | None, Product | None]:
     product = product_map.get(product_name.lower().strip())
     product = product or product_map.get(product_name)
     if product:
-        return True, '', product.id
-    return False, f'产品"{product_name}"不存在', None
+        return True, '', product.id, product
+    return False, f'产品"{product_name}"不存在', None, None
 
 def _format_import_result(imported: int, entity_label: str, errors: list[str]) -> str:
     result_msg = f'成功导入 {imported} 个{entity_label}到暂存区'
@@ -99,7 +100,7 @@ async def _generic_import_staging_from_excel(
     clear_func: Callable,
     sheet_keyword: str,
     entity_label: str,
-    build_entity: Callable[[dict[str, Any], str, int | None, int, bool, str, str], object],
+    build_entity: Callable[[dict[str, Any], str, int | None, int, bool, str, str, Product | None], object],
     column_names: dict[str, str],
     required_fields: list[str],
     extra_row_validations: Callable[[dict[str, Any], int], Awaitable[list[str]]] | None = None,
@@ -150,7 +151,7 @@ async def _generic_import_staging_from_excel(
                     continue
 
                 product_name = str(field_values.get('product_name', '')).strip()
-                is_validated, validation_error, product_id = await _validate_and_map_product(
+                is_validated, validation_error, product_id, product = await _validate_and_map_product(
                     product_map, product_name
                 )
 
@@ -160,7 +161,7 @@ async def _generic_import_staging_from_excel(
 
                 entity = build_entity(
                     field_values, session_id, product_id, qty,
-                    is_validated, validation_error, product_name,
+                    is_validated, validation_error, product_name, product,
                 )
                 db.add(entity)
                 imported += 1
@@ -186,7 +187,7 @@ async def _generic_update_staging_entity(
     data: dict,
     model_class: type[Any],
     entity_label: str,
-    extra_updates: Callable[[Any, dict, AsyncSession], None] | None = None,
+    extra_updates: Callable[[Any, dict, AsyncSession], Any | Awaitable[Any]] | None = None,
     session_scope: str | None = None,
 ) -> dict:
     """通用暂存实体更新。
@@ -220,7 +221,10 @@ async def _generic_update_staging_entity(
     if 'quantity' in data:
         entity.quantity = int(data['quantity'])
     if extra_updates:
-        extra_updates(entity, data, db)
+        # 允许同步/异步两种实现：出货暂存的库存预检需要查产品当前库存
+        updates_result = extra_updates(entity, data, db)
+        if inspect.isawaitable(updates_result):
+            await updates_result
 
     await db.flush()
     await db.refresh(entity)

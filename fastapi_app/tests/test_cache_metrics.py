@@ -108,13 +108,20 @@ class TestDecoratorInstrumentation:
 
     @pytest.mark.asyncio
     async def test_redis_error_recorded(self, recorded, monkeypatch):
-        """Redis 读取异常时记录 redis_error，并降级回源"""
+        """Redis 读取异常时记录 redis_error，并降级回源。
+
+        2026-10-17 审计 AUD-10：此前这里 mock 的是**内建** ConnectionError，
+        而生产抛的是 redis.exceptions.ConnectionError（只继承 RedisError）。
+        故障模型与生产不符，导致异常穿透缺陷被假绿掩护——必须用真实异常族。
+        """
+        import redis.exceptions
+
         class _BoomRedis:
             async def get(self, key):
-                raise ConnectionError('redis down')
+                raise redis.exceptions.ConnectionError('redis down')
 
             async def set(self, *a, **kw):
-                raise ConnectionError('redis down')
+                raise redis.exceptions.ConnectionError('redis down')
 
             async def delete(self, *a, **kw):
                 return 0
@@ -128,6 +135,41 @@ class TestDecoratorInstrumentation:
         result = await fn()
         assert result == {'v': 'fallback'}
         assert 'redis_error' in recorded
+
+    @pytest.mark.asyncio
+    async def test_release_lock_failure_does_not_swallow_result(self, monkeypatch):
+        """持锁重算成功、释锁时 Redis 已死——必须返回业务结果，不得 500。
+
+        2026-10-17 审计 AUD-10 场景 C：finally 里的释锁异常会覆盖 return 值。
+        """
+        import redis.exceptions
+
+        class _ReleaseBoomRedis:
+            redis_client = None
+
+            def __init__(self):
+                self.redis_client = self
+
+            def _make_key(self, key):
+                return key
+
+            async def get(self, key):
+                return None
+
+            async def set(self, key, value, nx=False, ex=None, timeout=None):
+                return True
+
+            async def eval(self, *a, **kw):
+                raise redis.exceptions.ConnectionError('release boom')
+
+        monkeypatch.setattr(cache_mod, '_get_redis_cache', lambda: _ReleaseBoomRedis())
+
+        @cache_result(key_prefix='t:release', ttl=60, local_ttl=0,
+                      key_builder=lambda *a, **k: 'k')
+        async def fn():
+            return {'v': 'ok'}
+
+        assert await fn() == {'v': 'ok'}
 
 
 class TestLocalTtlSemantics:

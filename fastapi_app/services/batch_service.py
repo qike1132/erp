@@ -68,8 +68,14 @@ async def find_case_locked(db: AsyncSession, identifier: str) -> tuple[Case | No
         case = case_result.scalars().first()
     if not case:
         return None, f'皮套 {identifier} 不存在'
-    # 行锁确保并发安全
-    case_result = await db.execute(select(Case).where(Case.id == case.id).with_for_update())
+    # 行锁确保并发安全。populate_existing 必须加：上面的无锁 SELECT 已把 Case 载入
+    # session 身份映射，SQLAlchemy 默认不会用锁定读的结果刷新已有对象——锁拿到了、
+    # 字段还是锁前旧值，后续负库存校验与 current_stock 直写都基于旧值
+    # （与已修复的 F-BE-SVC-STOCK-02 同款缺陷）。
+    case_result = await db.execute(
+        select(Case).where(Case.id == case.id).with_for_update()
+        .execution_options(populate_existing=True)
+    )
     case = case_result.scalar_one_or_none()
     if not case:
         return None, f'皮套 {identifier} 加锁失败'

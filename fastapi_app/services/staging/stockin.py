@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 def _build_stockin_entity(
     fields: dict, session_id: str, product_id: int | None, qty: int,
     is_validated: bool, validation_error: str, product_name: str,
+    product=None,
 ) -> StagingStockIn:
     stockin_date = parse_date_value(fields.get('stockin_date')) or datetime.now(UTC)  # aware UTC：staging_stock_in.stockin_date 列为 timestamptz
     return StagingStockIn(

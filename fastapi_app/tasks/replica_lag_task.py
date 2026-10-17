@@ -51,7 +51,9 @@ async def replica_lag_task(ctx: dict) -> dict:
             timeout=8,
             statement_cache_size=0,
         )
-    except (OSError, ConnectionError) as e:
+    # asyncpg 异常族不继承内置 OSError/ConnectionError（见下方查询段注释），
+    # connect 段同样必须兜住——否则副本断流会让 ARQ 判定任务失败并静默丢弃 cron。
+    except Exception as e:  # defensive: 监控任务，任何连接失败都应上报而非让 ARQ 判失败
         logger.error("只读副本无法连接（复制可能已断流）: %s", e)
         return {'ok': False, 'error': 'connect-failed'}
 

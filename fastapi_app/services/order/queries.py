@@ -224,11 +224,24 @@ def _serialize_orders(orders: list, deduct_map: dict, factory_map: dict | None =
 # L1 无法跨 worker 失效 —— 订单写入后 invalidate_cache("orders:*") 只删 L2，
 # 其余 worker 的 L1 仍会在 TTL 内返回删除/改数量前的旧列表（客户订单页自身也受影响）。
 # 与 orders:beile:list 同一处理；代价仅每次请求一次本地 Redis GET。
+# 2026-10-17 审计 AUD-05：key_builder 必须覆盖全部参与筛选的参数。
+# 此前漏了 keyword —— 同条件不同搜索词命中同一缓存条目，搜索结果串台最长 60s。
+# 抽成模块级函数以便单测直接锁定键的构成。
+def _orders_list_cache_key(*_args, **kwargs) -> str:
+    return (
+        f"p{kwargs.get('page', 1)}:pp{kwargs.get('per_page', 50)}"
+        f":c{kwargs.get('customer', '')}:pid{kwargs.get('product_id', '')}"
+        f":s{kwargs.get('status', '')}:sd{kwargs.get('start_date', '')}"
+        f":ed{kwargs.get('end_date', '')}:f{kwargs.get('factory', '')}"
+        f":kw{kwargs.get('keyword') or ''}"
+    )
+
+
 @cache_result(
     key_prefix="orders:list",
     ttl=60,
     local_ttl=0,
-    key_builder=lambda *args, **kwargs: f"p{kwargs.get('page', 1)}:pp{kwargs.get('per_page', 50)}:c{kwargs.get('customer', '')}:pid{kwargs.get('product_id', '')}:s{kwargs.get('status', '')}:sd{kwargs.get('start_date', '')}:ed{kwargs.get('end_date', '')}:f{kwargs.get('factory', '')}",
+    key_builder=_orders_list_cache_key,
 )
 async def get_orders(db: AsyncSession, page: int = 1, per_page: int = 50,
                      customer: str | None = None, product_id: int | None = None,

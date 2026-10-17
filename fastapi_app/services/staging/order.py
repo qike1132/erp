@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 def _build_order_entity(
     fields: dict, session_id: str, product_id: int | None, qty: int,
     is_validated: bool, validation_error: str, product_name: str,
+    product=None,
 ) -> StagingOrder:
     deduct_stock_flag, deduct_quantity = _parse_deduct_flag(
         fields.get('deduct_stock'), qty

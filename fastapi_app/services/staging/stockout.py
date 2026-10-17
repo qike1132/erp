@@ -22,7 +22,8 @@ from fastapi_app.services.staging._generic import (
     _generic_update_staging_entity,
 )
 from fastapi_app.services.staging.stockin import _validate_stockin_customer
-from fastapi_app.shared_models import InventoryLog, Order, StagingStockOut, StockOut
+from fastapi_app.shared.stock_concurrency import check_stock_available
+from fastapi_app.shared_models import InventoryLog, Order, Product, StagingStockOut, StockOut
 from fastapi_app.shared_models.order import ORDER_STATUS_SHIPPED
 from fastapi_app.utils import parse_date_value
 
@@ -32,15 +33,23 @@ logger = logging.getLogger(__name__)
 def _build_stockout_entity(
     fields: dict, session_id: str, product_id: int | None, qty: int,
     is_validated: bool, validation_error: str, product_name: str,
+    product=None,
 ) -> StagingStockOut:
     stockout_date = parse_date_value(fields.get('stockout_date')) or datetime.now(UTC)  # aware UTC：staging_stock_out.stockout_date 列为 timestamptz
     customer = str(fields.get('customer', '')).strip()
 
+    # 2026-10-17 审计 AUD-04：预检必须真查库存。此前 Excel 导入只要产品匹配就
+    # 硬编码「库存充足」，用户在确认弹窗里基于假信号拍板；与 OCR 路径
+    # （services/ocr/_import.py）的真实 check_stock_available 口径分裂。
     stock_check_passed = False
     stock_check_message = ''
     if is_validated:
-        stock_check_passed = True
-        stock_check_message = '库存充足'
+        if product is None:
+            stock_check_message = '未能读取当前库存，请在确认前核对'
+        else:
+            reason = check_stock_available(product.current_stock, -qty)
+            stock_check_passed = reason is None
+            stock_check_message = '库存充足' if reason is None else reason
 
     return StagingStockOut(
         session_id=session_id,
@@ -58,10 +67,15 @@ def _build_stockout_entity(
         status=StagingStatus.PENDING,
     )
 
-def _stockout_extra_updates(entity, data: dict, _db: AsyncSession) -> None:
+async def _stockout_extra_updates(entity, data: dict, db: AsyncSession) -> None:
     if 'quantity' in data and entity.product_id:
-        # extra_updates runs after quantity is set; perform stock check here
-        pass
+        # 2026-10-17 审计 AUD-04：编辑数量后必须重算库存预检（此前是空实现，
+        # 数量改大后暂存行仍显示导入时的旧结论）。
+        product = await db.get(Product, entity.product_id)
+        if product is not None:
+            reason = check_stock_available(product.current_stock, -int(entity.quantity))
+            entity.stock_check_passed = reason is None
+            entity.stock_check_message = '库存充足' if reason is None else reason
     if 'stockout_date' in data:
         entity.stockout_date = parse_date_value(data['stockout_date']) or datetime.now(UTC)  # aware UTC：列已迁移为 timestamptz
     if 'note' in data:

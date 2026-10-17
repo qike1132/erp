@@ -19,9 +19,25 @@ from collections.abc import Callable
 from datetime import datetime, timedelta
 from enum import Flag, auto
 from functools import wraps
-from typing import Any
+from typing import Any, cast
 
 from fastapi_app.core.cache_keys import PRODUCT_LIST_CACHE_PATTERN
+from fastapi_app.core.exception_handler import INFRA_EXCEPTIONS
+
+# 2026-10-17 审计 AUD-10：redis-py 的 ConnectionError/TimeoutError/ResponseError/
+# OutOfMemoryError 全部继承 redis.exceptions.RedisError，**不是** Python 内建异常
+# （issubclass(redis.exceptions.ConnectionError, ConnectionError) is False）。
+# 此前的 except 元组只列内建类，Redis 故障会穿透缓存层把已成功的业务结果变成 500。
+# 统一复用 INFRA_EXCEPTIONS（含 OSError/内建 ConnectionError/RedisError 全族）。
+# cast：INFRA_EXCEPTIONS 声明为 BaseException 元组（供通用兜底使用），
+# 本模块只捕 Exception 子类，收窄注解让 except 变量类型可用。
+_CACHE_INFRA_EXCEPTIONS: tuple[type[Exception], ...] = cast(
+    'tuple[type[Exception], ...]', INFRA_EXCEPTIONS
+)
+# 需要同时兜住参数校验错误的调用点（保持原有 ValueError 语义）
+_CACHE_INFRA_EXCEPTIONS_WITH_VALUE: tuple[type[Exception], ...] = (
+    *_CACHE_INFRA_EXCEPTIONS, ValueError,
+)
 
 # Redis 操作超时（秒）：内网 Redis 单次操作 <1ms，0.3s 足够；
 # 故障时快速失败（叠加 get+lock+set 最多 ~0.9s），避免每次失败累积 1s 阻塞
@@ -185,7 +201,7 @@ async def _acquire_stampede_lock(redis, lock_key: str, token: str) -> bool:
             timeout=CACHE_TIMEOUT,
         )
         return bool(got)
-    except (TimeoutError, OSError, ConnectionError, ValueError):
+    except _CACHE_INFRA_EXCEPTIONS_WITH_VALUE:
         return False
 
 
@@ -200,7 +216,7 @@ async def _release_stampede_lock(redis, lock_key: str, token: str) -> None:
             client.eval(_RELEASE_LOCK_LUA, 1, full_lock_key, token),
             timeout=CACHE_TIMEOUT,
         )
-    except (TimeoutError, OSError, ConnectionError, ValueError):
+    except _CACHE_INFRA_EXCEPTIONS_WITH_VALUE:
         pass  # 释放失败无害：锁 10s 后自动过期
 
 
@@ -211,7 +227,7 @@ async def _poll_for_refill(redis, cache_key: str, local_ttl: int) -> Any | None:
         await asyncio.sleep(_CACHE_REFILL_POLL_INTERVAL)
         try:
             cached = await asyncio.wait_for(redis.get(cache_key), timeout=CACHE_TIMEOUT)
-        except (TimeoutError, OSError, ConnectionError):
+        except _CACHE_INFRA_EXCEPTIONS:
             return None
         if cached is not None:
             _cache_local.pop(cache_key, None)
@@ -295,7 +311,7 @@ async def _compute_and_fill(func, args, kwargs, cache_key: str, local_ttl: int,
             )
             global _redis_fail_count
             _redis_fail_count = 0
-        except (TimeoutError, OSError, ConnectionError, ValueError) as e:
+        except _CACHE_INFRA_EXCEPTIONS_WITH_VALUE as e:
             _note_redis_failure(datetime.now(), e)
     return result
 
@@ -309,7 +325,7 @@ async def _read_l2(redis, cache_key: str) -> tuple[bool, Any]:
             _redis_fail_count = 0
             return True, cached
         _redis_fail_count = 0
-    except (TimeoutError, OSError, ConnectionError, ValueError) as e:
+    except _CACHE_INFRA_EXCEPTIONS_WITH_VALUE as e:
         _note_redis_failure(datetime.now(), e, record_op='redis_error')
         logger.warning("Redis 缓存读取失败(timeout=%ss)，降级到数据库查询: %s", CACHE_TIMEOUT, e)
     return False, None
@@ -398,7 +414,10 @@ def cache_result(
                         return result
                     finally:
                         if redis is not None:
-                            await _release_stampede_lock(redis, f"{cache_key}:lock", lock_token)
+                            # 释锁失败绝不能吞掉已算好的业务结果（此前 Redis 在
+                            # 重算期间死亡时，释锁抛异常会覆盖 return 值 → 500）
+                            with contextlib.suppress(Exception):
+                                await _release_stampede_lock(redis, f"{cache_key}:lock", lock_token)
 
                 # 未获锁且轮询未命中（或 Redis 不可用）：直接重算，保证请求总能返回
                 _record_cache_op('stale')
@@ -407,7 +426,7 @@ def cache_result(
                     redis, redis_available, ttl=ttl,
                 )
 
-            except (OSError, ConnectionError) as e:
+            except _CACHE_INFRA_EXCEPTIONS as e:
                 logger.error("缓存装饰器执行失败: %s", e, exc_info=True)
                 return await func(*args, **kwargs)
 
@@ -427,7 +446,7 @@ async def invalidate_cache(pattern: str) -> int:
                 redis_deleted = await redis.delete_pattern(pattern)
                 deleted += redis_deleted
                 logger.info("Redis 缓存失效: pattern=%s, deleted=%d", pattern, redis_deleted)
-            except (OSError, ConnectionError, ValueError) as e:
+            except _CACHE_INFRA_EXCEPTIONS_WITH_VALUE as e:
                 logger.warning("Redis 缓存失效失败: %s", e)
 
         # 再删 L1 本地缓存
@@ -440,7 +459,7 @@ async def invalidate_cache(pattern: str) -> int:
         await _publish_l1_invalidation(pattern)
 
         return deleted
-    except (OSError, ValueError) as e:
+    except _CACHE_INFRA_EXCEPTIONS_WITH_VALUE as e:
         logger.error("缓存失效失败: %s", e, exc_info=True)
         return 0
 
@@ -466,15 +485,15 @@ async def _publish_l1_invalidation(pattern: str) -> None:
             client.publish(redis._make_key(_L1_BROADCAST_CHANNEL), pattern),
             timeout=CACHE_TIMEOUT,
         )
-    except (TimeoutError, OSError, ConnectionError, ValueError) as e:
+    except _CACHE_INFRA_EXCEPTIONS_WITH_VALUE as e:
         logger.warning("发布 L1 缓存失效广播失败: %s", e)
 
 
 async def _close_pubsub(pubsub, channel: str) -> None:
     """安全关闭 pubsub（unsubscribe 与 aclose 独立容错，避免前者失败泄漏连接）"""
-    with contextlib.suppress(OSError, ConnectionError):
+    with contextlib.suppress(*_CACHE_INFRA_EXCEPTIONS):
         await pubsub.unsubscribe(channel)
-    with contextlib.suppress(OSError, ConnectionError):
+    with contextlib.suppress(*_CACHE_INFRA_EXCEPTIONS):
         await pubsub.aclose()
 
 
@@ -508,7 +527,7 @@ async def _l1_broadcast_listener() -> None:
         except asyncio.CancelledError:
             await _close_pubsub(pubsub, channel)
             raise
-        except (OSError, ConnectionError) as e:
+        except _CACHE_INFRA_EXCEPTIONS as e:
             logger.warning("L1 失效广播监听断线，%ss 后重连: %s", _L1_RECONNECT_BACKOFF, e)
             await _close_pubsub(pubsub, channel)
             await asyncio.sleep(_L1_RECONNECT_BACKOFF)
@@ -546,5 +565,5 @@ async def invalidate_dashboard_cache():
         await invalidate_cache('dashboard:stats')
         await invalidate_cache('dashboard:activities')
         logger.info("Dashboard 缓存已失效")
-    except (OSError, ConnectionError) as e:
+    except _CACHE_INFRA_EXCEPTIONS as e:
         logger.warning(f"失效 Dashboard 缓存失败: {e}")
