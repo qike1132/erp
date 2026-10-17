@@ -565,6 +565,9 @@
     "migrations/versions/pg_standalone_099_finished_stock_remark.py": [
       "drop_table_if_empty:finished_stock_remark"
     ],
+    "migrations/versions/pg_standalone_100_fs_remark_key.py": [
+      "drop_index_if_exists:finished_stock_remark"
+    ],
     "migrations/versions/rebuild_po_dedup_index.py": [
       "execute:DROP INDEX IF EXISTS uq_po_pending_dedup"
     ],

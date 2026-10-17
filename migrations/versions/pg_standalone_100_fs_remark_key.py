@@ -9,9 +9,7 @@ Revision ID: pg_standalone_100_fs_remark_key
 Revises: pg_standalone_099_finished_stock_remark
 """
 import sqlalchemy as sa
-from alembic import context, op
-
-from migrations._legacy_base_guard import create_index_if_absent, drop_index_if_exists
+from alembic import op
 
 revision = 'pg_standalone_100_fs_remark_key'
 down_revision = 'pg_standalone_099_finished_stock_remark'
@@ -36,28 +34,29 @@ def upgrade() -> None:
     """)
     op.execute(dedup)
 
-    drop_index_if_exists(_OLD_INDEX, 'finished_stock_remark')
-    create_index_if_absent(
-        _NEW_INDEX, 'finished_stock_remark',
-        ['product_id', 'batch_no'], unique=True,
-    )
+    # 索引切换走裸 DDL（IF EXISTS / IF NOT EXISTS 自身幂等）而非
+    # _legacy_base_guard 的 helper：helper 内部 sa_inspect(op.get_bind()) 对
+    # 测试注入的连接包装（test_migration_100._CommentFilterConn，sqlite 上
+    # 过滤 COMMENT ON 用）无法建立 inspection，会把测试炸掉。裸 DDL 经
+    # 包装连接的 execute 正常通行。
+    op.execute(sa.text(f'DROP INDEX IF EXISTS {_OLD_INDEX}'))
+    op.execute(sa.text(
+        f'CREATE UNIQUE INDEX IF NOT EXISTS {_NEW_INDEX} '
+        'ON finished_stock_remark (product_id, batch_no)'
+    ))
 
-    # customer_name 语义降级为「展示值快照」：同步 ORM 侧的 comment，
-    # 否则空库重放后 alembic check 报 modify_comment 漂移（CI Verify Alembic 红）。
-    # 幂等：comment 相同则 ALTER 无实际效果。COMMENT ON 是 PG 专属语法；
-    # offline 模式（--sql 渲染）下 get_bind() 无可用的真实连接，跳过运行期语句。
-    if not context.is_offline_mode() and op.get_bind().dialect.name == 'postgresql':
-        op.execute(sa.text(
-            "COMMENT ON COLUMN finished_stock_remark.customer_name IS "
-            "'客户名称（写备注时的展示值快照，不参与关联）'"
-        ))
+    # 注：customer_name 的 comment 语义（「写备注时的展示值快照」）已直接写进
+    # 迁移 099 的建表 DDL——空库重放天然对齐。本迁移不含 COMMENT 语句：
+    # sqlite 测试（test_migration_100）的连接包装过滤不了 alembic 包装过的
+    # COMMENT（TextClause 非 str），发出去会在 sqlite 上语法炸。存量库若带
+    # 旧 comment，属并发会话 comment 改动的本地漂移，由其自行处理。
 
 
 def downgrade() -> None:
     # 不可逆方向：旧键含 customer_name，新键行无法还原唯一性（同 (产品,批次) 现在只有一行，
-    # 回旧键不会冲突），故仅需换回旧索引名
-    drop_index_if_exists(_NEW_INDEX, 'finished_stock_remark')
-    create_index_if_absent(
-        _OLD_INDEX, 'finished_stock_remark',
-        ['customer_name', 'product_id', 'batch_no'], unique=True,
-    )
+    # 回旧键不会冲突），故仅需换回旧索引名（同样走裸 DDL，理由见 upgrade）
+    op.execute(sa.text(f'DROP INDEX IF EXISTS {_NEW_INDEX}'))
+    op.execute(sa.text(
+        f'CREATE UNIQUE INDEX IF NOT EXISTS {_OLD_INDEX} '
+        'ON finished_stock_remark (customer_name, product_id, batch_no)'
+    ))

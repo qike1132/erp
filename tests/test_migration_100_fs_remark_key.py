@@ -56,19 +56,42 @@ def _make_db(rows: list[tuple[int, str, str, str, int]]):
 
 def _run_upgrade(conn):
     mod = _load_migration_module()
-    ops = Operations(MigrationContext.configure(conn))
+    ops = Operations(MigrationContext.configure(_CommentFilterConn(conn)))
     mod.op = ops
     import migrations._legacy_base_guard as guard
     guard.op = ops
-
-    class _CtxStub:
-        @staticmethod
-        def is_offline_mode():
-            return False
-
     guard.context = _CtxStub()
-
     mod.upgrade()
+
+
+class _CommentFilterConn:
+    """sqlite 不认 COMMENT ON（PG 专属）；迁移里的 COMMENT 同步语句在此跳过。"""
+
+    def __init__(self, conn):
+        self._conn = conn
+
+    def execute(self, stmt, params=None):
+        if isinstance(stmt, str) and stmt.lstrip().upper().startswith('COMMENT'):
+            class _R:
+                rowcount = 0
+            return _R()
+        return self._conn.execute(stmt, params)
+
+    def exec_driver_sql(self, stmt, params=None):
+        if stmt.lstrip().upper().startswith('COMMENT'):
+            class _R:
+                rowcount = 0
+            return _R()
+        return self._conn.exec_driver_sql(stmt, params)
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+
+class _CtxStub:
+    @staticmethod
+    def is_offline_mode():
+        return False
 
 
 def test_dedup_keeps_latest_updated_at():
