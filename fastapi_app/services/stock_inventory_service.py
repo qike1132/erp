@@ -781,7 +781,10 @@ async def _resolve_products(db: AsyncSession, search: str) -> list[int] | None:
     if not search:
         return None  # 无搜索时不加载全量产品ID，调用方应跳过 ANY(:pids) 条件
     escaped = escape_like(search)
-    result = await db.execute(select(Product.id).where(or_(Product.name.like(f'%{escaped}%', escape='\\'), Product.barcode.like(f'%{escaped}%', escape='\\'))))  # sql-safe: escape_like/绑定参数/常量片段
+    # OCR 复审（2026-10-17 low）：改用 ilike——移动端/桌面端本地过滤原先都是
+    # toLowerCase() 双侧大小写不敏感，like 在 PG 是大小写敏感的，混合大小写
+    # 查询（如 m01 搜 M01）会假阴性。与 /products/list 的 ilike 口径一致。
+    result = await db.execute(select(Product.id).where(or_(Product.name.ilike(f'%{escaped}%', escape='\\'), Product.barcode.ilike(f'%{escaped}%', escape='\\'))))  # sql-safe: escape_like/绑定参数/常量片段
     return [row[0] for row in result.all()]
 
 

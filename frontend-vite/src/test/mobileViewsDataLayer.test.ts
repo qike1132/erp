@@ -169,7 +169,7 @@ describe('S12 移动端数据层统一', () => {
       expect(text).not.toContain('undefined')
     })
 
-    it('本地搜索按 DTO 字段（barcode / name / specification）过滤', async () => {
+    it('搜索走服务端（F-FE-MOBILE-07）：关键词变化触发带 search 的重查', async () => {
       mocks.productApi.list.mockResolvedValue({
         items: [product(), product({ id: 2, name: '泰迪熊', barcode: 'P002', specification: '25cm' })],
         total: 2,
@@ -178,12 +178,15 @@ describe('S12 移动端数据层统一', () => {
       const wrapper = mount(MProductView)
       await flushPromises()
 
-      const vm = wrapper.vm as unknown as { searchQuery: string }
-      vm.searchQuery = '泰迪'
-      await nextTick()
+      // @search 事件（回车/提交）驱动 handleSearch → 带 search 重查
+      await (wrapper.findComponent({ name: 'MSearchBar' }) as { vm: { $emit: (e: string, v: string) => void } })
+        .vm.$emit('search', '泰迪')
+      await flushPromises()
 
-      expect(wrapper.text()).toContain('泰迪熊')
-      expect(wrapper.text()).not.toContain('招财猫挂件')
+      // 服务端搜索（含 name/barcode/specification ilike），前端不再本地过滤
+      expect(mocks.productApi.list).toHaveBeenCalledWith(
+        expect.objectContaining({ search: '泰迪' }),
+      )
     })
   })
 

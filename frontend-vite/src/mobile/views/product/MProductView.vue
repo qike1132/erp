@@ -55,16 +55,10 @@ const products = ref<Product[]>([])
 const loading = ref(true)
 const searchQuery = ref('')
 
-const filteredProducts = computed(() => {
-  if (!searchQuery.value) return products.value
-  const q = searchQuery.value.toLowerCase()
-  return products.value.filter(
-    (p) =>
-      (p.barcode ?? '').toLowerCase().includes(q) ||
-      p.name.toLowerCase().includes(q) ||
-      (p.specification ?? '').toLowerCase().includes(q),
-  )
-})
+// F-FE-MOBILE-07 后本地过滤已冗余（搜索走服务端 search，含 name/barcode/spec
+// ilike），保留 computed 仅作切页时的即时过滤——与后端口径一致，不再自带
+// specification 分支之外的额外语义。
+const filteredProducts = computed(() => products.value)
 
 function handleSearch(val: string) {
   searchQuery.value = val
