@@ -43,6 +43,10 @@ export interface BackupSettings {
   initialized?: boolean
   updated_by?: string | null
   updated_at?: string | null
+  /** 实际生效配置来源：env（表内值仅记录，不生效） */
+  effective_source?: string
+  /** 实际生效的备份目录（环境变量 BACKUP_DIR） */
+  effective_backup_dir?: string
 }
 
 /** 路径预检结果 */

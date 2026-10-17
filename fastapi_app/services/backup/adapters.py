@@ -228,7 +228,13 @@ class BackupProgressReporterAdapter(ProgressReporter):
 
 
 class DefaultArchiveDecryptorAdapter(ArchiveDecryptor):
-    """复用现有 `backup_encryption.decrypt_backup` 的解密适配器。"""
+    """复用 `backup_encryption.decrypt_backup_auto` 的解密适配器。
+
+    2026-10-17 审计 AUD-06：此前用 `decrypt_backup`——它只认 chunked-v1 magic
+    与裸信封，**不剥离 4B meta 前缀**，旧 `/save` 产出的格式 B 密文会被当成
+    裸信封解（salt/nonce 错位），正确密码被误报「密码错误」。auto 版本四格式
+    全认（内部 `_strip_meta_prefix`）。
+    """
 
     async def decrypt_if_needed(
         self,
@@ -236,8 +242,9 @@ class DefaultArchiveDecryptorAdapter(ArchiveDecryptor):
         password: str | None,
         manifest_encrypted: bool,
     ) -> bytes:
-        from fastapi_app.core.backup_encryption import decrypt_backup
+        from fastapi_app.core.backup_encryption import decrypt_backup_auto
 
         if not password:
             raise ValueError("备份文件已加密，需要提供解密密码")
-        return decrypt_backup(zip_bytes, password)
+        plaintext, _meta = decrypt_backup_auto(zip_bytes, password)
+        return plaintext

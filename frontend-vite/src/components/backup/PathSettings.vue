@@ -1,5 +1,11 @@
 <template>
   <div class="ps-card">
+    <!-- 2026-10-17 审计 AUD-08：backup_settings 表未接线，清理/备份实际读环境变量。
+         知情假功能比无功能更危险，这里明确标注并禁用保存。 -->
+    <div class="ps-warn">
+      当前版本备份目录由环境变量 <code>BACKUP_DIR</code> 决定，此处保存不会生效（设置接线待后续专项）。
+      实际生效目录：<code>{{ settings?.effective_backup_dir || settings?.default_backup_dir || 'backups/server' }}</code>
+    </div>
     <div class="ps-radio-row">
       <label class="ps-radio">
         <input type="radio" value="default" :checked="mode === 'default'" @change="mode = 'default'" />
@@ -19,7 +25,7 @@
     </div>
     <div class="ps-actions">
       <button class="ps-btn ps-btn-outline" @click="handleValidate">校验路径</button>
-      <button class="ps-btn ps-btn-primary" :disabled="saving" @click="handleSave">{{ saving ? '保存中...' : '保存设置' }}</button>
+      <button class="ps-btn ps-btn-primary" :disabled="saving || !settingsWired" title="当前版本设置未接线，保存不生效" @click="handleSave">{{ saving ? '保存中...' : '保存设置' }}</button>
     </div>
   </div>
 </template>
@@ -37,6 +43,8 @@ const props = defineProps<{
 
 const mode = ref<'default' | 'custom'>('default')
 const customPath = ref('')
+// 设置表尚未接线（AUD-08）：保存按钮禁用，避免用户误以为修改生效
+const settingsWired = false
 const feedback = ref<{ tone: string; text: string }>({ tone: '', text: '' })
 
 // 加载设置后同步单选状态:当前生效路径与默认一致 → default,否则回显自定义路径
@@ -81,6 +89,8 @@ function handleSave() {
 
 <style scoped>
 .ps-card { border: 1px solid var(--color-border-light); border-radius: var(--radius-md, 14px); background: #ffffff; padding: 24px; box-shadow: 0 1px 3px rgba(0,0,0,.04), 0 4px 12px rgba(0,0,0,.06); }
+.ps-warn { margin-bottom: 12px; padding: 10px 12px; border-radius: var(--radius-input, 12px); background: #fff7e6; border: 1px solid #ffd591; color: #ad6800; font-size: 13px; line-height: 1.6; }
+.ps-warn code { font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; background: rgba(0,0,0,.04); padding: 1px 4px; border-radius: 4px; }
 .ps-radio-row { padding: 8px 0; }
 .ps-radio { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--color-text); }
 .ps-radio input { accent-color: var(--color-primary-600); }

@@ -179,6 +179,7 @@ async def restore_from_zip(
         probe.close()
 
     from .adapters import (
+        DefaultArchiveDecryptorAdapter,
         ExistingCacheInvalidatorAdapter,
         ExistingComponentRestoreAdapter,
         ExistingEngineLifecycleAdapter,
@@ -197,6 +198,9 @@ async def restore_from_zip(
         component_restore=ExistingComponentRestoreAdapter(),
         cache_invalidator=ExistingCacheInvalidatorAdapter(),
         verifier=ExistingRestoreVerifierAdapter(),
+        # 2026-10-17 审计 AUD-06：必须注入支持 meta 前缀格式的解密器，
+        # 否则 orchestrator 默认回退 decrypt_backup 解不开旧格式备份。
+        decryptor=DefaultArchiveDecryptorAdapter(),
     )
     # 内核（orchestrator._decrypt → decrypt_backup）的解密密码类型面只声明 str：
     # bytes/bytearray 只是在 backup_encryption 内部被兼容（那里是 `password if isinstance(password, bytearray)

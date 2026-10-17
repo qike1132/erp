@@ -343,6 +343,10 @@ class BackupSettingsOut(BaseModel):
     updated_by: str | None = None
     updated_at: str | None = None
     initialized: bool = Field(default=False, description="表是否已初始化(未初始化时使用环境变量默认值)")
+    # 2026-10-17 审计 AUD-08：设置表当前未接线，实际生效值来自环境变量。
+    # 显式返回来源，避免调用方把表内值当成生效值。
+    effective_source: str = Field(default="env", description="实际生效配置来源: env（表值仅记录，不生效）")
+    effective_backup_dir: str = Field(default="", description="实际生效的备份目录(环境变量 BACKUP_DIR)")
 
 
 class BackupSettingsUpdate(BaseModel):

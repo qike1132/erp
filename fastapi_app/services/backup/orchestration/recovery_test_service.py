@@ -385,12 +385,14 @@ class DisasterRecoveryTestService:
         if not (name.endswith('.enc') or '.enc' in name):
             return backup_path
         try:
-            from fastapi_app.core.backup_encryption import decrypt_backup
+            from fastapi_app.core.backup_encryption import decrypt_backup_auto
             password = self.test_config.get('test_password', '')
             if not password:
                 raise ValueError(f'备份 {name} 已加密，但未配置 BACKUP_TEST_PASSWORD，无法解密还原')
             encrypted_bytes = backup_path.read_bytes()
-            plain_bytes = decrypt_backup(encrypted_bytes, password)
+            # 2026-10-17 审计 AUD-06：auto 版本兼容 meta 前缀（旧 /save 格式），
+            # 与恢复主链路同口径；decrypt_backup 只认裸信封会误报密码错误。
+            plain_bytes, _meta = decrypt_backup_auto(encrypted_bytes, password)
             with tempfile.NamedTemporaryFile(
                 prefix='dr_decrypt_', suffix='.zip', delete=False
             ) as tmp_file:

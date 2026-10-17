@@ -89,11 +89,18 @@ async def fail_progress_quietly(task_id: str) -> None:
         logger.warning(f'标记进度失败（{task_id}）: {e}')
 
 
-async def _read_backup_file(file: UploadFile) -> tuple[bytes, bool, str]:
+async def _read_backup_file(
+    file: UploadFile, decrypt_password: str | None = None,
+) -> tuple[bytes, bool, str]:
     """读取并校验备份上传文件，返回 (content, is_zip, filename)。
 
     校验扩展名、文件大小上限、空内容与格式识别，不合法直接抛 HTTPException。
     从 import_backup / async_import_backup 中提取的公共逻辑。
+
+    2026-10-17 审计 AUD-07：`.enc` 白名单此前自相矛盾——格式识别只认明文
+    特征（PK/{/gz），而 `/export?format=json&encrypt=true` 产出的 `.json.enc`
+    首字节是 meta 长度前缀，三探针全不匹配 → 上传即 400，加密 JSON 导出
+    永远无法导入。现在对「.enc 且非 zip」先解密再识别。
     """
     filename = file.filename or ''
     ext = os.path.splitext(filename)[1].lower()
@@ -112,6 +119,28 @@ async def _read_backup_file(file: UploadFile) -> tuple[bytes, bool, str]:
     is_zip = filename.endswith('.zip') or filename.endswith('.zip.enc') or content[:4] == b'PK\x03\x04'
     is_json = filename.endswith('.json') or (content[:1] == b'{' and content.strip().endswith(b'}'))
     is_gz = filename.endswith('.gz') or (content[:2] == b'\x1f\x8b')
+    if not is_zip and not is_json and not is_gz and ext == '.enc':
+        # 加密的非 ZIP 备份（如 .json.enc）：先解密再做格式识别
+        if not decrypt_password:
+            raise HTTPException(
+                status_code=400,
+                detail='该备份已加密，请通过 X-Backup-Password 请求头提供解密密码',
+            )
+        try:
+            from fastapi_app.core.backup_encryption import BackupFileError, decrypt_backup_auto
+
+            def _decrypt_upload(data: bytes, pwd: str) -> bytes:
+                plaintext, _meta = decrypt_backup_auto(data, pwd)
+                return plaintext
+
+            content = await asyncio.to_thread(_decrypt_upload, content, decrypt_password)
+        except (BackupFileError, ValueError, OSError) as e:
+            raise HTTPException(
+                status_code=400, detail=_sanitize_error(f'加密备份解密失败: {e}'),
+            ) from e
+        is_zip = content[:4] == b'PK\x03\x04'
+        is_json = content[:1] == b'{' and content.strip().endswith(b'}')
+        is_gz = content[:2] == b'\x1f\x8b'
     if not is_zip and not is_json and not is_gz:
         raise HTTPException(status_code=400, detail='无法识别的备份文件格式')
     if is_gz:
@@ -213,7 +242,7 @@ async def import_backup(
     """
     if not confirm:
         raise HTTPException(status_code=400, detail='恢复操作需要二次确认，请传入 confirm=true')
-    content, is_zip, _ = await _read_backup_file(file)
+    content, is_zip, _ = await _read_backup_file(file, _get_encryption_password(None, x_backup_password))
     decrypt_password = _get_encryption_password(None, x_backup_password)
 
     pre_restore_info = await _pre_restore_info_or_fail(db, allow_missing_pre_restore_backup)
@@ -404,7 +433,7 @@ async def async_import_backup(
     """
     if not confirm:
         raise HTTPException(status_code=400, detail='恢复操作需要二次确认，请传入 confirm=true')
-    content, is_zip, filename = await _read_backup_file(file)
+    content, is_zip, filename = await _read_backup_file(file, _get_encryption_password(None, x_backup_password))
     decrypt_password = _get_encryption_password(None, x_backup_password)
 
     # 并发检查：避免同时启动多个恢复任务。委托共享助手区分「Redis 故障(503)」

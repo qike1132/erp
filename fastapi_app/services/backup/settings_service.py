@@ -82,6 +82,8 @@ async def get_settings(db: AsyncSession) -> dict:
             'max_count': 50,
             'encryption_mode': 'env',
             'initialized': False,
+            'effective_source': 'env',
+            'effective_backup_dir': str(BACKUP_DIR),
         }
 
     return {
@@ -93,6 +95,10 @@ async def get_settings(db: AsyncSession) -> dict:
         'updated_by': row.updated_by,
         'updated_at': row.updated_at.isoformat() if row.updated_at else None,
         'initialized': True,
+        # 2026-10-17 审计 AUD-08：_resolve_backup_dir_from_settings 从未接线，
+        # 清理/备份实际读 BACKUP_DIR 等环境变量。表值仅存储，不生效。
+        'effective_source': 'env',
+        'effective_backup_dir': str(BACKUP_DIR),
     }
 
 
