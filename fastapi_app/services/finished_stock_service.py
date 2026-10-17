@@ -178,20 +178,16 @@ async def get_finished_stock_summary(
 
 
 async def _get_all_customers(db: AsyncSession) -> list[str]:
-    """成品库存里出现过的客户名（含未指定客户 → ''），供页面快捷切换。"""
-    col = func.coalesce(DailyProductionRecord.customer_name, '')
-    rows = (
-        await db.execute(
-            select(col)
-            .where(
-                DailyProductionRecord.department == PACKAGING,
-                DailyProductionRecord.product_id.isnot(None),
-            )
-            .distinct()
-            .order_by(col)
-        )
-    ).scalars().all()
-    return [c for c in rows if c]
+    """客户快捷切换栏客户列表。
+
+    复用 /stock 的同一口径（``stock_inventory_service._get_all_customers``）：
+    成员 = 出现在 stock_in 或「未软删 order」里的客户，按最近活动排序。
+    不读 daily_production_record：包装部录入的客户可能为空（存量大量未填），
+    用它会让 chips 时有时无；且 /stock 的客户源更完整、两页观感一致。
+    """
+    from fastapi_app.services.stock_inventory_service import _get_all_customers as _stock_customers
+
+    return await _stock_customers(db, None)
 
 
 async def get_batches_by_product(
