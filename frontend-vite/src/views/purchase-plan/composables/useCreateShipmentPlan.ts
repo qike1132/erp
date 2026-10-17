@@ -84,7 +84,17 @@ export function useCreateShipmentPlan(open: Ref<boolean>, onCreated: () => void)
 
   function removeDetail(idx: number) {
     form.details.splice(idx, 1)
+    // F-FE-DESK-CORE-04：productSuggestions 以行下标为键，splice 收缩后所有
+    // 后续行下标 -1，必须整体前移——否则剩余行读到的是「别的行」遗留的建议，
+    // 点一下就落成错误 product_id。
     delete productSuggestions[idx]
+    const keys = Object.keys(productSuggestions).map(Number).sort((a, b) => a - b)
+    for (const k of keys) {
+      if (k > idx) {
+        productSuggestions[k - 1] = productSuggestions[k] ?? []
+        delete productSuggestions[k]
+      }
+    }
   }
 
   async function searchProducts(q: string): Promise<ProductSuggestion[]> {
@@ -154,6 +164,9 @@ export function useCreateShipmentPlan(open: Ref<boolean>, onCreated: () => void)
       if (!d) return `第 ${i + 1} 行：数据不完整`
       if (!d.customer_id) return `第 ${i + 1} 行：请选择客户`
       if (!d.product_name.trim()) return `第 ${i + 1} 行：产品名称不能为空`
+      // F-FE-DESK-CORE-04：product_id=0（未从下拉选择）原先直接落 payload，
+      // 后端只验「产品存在」验不出「选错了产品」——必须显式选择。
+      if (!d.product_id) return `第 ${i + 1} 行：请从下拉中选择产品`
       if (!d.plan_date) return `第 ${i + 1} 行：请选择出货日期`
       if (!d.quantity || d.quantity <= 0) return `第 ${i + 1} 行：数量必须大于 0`
       if (!Number.isInteger(d.quantity)) return `第 ${i + 1} 行：数量必须为整数`

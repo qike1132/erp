@@ -135,6 +135,7 @@ export function useStagedItems() {
     stockinOkQty = 0,
     stockinOkCount = 0,
     stockinFailedCount = 0,
+    orderFailedGroups = 0,
   ) {
     const done: string[] = []
     const kept: string[] = []
@@ -171,11 +172,37 @@ export function useStagedItems() {
     }
     const stockinNote = done.find((s) => s.startsWith('备货'))
     const stockinTail = stockinNote ? `；${stockinNote}` : ''
+    // F-FE-DESK-CORE-03：有失败分组时明说（行已保留供重试），不再播全量成功
+    const orderFailedCount = orderFailedGroups
+    const failNote = orderFailedCount > 0 ? `，${orderFailedCount} 个客户分组失败（已保留待重试）` : ''
     if (syncedPlanCount > 0) {
-      showToast(`提交成功：已创建 ${createdCount} 个主订单（含 ${order.count} 个 SKU），其中 ${syncedPlanCount} 条已同步出货计划${stockinTail}`, 'success')
+      showToast(`提交成功：已创建 ${createdCount} 个主订单${failNote}，其中 ${syncedPlanCount} 条已同步出货计划${stockinTail}`, orderFailedCount > 0 ? 'warning' : 'success')
       return
     }
-    showToast(`提交成功：已创建 ${createdCount} 个主订单（含 ${order.count} 个 SKU）${stockinTail}`, 'success')
+    showToast(`提交成功：已创建 ${createdCount} 个主订单${failNote}${stockinTail}`, orderFailedCount > 0 ? 'warning' : 'success')
+  }
+
+  /**
+   * 订单提交的逐组结果（F-FE-DESK-CORE-03）。后端 results 按**客户分组**构造
+   * （order_batch_create.py），每项带 `customer` 字段；按它把成功分组回映射到
+   * 暂存行——失败分组的行为留在暂存区供重试，而不是随整批清空。
+   * 分组无法映射（results 缺失/无 customer）时返回 null，调用方保守处理。
+   */
+  function orderOutcome(payload: Record<string, unknown>[], res: BatchSubmitOrdersResponse | null) {
+    const body = (res as { data?: BatchSubmitOrdersResponse } | null)?.data ?? res
+    const results = (body as { results?: { success?: boolean; customer?: string }[] } | null)?.results
+    if (!Array.isArray(results)) return null
+    const failedCustomers = new Set(
+      results.filter((r) => r?.success !== true).map((r) => String(r?.customer ?? '')).filter(Boolean),
+    )
+    if (results.some((r) => r?.success !== true && !r?.customer)) return null // 无法映射
+    const createdCount = results.filter((r) => r?.success === true).length
+    return {
+      /** 成功分组的客户名集合 */
+      okCustomers: new Set(results.filter((r) => r?.success === true).map((r) => String(r?.customer ?? ''))),
+      failedCustomers,
+      createdCount,
+    }
   }
 
   async function submitAll() {
@@ -210,14 +237,28 @@ export function useStagedItems() {
       const stockinFailedCount = stockinRes ? stockin.count - stockinRes.okCount : 0
 
       // 移除与播报共用同一组事实，二者不可能不一致
-      if (order.attempted && !order.failed) dropUids(orderUids)
+      // 订单按**逐组结果**移除（F-FE-DESK-CORE-03：原先 HTTP 200 即整批清空，
+      // 失败分组的行在工作区凭空消失且播报成功）。按成功分组的 customer 回映射；
+      // 无法映射时保守保留全部待人工核对。
+      const orderRes = order.attempted && !order.failed
+        ? orderOutcome(orderPayload, order.res)
+        : null
+      if (order.attempted && !order.failed) {
+        if (orderRes) {
+          dropUids(orderUids.filter((uid) => {
+            const item = stagedItems.value.find((i) => i.uid === uid)
+            return !item || orderRes.okCustomers.has(item.customer)
+          }))
+        }
+        // orderRes 为 null（results 形状不符）：保留全部，不播报成功清空
+      }
       if (stockin.attempted && !stockin.failed) {
         // 只移除**真正入库成功**的那几条；逐条失败的行留在暂存区供重试
         // （形状不符时 stockinRes 为 null，退回整批移除，避免重复入库）
         dropUids(stockinRes ? stockinUids.filter((_, i) => stockinRes.okFlags[i]) : stockinUids)
       }
 
-      reportSubmit(order, stockin, syncedPlanCount, stockinOkQty, stockinOkCount, stockinFailedCount)
+      reportSubmit(order, stockin, syncedPlanCount, stockinOkQty, stockinOkCount, stockinFailedCount, orderRes ? orderRes.failedCustomers.size : 0)
 
       // 订单 / 备货任一写入成功都会改变库存汇总与报表流水，统一失效派生查询
       const orderSubmitted = order.attempted && !order.failed

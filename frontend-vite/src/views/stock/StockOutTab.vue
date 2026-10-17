@@ -106,16 +106,24 @@ function onProductSelect(product: Product) {
 
 // === 可出货量查询 ===
 const shipmentInfo = ref<ShipmentInfo | null>(null)
+/** 请求序号：快速切换 SKU/客户时丢弃过期响应（与 fetchBatchOptions 同款守卫；
+ *  2026-10-17 审计 F-FE-DESK-CORE-02：原先无序号，慢响应后到会覆盖新 SKU 的
+ *  可出货量——展示与超额闸门都按错值判定）。 */
+let shipReqSeq = 0
 
 async function fetchShipmentInfo() {
   if (!form.productId || !form.customer) {
+    shipReqSeq++
     shipmentInfo.value = null
     return
   }
+  const seq = ++shipReqSeq
   try {
     const data = await stockApi.availableShipment(Number(form.productId), form.customer)
+    if (seq !== shipReqSeq) return // 已有更新的请求在途，丢弃过期响应
     shipmentInfo.value = data.data ?? null
   } catch {
+    if (seq !== shipReqSeq) return
     shipmentInfo.value = null
   }
 }
@@ -225,9 +233,9 @@ async function addStaged() {
   }
 
   if (form.productId && form.customer) {
-    if (shipmentInfo.value === null) {
-      await fetchShipmentInfo()
-    }
+    // F-FE-DESK-CORE-02：无条件重拉——shipmentInfo 非 null 时可能是上一个
+    // SKU/客户的陈旧值（闸门与展示都按它判定），null≠「已验证为最新」。
+    await fetchShipmentInfo()
     const avail = shipmentInfo.value?.available_quantity
     if (avail !== undefined && form.quantity > avail) {
       showToast(`出货数量超过可出货量！可出货: ${avail}`, 'error')
