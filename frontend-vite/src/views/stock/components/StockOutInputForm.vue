@@ -34,6 +34,20 @@
         </UiAutocomplete>
       </div>
 
+      <!-- 成品库存批次：选定 SKU 后带出，供按批次扣减（无批次时不显示） -->
+      <div v-if="batchOptions.length" class="form-field">
+        <label class="form-label">批次号</label>
+        <UiSelect
+          v-model="form.batchNo"
+          placeholder="不指定批次（整产品扣减）"
+          :options="batchSelectOptions"
+        />
+        <small v-if="selectedBatch" class="shipment-info">
+          <FontAwesomeIcon icon="info-circle" style="margin-right: 4px" aria-hidden="true" />
+          该批次可用: <strong style="color: var(--color-primary-500)">{{ selectedBatch.available_quantity }}</strong>
+        </small>
+      </div>
+
       <div class="form-field">
         <label class="form-label">出货数量</label>
         <input v-model.number="form.quantity" type="number" class="form-input" min="1" step="1" name="quantity" autocomplete="off" />
@@ -76,8 +90,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
-import type { ShipmentInfo, Product, StagedStockout } from '@/types'
+import { ref, computed } from 'vue'
+import type { ShipmentInfo, Product, StagedStockout, BatchAvailable } from '@/types'
 import UiSelect from '@/components/ui/UiSelect.vue'
 import UiDatePicker from '@/components/ui/UiDatePicker.vue'
 import UiButton from '@/components/ui/UiButton.vue'
@@ -91,11 +105,15 @@ interface StockOutForm {
   productId: string
   quantity: number
   note: string
+  /** 成品库存批次号（选填；选定后按该批次扣减） */
+  batchNo: string
 }
 
-defineProps<{
+const props = defineProps<{
   customerOptions: { value: string; label: string }[]
   shipmentInfo: ShipmentInfo | null
+  /** 成品库存批次可用量列表（选定 SKU 后由父级带出） */
+  batchOptions: BatchAvailable[]
   canAdd: boolean
   stagedCount: number
   searchFn: (q: string) => Promise<Product[]>
@@ -106,6 +124,18 @@ defineProps<{
 }>()
 
 const form = defineModel<StockOutForm>('form', { required: true })
+
+/**
+ * 批次下拉选项：只放真实批次。
+ * ⚠️ 不能加 `{ value: '' }` 的空值项：reka-ui 的 ComboboxItem 禁止空串 value
+ * （空串被它用来表示「清空选择」），加了会抛 "must have a value prop that is not
+ * an empty string"；「不指定批次」由 placeholder 承担，清空选择即回到它。
+ */
+const batchSelectOptions = computed(() =>
+  props.batchOptions.map((b) => ({ value: b.batch_no, label: `${b.batch_no}（可用 ${b.available_quantity}）` })),
+)
+/** 当前选中批次（用于显示可用量提示） */
+const selectedBatch = computed(() => props.batchOptions.find((b) => b.batch_no === form.value.batchNo) ?? null)
 
 const emit = defineEmits<{
   'add-staged': []

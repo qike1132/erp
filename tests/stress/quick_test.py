@@ -3,10 +3,15 @@ ERP系统压力测试 - 简化版
 测试API端点是否正常工作
 """
 
+import os as _os
+import sys as _sys
+
+_sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
 import asyncio
 import time
 
 import aiohttp
+from _prod_guard import require_non_production
 
 BASE_URL = "http://127.0.0.1:5002"
 CONCURRENT_USERS = 10
@@ -113,4 +118,5 @@ async def main():
         print("没有收集到结果")
 
 if __name__ == "__main__":
+    require_non_production(BASE_URL)  # fail-closed 守卫（F-TEST-BE-TOP-02）
     asyncio.run(main())

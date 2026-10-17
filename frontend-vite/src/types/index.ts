@@ -155,6 +155,40 @@ export interface InventoryResponse {
   per_page: number
 }
 
+export interface FinishedStockItem {
+  customer_name: string
+  product_id: number
+  product_name: string
+  barcode: string
+  batch_no: string
+  /** 原图 URL（已出站签名）；点击缩略图预览用它 */
+  image: string
+  /** 列表缩略图 URL（确定性后缀派生，已签名）；列表 img 用它 */
+  image_thumb: string | null
+  batch_in_qty: number
+  batch_available: number
+  is_custom: boolean
+  custom_country: string
+  /** 本页备注（按 客户+产品+批次 一行一条，页面自己维护） */
+  remark: string
+}
+
+export interface FinishedStockSummary {
+  success: boolean
+  data: FinishedStockItem[]
+  total: number
+  /** 过滤后全量（非当前页）的可用库存合计 */
+  total_available: number
+  page: number
+  per_page: number
+  all_customers: string[]
+}
+
+export interface BatchAvailable {
+  batch_no: string
+  available_quantity: number
+}
+
 export interface Customer {
   id: number
   customer_code?: string
@@ -618,6 +652,8 @@ export interface StagedStockout {
   date: string
   quantity: number
   note?: string
+  /** 成品库存批次号（选填；指定则按该批次扣减） */
+  batch_no?: string
 }
 
 export interface StockoutBatchSubmit {
@@ -626,6 +662,7 @@ export interface StockoutBatchSubmit {
   quantity: number
   stockout_date: string
   note?: string
+  batch_no?: string | null
 }
 
 export interface OrderBatchItem {

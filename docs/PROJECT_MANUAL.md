@@ -628,7 +628,7 @@ Get-Content D:\erp_system\logs\prod_runner.json    # ready:true 且 frontend_ok:
 ```
 
 > `logs/prod_runner.json` 里的 `mode/status` 字段**不可单独作为凭据**（启动窗口内可能陈旧），
-> 必须与上面的 HTTP/端口/ARQ 交叉验证；`started_at` 是「写盘时刻」不是进程启动时刻。
+> 必须与上面的 HTTP/端口/ARQ 交叉验证；`started_at` 是监督器启动时刻，写盘时刻看 `last_write_at`（2026-10-17 F-OPS-DEPLOY-11）。
 
 ### 4.15 部署后检查清单
 

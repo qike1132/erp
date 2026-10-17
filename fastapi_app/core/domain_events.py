@@ -7,6 +7,7 @@
 import asyncio
 import json
 import logging
+import os
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -48,12 +49,17 @@ class DomainEvent:
             self.event_id = uuid.uuid4().hex[:12]
 
     def to_dict(self) -> dict:
+        import os
         return {
             'event_type': self.event_type.value,
             'domain': self.domain,
             'payload': self.payload,
             'event_id': self.event_id,
             'timestamp': self.timestamp,
+            # 2026-10-17 审计 F-BE-CORE-03：发布进程已在 publish() 里本地跑过
+            # handler；Redis Pub/Sub 会把消息投回发布者自己 → 无 origin 过滤时
+            # 发布进程每个事件多跑一遍（8 worker 下 9 次/事件）。
+            'origin_pid': os.getpid(),
         }
 
     @classmethod
@@ -68,6 +74,8 @@ class DomainEvent:
 
 
 _subscribers: dict[DomainEventType, list[Callable]] = {}
+# F-BE-CORE-03：跨进程 event_id 去重（进程内已执行过的事件 id 集合）
+_seen_event_ids: dict[str, bool] = {}
 
 
 def subscribe(event_type: DomainEventType, handler: Callable):
@@ -255,6 +263,20 @@ async def start_event_listener():
                     continue
                 try:
                     event = DomainEvent.from_dict(json.loads(message['data']))
+                    # F-BE-CORE-03：本进程发布的事件已在 publish() 里本地执行过，
+                    # 跳过（否则发布进程每个事件跑两遍）；旧格式消息无 origin_pid
+                    # 时保守执行（等价旧行为）。
+                    origin_pid = (json.loads(message['data']) or {}).get('origin_pid')
+                    if origin_pid == os.getpid():
+                        continue
+                    # F-BE-CORE-03：跨进程去重——同 event_id 只执行一次（进程内
+                    # LRU 上限 1024，足够覆盖 5s 重连窗口内的重复投递）。
+                    if event.event_id in _seen_event_ids:
+                        continue
+                    _seen_event_ids[event.event_id] = True
+                    if len(_seen_event_ids) > 1024:
+                        for k in list(_seen_event_ids)[:512]:
+                            _seen_event_ids.pop(k, None)
                     handlers = list(_subscribers.get(event.event_type, []))
                     for handler in handlers:
                         try:

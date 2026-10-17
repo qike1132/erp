@@ -99,7 +99,14 @@ async def get_product_for_update(db: AsyncSession, product_id: int) -> Product:
     get_async_db / db_transaction 统一控制，本函数不提交。
     """
     result = await db.execute(
-        select(Product).where(Product.id == product_id).with_for_update()
+        select(Product)
+        .where(Product.id == product_id)
+        .with_for_update()
+        # F-BE-SVC-STOCK-02：同一会话先前未加锁预加载过该 Product 时（如出货导入
+        # 先 get_product_by_identifier 判存在），身份映射会把「取锁」解析成同一个
+        # 陈旧对象——锁拿到了、字段是旧的。populate_existing 强制用数据库当前值
+        # 覆盖已加载属性。
+        .execution_options(populate_existing=True)
     )
     product = result.scalar_one_or_none()
     if not product:

@@ -24,7 +24,7 @@ defineProps<{
 
 <style scoped>
 .cgl-customer-list {
-  flex: 0 0 150px;
+  flex: 0 0 120px;
   border-right: 1px solid var(--color-border-light, #e5e7eb);
   overflow-y: auto;
   background: transparent;

@@ -25,6 +25,7 @@ export type {
   CompletedOrderExportResponse,
 } from './purchase'
 export { customerApi } from './customer'
+export { finishedStockApi } from './finishedStock'
 export { supplierApi } from './supplier'
 export { stockApi } from './stock'
 export { stockReturnApi } from './stockReturn'

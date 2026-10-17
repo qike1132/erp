@@ -148,6 +148,15 @@
             :value="computedValue"
           />
 
+          <!-- 包装部成品库存：批次号 / 定制（仅包装部显示，随成品库存页一起用） -->
+          <ProductionFinishedStockFields
+            v-if="formDept === 'packaging'"
+            v-model:batch-no="form.batch_no"
+            v-model:is-custom="form.is_custom"
+            v-model:custom-country="form.custom_country"
+            :error="formErrors.custom_country"
+          />
+
           <div v-if="duplicateHint" class="pr-qe-dup" data-test="qe-dup">
             <FontAwesomeIcon icon="triangle-exclamation" aria-hidden="true" />
             <span>{{ duplicateHint }}</span>
@@ -206,6 +215,7 @@
 import { computed } from 'vue'
 import { formatCurrency } from '@/utils/format'
 import EntryDetailFields from './EntryDetailFields.vue'
+import ProductionFinishedStockFields from './ProductionFinishedStockFields.vue'
 import ProductSearchDropdown from './ProductSearchDropdown.vue'
 import CustomerSelect from './CustomerSelect.vue'
 import { useProductionEntry } from '@/views/production/composables/useProductionEntry'

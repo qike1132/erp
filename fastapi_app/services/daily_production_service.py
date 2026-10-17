@@ -25,7 +25,11 @@ from fastapi_app.core.production_scope import PRODUCTION_DEPARTMENTS
 from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.core.validators import validate_not_empty
 from fastapi_app.services.notification_service import StockEvent
-from fastapi_app.shared.stock_concurrency import assert_stock_available, get_product_for_update
+from fastapi_app.shared.stock_concurrency import (
+    apply_stock_delta_locked,
+    assert_stock_available,
+    get_product_for_update,
+)
 from fastapi_app.shared_models import Customer, DailyProductionRecord, InventoryLog, Product
 from fastapi_app.utils import calc_total_pages, parse_date_with_fallback
 
@@ -70,7 +74,10 @@ async def _apply_production_stock(
             product.current_stock, delta,
             message=f'生产记录变动将导致库存为负数（当前库存：{product.current_stock}，变化：{delta:+d}）',
         )
-    product.current_stock += delta
+    # 2026-10-17 审计 F-BE-SVC-STOCK-01：原为 `product.current_stock += delta` 直写，
+    # 不递增 version，与走乐观锁的写入口并发时丢失更新。改走统一写入口
+    # （调用方已持行锁，apply_stock_delta_locked 内置 WHERE version 守卫与原子非负守卫）。
+    await apply_stock_delta_locked(db, product, delta)
     db.add(InventoryLog(
         product_id=pid,
         change_type='生产入库' if delta > 0 else '生产入库冲销',
@@ -137,6 +144,12 @@ def validate_record_data(
         raise ValueError(f'生产数量不能超过 {MAX_QUANTITY}')
     if unit_price < 0:
         raise ValueError('单价不能为负数')
+
+
+def _validate_custom(is_custom: bool | None, custom_country: str | None) -> None:
+    """定制标记校验：标了定制就必须有国家（唯一新增校验，见成品库存方案）。"""
+    if is_custom and not (custom_country or '').strip():
+        raise ValueError('定制产品必须填写定制国家')
 
 
 async def _resolve_customer_name(db: AsyncSession, customer_id: int | None) -> str | None:
@@ -409,9 +422,13 @@ async def create_record(
     production_date_str: str,
     remark: str = '',
     created_by: str = '',
+    batch_no: str | None = None,
+    is_custom: bool | None = None,
+    custom_country: str | None = None,
 ) -> DailyProductionRecord:
     """创建生产记录"""
     validate_record_data(department, product_name, quantity, unit_price)
+    _validate_custom(is_custom, custom_country)
     prod_date = parse_date_with_fallback(production_date_str)
 
     # 限制不能录入未来日期的数据
@@ -430,6 +447,9 @@ async def create_record(
         quantity=quantity,
         production_date=prod_date,
         remark=remark.strip() if remark else None,
+        batch_no=(batch_no or '').strip() or None,
+        is_custom=bool(is_custom),
+        custom_country=((custom_country or '').strip() or None) if is_custom else None,
         created_by=(created_by or '').strip(),
     )
     db.add(record)
@@ -450,7 +470,8 @@ async def update_record(
 ) -> DailyProductionRecord:
     """更新生产记录"""
     result = await db.execute(
-        select(DailyProductionRecord).where(DailyProductionRecord.id == record_id)
+        # F-BE-SVC-STOCK-03：写路径取行锁，delta 不取自陈旧快照
+        select(DailyProductionRecord).where(DailyProductionRecord.id == record_id).with_for_update()
     )
     record = result.scalar_one_or_none()
     if not record:
@@ -483,6 +504,18 @@ async def update_record(
             raise ValueError('不能将生产日期修改为未来日期')
         record.production_date = new_date
 
+    # 批次/定制字段：允许显式置空（判 'in kwargs' 而非 'is not None'）
+    if 'batch_no' in kwargs:
+        record.batch_no = (kwargs['batch_no'] or '').strip() or None
+    if 'is_custom' in kwargs:
+        record.is_custom = bool(kwargs['is_custom'])
+    if 'custom_country' in kwargs:
+        record.custom_country = (kwargs['custom_country'] or '').strip() or None
+    # 用最终值校验（改任一字段后 is_custom/custom_country 都可能变化）
+    _validate_custom(record.is_custom, record.custom_country)
+    if not record.is_custom:
+        record.custom_country = None
+
     await db.flush()
 
     # 库存联动：同产品按差额调整；换产品则旧产品回退、新产品全额入账
@@ -512,7 +545,8 @@ async def delete_record(db: AsyncSession, record_id: int, *, operator: str = '')
         ValueError: 记录不存在。
     """
     result = await db.execute(
-        select(DailyProductionRecord).where(DailyProductionRecord.id == record_id)
+        # F-BE-SVC-STOCK-03：写路径取行锁，delta 不取自陈旧快照
+        select(DailyProductionRecord).where(DailyProductionRecord.id == record_id).with_for_update()
     )
     record = result.scalar_one_or_none()
     if not record:
@@ -817,6 +851,8 @@ async def export_records(
     start_date: str = '',
     end_date: str = '',
     departments: set[str] | None = None,
+    created_by: str = '',
+    keyword: str = '',
 ) -> bytes:
     """导出生产记录为 Excel（企业标准格式）
 
@@ -825,18 +861,24 @@ async def export_records(
         start_date: 区间起始日 (YYYY-MM-DD)。
         end_date: 区间结束日 (YYYY-MM-DD)，闭区间。
         departments: 可见部门集合；None 表示全部部门。
+        created_by: 录单人筛选（2026-10-17 审计 F-BE-SVC-STOCK-05：原先导出侧
+            自建条件漏掉录单人/关键词，导出的 Excel 与页面所见集合不同）。
+        keyword: 产品名或 69 码关键词。
     """
-    conditions = []
-    range_start = parse_date_with_fallback(start_date) if start_date else None
-    range_end = parse_date_with_fallback(end_date) if end_date else None
-    if range_start and range_end and range_end < range_start:
-        raise InvalidDateRangeError('结束日期不能早于开始日期')
-    if range_start:
-        conditions.append(DailyProductionRecord.production_date >= range_start)
-    if range_end:
-        conditions.append(DailyProductionRecord.production_date <= range_end)
-    if departments is not None:
-        conditions.append(DailyProductionRecord.department.in_(sorted(departments)))
+    # 与屏幕侧 get_records 复用同一条件构造器（F-BE-SVC-STOCK-05：
+    # 两套实现已漂移——导出丢了 created_by/keyword）。
+    try:
+        conditions = _build_record_conditions(
+            year=None, month=None,
+            start_date=start_date, end_date=end_date,
+            departments=departments, created_by=created_by, keyword=keyword,
+        )
+    except InvalidDateRangeError:
+        raise
+    except ValueError as e:
+        # 共享构造器抛普通 ValueError（区间反向等）；导出端点把 ValueError
+        # 映射为 413（行数上界），日期错误应保持 400 语义。
+        raise InvalidDateRangeError(str(e)) from e
 
     query = select(DailyProductionRecord).order_by(
         DailyProductionRecord.production_date,

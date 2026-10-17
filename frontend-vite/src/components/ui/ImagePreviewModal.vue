@@ -1,11 +1,11 @@
 <template>
   <!--
-    产品图片「原图」预览。迁移到共享 UiDialog（2026-10-16）以复用它的
-    Esc 关闭 / 焦点陷阱 / 滚动锁，替代原先只有 ✕ 一条关闭路径的手写 Teleport 遮罩。
-    行为：Esc 关闭、✕ 关闭；点遮罩空白不关闭（UiDialog closeOnOverlayClick 默认 false，
-    即全站约定 2026-10-14）。
-    对外契约不变：image prop + update:image 事件；image↔open 的适配只在本组件内部完成，
-    不把 image 语义泄漏给 UiDialog。
+    产品图片「原图」预览（共享组件，2026-10-17 从 views/pattern-room/components/ 抽到 ui/，
+    供 pattern-room 与 finished-stock 复用）。基于共享 UiDialog 复用 Esc 关闭 /
+    焦点陷阱 / 滚动锁。行为：Esc 关闭、✕ 关闭；点遮罩空白不关闭（UiDialog
+    closeOnOverlayClick 默认 false，即全站约定 2026-10-14）。
+    对外契约：image prop + update:image 事件；image↔open 的适配只在本组件内部完成。
+    传**原图** URL（相对路径，本组件内部走 resolveStaticUrl）。
   -->
   <UiDialog
     :open="!!image"
@@ -26,7 +26,7 @@
 
 <script setup lang="ts">
 import { resolveStaticUrl } from '@/api/request'
-import UiDialog from '@/components/ui/UiDialog.vue'
+import UiDialog from './UiDialog.vue'
 
 defineProps<{ image: string | null }>()
 const emit = defineEmits<{ 'update:image': [v: string | null] }>()
@@ -47,7 +47,7 @@ function onOpenChange(open: boolean) {
 .pim-title { font-size: 14px; font-weight: 700; color: var(--color-text); }
 .pim-body {
   display: flex; align-items: center; justify-content: center;
-  min-height: 50vh; padding: 20px; background: var(--color-surface, #f8fafc);
+  min-height: 50vh; padding: 20px; background: var(--color-surface);
   border-radius: 12px;
 }
 .pim-img-view {

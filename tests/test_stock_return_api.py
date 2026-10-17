@@ -76,9 +76,13 @@ async def sr_api():
                 async with AsyncClient(
                     transport=transport,
                     base_url="http://test",
+                    cookies={"fastapi_csrf_token": "test-csrf-token"},
                     headers={
                         "Authorization": "Bearer test-token",
                         "Origin": "http://localhost:3000",
+                        # F-BE-CORE-07 收口后「Bearer+Cookie」请求必须过 double-submit
+                        # （cookie 与 header 同值即可通过 compare_digest）
+                        "X-CSRF-Token": "test-csrf-token",
                     },
                 ) as client:
                     try:

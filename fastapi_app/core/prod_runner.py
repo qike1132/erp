@@ -571,8 +571,16 @@ class _Managed:
         self.backoff_step += 1
 
     def maybe_restart(self) -> None:
-        if self.status == "crashed" and self.next_start <= time.monotonic():
+        # 2026-10-17 审计 F-BE-CORE-06：启动失败（failed，一次都没起来）原先
+        # 永不重试——start() 抛 OSError 后状态停在 failed，监督器成一次性进程
+        # （端口被孤儿占用 / _PY 失效 / 杀软拦截都会走到这）。与 crashed 同样
+        # 走退避阶梯，失败后再排下一次。
+        if self.status in ("crashed", "failed") and self.next_start <= time.monotonic():
             self.start()
+            if self.status == "failed":
+                self.next_start = time.monotonic() + self.delay
+                self.delay = _next_backoff(self.delay, self.backoff_step)
+                self.backoff_step += 1
 
 class Supervisor:
     def __init__(self, workers: int, api_port: int, web_port: int, with_arq: bool = True):
@@ -584,6 +592,10 @@ class Supervisor:
         self.broker_port = _broker_port()
         self.ready = False
         self._last_log_check = 0.0
+        # F-BE-CORE-04 / F-OPS-DEPLOY-11：started_at 必须是监督器启动时刻，
+        # 不是每次 write_status 的落盘时刻（后者见 last_write_at）。
+        self._supervisor_started_at = _iso_now()
+        self._write_seq = 0
 
         self.backend = _Managed(
             "后端(uvicorn)", _cmd_uvicorn(api_port, workers), PROJECT_ROOT,
@@ -641,11 +653,17 @@ class Supervisor:
             broker_status = redis_status
         else:
             broker_status = "ok" if _is_redis_up(self.broker_port) else "down"
+        # 2026-10-17 审计 F-BE-CORE-04：监督器死亡后状态文件永久冻结为绿
+        # （GUI 无新鲜度判据）。加 last_write_at（每次落盘的真实时刻）与
+        # write_seq（单调递增序号），消费方按「超过 3×循环周期(3s) 未更新即 stale」判定。
+        self._write_seq = getattr(self, '_write_seq', 0) + 1
         self.ready = self.backend.status == "ready"  # 语义保持不变（GUI 可能已依赖）
         frontend_pid, frontend_status, frontend_ok = self._frontend_state()
         data = {
             "pid": os.getpid(),
-            "started_at": _iso_now(),
+            "started_at": self._supervisor_started_at,  # 语义修正：监督器启动时刻（原先每次写入刷新，见 F-OPS-DEPLOY-11）
+            "last_write_at": _iso_now(),  # 本次落盘时刻（新鲜度判据）
+            "write_seq": self._write_seq,
             "mode": "production",
             "ready": self.ready,
             # 新增可观测字段：ready 只看后端，前端缺失此前完全不可见；

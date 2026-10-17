@@ -11,6 +11,8 @@ export interface StockReturnRecord {
   stockout_id: number | null
   /** 历史关联行的出货单号 */
   stockout_no: string
+  /** 关联出货的批次号（退的是哪个批次）；无关联时为空串 */
+  batch_no: string
   reason: string
   note: string
   /** active 正常 / cancelled 已取消（历史遗留值，2026-10-09 起取消即硬删除，存量行仍可能有 cancelled） */
@@ -27,6 +29,7 @@ export interface ShipmentOption {
   customer: string | null
   quantity: number
   returned_quantity: number
+  batch_no: string
   available: number
 }
 

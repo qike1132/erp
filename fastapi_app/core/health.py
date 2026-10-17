@@ -153,6 +153,13 @@ async def _build_fresh_health(user_id: int | None):
     health_data["backup"] = await _backup_signal()
     if not overall_healthy:
         health_data["status"] = "unhealthy"
+    elif not health_data["backup"].get("ok", False):
+        # 2026-10-17 审计 F-BE-CORE-05：备份产物过期/ARQ 停摆原先只写进
+        # backup 字段，状态码仍 200 healthy——监督器与外部探活全部绿灯，
+        # 数据保护链静默失效无人可见（2026-09-16 那类事故的观察缺口）。
+        # DB 正常但备份链异常时降级为 degraded（仍 200，不触发监督器重启，
+        # 但 GUI/巡检可据 status 区分）。
+        health_data["status"] = "degraded"
     _set_cached_health(public_data=dict(health_data), internal_data=internal_checks)
 
     # P0-10：降级标记只加在响应上（缓存里存的是 DB/Redis 健康快照）

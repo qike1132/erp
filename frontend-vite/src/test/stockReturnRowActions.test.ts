@@ -62,7 +62,8 @@ function makeApi() {
 const ROW: StockReturnRecord = {
   id: 31, return_no: 'SR-20261008-0001', return_date: '2026-10-08',
   product: { id: 3, name: '鲨鱼公仔' }, quantity: 4, customer: 'MINISO国际',
-  stockout_id: 21, stockout_no: 'SO-1', reason: '破损', note: '备注', status: 'active',
+  stockout_id: 21, stockout_no: 'SO-1', batch_no: '0464628801',
+  reason: '破损', note: '备注', status: 'active',
 }
 
 beforeEach(() => {

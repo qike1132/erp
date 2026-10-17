@@ -409,13 +409,16 @@ async def update_batch_no(
 
     if sync_same_batch and old_batch_no and old_batch_no != batch_no:
         # 先锁定待同步订单，避免并发竞态（行级锁）
+        # F-BE-SVC-STOCK-07：多行 FOR UPDATE 必须按 id 升序（与
+        # order_batch_create._lock_products 同款），否则两条并发的批次操作
+        # 以相反顺序锁同一批行 → 死锁环（PG 直接 500，本仓无死锁映射）。
         lock_result = await db.execute(
             select(Order.id).where(
                 Order.batch_no == old_batch_no,
                 Order.id != order_id,
                 Order.status != ORDER_STATUS_BATCH_COMPLETED,
                 Order.is_deleted.isnot(True),
-            ).with_for_update()
+            ).order_by(Order.id).with_for_update()
         )
         sync_ids = list(lock_result.scalars().all())
         if sync_ids:
@@ -476,7 +479,8 @@ async def batch_assign(
     user: User,
 ) -> dict:
     whitelist = await get_whitelist(db)
-    stmt = select(Order).where(Order.id.in_(order_ids), Order.is_deleted.isnot(True)).with_for_update()
+    # F-BE-SVC-STOCK-07：多行锁按 id 升序
+    stmt = select(Order).where(Order.id.in_(order_ids), Order.is_deleted.isnot(True)).order_by(Order.id).with_for_update()
     result = await db.execute(stmt)
     orders = result.scalars().all()
 
@@ -507,11 +511,13 @@ async def complete_batch(
     batch_no: str,
     user: User,
 ) -> dict:
+    # F-BE-SVC-STOCK-07：两把多行锁都按 id 升序取（Order 集、StockIn 集各自排序），
+    # 消除并发完成同一批次的死锁环。
     stmt = select(Order).where(
         Order.batch_no == batch_no,
         Order.status != ORDER_STATUS_BATCH_COMPLETED,
         Order.is_deleted.isnot(True),
-    ).with_for_update()
+    ).order_by(Order.id).with_for_update()
     result = await db.execute(stmt)
     orders = result.scalars().all()
 
@@ -520,7 +526,7 @@ async def complete_batch(
             StockIn.batch_no == batch_no,
             StockIn.batch_completed_at.is_(None),
             StockIn.is_deleted.isnot(True),
-        ).with_for_update()
+        ).order_by(StockIn.id).with_for_update()
     )
     stockins = stockin_result.scalars().all()
 

@@ -97,6 +97,12 @@ async def _resolve_row_product(db, row: dict) -> tuple[Product | None, str | Non
     quantity = row.get('数量', 0)
     if not all([product_identifier, customer, quantity]):
         return None, '缺少必填字段'
+    # all() 只判真值，负数/零会被放过（负数 truthy）。数量语义上必须是正整数，
+    # 与 batch_import_core._parse_positive_quantity（qty>0 else None）、
+    # plan_tasks（quantity<=0 拒行）同口径 —— 2026-10-17 审计 F-BE-CORE-01。
+    if not isinstance(quantity, (int, float)) or isinstance(quantity, bool) \
+            or int(quantity) != quantity or int(quantity) <= 0:
+        return None, f'数量无效：{quantity!r}（必须为正整数）'
     product = await _resolve_product_locked(db, product_identifier)
     if not product:
         return None, f"产品 '{product_identifier}' 不存在"
@@ -211,6 +217,14 @@ async def _run_batch_import_async(file_path: str, job_id: str, task_label: str, 
     except (ValueError, TypeError, OSError) as exc:
         logger.error(f'批量导入{task_label}任务失败: {exc}', exc_info=True)
         # 保留文件以供 ARQ 重试（max_tries 控制重试上限）
+        delete_file = False
+        raise exc
+    except Exception as exc:  # defensive: 记录后原样上抛，只改 delete_file 语义保留源文件供 ARQ 重试
+        # 2026-10-17 审计 F-BE-CORE-02：非预期异常（SQLAlchemyError 死锁/断连、
+        # assert 失败等）原先走 delete_file=True → finally 删掉用户源文件 →
+        # ARQ 三次重试全部「文件不存在」。既然异常在向外抛（任务未成功），文件
+        # 一律保留，让重试仍有输入可用。
+        logger.error(f'批量导入{task_label}任务未预期异常（保留源文件供重试）: {exc}', exc_info=True)
         delete_file = False
         raise exc
     finally:

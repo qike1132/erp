@@ -15,6 +15,7 @@ declare module 'vue' {
     BackupOverviewCards: typeof import('./components/backup/BackupOverviewCards.vue')['default']
     BackupRecordTable: typeof import('./components/backup/BackupRecordTable.vue')['default']
     CustomerChipBar: typeof import('./components/ui/CustomerChipBar.vue')['default']
+    ImagePreviewModal: typeof import('./components/ui/ImagePreviewModal.vue')['default']
     OcrPasteImport: typeof import('./components/ocr/OcrPasteImport.vue')['default']
     OcrPreviewModal: typeof import('./components/ocr/OcrPreviewModal.vue')['default']
     PathSettings: typeof import('./components/backup/PathSettings.vue')['default']

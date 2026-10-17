@@ -35,6 +35,7 @@ import sys
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
+import httpx
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
@@ -126,6 +127,30 @@ def _build_test_db_url() -> str:
 
 
 TEST_DATABASE_URL = _build_test_db_url()
+
+
+def _assert_is_test_database(url: str) -> None:
+    """硬闸（2026-10-17 审计 F-TEST-BE-TOP-03）：测试会话会 DROP SCHEMA public CASCADE，
+    目标 URL 必须显式指向 *_test 库。
+
+    派生逻辑 parsed.path.replace(f"/{db_name}", ...) 在 DB_NAME 与实际库名不一致时
+    静默 no-op，返回的就是生产库 URL；TEST_DATABASE_URL 环境变量分支则完全无校验。
+    两个来路都在这里收口——不满足直接终止整个会话，不跑任何用例。
+    """
+    from urllib.parse import urlparse as _urlparse
+
+    p = _urlparse(url)
+    if not p.path.rstrip("/").endswith("_test"):
+        pytest.exit(
+            f"拒绝运行：测试库 URL 指向非测试库 {p.path!r}"
+            f"（本会话会对它执行 DROP SCHEMA public CASCADE）。"
+            f"请检查 DB_NAME 与 ASYNC_DATABASE_URL 的库名是否一致，"
+            f"或显式设置指向 *_test 库的 TEST_DATABASE_URL。",
+            returncode=2,
+        )
+
+
+_assert_is_test_database(TEST_DATABASE_URL)
 
 
 # ============================================================
@@ -325,9 +350,29 @@ async def async_client(test_engine, async_db_session):
 
     app.dependency_overrides[get_async_db] = _shared_db
     app.dependency_overrides[get_async_read_db] = _shared_db
+
+    # F-BE-CORE-07（CSRF 收口）后，Bearer+Cookie 的写请求必须过 double-submit：
+    # X-CSRF-Token 头须与 fastapi_csrf_token cookie 同值。token 会在响应中被
+    # 轮换，固定值会变陈旧 —— 用请求钩子在每次发请求前从 cookie jar 同步到头。
+    # （httpx.Request 没有 cookies 属性，jar 在 client 上；client 在钩子闭包
+    # 捕获时尚未实例化，故经 holder 间接引用运行时实例。）
+    holder: dict[str, AsyncClient] = {}
+
+    async def _sync_csrf_header(request: httpx.Request) -> None:
+        client = holder.get('client')
+        if client is None:
+            return
+        token = client.cookies.get("fastapi_csrf_token")
+        if token:
+            request.headers["X-CSRF-Token"] = token
+
     try:
         transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with AsyncClient(
+            transport=transport, base_url="http://test",
+            event_hooks={"request": [_sync_csrf_header]},
+        ) as client:
+            holder['client'] = client
             yield client
     finally:
         app.dependency_overrides.pop(get_async_db, None)
@@ -364,6 +409,8 @@ async def auth_headers(async_client, admin_user):
     )
     if resp.status_code == 200:
         data = resp.json()
+        # CSRF double-submit 由 async_client 的请求钩子统一处理（见上），
+        # 这里只需带 Bearer 头。
         return {"Authorization": f"Bearer {data.get('access_token', '')}"}
     # 登录失败时返回空头（测试会因 401 失败）
     return {}

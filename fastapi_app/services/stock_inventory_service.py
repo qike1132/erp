@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 from sqlalchemy.sql.elements import TextClause
 
+from fastapi_app.core.business_time import _BUSINESS_TZ, fmt_business
 from fastapi_app.core.cache import cache_result
 from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.shared_models import (
@@ -29,6 +30,19 @@ from fastapi_app.shared_models import (
     StockOut,
     StockReturn,
 )
+
+
+def _day_range_utc(day_str: str, *, end: bool = False) -> datetime:
+    """YYYY-MM-DD → 该北京日历日的起/止边界（aware UTC）。
+
+    2026-10-17 审计 F-BE-SVC-STOCK-06：原先把北京日历日 ``.replace(tzinfo=UTC)``
+    锚定成 UTC 零点，东八区窗口整体偏 8 小时（当天 00:00–07:59 的记录落到前一天）。
+    与 stock_out_service._resolve_stockout_datetime / order_batch_create 同口径。
+    """
+    d = datetime.strptime(day_str, '%Y-%m-%d')
+    if end:
+        d = d.replace(hour=23, minute=59, second=59)
+    return d.replace(tzinfo=_BUSINESS_TZ).astimezone(UTC)
 
 logger = logging.getLogger(__name__)
 
@@ -79,15 +93,13 @@ async def get_stockins(db: AsyncSession, page: int=1, per_page: int=50,
         conditions.append(StockIn.customer.like(f'%{escape_like(customer)}%'))
     if start_date:
         try:
-            from datetime import datetime
-            sd = datetime.strptime(start_date, '%Y-%m-%d').replace(tzinfo=UTC)
+            sd = _day_range_utc(start_date)
             conditions.append(StockIn.stockin_date >= sd)
         except ValueError:
             pass  # defensive: 可选 ValueError 静默处理,不影响主流程
     if end_date:
         try:
-            from datetime import datetime
-            ed = datetime.strptime(end_date, '%Y-%m-%d').replace(hour=23, minute=59, second=59, tzinfo=UTC)
+            ed = _day_range_utc(end_date, end=True)
             conditions.append(StockIn.stockin_date <= ed)
         except ValueError:
             pass  # defensive: 可选 ValueError 静默处理,不影响主流程
@@ -128,7 +140,7 @@ async def get_stockins(db: AsyncSession, page: int=1, per_page: int=50,
         deducted = int(row.deducted) if row.deducted is not None else 0
         data.append({
             'id': stock_in.id, 'stockin_no': stock_in.stockin_no,
-            'stockin_date': stock_in.stockin_date.strftime('%Y-%m-%d') if stock_in.stockin_date else '',
+            'stockin_date': fmt_business(stock_in.stockin_date, '%Y-%m-%d') if stock_in.stockin_date else '',
             'customer': stock_in.customer,
             'product': {'id': stock_in.product.id, 'name': stock_in.product.name, 'barcode': stock_in.product.barcode or '', 'image': stock_in.product.image or ''} if stock_in.product else None,
             'quantity': stock_in.quantity,
@@ -158,13 +170,13 @@ async def get_stockouts(db: AsyncSession, page: int=1, per_page: int=50,
         conditions.append(StockOut.customer.like(f'%{escape_like(customer)}%'))
     if start_date:
         try:
-            sd = datetime.strptime(start_date, '%Y-%m-%d').replace(tzinfo=UTC)
+            sd = _day_range_utc(start_date)
             conditions.append(StockOut.stockout_date >= sd)
         except ValueError:
             pass  # defensive: 可选 ValueError 静默处理,不影响主流程
     if end_date:
         try:
-            ed = datetime.strptime(end_date, '%Y-%m-%d').replace(hour=23, minute=59, second=59, tzinfo=UTC)
+            ed = _day_range_utc(end_date, end=True)
             conditions.append(StockOut.stockout_date <= ed)
         except ValueError:
             pass  # defensive: 可选 ValueError 静默处理,不影响主流程
@@ -196,7 +208,7 @@ async def get_stockouts(db: AsyncSession, page: int=1, per_page: int=50,
         item = {
             'id': stock_out.id,
             'stockout_no': stock_out.stockout_no,
-            'stockout_date': stock_out.stockout_date.strftime('%Y-%m-%d') if stock_out.stockout_date else '',
+            'stockout_date': fmt_business(stock_out.stockout_date, '%Y-%m-%d') if stock_out.stockout_date else '',
             'customer': stock_out.customer,
             'product_id': stock_out.product_id,
             'product_name': stock_out.product.name if stock_out.product else '',
@@ -230,7 +242,7 @@ async def get_stockreturns(db: AsyncSession, stockout_id: int | None = None,
         conditions.append(StockReturn.customer.like(f'%{escape_like(customer)}%'))
     if start_date:
         try:
-            sd = datetime.strptime(start_date, '%Y-%m-%d').replace(tzinfo=UTC)
+            sd = _day_range_utc(start_date)
             conditions.append(StockReturn.return_date >= sd)
         except ValueError:
             pass  # defensive: 可选 ValueError 静默处理,不影响主流程
@@ -238,7 +250,7 @@ async def get_stockreturns(db: AsyncSession, stockout_id: int | None = None,
         try:
             # 左闭右开：end_date 当天整天都计入（含 23:59:59.x 的微秒记录，
             # 退货时间由 business_now() 填充含微秒，23:59:59 口径会漏掉最后一秒内的单）
-            ed = (datetime.strptime(end_date, '%Y-%m-%d') + timedelta(days=1)).replace(tzinfo=UTC)
+            ed = _day_range_utc(end_date, end=True) + timedelta(days=1)
             conditions.append(StockReturn.return_date < ed)
         except ValueError:
             pass  # defensive: 可选 ValueError 静默处理,不影响主流程
@@ -256,12 +268,14 @@ async def get_stockreturns(db: AsyncSession, stockout_id: int | None = None,
         data.append({
             'id': stock_return.id,
             'return_no': stock_return.return_no,
-            'return_date': stock_return.return_date.strftime('%Y-%m-%d') if stock_return.return_date else '',
+            'return_date': fmt_business(stock_return.return_date, '%Y-%m-%d') if stock_return.return_date else '',
             'product': {'id': stock_return.product.id, 'name': stock_return.product.name} if stock_return.product else None,
             'quantity': stock_return.quantity,
             'customer': stock_return.customer,
             'stockout_id': stock_return.stockout_id,
             'stockout_no': stock_return.stockout.stockout_no if stock_return.stockout else '',
+            # 关联出货的批次号（该退货退的是哪个批次）；关联行缺失时为空串
+            'batch_no': stock_return.stockout.batch_no or '' if stock_return.stockout else '',
             'reason': stock_return.reason or '',
             'note': stock_return.note or '',
             'status': stock_return.status,
@@ -314,13 +328,14 @@ async def get_stockout_records(db: AsyncSession, kind: str = 'stockout', nos: st
         data.append({
             'id': so.id,
             'stockout_no': so.stockout_no,
-            'stockout_date': so.stockout_date.strftime('%Y-%m-%d') if so.stockout_date else '',
+            'stockout_date': fmt_business(so.stockout_date, '%Y-%m-%d') if so.stockout_date else '',
             'customer': so.customer or '',
             'product_id': so.product_id,
             'product_name': so.product.name if so.product else '',
             'barcode': so.product.barcode if so.product else '',
             'quantity': so.quantity,
             'returned_quantity': so.returned_quantity,
+            'batch_no': so.batch_no or '',
             'note': so.note or '',
             'stockin_id': so.stockin_id,
             'order_id': so.order_id,
@@ -344,7 +359,7 @@ async def get_stockreturn_records(db: AsyncSession, nos: str = '') -> list[dict]
         data.append({
             'id': sr.id,
             'return_no': sr.return_no,
-            'return_date': sr.return_date.strftime('%Y-%m-%d') if sr.return_date else '',
+            'return_date': fmt_business(sr.return_date, '%Y-%m-%d') if sr.return_date else '',
             'customer': sr.customer or '',
             'product_id': sr.product_id,
             'product_name': sr.product.name if sr.product else '',
@@ -766,7 +781,10 @@ async def _resolve_products(db: AsyncSession, search: str) -> list[int] | None:
     if not search:
         return None  # 无搜索时不加载全量产品ID，调用方应跳过 ANY(:pids) 条件
     escaped = escape_like(search)
-    result = await db.execute(select(Product.id).where(or_(Product.name.like(f'%{escaped}%', escape='\\'), Product.barcode.like(f'%{escaped}%', escape='\\'))))  # sql-safe: escape_like/绑定参数/常量片段
+    # OCR 复审（2026-10-17 low）：改用 ilike——移动端/桌面端本地过滤原先都是
+    # toLowerCase() 双侧大小写不敏感，like 在 PG 是大小写敏感的，混合大小写
+    # 查询（如 m01 搜 M01）会假阴性。与 /products/list 的 ilike 口径一致。
+    result = await db.execute(select(Product.id).where(or_(Product.name.ilike(f'%{escaped}%', escape='\\'), Product.barcode.ilike(f'%{escaped}%', escape='\\'))))  # sql-safe: escape_like/绑定参数/常量片段
     return [row[0] for row in result.all()]
 
 

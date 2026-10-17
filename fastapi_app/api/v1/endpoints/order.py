@@ -11,6 +11,7 @@ import logging
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -37,11 +38,33 @@ from fastapi_app.schemas.order import (
 from fastapi_app.services import order_batch_service, order_crud, order_service
 from fastapi_app.services.order.unified import get_unified_records
 from fastapi_app.services.order_service import PermissionDeniedError
-from fastapi_app.shared_models import Order, User
+from fastapi_app.shared_models import Order, OrderItem, Product, User
 from fastapi_app.shared_models.order import VALID_ORDER_STATUSES
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+async def _assert_order_factory_scoped(db: AsyncSession, order_id: int, user: User) -> None:
+    """写端点的工厂隔离闸门（2026-10-17 审计 F-BE-API-01）。
+
+    读端点（list_orders / get_order）把「绑定工厂的非超管只能碰本厂」下推到
+    service 的 WHERE（Order → items → product.factory 推导，Order 表本身无
+    factory 列），写端点此前只认权限码、按 id 直取——厂绑定用户可对可枚举的
+    自增 order_id 跨厂 PUT/DELETE。与 get_order_by_id 同口径：不匹配一律 404
+    （不暴露「该订单存在但不属于你」）。订单不存在时静默放行（由 service 报错）。
+    """
+    scoped_factory = user.factory if (user.factory and not user.is_super) else None
+    if not scoped_factory:
+        return
+    order_factory = (await db.execute(
+        select(Product.factory)
+        .join(OrderItem, OrderItem.product_id == Product.id)
+        .where(OrderItem.order_id == order_id, Product.factory.isnot(None))
+        .limit(1)
+    )).scalar_one_or_none()
+    if order_factory is not None and order_factory != scoped_factory:
+        raise HTTPException(status_code=404, detail="订单不存在")
 
 
 @router.get("/list", response_model=OrderListResponse)
@@ -54,6 +77,7 @@ async def list_orders(
     start_date: str | None = Query(None, description="开始日期筛选(YYYY-MM-DD)"),
     end_date: str | None = Query(None, description="结束日期筛选(YYYY-MM-DD)"),
     factory: str | None = Query(None, description="工厂筛选：东莞/湖北"),
+    keyword: str | None = Query(None, max_length=100, description="关键词筛选（订单号/产品名）"),
     db: AsyncSession = Depends(get_async_read_db),
     user: User = Depends(require_permission("order_manage")),
 ) -> OrderListResponse:
@@ -88,7 +112,7 @@ async def list_orders(
                                                 customer=customer, product_id=product_id,
                                                 status=status,
                                                 start_date=start_date, end_date=end_date,
-                                                factory=factory)
+                                                factory=factory, keyword=keyword)
     except AppError:
         raise  # 业务异常（如非法日期 400）交由全局 handler，不被吞为 500
     except (SQLAlchemyError, OSError) as e:
@@ -322,6 +346,7 @@ async def edit_order(
     if not order:
         logger.info("编辑订单失败：order_id=%s 不存在", order_id)
         raise HTTPException(status_code=404, detail="订单不存在")
+    await _assert_order_factory_scoped(db, order_id, user)
 
     # 未传入的字段沿用原值，实现部分更新
     # TODO(multi-sku-order): 读取 order.quantity 在多 SKU 下为首 item 兼容值，待后续 spec 改造为按 OrderItem 维度。
@@ -360,6 +385,11 @@ async def edit_order_item(
     Returns:
         OrderActionResponse: 含成功标志与提示消息的响应。
     """
+    # 工厂隔离（F-BE-API-01）：item 反查订单的工厂归属后与本厂比对，不匹配 404
+    _item_order_id = (await db.execute(
+        select(OrderItem.order_id).where(OrderItem.id == item_id))).scalar_one_or_none()
+    if _item_order_id is not None:
+        await _assert_order_factory_scoped(db, _item_order_id, user)
     async with db_transaction(db):
         result = await order_service.update_order_item(
             db, item_id, data.quantity, data.note, user,
@@ -415,6 +445,11 @@ async def delete_order_item(
         OSError: lambda e: HTTPException(status_code=500, detail='删除前备份失败，操作已回滚，请稍后重试'),
         SQLAlchemyError: lambda e: HTTPException(status_code=500, detail='数据库操作失败，删除已回滚'),
     }):
+        # 工厂隔离（F-BE-API-01）：item 反查订单的工厂归属后与本厂比对
+        _item_order_id = (await db.execute(
+            select(OrderItem.order_id).where(OrderItem.id == item_id))).scalar_one_or_none()
+        if _item_order_id is not None:
+            await _assert_order_factory_scoped(db, _item_order_id, user)
         result = await order_service.delete_order_item(db, item_id, user)
     await cache_mgr.invalidate_dashboard()
     # 末项删除会转成整单删除（service 回传 order_id）：与整单删除端点同口径发布
@@ -475,6 +510,8 @@ async def delete_order(
         OSError: _backup_failed,
         SQLAlchemyError: _db_failed,
     }):
+        # 工厂隔离（F-BE-API-01）
+        await _assert_order_factory_scoped(db, order_id, user)
         result = await order_service.delete_order(db, order_id, user)
 
     await cache_mgr.invalidate_dashboard()
@@ -537,6 +574,8 @@ async def update_batch_no(
         OrderActionResponse: 包含成功标志和提示消息的响应。
     """
     async with db_transaction(db):
+        # 工厂隔离（F-BE-API-01）
+        await _assert_order_factory_scoped(db, order_id, user)
         await order_batch_service.update_batch_no(
             db, order_id=order_id, batch_no=batch_no,
             sync_same_batch=False, user=user,
@@ -571,6 +610,8 @@ async def update_deduct_quantity(
     """
     try:
         async with db_transaction(db):
+            # 工厂隔离（F-BE-API-01）
+            await _assert_order_factory_scoped(db, order_id, user)
             result = await order_service.update_deduct_quantity(
                 db, order_id=order_id,
                 new_deduct_quantity=deduct_quantity, current_user=user,

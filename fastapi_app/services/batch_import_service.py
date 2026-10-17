@@ -55,7 +55,11 @@ from fastapi_app.services.xlsx_cell_images import (
     guess_image_extension,
     parse_dispimg_id,
 )
-from fastapi_app.shared.stock_concurrency import check_stock_available, get_product_for_update
+from fastapi_app.shared.stock_concurrency import (
+    apply_stock_delta_locked,
+    check_stock_available,
+    get_product_for_update,
+)
 from fastapi_app.shared_models import (
     CaseMovement,
     InventoryLog,
@@ -552,7 +556,9 @@ async def import_stockins_service(db: AsyncSession, file: ExcelUpload) -> BatchI
             )
             db.add(stockin)
             locked_product = await get_product_for_update(db, product_id)
-            locked_product.current_stock += qty
+            # 2026-10-17 审计 F-BE-SVC-STOCK-01：原为 `locked_product.current_stock += qty` 直写
+            # （不递增 version，并发丢失更新），改走统一写入口。
+            await apply_stock_delta_locked(db, locked_product, qty)
             log = InventoryLog(
                 product_id=product_id, change_type='备货', change_quantity=qty,
                 related_id=stockin_no, note=f'批量导入备货：{stockin_no}',
@@ -622,7 +628,8 @@ async def import_stockouts_service(db: AsyncSession, file: ExcelUpload) -> Batch
             stockout_date = parse_date_value(stockout_date_val) or datetime.now()
             # 按订单可用量分配出货，直到出货数量耗尽
             await _allocate_stockout_to_orders(db, product, qty, customer, stockout_date, note, shipment_info)
-            product.current_stock -= qty
+            # 2026-10-17 审计 F-BE-SVC-STOCK-01：原为 `product.current_stock -= qty` 直写，改走统一写入口。
+            await apply_stock_delta_locked(db, product, -qty)
             log = InventoryLog(
                 product_id=product.id, change_type='出库', change_quantity=-qty,
                 related_id='', note=f'批量导入出库：客户{customer}，数量{qty}',

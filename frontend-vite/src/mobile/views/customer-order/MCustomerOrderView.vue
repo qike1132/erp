@@ -9,7 +9,7 @@
       <div v-if="loading" class="m-center"><MSpinner size="lg" /></div>
       <MEmpty v-else-if="!orders.length" title="暂无订单" subtitle="输入关键词搜索" />
       <MList v-else>
-        <MListItem v-for="o in orders" :key="o.id" :title="`#${o.id} ${o.product_name || ''}`" :subtitle="`${o.customer_name || '—'} · ${o.quantity || 0}件 · ${o.date || ''}`">
+        <MListItem v-for="o in orders" :key="o.id" :title="`#${o.order_no || o.id} ${o.product?.name || ''}`" :subtitle="`${o.customer || '—'} · ${o.quantity || 0}件 · ${o.order_date || ''}`">
           <template #icon>
             <div class="m-icon-bg" :style="{ background: orderColor(o.status) }">
               <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" width="16" height="16"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" /><line x1="3" y1="6" x2="21" y2="6" /></svg>
@@ -46,7 +46,9 @@ import MSpinner from '@/mobile/components/MSpinner.vue'
 const activeTab = ref('all')
 const tabChips = [{ label: '全部', value: 'all' }, { label: '待处理', value: 'pending' }, { label: '已完成', value: 'completed' }]
 const keyword = ref('')
-const orders = ref<Array<{ id: number; product_name?: string; customer_name?: string; quantity?: number; date?: string; status?: string }>>([])
+// 字段与后端 OrderSerializer.LIST_CONFIG 对齐（F-FE-MOBILE-02：原先读
+// product_name/customer_name/date 等后端不返回的键，副标题恒为空）
+const orders = ref<Array<{ id: number; order_no?: string; customer?: string; order_date?: string; quantity?: number; status?: string; product?: { name?: string } }>>([])
 const loading = ref(false)
 const page = ref(1)
 const perPage = 20

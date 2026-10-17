@@ -11,6 +11,10 @@ ERP系统性能基准测试 - 20K+ 数据量场景
   - PostgreSQL 数据库已启动
   - 数据库中已有 20K+ 条测试数据（或运行 python -m tests.qa.data_generator_v3_db 生成）
 """
+import os as _os
+import sys as _sys
+
+_sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
 import asyncio
 import json
 import os
@@ -19,6 +23,8 @@ import sys
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
+
+from _prod_guard import require_non_production
 
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, project_root)
@@ -300,4 +306,5 @@ async def run_all_benchmarks():
 
 
 if __name__ == '__main__':
+    require_non_production(API_BASE)  # fail-closed 守卫（F-TEST-BE-TOP-02）
     asyncio.run(run_all_benchmarks())

@@ -83,15 +83,17 @@ defineEmits<{
 /** 卡片高度单一事实来源：DEFAULT_CARD_H 是唯一字面量，经模板 :style 注入 CSS 变量，
  *  ProjectCardItem 与本组件运行时读取消费同一来源，改高度只需改此处 */
 const CSS_VAR_CARD_H = '--pr-card-h'
-const DEFAULT_CARD_H = 216
-/** 卡片槽位高度（卡片高 + margin-bottom 6px） */
-const projectCardSlotH = ref(DEFAULT_CARD_H + 6)
+const DEFAULT_CARD_H = 256
+/** 卡片之间的垂直间距，必须与 ProjectCardItem 的 .cgl-project-card margin-bottom 保持一致 */
+const CARD_GAP = 10
+/** 卡片槽位高度（卡片高 + 卡片间距） */
+const projectCardSlotH = ref(DEFAULT_CARD_H + CARD_GAP)
 
 function readCardSlotH(): number {
   const el = projectAreaRef.value
-  if (!el) return DEFAULT_CARD_H + 6
+  if (!el) return DEFAULT_CARD_H + CARD_GAP
   const h = Number.parseFloat(getComputedStyle(el).getPropertyValue(CSS_VAR_CARD_H))
-  return (Number.isFinite(h) && h > 0 ? h : DEFAULT_CARD_H) + 6
+  return (Number.isFinite(h) && h > 0 ? h : DEFAULT_CARD_H) + CARD_GAP
 }
 /** 组内项目分页每页条数 */
 const PROJECT_PAGE_SIZE = 20

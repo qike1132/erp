@@ -1,11 +1,16 @@
 """
 ERP系统压力测试 - 稳定运行版
 """
+import os as _os
+import sys as _sys
+
+_sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
 import asyncio
 import statistics
 import time
 
 import aiohttp
+from _prod_guard import require_non_production
 
 BASE_URL = "http://127.0.0.1:5002"
 
@@ -194,6 +199,7 @@ async def main():
     print(f"{'='*60}")
 
 if __name__ == "__main__":
+    require_non_production(BASE_URL)  # fail-closed 守卫（F-TEST-BE-TOP-02）
     try:
         asyncio.run(main())
     except KeyboardInterrupt:

@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi_app.core.cache_invalidation import cache_mgr, schedule_post_commit_invalidation
 from fastapi_app.core.domain_events import DomainEvent, DomainEventType, schedule_post_commit_domain_event
 from fastapi_app.core.exception_handler import safe_publish_event
+from fastapi_app.services.business_time import fmt_business
 from fastapi_app.services.notification_service import StockEvent
 from fastapi_app.services.stock_common import (
     _BUSINESS_TZ,
@@ -64,13 +65,22 @@ async def _assert_inventory_balance(
         )
 
 
-async def create_stockout_core(db: AsyncSession, product_id: int, quantity: int, customer: str, stockout_date: datetime, note: str, operator_id: int | None = None) -> list[StockOut]:
+async def create_stockout_core(db: AsyncSession, product_id: int, quantity: int, customer: str, stockout_date: datetime, note: str, operator_id: int | None = None, batch_no: str | None = None) -> list[StockOut]:
+    # 批次串归一化：与批量路径 _process_single_stockout 同口径（schema 未做 strip，
+    # 直连 API 时可带前后空白；生产记录里的批次已被 strip 过，不归一化会匹配不到 → 误报不足）。
+    batch_no = (batch_no or '').strip() or None
     product = await stock_service.get_product_for_update(db, product_id)
     # 闸门口径与批量路径（_process_single_stockout）统一：库存结余 + 订单余量。
     # 产品级 current_stock 前置断言已移除（2026-10-06 批量路径同款裁定，2026-10-07
     # 对齐单条路径）：它是备货口径，与客户级订单准入自相矛盾；负库存由写入口
     # update_stock_with_optimistic_lock 的原子守卫兜底拒绝。
     await _assert_inventory_balance(db, product_id, product.name, customer, quantity)
+    # 批次级闸门（与批量路径同口径）：指定批次时按该批次可用量再拦一道。
+    if batch_no:
+        from fastapi_app.services.finished_stock_service import get_batch_available
+        batch_available = await get_batch_available(db, product_id, batch_no)
+        if quantity > batch_available:
+            raise ValueError(f'批次「{batch_no}」可用库存不足：可用 {batch_available}，本次 {quantity}')
     shipment_info = await stock_service.calculate_available_shipment_quantity(db, product_id, customer)
     if shipment_info['available_quantity'] <= 0:
         raise ValueError('该客户没有可用的订单支持出货！请先创建订单。')
@@ -85,7 +95,7 @@ async def create_stockout_core(db: AsyncSession, product_id: int, quantity: int,
             if order_detail['available'] <= 0:
                 continue
             ship_qty = min(remaining_qty, order_detail['available'])
-            stockout = StockOut(stockout_no=await stock_service.generate_stockout_number(db), product_id=product_id, quantity=ship_qty, stockout_date=stockout_date, customer=customer, order_id=order_detail['order_id'], note=note)
+            stockout = StockOut(stockout_no=await stock_service.generate_stockout_number(db), product_id=product_id, quantity=ship_qty, stockout_date=stockout_date, customer=customer, order_id=order_detail['order_id'], note=note, batch_no=batch_no or None)
             db.add(stockout)
             created_stockouts.append(stockout)
             remaining_qty -= ship_qty
@@ -142,6 +152,18 @@ async def update_stockout_core(db: AsyncSession, stockout: StockOut, new_quantit
         available_with_current = shipment_info['available_quantity'] + old_net
         if new_quantity - stockout.returned_quantity > available_with_current:
             raise ValueError(f"出货数量超过可出货量！订单总量：{shipment_info['order_quantity']}，可出货（含当前记录）：{available_with_current}")
+    # 批次级闸门：该行带批次时，数量净增不得超过该批次可用（可用量已扣掉本行自身净额，
+    # 故用「本次净增」比：new_net − old_net ≤ 当前批次可用）。删除路径不需校验（会释放批次量）。
+    # 仅对真实非空批次串生效（batch_no 为 None/空 时不查，保持既有行为）。
+    batch_no_val = stockout.batch_no
+    if isinstance(batch_no_val, str) and batch_no_val.strip() and not is_deduction:
+        from fastapi_app.services.finished_stock_service import get_batch_available
+        batch_available = await get_batch_available(db, stockout.product_id, batch_no_val)
+        net_delta = (new_quantity - stockout.returned_quantity) - old_net
+        # 只在净增时拦：净减/不变是释放批次量，即便该批次已被透支（可用为负）也必须放行，
+        # 否则「把出货改小」这种修复动作反而被拒。
+        if net_delta > 0 and net_delta > batch_available:
+            raise ValueError(f'批次「{batch_no_val}」可用库存不足：可用 {batch_available}，本次净增 {net_delta}')
     stockout.quantity = new_quantity
     stockout.stockout_date = stockout_date
     stockout.customer = customer
@@ -172,10 +194,10 @@ async def delete_stockout_core(db: AsyncSession, stockout: StockOut, operator_id
     await db.flush()
 
 
-async def create_stockout(db: AsyncSession, product_id: int, quantity: int, customer: str, stockout_date_str: str, note: str, operator_id: int | None = None) -> dict:
+async def create_stockout(db: AsyncSession, product_id: int, quantity: int, customer: str, stockout_date_str: str, note: str, operator_id: int | None = None, batch_no: str | None = None) -> dict:
     """创建出库记录"""
     stockout_date = _parse_date_preserve_time(stockout_date_str)
-    created_stockouts = await stock_service.create_stockout_core(db, product_id, quantity, customer, stockout_date, note, operator_id=operator_id)
+    created_stockouts = await stock_service.create_stockout_core(db, product_id, quantity, customer, stockout_date, note, operator_id=operator_id, batch_no=batch_no)
     shipment_completed_orders = await _recalc_shipment_order_statuses(db, created_stockouts)
 
     await db.flush()
@@ -191,7 +213,7 @@ async def create_stockout(db: AsyncSession, product_id: int, quantity: int, cust
     # 采购计划重算与缓存失效由 purchase_plan_service 的事件处理器异步执行，解耦循环依赖
     # 提交后发布：订阅者（采购计划 FIFO 重算）用独立 session 读库，
     # 提交前发布会读不到本次出货行，按旧数据算错并落库
-    plan_month = stockout_date.strftime('%Y-%m') if stockout_date else ''
+    plan_month = fmt_business(stockout_date, '%Y-%m') if stockout_date else ''
     product_name = product.name if product is not None else ''
     schedule_post_commit_domain_event(db, DomainEvent(
         event_type=DomainEventType.STOCK_OUT_CREATED,
@@ -238,7 +260,7 @@ async def update_stockout(db: AsyncSession, stockout_id: int, new_quantity: int,
 
     # 领域事件总线：出库单更新 → 发布 STOCK_OUT_UPDATED 事件，触发采购计划缓存失效（异步）
     # 提交后发布（同 create_stockout：订阅者用独立 session 读库）
-    plan_month = stockout_obj.stockout_date.strftime('%Y-%m') if stockout_obj.stockout_date else ''
+    plan_month = fmt_business(stockout_obj.stockout_date, '%Y-%m') if stockout_obj.stockout_date else ''
     schedule_post_commit_domain_event(db, DomainEvent(
         event_type=DomainEventType.STOCK_OUT_UPDATED,
         domain='stock',
@@ -287,7 +309,7 @@ async def delete_stockout(db: AsyncSession, stockout_id: int, operator_id: int |
 
     # 领域事件总线：出库单删除 → 发布 STOCK_OUT_DELETED 事件，触发采购计划重算与缓存失效（异步）
     # 提交后发布（同 create_stockout：订阅者用独立 session 读库）
-    plan_month = stockout_obj.stockout_date.strftime('%Y-%m') if stockout_obj.stockout_date else ''
+    plan_month = fmt_business(stockout_obj.stockout_date, '%Y-%m') if stockout_obj.stockout_date else ''
     schedule_post_commit_domain_event(db, DomainEvent(
         event_type=DomainEventType.STOCK_OUT_DELETED,
         domain='stock',
@@ -338,8 +360,12 @@ def _resolve_stockout_datetime(date_str: str) -> datetime:
 
 async def _create_stockout_records(db: AsyncSession, product_id: int, customer: str,
                                    note: str, stockout_date_str: str, quantity: int,
-                                   orders: list) -> list[StockOut]:
-    """按 FIFO 分配订单，创建出库记录"""
+                                   orders: list, batch_no: str | None = None) -> list[StockOut]:
+    """按 FIFO 分配订单，创建出库记录。
+
+    batch_no 非空时写到该次产生的**每一张** stock_out（FIFO 拆多行时全写）——
+    语义 = 这批货都出自该批次，供成品库存批次级扣减聚合。
+    """
     remaining_qty = quantity
     created_stockouts: list[StockOut] = []
     for order_detail in orders:
@@ -352,7 +378,8 @@ async def _create_stockout_records(db: AsyncSession, product_id: int, customer: 
         stockout = StockOut(
             stockout_no=stockout_no, product_id=product_id, quantity=ship_qty,
             stockout_date=(_resolve_stockout_datetime(stockout_date_str) if stockout_date_str else datetime.now(UTC)),
-            customer=customer, order_id=order_detail['order_id'], note=note
+            customer=customer, order_id=order_detail['order_id'], note=note,
+            batch_no=batch_no or None,
         )
         db.add(stockout)
         created_stockouts.append(stockout)
@@ -371,6 +398,7 @@ async def _process_single_stockout(db: AsyncSession, item: dict, operator_id: in
     quantity = int(item.get('quantity', 0))
     note = item.get('note', '')
     stockout_date_str = item.get('stockout_date') or ''
+    batch_no = str(item.get('batch_no') or '').strip()
     item_id = item.get('id', '未知')
     try:
         # P2-A2 类型收窄：_validate_stockout_batch 已过滤缺 product_id 的项；
@@ -383,6 +411,15 @@ async def _process_single_stockout(db: AsyncSession, item: dict, operator_id: in
         # （包装部入库 − 已出货，产品级）先拦一道，不足即拒。
         await _assert_inventory_balance(db, product_id, product.name, customer, quantity)
 
+        # 批次级闸门（成品库存方案 §三）：指定批次时按该批次可用量再拦一道。
+        # 产品级结余闸门（上面）保持不变，批次闸门只是在其上叠加更细的约束，
+        # 两页（/stock 与 /finished-stock）不会分叉。持产品行锁后校验，避免 TOCTOU。
+        if batch_no:
+            from fastapi_app.services.finished_stock_service import get_batch_available
+            batch_available = await get_batch_available(db, product_id, batch_no)
+            if quantity > batch_available:
+                return {'success': False, 'error': f'批次「{batch_no}」可用库存不足：可用 {batch_available}，本次 {quantity}', 'id': item_id}
+
         # 库存准入校准（2026-10-06 用户裁决）：按「客户+产品」订单余量口径
         # ——出货量受限于该客户该产品的订单总量与已出货量之差，与 /stock 页
         # available_stock 同源。前置的 product.current_stock 校验移除：
@@ -394,7 +431,7 @@ async def _process_single_stockout(db: AsyncSession, item: dict, operator_id: in
         if quantity > shipment_info['available_quantity']:
             return {'success': False, 'error': f"出货数量超过可出货量！订单总量：{shipment_info['order_quantity']}，已出货：{shipment_info['shipped_quantity']}，可出货：{shipment_info['available_quantity']}", 'id': item_id}
 
-        created_stockouts = await _create_stockout_records(db, product_id, customer, note, stockout_date_str, quantity, shipment_info['orders'])
+        created_stockouts = await _create_stockout_records(db, product_id, customer, note, stockout_date_str, quantity, shipment_info['orders'], batch_no=batch_no or None)
         # 上面已 get_product_for_update 持行锁：走统一写入口的持锁单次路径
         # （不开 savepoint —— 批量路径的既有不变式是"自包含、无嵌套事务"）。
         # apply_stock_delta_locked 自带原子负库存守卫，写时仍受保护。

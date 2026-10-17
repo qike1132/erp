@@ -32,8 +32,8 @@
           :src="proj.product_image_thumbnail_url || proj.product_image_url"
           class="cgl-thumb-img"
           alt=""
-          width="200"
-          height="200"
+          width="300"
+          height="240"
           loading="lazy"
           decoding="async"
           fetchpriority="low"
@@ -53,22 +53,16 @@
     </div>
     <div class="cgl-card-right">
       <div class="cgl-card-info">
-        <div class="cgl-card-line">
-          <span class="cgl-card-label">时间：</span>
-          <span class="cgl-card-value">{{ formatTime(proj.updated_at) }}</span>
+        <div class="cgl-card-name">{{ proj.product_name }}</div>
+        <div class="cgl-card-meta">
+          <span class="cgl-card-meta-label">版师：</span>
+          <span class="cgl-card-meta-value">{{ makerName || '-' }}</span>
         </div>
-        <div class="cgl-card-line">
-          <span class="cgl-card-label">名称：</span>
-          <span class="cgl-card-value">{{ proj.product_name }}</span>
+        <div class="cgl-card-meta">
+          <span class="cgl-card-meta-label">编号：</span>
+          <span class="cgl-card-meta-value">{{ displayNumber }}</span>
         </div>
-        <div class="cgl-card-line">
-          <span class="cgl-card-label">版师：</span>
-          <span class="cgl-card-value">{{ makerName || '-' }}</span>
-        </div>
-        <div class="cgl-card-line">
-          <span class="cgl-card-label">编号：</span>
-          <span class="cgl-card-value">{{ displayNumber }}</span>
-        </div>
+        <div class="cgl-card-time">时间：{{ formatTime(proj.updated_at) }}</div>
       </div>
       <div v-if="canManage" class="cgl-card-actions">
         <button
@@ -166,10 +160,10 @@ function formatTime(iso: string): string {
   gap: 10px;
   width: 100%;
   height: var(--pr-card-h);
-  margin-bottom: 6px;
+  margin-bottom: 10px;
   padding: 8px;
   box-sizing: border-box;
-  border: 1px solid transparent;
+  border: 1px solid var(--color-border, #e4e7ed);
   border-radius: 8px;
   background: #fff;
   cursor: pointer;
@@ -188,13 +182,17 @@ function formatTime(iso: string): string {
 }
 
 .cgl-card-left {
-  flex-shrink: 0;
+  /* flex-basis 必须为 0：auto 会让基准尺寸取自图片固有宽度，导致各卡缩略图宽度不一，
+     并挤压右侧文字列使按钮换行。0 则各卡等分剩余空间，宽度一致。 */
+  flex: 1 1 0;
+  min-width: 0;
 }
 
 .cgl-card-thumb {
   position: relative;
-  width: 200px;
-  height: 200px;
+  /* 宽度弹性铺满左侧区域（高度固定 240，不改变卡片高度）；右侧文字列固定宽度故不再有空白 */
+  width: 100%;
+  height: 240px;
   border-radius: 8px;
   overflow: hidden;
   background: var(--color-surface, #f3f4f6);
@@ -202,6 +200,18 @@ function formatTime(iso: string): string {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+}
+
+/* 缩略图描边：必须画在图片上层。图片 object-fit:cover 会铺满整格，
+   容器自身的 inset box-shadow 会被图片整个盖住而不可见。 */
+.cgl-card-thumb::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px var(--color-border, #e4e7ed);
+  pointer-events: none;
 }
 
 /* 骨架屏：微光扫过动画，清晰图加载完成后淡出 */
@@ -245,14 +255,13 @@ function formatTime(iso: string): string {
 }
 
 /* 清晰缩略图：默认透明，加载完成后淡入（避免占位闪烁）
-   使用 contain 完整展示产品图（cover 会裁掉边缘，产品主体易被切掉），
-   留白区域由容器背景色与下方模糊底图填充。 */
+   使用 cover 铺满整格（与下方模糊底图同款取景，清晰图淡入时无取景跳变）。 */
 .cgl-thumb-img {
   position: relative;
   z-index: 3;
   width: 100%;
   height: 100%;
-  object-fit: contain;
+  object-fit: cover;
   opacity: 0;
   transition: opacity 0.3s ease;
 }
@@ -296,7 +305,8 @@ function formatTime(iso: string): string {
 }
 
 .cgl-card-right {
-  flex: 1;
+  /* 固定为内容所需宽度（按钮行实测约 205px），不再 flex:1 撑满 → 消除右侧空白 */
+  flex: 0 1 220px;
   min-width: 0;
 }
 
@@ -306,25 +316,42 @@ function formatTime(iso: string): string {
   gap: 4px;
 }
 
-.cgl-card-line {
+/* 名称：卡片视觉锚点，放大加粗，扫读时最先被眼睛抓住 */
+.cgl-card-name {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cgl-card-meta {
   display: flex;
   align-items: baseline;
-  gap: 4px;
+  gap: 6px;
   font-size: 13px;
   line-height: 1.5;
 }
 
-.cgl-card-label {
+.cgl-card-meta-label {
   flex-shrink: 0;
   color: var(--color-text-secondary);
 }
 
-.cgl-card-value {
+.cgl-card-meta-value {
   min-width: 0;
   color: var(--color-text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 时间：最弱层级，仅作参考 */
+.cgl-card-time {
+  font-size: 12px;
+  color: var(--color-text-muted, #64748b);
 }
 
 /* 卡片操作按钮（编辑 / 完成） */

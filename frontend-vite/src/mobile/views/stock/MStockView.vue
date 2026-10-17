@@ -2,7 +2,7 @@
   <div class="m-stock">
     <!-- Search Bar -->
     <div class="m-stock-search">
-      <MSearchBar v-model="searchQuery" placeholder="搜索物料名称或编码…" />
+      <MSearchBar v-model="searchQuery" placeholder="搜索物料名称或编码…" @search="loadStock" />
     </div>
 
     <!-- Filter Tabs -->
@@ -114,7 +114,8 @@ function getQtyClass(item: InventoryItem): string {
 async function loadStock() {
   loading.value = true
   try {
-    const res = await stockApi.inventory({ page: 1, per_page: MOBILE_LIST_PAGE_SIZE })
+    // F-FE-MOBILE-07：服务端筛选（原先 200 条本地过滤，超量假阴性）
+    const res = await stockApi.inventory({ page: 1, per_page: MOBILE_LIST_PAGE_SIZE, product: searchQuery.value })
     stockItems.value = res.data ?? []
   } catch (e) {
     console.error('[MStockView] load failed:', e)

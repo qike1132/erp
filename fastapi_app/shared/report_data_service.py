@@ -141,10 +141,14 @@ def _apply_order_filters(query, customer, product, status, start_date, end_date,
     # 没有 OrderItem 连接，在那里引用会打挂 SQL。
     if product:
         like = f'%{escape_like(product)}%'
+        # 2026-10-17 审计 F-BE-SVC-ORDER-01：屏幕侧搜索框兼作「订单号」搜索
+        # （report_service 追加了 o.order_no 匹配），导出侧原先没加 → 导出的
+        # Excel 与页面所见集合不同。补齐同款条件。
         query = query.where(
             or_(
                 func.coalesce(Product.name, OrderItem.product_name).like(like),
                 func.coalesce(Product.barcode, OrderItem.product_barcode).like(like),
+                Order.order_no.like(like),
             )
         )
     query = _apply_factory_filter(query, factory)

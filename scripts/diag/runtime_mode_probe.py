@@ -431,9 +431,11 @@ def main() -> int:
             report["prod_runner_claims"] = {
                 "mode": state.get("mode"),
                 "workers": state.get("workers"),
-                # ⚠️ started_at 是"本次写盘时刻"，不是进程启动时刻（见审计 H3）
+                # 2026-10-17 起 started_at 语义已修正为监督器启动时刻（F-OPS-DEPLOY-11），
+                # 写盘时刻见新增的 last_write_at。
                 "started_at": state.get("started_at"),
-                "started_at_semantics": "写盘时刻（非进程启动时刻），勿用于判断是否刚重启",
+                "last_write_at": state.get("last_write_at"),
+                "started_at_semantics": "监督器启动时刻（写盘时刻见 last_write_at）",
                 "backend_pid": (state.get("services") or {}).get("backend", {}).get("pid"),
                 "arq_pid": (state.get("services") or {}).get("arq", {}).get("pid"),
             }

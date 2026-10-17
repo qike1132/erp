@@ -27,6 +27,7 @@
       <div v-if="loading" class="m-center"><MSpinner size="lg" /></div>
 
       <!-- 空态 -->
+      <MEmpty v-else-if="loadError" :title="loadError" />
       <MEmpty v-else-if="!selectedPlans.length" title="该日期暂无出货计划" />
 
       <!-- 日期汇总卡片 -->
@@ -82,6 +83,7 @@
 </template>
 
 <script setup lang="ts">
+import { toISODate } from '@/utils/format'
 import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { planApi } from '@/api'
 import MobileNavBar from '@/mobile/layouts/components/MobileNavBar.vue'
@@ -98,10 +100,14 @@ const year = ref(now.getFullYear())
 const month = ref(now.getMonth() + 1)
 const selectedDate = ref(todayStr())
 const plansByDate = ref<Record<string, Plan[]>>({})
+// F-FE-MOBILE-10：加载错误态（403/网络失败与「暂无数据」区分）
+const loadError = ref('')
+
 const loading = ref(false)
 const dateScrollRef = ref<HTMLElement>()
 
-function todayStr() { return new Date().toISOString().slice(0, 10) }
+// F-FE-MOBILE-06：toISOString 按 UTC 切日（东八区 00–08 点取到昨天）
+function todayStr() { return toISODate() }
 
 function prevMonth() {
   if (month.value === 1) { month.value = 12; year.value-- }
@@ -187,6 +193,7 @@ async function loadData() {
   try {
     const res = await planApi.monthly({ year: year.value, month: month.value })
     plansByDate.value = (res?.plans_by_date ?? {}) as Record<string, Plan[]>
+    loadError.value = ''
     // 若当前选中日期不在返回数据中且该月有数据，则选中第一个有数据的日期
     if (!plansByDate.value[selectedDate.value]) {
       const keys = Object.keys(plansByDate.value).sort()
@@ -194,8 +201,13 @@ async function loadData() {
         selectedDate.value = keys[0] ?? ''
       }
     }
-  } catch {
+  } catch (e) {
     plansByDate.value = {}
+    // F-FE-MOBILE-10：403 等错误原先吞成空 plans → 页面显示「暂无计划」，
+    // 与「真没数据」不可区分。置错误态让空态文案如实（403 详情拦截器已 toast）。
+    loadError.value = (e as { response?: { status?: number } })?.response?.status === 403
+      ? '无查看权限'
+      : '加载失败，请下拉重试'
   } finally {
     loading.value = false
   }

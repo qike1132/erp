@@ -19,6 +19,7 @@ class ShipmentOption(BaseModel):
     customer: str | None
     quantity: int
     returned_quantity: int
+    batch_no: str = ''
     available: int
 
 

@@ -1,0 +1,385 @@
+<template>
+  <div class="fs-container">
+    <div class="page-card page-card-main">
+      <div class="page-card-header">
+        <!-- 客户快捷切换栏上移到 header 行（占满剩余宽度），右侧是 搜索框 + 导出。
+            header 是 flex-wrap:nowrap 横向 flex：chips 自身可横向滚动，不会被压扁。 -->
+        <CustomerChipBar
+          :customers="customerList"
+          :selected="filters.customer"
+          :loading="isLoading"
+          @select="filters.customer = $event"
+        />
+        <div class="fs-search">
+          <FontAwesomeIcon icon="search" class="fs-search-icon" aria-hidden="true" />
+          <input v-model="filters.product" class="fs-search-input" placeholder="输入产品名称或 69 码" aria-label="搜索成品库存" />
+        </div>
+        <button
+          class="fs-export-btn"
+          :disabled="exporting"
+          aria-label="导出"
+          @click="handleExport"
+        >
+          <FontAwesomeIcon icon="file-excel" aria-hidden="true" />{{ exporting ? '导出中' : '导出 Excel' }}
+        </button>
+      </div>
+
+      <!-- 表格：SKU 大格（图片/产品名/69码跨行合并）+ 批次子行 -->
+      <!-- 用 fs-card-main（自带 padding:0 的 flex 列）而非 page-card-body：后者带
+           20/24 内边距与 scrollbar-gutter 预留槽，会留出四边空隙。对齐 /stock 的 sk-card-main。 -->
+      <div class="fs-card-main">
+        <UiDataTable
+          :data="tableRows"
+          :columns="uiColumns"
+          :loading="isLoading"
+          :paginator="(data?.total ?? 0) > perPage"
+          :rows="perPage"
+          :total-records="data?.total ?? 0"
+          row-key="__rk"
+          row-group-mode="rowspan"
+          :group-rows-by="GROUP_ROWS_BY"
+          @page="onPage"
+        >
+          <!-- 产品图片（独立列，随 SKU 大格跨行合并；点击看原图） -->
+          <template #column-body-_g_image="{ row }">
+            <span v-if="(row as FinishedStockItem).image && !failedKeys.has(groupKeyOf(row as FinishedStockItem))" class="fs-thumb-box">
+              <img
+                :key="thumbSrc(row as FinishedStockItem)"
+                loading="lazy"
+                :src="thumbSrc(row as FinishedStockItem)"
+                :alt="(row as FinishedStockItem).product_name"
+                @error="onImgError(row as FinishedStockItem)"
+                @click="previewImage(row as FinishedStockItem)"
+              />
+            </span>
+            <span v-else class="fs-no-image"><FontAwesomeIcon icon="file-image" aria-hidden="true" /></span>
+          </template>
+          <!-- 客户名称（field 被换成分组键，随 SKU 大格跨行合并；空显示未指定客户） -->
+          <template #column-body-_g_customer="{ row }">
+            <span>{{ (row as FinishedStockItem).customer_name || '未指定客户' }}</span>
+          </template>
+          <!-- 产品名称 -->
+          <template #column-body-_g_product="{ row }">
+            <span class="fs-name-cell">
+              <strong class="fs-name">{{ (row as FinishedStockItem).product_name }}</strong>
+            </span>
+          </template>
+          <!-- 69码（field 被换成分组键，必须显式渲染原字段，否则会显示分组键本身） -->
+          <template #column-body-_g_barcode="{ row }">
+            <span>{{ (row as FinishedStockItem).barcode }}</span>
+          </template>
+          <!-- 批次号：空则留空（不再显示「(未分批次)」灰标） -->
+          <template #column-body-batch_no="{ row }">
+            <span v-if="(row as FinishedStockItem).batch_no" class="fs-badge-batch">{{ (row as FinishedStockItem).batch_no }}</span>
+          </template>
+          <!-- 库存 -->
+          <template #column-body-batch_available="{ row }">
+            <span v-if="(row as FinishedStockItem).batch_available <= LOW_STOCK_THRESHOLD" class="fs-qty-low">
+              <FontAwesomeIcon icon="triangle-exclamation" aria-hidden="true" />{{ fmtNum((row as FinishedStockItem).batch_available) }}
+            </span>
+            <span v-else class="fs-qty-ok">{{ fmtNum((row as FinishedStockItem).batch_available) }}</span>
+          </template>
+          <!-- 定制 -->
+          <template #column-body-is_custom="{ row }">
+            <span v-if="(row as FinishedStockItem).is_custom" class="fs-badge-custom">{{ (row as FinishedStockItem).custom_country }}</span>
+            <span v-else class="fs-dash">—</span>
+          </template>
+          <!-- 备注：行内可编辑（子组件管理编辑态/草稿；父级只处理 save） -->
+          <template #column-body-remark="{ row }">
+            <FinishedStockRemarkCell
+              :remark="(row as FinishedStockRow).remark"
+              :editing="editingKey === (row as FinishedStockRow).__rk"
+              :saving="savingKey === (row as FinishedStockRow).__rk"
+              @start="startEditRemark(row as FinishedStockRow)"
+              @cancel="cancelEditRemark"
+              @save="(text: string) => saveRemark(row as FinishedStockRow, text)"
+            />
+          </template>
+          <template #empty>
+            <div class="fs-empty"><FontAwesomeIcon icon="boxes-stacked" aria-hidden="true" /><span>暂无成品库存</span></div>
+          </template>
+        </UiDataTable>
+      </div>
+
+      <!-- 原图预览（复用共享组件；传原图 URL，不是列表缩略图） -->
+      <ImagePreviewModal v-model:image="previewImg" />
+    </div>
+  </div></template>
+
+<script setup lang="ts">
+/**
+ * FinishedStockView.vue — 成品库存（批次级）
+ *
+ * 布局（Excel 风格 SKU 行合并）：一行 = 一个批次；同一 SKU 的
+ * 「图片 / 产品名称 / 69码」并成一个跨行大格，批次号 / 库存 / 定制 逐行渲染。
+ * 机制照 views/report/components/ReportTable.vue（PrimeVue rowGroupMode='rowspan'）：
+ * 要合并的列 field 换成分组键（_g_*），显示值仍从 body 槽取原字段。
+ *
+ * 分组键 = 客户 + 产品ID（后端按 (customer, product, batch) 聚合；同一批次号可能
+ * 出现在不同客户下，故客户必须进键，否则不同客户的行会被错误并成一个大格）。
+ * 用 product_id 而非 barcode：barcode 可空，无 69 码的产品会被并成一组。
+ *
+ * 数据源 GET /finished-stock/summary（与 /stock 同源：包装部入库 + 批次出货扣减）。
+ */
+import { ref, computed, watch } from 'vue'
+import { useQuery, keepPreviousData } from '@tanstack/vue-query'
+import UiDataTable from '@/components/ui/UiDataTable.vue'
+import type { TableColumn } from '@/components/ui/UiDataTable.vue'
+import CustomerChipBar from '@/components/ui/CustomerChipBar.vue'
+import ImagePreviewModal from '@/components/ui/ImagePreviewModal.vue'
+import FinishedStockRemarkCell from './FinishedStockRemarkCell.vue'
+import { formatNumber } from '@/utils/format'
+import { resolveStaticUrl } from '@/api/request'
+import { finishedStockApi } from '@/api'
+import { useDebouncedRef } from '@/composables/useDebouncedRef'
+import { useExport } from '@/composables/useExport'
+import { showToast } from '@/composables/useToast'
+import { compareBatchNo } from './batchSort'
+import type { FinishedStockItem } from '@/types'
+
+/** 表格行：聚合行 + 分组键注入的 `__rk`（row-key 与编辑态标识都用它）。
+ *  带上索引签名，与 `skuGroups` 产出的 `FinishedStockItem & Record<string, unknown>` 兼容。 */
+type FinishedStockRow = FinishedStockItem & { __rk: string } & Record<string, unknown>
+
+const filters = ref({ customer: '', product: '' })
+/** 低库存高亮阈值（≤ 该值标红预警） */
+const LOW_STOCK_THRESHOLD = 100
+const debouncedProduct = useDebouncedRef(computed(() => filters.value.product), 300)
+const page = ref(1)
+const perPage = ref(20)
+
+const { data, isLoading } = useQuery({
+  queryKey: ['finished-stock', () => filters.value.customer, debouncedProduct, () => page.value, () => perPage.value],
+  queryFn: () => finishedStockApi.summary({
+    customer: filters.value.customer || undefined,
+    product: debouncedProduct.value || undefined,
+    page: page.value,
+    per_page: perPage.value,
+  }),
+  staleTime: 30_000,
+  placeholderData: keepPreviousData,
+})
+
+// 过滤条件变化回到第 1 页：否则停在 page>1 会请求到不存在的页（空表），
+// 且 UiDataTable 分页器与父级 page 会脱节（照 InventoryTab 的既有做法）。
+watch(() => [filters.value.customer, debouncedProduct.value], () => {
+  page.value = 1
+})
+
+const customerList = computed(() => (data.value?.all_customers ?? []) as string[])
+
+/** 分组键：客户 + 产品ID（见文件头注释） */
+function groupKeyOf(row: FinishedStockItem): string {
+  return `${row.customer_name || ''}\u0000${row.product_id}`
+}
+
+/** 图片加载失败的分组（失败后退化成「无图」占位） */
+const failedKeys = ref<Set<string>>(new Set())
+/** 缩略图 404 已回退原图的分组（键 = groupKeyOf） */
+const thumbFallbackKeys = ref<Set<string>>(new Set())
+function onImgError(row: FinishedStockItem): void {
+  const key = groupKeyOf(row)
+  // 两段式回退（照 ProductTable）：缩略图 404（存量图/生成失败）先换成原图，
+  // 原图也失败才显示「无图」占位。image_thumb 是后端无条件派生的确定性 key，
+  // 不保证文件真的存在。
+  if (row.image_thumb && !thumbFallbackKeys.value.has(key)) {
+    thumbFallbackKeys.value = new Set(thumbFallbackKeys.value).add(key)
+    return
+  }
+  failedKeys.value = new Set(failedKeys.value).add(key)
+}
+/** 列表用缩略图；缩略图 404 回退原图 */
+function thumbSrc(row: FinishedStockItem): string {
+  const thumb = row.image_thumb
+  if (thumb && !thumbFallbackKeys.value.has(groupKeyOf(row))) return resolveStaticUrl(thumb)
+  return resolveStaticUrl(row.image || '')
+}
+/** 原图预览：传**原图** URL（不是列表缩略图） */
+const previewImg = ref<string | null>(null)
+function previewImage(row: FinishedStockItem): void {
+  if (row.image) previewImg.value = row.image
+}
+
+const { exporting, runExport } = useExport()
+/** 导出当前筛选结果（客户 + 搜索词），照 InventoryTab 的 runExport 写法 */
+function handleExport() {
+  runExport(() => finishedStockApi.export({
+    customer: filters.value.customer || undefined,
+    product: filters.value.product || undefined,
+  }))
+}
+
+// ===== 备注行内编辑 =====
+/** 正在编辑的行键（`__rk`）；null 表示没有行处于编辑态 */
+const editingKey = ref<string | null>(null)
+/** 保存中的行键，用于按钮 loading */
+const savingKey = ref<string | null>(null)
+
+function startEditRemark(row: FinishedStockRow) {
+  editingKey.value = row.__rk
+}
+
+function cancelEditRemark() {
+  editingKey.value = null
+}
+
+async function saveRemark(row: FinishedStockRow, text: string) {
+  if (savingKey.value) return
+  savingKey.value = row.__rk
+  try {
+    await finishedStockApi.saveRemark({
+      customer_name: row.customer_name || '',
+      product_id: row.product_id,
+      batch_no: row.batch_no || '',
+      remark: text,
+    })
+    row.remark = text.trim()
+    showToast('备注已保存', 'success')
+    editingKey.value = null
+  } catch (err: unknown) {
+    const e = err as { response?: { data?: { detail?: string } } }
+    showToast(e.response?.data?.detail || '备注保存失败', 'error')
+  } finally {
+    savingKey.value = null
+  }
+}
+
+/** 要合并成 SKU 大格的列 → 分组键字段（与 ReportTable.GROUP_FIELD_OF 同思路） */
+const GROUP_FIELD_OF: Record<string, string> = {
+  image: '_g_image',
+  customer_name: '_g_customer',
+  product_name: '_g_product',
+  barcode: '_g_barcode',
+}
+const GROUP_ROWS_BY = ['_g_image', '_g_customer', '_g_product', '_g_barcode']
+
+const baseColumns: TableColumn[] = [
+  { field: 'customer_name', header: '客户名称', align: 'left', width: '11%' },
+  { field: 'image', header: '图片', align: 'left', width: '56px' },
+  { field: 'product_name', header: '产品名称', align: 'left', width: '26%' },
+  { field: 'barcode', header: '69码', align: 'left', width: '10%' },
+  // 不加 sortable：UiDataTable 不向 PrimeVue 传 sortField/sortOrder，点表头会让 PrimeVue
+  // 重排整页数组，同 SKU 的批次行被打散 → rowspan 合并退化（每行各自渲染图片/产品名）。
+  // 行序由 skuGroups 自己控制：组按产品名稳定排序，组内默认按批次号升序（= 生产时间正序）。
+  { field: 'batch_no', header: '批次号', align: 'left', width: '16%' },
+  { field: 'batch_available', header: '库存', align: 'center', width: '9%' },
+  { field: 'is_custom', header: '定制', align: 'center', width: '7%' },
+  { field: 'remark', header: '备注', align: 'left', width: 'auto' },
+]
+const uiColumns = computed(() => baseColumns.map((c) => ({ ...c, field: GROUP_FIELD_OF[c.field] ?? c.field })))
+
+function fmtNum(v: unknown): string {
+  const n = Number(v)
+  if (!Number.isFinite(n)) return ''
+  return formatNumber(n)
+}
+
+/** 按分组键聚合，同 SKU 的批次行相邻 */
+const skuGroups = computed(() => {
+  const items = (data.value?.data ?? []) as FinishedStockItem[]
+  const map = new Map<string, FinishedStockItem[]>()
+  for (const r of items) {
+    const k = groupKeyOf(r)
+    const arr = map.get(k)
+    if (arr) arr.push(r)
+    else map.set(k, [r])
+  }
+  // SKU 组按产品名稳定排列、不参与列排序（否则点库存列会把组序打乱、破坏合并观感）
+  const groups = [...map.entries()].sort((a, b) =>
+    (a[1][0]?.product_name ?? '').localeCompare(b[1][0]?.product_name ?? '', 'zh'),
+  )
+  const out: (FinishedStockItem & Record<string, unknown>)[] = []
+  for (const [key, rows] of groups) {
+    // 组内固定按批次号升序（= 生产时间正序）；不做列排序（会打散 rowspan 分组）
+    const ordered = [...rows].sort((x, y) => compareBatchNo(x.batch_no, y.batch_no))
+    for (const r of ordered) {
+      out.push({
+        ...r,
+        __rk: `${key}-${r.batch_no || 'none'}`,
+        _g_image: key,
+        _g_customer: key,
+        _g_product: key,
+        _g_barcode: key,
+      })
+    }
+  }
+  return out
+})
+
+const tableRows = computed(() => skuGroups.value)
+
+function onPage(event: { page: number; rows: number }) {
+  page.value = event.page + 1
+  perPage.value = event.rows
+}
+</script>
+
+<style scoped>
+/* 必须显式声明：外层要是高度受限的 flex 列，下面的 flex:1 / min-height:0 才生效。
+   少了它（早先误用 /supplier 的 .sp-container，scoped 不跨组件生效）会让卡片随行数
+   长高、表格体不滚动，行多时底行与分页器被 .app-layout 裁掉够不着。 */
+.fs-container {
+  padding: 0;
+  margin: 0 auto;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+.fs-search { position: relative; flex-shrink: 0; }
+/* header 内：客户选择栏占满剩余宽度，搜索框 + 导出靠右。
+   sk-customer-row 是 CustomerChipBar 内的 scoped 样式，本页 scoped 命中不到，用 :deep。
+   去掉它的渐变背景/底部边线，左内边距归零让 chips 贴最左（不改共享组件，避免影响 /stock）。 */
+.page-card-header :deep(.sk-customer-row) {
+  flex: 1; min-width: 0;
+  background: none; border-bottom: 0; padding-left: 0;
+}
+.fs-search-icon { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); width: 13px; height: 13px; color: var(--color-text-muted); pointer-events: none; }
+.fs-search-input { width: 230px; padding: 7px 12px 7px 30px; border: 1.5px solid var(--color-border); border-radius: 9px; background: var(--color-surface-card); font-size: 12.5px; font-family: inherit; color: var(--color-text); outline: none; }
+.fs-search-input::placeholder { color: var(--color-text-muted); }
+.fs-search-input:focus { border-color: var(--color-primary-500); box-shadow: 0 0 0 3px rgba(91,141,239,0.15); }
+.fs-export-btn {
+  display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0;
+  padding: 7px 14px; border: 1.5px solid var(--color-success-200); border-radius: 9px;
+  background: var(--color-surface-card); font-family: inherit; font-size: 12.5px;
+  font-weight: 600; color: var(--color-success-600); white-space: nowrap; cursor: pointer;
+}
+.fs-export-btn:hover { background: var(--color-success-50); border-color: var(--color-success-500); }
+.fs-export-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.fs-card-main { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; padding: 0; }
+.fs-card-main :deep(.ui-data-table-wrapper) { flex: 1; min-height: 0; display: flex; flex-direction: column; border: 0; }
+.fs-card-main :deep([data-pc-name='datatable']) { flex: 1; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; }
+.fs-card-main :deep(.ui-pagination) { flex-shrink: 0; }
+.fs-card-main :deep(table) { table-layout: fixed; }
+/* 行高压到图片高度（44px）：<tr> 的垂直 padding 浏览器忽略，行高由 td 内容+padding 决定。
+   故压 td 垂直 padding 到 4px：44(图) + 4×2 = 52px；若无图行内容是单行文本
+   （line-height≈1.5×12.5≈19px）+ 8 ≈ 27px，被图片行统一拉到 52。 */
+.fs-card-main :deep([data-pc-section='bodycell']) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-top: 4px; padding-bottom: 4px; }
+.fs-card-main :deep([data-pc-section='bodyrow']:last-child) { border-bottom: 0; }
+.fs-card-main :deep([data-pc-section='sorticon']) { width: 10px; height: 10px; color: var(--color-slate-300); }
+
+.fs-name { font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fs-name-cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.fs-thumb-box {
+  width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 8px; overflow: hidden; background: var(--color-surface);
+  /* 抵消 bodycell 的左内边距，让缩略图贴到图片列起点 */
+  margin-left: -12px;
+}
+.fs-thumb-box img { width: 100%; height: 100%; object-fit: contain; cursor: pointer; }
+.fs-thumb-box img:hover { opacity: 0.85; }
+.fs-no-image {
+  width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 8px; background: var(--color-surface); color: var(--color-text-secondary);
+  font-size: 18px; opacity: 0.5; margin-left: -12px;
+}
+.fs-badge-batch { display: inline-flex; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; background: var(--color-primary-50); color: var(--color-primary-700); white-space: nowrap; }
+.fs-badge-custom { display: inline-flex; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; background: var(--color-purple-100); color: var(--color-purple-600); white-space: nowrap; }
+.fs-dash { color: var(--color-slate-300); }
+.fs-qty-ok { font-weight: 600; }
+.fs-qty-low { color: var(--color-danger-600); font-weight: 700; display: inline-flex; align-items: center; gap: 4px; }
+.fs-qty-low svg { width: 11px; height: 11px; }
+.fs-empty { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 40px 20px; color: var(--color-text-muted); }
+.fs-empty svg { width: 28px; height: 28px; opacity: .5; }
+</style>

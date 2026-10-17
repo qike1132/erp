@@ -4,7 +4,7 @@
       v-for="role in roles"
       :key="role.id"
       type="button"
-      :class="['role-tab', { 'role-tab--active': role.id === currentRoleId }]"
+      :class="['role-tab', { 'role-tab--active': role.id === activeRoleId }]"
       :title="canManage ? '右键打开菜单' : undefined"
       :aria-haspopup="canManage ? 'menu' : undefined"
       :aria-expanded="canManage ? menu?.role.id === role.id : undefined"
@@ -57,7 +57,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, nextTick, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, nextTick, watch, onMounted, onBeforeUnmount } from 'vue'
 import type { RoleBrief } from '@/api/patternRoom'
 
 const props = defineProps<{
@@ -65,6 +65,13 @@ const props = defineProps<{
   currentRoleId: number | null
   canManage: boolean
 }>()
+
+/**
+ * 有效激活角色。useSamplingRole 在切项目时会先清空 currentRoleId、再异步拉角色列表，
+ * 接口在途期间 currentRoleId 为 null → 若直接用它判断，标签会先渲染成未选中（白）再变蓝。
+ * 按该 hook「默认选中第一个角色」的口径回退到首个，消除这次闪烁。
+ */
+const activeRoleId = computed(() => props.currentRoleId ?? props.roles[0]?.id ?? null)
 
 const emit = defineEmits<{
   select: [roleId: number]

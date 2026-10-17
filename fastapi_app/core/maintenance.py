@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import logging
 import time
+from pathlib import Path
 
 from starlette.datastructures import URL
 from starlette.requests import Request
@@ -46,12 +47,17 @@ from starlette.responses import JSONResponse
 
 logger = logging.getLogger(__name__)
 
+_MAINTENANCE_TTL_SECONDS = 30 * 60
+
 _MAINTENANCE_KEY = 'erp:maintenance_mode'
+# 2026-10-17 审计 F-BE-CORE-09：Redis fail-open 的本地哨兵——还原流程 enter 时
+# 落盘、exit 时删除；Redis 读不到时以文件为准（fail-safe），避免还原窗口被
+# broker 抖动静默打穿。文件带 mtime 过期（2×TTL）防崩溃遗留。
+_MAINTENANCE_SENTINEL = Path(__file__).resolve().parents[2] / 'logs' / 'maintenance_mode.sentinel'
+_SENTINEL_MAX_AGE = _MAINTENANCE_TTL_SECONDS * 2
 
 # 维护模式 TTL（兜底自动解除，防崩溃遗留）。2026-09-29（H-1）起由
 # `renew_maintenance()` 随还原锁一起续期，长还原不会再中途失效。
-_MAINTENANCE_TTL_SECONDS = 30 * 60
-
 # 备份域前缀：还原/备份相关写请求放行（其余业务写请求在维护期被拒绝）
 _BACKUP_PATH_PREFIXES = ('/api/v1/backup/',)
 
@@ -103,8 +109,33 @@ def _report_read_failure(exc: Exception) -> None:
         )
 
 
+def _sentinel_active() -> bool:
+    """本地哨兵是否有效（存在且未过期）。读失败视为无效（与 Redis 路径同等宽容）。"""
+    try:
+        return _MAINTENANCE_SENTINEL.is_file() and \
+            (time.time() - _MAINTENANCE_SENTINEL.stat().st_mtime) < _SENTINEL_MAX_AGE
+    except OSError:
+        return False
+
+
+def _write_sentinel(on: bool) -> None:
+    try:
+        _MAINTENANCE_SENTINEL.parent.mkdir(parents=True, exist_ok=True)
+        if on:
+            _MAINTENANCE_SENTINEL.write_text(time.strftime('%Y-%m-%dT%H:%M:%S'), encoding='utf-8')
+        else:
+            _MAINTENANCE_SENTINEL.unlink(missing_ok=True)
+    except OSError as e:
+        logger.warning('维护模式哨兵文件写入失败（不影响 Redis 通道）: %s', e)
+
+
 async def is_maintenance_mode() -> bool:
-    """当前是否处于维护模式。Redis 不可用时读取兜底为 False（不阻塞业务）。
+    """当前是否处于维护模式。
+
+    Redis 正常时以 Redis 为准（TTL 兜底）；**Redis 读不到时改以本地哨兵为准**
+    （F-BE-CORE-09：原先任何异常都返回 False——还原期间 broker 抖动会把写闸门
+    静默打穿，写请求落在正在被替换的库上）。哨兵由 enter/exit 维护、mtime 过期
+    （2×TTL）兜底防崩溃遗留。Redis 正常时哨兵不参与判定（避免双真相源漂移）。
 
     ⚠️ 刻意**不**加本地缓存来"省掉这次读取"：维护模式是还原期间禁止写入的
     安全闸门，本地缓存会让它**延迟生效** —— 等于留下一个仍能写入的窗口。
@@ -112,13 +143,13 @@ async def is_maintenance_mode() -> bool:
     try:
         client = await _get_client()
         if client is None:
-            return False
+            return _sentinel_active()
         value = await client.get(_MAINTENANCE_KEY)
         _report_success()
         return bool(value)
     except Exception as e:  # broad-except: 维护状态探测不允许中断请求
         _report_read_failure(e)
-        return False
+        return _sentinel_active()
 
 
 async def enter_maintenance() -> bool:
@@ -129,6 +160,7 @@ async def enter_maintenance() -> bool:
             logger.warning('Redis 不可用，无法开启维护模式')
             return False
         await client.set(_MAINTENANCE_KEY, '1', ex=_MAINTENANCE_TTL_SECONDS)
+        _write_sentinel(True)
         _report_success()
         return True
     except Exception as e:  # broad-except: 维护开关失败不抛出
@@ -160,6 +192,7 @@ async def renew_maintenance() -> bool:
 
 async def exit_maintenance() -> None:
     """关闭维护模式。"""
+    _write_sentinel(False)
     try:
         client = await _get_client()
         if client is not None:

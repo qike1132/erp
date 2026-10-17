@@ -102,10 +102,9 @@ DOCUMENTED_WRITES = {
         "product.current_stock += total_deducted",
     ],
     "fastapi_app/services/batch_import_core.py": [
-        # 备货导入：qty 由 _parse_positive_quantity(label=备货) 保证 >0，纯增量
-        "locked_product.current_stock += qty",
-        # 出货导入写入侧：同一 _row_handler 内已由 check_stock_available 判定覆盖
-        "locked_product.current_stock -= qty",
+        # ↑ 2026-10-17 审计修复：原有的两处直写（备货 `locked_product.current_stock += qty`、
+        #   出货 `locked_product.current_stock -= qty`）已改走 apply_stock_delta_locked
+        #   （带 WHERE version 守卫并递增 version），台账清零。
     ],
     # ↑ 2026-10-02 P0 审计修复：原本这里还有一条「订单导入」的 `locked_product.current_stock += qty`，
     #   已删除 —— 订单不该影响物理库存（create_order / order_batch_create /

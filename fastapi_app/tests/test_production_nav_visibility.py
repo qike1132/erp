@@ -33,3 +33,11 @@ class TestNavPermissionCodes:
     def test_code_always_present_in_result(self):
         for code in ('production_summary_view', 'outsource_manage', 'permission_manage'):
             assert code in nav_permission_codes(code)
+
+    def test_finished_stock_lists_stock_users(self):
+        # 成品库存页服务 /stock 同一批用户：只授 stock_view（或 stockin_manage）的用户
+        # 也必须能看到入口，否则他们看不到菜单（接口本就认这两个码）。
+        codes = nav_permission_codes('finished_stock_view')
+        assert codes == ['finished_stock_view', 'stock_view', 'stockin_manage']
+        assert {'stock_view'} & set(codes)
+        assert {'stockin_manage'} & set(codes)

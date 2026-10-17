@@ -160,6 +160,7 @@ async def search_returnable_stockouts(db: AsyncSession, keyword: str, limit: int
             'customer': s.customer,
             'quantity': s.quantity,
             'returned_quantity': s.returned_quantity,
+            'batch_no': s.batch_no or '',
             'available': s.quantity - s.returned_quantity,
         })
     return data

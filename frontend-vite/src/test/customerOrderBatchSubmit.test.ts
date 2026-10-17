@@ -67,7 +67,7 @@ function mockEndpoints(opts: { ordersOk: boolean; stockinsOk: boolean }) {
   mocks.postMock.mockImplementation((url: string) => {
     if (url === ORDERS_URL) {
       return opts.ordersOk
-        ? Promise.resolve({ success: true, created_count: 1, results: [{ success: true }] })
+        ? Promise.resolve({ success: true, created_count: 1, results: [{ success: true, customer: '审计客户' }] })
         : Promise.reject(new Error('订单提交失败'))
     }
     if (url === STOCKINS_URL) {
@@ -196,5 +196,65 @@ describe('submitAll 部分失败语义', () => {
 
     expect(stagedItems.value).toHaveLength(0)
     expect(called(ORDERS_URL), '没有订单条目时不应请求订单接口').toBe(false)
+  })
+  it('F-FE-DESK-CORE-03：部分分组失败——成功分组行移除，失败分组行保留并播报 warning', async () => {
+    // 两个客户分组，B 组失败
+    const a = item('oa1', 'order'); const b = item('ob1', 'order')
+    b.customer = '失败客户'
+    const { stagedItems, submitAll } = setup([a, b])
+    mocks.postMock.mockImplementation((url: string) => {
+      if (url === ORDERS_URL) {
+        return Promise.resolve({
+          success: true, created_count: 1,
+          results: [
+            { success: true, customer: '审计客户' },
+            { success: false, customer: '失败客户', error: '产品不存在' },
+          ],
+        })
+      }
+      return Promise.reject(new Error(`unexpected url ${url}`))
+    })
+    await submitAll()
+    expect(stagedItems.value.map((i) => i.uid)).toEqual(['ob1']) // 失败分组保留
+    const texts = vi.mocked(showToast).mock.calls.map((c) => String(c[1]))
+    expect(texts).toContain('warning')
+  })
+
+  it('F-FE-DESK-CORE-03：results 无 customer 字段（形状不符）——保守保留全部', async () => {
+    const { stagedItems, submitAll } = setup([item('ox1', 'order')])
+    mocks.postMock.mockImplementation((url: string) => {
+      if (url === ORDERS_URL) {
+        return Promise.resolve({ success: true, created_count: 1, results: [{ success: true }] })
+      }
+      return Promise.reject(new Error(`unexpected url ${url}`))
+    })
+    await submitAll()
+    expect(stagedItems.value).toHaveLength(1) // 不清空
+  })
+  it('OCR 评审：失败分组里带出货计划的行不虚报「已同步出货计划」计数', async () => {
+    const a = item('pa1', 'order'); const b = item('pb1', 'order')
+    a.shipmentPlans = [{ date: '2026-10-20', quantity: 3, note: '' }]
+    b.shipmentPlans = [{ date: '2026-10-20', quantity: 3, note: '' }]
+    b.customer = '失败客户'
+    const { submitAll } = setup([a, b])
+    mocks.postMock.mockImplementation((url: string) => {
+      if (url === ORDERS_URL) {
+        return Promise.resolve({
+          success: true, created_count: 1,
+          results: [
+            { success: true, customer: '审计客户' },
+            { success: false, customer: '失败客户', error: '校验失败' },
+          ],
+        })
+      }
+      return Promise.reject(new Error(`unexpected url ${url}`))
+    })
+    const { submitAll: _ } = { submitAll: () => Promise.resolve() }
+    const api = { submitAll }
+    await api.submitAll()
+    const successTexts = vi.mocked(showToast).mock.calls.map((c) => String(c[0]))
+    const claimed = successTexts.find((t) => t.includes('已同步出货计划'))
+    expect(claimed).toBeDefined()
+    expect(claimed).toContain('1 条已同步出货计划') // 只有成功分组那 1 条
   })
 })

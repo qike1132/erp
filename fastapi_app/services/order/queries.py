@@ -7,7 +7,7 @@ import json
 import logging
 from datetime import UTC, datetime
 
-from sqlalchemy import ColumnElement, delete, func, select, tuple_, update
+from sqlalchemy import ColumnElement, delete, func, or_, select, tuple_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 
@@ -111,11 +111,28 @@ def _parse_date_condition(date_str: str | None, is_end: bool = False):
 
 def _build_order_filters(customer: str | None, product_id: int | None,
                          status: str | None,
-                         start_date: str | None, end_date: str | None) -> list:
+                         start_date: str | None, end_date: str | None,
+                         keyword: str | None = None) -> list:
     """构建订单筛选条件列表（共用，避免 DRY 违反）。"""
     conditions: list[ColumnElement[bool]] = []
     if customer:
         conditions.append(Order.customer.like(f'%{escape_like(customer)}%'))
+    # F-FE-MOBILE-03：搜索框「订单号/产品/客户」三合一——移动端提交 keyword
+    # 原先被 FastAPI 静默丢弃。命中任一即算命中（订单号/客户模糊、SKU 快照/
+    # 产品名/条码走 items 的 EXISTS 子查询——主查询没有 join OrderItem，
+    # 裸表引用会产生笛卡尔积/报错；与 factory 筛选的 items.any 同款写法）。
+    if keyword:
+        kw = f'%{escape_like(keyword)}%'
+        conditions.append(or_(
+            Order.order_no.like(kw),
+            Order.customer.like(kw),
+            Order.items.any(or_(
+                OrderItem.product_name.like(kw),
+                OrderItem.product_barcode.like(kw),
+                OrderItem.product.has(Product.name.like(kw)),
+                OrderItem.product.has(Product.barcode.like(kw)),
+            )),
+        ))
     if product_id:
         conditions.append(Order.product_id == product_id)
     if status:
@@ -217,7 +234,8 @@ async def get_orders(db: AsyncSession, page: int = 1, per_page: int = 50,
                      customer: str | None = None, product_id: int | None = None,
                      status: str | None = None,
                      start_date: str | None = None, end_date: str | None = None,
-                     factory: str | None = None) -> dict:
+                     factory: str | None = None,
+                     keyword: str | None = None) -> dict:
     """获取订单列表（含关联数据，支持分页和筛选）
 
     Args:
@@ -234,7 +252,7 @@ async def get_orders(db: AsyncSession, page: int = 1, per_page: int = 50,
     count_query = select(func.count(Order.id)).where(Order.is_deleted.isnot(True))
 
     # 筛选条件（共用，避免 DRY 违反）
-    conditions = _build_order_filters(customer, product_id, status, start_date, end_date)
+    conditions = _build_order_filters(customer, product_id, status, start_date, end_date, keyword=keyword)
     # 工厂筛选：订单包含至少一个属于该工厂的 SKU（加入 conditions 以便深翻页游标子查询同步过滤）
     if factory:
         conditions.append(Order.items.any(OrderItem.product.has(Product.factory == factory)))

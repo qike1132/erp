@@ -19,6 +19,9 @@ class ProductionRecordCreate(BaseModel):
     quantity: int = Field(..., gt=0, le=999999, description="生产数量")
     production_date: str = Field(..., description="生产日期 (YYYY-MM-DD)")
     remark: str | None = Field(None, max_length=500, description="备注")
+    batch_no: str | None = Field(None, max_length=100, description="批次号（复用订单批次体系）")
+    is_custom: bool | None = Field(None, description="是否定制")
+    custom_country: str | None = Field(None, max_length=100, description="定制国家（仅定制时有意义）")
 
 
 class ProductionRecordUpdate(BaseModel):
@@ -32,6 +35,9 @@ class ProductionRecordUpdate(BaseModel):
     quantity: int | None = Field(None, gt=0, le=999999, description="生产数量")
     production_date: str | None = Field(None, description="生产日期 (YYYY-MM-DD)")
     remark: str | None = Field(None, max_length=500, description="备注")
+    batch_no: str | None = Field(None, max_length=100, description="批次号（复用订单批次体系）")
+    is_custom: bool | None = Field(None, description="是否定制")
+    custom_country: str | None = Field(None, max_length=100, description="定制国家（仅定制时有意义）")
 
 
 class ProductionRecordItem(BaseModel):
