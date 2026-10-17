@@ -250,6 +250,10 @@ async def get_products_page(db: AsyncSession, page: int = 1, per_page: int = 20,
         conditions.append(or_(
             Product.name.ilike(f'%{escaped}%', escape='\\'),
             Product.barcode.ilike(f'%{escaped}%', escape='\\'),
+            # F-FE-MOBILE-07 复审补充（OCR 2026-10-17）：移动端改走服务端搜索前，
+            # 本地过滤还覆盖 specification（规格如 25cm）；后端不搜规格会让
+            # 「只按规格搜」从可用退化为「未找到匹配」。
+            Product.specification.ilike(f'%{escaped}%', escape='\\'),
         ))
     if only_unassigned:
         conditions.append(unassigned_product())
