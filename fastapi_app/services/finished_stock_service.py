@@ -197,6 +197,9 @@ async def get_batches_by_product(
 ) -> list[dict]:
     """某产品的批次可用量列表（供 /stock-out 录入 SKU 后带出批次选择）。
 
+    批次可用是 (产品, 批次) 级事实，与客户无关：``customer_name`` 仅为兼容既有
+    API 签名而保留，**不参与过滤**（原因见下方注释）。
+
     Returns: [{batch_no, available_quantity}]，按批次号升序（= 生产时间正序）。
     """
     bi = _batch_in_subq()
@@ -211,8 +214,10 @@ async def get_batches_by_product(
         # 只返回真实批次；空批次（未分批次）不可选，不进下拉
         .where(bi.c.batch_no != '')
     )
-    if customer_name:
-        q = q.where(func.coalesce(bi.c.customer_name, '') == customer_name)
+    # 不按客户过滤：bi.c.customer_name 是展示值，只要该批次有任何一条无客户的生产记录
+    # 或多客户就会塌成 ''，按它过滤会把出货闸门（get_batch_available 本就与客户无关）
+    # 会放行的批次藏掉 —— 那批货于是走「不指定批次」出货，批次行永远不被扣减、数字虚高。
+    # 批次可用是 (产品, 批次) 级事实，见模块 docstring。
     q = q.order_by(bi.c.batch_no)
 
     rows = (await db.execute(q)).mappings().all()

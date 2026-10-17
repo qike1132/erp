@@ -135,4 +135,6 @@ async def upsert_remark(
             batch_no=data.batch_no,
             remark=data.remark,
         )
-    return FinishedStockRemarkResponse(success=True, remark=data.remark)
+    # 回显归一化后的值：service 会 strip 并在空结果时删行，回显原始输入会让响应
+    # 与实际落库状态矛盾（例如纯空白输入会报一个非空 remark）
+    return FinishedStockRemarkResponse(success=True, remark=(data.remark or '').strip())

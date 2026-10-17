@@ -1,5 +1,5 @@
 <template>
-  <div class="sp-container">
+  <div class="fs-container">
     <div class="page-card page-card-main">
       <div class="page-card-header">
         <!-- 客户快捷切换栏上移到 header 行（占满剩余宽度），右侧是 搜索框 + 导出。
@@ -39,12 +39,12 @@
           row-group-mode="rowspan"
           :group-rows-by="GROUP_ROWS_BY"
           @page="onPage"
-          @sort="onSort"
         >
           <!-- 产品图片（独立列，随 SKU 大格跨行合并；点击看原图） -->
           <template #column-body-_g_image="{ row }">
             <span v-if="(row as FinishedStockItem).image && !failedKeys.has(groupKeyOf(row as FinishedStockItem))" class="fs-thumb-box">
               <img
+                :key="thumbSrc(row as FinishedStockItem)"
                 loading="lazy"
                 :src="thumbSrc(row as FinishedStockItem)"
                 :alt="(row as FinishedStockItem).product_name"
@@ -134,7 +134,7 @@ import { finishedStockApi } from '@/api'
 import { useDebouncedRef } from '@/composables/useDebouncedRef'
 import { useExport } from '@/composables/useExport'
 import { showToast } from '@/composables/useToast'
-import { batchSortKey, compareBatchNo } from './batchSort'
+import { compareBatchNo } from './batchSort'
 import type { FinishedStockItem } from '@/types'
 
 /** 表格行：聚合行 + 分组键注入的 `__rk`（row-key 与编辑态标识都用它）。
@@ -147,8 +147,6 @@ const LOW_STOCK_THRESHOLD = 100
 const debouncedProduct = useDebouncedRef(computed(() => filters.value.product), 300)
 const page = ref(1)
 const perPage = ref(20)
-/** 排序态：批次号/库存 列可点（order: 1 升序 / -1 降序） */
-const sort = ref<{ field: string; order: number } | null>(null)
 
 const { data, isLoading } = useQuery({
   queryKey: ['finished-stock', () => filters.value.customer, debouncedProduct, () => page.value, () => perPage.value],
@@ -177,10 +175,24 @@ function groupKeyOf(row: FinishedStockItem): string {
 
 /** 图片加载失败的分组（失败后退化成「无图」占位） */
 const failedKeys = ref<Set<string>>(new Set())
-function onImgError(row: FinishedStockItem): void { failedKeys.value.add(groupKeyOf(row)) }
-/** 列表用缩略图（后端确定性派生 + 已签名），拿不到回退原图 */
+/** 缩略图 404 已回退原图的分组（键 = groupKeyOf） */
+const thumbFallbackKeys = ref<Set<string>>(new Set())
+function onImgError(row: FinishedStockItem): void {
+  const key = groupKeyOf(row)
+  // 两段式回退（照 ProductTable）：缩略图 404（存量图/生成失败）先换成原图，
+  // 原图也失败才显示「无图」占位。image_thumb 是后端无条件派生的确定性 key，
+  // 不保证文件真的存在。
+  if (row.image_thumb && !thumbFallbackKeys.value.has(key)) {
+    thumbFallbackKeys.value = new Set(thumbFallbackKeys.value).add(key)
+    return
+  }
+  failedKeys.value = new Set(failedKeys.value).add(key)
+}
+/** 列表用缩略图；缩略图 404 回退原图 */
 function thumbSrc(row: FinishedStockItem): string {
-  return resolveStaticUrl(row.image_thumb || row.image || '')
+  const thumb = row.image_thumb
+  if (thumb && !thumbFallbackKeys.value.has(groupKeyOf(row))) return resolveStaticUrl(thumb)
+  return resolveStaticUrl(row.image || '')
 }
 /** 原图预览：传**原图** URL（不是列表缩略图） */
 const previewImg = ref<string | null>(null)
@@ -246,8 +258,11 @@ const baseColumns: TableColumn[] = [
   { field: 'image', header: '图片', align: 'left', width: '56px' },
   { field: 'product_name', header: '产品名称', align: 'left', width: '26%' },
   { field: 'barcode', header: '69码', align: 'left', width: '10%' },
-  { field: 'batch_no', header: '批次号', align: 'left', sortable: true, width: '16%' },
-  { field: 'batch_available', header: '库存', align: 'center', sortable: true, width: '9%' },
+  // 不加 sortable：UiDataTable 不向 PrimeVue 传 sortField/sortOrder，点表头会让 PrimeVue
+  // 重排整页数组，同 SKU 的批次行被打散 → rowspan 合并退化（每行各自渲染图片/产品名）。
+  // 行序由 skuGroups 自己控制：组按产品名稳定排序，组内默认按批次号升序（= 生产时间正序）。
+  { field: 'batch_no', header: '批次号', align: 'left', width: '16%' },
+  { field: 'batch_available', header: '库存', align: 'center', width: '9%' },
   { field: 'is_custom', header: '定制', align: 'center', width: '7%' },
   { field: 'remark', header: '备注', align: 'left', width: 'auto' },
 ]
@@ -257,13 +272,6 @@ function fmtNum(v: unknown): string {
   const n = Number(v)
   if (!Number.isFinite(n)) return ''
   return formatNumber(n)
-}
-
-/** 排序取值：批次号走专用键（见 batchSort），其余按数值。 */
-function sortVal(row: Record<string, unknown>, field: string): number | string {
-  if (field === 'batch_no') return batchSortKey(row.batch_no)
-  const n = Number(row[field])
-  return Number.isFinite(n) ? n : 0
 }
 
 /** 按分组键聚合，同 SKU 的批次行相邻 */
@@ -282,17 +290,8 @@ const skuGroups = computed(() => {
   )
   const out: (FinishedStockItem & Record<string, unknown>)[] = []
   for (const [key, rows] of groups) {
-    // 组内按当前排序列排；默认按批次号升序（= 生产时间正序）
-    const s = sort.value
-    const ordered = s
-      ? [...rows].sort((x, y) => {
-          const a = sortVal(x as unknown as Record<string, unknown>, s.field)
-          const b = sortVal(y as unknown as Record<string, unknown>, s.field)
-          if (a < b) return -s.order
-          if (a > b) return s.order
-          return 0
-        })
-      : [...rows].sort((x, y) => compareBatchNo(x.batch_no, y.batch_no))
+    // 组内固定按批次号升序（= 生产时间正序）；不做列排序（会打散 rowspan 分组）
+    const ordered = [...rows].sort((x, y) => compareBatchNo(x.batch_no, y.batch_no))
     for (const r of ordered) {
       out.push({
         ...r,
@@ -309,11 +308,6 @@ const skuGroups = computed(() => {
 
 const tableRows = computed(() => skuGroups.value)
 
-/** PrimeVue 排序事件：order 为 1 升序 / -1 降序 / 0 取消 */
-function onSort(event: { field: string; order: number }) {
-  sort.value = event.order ? { field: event.field, order: event.order } : null
-}
-
 function onPage(event: { page: number; rows: number }) {
   page.value = event.page + 1
   perPage.value = event.rows
@@ -321,6 +315,17 @@ function onPage(event: { page: number; rows: number }) {
 </script>
 
 <style scoped>
+/* 必须显式声明：外层要是高度受限的 flex 列，下面的 flex:1 / min-height:0 才生效。
+   少了它（早先误用 /supplier 的 .sp-container，scoped 不跨组件生效）会让卡片随行数
+   长高、表格体不滚动，行多时底行与分页器被 .app-layout 裁掉够不着。 */
+.fs-container {
+  padding: 0;
+  margin: 0 auto;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
 .fs-search { position: relative; flex-shrink: 0; }
 /* header 内：客户选择栏占满剩余宽度，搜索框 + 导出靠右。
    sk-customer-row 是 CustomerChipBar 内的 scoped 样式，本页 scoped 命中不到，用 :deep。
@@ -353,8 +358,6 @@ function onPage(event: { page: number; rows: number }) {
 .fs-card-main :deep([data-pc-section='bodycell']) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-top: 4px; padding-bottom: 4px; }
 .fs-card-main :deep([data-pc-section='bodyrow']:last-child) { border-bottom: 0; }
 .fs-card-main :deep([data-pc-section='sorticon']) { width: 10px; height: 10px; color: var(--color-slate-300); }
-.fs-card-main :deep(th[aria-sort='ascending'] [data-pc-section='sorticon']),
-.fs-card-main :deep(th[aria-sort='descending'] [data-pc-section='sorticon']) { color: var(--color-primary-600); }
 
 .fs-name { font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fs-name-cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; }

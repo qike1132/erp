@@ -132,7 +132,7 @@ async function fetchBatchOptions() {
   }
   const seq = ++batchReqSeq
   try {
-    const res = await finishedStockApi.batches(Number(form.productId), form.customer || undefined)
+    const res = await finishedStockApi.batches(Number(form.productId))
     if (seq !== batchReqSeq) return // 已有更新的请求在途，丢弃过期响应
     batchOptions.value = res.data ?? []
   } catch {
@@ -186,6 +186,38 @@ async function removeStagedItem(idx: number) {
 
 const stagedTotalQty = computed(() => staged.value.reduce((sum: number, item: StagedStockout) => sum + (item.quantity || 0), 0))
 
+/**
+ * 批次级闸门（前端即时提示）：「已暂存同批次量 + 本次数量」不得超过该批次可用。
+ * 必须计入已暂存：同一批次可多次新增出货，只比本次单条会放过累计超额
+ * （提交时被后端批次闸门拒，只得到「部分出货成功」）。
+ *
+ * 同时服务于「新增出货」与「编辑暂存」两条路径（编辑时把被编辑项自身排除，
+ * 否则它已被计入 staged，会把可用量算小）。返回 false 表示被拦下。
+ *
+ * 按 (产品, 客户, 批次) 累计：批次可用量是 (产品, 批次) 级事实，客户只用于把
+ * 同一客户对该批次的多次暂存合并计数。
+ */
+function checkBatchAvailability(opts: {
+  productId: string
+  customer: string
+  batchNo: string
+  quantity: number
+  excludeId?: number
+}): boolean {
+  if (!opts.batchNo) return true
+  const opt = batchOptions.value.find((b) => b.batch_no === opts.batchNo)
+  if (!opt) return true
+  const stagedSameBatch = staged.value
+    .filter((s) => s.product_id === opts.productId && s.customer === opts.customer
+      && (s.batch_no || '') === opts.batchNo && s.id !== opts.excludeId)
+    .reduce((sum, s) => sum + (s.quantity || 0), 0)
+  if (stagedSameBatch + opts.quantity > opt.available_quantity) {
+    showToast(`批次「${opts.batchNo}」可用不足！可用: ${opt.available_quantity}，已暂存: ${stagedSameBatch}`, 'error')
+    return false
+  }
+  return true
+}
+
 async function addStaged() {
   if (!canAdd.value) {
     showToast('请选择客户和产品，并输入数量', 'warning')
@@ -203,21 +235,12 @@ async function addStaged() {
     }
   }
 
-  // 批次级闸门（前端即时提示）：选了批次且「已暂存同批次量 + 本次」超过该批次可用 → 拦下。
-  // 必须计入已暂存：同一批次可多次「新增出货」，只比本次单条会放过累计超额
-  // （提交时被后端批次闸门拒，只得到「部分出货成功」）。
-  if (form.batchNo) {
-    const opt = batchOptions.value.find((b) => b.batch_no === form.batchNo)
-    if (opt) {
-      const stagedSameBatch = staged.value
-        .filter((s) => s.product_id === form.productId && s.customer === form.customer && (s.batch_no || '') === form.batchNo)
-        .reduce((sum, s) => sum + (s.quantity || 0), 0)
-      if (stagedSameBatch + form.quantity > opt.available_quantity) {
-        showToast(`批次「${form.batchNo}」可用不足！可用: ${opt.available_quantity}，已暂存: ${stagedSameBatch}`, 'error')
-        return
-      }
-    }
-  }
+  if (!checkBatchAvailability({
+    productId: form.productId,
+    customer: form.customer,
+    batchNo: form.batchNo,
+    quantity: form.quantity,
+  })) return
 
   staged.value.push({
     id: Date.now(),
@@ -266,6 +289,15 @@ function saveEditStaged() {
   if (editStagedIdx.value < 0) return
   const item = staged.value[editStagedIdx.value]
   if (!item) return
+  // 批次闸门同样要过：编辑可把数量调大，绕过它就会在提交时才被后端拒（部分出货成功）。
+  // excludeId 排除被编辑项自身——它已计入 staged，不排除会把可用量算小。
+  if (!checkBatchAvailability({
+    productId: item.product_id,
+    customer: editStagedForm.customer,
+    batchNo: item.batch_no || '',
+    quantity: editStagedForm.quantity,
+    excludeId: item.id,
+  })) return
   item.customer = editStagedForm.customer
   item.date = editStagedForm.date
   item.quantity = editStagedForm.quantity

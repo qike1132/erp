@@ -3,6 +3,7 @@
   <div class="fr-cell">
     <template v-if="editing">
       <input
+        ref="inputRef"
         v-model="draft"
         class="fr-input"
         placeholder="点击填写备注"
@@ -27,7 +28,7 @@
  * 从 FinishedStockView 抽出：编辑态/草稿/保存中都在本组件内维护，父级只关心
  * save 事件（拿到最终文本）。父级按 row-key 控制哪一行在编辑（editing）。
  */
-import { ref, watch } from 'vue'
+import { nextTick, ref, watch } from 'vue'
 
 const props = defineProps<{
   /** 当前行备注（已保存值） */
@@ -48,10 +49,15 @@ const emit = defineEmits<{
 }>()
 
 const draft = ref(props.remark || '')
+const inputRef = ref<HTMLInputElement | null>(null)
 
 // 进入编辑态时用最新已存值重置草稿；退出时丢弃（取消语义）。
 watch(() => props.editing, (on) => {
-  if (on) draft.value = props.remark || ''
+  if (on) {
+    draft.value = props.remark || ''
+    // 自动聚焦：原按钮被移除后焦点会落回文档，不聚焦的话用户得再点一次输入框
+    nextTick(() => inputRef.value?.focus())
+  }
 })
 
 function startEdit() {
