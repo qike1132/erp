@@ -335,6 +335,9 @@ async def export_records(
     start_date: str = Query('', description='起始日期 (YYYY-MM-DD)'),
     end_date: str = Query('', description='结束日期 (YYYY-MM-DD)'),
     department: str = Query('', description='部门筛选 (filling/handcraft/packaging)'),
+    # 2026-10-17 审计 F-BE-SVC-STOCK-05：与屏幕侧同口径——导出带上录单人/关键词
+    created_by: str = Query('', description='录单人筛选'),
+    keyword: str = Query('', description='产品名或69码关键词'),
     scope: set[str] | None = Depends(resolve_production_view_scope),
     db: AsyncSession = Depends(get_async_read_db),
 ) -> Response:
@@ -359,6 +362,8 @@ async def export_records(
             start_date=start_date,
             end_date=end_date,
             departments=narrow_departments(department, scope),
+            created_by=created_by,
+            keyword=keyword,
         )
         return Response(
             content=content,

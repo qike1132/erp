@@ -470,7 +470,8 @@ async def update_record(
 ) -> DailyProductionRecord:
     """更新生产记录"""
     result = await db.execute(
-        select(DailyProductionRecord).where(DailyProductionRecord.id == record_id)
+        # F-BE-SVC-STOCK-03：写路径取行锁，delta 不取自陈旧快照
+        select(DailyProductionRecord).where(DailyProductionRecord.id == record_id).with_for_update()
     )
     record = result.scalar_one_or_none()
     if not record:
@@ -544,7 +545,8 @@ async def delete_record(db: AsyncSession, record_id: int, *, operator: str = '')
         ValueError: 记录不存在。
     """
     result = await db.execute(
-        select(DailyProductionRecord).where(DailyProductionRecord.id == record_id)
+        # F-BE-SVC-STOCK-03：写路径取行锁，delta 不取自陈旧快照
+        select(DailyProductionRecord).where(DailyProductionRecord.id == record_id).with_for_update()
     )
     record = result.scalar_one_or_none()
     if not record:
@@ -849,6 +851,8 @@ async def export_records(
     start_date: str = '',
     end_date: str = '',
     departments: set[str] | None = None,
+    created_by: str = '',
+    keyword: str = '',
 ) -> bytes:
     """导出生产记录为 Excel（企业标准格式）
 
@@ -857,18 +861,24 @@ async def export_records(
         start_date: 区间起始日 (YYYY-MM-DD)。
         end_date: 区间结束日 (YYYY-MM-DD)，闭区间。
         departments: 可见部门集合；None 表示全部部门。
+        created_by: 录单人筛选（2026-10-17 审计 F-BE-SVC-STOCK-05：原先导出侧
+            自建条件漏掉录单人/关键词，导出的 Excel 与页面所见集合不同）。
+        keyword: 产品名或 69 码关键词。
     """
-    conditions = []
-    range_start = parse_date_with_fallback(start_date) if start_date else None
-    range_end = parse_date_with_fallback(end_date) if end_date else None
-    if range_start and range_end and range_end < range_start:
-        raise InvalidDateRangeError('结束日期不能早于开始日期')
-    if range_start:
-        conditions.append(DailyProductionRecord.production_date >= range_start)
-    if range_end:
-        conditions.append(DailyProductionRecord.production_date <= range_end)
-    if departments is not None:
-        conditions.append(DailyProductionRecord.department.in_(sorted(departments)))
+    # 与屏幕侧 get_records 复用同一条件构造器（F-BE-SVC-STOCK-05：
+    # 两套实现已漂移——导出丢了 created_by/keyword）。
+    try:
+        conditions = _build_record_conditions(
+            year=None, month=None,
+            start_date=start_date, end_date=end_date,
+            departments=departments, created_by=created_by, keyword=keyword,
+        )
+    except InvalidDateRangeError:
+        raise
+    except ValueError as e:
+        # 共享构造器抛普通 ValueError（区间反向等）；导出端点把 ValueError
+        # 映射为 413（行数上界），日期错误应保持 400 语义。
+        raise InvalidDateRangeError(str(e)) from e
 
     query = select(DailyProductionRecord).order_by(
         DailyProductionRecord.production_date,

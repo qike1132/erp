@@ -753,7 +753,11 @@ async def import_orders_from_data(db: AsyncSession, data_list: list, *, deps: Im
                 if deduct_flag_str.isdigit():
                     deduct_value = int(deduct_flag_str)
                 elif deduct_flag_str.lower() in ['是', 'yes']:
-                    deduct_value = 1
+                    # 2026-10-17 审计 F-BE-SVC-STOCK-04：「是」原先折算成 1 件，
+                    # 另两套实现（staging/_generic._parse_deduct_flag、
+                    # batch_import_service）都折算成整单数量 —— 同一列两种语义。
+                    # 对齐多数派：是 → qty。
+                    deduct_value = qty
 
                 if deduct_value > 0:
                     await deps.process_order_deduction(db, order, product_id, deduct_value, deduct_stock=True, product=product)
