@@ -202,11 +202,28 @@ function Get-NssmArgs([hashtable]$Spec){
   $list
 }
 
+function Invoke-Nssm([string]$Nssm,[string[]]$NssmArgs,[string]$Action){
+  # 2026-10-17 审计 P2-80：此前所有 nssm 调用都 | Out-Null 且不看退出码，
+  # 安装/配置失败会被静默吞掉。
+  & $Nssm @NssmArgs | Out-Null
+  if($LASTEXITCODE -ne 0){ throw "nssm $Action 失败（exit=$LASTEXITCODE）：$($NssmArgs -join ' ')" }
+}
+
 function Install-NssmService([string]$Nssm,[hashtable]$Spec){
   $name=$Spec.Name
-  if(Get-Service -Name $name -ErrorAction SilentlyContinue){ & $Nssm stop $name | Out-Null; & $Nssm remove $name confirm | Out-Null }
-  & $Nssm install $name $Spec.Application | Out-Null
-  foreach($a in (Get-NssmArgs $Spec)){ & $Nssm @a | Out-Null }
+  if(Get-Service -Name $name -ErrorAction SilentlyContinue){
+    Invoke-Nssm $Nssm @('stop',$name) 'stop'
+    # 停后必须等 STOPPED，不能立即 remove（旧实现会与正在停止的服务竞争）
+    $deadline=(Get-Date).AddSeconds(30)
+    do {
+      Start-Sleep -Milliseconds 500
+      $svc=Get-Service -Name $name -ErrorAction SilentlyContinue
+    } while($svc -and $svc.Status -ne 'Stopped' -and (Get-Date) -lt $deadline)
+    if($svc -and $svc.Status -ne 'Stopped'){ throw "服务 $name 未能停止（当前状态 $($svc.Status)）" }
+    Invoke-Nssm $Nssm @('remove',$name,'confirm') 'remove'
+  }
+  Invoke-Nssm $Nssm @('install',$name,$Spec.Application) 'install'
+  foreach($a in (Get-NssmArgs $Spec)){ Invoke-Nssm $Nssm $a 'set' }
 }
 
 function Test-Prereqs([hashtable]$Wanted){

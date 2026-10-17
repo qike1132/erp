@@ -100,7 +100,7 @@ jobs:
         python -m pip install --upgrade pip
         # 用锁文件（B1）：钉死全部传递依赖，与本地 venv 一致
         pip install -r requirements/base.lock -r requirements/dev.lock -r requirements/test.lock
-        pip install bandit pip-audit
+        pip install bandit==1.9.4 pip-audit==2.10.1
     
     - name: Verify Alembic migrations
       run: |
@@ -231,7 +231,7 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements/dev.lock
-        pip install uv
+        pip install uv==0.12.5
 
     # 锁同步门禁（B1）：requirements/<tier>.txt 改了必须重跑 uv pip compile 刷新 .lock，
     # 否则锁会悄悄与声明脱节（改了依赖却不生效）。

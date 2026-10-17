@@ -19,6 +19,12 @@ on:
 permissions:
   contents: write
 
+# 2026-10-17 审计 P2-70：机器人直推 main，禁止并发运行（两次刷新同时 push
+# 会产生非快进冲突/相互覆盖）
+concurrency:
+  group: refresh-requirements-lock
+  cancel-in-progress: false
+
 jobs:
   refresh:
     runs-on: ubuntu-latest
@@ -26,7 +32,7 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Install uv
-        run: pip install uv
+        run: pip install uv==0.12.5
 
       - name: Refresh all locks
         run: |

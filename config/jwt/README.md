@@ -1,37 +1,22 @@
-# JWT 密钥目录
+# JWT 密钥目录（Windows / NSSM 部署）
 
-此目录仅存放 **公钥**（`public.pem`），公钥可公开。
+本目录存放 JWT 签名相关文件。**私钥严禁提交到版本库。**
 
-**私钥（`private.pem`）严禁提交到代码仓库。** 生产环境通过以下方式注入：
+## 当前生产形态（2026-10 起）
 
-## K8s 部署
-```yaml
-volumes:
-  - name: jwt-secret
-    secret:
-      secretName: erp-jwt-keys
-volumeMounts:
-  - name: jwt-secret
-    mountPath: /run/secrets
-    readOnly: true
-```
-环境变量：`JWT_PRIVATE_KEY_PATH=/run/secrets/private.pem`
+- 部署方式：Windows 本机 + NSSM 服务（**不是** Docker/K8s）。
+- 生产签名钥：`_ops/credentials/` 下的私钥文件（由部署流程放置），
+  通过环境变量 `JWT_PRIVATE_KEY_PATH` 指向；运行时实际生效的是轮换后的
+  **v2 私钥**（历史 `private.pem` 已退役，勿再使用）。
+- `public.pem` 可提交，用于校验。
+- 私钥文件权限由 `.gitignore` + `.githooks` 密钥扫描双重拦截。
 
-## Docker 部署
-```bash
-docker run -v /host/path/private.pem:/run/secrets/private.pem:ro \
-  -e JWT_PRIVATE_KEY_PATH=/run/secrets/private.pem ...
-```
+## 轮换步骤（摘要）
 
-## 生成新密钥对
-```bash
-openssl genpkey -algorithm RSA -out private.pem -pkeyopt rsa_keygen_bits:4096
-openssl rsa -pubout -in private.pem -out public.pem
-# private.pem 保管在 Secret 管理系统；public.pem 提交到此目录
-```
+1. 生成新密钥对（openssl 或项目脚本）。
+2. 将新私钥放入受控目录，更新 `JWT_PRIVATE_KEY_PATH`。
+3. 重启 `erp-prod` / `erp-arq`（重启前确认工作区在 main，见 AGENTS.md §6.1）。
+4. 保留旧公钥直到所有旧 token 过期。
 
-## 密钥轮换
-1. 生成新密钥对
-2. 先部署新公钥（verifier 优先，接受新旧两种 token）
-3. 再切换签名者使用新私钥
-4. 观察 token 验证成功率，确认无异常后下线旧公钥
+> 2026-10-17 审计 P2-79：本文件此前是 Docker/K8s 时代的过期文档（Secret volume
+> 挂载 / `docker run -v`），与当前 NSSM 部署不符，已按实际形态改写。

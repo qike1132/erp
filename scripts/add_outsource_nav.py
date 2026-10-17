@@ -30,6 +30,9 @@ PERM_SECTION_NAME = '核心业务'
 
 
 def main():
+    # 2026-10-17 审计 P2-73：ORM 直写生产库，接入统一写护栏（fail-closed）
+    from _prod_write_guard import require_prod_write_consent
+    require_prod_write_consent('写入导航权限项（生产库）')
     session = SyncSessionLocal()
     try:
         # 1. 检查是否已存在

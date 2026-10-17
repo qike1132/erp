@@ -209,7 +209,7 @@ class RedisOps:
         if ok is None:
             self._msg_queue.put(('log', {
                 'text': f'未安装 {_SVC_REDIS_BROKER} 服务，erp-arq 无法运行；'
-                        f'请执行 scripts\\install_redis_services.ps1 注册 Redis 服务',
+                        f'请执行 deploy\\install_package.ps1 注册 Redis 服务（或手工 nssm install）',
                 'level': 'ERROR'}))
             return False
         for _ in range(20):

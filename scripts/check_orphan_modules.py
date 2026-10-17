@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -78,8 +79,34 @@ TEST_DIR_NAMES: frozenset[str] = frozenset({'tests', 'test'})
 MYPY_INI = ROOT / 'mypy.ini'
 
 
+def _git_tracked_py_files() -> list[Path] | None:
+    """git 跟踪的 .py 文件（2026-10-17 审计 P2-72：本地未跟踪文件不应进图，
+    否则本地与 CI 判定可分叉）。git 不可用时返回 None，回退 rglob。"""
+    try:
+        proc = subprocess.run(
+            ['git', '-C', str(ROOT), 'ls-files', '-z', '--', '*.py'],
+            capture_output=True, timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    names = [n for n in proc.stdout.decode('utf-8', errors='replace').split('\0') if n]
+    return [ROOT / n for n in names]
+
+
 def _iter_py_files() -> list[Path]:
-    out: list[Path] = []
+    tracked = _git_tracked_py_files()
+    if tracked is not None:
+        out: list[Path] = []
+        for path in tracked:
+            rel_parts = path.relative_to(ROOT).parts
+            if any(part in SKIP_DIR_NAMES for part in rel_parts[:-1]):
+                continue
+            if path.exists():
+                out.append(path)
+        return out
+    out = []
     for path in ROOT.rglob('*.py'):
         rel_parts = path.relative_to(ROOT).parts
         if any(part in SKIP_DIR_NAMES for part in rel_parts[:-1]):
