@@ -4361,6 +4361,25 @@
               "title": "Factory"
             },
             "description": "工厂筛选：东莞/湖北"
+          },
+          {
+            "name": "keyword",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 100
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "关键词筛选（订单号/产品名）",
+              "title": "Keyword"
+            },
+            "description": "关键词筛选（订单号/产品名）"
           }
         ],
         "responses": {
@@ -15342,6 +15361,30 @@
               "title": "Department"
             },
             "description": "部门筛选 (filling/handcraft/packaging)"
+          },
+          {
+            "name": "created_by",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "录单人筛选",
+              "default": "",
+              "title": "Created By"
+            },
+            "description": "录单人筛选"
+          },
+          {
+            "name": "keyword",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "产品名或69码关键词",
+              "default": "",
+              "title": "Keyword"
+            },
+            "description": "产品名或69码关键词"
           }
         ],
         "responses": {
