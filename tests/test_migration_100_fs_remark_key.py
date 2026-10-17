@@ -57,11 +57,25 @@ def _make_db(rows: list[tuple[int, str, str, str, int]]):
 def _run_upgrade(conn):
     mod = _load_migration_module()
     ops = Operations(MigrationContext.configure(_CommentFilterConn(conn)))
-    mod.op = ops
     import migrations._legacy_base_guard as guard
-    guard.op = ops
-    guard.context = _CtxStub()
-    mod.upgrade()
+    # 全局 guard.op / guard.context 是进程级单例：替换后必须恢复原值，
+    # 否则同批次后续测试（如 test_product_stock_check_constraint 的 offline
+    # 渲染）会拿到 _CommentFilterConn 包装连接，sa_inspect 直接炸
+    #（曾致 offline 测试跨文件假红）。
+    orig_op, orig_ctx = guard.op, guard.context
+    orig_mod_ctx = getattr(mod, 'context', None)
+    try:
+        mod.op = ops
+        guard.op = ops
+        guard.context = _CtxStub()
+        # 迁移内的 context.is_offline_mode() 用模块自己的 import（alembic.context
+        # proxy 在非 alembic 运行环境下未建立 → NameError）；注入 stub 同款豁免。
+        mod.context = _CtxStub()
+        mod.upgrade()
+    finally:
+        guard.op, guard.context = orig_op, orig_ctx
+        if orig_mod_ctx is not None:
+            mod.context = orig_mod_ctx
 
 
 class _CommentFilterConn:

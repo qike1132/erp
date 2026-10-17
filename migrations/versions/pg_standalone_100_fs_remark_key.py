@@ -9,7 +9,7 @@ Revision ID: pg_standalone_100_fs_remark_key
 Revises: pg_standalone_099_finished_stock_remark
 """
 import sqlalchemy as sa
-from alembic import op
+from alembic import context, op
 
 revision = 'pg_standalone_100_fs_remark_key'
 down_revision = 'pg_standalone_099_finished_stock_remark'
@@ -45,11 +45,15 @@ def upgrade() -> None:
         'ON finished_stock_remark (product_id, batch_no)'
     ))
 
-    # 注：customer_name 的 comment 语义（「写备注时的展示值快照」）已直接写进
-    # 迁移 099 的建表 DDL——空库重放天然对齐。本迁移不含 COMMENT 语句：
-    # sqlite 测试（test_migration_100）的连接包装过滤不了 alembic 包装过的
-    # COMMENT（TextClause 非 str），发出去会在 sqlite 上语法炸。存量库若带
-    # 旧 comment，属并发会话 comment 改动的本地漂移，由其自行处理。
+    # customer_name 的 comment 语义（「写备注时的展示值快照」）在 099 建表时
+    # 用的还是旧文案——空库重放到头后与 ORM 漂移，CI Verify Alembic 报
+    # modify_comment（2026-10-17 实测）。此处同步（幂等）：PG 专属语法 +
+    # 非 offline 守卫；sqlite 测试路径由 _CommentFilterConn 过滤。
+    if not context.is_offline_mode() and op.get_bind().dialect.name == 'postgresql':
+        op.execute(sa.text(
+            "COMMENT ON COLUMN finished_stock_remark.customer_name IS "
+            "'客户名称（写备注时的展示值快照，不参与关联）'"
+        ))
 
 
 def downgrade() -> None:

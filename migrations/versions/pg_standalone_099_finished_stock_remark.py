@@ -21,7 +21,7 @@ def upgrade() -> None:
     create_table_if_absent(
         'finished_stock_remark',
         sa.Column('id', sa.Integer(), primary_key=True),
-        sa.Column('customer_name', sa.String(length=100), nullable=False, server_default='', comment='客户名称（与聚合行展示值一致；空=未指定客户）'),
+        sa.Column('customer_name', sa.String(length=100), nullable=False, server_default='', comment='客户名称（写备注时的展示值快照，不参与关联）'),
         sa.Column('product_id', sa.Integer(), sa.ForeignKey('product.id', ondelete='CASCADE'), nullable=False, comment='产品ID'),
         sa.Column('batch_no', sa.String(length=100), nullable=False, server_default='', comment='批次号（空串=未分批次）'),
         sa.Column('remark', sa.Text(), nullable=False, server_default='', comment='备注内容'),
