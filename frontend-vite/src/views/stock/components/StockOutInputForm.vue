@@ -125,11 +125,15 @@ const props = defineProps<{
 
 const form = defineModel<StockOutForm>('form', { required: true })
 
-/** 批次下拉选项：首项为空值（可改回「不指定批次」），其余显示批次号 + 该批次可用量 */
-const batchSelectOptions = computed(() => [
-  { value: '', label: '不指定批次（整产品扣减）' },
-  ...props.batchOptions.map((b) => ({ value: b.batch_no, label: `${b.batch_no}（可用 ${b.available_quantity}）` })),
-])
+/**
+ * 批次下拉选项：只放真实批次。
+ * ⚠️ 不能加 `{ value: '' }` 的空值项：reka-ui 的 ComboboxItem 禁止空串 value
+ * （空串被它用来表示「清空选择」），加了会抛 "must have a value prop that is not
+ * an empty string"；「不指定批次」由 placeholder 承担，清空选择即回到它。
+ */
+const batchSelectOptions = computed(() =>
+  props.batchOptions.map((b) => ({ value: b.batch_no, label: `${b.batch_no}（可用 ${b.available_quantity}）` })),
+)
 /** 当前选中批次（用于显示可用量提示） */
 const selectedBatch = computed(() => props.batchOptions.find((b) => b.batch_no === form.value.batchNo) ?? null)
 
