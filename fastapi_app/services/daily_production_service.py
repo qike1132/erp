@@ -25,7 +25,11 @@ from fastapi_app.core.production_scope import PRODUCTION_DEPARTMENTS
 from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.core.validators import validate_not_empty
 from fastapi_app.services.notification_service import StockEvent
-from fastapi_app.shared.stock_concurrency import assert_stock_available, get_product_for_update
+from fastapi_app.shared.stock_concurrency import (
+    apply_stock_delta_locked,
+    assert_stock_available,
+    get_product_for_update,
+)
 from fastapi_app.shared_models import Customer, DailyProductionRecord, InventoryLog, Product
 from fastapi_app.utils import calc_total_pages, parse_date_with_fallback
 
@@ -70,7 +74,10 @@ async def _apply_production_stock(
             product.current_stock, delta,
             message=f'生产记录变动将导致库存为负数（当前库存：{product.current_stock}，变化：{delta:+d}）',
         )
-    product.current_stock += delta
+    # 2026-10-17 审计 F-BE-SVC-STOCK-01：原为 `product.current_stock += delta` 直写，
+    # 不递增 version，与走乐观锁的写入口并发时丢失更新。改走统一写入口
+    # （调用方已持行锁，apply_stock_delta_locked 内置 WHERE version 守卫与原子非负守卫）。
+    await apply_stock_delta_locked(db, product, delta)
     db.add(InventoryLog(
         product_id=pid,
         change_type='生产入库' if delta > 0 else '生产入库冲销',

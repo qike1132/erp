@@ -27,7 +27,11 @@ from fastapi_app.services.numbering import (
 from fastapi_app.services.order_deduction_service import process_order_deduction
 from fastapi_app.services.signed_urls import strip_upload_signature
 from fastapi_app.services.xlsx_cell_images import guess_image_extension, parse_dispimg_id
-from fastapi_app.shared.stock_concurrency import check_stock_available, get_product_for_update
+from fastapi_app.shared.stock_concurrency import (
+    apply_stock_delta_locked,
+    check_stock_available,
+    get_product_for_update,
+)
 from fastapi_app.shared_models import (
     Customer,
     InventoryLog,
@@ -824,7 +828,9 @@ async def import_stockins_from_data(db: AsyncSession, data_list: list, *, deps: 
 
         # 使用悲观锁更新产品库存，防止并发修改
         locked_product = await deps.get_product_for_update(db, product_id)
-        locked_product.current_stock += qty
+        # 2026-10-17 审计 F-BE-SVC-STOCK-01：原为 `locked_product.current_stock += qty` 直写
+        # （不递增 version，并发丢失更新），改走统一写入口。
+        await apply_stock_delta_locked(db, locked_product, qty)
 
         log = InventoryLog(
             product_id=product_id,
@@ -937,7 +943,8 @@ async def import_stockouts_from_data(db: AsyncSession, data_list: list, *, deps:
 
         # 使用悲观锁更新产品库存，防止并发修改
         locked_product = await deps.get_product_for_update(db, product.id)
-        locked_product.current_stock -= qty
+        # 2026-10-17 审计 F-BE-SVC-STOCK-01：原为 `locked_product.current_stock -= qty` 直写，改走统一写入口。
+        await apply_stock_delta_locked(db, locked_product, -qty)
 
         log = InventoryLog(
             product_id=product.id,

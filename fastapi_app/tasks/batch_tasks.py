@@ -97,6 +97,12 @@ async def _resolve_row_product(db, row: dict) -> tuple[Product | None, str | Non
     quantity = row.get('数量', 0)
     if not all([product_identifier, customer, quantity]):
         return None, '缺少必填字段'
+    # all() 只判真值，负数/零会被放过（负数 truthy）。数量语义上必须是正整数，
+    # 与 batch_import_core._parse_positive_quantity（qty>0 else None）、
+    # plan_tasks（quantity<=0 拒行）同口径 —— 2026-10-17 审计 F-BE-CORE-01。
+    if not isinstance(quantity, (int, float)) or isinstance(quantity, bool) \
+            or int(quantity) != quantity or int(quantity) <= 0:
+        return None, f'数量无效：{quantity!r}（必须为正整数）'
     product = await _resolve_product_locked(db, product_identifier)
     if not product:
         return None, f"产品 '{product_identifier}' 不存在"
