@@ -16,25 +16,30 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        'daily_production_record',
-        sa.Column(
-            'customer_id',
-            sa.Integer(),
-            sa.ForeignKey('customer.id', ondelete='SET NULL'),
-            nullable=True,
-            comment='客户ID',
-        ),
-    )
-    op.add_column(
-        'daily_production_record',
-        sa.Column(
-            'customer_name',
-            sa.String(length=100),
-            nullable=True,
-            comment='客户名称(冗余)',
-        ),
-    )
+    # 2026-10-17 审计 P2-29：加幂等守卫——重复执行（downgrade 后再 upgrade、
+    # 或半途失败重跑）不应因 duplicate column 中断。
+    cols = {c['name'] for c in sa.inspect(op.get_bind()).get_columns('daily_production_record')}
+    if 'customer_id' not in cols:
+        op.add_column(
+            'daily_production_record',
+            sa.Column(
+                'customer_id',
+                sa.Integer(),
+                sa.ForeignKey('customer.id', ondelete='SET NULL'),
+                nullable=True,
+                comment='客户ID',
+            ),
+        )
+    if 'customer_name' not in cols:
+        op.add_column(
+            'daily_production_record',
+            sa.Column(
+                'customer_name',
+                sa.String(length=100),
+                nullable=True,
+                comment='客户名称(冗余)',
+            ),
+        )
     op.execute(
         'CREATE INDEX IF NOT EXISTS idx_dpr_customer_id '
         'ON daily_production_record (customer_id)'

@@ -346,8 +346,8 @@ async def list_stockout_records(
 
 @router.get('/inventory', response_model=InventoryResponse)
 async def inventory(
-    customer: str = Query('', description='客户名称筛选'),
-    product: str = Query('', description='产品名称筛选'),
+    customer: str = Query('', max_length=100, description='客户名称筛选'),
+    product: str = Query('', max_length=100, description='产品名称筛选'),
     stock_status: str = Query('', pattern='^(zero|active)?$', description='库存状态筛选：zero=零库存 / active=有库存'),
     page: int = Query(1, ge=1, description='页码'),
     per_page: int = Query(50, ge=1, le=200, description='每页数量'),
@@ -414,8 +414,8 @@ def _build_inventory_excel(inventory_data: list, result: dict) -> tuple[bytes, s
 @limiter.limit("100/minute", key_func=rate_limit_key)  # 内网宽松：导出接口取消严格限流；P0-6(d) 显式绑键
 async def export_inventory(
     request: Request,
-    customer: str = Query('', description='客户名称筛选'),
-    product: str = Query('', description='产品名称筛选'),
+    customer: str = Query('', max_length=100, description='客户名称筛选'),
+    product: str = Query('', max_length=100, description='产品名称筛选'),
     db: AsyncSession = Depends(get_async_read_db),
     # 与 /inventory 同口径：导出的是同一份库存汇总，由「订单列表」页的工具条触发。
     _user: User = Depends(require_any_permission('stockin_manage', 'stock_view')),

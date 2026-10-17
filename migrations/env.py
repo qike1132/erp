@@ -3,6 +3,7 @@ from logging.config import fileConfig
 
 from alembic import context
 from sqlalchemy import text as sa_text
+from sqlalchemy.exc import SQLAlchemyError
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -45,7 +46,9 @@ def ensure_version_table_width(connection, version_table: str) -> None:
     try:
         connection.execute(sa_text(_VERSION_TABLE_DDL.format(table=version_table)))
         connection.execute(sa_text(_VERSION_TABLE_WIDTH_DDL.format(table=version_table)))
-    except Exception:
+    except (SQLAlchemyError, OSError):
+        # 2026-10-17 审计 P2-32：收窄捕获面（此前裸 except Exception 会吞掉
+        # SQL 语法错误/连接错误等真正的问题）。无权限/只读时静默跳过。
         logger.debug('跳过 alembic 版本表加宽（无权限或只读连接）', exc_info=True)
 
 
@@ -87,12 +90,12 @@ _IGNORED_DB_ONLY_INDEXES = {
     'idx_csfv_created_at',             # 054 建；生产同名旧索引先存在 → 新定义被跳过
     'idx_csfv_status',                 # 历史迁移所建
     'idx_csp_role_part_version',       # 054 建 unique；生产同名旧索引为 non-unique
-    'idx_inventory_log_product_time',  # 待迁移 084 改名为 ..._date 后即可移出
     'idx_material_reg_date',           # 历史迁移所建（生产定义与模型分叉）
     'idx_material_reg_supplier',       # 历史迁移所建（生产在 supplier_name，模型在 supplier_id）
-    'idx_stockout_has_stockin',        # 待迁移 084 删除后即可移出
-    'idx_stockout_order_stockin',      # 待迁移 084 删除后即可移出
 }
+# 2026-10-17 审计 P2-30：原三条「待 084 移出」条目已随 084 应用清理
+# （idx_inventory_log_product_time 改名、idx_stockout_has_stockin /
+# idx_stockout_order_stockin 删除）；生产已到 099，白名单不再需要保留它们。
 
 # 库独有列（模型未声明）：按「表 → 列名」精确匹配，避免与其它表上的同名列
 # （如 status 在十余张表都存在）互相污染。

@@ -476,6 +476,24 @@ async def get_stats_trend(db, days: int = 30) -> dict:
         if key and key in date_map:
             date_map[key]['registered'] = cnt
 
+    # 2026-10-17 审计 P2-09：received 此前从未赋值（恒为 0 骨架值）。
+    # 口径：当天完成的来料登记数（status=completed，按 update_time 的日期归档——
+    # 完成时间没有独立列，update_time 是唯一可用近似）。
+    recv_counts = (await db.execute(
+        select(func.date(MaterialRegistration.update_time), func.count())
+        .where(
+            MaterialRegistration.status == 'completed',
+            func.date(MaterialRegistration.update_time) >= start_date,
+            func.date(MaterialRegistration.update_time) <= end_date,
+        )
+        .group_by(func.date(MaterialRegistration.update_time))
+    )).all()
+
+    for recv_date, cnt in recv_counts:
+        key = recv_date.strftime('%Y-%m-%d') if recv_date else None
+        if key and key in date_map:
+            date_map[key]['received'] = cnt
+
     trend = [{'date': k, **v} for k, v in sorted(date_map.items())]
 
     return {'success': True, 'trend': trend}
