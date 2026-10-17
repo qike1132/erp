@@ -3,8 +3,9 @@
     <table>
       <colgroup>
         <col style="width: 68px" />
-        <col style="width: 200px" />
-        <col style="width: 170px" />
+        <col style="width: 190px" />
+        <col style="width: 130px" />
+        <col style="width: 150px" />
         <col />
         <col style="width: 80px" />
         <col style="width: 136px" />
@@ -13,6 +14,7 @@
         <tr>
           <th class="pick-col">选择</th>
           <th>出货单号</th>
+          <th>批次号</th>
           <th>客户</th>
           <th>产品</th>
           <th class="num">可退</th>
@@ -21,10 +23,10 @@
       </thead>
       <tbody>
         <tr v-if="loading">
-          <td colspan="6" class="empty">加载中…</td>
+          <td colspan="7" class="empty">加载中…</td>
         </tr>
         <tr v-else-if="shipments.length === 0">
-          <td colspan="6" class="empty">没有可退的出货明细（该产品未出货或已退完）</td>
+          <td colspan="7" class="empty">没有可退的出货明细（该产品未出货或已退完）</td>
         </tr>
         <tr
           v-for="s in shipments"
@@ -43,6 +45,7 @@
             />
           </td>
           <td class="mono">{{ s.stockout_no }}</td>
+          <td class="mono">{{ s.batch_no || '-' }}</td>
           <td class="ellipsis" :title="s.customer || undefined">{{ s.customer || '-' }}</td>
           <td>
             <div class="sr-prod" :title="s.product_name">{{ s.product_name }}</div>

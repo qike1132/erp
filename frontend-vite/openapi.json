@@ -34340,6 +34340,11 @@
             "type": "integer",
             "title": "Returned Quantity"
           },
+          "batch_no": {
+            "type": "string",
+            "title": "Batch No",
+            "default": ""
+          },
           "available": {
             "type": "integer",
             "title": "Available"

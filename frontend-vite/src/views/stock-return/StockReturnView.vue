@@ -47,6 +47,9 @@
           <template #column-body-stockout_no="{ row }">
             <span class="sr-mono dim">{{ (row as StockReturnRow).stockout_no || '-' }}</span>
           </template>
+          <template #column-body-batch_no="{ row }">
+            <span class="sr-mono dim">{{ (row as StockReturnRow).batch_no || '-' }}</span>
+          </template>
           <template #column-body-reason="{ row }">
             <span :title="(row as StockReturnRow).note || undefined" class="sr-reason">
               {{ (row as StockReturnRow).reason || '-' }}
@@ -180,12 +183,13 @@ function onPage(event: { page: number }) {
 const actionsColumn: TableColumn = { field: 'actions', header: '操作', align: 'center', width: '110px' }
 
 const columns: TableColumn[] = [
-  { field: 'return_no', header: '退货编号', align: 'left', width: '160px' },
+  { field: 'return_no', header: '退货编号', align: 'left', width: '150px' },
   { field: 'return_date', header: '退货日期', align: 'left', width: '110px' },
-  { field: 'customer', header: '客户', align: 'left', width: '130px' },
-  { field: 'product', header: '产品', align: 'left', width: '170px' },
+  { field: 'customer', header: '客户', align: 'left', width: '120px' },
+  { field: 'product', header: '产品', align: 'left', width: '160px' },
   { field: 'quantity', header: '数量', align: 'right', width: '80px' },
-  { field: 'stockout_no', header: '关联出货单号', align: 'left', width: '160px' },
+  { field: 'stockout_no', header: '关联出货单号', align: 'left', width: '150px' },
+  { field: 'batch_no', header: '批次号', align: 'left', width: '130px' },
   { field: 'reason', header: '退货原因', align: 'left' },
   { field: 'status', header: '状态', align: 'center', width: '90px' },
   ...(canEdit.value || canDelete.value ? [actionsColumn] : []),

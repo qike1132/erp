@@ -2594,6 +2594,7 @@ export interface ShipmentOption {
   customer: string | null
   quantity: number
   returned_quantity: number
+  batch_no?: string
   available: number
 }
 
