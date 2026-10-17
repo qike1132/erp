@@ -4,6 +4,9 @@ ERP系统分阶段压力测试
 阶段2: 10分钟/30并发
 阶段3: 15分钟/50并发
 """
+import sys as _sys, os as _os
+_sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+from _prod_guard import require_non_production
 import asyncio
 import statistics
 import time
@@ -204,6 +207,7 @@ async def main():
     print(f"{'='*60}")
 
 if __name__ == "__main__":
+    require_non_production(BASE_URL)  # fail-closed 守卫（F-TEST-BE-TOP-02）
     try:
         asyncio.run(main())
     except KeyboardInterrupt:

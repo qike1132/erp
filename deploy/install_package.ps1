@@ -21,7 +21,10 @@ param(
   [string]$Nssm = 'C:\nssm\nssm.exe',
   [string]$EncryptKey = '',
   [string]$AdminPassword = '',
-  [switch]$Force, [switch]$Blank, [switch]$SkipVerify
+  [switch]$Force, [switch]$Blank, [switch]$SkipVerify,
+  # 2026-10-17 审计 F-OPS-DEPLOY-03：DROP DATABASE 与通用 -Force 解耦——
+  # 重建既有库必须显式声明，防止「以为 -Force 只是覆盖文件」误删数据。
+  [switch]$AllowDropDatabase
 )
 . (Join-Path $PSScriptRoot '_lib.ps1')
 
@@ -220,7 +223,7 @@ try {
   if($existingSvc.Count -gt 0){ $conflicts += ($existingSvc -join ',') }
   if($dbExistsGuard){ $conflicts += "库 $dbNameGuard" }
   if(-not $Force -and $conflicts.Count -gt 0){
-    Write-Fail ("已存在: " + ($conflicts -join '; ') + "；覆盖请加 -Force（不会覆盖既有库/服务；基础软件可能已先装）")
+    Write-Fail ("已存在: " + ($conflicts -join '; ') + "；覆盖请加 -Force（将停止并移除既有服务、覆写目标目录；重建既有数据库还需 -AllowDropDatabase，不加时库冲突直接退出；基础软件可能已先装）")
     exit 1
   }
   if($Force -and $conflicts.Count -gt 0){
@@ -340,22 +343,52 @@ try {
       & $psql -h localhost -U postgres -d postgres -c "CREATE DATABASE $dbName WITH OWNER = $dbUser ENCODING = 'UTF8' TEMPLATE = template0" | Out-Null
       if($LASTEXITCODE -ne 0){ Write-Fail 'CREATE DATABASE 失败'; exit 1 }
       Write-Ok "数据库 $dbName 已创建（owner=$dbUser）"
-    } elseif($Force){
-      Write-Warn "库 $dbName 已存在，-Force：重建"
+    } elseif($Force -and $AllowDropDatabase){
+      Write-Warn "库 $dbName 已存在，-Force -AllowDropDatabase：删除并重建（数据不可恢复）"
       & $psql -h localhost -U postgres -d postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='$dbName' AND pid<>pg_backend_pid()" | Out-Null
       & $psql -h localhost -U postgres -d postgres -c "DROP DATABASE $dbName" | Out-Null
       if($LASTEXITCODE -ne 0){ Write-Fail 'DROP DATABASE 失败'; exit 1 }
       & $psql -h localhost -U postgres -d postgres -c "CREATE DATABASE $dbName WITH OWNER = $dbUser ENCODING = 'UTF8' TEMPLATE = template0" | Out-Null
       if($LASTEXITCODE -ne 0){ Write-Fail 'CREATE DATABASE（重建）失败'; exit 1 }
       Write-Ok "数据库 $dbName 已重建"
+    } elseif($Force){
+      # 2026-10-17 审计 F-OPS-DEPLOY-03：-Force 单独不足以删库重建——
+      # 提示语曾声称「不会覆盖既有库」，实际却 DROP；现在必须显式 -AllowDropDatabase。
+      Write-Fail "库 $dbName 已存在；-Force 只覆盖文件与服务，重建数据库须另加 -AllowDropDatabase（将删除库内全部数据）"; exit 1
     } else {
-      Write-Fail "$dbName 已存在；覆盖请加 -Force（不会覆盖既有库/服务）"; exit 1
+      Write-Fail "$dbName 已存在；覆盖请加 -Force（重建库须另加 -AllowDropDatabase）"; exit 1
     }
   } finally { Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue }
 
   # ==========================================================
   Write-Step '4 部署文件'
   if(Test-Path -LiteralPath $TargetDir){
+    # 2026-10-17 审计 F-OPS-DEPLOY-03：覆盖前快照（回滚依据）——
+    # 导出五服务 NSSM 参数（注册表）+ config 与 .env 副本。不做就不可回退。
+    $snapDir = Join-Path $TargetDir ("backups\preinstall-" + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+    New-Item -ItemType Directory -Force -Path $snapDir | Out-Null
+    $svcRegKey = 'HKLM:\SYSTEM\CurrentControlSet\Services'
+    $nssmSnapOk = $true
+    foreach($n in $five){
+      if(Get-Service -Name $n -ErrorAction SilentlyContinue){
+        $k = Join-Path $svcRegKey $n
+        if(Test-Path $k){
+          $out = Join-Path $snapDir "$n.reg"
+          & reg.exe export ($k -replace '^HKLM:', 'HKLM') $out /y | Out-Null
+          if($LASTEXITCODE -ne 0){ $nssmSnapOk = $false }
+        }
+      }
+    }
+    foreach($d in 'config','.env'){
+      $src = Join-Path $TargetDir $d
+      if(Test-Path -LiteralPath $src){ Copy-Item -Recurse -Force -Path $src -Destination $snapDir }
+    }
+    if($nssmSnapOk){
+      Write-Ok "安装前快照已保存：$snapDir（服务注册表 + config + .env）"
+    } else {
+      Write-Fail "安装前快照不完整（服务注册表导出失败）：$snapDir —— 继续执行将无法回滚服务定义"; exit 1
+    }
+
     # 覆盖前：停并移除旧的五服务
     foreach($n in $five){
       $s=Get-Service -Name $n -ErrorAction SilentlyContinue

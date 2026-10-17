@@ -2,6 +2,9 @@
 ERP系统压力测试 - 简化版（5分钟快速测试）
 """
 
+import sys as _sys, os as _os
+_sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+from _prod_guard import require_non_production
 import asyncio
 import statistics
 import time
@@ -179,4 +182,5 @@ async def main():
     print("=" * 80)
 
 if __name__ == "__main__":
+    require_non_production(BASE_URL)  # fail-closed 守卫（F-TEST-BE-TOP-02）
     asyncio.run(main())
