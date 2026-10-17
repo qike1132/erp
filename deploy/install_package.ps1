@@ -230,6 +230,13 @@ try {
     Write-Warn ("-Force：将覆盖 " + ($conflicts -join '; '))
   }
 
+  # 2026-10-17 OCR 评审：fail-fast——库已存在而未显式给 -AllowDropDatabase 时，
+  # 立即退出（原先要等到第 3 步建库段才失败，基础软件已在第 2 步装完、快照也未做）。
+  if($dbExistsGuard -and -not ($Force -and $AllowDropDatabase)){
+    Write-Fail "库 $dbNameGuard 已存在；未指定 -Force -AllowDropDatabase 不会重建数据库（将删除库内全部数据）。覆盖文件/服务请加 -Force；确认要重建库再加 -AllowDropDatabase。"
+    exit 1
+  }
+
   # ==========================================================
   Write-Step '2 装基础软件（已装跳过）'
   function Find-Bin([string]$Pattern){
@@ -345,6 +352,21 @@ try {
       Write-Ok "数据库 $dbName 已创建（owner=$dbUser）"
     } elseif($Force -and $AllowDropDatabase){
       Write-Warn "库 $dbName 已存在，-Force -AllowDropDatabase：删除并重建（数据不可恢复）"
+      # 2026-10-17 OCR 评审（high）：DROP DATABASE 原先发生在 step4 快照之前——
+      # 快照只保护 config/.env/服务定义，保护不了数据库。删库前必须先 pg_dump。
+      $pgDump = Get-PgTool 'pg_dump.exe'
+      if($pgDump){
+        $preDump = Join-Path $TargetDir ("backups\preinstall-" + (Get-Date -Format 'yyyyMMdd-HHmmss') + "-db.sql")
+        New-Item -ItemType Directory -Force -Path (Split-Path $preDump -Parent) | Out-Null
+        $env:PGPASSWORD = $PgSuperPassword
+        & $pgDump -h localhost -U postgres -d $dbName -f $preDump | Out-Null
+        $dumpOk = ($LASTEXITCODE -eq 0 -and (Test-Path $preDump) -and ((Get-Item $preDump).Length -gt 0))
+        Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
+        if(-not $dumpOk){ Write-Fail "删库前的 pg_dump 失败或产物为空：$preDump —— 拒绝删除数据库"; exit 1 }
+        Write-Ok "删库前基线已保存：$preDump"
+      } else {
+        Write-Fail '未定位到 pg_dump，无法做删库前基线备份 —— 拒绝删除数据库'; exit 1
+      }
       & $psql -h localhost -U postgres -d postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='$dbName' AND pid<>pg_backend_pid()" | Out-Null
       & $psql -h localhost -U postgres -d postgres -c "DROP DATABASE $dbName" | Out-Null
       if($LASTEXITCODE -ne 0){ Write-Fail 'DROP DATABASE 失败'; exit 1 }

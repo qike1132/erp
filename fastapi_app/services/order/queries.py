@@ -118,15 +118,20 @@ def _build_order_filters(customer: str | None, product_id: int | None,
     if customer:
         conditions.append(Order.customer.like(f'%{escape_like(customer)}%'))
     # F-FE-MOBILE-03：搜索框「订单号/产品/客户」三合一——移动端提交 keyword
-    # 原先被 FastAPI 静默丢弃。命中任一即算命中（订单号精确前缀、客户/产品名模糊）。
+    # 原先被 FastAPI 静默丢弃。命中任一即算命中（订单号/客户模糊、SKU 快照/
+    # 产品名/条码走 items 的 EXISTS 子查询——主查询没有 join OrderItem，
+    # 裸表引用会产生笛卡尔积/报错；与 factory 筛选的 items.any 同款写法）。
     if keyword:
         kw = f'%{escape_like(keyword)}%'
         conditions.append(or_(
             Order.order_no.like(kw),
             Order.customer.like(kw),
-            OrderItem.product_name.like(kw),
-            OrderItem.product.has(Product.barcode.like(kw)),
-            OrderItem.product.has(Product.name.like(kw)),
+            Order.items.any(or_(
+                OrderItem.product_name.like(kw),
+                OrderItem.product_barcode.like(kw),
+                OrderItem.product.has(Product.name.like(kw)),
+                OrderItem.product.has(Product.barcode.like(kw)),
+            )),
         ))
     if product_id:
         conditions.append(Order.product_id == product_id)
