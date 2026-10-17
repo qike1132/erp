@@ -22,6 +22,10 @@ from .snapshot import get_pg_version
 
 logger = logging.getLogger(__name__)
 
+# 2026-10-17 审计 P2-15：pg_dump 线程此前无超时看门狗，DB 端卡住/管道阻塞时
+# 会永久占住一个连接与线程。60 分钟足够全量库，超时即终止并报错。
+_PG_DUMP_TIMEOUT_SECONDS = 3600
+
 # PG 客户端工具自动发现候选目录（F6：pg_dump/psql 常不在服务进程 PATH 上）
 _PG_BIN_CANDIDATE_GLOBS = (
     r'C:\Program Files\PostgreSQL\*\bin',
@@ -122,7 +126,7 @@ async def run_pg_dump(output_path: Path, snapshot_id: str | None = None) -> dict
                             break
                         gz_f.write(chunk)
                 stdout_pipe.close()
-                proc_.wait()
+                proc_.wait(timeout=_PG_DUMP_TIMEOUT_SECONDS)
                 if proc_.returncode != 0:
                     stderr_text = b''.join(stderr_chunks).decode(errors='replace')
                     raise RuntimeError(

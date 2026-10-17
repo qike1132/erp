@@ -158,12 +158,8 @@ def _parse_ocr_sliding_window(data_lines: list[str], col_order: list[str], defau
     """
     items = []
     num_cols = len(col_order)
-    try:
-        product_col_idx = col_order.index('product_name')
-        quantity_col_idx = col_order.index('quantity')
-        quantity_col_idx - product_col_idx
-    except ValueError:
-        pass  # defensive: 可选 ValueError 静默处理,不影响主流程
+    # 2026-10-17 审计 P2-08：此处原有一段「取列下标再做减法」的死代码，
+    # 计算结果从未使用；列缺失也只会被静默吞掉，删除以减少误导。
     i = 0
     while i < len(data_lines):
         line = data_lines[i].strip()

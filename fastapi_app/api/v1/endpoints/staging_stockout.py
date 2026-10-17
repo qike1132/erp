@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_any_permission
 from fastapi_app.core.exceptions import db_transaction
+from fastapi_app.core.validators import matches_upload_magic
 from fastapi_app.schemas.staging import (
     StagingListResponse,
     StagingResponse,
@@ -30,7 +31,6 @@ router = APIRouter()
 # 暂存出货导入文件大小上限（10MB）
 MAX_STAGING_FILE_SIZE = 10 * 1024 * 1024
 # xlsx 文件的 ZIP 格式魔数（PK\x03\x04）
-XLSX_MAGIC_BYTES = b'\x50\x4b\x03\x04'
 
 
 def _build_scoped_session(user_id: int, session_id: str) -> str:
@@ -48,7 +48,7 @@ def _build_scoped_session(user_id: int, session_id: str) -> str:
 
 @router.get('', response_model=StagingListResponse, summary='获取暂存出货列表')
 async def get_staging_stockouts(
-    session_id: str = Query(..., description='会话ID'),
+    session_id: str = Query(..., max_length=200, description='会话ID'),
     db: AsyncSession = Depends(get_async_read_db),
     current_user: User = Depends(require_any_permission('batch_import', 'stockout_manage')),
 ) -> StagingListResponse:
@@ -70,7 +70,7 @@ async def get_staging_stockouts(
 @router.post('/import', response_model=StagingStockOutImportResult, summary='导入出货到暂存区')
 async def import_staging_stockouts(
     file: UploadFile = File(...),
-    session_id: str = Query(..., description='会话ID'),
+    session_id: str = Query(..., max_length=200, description='会话ID'),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(require_any_permission('batch_import', 'stockout_manage')),
 ) -> StagingStockOutImportResult:
@@ -94,8 +94,8 @@ async def import_staging_stockouts(
     content = await file.read()
     if len(content) > MAX_STAGING_FILE_SIZE:
         return StagingStockOutImportResult(success=False, message='文件大小超过10MB限制')
-    # 校验文件头魔数，防止非 xlsx 文件伪装上传
-    if content[:4] != XLSX_MAGIC_BYTES:
+    # 校验文件头魔数（2026-10-17 审计 P2-20：走公共层，与备货/订单导入同口径）
+    if not matches_upload_magic(content, ('xlsx', 'xlsm')):
         return StagingStockOutImportResult(success=False, message='文件内容不是有效的Excel格式')
     async with db_transaction(db):
         imported, message, errors = await svc.import_staging_stockouts_from_excel(db, content, scoped_session)
@@ -140,7 +140,7 @@ async def update_staging_stockout(
 
 @router.delete('/clear', response_model=StagingResponse, summary='清空暂存出货')
 async def clear_staging_stockouts(
-    session_id: str = Query(..., description='会话ID'),
+    session_id: str = Query(..., max_length=200, description='会话ID'),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(require_any_permission('batch_import', 'stockout_manage')),
 ) -> StagingResponse:
@@ -184,7 +184,7 @@ async def delete_staging_stockout(
 
 @router.post('/confirm', response_model=StagingStockOutConfirmResult, summary='确认暂存出货')
 async def confirm_staging_stockouts(
-    session_id: str = Query(..., description='会话ID'),
+    session_id: str = Query(..., max_length=200, description='会话ID'),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(require_any_permission('batch_import', 'stockout_manage')),
 ) -> StagingStockOutConfirmResult:

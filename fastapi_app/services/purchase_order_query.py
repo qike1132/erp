@@ -17,6 +17,7 @@ from sqlalchemy.orm import selectinload
 
 from fastapi_app.core.cache import cache_result
 from fastapi_app.core.sanitizer import escape_like
+from fastapi_app.services.export_limits import ensure_within_export_limit
 from fastapi_app.shared_models import PurchaseOrder, PurchaseOrderItem, Supplier
 from fastapi_app.shared_models.order import ORDER_STATUS_PENDING_STOCK
 from fastapi_app.shared_models.purchase_order import PurchaseOrderStatus
@@ -432,6 +433,10 @@ async def export_completed_orders(
     if eff_end:
         query = query.where(PurchaseOrder.completed_at <= f'{eff_end} 23:59:59')  # sql-safe: escape_like/绑定参数/常量片段
     query = query.order_by(PurchaseOrder.completed_at.desc())
+
+    # 2026-10-17 审计 P2-03：导出无行数上界（姊妹导出函数都有），
+    # 超量时占住 worker 并放大内存。与 daily_production 同口径先计数再拒。
+    await ensure_within_export_limit(db, select(func.count()).select_from(query.subquery()))
 
     result = await db.execute(query)
     orders = result.all()

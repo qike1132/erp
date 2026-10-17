@@ -530,13 +530,9 @@ def delete_backup_file(filename: str) -> str:  # log-context: internal helper �
         filepath.unlink()
     except (OSError, ValueError) as e:
         raise BackupFileError(f'删除备份文件失败: {e}') from e
-    # 同步清理 .meta sidecar（P0-4），残留无害但会干扰列表/保留策略展示
-    meta_path = BACKUP_DIR / (safe_name + '.meta')
-    if meta_path.exists():
-        try:
-            meta_path.unlink()
-        except OSError as e:
-            logger.warning(f'清理 .meta 失败: {meta_path.name}: {e}')
+    # 同步清理伴随文件（.meta + .record）。2026-10-17 审计 P2-16：此前只删 .meta，
+    # 单文件删除会留下 .record 永久残留；复用批量清理路径的同一实现。
+    _delete_backup_sidecars(filepath)
     return safe_name
 
 

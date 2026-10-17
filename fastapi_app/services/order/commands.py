@@ -99,6 +99,7 @@ async def create_order(db: AsyncSession, product_id: int, quantity: int,
     - 创建订单记录及库存日志（不影响物理库存）
     """
     validate_quantity_range(quantity, "订单数量")
+    validate_not_empty(customer, "客户名称")  # 2026-10-17 审计 P2-06：docstring 写了但代码缺失
 
     product = await get_product_for_update(db, product_id)
 
@@ -535,6 +536,12 @@ async def delete_order(db: AsyncSession, order_id: int, current_user: User) -> d
     order = await db.get(Order, order_id, options=[joinedload(Order.product)])
     if not order or order.is_deleted:
         raise ValueError('订单不存在')
+
+    # 2026-10-17 审计 P2-07：先锁 Product 再走后续检查，与 update_order 的
+    # Product→Order 锁序一致；此前删除路径先无锁读、到 _delete_order_directly
+    # 才锁 Product，与出库创建并发时存在锁序反转/TOCTOU 窗口。
+    if order.product_id is not None:
+        await get_product_for_update(db, order.product_id)
 
     await _check_order_lock(db, order_id, order, current_user, '删除')
 

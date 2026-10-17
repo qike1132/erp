@@ -223,6 +223,15 @@ class TestCreateOrder:
                 customer='客户', note='', current_user=mock_user
             )
 
+    @pytest.mark.asyncio
+    async def test_create_order_blank_customer_rejected(self, mock_async_db, mock_user):
+        """2026-10-17 审计 P2-06：纯空格客户名不得入库（docstring 早已声明）"""
+        with pytest.raises(ValueError):
+            await create_order(
+                mock_async_db, product_id=1, quantity=1,
+                customer='   ', note='', current_user=mock_user
+            )
+
 
 class TestUpdateOrder:
     """订单编辑"""

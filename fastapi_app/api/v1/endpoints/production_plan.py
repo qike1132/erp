@@ -45,7 +45,7 @@ MAX_UPLOAD_FILE_SIZE = 10 * 1024 * 1024
 async def list_plans(
     year: int = Query(..., description='年份'),
     month: int = Query(..., ge=1, le=12, description='月份'),
-    customer: str = Query('', description='客户名称筛选'),
+    customer: str = Query('', max_length=100, description='客户名称筛选'),
     db: AsyncSession = Depends(get_async_read_db),
     _user: User = Depends(require_permission('production_plan_view')),
 ) -> ProductionPlanListResponse:
@@ -150,7 +150,7 @@ async def delete_plan(
 async def timeline(
     year: int = Query(..., description='年份'),
     month: int = Query(..., ge=1, le=12, description='月份'),
-    customer: str = Query('', description='客户名称筛选'),
+    customer: str = Query('', max_length=100, description='客户名称筛选'),
     db: AsyncSession = Depends(get_async_read_db),
     _user: User = Depends(require_permission('production_plan_view')),
 ) -> TimelineResponse:
@@ -300,7 +300,7 @@ async def staging_validate(
 
 @router.post('/staging/confirm', response_model=StagingConfirmResponse)
 async def staging_confirm(
-    batch_id: str = Query('', description='批次ID，空则确认该会话全部'),
+    batch_id: str = Query('', max_length=100, description='批次ID，空则确认该会话全部'),
     db: AsyncSession = Depends(get_async_db),
     user: User = Depends(require_permission('production_plan_manage')),
 ) -> StagingConfirmResponse:
@@ -337,5 +337,8 @@ async def staging_clear(
         ProductionPlanActionResponse: 包含成功标志和提示消息的响应。
     """
     session_id, _ = get_user_identity(_user)
-    await production_plan_service.clear_staging(db, session_id)
+    # 2026-10-17 审计 P2-22：同文件其余写端点都在 db_transaction 内，唯独此处裸调，
+    # 失败时事务边界不明确（与统一提交口径不一致）。
+    async with db_transaction(db):
+        await production_plan_service.clear_staging(db, session_id)
     return ProductionPlanActionResponse(**success_response(message='暂存区已清空'))

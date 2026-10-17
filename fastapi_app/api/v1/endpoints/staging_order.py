@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 @router.get('', response_model=StagingListResponse, summary='获取暂存订单列表')
-async def get_staging_orders(session_id: str=Query('default', description='会话ID'), page: int=Query(1, ge=1, description='页码'), per_page: int=Query(100, ge=1, le=500, description='每页数量'), db: AsyncSession=Depends(get_async_read_db), current_user: User=Depends(require_any_permission('batch_import', 'order_manage'))):
+async def get_staging_orders(session_id: str=Query('default', max_length=200, description='会话ID'), page: int=Query(1, ge=1, description='页码'), per_page: int=Query(100, ge=1, le=500, description='每页数量'), db: AsyncSession=Depends(get_async_read_db), current_user: User=Depends(require_any_permission('batch_import', 'order_manage'))):
     """获取指定会话的暂存订单列表"""
     scoped_session = f'u{current_user.id}:{session_id}'
     data = await svc.get_staging_orders(db, scoped_session, page=page, per_page=per_page)
@@ -41,7 +41,7 @@ async def clear_staging_orders_by_session(session_id: str, db: AsyncSession=Depe
     return StagingClearResponse(success=True, message=f'已清空 {deleted} 个暂存订单', deleted=deleted)
 
 @router.post('/import', response_model=StagingOrderImportResult, summary='导入订单到暂存区')
-async def import_staging_orders(file: UploadFile=File(...), session_id: str=Query('default', description='会话ID'), db: AsyncSession=Depends(get_async_db), current_user: User=Depends(require_any_permission('batch_import', 'order_manage'))):
+async def import_staging_orders(file: UploadFile=File(...), session_id: str=Query('default', max_length=200, description='会话ID'), db: AsyncSession=Depends(get_async_db), current_user: User=Depends(require_any_permission('batch_import', 'order_manage'))):
     """批量导入订单到暂存区"""
     # session_id 显式传 None 与省略等价（pydantic 运行时默认即 None，已实测 model_dump 为 session_id=None）；
     # mypy 把 schema 中 `session_id: str | None = Field(None, ...)` 的位置参数形式视为必填（fastapi_app/schemas/staging.py:49）。
@@ -71,7 +71,7 @@ async def update_staging_order(order_id: int, data: StagingOrderUpdate, db: Asyn
     return StagingResponse(success=True, message='更新成功')
 
 @router.delete('/clear', response_model=StagingResponse, summary='清空当前会话的暂存订单')
-async def clear_staging_orders(session_id: str=Query('default', description='会话ID'), db: AsyncSession=Depends(get_async_db), current_user: User=Depends(require_any_permission('batch_import', 'order_manage'))):
+async def clear_staging_orders(session_id: str=Query('default', max_length=200, description='会话ID'), db: AsyncSession=Depends(get_async_db), current_user: User=Depends(require_any_permission('batch_import', 'order_manage'))):
     """清空当前会话的暂存订单"""
     scoped_session = f'u{current_user.id}:{session_id}'
     async with db_transaction(db):
@@ -87,7 +87,7 @@ async def delete_staging_order(order_id: int, db: AsyncSession=Depends(get_async
     return StagingResponse(success=True, message='删除成功')
 
 @router.post('/confirm', response_model=StagingOrderConfirmResult, summary='确认暂存订单')
-async def confirm_staging_orders(session_id: str=Query('default', description='会话ID'), db: AsyncSession=Depends(get_async_db), current_user: User=Depends(require_any_permission('batch_import', 'order_manage'))):
+async def confirm_staging_orders(session_id: str=Query('default', max_length=200, description='会话ID'), db: AsyncSession=Depends(get_async_db), current_user: User=Depends(require_any_permission('batch_import', 'order_manage'))):
     """确认暂存订单 - 转移到正式订单表"""
     scoped_session = f'u{current_user.id}:{session_id}'
     async with db_transaction(db):

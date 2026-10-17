@@ -552,6 +552,10 @@ async def restore_legacy_json(backup_data: dict, db: AsyncSession, task_id: str 
     tables_to_restore = [t for t in Base.metadata.sorted_tables if str(t.name) in backup_data.get('tables', {})]
     total_tables = len(tables_to_restore)
 
+    # 2026-10-17 审计 P2-14：session_replication_role 是会话级设置，rollback 不会
+    # 复位。此前只有成功路径重新启用，失败路径直接 raise，连接归还池后仍带
+    # replica 角色（后续写入绕过外键）。改为 finally 统一复位。
+    replication_role_set = None
     try:
         replication_role_set = await _disable_fk_constraints(db)
 
@@ -563,12 +567,18 @@ async def restore_legacy_json(backup_data: dict, db: AsyncSession, task_id: str 
         )
 
         await db.flush()
-        await _re_enable_fk_constraints(db, replication_role_set)
         await _invalidate_caches_after_restore()
         verification = await _verify_restored_json(db, backup_data)
     except (SQLAlchemyError, ValueError, OSError) as e:
         await db.rollback()  # manual-tx: try/except 内显式事务控制
         raise RestoreError(f'恢复过程中出错: {e}') from e
+    finally:
+        if replication_role_set:
+            try:
+                await _re_enable_fk_constraints(db, replication_role_set)
+            except (SQLAlchemyError, OSError, ValueError) as exc:
+                # defensive: 复位失败不能覆盖原始恢复异常，只告警
+                logger.warning('恢复后重新启用外键约束失败: %s', exc)
 
     # F7: 清空失败的表以"合并"而非"回滚"语义恢复——快照之后新增/变更的旧行会残留，
     # 必须先进入 errors，database.status 才能与端点口径一致地报 partial。

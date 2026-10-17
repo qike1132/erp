@@ -392,8 +392,20 @@ async def import_orders_service(db: AsyncSession, file: ExcelUpload) -> BatchImp
                 idem_key=_import_idem_key('order', customer, product_id, qty, order_date),
             )
             db.add(log)
-            if deduct_flag and str(deduct_flag).strip() == '是':
-                await process_order_deduction(db, order, product_id, qty, deduct_stock=True, product=locked_product)
+            # 2026-10-17 审计 P2-02：与 batch_import_core 对齐抵扣语义——
+            # 数字 = 抵扣数量；是/yes = 整单数量。此前只认「是」，数字被静默丢弃。
+            if deduct_flag:
+                deduct_str = str(deduct_flag).strip()
+                deduct_value = 0
+                if deduct_str.isdigit():
+                    deduct_value = int(deduct_str)
+                elif deduct_str.lower() in ('是', 'yes'):
+                    deduct_value = qty
+                if deduct_value > 0:
+                    await process_order_deduction(
+                        db, order, product_id, deduct_value,
+                        deduct_stock=True, product=locked_product,
+                    )
             return True, None
 
         return await _run_sheet_rows(

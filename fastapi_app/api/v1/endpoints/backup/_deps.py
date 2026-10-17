@@ -240,7 +240,17 @@ def _decrypt_backup_data(encrypted_bytes: bytes, password: str) -> bytes:  # log
 def _is_encrypted_data(data: bytes) -> bool:
     """
     检查数据是否已加密
+
+    2026-10-17 审计 P2-10：此前只认 meta 前缀（格式 B），而 chunked-v1 是
+    新建备份的默认格式——探针对主力格式恒返回 False。
     """
+    try:
+        from fastapi_app.core.backup_encryption import detect_encryption_format
+
+        if detect_encryption_format(data[:8]) == 'chunked-v1':
+            return True
+    except ImportError:
+        pass
     try:
         # 检查是否有元数据长度前缀
         if len(data) < 4:

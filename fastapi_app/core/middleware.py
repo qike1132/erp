@@ -2,20 +2,27 @@
 中间件注册模块
 
 从 main.py 提取，包含：
+- 请求 ID
 - CSRF 保护
 - CORS 配置
 - TrustedHost
 - GZip 压缩
 - 请求体大小限制（10MB）
 - Prometheus 请求追踪
+- 安全响应头
 
-中间件执行顺序（自上而下）：
-1. CSRF token 校验（非 GET/HEAD 请求，豁免登录/登出）
-2. CORS 跨域处理
-3. TrustedHost 主机头校验
+中间件执行顺序（请求进入时，由外到内；Starlette 中后注册的位于外层）：
+1. 安全响应头
+2. Prometheus 请求指标采集
+3. 请求体大小限制（10MB）
 4. GZip 响应压缩（>1000 bytes）
-5. 请求体大小限制（10MB）
-6. Prometheus 请求指标采集
+5. TrustedHost 主机头校验
+6. CORS 跨域处理
+7. CSRF token 校验（非 GET/HEAD 请求，豁免登录/登出）
+8. 请求 ID 注入
+
+注：2026-10-17 审计 P2-25 修正——此前 docstring 写的是注册顺序且漏列
+request_id/security_headers，与实际执行顺序几乎相反。
 """
 
 import logging

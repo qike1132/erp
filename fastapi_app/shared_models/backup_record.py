@@ -21,7 +21,7 @@ class BackupRecord(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    type: Mapped[str] = mapped_column(String(20), nullable=False, comment='备份类型: full/incremental/restore')
+    type: Mapped[str] = mapped_column(String(20), nullable=False, comment='备份类型: full/restore')
     trigger_type: Mapped[str] = mapped_column(String(20), nullable=False, default='manual', comment='触发方式: manual/auto')
     filename: Mapped[str | None] = mapped_column(String(255), comment='备份文件名')
     size: Mapped[int | None] = mapped_column(BigInteger, comment='文件大小(字节)')
@@ -35,7 +35,7 @@ class BackupRecord(Base):
     duration_seconds: Mapped[float | None] = mapped_column(comment='耗时(秒)')
     ip_address: Mapped[str | None] = mapped_column(String(45), comment='操作者IP地址')
     user_agent: Mapped[str | None] = mapped_column(Text, comment='浏览器UA')
-    parent_record_id: Mapped[int | None] = mapped_column(Integer, comment='父备份记录ID(增量备份指向全量备份)')
+    parent_record_id: Mapped[int | None] = mapped_column(Integer, comment='父备份记录ID(历史增量功能已移除，列保留兼容)')
     # M1 新增:manifest 摘要(schema 快照/校验指纹)、调度任务关联、加密标志
     manifest_summary: Mapped[dict | None] = mapped_column(JSONB, comment='manifest 摘要(行数/SHA-256 指纹/schema 快照)')
     schedule_id: Mapped[int | None] = mapped_column(Integer, comment='关联 backup_schedule 任务ID(手动触发为 NULL)')

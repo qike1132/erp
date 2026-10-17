@@ -57,7 +57,7 @@ async def _publish_case_event(payload: dict) -> None:
 # ==================== SKU 主档 ====================
 
 @router.get('/search', response_model=list[CaseSearchItem])
-async def case_search(q: str = Query('', description='搜索关键词'),
+async def case_search(q: str = Query('', max_length=100, description='搜索关键词'),
                       user: User = Depends(require_permission('case_manage')),
                       db: AsyncSession = Depends(get_async_read_db)) -> list[dict]:
     """皮套 SKU 搜索（录入联想，附当前库存）。"""
@@ -67,8 +67,8 @@ async def case_search(q: str = Query('', description='搜索关键词'),
 @router.get('/products', response_model=CaseProductListResponse)
 async def case_products(page: int = Query(1, ge=1),
                         per_page: int = Query(200, ge=1, le=200),
-                        search: str = Query(''),
-                        has_parts: str = Query('all', description='all/yes/no，按有无配件过滤'),
+                        search: str = Query('', max_length=100),
+                        has_parts: str = Query('all', max_length=10, description='all/yes/no，按有无配件过滤'),
                         user: User = Depends(require_permission('case_manage')),
                         db: AsyncSession = Depends(get_async_read_db)) -> dict:
     """产品列表（皮套设置用）：全部产品 + 各自配件数，供「有配件/无配件」筛选。"""
@@ -78,7 +78,7 @@ async def case_products(page: int = Query(1, ge=1),
 @router.get('/items', response_model=CaseItemListResponse)
 async def case_items(page: int = Query(1, ge=1),
                      per_page: int = Query(50, ge=1, le=200),
-                     search: str = Query(''),
+                     search: str = Query('', max_length=100),
                      parent_id: int | None = Query(None),
                      roots_only: bool = Query(False),
                      user: User = Depends(require_permission('case_manage')),
@@ -134,7 +134,7 @@ async def delete_case_item(item_id: int,
 @router.get('/inventory', response_model=CaseInventoryResponse)
 async def case_inventory(page: int = Query(1, ge=1),
                          per_page: int = Query(50, ge=1, le=200),
-                         search: str = Query(''),
+                         search: str = Query('', max_length=100),
                          user: User = Depends(require_permission('case_manage')),
                          db: AsyncSession = Depends(get_async_read_db)) -> dict:
     """皮套库存汇总（按主件分组，含配件）+ 整体统计。"""
@@ -147,10 +147,10 @@ async def case_inventory(page: int = Query(1, ge=1),
 async def case_movements(page: int = Query(1, ge=1),
                          per_page: int = Query(20, ge=1, le=100),
                          case_id: int | None = Query(None),
-                         direction: str = Query('', description='in/out，空为全部'),
-                         customer: str = Query(''),
-                         start_date: str = Query(''),
-                         end_date: str = Query(''),
+                         direction: str = Query('', max_length=10, description='in/out，空为全部'),
+                         customer: str = Query('', max_length=100),
+                         start_date: str = Query('', max_length=10),
+                         end_date: str = Query('', max_length=10),
                          quantity_min: int | None = Query(None),
                          quantity_max: int | None = Query(None),
                          user: User = Depends(require_permission('case_manage')),

@@ -125,7 +125,7 @@ async def _verify_table_row_count(db: AsyncSession, table, qtname: str,
         result = await db.execute(text(f'SELECT COUNT(*) FROM {qtname}'))  # nosec B608 — qtname 经 quote_table 白名单校验; batch-loop: 逐表备份/恢复,无法批量
         actual_rows = result.scalar() or 0
         table_exists = True
-    except (RuntimeError, OSError, ValueError) as e:
+    except (RuntimeError, OSError, ValueError, SQLAlchemyError) as e:
         actual_rows = -1
         table_exists = False
         logger.warning(f'验证: 统计表 {tname} 行数失败: {e}')
@@ -178,7 +178,7 @@ async def _verify_table_l2_fingerprint(db: AsyncSession, table, qtname: str,
             f'''SELECT MD5(STRING_AGG({agg_expr}, ',' ORDER BY "{order_col}")) FROM {qtname}'''  # nosec B608 — qtname 经 quote_table 白名单校验
         ))
         fingerprint = fp_result.scalar() or ''
-    except (ValueError, TypeError, OSError) as e:
+    except (ValueError, TypeError, OSError, SQLAlchemyError) as e:
         fingerprint = ''
         logger.warning(f'验证: 表 {tname} 指纹计算失败: {e}')
     fp_match = fingerprint == expected_fp if expected_fp else None

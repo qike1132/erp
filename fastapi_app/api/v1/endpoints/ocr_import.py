@@ -59,6 +59,11 @@ async def upload_shipping_docs(files: list[UploadFile]=File(..., description='�
     - 识别结果自动写入暂存出货表（staging_stock_out）
     - 返回 task_id 用于查询进度
     """
+    # 2026-10-17 审计 P2-23：批量上传必须有数量上限（此前任意多文件全量读入），
+    # 且识别写入改为逐文件事务——单文件失败不再回滚整批已成功的结果。
+    MAX_OCR_FILES = 50
+    if len(files) > MAX_OCR_FILES:
+        raise HTTPException(status_code=400, detail=f'单次最多上传 {MAX_OCR_FILES} 个文件')
     # 2026-10-17 审计 AUD-03：进度已迁 Redis，跨 worker 可见。
     # 未传 task_id 时新建；传了但未知（过期/旧客户端）由 _update_progress 自动初始化。
     if not task_id:
@@ -68,39 +73,39 @@ async def upload_shipping_docs(files: list[UploadFile]=File(..., description='�
     all_errors: list[str] = []
     file_results: list[dict] = []
     valid_files = 0
-    async with db_transaction(db):
-        for i, file in enumerate(files):
-            filename = file.filename or 'unknown'
-            ext = os.path.splitext(filename.lower())[1]
-            if ext not in SUPPORTED_EXTENSIONS:
-                all_errors.append(f'{filename}: 不支持的文件格式（支持 PDF/图片），已跳过')
-                continue
-            content = await file.read()
-            if len(content) > MAX_OCR_FILE_SIZE:
-                all_errors.append(f'{filename}: 文件超过 10MB 限制，已跳过')
-                continue
-            if len(content) == 0:
-                all_errors.append(f'{filename}: 文件为空，已跳过')
-                continue
-            # P0-12：扩展名通过后再校验文件头（改扩展名的伪 PDF/图片在此拦下，跳过该文件）
-            if not matches_upload_magic(content, ext):
-                all_errors.append(f'{filename}: 文件内容与扩展名不符（签名 {magic_signature(content)}），已跳过')
-                logger.warning('OCR 批量上传魔数校验失败: filename=%s ext=%s %s', filename, ext, magic_signature(content))
-                continue
-            valid_files += 1
-            if len(files) > 1:
-                await svc._update_progress(task_id, message=f'正在处理第 {i + 1}/{len(files)} 个文件: {filename}')
-            try:
+    for i, file in enumerate(files):
+        filename = file.filename or 'unknown'
+        ext = os.path.splitext(filename.lower())[1]
+        if ext not in SUPPORTED_EXTENSIONS:
+            all_errors.append(f'{filename}: 不支持的文件格式（支持 PDF/图片），已跳过')
+            continue
+        content = await file.read()
+        if len(content) > MAX_OCR_FILE_SIZE:
+            all_errors.append(f'{filename}: 文件超过 10MB 限制，已跳过')
+            continue
+        if len(content) == 0:
+            all_errors.append(f'{filename}: 文件为空，已跳过')
+            continue
+        # P0-12：扩展名通过后再校验文件头（改扩展名的伪 PDF/图片在此拦下，跳过该文件）
+        if not matches_upload_magic(content, ext):
+            all_errors.append(f'{filename}: 文件内容与扩展名不符（签名 {magic_signature(content)}），已跳过')
+            logger.warning('OCR 批量上传魔数校验失败: filename=%s ext=%s %s', filename, ext, magic_signature(content))
+            continue
+        valid_files += 1
+        if len(files) > 1:
+            await svc._update_progress(task_id, message=f'正在处理第 {i + 1}/{len(files)} 个文件: {filename}')
+        try:
+            async with db_transaction(db):
                 imported, message, errors = await svc.import_staging_stockouts_from_file(db, content, session_id, filename=filename, task_id=task_id)
-            except OcrDependencyError as e:
-                # 逐文件如实报出修复指引，别让整批 500（缺依赖时每个文件都会走到这里）
-                all_errors.append(f'{filename}: {e!s}')
-                logger.error('OCR 批量上传依赖缺失: %s', e)
-                continue
-            total_imported += imported
-            if errors:
-                all_errors.extend([f'{filename}: {e}' for e in errors])
-            file_results.append({'filename': filename, 'imported': imported, 'message': message})
+        except OcrDependencyError as e:
+            # 逐文件如实报出修复指引，别让整批 500（缺依赖时每个文件都会走到这里）
+            all_errors.append(f'{filename}: {e!s}')
+            logger.error('OCR 批量上传依赖缺失: %s', e)
+            continue
+        total_imported += imported
+        if errors:
+            all_errors.extend([f'{filename}: {e}' for e in errors])
+        file_results.append({'filename': filename, 'imported': imported, 'message': message})
     overall_message = f'共处理 {len(file_results)} 个文件，识别导入 {total_imported} 个出货到暂存区'
     await svc._update_progress(task_id, status='done', percent=100, message=overall_message)
     return OcrPdfImportResult(success=total_imported > 0 or len(file_results) == 0, message=overall_message, total_imported=total_imported, file_count=len(file_results), file_results=file_results, errors=all_errors[:20], task_id=task_id)

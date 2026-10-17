@@ -299,17 +299,17 @@ class DisasterRecoveryTestService:
                 logger.warning("没有找到备份文件")
                 return None
 
-            # 按时间排序，选择最新的
-            latest_backup = max(backup_files, key=lambda f: f.stat().st_mtime)
+            # 按时间从新到旧逐个尝试（2026-10-17 审计 P2-13：此前只取最新一个，
+            # 最新文件损坏/无密码时整个演练恒失败，不回退次新的完好备份）
+            for candidate in sorted(backup_files, key=lambda f: f.stat().st_mtime, reverse=True):
+                backup_info = await self._get_backup_info(candidate)
+                if backup_info:
+                    logger.info(f"选择备份文件进行测试: {candidate.name}")
+                    return backup_info
+                logger.warning(f"备份文件损坏或无效，尝试更早的备份: {candidate.name}")
 
-            # 检查文件完整性
-            backup_info = await self._get_backup_info(latest_backup)
-            if not backup_info:
-                logger.warning(f"备份文件损坏或无效: {latest_backup.name}")
-                return None
-
-            logger.info(f"选择备份文件进行测试: {latest_backup.name}")
-            return backup_info
+            logger.warning("没有可用的备份文件")
+            return None
 
         except OSError as e:
             logger.error(f"选择备份文件失败: {e}")

@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from sqlalchemy import CheckConstraint, DateTime, Index, Integer, Numeric, String, desc
@@ -30,7 +31,9 @@ class Product(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True, comment='产品名称')
     barcode: Mapped[str | None] = mapped_column(String(50), index=True, comment='69码/商品条码')
-    price: Mapped[float | None] = mapped_column(Numeric(10, 2), default=0, server_default='0', comment='产品价格')
+    # 2026-10-17 审计 P2-27：列为 Numeric，注解必须是 Decimal（此前写 float，
+    # 与实际运行时类型不符，mypy/IDE 会误推）。
+    price: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), default=0, server_default='0', comment='产品价格')
     image: Mapped[str | None] = mapped_column(String(200), comment='产品图片路径')
     factory: Mapped[str | None] = mapped_column(String(50), comment='所属工厂')
     initial_stock: Mapped[int] = mapped_column(Integer, default=0, comment='初始库存')
