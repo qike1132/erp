@@ -9,7 +9,7 @@ Revision ID: pg_standalone_100_fs_remark_key
 Revises: pg_standalone_099_finished_stock_remark
 """
 import sqlalchemy as sa
-from alembic import op
+from alembic import context, op
 
 from migrations._legacy_base_guard import create_index_if_absent, drop_index_if_exists
 
@@ -44,8 +44,9 @@ def upgrade() -> None:
 
     # customer_name 语义降级为「展示值快照」：同步 ORM 侧的 comment，
     # 否则空库重放后 alembic check 报 modify_comment 漂移（CI Verify Alembic 红）。
-    # 幂等：comment 相同则 ALTER 无实际效果。COMMENT ON 是 PG 专属语法。
-    if op.get_bind().dialect.name == 'postgresql':
+    # 幂等：comment 相同则 ALTER 无实际效果。COMMENT ON 是 PG 专属语法；
+    # offline 模式（--sql 渲染）下 get_bind() 无可用的真实连接，跳过运行期语句。
+    if not context.is_offline_mode() and op.get_bind().dialect.name == 'postgresql':
         op.execute(sa.text(
             "COMMENT ON COLUMN finished_stock_remark.customer_name IS "
             "'客户名称（写备注时的展示值快照，不参与关联）'"
