@@ -509,6 +509,9 @@ export function useSummaryModal() {
   const fabricPersistedRates = ref<number[][][]>([])
   /** 每个布料行内各明细损耗率是否不一致 */
   const fabricLossRateMixed = ref<boolean[][][]>([])
+  // 打开弹窗时的 mixed 基线（2026-10-17 审计 AUD-13：取消编辑要回到它，
+  // 此前只有自赋值空操作，逐行率回了基线而 mixed 标记没有）
+  const fabricLossRateMixedPersisted = ref<boolean[][][]>([])
   /** 每个布料行对应的明细 item_ids，用于按行保存损耗率 */
   const fabricItemIds = ref<number[][][][]>([])
 
@@ -660,6 +663,7 @@ export function useSummaryModal() {
     fabricLossRates.value = rates
     fabricPersistedRates.value = persistedRates
     fabricLossRateMixed.value = mixedRates
+    fabricLossRateMixedPersisted.value = cloneRaw(mixedRates)
     fabricItemIds.value = itemIds
     // 回显播种：把汇总接口返回的「已落库损耗率」作为编辑基线。
     // - spare_rate 是 number（含 0）时原样回显；否则（null / 旧后端未提供 undefined）落 0，
@@ -683,7 +687,10 @@ export function useSummaryModal() {
       factoryData.value = cloneRaw(factoryOriginalData.value)
       supplierData.value = cloneRaw(supplierOriginalData.value)
       fabricLossRates.value = cloneRaw(fabricPersistedRates.value)
-      fabricLossRateMixed.value = cloneRaw(fabricLossRateMixed.value)
+      fabricLossRateMixed.value = cloneRaw(fabricLossRateMixedPersisted.value)
+      // 顶部统一损耗率同样回到服务端基线：此前漏了这一行，取消编辑后
+      // 输入框仍显示用户改过的值，而逐行率已按持久值计算（同屏两套口径）。
+      lossRate.value = persistedLossRate.value
       // 分组订单级率同样回到服务端基线（统一率交互随之丢弃）
       groupSpareRates.value = seedGroupSpareRates(factoryOriginalData.value)
       // 弹窗仍开着、服务端仍存着该率，故恢复到「已落库」基线而非清零，
@@ -809,6 +816,7 @@ export function useSummaryModal() {
           persistedLossRate.value = sent
           fabricPersistedRates.value = cloneRaw(fabricLossRates.value)
           fabricLossRateMixed.value = fabricLossRateMixed.value.map((g) => g.map((ss) => ss.map(() => false)))
+          fabricLossRateMixedPersisted.value = cloneRaw(fabricLossRateMixed.value)
           lossRateMixed.value = false
           next = pendingRate
           pendingRate = null
@@ -982,6 +990,7 @@ export function useSummaryModal() {
     fabricLossRates.value = []
     fabricPersistedRates.value = []
     fabricLossRateMixed.value = []
+    fabricLossRateMixedPersisted.value = []
     groupSpareRates.value = []
     fabricItemIds.value = []
     fabricDrainPromises.clear()

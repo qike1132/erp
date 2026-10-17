@@ -33,3 +33,16 @@ export function isQuantityOutOfRange(value: unknown): boolean {
 export function quantityAriaInvalid(value: unknown): 'true' | undefined {
   return isQuantityOutOfRange(value) ? 'true' : undefined
 }
+
+/**
+ * 数量展示格式化：整数带千分位，小数保留至多 2 位。
+ *
+ * 2026-10-17 审计 AUD-14：来料数量是 float，展示层却用 toFixed(0) 四舍五入，
+ * 布料 12.5 米显示 13、已到 0.4kg 显示 0，与同模块 fmtQty 口径冲突。
+ * 统一到本函数，禁止再对数量直接 toFixed(0)。
+ */
+export function formatQuantity(value: unknown): string {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return '0'
+  return Number.isInteger(n) ? n.toLocaleString('en-US') : String(Math.round(n * 100) / 100)
+}

@@ -141,6 +141,20 @@ describe('逐布料行差异化损耗率', () => {
     expect(m.fabricLossRates).toEqual([[[120]], [[50]]])
   })
 
+  it('取消编辑同时恢复顶部统一损耗率与 mixed 基线（AUD-13）', async () => {
+    const m = useSummaryModal()
+    await m.openSummary([7, 8]) // spare_rate=null → 持久基线 0
+
+    m.toggleEditMode(true)
+    m.lossRate = 80
+    m.fabricLossRateMixed[0]![0]![0] = true
+
+    m.toggleEditMode(false)
+
+    expect(m.lossRate).toBe(0)
+    expect(m.fabricLossRateMixed[0]![0]![0]).toBe(false)
+  })
+
   it('打印/导出 HTML 按逐布料行损耗率分别计算数量', () => {
     const html = buildFactoryHtml(factorySummary(), 0, [[[100]], [[50]]])
 

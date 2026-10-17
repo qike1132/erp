@@ -8,6 +8,7 @@ import { ref, computed, watch, onUnmounted, type Ref } from 'vue'
 import { useQuery, keepPreviousData } from '@tanstack/vue-query'
 import { queryClient } from '@/utils/queryClient'
 import { materialApi } from '@/api'
+import { formatQuantity } from '@/utils/quantity'
 import type { Registration, RegItem } from '@/api/material'
 
 /** 逾期判定：登记日期早于今天-30 天且未收齐（与后端 stats/distribution 的 SQL 一致） */
@@ -58,9 +59,9 @@ export interface ProgressOrderRow {
   searchText: string
 }
 
-/** 数量格式化：整数带千分位，小数保留原值（≤2 位） */
+/** 数量格式化：统一走 @/utils/quantity（整数带千分位，小数 ≤2 位） */
 function fmtQty(n: number): string {
-  return Number.isInteger(n) ? n.toLocaleString('en-US') : String(Math.round(n * 100) / 100)
+  return formatQuantity(n)
 }
 
 /** 解析登记日期字符串为 UTC 零点 Date（后端序列化为 YYYY-MM-DD） */

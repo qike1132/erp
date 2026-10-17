@@ -14,9 +14,9 @@
               <span v-if="m.spec" class="mr-det-mat-spec">{{ m.spec }}</span>
             </div>
             <div class="mr-det-mat-metrics">
-              <span class="mr-det-mat-metric"><span class="mr-det-mat-label">采购</span><b class="mr-det-mat-value">{{ m.ordered.toFixed(0) }}</b></span>
-              <span class="mr-det-mat-metric"><span class="mr-det-mat-label">已到货</span><b class="mr-det-mat-value received">{{ m.received.toFixed(0) }}</b></span>
-              <span class="mr-det-mat-metric"><span class="mr-det-mat-label">未到货</span><b class="mr-det-mat-value remaining">{{ m.remaining.toFixed(0) }}</b></span>
+              <span class="mr-det-mat-metric"><span class="mr-det-mat-label">采购</span><b class="mr-det-mat-value">{{ formatQuantity(m.ordered) }}</b></span>
+              <span class="mr-det-mat-metric"><span class="mr-det-mat-label">已到货</span><b class="mr-det-mat-value received">{{ formatQuantity(m.received) }}</b></span>
+              <span class="mr-det-mat-metric"><span class="mr-det-mat-label">未到货</span><b class="mr-det-mat-value remaining">{{ formatQuantity(m.remaining) }}</b></span>
               <span class="mr-det-mat-metric"><span class="mr-det-mat-label">完成率</span><b class="mr-det-mat-value" :class="m.received >= m.ordered ? 'completed' : (m.pct >= 50 ? 'half' : 'low')">{{ m.pct }}%</b></span>
             </div>
             <div class="mr-det-mat-right">
@@ -36,6 +36,7 @@
 
 <script setup lang="ts">
 import UiDialog from '@/components/ui/UiDialog.vue'
+import { formatQuantity } from '@/utils/quantity'
 import type { SupMatItem, SupplierDetail } from '../material-types'
 
 defineProps<{

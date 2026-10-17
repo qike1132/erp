@@ -51,7 +51,7 @@
                   :estimated-height="estimatedBlockHeight"
                   :item-height="BEILE_ROW_HEIGHT"
                   :container-height="listAreaHeight"
-                  :item-key="(i: BeileOrderRowType) => i.id"
+                  :item-key="(i: BeileOrderRowType) => `${i.record_type ?? 'order'}:${i.id}`"
                   class="bo-virtual-list"
                 >
                   <template #default="{ item }">

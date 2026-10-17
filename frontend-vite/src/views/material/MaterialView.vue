@@ -171,8 +171,14 @@ async function submitReceive(payload: { qty: number | null; remark: string }) {
       totalDelta += qtyForThisItem
       remainingToReceive -= qtyForThisItem
     }
-    if (remainingToReceive > 0) { toast('收货数量超过采购总量', 'warning') }
-    toast(lastAutoCompleted ? '收货完成，该订单已全部到货，已转入历史记录' : '收货登记成功', lastAutoCompleted ? 'success' : 'info')
+    // 2026-10-17 审计 AUD-15：超量时不能连发两条 toast——toast 是单实例覆盖模式，
+    // 后一条「收货登记成功」会立即盖掉警告，用户只看到成功、不知道超出部分被丢弃。
+    // 改为单条合并消息。
+    if (remainingToReceive > 0) {
+      toast(`已登记 ${totalDelta}，超出采购总量的 ${remainingToReceive} 已忽略`, 'warning')
+    } else {
+      toast(lastAutoCompleted ? '收货完成，该订单已全部到货，已转入历史记录' : '收货登记成功', lastAutoCompleted ? 'success' : 'info')
+    }
     showReceiveDialog.value = false
     const newReceived = receiveItem.value.received + totalDelta
     updateSupplierDialogLocally(supplierDetail, showSupplierDialog, receiveItem.value, newReceived)

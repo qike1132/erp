@@ -8,8 +8,8 @@
         class="fr-input"
         placeholder="点击填写备注"
         autocomplete="off"
-        @keyup.enter="emit('save', draft)"
-        @keyup.esc="cancel"
+        @keydown.enter="onEnter"
+        @keydown.esc="onEsc"
       />
       <span v-if="saving" class="fr-saving">保存中…</span>
       <template v-else>
@@ -66,6 +66,21 @@ function startEdit() {
 
 function cancel() {
   emit('cancel')
+}
+
+/**
+ * 2026-10-17 审计 AUD-17：中文输入法选词回车会触发 keyup.enter ——
+ * Vue 的按键修饰符不过滤 IME 组合态，导致备注被存成半截拼音串。
+ * keydown 在组合期 isComposing=true（部分浏览器 keyCode=229），此时必须忽略。
+ */
+function onEnter(e: KeyboardEvent) {
+  if (e.isComposing || e.keyCode === 229) return
+  emit('save', draft.value)
+}
+
+function onEsc(e: KeyboardEvent) {
+  if (e.isComposing || e.keyCode === 229) return
+  cancel()
 }
 </script>
 
