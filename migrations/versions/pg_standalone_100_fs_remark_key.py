@@ -42,6 +42,15 @@ def upgrade() -> None:
         ['product_id', 'batch_no'], unique=True,
     )
 
+    # customer_name 语义降级为「展示值快照」：同步 ORM 侧的 comment，
+    # 否则空库重放后 alembic check 报 modify_comment 漂移（CI Verify Alembic 红）。
+    # 幂等：comment 相同则 ALTER 无实际效果。COMMENT ON 是 PG 专属语法。
+    if op.get_bind().dialect.name == 'postgresql':
+        op.execute(sa.text(
+            "COMMENT ON COLUMN finished_stock_remark.customer_name IS "
+            "'客户名称（写备注时的展示值快照，不参与关联）'"
+        ))
+
 
 def downgrade() -> None:
     # 不可逆方向：旧键含 customer_name，新键行无法还原唯一性（同 (产品,批次) 现在只有一行，

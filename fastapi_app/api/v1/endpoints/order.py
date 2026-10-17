@@ -346,7 +346,7 @@ async def edit_order(
     if not order:
         logger.info("编辑订单失败：order_id=%s 不存在", order_id)
         raise HTTPException(status_code=404, detail="订单不存在")
-    _assert_order_factory_scoped(db, order_id, user)
+    await _assert_order_factory_scoped(db, order_id, user)
 
     # 未传入的字段沿用原值，实现部分更新
     # TODO(multi-sku-order): 读取 order.quantity 在多 SKU 下为首 item 兼容值，待后续 spec 改造为按 OrderItem 维度。
@@ -389,7 +389,7 @@ async def edit_order_item(
     _item_order_id = (await db.execute(
         select(OrderItem.order_id).where(OrderItem.id == item_id))).scalar_one_or_none()
     if _item_order_id is not None:
-        _assert_order_factory_scoped(db, _item_order_id, user)
+        await _assert_order_factory_scoped(db, _item_order_id, user)
     async with db_transaction(db):
         result = await order_service.update_order_item(
             db, item_id, data.quantity, data.note, user,
@@ -449,7 +449,7 @@ async def delete_order_item(
         _item_order_id = (await db.execute(
             select(OrderItem.order_id).where(OrderItem.id == item_id))).scalar_one_or_none()
         if _item_order_id is not None:
-            _assert_order_factory_scoped(db, _item_order_id, user)
+            await _assert_order_factory_scoped(db, _item_order_id, user)
         result = await order_service.delete_order_item(db, item_id, user)
     await cache_mgr.invalidate_dashboard()
     # 末项删除会转成整单删除（service 回传 order_id）：与整单删除端点同口径发布
@@ -511,7 +511,7 @@ async def delete_order(
         SQLAlchemyError: _db_failed,
     }):
         # 工厂隔离（F-BE-API-01）
-        _assert_order_factory_scoped(db, order_id, user)
+        await _assert_order_factory_scoped(db, order_id, user)
         result = await order_service.delete_order(db, order_id, user)
 
     await cache_mgr.invalidate_dashboard()
@@ -575,7 +575,7 @@ async def update_batch_no(
     """
     async with db_transaction(db):
         # 工厂隔离（F-BE-API-01）
-        _assert_order_factory_scoped(db, order_id, user)
+        await _assert_order_factory_scoped(db, order_id, user)
         await order_batch_service.update_batch_no(
             db, order_id=order_id, batch_no=batch_no,
             sync_same_batch=False, user=user,
@@ -611,7 +611,7 @@ async def update_deduct_quantity(
     try:
         async with db_transaction(db):
             # 工厂隔离（F-BE-API-01）
-            _assert_order_factory_scoped(db, order_id, user)
+            await _assert_order_factory_scoped(db, order_id, user)
             result = await order_service.update_deduct_quantity(
                 db, order_id=order_id,
                 new_deduct_quantity=deduct_quantity, current_user=user,
