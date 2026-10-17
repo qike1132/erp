@@ -111,7 +111,7 @@ async def list_orders(
                                                 customer=customer, product_id=product_id,
                                                 status=status,
                                                 start_date=start_date, end_date=end_date,
-                                                factory=factory)
+                                                factory=factory, keyword=keyword)
     except AppError:
         raise  # 业务异常（如非法日期 400）交由全局 handler，不被吞为 500
     except (SQLAlchemyError, OSError) as e:
