@@ -45,6 +45,9 @@ export function useProductListActions(confirmDialog: ConfirmDialogLike) {
   const bomProductName = ref('')
   const currentProductId = ref<number | null>(null)
   const currentBomCategory = ref<BomCategory>('fabric')
+  // 2026-10-17 审计 F-FE-WS-A-01：读失败时编辑基线被清成空集，若仍允许保存，
+  // 后端「全量替换」语义会把该 SKU 整张 BOM 删光。此标记禁止在未加载成功时保存。
+  const bomLoadFailed = ref(false)
 
   const bomTabs = [
     { key: 'fabric' as const, label: '面料类', icon: 'fas fa-scroll' },
@@ -125,43 +128,50 @@ export function useProductListActions(confirmDialog: ConfirmDialogLike) {
     selectedRole.value = null
     defaultScopeName.value = '默认BOM'
     Object.keys(bomByScope).forEach(key => delete bomByScope[key])
+    bomLoadFailed.value = true // 进入加载即置失败态，成功路径末尾解除
     try {
       const res = (await productApi.loadBom(productId)) as {
         success: boolean
         product?: { roles?: { id: number; name: string }[]; default_bom_label?: string | null }
         materials?: BomMaterialRecord[]
       }
-      if (res.success) {
-        bomRoles.value = (res.product?.roles || []).map(r => ({
-          id: r.id,
-          name: r.name,
-        }))
-        defaultScopeName.value = res.product?.default_bom_label?.trim() || '默认BOM'
-        const materialsList = res.materials || []
-        materialsList.forEach((item) => {
-          const category = item.category || 'accessory'
-          if (category === 'packaging') return // 包装类不在BOM配置中管理
-          const key = item.role_id != null ? `role-${item.role_id}` : 'default'
-          ensureScope(key)[category as BomCategory].push({
-            id: item.id,
-            name: item.material_name || item.name || '',
-            specification: item.specification || '',
-            unit: item.unit || '码',
-            supplier_id: item.supplier_id || null,
-            supplier_name: item.supplier_name || '',
-            usage: item.unit_usage || item.quantity || 1,
-            remark: item.remark || '',
-            role_id: item.role_id ?? null,
-            category: category,
-          })
-        })
-        // 缺陷①（A-3）：打开弹窗默认停靠「默认BOM」——保持 selectedRole === null，
-        // 不再默认落 bomRoles[0]，避免用户误在某个角色作用域下编辑。
-        selectedRole.value = null
+      if (!res.success) {
+        // success=false 同样不能当编辑基线（空基线 + 保存 = 全删）
+        bomLoadFailed.value = true
+        showToast('加载BOM数据失败，禁止保存', 'error')
+        return
       }
+      bomRoles.value = (res.product?.roles || []).map(r => ({
+        id: r.id,
+        name: r.name,
+      }))
+      defaultScopeName.value = res.product?.default_bom_label?.trim() || '默认BOM'
+      const materialsList = res.materials || []
+      materialsList.forEach((item) => {
+        const category = item.category || 'accessory'
+        if (category === 'packaging') return // 包装类不在BOM配置中管理
+        const key = item.role_id != null ? `role-${item.role_id}` : 'default'
+        ensureScope(key)[category as BomCategory].push({
+          id: item.id,
+          name: item.material_name || item.name || '',
+          specification: item.specification || '',
+          unit: item.unit || '码',
+          supplier_id: item.supplier_id || null,
+          supplier_name: item.supplier_name || '',
+          usage: item.unit_usage || item.quantity || 1,
+          remark: item.remark || '',
+          role_id: item.role_id ?? null,
+          category: category,
+        })
+      })
+      // 缺陷①（A-3）：打开弹窗默认停靠「默认BOM」——保持 selectedRole === null，
+      // 不再默认落 bomRoles[0]，避免用户误在某个角色作用域下编辑。
+      selectedRole.value = null
+      bomLoadFailed.value = false // 数据完整落地，解除保存禁令
     } catch (error) {
       console.error('加载BOM数据失败:', error)
-      showToast('加载BOM数据失败', 'error')
+      bomLoadFailed.value = true
+      showToast('加载BOM数据失败，禁止保存', 'error')
     }
   }
 
@@ -253,6 +263,12 @@ export function useProductListActions(confirmDialog: ConfirmDialogLike) {
   }
 
   async function saveBom() {
+    // 2026-10-17 审计 F-FE-WS-A-01：BOM 未加载成功时基线是空集，
+    // 提交会按「全量替换」语义删光该 SKU 整张 BOM —— 禁止保存。
+    if (bomLoadFailed.value) {
+      showToast('BOM 未加载成功，禁止保存。请关闭弹窗后重试', 'error')
+      return
+    }
     // 校验：角色名必填
     const invalidRole = bomRoles.value.find(r => !(r.name || '').trim())
     if (invalidRole) {
@@ -266,6 +282,20 @@ export function useProductListActions(confirmDialog: ConfirmDialogLike) {
     if (invalidItems.length > 0) {
       showToast('请填写所有必填项（物料名称、规格型号、计量单位、默认供应商）', 'warning')
       return
+    }
+
+    // 空基线覆盖非空 BOM 的二次确认（防误清空整张 BOM）
+    if (allItems.length === 0 && currentProductId.value != null) {
+      const existing = await productApi.loadBom(currentProductId.value) as { success: boolean; materials?: BomMaterialRecord[] }
+      const nonEmpty = existing.success && (existing.materials || []).some(m => (m.category || 'accessory') !== 'packaging')
+      if (nonEmpty) {
+        const ok = await confirmDialog.confirm(
+          '当前 BOM 为空，但该产品已存在物料清单。保存将删除全部物料，确定继续吗？',
+          '危险操作确认',
+          'danger',
+        )
+        if (!ok) return
+      }
     }
 
     // 角色负载：id（既有行）/ role_key（新建）两条路径（角色为产品私有）

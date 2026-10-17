@@ -69,16 +69,34 @@ export function useStockOutActions(
       const failedItems = results.filter((result: { success: boolean }) => !result.success)
       const successCount = results.length - failedItems.length
 
-      if (result.success !== false && failedItems.length === 0) {
+      // 按逐条结果只移除已入库行（2026-10-17 审计 F-FE-DESK-CORE-01：
+      // 原先部分成功分支不清暂存，重提会把已成功的行再次提交 → 重复出库）。
+      // results[idx] 与请求行严格对位（stock_out_service.batch_create_stockouts
+      // 的 results 数组按请求下标回填）；对不上时保守不清空。
+      const resultsAligned = results.length === staged.value.length
+      const remaining = resultsAligned
+        ? staged.value.filter((_, idx) => {
+            const r = results[idx] as { success: boolean } | undefined
+            return !(r && r.success === true)
+          })
+        : staged.value
+
+      if (resultsAligned && result.success !== false && failedItems.length === 0) {
         // 全部成功
         showToast('出货提交成功', 'success')
         staged.value = []
         onComplete()
       } else if (successCount > 0) {
-        // 部分成功
+        // 部分成功：暂存区只留失败行，成功行移除（防重复出库）
         const errorMsgs = failedItems.slice(0, 3).map((result: { error?: string }, index: number) => `第${index + 1}项: ${result.error || '未知错误'}`).join('; ')
         const suffix = failedItems.length > 3 ? `...等共${failedItems.length}项失败` : ''
-        showToast(`部分出货成功(${successCount}/${results.length})，失败项: ${errorMsgs}${suffix}`, 'warning')
+        if (resultsAligned) {
+          staged.value = remaining
+          showToast(`部分出货成功(${successCount}/${results.length})，已入库行已从暂存区移除。失败项: ${errorMsgs}${suffix}`, 'warning')
+        } else {
+          // 结果无法与暂存行对位：保守保留全部，提示人工核对
+          showToast(`部分出货成功(${successCount}/${results.length})，但结果与暂存清单无法对齐，暂存区未改动，请刷新后核对库存与流水。失败项: ${errorMsgs}${suffix}`, 'warning')
+        }
         onComplete()
       } else {
         // 全部失败

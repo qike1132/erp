@@ -128,6 +128,30 @@ def _build_test_db_url() -> str:
 TEST_DATABASE_URL = _build_test_db_url()
 
 
+def _assert_is_test_database(url: str) -> None:
+    """硬闸（2026-10-17 审计 F-TEST-BE-TOP-03）：测试会话会 DROP SCHEMA public CASCADE，
+    目标 URL 必须显式指向 *_test 库。
+
+    派生逻辑 parsed.path.replace(f"/{db_name}", ...) 在 DB_NAME 与实际库名不一致时
+    静默 no-op，返回的就是生产库 URL；TEST_DATABASE_URL 环境变量分支则完全无校验。
+    两个来路都在这里收口——不满足直接终止整个会话，不跑任何用例。
+    """
+    from urllib.parse import urlparse as _urlparse
+
+    p = _urlparse(url)
+    if not p.path.rstrip("/").endswith("_test"):
+        pytest.exit(
+            f"拒绝运行：测试库 URL 指向非测试库 {p.path!r}"
+            f"（本会话会对它执行 DROP SCHEMA public CASCADE）。"
+            f"请检查 DB_NAME 与 ASYNC_DATABASE_URL 的库名是否一致，"
+            f"或显式设置指向 *_test 库的 TEST_DATABASE_URL。",
+            returncode=2,
+        )
+
+
+_assert_is_test_database(TEST_DATABASE_URL)
+
+
 # ============================================================
 # 集成测试标记
 # ============================================================
