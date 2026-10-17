@@ -1,4 +1,4 @@
-import { get } from './request'
+import { download, get, put } from './request'
 import type { ApiResponse, BatchAvailable, FinishedStockSummary } from '@/types'
 
 /**
@@ -22,4 +22,16 @@ export const finishedStockApi = {
       product_id: productId,
       customer,
     }),
+
+  /** 导出当前筛选（客户 + 搜索词）的成品库存 */
+  export: (params?: { customer?: string; product?: string }) =>
+    download('/finished-stock/export', '成品库存.xlsx', params),
+
+  /** 页面级备注 UPSERT：键 (客户,产品,批次) 一行一条；清空即删除 */
+  saveRemark: (data: {
+    customer_name: string
+    product_id: number
+    batch_no: string
+    remark: string
+  }) => put<{ success?: boolean; remark?: string }>('/finished-stock/remark', data),
 }

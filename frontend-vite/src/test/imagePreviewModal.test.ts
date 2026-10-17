@@ -14,7 +14,7 @@
 import { describe, it, expect } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { nextTick } from 'vue'
-import ImagePreviewModal from '@/views/pattern-room/components/ImagePreviewModal.vue'
+import ImagePreviewModal from '@/components/ui/ImagePreviewModal.vue'
 
 /**
  * reka-ui DismissableLayer 在 window.setTimeout(0) 后才挂上监听；事件回调又在

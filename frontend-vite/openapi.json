@@ -20184,6 +20184,116 @@
         }
       }
     },
+    "/api/v1/finished-stock/export": {
+      "get": {
+        "tags": [
+          "成品库存"
+        ],
+        "summary": "Export Finished Stock",
+        "description": "导出当前筛选（客户 + 搜索词）的成品库存为 Excel。",
+        "operationId": "export_finished_stock_api_v1_finished_stock_export_get",
+        "parameters": [
+          {
+            "name": "customer",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "客户名称筛选（精确）",
+              "default": "",
+              "title": "Customer"
+            },
+            "description": "客户名称筛选（精确）"
+          },
+          {
+            "name": "product",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "产品名称/69码搜索",
+              "default": "",
+              "title": "Product"
+            },
+            "description": "产品名称/69码搜索"
+          },
+          {
+            "name": "batch_no",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "批次号筛选（精确）",
+              "default": "",
+              "title": "Batch No"
+            },
+            "description": "批次号筛选（精确）"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/finished-stock/remark": {
+      "put": {
+        "tags": [
+          "成品库存"
+        ],
+        "summary": "Upsert Remark",
+        "description": "页面级备注 UPSERT：键 (客户,产品,批次) 一行一条；内容清空即删除。",
+        "operationId": "upsert_remark_api_v1_finished_stock_remark_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FinishedStockRemarkUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FinishedStockRemarkResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/": {
       "get": {
         "tags": [
@@ -26336,6 +26446,17 @@
             "title": "Image",
             "default": ""
           },
+          "image_thumb": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Thumb"
+          },
           "batch_in_qty": {
             "type": "integer",
             "title": "Batch In Qty",
@@ -26355,6 +26476,11 @@
             "type": "string",
             "title": "Custom Country",
             "default": ""
+          },
+          "remark": {
+            "type": "string",
+            "title": "Remark",
+            "default": ""
           }
         },
         "type": "object",
@@ -26363,6 +26489,59 @@
         ],
         "title": "FinishedStockItem",
         "description": "成品库存聚合行（客户 + 产品 + 批次）"
+      },
+      "FinishedStockRemarkResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "default": true
+          },
+          "remark": {
+            "type": "string",
+            "title": "Remark",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "title": "FinishedStockRemarkResponse"
+      },
+      "FinishedStockRemarkUpdate": {
+        "properties": {
+          "customer_name": {
+            "type": "string",
+            "maxLength": 100,
+            "title": "Customer Name",
+            "description": "客户名称（与聚合行展示值一致；空=未指定客户）",
+            "default": ""
+          },
+          "product_id": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Product Id",
+            "description": "产品ID"
+          },
+          "batch_no": {
+            "type": "string",
+            "maxLength": 100,
+            "title": "Batch No",
+            "description": "批次号（空=未分批次）",
+            "default": ""
+          },
+          "remark": {
+            "type": "string",
+            "maxLength": 2000,
+            "title": "Remark",
+            "description": "备注内容（清空即删除）",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "product_id"
+        ],
+        "title": "FinishedStockRemarkUpdate",
+        "description": "成品库存页备注更新（UPSERT；remark 清空即删除该行）"
       },
       "FinishedStockSummaryResponse": {
         "properties": {

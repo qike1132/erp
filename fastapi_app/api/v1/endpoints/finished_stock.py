@@ -1,21 +1,31 @@
 """成品库存（批次级）API 端点
 
-只读：按 客户/产品/批次 聚合成品库存 + 某产品的批次可用量列表。
+按 客户/产品/批次 聚合成品库存 + 某产品的批次可用量列表 + Excel 导出 + 页面备注维护。
 真相源与 /stock 同源（daily_production_record 包装部 + stock_out 批次扣减）。
 """
-from fastapi import APIRouter, Depends, Query
+import io
+from urllib.parse import quote
+
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi_app.core.database import get_async_read_db
+from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_any_permission
+from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.schemas.finished_stock import (
     BatchListResponse,
+    FinishedStockRemarkResponse,
+    FinishedStockRemarkUpdate,
     FinishedStockSummaryResponse,
 )
 from fastapi_app.services import finished_stock_service
 from fastapi_app.shared_models import User
 
 router = APIRouter()
+
+# 导出最大行数（仿 stock.py 的 MAX_EXPORT_INVENTORY_ROWS），防 openpyxl 全量内存构建 OOM
+MAX_EXPORT_ROWS = 10000
 
 
 @router.get('/summary', response_model=FinishedStockSummaryResponse)
@@ -55,3 +65,74 @@ async def product_batches(
     """某产品的批次可用量列表（供 /stock-out 录入 SKU 后带出批次选择）。"""
     rows = await finished_stock_service.get_batches_by_product(db, product_id, customer_name=customer)
     return BatchListResponse(data=rows)
+
+
+def _build_finished_stock_excel(rows: list[dict]) -> bytes:
+    """生成成品库存导出 Excel（在线程中调用，避免阻塞事件循环）。"""
+    import openpyxl
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = '成品库存'
+    ws.append(['客户', '产品名称', '69码', '批次号', '库存', '定制', '定制国家'])
+    for r in rows:
+        ws.append([
+            r['customer_name'] or '',
+            r['product_name'] or '',
+            r['barcode'] or '',
+            r['batch_no'] or '',
+            r['batch_available'],
+            '是' if r['is_custom'] else '',
+            r['custom_country'] or '',
+        ])
+    out = io.BytesIO()
+    wb.save(out)
+    return out.getvalue()
+
+
+@router.get('/export')
+async def export_finished_stock(
+    customer: str = Query('', description='客户名称筛选（精确）'),
+    product: str = Query('', description='产品名称/69码搜索'),
+    batch_no: str = Query('', description='批次号筛选（精确）'),
+    db: AsyncSession = Depends(get_async_read_db),
+    _user: User = Depends(require_any_permission('stockin_manage', 'stock_view', 'finished_stock_view')),
+) -> StreamingResponse:
+    """导出当前筛选（客户 + 搜索词）的成品库存为 Excel。"""
+    import asyncio
+
+    result = await finished_stock_service.get_finished_stock_summary(
+        db, customer_name=customer, product_search=product, batch_no=batch_no,
+        page=1, per_page=MAX_EXPORT_ROWS,
+    )
+    if result['total'] > MAX_EXPORT_ROWS:
+        raise HTTPException(status_code=400, detail=f'数据量过大({result["total"]}条)，请缩小查询范围后重试')
+
+    excel = await asyncio.to_thread(_build_finished_stock_excel, result['data'])
+    buffer = io.BytesIO(excel)
+    buffer.seek(0)
+    filename = '成品库存.xlsx'
+    return StreamingResponse(
+        buffer,
+        media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        headers={'Content-Disposition': f"attachment; filename*=UTF-8''{quote(filename)}"},
+    )
+
+
+@router.put('/remark', response_model=FinishedStockRemarkResponse)
+async def upsert_remark(
+    data: FinishedStockRemarkUpdate = Body(...),
+    db: AsyncSession = Depends(get_async_db),
+    # 备注是页面维护动作，与 /finished-stock 读同权限（含本页导航码）
+    _user: User = Depends(require_any_permission('stockin_manage', 'stock_view', 'finished_stock_view')),
+) -> FinishedStockRemarkResponse:
+    """页面级备注 UPSERT：键 (客户,产品,批次) 一行一条；内容清空即删除。"""
+    async with db_transaction(db):
+        await finished_stock_service.upsert_remark(
+            db,
+            customer_name=data.customer_name,
+            product_id=data.product_id,
+            batch_no=data.batch_no,
+            remark=data.remark,
+        )
+    return FinishedStockRemarkResponse(success=True, remark=data.remark)

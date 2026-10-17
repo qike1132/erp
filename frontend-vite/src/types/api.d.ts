@@ -1179,10 +1179,24 @@ export interface FinishedStockItem {
   barcode?: string
   batch_no?: string
   image?: string
+  image_thumb?: string | null
   batch_in_qty?: number
   batch_available?: number
   is_custom?: boolean
   custom_country?: string
+  remark?: string
+}
+
+export interface FinishedStockRemarkResponse {
+  success?: boolean
+  remark?: string
+}
+
+export interface FinishedStockRemarkUpdate {
+  customer_name?: string
+  product_id: number
+  batch_no?: string
+  remark?: string
 }
 
 export interface FinishedStockSummaryResponse {

@@ -161,11 +161,16 @@ export interface FinishedStockItem {
   product_name: string
   barcode: string
   batch_no: string
+  /** 原图 URL（已出站签名）；点击缩略图预览用它 */
   image: string
+  /** 列表缩略图 URL（确定性后缀派生，已签名）；列表 img 用它 */
+  image_thumb: string | null
   batch_in_qty: number
   batch_available: number
   is_custom: boolean
   custom_country: string
+  /** 本页备注（按 客户+产品+批次 一行一条，页面自己维护） */
+  remark: string
 }
 
 export interface FinishedStockSummary {

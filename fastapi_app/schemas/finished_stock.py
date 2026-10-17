@@ -1,5 +1,5 @@
 """成品库存（批次级）Pydantic 模型"""
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class FinishedStockItem(BaseModel):
@@ -10,10 +10,12 @@ class FinishedStockItem(BaseModel):
     barcode: str = ''
     batch_no: str = ''
     image: str = ''
+    image_thumb: str | None = None
     batch_in_qty: int = 0
     batch_available: int = 0
     is_custom: bool = False
     custom_country: str = ''
+    remark: str = ''
 
     @field_validator('image', mode='after')
     @classmethod
@@ -32,6 +34,22 @@ class FinishedStockItem(BaseModel):
         if parsed.scheme or parsed.netloc:
             return v
         return sign_upload_url(v)
+
+    @model_validator(mode='after')
+    def derive_image_thumb(self) -> 'FinishedStockItem':
+        """出站派生缩略图 URL（列表用），与 ProductResponse.derive_image_thumb 同口径。
+
+        缩略图 key 是确定性后缀（get_thumbnail_key 追加 .thumb.webp），无需加列/迁移；
+        文件不存在时前端 404 回退原图（列表用 image_thumb，预览用 image=原图）。
+        """
+        img = self.image
+        if img and img.startswith('/static/uploads/'):
+            from fastapi_app.services.signed_urls import sign_upload_url
+            from fastapi_app.services.storage_service import get_thumbnail_key
+
+            bare = img.split('?', 1)[0]
+            self.image_thumb = sign_upload_url(get_thumbnail_key(bare))
+        return self
 
 
 class FinishedStockSummaryResponse(BaseModel):
@@ -55,3 +73,16 @@ class BatchListResponse(BaseModel):
     """批次列表响应（供 /stock-out 带出批次选择）"""
     success: bool = True
     data: list[BatchAvailableItem] = []
+
+
+class FinishedStockRemarkUpdate(BaseModel):
+    """成品库存页备注更新（UPSERT；remark 清空即删除该行）"""
+    customer_name: str = Field('', max_length=100, description='客户名称（与聚合行展示值一致；空=未指定客户）')
+    product_id: int = Field(..., gt=0, description='产品ID')
+    batch_no: str = Field('', max_length=100, description='批次号（空=未分批次）')
+    remark: str = Field('', max_length=2000, description='备注内容（清空即删除）')
+
+
+class FinishedStockRemarkResponse(BaseModel):
+    success: bool = True
+    remark: str = ''

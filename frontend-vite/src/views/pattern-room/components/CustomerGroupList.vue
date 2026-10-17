@@ -61,7 +61,7 @@ import EmptyState from './EmptyState.vue'
 import CustomerGroupSearchBar from './CustomerGroupSearchBar.vue'
 import CustomerMakerPanel from './CustomerMakerPanel.vue'
 import CustomerProjectArea from './CustomerProjectArea.vue'
-import ImagePreviewModal from './ImagePreviewModal.vue'
+import ImagePreviewModal from '@/components/ui/ImagePreviewModal.vue'
 import type { PatternMakerGroup, ProjectStatus } from '@/api/patternRoom'
 import { useProjectGrouping } from '../composables/useProjectGrouping'
 
