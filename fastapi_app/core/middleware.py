@@ -244,14 +244,19 @@ def _setup_csrf(app: FastAPI) -> None:
                 # 原先两支都不进（无 else）→ CSRF 与 Origin 双双不校验，而 deps 的
                 # 认证链在 Bearer 解码失败时会静默回落 Cookie —— 攻击者以
                 # credentials:'include' + 伪 Bearer 头即可借受害者 Cookie 认证。
-                # 按「存在 Cookie 会话就按 Cookie 请求对待」收口：必须过 double-submit。
-                csrf_cookie = request.cookies.get("fastapi_csrf_token")
-                csrf_header = request.headers.get("X-CSRF-Token")
-                if not csrf_cookie or not csrf_header or not secrets.compare_digest(csrf_cookie, csrf_header):
-                    return JSONResponse(
-                        status_code=403,
-                        content={"detail": "CSRF token 验证失败"},
-                    )
+                # 只按「存在会话 cookie」（access_token/refresh_token，即 deps.py
+                # 回落读取的那两个键）收口；不能按「任意 cookie」判定——本中间件
+                # 每次响应都下发 fastapi_csrf_token，按任意 cookie 判会让带 cookie
+                # jar 的 Bearer 客户端（e2e 写路径用例、contract_snapshot、外部
+                # 集成）从第二个写请求起被一律 403。
+                if request.cookies.get("access_token") or request.cookies.get("refresh_token"):
+                    csrf_cookie = request.cookies.get("fastapi_csrf_token")
+                    csrf_header = request.headers.get("X-CSRF-Token")
+                    if not csrf_cookie or not csrf_header or not secrets.compare_digest(csrf_cookie, csrf_header):
+                        return JSONResponse(
+                            status_code=403,
+                            content={"detail": "CSRF token 验证失败"},
+                        )
 
         response = await call_next(request)
 

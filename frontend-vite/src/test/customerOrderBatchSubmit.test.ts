@@ -231,4 +231,30 @@ describe('submitAll 部分失败语义', () => {
     await submitAll()
     expect(stagedItems.value).toHaveLength(1) // 不清空
   })
+  it('OCR 评审：失败分组里带出货计划的行不虚报「已同步出货计划」计数', async () => {
+    const a = item('pa1', 'order'); const b = item('pb1', 'order')
+    a.shipmentPlans = [{ date: '2026-10-20', quantity: 3, note: '' }]
+    b.shipmentPlans = [{ date: '2026-10-20', quantity: 3, note: '' }]
+    b.customer = '失败客户'
+    const { submitAll } = setup([a, b])
+    mocks.postMock.mockImplementation((url: string) => {
+      if (url === ORDERS_URL) {
+        return Promise.resolve({
+          success: true, created_count: 1,
+          results: [
+            { success: true, customer: '审计客户' },
+            { success: false, customer: '失败客户', error: '校验失败' },
+          ],
+        })
+      }
+      return Promise.reject(new Error(`unexpected url ${url}`))
+    })
+    const { submitAll: _ } = { submitAll: () => Promise.resolve() }
+    const api = { submitAll }
+    await api.submitAll()
+    const successTexts = vi.mocked(showToast).mock.calls.map((c) => String(c[0]))
+    const claimed = successTexts.find((t) => t.includes('已同步出货计划'))
+    expect(claimed).toBeDefined()
+    expect(claimed).toContain('1 条已同步出货计划') // 只有成功分组那 1 条
+  })
 })

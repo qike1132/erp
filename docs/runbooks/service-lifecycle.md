@@ -266,7 +266,7 @@ nssm restart erp-prod                      # 旧 prod_runner 重新拉起 nginx
 **该文件会谎报**，且其字段本身有两个坑：
 
 - `mode`/`status`：**不可信**。必须交叉验证：声明的 pid 是否存活 + 端口归属 + 真实 HTTP 响应 + 日志写入。
-- `started_at`：**是「本次写盘时刻」，不是进程启动时刻**（`prod_runner.py:715` 的 `_iso_now()`），
+- `started_at`：监督器启动时刻（2026-10-17 F-OPS-DEPLOY-11 修正；此前曾是写盘时刻）。写盘时刻/新鲜度判据见 `last_write_at`（超过 15s 未更新视为 stale）,
   实测偏差可达 **28 分钟**。⇒ **别用它判断「服务是否刚重启」**，用进程 `create_time`。
 
 ### 5.5 「Redis 挂了，每个 POST 都慢 4 秒」

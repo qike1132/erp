@@ -192,10 +192,12 @@ export function useStagedItems() {
     const body = (res as { data?: BatchSubmitOrdersResponse } | null)?.data ?? res
     const results = (body as { results?: { success?: boolean; customer?: string }[] } | null)?.results
     if (!Array.isArray(results)) return null
+    // 任一 result 缺 customer 即视为形状不符（无法把分组回映射到暂存行），
+    // 调用方退回整批口径——空串 key 会静默匹配不到任何客户。
+    if (results.some((r) => !r?.customer)) return null
     const failedCustomers = new Set(
-      results.filter((r) => r?.success !== true).map((r) => String(r?.customer ?? '')).filter(Boolean),
+      results.filter((r) => r?.success !== true).map((r) => String(r?.customer ?? '')),
     )
-    if (results.some((r) => r?.success !== true && !r?.customer)) return null // 无法映射
     const createdCount = results.filter((r) => r?.success === true).length
     return {
       /** 成功分组的客户名集合 */
@@ -218,14 +220,30 @@ export function useStagedItems() {
       // 「带计划」计数与 payload 同点定稿：submitGroup 的两个 await 期间
       // removeStagedItem 可能让暂存区变短，事后过滤会漏算
       const orderWithPlans = stagedOrders.value.filter((i) => i.shipmentPlans.length > 0).length
+      // 带计划行所属的客户集合（同点定稿，供成功分组收敛播报计数）
+      const orderPlanCustomers = new Set(
+        stagedOrders.value.filter((i) => i.shipmentPlans.length > 0).map((i) => i.customer),
+      )
 
       // 两类条目各自独立提交：其一失败不阻断另一类，
       // 也不会把「从未尝试」错当成「已成功」（后者曾导致条目被静默移出暂存区）。
       const order = await submitGroup(stockApi.batchSubmitOrders, orderPayload, '订单')
       const stockin = await submitGroup(stockApi.batchSubmitStockins, stockinPayload, '备货')
 
-      // 在移除暂存项之前捕获「成功提交且带计划」的条目数（await 前已定稿），供播报使用
-      const syncedPlanCount = order.attempted && !order.failed ? orderWithPlans : 0
+      // 订单逐组结果先算（syncedPlanCount、移除、播报三处都要用）
+      const orderRes = order.attempted && !order.failed
+        ? orderOutcome(orderPayload, order.res)
+        : null
+
+      // 「带计划且提交成功」的条目数：orderRes 可用（results 带 customer）时按
+      // 成功分组收敛——失败分组里带计划的行没建过计划，计入会虚报
+      // 「其中 N 条已同步出货计划」（OCR 评审 2026-10-17）；orderRes 为 null
+      // （形状不符）时退回旧的整批口径。orderPlanCustomers 在 await 前定稿（见上）。
+      const syncedPlanCount = order.attempted && !order.failed
+        ? (orderRes
+            ? [...orderPlanCustomers].filter((c) => orderRes.okCustomers.has(c)).length
+            : orderWithPlans)
+        : 0
       // 备货按**逐条结果**统计：请求返回 200 不代表每条都入库成功
       const stockinRes = stockin.attempted && !stockin.failed
         ? stockinOutcome(stockinPayload, stockin.res)
@@ -240,9 +258,6 @@ export function useStagedItems() {
       // 订单按**逐组结果**移除（F-FE-DESK-CORE-03：原先 HTTP 200 即整批清空，
       // 失败分组的行在工作区凭空消失且播报成功）。按成功分组的 customer 回映射；
       // 无法映射时保守保留全部待人工核对。
-      const orderRes = order.attempted && !order.failed
-        ? orderOutcome(orderPayload, order.res)
-        : null
       if (order.attempted && !order.failed) {
         if (orderRes) {
           dropUids(orderUids.filter((uid) => {
