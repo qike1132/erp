@@ -203,7 +203,7 @@ describe('S12 移动端数据层统一', () => {
       const wrapper = mount(MStockView)
       await flushPromises()
 
-      expect(mocks.stockApi.inventory).toHaveBeenCalledWith({ page: 1, per_page: MOBILE_LIST_PAGE_SIZE, product: '' })
+      expect(mocks.stockApi.inventory).toHaveBeenCalledWith({ page: 1, per_page: MOBILE_LIST_PAGE_SIZE, product: '', stock_status: '' })
       const text = wrapper.text()
       expect(text).toContain('PP棉')
       expect(text).toContain('M01')
@@ -216,13 +216,16 @@ describe('S12 移动端数据层统一', () => {
       expect(wrapper.find('.m-stock-qty-val.high').exists()).toBe(true)
     })
 
-    it('「在库 / 零库存」筛选按 current_stock 判定', async () => {
-      mocks.stockApi.inventory.mockResolvedValue(
-        inventoryResponse([
-          inventoryItem(),
-          inventoryItem({ product_id: 8, product_name: '拉链', current_stock: 0 }),
-        ]),
-      )
+    it('「在库 / 零库存」筛选下推服务端（AUD-22）', async () => {
+      const all = [
+        inventoryItem(),
+        inventoryItem({ product_id: 8, product_name: '拉链', current_stock: 0 }),
+      ]
+      mocks.stockApi.inventory.mockImplementation((params: { stock_status?: string }) => {
+        const status = params?.stock_status
+        const data = status === 'zero' ? [all[1]!] : status === 'active' ? [all[0]!] : all
+        return Promise.resolve(inventoryResponse(data))
+      })
 
       const wrapper = mount(MStockView)
       await flushPromises()
@@ -230,11 +233,19 @@ describe('S12 移动端数据层统一', () => {
       const vm = wrapper.vm as unknown as { selectedTab: string }
       vm.selectedTab = 'zero'
       await nextTick()
+      await flushPromises()
+      expect(mocks.stockApi.inventory).toHaveBeenLastCalledWith(
+        expect.objectContaining({ stock_status: 'zero', page: 1 }),
+      )
       expect(wrapper.text()).toContain('拉链')
       expect(wrapper.text()).not.toContain('PP棉')
 
       vm.selectedTab = 'active'
       await nextTick()
+      await flushPromises()
+      expect(mocks.stockApi.inventory).toHaveBeenLastCalledWith(
+        expect.objectContaining({ stock_status: 'active', page: 1 }),
+      )
       expect(wrapper.text()).toContain('PP棉')
       expect(wrapper.text()).not.toContain('拉链')
     })

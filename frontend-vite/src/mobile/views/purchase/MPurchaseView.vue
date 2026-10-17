@@ -52,10 +52,17 @@
             </template>
           </MListItem>
         </MList>
+        <UiPagination
+          v-if="(unprocessed?.total || 0) > MOBILE_PAGE_SIZE"
+          :current-page="unprocessedPage"
+          :total-pages="Math.ceil((unprocessed?.total || 0) / MOBILE_PAGE_SIZE)"
+          :total-items="unprocessed?.total || 0"
+          @update:current-page="(p: number) => { unprocessedPage = p; loadUnprocessed(p) }"
+        />
       </template>
 
       <template v-if="activeTab === 'completed'">
-        <MSearchBar v-model="completedKeyword" placeholder="搜索已完成订单..." @search="loadCompleted()" />
+        <MSearchBar v-model="completedKeyword" placeholder="搜索已完成订单..." @search="searchCompleted" />
         <div v-if="completedLoading" class="m-center"><MSpinner size="lg" /></div>
         <MEmpty v-else-if="!completedOrders?.orders?.length" title="暂无已完成订单" />
         <MList v-else header="已完成">
@@ -72,6 +79,13 @@
             </template>
           </MListItem>
         </MList>
+        <UiPagination
+          v-if="(completedOrders?.total || 0) > MOBILE_PAGE_SIZE"
+          :current-page="completedPage"
+          :total-pages="Math.ceil((completedOrders?.total || 0) / MOBILE_PAGE_SIZE)"
+          :total-items="completedOrders?.total || 0"
+          @update:current-page="(p: number) => { completedPage = p; loadCompleted(p) }"
+        />
       </template>
     </div>
 
@@ -144,6 +158,7 @@ const detailTime = computed(() => {
 })
 
 async function refetchOrders(page = 1) {
+  ordersPage.value = page
   ordersLoading.value = true
   try { orders.value = await purchaseApi.orders({ page, per_page: MOBILE_PAGE_SIZE, keyword: keyword.value }) } finally { ordersLoading.value = false }
 }
@@ -151,13 +166,20 @@ async function refetchOrders(page = 1) {
 async function loadUnprocessed(page = 1) {
   // 注：/unprocessed-orders 端点无 keyword 参数（审计 F-FE-MOBILE-04 仅
   // 采购中/已完成两个页签的后端支持搜索），此页签搜索待端点增强后接线。
+  unprocessedPage.value = page
   unprocessedLoading.value = true
   try { unprocessed.value = await purchaseApi.unprocessedOrders({ page, per_page: MOBILE_PAGE_SIZE }) } finally { unprocessedLoading.value = false }
 }
 
 async function loadCompleted(page = 1) {
+  completedPage.value = page
   completedLoading.value = true
   try { completedOrders.value = await purchaseApi.completed({ page, per_page: MOBILE_PAGE_SIZE, keyword: completedKeyword.value }) } finally { completedLoading.value = false }
+}
+
+/** 搜索已完成订单：重置到第 1 页（否则会在旧页码上检索，结果为空） */
+function searchCompleted() {
+  loadCompleted(1)
 }
 
 function showOrderDetail(order: PurchaseOrder | UnprocessedOrder) {

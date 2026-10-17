@@ -348,6 +348,7 @@ async def list_stockout_records(
 async def inventory(
     customer: str = Query('', description='客户名称筛选'),
     product: str = Query('', description='产品名称筛选'),
+    stock_status: str = Query('', pattern='^(zero|active)?$', description='库存状态筛选：zero=零库存 / active=有库存'),
     page: int = Query(1, ge=1, description='页码'),
     per_page: int = Query(50, ge=1, le=200, description='每页数量'),
     db: AsyncSession = Depends(get_async_read_db),
@@ -371,7 +372,7 @@ async def inventory(
     """
     result = await stock_service.get_inventory_paginated(
         db, search_customer=customer, search_product=product,
-        page=page, per_page=per_page,
+        page=page, per_page=per_page, stock_status=stock_status,
     )
     return InventoryResponse(
         data=result['inventory_data'],

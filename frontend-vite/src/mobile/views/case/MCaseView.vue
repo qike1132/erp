@@ -56,6 +56,13 @@
             <template #value>{{ it.current_stock }}</template>
           </MListItem>
         </MList>
+        <UiPagination
+          v-if="invTotal > MOBILE_LIST_PAGE_SIZE"
+          :current-page="invPage"
+          :total-pages="Math.ceil(invTotal / MOBILE_LIST_PAGE_SIZE)"
+          :total-items="invTotal"
+          @update:current-page="(p: number) => { invPage = p; loadInventory() }"
+        />
       </template>
 
       <!-- 皮套设置（产品 → 配件维护） -->
@@ -105,6 +112,7 @@
  */
 import { ref, onMounted } from 'vue'
 import { caseApi } from '@/api'
+import { MOBILE_LIST_PAGE_SIZE } from '@/mobile/constants'
 import type { CaseSearchItem, CaseItem, CaseMovementPayload, CaseProduct } from '@/api/case'
 import { showToast } from '@/composables/useToast'
 import { toISODate } from '@/utils/format'
@@ -179,25 +187,36 @@ async function submit() {
 const invKeyword = ref('')
 const inventory = ref<CaseItem[]>([])
 const invLoading = ref(false)
+const invPage = ref(1)
+const invTotal = ref(0)
 
 async function loadInventory() {
   invLoading.value = true
   try {
-    const res = await caseApi.inventory({ search: invKeyword.value || undefined, per_page: 200 })
+    // 2026-10-17 审计 AUD-22：服务端分页（此前固定 per_page=200 无页码，
+    // 第 201 条起永久不可达）
+    const res = await caseApi.inventory({
+      search: invKeyword.value || undefined,
+      page: invPage.value,
+      per_page: MOBILE_LIST_PAGE_SIZE,
+    })
     const flat: CaseItem[] = []
     for (const node of res.inventory) {
       flat.push(node)
       flat.push(...node.children)
     }
     inventory.value = flat
+    invTotal.value = res.total ?? 0
   } catch {
     inventory.value = []
+    invTotal.value = 0
   } finally {
     invLoading.value = false
   }
 }
 
 function onInvSearch() {
+  invPage.value = 1
   void loadInventory()
 }
 

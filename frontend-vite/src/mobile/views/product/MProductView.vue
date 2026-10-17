@@ -36,6 +36,14 @@
       </div>
 
       <MEmpty v-else :title="searchQuery ? '未找到匹配产品' : '暂无产品数据'" />
+
+      <UiPagination
+        v-if="totalItems > MOBILE_LIST_PAGE_SIZE"
+        :current-page="page"
+        :total-pages="Math.ceil(totalItems / MOBILE_LIST_PAGE_SIZE)"
+        :total-items="totalItems"
+        @update:current-page="(p: number) => { page = p; loadProducts() }"
+      />
     </template>
   </div>
 </template>
@@ -54,6 +62,8 @@ import MEmpty from '@/mobile/components/MEmpty.vue'
 const products = ref<Product[]>([])
 const loading = ref(true)
 const searchQuery = ref('')
+const page = ref(1)
+const totalItems = ref(0)
 
 // F-FE-MOBILE-07 后本地过滤已冗余（搜索走服务端 search，含 name/barcode/spec
 // ilike），保留 computed 仅作切页时的即时过滤——与后端口径一致，不再自带
@@ -62,18 +72,22 @@ const filteredProducts = computed(() => products.value)
 
 function handleSearch(val: string) {
   searchQuery.value = val
-  loadProducts() // 服务端搜索：关键词变化即重查
+  page.value = 1 // 2026-10-17 审计 AUD-22：搜索必须回到第 1 页
+  loadProducts()
 }
 
 async function loadProducts() {
   loading.value = true
   try {
-    // F-FE-MOBILE-07：服务端搜索（原先只拉 200 条本地过滤，第 201 条起「未找到匹配」是假阴性）
-    const res = await productApi.list({ page: 1, per_page: MOBILE_LIST_PAGE_SIZE, search: searchQuery.value })
+    // F-FE-MOBILE-07：服务端搜索；AUD-22：服务端分页（此前固定 page=1，
+    // 第 201 条起永久不可达）
+    const res = await productApi.list({ page: page.value, per_page: MOBILE_LIST_PAGE_SIZE, search: searchQuery.value })
     products.value = res.items ?? []
+    totalItems.value = res.total ?? 0
   } catch (e) {
     console.error('[MProductView] load failed:', e)
     products.value = []
+    totalItems.value = 0
   } finally {
     loading.value = false
   }

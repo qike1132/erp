@@ -2,7 +2,7 @@
   <div class="m-page">
     <MobileNavBar title="批次号查询" :show-back="true" />
     <div class="m-page-body">
-      <MSearchBar v-model="keyword" placeholder="搜索批次号/产品/客户..." @search="handleSearch" />
+      <MSearchBar v-model="keyword" placeholder="搜索批次号/产品/客户..." @search="resetAndSearch" />
 
       <MFilterChips v-model="statusFilter" :chips="statusChips" />
 
@@ -18,7 +18,7 @@
           <MList>
             <MListItem
               v-for="item in group.items"
-              :key="item.id || item.order_id"
+              :key="item.id"
               :title="item.product_name || '—'"
               :subtitle="`批次: ${item.batch_no || '未分配'} · ${item.quantity || 0}件`"
             >
@@ -29,13 +29,22 @@
           </MList>
         </div>
       </div>
+
+      <UiPagination
+        v-if="totalItems > MOBILE_PAGE_SIZE"
+        :current-page="page"
+        :total-pages="Math.ceil(totalItems / MOBILE_PAGE_SIZE)"
+        :total-items="totalItems"
+        @update:current-page="(p: number) => { page = p; handleSearch() }"
+      />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { batchApi } from '@/api'
+import { MOBILE_PAGE_SIZE } from '@/mobile/constants'
 import type { BatchQueryItem } from '@/types'
 import MobileNavBar from '@/mobile/layouts/components/MobileNavBar.vue'
 import MSearchBar from '@/mobile/components/MSearchBar.vue'
@@ -57,6 +66,8 @@ const statusChips = [
 ]
 const rawList = ref<BatchItem[]>([])
 const loading = ref(false)
+const page = ref(1)
+const totalItems = ref(0)
 
 const groups = computed(() => {
   // 后端返回的是扁平 BatchQueryItem[]，按客户分组以保留原 UI 结构
@@ -72,10 +83,25 @@ const groups = computed(() => {
 async function handleSearch() {
   loading.value = true
   try {
-    const res = await batchApi.list({ keyword: keyword.value, status: statusFilter.value === 'all' ? '' : statusFilter.value, page: 1, per_page: 50 })
+    // 2026-10-17 审计 AUD-22：服务端分页（此前固定 page=1，第 51 条起不可达）
+    const res = await batchApi.list({
+      keyword: keyword.value,
+      status: statusFilter.value === 'all' ? '' : statusFilter.value,
+      page: page.value,
+      per_page: MOBILE_PAGE_SIZE,
+    })
     rawList.value = res?.data || []
+    totalItems.value = res?.total ?? 0
   } finally { loading.value = false }
 }
+
+// 状态切换必须回到第 1 页；搜索词由搜索框显式提交（避免逐字符请求）
+function resetAndSearch() {
+  page.value = 1
+  handleSearch()
+}
+
+watch(statusFilter, resetAndSearch)
 
 onMounted(handleSearch)
 

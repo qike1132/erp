@@ -415,20 +415,26 @@ async def get_inventory(db: AsyncSession, search_customer: str='', search_produc
 
 
 @cache_result(key_prefix="inventory:paginated", ttl=120, local_ttl=60,
-             key_builder=lambda **kwargs: f"{kwargs.get('search_customer','')}-{kwargs.get('search_product','')}-{kwargs.get('page',1)}-{kwargs.get('per_page',50)}")
+             key_builder=lambda **kwargs: f"{kwargs.get('search_customer','')}-{kwargs.get('search_product','')}-{kwargs.get('stock_status','')}-{kwargs.get('page',1)}-{kwargs.get('per_page',50)}")
 async def get_inventory_paginated(db: AsyncSession, search_customer: str = '', search_product: str = '',
-                                  page: int = 1, per_page: int = 50) -> dict:
+                                  page: int = 1, per_page: int = 50,
+                                  stock_status: str = '') -> dict:
     """
     库存分页查询 - SQL CTE 优化版
     将4次聚合查询合并为单次 CTE 查询，在数据库层面完成合并、过滤和分页，
     避免加载全量数据到 Python 内存。20K+ 条数据时响应时间从秒级降至百毫秒级。
+
+    stock_status（2026-10-17 审计 AUD-22）：zero=仅零库存行 / active=仅有库存行，
+    空串=不过滤。此前移动端在截断后的首页数据上做本地过滤，跨页结果失真。
     """
     # 仅在有产品搜索时才加载产品ID列表；无搜索时跳过 ANY(:pids) 条件避免20K元素数组导致全表扫描
     product_ids = await _resolve_products(db, search_product) if search_product else None
     if search_product and not product_ids:
         return _empty_inventory_response(page, per_page)
 
-    params, clauses, pids_param = _build_inventory_filter_params(search_product, search_customer, product_ids)
+    params, clauses, pids_param = _build_inventory_filter_params(
+        search_product, search_customer, product_ids, stock_status,
+    )
     cte_sql = _build_inventory_cte_sql(clauses)
 
     params['limit'] = per_page
@@ -493,13 +499,14 @@ async def get_inventory_balance(db: AsyncSession, product_id: int) -> int:
 
 
 def _build_inventory_filter_params(search_product: str, search_customer: str,
-                                   product_ids: list[int] | None) -> tuple[dict, dict, tuple[int, ...] | None]:
+                                   product_ids: list[int] | None,
+                                   stock_status: str = '') -> tuple[dict, dict, tuple[int, ...] | None]:
     """构建库存查询的过滤参数和SQL片段。
 
     Returns:
         (params, clauses) - params: 查询参数字典; clauses: SQL片段字典
     """
-    params: dict = {'sc_is_empty': not bool(search_customer)}
+    params: dict = {'sc_is_empty': not bool(search_customer), 'stock_status': stock_status}
     pid_clause = ''
     pids_param = None
     if search_product and product_ids:
@@ -661,6 +668,8 @@ SELECT f.product_id, f.customer, f.product_name, f.product_barcode,
     SUM(f.remaining) OVER() AS sum_order,
     SUM(f.total_qty) OVER() AS sum_stock
 FROM filtered f
+WHERE (:stock_status <> 'zero' OR f.inventory_balance <= 0)
+  AND (:stock_status <> 'active' OR f.inventory_balance > 0)
 ORDER BY f.customer, f.product_name
 LIMIT :limit OFFSET :offset
 """)  # nosec B608 - clauses 为模块级常量，值通过绑定参数传递

@@ -2,7 +2,7 @@
   <div class="m-stock">
     <!-- Search Bar -->
     <div class="m-stock-search">
-      <MSearchBar v-model="searchQuery" placeholder="搜索物料名称或编码…" @search="loadStock" />
+      <MSearchBar v-model="searchQuery" placeholder="搜索物料名称或编码…" @search="onSearch" />
     </div>
 
     <!-- Filter Tabs -->
@@ -44,12 +44,20 @@
       </div>
 
       <MEmpty v-else :title="searchQuery ? '未找到匹配物料' : '暂无库存数据'" />
+
+      <UiPagination
+        v-if="totalItems > MOBILE_LIST_PAGE_SIZE"
+        :current-page="page"
+        :total-pages="Math.ceil(totalItems / MOBILE_LIST_PAGE_SIZE)"
+        :total-items="totalItems"
+        @update:current-page="(p: number) => { page = p; loadStock() }"
+      />
     </template>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { stockApi } from '@/api'
 import { MOBILE_LIST_PAGE_SIZE } from '@/mobile/constants'
 import type { InventoryItem } from '@/types'
@@ -64,6 +72,8 @@ const stockItems = ref<InventoryItem[]>([])
 const loading = ref(true)
 const searchQuery = ref('')
 const selectedTab = ref('all')
+const page = ref(1)
+const totalItems = ref(0)
 
 const tabOptions = [
   { value: 'all', label: '全部' },
@@ -71,24 +81,9 @@ const tabOptions = [
   { value: 'zero', label: '零库存' },
 ]
 
-const filteredStock = computed(() => {
-  let items = stockItems.value
-
-  if (selectedTab.value === 'zero') {
-    items = items.filter((i) => isOutOfStock(i))
-  } else if (selectedTab.value === 'active') {
-    items = items.filter((i) => (i.current_stock ?? 0) > 0)
-  }
-
-  if (searchQuery.value) {
-    const q = searchQuery.value.toLowerCase()
-    items = items.filter(
-      (i) => (i.product_name ?? '').toLowerCase().includes(q) || codeOf(i).toLowerCase().includes(q),
-    )
-  }
-
-  return items
-})
+// 2026-10-17 审计 AUD-22：库存状态筛选已下推服务端（stock_status），
+// 本地不再对截断后的首页数据过滤——否则「零库存」只反映前 200 条。
+const filteredStock = computed(() => stockItems.value)
 
 function formatQty(val: number | null | undefined): string {
   if (val == null) return '0'
@@ -114,16 +109,33 @@ function getQtyClass(item: InventoryItem): string {
 async function loadStock() {
   loading.value = true
   try {
-    // F-FE-MOBILE-07：服务端筛选（原先 200 条本地过滤，超量假阴性）
-    const res = await stockApi.inventory({ page: 1, per_page: MOBILE_LIST_PAGE_SIZE, product: searchQuery.value })
+    // F-FE-MOBILE-07：服务端筛选；AUD-22：库存状态同样下推服务端 + 服务端分页
+    const res = await stockApi.inventory({
+      page: page.value,
+      per_page: MOBILE_LIST_PAGE_SIZE,
+      product: searchQuery.value,
+      stock_status: selectedTab.value === 'all' ? '' : selectedTab.value,
+    })
     stockItems.value = res.data ?? []
+    totalItems.value = res.total_items ?? 0
   } catch (e) {
     console.error('[MStockView] load failed:', e)
     stockItems.value = []
+    totalItems.value = 0
   } finally {
     loading.value = false
   }
 }
+
+function onSearch() {
+  page.value = 1
+  loadStock()
+}
+
+watch(selectedTab, () => {
+  page.value = 1
+  loadStock()
+})
 
 onMounted(loadStock)
 </script>
