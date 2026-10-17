@@ -76,7 +76,13 @@ EXPECTED_CALL_SITES = {
     # 删除订单（order 域）：直写前的净变化量判定
     "fastapi_app/services/order/commands.py": {"assert_stock_available": 1},
     # 暂存出货确认：for 循环 + begin_nested 内抛 ValueError
-    "fastapi_app/services/staging/stockout.py": {"assert_stock_available": 1},
+    # 2026-10-17 审计 AUD-04：另加 2 处 check_stock_available 预检
+    # （Excel 导入 _build_stockout_entity + 编辑 _stockout_extra_updates），
+    # 只产出 stock_check_passed 展示结论，不抛异常。
+    "fastapi_app/services/staging/stockout.py": {
+        "assert_stock_available": 1,
+        "check_stock_available": 2,
+    },
     # 删除入库（-stockin.quantity）／修改入库数量（quantity - old_quantity）
     "fastapi_app/services/stock_in_service.py": {"assert_stock_available": 2},
     # 出货准入已校准为「客户+产品」订单余量口径（calculate_available_shipment_quantity）；
@@ -460,10 +466,11 @@ def test_call_sites_use_unified_entry(rel_path):
     assert _unified_calls(rel_path) == EXPECTED_CALL_SITES[rel_path]
 
 
-def test_total_call_sites_is_nine():
+def test_total_call_sites_is_eleven():
+    """统一入口调用点合计 11 处（2026-10-17 审计 AUD-04 新增 2 处预检）。"""
     total = sum(count for site in EXPECTED_CALL_SITES.values() for count in site.values())
-    assert total == 9
-    assert sum(sum(_unified_calls(rel).values()) for rel in IN_SCOPE_FILES) == 9
+    assert total == 11
+    assert sum(sum(_unified_calls(rel).values()) for rel in IN_SCOPE_FILES) == 11
 
 
 @pytest.mark.parametrize("rel_path", IN_SCOPE_FILES)
