@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi_app.core.cache_invalidation import cache_mgr, schedule_post_commit_invalidation
 from fastapi_app.core.domain_events import DomainEvent, DomainEventType, schedule_post_commit_domain_event
 from fastapi_app.core.exception_handler import safe_publish_event
+from fastapi_app.services.business_time import fmt_business
 from fastapi_app.services.notification_service import StockEvent
 from fastapi_app.services.stock_common import (
     _BUSINESS_TZ,
@@ -212,7 +213,7 @@ async def create_stockout(db: AsyncSession, product_id: int, quantity: int, cust
     # 采购计划重算与缓存失效由 purchase_plan_service 的事件处理器异步执行，解耦循环依赖
     # 提交后发布：订阅者（采购计划 FIFO 重算）用独立 session 读库，
     # 提交前发布会读不到本次出货行，按旧数据算错并落库
-    plan_month = stockout_date.strftime('%Y-%m') if stockout_date else ''
+    plan_month = fmt_business(stockout_date, '%Y-%m') if stockout_date else ''
     product_name = product.name if product is not None else ''
     schedule_post_commit_domain_event(db, DomainEvent(
         event_type=DomainEventType.STOCK_OUT_CREATED,
@@ -259,7 +260,7 @@ async def update_stockout(db: AsyncSession, stockout_id: int, new_quantity: int,
 
     # 领域事件总线：出库单更新 → 发布 STOCK_OUT_UPDATED 事件，触发采购计划缓存失效（异步）
     # 提交后发布（同 create_stockout：订阅者用独立 session 读库）
-    plan_month = stockout_obj.stockout_date.strftime('%Y-%m') if stockout_obj.stockout_date else ''
+    plan_month = fmt_business(stockout_obj.stockout_date, '%Y-%m') if stockout_obj.stockout_date else ''
     schedule_post_commit_domain_event(db, DomainEvent(
         event_type=DomainEventType.STOCK_OUT_UPDATED,
         domain='stock',
@@ -308,7 +309,7 @@ async def delete_stockout(db: AsyncSession, stockout_id: int, operator_id: int |
 
     # 领域事件总线：出库单删除 → 发布 STOCK_OUT_DELETED 事件，触发采购计划重算与缓存失效（异步）
     # 提交后发布（同 create_stockout：订阅者用独立 session 读库）
-    plan_month = stockout_obj.stockout_date.strftime('%Y-%m') if stockout_obj.stockout_date else ''
+    plan_month = fmt_business(stockout_obj.stockout_date, '%Y-%m') if stockout_obj.stockout_date else ''
     schedule_post_commit_domain_event(db, DomainEvent(
         event_type=DomainEventType.STOCK_OUT_DELETED,
         domain='stock',

@@ -309,6 +309,10 @@ class TestUpdateRecord:
         record.product_name = '产品A'
         record.quantity = 100
         record.unit_price = 50.0
+        # 60b90ef3 把库存直写改成 apply_stock_delta_locked 后，product_id 非 None 会走
+        # 真实库存联动并对 MagicMock 的 current_stock 做数值比较（TypeError）。
+        # 本用例只测「更新成功」本身，与同文件 create 用例同口径：product_id=None 跳过联动。
+        record.product_id = None
         record.to_dict.return_value = {'id': 1, 'quantity': 150}
 
         mock_async_db.execute = AsyncMock()
