@@ -28,7 +28,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from server_manager import log_ops, windows_ops
+from server_manager import git_guard, log_ops, windows_ops
 from server_manager.action_gate import _EMERGENCY_JOIN_SEC, ActionGate
 from server_manager.constants import (
     _API_PORT,
@@ -1337,6 +1337,14 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
         self._gate.start('启动生产服务', self._start_services_flow)
 
     def _start_services_flow(self):
+        # 2026-10-17 审计 AUD-28：生产启动前先过 git 分支闸门
+        # （NSSM AppDirectory = 本仓库工作区，非 main 分支会被直接跑进生产）
+        ok, guard_msg = git_guard.check_production_branch()
+        if not ok:
+            self._msg_queue.put(('log', {'text': f'拒绝启动：{guard_msg}', 'level': 'ERROR'}))
+            return
+        if guard_msg.startswith('警告') or '覆盖' in guard_msg:
+            self._msg_queue.put(('log', {'text': guard_msg, 'level': 'WARNING'}))
         # 互斥切换：停开发模式 + 清端口（含进程树终止等阻塞操作，在动作线程内完成）
         # ★ 日志对齐开发模式：原实现只有两行「erp-prod start 已执行」——NSSM start
         #   立即返回，不等待 RUNNING、不回灌服务日志，界面上一片安静像没反应。

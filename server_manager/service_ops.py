@@ -14,7 +14,7 @@ import shutil
 import subprocess
 import time
 
-from server_manager import windows_ops
+from server_manager import git_guard, windows_ops
 from server_manager.constants import (
     _IS_WINDOWS,
     _NSSM_CANDIDATES,
@@ -631,7 +631,17 @@ class ServiceOps:
         ★ 停机失败必须**中止本轮重启**（2026-10-16 实机事故）：曾有无视停机终态、
           无条件进入启动阶段的实现 —— broker 停不掉却照常启动 → arq 重连 6380 把
           被依赖服务永久钉死 → 下次重启同样失败（自锁循环）。停不掉就不起。
+        ★ 2026-10-17 审计 AUD-28：重启/启动前先过 git 分支闸门。NSSM 的
+          AppDirectory 是本仓库工作区，重启 = 把当前签出分支跑进生产
+          （2026-10-14 已有 75 分钟实害事故）。非 main 直接拒绝。
         """
+        if verb in ('restart', 'start'):
+            ok, msg = git_guard.check_production_branch()
+            if not ok:
+                self._msg_queue.put(('log', {'text': f'拒绝执行：{msg}', 'level': 'ERROR'}))
+                return
+            if msg.startswith('警告') or '覆盖' in msg:
+                self._msg_queue.put(('log', {'text': msg, 'level': 'WARNING'}))
         nssm = self.find_nssm()
         if verb == 'restart':
             # 清一次即可：清的是**非受管**端口占用，与迭代顺序无关，不必每个服务重扫。

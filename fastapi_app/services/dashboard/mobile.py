@@ -3,11 +3,16 @@
 从 dashboard_service.py 按主题拆出,行为与原实现完全一致。
 """
 import logging
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 
 from sqlalchemy import extract, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi_app.core.business_time import (
+    business_day_range,
+    business_month_range,
+    business_today,
+)
 from fastapi_app.core.cache import cache_result
 from fastapi_app.core.float_utils import round_money
 from fastapi_app.schemas.dashboard import (
@@ -262,9 +267,11 @@ async def _load_warehouse_data(
 async def _load_plans_data(db: AsyncSession, plans_data: dict[str, object]) -> None:
     """生产计划数据：从 purchase_plan_details 读取当月的生产计划明细与汇总。"""
     try:
-        now = datetime.now()
-        year = now.year
-        month = now.month
+        # 2026-10-17 审计 AUD-23：当月口径同样取业务时区（此前 datetime.now()
+        # 取服务器本地时区，是 dashboard 内第二处不同源）。
+        today = business_today()
+        year = today.year
+        month = today.month
 
         # 直接从 purchase_plan_details 表获取生产计划数据
         logger.info(f"从 purchase_plan_details 读取生产计划: year={year}, month={month}")
@@ -361,15 +368,15 @@ async def fetch_mobile_dashboard(
         try:
             selected_date = datetime.strptime(query_date, "%Y-%m-%d").date()
         except ValueError:
-            selected_date = date.today()
+            selected_date = business_today()
     else:
-        selected_date = date.today()
+        selected_date = business_today()
 
+    # 2026-10-17 审计 AUD-23：与桌面端统一用业务时区日界（此前用服务器本地
+    # date.today()，与桌面端 UTC 日界分叉）。
     today = selected_date
-    today_start = datetime(today.year, today.month, today.day, 0, 0, 0)
-    tomorrow = today + timedelta(days=1)
-    today_end = datetime(tomorrow.year, tomorrow.month, tomorrow.day, 0, 0, 0)
-    month_start = datetime(selected_date.year, selected_date.month, 1, 0, 0, 0)
+    today_start, today_end = business_day_range(today)
+    month_start, _ = business_month_range(selected_date)
 
     stock_data = MobileStockData()
     production_data = MobileProductionData()

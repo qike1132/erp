@@ -5,7 +5,7 @@
 import asyncio
 import contextlib
 import logging
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime, timedelta
 
 from sqlalchemy import and_, func, select, text
 from sqlalchemy.exc import (
@@ -18,6 +18,7 @@ from sqlalchemy.exc import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi_app.core.business_time import business_day_range, business_today
 from fastapi_app.core.cache import cache_result
 from fastapi_app.core.float_utils import round_qty
 from fastapi_app.shared_models import (
@@ -241,12 +242,13 @@ async def fetch_dashboard_stats(db: AsyncSession) -> dict:
     同时保持用户感知"近实时"。
     """
     try:
-        now = datetime.now(UTC).replace(tzinfo=None)
-        today_start = datetime(now.year, now.month, now.day, 0, 0, 0)
-        tomorrow = now + timedelta(days=1)
-        today_end = datetime(tomorrow.year, tomorrow.month, tomorrow.day, 0, 0, 0)
-        yesterday_start = today_start - timedelta(days=1)
-        yesterday_date = yesterday_start.date()
+        # 2026-10-17 审计 AUD-23：统一业务时区（Asia/Shanghai）日界。
+        # 此前用 UTC 日界当「今日」，与移动端本地日界不一致（UTC+8 下每天
+        # 00:00–08:00 两端数字分叉）；与 timestamptz 列比较用 aware 时间。
+        today = business_today()
+        today_start, today_end = business_day_range(today)
+        yesterday_date = today - timedelta(days=1)
+        yesterday_start, _ = business_day_range(yesterday_date)
 
         # 并行执行：
         # - 主链路（传入 db）：MV 存在性 → today/yesterday 基表 → MV resolve

@@ -3,12 +3,17 @@
 从 dashboard_service.py 按主题拆出,行为与原实现完全一致。
 """
 import logging
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import DatabaseError, DataError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi_app.core.business_time import (
+    business_day_range,
+    business_month_range,
+    business_today,
+)
 from fastapi_app.core.cache import cache_result
 from fastapi_app.core.float_utils import round_money
 from fastapi_app.schemas.dashboard import CustomerOutDetail, CustomerOutDetailResponse
@@ -22,8 +27,8 @@ def _parse_dashboard_date(date_str: str | None) -> date:
         try:
             return datetime.strptime(date_str, "%Y-%m-%d").date()
         except ValueError:
-            return date.today()
-    return date.today()
+            return business_today()
+    return business_today()
 
 @cache_result(key_prefix="dashboard:customer_out", ttl=60, local_ttl=30,
               key_builder=lambda **kwargs: f"p:{kwargs.get('period', '')}:d:{kwargs.get('query_date', '') or ''}")  # sql-safe: escape_like/绑定参数/常量片段
@@ -36,14 +41,13 @@ async def fetch_customer_out_details(
     """
     selected_date = _parse_dashboard_date(query_date)
     today = selected_date
-    today_start = datetime(today.year, today.month, today.day, 0, 0, 0)
-    tomorrow = today + timedelta(days=1)
-    today_end = datetime(tomorrow.year, tomorrow.month, tomorrow.day, 0, 0, 0)
-    month_start = datetime(selected_date.year, selected_date.month, 1, 0, 0, 0)
+    # 2026-10-17 审计 AUD-23：统一业务时区日界（aware），与桌面/移动端一致
+    today_start, today_end = business_day_range(today)
+    month_start, month_end = business_month_range(selected_date)
 
     if period == "month":
         start_time = month_start
-        end_time = datetime(selected_date.year, selected_date.month + 1, 1, 0, 0, 0) if selected_date.month < 12 else datetime(selected_date.year + 1, 1, 1, 0, 0, 0)
+        end_time = month_end
     else:
         start_time = today_start
         end_time = today_end
@@ -86,14 +90,13 @@ async def fetch_customer_order_details(
     """
     selected_date = _parse_dashboard_date(date_param)
     today = selected_date
-    today_start = datetime(today.year, today.month, today.day, 0, 0, 0)
-    tomorrow = today + timedelta(days=1)
-    today_end = datetime(tomorrow.year, tomorrow.month, tomorrow.day, 0, 0, 0)
-    month_start = datetime(selected_date.year, selected_date.month, 1, 0, 0, 0)
+    # 2026-10-17 审计 AUD-23：统一业务时区日界（aware）
+    today_start, today_end = business_day_range(today)
+    month_start, month_end = business_month_range(selected_date)
 
     if period == "month":
         start_time = month_start
-        end_time = datetime(selected_date.year, selected_date.month + 1, 1, 0, 0, 0) if selected_date.month < 12 else datetime(selected_date.year + 1, 1, 1, 0, 0, 0)
+        end_time = month_end
     else:
         start_time = today_start
         end_time = today_end
