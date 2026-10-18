@@ -60,7 +60,6 @@ interface OcrProgressResult {
   success_count?: number
   errors?: string[]
 }
-
 // 2026-10-17 审计 AUD-03：后端写的是 done/percent，此前前端读 completed/percentage
 // → 进度恒 0、终态永不命中、无限轮询。not_found 也必须是终态。
 // 2026-10-18 OCR 评审：error 只是**单文件**失败状态，批量仍会继续并最终写 done，
@@ -70,6 +69,9 @@ const OCR_TERMINAL_STATUSES = ['done', 'completed', 'failed', 'not_found']
 const taskId = ref('')
 const progress = ref(0)
 const ocrResult = ref<OcrProgressResult | null>(null)
+// 2026-10-18 OCR 评审：/progress 只有 status/message，不含 success/errors；
+// 用上传响应判断「done 是否真的成功」，否则全失败也显示绿色「识别完成」。
+const uploadResult = ref<{ success?: boolean; message?: string; errors?: string[] } | null>(null)
 
 const progressStatus = ref<'' | 'success' | 'exception' | 'warning'>('')
 const progressText = ref('处理中…')
@@ -100,8 +102,13 @@ useQuery({
     const res = (await ocrApi.progress(taskId.value)) as OcrProgressResult
     progress.value = res.percent ?? res.percentage ?? 0
     if (res.status === 'done' || res.status === 'completed') {
-      progressStatus.value = 'success'
-      progressText.value = '识别完成'
+      if (uploadResult.value?.success === false) {
+        progressStatus.value = 'exception'
+        progressText.value = uploadResult.value.message || '识别失败'
+      } else {
+        progressStatus.value = 'success'
+        progressText.value = '识别完成'
+      }
       ocrResult.value = res
     } else if (res.status === 'failed' || res.status === 'not_found') {
       progressStatus.value = 'exception'
@@ -137,9 +144,14 @@ async function handleUpload(options: UploadOptions) {
 
     const formData = new FormData()
     formData.append('file', options.file)
-    // 2026-10-18 OCR 评审 H-2：upload 必须携带 create-task 返回的 task_id，
+    uploadResult.value = null
+    // 2026-10-18 OCR 评审：upload 必须携带 create-task 返回的 task_id，
     // 否则后端会新建另一个 task 写进度，前端轮询的 id 永远停在 pending。
-    await ocrApi.upload(sid, formData, sid)
+    uploadResult.value = await ocrApi.upload(sid, formData, sid) as {
+      success?: boolean
+      message?: string
+      errors?: string[]
+    }
 
     showToast('文件上传成功，开始识别...', 'success')
   } catch (err: unknown) {

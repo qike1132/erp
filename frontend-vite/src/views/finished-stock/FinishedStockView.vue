@@ -235,9 +235,10 @@ async function saveRemark(row: FinishedStockRow, text: string) {
       remark: text,
     })
     row.remark = text.trim()
-    // 2026-10-17 审计 P2-44：只改本地行对象时，翻页/重渲染会从旧缓存重建并丢改动；
-    // 保存成功后失效查询缓存，让服务端真值回填。
-    queryClient.invalidateQueries({ queryKey: ['finished-stock'] })
+    // 2026-10-17 审计 P2-44：只改本地行对象时，翻页/重渲染会从旧缓存重建并丢改动。
+    // 2026-10-18 OCR 评审：summary 走只读副本，立即 refetch 可能读回旧值并覆盖本地
+    // 改动；这里只标记缓存过期、不立刻重取，由下一次自然刷新取服务端真值。
+    queryClient.invalidateQueries({ queryKey: ['finished-stock'], refetchType: 'none' })
     showToast('备注已保存', 'success')
     editingKey.value = null
   } catch (err: unknown) {

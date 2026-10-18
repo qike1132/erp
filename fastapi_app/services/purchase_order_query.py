@@ -482,6 +482,11 @@ async def export_completed_orders(
                 'amount': float(item.total_price or 0),
                 'completed_at': order.completed_at.strftime('%Y-%m-%d') if order.completed_at else '',
             })
+    # 2026-10-18 OCR 评审：上面的 limit 只约束订单数，本函数最终产出的是明细行，
+    # 一个订单可展开为几十行；这里对最终行数再设硬上限。
+    if len(rows) > EXPORT_MAX_ROWS:
+        logger.warning('已完成订单导出明细超过最大行数 %d，已截断', EXPORT_MAX_ROWS)
+        rows = rows[:EXPORT_MAX_ROWS]
     return rows
 
 
