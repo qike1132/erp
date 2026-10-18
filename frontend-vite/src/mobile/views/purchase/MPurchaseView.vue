@@ -26,12 +26,13 @@
             </template>
           </MListItem>
         </MList>
+        <!-- 只调 loader 传 p，不在模板里先赋 ordersPage：loader 内部负责赋值与失败回滚，先赋值会让回滚失效 -->
         <UiPagination
           v-if="(orders?.total || 0) > MOBILE_PAGE_SIZE"
           :current-page="ordersPage"
           :total-pages="Math.ceil((orders?.total || 0) / MOBILE_PAGE_SIZE)"
           :total-items="orders?.total || 0"
-          @update:current-page="(p: number) => { ordersPage = p; refetchOrders(p) }"
+          @update:current-page="(p: number) => refetchOrders(p)"
         />
       </template>
 
@@ -57,7 +58,7 @@
           :current-page="unprocessedPage"
           :total-pages="Math.ceil((unprocessed?.total || 0) / MOBILE_PAGE_SIZE)"
           :total-items="unprocessed?.total || 0"
-          @update:current-page="(p: number) => { unprocessedPage = p; loadUnprocessed(p) }"
+          @update:current-page="(p: number) => loadUnprocessed(p)"
         />
       </template>
 
@@ -84,7 +85,7 @@
           :current-page="completedPage"
           :total-pages="Math.ceil((completedOrders?.total || 0) / MOBILE_PAGE_SIZE)"
           :total-items="completedOrders?.total || 0"
-          @update:current-page="(p: number) => { completedPage = p; loadCompleted(p) }"
+          @update:current-page="(p: number) => loadCompleted(p)"
         />
       </template>
     </div>

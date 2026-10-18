@@ -98,7 +98,14 @@ export function usePatternRoomProjectActions(options: UsePatternRoomProjectActio
     if (!requireManage()) return
     selectedProjectId.value = id
     const detail = await projectHook.fetchDetail(id)
-    if (!detail) return
+    if (!detail) {
+      // fetchDetail 吞异常返回 null：不提示的话「点了编辑毫无反应」，
+      // 用户无从判断是没权限、项目被删还是网络问题（同 AUD-12 的假成功缺口）
+      if (projectHook.errorStatus.value !== 403) {
+        showToast(projectHook.error.value ?? '加载打样详情失败，请重试', 'error')
+      }
+      return
+    }
     projectFormMode.value = 'edit'
     formPatternMakerId.value = detail.pattern_maker_id ?? null
     pendingProjectImage.value = null
@@ -176,13 +183,28 @@ export function usePatternRoomProjectActions(options: UsePatternRoomProjectActio
       })
       .catch((e) => {
         console.error('[PatternRoomView] 后台上传项目图片失败:', e)
-        showToast('图片上传失败，请重试', 'error')
+        // 403 已由 axios 拦截器统一提示，此处需抑制，否则同一次失败弹两条 toast。
+        // 其余错误刻意沿用固定文案而非 resolveSamplingErrorMessage 的原始 message：
+        // 后台上传发生在「项目已保存成功」之后，此时给用户透出 network down / 500 之类的
+        // 底层信息只会造成困惑，固定文案「图片上传失败，请重试」才是可执行的动作指引。
+        if (getErrorStatus(e) !== 403) {
+          showToast('图片上传失败，请重试', 'error')
+        }
       })
   }
 
   async function onProjectSubmitCreate(data: ProjectCreateRequest) {
+    // projectHook.create 内部吞异常返回 null（error/errorStatus 已写入），
+    // 不会抛到这里；只判 null 才能把失败反馈给用户，否则是「假成功」——
+    // 弹窗不关、列表不刷新、用户得不到任何失败信号。
     const res = await projectHook.create(data)
-    if (res && res.id) {
+    if (!res) {
+      if (projectHook.errorStatus.value !== 403) {
+        showToast(projectHook.error.value ?? '新增打样项目失败，请重试', 'error')
+      }
+      return
+    }
+    if (res.id) {
       const newProjectId = res.id
       const pendingImage = pendingProjectImage.value
       // 创建成功：立即关闭弹窗，图片改为后台异步上传，避免用户等待上传完成
@@ -201,19 +223,24 @@ export function usePatternRoomProjectActions(options: UsePatternRoomProjectActio
   async function onProjectSubmitUpdate(data: ProjectUpdateRequest) {
     if (!selectedProjectId.value) return
     const projectId = selectedProjectId.value
+    // 同 onProjectSubmitCreate：update 吞异常返回 null，需显式处理
     const res = await projectHook.update(projectId, data)
-    if (res) {
-      const pendingImage = pendingProjectImage.value
-      // 更新成功：立即关闭弹窗，图片改为后台异步上传，避免用户等待上传完成
-      projectFormVisible.value = false
-      pendingProjectImage.value = null
-      // 刷新详情与分组列表（保持当前状态筛选）
-      await projectHook.fetchDetail(projectId)
-      await groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, groupHook.currentPage.value, 'fresh')
-      // 后台上传暂存图片（不阻塞主流程）
-      if (pendingImage) {
-        uploadPendingImage(projectId, pendingImage)
+    if (!res) {
+      if (projectHook.errorStatus.value !== 403) {
+        showToast(projectHook.error.value ?? '保存打样项目失败，请重试', 'error')
       }
+      return
+    }
+    const pendingImage = pendingProjectImage.value
+    // 更新成功：立即关闭弹窗，图片改为后台异步上传，避免用户等待上传完成
+    projectFormVisible.value = false
+    pendingProjectImage.value = null
+    // 刷新详情与分组列表（保持当前状态筛选）
+    await projectHook.fetchDetail(projectId)
+    await groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, groupHook.currentPage.value, 'fresh')
+    // 后台上传暂存图片（不阻塞主流程）
+    if (pendingImage) {
+      uploadPendingImage(projectId, pendingImage)
     }
   }
 
@@ -228,12 +255,17 @@ export function usePatternRoomProjectActions(options: UsePatternRoomProjectActio
       'danger',
     )
     if (!ok) return
+    // 同新增/编辑：remove 吞异常返回 null，失败必须可见，否则删除毫无反应
     const res = await projectHook.remove(proj.id)
-    if (res) {
-      selectedProjectId.value = null
-      projectHook.clearCurrent()
-      await groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, groupHook.currentPage.value, 'fresh')
+    if (!res) {
+      if (projectHook.errorStatus.value !== 403) {
+        showToast(projectHook.error.value ?? '删除打样项目失败，请重试', 'error')
+      }
+      return
     }
+    selectedProjectId.value = null
+    projectHook.clearCurrent()
+    await groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, groupHook.currentPage.value, 'fresh')
   }
 
   return {

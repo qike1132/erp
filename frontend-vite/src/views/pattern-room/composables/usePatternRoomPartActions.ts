@@ -124,7 +124,11 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
       } else {
         // 2026-10-18 OCR 评审：setRoleCurrentVersion 内部吞异常返回 null，
         // 上面的 catch 不可达；必须显式处理 null，否则失败被当成功。
-        showToast(roleHook.error.value ?? '设置最终版本失败，请重试', 'error')
+        // 复用 toastActionError 的 403 抑制口径（403 已由拦截器提示），
+        // 否则同一次失败会弹两条 toast。
+        if (roleHook.errorStatus.value !== 403) {
+          showToast(roleHook.error.value ?? '设置最终版本失败，请重试', 'error')
+        }
       }
     } catch (e) {
       console.error('[PatternRoomView] 设置最终版本失败:', e)
@@ -153,10 +157,13 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
           if (!roleRes) {
             // 2026-10-18 OCR 评审：设最终版本失败时不得继续进入编辑态（假成功）；
             // 但复制接口已成功落库，必须刷新列表，避免用户重试产生重复版本。
-            showToast(
-              roleHook.error.value ?? `版本 ${res.version_no} 已复制，但设为最终版本失败，请手动设置`,
-              'error',
-            )
+            // 403 已由 axios 拦截器统一提示，此处需抑制，否则双弹。
+            if (roleHook.errorStatus.value !== 403) {
+              showToast(
+                roleHook.error.value ?? `版本 ${res.version_no} 已复制，但设为最终版本失败，请手动设置`,
+                'error',
+              )
+            }
             if (selectedProjectId.value) {
               await partHook.fetchPartsByVersion(
                 selectedProjectId.value,
@@ -307,7 +314,13 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
   async function onAddRole(roleName: string) {
     if (!requireManage()) return
     if (!selectedProjectId.value) return
-    await roleHook.createRole(roleName)
+    // roleHook.createRole 内部吞异常返回 null，不会抛到这里；
+    // 若不再判一次，失败就是「假成功」——输入框消失、标签没出现、无任何提示。
+    // 403 已由 axios 拦截器提示，走同一套抑制口径避免双弹。
+    const res = await roleHook.createRole(roleName)
+    if (!res && roleHook.errorStatus.value !== 403) {
+      showToast(roleHook.error.value ?? '新增角色失败，请重试', 'error')
+    }
   }
 
   async function onRemoveRole(role: RoleRemovePayload) {
@@ -318,7 +331,11 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
       'danger',
     )
     if (!ok) return
-    await roleHook.deleteRole(role.id)
+    // 同上：deleteRole 吞异常返回 null，失败对用户不可见（假成功）
+    const res = await roleHook.deleteRole(role.id)
+    if (!res && roleHook.errorStatus.value !== 403) {
+      showToast(roleHook.error.value ?? '删除角色失败，请重试', 'error')
+    }
     // roleHook.fetchRoles 已自动调用，会自动切换 currentRoleId 到第一个角色
     // partHook 会自动 watch 重新加载
   }

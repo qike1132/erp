@@ -1,8 +1,10 @@
 <template>
   <div class="ps-card">
     <!-- 2026-10-17 审计 AUD-08：backup_settings 表未接线，清理/备份实际读环境变量。
-         知情假功能比无功能更危险，这里明确标注并禁用保存。 -->
-    <div class="ps-warn">
+         知情假功能比无功能更危险，这里明确标注并禁用保存。
+         2026-10-18 OCR 复评：横幅与按钮 title 也要随后端 effective_source 条件化——
+         接线后仍显示「保存不生效」等于新的假信息。 -->
+    <div v-if="!settingsWired" class="ps-warn">
       当前版本备份目录由环境变量 <code>BACKUP_DIR</code> 决定，此处保存不会生效（设置接线待后续专项）。
       实际生效目录：<code>{{ settings?.effective_backup_dir || '未知（设置未加载或后端未返回）' }}</code>
     </div>
@@ -25,7 +27,7 @@
     </div>
     <div class="ps-actions">
       <button class="ps-btn ps-btn-outline" @click="handleValidate">校验路径</button>
-      <button class="ps-btn ps-btn-primary" :disabled="saving || !settingsWired" title="当前版本设置未接线，保存不生效" @click="handleSave">{{ saving ? '保存中...' : '保存设置' }}</button>
+      <button class="ps-btn ps-btn-primary" :disabled="saving || !settingsWired" :title="settingsWired ? '' : '当前版本设置未接线，保存不生效'" @click="handleSave">{{ saving ? '保存中...' : '保存设置' }}</button>
     </div>
   </div>
 </template>

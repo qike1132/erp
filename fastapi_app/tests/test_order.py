@@ -156,7 +156,12 @@ class TestOrderService:
         assert result['requires_approval'] is False
 
     async def test_delete_order_not_found(self, mock_db):
-        mock_db.get = AsyncMock(return_value=None)
+        # 2026-10-18 P2-07：delete_order 改为「先无锁读 product_id（db.execute）→
+        # 预锁 Product → select(Order).with_for_update()（db.execute）」，不再走 db.get。
+        # 两次查询都返回 None：第一次（product_id）跳过预锁，第二次（订单行）抛「订单不存在」。
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_db.execute = AsyncMock(return_value=mock_result)
         user = MagicMock()
         with pytest.raises(ValueError, match="不存在"):
             await order_service.delete_order(mock_db, order_id=999, current_user=user)
@@ -334,8 +339,25 @@ class TestOrderEndpoints:
         product.id = 1
         product.current_stock = 100
 
-        mock_db.get = AsyncMock(return_value=order)
-        mock_db.execute = AsyncMock(return_value=MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))))
+        # 2026-10-18 P2-07：delete_order 改为 db.execute 取数（先无锁读 product_id，
+        # 再 select(Order).with_for_update() 取订单行），不再走 db.get。
+        # 单测替身：前两次 execute 分别返回 product_id 与订单行，其后
+        # _collect_order_deletion_graph 的批量取数统一返回空行集（与原桩等价）。
+        call_count = {'n': 0}
+
+        async def _fake_execute(*_args, **_kwargs):
+            call_count['n'] += 1
+            if call_count['n'] == 1:
+                result = MagicMock()
+                result.scalar_one_or_none.return_value = order.product_id
+                return result
+            if call_count['n'] == 2:
+                result = MagicMock()
+                result.scalar_one_or_none.return_value = order
+                return result
+            return MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[]))))
+
+        mock_db.execute = AsyncMock(side_effect=_fake_execute)
         mock_db.delete = AsyncMock()
         mock_db.commit = AsyncMock()
 

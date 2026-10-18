@@ -194,6 +194,41 @@ describe('persistedLossRate / 取消编辑恢复真值', () => {
     expect(m.lossRate).toBe(8)
   })
 
+  it('6d. 「保存修改」落库 spare_rate 后：factoryData 同为新率，取消编辑不回滚（OCR 2026-10-18）', async () => {
+    // 打开时 spare_rate 缺省（0），用户在编辑态交互损耗率后走「保存修改」提交 spare_rate。
+    const m = useSummaryModal()
+    await m.openSummary([7, 8])
+    expect(m.factoryData!.spare_rate).toBeUndefined()
+
+    m.applyLossRate(5)
+    m.toggleEditMode(true)
+    await m.saveFactoryEdits()
+
+    // 此前只同步 factoryOriginalData，factoryData 仍是旧值 → 同屏两套口径
+    expect(m.factoryData!.spare_rate).toBe(5)
+    expect(m.factoryData!.groups[0]!.spare_rate).toBe(5)
+
+    // 取消编辑：分组率从 factoryOriginalData 重播，必须仍是 5（不是回滚到 0）
+    m.toggleEditMode(false)
+    expect(m.lossRate).toBe(5)
+    expect(m.groupSpareRates[0]).toBe(5)
+    // 重播后 factoryData 仍保持新率（回滚不会把 spare_rate 打回旧值）
+    expect(m.factoryData!.spare_rate).toBe(5)
+  })
+
+  it('6e. 对照：未交互损耗率时「保存修改」不改 spare_rate（基线零回归）', async () => {
+    const m = useSummaryModal()
+    await m.openSummary([7, 8])
+    m.updateFactoryQty(0, 0, 0, 12)
+    await m.saveFactoryEdits()
+
+    expect(m.factoryData!.spare_rate).toBeUndefined()
+
+    m.toggleEditMode(true)
+    m.toggleEditMode(false)
+    expect(m.groupSpareRates[0]).toBe(0)
+  })
+
   it('6c. 取消编辑消掉上一轮遗留的「已保存」小字（saveState → idle）', async () => {
     const m = useSummaryModal()
     await m.openSummary([7, 8])

@@ -189,8 +189,12 @@ const inventory = ref<CaseItem[]>([])
 const invLoading = ref(false)
 const invPage = ref(1)
 const invTotal = ref(0)
+// 2026-10-18 OCR 评审：请求序号。库存搜索框 @update:model-value 逐字符触发，
+// 翻页也会发新请求，旧响应后到会覆盖成旧关键词的结果。
+let invLoadSeq = 0
 
 async function loadInventory() {
+  const seq = ++invLoadSeq
   invLoading.value = true
   try {
     // 2026-10-17 审计 AUD-22：服务端分页（此前固定 per_page=200 无页码，
@@ -200,6 +204,7 @@ async function loadInventory() {
       page: invPage.value,
       per_page: MOBILE_LIST_PAGE_SIZE,
     })
+    if (seq !== invLoadSeq) return // 2026-10-18 OCR 评审：丢弃过期响应
     const flat: CaseItem[] = []
     for (const node of res.inventory) {
       flat.push(node)
@@ -208,6 +213,7 @@ async function loadInventory() {
     inventory.value = flat
     invTotal.value = res.total ?? 0
   } catch {
+    if (seq !== invLoadSeq) return
     // 2026-10-18 OCR 评审：保留旧总数与列表，提示失败即可
     showToast('库存加载失败，请重试', 'error')
   } finally {

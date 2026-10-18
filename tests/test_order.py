@@ -332,7 +332,11 @@ class TestDeleteOrder:
     @patch('fastapi_app.services.order.commands.cache_mgr')
     async def test_delete_order_not_found(self, mock_cache, mock_async_db, mock_user):
         """删除不存在的订单"""
-        mock_async_db.get = AsyncMock(return_value=None)
+        # 2026-10-18 P2-07：delete_order 改为 db.execute 取数（先无锁读 product_id，
+        # 再 select(Order).with_for_update()），不再走 db.get。两次都返回 None：
+        # 第一次跳过预锁，第二次抛「订单不存在」。
+        mock_async_db.execute = AsyncMock(return_value=MagicMock(
+            scalar_one_or_none=MagicMock(return_value=None)))
 
         with pytest.raises(ValueError, match='订单不存在'):
             await delete_order(mock_async_db, 999, mock_user)
@@ -345,10 +349,22 @@ class TestDeleteOrder:
                                               mock_cache, mock_async_db):
         """普通用户删除订单 - 走审批"""
         order = make_mock_order()
-        mock_async_db.get = AsyncMock(return_value=order)
-        # 删除前置校验会查询关联退货记录：默认无退货
-        mock_async_db.execute = AsyncMock(return_value=MagicMock(
-            scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))))
+        # 2026-10-18 P2-07：delete_order 的 db.execute 取数顺序——
+        # ① product_id 预读；② get_product_for_update 的产品行（未打桩，走真实函数）；
+        # ③ select(Order).with_for_update() 的订单行；其后是关联退货查询（空行集）。
+        call_count = {'n': 0}
+
+        async def _fake_execute(*_args, **_kwargs):
+            call_count['n'] += 1
+            if call_count['n'] == 1:
+                return MagicMock(scalar_one_or_none=MagicMock(return_value=order.product_id))
+            if call_count['n'] == 2:
+                return MagicMock(scalar_one_or_none=MagicMock(return_value=order))
+            if call_count['n'] == 3:
+                return MagicMock(scalar_one_or_none=MagicMock(return_value=order))
+            return MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[]))))
+
+        mock_async_db.execute = AsyncMock(side_effect=_fake_execute)
 
         normal_user = MagicMock()
         normal_user.id = 2
@@ -374,10 +390,19 @@ class TestDeleteOrder:
                                               mock_async_db):
         """超管直接删除订单"""
         order = make_mock_order()
-        mock_async_db.get = AsyncMock(return_value=order)
-        # 删除前置校验会查询关联退货记录：默认无退货
-        mock_async_db.execute = AsyncMock(return_value=MagicMock(
-            scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))))
+        # 2026-10-18 P2-07：取数顺序同 test_delete_order_normal_user
+        # （① product_id ② 产品行 ③ 订单行，其后空行集）。
+        call_count = {'n': 0}
+
+        async def _fake_execute(*_args, **_kwargs):
+            call_count['n'] += 1
+            if call_count['n'] == 1:
+                return MagicMock(scalar_one_or_none=MagicMock(return_value=order.product_id))
+            if call_count['n'] in (2, 3):
+                return MagicMock(scalar_one_or_none=MagicMock(return_value=order))
+            return MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[]))))
+
+        mock_async_db.execute = AsyncMock(side_effect=_fake_execute)
 
         super_user = MagicMock()
         super_user.id = 1
@@ -398,10 +423,22 @@ class TestDeleteOrder:
         直删时 DB 抛 IntegrityError 被映射成含糊的 409；现应前置为带原因的 ValueError(→400)。
         """
         order = make_mock_order()
-        mock_async_db.get = AsyncMock(return_value=order)
-        res = MagicMock()
-        res.scalars.return_value.all.return_value = ['SR-20261006-0001']
-        mock_async_db.execute = AsyncMock(return_value=res)
+        # 2026-10-18 P2-07：取数顺序——① product_id 预读 ② get_product_for_update
+        # 的产品行 ③ 加锁读订单行，④起是 assert_no_linked_returns 的关联退货查询
+        # （这里返回有退货，应在锁全链路之后被前置拒绝）。
+        call_count = {'n': 0}
+
+        async def _fake_execute(*_args, **_kwargs):
+            call_count['n'] += 1
+            if call_count['n'] == 1:
+                return MagicMock(scalar_one_or_none=MagicMock(return_value=order.product_id))
+            if call_count['n'] in (2, 3):
+                return MagicMock(scalar_one_or_none=MagicMock(return_value=order))
+            res = MagicMock()
+            res.scalars.return_value.all.return_value = ['SR-20261006-0001']
+            return res
+
+        mock_async_db.execute = AsyncMock(side_effect=_fake_execute)
 
         super_user = MagicMock()
         super_user.id = 1

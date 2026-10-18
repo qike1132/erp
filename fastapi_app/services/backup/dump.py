@@ -123,6 +123,17 @@ async def run_pg_dump(output_path: Path, snapshot_id: str | None = None) -> dict
 
             # 2026-10-18 OCR 评审：看门狗必须独立于 stdout 读取循环——DB 卡住时
             # read() 会永久阻塞，循环后的 wait(timeout) 永远执行不到。
+            #
+            # 顺序很关键（2026-10-18 评审复核实测）：原来的写法是 `timed_out.set()`
+            # 放在 terminate() **之前**且无条件执行，随后在读循环后又查一次
+            # `if timed_out.is_set(): raise TimeoutError`。pg_dump 正常结束时
+            # 循环退出 → wait() 立即返回 → 看到标志已置位就判超时。即「进程正常
+            # 完成」与「被看门狗杀掉」共用同一标志，而 terminate() 本身会让
+            # returncode 变成 -15/非 0，二者无法从返回值区分 → 正常完成也会
+            # 被误报成超时。
+            # 现在：置位**只在看门狗真的触发时**发生，且读取循环结束后
+            # **先 cancel+join 看门狗再判断标志**，彻底消除
+            # 「主线程已退出循环、看门苟延残喘补一个 set()」的竞态。
             timed_out = threading.Event()
 
             def _watchdog_kill() -> None:
@@ -147,6 +158,12 @@ async def run_pg_dump(output_path: Path, snapshot_id: str | None = None) -> dict
                             break
                         gz_f.write(chunk)
                 stdout_pipe.close()
+                # 先确保看门狗不再可能触发，再读它的标志：Timer.cancel() 只阻止
+                # 「尚未开始」的回调；若回调已在另一个线程里跑到一半，join() 才会
+                # 等它做完。少了这一步，主线程可能在 set() 之前判断 → 漏判超时，
+                # 或在 set() 之后判断 → 把正常完成误判成超时。
+                watchdog.cancel()
+                watchdog.join(timeout=_PG_DUMP_TIMEOUT_SECONDS + 10)
                 try:
                     proc_.wait(timeout=_PG_DUMP_TIMEOUT_SECONDS)
                 except subprocess.TimeoutExpired as exc:
@@ -173,6 +190,9 @@ async def run_pg_dump(output_path: Path, snapshot_id: str | None = None) -> dict
                     proc_.wait()
                 raise
             finally:
+                # cancel() 幂等：正常路径已在 wait() 前 cancel+join，异常路径
+                # （写盘/gzip 失败）在这里补一次，保证看门狗不会在 terminate()
+                # 之后又去 kill 同一个进程。
                 watchdog.cancel()
                 t_err.join(timeout=30)
                 stderr_pipe.close()

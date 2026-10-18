@@ -200,6 +200,9 @@ class TestPurchaseCenterService:
             MagicMock(all=MagicMock(return_value=[order_row])),  # 订单查询
             MagicMock(all=MagicMock(return_value=[item_row])),  # 明细查询
         ])
+        # 2026-10-18 OCR 评审：导出门禁改为先 COUNT 订单总数（建在未截断的订单集上），
+        # 桩必须提供 db.scalar；否则真实实现一 await 就 TypeError。
+        db.scalar = AsyncMock(return_value=1)
 
         rows = await export_completed_orders(db)
 
@@ -224,6 +227,7 @@ class TestPurchaseCenterService:
         from fastapi_app.services.purchase_center_service import export_completed_orders
         db = MagicMock()
         db.execute = AsyncMock(return_value=MagicMock(all=MagicMock(return_value=[])))
+        db.scalar = AsyncMock(return_value=0)
 
         rows = await export_completed_orders(db)
         assert rows == []
@@ -260,6 +264,7 @@ class TestPurchaseCenterService:
         from fastapi_app.services.purchase_center_service import export_completed_orders
         db = MagicMock()
         db.execute = AsyncMock(return_value=MagicMock(all=MagicMock(return_value=[])))
+        db.scalar = AsyncMock(return_value=0)
 
         await export_completed_orders(
             db, order_no='PO-001', customer_name='晨光', product_name='保温杯',
@@ -278,6 +283,7 @@ class TestPurchaseCenterService:
         from fastapi_app.services.purchase_center_service import export_completed_orders
         db = MagicMock()
         db.execute = AsyncMock(return_value=MagicMock(all=MagicMock(return_value=[])))
+        db.scalar = AsyncMock(return_value=0)
 
         await export_completed_orders(db, date_from='2026-09-01', date_to='2026-09-14')
         params = db.execute.call_args_list[0].args[0].compile().params
@@ -291,11 +297,67 @@ class TestPurchaseCenterService:
         from fastapi_app.services.purchase_center_service import export_completed_orders
         db = MagicMock()
         db.execute = AsyncMock(return_value=MagicMock(all=MagicMock(return_value=[])))
+        db.scalar = AsyncMock(return_value=0)
 
         await export_completed_orders(db, start_date='2026-09-10', date_from='2026-01-01')
         values = db.execute.call_args_list[0].args[0].compile().params.values()
         assert '2026-09-10' in values
         assert '2026-01-01' not in values
+
+    @pytest.mark.asyncio
+    async def test_export_rejects_when_order_count_exceeds_limit(self):
+        """2026-10-18 OCR 评审：门禁必须建在**未截断**的订单集上。
+
+        旧实现先 `limit(EXPORT_MAX_ROWS + 1)` 截断订单再统计明细行 —— 订单被裁后
+        明细行数永远不可能超限，`if len(rows) > EXPORT_MAX_ROWS` 形同虚设。
+        现在先 COUNT 订单总数，超限即抛 ValueError（端点转 413）。
+        """
+        import pytest as _pytest
+
+        from fastapi_app.services.export_limits import EXPORT_MAX_ROWS
+        from fastapi_app.services.purchase_center_service import export_completed_orders
+
+        db = MagicMock()
+        db.execute = AsyncMock(return_value=MagicMock(all=MagicMock(return_value=[])))
+        db.scalar = AsyncMock(return_value=EXPORT_MAX_ROWS + 1)
+
+        with _pytest.raises(ValueError, match='导出数据量过大'):
+            await export_completed_orders(db)
+        # 超限时必须**拒绝**，不得再拉明细（否则等于把超量的活干完才报错）
+        assert db.execute.await_count == 0
+
+    @pytest.mark.asyncio
+    async def test_export_rejects_when_detail_rows_exceed_limit(self):
+        """订单数未超限、但展开后明细行数爆上限 → 同样拒绝（不再静默截断）。"""
+        from datetime import datetime
+        from types import SimpleNamespace
+
+        import pytest as _pytest
+
+        from fastapi_app.services.export_limits import EXPORT_MAX_ROWS
+        from fastapi_app.services.purchase_center_service import export_completed_orders
+
+        # 1 个订单带 EXPORT_MAX_ROWS+1 行明细：订单数远未超限，行数超限
+        order_row = SimpleNamespace(
+            id=1, order_no='CG-1', supplier_name='S',
+            customer_name='C', completed_at=datetime(2026, 1, 1),
+        )
+        item_rows = [
+            SimpleNamespace(
+                order_id=1, material_name='m', material_code='c', specification='',
+                unit='米', quantity=1.0, unit_price=1.0, total_price=1.0,
+            )
+            for _ in range(EXPORT_MAX_ROWS + 1)
+        ]
+        db = MagicMock()
+        db.execute = AsyncMock(side_effect=[
+            MagicMock(all=MagicMock(return_value=[order_row])),
+            MagicMock(all=MagicMock(return_value=item_rows)),
+        ])
+        db.scalar = AsyncMock(return_value=1)
+
+        with _pytest.raises(ValueError, match='导出明细超过上限'):
+            await export_completed_orders(db)
 
     @pytest.mark.asyncio
     async def test_get_customers_statistics(self):

@@ -437,14 +437,26 @@ async def export_completed_orders(
         query = query.where(PurchaseOrder.completed_at <= f'{eff_end} 23:59:59')  # sql-safe: escape_like/绑定参数/常量片段
     query = query.order_by(PurchaseOrder.completed_at.desc())
 
-    # 2026-10-17 审计 P2-03：导出行数上界（与姊妹导出同口径：多取一行判断超限）
-    query = query.limit(EXPORT_MAX_ROWS + 1)
+    # 2026-10-18 OCR 评审：门禁必须建在**未截断**的订单集上。
+    # 旧写法先 `query.limit(EXPORT_MAX_ROWS + 1)` 把订单裁到 2 万条，再统计明细行
+    # ——订单被截断后明细行数不可能超过上限，`if len(rows) > EXPORT_MAX_ROWS`
+    # 永远不成立，413 逻辑形同虚设（且截断点会从某张订单中间切断明细）。
+    # 现改为先对筛选后的订单总数计数（COUNT 只回一行，代价远低于拉全量明细），
+    # 超限即拒；再按明细行数做二次兜底（单订单明细极多时订单数不超限也会爆行数）。
+    order_total = await db.scalar(
+        select(func.count()).select_from(query.order_by(None).subquery()),
+    )
+    order_total = int(order_total or 0)
+    if order_total > EXPORT_MAX_ROWS:
+        logger.warning('已完成订单导出订单数超过最大行数 %d（实际 %d），已拒绝', EXPORT_MAX_ROWS, order_total)
+        raise ValueError(
+            f'导出数据量过大（{order_total} 个已完成订单，上限 {EXPORT_MAX_ROWS}），请缩小筛选范围后分批导出',
+        )
+
+    query = query.limit(EXPORT_MAX_ROWS)
 
     result = await db.execute(query)
     orders = result.all()
-    if len(orders) > EXPORT_MAX_ROWS:
-        logger.warning('已完成订单导出超过最大行数 %d，已截断', EXPORT_MAX_ROWS)
-        orders = orders[:EXPORT_MAX_ROWS]
 
     rows = []
     order_ids = [o.id for o in orders]
@@ -482,8 +494,8 @@ async def export_completed_orders(
                 'amount': float(item.total_price or 0),
                 'completed_at': order.completed_at.strftime('%Y-%m-%d') if order.completed_at else '',
             })
-    # 2026-10-18 OCR 评审：静默截断对调用方不可见，且会从订单中间切断明细；
-    # 改为超限直接拒绝（端点转 413），提示缩小筛选范围。
+    # 二次兜底：单张订单的明细行数可能远超 1（多 SKU/多物料），订单数未超限时
+    # 明细行数仍可能爆掉上限。这里按实际展开后的行数拒绝，不再静默截断。
     if len(rows) > EXPORT_MAX_ROWS:
         raise ValueError(
             f'导出明细超过上限 {EXPORT_MAX_ROWS} 行，请缩小筛选范围后重试',

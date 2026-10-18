@@ -65,6 +65,8 @@ const loading = ref(true)
 const searchQuery = ref('')
 const page = ref(1)
 const totalItems = ref(0)
+// 2026-10-18 OCR 评审：请求序号。搜索与翻页并发时，旧响应后到会覆盖新结果。
+let loadSeq = 0
 
 // F-FE-MOBILE-07 后本地过滤已冗余（搜索走服务端 search，含 name/barcode/spec
 // ilike），保留 computed 仅作切页时的即时过滤——与后端口径一致，不再自带
@@ -78,17 +80,22 @@ function handleSearch(val: string) {
 }
 
 async function loadProducts() {
+  const seq = ++loadSeq
   loading.value = true
   try {
     // F-FE-MOBILE-07：服务端搜索；AUD-22：服务端分页（此前固定 page=1，
     // 第 201 条起永久不可达）
     const res = await productApi.list({ page: page.value, per_page: MOBILE_LIST_PAGE_SIZE, search: searchQuery.value })
+    if (seq !== loadSeq) return // 2026-10-18 OCR 评审：丢弃过期响应
     products.value = res.items ?? []
     totalItems.value = res.total ?? 0
   } catch (e) {
+    if (seq !== loadSeq) return
     console.error('[MProductView] load failed:', e)
-    // 2026-10-18 OCR 评审：失败时不要把 totalItems 归零——分页器会消失，
-    // 用户被困在空列表且无页码可回。保留旧总数并提示，由用户重试。
+    // 2026-10-18 OCR 评审：失败时清空行——page/searchQuery 已是新值，旧行留着
+    // 等于用旧数据冒充新条件的查询结果。保留 totalItems：分页器不消失，
+    // 用户可退回上一页重试。
+    products.value = []
     showToast('产品加载失败，请重试', 'error')
   } finally {
     loading.value = false

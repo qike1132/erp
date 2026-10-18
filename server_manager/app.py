@@ -59,7 +59,13 @@ if _IS_WINDOWS:
                 stream.reconfigure(encoding='utf-8', errors='replace')
             except Exception:
                 if hasattr(stream, 'buffer'):
-                    stream = io.TextIOWrapper(stream.buffer, encoding='utf-8', errors='replace', line_buffering=True)
+                    # 2026-10-18：改用局部变量（原写法给循环变量赋值，PLW2901）
+                    stream.buffer  # noqa: B018  - 仅探测，保持与原逻辑等价的属性判断
+                    wrapper = io.TextIOWrapper(stream.buffer, encoding='utf-8', errors='replace', line_buffering=True)
+                    if stream is sys.stdout:
+                        sys.stdout = wrapper
+                    elif stream is sys.stderr:
+                        sys.stderr = wrapper
 
 import contextlib
 import tkinter as tk
@@ -1326,15 +1332,10 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
         # ★ 必须等闸门【放行之后】才记时:gate.start 会拒绝(已有动作在飞),若提前刷新时间戳,
         #   随后 HOSTING_START_GRACE_SEC(60s) 内陈旧的状态文件会被误显示为「启动中」,
         #   而不是按真实情况告警。
-        # 2026-10-18 OCR 评审：闸门必须在 gate.start 之前评估——否则被拒绝的
-        # 重启仍会刷新 _prod_start_ts，宽限期内界面误显示「启动中」。
-        if verb == 'restart':
-            ok, guard_msg = git_guard.check_production_branch(_PROJECT_DIR)
-            if not ok:
-                self._msg_queue.put(('log', {'text': f'拒绝执行：{guard_msg}', 'level': 'ERROR'}))
-                return
-            if guard_msg.startswith('警告') or '覆盖' in guard_msg:
-                self._msg_queue.put(('log', {'text': guard_msg, 'level': 'WARNING'}))
+        # 2026-10-18 OCR 评审：闸门必须让被拒绝的重启不刷新 _prod_start_ts。
+        # 2026-10-18 OCR 复评：闸门跑在 Tk 主线程会冻结窗口（最多 3 次 git 子进程，
+        #   git status 全工作区约秒级），且 ServiceOps 侧还会再跑一遍。改为把闸门
+        #   下沉到 worker（_service_cmd_sync），由它回报结果；这里只保留 gate 互斥。
         if self._gate.start(f'服务{verb}', self._service_cmd_sync, verb) and verb == 'restart':
             self._prod_start_ts = time.time()
 

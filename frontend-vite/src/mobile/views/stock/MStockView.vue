@@ -75,6 +75,9 @@ const searchQuery = ref('')
 const selectedTab = ref('all')
 const page = ref(1)
 const totalItems = ref(0)
+// 2026-10-18 OCR 评审：请求序号。切换 chip / 搜索 / 翻页都会发新请求，
+// 若旧响应后到会无条件覆盖列表，出现「点的是零库存、展示的是全部」。
+let loadSeq = 0
 
 const tabOptions = [
   { value: 'all', label: '全部' },
@@ -108,6 +111,7 @@ function getQtyClass(item: InventoryItem): string {
 }
 
 async function loadStock() {
+  const seq = ++loadSeq
   loading.value = true
   try {
     // F-FE-MOBILE-07：服务端筛选；AUD-22：库存状态同样下推服务端 + 服务端分页
@@ -117,9 +121,11 @@ async function loadStock() {
       product: searchQuery.value,
       stock_status: selectedTab.value === 'all' ? '' : selectedTab.value,
     })
+    if (seq !== loadSeq) return // 2026-10-18 OCR 评审：丢弃过期响应
     stockItems.value = res.data ?? []
     totalItems.value = res.total_items ?? 0
   } catch (e) {
+    if (seq !== loadSeq) return
     console.error('[MStockView] load failed:', e)
     // 2026-10-18 OCR 评审：清空行但保留 totalItems——旧筛选/旧页的行不能顶着新
     // chip 展示，同时分页器不消失、用户可重试。

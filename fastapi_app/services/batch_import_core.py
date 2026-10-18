@@ -765,7 +765,18 @@ async def import_orders_from_data(db: AsyncSession, data_list: list, *, deps: Im
                     deduct_value = qty
 
                 if deduct_value > 0:
-                    await deps.process_order_deduction(db, order, product_id, deduct_value, deduct_stock=True, product=product)
+                    # 2026-10-18 OCR 评审：与 batch_import_service.import_orders_service
+                    # 同款修正——第 4 个位置参数是 `order_quantity`（订单数量），
+                    # 抵扣量必须走 `custom_deduct_quantity`。此前把 `deduct_value` 按位置
+                    # 塞进 order_quantity、不传 custom_deduct_quantity，两列语义在此路径
+                    # 碰巧一致（数字=抵扣量、是/yes=整单量）所以没暴露；一旦分叉
+                    # （部分抵扣），备货不足告警会拿抵扣量当订单量报错数。改为显式关键字。
+                    await deps.process_order_deduction(
+                        db, order, product_id, qty,
+                        deduct_stock=True,
+                        custom_deduct_quantity=deduct_value,
+                        product=product,
+                    )
             except (ValueError, TypeError, SQLAlchemyError) as e:
                 # 第八轮审计：原仅 logger.error 后仍 return True —— 该行计入 imported，
                 # 用户看到"成功导入"但抵扣未发生，订单与库存长期不符。改为 return False：

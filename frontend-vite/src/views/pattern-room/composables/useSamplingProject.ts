@@ -24,6 +24,14 @@ export function useSamplingProject() {
   const submitting = ref(false)
   /** 错误信息 */
   const error = ref<string | null>(null)
+  /**
+   * 最近一次失败的状态码。
+   *
+   * 本 hook 的写操作在内部 catch 后统一返回 null，调用方拿不到异常对象；
+   * 而 403 已由 axios 拦截器统一提示，调用方若只凭 error 文案再弹一次 toast
+   * 就会同一次失败弹两条。故把状态码一并暴露，让调用方复用同一套 403 抑制口径。
+   */
+  const errorStatus = ref<number | undefined>(undefined)
 
   /** 详情查询序号：并发 fetchDetail 时仅应用最新一次结果，避免旧响应覆盖新数据 */
   let detailFetchSeq = 0
@@ -35,6 +43,7 @@ export function useSamplingProject() {
     const seq = ++detailFetchSeq
     loading.value = true
     error.value = null
+    errorStatus.value = undefined
     try {
       const res = await patternRoomApi.getProject(id)
       if (seq === detailFetchSeq) {
@@ -63,6 +72,7 @@ export function useSamplingProject() {
   async function create(data: ProjectCreateRequest): Promise<ActionResponse | null> {
     submitting.value = true
     error.value = null
+    errorStatus.value = undefined
     try {
       const res = await patternRoomApi.createProject(data)
       return res
@@ -70,6 +80,7 @@ export function useSamplingProject() {
       console.error('[useSamplingProject] 新增打样项目失败:', e)
       const message = resolveSamplingErrorMessage(e, '新增打样项目失败')
       error.value = message
+      errorStatus.value = getErrorStatus(e)
       return null
     } finally {
       submitting.value = false
@@ -83,17 +94,22 @@ export function useSamplingProject() {
   async function update(id: number, data: ProjectUpdateRequest): Promise<ActionResponse | null> {
     submitting.value = true
     error.value = null
+    errorStatus.value = undefined
     try {
       const res = await patternRoomApi.updateProject(id, data)
       return res
     } catch (e) {
       console.error('[useSamplingProject] 编辑打样项目失败:', e)
       const message = resolveSamplingErrorMessage(e, '编辑打样项目失败')
-      error.value = message
-      // 乐观锁冲突：自动刷新详情，让用户基于最新数据重试
-      if (getErrorStatus(e) === 409) {
+      const status = getErrorStatus(e)
+      // 乐观锁冲突：自动刷新详情，让用户基于最新数据重试。
+      // fetchDetail 入口会重置 error/errorStatus，故先取本地副本、刷新完再回写，
+      // 否则冲突文案被冲掉、调用方只能拿到兜底文案
+      if (status === 409) {
         await fetchDetail(id)
       }
+      error.value = message
+      errorStatus.value = status
       return null
     } finally {
       submitting.value = false
@@ -106,6 +122,7 @@ export function useSamplingProject() {
   async function remove(id: number): Promise<ActionResponse | null> {
     submitting.value = true
     error.value = null
+    errorStatus.value = undefined
     try {
       const res = await patternRoomApi.deleteProject(id)
       return res
@@ -113,6 +130,7 @@ export function useSamplingProject() {
       console.error('[useSamplingProject] 删除打样项目失败:', e)
       const message = resolveSamplingErrorMessage(e, '删除打样项目失败')
       error.value = message
+      errorStatus.value = getErrorStatus(e)
       return null
     } finally {
       submitting.value = false
@@ -143,6 +161,7 @@ export function useSamplingProject() {
   function clearCurrent() {
     currentProject.value = null
     error.value = null
+    errorStatus.value = undefined
   }
 
   return {
@@ -150,6 +169,7 @@ export function useSamplingProject() {
     loading,
     submitting,
     error,
+    errorStatus,
     fetchDetail,
     create,
     update,

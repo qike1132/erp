@@ -781,6 +781,41 @@ export function useSummaryModal() {
   }
 
   /**
+   * 把「刚成功落库的统一损耗率」同步为新的已落库基线（供「取消编辑」恢复）。
+   *
+   * 两条落库路径必须共用本函数，否则同一份基线各自维护会漂移：
+   * - `applyLossRateAndSave`（顶部输入框自动落库，率已随请求发出）；
+   * - `saveFactoryEdits`（编辑态「保存修改」，rateTouched 时才提交 spare_rate）。
+   *
+   * 同步范围（缺一即「同屏两套口径」）：
+   * - persistedLossRate / persistedLossRateMixed：取消编辑时恢复的订单级基线；
+   * - fabricPersistedRates / fabricLossRateMixedPersisted：逐布料行的基线与 mixed 标记
+   *   （统一率输入会批量改写全部行，见 applyLossRate，故逐行基线必须一起刷新）；
+   * - lossRateMixed / fabricLossRateMixed：本次已把所有单统一为该值，不一致标记清除；
+   * - factoryOriginalData / factoryData：取消编辑时 groupSpareRates 从
+   *   factoryOriginalData 重播、diff 也以它为基准，不同步就会回滚到打开时的旧分组率；
+   *   factoryData 不同步则「取消编辑回新率、当前展示用旧率」同屏两套口径（OCR 2026-10-18）。
+   */
+  function syncPersistedLossRateBaseline(rate: number) {
+    persistedLossRate.value = rate
+    persistedLossRateMixed.value = false
+    fabricPersistedRates.value = cloneRaw(fabricLossRates.value)
+    fabricLossRateMixedPersisted.value = cloneRaw(fabricLossRateMixed.value)
+    lossRateMixed.value = false
+    const snapshot = factoryOriginalData.value
+    if (snapshot) {
+      snapshot.spare_rate = rate
+      snapshot.groups?.forEach((g) => { g.spare_rate = rate })
+    }
+    // 当前展示口径一并刷新：编辑态 diff 与「取消编辑」回滚都以此为基准，
+    // 只改基线不改展示会让同一屏幕同时存在新旧两套率。
+    if (factoryData.value) {
+      factoryData.value.spare_rate = rate
+      factoryData.value.groups?.forEach((g) => { g.spare_rate = rate })
+    }
+  }
+
+  /**
    * 用户交互损耗率后的自动落库（串行化 + 可见反馈）。
    *
    * 串行契约：
@@ -818,18 +853,7 @@ export function useSummaryModal() {
           await sendLossRate(sent)
           // 本次发送该率已成功落库 → 同步「已落库」基线（供取消编辑时恢复），
           // 并清掉「各单不一致」标记（本次已把所有涉及单统一为该值）。
-          persistedLossRate.value = sent
-          fabricPersistedRates.value = cloneRaw(fabricLossRates.value)
-          fabricLossRateMixed.value = fabricLossRateMixed.value.map((g) => g.map((ss) => ss.map(() => false)))
-          fabricLossRateMixedPersisted.value = cloneRaw(fabricLossRateMixed.value)
-          lossRateMixed.value = false
-          persistedLossRateMixed.value = false
-          // 2026-10-18 OCR 评审：取消编辑时 groupSpareRates 从 factoryOriginalData
-          // 重新播种，这里必须同步刷新快照，否则会回滚到打开时的旧分组率。
-          if (factoryOriginalData.value) {
-            factoryOriginalData.value.spare_rate = sent
-            factoryOriginalData.value.groups?.forEach((g) => { g.spare_rate = sent })
-          }
+          syncPersistedLossRateBaseline(sent)
           next = pendingRate
           pendingRate = null
         }
@@ -974,21 +998,17 @@ export function useSummaryModal() {
           })
         })
       })
-      factoryOriginalData.value = cloneRaw(factoryData.value)
-      lossRateTouched.value = false
       if (rateTouched) {
         // 2026-10-18 OCR 评审：本路径同样把 spare_rate 落库了，基线必须同步，
         // 否则「保存修改」后再「取消编辑」会回滚到旧率；逐行基线也要同步。
-        persistedLossRate.value = lossRate.value
-        persistedLossRateMixed.value = false
-        fabricPersistedRates.value = cloneRaw(fabricLossRates.value)
-        fabricLossRateMixedPersisted.value = cloneRaw(fabricLossRateMixed.value)
-        // 同步 openSummary 快照，取消编辑时 groupSpareRates 从这里重播
-        if (factoryOriginalData.value) {
-          factoryOriginalData.value.spare_rate = lossRate.value
-          factoryOriginalData.value.groups?.forEach((g) => { g.spare_rate = lossRate.value })
-        }
+        // 顺序很关键：必须**先**让共享函数把 factoryData 刷成新率，**再** clone 成基线；
+        // 反过来的话 cloneRaw 会把尚未刷新的旧率固化进 factoryOriginalData，等于没同步。
+        syncPersistedLossRateBaseline(lossRate.value)
+        factoryOriginalData.value = cloneRaw(factoryData.value)
+      } else {
+        factoryOriginalData.value = cloneRaw(factoryData.value)
       }
+      lossRateTouched.value = false
       try {
         const sRes = await purchaseApi.supplierSummary(orderIds.value) as unknown as SupplierSummaryData
         if (sRes.success) {

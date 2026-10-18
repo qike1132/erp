@@ -289,8 +289,9 @@ async def delete_order_item(db: AsyncSession, item_id: int, current_user: User) 
       （非超管会变成提交审批，订单不立即删除，故不能硬编码成功文案）。
     - 已被备货抵扣（该订单+该产品存在 stockin_id 非空的出货）时拒删。
 
-    锁序 Product→Order→Item：`_delete_order_directly` 内部是 Order→Product（先锁单再锁
-    产品），若此处不先预锁产品，会与出库创建路径（P→O）构成 AB-BA 死锁。
+    锁序 Product→Order→Item：`_delete_order_directly` 内部会再锁一次
+    order.product_id（幂等重锁），若此处不先预锁产品，会与出库创建路径（P→O）
+    构成 AB-BA 死锁。
     """
     head = (await db.execute(
         select(OrderItem.order_id, OrderItem.product_id,
@@ -532,16 +533,40 @@ def _write_order_deletion_backup(snapshot: dict) -> str | None:
         raise OSError('订单删除前备份失败，已中止删除操作') from exc
 
 
+async def _load_order_for_delete(db: AsyncSession, order_id: int) -> Order | None:
+    """按 delete_order 的锁序加载订单：先预锁 Product，再锁 Order 行本身。
+
+    2026-10-18 OCR 评审 P2-07 收尾：上一版用 `db.get(Order, ...)` 无锁读订单 ——
+    ① Order 行本身从未加锁，与并发删除构成更新丢失窗口；
+    ② `db.get` 走身份映射，本事务先前无锁加载过的 Order 会直接拿到旧对象。
+
+    锁序与 update_order 逐字同构（P→O）：先按 product_id 锁产品，再
+    `with_for_update(of=Order)` 锁订单行。`of=Order` 限定只锁 order 行 ——
+    joinedload 展开的 product 行已由上面的产品锁覆盖（同事务重锁无害），
+    不限定则锁范围会带上 join 出来的行，并依赖「PG 是否允许 outer join 上
+    裸 FOR UPDATE」这一易变细节。
+
+    读不到 product_id（订单不存在/product_id 空）则跳过预锁，由调用方按原口径
+    抛「订单不存在」——同 update_order 的做法。
+    """
+    _pre_pid = (await db.execute(
+        select(Order.product_id).where(Order.id == order_id)
+    )).scalar_one_or_none()
+    if _pre_pid is not None:
+        await get_product_for_update(db, _pre_pid)
+
+    return (await db.execute(
+        select(Order)
+        .options(joinedload(Order.product))
+        .where(Order.id == order_id)
+        .with_for_update(of=Order)
+    )).scalar_one_or_none()
+
+
 async def delete_order(db: AsyncSession, order_id: int, current_user: User) -> dict:
-    order = await db.get(Order, order_id, options=[joinedload(Order.product)])
+    order = await _load_order_for_delete(db, order_id)
     if not order or order.is_deleted:
         raise ValueError('订单不存在')
-
-    # 2026-10-17 审计 P2-07：先锁 Product 再走后续检查，与 update_order 的
-    # Product→Order 锁序一致；此前删除路径先无锁读、到 _delete_order_directly
-    # 才锁 Product，与出库创建并发时存在锁序反转/TOCTOU 窗口。
-    if order.product_id is not None:
-        await get_product_for_update(db, order.product_id)
 
     await _check_order_lock(db, order_id, order, current_user, '删除')
 
@@ -735,6 +760,10 @@ async def _delete_order_directly(
     # 产品删除后 order.product_id 会被置空（迁移 052：ON DELETE SET NULL）：
     # 此时无产品行可锁、无库存可回滚，且 inventory_log.product_id 是非空外键
     # （ON DELETE CASCADE），故跳过库存回滚，只清理订单自身关联记录。
+    # 本函数同时被审批通过路径（approval_service）调用：那条路径没有预锁 Product，
+    # 故这里必须自己锁一次；对 delete_order 已预锁的调用方，同事务内重复加锁是 no-op。
+    # 注意：本锁只覆盖 Product，**Order 行的锁由 delete_order 入口负责**（见那里的
+    # with_for_update 注释）；单独调本函数不等于锁全链路。
     product = (
         await get_product_for_update(db, order.product_id)
         if order.product_id is not None else None

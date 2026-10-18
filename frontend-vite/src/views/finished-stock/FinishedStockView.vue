@@ -234,10 +234,11 @@ async function saveRemark(row: FinishedStockRow, text: string) {
       batch_no: row.batch_no || '',
       remark: text,
     })
+    // 2026-10-17 审计 P2-44：本地改动写在 skuGroups 派生的行副本上（第 301 行
+    // `{ ...r }` 浅拷贝），computed 重算即丢。2026-10-18 OCR 复评：summary 走只读
+    // 副本、立即 refetch 可能读回旧值反而覆盖本地改动。因此：保留本地行对象修改
+    // （本次会话内可见），并标记缓存过期让下次自然刷新取服务端真值。
     row.remark = text.trim()
-    // 2026-10-17 审计 P2-44：只改本地行对象时，翻页/重渲染会从旧缓存重建并丢改动。
-    // 2026-10-18 OCR 评审：summary 走只读副本，立即 refetch 可能读回旧值并覆盖本地
-    // 改动；这里只标记缓存过期、不立刻重取，由下一次自然刷新取服务端真值。
     queryClient.invalidateQueries({ queryKey: ['finished-stock'], refetchType: 'none' })
     showToast('备注已保存', 'success')
     editingKey.value = null

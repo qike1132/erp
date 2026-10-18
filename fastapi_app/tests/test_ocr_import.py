@@ -84,7 +84,7 @@ class TestOcrImportEndpoints:
     async def test_upload_with_valid_task_id(self, client, mock_db):
         """测试上传 OCR 文件 - 传入有效的 task_id"""
         with patch('fastapi_app.services.ocr_service._progress_store',
-                    {'existing-task-id': {'status': 'pending', 'percent': 0, 'message': ''}}):
+                    {'existing-task-id': ({'status': 'pending', 'percent': 0, 'message': ''}, float('inf'))}):
             with patch('fastapi_app.services.ocr_service._update_progress',
                         new_callable=AsyncMock):
                 with patch('fastapi_app.services.ocr_service.import_staging_stockouts_from_file',

@@ -29,6 +29,14 @@ export function useSamplingRole(projectId: Ref<number | null>) {
   const submitting = ref(false)
   /** 错误信息 */
   const error = ref<string | null>(null)
+  /**
+   * 最近一次失败的状态码。
+   *
+   * 本 hook 的写操作在内部 catch 后统一返回 null，调用方拿不到异常对象；
+   * 而 403 已由 axios 拦截器统一提示，调用方若只凭 error 文案再弹一次 toast
+   * 就会同一次失败弹两条。故把状态码一并暴露，让调用方复用同一套 403 抑制口径。
+   */
+  const errorStatus = ref<number | undefined>(undefined)
 
   /** 竞态保护：快速切换项目时忽略旧响应 */
   let _requestId = 0
@@ -38,6 +46,7 @@ export function useSamplingRole(projectId: Ref<number | null>) {
     const reqId = ++_requestId
     loading.value = true
     error.value = null
+    errorStatus.value = undefined
     try {
       const res = await patternRoomApi.listRoles(id)
       if (reqId !== _requestId) return
@@ -79,6 +88,7 @@ export function useSamplingRole(projectId: Ref<number | null>) {
     if (projectId.value == null) return null
     submitting.value = true
     error.value = null
+    errorStatus.value = undefined
     try {
       const res = await patternRoomApi.createRole(projectId.value, { role_name: roleName })
       // 刷新角色列表
@@ -88,6 +98,7 @@ export function useSamplingRole(projectId: Ref<number | null>) {
       console.error('[useSamplingRole] 新增角色失败:', e)
       const message = resolveSamplingErrorMessage(e, '新增角色失败', ROLE_ERROR_OPTS)
       error.value = message
+      errorStatus.value = getErrorStatus(e)
       return null
     } finally {
       submitting.value = false
@@ -98,6 +109,7 @@ export function useSamplingRole(projectId: Ref<number | null>) {
   async function renameRole(roleId: number, newName: string, version: number): Promise<ActionResponse | null> {
     submitting.value = true
     error.value = null
+    errorStatus.value = undefined
     try {
       const res = await patternRoomApi.updateRole(roleId, { role_name: newName, version })
       // 刷新角色列表
@@ -108,11 +120,14 @@ export function useSamplingRole(projectId: Ref<number | null>) {
     } catch (e) {
       console.error('[useSamplingRole] 改名角色失败:', e)
       const message = resolveSamplingErrorMessage(e, '改名失败', ROLE_ERROR_OPTS)
-      error.value = message
-      // 乐观锁冲突：自动刷新列表
-      if (getErrorStatus(e) === 409 && projectId.value != null) {
+      const status = getErrorStatus(e)
+      // 乐观锁冲突：自动刷新列表。fetchRoles 入口会重置 error/errorStatus，
+      // 故先取本地副本、刷新完再回写，否则冲突文案被冲掉、调用方只能拿到兜底文案
+      if (status === 409 && projectId.value != null) {
         await fetchRoles(projectId.value)
       }
+      error.value = message
+      errorStatus.value = status
       return null
     } finally {
       submitting.value = false
@@ -123,6 +138,7 @@ export function useSamplingRole(projectId: Ref<number | null>) {
   async function setRoleCurrentVersion(roleId: number, versionNo: string, version: number): Promise<ActionResponse | null> {
     submitting.value = true
     error.value = null
+    errorStatus.value = undefined
     try {
       const res = await patternRoomApi.updateRole(roleId, { current_version: versionNo, version })
       // 局部 patch：仅更新对应角色的 current_version 与乐观锁版本号，避免全量 fetchRoles 闪烁。
@@ -139,10 +155,14 @@ export function useSamplingRole(projectId: Ref<number | null>) {
     } catch (e) {
       console.error('[useSamplingRole] 设置角色最终版本失败:', e)
       const message = resolveSamplingErrorMessage(e, '设置最终版本失败', ROLE_ERROR_OPTS)
-      error.value = message
-      if (getErrorStatus(e) === 409 && projectId.value != null) {
+      const status = getErrorStatus(e)
+      // 乐观锁冲突：自动刷新列表。fetchRoles 入口会重置 error/errorStatus，
+      // 故先取本地副本、刷新完再回写，否则冲突文案被冲掉
+      if (status === 409 && projectId.value != null) {
         await fetchRoles(projectId.value)
       }
+      error.value = message
+      errorStatus.value = status
       return null
     } finally {
       submitting.value = false
@@ -153,6 +173,7 @@ export function useSamplingRole(projectId: Ref<number | null>) {
   async function deleteRole(roleId: number): Promise<ActionResponse | null> {
     submitting.value = true
     error.value = null
+    errorStatus.value = undefined
     try {
       const res = await patternRoomApi.deleteRole(roleId)
       // 刷新角色列表
@@ -164,6 +185,7 @@ export function useSamplingRole(projectId: Ref<number | null>) {
       console.error('[useSamplingRole] 删除角色失败:', e)
       const message = resolveSamplingErrorMessage(e, '删除角色失败', ROLE_ERROR_OPTS)
       error.value = message
+      errorStatus.value = getErrorStatus(e)
       return null
     } finally {
       submitting.value = false
@@ -180,6 +202,7 @@ export function useSamplingRole(projectId: Ref<number | null>) {
     roles.value = []
     currentRoleId.value = null
     error.value = null
+    errorStatus.value = undefined
   }
 
   // watch projectId 自动重新加载角色列表
@@ -205,6 +228,7 @@ export function useSamplingRole(projectId: Ref<number | null>) {
     loading,
     submitting,
     error,
+    errorStatus,
     fetchRoles,
     getCurrentRole,
     createRole,

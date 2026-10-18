@@ -90,3 +90,26 @@ class TestEditPrecheck:
 
         assert entity.stock_check_passed is True
         assert entity.stock_check_message == '库存充足'
+
+    async def test_edit_to_unknown_product_invalidates_precheck(self):
+        """改成匹配不到的产品名后，预检必须作废（2026-10-18 OCR 评审）。
+
+        `_generic_update_staging_entity` 遇到未知产品名会把 product_id 置 None、
+        is_validated 置 False；本 hook 若只按「product_id 非空」分支重算，
+        上一轮导入留下的 stock_check_passed=True 会残留 —— 确认弹窗据此放行，
+        且 confirm_staging_stockouts 的筛选条件含 stock_check_passed IS TRUE，
+        这行会被选中再在确认阶段才被拒（用户看到两轮错误）。
+        """
+        entity = SimpleNamespace(
+            product_id=None, quantity=10, is_validated=False,
+            stock_check_passed=True, stock_check_message='库存充足',
+        )
+        db = AsyncMock()
+        db.get = AsyncMock(return_value=None)
+
+        await staging_stockout._stockout_extra_updates(
+            entity, {'product_name': '不存在的产品', 'quantity': 10}, db
+        )
+
+        assert entity.stock_check_passed is False
+        assert entity.stock_check_message == ''

@@ -70,10 +70,11 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch } from 'vue'
 import { useQueryClient } from '@tanstack/vue-query'
-import { stockApi, finishedStockApi } from '@/api'
+import { finishedStockApi } from '@/api'
 import { useCatalogStore } from '@/stores/catalog'
 import type { ShipmentInfo, StagedStockout, Product, BatchAvailable } from '@/types'
 import { useStockOutActions } from './composables/useStockOutActions'
+import { useStockOutAvailabilityGates } from './composables/useStockOutAvailabilityGates'
 import UiButton from '@/components/ui/UiButton.vue'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
@@ -81,6 +82,7 @@ import { showToast } from '@/composables/useToast'
 import { toISODate } from '@/utils/format'
 import { invalidateOrderDerivedQueries } from '@/utils/queryKeys'
 import { useStockOutProductSearch } from './composables/useStockOutProductSearch'
+import { groupByProductCustomer } from './composables/useStockoutOcrStaging'
 
 import StockOutInputForm from './components/StockOutInputForm.vue'
 import StockOutStagingList from './components/StockOutStagingList.vue'
@@ -106,26 +108,17 @@ function onProductSelect(product: Product) {
 
 // === 可出货量查询 ===
 const shipmentInfo = ref<ShipmentInfo | null>(null)
-/** 请求序号：快速切换 SKU/客户时丢弃过期响应（与 fetchBatchOptions 同款守卫；
- *  2026-10-17 审计 F-FE-DESK-CORE-02：原先无序号，慢响应后到会覆盖新 SKU 的
- *  可出货量——展示与超额闸门都按错值判定）。 */
-let shipReqSeq = 0
 
-async function fetchShipmentInfo() {
-  if (!form.productId || !form.customer) {
-    shipReqSeq++
+/** 展示用：复用 composable 的请求函数（带序号守卫，F-FE-DESK-CORE-02）。 */
+async function fetchShipmentInfo(productId?: string | number, customer?: string) {
+  const pid = productId ?? form.productId
+  const cust = customer ?? form.customer
+  if (!pid || !cust) {
     shipmentInfo.value = null
     return
   }
-  const seq = ++shipReqSeq
-  try {
-    const data = await stockApi.availableShipment(Number(form.productId), form.customer)
-    if (seq !== shipReqSeq) return // 已有更新的请求在途，丢弃过期响应
-    shipmentInfo.value = data.data ?? null
-  } catch {
-    if (seq !== shipReqSeq) return
-    shipmentInfo.value = null
-  }
+  const avail = await fetchAvailableShipment(pid, cust)
+  shipmentInfo.value = avail === undefined ? null : { available_quantity: avail } as ShipmentInfo
 }
 
 // === 成品库存批次列表（选定 SKU 后带出，供按批次扣减） ===
@@ -185,6 +178,9 @@ watch(() => form.customer, () => {
 
 // === 暂存列表 ===
 const staged = ref<StagedStockout[]>([])
+// 产品级累计闸门（2026-10-17 审计 P2-45 / 2026-10-18 OCR 复评）抽到 composable：
+// 新增、编辑、OCR 暂存三条入口共用同一口径（本文件已贴 400 行门禁上限）。
+const { fetchAvailableShipment, checkProductAvailability } = useStockOutAvailabilityGates(staged)
 
 async function removeStagedItem(idx: number) {
   const ok = await confirmDialog.confirm('确定删除？', '此操作不可恢复', 'danger')
@@ -231,30 +227,17 @@ async function addStaged() {
     showToast('请选择客户和产品，并输入数量', 'warning')
     return
   }
-  // 2026-10-18 OCR 评审：新增路径同样拦小数（后端 int，1.5 会让整批 422）
   if (!Number.isInteger(form.quantity) || form.quantity < 1) {
     showToast('数量必须为正整数', 'warning')
     return
   }
   if (form.productId && form.customer) {
-    // F-FE-DESK-CORE-02：无条件重拉——shipmentInfo 非 null 时可能是上一个
-    // SKU/客户的陈旧值（闸门与展示都按它判定），null≠「已验证为最新」。
-    await fetchShipmentInfo()
-    const avail = shipmentInfo.value?.available_quantity
-    if (avail !== undefined) {
-      // 2026-10-17 审计 P2-45：产品级可出货量校验必须累计同产品/客户已暂存量
-      const stagedSameProduct = staged.value
-        .filter((s) => s.product_id === form.productId && s.customer === form.customer)
-        .reduce((sum, s) => sum + (s.quantity || 0), 0)
-      const effectiveAvail = avail - stagedSameProduct
-      if (form.quantity > effectiveAvail) {
-        showToast(
-          `出货数量超过可出货量！可出货: ${effectiveAvail}（已暂存 ${stagedSameProduct}）`,
-          'error',
-        )
-        return
-      }
-    }
+    // 产品级累计闸门（2026-10-17 审计 P2-45；含 F-FE-DESK-CORE-02 的无条件重拉）
+    if (!await checkProductAvailability({
+      productId: form.productId,
+      customer: form.customer,
+      quantity: form.quantity,
+    })) return
   }
 
   if (!checkBatchAvailability({
@@ -283,12 +266,23 @@ async function addStaged() {
   batchOptions.value = []
 }
 
-/** OCR 粘贴识别确认后的条目：与手工录入进同一个暂存列表，提交前仍可改、删 */
-function addOcrStaged(items: StagedStockout[]) {
+/** OCR 粘贴识别确认后的条目：与手工录入进同一个暂存列表，提交前仍可改、删。
+ *  2026-10-18 OCR 复评：须正整数（后端 int），且按产品+客户合并后过可用量闸门。 */
+async function addOcrStaged(items: StagedStockout[]) {
   const invalid = items.find((it) => !Number.isInteger(it.quantity) || it.quantity < 1)
   if (invalid) {
     showToast(`OCR 行数量无效（${invalid.quantity}），请修正后再暂存`, 'warning')
     return
+  }
+  for (const group of groupByProductCustomer(items)) {
+    const first = group[0]
+    if (!first) continue
+    const ok = await checkProductAvailability({
+      productId: first.product_id,
+      customer: first.customer,
+      quantity: group.reduce((sum, s) => sum + (s.quantity || 0), 0),
+    })
+    if (!ok) return
   }
   staged.value.push(...items)
 }
@@ -312,7 +306,7 @@ function openEditStaged(idx: number) {
   editStagedOpen.value = true
 }
 
-function saveEditStaged() {
+async function saveEditStaged() {
   if (editStagedIdx.value < 0) return
   const item = staged.value[editStagedIdx.value]
   if (!item) return
@@ -330,6 +324,12 @@ function saveEditStaged() {
     quantity: editStagedForm.quantity,
     excludeId: item.id,
   })) return
+  // 2026-10-18 OCR 复评：产品级累计闸门也要过（此前只拦新增路径）
+  const ok = await checkProductAvailability({
+    productId: item.product_id, customer: editStagedForm.customer,
+    quantity: editStagedForm.quantity, excludeId: item.id,
+  })
+  if (!ok) return
   item.customer = editStagedForm.customer
   item.date = editStagedForm.date
   item.quantity = editStagedForm.quantity

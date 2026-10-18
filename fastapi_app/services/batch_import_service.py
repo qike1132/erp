@@ -407,9 +407,17 @@ async def import_orders_service(db: AsyncSession, file: ExcelUpload) -> BatchImp
                 elif deduct_str.lower() in ('是', 'yes'):
                     deduct_value = qty
                 if deduct_value > 0:
+                    # 2026-10-18 OCR 评审：第 4 个位置参数是 `order_quantity`（订单数量），
+                    # 抵扣量必须走 `custom_deduct_quantity`。此前把 `deduct_value` 按位置塞进
+                    # order_quantity、不传 custom_deduct_quantity：数字列语义碰巧一致
+                    # （都是扣这么多），但「是/yes」折算成 qty 后 order_quantity 与订单
+                    # 真实数量相等、掩盖了差异；一旦两列语义分叉（如部分抵扣），
+                    # 备货不足的告警会拿抵扣量当订单量报错数。改为显式关键字，按签名传。
                     await process_order_deduction(
-                        db, order, product_id, deduct_value,
-                        deduct_stock=True, product=locked_product,
+                        db, order, product_id, qty,
+                        deduct_stock=True,
+                        custom_deduct_quantity=deduct_value,
+                        product=locked_product,
                     )
             return True, None
 

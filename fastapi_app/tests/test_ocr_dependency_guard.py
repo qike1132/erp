@@ -103,7 +103,7 @@ class TestEndpointsSurfaceIt:
                           new=AsyncMock(side_effect=OcrDependencyError(MISSING_MSG))), \
              patch.object(svc, 'create_progress', new_callable=AsyncMock, return_value='t-1'), \
              patch.object(svc, '_update_progress', AsyncMock()), \
-             patch.object(svc, '_progress_store', {'t-1': {}}):
+             patch.object(svc, '_progress_store', {'t-1': ({}, float('inf'))}):
             response = await client.post(
                 '/api/v1/ocr-import/upload?session_id=s1&task_id=t-1', files=upload(field='files'))
         assert response.status_code == 200

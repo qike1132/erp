@@ -68,6 +68,29 @@ describe('BOM 空态护栏', () => {
     expect(saveBom).not.toHaveBeenCalled()
   })
 
+  it('空基线复查返回 success=false → 取消保存并解锁（OCR 2026-10-18）', async () => {
+    // 打开弹窗时加载成功（拿到非空基线），删光后保存前的复查必须重新请求 loadBom。
+    let call = 0
+    loadBom.mockImplementation(() => {
+      call += 1
+      return Promise.resolve(call === 1 ? loadedOk : { success: false, detail: 'boom' })
+    })
+    const confirm = makeConfirm(true)
+    const actions = useProductListActions(confirm)
+    await actions.openBomModal({ id: 7, name: 'P7' })
+    await actions.deleteBomItem(0)
+    await actions.saveBom()
+
+    // 复查失败：不得提交，且 bomSaving 必须解锁（否则后续保存全被吞）
+    expect(saveBom).not.toHaveBeenCalled()
+    expect(loadBom).toHaveBeenCalledTimes(2)
+
+    // 解锁验证：修好复查响应后同一实例应能正常保存
+    loadBom.mockImplementation(() => Promise.resolve(loadedOk))
+    await actions.saveBom()
+    expect(saveBom).toHaveBeenCalledTimes(1)
+  })
+
   it('删光已有物料的行再保存：弹 danger 确认，用户拒绝则不提交', async () => {
     loadBom.mockResolvedValue(loadedOk)
     let ok = true

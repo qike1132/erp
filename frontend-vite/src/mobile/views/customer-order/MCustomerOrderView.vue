@@ -66,14 +66,20 @@ const loading = ref(false)
 const page = ref(1)
 const perPage = 20
 const total = ref(0)
+// 2026-10-18 OCR 评审：请求序号。状态 chip 切换与翻页都由
+// watch([activeTab, page]) 触发请求，快速切换时旧响应可能后到并覆盖列表。
+let loadSeq = 0
 
 async function handleSearch() {
+  const seq = ++loadSeq
   loading.value = true
   try {
     const res = await orderApi.list({ keyword: keyword.value, status: activeTab.value === 'all' ? '' : activeTab.value, page: page.value, per_page: perPage })
+    if (seq !== loadSeq) return // 2026-10-18 OCR 评审：丢弃过期响应
     orders.value = res?.data || []
     total.value = res?.total || 0
   } catch {
+    if (seq !== loadSeq) return
     // 此前无 catch：请求失败时列表静默保持旧数据（或空白），用户零感知。
     // 2026-10-18 OCR 评审：保留 total（分页器不消失），仅清空列表并提示。
     orders.value = []

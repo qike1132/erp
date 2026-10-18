@@ -73,7 +73,16 @@ def _build_stockout_entity(
 async def _stockout_extra_updates(entity, data: dict, db: AsyncSession) -> None:
     # 2026-10-18 OCR 评审：改产品名（generic 层会重解析 product_id）或改数量，
     # 都必须重算预检；此前只看 quantity，换产品后仍沿用旧产品的结论。
-    if entity.product_id and ('quantity' in data or 'product_name' in data):
+    if 'product_name' in data and entity.product_id is None:
+        # 新名称匹配不到任何产品：_generic_update_staging_entity 已把 product_id 置 None、
+        # is_validated 置 False。此时下面按 product_id 非空的重算分支不会执行，旧的
+        # stock_check_passed/message 会残留（前端确认弹窗据此放行），且
+        # confirm_staging_stockouts 的筛选条件含 stock_check_passed IS TRUE，
+        # 残留 True 会让这行进入确认流程再被 _confirm_one_staging_stockout 拒。
+        # 必须显式作废预检：置 False 并清空文案，与导入路径「产品未匹配」的口径一致。
+        entity.stock_check_passed = False
+        entity.stock_check_message = ''
+    elif entity.product_id and ('quantity' in data or 'product_name' in data):
         # 2026-10-17 审计 AUD-04：编辑数量后必须重算库存预检（此前是空实现，
         # 数量改大后暂存行仍显示导入时的旧结论）。
         product = await db.get(Product, entity.product_id)

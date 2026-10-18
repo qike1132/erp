@@ -215,16 +215,16 @@ function Invoke-Nssm([string]$Nssm,[string[]]$NssmArgs,[string]$Action){
 
 function Install-NssmService([string]$Nssm,[hashtable]$Spec){
   $name=$Spec.Name
-    $cur=Get-Service -Name $name -ErrorAction SilentlyContinue
-    if($cur){
+  $cur=Get-Service -Name $name -ErrorAction SilentlyContinue
+  if($cur){
     # 已 STOPPED 时不调用 stop（nssm 会返回非零，属良性）。
-    # 2026-10-18 OCR 评审：非零在 STOP_PENDING/依赖占用时也常见，按 WARNING 处理，
+    # 2026-10-18 OCR 评审：非零在 STOP_PENDING/依赖占用时也常见（1051：被运行中的
+    # 依赖方占着，re-install 的正序停机就会撞上），按 WARNING 处理，
     # 由下面的「等 STOPPED」循环做权威判定。
-    if($cur -and $cur.Status -ne 'Stopped'){
+    if($cur.Status -ne 'Stopped'){
       try { Invoke-Nssm $Nssm @('stop',$name) 'stop' }
       catch { Write-Warning "$($_.Exception.Message)（继续等待 STOPPED 终态）" }
     }
-    if($cur){ $cur.Dispose() }
     # 停后必须等 STOPPED，不能立即 remove（旧实现会与正在停止的服务竞争）
     $svc=$null
     $deadline=(Get-Date).AddSeconds(30)
@@ -233,10 +233,23 @@ function Install-NssmService([string]$Nssm,[hashtable]$Spec){
       if($svc){ $svc.Dispose() }
       $svc=Get-Service -Name $name -ErrorAction SilentlyContinue
     } while($svc -and $svc.Status -ne 'Stopped' -and (Get-Date) -lt $deadline)
-    if($svc -and $svc.Status -ne 'Stopped'){ throw "服务 $name 未能停止（当前状态 $($svc.Status)）" }
+    if($svc -and $svc.Status -ne 'Stopped'){
+      # 2026-10-18 OCR 复评：1051 是被依赖方占用，重装前不可能停成；此时应跳过
+      # remove/install（保留现有服务），而不是抛异常中止整个安装。
+      $stillBlocked = $false
+      if($svc.Status -ne 'Stopped'){ $stillBlocked = $true }
+      if($svc){ $svc.Dispose() }
+      if($cur){ $cur.Dispose() }
+      if($stillBlocked){
+        Write-Warning "服务 $name 未能停止（可能被运行中的依赖方占用，错误 1051）；跳过本次重装，保留现有服务定义"
+        return
+      }
+      throw "服务 $name 未能停止"
+    }
     # 2026-10-18 OCR 评审：ServiceController 句柄未释放时 remove 只会标记删除，
     # 随后的 install 会报 ERROR_SERVICE_MARKED_FOR_DELETE (1072)。
     if($svc){ $svc.Dispose() }
+    if($cur){ $cur.Dispose() }
     Invoke-Nssm $Nssm @('remove',$name,'confirm') 'remove'
     $rmDeadline=(Get-Date).AddSeconds(30)
     do {

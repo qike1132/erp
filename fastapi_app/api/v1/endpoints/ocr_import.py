@@ -112,9 +112,13 @@ async def upload_shipping_docs(files: list[UploadFile]=File(..., description='�
         file_results.append({'filename': filename, 'imported': imported, 'message': message})
     overall_message = f'共处理 {len(file_results)} 个文件，识别导入 {total_imported} 个出货到暂存区'
     await svc._update_progress(task_id, status='done', percent=100, message=overall_message)
-    # 2026-10-18 OCR 评审：全部文件失败时 file_results 为空、total_imported=0，
-    # 旧表达式会返回 success=True；改为「有导入或有成功文件」才算成功。
-    overall_success = total_imported > 0 or len(file_results) > 0
+    # 2026-10-18 OCR 评审：file_results **不等于**「成功文件」——
+    # import_staging_stockouts_from_file 在「无法提取文本」「无法识别出货信息」
+    # 「识别导入失败」三种情况下返回的是 (0, message, [])，旧表达式
+    # `total_imported > 0 or len(file_results) > 0` 会把这些零导入的失败文件
+    # 判成成功 → 前端弹绿色「识别完成」而暂存区一行没进。
+    # 唯一可靠的成败信号是「真的导入了行数」。
+    overall_success = total_imported > 0
     return OcrPdfImportResult(success=overall_success, message=overall_message, total_imported=total_imported, file_count=len(file_results), file_results=file_results, errors=all_errors[:20], task_id=task_id)
 
 @router.get('/progress/{task_id}', summary='查询 OCR 识别进度')

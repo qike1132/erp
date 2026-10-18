@@ -586,6 +586,9 @@ class ServiceOps:
 
         返回 ``(ok, state, pid)``，与 ``start_one_service`` 一致。
         """
+        nssm = nssm or self.find_nssm()
+        # 2026-10-18 OCR 复评：闸门必须在**任何副作用之前**（记录 prev_pid 之前），
+        # 否则被拒绝时已经动过本地状态，且日志顺序会误导。
         # 2026-10-18 OCR 评审：单服务重启（如「应用 Worker 数」）此前绕过 AUD-28
         # 闸门；这些服务同样吃工作区源码，必须一视同仁。
         if name in (_SVC_API, _SVC_ARQ, _SVC_WEB):
@@ -593,9 +596,8 @@ class ServiceOps:
             if not ok:
                 self._msg_queue.put(('log', {'text': f'拒绝执行：{msg}', 'level': 'ERROR'}))
                 return False, 'REJECTED', None
-            if msg.startswith('警告') or '覆盖' in msg:
+            if git_guard.is_warning(msg):
                 self._msg_queue.put(('log', {'text': msg, 'level': 'WARNING'}))
-        nssm = nssm or self.find_nssm()
         prev_pid = self.svc_pid(name)
         self._msg_queue.put(('log', {'text': f'正在重启生产服务 {name}...'}))
         self._stop_service_sync(name, nssm, stop_timeout)
@@ -648,8 +650,12 @@ class ServiceOps:
             ok, msg = git_guard.check_production_branch(self._project_dir)
             if not ok:
                 self._msg_queue.put(('log', {'text': f'拒绝执行：{msg}', 'level': 'ERROR'}))
+                # 2026-10-18 OCR 复评：被拒绝时也要收_hosting_refresh，否则界面
+                # 停在「动作执行中」的空档；_prod_start_ts 未刷新，hosting 会按
+                # 陈旧状态文件真实告警。
+                self._msg_queue.put(('hosting_refresh', {}))
                 return
-            if msg.startswith('警告') or '覆盖' in msg:
+            if git_guard.is_warning(msg):
                 self._msg_queue.put(('log', {'text': msg, 'level': 'WARNING'}))
         nssm = self.find_nssm()
         if verb == 'restart':

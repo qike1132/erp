@@ -19,6 +19,13 @@ logger = logging.getLogger(__name__)
 ALLOWED_BRANCHES = frozenset({'main'})
 OVERRIDE_ENV = 'ERP_ALLOW_NON_MAIN'
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+# 「放行但需警告」的消息前缀（2026-10-18 OCR 复评：调用方不再靠嗅探中文字串）
+WARNING_PREFIX = '警告：'
+
+
+def is_warning(message: str) -> bool:
+    """放行消息是否需要按 WARNING 级别展示（工作区脏 / override / 非 git 目录）。"""
+    return message.startswith(WARNING_PREFIX) or '覆盖' in message
 
 
 def _git(args: list[str], cwd: Path) -> tuple[int, str, str]:
