@@ -31,5 +31,8 @@ def test_sync_engine_drops_asyncpg_connect_args(monkeypatch):
         monkeypatch.setattr(database, '_sync_engine', None)
         monkeypatch.setattr(database, '_SyncSessionLocal', None)
 
-    assert 'connect_args' not in captured['kwargs']
+    # 2026-10-18 OCR 评审：pgbouncer 模式下同步引擎改用 psycopg3 的等价开关
+    # prepare_threshold=None；关键是绝不能带 asyncpg 的 statement_cache_size。
+    assert 'statement_cache_size' not in captured['kwargs'].get('connect_args', {})
+    assert captured['kwargs'].get('connect_args') == {'prepare_threshold': None}
     assert captured['kwargs']['pool_size'] == 5
