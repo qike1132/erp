@@ -201,7 +201,9 @@ async def import_staging_stockouts_from_file(db: AsyncSession, file_content: byt
             result_msg = f'成功从{file_type}识别并导入 {imported} 个出货到暂存区'
             if errors:
                 result_msg += f"。错误: {'; '.join(errors[:5])}"
-            await _prog(status='done', message=result_msg, percent=100)
+            # 2026-10-18 OCR 评审：单文件完成不得写批量终态 done——同一 task_id
+            # 被整批共享，写 done 会让前端在第一个文件后就停止轮询。
+            await _prog(message=result_msg, percent=100)
             return (imported, result_msg, errors[:10] if errors else [])
     except OcrDependencyError:
         # 2026-10-18 OCR 评审：OcrDependencyError 继承 RuntimeError，必须先于

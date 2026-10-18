@@ -113,6 +113,7 @@ const confirmDialog = useConfirmDialog()
 /* ---------- 任务进度（备份 + 还原 + 上传共用统一轮询） ---------- */
 const activeTaskId = ref<string | null>(null)
 const busy = ref(false)
+const triggering = ref(false)
 const uploadRestoring = ref(false)
 /** 当前任务类型，用于终态 toast 文案（备份/还原共用同一轮询） */
 const taskKind = ref<'备份' | '还原'>('备份')
@@ -257,18 +258,26 @@ async function deleteSchedule(id: number) {
   }
 }
 async function triggerScheduleNow() {
+  // 2026-10-18 OCR 评审：同一时刻至多一个重任务；双击/任务执行中不得再入队
+  if (busy.value || triggering.value) {
+    toast.info('当前有任务执行中，请稍后再试')
+    return
+  }
   const first = schedules.value.find((s) => s.enabled)
   if (!first?.name) {
     // 无启用的定时任务时不回退触发任何备份（全量属重操作，静默发起会让用户意外）
     toast.info('当前没有启用的定时任务')
     return
   }
+  triggering.value = true
   try {
     await backupApi.triggerSchedule(first.name)
     toast.success('已触发定时备份')
   } catch {
     // 2026-10-17 审计 P2-56：此前是全文件唯一无 catch 的写操作
     toast.error('触发定时备份失败，请重试')
+  } finally {
+    triggering.value = false
   }
 }
 

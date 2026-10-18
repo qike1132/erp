@@ -8,12 +8,19 @@
 import { ref, type Ref } from 'vue'
 import type { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { showToast } from '@/composables/useToast'
+import { getErrorStatus } from '@/types/errors'
 import { resolveSamplingErrorMessage } from './useSamplingErrors'
 import { patternRoomApi } from '@/api/patternRoom'
 import type { ProjectCreateRequest, ProjectUpdateRequest, ProjectStatus } from '@/api/patternRoom'
 import { createManageGuard } from './useManageGuard'
 import type { useCustomerSampling } from './useCustomerSampling'
 import type { useSamplingProject } from './useSamplingProject'
+
+/** 403 已由 axios 拦截器统一提示，避免同一次失败弹两条 toast。 */
+function toastActionError(e: unknown, fallback: string) {
+  if (getErrorStatus(e) === 403) return
+  showToast(resolveSamplingErrorMessage(e, fallback), 'error')
+}
 
 type GroupHook = ReturnType<typeof useCustomerSampling>
 type ProjectHook = ReturnType<typeof useSamplingProject>
@@ -117,7 +124,7 @@ export function usePatternRoomProjectActions(options: UsePatternRoomProjectActio
       }
     } catch (e) {
       console.error('[PatternRoomView] 标记完成失败:', e)
-      showToast(resolveSamplingErrorMessage(e, '标记完成失败'), 'error')
+      toastActionError(e, '标记完成失败')
     }
   }
 
@@ -137,7 +144,7 @@ export function usePatternRoomProjectActions(options: UsePatternRoomProjectActio
       }
     } catch (e) {
       console.error('[PatternRoomView] 取消项目失败:', e)
-      showToast(resolveSamplingErrorMessage(e, '取消项目失败'), 'error')
+      toastActionError(e, '取消项目失败')
     }
   }
 

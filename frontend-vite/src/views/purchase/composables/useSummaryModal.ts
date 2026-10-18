@@ -824,6 +824,12 @@ export function useSummaryModal() {
           fabricLossRateMixedPersisted.value = cloneRaw(fabricLossRateMixed.value)
           lossRateMixed.value = false
           persistedLossRateMixed.value = false
+          // 2026-10-18 OCR 评审：取消编辑时 groupSpareRates 从 factoryOriginalData
+          // 重新播种，这里必须同步刷新快照，否则会回滚到打开时的旧分组率。
+          if (factoryOriginalData.value) {
+            factoryOriginalData.value.spare_rate = sent
+            factoryOriginalData.value.groups?.forEach((g) => { g.spare_rate = sent })
+          }
           next = pendingRate
           pendingRate = null
         }
@@ -972,9 +978,11 @@ export function useSummaryModal() {
       lossRateTouched.value = false
       if (rateTouched) {
         // 2026-10-18 OCR 评审：本路径同样把 spare_rate 落库了，基线必须同步，
-        // 否则「保存修改」后再「取消编辑」会回滚到旧率。
+        // 否则「保存修改」后再「取消编辑」会回滚到旧率；逐行基线也要同步。
         persistedLossRate.value = lossRate.value
         persistedLossRateMixed.value = false
+        fabricPersistedRates.value = cloneRaw(fabricLossRates.value)
+        fabricLossRateMixedPersisted.value = cloneRaw(fabricLossRateMixed.value)
       }
       try {
         const sRes = await purchaseApi.supplierSummary(orderIds.value) as unknown as SupplierSummaryData

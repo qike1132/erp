@@ -44,5 +44,7 @@ export function quantityAriaInvalid(value: unknown): 'true' | undefined {
 export function formatQuantity(value: unknown): string {
   const n = Number(value)
   if (!Number.isFinite(n)) return '0'
-  return Number.isInteger(n) ? n.toLocaleString('en-US') : String(Math.round(n * 100) / 100)
+  // 2026-10-18 OCR 评审：整数与小数走同一 Intl 路径，保证千分位一致；
+  // maximumFractionDigits 同时解决 Math.round 的二进制舍入（1.005 → 1）。
+  return n.toLocaleString('en-US', { maximumFractionDigits: 2 })
 }

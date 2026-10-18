@@ -19,10 +19,17 @@ from pathlib import Path
 
 import pytest
 
+from server_manager import git_guard
 from server_manager.constants import _SVC_API, _SVC_ARQ
 from server_manager.service_ops import ServiceOps
 
 NSSM = r'C:\nssm\nssm.exe'
+
+
+@pytest.fixture(autouse=True)
+def _allow_branch_guard(monkeypatch):
+    """2026-10-18 OCR 评审：单服务重启也走分支闸门，测试必须打桩。"""
+    monkeypatch.setattr(git_guard, 'check_production_branch', lambda *a, **k: (True, 'test'))
 
 # 生产当前真实形态（2026-09-29 修复后）：6 个独立元素
 CURRENT = [

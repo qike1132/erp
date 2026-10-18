@@ -20,6 +20,7 @@
           :paginator="true"
           :rows="pPerPage"
           :total-records="pCount"
+          :current-page="pPage"
           item-unit="条登记"
           row-key="orderNo"
           @page="emit('page', $event)"
@@ -109,6 +110,8 @@ defineProps<{
   pPages: number
   /** 后端精确总条数（2026-10-17 审计 P2-43：此前用 pages × perPage 估算） */
   pCount: number
+  /** 受控页码：避免 total 变化时 UiDataTable 自动复位到第 1 页 */
+  pPage: number
   showSearchEmpty: boolean
 }>()
 

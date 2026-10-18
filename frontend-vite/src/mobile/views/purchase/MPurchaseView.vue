@@ -114,6 +114,7 @@ import MListItem from '@/mobile/components/MListItem.vue'
 import MEmpty from '@/mobile/components/MEmpty.vue'
 import MSpinner from '@/mobile/components/MSpinner.vue'
 import MBottomSheet from '@/mobile/components/MBottomSheet.vue'
+import { showToast } from '@/composables/useToast'
 
 const activeTab = ref('orders')
 const tabChips = [
@@ -160,7 +161,9 @@ const detailTime = computed(() => {
 async function refetchOrders(page = 1) {
   ordersPage.value = page
   ordersLoading.value = true
-  try { orders.value = await purchaseApi.orders({ page, per_page: MOBILE_PAGE_SIZE, keyword: keyword.value }) } finally { ordersLoading.value = false }
+  try { orders.value = await purchaseApi.orders({ page, per_page: MOBILE_PAGE_SIZE, keyword: keyword.value }) }
+  catch { showToast('订单加载失败，请重试', 'error') }
+  finally { ordersLoading.value = false }
 }
 
 async function loadUnprocessed(page = 1) {
@@ -168,13 +171,17 @@ async function loadUnprocessed(page = 1) {
   // 采购中/已完成两个页签的后端支持搜索），此页签搜索待端点增强后接线。
   unprocessedPage.value = page
   unprocessedLoading.value = true
-  try { unprocessed.value = await purchaseApi.unprocessedOrders({ page, per_page: MOBILE_PAGE_SIZE }) } finally { unprocessedLoading.value = false }
+  try { unprocessed.value = await purchaseApi.unprocessedOrders({ page, per_page: MOBILE_PAGE_SIZE }) }
+  catch { showToast('待生成订单加载失败，请重试', 'error') }
+  finally { unprocessedLoading.value = false }
 }
 
 async function loadCompleted(page = 1) {
   completedPage.value = page
   completedLoading.value = true
-  try { completedOrders.value = await purchaseApi.completed({ page, per_page: MOBILE_PAGE_SIZE, keyword: completedKeyword.value }) } finally { completedLoading.value = false }
+  try { completedOrders.value = await purchaseApi.completed({ page, per_page: MOBILE_PAGE_SIZE, keyword: completedKeyword.value }) }
+  catch { showToast('已完成订单加载失败，请重试', 'error') }
+  finally { completedLoading.value = false }
 }
 
 /** 搜索已完成订单：重置到第 1 页（否则会在旧页码上检索，结果为空） */

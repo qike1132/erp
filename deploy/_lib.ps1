@@ -217,12 +217,20 @@ function Install-NssmService([string]$Nssm,[hashtable]$Spec){
   $name=$Spec.Name
   if(Get-Service -Name $name -ErrorAction SilentlyContinue){
     $cur=Get-Service -Name $name -ErrorAction SilentlyContinue
-    # 已 STOPPED 时不调用 stop（nssm 会返回非零，属良性）
-    if($cur -and $cur.Status -ne 'Stopped'){ Invoke-Nssm $Nssm @('stop',$name) 'stop' }
+    # 已 STOPPED 时不调用 stop（nssm 会返回非零，属良性）。
+    # 2026-10-18 OCR 评审：非零在 STOP_PENDING/依赖占用时也常见，按 WARNING 处理，
+    # 由下面的「等 STOPPED」循环做权威判定。
+    if($cur -and $cur.Status -ne 'Stopped'){
+      try { Invoke-Nssm $Nssm @('stop',$name) 'stop' }
+      catch { Write-Warning "$($_.Exception.Message)（继续等待 STOPPED 终态）" }
+    }
+    if($cur){ $cur.Dispose() }
     # 停后必须等 STOPPED，不能立即 remove（旧实现会与正在停止的服务竞争）
+    $svc=$null
     $deadline=(Get-Date).AddSeconds(30)
     do {
       Start-Sleep -Milliseconds 500
+      if($svc){ $svc.Dispose() }
       $svc=Get-Service -Name $name -ErrorAction SilentlyContinue
     } while($svc -and $svc.Status -ne 'Stopped' -and (Get-Date) -lt $deadline)
     if($svc -and $svc.Status -ne 'Stopped'){ throw "服务 $name 未能停止（当前状态 $($svc.Status)）" }
@@ -233,6 +241,7 @@ function Install-NssmService([string]$Nssm,[hashtable]$Spec){
     $rmDeadline=(Get-Date).AddSeconds(30)
     do {
       Start-Sleep -Milliseconds 300
+      if($svc){ $svc.Dispose(); $svc=$null }
       $gone= -not (Get-Service -Name $name -ErrorAction SilentlyContinue)
     } while(-not $gone -and (Get-Date) -lt $rmDeadline)
     if(-not $gone){ throw "服务 $name 删除未完成（可能仍标记为删除中）" }

@@ -276,6 +276,7 @@ function mountTab(rows: ProgressOrderRow[]) {
       pPerPage: 20,
       pPages: 1,
       pCount: rows.length,
+      pPage: 1,
       showSearchEmpty: false,
     },
     global: { plugins: [[PrimeVue, { unstyled: true, pt: plushCutePT }]] },

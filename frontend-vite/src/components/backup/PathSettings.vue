@@ -4,7 +4,7 @@
          知情假功能比无功能更危险，这里明确标注并禁用保存。 -->
     <div class="ps-warn">
       当前版本备份目录由环境变量 <code>BACKUP_DIR</code> 决定，此处保存不会生效（设置接线待后续专项）。
-      实际生效目录：<code>{{ settings?.effective_backup_dir || settings?.default_backup_dir || '未知（设置未加载）' }}</code>
+      实际生效目录：<code>{{ settings?.effective_backup_dir || '未知（设置未加载或后端未返回）' }}</code>
     </div>
     <div class="ps-radio-row">
       <label class="ps-radio">
@@ -31,7 +31,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { BackupSettings } from '@/api/backup'
 
 const props = defineProps<{
@@ -43,8 +43,9 @@ const props = defineProps<{
 
 const mode = ref<'default' | 'custom'>('default')
 const customPath = ref('')
-// 设置表尚未接线（AUD-08）：保存按钮禁用，避免用户误以为修改生效
-const settingsWired = false
+// 设置表尚未接线（AUD-08）：保存按钮禁用，避免用户误以为修改生效。
+// 2026-10-18 OCR 评审：由后端 effective_source 驱动，接线后自动放开。
+const settingsWired = computed(() => !!props.settings && props.settings.effective_source !== 'env')
 const feedback = ref<{ tone: string; text: string }>({ tone: '', text: '' })
 
 // 加载设置后同步单选状态:当前生效路径与默认一致 → default,否则回显自定义路径

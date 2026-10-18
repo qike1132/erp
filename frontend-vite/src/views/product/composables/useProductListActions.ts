@@ -295,9 +295,17 @@ export function useProductListActions(confirmDialog: ConfirmDialogLike) {
 
     // 空基线覆盖非空 BOM 的二次确认（防误清空整张 BOM）
     if (allItems.length === 0 && currentProductId.value != null) {
-      // 2026-10-18 OCR 评审：进入异步确认前就上锁，否则双击会并发走完确认
+      // 2026-10-18 OCR 评审：进入异步确认前就上锁，否则双击会并发走完确认；
+      // loadBom 失败时必须解锁，否则 bomSaving 永久为 true、后续保存全部被吞。
       bomSaving.value = true
-      const existing = await productApi.loadBom(currentProductId.value) as { success: boolean; materials?: BomMaterialRecord[] }
+      let existing: { success: boolean; materials?: BomMaterialRecord[] }
+      try {
+        existing = await productApi.loadBom(currentProductId.value) as { success: boolean; materials?: BomMaterialRecord[] }
+      } catch {
+        bomSaving.value = false
+        showToast('读取现有 BOM 失败，已取消保存', 'error')
+        return
+      }
       const nonEmpty = existing.success && (existing.materials || []).some(m => (m.category || 'accessory') !== 'packaging')
       if (nonEmpty) {
         const ok = await confirmDialog.confirm(

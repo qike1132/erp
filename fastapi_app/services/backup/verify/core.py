@@ -117,18 +117,35 @@ async def query_table_rows(tname: str, db: AsyncSession, since: str | None = Non
     return serialized_rows
 
 
+async def _in_savepoint(db: AsyncSession, fn):
+    """在 SAVEPOINT 内执行只读校验语句。
+
+    2026-10-18 OCR 评审（High）：此前用 Session.rollback() 恢复失败状态，会把
+    调用方尚未提交的整个恢复事务一起回滚（JSON 恢复路径是先 flush 再校验）。
+    改为嵌套事务：失败只回滚该语句，调用方的数据与后续校验都不受影响。
+    """
+    try:
+        async with db.begin_nested():
+            return True, await fn()
+    except (RuntimeError, SQLAlchemyError, ValueError, TypeError, OSError) as e:
+        logger.warning('验证: 校验语句失败（已回滚到 savepoint）: %s', e)
+        return False, None
+
+
 async def _verify_table_row_count(db: AsyncSession, table, qtname: str,
                                     expected_rows: int) -> tuple[dict, bool]:
     """L1 行数比对。返回 (l1_entry, 表是否存在)。"""
     tname = str(table.name)
-    try:
+
+    async def _count() -> int:
         result = await db.execute(text(f'SELECT COUNT(*) FROM {qtname}'))  # nosec B608 — qtname 经 quote_table 白名单校验; batch-loop: 逐表备份/恢复,无法批量
-        actual_rows = result.scalar() or 0
-        table_exists = True
-    except (RuntimeError, OSError, ValueError, SQLAlchemyError) as e:
-        actual_rows = -1
-        table_exists = False
-        logger.warning(f'验证: 统计表 {tname} 行数失败: {e}')
+        return int(result.scalar() or 0)
+
+    ok, actual = await _in_savepoint(db, _count)
+    table_exists = ok
+    actual_rows = actual if ok else -1
+    if not ok:
+        logger.warning(f'验证: 统计表 {tname} 行数失败')
 
     if not table_exists and expected_rows == 0:
         l1_pass = True
@@ -142,7 +159,8 @@ async def _verify_table_row_count(db: AsyncSession, table, qtname: str,
 async def _verify_table_l0_checksum(db: AsyncSession, table, qtname: str) -> str | None:
     """L0 全局校验和片段：表级 MD5 聚合（失败返回 None）。"""
     tname = str(table.name)
-    try:
+
+    async def _checksum() -> str | None:
         pk_col = [c.name for c in table.primary_key.columns]
         order_col = pk_col[0] if pk_col else 'id'
         cols_result = await db.execute(  # batch-loop: 逐表备份/恢复,无法批量
@@ -156,16 +174,17 @@ async def _verify_table_l0_checksum(db: AsyncSession, table, qtname: str) -> str
         ))
         t_hash = row.scalar()
         return f'{tname}:{t_hash}' if t_hash else None
-    except (SQLAlchemyError, ValueError, OSError) as e:
-        logger.warning(f'验证: 表 {tname} 全局校验和计算失败: {e}')
-        return None
+
+    ok, value = await _in_savepoint(db, _checksum)
+    return value if ok else None
 
 
 async def _verify_table_l2_fingerprint(db: AsyncSession, table, qtname: str,
                                        expected_fp: str) -> dict:
     """L2 数据指纹：MD5 聚合关键业务表（失败置空串）。"""
     tname = str(table.name)
-    try:
+
+    async def _fingerprint() -> str:
         pk_col = [c.name for c in table.primary_key.columns]
         order_col = pk_col[0] if pk_col else 'id'
         cols_result = await db.execute(  # batch-loop: 逐表备份/恢复,无法批量
@@ -177,14 +196,12 @@ async def _verify_table_l2_fingerprint(db: AsyncSession, table, qtname: str,
         fp_result = await db.execute(text(  # batch-loop: 逐表备份/恢复,无法批量
             f'''SELECT MD5(STRING_AGG({agg_expr}, ',' ORDER BY "{order_col}")) FROM {qtname}'''  # nosec B608 — qtname 经 quote_table 白名单校验
         ))
-        fingerprint = fp_result.scalar() or ''
-    except (ValueError, TypeError, OSError, SQLAlchemyError) as e:
-        # 2026-10-18 OCR 评审：SQLAlchemy 语句失败后 session 进入失败状态，
-        # 不 rollback 会让后续校验全部 PendingRollbackError；回滚后本轮按失败处理。
-        with contextlib.suppress(SQLAlchemyError):
-            await db.rollback()  # manual-tx: try/except 内显式事务控制
-        fingerprint = ''
-        logger.warning(f'验证: 表 {tname} 指纹计算失败: {e}')
+        return str(fp_result.scalar() or '')
+
+    ok, value = await _in_savepoint(db, _fingerprint)
+    fingerprint = value if ok else ''
+    if not ok:
+        logger.warning(f'验证: 表 {tname} 指纹计算失败')
     fp_match = fingerprint == expected_fp if expected_fp else None
     return {'table': tname, 'fingerprint': fingerprint, 'expected_fingerprint': expected_fp, 'match': fp_match}
 
@@ -192,16 +209,19 @@ async def _verify_table_l2_fingerprint(db: AsyncSession, table, qtname: str,
 async def _verify_table_l3_sampling(db: AsyncSession, table, qtname: str) -> dict:
     """L3 ID 抽样：取前 3 个主键值，确认恢复后仍存在。"""
     tname = str(table.name)
-    try:
+
+    async def _sample() -> list:
         pk_col_sample = [c.name for c in table.primary_key.columns]
         sample_col = pk_col_sample[0] if pk_col_sample else 'id'
         sample_result = await db.execute(text(  # batch-loop: 逐表备份/恢复,无法批量
             f'SELECT "{sample_col}" FROM {qtname} ORDER BY "{sample_col}" LIMIT 3'  # nosec B608 — qtname 经 quote_table 白名单校验
         ))
-        found_ids = [r[0] for r in sample_result.fetchall()]
-    except (SQLAlchemyError, ValueError, OSError) as e:
-        found_ids = []
-        logger.warning(f'验证: 表 {tname} 抽样查询失败: {e}')
+        return [r[0] for r in sample_result.fetchall()]
+
+    ok, value = await _in_savepoint(db, _sample)
+    found_ids = value if ok else []
+    if not ok:
+        logger.warning(f'验证: 表 {tname} 抽样查询失败')
     return {'table': tname, 'sample_ids': found_ids, 'count_found': len(found_ids)}
 
 

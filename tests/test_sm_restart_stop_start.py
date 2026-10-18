@@ -19,10 +19,19 @@ AppStopMethodConsole/Threads 各 1500ms 时就会），服务永远停在 STOPPE
 """
 from pathlib import Path
 
+import pytest
+
+from server_manager import git_guard
 from server_manager.constants import _SVC_ALL, _SVC_REDIS_BROKER, _SVC_REVERSE, _SVC_START_ORDER, _SVC_WEB
 from server_manager.service_ops import ServiceOps
 
 NSSM = r'C:\nssm\nssm.exe'
+
+
+@pytest.fixture(autouse=True)
+def _allow_branch_guard(monkeypatch):
+    """2026-10-18 OCR 评审：重启闸门会读取真实分支，测试必须打桩（CI 在 PR 分支跑）。"""
+    monkeypatch.setattr(git_guard, 'check_production_branch', lambda *a, **k: (True, 'test'))
 
 
 class _Gate:

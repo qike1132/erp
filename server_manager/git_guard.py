@@ -65,7 +65,9 @@ def check_production_branch(root: Path | str | None = None) -> tuple[bool, str]:
         c_head, head_sha, _ = _git(['rev-parse', 'HEAD'], base)
         c_main, main_sha, _ = _git(['rev-parse', 'refs/remotes/origin/main'], base)
         if c_head == 0 and c_main == 0 and head_sha and head_sha == main_sha:
-            branch = 'main (detached at origin/main)'
+            # 2026-10-18 OCR 评审：必须把 branch 归一成真正的允许值，
+            # 否则后续 `branch not in ALLOWED_BRANCHES` 会立刻拒绝。
+            branch = 'main'
         else:
             _, head_short, _ = _git(['rev-parse', '--short', 'HEAD'], base)
             return False, (

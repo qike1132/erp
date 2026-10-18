@@ -10,7 +10,7 @@ import logging
 from datetime import UTC, datetime
 from typing import cast
 
-from sqlalchemy import func, literal, or_, select, update
+from sqlalchemy import false, func, literal, or_, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
@@ -142,12 +142,19 @@ def _build_batch_order_branch(whitelist, batch_no, status, customer, keyword):
     return order_branch
 
 
-def _build_batch_stockin_branch(whitelist, batch_no, customer, keyword):
+def _build_batch_stockin_branch(whitelist, batch_no, customer, keyword, status=''):
     stockin_branch = select(
         StockIn.stockin_date.label('sort_date'),
         literal('stockin').label('record_type'),
         StockIn.id.label('record_id'),
     ).where(StockIn.is_deleted.isnot(True))
+    # 2026-10-18 OCR 评审：状态筛选此前只作用于订单分支，备货行永远返回，
+    # 导致「共 N 条」与实际状态筛选不符。备货行只有「批次已完成」一种状态。
+    if status:
+        if status == ORDER_STATUS_BATCH_COMPLETED:
+            stockin_branch = stockin_branch.where(StockIn.batch_completed_at.isnot(None))
+        else:
+            stockin_branch = stockin_branch.where(false())
 
     if whitelist:
         stockin_branch = stockin_branch.where(StockIn.customer.in_(whitelist))
@@ -257,7 +264,7 @@ async def get_batch_query_list(
     order_branch = _build_batch_order_branch(whitelist, batch_no, status, customer, keyword)
 
     # 支 2：备货（按 batch_no 过滤；过滤 is_deleted，与订单分支及 complete_batch 口径一致）
-    stockin_branch = _build_batch_stockin_branch(whitelist, batch_no, customer, keyword)
+    stockin_branch = _build_batch_stockin_branch(whitelist, batch_no, customer, keyword, status)
 
     # total = 两支各自 COUNT 之和（复用同一分支查询，过滤条件绝对一致，不受分页影响）
     order_total = int((await db.execute(

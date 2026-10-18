@@ -44,7 +44,10 @@ def _build_stockout_entity(
     stock_check_passed = False
     stock_check_message = ''
     if is_validated:
-        if product is None:
+        if qty <= 0:
+            # 2026-10-18 OCR 评审：0/负数行不得被判「库存充足」（确认环节会拒绝）
+            stock_check_message = f'数量无效: {qty}'
+        elif product is None:
             stock_check_message = '未能读取当前库存，请在确认前核对'
         else:
             reason = check_stock_available(product.current_stock, -qty)

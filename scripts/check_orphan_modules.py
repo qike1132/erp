@@ -84,7 +84,11 @@ def _git_tracked_py_files() -> list[Path] | None:
     否则本地与 CI 判定可分叉）。git 不可用时返回 None，回退 rglob。"""
     try:
         proc = subprocess.run(
-            ['git', '-C', str(ROOT), 'ls-files', '-z', '--', '*.py'],
+            # 2026-10-18 OCR 评审：--others --exclude-standard 让本地新建但未 add
+            # 的模块也进图（否则门禁在本地静默放行、CI 才红）；被 ignore 的垃圾
+            # 文件仍排除，CI 干净检出集合不变。
+            ['git', '-C', str(ROOT), 'ls-files', '-z',
+             '--cached', '--others', '--exclude-standard', '--', '*.py'],
             capture_output=True, timeout=60,
         )
     except (OSError, subprocess.SubprocessError):

@@ -74,9 +74,9 @@ async function handleSearch() {
     orders.value = res?.data || []
     total.value = res?.total || 0
   } catch {
-    // 此前无 catch：请求失败时列表静默保持旧数据（或空白），用户零感知
+    // 此前无 catch：请求失败时列表静默保持旧数据（或空白），用户零感知。
+    // 2026-10-18 OCR 评审：保留 total（分页器不消失），仅清空列表并提示。
     orders.value = []
-    total.value = 0
     showToast('订单查询失败，请重试', 'error')
   } finally { loading.value = false }
 }
@@ -90,8 +90,10 @@ watch([activeTab, page], handleSearch)
 onMounted(handleSearch)
 
 function onSearch() {
-  page.value = 1
-  handleSearch()
+  // 2026-10-18 OCR 评审：页码变化由 watch([activeTab, page]) 触发；
+  // 仅在已是第 1 页时手动重查，避免同一参数发两次请求。
+  if (page.value === 1) handleSearch()
+  else page.value = 1
 }
 
 function orderColor(s: string | undefined) {

@@ -125,6 +125,7 @@ export function useBomQuickCopy({
         const existing = (await productApi.loadBom(currentProductId.value)) as {
           success?: boolean
           materials?: unknown[]
+          product?: { roles?: unknown[] }
         }
         if (!existing?.success) {
           hideProgress()
@@ -132,7 +133,8 @@ export function useBomQuickCopy({
           showToast('读取目标产品 BOM 失败，已取消复制', 'error')
           return
         }
-        if ((existing.materials?.length ?? 0) > 0) {
+        // 角色定义也算「已有 BOM」：后端默认作用域覆盖会连 ProductRole 一起删
+        if ((existing.materials?.length ?? 0) > 0 || (existing.product?.roles?.length ?? 0) > 0) {
           const ok = await confirmOverwrite(currentProductName.value)
           if (!ok) {
             hideProgress()

@@ -10,6 +10,7 @@
           :paginator="true"
           :rows="hPerPage"
           :total-records="hCount"
+          :current-page="hPage"
           item-unit="条登记"
           row-key="id"
           @page="emit('page', $event)"
@@ -58,6 +59,8 @@ defineProps<{
   hPages: number
   /** 后端精确总条数（2026-10-17 审计 P2-43） */
   hCount: number
+  /** 受控页码：避免 total 变化时 UiDataTable 自动复位 */
+  hPage: number
 }>()
 
 const emit = defineEmits<{

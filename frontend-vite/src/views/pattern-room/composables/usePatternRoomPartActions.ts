@@ -13,6 +13,12 @@ import { showToast } from '@/composables/useToast'
 import { getErrorStatus } from '@/types/errors'
 import { resolveSamplingErrorMessage } from './useSamplingErrors'
 import { createEmptyEditData, PART_EDIT_FIELDS, usePartInlineEdit, type PartEditData } from './usePartInlineEdit'
+
+/** 403 已由 axios 拦截器统一提示，避免同一次失败弹两条 toast。 */
+function toastActionError(e: unknown, fallback: string) {
+  if (getErrorStatus(e) === 403) return
+  showToast(resolveSamplingErrorMessage(e, fallback), 'error')
+}
 import { createManageGuard } from './useManageGuard'
 import type { useSamplingProject } from './useSamplingProject'
 import type { useSamplingPart } from './useSamplingPart'
@@ -97,7 +103,7 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
       console.error('[PatternRoomView] 批量创建部位失败:', e)
       // 2026-10-17 审计 AUD-12：全局拦截器对非 401/403 无用户兜底，
       // catch 里只打 console 等于「假成功」——用户看不到任何失败信号。
-      showToast(resolveSamplingErrorMessage(e, '批量创建部位失败'), 'error')
+      toastActionError(e, '批量创建部位失败')
     } finally {
       partHook.submitting.value = false
     }
@@ -122,7 +128,7 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
       }
     } catch (e) {
       console.error('[PatternRoomView] 设置最终版本失败:', e)
-      showToast(resolveSamplingErrorMessage(e, '设置最终版本失败'), 'error')
+      toastActionError(e, '设置最终版本失败')
     }
   }
 
@@ -145,8 +151,15 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
             currentRole.version,
           )
           if (!roleRes) {
-            // 2026-10-18 OCR 评审：设最终版本失败时不得继续进入编辑态（假成功）
+            // 2026-10-18 OCR 评审：设最终版本失败时不得继续进入编辑态（假成功）；
+            // 但复制接口已成功落库，必须刷新列表，避免用户重试产生重复版本。
             showToast(roleHook.error.value ?? '设置最终版本失败，请重试', 'error')
+            if (selectedProjectId.value) {
+              await partHook.fetchPartsByVersion(
+                selectedProjectId.value,
+                roleHook.currentRoleId.value ?? undefined,
+              )
+            }
             return
           }
         }
@@ -166,7 +179,7 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
       }
     } catch (e) {
       console.error('[PatternRoomView] 复制部位版本失败:', e)
-      showToast(resolveSamplingErrorMessage(e, '复制部位版本失败'), 'error')
+      toastActionError(e, '复制部位版本失败')
     }
   }
 
@@ -264,7 +277,7 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
       }
     } catch (e) {
       console.error('[PatternRoomView] 删除部位版本失败:', e)
-      showToast(resolveSamplingErrorMessage(e, '删除部位版本失败'), 'error')
+      toastActionError(e, '删除部位版本失败')
     }
   }
 

@@ -34,6 +34,7 @@
         :p-per-page="pPerPage"
         :p-pages="pPages"
         :p-count="progressCount"
+        :p-page="pPage"
         :show-search-empty="showSearchEmpty"
         @page="onProgressPageChange"
         @view-supplier="viewSupplierDetail"
@@ -48,6 +49,7 @@
         :h-per-page="hPerPage"
         :h-pages="hPages"
         :h-count="historyCount"
+        :h-page="hPage"
         @page="onHistoryPageChange"
         @view-detail="viewDetail"
       />
@@ -119,7 +121,7 @@ const {
   toastMsg, toastType, toastIcon, toast,
   pPage, pPerPage, pPages, pIsLoading, pIsFetching, progressCount,
   progressOrderRows, filteredOrderRows, showSearchEmpty, searchKeyword, stats,
-  hPerPage, hPages, historyCount, hIsLoading, hIsFetching, hRegistrations,
+  hPage, hPerPage, hPages, historyCount, hIsLoading, hIsFetching, hRegistrations,
   loadProgress, ensureProgressLoaded, ensureHistoryLoaded,
   onProgressPageChange, onHistoryPageChange,
 } = useMaterialRegistrations(activeTab)
@@ -165,7 +167,7 @@ async function submitReceive(payload: { qty: number | null; remark: string }) {
     for (const sub of receiveItem.value.subItems) {
       if (remainingToReceive <= 0) break
       const itemRemaining = sub.ordered - sub.received
-      if (itemRemaining <= 0) continue
+      if (itemRemaining <= 1e-6) continue
       const qtyForThisItem = Math.min(remainingToReceive, itemRemaining)
       const res = await materialApi.receive(sub.id, { received_quantity: qtyForThisItem, remark: payload.remark })
       if (!res.success) { toast(res.message || '登记失败', 'error'); return }
@@ -177,6 +179,13 @@ async function submitReceive(payload: { qty: number | null; remark: string }) {
     // 2026-10-17 审计 AUD-15：超量时不能连发两条 toast——toast 是单实例覆盖模式，
     // 后一条「收货登记成功」会立即盖掉警告，用户只看到成功、不知道超出部分被丢弃。
     // 改为单条合并消息。2026-10-18 OCR 评审：浮点残差（1e-17）按成功处理，数量格式化。
+    // 2026-10-18 OCR 评审：循环体也按 1e-6 容差跳过浮点残差，
+    // 且全部已收齐（totalDelta≈0）时给出准确提示，不发无意义请求。
+    if (totalDelta <= 1e-6) {
+      toast('该物料已全部到货，无需再登记', 'warning')
+      loadProgress(pPage.value)
+      return
+    }
     if (remainingToReceive > 1e-6) {
       toast(`已登记 ${formatQuantity(totalDelta)}，超出采购总量的 ${formatQuantity(remainingToReceive)} 已忽略`, 'warning')
     } else {

@@ -3,6 +3,8 @@ import type { TaskResponse } from '@/types'
 
 /** OCR 预览耗时与文件数/页数成正比，放宽全局 15s 超时 */
 const PREVIEW_TIMEOUT = 120_000
+/** 批量识别写库同步执行（最多 50 个文件），放宽到 10 分钟 */
+const OCR_UPLOAD_TIMEOUT = 600_000
 
 export const ocrApi = {
   createTask: () => post<TaskResponse>('/ocr-import/create-task'),
@@ -21,6 +23,8 @@ export const ocrApi = {
       `/ocr-import/upload?session_id=${encodeURIComponent(sessionId)}`
       + (taskId ? `&task_id=${encodeURIComponent(taskId)}` : ''),
       formData,
+      undefined,
+      OCR_UPLOAD_TIMEOUT,
     ),
   progress: (taskId: string) =>
     get<{ status: string; percent?: number; message?: string }>(`/ocr-import/progress/${taskId}`),
