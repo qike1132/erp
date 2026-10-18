@@ -526,9 +526,9 @@ export function useSummaryModal() {
   let drainPromise: Promise<void> | null = null
   let pendingRate: number | null = null
   /**
-   * 「取消编辑」代数：取消时 +1，让取消前发出的自动落库响应不得再回写基线
-   * （否则请求在取消后完成，会把刚被丢弃的率重新塞回 factoryData/基线，
-   * 与用户看到的「已还原」状态自相矛盾）。取消后的新输入沿用新代数正常回写。
+   * 「关闭弹窗」代数：close() 时 +1，让关闭前发出的自动落库响应不得再回写基线
+   * （弹窗已清空状态，迟到响应会把它重新填成脏数据）。
+   * 取消编辑**不**自增代数：取消前已发出的请求服务端可能已提交，响应仍会同步基线。
    */
   let lossRateEpoch = 0
   /** 按布料行串行化损耗率保存，避免同一行快速连续输入产生乱序覆盖 */
@@ -696,6 +696,7 @@ export function useSummaryModal() {
       // 取消编辑只丢弃**尚未发出**的待转值；已在途的自动落库不能撤销
       // （服务端可能已提交），其响应仍会同步基线并由输入框读回，保证与服务器一致。
       pendingRate = null
+      fabricPendingRates.clear()
       factoryData.value = cloneRaw(factoryOriginalData.value)
       supplierData.value = cloneRaw(supplierOriginalData.value)
       fabricLossRates.value = cloneRaw(fabricPersistedRates.value)
@@ -821,6 +822,9 @@ export function useSummaryModal() {
     // 此时服务端已提交该率，输入框要跟随机读回，而不是停在回滚后的旧值。
     if (!lossRateTouched.value && pendingRate === null) {
       lossRate.value = rate
+      // 取消编辑已把 groupSpareRates 回滚成旧快照；在途响应落库后必须一起前移，
+      // 否则顶部统一率显示新值、「备品数量」（读 groupSpareRates）仍是旧值。
+      groupSpareRates.value = seedGroupSpareRates(factoryOriginalData.value)
     }
     if (factoryData.value) {
       factoryData.value.spare_rate = rate
@@ -868,7 +872,7 @@ export function useSummaryModal() {
           await sendLossRate(sent)
           // 本次发送该率已成功落库 → 同步「已落库」基线（供取消编辑时恢复），
           // 并清掉「各单不一致」标记（本次已把所有涉及单统一为该值）。
-          // 取消编辑期间发出的请求不回写：它属于已被用户丢弃的编辑。
+          // 弹窗已关闭：这批回写属于被丢弃的批次，不得回写（取消编辑不增代数，仍正常回写）
           if (sentEpoch === lossRateEpoch) {
             syncPersistedLossRateBaseline(sent)
             lastSentEpoch = sentEpoch

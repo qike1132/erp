@@ -45,6 +45,7 @@ vi.mock('@/composables/useExport', async () => {
 import { buildFactoryHtml, useSummaryModal } from '@/views/purchase/composables/useSummaryModal'
 import { usePurchaseActions } from '@/views/purchase/composables/usePurchaseActions'
 import SummaryModal from '@/views/purchase/components/SummaryModal.vue'
+import SummaryFactoryTab from '@/views/purchase/components/SummaryFactoryTab.vue'
 import { showToast } from '@/composables/useToast'
 import { purchaseApi } from '@/api'
 import type { FactorySummaryData, SupplierSummaryData } from '@/views/purchase/composables/useSummaryModal'
@@ -555,6 +556,92 @@ describe('C. 自动保存可见反馈（lossRateSaveState）', () => {
       if (c.text === null) expect(status).toBeUndefined()
       else expect(status?.text()).toBe(c.text)
       wrapper.unmount()
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// C. 关闭/取消编辑与在途自动落库的竞态（2026-10-18 OCR 复评）
+// ---------------------------------------------------------------------------
+describe('C. 在途落库与关闭/取消编辑', () => {
+  it('C5 close() 后在途统一率响应不得回写基线或保存状态', async () => {
+    const d = deferred<{ success: boolean }>()
+    vi.mocked(purchaseApi.saveFactoryEdits).mockReturnValue(d.promise as never)
+    const m = useSummaryModal()
+    await m.openSummary([7, 8])
+
+    m.applyLossRate(5)
+    const p = m.applyLossRateAndSave(5)
+    m.close()
+    d.resolve({ success: true })
+    await p
+
+    expect(m.persistedLossRate).toBe(0)
+    expect(m.lossRateSaveState).toBe('idle')
+    expect(m.lossRate).toBe(0)
+  })
+
+  it('C6 取消编辑后在途统一率响应仍同步基线，且 groupSpareRates 同源', async () => {
+    const d = deferred<{ success: boolean }>()
+    vi.mocked(purchaseApi.saveFactoryEdits).mockReturnValue(d.promise as never)
+    const m = useSummaryModal()
+    await m.openSummary([7, 8])
+
+    m.applyLossRate(5)
+    const p = m.applyLossRateAndSave(5)
+    m.toggleEditMode(false)
+    d.resolve({ success: true })
+    await p
+
+    expect(m.lossRate).toBe(5)
+    expect(m.persistedLossRate).toBe(5)
+    expect(m.factoryData?.spare_rate).toBe(5)
+    expect(m.groupSpareRates.every((r) => r === 5)).toBe(true)
+  })
+
+  it('C7 close() 后在途逐行率失败不得污染已关闭状态', async () => {
+    const d = deferred<{ success: boolean }>()
+    vi.mocked(purchaseApi.saveFactoryEdits).mockReturnValue(d.promise as never)
+    const m = useSummaryModal()
+    await m.openSummary([7, 8])
+
+    const p = m.applyFabricLossRateAndSave(0, 0, 0, 100)
+    expect(purchaseApi.saveFactoryEdits).toHaveBeenCalledTimes(1)
+    m.close()
+    d.reject(new Error('boom'))
+    // 关闭后的失败属于被丢弃批次：不置 error、不向调用方抛（否则关闭的弹窗还会 toast）
+    await expect(p).resolves.toBeUndefined()
+    expect(m.lossRateSaveState).toBe('idle')
+    expect(m.fabricLossRates).toEqual([])
+  })
+
+  it('C8 取消编辑会作废挂起的 300ms 防抖；保存修改不会', async () => {
+    vi.useFakeTimers()
+    const mountModal = () => mount(SummaryModal, {
+      props: {
+        open: true, factoryData: factoryOf(10), supplierData: SUPPLIER_RESPONSE, editMode: false,
+        lossRate: 0, orderCount: 1, supplierGroups: [],
+      },
+      global: { stubs: { UiDialog: { template: '<div><slot name="title" /><slot /></div>' } } },
+    })
+    try {
+      // 对照：不取消 → 防抖到点后照常发出
+      const ok = mountModal()
+      ok.findComponent(SummaryFactoryTab).vm.$emit('lossRateInput', 50)
+      vi.advanceTimersByTime(400)
+      expect(ok.emitted('applyLossRate')).toEqual([[50]])
+      ok.unmount()
+
+      // 取消编辑 → 挂起值被丢弃
+      const cancelled = mountModal()
+      cancelled.findComponent(SummaryFactoryTab).vm.$emit('lossRateInput', 50)
+      cancelled.findComponent(SummaryFactoryTab).vm.$emit('toggleEditMode', false)
+      vi.advanceTimersByTime(400)
+      expect(cancelled.emitted('applyLossRate')).toBeUndefined()
+      expect(cancelled.emitted('toggleEditMode')).toEqual([[false]])
+      cancelled.unmount()
+    } finally {
+      vi.useRealTimers()
     }
   })
 })

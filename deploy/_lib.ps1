@@ -227,9 +227,19 @@ function Stop-NssmService([string]$Nssm,[string]$Name){
   # 重装前的有序停机：erp-prod/arq 依赖 erp-redis，依赖方还在跑时 stop erp-redis
   # 会被 SCM 以 1051 拒绝 → 后续 remove/install 只能跳过，旧配置（含旧 --requirepass）
   # 继续生效。调用方必须先按逆依赖序停掉依赖方，再停被依赖者。
-  $svc=Get-Service -Name $Name -ErrorAction SilentlyContinue
-  if(-not $svc){ return $true }
+  # 注意：Get-Service 的「查询失败」不能与「服务不存在」混同，否则停机闸门被静默绕过。
+  try { $svc = Get-Service -Name $Name -ErrorAction Stop }
+  catch {
+    if($_.CategoryInfo.Category -eq 'ObjectNotFound'){ return $true }  # 未注册
+    throw
+  }
   $status=$svc.Status; $svc.Dispose()
+  # Paused/PausedPending 不接受 STOP 控制码（NSSM 崩溃循环限流会进这个状态）：
+  # 先 continue 再停，否则 stop 必然失败，且 services.msc 也停不掉。
+  if($status.ToString() -like 'Paused*'){
+    try { Invoke-Nssm $Nssm @('continue',$Name) 'continue' }
+    catch { Write-Warning "$($_.Exception.Message)（Paused 服务恢复失败，继续尝试 stop）" }
+  }
   if($status -ne 'Stopped'){
     try { Invoke-Nssm $Nssm @('stop',$Name) 'stop' }
     catch {
@@ -239,8 +249,11 @@ function Stop-NssmService([string]$Nssm,[string]$Name){
   }
   $deadline=(Get-Date).AddSeconds(45)
   while($true){
-    $cur=Get-Service -Name $Name -ErrorAction SilentlyContinue
-    if(-not $cur){ return $true }
+    try { $cur=Get-Service -Name $Name -ErrorAction Stop }
+    catch {
+      if($_.CategoryInfo.Category -eq 'ObjectNotFound'){ return $true }
+      throw
+    }
     $st=$cur.Status; $cur.Dispose()
     if($st -eq 'Stopped'){ return $true }
     if((Get-Date) -ge $deadline){ return $false }

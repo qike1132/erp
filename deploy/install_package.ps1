@@ -411,13 +411,16 @@ try {
       Write-Fail "安装前快照不完整（服务注册表导出失败）：$snapDir —— 继续执行将无法回滚服务定义"; exit 1
     }
 
-    # 覆盖前：停并移除旧的五服务
-    foreach($n in $five){
-      $s=Get-Service -Name $n -ErrorAction SilentlyContinue
-      if($s -and $s.Status -ne 'Stopped'){ & $Nssm stop $n | Out-Null }
+    # 覆盖前：按逆依赖序停并移除旧的五服务（依赖方先停，否则 1051 会静默失败）
+    for($i=$five.Count-1; $i -ge 0; $i--){
+      $n=$five[$i]
+      if(-not (Stop-NssmService $Nssm $n)){
+        Write-Fail "服务 $n 未能停止，无法覆盖安装（请到 services.msc 检查依赖方）"
+        exit 1
+      }
     }
     foreach($n in $five){
-      if(Get-Service -Name $n -ErrorAction SilentlyContinue){ & $Nssm remove $n confirm | Out-Null }
+      if(Get-Service -Name $n -ErrorAction SilentlyContinue){ Invoke-Nssm $Nssm @('remove',$n,'confirm') 'remove' }
     }
     Write-Ok '旧服务已停止并移除（-Force 覆盖）'
   }

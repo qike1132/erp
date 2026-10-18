@@ -94,16 +94,20 @@ function beforeUpload(file: File) {
 }
 
 async function handleFileChange(files: FileList) {
+  // 2026-10-18 OCR 评审：并发批次会把同一批文件重复写入暂存区（后端无幂等去重），
+  // 批次进行中拒绝新的选择；只等 uploading（finally 必复位），不会像按进度状态判断那样卡死。
+  if (uploading.value) {
+    showToast('当前批次仍在识别中，请等待完成后再上传', 'info')
+    return
+  }
   // 2026-10-18 OCR 复评：不能把整批塞进一个请求——中间件对 /api/v1/* 的请求体
   // 上限是 10MB（含 multipart 开销），nginx client_max_body_size 也是 10m；
   // 几个中等图片就会 413。改为共用同一个 task_id、逐文件串行提交，结果在前端合并。
-  // 新批次直接替换 taskId；轮询按 taskId 快照丢弃旧任务响应，故无需等旧批次结束。
-  const all = Array.from(files)
-  if (all.length > MAX_FILES) {
+  const selected = Array.from(files).filter((f) => beforeUpload(f))
+  if (selected.length > MAX_FILES) {
     showToast(`单次最多上传 ${MAX_FILES} 个文件`, 'error')
     return
   }
-  const selected = all.filter((f) => beforeUpload(f))
   if (!selected.length) return
   await handleUpload(selected)
 }
@@ -118,6 +122,8 @@ useQuery({
     const res = (await ocrApi.progress(tid)) as OcrProgressResult
     // 批次已切换：旧任务的迟到响应不得改动新批次的进度/终态
     if (tid !== taskId.value) return res
+    // 逐文件上传期间由本文件维护「上传中 i/N」文案；轮询每 800ms 写百分比会把它冲掉
+    if (uploading.value) return { status: 'processing' }
     progress.value = res.percent ?? 0
     if (res.status === 'done' || res.status === 'completed') {
       if (uploading.value) {
@@ -154,6 +160,8 @@ async function handleUpload(files: File[]) {
   uploading.value = true
   try {
     const createRes = (await ocrApi.createTask()) as unknown as { task_id?: string; session_id?: string }
+    // 批次已被新批次取代：不得回写 taskId（否则轮询一个永远不会上传的 pending 任务）
+    if (batchSeq !== uploadSeq) return
     const sid = createRes.task_id ?? createRes.session_id
     if (!sid) {
       showToast('创建任务失败', 'error')
@@ -181,8 +189,9 @@ async function handleUpload(files: File[]) {
         merged.total_imported = (merged.total_imported ?? 0) + (res.total_imported ?? 0)
         if (res.errors?.length) merged.errors!.push(...res.errors)
       } catch (err: unknown) {
-        // 单文件请求失败（413/超时/网络）不阻断其余文件，逐条上报
-        merged.errors!.push(`${file.name}: ${getErrorMessage(err, '上传失败')}`)
+        // 单文件请求失败（413/超时/网络）不阻断其余文件，逐条上报。
+        // 服务端在客户端超时/断连后仍会继续识别并写库，结果是「未知」而非必然失败。
+        merged.errors!.push(`${file.name}: ${getErrorMessage(err, '上传失败')}（结果未知，请先在暂存区核对再重试，避免重复导入）`)
       }
     }
     if (batchSeq !== uploadSeq) return

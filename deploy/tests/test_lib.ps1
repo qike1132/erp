@@ -132,6 +132,7 @@ $maskCases = @(
   @{ A=@('set','erp-redis','AppParameters','--requirepass "p w"'); Name='双引号含空格' }
   @{ A=@('set','erp-redis','AppParameters','--requirepass ''p w'''); Name='单引号含空格' }
   @{ A=@('set','erp-redis','AppParameters','--requirepass "p w\"'); Name='末尾转义引号（无闭合）' }
+  @{ A=@('set','erp-redis','AppParameters','--requirepass "p\"q w"'); Name='转义引号后仍含空格' }
   @{ A=@('set','erp-redis','AppParameters','--requirepass secret123'); Name='无引号' }
 )
 foreach($c in $maskCases){
@@ -142,6 +143,17 @@ foreach($c in $maskCases){
 }
 $noPw = ConvertTo-MaskedNssmArgs @('set','erp-web','AppParameters','-m x')
 Assert ($noPw -notmatch '\*\*\*') '非口令参数不被改写'
+
+# Invoke-Nssm 失败时必须把动作/退出码写进异常 Data（Stop-NssmService 靠它区分可降级失败）
+$fakeNssm = Join-Path $tmp 'nssm-fail.cmd'
+[IO.File]::WriteAllText($fakeNssm, "@exit /b 3`r`n", [Text.ASCIIEncoding]::new())
+try {
+  Invoke-Nssm $fakeNssm @('stop','erp-x') 'stop'
+  Assert $false 'Invoke-Nssm 应对非零退出码抛异常'
+} catch {
+  Assert ($_.Exception.Data['nssmAction'] -eq 'stop') '异常 Data 携带 nssmAction'
+  Assert ([int]$_.Exception.Data['nssmExitCode'] -eq 3) '异常 Data 携带退出码'
+}
 
 Remove-Item $tmp -Recurse -Force
 if($fail){ exit 1 } else { Write-Host 'ALL PASS' }

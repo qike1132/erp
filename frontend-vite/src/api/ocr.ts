@@ -8,7 +8,7 @@ const PREVIEW_TIMEOUT = 120_000
  * 注意：nginx `location /api/` 的 proxy_read_timeout 是 120s——超过网关就会 504，
  * 前端等更久没有意义；这里按网关对齐，让失败尽早可见。
  */
-const OCR_UPLOAD_TIMEOUT = 120_000
+const OCR_UPLOAD_TIMEOUT = 115_000
 
 export const ocrApi = {
   createTask: () => post<TaskResponse>('/ocr-import/create-task'),

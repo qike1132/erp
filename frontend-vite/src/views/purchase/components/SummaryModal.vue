@@ -48,7 +48,7 @@
         :fabric-loss-rate-mixed="fabricLossRateMixed"
         :group-spare-rates="groupSpareRates"
         @close="$emit('close')"
-        @toggle-edit-mode="$emit('toggleEditMode', $event)"
+        @toggle-edit-mode="onToggleEditMode"
         @save-edits="$emit('saveEdits')"
         @update-qty="(gi, si, fi, value) => $emit('updateQty', gi, si, fi, value)"
         @loss-rate-input="applyLossRateDebounced"
@@ -87,8 +87,7 @@
  * `v-if` 之下，用户在防抖窗口内切页签会让该子组件卸载，若定时器在子组件内则
  * `emit` 无监听者、刚输入的损耗率被静默丢弃。本组件不随页签切换卸载，行为与拆分前一致。
  */
-import { ref, watch } from 'vue'
-import { useDebounceFn } from '@vueuse/core'
+import { ref, watch, onUnmounted } from 'vue'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import SummaryFactoryTab from './SummaryFactoryTab.vue'
 import SummarySupplierTab from './SummarySupplierTab.vue'
@@ -132,25 +131,43 @@ const activeTab = ref<'factory' | 'supplier'>('factory')
 /**
  * P1-4: 损耗率输入防抖 300ms，避免每次按键触发全量 groups×suppliers×fabrics×materials 重算。
  * 定时器归属本组件（弹窗外壳）而非页签子组件，确保防抖窗口内切换页签不丢输入。
+ * 不用 useDebounceFn：当前 @vueuse 版本的返回值没有 cancel，取消编辑时无法作废挂起值。
  */
-const applyLossRateDebounced = useDebounceFn((v: number) => emit('applyLossRate', v), 300)
+let lossRateTimer: ReturnType<typeof setTimeout> | null = null
+function applyLossRateDebounced(v: number) {
+  if (lossRateTimer) clearTimeout(lossRateTimer)
+  lossRateTimer = setTimeout(() => {
+    lossRateTimer = null
+    emit('applyLossRate', v)
+  }, 300)
+}
 
 /** 单个布料行损耗率输入防抖：与统一输入同源 300ms，切换页签不丢输入。 */
-const applyFabricLossRateDebounced = useDebounceFn((gi: number, si: number, fi: number, v: number) => emit('applyFabricLossRate', gi, si, fi, v), 300)
+let fabricLossRateTimer: ReturnType<typeof setTimeout> | null = null
+function applyFabricLossRateDebounced(gi: number, si: number, fi: number, v: number) {
+  if (fabricLossRateTimer) clearTimeout(fabricLossRateTimer)
+  fabricLossRateTimer = setTimeout(() => {
+    fabricLossRateTimer = null
+    emit('applyFabricLossRate', gi, si, fi, v)
+  }, 300)
+}
+
+function cancelPendingRateEdits() {
+  if (lossRateTimer) { clearTimeout(lossRateTimer); lossRateTimer = null }
+  if (fabricLossRateTimer) { clearTimeout(fabricLossRateTimer); fabricLossRateTimer = null }
+}
 
 /**
- * 取消编辑 / 关闭弹窗时作废尚未触发的防抖：否则用户在点「取消」前 300ms 内
- * 的最后一次输入仍会在取消之后发出，把已丢弃的率重新落库。
+ * 只有点击「取消编辑」才作废挂起的防抖。
+ * 不能 watch editMode→false：保存修改/播种同样会置 false，会把用户刚输入、
+ * 尚未到点落库的损耗率静默丢掉（且 saveFactoryEdits 不会代为提交）。
  */
-function cancelPendingRateEdits() {
-  // @vueuse 的 useDebounceFn 运行时带 cancel，但当前版本类型未声明
-  const cancelLoss = (applyLossRateDebounced as unknown as { cancel?: () => void }).cancel
-  const cancelFabric = (applyFabricLossRateDebounced as unknown as { cancel?: () => void }).cancel
-  cancelLoss?.()
-  cancelFabric?.()
+function onToggleEditMode(enable: boolean) {
+  if (!enable) cancelPendingRateEdits()
+  emit('toggleEditMode', enable)
 }
-watch(() => props.editMode, (enabled) => { if (!enabled) cancelPendingRateEdits() })
 watch(() => props.open, (open) => { if (!open) cancelPendingRateEdits() })
+onUnmounted(cancelPendingRateEdits)
 </script>
 
 <style scoped>
