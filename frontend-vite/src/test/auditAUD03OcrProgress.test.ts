@@ -32,7 +32,8 @@ describe('AUD-03 OCR 进度前端契约', () => {
 
   it('上传期间跳过轮询文案/百分比，进度由文件数驱动；未达后端时本地收终态', () => {
     expect(source).toMatch(/:disabled="uploading"/)
-    expect(source).toMatch(/if \(uploading\.value\) return \{ status: 'processing' \}/)
+    expect(source).toMatch(/if \(uploading\.value\) \{/)
+    expect(source).toMatch(/batchSize\.value === 1/)
     expect(source).toMatch(/Math\.round\(\(\(i \+ 1\) \/ files\.length\) \* 100\)/)
     expect(source).toMatch(/if \(!accepted\)/)
   })

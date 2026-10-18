@@ -74,6 +74,8 @@ const progress = ref(0)
 const uploadResult = ref<UploadResult | null>(null)
 /** 上传请求在途：轮询可能先看到 done（后端在返回响应前就写了终态），此时不能提前锁存结果 */
 const uploading = ref(false)
+/** 当前批次文件数：单文件时轮询的 percent 仍有意义（同一 task 不会被每文件重置） */
+const batchSize = ref(0)
 
 const progressStatus = ref<'' | 'success' | 'exception' | 'warning'>('')
 const progressText = ref('处理中…')
@@ -122,7 +124,11 @@ useQuery({
     if (tid !== taskId.value) return res
     // 逐文件上传期间由本文件维护「上传中 i/N」文案与整体进度（按文件数），
     // 后端的 percent 每完成一个文件就写 100（同一 taskId），直接采用会显示错误进度。
-    if (uploading.value) return { status: 'processing' }
+    // 单文件批次没有「文件间」进度，轮询的 percent 是唯一有意义的进度来源。
+    if (uploading.value) {
+      if (batchSize.value === 1) progress.value = res.percent ?? 0
+      return { status: 'processing' }
+    }
     progress.value = res.percent ?? 0
     if (res.status === 'done' || res.status === 'completed') {
       const result = uploadResult.value
@@ -151,6 +157,7 @@ useQuery({
 
 async function handleUpload(files: File[]) {
   uploading.value = true
+  batchSize.value = files.length
   try {
     const createRes = (await ocrApi.createTask()) as unknown as { task_id?: string; session_id?: string }
     const sid = createRes.task_id ?? createRes.session_id
@@ -167,6 +174,7 @@ async function handleUpload(files: File[]) {
 
     const merged: UploadResult = { total_imported: 0, errors: [] }
     let accepted = false
+    let unknownCount = 0
     for (let i = 0; i < files.length; i++) {
       const file = files[i]!
       progress.value = Math.round((i / files.length) * 100)
@@ -186,6 +194,7 @@ async function handleUpload(files: File[]) {
         // 只有超时/断连/5xx 的服务端结果才是「未知」。
         const status = getErrorStatus(err)
         const unknown = status === undefined || status >= 500
+        if (unknown) unknownCount += 1
         merged.errors!.push(
           `${file.name}: ${getErrorMessage(err, '上传失败')}`
           + (unknown ? '（结果未知，请先在暂存区核对再重试，避免重复导入）' : ''),
@@ -196,10 +205,14 @@ async function handleUpload(files: File[]) {
     merged.success = (merged.total_imported ?? 0) > 0
     merged.message = `共处理 ${files.length} 个文件，识别导入 ${merged.total_imported} 个出货到暂存区`
     uploadResult.value = merged
-    // 所有请求都在到达后端前被拒：服务端任务永远停在 pending，不能等轮询给终态
+    // 没有任何请求真正到达后端：服务端任务永远停在 pending，不能等轮询给终态。
+    // 但「超时/5xx」是结果未知，不能断言文件未提交。
     if (!accepted) {
       progressStatus.value = 'exception'
-      progressText.value = merged.errors?.length ? '文件未能提交，请查看下方错误' : '上传失败'
+      progress.value = 0
+      progressText.value = unknownCount > 0
+        ? '上传结果未知，请先在暂存区核对再重试'
+        : (merged.errors?.length ? '文件未能提交，请查看下方错误' : '上传失败')
     }
   } catch (err: unknown) {
     const message = getErrorMessage(err, '上传失败')
@@ -210,6 +223,7 @@ async function handleUpload(files: File[]) {
     progressText.value = message
   } finally {
     uploading.value = false
+    batchSize.value = 0
   }
 }
 </script>

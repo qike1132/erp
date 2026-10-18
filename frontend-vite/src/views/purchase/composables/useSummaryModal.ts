@@ -749,6 +749,20 @@ export function useSummaryModal() {
   }
 
   /**
+   * 统一率批量下发到所有布料行（展示态 + 不一致标记同源）。
+   * skip 用于行级落库在途/待发的行：那些行以行级输入为准，不能被统一率覆盖。
+   */
+  function broadcastFabricRates(rate: number, skip?: Set<string>) {
+    const busy = (gi: number, si: number, fi: number) => skip?.has(fabricKey(gi, si, fi)) ?? false
+    fabricLossRates.value = fabricLossRates.value.map(
+      (g, gi) => g.map((rows, si) => rows.map((v, fi) => (busy(gi, si, fi) ? v : rate))),
+    )
+    fabricLossRateMixed.value = fabricLossRateMixed.value.map(
+      (g, gi) => g.map((rows, si) => rows.map((v, fi) => (busy(gi, si, fi) ? v : false))),
+    )
+  }
+
+  /**
    * 用户交互损耗率（非编辑态输入）：只记录「率」与「已交互」标记。
    *
    * 本函数**不改动 factoryData / supplierData 的任何数量**。
@@ -756,16 +770,6 @@ export function useSummaryModal() {
    * 按原始数量实时计算（同一处来源）。原始数量只经编辑态「保存修改」落库；
    * 损耗率本身由 applyLossRateAndSave 落库。
    */
-  /** 统一率批量下发到所有布料行（展示态 + 不一致标记同源） */
-  function broadcastFabricRates(rate: number) {
-    fabricLossRates.value = fabricLossRates.value.map(
-      (g) => g.map((rows) => rows.map(() => rate)),
-    )
-    fabricLossRateMixed.value = fabricLossRateMixed.value.map(
-      (g) => g.map((rows) => rows.map(() => false)),
-    )
-  }
-
   function applyLossRate(rate: number) {
     lossRate.value = rate
     // 统一设置所有布料行：全局输入作为批量快捷入口，逐行输入可再单独覆盖。
@@ -834,12 +838,22 @@ export function useSummaryModal() {
       // 取消编辑已把 groupSpareRates 回滚成旧快照；在途响应落库后必须一起前移，
       // 否则顶部统一率显示新值、「备品数量」（读 groupSpareRates）仍是旧值。
       groupSpareRates.value = seedGroupSpareRates(factoryOriginalData.value)
-      // 逐行率同样前移：取消编辑已把 fabricLossRates 回滚成旧快照，统一率落库后
-      // 表格「损耗率/数量」列必须与顶部统一率、「备品数量」同源，否则同屏两套口径。
-      // 但行级落库在途/待发时，行级值以行级响应为准，不能用统一率整表覆盖。
+      // 行级落库在途/待发的行以行级值/响应为准，其余行仍要前移；
+      // 否则顶部统一率已更新而整张表停在旧率（同屏两套口径）。
       if (fabricDrainPromises.size === 0 && fabricPendingRates.size === 0) {
         broadcastFabricRates(rate)
         fabricPersistedRates.value = cloneRaw(fabricLossRates.value)
+        fabricLossRateMixedPersisted.value = cloneRaw(fabricLossRateMixed.value)
+      } else {
+        const busyKeys = new Set([...fabricDrainPromises.keys(), ...fabricPendingRates.keys()])
+        broadcastFabricRates(rate, busyKeys)
+        // 只把已随统一率前移的行写入基线；busy 行等各自的响应回写
+        const previous = fabricPersistedRates.value
+        fabricPersistedRates.value = fabricLossRates.value.map(
+          (g, gi) => g.map((rows, si) => rows.map((v, fi) => (
+            busyKeys.has(fabricKey(gi, si, fi)) ? (previous[gi]?.[si]?.[fi] ?? v) : v
+          ))),
+        )
         fabricLossRateMixedPersisted.value = cloneRaw(fabricLossRateMixed.value)
       }
     }

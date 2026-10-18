@@ -181,5 +181,32 @@ try {
   Assert ([int]$_.Exception.Data['nssmExitCode'] -eq 3) '异常 Data 携带退出码'
 }
 
+# Stop-NssmService 行为：已停止直接成功；Pending → Stopped 需等待后成功
+function New-FakeService([string]$Status){
+  $o=New-Object psobject
+  $o | Add-Member NoteProperty Status $Status
+  $o | Add-Member ScriptMethod Dispose {}
+  $o
+}
+$script:svcQueue=[Collections.Queue]::new()
+function global:Get-Service {
+  [CmdletBinding()] param([string]$Name)
+  if($script:svcQueue.Count -gt 0){ New-FakeService ([string]$script:svcQueue.Dequeue()) }
+  else { New-FakeService 'Running' }
+}
+$script:svcQueue.Enqueue('Stopped')
+Assert ((Stop-NssmService 'x' 'erp-test') -eq $true) 'Stop-NssmService：已停止直接成功'
+$script:svcQueue.Clear(); $script:svcQueue.Enqueue('StartPending'); $script:svcQueue.Enqueue('Stopped')
+Assert ((Stop-NssmService 'x' 'erp-test') -eq $true) 'Stop-NssmService：等待 Pending 落定后成功'
+
+# 服务不存在（ObjectNotFound）→ 视为已停止；查询故障不得被当成不存在
+function global:Get-Service {
+  [CmdletBinding()] param([string]$Name)
+  $er=[System.Management.Automation.ErrorRecord]::new([System.Exception]::new('missing'),'x','ObjectNotFound',$null)
+  throw $er
+}
+Assert ($null -eq (Get-ServiceStatus 'missing')) 'Get-ServiceStatus：ObjectNotFound → $null'
+Remove-Item function:Get-Service -ErrorAction SilentlyContinue
+
 Remove-Item $tmp -Recurse -Force
 if($fail){ exit 1 } else { Write-Host 'ALL PASS' }

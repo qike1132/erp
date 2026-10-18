@@ -257,6 +257,10 @@ function Stop-NssmService([string]$Nssm,[string]$Name){
     $status = Get-ServiceStatus $Name
     if($null -eq $status -or $status -eq 'Stopped'){ return $true }
   }
+  if(Test-ServiceStatusPending $status){
+    # 状态一直落不下来：此时发 stop 必被 1061 拒绝，明确返回失败而不是白等 45s
+    return $false
+  }
 
   # 2) Paused/PausePending：continue 后再等离开 Pause*/Pending；continue 本身也可能
   #    因 Pending 被拒，故最多重试 3 次。

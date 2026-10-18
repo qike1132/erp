@@ -616,7 +616,7 @@ try {
     New-NetFirewallRule -DisplayName 'erp-web-3000' -Direction Inbound -Protocol TCP -LocalPort 3000 -Action Allow | Out-Null
     Write-Ok '已放行入站 TCP 3000'
   } else { Write-Ok '防火墙规则 erp-web-3000 已存在（跳过）' }
-  foreach($svc in 'erp-redis','erp-redis-broker','erp-prod','erp-arq','erp-web'){ Start-ErpService $svc }
+  foreach($svc in $five){ Start-ErpService $svc }
 
   # ==========================================================
   Write-Step '10 看门狗'
