@@ -82,7 +82,6 @@ import { showToast } from '@/composables/useToast'
 import { toISODate } from '@/utils/format'
 import { invalidateOrderDerivedQueries } from '@/utils/queryKeys'
 import { useStockOutProductSearch } from './composables/useStockOutProductSearch'
-import { groupByProductCustomer } from './composables/useStockoutOcrStaging'
 
 import StockOutInputForm from './components/StockOutInputForm.vue'
 import StockOutStagingList from './components/StockOutStagingList.vue'
@@ -117,8 +116,7 @@ async function fetchShipmentInfo(productId?: string | number, customer?: string)
     shipmentInfo.value = null
     return
   }
-  const avail = await fetchAvailableShipment(pid, cust)
-  shipmentInfo.value = avail === undefined ? null : { available_quantity: avail } as ShipmentInfo
+  shipmentInfo.value = await fetchAvailableShipment(pid, cust)
 }
 
 // === 成品库存批次列表（选定 SKU 后带出，供按批次扣减） ===
@@ -267,22 +265,15 @@ async function addStaged() {
 }
 
 /** OCR 粘贴识别确认后的条目：与手工录入进同一个暂存列表，提交前仍可改、删。
- *  2026-10-18 OCR 复评：须正整数（后端 int），且按产品+客户合并后过可用量闸门。 */
-async function addOcrStaged(items: StagedStockout[]) {
+ *  2026-10-18 OCR 复评：这里必须保持**同步**——调用方 buildStaged 是同步 emit、
+ * 随即归还 false 并清空草稿；改成 async 会在对话框已关闭后才因可用量不足
+ * early return，用户看到「已加入」但数据被丢。可用量闸门由提交前的
+ * useStockOutActions.submitBatch 预检统一兜底。 */
+function addOcrStaged(items: StagedStockout[]) {
   const invalid = items.find((it) => !Number.isInteger(it.quantity) || it.quantity < 1)
   if (invalid) {
     showToast(`OCR 行数量无效（${invalid.quantity}），请修正后再暂存`, 'warning')
     return
-  }
-  for (const group of groupByProductCustomer(items)) {
-    const first = group[0]
-    if (!first) continue
-    const ok = await checkProductAvailability({
-      productId: first.product_id,
-      customer: first.customer,
-      quantity: group.reduce((sum, s) => sum + (s.quantity || 0), 0),
-    })
-    if (!ok) return
   }
   staged.value.push(...items)
 }

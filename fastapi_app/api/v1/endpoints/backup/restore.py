@@ -557,6 +557,12 @@ async def async_restore_server_backup(
         raise HTTPException(status_code=400, detail=_sanitize_error(f'读取备份文件失败: {e}')) from e
 
     decrypt_password = _get_encryption_password(password, x_backup_password)
+
+    # 2026-10-18 OCR 复评：格式识别（可能因缺密码/错密码/坏 gzip/未知格式抛 400）
+    # 必须在取恢复锁之前完成。取锁后再抛会让 Redis 锁一直占到 1h TTL，
+    # 后续每次恢复请求都被 409 拒绝。
+    content, is_zip = await _sniff_server_backup_format(content, safe_name, decrypt_password)
+
     from fastapi_app.core.backup_progress import create_progress, generate_task_id
     task_id = generate_task_id()
     await create_progress(task_id, 'server_restore')
@@ -567,11 +573,6 @@ async def async_restore_server_backup(
             raise HTTPException(status_code=503, detail='恢复锁服务暂时不可用，请稍后重试')
         raise HTTPException(status_code=409, detail='另一个恢复操作正在执行中，请稍后重试')
 
-    # 2026-10-18 OCR 评审：与同步 /restore-by-name 同一套识别——.json.enc 在此
-    # 解密、.gz 在此解压，后台任务拿到的 content 一定是明文（否则任务内部的
-    # json.loads 会把密文当 JSON，最终以「格式无效」fail_progress 收场，而错误
-    # 信息完全不提加密）。
-    content, is_zip = await _sniff_server_backup_format(content, safe_name, decrypt_password)
     task = asyncio.create_task(_run_async_file_restore(
         task_id, content, is_zip, safe_name,
         confirm_sensitive=confirm_sensitive, decrypt_password=decrypt_password,

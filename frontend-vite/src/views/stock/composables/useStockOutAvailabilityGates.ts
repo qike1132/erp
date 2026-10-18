@@ -12,7 +12,7 @@
 import type { Ref } from 'vue'
 import { stockApi } from '@/api'
 import { showToast } from '@/composables/useToast'
-import type { StagedStockout } from '@/types'
+import type { ShipmentInfo, StagedStockout } from '@/types'
 
 export interface ProductAvailabilityGate {
   productId: string
@@ -27,24 +27,23 @@ let shipReqSeq = 0
 
 export function useStockOutAvailabilityGates(staged: Ref<StagedStockout[]>) {
   /**
-   * 拉取指定产品/客户的可出货量。参数缺省回落到调用方当前表单值。
-   * 返回 undefined 表示「拿不到可用量」（缺产品/客户、请求失败）——调用方应放行，
+   * 拉取指定产品/客户的可出货量信息（完整 ShipmentInfo——展示区还要用
+   * order_quantity / shipped_quantity，不能只回 available_quantity）。
+   * 返回 null 表示「拿不到」（缺产品/客户、请求失败）——闸门应放行，
    * 由后端做最终校验，避免前端因一次失败就锁死用户操作。
    */
   async function fetchAvailableShipment(
     productId?: string | number,
     customer?: string,
-  ): Promise<number | undefined> {
-    const pid = productId
-    const cust = customer
-    if (!pid || !cust) return undefined
+  ): Promise<ShipmentInfo | null> {
+    if (!productId || !customer) return null
     const seq = ++shipReqSeq
     try {
-      const data = await stockApi.availableShipment(Number(pid), cust)
-      if (seq !== shipReqSeq) return undefined // 已有更新的请求在途，丢弃过期响应
-      return data.data?.available_quantity
+      const data = await stockApi.availableShipment(Number(productId), customer)
+      if (seq !== shipReqSeq) return null // 已有更新的请求在途，丢弃过期响应
+      return data.data ?? null
     } catch {
-      return undefined
+      return null
     }
   }
 
@@ -61,7 +60,8 @@ export function useStockOutAvailabilityGates(staged: Ref<StagedStockout[]>) {
    */
   async function checkProductAvailability(opts: ProductAvailabilityGate): Promise<boolean> {
     if (!opts.productId || !opts.customer) return true
-    const avail = await fetchAvailableShipment(opts.productId, opts.customer)
+    const info = await fetchAvailableShipment(opts.productId, opts.customer)
+    const avail = info?.available_quantity
     if (avail === undefined) return true
     const stagedSameProduct = stagedTotalFor(opts.productId, opts.customer, opts.excludeId)
     const effectiveAvail = avail - stagedSameProduct

@@ -273,10 +273,13 @@ async function triggerScheduleNow() {
   try {
     await backupApi.triggerSchedule(first.name)
     toast.success('已触发定时备份')
+    // 2026-10-18 OCR 复评：触发只是「入队」，重任务随后跑几分钟；HTTP 返回即解锁
+    // 会让连点重复入队（后端 enqueue 无去重 job_id）。保持 10s 冷却，等状态轮询
+    // 把 busy 置真后由 busy 继续兜底。
+    window.setTimeout(() => { triggering.value = false }, 10_000)
   } catch {
     // 2026-10-17 审计 P2-56：此前是全文件唯一无 catch 的写操作
     toast.error('触发定时备份失败，请重试')
-  } finally {
     triggering.value = false
   }
 }
