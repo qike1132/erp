@@ -146,10 +146,11 @@ async def _verify_table_row_count(db: AsyncSession, table, qtname: str,
     actual_rows = actual if ok else -1
     if not ok:
         logger.warning(f'验证: 统计表 {tname} 行数失败')
-    # 2026-10-18 OCR 评审：查询失败（超时/断连）不等于「表不存在」，
-    # 不能因 expected_rows==0 就判 pass=True；记为不确定。
+    # 2026-10-18 OCR 评审（High）：查询失败不能记为「不确定」——汇总层只统计
+    # pass is True/False，None 会被当成通过；显式判 False 并标记 indeterminate。
     if not ok:
-        return {'table': tname, 'expected': expected_rows, 'actual': actual_rows, 'pass': None}, False
+        return {'table': tname, 'expected': expected_rows, 'actual': actual_rows,
+                'pass': False, 'indeterminate': True}, False
 
     if not table_exists and expected_rows == 0:
         l1_pass = True

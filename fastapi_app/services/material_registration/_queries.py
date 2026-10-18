@@ -10,7 +10,6 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import DisconnectionError, OperationalError
 from sqlalchemy.orm import joinedload, selectinload
 
-from fastapi_app.core.business_time import business_today
 from fastapi_app.core.cache import cache_result
 from fastapi_app.core.exceptions import BusinessError
 from fastapi_app.core.float_utils import float_compare, round_qty
@@ -452,9 +451,9 @@ async def get_stats_distribution(db) -> dict:
              key_builder=lambda **kwargs: str(kwargs.get('days', 30)))
 async def get_stats_trend(db, days: int = 30) -> dict:
     """趋势数据（SQL GROUP BY 替代全量 ORM 加载，L1 15s + L2 60s 缓存）"""
-    # 2026-10-18 OCR 评审：骨架与 SQL 桶必须同一天边界。func.date(timestamptz)
-    # 按 DB 会话时区（Asia/Shanghai）取值，因此这里用 business_today()。
-    end_date = business_today()
+    # 2026-10-18 OCR 评审：registered 按 registration_date（写入时用 UTC 日期）
+    # 分桶，received 必须用同一个 UTC 日边界，否则两条曲线差一天。
+    end_date = datetime.now(UTC).replace(tzinfo=None).date()
     start_date = end_date - timedelta(days=days)
 
     # 生成完整日期骨架
@@ -483,13 +482,13 @@ async def get_stats_trend(db, days: int = 30) -> dict:
     # 口径：当天完成的来料登记数（status=completed，按 update_time 的日期归档——
     # 完成时间没有独立列，update_time 是唯一可用近似）。
     recv_counts = (await db.execute(
-        select(func.date(MaterialRegistration.update_time), func.count())
+        select(func.date(MaterialRegistration.update_time.op('AT TIME ZONE')('UTC')), func.count())
         .where(
             MaterialRegistration.status == 'completed',
-            func.date(MaterialRegistration.update_time) >= start_date,
-            func.date(MaterialRegistration.update_time) <= end_date,
+            func.date(MaterialRegistration.update_time.op('AT TIME ZONE')('UTC')) >= start_date,
+            func.date(MaterialRegistration.update_time.op('AT TIME ZONE')('UTC')) <= end_date,
         )
-        .group_by(func.date(MaterialRegistration.update_time))
+        .group_by(func.date(MaterialRegistration.update_time.op('AT TIME ZONE')('UTC')))
     )).all()
 
     for recv_date, cnt in recv_counts:

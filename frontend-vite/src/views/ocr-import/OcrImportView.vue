@@ -85,11 +85,13 @@ function beforeUpload(file: File) {
   return true
 }
 
-function handleFileChange(files: FileList) {
+async function handleFileChange(files: FileList) {
+  // 2026-10-18 OCR 评审：逐个串行上传——taskId/uploadResult 是单实例，
+  // 并发上传会互相覆盖，轮询只能跟踪最后一个任务。
   for (let i = 0; i < files.length; i++) {
     const file = files[i]
     if (!file || !beforeUpload(file)) continue
-    handleUpload({ file })
+    await handleUpload({ file })
   }
 }
 
@@ -143,7 +145,7 @@ async function handleUpload(options: UploadOptions) {
     ocrResult.value = null
 
     const formData = new FormData()
-    formData.append('file', options.file)
+    formData.append('files', options.file)
     uploadResult.value = null
     // 2026-10-18 OCR 评审：upload 必须携带 create-task 返回的 task_id，
     // 否则后端会新建另一个 task 写进度，前端轮询的 id 永远停在 pending。

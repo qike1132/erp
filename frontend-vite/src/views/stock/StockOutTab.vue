@@ -231,21 +231,18 @@ async function addStaged() {
     showToast('请选择客户和产品，并输入数量', 'warning')
     return
   }
-  // 2026-10-18 OCR 评审：新增路径同样必须拦小数（后端 quantity 是 int，
-  // 1.5 会让整批提交 422，错误暴露得太晚）
+  // 2026-10-18 OCR 评审：新增路径同样拦小数（后端 int，1.5 会让整批 422）
   if (!Number.isInteger(form.quantity) || form.quantity < 1) {
     showToast('数量必须为正整数', 'warning')
     return
   }
-
   if (form.productId && form.customer) {
     // F-FE-DESK-CORE-02：无条件重拉——shipmentInfo 非 null 时可能是上一个
     // SKU/客户的陈旧值（闸门与展示都按它判定），null≠「已验证为最新」。
     await fetchShipmentInfo()
     const avail = shipmentInfo.value?.available_quantity
     if (avail !== undefined) {
-      // 2026-10-17 审计 P2-45：产品级可出货量校验必须累计同产品/客户已暂存量，
-      // 否则多次添加可累计超过可用量，提交时才被后端拒（部分出货成功）。
+      // 2026-10-17 审计 P2-45：产品级可出货量校验必须累计同产品/客户已暂存量
       const stagedSameProduct = staged.value
         .filter((s) => s.product_id === form.productId && s.customer === form.customer)
         .reduce((sum, s) => sum + (s.quantity || 0), 0)
@@ -288,7 +285,6 @@ async function addStaged() {
 
 /** OCR 粘贴识别确认后的条目：与手工录入进同一个暂存列表，提交前仍可改、删 */
 function addOcrStaged(items: StagedStockout[]) {
-  // 2026-10-18 OCR 评审：OCR 行同样必须是正整数，否则整批提交 422
   const invalid = items.find((it) => !Number.isInteger(it.quantity) || it.quantity < 1)
   if (invalid) {
     showToast(`OCR 行数量无效（${invalid.quantity}），请修正后再暂存`, 'warning')
