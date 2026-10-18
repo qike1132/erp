@@ -779,7 +779,9 @@ export function useSummaryModal() {
   function applyLossRate(rate: number) {
     lossRate.value = rate
     // 统一设置所有布料行：全局输入作为批量快捷入口，逐行输入可再单独覆盖。
-    broadcastFabricRates(rate)
+    // 行级落库在途/待发的行保持行级展示值（服务端会保留行级率），不能被统一率瞬时覆盖。
+    const busy = new Set([...fabricDrainPromises.keys(), ...fabricPendingRates.keys()])
+    broadcastFabricRates(rate, busy.size > 0 ? busy : undefined)
     // 订单级率同样批量下发全部分组（备品口径 A 的来源；逐行输入不会写这里）
     groupSpareRates.value = groupSpareRates.value.map(() => rate)
     lossRateMixed.value = false
@@ -824,7 +826,11 @@ export function useSummaryModal() {
    *   factoryOriginalData 重播、diff 也以它为基准，不同步就会回滚到打开时的旧分组率；
    *   factoryData 不同步则「取消编辑回新率、当前展示用旧率」同屏两套口径（OCR 2026-10-18）。
    */
-  function syncPersistedLossRateBaseline(rate: number, versionsAtSend?: Map<string, number>) {
+  function syncPersistedLossRateBaseline(
+    rate: number,
+    versionsAtSend?: Map<string, number>,
+    busyAtSend?: Set<string>,
+  ) {
     persistedLossRate.value = rate
     persistedLossRateMixed.value = false
     fabricPersistedRates.value = cloneRaw(fabricLossRates.value)
@@ -848,6 +854,7 @@ export function useSummaryModal() {
       // 否则顶部统一率已更新而整张表停在旧率（同屏两套口径）。
       // 在途/待发的行以行级输入为准；发送统一率后又手动改过的行（版本变了）同样不覆盖
       const edited = new Set<string>([
+        ...(busyAtSend ?? []),
         ...fabricDrainPromises.keys(),
         ...fabricPendingRates.keys(),
         ...[...fabricRateVersions.entries()]
@@ -913,12 +920,16 @@ export function useSummaryModal() {
           const sent = next
           const sentEpoch = lossRateEpoch
           const versionsAtSend = new Map(fabricRateVersions)
+          const busyAtSend = new Set([
+            ...fabricDrainPromises.keys(),
+            ...fabricPendingRates.keys(),
+          ])
           await sendLossRate(sent)
           // 本次发送该率已成功落库 → 同步「已落库」基线（供取消编辑时恢复），
           // 并清掉「各单不一致」标记（本次已把所有涉及单统一为该值）。
           // 弹窗已关闭：这批回写属于被丢弃的批次，不得回写（取消编辑不增代数，仍正常回写）
           if (sentEpoch === lossRateEpoch) {
-            syncPersistedLossRateBaseline(sent, versionsAtSend)
+            syncPersistedLossRateBaseline(sent, versionsAtSend, busyAtSend)
             lastSentEpoch = sentEpoch
           }
           next = pendingRate

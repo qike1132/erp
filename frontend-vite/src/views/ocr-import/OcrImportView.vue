@@ -28,7 +28,7 @@
           识别到 {{ uploadResult.errors.length }} 个错误：{{ uploadResult.errors.join('；') }}
         </UiAlert>
         <UiAlert v-if="uploadResult.unknown_count" variant="warning" :closable="false" style="margin-bottom: 12px">
-          另有 {{ uploadResult.unknown_count }} 个文件结果未知，请先在暂存区核对再重试
+          其中 {{ uploadResult.unknown_count }} 个文件结果未知，请先在暂存区核对再重试
         </UiAlert>
         <UiAlert v-if="uploadResult.total_imported" variant="success" :closable="false">
           成功识别 {{ uploadResult.total_imported }} 条记录
