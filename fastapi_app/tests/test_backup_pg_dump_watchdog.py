@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import io
 import subprocess
-import threading
 
 import pytest
 
