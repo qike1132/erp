@@ -1326,6 +1326,15 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
         # ★ 必须等闸门【放行之后】才记时:gate.start 会拒绝(已有动作在飞),若提前刷新时间戳,
         #   随后 HOSTING_START_GRACE_SEC(60s) 内陈旧的状态文件会被误显示为「启动中」,
         #   而不是按真实情况告警。
+        # 2026-10-18 OCR 评审：闸门必须在 gate.start 之前评估——否则被拒绝的
+        # 重启仍会刷新 _prod_start_ts，宽限期内界面误显示「启动中」。
+        if verb == 'restart':
+            ok, guard_msg = git_guard.check_production_branch(_PROJECT_DIR)
+            if not ok:
+                self._msg_queue.put(('log', {'text': f'拒绝执行：{guard_msg}', 'level': 'ERROR'}))
+                return
+            if guard_msg.startswith('警告') or '覆盖' in guard_msg:
+                self._msg_queue.put(('log', {'text': guard_msg, 'level': 'WARNING'}))
         if self._gate.start(f'服务{verb}', self._service_cmd_sync, verb) and verb == 'restart':
             self._prod_start_ts = time.time()
 
@@ -1339,7 +1348,7 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
     def _start_services_flow(self):
         # 2026-10-17 审计 AUD-28：生产启动前先过 git 分支闸门
         # （NSSM AppDirectory = 本仓库工作区，非 main 分支会被直接跑进生产）
-        ok, guard_msg = git_guard.check_production_branch()
+        ok, guard_msg = git_guard.check_production_branch(_PROJECT_DIR)
         if not ok:
             self._msg_queue.put(('log', {'text': f'拒绝启动：{guard_msg}', 'level': 'ERROR'}))
             return

@@ -117,13 +117,22 @@ export function useBomQuickCopy({
     // 2026-10-17 审计 AUD-18：未选角色时走产品级默认作用域，后端 overwrite=true
     // 会先删目标产品四张 BOM 表再替换。此前快速复制全程零确认——误点即不可逆
     // 数据丢失。目标已有 BOM 时必须先确认（角色作用域由用户显式选择，维持原行为）。
-    if (target.roleId == null && currentProductId.value != null) {
+    // 2026-10-18 OCR 评审：roleId==null 且 roleName 非空 = 新建未保存角色，
+    // 后端按 role_name 归入角色作用域（overwrite 只影响该角色），不是产品级全删；
+    // 只有 roleId 与 roleName 都为空才是默认作用域覆盖。
+    if (target.roleId == null && !target.roleName && currentProductId.value != null) {
       try {
         const existing = (await productApi.loadBom(currentProductId.value)) as {
           success?: boolean
           materials?: unknown[]
         }
-        if (existing?.success && (existing.materials?.length ?? 0) > 0) {
+        if (!existing?.success) {
+          hideProgress()
+          quickCopyLoading.value = false
+          showToast('读取目标产品 BOM 失败，已取消复制', 'error')
+          return
+        }
+        if ((existing.materials?.length ?? 0) > 0) {
           const ok = await confirmOverwrite(currentProductName.value)
           if (!ok) {
             hideProgress()

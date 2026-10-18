@@ -20,6 +20,7 @@
           :paginator="true"
           :rows="pPerPage"
           :total-records="pCount"
+          item-unit="条登记"
           row-key="orderNo"
           @page="emit('page', $event)"
         >

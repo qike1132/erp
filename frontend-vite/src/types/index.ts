@@ -120,10 +120,11 @@ export interface StockInRecord {
 export interface InventoryItem {
   product_id: number
   product_name: string
-  barcode: string
+  /** 后端不返回 barcode/current_stock（2026-10-18 OCR 评审修正），保留可选兼容旧夹具 */
+  barcode?: string
   product_barcode?: string
   customer?: string
-  current_stock: number
+  current_stock?: number
   total_stockin: number
   total_stockout: number
   total_deducted: number

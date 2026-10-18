@@ -11,6 +11,7 @@ import { patternRoomApi } from '@/api/patternRoom'
 import type { BatchPartCreateRequest, PartDetail, PartUpdateRequest } from '@/api/patternRoom'
 import { showToast } from '@/composables/useToast'
 import { getErrorStatus } from '@/types/errors'
+import { resolveSamplingErrorMessage } from './useSamplingErrors'
 import { createEmptyEditData, PART_EDIT_FIELDS, usePartInlineEdit, type PartEditData } from './usePartInlineEdit'
 import { createManageGuard } from './useManageGuard'
 import type { useSamplingProject } from './useSamplingProject'
@@ -96,7 +97,7 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
       console.error('[PatternRoomView] 批量创建部位失败:', e)
       // 2026-10-17 审计 AUD-12：全局拦截器对非 401/403 无用户兜底，
       // catch 里只打 console 等于「假成功」——用户看不到任何失败信号。
-      showToast('批量创建部位失败，请重试', 'error')
+      showToast(resolveSamplingErrorMessage(e, '批量创建部位失败'), 'error')
     } finally {
       partHook.submitting.value = false
     }
@@ -114,10 +115,14 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
         // 部位数据本身未变化，仅本地更新最终版本号，
         // 避免 fetchPartsByVersion 的 loading 态与数据整体替换导致整表闪烁
         partHook.setFinalVersion(versionNo)
+      } else {
+        // 2026-10-18 OCR 评审：setRoleCurrentVersion 内部吞异常返回 null，
+        // 上面的 catch 不可达；必须显式处理 null，否则失败被当成功。
+        showToast(roleHook.error.value ?? '设置最终版本失败，请重试', 'error')
       }
     } catch (e) {
       console.error('[PatternRoomView] 设置最终版本失败:', e)
-      showToast('设置最终版本失败，请重试', 'error')
+      showToast(resolveSamplingErrorMessage(e, '设置最终版本失败'), 'error')
     }
   }
 
@@ -134,11 +139,16 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
         // 折叠态会继续只显示旧版本行，新版本不可见
         const currentRole = roleHook.getCurrentRole()
         if (currentRole && res.version_no) {
-          await roleHook.setRoleCurrentVersion(
+          const roleRes = await roleHook.setRoleCurrentVersion(
             currentRole.id,
             res.version_no,
             currentRole.version,
           )
+          if (!roleRes) {
+            // 2026-10-18 OCR 评审：设最终版本失败时不得继续进入编辑态（假成功）
+            showToast(roleHook.error.value ?? '设置最终版本失败，请重试', 'error')
+            return
+          }
         }
         if (selectedProjectId.value) {
           await partHook.fetchPartsByVersion(
@@ -156,7 +166,7 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
       }
     } catch (e) {
       console.error('[PatternRoomView] 复制部位版本失败:', e)
-      showToast('复制部位版本失败，请重试', 'error')
+      showToast(resolveSamplingErrorMessage(e, '复制部位版本失败'), 'error')
     }
   }
 
@@ -213,7 +223,12 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
       }
     } catch (e) {
       console.error('[PatternRoomView] 保存部位编辑失败:', e)
-      showToast('保存失败，请重试', 'error')
+      showToast(
+        getErrorStatus(e) === 409
+          ? '该部位已被他人修改，已刷新为最新数据，请重新编辑'
+          : resolveSamplingErrorMessage(e, '保存失败'),
+        'error',
+      )
       // 409 乐观锁冲突：局部 patch 未更新 version，需全量刷新获取最新数据
       if (getErrorStatus(e) === 409 && selectedProjectId.value) {
         await partHook.fetchPartsByVersion(
@@ -249,7 +264,7 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
       }
     } catch (e) {
       console.error('[PatternRoomView] 删除部位版本失败:', e)
-      showToast('删除部位版本失败，请重试', 'error')
+      showToast(resolveSamplingErrorMessage(e, '删除部位版本失败'), 'error')
     }
   }
 

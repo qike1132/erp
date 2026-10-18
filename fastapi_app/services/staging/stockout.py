@@ -68,7 +68,9 @@ def _build_stockout_entity(
     )
 
 async def _stockout_extra_updates(entity, data: dict, db: AsyncSession) -> None:
-    if 'quantity' in data and entity.product_id:
+    # 2026-10-18 OCR 评审：改产品名（generic 层会重解析 product_id）或改数量，
+    # 都必须重算预检；此前只看 quantity，换产品后仍沿用旧产品的结论。
+    if entity.product_id and ('quantity' in data or 'product_name' in data):
         # 2026-10-17 审计 AUD-04：编辑数量后必须重算库存预检（此前是空实现，
         # 数量改大后暂存行仍显示导入时的旧结论）。
         product = await db.get(Product, entity.product_id)

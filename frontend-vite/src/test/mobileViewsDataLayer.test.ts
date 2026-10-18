@@ -58,8 +58,8 @@ function inventoryItem(over: Partial<InventoryItem> = {}): InventoryItem {
   return {
     product_id: 7,
     product_name: 'PP棉',
-    barcode: 'M01',
-    current_stock: 120,
+    product_barcode: 'M01',
+    inventory_balance: 120,
     total_stockin: 200,
     total_stockout: 80,
     total_deducted: 0,
@@ -191,12 +191,12 @@ describe('S12 移动端数据层统一', () => {
   })
 
   describe('MStockView（复用 @/types 的 InventoryItem）', () => {
-    it('用 current_stock 渲染数量、barcode/product_barcode 渲染编码，并显示零库存徽标', async () => {
+    it('用 inventory_balance 渲染数量、product_barcode 渲染编码，并显示零库存徽标', async () => {
       mocks.stockApi.inventory.mockResolvedValue(
         inventoryResponse([
           inventoryItem(),
-          inventoryItem({ product_id: 8, product_name: '拉链', barcode: '', product_barcode: 'Z09', current_stock: 0 }),
-          inventoryItem({ product_id: 9, product_name: '大库存料', barcode: 'M09', current_stock: 1500 }),
+          inventoryItem({ product_id: 8, product_name: '拉链', product_barcode: 'Z09', inventory_balance: 0 }),
+          inventoryItem({ product_id: 9, product_name: '大库存料', product_barcode: 'M09', inventory_balance: 1500 }),
         ]),
       )
 
@@ -219,7 +219,7 @@ describe('S12 移动端数据层统一', () => {
     it('「在库 / 零库存」筛选下推服务端（AUD-22）', async () => {
       const all = [
         inventoryItem(),
-        inventoryItem({ product_id: 8, product_name: '拉链', current_stock: 0 }),
+        inventoryItem({ product_id: 8, product_name: '拉链', inventory_balance: 0 }),
       ]
       mocks.stockApi.inventory.mockImplementation((params: { stock_status?: string }) => {
         const status = params?.stock_status

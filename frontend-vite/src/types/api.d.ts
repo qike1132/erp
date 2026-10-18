@@ -309,6 +309,8 @@ export interface BackupSettingsOut {
   updated_by?: string | null
   updated_at?: string | null
   initialized?: boolean
+  effective_source?: string
+  effective_backup_dir?: string
 }
 
 export interface BackupSettingsUpdate {

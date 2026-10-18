@@ -51,10 +51,27 @@ def check_production_branch(root: Path | str | None = None) -> tuple[bool, str]:
     code, branch, err = _git(['rev-parse', '--abbrev-ref', 'HEAD'], base)
     if code != 0:
         # 非 git 检出（打包部署）不应被闸门打死；但必须留痕
-        return True, f'无法确定 git 分支（{err or "git 不可用"}），已放行'
+        msg = f'警告：无法确定 git 分支（{err or "git 不可用"}），已放行'
+        logger.warning(msg)
+        return True, msg
 
     if os.environ.get(OVERRIDE_ENV) == '1':
         return True, f'分支闸门已被 {OVERRIDE_ENV}=1 覆盖，当前分支 {branch}'
+
+    # 2026-10-18 OCR 评审：detached HEAD 时 abbrev-ref 返回字面量 'HEAD'。
+    # 若 HEAD 与 origin/main 同一提交（CI/发布 checkout 常见），按 main 放行；
+    # 否则仍拒绝（无法确定运行的是哪条线的代码）。
+    if branch == 'HEAD':
+        c_head, head_sha, _ = _git(['rev-parse', 'HEAD'], base)
+        c_main, main_sha, _ = _git(['rev-parse', 'refs/remotes/origin/main'], base)
+        if c_head == 0 and c_main == 0 and head_sha and head_sha == main_sha:
+            branch = 'main (detached at origin/main)'
+        else:
+            _, head_short, _ = _git(['rev-parse', '--short', 'HEAD'], base)
+            return False, (
+                f'当前处于 detached HEAD（HEAD {head_short}）且不指向 origin/main，'
+                f'生产启停只允许 main。请切回 main；确需用该提交请设置 {OVERRIDE_ENV}=1'
+            )
 
     if branch not in ALLOWED_BRANCHES:
         _, head, _ = _git(['rev-parse', '--short', 'HEAD'], base)

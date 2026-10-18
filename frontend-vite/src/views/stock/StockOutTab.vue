@@ -231,6 +231,12 @@ async function addStaged() {
     showToast('请选择客户和产品，并输入数量', 'warning')
     return
   }
+  // 2026-10-18 OCR 评审：新增路径同样必须拦小数（后端 quantity 是 int，
+  // 1.5 会让整批提交 422，错误暴露得太晚）
+  if (!Number.isInteger(form.quantity) || form.quantity < 1) {
+    showToast('数量必须为正整数', 'warning')
+    return
+  }
 
   if (form.productId && form.customer) {
     // F-FE-DESK-CORE-02：无条件重拉——shipmentInfo 非 null 时可能是上一个

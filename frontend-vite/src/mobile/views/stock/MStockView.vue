@@ -32,7 +32,7 @@
             </div>
             <div class="m-stock-qty">
               <span :class="['m-stock-qty-val', getQtyClass(item)]">
-                {{ formatQty(item.current_stock) }}
+                {{ formatQty(item.inventory_balance) }}
               </span>
               <span class="m-stock-qty-unit">个</span>
             </div>
@@ -67,6 +67,7 @@ import MFilterChips from '@/mobile/components/MFilterChips.vue'
 import MBadge from '@/mobile/components/MBadge.vue'
 import MSkeleton from '@/mobile/components/MSkeleton.vue'
 import MEmpty from '@/mobile/components/MEmpty.vue'
+import { showToast } from '@/composables/useToast'
 
 const stockItems = ref<InventoryItem[]>([])
 const loading = ref(true)
@@ -90,19 +91,19 @@ function formatQty(val: number | null | undefined): string {
   return Number(val).toLocaleString('zh-CN')
 }
 
-/** 库存接口无安全库存字段（后端不提供），故只判定「零库存」而非「低库存」。 */
+/** 库存接口返回「库存（结余）」= inventory_balance；无 current_stock 字段。 */
 function isOutOfStock(item: InventoryItem): boolean {
-  return (item.current_stock ?? 0) <= 0
+  return (item.inventory_balance ?? 0) <= 0
 }
 
-/** 编码优先取 barcode，缺失时回退 product_barcode。 */
+/** 编码取 product_barcode（接口无 barcode 字段）。 */
 function codeOf(item: InventoryItem): string {
-  return item.barcode || item.product_barcode || ''
+  return item.product_barcode || ''
 }
 
 function getQtyClass(item: InventoryItem): string {
   if (isOutOfStock(item)) return 'low'
-  if ((item.current_stock ?? 0) > 1000) return 'high'
+  if ((item.inventory_balance ?? 0) > 1000) return 'high'
   return ''
 }
 
@@ -120,8 +121,8 @@ async function loadStock() {
     totalItems.value = res.total_items ?? 0
   } catch (e) {
     console.error('[MStockView] load failed:', e)
-    stockItems.value = []
-    totalItems.value = 0
+    // 2026-10-18 OCR 评审：保留旧 totalItems，避免失败时分页器消失、用户被困空页
+    showToast('库存加载失败，请重试', 'error')
   } finally {
     loading.value = false
   }

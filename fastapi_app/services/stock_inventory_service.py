@@ -703,6 +703,8 @@ def _format_inventory_rows(rows) -> tuple[list, int, int, int, int, int]:
             total_available_stock += available_stock
 
         inventory_data.append({
+            # 2026-10-18 OCR 评审：移动端需要稳定行键/产品 ID；此前响应无 product_id
+            'product_id': row.product_id,
             'customer': row.customer,
             'product_name': row.product_name,
             'product_barcode': row.product_barcode or '',

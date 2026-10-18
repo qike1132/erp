@@ -2930,6 +2930,7 @@
             "required": false,
             "schema": {
               "type": "string",
+              "maxLength": 200,
               "description": "会话ID",
               "default": "default",
               "title": "Session Id"
@@ -3046,6 +3047,7 @@
             "required": false,
             "schema": {
               "type": "string",
+              "maxLength": 200,
               "description": "会话ID",
               "default": "default",
               "title": "Session Id"
@@ -3196,6 +3198,7 @@
             "required": false,
             "schema": {
               "type": "string",
+              "maxLength": 200,
               "description": "会话ID",
               "default": "default",
               "title": "Session Id"
@@ -3242,6 +3245,7 @@
             "required": false,
             "schema": {
               "type": "string",
+              "maxLength": 200,
               "description": "会话ID",
               "default": "default",
               "title": "Session Id"
@@ -3288,6 +3292,7 @@
             "required": false,
             "schema": {
               "type": "string",
+              "maxLength": 200,
               "description": "会话ID",
               "default": "default",
               "title": "Session Id"
@@ -3334,6 +3339,7 @@
             "required": false,
             "schema": {
               "type": "string",
+              "maxLength": 200,
               "description": "会话ID",
               "default": "default",
               "title": "Session Id"
@@ -3484,6 +3490,7 @@
             "required": false,
             "schema": {
               "type": "string",
+              "maxLength": 200,
               "description": "会话ID",
               "default": "default",
               "title": "Session Id"
@@ -3530,6 +3537,7 @@
             "required": false,
             "schema": {
               "type": "string",
+              "maxLength": 200,
               "description": "会话ID",
               "default": "default",
               "title": "Session Id"
@@ -3576,6 +3584,7 @@
             "required": true,
             "schema": {
               "type": "string",
+              "maxLength": 200,
               "description": "会话ID",
               "title": "Session Id"
             },
@@ -3621,6 +3630,7 @@
             "required": true,
             "schema": {
               "type": "string",
+              "maxLength": 200,
               "description": "会话ID",
               "title": "Session Id"
             },
@@ -3770,6 +3780,7 @@
             "required": true,
             "schema": {
               "type": "string",
+              "maxLength": 200,
               "description": "会话ID",
               "title": "Session Id"
             },
@@ -3815,6 +3826,7 @@
             "required": true,
             "schema": {
               "type": "string",
+              "maxLength": 200,
               "description": "会话ID",
               "title": "Session Id"
             },
@@ -4261,7 +4273,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 100
                 },
                 {
                   "type": "null"
@@ -4297,7 +4310,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 20
                 },
                 {
                   "type": "null"
@@ -4315,7 +4329,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 10
                 },
                 {
                   "type": "null"
@@ -4333,7 +4348,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 10
                 },
                 {
                   "type": "null"
@@ -4351,7 +4367,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 50
                 },
                 {
                   "type": "null"
@@ -7718,6 +7735,7 @@
             "required": false,
             "schema": {
               "type": "string",
+              "maxLength": 100,
               "description": "客户名称筛选",
               "default": "",
               "title": "Customer"
@@ -7730,11 +7748,25 @@
             "required": false,
             "schema": {
               "type": "string",
+              "maxLength": 100,
               "description": "产品名称筛选",
               "default": "",
               "title": "Product"
             },
             "description": "产品名称筛选"
+          },
+          {
+            "name": "stock_status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(zero|active)?$",
+              "description": "库存状态筛选：zero=零库存 / active=有库存",
+              "default": "",
+              "title": "Stock Status"
+            },
+            "description": "库存状态筛选：zero=零库存 / active=有库存"
           },
           {
             "name": "page",
@@ -7803,6 +7835,7 @@
             "required": false,
             "schema": {
               "type": "string",
+              "maxLength": 100,
               "description": "客户名称筛选",
               "default": "",
               "title": "Customer"
@@ -7815,6 +7848,7 @@
             "required": false,
             "schema": {
               "type": "string",
+              "maxLength": 100,
               "description": "产品名称筛选",
               "default": "",
               "title": "Product"
@@ -10112,6 +10146,7 @@
             "required": false,
             "schema": {
               "type": "string",
+              "maxLength": 100,
               "description": "搜索关键词",
               "default": "",
               "title": "Q"
@@ -10185,6 +10220,7 @@
             "required": false,
             "schema": {
               "type": "string",
+              "maxLength": 100,
               "default": "",
               "title": "Search"
             }
@@ -10195,6 +10231,7 @@
             "required": false,
             "schema": {
               "type": "string",
+              "maxLength": 10,
               "description": "all/yes/no，按有无配件过滤",
               "default": "all",
               "title": "Has Parts"
@@ -10264,6 +10301,7 @@
             "required": false,
             "schema": {
               "type": "string",
+              "maxLength": 100,
               "default": "",
               "title": "Search"
             }
@@ -10533,6 +10571,7 @@
             "required": false,
             "schema": {
               "type": "string",
+              "maxLength": 100,
               "default": "",
               "title": "Search"
             }
@@ -10616,6 +10655,7 @@
             "required": false,
             "schema": {
               "type": "string",
+              "maxLength": 10,
               "description": "in/out，空为全部",
               "default": "",
               "title": "Direction"
@@ -10628,6 +10668,7 @@
             "required": false,
             "schema": {
               "type": "string",
+              "maxLength": 100,
               "default": "",
               "title": "Customer"
             }
@@ -10638,6 +10679,7 @@
             "required": false,
             "schema": {
               "type": "string",
+              "maxLength": 10,
               "default": "",
               "title": "Start Date"
             }
@@ -10648,6 +10690,7 @@
             "required": false,
             "schema": {
               "type": "string",
+              "maxLength": 10,
               "default": "",
               "title": "End Date"
             }
@@ -13346,6 +13389,7 @@
             "required": false,
             "schema": {
               "type": "string",
+              "maxLength": 100,
               "description": "客户名称筛选",
               "default": "",
               "title": "Customer"
@@ -13554,6 +13598,7 @@
             "required": false,
             "schema": {
               "type": "string",
+              "maxLength": 100,
               "description": "客户名称筛选",
               "default": "",
               "title": "Customer"
@@ -13790,6 +13835,7 @@
             "required": false,
             "schema": {
               "type": "string",
+              "maxLength": 100,
               "description": "批次ID，空则确认该会话全部",
               "default": "",
               "title": "Batch Id"
@@ -22101,6 +22147,18 @@
             "title": "Initialized",
             "description": "表是否已初始化(未初始化时使用环境变量默认值)",
             "default": false
+          },
+          "effective_source": {
+            "type": "string",
+            "title": "Effective Source",
+            "description": "实际生效配置来源: env（表值仅记录，不生效）",
+            "default": "env"
+          },
+          "effective_backup_dir": {
+            "type": "string",
+            "title": "Effective Backup Dir",
+            "description": "实际生效的备份目录(环境变量 BACKUP_DIR)",
+            "default": ""
           }
         },
         "type": "object",

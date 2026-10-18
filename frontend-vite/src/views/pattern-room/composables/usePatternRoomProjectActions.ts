@@ -8,6 +8,7 @@
 import { ref, type Ref } from 'vue'
 import type { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { showToast } from '@/composables/useToast'
+import { resolveSamplingErrorMessage } from './useSamplingErrors'
 import { patternRoomApi } from '@/api/patternRoom'
 import type { ProjectCreateRequest, ProjectUpdateRequest, ProjectStatus } from '@/api/patternRoom'
 import { createManageGuard } from './useManageGuard'
@@ -116,7 +117,7 @@ export function usePatternRoomProjectActions(options: UsePatternRoomProjectActio
       }
     } catch (e) {
       console.error('[PatternRoomView] 标记完成失败:', e)
-      showToast('标记完成失败，请重试', 'error')
+      showToast(resolveSamplingErrorMessage(e, '标记完成失败'), 'error')
     }
   }
 
@@ -136,7 +137,7 @@ export function usePatternRoomProjectActions(options: UsePatternRoomProjectActio
       }
     } catch (e) {
       console.error('[PatternRoomView] 取消项目失败:', e)
-      showToast('取消项目失败，请重试', 'error')
+      showToast(resolveSamplingErrorMessage(e, '取消项目失败'), 'error')
     }
   }
 

@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import DisconnectionError, OperationalError
 from sqlalchemy.orm import joinedload, selectinload
 
+from fastapi_app.core.business_time import business_today
 from fastapi_app.core.cache import cache_result
 from fastapi_app.core.exceptions import BusinessError
 from fastapi_app.core.float_utils import float_compare, round_qty
@@ -451,7 +452,9 @@ async def get_stats_distribution(db) -> dict:
              key_builder=lambda **kwargs: str(kwargs.get('days', 30)))
 async def get_stats_trend(db, days: int = 30) -> dict:
     """趋势数据（SQL GROUP BY 替代全量 ORM 加载，L1 15s + L2 60s 缓存）"""
-    end_date = datetime.now(UTC).replace(tzinfo=None).date()
+    # 2026-10-18 OCR 评审：骨架与 SQL 桶必须同一天边界。func.date(timestamptz)
+    # 按 DB 会话时区（Asia/Shanghai）取值，因此这里用 business_today()。
+    end_date = business_today()
     start_date = end_date - timedelta(days=days)
 
     # 生成完整日期骨架

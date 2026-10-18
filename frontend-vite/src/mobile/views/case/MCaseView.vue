@@ -208,8 +208,8 @@ async function loadInventory() {
     inventory.value = flat
     invTotal.value = res.total ?? 0
   } catch {
-    inventory.value = []
-    invTotal.value = 0
+    // 2026-10-18 OCR 评审：保留旧总数与列表，提示失败即可
+    showToast('库存加载失败，请重试', 'error')
   } finally {
     invLoading.value = false
   }

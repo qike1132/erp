@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi_app.services.ocr._extractors import extract_table_structure, extract_text
+from fastapi_app.services.ocr._extractors import OcrDependencyError, extract_table_structure, extract_text
 from fastapi_app.services.ocr._html_tables import (
     parse_html_shipping_tables,
     parse_shipping_document,
@@ -203,6 +203,10 @@ async def import_staging_stockouts_from_file(db: AsyncSession, file_content: byt
                 result_msg += f"。错误: {'; '.join(errors[:5])}"
             await _prog(status='done', message=result_msg, percent=100)
             return (imported, result_msg, errors[:10] if errors else [])
+    except OcrDependencyError:
+        # 2026-10-18 OCR 评审：OcrDependencyError 继承 RuntimeError，必须先于
+        # 下面的宽泛捕获重抛，否则端点的「缺依赖」专门分支永远不可达。
+        raise
     except (ValueError, TypeError, OSError, RuntimeError) as e:
         # 2026-10-03 第八轮审计：补 RuntimeError —— extract_text 在 rapidocr 未装/初始化
         # 失败时抛 RuntimeError，原 except 未捕获会冒泡成 500；此处应优雅返回失败元组。

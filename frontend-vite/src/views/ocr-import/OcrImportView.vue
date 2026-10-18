@@ -63,7 +63,9 @@ interface OcrProgressResult {
 
 // 2026-10-17 审计 AUD-03：后端写的是 done/percent，此前前端读 completed/percentage
 // → 进度恒 0、终态永不命中、无限轮询。not_found 也必须是终态。
-const OCR_TERMINAL_STATUSES = ['done', 'completed', 'failed', 'error', 'not_found']
+// 2026-10-18 OCR 评审：error 只是**单文件**失败状态，批量仍会继续并最终写 done，
+// 不能当作批量终态。
+const OCR_TERMINAL_STATUSES = ['done', 'completed', 'failed', 'not_found']
 
 const taskId = ref('')
 const progress = ref(0)
@@ -101,7 +103,7 @@ useQuery({
       progressStatus.value = 'success'
       progressText.value = '识别完成'
       ocrResult.value = res
-    } else if (res.status === 'failed' || res.status === 'error' || res.status === 'not_found') {
+    } else if (res.status === 'failed' || res.status === 'not_found') {
       progressStatus.value = 'exception'
       progressText.value = res.status === 'not_found' ? '任务不存在或已过期' : '识别失败'
       ocrResult.value = res
@@ -135,7 +137,9 @@ async function handleUpload(options: UploadOptions) {
 
     const formData = new FormData()
     formData.append('file', options.file)
-    await ocrApi.upload(sid, formData)
+    // 2026-10-18 OCR 评审 H-2：upload 必须携带 create-task 返回的 task_id，
+    // 否则后端会新建另一个 task 写进度，前端轮询的 id 永远停在 pending。
+    await ocrApi.upload(sid, formData, sid)
 
     showToast('文件上传成功，开始识别...', 'success')
   } catch (err: unknown) {

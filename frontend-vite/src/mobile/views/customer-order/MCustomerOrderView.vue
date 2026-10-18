@@ -4,7 +4,7 @@
     <div class="m-page-body">
       <MFilterChips v-model="activeTab" :chips="tabChips" />
 
-      <MSearchBar v-model="keyword" placeholder="搜索订单号/产品/客户..." @search="handleSearch" />
+      <MSearchBar v-model="keyword" placeholder="搜索订单号/产品/客户..." @search="onSearch" />
 
       <div v-if="loading" class="m-center"><MSpinner size="lg" /></div>
       <MEmpty v-else-if="!orders.length" title="暂无订单" subtitle="输入关键词搜索" />
@@ -81,8 +81,18 @@ async function handleSearch() {
   } finally { loading.value = false }
 }
 
+// 2026-10-18 OCR 评审：切换状态/提交搜索都必须回到第 1 页，
+// 否则会带着旧页码查询，出现空页或越界。
+watch(activeTab, () => {
+  page.value = 1
+})
 watch([activeTab, page], handleSearch)
 onMounted(handleSearch)
+
+function onSearch() {
+  page.value = 1
+  handleSearch()
+}
 
 function orderColor(s: string | undefined) {
   if (s === '已出货' || s === '批次已完成') return 'var(--m-accent-emerald)'

@@ -10,6 +10,7 @@
           :paginator="true"
           :rows="hPerPage"
           :total-records="hCount"
+          item-unit="条登记"
           row-key="id"
           @page="emit('page', $event)"
         >

@@ -136,7 +136,7 @@ describe('beile-order 搜索：自由键入防抖自动应用（BUG-1）', () =>
 
   it('键入未停顿满 600ms 不应用筛选（避免输入中途表格抖动）', async () => {
     const wrapper = await mountHost()
-    const bo = (wrapper.vm as unknown as { bo: { filters: { orderNo: string }; appliedProduct: { value: string } } }).bo
+    const bo = (wrapper.vm as unknown as { bo: { filters: { productKw: string }; appliedProduct: { value: string } } }).bo
     bo.filters.productKw = '变形金刚'
     await flushPromises()
     vi.advanceTimersByTime(599)
@@ -148,7 +148,7 @@ describe('beile-order 搜索：自由键入防抖自动应用（BUG-1）', () =>
     const wrapper = await mountHost()
     const bo = (wrapper.vm as unknown as {
       bo: {
-        filters: { orderNo: string }
+        filters: { productKw: string }
         appliedProduct: { value: string }
         displayOrders: { value: Array<{ id: number; product_name?: string }> }
       }
@@ -166,7 +166,7 @@ describe('beile-order 搜索：自由键入防抖自动应用（BUG-1）', () =>
   it('键入中途继续打字：防抖窗口重置，只在最终停顿后应用一次', async () => {
     const wrapper = await mountHost()
     const bo = (wrapper.vm as unknown as {
-      bo: { filters: { orderNo: string }; appliedProduct: { value: string } }
+      bo: { filters: { productKw: string }; appliedProduct: { value: string } }
     }).bo
     bo.filters.productKw = '变形'
     await flushPromises()
@@ -183,7 +183,7 @@ describe('beile-order 搜索：自由键入防抖自动应用（BUG-1）', () =>
   it('清空输入立即复位筛选值（与 HubeiSearchBar reset 事件殊途同归）', async () => {
     const wrapper = await mountHost()
     const bo = (wrapper.vm as unknown as {
-      bo: { filters: { orderNo: string }; appliedProduct: { value: string } }
+      bo: { filters: { productKw: string }; appliedProduct: { value: string } }
     }).bo
     bo.filters.productKw = '变形金刚'
     await flushPromises()

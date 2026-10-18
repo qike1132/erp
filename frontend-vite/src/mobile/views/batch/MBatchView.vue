@@ -18,7 +18,7 @@
           <MList>
             <MListItem
               v-for="item in group.items"
-              :key="item.id"
+              :key="`${item.record_type ?? 'order'}:${item.id}`"
               :title="item.product_name || '—'"
               :subtitle="`批次: ${item.batch_no || '未分配'} · ${item.quantity || 0}件`"
             >
@@ -53,6 +53,7 @@ import MList from '@/mobile/components/MList.vue'
 import MListItem from '@/mobile/components/MListItem.vue'
 import MEmpty from '@/mobile/components/MEmpty.vue'
 import MSpinner from '@/mobile/components/MSpinner.vue'
+import { showToast } from '@/composables/useToast'
 
 // 2026-10-17 审计 P2-65：后端 BatchQueryItem 不返回 order_id，此前前端扩展的
 // 幽灵字段永远 undefined（已随 item-key 修正一并移除）
@@ -60,11 +61,14 @@ type BatchItem = BatchQueryItem
 
 const keyword = ref('')
 const statusFilter = ref('all')
+// 2026-10-18 OCR 评审 H-8：筛选值必须是后端中文订单状态（Order.status 等值匹配），
+// 此前 pending/stocked/shipped 永远匹配不到（与 AUD-20 同款缺陷）。
 const statusChips = [
   { label: '全部', value: 'all' },
-  { label: '待备货', value: 'pending' },
-  { label: '已备货', value: 'stocked' },
-  { label: '已出货', value: 'shipped' },
+  { label: '待备货', value: '待备货' },
+  { label: '已备货', value: '已备货' },
+  { label: '已出货', value: '已出货' },
+  { label: '批次已完成', value: '批次已完成' },
 ]
 const rawList = ref<BatchItem[]>([])
 const loading = ref(false)
@@ -94,6 +98,11 @@ async function handleSearch() {
     })
     rawList.value = res?.data || []
     totalItems.value = res?.total ?? 0
+  } catch {
+    // 2026-10-18 OCR 评审：失败时给用户提示，避免「空列表 + 页码已变」的静默态
+    rawList.value = []
+    totalItems.value = 0
+    showToast('批次查询失败，请重试', 'error')
   } finally { loading.value = false }
 }
 
@@ -108,14 +117,15 @@ watch(statusFilter, resetAndSearch)
 onMounted(handleSearch)
 
 function batchColor(s: string | null | undefined) {
-  if (s === 'shipped') return 'var(--m-accent-emerald)'
-  if (s === 'stocked') return 'var(--m-accent)'
-  if (s === 'partial') return 'var(--m-accent-amber)'
+  if (s === '已出货' || s === '批次已完成') return 'var(--m-accent-emerald)'
+  if (s === '已备货') return 'var(--m-accent)'
+  if (s === '部分备货') return 'var(--m-accent-amber)'
+  if (s === '已取消') return 'var(--m-accent-rose)'
   return 'var(--m-text-secondary)'
 }
 function batchLabel(s: string | null | undefined) {
-  const map: Record<string, string> = { pending: '待备货', partial: '部分备货', stocked: '已备货', shipped: '已出货', completed: '已完成' }
-  return (s && map[s]) || s || '—'
+  // 后端状态本身即中文展示文案
+  return s || '—'
 }
 </script>
 

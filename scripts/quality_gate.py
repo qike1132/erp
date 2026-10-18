@@ -859,6 +859,11 @@ def apply_update_baseline(args, hard_failure: bool, regressions, counts_now) -> 
     if hard_failure:
         print("[ERROR] 有门禁拿不到机器可读计数，拒绝重建基线（避免把异常写成基线）。")
         return 2
+    if getattr(args, 'only', None) or getattr(args, 'probe_dir', None):
+        # 2026-10-18 OCR 评审：--only/--probe-dir 只跑部分门禁，counts_now 缺键，
+        # 写回会删掉其余门禁基线 → 它们永远判 NEW，棘轮被静默拆除。
+        print("[ERROR] --update-baseline 不能与 --only / --probe-dir 同时使用（会丢失其他门禁基线）。")
+        return 2
     if regressions and not args.force:
         print(
             "[ERROR] 存在新增违规，拒绝重建基线（这会让棘轮放松）。"

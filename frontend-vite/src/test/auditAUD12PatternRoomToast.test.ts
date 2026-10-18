@@ -36,6 +36,7 @@ describe('AUD-12 板房写失败提示', () => {
 
     await api.handleAddPatternMaker('张三')
 
-    expect(mocks.showToast).toHaveBeenCalledWith('新增版师失败，请重试', 'error')
+    // resolveSamplingErrorMessage 优先透出错误自身 message（后端 detail 同路径）
+    expect(mocks.showToast).toHaveBeenCalledWith('500', 'error')
   })
 })

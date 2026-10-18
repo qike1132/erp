@@ -7,7 +7,7 @@ Revision ID: pg_standalone_097_add_daily_production_customer
 Revises: pg_standalone_096_stockin_batch_fields
 """
 import sqlalchemy as sa
-from alembic import op
+from alembic import context, op
 
 revision = 'pg_standalone_097_add_daily_production_customer'
 down_revision = 'pg_standalone_096_stockin_batch_fields'
@@ -18,7 +18,12 @@ depends_on = None
 def upgrade() -> None:
     # 2026-10-17 审计 P2-29：加幂等守卫——重复执行（downgrade 后再 upgrade、
     # 或半途失败重跑）不应因 duplicate column 中断。
-    cols = {c['name'] for c in sa.inspect(op.get_bind()).get_columns('daily_production_record')}
+    # 2026-10-18 OCR 评审：offline（--sql）模式下 op.get_bind() 是 MockConnection，
+    # sa.inspect 不可用；此时假设列不存在，正常渲染 DDL。
+    if context.is_offline_mode():
+        cols: set[str] = set()
+    else:
+        cols = {c['name'] for c in sa.inspect(op.get_bind()).get_columns('daily_production_record')}
     if 'customer_id' not in cols:
         op.add_column(
             'daily_production_record',

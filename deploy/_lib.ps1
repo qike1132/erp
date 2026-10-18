@@ -206,13 +206,19 @@ function Invoke-Nssm([string]$Nssm,[string[]]$NssmArgs,[string]$Action){
   # 2026-10-17 审计 P2-80：此前所有 nssm 调用都 | Out-Null 且不看退出码，
   # 安装/配置失败会被静默吞掉。
   & $Nssm @NssmArgs | Out-Null
-  if($LASTEXITCODE -ne 0){ throw "nssm $Action 失败（exit=$LASTEXITCODE）：$($NssmArgs -join ' ')" }
+  if($LASTEXITCODE -ne 0){
+    # 2026-10-18 OCR 评审：错误信息不得回显 --requirepass <明文>（会进日志/截图）
+    $shown = ($NssmArgs -join ' ') -replace '(--requirepass\s+)("[^"]*"|\S+)', '$1***'
+    throw "nssm $Action 失败（exit=$LASTEXITCODE）：$shown"
+  }
 }
 
 function Install-NssmService([string]$Nssm,[hashtable]$Spec){
   $name=$Spec.Name
   if(Get-Service -Name $name -ErrorAction SilentlyContinue){
-    Invoke-Nssm $Nssm @('stop',$name) 'stop'
+    $cur=Get-Service -Name $name -ErrorAction SilentlyContinue
+    # 已 STOPPED 时不调用 stop（nssm 会返回非零，属良性）
+    if($cur -and $cur.Status -ne 'Stopped'){ Invoke-Nssm $Nssm @('stop',$name) 'stop' }
     # 停后必须等 STOPPED，不能立即 remove（旧实现会与正在停止的服务竞争）
     $deadline=(Get-Date).AddSeconds(30)
     do {
@@ -220,7 +226,16 @@ function Install-NssmService([string]$Nssm,[hashtable]$Spec){
       $svc=Get-Service -Name $name -ErrorAction SilentlyContinue
     } while($svc -and $svc.Status -ne 'Stopped' -and (Get-Date) -lt $deadline)
     if($svc -and $svc.Status -ne 'Stopped'){ throw "服务 $name 未能停止（当前状态 $($svc.Status)）" }
+    # 2026-10-18 OCR 评审：ServiceController 句柄未释放时 remove 只会标记删除，
+    # 随后的 install 会报 ERROR_SERVICE_MARKED_FOR_DELETE (1072)。
+    if($svc){ $svc.Dispose() }
     Invoke-Nssm $Nssm @('remove',$name,'confirm') 'remove'
+    $rmDeadline=(Get-Date).AddSeconds(30)
+    do {
+      Start-Sleep -Milliseconds 300
+      $gone= -not (Get-Service -Name $name -ErrorAction SilentlyContinue)
+    } while(-not $gone -and (Get-Date) -lt $rmDeadline)
+    if(-not $gone){ throw "服务 $name 删除未完成（可能仍标记为删除中）" }
   }
   Invoke-Nssm $Nssm @('install',$name,$Spec.Application) 'install'
   foreach($a in (Get-NssmArgs $Spec)){ Invoke-Nssm $Nssm $a 'set' }

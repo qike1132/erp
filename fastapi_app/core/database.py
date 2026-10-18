@@ -232,6 +232,11 @@ def _init_sync_engine():
     sync_pool_config = {
         key: value for key, value in _pool_config.items() if key != 'connect_args'
     }
+    if 'connect_args' in _pool_config:
+        # 2026-10-18 OCR 评审：psycopg3 对应的是禁用预备语句缓存。
+        # transaction 池化下服务端预备语句会跨事务失效（DISCARD ALL / 冲突），
+        # prepare_threshold=None 才是 psycopg3 的正确等价开关。
+        sync_pool_config['connect_args'] = {'prepare_threshold': None}
     _sync_engine = create_engine(
         settings.DATABASE_URL,
         **sync_pool_config,

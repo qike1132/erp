@@ -17,14 +17,18 @@ from typing import IO, Any, NamedTuple, cast
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ._constants import BACKUP_OPERATION_TIMEOUT
 from ._proc import run_proc
 from .snapshot import get_pg_version
 
 logger = logging.getLogger(__name__)
 
 # 2026-10-17 审计 P2-15：pg_dump 线程此前无超时看门狗，DB 端卡住/管道阻塞时
-# 会永久占住一个连接与线程。60 分钟足够全量库，超时即终止并报错。
-_PG_DUMP_TIMEOUT_SECONDS = 3600
+# 会永久占住一个连接与线程。
+# 2026-10-18 OCR 评审：外层 create_full_backup 还有 asyncio.wait_for 总超时
+# （BACKUP_OPERATION_TIMEOUT，默认 1800s），to_thread 无法中断线程，所以
+# dump 侧必须比外层更早触发，才能真正终止子进程。
+_PG_DUMP_TIMEOUT_SECONDS = max(60, BACKUP_OPERATION_TIMEOUT - 60)
 
 # PG 客户端工具自动发现候选目录（F6：pg_dump/psql 常不在服务进程 PATH 上）
 _PG_BIN_CANDIDATE_GLOBS = (
@@ -116,6 +120,23 @@ async def run_pg_dump(output_path: Path, snapshot_id: str | None = None) -> dict
 
             t_err = threading.Thread(target=_drain_err, daemon=True)
             t_err.start()
+
+            # 2026-10-18 OCR 评审：看门狗必须独立于 stdout 读取循环——DB 卡住时
+            # read() 会永久阻塞，循环后的 wait(timeout) 永远执行不到。
+            timed_out = threading.Event()
+
+            def _watchdog_kill() -> None:
+                timed_out.set()
+                with contextlib.suppress(OSError):
+                    proc_.terminate()
+                    try:
+                        proc_.wait(timeout=10)
+                    except subprocess.TimeoutExpired:
+                        proc_.kill()
+
+            watchdog = threading.Timer(_PG_DUMP_TIMEOUT_SECONDS, _watchdog_kill)
+            watchdog.daemon = True
+            watchdog.start()
             try:
                 with open(output_path, 'wb') as raw_f, gzip.GzipFile(
                     fileobj=raw_f, mode='wb', compresslevel=1,
@@ -126,7 +147,15 @@ async def run_pg_dump(output_path: Path, snapshot_id: str | None = None) -> dict
                             break
                         gz_f.write(chunk)
                 stdout_pipe.close()
-                proc_.wait(timeout=_PG_DUMP_TIMEOUT_SECONDS)
+                try:
+                    proc_.wait(timeout=_PG_DUMP_TIMEOUT_SECONDS)
+                except subprocess.TimeoutExpired as exc:
+                    # 2026-10-18 OCR 评审：转成 TimeoutError，调用链统一按超时处理
+                    raise TimeoutError(
+                        f'pg_dump 超时（{_PG_DUMP_TIMEOUT_SECONDS}s）'
+                    ) from exc
+                if timed_out.is_set():
+                    raise TimeoutError(f'pg_dump 超时（{_PG_DUMP_TIMEOUT_SECONDS}s）')
                 if proc_.returncode != 0:
                     stderr_text = b''.join(stderr_chunks).decode(errors='replace')
                     raise RuntimeError(
@@ -144,6 +173,7 @@ async def run_pg_dump(output_path: Path, snapshot_id: str | None = None) -> dict
                     proc_.wait()
                 raise
             finally:
+                watchdog.cancel()
                 t_err.join(timeout=30)
                 stderr_pipe.close()
 

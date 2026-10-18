@@ -481,6 +481,9 @@ export function useSummaryModal() {
    * 自动落库成功后同步更新）。供「取消编辑」时恢复到真值，而非错误地清零。
    */
   const persistedLossRate = ref(0)
+  // 2026-10-18 OCR 评审：lossRateMixed 也需要「打开时的基线」，否则取消编辑
+  // 会把「各单不一致」提示错误地恢复/抹掉。
+  const persistedLossRateMixed = ref(false)
   /** 各单损耗率不一致（后端 spare_rate_mixed）：true 时 lossRate 显示 0 不代表「未设置过」 */
   const lossRateMixed = ref(false)
   /** 损耗率是否被用户交互过：仅在交互过时随动作提交 spare_rate（避免用 0 覆盖已存值） */
@@ -677,6 +680,7 @@ export function useSummaryModal() {
     lossRateTouched.value = false
     lossRateSaveState.value = 'idle'
     lossRateMixed.value = fRes.spare_rate_mixed === true
+    persistedLossRateMixed.value = lossRateMixed.value
     tab.value = 'factory'
     open.value = true
   }
@@ -691,6 +695,7 @@ export function useSummaryModal() {
       // 顶部统一损耗率同样回到服务端基线：此前漏了这一行，取消编辑后
       // 输入框仍显示用户改过的值，而逐行率已按持久值计算（同屏两套口径）。
       lossRate.value = persistedLossRate.value
+      lossRateMixed.value = persistedLossRateMixed.value
       // 分组订单级率同样回到服务端基线（统一率交互随之丢弃）
       groupSpareRates.value = seedGroupSpareRates(factoryOriginalData.value)
       // 弹窗仍开着、服务端仍存着该率，故恢复到「已落库」基线而非清零，
@@ -818,6 +823,7 @@ export function useSummaryModal() {
           fabricLossRateMixed.value = fabricLossRateMixed.value.map((g) => g.map((ss) => ss.map(() => false)))
           fabricLossRateMixedPersisted.value = cloneRaw(fabricLossRateMixed.value)
           lossRateMixed.value = false
+          persistedLossRateMixed.value = false
           next = pendingRate
           pendingRate = null
         }
@@ -893,6 +899,8 @@ export function useSummaryModal() {
           if (persistedRow) persistedRow[fi] = sent
           const mixedRow = fabricLossRateMixed.value[gi]?.[si]
           if (mixedRow) mixedRow[fi] = false
+          const mixedPersistedRow = fabricLossRateMixedPersisted.value[gi]?.[si]
+          if (mixedPersistedRow) mixedPersistedRow[fi] = false
           next = fabricPendingRates.get(key) ?? null
           fabricPendingRates.delete(key)
         }
@@ -962,6 +970,12 @@ export function useSummaryModal() {
       })
       factoryOriginalData.value = cloneRaw(factoryData.value)
       lossRateTouched.value = false
+      if (rateTouched) {
+        // 2026-10-18 OCR 评审：本路径同样把 spare_rate 落库了，基线必须同步，
+        // 否则「保存修改」后再「取消编辑」会回滚到旧率。
+        persistedLossRate.value = lossRate.value
+        persistedLossRateMixed.value = false
+      }
       try {
         const sRes = await purchaseApi.supplierSummary(orderIds.value) as unknown as SupplierSummaryData
         if (sRes.success) {
@@ -987,6 +1001,7 @@ export function useSummaryModal() {
     // 已落库基线随弹窗关闭复位：下次 openSummary 会按汇总接口的 spare_rate 重新播种。
     persistedLossRate.value = 0
     lossRateMixed.value = false
+    persistedLossRateMixed.value = false
     fabricLossRates.value = []
     fabricPersistedRates.value = []
     fabricLossRateMixed.value = []

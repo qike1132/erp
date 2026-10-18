@@ -24,14 +24,14 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 @router.get('', response_model=StagingListResponse, summary='获取暂存备货列表')
-async def get_staging_stockins(session_id: str=Query('default', max_length=200, description='会话ID'), db: AsyncSession=Depends(get_async_read_db), current_user: User=Depends(require_any_permission('batch_import', 'order_manage', 'stockin_manage'))):
+async def get_staging_stockins(session_id: str=Query('default', max_length=50, description='会话ID'), db: AsyncSession=Depends(get_async_read_db), current_user: User=Depends(require_any_permission('batch_import', 'order_manage', 'stockin_manage'))):
     """获取指定会话的暂存备货列表"""
     scoped_session = f'u{current_user.id}:{session_id}'
     data = await svc.get_staging_stockins(db, scoped_session)
     return StagingListResponse(success=True, data=data, total=len(data))
 
 @router.post('/import', response_model=StagingStockInImportResult, summary='导入备货到暂存区')
-async def import_staging_stockins(file: UploadFile=File(...), session_id: str=Query('default', max_length=200, description='会话ID'), db: AsyncSession=Depends(get_async_db), current_user: User=Depends(require_any_permission('batch_import', 'order_manage', 'stockin_manage'))):
+async def import_staging_stockins(file: UploadFile=File(...), session_id: str=Query('default', max_length=50, description='会话ID'), db: AsyncSession=Depends(get_async_db), current_user: User=Depends(require_any_permission('batch_import', 'order_manage', 'stockin_manage'))):
     """批量导入备货到暂存区"""
     if not file.filename or not file.filename.endswith('.xlsx'):
         return StagingStockInImportResult(success=False, message='只支持 .xlsx 格式，.xls 已不再支持')
@@ -59,7 +59,7 @@ async def update_staging_stockin(stockin_id: int, data: StagingStockInUpdate, db
     return StagingResponse(success=True, message='更新成功')
 
 @router.delete('/clear', response_model=StagingResponse, summary='清空暂存备货')
-async def clear_staging_stockins(session_id: str=Query('default', max_length=200, description='会话ID'), db: AsyncSession=Depends(get_async_db), current_user: User=Depends(require_any_permission('batch_import', 'order_manage', 'stockin_manage'))):
+async def clear_staging_stockins(session_id: str=Query('default', max_length=50, description='会话ID'), db: AsyncSession=Depends(get_async_db), current_user: User=Depends(require_any_permission('batch_import', 'order_manage', 'stockin_manage'))):
     """清空当前会话的暂存备货"""
     scoped_session = f'u{current_user.id}:{session_id}'
     async with db_transaction(db):
@@ -75,7 +75,7 @@ async def delete_staging_stockin(stockin_id: int, db: AsyncSession=Depends(get_a
     return StagingResponse(success=True, message='删除成功')
 
 @router.post('/confirm', response_model=StagingStockInConfirmResult, summary='确认暂存备货')
-async def confirm_staging_stockins(session_id: str=Query('default', max_length=200, description='会话ID'), db: AsyncSession=Depends(get_async_db), current_user: User=Depends(require_any_permission('batch_import', 'order_manage', 'stockin_manage'))):
+async def confirm_staging_stockins(session_id: str=Query('default', max_length=50, description='会话ID'), db: AsyncSession=Depends(get_async_db), current_user: User=Depends(require_any_permission('batch_import', 'order_manage', 'stockin_manage'))):
     """确认暂存备货 - 转移到正式备货表"""
     scoped_session = f'u{current_user.id}:{session_id}'
     async with db_transaction(db):

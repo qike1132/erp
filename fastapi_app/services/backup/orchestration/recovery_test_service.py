@@ -303,7 +303,9 @@ class DisasterRecoveryTestService:
             # 最新文件损坏/无密码时整个演练恒失败，不回退次新的完好备份）
             for candidate in sorted(backup_files, key=lambda f: f.stat().st_mtime, reverse=True):
                 backup_info = await self._get_backup_info(candidate)
-                if backup_info:
+                # 2026-10-18 OCR 评审：_get_backup_info 对「ZIP 损坏 / 缺密码」仍返回
+                # dict（integrity_check.passed=False），只看 truthy 会选中坏备份。
+                if backup_info and backup_info.get('integrity_check', {}).get('passed', True):
                     logger.info(f"选择备份文件进行测试: {candidate.name}")
                     return backup_info
                 logger.warning(f"备份文件损坏或无效，尝试更早的备份: {candidate.name}")

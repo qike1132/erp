@@ -586,6 +586,15 @@ class ServiceOps:
 
         返回 ``(ok, state, pid)``，与 ``start_one_service`` 一致。
         """
+        # 2026-10-18 OCR 评审：单服务重启（如「应用 Worker 数」）此前绕过 AUD-28
+        # 闸门；这些服务同样吃工作区源码，必须一视同仁。
+        if name in (_SVC_API, _SVC_ARQ, _SVC_WEB):
+            ok, msg = git_guard.check_production_branch(self._project_dir)
+            if not ok:
+                self._msg_queue.put(('log', {'text': f'拒绝执行：{msg}', 'level': 'ERROR'}))
+                return False, 'REJECTED', None
+            if msg.startswith('警告') or '覆盖' in msg:
+                self._msg_queue.put(('log', {'text': msg, 'level': 'WARNING'}))
         nssm = nssm or self.find_nssm()
         prev_pid = self.svc_pid(name)
         self._msg_queue.put(('log', {'text': f'正在重启生产服务 {name}...'}))
@@ -636,7 +645,7 @@ class ServiceOps:
           （2026-10-14 已有 75 分钟实害事故）。非 main 直接拒绝。
         """
         if verb in ('restart', 'start'):
-            ok, msg = git_guard.check_production_branch()
+            ok, msg = git_guard.check_production_branch(self._project_dir)
             if not ok:
                 self._msg_queue.put(('log', {'text': f'拒绝执行：{msg}', 'level': 'ERROR'}))
                 return

@@ -295,6 +295,8 @@ export function useProductListActions(confirmDialog: ConfirmDialogLike) {
 
     // 空基线覆盖非空 BOM 的二次确认（防误清空整张 BOM）
     if (allItems.length === 0 && currentProductId.value != null) {
+      // 2026-10-18 OCR 评审：进入异步确认前就上锁，否则双击会并发走完确认
+      bomSaving.value = true
       const existing = await productApi.loadBom(currentProductId.value) as { success: boolean; materials?: BomMaterialRecord[] }
       const nonEmpty = existing.success && (existing.materials || []).some(m => (m.category || 'accessory') !== 'packaging')
       if (nonEmpty) {
@@ -303,7 +305,10 @@ export function useProductListActions(confirmDialog: ConfirmDialogLike) {
           '危险操作确认',
           'danger',
         )
-        if (!ok) return
+        if (!ok) {
+          bomSaving.value = false
+          return
+        }
       }
     }
 

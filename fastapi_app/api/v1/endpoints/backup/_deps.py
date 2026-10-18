@@ -212,19 +212,13 @@ def _decrypt_backup_data(encrypted_bytes: bytes, password: str) -> bytes:  # log
     解密备份数据
     """
     try:
-        from fastapi_app.core.backup_encryption import BackupFileError, decrypt_backup
+        # 2026-10-18 OCR 评审：改用 decrypt_backup_auto（四格式全认：chunked-v1 /
+        # 裸信封 / meta 前缀）。此前无条件按 meta 前缀解析，裸 chunked-v1 的
+        # 前 4 字节会被当成 1.1GB 长度 → 恒报「格式无效」，P2-10 只修了一半。
+        from fastapi_app.core.backup_encryption import BackupFileError, decrypt_backup_auto
 
-        # 解析元数据长度
-        if len(encrypted_bytes) < 4:
-            raise BackupFileError('加密数据格式无效')
-
-        meta_len = int.from_bytes(encrypted_bytes[:4], 'big')
-        if len(encrypted_bytes) < 4 + meta_len:
-            raise BackupFileError('加密数据格式无效')
-
-        # 跳过元数据，解密实际数据
-        encrypted_data = encrypted_bytes[4 + meta_len:]
-        return decrypt_backup(encrypted_data, password)
+        plaintext, _meta = decrypt_backup_auto(encrypted_bytes, password)
+        return plaintext
     except ImportError:
         # H2 修复：fail-closed——解密模块不可用时无法确认数据形态，
         # 返回原始字节会把密文当明文喂给下游解析器产生误导性错误

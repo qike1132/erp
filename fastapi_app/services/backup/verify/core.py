@@ -179,6 +179,10 @@ async def _verify_table_l2_fingerprint(db: AsyncSession, table, qtname: str,
         ))
         fingerprint = fp_result.scalar() or ''
     except (ValueError, TypeError, OSError, SQLAlchemyError) as e:
+        # 2026-10-18 OCR 评审：SQLAlchemy 语句失败后 session 进入失败状态，
+        # 不 rollback 会让后续校验全部 PendingRollbackError；回滚后本轮按失败处理。
+        with contextlib.suppress(SQLAlchemyError):
+            await db.rollback()  # manual-tx: try/except 内显式事务控制
         fingerprint = ''
         logger.warning(f'验证: 表 {tname} 指纹计算失败: {e}')
     fp_match = fingerprint == expected_fp if expected_fp else None

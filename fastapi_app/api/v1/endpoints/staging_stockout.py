@@ -48,7 +48,7 @@ def _build_scoped_session(user_id: int, session_id: str) -> str:
 
 @router.get('', response_model=StagingListResponse, summary='获取暂存出货列表')
 async def get_staging_stockouts(
-    session_id: str = Query(..., max_length=200, description='会话ID'),
+    session_id: str = Query(..., max_length=50, description='会话ID'),
     db: AsyncSession = Depends(get_async_read_db),
     current_user: User = Depends(require_any_permission('batch_import', 'stockout_manage')),
 ) -> StagingListResponse:
@@ -70,7 +70,7 @@ async def get_staging_stockouts(
 @router.post('/import', response_model=StagingStockOutImportResult, summary='导入出货到暂存区')
 async def import_staging_stockouts(
     file: UploadFile = File(...),
-    session_id: str = Query(..., max_length=200, description='会话ID'),
+    session_id: str = Query(..., max_length=50, description='会话ID'),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(require_any_permission('batch_import', 'stockout_manage')),
 ) -> StagingStockOutImportResult:
@@ -140,7 +140,7 @@ async def update_staging_stockout(
 
 @router.delete('/clear', response_model=StagingResponse, summary='清空暂存出货')
 async def clear_staging_stockouts(
-    session_id: str = Query(..., max_length=200, description='会话ID'),
+    session_id: str = Query(..., max_length=50, description='会话ID'),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(require_any_permission('batch_import', 'stockout_manage')),
 ) -> StagingResponse:
@@ -184,7 +184,7 @@ async def delete_staging_stockout(
 
 @router.post('/confirm', response_model=StagingStockOutConfirmResult, summary='确认暂存出货')
 async def confirm_staging_stockouts(
-    session_id: str = Query(..., max_length=200, description='会话ID'),
+    session_id: str = Query(..., max_length=50, description='会话ID'),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(require_any_permission('batch_import', 'stockout_manage')),
 ) -> StagingStockOutConfirmResult:

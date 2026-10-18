@@ -58,6 +58,7 @@ import MSearchBar from '@/mobile/components/MSearchBar.vue'
 import MBadge from '@/mobile/components/MBadge.vue'
 import MSkeleton from '@/mobile/components/MSkeleton.vue'
 import MEmpty from '@/mobile/components/MEmpty.vue'
+import { showToast } from '@/composables/useToast'
 
 const products = ref<Product[]>([])
 const loading = ref(true)
@@ -86,8 +87,9 @@ async function loadProducts() {
     totalItems.value = res.total ?? 0
   } catch (e) {
     console.error('[MProductView] load failed:', e)
-    products.value = []
-    totalItems.value = 0
+    // 2026-10-18 OCR 评审：失败时不要把 totalItems 归零——分页器会消失，
+    // 用户被困在空列表且无页码可回。保留旧总数并提示，由用户重试。
+    showToast('产品加载失败，请重试', 'error')
   } finally {
     loading.value = false
   }

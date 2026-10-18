@@ -16,9 +16,14 @@ export const ocrApi = {
    * 当时的调用方各自绕开本函数手拼 URL 才得以工作，
    * 这正是「API 层与实际契约脱节」的典型表现。现补回参数并由调用方统一走本函数。
    */
-  upload: (sessionId: string, formData: FormData) =>
-    upload(`/ocr-import/upload?session_id=${encodeURIComponent(sessionId)}`, formData),
-  progress: (taskId: string) => get<{ progress: number; status: string }>(`/ocr-import/progress/${taskId}`),
+  upload: (sessionId: string, formData: FormData, taskId?: string) =>
+    upload(
+      `/ocr-import/upload?session_id=${encodeURIComponent(sessionId)}`
+      + (taskId ? `&task_id=${encodeURIComponent(taskId)}` : ''),
+      formData,
+    ),
+  progress: (taskId: string) =>
+    get<{ status: string; percent?: number; message?: string }>(`/ocr-import/progress/${taskId}`),
   /**
    * 订单图片识别预览（`POST /ocr-import/order/preview`）——**不写库**。
    *

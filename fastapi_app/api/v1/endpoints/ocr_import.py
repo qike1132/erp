@@ -102,6 +102,10 @@ async def upload_shipping_docs(files: list[UploadFile]=File(..., description='�
             all_errors.append(f'{filename}: {e!s}')
             logger.error('OCR 批量上传依赖缺失: %s', e)
             continue
+        except Exception as e:  # defensive: 单文件失败不得中断整批（其余文件已各自提交）
+            all_errors.append(f'{filename}: 处理失败（{e!s}）')
+            logger.exception('OCR 批量上传单文件处理失败: %s', filename)
+            continue
         total_imported += imported
         if errors:
             all_errors.extend([f'{filename}: {e}' for e in errors])

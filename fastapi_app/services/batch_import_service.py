@@ -397,7 +397,12 @@ async def import_orders_service(db: AsyncSession, file: ExcelUpload) -> BatchImp
             if deduct_flag:
                 deduct_str = str(deduct_flag).strip()
                 deduct_value = 0
-                if deduct_str.isdigit():
+                # 2026-10-18 OCR 评审：Polars 把整列推断成 Float64 时，整数会以
+                # 3.0 形式到达，str(3.0)='3.0' 不是 digit → 抵扣被静默跳过。
+                if isinstance(deduct_flag, (int, float)) and not isinstance(deduct_flag, bool) \
+                        and float(deduct_flag).is_integer():
+                    deduct_value = int(deduct_flag)
+                elif deduct_str.isdigit():
                     deduct_value = int(deduct_str)
                 elif deduct_str.lower() in ('是', 'yes'):
                     deduct_value = qty

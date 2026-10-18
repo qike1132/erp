@@ -9,6 +9,8 @@ import type { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { patternMakerApi } from '@/api/patternMaker'
 import type { PatternMaker } from '@/api/patternMaker'
 import { showToast } from '@/composables/useToast'
+import { getErrorStatus } from '@/types/errors'
+import { resolveSamplingErrorMessage } from './useSamplingErrors'
 import { usePatternRoomStore, resolveSwr } from '@/stores/patternRoom'
 import { createManageGuard } from './useManageGuard'
 
@@ -73,7 +75,7 @@ export function usePatternRoomPatternMakers(
       }
     } catch (e) {
       console.error('[PatternRoomView] 新增版师失败:', e)
-      showToast('新增版师失败，请重试', 'error')
+      showToast(resolveSamplingErrorMessage(e, '新增版师失败'), 'error')
     }
   }
 
@@ -97,7 +99,10 @@ export function usePatternRoomPatternMakers(
       }
     } catch (e) {
       console.error('[PatternRoomView] 删除版师失败:', e)
-      showToast('删除版师失败，请重试', 'error')
+      // 403 已由 axios 拦截器统一提示，避免双 toast
+      if (getErrorStatus(e) !== 403) {
+        showToast(resolveSamplingErrorMessage(e, '删除版师失败'), 'error')
+      }
     }
   }
 

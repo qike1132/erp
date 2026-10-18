@@ -4,7 +4,7 @@
          知情假功能比无功能更危险，这里明确标注并禁用保存。 -->
     <div class="ps-warn">
       当前版本备份目录由环境变量 <code>BACKUP_DIR</code> 决定，此处保存不会生效（设置接线待后续专项）。
-      实际生效目录：<code>{{ settings?.effective_backup_dir || settings?.default_backup_dir || 'backups/server' }}</code>
+      实际生效目录：<code>{{ settings?.effective_backup_dir || settings?.default_backup_dir || '未知（设置未加载）' }}</code>
     </div>
     <div class="ps-radio-row">
       <label class="ps-radio">
