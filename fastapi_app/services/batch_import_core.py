@@ -750,7 +750,12 @@ async def import_orders_from_data(db: AsyncSession, data_list: list, *, deps: Im
             try:
                 deduct_flag_str = str(deduct_flag).strip()
                 deduct_value = 0
-                if deduct_flag_str.isdigit():
+                # 2026-10-18 OCR 评审：与单表端点对齐——Polars Float64 列的
+                # 整数会以 3.0 到达，str(3.0) 不是 digit，会被静默跳过。
+                if isinstance(deduct_flag, (int, float)) and not isinstance(deduct_flag, bool) \
+                        and float(deduct_flag).is_integer():
+                    deduct_value = int(deduct_flag)
+                elif deduct_flag_str.isdigit():
                     deduct_value = int(deduct_flag_str)
                 elif deduct_flag_str.lower() in ['是', 'yes']:
                     # 2026-10-17 审计 F-BE-SVC-STOCK-04：「是」原先折算成 1 件，

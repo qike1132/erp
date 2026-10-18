@@ -132,8 +132,9 @@ export function useReportRowActions() {
   async function saveOrderItemEdit() {
     const form = orderItemEditForm.value
     if (!form) return
-    if (!Number.isFinite(form.quantity) || form.quantity < 1) {
-      showToast('请填写大于 0 的数量', 'error')
+    // 2026-10-18 OCR 评审：与退货口径一致，数量必须是正整数
+    if (!Number.isInteger(form.quantity) || form.quantity < 1) {
+      showToast('数量必须为正整数', 'error')
       return
     }
     savingOrderItem.value = true
@@ -190,8 +191,9 @@ export function useReportRowActions() {
   async function saveStockoutEdit() {
     const form = stockoutEditForm.value
     if (!form) return
-    if (!Number.isFinite(form.quantity) || form.quantity < 1) {
-      showToast('请填写大于 0 的数量', 'error')
+    // 2026-10-18 OCR 评审：与退货口径一致，数量必须是正整数
+    if (!Number.isInteger(form.quantity) || form.quantity < 1) {
+      showToast('数量必须为正整数', 'error')
       return
     }
     savingStockout.value = true

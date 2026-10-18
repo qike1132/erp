@@ -302,7 +302,13 @@ class DisasterRecoveryTestService:
             # 按时间从新到旧逐个尝试（2026-10-17 审计 P2-13：此前只取最新一个，
             # 最新文件损坏/无密码时整个演练恒失败，不回退次新的完好备份）
             for candidate in sorted(backup_files, key=lambda f: f.stat().st_mtime, reverse=True):
-                backup_info = await self._get_backup_info(candidate)
+                # 2026-10-18 OCR 评审：单个候选的异常（zlib/NotImplementedError 等）
+                # 不得让整个演练失败，继续尝试更早的备份。
+                try:
+                    backup_info = await self._get_backup_info(candidate)
+                except Exception as exc:  # defensive: 单个坏备份不应中断演练
+                    logger.warning(f"检查备份 {candidate.name} 失败，尝试更早的备份: {exc}")
+                    continue
                 # 2026-10-18 OCR 评审：_get_backup_info 对「ZIP 损坏 / 缺密码」仍返回
                 # dict（integrity_check.passed=False），只看 truthy 会选中坏备份。
                 if backup_info and backup_info.get('integrity_check', {}).get('passed', True):

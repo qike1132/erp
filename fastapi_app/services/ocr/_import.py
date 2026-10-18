@@ -158,13 +158,13 @@ async def import_staging_stockouts_from_file(db: AsyncSession, file_content: byt
 
             parsed_items, table_pages, text_pages = await _recognize_items(file_content, filename, file_type, _prog)
             if not text_pages and not parsed_items:
-                await _prog(status='error', message='文件无法提取文本内容', percent=0)
+                await _prog(message='文件无法提取文本内容', percent=0)
                 return (0, '文件无法提取文本内容，可能是空白文件或图片质量过低', [])
             if not parsed_items:
                 preview_pages = table_pages or text_pages
                 raw_text_preview = '\n'.join(p.get('text', '')[:200] for p in preview_pages[:3])
                 logger.warning(f'{file_type} 解析未识别到出货项: {filename}\n原始文本:\n{raw_text_preview}')  # sql-safe: escape_like/绑定参数/常量片段
-                await _prog(status='error', message='无法识别出货信息', percent=0)
+                await _prog(message='无法识别出货信息', percent=0)
                 return (0, '无法从文件中识别出货信息，请确认文件格式是否正确', [])
             await _prog(message=f'解析完成，识别到 {len(parsed_items)} 个出货项', percent=80)
             await asyncio.sleep(0.05)
@@ -213,7 +213,7 @@ async def import_staging_stockouts_from_file(db: AsyncSession, file_content: byt
         # 2026-10-03 第八轮审计：补 RuntimeError —— extract_text 在 rapidocr 未装/初始化
         # 失败时抛 RuntimeError，原 except 未捕获会冒泡成 500；此处应优雅返回失败元组。
         logger.error(f'OCR 导入失败: {e!s}', exc_info=True)
-        await _prog(status='error', message=f'识别导入失败: {e!s}', percent=0)
+        await _prog(message=f'识别导入失败: {e!s}', percent=0)
         return (0, f'识别导入失败: {e!s}', [])
 
 

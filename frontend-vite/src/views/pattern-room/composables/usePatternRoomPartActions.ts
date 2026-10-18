@@ -153,7 +153,10 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
           if (!roleRes) {
             // 2026-10-18 OCR 评审：设最终版本失败时不得继续进入编辑态（假成功）；
             // 但复制接口已成功落库，必须刷新列表，避免用户重试产生重复版本。
-            showToast(roleHook.error.value ?? '设置最终版本失败，请重试', 'error')
+            showToast(
+              roleHook.error.value ?? `版本 ${res.version_no} 已复制，但设为最终版本失败，请手动设置`,
+              'error',
+            )
             if (selectedProjectId.value) {
               await partHook.fetchPartsByVersion(
                 selectedProjectId.value,
@@ -236,12 +239,15 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
       }
     } catch (e) {
       console.error('[PatternRoomView] 保存部位编辑失败:', e)
-      showToast(
-        getErrorStatus(e) === 409
-          ? '该部位已被他人修改，已刷新为最新数据，请重新编辑'
-          : resolveSamplingErrorMessage(e, '保存失败'),
-        'error',
-      )
+      const status = getErrorStatus(e)
+      if (status !== 403) {
+        showToast(
+          resolveSamplingErrorMessage(e, '保存失败', {
+            conflict: '该部位已被他人修改，已刷新为最新数据，请重新编辑',
+          }),
+          'error',
+        )
+      }
       // 409 乐观锁冲突：局部 patch 未更新 version，需全量刷新获取最新数据
       if (getErrorStatus(e) === 409 && selectedProjectId.value) {
         await partHook.fetchPartsByVersion(

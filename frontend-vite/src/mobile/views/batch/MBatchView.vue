@@ -74,6 +74,7 @@ const rawList = ref<BatchItem[]>([])
 const loading = ref(false)
 const page = ref(1)
 const totalItems = ref(0)
+let loadSeq = 0
 
 const groups = computed(() => {
   // 后端返回的是扁平 BatchQueryItem[]，按客户分组以保留原 UI 结构
@@ -87,21 +88,25 @@ const groups = computed(() => {
 })
 
 async function handleSearch() {
+  const seq = ++loadSeq
+  const requestedPage = page.value
   loading.value = true
   try {
     // 2026-10-17 审计 AUD-22：服务端分页（此前固定 page=1，第 51 条起不可达）
     const res = await batchApi.list({
       keyword: keyword.value,
       status: statusFilter.value === 'all' ? '' : statusFilter.value,
-      page: page.value,
+      page: requestedPage,
       per_page: MOBILE_PAGE_SIZE,
     })
+    if (seq !== loadSeq) return // 2026-10-18 OCR 评审：丢弃过期响应
     rawList.value = res?.data || []
     totalItems.value = res?.total ?? 0
   } catch {
-    // 2026-10-18 OCR 评审：失败时给用户提示，避免「空列表 + 页码已变」的静默态
+    if (seq !== loadSeq) return
+    // 2026-10-18 OCR 评审：保留 totalItems（分页器不消失、可回退），
+    // 只清空列表并提示；不要清 total 造成「被困空页」。
     rawList.value = []
-    totalItems.value = 0
     showToast('批次查询失败，请重试', 'error')
   } finally { loading.value = false }
 }

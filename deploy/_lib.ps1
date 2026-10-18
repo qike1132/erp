@@ -215,8 +215,8 @@ function Invoke-Nssm([string]$Nssm,[string[]]$NssmArgs,[string]$Action){
 
 function Install-NssmService([string]$Nssm,[hashtable]$Spec){
   $name=$Spec.Name
-  if(Get-Service -Name $name -ErrorAction SilentlyContinue){
     $cur=Get-Service -Name $name -ErrorAction SilentlyContinue
+    if($cur){
     # 已 STOPPED 时不调用 stop（nssm 会返回非零，属良性）。
     # 2026-10-18 OCR 评审：非零在 STOP_PENDING/依赖占用时也常见，按 WARNING 处理，
     # 由下面的「等 STOPPED」循环做权威判定。
@@ -242,7 +242,9 @@ function Install-NssmService([string]$Nssm,[hashtable]$Spec){
     do {
       Start-Sleep -Milliseconds 300
       if($svc){ $svc.Dispose(); $svc=$null }
-      $gone= -not (Get-Service -Name $name -ErrorAction SilentlyContinue)
+      $poll=Get-Service -Name $name -ErrorAction SilentlyContinue
+      $gone= -not $poll
+      if($poll){ $poll.Dispose() }
     } while(-not $gone -and (Get-Date) -lt $rmDeadline)
     if(-not $gone){ throw "服务 $name 删除未完成（可能仍标记为删除中）" }
   }

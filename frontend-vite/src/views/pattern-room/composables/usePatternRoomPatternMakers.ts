@@ -75,7 +75,9 @@ export function usePatternRoomPatternMakers(
       }
     } catch (e) {
       console.error('[PatternRoomView] 新增版师失败:', e)
-      showToast(resolveSamplingErrorMessage(e, '新增版师失败'), 'error')
+      if (getErrorStatus(e) !== 403) {
+        showToast(resolveSamplingErrorMessage(e, '新增版师失败'), 'error')
+      }
     }
   }
 

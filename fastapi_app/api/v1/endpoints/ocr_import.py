@@ -112,7 +112,10 @@ async def upload_shipping_docs(files: list[UploadFile]=File(..., description='�
         file_results.append({'filename': filename, 'imported': imported, 'message': message})
     overall_message = f'共处理 {len(file_results)} 个文件，识别导入 {total_imported} 个出货到暂存区'
     await svc._update_progress(task_id, status='done', percent=100, message=overall_message)
-    return OcrPdfImportResult(success=total_imported > 0 or len(file_results) == 0, message=overall_message, total_imported=total_imported, file_count=len(file_results), file_results=file_results, errors=all_errors[:20], task_id=task_id)
+    # 2026-10-18 OCR 评审：全部文件失败时 file_results 为空、total_imported=0，
+    # 旧表达式会返回 success=True；改为「有导入或有成功文件」才算成功。
+    overall_success = total_imported > 0 or len(file_results) > 0
+    return OcrPdfImportResult(success=overall_success, message=overall_message, total_imported=total_imported, file_count=len(file_results), file_results=file_results, errors=all_errors[:20], task_id=task_id)
 
 @router.get('/progress/{task_id}', summary='查询 OCR 识别进度')
 async def get_ocr_progress(task_id: str, current_user: User=Depends(require_any_permission('batch_import', 'stockout_manage'))):

@@ -92,15 +92,17 @@ def start_production(args: argparse.Namespace):
 
     sys.path.insert(0, str(PROJECT_ROOT))
 
-    # 2026-10-17 审计 AUD-28：生产启动前过 git 分支闸门（非 main 拒绝）
-    from server_manager.git_guard import check_production_branch
+    # 2026-10-17 审计 AUD-28：生产启动前过 git 分支闸门（非 main 拒绝）。
+    # 2026-10-18 OCR 评审：--check 只做环境自检、不拉起任何进程，不应被闸门拦住。
+    if not args.check:
+        from server_manager.git_guard import check_production_branch
 
-    ok, guard_msg = check_production_branch(PROJECT_ROOT)
-    if not ok:
-        print(f'[ERROR] {guard_msg}')
-        raise SystemExit(1)
-    if guard_msg.startswith('警告') or '覆盖' in guard_msg:
-        print(f'[WARN] {guard_msg}')
+        ok, guard_msg = check_production_branch(PROJECT_ROOT)
+        if not ok:
+            print(f'[ERROR] {guard_msg}')
+            raise SystemExit(1)
+        if guard_msg.startswith('警告') or '覆盖' in guard_msg:
+            print(f'[WARN] {guard_msg}')
 
     from fastapi_app.core import prod_runner
 

@@ -121,7 +121,9 @@ async function loadStock() {
     totalItems.value = res.total_items ?? 0
   } catch (e) {
     console.error('[MStockView] load failed:', e)
-    // 2026-10-18 OCR 评审：保留旧 totalItems，避免失败时分页器消失、用户被困空页
+    // 2026-10-18 OCR 评审：清空行但保留 totalItems——旧筛选/旧页的行不能顶着新
+    // chip 展示，同时分页器不消失、用户可重试。
+    stockItems.value = []
     showToast('库存加载失败，请重试', 'error')
   } finally {
     loading.value = false

@@ -159,28 +159,31 @@ const detailTime = computed(() => {
 })
 
 async function refetchOrders(page = 1) {
+  const prev = ordersPage.value
   ordersPage.value = page
   ordersLoading.value = true
   try { orders.value = await purchaseApi.orders({ page, per_page: MOBILE_PAGE_SIZE, keyword: keyword.value }) }
-  catch { showToast('订单加载失败，请重试', 'error') }
+  catch { ordersPage.value = prev; showToast('订单加载失败，请重试', 'error') }
   finally { ordersLoading.value = false }
 }
 
 async function loadUnprocessed(page = 1) {
   // 注：/unprocessed-orders 端点无 keyword 参数（审计 F-FE-MOBILE-04 仅
   // 采购中/已完成两个页签的后端支持搜索），此页签搜索待端点增强后接线。
+  const prev = unprocessedPage.value
   unprocessedPage.value = page
   unprocessedLoading.value = true
   try { unprocessed.value = await purchaseApi.unprocessedOrders({ page, per_page: MOBILE_PAGE_SIZE }) }
-  catch { showToast('待生成订单加载失败，请重试', 'error') }
+  catch { unprocessedPage.value = prev; showToast('待生成订单加载失败，请重试', 'error') }
   finally { unprocessedLoading.value = false }
 }
 
 async function loadCompleted(page = 1) {
+  const prev = completedPage.value
   completedPage.value = page
   completedLoading.value = true
   try { completedOrders.value = await purchaseApi.completed({ page, per_page: MOBILE_PAGE_SIZE, keyword: completedKeyword.value }) }
-  catch { showToast('已完成订单加载失败，请重试', 'error') }
+  catch { completedPage.value = prev; showToast('已完成订单加载失败，请重试', 'error') }
   finally { completedLoading.value = false }
 }
 

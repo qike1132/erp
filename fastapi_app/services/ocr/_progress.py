@@ -37,9 +37,18 @@ async def create_progress() -> str:
     return task_id
 
 
+# Redis 读取失败（非 miss）时返回的哨兵：端点据此返回「进行中」而非终态 not_found，
+# 避免一次 Redis 抖动让长批量被前端判死。
+_UNAVAILABLE: dict = {'status': 'pending', 'percent': 0, 'message': '进度暂不可用，正在重试'}
+
+
 async def get_progress(task_id: str) -> dict | None:
-    """返回进度字典；不存在/已过期返回 None（端点据此返回 not_found 终态）。"""
-    data = await safe_get(_key(task_id))
+    """返回进度字典；确认不存在/已过期返回 None（端点据此返回 not_found 终态）。"""
+    data = await safe_get(_key(task_id), fallback=_UNAVAILABLE)
+    if data is _UNAVAILABLE:
+        # Redis 读取异常：先看进程内降级存储，再返回非终态占位。
+        # 返回副本：调用方可能 update()，不能污染共享哨兵
+        return _progress_store.get(task_id) or dict(_UNAVAILABLE)
     if isinstance(data, dict):
         return data
     return _progress_store.get(task_id)
@@ -50,6 +59,8 @@ async def _update_progress(task_id: str, **kwargs) -> None:
     current = await get_progress(task_id)
     if current is None:
         current = {'status': 'pending', 'percent': 0, 'message': '', 'filename': ''}
+    else:
+        current = dict(current)
     if kwargs.get('status') != 'error' and 'percent' in kwargs:
         kwargs['percent'] = max(kwargs['percent'], current.get('percent', 0))
     current.update(kwargs)

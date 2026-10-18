@@ -272,7 +272,11 @@ async def api_export_completed_orders(
     Returns:
         dict[str, Any]: 包含 success 标志和 rows 数据的字典。
     """
-    rows = await svc.export_completed_orders(db, **data.model_dump(exclude_none=True))
+    try:
+        rows = await svc.export_completed_orders(db, **data.model_dump(exclude_none=True))
+    except ValueError as e:
+        # 2026-10-18 OCR 评审：导出行数超限应明确拒绝（413），不能静默截断
+        raise HTTPException(status_code=413, detail=str(e)) from e
     return success_response(rows=rows)
 
 

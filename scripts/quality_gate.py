@@ -627,8 +627,15 @@ def load_baseline() -> dict[str, int] | None:
     try:
         with BASELINE_PATH.open(encoding="utf-8") as fh:
             data = json.load(fh)
-        return {k: int(v) for k, v in (data.get("counts") or {}).items()}
-    except (OSError, ValueError) as exc:
+        if not isinstance(data, dict):
+            raise ValueError('基线顶层必须是 JSON object')
+        counts = data.get("counts")
+        if counts is None:
+            return {}
+        if not isinstance(counts, dict):
+            raise ValueError('counts 必须是 object')
+        return {k: int(v) for k, v in counts.items()}
+    except (OSError, ValueError, TypeError, AttributeError) as exc:
         print(f"[ERROR] 基线文件损坏，拒绝按空基线放行：{exc}", file=sys.stderr)
         return None
 

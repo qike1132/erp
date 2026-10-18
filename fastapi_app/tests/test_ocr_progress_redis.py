@@ -33,7 +33,8 @@ def fake_redis(monkeypatch):
     store: dict[str, dict] = {}
 
     async def _get(key, fallback=None, context=''):
-        return store.get(key, fallback)
+        # 模拟真实语义：miss 返回 None；fallback 只在读取异常时使用
+        return store.get(key)
 
     async def _set(key, value, timeout=300, context=''):
         store[key] = value
@@ -90,5 +91,14 @@ async def test_percent_is_monotonic(no_redis):
 
 
 @pytest.mark.asyncio
-async def test_get_returns_none_when_missing(no_redis):
+async def test_get_returns_none_when_missing(fake_redis):
+    # Redis 正常但确实没有该 key → None（端点转 not_found 终态）
     assert await _progress.get_progress('nope') is None
+
+
+@pytest.mark.asyncio
+async def test_get_returns_pending_when_redis_unavailable(no_redis):
+    # Redis 读取失败不等于任务不存在：返回 pending 占位，避免长批量被前端判死
+    data = await _progress.get_progress('nope')
+    assert data is not None
+    assert data['status'] == 'pending'

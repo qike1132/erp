@@ -983,6 +983,11 @@ export function useSummaryModal() {
         persistedLossRateMixed.value = false
         fabricPersistedRates.value = cloneRaw(fabricLossRates.value)
         fabricLossRateMixedPersisted.value = cloneRaw(fabricLossRateMixed.value)
+        // 同步 openSummary 快照，取消编辑时 groupSpareRates 从这里重播
+        if (factoryOriginalData.value) {
+          factoryOriginalData.value.spare_rate = lossRate.value
+          factoryOriginalData.value.groups?.forEach((g) => { g.spare_rate = lossRate.value })
+        }
       }
       try {
         const sRes = await purchaseApi.supplierSummary(orderIds.value) as unknown as SupplierSummaryData

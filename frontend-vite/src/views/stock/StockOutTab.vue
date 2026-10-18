@@ -288,6 +288,12 @@ async function addStaged() {
 
 /** OCR 粘贴识别确认后的条目：与手工录入进同一个暂存列表，提交前仍可改、删 */
 function addOcrStaged(items: StagedStockout[]) {
+  // 2026-10-18 OCR 评审：OCR 行同样必须是正整数，否则整批提交 422
+  const invalid = items.find((it) => !Number.isInteger(it.quantity) || it.quantity < 1)
+  if (invalid) {
+    showToast(`OCR 行数量无效（${invalid.quantity}），请修正后再暂存`, 'warning')
+    return
+  }
   staged.value.push(...items)
 }
 
