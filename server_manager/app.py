@@ -496,6 +496,9 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
                     except Exception:
                         pass
                     self._refresh_hosting_status()
+                elif msg_type == 'service_action_accepted':
+                    # worker 内的 git 分支闸门已放行，从这一刻起才进入启动宽限期
+                    self._note_service_action_accepted(data)
                 elif msg_type == 'hosting_apply':
                     # 后台收集完成 → 主线程应用（UI 更新）
                     self._apply_hosting_data(data['data'])
@@ -536,6 +539,11 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
         # 把真正的 log / log_batch 推到下一轮（200ms 后）——崩溃循环刷日志时
         # 运行面板的「最新输出」会明显滞后于实际日志，排障时看到的是假最新。
         self._do_flush()
+
+    def _note_service_action_accepted(self, data):
+        """worker 内 git 闸门放行后才刷新启动宽限时间戳（拒绝路径不投此消息）。"""
+        if data.get('verb') in ('restart', 'start'):
+            self._prod_start_ts = time.time()
 
     # ===================== 动作闸门接入（P0-3） =====================
     #
@@ -1333,11 +1341,10 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
         #   随后 HOSTING_START_GRACE_SEC(60s) 内陈旧的状态文件会被误显示为「启动中」,
         #   而不是按真实情况告警。
         # 2026-10-18 OCR 评审：闸门必须让被拒绝的重启不刷新 _prod_start_ts。
-        # 2026-10-18 OCR 复评：闸门跑在 Tk 主线程会冻结窗口（最多 3 次 git 子进程，
-        #   git status 全工作区约秒级），且 ServiceOps 侧还会再跑一遍。改为把闸门
-        #   下沉到 worker（_service_cmd_sync），由它回报结果；这里只保留 gate 互斥。
-        if self._gate.start(f'服务{verb}', self._service_cmd_sync, verb) and verb == 'restart':
-            self._prod_start_ts = time.time()
+        # 2026-10-18 OCR 复评：闸门跑在 worker 里，UI 线程此刻还不知道分支检查
+        # 会不会拒绝。时间戳改由 worker 放行后投递 service_action_accepted 再刷新，
+        # 避免「被拒绝的重启」在 60s 宽限期内把陈旧快照显示成「启动中」。
+        self._gate.start(f'服务{verb}', self._service_cmd_sync, verb)
 
     def _start_services(self):
         # 互斥守卫：开发模式正在启动/重启中则拒绝（防 TOCTOU 双后端抢 5002）

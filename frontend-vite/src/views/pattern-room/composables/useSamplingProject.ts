@@ -55,6 +55,8 @@ export function useSamplingProject() {
       const message = resolveSamplingErrorMessage(e, '加载打样详情失败')
       if (seq === detailFetchSeq) {
         error.value = message
+        // 调用方靠 errorStatus 抑制 403 的重复 toast；不写会沿用上一次操作的状态码
+        errorStatus.value = getErrorStatus(e)
         currentProject.value = null
       }
       return null

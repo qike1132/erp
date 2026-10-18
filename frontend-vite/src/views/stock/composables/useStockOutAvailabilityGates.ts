@@ -22,10 +22,11 @@ export interface ProductAvailabilityGate {
   excludeId?: number
 }
 
-/** 请求序号：快速切换 SKU/客户时丢弃过期响应（F-FE-DESK-CORE-02） */
-let shipReqSeq = 0
-
 export function useStockOutAvailabilityGates(staged: Ref<StagedStockout[]>) {
+  /** 请求序号：快速切换 SKU/客户时丢弃过期响应（F-FE-DESK-CORE-02）。
+   *  放在 composable 内而非模块级——多个实例（不同标签页/视图）各自切换 SKU 时，
+   *  共享序号会让后发请求把另一实例的在途响应误判为过期。 */
+  let shipReqSeq = 0
   /**
    * 拉取指定产品/客户的可出货量信息（完整 ShipmentInfo——展示区还要用
    * order_quantity / shipped_quantity，不能只回 available_quantity）。

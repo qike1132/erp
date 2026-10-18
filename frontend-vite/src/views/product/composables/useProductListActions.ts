@@ -441,6 +441,8 @@ export function useProductListActions(confirmDialog: ConfirmDialogLike) {
     reloadBom: loadBomData,
     selectedRole,
     selectRoleById,
+    // 与快速复制同一口径：保存进行中拒绝发起复制（两者都会重载编辑基线）
+    isBusy: () => bomSaving.value,
   })
 
   return {

@@ -208,7 +208,7 @@ function Invoke-Nssm([string]$Nssm,[string[]]$NssmArgs,[string]$Action){
   & $Nssm @NssmArgs | Out-Null
   if($LASTEXITCODE -ne 0){
     # 2026-10-18 OCR 评审：错误信息不得回显 --requirepass <明文>（会进日志/截图）
-    $shown = ($NssmArgs -join ' ') -replace '(--requirepass\s+)("[^"]*"|\S+)', '$1***'
+    $shown = ($NssmArgs -join ' ') -replace '(--requirepass\s+)("(?:\\.|[^"\\])*"|''[^'']*''|\S+)', '$1***'
     throw "nssm $Action 失败（exit=$LASTEXITCODE）：$shown"
   }
 }
@@ -223,7 +223,12 @@ function Install-NssmService([string]$Nssm,[hashtable]$Spec){
     # 由下面的「等 STOPPED」循环做权威判定。
     if($cur.Status -ne 'Stopped'){
       try { Invoke-Nssm $Nssm @('stop',$name) 'stop' }
-      catch { Write-Warning "$($_.Exception.Message)（继续等待 STOPPED 终态）" }
+      catch {
+        # 只降级「stop 命令本身返回非零」：nssm 不存在/无法启动是硬失败，
+        # 继续往下走只会在 remove/install 处报更离谱的错。
+        if($_.Exception.Message -notlike 'nssm stop 失败*'){ throw }
+        Write-Warning "$($_.Exception.Message)（继续等待 STOPPED 终态）"
+      }
     }
     # 停后必须等 STOPPED，不能立即 remove（旧实现会与正在停止的服务竞争）
     $svc=$null
@@ -242,7 +247,8 @@ function Install-NssmService([string]$Nssm,[hashtable]$Spec){
       if($cur){ $cur.Dispose() }
       if($stillBlocked){
         Write-Warning "服务 $name 未能停止（可能被运行中的依赖方占用，错误 1051）；跳过本次重装，保留现有服务定义"
-        return
+        # 返回 false 让调用方计入「未按本次配置重装」，避免安装流程报全绿
+        return $false
       }
       throw "服务 $name 未能停止"
     }
@@ -263,6 +269,7 @@ function Install-NssmService([string]$Nssm,[hashtable]$Spec){
   }
   Invoke-Nssm $Nssm @('install',$name,$Spec.Application) 'install'
   foreach($a in (Get-NssmArgs $Spec)){ Invoke-Nssm $Nssm $a 'set' }
+  return $true
 }
 
 function Test-Prereqs([hashtable]$Wanted){

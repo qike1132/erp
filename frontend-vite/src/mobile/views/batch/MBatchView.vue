@@ -108,7 +108,10 @@ async function handleSearch() {
     // 只清空列表并提示；不要清 total 造成「被困空页」。
     rawList.value = []
     showToast('批次查询失败，请重试', 'error')
-  } finally { loading.value = false }
+  } finally {
+    // 过期请求的 finally 不能关掉新请求的 loading
+    if (seq === loadSeq) loading.value = false
+  }
 }
 
 // 状态切换必须回到第 1 页；搜索词由搜索框显式提交（避免逐字符请求）

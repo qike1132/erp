@@ -131,7 +131,10 @@ async def _sniff_server_backup_format(content: bytes, safe_name: str, decrypt_pa
         raise HTTPException(status_code=400, detail='无法识别的备份文件格式')
     if is_gz:
         try:
-            content = _decompress_gzip_bounded(content, backup_service.MAX_BACKUP_FILE_SIZE)
+            # 解压是 CPU/IO 阻塞操作，与上传路径一致移入线程池，避免卡住事件循环
+            content = await asyncio.to_thread(
+                _decompress_gzip_bounded, content, backup_service.MAX_BACKUP_FILE_SIZE,
+            )
         except (OSError, EOFError, ValueError, zlib.error) as e:
             # BadGzipFile 是 OSError 子类；截断的 gz 抛 EOFError；坏块抛 zlib.error
             raise HTTPException(status_code=400, detail=_sanitize_error(f'gzip 备份文件无法解压: {e}')) from e
@@ -391,10 +394,15 @@ async def restore_server_backup(
 
     decrypt_password = _get_encryption_password(password, x_backup_password)
 
+    # 2026-10-18 OCR 复评：格式识别必须在落安全备份与取恢复锁**之前**。
+    # 旧顺序下坏文件/错密码会先触发一次全量安全备份再 400，且锁已拿到要占满 TTL。
+    # sniff 解密后的 is_zip 必须用于分支——`.enc` 文件里也可能是 ZIP，
+    # 继续走 json.loads 会把解密出的 ZIP 当 JSON 解析而 400。
+    content, is_zip = await _sniff_server_backup_format(content, safe_name, decrypt_password)
+
     # P0-5: 两条路径都要先落安全备份（旧实现仅 zip 分支有，JSON 分支连回滚点都没有）
     pre_restore_info = await _pre_restore_info_or_fail(db, allow_missing_pre_restore_backup)
 
-    is_zip = safe_name.endswith('.zip') or safe_name.endswith('.zip.enc') or content[:4] == b'PK\x03\x04'
     if is_zip:
         # P0-5: Redis 还原锁（旧实现此路径没有）
         zip_lock_owner = await _acquire_sync_restore_lock('sync_restore_by_name')
@@ -419,9 +427,8 @@ async def restore_server_backup(
             'results': result, 'total_inserted': total_rows,
             'restored_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         }
-    # 2026-10-18 OCR 评审：非 zip 分支必须先识别格式（.json.enc 在此解密、
-    # .gz 在此解压），否则下面的 json.loads 会把密文当 JSON 解析而 400。
-    content, is_zip = await _sniff_server_backup_format(content, safe_name, decrypt_password)
+    # 2026-10-18 OCR 评审：非 zip 分支的 .json.enc 解密、.gz 解压已在入口 sniff 完成，
+    # 此处 content 已是可直接 json.loads 的明文。
     # JSON path
     try:
         backup_data = await asyncio.to_thread(json.loads, content)

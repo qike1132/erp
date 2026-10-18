@@ -561,18 +561,22 @@ try {
   $authArg = if($redisPw){ ('--requirepass "{0}"' -f ($redisPw -replace '"','\"')) } else { '' }
 
   # 先装 Redis（erp-prod/arq 依赖其存在——SCM 拒绝依赖不存在的服务）
-  Install-NssmService $Nssm @{Name='erp-redis';Application=$redisExe;Parameters=("$cacheConf $authArg").Trim();Directory=$RedisDir;Stdout=(Join-Path $logDir 'erp-redis.log');Stderr=(Join-Path $logDir 'erp-redis.log')}
+  $reinstallSkipped=@()
+  if(-not (Install-NssmService $Nssm @{Name='erp-redis';Application=$redisExe;Parameters=("$cacheConf $authArg").Trim();Directory=$RedisDir;Stdout=(Join-Path $logDir 'erp-redis.log');Stderr=(Join-Path $logDir 'erp-redis.log')})){ $reinstallSkipped+='erp-redis' }
   Assert-ServiceRegistered 'erp-redis'
-  Install-NssmService $Nssm @{Name='erp-redis-broker';Application=$redisExe;Parameters=("$brokerConf $authArg").Trim();Directory=$RedisDir;Stdout=(Join-Path $logDir 'erp-redis-broker.log');Stderr=(Join-Path $logDir 'erp-redis-broker.log')}
+  if(-not (Install-NssmService $Nssm @{Name='erp-redis-broker';Application=$redisExe;Parameters=("$brokerConf $authArg").Trim();Directory=$RedisDir;Stdout=(Join-Path $logDir 'erp-redis-broker.log');Stderr=(Join-Path $logDir 'erp-redis-broker.log')})){ $reinstallSkipped+='erp-redis-broker' }
   Assert-ServiceRegistered 'erp-redis-broker'
 
-  Install-NssmService $Nssm @{Name='erp-prod';Application=$py;Parameters='-m fastapi_app.core.prod_runner --no-arq';Directory=$TargetDir;Env=$envs;DependOn='erp-redis';Stdout=(Join-Path $logDir 'erp-prod.log');Stderr=(Join-Path $logDir 'erp-prod.log')}
+  if(-not (Install-NssmService $Nssm @{Name='erp-prod';Application=$py;Parameters='-m fastapi_app.core.prod_runner --no-arq';Directory=$TargetDir;Env=$envs;DependOn='erp-redis';Stdout=(Join-Path $logDir 'erp-prod.log');Stderr=(Join-Path $logDir 'erp-prod.log')})){ $reinstallSkipped+='erp-prod' }
   Assert-ServiceRegistered 'erp-prod'
-  Install-NssmService $Nssm @{Name='erp-arq';Application=$py;Parameters='-m arq fastapi_app.core.arq_app.WorkerSettings';Directory=$TargetDir;Env=$envs;DependOn='erp-redis-broker';Stdout=(Join-Path $logDir 'erp-arq.log');Stderr=(Join-Path $logDir 'erp-arq.log')}
+  if(-not (Install-NssmService $Nssm @{Name='erp-arq';Application=$py;Parameters='-m arq fastapi_app.core.arq_app.WorkerSettings';Directory=$TargetDir;Env=$envs;DependOn='erp-redis-broker';Stdout=(Join-Path $logDir 'erp-arq.log');Stderr=(Join-Path $logDir 'erp-arq.log')})){ $reinstallSkipped+='erp-arq' }
   Assert-ServiceRegistered 'erp-arq'
-  Install-NssmService $Nssm @{Name='erp-web';Application=$nginxExe;Parameters="-p $TargetDir -c $nginxConf -e $logDir\nginx-error.log";Directory=$TargetDir;Stdout=(Join-Path $logDir 'erp-web.log');Stderr=(Join-Path $logDir 'erp-web.log')}
+  if(-not (Install-NssmService $Nssm @{Name='erp-web';Application=$nginxExe;Parameters="-p $TargetDir -c $nginxConf -e $logDir\nginx-error.log";Directory=$TargetDir;Stdout=(Join-Path $logDir 'erp-web.log');Stderr=(Join-Path $logDir 'erp-web.log')})){ $reinstallSkipped+='erp-web' }
   Assert-ServiceRegistered 'erp-web'
   Write-Ok '五个 NSSM 服务注册完成'
+  if($reinstallSkipped.Count -gt 0){
+    Write-Warn ("以下服务未能停止，沿用了上一次安装的定义（本次配置未生效）：" + ($reinstallSkipped -join '、') + "。请在依赖方停止后重跑安装，或手工核对 nssm 配置")
+  }
 
   # ==========================================================
   Write-Step '9 防火墙 + 启停'

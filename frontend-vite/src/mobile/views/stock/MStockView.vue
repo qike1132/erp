@@ -132,7 +132,8 @@ async function loadStock() {
     stockItems.value = []
     showToast('库存加载失败，请重试', 'error')
   } finally {
-    loading.value = false
+    // 过期请求的 finally 不能关掉新请求的 loading
+    if (seq === loadSeq) loading.value = false
   }
 }
 

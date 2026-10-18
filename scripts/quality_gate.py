@@ -631,7 +631,8 @@ def load_baseline() -> dict[str, int] | None:
             raise ValueError('基线顶层必须是 JSON object')
         counts = data.get("counts")
         if counts is None:
-            return {}
+            # 有文件但无 counts（形状损坏）：不能当空基线放行，否则全部门禁判 NEW 静默绿
+            raise ValueError('基线缺少 counts 字段')
         if not isinstance(counts, dict):
             raise ValueError('counts 必须是 object')
         return {k: int(v) for k, v in counts.items()}

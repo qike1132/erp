@@ -188,13 +188,15 @@ export function useBomQuickCopy({
           showToast('读取目标产品 BOM 失败，已取消复制', 'error')
           return
         }
-        // 只数该角色名下的物料（role_id 相等）；新建未保存角色按名称匹配后端角色定义
-        const roleIdForScope = target.roleId
-        const scopeMaterials = (existing.materials || []).filter((m) =>
-          roleIdForScope != null
-            ? m.role_id === roleIdForScope
-            : (existing.product?.roles || []).some((r) => r.name === roleScopeName),
-        )
+        // 只数该角色名下的物料。未保存角色只有名称：先按名称解析出角色 id，
+        // 解析不到说明该角色尚无任何物料（复制时会新建），无需确认。
+        // 旧写法用 `.some(role.name === 名称)` 判断后**把所有角色的物料**都算进来，
+        // 只要存在同名角色定义就会弹出「该角色已有物料」的误确认。
+        const matchedRoleId = target.roleId
+          ?? (existing.product?.roles || []).find((r) => r.name === roleScopeName)?.id
+        const scopeMaterials = matchedRoleId == null
+          ? []
+          : (existing.materials || []).filter((m) => m.role_id === matchedRoleId)
         if (scopeMaterials.length > 0) {
           const ok = await confirmRoleOverwrite(roleScopeName)
           if (!ok) {

@@ -72,6 +72,8 @@ export function useSamplingRole(projectId: Ref<number | null>) {
       console.error('[useSamplingRole] 查询角色列表失败:', e)
       const message = resolveSamplingErrorMessage(e, '加载角色列表失败', ROLE_ERROR_OPTS)
       error.value = message
+      // 调用方靠 errorStatus 抑制 403 的重复 toast；不写会沿用上一次操作的状态码
+      errorStatus.value = getErrorStatus(e)
       roles.value = []
     } finally {
       if (reqId === _requestId) loading.value = false

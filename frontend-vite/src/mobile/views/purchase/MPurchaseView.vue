@@ -159,33 +159,66 @@ const detailTime = computed(() => {
   return order.order_date || '—'
 })
 
+// 2026-10-18 OCR 复评：三个列表各自带请求序号，快速翻页/切关键词时旧响应
+// 后到会把新数据覆盖成旧页结果（其余移动端视图已统一此守卫）。
+let ordersSeq = 0
+let unprocessedSeq = 0
+let completedSeq = 0
+
 async function refetchOrders(page = 1) {
+  const seq = ++ordersSeq
   const prev = ordersPage.value
   ordersPage.value = page
   ordersLoading.value = true
-  try { orders.value = await purchaseApi.orders({ page, per_page: MOBILE_PAGE_SIZE, keyword: keyword.value }) }
-  catch { ordersPage.value = prev; showToast('订单加载失败，请重试', 'error') }
-  finally { ordersLoading.value = false }
+  try {
+    const res = await purchaseApi.orders({ page, per_page: MOBILE_PAGE_SIZE, keyword: keyword.value })
+    if (seq !== ordersSeq) return
+    orders.value = res
+  } catch {
+    if (seq !== ordersSeq) return
+    ordersPage.value = prev
+    showToast('订单加载失败，请重试', 'error')
+  } finally {
+    if (seq === ordersSeq) ordersLoading.value = false
+  }
 }
 
 async function loadUnprocessed(page = 1) {
   // 注：/unprocessed-orders 端点无 keyword 参数（审计 F-FE-MOBILE-04 仅
   // 采购中/已完成两个页签的后端支持搜索），此页签搜索待端点增强后接线。
+  const seq = ++unprocessedSeq
   const prev = unprocessedPage.value
   unprocessedPage.value = page
   unprocessedLoading.value = true
-  try { unprocessed.value = await purchaseApi.unprocessedOrders({ page, per_page: MOBILE_PAGE_SIZE }) }
-  catch { unprocessedPage.value = prev; showToast('待生成订单加载失败，请重试', 'error') }
-  finally { unprocessedLoading.value = false }
+  try {
+    const res = await purchaseApi.unprocessedOrders({ page, per_page: MOBILE_PAGE_SIZE })
+    if (seq !== unprocessedSeq) return
+    unprocessed.value = res
+  } catch {
+    if (seq !== unprocessedSeq) return
+    unprocessedPage.value = prev
+    showToast('待生成订单加载失败，请重试', 'error')
+  } finally {
+    if (seq === unprocessedSeq) unprocessedLoading.value = false
+  }
 }
 
 async function loadCompleted(page = 1) {
+  const seq = ++completedSeq
   const prev = completedPage.value
   completedPage.value = page
   completedLoading.value = true
-  try { completedOrders.value = await purchaseApi.completed({ page, per_page: MOBILE_PAGE_SIZE, keyword: completedKeyword.value }) }
-  catch { completedPage.value = prev; showToast('已完成订单加载失败，请重试', 'error') }
-  finally { completedLoading.value = false }
+  try {
+    const res = await purchaseApi.completed({ page, per_page: MOBILE_PAGE_SIZE, keyword: completedKeyword.value })
+    if (seq !== completedSeq) return
+    completedOrders.value = res
+  } catch {
+    if (seq !== completedSeq) return
+    completedPage.value = prev
+    showToast('已完成订单加载失败，请重试', 'error')
+  } finally {
+    if (seq === completedSeq) completedLoading.value = false
+  }
 }
 
 /** 搜索已完成订单：重置到第 1 页（否则会在旧页码上检索，结果为空） */

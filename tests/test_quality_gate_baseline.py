@@ -18,6 +18,15 @@ def test_corrupt_baseline_fails_closed(tmp_path, monkeypatch):
     assert q.load_baseline() is None
 
 
+def test_baseline_without_counts_fails_closed(tmp_path, monkeypatch):
+    """有文件但缺 counts（形状损坏）也不能当空基线放行。"""
+    broken = tmp_path / 'gate_baseline.json'
+    broken.write_text('{"_comment": "x"}', encoding='utf-8')
+    monkeypatch.setattr(q, 'BASELINE_PATH', broken)
+
+    assert q.load_baseline() is None
+
+
 def test_missing_baseline_is_empty(tmp_path, monkeypatch):
     monkeypatch.setattr(q, 'BASELINE_PATH', tmp_path / 'nope.json')
     assert q.load_baseline() == {}

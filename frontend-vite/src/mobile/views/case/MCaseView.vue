@@ -192,6 +192,8 @@ const invTotal = ref(0)
 // 2026-10-18 OCR 评审：请求序号。库存搜索框 @update:model-value 逐字符触发，
 // 翻页也会发新请求，旧响应后到会覆盖成旧关键词的结果。
 let invLoadSeq = 0
+/** 最近一次成功加载的页码：失败时回退，避免分页器停在无数据的空页 */
+let invLoadedPage = 1
 
 async function loadInventory() {
   const seq = ++invLoadSeq
@@ -212,12 +214,16 @@ async function loadInventory() {
     }
     inventory.value = flat
     invTotal.value = res.total ?? 0
+    invLoadedPage = invPage.value
   } catch {
     if (seq !== invLoadSeq) return
-    // 2026-10-18 OCR 评审：保留旧总数与列表，提示失败即可
+    // 2026-10-18 OCR 复评：页码已前进但数据仍是旧的 → 回退到上次成功页，
+    // 保留旧列表（回退会由分页器触发一次重载）
+    invPage.value = invLoadedPage
     showToast('库存加载失败，请重试', 'error')
   } finally {
-    invLoading.value = false
+    // 过期请求的 finally 不能关掉新请求的 loading
+    if (seq === invLoadSeq) invLoading.value = false
   }
 }
 

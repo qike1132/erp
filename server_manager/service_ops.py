@@ -598,6 +598,9 @@ class ServiceOps:
                 return False, 'REJECTED', None
             if git_guard.is_warning(msg):
                 self._msg_queue.put(('log', {'text': msg, 'level': 'WARNING'}))
+            # 只有重启 erp-prod 才刷新启动宽限（arq/web 不影响 prod_runner 快照）
+            if name == _SVC_API:
+                self._msg_queue.put(('service_action_accepted', {'verb': 'restart'}))
         prev_pid = self.svc_pid(name)
         self._msg_queue.put(('log', {'text': f'正在重启生产服务 {name}...'}))
         self._stop_service_sync(name, nssm, stop_timeout)
@@ -657,6 +660,8 @@ class ServiceOps:
                 return
             if git_guard.is_warning(msg):
                 self._msg_queue.put(('log', {'text': msg, 'level': 'WARNING'}))
+            # 闸门已放行：通知 app 刷新启动宽限时间戳（拒绝路径投 hosting_refresh、不投本消息）
+            self._msg_queue.put(('service_action_accepted', {'verb': verb}))
         nssm = self.find_nssm()
         if verb == 'restart':
             # 清一次即可：清的是**非受管**端口占用，与迭代顺序无关，不必每个服务重扫。

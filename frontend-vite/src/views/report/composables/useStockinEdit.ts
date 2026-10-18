@@ -85,9 +85,10 @@ export function useStockinEdit(
   async function saveStockinEdit() {
     const form = stockinEditForm.value
     if (!form) return
-    // 数量被清空时输入框给 ''（非 number），放行只会换来后端笼统的 422
-    if (!Number.isFinite(form.quantity) || form.quantity < 1) {
-      showToast('请填写大于 0 的备货数量', 'error')
+    // 数量被清空时输入框给 ''（非 number），放行只会换来后端笼统的 422。
+    // 与其他三条编辑路径统一用整数校验：小数虽 isFinite 通过，后端 quantity 是整数列。
+    if (!Number.isInteger(form.quantity) || form.quantity < 1) {
+      showToast('请填写大于 0 的整数备货数量', 'error')
       return
     }
     await editStockin.run(form)

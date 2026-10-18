@@ -272,7 +272,8 @@ async function triggerScheduleNow() {
   triggering.value = true
   try {
     await backupApi.triggerSchedule(first.name)
-    toast.success('已触发定时备份')
+    // 首个 enabled 调度可能是清理/巡检型任务，不能一律叫「备份」
+    toast.success(`已触发定时任务「${first.name}」`)
     // 2026-10-18 OCR 复评：触发只是「入队」，重任务随后跑几分钟；HTTP 返回即解锁
     // 会让连点重复入队（后端 enqueue 无去重 job_id）。保持 10s 冷却，等状态轮询
     // 把 busy 置真后由 busy 继续兜底。

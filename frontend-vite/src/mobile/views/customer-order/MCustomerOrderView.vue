@@ -69,6 +69,8 @@ const total = ref(0)
 // 2026-10-18 OCR 评审：请求序号。状态 chip 切换与翻页都由
 // watch([activeTab, page]) 触发请求，快速切换时旧响应可能后到并覆盖列表。
 let loadSeq = 0
+/** 最近一次成功加载的页码：失败时回退，避免分页器停在与数据不一致的空页 */
+let loadedPage = 1
 
 async function handleSearch() {
   const seq = ++loadSeq
@@ -78,13 +80,19 @@ async function handleSearch() {
     if (seq !== loadSeq) return // 2026-10-18 OCR 评审：丢弃过期响应
     orders.value = res?.data || []
     total.value = res?.total || 0
+    loadedPage = page.value
   } catch {
     if (seq !== loadSeq) return
     // 此前无 catch：请求失败时列表静默保持旧数据（或空白），用户零感知。
     // 2026-10-18 OCR 评审：保留 total（分页器不消失），仅清空列表并提示。
     orders.value = []
+    // 2026-10-18 OCR 复评：页码已随翻页前进但没有对应数据 → 回到上次成功页
+    page.value = loadedPage
     showToast('订单查询失败，请重试', 'error')
-  } finally { loading.value = false }
+  } finally {
+    // 过期请求的 finally 不能关掉新请求的 loading
+    if (seq === loadSeq) loading.value = false
+  }
 }
 
 // 2026-10-18 OCR 评审：切换状态/提交搜索都必须回到第 1 页，

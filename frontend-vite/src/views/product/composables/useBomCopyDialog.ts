@@ -13,13 +13,19 @@ interface UseBomCopyDialogDeps {
   selectedRole: Ref<Role | null>
   /** 复制成功后按 id 回选目标角色（新建角色落库后 id 会变） */
   selectRoleById: (roleId: number) => void
+  /**
+   * 「另一种破坏性操作是否在途」判定（宿主注入 `bomSaving`）。
+   * 复制与保存都是全量替换语义，复制成功后 reloadBom 会重载编辑基线，
+   * 与在途保存互相覆盖——与快速复制同一道闸门。
+   */
+  isBusy: () => boolean
 }
 
 /**
  * 复制 BOM 对话框（搜索源产品 → 预览 → 确认复制）
  * 从 useProductListActions 抽离，专注于对话框内的交互流程。
  */
-export function useBomCopyDialog({ currentProductId, reloadBom, selectedRole, selectRoleById }: UseBomCopyDialogDeps) {
+export function useBomCopyDialog({ currentProductId, reloadBom, selectedRole, selectRoleById, isBusy }: UseBomCopyDialogDeps) {
   const copyBomDialogVisible = ref(false)
   const copyBomSearchKeyword = ref('')
   const copyBomProducts = ref<BomSearchProduct[]>([])
@@ -72,6 +78,12 @@ export function useBomCopyDialog({ currentProductId, reloadBom, selectedRole, se
 
   async function confirmCopyBom() {
     if (!copyBomSourceProductId.value) return
+    // 双击/重复点击会并发发起两次全量替换；复制进行中不再接受新请求
+    if (copyBomProgress.visible) return
+    if (isBusy()) {
+      showToast('保存进行中，请稍候再复制', 'warning')
+      return
+    }
     // 解析复制归属角色：未保存的新角色按名称交给后端查找或新建，无需先保存
     const target = resolveCopyTargetRole(selectedRole.value)
     if (!target.ok) {

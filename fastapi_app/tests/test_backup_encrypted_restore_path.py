@@ -209,6 +209,25 @@ async def test_sniff_server_backup_format_requires_password_for_enc(tmp_path) ->
 
 
 @pytest.mark.asyncio
+async def test_sniff_server_backup_format_detects_zip_after_decrypt() -> None:
+    """`.enc` 里装的是 ZIP 时，解密后的 is_zip 必须参与分支。
+
+    旧实现按文件名推断 is_zip 后就丢掉了 sniff 的返回值：`.enc`（不带 .zip）
+    解出 ZIP 仍会走 json.loads → 400。服务器恢复必须以解密后的真实格式为准。
+    """
+    from fastapi_app.api.v1.endpoints.backup.restore import _sniff_server_backup_format
+    from fastapi_app.core.backup_encryption import encrypt_backup_auto
+
+    zip_bytes = _zip_with_manifest(_MANIFEST)
+    ciphertext, _meta = encrypt_backup_auto(zip_bytes, _PW)
+
+    content, is_zip = await _sniff_server_backup_format(ciphertext, 'erp_backup.enc', _PW)
+
+    assert is_zip is True
+    assert content == zip_bytes
+
+
+@pytest.mark.asyncio
 async def test_sniff_server_backup_format_plain_json_unchanged() -> None:
     """明文 JSON / ZIP 不加密也能识别（不因本次改动回归）。"""
     from fastapi_app.api.v1.endpoints.backup.restore import _sniff_server_backup_format

@@ -525,6 +525,12 @@ export function useSummaryModal() {
    */
   let drainPromise: Promise<void> | null = null
   let pendingRate: number | null = null
+  /**
+   * 「取消编辑」代数：取消时 +1，让取消前发出的自动落库响应不得再回写基线
+   * （否则请求在取消后完成，会把刚被丢弃的率重新塞回 factoryData/基线，
+   * 与用户看到的「已还原」状态自相矛盾）。取消后的新输入沿用新代数正常回写。
+   */
+  let lossRateEpoch = 0
   /** 按布料行串行化损耗率保存，避免同一行快速连续输入产生乱序覆盖 */
   const fabricDrainPromises = new Map<string, Promise<void>>()
   const fabricPendingRates = new Map<string, number>()
@@ -687,7 +693,9 @@ export function useSummaryModal() {
 
   function toggleEditMode(enable: boolean) {
     if (!enable) {
-      // 取消编辑：丢弃本地改动与损耗率交互，回到服务端原值（数量永远是原始真值）。
+      // 取消编辑：作废取消前发出的自动落库结果（响应稍后到达也不得回写基线）
+      lossRateEpoch += 1
+      pendingRate = null
       factoryData.value = cloneRaw(factoryOriginalData.value)
       supplierData.value = cloneRaw(supplierOriginalData.value)
       fabricLossRates.value = cloneRaw(fabricPersistedRates.value)
@@ -844,21 +852,27 @@ export function useSummaryModal() {
     // 4) 启动排空循环：每次发送前取走「期间累积的最新值」，保证最后发送 = 最后输入
     const run = (async () => {
       let next: number | null = rate
+      let lastSentEpoch = lossRateEpoch
       try {
         while (next !== null) {
           // 目标采购单已失效（例如弹窗在途期间被关闭）：不再发送无 order_ids 的请求
           if (orderIds.value.length === 0) break
           lossRateSaveState.value = 'saving'
           const sent = next
+          const sentEpoch = lossRateEpoch
           await sendLossRate(sent)
           // 本次发送该率已成功落库 → 同步「已落库」基线（供取消编辑时恢复），
           // 并清掉「各单不一致」标记（本次已把所有涉及单统一为该值）。
-          syncPersistedLossRateBaseline(sent)
+          // 取消编辑期间发出的请求不回写：它属于已被用户丢弃的编辑。
+          if (sentEpoch === lossRateEpoch) {
+            syncPersistedLossRateBaseline(sent)
+            lastSentEpoch = sentEpoch
+          }
           next = pendingRate
           pendingRate = null
         }
         // 队列排空且目标仍有效：最后一次输入已成功落库 → 复位标记并给出成功反馈
-        if (orderIds.value.length > 0) {
+        if (orderIds.value.length > 0 && lastSentEpoch === lossRateEpoch) {
           lossRateTouched.value = false
           lossRateSaveState.value = 'saved'
         }
@@ -1025,6 +1039,9 @@ export function useSummaryModal() {
   function close() {
     open.value = false
     orderIds.value = []
+    // 作废在途自动落库的回写（关闭后响应到达也不得复活已清空的基线）
+    lossRateEpoch += 1
+    pendingRate = null
     supplierOrder.value = []
     orderTime.value = ''
     // 关闭弹窗即丢弃「尚未落库的损耗率交互」：否则失败态残留的 lossRate/lossRateTouched

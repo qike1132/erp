@@ -277,8 +277,9 @@ export function useMaterialRegistrations(activeTab: Ref<string>) {
 
   // 2026-10-18 OCR 评审：受控页码下 UiDataTable 不再自动复位；总数缩水时
   // （如当前页登记全部完成被 exclude_completed 过滤）把页码收敛到最后一页。
-  watch(pPages, (pages) => { if (pPage.value > pages) pPage.value = pages })
-  watch(hPages, (pages) => { if (hPage.value > pages) hPage.value = pages })
+  // 2026-10-18 OCR 复评：pages 可能为 0（空结果），必须夹到 ≥1，否则会发出 page=0 请求。
+  watch(pPages, (pages) => { if (pPage.value > Math.max(1, pages)) pPage.value = Math.max(1, pages) })
+  watch(hPages, (pages) => { if (hPage.value > Math.max(1, pages)) hPage.value = Math.max(1, pages) })
 
   /** 收货后强制刷新来料进度与 KPI（收货会改 overview/distribution，一并失效） */
   function loadProgress(page?: number) {
