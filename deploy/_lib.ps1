@@ -243,7 +243,7 @@ function Get-ServiceStatus([string]$Name){
   $st=$svc.Status.ToString(); $svc.Dispose(); return $st
 }
 
-function Stop-NssmService([string]$Nssm,[string]$Name){
+function Stop-NssmService([string]$Nssm,[string]$Name,[int]$PendingTimeoutSec=15){
   # 重装前的有序停机：erp-prod/arq 依赖 erp-redis，依赖方还在跑时 stop erp-redis
   # 会被 SCM 以 1051 拒绝 → 后续 remove/install 只能跳过，旧配置（含旧 --requirepass）
   # 继续生效。调用方必须先按逆依赖序停掉依赖方，再停被依赖者。
@@ -251,7 +251,7 @@ function Stop-NssmService([string]$Nssm,[string]$Name){
   if($null -eq $status -or $status -eq 'Stopped'){ return $true }
 
   # 1) 任何 *Pending 状态都不接受控制码：先等它落定（有独立短超时）
-  $deadline=(Get-Date).AddSeconds(15)
+  $deadline=(Get-Date).AddSeconds($PendingTimeoutSec)
   while((Test-ServiceStatusPending $status) -and (Get-Date) -lt $deadline){
     Start-Sleep -Milliseconds 300
     $status = Get-ServiceStatus $Name

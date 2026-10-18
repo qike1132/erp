@@ -122,6 +122,8 @@ useQuery({
     const res = (await ocrApi.progress(tid)) as OcrProgressResult
     // 批次已切换：旧任务的迟到响应不得改动新批次的进度/终态
     if (tid !== taskId.value) return res
+    // 已由本地收终态（全部未达后端）：迟到轮询不得把它改回成功/处理中
+    if (progressStatus.value !== '') return res
     // 逐文件上传期间由本文件维护「上传中 i/N」文案与整体进度（按文件数），
     // 后端的 percent 每完成一个文件就写 100（同一 taskId），直接采用会显示错误进度。
     // 单文件批次没有「文件间」进度，轮询的 percent 是唯一有意义的进度来源。
@@ -204,6 +206,7 @@ async function handleUpload(files: File[]) {
     }
     merged.success = (merged.total_imported ?? 0) > 0
     merged.message = `共处理 ${files.length} 个文件，识别导入 ${merged.total_imported} 个出货到暂存区`
+      + (unknownCount > 0 ? `（其中 ${unknownCount} 个结果未知，请核对）` : '')
     uploadResult.value = merged
     // 没有任何请求真正到达后端：服务端任务永远停在 pending，不能等轮询给终态。
     // 但「超时/5xx」是结果未知，不能断言文件未提交。

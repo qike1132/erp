@@ -534,6 +534,11 @@ export function useSummaryModal() {
   /** 按布料行串行化损耗率保存，避免同一行快速连续输入产生乱序覆盖 */
   const fabricDrainPromises = new Map<string, Promise<void>>()
   const fabricPendingRates = new Map<string, number>()
+  /**
+   * 行级率版本：每次行级输入 +1。统一率的迟到响应只回写「版本未变」的行，
+   * 避免覆盖用户在请求在途期间手动改过的行（busy 集合在响应到达时可能已清空）。
+   */
+  const fabricRateVersions = new Map<string, number>()
 
   /**
    * 工厂页签「数量」列的当前展示值索引：key = (供应商,物料,规格,单位) → 汇总数量。
@@ -674,6 +679,7 @@ export function useSummaryModal() {
     fabricLossRateMixed.value = mixedRates
     fabricLossRateMixedPersisted.value = cloneRaw(mixedRates)
     fabricItemIds.value = itemIds
+    fabricRateVersions.clear()
     // 回显播种：把汇总接口返回的「已落库损耗率」作为编辑基线。
     // - spare_rate 是 number（含 0）时原样回显；否则（null / 旧后端未提供 undefined）落 0，
     //   与改动前行为完全一致，零回归。
@@ -818,7 +824,7 @@ export function useSummaryModal() {
    *   factoryOriginalData 重播、diff 也以它为基准，不同步就会回滚到打开时的旧分组率；
    *   factoryData 不同步则「取消编辑回新率、当前展示用旧率」同屏两套口径（OCR 2026-10-18）。
    */
-  function syncPersistedLossRateBaseline(rate: number) {
+  function syncPersistedLossRateBaseline(rate: number, versionsAtSend?: Map<string, number>) {
     persistedLossRate.value = rate
     persistedLossRateMixed.value = false
     fabricPersistedRates.value = cloneRaw(fabricLossRates.value)
@@ -845,13 +851,17 @@ export function useSummaryModal() {
         fabricPersistedRates.value = cloneRaw(fabricLossRates.value)
         fabricLossRateMixedPersisted.value = cloneRaw(fabricLossRateMixed.value)
       } else {
-        const busyKeys = new Set([...fabricDrainPromises.keys(), ...fabricPendingRates.keys()])
-        broadcastFabricRates(rate, busyKeys)
-        // 只把已随统一率前移的行写入基线；busy 行等各自的响应回写
+        // 统一率发送后被手动改过的行（版本变了）不覆盖，其余行照常前移
+        const edited = new Set(
+          [...fabricRateVersions.entries()]
+            .filter(([key, version]) => version !== (versionsAtSend?.get(key) ?? 0))
+            .map(([key]) => key),
+        )
+        broadcastFabricRates(rate, edited)
         const previous = fabricPersistedRates.value
         fabricPersistedRates.value = fabricLossRates.value.map(
           (g, gi) => g.map((rows, si) => rows.map((v, fi) => (
-            busyKeys.has(fabricKey(gi, si, fi)) ? (previous[gi]?.[si]?.[fi] ?? v) : v
+            edited.has(fabricKey(gi, si, fi)) ? (previous[gi]?.[si]?.[fi] ?? v) : v
           ))),
         )
         fabricLossRateMixedPersisted.value = cloneRaw(fabricLossRateMixed.value)
@@ -900,12 +910,13 @@ export function useSummaryModal() {
           lossRateSaveState.value = 'saving'
           const sent = next
           const sentEpoch = lossRateEpoch
+          const versionsAtSend = new Map(fabricRateVersions)
           await sendLossRate(sent)
           // 本次发送该率已成功落库 → 同步「已落库」基线（供取消编辑时恢复），
           // 并清掉「各单不一致」标记（本次已把所有涉及单统一为该值）。
           // 弹窗已关闭：这批回写属于被丢弃的批次，不得回写（取消编辑不增代数，仍正常回写）
           if (sentEpoch === lossRateEpoch) {
-            syncPersistedLossRateBaseline(sent)
+            syncPersistedLossRateBaseline(sent, versionsAtSend)
             lastSentEpoch = sentEpoch
           }
           next = pendingRate
@@ -952,6 +963,8 @@ export function useSummaryModal() {
     const row = fabricLossRates.value[gi]?.[si]
     if (!row || fi < 0 || fi >= row.length) return
     row[fi] = rate
+    const key = fabricKey(gi, si, fi)
+    fabricRateVersions.set(key, (fabricRateVersions.get(key) ?? 0) + 1)
     const mixedRow = fabricLossRateMixed.value[gi]?.[si]
     if (mixedRow) mixedRow[fi] = false
   }
@@ -1110,6 +1123,7 @@ export function useSummaryModal() {
     fabricItemIds.value = []
     fabricDrainPromises.clear()
     fabricPendingRates.clear()
+    fabricRateVersions.clear()
     // 保存反馈随弹窗关闭复位（状态由下一次输入或关闭重置，不使用定时器）
     lossRateSaveState.value = 'idle'
   }
