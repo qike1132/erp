@@ -754,6 +754,11 @@ export function useSummaryModal() {
     }
   }
 
+  /** 当前行级落库在途/待发的行 key（统一率回写要跳过这些行） */
+  function currentBusyFabricKeys(): Set<string> {
+    return new Set([...fabricDrainPromises.keys(), ...fabricPendingRates.keys()])
+  }
+
   /**
    * 统一率批量下发到所有布料行（展示态 + 不一致标记同源）。
    * skip 用于行级落库在途/待发的行：那些行以行级输入为准，不能被统一率覆盖。
@@ -780,8 +785,9 @@ export function useSummaryModal() {
     lossRate.value = rate
     // 统一设置所有布料行：全局输入作为批量快捷入口，逐行输入可再单独覆盖。
     // 行级落库在途/待发的行保持行级展示值（服务端会保留行级率），不能被统一率瞬时覆盖。
-    const busy = new Set([...fabricDrainPromises.keys(), ...fabricPendingRates.keys()])
-    broadcastFabricRates(rate, busy.size > 0 ? busy : undefined)
+    // 注：后端统一率落库只写订单级 spare_rate，不写 item.loss_rate；「已显式落库的行级率
+    // 是否也应被统一率批量改写」仍需业务确认，当前保持既有行为，仅保护在途行。
+    broadcastFabricRates(rate, currentBusyFabricKeys())
     // 订单级率同样批量下发全部分组（备品口径 A 的来源；逐行输入不会写这里）
     groupSpareRates.value = groupSpareRates.value.map(() => rate)
     lossRateMixed.value = false
@@ -855,8 +861,7 @@ export function useSummaryModal() {
       // 在途/待发的行以行级输入为准；发送统一率后又手动改过的行（版本变了）同样不覆盖
       const edited = new Set<string>([
         ...(busyAtSend ?? []),
-        ...fabricDrainPromises.keys(),
-        ...fabricPendingRates.keys(),
+        ...currentBusyFabricKeys(),
         ...[...fabricRateVersions.entries()]
           .filter(([key, version]) => version !== (versionsAtSend?.get(key) ?? 0))
           .map(([key]) => key),
@@ -920,10 +925,7 @@ export function useSummaryModal() {
           const sent = next
           const sentEpoch = lossRateEpoch
           const versionsAtSend = new Map(fabricRateVersions)
-          const busyAtSend = new Set([
-            ...fabricDrainPromises.keys(),
-            ...fabricPendingRates.keys(),
-          ])
+          const busyAtSend = currentBusyFabricKeys()
           await sendLossRate(sent)
           // 本次发送该率已成功落库 → 同步「已落库」基线（供取消编辑时恢复），
           // 并清掉「各单不一致」标记（本次已把所有涉及单统一为该值）。

@@ -654,4 +654,30 @@ describe('C. 在途落库与关闭/取消编辑', () => {
       vi.useRealTimers()
     }
   })
+
+  it('C9 在途行级率不被统一率覆盖（含响应结算后）', async () => {
+    const rowD = deferred<{ success: boolean }>()
+    const unifiedD = deferred<{ success: boolean }>()
+    vi.mocked(purchaseApi.saveFactoryEdits)
+      .mockImplementationOnce(() => rowD.promise as never)
+      .mockImplementationOnce(() => unifiedD.promise as never)
+    const m = useSummaryModal()
+    await m.openSummary([7, 8])
+
+    const rowP = m.applyFabricLossRateAndSave(0, 0, 0, 100)
+    expect(m.fabricLossRates[0]?.[0]?.[0]).toBe(100)
+    const unifiedP = m.applyLossRateAndSave(3)
+    // 行级请求在途：统一率不得即时覆盖该行
+    expect(m.lossRate).toBe(3)
+    expect(m.fabricLossRates[0]?.[0]?.[0]).toBe(100)
+
+    rowD.resolve({ success: true })
+    await rowP
+    expect(m.fabricLossRates[0]?.[0]?.[0]).toBe(100)
+
+    unifiedD.resolve({ success: true })
+    await unifiedP
+    // 行级响应已结算，后续统一率响应也不能把该行改回统一率
+    expect(m.fabricLossRates[0]?.[0]?.[0]).toBe(100)
+  })
 })
