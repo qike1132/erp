@@ -36,6 +36,8 @@ describe('AUD-03 OCR 进度前端契约', () => {
     expect(source).toMatch(/batchSize\.value === 1/)
     expect(source).toMatch(/Math\.round\(\(\(i \+ 1\) \/ files\.length\) \* 100\)/)
     expect(source).toMatch(/if \(!accepted\)/)
+    // 本地终态锁存：迟到轮询不得把已定的 exception 改回成功
+    expect(source).toMatch(/progressStatus\.value !== ''\) return res/)
   })
 
   it('单文件失败区分「明确拒绝」与「结果未知」', () => {

@@ -200,7 +200,9 @@ Assert ((Stop-NssmService 'x' 'erp-test') -eq $true) 'Stop-NssmService：已停�
 $script:svcQueue.Clear(); $script:svcQueue.Enqueue('StartPending'); $script:svcQueue.Enqueue('Stopped')
 Assert ((Stop-NssmService 'x' 'erp-test') -eq $true) 'Stop-NssmService：等待 Pending 落定后成功'
 $script:svcQueue.Clear(); $script:svcDefault='StartPending'
+$sw=[Diagnostics.Stopwatch]::StartNew()
 Assert ((Stop-NssmService 'x' 'erp-test' 1) -eq $false) 'Stop-NssmService：Pending 超时明确失败'
+Assert ($sw.Elapsed.TotalSeconds -lt 5) 'Stop-NssmService：Pending 超时参数生效（未退回 15s 默认）'
 $script:svcDefault='Running'
 
 # 服务不存在（ObjectNotFound）→ 视为已停止；查询故障不得被当成不存在

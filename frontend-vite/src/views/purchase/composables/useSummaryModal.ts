@@ -846,17 +846,19 @@ export function useSummaryModal() {
       groupSpareRates.value = seedGroupSpareRates(factoryOriginalData.value)
       // 行级落库在途/待发的行以行级值/响应为准，其余行仍要前移；
       // 否则顶部统一率已更新而整张表停在旧率（同屏两套口径）。
-      if (fabricDrainPromises.size === 0 && fabricPendingRates.size === 0) {
+      // 在途/待发的行以行级输入为准；发送统一率后又手动改过的行（版本变了）同样不覆盖
+      const edited = new Set<string>([
+        ...fabricDrainPromises.keys(),
+        ...fabricPendingRates.keys(),
+        ...[...fabricRateVersions.entries()]
+          .filter(([key, version]) => version !== (versionsAtSend?.get(key) ?? 0))
+          .map(([key]) => key),
+      ])
+      if (edited.size === 0) {
         broadcastFabricRates(rate)
         fabricPersistedRates.value = cloneRaw(fabricLossRates.value)
         fabricLossRateMixedPersisted.value = cloneRaw(fabricLossRateMixed.value)
       } else {
-        // 统一率发送后被手动改过的行（版本变了）不覆盖，其余行照常前移
-        const edited = new Set(
-          [...fabricRateVersions.entries()]
-            .filter(([key, version]) => version !== (versionsAtSend?.get(key) ?? 0))
-            .map(([key]) => key),
-        )
         broadcastFabricRates(rate, edited)
         const previous = fabricPersistedRates.value
         fabricPersistedRates.value = fabricLossRates.value.map(

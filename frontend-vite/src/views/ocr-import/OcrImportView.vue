@@ -27,6 +27,9 @@
         <UiAlert v-if="uploadResult.errors?.length" variant="warning" :closable="false" style="margin-bottom: 12px">
           识别到 {{ uploadResult.errors.length }} 个错误：{{ uploadResult.errors.join('；') }}
         </UiAlert>
+        <UiAlert v-if="uploadResult.unknown_count" variant="warning" :closable="false" style="margin-bottom: 12px">
+          另有 {{ uploadResult.unknown_count }} 个文件结果未知，请先在暂存区核对再重试
+        </UiAlert>
         <UiAlert v-if="uploadResult.total_imported" variant="success" :closable="false">
           成功识别 {{ uploadResult.total_imported }} 条记录
         </UiAlert>
@@ -53,6 +56,8 @@ type UploadResult = {
   message?: string
   errors?: string[]
   total_imported?: number
+  /** 结果未知（超时/断连/5xx）的文件数：这些请求可能已在服务端落库 */
+  unknown_count?: number
 }
 
 /** /ocr-import/progress 轮询响应（后端键为 status/percent/message） */
@@ -205,8 +210,9 @@ async function handleUpload(files: File[]) {
       progress.value = Math.round(((i + 1) / files.length) * 100)
     }
     merged.success = (merged.total_imported ?? 0) > 0
+    merged.unknown_count = unknownCount
     merged.message = `共处理 ${files.length} 个文件，识别导入 ${merged.total_imported} 个出货到暂存区`
-      + (unknownCount > 0 ? `（其中 ${unknownCount} 个结果未知，请核对）` : '')
+      + (unknownCount > 0 ? `（另有 ${unknownCount} 个文件结果未知，请核对）` : '')
     uploadResult.value = merged
     // 没有任何请求真正到达后端：服务端任务永远停在 pending，不能等轮询给终态。
     // 但「超时/5xx」是结果未知，不能断言文件未提交。
