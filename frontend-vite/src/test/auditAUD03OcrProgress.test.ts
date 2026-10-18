@@ -30,6 +30,15 @@ describe('AUD-03 OCR 进度前端契约', () => {
     expect(source).toMatch(/ocrApi\.upload\(sid, fd, sid\)/)
   })
 
+  it('上传期间禁用选择器且轮询只跳过文案、仍更新百分比', () => {
+    expect(source).toMatch(/:disabled="uploading"/)
+    expect(source).toMatch(/if \(uploading\.value\) \{\s*progress\.value = res\.percent/)
+  })
+
+  it('单文件失败区分「明确拒绝」与「结果未知」', () => {
+    expect(source).toMatch(/status === undefined \|\| status >= 500/)
+  })
+
   it('前端校验后端 MAX_OCR_FILES=50', () => {
     expect(source).toMatch(/MAX_FILES = 50/)
   })

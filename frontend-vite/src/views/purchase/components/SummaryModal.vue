@@ -142,19 +142,22 @@ function applyLossRateDebounced(v: number) {
   }, 300)
 }
 
-/** 单个布料行损耗率输入防抖：与统一输入同源 300ms，切换页签不丢输入。 */
-let fabricLossRateTimer: ReturnType<typeof setTimeout> | null = null
+/** 单个布料行损耗率输入防抖：按行独立计时，快速连续改多行时不能互相取消。 */
+const fabricLossRateTimers = new Map<string, ReturnType<typeof setTimeout>>()
 function applyFabricLossRateDebounced(gi: number, si: number, fi: number, v: number) {
-  if (fabricLossRateTimer) clearTimeout(fabricLossRateTimer)
-  fabricLossRateTimer = setTimeout(() => {
-    fabricLossRateTimer = null
+  const key = `${gi}-${si}-${fi}`
+  const timer = fabricLossRateTimers.get(key)
+  if (timer) clearTimeout(timer)
+  fabricLossRateTimers.set(key, setTimeout(() => {
+    fabricLossRateTimers.delete(key)
     emit('applyFabricLossRate', gi, si, fi, v)
-  }, 300)
+  }, 300))
 }
 
 function cancelPendingRateEdits() {
   if (lossRateTimer) { clearTimeout(lossRateTimer); lossRateTimer = null }
-  if (fabricLossRateTimer) { clearTimeout(fabricLossRateTimer); fabricLossRateTimer = null }
+  fabricLossRateTimers.forEach((timer) => clearTimeout(timer))
+  fabricLossRateTimers.clear()
 }
 
 /**

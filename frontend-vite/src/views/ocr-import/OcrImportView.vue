@@ -3,7 +3,7 @@
     <UiPageHeader>OCR 导入<template #description>上传发票或单据图片，自动识别并导入数据</template></UiPageHeader>
 
     <UiCard>
-      <UiUpload accept=".pdf,.png,.jpg,.jpeg,.bmp,.tiff,.webp" multiple @change="handleFileChange">
+      <UiUpload accept=".pdf,.png,.jpg,.jpeg,.bmp,.tiff,.webp" multiple :disabled="uploading" @change="handleFileChange">
         <div class="upload-dragger-content">
           <FontAwesomeIcon icon="cloud-upload-alt" style="font-size: 48px; color: var(--color-text-muted)" aria-hidden="true" />
           <p style="margin-top: 12px">拖拽文件到这里，或点击上传</p>
@@ -46,7 +46,7 @@ import UiAlert from '@/components/ui/UiAlert.vue'
 import UiPageHeader from '@/components/ui/UiPageHeader.vue'
 
 import { showToast } from '@/composables/useToast'
-import { getErrorMessage } from '@/types/errors'
+import { getErrorMessage, getErrorStatus } from '@/types/errors'
 
 type UploadResult = {
   success?: boolean
@@ -74,8 +74,6 @@ const progress = ref(0)
 const uploadResult = ref<UploadResult | null>(null)
 /** 上传请求在途：轮询可能先看到 done（后端在返回响应前就写了终态），此时不能提前锁存结果 */
 const uploading = ref(false)
-/** 批次序号：新批次直接取代旧批次，旧请求的迟到响应不得回写 UI */
-let uploadSeq = 0
 
 const progressStatus = ref<'' | 'success' | 'exception' | 'warning'>('')
 const progressText = ref('处理中…')
@@ -122,15 +120,13 @@ useQuery({
     const res = (await ocrApi.progress(tid)) as OcrProgressResult
     // 批次已切换：旧任务的迟到响应不得改动新批次的进度/终态
     if (tid !== taskId.value) return res
-    // 逐文件上传期间由本文件维护「上传中 i/N」文案；轮询每 800ms 写百分比会把它冲掉
-    if (uploading.value) return { status: 'processing' }
+    // 逐文件上传期间由本文件维护「上传中 i/N」文案；只跳过文案，百分数仍要更新进度条
+    if (uploading.value) {
+      progress.value = res.percent ?? 0
+      return { status: 'processing' }
+    }
     progress.value = res.percent ?? 0
     if (res.status === 'done' || res.status === 'completed') {
-      if (uploading.value) {
-        // 后端先写 done 再返回上传响应：保持轮询，等 uploadResult 落地再定终态
-        progressText.value = '识别完成，正在汇总结果…'
-        return { status: 'processing' }
-      }
       const result = uploadResult.value
       if (result?.success === false) {
         progressStatus.value = 'exception'
@@ -156,12 +152,9 @@ useQuery({
 })
 
 async function handleUpload(files: File[]) {
-  const batchSeq = ++uploadSeq
   uploading.value = true
   try {
     const createRes = (await ocrApi.createTask()) as unknown as { task_id?: string; session_id?: string }
-    // 批次已被新批次取代：不得回写 taskId（否则轮询一个永远不会上传的 pending 任务）
-    if (batchSeq !== uploadSeq) return
     const sid = createRes.task_id ?? createRes.session_id
     if (!sid) {
       showToast('创建任务失败', 'error')
@@ -176,8 +169,6 @@ async function handleUpload(files: File[]) {
 
     const merged: UploadResult = { total_imported: 0, errors: [] }
     for (let i = 0; i < files.length; i++) {
-      // 新批次已开始：旧批次不再继续提交/回写（已提交的文件由后端照常处理）
-      if (batchSeq !== uploadSeq) return
       const file = files[i]!
       progressText.value = `上传中 ${i + 1}/${files.length}：${file.name}`
       const fd = new FormData()
@@ -190,16 +181,20 @@ async function handleUpload(files: File[]) {
         if (res.errors?.length) merged.errors!.push(...res.errors)
       } catch (err: unknown) {
         // 单文件请求失败（413/超时/网络）不阻断其余文件，逐条上报。
-        // 服务端在客户端超时/断连后仍会继续识别并写库，结果是「未知」而非必然失败。
-        merged.errors!.push(`${file.name}: ${getErrorMessage(err, '上传失败')}（结果未知，请先在暂存区核对再重试，避免重复导入）`)
+        // 4xx 是服务端明确拒绝（413/403/422），肯定没写库；
+        // 只有超时/断连/5xx 的服务端结果才是「未知」。
+        const status = getErrorStatus(err)
+        const unknown = status === undefined || status >= 500
+        merged.errors!.push(
+          `${file.name}: ${getErrorMessage(err, '上传失败')}`
+          + (unknown ? '（结果未知，请先在暂存区核对再重试，避免重复导入）' : ''),
+        )
       }
     }
-    if (batchSeq !== uploadSeq) return
     merged.success = (merged.total_imported ?? 0) > 0
     merged.message = `共处理 ${files.length} 个文件，识别导入 ${merged.total_imported} 个出货到暂存区`
     uploadResult.value = merged
   } catch (err: unknown) {
-    if (batchSeq !== uploadSeq) return
     const message = getErrorMessage(err, '上传失败')
     // 失败也写进 uploadResult：轮询看到 done 时据此显示失败而不是绿色完成
     uploadResult.value = { success: false, message }
@@ -207,7 +202,7 @@ async function handleUpload(files: File[]) {
     progressStatus.value = 'exception'
     progressText.value = message
   } finally {
-    if (batchSeq === uploadSeq) uploading.value = false
+    uploading.value = false
   }
 }
 </script>

@@ -825,6 +825,16 @@ export function useSummaryModal() {
       // 取消编辑已把 groupSpareRates 回滚成旧快照；在途响应落库后必须一起前移，
       // 否则顶部统一率显示新值、「备品数量」（读 groupSpareRates）仍是旧值。
       groupSpareRates.value = seedGroupSpareRates(factoryOriginalData.value)
+      // 逐行率同样前移：取消编辑已把 fabricLossRates 回滚成旧快照，统一率落库后
+      // 表格「损耗率/数量」列必须与顶部统一率、「备品数量」同源，否则同屏两套口径。
+      fabricLossRates.value = fabricLossRates.value.map(
+        (g) => g.map((rows) => rows.map(() => rate)),
+      )
+      fabricLossRateMixed.value = fabricLossRateMixed.value.map(
+        (g) => g.map((rows) => rows.map(() => false)),
+      )
+      fabricPersistedRates.value = cloneRaw(fabricLossRates.value)
+      fabricLossRateMixedPersisted.value = cloneRaw(fabricLossRateMixed.value)
     }
     if (factoryData.value) {
       factoryData.value.spare_rate = rate

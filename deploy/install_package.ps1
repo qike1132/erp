@@ -199,6 +199,8 @@ try {
   # 诚实边界：基础软件步骤是幂等「已装跳过」；若本步之后中途失败，可能已装过 PostgreSQL/Redis/nginx…
   # 故只承诺「不覆盖既有库/服务」，不声称「未改动任何现场」。
   $five = @('erp-redis','erp-redis-broker','erp-prod','erp-arq','erp-web')
+  # 唯一权威停机序（依赖方先停）。不要由 $five 反推：$five 的顺序服务于安装/启动。
+  $stopOrder = @('erp-web','erp-arq','erp-prod','erp-redis-broker','erp-redis')
   $existingSvc = @($five | Where-Object { Get-Service -Name $_ -ErrorAction SilentlyContinue })
   $targetExists = Test-Path -LiteralPath $TargetDir
 
@@ -412,15 +414,24 @@ try {
     }
 
     # 覆盖前：按逆依赖序停并移除旧的五服务（依赖方先停，否则 1051 会静默失败）
-    for($i=$five.Count-1; $i -ge 0; $i--){
-      $n=$five[$i]
-      if(-not (Stop-NssmService $Nssm $n)){
-        Write-Fail "服务 $n 未能停止，无法覆盖安装（请到 services.msc 检查依赖方）"
-        exit 1
+    $notStopped=@()
+    foreach($n in $stopOrder){
+      try {
+        if(-not (Stop-NssmService $Nssm $n)){ $notStopped+=$n }
+      } catch {
+        Write-Warning "停止 $n 时出错：$($_.Exception.Message)"
+        $notStopped+=$n
       }
     }
+    if($notStopped.Count -gt 0){
+      Write-Fail ("以下服务未能停止，无法覆盖安装（已停服务保持停止，现场为部分停机）：" + ($notStopped -join '、') + "。请到 services.msc 检查依赖方后重跑")
+      exit 1
+    }
     foreach($n in $five){
-      if(Get-Service -Name $n -ErrorAction SilentlyContinue){ Invoke-Nssm $Nssm @('remove',$n,'confirm') 'remove' }
+      $exists=$null
+      try { $exists=Get-Service -Name $n -ErrorAction Stop }
+      catch { if($_.CategoryInfo.Category -ne 'ObjectNotFound'){ throw } }
+      if($exists){ $exists.Dispose(); Invoke-Nssm $Nssm @('remove',$n,'confirm') 'remove' }
     }
     Write-Ok '旧服务已停止并移除（-Force 覆盖）'
   }
@@ -567,8 +578,13 @@ try {
   # 顺序反了会撞 1051：依赖方还在跑时 stop 被依赖者失败，Install-NssmService
   # 只能跳过重装 → 新生成的 conf / 轮换后的 --requirepass 不生效，但脚本仍继续。
   $notStopped=@()
-  foreach($svc in 'erp-web','erp-arq','erp-prod','erp-redis-broker','erp-redis'){
-    if(-not (Stop-NssmService $Nssm $svc)){ $notStopped+=$svc }
+  foreach($svc in $stopOrder){
+    try {
+      if(-not (Stop-NssmService $Nssm $svc)){ $notStopped+=$svc }
+    } catch {
+      Write-Warning "停止 $svc 时出错：$($_.Exception.Message)"
+      $notStopped+=$svc
+    }
   }
   if($notStopped.Count -gt 0){
     Write-Fail ("以下服务未能停止，无法安全重装：" + ($notStopped -join '、') + "。请先在 services.msc 停止它们后重跑安装")

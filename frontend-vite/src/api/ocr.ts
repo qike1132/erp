@@ -1,12 +1,12 @@
 import { get, post, upload } from './request'
 import type { TaskResponse } from '@/types'
 
-/** OCR 预览耗时与文件数/页数成正比，放宽全局 15s 超时 */
-const PREVIEW_TIMEOUT = 120_000
+/** OCR 预览耗时与文件数/页数成正比；网关 proxy_read_timeout 为 120s，留 5s 余量 */
+const PREVIEW_TIMEOUT = 115_000
 /**
  * 单次上传（一个文件）的超时上限。
- * 注意：nginx `location /api/` 的 proxy_read_timeout 是 120s——超过网关就会 504，
- * 前端等更久没有意义；这里按网关对齐，让失败尽早可见。
+ * 注意：nginx `location /api/` 的 proxy_read_timeout 是 120s——超过网关就会 504；
+ * 前端留 5s 余量，让网关的错误响应先到，而不是客户端先超时。
  */
 const OCR_UPLOAD_TIMEOUT = 115_000
 

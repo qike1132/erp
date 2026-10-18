@@ -597,6 +597,7 @@ describe('C. 在途落库与关闭/取消编辑', () => {
     expect(m.persistedLossRate).toBe(5)
     expect(m.factoryData?.spare_rate).toBe(5)
     expect(m.groupSpareRates.every((r) => r === 5)).toBe(true)
+    expect(m.fabricLossRates[0]?.[0]?.[0]).toBe(5)
   })
 
   it('C7 close() 后在途逐行率失败不得污染已关闭状态', async () => {
@@ -640,6 +641,15 @@ describe('C. 在途落库与关闭/取消编辑', () => {
       expect(cancelled.emitted('applyLossRate')).toBeUndefined()
       expect(cancelled.emitted('toggleEditMode')).toEqual([[false]])
       cancelled.unmount()
+
+      // 保存修改（editMode prop true→false，非用户点取消）不得丢弃挂起输入
+      const saved = mountModal()
+      saved.findComponent(SummaryFactoryTab).vm.$emit('lossRateInput', 50)
+      await saved.setProps({ editMode: true })
+      await saved.setProps({ editMode: false })
+      vi.advanceTimersByTime(400)
+      expect(saved.emitted('applyLossRate')).toEqual([[50]])
+      saved.unmount()
     } finally {
       vi.useRealTimers()
     }

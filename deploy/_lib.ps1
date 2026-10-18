@@ -223,6 +223,11 @@ function Invoke-Nssm([string]$Nssm,[string[]]$NssmArgs,[string]$Action){
   }
 }
 
+function Test-ServiceStatusNeedsContinue([string]$Status){
+  # Paused / PausePending 都不接受 STOP 控制码（NSSM 崩溃循环限流会进这两个状态）
+  return ($Status -like 'Pause*')
+}
+
 function Stop-NssmService([string]$Nssm,[string]$Name){
   # 重装前的有序停机：erp-prod/arq 依赖 erp-redis，依赖方还在跑时 stop erp-redis
   # 会被 SCM 以 1051 拒绝 → 后续 remove/install 只能跳过，旧配置（含旧 --requirepass）
@@ -236,9 +241,22 @@ function Stop-NssmService([string]$Nssm,[string]$Name){
   $status=$svc.Status; $svc.Dispose()
   # Paused/PausedPending 不接受 STOP 控制码（NSSM 崩溃循环限流会进这个状态）：
   # 先 continue 再停，否则 stop 必然失败，且 services.msc 也停不掉。
-  if($status.ToString() -like 'Paused*'){
+  if(Test-ServiceStatusNeedsContinue $status.ToString()){
     try { Invoke-Nssm $Nssm @('continue',$Name) 'continue' }
     catch { Write-Warning "$($_.Exception.Message)（Paused 服务恢复失败，继续尝试 stop）" }
+    # continue 是异步控制码：先等状态离开 Pause*/ContinuePending，否则紧跟的 stop 会 1061 被拒
+    $resumeDeadline=(Get-Date).AddSeconds(15)
+    while($true){
+      try { $cur=Get-Service -Name $Name -ErrorAction Stop }
+      catch {
+        if($_.CategoryInfo.Category -eq 'ObjectNotFound'){ return $true }
+        throw
+      }
+      $st=$cur.Status.ToString(); $cur.Dispose()
+      if($st -notlike 'Pause*' -and $st -ne 'ContinuePending'){ break }
+      if((Get-Date) -ge $resumeDeadline){ break }
+      Start-Sleep -Milliseconds 300
+    }
   }
   if($status -ne 'Stopped'){
     try { Invoke-Nssm $Nssm @('stop',$Name) 'stop' }

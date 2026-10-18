@@ -127,6 +127,18 @@ foreach($c in $hostCases){
   Assert (([bool](Test-IsIPv6Literal $c.H)) -eq $c.Is6) ("Test-IsIPv6Literal " + $c.Name)
 }
 
+# Paused/PausePending 需要先 continue 才能 stop；其它状态不应触发
+$pauseCases = @(
+  @{ S='Paused'; Want=$true }
+  @{ S='PausePending'; Want=$true }
+  @{ S='Running'; Want=$false }
+  @{ S='Stopped'; Want=$false }
+  @{ S='StartPending'; Want=$false }
+)
+foreach($c in $pauseCases){
+  Assert (([bool](Test-ServiceStatusNeedsContinue $c.S)) -eq $c.Want) ("Test-ServiceStatusNeedsContinue " + $c.S)
+}
+
 # Redis 口令脱敏（安全相关，防止错误信息/截图泄露 --requirepass）
 $maskCases = @(
   @{ A=@('set','erp-redis','AppParameters','--requirepass "p w"'); Name='双引号含空格' }
