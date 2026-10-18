@@ -188,12 +188,12 @@ export function useBomQuickCopy({
           showToast('读取目标产品 BOM 失败，已取消复制', 'error')
           return
         }
-        // 只数该角色名下的物料。未保存角色只有名称：先按名称解析出角色 id，
-        // 解析不到说明该角色尚无任何物料（复制时会新建），无需确认。
-        // 旧写法用 `.some(role.name === 名称)` 判断后**把所有角色的物料**都算进来，
-        // 只要存在同名角色定义就会弹出「该角色已有物料」的误确认。
+        // 后端按 lower(trim(name)) 解析角色（唯一索引也是小写口径），
+        // 前端必须同口径比较，否则大小写不同的同名角色会跳过覆盖确认。
+        const roleNameKey = roleScopeName.trim().toLowerCase()
         const matchedRoleId = target.roleId
-          ?? (existing.product?.roles || []).find((r) => r.name === roleScopeName)?.id
+          ?? (existing.product?.roles || [])
+            .find((r) => r.name.trim().toLowerCase() === roleNameKey)?.id
         const scopeMaterials = matchedRoleId == null
           ? []
           : (existing.materials || []).filter((m) => m.role_id === matchedRoleId)

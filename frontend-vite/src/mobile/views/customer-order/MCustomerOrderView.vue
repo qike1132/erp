@@ -86,8 +86,9 @@ async function handleSearch() {
     // 此前无 catch：请求失败时列表静默保持旧数据（或空白），用户零感知。
     // 2026-10-18 OCR 评审：保留 total（分页器不消失），仅清空列表并提示。
     orders.value = []
-    // 2026-10-18 OCR 复评：页码已随翻页前进但没有对应数据 → 回到上次成功页
-    page.value = loadedPage
+    // 2026-10-18 OCR 复评：只有「翻页失败」才回退页码。切 tab / 提交搜索会先把
+    // page 重置为 1，失败时若也回退，会把页码拨回上一个条件的成功页。
+    if (page.value !== 1) page.value = loadedPage
     showToast('订单查询失败，请重试', 'error')
   } finally {
     // 过期请求的 finally 不能关掉新请求的 loading

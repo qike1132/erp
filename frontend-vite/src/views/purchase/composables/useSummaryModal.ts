@@ -693,8 +693,8 @@ export function useSummaryModal() {
 
   function toggleEditMode(enable: boolean) {
     if (!enable) {
-      // 取消编辑：作废取消前发出的自动落库结果（响应稍后到达也不得回写基线）
-      lossRateEpoch += 1
+      // 取消编辑只丢弃**尚未发出**的待转值；已在途的自动落库不能撤销
+      // （服务端可能已提交），其响应仍会同步基线并由输入框读回，保证与服务器一致。
       pendingRate = null
       factoryData.value = cloneRaw(factoryOriginalData.value)
       supplierData.value = cloneRaw(supplierOriginalData.value)
@@ -817,6 +817,11 @@ export function useSummaryModal() {
     }
     // 当前展示口径一并刷新：编辑态 diff 与「取消编辑」回滚都以此为基准，
     // 只改基线不改展示会让同一屏幕同时存在新旧两套率。
+    // 取消编辑时若有在途自动落库，响应回来时 lossRateTouched 已被清零：
+    // 此时服务端已提交该率，输入框要跟随机读回，而不是停在回滚后的旧值。
+    if (!lossRateTouched.value && pendingRate === null) {
+      lossRate.value = rate
+    }
     if (factoryData.value) {
       factoryData.value.spare_rate = rate
       factoryData.value.groups?.forEach((g) => { g.spare_rate = rate })
@@ -879,6 +884,8 @@ export function useSummaryModal() {
       } catch (err) {
         // 任一发送失败：清空待发队列（重新输入即重试），保留 lossRateTouched=true
         pendingRate = null
+        // 弹窗已关闭：这次失败属于被丢弃的批次，不再污染保存状态/弹 toast
+        if (lastSentEpoch !== lossRateEpoch) return
         lossRateSaveState.value = 'error'
         throw err
       } finally {
@@ -932,27 +939,35 @@ export function useSummaryModal() {
 
     const run = (async () => {
       let next: number | null = rate
+      let lastSentEpoch = lossRateEpoch
       try {
         while (next !== null) {
           const ids = fabricItemIds.value?.[gi]?.[si]?.[fi] || []
           if (ids.length === 0) break
           lossRateSaveState.value = 'saving'
           const sent = next
+          const sentEpoch = lossRateEpoch
           await sendFabricLossRate(ids, sent)
-          const persistedRow = fabricPersistedRates.value[gi]?.[si]
-          if (persistedRow) persistedRow[fi] = sent
-          const mixedRow = fabricLossRateMixed.value[gi]?.[si]
-          if (mixedRow) mixedRow[fi] = false
-          const mixedPersistedRow = fabricLossRateMixedPersisted.value[gi]?.[si]
-          if (mixedPersistedRow) mixedPersistedRow[fi] = false
+          // 弹窗已关闭：这批回写属于被丢弃的批次，不得复活已清空的基线
+          if (sentEpoch === lossRateEpoch) {
+            const persistedRow = fabricPersistedRates.value[gi]?.[si]
+            if (persistedRow) persistedRow[fi] = sent
+            const mixedRow = fabricLossRateMixed.value[gi]?.[si]
+            if (mixedRow) mixedRow[fi] = false
+            const mixedPersistedRow = fabricLossRateMixedPersisted.value[gi]?.[si]
+            if (mixedPersistedRow) mixedPersistedRow[fi] = false
+            lastSentEpoch = sentEpoch
+          }
           next = fabricPendingRates.get(key) ?? null
           fabricPendingRates.delete(key)
         }
-        if ((fabricItemIds.value?.[gi]?.[si]?.[fi] || []).length > 0) {
+        if ((fabricItemIds.value?.[gi]?.[si]?.[fi] || []).length > 0
+          && lastSentEpoch === lossRateEpoch) {
           lossRateSaveState.value = 'saved'
         }
       } catch (err) {
         fabricPendingRates.delete(key)
+        if (lastSentEpoch !== lossRateEpoch) return
         lossRateSaveState.value = 'error'
         throw err
       } finally {

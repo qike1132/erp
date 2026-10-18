@@ -21,9 +21,10 @@ logger = logging.getLogger(__name__)
 _KEY_PREFIX = 'erp:ocr_progress:'
 _PROGRESS_TTL = 3600
 
-# Redis 不可用时的进程内降级（保留给单 worker / 开发环境）。
-# 值为 (data, expires_at_monotonic)：与 Redis 侧同一 TTL，过期即视为不存在，
-# 否则「永不消失的旧进度」会让前端轮询不到终态。
+# 进程内兜底：**防御性/测试可见**。生产路径上 utils.redis_cache 自己会在连接失败时
+# 降级到它的 _fallback_cache（不抛异常），因此 safe_set 不会返回 False，这里通常不会
+# 被写入；保留它是为了 safe_get 真抛 INFRA_EXCEPTIONS 时仍有一条本模块的兜底。
+# 值为 (data, expires_at_monotonic)：与 Redis 侧同一 TTL，过期即视为不存在。
 _progress_store: dict[str, tuple[dict, float]] = {}
 
 

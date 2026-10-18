@@ -202,14 +202,49 @@ function Get-NssmArgs([hashtable]$Spec){
   $list
 }
 
+function ConvertTo-MaskedNssmArgs([string[]]$ArgList){
+  # 纯函数：错误信息/日志里不得回显 --requirepass 明文。
+  # 同时覆盖带引号（含空格、转义引号）与不带引号两种形式。
+  # 注意参数不能叫 $Args：那是 PowerShell 自动变量，取到的会是空数组。
+  ($ArgList -join ' ') -replace '(--requirepass\s+)("(?:\\.|[^"\\])*"?|''[^'']*''?|\S+)', '$1***'
+}
+
 function Invoke-Nssm([string]$Nssm,[string[]]$NssmArgs,[string]$Action){
   # 2026-10-17 审计 P2-80：此前所有 nssm 调用都 | Out-Null 且不看退出码，
   # 安装/配置失败会被静默吞掉。
   & $Nssm @NssmArgs | Out-Null
   if($LASTEXITCODE -ne 0){
     # 2026-10-18 OCR 评审：错误信息不得回显 --requirepass <明文>（会进日志/截图）
-    $shown = ($NssmArgs -join ' ') -replace '(--requirepass\s+)("(?:\\.|[^"\\])*"|''[^'']*''|\S+)', '$1***'
-    throw "nssm $Action 失败（exit=$LASTEXITCODE）：$shown"
+    $shown = ConvertTo-MaskedNssmArgs $NssmArgs
+    $ex = [System.Exception]::new("nssm $Action 失败（exit=$LASTEXITCODE）：$shown")
+    $ex.Data['nssmAction'] = $Action
+    $ex.Data['nssmExitCode'] = $LASTEXITCODE
+    throw $ex
+  }
+}
+
+function Stop-NssmService([string]$Nssm,[string]$Name){
+  # 重装前的有序停机：erp-prod/arq 依赖 erp-redis，依赖方还在跑时 stop erp-redis
+  # 会被 SCM 以 1051 拒绝 → 后续 remove/install 只能跳过，旧配置（含旧 --requirepass）
+  # 继续生效。调用方必须先按逆依赖序停掉依赖方，再停被依赖者。
+  $svc=Get-Service -Name $Name -ErrorAction SilentlyContinue
+  if(-not $svc){ return $true }
+  $status=$svc.Status; $svc.Dispose()
+  if($status -ne 'Stopped'){
+    try { Invoke-Nssm $Nssm @('stop',$Name) 'stop' }
+    catch {
+      if($_.Exception.Data['nssmAction'] -ne 'stop'){ throw }
+      Write-Warning "$($_.Exception.Message)（继续等待 STOPPED 终态）"
+    }
+  }
+  $deadline=(Get-Date).AddSeconds(45)
+  while($true){
+    $cur=Get-Service -Name $Name -ErrorAction SilentlyContinue
+    if(-not $cur){ return $true }
+    $st=$cur.Status; $cur.Dispose()
+    if($st -eq 'Stopped'){ return $true }
+    if((Get-Date) -ge $deadline){ return $false }
+    Start-Sleep -Milliseconds 500
   }
 }
 
@@ -225,8 +260,8 @@ function Install-NssmService([string]$Nssm,[hashtable]$Spec){
       try { Invoke-Nssm $Nssm @('stop',$name) 'stop' }
       catch {
         # 只降级「stop 命令本身返回非零」：nssm 不存在/无法启动是硬失败，
-        # 继续往下走只会在 remove/install 处报更离谱的错。
-        if($_.Exception.Message -notlike 'nssm stop 失败*'){ throw }
+        # 继续往下走只会在 remove/install 处报更离谱的错。判定走异常数据而不是文案。
+        if($_.Exception.Data['nssmAction'] -ne 'stop'){ throw }
         Write-Warning "$($_.Exception.Message)（继续等待 STOPPED 终态）"
       }
     }

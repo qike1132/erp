@@ -127,5 +127,21 @@ foreach($c in $hostCases){
   Assert (([bool](Test-IsIPv6Literal $c.H)) -eq $c.Is6) ("Test-IsIPv6Literal " + $c.Name)
 }
 
+# Redis 口令脱敏（安全相关，防止错误信息/截图泄露 --requirepass）
+$maskCases = @(
+  @{ A=@('set','erp-redis','AppParameters','--requirepass "p w"'); Name='双引号含空格' }
+  @{ A=@('set','erp-redis','AppParameters','--requirepass ''p w'''); Name='单引号含空格' }
+  @{ A=@('set','erp-redis','AppParameters','--requirepass "p w\"'); Name='末尾转义引号（无闭合）' }
+  @{ A=@('set','erp-redis','AppParameters','--requirepass secret123'); Name='无引号' }
+)
+foreach($c in $maskCases){
+  $m = ConvertTo-MaskedNssmArgs $c.A
+  Assert ($m -match '--requirepass \*\*\*') ("脱敏保留标记 " + $c.Name)
+  Assert ($m -notmatch 'secret123') ("脱敏不含明文 " + $c.Name)
+  Assert ($m -notmatch '\bp w') ("脱敏不含含空格口令片段 " + $c.Name)
+}
+$noPw = ConvertTo-MaskedNssmArgs @('set','erp-web','AppParameters','-m x')
+Assert ($noPw -notmatch '\*\*\*') '非口令参数不被改写'
+
 Remove-Item $tmp -Recurse -Force
 if($fail){ exit 1 } else { Write-Host 'ALL PASS' }

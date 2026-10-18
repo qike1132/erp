@@ -50,6 +50,8 @@ export function useProductListActions(confirmDialog: ConfirmDialogLike) {
   const bomLoadFailed = ref(false)
   // 2026-10-17 审计 P2-51：保存防重复提交（双击会并发发起两次全量替换）
   const bomSaving = ref(false)
+  /** 复制（快速复制/复制对话框）是否在途；在常量声明后接线，避免块级引用顺序问题 */
+  let copyInFlight: () => boolean = () => false
 
   const bomTabs = [
     { key: 'fabric' as const, label: '面料类', icon: 'fas fa-scroll' },
@@ -272,6 +274,11 @@ export function useProductListActions(confirmDialog: ConfirmDialogLike) {
 
   async function saveBom() {
     if (bomSaving.value) return
+    // 与复制互斥是双向的：复制在途时保存同样会与随后的 reloadBom 互相覆盖
+    if (copyInFlight()) {
+      showToast('复制进行中，请稍候再保存', 'warning')
+      return
+    }
     // 2026-10-17 审计 F-FE-WS-A-01：BOM 未加载成功时基线是空集，
     // 提交会按「全量替换」语义删光该 SKU 整张 BOM —— 禁止保存。
     if (bomLoadFailed.value) {
@@ -444,6 +451,9 @@ export function useProductListActions(confirmDialog: ConfirmDialogLike) {
     // 与快速复制同一口径：保存进行中拒绝发起复制（两者都会重载编辑基线）
     isBusy: () => bomSaving.value,
   })
+  copyInFlight = () => quickCopy.quickCopyProgress.visible
+    || quickCopy.quickCopyLoading.value
+    || copyDialog.copyBomProgress.visible
 
   return {
     // BOM modal

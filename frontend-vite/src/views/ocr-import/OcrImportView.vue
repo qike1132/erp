@@ -74,12 +74,16 @@ const progress = ref(0)
 const uploadResult = ref<UploadResult | null>(null)
 /** 上传请求在途：轮询可能先看到 done（后端在返回响应前就写了终态），此时不能提前锁存结果 */
 const uploading = ref(false)
+/** 批次序号：新批次直接取代旧批次，旧请求的迟到响应不得回写 UI */
+let uploadSeq = 0
 
 const progressStatus = ref<'' | 'success' | 'exception' | 'warning'>('')
 const progressText = ref('处理中…')
 
 /** 后端 MAX_OCR_FILE_SIZE 为 10MB；前端放宽会让文件到服务端才被跳过 */
 const MAX_FILE_SIZE = 10 * 1024 * 1024
+/** 后端 MAX_OCR_FILES = 50：超过会被整批 400 */
+const MAX_FILES = 50
 
 function beforeUpload(file: File) {
   if (file.size > MAX_FILE_SIZE) {
@@ -90,18 +94,18 @@ function beforeUpload(file: File) {
 }
 
 async function handleFileChange(files: FileList) {
-  // 一次请求提交整批（后端 /upload 接受 list[UploadFile]）。
-  // 逐个串行上传会让 taskId/uploadResult 互相覆盖，轮询只能跟踪最后一个任务。
-  if (uploading.value || (taskId.value && progressStatus.value === '')) {
-    showToast('当前批次仍在识别中，请等待完成后再上传', 'info')
+  // 2026-10-18 OCR 复评：不能把整批塞进一个请求——中间件对 /api/v1/* 的请求体
+  // 上限是 10MB（含 multipart 开销），nginx client_max_body_size 也是 10m；
+  // 几个中等图片就会 413。改为共用同一个 task_id、逐文件串行提交，结果在前端合并。
+  // 新批次直接替换 taskId；轮询按 taskId 快照丢弃旧任务响应，故无需等旧批次结束。
+  const all = Array.from(files)
+  if (all.length > MAX_FILES) {
+    showToast(`单次最多上传 ${MAX_FILES} 个文件`, 'error')
     return
   }
-  const selected = Array.from(files).filter((f) => beforeUpload(f))
+  const selected = all.filter((f) => beforeUpload(f))
   if (!selected.length) return
-
-  const formData = new FormData()
-  selected.forEach((f) => formData.append('files', f))
-  await handleUpload(formData)
+  await handleUpload(selected)
 }
 
 // 轮询进度
@@ -109,8 +113,11 @@ async function handleFileChange(files: FileList) {
 useQuery({
   queryKey: ['ocr-progress', taskId],
   queryFn: async () => {
-    if (!taskId.value) return null
-    const res = (await ocrApi.progress(taskId.value)) as OcrProgressResult
+    const tid = taskId.value
+    if (!tid) return null
+    const res = (await ocrApi.progress(tid)) as OcrProgressResult
+    // 批次已切换：旧任务的迟到响应不得改动新批次的进度/终态
+    if (tid !== taskId.value) return res
     progress.value = res.percent ?? 0
     if (res.status === 'done' || res.status === 'completed') {
       if (uploading.value) {
@@ -142,7 +149,8 @@ useQuery({
   },
 })
 
-async function handleUpload(formData: FormData) {
+async function handleUpload(files: File[]) {
+  const batchSeq = ++uploadSeq
   uploading.value = true
   try {
     const createRes = (await ocrApi.createTask()) as unknown as { task_id?: string; session_id?: string }
@@ -158,10 +166,31 @@ async function handleUpload(formData: FormData) {
     progressText.value = '上传中...'
     uploadResult.value = null
 
-    // upload 必须携带 create-task 返回的 task_id，
-    // 否则后端会新建另一个 task 写进度，前端轮询的 id 永远停在 pending。
-    uploadResult.value = await ocrApi.upload(sid, formData, sid) as UploadResult
+    const merged: UploadResult = { total_imported: 0, errors: [] }
+    for (let i = 0; i < files.length; i++) {
+      // 新批次已开始：旧批次不再继续提交/回写（已提交的文件由后端照常处理）
+      if (batchSeq !== uploadSeq) return
+      const file = files[i]!
+      progressText.value = `上传中 ${i + 1}/${files.length}：${file.name}`
+      const fd = new FormData()
+      fd.append('files', file)
+      try {
+        // upload 必须携带 create-task 返回的 task_id，
+        // 否则后端会新建另一个 task 写进度，前端轮询的 id 永远停在 pending。
+        const res = await ocrApi.upload(sid, fd, sid) as UploadResult
+        merged.total_imported = (merged.total_imported ?? 0) + (res.total_imported ?? 0)
+        if (res.errors?.length) merged.errors!.push(...res.errors)
+      } catch (err: unknown) {
+        // 单文件请求失败（413/超时/网络）不阻断其余文件，逐条上报
+        merged.errors!.push(`${file.name}: ${getErrorMessage(err, '上传失败')}`)
+      }
+    }
+    if (batchSeq !== uploadSeq) return
+    merged.success = (merged.total_imported ?? 0) > 0
+    merged.message = `共处理 ${files.length} 个文件，识别导入 ${merged.total_imported} 个出货到暂存区`
+    uploadResult.value = merged
   } catch (err: unknown) {
+    if (batchSeq !== uploadSeq) return
     const message = getErrorMessage(err, '上传失败')
     // 失败也写进 uploadResult：轮询看到 done 时据此显示失败而不是绿色完成
     uploadResult.value = { success: false, message }
@@ -169,7 +198,7 @@ async function handleUpload(formData: FormData) {
     progressStatus.value = 'exception'
     progressText.value = message
   } finally {
-    uploading.value = false
+    if (batchSeq === uploadSeq) uploading.value = false
   }
 }
 </script>

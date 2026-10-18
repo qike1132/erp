@@ -24,8 +24,14 @@ describe('AUD-03 OCR 进度前端契约', () => {
     expect(source).toMatch(/if \(uploading\.value\)/)
   })
 
-  it('整批一次上传（后端 /upload 接受 files 列表）', () => {
-    expect(source).toMatch(/formData\.append\('files', f\)/)
+  it('逐文件提交（请求体 10MB 上限），共用同一 task_id', () => {
+    // 整批塞一个请求会被中间件/nginx 的 10MB 挡下
+    expect(source).toMatch(/fd\.append\('files', file\)/)
+    expect(source).toMatch(/ocrApi\.upload\(sid, fd, sid\)/)
+  })
+
+  it('前端校验后端 MAX_OCR_FILES=50', () => {
+    expect(source).toMatch(/MAX_FILES = 50/)
   })
 
   it('终态集合包含 done 与 not_found', () => {

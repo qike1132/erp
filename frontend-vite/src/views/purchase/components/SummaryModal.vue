@@ -87,14 +87,14 @@
  * `v-if` 之下，用户在防抖窗口内切页签会让该子组件卸载，若定时器在子组件内则
  * `emit` 无监听者、刚输入的损耗率被静默丢弃。本组件不随页签切换卸载，行为与拆分前一致。
  */
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { useDebounceFn } from '@vueuse/core'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import SummaryFactoryTab from './SummaryFactoryTab.vue'
 import SummarySupplierTab from './SummarySupplierTab.vue'
 import type { FactorySummaryData, SupplierSummaryData, MaterialItem } from '../composables/useSummaryModal'
 
-defineProps<{
+const props = defineProps<{
   open: boolean
   factoryData: FactorySummaryData | null
   supplierData: SupplierSummaryData | null
@@ -137,6 +137,20 @@ const applyLossRateDebounced = useDebounceFn((v: number) => emit('applyLossRate'
 
 /** 单个布料行损耗率输入防抖：与统一输入同源 300ms，切换页签不丢输入。 */
 const applyFabricLossRateDebounced = useDebounceFn((gi: number, si: number, fi: number, v: number) => emit('applyFabricLossRate', gi, si, fi, v), 300)
+
+/**
+ * 取消编辑 / 关闭弹窗时作废尚未触发的防抖：否则用户在点「取消」前 300ms 内
+ * 的最后一次输入仍会在取消之后发出，把已丢弃的率重新落库。
+ */
+function cancelPendingRateEdits() {
+  // @vueuse 的 useDebounceFn 运行时带 cancel，但当前版本类型未声明
+  const cancelLoss = (applyLossRateDebounced as unknown as { cancel?: () => void }).cancel
+  const cancelFabric = (applyFabricLossRateDebounced as unknown as { cancel?: () => void }).cancel
+  cancelLoss?.()
+  cancelFabric?.()
+}
+watch(() => props.editMode, (enabled) => { if (!enabled) cancelPendingRateEdits() })
+watch(() => props.open, (open) => { if (!open) cancelPendingRateEdits() })
 </script>
 
 <style scoped>

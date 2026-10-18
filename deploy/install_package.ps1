@@ -560,6 +560,18 @@ try {
   # requirepass 只吃到第一段，实际口令与应用侧 .env 不一致（连不上）。
   $authArg = if($redisPw){ ('--requirepass "{0}"' -f ($redisPw -replace '"','\"')) } else { '' }
 
+  # 重装前按逆依赖序停掉现有服务（erp-web → erp-arq/erp-prod → broker → redis）。
+  # 顺序反了会撞 1051：依赖方还在跑时 stop 被依赖者失败，Install-NssmService
+  # 只能跳过重装 → 新生成的 conf / 轮换后的 --requirepass 不生效，但脚本仍继续。
+  $notStopped=@()
+  foreach($svc in 'erp-web','erp-arq','erp-prod','erp-redis-broker','erp-redis'){
+    if(-not (Stop-NssmService $Nssm $svc)){ $notStopped+=$svc }
+  }
+  if($notStopped.Count -gt 0){
+    Write-Fail ("以下服务未能停止，无法安全重装：" + ($notStopped -join '、') + "。请先在 services.msc 停止它们后重跑安装")
+    exit 1
+  }
+
   # 先装 Redis（erp-prod/arq 依赖其存在——SCM 拒绝依赖不存在的服务）
   $reinstallSkipped=@()
   if(-not (Install-NssmService $Nssm @{Name='erp-redis';Application=$redisExe;Parameters=("$cacheConf $authArg").Trim();Directory=$RedisDir;Stdout=(Join-Path $logDir 'erp-redis.log');Stderr=(Join-Path $logDir 'erp-redis.log')})){ $reinstallSkipped+='erp-redis' }
@@ -575,7 +587,8 @@ try {
   Assert-ServiceRegistered 'erp-web'
   Write-Ok '五个 NSSM 服务注册完成'
   if($reinstallSkipped.Count -gt 0){
-    Write-Warn ("以下服务未能停止，沿用了上一次安装的定义（本次配置未生效）：" + ($reinstallSkipped -join '、') + "。请在依赖方停止后重跑安装，或手工核对 nssm 配置")
+    Write-Fail ("以下服务未能停止，沿用了上一次安装的定义（本次配置未生效）：" + ($reinstallSkipped -join '、') + "。安装中止，请在依赖方停止后重跑安装")
+    exit 1
   }
 
   # ==========================================================

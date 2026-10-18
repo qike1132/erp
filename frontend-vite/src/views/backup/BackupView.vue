@@ -279,8 +279,9 @@ async function triggerScheduleNow() {
     // 把 busy 置真后由 busy 继续兜底。
     window.setTimeout(() => { triggering.value = false }, 10_000)
   } catch {
-    // 2026-10-17 审计 P2-56：此前是全文件唯一无 catch 的写操作
-    toast.error('触发定时备份失败，请重试')
+    // 2026-10-17 审计 P2-56：此前是全文件唯一无 catch 的写操作；
+    // 与成功文案对齐：首个 enabled 调度可能是清理/巡检型任务
+    toast.error(`触发定时任务「${first.name}」失败，请重试`)
     triggering.value = false
   }
 }
