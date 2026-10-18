@@ -198,9 +198,9 @@ try {
   # ---- 覆盖守卫：无 -Force 时拒绝 ----
   # 诚实边界：基础软件步骤是幂等「已装跳过」；若本步之后中途失败，可能已装过 PostgreSQL/Redis/nginx…
   # 故只承诺「不覆盖既有库/服务」，不声称「未改动任何现场」。
-  $five = @('erp-redis','erp-redis-broker','erp-prod','erp-arq','erp-web')
-  # 唯一权威停机序（依赖方先停）。不要由 $five 反推：$five 的顺序服务于安装/启动。
+  # 唯一权威停机序（依赖方先停），启动/安装序取其反向，避免两份枚举漂移
   $stopOrder = @('erp-web','erp-arq','erp-prod','erp-redis-broker','erp-redis')
+  $five = @($stopOrder[($stopOrder.Count-1)..0])
   $existingSvc = @($five | Where-Object { Get-Service -Name $_ -ErrorAction SilentlyContinue })
   $targetExists = Test-Path -LiteralPath $TargetDir
 

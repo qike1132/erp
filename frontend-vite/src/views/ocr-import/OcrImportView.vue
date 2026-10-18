@@ -4,9 +4,9 @@
 
     <UiCard>
       <UiUpload accept=".pdf,.png,.jpg,.jpeg,.bmp,.tiff,.webp" multiple :disabled="uploading" @change="handleFileChange">
-        <div class="upload-dragger-content">
+        <div class="upload-dragger-content" :class="{ 'is-disabled': uploading }">
           <FontAwesomeIcon icon="cloud-upload-alt" style="font-size: 48px; color: var(--color-text-muted)" aria-hidden="true" />
-          <p style="margin-top: 12px">拖拽文件到这里，或点击上传</p>
+          <p style="margin-top: 12px">{{ uploading ? '识别中，请稍候…' : '拖拽文件到这里，或点击上传' }}</p>
           <p style="color: var(--color-text-muted); font-size: 12px">支持 PDF/PNG/JPG/BMP/TIFF/WEBP</p>
         </div>
       </UiUpload>
@@ -120,11 +120,9 @@ useQuery({
     const res = (await ocrApi.progress(tid)) as OcrProgressResult
     // 批次已切换：旧任务的迟到响应不得改动新批次的进度/终态
     if (tid !== taskId.value) return res
-    // 逐文件上传期间由本文件维护「上传中 i/N」文案；只跳过文案，百分数仍要更新进度条
-    if (uploading.value) {
-      progress.value = res.percent ?? 0
-      return { status: 'processing' }
-    }
+    // 逐文件上传期间由本文件维护「上传中 i/N」文案与整体进度（按文件数），
+    // 后端的 percent 每完成一个文件就写 100（同一 taskId），直接采用会显示错误进度。
+    if (uploading.value) return { status: 'processing' }
     progress.value = res.percent ?? 0
     if (res.status === 'done' || res.status === 'completed') {
       const result = uploadResult.value
@@ -168,8 +166,10 @@ async function handleUpload(files: File[]) {
     uploadResult.value = null
 
     const merged: UploadResult = { total_imported: 0, errors: [] }
+    let accepted = false
     for (let i = 0; i < files.length; i++) {
       const file = files[i]!
+      progress.value = Math.round((i / files.length) * 100)
       progressText.value = `上传中 ${i + 1}/${files.length}：${file.name}`
       const fd = new FormData()
       fd.append('files', file)
@@ -177,6 +177,7 @@ async function handleUpload(files: File[]) {
         // upload 必须携带 create-task 返回的 task_id，
         // 否则后端会新建另一个 task 写进度，前端轮询的 id 永远停在 pending。
         const res = await ocrApi.upload(sid, fd, sid) as UploadResult
+        accepted = true
         merged.total_imported = (merged.total_imported ?? 0) + (res.total_imported ?? 0)
         if (res.errors?.length) merged.errors!.push(...res.errors)
       } catch (err: unknown) {
@@ -190,10 +191,16 @@ async function handleUpload(files: File[]) {
           + (unknown ? '（结果未知，请先在暂存区核对再重试，避免重复导入）' : ''),
         )
       }
+      progress.value = Math.round(((i + 1) / files.length) * 100)
     }
     merged.success = (merged.total_imported ?? 0) > 0
     merged.message = `共处理 ${files.length} 个文件，识别导入 ${merged.total_imported} 个出货到暂存区`
     uploadResult.value = merged
+    // 所有请求都在到达后端前被拒：服务端任务永远停在 pending，不能等轮询给终态
+    if (!accepted) {
+      progressStatus.value = 'exception'
+      progressText.value = merged.errors?.length ? '文件未能提交，请查看下方错误' : '上传失败'
+    }
   } catch (err: unknown) {
     const message = getErrorMessage(err, '上传失败')
     // 失败也写进 uploadResult：轮询看到 done 时据此显示失败而不是绿色完成
@@ -211,6 +218,10 @@ async function handleUpload(files: File[]) {
 .upload-dragger-content {
   text-align: center;
   padding: 40px 0;
+}
+.upload-dragger-content.is-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 .mt-16 {
   margin-top: 16px;

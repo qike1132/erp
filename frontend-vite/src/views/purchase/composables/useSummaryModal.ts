@@ -756,11 +756,20 @@ export function useSummaryModal() {
    * 按原始数量实时计算（同一处来源）。原始数量只经编辑态「保存修改」落库；
    * 损耗率本身由 applyLossRateAndSave 落库。
    */
+  /** 统一率批量下发到所有布料行（展示态 + 不一致标记同源） */
+  function broadcastFabricRates(rate: number) {
+    fabricLossRates.value = fabricLossRates.value.map(
+      (g) => g.map((rows) => rows.map(() => rate)),
+    )
+    fabricLossRateMixed.value = fabricLossRateMixed.value.map(
+      (g) => g.map((rows) => rows.map(() => false)),
+    )
+  }
+
   function applyLossRate(rate: number) {
     lossRate.value = rate
     // 统一设置所有布料行：全局输入作为批量快捷入口，逐行输入可再单独覆盖。
-    fabricLossRates.value = fabricLossRates.value.map((g) => g.map((ss) => ss.map(() => rate)))
-    fabricLossRateMixed.value = fabricLossRateMixed.value.map((g) => g.map((ss) => ss.map(() => false)))
+    broadcastFabricRates(rate)
     // 订单级率同样批量下发全部分组（备品口径 A 的来源；逐行输入不会写这里）
     groupSpareRates.value = groupSpareRates.value.map(() => rate)
     lossRateMixed.value = false
@@ -827,14 +836,12 @@ export function useSummaryModal() {
       groupSpareRates.value = seedGroupSpareRates(factoryOriginalData.value)
       // 逐行率同样前移：取消编辑已把 fabricLossRates 回滚成旧快照，统一率落库后
       // 表格「损耗率/数量」列必须与顶部统一率、「备品数量」同源，否则同屏两套口径。
-      fabricLossRates.value = fabricLossRates.value.map(
-        (g) => g.map((rows) => rows.map(() => rate)),
-      )
-      fabricLossRateMixed.value = fabricLossRateMixed.value.map(
-        (g) => g.map((rows) => rows.map(() => false)),
-      )
-      fabricPersistedRates.value = cloneRaw(fabricLossRates.value)
-      fabricLossRateMixedPersisted.value = cloneRaw(fabricLossRateMixed.value)
+      // 但行级落库在途/待发时，行级值以行级响应为准，不能用统一率整表覆盖。
+      if (fabricDrainPromises.size === 0 && fabricPendingRates.size === 0) {
+        broadcastFabricRates(rate)
+        fabricPersistedRates.value = cloneRaw(fabricLossRates.value)
+        fabricLossRateMixedPersisted.value = cloneRaw(fabricLossRateMixed.value)
+      }
     }
     if (factoryData.value) {
       factoryData.value.spare_rate = rate

@@ -139,6 +139,20 @@ foreach($c in $pauseCases){
   Assert (([bool](Test-ServiceStatusNeedsContinue $c.S)) -eq $c.Want) ("Test-ServiceStatusNeedsContinue " + $c.S)
 }
 
+# 任何 *Pending 都不接受控制码
+$pendingCases = @(
+  @{ S='StartPending'; Want=$true }
+  @{ S='StopPending'; Want=$true }
+  @{ S='PausePending'; Want=$true }
+  @{ S='ContinuePending'; Want=$true }
+  @{ S='Paused'; Want=$false }
+  @{ S='Running'; Want=$false }
+  @{ S='Stopped'; Want=$false }
+)
+foreach($c in $pendingCases){
+  Assert (([bool](Test-ServiceStatusPending $c.S)) -eq $c.Want) ("Test-ServiceStatusPending " + $c.S)
+}
+
 # Redis 口令脱敏（安全相关，防止错误信息/截图泄露 --requirepass）
 $maskCases = @(
   @{ A=@('set','erp-redis','AppParameters','--requirepass "p w"'); Name='双引号含空格' }

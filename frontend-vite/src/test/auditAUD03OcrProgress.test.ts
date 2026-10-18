@@ -30,9 +30,11 @@ describe('AUD-03 OCR 进度前端契约', () => {
     expect(source).toMatch(/ocrApi\.upload\(sid, fd, sid\)/)
   })
 
-  it('上传期间禁用选择器且轮询只跳过文案、仍更新百分比', () => {
+  it('上传期间跳过轮询文案/百分比，进度由文件数驱动；未达后端时本地收终态', () => {
     expect(source).toMatch(/:disabled="uploading"/)
-    expect(source).toMatch(/if \(uploading\.value\) \{\s*progress\.value = res\.percent/)
+    expect(source).toMatch(/if \(uploading\.value\) return \{ status: 'processing' \}/)
+    expect(source).toMatch(/Math\.round\(\(\(i \+ 1\) \/ files\.length\) \* 100\)/)
+    expect(source).toMatch(/if \(!accepted\)/)
   })
 
   it('单文件失败区分「明确拒绝」与「结果未知」', () => {

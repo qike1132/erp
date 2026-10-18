@@ -228,55 +228,66 @@ function Test-ServiceStatusNeedsContinue([string]$Status){
   return ($Status -like 'Pause*')
 }
 
+function Test-ServiceStatusPending([string]$Status){
+  # Start/Stop/Pause/ContinuePending 期间 SCM 一律拒绝控制码（1061）
+  return ($Status -like '*Pending')
+}
+
+function Get-ServiceStatus([string]$Name){
+  # 返回状态字符串；服务未注册返回 $null（查询故障照抛，不能与「不存在」混同）
+  try { $svc=Get-Service -Name $Name -ErrorAction Stop }
+  catch {
+    if($_.CategoryInfo.Category -eq 'ObjectNotFound'){ return $null }
+    throw
+  }
+  $st=$svc.Status.ToString(); $svc.Dispose(); return $st
+}
+
 function Stop-NssmService([string]$Nssm,[string]$Name){
   # 重装前的有序停机：erp-prod/arq 依赖 erp-redis，依赖方还在跑时 stop erp-redis
   # 会被 SCM 以 1051 拒绝 → 后续 remove/install 只能跳过，旧配置（含旧 --requirepass）
   # 继续生效。调用方必须先按逆依赖序停掉依赖方，再停被依赖者。
-  # 注意：Get-Service 的「查询失败」不能与「服务不存在」混同，否则停机闸门被静默绕过。
-  try { $svc = Get-Service -Name $Name -ErrorAction Stop }
-  catch {
-    if($_.CategoryInfo.Category -eq 'ObjectNotFound'){ return $true }  # 未注册
-    throw
+  $status = Get-ServiceStatus $Name
+  if($null -eq $status -or $status -eq 'Stopped'){ return $true }
+
+  # 1) 任何 *Pending 状态都不接受控制码：先等它落定（有独立短超时）
+  $deadline=(Get-Date).AddSeconds(15)
+  while((Test-ServiceStatusPending $status) -and (Get-Date) -lt $deadline){
+    Start-Sleep -Milliseconds 300
+    $status = Get-ServiceStatus $Name
+    if($null -eq $status -or $status -eq 'Stopped'){ return $true }
   }
-  $status=$svc.Status; $svc.Dispose()
-  # Paused/PausedPending 不接受 STOP 控制码（NSSM 崩溃循环限流会进这个状态）：
-  # 先 continue 再停，否则 stop 必然失败，且 services.msc 也停不掉。
-  if(Test-ServiceStatusNeedsContinue $status.ToString()){
+
+  # 2) Paused/PausePending：continue 后再等离开 Pause*/Pending；continue 本身也可能
+  #    因 Pending 被拒，故最多重试 3 次。
+  $attempts=0
+  while((Test-ServiceStatusNeedsContinue $status) -and $attempts -lt 3){
     try { Invoke-Nssm $Nssm @('continue',$Name) 'continue' }
-    catch { Write-Warning "$($_.Exception.Message)（Paused 服务恢复失败，继续尝试 stop）" }
-    # continue 是异步控制码：先等状态离开 Pause*/ContinuePending，否则紧跟的 stop 会 1061 被拒
-    $resumeDeadline=(Get-Date).AddSeconds(15)
-    while($true){
-      try { $cur=Get-Service -Name $Name -ErrorAction Stop }
-      catch {
-        if($_.CategoryInfo.Category -eq 'ObjectNotFound'){ return $true }
-        throw
-      }
-      $st=$cur.Status.ToString(); $cur.Dispose()
-      if($st -notlike 'Pause*' -and $st -ne 'ContinuePending'){ break }
-      if((Get-Date) -ge $resumeDeadline){ break }
+    catch { Write-Warning "$($_.Exception.Message)（Paused 服务恢复失败，继续等待）" }
+    $attempts++
+    $resumeDeadline=(Get-Date).AddSeconds(5)
+    while((Get-Date) -lt $resumeDeadline){
       Start-Sleep -Milliseconds 300
+      $status = Get-ServiceStatus $Name
+      if($null -eq $status -or $status -eq 'Stopped'){ return $true }
+      if(-not (Test-ServiceStatusPending $status) -and -not (Test-ServiceStatusNeedsContinue $status)){ break }
     }
   }
-  if($status -ne 'Stopped'){
-    try { Invoke-Nssm $Nssm @('stop',$Name) 'stop' }
-    catch {
-      if($_.Exception.Data['nssmAction'] -ne 'stop'){ throw }
-      Write-Warning "$($_.Exception.Message)（继续等待 STOPPED 终态）"
-    }
+  if($status -eq 'Stopped'){ return $true }
+
+  # 3) 状态已落定（或已尽力恢复）：发 stop 并等 STOPPED
+  try { Invoke-Nssm $Nssm @('stop',$Name) 'stop' }
+  catch {
+    if($_.Exception.Data['nssmAction'] -ne 'stop'){ throw }
+    Write-Warning "$($_.Exception.Message)（继续等待 STOPPED 终态）"
   }
-  $deadline=(Get-Date).AddSeconds(45)
-  while($true){
-    try { $cur=Get-Service -Name $Name -ErrorAction Stop }
-    catch {
-      if($_.CategoryInfo.Category -eq 'ObjectNotFound'){ return $true }
-      throw
-    }
-    $st=$cur.Status; $cur.Dispose()
-    if($st -eq 'Stopped'){ return $true }
-    if((Get-Date) -ge $deadline){ return $false }
+  $stopDeadline=(Get-Date).AddSeconds(45)
+  while((Get-Date) -lt $stopDeadline){
     Start-Sleep -Milliseconds 500
+    $status = Get-ServiceStatus $Name
+    if($null -eq $status -or $status -eq 'Stopped'){ return $true }
   }
+  return $false
 }
 
 function Install-NssmService([string]$Nssm,[hashtable]$Spec){
