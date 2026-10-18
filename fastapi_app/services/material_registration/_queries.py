@@ -481,6 +481,14 @@ async def get_stats_trend(db, days: int = 30) -> dict:
     # 2026-10-17 审计 P2-09：received 此前从未赋值（恒为 0 骨架值）。
     # 口径：当天完成的来料登记数（status=completed，按 update_time 的日期归档——
     # 完成时间没有独立列，update_time 是唯一可用近似）。
+    # 2026-10-18 OCR 评审：必须显式 `AT TIME ZONE 'UTC'` 再取 date。
+    # update_time 是 timestamptz，裸 `func.date(update_time)` 由 PostgreSQL 按
+    # **会话时区**（本库为 Asia/Shanghai）取日界，而 registered 侧的
+    # registration_date 是 Date 列、写入端用 `datetime.now(UTC).date()`
+    # （services/material_registration/_commands.py 与模型 default）→ 裸 date() 会让
+    # received 比 registered 整体晚一天（UTC 00:00–08:00 完成的登记落到次日），
+    # 两条曲线错位一天。转成 UTC 日期后与 registered 同边界。
+    # （副作用：该表达式无法走索引，只扫 30 天窗口，可接受。）
     recv_counts = (await db.execute(
         select(func.date(MaterialRegistration.update_time.op('AT TIME ZONE')('UTC')), func.count())
         .where(

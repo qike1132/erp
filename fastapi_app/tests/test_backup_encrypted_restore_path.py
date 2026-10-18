@@ -18,6 +18,7 @@ from __future__ import annotations
 import io
 import json
 import zipfile
+from pathlib import Path
 
 import pytest
 
@@ -149,3 +150,73 @@ def test_plan_endpoint_accepts_password_field() -> None:
 
     assert 'password' in schema['properties']
     assert 'password' not in schema.get('required', [])
+
+
+# ---------------------------------------------------------------------------
+# 2026-10-18 OCR 评审：AUD-07 只改了一半 —— .json.enc 的解密此前只加了上传路径
+# ---------------------------------------------------------------------------
+
+def test_server_restore_endpoints_decrypt_json_enc() -> None:
+    """两个「从服务器恢复」端点必须走同一套格式识别（含 .enc 解密）。
+
+    旧实现只在上传路径 `_read_backup_file` 里解密，`/restore-by-name` 与
+    `/async-restore-by-name` 仍是裸 `json.loads(content)` —— 加密 JSON 备份从
+    服务器还原时必定 400「格式无效」，而错误信息完全不提加密。
+    """
+    source = Path(
+        'fastapi_app/api/v1/endpoints/backup/restore.py',
+    ).read_text(encoding='utf-8')
+
+    # 两条服务器恢复路径都要经过共享识别函数
+    assert source.count('await _sniff_server_backup_format(') >= 2, (
+        '「从服务器恢复」的端点没有都走 _sniff_server_backup_format —— '
+        '加密 JSON 备份会以「格式无效」失败（AUD-07 漏改）'
+    )
+
+
+@pytest.mark.asyncio
+async def test_sniff_server_backup_format_decrypts_json_enc(tmp_path) -> None:
+    """`.json.enc` 解密后应被识别为 JSON（is_zip=False）并返回明文。"""
+    from fastapi_app.api.v1.endpoints.backup.restore import _sniff_server_backup_format
+    from fastapi_app.core.backup_encryption import encrypt_backup_auto
+
+    plaintext = json.dumps({'tables': {'orders': []}}).encode()
+    ciphertext, _meta = encrypt_backup_auto(plaintext, _PW)
+
+    content, is_zip = await _sniff_server_backup_format(
+        ciphertext, 'erp_backup_20260928.json.enc', _PW,
+    )
+
+    assert is_zip is False
+    assert json.loads(content) == {'tables': {'orders': []}}
+
+
+@pytest.mark.asyncio
+async def test_sniff_server_backup_format_requires_password_for_enc(tmp_path) -> None:
+    """加密文件但没给密码 → 明确的 400，而不是「无法识别的备份文件格式」。"""
+    from fastapi import HTTPException
+
+    from fastapi_app.api.v1.endpoints.backup.restore import _sniff_server_backup_format
+    from fastapi_app.core.backup_encryption import encrypt_backup_auto
+
+    plaintext = json.dumps({'tables': {'orders': []}}).encode()
+    ciphertext, _meta = encrypt_backup_auto(plaintext, _PW)
+
+    with pytest.raises(HTTPException) as ei:
+        await _sniff_server_backup_format(ciphertext, 'erp_backup_20260928.json.enc', None)
+    assert ei.value.status_code == 400
+    assert '加密' in str(ei.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_sniff_server_backup_format_plain_json_unchanged() -> None:
+    """明文 JSON / ZIP 不加密也能识别（不因本次改动回归）。"""
+    from fastapi_app.api.v1.endpoints.backup.restore import _sniff_server_backup_format
+
+    raw = json.dumps({'tables': {'orders': []}}).encode()
+    content, is_zip = await _sniff_server_backup_format(raw, 'erp_backup.json', None)
+    assert is_zip is False and json.loads(content) == {'tables': {'orders': []}}
+
+    zip_bytes = _zip_with_manifest(_MANIFEST)
+    content, is_zip = await _sniff_server_backup_format(zip_bytes, 'erp_backup.zip', None)
+    assert is_zip is True and content == zip_bytes

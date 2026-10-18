@@ -16,6 +16,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from migrations import _destructive_scan as scan
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -46,3 +48,56 @@ def test_readme_documents_autogenerate_prohibition():
     assert "禁止对生产库运行 alembic revision --autogenerate" in text, (
         "migrations/README 缺少 autogenerate 禁令，请勿删除该警告。"
     )
+
+
+# ---------------------------------------------------------------------------
+# 2026-10-18 OCR 评审：env.py 的版本表加宽兜底不得吞掉真正的错误
+# ---------------------------------------------------------------------------
+
+def _wrap(sqlstate: str) -> Exception:
+    """按真实驱动行为包一层：psycopg 异常带 .sqlstate，SQLAlchemy 再包成 DBAPIError。"""
+    import psycopg
+    from sqlalchemy.exc import ProgrammingError
+
+    orig = psycopg.errors.lookup(sqlstate)
+    return ProgrammingError('CREATE TABLE IF NOT EXISTS alembic_version ...', {}, orig)
+
+
+class TestVersionTableWidthSwallowPolicy:
+    """只对「预期内」失败静默（无权限 / 只读连接），其余一律抛出。
+
+    历史写法按异常类捕获（先是裸 `except Exception`，后收窄为
+    `(SQLAlchemyError, OSError)`），两者都达不到目的——SQL 语法错是
+    `ProgrammingError`，正是 `SQLAlchemyError` 的子类，照吞不误。一旦 DDL
+    写错，症状是「加宽静默没生效」，排查时看不到任何报错。
+    """
+
+    def _call(self, exc: Exception) -> None:
+        from unittest.mock import MagicMock
+
+        # 2026-10-18：加宽逻辑已抽到 migrations/_version_table_width.py
+        # （migrations/env.py 模块级依赖 alembic.context，不能被单测直接 import）。
+        from migrations._version_table_width import ensure_version_table_width
+
+        conn = MagicMock()
+        conn.execute.side_effect = exc
+        ensure_version_table_width(conn, 'alembic_version')
+
+    def test_insufficient_privilege_is_swallowed(self) -> None:
+        # 42501：无建表/改列权限，本函数本就是尽力而为的幂等预处理
+        self._call(_wrap('42501'))
+
+    def test_read_only_transaction_is_swallowed(self) -> None:
+        # 25006：连到 standby 等只读连接
+        self._call(_wrap('25006'))
+
+    def test_syntax_error_propagates(self) -> None:
+        # 42601：DDL 写错必须炸出来，不能被静默吞掉
+        with pytest.raises(Exception, match='alembic_version'):
+            self._call(_wrap('42601'))
+
+    def test_connection_error_propagates(self) -> None:
+        from sqlalchemy.exc import OperationalError
+
+        with pytest.raises(OperationalError):
+            self._call(OperationalError('SELECT 1', {}, RuntimeError('connection lost')))
