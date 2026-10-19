@@ -28,11 +28,20 @@ vi.mock('@/composables/useToast', () => ({
 }))
 
 import { outsourceApi } from '@/api/outsource'
+import { toast } from '@/composables/useToast'
 import type { OutsourceProcessType } from '@/api/outsource'
 import OutsourcePresetTab from '@/views/outsource/components/OutsourcePresetTab.vue'
 
 /** 与组件内一致的取数口径（断言参数用，勿复制漂移：本测试就是锁它的） */
 const PAGE_SIZE = 500
+
+/** 搜索选中的待配置产品（OutsourcePresetView 经 props 传入，拉取失败时仍存在） */
+interface PendingProduct {
+  product_id: number
+  product_name: string
+  product_barcode: string | null
+  factory: string | null
+}
 
 function genPresets(idBase: number, count: number, productIdBase: number): OutsourceProcessType[] {
   return Array.from({ length: count }, (_, i) => ({
@@ -51,10 +60,10 @@ function ok(data: OutsourceProcessType[]) {
   return { success: true, data, total: data.length }
 }
 
-function mountTab() {
+function mountTab(pendingProducts: PendingProduct[] = []) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return mount(OutsourcePresetTab, {
-    props: { pendingProducts: [] },
+    props: { pendingProducts },
     global: {
       plugins: [[VueQueryPlugin, { queryClient }]],
       stubs: {
@@ -165,7 +174,20 @@ describe('OutsourcePresetTab — 分页错误处理与 total 收口（OCR-3 M4/L
     expect(outsourceApi.processTypes).toHaveBeenCalledTimes(2)
     expect(wrapper.findAll('tbody tr')).toHaveLength(500)
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('第 2 页'))
+    // OCR-4 M139：isError 仍 false、重试按钮不会出现，不完整列表必须以 toast 让用户可感知
+    expect(toast.warning).toHaveBeenCalledWith('工序预设列表加载不完整，请刷新重试')
     warnSpy.mockRestore()
+  })
+
+  it('M4(OCR-4): 拉取失败时搜索选中的待配置产品不得掩盖错误态，必须露出错误+重试', async () => {
+    vi.mocked(outsourceApi.processTypes).mockRejectedValue(new Error('network down'))
+    const wrapper = mountTab([{ product_id: 9, product_name: '待配置产品', product_barcode: null, factory: null }])
+    await flushPromises()
+
+    // 修复前：错误态条件用 productCards（含 pendingProducts）判空 → 非空 → 跳过错误态，
+    // 渲染成只有 pending 行的「未配置」表格，拉取失败被静默掩盖（Red）
+    expect(wrapper.find('.osp-error').exists()).toBe(true)
+    expect(wrapper.find('.osp-retry-btn').exists()).toBe(true)
   })
 
   it('Low: 记录数恰为页大小整数倍时用 total 收口，不多拉一次空页', async () => {

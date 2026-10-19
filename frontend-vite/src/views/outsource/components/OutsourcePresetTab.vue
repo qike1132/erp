@@ -1,7 +1,8 @@
 <template>
   <div class="osp-inventory">
     <div class="osp-card-main">
-      <div v-if="isError && productCards.length === 0" class="osp-empty osp-error">
+      <!-- 错误态判据用 presets（不含搜索选中产品）：pendingProducts 非空时拉取失败不得被「未配置」表格掩盖（OCR-4 M4） -->
+      <div v-if="isError && presets.length === 0" class="osp-empty osp-error">
         <FontAwesomeIcon icon="exclamation-circle" aria-hidden="true" />
         <span>工序预设加载失败</span>
         <button class="osp-retry-btn" aria-label="重试" @click="() => void refetch()">重试</button>
@@ -99,6 +100,7 @@ import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import OutsourceAddProcessDialog from './OutsourceAddProcessDialog.vue'
 import { useApiMutation } from '@/composables/useApiMutation'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
+import { toast } from '@/composables/useToast'
 import { useAuthStore } from '@/stores/auth'
 
 const props = defineProps<{
@@ -137,6 +139,7 @@ async function fetchAllProcessTypes(): Promise<OutsourceProcessType[]> {
     } catch (e) {
       if (page === 1) throw e // 首屏失败：交给上层 isError + 重试（OCR-3 M4）
       console.warn(`工序预设第 ${page} 页拉取失败，已保留前 ${all.length} 条`)
+      toast.warning('工序预设列表加载不完整，请刷新重试') // isError 仍 false、无重试按钮，须用户可感知（OCR-4 M139）
       truncatedByGuard = false // 部分失败不是护栏截断，不误报
       break // 后续页失败：保留已取到的预设，不清空整表（M4）
     }
@@ -161,7 +164,10 @@ const {
   staleTime: 15_000,
 })
 
-const presets = computed<OutsourceProcessType[]>(() => listData.value ?? [])
+/** 旧缓存快照防御（OCR-4 H1）：persistQueryClient 的 buster 未升级（main.ts:87），sessionStorage 会恢复分页信封 {success,data,total} 形态的旧快照——非数组一律视为空，待后台 refetch 替换 */
+const presets = computed<OutsourceProcessType[]>(() =>
+  Array.isArray(listData.value) ? listData.value : [],
+)
 
 interface ProductCard {
   product_id: number
@@ -251,19 +257,8 @@ const confirmDialog = useConfirmDialog()
 <style scoped>
 /* 单行排版：文件贴 400 行门禁，规则不变 */
 .osp-inventory { display: flex; flex-direction: column; height: 100%; min-height: 0; }
-.osp-card-main {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
-}
-.osp-table-wrap {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  scrollbar-gutter: stable;
-}
+.osp-card-main { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.osp-table-wrap { flex: 1; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; }
 .osp-table {
   width: 100%;
   table-layout: fixed;
