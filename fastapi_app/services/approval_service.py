@@ -32,7 +32,8 @@ from fastapi_app.services.order_utils import (
     detach_cancelled_returns_for_order,
     sync_single_item_quantity,
 )
-from fastapi_app.shared.stock_concurrency import assert_stock_available, get_product_for_update
+from fastapi_app.shared.order_stock_rollback import rollback_order_stock_by_sku
+from fastapi_app.shared.stock_concurrency import get_product_for_update
 from fastapi_app.shared_models import (
     ApprovalLog,
     ApprovalRequest,
@@ -373,29 +374,16 @@ async def _handle_edit_approval(
     order.status = await compute_order_status_from_db(db, order)
 
 
-def _rollback_deduction_for_approval(
+async def _rollback_deduction_for_approval(
     db: AsyncSession, product, order: Order, order_stockouts: list, total_deducted: int,
 ) -> None:
-    """回滚每条出库记录的净抵扣数量（产品已删除时无库存与日志目标可写，跳过）。"""
-    if product is None:
-        return
-    for stockout in order_stockouts:
-        net_qty = stockout.quantity - stockout.returned_quantity
-        if net_qty <= 0:
-            continue
-        db.add(InventoryLog(
-            product_id=order.product_id,
-            change_type='抵扣回滚(审批)',
-            change_quantity=net_qty,
-            related_id=order.order_no,
-            note=f'审批删除订单回滚抵扣，净退回{net_qty}件',
-        ))
-    # 负库存判定统一走 fastapi_app.shared.stock_concurrency 入口（P1-2b）
-    assert_stock_available(
-        product.current_stock, total_deducted,
-        message=f'删除订单将导致库存为负数（当前库存：{product.current_stock}，净变化：{total_deducted:+d}）',
-    )
-    product.current_stock += total_deducted
+    """审批删订单的抵扣回滚（逐 SKU 归位，2026-10-18 P0-1）。
+
+    与直删路径收敛到同一实现 shared.order_stock_rollback.rollback_order_stock_by_sku
+    ——此前两处是复制分叉关系，且同款缺陷：把全部 SKU 净扣减量加回首 SKU。
+    参数 product / total_deducted 保留只为兼容调用方。
+    """
+    await rollback_order_stock_by_sku(db, order, order_stockouts)
 
 
 def _add_delete_audit_log(
@@ -453,7 +441,7 @@ async def _handle_delete_approval(
     order_stockouts = list(result.scalars().all())
     total_deducted = sum(so.quantity - so.returned_quantity for so in order_stockouts)
 
-    _rollback_deduction_for_approval(db, product, order, order_stockouts, total_deducted)
+    await _rollback_deduction_for_approval(db, product, order, order_stockouts, total_deducted)
 
     # 先解除已取消退货对外键的引用（否则 RESTRICT 外键挡住下面的 stock_out 删除）；
     # active 退货已在 _handle_delete_approval 开头的 assert_no_linked_returns 处被拒。

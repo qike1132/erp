@@ -43,6 +43,7 @@ from fastapi_app.services.order_utils import (
 from fastapi_app.services.serializers.order_serializer import (
     OrderSerializer,
 )
+from fastapi_app.shared.order_stock_rollback import rollback_order_stock_by_sku
 from fastapi_app.shared.stock_concurrency import assert_stock_available, get_product_for_update
 from fastapi_app.shared_models import (
     ApprovalLog,
@@ -674,39 +675,14 @@ def _order_deletion_backup_payload(
 async def _rollback_order_stock_deduction(
     db: AsyncSession, product, order: Order, order_stockouts: list, total_deducted: int,
 ) -> None:
-    """回滚删除订单带来的库存抵扣；``product`` 为 None（产品已删除）时跳过。"""
-    if product is None:
-        return
-    # 批量构建抵扣回滚日志，消除循环内逐条 add 的 N+1 开销
-    rollback_logs = []
-    for stockout in order_stockouts:
-        net_qty = stockout.quantity - stockout.returned_quantity
-        if net_qty <= 0:
-            continue
-        rollback_logs.append(InventoryLog(
-            product_id=order.product_id,
-            change_type='抵扣回滚',
-            change_quantity=net_qty,
-            related_id=order.order_no,
-            note=f'订单删除回滚抵扣：{order.order_no}，恢复备货ID {stockout.stockin_id if stockout.stockin_id else "未知"} 的 {net_qty} 件'
-        ))
-    if rollback_logs:
-        db.add_all(rollback_logs)
+    """回滚删除订单带来的库存抵扣（逐 SKU 归位，2026-10-18 P0-1）。
 
-    # 负库存判定统一走 fastapi_app.shared.stock_concurrency 入口（P1-2b）
-    assert_stock_available(
-        product.current_stock, total_deducted,
-        message=f'删除订单将导致库存为负数（产品：{product.name}，当前库存：{product.current_stock}，净变化：{total_deducted:+d}）',
-    )
-    product.current_stock += total_deducted
-
-    db.add(InventoryLog(
-        product_id=order.product_id,
-        change_type='订单删除',
-        change_quantity=total_deducted,
-        related_id=order.order_no,
-        note=f'订单删除：{order.order_no}，订单数量：{order.quantity}，抵扣回滚数量：{total_deducted}'
-    ))
+    实现收敛到 shared.order_stock_rollback.rollback_order_stock_by_sku：
+    多 SKU 订单按 stockout.product_id 分组各自回滚，旧实现把全部净扣减量
+    加回首 SKU（order.product_id 兼容值）是库存正确性缺陷。参数 product /
+    total_deducted 保留仅为兼容调用方，逐 SKU 实现内自行按组取锁与求和。
+    """
+    await rollback_order_stock_by_sku(db, order, order_stockouts)
 
 
 async def _purge_outsource_processes(db: AsyncSession, process_ids: list[int]) -> None:
