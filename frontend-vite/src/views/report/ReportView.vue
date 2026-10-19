@@ -87,8 +87,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, watch } from 'vue'
 import { useQuery, keepPreviousData } from '@tanstack/vue-query'
+import { useDebounceFn } from '@vueuse/core'
 import { reportApi } from '@/api'
 import { useCatalogStore } from '@/stores/catalog'
 import { useAuthStore } from '@/stores/auth'
@@ -106,11 +107,37 @@ import { useReportRowActions, TAB_ROW_PERMISSIONS, type ReportActionTab } from '
 const activeTab = ref<TabType>('order')
 const page = ref(1)
 const perPage = ref(15)
-const searched = ref(true)
+/**
+ * 查询门槛（P1-24）：初始关闭——挂载/切 tab 不自动查；提交（显式点「查询」
+ * 或筛选 300ms 防抖静默提交）后才开启。原先恒为 true，门槛形同虚设。
+ */
+const searched = ref(false)
 /** 当前排序（服务端分页不变，这是当前页内的客户端排序） */
 const sort = ref<{ field: string; order: number } | null>(null)
 
 const filters = reactive({ customer: '', product: '' })
+/**
+ * 已提交的筛选快照（P1-24）：queryKey 与导出读它，而非 reactive 原对象——
+ * ReportFilterBar 经 defineModel 就地 mutate filters，每敲一个字符 key 就变，
+ * 造成每键一次后端请求。快照只在「提交」时更新。
+ */
+const appliedFilters = ref({ customer: '', product: '' })
+
+/** 提交当前筛选：快照入 key、开查询门槛、回第 1 页（新筛选从第一页看起） */
+function commitFilters() {
+  appliedFilters.value = { customer: filters.customer, product: filters.product }
+  searched.value = true
+  page.value = 1
+}
+
+/**
+ * 键入静默防抖提交（照 PurchasePlanView 的「防抖快照」模式）：连续键入只提交
+ * 最终值。已显式提交后防抖才到期时，快照内容相同 → queryKey 结构化哈希相同 →
+ * vue-query 判 key 未变不重发请求（@vueuse 的 useDebounceFn 无 cancel，靠 key
+ * 幂等实现「立即提交且到期不重复」）。
+ */
+const debouncedCommit = useDebounceFn(commitFilters, 300)
+watch(filters, () => { debouncedCommit() })
 
 const authStore = useAuthStore()
 /**
@@ -147,11 +174,11 @@ function onRowDelete(row: Record<string, unknown>) {
 }
 
 const { data: reportData, isLoading, isFetching } = useQuery({
-  queryKey: ['report-data', activeTab, page, perPage, filters],
+  queryKey: ['report-data', activeTab, page, perPage, appliedFilters],
   queryFn: async () => {
     const params: Record<string, string | number> = { page: page.value, per_page: perPage.value }
-    if (filters.customer) params.customer = filters.customer
-    if (filters.product) params.product = filters.product
+    if (appliedFilters.value.customer) params.customer = appliedFilters.value.customer
+    if (appliedFilters.value.product) params.product = appliedFilters.value.product
     return await reportApi[currentTabEndpoint()](params)
   },
   enabled: searched,
@@ -180,13 +207,14 @@ function onSort(event: { field: string; order: number }) {
 }
 
 function doSearch() {
-  searched.value = true
-  page.value = 1
+  // 显式提交：同步生效不等防抖；挂起的防抖到期时快照内容相同 → key 幂等不重复
+  commitFilters()
 }
 
 function doReset() {
   Object.assign(filters, { customer: '', product: '' })
-  page.value = 1
+  // 同步提交空筛选并回第 1 页（不等防抖）；防抖到期时同快照为 no-op
+  commitFilters()
 }
 
 function onTabChange(value: TabType) {
@@ -202,8 +230,9 @@ function onPageChange(event: { page: number; rows: number }) {
 function exportReport() {
   const params = new URLSearchParams()
   params.set('report_type', activeTab.value)
-  if (filters.customer) params.set('customer', filters.customer)
-  if (filters.product) params.set('product', filters.product)
+  // 导出与查询同口径：读已提交的筛选快照，而非用户可能还在改的草稿输入（P1-24）
+  if (appliedFilters.value.customer) params.set('customer', appliedFilters.value.customer)
+  if (appliedFilters.value.product) params.set('product', appliedFilters.value.product)
   window.open(`/api/v1/reports/export?${params.toString()}`, '_blank')
 }
 </script>

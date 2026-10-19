@@ -10,7 +10,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { nextTick, type Component } from 'vue'
-import { mount, type VueWrapper } from '@vue/test-utils'
+import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import PrimeVue from 'primevue/config'
 import { plushCutePT } from '@/styles/primevue-pt'
 
@@ -291,8 +291,12 @@ describe('ReportView —— 单行工具条', () => {
     expect(mountView().find('.rp-toolbar h1').text()).toBe('报表流水')
   })
 
-  it('tab 组、筛选、导出在同一行（同一工具条容器内）', () => {
+  it('tab 组、筛选、导出在同一行（同一工具条容器内）', async () => {
     const w = mountView()
+    // P1-24 修复后导出按钮受查询门槛控制（searched 初始 false，提交后才渲染）；
+    // 本用例锁的是「三元素同容器」的布局结构，故先点查询提交再断言。
+    await w.find('.rp-toolbar [aria-label="查询"]').trigger('click')
+    await flushPromises()
 
     expect(w.find('.rp-toolbar .rp-tab-group').exists()).toBe(true)
     expect(w.find('.rp-toolbar .rp-filter-bar').exists()).toBe(true)
