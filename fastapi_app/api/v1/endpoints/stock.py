@@ -13,6 +13,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.cache import cache_result
@@ -31,13 +32,36 @@ from fastapi_app.schemas.stock import (
 )
 from fastapi_app.services import stock_service
 from fastapi_app.services.stock_inventory_service import get_stockout_records
-from fastapi_app.shared_models import StockIn, StockOut, User
+from fastapi_app.shared_models import Product, StockIn, StockOut, User
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # 导出库存数据的最大条数限制，超过则要求缩小查询范围
 MAX_EXPORT_INVENTORY_ROWS = 10000
+
+
+async def _assert_product_factory_scoped(
+    db: AsyncSession, product_id: int | None, user: User, *, what: str,
+) -> None:
+    """库存/退货写端点的工厂隔离闸门（2026-10-18 审计 P0-2）。
+
+    与 order.py::_assert_order_factory_scoped 同口径（2026-10-17 F-BE-API-01）：
+    厂绑定（User.factory 非空）的非超管用户只能写本厂产品名下的记录；此前
+    写端点只认权限码、按自增 id 直取——东莞厂绑定用户可改删湖北厂的
+    入库/出库/退货记录（水平越权）。不匹配一律 404（不暴露「该记录存在
+    但不属于你」）；产品 factory 为空的历史行与产品不存在时放行（后者由
+    后续逻辑报 404/400）。
+    """
+    scoped_factory = user.factory if (user.factory and not user.is_super) else None
+    if not scoped_factory or product_id is None:
+        return
+    row_factory = (await db.execute(
+        select(Product.factory).where(Product.id == product_id)
+    )).scalar_one_or_none()
+    if row_factory is not None and row_factory != scoped_factory:
+        raise HTTPException(
+            status_code=404, detail=f'{what}不存在')
 
 
 def _ensure_row_action_permission(user: User, *, is_deduction: bool, action: str) -> None:
@@ -108,6 +132,7 @@ async def create_stockin(
         StockActionResponse: 包含成功标志和提示消息的响应。
     """
     async with db_transaction(db):
+        await _assert_product_factory_scoped(db, data.product_id, _user, what='入库记录')
         await stock_service.create_stockin(
             db, product_id=data.product_id, quantity=data.quantity,
             customer=data.customer, stockin_date_str=data.stockin_date,
@@ -144,6 +169,7 @@ async def edit_stockin(
     if not stockin:
         logger.info('编辑入库失败：stockin_id=%s 不存在', stockin_id)
         raise HTTPException(status_code=404, detail='入库记录不存在')
+    await _assert_product_factory_scoped(db, stockin.product_id, _user, what='入库记录')
     quantity = data.quantity if data.quantity is not None else stockin.quantity
     customer = data.customer if data.customer is not None else stockin.customer
     stockin_date = data.stockin_date if data.stockin_date else stockin.stockin_date.strftime('%Y-%m-%d') if stockin.stockin_date else ''
@@ -174,6 +200,11 @@ async def delete_stockin(
         StockActionResponse: 包含成功标志和提示消息的响应。
     """
     async with db_transaction(db):
+        # 厂隔离闸门（P0-2）：删除前取该备货行的产品归属做校验
+        _product_id = (await db.execute(
+            select(StockIn.product_id).where(StockIn.id == stockin_id)
+        )).scalar_one_or_none()
+        await _assert_product_factory_scoped(db, _product_id, _user, what='入库记录')
         await stock_service.delete_stockin(db, stockin_id, operator_id=_user.id)
     return StockActionResponse(success=True, message='入库删除成功！')
 
@@ -229,6 +260,7 @@ async def create_stockout(
         StockActionResponse: 包含成功标志和提示消息的响应。
     """
     async with db_transaction(db):
+        await _assert_product_factory_scoped(db, data.product_id, _user, what='出库记录')
         await stock_service.create_stockout(
             db, product_id=data.product_id, quantity=data.quantity,
             customer=data.customer, stockout_date_str=data.stockout_date,
@@ -267,6 +299,7 @@ async def edit_stockout(
     if not stockout:
         logger.info('编辑出库失败：stockout_id=%s 不存在', stockout_id)
         raise HTTPException(status_code=404, detail='出库记录不存在')
+    await _assert_product_factory_scoped(db, stockout.product_id, _user, what='出库记录')
     is_deduction = stockout.stockin_id is not None
     _ensure_row_action_permission(_user, is_deduction=is_deduction, action='edit')
     quantity = data.quantity if data.quantity is not None else stockout.quantity
@@ -312,6 +345,7 @@ async def delete_stockout(
     if not stockout:
         logger.info('删除出库失败：stockout_id=%s 不存在', stockout_id)
         raise HTTPException(status_code=404, detail='出库记录不存在')
+    await _assert_product_factory_scoped(db, stockout.product_id, _user, what='出库记录')
     _ensure_row_action_permission(_user, is_deduction=stockout.stockin_id is not None, action='delete')
     async with db_transaction(db):
         await stock_service.delete_stockout(db, stockout_id, operator_id=_user.id)

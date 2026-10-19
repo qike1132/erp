@@ -9,6 +9,7 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,13 +26,31 @@ from fastapi_app.services.stock_return_service import (
     edit_stockreturn,
     search_returnable_stockouts,
 )
-from fastapi_app.shared_models import StockReturn, User
+from fastapi_app.shared_models import StockOut, StockReturn, User
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # 新增退货弹窗的产品候选窗口大小（与前端约定）
 PRODUCT_OPTIONS_LIMIT = 500
+
+
+async def _assert_return_factory_scoped(
+    db: AsyncSession, stockout_id: int | None, user: User,
+) -> None:
+    """退货写端点的工厂隔离闸门（2026-10-18 审计 P0-2）。
+
+    退货单挂在出货明细上（产品归属经 StockOut.product_id 推导），口径与
+    stock.py::_assert_product_factory_scoped / order.py::_assert_order_factory_scoped
+    一致：厂绑定非超管只能退本厂产品的货，他厂一律 404。
+    """
+    from fastapi_app.api.v1.endpoints.stock import _assert_product_factory_scoped
+    if stockout_id is None:
+        return
+    product_id = (await db.execute(
+        select(StockOut.product_id).where(StockOut.id == stockout_id)
+    )).scalar_one_or_none()
+    await _assert_product_factory_scoped(db, product_id, user, what='退货记录')
 
 
 @router.get('/shipment-options', response_model=list[ShipmentOption])
@@ -141,6 +160,7 @@ async def create_stock_return(
             IntegrityError: (400, '请勿重复提交：该请求已登记过退货'),
         },
     ):
+        await _assert_return_factory_scoped(db, data.stockout_id, _user)
         result = await create_stockreturn(
             db, stockout_id=data.stockout_id, quantity=data.quantity,
             return_date_str=return_date, reason=data.reason, note=data.note,
@@ -180,6 +200,7 @@ async def edit_stock_return(
     if not stock_return:
         logger.info('编辑退货失败：return_id=%s 不存在', return_id)
         raise HTTPException(status_code=404, detail='退货记录不存在')
+    await _assert_return_factory_scoped(db, stock_return.stockout_id, _user)
     async with db_transaction(
         db,
         error_map={IntegrityError: (400, '请勿重复提交：该请求已登记过退货')},
@@ -217,6 +238,7 @@ async def cancel_stock_return(
     if not stock_return:
         logger.info('取消退货失败：return_id=%s 不存在', return_id)
         raise HTTPException(status_code=404, detail='退货记录不存在')
+    await _assert_return_factory_scoped(db, stock_return.stockout_id, _user)
     async with db_transaction(db):
         await cancel_stockreturn(db, stockreturn_id=return_id, operator_id=_user.id)
     return StockActionResponse(success=True, message='退货已删除！库存已扣回')
