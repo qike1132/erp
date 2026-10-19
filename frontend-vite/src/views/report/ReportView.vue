@@ -87,9 +87,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, watch } from 'vue'
+import { ref, reactive, computed, watch, nextTick } from 'vue'
 import { useQuery, keepPreviousData } from '@tanstack/vue-query'
-import { useDebounceFn } from '@vueuse/core'
+import { useDebouncedSearch } from '@/composables/useDebouncedSearch'
 import { reportApi } from '@/api'
 import { useCatalogStore } from '@/stores/catalog'
 import { useAuthStore } from '@/stores/auth'
@@ -131,19 +131,21 @@ function commitFilters() {
 }
 
 /**
- * 键入静默防抖提交（照 PurchasePlanView 的「防抖快照」模式）：连续键入只提交
- * 最终值。已显式提交后防抖才到期时，先判快照是否真有变化再提交（OCR-3 M5）：
+ * 键入静默防抖提交（统一走 useDebouncedSearch，与 approval/customer 等视图同一口径）：
+ * 连续键入只提交最终值。已显式提交后防抖才到期时，先判快照是否真有变化再提交（OCR-3 M5）：
  * 显式提交/重置后 300ms 内翻页，挂起的防抖不得把页码无条件打回第 1 页。
  */
-const debouncedCommit = useDebounceFn(() => {
-  if (
-    filters.customer !== appliedFilters.value.customer
-    || filters.product !== appliedFilters.value.product
-  ) {
-    commitFilters()
-  }
-}, 300)
-watch(filters, () => { debouncedCommit() })
+const { debounceSearch } = useDebouncedSearch(300)
+watch(filters, () => {
+  debounceSearch(() => {
+    if (
+      filters.customer !== appliedFilters.value.customer
+      || filters.product !== appliedFilters.value.product
+    ) {
+      commitFilters()
+    }
+  })
+})
 
 const authStore = useAuthStore()
 /**
@@ -192,8 +194,14 @@ const { data: reportData, isLoading, isFetching, refetch } = useQuery({
   placeholderData: keepPreviousData,
 })
 
-const logs = computed(() => reportData.value?.logs ?? [])
-const pagination = computed(() => reportData.value?.pagination)
+/**
+ * 渲染数据 gate（OCR-4 M:129）：report-data 查询经 persistQueryClient 持久化到
+ * sessionStorage，F5 后 disabled 的 useQuery 仍会暴露恢复的缓存快照——用户没点
+ * 查询就看到旧数据行且无任何刷新指示。故未查询（searched=false）时一概不渲染
+ * 行与分页（分页同样来自缓存，只 gate logs 会出现「0 行 + 分页条显示旧总数」）。
+ */
+const logs = computed(() => (searched.value ? reportData.value?.logs : undefined) ?? [])
+const pagination = computed(() => (searched.value ? reportData.value?.pagination : undefined))
 
 /** 排序取值：非数值列按 0，避免 NaN 让整列排序失效 */
 function sortValue(row: Record<string, unknown>, field: string): number {
@@ -214,14 +222,18 @@ function onSort(event: { field: string; order: number }) {
 
 function doSearch() {
   // 显式提交：同步生效不等防抖；挂起的防抖到期时快照未变 → 不再提交（M5）。
-  // 条件与页码都没变时 key 不变、staleTime 内 vue-query 不会重查；「查询」是
-  // 显式命令必须每次都真的发一次请求（OCR-3 M6，参照 useCompletedOrders.search 语义）。
+  // 条件未变也必须真的发一次请求（OCR-3 M6）：unchanged 刻意不含 page 条件——
+  // page≥2 时点「查询」，commitFilters 把页码归 1 后 key 切回 page-1，若该 key
+  // 在 staleTime 内有缓存，TanStack 不会自动重查，「查询」会静默吃缓存（OCR-4 M:223）。
   const unchanged =
-    page.value === 1
-    && appliedFilters.value.customer === filters.customer
+    appliedFilters.value.customer === filters.customer
     && appliedFilters.value.product === filters.product
   commitFilters()
-  if (unchanged) void refetch()
+  if (unchanged) {
+    // 页码可能从 ≥2 归 1：等 observer 切到新 key 再 refetch，
+    // 避免对旧 key（page≥2）强制重查后又被 key 切换丢弃、白查一次
+    void nextTick(() => { void refetch() })
+  }
 }
 
 function doReset() {
@@ -241,6 +253,15 @@ function onPageChange(event: { page: number; rows: number }) {
 }
 
 function exportReport() {
+  // 草稿与已提交快照不一致时先同步提交（OCR-4 Low:247）：「导出」与「查询」一样是
+  // 显式动作，立即生效不等防抖——导出文件必须与输入框当前所见一致；提交后挂起的
+  // 防抖到期发现快照已一致，自然 no-op，不会二次请求。
+  if (
+    filters.customer !== appliedFilters.value.customer
+    || filters.product !== appliedFilters.value.product
+  ) {
+    commitFilters()
+  }
   const params = new URLSearchParams()
   params.set('report_type', activeTab.value)
   // 导出与查询同口径：读已提交的筛选快照，而非用户可能还在改的草稿输入（P1-24）

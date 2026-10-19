@@ -132,6 +132,18 @@ function mountView() {
   })
 }
 
+/**
+ * P1-24 起查询门槛初始关闭：searched=false 时 ReportView 不渲染数据行/分页
+ * （F5 恢复的持久化缓存也不渲染，OCR-4 M:129）。断言数据渲染的用例须先显式
+ * 点一次「查询」进入已查询态——与生产里用户先查询再看表的真实路径一致。
+ */
+async function mountViewSearched() {
+  const wrapper = mountView()
+  await wrapper.find('.rp-query').trigger('click')
+  await nextTick()
+  return wrapper
+}
+
 /** 订单流水的表格列（与 useReportConfig 的订单分支一致：八列、末列 9% 操作） */
 const TABLE_COLUMNS = [
   { field: 'date', header: '下单时间', align: 'left' as const, width: '14%' },
@@ -323,21 +335,21 @@ describe('ReportView —— 表格与数字格式', () => {
     expect(styles[7]).toContain('9%')   // 操作
   })
 
-  it('数量走千分位并加粗', () => {
-    const cells = mountView().findAll('tbody tr')[0]!.findAll('td')
+  it('数量走千分位并加粗', async () => {
+    const cells = (await mountViewSearched()).findAll('tbody tr')[0]!.findAll('td')
 
     expect(cells[5]?.text()).toContain('15,000')
     expect(cells[5]?.find('.rp-qty').exists()).toBe(true)
   })
 
-  it('空值留白，不显示「-」占位符', () => {
-    const cells = mountView().findAll('tbody tr')[1]!.findAll('td')
+  it('空值留白，不显示「-」占位符', async () => {
+    const cells = (await mountViewSearched()).findAll('tbody tr')[1]!.findAll('td')
 
     expect(cells[6]?.text()).toBe('')
   })
 
   it('数量列可排序（当前页客户端重排）', async () => {
-    const w = mountView()
+    const w = await mountViewSearched()
 
     await emitSort(w, 'quantity', 1)
     expect(w.findAll('tbody tr')[0]?.text()).toContain('5,000')

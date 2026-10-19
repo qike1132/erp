@@ -18,7 +18,7 @@
       <template #empty>
         <div class="rp-empty">
           <FontAwesomeIcon icon="chart-line" aria-hidden="true" />
-          <span>{{ isFetching ? '加载中…' : '暂无数据' }}</span>
+          <span>{{ emptyText }}</span>
         </div>
       </template>
 
@@ -131,6 +131,16 @@ const GROUP_FIELD_OF: Record<string, string> = {
 const GROUP_ROWS_BY = ['_g_date', '_g_no', '_g_customer']
 
 const isOrder = computed(() => props.activeTab === 'order')
+
+/**
+ * 空态文案（OCR-R4 M:114）：查询门槛未开（没点过「查询」）时给操作引导，
+ * 与「查过没结果」的「暂无数据」区分开——否则用户进页面看到空表，
+ * 会误以为查过没数据，不知道要先查询。
+ */
+const emptyText = computed(() => {
+  if (!props.searched) return '请输入查询条件后点击查询'
+  return props.isFetching ? '加载中…' : '暂无数据'
+})
 
 /** 送进表格的列：订单级三列换成组内唯一的分组键，其余列（数量/备注/操作）原样逐行渲染 */
 const uiColumns = computed<TableColumn[]>(() =>

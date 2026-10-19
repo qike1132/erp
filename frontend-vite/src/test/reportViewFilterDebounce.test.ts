@@ -14,7 +14,7 @@
  * 注意：用真实定时器而非 fake timers——@tanstack/query-core 的调度在
  * fake timers 下会被冻结，挂载请求根本发不出，会制造「未请求」假绿。
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { defineComponent } from 'vue'
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
@@ -274,5 +274,68 @@ describe('ReportView — OCR-3 修复（防抖回跳 M5 / 查询空操作 M6）'
     await wrapper.find('.f-search').trigger('click')
     await flushPromises()
     expect(mocks.orderLogs).toHaveBeenCalledTimes(2)
+  })
+})
+describe('ReportView — OCR-4 修复（page≥2 重查 M:223 / 导出快照一致性 Low:247）', () => {
+  let openSpy: ReturnType<typeof vi.spyOn>
+
+  beforeEach(() => {
+    mocks.orderLogs.mockReset()
+    mocks.orderLogs.mockResolvedValue({ logs: [], pagination: { pages: 3, total: 40 } })
+    openSpy = vi.spyOn(window, 'open').mockImplementation(() => null)
+  })
+
+  afterEach(() => {
+    openSpy.mockRestore()
+  })
+
+  it('M:223: 第 2 页 + 条件未变时点「查询」：必须真的再发一次请求（不许静默吃缓存）', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.find('.f-product').setValue('保温杯')
+    await wrapper.find('.f-search').trigger('click')
+    await flushPromises()
+    expect(mocks.orderLogs).toHaveBeenCalledTimes(1)
+
+    // 翻到第 2 页（30s staleTime 内，page-1 缓存仍是 fresh）
+    await wrapper.find('.t-page2').trigger('click')
+    await flushPromises()
+    expect(mocks.orderLogs).toHaveBeenCalledTimes(2)
+    expect(mocks.orderLogs).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2 }))
+
+    // 条件未变、停在第 2 页时点「查询」：当前实现 unchanged 要求 page===1 → 跳过
+    // refetch；commitFilters 把页码归 1 后 key 切回 page-1 的 fresh 缓存 → 静默零请求。
+    // 「查询」是显式命令，必须重新拿最新数据
+    await wrapper.find('.f-search').trigger('click')
+    await flushPromises()
+    expect(mocks.orderLogs).toHaveBeenCalledTimes(3)
+    expect(mocks.orderLogs).toHaveBeenLastCalledWith({ page: 1, per_page: 15, product: '保温杯' })
+  })
+
+  it('Low:247: 草稿与已提交快照不一致时点「导出」：导出口径必须等于输入框当前所见', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.find('.f-product').setValue('保温杯')
+    await wrapper.find('.f-search').trigger('click') // 提交「保温杯」
+    await flushPromises()
+    expect(mocks.orderLogs).toHaveBeenCalledTimes(1)
+
+    // 改草稿为「杯」但不等 300ms 防抖提交，立即点「导出」：
+    // 当前实现读已提交快照「保温杯」→ 导出文件与输入框所见不一致（Red）
+    await wrapper.find('.f-product').setValue('杯')
+    await wrapper.find('.f-export').trigger('click')
+
+    expect(openSpy).toHaveBeenCalledTimes(1)
+    const url = openSpy.mock.calls[0][0] as string
+    expect(url).toContain('product=%E6%9D%AF') // 「杯」——与输入框所见一致
+    expect(url).toContain('report_type=order')
+
+    // 导出提交草稿触发一次查询；挂起的防抖到期发现快照已一致 → no-op，不重复请求
+    await sleep(400)
+    await flushPromises()
+    expect(mocks.orderLogs).toHaveBeenCalledTimes(2)
+    expect(mocks.orderLogs).toHaveBeenLastCalledWith(expect.objectContaining({ product: '杯' }))
   })
 })
