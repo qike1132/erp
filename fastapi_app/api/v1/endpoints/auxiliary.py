@@ -21,7 +21,7 @@ from fastapi_app.services.auxiliary_service import (
     get_stockin_by_id,
 )
 from fastapi_app.shared.factory_scope import assert_product_factory_scoped
-from fastapi_app.shared_models import Customer, User
+from fastapi_app.shared_models import Customer, StockIn, StockOut, User
 
 
 class CacheClearResponse(BaseModel):
@@ -304,8 +304,16 @@ async def delete_stockout_api(
     user: User = Depends(require_permission("stockout_manage")),
     db: AsyncSession = Depends(get_async_db),
 ):
-    """删除出库记录（API方式）"""
+    """删除出库记录（API方式；厂绑定用户先过工厂闸门，2026-10-19 OCR 第四轮 H2）"""
     from fastapi_app.services.stock_service import delete_stockout as svc_delete
+    # 工厂闸门（OCR 第四轮 H2）：stock.py 的 /stock/out/delete 与本文件批量
+    # 端点均已校验，本端点漏网——厂绑定用户可按 id 跨厂删他厂出货行。
+    # 行不存在时 product_id 为 None、闸门放行，保持 svc 原有
+    # ValueError('出库记录不存在') → 400 语义不变（不抢答 404）。
+    _product_id = (await db.execute(
+        select(StockOut.product_id).where(StockOut.id == id)
+    )).scalar_one_or_none()
+    await assert_product_factory_scoped(db, _product_id, user, what='出库记录')
     async with db_transaction(db, commit=False):
         await svc_delete(db, id)
     return success_response(message='出库删除成功')
@@ -317,8 +325,15 @@ async def delete_stockin_api(
     user: User = Depends(require_any_permission("stockin_manage", "order_manage")),
     db: AsyncSession = Depends(get_async_db),
 ):
-    """删除入库记录（API方式）"""
+    """删除入库记录（API方式；厂绑定用户先过工厂闸门，2026-10-19 OCR 第四轮 H2）"""
     from fastapi_app.services.stock_service import delete_stockin as svc_delete
+    # 工厂闸门（OCR 第四轮 H2）：与 stockout 端点同款漏网，同款修法——
+    # 先查该行 product_id 过闸门，行不存在时放行保持 svc 原有
+    # ValueError('入库记录不存在') → 400 语义。
+    _product_id = (await db.execute(
+        select(StockIn.product_id).where(StockIn.id == id)
+    )).scalar_one_or_none()
+    await assert_product_factory_scoped(db, _product_id, user, what='入库记录')
     async with db_transaction(db, commit=False):
         await svc_delete(db, id)
     return success_response(message='入库删除成功')

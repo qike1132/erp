@@ -52,6 +52,15 @@ async def fs_api():
                         join_transaction_mode="create_savepoint",
                     ) as s:
                         yield s
+                        # 模拟生产 get_async_db 收尾 commit（2026-10-19 OCR
+                        # 第四轮 H2 测试）：aux 删除端点 db_transaction(commit=
+                        # False) 的写要靠请求依赖收尾的 commit 才持久化；不加
+                        # 这行，端点写停留在 savepoint 里随 session.close()
+                        # 回滚，正路径用例断言「行已删」永远看不到效果。此处
+                        # commit 的是 savepoint（RELEASE），外层事务仍由 fixture
+                        # 统一回滚，用例间隔离不变；路由抛异常时收尾异常路径
+                        # 不走 commit（与生产一致，写被回滚）。
+                        await s.commit()
 
                 shared_session = AsyncSession(
                     bind=conn, expire_on_commit=False,
@@ -470,3 +479,87 @@ class TestAuxBatchFactoryScope:
         # 他厂产品不得因本厂项成功而被连带处理
         await db.refresh(product_dg)
         assert product_dg.current_stock == 100, '被拒项不得改他厂产品库存'
+
+@pytest.mark.integration
+class TestAuxDeleteFactoryScope:
+    """OCR 第四轮 H2：aux 单行删除端点的工厂闸门。
+
+    /aux/stockout/{id} 与 /aux/stockin/{id} 此前只认权限码、直调
+    stock_service.delete_stockout/delete_stockin——stock.py 的
+    /stock/out|in/delete/{id} 与本文件批量端点均已过闸门，这两个单行
+    端点漏网，厂绑定用户可按 id 跨厂删他厂出库/入库行（水平越权）。
+    """
+
+    async def test_factory_user_cannot_delete_other_factory_stockout(self, fs_api):
+        client, db, _, set_user = fs_api
+        set_user("东莞")
+        product, stockout = await _make_hubei_stockout(db)
+        resp = await client.delete(f"/api/v1/aux/stockout/{stockout.id}")
+        assert resp.status_code == 404, (
+            f'厂绑定用户删他厂出库应 404（闸门口径，不暴露存在性），'
+            f'实际 {resp.status_code}：{resp.text}')
+        from fastapi_app.shared_models import StockOut
+        assert (await db.execute(select(StockOut.id).where(StockOut.id == stockout.id))
+                ).scalar() == stockout.id, '被拒请求不得删除出库记录'
+        await _assert_no_stock_mutation(db, product)
+
+    async def test_factory_user_cannot_delete_other_factory_stockin(self, fs_api):
+        from fastapi_app.shared_models import Product, StockIn
+        client, db, _, set_user = fs_api
+        set_user("东莞")
+        # 造无抵扣行的备货：挂抵扣行时旧版（无闸门）会被 svc 业务校验以 400
+        # 拒绝，虽也红但证明力弱；无抵扣行时旧版会把删请求真放行到底，
+        # 「行仍在」断言才直接证明越权删除确实发生。
+        suffix = uuid.uuid4().hex[:8]
+        product = Product(
+            name=f"湖北-{suffix}", barcode=f"HB3-{suffix}",
+            factory="湖北", current_stock=100, initial_stock=100)
+        db.add(product)
+        await db.flush()
+        stockin = StockIn(
+            stockin_no=f"SI-AUX-{suffix}", product_id=product.id,
+            quantity=20, customer="湖北客户", stockin_date=None)
+        db.add(stockin)
+        await db.flush()
+        resp = await client.delete(f"/api/v1/aux/stockin/{stockin.id}")
+        assert resp.status_code == 404, (
+            f'厂绑定用户删他厂备货应 404（闸门口径），'
+            f'实际 {resp.status_code}：{resp.text}')
+        assert (await db.execute(select(StockIn.id).where(StockIn.id == stockin.id))
+                ).scalar() == stockin.id, '被拒请求不得删除备货记录'
+        await _assert_no_stock_mutation(db, product)
+
+    async def test_same_factory_user_delete_stockout_ok(self, fs_api):
+        """本厂正路径：闸门放行，删除真实生效（200）。"""
+        client, db, _, set_user = fs_api
+        set_user("湖北")
+        _product, stockout = await _make_hubei_stockout(db)
+        resp = await client.delete(f"/api/v1/aux/stockout/{stockout.id}")
+        assert resp.status_code == 200, (
+            f'本厂用户删本厂出库应 200，实际 {resp.status_code}：{resp.text}')
+        from fastapi_app.shared_models import StockOut
+        assert (await db.execute(select(StockOut.id).where(StockOut.id == stockout.id))
+                ).scalar() is None, '删除成功后出库行应不存在'
+
+    async def test_same_factory_user_delete_stockin_ok(self, fs_api):
+        """本厂正路径：无抵扣行的备货删除真实生效（200）。"""
+        from fastapi_app.shared_models import Product, StockIn
+        client, db, _, set_user = fs_api
+        set_user("湖北")
+        # 造无抵扣行的备货（挂抵扣行会被 svc 的业务校验拒绝，不是闸门问题）
+        suffix = uuid.uuid4().hex[:8]
+        product = Product(
+            name=f"湖北-{suffix}", barcode=f"HB2-{suffix}",
+            factory="湖北", current_stock=100, initial_stock=100)
+        db.add(product)
+        await db.flush()
+        stockin = StockIn(
+            stockin_no=f"SI-AUX-{suffix}", product_id=product.id,
+            quantity=20, customer="湖北客户", stockin_date=None)
+        db.add(stockin)
+        await db.flush()
+        resp = await client.delete(f"/api/v1/aux/stockin/{stockin.id}")
+        assert resp.status_code == 200, (
+            f'本厂用户删本厂备货应 200，实际 {resp.status_code}：{resp.text}')
+        assert (await db.execute(select(StockIn.id).where(StockIn.id == stockin.id))
+                ).scalar() is None, '删除成功后备货行应不存在'

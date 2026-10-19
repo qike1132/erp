@@ -426,22 +426,35 @@ async def _handle_delete_approval(
     删除该订单的其他 ApprovalRequest（当前审批保留以便设状态/建日志）。
     Raises: ValueError: 库存回滚将变为负数时（由共享回滚实现抛出）。
     """
-    # 2026-10-19 OCR 第三轮 M2：开头锁 Order 行，封住「无锁读 StockOut 快照 →
-    # 回滚内部才取锁」的插入窗口——并发 create_stockout_core（先锁 product、
-    # 再经 calculate_available_shipment_quantity 锁 Order）可在该窗口插入并
-    # 提交一条本订单新 stock_out：随后下方按 order_id 的批量 DELETE 会把它
-    # 一并删掉，但它不在回滚集，库存永久少这笔量。先锁 Order 与出货路径的
-    # Order 锁互斥序列化；本事务提交后 is_deleted=True，并发方重算可出货量
-    # 时本订单被过滤，不会再挂新出货。
+    # 锁序必须与出货创建/整单编辑/直删一致（P→O，2026-10-19 OCR 第四轮 H3）：
+    # 先按升序预锁本单回滚涉及的产品行全集，再锁 Order 行。若先锁 Order
+    # （旧 O→P），会与 create_stockout_core（stock_out_service 先锁 product、
+    # 再经 calculate_available_shipment_quantity 锁 Order）以及 update_order /
+    # _load_order_for_delete（均 P→O）互逆——本路径持 Order 等 product，
+    # 出货方持 product 等 Order，构成 AB-BA 死锁，PG 强杀一方（500/重试）。
+    # _prelock_order_products 按 id 升序锁「order.product_id ∪ 该订单全部
+    # 出库行 distinct product_id」全集，与 rollback_order_stock_by_sku 内部
+    # 升序锁同集同序，回滚里的重锁全部为 no-op；预锁的产品行同时挡住并发
+    # create_stockout_core 对这些 SKU 插入新 stock_out——原 M2 插入窗口仍关闭
+    # （下方 StockOut 快照重读发生在 Order 锁之后，漏网行必入回滚集）。
+    # 函数体内延迟导入：order/commands.py 顶部 import approval_flow →
+    # approval_service，顶部 import 会循环（同 _backup_and_audit_deleted_order）。
+    from fastapi_app.services.order.commands import _prelock_order_products
+    await _prelock_order_products(db, order.id)
+    # Order 行锁（OCR 第三轮 M2）：预锁产品行已先行序列化出货写入侧，此锁
+    # 补齐对「先持 Order 再写 stock_out」路径的互斥；本事务提交后
+    # is_deleted=True，并发方重算可出货量时本订单被过滤，不会再挂新出货。
     await db.execute(select(Order.id).where(Order.id == order.id).with_for_update())
 
     # 退货记录存在时不可删除（迁移 072 RESTRICT 的应用层前置）：审批提交后才
     # 产生退货的场景直删入口校验不覆盖，此处再挡一次并给出明确原因。
     await assert_no_linked_returns(db, order.id)
 
-    # 2026-10-19 OCR Medium：不预锁 order.product_id（与共享回滚升序锁序互逆，
-    # 且返回值自 P0-1 起只是死参数）——进入回滚前不持任何 product 行锁，锁序由
-    # rollback_order_stock_by_sku 内部升序保证。
+    # 出库快照（此刻产品全集已在上方升序预锁、Order 行已锁，读到的与本事务
+    # 串行化的稳定快照）。不再单独预锁 order.product_id 单行：OCR Medium 的
+    # 「单行预锁与共享回滚升序锁序互逆」顾虑正是全集升序预锁要解决的——
+    # order.product_id 不是集合最小 id 时单行预锁会「持大等小」，见
+    # commands.py::_prelock_order_products docstring 的构造例。
     result = await db.execute(
         select(StockOut).where(StockOut.order_id == order.id)
     )
