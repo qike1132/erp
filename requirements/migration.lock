@@ -25,7 +25,7 @@ bcrypt==5.0.0
     # via
     #   -r requirements/base.txt
     #   -r requirements/migration.txt
-certifi==2026.7.22
+certifi==2026.10.18
     # via
     #   httpcore
     #   httpx
