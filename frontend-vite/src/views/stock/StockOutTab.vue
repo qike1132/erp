@@ -1,6 +1,6 @@
 <template>
   <div class="stock-out-tab">
-    <!-- 录入主区（2026-10-06 记录查询 tab 移除，本组件只承载录入） -->
+
     <div class="so-tab-content">
       <div class="so-body">
         <!-- 左栏：出货信息录入 -->
@@ -53,6 +53,7 @@
       v-model:open="editStagedOpen"
       v-model:form="editStagedForm"
       :customer-options="customerOptions"
+      :saving="editSaving"
       @save="saveEditStaged"
     />
 
@@ -121,18 +122,20 @@ async function fetchShipmentInfo(productId?: string | number, customer?: string)
 
 // === 成品库存批次列表（选定 SKU 后带出，供按批次扣减） ===
 const batchOptions = ref<BatchAvailable[]>([])
-// 请求序号守卫 + 按产品拉批次：返回 null=被更新请求顶掉（勿变更状态）；[]=无批次或失败（闸门放行，后端兜底）
-let batchReqSeq = 0
+// 页面级/编辑级各自独立的序号池：编辑保存的批次请求不顶掉页面级在途请求（2026-10-19 OCR-2 L3）
+const pageBatchSeq = { v: 0 }
+const editBatchSeq = { v: 0 }
 
-async function fetchBatchesForProduct(productId: string | number): Promise<BatchAvailable[] | null> {
-  const seq = ++batchReqSeq
+/** 按产品拉批次（null=被顶掉）；failValue=失败返回：页面级 []（清空下拉）/编辑级 null（放行后端兜底，OCR-2 M2） */
+async function fetchBatchesForProduct(
+  productId: string | number, seq: { v: number }, failValue: BatchAvailable[] | null = [],
+): Promise<BatchAvailable[] | null> {
+  const my = ++seq.v
   try {
     const res = await finishedStockApi.batches(Number(productId))
-    if (seq !== batchReqSeq) return null // 已有更新的请求在途，丢弃过期响应
-    return res.data ?? []
+    return my !== seq.v ? null : (res.data ?? [])
   } catch {
-    if (seq !== batchReqSeq) return null
-    return []
+    return my !== seq.v ? null : failValue
   }
 }
 
@@ -141,7 +144,7 @@ async function fetchBatchOptions() {
     batchOptions.value = []
     return
   }
-  const batches = await fetchBatchesForProduct(form.productId)
+  const batches = await fetchBatchesForProduct(form.productId, pageBatchSeq)
   if (batches === null) return // 已有更新的请求在途，丢弃过期响应
   batchOptions.value = batches
   // 当前选中批次若不在新列表里则清空，避免提交一个不存在/不属于该产品的批次
@@ -194,29 +197,23 @@ async function removeStagedItem(idx: number) {
 
 const stagedTotalQty = computed(() => staged.value.reduce((sum: number, item: StagedStockout) => sum + (item.quantity || 0), 0))
 
-/**
- * 批次级闸门（前端即时提示）：「已暂存同批次量 + 本次数量」不得超过该批次可用。
- * 必须计入已暂存：同一批次可多次新增出货，只比本次单条会放过累计超额
- * （提交时被后端批次闸门拒，只得到「部分出货成功」）。
- *
- * 同时服务于「新增出货」与「编辑暂存」两条路径（编辑时把被编辑项自身排除，
- * 否则它已被计入 staged，会把可用量算小）。返回 false 表示被拦下。
- *
- * 按 (产品, 客户, 批次) 累计：批次可用量是 (产品, 批次) 级事实，客户只用于把
- * 同一客户对该批次的多次暂存合并计数。
- */
+/** 批次级闸门：「已暂存同批次量 + 本次数量」≤ 批次可用（否则提交被后端拒=「部分出货成功」）；excludeId 排除被编辑项 */
 function checkBatchAvailability(opts: {
   productId: string
   customer: string
   batchNo: string
   quantity: number
   excludeId?: number
-  /** 批次列表来源：缺省用当前表单的 batchOptions；编辑路径传入按 product_id 重拉的结果（P1-20） */
-  batches?: BatchAvailable[]
+  /** 批次列表：传数组=权威列表，找不到=批次已不存在（拦截，OCR-2 M2）；null/缺省=数据不可得（放行，后端兜底） */
+  batches?: BatchAvailable[] | null
 }): boolean {
   if (!opts.batchNo) return true
   const opt = (opts.batches ?? batchOptions.value).find((b) => b.batch_no === opts.batchNo)
-  if (!opt) return true
+  if (!opt) {
+    if (!opts.batches) return true // 数据不可得/页面级列表未加载：放行，后端兜底
+    showToast(`批次「${opts.batchNo}」已不存在（入库记录可能已删除），请清除批次后重试`, 'warning')
+    return false
+  }
   const stagedSameBatch = staged.value
     .filter((s) => s.product_id === opts.productId && s.customer === opts.customer
       && (s.batch_no || '') === opts.batchNo && s.id !== opts.excludeId)
@@ -289,9 +286,9 @@ function addOcrStaged(items: StagedStockout[]) {
 // === 编辑暂存 ===
 const editStagedOpen = ref(false)
 const editStagedIdx = ref(-1)
-// 注：编辑暂存弹窗不支持改批次（批次在列表徽标里展示，选错只能删了重加）；
-// 故这里不引入 batchNo 字段，避免看似可改实则空转。
+// 编辑弹窗不支持改批次（批次在列表徽标里展示，选错只能删了重加），不引入 batchNo 字段
 const editStagedForm = reactive({ customer: '', date: '', productName: '', quantity: 1, note: '' })
+const editSaving = ref(false) // 保存链路在途标记：双击守卫 + 弹窗保存按钮禁用（OCR-2 M1）
 
 function openEditStaged(idx: number) {
   editStagedIdx.value = idx
@@ -306,34 +303,37 @@ function openEditStaged(idx: number) {
 }
 
 async function saveEditStaged() {
-  if (editStagedIdx.value < 0) return
+  if (editSaving.value || editStagedIdx.value < 0) return // 在途守卫：双击不重入（OCR-2 M1）
   const item = staged.value[editStagedIdx.value]
   if (!item) return
-  // 2026-10-17 审计 P2-46：编辑对话框此前无输入校验（HTML min 不拦键入）
+
   if (!Number.isInteger(editStagedForm.quantity) || editStagedForm.quantity < 1) {
     showToast('数量必须为正整数', 'warning')
     return
   }
-  // 2026-10-19 审计 P1-20：暂存后 batchOptions 已清空，闸门「查不到即放行」会失效——
-  // 按被编辑条目的 product_id 无条件重拉批次再校验（失败/被顶掉则放行，后端兜底）。
-  const editBatches = (await fetchBatchesForProduct(item.product_id)) ?? []
-  // 批次闸门：编辑可把数量调大；excludeId 排除被编辑项自身（已计入 staged，不排除会把可用量算小）。
-  if (!checkBatchAvailability({
-    productId: item.product_id, customer: editStagedForm.customer,
-    batchNo: item.batch_no || '', quantity: editStagedForm.quantity,
-    excludeId: item.id, batches: editBatches,
-  })) return
-  // 2026-10-18 OCR 复评：产品级累计闸门也要过（此前只拦新增路径）
-  const ok = await checkProductAvailability({
-    productId: item.product_id, customer: editStagedForm.customer,
-    quantity: editStagedForm.quantity, excludeId: item.id,
-  })
-  if (!ok) return
-  item.customer = editStagedForm.customer
-  item.date = editStagedForm.date
-  item.quantity = editStagedForm.quantity
-  item.note = editStagedForm.note
-  editStagedOpen.value = false
+  editSaving.value = true
+  try {
+    // P1-20：暂存后 batchOptions 已清空，按条目 product_id 重拉权威批次；无 batch_no 短路（L4）；失败=null 放行（M2）
+    const editBatches = item.batch_no ? await fetchBatchesForProduct(item.product_id, editBatchSeq, null) : []
+    if (!checkBatchAvailability({
+      productId: item.product_id, customer: editStagedForm.customer,
+      batchNo: item.batch_no || '', quantity: editStagedForm.quantity,
+      excludeId: item.id, batches: editBatches,
+    })) return
+
+    const ok = await checkProductAvailability({
+      productId: item.product_id, customer: editStagedForm.customer,
+      quantity: editStagedForm.quantity, excludeId: item.id,
+    })
+    if (!ok) return
+    item.customer = editStagedForm.customer
+    item.date = editStagedForm.date
+    item.quantity = editStagedForm.quantity
+    item.note = editStagedForm.note
+    editStagedOpen.value = false
+  } finally {
+    editSaving.value = false
+  }
 }
 
 // === 批量提交 ===

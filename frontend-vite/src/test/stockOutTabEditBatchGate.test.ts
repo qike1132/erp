@@ -11,7 +11,7 @@
  * 做批次校验；拉取失败/被在途请求顶掉时闸门放行，由后端做最终校验。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { mount, flushPromises } from '@vue/test-utils'
 
 const mocks = vi.hoisted(() => ({
   getMock: vi.fn(),
@@ -77,6 +77,7 @@ interface StockOutTabVm {
   editStagedForm: { customer: string; date: string; productName: string; quantity: number; note: string }
   editStagedOpen: boolean
   staged: StagedStockout[]
+  batchOptions: { batch_no: string; available_quantity: number }[]
 }
 
 /** 走真实 addStaged 链路暂存一条 B1 批次条目（闸门产品级给足，不干扰本组用例） */
@@ -179,5 +180,126 @@ describe('StockOutTab — 编辑暂存条目的批次可用量闸门（P1-20）'
     await vm.saveEditStaged()
     expect(mocks.showToast).toHaveBeenCalledWith(expect.stringContaining('B1'), 'error')
     expect(vm.staged[0]!.quantity).toBe(5)
+  })
+})
+describe('StockOutTab — OCR-2 四项修复（双击守卫/批次缺失拦截/seq 隔离/无批次短路）', () => {
+  /** 挂起第 N 次 '/finished-stock/batches' 调用直至手动放行（制造在途窗口） */
+  function mockBatchesWithHold(holdAt: number) {
+    let release!: () => void
+    const held = new Promise<void>((r) => { release = r })
+    mocks.getMock.mockImplementation(async (url: string) => {
+      if (url === '/finished-stock/batches') {
+        batchesCalls += 1
+        if (batchesCalls === holdAt) await held
+        return { success: true, data: [{ batch_no: 'B1', available_quantity: 10 }] }
+      }
+      if (url === '/aux/available-shipment') {
+        return { success: true, data: { order_quantity: 1000, shipped_quantity: 0, available_quantity: 1000 } }
+      }
+      return { success: true, data: [] }
+    })
+    return () => release()
+  }
+
+  it('保存链路在途时双击不重入：编辑保存只执行一次（M1）', async () => {
+    const release = mockBatchesWithHold(2) // 挂住编辑路径的批次拉取，制造「保存未完成」窗口
+    const wrapper = mountTab()
+    const vm = wrapper.vm as unknown as StockOutTabVm
+    await stageOneB1Item(vm, 2)
+
+    vm.openEditStaged(0)
+    vm.editStagedForm.quantity = 5
+    const first = vm.saveEditStaged() // 第一次点击：挂起在编辑批次拉取（editSaving 已置位）
+    await vm.saveEditStaged()         // 双击的第二次：必须被在途守卫同步挡下
+    release()
+    await first
+
+    // addStaged 的 1 次 + 编辑的 1 次；无守卫时第二次调用会顶掉并重发（第 3 次）
+    expect(batchesCalls).toBe(2)
+    expect(vm.staged[0]!.quantity).toBe(5)
+    expect(vm.editStagedOpen).toBe(false)
+  })
+
+  it('权威列表里找不到批次（如入库被删）：警告并拦截，而非静默放行（M2）', async () => {
+    batchResponses = [
+      [{ batch_no: 'B1', available_quantity: 10 }], // addStaged：B1 正常
+      [{ batch_no: 'B9', available_quantity: 5 }],  // 编辑重拉：B1 已不在权威列表
+    ]
+    const wrapper = mountTab()
+    const vm = wrapper.vm as unknown as StockOutTabVm
+    await stageOneB1Item(vm, 2)
+
+    vm.openEditStaged(0)
+    vm.editStagedForm.quantity = 3 // 数量本身合法，但批次已不存在
+    await vm.saveEditStaged()
+
+    expect(mocks.showToast).toHaveBeenCalledWith(expect.stringContaining('B1'), 'warning')
+    expect(vm.staged[0]!.quantity).toBe(2) // 未落值
+    expect(vm.editStagedOpen).toBe(true)   // 弹窗保持打开
+  })
+
+  it('批次数据拉取失败（数据不可得）仍放行保存，由后端兜底（M2 护栏，防矫枉过正）', async () => {
+    mocks.getMock.mockImplementation(async (url: string) => {
+      if (url === '/finished-stock/batches') {
+        batchesCalls += 1
+        if (batchesCalls >= 2) throw new Error('network down') // 编辑重拉失败
+        return { success: true, data: [{ batch_no: 'B1', available_quantity: 10 }] }
+      }
+      if (url === '/aux/available-shipment') {
+        return { success: true, data: { order_quantity: 1000, shipped_quantity: 0, available_quantity: 1000 } }
+      }
+      return { success: true, data: [] }
+    })
+    const wrapper = mountTab()
+    const vm = wrapper.vm as unknown as StockOutTabVm
+    await stageOneB1Item(vm, 2)
+
+    vm.openEditStaged(0)
+    vm.editStagedForm.quantity = 5
+    await vm.saveEditStaged()
+
+    expect(mocks.showToast).not.toHaveBeenCalledWith(expect.stringContaining('已不存在'), 'warning')
+    expect(vm.staged[0]!.quantity).toBe(5)
+    expect(vm.editStagedOpen).toBe(false)
+  })
+
+  it('无 batch_no 的条目（OCR 暂存均属此类）编辑保存：不发批次请求（L4）', async () => {
+    const wrapper = mountTab()
+    const vm = wrapper.vm as unknown as StockOutTabVm
+    // 暂存一条无批次条目（OCR 粘贴路径的典型形态：不带 batch_no）
+    vm.form.customer = '客户甲'
+    vm.form.productId = '7'
+    vm.form.search = '产品A'
+    vm.form.quantity = 2
+    vm.form.batchNo = ''
+    await vm.addStaged()
+    expect(vm.staged.at(-1)?.batch_no).toBeUndefined()
+    const callsAfterStaging = batchesCalls
+
+    vm.openEditStaged(0)
+    vm.editStagedForm.quantity = 5
+    await vm.saveEditStaged()
+
+    expect(batchesCalls).toBe(callsAfterStaging) // 短路：保存链路零批次请求
+    expect(vm.staged[0]!.quantity).toBe(5)
+    expect(vm.editStagedOpen).toBe(false)
+  })
+
+  it('编辑保存的批次请求不顶掉页面级在途请求：批次下拉数据仍落地（L3）', async () => {
+    const release = mockBatchesWithHold(1) // 挂住页面级（watch 触发）的首次拉取
+    const wrapper = mountTab()
+    const vm = wrapper.vm as unknown as StockOutTabVm
+    // 首次 batches 挂起中；addStaged 的批次闸门因 batchOptions 为空放行，不依赖它
+    await stageOneB1Item(vm, 2)
+
+    vm.openEditStaged(0)
+    vm.editStagedForm.quantity = 5
+    await vm.saveEditStaged() // 编辑路径用独立序号池：第 2 次调用正常完成
+    expect(vm.staged[0]!.quantity).toBe(5)
+
+    release() // 页面级在途请求此时才返回
+    await flushPromises()
+    // 共享 seq 时编辑请求会顶掉页面级（返回 null 被丢弃，batchOptions 保持空）
+    expect(vm.batchOptions.some((b) => b.batch_no === 'B1')).toBe(true)
   })
 })

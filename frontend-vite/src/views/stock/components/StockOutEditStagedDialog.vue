@@ -24,7 +24,7 @@
     </div>
     <template #footer>
       <UiButton variant="outline" @click="openModel = false">取消</UiButton>
-      <UiButton variant="primary" @click="emit('save')">保存</UiButton>
+      <UiButton variant="primary" :disabled="saving" @click="emit('save')">{{ saving ? '保存中…' : '保存' }}</UiButton>
     </template>
   </UiDialog>
 </template>
@@ -46,6 +46,8 @@ interface EditStagedForm {
 
 defineProps<{
   customerOptions: { value: string; label: string }[]
+  /** 保存链路在途：禁用保存按钮防双击重入（OCR-2 M1，由 StockOutTab 的 editSaving 传入） */
+  saving?: boolean
 }>()
 
 const openModel = defineModel<boolean>('open', { default: false })
