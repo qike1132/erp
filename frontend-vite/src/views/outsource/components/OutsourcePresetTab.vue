@@ -107,17 +107,39 @@ const emit = defineEmits<{
 const authStore = useAuthStore()
 const canManage = computed(() => authStore.hasPermission('outsource_manage'))
 
+/** 列表端点单页上限（后端 per_page 上限 500）——与 useOrderImport 同口径 */
+const PRESET_PAGE_SIZE = 500
+/** 分页护栏：最多 20 页（= 10000 条预设），防异常响应（恒满页）导致死循环 */
+const PRESET_MAX_PAGES = 20
+
+/**
+ * 分页拉全部工序预设（2026-10-19 审计 P1-23）。
+ * 此前单页 per_page=500 不翻页、不校验 total——记录超 500 后多出的产品卡
+ * 静默缺失。照 useOrderImport.fetchAllStaged 的模式：逐页取满页即续拉，
+ * 页不满即止，页数护栏兜底。
+ */
+async function fetchAllProcessTypes(): Promise<OutsourceProcessType[]> {
+  const all: OutsourceProcessType[] = []
+  for (let page = 1; page <= PRESET_MAX_PAGES; page += 1) {
+    const res = await outsourceApi.processTypes({ page, per_page: PRESET_PAGE_SIZE })
+    const items = res.data ?? []
+    all.push(...items)
+    if (items.length < PRESET_PAGE_SIZE) break
+  }
+  return all
+}
+
 const {
   data: listData,
   isLoading,
   refetch,
 } = useQuery({
   queryKey: ['outsource-process-types'],
-  queryFn: () => outsourceApi.processTypes({ per_page: 500 }),
+  queryFn: fetchAllProcessTypes,
   staleTime: 15_000,
 })
 
-const presets = computed<OutsourceProcessType[]>(() => listData.value?.data ?? [])
+const presets = computed<OutsourceProcessType[]>(() => listData.value ?? [])
 
 interface ProductCard {
   product_id: number

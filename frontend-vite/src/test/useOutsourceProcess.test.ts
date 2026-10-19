@@ -245,3 +245,87 @@ describe('useOutsourceProcess 发货/收货权限点', () => {
     expect(hook.canReceive.value).toBe(false)
   })
 })
+describe('useOutsourceProcess 一键发货/收货数量草稿三分支（P1-21 显式 0 回退）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    grantedPermissions = new Set(['outsource_manage', 'outsource_ship', 'outsource_receive'])
+    currentUsername = 'admin'
+  })
+
+  it('发货草稿显式输入 0：拒绝整批并提示，不得静默回退为全部剩余量', async () => {
+    vi.mocked(outsourceApi.shipProcessesBatch).mockResolvedValue({ success: true, total: 2, data: [] } as never)
+    const hook = await setup(twoShippable)
+    hook.setShipQty(1, '0') // 电绣剩余 6：显式 0 ≠ 未填
+    await hook.handleBulkShip()
+
+    // 修复前 Number('0') || 6 → 6：以「全部剩余量」静默发货，实际发货量大于用户意图
+    expect(outsourceApi.shipProcessesBatch).not.toHaveBeenCalled()
+    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('数量输入无效'))
+  })
+
+  it('发货草稿清空输入：按默认剩余量发货（未填 ≠ 0）', async () => {
+    vi.mocked(outsourceApi.shipProcessesBatch).mockResolvedValue({ success: true, total: 2, data: [] } as never)
+    const hook = await setup(twoShippable)
+    hook.setShipQty(1, '5')
+    hook.setShipQty(1, '') // 清空 → 回到「未填」
+    await hook.handleBulkShip()
+
+    expect(outsourceApi.shipProcessesBatch).toHaveBeenCalledWith(1, [
+      { process_id: 1, quantity: 6 },
+      { process_id: 2, quantity: 8 },
+    ])
+  })
+
+  it('发货草稿负数：拒绝整批并提示', async () => {
+    const hook = await setup(twoShippable)
+    hook.setShipQty(1, '-3')
+    await hook.handleBulkShip()
+
+    expect(outsourceApi.shipProcessesBatch).not.toHaveBeenCalled()
+    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('数量输入无效'))
+  })
+
+  it('发货草稿非整数：拒绝整批并提示', async () => {
+    const hook = await setup(twoShippable)
+    hook.setShipQty(1, '2.5')
+    await hook.handleBulkShip()
+
+    expect(outsourceApi.shipProcessesBatch).not.toHaveBeenCalled()
+    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('数量输入无效'))
+  })
+
+  it('发货草稿正整数：原样使用（不替换为剩余量）', async () => {
+    vi.mocked(outsourceApi.shipProcessesBatch).mockResolvedValue({ success: true, total: 2, data: [] } as never)
+    const hook = await setup(twoShippable)
+    hook.setShipQty(1, '5')
+    await hook.handleBulkShip()
+
+    expect(outsourceApi.shipProcessesBatch).toHaveBeenCalledWith(1, [
+      { process_id: 1, quantity: 5 },
+      { process_id: 2, quantity: 8 },
+    ])
+  })
+
+  it('收货草稿显式输入 0：拒绝整批；清空则默认剩余待收量', async () => {
+    vi.mocked(outsourceApi.receiveProcessesBatch).mockResolvedValue({ success: true, total: 1, data: [] } as never)
+    const hook = await setup(twoShippable)
+    hook.setReceiveQty(1, '0') // 电绣已发 4 未收 0：显式 0 ≠ 未填
+    await hook.handleBulkReceive()
+
+    expect(outsourceApi.receiveProcessesBatch).not.toHaveBeenCalled()
+    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('数量输入无效'))
+
+    hook.setReceiveQty(1, '') // 清空 → 默认剩余待收 4
+    await hook.handleBulkReceive()
+    expect(outsourceApi.receiveProcessesBatch).toHaveBeenCalledWith(1, [{ process_id: 1, quantity: 4 }])
+  })
+
+  it('收货草稿正整数：原样使用', async () => {
+    vi.mocked(outsourceApi.receiveProcessesBatch).mockResolvedValue({ success: true, total: 1, data: [] } as never)
+    const hook = await setup(twoShippable)
+    hook.setReceiveQty(1, '3') // 剩余待收 4，显式收 3
+    await hook.handleBulkReceive()
+
+    expect(outsourceApi.receiveProcessesBatch).toHaveBeenCalledWith(1, [{ process_id: 1, quantity: 3 }])
+  })
+})
