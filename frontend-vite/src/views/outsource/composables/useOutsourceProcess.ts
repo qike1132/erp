@@ -197,18 +197,39 @@ export function useOutsourceProcess(detailDataProp: Ref<OutsourceOrderRow | null
   type ParsedQtyDraft = { kind: 'unfilled' } | { kind: 'invalid' } | { kind: 'qty'; qty: number }
 
   /**
-   * 解析一键发货/收货的数量草稿（2026-10-19 审计 P1-21）。
+   * 解析一键发货/收货的数量草稿（2026-10-19 审计 P1-21 + OCR-3 M7）。
    * 此前 `Number(draft) || remaining` 把显式输入的 0 / 清空一并当成「未填」
    * 静默回退为全部剩余量——实际发货量大于用户意图，且后端 gt=0 校验拦不住
-   * 回退值（拦到的只有负数/非整数透传）。改为显式三分支：
-   * 未填（undefined/空串/纯空白）→ 调用方取默认剩余量；
-   * 0/负数/非整数 → 拒绝并提示；正整数 → 原样使用。
+   * 回退值。P1-21 只修了 0，OCR-3 M7 把清空（''）一并判无效：
+   * 未填（undefined，从未输入过）→ 调用方取默认剩余量；
+   * 空串/纯空白/0/负数/非整数 → 拒绝并提示；正整数 → 原样使用。
    */
   function parseQtyDraft(raw: string | undefined): ParsedQtyDraft {
-    if (raw === undefined || raw.trim() === '') return { kind: 'unfilled' }
+    if (raw === undefined) return { kind: 'unfilled' }
     const n = Number(raw)
-    if (!Number.isInteger(n) || n < 1) return { kind: 'invalid' }
+    if (raw.trim() === '' || !Number.isInteger(n) || n < 1) return { kind: 'invalid' }
     return { kind: 'qty', qty: n }
+  }
+
+  /**
+   * 按各行草稿组装批量请求条目；有无效草稿时提示并返回 null（OCR-3 Low：
+   * 消 handleBulkShip/handleBulkReceive 两处构批重复，校验规则只此一份）。
+   */
+  function buildBatchItems(
+    targets: OrderOutsourceProcess[],
+    drafts: Record<number, string>,
+    remainingOf: (p: OrderOutsourceProcess) => number,
+  ): { process_id: number; quantity: number }[] | null {
+    const items: { process_id: number; quantity: number }[] = []
+    for (const p of targets) {
+      const parsed = parseQtyDraft(drafts[p.id])
+      if (parsed.kind === 'invalid') {
+        toast.error(`工序「${p.process_type}」的数量输入无效（${drafts[p.id]}）：须为正整数，清空不会默认全部剩余量，请显式填写`)
+        return null
+      }
+      items.push({ process_id: p.id, quantity: parsed.kind === 'unfilled' ? remainingOf(p) : parsed.qty })
+    }
+    return items
   }
 
   /** 一键发货：所有有待发剩余的工序，单请求单事务批量发货（数量取各行输入，缺省剩余） */
@@ -220,15 +241,8 @@ export function useOutsourceProcess(detailDataProp: Ref<OutsourceOrderRow | null
     }
     const orderId = detailData.value?.id
     if (!orderId) return
-    const items: { process_id: number; quantity: number }[] = []
-    for (const p of targets) {
-      const parsed = parseQtyDraft(shipQtyDrafts[p.id])
-      if (parsed.kind === 'invalid') {
-        toast.error(`工序「${p.process_type}」的数量输入无效（${shipQtyDrafts[p.id]}）：须为正整数，留空则默认全部剩余量`)
-        return
-      }
-      items.push({ process_id: p.id, quantity: parsed.kind === 'unfilled' ? remainingShipQty(p) : parsed.qty })
-    }
+    const items = buildBatchItems(targets, shipQtyDrafts, remainingShipQty)
+    if (!items) return
     bulkShipping.value = true
     try {
       await outsourceApi.shipProcessesBatch(orderId, items)
@@ -251,15 +265,8 @@ export function useOutsourceProcess(detailDataProp: Ref<OutsourceOrderRow | null
     }
     const orderId = detailData.value?.id
     if (!orderId) return
-    const items: { process_id: number; quantity: number }[] = []
-    for (const p of targets) {
-      const parsed = parseQtyDraft(receiveQtyDrafts[p.id])
-      if (parsed.kind === 'invalid') {
-        toast.error(`工序「${p.process_type}」的数量输入无效（${receiveQtyDrafts[p.id]}）：须为正整数，留空则默认全部剩余量`)
-        return
-      }
-      items.push({ process_id: p.id, quantity: parsed.kind === 'unfilled' ? remainingReceiveQty(p) : parsed.qty })
-    }
+    const items = buildBatchItems(targets, receiveQtyDrafts, remainingReceiveQty)
+    if (!items) return
     bulkReceiving.value = true
     try {
       await outsourceApi.receiveProcessesBatch(orderId, items)

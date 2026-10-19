@@ -126,6 +126,12 @@ const batchOptions = ref<BatchAvailable[]>([])
 const pageBatchSeq = { v: 0 }
 const editBatchSeq = { v: 0 }
 
+/** 清空页面级批次下拉时同步推进序号，让在途请求失效（否则迟到响应把旧产品批次写回，OCR-3 Low） */
+function clearPageBatches() {
+  pageBatchSeq.v++
+  batchOptions.value = []
+}
+
 /** 按产品拉批次（null=被顶掉）；failValue=失败返回：页面级 []（清空下拉）/编辑级 null（放行后端兜底，OCR-2 M2） */
 async function fetchBatchesForProduct(
   productId: string | number, seq: { v: number }, failValue: BatchAvailable[] | null = [],
@@ -141,7 +147,7 @@ async function fetchBatchesForProduct(
 
 async function fetchBatchOptions() {
   if (!form.productId) {
-    batchOptions.value = []
+    clearPageBatches()
     return
   }
   const batches = await fetchBatchesForProduct(form.productId, pageBatchSeq)
@@ -156,7 +162,7 @@ async function fetchBatchOptions() {
 /** 产品选择被清空（StockOutInputForm 的 clear-shipment）：批次也要一并清掉 */
 function clearShipmentSelection() {
   shipmentInfo.value = null
-  batchOptions.value = []
+  clearPageBatches()
   form.batchNo = ''
 }
 
@@ -204,14 +210,19 @@ function checkBatchAvailability(opts: {
   batchNo: string
   quantity: number
   excludeId?: number
-  /** 批次列表：传数组=权威列表，找不到=批次已不存在（拦截，OCR-2 M2）；null/缺省=数据不可得（放行，后端兜底） */
+  /** 批次列表：传数组=权威列表，找不到=批次已不存在（拦截，OCR-2 M2）；null=数据不可得（放行）；缺省=回落页面级列表 */
   batches?: BatchAvailable[] | null
+  /** 批次缺失时的补救提示；编辑弹窗无批次控件，须提示删除重加而非「清除批次」（OCR-3 Low） */
+  missingHint?: string
 }): boolean {
   if (!opts.batchNo) return true
+  // 显式 null=数据不可得：放行后端兜底（OCR-3 M2）。不得降级页面级列表——那装的是
+  // form.productId 的批次，拿来校验 item.product_id 等于用别的产品做 allow/deny。
+  if (opts.batches === null) return true
   const opt = (opts.batches ?? batchOptions.value).find((b) => b.batch_no === opts.batchNo)
   if (!opt) {
-    if (!opts.batches) return true // 数据不可得/页面级列表未加载：放行，后端兜底
-    showToast(`批次「${opts.batchNo}」已不存在（入库记录可能已删除），请清除批次后重试`, 'warning')
+    if (!opts.batches) return true // 参数缺省=页面级列表未加载：放行，后端兜底
+    showToast(`批次「${opts.batchNo}」已不存在（入库记录可能已删除），${opts.missingHint ?? '请清除批次后重试'}`, 'warning')
     return false
   }
   const stagedSameBatch = staged.value
@@ -266,7 +277,7 @@ async function addStaged() {
   form.note = ''
   form.batchNo = ''
   shipmentInfo.value = null
-  batchOptions.value = []
+  clearPageBatches()
 }
 
 /** OCR 粘贴识别确认后的条目：与手工录入进同一个暂存列表，提交前仍可改、删。
@@ -304,33 +315,47 @@ function openEditStaged(idx: number) {
 
 async function saveEditStaged() {
   if (editSaving.value || editStagedIdx.value < 0) return // 在途守卫：双击不重入（OCR-2 M1）
-  const item = staged.value[editStagedIdx.value]
-  if (!item) return
-
-  if (!Number.isInteger(editStagedForm.quantity) || editStagedForm.quantity < 1) {
+  const idx = editStagedIdx.value
+  const item = staged.value[idx]
+  const itemId = item?.id
+  if (!item || itemId === undefined) return
+  // 快照输入（OCR-3 M1）：两个 await 期间弹窗可被关/另开另一行，届时再读 editStagedForm
+  // 会把新行的草稿写到本行上；全程只用这份快照。
+  const draft = { customer: editStagedForm.customer, date: editStagedForm.date, quantity: editStagedForm.quantity, note: editStagedForm.note }
+  if (!Number.isInteger(draft.quantity) || draft.quantity < 1) {
     showToast('数量必须为正整数', 'warning')
+    return
+  }
+  // 空值守卫（OCR-3 M3）：对齐新增路径 canAdd 口径——date 可被清空、UiSelect 可为空，
+  // 落成 customer/date 为空的条目后逐行被后端拒，用户只见「部分出货成功」且难定位。
+  if (!draft.customer || !draft.date) {
+    showToast('请填写客户和出货时间', 'warning')
     return
   }
   editSaving.value = true
   try {
+    // await 后行可能被删/换位：itemId 不在原索引即放弃应用（OCR-3 M1）
+    const sameItem = () => staged.value[idx]?.id === itemId
     // P1-20：暂存后 batchOptions 已清空，按条目 product_id 重拉权威批次；无 batch_no 短路（L4）；失败=null 放行（M2）
     const editBatches = item.batch_no ? await fetchBatchesForProduct(item.product_id, editBatchSeq, null) : []
+    if (!sameItem()) return
     if (!checkBatchAvailability({
-      productId: item.product_id, customer: editStagedForm.customer,
-      batchNo: item.batch_no || '', quantity: editStagedForm.quantity,
-      excludeId: item.id, batches: editBatches,
+      productId: item.product_id, customer: draft.customer,
+      batchNo: item.batch_no || '', quantity: draft.quantity,
+      excludeId: itemId, batches: editBatches, missingHint: '请删除该行后重新添加',
     })) return
 
     const ok = await checkProductAvailability({
-      productId: item.product_id, customer: editStagedForm.customer,
-      quantity: editStagedForm.quantity, excludeId: item.id,
+      productId: item.product_id, customer: draft.customer,
+      quantity: draft.quantity, excludeId: itemId,
     })
-    if (!ok) return
-    item.customer = editStagedForm.customer
-    item.date = editStagedForm.date
-    item.quantity = editStagedForm.quantity
-    item.note = editStagedForm.note
-    editStagedOpen.value = false
+    if (!ok || !sameItem()) return
+    item.customer = draft.customer
+    item.date = draft.date
+    item.quantity = draft.quantity
+    item.note = draft.note
+    // 弹窗已另开他行时不得关掉用户刚打开的弹窗（OCR-3 M1）
+    if (editStagedIdx.value === idx) editStagedOpen.value = false
   } finally {
     editSaving.value = false
   }
@@ -354,46 +379,13 @@ function onStockoutImported() {
 </script>
 
 <style scoped>
-/* ===== Layout ===== */
-.stock-out-tab {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-}
-.so-tab-content {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-}
-.so-body {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-}
-@media (max-width: 992px) {
-  .so-body { grid-template-columns: 1fr; }
-}
-.so-col {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
-}
-.so-col + .so-col {
-  border-left: 2px solid var(--color-border, #cbd5e1);
-}
-
+/* ===== Layout（单行排版：文件贴 400 行门禁，规则不变） ===== */
+.stock-out-tab { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
+.so-tab-content { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
+.so-body { display: grid; grid-template-columns: 1fr 1fr; flex: 1; min-height: 0; overflow: hidden; }
+@media (max-width: 992px) { .so-body { grid-template-columns: 1fr; } }
+.so-col { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.so-col + .so-col { border-left: 2px solid var(--color-border, #cbd5e1); }
 /* ===== Submit Bar ===== */
-.so-submit-bar {
-  display: flex;
-  justify-content: center;
-  padding: 8px 0;
-  border-top: 1px solid var(--color-border, #cbd5e1);
-}
+.so-submit-bar { display: flex; justify-content: center; padding: 8px 0; border-top: 1px solid var(--color-border, #cbd5e1); }
 </style>

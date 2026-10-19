@@ -132,11 +132,17 @@ function commitFilters() {
 
 /**
  * 键入静默防抖提交（照 PurchasePlanView 的「防抖快照」模式）：连续键入只提交
- * 最终值。已显式提交后防抖才到期时，快照内容相同 → queryKey 结构化哈希相同 →
- * vue-query 判 key 未变不重发请求（@vueuse 的 useDebounceFn 无 cancel，靠 key
- * 幂等实现「立即提交且到期不重复」）。
+ * 最终值。已显式提交后防抖才到期时，先判快照是否真有变化再提交（OCR-3 M5）：
+ * 显式提交/重置后 300ms 内翻页，挂起的防抖不得把页码无条件打回第 1 页。
  */
-const debouncedCommit = useDebounceFn(commitFilters, 300)
+const debouncedCommit = useDebounceFn(() => {
+  if (
+    filters.customer !== appliedFilters.value.customer
+    || filters.product !== appliedFilters.value.product
+  ) {
+    commitFilters()
+  }
+}, 300)
 watch(filters, () => { debouncedCommit() })
 
 const authStore = useAuthStore()
@@ -173,7 +179,7 @@ function onRowDelete(row: Record<string, unknown>) {
   void rowActions.onRowAction(activeTab.value as ReportActionTab, 'delete', row)
 }
 
-const { data: reportData, isLoading, isFetching } = useQuery({
+const { data: reportData, isLoading, isFetching, refetch } = useQuery({
   queryKey: ['report-data', activeTab, page, perPage, appliedFilters],
   queryFn: async () => {
     const params: Record<string, string | number> = { page: page.value, per_page: perPage.value }
@@ -207,8 +213,15 @@ function onSort(event: { field: string; order: number }) {
 }
 
 function doSearch() {
-  // 显式提交：同步生效不等防抖；挂起的防抖到期时快照内容相同 → key 幂等不重复
+  // 显式提交：同步生效不等防抖；挂起的防抖到期时快照未变 → 不再提交（M5）。
+  // 条件与页码都没变时 key 不变、staleTime 内 vue-query 不会重查；「查询」是
+  // 显式命令必须每次都真的发一次请求（OCR-3 M6，参照 useCompletedOrders.search 语义）。
+  const unchanged =
+    page.value === 1
+    && appliedFilters.value.customer === filters.customer
+    && appliedFilters.value.product === filters.product
   commitFilters()
+  if (unchanged) void refetch()
 }
 
 function doReset() {

@@ -74,9 +74,12 @@ describe('OutsourcePresetTab — 工序预设分页取全（P1-23）', () => {
   it('记录超过单页 500 条时自动翻页取全，产品卡不静默缺失', async () => {
     const page1 = genPresets(1, PAGE_SIZE, 1)
     const page2 = genPresets(501, 120, 501)
-    vi.mocked(outsourceApi.processTypes).mockImplementation(async (params?: { page?: number }) => {
-      return ok(params?.page === 2 ? page2 : page1)
-    })
+    // total=全量总数（分页元数据），非当页条数——total 收口口径（OCR-3）依赖它判断是否取完
+    vi.mocked(outsourceApi.processTypes).mockImplementation(async (params?: { page?: number }) => ({
+      success: true,
+      data: params?.page === 2 ? page2 : page1,
+      total: PAGE_SIZE + 120,
+    }))
 
     const wrapper = mountTab()
     await flushPromises()
@@ -102,16 +105,81 @@ describe('OutsourcePresetTab — 工序预设分页取全（P1-23）', () => {
   it('护栏：每页恒满 500 时最多拉 20 页，不死循环', async () => {
     // 恒满页：全部条目同属一个产品（同 product_id 的 500 道工序），
     // 既模拟异常响应又把产品卡压到 1 行；但该行的工序 chips 仍要渲染
-    // 20×500=10000 个，jsdom 下成本可观，放宽超时避免环境波动误报
+    // 20×500=10000 个，jsdom 下成本可观，放宽超时避免环境波动误报。
+    // 响应不带 total（total 收口失效的异常形态）→ 只能靠页数护栏兜底。
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const sameProductPage = Array.from({ length: PAGE_SIZE }, (_, i) => ({
       ...genPresets(i + 1, 1, 1)[0]!,
     }))
-    vi.mocked(outsourceApi.processTypes).mockImplementation(async () => ok(sameProductPage))
+    vi.mocked(outsourceApi.processTypes).mockImplementation(async () => ({
+      success: true,
+      data: sameProductPage,
+      total: 0,
+    }))
 
     const wrapper = mountTab()
     await flushPromises()
 
     expect(outsourceApi.processTypes).toHaveBeenCalledTimes(20)
     expect(wrapper.findAll('tbody tr')).toHaveLength(1)
+    // 护栏截断必须可观测（OCR-3 Low）：静默截断=同一种缺陷换个阈值重现
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('护栏'))
+    warnSpy.mockRestore()
   }, 30_000)
+})
+
+describe('OutsourcePresetTab — 分页错误处理与 total 收口（OCR-3 M4/Low）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('M4: 首屏失败显示错误态与重试入口，而非「暂无产品」空态；重试后恢复', async () => {
+    const three = genPresets(1, 3, 1)
+    vi.mocked(outsourceApi.processTypes)
+      .mockRejectedValueOnce(new Error('network down'))
+      .mockResolvedValueOnce(ok(three))
+    const wrapper = mountTab()
+    await flushPromises()
+
+    // 错误态：不是「暂无产品」的误导性空态（当前实现无错误分支 → 落空态，Red）
+    expect(wrapper.find('.osp-error').exists()).toBe(true)
+    expect(wrapper.find('.osp-empty').text()).not.toContain('暂无产品')
+
+    await wrapper.find('.osp-retry-btn').trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('tbody tr')).toHaveLength(3)
+  })
+
+  it('M4: 后续页失败保留已取到的数据，不清空整表', async () => {
+    const page1 = genPresets(1, PAGE_SIZE, 1)
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.mocked(outsourceApi.processTypes).mockImplementation(async (params?: { page?: number }) => {
+      if (params?.page === 2) throw new Error('network down')
+      // total > 500：表达「还有更多」，total 收口不会在第 1 页后提前结束
+      return { success: true, data: page1, total: PAGE_SIZE + 100 }
+    })
+    const wrapper = mountTab()
+    await flushPromises()
+
+    // 首页 500 条已到手：第 2 页失败不得让整表清空成空态（当前实现 queryFn 整体 reject → 0 行，Red）
+    expect(outsourceApi.processTypes).toHaveBeenCalledTimes(2)
+    expect(wrapper.findAll('tbody tr')).toHaveLength(500)
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('第 2 页'))
+    warnSpy.mockRestore()
+  })
+
+  it('Low: 记录数恰为页大小整数倍时用 total 收口，不多拉一次空页', async () => {
+    const page1 = genPresets(1, PAGE_SIZE, 1)
+    vi.mocked(outsourceApi.processTypes).mockImplementation(async (params?: { page?: number }) => ({
+      success: true,
+      data: params?.page === 1 ? page1 : [],
+      total: PAGE_SIZE, // 共 500 条：第 1 页已取完
+    }))
+    const wrapper = mountTab()
+    await flushPromises()
+
+    // 当前实现只看「本页是否满页」→ 满页续拉第 2 次空请求（Red）
+    expect(outsourceApi.processTypes).toHaveBeenCalledTimes(1)
+    expect(wrapper.findAll('tbody tr')).toHaveLength(500)
+  })
 })

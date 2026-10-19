@@ -23,7 +23,7 @@
       </div>
     </div>
     <template #footer>
-      <UiButton variant="outline" @click="openModel = false">取消</UiButton>
+      <UiButton variant="outline" :disabled="saving" @click="openModel = false">取消</UiButton>
       <UiButton variant="primary" :disabled="saving" @click="emit('save')">{{ saving ? '保存中…' : '保存' }}</UiButton>
     </template>
   </UiDialog>

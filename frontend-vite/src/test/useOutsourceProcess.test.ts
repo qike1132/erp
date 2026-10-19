@@ -263,12 +263,22 @@ describe('useOutsourceProcess 一键发货/收货数量草稿三分支（P1-21 �
     expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('数量输入无效'))
   })
 
-  it('发货草稿清空输入：按默认剩余量发货（未填 ≠ 0）', async () => {
+  it('发货草稿清空输入：拒绝整批并提示（OCR-3 M7：显示为空 ≠ 视为满额，防「实际发货量大于用户意图」）', async () => {
     vi.mocked(outsourceApi.shipProcessesBatch).mockResolvedValue({ success: true, total: 2, data: [] } as never)
     const hook = await setup(twoShippable)
     hook.setShipQty(1, '5')
-    hook.setShipQty(1, '') // 清空 → 回到「未填」
+    hook.setShipQty(1, '') // 清空：输入框显示为空，若静默回退满额则是「显示空=发全部」的认知落差
     await hook.handleBulkShip()
+
+    // 修复前空串被判「未填」→ 按全部剩余量 6 发货；M7 起清空即无效，须显式填写
+    expect(outsourceApi.shipProcessesBatch).not.toHaveBeenCalled()
+    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('数量输入无效'))
+  })
+
+  it('发货草稿从未输入（undefined）：默认剩余量——「留空」语义仅保留给从未输入过', async () => {
+    vi.mocked(outsourceApi.shipProcessesBatch).mockResolvedValue({ success: true, total: 2, data: [] } as never)
+    const hook = await setup(twoShippable)
+    await hook.handleBulkShip() // 全程未 setShipQty
 
     expect(outsourceApi.shipProcessesBatch).toHaveBeenCalledWith(1, [
       { process_id: 1, quantity: 6 },
@@ -306,7 +316,7 @@ describe('useOutsourceProcess 一键发货/收货数量草稿三分支（P1-21 �
     ])
   })
 
-  it('收货草稿显式输入 0：拒绝整批；清空则默认剩余待收量', async () => {
+  it('收货草稿显式输入 0：拒绝整批；清空同样拒绝（M7 语义与发货一致）', async () => {
     vi.mocked(outsourceApi.receiveProcessesBatch).mockResolvedValue({ success: true, total: 1, data: [] } as never)
     const hook = await setup(twoShippable)
     hook.setReceiveQty(1, '0') // 电绣已发 4 未收 0：显式 0 ≠ 未填
@@ -315,9 +325,10 @@ describe('useOutsourceProcess 一键发货/收货数量草稿三分支（P1-21 �
     expect(outsourceApi.receiveProcessesBatch).not.toHaveBeenCalled()
     expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('数量输入无效'))
 
-    hook.setReceiveQty(1, '') // 清空 → 默认剩余待收 4
+    hook.setReceiveQty(1, '') // 清空 → 同样拒绝（修复前默认剩余待收 4，M7 起须显式填写）
     await hook.handleBulkReceive()
-    expect(outsourceApi.receiveProcessesBatch).toHaveBeenCalledWith(1, [{ process_id: 1, quantity: 4 }])
+    expect(outsourceApi.receiveProcessesBatch).not.toHaveBeenCalled()
+    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('数量输入无效'))
   })
 
   it('收货草稿正整数：原样使用', async () => {

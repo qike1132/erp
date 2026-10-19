@@ -232,3 +232,47 @@ describe('ReportView — 筛选防抖与提交门槛（P1-24）', () => {
     expect(wrapper.find('.f-export').exists()).toBe(true)
   })
 })
+describe('ReportView — OCR-3 修复（防抖回跳 M5 / 查询空操作 M6）', () => {
+  beforeEach(() => {
+    mocks.orderLogs.mockReset()
+    mocks.orderLogs.mockResolvedValue({ logs: [], pagination: { pages: 3, total: 40 } })
+  })
+
+  it('M5: 显式提交后 300ms 内翻页：挂起的防抖到期不得把页码打回第 1 页', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.find('.f-product').setValue('保温杯')
+    await wrapper.find('.f-search').trigger('click') // 显式提交：page=1，立即请求
+    await flushPromises()
+    expect(mocks.orderLogs).toHaveBeenCalledTimes(1)
+
+    // 300ms 防抖窗口内翻到第 2 页
+    await wrapper.find('.t-page2').trigger('click')
+    await flushPromises()
+    expect(mocks.orderLogs).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2 }))
+
+    await sleep(400) // 挂起的防抖回调此刻到期
+    await flushPromises()
+    // 不得回跳：page 仍停在第 2 页（当前实现无条件 page=1；回到旧 key 时因 staleTime
+    // 内 fresh 可能连请求都不发，故断言 UI 状态而非请求数，直击回跳本质）
+    expect((wrapper.vm as unknown as { page: number }).page).toBe(2)
+    expect(mocks.orderLogs).toHaveBeenCalledTimes(2)
+  })
+
+  it('M6: 条件与页码都未变时重复点「查询」：必须真的再发一次请求', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.find('.f-product').setValue('保温杯')
+    await wrapper.find('.f-search').trigger('click')
+    await flushPromises()
+    expect(mocks.orderLogs).toHaveBeenCalledTimes(1)
+
+    // 同条件同页码再点「查询」：key 哈希不变 + staleTime 30s → 静默不查（Red）；
+    // 「查询」是显式命令，必须每次都真的发一次请求（参照 useCompletedOrders.search 语义）
+    await wrapper.find('.f-search').trigger('click')
+    await flushPromises()
+    expect(mocks.orderLogs).toHaveBeenCalledTimes(2)
+  })
+})

@@ -1,7 +1,12 @@
 <template>
   <div class="osp-inventory">
     <div class="osp-card-main">
-      <div v-if="isLoading && productCards.length === 0" class="osp-empty">
+      <div v-if="isError && productCards.length === 0" class="osp-empty osp-error">
+        <FontAwesomeIcon icon="exclamation-circle" aria-hidden="true" />
+        <span>工序预设加载失败</span>
+        <button class="osp-retry-btn" aria-label="重试" @click="() => void refetch()">重试</button>
+      </div>
+      <div v-else-if="isLoading && productCards.length === 0" class="osp-empty">
         <UiSpinner />
       </div>
       <div v-else-if="productCards.length === 0" class="osp-empty">
@@ -116,22 +121,39 @@ const PRESET_MAX_PAGES = 20
  * 分页拉全部工序预设（2026-10-19 审计 P1-23）。
  * 此前单页 per_page=500 不翻页、不校验 total——记录超 500 后多出的产品卡
  * 静默缺失。照 useOrderImport.fetchAllStaged 的模式：逐页取满页即续拉，
- * 页不满即止，页数护栏兜底。
+ * 页不满即止，页数护栏兜底。OCR-3：首屏失败上抛（isError+重试），后续页
+ * 失败保留已取数据；total 收口避免整数倍记录多拉空页；护栏截断须可观测。
  */
 async function fetchAllProcessTypes(): Promise<OutsourceProcessType[]> {
   const all: OutsourceProcessType[] = []
+  let truncatedByGuard = true
   for (let page = 1; page <= PRESET_MAX_PAGES; page += 1) {
-    const res = await outsourceApi.processTypes({ page, per_page: PRESET_PAGE_SIZE })
-    const items = res.data ?? []
+    let items: OutsourceProcessType[] = []
+    let total = 0
+    try {
+      const res = await outsourceApi.processTypes({ page, per_page: PRESET_PAGE_SIZE })
+      items = res.data ?? []
+      total = res.total ?? 0
+    } catch (e) {
+      if (page === 1) throw e // 首屏失败：交给上层 isError + 重试（OCR-3 M4）
+      console.warn(`工序预设第 ${page} 页拉取失败，已保留前 ${all.length} 条`)
+      truncatedByGuard = false // 部分失败不是护栏截断，不误报
+      break // 后续页失败：保留已取到的预设，不清空整表（M4）
+    }
     all.push(...items)
-    if (items.length < PRESET_PAGE_SIZE) break
+    if (items.length < PRESET_PAGE_SIZE || (total > 0 && all.length >= total)) {
+      truncatedByGuard = false
+      break
+    }
   }
+  if (truncatedByGuard) console.warn(`工序预设达 ${PRESET_MAX_PAGES * PRESET_PAGE_SIZE} 条护栏上限，超出部分未加载`)
   return all
 }
 
 const {
   data: listData,
   isLoading,
+  isError,
   refetch,
 } = useQuery({
   queryKey: ['outsource-process-types'],
@@ -227,13 +249,8 @@ const confirmDialog = useConfirmDialog()
 </script>
 
 <style scoped>
-.osp-inventory {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  min-height: 0;
-}
-
+/* 单行排版：文件贴 400 行门禁，规则不变 */
+.osp-inventory { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .osp-card-main {
   flex: 1;
   display: flex;
@@ -377,4 +394,7 @@ const confirmDialog = useConfirmDialog()
 }
 .osp-empty span { font-size: 14px; }
 .osp-empty-sub { font-size: 12px; opacity: 0.85; }
+.osp-error svg { color: var(--color-danger-500); }
+.osp-retry-btn { margin-top: 6px; padding: 6px 18px; border: 1px solid var(--color-border, #cbd5e1); border-radius: 8px; background: white; color: var(--color-text); font-size: 13px; cursor: pointer; }
+.osp-retry-btn:hover { border-color: var(--color-primary-400); color: var(--color-primary-600); }
 </style>
