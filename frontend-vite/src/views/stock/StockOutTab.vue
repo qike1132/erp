@@ -121,23 +121,29 @@ async function fetchShipmentInfo(productId?: string | number, customer?: string)
 
 // === 成品库存批次列表（选定 SKU 后带出，供按批次扣减） ===
 const batchOptions = ref<BatchAvailable[]>([])
-/** 请求序号：快速切换 SKU/客户时丢弃过期响应，避免旧结果覆盖新结果 */
+// 请求序号守卫 + 按产品拉批次：返回 null=被更新请求顶掉（勿变更状态）；[]=无批次或失败（闸门放行，后端兜底）
 let batchReqSeq = 0
+
+async function fetchBatchesForProduct(productId: string | number): Promise<BatchAvailable[] | null> {
+  const seq = ++batchReqSeq
+  try {
+    const res = await finishedStockApi.batches(Number(productId))
+    if (seq !== batchReqSeq) return null // 已有更新的请求在途，丢弃过期响应
+    return res.data ?? []
+  } catch {
+    if (seq !== batchReqSeq) return null
+    return []
+  }
+}
 
 async function fetchBatchOptions() {
   if (!form.productId) {
     batchOptions.value = []
     return
   }
-  const seq = ++batchReqSeq
-  try {
-    const res = await finishedStockApi.batches(Number(form.productId))
-    if (seq !== batchReqSeq) return // 已有更新的请求在途，丢弃过期响应
-    batchOptions.value = res.data ?? []
-  } catch {
-    if (seq !== batchReqSeq) return
-    batchOptions.value = []
-  }
+  const batches = await fetchBatchesForProduct(form.productId)
+  if (batches === null) return // 已有更新的请求在途，丢弃过期响应
+  batchOptions.value = batches
   // 当前选中批次若不在新列表里则清空，避免提交一个不存在/不属于该产品的批次
   if (form.batchNo && !batchOptions.value.some((b) => b.batch_no === form.batchNo)) {
     form.batchNo = ''
@@ -205,9 +211,11 @@ function checkBatchAvailability(opts: {
   batchNo: string
   quantity: number
   excludeId?: number
+  /** 批次列表来源：缺省用当前表单的 batchOptions；编辑路径传入按 product_id 重拉的结果（P1-20） */
+  batches?: BatchAvailable[]
 }): boolean {
   if (!opts.batchNo) return true
-  const opt = batchOptions.value.find((b) => b.batch_no === opts.batchNo)
+  const opt = (opts.batches ?? batchOptions.value).find((b) => b.batch_no === opts.batchNo)
   if (!opt) return true
   const stagedSameBatch = staged.value
     .filter((s) => s.product_id === opts.productId && s.customer === opts.customer
@@ -306,14 +314,14 @@ async function saveEditStaged() {
     showToast('数量必须为正整数', 'warning')
     return
   }
-  // 批次闸门同样要过：编辑可把数量调大，绕过它就会在提交时才被后端拒（部分出货成功）。
-  // excludeId 排除被编辑项自身——它已计入 staged，不排除会把可用量算小。
+  // 2026-10-19 审计 P1-20：暂存后 batchOptions 已清空，闸门「查不到即放行」会失效——
+  // 按被编辑条目的 product_id 无条件重拉批次再校验（失败/被顶掉则放行，后端兜底）。
+  const editBatches = (await fetchBatchesForProduct(item.product_id)) ?? []
+  // 批次闸门：编辑可把数量调大；excludeId 排除被编辑项自身（已计入 staged，不排除会把可用量算小）。
   if (!checkBatchAvailability({
-    productId: item.product_id,
-    customer: editStagedForm.customer,
-    batchNo: item.batch_no || '',
-    quantity: editStagedForm.quantity,
-    excludeId: item.id,
+    productId: item.product_id, customer: editStagedForm.customer,
+    batchNo: item.batch_no || '', quantity: editStagedForm.quantity,
+    excludeId: item.id, batches: editBatches,
   })) return
   // 2026-10-18 OCR 复评：产品级累计闸门也要过（此前只拦新增路径）
   const ok = await checkProductAvailability({
