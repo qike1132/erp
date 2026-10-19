@@ -121,6 +121,40 @@ async def _assert_per_sku_rollback(session, order_no, pa, pb):
             '流水 product_id 必须与被回滚的 SKU 一致，否则账实无法还原')
 
 
+async def _order_summary_rows(session, order_no, change_type):
+    """取本订单某 change_type 的汇总流水 change_quantity 列表。"""
+    return (await session.execute(
+        select(InventoryLog.change_quantity).where(
+            InventoryLog.change_type == change_type,
+            InventoryLog.related_id == order_no,
+        ))).scalars().all()
+
+
+async def _assert_single_summary(session, order_no, expected_total):
+    """断言订单级汇总：恰好一条「订单删除」汇总且值=实际回滚量（直删路径）。"""
+    rows = await _order_summary_rows(session, order_no, '订单删除')
+    assert rows == [expected_total], (
+        f'直删应恰写一条「订单删除」汇总（值 {expected_total}），实际 {rows}——'
+        '多写或漏写都会让按 product 聚合 change_quantity 的对账口径失真')
+
+
+async def _assert_approval_summary_only(session, order_no, expected_total):
+    """断言审批删的汇总口径（2026-10-19 OCR 第二轮 M3）。
+
+    审批路径自写一条「订单删除(审批)」（值=实际回滚量），共享实现传
+    write_summary=False 不再写「订单删除」——否则同一笔回滚两条汇总，
+    inventory_reconcile 按 product 聚合 change_quantity 会重复计数。
+    """
+    rows = await _order_summary_rows(session, order_no, '订单删除(审批)')
+    assert rows == [expected_total], (
+        f'审批删应恰写一条「订单删除(审批)」汇总（值=实际回滚量 '
+        f'{expected_total}），实际 {rows}')
+    plain = await _order_summary_rows(session, order_no, '订单删除')
+    assert plain == [], (
+        f'审批删不得再写「订单删除」汇总（write_summary=False），实际 {plain}——'
+        '双汇总会让按 product 聚合的对账重复计数')
+
+
 class TestDirectDeleteMultiSkuRollback:
     """直删路径（超管 delete_order → _delete_order_directly）。"""
 
@@ -139,6 +173,9 @@ class TestDirectDeleteMultiSkuRollback:
         assert order.is_deleted is True, '订单应被软删除'
         await _assert_per_sku_rollback(
             async_db_session, f'{_ORDER_PREFIX}001', pa, pb)
+        # 直删汇总（write_summary 默认 True）：恰一条「订单删除」，值=实际回滚量
+        await _assert_single_summary(
+            async_db_session, f'{_ORDER_PREFIX}001', _QUANTITY * 2)
 
 
 class TestApprovalDeleteMultiSkuRollback:
@@ -166,3 +203,7 @@ class TestApprovalDeleteMultiSkuRollback:
         assert order.is_deleted is True, '审批通过后订单应被软删除'
         await _assert_per_sku_rollback(
             async_db_session, f'{_ORDER_PREFIX}002', pa, pb)
+        # 审批删汇总口径（M3）：仅一条「订单删除(审批)」（值=实际回滚量），
+        # 不得再有「订单删除」——双汇总会让 inventory_reconcile 重复计数
+        await _assert_approval_summary_only(
+            async_db_session, f'{_ORDER_PREFIX}002', _QUANTITY * 2)

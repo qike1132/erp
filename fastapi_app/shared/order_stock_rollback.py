@@ -17,7 +17,10 @@
   （change_type 维持既名——stock_inventory_service 的「已出货净额」口径
   列表按它排除回滚行，改名会破坏两处 CTE 同步）；
 - 单 SKU 订单（全部出库行挂在 order.product_id 上）行为与旧实现等价：
-  净量合计、一次加回、一条「订单删除」汇总流水；
+  净量合计、一次加回、一条「订单删除」汇总流水（write_summary=True 时；
+  审批路径传 False 跳过本段，由调用方自写「订单删除(审批)」汇总防重复
+  计数——2026-10-19 OCR 第二轮 M3）；order.product_id 为 NULL 时不写
+  汇总（不可归属行，同轮 L6）；
 - 产品为 NULL 的出库行（历史行 product_id 不可能为 NULL——StockOut FK
   非空；防御性跳过并告警）与 product 行不存在（并发删除）跳过告警，
   不阻断删除主流程（与旧实现「order.product_id 为 NULL 时跳过」同语义）。
@@ -50,12 +53,20 @@ async def rollback_order_stock_by_sku(
     db: AsyncSession,
     order: Order,
     order_stockouts: list[StockOut],
+    write_summary: bool = True,
 ) -> int:
     """删除订单时按 SKU 回滚净抵扣量，返回总回滚量。
 
     逐 product 分组：组内净量 <= 0 跳过；组产品行不存在时告警跳过
     （不阻断删除）。负库存守卫与 version 递增由 apply_stock_delta_locked
     统一承担（修掉了旧实现直改 ``product.current_stock`` 不递增 version 的问题）。
+
+    Args:
+        write_summary: 是否写「订单删除」汇总流水（2026-10-19 OCR 第二轮 M3）。
+            审批删路径传 False——它自写「订单删除(审批)」汇总（change_type
+            带审批后缀、值取本函数返回的实际回滚量），若不关掉本段，同一笔
+            回滚会插两条汇总，inventory_reconcile 按 product 聚合全部
+            change_quantity 时重复计数。直删路径不传（默认 True）行为不变。
     """
     net_by_product: dict[int, int] = defaultdict(int)
     for stockout in order_stockouts:
@@ -90,7 +101,15 @@ async def rollback_order_stock_by_sku(
             related_id=order.order_no,
             note=f'订单删除回滚抵扣：{order.order_no}，恢复产品「{product.name}」净 {net_qty} 件',
         ))
-    if total_rolled_back:
+    # 汇总流水守卫（2026-10-19 OCR 第二轮）：
+    # - write_summary=False 跳过（审批路径自写「订单删除(审批)」，防重复计数）；
+    # - order.product_id 可 NULL（迁移 052 ON DELETE SET NULL：兼容产品被删后
+    #   出库行仍可挂其他 SKU），NULL 时跳过——否则写出 product_id=None 的
+    #   不可归属台账行（L6，与审批路径守卫口径一致）。
+    # 已知限制（OCR 次级建议，不改）：多 SKU 订单的汇总整笔记在兼容 SKU
+    # （order.product_id）头上，该 SKU 的流水合计会大于其实际库存变动；
+    # 逐 SKU 明细由上方「抵扣回滚」行准确记账，汇总行仅作订单级总量参考。
+    if total_rolled_back and write_summary and order.product_id is not None:
         db.add(InventoryLog(
             product_id=order.product_id,
             change_type='订单删除',

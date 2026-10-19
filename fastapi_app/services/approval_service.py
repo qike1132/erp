@@ -398,7 +398,13 @@ def _add_delete_audit_log(
 async def _backup_and_audit_deleted_order(
     db: AsyncSession, order: Order, current_user: User, approval_id: int,
 ) -> None:
-    """备份订单删除图并写审批删除审计日志（与直删路径同口径，可追溯可恢复）。"""
+    """备份订单删除图并写审批删除审计日志（与直删路径同口径，可追溯可恢复）。
+
+    调用时点契约（2026-10-19 OCR 第二轮 M5）：必须在任何 sa_delete 批量
+    DELETE（StockOut/OrderSyncRecord/SyncRetryQueue/OrderStatusLog/审批/
+    明细）**之前**调用——内部 _collect_order_deletion_graph 重新查库，
+    DELETE 已在事务内生效时查到的对应段恒为空，备份无法还原抵扣明细。
+    """
     from fastapi_app.services.order.commands import (
         _collect_order_deletion_graph,
         _order_deletion_backup_payload,
@@ -432,7 +438,23 @@ async def _handle_delete_approval(
     )
     order_stockouts = list(result.scalars().all())
 
-    await rollback_order_stock_by_sku(db, order, order_stockouts)
+    # write_summary=False（2026-10-19 OCR 第二轮 M3）：本路径自写
+    # 「订单删除(审批)」汇总（见下方），共享实现再写「订单删除」会让
+    # inventory_reconcile 对同一笔回滚重复计数。返回值是**实际回滚量**
+    # （正组求和、跳过缺失产品后的落账值），供下方汇总与消息使用——
+    # 替代旧式「出库行净量求和」：后者在下方批量 DELETE 之后再读
+    # order_stockouts 实例属性属过期读（M2），且含负组/被跳过组时
+    # 与实际回滚量不符。
+    total_rolled_back = await rollback_order_stock_by_sku(
+        db, order, order_stockouts, write_summary=False,
+    )
+
+    # 备份+审计（2026-10-19 OCR 第二轮 M5 前移）：必须在下方批量 DELETE
+    # （StockOut/OrderSyncRecord 等）**之前**收集删除图——_collect_order_deletion_graph
+    # 重新查库，DELETE 已在事务内生效时查到的 stockouts/sync_records 恒为空，
+    # 备份无法还原本单抵扣明细（原顺序与直删路径相反）。审批/状态日志/
+    # 重试队列此刻均未删，快照完整。
+    await _backup_and_audit_deleted_order(db, order, current_user, approval.id)
 
     # 先解除已取消退货对外键的引用（否则 RESTRICT 外键挡住下面的 stock_out 删除）；
     # active 退货已在开头的 assert_no_linked_returns 处被拒。
@@ -442,7 +464,6 @@ async def _handle_delete_approval(
 
     await db.execute(sa_delete(OrderSyncRecord).where(OrderSyncRecord.source_order_id == order.id))
     # 与直删路径同口径（Round16 B1/B2）：同步重试队列与状态日志随订单清理。
-    await _backup_and_audit_deleted_order(db, order, current_user, approval.id)
     await db.execute(sa_delete(SyncRetryQueue).where(SyncRetryQueue.source_order_id == order.id))
     await db.execute(sa_delete(OrderStatusLog).where(OrderStatusLog.order_no == order.order_no))
     approval_result = await db.execute(
@@ -469,18 +490,22 @@ async def _handle_delete_approval(
     from fastapi_app.services.shipment_plan_sync import purge_shipment_plan_details_for_order
     await purge_shipment_plan_details_for_order(db, order.order_no)
 
-    # 「订单删除(审批)」汇总流水与收敛前逐字一致（FK 保证 order.product_id 非
-    # None 即产品存在；total_deducted 全部出库行净量之和含负组，同式重算）。
-    # 2026-10-19 OCR 披露：共享实现内部另写「订单删除」汇总，两段重叠留待
-    # owner 裁决，本次不改对外流水行为。
-    total_deducted = sum(so.quantity - so.returned_quantity for so in order_stockouts)
+    # 「订单删除(审批)」汇总流水（2026-10-19 OCR 第二轮 M2/M3 重写）：
+    # - 值 = rollback_order_stock_by_sku 的返回值（**实际回滚量**），不再是
+    #   「全部出库行净量和」——旧式求和在上方 sa_delete(StockOut)（bulk
+    #   delete 的 synchronize_session='auto' 会 expunge 实例）之后读
+    #   order_stockouts 属性属过期读（M2），且含负组/产品缺失被跳过组时
+    #   与实际落账不符；实际回滚量与逐 SKU「抵扣回滚」流水之和严格对账。
+    # - 共享实现已传 write_summary=False 不再写「订单删除」汇总，本段是
+    #   审批删除唯一的订单级汇总（M3：消除双汇总重复计数）。
+    # - 对外 change_type 维持「订单删除(审批)」不变（前端/报表按名消费）。
     if order.product_id is not None:
         db.add(InventoryLog(
             product_id=order.product_id,
             change_type='订单删除(审批)',
-            change_quantity=total_deducted,
+            change_quantity=total_rolled_back,
             related_id=order.order_no,
-            note=f'审批通过删除订单：{order.order_no}，抵扣回滚数量：{total_deducted}',
+            note=f'审批通过删除订单：{order.order_no}，抵扣回滚数量：{total_rolled_back}',
         ))
 
     # 软删除订单（与直删一致），避免硬删除触发 Order→ApprovalRequest 的 CASCADE

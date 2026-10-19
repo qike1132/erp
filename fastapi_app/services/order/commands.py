@@ -291,22 +291,22 @@ async def delete_order_item(db: AsyncSession, item_id: int, current_user: User) 
     - 已被备货抵扣（该订单+该产品存在 stockin_id 非空的出货）时拒删。
 
     锁序 Product→Order→Item：末项分支会进 delete_order（_load_order_for_delete
-    以集合升序预锁整单产品并锁 Order 行）；此处先预锁「明细+兼容」两行，
-    避免以 P→O 之外的顺序与出库创建/整单编辑路径互等行锁死锁。
+    以集合升序预锁整单产品并锁 Order 行）；此处同样以**同一套**
+    _prelock_order_products 集合升序预锁（含待删明细产品），保证两条路径
+    持有的集合与顺序完全一致，避免以 P→O 之外的顺序与出库创建/整单编辑
+    /并发整单删除路径互等行锁死锁（2026-10-19 OCR 第二轮 M4）。
     """
     head = (await db.execute(
-        select(OrderItem.order_id, OrderItem.product_id,
-               Order.product_id.label('order_product_id'))
-        .join(Order, Order.id == OrderItem.order_id)
-        .where(OrderItem.id == item_id)
+        select(OrderItem.order_id, OrderItem.product_id).where(OrderItem.id == item_id)
     )).one_or_none()
     if head is None:
         raise ValueError('订单明细不存在')
-    # 预锁「明细产品」与「订单兼容产品」两行（按 id 升序）——末项分支会进
-    # delete_order 再锁整单产品全集；若不预锁，本路径会以 P(明细)→O→P(兼容)
-    # 乱序参与并发，与整单编辑的 P(兼容)→O 互等行锁死锁。
-    for pid in sorted({p for p in (head.product_id, head.order_product_id) if p is not None}):
-        await get_product_for_update(db, pid)
+    # 整单产品全集升序预锁（含本明细产品作为 extra——明细可能尚无出库行、
+    # order.product_id 可能已迁移，不在公共函数的 stockout/order 两个来源里）。
+    # 非末项分支会因此多锁本单其他 SKU 的产品行（无害：同事务短暂持有），
+    # 换来与 delete_order 的锁序完全一致；末项分支进入 delete_order 后
+    # _load_order_for_delete 的重锁全部为 no-op。
+    await _prelock_order_products(db, head.order_id, head.product_id)
     order = (await db.execute(
         select(Order).where(Order.id == head.order_id).with_for_update()
     )).scalar_one_or_none()
@@ -534,6 +534,37 @@ def _write_order_deletion_backup(snapshot: dict) -> str | None:
         raise OSError('订单删除前备份失败，已中止删除操作') from exc
 
 
+async def _prelock_order_products(
+    db: AsyncSession, order_id: int, *extra_pids: int | None,
+) -> None:
+    """整单产品全集升序预锁（delete_order / delete_order_item 共用锁序）。
+
+    集合 = 无锁读 ``order.product_id`` ∪ 该订单全部出库行 distinct
+    ``product_id`` ∪ ``extra_pids``（调用方已知的额外产品，如待删明细的
+    product_id——明细可能尚无出库行、order.product_id 可能已迁移，不在
+    前两个来源里），过滤 None 后按 id 升序逐行 get_product_for_update。
+    订单不存在则前两个来源为空、仅锁 extra（「订单不存在」由调用方按
+    原口径抛错，同 update_order 的做法）。
+
+    2026-10-19 OCR 第二轮 M4：delete_order_item 原先只预锁「明细产品+
+    兼容产品」两行再锁 Order 行，末项分支进 delete_order 后若全集里存在
+    比已持行更小的 id（订单删过明细、stockin_id IS NULL 的 stock_out 挂
+    更小 id 产品时可达），会「持大等小」，与并发 delete_order「先拿小
+    id 再等大 id」互等死锁。两路径改为共用本函数后持有的集合与顺序
+    完全一致，末项分支进入 _load_order_for_delete 的重锁全部为 no-op，
+    锁序全程单调。delete_order_item 非末项分支会因此多锁本单其他 SKU
+    的产品行（无害：同事务短暂持有），换来两条路径锁序统一。
+    """
+    order_pid = (await db.execute(
+        select(Order.product_id).where(Order.id == order_id)
+    )).scalar_one_or_none()
+    stockout_pids = (await db.execute(
+        select(StockOut.product_id).where(StockOut.order_id == order_id).distinct()
+    )).scalars().all()
+    for pid in sorted({p for p in (order_pid, *stockout_pids, *extra_pids) if p is not None}):
+        await get_product_for_update(db, pid)
+
+
 async def _load_order_for_delete(db: AsyncSession, order_id: int) -> Order | None:
     """按 delete_order 的锁序加载订单：先升序预锁全部涉及 Product，再锁 Order 行。
 
@@ -553,21 +584,16 @@ async def _load_order_for_delete(db: AsyncSession, order_id: int) -> Order | Non
     删除会以「持 P(order.product_id) 等集合内更小 id 行」互等，构成 AB-BA
     死锁窗口（OCR 例：单 X 的 order.product_id=5、出库 {3,5}；单 Y 的
     order.product_id=3、出库 {3,5}）。集合升序预锁后，回滚内部的重锁全部
-    为 no-op，锁序全程单调。已知残余：delete_order_item 末项分支自持部分
-    集合（明细产品+兼容产品）先于本函数进入，其锁序不属本函数管辖（见该
-    函数注释）。
+    为 no-op，锁序全程单调。
+
+    2026-10-19 OCR 第二轮 M4：预锁段抽为公共 ``_prelock_order_products``，
+    与 ``delete_order_item`` 共用同一集合与顺序（该函数原先只预锁两行，
+    与本函数的全集锁序构成新的 AB-BA 窗口，详见其 docstring）。
 
     读不到 product_id（订单不存在）则集合为空、跳过预锁，由调用方按原口径
     抛「订单不存在」——同 update_order 的做法。
     """
-    order_pid = (await db.execute(
-        select(Order.product_id).where(Order.id == order_id)
-    )).scalar_one_or_none()
-    stockout_pids = (await db.execute(
-        select(StockOut.product_id).where(StockOut.order_id == order_id).distinct()
-    )).scalars().all()
-    for pid in sorted({p for p in (order_pid, *stockout_pids) if p is not None}):
-        await get_product_for_update(db, pid)
+    await _prelock_order_products(db, order_id)
 
     return (await db.execute(
         select(Order)

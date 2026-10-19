@@ -282,6 +282,47 @@ class TestStockReturnFactoryScope:
                 ).scalar() == stock_return.id, '被拒请求不得删除退货'
         await _assert_no_stock_mutation(db, product)
 
+    # ── 2026-10-19 OCR 第二轮 M1：按产品退货的历史行（stockout_id NULL）不得绕过厂闸门 ──
+    # StockReturn.stockout_id 可空（迁移 071：按产品退货不关联出货），
+    # 旧闸门 `if stockout_id is None: return` 对这些行直接放行——厂绑定用户
+    # 可跨厂回冲库存/删记录。StockReturn.product_id NOT NULL，闸门须按它判厂。
+
+    async def test_factory_user_cannot_edit_product_return_without_stockout(self, fs_api):
+        client, db, _, set_user = fs_api
+        set_user("东莞")
+        product, _stockout = await _make_hubei_stockout(db)
+        from fastapi_app.shared_models import StockReturn
+        stock_return = StockReturn(
+            return_no=f"SR-FS-{uuid.uuid4().hex[:8]}", product_id=product.id,
+            stockout_id=None, quantity=3, customer="湖北客户",
+            return_date=None, status="active")
+        db.add(stock_return)
+        await db.flush()
+        resp = await client.put(f"{RETURN_API}/{stock_return.id}", json={"quantity": 99})
+        assert resp.status_code == 404, (
+            f'厂绑定用户改他厂按产品退货（无 stockout）应 404，'
+            f'实际 {resp.status_code}：{resp.text}')
+        await _assert_no_stock_mutation(db, product)
+
+    async def test_factory_user_cannot_delete_product_return_without_stockout(self, fs_api):
+        client, db, _, set_user = fs_api
+        set_user("东莞")
+        product, _stockout = await _make_hubei_stockout(db)
+        from fastapi_app.shared_models import StockReturn
+        stock_return = StockReturn(
+            return_no=f"SR-FS-{uuid.uuid4().hex[:8]}", product_id=product.id,
+            stockout_id=None, quantity=3, customer="湖北客户",
+            return_date=None, status="active")
+        db.add(stock_return)
+        await db.flush()
+        resp = await client.delete(f"{RETURN_API}/{stock_return.id}")
+        assert resp.status_code == 404, (
+            f'厂绑定用户删他厂按产品退货（无 stockout）应 404，'
+            f'实际 {resp.status_code}：{resp.text}')
+        assert (await db.execute(select(StockReturn.id).where(StockReturn.id == stock_return.id))
+                ).scalar() == stock_return.id, '被拒请求不得删除按产品退货'
+        await _assert_no_stock_mutation(db, product)
+
 
 @pytest.mark.integration
 class TestFactoryScopeAllows:
