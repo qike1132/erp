@@ -5,6 +5,7 @@
 把「整张订单全部 SKU 的净扣减量」一次性加回 ``order.product_id``（多 SKU
 模型下的首 SKU 兼容值）锁定的单行 Product，InventoryLog 也全记首 SKU——
 每删一张多 SKU 订单必然：首 SKU 库存虚增、其余 SKU 漏回滚、流水无法还原。
+（2026-10-19 OCR 迭代：这两个包装函数已删，两条路径的调用点直接调本模块。）
 
 本模块把回滚收敛为**单一实现**（两条删除路径此前是复制分叉关系，历次
 修复屡次只落一侧）：
@@ -20,6 +21,13 @@
 - 产品为 NULL 的出库行（历史行 product_id 不可能为 NULL——StockOut FK
   非空；防御性跳过并告警）与 product 行不存在（并发删除）跳过告警，
   不阻断删除主流程（与旧实现「order.product_id 为 NULL 时跳过」同语义）。
+
+锁序契约（2026-10-19 OCR Medium 修复）：本函数内部按 product_id 升序逐行
+取锁。调用方在进入前**不得持有任何 product 行锁**（如审批删路径）；若因
+外层锁序约定必须预锁（如直删路径为保持与 update_order/出库创建的 P→O
+约定），必须**按升序一次性预锁本订单回滚涉及的全部产品行**（与内部序
+一致，重锁为 no-op）——严禁只预锁 order.product_id 单行：当它不是回滚
+集合的最小 id 时，两条并发删除会互等行锁，构成 AB-BA 死锁窗口。
 """
 import logging
 from collections import defaultdict

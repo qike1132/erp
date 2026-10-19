@@ -44,7 +44,7 @@ from fastapi_app.services.serializers.order_serializer import (
     OrderSerializer,
 )
 from fastapi_app.shared.order_stock_rollback import rollback_order_stock_by_sku
-from fastapi_app.shared.stock_concurrency import assert_stock_available, get_product_for_update
+from fastapi_app.shared.stock_concurrency import get_product_for_update
 from fastapi_app.shared_models import (
     ApprovalLog,
     ApprovalRequest,
@@ -290,9 +290,9 @@ async def delete_order_item(db: AsyncSession, item_id: int, current_user: User) 
       （非超管会变成提交审批，订单不立即删除，故不能硬编码成功文案）。
     - 已被备货抵扣（该订单+该产品存在 stockin_id 非空的出货）时拒删。
 
-    锁序 Product→Order→Item：`_delete_order_directly` 内部会再锁一次
-    order.product_id（幂等重锁），若此处不先预锁产品，会与出库创建路径（P→O）
-    构成 AB-BA 死锁。
+    锁序 Product→Order→Item：末项分支会进 delete_order（_load_order_for_delete
+    以集合升序预锁整单产品并锁 Order 行）；此处先预锁「明细+兼容」两行，
+    避免以 P→O 之外的顺序与出库创建/整单编辑路径互等行锁死锁。
     """
     head = (await db.execute(
         select(OrderItem.order_id, OrderItem.product_id,
@@ -302,9 +302,9 @@ async def delete_order_item(db: AsyncSession, item_id: int, current_user: User) 
     )).one_or_none()
     if head is None:
         raise ValueError('订单明细不存在')
-    # 预锁「明细产品」与「订单兼容产品」两行（按 id 升序）——末项分支会进 delete_order →
-    # _delete_order_directly 再锁 order.product_id；若不预锁，本路径会以
-    # P(明细)→O→P(兼容) 参与并发，与整单编辑的 P(兼容)→O 互等行锁死锁。
+    # 预锁「明细产品」与「订单兼容产品」两行（按 id 升序）——末项分支会进
+    # delete_order 再锁整单产品全集；若不预锁，本路径会以 P(明细)→O→P(兼容)
+    # 乱序参与并发，与整单编辑的 P(兼容)→O 互等行锁死锁。
     for pid in sorted({p for p in (head.product_id, head.order_product_id) if p is not None}):
         await get_product_for_update(db, pid)
     order = (await db.execute(
@@ -535,26 +535,39 @@ def _write_order_deletion_backup(snapshot: dict) -> str | None:
 
 
 async def _load_order_for_delete(db: AsyncSession, order_id: int) -> Order | None:
-    """按 delete_order 的锁序加载订单：先预锁 Product，再锁 Order 行本身。
+    """按 delete_order 的锁序加载订单：先升序预锁全部涉及 Product，再锁 Order 行。
 
     2026-10-18 OCR 评审 P2-07 收尾：上一版用 `db.get(Order, ...)` 无锁读订单 ——
     ① Order 行本身从未加锁，与并发删除构成更新丢失窗口；
     ② `db.get` 走身份映射，本事务先前无锁加载过的 Order 会直接拿到旧对象。
 
-    锁序与 update_order 逐字同构（P→O）：先按 product_id 锁产品，再
-    `with_for_update(of=Order)` 锁订单行。`of=Order` 限定只锁 order 行 ——
-    joinedload 展开的 product 行已由上面的产品锁覆盖（同事务重锁无害），
-    不限定则锁范围会带上 join 出来的行，并依赖「PG 是否允许 outer join 上
-    裸 FOR UPDATE」这一易变细节。
+    锁序与 update_order 同构（P→O）：先锁产品行，再 `with_for_update(of=Order)`
+    锁订单行。`of=Order` 限定只锁 order 行 —— joinedload 展开的 product 行已由
+    上面的产品锁覆盖（同事务重锁无害），不限定则锁范围会带上 join 出来的行，
+    并依赖「PG 是否允许 outer join 上裸 FOR UPDATE」这一易变细节。
 
-    读不到 product_id（订单不存在/product_id 空）则跳过预锁，由调用方按原口径
+    2026-10-19 OCR Medium 修复：预锁范围从 order.product_id 单行扩为
+    「order.product_id ∪ 该订单全部出库行的 product_id」并**按 id 升序**逐行
+    取锁——删除回滚（rollback_order_stock_by_sku）内部同样按升序锁这些行，
+    若只预锁 order.product_id 单行，当它不是回滚集合的最小 id 时，两条并发
+    删除会以「持 P(order.product_id) 等集合内更小 id 行」互等，构成 AB-BA
+    死锁窗口（OCR 例：单 X 的 order.product_id=5、出库 {3,5}；单 Y 的
+    order.product_id=3、出库 {3,5}）。集合升序预锁后，回滚内部的重锁全部
+    为 no-op，锁序全程单调。已知残余：delete_order_item 末项分支自持部分
+    集合（明细产品+兼容产品）先于本函数进入，其锁序不属本函数管辖（见该
+    函数注释）。
+
+    读不到 product_id（订单不存在）则集合为空、跳过预锁，由调用方按原口径
     抛「订单不存在」——同 update_order 的做法。
     """
-    _pre_pid = (await db.execute(
+    order_pid = (await db.execute(
         select(Order.product_id).where(Order.id == order_id)
     )).scalar_one_or_none()
-    if _pre_pid is not None:
-        await get_product_for_update(db, _pre_pid)
+    stockout_pids = (await db.execute(
+        select(StockOut.product_id).where(StockOut.order_id == order_id).distinct()
+    )).scalars().all()
+    for pid in sorted({p for p in (order_pid, *stockout_pids) if p is not None}):
+        await get_product_for_update(db, pid)
 
     return (await db.execute(
         select(Order)
@@ -672,18 +685,6 @@ def _order_deletion_backup_payload(
     }
 
 
-async def _rollback_order_stock_deduction(
-    db: AsyncSession, product, order: Order, order_stockouts: list, total_deducted: int,
-) -> None:
-    """回滚删除订单带来的库存抵扣（逐 SKU 归位，2026-10-18 P0-1）。
-
-    实现收敛到 shared.order_stock_rollback.rollback_order_stock_by_sku：
-    多 SKU 订单按 stockout.product_id 分组各自回滚，旧实现把全部净扣减量
-    加回首 SKU（order.product_id 兼容值）是库存正确性缺陷。参数 product /
-    total_deducted 保留仅为兼容调用方，逐 SKU 实现内自行按组取锁与求和。
-    """
-    await rollback_order_stock_by_sku(db, order, order_stockouts)
-
 
 async def _purge_outsource_processes(db: AsyncSession, process_ids: list[int]) -> None:
     """解绑出货明细、删除工序流转与工序本身（分批 IN，避免超大 IN 列表）。"""
@@ -733,28 +734,24 @@ async def _purge_order_related_rows(
 async def _delete_order_directly(
     db: AsyncSession, order: Order, order_id: int, current_user: User,
 ) -> dict:
-    # 产品删除后 order.product_id 会被置空（迁移 052：ON DELETE SET NULL）：
-    # 此时无产品行可锁、无库存可回滚，且 inventory_log.product_id 是非空外键
-    # （ON DELETE CASCADE），故跳过库存回滚，只清理订单自身关联记录。
-    # 本函数同时被审批通过路径（approval_service）调用：那条路径没有预锁 Product，
-    # 故这里必须自己锁一次；对 delete_order 已预锁的调用方，同事务内重复加锁是 no-op。
-    # 注意：本锁只覆盖 Product，**Order 行的锁由 delete_order 入口负责**（见那里的
-    # with_for_update 注释）；单独调本函数不等于锁全链路。
-    product = (
-        await get_product_for_update(db, order.product_id)
-        if order.product_id is not None else None
-    )
-
+    # 2026-10-19 OCR Medium 收敛：本函数不再预锁 order.product_id 单行——该锁
+    # 与共享回滚的升序锁序构成 AB-BA 死锁窗口，且其返回值自 P0-1 起只是死参数。
+    # 产品行锁全部由唯一调用链 delete_order → _load_order_for_delete 以
+    # 「集合升序预锁」承担（见该函数 docstring）；rollback_order_stock_by_sku
+    # 内部的重锁为 no-op。注意：Order 行的锁由 delete_order 入口负责；单独调
+    # 本函数不等于锁全链路。
     graph = await _collect_order_deletion_graph(db, order, order_id)
     order_stockouts = graph['stockouts']
-    total_deducted = sum(so.quantity - so.returned_quantity for so in order_stockouts)
     flow_count = _order_deletion_flow_count(graph)
+    # 仅用于下方删除日志与返回消息文案（全部出库行净量之和，含负组，与
+    # 2026-10-18 P0-1 前同式）；回滚量本身由 rollback_order_stock_by_sku 自算。
+    total_deducted = sum(so.quantity - so.returned_quantity for so in order_stockouts)
 
     backup_path = _write_order_deletion_backup(
         _order_deletion_backup_payload(order, order_id, current_user, graph, flow_count),
     )
 
-    await _rollback_order_stock_deduction(db, product, order, order_stockouts, total_deducted)
+    await rollback_order_stock_by_sku(db, order, order_stockouts)
 
     plan_purge = await _purge_order_related_rows(db, order, order_id, graph)
 

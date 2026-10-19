@@ -374,17 +374,6 @@ async def _handle_edit_approval(
     order.status = await compute_order_status_from_db(db, order)
 
 
-async def _rollback_deduction_for_approval(
-    db: AsyncSession, product, order: Order, order_stockouts: list, total_deducted: int,
-) -> None:
-    """审批删订单的抵扣回滚（逐 SKU 归位，2026-10-18 P0-1）。
-
-    与直删路径收敛到同一实现 shared.order_stock_rollback.rollback_order_stock_by_sku
-    ——此前两处是复制分叉关系，且同款缺陷：把全部 SKU 净扣减量加回首 SKU。
-    参数 product / total_deducted 保留只为兼容调用方。
-    """
-    await rollback_order_stock_by_sku(db, order, order_stockouts)
-
 
 def _add_delete_audit_log(
     db: AsyncSession, current_user: User, order: Order, approval_id: int, backup_path: str | None,
@@ -406,53 +395,10 @@ def _add_delete_audit_log(
     ))
 
 
-async def _handle_delete_approval(
-    db: AsyncSession, approval: ApprovalRequest, order: Order, current_user: User,
+async def _backup_and_audit_deleted_order(
+    db: AsyncSession, order: Order, current_user: User, approval_id: int,
 ) -> None:
-    """处理删除类审批：回滚库存抵扣、清理关联记录、软删除订单。
-
-    删除该订单的其他 ApprovalRequest 记录（排除当前审批），
-    当前审批保留以便设置状态和创建日志。
-
-    Args:
-        db: 数据库会话。
-        approval: 审批请求对象。
-        order: 关联订单对象。
-        current_user: 审批人（备份快照与 AuditLog 的操作者）。
-
-    Raises:
-        ValueError: 关联产品不存在或库存将变为负数时抛出。
-    """
-    # 退货记录存在时不可删除（迁移 072 RESTRICT 的应用层前置）：审批提交后才产生退货的
-    # 场景下，直删入口的校验不会覆盖到这里，故此处再挡一次，给出明确原因而非 DB 层 409。
-    await assert_no_linked_returns(db, order.id)
-
-    # 产品删除后 order.product_id 会被置空（迁移 052：ON DELETE SET NULL）：
-    # 此时无产品行可锁、无库存可回滚，且 inventory_log.product_id 是非空外键
-    # （ON DELETE CASCADE），故跳过库存回滚，仅清理关联记录并软删除订单。
-    product = (
-        await get_product_for_update(db, order.product_id)
-        if order.product_id is not None else None
-    )
-
-    result = await db.execute(
-        select(StockOut).where(StockOut.order_id == order.id)
-    )
-    order_stockouts = list(result.scalars().all())
-    total_deducted = sum(so.quantity - so.returned_quantity for so in order_stockouts)
-
-    await _rollback_deduction_for_approval(db, product, order, order_stockouts, total_deducted)
-
-    # 先解除已取消退货对外键的引用（否则 RESTRICT 外键挡住下面的 stock_out 删除）；
-    # active 退货已在 _handle_delete_approval 开头的 assert_no_linked_returns 处被拒。
-    await detach_cancelled_returns_for_order(db, order.id)
-    # 批量删除出库记录，避免逐条 ORM delete
-    await db.execute(sa_delete(StockOut).where(StockOut.order_id == order.id))
-
-    await db.execute(sa_delete(OrderSyncRecord).where(OrderSyncRecord.source_order_id == order.id))
-    # 与直删路径同口径（Round16 B1/B2）：同步重试队列与状态日志随订单清理，
-    # 否则 purchase_history 的状态日志仍指向已删订单（审计口径不一致）。
-    # 备份与 AuditLog 对齐直删：审批删同样可追溯、可恢复。
+    """备份订单删除图并写审批删除审计日志（与直删路径同口径，可追溯可恢复）。"""
     from fastapi_app.services.order.commands import (
         _collect_order_deletion_graph,
         _order_deletion_backup_payload,
@@ -463,7 +409,40 @@ async def _handle_delete_approval(
         order, order.id, current_user, backup_graph,
         len(backup_graph['status_logs']) + len(backup_graph['retry_records']),
     ))
-    _add_delete_audit_log(db, current_user, order, approval.id, backup_path)
+    _add_delete_audit_log(db, current_user, order, approval_id, backup_path)
+
+
+async def _handle_delete_approval(
+    db: AsyncSession, approval: ApprovalRequest, order: Order, current_user: User,
+) -> None:
+    """处理删除类审批：回滚库存抵扣、清理关联记录、软删除订单。
+
+    删除该订单的其他 ApprovalRequest（当前审批保留以便设状态/建日志）。
+    Raises: ValueError: 库存回滚将变为负数时（由共享回滚实现抛出）。
+    """
+    # 退货记录存在时不可删除（迁移 072 RESTRICT 的应用层前置）：审批提交后才
+    # 产生退货的场景直删入口校验不覆盖，此处再挡一次并给出明确原因。
+    await assert_no_linked_returns(db, order.id)
+
+    # 2026-10-19 OCR Medium：不预锁 order.product_id（与共享回滚升序锁序互逆，
+    # 且返回值自 P0-1 起只是死参数）——进入回滚前不持任何 product 行锁，锁序由
+    # rollback_order_stock_by_sku 内部升序保证；本路径不锁 Order 行。
+    result = await db.execute(
+        select(StockOut).where(StockOut.order_id == order.id)
+    )
+    order_stockouts = list(result.scalars().all())
+
+    await rollback_order_stock_by_sku(db, order, order_stockouts)
+
+    # 先解除已取消退货对外键的引用（否则 RESTRICT 外键挡住下面的 stock_out 删除）；
+    # active 退货已在开头的 assert_no_linked_returns 处被拒。
+    await detach_cancelled_returns_for_order(db, order.id)
+    # 批量删除出库记录，避免逐条 ORM delete
+    await db.execute(sa_delete(StockOut).where(StockOut.order_id == order.id))
+
+    await db.execute(sa_delete(OrderSyncRecord).where(OrderSyncRecord.source_order_id == order.id))
+    # 与直删路径同口径（Round16 B1/B2）：同步重试队列与状态日志随订单清理。
+    await _backup_and_audit_deleted_order(db, order, current_user, approval.id)
     await db.execute(sa_delete(SyncRetryQueue).where(SyncRetryQueue.source_order_id == order.id))
     await db.execute(sa_delete(OrderStatusLog).where(OrderStatusLog.order_no == order.order_no))
     approval_result = await db.execute(
@@ -490,7 +469,12 @@ async def _handle_delete_approval(
     from fastapi_app.services.shipment_plan_sync import purge_shipment_plan_details_for_order
     await purge_shipment_plan_details_for_order(db, order.order_no)
 
-    if product is not None:
+    # 「订单删除(审批)」汇总流水与收敛前逐字一致（FK 保证 order.product_id 非
+    # None 即产品存在；total_deducted 全部出库行净量之和含负组，同式重算）。
+    # 2026-10-19 OCR 披露：共享实现内部另写「订单删除」汇总，两段重叠留待
+    # owner 裁决，本次不改对外流水行为。
+    total_deducted = sum(so.quantity - so.returned_quantity for so in order_stockouts)
+    if order.product_id is not None:
         db.add(InventoryLog(
             product_id=order.product_id,
             change_type='订单删除(审批)',
@@ -499,15 +483,11 @@ async def _handle_delete_approval(
             note=f'审批通过删除订单：{order.order_no}，抵扣回滚数量：{total_deducted}',
         ))
 
-    # 软删除订单（与 order_crud._delete_order_directly 一致），
-    # 避免硬删除触发 Order→ApprovalRequest 的 CASCADE，导致当前审批被级联删除
-    # 而与新创建的 ApprovalLog 产生 FK NO ACTION 冲突。
+    # 软删除订单（与直删一致），避免硬删除触发 Order→ApprovalRequest 的 CASCADE
+    # 级联删掉当前审批、与新 ApprovalLog 产生 FK NO ACTION 冲突。
     order.is_deleted = True
     order.deleted_at = _utcnow()
     order.deleted_by_id = approval.requester_id
-
-    # 领域事件 ORDER_DELETED 已移至 endpoint 层（approval.py）事务提交后发布，
-    # 订阅者使用独立 session，需可见已提交变更。
 
 
 # 审批操作类型 → handler 策略注册表（OCP）

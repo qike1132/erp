@@ -65,16 +65,26 @@ IN_SCOPE_FILES = (
     "fastapi_app/services/stock_return_service.py",
 )
 
-# 每个文件期望的统一入口调用点数量（AST 统计 Call 节点，合计 9 处）
+# 每个文件期望的统一入口调用点数量（AST 统计 Call 节点，合计 9 处）。
+# 2026-10-18 P0-1（commit 82670b64）：两个删除路径的回滚收敛到
+# shared/order_stock_rollback.py → apply_stock_delta_locked（负库存守卫与
+# version 递增内置），approval_service.py 与 order/commands.py 的
+# assert_stock_available 调用点随实现移出，条目清零（2026-10-19 OCR 迭代）。
+# shared/order_stock_rollback.py 本身不入本清单：IN_SCOPE 判据是 t31 历史
+# 收敛名单（曾有内联判定的 service 文件），它无内联判定、不直写
+# current_stock（走 apply_stock_delta_locked），且已被下方两条全根扫描
+# （序关系比较 + 普通赋值直写）覆盖。
 EXPECTED_CALL_SITES = {
-    # 删除订单：直写前的净变化量判定
-    "fastapi_app/services/approval_service.py": {"assert_stock_available": 1},
+    # 删除订单：回滚已收敛到 shared/order_stock_rollback.py（2026-10-18 P0-1），
+    # 原直写前的净变化量判定随之移出本文件。
+    "fastapi_app/services/approval_service.py": {},
     # 出货导入：按行静默跳过（返回 False）
     "fastapi_app/services/batch_import_core.py": {"check_stock_available": 1},
     # OCR 出货导入：只产出暂存行校验结论，不抛异常
     "fastapi_app/services/ocr/_import.py": {"check_stock_available": 1},
-    # 删除订单（order 域）：直写前的净变化量判定
-    "fastapi_app/services/order/commands.py": {"assert_stock_available": 1},
+    # 删除订单（order 域）：回滚已收敛到 shared/order_stock_rollback.py
+    # （2026-10-18 P0-1），原直写前的净变化量判定随之移出本文件。
+    "fastapi_app/services/order/commands.py": {},
     # 暂存出货确认：for 循环 + begin_nested 内抛 ValueError
     # 2026-10-17 审计 AUD-04：另加 2 处 check_stock_available 预检
     # （Excel 导入 _build_stockout_entity + 编辑 _stockout_extra_updates），
@@ -99,14 +109,11 @@ EXPECTED_CALL_SITES = {
 # 8 个文件内所有 `*.current_stock += / -=` 直写的静态台账（按文件路径分组）。
 # 每一条都标注了它是「纯增量（不适用本任务）」还是「写入侧（负向由统一入口覆盖）」。
 DOCUMENTED_WRITES = {
-    "fastapi_app/services/approval_service.py": [
-        # 写入侧：total_deducted 可正可负，负向由同函数内 assert_stock_available 覆盖
-        "product.current_stock += total_deducted",
-    ],
-    "fastapi_app/services/order/commands.py": [
-        # 写入侧：total_deducted 可正可负，负向由同函数内 assert_stock_available 覆盖
-        "product.current_stock += total_deducted",
-    ],
+    # 2026-10-18 P0-1：回滚收敛到 shared/order_stock_rollback.py 后，
+    # 两个删除路径的 `product.current_stock += total_deducted` 直写消失
+    # （改走 apply_stock_delta_locked：带 version 守卫并递增），台账清零。
+    "fastapi_app/services/approval_service.py": [],
+    "fastapi_app/services/order/commands.py": [],
     "fastapi_app/services/batch_import_core.py": [
         # ↑ 2026-10-17 审计修复：原有的两处直写（备货 `locked_product.current_stock += qty`、
         #   出货 `locked_product.current_stock -= qty`）已改走 apply_stock_delta_locked
@@ -466,15 +473,29 @@ def test_call_sites_use_unified_entry(rel_path):
     assert _unified_calls(rel_path) == EXPECTED_CALL_SITES[rel_path]
 
 
-def test_total_call_sites_is_eleven():
-    """统一入口调用点合计 11 处（2026-10-17 审计 AUD-04 新增 2 处预检）。"""
+def test_total_call_sites_is_nine():
+    """统一入口调用点合计 9 处。
+
+    2026-10-17 审计 AUD-04 曾新增 2 处预检至 11；2026-10-18 P0-1 把两个
+    删除路径的回滚收敛到 shared/order_stock_rollback.py（负向守卫内置在
+    apply_stock_delta_locked），approval_service.py 与 order/commands.py
+    的 2 处 assert_stock_available 调用点随之移出，降为 9。
+    """
     total = sum(count for site in EXPECTED_CALL_SITES.values() for count in site.values())
-    assert total == 11
-    assert sum(sum(_unified_calls(rel).values()) for rel in IN_SCOPE_FILES) == 11
+    assert total == 9
+    assert sum(sum(_unified_calls(rel).values()) for rel in IN_SCOPE_FILES) == 9
 
 
 @pytest.mark.parametrize("rel_path", IN_SCOPE_FILES)
 def test_in_scope_files_import_unified_entry(rel_path):
+    """文件内的统一入口调用必须来自共享模块（防本地复制实现）。
+
+    2026-10-18 P0-1：两个删除路径的调用点已移出（EXPECTED_CALL_SITES
+    清零），import 要求随调用点一并解除——断言意图是「有调用点则必须真
+    import」，对零调用点文件不再要求持有 import。
+    """
+    if not EXPECTED_CALL_SITES[rel_path]:
+        return
     imported: set[str] = set()
     for node in ast.walk(_tree(rel_path)):
         if (isinstance(node, ast.ImportFrom)
