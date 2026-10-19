@@ -30,6 +30,7 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import UiInput from '@/components/ui/UiInput.vue'
 import UiSelect from '@/components/ui/UiSelect.vue'
 import UiDatePicker from '@/components/ui/UiDatePicker.vue'
@@ -44,19 +45,30 @@ interface EditStagedForm {
   note: string
 }
 
-defineProps<{
+const props = defineProps<{
   customerOptions: { value: string; label: string }[]
   /** 保存链路在途：禁用保存按钮防双击重入（OCR-2 M1，由 StockOutTab 的 editSaving 传入） */
   saving?: boolean
 }>()
 
-const openModel = defineModel<boolean>('open', { default: false })
+const open = defineModel<boolean>('open', { default: false })
 
 const form = defineModel<EditStagedForm>('form', { required: true })
 
 const emit = defineEmits<{
   save: []
 }>()
+
+/** saving 在途时拦截 UiDialog 的 ✕/Esc 关闭（OCR-4 L）：与「取消」按钮禁用同语义。
+ *  否则关掉后保存结果仍会静默落暂存行（用户既没看到已保存也没看到失败原因），
+ *  且「取消被禁而 ✕ 能关」两条退出路径口径分裂。 */
+const openModel = computed({
+  get: () => open.value,
+  set: (v: boolean) => {
+    if (props.saving && !v) return
+    open.value = v
+  },
+})
 </script>
 
 <style scoped>

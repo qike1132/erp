@@ -1,0 +1,55 @@
+/* StockOutTab 布局样式 —— 从组件 <style> 抽出（2026-10-19 OCR-4 L）。
+ * 原先为贴 400 行门禁把规则压成单行，牺牲可读性与 diff 聚焦；
+ * 经 <style scoped src="./StockOutTab.css"> 引入，scoped 修饰符对本文件同样生效
+ * （编译时注入 data-v hash，与内联 style 行为一致）。
+ * 规则内容与抽出前完全一致，仅展开排版。 */
+
+/* ===== Layout ===== */
+.stock-out-tab {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.so-tab-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.so-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+@media (max-width: 992px) {
+  .so-body {
+    grid-template-columns: 1fr;
+  }
+}
+
+.so-col {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.so-col + .so-col {
+  border-left: 2px solid var(--color-border, #cbd5e1);
+}
+
+/* ===== Submit Bar ===== */
+.so-submit-bar {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0;
+  border-top: 1px solid var(--color-border, #cbd5e1);
+}

@@ -78,6 +78,7 @@ interface StockOutTabVm {
   fetchBatchOptions: () => Promise<void>
   editStagedForm: { customer: string; date: string; productName: string; quantity: number; note: string }
   editStagedOpen: boolean
+  editStagedIdx: number
   staged: StagedStockout[]
   batchOptions: { batch_no: string; available_quantity: number }[]
 }
@@ -466,5 +467,139 @@ describe('StockOutTab — OCR-3 修复（输入快照 M1 / null 不降级 M2 / �
     await flushPromises()
     // 迟到的旧请求不得写回（表单已重置，下拉残留旧产品批次是 bug）
     expect(vm.batchOptions).toHaveLength(0)
+  })
+})
+describe('StockOutTab — OCR-4 修复（M1 静默放弃反馈 / M2 页面级批次失败保留）', () => {
+  /** 挂起第 N 次 '/aux/available-shipment' 调用直至手动放行（制造产品闸门在途窗口） */
+  function mockShipmentWithHold(holdAt: number) {
+    let release!: () => void
+    const held = new Promise<void>((r) => { release = r })
+    let shipmentCalls = 0
+    mocks.getMock.mockImplementation(async (url: string) => {
+      if (url === '/finished-stock/batches') {
+        batchesCalls += 1
+        return { success: true, data: [{ batch_no: 'B1', available_quantity: 10 }] }
+      }
+      if (url === '/aux/available-shipment') {
+        shipmentCalls += 1
+        if (shipmentCalls === holdAt) await held
+        return { success: true, data: { order_quantity: 1000, shipped_quantity: 0, available_quantity: 1000 } }
+      }
+      return { success: true, data: [] }
+    })
+    return () => release()
+  }
+
+  it('M1: 批次重拉在途期间该行被删除：toast 反馈 + 关闭弹窗 + 复位索引，不再静默死路', async () => {
+    const release = mockBatchesWithHold(2) // 挂住编辑路径的批次拉取
+    const wrapper = mountTab()
+    const vm = wrapper.vm as unknown as StockOutTabVm
+    await stageOneB1Item(vm, 2)
+
+    vm.openEditStaged(0)
+    vm.editStagedForm.quantity = 5
+    const pending = vm.saveEditStaged()
+    await flushPromises()
+    vm.staged.splice(0, 1) // 在途期间该行被删除
+    expect(vm.editStagedOpen).toBe(true)
+
+    release()
+    await pending
+    expect(vm.staged).toHaveLength(0) // 不得复活/误写（OCR-3 M1 语义保持）
+    // 静默放弃 = 弹窗停在失效行上，点保存永远无响应也无反馈（OCR-4 M1）
+    expect(mocks.showToast).toHaveBeenCalledWith(expect.stringContaining('已被删除'), 'warning')
+    expect(vm.editStagedOpen).toBe(false)
+    expect(vm.editStagedIdx).toBe(-1)
+  })
+
+  it('M1: 产品闸门在途期间该行被删除：第二处放弃点同样反馈并关闭', async () => {
+    // 直接注入条目（不经 addStaged）：available-shipment 只会被编辑保存链路调用一次，
+    // 排除 addStaged 闸门/watch fetchShipmentInfo 的次数抖动，hold 住的必然是保存路径
+    const release = mockShipmentWithHold(1)
+    const wrapper = mountTab()
+    const vm = wrapper.vm as unknown as StockOutTabVm
+    vm.staged.push({ id: 111, product_id: '7', product_name: '产品A', customer: '客户甲', date: '2026-10-19', quantity: 2, note: '', batch_no: 'B1' })
+
+    vm.openEditStaged(0)
+    vm.editStagedForm.quantity = 5
+    const pending = vm.saveEditStaged()
+    await flushPromises()
+    vm.staged.splice(0, 1)
+
+    release()
+    await pending
+    expect(vm.staged).toHaveLength(0)
+    expect(mocks.showToast).toHaveBeenCalledWith(expect.stringContaining('已被删除'), 'warning')
+    expect(vm.editStagedOpen).toBe(false)
+    expect(vm.editStagedIdx).toBe(-1)
+  })
+
+  it('M1: 在途期间行被删且用户已另开补位行编辑：不打扰新编辑会话（不关新弹窗/不 toast）', async () => {
+    const release = mockBatchesWithHold(1) // 直接注入条目：编辑保存的批次拉取是第 1 次调用
+    const wrapper = mountTab()
+    const vm = wrapper.vm as unknown as StockOutTabVm
+    // 显式不同 id（Date.now() 同毫秒会撞 id），模拟两条已暂存条目
+    vm.staged.push(
+      { id: 111, product_id: '7', product_name: '产品A', customer: '客户甲', date: '2026-10-19', quantity: 2, note: '', batch_no: 'B1' },
+      { id: 222, product_id: '7', product_name: '产品B', customer: '客户甲', date: '2026-10-19', quantity: 3, note: '', batch_no: 'B1' },
+    )
+
+    vm.openEditStaged(0) // 编辑第 0 行（id=111）
+    vm.editStagedForm.quantity = 5
+    const pending = vm.saveEditStaged()
+    await flushPromises()
+    vm.staged.splice(0, 1) // 第 0 行删除 → id=222 补位到索引 0
+    vm.openEditStaged(0) // 用户在补位行（id=222）上另开编辑
+    expect(vm.editStagedOpen).toBe(true)
+
+    release()
+    await pending
+    // 新编辑会话不得被在途保存的放弃逻辑关掉/打扰（防矫枉过正）
+    expect(vm.editStagedOpen).toBe(true)
+    expect(mocks.showToast).not.toHaveBeenCalledWith(expect.stringContaining('已被删除'), 'warning')
+  })
+
+  it('M2: 页面级批次拉取失败：保留旧选项与已选批次 + toast 警告，不坍缩为空列表', async () => {
+    mocks.getMock.mockImplementation(async (url: string) => {
+      if (url === '/finished-stock/batches') {
+        batchesCalls += 1
+        if (batchesCalls >= 2) throw new Error('network down') // 第 2 次（如 watch customer 重拉）瞬时失败
+        return { success: true, data: [{ batch_no: 'B1', available_quantity: 10 }] }
+      }
+      if (url === '/aux/available-shipment') {
+        return { success: true, data: { order_quantity: 1000, shipped_quantity: 0, available_quantity: 1000 } }
+      }
+      return { success: true, data: [] }
+    })
+    const wrapper = mountTab()
+    const vm = wrapper.vm as unknown as StockOutTabVm
+    vm.form.productId = '7'
+    await vm.fetchBatchOptions() // 第 1 次：成功，B1 可用 10
+    expect(vm.batchOptions).toHaveLength(1)
+    vm.form.batchNo = 'B1' // 用户选定批次
+
+    await vm.fetchBatchOptions() // 第 2 次：瞬时失败
+    // 失败 ≠ 权威空列表：清掉会连带清已选批次并隐藏下拉，用户以「不指定批次」盲提交（OCR-4 M2）
+    expect(mocks.showToast).toHaveBeenCalledWith(expect.stringContaining('批次列表拉取失败'), 'warning')
+    expect(vm.batchOptions).toHaveLength(1)
+    expect(vm.batchOptions[0]!.batch_no).toBe('B1')
+    expect(vm.form.batchNo).toBe('B1')
+  })
+
+  it('M2 对照: 成功响应确实无批次：照常清空下拉与已选批次（防矫枉过正）', async () => {
+    batchResponses = [
+      [{ batch_no: 'B1', available_quantity: 10 }],
+      [], // 第 2 次成功但权威列表为空
+    ]
+    const wrapper = mountTab()
+    const vm = wrapper.vm as unknown as StockOutTabVm
+    vm.form.productId = '7'
+    await vm.fetchBatchOptions()
+    vm.form.batchNo = 'B1'
+    await vm.fetchBatchOptions()
+
+    expect(vm.batchOptions).toHaveLength(0)
+    expect(vm.form.batchNo).toBe('')
+    expect(mocks.showToast).not.toHaveBeenCalledWith(expect.stringContaining('批次列表拉取失败'), 'warning')
   })
 })

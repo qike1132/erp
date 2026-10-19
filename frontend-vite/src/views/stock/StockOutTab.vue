@@ -132,16 +132,16 @@ function clearPageBatches() {
   batchOptions.value = []
 }
 
-/** 按产品拉批次（null=被顶掉）；failValue=失败返回：页面级 []（清空下拉）/编辑级 null（放行后端兜底，OCR-2 M2） */
+/** 按产品拉批次；null=被顶掉（丢弃过期响应）；'failed'=请求失败（页面级保留旧值/编辑级放行后端兜底）；数组=成功（含空列表） */
 async function fetchBatchesForProduct(
-  productId: string | number, seq: { v: number }, failValue: BatchAvailable[] | null = [],
-): Promise<BatchAvailable[] | null> {
+  productId: string | number, seq: { v: number },
+): Promise<BatchAvailable[] | null | 'failed'> {
   const my = ++seq.v
   try {
     const res = await finishedStockApi.batches(Number(productId))
     return my !== seq.v ? null : (res.data ?? [])
   } catch {
-    return my !== seq.v ? null : failValue
+    return my !== seq.v ? null : 'failed'
   }
 }
 
@@ -152,8 +152,13 @@ async function fetchBatchOptions() {
   }
   const batches = await fetchBatchesForProduct(form.productId, pageBatchSeq)
   if (batches === null) return // 已有更新的请求在途，丢弃过期响应
+  if (batches === 'failed') {
+    // 瞬时失败 ≠ 权威空列表（OCR-4 M2）：清掉会连带清已选批次并隐藏下拉，用户以「不指定批次」盲提交
+    showToast('批次列表拉取失败，已保留上次结果；若刚入库请稍后刷新', 'warning')
+    return
+  }
   batchOptions.value = batches
-  // 当前选中批次若不在新列表里则清空，避免提交一个不存在/不属于该产品的批次
+  // 当前选中批次若不在新列表里则清空，避免提交一个不存在/不属于该产品的批次（仅成功响应才清）
   if (form.batchNo && !batchOptions.value.some((b) => b.batch_no === form.batchNo)) {
     form.batchNo = ''
   }
@@ -297,11 +302,14 @@ function addOcrStaged(items: StagedStockout[]) {
 // === 编辑暂存 ===
 const editStagedOpen = ref(false)
 const editStagedIdx = ref(-1)
+// 编辑会话令牌：openEditStaged 每次递增，保存链路据此判断用户是否仍停留本次会话（OCR-4 M1）
+const editSessionId = { v: 0 }
 // 编辑弹窗不支持改批次（批次在列表徽标里展示，选错只能删了重加），不引入 batchNo 字段
 const editStagedForm = reactive({ customer: '', date: '', productName: '', quantity: 1, note: '' })
 const editSaving = ref(false) // 保存链路在途标记：双击守卫 + 弹窗保存按钮禁用（OCR-2 M1）
 
 function openEditStaged(idx: number) {
+  editSessionId.v++
   editStagedIdx.value = idx
   const item = staged.value[idx]
   if (!item) return
@@ -333,23 +341,32 @@ async function saveEditStaged() {
     return
   }
   editSaving.value = true
+  const session = editSessionId.v // 会话令牌快照：期间重开过编辑（含补位行同索引）则放弃时不打扰新会话
+  /** 行被删/换位且用户仍停留本会话：反馈并关闭复位——静默放弃=弹窗停在失效行上永远存不了（OCR-4 M1） */
+  const abandonStaleEdit = () => {
+    if (editSessionId.v !== session || !editStagedOpen.value) return
+    showToast('该出库行已被删除或变更，本次编辑未保存', 'warning')
+    editStagedOpen.value = false
+    editStagedIdx.value = -1
+  }
   try {
     // await 后行可能被删/换位：itemId 不在原索引即放弃应用（OCR-3 M1）
     const sameItem = () => staged.value[idx]?.id === itemId
     // P1-20：暂存后 batchOptions 已清空，按条目 product_id 重拉权威批次；无 batch_no 短路（L4）；失败=null 放行（M2）
-    const editBatches = item.batch_no ? await fetchBatchesForProduct(item.product_id, editBatchSeq, null) : []
-    if (!sameItem()) return
+    const editBatches = item.batch_no ? await fetchBatchesForProduct(item.product_id, editBatchSeq) : []
+    if (!sameItem()) { abandonStaleEdit(); return }
     if (!checkBatchAvailability({
       productId: item.product_id, customer: draft.customer,
       batchNo: item.batch_no || '', quantity: draft.quantity,
-      excludeId: itemId, batches: editBatches, missingHint: '请删除该行后重新添加',
+      excludeId: itemId, batches: editBatches === 'failed' ? null : editBatches, missingHint: '请删除该行后重新添加',
     })) return
 
     const ok = await checkProductAvailability({
       productId: item.product_id, customer: draft.customer,
       quantity: draft.quantity, excludeId: itemId,
     })
-    if (!ok || !sameItem()) return
+    if (!ok) return
+    if (!sameItem()) { abandonStaleEdit(); return }
     item.customer = draft.customer
     item.date = draft.date
     item.quantity = draft.quantity
@@ -378,14 +395,5 @@ function onStockoutImported() {
 }
 </script>
 
-<style scoped>
-/* ===== Layout（单行排版：文件贴 400 行门禁，规则不变） ===== */
-.stock-out-tab { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
-.so-tab-content { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
-.so-body { display: grid; grid-template-columns: 1fr 1fr; flex: 1; min-height: 0; overflow: hidden; }
-@media (max-width: 992px) { .so-body { grid-template-columns: 1fr; } }
-.so-col { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
-.so-col + .so-col { border-left: 2px solid var(--color-border, #cbd5e1); }
-/* ===== Submit Bar ===== */
-.so-submit-bar { display: flex; justify-content: center; padding: 8px 0; border-top: 1px solid var(--color-border, #cbd5e1); }
-</style>
+<!-- 样式抽出为同目录 css（2026-10-19 OCR-4 L）：单行排版牺牲可读性与 diff 聚焦；scoped 对外部 css 同样生效 -->
+<style scoped src="./StockOutTab.css"></style>
