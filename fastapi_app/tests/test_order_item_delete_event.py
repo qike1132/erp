@@ -95,8 +95,19 @@ async def test_last_item_delete_service_returns_order_id(mock_db, monkeypatch):
     head = SimpleNamespace(order_id=7, product_id=None, order_product_id=None)
     order = SimpleNamespace(id=7, is_deleted=False)
 
+    # 2026-10-19 OCR 第三轮 H2 对齐 M4 重构后的 db.execute 调用序列——
+    # ① one_or_none 取明细 head；随后 _prelock_order_products 预锁段：
+    # ② select(Order.product_id) 无锁预读（None → 不入锁集合）、
+    # ③ select(StockOut.product_id).distinct() 出库产品集（空；head.
+    # product_id=None 同样过滤）——两者皆空故无 get_product_for_update；
+    # ④ select(Order).with_for_update() 订单行；⑤ 备货抵扣 SUM、
+    # ⑥ 兄弟明细 COUNT（=1 → 走末项分支，delete_order 已被替换）。
     head_result = MagicMock()
     head_result.one_or_none.return_value = head
+    order_pid_result = MagicMock()
+    order_pid_result.scalar_one_or_none.return_value = None
+    stockout_pids_result = MagicMock()
+    stockout_pids_result.scalars.return_value.all.return_value = []
     order_result = MagicMock()
     order_result.scalar_one_or_none.return_value = order
     deducted_result = MagicMock()
@@ -105,7 +116,8 @@ async def test_last_item_delete_service_returns_order_id(mock_db, monkeypatch):
     siblings_result.scalar_one.return_value = 1
 
     mock_db.execute = AsyncMock(
-        side_effect=[head_result, order_result, deducted_result, siblings_result]
+        side_effect=[head_result, order_pid_result, stockout_pids_result,
+                     order_result, deducted_result, siblings_result]
     )
 
     async def _no_lock(*_args, **_kwargs):

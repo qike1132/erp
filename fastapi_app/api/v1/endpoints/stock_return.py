@@ -26,6 +26,7 @@ from fastapi_app.services.stock_return_service import (
     edit_stockreturn,
     search_returnable_stockouts,
 )
+from fastapi_app.shared.factory_scope import assert_product_factory_scoped
 from fastapi_app.shared_models import StockOut, StockReturn, User
 
 logger = logging.getLogger(__name__)
@@ -48,18 +49,17 @@ async def _assert_return_factory_scoped(
     回冲库存/删记录）。create 无整行、按 stockout_id 推导
     （StockReturnCreate.stockout_id 必填非空，推导必达）。
 
-    口径与 stock.py::_assert_product_factory_scoped / order.py::
-    _assert_order_factory_scoped 一致：厂绑定非超管只能退本厂产品的货，
-    他厂一律 404；产品 factory 为空的历史行与产品不存在时放行
-    （后者由后续逻辑报 404/400）。
+    口径与 shared.factory_scope::assert_product_factory_scoped /
+    order.py::_assert_order_factory_scoped 一致：厂绑定非超管只能退本厂
+    产品的货，他厂一律 404；产品 factory 为空（NULL 或空串）的历史行与
+    产品不存在时放行（后者由后续逻辑报 404/400）。
     """
-    from fastapi_app.api.v1.endpoints.stock import _assert_product_factory_scoped
     pid = product_id
     if pid is None and stockout_id is not None:
         pid = (await db.execute(
             select(StockOut.product_id).where(StockOut.id == stockout_id)
         )).scalar_one_or_none()
-    await _assert_product_factory_scoped(db, pid, user, what='退货记录')
+    await assert_product_factory_scoped(db, pid, user, what='退货记录')
 
 
 @router.get('/shipment-options', response_model=list[ShipmentOption])

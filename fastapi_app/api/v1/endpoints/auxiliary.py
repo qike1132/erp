@@ -20,6 +20,7 @@ from fastapi_app.services.auxiliary_service import (
     get_product_by_id,
     get_stockin_by_id,
 )
+from fastapi_app.shared.factory_scope import assert_product_factory_scoped
 from fastapi_app.shared_models import Customer, User
 
 
@@ -398,6 +399,37 @@ class BatchStockOutRequest(BaseModel):
 
 # ==================== 批量提交 API ====================
 
+async def _factory_gate_batch_items(
+    db: AsyncSession, user: User, items: list, *, reject_message: str,
+) -> tuple[list[dict], list[int], list[dict | None]]:
+    """批量提交端点的逐项工厂闸门（2026-10-19 OCR 第三轮 H1）。
+
+    单条路径（/stock/in|out/create）已有 assert_product_factory_scoped，但
+    /aux/batch-submit-stockins|stockouts 的编排内部无任何工厂校验——厂绑定
+    （User.factory 非空）非超管可混入他厂 product_id 批量建备货/出货（越权）。
+    本 helper 在编排前逐项执行闸门，**不破坏整批语义**：他厂项标
+    success=False + 明确文案留在原下标（前端按下标对位判定部分失败），
+    放行项交给编排。
+
+    Returns:
+        (放行项的 model_dump 列表, 放行项原始下标列表, 全长度结果占位数组)。
+        被拒下标已填 ``{'success': False, 'error': ...}``，放行下标为 None
+        待编排结果回填。未绑定厂/超管用户闸门内部直接放行，零额外查询。
+    """
+    allowed: list[dict] = []
+    slots: list[int] = []
+    results: list[dict | None] = [None] * len(items)
+    for idx, item in enumerate(items):
+        try:
+            await assert_product_factory_scoped(db, item.product_id, user, what='库存记录')
+        except HTTPException:
+            results[idx] = {'success': False, 'error': reject_message}
+        else:
+            allowed.append(item.model_dump())
+            slots.append(idx)
+    return allowed, slots, results
+
+
 @router.post("/batch-submit-orders", response_model=BatchOrderResponse)
 async def batch_submit_orders(
     data: BatchOrderRequest,
@@ -417,11 +449,18 @@ async def batch_submit_stockins(
     user: User = Depends(require_any_permission("stockin_manage", "order_manage")),
     db: AsyncSession = Depends(get_async_db),
 ):
-    """批量提交入库"""
+    """批量提交入库（厂绑定用户先过逐项工厂闸门，2026-10-19 OCR 第三轮 H1）"""
     from fastapi_app.services.auxiliary_service import orchestrate_batch_stockins
-    return await orchestrate_batch_stockins(
-        db, [item.model_dump() for item in data.stockins], operator_id=user.id,
+    allowed, slots, results = await _factory_gate_batch_items(
+        db, user, data.stockins,
+        reject_message='产品不在你的工厂范围，已拒绝该条入库',
     )
+    if allowed:
+        orchestrated = await orchestrate_batch_stockins(db, allowed, operator_id=user.id)
+        for slot, r in zip(slots, orchestrated['results'], strict=True):
+            results[slot] = r or {'success': False, 'error': '入库处理失败，请稍后重试'}
+    # 顶层 success 保持 batch_create_stockins 的恒 True 语义；部分失败由 results[].success 表达
+    return {'success': True, 'results': results}
 
 
 @router.post("/batch-submit-stockouts", response_model=BatchStockoutResponse)
@@ -430,11 +469,21 @@ async def batch_submit_stockouts(
     user: User = Depends(require_permission("stockout_manage")),
     db: AsyncSession = Depends(get_async_db),
 ):
-    """批量提交出库"""
+    """批量提交出库（厂绑定用户先过逐项工厂闸门，2026-10-19 OCR 第三轮 H1）"""
     from fastapi_app.services.auxiliary_service import orchestrate_batch_stockouts
-    return await orchestrate_batch_stockouts(
-        db, [item.model_dump() for item in data.stockouts], operator_id=user.id,
+    allowed, slots, results = await _factory_gate_batch_items(
+        db, user, data.stockouts,
+        reject_message='产品不在你的工厂范围，已拒绝该条出货',
     )
+    if allowed:
+        orchestrated = await orchestrate_batch_stockouts(db, allowed, operator_id=user.id)
+        for slot, r in zip(slots, orchestrated['results'], strict=True):
+            results[slot] = r or {'success': False, 'error': '出货处理失败，请稍后重试'}
+    # 顶层 success 对齐 batch_create_stockouts 的 all_success：被拒项也计入失败
+    return {
+        'success': all(r is not None and r.get('success') for r in results),
+        'results': results,
+    }
 
 
 # ==================== 系统状态 API ====================

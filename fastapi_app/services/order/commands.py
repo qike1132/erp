@@ -769,15 +769,17 @@ async def _delete_order_directly(
     graph = await _collect_order_deletion_graph(db, order, order_id)
     order_stockouts = graph['stockouts']
     flow_count = _order_deletion_flow_count(graph)
-    # 仅用于下方删除日志与返回消息文案（全部出库行净量之和，含负组，与
-    # 2026-10-18 P0-1 前同式）；回滚量本身由 rollback_order_stock_by_sku 自算。
-    total_deducted = sum(so.quantity - so.returned_quantity for so in order_stockouts)
+
 
     backup_path = _write_order_deletion_backup(
         _order_deletion_backup_payload(order, order_id, current_user, graph, flow_count),
     )
 
-    await rollback_order_stock_by_sku(db, order, order_stockouts)
+    # 2026-10-19 OCR 第三轮 M3：接收**实际回滚量**（正组求和、跳过缺失产品后的
+    # 落账值），下方日志与用户消息改用之——total_deducted 只是「全部出库行净量
+    # 之和」，含负组/缺失 SKU 组时与实际回滚量发散（审批路径 _handle_delete_approval
+    # 在任务 #27 已同样修过，此处对齐口径）。
+    total_rolled_back = await rollback_order_stock_by_sku(db, order, order_stockouts)
 
     plan_purge = await _purge_order_related_rows(db, order, order_id, graph)
 
@@ -824,10 +826,10 @@ async def _delete_order_directly(
 
     logger.info(
         '订单删除成功：%s，操作人：%s，抵扣回滚：%s，级联流程清理：%s，出货计划明细清理：%s，备份：%s',
-        deleted_order_no, current_user.username, total_deducted, flow_count,
+        deleted_order_no, current_user.username, total_rolled_back, flow_count,
         plan_purge.get('detail_deleted', 0) if plan_purge else 0, backup_path,
     )
-    message = f'订单删除成功！已级联清理 {flow_count} 条关联流程记录，抵扣回滚数量：{total_deducted}'
+    message = f'订单删除成功！已级联清理 {flow_count} 条关联流程记录，抵扣回滚数量：{total_rolled_back}'
     if plan_purge and plan_purge.get('detail_deleted'):
         message += f"，同步移除出货计划明细 {plan_purge['detail_deleted']} 条"
     return {

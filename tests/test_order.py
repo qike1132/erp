@@ -349,9 +349,11 @@ class TestDeleteOrder:
                                               mock_cache, mock_async_db):
         """普通用户删除订单 - 走审批"""
         order = make_mock_order()
-        # 2026-10-18 P2-07：delete_order 的 db.execute 取数顺序——
-        # ① product_id 预读；② get_product_for_update 的产品行（未打桩，走真实函数）；
-        # ③ select(Order).with_for_update() 的订单行；其后是关联退货查询（空行集）。
+        # 2026-10-19 OCR 第三轮 H2 对齐 M4 重构后的调用序列——
+        # _prelock_order_products：① select(Order.product_id) 无锁预读；
+        # ② select(StockOut.product_id).distinct() 出库产品集（空）；
+        # ③ get_product_for_update 的产品行（product_id=1，一次）；
+        # ④ select(Order).with_for_update() 订单行；其后是关联退货查询（空行集）。
         call_count = {'n': 0}
 
         async def _fake_execute(*_args, **_kwargs):
@@ -359,8 +361,8 @@ class TestDeleteOrder:
             if call_count['n'] == 1:
                 return MagicMock(scalar_one_or_none=MagicMock(return_value=order.product_id))
             if call_count['n'] == 2:
-                return MagicMock(scalar_one_or_none=MagicMock(return_value=order))
-            if call_count['n'] == 3:
+                return MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[]))))
+            if call_count['n'] in (3, 4):
                 return MagicMock(scalar_one_or_none=MagicMock(return_value=order))
             return MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[]))))
 
@@ -390,15 +392,17 @@ class TestDeleteOrder:
                                               mock_async_db):
         """超管直接删除订单"""
         order = make_mock_order()
-        # 2026-10-18 P2-07：取数顺序同 test_delete_order_normal_user
-        # （① product_id ② 产品行 ③ 订单行，其后空行集）。
+        # 2026-10-19 OCR 第三轮 H2：取数顺序同 test_delete_order_normal_user
+        # （① product_id ② 出库产品集 ③ 产品行 ④ 订单行，其后空行集）。
         call_count = {'n': 0}
 
         async def _fake_execute(*_args, **_kwargs):
             call_count['n'] += 1
             if call_count['n'] == 1:
                 return MagicMock(scalar_one_or_none=MagicMock(return_value=order.product_id))
-            if call_count['n'] in (2, 3):
+            if call_count['n'] == 2:
+                return MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[]))))
+            if call_count['n'] in (3, 4):
                 return MagicMock(scalar_one_or_none=MagicMock(return_value=order))
             return MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[]))))
 
@@ -423,16 +427,20 @@ class TestDeleteOrder:
         直删时 DB 抛 IntegrityError 被映射成含糊的 409；现应前置为带原因的 ValueError(→400)。
         """
         order = make_mock_order()
-        # 2026-10-18 P2-07：取数顺序——① product_id 预读 ② get_product_for_update
-        # 的产品行 ③ 加锁读订单行，④起是 assert_no_linked_returns 的关联退货查询
-        # （这里返回有退货，应在锁全链路之后被前置拒绝）。
+        # 2026-10-19 OCR 第三轮 H2 对齐 M4 重构后的调用序列——
+        # ① select(Order.product_id) 无锁预读 ② 出库产品 distinct 集（空）
+        # ③ get_product_for_update 产品行 ④ 加锁读订单行，⑤起是
+        # assert_no_linked_returns 的关联退货查询（这里返回有退货，
+        # 应在锁全链路之后被前置拒绝）。
         call_count = {'n': 0}
 
         async def _fake_execute(*_args, **_kwargs):
             call_count['n'] += 1
             if call_count['n'] == 1:
                 return MagicMock(scalar_one_or_none=MagicMock(return_value=order.product_id))
-            if call_count['n'] in (2, 3):
+            if call_count['n'] == 2:
+                return MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[]))))
+            if call_count['n'] in (3, 4):
                 return MagicMock(scalar_one_or_none=MagicMock(return_value=order))
             res = MagicMock()
             res.scalars.return_value.all.return_value = ['SR-20261006-0001']

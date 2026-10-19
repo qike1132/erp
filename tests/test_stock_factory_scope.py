@@ -368,3 +368,105 @@ class TestFactoryScopeAllows:
             "stockin_date": "2026-10-18",
         })
         assert resp.status_code != 404, 'factory 为空的历史产品不得被厂闸门拦截'
+    # ── 2026-10-19 OCR 第三轮 M1：factory 为**空串**的产品同样放行 ──
+    # product_service.create_product 落库写 factory=factory or ''——未分配工厂
+    # 是空串而非 NULL；旧判 `row_factory is not None` 把空串产品对厂绑定用户
+    # 404，而产品列表页不按厂过滤仍显示这些行，读放行写拦截口径矛盾。
+
+    async def test_legacy_product_with_empty_string_factory_allowed(self, fs_api):
+        """产品 factory 为空串（create_product 写 factory or ''）的历史行不拦。"""
+        client, db, _, set_user = fs_api
+        set_user("东莞")
+        from fastapi_app.shared_models import Product
+        suffix = uuid.uuid4().hex[:8]
+        product = Product(
+            name=f"空厂-{suffix}", barcode=f"EF-{suffix}",
+            factory="", current_stock=100, initial_stock=100)
+        db.add(product)
+        await db.flush()
+        resp = await client.post(f"{STOCK_API}/in/create", json={
+            "product_id": product.id, "quantity": 5, "customer": "客户",
+            "stockin_date": "2026-10-19",
+        })
+        assert resp.status_code != 404, 'factory 为空串的历史产品不得被厂闸门拦截'
+
+
+@pytest.mark.integration
+class TestAuxBatchFactoryScope:
+    """OCR 第三轮 H1：批量提交端点的逐项工厂闸门。
+
+    /aux/batch-submit-stockins|stockouts 此前只认权限码，编排内部
+    （batch_create_stockins / batch_create_stockouts）无任何工厂校验——
+    厂绑定用户可混入他厂 product_id 批量建备货/出货（单条路径 P0-2 修了，
+    批量路径漏网）。闸门须逐项执行：他厂项标 success=False 留在原下标
+    （HTTP 恒 200，不破坏整批语义，前端按 results 下标对位判定部分失败）。
+    """
+
+    async def test_factory_user_batch_stockin_item_rejected(self, fs_api):
+        client, db, _, set_user = fs_api
+        set_user("东莞")
+        product, _stockout = await _make_hubei_stockout(db)
+        resp = await client.post("/api/v1/aux/batch-submit-stockins", json={
+            "stockins": [
+                {"product_id": product.id, "quantity": 5, "customer": "湖北客户"},
+            ],
+        })
+        assert resp.status_code == 200, (
+            f'批量端点不得因单项被拒而整批 4xx/5xx，实际 {resp.status_code}：{resp.text}')
+        body = resp.json()
+        assert len(body["results"]) == 1, 'results 须与请求项数对齐（前端按下标对位）'
+        assert body["results"][0]["success"] is False, (
+            f'他厂产品的备货项应被拒，实际 {body["results"][0]}')
+        assert "工厂" in (body["results"][0].get("error") or ''), (
+            f'拒绝文案须明确指出工厂范围，实际 {body["results"][0]}')
+        await _assert_no_stock_mutation(db, product)
+
+    async def test_factory_user_batch_stockout_item_rejected(self, fs_api):
+        client, db, _, set_user = fs_api
+        set_user("东莞")
+        product, _stockout = await _make_hubei_stockout(db)
+        resp = await client.post("/api/v1/aux/batch-submit-stockouts", json={
+            "stockouts": [
+                {"product_id": product.id, "quantity": 5, "customer": "湖北客户"},
+            ],
+        })
+        assert resp.status_code == 200, (
+            f'批量端点不得因单项被拒而整批 4xx/5xx，实际 {resp.status_code}：{resp.text}')
+        body = resp.json()
+        assert len(body["results"]) == 1, 'results 须与请求项数对齐（前端按下标对位）'
+        assert body["results"][0]["success"] is False, (
+            f'他厂产品的出货项应被拒，实际 {body["results"][0]}')
+        assert "工厂" in (body["results"][0].get("error") or ''), (
+            f'拒绝文案须明确指出工厂范围，实际 {body["results"][0]}')
+        await _assert_no_stock_mutation(db, product)
+
+    async def test_factory_user_batch_mixed_items_keep_order_and_partial_success(self, fs_api):
+        """混合批次：他厂项拒（原下标）、本厂项正常编排成功，顺序不得错位。"""
+        from fastapi_app.shared_models import Product
+        client, db, _, set_user = fs_api
+        set_user("湖北")
+        product_hb, _stockout = await _make_hubei_stockout(db)
+        suffix = uuid.uuid4().hex[:8]
+        product_dg = Product(
+            name=f"东莞-{suffix}", barcode=f"DG-{suffix}",
+            factory="东莞", current_stock=100, initial_stock=100)
+        db.add(product_dg)
+        await db.flush()
+        resp = await client.post("/api/v1/aux/batch-submit-stockins", json={
+            "stockins": [
+                {"product_id": product_dg.id, "quantity": 5, "customer": "东莞客户"},
+                {"product_id": product_hb.id, "quantity": 5, "customer": "湖北客户"},
+            ],
+        })
+        assert resp.status_code == 200, f'实际 {resp.status_code}：{resp.text}'
+        body = resp.json()
+        assert len(body["results"]) == 2, 'results 须与请求项数对齐（前端按下标对位）'
+        assert body["results"][0]["success"] is False, (
+            f'第 0 项（他厂）应被拒，实际 {body["results"][0]}')
+        assert "工厂" in (body["results"][0].get("error") or '')
+        assert body["results"][1]["success"] is True, (
+            f'第 1 项（本厂）应正常创建，实际 {body["results"][1]}')
+        assert body["results"][1].get("stockin_no"), '成功项须带 stockin_no'
+        # 他厂产品不得因本厂项成功而被连带处理
+        await db.refresh(product_dg)
+        assert product_dg.current_stock == 100, '被拒项不得改他厂产品库存'

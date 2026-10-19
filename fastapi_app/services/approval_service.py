@@ -426,13 +426,22 @@ async def _handle_delete_approval(
     删除该订单的其他 ApprovalRequest（当前审批保留以便设状态/建日志）。
     Raises: ValueError: 库存回滚将变为负数时（由共享回滚实现抛出）。
     """
+    # 2026-10-19 OCR 第三轮 M2：开头锁 Order 行，封住「无锁读 StockOut 快照 →
+    # 回滚内部才取锁」的插入窗口——并发 create_stockout_core（先锁 product、
+    # 再经 calculate_available_shipment_quantity 锁 Order）可在该窗口插入并
+    # 提交一条本订单新 stock_out：随后下方按 order_id 的批量 DELETE 会把它
+    # 一并删掉，但它不在回滚集，库存永久少这笔量。先锁 Order 与出货路径的
+    # Order 锁互斥序列化；本事务提交后 is_deleted=True，并发方重算可出货量
+    # 时本订单被过滤，不会再挂新出货。
+    await db.execute(select(Order.id).where(Order.id == order.id).with_for_update())
+
     # 退货记录存在时不可删除（迁移 072 RESTRICT 的应用层前置）：审批提交后才
     # 产生退货的场景直删入口校验不覆盖，此处再挡一次并给出明确原因。
     await assert_no_linked_returns(db, order.id)
 
     # 2026-10-19 OCR Medium：不预锁 order.product_id（与共享回滚升序锁序互逆，
     # 且返回值自 P0-1 起只是死参数）——进入回滚前不持任何 product 行锁，锁序由
-    # rollback_order_stock_by_sku 内部升序保证；本路径不锁 Order 行。
+    # rollback_order_stock_by_sku 内部升序保证。
     result = await db.execute(
         select(StockOut).where(StockOut.order_id == order.id)
     )
