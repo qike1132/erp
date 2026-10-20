@@ -12,14 +12,11 @@
 # 新架构（ports/adapters 模式）— 原有导出保持不变
 # ---------------------------------------------------------------------------
 from fastapi_app.services.backup.adapters import (
-    BackupProgressReporterAdapter,
     DefaultArchiveDecryptorAdapter,
     ExistingCacheInvalidatorAdapter,
     ExistingComponentRestoreAdapter,
     ExistingEngineLifecycleAdapter,
     ExistingRestoreVerifierAdapter,
-    ExistingSafetyBackupAdapter,
-    PostgresAdvisoryLockAdapter,
 )
 from fastapi_app.services.backup.orchestrator import (
     DatabaseRestoreOrchestrator,
@@ -77,7 +74,6 @@ from ._constants import (
     PRE_RESTORE_DIR,
     PROJECT_ROOT,
     REDIS_DUMP,
-    RESTORE_LOCK_ID,
     UPLOADS_DIR,
 )
 from .cache_restore import *  # noqa: F403
@@ -138,7 +134,6 @@ __all__ = [  # noqa: RUF022
     "PRE_RESTORE_DIR",
     "PROJECT_ROOT",
     "REDIS_DUMP",
-    "RESTORE_LOCK_ID",
     "UPLOADS_DIR",
     # 端口
     "AdvisoryLock",
@@ -150,7 +145,6 @@ __all__ = [  # noqa: RUF022
     # 格式策略
     "BackupLockError",
     # 适配器
-    "BackupProgressReporterAdapter",
     "BinaryLogError",
     "CacheInvalidator",
     "ComponentRestorePort",
@@ -167,9 +161,7 @@ __all__ = [  # noqa: RUF022
     "ExistingComponentRestoreAdapter",
     "ExistingEngineLifecycleAdapter",
     "ExistingRestoreVerifierAdapter",
-    "ExistingSafetyBackupAdapter",
     "JsonRestoreStrategy",
-    "PostgresAdvisoryLockAdapter",
     "ProgressReporter",
     # 策略
     "PsqlRestoreStrategy",
@@ -225,7 +217,6 @@ __all__ = [  # noqa: RUF022
     "restore_config",
     "restore_database_from_json",
     "restore_database_via_psql",
-    "restore_database_via_psql_from_bytes",
     # filestore
     "restore_filestore",
     "restore_from_zip",

@@ -23,7 +23,6 @@ from fastapi_app.api.v1.endpoints.backup import _deps
 from fastapi_app.services.backup.adapters import (
     ExistingComponentRestoreAdapter,
     ExistingRestoreVerifierAdapter,
-    ExistingSafetyBackupAdapter,
 )
 from fastapi_app.services.backup.orchestrator import DatabaseRestoreOrchestrator
 from fastapi_app.services.backup.strategies import (
@@ -51,6 +50,45 @@ def test_no_legacy_backup_service_imports_in_backup_pkg():
             ):
                 offenders.append(f'{py.relative_to(BACKUP_PKG_DIR)}:{node.lineno}')
     assert not offenders, f'发现对已删除模块 {LEGACY_MODULE} 的导入: {offenders}'
+
+
+# ---------------------------------------------------------------------------
+# 1b. 死代码守卫（Z05-R18）：未接线的平行实现不得复活
+# ---------------------------------------------------------------------------
+
+# 恢复锁只有 Redis 版（restore.py）、加密/格式探测只有 core/backup_encryption.py、
+# 备份策略只有只读路径——这些实现各自重复了上述之一，且 grep 全仓零生产调用方。
+DEAD_BACKUP_SYMBOLS = frozenset({
+    'PostgresAdvisoryLockAdapter', 'ExistingSafetyBackupAdapter', 'BackupProgressReporterAdapter',
+    'try_acquire_restore_lock', 'release_advisory_restore_lock',
+    'restore_database_via_psql_from_bytes',
+    'update_policy', 'get_policy_compliance', 'get_alert_statistics',
+    'set_transaction_isolation_serializable', 'create_database_snapshot_backup',
+    'get_postgres_lsn', 'get_postgres_wal_info',
+    'DefaultBackupFormatStrategy', 'LocalBackupStorage',
+    'create_backup_chunks', 'restore_from_chunks',
+})
+DEAD_BACKUP_MODULES = ('chunks.py', 'format_strategy.py', 'format_storage.py', 'format_types.py')
+
+
+def test_dead_backup_parallel_implements_stay_deleted():
+    for name in DEAD_BACKUP_MODULES:
+        assert not (BACKUP_PKG_DIR / name).exists(), f'平行实现模块 {name} 不应存在'
+
+    offenders: list[str] = []
+    for py in BACKUP_PKG_DIR.rglob('*.py'):
+        if '__pycache__' in py.parts:
+            continue
+        tree = ast.parse(py.read_text(encoding='utf-8'))
+        for node in ast.walk(tree):
+            defined: str | None = None
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                defined = node.name
+            elif isinstance(node, ast.Assign):
+                defined = next((t.id for t in node.targets if isinstance(t, ast.Name)), None)
+            if defined in DEAD_BACKUP_SYMBOLS:
+                offenders.append(f'{py.relative_to(BACKUP_PKG_DIR)}:{node.lineno} {defined}')
+    assert not offenders, f'已删除的未接线实现重新出现: {offenders}'
 
 
 # ---------------------------------------------------------------------------
@@ -110,20 +148,6 @@ async def test_json_strategy_delegates_to_json_backup(monkeypatch):
     passed_zf, passed_db = fake.await_args.args
     assert isinstance(passed_zf, zipfile.ZipFile)
     assert passed_db is lifecycle.session
-
-
-@pytest.mark.asyncio
-async def test_safety_backup_adapter_delegates(monkeypatch):
-    from fastapi_app.services.backup.orchestration import core as orchestration_core
-
-    fake = AsyncMock(return_value={'filename': 'pre_restore.zip'})
-    monkeypatch.setattr(orchestration_core, 'create_pre_restore_backup', fake)
-
-    db = SimpleNamespace()
-    result = await ExistingSafetyBackupAdapter(db).create()
-
-    assert result == {'filename': 'pre_restore.zip'}
-    fake.assert_awaited_once_with(db)
 
 
 @pytest.mark.asyncio

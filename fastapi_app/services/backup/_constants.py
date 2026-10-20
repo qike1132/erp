@@ -23,7 +23,6 @@ BACKUP_DIR = Path(os.environ.get('BACKUP_DIR', 'backups/server'))
 # （2026-10-02 P2 审计实测：生产恒报"最新备份 132 小时前"，而当天 14:00 刚出过加密包）。
 BACKUP_FILE_EXTENSIONS = ('.zip', '.zip.enc', '.tar.gz', '.tar')
 MAX_BACKUP_FILE_SIZE = 500 * 1024 * 1024
-RESTORE_LOCK_ID = 20240426
 BACKUP_LOCK_ID = 20240427
 # 灾难恢复演练互斥锁（第十四轮）：演练会建/删同名测试库，同秒两次触发会互毁。
 RECOVERY_TEST_LOCK_ID = 20240428

@@ -3,16 +3,16 @@
   "counts": {
     "n_plus_one": 0,
     "bare_except": 0,
-    "function_length": 31,
+    "function_length": 30,
     "vue_component_length": 6,
-    "service_commit": 12,
+    "service_commit": 10,
     "bom": 0,
     "alembic_heads": 0,
     "env_drift": 0,
-    "ruff": 32,
+    "ruff": 18,
     "complexity": 4,
-    "loop_shadow": 13,
+    "loop_shadow": 12,
     "pip_audit": 0,
-    "nosec_budget": 83
+    "nosec_budget": 80
   }
 }

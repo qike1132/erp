@@ -21,11 +21,6 @@ from email.mime.text import MIMEText
 from typing import Any
 
 import httpx
-from sqlalchemy import select
-from sqlalchemy.exc import SQLAlchemyError
-
-from fastapi_app.core.database import get_async_db_context
-from fastapi_app.shared_models.backup_record import BackupRecord
 
 logger = logging.getLogger(__name__)
 
@@ -455,65 +450,6 @@ class BackupAlertService:
         # 所有重试都失败
         logger.error(f"任务 {task_name} 所有 {max_retries} 次重试均失败")
         return False, last_error
-
-    async def get_alert_statistics(self, days: int = 7) -> dict[str, Any]:
-        """获取告警统计信息"""
-        try:
-            async with get_async_db_context() as db:
-                # 查询最近N天的失败记录
-                cutoff_date = datetime.now() - timedelta(days=days)
-                stmt = (
-                    select(BackupRecord)
-                    .where(BackupRecord.status == 'failed')
-                    .where(BackupRecord.created_at >= cutoff_date)
-                )
-                result = await db.execute(stmt)
-                failed_records = result.scalars().all()
-
-                # 按任务类型统计
-                by_task_type: dict[str, int] = {}
-                by_severity: dict[str, int] = {}
-                recent_failures: list[dict[str, object]] = []
-                stats = {
-                    'total_failures': len(failed_records),
-                    'by_task_type': by_task_type,
-                    'by_severity': by_severity,
-                    'recent_failures': recent_failures
-                }
-
-                for record in failed_records:
-                    # 按任务类型统计
-                    task_type = record.type or 'unknown'
-                    if task_type not in by_task_type:
-                        by_task_type[task_type] = 0
-                    by_task_type[task_type] += 1
-
-                    # 按严重级别统计（从错误信息中提取）
-                    error_msg = record.error_message or ''
-                    severity = 'error'
-                    if 'CRITICAL' in error_msg:
-                        severity = 'critical'
-                    elif 'WARNING' in error_msg:
-                        severity = 'warning'
-
-                    if severity not in by_severity:
-                        by_severity[severity] = 0
-                    by_severity[severity] += 1
-
-                    # 最近失败记录
-                    recent_failures.append({
-                        'id': record.id,
-                        'type': record.type,
-                        'filename': record.filename,
-                        'error_message': record.error_message,
-                        'created_at': record.created_at.isoformat() if record.created_at else None
-                    })
-
-                return stats
-
-        except SQLAlchemyError as e:
-            logger.error(f"获取告警统计信息失败: {e}")
-            return {}
 
 
 # 全局告警服务实例

@@ -1,9 +1,8 @@
 """备份查询服务 — 承接 backup 端点包内直写的 SQL
 
-从 endpoints/backup 包下沉的查询与锁操作（纯查询搬移，逻辑零改动）：
+从 endpoints/backup 包下沉的查询操作（纯查询搬移，逻辑零改动）：
 - 备份表行数统计（list_backup_tables 聚合）
 - BackupRecord 分页列表 / 近30天成功率统计 / 类型分布聚合
-- 恢复操作 PostgreSQL advisory lock 获取与释放
 - 数据库连通性探测（SELECT 1）
 
 所有函数均接收调用方传入的同一 AsyncSession（除连通性探测自建会话外），
@@ -17,7 +16,6 @@ from sqlalchemy import func, select, text
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi_app.services.backup._constants import RESTORE_LOCK_ID
 from fastapi_app.services.backup.verify.core import quote_table
 from fastapi_app.shared_models import Base
 from fastapi_app.shared_models.backup_record import BackupRecord
@@ -115,25 +113,6 @@ async def get_backup_records_page(
     stmt = select(BackupRecord).order_by(BackupRecord.created_at.desc()).offset(offset).limit(page_size)
     result = await db.execute(stmt)
     return list(result.scalars().all()), total
-
-
-async def try_acquire_restore_lock(db: AsyncSession) -> bool:
-    """尝试获取恢复操作 PostgreSQL advisory lock（非阻塞），成功返回 True"""
-    lock_result = await db.execute(
-        text('SELECT pg_try_advisory_lock(:lock_id)'), {'lock_id': RESTORE_LOCK_ID}
-    )
-    return bool(lock_result.scalar())
-
-
-# 名称刻意区别于 Redis 版 release_restore_lock（services/backup/restore.py）：同名会经 .verify 星号导入遮蔽包级导出
-async def release_advisory_restore_lock(db: AsyncSession) -> None:
-    """释放恢复操作 PostgreSQL advisory lock（失败仅记录警告，不抛出）"""
-    try:
-        await db.execute(
-            text('SELECT pg_advisory_unlock(:lock_id)'), {'lock_id': RESTORE_LOCK_ID}
-        )
-    except Exception:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断
-        logger.warning('释放恢复锁失败')
 
 
 async def check_database_alive() -> bool:

@@ -10,7 +10,7 @@
 
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Any, TypedDict
 
@@ -25,7 +25,6 @@ from fastapi_app.services.backup._constants import (
     retention_days,
 )
 from fastapi_app.services.backup.metrics.alert_service import alert_service
-from fastapi_app.services.backup.records import ensure_backup_dir
 from fastapi_app.shared_models.backup_record import BackupRecord
 
 logger = logging.getLogger(__name__)
@@ -158,98 +157,6 @@ class BackupPolicyService:
             }
         }
 
-    async def update_policy(self, policy_data: dict[str, Any]) -> tuple[bool, str]:
-        """
-        更新备份策略
-
-        Args:
-            policy_data: 策略数据
-
-        Returns:
-            Tuple[bool, str]: (是否成功, 消息)
-        """
-        try:
-            # 验证策略数据
-            validation_result = self._validate_policy(policy_data)
-            if not validation_result[0]:
-                return validation_result
-
-            # 加载当前策略
-            current_policy = await self.get_current_policy()
-
-            # 合并策略
-            updated_policy = self._merge_policies(current_policy, policy_data)
-            updated_policy['updated_at'] = datetime.now().isoformat()
-
-            # 保存策略
-            ensure_backup_dir()
-            with open(self.policy_file, 'w', encoding='utf-8') as f:
-                json.dump(updated_policy, f, ensure_ascii=False, indent=2)
-
-            # 更新配置
-            self._update_config_from_policy(updated_policy)
-
-            logger.info(f"备份策略已更新: {updated_policy.get('policy_name', 'unknown')}")
-            return True, "备份策略更新成功"
-
-        except (OSError, ValueError, TypeError) as e:
-            logger.error(f"更新备份策略失败: {e}")
-            return False, f"更新备份策略失败: {e!s}"
-
-    def _validate_policy(self, policy_data: dict[str, Any]) -> tuple[bool, str]:
-        """验证策略数据"""
-        try:
-            # 检查必需字段
-            required_fields = ['policy_name', 'full_backup', 'retention']
-            for field in required_fields:
-                if field not in policy_data:
-                    return False, f"缺少必需字段: {field}"
-
-            # 验证cron表达式
-            cron_fields = [
-                ('full_backup.schedule', policy_data.get('full_backup', {}).get('schedule'))
-            ]
-
-            for field_name, cron_expr in cron_fields:
-                if cron_expr and not self._is_valid_cron(cron_expr):
-                    return False, f"无效的cron表达式: {field_name}={cron_expr}"
-
-            # 验证保留策略
-            retention = policy_data.get('retention', {})
-            if retention.get('enabled', True):
-                strategy = retention.get('strategy', 'hybrid')
-                if strategy not in ['hybrid', 'time', 'count']:
-                    return False, f"无效的保留策略: {strategy}"
-
-                if strategy in ['hybrid', 'time']:
-                    days = retention.get('retention_days', 0)
-                    if not isinstance(days, int) or days < 1:
-                        return False, "retention_days必须是大于0的整数"
-
-                if strategy in ['hybrid', 'count']:
-                    count = retention.get('retention_count', 0)
-                    if not isinstance(count, int) or count < 1:
-                        return False, "retention_count必须是大于0的整数"
-
-            # 验证加密设置
-            encryption = policy_data.get('encryption', {})
-            if encryption.get('enabled', False):
-                algorithm = encryption.get('algorithm', '')
-                if algorithm not in ['AES256', 'AES128', 'DES3']:
-                    return False, f"不支持的加密算法: {algorithm}"
-
-            # 验证压缩设置
-            compression = policy_data.get('compression', {})
-            if compression.get('enabled', True):
-                level = compression.get('level', 6)
-                if not isinstance(level, int) or level < 0 or level > 9:
-                    return False, "压缩级别必须是0-9之间的整数"
-
-            return True, "验证通过"
-
-        except (TypeError, ValueError, AttributeError) as e:
-            return False, f"策略验证失败: {e!s}"
-
     def _is_valid_cron(self, cron_expr: str) -> bool:
         """验证cron表达式"""
         # 简单的cron表达式验证
@@ -303,55 +210,6 @@ class BackupPolicyService:
             return min_val <= int(part) <= max_val
 
         return False
-
-    def _merge_policies(self, current: dict[str, Any], updates: dict[str, Any]) -> dict[str, Any]:
-        """合并策略"""
-        merged = current.copy()
-
-        def deep_merge(base: dict, update: dict) -> dict:
-            for key, value in update.items():
-                if key in base and isinstance(base[key], dict) and isinstance(value, dict):
-                    base[key] = deep_merge(base[key], value)
-                else:
-                    base[key] = value
-            return base
-
-        return deep_merge(merged, updates)
-
-    def _update_config_from_policy(self, policy: dict[str, Any]) -> None:
-        """从策略更新配置"""
-        try:
-            # 更新全量备份cron
-            full_cron = policy.get('full_backup', {}).get('schedule')
-            if full_cron:
-                self.policy_config['full_backup_cron'] = full_cron
-
-            # 更新保留策略
-            retention = policy.get('retention', {})
-            if retention.get('strategy') in ['hybrid', 'time']:
-                days = retention.get('retention_days')
-                if days:
-                    self.policy_config['retention_days'] = days
-
-            if retention.get('strategy') in ['hybrid', 'count']:
-                count = retention.get('retention_count')
-                if count:
-                    self.policy_config['retention_count'] = count
-
-            # 更新加密设置
-            encryption = policy.get('encryption', {})
-            self.policy_config['encryption_enabled'] = encryption.get('enabled', False)
-
-            # 更新通知设置
-            notification = policy.get('notification', {})
-            self.policy_config['notify_on_success'] = notification.get('notify_on_success', False)
-            self.policy_config['notify_on_failure'] = notification.get('notify_on_failure', True)
-            self.policy_config['notify_on_warning'] = notification.get('notify_on_warning', True)
-
-            logger.info("配置已从策略更新")
-
-        except Exception as e:  # defensive: config update failure should not crash policy loading
-            logger.error(f"从策略更新配置失败: {e}")
 
     async def apply_backup_policy(self) -> dict[str, Any]:
         """
@@ -610,95 +468,6 @@ class BackupPolicyService:
                 'error': str(e),
                 'message': f'应用存储策略失败: {e!s}'
             }
-
-    async def get_policy_compliance(self) -> dict[str, Any]:
-        """获取策略合规性报告"""
-        try:
-            policy = await self.get_current_policy()
-
-            # 检查实际备份情况
-            async with get_async_db_context() as db:
-                # 最近24小时备份统计
-                cutoff_time = datetime.now() - timedelta(hours=24)
-
-                # 全量备份
-                full_stmt = (
-                    select(BackupRecord)
-                    .where(BackupRecord.type == 'full')
-                    .where(BackupRecord.status == 'success')
-                    .where(BackupRecord.created_at >= cutoff_time)
-                )
-                full_result = await db.execute(full_stmt)
-                full_backups = full_result.scalars().all()
-
-            # 检查磁盘空间
-            import psutil
-            storage_location = Path(policy.get('storage', {}).get('primary_location', str(BACKUP_DIR)))
-            disk_usage = psutil.disk_usage(str(storage_location))
-            free_percent = 100 - disk_usage.percent
-
-            # 生成合规性报告
-            compliance: dict[str, Any] = {
-                'policy_name': policy.get('policy_name'),
-                'check_time': datetime.now().isoformat(),
-                'backup_schedule': {
-                    'full_backup_enabled': policy.get('full_backup', {}).get('enabled', True),
-                    'full_backup_schedule': policy.get('full_backup', {}).get('schedule'),
-                    'full_backups_last_24h': len(full_backups),
-                    'compliance': len(full_backups) > 0  # 至少1个全量
-                },
-                'retention_policy': {
-                    'enabled': policy.get('retention', {}).get('enabled', True),
-                    'strategy': policy.get('retention', {}).get('strategy', 'hybrid'),
-                    'retention_days': policy.get('retention', {}).get('retention_days', 30),
-                    'retention_count': policy.get('retention', {}).get('retention_count', 100),
-                    'min_free_space_gb': policy.get('retention', {}).get('min_free_space_gb', 10),
-                    'actual_free_space_gb': round(disk_usage.free / (1024 ** 3), 2),
-                    'actual_free_space_percent': round(free_percent, 2),
-                    'compliance': free_percent >= 10  # 至少10%空闲空间
-                },
-                'encryption': {
-                    'enabled': policy.get('encryption', {}).get('enabled', False),
-                    'algorithm': policy.get('encryption', {}).get('algorithm', ''),
-                    'key_rotation_days': policy.get('encryption', {}).get('key_rotation_days', 90),
-                    'compliance': True  # 暂时总是合规
-                },
-                'overall_compliance': {
-                    'status': 'compliant',  # compliant/warning/non-compliant
-                    'score': 100,  # 合规分数
-                    'issues': []
-                }
-            }
-
-            # 计算总体合规性
-            issues = []
-
-            if not compliance['backup_schedule']['compliance']:
-                issues.append('备份计划未按策略执行')
-                compliance['overall_compliance']['status'] = 'non-compliant'
-
-            if not compliance['retention_policy']['compliance']:
-                issues.append('磁盘空间不足')
-                if compliance['overall_compliance']['status'] != 'non-compliant':
-                    compliance['overall_compliance']['status'] = 'warning'
-
-            compliance['overall_compliance']['issues'] = issues
-
-            # 计算合规分数
-            score = 100
-            if issues:
-                score = max(0, 100 - len(issues) * 20)
-            compliance['overall_compliance']['score'] = score
-
-            return compliance
-
-        except (SQLAlchemyError, OSError) as e:
-            logger.error(f"获取策略合规性报告失败: {e}")
-            return {
-                'error': str(e),
-                'message': '获取策略合规性报告失败'
-            }
-
 
 # 全局备份策略服务实例
 policy_service = BackupPolicyService()

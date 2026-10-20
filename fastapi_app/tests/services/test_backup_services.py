@@ -14,7 +14,6 @@ def test_backup_alert_service_import():
     assert service is not None
     assert hasattr(service, 'send_alert')
     assert hasattr(service, 'retry_with_backoff')
-    assert hasattr(service, 'get_alert_statistics')
 
 
 def test_backup_health_check_service_import():
@@ -33,9 +32,7 @@ def test_backup_policy_service_import():
     service = BackupPolicyService()
     assert service is not None
     assert hasattr(service, 'get_current_policy')
-    assert hasattr(service, 'update_policy')
     assert hasattr(service, 'apply_backup_policy')
-    assert hasattr(service, 'get_policy_compliance')
 
 
 def test_backup_metrics_service_import():

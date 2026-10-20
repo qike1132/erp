@@ -667,15 +667,3 @@ async def restore_database_via_psql(zf, db: AsyncSession, task_id: str | None = 
         return await _interpret_psql_result(result, _report)
     except (TimeoutError, OSError, ValueError) as e:
         return {'status': 'error', 'error': f'数据库恢复失败: {e}'}
-
-async def restore_database_via_psql_from_bytes(zip_bytes: bytes, db: AsyncSession) -> dict:
-    """从 ZIP bytes 恢复数据库（用于安全备份回滚）"""
-    import io
-    import zipfile
-    try:
-        zf = zipfile.ZipFile(io.BytesIO(zip_bytes))
-    except zipfile.BadZipFile:
-        return {'status': 'error', 'error': '无效的 ZIP 备份文件'}
-    if 'database/dump.sql.gz' not in zf.namelist():
-        return {'status': 'error', 'error': '安全备份中无 database/dump.sql.gz'}
-    return await restore_database_via_psql(zf, db)

@@ -31,16 +31,6 @@ class TestBackupAlertService:
             service.__init__()
             return service
 
-    @pytest.fixture
-    def mock_db_session(self):
-        """模拟数据库会话"""
-        session = AsyncMock()
-        session.execute = AsyncMock()
-        session.commit = AsyncMock()
-        session.rollback = AsyncMock()
-        session.close = AsyncMock()
-        return session
-
     def test_load_alert_config(self, alert_service):
         """测试加载告警配置"""
         config = alert_service._load_alert_config()
@@ -188,29 +178,20 @@ class TestBackupAlertService:
     @pytest.mark.asyncio
     async def test_send_alert_without_config(self, alert_service):
         """测试发送告警（无配置）"""
-        # 模拟数据库上下文管理器
-        mock_session = AsyncMock()
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = None
-        mock_session.execute.return_value = mock_result
+        # 发送告警
+        result = await alert_service.send_alert(
+            task_name='test_task',
+            error='测试错误',
+            task_type='backup',
+            severity='error'
+        )
 
-        with patch('fastapi_app.services.backup.metrics.alert_service.get_async_db_context') as mock_context:
-            mock_context.return_value.__aenter__.return_value = mock_session
+        # 应该成功（即使没有邮件和webhook配置）
+        assert result is True
 
-            # 发送告警
-            result = await alert_service.send_alert(
-                task_name='test_task',
-                error='测试错误',
-                task_type='backup',
-                severity='error'
-            )
-
-            # 应该成功（即使没有邮件和webhook配置）
-            assert result is True
-
-            # 验证失败计数已更新
-            assert 'test_task' in alert_service.failure_counts
-            assert alert_service.failure_counts['test_task']['error'] == 1
+        # 验证失败计数已更新
+        assert 'test_task' in alert_service.failure_counts
+        assert alert_service.failure_counts['test_task']['error'] == 1
 
     @pytest.mark.asyncio
     async def test_send_alert_with_email_config(self, alert_service):
@@ -228,16 +209,7 @@ class TestBackupAlertService:
             'last_failure_time': datetime.now()
         }
 
-        # 模拟数据库上下文管理器
-        mock_session = AsyncMock()
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = None
-        mock_session.execute.return_value = mock_result
-
-        with patch('fastapi_app.services.backup.metrics.alert_service.get_async_db_context') as mock_context, \
-             patch('smtplib.SMTP') as mock_smtp:
-
-            mock_context.return_value.__aenter__.return_value = mock_session
+        with patch('smtplib.SMTP') as mock_smtp:
             mock_smtp_instance = MagicMock()
             mock_smtp.return_value.__enter__.return_value = mock_smtp_instance
 
@@ -266,16 +238,7 @@ class TestBackupAlertService:
             'last_failure_time': datetime.now()
         }
 
-        # 模拟数据库上下文管理器
-        mock_session = AsyncMock()
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = None
-        mock_session.execute.return_value = mock_result
-
-        with patch('fastapi_app.services.backup.metrics.alert_service.get_async_db_context') as mock_context, \
-             patch('httpx.AsyncClient') as mock_client:
-
-            mock_context.return_value.__aenter__.return_value = mock_session
+        with patch('httpx.AsyncClient') as mock_client:
             mock_client_instance = AsyncMock()
             mock_client.return_value.__aenter__.return_value = mock_client_instance
             mock_client_instance.post.return_value = MagicMock(status_code=200)
@@ -342,56 +305,6 @@ class TestBackupAlertService:
         assert success is True
         assert result == "success"
         assert call_count == 3  # 第3次尝试成功
-
-    @pytest.mark.asyncio
-    async def test_get_alert_statistics(self, alert_service, mock_db_session):
-        """测试获取告警统计信息"""
-        # 模拟数据库查询结果
-        mock_records = [
-            MagicMock(
-                id=1,
-                type='full',
-                filename='backup1.zip',
-                error_message='ERROR: 磁盘空间不足',
-                created_at=datetime.now()
-            ),
-            MagicMock(
-                id=2,
-                type='auto',
-                filename='backup2.zip',
-                error_message='WARNING: 备份超时',
-                created_at=datetime.now()
-            ),
-            MagicMock(
-                id=3,
-                type='full',
-                filename='backup3.zip',
-                error_message='CRITICAL: 数据库连接失败',
-                created_at=datetime.now()
-            ),
-        ]
-
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = mock_records
-        mock_db_session.execute.return_value = mock_result
-
-        with patch('fastapi_app.services.backup.metrics.alert_service.get_async_db_context') as mock_context:
-            mock_context.return_value.__aenter__.return_value = mock_db_session
-
-            stats = await alert_service.get_alert_statistics(days=7)
-
-            assert 'total_failures' in stats
-            assert 'by_task_type' in stats
-            assert 'by_severity' in stats
-            assert 'recent_failures' in stats
-
-            assert stats['total_failures'] == 3
-            assert stats['by_task_type']['full'] == 2
-            assert stats['by_task_type']['auto'] == 1
-            assert stats['by_severity']['error'] == 1
-            assert stats['by_severity']['warning'] == 1
-            assert stats['by_severity']['critical'] == 1
-            assert len(stats['recent_failures']) == 3
 
     def test_get_hostname(self, alert_service):
         """测试获取主机名"""

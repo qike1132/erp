@@ -12,8 +12,6 @@ import zipfile
 from types import TracebackType
 from typing import Any
 
-from sqlalchemy import text
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.services.backup.ports import (
@@ -26,62 +24,9 @@ from fastapi_app.services.backup.ports import (
     RestoreVerifier,
     SafetyBackupProvider,
 )
-from fastapi_app.services.backup.types import ComponentsRestoreResult, RestorePhase
+from fastapi_app.services.backup.types import ComponentsRestoreResult
 
 logger = logging.getLogger(__name__)
-
-
-class PostgresAdvisoryLockAdapter:
-    """基于 PostgreSQL advisory lock 的并发控制适配器。"""
-
-    RESTORE_LOCK_ID = 20240426
-
-    def __init__(self, db: AsyncSession) -> None:
-        self._db = db
-        self._acquired = False
-
-    async def __aenter__(self) -> PostgresAdvisoryLockAdapter:
-        try:
-            result = await self._db.execute(
-                text("SELECT pg_try_advisory_lock(:lock_id)"),
-                {"lock_id": self.RESTORE_LOCK_ID},
-            )
-            self._acquired = bool(result.scalar())
-        except SQLAlchemyError as exc:
-            logger.error("获取 advisory lock 失败: %s", exc)
-            self._acquired = False
-
-        if not self._acquired:
-            raise RuntimeError("无法获取恢复锁，可能有其他恢复任务正在执行")
-        return self
-
-    async def __aexit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        tb: TracebackType | None,
-    ) -> bool | None:
-        if self._acquired:
-            try:
-                await self._db.execute(
-                    text("SELECT pg_advisory_unlock(:lock_id)"),
-                    {"lock_id": self.RESTORE_LOCK_ID},
-                )
-            except Exception as unlock_exc:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断
-                logger.warning("释放 advisory lock 失败: %s", unlock_exc)
-        return None
-
-
-class ExistingSafetyBackupAdapter(SafetyBackupProvider):
-    """复用现有 `create_pre_restore_backup` 的安全备份适配器。"""
-
-    def __init__(self, db: AsyncSession) -> None:
-        self._db = db
-
-    async def create(self) -> dict[str, Any]:
-        from fastapi_app.services.backup.orchestration.core import create_pre_restore_backup
-
-        return await create_pre_restore_backup(self._db)
 
 
 class ExistingComponentRestoreAdapter(ComponentRestorePort):
@@ -209,22 +154,6 @@ class NoOpSafetyBackupAdapter(SafetyBackupProvider):
 
     async def create(self) -> dict[str, Any]:
         return {"success": True, "skipped": True, "reason": "endpoint-owned"}
-
-
-class BackupProgressReporterAdapter(ProgressReporter):
-    """复用现有 `backup_progress` 的进度报告适配器。"""
-
-    def __init__(self, task_id: str) -> None:
-        self._task_id = task_id
-
-    async def report(self, phase: RestorePhase | str, sub: float, detail: str = "") -> None:
-        from fastapi_app.core.backup_progress import update_progress
-
-        phase_name = phase.value if isinstance(phase, RestorePhase) else phase
-        try:
-            await update_progress(self._task_id, phase_name, sub, detail)
-        except Exception as exc:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断
-            logger.warning("进度上报失败: %s", exc)
 
 
 class DefaultArchiveDecryptorAdapter(ArchiveDecryptor):
