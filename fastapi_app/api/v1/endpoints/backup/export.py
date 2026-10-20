@@ -520,41 +520,47 @@ async def export_backup_chunk(
     if chunk_index < 0:
         raise HTTPException(status_code=400, detail='分片索引不能为负数')
 
-    # P0-3: 优先从 bundle 缓存切片（export-info 已生成好的同一份文件）
-    if bundle_id and (bundle := await _load_chunk_bundle(bundle_id)):
+    # P0-3: 优先从 bundle 缓存切片（export-info 已生成好的同一份文件）。
+    # Z05-R11：给了 bundle_id 但 Redis/文件已失效时，不得静默回退为「每个分片重新
+    # 全量备份」——那会让 backups/ 随分片数线性膨胀。直接 410 让客户端重新 export-info。
+    if bundle_id:
+        bundle = await _load_chunk_bundle(bundle_id)
+        if not bundle:
+            raise HTTPException(status_code=410, detail='分片会话已过期，请重新获取备份信息')
         bundle_path = Path(bundle['path'])
-        if bundle_path.is_file():
-            total_size = bundle['total_size']
-            chunk_size = bundle['chunk_size']
-            total_chunks = bundle['total_chunks']
-            if chunk_index >= total_chunks:
-                raise HTTPException(status_code=416, detail=f'分片索引超出范围，最大索引为{total_chunks - 1}')
-
-            start = chunk_index * chunk_size
-            end = min(start + chunk_size, total_size) - 1
-
-            def _read_cached_chunk(path: Path, _start: int, length: int) -> bytes:
-                with open(path, 'rb') as f:
-                    f.seek(_start)
-                    return f.read(length)
-
-            try:
-                chunk_data = await asyncio.to_thread(_read_cached_chunk, bundle_path, start, end - start + 1)
-            except OSError as e:
-                logger.warning(f'读取分片 bundle 失败（回退逐片生成）: {e}')
-            else:
-                return BackupChunkResponse(
-                    success=True,
-                    chunk_index=chunk_index,
-                    chunk_data=chunk_data,
-                    total_chunks=total_chunks,
-                    chunk_size=len(chunk_data),
-                    is_last=(chunk_index == total_chunks - 1),
-                )
-        else:
+        if not bundle_path.is_file():
             logger.warning(f'分片 bundle 文件已不存在: {bundle_id}')
+            raise HTTPException(status_code=410, detail='分片会话文件已清理，请重新获取备份信息')
 
-    # 回退路径（无 bundle_id / 缓存未命中）：保持旧行为，现场生成
+        total_size = bundle['total_size']
+        chunk_size = bundle['chunk_size']
+        total_chunks = bundle['total_chunks']
+        if chunk_index >= total_chunks:
+            raise HTTPException(status_code=416, detail=f'分片索引超出范围，最大索引为{total_chunks - 1}')
+
+        start = chunk_index * chunk_size
+        end = min(start + chunk_size, total_size) - 1
+
+        def _read_cached_chunk(path: Path, _start: int, length: int) -> bytes:
+            with open(path, 'rb') as f:
+                f.seek(_start)
+                return f.read(length)
+
+        try:
+            chunk_data = await asyncio.to_thread(_read_cached_chunk, bundle_path, start, end - start + 1)
+        except OSError as e:
+            logger.warning(f'读取分片 bundle 失败: {e}')
+            raise HTTPException(status_code=410, detail='分片会话读取失败，请重新获取备份信息') from e
+        return BackupChunkResponse(
+            success=True,
+            chunk_index=chunk_index,
+            chunk_data=chunk_data,
+            total_chunks=total_chunks,
+            chunk_size=len(chunk_data),
+            is_last=(chunk_index == total_chunks - 1),
+        )
+
+    # 回退路径（无 bundle_id 的旧客户端）：保持旧行为，现场生成
     effective_encrypt, encryption_password = _resolve_encryption(encrypt, None, x_backup_password)
     try:
         backup_path, _manifest = await backup_service.create_full_backup_to_file(
