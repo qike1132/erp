@@ -32,6 +32,7 @@ from fastapi_app.services.outsource_service import (
     ship_order_process,
     ship_order_processes_batch,
     sync_outsource_processes_for_order,
+    update_order_process,
     update_process_type,
 )
 from fastapi_app.shared_models import OrderItem, OrderOutsourceProcess
@@ -679,6 +680,56 @@ class TestProcessStatusFlow:
 
         assert len(result) == 2
         assert result[0]['process_type'] == '电绣'
+
+
+class TestUpdateOrderProcessPlannedTime:
+    """计划时间写入：naive 墙钟显式按北京时区解读成 aware UTC
+
+    2026-10-20 审计 F1-11 族实例：planned_start_time / planned_end_time 列是
+    timestamptz，写入的却是客户端传来的 naive 墙钟值。直写 naive 等于把
+    「按哪个时区解读」甩给 PG 会话时区——本机会话时区恰是 Asia/Shanghai 时
+    碰巧正确，服务器 TimeZone 一变就整体偏 8 小时。
+    """
+
+    @pytest.mark.asyncio
+    async def test_naive_planned_time_stored_as_utc_instant(self, mock_async_db):
+        """naive 09:00（北京时间墙钟）→ 存 01:00Z，展示仍是 09:00"""
+        p = make_order_process(pid=7)
+        mock_async_db.get = AsyncMock(return_value=p)
+
+        result = await update_order_process(mock_async_db, 7, {
+            'planned_start_time': datetime(2026, 10, 21, 9, 0, 0),
+        })
+
+        stored = p.planned_start_time
+        assert stored.tzinfo is not None, 'naive 值直写 timestamptz 会依赖 PG 会话时区'
+        assert stored == datetime(2026, 10, 21, 1, 0, tzinfo=UTC)
+        assert result['planned_start_time'] == '2026-10-21 09:00'
+
+    @pytest.mark.asyncio
+    async def test_aware_planned_time_keeps_instant(self, mock_async_db):
+        """已带时区的输入按其瞬间存，不做二次解读"""
+        p = make_order_process(pid=7)
+        mock_async_db.get = AsyncMock(return_value=p)
+
+        result = await update_order_process(mock_async_db, 7, {
+            'planned_start_time': datetime(2026, 10, 21, 9, 0, tzinfo=UTC),
+        })
+
+        assert p.planned_start_time == datetime(2026, 10, 21, 9, 0, tzinfo=UTC)
+        assert result['planned_start_time'] == '2026-10-21 17:00'
+
+    @pytest.mark.asyncio
+    async def test_explicit_null_clears_planned_time(self, mock_async_db):
+        """客户端显式传 null → 清空计划时间（不是崩溃）"""
+        p = make_order_process(pid=7)
+        p.planned_start_time = datetime(2026, 10, 21, 9, 0, tzinfo=UTC)
+        mock_async_db.get = AsyncMock(return_value=p)
+
+        result = await update_order_process(mock_async_db, 7, {'planned_start_time': None})
+
+        assert p.planned_start_time is None
+        assert result['planned_start_time'] is None
 
 
 class TestOrderListProgress:

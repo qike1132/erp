@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 
+from fastapi_app.core.business_time import _BUSINESS_TZ
 from fastapi_app.services.outsource._common import (
     _derive_status,
     _is_fully_received,
@@ -231,6 +232,23 @@ async def sync_orders_for_product(
     return {'created': created, 'removed': removed, 'kept': kept}
 
 
+def _planned_instant(value: datetime | None) -> datetime | None:
+    """客户端录入的计划时间 → aware UTC。
+
+    planned_start_time / planned_end_time 是用户填的**墙上时间**，列却是 timestamptz。
+    直接写 naive 值等于把「按哪个时区解读」甩给 PG 会话时区：本机会话时区恰是
+    Asia/Shanghai 时碰巧正确，服务器 TimeZone 一变就整体偏 8 小时（与 2026-10-17
+    审计 F1-11 族同源）。这里显式按业务时区解读再转 UTC，写入值不再依赖服务器配置。
+
+    口径与 stock_out_service._resolve_stockout_datetime / order_batch_create 一致。
+    """
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=_BUSINESS_TZ).astimezone(UTC)
+    return value.astimezone(UTC)
+
+
 async def update_order_process(db: AsyncSession, process_id: int, data: dict) -> dict:
     """更新订单外发工序（计划时间/工序类型/备注，部分更新）。"""
     p = await db.get(OrderOutsourceProcess, process_id)
@@ -245,9 +263,9 @@ async def update_order_process(db: AsyncSession, process_id: int, data: dict) ->
     if data.get('sort_order') is not None:
         p.sort_order = data['sort_order']
     if 'planned_start_time' in data:
-        p.planned_start_time = data['planned_start_time']
+        p.planned_start_time = _planned_instant(data['planned_start_time'])
     if 'planned_end_time' in data:
-        p.planned_end_time = data['planned_end_time']
+        p.planned_end_time = _planned_instant(data['planned_end_time'])
     if 'remark' in data:
         p.remark = (data['remark'] or '').strip() or None
 
