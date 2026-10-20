@@ -251,7 +251,8 @@ async def get_system_stats() -> dict:
     """获取系统统计信息。
 
     - cache：真实 Redis/内存缓存统计（redis_cache.get_stats）。
-    - performance/queries：生产路径没有埋点（PerformanceMiddleware 未注册、
+    - performance/queries：生产路径没有埋点（请求耗时指标只在
+      core/middleware.py 里以 Prometheus 形式记录，未回灌到本端点；
       track_db_query 零调用）——明确返回 not_instrumented，不再返回全 0 假数据
       误导运维判断（审计 P1-15）。
     """
@@ -267,7 +268,8 @@ async def get_system_stats() -> dict:
         'cache': cache_stats,
         'performance': {
             'status': 'not_instrumented',
-            'reason': 'PerformanceMiddleware 未注册，无真实请求性能数据；不再返回全 0 假数据',
+            'reason': '生产路径无请求性能数据回灌（耗时指标只在 core/middleware.py '
+                      '以 Prometheus 形式记录）；不再返回全 0 假数据',
             'queries': {
                 'status': 'not_instrumented',
                 'reason': 'track_db_query 装饰器无生产调用点；不再返回全 0 假数据',

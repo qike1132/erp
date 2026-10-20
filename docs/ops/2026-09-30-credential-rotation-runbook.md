@@ -39,7 +39,7 @@ Get-ChildItem backups -Recurse -File -Filter *.enc.meta | Select-Object FullName
 |---|---|---|
 | S1 `PG_SUPER_PASSWORD` | **无应用消费者**；仅人工运维（psql 手工登录取用） | 全仓 grep 只命中 `deliverables/**` 的审核报告，`fastapi_app/**` 零命中 |
 | S2 userlist 口令 | PGBouncer（**当前未运行**，端口 6432 无监听） | 应用走 `DB_USER=erp_app` 直连 PostgreSQL，不经过 PGBouncer |
-| S3 `BACKUP_ENCRYPTION_PASSWORD` | `fastapi_app/services/backup/format_strategy.py:472-485`、`core/backup_encryption.py`、`services/backup/crypto.py:60-66`、`api/v1/endpoints/backup/_deps.py:143`、`.../validation.py:423`、`.../export.py` | 优先级链：显式 password 参数 > `X-Backup-Password` 头 > 环境变量 |
+| S3 `BACKUP_ENCRYPTION_PASSWORD` | `fastapi_app/core/backup_encryption.py`、`fastapi_app/services/backup/crypto.py`、`fastapi_app/api/v1/endpoints/backup/_deps.py`、`.../validation.py`、`.../export.py`、`.../actions.py` | 优先级链：显式 password 参数 > `X-Backup-Password` 头 > 环境变量 |
 
 **⚠️ 动手前请人工确认一件事**：除本机应用外，**是否有别的机器/脚本也使用 S1 或 S2 的同一个口令**（例如运维笔记本上的 psql、备份脚本、监控探针）。若有，轮换会让那些连接立即失败，需要同步改。
 
