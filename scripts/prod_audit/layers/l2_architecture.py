@@ -4,6 +4,7 @@
 职责单一(服务文件长度)/端点瘦身(业务逻辑下沉)。
 
 依赖方向约束: ``endpoints → services → core → models``,禁止反向。
+例外: ``core → services`` 允许 —— core 是组合根(AGENTS.md §2)。
 
 任务来源: ``.codeartsdoer/specs/prod_code_review/tasks.md`` 第 3 节。
 """
@@ -199,12 +200,18 @@ class L2Architecture(LayerBase):
         graph: dict[str, set[str]],
         builder: IssueBuilder,
     ) -> list[AuditIssue]:
-        """检测反向依赖: endpoints→models / services→endpoints / core→services。"""
+        """检测反向依赖: endpoints→models / services→endpoints / core→endpoints。
+
+        ⚠️ **core → services 不在禁止清单**: AGENTS.md §2 明文「core 是组合根,
+        允许 import services(契约未禁止,勿当越层修)」——core/arq_app.py 顶层
+        import services 正是该契约允许的组合根模式,判成违规是**误报型检查器
+        缺陷**(审计 #18a),长期报下去会训练团队忽略 L2 的真实发现。
+        """
         issues: list[AuditIssue] = []
         forbidden: dict[str, set[str]] = {
             "endpoints": {"models"},
             "services": {"endpoints"},
-            "core": {"services", "endpoints"},
+            "core": {"endpoints"},
         }
         for module_key, deps in graph.items():
             source_layer = module_key.split(":", 1)[0]

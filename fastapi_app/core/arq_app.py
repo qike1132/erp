@@ -20,6 +20,9 @@ from arq.constants import default_queue_name, health_check_key_suffix
 
 from fastapi_app.core.arq_callbacks import on_job_end, on_job_start
 from fastapi_app.core.config import settings
+
+# core → services 是**契约允许**的组合根依赖(AGENTS.md §2:「core 是组合根,
+# 允许 import services(契约未禁止,勿当越层修)」)。别把它当越层改掉。
 from fastapi_app.services.inventory_reconcile import is_enabled
 
 logger = logging.getLogger(__name__)
