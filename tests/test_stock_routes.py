@@ -57,7 +57,7 @@ class TestStockInRoutes:
             "stockin_date": datetime.now(UTC).strftime("%Y-%m-%d"),
         }
         resp = await async_client.post("/api/v1/stock/in/create", headers=auth_headers, json=payload)
-        assert resp.status_code in (200, 400, 422)
+        assert 400 <= resp.status_code < 500, f"缺少 product_id 应被 4xx 拒绝，实际 {resp.status_code}"
 
     @pytest.mark.asyncio
     async def test_stockin_create_nonexistent_product(self, async_client, auth_headers, test_customer):
@@ -69,7 +69,7 @@ class TestStockInRoutes:
             "stockin_date": datetime.now(UTC).strftime("%Y-%m-%d"),
         }
         resp = await async_client.post("/api/v1/stock/in/create", headers=auth_headers, json=payload)
-        assert resp.status_code in (200, 400, 422, 404)
+        assert 400 <= resp.status_code < 500, f"不存在的产品应被 4xx 拒绝，实际 {resp.status_code}"
 
     @pytest.mark.asyncio
     async def test_stockin_edit_get_success(self, async_client, auth_headers, test_stockin):
@@ -298,7 +298,7 @@ class TestStockOutRoutes:
             "stockout_date": datetime.now(UTC).strftime("%Y-%m-%d"),
         }
         resp = await async_client.post("/api/v1/stock/out/create", headers=auth_headers, json=payload)
-        assert resp.status_code in (200, 400, 422, 404)
+        assert 400 <= resp.status_code < 500, f"不存在的产品应被 4xx 拒绝，实际 {resp.status_code}"
 
     @pytest.mark.asyncio
     async def test_stockout_edit_get_success(self, async_client, auth_headers, test_stockout):
@@ -509,7 +509,7 @@ class TestStockEdgeCases:
             "stockin_date": datetime.now(UTC).strftime("%Y-%m-%d"),
         }
         resp = await async_client.post("/api/v1/stock/in/create", headers=auth_headers, json=payload)
-        assert resp.status_code in (200, 400, 422)
+        assert 400 <= resp.status_code < 500, f"零数量入库应被 4xx 拒绝，实际 {resp.status_code}"
 
     @pytest.mark.asyncio
     async def test_stockout_zero_quantity(self, async_client, auth_headers, test_product):
@@ -520,7 +520,7 @@ class TestStockEdgeCases:
             "stockout_date": datetime.now(UTC).strftime("%Y-%m-%d"),
         }
         resp = await async_client.post("/api/v1/stock/out/create", headers=auth_headers, json=payload)
-        assert resp.status_code in (200, 400, 422)
+        assert 400 <= resp.status_code < 500, f"零数量出库应被 4xx 拒绝，实际 {resp.status_code}"
 
     @pytest.mark.asyncio
     async def test_stockout_exact_stock(self, async_client, auth_headers, async_db_session, test_product, test_customer):
