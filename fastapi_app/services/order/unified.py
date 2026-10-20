@@ -9,7 +9,7 @@
 - 两侧统一投影为 (record_type, source_id, order_no, customer, sort_date) 后 UNION ALL；
 - 按 sort_date DESC NULLS LAST, record_type, source_id 稳定排序；
 - 分页用 func.count().over() 窗口计数（单次扫描拿到 total）；
-- 备货侧 StockIn.is_deleted 过滤与订单侧一致（不学 get_stockins 的静默忽略）；
+- 备货侧不设软删状态位（StockIn 只有硬删，无 is_deleted 过滤）；
 - 日期参数非法抛 BusinessError（HTTP 400），不静默忽略。
 """
 from __future__ import annotations
@@ -122,7 +122,7 @@ def _build_stockin_part(
         StockIn.stockin_no.label('order_no'),
         StockIn.customer.label('customer'),
         StockIn.stockin_date.label('sort_date'),
-    ).where(StockIn.is_deleted.isnot(True))
+    )
 
     if factory:
         part = part.where(StockIn.product.has(Product.factory == factory))

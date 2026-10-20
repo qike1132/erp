@@ -110,13 +110,18 @@ class TestBuildBatchStockinBranch:
         compiled = str(branch.compile())
         assert 'batch_no' in compiled
 
-    def test_build_stockin_branch_filters_deleted(self):
-        """备货分支须过滤 is_deleted，与订单分支及 complete_batch 口径一致"""
+    def test_build_stockin_branch_has_no_soft_delete_filter(self):
+        """备货分支不按 is_deleted 过滤：StockIn 只有硬删，该列已于 Z03-R5 移除。
+
+        此前这里是「须过滤 is_deleted」的断言——锁的是一个恒真的死过滤；
+        列删除后若有人再把 is_deleted 引用加回来，会因列不存在直接报错，
+        这条断言负责在编译期把意图固定成「本来就不该有」。
+        """
         branch = order_batch_service._build_batch_stockin_branch(
             whitelist=None, batch_no=None, customer=None, keyword=None,
         )
         compiled = str(branch.compile())
-        assert 'is_deleted' in compiled
+        assert 'is_deleted' not in compiled
 
 
 # ============================================================================
@@ -343,7 +348,10 @@ class TestSerializeBatchStockins:
 
         result = await order_batch_service._serialize_batch_stockins(db, [21])
         assert result[21]['status'] == '批次已完成'
-        assert result[21]['batch_completed_at'] == '2026-03-03 12:00'
+        # batch_completed_at 是 naive 列、写入的是 naive UTC（complete_batch 里
+        # now(UTC).replace(tzinfo=None)），展示统一走 format_local_time → 北京 +8。
+        # 原断言 '12:00' 是格式化切换前的陈旧期望（HEAD 上即已失败，非本次改动引入）。
+        assert result[21]['batch_completed_at'] == '2026-03-03 20:00'
 
 
 # ============================================================================

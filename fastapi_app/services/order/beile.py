@@ -87,7 +87,6 @@ def _build_beile_unified_query(confirmed: bool | None, customer, factory, produc
         StockIn.customer.label('customer'),
         StockIn.stockin_date.label('sort_date'),
     ).where(
-        StockIn.is_deleted.isnot(True),
         StockIn.product.has(Product.factory == factory),
     )
     if confirmed is not None:
@@ -385,7 +384,6 @@ async def get_beile_unconfirmed_count(db: AsyncSession, factory: str = '湖北')
     )
     unconfirmed_stockins_result = await db.execute(
         select(func.count(StockIn.id)).where(
-            StockIn.is_deleted.isnot(True),
             StockIn.confirmed_at.is_(None),
             StockIn.product.has(Product.factory == factory),
         )
@@ -751,7 +749,6 @@ async def confirm_beile_stockin(db: AsyncSession, stockin_id: int, current_user:
         .options(selectinload(StockIn.product))
         .where(
             StockIn.id == stockin_id,
-            StockIn.is_deleted.isnot(True),
             StockIn.product.has(Product.factory == '湖北'),
         )
         .with_for_update()

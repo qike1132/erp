@@ -149,7 +149,7 @@ def _build_batch_stockin_branch(whitelist, batch_no, customer, keyword, status='
         StockIn.stockin_date.label('sort_date'),
         literal('stockin').label('record_type'),
         StockIn.id.label('record_id'),
-    ).where(StockIn.is_deleted.isnot(True))
+    )
     # 2026-10-18 OCR 评审：状态筛选此前只作用于订单分支，备货行永远返回，
     # 导致「共 N 条」与实际状态筛选不符。备货行只有「批次已完成」一种状态。
     if status:
@@ -554,7 +554,6 @@ async def complete_batch(
         select(StockIn).where(
             StockIn.batch_no == batch_no,
             StockIn.batch_completed_at.is_(None),
-            StockIn.is_deleted.isnot(True),
         ).order_by(StockIn.id).with_for_update()
     )
     stockins = stockin_result.scalars().all()

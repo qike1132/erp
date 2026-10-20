@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, desc
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, desc
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from fastapi_app.shared_models import Base
@@ -38,7 +38,8 @@ class StockIn(Base):
     # 湖北备货确认流程：confirmed_at IS NULL 视为「未确认备货」（与订单确认流程对齐）
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime, comment='备货确认时间（湖北备货确认流程）')
     confirmed_by_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('user.id', ondelete='SET NULL'), comment='备货确认人ID')
-    is_deleted: Mapped[bool | None] = mapped_column(Boolean, default=False, index=True, comment='是否已删除')
+    # 备货没有软删：删除入口是硬删（is_deleted 曾作为「永不写入的死状态位」存在，
+    # 7 处 isnot(True) 过滤恒真；2026-10-17 审计 Z03-R5 已连同列一起移除）。
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), comment='更新时间')
 
     product: Mapped[Product] = relationship('Product', backref='stockins')

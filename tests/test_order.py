@@ -525,10 +525,10 @@ class TestGetBeileOrders:
 
 
 class TestBeileSoftDeleteFilter:
-    """湖北订单软删除过滤（Order.is_deleted 与 StockIn.is_deleted 语义对齐）
+    """湖北订单软删除过滤（只有 Order 有软删；StockIn 是硬删，无状态位）
 
-    用真实 SQLite 执行 UNION 子查询，验证软删行不出现在合并列表：
-    若 StockIn 侧丢失 is_deleted 过滤，软删备货行会重新混入列表与计数。
+    用真实 SQLite 执行 UNION 子查询，验证软删订单不出现在合并列表。
+    StockIn.is_deleted 已于 2026-10-17 审计 Z03-R5 移除（死状态位，从未写入）。
     """
 
     @staticmethod
@@ -546,38 +546,6 @@ class TestBeileSoftDeleteFilter:
             await conn.run_sync(Base.metadata.create_all, tables=tables)
         sf = async_sessionmaker(engine, expire_on_commit=False)
         yield sf, engine
-
-    @pytest.mark.asyncio
-    async def test_soft_deleted_stockin_excluded_from_unified_query(self, tmp_path):
-        """软删 StockIn 不进合并子查询；未删行正常返回"""
-        agen = self._session(tmp_path)
-        sf, engine = await agen.__anext__()
-
-        from sqlalchemy import select as sa_select
-
-        from fastapi_app.services.order.beile import _build_beile_unified_query
-        from fastapi_app.shared_models import Product, StockIn
-
-        async with sf() as db:
-            product = Product(name='软删测试品', factory='湖北')
-            db.add(product)
-            await db.flush()
-
-            db.add(StockIn(stockin_no='SI-KEEP', customer='客户A', product_id=product.id,
-                           quantity=10, confirmed_at=None))
-            db.add(StockIn(stockin_no='SI-DELETED', customer='客户B', product_id=product.id,
-                           quantity=20, confirmed_at=None, is_deleted=True))
-            await db.flush()
-
-            subq = _build_beile_unified_query(confirmed=None, factory='湖北',
-                                              customer=None, product_kw=None)
-            rows = (await db.execute(sa_select(subq))).all()
-            stockin_rows = {r.order_no for r in rows if r.record_type == 'stockin'}
-
-            assert 'SI-KEEP' in stockin_rows, '未软删备货应出现在合并查询中'
-            assert 'SI-DELETED' not in stockin_rows, '软删备货不应出现在合并查询中'
-
-        await engine.dispose()
 
     @pytest.mark.asyncio
     async def test_soft_deleted_order_excluded_from_unified_query(self, tmp_path):
