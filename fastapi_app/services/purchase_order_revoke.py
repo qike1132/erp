@@ -77,7 +77,10 @@ async def revoke_pending_purchase_orders_for_product(db: AsyncSession, product_i
     if await _fetch_bom_product_ids(db, [product_id]):
         return {'revoked': 0, 'orders_reset': 0}
 
-    # 覆盖该产品的 pending 采购单（按 SKU 快照映射到 product_id，与汇总口径同源）
+    # 覆盖该产品的 pending 采购单（按 SKU 快照映射到 product_id，与汇总口径同源）。
+    # 注：purchase_order_sku 只存 product_name/barcode，没有 product_id 列，
+    # 无法直接 join 下推；按来源 OrderItem 反查会把查询复杂度反推到三表，
+    # 本轮保留全量 pending 加载（Z02-R4 待定：需给快照补 product_id 列后重做）。
     pending = list((await db.execute(
         select(PurchaseOrder).where(PurchaseOrder.status == PurchaseOrderStatus.PENDING)
     )).scalars().unique().all())

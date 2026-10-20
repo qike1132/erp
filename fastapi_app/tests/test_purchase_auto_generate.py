@@ -408,3 +408,22 @@ async def test_list_candidates_filters_out_orders_without_bom(monkeypatch):
 
     result = await up.list_auto_generate_candidates(db)
     assert [c['composite_id'] for c in result] == ['order:1'], '缺 BOM 的记录不得进入候选'
+
+
+async def test_existing_pending_lookup_filters_in_sql():
+    """Z02-R3：幂等回查必须把 source_order_ids 匹配下推到 SQL（JSONB @>）。"""
+    from fastapi_app.services.purchase_order_generate import (
+        fetch_existing_pending_for_composite_ids,
+    )
+
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = []
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=result)
+
+    assert await fetch_existing_pending_for_composite_ids(db, ['order:5', 'stockin:3']) == []
+
+    stmt = db.execute.await_args.args[0]
+    sql = str(stmt.compile())
+    assert 'JSONB' in sql.upper()
+    assert '@>' in sql, f'匹配未下推到 SQL：{sql}'

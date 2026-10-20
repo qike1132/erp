@@ -539,12 +539,20 @@ async def fetch_existing_pending_for_composite_ids(
     if not source_ids:
         return []
 
+    # Z02-R3：用 PostgreSQL JSONB 包含下推过滤，避免把全部 pending 单整建制拉进内存；
+    # 与 cleanup_orphan_pending_purchase_orders 的 @> 口径一致（本仓仅 PG）。
+    from sqlalchemy import cast as sa_cast
+    from sqlalchemy import or_
+    from sqlalchemy.dialects.postgresql import JSONB as PG_JSONB
+
+    jsonb_col = sa_cast(PurchaseOrder.source_order_ids, PG_JSONB)
     result = await db.execute(
         select(PurchaseOrder)
         .options(selectinload(PurchaseOrder.items))
         .where(
             PurchaseOrder.source_order_ids.isnot(None),
             PurchaseOrder.status == PurchaseOrderStatus.PENDING,
+            or_(*[jsonb_col.contains([sid]) for sid in source_ids]),
         )
     )
     matched: list[dict] = []
