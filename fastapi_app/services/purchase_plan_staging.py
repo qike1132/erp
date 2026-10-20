@@ -278,7 +278,12 @@ def _create_details_for_group(
     created = 0
     for record in group_records:
         product = name_to_product.get(record.product_name)
-        detail = PurchasePlanDetail(plan_id=plan.id, product_id=product.id if product else 0, product_name=record.product_name, barcode='', plan_date=record.plan_date, quantity=record.quantity, shipped_qty=0, remark=record.remark or '')
+        if product is None:
+            # 绝不能写 product_id=0 占位：purchase_plan_details.product_id 有外键
+            # REFERENCES product(id)，库里不存在 id=0 → 提交时 FK 违约，整批失败，
+            # 且该 IntegrityError 在确认端点被映射成误导性的 409「单号已存在」。
+            raise ValueError(f'产品「{record.product_name}」不存在或已被删除，无法生成计划明细')
+        detail = PurchasePlanDetail(plan_id=plan.id, product_id=product.id, product_name=record.product_name, barcode='', plan_date=record.plan_date, quantity=record.quantity, shipped_qty=0, remark=record.remark or '')
         db.add(detail)
         created += 1
     return created
@@ -312,6 +317,16 @@ async def confirm_staging(db: AsyncSession, session_id: str, batch_id: str='', c
     names = list({r.product_name for r in valid_records if r.product_name})
     product_result = await db.execute(select(Product).where(Product.name.in_(names)))
     name_to_product = {p.name: p for p in product_result.scalars().all()}
+    # 校验与确认之间产品可能被改名或删除,此时按名字匹配会落空。落空即 fail-fast,
+    # 拒绝确认并让用户重新校验——而不是把占位行带进计划明细(FK 违约/静默丢行)。
+    missing_products = sorted({
+        r.product_name for r in valid_records
+        if r.product_name and r.product_name not in name_to_product
+    })
+    if missing_products:
+        raise ValueError(
+            f'以下产品不存在或已被改名，请重新校验后再确认：{"、".join(missing_products)}'
+        )
     created_plans = []
     created_details = 0
     for (customer_name, plan_month), group_records in groups.items():
